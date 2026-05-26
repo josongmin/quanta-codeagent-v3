@@ -26,6 +26,7 @@ import {
   lookupModeProfile,
   wrapSubagentRunner,
 } from "@/agent/subagent-typed"
+import type { AgentConfig } from "@/agent/types"
 import type { Message } from "@/llm"
 import { assembleConfig, type SessionDeps } from "./assemble/config"
 
@@ -38,7 +39,7 @@ export interface SharedExecutionPlaneArgs {
 }
 
 type SharedExecutionPlaneDeps = Pick<
-  SessionDeps,
+  AgentConfig,
   | "conversationCheckpoint"
   | "fork"
   | "forkSession"
@@ -46,6 +47,15 @@ type SharedExecutionPlaneDeps = Pick<
   | "subagentBackground"
   | "autoBackground"
 >
+
+export interface SharedExecutionPlaneRuntimeArgs {
+  readonly history: readonly Message[]
+  readonly parentConfig: AgentConfig
+  readonly subagentConfig?: AgentConfig["subagent"]
+  readonly cwd: string
+  readonly envSource: Readonly<Record<string, string | undefined>>
+  readonly convStore?: ConversationCheckpointStore
+}
 
 const normalizeBgStatus = (status: string): SubagentStatus =>
   status === "interrupted" || status === "resumed" ? "failed" : (status as SubagentStatus)
@@ -102,6 +112,20 @@ const adaptDelegation = (
 export const buildSharedExecutionPlaneSessionDeps = async (
   args: SharedExecutionPlaneArgs,
 ): Promise<Partial<SharedExecutionPlaneDeps>> => {
+  const parentConfig = assembleConfig([...args.history], args.sessionDeps)
+  return await buildSharedExecutionPlaneRuntimeAugments({
+    history: args.history,
+    parentConfig,
+    subagentConfig: args.sessionDeps.subagentConfig,
+    cwd: args.cwd,
+    envSource: args.envSource,
+    ...(args.convStore !== undefined ? { convStore: args.convStore } : {}),
+  })
+}
+
+export const buildSharedExecutionPlaneRuntimeAugments = async (
+  args: SharedExecutionPlaneRuntimeArgs,
+): Promise<Partial<SharedExecutionPlaneDeps>> => {
   const convStore = args.convStore ?? defaultConversationCheckpointStore()
   const forkWire = defaultCheckpointBaseWire({ store: convStore })
   const base: Partial<SharedExecutionPlaneDeps> = {
@@ -110,12 +134,11 @@ export const buildSharedExecutionPlaneSessionDeps = async (
     forkSession: { forker: forkWire.forker },
   }
 
-  const subagentCfg = args.sessionDeps.subagentConfig
+  const subagentCfg = args.subagentConfig
   if (subagentCfg === undefined) return base
 
-  const parentConfig = assembleConfig([...args.history], args.sessionDeps)
   const childRunner = createSubagentRunner(
-    parentConfig,
+    args.parentConfig,
     subagentCfg.maxDepth !== undefined ? { maxDepth: subagentCfg.maxDepth } : {},
   )
   const maxConcurrent = parsePositiveInt(args.envSource.QUANTA_BG_MAX_CONCURRENT)
@@ -166,7 +189,7 @@ export const buildSharedExecutionPlaneSessionDeps = async (
 
   return {
     ...base,
-    delegation: adaptDelegation(parentConfig, subagentCfg.maxDepth),
+    delegation: adaptDelegation(args.parentConfig, subagentCfg.maxDepth),
     subagentBackground: { scheduler },
     autoBackground: {
       detector,

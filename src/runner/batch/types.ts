@@ -71,6 +71,45 @@ export interface InstanceResult {
   durationMs?: number
   /** Rolled-up token usage (only when observing and the LLM reported it). */
   usage?: InstanceUsage
+  /**
+   * Per-instance adaptive-timeout + retry budget (measurement-stability slice).
+   * ABSENT (default) ⇒ neither adaptive nor retry ran (byte-identical path);
+   * the report.json omits the field entirely. PRESENT ⇒ the driver applied
+   * the knob-aware adaptive timeout and/or the transient-retry loop and is
+   * recording the per-attempt history for after-the-fact analysis.
+   *
+   * `attempts === 1` and `attemptOutcomes.length === 1` is the standard
+   * single-pass posture (no retry consumed). `baseTimeoutMs === adaptedTimeoutMs`
+   * means no knob raised the budget — byte-identical to the pre-feature wall-clock.
+   */
+  budget?: BenchInstanceBudget
+}
+
+/** Structured per-attempt outcome shape echoed onto the report. Mirrors the
+ *  `AttemptOutcome` union in `runner/batch/eval/retry-policy.ts` but lives
+ *  here so consumers of `InstanceResult` don't need to import the eval
+ *  sub-slice. Keeping it pure-data (no methods) preserves the JSON-serialise
+ *  round-trip used by `writeReport`. */
+export type BenchAttemptOutcome =
+  | { kind: "pass" }
+  | { kind: "empty-patch"; reason?: string }
+  | { kind: "timeout" }
+  | {
+      kind: "real-fail"
+      subkind: "completed_unresolved" | "verify_loop_stuck" | "max_turns_exhausted"
+    }
+  | { kind: "infra-fail"; reason: string }
+
+export interface BenchInstanceBudget {
+  /** `deps.timeoutMs` as passed by the caller (pre-adaptation). */
+  baseTimeoutMs: number
+  /** `baseTimeoutMs * Σ(active knob costMultipliers)` clamped to 30 min.
+   *  Equals `baseTimeoutMs` when no knob is active. */
+  adaptedTimeoutMs: number
+  /** Number of attempts actually consumed (1 = no retry). */
+  attempts: number
+  /** Per-attempt classified outcomes (length === attempts). */
+  attemptOutcomes: BenchAttemptOutcome[]
 }
 
 /** One Best-of-N trajectory result. Generic so the sampler stays reusable. */

@@ -145,7 +145,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     statusBar,
     turnIndicator,
     turnSummary,
-    runtimeBridge,
+    runtimeContext,
     state: featureState,
     idMeta,
     pendingImages,
@@ -165,7 +165,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
   let lastUserInputAt = 0
   let lastTurnOutcome: LastTurnOutcome | undefined
   const liveAutomationSlot =
-    runtimeBridge.getAutomationEngine() ??
+    runtimeContext.automationEngine() ??
     assembleAutomation(
       { get: (name) => process.env[name] },
       {
@@ -178,12 +178,12 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     ) ??
     undefined
   if (liveAutomationSlot !== undefined) {
-    runtimeBridge.ensureAutomationEngine(liveAutomationSlot)
+    runtimeContext.ensureAutomationEngine(liveAutomationSlot)
   }
-  const activeIdentityModeState = runtimeBridge.getIdentityModeState()
-  const activeToolProfileState = runtimeBridge.getToolProfileState()
+  const activeIdentityModeState = runtimeContext.identityModeState()
+  const activeToolProfileState = runtimeContext.toolProfileState()
 
-  const runtimeFacade = await runtimeBridge.createRuntimeFacade({
+  const runtimeFacade = await runtimeContext.createRuntimeFacade({
     boot: {
       mode: setup.mode,
       refreshSystemPrompt: setup.refreshSystemPrompt,
@@ -199,7 +199,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
   const session = await runtimeFacade.createSession({
     cwd: setup.cwd,
     model: setup.model,
-    permissionMode: runtimeBridge.getPermissionMode(),
+    permissionMode: runtimeContext.permissionMode(),
     ...(activeIdentityModeState !== undefined
       ? { identityMode: activeIdentityModeState.get() }
       : {}),

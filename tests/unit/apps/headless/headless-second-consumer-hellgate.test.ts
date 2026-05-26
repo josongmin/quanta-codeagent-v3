@@ -99,6 +99,7 @@ const ALLOWED_PREFIXES: readonly string[] = [
   "@/runner/assemble/config",
   "@/runner/assemble/tooling",
   "@/runner/orchestrate/resume-fsm",
+  "@/ipc/session",
   "@/sdk/runtime",
   "@/agent",
   "@/llm",
@@ -163,9 +164,10 @@ describe("ADR-0308 headless second-consumer hellgate", () => {
     expect(violations).toEqual([])
   })
 
-  test("CASE 2b: headless source uses the sdk runtime bridge, not raw compat helpers", () => {
+  test("CASE 2b: headless source uses the sdk runtime root, not raw compat helpers", () => {
     const source = readFileSync(join(HEADLESS_DIR, "index.ts"), "utf8")
-    expect(source).toContain('from "@/sdk/runtime/bridge"')
+    expect(source).toContain('from "@/sdk/runtime"')
+    expect(source).not.toContain('from "@/sdk/runtime/bridge"')
     expect(source).not.toContain("createLegacyRunnerSessionHost(")
     expect(source).not.toContain('from "@/runner/session-execution-plane"')
     expect(source).not.toContain('from "@/runner/session-memory-auto"')

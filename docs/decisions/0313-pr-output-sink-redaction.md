@@ -1,7 +1,7 @@
 # ADR-0313 — PR output sink redaction + idempotency invariants
 
 - **Status**: accepted (2026-05-26)
-- **Related**: [[0311-github-actions-trigger-adapter]] (sibling — input side), [[0078-redaction-content-plane]] (`@/security` SoT), [[0132-autonomous-proactive-reactor]] (no-loop discipline)
+- **Related**: [[0311-github-actions-trigger-adapter]] (sibling — input side), [[0078-secret-redaction-content-plane-invariant]] (`@/security` SoT), [[0132-autonomous-proactive-reactor]] (no-loop discipline), [[0314-mention-filter-trust-scope]] (shared marker SoT)
 - **References**:
   - secretlint + our 10-format regex layer ([[secret-and-pii-detection-2026-05-25]])
   - Anthropic claude-code-action (`<!-- claude-code:reaction-id=...-->` marker pattern)

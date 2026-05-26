@@ -34,13 +34,20 @@ evidence:
   code:
     - src/integrations/github/event-source-actions.ts
     - src/integrations/github/event-payload.ts
+    - src/integrations/github/idempotency.ts
     - src/integrations/github/index.ts
+    - src/integrations/github/types.ts
   adrs: [311]
   tests:
     unit:
       - tests/unit/integrations/github/event-source-actions.test.ts
       - tests/unit/integrations/github/event-payload.test.ts
+      - tests/unit/integrations/github/idempotency.test.ts
       - tests/unit/integrations/github/event-source-actions-malformed-hellgate.test.ts
+      - tests/unit/integrations/github/event-source-idempotency-hellgate.test.ts
+      - tests/unit/integrations/github/event-payload-fuzz-hellgate-r2.test.ts
+      - tests/unit/integrations/github/event-source-actions-state-hellgate-r2.test.ts
+      - tests/unit/integrations/github/idempotency-cap-hellgate-r2.test.ts
     integration:
       - tests/integration/integrations/github/github-actions-end-to-end.test.ts
     contract: []

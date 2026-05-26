@@ -21,7 +21,11 @@
 import type { AgentOutcome } from "@/agent"
 import { bootstrapSession, type SessionBootstrapResult } from "@/host/bootstrap"
 import type { RuntimeSession } from "@/sdk/runtime"
-import { createRuntimeFromBootstrap, summarizeRuntimeWires } from "@/sdk/runtime/bridge"
+import {
+  attachSessionTransport,
+  createRuntimeFromBootstrap,
+  summarizeRuntimeContext,
+} from "@/sdk/runtime"
 import { buildFakeBootstrapDeps, buildFakeRuntime, RecordingStream } from "./fake-deps"
 import { FakeLlm } from "./fake-llm"
 import type {
@@ -51,11 +55,13 @@ const completionsOf = (input: HeadlessRunInput): readonly FakeCompletion[] => {
   return [{ text: "ok" }]
 }
 
-/** Compose the runtime-bridge inputs from a bootstrap result + the
+/** Compose the runtime-context inputs from a bootstrap result + the
  *  recording stream. Surface-clean: only fields the headless path needs
  *  (no admissibility, no plan-store, no follow-up queue). The signal flows
  *  through from the caller via `boot.abort.signal`. */
-type HeadlessRuntimeDeps = Awaited<ReturnType<typeof createRuntimeFromBootstrap>>["sessionDeps"]
+type HeadlessRuntimeContext = Awaited<
+  ReturnType<typeof createRuntimeFromBootstrap>
+>["runtimeContext"]
 
 const buildHeadlessRuntimeArgs = (
   boot: SessionBootstrapResult,
@@ -89,8 +95,8 @@ const abortedOutcome = (messages: readonly import("@/llm").Message[]): AgentOutc
   messages: [...messages],
 })
 
-const summarizeHeadlessWires = (deps: HeadlessRuntimeDeps): HeadlessRuntimeWires =>
-  summarizeRuntimeWires(deps)
+const summarizeHeadlessWires = (runtimeContext: HeadlessRuntimeContext): HeadlessRuntimeWires =>
+  summarizeRuntimeContext(runtimeContext)
 
 /** Run a single agent turn through `@/host/bootstrap` + internal
  *  `@/runner/*` helpers with faked deps. Returns the bootstrap result, the
@@ -131,8 +137,9 @@ export const runHeadlessOnce = async (input: HeadlessRunInput): Promise<Headless
 
   let session: RuntimeSession | undefined
   let runtimeFacade: Awaited<ReturnType<typeof createRuntimeFromBootstrap>>["runtime"] | undefined
+  let transportHandle: Awaited<ReturnType<typeof attachSessionTransport>> | undefined
   try {
-    const { runtime, sessionDeps } = await createRuntimeFromBootstrap(
+    const { runtime, runtimeContext } = await createRuntimeFromBootstrap(
       buildHeadlessRuntimeArgs(boot, input, stream),
     )
     runtimeFacade = runtime
@@ -145,6 +152,15 @@ export const runHeadlessOnce = async (input: HeadlessRunInput): Promise<Headless
         : {}),
       ...(boot.toolProfileState !== undefined ? { toolProfile: boot.toolProfileState.get() } : {}),
     })
+    if (input.transport !== undefined) {
+      transportHandle = await attachSessionTransport({
+        session,
+        transport: input.transport,
+        ...(input.transportReplayWindow !== undefined
+          ? { replayWindow: input.transportReplayWindow }
+          : {}),
+      })
+    }
     if (input.signal?.aborted === true) {
       const messages = [...boot.history]
       return {
@@ -152,7 +168,7 @@ export const runHeadlessOnce = async (input: HeadlessRunInput): Promise<Headless
         outcome: abortedOutcome(messages),
         messages,
         events: stream.events,
-        wires: summarizeHeadlessWires(sessionDeps),
+        wires: summarizeHeadlessWires(runtimeContext),
       }
     }
     await session.input.append(input.prompt, undefined, { signal: boot.abort.signal })
@@ -166,9 +182,10 @@ export const runHeadlessOnce = async (input: HeadlessRunInput): Promise<Headless
       outcome,
       messages: turn.turn.messages,
       events: stream.events,
-      wires: summarizeHeadlessWires(sessionDeps),
+      wires: summarizeHeadlessWires(runtimeContext),
     }
   } finally {
+    await transportHandle?.close().catch(() => undefined)
     await session?.close().catch(() => undefined)
     await runtimeFacade?.close().catch(() => undefined)
   }

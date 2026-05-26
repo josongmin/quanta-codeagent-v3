@@ -82,11 +82,19 @@ const PATTERNS: ReadonlyArray<Pattern> = [
     kind: "stripe-key",
     regex: /\b(?:sk_live_|sk_test_|rk_live_|rk_test_|pk_live_)[A-Za-z0-9]{20,}\b/g,
   },
-  // OpenAI API key — `sk-` followed by ≥32 alphanumerics. Negative-lookahead
-  // on `ant-` / `live_` / `test_` so anthropic/stripe forms above win.
+  // OpenAI proj-key (2024+) — `sk-proj-` followed by mixed-class body
+  // including `_`/`-`. Matched BEFORE the classic shape below so the classic
+  // regex's `[A-Za-z0-9]` class never slices the proj-key at its first `-`.
   {
     kind: "openai-api-key",
-    regex: /\bsk-(?!ant-)(?!live_)(?!test_)[A-Za-z0-9]{32,}\b/g,
+    regex: /\bsk-proj-[A-Za-z0-9_-]{20,}\b/g,
+  },
+  // OpenAI classic API key — `sk-` followed by ≥32 alphanumerics. Negative-
+  // lookahead on `ant-` / `proj-` / `live_` / `test_` so anthropic, the
+  // proj-key matcher above, and stripe forms each win their respective shape.
+  {
+    kind: "openai-api-key",
+    regex: /\bsk-(?!ant-)(?!proj-)(?!live_)(?!test_)[A-Za-z0-9]{32,}\b/g,
   },
   // Slack token — `xox[baprse]-` prefix + ≥10 token chars. The prefix is
   // distinctive enough that this carries no false-positive risk in prose.

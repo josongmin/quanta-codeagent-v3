@@ -2,9 +2,18 @@
 
 quanta can respond to `@quanta` (or `/quanta`) mentions on pull requests. The
 **Tier 0** path uses GitHub Actions and ships in this repo as a workflow
-template — no external server, no webhook host. (Tier 1, a self-hosted
-webhook responder, is documented in ADR-0312 and lives in a separate slice;
-this guide covers Tier 0 only.)
+template — no external server, no webhook host. (Tier 1, the GitHub App
+webhook-host scaffold, is documented in ADR-0312 and lives in a separate
+slice; this guide covers Tier 0 only.)
+
+> **Prerequisite (current status).** The workflow template targets the CLI
+> runner file `src/apps/cli/from-pr-cmd-runner.ts`. That file is being
+> wired in a follow-up sprint (see ADR-0311 "CLI registry option B"). The
+> template itself is install-ready — copy + secret + mention all work — but
+> until the runner file lands, the `run quanta from-pr` step exits non-zero
+> with `module not found` and the workflow posts a one-line failure
+> comment via the `report failure to PR` step. Track ADR-0311 follow-up
+> for the unblock.
 
 ## 1. Install the workflow
 
@@ -100,10 +109,27 @@ non-bot account.
 4. **Run failed with `missing repo slug`.** The workflow injects
    `GITHUB_REPOSITORY` automatically; this error means the env was
    stripped — restore the default `env:` block from the template.
+5. **`module not found: src/apps/cli/from-pr-cmd-runner.ts`.** The runner
+   composition root has not landed yet (see the Prerequisite note at the
+   top of this file). Until that ships, the workflow installs cleanly and
+   the failure-reporter step posts a single comment per delivery — that is
+   working as designed, the bot is awaiting the entry-point wire-up.
+6. **Duplicate comments after a force-push.** The workflow uses
+   `concurrency.cancel-in-progress: true`, so a force-push mid-run aborts
+   the in-flight handler. If the marker was already stamped before the
+   abort, the next run upgrades-in-place via the ADR-0313 PATCH path; no
+   second comment is created. If you see two comments on the same delivery
+   id, file a regression — the marker collision detector should make this
+   impossible.
+7. **`@quanta` mentioned but no reaction.** The case-insensitive `contains()`
+   pre-filter only sees `@quanta` and `/quanta` by default. Custom phrases
+   set via `QUANTA_GH_TRIGGER_PHRASES` are honored by the in-process mention
+   filter, NOT by the cheap workflow `if:` — extend the `if:` block too if
+   you want the runner to start at all on a custom phrase.
 
 ## Related
 
 - ADR-0311 (this Tier 0 design)
-- ADR-0312 (Tier 1: self-hosted webhook — separate slice)
-- ADR-0313 (Tier 2: polling fallback)
+- ADR-0312 (Tier 1: GitHub App webhook-host scaffold — separate slice)
+- ADR-0313 (PR output sink: mandatory redaction + idempotency marker)
 - ADR-0314 (mention filter + trust scope)

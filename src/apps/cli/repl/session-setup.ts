@@ -12,6 +12,7 @@ import type { PermissionMode, PermissionStore } from "@/permission"
 import { clearFsJailDecisionSink, setFsJailDecisionSink } from "@/storage"
 import type { StreamPort } from "@/stream"
 import type { TaskRegistry } from "@/subagent"
+import type { RuntimeContext } from "@/sdk/runtime"
 import type { BranchProgressTracker } from "../branch-search-progress"
 import type { CostPanel } from "../cost-panel"
 import type { DebugCmdState } from "../debug-cmd"
@@ -26,8 +27,7 @@ import type { TimelinePanel } from "../timeline-panel"
 import type { TurnIndicator } from "../turn-indicator"
 import type { TurnSummaryCollector } from "../turn-summary"
 import { type CliFeatureConfig, readCliFeatureConfig } from "./cli-feature-config"
-import type { CliRuntimeBridge } from "./runtime-bridge"
-import { composeCliSessionDeps } from "./session-deps-compose"
+import { composeCliRuntimeContext } from "./runtime-context-compose"
 import { readSessionRuntimeConfig } from "./session-runtime-config"
 /** Track D — DebugTracerHandle. Surface owns the live state + the
  *  swap-in/out side effect (mutable proxy port in the stream tee).
@@ -131,7 +131,7 @@ export interface SessionSetupResult {
    *  land on a clean screen. Absent ⇒ no tee allocated (byte-identical
    *  default-OFF). */
   readonly timelinePanel: TimelinePanel | undefined
-  readonly runtimeBridge: CliRuntimeBridge
+  readonly runtimeContext: RuntimeContext
   readonly costPanel: CostPanel | undefined
   readonly branchProgress: BranchProgressTracker | undefined
   readonly planStore: PlanStore | undefined
@@ -207,7 +207,7 @@ export const setupSession = async (
     timelineStream,
   )
 
-  const { runtimeBridge } = await composeCliSessionDeps({
+  const { runtimeContext } = await composeCliRuntimeContext({
     boot,
     turnStream,
     loadPermissionStore: deps.loadPermissionStore,
@@ -224,7 +224,7 @@ export const setupSession = async (
   // `clearFsJailDecisionSink()` is wrapped into `shutdownMcp` below so
   // session-end tears it down before sibling processes (or a re-entered
   // setupSession in tests) inherit a stale sink.
-  const decisionEmitter = runtimeBridge.getDecisionEmitter()
+  const decisionEmitter = runtimeContext.decisionEmitter()
   if (decisionEmitter !== undefined) {
     setFsJailDecisionSink(decisionEmitter)
   }
@@ -276,7 +276,7 @@ export const setupSession = async (
     turnSummary,
     debugHandle,
     timelinePanel,
-    runtimeBridge,
+    runtimeContext,
     costPanel: boot.costPanel as CostPanel | undefined,
     branchProgress: boot.branchProgress as BranchProgressTracker | undefined,
     planStore: boot.planStore,

@@ -1,7 +1,7 @@
 # ADR-0311 — GitHub Actions trigger adapter (Tier 0 PR webhook bot)
 
 - **Status**: accepted (2026-05-26)
-- **Related**: [[0132-autonomous-proactive-reactor]] (TriggerSourcePort SoT), [[0078-redaction-content-plane]] (`@/security` source), [[may-23-git-axis-absorption]] (gh CLI port shape)
+- **Related**: [[0132-autonomous-proactive-reactor]] (TriggerSourcePort SoT), [[0078-secret-redaction-content-plane-invariant]] (`@/security` source), [[may-23-git-axis-absorption]] (gh CLI port shape), [[0312-github-app-webhook-host-scaffold]] (Tier-1 sibling), [[0313-pr-output-sink-redaction]] (output sink), [[0314-mention-filter-trust-scope]] (mention gate)
 - **References**:
   - Codex `codex-action` (issue_comment + pull_request_review + workflow_dispatch handler shape)
   - Cursor BugBot (`@cursor review` mention vocabulary, code-block exclusion)
@@ -32,6 +32,10 @@ quanta는 `gh pr checks` / `gh api comments` 폴링 외에는 GitHub의 능동�
 - [[../../src/integrations/github/mention-filter.ts]] — `matchMention` + `createMentionFilter` (code-block / blockquote exclude)
 - [[../../src/integrations/github/idempotency.ts]] — `createDeliveryStore` + `computeIdempotencyKey`
 - [[../../src/integrations/github/pr-context-loader.ts]] — 4-shot gh bundle into `PrContext`
+- [[../../src/integrations/github/pr-output-sink.ts]] — `createPrOutputSink` (자매조 [[0313-pr-output-sink-redaction]])
+- [[../../src/integrations/github/index.ts]] — slice barrel + `ALL_GH_EVENT_KINDS` 상수
+- [[../../src/apps/cli/from-pr-cmd.ts]] — `runFromPrCmd` lib entry (port-only)
+- [[../../src/apps/cli/from-pr-cmd-adapters.ts]] — production adapter set (node:fs / Bun.spawn / `@/security`)
 
 ## Consequences
 
@@ -39,7 +43,8 @@ quanta는 `gh pr checks` / `gh api comments` 폴링 외에는 GitHub의 능동�
 - 새 PR 봇 모드(`gh pr review` 자동 응답)가 dedup + trust scope + bot guard 세 겹 방어로 default-OFF 시작.
 - `pr-context-loader`는 어느 gh 콜이라도 fail 시 `undefined` — partial PrContext는 surface하지 않는다 ([[no-heuristics-only-validated]] 적용: 불완전 컨텍스트로 추론 금지).
 - Tier 1 webhook(외부 호스트) 진입은 [[0312-github-app-webhook-host-scaffold]]에서 분리. Signature 검증은 이미 [[../../src/integrations/github/signature-verify.ts]]에 wire되어 있다.
-- 27 hellgate 케이스(이벤트 malformed 12 + 멘션 필터 17 + 시그니처 14 + 출력 sink 9 + idempotency 8)로 회귀 봉인.
+- 62 hellgate 케이스(이벤트 malformed 13 + 멘션 필터 17 + 시그니처 15 + 출력 sink 9 + idempotency 8)로 회귀 봉인. 추가로 R2 fuzz/state/cap 배터리 6개(`*-r2.test.ts`)로 보완.
+- 워크플로 템플릿 [[../../.github/workflows/quanta-pr-bot.yml.template]] + 사용자 가이드 [[../../docs/integrations/github/SETUP.md]]로 외부 진입 표면 마감. 운영자 시각 슬라이스 차트는 [[../../docs/integrations/github/README.md]].
 
 ## Negative invariants
 

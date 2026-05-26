@@ -48,6 +48,7 @@ evidence:
     unit:
       - tests/unit/integrations/github/mention-filter.test.ts
       - tests/unit/integrations/github/mention-filter-trust-scope-hellgate.test.ts
+      - tests/unit/integrations/github/mention-filter-fuzz-hellgate-r2.test.ts
     integration: []
     contract: []
 knobs: []

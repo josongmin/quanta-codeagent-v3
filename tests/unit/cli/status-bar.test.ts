@@ -11,10 +11,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { installStatusBar } from "../../../src/apps/cli/status-bar"
 
-/** Strip CSI sequences (`ESC [ … final-byte`) so the remaining run-length
- *  is the visible-char width the terminal would actually advance the
- *  cursor by. */
-const stripCsi = (s: string): string => s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")
+/** Strip CSI sequences (`ESC [ … final-byte`) AND DEC private cursor-state
+ *  escapes (`ESC 7` / `ESC 8` = DECSC / DECRC, used by the status bar to
+ *  save/restore the cursor across paints) so the remaining run-length is the
+ *  visible-char width the terminal would actually advance the cursor by. */
+const stripCsi = (s: string): string =>
+  s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\x1b[78]/g, "")
 
 describe("status-bar paintRow visible-width invariant", () => {
   let writes: string[]
@@ -54,8 +56,13 @@ describe("status-bar paintRow visible-width invariant", () => {
     }
   })
 
+  // Pretend stderr is a TTY in this test surface (Bun's test runner stderr is
+  // not a TTY, which would otherwise route through the new auto-disable seam
+  // and return a no-op stub.)
+  const ttyOpts = { env: process.env, stderrIsTTY: true } as const
+
   test("short text padded to exactly cols visible chars (not cols + 1)", () => {
-    const bar = installStatusBar("hello")
+    const bar = installStatusBar("hello", ttyOpts)
     bar.teardown()
     // initial paint is in writes[1] (writes[0] is the DECSTBM setup pair).
     const paint = writes.find((w) => w.includes("hello"))
@@ -74,7 +81,7 @@ describe("status-bar paintRow visible-width invariant", () => {
 
   test("text exactly cols-wide is sliced to cols-1 (leaves room for leading space)", () => {
     const longText = "x".repeat(80)
-    const bar = installStatusBar(longText)
+    const bar = installStatusBar(longText, ttyOpts)
     bar.teardown()
     const paint = writes.find((w) => w.includes("xxxx"))
     expect(paint).toBeDefined()
@@ -86,7 +93,7 @@ describe("status-bar paintRow visible-width invariant", () => {
 
   test("text wider than cols is truncated, never wraps", () => {
     const longText = "y".repeat(200)
-    const bar = installStatusBar(longText)
+    const bar = installStatusBar(longText, ttyOpts)
     bar.teardown()
     const paint = writes.find((w) => w.includes("yyyy"))
     expect(paint).toBeDefined()

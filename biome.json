@@ -1138,7 +1138,10 @@
         "!tests/integration/composition-root-wire-hellgate.test.ts",
         "!tests/integration/decision-tracer-e2e-hellgate.test.ts",
         "!tests/integration/debug-cli-surface-e2e-hellgate.test.ts",
-        "!tests/unit/playbook-trigger-cli-bind-hellgate.test.ts"
+        "!tests/unit/playbook-trigger-cli-bind-hellgate.test.ts",
+        "!tests/unit/integrations/github/cli-real-adapters-hellgate-r3.test.ts",
+        "!tests/unit/integrations/github/composer-redact-defence-in-depth-hellgate-r3.test.ts",
+        "!tests/integration/integrations/github/end-to-end-real-adapter-r3.test.ts"
       ],
       "linter": {
         "rules": {

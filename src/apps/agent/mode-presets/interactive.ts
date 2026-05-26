@@ -10,7 +10,7 @@ import type { AgentConfig } from "@/agent"
 import { buildSystemPrompt } from "@/agent"
 import type { PermissionContext } from "@/permission"
 import type { RuntimeAgentTurnAssembler } from "@/sdk/runtime"
-import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime/bridge"
+import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
 import { StdoutStream, type StreamPort, TeeStream } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
 import {
@@ -75,7 +75,7 @@ const runInteractiveTerminal = async (req: AssembleRequest): Promise<void> => {
     })
   const { runtime: runtimeFacade } = await createRuntimeFromAgentConfigBase({
     base,
-    assembleConfig: assemble,
+    turnAssembler: assemble,
     history: [...base.messages],
     state: undefined,
     idMeta: undefined,

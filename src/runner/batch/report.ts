@@ -24,7 +24,7 @@ import {
   type FailureClassification,
 } from "./corpus/failure-classifier"
 import { resolvedTotals } from "./observe"
-import type { InstanceResult } from "./types"
+import type { BenchInstanceBudget, InstanceResult } from "./types"
 
 export interface BenchReportMeta {
   model: string
@@ -54,6 +54,10 @@ export interface PerInstanceReport {
   error?: string
   /** Structured failure classification. Omitted for passing runs. */
   failure?: FailureClassification
+  /** Adaptive-timeout + retry budget. Omitted unless the driver applied the
+   *  measurement-stability slice (default: omitted ⇒ byte-identical to the
+   *  pre-feature JSON report shape). */
+  budget?: BenchInstanceBudget
 }
 
 export interface BenchReport {
@@ -118,6 +122,7 @@ export const buildReport = (
         patchBytes: Buffer.byteLength(r.patch, "utf8"),
         ...(r.error !== undefined ? { error: r.error } : {}),
         ...(c.termination !== "passed" ? { failure: c } : {}),
+        ...(r.budget !== undefined ? { budget: r.budget } : {}),
       }
     }),
     knobs,

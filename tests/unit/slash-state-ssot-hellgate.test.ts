@@ -9,10 +9,10 @@ const read = (path: string): string => readFileSync(join(REPO_ROOT, path), "utf8
 describe("slash state SSOT hellgate", () => {
   test("surface-compose projects slash state from the runtime bridge only", () => {
     const src = read("src/apps/cli/repl/surface-compose.ts")
-    expect(src).toContain("toolProfileState: setup.runtimeBridge.getToolProfileState()")
-    expect(src).toContain("identityModeState: setup.runtimeBridge.getIdentityModeState()")
+    expect(src).toContain("toolProfileState: setup.runtimeContext.toolProfileState()")
+    expect(src).toContain("identityModeState: setup.runtimeContext.identityModeState()")
     expect(src).toContain("onIdentityModeChange: setup.refreshSystemPrompt")
-    expect(src).toContain("focusChain: setup.runtimeBridge.getFocusChain()")
+    expect(src).toContain("focusChain: setup.runtimeContext.focusChain()")
   })
 
   test("slash adapters prefer authoritative session-owned state", () => {
@@ -24,7 +24,7 @@ describe("slash state SSOT hellgate", () => {
   })
 
   test("runtime deps and AgentConfig expose the same live state slots", () => {
-    const deps = read("src/host/runtime/session-host.ts")
+    const deps = read("src/host/runtime/internal/context-binding.ts")
     expect(deps).toContain("toolProfileState: args.boot.toolProfileState")
     expect(deps).toContain("identityModeState: args.boot.identityModeState")
     expect(deps).toContain(

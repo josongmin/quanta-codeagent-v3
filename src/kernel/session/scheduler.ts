@@ -1,11 +1,5 @@
 import type { Message } from "@/llm"
-import type {
-  ArtifactRef,
-  SessionCommand,
-  SessionEvent,
-  SessionTranscriptReplaceCommand,
-  TurnRunCommand,
-} from "@/protocol/session"
+import type { ArtifactRef, SessionCommand, SessionEvent, TurnRunCommand } from "@/protocol/session"
 import { SessionProtocolValidationError } from "@/protocol/session"
 import type { KernelDispatchContext, SessionHostTurnResult } from "./ports"
 import { reduceSessionCommand } from "./reducer"

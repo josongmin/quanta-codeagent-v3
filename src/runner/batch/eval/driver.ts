@@ -43,7 +43,8 @@ import type { PermissionContext } from "@/permission"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
 import { type AttemptObservation, BenchObserver, UsageTap } from "../observe"
-import type { Instance, InstanceResult } from "../types"
+import type { BenchAttemptOutcome, Instance, InstanceResult } from "../types"
+import { computeAdaptedTimeout } from "./adaptive-timeout"
 import { runEnvPrep } from "./env-prep"
 import { exec, execArgv } from "./exec"
 import { knobsForReport, resolveBenchKnobs } from "./knobs-bench"
@@ -65,6 +66,14 @@ import {
   ObservationError,
   type Wiring,
 } from "./report"
+import {
+  type AttemptOutcome,
+  classifyOutcome,
+  DEFAULT_POLICY,
+  parseRetryTransientEnv,
+  type RetryPolicy,
+  runRetryLoop,
+} from "./retry-policy"
 import { cleanupSandbox, copyRepo, createSandbox } from "./sandbox"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
 import { type PythonSwebenchEvaluate, verify } from "./verdict"
@@ -110,6 +119,34 @@ export interface RunInstanceDeps {
     maxRounds?: number
     validate?: (args: ValidateArgs) => Promise<ValidatorResult>
     buildContext?: (args: BuildRepairContextArgs) => string
+  }
+  /**
+   * Measurement-stability slice: knob-aware adaptive timeout + transient-retry
+   * loop. ABSENT (default) ⇒ feature OFF (byte-identical single-pass path) —
+   * `deps.timeoutMs` is the deadline, retries are not attempted, and the
+   * `budget` field is omitted from `InstanceResult`. PRESENT ⇒ the driver:
+   *   1. resolves the bench-surface knob state from `process.env`;
+   *   2. computes `adaptedTimeoutMs = baseMs * Σ(active costMultipliers)`
+   *      clamped to 30 min, and uses that as the per-attempt deadline;
+   *   3. runs up to `maxAttempts` attempts, classifying each `InstanceResult`
+   *      and retrying ONLY transient outcomes (empty-patch / infra-fail).
+   *   4. stamps `result.budget` with the per-attempt history.
+   *
+   * `maxAttempts === 1` is byte-identical to the pre-feature single-pass
+   * path EXCEPT that `budget` is recorded. To keep the JSON report
+   * byte-identical, the wrapper omits `budget` when neither adaptive nor
+   * retry produced a non-baseline value.
+   *
+   * The wrapper layer is ON TOP of Best-of-N (`apps/bench/index.ts`'s
+   * `resolveInstance`) — each retry attempt is itself a full Best-of-N
+   * round.
+   */
+  measurementStability?: {
+    /** Max retries on transient outcome (1 = no retry, byte-identical). */
+    maxAttempts?: number
+    /** Custom retry policy (default: `DEFAULT_POLICY` — only empty-patch +
+     *  infra-fail are retried). */
+    policy?: RetryPolicy
   }
 }
 
@@ -1116,8 +1153,12 @@ const okResult = (
  * agent stream is Tee'd into a strict `JsonlRecorder` plus bench `sandbox`/
  * `patch_generated`/`verify` lines; a strict observation failure yields
  * `verdict:"degraded"` (excluded from `resolved/total`).
+ *
+ * Internal — `runInstance` (below) wraps this with the measurement-stability
+ * retry loop. Exported as `runInstanceOnce` so tests can pin the single-pass
+ * path independently of the retry wrapper.
  */
-export const runInstance = async (
+export const runInstanceOnce = async (
   instance: Instance,
   deps: RunInstanceDeps,
 ): Promise<InstanceResult> => {
@@ -1226,10 +1267,119 @@ export const runInstance = async (
   }
 }
 
+/** Project `AttemptOutcome` (the retry-policy enum) into `BenchAttemptOutcome`
+ *  (the wire shape on `InstanceResult.budget`). Same union, mirrored here so
+ *  the bench-types module doesn't have to depend on `retry-policy.ts`. */
+const projectOutcome = (o: AttemptOutcome): BenchAttemptOutcome => {
+  if (o.kind === "pass") return { kind: "pass" }
+  if (o.kind === "empty-patch") {
+    return o.reason !== undefined
+      ? { kind: "empty-patch", reason: o.reason }
+      : { kind: "empty-patch" }
+  }
+  if (o.kind === "timeout") return { kind: "timeout" }
+  if (o.kind === "real-fail") return { kind: "real-fail", subkind: o.subkind }
+  return { kind: "infra-fail", reason: o.reason }
+}
+
+/**
+ * Public entry-point with measurement-stability wrapper.
+ *
+ * Flow:
+ *   1. Resolve bench knob state from `process.env`. (Pure: closed-port read.)
+ *   2. Compute the adaptive per-attempt timeout via `computeAdaptedTimeout`
+ *      (= `baseMs * Σ(active knob costMultipliers)`, clamped to 30 min).
+ *   3. Resolve `maxAttempts` (`deps.measurementStability?.maxAttempts` >
+ *      `QUANTA_BENCH_RETRY_TRANSIENT` > 1).
+ *   4. Run the retry loop: each iteration calls `runInstanceOnce` with deps
+ *      whose `timeoutMs` is the ADAPTED value. Classify the result; stop on
+ *      pass / real-fail / policy says stop.
+ *   5. Stamp `result.budget` with the per-attempt history when adaptive OR
+ *      retry produced a non-baseline value; otherwise omit (byte-identical
+ *      JSON report shape).
+ *
+ * Byte-identical fence: when `maxAttempts === 1` (default) AND every active
+ * knob's `costMultiplier <= 1` (i.e. `adaptedTimeoutMs === baseTimeoutMs`),
+ * the wrapper:
+ *   - calls `runInstanceOnce` EXACTLY ONCE with `deps.timeoutMs` unchanged;
+ *   - does NOT stamp `result.budget` (omitted);
+ *   - returns the same `InstanceResult` shape the legacy path would have.
+ */
+export const runInstance = async (
+  instance: Instance,
+  deps: RunInstanceDeps,
+): Promise<InstanceResult> => {
+  // Resolve knob state for adaptive timeout. Fail-soft: any unexpected
+  // throw in the resolver falls back to baseMs (byte-identical posture).
+  let adaptedTimeoutMs = deps.timeoutMs
+  const baseTimeoutMs = deps.timeoutMs
+  try {
+    const state = resolveBenchKnobs({ envVars: process.env })
+    adaptedTimeoutMs = computeAdaptedTimeout(deps.timeoutMs, state)
+    // computeAdaptedTimeout returns 0 for garbage baseMs; preserve the caller's
+    // value in that case (the deadline timer will fire immediately, which is
+    // the intended fail-fast posture).
+    if (adaptedTimeoutMs === 0 && deps.timeoutMs > 0) adaptedTimeoutMs = deps.timeoutMs
+  } catch {
+    // Any resolution error ⇒ baseline posture. Telemetry concerns must
+    // never fail a measurement run.
+  }
+
+  // Resolve maxAttempts. Precedence: deps.measurementStability.maxAttempts
+  // (test seam) > QUANTA_BENCH_RETRY_TRANSIENT env > 1 (no retry).
+  const envAttempts = parseRetryTransientEnv(process.env.QUANTA_BENCH_RETRY_TRANSIENT)
+  const maxAttempts = Math.max(
+    1,
+    Math.floor(deps.measurementStability?.maxAttempts ?? envAttempts ?? 1),
+  )
+  const policy = deps.measurementStability?.policy ?? DEFAULT_POLICY
+
+  // Adapted deps: only `timeoutMs` differs. All other fields are passed
+  // through verbatim so each attempt sees the same agent / repair / observe
+  // wiring. `measurementStability` is stripped so the inner call doesn't try
+  // to recurse into the wrapper.
+  const innerDeps: RunInstanceDeps = {
+    llm: deps.llm,
+    maxTurns: deps.maxTurns,
+    timeoutMs: adaptedTimeoutMs,
+    ...(deps.pythonSwebench !== undefined ? { pythonSwebench: deps.pythonSwebench } : {}),
+    ...(deps.observe !== undefined ? { observe: deps.observe } : {}),
+    ...(deps.repair !== undefined ? { repair: deps.repair } : {}),
+  }
+
+  // Byte-identical fast path: single attempt + adapted === base ⇒ run the
+  // legacy single-pass and return without stamping `budget`. This is the
+  // contract that keeps `QUANTA_BENCH_RETRY_TRANSIENT=1` + all-knobs-OFF
+  // identical to the pre-feature wall-clock and JSON shape.
+  if (maxAttempts === 1 && adaptedTimeoutMs === baseTimeoutMs) {
+    return runInstanceOnce(instance, innerDeps)
+  }
+
+  const { result, loop } = await runRetryLoop(
+    async () => runInstanceOnce(instance, innerDeps),
+    maxAttempts,
+    policy,
+  )
+  const budget = {
+    baseTimeoutMs,
+    adaptedTimeoutMs,
+    attempts: loop.attempts,
+    attemptOutcomes: loop.outcomes.map(projectOutcome),
+  }
+  return { ...result, budget }
+}
+
+/** Re-export the adaptive-timeout helpers so apps/bench's matrix budget tools
+ *  can reuse the exact same projection. */
+export { computeAdaptedTimeout, MAX_TIMEOUT_MS, sumCostMultipliers } from "./adaptive-timeout"
 export type { BenchKnobState } from "./knobs-bench"
 // Knob wiring helpers — re-exported for the report path + tests so callers
 // don't have to import from two siblings.
 export { applyBenchKnobs, knobsForReport, readKnobValue, resolveBenchKnobs } from "./knobs-bench"
+export type { AttemptOutcome, RetryPolicy }
+/** Re-export the classifier + policy types so apps/bench callers can wire
+ *  custom policies (test seam) or inspect outcomes without reaching into the
+ *  retry-policy sub-slice directly. */
 // Re-export the observation usage tap so test fixtures and other internals can
 // continue to use bench's typed surface unchanged.
-export { BenchObserver, UsageTap }
+export { BenchObserver, classifyOutcome, DEFAULT_POLICY, parseRetryTransientEnv, UsageTap }

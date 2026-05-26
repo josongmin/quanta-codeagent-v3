@@ -24,15 +24,30 @@ on:
   pull_request:
     types: [opened, synchronize]
 
+# Least-privilege: the Tier-0 path only reads PR metadata + writes a comment.
+# `contents: read` covers the checkout; `pull-requests: write` covers
+# `gh pr comment` / `gh pr review`. No `contents: write` — the bot CANNOT
+# push commits to the repo. `issues: write` is required because
+# `issue_comment` is the GH event family used for PR conversation comments
+# (a PR comment IS an issue comment under the hood).
 permissions:
   contents: read
   pull-requests: write
   issues: write
 
 concurrency:
-  # One in-flight run per PR (or per issue, when it's an issue_comment on a
-  # non-PR — quanta no-ops in that case).
-  group: quanta-pr-bot-${{ github.event.pull_request.number || github.event.issue.number }}
+  # One in-flight run per PR (when triggered by a PR event) or per issue
+  # (when an `issue_comment` lands on a real issue — quanta will no-op for
+  # those after the cheap pre-filter rejects them, but the group still needs
+  # a stable key). `github.run_id` is the last-resort fallback when neither
+  # number is present (defensive — should never trigger under the `on:` set
+  # above, but keeps the expression total).
+  group: >-
+    quanta-pr-bot-${{
+      github.event.pull_request.number
+      || github.event.issue.number
+      || github.run_id
+    }}
   cancel-in-progress: true
 
 jobs:
@@ -42,6 +57,14 @@ jobs:
     timeout-minutes: 15
     # Cheap pre-filter so non-mention comments do not burn a runner. The
     # in-process mention filter (ADR-0314) is still the authoritative gate.
+    # Notes:
+    #   - `pull_request` events have no `comment` / `review` object, so the
+    #     short-circuit `github.event_name == 'pull_request'` MUST come first
+    #     — accessing `.comment.body` on a pull_request payload would
+    #     evaluate to `null` (not throw), but ordering by family is clearer.
+    #   - `contains()` is case-INSENSITIVE in GH Actions expressions for
+    #     ASCII; trigger-phrase customisation that adds non-ASCII tokens
+    #     should rely on the in-process mention filter for the real match.
     if: >-
       github.event_name == 'pull_request' ||
       contains(github.event.comment.body, '@quanta') ||
@@ -58,16 +81,22 @@ jobs:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
-      - name: checkout PR head (fetch-depth 0 for moved-code detector)
+      - name: checkout PR head
+        # `gh pr view/diff` run server-side, so a shallow checkout is enough
+        # for the Tier-0 ack path. fetch-depth 0 is reserved for the future
+        # local moved-code detector wiring; flip to 0 when that lands.
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          # Pin to a tag so a runner update can never re-execute the bot
+          # against a Bun release that hasn't been smoked. Bump deliberately
+          # together with `package.json` engine constraints.
+          bun-version: "1.1.38"
 
       - name: install dependencies (frozen)
         run: bun install --frozen-lockfile
@@ -76,7 +105,34 @@ jobs:
         # `from-pr` reads GITHUB_EVENT_PATH / GITHUB_EVENT_NAME /
         # GITHUB_REPOSITORY automatically from the runner. The mention
         # filter and trust-scope gate run BEFORE any LLM call.
-        run: bun run quanta from-pr
+        #
+        # ENTRY-POINT NOTE: this command targets the runner file
+        # `src/apps/cli/from-pr-cmd-runner.ts` which composes the production
+        # adapters from `from-pr-cmd-adapters.ts` around `runFromPrCmd`.
+        # The runner file is the explicit composition root for the Tier-0
+        # entry — keeping it separate from `src/apps/cli/index.ts` avoids
+        # pulling the full REPL bootstrap (sandbox install, dotenv load,
+        # session bootstrap) into a one-shot bot run.
+        run: bun run src/apps/cli/from-pr-cmd-runner.ts
+
+      - name: workflow summary
+        if: always()
+        # `$GITHUB_STEP_SUMMARY` is a markdown sink that surfaces under the
+        # workflow run page. We dump the event family + PR number so an
+        # operator can see at a glance whether the run was a no-op skip
+        # (e.g. bot sender) without scrolling step logs.
+        run: |
+          {
+            echo "## quanta-pr-bot"
+            echo ""
+            echo "- event: \`${{ github.event_name }}\` (action=\`${{ github.event.action }}\`)"
+            echo "- pr: ${{ github.event.pull_request.number || github.event.issue.number || 'n/a' }}"
+            echo "- sender: ${{ github.event.sender.login || 'n/a' }}"
+            echo "- conclusion: ${{ job.status }}"
+            echo ""
+            echo "_Mention filter + trust-scope decisions are in the_"
+            echo "_\"run quanta from-pr\" step logs (ADR-0314)._"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: report failure to PR (best-effort)
         if: failure()
@@ -84,6 +140,16 @@ jobs:
           BODY="quanta encountered an error during PR response. See workflow logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           PR_NUM="${{ github.event.pull_request.number || github.event.issue.number }}"
           if [ -n "$PR_NUM" ]; then
+            # `|| true` so a 2nd failure here (rate limit, permissions drift)
+            # cannot mask the original step's exit code. We do NOT echo
+            # `BODY` after the `gh` call — runner logs already show it.
+            #
+            # Self-loop note: the body above does NOT contain `@quanta` or
+            # `/quanta`, so even if GitHub eventually surfaces this comment
+            # back through the issue_comment family, the ADR-0314 mention
+            # filter would still reject it (and the ADR-0313 idempotency
+            # marker stamped by the in-process sink provides a second
+            # guard if/when the agent loop is wired downstream).
             gh pr comment "$PR_NUM" --repo "${{ github.repository }}" --body "$BODY" || true
           fi
         env:
@@ -102,3 +168,14 @@ jobs:
 #     under `env:` in the `respond` job.
 #  4. Open a PR and comment `@quanta please review` — the bot will ack
 #     within ~30s.
+#
+# ─── prerequisite ────────────────────────────────────────────────────────
+#
+# The `run` step targets `src/apps/cli/from-pr-cmd-runner.ts`. Until that
+# file lands (see ADR-0311 follow-up: CLI registry option B), the workflow
+# template is INSTALL-READY but the `run quanta from-pr` step will exit
+# non-zero with `module not found`. The `report failure to PR` step then
+# posts a one-line diagnostic comment. To verify the rest of the workflow
+# end-to-end before the runner file lands, set `dry-run: true` by passing
+# `--dry-run` after the script path (a future revision will surface this
+# as a workflow input).

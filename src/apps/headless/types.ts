@@ -16,6 +16,7 @@
 
 import type { AgentConfig, AgentOutcome } from "@/agent"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
+import type { SessionTransport } from "@/ipc/session"
 import type { Message, StreamEvent } from "@/llm"
 import type { AgentEvent } from "@/stream"
 
@@ -55,6 +56,12 @@ export interface HeadlessRunInput {
   /** Optional home dir for host-owned persistent helpers such as
    *  session-memory-auto. Default `"/tmp"`. */
   readonly homeDir?: string
+  /** Optional live session transport attach slot. When present, the headless
+   *  proof attaches the runtime session to this transport before the first
+   *  user command. Default-OFF. */
+  readonly transport?: SessionTransport
+  /** Optional retained tail window for the attached transport bridge. */
+  readonly transportReplayWindow?: number
   /** Optional subagent config so the shared execution-plane helper can
    *  wire real delegation/background slots in the second-consumer surface. */
   readonly subagentConfig?: AgentConfig["subagent"]

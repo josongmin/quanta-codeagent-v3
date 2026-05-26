@@ -3,7 +3,6 @@ import type { AgentOutcome } from "../../../../src/agent"
 import type { IdleMonitor } from "../../../../src/apps/cli/idle-monitor"
 import type { LifecyclePills } from "../../../../src/apps/cli/lifecycle-pills"
 import type { RejectCounter } from "../../../../src/apps/cli/reject-counter"
-import { createCliRuntimeBridge } from "../../../../src/apps/cli/repl/runtime-bridge"
 import type {
   RunSessionLoopDeps,
   SessionLoopSinks,
@@ -13,6 +12,7 @@ import type { StatusBar } from "../../../../src/apps/cli/status-bar"
 import type { TurnIndicator } from "../../../../src/apps/cli/turn-indicator"
 import type { TurnSummaryCollector } from "../../../../src/apps/cli/turn-summary"
 import type { Message } from "../../../../src/llm"
+import type { RuntimeContext } from "../../../../src/sdk/runtime"
 
 /**
  * Slice-C (T2 rewrite): runtime behavior coverage for `runSessionLoop`.
@@ -140,18 +140,140 @@ const buildSinks = (): SessionLoopSinks & {
   }
 }
 
+const resetRuntimeCalls = (): void => {
+  runtimeCalls.createRuntime = 0
+  runtimeCalls.createSession = 0
+  runtimeCalls.prompts = []
+  runtimeCalls.imageCounts = []
+  runtimeCalls.turnRun = 0
+  runtimeCalls.sessionClose = 0
+  runtimeCalls.runtimeClose = 0
+}
+
 // Build a minimal SessionSetupResult — the loop only reads a subset.
-const buildSetup = (
+const buildSetup = async (
   argPrompt: string | undefined,
-): SessionSetupResult & {
-  __statusBar: ReturnType<typeof stubStatusBar>
-  __pillsDisposeCalls: { n: number }
-} => {
+): Promise<
+  SessionSetupResult & {
+    __statusBar: ReturnType<typeof stubStatusBar>
+    __pillsDisposeCalls: { n: number }
+  }
+> => {
   const statusBar = stubStatusBar()
   const pillsDisposeCalls = { n: 0 }
   const llmStub = {
     generate: async () => ({ content: [] }),
   } as unknown as SessionSetupResult["llm"]
+  resetRuntimeCalls()
+  let registry = {
+    has: (_name: string) => false,
+    all: () => [] as unknown[],
+  }
+  let automationEngine: unknown
+  const runtimeContext: RuntimeContext = {
+    createRuntimeFacade: async (_args) => {
+      runtimeCalls.createRuntime += 1
+      bridgeState.options = {
+        sessionDeps: {
+          ...(automationEngine !== undefined ? { automationEngine } : {}),
+          registry,
+        },
+      }
+      bridgeState.messages = []
+      bridgeState.outcome = undefined
+      bridgeState.closeCalls = 0
+      return {
+        createSession: async () => {
+          runtimeCalls.createSession += 1
+          return {
+            sessionId: "session-loop-sdk",
+            dispatch: async () => ({ revision: 0, seq: 0, events: [] }),
+            subscribe: () => () => undefined,
+            snapshot: async () => ({
+              sessionId: "session-loop-sdk",
+              revision: 0,
+              seq: 0,
+              state: {
+                status: "idle",
+                draftInput: "",
+                permissionMode: "default",
+                messageCount: bridgeState.messages.length,
+              },
+              capabilities: {
+                approvals: "operator",
+                tools: true,
+                memory: false,
+                artifacts: true,
+                subagents: false,
+                automation: automationEngine !== undefined,
+                shellSnapshot: false,
+                transport: "inproc" as const,
+              },
+              pendingApproval: null,
+              openArtifacts: [],
+            }),
+            attachSessionTransport: async () => ({ close: async () => undefined }),
+            close: async () => {
+              runtimeCalls.sessionClose += 1
+              bridgeState.closeCalls += 1
+            },
+            input: {
+              append: async (text: string, meta?: { readonly images?: readonly unknown[] }) => {
+                runtimeCalls.prompts.push(text)
+                runtimeCalls.imageCounts.push(meta?.images?.length ?? 0)
+                return { revision: 1, seq: 1, events: [] }
+              },
+            },
+            turn: {
+              run: async () => {
+                runtimeCalls.turnRun += 1
+                if (bridgeState.failWith !== undefined) throw bridgeState.failWith
+                const prompt = runtimeCalls.prompts.at(-1) ?? ""
+                const outcome = makeOutcome(prompt)
+                bridgeState.messages = [...outcome.messages] as Message[]
+                bridgeState.outcome = outcome
+                return { revision: 2, seq: 2, events: [], turn: { outcome, messages: outcome.messages } }
+              },
+            },
+            identity: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
+            toolProfile: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
+            approval: { respond: async () => ({ revision: 0, seq: 0, events: [] }) },
+            transcript: {
+              replace: async (messages: readonly Message[]) => {
+                bridgeState.messages = [...messages]
+                return { revision: 3, seq: 3, events: [], transcript: { messages: [...messages] } }
+              },
+            },
+            side: { start: async () => ({ outcome: makeOutcome("side"), answerText: "side", inputTokens: 0, outputTokens: 0, toolsAvailable: 0 }) },
+          }
+        },
+        close: async () => {
+          runtimeCalls.runtimeClose += 1
+        },
+      }
+    },
+    registry: () => registry as never,
+    wrapRegistry: (_mapper) => undefined,
+    permissionMode: () => "default",
+    automationEngine: () => automationEngine as never,
+    ensureAutomationEngine: (slot) => {
+      automationEngine = slot
+      registry = {
+        has: (name: string) => name === "automation_update",
+        all: () => [],
+      }
+      return slot
+    },
+    setGranularRegistry: () => undefined,
+    toolProfileState: () => undefined,
+    identityModeState: () => undefined,
+    focusChain: () => undefined,
+    decisionEmitter: () => undefined,
+    admissibility: () => undefined,
+    withAdmissibility: () => undefined,
+    planExitPort: () => undefined,
+    userInputPort: () => undefined,
+  }
   // Use a permissive `as never` cast for fields the loop only forwards.
   const result = {
     provider: "anthropic" as never,
@@ -186,16 +308,7 @@ const buildSetup = (
     turnSummary: stubSummary(),
     debugHandle: undefined,
     timelinePanel: undefined,
-    runtimeBridge: createCliRuntimeBridge({
-      llm: llmStub,
-      permission: { mode: "default" },
-      signal: new AbortController().signal,
-      registry: {
-        has: () => false,
-        specs: () => [],
-        all: () => [],
-      },
-    } as never),
+    runtimeContext,
     costPanel: undefined,
     branchProgress: undefined,
     planStore: undefined,
@@ -262,7 +375,7 @@ const bridgeState: {
   options: {
     sessionDeps?: {
       automationEngine?: unknown
-      registry?: { has: (name: string) => boolean }
+      registry?: { has: (name: string) => boolean; all?: () => unknown[] }
     }
   } | null
   messages: Message[]
@@ -340,12 +453,87 @@ beforeAll(async () => {
         },
       }
     }
+    const createMockLegacyRuntimeBinding = (
+      initial: {
+        permission?: { mode: string }
+        registry?: { has: (name: string) => boolean; all?: () => unknown[] }
+        automationEngine?: unknown
+      } = {},
+    ) => {
+      const bind = (snapshot: {
+        permission: { mode: string }
+        registry: { has: (name: string) => boolean; all?: () => unknown[] }
+        automationEngine?: unknown
+      }) => ({
+        snapshot,
+        patch: (
+          patch: Partial<{
+            permission: { mode: string }
+            registry: { has: (name: string) => boolean; all?: () => unknown[] }
+            automationEngine?: unknown
+          }>,
+        ) =>
+          bind({
+            ...snapshot,
+            ...patch,
+          }),
+        createRuntimeHost: (
+          options: Omit<NonNullable<typeof bridgeState.options>, "sessionDeps">,
+        ) => {
+          const hostOptions = {
+            ...options,
+            sessionDeps: {
+              permission: snapshot.permission,
+              ...(snapshot.automationEngine !== undefined
+                ? { automationEngine: snapshot.automationEngine }
+                : {}),
+              registry: snapshot.registry,
+            },
+          }
+          return {
+            createSessionHost: async () => createMockLegacyRunnerSessionHost(hostOptions),
+          }
+        },
+        materializeReviewerAgent: () => undefined,
+      })
+      return bind({
+        permission: initial.permission ?? { mode: "default" },
+        registry: initial.registry ?? { has: () => false, all: () => [] },
+        ...(initial.automationEngine !== undefined
+          ? { automationEngine: initial.automationEngine }
+          : {}),
+      })
+    }
     return {
       ...legacyHost,
-      createLegacyRunnerSessionHost: createMockLegacyRunnerSessionHost,
-      createSingleLegacyRuntimeHost: (options: typeof bridgeState.options) => ({
-        createSessionHost: async () => createMockLegacyRunnerSessionHost(options),
-      }),
+      createLegacyRuntimeBridgeBindingFromAgentConfigBase: (args: {
+        base?: {
+          permission?: { mode: string }
+          registry?: { has: (name: string) => boolean; all?: () => unknown[] }
+          automationEngine?: unknown
+        }
+      }) =>
+        createMockLegacyRuntimeBinding({
+          ...(args.base?.permission !== undefined ? { permission: args.base.permission } : {}),
+          ...(args.base?.registry !== undefined ? { registry: args.base.registry } : {}),
+          ...(args.base?.automationEngine !== undefined
+            ? { automationEngine: args.base.automationEngine }
+            : {}),
+        }),
+      createLegacyRuntimeBridgeBindingFromBootstrap: async (args: {
+        boot?: {
+          permission?: { mode: string }
+          tooling?: {
+            registry?: { has: (name: string) => boolean; all?: () => unknown[] }
+          }
+        }
+      }) =>
+        createMockLegacyRuntimeBinding({
+          ...(args.boot?.permission !== undefined ? { permission: args.boot.permission } : {}),
+          ...(args.boot?.tooling?.registry !== undefined
+            ? { registry: args.boot.tooling.registry }
+            : {}),
+        }),
     }
   })
 
@@ -410,12 +598,12 @@ beforeAll(async () => {
             },
             turn: {
               run: async (_meta?: unknown, options?: { signal?: AbortSignal }) => {
-              runtimeCalls.turnRun += 1
-              const result = await hostSession.runTurn({
-                history: [...bridgeState.messages],
-                prompt,
-                ...(imageCount > 0 ? { images: new Array(imageCount).fill(null) } : {}),
-                ...(options?.signal !== undefined ? { signal: options.signal } : {}),
+                runtimeCalls.turnRun += 1
+                const result = await hostSession.runTurn({
+                  history: [...bridgeState.messages],
+                  prompt,
+                  ...(imageCount > 0 ? { images: new Array(imageCount).fill(null) } : {}),
+                  ...(options?.signal !== undefined ? { signal: options.signal } : {}),
                 })
                 return { revision: 2, seq: 2, events: [], turn: result }
               },
@@ -467,13 +655,7 @@ afterAll(async () => {
 })
 
 beforeEach(() => {
-  runtimeCalls.createRuntime = 0
-  runtimeCalls.createSession = 0
-  runtimeCalls.prompts = []
-  runtimeCalls.imageCounts = []
-  runtimeCalls.turnRun = 0
-  runtimeCalls.sessionClose = 0
-  runtimeCalls.runtimeClose = 0
+  resetRuntimeCalls()
   promptQueue.length = 0
   bridgeState.options = null
   bridgeState.messages = []
@@ -548,7 +730,7 @@ describe("session-loop — type contract shape lock (compile-time)", () => {
 describe("session-loop — one-shot branch (argPrompt set)", () => {
   test("drives the one-shot branch through the runtime session with the seed prompt", async () => {
     const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
-    const setup = buildSetup("seed-prompt-text")
+    const setup = await buildSetup("seed-prompt-text")
     const sinks = buildSinks()
     await runSessionLoop({
       setup,
@@ -563,7 +745,7 @@ describe("session-loop — one-shot branch (argPrompt set)", () => {
 
   test("one-shot branch closes both the session and runtime facade", async () => {
     const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
-    const setup = buildSetup("any-prompt")
+    const setup = await buildSetup("any-prompt")
     const sinks = buildSinks()
     await runSessionLoop({
       setup,
@@ -577,7 +759,7 @@ describe("session-loop — one-shot branch (argPrompt set)", () => {
 
   test("after a successful turn, fires sinks in order: dashboard → summary → pills", async () => {
     const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
-    const setup = buildSetup("p")
+    const setup = await buildSetup("p")
     const sinks = buildSinks()
     await runSessionLoop({
       setup,
@@ -589,7 +771,7 @@ describe("session-loop — one-shot branch (argPrompt set)", () => {
 
   test("renderAndResetSummary receives the runOnce outcome (messages threaded through)", async () => {
     const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
-    const setup = buildSetup("p")
+    const setup = await buildSetup("p")
     const sinks = buildSinks()
     await runSessionLoop({
       setup,
@@ -608,7 +790,7 @@ describe("session-loop — one-shot branch (argPrompt set)", () => {
     // and are zeroed AFTER the body runs (so a subsequent reuse would see []).
     // We assert the forward via the runtime session append metadata.
     const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
-    const setup = buildSetup("p")
+    const setup = await buildSetup("p")
     ;(setup as { pendingImages: unknown }).pendingImages = [{ kind: "image_url", url: "data:..." }]
     const sinks = buildSinks()
     await runSessionLoop({
@@ -625,7 +807,7 @@ describe("session-loop — one-shot branch (argPrompt set)", () => {
 describe("session-loop — interactive branch (no argPrompt)", () => {
   test("consumes the prompt pipeline and dispatches one interactive turn through the runtime session", async () => {
     const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
-    const setup = buildSetup(undefined)
+    const setup = await buildSetup(undefined)
     const sinks = buildSinks()
     promptQueue.push({ text: "interactive-seed", images: [] }, null)
     await runSessionLoop({
@@ -648,7 +830,7 @@ describe("session-loop — interactive branch (no argPrompt)", () => {
     process.env.QUANTA_AUTOMATION = "on"
     try {
       const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
-      const setup = buildSetup(undefined)
+      const setup = await buildSetup(undefined)
       const sinks = buildSinks()
       await runSessionLoop({
         setup,
@@ -666,7 +848,7 @@ describe("session-loop — interactive branch (no argPrompt)", () => {
 
   test("empty prompt source exits without dispatching a turn", async () => {
     const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
-    const setup = buildSetup(undefined)
+    const setup = await buildSetup(undefined)
     const sinks = buildSinks()
     await runSessionLoop({
       setup,
@@ -680,7 +862,7 @@ describe("session-loop — interactive branch (no argPrompt)", () => {
 
   test("registerExitTeardown registers a callback that disposes pills + tears down status bar", async () => {
     const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
-    const setup = buildSetup(undefined)
+    const setup = await buildSetup(undefined)
     const sinks = buildSinks()
     const teardowns: Array<() => void> = []
     await runSessionLoop({
@@ -699,7 +881,7 @@ describe("session-loop — interactive branch (no argPrompt)", () => {
 
   test("registerReplaceMessages routes transcript restore through the runtime session", async () => {
     const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
-    const setup = buildSetup(undefined)
+    const setup = await buildSetup(undefined)
     const sinks = buildSinks()
     let replaceMessages: ((messages: ReadonlyArray<Message>) => Promise<void>) | undefined
     await runSessionLoop({
@@ -720,7 +902,7 @@ describe("session-loop — interactive branch (no argPrompt)", () => {
 
   test("interactive success renders dashboard and summary exactly once for one prompt", async () => {
     const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
-    const setup = buildSetup(undefined)
+    const setup = await buildSetup(undefined)
     const sinks = buildSinks()
     promptQueue.push("ok", null)
     await runSessionLoop({
@@ -735,7 +917,7 @@ describe("session-loop — interactive branch (no argPrompt)", () => {
 
   test("interactive success flushes lifecycle pills on turn completion", async () => {
     const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
-    const setup = buildSetup(undefined)
+    const setup = await buildSetup(undefined)
     const sinks = buildSinks()
     promptQueue.push("ok", null)
     await runSessionLoop({
@@ -749,7 +931,7 @@ describe("session-loop — interactive branch (no argPrompt)", () => {
 
   test("renderTurnError fires when the runtime-backed turn throws", async () => {
     const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
-    const setup = buildSetup(undefined)
+    const setup = await buildSetup(undefined)
     const sinks = buildSinks()
     promptQueue.push("explode", null)
     bridgeState.failWith = new Error("boom")

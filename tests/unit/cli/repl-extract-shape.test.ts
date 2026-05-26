@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import * as repl from "../../../src/apps/cli/repl"
-import * as sessionDepsCompose from "../../../src/apps/cli/repl/session-deps-compose"
+import * as runtimeContextCompose from "../../../src/apps/cli/repl/runtime-context-compose"
 import * as skillsSurface from "../../../src/apps/cli/repl/skills-surface"
 import * as slashSurface from "../../../src/apps/cli/repl/slash-surface"
 import * as surfaceCompose from "../../../src/apps/cli/repl/surface-compose"
@@ -44,7 +44,7 @@ describe("apps/cli/repl + session-io extract shape", () => {
     expect(typeof slashSurface.dispatchReplSlash).toBe("function")
     expect(typeof skillsSurface.buildSkillsCallback).toBe("function")
     expect(typeof skillsSurface.installPills).toBe("function")
-    expect(typeof sessionDepsCompose.composeCliSessionDeps).toBe("function")
+    expect(typeof runtimeContextCompose.composeCliRuntimeContext).toBe("function")
     expect(typeof surfaceCompose.buildPromptUx).toBe("function")
     expect(typeof surfaceCompose.createSurfaceState).toBe("function")
     expect(typeof surfaceCompose.composeSurfaceSlashCtx).toBe("function")
@@ -81,6 +81,6 @@ describe("apps/cli/repl + session-io extract shape", () => {
     expect(replSrc).toContain('from "./repl/skills-surface"')
     expect(replSrc).toContain('from "./repl/slash-surface"')
     expect(replSrc).toContain('from "./repl/surface-compose"')
-    expect(sessionSetupSrc).toContain('from "./session-deps-compose"')
+    expect(sessionSetupSrc).toContain('from "./runtime-context-compose"')
   })
 })

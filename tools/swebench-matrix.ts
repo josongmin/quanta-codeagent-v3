@@ -39,6 +39,27 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { basename, join, resolve } from "node:path"
 import { costUsd } from "@/observability"
 import { type AnyKnob, allKnobs, knobsForSurface, registerKnob } from "@/runner/knobs"
+import {
+  buildCostFile,
+  type CostAccumulator,
+  emptyCostAccumulator,
+  estimateEtaMs,
+  formatInstanceLine,
+  formatProgressBar,
+  recordRows,
+} from "./swebench-matrix/progress"
+import {
+  cleanSweepState,
+  detectMismatch,
+  flattenPartialRows,
+  formatMismatch,
+  loadSweepState,
+  newSweepState,
+  recordConditionComplete,
+  type SweepState,
+  saveSweepState,
+} from "./swebench-matrix/state"
+import { buildSummary, formatSummaryTable, readSummaryRows } from "./swebench-matrix/summary"
 
 /**
  * Bench-knob bootstrap entry. The matrix tool's `--axes` mode (and its
@@ -651,6 +672,18 @@ export interface MatrixArgs {
   maxTurns: number
   timeoutMs: number
   pythonGrade: boolean
+  /** `--resume`: skip conditions already in `<out>/.matrix-state.json`. The
+   *  state file's stored mode/dataset/model/axes/conditions MUST match the
+   *  current invocation or the runner fails loudly (no silent reset). */
+  resume: boolean
+  /** `--summary`: post-process an existing sweep. When set, the runner
+   *  reads `<out>/matrix-summary{,-axes}.jsonl` and prints the extended
+   *  table (per-condition pass@1 σ, ROI). No bench spawn. */
+  summary: boolean
+  /** `--keep-state`: do NOT delete `.matrix-state.json` after the final
+   *  condition succeeds. Useful for post-mortem of cost vs progress.
+   *  Default false — successful sweeps leave a clean `outDir`. */
+  keepState: boolean
 }
 
 /** Resolve a path-or-empty in dry-run vs. real-run modes. Throws on missing
@@ -665,28 +698,46 @@ const resolveRequired = (raw: string | undefined, flag: string, dryRun: boolean)
 }
 
 export const parseArgs = (argv: readonly string[]): MatrixArgs => {
-  // Axes / dry-run are checked FIRST so a `--axes` request without `--dataset`
-  // still fails with the dataset error (operator-visible: same flag set
-  // required regardless of mode). The mutually-exclusive check between
-  // `--axes` and `--conditions` runs AFTER all required-arg checks pass —
-  // otherwise the operator would see two errors out of order.
-  const dataset = argValue(argv, "--dataset")
-  if (dataset === undefined || dataset === "") {
+  // Mode probes — these change which other flags become required:
+  //   - `--summary`  → reads on-disk artifacts only; `--out` required, no
+  //                    `--dataset`/`--corpus` (the JSONL already has the picks).
+  //   - `--resume`   → resumes an in-progress sweep; `--out` required, the
+  //                    state file's stored `dataset`/`model`/`mode` is the
+  //                    source of truth for those (operator overrides are
+  //                    rejected as mismatch by `detectMismatch`).
+  //   - `--dry-run`  → preserves existing behavior (corpus/out optional).
+  const dryRun = argFlag(argv, "--dry-run")
+  const summary = argFlag(argv, "--summary")
+  const resume = argFlag(argv, "--resume")
+  if (summary && resume) {
+    throw new Error("--summary and --resume are mutually exclusive")
+  }
+  // Axes / dry-run / summary / resume are checked FIRST so a `--axes` request
+  // without `--dataset` still fails with the dataset error (operator-visible:
+  // same flag set required regardless of mode). The mutually-exclusive check
+  // between `--axes` and `--conditions` runs AFTER all required-arg checks
+  // pass — otherwise the operator would see two errors out of order.
+  const datasetRaw = argValue(argv, "--dataset")
+  if (!summary && !resume && (datasetRaw === undefined || datasetRaw === "")) {
     throw new Error("missing required --dataset <file>")
   }
-  // --axes mode does NOT require --corpus / --out when --dry-run is set: the
-  // bench is never spawned in that case, so we tolerate their absence to
-  // make `bun run tools/swebench-matrix.ts --dataset f --axes lsp --dry-run`
-  // a friction-free smoke for the operator.
-  const dryRun = argFlag(argv, "--dry-run")
   const axes = parseAxes(argValue(argv, "--axes"))
   if (axes !== undefined && argv.includes("--conditions")) {
     throw new Error("--axes and --conditions are mutually exclusive")
   }
-  const corpus = resolveRequired(argValue(argv, "--corpus"), "--corpus", dryRun)
+  // `--summary` and `--resume` require `--out` (the state file / JSONL home)
+  // but tolerate missing `--corpus` (no bench will spawn in summary mode;
+  // resume gets corpus from the operator). For resume we still require
+  // --corpus because the bench needs it for any remaining condition.
+  const dryLike = dryRun || summary
+  const corpus = resolveRequired(argValue(argv, "--corpus"), "--corpus", dryLike)
   const out = resolveRequired(argValue(argv, "--out"), "--out", dryRun)
+  if ((summary || resume) && out === "") {
+    throw new Error("--out is required for --summary / --resume")
+  }
+  const dataset = datasetRaw === undefined || datasetRaw === "" ? "" : resolve(datasetRaw)
   return {
-    dataset: resolve(dataset),
+    dataset,
     corpus,
     model: argValue(argv, "--model") ?? "gpt-5",
     out,
@@ -696,6 +747,9 @@ export const parseArgs = (argv: readonly string[]): MatrixArgs => {
     maxTurns: argPositiveInt(argv, "--max-turns", 30),
     timeoutMs: argPositiveInt(argv, "--timeout-ms", 600_000),
     pythonGrade: argFlag(argv, "--python-grade"),
+    resume,
+    summary,
+    keepState: argFlag(argv, "--keep-state"),
   }
 }
 
@@ -898,7 +952,7 @@ const parseArgsOrExit = (): MatrixArgs => {
   } catch (e) {
     log(`error: ${(e as Error).message}`)
     log(
-      "usage: bun run tools/swebench-matrix.ts --dataset <file> --corpus <dir> --out <dir> [--model gpt-5] [--conditions baseline,lsp,...] [--axes lsp,subagent,...] [--dry-run] [--max-turns 30] [--timeout-ms 600000] [--python-grade]",
+      "usage: bun run tools/swebench-matrix.ts --dataset <file> --corpus <dir> --out <dir> [--model gpt-5] [--conditions baseline,lsp,...] [--axes lsp,subagent,...] [--dry-run] [--max-turns 30] [--timeout-ms 600000] [--python-grade] [--resume] [--summary] [--keep-state]",
     )
     process.exit(1)
   }
@@ -929,6 +983,153 @@ const printAxesDryRun = (conditions: readonly AxesCondition[]): void => {
   }
 }
 
+// ── resume / progress wiring (shared across legacy + axes modes) ───────────
+
+interface ResumeBootstrap {
+  /** Live SweepState — either freshly minted (no `--resume` or no file) OR
+   *  the loaded checkpoint (`--resume` + matching state). */
+  readonly state: SweepState
+  /** Rows from any previously-completed conditions (empty on first run). */
+  readonly allRows: MatrixRow[]
+  /** CostAccumulator seeded from `allRows` so ETA / spent are accurate
+   *  immediately when resuming. */
+  readonly cost: CostAccumulator
+}
+
+const bootstrapResume = (
+  args: MatrixArgs,
+  req: {
+    readonly mode: "conditions" | "axes"
+    readonly conditions: readonly string[]
+    readonly axes?: readonly string[]
+    readonly estUsd: number | undefined
+  },
+): ResumeBootstrap => {
+  const stored = loadSweepState(args.out)
+  if (stored !== undefined && args.resume) {
+    const mismatch = detectMismatch(stored, {
+      mode: req.mode,
+      dataset: args.dataset,
+      model: args.model,
+      ...(req.axes !== undefined ? { axes: req.axes } : {}),
+      conditions: req.conditions,
+    })
+    if (mismatch !== undefined) {
+      throw new Error(
+        `--resume rejected: ${formatMismatch(mismatch)} — drop the state file or correct the flags`,
+      )
+    }
+    const rows = flattenPartialRows(stored)
+    const acc = recordRows(emptyCostAccumulator(), rows)
+    log(
+      `[resume] loaded ${stored.completed.length} completed condition(s); ${rows.length} row(s) replayed; $${acc.spentUsd.toFixed(4)} spent so far`,
+    )
+    return { state: stored, allRows: [...rows], cost: acc }
+  }
+  if (stored !== undefined && !args.resume) {
+    // Defensive: a stale state file from a previous interrupted run is
+    // present, but the operator did not ask to resume. We do NOT honour
+    // it (the safety contract is "resume is explicit"); we DO mention it
+    // so the operator notices.
+    log(
+      `[resume] found existing .matrix-state.json (${stored.completed.length} completed) — IGNORED without --resume`,
+    )
+  }
+  if (args.resume && stored === undefined) {
+    log("[resume] no .matrix-state.json found — starting fresh")
+  }
+  const fresh = newSweepState({
+    dataset: args.dataset,
+    outDir: args.out,
+    model: args.model,
+    mode: req.mode,
+    ...(req.axes !== undefined ? { axes: req.axes } : {}),
+    conditions: req.conditions,
+    ...(req.estUsd !== undefined ? { totalEstCostUsd: req.estUsd } : {}),
+  })
+  return { state: fresh, allRows: [], cost: emptyCostAccumulator() }
+}
+
+/** Persist the running cost snapshot. Atomic via writeFileSync's own
+ *  same-file semantics (cost.json is small and read-only by external
+ *  tooling; corruption windows are negligible). */
+const writeCostFile = (args: MatrixArgs, acc: CostAccumulator): void => {
+  try {
+    writeFileSync(
+      join(args.out, ".cost.json"),
+      `${JSON.stringify(buildCostFile({ acc, model: args.model }), null, 2)}\n`,
+    )
+  } catch {
+    // Best-effort: a write failure here is not fatal to the sweep.
+  }
+}
+
+/** Print the progress bar after each condition. Uses the cost accumulator
+ *  + remaining condition count to derive ETA. ETA is `n/a` until at least
+ *  one instance wall time is observed. */
+const printProgressBar = (
+  completed: number,
+  total: number,
+  cost: CostAccumulator,
+  estUsd: number | undefined,
+): void => {
+  // Estimate remaining wall time = mean(observed) × remaining instances.
+  // We approximate "remaining instances" as `(total − completed) × meanPicks`
+  // where meanPicks = observed instances / completed condition. When
+  // completed === 0 we can't estimate ⇒ undefined ⇒ n/a.
+  const meanPicks = completed > 0 ? Math.max(1, Math.round(cost.instanceCount / completed)) : 0
+  const remaining = (total - completed) * meanPicks
+  const eta = estimateEtaMs(cost.observedWallMs, remaining)
+  // biome-ignore lint/suspicious/noConsole: this is a CLI tool's primary UX.
+  console.error(
+    `[matrix] ${formatProgressBar({
+      completed,
+      total,
+      spentUsd: cost.spentUsd,
+      ...(estUsd !== undefined ? { estUsd } : {}),
+      ...(eta !== undefined ? { etaMs: eta } : {}),
+    })}`,
+  )
+}
+
+/** Print one line per instance in the condition. We do NOT have a callback
+ *  hook into the bench's own per-instance output, so this is a deferred
+ *  echo — after the bench reports the condition's verdicts we print the
+ *  per-pick lines using the already-collected `MatrixRow` data. */
+const printRowVerdicts = (rows: readonly MatrixRow[], total: number): void => {
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i]
+    if (r === undefined) continue
+    // biome-ignore lint/suspicious/noConsole: this is a CLI tool's primary UX.
+    console.error(`[matrix]   ${formatInstanceLine(i + 1, total, r)}`)
+  }
+}
+
+// ── --summary mode ─────────────────────────────────────────────────────────
+
+const mainSummaryMode = (args: MatrixArgs): void => {
+  // Try both possible summary file names; prefer axes if both exist.
+  const axesFile = join(args.out, "matrix-summary-axes.jsonl")
+  const legacyFile = join(args.out, "matrix-summary.jsonl")
+  let chosen: string | undefined
+  if (existsSync(axesFile)) chosen = axesFile
+  else if (existsSync(legacyFile)) chosen = legacyFile
+  if (chosen === undefined) {
+    throw new Error(
+      `--summary: neither ${basename(axesFile)} nor ${basename(legacyFile)} found in ${args.out}`,
+    )
+  }
+  const rows = readSummaryRows(chosen)
+  const report = buildSummary(rows)
+  const table = formatSummaryTable(report)
+  // biome-ignore lint/suspicious/noConsole: operator-visible primary output.
+  console.log(table)
+  // Persist the extended view next to the input.
+  const outPath = join(args.out, "matrix-summary-extended.md")
+  writeFileSync(outPath, `${table}\n`)
+  log(`read ${basename(chosen)} (${rows.length} row(s)); wrote ${basename(outPath)}`)
+}
+
 const mainAxesMode = async (args: MatrixArgs, axes: readonly string[]): Promise<void> => {
   await bootstrapBenchKnobs()
   const conditions = generateAxesConditions(axes)
@@ -942,8 +1143,17 @@ const mainAxesMode = async (args: MatrixArgs, axes: readonly string[]): Promise<
   log(`dataset=${basename(args.dataset)} model=${args.model} out=${args.out}`)
   const pickIds = readPickIds(args.dataset)
   log(`picks (${pickIds.length}): ${pickIds.join(", ")}`)
+  // Resume preamble: load + check mismatch + seed rows/cost accumulator.
+  const conditionLabels = conditions.map((c) => c.label)
+  const { state, allRows, cost } = bootstrapResume(args, {
+    mode: "axes",
+    conditions: conditionLabels,
+    axes,
+    estUsd: undefined,
+  })
   const partialFile = join(args.out, `partial-axes-${Date.now()}.jsonl`)
-  const allRows: MatrixRow[] = []
+  let curState = state
+  let curCost = cost
   let interrupted = false
   const onSigint = (): void => {
     interrupted = true
@@ -951,19 +1161,33 @@ const mainAxesMode = async (args: MatrixArgs, axes: readonly string[]): Promise<
   }
   process.on("SIGINT", onSigint)
   try {
+    const completedSet = new Set(curState.completed)
     for (let i = 0; i < conditions.length; i++) {
       if (interrupted) break
       const cond = conditions[i]
       if (cond === undefined) continue // noUncheckedIndexedAccess
+      if (completedSet.has(cond.label)) {
+        log(`(${i + 1}/${conditions.length}) axes=${cond.label} — already completed, skipping`)
+        continue
+      }
       // biome-ignore lint/suspicious/noConsole: this is a CLI tool's primary UX.
       console.error(`[matrix] (${i + 1}/${conditions.length}) axes=${cond.label}`)
-      allRows.push(...(await runOneAxesCondition(args, cond, pickIds)))
+      const rows = await runOneAxesCondition(args, cond, pickIds)
+      allRows.push(...rows)
       writeJsonl(partialFile, allRows)
+      curCost = recordRows(curCost, rows)
+      curState = recordConditionComplete(curState, cond.label, rows)
+      saveSweepState(args.out, curState)
+      writeCostFile(args, curCost)
+      printProgressBar(i + 1, conditions.length, curCost, undefined)
+      printRowVerdicts(rows, pickIds.length)
     }
     const summaryFile = join(args.out, "matrix-summary-axes.jsonl")
     writeJsonl(summaryFile, allRows)
     log(`wrote ${summaryFile} (${allRows.length} row(s))`)
     if (interrupted) process.exit(130)
+    // Final cleanup — state file gone after a fully-successful sweep.
+    if (!args.keepState) cleanSweepState(args.out)
   } finally {
     process.off("SIGINT", onSigint)
   }
@@ -982,8 +1206,18 @@ const mainConditionsMode = async (args: MatrixArgs): Promise<void> => {
   const pickIds = readPickIds(args.dataset)
   log(`picks (${pickIds.length}): ${pickIds.join(", ")}`)
 
+  // Resume preamble (no-op if `--resume` was not passed AND no prior
+  // `.matrix-state.json` exists). Seeds `allRows`/`cost` from disk when a
+  // valid checkpoint matches the requested mode/dataset/model/conditions.
+  const { state, allRows, cost } = bootstrapResume(args, {
+    mode: "conditions",
+    conditions: args.conditions,
+    estUsd: undefined,
+  })
+
   const partialFile = join(args.out, `partial-${Date.now()}.jsonl`)
-  const allRows: MatrixRow[] = []
+  let curState = state
+  let curCost = cost
   let interrupted = false
   const onSigint = (): void => {
     interrupted = true
@@ -992,13 +1226,27 @@ const mainConditionsMode = async (args: MatrixArgs): Promise<void> => {
   process.on("SIGINT", onSigint)
 
   try {
+    const completedSet = new Set(curState.completed)
     for (let i = 0; i < args.conditions.length; i++) {
       if (interrupted) break
       const condition = args.conditions[i]
       if (condition === undefined) continue // noUncheckedIndexedAccess
+      if (completedSet.has(condition)) {
+        log(
+          `(${i + 1}/${args.conditions.length}) condition=${condition} — already completed, skipping`,
+        )
+        continue
+      }
       printRemaining(i, args.conditions.length, condition)
-      allRows.push(...(await runOneCondition(args, condition, pickIds)))
+      const rows = await runOneCondition(args, condition, pickIds)
+      allRows.push(...rows)
       writeJsonl(partialFile, allRows)
+      curCost = recordRows(curCost, rows)
+      curState = recordConditionComplete(curState, condition, rows)
+      saveSweepState(args.out, curState)
+      writeCostFile(args, curCost)
+      printProgressBar(i + 1, args.conditions.length, curCost, undefined)
+      printRowVerdicts(rows, pickIds.length)
     }
     const summaryFile = join(args.out, "matrix-summary.jsonl")
     writeJsonl(summaryFile, allRows)
@@ -1009,13 +1257,47 @@ const mainConditionsMode = async (args: MatrixArgs): Promise<void> => {
     writeFileSync(join(args.out, "matrix-summary.md"), `${table}\n`)
     log(`wrote ${summaryFile} (${allRows.length} row(s))`)
     if (interrupted) process.exit(130)
+    if (!args.keepState) cleanSweepState(args.out)
   } finally {
     process.off("SIGINT", onSigint)
   }
 }
 
+/** Merge stored state's `dataset`/`model` into `args` for a resume call,
+ *  applying defaults: if the operator omitted the flag (dataset="" or
+ *  model="gpt-5"), use the stored value. Pure. Extracted to keep `main`
+ *  under the biome cognitive-complexity ceiling. */
+const inheritStateDefaults = (args: MatrixArgs, stored: SweepState): MatrixArgs => ({
+  ...args,
+  dataset: args.dataset === "" ? stored.dataset : args.dataset,
+  model: args.model === "gpt-5" && stored.model !== "gpt-5" ? stored.model : args.model,
+})
+
+/** Dispatch the resume request to the right mode-driver. Returns `true`
+ *  when a resume actually fired; `false` lets `main` fall through to the
+ *  fresh-run dispatch. */
+const dispatchResume = async (args: MatrixArgs): Promise<boolean> => {
+  const stored = loadSweepState(args.out)
+  if (stored === undefined) return false
+  if (stored.mode === "axes") {
+    const axes = stored.axes ?? []
+    await mainAxesMode({ ...inheritStateDefaults(args, stored), axes }, axes)
+    return true
+  }
+  const conditions = stored.conditions as readonly Condition[]
+  await mainConditionsMode({ ...inheritStateDefaults(args, stored), conditions })
+  return true
+}
+
 const main = async (): Promise<void> => {
   const args = parseArgsOrExit()
+  if (args.summary) {
+    mainSummaryMode(args)
+    return
+  }
+  // --resume reads the state file first to pick the right mode-driver.
+  // The CLI flags must still match (mismatch detector enforces this).
+  if (args.resume && (await dispatchResume(args))) return
   if (args.axes !== undefined) {
     await mainAxesMode(args, args.axes)
     return

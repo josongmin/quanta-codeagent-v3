@@ -18,7 +18,9 @@ import type { AgentConfig, AgentOutcome } from "@/agent"
 import type { LLMPort } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
-import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime/bridge"
+import {
+  createRuntimeFromAgentConfigBase,
+} from "@/sdk/runtime"
 import type { StreamPort } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
 
@@ -59,7 +61,6 @@ describe("interactive.runMode — guard", () => {
       new URL("../../../../../src/apps/agent/mode-presets/interactive.ts", import.meta.url),
       "utf8",
     )
-    expect(src).toContain('from "@/sdk/runtime/bridge"')
     expect(src).toContain('from "@/sdk/runtime"')
     expect(src).not.toContain("createLegacyRunnerSessionHost(")
     expect(src).not.toContain("runInteractive(")
@@ -136,7 +137,7 @@ describe("interactive.runMode — hermetic via seams.runAgent", () => {
       granularRegistry,
     } as unknown as RuntimeAgentConfigBase
 
-    const { sessionDeps: deps, runtime } = await createRuntimeFromAgentConfigBase({
+    const { runtimeContext, runtime } = await createRuntimeFromAgentConfigBase({
       base,
       history: [],
       state: undefined,
@@ -144,13 +145,9 @@ describe("interactive.runMode — hermetic via seams.runAgent", () => {
       shutdown: async () => undefined,
     })
 
-    expect(deps.systemSource).toBe(systemSource)
-    expect(deps.sessionCtx).toBe("ctx")
-    expect(deps.stage1OutputsStore).toBe(stage1OutputsStore)
-    expect(deps.toolProfileState).toBe(toolProfileState)
-    expect(deps.identityModeState).toBe(identityModeState)
-    expect(deps.focusChain).toBe(focusChain)
-    expect(deps.granularRegistry).toBe(granularRegistry)
+    expect(runtimeContext.toolProfileState()).toBe(toolProfileState)
+    expect(runtimeContext.identityModeState()).toBe(identityModeState)
+    expect(runtimeContext.focusChain()).toBe(focusChain)
     await runtime.close()
   })
 })

@@ -1,4 +1,5 @@
 import type { SessionHost } from "@/kernel/session"
+import { createSessionTransportBridge, type ConnectedSessionTransport, type SessionTransport } from "@/ipc/session"
 import {
   createKernelSessionState,
   dispatchSessionCommand,
@@ -32,6 +33,27 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
   let state: KernelSessionState = createKernelSessionState(hostDescription)
   const subscriptions = new SessionSubscriptionHub()
   const sessionId = state.sessionId
+  let transportDispatchQueue: Promise<void> = Promise.resolve()
+  let transportBridge:
+    | ReturnType<typeof createSessionTransportBridge>
+    | undefined
+
+  const ensureTransportBridge = (
+    replayWindow?: number,
+  ): ReturnType<typeof createSessionTransportBridge> => {
+    if (transportBridge !== undefined) return transportBridge
+    transportBridge = createSessionTransportBridge({
+      snapshot: toSessionSnapshotLite(state),
+      ...(replayWindow !== undefined ? { tailLimit: replayWindow } : {}),
+      onCommand: async (command) => {
+        transportDispatchQueue = transportDispatchQueue.then(async () => {
+          await dispatch(command)
+        })
+        await transportDispatchQueue
+      },
+    })
+    return transportBridge
+  }
 
   const publishEvents = (events: readonly SessionEvent[]): void => {
     for (const event of events) subscriptions.publish(event)
@@ -49,6 +71,8 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
     })
     state = result.state
     publishEvents(result.events)
+    await transportBridge?.publishEvents(result.events)
+    await transportBridge?.publishSnapshot(toSessionSnapshotLite(state))
     return {
       revision: state.revision,
       seq: state.seq,
@@ -158,19 +182,30 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
     dispatch,
     subscribe: (listener) => subscriptions.subscribe(listener),
     snapshot: async () => toSessionSnapshotLite(state),
+    attachSessionTransport: async (
+      transport: SessionTransport,
+      options: { readonly replayWindow?: number } = {},
+    ): Promise<ConnectedSessionTransport> => {
+      if (closed) throw new SessionClosedError(sessionId)
+      return await ensureTransportBridge(options.replayWindow).connect(transport)
+    },
     close: async () => {
       if (closed) return
       closed = true
       await args.hostSession.close()
+      state = { ...state, status: "closed", seq: state.seq + 1 }
       const event: SessionEvent = {
         eventId: crypto.randomUUID(),
-        seq: state.seq + 1,
+        seq: state.seq,
         revision: state.revision,
         emittedAt: args.kernel.clock.now().toISOString(),
         type: "session.closed",
       }
       await args.kernel.eventLog.append(event)
+      await transportBridge?.publishEvents([event])
+      await transportBridge?.publishSnapshot(toSessionSnapshotLite(state))
       publishEvents([event])
+      await transportBridge?.close()
     },
     input: {
       append: async (text, meta, options) => dispatch(buildInputAppend(text, meta), options),

@@ -1,5 +1,6 @@
 import type { AgentOutcome } from "@/agent"
 import type { CreateRuntimeOptions, RuntimeSessionConfig } from "@/host/runtime"
+import type { ConnectedSessionTransport, SessionTransport } from "@/ipc/session"
 import type { SessionHostSideConversationResult } from "@/kernel/session"
 import type { ImageBlock, Message } from "@/llm"
 import type {
@@ -54,6 +55,10 @@ export interface RuntimeSession {
   ): Promise<SessionDispatchResult>
   subscribe(listener: (event: SessionEvent) => void): () => void
   snapshot(): Promise<SessionSnapshotLite>
+  attachSessionTransport(
+    transport: SessionTransport,
+    options?: { readonly replayWindow?: number },
+  ): Promise<ConnectedSessionTransport>
   close(): Promise<void>
   readonly input: {
     append(

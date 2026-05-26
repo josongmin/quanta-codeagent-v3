@@ -15,11 +15,54 @@
  */
 
 const ESC = "\x1b["
-const SAVE_CURSOR = `${ESC}s`
-const RESTORE_CURSOR = `${ESC}u`
+// DECSC / DECRC (`ESC 7` / `ESC 8`) — the DEC private cursor save/restore.
+// Preferred over SCO (`ESC[s` / `ESC[u`) because xterm/iTerm2/Terminal.app/
+// tmux/VSCode/screen all implement DEC fully; SCO restore is unreliable on
+// VSCode-integrated and some legacy emulators, which causes the next stdout
+// write to land at the status-row position instead of returning to the
+// streamed content — showing as " · 29.6k in · 33 out" suffixes leaking
+// onto every content line.
+const SAVE_CURSOR = "\x1b7"
+const RESTORE_CURSOR = "\x1b8"
 const ERASE_LINE = `${ESC}2K`
 const FG_DIM = `${ESC}2m`
 const FG_RESET = `${ESC}22;39m`
+
+/** Truthy/falsy knob parser for env strings ("0", "off", "false", "no"). */
+const isEnvFalsy = (v: string | undefined): boolean => {
+  if (v === undefined) return false
+  const n = v.trim().toLowerCase()
+  return n === "0" || n === "false" || n === "off" || n === "no"
+}
+
+/** Decide whether the bottom status row can render reliably in this surface.
+ *
+ *  Returns `false` (callers should install a no-op stub) when any of:
+ *   - `stderr` is not a TTY (pipe / redirect / non-interactive)
+ *   - `$TERM=dumb` (Emacs comint, some CI shells — no DECSTBM)
+ *   - `QUANTA_STATUSBAR=0` / `off` / `false` / `no` (operator override)
+ *
+ *  Pure function — no global reads — so the call site is fully testable. */
+export const isStatusBarSupported = (
+  env: NodeJS.ProcessEnv,
+  stderrIsTTY: boolean | undefined,
+): boolean => {
+  if (stderrIsTTY !== true) return false
+  if ((env.TERM ?? "").trim().toLowerCase() === "dumb") return false
+  if (isEnvFalsy(env.QUANTA_STATUSBAR)) return false
+  return true
+}
+
+const NOOP: StatusBar = {
+  setDefault: (): void => undefined,
+  transient: (): void => undefined,
+  clearTransient: (): void => undefined,
+  teardown: (): void => undefined,
+}
+
+/** Headless stub — paints nothing, accepts every call. Returned by
+ *  {@link installStatusBar} when {@link isStatusBarSupported} says no. */
+export const createNoopStatusBar = (): StatusBar => NOOP
 
 const termRows = (): number => {
   const r = process.stderr.rows
@@ -42,7 +85,18 @@ export interface StatusBar {
   readonly teardown: () => void
 }
 
-export const installStatusBar = (initialText: string): StatusBar => {
+export const installStatusBar = (
+  initialText: string,
+  options: { readonly env?: NodeJS.ProcessEnv; readonly stderrIsTTY?: boolean } = {},
+): StatusBar => {
+  const env = options.env ?? process.env
+  const stderrIsTTY = options.stderrIsTTY ?? process.stderr.isTTY
+  // Auto-disable on unsupported surfaces (non-TTY, dumb terminal, opt-out env)
+  // — return a no-op stub so existing callers don't need to branch. This is
+  // what prevents the SCO-restore leak from polluting content on terminals
+  // that don't honour cursor save/restore.
+  if (!isStatusBarSupported(env, stderrIsTTY)) return createNoopStatusBar()
+
   let defaultText = initialText
   let currentText = initialText
   let transientTimer: ReturnType<typeof setTimeout> | null = null
@@ -116,9 +170,7 @@ export const installStatusBar = (initialText: string): StatusBar => {
       // Reset scroll region to full screen, clear the status row, leave
       // cursor on the first column of the (former) status row so the
       // shell prompt that follows quanta exit starts on a clean line.
-      process.stderr.write(
-        `${ESC}r` + `${ESC}${rows};1H` + ERASE_LINE + `${ESC}${rows};1H`,
-      )
+      process.stderr.write(`${ESC}r` + `${ESC}${rows};1H` + ERASE_LINE + `${ESC}${rows};1H`)
       installed = false
       void currentText
     },

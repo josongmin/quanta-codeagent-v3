@@ -67,7 +67,8 @@ describe("CLI runtime SDK cutover source gates", () => {
 
   test("cli setup and side-conversation seams avoid old runner barrels in the main path", () => {
     const repl = readSource("src/apps/cli/repl.ts")
-    const deps = readSource("src/apps/cli/repl/session-deps-compose.ts")
+    const runtimeContext = readSource("src/apps/cli/repl/runtime-context-compose.ts")
+    const sdkContext = readSource("src/sdk/runtime/context.ts")
     const surface = readSource("src/apps/cli/repl/surface-compose.ts")
     const setup = readSource("src/apps/cli/repl/session-setup.ts")
     const internal = readSource("src/apps/cli/internal.ts")
@@ -76,14 +77,21 @@ describe("CLI runtime SDK cutover source gates", () => {
     expect(repl).not.toContain('from "@/runner"')
     expect(repl).not.toContain('from "@/runner/session-execution-plane"')
 
-    expect(deps).toContain('from "@/sdk/runtime/bridge"')
-    expect(deps).toContain("composeBootstrapRuntimeDeps")
-    expect(deps).not.toContain('from "@/runner/assemble/config"')
-    expect(deps).not.toContain('from "@/runner/session-memory-auto"')
-    expect(deps).not.toContain('from "../config-assemble"')
+    expect(runtimeContext).toContain('from "@/sdk/runtime"')
+    expect(runtimeContext).toContain("composeRuntimeBootstrapContext")
+    expect(runtimeContext).not.toContain('from "@/sdk/runtime/bridge"')
+    expect(runtimeContext).not.toContain('from "@/runner/assemble/config"')
+    expect(runtimeContext).not.toContain('from "@/runner/session-memory-auto"')
+    expect(runtimeContext).not.toContain("RuntimeSessionDeps")
 
     expect(surface).not.toContain("import { assembleConfig")
     expect(surface).toContain("startSideConversation: async (args) => {")
+
+    expect(sdkContext).not.toContain("RuntimeSessionDeps")
+    expect(sdkContext).not.toContain("CreateRuntimeFacadeFromSessionDepsArgs")
+    expect(sdkContext).not.toContain('from "@/sdk/runtime/bridge"')
+    expect(sdkContext).not.toContain("createRuntimeFacadeFromSessionDeps")
+    expect(sdkContext).not.toContain("export interface RuntimeBridgeState")
 
     expect(setup).not.toContain("sideConversationPort")
     expect(setup).not.toContain('from "@/host/runtime/session-host"')

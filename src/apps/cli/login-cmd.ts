@@ -96,11 +96,7 @@ const renderSuccess = (
         ? gray("unknown")
         : green(plan)
   const expStyle = expiryColor(rec.expires_at, nowMs)
-  const lines: string[] = [
-    `${green("✓")} ${bold("Signed in")}`,
-    "",
-    kvLine("plan", planStyled, 13),
-  ]
+  const lines: string[] = [`${green("✓")} ${bold("Signed in")}`, "", kvLine("plan", planStyled, 13)]
   if (rec.account_id) {
     lines.push(kvLine("account_id", gray(rec.account_id), 13))
   }
@@ -173,6 +169,30 @@ const buildErrorRender = (e: unknown): string => {
   return renderError("Login failed", errMessage(e))
 }
 
+type KeypressListener = (...args: unknown[]) => void
+
+/** Detach REPL keypress listeners and install one that maps Ctrl+C → `abort()`.
+ *  Returns the restore closure the caller MUST invoke in `finally`. No-op when
+ *  stdin isn't in raw mode (one-shot CLI, tests) — there the `process.once
+ *  SIGINT` path covers cancellation. */
+const installLoginCtrlCInterceptor = (abort: () => void): (() => void) => {
+  const stdin = process.stdin
+  if (stdin.isTTY !== true || stdin.isRaw !== true) return (): void => undefined
+  const saved = stdin.listeners("keypress") as unknown as readonly KeypressListener[]
+  const onLoginKeypress = (
+    _s: string | undefined,
+    key: { name?: string; ctrl?: boolean } | undefined,
+  ): void => {
+    if (key?.ctrl === true && key.name === "c") abort()
+  }
+  stdin.removeAllListeners("keypress")
+  stdin.on("keypress", onLoginKeypress as KeypressListener)
+  return (): void => {
+    stdin.removeListener("keypress", onLoginKeypress as KeypressListener)
+    for (const l of saved) stdin.on("keypress", l)
+  }
+}
+
 const peekPlanFromAccessToken = (rec: TokenRecord): string | null => {
   // The id_token usually carries chatgpt_plan_type. Some flows return only
   // access_token here; fall back to access_token decode in that case.
@@ -211,12 +231,18 @@ export const buildLoginCmd = (deps: LoginDeps = {}): SlashCommand => ({
 
     ctx.out(renderFlowStart(cfg))
 
-    // SIGINT escape hatch: the browser flow otherwise blocks for up to 10 min
-    // and the REPL's interrupt handler can't reach inside the await. A local
-    // controller wired to a SIGINT handler lets Ctrl+C unstick the flow.
+    // Ctrl+C escape hatch — two paths cover both surfaces:
+    //   1. process SIGINT: fires in non-raw-mode invocations (one-shot CLI,
+    //      tests). The REPL's raw-mode stdin swallows SIGINT, so this alone
+    //      isn't enough there.
+    //   2. raw-mode keypress: the REPL's turn-cancel FSM would otherwise route
+    //      Ctrl+C to `outerAbort.abort()` and exit the WHOLE surface — the
+    //      interceptor below detaches it for the duration of the wait so
+    //      /login Ctrl+C ⇒ "Login cancelled" + REPL stays alive.
     const ac = new AbortController()
     const sigintHandler = (): void => ac.abort()
     process.once("SIGINT", sigintHandler)
+    const restoreKeypress = installLoginCtrlCInterceptor(() => ac.abort())
     try {
       const flowOpts = {
         cfg,
@@ -261,6 +287,7 @@ export const buildLoginCmd = (deps: LoginDeps = {}): SlashCommand => ({
       return 1
     } finally {
       process.removeListener("SIGINT", sigintHandler)
+      restoreKeypress()
     }
   },
 })

@@ -1,7 +1,7 @@
 # ADR-0312 — GitHub App webhook host scaffold (Tier 1, intentionally deferred)
 
 - **Status**: accepted (2026-05-26) — scaffold + signature path; impl deferred until host decision
-- **Related**: [[0311-github-actions-trigger-adapter]] (sibling Tier-0 path), [[0132-autonomous-proactive-reactor]] (TriggerSourcePort SoT)
+- **Related**: [[0311-github-actions-trigger-adapter]] (sibling Tier-0 path), [[0132-autonomous-proactive-reactor]] (TriggerSourcePort SoT), [[0313-pr-output-sink-redaction]] (shares redactPort-mandatory invariant), [[0314-mention-filter-trust-scope]] (filter consumed by both tiers)
 - **References**:
   - GitHub Docs — Webhooks `X-Hub-Signature-256` (HMAC-SHA256 over raw body bytes)
   - Cursor BugBot host (single-process HTTP + signature verify before parse)

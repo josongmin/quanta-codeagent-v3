@@ -1,0 +1,19 @@
+{
+  "action": "opened",
+  "pull_request": {
+    "number": 88,
+    "title": "Add @quanta review trigger",
+    "body": "Please run /quanta review",
+    "head": { "ref": "feat", "sha": "deadbeef" },
+    "base": { "ref": "main", "sha": "cafebabe" },
+    "user": { "login": "owner", "type": "User" },
+    "author_association": "OWNER"
+  },
+  "repository": {
+    "id": 7779,
+    "name": "repo",
+    "full_name": "owner/repo",
+    "owner": { "login": "owner", "type": "User" }
+  },
+  "sender": { "login": "owner", "type": "User" }
+}

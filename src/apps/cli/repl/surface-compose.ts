@@ -304,7 +304,7 @@ export const composeSurfaceWires = (
   // so `assembleConfig` carries it onto `AgentConfig.granularRegistry`.
   // The per-tool recorder (Wire 3 below) populates it when opted in.
   const granularRegistry: GranularRegistryPort = defaultGranularRegistry()
-  setup.runtimeBridge.setGranularRegistry(granularRegistry)
+  setup.runtimeContext.setGranularRegistry(granularRegistry)
   // ADR-0309 Wire 3 — per-tool auto-record cadence. Env-gated:
   // `QUANTA_PER_TOOL_RECORD=on` ⇒ wrap every tool in the session registry
   // with a pre-execute snapshot recorder. Absent / any other value ⇒
@@ -339,7 +339,7 @@ export const composeSurfaceWires = (
       },
       logger,
     })
-    setup.runtimeBridge.wrapRegistry((tool: Tool) => recorder.wrapTool(tool))
+    setup.runtimeContext.wrapRegistry((tool: Tool) => recorder.wrapTool(tool))
   }
   // ADR-0292 — turn-end record wire. Env-gated: `QUANTA_CHECKPOINT_CONV=on`
   // wires the live wire; anything else leaves the slot `null` so the slash
@@ -420,17 +420,17 @@ export const composeSurfaceWires = (
     // the slot entirely (default-OFF byte-identical).
     composerHandle,
     conversationStore: convStore,
-    ...(setup.runtimeBridge.getToolProfileState() !== undefined
-      ? { toolProfileState: setup.runtimeBridge.getToolProfileState() }
+    ...(setup.runtimeContext.toolProfileState() !== undefined
+      ? { toolProfileState: setup.runtimeContext.toolProfileState() }
       : {}),
-    ...(setup.runtimeBridge.getIdentityModeState() !== undefined
+    ...(setup.runtimeContext.identityModeState() !== undefined
       ? {
-          identityModeState: setup.runtimeBridge.getIdentityModeState(),
+          identityModeState: setup.runtimeContext.identityModeState(),
           onIdentityModeChange: setup.refreshSystemPrompt,
         }
       : {}),
-    ...(setup.runtimeBridge.getFocusChain() !== undefined
-      ? { focusChain: setup.runtimeBridge.getFocusChain() }
+    ...(setup.runtimeContext.focusChain() !== undefined
+      ? { focusChain: setup.runtimeContext.focusChain() }
       : {}),
     textInbox,
   })
