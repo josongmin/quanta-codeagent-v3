@@ -5,7 +5,7 @@
   "identifier": "ai.quanta.desktop",
   "build": {
     "beforeDevCommand": "",
-    "beforeBuildCommand": "",
+    "beforeBuildCommand": "bash -lc 'search=\"$PWD\"; while [ \"$search\" != \"/\" ]; do for candidate in \"$search/scripts/prepare-build.sh\" \"$search/apps/tauri-shell/scripts/prepare-build.sh\"; do if [ -f \"$candidate\" ]; then exec bash \"$candidate\"; fi; done; search=\"$(dirname \"$search\")\"; done; echo \"prepare-build.sh not found from $PWD\" >&2; exit 1'",
     "devUrl": "http://localhost:5173",
     "frontendDist": "../web-frontend/dist"
   },

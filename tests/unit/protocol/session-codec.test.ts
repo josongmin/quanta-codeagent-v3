@@ -62,6 +62,7 @@ describe("@/protocol/session codec", () => {
       causedByCommandId: "c1",
       type: "turn.completed",
       outcomeReason: "completed",
+      assistantText: "pong",
     })
     expect(decodeSessionEvent(raw)).toEqual({
       eventId: "e1",
@@ -71,6 +72,30 @@ describe("@/protocol/session codec", () => {
       causedByCommandId: "c1",
       type: "turn.completed",
       outcomeReason: "completed",
+      assistantText: "pong",
+    })
+  })
+
+  test("round-trips turn.started image attachments", () => {
+    const raw = encodeSessionEvent({
+      eventId: "e2",
+      seq: 3,
+      revision: 5,
+      emittedAt: "2026-05-26T00:00:02.000Z",
+      causedByCommandId: "c2",
+      type: "turn.started",
+      prompt: "",
+      images: [{ type: "image", data: "Zm9v", mediaType: "image/png" }],
+    })
+    expect(decodeSessionEvent(raw)).toEqual({
+      eventId: "e2",
+      seq: 3,
+      revision: 5,
+      emittedAt: "2026-05-26T00:00:02.000Z",
+      causedByCommandId: "c2",
+      type: "turn.started",
+      prompt: "",
+      images: [{ type: "image", data: "Zm9v", mediaType: "image/png" }],
     })
   })
 

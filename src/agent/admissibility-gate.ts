@@ -234,6 +234,84 @@ const reviewerTag = (reviewer: ReviewerTier): string =>
       ? "reviewer_guardian"
       : "reviewer_user"
 
+const isSessionApprovalRequiredError = (error: unknown): boolean => {
+  if (typeof error !== "object" || error === null || !("approval" in error)) return false
+  const approval = (error as { approval?: unknown }).approval
+  return (
+    typeof approval === "object" &&
+    approval !== null &&
+    "approvalId" in approval &&
+    "reason" in approval &&
+    "requestedAt" in approval
+  )
+}
+
+const reviewActionKeyOf = (
+  config: AdmissibilityGateConfig,
+  action: AdmissibilityAction,
+): string => {
+  const shellCommand = config.registry.extractShellCommand(action.tool, action.input)
+  return shellCommand !== null ? `${action.tool}|${shellCommand}` : action.tool
+}
+
+const buildReviewContext = (
+  config: AdmissibilityGateConfig,
+  action: AdmissibilityAction,
+  opts: AdmissibilityWaveAOptions,
+): ReviewContext & { reviewKind: NonNullable<ReviewContext["reviewKind"]> } => ({
+  sessionId: config.sessionId ?? "default",
+  turnId: String(config.run?.turn ?? 0),
+  priorDenials: opts.priorDenials ?? [],
+  configReviewer: opts.defaultReviewer ?? "user",
+  decidedAt: (opts.decidedAt ?? Date.now)(),
+  reviewKind: opts.reviewKindOverride ?? inferReviewKind(action.tool, action.isReadOnly),
+})
+
+const denyIllegalReviewerVerb = (
+  call: ToolUseBlock,
+  decision: Awaited<ReturnType<typeof reviewAction>>,
+  reviewKind: NonNullable<ReviewContext["reviewKind"]>,
+): DispatchResult | null => {
+  if (decision.verb === undefined || isDecisionLegalFor(reviewKind, decision.verb)) return null
+  return deny(
+    call.id,
+    `Reviewer returned illegal verb '${decision.verb.verb}' for reviewKind='${reviewKind}'.`,
+    "reviewer_verb_illegal",
+  )
+}
+
+const denyReviewedAction = (
+  call: ToolUseBlock,
+  config: AdmissibilityGateConfig,
+  decision: Awaited<ReturnType<typeof reviewAction>>,
+  origin: "rule" | "hitl",
+): DispatchResult => {
+  const tag = reviewerTag(decision.reviewer)
+  const originSuffix = origin === "rule" ? " (origin=rule)" : ""
+  if (decision.verb?.verb === "reject_and_tell") {
+    const baseContent =
+      decision.outcome === "user_aborted"
+        ? `User aborted: ${decision.rationale}${originSuffix}${HANDOFF_SUFFIX}`
+        : decision.outcome === "guardian_denied"
+          ? `Guardian denied: ${decision.rationale}${originSuffix}`
+          : `User declined: ${decision.rationale}${originSuffix}`
+    return denyFromConfirm(
+      call,
+      { decision: "deny_and_steer", steer: decision.verb.message },
+      baseContent,
+      tag,
+      config,
+    )
+  }
+  if (decision.outcome === "user_aborted") {
+    return deny(call.id, `User aborted: ${decision.rationale}${originSuffix}${HANDOFF_SUFFIX}`, tag)
+  }
+  if (decision.outcome === "guardian_denied") {
+    return deny(call.id, `Guardian denied: ${decision.rationale}${originSuffix}`, tag)
+  }
+  return deny(call.id, `User declined: ${decision.rationale}${originSuffix}`, tag)
+}
+
 /**
  * Run the reviewer escalation for an action (rule `ask` OR always-confirm tier
  * with a wired port). Builds the `ToolActionKeyed` + `ReviewContext`, invokes
@@ -262,8 +340,7 @@ const reviewAndDecide = async (
   // else the bare tool name — the same key a sticky-precedence DenialMemory is
   // recorded under, so a prior guardian_denied / user_aborted short-circuits
   // re-review of the identical action.
-  const shellCommand = config.registry.extractShellCommand(action.tool, action.input)
-  const actionKey = shellCommand !== null ? `${action.tool}|${shellCommand}` : action.tool
+  const actionKey = reviewActionKeyOf(config, action)
 
   // ADR-0070 allowlist_escalated re-run pattern — Cursor parity. When a prior
   // approval recorded this actionKey, skip the reviewer entirely and proceed
@@ -282,30 +359,16 @@ const reviewAndDecide = async (
   // `opts.reviewKindOverride`; otherwise inferred from the tool name + readonly
   // shape. The port may consume `ctx.reviewKind` to render a kind-typed UI; if
   // it doesn't, the field is ignored (byte-identical legacy port behavior).
-  const reviewKind = opts.reviewKindOverride ?? inferReviewKind(action.tool, action.isReadOnly)
-  const ctx: ReviewContext = {
-    sessionId: config.sessionId ?? "default",
-    turnId: String(config.run?.turn ?? 0),
-    priorDenials: opts.priorDenials ?? [],
-    configReviewer: opts.defaultReviewer ?? "user",
-    decidedAt: (opts.decidedAt ?? Date.now)(),
-    reviewKind,
-  }
+  const ctx = buildReviewContext(config, action, opts)
   const dec = await reviewAction(keyed, ctx, opts.reviewerPort)
-  const tag = reviewerTag(dec.reviewer)
 
   // ADR-0070 — validate the OPTIONAL richer verb against the reviewKind.
   // A port that returns a verb illegal for the kind (e.g. `allowlist_commands`
   // on an `edit` kind) MUST be rejected — this is a wiring/contract bug, not
   // a user-facing decision. Surfaced as a typed deny so a host learns about
   // the malformed verb without trusting it as an allow.
-  if (dec.verb !== undefined && !isDecisionLegalFor(reviewKind, dec.verb)) {
-    return deny(
-      call.id,
-      `Reviewer returned illegal verb '${dec.verb.verb}' for reviewKind='${reviewKind}'.`,
-      "reviewer_verb_illegal",
-    )
-  }
+  const illegalVerb = denyIllegalReviewerVerb(call, dec, ctx.reviewKind)
+  if (illegalVerb !== null) return illegalVerb
 
   if (isAllowed(dec.outcome)) {
     // ADR-0070 — record the actionKey in the allowlist_escalated cache so a
@@ -316,36 +379,7 @@ const reviewAndDecide = async (
 
   // Rule-ask escalations carry an `origin=rule` marker so the surface can tell
   // a denylist-rule escalation apart from an always-confirm-tier escalation.
-  const originSuffix = origin === "rule" ? " (origin=rule)" : ""
-
-  // ADR-0070 — `reject_and_tell` carries a steering message for the model.
-  // We synthesize a `deny_and_steer` ConfirmDecision and route it through the
-  // EXISTING {@link denyFromConfirm} seam so the gate has exactly ONE
-  // `steerInjection:` assignment site (regression-guarded by
-  // admissibility-deny-steer-hell.test.ts §G-1d).
-  if (dec.verb !== undefined && dec.verb.verb === "reject_and_tell") {
-    const baseContent =
-      dec.outcome === "user_aborted"
-        ? `User aborted: ${dec.rationale}${originSuffix}${HANDOFF_SUFFIX}`
-        : dec.outcome === "guardian_denied"
-          ? `Guardian denied: ${dec.rationale}${originSuffix}`
-          : `User declined: ${dec.rationale}${originSuffix}`
-    return denyFromConfirm(
-      call,
-      { decision: "deny_and_steer", steer: dec.verb.message },
-      baseContent,
-      tag,
-      config,
-    )
-  }
-
-  if (dec.outcome === "user_aborted") {
-    return deny(call.id, `User aborted: ${dec.rationale}${originSuffix}${HANDOFF_SUFFIX}`, tag)
-  }
-  if (dec.outcome === "guardian_denied") {
-    return deny(call.id, `Guardian denied: ${dec.rationale}${originSuffix}`, tag)
-  }
-  return deny(call.id, `User declined: ${dec.rationale}${originSuffix}`, tag)
+  return denyReviewedAction(call, config, dec, origin)
 }
 
 /** Emit pre_tool_use hook, returning a hook-denied result or null to proceed.
@@ -575,6 +609,7 @@ const runAlwaysConfirmBranch = async (
   try {
     decision = normalizeConfirm(await config.onConfirm(action))
   } catch (e) {
+    if (isSessionApprovalRequiredError(e)) throw e
     const message = errMessage(e)
     return deny(
       call.id,
@@ -636,6 +671,73 @@ const runToolProfileGate = async (
     return deny(call.id, `Permission denied: ${policy.reason}`, "tool-profile-denied")
   }
   return runAlwaysConfirmBranch(call, config, action, opts)
+}
+
+const denyIfModeBlocked = (
+  call: ToolUseBlock,
+  config: AdmissibilityGateConfig,
+  action: AdmissibilityAction,
+): DispatchResult | null => {
+  const effectiveMode = resolveAgentMode(config.mode, config.planMode)
+  if (!isMutatingToolBlockedInMode(effectiveMode, action)) return null
+  return deny(call.id, modeBlockReason(effectiveMode, call.name), `${effectiveMode}-blocked`)
+}
+
+const runPatternAutoPassGate = async (
+  call: ToolUseBlock,
+  config: AdmissibilityGateConfig,
+  action: AdmissibilityAction,
+  opts: AdmissibilityWaveAOptions,
+): Promise<DispatchResult | null | "fallthrough"> => {
+  if (config.permissionPatternStore === undefined) return "fallthrough"
+  const autoPassOpts: { allowDangerous?: boolean; decidedAt?: () => number } = {}
+  if (config.permissionAllowDangerous === true) autoPassOpts.allowDangerous = true
+  if (opts.decidedAt !== undefined) autoPassOpts.decidedAt = opts.decidedAt
+  const result = autoPassByPatterns(
+    config.permissionPatternStore,
+    { rememberPatterns: action.rememberPatterns, isMaybeDangerous: action.isMaybeDangerous },
+    autoPassOpts,
+  )
+  return result.kind === "auto_pass"
+    ? ((await runPreToolUseHook(call, config, opts)) ?? null)
+    : "fallthrough"
+}
+
+const runHitlReviewGate = async (
+  call: ToolUseBlock,
+  config: AdmissibilityGateConfig,
+  action: AdmissibilityAction,
+  opts: AdmissibilityWaveAOptions,
+): Promise<DispatchResult | null | "fallthrough"> => {
+  if (config.hitl?.enabled !== true) return "fallthrough"
+  if (opts.reviewerPort !== undefined) {
+    const { tier } = resolveHitlTier(config, call, action)
+    if (tier === "always-confirm") {
+      return await reviewAndDecide(call, config, action, opts, "hitl")
+    }
+  }
+  const hitlResult = await runHitlGate(call, config, action, opts)
+  if (hitlResult === "fallthrough") return "fallthrough"
+  return hitlResult ?? runPreToolUseHook(call, config, opts)
+}
+
+const runPermissionStackGate = async (
+  call: ToolUseBlock,
+  config: AdmissibilityGateConfig,
+  permission: PermissionContext,
+  action: AdmissibilityAction,
+  opts: AdmissibilityWaveAOptions,
+): Promise<DispatchResult | null | "fallthrough"> => {
+  const stackResult = runPermissionStack(
+    call,
+    config,
+    permission,
+    action,
+    opts.permissionStore !== undefined ? { store: opts.permissionStore } : {},
+  )
+  if (stackResult === "allow") return await runPreToolUseHook(call, config, opts)
+  if (stackResult !== null) return stackResult
+  return "fallthrough"
 }
 
 /**
@@ -849,6 +951,7 @@ const resolveAskBranch = async (
     try {
       decision = normalizeConfirm(await config.onConfirm(action))
     } catch (e) {
+      if (isSessionApprovalRequiredError(e)) throw e
       const message = errMessage(e)
       return deny(call.id, `Confirmation handler failed: ${message}`, "error")
     }
@@ -1073,10 +1176,8 @@ export const runAdmissibilityGate = async (
   // 1. Mode-posture block (plan/review/audit) — fires BEFORE any HITL or
   //    permission work so a blocked mutating tool never reaches the classifier
   //    or the confirm prompt. Read-only tools always pass through.
-  const effectiveMode = resolveAgentMode(config.mode, config.planMode)
-  if (isMutatingToolBlockedInMode(effectiveMode, action)) {
-    return deny(call.id, modeBlockReason(effectiveMode, call.name), `${effectiveMode}-blocked`)
-  }
+  const modeBlocked = denyIfModeBlocked(call, config, action)
+  if (modeBlocked !== null) return modeBlocked
 
   // 2. HARD_DENY security boundary — pulled AHEAD of the rule DSL + HITL/
   //    reviewer + pattern auto-pass when ANY allow-capable bypass is active
@@ -1108,23 +1209,8 @@ export const runAdmissibilityGate = async (
   //      Placed BEFORE the rules DSL so a user-granted pattern combo behaves
   //      like an explicit pre-approval — equivalent in spirit to a rules
   //      `allow` written by the operator. HARD_DENY (above) still wins.
-  if (config.permissionPatternStore !== undefined) {
-    const autoPassOpts: { allowDangerous?: boolean; decidedAt?: () => number } = {}
-    if (config.permissionAllowDangerous === true) autoPassOpts.allowDangerous = true
-    if (opts.decidedAt !== undefined) autoPassOpts.decidedAt = opts.decidedAt
-    const res = autoPassByPatterns(
-      config.permissionPatternStore,
-      { rememberPatterns: action.rememberPatterns, isMaybeDangerous: action.isMaybeDangerous },
-      autoPassOpts,
-    )
-    if (res.kind === "auto_pass") {
-      // Synthetic `auto_review/config_allowed` decision; we don't surface the
-      // ApprovalDecision via this seam (the gate's contract is DispatchResult),
-      // but the predicate constructed + validated one. Route through the hook
-      // so a `pre_tool_use` veto still applies.
-      return runPreToolUseHook(call, config, opts)
-    }
-  }
+  const patternResult = await runPatternAutoPassGate(call, config, action, opts)
+  if (patternResult !== "fallthrough") return patternResult
 
   // 3. Prefix-rule DSL gate (ADR-0031) — after mode + HARD_DENY. `allow` ⇒ admit,
   //    `deny` ⇒ terminal, `ask` ⇒ reviewer (or rule_ask deny if no port),
@@ -1139,39 +1225,14 @@ export const runAdmissibilityGate = async (
   //    HITL branch phrases the deny as a hand-off-required terminator, while
   //    the policy branch keeps the legacy "Permission denied" wording for
   //    classifier denials in auto mode.
-  if (config.hitl?.enabled === true) {
-    // Wave A (ADR-0029): a wired reviewerPort intercepts the always-confirm
-    // tier and escalates to reviewAction instead of the legacy onConfirm. Every
-    // other tier keeps its runHitlGate semantics (hand-off-required deny / none
-    // allow / pre-approval fallthrough), so unset reviewerPort ⇒ byte-identical.
-    if (opts.reviewerPort !== undefined) {
-      const { tier } = resolveHitlTier(config, call, action)
-      if (tier === "always-confirm") {
-        return reviewAndDecide(call, config, action, opts, "hitl")
-      }
-    }
-    const hitlResult = await runHitlGate(call, config, action, opts)
-    if (hitlResult !== "fallthrough") {
-      // null ⇒ HITL approved, skip mode policy and emit hook + proceed.
-      // non-null ⇒ short-circuit deny.
-      return hitlResult ?? runPreToolUseHook(call, config, opts)
-    }
-  }
+  const hitlResult = await runHitlReviewGate(call, config, action, opts)
+  if (hitlResult !== "fallthrough") return hitlResult
 
   // 3. Permission stack consultation (ADR-0046, opt-in via
   //    config.permissionStack.enabled). Highest-priority axis after HARD_DENY:
   //    post-denial override → per-thread → per-host → fall through.
-  const stackResult = runPermissionStack(
-    call,
-    config,
-    permission,
-    action,
-    opts.permissionStore !== undefined ? { store: opts.permissionStore } : {},
-  )
-  if (stackResult !== null && stackResult !== "allow") return stackResult
-  // `"allow"` from the stack ⇒ skip mode policy (the stack's allow is
-  //    authoritative) and emit the pre_tool_use hook last.
-  if (stackResult === "allow") return runPreToolUseHook(call, config, opts)
+  const stackResult = await runPermissionStackGate(call, config, permission, action, opts)
+  if (stackResult !== "fallthrough") return stackResult
 
   // 4. Permission policy (HARD_DENY + mode-driven decision; "auto" routes
   //    through the injected classifier).

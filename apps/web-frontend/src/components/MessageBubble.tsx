@@ -1,15 +1,10 @@
-import type { ReactNode } from "react"
-import ReactMarkdown from "react-markdown"
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter"
-// We use the bundled `tomorrow` Prism theme — keeps the bundle dep-free of
-// extra theme JSON. Future polish: dynamic-import a darker theme.
-import { tomorrow } from "react-syntax-highlighter/dist/esm/styles/prism"
-import remarkGfm from "remark-gfm"
+import { lazy, memo, Suspense } from "react"
 import { cx } from "../lib/classnames"
 import type { UiMessage } from "../types/protocol"
 
 export interface MessageBubbleProps {
   readonly message: UiMessage
+  readonly isStreaming?: boolean
 }
 
 const ROLE_STYLES: Record<UiMessage["role"], string> = {
@@ -26,11 +21,23 @@ const ROLE_LABEL: Record<UiMessage["role"], string> = {
   error: "error",
 }
 
-export const MessageBubble = ({ message }: MessageBubbleProps): JSX.Element => {
+const LazyMarkdownMessage = lazy(async () => {
+  const module = await import("./MarkdownMessage")
+  return { default: module.MarkdownMessage }
+})
+
+const MessageBubbleInner = ({
+  message,
+  isStreaming = false,
+}: MessageBubbleProps): JSX.Element => {
+  const hasImages = message.images !== undefined && message.images.length > 0
+  const isImageOnly = hasImages && message.text.length === 0
+
   return (
     <div
       className={cx(
-        "max-w-[80%] rounded-lg px-3 py-2 font-mono text-sm shadow-sm",
+        "rounded-lg px-3 py-2 font-mono text-sm shadow-sm",
+        isImageOnly ? "w-fit max-w-[80%]" : "max-w-[80%]",
         message.role === "user" ? "ml-auto" : "mr-auto",
         ROLE_STYLES[message.role],
       )}
@@ -41,68 +48,47 @@ export const MessageBubble = ({ message }: MessageBubbleProps): JSX.Element => {
           {formatTime(message.timestamp)}
         </time>
       </div>
-      <div className="markdown-body whitespace-pre-wrap break-words leading-relaxed">
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          components={{
-            code(props) {
-              const {
-                inline,
-                className,
-                children,
-                ...rest
-              } = props as {
-                inline?: boolean
-                className?: string
-                children?: ReactNode
-              }
-              const match = /language-(\w+)/.exec(className ?? "")
-              if (inline === true || match === null) {
-                return (
-                  <code
-                    className={cx(
-                      "rounded bg-neutral-950 px-1 py-0.5 text-xs",
-                      className,
-                    )}
-                    {...rest}
-                  >
-                    {children}
-                  </code>
-                )
-              }
-              return (
-                <SyntaxHighlighter
-                  language={match[1]}
-                  style={tomorrow}
-                  PreTag="div"
-                  customStyle={{
-                    background: "rgb(10 10 10)",
-                    margin: 0,
-                    borderRadius: "0.375rem",
-                    fontSize: "0.8rem",
-                  }}
-                >
-                  {String(children ?? "").replace(/\n$/, "")}
-                </SyntaxHighlighter>
-              )
-            },
-            a({ children, ...rest }) {
-              return (
-                <a
-                  {...rest}
-                  className="text-accent underline decoration-accent/40 hover:decoration-accent"
-                  target="_blank"
-                  rel="noreferrer noopener"
-                >
-                  {children}
-                </a>
-              )
-            },
-          }}
-        >
-          {message.text}
-        </ReactMarkdown>
-      </div>
+      {hasImages ? (
+        <div className="mb-2 flex flex-col gap-2">
+          {message.images.map((image, index) => (
+            <img
+              key={`${message.id}-image-${index.toString()}`}
+              src={`data:${image.mediaType};base64,${image.data}`}
+              alt={`${ROLE_LABEL[message.role]} attachment ${index + 1}`}
+              className="max-h-80 max-w-full rounded-md border border-neutral-700 object-contain"
+            />
+          ))}
+        </div>
+      ) : null}
+      {message.text.length > 0 ? (
+        isStreaming ? (
+          <PlainMessageText text={message.text} />
+        ) : (
+          <Suspense fallback={<PlainMessageText text={message.text} />}>
+            <LazyMarkdownMessage text={message.text} />
+          </Suspense>
+        )
+      ) : null}
+    </div>
+  )
+}
+
+export const areMessageBubblePropsEqual = (
+  prev: MessageBubbleProps,
+  next: MessageBubbleProps,
+): boolean =>
+  prev.isStreaming === next.isStreaming &&
+  isSameUiMessage(prev.message, next.message)
+
+export const MessageBubble = memo(
+  MessageBubbleInner,
+  areMessageBubblePropsEqual,
+)
+
+const PlainMessageText = ({ text }: { readonly text: string }): JSX.Element => {
+  return (
+    <div className="whitespace-pre-wrap break-words leading-relaxed">
+      {text}
     </div>
   )
 }
@@ -115,4 +101,27 @@ const formatTime = (iso: string): string => {
     minute: "2-digit",
     second: "2-digit",
   })
+}
+
+const isSameUiMessage = (left: UiMessage, right: UiMessage): boolean => {
+  if (left === right) return true
+  if (left.id !== right.id) return false
+  if (left.role !== right.role) return false
+  if (left.text !== right.text) return false
+  if (left.timestamp !== right.timestamp) return false
+  const leftImages = left.images
+  const rightImages = right.images
+  if (leftImages === rightImages) return true
+  if (leftImages === undefined || rightImages === undefined) return false
+  if (leftImages.length !== rightImages.length) return false
+  for (let index = 0; index < leftImages.length; index += 1) {
+    const leftImage = leftImages[index]
+    const rightImage = rightImages[index]
+    if (leftImage === rightImage) continue
+    if (leftImage === undefined || rightImage === undefined) return false
+    if (leftImage.type !== rightImage.type) return false
+    if (leftImage.mediaType !== rightImage.mediaType) return false
+    if (leftImage.data !== rightImage.data) return false
+  }
+  return true
 }

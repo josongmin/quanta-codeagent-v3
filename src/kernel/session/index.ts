@@ -9,6 +9,7 @@ export type {
   SessionHostSideConversationArgs,
   SessionHostSideConversationInheritance,
   SessionHostSideConversationResult,
+  SessionHostTurnEvent,
   SessionHostTurnResult,
 } from "./ports"
 export { systemClock } from "./ports"

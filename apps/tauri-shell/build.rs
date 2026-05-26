@@ -8,5 +8,9 @@
 // in `tauri.conf.json` so the source of truth stays declarative.
 
 fn main() {
+    println!("cargo:rerun-if-changed=tauri.conf.json");
+    println!("cargo:rerun-if-changed=capabilities");
+    println!("cargo:rerun-if-changed=icons");
+    println!("cargo:rerun-if-changed=../web-frontend/dist");
     tauri_build::build();
 }

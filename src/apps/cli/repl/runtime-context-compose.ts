@@ -4,10 +4,8 @@ import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoin
 import { createClassifierBackedAutoReview } from "@/agent/reviewer-port"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
 import type { PermissionStore, ToolAction } from "@/permission"
-import {
-  composeRuntimeBootstrapContext,
-  type RuntimeContext,
-} from "@/sdk/runtime"
+import type { PendingApprovalView } from "@/protocol/session"
+import { composeRuntimeBootstrapContext, type RuntimeContext } from "@/sdk/runtime"
 import { decisionEmitterFromStream, type StreamPort } from "@/stream"
 import { diffPreviewEnabled, renderActionDiff } from "../diff-preview"
 import type { IdleMonitor } from "../idle-monitor"
@@ -40,6 +38,18 @@ const buildCliOnConfirm =
     return accepted
   }
 
+const buildCliApprovalPrompt =
+  (deps: { readonly idleMonitor: IdleMonitor; readonly rejectCounter: RejectCounter }) =>
+  async (approval: PendingApprovalView): Promise<"approve" | "deny"> => {
+    process.stderr.write(`Approval required: ${approval.reason}\n`)
+    const ans = await askLine("Approve pending action? [y/N] ")
+    const accepted = ans.trim().toLowerCase() === "y"
+    if (accepted) deps.rejectCounter.recordAccept()
+    else deps.rejectCounter.recordDeny()
+    deps.idleMonitor.markActive()
+    return accepted ? "approve" : "deny"
+  }
+
 export interface ComposeCliRuntimeContextArgs {
   readonly boot: SessionBootstrapResult
   readonly turnStream: StreamPort
@@ -50,10 +60,15 @@ export interface ComposeCliRuntimeContextArgs {
 }
 
 export interface CliRuntimeContextBindings {
+  readonly approvalPrompt: (approval: PendingApprovalView) => Promise<"approve" | "deny">
   readonly runtimeContext: RuntimeContext
 }
 
 type RuntimeContextAdmissibility = ReturnType<RuntimeContext["admissibility"]>
+
+interface RuntimeConfirmSlot {
+  current: (action: ToolAction) => Promise<boolean>
+}
 
 const buildSessionMemoryAutoSummarizer = (
   boot: SessionBootstrapResult,
@@ -62,12 +77,27 @@ const buildSessionMemoryAutoSummarizer = (
 const buildBootstrapContextArgs = (args: {
   readonly boot: SessionBootstrapResult
   readonly turnStream: StreamPort
+  readonly confirmSlot: RuntimeConfirmSlot
   readonly onConfirm: (action: ToolAction) => Promise<boolean>
   readonly planExitPort: ReturnType<typeof createCliPlanExitPort>
   readonly userInputPort: ReturnType<typeof createCliUserInputPort>
   readonly summarizerLlm?: ReturnType<typeof buildSummarizerLlm>
+  readonly sandboxProfile: CliReviewerSandboxProfile
+  readonly permissionStore: PermissionStore | undefined
+  readonly autoReview: ReturnType<typeof createClassifierBackedAutoReview> | undefined
 }): Parameters<typeof composeRuntimeBootstrapContext>[0] => {
-  const { boot, turnStream, onConfirm, planExitPort, userInputPort, summarizerLlm } = args
+  const {
+    boot,
+    turnStream,
+    confirmSlot,
+    onConfirm,
+    planExitPort,
+    userInputPort,
+    summarizerLlm,
+    sandboxProfile,
+    permissionStore,
+    autoReview,
+  } = args
   const shellSnapshot = buildShellSnapshotConfig()
   return {
     boot,
@@ -75,10 +105,20 @@ const buildBootstrapContextArgs = (args: {
     onConfirm,
     includeSearchPipeline: true,
     overlay: {
+      approvalProtocol: { confirmSlot },
       ...(summarizerLlm !== undefined ? { summarizerLlm } : {}),
       planExitPort,
       userInputPort,
       decisionEmitter: decisionEmitterFromStream(turnStream),
+      admissibilityBuilder: ({ materializeReviewerAgent }) =>
+        buildAdmissibility({
+          boot,
+          onConfirm,
+          sandboxProfile,
+          permissionStore,
+          autoReview,
+          materializeReviewerAgent: () => materializeReviewerAgent(boot),
+        }),
       ...(shellSnapshot !== undefined ? { shellSnapshot } : {}),
     },
   }
@@ -90,12 +130,15 @@ const buildAdmissibility = (args: {
   readonly sandboxProfile: CliReviewerSandboxProfile
   readonly permissionStore: PermissionStore | undefined
   readonly autoReview: ReturnType<typeof createClassifierBackedAutoReview> | undefined
-  readonly runtimeContext: RuntimeContext
+  readonly materializeReviewerAgent: () => ReturnType<
+    SessionBootstrapResult["materializeReviewerAgent"]
+  >
 }): RuntimeContextAdmissibility => {
-  const { boot, onConfirm, sandboxProfile, permissionStore, autoReview, runtimeContext } = args
+  const { boot, onConfirm, sandboxProfile, permissionStore, autoReview, materializeReviewerAgent } =
+    args
   const userReviewerPort = createOnConfirmReviewerPort({ onConfirm })
   const threadPermission = permissionStore?.getThread(boot.sessionId)
-  const reviewerAgent = runtimeContext.materializeReviewerAgent(boot)
+  const reviewerAgent = materializeReviewerAgent()
   const guardianReview =
     reviewerAgent !== undefined
       ? boot.createSubagentBackedGuardianReview({
@@ -128,10 +171,15 @@ export const composeCliRuntimeContext = async (
   args: ComposeCliRuntimeContextArgs,
 ): Promise<CliRuntimeContextBindings> => {
   const { boot, turnStream, loadPermissionStore, sandboxProfile } = args
-  const onConfirm = buildCliOnConfirm({
+  const surfaceOnConfirm = buildCliOnConfirm({
     idleMonitor: boot.idleMonitor as IdleMonitor,
     rejectCounter: boot.rejectCounter as RejectCounter,
   })
+  const confirmSlot: RuntimeConfirmSlot = {
+    current: surfaceOnConfirm,
+  }
+  const onConfirm = async (action: ToolAction): Promise<boolean> =>
+    await confirmSlot.current(action)
   const autoReviewUserPort = createOnConfirmReviewerPort({ onConfirm })
   const autoReview =
     boot.permission.classify !== undefined
@@ -148,10 +196,14 @@ export const composeCliRuntimeContext = async (
     ...buildBootstrapContextArgs({
       boot,
       turnStream,
+      confirmSlot,
       onConfirm,
       planExitPort,
       userInputPort,
       ...(summarizerLlm !== undefined ? { summarizerLlm } : {}),
+      sandboxProfile,
+      permissionStore,
+      autoReview,
     }),
     ...(args.convStore !== undefined
       ? {
@@ -168,14 +220,11 @@ export const composeCliRuntimeContext = async (
       logWarn: (msg: string) => process.stderr.write(`[memory-auto] ${msg}\n`),
     },
   })
-  const admissibility = buildAdmissibility({
-    boot,
-    onConfirm,
-    sandboxProfile,
-    permissionStore,
-    autoReview,
+  return {
+    approvalPrompt: buildCliApprovalPrompt({
+      idleMonitor: boot.idleMonitor as IdleMonitor,
+      rejectCounter: boot.rejectCounter as RejectCounter,
+    }),
     runtimeContext,
-  })
-  if (admissibility !== undefined) runtimeContext.withAdmissibility(admissibility)
-  return { runtimeContext }
+  }
 }

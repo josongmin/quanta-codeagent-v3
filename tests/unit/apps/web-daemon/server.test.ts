@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { main } from "@/apps/web-daemon"
 import type { WebDaemonHandle } from "@/apps/web-daemon/types"
 import type { SessionTransportMessage } from "@/ipc/session"
@@ -56,6 +59,7 @@ describe("web daemon end-to-end", () => {
     // RuntimeSession before we issue the connect.
     await new Promise((resolve) => setTimeout(resolve, 25))
     expect(bag.sessionsCreated).toBe(1)
+    expect(bag.attachTransportCalls).toBe(1)
 
     // The stub session id is deterministic — see fixture.ts.
     const connect: SessionTransportMessage = {
@@ -92,8 +96,174 @@ describe("web daemon end-to-end", () => {
 
     const rejected = await waitForMessage(ws, (m) => m.kind === "rejected")
     if (rejected.kind !== "rejected") throw new Error("type narrow")
+    expect(rejected.sessionId).toBe("stub-session-1")
     expect(rejected.target).toBe("connect")
     expect(rejected.reason).toBe("session_id_mismatch")
+
+    ws.close()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  })
+
+  test("empty-session bootstrap connect is rejected with the canonical session id", async () => {
+    const { factory } = createStubRuntimeFactory()
+    const handle = await main({ port: 0, bind: "127.0.0.1", runtimeFactory: factory })
+    handles.push(handle)
+
+    const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
+    await waitForOpen(ws)
+    await new Promise((resolve) => setTimeout(resolve, 25))
+
+    const connect: SessionTransportMessage = {
+      kind: "connect",
+      sessionId: "",
+    }
+    ws.send(encodeSessionTransportMessage(connect))
+
+    const rejected = await waitForMessage(
+      ws,
+      (m) => m.kind === "rejected" && m.target === "connect",
+    )
+    if (rejected.kind !== "rejected") throw new Error("type narrow")
+    expect(rejected.sessionId).toBe("stub-session-1")
+    expect(rejected.target).toBe("connect")
+    expect(rejected.reason).toBe("session_id_mismatch")
+
+    ws.close()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  })
+
+  test("back-to-back input.append + turn.run is serialized through the runtime transport", async () => {
+    const { factory } = createStubRuntimeFactory()
+    const handle = await main({ port: 0, bind: "127.0.0.1", runtimeFactory: factory })
+    handles.push(handle)
+
+    const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
+    await waitForOpen(ws)
+    await new Promise((resolve) => setTimeout(resolve, 25))
+
+    ws.send(
+      encodeSessionTransportMessage({
+        kind: "connect",
+        sessionId: "stub-session-1",
+      }),
+    )
+    await waitForMessage(ws, (m) => m.kind === "snapshot")
+
+    const issuedAt = new Date().toISOString()
+    ws.send(
+      encodeSessionTransportMessage({
+        kind: "command",
+        command: {
+          sessionId: "stub-session-1",
+          commandId: "cmd-append",
+          issuedAt,
+          type: "input.append",
+          text: "hello",
+        },
+      }),
+    )
+    ws.send(
+      encodeSessionTransportMessage({
+        kind: "command",
+        command: {
+          sessionId: "stub-session-1",
+          commandId: "cmd-run",
+          issuedAt,
+          type: "turn.run",
+        },
+      }),
+    )
+
+    const started = await waitForMessage(
+      ws,
+      (m) => m.kind === "event" && m.event.type === "turn.started",
+      2000,
+    )
+    expect(started.kind).toBe("event")
+    if (started.kind !== "event") throw new Error("type narrow")
+    expect(started.event.type).toBe("turn.started")
+    if (started.event.type !== "turn.started") throw new Error("type narrow")
+    expect(started.event.prompt).toBe("hello")
+
+    ws.close()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  })
+
+  test("turn.run streams assistant delta events before completion", async () => {
+    const { factory } = createStubRuntimeFactory()
+    const handle = await main({ port: 0, bind: "127.0.0.1", runtimeFactory: factory })
+    handles.push(handle)
+
+    const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/`)
+    await waitForOpen(ws)
+    await new Promise((resolve) => setTimeout(resolve, 25))
+
+    ws.send(
+      encodeSessionTransportMessage({
+        kind: "connect",
+        sessionId: "stub-session-1",
+      }),
+    )
+    await waitForMessage(ws, (m) => m.kind === "snapshot")
+
+    const issuedAt = new Date().toISOString()
+    ws.send(
+      encodeSessionTransportMessage({
+        kind: "command",
+        command: {
+          sessionId: "stub-session-1",
+          commandId: "cmd-append",
+          issuedAt,
+          type: "input.append",
+          text: "hello",
+        },
+      }),
+    )
+    ws.send(
+      encodeSessionTransportMessage({
+        kind: "command",
+        command: {
+          sessionId: "stub-session-1",
+          commandId: "cmd-run",
+          issuedAt,
+          type: "turn.run",
+        },
+      }),
+    )
+
+    const delta = await waitForMessage(
+      ws,
+      (m) => m.kind === "event" && m.event.type === "turn.output.delta",
+      2000,
+    )
+    if (delta.kind !== "event" || delta.event.type !== "turn.output.delta") {
+      throw new Error("type narrow")
+    }
+    expect(delta.event.delta.length).toBeGreaterThan(0)
+
+    const completed = await waitForMessage(
+      ws,
+      (m) => m.kind === "event" && m.event.type === "turn.completed",
+      2000,
+    )
+    if (completed.kind !== "event" || completed.event.type !== "turn.completed") {
+      throw new Error("type narrow")
+    }
+    expect(completed.event.assistantText).toBe("stub: hello")
+
+    const finalState = await waitForMessage(
+      ws,
+      (m) =>
+        m.kind === "event" &&
+        m.event.type === "session.state.updated" &&
+        m.event.state.status === "idle" &&
+        m.event.state.lastAssistantText === "stub: hello",
+      2000,
+    )
+    if (finalState.kind !== "event" || finalState.event.type !== "session.state.updated") {
+      throw new Error("type narrow")
+    }
+    expect(finalState.event.state.streamingAssistantText).toBeUndefined()
 
     ws.close()
     await new Promise((resolve) => setTimeout(resolve, 50))
@@ -122,6 +292,48 @@ describe("web daemon end-to-end", () => {
     const r3 = await fetch(`http://127.0.0.1:${handle.port}/health`)
     const body3 = (await r3.json()) as { status: string; sessions: number; uptime_ms: number }
     expect(body3.sessions).toBe(0)
+  })
+
+  test("/threads + /threads/:id/events expose persisted threads for transcript hydration", async () => {
+    // Isolate the SQLite file to a tmp dir so the test doesn't read/write the
+    // user's real `~/.quanta/web-daemon/threads.db`.
+    const tmpDbDir = mkdtempSync(join(tmpdir(), "quanta-web-db-"))
+    const prevDir = process.env.QUANTA_WEB_DB_DIR
+    process.env.QUANTA_WEB_DB_DIR = tmpDbDir
+    try {
+      const { factory } = createStubRuntimeFactory()
+      const handle = await main({ port: 0, bind: "127.0.0.1", runtimeFactory: factory })
+      handles.push(handle)
+
+      const r1 = await fetch(`http://127.0.0.1:${handle.port}/threads`)
+      expect(r1.status).toBe(200)
+      const body1 = (await r1.json()) as {
+        threads: Array<{ id: string; eventCount: number }>
+      }
+      expect(body1.threads.length).toBeGreaterThanOrEqual(1)
+      expect(body1.threads.some((t) => t.id === "stub-session-1")).toBe(true)
+
+      const eventsUrl = `http://127.0.0.1:${handle.port}/threads/${encodeURIComponent("stub-session-1")}/events`
+      const r2 = await fetch(eventsUrl)
+      expect(r2.status).toBe(200)
+      const body2 = (await r2.json()) as { threadId: string; events: unknown[] }
+      expect(body2.threadId).toBe("stub-session-1")
+      expect(Array.isArray(body2.events)).toBe(true)
+
+      // Unknown thread id returns 200 + empty list (the store is forgiving;
+      // the client treats no-events as nothing-to-replay).
+      const r3 = await fetch(`http://127.0.0.1:${handle.port}/threads/no-such-thread/events`)
+      expect(r3.status).toBe(200)
+      const body3 = (await r3.json()) as { events: unknown[] }
+      expect(body3.events).toEqual([])
+    } finally {
+      if (prevDir === undefined) {
+        delete process.env.QUANTA_WEB_DB_DIR
+      } else {
+        process.env.QUANTA_WEB_DB_DIR = prevDir
+      }
+      rmSync(tmpDbDir, { recursive: true, force: true })
+    }
   })
 
   test("handle.stop() closes the runtime and the per-session count goes back to 0", async () => {

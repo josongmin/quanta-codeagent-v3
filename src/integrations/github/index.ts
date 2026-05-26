@@ -9,9 +9,12 @@
  *     markers. Boot-time refuses to wire without a RedactPort.
  *   - `loadPrContext` pulls 4-shot gh context for the agent's first turn.
  *
- * Tier-1 (host-decided webhook, NOT_IMPLEMENTED):
- *   - `createWebhookEventSource` is a scaffold; `verifyHubSignature256` is
- *     the HMAC verifier so the transport adapter can rely on a tested contract.
+ * Tier-1 (host-decided webhook, live):
+ *   - `createWebhookEventSource` boots a webhook-driven trigger source behind
+ *     a transport seam (`WebhookTransportPort`). Two production adapters
+ *     ship in `webhook-transports.ts`: `createBunWebhookTransport` (preferred
+ *     under Bun) and `createNodeWebhookTransport` (node:http fallback).
+ *   - `verifyHubSignature256` exposes the HMAC contract for adapter authors.
  */
 
 export type { NormalizeOpts, ParseGhEventOpts } from "./event-payload"
@@ -50,10 +53,13 @@ export type {
 } from "./types"
 export { ALL_GH_EVENT_KINDS, asIdempotencyKey } from "./types"
 export type {
+  WebhookEventSource,
   WebhookEventSourceOpts,
   WebhookHandle,
   WebhookRequest,
   WebhookResponse,
   WebhookTransportPort,
 } from "./webhook-server"
-export { createWebhookEventSource } from "./webhook-server"
+export { createWebhookEventSource, MAX_REQUEST_BYTES } from "./webhook-server"
+export type { BunWebhookTransportOpts, NodeWebhookTransportOpts } from "./webhook-transports"
+export { createBunWebhookTransport, createNodeWebhookTransport } from "./webhook-transports"

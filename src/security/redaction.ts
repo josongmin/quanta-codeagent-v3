@@ -105,10 +105,13 @@ const patterns: ReadonlyArray<Pattern> = [
     kind: "gcp_service_account_key",
     regex: /\{[^{}]*?"type"\s*:\s*"service_account"[^{}]*?"private_key"\s*:\s*"[^"]+"[^{}]*?\}/g,
   },
-  // AWS access key id — exact-shape `AKIA` / `ASIA` / `AROA` / `AIDA` + 16 base32.
+  // AWS access key id — exact-shape `AKIA` / `ASIA` / `AROA` / `AIDA` + 16
+  // base32. Left boundary dropped so EMBEDDED form (`xxxAKIA…`) still
+  // matches — the 20-char distinctive prefix makes false-positive risk
+  // negligible. Right boundary kept for clean termination.
   {
     kind: "aws_access_key_id",
-    regex: /\b(?:AKIA|ASIA|AROA|AIDA)[0-9A-Z]{16}\b/g,
+    regex: /(?:AKIA|ASIA|AROA|AIDA)[0-9A-Z]{16}\b/g,
   },
   // AWS secret access key — `aws_secret_access_key = <40 char base64>` shape.
   // Anchor on the assignment so a 40-char identifier in normal prose doesn't trip.
@@ -116,26 +119,28 @@ const patterns: ReadonlyArray<Pattern> = [
     kind: "aws_secret_access_key_assignment",
     regex: /aws_secret_access_key\s*=\s*[A-Za-z0-9/+=]{40}/gi,
   },
-  // GitHub PAT — classic prefixes.
+  // GitHub PAT — classic prefixes. Left boundary dropped (distinctive prefix
+  // + underscore make false-positive risk negligible).
   {
     kind: "github_pat_classic",
-    regex: /\b(?:ghp|gho|ghs|ghr|ghu)_[A-Za-z0-9]{36,255}\b/g,
+    regex: /(?:ghp|gho|ghs|ghr|ghu)_[A-Za-z0-9]{36,255}\b/g,
   },
   // GitHub PAT — fine-grained.
   {
     kind: "github_pat_fine_grained",
-    regex: /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
+    regex: /github_pat_[A-Za-z0-9_]{20,}\b/g,
   },
-  // Google API key — `AIza` + 35 url-safe base64 chars.
+  // Google API key — `AIza` + 35 url-safe base64 chars. Distinctive prefix.
   {
     kind: "google_api_key",
-    regex: /\bAIza[0-9A-Za-z\-_]{35}\b/g,
+    regex: /AIza[0-9A-Za-z\-_]{35}\b/g,
   },
   // Anthropic API key — `sk-ant-` prefix. Match BEFORE openai_api_key so
   // `sk-ant-…` is classified as anthropic rather than the generic `sk-` shape.
+  // Left boundary dropped (`sk-ant-` is distinctive enough).
   {
     kind: "anthropic_api_key",
-    regex: /\bsk-ant-[A-Za-z0-9\-_]{20,}\b/g,
+    regex: /sk-ant-[A-Za-z0-9\-_]{20,}\b/g,
   },
   // Stripe live / test secret key.
   {
@@ -144,10 +149,11 @@ const patterns: ReadonlyArray<Pattern> = [
   },
   // OpenAI proj-key (2024+) — `sk-proj-` followed by a long mixed-class body
   // containing `_` / `-`. Order matters: matched BEFORE the classic shape so
-  // a `sk-proj-…` does not get sliced at the first `-`.
+  // a `sk-proj-…` does not get sliced at the first `-`. Left boundary dropped
+  // (`sk-proj-` is distinctive enough).
   {
     kind: "openai_api_key",
-    regex: /\bsk-proj-[A-Za-z0-9_-]{20,}\b/g,
+    regex: /sk-proj-[A-Za-z0-9_-]{20,}\b/g,
   },
   // OpenAI classic API key — `sk-` followed by ≥32 alphanumeric (avoid clash
   // with anthropic above by negative-lookahead on `ant-`; avoid stripe by

@@ -22,9 +22,9 @@ import {
   prepareReproTest,
   REPRO_FILE_NAME,
   REPRO_HINT_MESSAGE,
-  type RunInstanceDeps,
   readKnobValue,
   resolveBenchKnobs,
+  type RunInstanceDeps as SharedRunInstanceDeps,
   UsageTap,
 } from "@/runner/batch/eval/driver"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
@@ -49,13 +49,7 @@ import { cleanupSandbox, copyRepo, createSandbox } from "./sandbox"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
 import { verify } from "./verdict"
 
-export type {
-  BenchKnobState,
-  IssueHintMode,
-  PrepareIssueHintDeps,
-  PrepareReproTestDeps,
-  RunInstanceDeps,
-}
+export type { BenchKnobState, IssueHintMode, PrepareIssueHintDeps, PrepareReproTestDeps }
 export {
   applyBenchKnobs,
   BenchObserver,
@@ -74,6 +68,10 @@ export {
   readKnobValue,
   resolveBenchKnobs,
   UsageTap,
+}
+
+export interface RunInstanceDeps extends SharedRunInstanceDeps {
+  readonly runtimeFactory?: typeof createRuntime
 }
 
 const capabilityManifestForConfig = (config: AgentConfig): CapabilityManifest => ({
@@ -143,11 +141,18 @@ const lastTerminalTurnEventOf = (
   return undefined
 }
 
-const runAgentViaSdk = async (config: AgentConfig): Promise<AgentOutcome> => {
+const runAgentViaSdk = async (
+  config: AgentConfig,
+  runtimeFactory: typeof createRuntime = createRuntime,
+): Promise<AgentOutcome> => {
   const hostSession = createBenchSessionHost(config)
-  const runtime = await createRuntime({
+  const runtimeOptions = {
     host: createSingleSessionRuntimeHost(() => hostSession),
-  })
+  } satisfies Parameters<typeof createRuntime>[0]
+  const runtime =
+    runtimeFactory === createRuntime
+      ? await createRuntime(runtimeOptions)
+      : await runtimeFactory(runtimeOptions)
   let session: Awaited<ReturnType<typeof runtime.createSession>> | undefined
   let unsubscribe: (() => void) | undefined
   try {
@@ -239,6 +244,7 @@ const runAgentOnce = async (
   const tap = new LastVerifyCmdTap(w.stream)
   const outcome = await runAgentViaSdk(
     buildRunnerConfig(instance, deps, sandbox, signal, tap, seedMsg, precomputedHint, reproHint),
+    deps.runtimeFactory,
   )
   const patch = await gitStageAndDiffCached(sandbox, timeoutMs)
   return {
@@ -275,6 +281,7 @@ const runAgentPhase = async (
           precomputedHint,
           reproHint,
         ),
+        deps.runtimeFactory,
       )
       turns = outcome.turns
     },

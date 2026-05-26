@@ -3,7 +3,11 @@ import { startAutomationEngineTicker } from "@/agent/loop-helpers"
 import type { Message } from "@/llm"
 import { injectSimulatedTurn, type LastTurnOutcome, REACTOR_ENV_FLAG } from "@/reactor"
 import { assembleAutomation } from "@/scheduler/runtime-wire"
-import type { RuntimeSideConversationArgs, RuntimeSideConversationResult } from "@/sdk/runtime"
+import type {
+  RuntimeFacadeComposeOptions,
+  RuntimeSideConversationArgs,
+  RuntimeSideConversationResult,
+} from "@/sdk/runtime"
 import { logger } from "@/shared"
 import type { PlaybookPlanQueueSink } from "@/skill/playbook"
 import { startReactorWatchBridge } from "../reactor-watch-bridge"
@@ -78,6 +82,11 @@ export interface RunSessionLoopDeps {
   readonly registerSideConversationStart?: (
     fn: ((args: RuntimeSideConversationArgs) => Promise<RuntimeSideConversationResult>) | undefined,
   ) => void
+  /** Constructor-time runtime composition payload threaded into
+   *  `runtimeContext.createRuntimeFacade(...)`. Keeps the public SDK surface
+   *  immutable after bootstrap while still letting the CLI supply
+   *  session-owned adapters. */
+  readonly runtimeFacadeCompose?: RuntimeFacadeComposeOptions
   /** ADR-0293 — playbook-trigger seam the loop attaches to once it owns the
    *  `ExternalPromptQueue` (the queue is the sink target). Absent ⇒ no
    *  trigger wire is constructed (default-OFF byte-identical). */
@@ -137,6 +146,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     convCheckpointWire,
     registerReplaceMessages,
     registerSideConversationStart,
+    runtimeFacadeCompose,
     playbookSeam,
     playbookCliFlag,
   } = deps
@@ -177,11 +187,15 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
       },
     ) ??
     undefined
-  if (liveAutomationSlot !== undefined) {
-    runtimeContext.ensureAutomationEngine(liveAutomationSlot)
-  }
   const activeIdentityModeState = runtimeContext.identityModeState()
   const activeToolProfileState = runtimeContext.toolProfileState()
+  const runtimeCompose =
+    liveAutomationSlot !== undefined
+      ? {
+          ...(runtimeFacadeCompose ?? {}),
+          automationEngine: liveAutomationSlot,
+        }
+      : runtimeFacadeCompose
 
   const runtimeFacade = await runtimeContext.createRuntimeFacade({
     boot: {
@@ -195,6 +209,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     idMeta,
     shutdown: async () => undefined,
     mcpClients: setup.mcpClients as Array<{ stop: () => Promise<void> }>,
+    ...(runtimeCompose !== undefined ? { compose: runtimeCompose } : {}),
   })
   const session = await runtimeFacade.createSession({
     cwd: setup.cwd,
@@ -264,6 +279,40 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
   }
   attachPlaybookHandle()
 
+  type SessionTurnPayload = NonNullable<Awaited<ReturnType<typeof session.turn.run>>["turn"]>
+
+  const requireTurnPayload = (
+    result: Awaited<ReturnType<typeof session.turn.run>>,
+  ): SessionTurnPayload => {
+    if (result.turn === undefined) {
+      throw new Error("runtime session turn completed without a turn payload")
+    }
+    return result.turn
+  }
+
+  const completeRuntimeTurn = (
+    turn: SessionTurnPayload,
+  ): {
+    readonly messages: readonly Message[]
+    readonly outcomeReason?: AgentOutcome["reason"]
+  } => ({
+    messages: turn.messages,
+    ...(turn.outcome.reason !== undefined ? { outcomeReason: turn.outcome.reason } : {}),
+  })
+
+  const resolvePendingApproval = async (
+    approval: NonNullable<SessionTurnPayload["approvalRequest"]>,
+    turnSignal: AbortSignal,
+  ): Promise<void> => {
+    const decision = await setup.approvalPrompt(approval)
+    await session.approval.respond(approval.approvalId, decision, undefined, {
+      signal: turnSignal,
+    })
+    if (decision === "deny") {
+      throw new Error(`runtime session approval denied (${approval.reason})`)
+    }
+  }
+
   const runSessionTurn = async (args: {
     readonly text: string
     readonly images?: readonly import("@/llm").ImageBlock[]
@@ -277,20 +326,12 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     await session.input.append(args.text, images.length > 0 ? { images } : undefined, {
       signal: args.turnSignal,
     })
-    const result = await session.turn.run(undefined, { signal: args.turnSignal })
-    if (result.turn === undefined) {
-      throw new Error("runtime session turn completed without a turn payload")
-    }
-    if (result.turn.approvalRequest !== undefined) {
-      throw new Error(
-        `runtime session approval flow is not yet wired in CLI surface (approvalId=${result.turn.approvalRequest.approvalId})`,
+    for (;;) {
+      const turn = requireTurnPayload(
+        await session.turn.run(undefined, { signal: args.turnSignal }),
       )
-    }
-    const messages = result.turn.messages
-    const outcomeReason = result.turn.outcome.reason
-    return {
-      messages,
-      ...(outcomeReason !== undefined ? { outcomeReason } : {}),
+      if (turn.approvalRequest === undefined) return completeRuntimeTurn(turn)
+      await resolvePendingApproval(turn.approvalRequest, args.turnSignal)
     }
   }
 

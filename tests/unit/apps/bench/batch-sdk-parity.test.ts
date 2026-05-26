@@ -1,12 +1,15 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
+import { __resetRuntimeConfig } from "@/shared/runtime-config"
 import { runInstance } from "../../../../src/apps/bench/eval/index"
 import type { Instance } from "../../../../src/apps/bench/types"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..", "..")
+const originalBenchHome = process.env.QUANTA_BENCH_HOME
+const testBenchHome = mkdtempSync(join(tmpdir(), "batch-sdk-home-"))
 
 class NoopLLM implements LLMPort {
   async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
@@ -14,6 +17,18 @@ class NoopLLM implements LLMPort {
     yield { type: "message_stop", stop_reason: "end_turn" }
   }
 }
+
+beforeEach(() => {
+  process.env.QUANTA_BENCH_HOME = testBenchHome
+  __resetRuntimeConfig()
+})
+
+afterAll(() => {
+  if (originalBenchHome === undefined) delete process.env.QUANTA_BENCH_HOME
+  else process.env.QUANTA_BENCH_HOME = originalBenchHome
+  __resetRuntimeConfig()
+  rmSync(testBenchHome, { recursive: true, force: true })
+})
 
 describe("T5 batch SDK parity", () => {
   test("batch driver consumes the sdk runtime and keeps direct bootstrap out", () => {

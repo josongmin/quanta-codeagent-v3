@@ -51,7 +51,7 @@ const PATTERNS: ReadonlyArray<Pattern> = [
   // AWS access key id — exact AKIA/ASIA/AROA/AIDA + 16 base32 chars.
   {
     kind: "aws-access-key",
-    regex: /\b(?:AKIA|ASIA|AROA|AIDA)[0-9A-Z]{16}\b/g,
+    regex: /(?:AKIA|ASIA|AROA|AIDA)[0-9A-Z]{16}\b/g,
   },
   // AWS secret access key — 40-char base64 anchored on the documented
   // assignment shape (`aws_secret_access_key = …`). Anchoring on the assignment
@@ -64,18 +64,18 @@ const PATTERNS: ReadonlyArray<Pattern> = [
   // GitHub tokens — classic + fine-grained PAT prefixes.
   {
     kind: "github-token",
-    regex: /\b(?:ghp|gho|ghs|ghr|ghu)_[A-Za-z0-9]{36,255}\b/g,
+    regex: /(?:ghp|gho|ghs|ghr|ghu)_[A-Za-z0-9]{36,255}\b/g,
   },
   // Google API key — `AIza` + 35 url-safe base64.
   {
     kind: "google-api-key",
-    regex: /\bAIza[0-9A-Za-z\-_]{35}\b/g,
+    regex: /AIza[0-9A-Za-z\-_]{35}\b/g,
   },
   // Anthropic API key — `sk-ant-` prefix. MUST come before openai (which is
   // just `sk-`) so the more-specific shape wins.
   {
     kind: "anthropic-api-key",
-    regex: /\bsk-ant-[A-Za-z0-9\-_]{20,}\b/g,
+    regex: /sk-ant-[A-Za-z0-9\-_]{20,}\b/g,
   },
   // Stripe live/test secret key (also restricted/test variants).
   {
@@ -87,7 +87,7 @@ const PATTERNS: ReadonlyArray<Pattern> = [
   // regex's `[A-Za-z0-9]` class never slices the proj-key at its first `-`.
   {
     kind: "openai-api-key",
-    regex: /\bsk-proj-[A-Za-z0-9_-]{20,}\b/g,
+    regex: /sk-proj-[A-Za-z0-9_-]{20,}\b/g,
   },
   // OpenAI classic API key — `sk-` followed by ≥32 alphanumerics. Negative-
   // lookahead on `ant-` / `proj-` / `live_` / `test_` so anthropic, the

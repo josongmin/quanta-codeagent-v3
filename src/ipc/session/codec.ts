@@ -44,6 +44,15 @@ const decodeString = (value: unknown, issue: string): string => {
   return value
 }
 
+const decodeConnectSessionId = (value: unknown): string => {
+  if (typeof value !== "string") {
+    throw new SessionProtocolValidationError("bad_transport_session_id")
+  }
+  // Empty string is the bootstrap discovery sentinel; the bridge still owns
+  // canonical session validation and will reject mismatches with the real id.
+  return value
+}
+
 const decodeOptionalNumber = (value: unknown, issue: string): number | undefined => {
   if (value === undefined) return undefined
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -68,7 +77,7 @@ const decodeConnectMessage = (raw: string): SessionTransportMessage => {
   )
   return {
     kind: "connect",
-    sessionId: decodeString(envelope.sessionId, "bad_transport_session_id"),
+    sessionId: decodeConnectSessionId(envelope.sessionId),
     ...(resumeFromSeq !== undefined ? { resumeFromSeq } : {}),
   }
 }

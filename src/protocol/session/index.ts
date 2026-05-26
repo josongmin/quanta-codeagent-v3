@@ -40,7 +40,11 @@ export type {
   SessionEventEnvelope,
   SessionEventType,
   SessionStateUpdatedEvent,
+  TokenUsage,
+  ToolCompletedEvent,
+  ToolInvokedEvent,
   TurnCompletedEvent,
+  TurnOutputDeltaEvent,
   TurnFailedEvent,
   TurnStartedEvent,
 } from "./events"

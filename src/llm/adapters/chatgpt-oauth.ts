@@ -229,6 +229,19 @@ export class ChatGPTOAuthAdapter implements LLMPort {
 
     const body = buildResponsesBody(input, effectiveModel)
 
+    // DEBUG: dump request body shape (truncate image data URLs) so we can
+    // see whether `input_image` parts are reaching the wire. Remove once
+    // vision is verified end-to-end.
+    if (process.env.QUANTA_DEBUG_OAUTH === "1") {
+      const debugJson = JSON.stringify(body, (_k, v) => {
+        if (typeof v === "string" && v.startsWith("data:") && v.length > 80) {
+          return `${v.slice(0, 60)}…[${v.length} chars]`
+        }
+        return v
+      })
+      process.stderr.write(`[oauth body] ${debugJson}\n`)
+    }
+
     // Stamp the actual provider wire boundary after token/catalog preflight.
     input.turnTimingCapture?.markRequestSent()
     const res = await this.fetchImpl(url, {
@@ -368,9 +381,17 @@ const messageToItems = (m: Message): ResponsesInputItem[] => {
         call_id: b.tool_use_id,
         output: b.content,
       })
+    } else if (b.type === "image" && m.role === "user") {
+      // Vision input — Responses API `input_image` part. `detail: "high"`
+      // forces the model to actually attend to the image (some configs
+      // treat absent `detail` as "skip" on large attachments).
+      textParts.push({
+        type: "input_image",
+        image_url: `data:${b.mediaType};base64,${b.data}`,
+      } as unknown as ResponsesInputItem)
     }
-    // image / thinking blocks: not surfaced on the Responses input shape
-    // here — Phase-2.1 follow-up.
+    // thinking blocks: not surfaced on the Responses input shape — Phase-2.1
+    // follow-up.
   }
   if (textParts.length > 0) {
     items.push({ type: "message", role: m.role, content: textParts })
@@ -403,6 +424,34 @@ export const buildResponsesBody = (input: StreamInput, model: string): Record<st
   // `role:"system"` message (probe-verified 400 otherwise). Empty caller
   // system ⇒ minimal default so the request still composes.
   const instructions = sys !== "" ? sys : DEFAULT_INSTRUCTIONS
+  // Service-tier knob — matches ChatGPT's "Standard / Fast" toggle. Codex
+  // sends this same field on `/codex/responses`. Values:
+  //   auto      — let backend pick (default)
+  //   default   — standard tier
+  //   flex      — slower, cheaper queue
+  //   priority  — ChatGPT's "Fast" mode (1.5× speed, more usage)
+  //   scale     — high-throughput tier
+  // Set via `QUANTA_SERVICE_TIER`; absent ⇒ omitted (backend default).
+  // `QUANTA_FAST=1` is shorthand for `priority`.
+  const tierRaw = process.env.QUANTA_SERVICE_TIER
+  const tierFromFast = process.env.QUANTA_FAST === "1" ? "priority" : undefined
+  const serviceTier = tierFromFast ?? tierRaw
+
+  // Reasoning effort knob — matches ChatGPT UI's "Low / Medium / High /
+  // Extra High" picker. Responses API spec: `reasoning: { effort }`.
+  // Values: "minimal" | "low" | "medium" | "high"  (Extra High maps to
+  // "high" on the OpenAI API — there is no distinct "extra" value on
+  // the wire). Set via `QUANTA_REASONING_EFFORT`; absent ⇒ omitted
+  // (backend / model default).
+  const effortRaw = process.env.QUANTA_REASONING_EFFORT?.toLowerCase()
+  const reasoningEffort =
+    effortRaw === "minimal" ||
+    effortRaw === "low" ||
+    effortRaw === "medium" ||
+    effortRaw === "high"
+      ? effortRaw
+      : undefined
+
   return {
     model,
     instructions,
@@ -411,6 +460,12 @@ export const buildResponsesBody = (input: StreamInput, model: string): Record<st
     tools: toolsToResponsesShape(input.tools),
     parallel_tool_calls: false,
     store: false,
+    ...(serviceTier !== undefined && serviceTier.length > 0
+      ? { service_tier: serviceTier }
+      : {}),
+    ...(reasoningEffort !== undefined
+      ? { reasoning: { effort: reasoningEffort } }
+      : {}),
   }
 }
 

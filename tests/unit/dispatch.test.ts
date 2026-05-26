@@ -1,11 +1,19 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { z } from "zod"
-import { createOnConfirmReviewerPort, type AgentConfig } from "@/agent"
-import { HookBus } from "@/agent"
+import { type AgentConfig, createOnConfirmReviewerPort, HookBus } from "@/agent"
 import { dispatchTool } from "@/agent/dispatch"
 import type { ToolUseBlock } from "@/llm"
-import { createPermissionStore, type PermissionContext, setThreadPermission } from "@/permission"
+import {
+  __resetDefaultPermissionStore,
+  createPermissionStore,
+  type PermissionContext,
+  setThreadPermission,
+} from "@/permission"
 import { RulesStore } from "@/rules"
+import { __resetRuntimeConfig } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 import { ToolRegistry } from "@/tool"
 
@@ -74,6 +82,27 @@ const ruleStore = (text: string): RulesStore => {
   store.loadLayer("project", text, "tests/unit/dispatch.test.ts")
   return store
 }
+
+const originalPermissionState = process.env.QUANTA_PERMISSION_STATE
+let permissionStateRoot: string | null = null
+
+beforeEach(() => {
+  permissionStateRoot = mkdtempSync(join(tmpdir(), "dispatch-perm-state-"))
+  process.env.QUANTA_PERMISSION_STATE = join(permissionStateRoot, "permission-state.json")
+  __resetRuntimeConfig()
+  __resetDefaultPermissionStore()
+})
+
+afterEach(() => {
+  if (permissionStateRoot !== null) {
+    rmSync(permissionStateRoot, { recursive: true, force: true })
+    permissionStateRoot = null
+  }
+  if (originalPermissionState === undefined) delete process.env.QUANTA_PERMISSION_STATE
+  else process.env.QUANTA_PERMISSION_STATE = originalPermissionState
+  __resetRuntimeConfig()
+  __resetDefaultPermissionStore()
+})
 
 describe("dispatchTool happy path", () => {
   test("found read-only tool executes and returns a well-formed result block", async () => {

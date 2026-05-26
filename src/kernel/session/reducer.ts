@@ -23,8 +23,18 @@ const withRevision = (state: KernelSessionState): KernelSessionState => ({
   revision: state.revision + 1,
 })
 
+const clearStreamingAssistantText = (
+  transcript: KernelSessionState["transcript"],
+): KernelSessionState["transcript"] => {
+  const { streamingAssistantText: _streamingAssistantText, ...rest } = transcript
+  return rest
+}
+
 const appendDraft = (draft: string, next: string): string =>
   draft === "" ? next : `${draft}\n${next}`
+
+const hasDraftTurnInput = (state: KernelSessionState): boolean =>
+  state.draftInput.trim().length > 0 || state.draftImages.length > 0
 
 const resolveApproval = (
   state: KernelSessionState,
@@ -37,6 +47,12 @@ const resolveApproval = (
     ...state,
     pendingApproval: null,
     status: "idle",
+    ...(command.decision === "deny"
+      ? {
+          draftInput: "",
+          draftImages: [],
+        }
+      : {}),
   })
 }
 
@@ -176,12 +192,13 @@ export const reduceSessionCommand = (
     case "turn.cancel":
       return { state, hostAction: { kind: "none" }, events: [] }
     case "turn.run": {
-      if (state.draftInput.trim() === "") {
+      if (!hasDraftTurnInput(state)) {
         throw new SessionProtocolValidationError("empty_turn_input")
       }
       const nextState = withRevision({
         ...state,
         status: "running",
+        transcript: clearStreamingAssistantText(state.transcript),
       })
       return {
         state: nextState,
@@ -200,6 +217,7 @@ export const reduceSessionCommand = (
             causedByCommandId: command.commandId,
             type: "turn.started",
             prompt: state.draftInput,
+            ...(state.draftImages.length > 0 ? { images: state.draftImages } : {}),
           },
           {
             eventId: crypto.randomUUID(),

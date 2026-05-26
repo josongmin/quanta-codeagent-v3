@@ -21,9 +21,11 @@ export type {
 } from "./types"
 export type {
   ComposeRuntimeBootstrapContextArgs,
+  CreateRuntimeFacadeArgs,
   CreateRuntimeFromAgentConfigBaseArgs,
   CreateRuntimeFromBootstrapArgs,
   RuntimeContext,
+  RuntimeFacadeComposeOptions,
   RuntimeWireSummary,
 } from "./context"
 export type { AttachedSessionTransport, AttachSessionTransportArgs } from "./transport"

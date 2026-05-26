@@ -42,4 +42,15 @@ describe("CLI repl thin-surface ownership hellgate", () => {
     expect(biome).toContain('"**/session-memory-auto"')
     expect(biome).toContain("Use the sanctioned runner-owned modules instead.")
   })
+
+  test("CLI runtime wiring does not mutate the SDK runtime context after bootstrap", () => {
+    const runtimeContextCompose = read("src/apps/cli/repl/runtime-context-compose.ts")
+    const surfaceCompose = read("src/apps/cli/repl/surface-compose.ts")
+    const sessionLoop = read("src/apps/cli/repl/session-loop.ts")
+
+    expect(runtimeContextCompose).not.toContain(".withAdmissibility(")
+    expect(surfaceCompose).not.toContain(".wrapRegistry(")
+    expect(surfaceCompose).not.toContain(".setGranularRegistry(")
+    expect(sessionLoop).not.toContain(".ensureAutomationEngine(")
+  })
 })

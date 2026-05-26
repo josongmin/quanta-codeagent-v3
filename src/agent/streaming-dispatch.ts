@@ -183,6 +183,18 @@ interface Slot {
 
 const isAborted = (signal: AbortSignal | undefined): boolean => signal?.aborted ?? false
 
+const isSessionApprovalRequiredError = (error: unknown): boolean => {
+  if (typeof error !== "object" || error === null || !("approval" in error)) return false
+  const approval = (error as { approval?: unknown }).approval
+  return (
+    typeof approval === "object" &&
+    approval !== null &&
+    "approvalId" in approval &&
+    "reason" in approval &&
+    "requestedAt" in approval
+  )
+}
+
 /** Mutable accumulation state for one (possibly tombstone-reset) turn. Held in
  *  one object so the per-event handler can reset it in place on `stream_reset`
  *  exactly as the inline version did (reassign `rawEvents`, truncate `slots`). */
@@ -306,17 +318,7 @@ const handleStreamEvent = (state: TurnState, ev: StreamEvent, args: StreamingTur
   }
 
   state.rawEvents.push(ev)
-
-  // ADR-0077 TTFT: fire `onFirstChunk` exactly once, on the FIRST of
-  // (text_delta | thinking_delta | tool_use_start). The latch is reset by
-  // `resetForTombstone`, so a post-reset replacement stream re-measures.
-  if (
-    !state.firstChunkSeen &&
-    (ev.type === "text_delta" || ev.type === "thinking_delta" || ev.type === "tool_use_start")
-  ) {
-    state.firstChunkSeen = true
-    args.onFirstChunk?.()
-  }
+  fireFirstChunkOnce(state, ev, args.onFirstChunk)
 
   if (ev.type === "text_delta") {
     args.onTextDelta?.(ev.delta)
@@ -324,19 +326,7 @@ const handleStreamEvent = (state: TurnState, ev: StreamEvent, args: StreamingTur
   }
 
   if (ev.type === "response_in_progress") {
-    // ADR-0048: fire the heartbeat seam if registered. We FILL IN `timestamp`
-    // here (receive side) so the handler always sees a stable monotonic-ish
-    // clock; if the provider supplied `createdAt` we forward that as the
-    // authoritative value instead.
-    if (args.onInProgress !== undefined) {
-      const indicator: InProgressIndicator = {
-        kind: "in-progress",
-        timestamp: ev.createdAt ?? (args.now ?? Date.now)(),
-        ...(ev.message !== undefined ? { message: ev.message } : {}),
-        ...(ev.progress !== undefined ? { progress: ev.progress } : {}),
-      }
-      args.onInProgress(indicator)
-    }
+    emitInProgressIndicator(ev, args)
     return
   }
 
@@ -346,6 +336,36 @@ const handleStreamEvent = (state: TurnState, ev: StreamEvent, args: StreamingTur
   // cognitive complexity bounded — biome would otherwise flag the per-event
   // branches added by the wire.
   handleToolUseEvent(state, ev, args)
+}
+
+const fireFirstChunkOnce = (
+  state: TurnState,
+  ev: StreamEvent,
+  onFirstChunk: StreamingTurnArgs["onFirstChunk"],
+): void => {
+  const isFirstChunkEvent =
+    ev.type === "text_delta" || ev.type === "thinking_delta" || ev.type === "tool_use_start"
+  if (state.firstChunkSeen || !isFirstChunkEvent) return
+  state.firstChunkSeen = true
+  onFirstChunk?.()
+}
+
+const emitInProgressIndicator = (
+  ev: Extract<StreamEvent, { type: "response_in_progress" }>,
+  args: StreamingTurnArgs,
+): void => {
+  // ADR-0048: fire the heartbeat seam if registered. We FILL IN `timestamp`
+  // here (receive side) so the handler always sees a stable monotonic-ish
+  // clock; if the provider supplied `createdAt` we forward that as the
+  // authoritative value instead.
+  if (args.onInProgress === undefined) return
+  const indicator: InProgressIndicator = {
+    kind: "in-progress",
+    timestamp: ev.createdAt ?? (args.now ?? Date.now)(),
+    ...(ev.message !== undefined ? { message: ev.message } : {}),
+    ...(ev.progress !== undefined ? { progress: ev.progress } : {}),
+  }
+  args.onInProgress(indicator)
 }
 
 /** Route the three `tool_use_*` streaming events: fire the optional input
@@ -393,7 +413,8 @@ const drainDeferredSlots = async (
     slot.promise = dispatch(slot.call)
     try {
       await slot.promise
-    } catch {
+    } catch (error) {
+      if (isSessionApprovalRequiredError(error)) throw error
       // Defensive: dispatch is contractually no-throw (every error path inside
       // it MUST resolve to an ok:false tool_result block). If a future refactor
       // breaks that, we keep marching so the remaining deferred slots still
@@ -465,9 +486,13 @@ export const streamingTurn = async (args: StreamingTurnArgs): Promise<StreamingT
   // early dispatch must NOT short-circuit Phase 3 + Phase 4. The rejection is
   // re-observed by `collectResultBlocks` and surfaced as a `dispatchFailedBlock`
   // so the ordering invariant (one block per scheduled call) is preserved.
-  await Promise.allSettled(
+  const earlyDispatches = await Promise.allSettled(
     state.slots.filter((s) => s.promise).map((s) => s.promise as Promise<unknown>),
   )
+  const pendingApproval = earlyDispatches.find(
+    (result) => result.status === "rejected" && isSessionApprovalRequiredError(result.reason),
+  )
+  if (pendingApproval?.status === "rejected") throw pendingApproval.reason
 
   if (isAborted(signal)) return { kind: "aborted" }
 

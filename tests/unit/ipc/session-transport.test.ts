@@ -242,9 +242,72 @@ describe("session websocket transport", () => {
 
     await transport.close()
   })
+
+  test("decodes connect messages with empty sessionId for bootstrap discovery", async () => {
+    const harness = makeSocketHarness()
+    const transport = wrapWebSocketLikeAsSessionTransport(harness.socket)
+    const seen: SessionTransportMessage[] = []
+    transport.onMessage((message) => {
+      seen.push(message)
+    })
+
+    harness.emit(encodeSessionTransportMessage({ kind: "connect", sessionId: "" }))
+
+    expect(seen).toEqual([{ kind: "connect", sessionId: "" }])
+
+    await transport.close()
+  })
 })
 
 describe("session transport bridge replay", () => {
+  test("updates the retained snapshot without broadcasting it to already-connected peers", async () => {
+    const bridge = createSessionTransportBridge({
+      snapshot: makeSnapshot({ revision: 1, seq: 1 }),
+    })
+
+    const livePair = createTransportPair()
+    const liveInbound: SessionTransportMessage[] = []
+    livePair.client.onMessage((message) => {
+      liveInbound.push(message)
+    })
+
+    await bridge.connect(livePair.server)
+    await livePair.client.send(makeConnectMessage())
+    expect(liveInbound).toEqual([
+      { kind: "snapshot", snapshot: makeSnapshot({ revision: 1, seq: 1 }) },
+    ])
+
+    liveInbound.length = 0
+    const updatedSnapshot = makeSnapshot({
+      revision: 3,
+      seq: 5,
+      state: {
+        status: "running",
+        draftInput: "hello",
+        permissionMode: "default",
+        messageCount: 1,
+      },
+    })
+    bridge.updateSnapshot(updatedSnapshot)
+
+    expect(liveInbound).toEqual([])
+    expect(bridge.currentSnapshot()).toEqual(updatedSnapshot)
+
+    const replayPair = createTransportPair()
+    const replayInbound: SessionTransportMessage[] = []
+    replayPair.client.onMessage((message) => {
+      replayInbound.push(message)
+    })
+    await bridge.connect(replayPair.server)
+    await replayPair.client.send(makeConnectMessage())
+
+    expect(replayInbound).toEqual([{ kind: "snapshot", snapshot: updatedSnapshot }])
+
+    await bridge.close()
+    await livePair.client.close()
+    await replayPair.client.close()
+  })
+
   test("resume inside retained tail replays only missing tail events", async () => {
     const bridge = createSessionTransportBridge({
       snapshot: makeSnapshot({ revision: 5, seq: 10 }),

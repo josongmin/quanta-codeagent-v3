@@ -51,6 +51,7 @@ For the Tauri dev workflow, point Tauri's `devPath` at
 | --- | --- | --- |
 | `VITE_QUANTA_WS_URL` | `ws://127.0.0.1:4096/` | daemon WebSocket URL |
 | `VITE_QUANTA_AUTH_TOKEN` | _(none)_ | bearer token (appended as `?token=…`) |
+| `VITE_QUANTA_STRICT_MODE` | `0` | wrap the app in `React.StrictMode` for dev-only diagnostics |
 
 Vite picks these up at build time. To change at deploy time, rebuild
 with the new env values.

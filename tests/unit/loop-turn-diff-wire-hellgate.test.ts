@@ -15,11 +15,15 @@
  *                                            events in order.
  */
 
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { type AgentConfig, runAgent } from "@/agent"
 import type { TurnDiffSession } from "@/agent/git-observability"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
-import type { PermissionContext } from "@/permission"
+import { __resetDefaultPermissionStore, type PermissionContext } from "@/permission"
+import { __resetRuntimeConfig } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
 
@@ -70,6 +74,27 @@ const baseCfg = (over: Partial<AgentConfig> & Pick<AgentConfig, "llm">): AgentCo
   signal: new AbortController().signal,
   onConfirm: async () => false,
   ...over,
+})
+
+const originalPermissionState = process.env.QUANTA_PERMISSION_STATE
+let permissionStateRoot: string | null = null
+
+beforeEach(() => {
+  permissionStateRoot = mkdtempSync(join(tmpdir(), "turn-diff-perm-state-"))
+  process.env.QUANTA_PERMISSION_STATE = join(permissionStateRoot, "permission-state.json")
+  __resetRuntimeConfig()
+  __resetDefaultPermissionStore()
+})
+
+afterEach(() => {
+  if (permissionStateRoot !== null) {
+    rmSync(permissionStateRoot, { recursive: true, force: true })
+    permissionStateRoot = null
+  }
+  if (originalPermissionState === undefined) delete process.env.QUANTA_PERMISSION_STATE
+  else process.env.QUANTA_PERMISSION_STATE = originalPermissionState
+  __resetRuntimeConfig()
+  __resetDefaultPermissionStore()
 })
 
 /** Build a spy `TurnDiffSession` whose `endTurn` returns scripted events.

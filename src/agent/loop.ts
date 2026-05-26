@@ -226,6 +226,18 @@ const configuredModel = (llm: AgentConfig["llm"]): string => {
   return m !== undefined && m !== "" ? m : "unknown"
 }
 
+const isSessionApprovalRequiredError = (error: unknown): boolean => {
+  if (typeof error !== "object" || error === null || !("approval" in error)) return false
+  const approval = (error as { approval?: unknown }).approval
+  return (
+    typeof approval === "object" &&
+    approval !== null &&
+    "approvalId" in approval &&
+    "reason" in approval &&
+    "requestedAt" in approval
+  )
+}
+
 /** Pure side-effect emit of a `{type:"llm_request"}` AgentEvent IMMEDIATELY
  *  before the turn's model stream is consumed (RFC-0002 §5.2/§9/§11). The
  *  recorder pairs it with the turn's trailing `llm_usage` via the SAME llm
@@ -553,6 +565,10 @@ const streamConsume = async (
       resultBlocks: outcome.resultBlocks as AssembledMessage["content"],
     }
   } catch (e) {
+    if (isSessionApprovalRequiredError(e)) {
+      samplingStatus = "error"
+      throw e
+    }
     samplingStatus = "error"
     const message = e instanceof LLMError ? e.message : (e as Error).message
     return { error: e, message }
@@ -981,6 +997,48 @@ const prepareTurnContext = async (
 type Step = { done: false } | { done: true; result: TurnResult }
 const CONTINUE: Step = { done: false }
 
+const applyNonSuccessRecoveryAction = async (
+  session: TurnSession,
+  state: TurnState,
+  action: RecoveryAction,
+  result: StreamSuccess | { error: unknown; message: string },
+  ctxSystem: SystemPromptInput,
+): Promise<Step | null> => {
+  const { config } = session
+  const { wm, breaker } = state
+  if (action.do === "error") {
+    return { done: true, result: { kind: "error", reason: action.reason } }
+  }
+  if (action.do === "refusal") {
+    const success = result as StreamSuccess
+    wm.append(success.message)
+    return {
+      done: true,
+      result: { kind: "refusal", rationale: action.rationale, message: success.message },
+    }
+  }
+  if (action.do === "backoff") {
+    emitRecovery(config, "backoff", `attempt ${action.attempt}`)
+    await sleep(backoffDelayMs(action.attempt), config.signal)
+    return CONTINUE
+  }
+  if (action.do !== "compact") return null
+  emitRecovery(config, "compact")
+  const verdict = breaker?.check()
+  if (verdict?.abort) return { done: true, result: { kind: "error", reason: verdict.reason } }
+  const snapshot = [...wm.snapshot()]
+  const before = estimateTokens(snapshot)
+  const compacted = await reactiveCompact({
+    messages: snapshot,
+    llm: config.compaction?.summarizerLlm ?? config.llm,
+    system: ctxSystem,
+  })
+  if (!compacted.ok) return { done: true, result: { kind: "error", reason: compacted.reason } }
+  breaker?.recordReactive(before, estimateTokens(compacted.messages))
+  wm.replace(compacted.messages)
+  return CONTINUE
+}
+
 /** Apply one decided {@link RecoveryAction}. Returns `{done:false}` to
  *  re-enter the SAME turn (after mutating `messages`/sleeping/compacting) or
  *  `{done:true}` with the terminal {@link TurnResult}. The `proceed` branch
@@ -1013,51 +1071,15 @@ const applyAction = async (
 ): Promise<Step> => {
   // R2-B P1: destructure to the same local names the original body used.
   const { config, guards } = session
-  const { wm, breaker, toolChoiceState } = state
-  if (action.do === "error") return { done: true, result: { kind: "error", reason: action.reason } }
-  if (action.do === "refusal") {
-    // ADR-0076 Gap-1 SOTA++ — terminal `refusal` action. Append the final
-    // refusing assistant message to working memory so the transcript carries
-    // the visible refusal text (mirrors the `completed` path; otherwise a
-    // resume / probe would not see the refusal in `outcome.messages`). The
-    // `rationale` was extracted by `decideOnAssembled`; we pass the assembled
-    // message along so the outer loop can route to `finish("refusal", …)`.
-    const success = result as StreamSuccess
-    wm.append(success.message)
-    return {
-      done: true,
-      result: { kind: "refusal", rationale: action.rationale, message: success.message },
-    }
-  }
-  if (action.do === "backoff") {
-    // RFC-0002 §5.2 recovery trace. Pure observation (NullStream swallows it):
-    // emitted at the recovery point the loop already reached; the sleep + retry
-    // control flow below is byte-identical to the pre-emit path.
-    emitRecovery(config, "backoff", `attempt ${action.attempt}`)
-    await sleep(backoffDelayMs(action.attempt), config.signal)
-    return CONTINUE
-  }
-  if (action.do === "compact") {
-    emitRecovery(config, "compact")
-    // Tier 0 safety hardening (ADR-0011): trip the breaker BEFORE another reactive
-    // squeeze so a compact↔PTL thrash spin aborts with a clear reason
-    // instead of looping until maxTurns / a provider 400.
-    const verdict = breaker?.check()
-    if (verdict?.abort) return { done: true, result: { kind: "error", reason: verdict.reason } }
-    const snapshot = [...wm.snapshot()]
-    const before = estimateTokens(snapshot)
-    const compacted = await reactiveCompact({
-      messages: snapshot,
-      // ADR-0011: dedicated summarizer model when configured;
-      // absent (or no compaction block) ⇒ main llm (byte-identical).
-      llm: config.compaction?.summarizerLlm ?? config.llm,
-      system: ctxSystem,
-    })
-    if (!compacted.ok) return { done: true, result: { kind: "error", reason: compacted.reason } }
-    breaker?.recordReactive(before, estimateTokens(compacted.messages))
-    wm.replace(compacted.messages)
-    return CONTINUE
-  }
+  const { wm, toolChoiceState } = state
+  const nonSuccessStep = await applyNonSuccessRecoveryAction(
+    session,
+    state,
+    action,
+    result,
+    ctxSystem,
+  )
+  if (nonSuccessStep !== null) return nonSuccessStep
   // From here the stream succeeded: `result` carries the assembled message
   // and the (already dispatched) tool_result blocks.
   const success = result as StreamSuccess
@@ -1217,30 +1239,11 @@ const emitUserPromptSubmitHook = async (
   sessionId: string,
 ): Promise<string | null> => {
   if (cfg.hooks === undefined) return null
-  // Walk backwards for the trailing user message (a typical seed ends in
-  // user; a resume-without-new-prompt seed ends in assistant — we skip).
-  let lastUserIdx = -1
-  for (let i = wm.messages.length - 1; i >= 0; i--) {
-    const m = wm.messages[i]
-    if (m === undefined) continue
-    if (m.role === "user") {
-      lastUserIdx = i
-      break
-    }
-  }
+  const lastUserIdx = findTrailingUserMessageIndex(wm)
   if (lastUserIdx < 0) return null
   const userMsg = wm.messages[lastUserIdx]
   if (userMsg === undefined) return null
-  // Join all text blocks for the hook view; count non-text as attachments.
-  let promptText = ""
-  let attachmentsCount = 0
-  for (const b of userMsg.content) {
-    if (b.type === "text") {
-      promptText = promptText.length > 0 ? `${promptText}\n${b.text}` : b.text
-    } else {
-      attachmentsCount += 1
-    }
-  }
+  const { promptText, attachmentsCount } = summarizeUserPrompt(userMsg)
   const emit = (await cfg.hooks.emit({
     type: "user_prompt_submit",
     prompt: promptText,
@@ -1253,22 +1256,50 @@ const emitUserPromptSubmitHook = async (
   // updatedPrompt rewrites the FIRST text block in place. We do NOT touch
   // attachments (an image queued for this turn is preserved verbatim).
   if (typeof emit.updatedPrompt === "string") {
-    const newText = emit.updatedPrompt
-    let rewritten = false
-    const newContent = userMsg.content.map((b) => {
-      if (!rewritten && b.type === "text") {
-        rewritten = true
-        return { ...b, text: newText }
-      }
-      return b
-    })
-    // If the message had NO text block at all, prepend one so the rewrite
-    // is observable (rare path: image-only prompt with a hook that wants to
-    // inject explanatory text).
-    if (!rewritten) newContent.unshift({ type: "text", text: newText })
-    wm.messages[lastUserIdx] = { ...userMsg, content: newContent }
+    rewriteUserPromptMessage(wm, lastUserIdx, userMsg, emit.updatedPrompt)
   }
   return null
+}
+
+const findTrailingUserMessageIndex = (wm: WorkingMemory<Message>): number => {
+  for (let i = wm.messages.length - 1; i >= 0; i--) {
+    const message = wm.messages[i]
+    if (message?.role === "user") return i
+  }
+  return -1
+}
+
+const summarizeUserPrompt = (
+  userMsg: Message,
+): { readonly promptText: string; readonly attachmentsCount: number } => {
+  let promptText = ""
+  let attachmentsCount = 0
+  for (const block of userMsg.content) {
+    if (block.type === "text") {
+      promptText = promptText.length > 0 ? `${promptText}\n${block.text}` : block.text
+    } else {
+      attachmentsCount += 1
+    }
+  }
+  return { promptText, attachmentsCount }
+}
+
+const rewriteUserPromptMessage = (
+  wm: WorkingMemory<Message>,
+  lastUserIdx: number,
+  userMsg: Message,
+  newText: string,
+): void => {
+  let rewritten = false
+  const newContent = userMsg.content.map((block) => {
+    if (!rewritten && block.type === "text") {
+      rewritten = true
+      return { ...block, text: newText }
+    }
+    return block
+  })
+  if (!rewritten) newContent.unshift({ type: "text", text: newText })
+  wm.messages[lastUserIdx] = { ...userMsg, content: newContent }
 }
 
 /**
@@ -1652,6 +1683,554 @@ const pollConversationAction = async (
   return { kind: "continue" }
 }
 
+const persistFinalMessages = async (args: {
+  readonly cfg: AgentConfig
+  readonly recorder: AgentRecorder | undefined
+  readonly redactionEnabled: boolean
+  readonly recordRedaction: (
+    origin: import("@/security").RedactionOrigin,
+    hits: readonly import("@/security").RedactionHit[],
+  ) => void
+  readonly sessionId: string
+  readonly messages: readonly Message[]
+  readonly reason: StopReason
+}): Promise<void> => {
+  if (args.redactionEnabled && args.cfg.store) {
+    scanEnvelopeForRedactions(args.messages, args.recordRedaction)
+  }
+  if (!args.cfg.store) return
+  await persistSession(
+    buildPersistDeps(args.cfg, args.recorder, args.redactionEnabled, args.recordRedaction),
+    {
+      sessionId: args.sessionId,
+      finalMessages: [...args.messages],
+    },
+  )
+}
+
+const cleanupFinishedSession = async (args: {
+  readonly cfg: AgentConfig
+  readonly features: Awaited<ReturnType<typeof buildSessionFeatures>>
+}): Promise<void> => {
+  try {
+    await args.features.cleanup?.()
+  } catch (e) {
+    const message = errMessage(e)
+    args.cfg.stream.emit({ type: "error", message: `subagent cleanup failed: ${message}` })
+  }
+  await saveFollowUpQueueSnapshot(args.cfg)
+  await savePlanSnapshot(args.cfg)
+}
+
+const buildFinalAgentOutcome = (args: {
+  readonly reason: StopReason
+  readonly turns: number
+  readonly messages: readonly Message[]
+  readonly stopCategory?: StopCategory
+  readonly memoryCitations: readonly MemoryCitation[]
+  readonly redactionAgg: ReadonlyMap<string, import("./types").RedactionRollup>
+  readonly refusal?: { readonly rationale: string }
+  readonly lastTurnTiming: TurnTiming | null
+}): AgentOutcome => {
+  const redactions = args.redactionAgg.size > 0 ? [...args.redactionAgg.values()] : undefined
+  return {
+    reason: args.reason,
+    turns: args.turns,
+    messages: [...args.messages],
+    ...(args.stopCategory !== undefined ? { stopCategory: args.stopCategory } : {}),
+    ...(args.memoryCitations.length > 0 ? { memoryCitations: args.memoryCitations } : {}),
+    ...(redactions !== undefined ? { redactions } : {}),
+    ...(args.refusal !== undefined ? { refusal: args.refusal } : {}),
+    ...(args.lastTurnTiming !== null ? { turnTiming: args.lastTurnTiming } : {}),
+  }
+}
+
+const finishAgentSession = async (args: {
+  readonly cfg: AgentConfig
+  readonly wm: WorkingMemory<Message>
+  readonly sessionId: string
+  readonly recorder: AgentRecorder | undefined
+  readonly redactionEnabled: boolean
+  readonly recordRedaction: (
+    origin: import("@/security").RedactionOrigin,
+    hits: readonly import("@/security").RedactionHit[],
+  ) => void
+  readonly features: Awaited<ReturnType<typeof buildSessionFeatures>>
+  readonly memoryCitations: readonly MemoryCitation[]
+  readonly redactionAgg: ReadonlyMap<string, import("./types").RedactionRollup>
+  readonly lastTurnTiming: TurnTiming | null
+  readonly reason: StopReason
+  readonly turns: number
+  readonly stopCategory?: StopCategory
+  readonly refusal?: { readonly rationale: string }
+}): Promise<AgentOutcome> => {
+  if (args.cfg.activeTurnRef) {
+    args.cfg.activeTurnRef.current = {
+      currentTurn: null,
+      isInterrupted: args.reason === "aborted",
+    }
+  }
+  const messages = [...args.wm.snapshot()]
+  await persistFinalMessages({
+    cfg: args.cfg,
+    recorder: args.recorder,
+    redactionEnabled: args.redactionEnabled,
+    recordRedaction: args.recordRedaction,
+    sessionId: args.sessionId,
+    messages,
+    reason: args.reason,
+  })
+  await cleanupFinishedSession({ cfg: args.cfg, features: args.features })
+  args.recorder?.stopReason(args.reason)
+  if (args.cfg.hooks)
+    await args.cfg.hooks.emit({ type: "session_end", reason: args.reason, turns: args.turns })
+  args.cfg.stream.emit({ type: "done", reason: args.reason, turns: args.turns })
+  return buildFinalAgentOutcome({
+    reason: args.reason,
+    turns: args.turns,
+    messages,
+    memoryCitations: args.memoryCitations,
+    redactionAgg: args.redactionAgg,
+    lastTurnTiming: args.lastTurnTiming,
+    ...(args.stopCategory !== undefined ? { stopCategory: args.stopCategory } : {}),
+    ...(args.refusal !== undefined ? { refusal: args.refusal } : {}),
+  })
+}
+
+const runSessionStartSequence = async (args: {
+  readonly cfg: AgentConfig
+  readonly wm: WorkingMemory<Message>
+  readonly sessionId: string
+  readonly taskRegistry: { forceStop(id: string): boolean } | undefined
+}): Promise<"continue" | "aborted"> => {
+  args.cfg.stream.emit({ type: "session_start" })
+  if (args.cfg.hooks)
+    await args.cfg.hooks.emit({ type: "session_start", sessionId: args.sessionId })
+  if (args.cfg.hooks !== undefined) {
+    const denied = await emitUserPromptSubmitHook(args.cfg, args.wm, args.sessionId)
+    if (denied !== null) return "aborted"
+  }
+  await restoreFollowUpQueueSnapshot(args.cfg)
+  await restorePlanSnapshot(args.cfg)
+  return handleSubmissionControlOp(args.cfg, args.taskRegistry) === "aborted"
+    ? "aborted"
+    : "continue"
+}
+
+const applySteerBarrierMessages = async (
+  cfg: AgentConfig,
+  wm: WorkingMemory<Message>,
+): Promise<void> => {
+  if (!cfg.steerBarrier) return
+  const beforeLen = cfg.messages.length
+  await cfg.steerBarrier()
+  for (let i = beforeLen; i < cfg.messages.length; i++) {
+    const injected = cfg.messages[i]
+    if (injected) wm.append(injected)
+  }
+}
+
+const setActiveTurnHeader = (cfg: AgentConfig, sessionId: string): void => {
+  if (!cfg.activeTurnRef) return
+  cfg.activeTurnRef.current = {
+    currentTurn: makeTurnHeader({
+      turnId: crypto.randomUUID(),
+      kind: "main",
+      startedAt: Date.now(),
+      threadId: sessionId,
+    }),
+    isInterrupted: false,
+  }
+}
+
+const syncQueuedTurnInputs = async (args: {
+  readonly cfg: AgentConfig
+  readonly wm: WorkingMemory<Message>
+  readonly sessionId: string
+  readonly taskRegistry: { forceStop(id: string): boolean } | undefined
+}): Promise<"continue" | "aborted"> => {
+  const followUpResult = pollFollowUpQueue(args.cfg, args.sessionId)
+  if (followUpResult !== null) args.wm.append(followUpResult)
+  const actionOutcome = await pollConversationAction(args.cfg, args.taskRegistry)
+  if (actionOutcome.kind === "finish_aborted") return "aborted"
+  if (actionOutcome.kind === "injection") args.wm.append(actionOutcome.message)
+  return "continue"
+}
+
+const injectFocusChainMessage = (cfg: AgentConfig, wm: WorkingMemory<Message>): void => {
+  if (cfg.focusChain === undefined) return
+  try {
+    cfg.focusChain.tracker.tickTurn()
+    const injection = cfg.focusChain.tracker.getInjection()
+    if (injection !== null && injection.trim().length > 0) {
+      wm.append({
+        role: "user",
+        content: [{ type: "text", text: injection }],
+      })
+    }
+  } catch (e) {
+    cfg.stream.emit({
+      type: "error",
+      message: `focus-chain inject failed: ${errMessage(e)}`,
+    })
+  }
+}
+
+const prepareTurnIteration = async (args: {
+  readonly cfg: AgentConfig
+  readonly wm: WorkingMemory<Message>
+  readonly sessionId: string
+  readonly taskRegistry: { forceStop(id: string): boolean } | undefined
+  readonly turn: number
+  readonly localizePhaseState: import("./localize-phase-guard").LocalizePhaseState | undefined
+  readonly dedupGate: unknown
+  readonly shellSnapshotSession: ShellSnapshotSession | undefined
+  readonly hookPromptPending: import("./hooks").HookPromptInject[]
+}): Promise<"continue" | "aborted"> => {
+  if (args.cfg.signal.aborted) return "aborted"
+  if (args.localizePhaseState !== undefined) args.localizePhaseState.turn = args.turn - 1
+  args.cfg.budgetMeter?.tick("turn")
+  await applySteerBarrierMessages(args.cfg, args.wm)
+  setActiveTurnHeader(args.cfg, args.sessionId)
+  const queuedInputs = await syncQueuedTurnInputs(args)
+  if (queuedInputs === "aborted") return "aborted"
+  injectFocusChainMessage(args.cfg, args.wm)
+  if (args.dedupGate) {
+    const stamped = stampTurn(args.cfg.run, args.turn)
+    args.cfg.run = stamped ?? { runId: args.sessionId, turn: args.turn }
+  }
+  if (args.shellSnapshotSession !== undefined) {
+    await args.shellSnapshotSession.snapshotForTurn(args.turn)
+  }
+  args.cfg.stream.emit({ type: "turn_start", turn: args.turn })
+  if (args.cfg.hooks) {
+    const turnStart = await args.cfg.hooks.emit({ type: "turn_start", turn: args.turn })
+    if (turnStart.promptHook !== undefined) args.hookPromptPending.push(turnStart.promptHook)
+  }
+  return "continue"
+}
+
+type TurnLoopResolution =
+  | { readonly kind: "continue" }
+  | {
+      readonly kind: "finish"
+      readonly reason: StopReason
+      readonly turns: number
+      readonly stopCategory?: StopCategory
+      readonly refusal?: { readonly rationale: string }
+    }
+
+type FinishAgentSession = (
+  reason: StopReason,
+  turns: number,
+  stopCategory?: StopCategory,
+  refusal?: { readonly rationale: string },
+) => Promise<AgentOutcome>
+
+type RunAgentTurnStateSeed = Omit<TurnState, "rec" | "collector">
+
+interface RunAgentContext {
+  readonly features: Awaited<ReturnType<typeof buildSessionFeatures>>
+  readonly cfg: AgentConfig
+  readonly wm: WorkingMemory<Message>
+  readonly sessionId: string
+  readonly recorder: AgentRecorder | undefined
+  readonly breaker: CompactionBreaker | undefined
+  readonly localizePhaseState: import("./localize-phase-guard").LocalizePhaseState | undefined
+  readonly dedupGate: unknown
+  readonly hookPromptPending: HookPromptInject[]
+  readonly pendingPlanExitRef: { current: PendingPlanExit | null }
+  readonly shellSnapshotSession: ShellSnapshotSession | undefined
+  readonly turnDiffSession: TurnDiffSession | undefined
+  readonly gitDirectiveCollector: ReturnType<typeof buildGitDirectiveEmit> | undefined
+  readonly session: TurnSession
+  readonly turnStateSeed: RunAgentTurnStateSeed
+  readonly finish: FinishAgentSession
+}
+
+const flushTurnObservability = async (args: {
+  readonly cfg: AgentConfig
+  readonly stream: AgentConfig["stream"]
+  readonly turn: number
+  readonly turnDiffSession: TurnDiffSession | undefined
+  readonly gitDirectiveCollector: ReturnType<typeof buildGitDirectiveEmit> | undefined
+  readonly workCollector: TurnWorkMetricsCollector | undefined
+  readonly workTurnId: string | undefined
+  readonly result: TurnResult
+}): Promise<void> => {
+  if (args.turnDiffSession !== undefined) {
+    const diffEvent = await args.turnDiffSession.endTurn(args.turn)
+    if (diffEvent !== null) args.stream.emit(diffEvent)
+  }
+  args.gitDirectiveCollector?.flush()
+  emitWorkMetrics(args.cfg, args.workCollector, args.workTurnId, args.result.kind)
+}
+
+const resolveTurnLoopOutcome = async (args: {
+  readonly cfg: AgentConfig
+  readonly stream: AgentConfig["stream"]
+  readonly wm: WorkingMemory<Message>
+  readonly breaker: CompactionBreaker | undefined
+  readonly recorder: AgentRecorder | undefined
+  readonly turn: number
+  readonly result: TurnResult
+  readonly pendingPlanExitRef: { current: PendingPlanExit | null }
+  readonly hookPromptPending: import("./hooks").HookPromptInject[]
+}): Promise<TurnLoopResolution> => {
+  if (args.result.kind === "aborted") {
+    return {
+      kind: "finish",
+      reason: "aborted",
+      turns: args.turn - 1,
+      stopCategory: interruptedCategory("user"),
+    }
+  }
+  if (args.result.kind === "error") {
+    args.stream.emit({ type: "error", message: args.result.reason })
+    return {
+      kind: "finish",
+      reason: "error",
+      turns: args.turn - 1,
+      stopCategory: classifyErrorReason(args.result.reason),
+    }
+  }
+  if (args.result.kind === "refusal") {
+    args.recorder?.turn()
+    return {
+      kind: "finish",
+      reason: "refusal",
+      turns: args.turn,
+      stopCategory: refusalCategory(),
+      refusal: { rationale: args.result.rationale },
+    }
+  }
+  args.recorder?.turn()
+  const exhausted = args.cfg.budgetMeter?.checkExhausted()
+  if (exhausted?.exhausted) {
+    emitBudgetExhaustedDecision(args.cfg.decisionEmitter, exhausted, { turn: args.turn })
+    return {
+      kind: "finish",
+      reason: "budget_exhausted",
+      turns: args.turn,
+      stopCategory: completedCategory("max_turns"),
+    }
+  }
+  if (args.result.kind === "completed") {
+    return {
+      kind: "finish",
+      reason: "completed",
+      turns: args.turn,
+      stopCategory: completedCategory("normal"),
+    }
+  }
+  args.breaker?.noteProgress()
+  args.wm.append({ role: "user", content: args.result.resultBlocks })
+  if (args.pendingPlanExitRef.current !== null) {
+    applyPendingPlanExit(args.cfg, args.pendingPlanExitRef.current, args.hookPromptPending)
+    args.pendingPlanExitRef.current = null
+  }
+  return { kind: "continue" }
+}
+
+const createRunAgentContext = async (config: AgentConfig): Promise<RunAgentContext> => {
+  const features = await buildSessionFeatures(config)
+  const dedupGateActive =
+    config.dedupGate !== undefined || config.dedupGateConfig?.disabled !== true
+  const baseCfg = buildEffectiveConfig(config, features.extraTools)
+  const cfg: AgentConfig = dedupGateActive && baseCfg === config ? { ...baseCfg } : baseCfg
+  const pendingPlanExitRef: { current: PendingPlanExit | null } = { current: null }
+  const onPlanExitOutcome = cfg.onPlanExitOutcome
+  cfg.onPlanExitOutcome = (event) => {
+    pendingPlanExitRef.current = event
+    onPlanExitOutcome?.(event)
+  }
+
+  const skillGate = buildSkillGate(features.skillAllowlists, features.skillOverrides)
+  const wm: WorkingMemory<Message> = createWorkingMemory<Message>(buildSeedMessages(cfg))
+  const recorder = cfg.metrics ? new AgentRecorder(cfg.metrics) : undefined
+  const sessionId = cfg.sessionId ?? "default"
+  const breaker = cfg.compactionBreaker?.disabled
+    ? undefined
+    : new CompactionBreaker(cfg.compactionBreaker?.caps)
+  const dedupGate = attachDedupGate(cfg)
+  const { state: verifyGuardState, history: toolHistory } = buildVerifyGuard(cfg)
+  const closeoutGuardState = buildCloseoutGuard(cfg)
+  attachCapEnforcer(cfg)
+  const localizePhaseState = attachLocalizePhase(cfg)
+  const guardChain = buildGuardChain({
+    config: cfg,
+    verifyGuardState,
+    closeoutGuardState,
+  })
+  const toolChoiceState = createToolChoiceTurnState()
+  const hookPromptPending = wireHookPromptPending(cfg)
+  const memoryCitations: MemoryCitation[] = []
+  const redactionEnabled = normalizeRedactionConfig(cfg.redaction).enabled
+  const { agg: redactionAgg, record: recordRedaction } = createRedactionRollup()
+  const summaryArchive: ConversationSummaryArchive | undefined =
+    cfg.compaction?.archive === true ? createArchive() : undefined
+  let lastTurnTiming: TurnTiming | null = null
+  const recordTurnTiming = (timing: TurnTiming): void => {
+    lastTurnTiming = timing
+  }
+  const turnDiffSession = buildTurnDiffSession(cfg)
+  const gitDirectiveCollector = buildGitDirectiveEmit(cfg)
+  const shellSnapshotSession: ShellSnapshotSession | undefined = buildShellSnapshotSession(
+    cfg,
+    (message) => cfg.stream.emit({ type: "error", message }),
+    cfg.shellSnapshot?.shellEnv,
+  )
+  if (shellSnapshotSession !== undefined) {
+    await shellSnapshotSession.pruneOnStart()
+    cfg.shellSnapshotSession = shellSnapshotSession
+  }
+
+  const session: TurnSession = {
+    config: cfg,
+    specs: cfg.registry.specs(),
+    ...(recorder !== undefined ? { recorder } : {}),
+    ...(features.classifier !== undefined ? { classifier: features.classifier } : {}),
+    ...(skillGate !== undefined ? { skillGate } : {}),
+    ...(features.activeSkills !== undefined ? { activeSkills: features.activeSkills } : {}),
+    ...(summaryArchive !== undefined ? { archive: summaryArchive } : {}),
+    guards: guardChain,
+    hookPromptPending,
+  }
+
+  const turnStateSeed: RunAgentTurnStateSeed = {
+    wm,
+    breaker,
+    toolHistory,
+    workingState: features.workingState,
+    toolChoiceState,
+    citations: memoryCitations,
+    onRedaction: recordRedaction,
+    onTurnTiming: recordTurnTiming,
+  }
+
+  const finish: FinishAgentSession = async (reason, turns, stopCategory, refusal) =>
+    await finishAgentSession({
+      cfg,
+      wm,
+      sessionId,
+      recorder,
+      redactionEnabled,
+      recordRedaction,
+      features,
+      memoryCitations,
+      redactionAgg,
+      lastTurnTiming,
+      reason,
+      turns,
+      ...(stopCategory !== undefined ? { stopCategory } : {}),
+      ...(refusal !== undefined ? { refusal } : {}),
+    })
+
+  return {
+    features,
+    cfg,
+    wm,
+    sessionId,
+    recorder,
+    breaker,
+    localizePhaseState,
+    dedupGate,
+    hookPromptPending,
+    pendingPlanExitRef,
+    shellSnapshotSession,
+    turnDiffSession,
+    gitDirectiveCollector,
+    session,
+    turnStateSeed,
+    finish,
+  }
+}
+
+const executeTurnWithObservability = async (args: {
+  readonly ctx: RunAgentContext
+  readonly turn: number
+}): Promise<{
+  readonly result: TurnResult
+  readonly workCollector: TurnWorkMetricsCollector | undefined
+  readonly workTurnId: string | undefined
+}> => {
+  const { collector: workCollector, turnId: workTurnId } = buildWorkMetricsResources(args.ctx.cfg)
+  const turnId = args.ctx.cfg.activeTurnRef?.current.currentTurn?.turnId ?? crypto.randomUUID()
+  const turnSpan: Span = startSpan(SPAN_NAMES.turn, turnSpanAttrs(turnId))
+  let turnSpanStatus: "ok" | "error" | "aborted" = "ok"
+  let result: TurnResult
+  try {
+    if (args.ctx.turnDiffSession !== undefined) {
+      await args.ctx.turnDiffSession.startTurn(args.turn)
+    }
+    const state: TurnState = {
+      ...args.ctx.turnStateSeed,
+      rec: freshRecovery(),
+      collector: workCollector,
+    }
+    result = await runTurn(args.turn, args.ctx.session, state)
+    turnSpanStatus =
+      result.kind === "aborted" ? "aborted" : result.kind === "error" ? "error" : "ok"
+  } catch (e) {
+    turnSpanStatus = "error"
+    throw e
+  } finally {
+    endSpan(turnSpan, turnSpanStatus, attrs({}))
+  }
+  return { result, workCollector, workTurnId }
+}
+
+const runAgentTurnLoop = async (ctx: RunAgentContext): Promise<AgentOutcome | undefined> => {
+  for (let turn = 1; turn <= ctx.cfg.maxTurns; turn++) {
+    const turnReady = await prepareTurnIteration({
+      cfg: ctx.cfg,
+      wm: ctx.wm,
+      sessionId: ctx.sessionId,
+      taskRegistry: ctx.features.taskRegistry,
+      turn,
+      localizePhaseState: ctx.localizePhaseState,
+      dedupGate: ctx.dedupGate,
+      shellSnapshotSession: ctx.shellSnapshotSession,
+      hookPromptPending: ctx.hookPromptPending,
+    })
+    if (turnReady === "aborted") {
+      return ctx.finish("aborted", turn - 1, interruptedCategory("user"))
+    }
+
+    const { result, workCollector, workTurnId } = await executeTurnWithObservability({ ctx, turn })
+    await flushTurnObservability({
+      cfg: ctx.cfg,
+      stream: ctx.cfg.stream,
+      turn,
+      turnDiffSession: ctx.turnDiffSession,
+      gitDirectiveCollector: ctx.gitDirectiveCollector,
+      workCollector,
+      workTurnId,
+      result,
+    })
+    const resolution = await resolveTurnLoopOutcome({
+      cfg: ctx.cfg,
+      stream: ctx.cfg.stream,
+      wm: ctx.wm,
+      breaker: ctx.breaker,
+      recorder: ctx.recorder,
+      turn,
+      result,
+      pendingPlanExitRef: ctx.pendingPlanExitRef,
+      hookPromptPending: ctx.hookPromptPending,
+    })
+    if (resolution.kind === "finish") {
+      return ctx.finish(
+        resolution.reason,
+        resolution.turns,
+        resolution.stopCategory,
+        resolution.refusal,
+      )
+    }
+  }
+  return undefined
+}
+
 export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
   // Codex 10-step span tree — root `session_loop` span. Wraps the WHOLE
   // session body in a try/finally so the span always closes, even on a
@@ -1724,610 +2303,19 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
  *  stays untouched — adding a `try/finally` around it inline would have
  *  required restructuring every return path. */
 const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
-  // Tier 1 capability (ADR-0011): materialize optional subsystems ONCE. With no
-  // Tier-1 config `features.extraTools` is empty and `cfg === config` by
-  // identity, so the loop is byte-for-byte identical to the pre-absorption path.
-  const features = await buildSessionFeatures(config)
-  // T3 — when the dedup gate is active (caller pre-supplied a gate OR we'll
-  // construct one) the loop writes a per-turn stamped `run` AND attaches the
-  // gate to the loop-local `cfg`, both of which would mutate the caller's
-  // `AgentConfig` if `cfg` aliased `config`. So when the gate is active AND
-  // `buildEffectiveConfig` returned the original by identity (no Tier-1
-  // extra-tools rebuild), we take a shallow copy here. Gate disabled ⇒ no
-  // copy, original alias preserved (byte-identical to the pre-T3 path).
-  const dedupGateActive =
-    config.dedupGate !== undefined || config.dedupGateConfig?.disabled !== true
-  const baseCfg = buildEffectiveConfig(config, features.extraTools)
-  const cfg: AgentConfig = dedupGateActive && baseCfg === config ? { ...baseCfg } : baseCfg
-  let pendingPlanExit: PendingPlanExit | null = null
-  const onPlanExitOutcome = cfg.onPlanExitOutcome
-  cfg.onPlanExitOutcome = (event) => {
-    pendingPlanExit = event
-    onPlanExitOutcome?.(event)
-  }
-  const classifier = features.classifier
-  const skillGate = buildSkillGate(features.skillAllowlists, features.skillOverrides)
-  // Cached once at session start (Codex anti-reread). Passed straight into the
-  // per-turn reminder by `prepareTurnContext`. Absent ⇒ no block emitted, so
-  // skill-less sessions stay byte-identical end-to-end.
-  const activeSkills = features.activeSkills
-  const { stream } = cfg
-  // ADR-0062 (Spec A3): canonical seed buffer (RFC §6.3). When the typed
-  // Submission envelope projects to user-input it is appended to
-  // `cfg.messages`; absent ⇒ byte-identical legacy. The caller's `cfg.messages`
-  // is never mutated. See `loop-helpers#buildSeedMessages`.
-  const wm: WorkingMemory<Message> = createWorkingMemory<Message>(buildSeedMessages(cfg))
-  const specs = cfg.registry.specs()
-  const recorder = cfg.metrics ? new AgentRecorder(cfg.metrics) : undefined
-  const sessionId = cfg.sessionId ?? "default"
-  // Tier 0 safety hardening (ADR-0011): one breaker per session. ON by default with
-  // DEFAULT_COMPACTION_BREAKER_CAPS — only trips on pathological compaction
-  // thrash, so configured-but-normal and unconfigured sessions are unaffected.
-  const breaker = cfg.compactionBreaker?.disabled
-    ? undefined
-    : new CompactionBreaker(cfg.compactionBreaker?.caps)
-  // T3 — pre-flight dedup gate (default-ON / `disabled:true` opts out). See
-  // `loop-helpers#attachDedupGate`: builds + attaches to `cfg.dedupGate` so
-  // `dispatchTool` reads it via the AgentConfig channel. Returns the gate so
-  // the loop can branch on activeness for the `cfg` copy decision below.
-  const dedupGate = attachDedupGate(cfg)
-  // Verify-guard (ADR-0011, Tier 0 safety hardening): per-run forcing budget + ordered
-  // dispatched-tool log, created ONLY when `cfg.verifyGuard` is set. Absent ⇒
-  // both stay `undefined`, no object is allocated, the history push and the
-  // guard decision are never reached → loop is byte-for-byte identical. The
-  // construction is factored out so `runAgent` gains ZERO new branch points.
-  const { state: verifyGuardState, history: toolHistory } = buildVerifyGuard(cfg)
-  // Closeout reminder (§4 mirror): single-shot per-run closeout budget,
-  // created ONLY when `cfg.closeoutGuard?.enabled === true`. Absent (or
-  // `enabled !== true`) ⇒ stays `undefined`, no object is allocated, the
-  // guard decision is never reached → loop is byte-for-byte identical. The
-  // construction is factored out (mirroring `buildVerifyGuard`) so `runAgent`
-  // gains ZERO new branch points.
-  const closeoutGuardState = buildCloseoutGuard(cfg)
-  // ADR-0062 rule #3 — cap-as-instruction enforcement (DEFAULT-OFF). See
-  // `loop-helpers#attachCapEnforcer`: builds + attaches to `cfg.capEnforcer`
-  // iff absent. With `cfg.capEnforce !== true` and no env flag ⇒ no
-  // allocation, dispatch byte-identical.
-  attachCapEnforcer(cfg)
-  // Localize-phase guard (Agentless "localize-first" Tier 0). See
-  // `loop-helpers#attachLocalizePhase`: builds + attaches to
-  // `cfg.localizePhaseState` iff present; loop bumps `state.turn` per
-  // iteration. Absent / invalid ⇒ undefined (no allocation, byte-identical).
-  const localizePhaseState = attachLocalizePhase(cfg)
-  // Turn-exit guard chain (refactor 2026-05-23): one composed chain replaces
-  // the prior `verifyGuardStep` + `closeoutGuardStep` ladder in `applyAction`.
-  // Default-OFF byte-identical: when neither `cfg.verifyGuard` is set NOR
-  // `cfg.closeoutGuard.enabled === true`, `buildGuardChain` returns `[]` and
-  // `applyAction` short-circuits with `guards.length > 0` (zero allocation,
-  // zero work). Order: VerifyGuard before CloseoutGuard (matches the legacy
-  // ordering — see `./guards/build.ts`).
-  const guardChain = buildGuardChain({
-    config: cfg,
-    verifyGuardState,
-    closeoutGuardState,
+  const ctx = await createRunAgentContext(config)
+  const startOutcome = await runSessionStartSequence({
+    cfg: ctx.cfg,
+    wm: ctx.wm,
+    sessionId: ctx.sessionId,
+    taskRegistry: ctx.features.taskRegistry,
   })
-  // ADR-0079 — session-scoped tool_choice turn state. Always constructed (a
-  // bare `{verifyGuardViolated:false, closeoutAttempted:false}`); with no guard
-  // ever arming a flag, `consumeTurnSignals` always yields `{}` and
-  // `resolveToolChoice` always returns `{kind:"auto"}` ⇒ the field is omitted
-  // from every `StreamInput` (byte-identical wire payload, default-OFF).
-  const toolChoiceState = createToolChoiceTurnState()
-  // ADR-0133 — session-scoped pending list of hook-emitted `promptHook`
-  // responses. See `loop-helpers#wireHookPromptPending`: attaches a push port
-  // to `cfg.subagentPendingPrompt` iff absent; the list is drained per turn by
-  // `prepareTurnContext`. Default-OFF: an empty list never renders a block.
-  const hookPromptPending = wireHookPromptPending(cfg)
-  // ADR-0082 — run-scoped memory_citation accumulator. Append-only: each
-  // recall that places records into the prompt window pushes one citation per
-  // placed record (via the `recallContext` `onPlaced` seam, threaded through
-  // `prepareTurnContext` → `resolveMemoryContext`). `finish()` attaches it to
-  // the outcome ONLY when non-empty (no store / no recall hits ⇒ omitted,
-  // byte-identical).
-  const memoryCitations: MemoryCitation[] = []
-  // ADR-0078 — startup gate: `normalizeRedactionConfig` THROWS a
-  // `RedactionConfigError` when redaction is `disabled` without a non-empty
-  // `acknowledgedRisk` (refuse to start silently unprotected). default-ON when
-  // `cfg.redaction` is absent. The run-scoped aggregator folds every hit
-  // (origin × kind) into a count; `finish()` surfaces it as
-  // `AgentOutcome.redactions` ONLY when non-empty (no hits ⇒ omitted, byte-
-  // identical). When redaction is disabled, dispatch/distill/envelope never
-  // produce hits so the rollup stays empty (the banner is the user-facing seam).
-  const redactionEnabled = normalizeRedactionConfig(cfg.redaction).enabled
-  const { agg: redactionAgg, record: recordRedaction } = createRedactionRollup()
-  // Codex absorption — memory L3 (Phase 6): session-scoped WorkingState.
-  // Wired in by `buildSessionFeatures` when `cfg.workingState?.enabled === true`;
-  // absent ⇒ `undefined`, no allocation, the per-turn block is omitted (byte-
-  // identical for callers without the opt-in).
-  const workingState = features.workingState
-  // ADR-0075 — Cursor-style ConversationSummaryArchive. Built ONLY when
-  // `cfg.compaction?.archive === true`; absent ⇒ `undefined`, no allocation,
-  // and `maybeCompact` skips the archive-append + `context_compacted` emit
-  // path entirely (byte-identical to the pre-archive loop). One archive per
-  // session lifetime (never shared across `runAgent` invocations) — the loop
-  // owns it.
-  const summaryArchive: ConversationSummaryArchive | undefined =
-    cfg.compaction?.archive === true ? createArchive() : undefined
-  // ADR-0077 Plane-B (L4 wire): session-scoped slot for the LAST sampling-
-  // request's TurnTiming snapshot. `streamConsume` overwrites this on every
-  // stream close (productive turn OR error/abort). `finish()` surfaces it on
-  // `AgentOutcome.turnTiming` ONLY when non-null AND the run produced at
-  // least one productive turn (i.e. a stream was actually opened). The
-  // YAML's "마지막 productive turn의 snapshot surface" contract: a no-stream
-  // immediate-abort run never opens a stream so the slot stays null and the
-  // outcome field stays omitted (byte-identical for callers that only read
-  // `reason`).
-  let lastTurnTiming: TurnTiming | null = null
-  const recordTurnTiming = (timing: TurnTiming): void => {
-    lastTurnTiming = timing
+  if (startOutcome === "aborted") {
+    return ctx.finish("aborted", 0, interruptedCategory("user"))
   }
-
-  // ADR-0125 turn-diff loop wiring — opt-in (`cfg.gitObservability?.enabled`).
-  // See `loop-helpers#buildTurnDiffSession` for the closed-port factory; absent
-  // /disabled ⇒ undefined (no `git` spawn, byte-identical legacy).
-  const turnDiffSession: TurnDiffSession | undefined = buildTurnDiffSession(cfg)
-
-  // ADR-0234 git-directive emit wire — opt-in
-  // (`cfg.gitDirectiveEmit?.enabled`). See `loop-helpers#buildGitDirectiveEmit`
-  // for the collector factory; absent/disabled ⇒ undefined (no collector
-  // built, no emitter instantiated, byte-identical legacy). When set, the
-  // helper ALSO mutates `cfg.gitDirectiveEmit.collector` so a downstream
-  // tool wire (gitTools at the composition root) reads the SAME collector
-  // the loop will flush at turn end.
-  const gitDirectiveCollector = buildGitDirectiveEmit(cfg)
-
-  // ADR-0235 per-turn shell-snapshot wire (opt-in `cfg.shellSnapshot`).
-  // Absent ⇒ helper returns `undefined` and EVERY tick site below is a no-op
-  // (the optional-chain calls return early before any allocation). Loop is
-  // byte-identical for every legacy caller (RFC §1.2 default-OFF). When
-  // present, captures at turn-start (or once per session when
-  // `captureAtTurnStart === false`) and exposes the active restore seam via
-  // `currentSeam()` — dispatch reads this when building `ToolContext`.
-  const shellSnapshotSession: ShellSnapshotSession | undefined = buildShellSnapshotSession(
-    cfg,
-    (message) => stream.emit({ type: "error", message }),
-    cfg.shellSnapshot?.shellEnv,
-  )
-  // Best-effort prune at session start + stash the session helper on `cfg`
-  // so dispatch can reach the active seam through the same AgentConfig
-  // channel every other per-turn slot uses (turnDiffSession is local to
-  // loop because only loop reads it; the shell-snapshot seam is read by
-  // dispatch, hence the field-on-cfg path). Storing the SESSION (not the
-  // seam) so a re-capture at the NEXT turn boundary is observed by the
-  // very next dispatch — the seam handle would freeze mid-turn.
-  // `exactOptionalPropertyTypes`: assign ONLY when defined so dispatch's
-  // optional-chain access stays type-safe (never `undefined`-assigned).
-  if (shellSnapshotSession !== undefined) {
-    await shellSnapshotSession.pruneOnStart()
-    cfg.shellSnapshotSession = shellSnapshotSession
+  const finished = await runAgentTurnLoop(ctx)
+  if (finished !== undefined) {
+    return finished
   }
-
-  // R2-B P1 — session-lifetime bundle. Configured ONCE here (after every
-  // session resource the helpers might need has been materialized) and passed
-  // unchanged into every `runTurn` call. The bundle is `readonly`, so a helper
-  // cannot accidentally rebind a session field mid-loop. Per-turn mutable
-  // state (`rec`, `wm`, …) lives in the SECOND bundle built inside the for
-  // loop (so `freshRecovery()` runs once per turn — byte-identical to the
-  // pre-bundle path that constructed it positionally on every call).
-  const session: TurnSession = {
-    config: cfg,
-    specs,
-    ...(recorder !== undefined ? { recorder } : {}),
-    ...(classifier !== undefined ? { classifier } : {}),
-    ...(skillGate !== undefined ? { skillGate } : {}),
-    ...(activeSkills !== undefined ? { activeSkills } : {}),
-    ...(summaryArchive !== undefined ? { archive: summaryArchive } : {}),
-    guards: guardChain,
-    hookPromptPending,
-  }
-
-  const finish = async (
-    reason: StopReason,
-    turns: number,
-    stopCategory?: StopCategory,
-    refusal?: { readonly rationale: string },
-  ): Promise<AgentOutcome> => {
-    // ADR-0030: clear the active-turn header and reflect the stop reason so a
-    // surface can ask "are we still mid-turn? were we interrupted?" after the
-    // loop returns. Absent ref ⇒ no-op (byte-identical legacy).
-    if (cfg.activeTurnRef) {
-      cfg.activeTurnRef.current = { currentTurn: null, isInterrupted: reason === "aborted" }
-    }
-    const messages = [...wm.snapshot()]
-    // ADR-0078 point #2 — envelope_jsonl: scan every text block of the final
-    // transcript at the persistence boundary and fold the hits into the run
-    // rollup. See `loop-helpers#scanEnvelopeForRedactions`. Disabled ⇒ skipped
-    // (each origin still fires once per secret via the distill path).
-    if (redactionEnabled && cfg.store) {
-      scanEnvelopeForRedactions(messages, recordRedaction)
-    }
-    if (cfg.store) {
-      await persistSession(buildPersistDeps(cfg, recorder, redactionEnabled, recordRedaction), {
-        sessionId,
-        finalMessages: messages,
-      })
-    }
-    // R-Phase5 P0-A: graceful shutdown of any pending background subagents.
-    // `features.cleanup` is set ONLY when `config.subagent` is configured
-    // (features.ts:204+), so `?.()` is a no-op for default-OFF sessions
-    // (RFC §1.2 byte-identical preserved). Idempotent: a second call sees
-    // `pendingIds() === []` and returns immediately. Failures are best-effort
-    // (the session is already finishing) — surface as an `error` event so
-    // probe/triage can see them, but do NOT block the outcome resolution.
-    try {
-      await features.cleanup?.()
-    } catch (e) {
-      const message = errMessage(e)
-      stream.emit({ type: "error", message: `subagent cleanup failed: ${message}` })
-    }
-    // L4 control-op cluster (2026-05-23) — follow-up queue snapshot save.
-    // Helper-extracted to keep `finish` flat (cognitive-complexity budget).
-    await saveFollowUpQueueSnapshot(cfg)
-    // ADR-0095 P7 — plan-mode snapshot save. Same boundary discipline as the
-    // queue save: errors collapse to `error` AgentEvent, never block finish.
-    await savePlanSnapshot(cfg)
-    recorder?.stopReason(reason)
-    if (cfg.hooks) await cfg.hooks.emit({ type: "session_end", reason, turns })
-    stream.emit({ type: "done", reason, turns })
-    // ADR-0073 (Spec B3): attach the structured stop-category when the caller
-    // provided one. `exactOptionalPropertyTypes`: spread conditionally so
-    // legacy callers see an outcome with NO `stopCategory` field (byte-
-    // identical to pre-B3 — they cannot observe a `stopCategory: undefined`).
-    // ADR-0073 stopCategory + ADR-0082 memoryCitations are both optional
-    // add-ons: spread each only when present so a legacy outcome carries
-    // neither field (byte-identical — callers that read only `reason` cannot
-    // observe an `undefined`/empty-array property).
-    // ADR-0078 — surface the redaction rollup ONLY when hits fired (omitted
-    // otherwise, byte-identical for callers that ignore it).
-    const redactions = redactionAgg.size > 0 ? [...redactionAgg.values()] : undefined
-    return {
-      reason,
-      turns,
-      messages,
-      ...(stopCategory !== undefined ? { stopCategory } : {}),
-      ...(memoryCitations.length > 0 ? { memoryCitations } : {}),
-      ...(redactions !== undefined ? { redactions } : {}),
-      // ADR-0076 Gap-1 SOTA++ — refusal payload, spread conditionally so a
-      // non-refusal outcome carries NO `refusal` key (byte-identical legacy).
-      ...(refusal !== undefined ? { refusal } : {}),
-      // ADR-0077 Plane-B (L4 wire): surface the LAST sampling-request's
-      // timing snapshot ONLY when a stream was actually opened (i.e.
-      // `streamConsume` ran at least once and overwrote the slot). An
-      // immediate-abort / no-stream run leaves the slot null and the
-      // field is omitted — byte-identical for callers that ignore it.
-      ...(lastTurnTiming !== null ? { turnTiming: lastTurnTiming } : {}),
-    }
-  }
-
-  // RFC-0002 §5.2 `session_start` — emitted ONCE at run start so the trajectory
-  // has a head marker (Group E maps it → kind:"session_start"). Pure
-  // observation: an AgentEvent only seen when a stream/recorder is attached
-  // (NullStream swallows it); it precedes nothing in the control flow.
-  stream.emit({ type: "session_start" })
-
-  if (cfg.hooks) await cfg.hooks.emit({ type: "session_start", sessionId })
-
-  // S5 — `user_prompt_submit` (Cursor / Claude Code parity). Emits ONCE per
-  // run if the seeded buffer ends in a user message (the common path: the
-  // surface appended a fresh prompt before calling runAgent). Honored response
-  // channels: `deny` ⇒ short-circuit into aborted; `updatedPrompt` (string)
-  // ⇒ rewrite the trailing user message's text block in place. No emission
-  // when there is no trailing user message (resume-without-new-prompt) or
-  // when no bus is wired (byte-identical legacy path). Helper-extracted to
-  // keep `runAgentInner` under the biome cognitive-complexity budget; see
-  // `emitUserPromptSubmitHook` below.
-  if (cfg.hooks !== undefined) {
-    const denied = await emitUserPromptSubmitHook(cfg, wm, sessionId)
-    if (denied !== null) {
-      return finish("aborted", 0, interruptedCategory("user"))
-    }
-  }
-
-  // L4 control-op cluster (2026-05-23) — follow-up queue snapshot restore.
-  // Helper-extracted; see `restoreFollowUpQueueSnapshot` below.
-  await restoreFollowUpQueueSnapshot(cfg)
-  // ADR-0095 P7 — plan-mode snapshot restore. Mirror discipline: errors
-  // collapse to `error` AgentEvent, never crash session-start.
-  await restorePlanSnapshot(cfg)
-
-  // L4 control-op cluster (2026-05-23) — Codex `ensureReady()` gate mirror.
-  // Now that the session is past `session_start` we can OBSERVE typed control
-  // ops on the submission envelope. Helper-extracted to keep `runAgentInner`
-  // under the cognitive-complexity budget; see `handleSubmissionControlOp`
-  // below. Returns `aborted` when the submission carries an `interrupt` op
-  // so the caller short-circuits into `finish`.
-  const subOutcome = handleSubmissionControlOp(cfg, features.taskRegistry)
-  if (subOutcome === "aborted") {
-    return finish("aborted", 0, interruptedCategory("user"))
-  }
-
-  for (let turn = 1; turn <= cfg.maxTurns; turn++) {
-    if (cfg.signal.aborted) return finish("aborted", turn - 1, interruptedCategory("user"))
-    // Localize-phase guard turn-counter bump (Agentless absorption — Tier 0).
-    // The loop's `turn` is 1-indexed; the guard's `state.turn` is 0-indexed
-    // (turn 0 = first turn). Absent state ⇒ no-op, byte-identical loop.
-    if (localizePhaseState !== undefined) {
-      localizePhaseState.turn = turn - 1
-    }
-    // RFC may-22 Phase 1: BudgetMeter tick — turn start. Optional-chain ⇒ when
-    // `cfg.budgetMeter === undefined` the call is a no-op and the loop is
-    // byte-for-byte identical to the pre-RFC path.
-    cfg.budgetMeter?.tick("turn")
-    // ADR-0030 mid-turn steering seam (default-OFF ⇒ both no-ops, byte-
-    // identical legacy). Order matters: await the barrier FIRST so a pending
-    // surface injection lands in the conversation buffer before we expose the
-    // fresh turn header and snapshot it for this turn's LLM call.
-    if (cfg.steerBarrier) {
-      // The surface may push a steered user message into the conversation
-      // buffer (`cfg.messages`) while the barrier resolves. `wm` holds its own
-      // copy (constructor does `[...initial]`), so reconcile the tail the
-      // barrier appended into `wm` — that is what the NEXT LLM snapshot reads.
-      const beforeLen = cfg.messages.length
-      await cfg.steerBarrier()
-      for (let i = beforeLen; i < cfg.messages.length; i++) {
-        const injected = cfg.messages[i]
-        if (injected) wm.append(injected)
-      }
-    }
-    if (cfg.activeTurnRef) {
-      cfg.activeTurnRef.current = {
-        currentTurn: makeTurnHeader({
-          turnId: crypto.randomUUID(),
-          kind: "main",
-          startedAt: Date.now(),
-          threadId: sessionId,
-        }),
-        isInterrupted: false,
-      }
-    }
-
-    // L4 control-op cluster (2026-05-23) — queued-follow-ups (ADR-0037) +
-    // typed ConversationAction (ADR-0071) consumption.
-    //
-    // Ordering:
-    //   1. Follow-up queue popReady (after steerBarrier, before
-    //      conversation-action): a queued follow-up is the OLDEST pending
-    //      input, so it seeds the next turn first. A non-null pausedReason
-    //      defers the pop and emits `response_queued{reason}` so the
-    //      surface can paint the back-pressure.
-    //   2. Conversation-action port poll: a typed action may inject a
-    //      user_message OR control the turn (cancel / cancel_subagent /
-    //      summarize / resume). The decision uses the activeTurnRef state
-    //      we just set (currentTurn non-null, isInterrupted false).
-    //
-    // Both are default-OFF (the absence of `followUpQueue` /
-    // `conversationActionPort` skips the entire block; byte-identical).
-    const followUpResult = pollFollowUpQueue(cfg, sessionId)
-    if (followUpResult !== null) wm.append(followUpResult)
-    const conversationActionOutcome = await pollConversationAction(cfg, features.taskRegistry)
-    if (conversationActionOutcome.kind === "finish_aborted") {
-      // accepted_control + cancel ⇒ unwind the parent turn (matches
-      // submission interrupt semantics). turn-1 because the for-loop's
-      // turn counter is 1-based; we have not yet consumed THIS turn.
-      return finish("aborted", turn - 1, interruptedCategory("user"))
-    }
-    if (conversationActionOutcome.kind === "injection") {
-      wm.append(conversationActionOutcome.message)
-    }
-
-    // ADR-0236 / ADR-0219 — Focus Chain auto-reinject (Cline absorption).
-    // Default-OFF: `cfg.focusChain` absent ⇒ no `tickTurn`, no `getInjection`,
-    // no allocation — byte-identical legacy. When present, advance the
-    // tracker BEFORE the LLM snapshot is taken so the per-turn injection
-    // (rendered as a `user` message body) lands ahead of the assistant turn.
-    // The port's surface is no-throw per its 5-contract; defense-in-depth
-    // wrap surfaces a structural error AgentEvent without crashing the turn.
-    if (cfg.focusChain !== undefined) {
-      try {
-        cfg.focusChain.tracker.tickTurn()
-        const injection = cfg.focusChain.tracker.getInjection()
-        if (injection !== null && injection.trim().length > 0) {
-          wm.append({
-            role: "user",
-            content: [{ type: "text", text: injection }],
-          })
-        }
-      } catch (e) {
-        stream.emit({
-          type: "error",
-          message: `focus-chain inject failed: ${errMessage(e)}`,
-        })
-      }
-    }
-
-    // Per-turn correlation working copy (RFC-0002 §5.1/§5.4). Pre-T3 this
-    // was computed-and-discarded (`void stampTurn(...)`) so the caller's
-    // `config.run` was never observed by downstream code. T3 reads the
-    // stamped `turn` from `cfg.run?.turn` inside `dispatchTool` to drive the
-    // dedup gate's sliding window, so when the gate is active we MUST
-    // actually thread the per-turn run. Two sub-cases:
-    //   1. caller supplied `config.run` ⇒ stamp `{...run, turn}` (still a
-    //      fresh copy — the caller's object is not mutated).
-    //   2. no `config.run` AND gate active ⇒ synthesize a minimal one
-    //      (`runId:sessionId`) so the structural brake actually engages for
-    //      the default RunContext-less path.
-    // Gate INACTIVE ⇒ neither branch runs (mirrors the pre-T3 discard),
-    // preserving byte-identical behavior for callers without the gate.
-    if (dedupGate) {
-      const stamped = stampTurn(cfg.run, turn)
-      cfg.run = stamped ?? { runId: sessionId, turn }
-    }
-    // ADR-0235 per-turn shell-snapshot capture (opt-in). Absent ⇒
-    // `shellSnapshotSession` is `undefined` and the optional-chain call
-    // returns synchronously without any work (byte-identical, RFC §1.2).
-    // Awaited so the snapshot is on-disk BEFORE the turn body opens any
-    // shell tool — every `runShell` call in this turn will pick up the
-    // same handle through `currentSeam()`. Failures inside the helper
-    // are surfaced as `error` AgentEvents (no-throw), and dispatch falls
-    // back to the legacy spawn for the turn (the seam is absent).
-    if (shellSnapshotSession !== undefined) {
-      await shellSnapshotSession.snapshotForTurn(turn)
-    }
-    stream.emit({ type: "turn_start", turn })
-    if (cfg.hooks) {
-      const tsEmit = await cfg.hooks.emit({ type: "turn_start", turn })
-      // ADR-0133 — a `turn_start` hook may return promptHook (e.g. inject a
-      // per-turn checklist). Push into the session-scoped pending list so
-      // runTurn's snapshot folds it into THIS turn's prompt.
-      if (tsEmit.promptHook !== undefined) hookPromptPending.push(tsEmit.promptHook)
-    }
-
-    // absorb #6 (ADR-0064): per-turn work-metrics. Both fields are `undefined`
-    // when no sink is wired (byte-identical, RFC §1.2). See `buildWorkMetrics`
-    // helper above runAgent — keeps the runAgent body free of new branches.
-    const { collector: workCollector, turnId: workTurnId } = buildWorkMetricsResources(cfg)
-
-    // Codex 10-step span tree — `session_task.turn`. Opens before the per-
-    // turn work begins, closes after `runTurn` returns (success OR failure).
-    // The turnId is derived from `activeTurnRef.currentTurn` when set (reuse
-    // the same id so an OTel trace ties to the surface header), else a
-    // freshly-generated UUID (the canonical id for this turn). With no sink
-    // the wrap is two no-op calls (NOOP_SPAN sentinel). Status mapping:
-    // `aborted` ⇒ aborted, `error` ⇒ error, otherwise `ok`.
-    const turnId = cfg.activeTurnRef?.current.currentTurn?.turnId ?? crypto.randomUUID()
-    const turnSpan: Span = startSpan(SPAN_NAMES.turn, turnSpanAttrs(turnId))
-    let turnSpanStatus: "ok" | "error" | "aborted" = "ok"
-    // ADR-0125 turn-diff loop wiring — snapshot the turn-start anchor SHA
-    // BEFORE the turn body runs. Absent session ⇒ no-op, no `git rev-parse`
-    // spawn, byte-identical. Awaited so a slow git call serializes with the
-    // body (the emitter is already best-effort: a null anchor at endTurn just
-    // returns null). Uses the loop's 1-indexed `turn` directly as the turn
-    // index (the emitter treats it as an opaque key per session).
-    if (turnDiffSession !== undefined) await turnDiffSession.startTurn(turn)
-    // Recovery counters are per-turn: SAME-TURN retries share & exhaust these,
-    // a fresh turn starts clean. runTurn owns the SEAM (buildTurnContext) and
-    // mutates `messages` (canonical history) in place.
-    let result: TurnResult
-    try {
-      // R2-B P1 — per-turn state bundle. `freshRecovery()` is constructed here
-      // so each turn enters runTurn with a clean counter (byte-identical to the
-      // pre-bundle positional call). All other fields are session-lifetime
-      // handles whose pointers don't change turn-to-turn (just shared by
-      // reference). `workCollector` is per-turn (built above for THIS turn).
-      const state: TurnState = {
-        wm,
-        rec: freshRecovery(),
-        breaker,
-        toolHistory,
-        workingState,
-        collector: workCollector,
-        toolChoiceState,
-        citations: memoryCitations,
-        onRedaction: recordRedaction,
-        onTurnTiming: recordTurnTiming,
-      }
-      result = await runTurn(turn, session, state)
-      turnSpanStatus =
-        result.kind === "aborted" ? "aborted" : result.kind === "error" ? "error" : "ok"
-    } catch (e) {
-      // runTurn does not throw today (every failure is converted to a
-      // TurnResult), but mark the span as error and re-throw if it ever
-      // does — the catch is defense in depth so the span always closes.
-      turnSpanStatus = "error"
-      endSpan(turnSpan, turnSpanStatus, attrs({}))
-      throw e
-    }
-    endSpan(turnSpan, turnSpanStatus, attrs({}))
-
-    // ADR-0125 turn-diff loop wiring — compute the cumulative diff between the
-    // turn-start anchor and the current HEAD/worktree, emit it onto the loop's
-    // stream if non-null. Absent session / no anchor / no changes / git
-    // failures ⇒ `endTurn` returns null and nothing is emitted (best-effort,
-    // never throws). Fires for EVERY turn the loop reached (including the
-    // terminal aborted/error/refusal/completed turns) so a host UI sees the
-    // final turn's diff before the loop returns. Position: after `endSpan` so
-    // the turn span closes before the diff emit lands, AND before
-    // `emitWorkMetrics` so a host that watches both events sees the diff
-    // FIRST (matches the recorder-first emission convention).
-    if (turnDiffSession !== undefined) {
-      const diffEvent = await turnDiffSession.endTurn(turn)
-      if (diffEvent !== null) stream.emit(diffEvent)
-    }
-
-    // ADR-0234 git-directive emit flush — drain any directives the mutating
-    // git tools recorded during this turn's intermediate-phase tool calls.
-    // The flush emits each entry through the wired emitter with
-    // `phase: "final-answer"` — the natural moment that satisfies the
-    // ADR-0221 phase invariant. Absent collector ⇒ no flush call (the helper
-    // returned `undefined`). The collector itself is no-throw; flush() returns
-    // typed Result-per-entry which we deliberately ignore at the loop level
-    // (test-only observability; production swallows wire errors so a sink
-    // failure cannot crash the turn). Position: after `endSpan` so the turn
-    // span closes first, after `turnDiffSession.endTurn` so the diff event
-    // emits before the directive lines (UI consumers see the diff context
-    // before the directives that describe what changed), and BEFORE
-    // `emitWorkMetrics` so the directives arrive on the wire ahead of the
-    // work-metrics summary.
-    gitDirectiveCollector?.flush()
-
-    // C11: turn accounting is now consistent. `recorder?.turn()` used to fire
-    // at turn-top, so a turn that immediately aborted/errored BEFORE producing
-    // any model output still inflated `agent.turns` — yet the aborted branch
-    // already reported `turn - 1` to `AgentOutcome.turns`, an error-vs-abort
-    // off-by-one. We now count a turn (metric AND outcome) only when it did
-    // real work: `tools` advanced the loop or `completed` produced a final
-    // model turn. A no-work `aborted`/`error` reports `turn - 1` and does NOT
-    // bump the recorder — so `AgentOutcome.turns` and `agent.turns` always
-    // agree. Normal-path counts are unperturbed (every productive turn still
-    // counts exactly once; `max_turns` is reached only via productive tool
-    // turns, so it still reports `cfg.maxTurns`).
-    // absorb #6 (ADR-0064): finalize + emit the per-turn work snapshot via a
-    // helper. Skipped when no sink is wired (byte-identical) or the turn
-    // aborted before any work landed (snapshot would be all-zeros — no signal).
-    emitWorkMetrics(cfg, workCollector, workTurnId, result.kind)
-    if (result.kind === "aborted") {
-      return finish("aborted", turn - 1, interruptedCategory("user"))
-    }
-    if (result.kind === "error") {
-      // Mirror the abort semantics: a turn that errored without producing a
-      // productive model turn did no work, so it must not inflate the count.
-      stream.emit({ type: "error", message: result.reason })
-      // ADR-0073 (Spec B3): classify the free-form reason into a structured
-      // {@link StopCategory}. Pure classification — no IO, no clock; legacy
-      // `reason: "error"` stays the authoritative top-level outcome so a
-      // surface that only reads it sees byte-identical behavior.
-      return finish("error", turn - 1, classifyErrorReason(result.reason))
-    }
-    if (result.kind === "refusal") {
-      // ADR-0076 Gap-1 SOTA++ — model declined via `stop_reason="refusal"`.
-      // The refusing turn DID produce a final assistant message (visible
-      // refusal text), so it counts as work: bump the recorder and report
-      // `turn` (not `turn - 1`) — mirrors the `completed` accounting. The
-      // typed `refusal.rationale` is threaded into the outcome via the
-      // 4th finish() arg.
-      recorder?.turn()
-      return finish("refusal", turn, refusalCategory(), { rationale: result.rationale })
-    }
-    recorder?.turn()
-
-    // RFC may-22 Phase 1 + audit R1 fix: BudgetMeter exhaustion check runs
-    // BEFORE the `completed` early-return so a cap (cost / tokens / tools)
-    // blown DURING the terminal turn reports `budget_exhausted` rather than a
-    // false `completed` (exit 0). The check is here — after this turn's usage
-    // ticks have all fired (emitWorkMetrics is post-turn) and after the
-    // aborted/error early-returns (user intent / LLM error stay authoritative)
-    // — so it covers BOTH the completing turn and the continue-to-next-turn
-    // path with a single propositional check. Default-OFF (no meter ⇒ no
-    // check, byte-identical legacy).
-    const ex = cfg.budgetMeter?.checkExhausted()
-    if (ex?.exhausted) {
-      // ADR-0269 Phase 3 — surface the budget hard-deny on the debug-tracer
-      // side channel BEFORE finishing the run, so a tracer can pair the
-      // decision row with the final outcome row. Default-OFF: no
-      // decisionEmitter ⇒ zero allocation (helper short-circuits).
-      emitBudgetExhaustedDecision(cfg.decisionEmitter, ex, { turn })
-      return finish("budget_exhausted", turn, completedCategory("max_turns"))
-    }
-    if (result.kind === "completed") return finish("completed", turn, completedCategory("normal"))
-
-    // A real tool turn landed (not stuck thrashing compaction) — clear the
-    // consecutive no-progress strikes (Tier 0 safety hardening, ADR-0011).
-    breaker?.noteProgress()
-    wm.append({ role: "user", content: result.resultBlocks })
-    if (pendingPlanExit !== null) {
-      applyPendingPlanExit(cfg, pendingPlanExit, hookPromptPending)
-      pendingPlanExit = null
-    }
-  }
-
-  return finish("max_turns", cfg.maxTurns, completedCategory("max_turns"))
+  return ctx.finish("max_turns", ctx.cfg.maxTurns, completedCategory("max_turns"))
 }

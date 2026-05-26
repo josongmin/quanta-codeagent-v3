@@ -1,8 +1,12 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type { AgentConfig } from "@/agent"
 import { runAgent } from "@/agent"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
-import type { PermissionContext } from "@/permission"
+import { __resetDefaultPermissionStore, type PermissionContext } from "@/permission"
+import { __resetRuntimeConfig } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
 
@@ -63,6 +67,27 @@ const cfg = (over: Partial<AgentConfig> & Pick<AgentConfig, "llm">): AgentConfig
   signal: new AbortController().signal,
   onConfirm: async () => false,
   ...over,
+})
+
+const originalPermissionState = process.env.QUANTA_PERMISSION_STATE
+let permissionStateRoot: string | null = null
+
+beforeEach(() => {
+  permissionStateRoot = mkdtempSync(join(tmpdir(), "working-loop-perm-state-"))
+  process.env.QUANTA_PERMISSION_STATE = join(permissionStateRoot, "permission-state.json")
+  __resetRuntimeConfig()
+  __resetDefaultPermissionStore()
+})
+
+afterEach(() => {
+  if (permissionStateRoot !== null) {
+    rmSync(permissionStateRoot, { recursive: true, force: true })
+    permissionStateRoot = null
+  }
+  if (originalPermissionState === undefined) delete process.env.QUANTA_PERMISSION_STATE
+  else process.env.QUANTA_PERMISSION_STATE = originalPermissionState
+  __resetRuntimeConfig()
+  __resetDefaultPermissionStore()
 })
 
 describe("loop routes history through WorkingMemory", () => {

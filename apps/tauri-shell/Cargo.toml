@@ -57,6 +57,11 @@ hex = "0.4"
 # `QUANTA_BUN_PATH`).
 which = "6"
 
+# Base64 for encoding the screenshot PNG into the hotkey-capture event
+# payload (frontend converts to a data URL for preview + ships raw bytes
+# to the LLM via `input.append({ images })`).
+base64 = "0.22"
+
 [build-dependencies]
 # Generates context (icons, capability index, info.plist merge) from
 # `tauri.conf.json`.

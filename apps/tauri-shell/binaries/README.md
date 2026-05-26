@@ -1,22 +1,20 @@
-# `binaries/` — sidecar drop-in directory
+# `binaries/` — sidecar staging directory
 
 Tauri's `bundle.externalBin` allowlist (see `../tauri.conf.json`) expects
-the two sidecar binaries to live in this directory **before** you run
-`cargo tauri build`. They are NOT committed — they're build artifacts of
-sibling workers.
+the two sidecar binaries to live in this directory when the shell build
+runs. `../scripts/prepare-build.sh` now compiles and stages them
+automatically from `beforeBuildCommand`.
 
 | Binary               | Source                          | Build command                                                                                  |
 |----------------------|---------------------------------|------------------------------------------------------------------------------------------------|
 | `quanta-web-daemon`  | `src/apps/web-daemon/` (worker B) | `bun build --compile --outfile binaries/quanta-web-daemon src/apps/web-daemon/index.ts`         |
 | `screen-ocr`         | `native/screen-ocr/` (worker E) | `cd native/screen-ocr && swift build -c release && cp .build/release/screen-ocr ../../apps/tauri-shell/binaries/screen-ocr` |
 
-Build order:
+The build script also mirrors each sidecar into:
 
-1. Bun web-daemon — independent.
-2. Swift screen-ocr — independent.
-3. (You can do 1 and 2 in any order or in parallel.)
-4. `cargo tauri build` from `apps/tauri-shell/` — Tauri copies both into
-   the `.app` bundle's `Contents/MacOS/` directory automatically.
+- `<name>-<target-triple>` in this directory, for Tauri's sidecar resolver
+- `target/release/{<name>,<name>-<target-triple>}`, so
+  `cargo tauri build --no-bundle` produces a directly runnable release tree
 
 ## Tauri 2.x target-triple suffix
 
@@ -30,9 +28,8 @@ ln -s screen-ocr screen-ocr-$(rustc -vV | awk '/host/ {print $2}')
 ln -s quanta-web-daemon quanta-web-daemon-$(rustc -vV | awk '/host/ {print $2}')
 ```
 
-This is documented here (not automated) because the target triple is
-toolchain-local and we don't want a build script that mutates worker B/E
-outputs.
+This is automated now because stale sidecar copies in `target/release/`
+were a real failure mode during shell smoke.
 
 ## Why not commit these?
 

@@ -185,6 +185,32 @@ export interface ToolContext {
    *  in `@/agent`) is the only place that knows how to wire the concrete port
    *  here. */
   shellSnapshot?: ShellSnapshotRestoreSeam
+  /** Self-inspection seam for the `session_config` tool. Read+write over the
+   *  agent's own SDK posture (effort tier, identity mode, tool profile, model,
+   *  provider). The dispatch seam wires this from `AgentConfig.sessionConfigPort`;
+   *  when absent, `session_config` returns a typed `not_wired` failure (the
+   *  tool itself is always registered in `buildDefaultTools` so the LLM can
+   *  surface a coherent answer either way). Duck-typed (structural mirror of
+   *  `SessionConfigSeam` in `./session_config`) so the `@/tool` slice never
+   *  imports `@/agent`. */
+  sessionConfig?: SessionConfigSeam
+}
+
+/** Canonical seam declaration for the `session_config` tool. Lives in
+ *  `./types` (not in `./session_config`) so `ToolContext` can reference it
+ *  without a circular import; the tool file re-exports it for downstream
+ *  callers. The dispatch seam (`@/agent/dispatch.ts`) builds the concrete
+ *  port from `AgentConfig.sessionConfigPort`; absent ⇒ the tool returns a
+ *  typed `not_wired` failure. Effort tier mirrors `@/agent/effort#EffortLevel`
+ *  as a closed literal union — the unit test in
+ *  `tests/unit/tool/session-config.test.ts` pins parity. */
+export interface SessionConfigSeam {
+  readonly readEffort: () => "default" | "max" | "high" | "medium" | "low"
+  readonly writeEffort: (next: "default" | "max" | "high" | "medium" | "low") => void
+  readonly readIdentityMode?: () => string
+  readonly readToolProfile?: () => string
+  readonly readModel?: () => string
+  readonly readProvider?: () => string
 }
 
 /** ADR-0235 wire — structural mirror of `ShellSnapshotRestoreSeam` from

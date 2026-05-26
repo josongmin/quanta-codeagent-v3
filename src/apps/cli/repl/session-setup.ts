@@ -9,10 +9,11 @@ import {
 import type { ImageBlock, LLMPort, Message } from "@/llm"
 import type { StructuredLogger } from "@/observability"
 import type { PermissionMode, PermissionStore } from "@/permission"
+import type { PendingApprovalView } from "@/protocol/session"
+import type { RuntimeContext } from "@/sdk/runtime"
 import { clearFsJailDecisionSink, setFsJailDecisionSink } from "@/storage"
 import type { StreamPort } from "@/stream"
 import type { TaskRegistry } from "@/subagent"
-import type { RuntimeContext } from "@/sdk/runtime"
 import type { BranchProgressTracker } from "../branch-search-progress"
 import type { CostPanel } from "../cost-panel"
 import type { DebugCmdState } from "../debug-cmd"
@@ -131,6 +132,7 @@ export interface SessionSetupResult {
    *  land on a clean screen. Absent ⇒ no tee allocated (byte-identical
    *  default-OFF). */
   readonly timelinePanel: TimelinePanel | undefined
+  readonly approvalPrompt: (approval: PendingApprovalView) => Promise<"approve" | "deny">
   readonly runtimeContext: RuntimeContext
   readonly costPanel: CostPanel | undefined
   readonly branchProgress: BranchProgressTracker | undefined
@@ -207,7 +209,7 @@ export const setupSession = async (
     timelineStream,
   )
 
-  const { runtimeContext } = await composeCliRuntimeContext({
+  const { approvalPrompt, runtimeContext } = await composeCliRuntimeContext({
     boot,
     turnStream,
     loadPermissionStore: deps.loadPermissionStore,
@@ -276,6 +278,7 @@ export const setupSession = async (
     turnSummary,
     debugHandle,
     timelinePanel,
+    approvalPrompt,
     runtimeContext,
     costPanel: boot.costPanel as CostPanel | undefined,
     branchProgress: boot.branchProgress as BranchProgressTracker | undefined,

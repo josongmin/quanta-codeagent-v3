@@ -54,17 +54,72 @@ interface Harness {
   runNextTimer: () => void
 }
 
+const parseSentFrame = (raw: string): Record<string, unknown> =>
+  JSON.parse(raw) as Record<string, unknown>
+
+const expectConnectFrame = (raw: string | undefined, sessionId: string): void => {
+  expect(raw).toBeDefined()
+  const parsed = parseSentFrame(raw ?? "")
+  expect(parsed).toMatchObject({
+    version: SESSION_PROTOCOL_VERSION,
+    kind: "connect",
+    sessionId,
+  })
+}
+
+const encodeRejectedFrame = (sessionId?: string): string =>
+  JSON.stringify({
+    version: SESSION_PROTOCOL_VERSION,
+    kind: "rejected",
+    target: "connect",
+    reason: "protocol_validation",
+    issue: "handshake_required",
+    ...(sessionId === undefined ? {} : { sessionId }),
+  })
+
+const encodeSnapshotFrame = (sessionId: string): string =>
+  JSON.stringify({
+    version: SESSION_PROTOCOL_VERSION,
+    kind: "snapshot",
+    payload: {
+      sessionId,
+      revision: 1,
+      seq: 0,
+      state: {
+        status: "idle",
+        draftInput: "",
+        permissionMode: "default",
+        messageCount: 0,
+      },
+      capabilities: {
+        approvals: "none",
+        tools: true,
+        memory: false,
+        artifacts: false,
+        subagents: false,
+        automation: false,
+        shellSnapshot: false,
+        transport: "websocket",
+      },
+      pendingApproval: null,
+      openArtifacts: [],
+    },
+  })
+
 const buildHarness = (): Harness => {
   const fakes: FakeWebSocket[] = []
   const timers: Array<{ cb: () => void; ms: number; handle: number }> = []
   let nextHandle = 1
 
+  class TestWebSocket extends FakeWebSocket {
+    constructor(url: string, protocols?: string | readonly string[]) {
+      super(url, protocols)
+      fakes.push(this)
+    }
+  }
+
   const client = new SessionClient({
-    webSocketCtor: ((url: string, protocols?: string | readonly string[]) => {
-      const fake = new FakeWebSocket(url, protocols)
-      fakes.push(fake)
-      return fake
-    }) as unknown as new (
+    webSocketCtor: TestWebSocket as unknown as new (
       url: string,
       protocols?: string | readonly string[],
     ) => WebSocketLike,
@@ -95,7 +150,7 @@ const buildHarness = (): Harness => {
 }
 
 describe("SessionClient", () => {
-  it("constructs a WebSocket on connect() and transitions to connected on open", () => {
+  it("constructs a WebSocket on connect() and sends the handshake connect frame on open", () => {
     const h = buildHarness()
     const states: string[] = []
     h.client.onConnectionChange((s) => states.push(s.kind))
@@ -105,8 +160,8 @@ describe("SessionClient", () => {
     expect(h.fakes[0]?.url).toBe("ws://localhost/test")
 
     h.fakes[0]?._simulateOpen()
-    expect(states).toContain("connecting")
-    expect(states).toContain("connected")
+    expect(states).toEqual(["closed", "connecting"])
+    expectConnectFrame(h.fakes[0]?.sent[0], "ui-session")
   })
 
   it("appends ?token query when an auth token is provided", () => {
@@ -157,6 +212,8 @@ describe("SessionClient", () => {
     const h = buildHarness()
     h.client.connect({ url: "ws://localhost/x" })
     h.fakes[0]?._simulateOpen()
+    h.fakes[0]?._simulateMessage(encodeRejectedFrame("s1"))
+    h.fakes[0]?._simulateMessage(encodeSnapshotFrame("s1"))
 
     h.client.send({
       sessionId: "s1",
@@ -165,8 +222,10 @@ describe("SessionClient", () => {
       type: "turn.run",
     })
 
-    expect(h.fakes[0]?.sent).toHaveLength(1)
-    const sentRaw = h.fakes[0]?.sent[0] ?? ""
+    expect(h.fakes[0]?.sent).toHaveLength(3)
+    expectConnectFrame(h.fakes[0]?.sent[0], "ui-session")
+    expectConnectFrame(h.fakes[0]?.sent[1], "s1")
+    const sentRaw = h.fakes[0]?.sent[2] ?? ""
     const parsed = JSON.parse(sentRaw) as Record<string, unknown>
     expect(parsed.version).toBe(SESSION_PROTOCOL_VERSION)
     expect(parsed.kind).toBe("command")
@@ -235,5 +294,103 @@ describe("SessionClient", () => {
       expect(h.client.state.attempt).toBe(2)
       expect(h.client.state.retryInMs).toBe(1000)
     }
+  })
+
+  it("learns the canonical sessionId from a rejected handshake reply and replays connect", () => {
+    const h = buildHarness()
+    const learnedIds: string[] = []
+
+    h.client.onSessionId((sessionId) => learnedIds.push(sessionId))
+    h.client.connect({ url: "ws://localhost/x" })
+    h.fakes[0]?._simulateOpen()
+    h.fakes[0]?._simulateMessage(encodeRejectedFrame("srv-1"))
+
+    expect(h.client.sessionId).toBe("srv-1")
+    expect(learnedIds).toEqual(["srv-1"])
+    expect(h.fakes[0]?.sent).toHaveLength(2)
+    expectConnectFrame(h.fakes[0]?.sent[0], "ui-session")
+    expectConnectFrame(h.fakes[0]?.sent[1], "srv-1")
+  })
+
+  it("transitions to connected only after the snapshot handshake completes", () => {
+    const h = buildHarness()
+    const states: string[] = []
+
+    h.client.onConnectionChange((s) => states.push(s.kind))
+    h.client.connect({ url: "ws://localhost/x" })
+    h.fakes[0]?._simulateOpen()
+    h.fakes[0]?._simulateMessage(encodeRejectedFrame("srv-1"))
+    h.fakes[0]?._simulateMessage(encodeSnapshotFrame("srv-1"))
+
+    expect(states).toEqual(["closed", "connecting", "connected"])
+    expect(h.client.state.kind).toBe("connected")
+  })
+
+  it("dispatches decoded snapshots to snapshot subscribers", () => {
+    const h = buildHarness()
+    const seen: string[] = []
+
+    h.client.onSnapshot((snapshot) => {
+      seen.push(snapshot.state.status)
+    })
+    h.client.connect({ url: "ws://localhost/x" })
+    h.fakes[0]?._simulateOpen()
+    h.fakes[0]?._simulateMessage(encodeRejectedFrame("srv-1"))
+    h.fakes[0]?._simulateMessage(encodeSnapshotFrame("srv-1"))
+
+    expect(seen).toEqual(["idle"])
+  })
+
+  it("reuses the learned canonical sessionId on the next socket open after reconnect", () => {
+    const h = buildHarness()
+
+    h.client.connect({ url: "ws://localhost/x" })
+    h.fakes[0]?._simulateOpen()
+    h.fakes[0]?._simulateMessage(encodeRejectedFrame("srv-1"))
+    h.fakes[0]?._simulateClose(1006, "abnormal")
+    h.runNextTimer()
+
+    expect(h.fakes).toHaveLength(2)
+    h.fakes[1]?._simulateOpen()
+    expectConnectFrame(h.fakes[1]?.sent[0], "srv-1")
+  })
+
+  it("ignores rejected frames that do not carry a canonical sessionId", () => {
+    const h = buildHarness()
+    const learnedIds: string[] = []
+
+    h.client.onSessionId((sessionId) => learnedIds.push(sessionId))
+    h.client.connect({ url: "ws://localhost/x" })
+    h.fakes[0]?._simulateOpen()
+    h.fakes[0]?._simulateMessage(encodeRejectedFrame())
+
+    expect(h.client.sessionId).toBeNull()
+    expect(learnedIds).toEqual([])
+    expect(h.fakes[0]?.sent).toHaveLength(1)
+    expectConnectFrame(h.fakes[0]?.sent[0], "ui-session")
+  })
+
+  it("surfaces command rejections to rejection subscribers", () => {
+    const h = buildHarness()
+    const seen: string[] = []
+
+    h.client.onRejected((frame) => {
+      seen.push(`${frame.target}:${frame.reason}:${frame.issue ?? ""}`)
+    })
+    h.client.connect({ url: "ws://localhost/x" })
+    h.fakes[0]?._simulateOpen()
+    h.fakes[0]?._simulateMessage(
+      JSON.stringify({
+        version: SESSION_PROTOCOL_VERSION,
+        kind: "rejected",
+        target: "command",
+        reason: "protocol_validation",
+        issue: "session_id_mismatch",
+        sessionId: "srv-1",
+        commandId: "cmd-1",
+      }),
+    )
+
+    expect(seen).toEqual(["command:protocol_validation:session_id_mismatch"])
   })
 })

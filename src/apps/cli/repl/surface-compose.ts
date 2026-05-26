@@ -9,7 +9,11 @@ import {
 } from "@/agent/conversation-checkpoint"
 import type { Message } from "@/llm"
 import { buildCostDashboard, GEN_AI_ATTRS, renderDashboardText } from "@/observability"
-import type { RuntimeSideConversationArgs, RuntimeSideConversationResult } from "@/sdk/runtime"
+import type {
+  RuntimeFacadeComposeOptions,
+  RuntimeSideConversationArgs,
+  RuntimeSideConversationResult,
+} from "@/sdk/runtime"
 import {
   loadSessionById,
   type SavedSession,
@@ -17,7 +21,6 @@ import {
   saveSessionById,
 } from "@/session"
 import { logger } from "@/shared"
-import type { Tool } from "@/tool"
 import { runImageCmd } from "../image-cmd"
 import type { ImageQueue } from "../image-queue"
 import { createPromptHistory, type PromptHistory } from "../prompt-history"
@@ -187,6 +190,10 @@ export interface ReplSurfaceWires {
   readonly composerHandle: ComposerHandle
   /** ADR-0291 — surface-owned text inbox singleton. */
   readonly textInbox: TextInbox
+  /** Constructor-time runtime composition inputs the loop threads into
+   *  `runtimeContext.createRuntimeFacade(...)` so the public SDK surface stays
+   *  immutable after bootstrap. */
+  readonly runtimeFacadeCompose: RuntimeFacadeComposeOptions
   /** ADR-0292 — surface-side hook the loop uses to swap its live history
    *  binding when `/rewind-conv <tag>` restores a snapshot. Wired by the
    *  loop via a setter so the closure captures the loop-internal `let`
@@ -299,12 +306,8 @@ export const composeSurfaceWires = (
   opts?: { readonly convStore?: ConversationCheckpointStore },
 ): ReplSurfaceWires => {
   const convStore = opts?.convStore ?? defaultConversationCheckpointStore()
-  // ADR-0300/0304 — per-session granular checkpoint registry. ALWAYS
-  // instantiated (pure in-memory, zero cost); mirrored onto the runtime bridge
-  // so `assembleConfig` carries it onto `AgentConfig.granularRegistry`.
-  // The per-tool recorder (Wire 3 below) populates it when opted in.
   const granularRegistry: GranularRegistryPort = defaultGranularRegistry()
-  setup.runtimeContext.setGranularRegistry(granularRegistry)
+  let registryToolMapper: RuntimeFacadeComposeOptions["registryToolMapper"] | undefined
   // ADR-0309 Wire 3 — per-tool auto-record cadence. Env-gated:
   // `QUANTA_PER_TOOL_RECORD=on` ⇒ wrap every tool in the session registry
   // with a pre-execute snapshot recorder. Absent / any other value ⇒
@@ -339,7 +342,11 @@ export const composeSurfaceWires = (
       },
       logger,
     })
-    setup.runtimeContext.wrapRegistry((tool: Tool) => recorder.wrapTool(tool))
+    registryToolMapper = (tool) => recorder.wrapTool(tool)
+  }
+  const runtimeFacadeCompose: RuntimeFacadeComposeOptions = {
+    granularRegistry,
+    ...(registryToolMapper !== undefined ? { registryToolMapper } : {}),
   }
   // ADR-0292 — turn-end record wire. Env-gated: `QUANTA_CHECKPOINT_CONV=on`
   // wires the live wire; anything else leaves the slot `null` so the slash
@@ -474,6 +481,7 @@ export const composeSurfaceWires = (
     playbookSeam,
     composerHandle,
     textInbox,
+    runtimeFacadeCompose,
     setReplaceMessages,
     setSideConversationStart,
   }

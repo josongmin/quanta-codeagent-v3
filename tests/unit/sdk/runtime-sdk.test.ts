@@ -99,6 +99,70 @@ describe("@/sdk/runtime", () => {
     await runtime.close()
   })
 
+  test("publishes turn.started and running state before the host turn resolves", async () => {
+    let releaseHostTurn = (): void => undefined
+    const hostTurnGate = new Promise<void>((resolve) => {
+      releaseHostTurn = resolve
+    })
+    const runtime = await createRuntime({
+      host: createSingleSessionRuntimeHost(() => ({
+        describe: () => ({
+          sessionId: "sdk-session",
+          permissionMode: "default",
+          capabilityManifest: {
+            approvals: "none",
+            tools: false,
+            memory: false,
+            artifacts: false,
+            subagents: false,
+            automation: false,
+            shellSnapshot: false,
+            transport: "inproc",
+          },
+        }),
+        runTurn: async () => {
+          await hostTurnGate
+          return { outcome: makeOutcome("completed"), messages: makeOutcome("completed").messages }
+        },
+        close: async () => undefined,
+      })),
+    })
+    const session = await runtime.createSession({ cwd: "/tmp", permissionMode: "default" })
+
+    await session.input.append("ping")
+
+    let sawTurnStarted = false
+    let sawRunningUpdate = false
+    let resolveStarted = (): void => undefined
+    const started = new Promise<void>((resolve) => {
+      resolveStarted = resolve
+    })
+    const off = session.subscribe((event) => {
+      if (event.type === "turn.started") {
+        sawTurnStarted = true
+        resolveStarted()
+      }
+      if (event.type === "session.state.updated" && event.state.status === "running") {
+        sawRunningUpdate = true
+      }
+    })
+
+    const turnPromise = session.turn.run()
+    await started
+
+    expect(sawTurnStarted).toBe(true)
+    expect(sawRunningUpdate).toBe(true)
+    expect((await session.snapshot()).state.status).toBe("running")
+
+    releaseHostTurn()
+    const turn = await turnPromise
+    expect(turn.turn?.outcome.reason).toBe("completed")
+
+    off()
+    await session.close()
+    await runtime.close()
+  })
+
   test("side conversation proxies through the runtime session seam", async () => {
     let seenQuestion = ""
     const runtime = await createRuntime({

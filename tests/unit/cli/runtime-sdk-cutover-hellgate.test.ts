@@ -70,6 +70,7 @@ describe("CLI runtime SDK cutover source gates", () => {
     const runtimeContext = readSource("src/apps/cli/repl/runtime-context-compose.ts")
     const sdkContext = readSource("src/sdk/runtime/context.ts")
     const surface = readSource("src/apps/cli/repl/surface-compose.ts")
+    const sessionLoop = readSource("src/apps/cli/repl/session-loop.ts")
     const setup = readSource("src/apps/cli/repl/session-setup.ts")
     const internal = readSource("src/apps/cli/internal.ts")
 
@@ -83,15 +84,20 @@ describe("CLI runtime SDK cutover source gates", () => {
     expect(runtimeContext).not.toContain('from "@/runner/assemble/config"')
     expect(runtimeContext).not.toContain('from "@/runner/session-memory-auto"')
     expect(runtimeContext).not.toContain("RuntimeSessionDeps")
+    expect(runtimeContext).not.toContain(".withAdmissibility(")
 
     expect(surface).not.toContain("import { assembleConfig")
     expect(surface).toContain("startSideConversation: async (args) => {")
+    expect(surface).not.toContain(".wrapRegistry(")
+    expect(surface).not.toContain(".setGranularRegistry(")
 
     expect(sdkContext).not.toContain("RuntimeSessionDeps")
     expect(sdkContext).not.toContain("CreateRuntimeFacadeFromSessionDepsArgs")
     expect(sdkContext).not.toContain('from "@/sdk/runtime/bridge"')
     expect(sdkContext).not.toContain("createRuntimeFacadeFromSessionDeps")
     expect(sdkContext).not.toContain("export interface RuntimeBridgeState")
+
+    expect(sessionLoop).not.toContain(".ensureAutomationEngine(")
 
     expect(setup).not.toContain("sideConversationPort")
     expect(setup).not.toContain('from "@/host/runtime/session-host"')

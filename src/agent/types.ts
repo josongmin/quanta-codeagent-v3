@@ -622,6 +622,23 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   sessionEffort?: () => EffortLevel | undefined
   /**
+   * Self-inspection / self-mutation seam consumed by the `session_config`
+   * tool. Read + write over the agent's own SDK posture (effort tier, identity
+   * mode, tool profile, model, provider). The dispatch seam wires this
+   * directly into `ToolContext.sessionConfig`. Absent ⇒ the tool returns a
+   * typed `not_wired` failure to the model (the tool is still registered so
+   * the LLM can give the operator a coherent reply either way; default-OFF
+   * is byte-identical to pre-ADR behavior since no session previously called
+   * the tool).
+   *
+   * The composition root (`apps/cli/host/bootstrap-session.ts`) builds the
+   * concrete seam from the existing `effortStore` + `identityModeState` +
+   * `toolProfileState` plus the resolved provider/model from runtime config.
+   * Sliced (no `@/agent` ↔ `@/tool` cycle) via the canonical declaration in
+   * `@/tool/types`.
+   */
+  sessionConfigPort?: import("@/tool").SessionConfigSeam
+  /**
    * ADR-0081 shell output delta streaming — opt-in observer for the typed
    * `ShellExecEvent` stream. The dispatch seam forwards this to
    * `ToolContext.onShellEvent` so the `bash` tool (and any future shell-

@@ -5,7 +5,9 @@
 //!   2. Install in-app state (DaemonHandle, LastSelection, HotkeyEnabled).
 //!   3. Auto-start the bun web-daemon sidecar (spawn-and-supervise).
 //!   4. Inject `window.__QUANTA_CONFIG__` into the main webview at boot.
-//!   5. Hotkey registration is OPT-IN — frontend calls `enable_hotkey`.
+//!   5. Auto-enable the active-monitor capture hotkey
+//!      (`Cmd+Ctrl+Shift+[`) and Send-trigger hotkey
+//!      (`Cmd+Ctrl+Shift+]`) at boot.
 
 #![cfg_attr(
     all(not(debug_assertions), target_os = "windows"),
@@ -14,7 +16,7 @@
 #![deny(unsafe_code)]
 
 use quanta_tauri_shell_lib::{commands, daemon, hotkey, ocr};
-use tauri::{Manager, RunEvent, WebviewWindow};
+use tauri::{Manager, RunEvent};
 
 fn main() {
     let log_plugin = tauri_plugin_log::Builder::default()
@@ -26,11 +28,42 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .on_page_load(|webview, _payload| {
+            if webview.label() != "main" {
+                return;
+            }
+            let handle = webview.app_handle().clone();
+            tauri::async_runtime::spawn(async move {
+                match daemon::current_info(&handle).await {
+                    Ok(info) => daemon::publish_config(&handle, &info),
+                    Err(err) => {
+                        log::warn!(
+                            target: "quanta::boot",
+                            "page-load config inject skipped: {err}"
+                        );
+                    }
+                }
+            });
+        })
         .setup(|app| {
             let handle = app.handle().clone();
             ocr::install(&handle);
             hotkey::install(&handle);
             daemon::install(&handle);
+
+            // Auto-enable the active-monitor capture (`Cmd+Ctrl+Shift+[`)
+            // and Send-trigger (`Cmd+Ctrl+Shift+]`) hotkeys. Default-ON
+            // per user request — the hotkeys ARE the feature surface.
+            // Failure is non-fatal: the rest of the app boots regardless.
+            let h_hotkey = handle.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(err) = hotkey::enable(&h_hotkey).await {
+                    log::warn!(
+                        target: "quanta::boot",
+                        "hotkey auto-enable failed: {err}"
+                    );
+                }
+            });
 
             // Kick off the daemon supervisor. If it fails, the frontend can
             // still come up — the user retries from the UI via
@@ -44,7 +77,11 @@ fn main() {
                             info.port,
                             info.pid
                         );
-                        inject_config_into_main(&handle, &info);
+                        // Best-effort fallback only. The frontend's primary
+                        // bootstrap path now pulls config via `daemon_info`;
+                        // this injection just keeps older browser-only code
+                        // paths working when the webview is already ready.
+                        daemon::publish_config(&handle, &info);
                     }
                     Err(err) => {
                         log::warn!(target: "quanta::boot", "daemon auto-start failed: {err}");
@@ -58,6 +95,7 @@ fn main() {
             commands::capture_window,
             commands::start_daemon,
             commands::stop_daemon,
+            commands::restart_daemon,
             commands::daemon_status,
             commands::daemon_info,
             commands::enable_hotkey,
@@ -90,33 +128,3 @@ fn main() {
     });
 }
 
-/// Inject `window.__QUANTA_CONFIG__ = { wsUrl, httpUrl, authToken }` into the
-/// main webview at boot. The React app reads it instead of falling back to
-/// `import.meta.env` defaults (which would target the dev daemon, not this
-/// per-app instance).
-fn inject_config_into_main<R: tauri::Runtime>(
-    handle: &tauri::AppHandle<R>,
-    info: &daemon::DaemonInfo,
-) {
-    let Some(window): Option<WebviewWindow<R>> = handle.get_webview_window("main") else {
-        log::warn!(target: "quanta::boot", "main webview not found at config-inject time");
-        return;
-    };
-    let payload = serde_json::json!({
-        "wsUrl": info.ws_url,
-        "httpUrl": info.http_url,
-        "authToken": info.auth_token,
-        "port": info.port,
-    });
-    // We JSON-stringify the payload server-side so the JS literal is safe
-    // (no string concatenation, no user-controlled input).
-    let payload_str = payload.to_string();
-    let script = format!(
-        "(function(){{ try {{ window.__QUANTA_CONFIG__ = {payload_str}; \
-         window.dispatchEvent(new CustomEvent('quanta:config-ready', {{ detail: window.__QUANTA_CONFIG__ }})); \
-         }} catch (e) {{ console.error('quanta config inject failed', e); }} }})();"
-    );
-    if let Err(err) = window.eval(&script) {
-        log::warn!(target: "quanta::boot", "config inject eval failed: {err}");
-    }
-}

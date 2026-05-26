@@ -14,14 +14,9 @@
  * in constant time so a timing oracle cannot leak prefix matches.
  */
 
+import { networkInterfaces } from "node:os"
 import type { Server, ServerWebSocket } from "bun"
-import {
-  createSessionTransportBridge,
-  type SessionTransport,
-  type SessionTransportBridge,
-  wrapWebSocketLikeAsSessionTransport,
-} from "@/ipc/session"
-import type { SessionEvent } from "@/protocol/session"
+import { type SessionTransport, wrapWebSocketLikeAsSessionTransport } from "@/ipc/session"
 import type { RuntimeFacade, RuntimeSession } from "@/sdk/runtime"
 import { logger } from "@/shared"
 import {
@@ -29,6 +24,12 @@ import {
   type RegisteredSession,
   type SessionRegistry,
 } from "./session-registry"
+import {
+  handleAuthLoginStart,
+  handleAuthLogout,
+  handleAuthStatus,
+} from "./auth-routes"
+import { openThreadStore } from "./persistence-sqlite"
 import type { WebDaemonConfig, WebDaemonHandle, WebDaemonHealth } from "./types"
 import {
   type BunServerWebSocketLike,
@@ -76,73 +77,279 @@ const authReject = (): Response =>
     headers: { "content-type": "text/plain; charset=utf-8" },
   })
 
-const jsonResponse = (status: number, body: unknown): Response =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json; charset=utf-8" },
-  })
+/**
+ * Allowlist of `process.env` keys the `/config` HTTP endpoint may write.
+ * The adapter layer reads these on every LLM call, so a successful POST
+ * takes effect on the user's next turn (no daemon restart needed).
+ *
+ * Hard rules:
+ *   - Keys are closed-enumerated (no arbitrary env injection).
+ *   - Values are length-capped + character-allowlisted to head off
+ *     accidental shell-style injection if the env is ever spliced
+ *     into a child process command line in the future.
+ */
+const CONFIG_ALLOWED_KEYS = new Set([
+  "QUANTA_FAST",
+  "QUANTA_SERVICE_TIER",
+  "QUANTA_MODEL",
+  "QUANTA_REASONING_EFFORT",
+])
+const CONFIG_VALUE_PATTERN = /^[A-Za-z0-9_.:\-]{0,64}$/
 
-const forwardSessionEvents = (
-  session: RuntimeSession,
-  bridge: SessionTransportBridge,
-): (() => void) => {
-  // Pipe every event the runtime publishes into the transport bridge so the
-  // client sees full server-side activity (turn events, approvals, etc.).
-  const unsubscribe = session.subscribe((event: SessionEvent) => {
-    void bridge.publishEvents([event]).catch((error: unknown) => {
-      logger.warn("web-daemon: bridge.publishEvents failed", {
-        error: error instanceof Error ? error.message : String(error),
-      })
-    })
-  })
-  return unsubscribe
+const handleConfigPost = async (req: Request): Promise<Response> => {
+  let body: unknown
+  try {
+    body = await req.json()
+  } catch {
+    return jsonResponse(400, { error: "invalid_json" })
+  }
+  if (body === null || typeof body !== "object") {
+    return jsonResponse(400, { error: "body_must_be_object" })
+  }
+  const entries = body as Record<string, unknown>
+  const applied: Record<string, string | null> = {}
+  for (const [key, raw] of Object.entries(entries)) {
+    if (!CONFIG_ALLOWED_KEYS.has(key)) {
+      return jsonResponse(400, { error: "unknown_key", key })
+    }
+    if (raw === null || raw === "") {
+      delete process.env[key]
+      applied[key] = null
+      continue
+    }
+    if (typeof raw !== "string") {
+      return jsonResponse(400, { error: "value_must_be_string_or_null", key })
+    }
+    if (!CONFIG_VALUE_PATTERN.test(raw)) {
+      return jsonResponse(400, { error: "value_pattern_rejected", key })
+    }
+    process.env[key] = raw
+    applied[key] = raw
+  }
+  logger.info("web-daemon: /config applied", applied)
+  return jsonResponse(200, { ok: true, applied })
 }
 
+/** CORS headers — the frontend dev server (`localhost:5173`) is a
+ *  different origin from the daemon (`localhost:4096`), so browser
+ *  fetches need preflight + ACAO. Loopback-only dev; loose `*` is fine.
+ *  When `Origin` is set we echo it (so credentialed requests would work
+ *  if the frontend ever adds `credentials: "include"`). */
+const corsHeaders = (req: Request | null): Record<string, string> => ({
+  "access-control-allow-origin": req?.headers.get("origin") ?? "*",
+  "access-control-allow-methods": "GET, POST, OPTIONS, DELETE",
+  "access-control-allow-headers": "authorization, content-type",
+  "access-control-max-age": "600",
+  vary: "Origin",
+})
+
+const handlePreflight = (req: Request): Response =>
+  new Response(null, { status: 204, headers: corsHeaders(req) })
+
+const jsonResponse = (status: number, body: unknown, req?: Request): Response =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      ...corsHeaders(req ?? null),
+    },
+  })
+
+/* ---------- static SPA serve ------------------------------------------ */
+
+const RESOLVED_DIST_DIR: string | null = (() => {
+  const envOverride = process.env.QUANTA_WEB_DIST
+  const candidates: string[] = []
+  if (envOverride !== undefined && envOverride.length > 0) candidates.push(envOverride)
+  candidates.push("apps/web-frontend/dist")
+  candidates.push("./apps/web-frontend/dist")
+  for (const c of candidates) {
+    try {
+      // Bun.file is lazy — check the index sentinel.
+      const path = c.endsWith("/") ? `${c}index.html` : `${c}/index.html`
+      // biome-ignore lint/style/noNonNullAssertion: presence-only probe
+      const file = Bun.file(path)
+      // Bun.file.size === 0 on miss; > 0 means it exists with content.
+      // We don't await stat: `existsSync` is sync and well-defined here.
+      void file
+      // Use a sync existence test so we can pick the right candidate
+      // without async at module init.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const fs = require("node:fs") as typeof import("node:fs")
+      if (fs.existsSync(path)) return c.replace(/\/$/, "")
+    } catch {
+      // try next
+    }
+  }
+  return null
+})()
+
+const MIME_BY_EXT: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".mjs": "application/javascript; charset=utf-8",
+  ".map": "application/json; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".txt": "text/plain; charset=utf-8",
+}
+
+const mimeFor = (path: string): string => {
+  const idx = path.lastIndexOf(".")
+  if (idx < 0) return "application/octet-stream"
+  return MIME_BY_EXT[path.slice(idx).toLowerCase()] ?? "application/octet-stream"
+}
+
+const serveStaticSpa = (pathname: string): Response | null => {
+  if (RESOLVED_DIST_DIR === null) return null
+  // Canonicalise — strip leading "/" so we can `join` safely; guard against
+  // path traversal by rejecting any "..". SPA root → index.html.
+  const cleaned = pathname.replace(/^\/+/, "")
+  if (cleaned.includes("..")) return null
+  const candidate =
+    cleaned === "" || cleaned === "index.html"
+      ? `${RESOLVED_DIST_DIR}/index.html`
+      : `${RESOLVED_DIST_DIR}/${cleaned}`
+  const file = Bun.file(candidate)
+  if (file.size === 0) {
+    // SPA fallback — unknown route ⇒ index.html so client-side routing wins.
+    const indexFile = Bun.file(`${RESOLVED_DIST_DIR}/index.html`)
+    if (indexFile.size === 0) return null
+    return new Response(indexFile, {
+      status: 200,
+      headers: { "content-type": "text/html; charset=utf-8" },
+    })
+  }
+  return new Response(file, {
+    status: 200,
+    headers: { "content-type": mimeFor(candidate) },
+  })
+}
+
+/** IPv6 literals need brackets in URLs (RFC 3986 §3.2.2). */
+const formatHost = (address: string, family: "IPv4" | "IPv6"): string =>
+  family === "IPv6" ? `[${address}]` : address
+
+interface ReachableIp {
+  readonly label: string
+  readonly family: "IPv4" | "IPv6"
+  readonly address: string
+}
+
+/**
+ * Resolve which interfaces a client could actually reach this daemon at.
+ *
+ * - `127.0.0.1` / `::1` / `localhost` bind ⇒ only loopback is reachable.
+ * - `0.0.0.0` / `::` bind ⇒ every non-internal interface plus loopback.
+ * - Specific IP bind ⇒ just that IP (loopback added only if same machine).
+ *
+ * IPv6 link-local (`fe80::*`) is dropped — its zone-id suffix isn't safe
+ * inside a URL.
+ */
+const collectReachableIps = (bind: string): readonly ReachableIp[] => {
+  const wildcard = bind === "0.0.0.0" || bind === "::" || bind === ""
+  const loopback: ReachableIp = bind === "::" || bind === "::1"
+    ? { label: "loopback", family: "IPv6", address: "::1" }
+    : { label: "loopback", family: "IPv4", address: "127.0.0.1" }
+  if (!wildcard && bind !== "0.0.0.0") {
+    if (bind === "127.0.0.1" || bind === "::1" || bind === "localhost") {
+      return [loopback]
+    }
+    return [
+      loopback,
+      {
+        label: "bind",
+        family: bind.includes(":") ? "IPv6" : "IPv4",
+        address: bind,
+      },
+    ]
+  }
+  const out: ReachableIp[] = [loopback]
+  const ifaces = networkInterfaces()
+  for (const [name, list] of Object.entries(ifaces)) {
+    if (list === undefined) continue
+    for (const entry of list) {
+      if (entry.internal) continue
+      if (entry.family !== "IPv4" && entry.family !== "IPv6") continue
+      // Drop IPv6 link-local — `fe80::%en0` URLs aren't broadly usable.
+      if (entry.family === "IPv6" && entry.address.toLowerCase().startsWith("fe80")) {
+        continue
+      }
+      out.push({
+        label: name,
+        family: entry.family,
+        address: entry.address,
+      })
+    }
+  }
+  return out
+}
+
+/**
+ * Multi-client shared-session mode (v2):
+ *   - The daemon creates ONE session at boot via `runtime.createSession`.
+ *   - Every WebSocket connection attaches its own `SessionTransport` to
+ *     the SAME session, so all connected clients see the same transcript
+ *     and any one of them can advance the turn.
+ *   - The per-WS `RegisteredSession.session` field still points at the
+ *     shared session for `registry.has/size` accounting; `drop()` MUST
+ *     NOT call `session.close()` (the daemon shutdown path closes it
+ *     exactly once via `runtime.close`).
+ */
 const buildRegisteredSession = async (
   registry: SessionRegistry,
   socketKey: object,
-  config: WebDaemonConfig,
   socket: BunWebSocketAdapter,
-  runtime: RuntimeFacade,
+  sharedSession: RuntimeSession,
 ): Promise<void> => {
-  const session = await runtime.createSession(config.sessionConfig)
-  const snapshot = await session.snapshot()
-  const bridge = createSessionTransportBridge({
-    snapshot,
-    onCommand: async (command) => {
-      try {
-        await session.dispatch(command)
-      } catch (error) {
-        logger.warn("web-daemon: session.dispatch failed", {
-          commandId: command.commandId,
-          type: command.type,
-          error: error instanceof Error ? error.message : String(error),
-        })
-      }
-    },
-    onBridgeError: ({ error }) => {
-      logger.warn("web-daemon: bridge error", {
-        error: error instanceof Error ? error.message : String(error),
-      })
-    },
-  })
   const transport: SessionTransport = wrapWebSocketLikeAsSessionTransport(socket.socket)
-  const connected = await bridge.connect(transport)
-  const stopForwarder = forwardSessionEvents(session, bridge)
+  const connected = await sharedSession.attachSessionTransport(transport)
   const entry: RegisteredSession = {
-    session,
-    bridge,
+    session: sharedSession,
     transport,
     connected,
-    stopForwarder,
   }
   registry.add(socketKey, entry)
 }
 
 export const startWebDaemon = async (config: WebDaemonConfig): Promise<WebDaemonHandle> => {
   const runtime = await config.runtimeFactory()
+  // ONE shared session for the whole daemon lifetime. New WS connections
+  // join the same session instead of minting a fresh one — see the
+  // `buildRegisteredSession` comment above.
+  const sharedSession = await runtime.createSession(config.sessionConfig)
   const registry = createSessionRegistry()
   const startedAt = performance.now()
+
+  // SQLite-backed thread persistence — append every SessionEvent on the
+  // shared session to `~/.quanta/web-daemon/threads.db` (override path
+  // via `QUANTA_WEB_DB_DIR`). Disable by setting `QUANTA_WEB_DB=off`.
+  const threadStore =
+    process.env.QUANTA_WEB_DB === "off" ? null : openThreadStore()
+  let unsubPersist: (() => void) | null = null
+  if (threadStore !== null) {
+    threadStore.upsertThread({ id: sharedSession.sessionId })
+    unsubPersist = sharedSession.subscribe((event) => {
+      try {
+        threadStore.appendEvent(sharedSession.sessionId, event)
+      } catch (error) {
+        logger.warn("web-daemon: sqlite append failed", {
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+    })
+    logger.info("web-daemon: thread persistence enabled", {
+      sessionId: sharedSession.sessionId,
+    })
+  }
 
   const tryUpgrade = (req: Request, server: Server<WSData>): Response | undefined => {
     const url = new URL(req.url)
@@ -165,6 +372,11 @@ export const startWebDaemon = async (config: WebDaemonConfig): Promise<WebDaemon
     hostname: config.bind,
     fetch(req, srv) {
       const url = new URL(req.url)
+      // CORS preflight — cross-origin frontends (Vite dev on :5173, Tauri
+      // tauri://localhost, etc.) need this OR every POST/DELETE fails.
+      if (req.method === "OPTIONS") {
+        return handlePreflight(req)
+      }
       if (url.pathname === "/health" && req.method === "GET") {
         const health: WebDaemonHealth = {
           status: "ok",
@@ -173,11 +385,107 @@ export const startWebDaemon = async (config: WebDaemonConfig): Promise<WebDaemon
         }
         return jsonResponse(200, health)
       }
+      if (url.pathname === "/network" && req.method === "GET") {
+        // Reachable URL set so the UI can show every interface the daemon
+        // is actually listening on (loopback + each non-internal IPv4/IPv6
+        // when bound to `0.0.0.0` / `::`). Auth-free — only contains
+        // host/port info; the token itself stays in the WS upgrade path.
+        const port = server.port ?? config.port
+        const ips = collectReachableIps(config.bind)
+        const wsUrls = ips.map((entry) => ({
+          label: entry.label,
+          family: entry.family,
+          wsUrl: `ws://${formatHost(entry.address, entry.family)}:${port}/`,
+          httpUrl: `http://${formatHost(entry.address, entry.family)}:${port}/`,
+        }))
+        return jsonResponse(200, { port, bind: config.bind, urls: wsUrls })
+      }
+      // Thread persistence read-side. `GET /threads` lists every persisted
+      // thread (most-recent first); `GET /threads/:id/events?since=N` returns
+      // the SessionEvent log for that thread so a reloaded client can rebuild
+      // its transcript without losing what the previous tab saw. Both require
+      // the same bearer auth as WS upgrade. Disabled (404) when persistence
+      // is off (`QUANTA_WEB_DB=off`).
+      if (url.pathname === "/threads" && req.method === "GET") {
+        if (config.authToken !== undefined) {
+          const presented = extractToken(url, req.headers.get("authorization"))
+          if (presented === undefined || !constantTimeEquals(presented, config.authToken)) {
+            return authReject()
+          }
+        }
+        if (threadStore === null) {
+          return jsonResponse(404, { error: "persistence_disabled" })
+        }
+        return jsonResponse(200, { threads: threadStore.listThreads() })
+      }
+      {
+        const eventsMatch = url.pathname.match(/^\/threads\/([^/]+)\/events$/)
+        if (eventsMatch !== null && req.method === "GET") {
+          if (config.authToken !== undefined) {
+            const presented = extractToken(url, req.headers.get("authorization"))
+            if (presented === undefined || !constantTimeEquals(presented, config.authToken)) {
+              return authReject()
+            }
+          }
+          if (threadStore === null) {
+            return jsonResponse(404, { error: "persistence_disabled" })
+          }
+          const threadId = decodeURIComponent(eventsMatch[1] ?? "")
+          const sinceRaw = url.searchParams.get("since")
+          const since = sinceRaw === null ? 0 : Number.parseInt(sinceRaw, 10)
+          const sinceSeq = Number.isFinite(since) && since >= 0 ? since : 0
+          return jsonResponse(200, {
+            threadId,
+            events: threadStore.loadEvents(threadId, sinceSeq),
+          })
+        }
+      }
+      if (url.pathname === "/config" && req.method === "POST") {
+        // Dynamic LLM knob update via slash commands. Mutates `process.env`
+        // so the next adapter call picks it up; closed allowlist of keys
+        // keeps the surface tight (no arbitrary env injection). Auth: same
+        // bearer token as WS upgrade. Multi-client implication: all
+        // attached clients see the change on their NEXT turn (shared
+        // session).
+        if (config.authToken !== undefined) {
+          const presented = extractToken(url, req.headers.get("authorization"))
+          if (presented === undefined || !constantTimeEquals(presented, config.authToken)) {
+            return authReject()
+          }
+        }
+        return handleConfigPost(req)
+      }
+      // ChatGPT OAuth login/logout/whoami — same bearer auth; thin
+      // wrappers around the CLI's existing `/login` slash compose
+      // (`runBrowserFlow` → `exchangeCode` → `writeToken`).
+      if (url.pathname.startsWith("/auth/") && (req.method === "POST" || req.method === "GET")) {
+        if (config.authToken !== undefined) {
+          const presented = extractToken(url, req.headers.get("authorization"))
+          if (presented === undefined || !constantTimeEquals(presented, config.authToken)) {
+            return authReject()
+          }
+        }
+        if (url.pathname === "/auth/login" && req.method === "POST") return handleAuthLoginStart()
+        if (url.pathname === "/auth/logout" && req.method === "POST") return handleAuthLogout()
+        if (url.pathname === "/auth/status" && req.method === "GET") return handleAuthStatus()
+        return jsonResponse(404, { error: "unknown_auth_route", path: url.pathname })
+      }
       if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
         const resp = tryUpgrade(req, srv)
         if (resp !== undefined) return resp
         // Upgrade succeeded — Bun consumed the request.
         return new Response(null, { status: 101 })
+      }
+      // Static SPA serve — every other GET tries to resolve against the
+      // built frontend dist (Vite output). Lets the daemon double as the
+      // web host so a phone / sibling laptop can hit
+      // `http://<LAN-IP>:<port>/` and load the same UI Tauri renders
+      // locally. `QUANTA_WEB_DIST` overrides the dist path; absent ⇒
+      // try the in-repo default + give up with 404 so dev-mode (Vite-only)
+      // stays usable as before.
+      if (req.method === "GET") {
+        const staticResp = serveStaticSpa(url.pathname)
+        if (staticResp !== null) return staticResp
       }
       return new Response("not found", { status: 404 })
     },
@@ -188,7 +496,7 @@ export const startWebDaemon = async (config: WebDaemonConfig): Promise<WebDaemon
         // the right adapter; the registered session is filled in below.
         ws.data.adapter = adapter
         try {
-          await buildRegisteredSession(registry, ws, config, adapter, runtime)
+          await buildRegisteredSession(registry, ws, adapter, sharedSession)
         } catch (error) {
           logger.error("web-daemon: failed to create runtime session", {
             error: error instanceof Error ? error.message : String(error),
@@ -241,6 +549,11 @@ export const startWebDaemon = async (config: WebDaemonConfig): Promise<WebDaemon
       // BEFORE we tear down our adapter state.
       await server.stop(true)
       await registry.closeAll()
+      if (unsubPersist !== null) {
+        unsubPersist()
+        unsubPersist = null
+      }
+      threadStore?.close()
       await runtime.close().catch((error: unknown) => {
         logger.warn("web-daemon: runtime.close failed", {
           error: error instanceof Error ? error.message : String(error),

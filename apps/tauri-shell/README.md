@@ -7,13 +7,13 @@ macOS-only Tauri 2.x desktop wrapper for quanta (ADR-0317).
 - Wraps the web frontend built by `apps/web-frontend/` (see [worker C]).
 - Spawns the bun-compiled `quanta-web-daemon` (`src/apps/web-daemon/`) as a
   Tauri sidecar, picks a free local port, mints a 256-bit auth token, and
-  injects `window.__QUANTA_CONFIG__ = { wsUrl, httpUrl, authToken }` into
-  the main webview at boot.
+  exposes that tuple to the webview via the Tauri `daemon_info` command.
+  Best-effort `window.__QUANTA_CONFIG__` injection remains only as a
+  compatibility fallback.
 - Spawns the Swift `screen-ocr` sidecar (`native/screen-ocr/`) on demand:
   `list_windows` enumerates capturable windows, `capture_window` runs OCR.
-- Registers a global hotkey (`Cmd+Shift+Q` default) **only after the user
-  opts in** via `enable_hotkey`. On trigger, captures the last-selected
-  (or frontmost non-Quanta) window and emits `quanta:hotkey-capture`.
+- Auto-registers a global hotkey (`Cmd+\` default). On trigger, captures
+  the frontmost non-Quanta window and emits `quanta:hotkey-image-capture`.
 
 ## Status
 
@@ -31,51 +31,49 @@ Negative Invariants).
 | `stop_daemon`    | `void`                 | SIGTERM (best-effort, no-unsafe policy)   |
 | `daemon_status`  | `DaemonStatus`         | `{ running, port, uptime_ms, restart }`   |
 | `daemon_info`    | `DaemonInfo`           | Current ws_url / auth_token snapshot      |
-| `enable_hotkey`  | `void`                 | Default-OFF; opt-in registration          |
+| `enable_hotkey`  | `void`                 | Idempotent re-enable                      |
 | `disable_hotkey` | `void`                 | Idempotent                                |
 | `hotkey_status`  | `boolean`              | Whether the accelerator is registered     |
 
 All commands return `Result<T, AppError>`. `AppError` serialises as
 `{ code: string, message: string }`.
 
-## Build recipe (5 steps)
-
-> **None of these steps are run by Claude / the agent.** This README is
-> the user-facing checklist.
+## Build recipe
 
 ```sh
 # 0. Prereqs (one-time)
 #    - Rust toolchain (stable, 2021 edition)
-#    - Bun (https://bun.sh) — for compiling the web-daemon
-#    - Xcode CLT (`xcode-select --install`) — for the Swift sidecar
+#    - Bun (https://bun.sh)
+#    - Xcode CLT (`xcode-select --install`)
 #    - Tauri 2 CLI (`cargo install tauri-cli --version '^2'`)
-
-# 1. Build the bun web-daemon as a standalone executable
-bun build --compile --outfile apps/tauri-shell/binaries/quanta-web-daemon \
-    src/apps/web-daemon/index.ts
-
-# 2. Build the Swift screen-ocr sidecar and copy it in
-cd native/screen-ocr && swift build -c release && cd -
-cp native/screen-ocr/.build/release/screen-ocr \
-    apps/tauri-shell/binaries/screen-ocr
-
-# 3. Build the web frontend SPA (worker C's package)
-cd apps/web-frontend && bun install && bun run build && cd -
-
-# 4. Drop real icons into apps/tauri-shell/icons/
-#    (the committed PNGs are 1x1 placeholders — replace before shipping)
-#    Required filenames: 32x32.png, 128x128.png, 128x128@2x.png, icon.icns
-
-# 5. Build the desktop bundle
-cd apps/tauri-shell && cargo tauri build
+#    - just (`brew install just`)
+#
+# `just build` = `cargo tauri build` + `scripts/sign-bundle.sh`. The sign
+# step is mandatory: Tauri's bundler leaves Rust's linker-signed random
+# identifier on the shell and the sidecars as `screen-ocr` / `a.out`, so
+# without it every release prompts again for ScreenCapture / Accessibility
+# (TCC keys grants by code-signature ID).
+cd apps/tauri-shell && just build
 # Output: target/release/bundle/{app,dmg}/Quanta.{app,dmg}
+
+# Other recipes:
+#   just install    # build + copy to /Applications + re-sign in place
+#   just sign PATH  # re-sign an existing .app (defaults to the release one)
+#   just tcc-reset  # clear stale ScreenCapture/Accessibility grants
+#   just dev        # cargo tauri dev (no sign step)
+```
+
+For a release binary without DMG packaging:
+
+```sh
+cd apps/tauri-shell && just build-nobundle
 ```
 
 For dev iteration on the React app:
 
 ```sh
 cd apps/web-frontend && bun run dev   # vite at http://localhost:5173
-cd apps/tauri-shell && cargo tauri dev # loads devUrl from tauri.conf.json
+cd apps/tauri-shell && just dev       # loads devUrl from tauri.conf.json
 ```
 
 ## Security model (TL;DR)
@@ -87,12 +85,11 @@ cd apps/tauri-shell && cargo tauri dev # loads devUrl from tauri.conf.json
   is requested at first screen-capture invocation (handled by
   ScreenCaptureKit on the Swift side). `entitlements.plist` lives in this
   directory and is referenced from `tauri.conf.json`.
-- **Hotkey is OFF by default.** Registration happens lazily via the
-  `enable_hotkey` command. Users see no global-shortcut prompt until they
-  opt in from the UI.
+- **Hotkey is ON by default.** Registration happens during app boot. The
+  `disable_hotkey` command remains available if the user wants it off.
 - **Auth token is per-process random.** A 256-bit hex token is minted at
-  daemon boot and injected into the webview as `__QUANTA_CONFIG__`. There
-  is no on-disk credential.
+  daemon boot and served to the frontend over the Tauri `daemon_info`
+  command. There is no on-disk credential.
 
 ## Negative invariants
 

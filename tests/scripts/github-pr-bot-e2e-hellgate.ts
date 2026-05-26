@@ -32,6 +32,11 @@ interface RunResult {
   readonly stderr: string
 }
 
+interface IssueCommentRef {
+  readonly id?: number
+  readonly survivedUrl?: string
+}
+
 const work = mkdtempSync(join(tmpdir(), "quanta-e2e-"))
 const scoreboard: { name: string; ok: boolean; detail: string }[] = []
 const postedCommentIds: number[] = []
@@ -102,6 +107,22 @@ const malformedEventPath = (): string => {
   const path = join(work, `evt-bad-${Math.random().toString(36).slice(2)}.json`)
   writeFileSync(path, "{{{not json{{")
   return path
+}
+
+const issueCommentIdFromUrl = (url: string | undefined): number | undefined => {
+  const match = url?.match(/issuecomment-(\d+)/)
+  if (match === undefined || match === null) return undefined
+  return Number.parseInt(match[1] ?? "0", 10)
+}
+
+const issueCommentRef = (args: {
+  readonly id?: number | undefined
+  readonly survivedUrl?: string | undefined
+}): IssueCommentRef => {
+  const ref: { id?: number; survivedUrl?: string } = {}
+  if (args.id !== undefined) ref.id = args.id
+  if (args.survivedUrl !== undefined) ref.survivedUrl = args.survivedUrl
+  return ref
 }
 
 // ─── case battery ─────────────────────────────────────────────────────────
@@ -774,11 +795,12 @@ expect(
             // skip non-JSON
           }
         }
-        const idMatch = posted?.url?.match(/issuecomment-(\d+)/)
-        resolve({
-          id: idMatch ? Number.parseInt(idMatch[1] ?? "0", 10) : undefined,
-          survivedUrl: posted?.url,
-        })
+        resolve(
+          issueCommentRef({
+            id: issueCommentIdFromUrl(posted?.url),
+            survivedUrl: posted?.url,
+          }),
+        )
       })
     })
 
@@ -830,10 +852,7 @@ expect(
       p.stdout.on("data", (d) => stdout.push(d.toString("utf8")))
       p.on("close", () => {
         const joined = stdout.join("")
-        const idMatch = joined.match(/issuecomment-(\d+)/)
-        resolve({
-          id: idMatch ? Number.parseInt(idMatch[1] ?? "0", 10) : undefined,
-        })
+        resolve(issueCommentRef({ id: issueCommentIdFromUrl(joined) }))
       })
     })
 
@@ -1025,7 +1044,7 @@ expect(
   })
   const dry = r.events.find((e) => e.type === "dry-run-body") as { body?: string } | undefined
   const body = dry?.body ?? ""
-  const leaks = (body.match(new RegExp(`sk-proj-Z{40}`, "g")) ?? []).length
+  const leaks = (body.match(/sk-proj-Z{40}/g) ?? []).length
   expect(
     "case 43: secret repeated 5x → 0 raw leaks",
     r.exitCode === 0 && hasEvent(r, "trigger") && leaks === 0,

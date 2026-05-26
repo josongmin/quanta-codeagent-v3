@@ -147,6 +147,18 @@ const consultDispatchGuard = (call: ToolUseBlock, config: AgentConfig): Dispatch
   return deny(call.id, `${prefix}${decision.reason}`, "guard-deny")
 }
 
+const isSessionApprovalRequiredError = (error: unknown): boolean => {
+  if (typeof error !== "object" || error === null || !("approval" in error)) return false
+  const approval = (error as { approval?: unknown }).approval
+  return (
+    typeof approval === "object" &&
+    approval !== null &&
+    "approvalId" in approval &&
+    "reason" in approval &&
+    "requestedAt" in approval
+  )
+}
+
 /**
  * Run one tool call end to end: gates → execute → normalize errors.
  * Tool/permission/plan/hook failures become error tool_results (the model
@@ -253,6 +265,10 @@ export const dispatchTool = async (
     )
     return out
   } catch (e) {
+    if (isSessionApprovalRequiredError(e)) {
+      endSpan(toolSpan, "error", attrs({ [QUANTA_ATTRS.tool.status]: "error" }))
+      throw e
+    }
     // NO-THROW CONTRACT (AUDIT-FIX). `dispatchTool` is the loop's single-tool
     // pipeline and the streaming engine (`streaming-dispatch.ts`) is built on
     // the documented invariant that it NEVER throws — every failure becomes an
@@ -383,6 +399,7 @@ const buildToolContext = (args: {
       const seam = config.shellSnapshotSession?.currentSeam()
       return seam !== undefined ? { shellSnapshot: seam } : {}
     })(),
+    ...(config.sessionConfigPort !== undefined ? { sessionConfig: config.sessionConfigPort } : {}),
   }
 }
 

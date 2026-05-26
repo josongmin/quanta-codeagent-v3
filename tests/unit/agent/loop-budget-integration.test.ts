@@ -9,13 +9,14 @@
  *    real runs.
  */
 
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { type AgentConfig, BudgetMeter, runAgent } from "@/agent"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
-import type { PermissionContext } from "@/permission"
+import { __resetDefaultPermissionStore, type PermissionContext } from "@/permission"
+import { __resetRuntimeConfig } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
 
@@ -68,6 +69,27 @@ const baseCfg = (over: Partial<AgentConfig> & Pick<AgentConfig, "llm">): AgentCo
   signal: new AbortController().signal,
   onConfirm: async () => false,
   ...over,
+})
+
+const originalPermissionState = process.env.QUANTA_PERMISSION_STATE
+let permissionStateRoot: string | null = null
+
+beforeEach(() => {
+  permissionStateRoot = mkdtempSync(join(tmpdir(), "loop-budget-perm-state-"))
+  process.env.QUANTA_PERMISSION_STATE = join(permissionStateRoot, "permission-state.json")
+  __resetRuntimeConfig()
+  __resetDefaultPermissionStore()
+})
+
+afterEach(() => {
+  if (permissionStateRoot !== null) {
+    rmSync(permissionStateRoot, { recursive: true, force: true })
+    permissionStateRoot = null
+  }
+  if (originalPermissionState === undefined) delete process.env.QUANTA_PERMISSION_STATE
+  else process.env.QUANTA_PERMISSION_STATE = originalPermissionState
+  __resetRuntimeConfig()
+  __resetDefaultPermissionStore()
 })
 
 describe("loop ↔ BudgetMeter — default-OFF byte-identical", () => {
@@ -139,10 +161,7 @@ describe("loop ↔ BudgetMeter — exhaustion firing", () => {
   })
 
   test("meter ticks observe turn start + model call + tool call", async () => {
-    const llm = new FakeLLM([
-      toolUse("c1", "ls", { paths: [dir] }),
-      text("done"),
-    ])
+    const llm = new FakeLLM([toolUse("c1", "ls", { paths: [dir] }), text("done")])
     const meter = new BudgetMeter()
     const cfg = baseCfg({ llm, cwd: dir, budgetMeter: meter })
     await runAgent(cfg)

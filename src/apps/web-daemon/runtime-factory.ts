@@ -15,12 +15,39 @@ import { pickProvider, tryCreateLLM } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import {
   createRuntimeFromAgentConfigBase,
+  type RuntimeAgentConfigBase,
   type RuntimeAgentTurnAssembler,
   type RuntimeFacade,
 } from "@/sdk/runtime"
 import { StdoutStream } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
 import { assembleAgentConfig } from "@/apps/agent/assemble"
+
+type InteractiveTurnDeps = Pick<
+  RuntimeAgentConfigBase,
+  "cwd" | "llm" | "maxTurns" | "permission" | "registry" | "signal" | "stream" | "system"
+>
+
+export const buildInteractiveTurnAssembler = (
+  base: Omit<AgentConfig, "modePolicy" | "budgetMeter">,
+): RuntimeAgentTurnAssembler => (messages, turnDeps) => {
+  const deps = turnDeps as InteractiveTurnDeps
+  return assembleAgentConfig({
+    mode: "interactive",
+    base: {
+      ...base,
+      llm: deps.llm,
+      registry: deps.registry,
+      stream: deps.stream,
+      permission: deps.permission,
+      messages,
+      system: deps.system,
+      cwd: deps.cwd,
+      maxTurns: deps.maxTurns,
+      signal: deps.signal,
+    },
+  })
+}
 
 /**
  * Build a `runtimeFactory` suitable for `WebDaemonConfig`. The LLM port is
@@ -53,11 +80,7 @@ export const buildProductionRuntimeFactory = (): (() => Promise<RuntimeFacade>) 
       maxTurns: 200,
       signal: abort.signal,
     }
-    const turnAssembler: RuntimeAgentTurnAssembler = (messages, _turnDeps) =>
-      assembleAgentConfig({
-        mode: "interactive",
-        base: { ...base, messages },
-      })
+    const turnAssembler = buildInteractiveTurnAssembler(base)
     const { runtime } = await createRuntimeFromAgentConfigBase({
       base,
       turnAssembler,

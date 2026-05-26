@@ -328,6 +328,22 @@ export const bootstrapSession = async (
     const costPanel = deps.buildCostPanelOrUndefined(featureCfg, runtime.model)
     const branchProgress = deps.buildBranchProgressOrUndefined(featureCfg)
     const planStore = deps.buildPlanStoreOrUndefined(featureCfg)
+    // `session_config` tool seam — built ONCE at bootstrap from the same
+    // mutable cells the rest of the surface uses (effortStore +
+    // identityModeState + toolProfileState), so a `set_effort` via the tool
+    // and an operator `/effort` slash mutate the SAME store. The seam is
+    // duck-typed (structural mirror of `SessionConfigSeam` declared in
+    // `@/tool/types`) so this file stays slice-fenced.
+    const sessionConfigPort: SessionBootstrapResult["sessionConfigPort"] = {
+      readEffort: () => effortStore.get(),
+      writeEffort: (next) => {
+        effortStore.set(next)
+      },
+      readIdentityMode: () => identityModeState.get(),
+      readToolProfile: () => toolProfileState.get(),
+      readModel: () => runtime.model,
+      readProvider: () => runtime.provider,
+    }
     const shutdownMcp = async (): Promise<void> => {
       await stopMcpClients(features.mcpClients)
     }
@@ -370,6 +386,7 @@ export const bootstrapSession = async (
       toolProfileState,
       identityModeState,
       focusChain,
+      sessionConfigPort,
       shutdownMcp,
       // ADR-0301 — present the parsed CLI flag as `true | undefined`. Mapping
       // `false → undefined` lets the downstream consumer spread the slot

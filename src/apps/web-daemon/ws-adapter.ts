@@ -69,6 +69,17 @@ const toFrameString = (raw: string | Uint8Array | ArrayBuffer): string | undefin
 
 export const createBunWebSocketAdapter = (ws: BunServerWebSocketLike): BunWebSocketAdapter => {
   const listeners = new Set<MessageHandler>()
+  /**
+   * Pre-listener buffer. The Bun.serve `open` callback registers the message
+   * listener via `await buildRegisteredSession(...)` — an async sequence
+   * that may not complete before the client's first frame arrives. Without
+   * this buffer, the `connect` handshake frame is silently dropped by
+   * `pushMessage` (fan-out finds an empty listener set), and the daemon
+   * appears mute. Frames received before the first listener is added land
+   * here; they are flushed in subscription order when `addEventListener`
+   * registers a handler.
+   */
+  const pendingFrames: string[] = []
   let closed = false
 
   const socket: SessionWebSocketLike = {
@@ -80,6 +91,7 @@ export const createBunWebSocketAdapter = (ws: BunServerWebSocketLike): BunWebSoc
       if (closed) return
       closed = true
       listeners.clear()
+      pendingFrames.length = 0
       try {
         ws.close(code, reason)
       } catch {
@@ -88,7 +100,20 @@ export const createBunWebSocketAdapter = (ws: BunServerWebSocketLike): BunWebSoc
     },
     addEventListener(type, handler) {
       if (type !== "message" || closed) return
+      const wasEmpty = listeners.size === 0
       listeners.add(handler)
+      if (wasEmpty && pendingFrames.length > 0) {
+        // Drain in arrival order. Snapshot + clear first so re-entrant
+        // dispatch (handler that adds more listeners) doesn't double-flush.
+        const drain = pendingFrames.splice(0, pendingFrames.length)
+        for (const text of drain) {
+          try {
+            handler({ data: text })
+          } catch {
+            // swallow per fan-out rule
+          }
+        }
+      }
     },
     removeEventListener(type, handler) {
       if (type !== "message") return
@@ -102,6 +127,11 @@ export const createBunWebSocketAdapter = (ws: BunServerWebSocketLike): BunWebSoc
       if (closed) return
       const text = toFrameString(raw)
       if (text === undefined) return
+      if (listeners.size === 0) {
+        // No listener yet — buffer until `addEventListener` lands.
+        pendingFrames.push(text)
+        return
+      }
       // Snapshot before fan-out: a listener that unsubscribes mid-iteration
       // (e.g. transport.close()) must not perturb the loop.
       for (const handler of [...listeners]) {
@@ -117,6 +147,7 @@ export const createBunWebSocketAdapter = (ws: BunServerWebSocketLike): BunWebSoc
       if (closed) return
       closed = true
       listeners.clear()
+      pendingFrames.length = 0
     },
   }
 }

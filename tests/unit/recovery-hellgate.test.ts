@@ -26,22 +26,20 @@
  *   4. PTL → reactive compaction does NOT count as a normal turn.
  */
 
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type { AgentConfig } from "@/agent"
 import { runAgent } from "@/agent"
-import {
-  decideOnAssembled,
-  decideOnStreamError,
-  freshRecovery,
-  type RecoveryState,
-} from "@/agent/loop"
+import { reactiveCompact } from "@/agent/compaction"
+import { decideOnAssembled, decideOnStreamError, freshRecovery } from "@/agent/loop"
+import { backoffDelayMs, classifyLLMError, isPromptTooLong } from "@/agent/retry"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
-import type { PermissionContext } from "@/permission"
-import { LLMError } from "@/shared"
+import { __resetDefaultPermissionStore, type PermissionContext } from "@/permission"
+import { __resetRuntimeConfig, LLMError } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
-import { reactiveCompact } from "@/agent/compaction"
-import { backoffDelayMs, classifyLLMError, isPromptTooLong } from "@/agent/retry"
 
 // ─── House fakes (mirror tests/integration/agent-recovery-e2e.test.ts) ──────
 
@@ -110,6 +108,27 @@ const withTimeout = async <T>(p: Promise<T>, ms: number, label: string): Promise
 }
 
 const retryable = (): LLMError => new LLMError("503 service unavailable")
+
+const originalPermissionState = process.env.QUANTA_PERMISSION_STATE
+let permissionStateRoot: string | null = null
+
+beforeEach(() => {
+  permissionStateRoot = mkdtempSync(join(tmpdir(), "recovery-perm-state-"))
+  process.env.QUANTA_PERMISSION_STATE = join(permissionStateRoot, "permission-state.json")
+  __resetRuntimeConfig()
+  __resetDefaultPermissionStore()
+})
+
+afterEach(() => {
+  if (permissionStateRoot !== null) {
+    rmSync(permissionStateRoot, { recursive: true, force: true })
+    permissionStateRoot = null
+  }
+  if (originalPermissionState === undefined) delete process.env.QUANTA_PERMISSION_STATE
+  else process.env.QUANTA_PERMISSION_STATE = originalPermissionState
+  __resetRuntimeConfig()
+  __resetDefaultPermissionStore()
+})
 
 // ─────────────────────────────────────────────────────────────────────────
 // 1. EXACT-BOUNDARY: stream backoff — 1,2,3 allowed; 4th is a HARD error
@@ -253,11 +272,7 @@ describe("A3 maxTurns — recovery storm consumes exactly one turn slot", () => 
       thr(retryable()),
       ev(text("recovered after storm")),
     ])
-    const out = await withTimeout(
-      runAgent(cfg({ llm, maxTurns: 1 })),
-      20_000,
-      "storm-one-turn",
-    )
+    const out = await withTimeout(runAgent(cfg({ llm, maxTurns: 1 })), 20_000, "storm-one-turn")
     expect(out.reason).toBe("completed")
     expect(out.turns).toBe(1)
     expect(llm.calls).toBe(4) // 3 retries + 1 success, all within one turn slot

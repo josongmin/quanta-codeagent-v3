@@ -1,9 +1,14 @@
 import type { Message } from "@/llm"
 import type { ArtifactRef, SessionCommand, SessionEvent, TurnRunCommand } from "@/protocol/session"
 import { SessionProtocolValidationError } from "@/protocol/session"
-import type { KernelDispatchContext, SessionHostTurnResult } from "./ports"
+import type { KernelDispatchContext, SessionHostTurnEvent, SessionHostTurnResult } from "./ports"
 import { reduceSessionCommand } from "./reducer"
-import { type KernelSessionState, summarizeTranscript, toSessionStateView } from "./state"
+import {
+  type KernelSessionState,
+  type KernelTranscriptState,
+  summarizeTranscript,
+  toSessionStateView,
+} from "./state"
 
 const appendEvents = async (
   eventLog: KernelDispatchContext["eventLog"],
@@ -27,6 +32,13 @@ const readyEvents = (args: {
     type: "artifact.ready",
     artifact,
   }))
+
+const clearStreamingAssistantText = (
+  transcript: KernelTranscriptState,
+): KernelTranscriptState => {
+  const { streamingAssistantText: _streamingAssistantText, ...rest } = transcript
+  return rest
+}
 
 export interface KernelDispatchResult {
   readonly state: KernelSessionState
@@ -79,8 +91,7 @@ const onApprovalRequested = async (args: {
     status: "awaiting_approval",
     pendingApproval: approval,
     messages: [...args.result.messages],
-    transcript: summarizeTranscript(args.result.messages),
-    lastOutcomeReason: args.result.outcome.reason,
+    transcript: clearStreamingAssistantText(summarizeTranscript(args.result.messages)),
   }
   const approvalEvents = approvalEventsForTurn({
     state: nextState,
@@ -120,6 +131,15 @@ const completionEventsForTurn = (args: {
       causedByCommandId: args.command.commandId,
       type: "turn.completed",
       outcomeReason: args.state.lastOutcomeReason ?? "completed",
+      ...(args.state.transcript.lastAssistantText !== undefined
+        ? { assistantText: args.state.transcript.lastAssistantText }
+        : {}),
+      ...(args.state.modelSlug !== undefined
+        ? { modelSlug: args.state.modelSlug }
+        : {}),
+      ...(args.state.lastTokenUsage !== undefined
+        ? { tokenUsage: args.state.lastTokenUsage }
+        : {}),
     },
     {
       eventId: crypto.randomUUID(),
@@ -149,9 +169,12 @@ const onTurnCompleted = async (args: {
     draftInput: "",
     draftImages: [],
     pendingApproval: null,
-    transcript: summarizeTranscript(args.result.messages),
+    transcript: clearStreamingAssistantText(summarizeTranscript(args.result.messages)),
     artifacts: [...args.state.artifacts, ...artifacts],
     lastOutcomeReason: args.result.outcome.reason,
+    ...(args.result.tokenUsage !== undefined
+      ? { lastTokenUsage: args.result.tokenUsage }
+      : {}),
   }
   const completionEvents = completionEventsForTurn({
     state: completedState,
@@ -185,6 +208,7 @@ const onTurnFailed = async (args: {
     revision: args.state.revision + 1,
     seq: args.state.seq + 2,
     status: "failed",
+    transcript: clearStreamingAssistantText(args.state.transcript),
     lastOutcomeReason: "error",
   }
   const failedEvents: SessionEvent[] = [
@@ -211,6 +235,178 @@ const onTurnFailed = async (args: {
   return { state: nextState, events: [...args.events, ...failedEvents] }
 }
 
+const onTurnErrored = async (args: {
+  readonly state: KernelSessionState
+  readonly command: TurnRunCommand
+  readonly result: SessionHostTurnResult
+  readonly ctx: KernelDispatchContext
+  readonly events: readonly SessionEvent[]
+}): Promise<KernelDispatchResult> => {
+  const nextState: KernelSessionState = {
+    ...args.state,
+    revision: args.state.revision + 1,
+    seq: args.state.seq + 2,
+    status: "failed",
+    messages: [...args.result.messages],
+    draftInput: "",
+    draftImages: [],
+    pendingApproval: null,
+    transcript: clearStreamingAssistantText(summarizeTranscript(args.result.messages)),
+    lastOutcomeReason: "error",
+  }
+  const failedEvents: SessionEvent[] = [
+    {
+      eventId: crypto.randomUUID(),
+      seq: nextState.seq - 1,
+      revision: nextState.revision,
+      emittedAt: args.ctx.clock.now().toISOString(),
+      causedByCommandId: args.command.commandId,
+      type: "turn.failed",
+      message: args.result.errorMessage ?? "error",
+    },
+    {
+      eventId: crypto.randomUUID(),
+      seq: nextState.seq,
+      revision: nextState.revision,
+      emittedAt: args.ctx.clock.now().toISOString(),
+      causedByCommandId: args.command.commandId,
+      type: "session.state.updated",
+      state: toSessionStateView(nextState),
+    },
+  ]
+  await appendEvents(args.ctx.eventLog, failedEvents)
+  return {
+    state: nextState,
+    events: [...args.events, ...failedEvents],
+    turnResult: args.result,
+    transcriptMessages: [...args.result.messages],
+  }
+}
+
+const emitTurnStreamEvent = async (args: {
+  readonly state: KernelSessionState
+  readonly command: TurnRunCommand
+  readonly ctx: KernelDispatchContext
+  readonly event: SessionHostTurnEvent
+}): Promise<{
+  readonly state: KernelSessionState
+  readonly emitted: SessionEvent
+}> => {
+  switch (args.event.type) {
+    case "assistant_text.delta": {
+      const nextText = `${args.state.transcript.streamingAssistantText ?? ""}${args.event.delta}`
+      const nextState: KernelSessionState = {
+        ...args.state,
+        revision: args.state.revision + 1,
+        seq: args.state.seq + 1,
+        transcript: {
+          ...args.state.transcript,
+          streamingAssistantText: nextText,
+        },
+      }
+      const sessionEvent: SessionEvent = {
+        eventId: crypto.randomUUID(),
+        seq: nextState.seq,
+        revision: nextState.revision,
+        emittedAt: args.ctx.clock.now().toISOString(),
+        causedByCommandId: args.command.commandId,
+        type: "turn.output.delta",
+        delta: args.event.delta,
+      }
+      await appendEvents(args.ctx.eventLog, [sessionEvent])
+      await args.ctx.onCommitted?.({ state: nextState, events: [sessionEvent] })
+      return { state: nextState, emitted: sessionEvent }
+    }
+    case "tool.invoked": {
+      const nextState: KernelSessionState = {
+        ...args.state,
+        revision: args.state.revision + 1,
+        seq: args.state.seq + 1,
+      }
+      const sessionEvent: SessionEvent = {
+        eventId: crypto.randomUUID(),
+        seq: nextState.seq,
+        revision: nextState.revision,
+        emittedAt: args.ctx.clock.now().toISOString(),
+        causedByCommandId: args.command.commandId,
+        type: "tool.invoked",
+        toolCallId: args.event.toolCallId,
+        toolName: args.event.toolName,
+        ...(args.event.argsPreview !== undefined
+          ? { argsPreview: args.event.argsPreview }
+          : {}),
+      }
+      await appendEvents(args.ctx.eventLog, [sessionEvent])
+      await args.ctx.onCommitted?.({ state: nextState, events: [sessionEvent] })
+      return { state: nextState, emitted: sessionEvent }
+    }
+    case "tool.completed": {
+      const nextState: KernelSessionState = {
+        ...args.state,
+        revision: args.state.revision + 1,
+        seq: args.state.seq + 1,
+      }
+      const sessionEvent: SessionEvent = {
+        eventId: crypto.randomUUID(),
+        seq: nextState.seq,
+        revision: nextState.revision,
+        emittedAt: args.ctx.clock.now().toISOString(),
+        causedByCommandId: args.command.commandId,
+        type: "tool.completed",
+        toolCallId: args.event.toolCallId,
+        toolName: args.event.toolName,
+        outcome: args.event.outcome,
+        ...(args.event.resultPreview !== undefined
+          ? { resultPreview: args.event.resultPreview }
+          : {}),
+        ...(args.event.durationMs !== undefined
+          ? { durationMs: args.event.durationMs }
+          : {}),
+      }
+      await appendEvents(args.ctx.eventLog, [sessionEvent])
+      await args.ctx.onCommitted?.({ state: nextState, events: [sessionEvent] })
+      return { state: nextState, emitted: sessionEvent }
+    }
+    case "usage": {
+      // Token usage is NOT a wire event on its own — it accumulates into
+      // `state.lastTokenUsage` and gets spread onto the next
+      // `turn.completed`. We still emit a `session.state.updated` so the
+      // session view stays consistent, but we keep it cheap.
+      const nextState: KernelSessionState = {
+        ...args.state,
+        revision: args.state.revision + 1,
+        seq: args.state.seq + 1,
+        lastTokenUsage: {
+          ...(args.event.promptTokens !== undefined
+            ? { promptTokens: args.event.promptTokens }
+            : {}),
+          ...(args.event.completionTokens !== undefined
+            ? { completionTokens: args.event.completionTokens }
+            : {}),
+          ...(args.event.totalTokens !== undefined
+            ? { totalTokens: args.event.totalTokens }
+            : {}),
+          ...(args.event.costMicroUsd !== undefined
+            ? { costMicroUsd: args.event.costMicroUsd }
+            : {}),
+        },
+      }
+      const sessionEvent: SessionEvent = {
+        eventId: crypto.randomUUID(),
+        seq: nextState.seq,
+        revision: nextState.revision,
+        emittedAt: args.ctx.clock.now().toISOString(),
+        causedByCommandId: args.command.commandId,
+        type: "session.state.updated",
+        state: toSessionStateView(nextState),
+      }
+      await appendEvents(args.ctx.eventLog, [sessionEvent])
+      await args.ctx.onCommitted?.({ state: nextState, events: [sessionEvent] })
+      return { state: nextState, emitted: sessionEvent }
+    }
+  }
+}
+
 const runTurn = async (args: {
   readonly state: KernelSessionState
   readonly command: TurnRunCommand
@@ -219,35 +415,60 @@ const runTurn = async (args: {
   readonly events: readonly SessionEvent[]
 }): Promise<KernelDispatchResult> => {
   const hostAction = args.reduced.hostAction
+  let streamState = args.state
+  const streamedEvents: SessionEvent[] = []
+  let pendingStream = Promise.resolve()
   try {
     const result = await args.ctx.host.runTurn({
       history: hostAction.kind === "run_turn" ? hostAction.history : args.state.messages,
       prompt: hostAction.kind === "run_turn" ? hostAction.prompt : "",
       ...(hostAction.kind === "run_turn" ? { images: hostAction.images } : {}),
       ...(args.ctx.signal !== undefined ? { signal: args.ctx.signal } : {}),
+      onEvent: (event) => {
+        pendingStream = pendingStream.then(async () => {
+          const streamed = await emitTurnStreamEvent({
+            state: streamState,
+            command: args.command,
+            ctx: args.ctx,
+            event,
+          })
+          streamState = streamed.state
+          streamedEvents.push(streamed.emitted)
+        })
+      },
     })
+    await pendingStream
     return result.approvalRequest !== undefined
       ? await onApprovalRequested({
-          state: args.state,
+          state: streamState,
           command: args.command,
           result,
           ctx: args.ctx,
-          events: args.events,
+          events: [...args.events, ...streamedEvents],
         })
+      : result.outcome.reason === "error"
+        ? await onTurnErrored({
+            state: streamState,
+            command: args.command,
+            result,
+            ctx: args.ctx,
+            events: [...args.events, ...streamedEvents],
+          })
       : await onTurnCompleted({
-          state: args.state,
+          state: streamState,
           command: args.command,
           result,
           ctx: args.ctx,
-          events: args.events,
+          events: [...args.events, ...streamedEvents],
         })
   } catch (error) {
+    await pendingStream
     return await onTurnFailed({
-      state: args.state,
+      state: streamState,
       command: args.command,
       error,
       ctx: args.ctx,
-      events: args.events,
+      events: [...args.events, ...streamedEvents],
     })
   }
 }
@@ -266,6 +487,7 @@ export const dispatchSessionCommand = async (
       seq: state.seq + immediateEvents.length,
     }
     await appendEvents(ctx.eventLog, immediateEvents)
+    await ctx.onCommitted?.({ state: nextState, events: immediateEvents })
 
     switch (command.type) {
       case "session.identity.set":
@@ -280,6 +502,12 @@ export const dispatchSessionCommand = async (
           events: immediateEvents,
           transcriptMessages: [...command.messages],
         }
+      case "approval.respond":
+        await ctx.host.resolveApproval?.({
+          approvalId: command.approvalId,
+          decision: command.decision,
+        })
+        return { state: nextState, events: immediateEvents }
       case "turn.run":
         return await runTurn({
           state: nextState,

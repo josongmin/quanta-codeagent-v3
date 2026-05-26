@@ -29,7 +29,10 @@
 import { computeRetryDelayMs } from "./reconnect"
 import {
   decodeEventFrame,
+  decodeRejectedFrame,
+  decodeSnapshotFrame,
   encodeCommandFrame,
+  encodeConnectFrame,
   peekEnvelopeKind,
 } from "./envelope"
 import type {
@@ -37,6 +40,8 @@ import type {
   SessionCommand,
   SessionEvent,
   SessionEventType,
+  SessionRejectedFrame,
+  SessionSnapshotLite,
 } from "../types/protocol"
 
 /* ------------------------------------------------------------------ */
@@ -63,6 +68,7 @@ export type EventHandler<TType extends SessionEventType = SessionEventType> = (
 ) => void
 
 export type ConnectionHandler = (state: ConnectionState) => void
+export type SnapshotHandler = (snapshot: SessionSnapshotLite) => void
 
 /**
  * Minimal interface SessionClient depends on — the global `WebSocket` ctor
@@ -101,6 +107,7 @@ export interface SessionClientOptions {
 /* ------------------------------------------------------------------ */
 
 const READYSTATE_OPEN = 1
+const HANDSHAKE_DISCOVERY_SESSION_ID = "ui-session"
 
 /* ------------------------------------------------------------------ */
 /* SessionClient                                                       */
@@ -112,7 +119,9 @@ export class SessionClient {
     Set<EventHandler<SessionEventType>>
   >()
   readonly #wildcardEventHandlers = new Set<(event: SessionEvent) => void>()
+  readonly #rejectedHandlers = new Set<(frame: SessionRejectedFrame) => void>()
   readonly #connectionHandlers = new Set<ConnectionHandler>()
+  readonly #snapshotHandlers = new Set<SnapshotHandler>()
   readonly #wsCtor: WebSocketCtor
   readonly #setTimer: (cb: () => void, ms: number) => unknown
   readonly #clearTimer: (handle: unknown) => void
@@ -124,6 +133,10 @@ export class SessionClient {
   #intentionallyClosed = false
   #reconnectHandle: unknown = null
   #state: ConnectionState = { kind: "closed" }
+  /** Server-minted session id learned via connect-reject discovery or snapshot. */
+  #sessionId: string | null = null
+  #lastSnapshot: SessionSnapshotLite | null = null
+  readonly #sessionIdHandlers = new Set<(id: string) => void>()
 
   constructor(options: SessionClientOptions = {}) {
     const ctor =
@@ -182,7 +195,34 @@ export class SessionClient {
       )
       return
     }
+    if (this.#state.kind !== "connected") {
+      this.#log(
+        "warn",
+        `[SessionClient] dropping command type=${command.type} — handshake not ready`,
+      )
+      return
+    }
     this.#ws.send(encodeCommandFrame(command))
+  }
+
+  /** Last server-minted session id, or `null` until the handshake settles. */
+  get sessionId(): string | null {
+    return this.#sessionId
+  }
+
+  /** Subscribe to sessionId discovery — fires once per learned id. */
+  onSessionId(handler: (id: string) => void): () => void {
+    this.#sessionIdHandlers.add(handler)
+    if (this.#sessionId !== null) {
+      try {
+        handler(this.#sessionId)
+      } catch {
+        // swallow — surface to console via #log instead
+      }
+    }
+    return () => {
+      this.#sessionIdHandlers.delete(handler)
+    }
   }
 
   /* ---------------- Subscriptions ------------------------------- */
@@ -209,6 +249,41 @@ export class SessionClient {
     this.#wildcardEventHandlers.add(handler)
     return () => {
       this.#wildcardEventHandlers.delete(handler)
+    }
+  }
+
+  /**
+   * Inject historical events into the same fanout path as live WS frames.
+   * Used by transcript hydration after a page reload: the daemon's SQLite
+   * thread store replies with the past `SessionEvent[]` and we replay them
+   * through every typed + wildcard handler so the transcript reducer rebuilds
+   * exactly as if the events had just arrived. Deduplication against any live
+   * frames that overlap is the reducer's job (it tracks `eventId`).
+   */
+  replayEvents(events: readonly SessionEvent[]): void {
+    for (const event of events) {
+      this.#fanoutEvent(event)
+    }
+  }
+
+  onRejected(handler: (frame: SessionRejectedFrame) => void): () => void {
+    this.#rejectedHandlers.add(handler)
+    return () => {
+      this.#rejectedHandlers.delete(handler)
+    }
+  }
+
+  onSnapshot(handler: SnapshotHandler): () => void {
+    this.#snapshotHandlers.add(handler)
+    if (this.#lastSnapshot !== null) {
+      try {
+        handler(this.#lastSnapshot)
+      } catch {
+        // swallow — surface to console via #log instead
+      }
+    }
+    return () => {
+      this.#snapshotHandlers.delete(handler)
     }
   }
 
@@ -256,7 +331,17 @@ export class SessionClient {
 
     ws.onopen = () => {
       this.#attempt = 0
-      this.#setState({ kind: "connected" })
+      // The server requires a `connect` handshake before any command frame
+      // is accepted. Until we know the canonical session id we send a
+      // non-empty discovery sentinel; the daemon rejects it with the real
+      // session id and we immediately retry with that value.
+      try {
+        ws.send(
+          encodeConnectFrame(this.#sessionId ?? HANDSHAKE_DISCOVERY_SESSION_ID),
+        )
+      } catch (err) {
+        this.#log("warn", `[SessionClient] connect frame failed: ${String(err)}`)
+      }
     }
     ws.onclose = (ev) => {
       this.#ws = null
@@ -285,6 +370,56 @@ export class SessionClient {
       )
       return
     }
+    const rejected = decodeRejectedFrame(data)
+    if (rejected !== null) {
+      if (
+        rejected.target === "connect" &&
+        rejected.sessionId !== undefined &&
+        rejected.sessionId.length > 0 &&
+        this.#sessionId !== rejected.sessionId
+      ) {
+        this.#adoptSessionId(rejected.sessionId)
+        if (this.#ws !== null && this.#ws.readyState === READYSTATE_OPEN) {
+          try {
+            this.#ws.send(encodeConnectFrame(rejected.sessionId))
+          } catch (err) {
+            this.#log("warn", `[SessionClient] connect-retry failed: ${String(err)}`)
+          }
+        }
+      }
+      if (rejected.target === "command") {
+        for (const handler of [...this.#rejectedHandlers]) {
+          try {
+            handler(rejected)
+          } catch (err) {
+            this.#log("warn", `[SessionClient] rejected handler threw: ${String(err)}`)
+          }
+        }
+      }
+      return
+    }
+    const snapshot = decodeSnapshotFrame(data)
+    if (snapshot !== null) {
+      this.#lastSnapshot = snapshot
+      if (
+        this.#sessionId === null ||
+        this.#sessionId !== snapshot.sessionId
+      ) {
+        this.#adoptSessionId(snapshot.sessionId)
+      }
+      this.#setState({ kind: "connected" })
+      for (const handler of [...this.#snapshotHandlers]) {
+        try {
+          handler(snapshot)
+        } catch (err) {
+          this.#log(
+            "warn",
+            `[SessionClient] snapshot handler threw: ${String(err)}`,
+          )
+        }
+      }
+      return
+    }
     const event = decodeEventFrame(data)
     if (event === null) {
       const kind = peekEnvelopeKind(data)
@@ -296,6 +431,10 @@ export class SessionClient {
       }
       return
     }
+    this.#fanoutEvent(event)
+  }
+
+  #fanoutEvent(event: SessionEvent): void {
     const typed = this.#eventHandlers.get(event.type)
     if (typed !== undefined) {
       for (const handler of [...typed]) {
@@ -360,5 +499,16 @@ export class SessionClient {
     if (token === undefined || token.length === 0) return url
     const sep = url.includes("?") ? "&" : "?"
     return `${url}${sep}token=${encodeURIComponent(token)}`
+  }
+
+  #adoptSessionId(sessionId: string): void {
+    this.#sessionId = sessionId
+    for (const handler of [...this.#sessionIdHandlers]) {
+      try {
+        handler(sessionId)
+      } catch (err) {
+        this.#log("warn", `[SessionClient] sessionId handler threw: ${String(err)}`)
+      }
+    }
   }
 }

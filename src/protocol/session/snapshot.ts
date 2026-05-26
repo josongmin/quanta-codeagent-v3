@@ -25,6 +25,7 @@ export interface SessionStateView {
   readonly messageCount: number
   readonly lastUserText?: string
   readonly lastAssistantText?: string
+  readonly streamingAssistantText?: string
   readonly lastOutcomeReason?: string
 }
 

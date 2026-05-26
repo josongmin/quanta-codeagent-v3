@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test"
+import { z } from "zod"
+import { createOnConfirmReviewerPort } from "@/agent"
 import { deriveCapabilityManifest } from "@/host/runtime"
 import { createRuntimeContextBindingFromAgentConfigBase } from "@/host/runtime/internal/context-binding"
+import type { LLMPort, StreamEvent } from "@/llm"
 import type { RuntimeAgentConfigBase } from "@/sdk/runtime/base"
+import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime/context"
 import { ToolRegistry } from "@/tool"
 
 const fakeToolRegistry = (count: number): ToolRegistry =>
@@ -27,8 +31,38 @@ const makeBase = (overrides: Partial<RuntimeAgentConfigBase> = {}): RuntimeAgent
     system: "system",
     cwd: "/tmp/test",
     maxTurns: 5,
+    signal: new AbortController().signal,
     ...overrides,
   }) as RuntimeAgentConfigBase
+
+class ScriptedLLM implements LLMPort {
+  private cursor = 0
+
+  constructor(private readonly scripts: ReadonlyArray<readonly StreamEvent[]>) {}
+
+  async *stream(): AsyncIterable<StreamEvent> {
+    const events = this.scripts[this.cursor] ?? []
+    this.cursor += 1
+    for (const event of events) yield event
+  }
+}
+
+const approvalTool = (runs: { count: number }) =>
+  ({
+    name: "bash",
+    description: "approval test tool",
+    inputSchema: z.object({ command: z.string() }),
+    isReadOnly: () => false,
+    isConcurrencySafe: () => false,
+    extractShellCommand: (input: { command: string }) => input.command,
+    execute: async function* () {
+      runs.count += 1
+      yield {
+        type: "result",
+        result: { ok: true, output: "shell ok" },
+      }
+    },
+  }) as const
 
 describe("host runtime capability derivation", () => {
   test("public derivation freezes normalized host truth", () => {
@@ -108,5 +142,84 @@ describe("host runtime capability derivation", () => {
       transport: "inproc",
     })
     expect(Object.isFrozen(manifest)).toBe(true)
+  })
+
+  test("runtime session host surfaces approval requests and replays the approved action once", async () => {
+    const llm = new ScriptedLLM([
+      [
+        { type: "tool_use_start", id: "t1", name: "bash" },
+        { type: "tool_use_delta", id: "t1", delta: '{"command":"touch /tmp/out.txt"}' },
+        { type: "tool_use_end", id: "t1", input: { command: "touch /tmp/out.txt" } },
+        { type: "message_stop", stop_reason: "tool_use" },
+      ],
+      [
+        { type: "tool_use_start", id: "t1", name: "bash" },
+        { type: "tool_use_delta", id: "t1", delta: '{"command":"touch /tmp/out.txt"}' },
+        { type: "tool_use_end", id: "t1", input: { command: "touch /tmp/out.txt" } },
+        { type: "message_stop", stop_reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", delta: "done" },
+        { type: "message_stop", stop_reason: "end_turn" },
+      ],
+    ])
+    const toolRuns = { count: 0 }
+    const surfaceConfirmCalls = { count: 0 }
+    const confirmSlot = {
+      current: async (_action: unknown) => {
+        surfaceConfirmCalls.count += 1
+        return true
+      },
+    }
+    const base = {
+      ...makeBase({
+        llm,
+        registry: new ToolRegistry([approvalTool(toolRuns)] as never),
+        permission: { mode: "default" } as never,
+        onConfirm: async (action) => await confirmSlot.current(action),
+        admissibility: {
+          reviewerPort: createOnConfirmReviewerPort({
+            onConfirm: async (action) => await confirmSlot.current(action),
+          }),
+          defaultReviewer: "user",
+        } as never,
+      }),
+      approvalProtocol: { confirmSlot },
+    } as RuntimeAgentConfigBase
+    const { runtime } = await createRuntimeFromAgentConfigBase({
+      base,
+      history: [],
+      state: undefined,
+      idMeta: undefined,
+      shutdown: async () => undefined,
+    })
+
+    let session: Awaited<ReturnType<typeof runtime.createSession>> | undefined
+    try {
+      session = await runtime.createSession({ cwd: "/tmp/test", permissionMode: "default" })
+      await session.input.append("write the file")
+
+      const pending = await session.turn.run()
+      expect(pending.turn?.approvalRequest).toEqual({
+        approvalId: expect.any(String),
+        reason: "terminal.needs_approval",
+        requestedAt: expect.any(String),
+      })
+      expect(toolRuns.count).toBe(0)
+      expect(surfaceConfirmCalls.count).toBe(0)
+
+      const approvalId = pending.turn?.approvalRequest?.approvalId
+      if (approvalId === undefined) throw new Error("approval id missing from pending turn")
+      await session.approval.respond(approvalId, "approve")
+
+      const completed = await session.turn.run()
+      expect(completed.turn?.approvalRequest).toBeUndefined()
+      expect(completed.turn?.outcome.reason).toBe("completed")
+      expect(toolRuns.count).toBe(1)
+      expect(surfaceConfirmCalls.count).toBe(0)
+    } finally {
+      await session?.close().catch(() => undefined)
+      await runtime.close().catch(() => undefined)
+    }
   })
 })

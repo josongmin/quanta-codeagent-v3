@@ -6,7 +6,10 @@
  * B4 must be behavior-preserving, so each test constructs a config that would
  * trigger MULTIPLE gates and asserts which one fires first.
  */
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { z } from "zod"
 import type { AgentConfig } from "@/agent"
 import { HookBus } from "@/agent"
@@ -14,11 +17,13 @@ import { type AdmissibilityAction, runAdmissibilityGate } from "@/agent/admissib
 import { dispatchTool } from "@/agent/dispatch"
 import type { ToolUseBlock } from "@/llm"
 import {
+  __resetDefaultPermissionStore,
   AutoModeClassifier,
   type ClassifierPort,
   type HITLTier,
   type PermissionContext,
 } from "@/permission"
+import { __resetRuntimeConfig } from "@/shared"
 import type { Tool, ToolEvent } from "@/tool"
 import { ToolRegistry } from "@/tool"
 
@@ -71,6 +76,27 @@ const actionOf = (tool: Tool, input: unknown = {}): AdmissibilityAction => ({
   tool: tool.name,
   input,
   isReadOnly: tool.isReadOnly(),
+})
+
+const originalPermissionState = process.env.QUANTA_PERMISSION_STATE
+let permissionStateRoot: string | null = null
+
+beforeEach(() => {
+  permissionStateRoot = mkdtempSync(join(tmpdir(), "admissibility-perm-state-"))
+  process.env.QUANTA_PERMISSION_STATE = join(permissionStateRoot, "permission-state.json")
+  __resetRuntimeConfig()
+  __resetDefaultPermissionStore()
+})
+
+afterEach(() => {
+  if (permissionStateRoot !== null) {
+    rmSync(permissionStateRoot, { recursive: true, force: true })
+    permissionStateRoot = null
+  }
+  if (originalPermissionState === undefined) delete process.env.QUANTA_PERMISSION_STATE
+  else process.env.QUANTA_PERMISSION_STATE = originalPermissionState
+  __resetRuntimeConfig()
+  __resetDefaultPermissionStore()
 })
 
 const bashSchema = z.object({ command: z.string() })
@@ -437,27 +463,90 @@ describe("runAdmissibilityGate: canonical ordering", () => {
 })
 
 describe("runAdmissibilityGate: parity with dispatchTool", () => {
+  type Scenario = {
+    name: string
+    tool: Tool
+    input: unknown
+    permission: PermissionContext
+    hitl?: { enabled?: boolean }
+    planMode?: boolean
+    onConfirm?: () => Promise<boolean>
+    expectPreview: string | null
+    expectContent?: string
+    divergent?: { dispatchedPreview: string; dispatchedContent: string }
+  }
+
+  const buildScenarioConfig = (scenario: Scenario): AgentConfig =>
+    cfg({
+      registry: new ToolRegistry([scenario.tool]),
+      permission: scenario.permission,
+      ...(scenario.hitl ? { hitl: scenario.hitl } : {}),
+      ...(scenario.planMode !== undefined ? { planMode: scenario.planMode } : {}),
+      ...(scenario.onConfirm ? { onConfirm: scenario.onConfirm } : {}),
+    })
+
+  const expectParityScenario = (
+    scenario: Scenario,
+    direct: Awaited<ReturnType<typeof runAdmissibilityGate>>,
+    dispatched: Awaited<ReturnType<typeof dispatchTool>>,
+  ): void => {
+    if (scenario.expectPreview === null) {
+      expect(direct, `[${scenario.name}] direct should be null when admissible`).toBeNull()
+      expect(dispatched.ok, `[${scenario.name}] dispatched should be ok`).toBe(true)
+      return
+    }
+    if (scenario.divergent) {
+      expect(direct, `[${scenario.name}] direct should not be null`).not.toBeNull()
+      expect(direct?.preview, `[${scenario.name}] direct preview`).toBe(scenario.expectPreview)
+      if (scenario.expectContent) {
+        expect(direct?.block.content, `[${scenario.name}] direct content`).toContain(
+          scenario.expectContent,
+        )
+      }
+      expect(dispatched.preview, `[${scenario.name}] dispatched preview`).toBe(
+        scenario.divergent.dispatchedPreview,
+      )
+      expect(dispatched.block.content, `[${scenario.name}] dispatched content`).toContain(
+        scenario.divergent.dispatchedContent,
+      )
+      return
+    }
+    expect(direct, `[${scenario.name}] direct should not be null`).not.toBeNull()
+    expect(direct?.preview, `[${scenario.name}] direct preview`).toBe(scenario.expectPreview)
+    expect(dispatched.preview, `[${scenario.name}] dispatched preview`).toBe(scenario.expectPreview)
+    if (scenario.expectContent) {
+      expect(direct?.block.content, `[${scenario.name}] direct content`).toContain(
+        scenario.expectContent,
+      )
+      expect(dispatched.block.content, `[${scenario.name}] dispatched content`).toContain(
+        scenario.expectContent,
+      )
+    }
+  }
+
+  const runParityScenario = async (scenario: Scenario): Promise<void> => {
+    const direct = await runAdmissibilityGate(
+      call(scenario.tool.name, scenario.input),
+      buildScenarioConfig(scenario),
+      scenario.permission,
+      {
+        tool: scenario.tool.name,
+        input: scenario.input,
+        isReadOnly: scenario.tool.isReadOnly(),
+      },
+    )
+    const dispatched = await dispatchTool(
+      call(scenario.tool.name, scenario.input),
+      buildScenarioConfig(scenario),
+      scenario.permission,
+    )
+    expectParityScenario(scenario, direct, dispatched)
+  }
+
   test("dispatchTool path matches runAdmissibilityGate for representative configs", async () => {
     // Each scenario builds a config the gate sees and an equivalent dispatch
     // call. We assert structural parity (ok flag + preview tag + a content
     // substring) so any extraction drift becomes visible.
-    type Scenario = {
-      name: string
-      tool: Tool
-      input: unknown
-      permission: PermissionContext
-      hitl?: { enabled?: boolean }
-      planMode?: boolean
-      onConfirm?: () => Promise<boolean>
-      expectPreview: string | null // null ⇒ tool runs (ok:true)
-      expectContent?: string
-      /** ADR-0036 L4: scenarios where the dispatch path legitimately
-       *  diverges from the direct admissibility-gate path (the seam guard
-       *  pre-empts). When set, the parity comparison checks `direct`
-       *  against `expectPreview/Content` and `dispatched` against
-       *  `divergent.dispatchedPreview/Content`. */
-      divergent?: { dispatchedPreview: string; dispatchedContent: string }
-    }
     const bash = makeTool("bash", { readOnly: false, schema: bashSchema })
     const ro = makeTool("ro", { readOnly: true })
     const mutate = makeTool("mut", { readOnly: false })
@@ -564,55 +653,7 @@ describe("runAdmissibilityGate: parity with dispatchTool", () => {
     ]
 
     for (const s of scenarios) {
-      const buildCfg = (): AgentConfig =>
-        cfg({
-          registry: new ToolRegistry([s.tool]),
-          permission: s.permission,
-          ...(s.hitl ? { hitl: s.hitl } : {}),
-          ...(s.planMode !== undefined ? { planMode: s.planMode } : {}),
-          ...(s.onConfirm ? { onConfirm: s.onConfirm } : {}),
-        })
-
-      // Path A: runAdmissibilityGate directly
-      const direct = await runAdmissibilityGate(
-        call(s.tool.name, s.input),
-        buildCfg(),
-        s.permission,
-        { tool: s.tool.name, input: s.input, isReadOnly: s.tool.isReadOnly() },
-      )
-
-      // Path B: dispatchTool — which funnels through the same gate.
-      const dispatched = await dispatchTool(call(s.tool.name, s.input), buildCfg(), s.permission)
-
-      if (s.expectPreview === null) {
-        // Tool ran — both paths should reflect ok-success.
-        expect(direct, `[${s.name}] direct should be null when admissible`).toBeNull()
-        expect(dispatched.ok, `[${s.name}] dispatched should be ok`).toBe(true)
-      } else if (s.divergent) {
-        // ADR-0036 L4: the dispatch path differs from the direct gate
-        // path because the seam guard pre-empts. Assert each separately.
-        expect(direct, `[${s.name}] direct should not be null`).not.toBeNull()
-        expect(direct?.preview, `[${s.name}] direct preview`).toBe(s.expectPreview)
-        if (s.expectContent) {
-          expect(direct?.block.content, `[${s.name}] direct content`).toContain(s.expectContent)
-        }
-        expect(dispatched.preview, `[${s.name}] dispatched preview`).toBe(
-          s.divergent.dispatchedPreview,
-        )
-        expect(dispatched.block.content, `[${s.name}] dispatched content`).toContain(
-          s.divergent.dispatchedContent,
-        )
-      } else {
-        expect(direct, `[${s.name}] direct should not be null`).not.toBeNull()
-        expect(direct?.preview, `[${s.name}] direct preview`).toBe(s.expectPreview)
-        expect(dispatched.preview, `[${s.name}] dispatched preview`).toBe(s.expectPreview)
-        if (s.expectContent) {
-          expect(direct?.block.content, `[${s.name}] direct content`).toContain(s.expectContent)
-          expect(dispatched.block.content, `[${s.name}] dispatched content`).toContain(
-            s.expectContent,
-          )
-        }
-      }
+      await runParityScenario(s)
     }
   })
 })

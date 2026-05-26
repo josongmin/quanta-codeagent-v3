@@ -315,6 +315,17 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   // Pure HTTP GET + multimodal-block emit; no FS write, no shell. Safe in
   // plan mode.
   read_image_url: null,
+  // `session_config` — agent self-inspection / self-mutation over its own
+  // SDK posture (effort tier, identity mode, tool profile, model, provider).
+  // Although `op:set_effort` mutates the session EffortStore, the mutation
+  // is purely an internal preference change (no FS / shell / git / network
+  // side effect) and mirrors the existing operator `/effort` slash which is
+  // also allowed in plan mode. Classifying as `null` keeps plan-mode
+  // dispatch a one-table lookup while leaving the only operator-facing risk
+  // — sudden effort bumps — under the operator's eye (every mutation is a
+  // visible tool call in the trace). The unit + hellgate tests assert this
+  // classification stays read-only-permissive.
+  session_config: null,
 })
 
 /** Thrown by {@link isMutatingTool} / {@link assertNotMutatingInPlanMode}

@@ -21,6 +21,7 @@ import { localizeTool } from "./localize"
 import { parseTestFailureTool } from "./parse-test-failure"
 import { makeReadTool, readTool } from "./read"
 import { scriptedReplaceTool } from "./scripted-replace"
+import { sessionConfigTool } from "./session_config"
 import { testRunnerTool } from "./test-runner"
 import type { Tool } from "./types"
 import { webFetchTool } from "./web"
@@ -172,6 +173,16 @@ export {
   searchCodebaseInputSchema,
   searchCodebaseTool,
 } from "./search-codebase"
+// `session_config` tool — agent's self-inspection / self-mutation seam.
+// Registered unconditionally in `buildDefaultTools` (returns a typed
+// `not_wired` failure when the composition root has not bound the seam).
+export {
+  SESSION_CONFIG_EFFORT_LEVELS,
+  type SessionConfigEffortLevel,
+  type SessionConfigInput,
+  sessionConfigInputSchema,
+  sessionConfigTool,
+} from "./session_config"
 // Shadow-store tools (ADR-0119 + ADR-0122). Built only when the assembly seam
 // wires `AgentConfig.shadowOdb`; NOT part of `defaultTools` — see tier1/shadow.ts.
 export type {
@@ -232,6 +243,7 @@ export type {
   PlanMutatorTodoPatch,
   PlanReadonlyView,
   SandboxViolationReason,
+  SessionConfigSeam,
   ShellSnapshotRestoreSeam,
   Tool,
   ToolContext,
@@ -390,6 +402,12 @@ const buildBaseDefaultTools = (ports: DefaultToolPorts): Tool[] => [
   yamlReadTool as Tool,
   pdfReadTool as Tool,
   xlsxReadTool as Tool,
+  // `session_config` — agent self-inspection / self-mutation over its own
+  // SDK posture (effort tier, identity mode, tool profile, model, provider).
+  // Always registered: when the composition root has not wired the seam,
+  // the tool yields a typed `not_wired` failure. Read+write split: `op:get`
+  // reads, `op:set_effort` mutates the session effort (mirrors `/effort`).
+  sessionConfigTool as Tool,
 ]
 
 /**

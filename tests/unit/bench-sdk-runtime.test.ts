@@ -1,9 +1,12 @@
-import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test"
+import { afterAll, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { runInstance } from "@/apps/bench/eval"
 import type { Instance } from "@/apps/bench/types"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
+import type { SessionEvent } from "@/protocol/session"
+import type { CreateRuntimeOptions, RuntimeFacade, RuntimeSession } from "@/sdk/runtime"
 import { __resetRuntimeConfig } from "@/shared/runtime-config"
 
 class NoopLLM implements LLMPort {
@@ -29,115 +32,106 @@ const testBenchHome = mkdtempSync(join(tmpdir(), "bench-sdk-home-"))
 process.env.QUANTA_BENCH_HOME = testBenchHome
 __resetRuntimeConfig()
 
-const loadRunInstanceWithSdkMock = async () => {
-  const originalSdkModule = await import("@/sdk/runtime")
-  await mock.module("@/sdk/runtime", () => ({
-    ...originalSdkModule,
-    createRuntime: async ({
-      host,
-    }: {
-      host: {
-        createSessionHost(config: Record<string, unknown>): Promise<{
-          describe(): { sessionId: string }
-          runTurn(args: {
-            history: readonly unknown[]
-            prompt: string
-            signal?: AbortSignal
-          }): Promise<unknown>
-          close(): Promise<void>
-        }>
-      }
-    }) => {
-      sdkCalls.createRuntime += 1
-      return {
-        createSession: async (config: Record<string, unknown>) => {
-          sdkCalls.createSession += 1
-          const hostSession = await host.createSessionHost(config)
-          let prompt = ""
-          const listeners = new Set<(event: Record<string, unknown>) => void>()
-          return {
-            sessionId: hostSession.describe().sessionId,
-            dispatch: async () => ({ revision: 0, seq: 0, events: [] }),
-            subscribe: (listener: (event: Record<string, unknown>) => void) => {
-              sdkCalls.subscribe += 1
-              listeners.add(listener)
-              return () => {
-                sdkCalls.unsubscribe += 1
-                listeners.delete(listener)
-              }
-            },
-            snapshot: async () => ({ sessionId: hostSession.describe().sessionId }),
-            close: async () => {
-              sdkCalls.sessionClose += 1
-              await hostSession.close()
-            },
-            input: {
-              append: async (text: string) => {
-                prompt = text
-                sdkCalls.prompts.push(text)
-                return { revision: 1, seq: 1, events: [] }
-              },
-            },
-            turn: {
-              run: async (_meta?: unknown, options?: { signal?: AbortSignal }) => {
-                sdkCalls.turnRun += 1
-                for (const listener of [...listeners]) {
-                  listener({
-                    eventId: "turn-started",
-                    seq: 2,
-                    revision: 2,
-                    emittedAt: "2026-05-26T00:00:00.000Z",
-                    type: "turn.started",
-                    prompt,
-                  })
-                }
-                const result = await hostSession.runTurn({
-                  history: [],
-                  prompt,
-                  ...(options?.signal !== undefined ? { signal: options.signal } : {}),
-                })
-                for (const listener of [...listeners]) {
-                  listener({
-                    eventId: "turn-completed",
-                    seq: 3,
-                    revision: 3,
-                    emittedAt: "2026-05-26T00:00:01.000Z",
-                    type: "turn.completed",
-                    outcomeReason: "completed",
-                  })
-                }
-                return { revision: 2, seq: 2, events: [], turn: result }
-              },
-            },
-            identity: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
-            toolProfile: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
-            approval: { respond: async () => ({ revision: 0, seq: 0, events: [] }) },
-            transcript: {
-              replace: async () => ({
-                revision: 0,
-                seq: 0,
-                events: [],
-                transcript: { messages: [] },
-              }),
-            },
+const runtimeFactory = async ({ host }: CreateRuntimeOptions): Promise<RuntimeFacade> => {
+  sdkCalls.createRuntime += 1
+  return {
+    createSession: async (config) => {
+      sdkCalls.createSession += 1
+      const hostSession = await host.createSessionHost(config)
+      const description = hostSession.describe()
+      let prompt = ""
+      const listeners = new Set<(event: SessionEvent) => void>()
+      const session: RuntimeSession = {
+        sessionId: description.sessionId,
+        dispatch: async () => ({ revision: 0, seq: 0, events: [] }),
+        subscribe: (listener) => {
+          sdkCalls.subscribe += 1
+          listeners.add(listener)
+          return () => {
+            sdkCalls.unsubscribe += 1
+            listeners.delete(listener)
           }
         },
+        snapshot: async () => ({
+          sessionId: description.sessionId,
+          revision: 0,
+          seq: 0,
+          state: {
+            status: "idle",
+            draftInput: prompt,
+            permissionMode: description.permissionMode,
+            identityMode: "default",
+            toolProfile: "write",
+            messageCount: 0,
+          },
+          capabilities: description.capabilityManifest,
+          pendingApproval: null,
+          openArtifacts: [],
+        }),
+        attachSessionTransport: async () => ({ close: async () => undefined }) as never,
         close: async () => {
-          sdkCalls.runtimeClose += 1
+          sdkCalls.sessionClose += 1
+          await hostSession.close()
+        },
+        input: {
+          append: async (text: string) => {
+            prompt = text
+            sdkCalls.prompts.push(text)
+            return { revision: 1, seq: 1, events: [] }
+          },
+        },
+        turn: {
+          run: async (_meta, options) => {
+            sdkCalls.turnRun += 1
+            for (const listener of [...listeners]) {
+              listener({
+                eventId: "turn-started",
+                seq: 2,
+                revision: 2,
+                emittedAt: "2026-05-26T00:00:00.000Z",
+                type: "turn.started",
+                prompt,
+              })
+            }
+            const result = await hostSession.runTurn({
+              history: [],
+              prompt,
+              ...(options?.signal !== undefined ? { signal: options.signal } : {}),
+            })
+            for (const listener of [...listeners]) {
+              listener({
+                eventId: "turn-completed",
+                seq: 3,
+                revision: 3,
+                emittedAt: "2026-05-26T00:00:01.000Z",
+                type: "turn.completed",
+                outcomeReason: "completed",
+              })
+            }
+            return { revision: 2, seq: 2, events: [], turn: result }
+          },
+        },
+        identity: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
+        toolProfile: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
+        approval: { respond: async () => ({ revision: 0, seq: 0, events: [] }) },
+        transcript: {
+          replace: async () => ({
+            revision: 0,
+            seq: 0,
+            events: [],
+            transcript: { messages: [] },
+          }),
+        },
+        side: {
+          start: async () => {
+            throw new Error("bench test double does not implement side conversations")
+          },
         },
       }
+      return session
     },
-  }))
-
-  const benchEvalModuleUrl = new URL("../../src/apps/bench/eval/index.ts", import.meta.url)
-  benchEvalModuleUrl.searchParams.set("sdkCutover", `${Date.now()}-${Math.random()}`)
-  const { runInstance } = await import(benchEvalModuleUrl.href)
-
-  return {
-    runInstance,
-    restore: async () => {
-      await mock.module("@/sdk/runtime", () => originalSdkModule)
-      mock.restore()
+    close: async () => {
+      sdkCalls.runtimeClose += 1
     },
   }
 }
@@ -164,7 +158,6 @@ describe("apps/bench/eval SDK cutover", () => {
   test.serial(
     "runInstance drives the per-instance attempt through createRuntime/session dispatch",
     async () => {
-      const { runInstance, restore } = await loadRunInstanceWithSdkMock()
       const dir = mkdtempSync(join(tmpdir(), "bench-sdk-runtime-"))
       try {
         writeFileSync(join(dir, "note.txt"), "ok\n")
@@ -178,6 +171,7 @@ describe("apps/bench/eval SDK cutover", () => {
           llm: new NoopLLM(),
           maxTurns: 2,
           timeoutMs: 20_000,
+          runtimeFactory,
         })
         expect(result.id).toBe(instance.id)
         expect(result.passed).toBe(false)
@@ -193,7 +187,6 @@ describe("apps/bench/eval SDK cutover", () => {
         expect(sdkCalls.prompts[0]).toContain("Inspect the repo and stop.")
         expect(sdkCalls.prompts[0]).toContain("Work inside")
       } finally {
-        await restore()
         rmSync(dir, { recursive: true, force: true })
       }
     },

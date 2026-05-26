@@ -11,6 +11,7 @@
 //   5  capture / OCR failure
 //
 import ArgumentParser
+import AppKit
 import Foundation
 
 @main
@@ -25,6 +26,18 @@ struct ScreenOcr: AsyncParsableCommand {
             CheckPermissionCommand.self,
         ]
     )
+}
+
+enum AppBootstrap {
+    /// ScreenCaptureKit capture paths can trip `CGS_REQUIRE_INIT` when this
+    /// process has never initialised the AppKit application singleton.
+    /// `list-windows` stays on the CGWindowList path and does not need this,
+    /// but `capture` does before touching `SCShareableContent`.
+    @discardableResult
+    static func ensureAppKitLoaded() -> Bool {
+        _ = NSApplication.shared
+        return NSApp != nil
+    }
 }
 
 struct CheckPermissionCommand: ParsableCommand {

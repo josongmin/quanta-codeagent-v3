@@ -1,5 +1,9 @@
+import {
+  type ConnectedSessionTransport,
+  createSessionTransportBridge,
+  type SessionTransport,
+} from "@/ipc/session"
 import type { SessionHost } from "@/kernel/session"
-import { createSessionTransportBridge, type ConnectedSessionTransport, type SessionTransport } from "@/ipc/session"
 import {
   createKernelSessionState,
   dispatchSessionCommand,
@@ -34,9 +38,7 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
   const subscriptions = new SessionSubscriptionHub()
   const sessionId = state.sessionId
   let transportDispatchQueue: Promise<void> = Promise.resolve()
-  let transportBridge:
-    | ReturnType<typeof createSessionTransportBridge>
-    | undefined
+  let transportBridge: ReturnType<typeof createSessionTransportBridge> | undefined
 
   const ensureTransportBridge = (
     replayWindow?: number,
@@ -59,42 +61,72 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
     for (const event of events) subscriptions.publish(event)
   }
 
+  const publishCommittedEvents = async (
+    committedState: KernelSessionState,
+    events: readonly SessionEvent[],
+  ): Promise<number> => {
+    if (events.length === 0) return 0
+    state = committedState
+    publishEvents(events)
+    await transportBridge?.publishEvents(events)
+    transportBridge?.updateSnapshot(toSessionSnapshotLite(state))
+    return events.length
+  }
+
+  const publishPendingEvents = async (
+    events: readonly SessionEvent[],
+    committedEventCount: number,
+  ): Promise<void> => {
+    const pendingEvents = committedEventCount === 0 ? events : events.slice(committedEventCount)
+    if (pendingEvents.length > 0) {
+      publishEvents(pendingEvents)
+      await transportBridge?.publishEvents(pendingEvents)
+    }
+    if (committedEventCount === 0 || pendingEvents.length > 0) {
+      transportBridge?.updateSnapshot(toSessionSnapshotLite(state))
+    }
+  }
+
+  const toDispatchResult = (result: Awaited<ReturnType<typeof dispatchSessionCommand>>) => ({
+    revision: state.revision,
+    seq: state.seq,
+    events: result.events,
+    ...(result.transcriptMessages !== undefined
+      ? { transcript: { messages: [...result.transcriptMessages] } }
+      : {}),
+    ...(result.turnResult !== undefined
+      ? {
+          turn: {
+            outcome: result.turnResult.outcome,
+            messages: [...result.turnResult.messages],
+            ...(result.turnResult.artifacts !== undefined
+              ? { artifacts: [...result.turnResult.artifacts] }
+              : {}),
+            ...(result.turnResult.approvalRequest !== undefined
+              ? { approvalRequest: result.turnResult.approvalRequest }
+              : {}),
+          },
+        }
+      : {}),
+  })
+
   const dispatch = async (
     command: SessionCommand,
     options: SessionDispatchOptions = {},
   ): Promise<SessionDispatchResult> => {
     if (closed) throw new SessionClosedError(sessionId)
+    let committedEventCount = 0
     const result = await dispatchSessionCommand(state, command, {
       ...args.kernel,
       host: args.hostSession,
       ...(options.signal !== undefined ? { signal: options.signal } : {}),
+      onCommitted: async ({ state: committedState, events }) => {
+        committedEventCount += await publishCommittedEvents(committedState, events)
+      },
     })
     state = result.state
-    publishEvents(result.events)
-    await transportBridge?.publishEvents(result.events)
-    await transportBridge?.publishSnapshot(toSessionSnapshotLite(state))
-    return {
-      revision: state.revision,
-      seq: state.seq,
-      events: result.events,
-      ...(result.transcriptMessages !== undefined
-        ? { transcript: { messages: [...result.transcriptMessages] } }
-        : {}),
-      ...(result.turnResult !== undefined
-        ? {
-            turn: {
-              outcome: result.turnResult.outcome,
-              messages: [...result.turnResult.messages],
-              ...(result.turnResult.artifacts !== undefined
-                ? { artifacts: [...result.turnResult.artifacts] }
-                : {}),
-              ...(result.turnResult.approvalRequest !== undefined
-                ? { approvalRequest: result.turnResult.approvalRequest }
-                : {}),
-            },
-          }
-        : {}),
-    }
+    await publishPendingEvents(result.events, committedEventCount)
+    return toDispatchResult(result)
   }
 
   const commandMeta = <
@@ -187,7 +219,24 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
       options: { readonly replayWindow?: number } = {},
     ): Promise<ConnectedSessionTransport> => {
       if (closed) throw new SessionClosedError(sessionId)
-      return await ensureTransportBridge(options.replayWindow).connect(transport)
+      const connected = await ensureTransportBridge(options.replayWindow).connect(transport)
+      // Synthesise a `session.created` event for the freshly-attached client
+      // so it can render the model pill + capability manifest without an
+      // out-of-band lookup. This is intentionally per-attach (not
+      // per-session-life) so a reconnecting client sees the same shape.
+      const createdEvent: SessionEvent = {
+        type: "session.created",
+        eventId: crypto.randomUUID(),
+        seq: state.seq,
+        revision: state.revision,
+        emittedAt: args.kernel.clock.now().toISOString(),
+        capabilityManifest: state.capabilityManifest,
+        ...(state.modelSlug !== undefined ? { model: state.modelSlug } : {}),
+      }
+      // Publish to in-proc subscribers AND the just-connected transport.
+      publishEvents([createdEvent])
+      await transportBridge?.publishEvents([createdEvent])
+      return connected
     },
     close: async () => {
       if (closed) return
@@ -203,7 +252,7 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
       }
       await args.kernel.eventLog.append(event)
       await transportBridge?.publishEvents([event])
-      await transportBridge?.publishSnapshot(toSessionSnapshotLite(state))
+      transportBridge?.updateSnapshot(toSessionSnapshotLite(state))
       publishEvents([event])
       await transportBridge?.close()
     },

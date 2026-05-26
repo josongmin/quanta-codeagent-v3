@@ -1,8 +1,8 @@
 /**
  * `@/apps/web-daemon/session-registry` — active session bookkeeping.
  *
- * Tracks the `RuntimeSession + SessionTransportBridge + transport` triple
- * for each connected WebSocket. The registry guarantees:
+ * Tracks the `RuntimeSession + attached transport` pair for each connected
+ * WebSocket. The registry guarantees:
  *   1. Idempotent eviction — `evict(ws)` is safe to call from both the
  *      WS `close` callback and the daemon shutdown path.
  *   2. Bounded cleanup — `closeAll()` awaits every per-session shutdown so
@@ -11,20 +11,13 @@
  *      starve the rest of the eviction loop.
  */
 
-import type {
-  ConnectedSessionTransport,
-  SessionTransport,
-  SessionTransportBridge,
-} from "@/ipc/session"
+import type { ConnectedSessionTransport, SessionTransport } from "@/ipc/session"
 import type { RuntimeSession } from "@/sdk/runtime"
 
 export interface RegisteredSession {
   readonly session: RuntimeSession
-  readonly bridge: SessionTransportBridge
   readonly transport: SessionTransport
   readonly connected: ConnectedSessionTransport
-  /** Unsubscribes the session-event → bridge.publishEvents pipeline. */
-  readonly stopForwarder: () => void
 }
 
 export interface SessionRegistry {
@@ -49,11 +42,13 @@ export const createSessionRegistry = (): SessionRegistry => {
   const entries = new Map<object, RegisteredSession>()
 
   const drop = async (entry: RegisteredSession): Promise<void> => {
-    await safeClose("forwarder", () => entry.stopForwarder())
+    // Per-WS cleanup only — close the transport pair so the WebSocket
+    // half of the bridge frees its buffers. `entry.session` is shared
+    // across all WS clients (multi-client mode); closing it here would
+    // kill the shared transcript whenever any one client disconnects.
+    // The daemon's `stop()` path closes the runtime exactly once.
     await safeClose("connected", () => entry.connected.close())
     await safeClose("transport", () => entry.transport.close())
-    await safeClose("bridge", () => entry.bridge.close())
-    await safeClose("session", () => entry.session.close())
   }
 
   return {

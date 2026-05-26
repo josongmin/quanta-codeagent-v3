@@ -118,6 +118,7 @@ describe("session-setup — dependency contract (compile-time shape lock)", () =
       "turnSummary",
       "debugHandle",
       "timelinePanel",
+      "approvalPrompt",
       "runtimeContext",
       "costPanel",
       "branchProgress",
@@ -128,11 +129,11 @@ describe("session-setup — dependency contract (compile-time shape lock)", () =
       "shutdownMcp",
       "featureCfg",
     ]
-    // 37 named bindings — assert presence to detect accidental drops
+    // 38 named bindings — assert presence to detect accidental drops
     // (ADR-0297 added `featureCfg` for surface-level feature consolidation;
     // `effortStore` was added earlier on main for session-level effort UX).
-    expect(keys).toHaveLength(37)
-    expect(new Set(keys).size).toBe(37)
+    expect(keys).toHaveLength(38)
+    expect(new Set(keys).size).toBe(38)
   })
 })
 

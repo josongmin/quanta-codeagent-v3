@@ -55,6 +55,7 @@ export interface SessionStateView {
   readonly messageCount: number
   readonly lastUserText?: string
   readonly lastAssistantText?: string
+  readonly streamingAssistantText?: string
   readonly lastOutcomeReason?: string
 }
 
@@ -74,6 +75,16 @@ export interface ArtifactRef {
   readonly createdAt: string
 }
 
+export interface SessionSnapshotLite {
+  readonly sessionId: string
+  readonly revision: number
+  readonly seq: number
+  readonly state: SessionStateView
+  readonly capabilities: CapabilityManifest
+  readonly pendingApproval: PendingApprovalView | null
+  readonly openArtifacts: readonly ArtifactRef[]
+}
+
 /* --- Command envelopes (client → server) ------------------------------- */
 
 interface SessionCommandEnvelope<TType extends string> {
@@ -84,9 +95,24 @@ interface SessionCommandEnvelope<TType extends string> {
   readonly type: TType
 }
 
+/**
+ * Image attachment for `input.append`. Mirrors `ImageBlock` upstream
+ * (`src/llm/types.ts`). The daemon's `RuntimeSession.input.append` accepts
+ * an `images` array; the LLM adapter converts to provider-native shape
+ * (OpenAI/ChatGPT: `image_url` data URL; Anthropic: `image` base64 source).
+ */
+export interface ImageBlock {
+  readonly type: "image"
+  /** MIME type — `image/png` for hotkey-capture screenshots. */
+  readonly mediaType: string
+  /** Raw base64 (no `data:` prefix). */
+  readonly data: string
+}
+
 export interface InputAppendCommand
   extends SessionCommandEnvelope<"input.append"> {
   readonly text: string
+  readonly images?: readonly ImageBlock[]
 }
 
 export interface TurnRunCommand extends SessionCommandEnvelope<"turn.run"> {}
@@ -125,6 +151,9 @@ interface SessionEventEnvelope<TType extends string> {
 export interface SessionCreatedEvent
   extends SessionEventEnvelope<"session.created"> {
   readonly capabilityManifest: CapabilityManifest
+  /** Active model slug (e.g. `gpt-5`, `claude-sonnet-4-6`). Optional —
+   *  populated by runtimes that can introspect their LLM port. */
+  readonly model?: string
 }
 
 export interface SessionStateUpdatedEvent
@@ -135,11 +164,47 @@ export interface SessionStateUpdatedEvent
 export interface TurnStartedEvent
   extends SessionEventEnvelope<"turn.started"> {
   readonly prompt: string
+  readonly images?: readonly ImageBlock[]
+}
+
+/** Per-turn token accounting. Mirrors `TokenUsage` upstream. */
+export interface TokenUsage {
+  readonly promptTokens?: number
+  readonly completionTokens?: number
+  readonly totalTokens?: number
+  /** Cost estimate in USD micro-cents (10^-6 USD). */
+  readonly costMicroUsd?: number
 }
 
 export interface TurnCompletedEvent
   extends SessionEventEnvelope<"turn.completed"> {
   readonly outcomeReason: string
+  readonly assistantText?: string
+  readonly tokenUsage?: TokenUsage
+  readonly modelSlug?: string
+}
+
+/** Tool invocation life-cycle (mirrors upstream `ToolInvokedEvent`). */
+export interface ToolInvokedEvent
+  extends SessionEventEnvelope<"tool.invoked"> {
+  readonly toolCallId: string
+  readonly toolName: string
+  readonly argsPreview?: string
+}
+
+/** Tool completion life-cycle (mirrors upstream `ToolCompletedEvent`). */
+export interface ToolCompletedEvent
+  extends SessionEventEnvelope<"tool.completed"> {
+  readonly toolCallId: string
+  readonly toolName: string
+  readonly outcome: "ok" | "error" | "denied" | "timeout"
+  readonly resultPreview?: string
+  readonly durationMs?: number
+}
+
+export interface TurnOutputDeltaEvent
+  extends SessionEventEnvelope<"turn.output.delta"> {
+  readonly delta: string
 }
 
 export interface TurnFailedEvent extends SessionEventEnvelope<"turn.failed"> {
@@ -170,7 +235,10 @@ export type SessionEvent =
   | SessionStateUpdatedEvent
   | TurnStartedEvent
   | TurnCompletedEvent
+  | TurnOutputDeltaEvent
   | TurnFailedEvent
+  | ToolInvokedEvent
+  | ToolCompletedEvent
   | ApprovalRequestedEvent
   | ApprovalResolvedEvent
   | ArtifactReadyEvent
@@ -178,6 +246,26 @@ export type SessionEvent =
 
 export type SessionEventType = SessionEvent["type"]
 export type SessionCommandType = SessionCommand["type"]
+
+/* --- Transport control envelopes (server → client) --------------------- */
+
+export type SessionRejectTarget = "connect" | "command"
+
+export type SessionRejectReason =
+  | "duplicate_command"
+  | "protocol_validation"
+  | "revision_conflict"
+  | "session_id_mismatch"
+
+export interface SessionRejectedFrame {
+  readonly sessionId?: string
+  readonly target: SessionRejectTarget
+  readonly reason: SessionRejectReason
+  readonly commandId?: string
+  readonly expectedRevision?: number
+  readonly actualRevision?: number
+  readonly issue?: string
+}
 
 /* --- Session wire envelope --------------------------------------------- */
 
@@ -211,6 +299,7 @@ export interface UiMessage {
   readonly role: "user" | "assistant" | "system" | "error"
   readonly text: string
   readonly timestamp: string
+  readonly images?: readonly ImageBlock[]
 }
 
 export type ConnectionState =

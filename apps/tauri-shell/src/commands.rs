@@ -34,6 +34,11 @@ pub async fn stop_daemon<R: Runtime>(app: AppHandle<R>) -> AppResult<()> {
 }
 
 #[tauri::command]
+pub async fn restart_daemon<R: Runtime>(app: AppHandle<R>) -> AppResult<DaemonInfo> {
+    daemon::restart(&app).await
+}
+
+#[tauri::command]
 pub async fn daemon_status<R: Runtime>(app: AppHandle<R>) -> AppResult<DaemonStatus> {
     daemon::status(&app).await
 }

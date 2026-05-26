@@ -260,20 +260,17 @@ describe("ADR-0313 hellgate R3 — composer defence-in-depth", () => {
     expect(ctx.postBody).toContain(`xxx${AWS_KEY}yyy`)
   })
 
-  test("documented narrowing: diff field is NOT folded into composer body", async () => {
-    // composeSummary uses only title/headBranch/baseBranch/changedFiles.length/body.
-    // A secret in `diff` cannot leak through this surface (no leak, no redact
-    // needed). We assert ABSENCE of both the literal secret AND a redacted
-    // placeholder caused by it.
+  test("R5: diff IS folded into composer body — secrets in diff get redacted", async () => {
+    // R5 expanded composeSummary to fold the first 600 chars of diff. A secret
+    // landing in that window MUST be redacted, NOT leaked raw.
     const ctx = await runWith({ ...defaultStub, diff: `--- a\n+++ b\n-key=${AWS_KEY}\n+key=...` })
     expect(ctx.postBody).toBeDefined()
     if (ctx.postBody === undefined) throw new Error("unreachable")
     expect(ctx.postBody).not.toContain(AWS_KEY)
-    // No redaction needed (the diff wasn't even part of the composed body).
-    expect(ctx.postBody).not.toContain("[REDACTED:aws_access_key_id]")
+    expect(ctx.postBody).toContain("[REDACTED:aws_access_key_id]")
   })
 
-  test("documented narrowing: recentComments are NOT folded into composer body", async () => {
+  test("R5: recentComments ARE folded — secrets in prior comments get redacted", async () => {
     const ctx = await runWith({
       ...defaultStub,
       comments: [
@@ -287,20 +284,19 @@ describe("ADR-0313 hellgate R3 — composer defence-in-depth", () => {
     expect(ctx.postBody).toBeDefined()
     if (ctx.postBody === undefined) throw new Error("unreachable")
     expect(ctx.postBody).not.toContain(ANT_KEY)
-    // No redact placeholder either — never made it to the composer.
-    expect(ctx.postBody).not.toContain("[REDACTED:anthropic_api_key]")
+    expect(ctx.postBody).toContain("[REDACTED:anthropic_api_key]")
   })
 
-  test("changedFiles paths: count only is folded — secret-like path leaks neither raw nor redacted", async () => {
+  test("R5: changedFiles paths fold top 10 by name — secret-like path is redacted (not raw)", async () => {
     const ctx = await runWith({
       ...defaultStub,
       files: [{ filename: "src/x.ts" }, { filename: `src/${PROJ_KEY}.ts` }],
     })
     expect(ctx.postBody).toBeDefined()
     if (ctx.postBody === undefined) throw new Error("unreachable")
+    // Path containing the proj-key shape MUST be redacted, not raw.
     expect(ctx.postBody).not.toContain(PROJ_KEY)
-    // The body only references file COUNT, never names.
-    expect(ctx.postBody).toMatch(/Files changed: 2/)
+    expect(ctx.postBody).toMatch(/Files changed \(2\)/)
   })
 
   test("idempotency marker is appended AFTER redaction (never bypasses cap)", async () => {

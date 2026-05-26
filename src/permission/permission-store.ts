@@ -206,68 +206,68 @@ const isFiniteNumber = (value: unknown): value is number =>
 const isStringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((entry) => typeof entry === "string")
 
+const isApprovalPolicy = (value: unknown): value is ThreadPermission["approvalPolicy"] =>
+  value === "never" || value === "on-request" || value === "on-failure" || value === "always"
+
+const isApprovalsReviewer = (value: unknown): value is ThreadPermission["approvalsReviewer"] =>
+  value === "user" || value === "agent"
+
+const validateSandboxPolicy = (
+  value: unknown,
+  path: string,
+): ValidationResult<ThreadPermission["sandboxPolicy"]> => {
+  if (!isRecord(value)) {
+    return validationError(`${path}.sandboxPolicy must be an object`)
+  }
+  switch (value.type) {
+    case "danger-full-access":
+      return validationOk({ type: "danger-full-access" })
+    case "read-only":
+      return validationOk({ type: "read-only" })
+    case "workspace-write": {
+      const writableRoots = value.writableRoots
+      if (writableRoots !== undefined && !isStringArray(writableRoots)) {
+        return validationError(`${path}.sandboxPolicy.writableRoots must be a string array`)
+      }
+      const networkAccess = value.networkAccess
+      if (networkAccess !== undefined && typeof networkAccess !== "boolean") {
+        return validationError(`${path}.sandboxPolicy.networkAccess must be boolean`)
+      }
+      return validationOk({
+        type: "workspace-write",
+        ...(writableRoots !== undefined ? { writableRoots: [...writableRoots] } : {}),
+        ...(networkAccess !== undefined ? { networkAccess } : {}),
+      })
+    }
+    default:
+      return validationError(`${path}.sandboxPolicy.type must be a known sandbox policy`)
+  }
+}
+
 const validateThreadPermission = (
   value: unknown,
   path: string,
 ): ValidationResult<ThreadPermission> => {
   if (!isRecord(value)) return validationError(`${path} must be an object`)
   const approvalPolicy = value.approvalPolicy
-  if (
-    approvalPolicy !== "never" &&
-    approvalPolicy !== "on-request" &&
-    approvalPolicy !== "on-failure" &&
-    approvalPolicy !== "always"
-  ) {
+  if (!isApprovalPolicy(approvalPolicy)) {
     return validationError(`${path}.approvalPolicy must be a known policy string`)
   }
   const approvalsReviewer = value.approvalsReviewer
-  if (approvalsReviewer !== "user" && approvalsReviewer !== "agent") {
+  if (!isApprovalsReviewer(approvalsReviewer)) {
     return validationError(`${path}.approvalsReviewer must be 'user' or 'agent'`)
   }
-  const sandboxPolicyRaw = value.sandboxPolicy
-  if (!isRecord(sandboxPolicyRaw)) {
-    return validationError(`${path}.sandboxPolicy must be an object`)
-  }
-
-  let sandboxPolicy: ThreadPermission["sandboxPolicy"]
-  switch (sandboxPolicyRaw.type) {
-    case "danger-full-access":
-      sandboxPolicy = { type: "danger-full-access" }
-      break
-    case "read-only":
-      sandboxPolicy = { type: "read-only" }
-      break
-    case "workspace-write": {
-      const writableRoots = sandboxPolicyRaw.writableRoots
-      if (writableRoots !== undefined && !isStringArray(writableRoots)) {
-        return validationError(`${path}.sandboxPolicy.writableRoots must be a string array`)
-      }
-      const networkAccess = sandboxPolicyRaw.networkAccess
-      if (networkAccess !== undefined && typeof networkAccess !== "boolean") {
-        return validationError(`${path}.sandboxPolicy.networkAccess must be boolean`)
-      }
-      sandboxPolicy = {
-        type: "workspace-write",
-        ...(writableRoots !== undefined ? { writableRoots: [...writableRoots] } : {}),
-        ...(networkAccess !== undefined ? { networkAccess } : {}),
-      }
-      break
-    }
-    default:
-      return validationError(`${path}.sandboxPolicy.type must be a known sandbox policy`)
-  }
+  const sandboxPolicyResult = validateSandboxPolicy(value.sandboxPolicy, path)
+  if (!sandboxPolicyResult.ok) return sandboxPolicyResult
 
   return validationOk({
     approvalPolicy,
     approvalsReviewer,
-    sandboxPolicy,
+    sandboxPolicy: sandboxPolicyResult.value,
   })
 }
 
-const validateHostAgentMode = (
-  value: unknown,
-  path: string,
-): ValidationResult<HostAgentMode> => {
+const validateHostAgentMode = (value: unknown, path: string): ValidationResult<HostAgentMode> => {
   if (value !== "full-access" && value !== "read-only" && value !== "custom") {
     return validationError(`${path} must be a known host mode`)
   }
@@ -796,5 +796,7 @@ export const getDefaultPermissionStore = (): PermissionStore => {
 
 /** Test-only reset of the singleton (does not touch any on-disk file). */
 export const __resetDefaultPermissionStore = (): void => {
+  const prior = defaultStore
   defaultStore = null
+  void prior?.reset().catch(() => undefined)
 }

@@ -7,6 +7,11 @@
  *   - `node:crypto` (HMAC + sha hashing),
  *   - sibling files in the same slice (`./*`).
  *
+ * One carve-out: `webhook-transports.ts` is the dedicated boundary file for
+ * the Tier-1 HTTP server adapters (ADR-0312); it MAY additionally import
+ * `node:http`. Every other slice file remains port-only. (Same pattern as
+ * `from-pr-cmd-adapters.ts` for the gh-CLI side.)
+ *
  * Anything else is a fence breach.  In particular the slice MUST NOT import
  * from `@/agent`, `@/llm`, `@/permission`, `@/tool`, `@/apps`, `@/stream`,
  * `@/runner`, `@/skill`, `@/mcp`, `@/memory`, `@/storage`, `@/host`,
@@ -176,6 +181,10 @@ describe("ADR-0311 hellgate R3 — slice fence (static)", () => {
     const RE_IMPORT_FROM = /from\s+["']([^"']+)["']/g
     const offenders: Array<{ file: string; spec: string }> = []
     for (const f of SLICE_FILES) {
+      // Carve-out: `webhook-transports.ts` is the dedicated network-adapter
+      // boundary file; it MAY additionally import `node:http`. (Same pattern
+      // as the CLI adapters file at apps/cli.)
+      const isTransports = f.relPath === "webhook-transports.ts"
       const m = f.content.matchAll(RE_IMPORT_FROM)
       for (const hit of m) {
         const spec = hit[1] ?? ""
@@ -183,7 +192,8 @@ describe("ADR-0311 hellgate R3 — slice fence (static)", () => {
           spec === "@/reactor" ||
           spec.startsWith("@/reactor/") ||
           spec === "node:crypto" ||
-          spec.startsWith("./")
+          spec.startsWith("./") ||
+          (isTransports && spec === "node:http")
         if (!ok) offenders.push({ file: f.relPath, spec })
       }
     }

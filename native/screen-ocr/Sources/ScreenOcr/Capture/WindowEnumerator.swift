@@ -18,6 +18,13 @@ enum WindowEnumerator {
     ///   - layer != 0 dropped (utility / menubar / dock / wallpapers)
     ///   - empty title dropped (untitled overlays, transient sheets)
     ///   - own process dropped (so a self-targeting capture loop is impossible)
+    ///
+    /// Ordering: windows owned by `NSWorkspace.frontmostApplication` are
+    /// emitted first (preserving their internal z-order), then everything
+    /// else. CGWindowList's native z-order does not reliably surface the
+    /// user-perceived frontmost app on macOS 14+, so callers that want
+    /// "the app the user was looking at" — e.g. the global capture hotkey —
+    /// can just take `windows[0]` and trust it.
     static func enumerate() -> ListWindowsResponse {
         let opts: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
         // kCGNullWindowID asks for all on-screen windows in z-order.
@@ -27,15 +34,23 @@ enum WindowEnumerator {
         }
 
         let ownPid = ProcessInfo.processInfo.processIdentifier
-        var out: [WindowInfo] = []
-        out.reserveCapacity(raw.count)
+        let frontmostPid = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
+        var frontWindows: [WindowInfo] = []
+        var otherWindows: [WindowInfo] = []
+        frontWindows.reserveCapacity(raw.count)
+        otherWindows.reserveCapacity(raw.count)
 
         for entry in raw {
             guard let info = parseEntry(entry, ownPid: ownPid) else { continue }
-            out.append(info)
+            let entryPid = (entry[kCGWindowOwnerPID as String] as? Int32) ?? 0
+            if frontmostPid != 0 && entryPid == frontmostPid {
+                frontWindows.append(info)
+            } else {
+                otherWindows.append(info)
+            }
         }
 
-        return ListWindowsResponse(windows: out)
+        return ListWindowsResponse(windows: frontWindows + otherWindows)
     }
 
     /// Pure parse — split out so we can keep `enumerate()` short.

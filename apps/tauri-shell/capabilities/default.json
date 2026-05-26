@@ -34,12 +34,7 @@
         {
           "name": "screen-ocr",
           "sidecar": true,
-          "args": [
-            "list-windows",
-            "capture",
-            "--window-id",
-            { "validator": "^[0-9]{1,10}$" }
-          ]
+          "args": true
         }
       ]
     },

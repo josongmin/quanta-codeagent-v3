@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Manager, Runtime, WebviewWindow};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 use tokio::sync::Mutex;
@@ -109,6 +109,9 @@ fn pick_free_port() -> AppResult<u16> {
 /// `State<'_, Shell>` across an await point — `start()` can stay `async`
 /// and remain `Send`-bounded for `tauri::async_runtime::spawn`.
 fn spawn_once<R: Runtime>(app: &AppHandle<R>) -> AppResult<(DaemonInfo, CommandChild)> {
+    // Per-launch random loopback port + auth token. The frontend now pulls
+    // these through the Tauri `daemon_info` command, so the shell no longer
+    // depends on brittle early-webview script injection for correctness.
     let port = pick_free_port()?;
     let token = mint_auth_token()?;
     let started_at_ms = now_ms();
@@ -126,7 +129,42 @@ fn spawn_once<R: Runtime>(app: &AppHandle<R>) -> AppResult<(DaemonInfo, CommandC
         })?
         .env("QUANTA_WEB_PORT", port.to_string())
         .env("QUANTA_WEB_AUTH_TOKEN", token.clone())
+        // Bind 0.0.0.0 so phones / other LAN devices on the same Wi-Fi
+        // can reach the daemon. The 256-bit random token above is the
+        // sole auth gate — without it, an attacker on the LAN would
+        // still get a 401 on the WS upgrade. Set
+        // `QUANTA_LAN=0` to pin back to loopback.
+        .env(
+            "QUANTA_WEB_BIND",
+            if std::env::var("QUANTA_LAN").as_deref() == Ok("0") {
+                "127.0.0.1"
+            } else {
+                "0.0.0.0"
+            },
+        )
         .env("QUANTA_SURFACE", "tauri-desktop");
+    // Tauri 2 `shell.sidecar()` does NOT inherit parent env by default. The
+    // daemon needs the user's LLM credentials (OPENAI_API_KEY /
+    // ANTHROPIC_API_KEY / etc.) + HOME/PATH/locale for normal operation, so
+    // we forward an allowlisted set captured at boot time. The list is
+    // intentionally generous (this is a single-user desktop shell, not a
+    // multi-tenant server).
+    let forwarded_env_keys: &[&str] = &[
+        "HOME", "PATH", "USER", "LANG", "LC_ALL", "TMPDIR", "SHELL",
+        "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_ORG_ID",
+        "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL",
+        "QUANTA_PROVIDER", "QUANTA_MODEL",
+        "QUANTA_HOME", "QUANTA_CONFIG_DIR",
+        // Debug knobs — opt-in via env, no behavior change unless set.
+        "QUANTA_DEBUG_OAUTH",
+        "QUANTA_SERVICE_TIER", "QUANTA_FAST", "QUANTA_REASONING_EFFORT",
+    ];
+    let cmd = forwarded_env_keys.iter().fold(cmd, |c, key| {
+        match std::env::var(key) {
+            Ok(v) => c.env(*key, v),
+            Err(_) => c,
+        }
+    });
 
     let (mut rx, child) = cmd.spawn().map_err(|source| AppError::SidecarSpawn {
         name: SIDECAR_NAME,
@@ -226,6 +264,33 @@ pub async fn start<R: Runtime>(app: &AppHandle<R>) -> AppResult<DaemonInfo> {
     let mut state = handle.0.lock().await;
     state.info = Some(info.clone());
     state.child = Some(child);
+    state.auto_restart = true;
+    Ok(info)
+}
+
+/// Stop the running daemon (if any) and start a fresh one. Used by the
+/// frontend's "재시작" button when the WS connection is wedged. The new
+/// daemon binds a fresh random port + auth token; we re-inject the config
+/// into the main webview so React reconnects to the new endpoint.
+pub async fn restart<R: Runtime>(app: &AppHandle<R>) -> AppResult<DaemonInfo> {
+    // `stop()` flips `auto_restart=false` to keep the supervisor from
+    // racing us. Tolerate "not running" so the button still works when the
+    // daemon already crashed and the supervisor hasn't re-spawned yet.
+    match stop(app).await {
+        Ok(()) => {}
+        Err(AppError::DaemonNotRunning) => {}
+        Err(err) => return Err(err),
+    }
+    // Give the rx-loop a beat to observe `Terminated` and the OS a beat
+    // to release the bound port before we pick a fresh one.
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    {
+        let handle = app.state::<DaemonHandle>().inner().clone();
+        let mut state = handle.0.lock().await;
+        state.auto_restart = true;
+    }
+    let info = start(app).await?;
+    publish_config(app, &info);
     Ok(info)
 }
 
@@ -340,4 +405,30 @@ pub static SUPERVISOR_BOOTED: AtomicBool = AtomicBool::new(false);
 pub fn install<R: Runtime>(app: &AppHandle<R>) {
     app.manage(DaemonHandle::new());
     SUPERVISOR_BOOTED.store(true, Ordering::SeqCst);
+}
+
+/// Inject `window.__QUANTA_CONFIG__ = { wsUrl, httpUrl, authToken, port }`
+/// into the main webview and dispatch a `quanta:config-ready` event so the
+/// React app picks up the new endpoint and reconnects. Called from the
+/// boot path AND from `restart()` after a fresh port+token mint.
+pub fn publish_config<R: Runtime>(handle: &AppHandle<R>, info: &DaemonInfo) {
+    let Some(window): Option<WebviewWindow<R>> = handle.get_webview_window("main") else {
+        log::warn!(target: "quanta::boot", "main webview not found at config-inject time");
+        return;
+    };
+    let payload = serde_json::json!({
+        "wsUrl": info.ws_url,
+        "httpUrl": info.http_url,
+        "authToken": info.auth_token,
+        "port": info.port,
+    });
+    let payload_str = payload.to_string();
+    let script = format!(
+        "(function(){{ try {{ window.__QUANTA_CONFIG__ = {payload_str}; \
+         window.dispatchEvent(new CustomEvent('quanta:config-ready', {{ detail: window.__QUANTA_CONFIG__ }})); \
+         }} catch (e) {{ console.error('quanta config inject failed', e); }} }})();"
+    );
+    if let Err(err) = window.eval(&script) {
+        log::warn!(target: "quanta::boot", "config inject eval failed: {err}");
+    }
 }

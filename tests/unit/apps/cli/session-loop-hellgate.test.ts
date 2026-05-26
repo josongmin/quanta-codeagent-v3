@@ -171,8 +171,26 @@ const buildSetup = async (
   }
   let automationEngine: unknown
   const runtimeContext: RuntimeContext = {
-    createRuntimeFacade: async (_args: Parameters<RuntimeContext["createRuntimeFacade"]>[0]) => {
+    createRuntimeFacade: async (args: Parameters<RuntimeContext["createRuntimeFacade"]>[0]) => {
       runtimeCalls.createRuntime += 1
+      automationEngine = args.compose?.automationEngine
+      const registryNames = [
+        ...new Set([
+          ...registry
+            .all()
+            .map((tool) =>
+              typeof tool === "object" && tool !== null && "name" in tool
+                ? String((tool as { name: string }).name)
+                : "",
+            )
+            .filter((name) => name.length > 0),
+          ...(automationEngine !== undefined ? ["automation_update"] : []),
+        ]),
+      ]
+      registry = {
+        has: (name: string) => registryNames.includes(name),
+        all: () => registryNames.map((name) => ({ name })),
+      }
       bridgeState.options = {
         sessionDeps: {
           ...(automationEngine !== undefined ? { automationEngine } : {}),
@@ -267,24 +285,13 @@ const buildSetup = async (
     },
     materializeReviewerAgent: (_boot, _turnAssembler) => undefined,
     registry: () => registry as never,
-    wrapRegistry: (_mapper: Parameters<RuntimeContext["wrapRegistry"]>[0]) => undefined,
     permissionMode: () => "default",
     automationEngine: () => automationEngine as never,
-    ensureAutomationEngine: (slot: Parameters<RuntimeContext["ensureAutomationEngine"]>[0]) => {
-      automationEngine = slot
-      registry = {
-        has: (name: string) => name === "automation_update",
-        all: () => [],
-      }
-      return slot
-    },
-    setGranularRegistry: () => undefined,
     toolProfileState: () => undefined,
     identityModeState: () => undefined,
     focusChain: () => undefined,
     decisionEmitter: () => undefined,
     admissibility: () => undefined,
-    withAdmissibility: () => undefined,
     planExitPort: () => undefined,
     userInputPort: () => undefined,
   }
@@ -322,6 +329,7 @@ const buildSetup = async (
     turnSummary: stubSummary(),
     debugHandle: undefined,
     timelinePanel: undefined,
+    approvalPrompt: async () => "approve" as const,
     runtimeContext,
     costPanel: undefined,
     branchProgress: undefined,
@@ -727,9 +735,10 @@ describe("session-loop — type contract shape lock (compile-time)", () => {
       "sinks",
       "ux",
       "imageQueue",
+      "runtimeFacadeCompose",
       "registerExitTeardown",
     ]
-    expect(allKeys).toHaveLength(6)
+    expect(allKeys).toHaveLength(7)
   })
 
   test("runSessionLoop export is an async function", async () => {

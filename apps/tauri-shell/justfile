@@ -1,0 +1,53 @@
+# Quanta desktop shell — build/run recipes.
+#
+# Tauri 2 has `beforeBuildCommand` / `beforeBundleCommand` but no
+# `afterBundleCommand`, so the post-bundle adhoc deep-sign step lives here.
+# Without that step every release prompts again for ScreenCapture +
+# Accessibility because TCC keys grants by code-signature identifier and
+# Rust's linker-signed shell ID changes every build.
+
+set shell := ["bash", "-euo", "pipefail", "-c"]
+
+tauri_root := justfile_directory()
+app_path   := tauri_root / "target/release/bundle/macos/Quanta.app"
+dmg_dir    := tauri_root / "target/release/bundle/dmg"
+
+# List available recipes.
+default:
+    @just --list
+
+# Production build + adhoc deep re-sign with stable bundle IDs.
+build:
+    cargo tauri build
+    {{tauri_root}}/scripts/sign-bundle.sh {{app_path}}
+
+# Release binary build without DMG packaging (no re-sign).
+build-nobundle:
+    cargo tauri build --no-bundle
+
+# Re-sign an already-built bundle. Pass a path to target an installed copy.
+sign target=app_path:
+    {{tauri_root}}/scripts/sign-bundle.sh {{target}}
+
+# Dev iteration: Vite at :5173 + cargo tauri dev. No sign step.
+dev:
+    cargo tauri dev
+
+# Build then install over /Applications/Quanta.app, re-signing in place.
+install: build
+    pkill -f quanta-tauri-shell 2>/dev/null || true
+    pkill -f quanta-web-daemon 2>/dev/null || true
+    rm -rf /Applications/Quanta.app
+    cp -R {{app_path}} /Applications/Quanta.app
+    {{tauri_root}}/scripts/sign-bundle.sh /Applications/Quanta.app
+    @echo "installed → /Applications/Quanta.app"
+
+# Print the path of the most-recent built DMG.
+dmg-path:
+    @ls -1 {{dmg_dir}}/*.dmg 2>/dev/null | tail -1
+
+# Reset TCC entries for the stable bundle ID (forces one clean re-grant).
+tcc-reset:
+    tccutil reset ScreenCapture ai.quanta.desktop || true
+    tccutil reset Accessibility ai.quanta.desktop || true
+    @echo "TCC reset for ai.quanta.desktop"

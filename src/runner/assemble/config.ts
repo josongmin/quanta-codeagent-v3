@@ -165,6 +165,13 @@ export interface SessionDeps {
    *  /rewind-tool revision) consume it directly. Absent ⇒ omitted from
    *  AgentConfig entirely (byte-identical default-OFF). */
   granularRegistry?: GranularRegistryPort
+  /** `session_config` tool seam — read + write over the agent's own SDK
+   *  posture (effort tier, identity mode, tool profile, model, provider).
+   *  Built by the composition root from the pre-existing `effortStore` +
+   *  `identityModeState` + `toolProfileState`. Absent ⇒ omitted from
+   *  AgentConfig (byte-identical default-OFF: the tool itself is registered
+   *  unconditionally and yields a typed `not_wired` failure when called). */
+  sessionConfigPort?: AgentConfig["sessionConfigPort"]
 }
 
 /** Compaction config dependency. Present when memory/store is on (preserving
@@ -289,6 +296,7 @@ const buildExecutionPlaneSpreads = (d: SessionDeps): Partial<AgentConfig> => ({
   ...(d.granularRegistry !== undefined ? { granularRegistry: d.granularRegistry } : {}),
   ...(d.stage1OutputsStore !== undefined ? { stage1OutputsStore: d.stage1OutputsStore } : {}),
   ...(d.automationEngine !== undefined ? { automationEngine: d.automationEngine } : {}),
+  ...(d.sessionConfigPort !== undefined ? { sessionConfigPort: d.sessionConfigPort } : {}),
 })
 
 export const assembleConfig = (messages: Message[], d: SessionDeps): AgentConfig => {

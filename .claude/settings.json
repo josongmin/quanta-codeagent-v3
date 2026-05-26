@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bun test)",
+      "Bash(bun test *)",
+      "Bash(bun run typecheck)",
+      "Bash(bun run typecheck *)",
+      "Bash(bunx tsc --noEmit)",
+      "Bash(bunx tsc --noEmit *)",
+      "Bash(bun fc validate)",
+      "Bash(bun fc validate *)",
+      "Bash(bun fc list)",
+      "Bash(bun fc list *)",
+      "Bash(bun fc grade)",
+      "Bash(bun run lint)",
+      "Bash(bun run lint *)",
+      "Bash(docker info)",
+      "Bash(docker info *)"
+    ]
+  }
+}

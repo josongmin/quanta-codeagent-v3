@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest"
 import {
+  decodeSnapshotFrame,
+  decodeRejectedFrame,
   decodeEventFrame,
+  encodeConnectFrame,
   encodeCommandFrame,
   isEventEnvelope,
   peekEnvelopeKind,
@@ -39,6 +42,19 @@ describe("encodeCommandFrame", () => {
   })
 })
 
+describe("encodeConnectFrame", () => {
+  it("emits the flat connect control envelope used by the handshake path", () => {
+    const raw = encodeConnectFrame("srv-1")
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    expect(parsed).toMatchObject({
+      version: SESSION_PROTOCOL_VERSION,
+      kind: "connect",
+      sessionId: "srv-1",
+    })
+    expect("payload" in parsed).toBe(false)
+  })
+})
+
 describe("decodeEventFrame", () => {
   const validEvent = JSON.stringify({
     version: SESSION_PROTOCOL_VERSION,
@@ -66,6 +82,29 @@ describe("decodeEventFrame", () => {
     const decoded = decodeEventFrame(validEvent)
     expect(decoded?.type).toBe("session.created")
     expect(decoded?.seq).toBe(0)
+  })
+
+  it("accepts turn.output.delta event envelopes", () => {
+    const raw = JSON.stringify({
+      version: SESSION_PROTOCOL_VERSION,
+      kind: "event",
+      payload: {
+        eventId: "delta-1",
+        seq: 4,
+        revision: 3,
+        emittedAt: "2026-05-26T00:00:00.000Z",
+        type: "turn.output.delta",
+        delta: "pong",
+      },
+    })
+    expect(decodeEventFrame(raw)).toEqual({
+      eventId: "delta-1",
+      seq: 4,
+      revision: 3,
+      emittedAt: "2026-05-26T00:00:00.000Z",
+      type: "turn.output.delta",
+      delta: "pong",
+    })
   })
 
   it("returns null for a non-string input (Blob / ArrayBuffer placeholder)", () => {
@@ -116,6 +155,149 @@ describe("decodeEventFrame", () => {
       },
     })
     expect(decodeEventFrame(raw)).toBeNull()
+  })
+})
+
+describe("decodeRejectedFrame", () => {
+  it("returns the canonical sessionId when a rejected control frame carries one", () => {
+    const raw = JSON.stringify({
+      version: SESSION_PROTOCOL_VERSION,
+      kind: "rejected",
+      target: "connect",
+      reason: "protocol_validation",
+      sessionId: "srv-1",
+    })
+    expect(decodeRejectedFrame(raw)).toEqual({
+      target: "connect",
+      reason: "protocol_validation",
+      sessionId: "srv-1",
+    })
+  })
+
+  it("returns the rejection reason even when no canonical sessionId is present", () => {
+    const raw = JSON.stringify({
+      version: SESSION_PROTOCOL_VERSION,
+      kind: "rejected",
+      target: "command",
+      reason: "protocol_validation",
+      issue: "session_id_mismatch",
+    })
+    expect(decodeRejectedFrame(raw)).toEqual({
+      target: "command",
+      reason: "protocol_validation",
+      issue: "session_id_mismatch",
+    })
+  })
+
+  it("returns null for malformed or non-rejected frames", () => {
+    expect(decodeRejectedFrame("{")).toBeNull()
+    expect(
+      decodeRejectedFrame(
+        JSON.stringify({
+          version: SESSION_PROTOCOL_VERSION,
+          kind: "event",
+          payload: { type: "turn.started" },
+        }),
+      ),
+    ).toBeNull()
+  })
+})
+
+describe("decodeSnapshotFrame", () => {
+  it("returns the snapshot payload when the frame is well-formed", () => {
+    const raw = JSON.stringify({
+      version: SESSION_PROTOCOL_VERSION,
+      kind: "snapshot",
+      payload: {
+        sessionId: "srv-1",
+        revision: 3,
+        seq: 8,
+        state: {
+          status: "idle",
+          draftInput: "",
+          permissionMode: "default",
+          messageCount: 2,
+          lastUserText: "hello",
+          lastAssistantText: "world",
+          streamingAssistantText: "wor",
+          lastOutcomeReason: "completed",
+        },
+        capabilities: {
+          approvals: "none",
+          tools: true,
+          memory: false,
+          artifacts: false,
+          subagents: false,
+          automation: false,
+          shellSnapshot: false,
+          transport: "websocket",
+        },
+        pendingApproval: null,
+        openArtifacts: [],
+      },
+    })
+    expect(decodeSnapshotFrame(raw)).toEqual({
+      sessionId: "srv-1",
+      revision: 3,
+      seq: 8,
+      state: {
+        status: "idle",
+        draftInput: "",
+        permissionMode: "default",
+        messageCount: 2,
+        lastUserText: "hello",
+        lastAssistantText: "world",
+        streamingAssistantText: "wor",
+        lastOutcomeReason: "completed",
+      },
+      capabilities: {
+        approvals: "none",
+        tools: true,
+        memory: false,
+        artifacts: false,
+        subagents: false,
+        automation: false,
+        shellSnapshot: false,
+        transport: "websocket",
+      },
+      pendingApproval: null,
+      openArtifacts: [],
+    })
+  })
+
+  it("returns null for malformed or non-snapshot frames", () => {
+    expect(decodeSnapshotFrame("{")).toBeNull()
+    expect(
+      decodeSnapshotFrame(
+        JSON.stringify({
+          version: SESSION_PROTOCOL_VERSION,
+          kind: "snapshot",
+          payload: {
+            sessionId: "srv-1",
+            revision: "3",
+            seq: 8,
+            state: {
+              status: "idle",
+              draftInput: "",
+              permissionMode: "default",
+              messageCount: 0,
+            },
+            capabilities: {
+              approvals: "none",
+              tools: true,
+              memory: false,
+              artifacts: false,
+              subagents: false,
+              automation: false,
+              shellSnapshot: false,
+              transport: "websocket",
+            },
+            pendingApproval: null,
+            openArtifacts: [],
+          },
+        }),
+      ),
+    ).toBeNull()
   })
 })
 

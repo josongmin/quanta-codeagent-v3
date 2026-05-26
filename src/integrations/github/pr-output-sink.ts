@@ -66,6 +66,11 @@ export interface PrOutputSinkOpts {
    *  resolves concurrent-POST races. Default true. Tests opt out to
    *  isolate sequential-only behavior. */
   readonly reconcileConcurrentPosts?: boolean
+  /** Number of reconcile cycles to run when ≥2 matches survive after a
+   *  cycle. Each cycle: list → eliminate losers → list again. Bounded
+   *  (default 3) so a hostile API can't induce an infinite loop. After the
+   *  bound is hit we return best-effort. */
+  readonly reconcileMaxRetries?: number
   readonly signal?: AbortSignal
 }
 
@@ -92,6 +97,7 @@ export const createPrOutputSink = (opts: PrOutputSinkOpts): PrOutputSink => {
   const prefix = opts.idempotencyMarkerPrefix ?? IDEMPOTENCY_MARKER_PREFIX
   const hiddenMarkerEnabled = opts.hiddenMarkerEnabled ?? true
   const reconcileEnabled = opts.reconcileConcurrentPosts ?? true
+  const reconcileMaxRetries = Math.max(0, opts.reconcileMaxRetries ?? 3)
 
   const prepareBody = (body: string, key: IdempotencyKey): string => {
     const redacted = opts.redactPort.redact(body)
@@ -110,7 +116,7 @@ export const createPrOutputSink = (opts: PrOutputSinkOpts): PrOutputSink => {
       }
       const posted = await postNewComment(opts, prepared, opts.signal)
       if (!posted.ok || !reconcileEnabled || !hiddenMarkerEnabled) return posted
-      return await reconcileAfterPost(opts, key, prefix, posted, opts.signal)
+      return await reconcileAfterPost(opts, key, prefix, posted, opts.signal, reconcileMaxRetries)
     },
     async postReview({ verdict, body, key }): Promise<OutputPostResult> {
       const prepared = prepareBody(body, key)
@@ -142,22 +148,33 @@ const clampWithMarker = (body: string, marker: string, maxBytes: number): string
   return `${trimmed}…\n${marker}`
 }
 
+/** GH `/issues/<n>/comments` pagination cap. Each request fetches 100 rows
+ *  (the GH max); we walk pages until exhaustion or this cap. 1000 comments
+ *  is well above the long-running-PR threshold (Linux kernel hot PRs sit at
+ *  ~200). Beyond the cap we fall back to "marker not found" — documented as
+ *  a Tier-2 edge case in ADR-0313 §pagination. */
+const COMMENT_LIST_MAX_PAGES = 10
+
 const findExistingComment = async (
   opts: PrOutputSinkOpts,
   key: IdempotencyKey,
   prefix: string,
   signal: AbortSignal | undefined,
 ): Promise<ExistingComment | undefined> => {
-  const path = `repos/${opts.repoSlug}/issues/${opts.prNumber}/comments?per_page=100`
-  const res = await safeRun(opts.ghCliPort, ["api", path], opts.repoCwd, signal)
-  if (res === undefined || res.exitCode !== 0) return undefined
-  const rows = safeJsonArray<{ id?: number; body?: string }>(res.stdout)
-  if (rows === undefined) return undefined
   const needle = `${prefix}${key}${IDEMPOTENCY_MARKER_SUFFIX}`
-  for (const row of rows) {
-    if (typeof row.id !== "number" || row.id <= 0) continue
-    if (typeof row.body !== "string") continue
-    if (row.body.includes(needle)) return { id: row.id, body: row.body }
+  for (let page = 1; page <= COMMENT_LIST_MAX_PAGES; page++) {
+    if (signal?.aborted === true) return undefined
+    const path = `repos/${opts.repoSlug}/issues/${opts.prNumber}/comments?per_page=100&page=${page}`
+    const res = await safeRun(opts.ghCliPort, ["api", path], opts.repoCwd, signal)
+    if (res === undefined || res.exitCode !== 0) return undefined
+    const rows = safeJsonArray<{ id?: number; body?: string }>(res.stdout)
+    if (rows === undefined || rows.length === 0) return undefined
+    for (const row of rows) {
+      if (typeof row.id !== "number" || row.id <= 0) continue
+      if (typeof row.body !== "string") continue
+      if (row.body.includes(needle)) return { id: row.id, body: row.body }
+    }
+    if (rows.length < 100) return undefined // last page (fewer than per_page rows)
   }
   return undefined
 }
@@ -247,16 +264,22 @@ const postReviewComment = async (
 }
 
 /**
- * Post-then-reconcile race resolver.
+ * Post-then-reconcile race resolver — bounded retry loop.
  *
  * Called immediately after a successful POST. Re-lists comments matching our
  * marker; if multiple match (a concurrent POST raced ours), EVERY observer
  * applies the same deterministic rule — `smallest GH comment.id wins` —
- * and the losers self-delete. Both processes converge to one survivor.
+ * and the losers self-DELETE. After the sweep we re-list ONCE MORE; if ≥2
+ * still survive (GH list-after-write eventual consistency surfaced a
+ * straggler), we sweep again, up to `maxRetries` cycles. Bounded so a
+ * hostile API can't induce an infinite loop.
  *
  * Best-effort throughout: list failure / parse failure / delete 404 collapse
  * to the original POST result (so a hostile network can't tear down a
  * legitimately-posted comment).
+ *
+ * Every observer ends up reporting the SAME canonical `url` (the surviving
+ * comment's `html_url` from the listing).
  */
 const reconcileAfterPost = async (
   opts: PrOutputSinkOpts,
@@ -264,41 +287,84 @@ const reconcileAfterPost = async (
   prefix: string,
   posted: OutputPostResult,
   signal: AbortSignal | undefined,
+  maxRetries: number,
 ): Promise<OutputPostResult> => {
   const myId = parseCommentIdFromUrl(posted.url)
-  if (myId === undefined) return posted // can't reason about race; trust POST result
+  if (myId === undefined) return posted
+
+  let result: OutputPostResult = posted
+  for (let cycle = 0; cycle <= maxRetries; cycle++) {
+    if (signal?.aborted === true) return result
+    const cycleOutcome = await reconcileOneCycle(opts, key, prefix, myId, posted, result, signal)
+    if (cycleOutcome.done) return cycleOutcome.result
+    result = cycleOutcome.result
+  }
+  return result
+}
+
+interface CycleOutcome {
+  readonly done: boolean
+  readonly result: OutputPostResult
+}
+
+/** One sweep of the reconcile loop — extracted so the outer driver stays
+ *  under the complexity cap. Returns `done=true` when convergence is
+ *  reached or when this observer has self-eliminated (loser path). */
+const reconcileOneCycle = async (
+  opts: PrOutputSinkOpts,
+  key: IdempotencyKey,
+  prefix: string,
+  myId: number,
+  posted: OutputPostResult,
+  prior: OutputPostResult,
+  signal: AbortSignal | undefined,
+): Promise<CycleOutcome> => {
   const matches = await findAllCommentsWithMarker(opts, key, prefix, signal)
-  if (matches.length <= 1) return posted // no race — we're alone
+  if (matches.length <= 1) {
+    return { done: true, result: canonicalize(prior, posted, matches[0]) }
+  }
   const sorted = [...matches].sort((a, b) => a.id - b.id)
   const winner = sorted[0]
-  if (winner === undefined) return posted
-  if (winner.id === myId) {
-    // I'm the winner. Best-effort delete the losers.
-    for (let i = 1; i < sorted.length; i++) {
-      const loser = sorted[i]
-      if (loser !== undefined) await safeDeleteComment(opts, loser.id, signal)
+  if (winner === undefined) return { done: true, result: prior }
+  if (winner.id !== myId) {
+    // Loser path: don't fall back to OUR (now-deleted) POST URL — if the
+    // winner's html_url is unknown, we honestly report no URL rather than
+    // mislead the caller with a 404-bound link.
+    await safeDeleteComment(opts, myId, signal)
+    const winnerUrl =
+      typeof winner.htmlUrl === "string" && winner.htmlUrl.length > 0 ? winner.htmlUrl : undefined
+    return {
+      done: true,
+      result: Object.freeze({
+        ok: true,
+        ...(winnerUrl !== undefined ? { url: winnerUrl } : {}),
+      }),
     }
-    // Return the CANONICAL URL from the listing so EVERY observer (winner +
-    // losers alike) sees the same `url` string for the surviving comment.
-    // If the listing didn't carry an html_url, fall back to the POST result.
-    return Object.freeze({
-      ok: true,
-      ...(typeof winner.htmlUrl === "string" && winner.htmlUrl.length > 0
-        ? { url: winner.htmlUrl }
-        : typeof posted.url === "string"
-          ? { url: posted.url }
-          : {}),
-    })
   }
-  // Someone else won. Best-effort delete mine; return winner's URL so the
-  // caller sees a single stable anchor for the surviving comment.
-  await safeDeleteComment(opts, myId, signal)
-  return Object.freeze({
-    ok: true,
-    ...(typeof winner.htmlUrl === "string" && winner.htmlUrl.length > 0
-      ? { url: winner.htmlUrl }
-      : {}),
-  })
+  // I'm the winner — delete losers and signal "keep iterating to confirm".
+  for (let i = 1; i < sorted.length; i++) {
+    const loser = sorted[i]
+    if (loser !== undefined) await safeDeleteComment(opts, loser.id, signal)
+  }
+  return { done: false, result: canonicalize(prior, posted, winner) }
+}
+
+/** Build a result that reports the CANONICAL listing URL when available,
+ *  falling back to the POST result URL. Every observer converges to the
+ *  same string. */
+const canonicalize = (
+  prior: OutputPostResult,
+  posted: OutputPostResult,
+  winner: MarkerMatchedComment | undefined,
+): OutputPostResult => {
+  if (winner === undefined) return prior
+  const url =
+    typeof winner.htmlUrl === "string" && winner.htmlUrl.length > 0
+      ? winner.htmlUrl
+      : typeof posted.url === "string"
+        ? posted.url
+        : undefined
+  return Object.freeze({ ok: true, ...(url !== undefined ? { url } : {}) })
 }
 
 /** Parse `https://github.com/o/r/pull/N#issuecomment-XXXX` → XXXX. */
@@ -319,23 +385,27 @@ const findAllCommentsWithMarker = async (
   prefix: string,
   signal: AbortSignal | undefined,
 ): Promise<readonly MarkerMatchedComment[]> => {
-  const path = `repos/${opts.repoSlug}/issues/${opts.prNumber}/comments?per_page=100`
-  const res = await safeRun(opts.ghCliPort, ["api", path], opts.repoCwd, signal)
-  if (res === undefined || res.exitCode !== 0) return []
-  const rows = safeJsonArray<{ id?: number; body?: string; html_url?: string }>(res.stdout)
-  if (rows === undefined) return []
   const needle = `${prefix}${key}${IDEMPOTENCY_MARKER_SUFFIX}`
   const out: MarkerMatchedComment[] = []
-  for (const row of rows) {
-    if (typeof row.id !== "number" || row.id <= 0) continue
-    if (typeof row.body !== "string") continue
-    if (!row.body.includes(needle)) continue
-    out.push(
-      Object.freeze({
-        id: row.id,
-        htmlUrl: typeof row.html_url === "string" ? row.html_url : undefined,
-      }),
-    )
+  for (let page = 1; page <= COMMENT_LIST_MAX_PAGES; page++) {
+    if (signal?.aborted === true) return out
+    const path = `repos/${opts.repoSlug}/issues/${opts.prNumber}/comments?per_page=100&page=${page}`
+    const res = await safeRun(opts.ghCliPort, ["api", path], opts.repoCwd, signal)
+    if (res === undefined || res.exitCode !== 0) return out
+    const rows = safeJsonArray<{ id?: number; body?: string; html_url?: string }>(res.stdout)
+    if (rows === undefined || rows.length === 0) return out
+    for (const row of rows) {
+      if (typeof row.id !== "number" || row.id <= 0) continue
+      if (typeof row.body !== "string") continue
+      if (!row.body.includes(needle)) continue
+      out.push(
+        Object.freeze({
+          id: row.id,
+          htmlUrl: typeof row.html_url === "string" ? row.html_url : undefined,
+        }),
+      )
+    }
+    if (rows.length < 100) return out
   }
   return out
 }

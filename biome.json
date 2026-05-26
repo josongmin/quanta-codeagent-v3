@@ -1141,6 +1141,7 @@
         "!tests/unit/playbook-trigger-cli-bind-hellgate.test.ts",
         "!tests/unit/integrations/github/cli-real-adapters-hellgate-r3.test.ts",
         "!tests/unit/integrations/github/composer-redact-defence-in-depth-hellgate-r3.test.ts",
+        "!tests/unit/integrations/github/composer-fold-hellgate-r5.test.ts",
         "!tests/integration/integrations/github/end-to-end-real-adapter-r3.test.ts"
       ],
       "linter": {

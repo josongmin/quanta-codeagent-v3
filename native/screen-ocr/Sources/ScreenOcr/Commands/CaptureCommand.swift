@@ -50,6 +50,9 @@ struct CaptureCommand: AsyncParsableCommand {
 
     @available(macOS 13.0, *)
     private func runCapture() async throws {
+        guard AppBootstrap.ensureAppKitLoaded() else {
+            throw CaptureError.captureFailed("NSApplicationLoad failed before ScreenCaptureKit init")
+        }
         let cgWindowId = CGWindowID(windowId)
         let capture = ScreenCapture()
         let image = try await capture.grab(windowId: cgWindowId)

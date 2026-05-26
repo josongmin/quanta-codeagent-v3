@@ -394,6 +394,16 @@ export interface SessionBootstrapResult {
   /** Authoritative session-owned focus-chain tracker. The slash surface and
    *  the loop share the SAME tracker instance. */
   readonly focusChain: { readonly tracker: FocusChainPort; readonly reinjectEveryN: number }
+  /** `session_config` tool seam — read + write over the agent's own SDK
+   *  posture (effort tier, identity mode, tool profile, model, provider).
+   *  Built once at bootstrap from `effortStore` + `identityModeState` +
+   *  `toolProfileState` + `runtime.model` + `runtime.provider`. The
+   *  downstream `context-binding.ts` wires it onto
+   *  `AgentConfig.sessionConfigPort`; the dispatch seam then exposes it on
+   *  `ToolContext.sessionConfig` for the `session_config` default tool.
+   *  Absent ⇒ the tool yields a typed `not_wired` failure to the model
+   *  (byte-identical default-OFF for any caller that never invokes it). */
+  readonly sessionConfigPort: AgentConfig["sessionConfigPort"]
   readonly shutdownMcp: () => Promise<void>
   /** ADR-0301 — `--playbook-trigger` CLI flag echo, threaded from
    *  `SessionRuntimeConfigShape.playbookTriggerFlag`. The downstream loop

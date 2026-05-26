@@ -13,7 +13,11 @@ bun run web:daemon
 bun run src/apps/web-daemon/index.ts
 ```
 
-Defaults: `127.0.0.1:4096`, no auth. Override:
+Defaults: `0.0.0.0:4096`, no auth. The wildcard bind lets phones / other
+LAN devices on the same Wi-Fi reach the daemon — combined with Vite's
+`host: true`, the SPA's URL pill renders a working LAN URL. Pin to
+loopback with `QUANTA_WEB_BIND=127.0.0.1` when you don't want LAN
+exposure:
 
 ```bash
 QUANTA_WEB_PORT=4196 \

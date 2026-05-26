@@ -6,6 +6,7 @@ import type {
   PendingApprovalView,
   SessionEvent,
 } from "@/protocol/session"
+import type { KernelSessionState } from "./state"
 
 export interface KernelClock {
   now(): Date
@@ -22,6 +23,22 @@ export interface SessionHostDescription {
   readonly identityMode?: string
   readonly toolProfile?: string
   readonly messages?: readonly Message[]
+  /** Active LLM model slug if the host can introspect its port. Surfaces
+   *  on `session.created` (one-shot) and `session.state.updated` (every
+   *  state echo) so any subscriber can show a model pill without an
+   *  out-of-band lookup. Optional — test doubles may omit. */
+  readonly modelSlug?: string
+}
+
+/** Per-turn token accounting reported by an LLM adapter (provider stream
+ *  usually emits this on its terminal frame). Mirrors `TokenUsage` in
+ *  `@/protocol/session` so the kernel can hand it through without an
+ *  upstream-vs-downstream type rename. */
+export interface SessionHostTurnUsage {
+  readonly promptTokens?: number
+  readonly completionTokens?: number
+  readonly totalTokens?: number
+  readonly costMicroUsd?: number
 }
 
 export interface SessionHostTurnResult {
@@ -29,7 +46,42 @@ export interface SessionHostTurnResult {
   readonly messages: readonly Message[]
   readonly artifacts?: readonly ArtifactRef[]
   readonly approvalRequest?: PendingApprovalView
+  readonly errorMessage?: string
+  /** Token usage for THIS turn (not cumulative). When absent the
+   *  scheduler omits the field on `turn.completed`. */
+  readonly tokenUsage?: SessionHostTurnUsage
 }
+
+/**
+ * Streaming event variants the SessionHost can yield through `runTurn`'s
+ * `onEvent` callback. The scheduler maps these 1-to-1 onto wire events
+ * (`turn.output.delta` / `tool.invoked` / `tool.completed`) and the
+ * `usage` variant feeds `KernelSessionState.lastTokenUsage` so the next
+ * `turn.completed` carries it.
+ */
+export type SessionHostTurnEvent =
+  | { readonly type: "assistant_text.delta"; readonly delta: string }
+  | {
+      readonly type: "tool.invoked"
+      readonly toolCallId: string
+      readonly toolName: string
+      readonly argsPreview?: string
+    }
+  | {
+      readonly type: "tool.completed"
+      readonly toolCallId: string
+      readonly toolName: string
+      readonly outcome: "ok" | "error" | "denied" | "timeout"
+      readonly resultPreview?: string
+      readonly durationMs?: number
+    }
+  | {
+      readonly type: "usage"
+      readonly promptTokens?: number
+      readonly completionTokens?: number
+      readonly totalTokens?: number
+      readonly costMicroUsd?: number
+    }
 
 export type SessionHostSideConversationInheritance = "none" | "system" | "last-turn"
 
@@ -57,7 +109,12 @@ export interface SessionHost {
     readonly prompt: string
     readonly images?: readonly ImageBlock[]
     readonly signal?: AbortSignal
+    readonly onEvent?: (event: SessionHostTurnEvent) => void
   }): Promise<SessionHostTurnResult>
+  resolveApproval?(args: {
+    readonly approvalId: string
+    readonly decision: "approve" | "deny"
+  }): Promise<void> | void
   setIdentityMode?(mode: string): Promise<void> | void
   setToolProfile?(profile: string): Promise<void> | void
   startSideConversation?(
@@ -71,9 +128,15 @@ export interface KernelEventLogPort {
   list(): readonly SessionEvent[]
 }
 
+export interface KernelCommittedEvents {
+  readonly state: KernelSessionState
+  readonly events: readonly SessionEvent[]
+}
+
 export interface KernelDispatchContext {
   readonly clock: KernelClock
   readonly eventLog: KernelEventLogPort
   readonly host: SessionHost
   readonly signal?: AbortSignal
+  readonly onCommitted?: (args: KernelCommittedEvents) => Promise<void> | void
 }

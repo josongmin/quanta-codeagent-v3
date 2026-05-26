@@ -23,10 +23,20 @@ type RuntimeContextDecisionEmitterView = RuntimeContextSnapshot["decisionEmitter
 type RuntimeContextAdmissibilityView = RuntimeContextSnapshot["admissibility"]
 type RuntimeContextPlanExitPortView = RuntimeContextSnapshot["planExitPort"]
 type RuntimeContextUserInputPortView = RuntimeContextSnapshot["userInputPort"]
-type CreateRuntimeFacadeArgs = Parameters<RuntimeContextBinding["createRuntimeHost"]>[0]
+type InternalCreateRuntimeFacadeArgs = Parameters<RuntimeContextBinding["createRuntimeHost"]>[0]
 type RuntimeContextPatch = Parameters<RuntimeContextBinding["patch"]>[0]
 type InternalBootstrapContextArgs = Parameters<typeof createRuntimeContextBindingFromBootstrap>[0]
-type RuntimeCreateHostArgs = Omit<CreateRuntimeFacadeArgs, "boot">
+type RuntimeCreateHostArgs = Omit<CreateRuntimeFacadeArgs, "boot" | "compose">
+
+export interface RuntimeFacadeComposeOptions {
+  readonly automationEngine?: NonNullable<RuntimeContextAutomationEngineView>
+  readonly granularRegistry?: GranularRegistryPort
+  readonly registryToolMapper?: (tool: Tool) => Tool
+}
+
+export interface CreateRuntimeFacadeArgs extends InternalCreateRuntimeFacadeArgs {
+  readonly compose?: RuntimeFacadeComposeOptions
+}
 
 export interface RuntimeWireSummary {
   readonly executionPlane: {
@@ -52,19 +62,13 @@ export interface RuntimeContext {
     turnAssembler?: RuntimeAgentTurnAssembler,
   ): ReturnType<SessionBootstrapResult["materializeReviewerAgent"]>
   registry(): RuntimeContextRegistryView
-  wrapRegistry(mapper: (tool: Tool) => Tool): void
   permissionMode(): RuntimeContextPermissionModeView
   automationEngine(): RuntimeContextAutomationEngineView
-  ensureAutomationEngine(
-    slot: NonNullable<RuntimeContextAutomationEngineView>,
-  ): RuntimeContextAutomationEngineView
-  setGranularRegistry(registry: GranularRegistryPort): void
   toolProfileState(): RuntimeContextToolProfileStateView
   identityModeState(): RuntimeContextIdentityModeStateView
   focusChain(): RuntimeContextFocusChainView
   decisionEmitter(): RuntimeContextDecisionEmitterView
   admissibility(): RuntimeContextAdmissibilityView
-  withAdmissibility(admissibility: NonNullable<RuntimeContextAdmissibilityView>): void
   planExitPort(): RuntimeContextPlanExitPortView
   userInputPort(): RuntimeContextUserInputPortView
 }
@@ -94,7 +98,12 @@ const createRuntimeFacadeFromBinding = async (
   args: CreateRuntimeFacadeArgs,
 ): Promise<RuntimeFacade> =>
   await createRuntime({
-    host: binding.createRuntimeHost(args),
+    host: applyRuntimeFacadeComposeOptions(binding, args.compose).createRuntimeHost(
+      (() => {
+        const { compose: _compose, ...hostArgs } = args
+        return hostArgs
+      })(),
+    ),
   })
 
 const unwrapRuntimeContext = (context: RuntimeContext): RuntimeContextRecord =>
@@ -104,6 +113,39 @@ const patchRuntimeContextState = (
   state: InternalRuntimeContextState,
   patch: RuntimeContextPatch,
 ): InternalRuntimeContextState => state.patch(patch)
+
+const applyRuntimeFacadeComposeOptions = (
+  binding: RuntimeContextBinding,
+  compose: RuntimeFacadeComposeOptions | undefined,
+): RuntimeContextBinding => {
+  if (compose === undefined) return binding
+  let next = binding
+  if (compose.granularRegistry !== undefined) {
+    next = patchRuntimeContextState(next, {
+      granularRegistry: compose.granularRegistry,
+    })
+  }
+  if (compose.registryToolMapper !== undefined) {
+    const registry = next.snapshot.registry
+    const { registryToolMapper } = compose
+    next = patchRuntimeContextState(next, {
+      registry: new ToolRegistry(registry.all().map((tool) => registryToolMapper(tool))),
+    })
+  }
+  if (compose.automationEngine !== undefined) {
+    const registry = next.snapshot.registry
+    next = patchRuntimeContextState(next, {
+      automationEngine: compose.automationEngine,
+      registry: registry.has("automation_update")
+        ? registry
+        : new ToolRegistry([
+            ...registry.all(),
+            automationUpdateTool(compose.automationEngine.engine),
+          ]),
+    })
+  }
+  return next
+}
 
 const summarizeRuntimeSnapshot = (snapshot: RuntimeContextSnapshot): RuntimeWireSummary => ({
   executionPlane: {
@@ -138,39 +180,13 @@ const createRuntimeContext = (initialState: InternalRuntimeContextState): Runtim
     materializeReviewerAgent: (boot, turnAssembler) =>
       record.state.materializeReviewerAgent(boot, turnAssembler),
     registry: () => record.state.snapshot.registry,
-    wrapRegistry: (mapper) => {
-      const registry = record.state.snapshot.registry
-      record.state = patchRuntimeContextState(record.state, {
-        registry: new ToolRegistry(registry.all().map((tool) => mapper(tool))),
-      })
-    },
     permissionMode: () => record.state.snapshot.permission.mode,
     automationEngine: () => record.state.snapshot.automationEngine,
-    ensureAutomationEngine: (slot) => {
-      const registry = record.state.snapshot.registry
-      record.state = patchRuntimeContextState(record.state, {
-        automationEngine: slot,
-        registry: registry.has("automation_update")
-          ? registry
-          : new ToolRegistry([...registry.all(), automationUpdateTool(slot.engine)]),
-      })
-      return record.state.snapshot.automationEngine
-    },
-    setGranularRegistry: (registry) => {
-      record.state = patchRuntimeContextState(record.state, {
-        granularRegistry: registry,
-      })
-    },
     toolProfileState: () => record.state.snapshot.toolProfileState,
     identityModeState: () => record.state.snapshot.identityModeState,
     focusChain: () => record.state.snapshot.focusChain,
     decisionEmitter: () => record.state.snapshot.decisionEmitter,
     admissibility: () => record.state.snapshot.admissibility,
-    withAdmissibility: (admissibility) => {
-      record.state = patchRuntimeContextState(record.state, {
-        admissibility,
-      })
-    },
     planExitPort: () => record.state.snapshot.planExitPort,
     userInputPort: () => record.state.snapshot.userInputPort,
   }

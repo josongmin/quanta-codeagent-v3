@@ -9,7 +9,13 @@ if (rootEl === null) {
 }
 
 createRoot(rootEl).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
+  (
+    import.meta.env.VITE_QUANTA_STRICT_MODE === "1" ? (
+      <React.StrictMode>
+        <App />
+      </React.StrictMode>
+    ) : (
+      <App />
+    )
+  ),
 )

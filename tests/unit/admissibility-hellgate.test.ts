@@ -19,7 +19,10 @@
  * tests/integration/admissibility-wave-a.test.ts (intentionally duplicated,
  * not imported — those are test files, not modules).
  */
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { z } from "zod"
 import type { AgentConfig } from "@/agent"
 import { HookBus } from "@/agent"
@@ -30,11 +33,13 @@ import {
 } from "@/agent/admissibility-gate"
 import type { ToolUseBlock } from "@/llm"
 import {
+  __resetDefaultPermissionStore,
   createInMemoryTrustScopeRegistry,
   type HITLTier,
   type PermissionContext,
 } from "@/permission"
 import { RulesStore } from "@/rules"
+import { __resetRuntimeConfig } from "@/shared"
 import type { Tool } from "@/tool"
 import { ToolRegistry } from "@/tool"
 
@@ -103,6 +108,27 @@ const loadedStore = (lines: string): RulesStore => {
   s.loadLayer("user", lines, "user.rules")
   return s
 }
+
+const originalPermissionState = process.env.QUANTA_PERMISSION_STATE
+let permissionStateRoot: string | null = null
+
+beforeEach(() => {
+  permissionStateRoot = mkdtempSync(join(tmpdir(), "admissibility-hell-perm-state-"))
+  process.env.QUANTA_PERMISSION_STATE = join(permissionStateRoot, "permission-state.json")
+  __resetRuntimeConfig()
+  __resetDefaultPermissionStore()
+})
+
+afterEach(() => {
+  if (permissionStateRoot !== null) {
+    rmSync(permissionStateRoot, { recursive: true, force: true })
+    permissionStateRoot = null
+  }
+  if (originalPermissionState === undefined) delete process.env.QUANTA_PERMISSION_STATE
+  else process.env.QUANTA_PERMISSION_STATE = originalPermissionState
+  __resetRuntimeConfig()
+  __resetDefaultPermissionStore()
+})
 
 describe("HELLGATE B3 — HARD_DENY beats EVERY allow signal simultaneously", () => {
   // The adversary maxes out every authorization axis the gate knows about and

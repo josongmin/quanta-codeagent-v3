@@ -44,6 +44,7 @@ export interface ConnectedSessionTransport {
 export interface SessionTransportBridge {
   readonly sessionId: string
   connect(transport: SessionTransport): Promise<ConnectedSessionTransport>
+  updateSnapshot(snapshot: SessionSnapshotLite): void
   publishSnapshot(snapshot: SessionSnapshotLite): Promise<void>
   publishEvents(events: readonly SessionEvent[]): Promise<void>
   currentSnapshot(): SessionSnapshotLite
@@ -152,6 +153,12 @@ export const createSessionTransportBridge = (
   }
 
   const peers = new Set<Peer>()
+
+  const updateSnapshotState = (nextSnapshot: SessionSnapshotLite): void => {
+    snapshot = cloneSnapshot(nextSnapshot)
+    tail = trimTail(snapshot, tail, opts.tailLimit ?? DEFAULT_TAIL_LIMIT)
+    commandReplayIndex = rebuildCommandReplayIndex(tail)
+  }
 
   const reportBridgeError = (peer: SessionTransport, error: unknown): void => {
     opts.onBridgeError?.({ peer, error })
@@ -326,10 +333,11 @@ export const createSessionTransportBridge = (
         close: async () => closePeer(peer),
       }
     },
+    updateSnapshot(nextSnapshot) {
+      updateSnapshotState(nextSnapshot)
+    },
     async publishSnapshot(nextSnapshot) {
-      snapshot = cloneSnapshot(nextSnapshot)
-      tail = trimTail(snapshot, tail, opts.tailLimit ?? DEFAULT_TAIL_LIMIT)
-      commandReplayIndex = rebuildCommandReplayIndex(tail)
+      updateSnapshotState(nextSnapshot)
       await Promise.all(
         [...peers]
           .filter((peer) => !peer.closed)

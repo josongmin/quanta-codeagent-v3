@@ -95,6 +95,90 @@ describe("@/kernel/session", () => {
     expect(result.turnResult?.outcome.reason).toBe("completed")
     expect(result.transcriptMessages).toEqual(makeOutcome("completed").messages)
     expect(result.events.map((event) => event.type)).toContain("turn.completed")
+    const completed = result.events.find((event) => event.type === "turn.completed")
+    expect(completed).toMatchObject({
+      type: "turn.completed",
+      outcomeReason: "completed",
+      assistantText: "pong",
+    })
+    const started = result.events.find((event) => event.type === "turn.started")
+    expect(started).toMatchObject({
+      type: "turn.started",
+      prompt: "ping",
+      images: [{ type: "image", data: "Zm9v", mediaType: "image/png" }],
+    })
+  })
+
+  test("allows image-only turns", async () => {
+    const manifest = {
+      approvals: "none" as const,
+      tools: true,
+      memory: false,
+      artifacts: false,
+      subagents: false,
+      automation: false,
+      shellSnapshot: false,
+      transport: "inproc" as const,
+    }
+    let state = createKernelSessionState({
+      sessionId: "image-only",
+      permissionMode: "default",
+      capabilityManifest: manifest,
+    })
+    const eventLog = new InMemorySessionEventLog()
+    const host = {
+      describe: () => ({
+        sessionId: "image-only",
+        permissionMode: "default",
+        capabilityManifest: manifest,
+      }),
+      runTurn: async ({
+        prompt,
+        images,
+      }: {
+        prompt: string
+        images?: ReadonlyArray<{ type: "image"; data: string; mediaType: string }>
+      }) => {
+        expect(prompt).toBe("")
+        expect(images).toEqual([{ type: "image", data: "Zm9v", mediaType: "image/png" }])
+        return { outcome: makeOutcome("completed"), messages: makeOutcome("completed").messages }
+      },
+      close: async () => undefined,
+    }
+
+    state = (
+      await dispatchSessionCommand(
+        state,
+        {
+          sessionId: "image-only",
+          commandId: "img-append",
+          issuedAt: "2026-05-26T00:00:10.000Z",
+          type: "input.append",
+          text: "",
+          images: [{ type: "image", data: "Zm9v", mediaType: "image/png" }],
+        },
+        { clock: systemClock, eventLog, host },
+      )
+    ).state
+
+    const result = await dispatchSessionCommand(
+      state,
+      {
+        sessionId: "image-only",
+        commandId: "img-run",
+        issuedAt: "2026-05-26T00:00:11.000Z",
+        expectedRevision: state.revision,
+        type: "turn.run",
+      },
+      { clock: systemClock, eventLog, host },
+    )
+
+    expect(result.turnResult?.outcome.reason).toBe("completed")
+    expect(result.events.find((event) => event.type === "turn.started")).toMatchObject({
+      type: "turn.started",
+      prompt: "",
+      images: [{ type: "image", data: "Zm9v", mediaType: "image/png" }],
+    })
   })
 
   test("replaces transcript through the kernel-owned command path", async () => {

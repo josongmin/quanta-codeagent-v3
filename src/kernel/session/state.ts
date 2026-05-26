@@ -12,6 +12,17 @@ export interface KernelTranscriptState {
   readonly messageCount: number
   readonly lastUserText?: string
   readonly lastAssistantText?: string
+  readonly streamingAssistantText?: string
+}
+
+/** Token usage carried alongside the kernel state. Mirrors
+ *  `SessionHostTurnUsage` in `./ports` so the scheduler can echo it onto
+ *  `turn.completed` without an upstream type pull-in. */
+export interface KernelTokenUsage {
+  readonly promptTokens?: number
+  readonly completionTokens?: number
+  readonly totalTokens?: number
+  readonly costMicroUsd?: number
 }
 
 export interface KernelSessionState {
@@ -31,6 +42,12 @@ export interface KernelSessionState {
   readonly artifacts: readonly ArtifactRef[]
   readonly capabilityManifest: CapabilityManifest
   readonly lastOutcomeReason?: string
+  /** Active LLM model slug — captured from the host description at session
+   *  creation. Echoed on `session.created` and `turn.completed`. */
+  readonly modelSlug?: string
+  /** Token usage from the most recent `turn.completed`. Cumulative tally is
+   *  the UI's concern; the kernel only holds the latest. */
+  readonly lastTokenUsage?: KernelTokenUsage
 }
 
 export interface CreateKernelSessionStateInput {
@@ -40,6 +57,7 @@ export interface CreateKernelSessionStateInput {
   readonly identityMode?: string
   readonly toolProfile?: string
   readonly messages?: readonly Message[]
+  readonly modelSlug?: string
 }
 
 const lastTextBlock = (message: Message | undefined): string | undefined => {
@@ -82,6 +100,7 @@ export const createKernelSessionState = (
     transcript: summarizeTranscript(messages),
     artifacts: [],
     capabilityManifest: input.capabilityManifest,
+    ...(input.modelSlug !== undefined ? { modelSlug: input.modelSlug } : {}),
   }
 }
 
@@ -97,6 +116,9 @@ export const toSessionStateView = (state: KernelSessionState): SessionStateView 
     : {}),
   ...(state.transcript.lastAssistantText !== undefined
     ? { lastAssistantText: state.transcript.lastAssistantText }
+    : {}),
+  ...(state.transcript.streamingAssistantText !== undefined
+    ? { streamingAssistantText: state.transcript.streamingAssistantText }
     : {}),
   ...(state.lastOutcomeReason !== undefined ? { lastOutcomeReason: state.lastOutcomeReason } : {}),
 })

@@ -7,22 +7,24 @@
  *
  * Env knobs (all optional):
  *   QUANTA_WEB_PORT        - TCP port (default `4096`)
- *   QUANTA_WEB_BIND        - bind address (default `127.0.0.1`)
+ *   QUANTA_WEB_BIND        - bind address (default `0.0.0.0` so LAN
+ *                            devices on the same Wi-Fi reach the daemon;
+ *                            set `127.0.0.1` to restrict to loopback)
  *   QUANTA_WEB_AUTH_TOKEN  - bearer token; when set, every WS upgrade
  *                            must carry `Authorization: Bearer <token>`
  *                            or `?token=<token>` in the URL
  *
- * The entry script provides a placeholder `runtimeFactory` that fails loud
- * if anyone tries to invoke `bun run` directly without a composition root
- * — the daemon is library-shaped first and entry-script second, mirroring
- * how `src/apps/agent` composes its runtime.
+ * The daemon remains library-shaped first, but when no explicit
+ * `runtimeFactory` override is supplied we lazily load the production
+ * composition root. This keeps tests injectable while making compiled
+ * sidecar binaries independent of `import.meta.main` quirks.
  */
 
 import { startWebDaemon } from "./server"
 import type { WebDaemonConfig, WebDaemonHandle } from "./types"
 
 const DEFAULT_PORT = 4096
-const DEFAULT_BIND = "127.0.0.1"
+const DEFAULT_BIND = "0.0.0.0"
 
 const parsePort = (raw: string | undefined): number => {
   if (raw === undefined || raw.length === 0) return DEFAULT_PORT
@@ -51,6 +53,9 @@ const parseAuthToken = (raw: string | undefined): string | undefined => {
  * than to boot a daemon that cannot serve a session.
  */
 export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDaemonHandle> => {
+  const runtimeFactory =
+    overrides?.runtimeFactory ??
+    (await import("./runtime-factory")).buildProductionRuntimeFactory()
   const config: WebDaemonConfig = {
     port: overrides?.port ?? parsePort(process.env.QUANTA_WEB_PORT),
     bind: overrides?.bind ?? parseBind(process.env.QUANTA_WEB_BIND),
@@ -58,17 +63,28 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
       overrides?.authToken !== undefined
         ? overrides.authToken
         : parseAuthToken(process.env.QUANTA_WEB_AUTH_TOKEN),
-    runtimeFactory:
-      overrides?.runtimeFactory ??
-      ((): Promise<never> => {
-        throw new Error(
-          "web-daemon: no runtimeFactory injected. Either call main({ runtimeFactory }) from a composition root, or wait for the production CLI bootstrap wiring (Worker D).",
-        )
-      }),
+    runtimeFactory,
     sessionConfig: overrides?.sessionConfig ?? {},
   }
 
-  const handle = await startWebDaemon(config)
+  // Port-collision fallback: if the requested port is taken (EADDRINUSE
+  // surfaces as `Failed to start server. Is port X in use?` from Bun),
+  // retry with `port: 0` so the OS picks a free port. The actual bound
+  // port is exposed on `handle.port` for the shell to publish to the
+  // frontend. Opt out with `QUANTA_WEB_STRICT_PORT=1`.
+  let handle: WebDaemonHandle
+  try {
+    handle = await startWebDaemon(config)
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error)
+    const strict = process.env.QUANTA_WEB_STRICT_PORT === "1"
+    if (strict || !msg.toLowerCase().includes("port")) throw error
+    process.stderr.write(
+      `web-daemon: port ${config.port} in use — falling back to OS-picked port\n`,
+    )
+    handle = await startWebDaemon({ ...config, port: 0 })
+  }
+  process.stderr.write(`web-daemon: listening on ${handle.hostname}:${handle.port}\n`)
 
   const shutdown = async (sig: NodeJS.Signals): Promise<void> => {
     try {
@@ -93,9 +109,7 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
 if (import.meta.main) {
   void (async (): Promise<void> => {
     try {
-      const { buildProductionRuntimeFactory } = await import("./runtime-factory")
-      const runtimeFactory = buildProductionRuntimeFactory()
-      await main({ runtimeFactory })
+      await main()
     } catch (error: unknown) {
       process.stderr.write(
         `web-daemon: fatal: ${error instanceof Error ? error.message : String(error)}\n`,

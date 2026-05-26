@@ -6,9 +6,11 @@ import type {
   SessionHostSideConversationArgs,
   SessionHostSideConversationInheritance,
   SessionHostSideConversationResult,
+  SessionHostTurnEvent,
 } from "@/kernel/session"
 import type { ContentBlock, ImageBlock, Message } from "@/llm"
-import type { CapabilityManifest } from "@/protocol/session"
+import { inferReviewKind, reasonCodeFor, type ToolAction } from "@/permission"
+import type { CapabilityManifest, PendingApprovalView } from "@/protocol/session"
 import type {
   IdentityModeSessionState,
   SystemSource,
@@ -19,15 +21,25 @@ import { buildSharedExecutionPlaneRuntimeAugments } from "@/runner/session-execu
 import { buildSessionMemoryAutoWires } from "@/runner/session-memory-auto"
 import type { RuntimeAgentConfigBase, RuntimeAgentTurnAssembler } from "@/sdk/runtime/base"
 import type { SessionMeta } from "@/session"
-import { type Tool, ToolRegistry } from "@/tool"
+import type { AgentEvent } from "@/stream"
+import { automationUpdateTool, type Tool, ToolRegistry } from "@/tool"
 import { createSingleSessionRuntimeHost } from "../builder"
 import { deriveCapabilityManifest } from "../capabilities"
 import type { RuntimeHost, RuntimeSessionConfig } from "../types"
 
 type RuntimeBase = RuntimeAgentConfigBase & {
+  approvalProtocol?: RuntimeApprovalProtocolConfig
   systemSource?: SystemSource
   toolProfileState?: ToolProfileSessionState
   identityModeState?: IdentityModeSessionState
+}
+
+interface RuntimeConfirmSlot {
+  current: NonNullable<AgentConfig["onConfirm"]>
+}
+
+interface RuntimeApprovalProtocolConfig {
+  readonly confirmSlot: RuntimeConfirmSlot
 }
 
 interface BootBindings {
@@ -181,12 +193,23 @@ interface RuntimeMemoryAutoComposeArgs {
 }
 
 type RuntimeBootstrapOverlay = {
+  readonly approvalProtocol?: RuntimeApprovalProtocolConfig
   readonly admissibility?: AgentConfig["admissibility"]
+  readonly admissibilityBuilder?: (
+    helpers: RuntimeBootstrapHelpers,
+  ) => AgentConfig["admissibility"] | undefined | Promise<AgentConfig["admissibility"] | undefined>
   readonly decisionEmitter?: AgentConfig["decisionEmitter"]
   readonly planExitPort?: AgentConfig["planExitPort"]
   readonly shellSnapshot?: AgentConfig["shellSnapshot"]
   readonly summarizerLlm?: NonNullable<AgentConfig["compaction"]>["summarizerLlm"]
   readonly userInputPort?: AgentConfig["userInputPort"]
+}
+
+interface RuntimeBootstrapHelpers {
+  materializeReviewerAgent(
+    boot: SessionBootstrapResult,
+    turnAssembler?: RuntimeAgentTurnAssembler,
+  ): ReturnType<SessionBootstrapResult["materializeReviewerAgent"]>
 }
 
 interface CreateRuntimeContextBindingFromBootstrapArgs {
@@ -327,6 +350,7 @@ const buildAgentConfigFromBase = (args: {
   }
 
   const {
+    approvalProtocol: _approvalProtocol,
     systemSource,
     toolProfileState,
     identityModeState,
@@ -366,6 +390,14 @@ const buildCompactionConfig = (args: {
   return args.summarizerLlm !== undefined ? { summarizerLlm: args.summarizerLlm } : {}
 }
 
+const ensureAutomationRegistry = (
+  registry: AgentConfig["registry"],
+  automationEngine: AgentConfig["automationEngine"] | undefined,
+): AgentConfig["registry"] => {
+  if (automationEngine === undefined || registry.has("automation_update")) return registry
+  return new ToolRegistry([...registry.all(), automationUpdateTool(automationEngine.engine)])
+}
+
 const buildBaseFromBootstrap = (args: {
   readonly boot: SessionBootstrapResult
   readonly stream: AgentConfig["stream"]
@@ -380,7 +412,7 @@ const buildBaseFromBootstrap = (args: {
 
   return ensureSessionId({
     llm: args.boot.llm,
-    registry: args.boot.tooling.registry,
+    registry: ensureAutomationRegistry(args.boot.tooling.registry, undefined),
     stream: args.stream,
     permission: args.boot.permission,
     messages: [...args.boot.history],
@@ -406,6 +438,7 @@ const buildBaseFromBootstrap = (args: {
       "searchPipeline",
       args.includeSearchPipeline === true ? args.boot.tooling.searchPipeline : undefined,
     ),
+    ...whenDefined("approvalProtocol", args.overlay?.approvalProtocol),
     ...whenDefined("planExitPort", args.overlay?.planExitPort),
     ...whenDefined("userInputPort", args.overlay?.userInputPort),
     ...whenDefined("toolProfileState", args.boot.toolProfileState),
@@ -418,6 +451,7 @@ const buildBaseFromBootstrap = (args: {
     ...whenDefined("decisionEmitter", args.overlay?.decisionEmitter),
     ...whenDefined("admissibility", args.overlay?.admissibility),
     ...whenDefined("shellSnapshot", args.overlay?.shellSnapshot),
+    ...whenDefined("sessionConfigPort", args.boot.sessionConfigPort),
     sessionEffort: () => args.boot.effortStore.get(),
   })
 }
@@ -615,6 +649,81 @@ const createUsageTallyStream = (
 const mintSideConversationSessionId = (mainSessionId: string): string =>
   `side:${mainSessionId}:${Math.random().toString(36).slice(2, 10)}`
 
+class RuntimeApprovalRequiredError extends Error {
+  readonly approval: PendingApprovalView
+
+  constructor(approval: PendingApprovalView) {
+    super(`runtime approval required: ${approval.reason}`)
+    this.name = "RuntimeApprovalRequiredError"
+    this.approval = approval
+  }
+}
+
+const isRuntimeApprovalRequiredError = (error: unknown): error is RuntimeApprovalRequiredError =>
+  error instanceof RuntimeApprovalRequiredError
+
+interface PendingRuntimeApprovalRecord {
+  readonly approval: PendingApprovalView
+  readonly actionKey: string
+}
+
+const actionKeyOf = (registry: ToolRegistry, action: ToolAction): string => {
+  let shellCommand: string | null
+  try {
+    shellCommand = registry.extractShellCommand(action.tool, action.input)
+  } catch {
+    shellCommand = null
+  }
+  return shellCommand !== null ? `${action.tool}|${shellCommand}` : action.tool
+}
+
+const reasonOf = (action: ToolAction): PendingApprovalView["reason"] =>
+  reasonCodeFor(inferReviewKind(action.tool, action.isReadOnly))
+
+const approvalPlaceholderOutcome = (messages: readonly Message[]): AgentOutcome => ({
+  reason: "aborted",
+  turns: 0,
+  messages: [...messages],
+})
+
+const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
+  const pending = new Map<string, PendingRuntimeApprovalRecord>()
+  const grants = new Set<string>()
+
+  const onConfirm: NonNullable<AgentConfig["onConfirm"]> = async (action) => {
+    const actionKey = actionKeyOf(base.registry, action)
+    if (grants.delete(actionKey)) return true
+
+    const approval: PendingApprovalView = {
+      approvalId: crypto.randomUUID(),
+      reason: reasonOf(action),
+      requestedAt: new Date().toISOString(),
+    }
+    pending.set(approval.approvalId, { approval, actionKey })
+    throw new RuntimeApprovalRequiredError(approval)
+  }
+
+  return {
+    runWithProtocol: async <T>(work: () => Promise<T>): Promise<T> => {
+      const slot = base.approvalProtocol?.confirmSlot
+      if (slot === undefined) return await work()
+      const previous = slot.current
+      slot.current = onConfirm
+      try {
+        return await work()
+      } finally {
+        slot.current = previous
+      }
+    },
+    resolveApproval: (approvalId: string, decision: "approve" | "deny"): void => {
+      const record = pending.get(approvalId)
+      if (record === undefined) return
+      pending.delete(approvalId)
+      if (decision === "approve") grants.add(record.actionKey)
+    },
+  }
+}
+
 const createSideConversationBase = (args: {
   readonly base: RuntimeBase
   readonly registry: ToolRegistry
@@ -695,6 +804,127 @@ const startSideConversation = async (args: {
   }
 }
 
+interface RuntimeTurnResult {
+  readonly outcome: AgentOutcome
+  readonly messages: Message[]
+  readonly approvalRequest?: PendingApprovalView
+  readonly errorMessage?: string
+}
+
+const extractTurnErrorMessage = (event: AgentEvent): string | undefined =>
+  event.type === "error" && event.message.length > 0 ? event.message : undefined
+
+const toSessionHostTurnEvent = (event: AgentEvent): SessionHostTurnEvent | undefined => {
+  switch (event.type) {
+    case "assistant_text":
+      return event.delta.length > 0
+        ? { type: "assistant_text.delta", delta: event.delta }
+        : undefined
+    case "tool_call":
+      return {
+        type: "tool.invoked",
+        toolCallId: event.id,
+        toolName: event.name,
+        ...(event.input !== undefined ? { argsPreview: previewToolArgs(event.input) } : {}),
+      }
+    case "tool_result":
+      return {
+        type: "tool.completed",
+        toolCallId: event.id,
+        toolName: event.name,
+        outcome: event.ok ? "ok" : "error",
+        ...(event.preview !== undefined && event.preview.length > 0
+          ? { resultPreview: clampPreview(event.preview) }
+          : {}),
+        ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
+      }
+    case "usage":
+      return {
+        type: "usage",
+        promptTokens: event.inputTokens,
+        completionTokens: event.outputTokens,
+        totalTokens: event.inputTokens + event.outputTokens,
+      }
+    default:
+      return undefined
+  }
+}
+
+const createTurnStreamPort = (args: {
+  readonly baseStream: AgentConfig["stream"]
+  readonly onEvent?: (event: SessionHostTurnEvent) => void
+}): {
+  readonly stream: AgentConfig["stream"]
+  readonly getLastErrorMessage: () => string | undefined
+} => {
+  let lastErrorMessage: string | undefined
+  return {
+    stream: {
+      emit(event: AgentEvent): void {
+        const errorMessage = extractTurnErrorMessage(event)
+        if (errorMessage !== undefined) lastErrorMessage = errorMessage
+        const sessionEvent = toSessionHostTurnEvent(event)
+        if (sessionEvent !== undefined) args.onEvent?.(sessionEvent)
+        args.baseStream.emit(event)
+      },
+    },
+    getLastErrorMessage: () => lastErrorMessage,
+  }
+}
+
+const PREVIEW_MAX = 256
+
+const clampPreview = (text: string): string =>
+  text.length <= PREVIEW_MAX ? text : `${text.slice(0, PREVIEW_MAX - 1)}…`
+
+const previewToolArgs = (input: unknown): string => {
+  let serialised: string
+  try {
+    serialised = typeof input === "string" ? input : JSON.stringify(input)
+  } catch {
+    return "<unserialisable>"
+  }
+  return clampPreview(serialised)
+}
+
+const buildRuntimeTurnArgs = (args: {
+  readonly base: RuntimeBase
+  readonly turnAssembler?: RuntimeAgentTurnAssembler
+  readonly history: readonly Message[]
+  readonly prompt: string
+  readonly images?: readonly ImageBlock[]
+  readonly state: string | undefined
+  readonly idMeta: SessionMeta | undefined
+  readonly mcpClients?: Array<{ stop: () => Promise<void> }>
+  readonly signal?: AbortSignal
+  readonly onEvent?: (event: SessionHostTurnEvent) => void
+}) => ({
+  base: args.base,
+  ...(args.turnAssembler !== undefined ? { turnAssembler: args.turnAssembler } : {}),
+  history: [...args.history],
+  prompt: args.prompt,
+  ...(args.images !== undefined && args.images.length > 0 ? { images: [...args.images] } : {}),
+  state: args.state,
+  idMeta: args.idMeta,
+  ...(args.mcpClients !== undefined ? { mcpClients: args.mcpClients } : {}),
+  ...(args.signal !== undefined ? { signal: args.signal } : {}),
+  ...(args.onEvent !== undefined ? { onEvent: args.onEvent } : {}),
+})
+
+const toSessionHostTurnResult = (result: RuntimeTurnResult) =>
+  result.approvalRequest !== undefined
+    ? {
+        outcome: result.outcome,
+        messages: result.messages,
+        approvalRequest: result.approvalRequest,
+        ...(result.errorMessage !== undefined ? { errorMessage: result.errorMessage } : {}),
+      }
+    : {
+        outcome: result.outcome,
+        messages: result.messages,
+        ...(result.errorMessage !== undefined ? { errorMessage: result.errorMessage } : {}),
+      }
+
 const runRuntimeTurn = async (args: {
   readonly base: RuntimeBase
   readonly turnAssembler?: RuntimeAgentTurnAssembler
@@ -705,15 +935,23 @@ const runRuntimeTurn = async (args: {
   readonly idMeta: SessionMeta | undefined
   readonly mcpClients?: Array<{ stop: () => Promise<void> }>
   readonly signal?: AbortSignal
-}): Promise<{ readonly outcome: AgentOutcome; readonly messages: Message[] }> => {
+  readonly onEvent?: (event: SessionHostTurnEvent) => void
+}): Promise<RuntimeTurnResult> => {
   const mcpClients = args.mcpClients ?? []
+  const turnStream = createTurnStreamPort({
+    baseStream: args.base.stream,
+    ...(args.onEvent !== undefined ? { onEvent: args.onEvent } : {}),
+  })
   try {
     const content: ContentBlock[] = [{ type: "text", text: args.prompt }, ...(args.images ?? [])]
     const next = [...args.history, { role: "user", content } as Message]
     const outcome = await runAgent(
       buildAgentConfigFromBase(
         buildAgentConfigFromBaseInput({
-          base: args.base,
+          base: {
+            ...args.base,
+            stream: turnStream.stream,
+          },
           messages: next,
           signal: args.signal,
           turnAssembler: args.turnAssembler,
@@ -721,6 +959,7 @@ const runRuntimeTurn = async (args: {
       ),
     )
     const messages = outcome.messages
+    const errorMessage = turnStream.getLastErrorMessage()
     await persistTurn({
       state: args.state,
       idMeta: args.idMeta,
@@ -728,7 +967,20 @@ const runRuntimeTurn = async (args: {
       messages,
       outcome,
     })
-    return { outcome, messages }
+    return {
+      outcome,
+      messages,
+      ...(errorMessage !== undefined ? { errorMessage } : {}),
+    }
+  } catch (error) {
+    if (isRuntimeApprovalRequiredError(error)) {
+      return {
+        outcome: approvalPlaceholderOutcome(args.history),
+        messages: [...args.history],
+        approvalRequest: error.approval,
+      }
+    }
+    throw error
   } finally {
     for (const client of mcpClients) await client.stop().catch(() => undefined)
   }
@@ -741,6 +993,7 @@ const createRuntimeSessionHost = (args: {
   let closed = false
   let shutdownComplete = false
   const base = args.state.base
+  const approvalProtocol = createRuntimeApprovalProtocolController(base)
   const capabilityManifest = buildCapabilityManifest(base)
 
   const close = async (): Promise<void> => {
@@ -762,23 +1015,38 @@ const createRuntimeSessionHost = (args: {
         ? { toolProfile: args.options.boot.toolProfileState.get() }
         : {}),
       messages: [...args.options.history],
+      // Expose the LLM port's model slug so the kernel can carry it onto
+      // `session.created` + `turn.completed`. Optional — adapters without
+      // a `model` field just leave it undefined.
+      ...(base.llm.model !== undefined ? { modelSlug: base.llm.model } : {}),
     }),
-    runTurn: async ({ history, prompt, images, signal }) => {
+    runTurn: async ({ history, prompt, images, signal, onEvent }) => {
       if (closed) throw new Error("runtime session host is closed")
-      const result = await runRuntimeTurn({
-        base,
-        ...(args.state.turnAssembler !== undefined
-          ? { turnAssembler: args.state.turnAssembler }
-          : {}),
-        history: [...history],
-        prompt,
-        ...(images !== undefined && images.length > 0 ? { images: [...images] } : {}),
-        state: args.options.state,
-        idMeta: args.options.idMeta,
-        ...(args.options.mcpClients !== undefined ? { mcpClients: args.options.mcpClients } : {}),
-        ...(signal !== undefined ? { signal } : {}),
-      })
-      return { outcome: result.outcome, messages: result.messages }
+      const result = await approvalProtocol.runWithProtocol(
+        async () =>
+          await runRuntimeTurn(
+            buildRuntimeTurnArgs({
+              base,
+              ...(args.state.turnAssembler !== undefined
+                ? { turnAssembler: args.state.turnAssembler }
+                : {}),
+              history,
+              prompt,
+              ...(images !== undefined ? { images } : {}),
+              state: args.options.state,
+              idMeta: args.options.idMeta,
+              ...(args.options.mcpClients !== undefined
+                ? { mcpClients: args.options.mcpClients }
+                : {}),
+              ...(signal !== undefined ? { signal } : {}),
+              ...(onEvent !== undefined ? { onEvent } : {}),
+            }),
+          ),
+      )
+      return toSessionHostTurnResult(result)
+    },
+    resolveApproval: async ({ approvalId, decision }) => {
+      approvalProtocol.resolveApproval(approvalId, decision)
     },
     setIdentityMode: async (mode) => {
       args.options.boot?.identityModeState?.set(mode as never)
@@ -856,6 +1124,14 @@ export const createRuntimeContextBindingFromAgentConfigBase = (args: {
 export const createRuntimeContextBindingFromBootstrap = async (
   args: CreateRuntimeContextBindingFromBootstrapArgs,
 ): Promise<RuntimeContextBinding> => {
+  if (
+    args.overlay?.admissibility !== undefined &&
+    args.overlay.admissibilityBuilder !== undefined
+  ) {
+    throw new Error(
+      "runtime bootstrap overlay cannot set both admissibility and admissibilityBuilder",
+    )
+  }
   let base = buildBaseFromBootstrap({
     boot: args.boot,
     stream: args.stream,
@@ -879,6 +1155,23 @@ export const createRuntimeContextBindingFromBootstrap = async (
       ...args.memoryAuto,
       base,
     })
+  }
+
+  if (args.overlay?.admissibilityBuilder !== undefined) {
+    const preview = createRuntimeContextBinding({
+      base,
+      ...(args.turnAssembler !== undefined ? { turnAssembler: args.turnAssembler } : {}),
+    })
+    const admissibility = await args.overlay.admissibilityBuilder({
+      materializeReviewerAgent: (boot, turnAssembler) =>
+        preview.materializeReviewerAgent(boot, turnAssembler),
+    })
+    if (admissibility !== undefined) {
+      base = {
+        ...base,
+        admissibility,
+      }
+    }
   }
 
   return createRuntimeContextBinding({
