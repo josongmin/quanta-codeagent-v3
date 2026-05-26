@@ -10,6 +10,7 @@
     "agent:headless": "bun run src/apps/agent/index.ts --mode headless",
     "agent:batch": "bun run src/apps/agent/index.ts --mode batch",
     "agent:ci-bot": "bun run src/apps/agent/index.ts --mode ci-bot",
+    "web:daemon": "bun run src/apps/web-daemon/index.ts",
     "test:clean-js": "find tests -name '*.test.js' -delete",
     "test:admission": "bun run tools/test-admission/cli.ts check-changed",
     "test:admission:audit": "bun run tools/test-admission/cli.ts audit",

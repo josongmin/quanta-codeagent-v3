@@ -1,0 +1,84 @@
+id: web-daemon-surface
+title: '`@/apps/web-daemon` — Bun.serve WS daemon publishing RuntimeSession'
+section: 10
+subsystem: Multi-surface (CLI / Web / Tauri) — Web surface
+order: 95
+maturity: L3
+status: new
+ui_surfaces: [api]
+monitoring: integrated
+modes: [daemon]
+configurable: integrated
+config_refs:
+  env:
+    - QUANTA_WEB_PORT
+    - QUANTA_WEB_BIND
+    - QUANTA_WEB_AUTH_TOKEN
+owners: ["@songmin"]
+labels: ["adr-0315", "surface:web", "tier:1"]
+depends_on:
+  - slice-ipc-bridge
+purpose: |
+  Default-OFF bun process that publishes the existing `@/sdk/runtime`
+  `RuntimeFacade` over WebSocket using the wire format already established
+  by `@/ipc/session` (`SessionTransportMessage`, one JSON envelope per WS
+  text frame). Boots via `bun run web:daemon` (or `main({...})` from a
+  composition root). Per-connection: `Bun.serve` upgrade →
+  `createBunWebSocketAdapter` → `wrapWebSocketLikeAsSessionTransport` →
+  `createSessionTransportBridge` over a fresh `RuntimeSession`. Auth via
+  `Authorization: Bearer <token>` OR `?token=<token>` (browsers cannot set
+  upgrade headers — the query path is the documented fallback); constant-
+  time compare. `GET /health` reports live session count + uptime.
+  Graceful shutdown on SIGINT/SIGTERM closes the listener with force=true
+  FIRST so Bun delivers the close frame, then `registry.closeAll()`, then
+  `runtime.close()` — the ordering is locked by a `handle.stop()` test
+  (the swap hangs on macOS Bun).
+evidence:
+  code:
+    - src/apps/web-daemon/index.ts
+    - src/apps/web-daemon/server.ts
+    - src/apps/web-daemon/ws-adapter.ts
+    - src/apps/web-daemon/session-registry.ts
+    - src/apps/web-daemon/types.ts
+    - src/apps/web-daemon/README.md
+  adrs:
+    - docs/decisions/0315-web-daemon-surface.md
+  tests:
+    unit:
+      - tests/unit/apps/web-daemon/server.test.ts
+      - tests/unit/apps/web-daemon/ws-adapter.test.ts
+      - tests/unit/apps/web-daemon/auth.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_WEB_PORT
+    default: "4096"
+    purpose: TCP port to bind (integer 0..65535; 0 = OS-chosen).
+  - name: QUANTA_WEB_BIND
+    default: "127.0.0.1"
+    purpose: Bind address (default loopback only).
+  - name: QUANTA_WEB_AUTH_TOKEN
+    default: "undefined"
+    purpose: |
+      Bearer token. When set, every WS upgrade must carry
+      `Authorization: Bearer <token>` or `?token=<token>`. When unset
+      (default) the WS endpoint is open — only loopback bind guards it.
+deliberate_hold:
+  reason: |
+    Production composition root (real `runtimeFactory` injection from
+    the CLI bootstrap) belongs to Worker D / Tauri shell wiring. The
+    entry script throws fail-loud if no factory is injected to make
+    the missing wiring impossible to overlook.
+  promotion_path: |
+    L4 lands when Worker D ships a composition root that calls
+    `main({ runtimeFactory: () => createRuntime(<real host>) })`
+    and an integration test exercises a full transcript turn over WS.
+notes: |
+  Slice fence: no npm dependency added (Bun.serve has built-in WS
+  support — explicitly required by the spec). The slice touches ONLY
+  `src/apps/web-daemon/**`, plus one script entry in `package.json`
+  (`web:daemon`) and this catalog row. No edits to `src/apps/cli/**`,
+  `src/sdk/**`, `src/ipc/**`, or `src/protocol/**` — those are imported
+  via their public barrels only. 29 unit tests / 45 expectations / 0 fail.
+  tsc clean for the slice (pre-existing `@/observability/coverage`
+  errors are unrelated). biome clean for the slice.
