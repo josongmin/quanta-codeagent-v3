@@ -17,14 +17,24 @@ import {
  *   - the chat input string (controlled component for InputBar)
  *   - the "hotkey capture" payload that HotkeyToast appends to input
  *
- * Build-time env (Vite):
- *   - VITE_QUANTA_WS_URL      default ws://127.0.0.1:4096/
- *   - VITE_QUANTA_AUTH_TOKEN  optional
+ * Config resolution order (precedence highest to lowest):
+ *   1. `window.__QUANTA_CONFIG__`  — injected by the Tauri shell at boot
+ *      with the per-launch random port and auth token. Always wins when
+ *      present (i.e. when running inside the desktop app).
+ *   2. `import.meta.env.VITE_QUANTA_WS_URL` / `VITE_QUANTA_AUTH_TOKEN`
+ *      — build-time defaults for `bun run dev` standalone browser use.
+ *   3. Hard-coded `ws://127.0.0.1:4096/` fallback (matches the daemon's
+ *      default bind when no env or injection is present).
  */
 
 const DEFAULT_WS_URL = "ws://127.0.0.1:4096/"
 
 const SESSION_ID_PLACEHOLDER = "ui-session"
+
+interface QuantaInjectedConfig {
+  readonly wsUrl?: string
+  readonly authToken?: string
+}
 
 const getEnv = (key: "VITE_QUANTA_WS_URL" | "VITE_QUANTA_AUTH_TOKEN"):
   | string
@@ -37,6 +47,24 @@ const getEnv = (key: "VITE_QUANTA_WS_URL" | "VITE_QUANTA_AUTH_TOKEN"):
   return env?.[key]
 }
 
+const readInjectedConfig = (): QuantaInjectedConfig | undefined => {
+  if (typeof window === "undefined") return undefined
+  const injected = (window as unknown as {
+    __QUANTA_CONFIG__?: QuantaInjectedConfig
+  }).__QUANTA_CONFIG__
+  if (injected === undefined || injected === null) return undefined
+  if (typeof injected !== "object") return undefined
+  return injected
+}
+
+const resolveConnectionConfig = (): { url: string; token?: string } => {
+  const injected = readInjectedConfig()
+  const url = injected?.wsUrl ?? getEnv("VITE_QUANTA_WS_URL") ?? DEFAULT_WS_URL
+  const tokenRaw = injected?.authToken ?? getEnv("VITE_QUANTA_AUTH_TOKEN")
+  const token = typeof tokenRaw === "string" && tokenRaw.length > 0 ? tokenRaw : undefined
+  return token === undefined ? { url } : { url, token }
+}
+
 export const App = (): JSX.Element => {
   const client = useMemo(() => new SessionClient(), [])
   const connection = useConnectionState(client)
@@ -47,11 +75,23 @@ export const App = (): JSX.Element => {
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
   // Wire connect on mount / disconnect on unmount.
+  // We also re-resolve on `quanta:config-ready` because Tauri may inject
+  // `window.__QUANTA_CONFIG__` AFTER the React app first mounts (the inject
+  // script runs once the main webview reports ready). If the event fires
+  // before mount, the initial resolve already picked it up.
   useEffect(() => {
-    const wsUrl = getEnv("VITE_QUANTA_WS_URL") ?? DEFAULT_WS_URL
-    const token = getEnv("VITE_QUANTA_AUTH_TOKEN")
-    client.connect(token === undefined ? { url: wsUrl } : { url: wsUrl, auth: { token } })
+    const resolveAndConnect = (): void => {
+      const { url, token } = resolveConnectionConfig()
+      client.connect(token === undefined ? { url } : { url, auth: { token } })
+    }
+    resolveAndConnect()
+    const onConfigReady = (): void => {
+      client.disconnect()
+      resolveAndConnect()
+    }
+    window.addEventListener("quanta:config-ready", onConfigReady)
     return () => {
+      window.removeEventListener("quanta:config-ready", onConfigReady)
       client.disconnect()
     }
   }, [client])

@@ -31,10 +31,17 @@ pub const HOTKEY_EVENT: &str = "quanta:hotkey-capture";
 #[derive(Clone, Default)]
 pub struct HotkeyEnabled(pub Arc<AtomicBool>);
 
+/// Payload broadcast to webviews when the hotkey fires.
+///
+/// `kind` is a literal so the on-wire shape matches what the React app's
+/// `window.addEventListener("message")` discriminator checks for. The other
+/// fields are extras — the frontend ignores unknown fields but they help
+/// with debugging / future UI (e.g. showing which window was captured).
 #[derive(Debug, Clone, Serialize)]
 pub struct HotkeyCapturePayload {
-    pub window_id: u32,
+    pub kind: &'static str,
     pub text: String,
+    pub window_id: u32,
     pub line_count: usize,
 }
 
@@ -126,12 +133,39 @@ async fn on_hotkey_pressed<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
         *guard = Some(window_id);
     }
     let payload = HotkeyCapturePayload {
+        kind: HOTKEY_EVENT,
         window_id,
         text: capture.text.clone(),
         line_count: capture.lines.len(),
     };
+    // Channel 1: Tauri event system — for JS clients using @tauri-apps/api/event.
     app.emit(HOTKEY_EVENT, &payload)
         .map_err(|e| AppError::Internal(format!("event emit failed: {e}")))?;
+    // Channel 2: window.postMessage — the bundled React app listens via
+    // `window.addEventListener("message")` (browser-native, no Tauri JS dep).
+    // We JSON-stringify server-side so the script literal is injection-safe.
+    if let Some(window) = app.get_webview_window("main") {
+        match serde_json::to_string(&payload) {
+            Ok(payload_json) => {
+                let script = format!(
+                    "(function(){{ try {{ window.postMessage({payload_json}, '*'); }} \
+                     catch (e) {{ console.error('quanta hotkey postMessage failed', e); }} }})();"
+                );
+                if let Err(err) = window.eval(&script) {
+                    log::warn!(
+                        target: "quanta::hotkey",
+                        "postMessage eval failed: {err}"
+                    );
+                }
+            }
+            Err(err) => {
+                log::warn!(
+                    target: "quanta::hotkey",
+                    "payload serialize for postMessage failed: {err}"
+                );
+            }
+        }
+    }
     log::info!(
         target: "quanta::hotkey",
         "captured window {} ({} lines)",

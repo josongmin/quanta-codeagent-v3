@@ -40,7 +40,7 @@ pub struct Bbox {
 pub struct OcrLine {
     pub text: String,
     pub bbox: Bbox,
-    pub conf: f64,
+    pub confidence: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
