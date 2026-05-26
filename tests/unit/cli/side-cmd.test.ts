@@ -142,6 +142,23 @@ describe("/side slash command", () => {
     expect(help).toContain("tools:")
   })
 
+  test("--help prefers wired runtime defaults when present", async () => {
+    const capture: PortCapture = { calls: 0 }
+    const { ctx, stdout } = makeCtx({
+      side: {
+        ...makeState(makeFakeStart(okResult(), capture)),
+        defaultTools: ["read", "grep"],
+        defaultMaxTurns: 4,
+      },
+    })
+    const rc = await sideCmd.run(["--help"], ctx)
+    expect(rc).toBe(0)
+    const help = stdout.join("")
+    expect(help).toContain("max turns:   4 (hard cap 5)")
+    expect(help).toContain("tools:       read, grep")
+    expect(capture.calls).toBe(0)
+  })
+
   test("empty prompt ⇒ exit 1 + hint", async () => {
     const { ctx, stderr } = makeCtx()
     const rc = await sideCmd.run([], ctx)

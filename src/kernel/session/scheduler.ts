@@ -41,27 +41,6 @@ export interface KernelDispatchResult {
   readonly turnResult?: SessionHostTurnResult
 }
 
-const replaceTranscript = (
-  command: SessionTranscriptReplaceCommand,
-  ctx: KernelDispatchContext,
-  nextState: KernelSessionState,
-  reduced: ReturnType<typeof reduceSessionCommand>,
-  events: readonly SessionEvent[],
-): KernelDispatchResult => {
-  if (ctx.host.replaceMessages === undefined) {
-    throw new SessionProtocolValidationError("transcript_replace_unsupported")
-  }
-  if (reduced.hostAction.kind !== "replace_transcript") {
-    throw new SessionProtocolValidationError("bad_transcript_replace_host_action")
-  }
-  ctx.host.replaceMessages(reduced.hostAction.messages)
-  return {
-    state: nextState,
-    events,
-    transcriptMessages: [...command.messages],
-  }
-}
-
 const approvalEventsForTurn = (args: {
   readonly state: KernelSessionState
   readonly command: TurnRunCommand
@@ -105,6 +84,9 @@ const onApprovalRequested = async (args: {
     seq: args.state.seq + 2,
     status: "awaiting_approval",
     pendingApproval: approval,
+    messages: [...args.result.messages],
+    transcript: summarizeTranscript(args.result.messages),
+    lastOutcomeReason: args.result.outcome.reason,
   }
   const approvalEvents = approvalEventsForTurn({
     state: nextState,
@@ -169,6 +151,7 @@ const onTurnCompleted = async (args: {
     ...args.state,
     revision: args.state.revision + 1,
     status: "idle",
+    messages: [...args.result.messages],
     draftInput: "",
     draftImages: [],
     pendingApproval: null,
@@ -244,6 +227,7 @@ const runTurn = async (args: {
   const hostAction = args.reduced.hostAction
   try {
     const result = await args.ctx.host.runTurn({
+      history: hostAction.kind === "run_turn" ? hostAction.history : args.state.messages,
       prompt: hostAction.kind === "run_turn" ? hostAction.prompt : "",
       ...(hostAction.kind === "run_turn" ? { images: hostAction.images } : {}),
       ...(args.ctx.signal !== undefined ? { signal: args.ctx.signal } : {}),
@@ -296,7 +280,11 @@ export const dispatchSessionCommand = async (
       await ctx.host.setToolProfile?.(command.profile)
       return { state: nextState, events: immediateEvents }
     case "session.transcript.replace":
-      return replaceTranscript(command, ctx, nextState, reduced, immediateEvents)
+      return {
+        state: nextState,
+        events: immediateEvents,
+        transcriptMessages: [...command.messages],
+      }
     case "turn.run":
       return await runTurn({
         state: nextState,

@@ -11,7 +11,7 @@
  *   - `/side <question>`               → run with defaults (system-prompt-only
  *                                        inheritance, read-only allowlist,
  *                                        maxTurns=3, capped at
- *                                        {@link SIDE_CHAT_MAX_TURNS_CAP}).
+ *                                        {@link SIDE_CMD_MAX_TURNS_CAP}).
  *   - `/side --inherit=<mode> <q>`     → override context inheritance
  *                                        (`none|system|last-turn`).
  *   - `/side --tools=<csv> <q>`        → override the default tool allowlist.
@@ -33,13 +33,40 @@
  * the runtime/session host adapter.
  */
 
-import {
-  SIDE_CHAT_DEFAULT_READ_ONLY,
-  SIDE_CHAT_MAX_TURNS_CAP,
-  type SideChatContextInheritance,
-} from "@/runner/orchestrate/side-chat"
-import type { RuntimeSideConversationResult } from "@/sdk/runtime"
+import type { RuntimeSideConversationArgs, RuntimeSideConversationResult } from "@/sdk/runtime"
 import type { SlashCommand, SlashContext } from "./slash-commands"
+
+type SideChatContextInheritance = NonNullable<RuntimeSideConversationArgs["inherit"]>
+type SideCmdStartArgs = Pick<
+  RuntimeSideConversationArgs,
+  "question" | "inherit" | "tools" | "maxTurns" | "signal"
+>
+
+const SIDE_CMD_MAX_TURNS_CAP = 5
+const SIDE_CMD_DEFAULT_MAX_TURNS = 3
+const SIDE_CMD_DEFAULT_READ_ONLY: readonly string[] = Object.freeze([
+  "read",
+  "search_codebase",
+  "grep",
+  "glob",
+  "file_tree_summary",
+  "parse_test_failure",
+  "localize",
+  "diagnostics",
+  "git_log",
+  "git_diff",
+  "git_blame",
+  "git_blame_heatmap",
+  "git_churn",
+  "git_status",
+  "lsp_definition",
+  "lsp_references",
+  "lsp_hover",
+  "lsp_type_definition",
+  "lsp_implementation",
+  "lsp_document_symbol",
+  "lsp_workspace_symbol",
+])
 
 /**
  * Session-time state required by `/side`. Injected by the surface
@@ -52,23 +79,17 @@ import type { SlashCommand, SlashContext } from "./slash-commands"
  *  - `isWired` — live runtime-session availability probe. False means the
  *    current surface has not attached a side-conversation starter yet.
  *  - `defaultTools` — surface-resolved default allowlist (typically
- *    {@link SIDE_CHAT_DEFAULT_READ_ONLY}, optionally overridden via
+ *    {@link SIDE_CMD_DEFAULT_READ_ONLY}, optionally overridden via
  *    `QUANTA_SIDE_DEFAULT_TOOLS`). A per-call `--tools=` flag wins.
  *  - `defaultMaxTurns` — surface-resolved default max-turns cap (typically
  *    read from `QUANTA_SIDE_MAX_TURNS` if set). Forwarded to the port when
  *    no per-call override is supplied; the runner additionally clamps to
- *    {@link SIDE_CHAT_MAX_TURNS_CAP}.
+ *    {@link SIDE_CMD_MAX_TURNS_CAP}.
  *  - `signal` — surface-supplied abort signal. Passed through `start`
  *    per-call (every invocation re-reads the surface's current signal).
  */
 export interface SideCmdSlashState {
-  readonly start: (args: {
-    readonly question: string
-    readonly inherit?: SideChatContextInheritance
-    readonly tools?: readonly string[]
-    readonly maxTurns?: number
-    readonly signal: AbortSignal
-  }) => Promise<RuntimeSideConversationResult>
+  readonly start: (args: SideCmdStartArgs) => Promise<RuntimeSideConversationResult>
   readonly isWired: () => boolean
   readonly defaultTools?: readonly string[]
   readonly defaultMaxTurns?: number
@@ -94,6 +115,14 @@ const parseInherit = (raw: string): SideChatContextInheritance => {
   }
   return v as SideChatContextInheritance
 }
+
+const resolveHelpDefaultTools = (ctx: SlashContext): readonly string[] => {
+  const wired = ctx.side?.defaultTools
+  return wired !== undefined && wired.length > 0 ? wired : SIDE_CMD_DEFAULT_READ_ONLY
+}
+
+const resolveHelpDefaultMaxTurns = (ctx: SlashContext): number =>
+  ctx.side?.defaultMaxTurns ?? SIDE_CMD_DEFAULT_MAX_TURNS
 
 /** Parse `--tools=<csv>` into a non-empty trimmed list. Throws on empty. */
 const parseToolsCsv = (raw: string): string[] => {
@@ -138,7 +167,8 @@ export const parseSideCmdArgs = (args: readonly string[]): SideCmdArgs => {
   }
 }
 
-const HELP_TEXT = `\
+const renderHelp = (ctx: SlashContext): number => {
+  const helpText = `\
 /side <question>                Ask a quick question in an isolated agent loop.
 /side --inherit=<mode> <q>      Inherit context: none | system (default) | last-turn.
 /side --tools=<csv> <q>         Override the read-only tool allowlist.
@@ -146,16 +176,14 @@ const HELP_TEXT = `\
 
 Defaults:
   - inheritance: system (system prompt reused; main history NOT carried)
-  - max turns:   3 (hard cap ${SIDE_CHAT_MAX_TURNS_CAP})
-  - tools:       ${SIDE_CHAT_DEFAULT_READ_ONLY.join(", ")}
+  - max turns:   ${resolveHelpDefaultMaxTurns(ctx)} (hard cap ${SIDE_CMD_MAX_TURNS_CAP})
+  - tools:       ${resolveHelpDefaultTools(ctx).join(", ")}
 
 Isolation: the main conversation history, working state, and cost tally are
 NOT affected. Mutating tools (write/edit/bash/git_commit/…) are physically
 absent from the side-chat registry — they cannot be invoked even if listed
 on --tools.`
-
-const renderHelp = (ctx: SlashContext): number => {
-  ctx.out(`${HELP_TEXT}\n`)
+  ctx.out(`${helpText}\n`)
   return 0
 }
 

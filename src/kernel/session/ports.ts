@@ -21,6 +21,7 @@ export interface SessionHostDescription {
   readonly capabilityManifest: CapabilityManifest
   readonly identityMode?: string
   readonly toolProfile?: string
+  readonly messages?: readonly Message[]
 }
 
 export interface SessionHostTurnResult {
@@ -52,6 +53,7 @@ export interface SessionHostSideConversationResult {
 export interface SessionHost {
   describe(): SessionHostDescription
   runTurn(args: {
+    readonly history: readonly Message[]
     readonly prompt: string
     readonly images?: readonly ImageBlock[]
     readonly signal?: AbortSignal
@@ -61,9 +63,6 @@ export interface SessionHost {
   startSideConversation?(
     args: SessionHostSideConversationArgs,
   ): Promise<SessionHostSideConversationResult>
-  peekMessages?(): readonly Message[]
-  peekLastOutcome?(): AgentOutcome | undefined
-  replaceMessages?(messages: readonly Message[]): void
   close(): Promise<void>
 }
 

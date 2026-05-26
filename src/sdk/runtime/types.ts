@@ -1,9 +1,6 @@
 import type { AgentOutcome } from "@/agent"
 import type { CreateRuntimeOptions, RuntimeSessionConfig } from "@/host/runtime"
-import type {
-  SessionHostSideConversationArgs,
-  SessionHostSideConversationResult,
-} from "@/kernel/session"
+import type { SessionHostSideConversationResult } from "@/kernel/session"
 import type { ImageBlock, Message } from "@/llm"
 import type {
   ApprovalRespondCommand,
@@ -40,7 +37,13 @@ export interface SessionDispatchResult {
   }
 }
 
-export type RuntimeSideConversationArgs = SessionHostSideConversationArgs
+export interface RuntimeSideConversationArgs {
+  readonly question: string
+  readonly inherit?: "none" | "system" | "last-turn"
+  readonly tools?: readonly string[]
+  readonly maxTurns?: number
+  readonly signal: AbortSignal
+}
 export type RuntimeSideConversationResult = SessionHostSideConversationResult
 
 export interface RuntimeSession {

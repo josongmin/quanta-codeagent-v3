@@ -1,5 +1,5 @@
 id: runner-run-interactive
-title: runInteractive — surface-agnostic REPL-loop driver
+title: Legacy runInteractive cutover — prompt-pipeline + turn-runner REPL driver
 section: 6
 subsystem: surface-agnostic REPL driver
 order: 113
@@ -13,30 +13,34 @@ owners: ["@songmin"]
 labels: ["surface:core", "tier:1"]
 depends_on: [prompt-source-payload-widening, assemble-config, repl-code-smell-cleanup, abort-signal-compose, on-session-minted-port]
 purpose: |
-  REPL 루프를 surface(CLI/Web-Tauri/CLI-embedded browser)에 agnostic하게 분리한 드라이버.
-  `PromptSource` 포트로 CLI raw-line-reader / Web WebSocket / Tauri IPC 입력을 통일
-  추상화 — 동일 luminance loop가 surface별 어댑터만 갈아끼우면 작동. wrapTurn 훅으로
-  per-turn 횡단관심사(Esc-Esc cancel + dashboard + REPL-survive on tool error)를 부착
-  가능. PromptPayload widening(text+images)을 그대로 받아 multimodal과 호환.
-  CLI surface는 `apps/cli/repl.ts`에서 raw-line-reader PromptSource로 wrapping.
+  옛 `runInteractive` 단일 helper는 제거됐지만, surface-agnostic REPL driver
+  계약 자체는 유지된다. 현재 live path는
+  `apps/agent/mode-presets/interactive.ts`의 runtime-SDK preset +
+  `apps/cli/repl/prompt-pipeline.ts`의 prompt acquisition/slash routing +
+  `apps/cli/repl/turn-runner.ts`의 per-turn abort wrapper +
+  `apps/cli/repl/session-loop.ts`의 session loop composition으로 분리돼 있다.
+  PromptPayload widening(text+images)은 `runOnce` path와 그대로 호환된다.
 evidence:
   code:
-    - src/runner/orchestrate/run-interactive.ts
-    - src/runner/orchestrate/prompt-source.ts
-    - src/runner/orchestrate/index.ts
-    - src/runner/index.ts
+    - src/apps/agent/mode-presets/interactive.ts
     - src/apps/cli/repl.ts
+    - src/apps/cli/repl/prompt-pipeline.ts
+    - src/apps/cli/repl/turn-runner.ts
+    - src/apps/cli/repl/session-loop.ts
+    - src/runner/orchestrate/run-once.ts
   adrs: []
   tests:
     unit:
-      - tests/unit/runner-orchestrate-interactive.test.ts
-      - tests/unit/runner/run-interactive-multimodal.test.ts
-      - tests/unit/runner-slice-boundary.test.ts
+      - tests/unit/apps/agent/mode-presets/interactive.test.ts
+      - tests/unit/apps/cli/prompt-pipeline-hellgate.test.ts
+      - tests/unit/apps/cli/turn-runner-hellgate.test.ts
+      - tests/unit/runner/public-old-seam-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
 deliberate_hold: null
 notes: |
-  surface-가용성 ROI 게이팅 금지(memory surface-model). PromptSource는 닫힌 포트 — CLI
-  어댑터(raw-line-reader)는 별 entry로 카탈로그됨. wrapTurn 훅은 default no-op이며,
-  surface별 횡단관심사(Esc-Esc cancel, dashboard, REPL-survive)를 부착하는 seam.
+  `runInteractive` symbol은 더 이상 public seam이 아니다. surface-가용성은
+  prompt acquisition / turn wrapper / runtime host로 쪼개져 유지된다.
+  CLI raw-line-reader는 `prompt-pipeline`, Esc-Esc/Ctrl+C wrapper는 `turn-runner`,
+  live preset boundary는 `interactive.runMode`가 owner다.

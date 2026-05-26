@@ -63,7 +63,6 @@ evidence:
     - src/runner/assemble/config.ts
     - src/runner/index.ts
     - src/apps/cli/internal.ts
-    - src/apps/cli/config-assemble.ts
   adrs: []
   tests:
     unit:
@@ -77,7 +76,9 @@ evidence:
 knobs: []
 deliberate_hold: null
 notes: |
-  CLI shim (`apps/cli/internal.ts` / `config-assemble.ts`) 는 동일 export 이름을
-  re-expose 해서 132+ 기존 consumer 영향 ZERO. byte-identical 게이트: 모든
-  default-OFF (store 없음, fallback 모델 없음, classifier 비활성, …) 시
-  `runOnce` / `runAgent` 가 prior inline 거동과 정확히 동일 path 통과.
+  CLI env/argv envelope은 `apps/cli/internal.ts`에 남고, 별도
+  `apps/cli/config-assemble.ts` shim은 제거됐다. 현재 compatibility는
+  CLI helper exports + direct `src/runner/assemble/config.ts` import 조합으로
+  유지된다. byte-identical 게이트: 모든 default-OFF (store 없음, fallback 모델
+  없음, classifier 비활성, …) 시 `runOnce` / `runAgent`가 prior inline 거동과
+  정확히 동일 path 통과.

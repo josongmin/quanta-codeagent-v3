@@ -37,7 +37,6 @@ evidence:
   tests:
     unit:
       - tests/unit/apps/agent/mode-presets/interactive.test.ts
-      - tests/unit/runner-orchestrate-interactive.test.ts
     integration: []
     contract: []
 knobs: []
@@ -48,3 +47,5 @@ notes: |
   REPL path uses this catch because `runRepl` does NOT return a structured
   AgentOutcome — it either resolves (clean exit → 0) or throws an abort
   (interrupted → 130). The two paths agree on the {0, 130} boundary.
+  Legacy `@/runner#runInteractive` tests were removed; runtime-SDK
+  `interactive.runMode` is the owner.

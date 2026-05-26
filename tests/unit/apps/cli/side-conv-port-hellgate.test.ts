@@ -72,6 +72,7 @@ describe("runtime side starter source fences", () => {
   test("side-cmd.ts avoids runner side-conversation imports", async () => {
     const src = await readFile(SIDE_CMD_PATH, "utf8")
     expect(src).not.toContain('from "@/runner/side-conversation-port"')
+    expect(src).not.toContain('from "@/runner/orchestrate/side-chat"')
     expect(src).not.toContain("SideConversationPort")
   })
 })

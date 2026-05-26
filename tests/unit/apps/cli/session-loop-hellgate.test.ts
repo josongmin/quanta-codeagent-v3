@@ -327,17 +327,13 @@ beforeAll(async () => {
             transport: "inproc" as const,
           },
         }),
-        runTurn: async ({ prompt }: { prompt: string }) => {
+        runTurn: async ({ history, prompt }: { history: readonly Message[]; prompt: string }) => {
           if (bridgeState.failWith !== undefined) throw bridgeState.failWith
+          expect(history).toEqual(bridgeState.messages)
           const outcome = makeOutcome(prompt)
           bridgeState.messages = [...outcome.messages] as Message[]
           bridgeState.outcome = outcome
           return { outcome, messages: outcome.messages }
-        },
-        peekMessages: () => [...bridgeState.messages],
-        peekLastOutcome: () => bridgeState.outcome,
-        replaceMessages: (messages: readonly Message[]) => {
-          bridgeState.messages = [...messages]
         },
         close: async () => {
           bridgeState.closeCalls += 1
@@ -365,6 +361,7 @@ beforeAll(async () => {
             capabilityManifest: Record<string, unknown>
           }
           runTurn(args: {
+            history: readonly Message[]
             prompt: string
             images?: unknown[]
             signal?: AbortSignal
@@ -413,11 +410,12 @@ beforeAll(async () => {
             },
             turn: {
               run: async (_meta?: unknown, options?: { signal?: AbortSignal }) => {
-                runtimeCalls.turnRun += 1
-                const result = await hostSession.runTurn({
-                  prompt,
-                  ...(imageCount > 0 ? { images: new Array(imageCount).fill(null) } : {}),
-                  ...(options?.signal !== undefined ? { signal: options.signal } : {}),
+              runtimeCalls.turnRun += 1
+              const result = await hostSession.runTurn({
+                history: [...bridgeState.messages],
+                prompt,
+                ...(imageCount > 0 ? { images: new Array(imageCount).fill(null) } : {}),
+                ...(options?.signal !== undefined ? { signal: options.signal } : {}),
                 })
                 return { revision: 2, seq: 2, events: [], turn: result }
               },

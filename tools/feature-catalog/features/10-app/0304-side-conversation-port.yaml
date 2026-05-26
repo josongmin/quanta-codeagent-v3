@@ -19,17 +19,18 @@ purpose: |
   Closes the engine-internal leak in the CLI slash-surface where
   `buildReplSlashCtx` imported `assembleConfig` + `SessionDeps` from
   `@/apps/cli/internal` to wire the `/side` slash. Introduces a typed
-  `SideConversationPort` injected from the host bootstrap; the slash-
-  surface consumes only the port (no engine internals). Pure rename
-  + DI swap — `runSideChat` (`src/runner/orchestrate/side-chat.ts`)
-  unchanged.
+  `SideConversationPort` injected from the host bootstrap; the slash-surface
+  consumes only the port (no engine internals). After the runtime-SDK session
+  host cutover there is no dedicated `side-conv-wire.ts` helper — the live
+  wire is built in surface composition/runtime host and `runSideChat`
+  (`src/runner/orchestrate/side-chat.ts`) remains unchanged.
 evidence:
   code:
-    - src/apps/cli/repl/side-conv-wire.ts
     - src/apps/cli/repl/slash-surface.ts
     - src/apps/cli/repl/surface-compose.ts
     - src/apps/cli/side-cmd.ts
     - src/apps/cli/slash-contract.ts
+    - src/host/runtime/session-host.ts
     - src/runner/side-conversation-port.ts
     - src/runner/orchestrate/side-chat.ts
   adrs:
@@ -47,4 +48,5 @@ deliberate_hold: null
 notes: |
   Companion of ADR-0299 (CLI-01) and ADR-0303 (thin-surface). Each port
   extraction shrinks the cross-surface import count counted by the
-  ratchet test.
+  ratchet test. `tests/unit/apps/cli/repl-thin-surface-ownership-hellgate.test.ts`
+  now also pins the absence of `./side-conv-wire`.

@@ -17,29 +17,32 @@ purpose: |
   의존하지 않도록 노출한 `PromptSource` 포트 + `PromptPayload` back-compat union.
   `PromptPayload = string | { text, images? }` — pre-multi-modal surface는 plain
   string 그대로 반환(byte-identical), 이미지가 있는 turn에만 `{ text, images }`
-  객체로 opt-in. `runInteractive`가 `normalizePromptPayload`로 `{ text, images: [] }`
-  로 정규화한 뒤 `runOnce`에 전달 → 기존 text-only surface는 컴파일/런타임 무변경.
-  Drain semantics: 이미지는 `next()` 한 번 호출당 정확히 한 번만 그 turn에
+  객체로 opt-in. 현재 live path는 CLI `prompt-pipeline`이 local prompt를
+  `string | { text, images }`로 만들고, `runOnce`가
+  `normalizePromptPayload`로 `{ text, images: [] }` 형태로 정규화한 뒤
+  `runAgent`에 전달한다. 기존 text-only surface는 컴파일/런타임 무변경.
+  Drain semantics: 이미지는 accepted prompt 한 번당 정확히 한 번만 그 turn에
   attach (다음 turn에 carry-over 없음, ImageQueue가 enforce).
 evidence:
   code:
-    - src/runner/orchestrate/prompt-source.ts
-    - src/runner/orchestrate/run-interactive.ts
+    - src/runner/orchestrate/prompt-payload.ts
     - src/runner/orchestrate/run-once.ts
-    - src/runner/orchestrate/index.ts
+    - src/apps/cli/repl/prompt-pipeline.ts
     - src/apps/cli/repl.ts
   adrs: []
   tests:
     unit:
-      - tests/unit/runner-orchestrate-interactive.test.ts
+      - tests/unit/apps/cli/prompt-pipeline-hellgate.test.ts
       - tests/unit/runner-slice-boundary.test.ts
-      - tests/unit/runner/run-interactive-multimodal.test.ts
+      - tests/unit/runner/run-once-multimodal.test.ts
     integration: []
     contract: []
 knobs: []
 deliberate_hold: null
 notes: |
   R6 type-widening track. Layer-2 surface-agnostic invariant 유지: runner는
-  raw-mode/WebSocket/IPC 모름. CLI adapter는 `src/apps/cli/repl/prompt-source.ts`
-  에서 `buildCliPromptSource` 가 `ImageQueue.drain()`을 매 `next()`마다 호출해
-  multi-modal envelope을 만든다. Web/Tauri는 동일 포트로 다른 어댑터 가능.
+  raw-mode/WebSocket/IPC를 직접 모른다. CLI adapter는
+  `src/apps/cli/repl/prompt-pipeline.ts`의 `localPayload()`가
+  `ImageQueue.drain()`을 accepted prompt마다 정확히 한 번 호출해
+  multi-modal envelope을 만든다. Legacy `run-interactive.ts` /
+  `prompt-source.ts` seam은 runtime-SDK cutover에서 제거됐다.

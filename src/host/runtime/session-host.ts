@@ -1,4 +1,4 @@
-import type { AgentConfig, AgentOutcome } from "@/agent"
+import type { AgentConfig } from "@/agent"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
 import type {
   SessionHost,
@@ -36,12 +36,6 @@ export interface LegacyRunnerSessionHostOptions {
   readonly idMeta: SessionMeta | undefined
   readonly shutdown: () => Promise<void>
   readonly mcpClients?: Array<{ stop: () => Promise<void> }>
-}
-
-export interface LegacyRunnerSessionHost extends SessionHost {
-  peekMessages(): readonly Message[]
-  peekLastOutcome(): AgentOutcome | undefined
-  replaceMessages(messages: readonly Message[]): void
 }
 
 export type LegacySessionConfigAssembler = RuntimeAgentTurnAssembler
@@ -326,9 +320,7 @@ export const startLegacySideConversation = async (
 
 export const createLegacyRunnerSessionHost = (
   options: LegacyRunnerSessionHostOptions,
-): LegacyRunnerSessionHost => {
-  let history = [...options.history]
-  let lastOutcome: AgentOutcome | undefined
+): SessionHost => {
   let closed = false
   let shutdownComplete = false
   const capabilityManifest = buildCapabilityManifestFromLegacySessionDeps(options.sessionDeps)
@@ -351,8 +343,9 @@ export const createLegacyRunnerSessionHost = (
       ...(options.boot?.toolProfileState !== undefined
         ? { toolProfile: options.boot.toolProfileState.get() }
         : {}),
+      messages: [...options.history],
     }),
-    runTurn: async ({ prompt, images, signal }) => {
+    runTurn: async ({ history, prompt, images, signal }) => {
       if (closed) throw new Error("legacy runner session host is closed")
       const turnDeps =
         signal === undefined ? options.sessionDeps : { ...options.sessionDeps, signal }
@@ -367,8 +360,6 @@ export const createLegacyRunnerSessionHost = (
         idMeta: options.idMeta,
         ...(options.mcpClients !== undefined ? { mcpClients: options.mcpClients } : {}),
       })
-      history = [...result.messages]
-      lastOutcome = result.outcome
       return { outcome: result.outcome, messages: result.messages }
     },
     setIdentityMode: async (mode) => {
@@ -393,11 +384,6 @@ export const createLegacyRunnerSessionHost = (
         ...(args.tools !== undefined ? { tools: args.tools } : {}),
         ...(args.maxTurns !== undefined ? { maxTurns: args.maxTurns } : {}),
       }),
-    peekMessages: () => [...history],
-    peekLastOutcome: () => lastOutcome,
-    replaceMessages: (messages) => {
-      history = [...messages]
-    },
     close,
   }
 }

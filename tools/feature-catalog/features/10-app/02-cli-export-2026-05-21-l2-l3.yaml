@@ -19,9 +19,10 @@ evidence:
   code:
     - src/apps/cli/internal.ts
     - src/apps/cli/index.ts
-    - src/apps/cli/config-assemble.ts
     - src/apps/cli/dotenv.ts
     - src/apps/cli/history-cmd.ts
+    - src/apps/cli/repl.ts
+    - src/runner/assemble/config.ts
   adrs: []
   tests:
     unit: [tests/unit/cli-summarizer.test.ts]
@@ -29,4 +30,4 @@ evidence:
     contract: []
 knobs: []
 deliberate_hold: null
-notes: 'main().catch(...) top-level 호출 보존. 의 로컬 재구현 제거 → 실제 buildSummarizerLlm/compactionDep 직접 import해 검증(9 pass). 새 Biome 격리 규칙 : src/에서 src/apps/와 tests/unit/{cli-summarizer,dotenv}.test.ts만 제외하고 /apps/cli…'
+notes: 'main().catch(...) top-level 호출 보존. local shim `src/apps/cli/config-assemble.ts`는 제거됐고, current closure는 `src/apps/cli/internal.ts` helper exports + direct `src/runner/assemble/config.ts` import로 닫힌다. 의 로컬 재구현 제거 → 실제 buildSummarizerLlm/compactionDep 직접 import해 검증(9 pass). 새 Biome 격리 규칙: src/에서 src/apps/와 tests/unit/{cli-summarizer,dotenv}.test.ts만 제외하고 /apps/cli…'

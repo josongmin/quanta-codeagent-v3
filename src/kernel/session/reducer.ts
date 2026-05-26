@@ -5,8 +5,12 @@ import { type KernelSessionState, summarizeTranscript, toSessionStateView } from
 
 type HostAction =
   | { readonly kind: "none" }
-  | { readonly kind: "replace_transcript"; readonly messages: readonly Message[] }
-  | { readonly kind: "run_turn"; readonly prompt: string; readonly images: readonly ImageBlock[] }
+  | {
+      readonly kind: "run_turn"
+      readonly history: readonly Message[]
+      readonly prompt: string
+      readonly images: readonly ImageBlock[]
+    }
 
 export interface ReducerResult {
   readonly state: KernelSessionState
@@ -117,15 +121,17 @@ export const reduceSessionCommand = (
       if (state.status === "running" || state.pendingApproval !== null) {
         throw new SessionProtocolValidationError("transcript_replace_unavailable")
       }
+      const nextMessages = [...command.messages]
       const { lastOutcomeReason: _lastOutcomeReason, ...stateWithoutOutcome } = state
       const nextState = withRevision({
         ...stateWithoutOutcome,
         status: "idle",
-        transcript: summarizeTranscript(command.messages),
+        messages: nextMessages,
+        transcript: summarizeTranscript(nextMessages),
       })
       return {
         state: nextState,
-        hostAction: { kind: "replace_transcript", messages: [...command.messages] },
+        hostAction: { kind: "none" },
         events: [
           {
             eventId: crypto.randomUUID(),
@@ -179,7 +185,12 @@ export const reduceSessionCommand = (
       })
       return {
         state: nextState,
-        hostAction: { kind: "run_turn", prompt: state.draftInput, images: state.draftImages },
+        hostAction: {
+          kind: "run_turn",
+          history: [...state.messages],
+          prompt: state.draftInput,
+          images: state.draftImages,
+        },
         events: [
           {
             eventId: crypto.randomUUID(),

@@ -18,6 +18,7 @@ export interface KernelSessionState {
   readonly revision: number
   readonly seq: number
   readonly status: "idle" | "running" | "awaiting_approval" | "failed" | "closed"
+  readonly messages: readonly Message[]
   readonly draftInput: string
   readonly draftImages: readonly ImageBlock[]
   readonly permissionMode: string
@@ -36,6 +37,7 @@ export interface CreateKernelSessionStateInput {
   readonly capabilityManifest: CapabilityManifest
   readonly identityMode?: string
   readonly toolProfile?: string
+  readonly messages?: readonly Message[]
 }
 
 const lastTextBlock = (message: Message | undefined): string | undefined => {
@@ -60,21 +62,25 @@ export const summarizeTranscript = (messages: readonly Message[]): KernelTranscr
 
 export const createKernelSessionState = (
   input: CreateKernelSessionStateInput,
-): KernelSessionState => ({
-  sessionId: input.sessionId,
-  revision: 0,
-  seq: 0,
-  status: "idle",
-  draftInput: "",
-  draftImages: [],
-  permissionMode: input.permissionMode,
-  ...(input.identityMode !== undefined ? { identityMode: input.identityMode } : {}),
-  ...(input.toolProfile !== undefined ? { toolProfile: input.toolProfile } : {}),
-  pendingApproval: null,
-  transcript: { messageCount: 0 },
-  artifacts: [],
-  capabilityManifest: input.capabilityManifest,
-})
+): KernelSessionState => {
+  const messages = [...(input.messages ?? [])]
+  return {
+    sessionId: input.sessionId,
+    revision: 0,
+    seq: 0,
+    status: "idle",
+    messages,
+    draftInput: "",
+    draftImages: [],
+    permissionMode: input.permissionMode,
+    ...(input.identityMode !== undefined ? { identityMode: input.identityMode } : {}),
+    ...(input.toolProfile !== undefined ? { toolProfile: input.toolProfile } : {}),
+    pendingApproval: null,
+    transcript: summarizeTranscript(messages),
+    artifacts: [],
+    capabilityManifest: input.capabilityManifest,
+  }
+}
 
 export const toSessionStateView = (state: KernelSessionState): SessionStateView => ({
   status: state.status,

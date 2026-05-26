@@ -33,11 +33,11 @@ describe("@/sdk/runtime", () => {
           identityMode: "default",
           toolProfile: "write",
         }),
-        runTurn: async ({ prompt }: { prompt: string }) => {
+        runTurn: async ({ history, prompt }: { history: readonly unknown[]; prompt: string }) => {
+          expect(history).toEqual([])
           expect(prompt).toBe("ping")
           return { outcome: makeOutcome("completed"), messages: makeOutcome("completed").messages }
         },
-        replaceMessages: () => undefined,
         close: async () => undefined,
       })),
     })
@@ -70,7 +70,6 @@ describe("@/sdk/runtime", () => {
   })
 
   test("transcript replace returns the restored messages through the runtime surface", async () => {
-    let replaced: readonly unknown[] = []
     const runtime = await createRuntime({
       host: createSingleSessionRuntimeHost(() => ({
         describe: () => ({
@@ -88,9 +87,6 @@ describe("@/sdk/runtime", () => {
           },
         }),
         runTurn: async () => ({ outcome: makeOutcome("completed"), messages: [] }),
-        replaceMessages: (messages) => {
-          replaced = [...messages]
-        },
         close: async () => undefined,
       })),
     })
@@ -98,7 +94,7 @@ describe("@/sdk/runtime", () => {
     const messages = makeOutcome("completed").messages
     const result = await session.transcript.replace(messages)
     expect(result.transcript?.messages).toEqual(messages)
-    expect(replaced).toEqual(messages)
+    expect((await session.snapshot()).state.messageCount).toBe(messages.length)
     await session.close()
     await runtime.close()
   })
@@ -138,7 +134,6 @@ describe("@/sdk/runtime", () => {
     const session = await runtime.createSession({ cwd: "/tmp", permissionMode: "default" })
     const result = await session.side.start({
       question: "where is the test command?",
-      messages: [],
       signal: new AbortController().signal,
     })
     expect(seenQuestion).toBe("where is the test command?")

@@ -28,7 +28,8 @@ interface CreateRuntimeSessionArgs {
 
 export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSession => {
   let closed = false
-  let state: KernelSessionState = createKernelSessionState(args.hostSession.describe())
+  const hostDescription = args.hostSession.describe()
+  let state: KernelSessionState = createKernelSessionState(hostDescription)
   const subscriptions = new SessionSubscriptionHub()
   const sessionId = state.sessionId
 
@@ -197,7 +198,10 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
         if (args.hostSession.startSideConversation === undefined) {
           throw new Error("side conversation is not supported by this runtime session host")
         }
-        return await args.hostSession.startSideConversation(sideArgs)
+        return await args.hostSession.startSideConversation({
+          ...sideArgs,
+          messages: [...state.messages],
+        })
       },
     },
   }

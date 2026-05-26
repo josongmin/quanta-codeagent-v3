@@ -1,15 +1,18 @@
 import type { SessionBootstrapResult } from "@/host/bootstrap"
+import {
+  assembleLegacyAgentConfig,
+  buildSessionDepsFromAgentConfigBase,
+  type ComposeLegacySessionDepsArgs,
+  composeLegacySessionDeps,
+  createSingleLegacyRuntimeHost,
+  type LegacyRunnerSessionHostOptions,
+} from "@/host/runtime/session-host"
 import type { Message } from "@/llm"
 import type { SessionDeps } from "@/runner/assemble/config"
 import type { SessionMeta } from "@/session"
+import { createRuntime } from "./create-runtime"
 import type { RuntimeAgentConfigBase, RuntimeAgentTurnAssembler } from "./base"
-import {
-  composeBootstrapLegacySessionDeps,
-  createLegacyRuntimeFacade,
-  createLegacyRuntimeFromAgentConfigBase,
-  createLegacyRuntimeFromBootstrap,
-  materializeLegacyReviewerAgent,
-} from "./compat"
+import type { RuntimeFacade } from "./types"
 
 export type RuntimeSessionDeps = SessionDeps
 
@@ -55,19 +58,81 @@ export interface CreateRuntimeFacadeFromSessionDepsArgs {
   readonly mcpClients?: Array<{ stop: () => Promise<void> }>
 }
 
+const createLegacyRuntimeFacade = async (
+  args: LegacyRunnerSessionHostOptions,
+): Promise<RuntimeFacade> =>
+  await createRuntime({
+    host: createSingleLegacyRuntimeHost(args),
+  })
+
+const createLegacyRuntimeFromAgentConfigBase = async (
+  args: CreateRuntimeFromAgentConfigBaseArgs,
+): Promise<{ readonly runtime: RuntimeFacade; readonly sessionDeps: SessionDeps }> => {
+  const sessionDeps = buildSessionDepsFromAgentConfigBase(args.base)
+  const runtime = await createLegacyRuntimeFacade({
+    sessionDeps,
+    ...(args.assembleConfig !== undefined ? { assembleConfig: args.assembleConfig } : {}),
+    history: [...(args.history ?? args.base.messages ?? [])],
+    state: args.state,
+    idMeta: args.idMeta,
+    shutdown: args.shutdown,
+    ...(args.mcpClients !== undefined ? { mcpClients: args.mcpClients } : {}),
+  })
+  return { runtime, sessionDeps }
+}
+
 export const createRuntimeFacadeFromSessionDeps = createLegacyRuntimeFacade
 
 export const createRuntimeFromAgentConfigBase = createLegacyRuntimeFromAgentConfigBase as (
   args: CreateRuntimeFromAgentConfigBaseArgs,
 ) => ReturnType<typeof createLegacyRuntimeFromAgentConfigBase>
 
-export const composeBootstrapRuntimeDeps = composeBootstrapLegacySessionDeps as (
-  args: Parameters<typeof composeBootstrapLegacySessionDeps>[0],
+export const composeBootstrapRuntimeDeps = composeLegacySessionDeps as (
+  args: ComposeLegacySessionDepsArgs,
 ) => Promise<RuntimeSessionDeps>
+
+const createLegacyRuntimeFromBootstrap = async (
+  args: ComposeLegacySessionDepsArgs &
+    Omit<LegacyRunnerSessionHostOptions, "sessionDeps" | "boot"> & {
+      readonly boot: SessionBootstrapResult
+    },
+): Promise<{ readonly runtime: RuntimeFacade; readonly sessionDeps: SessionDeps }> => {
+  const sessionDeps = await composeLegacySessionDeps(args)
+  const runtime = await createLegacyRuntimeFacade({
+    boot: {
+      mode: args.boot.mode,
+      refreshSystemPrompt: args.boot.refreshSystemPrompt,
+      ...(args.boot.toolProfileState !== undefined
+        ? { toolProfileState: args.boot.toolProfileState }
+        : {}),
+      ...(args.boot.identityModeState !== undefined
+        ? { identityModeState: args.boot.identityModeState }
+        : {}),
+    },
+    sessionDeps,
+    ...(args.assembleConfig !== undefined ? { assembleConfig: args.assembleConfig } : {}),
+    history: [...args.history],
+    state: args.state,
+    idMeta: args.idMeta,
+    shutdown: args.shutdown,
+    ...(args.mcpClients !== undefined ? { mcpClients: args.mcpClients } : {}),
+  })
+  return { runtime, sessionDeps }
+}
 
 export const createRuntimeFromBootstrap = createLegacyRuntimeFromBootstrap as (
   args: Parameters<typeof createLegacyRuntimeFromBootstrap>[0],
 ) => ReturnType<typeof createLegacyRuntimeFromBootstrap>
+
+const materializeLegacyReviewerAgent = (
+  boot: SessionBootstrapResult,
+  baseSessionDeps: SessionDeps,
+  assembleConfig?: RuntimeAgentTurnAssembler,
+): ReturnType<SessionBootstrapResult["materializeReviewerAgent"]> => {
+  return boot.materializeReviewerAgent(
+    assembleLegacyAgentConfig([], baseSessionDeps, assembleConfig),
+  )
+}
 
 export const materializeReviewerAgent = materializeLegacyReviewerAgent as (
   boot: SessionBootstrapResult,

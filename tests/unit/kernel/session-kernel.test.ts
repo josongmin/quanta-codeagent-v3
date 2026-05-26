@@ -45,12 +45,15 @@ describe("@/kernel/session", () => {
         capabilityManifest: manifest,
       }),
       runTurn: async ({
+        history,
         prompt,
         images,
       }: {
+        history: ReadonlyArray<unknown>
         prompt: string
         images?: ReadonlyArray<{ type: "image"; data: string; mediaType: string }>
       }) => {
+        expect(history).toEqual([])
         expect(prompt).toBe("ping")
         expect(images).toEqual([{ type: "image", data: "Zm9v", mediaType: "image/png" }])
         return { outcome: makeOutcome("completed"), messages: makeOutcome("completed").messages }
@@ -105,7 +108,6 @@ describe("@/kernel/session", () => {
       shellSnapshot: false,
       transport: "inproc" as const,
     }
-    let replaced: readonly unknown[] = []
     const state = createKernelSessionState({
       sessionId: "s1",
       permissionMode: "default",
@@ -131,16 +133,13 @@ describe("@/kernel/session", () => {
             capabilityManifest: manifest,
           }),
           runTurn: async () => ({ outcome: makeOutcome("completed"), messages: [] }),
-          replaceMessages: (nextMessages) => {
-            replaced = [...nextMessages]
-          },
           close: async () => undefined,
         },
       },
     )
     expect(result.state.transcript.messageCount).toBe(messages.length)
+    expect(result.state.messages).toEqual(messages)
     expect(result.transcriptMessages).toEqual(messages)
-    expect(replaced).toEqual(messages)
   })
 
   test("rejects stale revisions", async () => {

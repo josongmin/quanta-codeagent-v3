@@ -375,7 +375,6 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
       start: async ({ question, inherit, tools, maxTurns, signal }) =>
         await startSideConversation({
           question,
-          messages: getHistory(),
           signal,
           ...(inherit !== undefined ? { inherit } : {}),
           ...(tools !== undefined ? { tools } : {}),

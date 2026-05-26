@@ -36,7 +36,11 @@ await mock.module("@/sdk/runtime", () => ({
     host: {
       createSessionHost(config: Record<string, unknown>): Promise<{
         describe(): { sessionId: string }
-        runTurn(args: { prompt: string; signal?: AbortSignal }): Promise<unknown>
+        runTurn(args: {
+          history: readonly unknown[]
+          prompt: string
+          signal?: AbortSignal
+        }): Promise<unknown>
         close(): Promise<void>
       }>
     }
@@ -67,6 +71,7 @@ await mock.module("@/sdk/runtime", () => ({
             run: async (_meta?: unknown, options?: { signal?: AbortSignal }) => {
               sdkCalls.turnRun += 1
               const result = await hostSession.runTurn({
+                history: [],
                 prompt,
                 ...(options?.signal !== undefined ? { signal: options.signal } : {}),
               })
