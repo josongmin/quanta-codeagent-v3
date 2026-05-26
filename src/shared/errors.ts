@@ -102,6 +102,22 @@ export class PermissionDeniedError extends QuantaError {
  *                                NOT the model's fault). HITL review — the
  *                                user must inspect and either re-enable the
  *                                sandbox or downgrade the request.
+ *   - `invalid_image`            Provider rejected the request because an
+ *                                attached image / document block was
+ *                                unprocessable (corrupt bytes, oversize,
+ *                                unsupported type, dimension cap). Distinct
+ *                                from `bad_request` (other 400s are caller
+ *                                bugs the agent cannot mechanically fix) and
+ *                                from `cyber_policy` (content-safety refusal
+ *                                that requires HITL): the AGENT can recover
+ *                                by SANITIZING the offending block out of the
+ *                                history (ADR-0323 `HistorySanitizationPort`)
+ *                                and re-sampling. Codex parity
+ *                                (`codex-rs/core/src/session/turn.rs:363-381`
+ *                                `CodexErr::InvalidImageRequest`). After
+ *                                sanitize-and-retry exhausts, the error
+ *                                propagates as fatal (same policy as
+ *                                `bad_request`).
  *
  * NEVER classify by message text downstream. If you find yourself doing
  * `e.message.includes(...)`, the fix is in this file (extend classification),
@@ -127,6 +143,12 @@ export type LLMErrorKind =
   | "too_many_failed_attempts"
   | "thread_rollback_failed"
   | "sandbox_error"
+  // ADR-0328 — Codex parity (`codex-rs/core/src/session/turn.rs:363-381`).
+  // Provider-emitable: surfaced from the adapter boundary on a 400 with an
+  // image-related marker. Recovery is handled by ADR-0323's
+  // `HistorySanitizationPort` (default-OFF wrap in
+  // `src/llm/image-sanitization-retry/`).
+  | "invalid_image"
 
 /** Provider id used by the adapter→error classifier. Kept narrow so a typo at
  *  the adapter boundary fails to compile. `chatgpt-oauth` (ADR-0094) is the
@@ -255,6 +277,42 @@ const ADAPTER_CONTEXT_WINDOW_MARKERS: readonly string[] = [
   "tokens exceed",
 ] as const
 
+/** ADR-0328: marker substrings (lowercased) for provider rejection of an
+ *  attached image / document block at the ADAPTER boundary. Same
+ *  heuristic-at-boundary rationale as {@link ADAPTER_CONTEXT_WINDOW_MARKERS}.
+ *  Only fired when the provider ALSO returned a 400/422 — never on a bare
+ *  200 stream or a 429.
+ *
+ *  Marker basis (conservative — no SDK error code is currently broken out
+ *  for this case so the only available signal is the body text):
+ *    - Anthropic surfaces this as `400 invalid_request_error` with phrases
+ *      like "could not process image", "unable to process image", "image
+ *      dimensions exceed", "unsupported image type". The marker set is the
+ *      INTERSECTION of those phrases lowercased, narrowed to the most
+ *      distinctive substrings ("invalid image", "could not process image",
+ *      "unable to process image", "image dimensions", "unsupported image
+ *      type", "image format"). A future provider-code (e.g.
+ *      `.error.type === "invalid_image"`) extension would short-circuit
+ *      the marker scan and is encoded BEFORE the substring fallback.
+ *    - "document" parity is intentional: Anthropic native-document blocks
+ *      (`type:"document"`, ADR-0137) surface the same failure shape.
+ *
+ *  Precedence: this fires AFTER cyber_policy (a refusal that ALSO mentions
+ *  "invalid image" must route to HITL, not sanitize-retry) and AFTER
+ *  context_window (oversize prompt with an image still routes to compaction,
+ *  not sanitize). See {@link classifyBadRequest} for the order. */
+const ADAPTER_INVALID_IMAGE_MARKERS: readonly string[] = [
+  "invalid image",
+  "could not process image",
+  "unable to process image",
+  "image dimensions",
+  "unsupported image type",
+  "image format",
+  "invalid document",
+  "could not process document",
+  "unable to process document",
+] as const
+
 /** ADR-0234: marker substrings (lowercased) for provider safety / content
  *  policy refusals at the ADAPTER boundary. Same heuristic-at-boundary
  *  rationale as {@link ADAPTER_CONTEXT_WINDOW_MARKERS}; only fired when the
@@ -312,12 +370,20 @@ const lowerProviderCode = (e: unknown): string => {
   return ""
 }
 
-/** ADR-0234: classify a 400/422 SDK response into one of three buckets:
- *  cyber_policy (HITL), context_window_exceeded (reactive compaction), or
- *  the catch-all bad_request (caller bug). Extracted to keep the parent
- *  `classify`'s cyclomatic complexity under the biome cap. Precedence:
- *  cyber_policy > context_window > bad_request — a refusal that ALSO
- *  mentions "context length" must route to HITL, not compaction. */
+/** ADR-0234/0328: classify a 400/422 SDK response into one of four buckets:
+ *  cyber_policy (HITL), context_window_exceeded (reactive compaction),
+ *  invalid_image (history sanitization + retry), or the catch-all
+ *  bad_request (caller bug). Extracted to keep the parent `classify`'s
+ *  cyclomatic complexity under the biome cap. Precedence:
+ *
+ *    cyber_policy > context_window > invalid_image > bad_request
+ *
+ *  Rationale: a refusal that ALSO mentions "context length" must route to
+ *  HITL, not compaction. A 400 that mentions BOTH "context length" and
+ *  "invalid image" should route to compaction (the prompt is the primary
+ *  fault — sanitizing one image won't shrink an oversize prompt). Only when
+ *  policy and context-window are both ruled out does invalid_image fire and
+ *  drive ADR-0323's history sanitization + retry (`ADR-0328`). */
 const classifyBadRequest = (e: unknown): LLMErrorKind => {
   const lowerMsg = lowerMessage(e)
   const providerCode = lowerProviderCode(e)
@@ -329,6 +395,13 @@ const classifyBadRequest = (e: unknown): LLMErrorKind => {
     containsAnyAdapter(lowerMsg, ADAPTER_CONTEXT_WINDOW_MARKERS)
   ) {
     return "context_window_exceeded"
+  }
+  if (
+    providerCode === "invalid_image" ||
+    providerCode === "invalid_image_request" ||
+    containsAnyAdapter(lowerMsg, ADAPTER_INVALID_IMAGE_MARKERS)
+  ) {
+    return "invalid_image"
   }
   return "bad_request"
 }

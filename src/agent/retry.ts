@@ -115,6 +115,12 @@ const FATAL_KINDS: ReadonlySet<string> = new Set([
   "not_implemented",
   "stream_corrupt",
   "aborted",
+  // ADR-0328: by the time `invalid_image` reaches the in-loop retry/
+  // fallback policy, the adapter-side `withImageSanitizationRetry` wrap
+  // has already attempted sanitize-and-retry. Further same-provider retry
+  // (or provider fallback) would re-submit the same poisoned bytes — the
+  // wrap, not this loop, owns recovery. Same FATAL policy as `bad_request`.
+  "invalid_image",
 ])
 
 /** True iff `e` looks like a transient LLM failure worth retrying. Only

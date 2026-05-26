@@ -610,6 +610,39 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   modelCandidates?: readonly ModelCandidate[]
   /**
+   * ADR-0328 — image sanitization retry options. When `enabled: true`, the
+   * loop wraps `llm` with `withImageSanitizationRetry(llm, port)` (where
+   * `port = createWorkingMemoryHistorySanitization(wm)` is bound to the
+   * loop's WorkingMemory). On an `LLMError("invalid_image", ...)` thrown by
+   * the wrapped adapter, the port scrubs the LAST message's image/document
+   * blocks and re-streams.
+   *
+   * Default-OFF: absent (or `enabled !== true`) ⇒ no wrap, byte-identical
+   * legacy behavior — an `invalid_image` 400 propagates as `fatal` via the
+   * Codex-spec router (same policy as `bad_request`).
+   *
+   * Knobs (all exactOptional):
+   *   - `enabled`     turn the wrap on. Default: `false`.
+   *   - `maxAttempts` sanitize-and-retry budget per stream() call. Default:
+   *                   `1` (Codex parity). Clamped to [0, 5].
+   *   - `placeholder` text written into the sanitized text block. Default:
+   *                   `"[invalid image removed]"`. Observable in the
+   *                   transcript; hosts may rebrand without changing
+   *                   semantics.
+   *
+   * STATUS — production wire is a follow-up. The wrapping function ships
+   * here (`src/llm/image-sanitization-retry/`); hooking it into
+   * `createRunAgentContext` (`src/agent/loop.ts:~2049`) after `wm` is
+   * constructed is the next step. Until then this slot is shape-only —
+   * present so the schema is stable when the wire lands. See ADR-0328
+   * §Wire for the hookup TODO.
+   */
+  imageSanitizationRetry?: {
+    readonly enabled?: boolean
+    readonly maxAttempts?: number
+    readonly placeholder?: string
+  }
+  /**
    * Session-level reasoning-effort accessor. Read once per turn by
    * `resolveSkillTurnOverride` to derive the `thinking:{enabled,budget_tokens}`
    * field on the per-turn LLMInput. Precedence: skill > session > default.

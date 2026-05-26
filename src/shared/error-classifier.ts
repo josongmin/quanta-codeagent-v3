@@ -30,11 +30,15 @@
  *   3. sandbox-error markers (kind: sandbox_error) — host-side failure
  *      carries no HTTP status, distinguish from server_error.
  *   4. policy-refusal markers (kind: cyber_policy)
- *   5. too-many-failed-attempts markers (kind: too_many_failed_attempts) —
+ *   5. invalid-image markers (kind: invalid_image) — ADR-0328. AFTER
+ *      policy (a refusal about an image must still route to HITL), but
+ *      BEFORE the status-based bad_request bucket so a 400 with image
+ *      markers routes to sanitize-and-retry instead of fatal abort.
+ *   6. too-many-failed-attempts markers (kind: too_many_failed_attempts) —
  *      BEFORE rate_limit (429), since providers signal this as a 429 with
  *      "exhausted" wording and we must NOT retry exhausted budget.
- *   6. thread-rollback-failed markers (kind: thread_rollback_failed)
- *   7. fall through to status-based classification (identical to
+ *   7. thread-rollback-failed markers (kind: thread_rollback_failed)
+ *   8. fall through to status-based classification (identical to
  *      `fromSdkError`'s `classify`).
  *
  * Heuristic markers are intentionally narrow — every marker added without a
@@ -103,6 +107,24 @@ const TOO_MANY_FAILED_MARKERS: readonly string[] = [
   "max_retries exceeded",
   "exhausted retries",
   "exhausted_retries",
+] as const
+
+/** ADR-0328: marker substrings (lowercased) for provider-rejected image /
+ *  document blocks. Mirror of {@link ADAPTER_INVALID_IMAGE_MARKERS} in
+ *  `errors.ts` — kept in sync so a raw thrown Error (never wrapped by
+ *  `fromSdkError`) still routes to `invalid_image`. Precedence: AFTER
+ *  cyber_policy / context_window (policy refusals about images route to
+ *  HITL; oversize prompts with images route to compaction). */
+const INVALID_IMAGE_MARKERS: readonly string[] = [
+  "invalid image",
+  "could not process image",
+  "unable to process image",
+  "image dimensions",
+  "unsupported image type",
+  "image format",
+  "invalid document",
+  "could not process document",
+  "unable to process document",
 ] as const
 
 /** Marker substrings (lowercased) for server-side conversation/thread rollback
@@ -205,6 +227,7 @@ export const classify = (e: unknown): LLMErrorKind => {
   if (containsAny(lower, CONTEXT_WINDOW_MARKERS)) return "context_window_exceeded"
   if (containsAny(lower, SANDBOX_MARKERS)) return "sandbox_error"
   if (containsAny(lower, POLICY_MARKERS)) return "cyber_policy"
+  if (containsAny(lower, INVALID_IMAGE_MARKERS)) return "invalid_image"
   if (containsAny(lower, TOO_MANY_FAILED_MARKERS)) return "too_many_failed_attempts"
   if (containsAny(lower, THREAD_ROLLBACK_MARKERS)) return "thread_rollback_failed"
 

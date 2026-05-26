@@ -25,6 +25,17 @@
  *   too_many_failed_attempts → fatal                 (budget burned)
  *   thread_rollback_failed   → reactive_compaction   (rebuild shorter prefix)
  *   sandbox_error            → hitl_handoff          (user review host)
+ *   invalid_image            → fatal                 (sanitize-retry happens
+ *                                                     at the adapter wrap layer
+ *                                                     — ADR-0328. By the time
+ *                                                     the kind reaches THIS
+ *                                                     router the wrap has
+ *                                                     already exhausted its
+ *                                                     retry budget; further
+ *                                                     retry / fallback would
+ *                                                     re-poison the history.
+ *                                                     Same policy as
+ *                                                     `bad_request`.)
  *
  * ── Why `activeTurnNotSteerable` (Codex) does NOT map to retry_same_turn ─────
  * The user's spec asks for `activeTurnNotSteerable → retry_same_turn` NOT to
@@ -80,6 +91,12 @@ export const codexSpecRoute = (kind: LLMErrorKind): RecoveryAction => {
       return "reactive_compaction"
     case "sandbox_error":
       return "hitl_handoff"
+    case "invalid_image":
+      // ADR-0328: by the time the kind reaches this canonical router, the
+      // `withImageSanitizationRetry` wrap (when wired) has already attempted
+      // sanitize-and-retry and failed. Same policy as `bad_request` — the
+      // history is poisoned in a way the agent could not mechanically fix.
+      return "fatal"
     default:
       return assertNever(kind)
   }

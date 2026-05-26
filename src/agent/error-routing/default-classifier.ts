@@ -104,6 +104,14 @@ const fromLLMError = (e: LLMError): TypedError => {
       return { kind: "threadRollbackFailed", message }
     case "sandbox_error":
       return { kind: "sandboxError", message }
+    case "invalid_image":
+      // ADR-0328 — `invalid_image` is recovered by the
+      // `withImageSanitizationRetry` LLM wrap (ADR-0323 sanitization +
+      // re-stream). If the wrap exhausted and the error escaped to the
+      // typed-error router, the only consistent outer policy is
+      // `badRequest` (same as a non-image 400 — sanitize-retry already
+      // had its shot, further retry would just re-poison the history).
+      return { kind: "badRequest", message }
     default: {
       // Exhaustiveness guard: if a new `LLMErrorKind` is added in
       // `@/shared/errors`, TS fails here.
