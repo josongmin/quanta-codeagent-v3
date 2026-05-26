@@ -1382,6 +1382,41 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
     readonly emitter?: import("../git/directive-emit").DirectiveEmitterPort
     readonly collector?: import("../git/directive-emit").GitDirectiveCollector
   }
+
+  // ─── ADR-0327 Codex-r2 wire seam ──────────────────────────────────────────
+  //
+  // Three optional slots that the loop forwards to `buildTurnContext` when
+  // present. ALL ABSENT ⇒ loop is byte-identical to pre-ADR-0327. The slots
+  // are intentionally narrow function/port shapes — caller (composition
+  // root / session setup) constructs and threads them, holding any cursor
+  // / detector / store state in its own closure. Default-OFF (RFC §1.2).
+
+  /** ADR-0326 — session-scoped system-prompt cache port. When set together
+   *  with {@link systemPromptCacheKey}, the loop forwards both to
+   *  `buildTurnContext` so the default `buildSystemPrompt()` factory is
+   *  memoized per key. `system` (caller-provided prefix) bypasses the cache.
+   *  Absent ⇒ per-turn rebuild (byte-identical). */
+  systemPromptCache?: import("@/llm/system-prompt-cache").SystemPromptCachePort
+
+  /** ADR-0326 — opaque session key for {@link systemPromptCache}. When the
+   *  cache is set but the key is absent (or vice-versa), the cache stays
+   *  DISENGAGED (legacy build path) — both slots are required to wire. */
+  systemPromptCacheKey?: import("@/llm/system-prompt-cache").SystemPromptCacheKey
+
+  /** ADR-0321 — per-turn context-change events producer. Called once per
+   *  `buildTurnContext` build. The producer owns its own cursor / detector /
+   *  store state (closure pattern); the loop forwards the returned array
+   *  verbatim to `contextChangeEvents`. NO-THROW invariant: a thrown error
+   *  is logged and converted to an empty array so a misconfigured producer
+   *  cannot break the turn. Absent / empty ⇒ no splice (byte-identical). */
+  contextEventsForTurn?: () => readonly import("@/agent/context-change").ContextEvent[]
+
+  /** ADR-0325 — mention-injection runner. When set, the loop extracts the
+   *  latest user-role text content and invokes the runner; the returned
+   *  messages are forwarded to `mentionInjectionMessages`. NO-THROW
+   *  invariant: a thrown error is logged and converted to `[]`. Absent ⇒ no
+   *  parse, no injection (byte-identical). */
+  mentionInjector?: (userInputText: string) => readonly import("@/llm").Message[]
 }
 
 // ─────────────────────────────────────────────────────────────────────────

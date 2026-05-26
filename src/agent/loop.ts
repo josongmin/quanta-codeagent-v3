@@ -820,6 +820,56 @@ const staticSystemFor = (config: AgentConfig): SystemPromptInput =>
     system: config.system,
   }).system
 
+/** ADR-0327 — invoke the optional context-events producer with NO-THROW.
+ *  Absent producer ⇒ empty array. A thrown error is swallowed and converted
+ *  to an empty array so a misconfigured producer cannot break the turn —
+ *  the spliced channel simply contributes nothing this turn. */
+const resolveContextEventsForTurn = (
+  config: AgentConfig,
+): readonly import("./context-change").ContextEvent[] => {
+  if (config.contextEventsForTurn === undefined) return []
+  try {
+    return config.contextEventsForTurn()
+  } catch {
+    return []
+  }
+}
+
+/** ADR-0327 — invoke the optional mention-injector with NO-THROW. The runner
+ *  is fed the LAST user-role text content in working memory (the model's
+ *  current prompt). Empty or non-user tail ⇒ runner not called, empty
+ *  array returned. A thrown runner returns to "no splice" same as absent. */
+const resolveMentionInjectionMessages = (
+  config: AgentConfig,
+  wm: WorkingMemory<Message>,
+): readonly Message[] => {
+  if (config.mentionInjector === undefined) return []
+  const userText = latestUserTextFromWm(wm)
+  if (userText === undefined || userText.length === 0) return []
+  try {
+    return config.mentionInjector(userText)
+  } catch {
+    return []
+  }
+}
+
+/** Extract the last user-role text content from working memory. Used by the
+ *  mention-injection wire (ADR-0327). Returns undefined when the tail is
+ *  not a user-role text message — e.g. when the tail is a tool_result or
+ *  assistant message (mid-turn states). */
+const latestUserTextFromWm = (wm: WorkingMemory<Message>): string | undefined => {
+  const snap = wm.snapshot()
+  for (let i = snap.length - 1; i >= 0; i--) {
+    const msg = snap[i]
+    if (msg === undefined || msg.role !== "user") continue
+    for (const block of msg.content) {
+      if (block.type === "text") return block.text
+    }
+    return undefined
+  }
+  return undefined
+}
+
 /** Abort-aware sleep used by the in-loop turn-retry backoff. Resolves early
  *  (no throw) if the signal trips so the caller's next abort check handles it. */
 const sleep = (ms: number, signal: AbortSignal): Promise<void> =>
@@ -963,6 +1013,11 @@ const prepareTurnContext = async (
   // so the per-turn reminder reflects mutations the tool just made earlier in
   // the same turn. Absent ⇒ block omitted, byte-identical.
   const wsSnapshot = workingState?.snapshot()
+  // ADR-0327 wire — invoke optional producers BEFORE buildTurnContext so the
+  // resulting events / messages ride the same call. NO-THROW: a misconfigured
+  // producer must not break the turn — failures degrade to "no splice".
+  const contextEvents = resolveContextEventsForTurn(config)
+  const mentionMessages = resolveMentionInjectionMessages(config, wm)
   const ctx = buildTurnContext({
     baseMessages: [...wm.snapshot()],
     cwd: config.cwd,
@@ -987,6 +1042,17 @@ const prepareTurnContext = async (
     ...(hookPromptInjects !== undefined && hookPromptInjects.length > 0
       ? { hookPromptInjects }
       : {}),
+    // ADR-0327 — three wire forwards. Each is omitted (NOT set to undefined)
+    // when its source is absent so `exactOptionalPropertyTypes` stays happy
+    // and the byte-identical invariant holds for legacy callers.
+    ...(config.systemPromptCache !== undefined
+      ? { systemPromptCache: config.systemPromptCache }
+      : {}),
+    ...(config.systemPromptCacheKey !== undefined
+      ? { systemPromptCacheKey: config.systemPromptCacheKey }
+      : {}),
+    ...(contextEvents.length > 0 ? { contextChangeEvents: contextEvents } : {}),
+    ...(mentionMessages.length > 0 ? { mentionInjectionMessages: mentionMessages } : {}),
   })
   // ADR-0080 — fold the IDE snapshot into the built context (no provider ⇒
   // returned unchanged, byte-identical). ADR-0078 — prepend the redaction-
