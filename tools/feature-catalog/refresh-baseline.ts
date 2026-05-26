@@ -7,7 +7,7 @@
  *
  * Gates:
  *   1. tsc --noEmit            → exit code + error-line count
- *   2. biome check src tests   → exit code + (best-effort) error count
+ *   2. biome check authoritative targets → exit code + (best-effort) error count
  *   3. bun test (unit + integration, then per-tier for file/test counts)
  *
  * Zero new deps — only Bun built-ins. Pure parser is exported for unit
@@ -16,6 +16,7 @@
 import { writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { collectBiomeTargets } from "../dev/biome-targets"
 
 // ────────────────────────────────────────────────────────────────────────────
 // Pure parsers (unit-tested without spawning real subprocesses)
@@ -149,7 +150,8 @@ const main = async (): Promise<number> => {
   const tscErrors = countTscErrors(`${tsc.stdout}\n${tsc.stderr}`)
 
   process.stderr.write("[baseline] biome check …\n")
-  const biome = await run([biomeBin, "check", "src", "tests"], repoRoot)
+  const biomeTargets = collectBiomeTargets(repoRoot)
+  const biome = await run([biomeBin, "check", ...biomeTargets], repoRoot)
   const biomeErrors = countBiomeErrors(`${biome.stdout}\n${biome.stderr}`)
 
   process.stderr.write("[baseline] bun test (unit + integration) …\n")

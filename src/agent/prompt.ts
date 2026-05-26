@@ -1,4 +1,5 @@
 import type { Message, SystemBlock } from "@/llm"
+import { buildPersistentInjectionMessages } from "./context-change"
 import { type GlobRule, renderGlobRulesBlock, selectGlobRules } from "./glob-rules"
 import { assertValidIdentityLines } from "./identity"
 import { resolveAgentMode } from "./mode"
@@ -171,6 +172,37 @@ export interface TurnContextInput {
    *  Absent or empty array ⇒ no block, byte-identical to the pre-ADR-0133
    *  path. */
   hookPromptInjects?: readonly import("./hooks").HookPromptInject[]
+
+  // ─── ADR-0327 wire seam (Codex r2 absorption) ──────────────────────────────
+  //
+  // Three orthogonal optional channels that, when ALL absent, leave the
+  // `system` array and `messages` array byte-identical to the legacy path.
+  // The byte-identical invariant is pinned by hellgate (`prompt-adr-0327-
+  // wire-hellgate.test.ts`).
+
+  /** ADR-0326 — session-scoped system-prompt cache. When both `systemPromptCache`
+   *  and `systemPromptCacheKey` are present AND `system` is absent (i.e. the
+   *  default `buildSystemPrompt()` would otherwise be re-invoked every call),
+   *  buildTurnContext routes the base-prompt resolution through
+   *  `cache.getOrBuild(key, buildSystemPrompt)` so iterations within the same
+   *  session reuse a memoized string. The cached text is byte-identical to the
+   *  un-cached call, so the rendered `SystemBlock[]` prefix is unchanged. */
+  systemPromptCache?: import("@/llm/system-prompt-cache").SystemPromptCachePort
+  systemPromptCacheKey?: import("@/llm/system-prompt-cache").SystemPromptCacheKey
+
+  /** ADR-0321 — persistent context-change typed events. Each event renders as
+   *  a `<context-update>` (or sibling envelope) user-role message and is
+   *  spliced AFTER `baseMessages` (+ any hook-context) and BEFORE the trailing
+   *  `<system-reminder>` so the model reads state transitions as chronological
+   *  pre-turn signals. Empty / absent ⇒ no splice, byte-identical. */
+  contextChangeEvents?: readonly import("./context-change").ContextEvent[]
+
+  /** ADR-0325 — already-built mention-injection user messages (from
+   *  `buildMentionInjectionMessages`). Spliced into the same slot as
+   *  `contextChangeEvents`, AFTER any context-change messages so the
+   *  chronological order is `context-update → mention-injection → reminder`.
+   *  Empty / absent ⇒ no splice, byte-identical. */
+  mentionInjectionMessages?: readonly Message[]
 }
 
 export interface TurnContext {
@@ -395,7 +427,11 @@ const buildDynamicContext = (input: TurnContextInput): string | undefined => {
  * the tail varies.
  */
 export const buildTurnContext = (input: TurnContextInput): TurnContext => {
-  const basePrompt = input.system ?? buildSystemPrompt()
+  // ADR-0326 wire — cache the default `buildSystemPrompt()` result per
+  // session-key. `input.system` (caller-provided) bypasses the cache so a
+  // caller that already memoizes its own static prefix isn't shadowed.
+  const basePrompt =
+    input.system ?? resolveCachedSystemPrompt(input.systemPromptCache, input.systemPromptCacheKey)
   // 4-section preset (Claude Desktop 1.7196 `systemPromptSectionCache` mirror)
   // activates only when the caller supplies repo-local rules text OR a static
   // user-append; otherwise we stay byte-identical to the legacy single-block
@@ -424,6 +460,14 @@ export const buildTurnContext = (input: TurnContextInput): TurnContext => {
   const dynamic = buildDynamicContext(input)
   const messages: Message[] = [...input.baseMessages]
   appendHookContextMessage(messages, input.hookPromptInjects)
+  // ADR-0321 + ADR-0325 wire — persistent injection channels.
+  // Both are inserted AFTER the base history (+ any hook-context) and BEFORE
+  // the trailing `<system-reminder>` so the model reads them as chronological
+  // pre-turn signals. Same-slot ordering: context-change first (it represents
+  // state transitions that happened BEFORE the turn started), then mention
+  // injections (user-driven invocations FOR this turn).
+  appendContextChangeMessages(messages, input.contextChangeEvents)
+  appendMentionInjectionMessages(messages, input.mentionInjectionMessages)
   if (dynamic !== undefined) {
     // Route the assembled dynamic block through the canonical untrusted-embed
     // helper: it defangs inner `<system-reminder>` boundaries BEFORE wrapping so
@@ -438,4 +482,42 @@ export const buildTurnContext = (input: TurnContextInput): TurnContext => {
     })
   }
   return { system, messages }
+}
+
+// ─── ADR-0327 wire helpers ───────────────────────────────────────────────────
+//
+// Three small helpers, deliberately kept at module scope so each is exactly
+// one responsibility and exactly one shape. All three are NO-OP when their
+// optional input is absent — the byte-identical invariant lives here.
+
+const resolveCachedSystemPrompt = (
+  cache: import("@/llm/system-prompt-cache").SystemPromptCachePort | undefined,
+  key: import("@/llm/system-prompt-cache").SystemPromptCacheKey | undefined,
+): string => {
+  // Both must be present for the cache to engage. Either-or absent ⇒ legacy
+  // per-call build, byte-identical to the pre-ADR-0326 path.
+  if (cache !== undefined && key !== undefined) {
+    return cache.getOrBuild(key, () => buildSystemPrompt()).text
+  }
+  return buildSystemPrompt()
+}
+
+const appendContextChangeMessages = (
+  messages: Message[],
+  events: readonly import("./context-change").ContextEvent[] | undefined,
+): void => {
+  if (events === undefined || events.length === 0) return
+  for (const m of buildPersistentInjectionMessages(events)) {
+    messages.push(m)
+  }
+}
+
+const appendMentionInjectionMessages = (
+  messages: Message[],
+  injects: readonly Message[] | undefined,
+): void => {
+  if (injects === undefined || injects.length === 0) return
+  for (const m of injects) {
+    messages.push(m)
+  }
 }

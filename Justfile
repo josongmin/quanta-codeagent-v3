@@ -74,11 +74,11 @@ typecheck:
 
 # Lint via Biome (warnings non-gating; non-zero exit on errors only).
 lint:
-    ./node_modules/.bin/biome check src tests
+    {{BUN}} run tools/dev/run-biome.ts check
 
 # Auto-fix lint + format (skip if your repo state is precious).
 lint-fix:
-    ./node_modules/.bin/biome check --write src tests
+    {{BUN}} run tools/dev/run-biome.ts check --write
 
 # Unit + integration suites (the deterministic gate; smoke battery folds in via
 # `tests/unit/smoke-battery.test.ts`).

@@ -715,8 +715,8 @@ export interface OtelExporterFromEnvResult {
   readonly tracer: Tracer
 }
 
-/** Read `QUANTA_OTEL_ENDPOINT` from the provided env (default `process.env`)
- *  and build a wired triple. Returns `undefined` when the env value is
+/** Read `QUANTA_OTEL_ENDPOINT` from the provided env record and build a wired
+ *  triple. Returns `undefined` when the env value is
  *  missing/empty/whitespace.
  *
  *  Additional env knobs honored:
@@ -729,7 +729,7 @@ export interface OtelExporterFromEnvResult {
  *  policy: a default endpoint would silently leak observations to localhost).
  */
 export const attachOtelExporterFromEnv = (
-  env: Readonly<Record<string, string | undefined>> = process.env,
+  env: Readonly<Record<string, string | undefined>> = {},
   overrides?: Partial<OtelExporterOpts>,
 ): OtelExporterFromEnvResult | undefined => {
   const rawEndpoint = env.QUANTA_OTEL_ENDPOINT ?? overrides?.endpoint
