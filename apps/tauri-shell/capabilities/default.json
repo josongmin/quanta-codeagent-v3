@@ -1,0 +1,55 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Quanta desktop shell capability set (ADR-0317). Default-DENY posture: only the named permissions are granted to the main window. Hotkey is registered behind a runtime gate (`enable_hotkey` command) and is OFF by default.",
+  "windows": ["main"],
+  "platforms": ["macOS"],
+  "permissions": [
+    "core:default",
+    "core:event:allow-emit",
+    "core:event:allow-emit-to",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:default",
+    "core:webview:default",
+    "core:path:default",
+    "core:app:default",
+
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister",
+    "global-shortcut:allow-is-registered",
+
+    "process:default",
+
+    "log:default",
+
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "binaries/quanta-web-daemon",
+          "sidecar": true,
+          "args": true
+        },
+        {
+          "name": "binaries/screen-ocr",
+          "sidecar": true,
+          "args": [
+            "list-windows",
+            "capture",
+            "--window-id",
+            { "validator": "^[0-9]{1,10}$" }
+          ]
+        }
+      ]
+    },
+
+    {
+      "identifier": "shell:allow-kill",
+      "allow": [
+        { "name": "binaries/quanta-web-daemon", "sidecar": true },
+        { "name": "binaries/screen-ocr", "sidecar": true }
+      ]
+    }
+  ]
+}

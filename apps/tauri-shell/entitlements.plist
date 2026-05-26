@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  ADR-0317 — Quanta desktop shell entitlements (dev profile).
+
+  - app-sandbox = false: unsigned dev builds work locally; the screen-ocr
+    sidecar uses ScreenCaptureKit which requires TCC user consent at first
+    use anyway. Production signing/notarization is OUT OF v1 scope and
+    will land in a follow-up ADR with a tightened sandbox profile + a real
+    Developer ID Application certificate.
+  - JIT not requested. We do not load arbitrary code.
+  - Apple Events disabled. The hotkey/OCR path uses ScreenCaptureKit, not
+    AppleScript, so we do not need automation entitlements.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.app-sandbox</key>
+  <false/>
+
+  <key>com.apple.security.cs.allow-jit</key>
+  <false/>
+
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <false/>
+
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <false/>
+
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>

@@ -1,0 +1,75 @@
+[package]
+name = "quanta-tauri-shell"
+version = "0.1.0"
+edition = "2021"
+description = "macOS desktop shell for quanta (ADR-0317) — wraps the web-frontend SPA, spawns the bun web-daemon and Swift screen-ocr sidecars, registers a global hotkey"
+license = "MIT OR Apache-2.0"
+# Standalone crate — NOT a member of the root workspace at `crates/Cargo.toml`.
+# Rationale (ADR-0317 §Build): the desktop shell pulls a large transitive dep
+# tree (Tauri 2 + webkit + objc2 stack); keeping it out of the root workspace
+# means a `cargo check` at `crates/` for sandbox/VZ helpers stays fast and is
+# not coupled to Tauri's release cadence. Build steps live in `README.md`.
+[lib]
+name = "quanta_tauri_shell_lib"
+crate-type = ["lib"]
+path = "src/lib.rs"
+
+[[bin]]
+name = "quanta-tauri-shell"
+path = "src/main.rs"
+
+# ---------------------------------------------------------------------------
+# Tauri 2.x stack — versions pinned to the 2.x stable line as of 2026-05.
+# Plugin crates follow the same major. The exact patch is left flexible so
+# `cargo update` picks current security fixes without manifest churn.
+# ---------------------------------------------------------------------------
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api"] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-process = "2"
+tauri-plugin-log = "2"
+
+# Serialization for tauri::command payloads + sidecar JSON parsing.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Async runtime — Tauri pulls tokio transitively, but we depend on it explicitly
+# so daemon supervisor / hotkey debouncer can use timers without surprises.
+tokio = { version = "1", features = ["sync", "time", "process", "macros", "rt-multi-thread", "io-util"] }
+
+# Logging surface (tauri-plugin-log adapts this).
+log = "0.4"
+
+# Error plumbing — thiserror gives us `AppError` enum with `Serialize` derived
+# manually in `error.rs` (frontend expects `{ code, message }` shape).
+thiserror = "1"
+
+# Find-a-free-port helper for the daemon supervisor.
+portpicker = "0.1"
+
+# Random auth token for the daemon. `getrandom` is the minimal crypto-grade
+# entropy surface; we slice 32 bytes and hex-encode them.
+getrandom = "0.2"
+hex = "0.4"
+
+# `which` for resolving `bun` on the user's PATH (overridable via
+# `QUANTA_BUN_PATH`).
+which = "6"
+
+[build-dependencies]
+# Generates context (icons, capability index, info.plist merge) from
+# `tauri.conf.json`.
+tauri-build = { version = "2", features = [] }
+
+# ---------------------------------------------------------------------------
+# Profiles
+# ---------------------------------------------------------------------------
+[profile.release]
+# `tauri build` defaults are fine; pull them in explicitly so dev users get
+# small binaries even when building outside `cargo tauri build`.
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
