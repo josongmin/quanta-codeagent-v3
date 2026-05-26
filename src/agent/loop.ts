@@ -770,7 +770,22 @@ const maybeCompact = async (
     emitRecovery(config, "compact", "proactive")
     // Tier 0 safety hardening (ADR-0011): feed the thrash counter. A proactive compact
     // that fails to meaningfully shrink is a no-progress strike.
-    breaker?.recordProactive(before, estimateTokens(result.messages))
+    const after = estimateTokens(result.messages)
+    breaker?.recordProactive(before, after)
+    // ADR-0324 wire — emit a typed `compaction_event` so consumers reading the
+    // typed-history side channel can see the pass as a narrative event. Pure
+    // observability; failure swallowed so a misconfigured emitter cannot break
+    // the turn. Reactive (mid-turn / PTL-driven) compaction is a separate
+    // call-site and gets its own emit in a follow-up wire.
+    emitCompactionEvent(config, {
+      kind: "compaction_event",
+      trigger: "pre_sampling",
+      reason: "context_limit",
+      tokensBefore: before,
+      tokensAfter: after,
+      messagesRemoved: Math.max(snapshot.length - result.messages.length, 0),
+      at: Date.now(),
+    })
     wm.replace(result.messages)
     // ADR-0075 archive + marker. Strictly AFTER `wm.replace`: a subscriber
     // that reacts to `context_compacted` by reading `wm` (e.g. a debug UI
@@ -819,6 +834,22 @@ const staticSystemFor = (config: AgentConfig): SystemPromptInput =>
     planMode: config.planMode ?? false,
     system: config.system,
   }).system
+
+/** ADR-0324 — fire the optional compaction-event emitter with NO-THROW.
+ *  Absent ⇒ no-op. A thrown emitter is swallowed so an observability glitch
+ *  cannot abort the turn. Called from the proactive `maybeCompact` site
+ *  AFTER `wm.replace` confirms the compaction landed. */
+const emitCompactionEvent = (
+  config: AgentConfig,
+  event: import("@/memory/typed-event").CompactionEventVariant,
+): void => {
+  if (config.compactionEventEmit === undefined) return
+  try {
+    config.compactionEventEmit(event)
+  } catch {
+    // Pure observability — swallow + continue.
+  }
+}
 
 /** ADR-0327 — invoke the optional context-events producer with NO-THROW.
  *  Absent producer ⇒ empty array. A thrown error is swallowed and converted

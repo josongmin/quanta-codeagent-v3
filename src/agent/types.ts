@@ -1417,6 +1417,15 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    *  invariant: a thrown error is logged and converted to `[]`. Absent ⇒ no
    *  parse, no injection (byte-identical). */
   mentionInjector?: (userInputText: string) => readonly import("@/llm").Message[]
+
+  /** ADR-0324 — typed compaction-event emitter. Called when a proactive
+   *  (top-of-turn `maybeCompact`) compaction succeeds. The callback is
+   *  expected to push the event onto a `TypedHistoryEventStore` (ADR-0320)
+   *  so consumers (typically a context-events producer fed by the SAME
+   *  store) can surface compaction as a typed-history narrative event.
+   *  NO-THROW: callback errors are swallowed so an emitter glitch cannot
+   *  break the turn. Absent ⇒ no emit (byte-identical). */
+  compactionEventEmit?: (event: import("@/memory/typed-event").CompactionEventVariant) => void
 }
 
 // ─────────────────────────────────────────────────────────────────────────
