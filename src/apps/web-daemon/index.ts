@@ -91,10 +91,16 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
 }
 
 if (import.meta.main) {
-  void main().catch((error: unknown) => {
-    process.stderr.write(
-      `web-daemon: fatal: ${error instanceof Error ? error.message : String(error)}\n`,
-    )
-    process.exit(1)
-  })
+  void (async (): Promise<void> => {
+    try {
+      const { buildProductionRuntimeFactory } = await import("./runtime-factory")
+      const runtimeFactory = buildProductionRuntimeFactory()
+      await main({ runtimeFactory })
+    } catch (error: unknown) {
+      process.stderr.write(
+        `web-daemon: fatal: ${error instanceof Error ? error.message : String(error)}\n`,
+      )
+      process.exit(1)
+    }
+  })()
 }
