@@ -1,10 +1,14 @@
 /**
- * ★ HELLGATE — ADR-0319 port surface (compile-time assertion).
+ * ★ HELLGATE — ADR-0320 port surface (compile-time assertion).
  *
  * Pins the exact method signature of `TypedHistoryEventStore` and the
  * exact variant set of `TypedHistoryEvent`. Drift here means the
  * closed-port contract was widened without a new ADR — that's the
  * load-bearing invariant of the slice-fence.
+ *
+ * 6 variants: ADR-0320 (5: context_update / skill_activation /
+ * repo_rules_change / mode_change / reasoning_echo) + ADR-0324
+ * (compaction_event).
  *
  * The test body runs at runtime as a sanity smoke (one assertion per
  * variant tag), but the real test is `tsc --noEmit`: every type
@@ -26,12 +30,18 @@ type Equals<A, B> =
 
 type AssertTrue<T extends true> = T
 
-// 1) Variant set is exactly the 5 declared in ADR-0319. Adding a 6th
-//    requires a new ADR; the type guard fires at the compile step.
+// 1) Variant set is exactly the 6 declared in ADR-0320 (5 original) +
+//    ADR-0324 (compaction_event). Adding a 7th requires a new ADR; the
+//    type guard fires at the compile step.
 type _VariantSet = AssertTrue<
   Equals<
     TypedHistoryEventKind,
-    "context_update" | "skill_activation" | "repo_rules_change" | "mode_change" | "reasoning_echo"
+    | "context_update"
+    | "skill_activation"
+    | "repo_rules_change"
+    | "mode_change"
+    | "reasoning_echo"
+    | "compaction_event"
   >
 >
 
@@ -61,7 +71,7 @@ void _markers
 
 // ----------------------------- runtime smoke --------------------------------
 
-describe("ADR-0319 port-contract", () => {
+describe("ADR-0320 port-contract", () => {
   test("factory returns an object satisfying the 4-method port", () => {
     const store = createInMemoryTypedHistoryEventStore()
     expect(typeof store.append).toBe("function")
@@ -79,6 +89,7 @@ describe("ADR-0319 port-contract", () => {
       "repo_rules_change",
       "mode_change",
       "reasoning_echo",
+      "compaction_event",
     ]
     for (const tag of tags) {
       const _exhaustive: TypedHistoryEventKind = tag
@@ -88,6 +99,7 @@ describe("ADR-0319 port-contract", () => {
         case "repo_rules_change":
         case "mode_change":
         case "reasoning_echo":
+        case "compaction_event":
           break
         default: {
           const _never: never = _exhaustive
@@ -95,6 +107,6 @@ describe("ADR-0319 port-contract", () => {
         }
       }
     }
-    expect(tags.length).toBe(5)
+    expect(tags.length).toBe(6)
   })
 })

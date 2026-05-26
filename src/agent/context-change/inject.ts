@@ -102,6 +102,21 @@ const buildOne = (event: ContextEvent): Message => {
         `at: ${event.at}${turnSuffix}`,
       ].join("\n")
       break
+    // ADR-0324 — 6th variant added to the closed-set union. Rendered
+    // with the same envelope shape so the model reads "compaction
+    // occurred" as a typed signal (mirrors Codex
+    // `ResponseItem::Compaction`).
+    case "compaction_event":
+      tag = "compaction-event"
+      body = [
+        `trigger: ${event.trigger}`,
+        `reason: ${event.reason}`,
+        `tokensBefore: ${event.tokensBefore}`,
+        `tokensAfter: ${event.tokensAfter}`,
+        `messagesRemoved: ${event.messagesRemoved}`,
+        `at: ${event.at}${turnSuffix}`,
+      ].join("\n")
+      break
   }
 
   return {

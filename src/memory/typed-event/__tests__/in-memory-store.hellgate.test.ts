@@ -1,5 +1,5 @@
 /**
- * ★ HELLGATE — ADR-0319 typed-history event store default adapter.
+ * ★ HELLGATE — ADR-0320 typed-history event store default adapter.
  *
  * Each test pins a real contract assertion from `./port.ts` JSDoc and
  * fails if the in-memory impl drifts. Coverage:
@@ -7,14 +7,21 @@
  *   - append + snapshot preserves insertion order
  *   - `since(t)` is INCLUSIVE on the lower bound
  *   - `clear` returns the store to empty
- *   - each of the 5 variants round-trips byte-identical
+ *   - each of the 6 variants round-trips byte-identical (5 ADR-0320 +
+ *     compaction_event from ADR-0324)
  *   - `turnId` is optional (absent in snapshot when omitted)
  *   - large-N (10k) snapshot deep-equals the appended sequence
  *   - same-`at` events stay in insertion order
+ *   - compaction_event: all 3 triggers + all 3 reasons round-trip
+ *   - compaction_event: messagesRemoved=0 (trivial pass) accepted
+ *   - compaction_event: tokensAfter > tokensBefore is NOT rejected by
+ *     the store (producer responsibility, no `append`-side validation)
+ *   - compaction_event: `turnId` optional (mirrors other variants)
  */
 
 import { describe, expect, test } from "bun:test"
 import {
+  type CompactionEventVariant,
   type ContextUpdateEvent,
   createInMemoryTypedHistoryEventStore,
   type ModeChangeEvent,
@@ -24,7 +31,7 @@ import {
   type TypedHistoryEvent,
 } from ".."
 
-describe("ADR-0319 typed-event in-memory store — hellgate", () => {
+describe("ADR-0320 typed-event in-memory store — hellgate", () => {
   test("empty snapshot returns an empty frozen array", () => {
     const store = createInMemoryTypedHistoryEventStore()
     const snap = store.snapshot()
@@ -79,7 +86,7 @@ describe("ADR-0319 typed-event in-memory store — hellgate", () => {
     expect(store.snapshot()).toEqual([{ kind: "mode_change", prev: "c", next: "d", at: 3 }])
   })
 
-  test("each of the 5 variants round-trips byte-identical", () => {
+  test("each of the 6 variants round-trips byte-identical", () => {
     const store = createInMemoryTypedHistoryEventStore()
     const ctx: ContextUpdateEvent = {
       kind: "context_update",
@@ -119,18 +126,30 @@ describe("ADR-0319 typed-event in-memory store — hellgate", () => {
       at: 5,
       turnId: "t-3",
     }
+    const compaction: CompactionEventVariant = {
+      kind: "compaction_event",
+      trigger: "mid_turn",
+      reason: "context_limit",
+      tokensBefore: 100_000,
+      tokensAfter: 32_000,
+      messagesRemoved: 47,
+      at: 6,
+      turnId: "t-3",
+    }
     store.append(ctx)
     store.append(skill)
     store.append(rules)
     store.append(mode)
     store.append(reason)
+    store.append(compaction)
     const snap = store.snapshot()
-    expect(snap.length).toBe(5)
+    expect(snap.length).toBe(6)
     expect(snap[0]).toEqual(ctx)
     expect(snap[1]).toEqual(skill)
     expect(snap[2]).toEqual(rules)
     expect(snap[3]).toEqual(mode)
     expect(snap[4]).toEqual(reason)
+    expect(snap[5]).toEqual(compaction)
   })
 
   test("`turnId` is optional — absent in snapshot when omitted", () => {
@@ -199,6 +218,137 @@ describe("ADR-0319 typed-event in-memory store — hellgate", () => {
     expect(store.snapshot()).toEqual([a, b, c])
     // since(100) must include all three (inclusive lower bound) in order
     expect(store.since(100)).toEqual([a, b, c])
+  })
+
+  // ----- ADR-0324 compaction_event variant hellgate -----
+
+  test("compaction_event: all 3 trigger values round-trip", () => {
+    const store = createInMemoryTypedHistoryEventStore()
+    const triggers: CompactionEventVariant["trigger"][] = [
+      "pre_sampling",
+      "mid_turn",
+      "user_requested",
+    ]
+    for (let i = 0; i < triggers.length; i++) {
+      const t = triggers[i] as CompactionEventVariant["trigger"]
+      store.append({
+        kind: "compaction_event",
+        trigger: t,
+        reason: "context_limit",
+        tokensBefore: 1000,
+        tokensAfter: 500,
+        messagesRemoved: 3,
+        at: i,
+      })
+    }
+    const snap = store.snapshot()
+    expect(snap.length).toBe(3)
+    expect((snap[0] as CompactionEventVariant).trigger).toBe("pre_sampling")
+    expect((snap[1] as CompactionEventVariant).trigger).toBe("mid_turn")
+    expect((snap[2] as CompactionEventVariant).trigger).toBe("user_requested")
+  })
+
+  test("compaction_event: all 3 reason values round-trip", () => {
+    const store = createInMemoryTypedHistoryEventStore()
+    const reasons: CompactionEventVariant["reason"][] = ["context_limit", "token_budget", "manual"]
+    for (let i = 0; i < reasons.length; i++) {
+      const r = reasons[i] as CompactionEventVariant["reason"]
+      store.append({
+        kind: "compaction_event",
+        trigger: "mid_turn",
+        reason: r,
+        tokensBefore: 2000,
+        tokensAfter: 1000,
+        messagesRemoved: 5,
+        at: i,
+      })
+    }
+    const snap = store.snapshot()
+    expect(snap.length).toBe(3)
+    expect((snap[0] as CompactionEventVariant).reason).toBe("context_limit")
+    expect((snap[1] as CompactionEventVariant).reason).toBe("token_budget")
+    expect((snap[2] as CompactionEventVariant).reason).toBe("manual")
+  })
+
+  test("compaction_event: messagesRemoved=0 (trivial pass) is accepted", () => {
+    const store = createInMemoryTypedHistoryEventStore()
+    const trivial: CompactionEventVariant = {
+      kind: "compaction_event",
+      trigger: "pre_sampling",
+      reason: "token_budget",
+      tokensBefore: 8_000,
+      tokensAfter: 8_000,
+      messagesRemoved: 0,
+      at: 1,
+    }
+    store.append(trivial)
+    const snap = store.snapshot()
+    expect(snap.length).toBe(1)
+    expect(snap[0]).toEqual(trivial)
+    // The store contract (`port.ts:append`) is total: no validation,
+    // no rejection. A trivial pass is still a real attempt — recording
+    // it lets the model see the attempt occurred.
+    expect((snap[0] as CompactionEventVariant).messagesRemoved).toBe(0)
+  })
+
+  test("compaction_event: tokensAfter > tokensBefore is NOT rejected by the store", () => {
+    // Invariant `tokensAfter <= tokensBefore` is the PRODUCER's
+    // responsibility — documented in `types.ts` JSDoc and in the
+    // `port.ts:append` contract ("the event is stored verbatim; no
+    // validation"). The store must accept the payload as-is. If a
+    // future ADR adds a producer-side check, this test pins that the
+    // check is NOT on the store boundary.
+    const store = createInMemoryTypedHistoryEventStore()
+    const invalid: CompactionEventVariant = {
+      kind: "compaction_event",
+      trigger: "manual" as never as CompactionEventVariant["trigger"], // intentional dummy — store doesn't validate
+      reason: "manual",
+      tokensBefore: 500,
+      tokensAfter: 1_500, // intentionally larger
+      messagesRemoved: 2,
+      at: 1,
+    }
+    // We do the actual call with a valid trigger value so the type
+    // checker stays happy AND the test still pins "store does not
+    // reject" — replace the trigger with a valid one for the runtime
+    // call.
+    const payload: CompactionEventVariant = { ...invalid, trigger: "user_requested" }
+    expect(() => store.append(payload)).not.toThrow()
+    const snap = store.snapshot()
+    expect(snap.length).toBe(1)
+    expect((snap[0] as CompactionEventVariant).tokensAfter).toBe(1_500)
+    expect((snap[0] as CompactionEventVariant).tokensBefore).toBe(500)
+  })
+
+  test("compaction_event: `turnId` is optional — absent when omitted", () => {
+    const store = createInMemoryTypedHistoryEventStore()
+    const withId: CompactionEventVariant = {
+      kind: "compaction_event",
+      trigger: "mid_turn",
+      reason: "context_limit",
+      tokensBefore: 4_000,
+      tokensAfter: 2_000,
+      messagesRemoved: 10,
+      at: 1,
+      turnId: "t-7",
+    }
+    const withoutId: CompactionEventVariant = {
+      kind: "compaction_event",
+      trigger: "pre_sampling",
+      reason: "token_budget",
+      tokensBefore: 5_000,
+      tokensAfter: 3_000,
+      messagesRemoved: 6,
+      at: 2,
+    }
+    store.append(withId)
+    store.append(withoutId)
+    const snap = store.snapshot()
+    expect((snap[0] as CompactionEventVariant).turnId).toBe("t-7")
+    expect((snap[1] as CompactionEventVariant).turnId).toBeUndefined()
+    // `exactOptionalPropertyTypes` invariant: the property key must
+    // not be auto-introduced when the producer omits it.
+    expect(Object.hasOwn(snap[1] as object, "turnId")).toBe(false)
   })
 
   test("`snapshot()` is frozen — mutation attempts throw in strict mode", () => {

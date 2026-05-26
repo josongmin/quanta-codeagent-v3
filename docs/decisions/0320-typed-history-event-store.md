@@ -66,7 +66,7 @@ Surface widening (adding a method, loosening a return type, dropping a
 method) requires a new ADR. The 5-variant union widens under the same
 rule.
 
-### The 5 variants (frozen by this ADR)
+### The variants (frozen by this ADR — extensions logged below)
 
 | kind                 | shape (load-bearing fields)                                              |
 |----------------------|--------------------------------------------------------------------------|
@@ -75,10 +75,25 @@ rule.
 | `repo_rules_change`  | `{ addedPaths: readonly string[]; removedPaths: readonly string[] }`     |
 | `mode_change`        | `{ prev: string; next: string; reason? }`                                |
 | `reasoning_echo`     | `{ signature; redacted: boolean; tokenCount? }`                          |
+| `compaction_event` (ADR-0324) | `{ trigger: "pre_sampling" \| "mid_turn" \| "user_requested"; reason: "context_limit" \| "token_budget" \| "manual"; tokensBefore; tokensAfter; messagesRemoved }` |
 
 Every variant additionally carries `at: number` (epoch ms) and
 optional `turnId?: string`. `turnId` is producer-supplied; the store
 does not synthesize one.
+
+### Closed-set extension log
+
+The variant union is **closed-port**: widening it requires a new ADR
+that explicitly amends this section. Five variants were sealed by the
+original ADR; subsequent rows record each amendment.
+
+| date       | ADR       | transition | added variant      | rationale (1-line)                                                       |
+|------------|-----------|------------|--------------------|--------------------------------------------------------------------------|
+| 2026-05-27 | ADR-0324  | 5 → 6      | `compaction_event` | Absorb Codex `ResponseItem::Compaction / ContextCompaction / CompactionTrigger` so the model sees compaction passes as a typed narrative event (orthogonal to wm mutation). |
+
+The `compaction_event` variant is additive — it does not replace,
+shadow, or alter any of the original 5 variants, and the wm mutation
+channel is unaffected. Producer wiring lives in a separate ADR.
 
 ## Non-goals
 
