@@ -48,6 +48,7 @@ evidence:
       - tests/unit/integrations/github/pr-context-loader-network-hellgate-r2.test.ts
       - tests/unit/integrations/github/cli-real-adapters-hellgate-r3.test.ts
       - tests/unit/integrations/github/redact-parity-hellgate-r3.test.ts
+      - tests/unit/integrations/github/pr-output-sink-reconcile-hellgate-r4.test.ts
     integration: []
     contract: []
 knobs: []

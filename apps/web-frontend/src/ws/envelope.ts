@@ -16,7 +16,6 @@ import type {
   CommandEnvelope,
   EventEnvelope,
   SessionCommand,
-  SessionCommandType,
   SessionEvent,
   SessionEventType,
 } from "../types/protocol"
@@ -27,13 +26,6 @@ import type {
  * envelope is still attempted — the daemon decides the hard rejection arm.
  */
 export const SESSION_PROTOCOL_VERSION = "1" as const
-
-const COMMAND_TYPES: readonly SessionCommandType[] = [
-  "approval.respond",
-  "input.append",
-  "turn.cancel",
-  "turn.run",
-]
 
 const EVENT_TYPES: readonly SessionEventType[] = [
   "approval.requested",
@@ -51,9 +43,6 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value)
 
 const isString = (value: unknown): value is string => typeof value === "string"
-
-const isCommandTypeTag = (value: unknown): value is SessionCommandType =>
-  isString(value) && (COMMAND_TYPES as readonly string[]).includes(value)
 
 const isEventTypeTag = (value: unknown): value is SessionEventType =>
   isString(value) && (EVENT_TYPES as readonly string[]).includes(value)

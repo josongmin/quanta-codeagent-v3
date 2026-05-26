@@ -48,9 +48,12 @@ describe("ADR-0314 hellgate R2 — mention-filter fuzz", () => {
     expect(matchMention("contact @quanta.io for help", ["@quanta"]).matched).toBe(true)
   })
 
-  test("markdown link `[@quanta](url)` ⇒ no match (preceded by `[`)", () => {
-    // The phrase is preceded by `[`, which is NOT whitespace ⇒ boundary fails.
-    expect(matchMention("see [@quanta](https://x.io) docs", ["@quanta"]).matched).toBe(false)
+  test("markdown link `[@quanta](url)` ⇒ matches (R4: open punct is valid pre-boundary, GitHub parity)", () => {
+    // Updated R4: open punctuation (`(`, `[`, `{`, `<`, `"`, `'`) is accepted
+    // as a pre-boundary so GitHub-native mention shapes like `[@quanta](url)`
+    // and `(@quanta)` fire. The phrase is preceded by `[`, which is now a
+    // valid boundary.
+    expect(matchMention("see [@quanta](https://x.io) docs", ["@quanta"]).matched).toBe(true)
   })
 
   test("HTML comment wrapping the phrase ⇒ phrase still detected (we don't strip HTML)", () => {

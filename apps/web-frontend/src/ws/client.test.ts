@@ -10,7 +10,7 @@ import { SESSION_PROTOCOL_VERSION } from "./envelope"
 class FakeWebSocket implements WebSocketLike {
   readyState = 0 // CONNECTING
   sent: string[] = []
-  closedWith: { code?: number; reason?: string } | null = null
+  closedWith: { code?: number | undefined; reason?: string | undefined } | null = null
   onopen: ((ev: Event) => void) | null = null
   onclose: ((ev: { code: number; reason: string }) => void) | null = null
   onerror: ((ev: Event) => void) | null = null

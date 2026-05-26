@@ -160,10 +160,14 @@ const stripInlineCode = (line: string): string => {
 }
 
 /**
- * Word-boundary phrase search. Phrase MUST be preceded by start-of-line or
- * whitespace, and followed by whitespace / EOL / common punctuation (`,.;:)!?]`).
- * Returns the index of the FIRST boundary-valid match, or -1.
+ * Word-boundary phrase search. Phrase MUST be preceded by start-of-line,
+ * whitespace, or an OPEN punctuation char (`([{<"'`) — matching GitHub's
+ * native @mention behavior where `(@user)`, `[@user]`, `"@user"` are all
+ * valid mentions. Followed by whitespace, EOL, or common CLOSE punctuation
+ * (`,.;:)!?]`).  Returns the index of the FIRST boundary-valid match, or -1.
  */
+const PRE_BOUNDARY_PUNCT = /[([{<"']/
+const POST_BOUNDARY_PUNCT = /[.,;:!?)\]}>'"]/
 const findPhraseWithBoundary = (haystack: string, phrase: string): number => {
   let from = 0
   while (from < haystack.length) {
@@ -171,8 +175,8 @@ const findPhraseWithBoundary = (haystack: string, phrase: string): number => {
     if (idx < 0) return -1
     const prev = idx === 0 ? "" : (haystack[idx - 1] ?? "")
     const next = haystack[idx + phrase.length] ?? ""
-    const prevOk = prev === "" || /\s/.test(prev)
-    const nextOk = next === "" || /\s/.test(next) || /[.,;:!?)\]]/.test(next)
+    const prevOk = prev === "" || /\s/.test(prev) || PRE_BOUNDARY_PUNCT.test(prev)
+    const nextOk = next === "" || /\s/.test(next) || POST_BOUNDARY_PUNCT.test(next)
     if (prevOk && nextOk) return idx
     from = idx + 1
   }
@@ -183,5 +187,5 @@ const extractArgs = (after: string): string | undefined => {
   const trimmed = after.trim()
   if (trimmed.length === 0) return undefined
   // Strip leading punctuation we accepted as the boundary so args is clean.
-  return trimmed.replace(/^[.,;:!?)\]]+\s*/, "")
+  return trimmed.replace(/^[.,;:!?)\]}>'"]+\s*/, "")
 }

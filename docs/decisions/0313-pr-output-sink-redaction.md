@@ -15,20 +15,23 @@ Equally bad: a network blip causing two POSTs ⇒ duplicate comment spam, with n
 
 ## Decision
 
-`createPrOutputSink(opts) → PrOutputSink` — 3-verb sink (`postComment` / `postReview` / `postReviewComment`) with three structural invariants enforced at construction:
+`createPrOutputSink(opts) → PrOutputSink` — 3-verb sink (`postComment` / `postReview` / `postReviewComment`) with four structural invariants enforced at construction:
 
 1. **`redactPort` is mandatory** — missing or non-function `redact` ⇒ `throw` AT CONSTRUCT TIME. Boot-time refusal, not runtime fallback. The composition root MUST bind `{ redact: (t) => redactSecrets(t, { origin: "tool_result" }).text }` (or stricter).
 2. **Idempotency marker** — every body is suffixed with `<!-- quanta:idempotency=<16hex> -->`. The hex is `sha256(deliveryId + ":" + action).slice(0,16)`. Existing comment with matching marker ⇒ PATCH; otherwise ⇒ POST.
 3. **Body cap is BYTE-counted** — 65,000 bytes default, marker counted within. Over-cap bodies are trimmed BEFORE the marker, with `…` sentinel inserted. Multi-byte UTF-8 boundaries are accepted as a documented degradation (we'd rather drop a glyph than skip the marker).
+4. **Post-then-reconcile race resolution** (R4) — GitHub API has no conditional-write primitive (no `If-None-Match` on `/issues/{n}/comments`), so two processes that both see "no existing comment" can each POST. After a POST the sink re-lists comments containing our marker; if multiple match (race), EVERY observer applies the same deterministic rule — **smallest GH `comment.id` wins** — and the losers self-DELETE. Every observer reports the SAME canonical `url` (the surviving comment's `html_url` from the listing), so callers see one stable anchor regardless of who won. Best-effort: list-failure / delete-404 collapse to the original POST result. Opt-out via `reconcileConcurrentPosts: false`.
 
 Self-loop defense (defense in depth with [[0311-github-actions-trigger-adapter]]):
 - The marker we stamp here is the same string the mention filter excludes — `[[0314-mention-filter-trust-scope]]` rejects any body containing it.
 - Our own output therefore cannot wake us up, even if GH eventually surfaces it back to the trigger source.
 
 Files:
-- [[../../src/integrations/github/pr-output-sink.ts]] — sink + clamp + PATCH/POST routing
+- [[../../src/integrations/github/pr-output-sink.ts]] — sink + clamp + PATCH/POST routing + reconcileAfterPost
 - [[../../src/integrations/github/idempotency.ts]] — `computeIdempotencyKey` (16 hex char SHA-256 truncation)
 - 9 hellgate cases in [[../../tests/unit/integrations/github/pr-output-sink-redaction-hellgate.test.ts]] lock AWS key id / GitHub PAT / Anthropic key / JWT / PEM block redaction + marker stamping + recursive-self detection + over-cap trim path.
+- 10 R4 reconcile hellgate cases in [[../../tests/unit/integrations/github/pr-output-sink-reconcile-hellgate-r4.test.ts]] cover sequential POST (no extra calls), 3-way race (winner + loser paths), reconcile-disabled opt-out, list-failure / delete-404 no-throw, URL parse fail, PATCH path untouched, hiddenMarker-disabled, and determinism (every observer agrees on canonical URL).
+- E2E race resolution verified against real GitHub API in [[../../tests/scripts/github-pr-bot-e2e-hellgate.ts]] cases 26 (2-way), 32 (3-way), 33 (5-burst).
 
 ## Consequences
 

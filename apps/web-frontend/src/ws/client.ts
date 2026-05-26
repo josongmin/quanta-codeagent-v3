@@ -196,11 +196,11 @@ export class SessionClient {
       set = new Set()
       this.#eventHandlers.set(type, set)
     }
-    set.add(handler as EventHandler<SessionEventType>)
+    set.add(handler as unknown as EventHandler<SessionEventType>)
     return () => {
       const target = this.#eventHandlers.get(type)
       if (target === undefined) return
-      target.delete(handler as EventHandler<SessionEventType>)
+      target.delete(handler as unknown as EventHandler<SessionEventType>)
       if (target.size === 0) this.#eventHandlers.delete(type)
     }
   }

@@ -13,13 +13,7 @@
 )]
 #![deny(unsafe_code)]
 
-use quanta_tauri_shell_lib::{
-    commands::{
-        capture_window, daemon_info, daemon_status, disable_hotkey, enable_hotkey, hotkey_status,
-        list_windows, start_daemon, stop_daemon,
-    },
-    daemon, hotkey, ocr,
-};
+use quanta_tauri_shell_lib::{commands, daemon, hotkey, ocr};
 use tauri::{Manager, RunEvent, WebviewWindow};
 
 fn main() {
@@ -60,15 +54,15 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            list_windows,
-            capture_window,
-            start_daemon,
-            stop_daemon,
-            daemon_status,
-            daemon_info,
-            enable_hotkey,
-            disable_hotkey,
-            hotkey_status,
+            commands::list_windows,
+            commands::capture_window,
+            commands::start_daemon,
+            commands::stop_daemon,
+            commands::daemon_status,
+            commands::daemon_info,
+            commands::enable_hotkey,
+            commands::disable_hotkey,
+            commands::hotkey_status,
         ])
         .build(tauri::generate_context!());
 

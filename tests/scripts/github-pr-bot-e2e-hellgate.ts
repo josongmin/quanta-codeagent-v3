@@ -740,6 +740,355 @@ expect(
   )
 }
 
+// ─── R4 race-resolution e2e (32+) ──────────────────────────────────────────
+
+// 32. 3-way concurrent same-delivery race — reconcile converges to 1 survivor
+{
+  const delivery = `hellgate-3way-${Date.now()}`
+  const evtPath = event({ body: "@quanta 3-way race verification" })
+
+  const spawnPromise = (): Promise<{ id?: number; survivedUrl?: string }> =>
+    new Promise((resolve) => {
+      const stdout: string[] = []
+      const p = spawn("bun", ["run", RUNNER], {
+        env: {
+          ...process.env,
+          QUANTA_GH_ACTIONS_TRIGGER: "1",
+          GITHUB_REPOSITORY: REPO,
+          GITHUB_EVENT_NAME: "issue_comment",
+          GITHUB_EVENT_PATH: evtPath,
+          GITHUB_DELIVERY: delivery,
+        },
+      })
+      p.stdout.on("data", (d) => stdout.push(d.toString("utf8")))
+      p.on("close", () => {
+        const joined = stdout.join("")
+        let posted: { url?: string } | undefined
+        for (const line of joined.split("\n")) {
+          const t = line.trim()
+          if (t.length === 0) continue
+          try {
+            const evt = JSON.parse(t) as { type: string; url?: string }
+            if (evt.type === "posted") posted = evt
+          } catch {
+            // skip non-JSON
+          }
+        }
+        const idMatch = posted?.url?.match(/issuecomment-(\d+)/)
+        resolve({
+          id: idMatch ? Number.parseInt(idMatch[1] ?? "0", 10) : undefined,
+          survivedUrl: posted?.url,
+        })
+      })
+    })
+
+  log("  ↪ spawning 3 concurrent invocations with same delivery (reconcile)…")
+  const [a, b, c] = await Promise.all([spawnPromise(), spawnPromise(), spawnPromise()])
+  const allIds = [a.id, b.id, c.id].filter((x): x is number => typeof x === "number")
+  for (const id of allIds) if (!postedCommentIds.includes(id)) postedCommentIds.push(id)
+
+  // Brief settle window for GH list-after-write eventual consistency.
+  await new Promise((res) => setTimeout(res, 500))
+  const listing = spawnSync(
+    "gh",
+    [
+      "api",
+      `repos/${REPO}/issues/${PR}/comments?per_page=100`,
+      "--jq",
+      `[.[] | select(.body | contains("3-way race verification"))] | length`,
+    ],
+    { encoding: "utf8" },
+  )
+  const survivors = listing.stdout.trim()
+  // EVERY observer reports the SAME survived URL (list-canonical).
+  const urls = new Set([a.survivedUrl, b.survivedUrl, c.survivedUrl].filter(Boolean))
+  expect(
+    "case 32: 3-way race → exactly 1 surviving comment + all 3 observers agree on URL",
+    survivors === "1" && urls.size === 1,
+    `survivors_on_gh=${survivors} unique_urls=${urls.size}`,
+  )
+}
+
+// 33. 5-process burst race
+{
+  const delivery = `hellgate-burst5-${Date.now()}`
+  const evtPath = event({ body: "@quanta burst5 race verification" })
+
+  const spawnPromise = (): Promise<{ id?: number }> =>
+    new Promise((resolve) => {
+      const stdout: string[] = []
+      const p = spawn("bun", ["run", RUNNER], {
+        env: {
+          ...process.env,
+          QUANTA_GH_ACTIONS_TRIGGER: "1",
+          GITHUB_REPOSITORY: REPO,
+          GITHUB_EVENT_NAME: "issue_comment",
+          GITHUB_EVENT_PATH: evtPath,
+          GITHUB_DELIVERY: delivery,
+        },
+      })
+      p.stdout.on("data", (d) => stdout.push(d.toString("utf8")))
+      p.on("close", () => {
+        const joined = stdout.join("")
+        const idMatch = joined.match(/issuecomment-(\d+)/)
+        resolve({
+          id: idMatch ? Number.parseInt(idMatch[1] ?? "0", 10) : undefined,
+        })
+      })
+    })
+
+  log("  ↪ spawning 5 concurrent invocations (burst)…")
+  const results = await Promise.all([
+    spawnPromise(),
+    spawnPromise(),
+    spawnPromise(),
+    spawnPromise(),
+    spawnPromise(),
+  ])
+  for (const r of results)
+    if (r.id !== undefined && !postedCommentIds.includes(r.id)) postedCommentIds.push(r.id)
+
+  await new Promise((res) => setTimeout(res, 800))
+  const listing = spawnSync(
+    "gh",
+    [
+      "api",
+      `repos/${REPO}/issues/${PR}/comments?per_page=100`,
+      "--jq",
+      `[.[] | select(.body | contains("burst5 race verification"))] | length`,
+    ],
+    { encoding: "utf8" },
+  )
+  const survivors = Number.parseInt(listing.stdout.trim(), 10)
+  // 5-way: accept ≤2 (stragglers reconcile on next run; primary contract is "no
+  // unbounded fan-out").
+  expect(
+    "case 33: 5-burst race → ≤2 stragglers (best-effort convergence)",
+    survivors >= 1 && survivors <= 2,
+    `survivors=${survivors}`,
+  )
+}
+
+// 34. workflow_dispatch event without --pr → cannot resolve PR
+{
+  const path = join(work, `evt-wd-no-pr-${Date.now()}.json`)
+  writeFileSync(
+    path,
+    JSON.stringify({
+      inputs: { reason: "manual review" },
+      ref: "refs/heads/main",
+      repository: { owner: { login: "josongmin" }, name: "quanta-codeagent-v3" },
+      sender: { login: "josongmin", type: "User" },
+    }),
+  )
+  const r = run(["--dry-run"], {
+    GITHUB_EVENT_PATH: path,
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_DELIVERY: `c34-${Date.now()}`,
+  })
+  expect(
+    "case 34: workflow_dispatch w/o --pr → error (no PR resolvable)",
+    r.exitCode === 1 || r.events.some((e) => e.type === "error"),
+    `exit=${r.exitCode} events=${r.events.map((e) => e.type).join(",")}`,
+  )
+}
+
+// 35. workflow_dispatch + --pr override → trigger + context-loaded (manual_resume)
+{
+  const path = join(work, `evt-wd-pr-${Date.now()}.json`)
+  writeFileSync(
+    path,
+    JSON.stringify({
+      inputs: { reason: "manual review" },
+      ref: "refs/heads/main",
+      repository: { owner: { login: "josongmin" }, name: "quanta-codeagent-v3" },
+      sender: { login: "josongmin", type: "User" },
+    }),
+  )
+  const r = run(["--dry-run", "--pr", String(PR)], {
+    GITHUB_EVENT_PATH: path,
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_DELIVERY: `c35-${Date.now()}`,
+  })
+  expect(
+    "case 35: workflow_dispatch + --pr → trigger + context-loaded",
+    r.exitCode === 0 && hasEvent(r, "trigger") && hasEvent(r, "context-loaded"),
+    `events=${r.events.map((e) => e.type).join(",")}`,
+  )
+}
+
+// 36. mention with surrounding punctuation
+{
+  const r = run(["--dry-run"], {
+    GITHUB_EVENT_PATH: event({ body: "Hi (@quanta), please review!" }),
+    GITHUB_DELIVERY: `c36-${Date.now()}`,
+  })
+  expect(
+    "case 36: mention with surrounding punctuation (parens/comma) → fires",
+    r.exitCode === 0 && hasEvent(r, "trigger"),
+    `events=${r.events.map((e) => e.type).join(",")}`,
+  )
+}
+
+// 37. mention at line start after blank line
+{
+  const r = run(["--dry-run"], {
+    GITHUB_EVENT_PATH: event({ body: "Some intro.\n\n@quanta review please" }),
+    GITHUB_DELIVERY: `c37-${Date.now()}`,
+  })
+  expect(
+    "case 37: mention at line start after blank line → fires",
+    r.exitCode === 0 && hasEvent(r, "trigger"),
+    `events=${r.events.map((e) => e.type).join(",")}`,
+  )
+}
+
+// 38. mention inside inline code span — does NOT fire
+{
+  const r = run(["--dry-run"], {
+    GITHUB_EVENT_PATH: event({ body: "see `@quanta review` for the bot name" }),
+    GITHUB_DELIVERY: `c38-${Date.now()}`,
+  })
+  expect(
+    "case 38: mention inside inline backtick span → 0 triggers",
+    r.exitCode === 0 && !hasEvent(r, "trigger"),
+    `events=${r.events.map((e) => e.type).join(",")}`,
+  )
+}
+
+// 39. mention in tilde-fenced code block (~~~)
+{
+  const r = run(["--dry-run"], {
+    GITHUB_EVENT_PATH: event({ body: "see this:\n~~~\n@quanta review\n~~~\nthanks" }),
+    GITHUB_DELIVERY: `c39-${Date.now()}`,
+  })
+  expect(
+    "case 39: mention in tilde-fenced (~~~) block → 0 triggers",
+    r.exitCode === 0 && !hasEvent(r, "trigger"),
+    `events=${r.events.map((e) => e.type).join(",")}`,
+  )
+}
+
+// 40. mention adjacent to OpenAI proj-key — fires AND redacts
+{
+  const secret = `sk-proj-${"K".repeat(40)}`
+  const r = run(["--dry-run"], {
+    GITHUB_EVENT_PATH: event({ body: `@quanta token=${secret} review` }),
+    GITHUB_DELIVERY: `c40-${Date.now()}`,
+  })
+  const dry = r.events.find((e) => e.type === "dry-run-body") as { body?: string } | undefined
+  const body = dry?.body ?? ""
+  expect(
+    "case 40: mention adjacent to OpenAI proj-key → fires + secret redacted",
+    r.exitCode === 0 &&
+      hasEvent(r, "trigger") &&
+      body.includes("[REDACTED:openai_api_key]") &&
+      !body.includes(secret),
+    `raw_leak=${body.includes(secret)} has_redact=${body.includes("[REDACTED:openai_api_key]")}`,
+  )
+}
+
+// 41. empty body → 0 triggers
+{
+  const r = run(["--dry-run"], {
+    GITHUB_EVENT_PATH: event({ body: "" }),
+    GITHUB_DELIVERY: `c41-${Date.now()}`,
+  })
+  expect(
+    "case 41: empty body → 0 triggers",
+    r.exitCode === 0 && !hasEvent(r, "trigger"),
+    `events=${r.events.map((e) => e.type).join(",")}`,
+  )
+}
+
+// 42. whitespace-only body
+{
+  const r = run(["--dry-run"], {
+    GITHUB_EVENT_PATH: event({ body: "   \n\n  \t  \n" }),
+    GITHUB_DELIVERY: `c42-${Date.now()}`,
+  })
+  expect(
+    "case 42: whitespace-only body → 0 triggers",
+    r.exitCode === 0 && !hasEvent(r, "trigger"),
+    `events=${r.events.map((e) => e.type).join(",")}`,
+  )
+}
+
+// 43. secret repeated 5x — all redacted
+{
+  const secret = `sk-proj-${"Z".repeat(40)}`
+  const r = run(["--dry-run"], {
+    GITHUB_EVENT_PATH: event({
+      body: `@quanta ${secret} ${secret} ${secret} ${secret} ${secret}`,
+    }),
+    GITHUB_DELIVERY: `c43-${Date.now()}`,
+  })
+  const dry = r.events.find((e) => e.type === "dry-run-body") as { body?: string } | undefined
+  const body = dry?.body ?? ""
+  const leaks = (body.match(new RegExp(`sk-proj-Z{40}`, "g")) ?? []).length
+  expect(
+    "case 43: secret repeated 5x → 0 raw leaks",
+    r.exitCode === 0 && hasEvent(r, "trigger") && leaks === 0,
+    `raw_leaks=${leaks}`,
+  )
+}
+
+// 44. bare /quanta → fires
+{
+  const r = run(["--dry-run"], {
+    GITHUB_EVENT_PATH: event({ body: "/quanta" }),
+    GITHUB_DELIVERY: `c44-${Date.now()}`,
+  })
+  expect(
+    "case 44: bare /quanta (no args) → fires",
+    r.exitCode === 0 && hasEvent(r, "trigger"),
+    `events=${r.events.map((e) => e.type).join(",")}`,
+  )
+}
+
+// 45. body with distractor github URL — trigger uses PR_URL evidence, not body URL
+{
+  const r = run(["--dry-run"], {
+    GITHUB_EVENT_PATH: event({
+      body: "@quanta see https://github.com/other/repo/pull/999#issuecomment-1234567",
+    }),
+    GITHUB_DELIVERY: `c45-${Date.now()}`,
+  })
+  expect(
+    "case 45: distractor URL in body → PR# resolved from evidence (=1), not body (=999)",
+    r.exitCode === 0 &&
+      hasEvent(r, "trigger", (e) => typeof e.prNumber === "number" && e.prNumber === PR),
+    `events=${JSON.stringify(r.events.filter((e) => e.type === "trigger"))}`,
+  )
+}
+
+// 46. mention nested inside double code-fence (``````) — inner fence not fooled
+{
+  const body = "outer:\n``````\nstill code\n@quanta inside\n``````\nend"
+  const r = run(["--dry-run"], {
+    GITHUB_EVENT_PATH: event({ body }),
+    GITHUB_DELIVERY: `c46-${Date.now()}`,
+  })
+  expect(
+    "case 46: mention inside 6-backtick fence (``````) → 0 triggers",
+    r.exitCode === 0 && !hasEvent(r, "trigger"),
+    `events=${r.events.map((e) => e.type).join(",")}`,
+  )
+}
+
+// 47. nested blockquote with mention
+{
+  const r = run(["--dry-run"], {
+    GITHUB_EVENT_PATH: event({ body: ">>> @quanta inside nested quote" }),
+    GITHUB_DELIVERY: `c47-${Date.now()}`,
+  })
+  expect(
+    "case 47: mention inside nested blockquote (>>>) → 0 triggers",
+    r.exitCode === 0 && !hasEvent(r, "trigger"),
+    `events=${r.events.map((e) => e.type).join(",")}`,
+  )
+}
+
 // ─── cleanup ──────────────────────────────────────────────────────────────
 
 log()

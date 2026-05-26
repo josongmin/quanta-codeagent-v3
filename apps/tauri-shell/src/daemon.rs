@@ -104,7 +104,11 @@ fn pick_free_port() -> AppResult<u16> {
 
 /// Spawn the daemon ONCE. Returns the live info + child handle. The caller
 /// stores them on `DaemonHandle`; the supervisor decides whether to restart.
-async fn spawn_once<R: Runtime>(app: &AppHandle<R>) -> AppResult<(DaemonInfo, CommandChild)> {
+///
+/// Sync (no `await`) so the returned future never holds a `!Send`
+/// `State<'_, Shell>` across an await point — `start()` can stay `async`
+/// and remain `Send`-bounded for `tauri::async_runtime::spawn`.
+fn spawn_once<R: Runtime>(app: &AppHandle<R>) -> AppResult<(DaemonInfo, CommandChild)> {
     let port = pick_free_port()?;
     let token = mint_auth_token()?;
     let started_at_ms = now_ms();
@@ -138,7 +142,7 @@ async fn spawn_once<R: Runtime>(app: &AppHandle<R>) -> AppResult<(DaemonInfo, Co
         .state::<DaemonHandle>()
         .inner()
         .clone();
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {
             match event {
                 CommandEvent::Stdout(bytes) => {
@@ -218,7 +222,7 @@ pub async fn start<R: Runtime>(app: &AppHandle<R>) -> AppResult<DaemonInfo> {
             return Err(AppError::DaemonAlreadyRunning { port: info.port });
         }
     }
-    let (info, child) = spawn_once(app).await?;
+    let (info, child) = spawn_once(app)?;
     let mut state = handle.0.lock().await;
     state.info = Some(info.clone());
     state.child = Some(child);
@@ -242,7 +246,7 @@ pub async fn stop<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
             "failed to signal daemon pid {pid}: {e}"
         )))?;
         let kill_handle = app.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             tokio::time::sleep(Duration::from_secs(2)).await;
             // Best-effort SIGKILL via libc. Only runs if daemon hasn't
             // already cleared the slot. We re-check the handle to avoid
