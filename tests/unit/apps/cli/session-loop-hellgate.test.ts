@@ -171,7 +171,7 @@ const buildSetup = async (
   }
   let automationEngine: unknown
   const runtimeContext: RuntimeContext = {
-    createRuntimeFacade: async (_args) => {
+    createRuntimeFacade: async (_args: Parameters<RuntimeContext["createRuntimeFacade"]>[0]) => {
       runtimeCalls.createRuntime += 1
       bridgeState.options = {
         sessionDeps: {
@@ -232,7 +232,12 @@ const buildSetup = async (
                 const outcome = makeOutcome(prompt)
                 bridgeState.messages = [...outcome.messages] as Message[]
                 bridgeState.outcome = outcome
-                return { revision: 2, seq: 2, events: [], turn: { outcome, messages: outcome.messages } }
+                return {
+                  revision: 2,
+                  seq: 2,
+                  events: [],
+                  turn: { outcome, messages: outcome.messages },
+                }
               },
             },
             identity: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
@@ -244,7 +249,15 @@ const buildSetup = async (
                 return { revision: 3, seq: 3, events: [], transcript: { messages: [...messages] } }
               },
             },
-            side: { start: async () => ({ outcome: makeOutcome("side"), answerText: "side", inputTokens: 0, outputTokens: 0, toolsAvailable: 0 }) },
+            side: {
+              start: async () => ({
+                outcome: makeOutcome("side"),
+                answerText: "side",
+                inputTokens: 0,
+                outputTokens: 0,
+                toolsAvailable: 0,
+              }),
+            },
           }
         },
         close: async () => {
@@ -253,10 +266,10 @@ const buildSetup = async (
       }
     },
     registry: () => registry as never,
-    wrapRegistry: (_mapper) => undefined,
+    wrapRegistry: (_mapper: Parameters<RuntimeContext["wrapRegistry"]>[0]) => undefined,
     permissionMode: () => "default",
     automationEngine: () => automationEngine as never,
-    ensureAutomationEngine: (slot) => {
+    ensureAutomationEngine: (slot: Parameters<RuntimeContext["ensureAutomationEngine"]>[0]) => {
       automationEngine = slot
       registry = {
         has: (name: string) => name === "automation_update",

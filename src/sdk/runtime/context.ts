@@ -1,52 +1,32 @@
 import type { GranularRegistryPort } from "@/agent/checkpoint/granular-registry"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
 import {
-  INTERNAL_TURN_ASSEMBLER_FIELD,
-  composeBootstrapRuntimeDeps as composeBootstrapRuntimeDepsInternal,
-  createRuntimeFacadeFromBridgeState as createRuntimeFacadeFromBridgeStateInternal,
-  createRuntimeFromAgentConfigBase as createRuntimeFromAgentConfigBaseInternal,
-  createRuntimeFromBootstrap as createRuntimeFromBootstrapInternal,
-  getRuntimeBridgeAdmissibility,
-  getRuntimeBridgeAutomationEngine,
-  getRuntimeBridgeDecisionEmitter,
-  getRuntimeBridgeFocusChain,
-  getRuntimeBridgeIdentityModeState,
-  getRuntimeBridgePermissionMode,
-  getRuntimeBridgePlanExitPort,
-  getRuntimeBridgeRegistry,
-  getRuntimeBridgeToolProfileState,
-  getRuntimeBridgeUserInputPort,
-  materializeReviewerAgent as materializeReviewerAgentInternal,
-  patchRuntimeBridgeState,
-  summarizeRuntimeWires as summarizeRuntimeWiresInternal,
-} from "@/host/runtime/internal/runtime-context-bridge"
+  createRuntimeContextBindingFromAgentConfigBase,
+  createRuntimeContextBindingFromBootstrap,
+} from "@/host/runtime/internal/context-binding"
 import type { Tool } from "@/tool"
 import { automationUpdateTool, ToolRegistry } from "@/tool"
 import type { RuntimeAgentConfigBase, RuntimeAgentTurnAssembler } from "./base"
+import { createRuntime } from "./create-runtime"
 import type { RuntimeFacade } from "./types"
 
-type InternalRuntimeContextState = Awaited<ReturnType<typeof composeBootstrapRuntimeDepsInternal>>
-type RuntimeContextRegistryView = ReturnType<typeof getRuntimeBridgeRegistry>
-type RuntimeContextPermissionModeView = ReturnType<typeof getRuntimeBridgePermissionMode>
-type RuntimeContextAutomationEngineView = ReturnType<typeof getRuntimeBridgeAutomationEngine>
-type RuntimeContextToolProfileStateView = ReturnType<typeof getRuntimeBridgeToolProfileState>
-type RuntimeContextIdentityModeStateView = ReturnType<typeof getRuntimeBridgeIdentityModeState>
-type RuntimeContextFocusChainView = ReturnType<typeof getRuntimeBridgeFocusChain>
-type RuntimeContextDecisionEmitterView = ReturnType<typeof getRuntimeBridgeDecisionEmitter>
-type RuntimeContextAdmissibilityView = ReturnType<typeof getRuntimeBridgeAdmissibility>
-type RuntimeContextPlanExitPortView = ReturnType<typeof getRuntimeBridgePlanExitPort>
-type RuntimeContextUserInputPortView = ReturnType<typeof getRuntimeBridgeUserInputPort>
-type CreateRuntimeFacadeArgs = Omit<
-  Parameters<typeof createRuntimeFacadeFromBridgeStateInternal>[0],
-  "bridgeState"
->
-type InternalFromBaseArgs = Parameters<typeof createRuntimeFromAgentConfigBaseInternal>[0]
-type InternalFromBootstrapArgs = Parameters<typeof createRuntimeFromBootstrapInternal>[0]
-type InternalBootstrapContextArgs = Parameters<typeof composeBootstrapRuntimeDepsInternal>[0]
-
-type TurnAssemblerPatch = Partial<
-  Record<typeof INTERNAL_TURN_ASSEMBLER_FIELD, RuntimeAgentTurnAssembler>
->
+type RuntimeContextBinding = ReturnType<typeof createRuntimeContextBindingFromAgentConfigBase>
+type RuntimeContextSnapshot = RuntimeContextBinding["snapshot"]
+type InternalRuntimeContextState = RuntimeContextBinding
+type RuntimeContextRegistryView = RuntimeContextSnapshot["registry"]
+type RuntimeContextPermissionModeView = RuntimeContextSnapshot["permission"]["mode"]
+type RuntimeContextAutomationEngineView = RuntimeContextSnapshot["automationEngine"]
+type RuntimeContextToolProfileStateView = RuntimeContextSnapshot["toolProfileState"]
+type RuntimeContextIdentityModeStateView = RuntimeContextSnapshot["identityModeState"]
+type RuntimeContextFocusChainView = RuntimeContextSnapshot["focusChain"]
+type RuntimeContextDecisionEmitterView = RuntimeContextSnapshot["decisionEmitter"]
+type RuntimeContextAdmissibilityView = RuntimeContextSnapshot["admissibility"]
+type RuntimeContextPlanExitPortView = RuntimeContextSnapshot["planExitPort"]
+type RuntimeContextUserInputPortView = RuntimeContextSnapshot["userInputPort"]
+type CreateRuntimeFacadeArgs = Parameters<RuntimeContextBinding["createRuntimeHost"]>[0]
+type RuntimeContextPatch = Parameters<RuntimeContextBinding["patch"]>[0]
+type InternalBootstrapContextArgs = Parameters<typeof createRuntimeContextBindingFromBootstrap>[0]
+type RuntimeCreateHostArgs = Omit<CreateRuntimeFacadeArgs, "boot">
 
 export interface RuntimeWireSummary {
   readonly executionPlane: {
@@ -90,78 +70,103 @@ interface RuntimeContextRecord extends RuntimeContext {
 }
 
 export interface CreateRuntimeFromAgentConfigBaseArgs
-  extends Omit<InternalFromBaseArgs, typeof INTERNAL_TURN_ASSEMBLER_FIELD> {
+  extends Omit<RuntimeCreateHostArgs, "history"> {
+  readonly base: RuntimeAgentConfigBase
+  readonly history?: CreateRuntimeFacadeArgs["history"]
   readonly turnAssembler?: RuntimeAgentTurnAssembler
 }
 
 export interface ComposeRuntimeBootstrapContextArgs
-  extends Omit<InternalBootstrapContextArgs, typeof INTERNAL_TURN_ASSEMBLER_FIELD> {
+  extends Omit<InternalBootstrapContextArgs, "turnAssembler"> {
   readonly turnAssembler?: RuntimeAgentTurnAssembler
 }
 
 export interface CreateRuntimeFromBootstrapArgs
-  extends Omit<InternalFromBootstrapArgs, typeof INTERNAL_TURN_ASSEMBLER_FIELD> {
-  readonly turnAssembler?: RuntimeAgentTurnAssembler
-}
+  extends ComposeRuntimeBootstrapContextArgs,
+    RuntimeCreateHostArgs {}
 
-const withTurnAssembler = <T extends object>(
-  args: T,
-  turnAssembler: RuntimeAgentTurnAssembler | undefined,
-): T & TurnAssemblerPatch =>
-  turnAssembler === undefined
-    ? (args as T & TurnAssemblerPatch)
-    : ({
-        ...args,
-        [INTERNAL_TURN_ASSEMBLER_FIELD]: turnAssembler,
-      } as T & TurnAssemblerPatch)
+const createRuntimeFacadeFromBinding = async (
+  binding: RuntimeContextBinding,
+  args: CreateRuntimeFacadeArgs,
+): Promise<RuntimeFacade> =>
+  await createRuntime({
+    host: binding.createRuntimeHost(args),
+  })
 
 const unwrapRuntimeContext = (context: RuntimeContext): RuntimeContextRecord =>
   context as RuntimeContextRecord
 
+const patchRuntimeContextState = (
+  state: InternalRuntimeContextState,
+  patch: RuntimeContextPatch,
+): InternalRuntimeContextState => state.patch(patch)
+
+const summarizeRuntimeSnapshot = (snapshot: RuntimeContextSnapshot): RuntimeWireSummary => ({
+  executionPlane: {
+    conversationCheckpoint: snapshot.conversationCheckpoint !== undefined,
+    fork: snapshot.fork !== undefined,
+    forkSession: snapshot.forkSession !== undefined,
+    delegation: snapshot.delegation !== undefined,
+    subagentBackground: snapshot.subagentBackground !== undefined,
+    autoBackground: snapshot.autoBackground !== undefined,
+  },
+  memoryAuto: {
+    sessionCtx: snapshot.sessionCtx !== undefined,
+    stage1OutputsStore: snapshot.stage1OutputsStore !== undefined,
+    memoryConsolidator: snapshot.memoryConsolidator !== undefined,
+    memoryConsolidatorEnabled: snapshot.memoryConsolidator?.enabled === true,
+  },
+})
+
+const runtimeBootBindings = (
+  boot: SessionBootstrapResult,
+): NonNullable<CreateRuntimeFacadeArgs["boot"]> => ({
+  mode: boot.mode,
+  refreshSystemPrompt: boot.refreshSystemPrompt,
+  ...(boot.toolProfileState !== undefined ? { toolProfileState: boot.toolProfileState } : {}),
+  ...(boot.identityModeState !== undefined ? { identityModeState: boot.identityModeState } : {}),
+})
+
 const createRuntimeContext = (initialState: InternalRuntimeContextState): RuntimeContext => {
   const record: RuntimeContextRecord = {
     state: initialState,
-    createRuntimeFacade: async (args) =>
-      await createRuntimeFacadeFromBridgeStateInternal({
-        ...args,
-        bridgeState: record.state,
-      }),
-    registry: () => getRuntimeBridgeRegistry(record.state),
+    createRuntimeFacade: async (args) => await createRuntimeFacadeFromBinding(record.state, args),
+    registry: () => record.state.snapshot.registry,
     wrapRegistry: (mapper) => {
-      const registry = getRuntimeBridgeRegistry(record.state)
-      record.state = patchRuntimeBridgeState(record.state, {
+      const registry = record.state.snapshot.registry
+      record.state = patchRuntimeContextState(record.state, {
         registry: new ToolRegistry(registry.all().map((tool) => mapper(tool))),
-      }) as InternalRuntimeContextState
+      })
     },
-    permissionMode: () => getRuntimeBridgePermissionMode(record.state),
-    automationEngine: () => getRuntimeBridgeAutomationEngine(record.state),
+    permissionMode: () => record.state.snapshot.permission.mode,
+    automationEngine: () => record.state.snapshot.automationEngine,
     ensureAutomationEngine: (slot) => {
-      const registry = getRuntimeBridgeRegistry(record.state)
-      record.state = patchRuntimeBridgeState(record.state, {
+      const registry = record.state.snapshot.registry
+      record.state = patchRuntimeContextState(record.state, {
         automationEngine: slot,
         registry: registry.has("automation_update")
           ? registry
           : new ToolRegistry([...registry.all(), automationUpdateTool(slot.engine)]),
-      }) as InternalRuntimeContextState
-      return getRuntimeBridgeAutomationEngine(record.state)
+      })
+      return record.state.snapshot.automationEngine
     },
     setGranularRegistry: (registry) => {
-      record.state = patchRuntimeBridgeState(record.state, {
+      record.state = patchRuntimeContextState(record.state, {
         granularRegistry: registry,
-      }) as InternalRuntimeContextState
+      })
     },
-    toolProfileState: () => getRuntimeBridgeToolProfileState(record.state),
-    identityModeState: () => getRuntimeBridgeIdentityModeState(record.state),
-    focusChain: () => getRuntimeBridgeFocusChain(record.state),
-    decisionEmitter: () => getRuntimeBridgeDecisionEmitter(record.state),
-    admissibility: () => getRuntimeBridgeAdmissibility(record.state),
+    toolProfileState: () => record.state.snapshot.toolProfileState,
+    identityModeState: () => record.state.snapshot.identityModeState,
+    focusChain: () => record.state.snapshot.focusChain,
+    decisionEmitter: () => record.state.snapshot.decisionEmitter,
+    admissibility: () => record.state.snapshot.admissibility,
     withAdmissibility: (admissibility) => {
-      record.state = patchRuntimeBridgeState(record.state, {
+      record.state = patchRuntimeContextState(record.state, {
         admissibility,
-      }) as InternalRuntimeContextState
+      })
     },
-    planExitPort: () => getRuntimeBridgePlanExitPort(record.state),
-    userInputPort: () => getRuntimeBridgeUserInputPort(record.state),
+    planExitPort: () => record.state.snapshot.planExitPort,
+    userInputPort: () => record.state.snapshot.userInputPort,
   }
   return record
 }
@@ -169,74 +174,54 @@ const createRuntimeContext = (initialState: InternalRuntimeContextState): Runtim
 export const createRuntimeFromAgentConfigBase = async (
   args: CreateRuntimeFromAgentConfigBaseArgs,
 ): Promise<{ readonly runtime: RuntimeFacade; readonly runtimeContext: RuntimeContext }> => {
-  const result = await createRuntimeFromAgentConfigBaseInternal(
-    withTurnAssembler(
-      {
-        base: args.base,
-        ...(args.history !== undefined ? { history: args.history } : {}),
-        state: args.state,
-        idMeta: args.idMeta,
-        shutdown: args.shutdown,
-        ...(args.mcpClients !== undefined ? { mcpClients: args.mcpClients } : {}),
-      },
-      args.turnAssembler,
-    ) as InternalFromBaseArgs,
-  )
+  const binding = createRuntimeContextBindingFromAgentConfigBase({
+    base: args.base,
+    ...(args.turnAssembler !== undefined ? { turnAssembler: args.turnAssembler } : {}),
+  })
+  const runtime = await createRuntimeFacadeFromBinding(binding, {
+    history: [...(args.history ?? args.base.messages ?? [])],
+    state: args.state,
+    idMeta: args.idMeta,
+    shutdown: args.shutdown,
+    ...(args.mcpClients !== undefined ? { mcpClients: args.mcpClients } : {}),
+  })
   return {
-    runtime: result.runtime,
-    runtimeContext: createRuntimeContext(result.bridgeState),
+    runtime,
+    runtimeContext: createRuntimeContext(binding),
   }
 }
 
 export const composeRuntimeBootstrapContext = async (
   args: ComposeRuntimeBootstrapContextArgs,
 ): Promise<RuntimeContext> =>
-  createRuntimeContext(
-    await composeBootstrapRuntimeDepsInternal(
-      withTurnAssembler(
-        {
-          boot: args.boot,
-          stream: args.stream,
-          onConfirm: args.onConfirm,
-          ...(args.includeSearchPipeline !== undefined
-            ? { includeSearchPipeline: args.includeSearchPipeline }
-            : {}),
-          ...(args.overlay !== undefined ? { overlay: args.overlay } : {}),
-          ...(args.execution !== undefined ? { execution: args.execution } : {}),
-          ...(args.memoryAuto !== undefined ? { memoryAuto: args.memoryAuto } : {}),
-        },
-        args.turnAssembler,
-      ) as InternalBootstrapContextArgs,
-    ),
-  )
+  createRuntimeContext(await createRuntimeContextBindingFromBootstrap(args))
 
 export const createRuntimeFromBootstrap = async (
   args: CreateRuntimeFromBootstrapArgs,
 ): Promise<{ readonly runtime: RuntimeFacade; readonly runtimeContext: RuntimeContext }> => {
-  const result = await createRuntimeFromBootstrapInternal(
-    withTurnAssembler(
-      {
-        boot: args.boot,
-        stream: args.stream,
-        onConfirm: args.onConfirm,
-        ...(args.includeSearchPipeline !== undefined
-          ? { includeSearchPipeline: args.includeSearchPipeline }
-          : {}),
-        ...(args.overlay !== undefined ? { overlay: args.overlay } : {}),
-        ...(args.execution !== undefined ? { execution: args.execution } : {}),
-        ...(args.memoryAuto !== undefined ? { memoryAuto: args.memoryAuto } : {}),
-        history: args.history,
-        state: args.state,
-        idMeta: args.idMeta,
-        shutdown: args.shutdown,
-        ...(args.mcpClients !== undefined ? { mcpClients: args.mcpClients } : {}),
-      },
-      args.turnAssembler,
-    ) as InternalFromBootstrapArgs,
-  )
+  const binding = await createRuntimeContextBindingFromBootstrap({
+    boot: args.boot,
+    stream: args.stream,
+    onConfirm: args.onConfirm,
+    ...(args.includeSearchPipeline !== undefined
+      ? { includeSearchPipeline: args.includeSearchPipeline }
+      : {}),
+    ...(args.overlay !== undefined ? { overlay: args.overlay } : {}),
+    ...(args.execution !== undefined ? { execution: args.execution } : {}),
+    ...(args.memoryAuto !== undefined ? { memoryAuto: args.memoryAuto } : {}),
+    ...(args.turnAssembler !== undefined ? { turnAssembler: args.turnAssembler } : {}),
+  })
+  const runtime = await createRuntimeFacadeFromBinding(binding, {
+    boot: runtimeBootBindings(args.boot),
+    history: [...args.history],
+    state: args.state,
+    idMeta: args.idMeta,
+    shutdown: args.shutdown,
+    ...(args.mcpClients !== undefined ? { mcpClients: args.mcpClients } : {}),
+  })
   return {
-    runtime: result.runtime,
-    runtimeContext: createRuntimeContext(result.bridgeState),
+    runtime,
+    runtimeContext: createRuntimeContext(binding),
   }
 }
 
@@ -245,11 +230,7 @@ export const materializeReviewerAgent = (
   runtimeContext: RuntimeContext,
   turnAssembler?: RuntimeAgentTurnAssembler,
 ): ReturnType<SessionBootstrapResult["materializeReviewerAgent"]> =>
-  materializeReviewerAgentInternal(
-    boot,
-    unwrapRuntimeContext(runtimeContext).state,
-    turnAssembler,
-  )
+  unwrapRuntimeContext(runtimeContext).state.materializeReviewerAgent(boot, turnAssembler)
 
 export const summarizeRuntimeContext = (runtimeContext: RuntimeContext): RuntimeWireSummary =>
-  summarizeRuntimeWiresInternal(unwrapRuntimeContext(runtimeContext).state)
+  summarizeRuntimeSnapshot(unwrapRuntimeContext(runtimeContext).state.snapshot)

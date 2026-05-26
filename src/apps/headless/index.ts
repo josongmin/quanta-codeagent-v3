@@ -98,6 +98,47 @@ const abortedOutcome = (messages: readonly import("@/llm").Message[]): AgentOutc
 const summarizeHeadlessWires = (runtimeContext: HeadlessRuntimeContext): HeadlessRuntimeWires =>
   summarizeRuntimeContext(runtimeContext)
 
+const buildHeadlessSessionConfig = (
+  boot: SessionBootstrapResult,
+): Parameters<
+  Awaited<ReturnType<typeof createRuntimeFromBootstrap>>["runtime"]["createSession"]
+>[0] => ({
+  cwd: boot.cwd,
+  model: boot.model,
+  permissionMode: boot.mode,
+  ...(boot.identityModeState !== undefined ? { identityMode: boot.identityModeState.get() } : {}),
+  ...(boot.toolProfileState !== undefined ? { toolProfile: boot.toolProfileState.get() } : {}),
+})
+
+const buildAbortedHeadlessResult = (args: {
+  readonly boot: SessionBootstrapResult
+  readonly runtimeContext: HeadlessRuntimeContext
+  readonly stream: RecordingStream
+}): HeadlessRunResult => {
+  const messages = [...args.boot.history]
+  return {
+    ...args.boot,
+    outcome: abortedOutcome(messages),
+    messages,
+    events: args.stream.events,
+    wires: summarizeHeadlessWires(args.runtimeContext),
+  }
+}
+
+const attachHeadlessTransport = async (args: {
+  readonly session: RuntimeSession
+  readonly input: HeadlessRunInput
+}): Promise<Awaited<ReturnType<typeof attachSessionTransport>> | undefined> => {
+  if (args.input.transport === undefined) return undefined
+  return await attachSessionTransport({
+    session: args.session,
+    transport: args.input.transport,
+    ...(args.input.transportReplayWindow !== undefined
+      ? { replayWindow: args.input.transportReplayWindow }
+      : {}),
+  })
+}
+
 /** Run a single agent turn through `@/host/bootstrap` + internal
  *  `@/runner/*` helpers with faked deps. Returns the bootstrap result, the
  *  per-turn outcome, the resulting message history, emitted `AgentEvent`s,
@@ -143,36 +184,14 @@ export const runHeadlessOnce = async (input: HeadlessRunInput): Promise<Headless
       buildHeadlessRuntimeArgs(boot, input, stream),
     )
     runtimeFacade = runtime
-    session = await runtimeFacade.createSession({
-      cwd: boot.cwd,
-      model: boot.model,
-      permissionMode: boot.mode,
-      ...(boot.identityModeState !== undefined
-        ? { identityMode: boot.identityModeState.get() }
-        : {}),
-      ...(boot.toolProfileState !== undefined ? { toolProfile: boot.toolProfileState.get() } : {}),
-    })
-    if (input.transport !== undefined) {
-      transportHandle = await attachSessionTransport({
-        session,
-        transport: input.transport,
-        ...(input.transportReplayWindow !== undefined
-          ? { replayWindow: input.transportReplayWindow }
-          : {}),
-      })
-    }
+    const runtimeSession = await runtimeFacade.createSession(buildHeadlessSessionConfig(boot))
+    session = runtimeSession
+    transportHandle = await attachHeadlessTransport({ session: runtimeSession, input })
     if (input.signal?.aborted === true) {
-      const messages = [...boot.history]
-      return {
-        ...boot,
-        outcome: abortedOutcome(messages),
-        messages,
-        events: stream.events,
-        wires: summarizeHeadlessWires(runtimeContext),
-      }
+      return buildAbortedHeadlessResult({ boot, runtimeContext, stream })
     }
-    await session.input.append(input.prompt, undefined, { signal: boot.abort.signal })
-    const turn = await session.turn.run(undefined, { signal: boot.abort.signal })
+    await runtimeSession.input.append(input.prompt, undefined, { signal: boot.abort.signal })
+    const turn = await runtimeSession.turn.run(undefined, { signal: boot.abort.signal })
     if (turn.turn === undefined) {
       throw new Error("headless SDK session completed without a turn payload")
     }

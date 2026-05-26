@@ -9,17 +9,17 @@ import type {
 } from "@/kernel/session"
 import type { ContentBlock, ImageBlock, Message } from "@/llm"
 import { type CapabilityManifest, normalizeCapabilityManifest } from "@/protocol/session"
-import {
-  type IdentityModeSessionState,
-  type SystemSource,
-  type ToolProfileSessionState,
+import type {
+  IdentityModeSessionState,
+  SystemSource,
+  ToolProfileSessionState,
 } from "@/runner/assemble/session-state"
 import { persistTurn } from "@/runner/orchestrate/persist-turn"
 import { buildSharedExecutionPlaneRuntimeAugments } from "@/runner/session-execution-plane"
 import { buildSessionMemoryAutoWires } from "@/runner/session-memory-auto"
 import type { RuntimeAgentConfigBase, RuntimeAgentTurnAssembler } from "@/sdk/runtime/base"
 import type { SessionMeta } from "@/session"
-import { ToolRegistry, type Tool } from "@/tool"
+import { type Tool, ToolRegistry } from "@/tool"
 import { createSingleSessionRuntimeHost } from "../builder"
 import type { RuntimeHost, RuntimeSessionConfig } from "../types"
 
@@ -199,15 +199,32 @@ interface CreateRuntimeContextBindingFromBootstrapArgs {
   readonly turnAssembler?: RuntimeAgentTurnAssembler
 }
 
+const whenDefined = <K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> =>
+  value === undefined ? {} : ({ [key]: value } as Partial<Record<K, V>>)
+
+const withDefinedProps = <T extends object>(record: T): T => {
+  const entries = Object.entries(record).filter(([, value]) => value !== undefined)
+  return Object.fromEntries(entries) as T
+}
+
+const sanitizeRuntimeBase = <T extends object>(base: T): RuntimeBase =>
+  withDefinedProps(base) as unknown as RuntimeBase
+
 const ensureSessionId = (base: RuntimeBase): RuntimeBase =>
-  base.sessionId === undefined ? { ...base, sessionId: crypto.randomUUID() } : base
+  base.sessionId === undefined
+    ? sanitizeRuntimeBase({ ...base, sessionId: crypto.randomUUID() })
+    : sanitizeRuntimeBase(base)
+
+const getSessionId = (base: RuntimeBase): string => base.sessionId ?? crypto.randomUUID()
 
 const buildCapabilityManifest = (base: RuntimeBase): CapabilityManifest =>
   normalizeCapabilityManifest({
     approvals: "operator",
     tools: base.registry.all().length > 0,
     memory:
-      base.store !== undefined || base.memoryConsolidator !== undefined || base.memory !== undefined,
+      base.store !== undefined ||
+      base.memoryConsolidator !== undefined ||
+      base.memory !== undefined,
     artifacts: true,
     subagents:
       base.subagent !== undefined ||
@@ -218,9 +235,7 @@ const buildCapabilityManifest = (base: RuntimeBase): CapabilityManifest =>
     transport: "inproc",
   })
 
-const toToolProfileConfig = (
-  state: ToolProfileSessionState | undefined,
-): Partial<AgentConfig> =>
+const toToolProfileConfig = (state: ToolProfileSessionState | undefined): Partial<AgentConfig> =>
   state === undefined
     ? {}
     : {
@@ -231,9 +246,7 @@ const toToolProfileConfig = (
         },
       }
 
-const toIdentityModeConfig = (
-  state: IdentityModeSessionState | undefined,
-): Partial<AgentConfig> =>
+const toIdentityModeConfig = (state: IdentityModeSessionState | undefined): Partial<AgentConfig> =>
   state === undefined
     ? {}
     : {
@@ -309,10 +322,7 @@ const buildAgentConfigFromBase = (args: {
   readonly turnAssembler?: RuntimeAgentTurnAssembler
 }): AgentConfig => {
   if (args.turnAssembler !== undefined) {
-    return args.turnAssembler(
-      [...args.messages],
-      buildAssemblerContext(args.base, args.signal),
-    )
+    return args.turnAssembler([...args.messages], buildAssemblerContext(args.base, args.signal))
   }
 
   const {
@@ -334,6 +344,18 @@ const buildAgentConfigFromBase = (args: {
     ...toIdentityModeConfig(identityModeState),
   }
 }
+
+const buildAgentConfigFromBaseInput = (args: {
+  readonly base: RuntimeBase
+  readonly messages: readonly Message[]
+  readonly signal: AbortSignal | undefined
+  readonly turnAssembler: RuntimeAgentTurnAssembler | undefined
+}): Parameters<typeof buildAgentConfigFromBase>[0] => ({
+  base: args.base,
+  messages: args.messages,
+  ...(args.signal !== undefined ? { signal: args.signal } : {}),
+  ...(args.turnAssembler !== undefined ? { turnAssembler: args.turnAssembler } : {}),
+})
 
 const buildCompactionConfig = (args: {
   readonly store: AgentConfig["store"]
@@ -362,66 +384,39 @@ const buildBaseFromBootstrap = (args: {
     permission: args.boot.permission,
     messages: [...args.boot.history],
     system: args.boot.system,
-    ...(args.boot.systemSource !== undefined ? { systemSource: args.boot.systemSource } : {}),
+    ...whenDefined("systemSource", args.boot.systemSource),
     cwd: args.boot.cwd,
     maxTurns: args.boot.maxTurns,
     signal: args.boot.abort.signal,
     onConfirm: args.onConfirm,
-    sessionId: args.boot.sessionId,
-    ...(args.boot.tooling.store !== undefined ? { store: args.boot.tooling.store } : {}),
-    ...(compaction !== undefined ? { compaction } : {}),
-    ...(args.boot.tooling.embedder !== undefined ? { embedder: args.boot.tooling.embedder } : {}),
-    ...(args.boot.tooling.memoryConfig !== undefined
-      ? { memory: args.boot.tooling.memoryConfig }
-      : {}),
+    ...whenDefined("sessionId", args.boot.sessionId),
+    ...whenDefined("store", args.boot.tooling.store),
+    ...whenDefined("compaction", compaction),
+    ...whenDefined("embedder", args.boot.tooling.embedder),
+    ...whenDefined("memory", args.boot.tooling.memoryConfig),
     ...(args.boot.features.planMode ? { planMode: true } : {}),
-    ...(args.boot.features.metrics !== undefined ? { metrics: args.boot.features.metrics } : {}),
-    ...(args.boot.run !== undefined ? { run: args.boot.run } : {}),
-    ...(args.boot.tooling.subagentConfig !== undefined
-      ? { subagent: args.boot.tooling.subagentConfig }
-      : {}),
-    ...(args.boot.tooling.skillsConfig !== undefined
-      ? { skills: args.boot.tooling.skillsConfig }
-      : {}),
-    ...(args.boot.tooling.compactionBreakerConfig !== undefined
-      ? { compactionBreaker: args.boot.tooling.compactionBreakerConfig }
-      : {}),
-    ...(args.boot.tooling.verifyGuardConfig !== undefined
-      ? { verifyGuard: args.boot.tooling.verifyGuardConfig }
-      : {}),
-    ...(args.includeSearchPipeline === true && args.boot.tooling.searchPipeline !== undefined
-      ? { searchPipeline: args.boot.tooling.searchPipeline }
-      : {}),
-    ...(args.overlay?.planExitPort !== undefined
-      ? { planExitPort: args.overlay.planExitPort }
-      : {}),
-    ...(args.overlay?.userInputPort !== undefined
-      ? { userInputPort: args.overlay.userInputPort }
-      : {}),
-    ...(args.boot.toolProfileState !== undefined
-      ? { toolProfileState: args.boot.toolProfileState }
-      : {}),
-    ...(args.boot.identityModeState !== undefined
-      ? { identityModeState: args.boot.identityModeState }
-      : {}),
-    ...(args.boot.focusChain !== undefined ? { focusChain: args.boot.focusChain } : {}),
-    ...(args.boot.onShellEvent !== undefined ? { onShellEvent: args.boot.onShellEvent } : {}),
-    ...(args.boot.workMetricsSink !== undefined
-      ? { workMetricsSink: args.boot.workMetricsSink }
-      : {}),
-    ...(args.boot.lifecycleFollowUpQueue !== undefined
-      ? { followUpQueue: args.boot.lifecycleFollowUpQueue }
-      : {}),
-    ...(args.boot.planStore !== undefined ? { planStore: args.boot.planStore } : {}),
-    ...(args.overlay?.decisionEmitter !== undefined
-      ? { decisionEmitter: args.overlay.decisionEmitter }
-      : {}),
-    ...(args.overlay?.admissibility !== undefined
-      ? { admissibility: args.overlay.admissibility }
-      : {}),
-    ...(args.overlay?.shellSnapshot !== undefined
-      ? { shellSnapshot: args.overlay.shellSnapshot }
-      : {}),
+    ...whenDefined("metrics", args.boot.features.metrics),
+    ...whenDefined("run", args.boot.run),
+    ...whenDefined("subagent", args.boot.tooling.subagentConfig),
+    ...whenDefined("skills", args.boot.tooling.skillsConfig),
+    ...whenDefined("compactionBreaker", args.boot.tooling.compactionBreakerConfig),
+    ...whenDefined("verifyGuard", args.boot.tooling.verifyGuardConfig),
+    ...whenDefined(
+      "searchPipeline",
+      args.includeSearchPipeline === true ? args.boot.tooling.searchPipeline : undefined,
+    ),
+    ...whenDefined("planExitPort", args.overlay?.planExitPort),
+    ...whenDefined("userInputPort", args.overlay?.userInputPort),
+    ...whenDefined("toolProfileState", args.boot.toolProfileState),
+    ...whenDefined("identityModeState", args.boot.identityModeState),
+    ...whenDefined("focusChain", args.boot.focusChain),
+    ...whenDefined("onShellEvent", args.boot.onShellEvent),
+    ...whenDefined("workMetricsSink", args.boot.workMetricsSink),
+    ...whenDefined("followUpQueue", args.boot.lifecycleFollowUpQueue),
+    ...whenDefined("planStore", args.boot.planStore),
+    ...whenDefined("decisionEmitter", args.overlay?.decisionEmitter),
+    ...whenDefined("admissibility", args.overlay?.admissibility),
+    ...whenDefined("shellSnapshot", args.overlay?.shellSnapshot),
     sessionEffort: () => args.boot.effortStore.get(),
   })
 }
@@ -429,12 +424,14 @@ const buildBaseFromBootstrap = (args: {
 const extendBaseWithExecutionPlane = async (
   args: RuntimeExecutionComposeArgs,
 ): Promise<RuntimeBase> => {
-  const parentConfig = buildAgentConfigFromBase({
-    base: args.base,
-    messages: [...args.history],
-    signal: args.base.signal,
-    turnAssembler: args.turnAssembler,
-  })
+  const parentConfig = buildAgentConfigFromBase(
+    buildAgentConfigFromBaseInput({
+      base: args.base,
+      messages: [...args.history],
+      signal: args.base.signal,
+      turnAssembler: args.turnAssembler,
+    }),
+  )
   const augments = await buildSharedExecutionPlaneRuntimeAugments({
     history: args.history,
     parentConfig,
@@ -446,12 +443,16 @@ const extendBaseWithExecutionPlane = async (
   return { ...args.base, ...augments }
 }
 
-const extendBaseWithMemoryAuto = async (args: RuntimeMemoryAutoComposeArgs): Promise<RuntimeBase> => {
+const extendBaseWithMemoryAuto = async (
+  args: RuntimeMemoryAutoComposeArgs,
+): Promise<RuntimeBase> => {
   const auto = await buildSessionMemoryAutoWires({
     env: args.env,
     llm: args.base.llm,
-    summarizerLlm: args.base.compaction?.summarizerLlm,
-    sessionId: args.base.sessionId ?? crypto.randomUUID(),
+    ...(args.base.compaction?.summarizerLlm !== undefined
+      ? { summarizerLlm: args.base.compaction.summarizerLlm }
+      : {}),
+    sessionId: getSessionId(args.base),
     signal: args.base.signal,
     ...(args.homeDir !== undefined ? { homeDir: args.homeDir } : {}),
     ...(args.now !== undefined ? { now: args.now } : {}),
@@ -466,38 +467,34 @@ const extendBaseWithMemoryAuto = async (args: RuntimeMemoryAutoComposeArgs): Pro
   }
 }
 
+const buildOptionalSnapshotFields = (
+  base: RuntimeBase,
+): Partial<Omit<RuntimeContextSnapshot, "registry" | "permission">> => ({
+  ...whenDefined("systemSource", base.systemSource),
+  ...whenDefined("automationEngine", base.automationEngine),
+  ...whenDefined("toolProfileState", base.toolProfileState),
+  ...whenDefined("identityModeState", base.identityModeState),
+  ...whenDefined("focusChain", base.focusChain),
+  ...whenDefined("decisionEmitter", base.decisionEmitter),
+  ...whenDefined("admissibility", base.admissibility),
+  ...whenDefined("planExitPort", base.planExitPort),
+  ...whenDefined("userInputPort", base.userInputPort),
+  ...whenDefined("conversationCheckpoint", base.conversationCheckpoint),
+  ...whenDefined("fork", base.fork),
+  ...whenDefined("forkSession", base.forkSession),
+  ...whenDefined("delegation", base.delegation),
+  ...whenDefined("subagentBackground", base.subagentBackground),
+  ...whenDefined("autoBackground", base.autoBackground),
+  ...whenDefined("sessionCtx", base.sessionCtx),
+  ...whenDefined("stage1OutputsStore", base.stage1OutputsStore),
+  ...whenDefined("memoryConsolidator", base.memoryConsolidator),
+  ...whenDefined("granularRegistry", base.granularRegistry),
+})
+
 const buildSnapshot = (base: RuntimeBase): RuntimeContextSnapshot => ({
   registry: base.registry,
   permission: base.permission,
-  ...(base.systemSource !== undefined ? { systemSource: base.systemSource } : {}),
-  ...(base.automationEngine !== undefined ? { automationEngine: base.automationEngine } : {}),
-  ...(base.toolProfileState !== undefined ? { toolProfileState: base.toolProfileState } : {}),
-  ...(base.identityModeState !== undefined
-    ? { identityModeState: base.identityModeState }
-    : {}),
-  ...(base.focusChain !== undefined ? { focusChain: base.focusChain } : {}),
-  ...(base.decisionEmitter !== undefined ? { decisionEmitter: base.decisionEmitter } : {}),
-  ...(base.admissibility !== undefined ? { admissibility: base.admissibility } : {}),
-  ...(base.planExitPort !== undefined ? { planExitPort: base.planExitPort } : {}),
-  ...(base.userInputPort !== undefined ? { userInputPort: base.userInputPort } : {}),
-  ...(base.conversationCheckpoint !== undefined
-    ? { conversationCheckpoint: base.conversationCheckpoint }
-    : {}),
-  ...(base.fork !== undefined ? { fork: base.fork } : {}),
-  ...(base.forkSession !== undefined ? { forkSession: base.forkSession } : {}),
-  ...(base.delegation !== undefined ? { delegation: base.delegation } : {}),
-  ...(base.subagentBackground !== undefined
-    ? { subagentBackground: base.subagentBackground }
-    : {}),
-  ...(base.autoBackground !== undefined ? { autoBackground: base.autoBackground } : {}),
-  ...(base.sessionCtx !== undefined ? { sessionCtx: base.sessionCtx } : {}),
-  ...(base.stage1OutputsStore !== undefined
-    ? { stage1OutputsStore: base.stage1OutputsStore }
-    : {}),
-  ...(base.memoryConsolidator !== undefined
-    ? { memoryConsolidator: base.memoryConsolidator }
-    : {}),
-  ...(base.granularRegistry !== undefined ? { granularRegistry: base.granularRegistry } : {}),
+  ...buildOptionalSnapshotFields(base),
 })
 
 const SIDE_CONVERSATION_MAX_TURNS_CAP = 5
@@ -623,25 +620,31 @@ const createSideConversationBase = (args: {
   readonly signal: AbortSignal
   readonly maxTurns: number
   readonly tally: UsageTally
-}): RuntimeBase => ({
-  ...args.base,
-  registry: args.registry,
-  stream: createUsageTallyStream(args.base.stream, args.tally),
-  maxTurns: args.maxTurns,
-  signal: args.signal,
-  store: undefined,
-  sessionId: mintSideConversationSessionId(args.base.sessionId ?? crypto.randomUUID()),
-  embedder: undefined,
-  memory: undefined,
-  metrics: undefined,
-  run: undefined,
-  subagent: undefined,
-  compactionBreaker: undefined,
-  verifyGuard: undefined,
-  compaction: undefined,
-  workMetricsSink: undefined,
-  planMode: false,
-})
+}): RuntimeBase => {
+  const {
+    store: _store,
+    embedder: _embedder,
+    memory: _memory,
+    metrics: _metrics,
+    run: _run,
+    subagent: _subagent,
+    compactionBreaker: _compactionBreaker,
+    verifyGuard: _verifyGuard,
+    compaction: _compaction,
+    workMetricsSink: _workMetricsSink,
+    ...rest
+  } = args.base
+
+  return {
+    ...rest,
+    registry: args.registry,
+    stream: createUsageTallyStream(args.base.stream, args.tally),
+    maxTurns: args.maxTurns,
+    signal: args.signal,
+    sessionId: mintSideConversationSessionId(getSessionId(args.base)),
+    planMode: false,
+  }
+}
 
 const startSideConversation = async (args: {
   readonly base: RuntimeBase
@@ -673,12 +676,14 @@ const startSideConversation = async (args: {
     tally,
   })
   const outcome = await runAgent(
-    buildAgentConfigFromBase({
-      base: isolatedBase,
-      messages,
-      signal: args.signal,
-      turnAssembler: args.turnAssembler,
-    }),
+    buildAgentConfigFromBase(
+      buildAgentConfigFromBaseInput({
+        base: isolatedBase,
+        messages,
+        signal: args.signal,
+        turnAssembler: args.turnAssembler,
+      }),
+    ),
   )
   return {
     outcome,
@@ -705,18 +710,20 @@ const runRuntimeTurn = async (args: {
     const content: ContentBlock[] = [{ type: "text", text: args.prompt }, ...(args.images ?? [])]
     const next = [...args.history, { role: "user", content } as Message]
     const outcome = await runAgent(
-      buildAgentConfigFromBase({
-        base: args.base,
-        messages: next,
-        signal: args.signal,
-        turnAssembler: args.turnAssembler,
-      }),
+      buildAgentConfigFromBase(
+        buildAgentConfigFromBaseInput({
+          base: args.base,
+          messages: next,
+          signal: args.signal,
+          turnAssembler: args.turnAssembler,
+        }),
+      ),
     )
     const messages = outcome.messages
     await persistTurn({
       state: args.state,
       idMeta: args.idMeta,
-      sessionId: args.base.sessionId,
+      sessionId: getSessionId(args.base),
       messages,
       outcome,
     })
@@ -807,10 +814,10 @@ const createRuntimeContextBinding = (state: RuntimeContextBindingState): Runtime
     snapshot: buildSnapshot(normalizedState.base),
     patch: (patch) =>
       createRuntimeContextBinding({
-        base: {
+        base: sanitizeRuntimeBase({
           ...normalizedState.base,
           ...patch,
-        },
+        }),
         ...(normalizedState.turnAssembler !== undefined
           ? { turnAssembler: normalizedState.turnAssembler }
           : {}),
@@ -824,12 +831,14 @@ const createRuntimeContextBinding = (state: RuntimeContextBindingState): Runtime
       ),
     materializeReviewerAgent: (boot, turnAssembler) =>
       boot.materializeReviewerAgent(
-        buildAgentConfigFromBase({
-          base: normalizedState.base,
-          messages: [],
-          signal: normalizedState.base.signal,
-          turnAssembler: turnAssembler ?? normalizedState.turnAssembler,
-        }),
+        buildAgentConfigFromBase(
+          buildAgentConfigFromBaseInput({
+            base: normalizedState.base,
+            messages: [],
+            signal: normalizedState.base.signal,
+            turnAssembler: turnAssembler ?? normalizedState.turnAssembler,
+          }),
+        ),
       ),
   }
 }

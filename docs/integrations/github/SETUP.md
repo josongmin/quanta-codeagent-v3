@@ -6,14 +6,13 @@ template — no external server, no webhook host. (Tier 1, the GitHub App
 webhook-host scaffold, is documented in ADR-0312 and lives in a separate
 slice; this guide covers Tier 0 only.)
 
-> **Prerequisite (current status).** The workflow template targets the CLI
-> runner file `src/apps/cli/from-pr-cmd-runner.ts`. That file is being
-> wired in a follow-up sprint (see ADR-0311 "CLI registry option B"). The
-> template itself is install-ready — copy + secret + mention all work — but
-> until the runner file lands, the `run quanta from-pr` step exits non-zero
-> with `module not found` and the workflow posts a one-line failure
-> comment via the `report failure to PR` step. Track ADR-0311 follow-up
-> for the unblock.
+> **Status.** Runner file `src/apps/cli/from-pr-cmd-runner.ts` has landed.
+> Workflow is install-ready end-to-end. The current ack-only round posts a
+> Tier 0 acknowledgement; agent-loop wire-up (the actual review/fix
+> response) is a follow-up sprint. `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`
+> in the workflow `env:` block are placeholders for that future wire and
+> are NOT read by the current `from-pr-cmd-runner.ts` — only `GH_TOKEN`
+> (auto-supplied by `${{ secrets.GITHUB_TOKEN }}`) is required today.
 
 ## 1. Install the workflow
 
@@ -30,7 +29,7 @@ git push
 The workflow is committed to your default branch; GitHub Actions picks it up
 on the next event.
 
-## 2. Add API key as a repo secret
+## 2. Add API key as a repo secret (forward-compat — not required today)
 
 In your repo: **Settings → Secrets and variables → Actions → New repository
 secret**. Add ONE of:
@@ -38,8 +37,9 @@ secret**. Add ONE of:
 - `ANTHROPIC_API_KEY` (Claude provider)
 - `OPENAI_API_KEY` (OpenAI provider)
 
-quanta picks the provider via the `LLM_PROVIDER` env var (default: anthropic
-when ANTHROPIC_API_KEY is set, openai otherwise).
+The current ack-only round does NOT call an LLM, so these are unused right
+now. They wire in when the agent-loop downstream lands. `GITHUB_TOKEN` is
+auto-provided by GitHub Actions and is the only secret the bot reads today.
 
 ## 3. Mention the bot
 
@@ -126,6 +126,53 @@ non-bot account.
    set via `QUANTA_GH_TRIGGER_PHRASES` are honored by the in-process mention
    filter, NOT by the cheap workflow `if:` — extend the `if:` block too if
    you want the runner to start at all on a custom phrase.
+
+## Local testing (without GitHub Actions)
+
+You can drive the runner locally against a fixture event JSON. Bun auto-loads
+`.env` from the current working directory, so put your token there:
+
+```sh
+# .env  (cwd of `bun run`)
+GH_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# optional — only the agent-loop wire reads these
+# ANTHROPIC_API_KEY=sk-ant-...
+# OPENAI_API_KEY=sk-...
+```
+
+Then write a fake event JSON and run:
+
+```sh
+cat > /tmp/event.json <<'EOF'
+{
+  "action": "created",
+  "issue": {
+    "number": 42,
+    "pull_request": { "html_url": "https://github.com/<you>/<repo>/pull/42" }
+  },
+  "repository": { "owner": { "login": "<you>" }, "name": "<repo>" },
+  "sender": { "login": "<you>", "type": "User" },
+  "comment": {
+    "body": "@quanta please review",
+    "author_association": "OWNER"
+  }
+}
+EOF
+
+QUANTA_GH_ACTIONS_TRIGGER=1 \
+GITHUB_REPOSITORY="<you>/<repo>" \
+GITHUB_EVENT_PATH=/tmp/event.json \
+GITHUB_EVENT_NAME=issue_comment \
+GITHUB_DELIVERY=local-dev-1 \
+bun run src/apps/cli/from-pr-cmd-runner.ts --dry-run
+```
+
+`--dry-run` emits the redacted body to stdout instead of calling `gh pr
+comment`. Drop the flag to post for real (requires `gh` authenticated against
+the target repo).
+
+CLI flags: `--repo`, `--pr`, `--trust-scope`, `--trigger-phrase` (repeatable),
+`--allow-bots`, `--dry-run`. Run with `--help` for the full list.
 
 ## Related
 

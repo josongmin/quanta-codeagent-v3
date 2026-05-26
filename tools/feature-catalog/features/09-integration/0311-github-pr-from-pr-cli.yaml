@@ -51,10 +51,12 @@ evidence:
   code:
     - src/apps/cli/from-pr-cmd.ts
     - src/apps/cli/from-pr-cmd-adapters.ts
+    - src/apps/cli/from-pr-cmd-runner.ts
   adrs: [311, 313]
   tests:
     unit:
       - tests/unit/apps/cli/from-pr-cmd.test.ts
+      - tests/unit/apps/cli/from-pr-cmd-runner.test.ts
       - tests/unit/integrations/github/cli-real-adapters-hellgate-r3.test.ts
       - tests/unit/integrations/github/redact-parity-hellgate-r3.test.ts
     integration: []

@@ -23,11 +23,18 @@
  *     plumbing; we just render).
  */
 
+import { cyan, dim, gray, green, magenta, yellow } from "@/ui"
 import type { StatusBar } from "./status-bar"
 
 /** Default braille glyph cycle (10 frames). Same set Codex / Claude Desktop
  *  use for their "thinking…" indicator; cycles cleanly at any frame rate. */
 export const DEFAULT_GLYPHS: readonly string[] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+/** Visual separator between indicator segments. A thin middle-dot keeps the
+ *  line dev-paper feel — same character spacing as `·` but renders quieter
+ *  when wrapped in `dim()`. The two-space halo gives each segment a clear
+ *  visual unit without bunching them tight on smaller terminals. */
+const SEP = dim("·")
 
 /** Default frame interval (ms). 80 ms ⇒ 12.5 fps — fast enough to look smooth,
  *  slow enough to keep the repaint cost negligible. */
@@ -126,21 +133,21 @@ interface RenderState {
 }
 
 const renderLine = (state: RenderState, glyphs: readonly string[], nowMs: number): string => {
-  const glyph = glyphs[state.frame % glyphs.length] ?? "·"
+  const glyph = cyan(glyphs[state.frame % glyphs.length] ?? "·")
   const elapsed = formatElapsed(nowMs - state.startedAt)
 
   // Pre-first-chunk: short "thinking…" line — no token counts yet.
   if (state.firstChunkAt === undefined) {
-    return `${glyph} thinking… ${elapsed}`
+    return `${glyph} ${dim("thinking…")} ${cyan(elapsed)}`
   }
 
   const ttft = formatElapsed(state.firstChunkAt - state.startedAt)
-  const parts: string[] = [glyph, "streaming", elapsed, `ttft ${ttft}`]
-  if (state.inputTokens > 0) parts.push(`${formatTokens(state.inputTokens)} in`)
-  if (state.outputTokens > 0) parts.push(`${formatTokens(state.outputTokens)} out`)
+  const parts: string[] = [glyph, dim("streaming"), cyan(elapsed), `${dim("ttft")} ${yellow(ttft)}`]
+  if (state.inputTokens > 0) parts.push(`${magenta(formatTokens(state.inputTokens))} ${dim("in")}`)
+  if (state.outputTokens > 0) parts.push(`${green(formatTokens(state.outputTokens))} ${dim("out")}`)
   const cost = formatCost(state.costUsd)
-  if (cost !== "") parts.push(cost)
-  return parts.join(" · ")
+  if (cost !== "") parts.push(gray(cost))
+  return parts.join(` ${SEP} `)
 }
 
 /** Build a turn indicator bound to the injected {@link StatusBar}. See

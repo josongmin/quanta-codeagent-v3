@@ -18,9 +18,7 @@ import type { AgentConfig, AgentOutcome } from "@/agent"
 import type { LLMPort } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
-import {
-  createRuntimeFromAgentConfigBase,
-} from "@/sdk/runtime"
+import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
 import type { StreamPort } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
 
