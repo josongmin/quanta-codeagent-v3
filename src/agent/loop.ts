@@ -1,5 +1,7 @@
 import type { LLMPort, Message, StreamEvent, SystemPromptInput } from "@/llm"
+import { withImageSanitizationRetry } from "@/llm/image-sanitization-retry"
 import { createWorkingMemory, type WorkingMemory } from "@/memory"
+import { createWorkingMemoryHistorySanitization } from "@/memory/history-sanitization"
 import {
   attrs,
   createTurnTimingCapture,
@@ -2129,12 +2131,44 @@ const resolveTurnLoopOutcome = async (args: {
   return { kind: "continue" }
 }
 
+/**
+ * ADR-0328 image sanitization retry wire — when `cfg.imageSanitizationRetry`
+ * is enabled, wrap `cfg.llm` so an Anthropic `invalid_image` 400 triggers a
+ * single-pass last-turn image scrub + re-stream (Codex
+ * `replace_last_turn_images → continue` parity). Default-OFF (absent or
+ * `enabled !== true`) ⇒ returns `cfg.llm` verbatim, byte-identical to the
+ * pre-ADR path. `cfg` MUST already be a per-run clone (see the
+ * `baseCfg === config` guard in `createRunAgentContext`) — the caller mutates
+ * `cfg.llm` with the return value and that mutation must not leak.
+ */
+const maybeWrapImageSanitizationRetry = (cfg: AgentConfig, wm: WorkingMemory<Message>): LLMPort => {
+  if (cfg.imageSanitizationRetry?.enabled !== true) return cfg.llm
+  const port = createWorkingMemoryHistorySanitization(wm)
+  const wrapOpts = {
+    ...(cfg.imageSanitizationRetry.maxAttempts !== undefined
+      ? { maxAttempts: cfg.imageSanitizationRetry.maxAttempts }
+      : {}),
+    ...(cfg.imageSanitizationRetry.placeholder !== undefined
+      ? { placeholder: cfg.imageSanitizationRetry.placeholder }
+      : {}),
+  }
+  return withImageSanitizationRetry(cfg.llm, port, wrapOpts)
+}
+
 const createRunAgentContext = async (config: AgentConfig): Promise<RunAgentContext> => {
   const features = await buildSessionFeatures(config)
-  const dedupGateActive =
-    config.dedupGate !== undefined || config.dedupGateConfig?.disabled !== true
   const baseCfg = buildEffectiveConfig(config, features.extraTools)
-  const cfg: AgentConfig = dedupGateActive && baseCfg === config ? { ...baseCfg } : baseCfg
+  // `cfg` is mutated below (onPlanExitOutcome, shellSnapshotSession, llm wrap,
+  // attachDedupGate, attachCapEnforcer, attachLocalizePhase, wireHookPromptPending).
+  // `buildEffectiveConfig` returns the SAME reference as `config` when there are
+  // no extra tools (see `buildEffectiveConfig` impl), so without an unconditional
+  // shallow clone those mutations would leak to the caller. The previous
+  // `dedupGateActive && baseCfg === config` gate left the no-dedup / no-extra-tools
+  // path leaking — ADR-0328 §Wire documents this as the ownership concern that
+  // was blocking the `cfg.llm` wrap. Clone whenever we share a reference with
+  // the caller; when `buildEffectiveConfig` already minted a fresh object,
+  // re-cloning is unnecessary.
+  const cfg: AgentConfig = baseCfg === config ? { ...baseCfg } : baseCfg
   const pendingPlanExitRef: { current: PendingPlanExit | null } = { current: null }
   const onPlanExitOutcome = cfg.onPlanExitOutcome
   cfg.onPlanExitOutcome = (event) => {
@@ -2144,6 +2178,7 @@ const createRunAgentContext = async (config: AgentConfig): Promise<RunAgentConte
 
   const skillGate = buildSkillGate(features.skillAllowlists, features.skillOverrides)
   const wm: WorkingMemory<Message> = createWorkingMemory<Message>(buildSeedMessages(cfg))
+  cfg.llm = maybeWrapImageSanitizationRetry(cfg, wm)
   const recorder = cfg.metrics ? new AgentRecorder(cfg.metrics) : undefined
   const sessionId = cfg.sessionId ?? "default"
   const breaker = cfg.compactionBreaker?.disabled

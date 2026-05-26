@@ -1,7 +1,16 @@
 # ADR-0328 — invalid_image classification + sanitization-retry wire (ADR-0323 production wire)
 
 ## Status
-Accepted. Slice landed; production hookup (single mutation in `createRunAgentContext`) is the only follow-up.
+Accepted and landed. Slice + production hookup both in main: the wrap mutates
+`cfg.llm` inside `createRunAgentContext` immediately after `wm` is built
+(`src/agent/loop.ts` — `maybeWrapImageSanitizationRetry`). The ownership
+concern flagged in §Wiring was resolved in the same change by collapsing the
+`cfg` clone gate from `dedupGateActive && baseCfg === config` to
+`baseCfg === config` — `cfg` is now a per-run clone whenever
+`buildEffectiveConfig` would otherwise return the caller's reference, so
+every existing mutation in this function (`onPlanExitOutcome`,
+`shellSnapshotSession`, dedup-gate / cap-enforcer / localize-phase attaches,
+and now `cfg.llm`) is leak-safe.
 
 ## Context
 
