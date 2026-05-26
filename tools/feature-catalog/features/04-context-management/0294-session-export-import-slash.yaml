@@ -32,6 +32,7 @@ evidence:
   code:
     - src/apps/cli/session-cmd.ts
     - src/apps/cli/slash-commands.ts
+    - src/apps/cli/repl/surface-compose.ts
   adrs: [294]
   tests:
     unit:
@@ -39,14 +40,15 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold:
-  reason: '`ctx.sessionIo` 어댑터를 REPL surface 에서 host session store 에 와이어하는 작업은 후속 PR. 현재는 slash + hellgate 만 land — 어댑터 inject 만 추가하면 즉시 활성 (1 슬롯 채우기).'
-  promotion_path: 'REPL composition root 에서 `slashCtx.sessionIo = { readSession, writeSession, mintNewId }` 슬롯을 host 의 SessionStore 위 얇은 어댑터로 채움. 그 1-line 와이어만 추가하면 L4.'
+deliberate_hold: null
 notes: |
   - Plane-clean: `@/session/import-export`, `@/session/import-export-fs`,
     `@/session/types`, `node:fs/promises`, `node:path`, `node:os`,
     `is-path-inside` (기존 dep). `@/storage` / `@/permission` / `@/agent`
     절대 import X — host adapter 가 store 추상화.
+  - REPL surface now wires `sessionIo` from the default V2 session store,
+    so `/session export|import` is active on the main interactive path
+    rather than slash-only plus pending host follow-up.
   - Id rewrite on import: 임포트 시 `meta.id` 를 새로 minted id 로 덮어씀.
     안 그러면 store index 와 file 의 meta.id 가 drift. 같은 envelope 을
     두 번 import 하면 두 개의 별도 session 생성 — by design.

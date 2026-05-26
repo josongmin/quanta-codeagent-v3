@@ -17,7 +17,7 @@ import {
   saveSessionById,
 } from "@/session"
 import { logger } from "@/shared"
-import { type Tool, ToolRegistry } from "@/tool"
+import type { Tool } from "@/tool"
 import { runImageCmd } from "../image-cmd"
 import type { ImageQueue } from "../image-queue"
 import { createPromptHistory, type PromptHistory } from "../prompt-history"
@@ -300,11 +300,11 @@ export const composeSurfaceWires = (
 ): ReplSurfaceWires => {
   const convStore = opts?.convStore ?? defaultConversationCheckpointStore()
   // ADR-0300/0304 — per-session granular checkpoint registry. ALWAYS
-  // instantiated (pure in-memory, zero cost); mirrored onto sessionDeps
+  // instantiated (pure in-memory, zero cost); mirrored onto the runtime bridge
   // so `assembleConfig` carries it onto `AgentConfig.granularRegistry`.
   // The per-tool recorder (Wire 3 below) populates it when opted in.
   const granularRegistry: GranularRegistryPort = defaultGranularRegistry()
-  setup.sessionDeps.granularRegistry = granularRegistry
+  setup.runtimeBridge.setGranularRegistry(granularRegistry)
   // ADR-0309 Wire 3 — per-tool auto-record cadence. Env-gated:
   // `QUANTA_PER_TOOL_RECORD=on` ⇒ wrap every tool in the session registry
   // with a pre-execute snapshot recorder. Absent / any other value ⇒
@@ -339,8 +339,7 @@ export const composeSurfaceWires = (
       },
       logger,
     })
-    const wrapped = setup.sessionDeps.registry.all().map((t: Tool) => recorder.wrapTool(t))
-    setup.sessionDeps.registry = new ToolRegistry(wrapped)
+    setup.runtimeBridge.wrapRegistry((tool: Tool) => recorder.wrapTool(tool))
   }
   // ADR-0292 — turn-end record wire. Env-gated: `QUANTA_CHECKPOINT_CONV=on`
   // wires the live wire; anything else leaves the slot `null` so the slash
@@ -421,17 +420,17 @@ export const composeSurfaceWires = (
     // the slot entirely (default-OFF byte-identical).
     composerHandle,
     conversationStore: convStore,
-    ...(setup.sessionDeps.toolProfileState !== undefined
-      ? { toolProfileState: setup.sessionDeps.toolProfileState }
+    ...(setup.runtimeBridge.getToolProfileState() !== undefined
+      ? { toolProfileState: setup.runtimeBridge.getToolProfileState() }
       : {}),
-    ...(setup.sessionDeps.identityModeState !== undefined
+    ...(setup.runtimeBridge.getIdentityModeState() !== undefined
       ? {
-          identityModeState: setup.sessionDeps.identityModeState,
+          identityModeState: setup.runtimeBridge.getIdentityModeState(),
           onIdentityModeChange: setup.refreshSystemPrompt,
         }
       : {}),
-    ...(setup.sessionDeps.focusChain !== undefined
-      ? { focusChain: setup.sessionDeps.focusChain }
+    ...(setup.runtimeBridge.getFocusChain() !== undefined
+      ? { focusChain: setup.runtimeBridge.getFocusChain() }
       : {}),
     textInbox,
   })

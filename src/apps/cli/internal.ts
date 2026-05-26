@@ -701,10 +701,9 @@ export const composeLLM = (
     env: process.env,
   })
 
-// ── Split: `SessionDeps` and `Tooling` live in `@/runner/assemble/*` (PURE
-//    composition, no env reads). Re-exported below so CLI-local types keep
-//    their historical surface without pulling runtime assembly helpers back in.
-export type { SessionDeps } from "@/runner/assemble/config"
+// ── Split: `Tooling` lives in `@/runner/assemble/*` (PURE composition, no
+//    env reads). Re-exported below so CLI-local types keep their historical
+//    surface without pulling runtime assembly helpers back in.
 export type { Tooling } from "@/runner/assemble/tooling"
 
 /** Build the per-run tooling: resolve every env-driven default-OFF knob, then

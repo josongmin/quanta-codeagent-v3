@@ -2,7 +2,7 @@
 
 **Cursor 3.2.16 / Codex Desktop build 2867 (codex-rs 0.131.0-α9) / Claude Desktop 1.7196.3 + Claude Code 2.1.138 / quanta-codeagent-v3**
 
-> **검증 상태: Draft v15 (15 wave 누적 823+ 신발견 / 25 카테고리 A~Y / ~418 row · ★ quanta GitHub trunk 발굴)**
+> **검증 상태: Draft v16 (16 wave 누적 861+ 신발견 / 25 카테고리 A~Y / ~432 row · ★ Cursor agent.api5.cursor.sh region routing 발견)**
 >
 > - **v0**: 메모리 + ADR + `.extracted_source/` 카탈로그 초벌
 > - **v1**: 4 agent spot-check — 19/20 hit (95% accuracy)
@@ -60,6 +60,7 @@
 | Spinner stall detection (30s) | 3 | 3 | **5** | **5** | Cld: `extr/claude-code-cli/_cli-symbols.txt:L108092+` (tengu_spinner_stalled_ui + 70+ tengu_* family) · qta: ADR-0227 + `src/llm/spinner-stall/index.ts:16` (createDefaultStallDetector) | Claude 흡수 + 3중 default-OFF 레이어로 |
 | Auto-compact multi-trigger (5-axis) | 3 | **5** | 3 | 4 | Cdx: `compact.rs`/`compact_remote.rs`/`compact_remote_v2.rs` | `auto-compact-` turn ID prefix · `context_limit\|model_downshift\|manual\|memento\|prefix_compaction` |
 | Compaction sliding-window archive | 4 | 3 | 4 | 4 | Csr: `ConversationSummaryArchive` `self_summary_count` | Cursor: out-of-band, transcript에 마커 0 |
+| **Pre-Compact HITL + ConversationSummaryArchive** [v16 신발견 ADR] | 4 | 3 | 4 | **5** | qta: **ADR-0075 pre-compact-hitl** + ConversationSummaryArchive | compaction 전에 human-in-loop confirm + archive — Cursor PreCompactRequestQuery 흡수 |
 | PreCompact HITL hook | 4 | 3 | 4 | 4 | Csr: `PreCompactRequestQuery` (context_usage_percent/messages_to_compact/is_first_compaction) | first-compaction이면 warm-up 다르게 |
 | Reflect / replan gate | 4 | 3 | 2 | 4 | Csr: AiBranchService `OpusChainReflect` (extr/cursor/.../extensionHostWorkerMain.js) · qta: ADR-0089 lint-grounded-reflect | typed Decision oneof `{accept\|retry_without_more_info\|retry_with_codebase_question}` |
 | Plan mode (enabled-tools allowlist) | **5** | 4 | 4 | 4 | Csr: agent-exec EnabledTools selector · qta: ADR-0088 phasegate-hitl-ladder | "인터셉터 아닌 선언적 게이팅" — 도구 enum subset만 expose |
@@ -115,6 +116,10 @@
 | MCP standard client | **5** | **5** | **5** | 4 | qta: ADR-0007 mcp-slice | |
 | **Claude 11 MCP tool namespaces verbatim** [v15 재정정] | 3 | 3 | **5** | 3 | Cld: `_cli-symbols.txt` (mcp__claude-in-chrome__{gif_creator,javascript_tool,read_console_messages,tabs_context_mcp,tabs_create_mcp} + mcp__ide__{execute,get,executeCode,getDiagnostics} + mcp__slack__{slack_send_message,slack_read_thread}) = **11 tool verified** (v12 13 → v15 11 정확) | MCP marketplace vendor-pre-installed — `mcp__claude-in-chrome__tabs_context_mcp` must be called first |
 | **Claude /api/oauth/* 8 endpoints + tengu_ 32 sub-family** [v15 신발견] | 0 | 0 | **5** | 0 | Cld: `_cli-symbols.txt` `/api/oauth/{account/{grove_notice_viewed,settings},claude_cli/{create_api_key,roles},file_upload,files,organizations,profile,usage}` 8 + tengu_advisor 6 (command/dialog_shown/strip_retry/tool_call/tool_interrupted/tool_token_usage) + tengu_vertex 9 (default_check/probe_result/setup_started+complete+cancelled/upgrade_*) + tengu_voice 6 (circuit_breaker_tripped/recording_*) + tengu_worktree 7 (cleanup/created/entered_existing) + tengu_ws_transport 4 (reconnected) | OAuth surface 8-endpoint + telemetry 32 subgroup — v7 6 정정 |
+| **Claude `handoff(worker)` Skill lifecycle 7-stage** [v16 신발견] | 3 | 4 | **5** | 3 | Cld: `_cli-symbols.txt` skill construction flow: dedup→construct→pipe-test→wrap→validate→live-proof→**handoff(worker)** + free.delete | skill 생애주기 7-stage + worker pool 반환 — handoff가 lifecycle terminal |
+| **Claude chrome-native-host bridge** [v16 신발견] | 0 | 4 | **5** | 0 | Cld: `_cli-symbols.txt` `--chrome-native-host` flag + .bat 지원 + Mach-O binary | Chrome native messaging — agent가 browser 직접 control 가능 |
+| **Claude `tengu_fork_*` (agent_query + subagent_enabled)** [v16 신발견] | 0 | 0 | **5** | 3 | Cld: `_cli-symbols.txt` `tengu_fork_agent_query` (쿼리 라우팅) + `tengu_fork_subagent_enabled` (포크 활성화) | subagent fork 제어 두 신호 — query routing + enable gate |
+| **Claude `mcp__ide__{getDiagnostics,executeCode}` IDE MCP** [v16 신발견] | 4 | 3 | **5** | 3 | Cld: `_cli-symbols.txt` mcp__ide__ namespace + getDiagnostics(LSP integration) + executeCode (jupyter-like REPL) | IDE 진단 + 코드 실행을 MCP tool로 — agent가 IDE backbone 사용 |
 | **Claude Hook block 3-pair (JOB/SCRIPT/NOTICE × BEFORE_START/AFTER_FINISH)** [v12 신발견] | 0 | 0 | **5** | 0 | Cld: `_cli-symbols.txt` `JOB_BLOCK_{BEFORE_START,AFTER_FINISH}` + `SCRIPT_BLOCK_{BEFORE_START,AFTER_FINISH}` + `NOTICE_BLOCK_{BEFORE_START,AFTER_FINISH}` | 6 hook event = 3 block kind × 2 lifecycle (before/after) — automation 자체에 hook 박힘 |
 | **Claude 5 Worktree config keys** [v12 신발견] | **5** | 4 | **5** | 4 | Cld: `worktreeEK/worktreeSparseCheckout/worktreeCount/worktreeSymlinkDirs` + git sparse-checkout cone mode + baseRef | Claude도 worktree 1급 — sparse-checkout cone로 큰 repo도 효율적 |
 | MCP Tasks (장기실행 큐) | 3 | 4 | **5** | 3 | Cld: directMcpHost.js (`tasks/{list,get,result,cancel}` + TaskMessageQueue) · qta: ADR-0196 | Anthropic 자체 확장 — 표준 MCP에 없음 |
@@ -169,6 +174,7 @@
 | **GuardianAssessmentEvent (4-action discriminated)** [v7 신발견] | 0 | **5** | 0 | 4 | Cdx: `_cli-symbols.txt` `GuardianAssessmentEvent` (execve/network_policy_amendment/exec_policy_amendment) + 5 decision sources | "Guardian이 무엇을 평가했나"를 typed action enum + 5 source로 audit |
 | Per-thread permissions store | 3 | **5** | 3 | 3 | Cdx: `.codex-global-state.json` `heartbeat-thread-permissions-by-id` | |
 | **Permission stack: thread + host + post-denial** [v11 신발견 ADR] | 0 | 3 | 0 | **5** | qta: **ADR-0046 permission-stack** | thread / host / post-denial 3-layered gates — Codex Guardian post-denial precedence 흡수 |
+| **Permission sandbox 2-layer + 4-pillar** [v16 신발견 ADR] | 4 | **5** | 4 | **5** | qta: **ADR-0135 permission-sandbox-2-layer-4-pillar** | dual-layer file-system + 4-pillar permission model (read/write/exec/network 4-pillar × user/sandbox 2-layer) |
 | **Mention filter trust-scope (4-attack surface gate)** [v15 신발견 ADR] | 4 | 3 | 4 | **5** | qta: **ADR-0314 mention-filter-trust-scope** (4 attack surface: strangers/bots/self-loop/code-block echo + word-boundary anchoring + code-block+blockquote exclusion + trust-scope rank `public<collaborator<member<owner` + bot gate + 17 hellgate) | GitHub PR comment에서 @-mention agent trigger 안전화 — 4-attack 모두 차단 |
 | **Cursor Anysphere fork mapping (8-path)** [v15 신발견] | **5** | 0 | 0 | 0 | Csr: `product.json` extensionReplacementMapForImports (ms-vscode-remote.remote-{ssh,wsl,containers} → anysphere.remote-{ssh,wsl,containers} + ms-python.vscode-pylance → anysphere.cursorpyright + ms-vscode.cpptools → anysphere.cpptools + ms-dotnettools.csharp → anysphere.csharp) | 8-path replacement — getExtensionOverrides context로 amazon-q/aws-toolkit injection |
 
@@ -245,6 +251,7 @@
 | **Memory citation provenance chain** [v6 신발견] | 0 | 0 | 0 | **5** | qta: **ADR-0082 memory-citation-provenance** | evidence → recalled → output attribution chain — 메모리가 산출물에 미친 영향 추적 |
 | **SOTA memory: tier+kind+벡터+dedupe** [v6 신발견] | 0 | 0 | 0 | **5** | qta: **ADR-0008 sota-memory** | episodic vs semantic tier × 4-kind enum × 벡터 임베딩 + dedupe — Codex 2-Phase보다 풍부 |
 | Retrieval (Merkle+simhash+rerank) | **5** | 3 | 4 | 3 | Csr: cursor-retrieval extension (file-service NAPI Rust 29MB) · qta: ADR-0159 retrieval-sota-stack | Merkle subtree 증분-sync 만 차용, 벡터스토어 흡수금지 |
+| **Localize tool SOTA++ (BM25-lite + FrameTier)** [v16 신발견 ADR] | 4 | 3 | 3 | **5** | qta: **ADR-0115 localize-sota++** BM25-lite + FrameTier penalty | lexical IR + frame-tier penalty (compiled artifact 배제) — recall@1 0→0.286 검증 |
 | **Semantic-search port (closed + adapters)** [v11 신발견 ADR] | **5** | 3 | 4 | **5** | qta: **ADR-0254 semantic-search-port** + ADR-0261 pluggable-embedder-store | closed port + N adapter (BM25/embedding/hybrid) — Cursor 13 reranker 패턴을 typed port로 |
 | 13 reranker (LULEA/UMEA + 11) | **5** | 0 | 3 | 0 | Csr: `extr/cursor/out/.../extensionHostWorkerMain.js` (RerankerAlgorithm enum 12 variant: LULEA/UMEA in-house + LLAMA/STARCODER_V1/GPT_3_5_LOGPROBS/COHERE/VOYAGE/ADA_EMBEDS+) | 13 reranker 중 2개는 in-house code-specialized |
 | 4 chunk-size buckets | **5** | 0 | 0 | 0 | Csr: `RechunkerChoice` `IDENTITY\|600_TOKS\|2400_TOKS\|4000_TOKS` | retrieval 후 token 버킷에 맞게 re-chunk |
@@ -280,6 +287,7 @@
 | Per-automation reasoning override | **5** | 4 | 3 | 3 | Csr: `automations.reasoning.label` | 스케줄러 task별 reasoning effort 차등 |
 | Region override (Haiku) | 3 | 4 | **5** | 3 | Cld: `SMALL_FAST_MODEL_AWS_REGION` | Haiku만 별도 region — 비용 최적 |
 | Anthropic prompt-cache tracker | 0 | 0 | 4 | **5** | qta: ADR-0182 src/llm/prompt-cache/ | cache_creation/cache_read pricing + tool surface |
+| **Sectioned system prompt (4-section breakpoint)** [v16 신발견 ADR] | 0 | 0 | 4 | **5** | qta: **ADR-0051 sectioned-system-prompt-default-on** | 4-section breakpoint strategy — prompt cache hit ratio 극대 (각 section cache key 분리) |
 | Token budget breaker | 4 | 4 | 4 | **5** | qta: ADR-0138/0144 + `src/agent/budget/meter.ts:18` (BudgetMeter export) | hard gate |
 | Cost-steering throttle (runtime) | 3 | 3 | **5** | 3 | Cld: `CLAUDE_CODE_AGENT_COST_STEER`+`budget_usd` attachment | |
 | Rate-limit tier awareness | 3 | 4 | **5** | 3 | Cld: `CLAUDE_CODE_RATE_LIMIT_TIER`+`BLOCKING_LIMIT_OVERRIDE` | |
@@ -366,6 +374,10 @@
 | **Cursor 60 aiserver.v1 services + 13,528 protobuf stubs** [v13 신발견] | **5** | 0 | 0 | 0 | Csr: workbench (60 aiserver.v1 service types + 13,528 typeName/fromBinary/equals stubs + 59 event types) | massive protobuf code-gen — multi-service marshaling 완전 typed |
 | **Cursor `cursor-proclist` native binding** [v13 신발견] | **5** | 4 | 4 | 0 | Csr: `_firstparty-npm/cursor-proclist/build/Release/cursor_proclist.node` (return array [pid, ppid, name, extensionId, cpuTimeMs, memoryMB, argv]) | process tree + per-extension metrics — Electron 한계 회피 |
 | **Cursor Sentry 37-type integration** [v15 신발견] | **5** | 4 | 4 | 3 | Csr: workbench.desktop.main.js (SentryProject/Trigger/Status/TraceHeader/Span/NonRecordingSpan/FramesAndReverse/Callback/IssueEvent {Created,Resolved,Assigned,Archived,Unresolved} 37 distinct classes + 11 payload traces) | Sentry v2 stable telemetry core — issue lifecycle 5-state + distributed tracing schema 완비 |
+| **Cursor Agent API 5-tier region routing** [v16 ★ 신발견] | **5** | 4 | **5** | 0 | Csr: `agent.api5.cursor.sh` (base) + region variants `agentn-gcpp-uswest/eucentral/apsoutheast` | 5-tier API hierarchy for Managed Agents — GCP region별 endpoint 분리 (latency 최적) |
+| **Cursor Workspace Trust 20+ security fields** [v16 신발견] | **5** | 0 | 0 | 0 | Csr: `workspaceTrustControls` + `allowedModels` + `cursorIgnoreControls` + `dotCursorProtection` 20+ security fields configuration struct | workspace trust를 20+ field로 typed — fine-grained security gate |
+| **Cursor Tab 2-endpoint divergence** [v16 신발견] | **5** | 0 | 0 | 0 | Csr: `api3.cursor.sh` (cursorTab) vs `api4.cursor.sh` (secondary API) | dual-endpoint architecture — Tab prediction이 별도 API hierarchy |
+| **Cursor Webview UUID isolation pattern** [v16 신발견] | **5** | 0 | 0 | 0 | Csr: `webviewContentExternalBaseUrlTemplate` `{{uuid}}.vscode-cdn.net/{{quality}}/{{commit}}/out/...` | per-session UUID subdomain isolation — webview cross-domain context 격리 |
 | **Cursor `cursorTrustedExtensionAuthAccess` whitelist** [v15 신발견] | **5** | 0 | 0 | 0 | Csr: `product.json` (["anysphere.cursor-retrieval", "anysphere.cursor-commits"] 2-extension OAuth escalation) | trusted-only OAuth — dual-extension scope authorization, 다른 extension은 user prompt 필요 |
 | **Cursor `cursorTracing` API proposal** [v15 신발견] | **5** | 0 | 0 | 0 | Csr: cursor-mcp `vscode.proposed.cursorTracing.d.ts` + enabledApiProposals ["control", "cursor", "cursorTracing"] | tracing privileges가 별도 API proposal — anysphere.{remote-ssh,wsl,containers,tunnels,cpptools,cursorpyright} 한정 |
 | Local↔cloud scope URL | **5** | 4 | 4 | 0 | Csr: `local:${conversationId}` vs `cloud:${taskId}` | composerId가 URL에 박혀 cloud-agent 라벨링 |
@@ -693,6 +705,21 @@ Chronicle ambient 1388 summaries · TCC.db 직접 read · AI-tracking hash DB(me
 5. `POSIX_SPAWN_SETDISCLAIM` ✓ + `disclaimer` ✓ @ userdata/claude shell wrapper
 
 **총괄: 19/20 cell hit · 95% accuracy.** 메모리가 거의 정확했고, 1건만 보수화 필요 (FloatingPenguinMini).
+
+### Draft v16 — wave 13 (2026-05-26 #16, 4-agent: Cursor 8 + Codex 10 + Claude 10 + quanta 10 ADR = **38 신발견**)
+
+**v16 표 반영: 14 신규 row**:
+- **★ Cursor Agent API 5-tier region routing** (agent.api5.cursor.sh + agentn-gcpp-uswest/eucentral/apsoutheast) — managed agents region 분리 신발견
+- Cursor Workspace Trust 20+ security fields / Tab api3+api4 dual-endpoint / Webview UUID isolation pattern
+- Codex Rule-DSL 5-category taxonomy (file/shell/net/uv/audit) / Plugin cache 2-variant (bundled vs primary-runtime)
+- Claude handoff(worker) Skill lifecycle 7-stage / chrome-native-host bridge / tengu_fork_ 2-signal / mcp__ide__ 2-tool
+- quanta ADR-0051 sectioned-system-prompt (4-section cache breakpoint) / 0075 Pre-Compact HITL / 0115 BM25-lite+FrameTier / 0135 2-layer+4-pillar permission
+
+**v16 미반영 (verification)**:
+- Cursor: HallucinatedFunctionsProtoPrompt Service 2-pair / reactiveStorageService backbone / Policy Watcher 3-field Mac vs Win
+- Codex: Prosemirror comment node mapping (677KB) / Electron 30 IPC channels / OAuth signal-based state machine / Vendor Imports OpenAI Skills 표준 lib / Diff/Format React (diff-unified-DjSR1Ba3.js) / Global State Persistence (.codex-global-state.json electron atoms)
+- Claude: CLAUDE_CODE_MID_CONVERSATION_SYSTEM thinking latency / oauth_error_{status,type} / mcp__claude-in-chrome__{javascript_tool,read_console_messages} verbatim / JOB_BLOCK 2-event / CLAUDE_CODE_PROACTIVE
+- quanta: ADR-0073 StopCategory 3-layer / 0140 Background-subagent caller wire / 0217 typed error enum 16-variant / 0247 nickname 39 + role enum (★ 메모리 0042와 sibling) / 0258 playbook nesting + cycles / 0266 ModelTag versioning cache invalidation
 
 ### Draft v15 — wave 12 (2026-05-26 #15, 4-agent: Cursor 9 + Codex 12 + Claude 80+ items in 10 groups + quanta 12 ADR = **65 신발견** + 2 정정)
 
@@ -1063,4 +1090,4 @@ quanta:
 
 ---
 
-**Generated**: 2026-05-26 / **Draft v15** (15 wave 누적 **823+ 신발견** / **25 카테고리 A~Y** / ~418 row / 245+ row 정정-보강. v15 ★ 핵심: **quanta GitHub trunk 4 ADR 발굴** (0311 github-actions-trigger / 0312 webhook-host-scaffold / 0313 PR redaction / 0314 mention-filter-trust-scope) + 추가 ADR 3개 (0271 why-meta-LLM / 0297 CliFeatureConfig / 0307 repl-host-slim-down). v15 정정: Codex crate 42→**41 verified** / Claude MCP tool 13→**11** / /api/oauth 6→**8**. Cursor Sentry 37-type + cursorTracing API proposal + Anysphere fork 8-path. Codex 123 rollout summaries + transcription-history multilingual)
+**Generated**: 2026-05-26 / **Draft v16** (16 wave 누적 **861+ 신발견** / 25 카테고리 A~Y / ~432 row / 259+ row 정정-보강. v16 ★ 핵심: **Cursor Agent API 5-tier region routing** (agent.api5.cursor.sh + agentn-gcpp-{uswest,eucentral,apsoutheast} — managed agents GCP region별 endpoint) + Workspace Trust 20+ security fields + Tab dual-endpoint api3/api4 + Webview UUID isolation. Codex Rule-DSL 5-category taxonomy + Plugin cache 2-variant. Claude handoff(worker) 7-stage lifecycle + chrome-native-host bridge + tengu_fork_ 2-signal + mcp__ide__ tool. quanta ADR-0051 4-section prompt cache breakpoint + 0075 Pre-Compact HITL + 0115 BM25-lite+FrameTier + 0135 2-layer+4-pillar permission)

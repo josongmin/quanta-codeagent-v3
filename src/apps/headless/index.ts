@@ -20,9 +20,8 @@
 
 import type { AgentOutcome } from "@/agent"
 import { bootstrapSession, type SessionBootstrapResult } from "@/host/bootstrap"
-import type { SessionDeps } from "@/runner/assemble/config"
 import type { RuntimeSession } from "@/sdk/runtime"
-import { createLegacyRuntimeFromBootstrap } from "@/sdk/runtime/compat"
+import { createRuntimeFromBootstrap, summarizeRuntimeWires } from "@/sdk/runtime/bridge"
 import { buildFakeBootstrapDeps, buildFakeRuntime, RecordingStream } from "./fake-deps"
 import { FakeLlm } from "./fake-llm"
 import type {
@@ -52,15 +51,17 @@ const completionsOf = (input: HeadlessRunInput): readonly FakeCompletion[] => {
   return [{ text: "ok" }]
 }
 
-/** Compose the per-turn `SessionDeps` from a bootstrap result + the
+/** Compose the runtime-bridge inputs from a bootstrap result + the
  *  recording stream. Surface-clean: only fields the headless path needs
  *  (no admissibility, no plan-store, no follow-up queue). The signal flows
  *  through from the caller via `boot.abort.signal`. */
-const buildHeadlessLegacyRuntimeArgs = (
+type HeadlessRuntimeDeps = Awaited<ReturnType<typeof createRuntimeFromBootstrap>>["sessionDeps"]
+
+const buildHeadlessRuntimeArgs = (
   boot: SessionBootstrapResult,
   input: HeadlessRunInput,
   stream: RecordingStream,
-): Parameters<typeof createLegacyRuntimeFromBootstrap>[0] => ({
+): Parameters<typeof createRuntimeFromBootstrap>[0] => ({
   boot,
   stream,
   // The headless surface does not interact with a human — `onConfirm` denies
@@ -88,22 +89,8 @@ const abortedOutcome = (messages: readonly import("@/llm").Message[]): AgentOutc
   messages: [...messages],
 })
 
-const summarizeHeadlessWires = (deps: SessionDeps): HeadlessRuntimeWires => ({
-  executionPlane: {
-    conversationCheckpoint: deps.conversationCheckpoint !== undefined,
-    fork: deps.fork !== undefined,
-    forkSession: deps.forkSession !== undefined,
-    delegation: deps.delegation !== undefined,
-    subagentBackground: deps.subagentBackground !== undefined,
-    autoBackground: deps.autoBackground !== undefined,
-  },
-  memoryAuto: {
-    sessionCtx: deps.sessionCtx !== undefined,
-    stage1OutputsStore: deps.stage1OutputsStore !== undefined,
-    memoryConsolidator: deps.memoryConsolidator !== undefined,
-    memoryConsolidatorEnabled: deps.memoryConsolidator?.enabled === true,
-  },
-})
+const summarizeHeadlessWires = (deps: HeadlessRuntimeDeps): HeadlessRuntimeWires =>
+  summarizeRuntimeWires(deps)
 
 /** Run a single agent turn through `@/host/bootstrap` + internal
  *  `@/runner/*` helpers with faked deps. Returns the bootstrap result, the
@@ -143,12 +130,10 @@ export const runHeadlessOnce = async (input: HeadlessRunInput): Promise<Headless
   }
 
   let session: RuntimeSession | undefined
-  let runtimeFacade:
-    | Awaited<ReturnType<typeof createLegacyRuntimeFromBootstrap>>["runtime"]
-    | undefined
+  let runtimeFacade: Awaited<ReturnType<typeof createRuntimeFromBootstrap>>["runtime"] | undefined
   try {
-    const { runtime, sessionDeps } = await createLegacyRuntimeFromBootstrap(
-      buildHeadlessLegacyRuntimeArgs(boot, input, stream),
+    const { runtime, sessionDeps } = await createRuntimeFromBootstrap(
+      buildHeadlessRuntimeArgs(boot, input, stream),
     )
     runtimeFacade = runtime
     session = await runtimeFacade.createSession({

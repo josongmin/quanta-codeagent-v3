@@ -29,6 +29,8 @@ purpose: |
   absent `phase2` block ⇒ zero allocation, byte-identical to today.
 evidence:
   code:
+    - src/runner/session-memory-auto.ts
+    - src/apps/cli/repl/session-deps-compose.ts
     - src/agent/memory-consolidator-hook.ts
     - src/memory/consolidate/phase2.ts
     - src/memory/consolidate/constants.ts
@@ -68,16 +70,16 @@ knobs:
     purpose: 'age threshold'
 deliberate_hold:
   reason: |
-    The hook itself is a pure orchestration seam — wiring the actual call
-    site into `runAgent` is the host's job (loop.ts owner). This lets the
-    Web/Tauri surface call it from its own session-start path with
-    different timing semantics (e.g. background tick vs first-prompt).
+    The hook itself is still a pure orchestration seam. The CLI/REPL host
+    now wires it through `buildSessionMemoryAutoWires()`, but non-CLI
+    surfaces (Web/Tauri/other hosts) still need their own session-start
+    binding and may choose different timing semantics (background tick vs
+    first-prompt).
   promotion_path: |
-    Host surface (CLI / Web / Tauri) calls `runMemoryPhase2AutoTrigger`
-    once per session start with a resolved phase2 block. The CLI surface
-    needs a `Phase2Summarizer` wrapper around its LLM adapter (see
-    `Phase2Summarizer` JSDoc in `src/memory/consolidate/types.ts` for the
-    one-line wire) + a `MemoryWriter` built from `node:fs/promises`.
+    Keep the orchestration seam shared, but document per-surface ownership:
+    CLI/REPL is already wired; future Web/Tauri/daemon hosts should call
+    `runMemoryPhase2AutoTrigger` once per session start with their own
+    resolved phase2 block and lifecycle policy.
 notes: |
   Pairs with `consolidator-session-hook` (Phase 1 session-end) and
   `memory-md-atomic-writer` (Phase 2 disk side). Anti-leak invariant:

@@ -4,10 +4,8 @@ import type { Message } from "@/llm"
 import { injectSimulatedTurn, type LastTurnOutcome, REACTOR_ENV_FLAG } from "@/reactor"
 import { assembleAutomation } from "@/scheduler/runtime-wire"
 import type { RuntimeSideConversationArgs, RuntimeSideConversationResult } from "@/sdk/runtime"
-import { createLegacyRuntimeFacade } from "@/sdk/runtime/compat"
 import { logger } from "@/shared"
 import type { PlaybookPlanQueueSink } from "@/skill/playbook"
-import { automationUpdateTool, ToolRegistry } from "@/tool"
 import { startReactorWatchBridge } from "../reactor-watch-bridge"
 import type { ConvCheckpointWire } from "./conv-checkpoint-wire"
 import { ExternalPromptQueue } from "./external-prompt-queue"
@@ -147,7 +145,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     statusBar,
     turnIndicator,
     turnSummary,
-    sessionDeps,
+    runtimeBridge,
     state: featureState,
     idMeta,
     pendingImages,
@@ -167,7 +165,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
   let lastUserInputAt = 0
   let lastTurnOutcome: LastTurnOutcome | undefined
   const liveAutomationSlot =
-    sessionDeps.automationEngine ??
+    runtimeBridge.getAutomationEngine() ??
     assembleAutomation(
       { get: (name) => process.env[name] },
       {
@@ -179,28 +177,19 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
       },
     ) ??
     undefined
-  const activeSessionDeps =
-    liveAutomationSlot !== undefined
-      ? {
-          ...sessionDeps,
-          automationEngine: liveAutomationSlot,
-          registry: sessionDeps.registry.has("automation_update")
-            ? sessionDeps.registry
-            : new ToolRegistry([
-                ...sessionDeps.registry.all(),
-                automationUpdateTool(liveAutomationSlot.engine),
-              ]),
-        }
-      : sessionDeps
+  if (liveAutomationSlot !== undefined) {
+    runtimeBridge.ensureAutomationEngine(liveAutomationSlot)
+  }
+  const activeIdentityModeState = runtimeBridge.getIdentityModeState()
+  const activeToolProfileState = runtimeBridge.getToolProfileState()
 
-  const runtimeFacade = await createLegacyRuntimeFacade({
+  const runtimeFacade = await runtimeBridge.createRuntimeFacade({
     boot: {
       mode: setup.mode,
       refreshSystemPrompt: setup.refreshSystemPrompt,
-      toolProfileState: activeSessionDeps.toolProfileState,
-      identityModeState: activeSessionDeps.identityModeState,
+      toolProfileState: activeToolProfileState,
+      identityModeState: activeIdentityModeState,
     },
-    sessionDeps: activeSessionDeps,
     history: [...surfaceState.history],
     state: featureState,
     idMeta,
@@ -210,13 +199,11 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
   const session = await runtimeFacade.createSession({
     cwd: setup.cwd,
     model: setup.model,
-    permissionMode: activeSessionDeps.permission.mode,
-    ...(activeSessionDeps.identityModeState !== undefined
-      ? { identityMode: activeSessionDeps.identityModeState.get() }
+    permissionMode: runtimeBridge.getPermissionMode(),
+    ...(activeIdentityModeState !== undefined
+      ? { identityMode: activeIdentityModeState.get() }
       : {}),
-    ...(activeSessionDeps.toolProfileState !== undefined
-      ? { toolProfile: activeSessionDeps.toolProfileState.get() }
-      : {}),
+    ...(activeToolProfileState !== undefined ? { toolProfile: activeToolProfileState.get() } : {}),
   })
   registerSideConversationStart?.((args) => session.side.start(args))
 

@@ -4,17 +4,18 @@ import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoin
 import { createClassifierBackedAutoReview } from "@/agent/reviewer-port"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
 import type { PermissionStore, ToolAction } from "@/permission"
-import type { SessionDeps } from "@/runner/assemble/config"
 import {
-  composeBootstrapLegacySessionDeps,
-  materializeLegacyReviewerAgent,
-} from "@/sdk/runtime/compat"
+  composeBootstrapRuntimeDeps,
+  materializeReviewerAgent,
+  type RuntimeSessionDeps,
+} from "@/sdk/runtime/bridge"
 import { decisionEmitterFromStream, type StreamPort } from "@/stream"
 import { diffPreviewEnabled, renderActionDiff } from "../diff-preview"
 import type { IdleMonitor } from "../idle-monitor"
 import { buildShellSnapshotConfig, buildSummarizerLlm } from "../internal"
 import type { RejectCounter } from "../reject-counter"
 import { type CliReviewerSandboxProfile, selectDefaultReviewer } from "./reviewer-policy"
+import { type CliRuntimeBridge, createCliRuntimeBridge } from "./runtime-bridge"
 import { createCliPlanExitPort, createCliUserInputPort } from "./session-host-ports"
 
 const askLine = async (prompt: string): Promise<string> => {
@@ -51,7 +52,7 @@ export interface ComposeCliSessionDepsArgs {
 }
 
 export interface CliAdmissibilityBindings {
-  readonly sessionDeps: SessionDeps
+  readonly runtimeBridge: CliRuntimeBridge
 }
 
 const buildSessionMemoryAutoSummarizer = (
@@ -65,7 +66,7 @@ const buildBaseSessionDeps = (args: {
   readonly planExitPort: ReturnType<typeof createCliPlanExitPort>
   readonly userInputPort: ReturnType<typeof createCliUserInputPort>
   readonly summarizerLlm?: ReturnType<typeof buildSummarizerLlm>
-}): Parameters<typeof composeBootstrapLegacySessionDeps>[0] => {
+}): Parameters<typeof composeBootstrapRuntimeDeps>[0] => {
   const { boot, turnStream, onConfirm, planExitPort, userInputPort, summarizerLlm } = args
   const shellSnapshot = buildShellSnapshotConfig()
   return {
@@ -89,12 +90,12 @@ const buildAdmissibility = (args: {
   readonly sandboxProfile: CliReviewerSandboxProfile
   readonly permissionStore: PermissionStore | undefined
   readonly autoReview: ReturnType<typeof createClassifierBackedAutoReview> | undefined
-  readonly baseSessionDeps: SessionDeps
-}): SessionDeps["admissibility"] => {
+  readonly baseSessionDeps: RuntimeSessionDeps
+}): RuntimeSessionDeps["admissibility"] => {
   const { boot, onConfirm, sandboxProfile, permissionStore, autoReview, baseSessionDeps } = args
   const userReviewerPort = createOnConfirmReviewerPort({ onConfirm })
   const threadPermission = permissionStore?.getThread(boot.sessionId)
-  const reviewerAgent = materializeLegacyReviewerAgent(boot, baseSessionDeps)
+  const reviewerAgent = materializeReviewerAgent(boot, baseSessionDeps)
   const guardianReview =
     reviewerAgent !== undefined
       ? boot.createSubagentBackedGuardianReview({
@@ -156,7 +157,7 @@ export const composeCliSessionDeps = async (
     userInputPort,
     ...(summarizerLlm !== undefined ? { summarizerLlm } : {}),
   })
-  const sessionDeps = await composeBootstrapLegacySessionDeps({
+  const sessionDeps = await composeBootstrapRuntimeDeps({
     ...composePlan,
     ...(args.convStore !== undefined
       ? {
@@ -181,5 +182,5 @@ export const composeCliSessionDeps = async (
     autoReview,
     baseSessionDeps: sessionDeps,
   })
-  return { sessionDeps }
+  return { runtimeBridge: createCliRuntimeBridge(sessionDeps) }
 }

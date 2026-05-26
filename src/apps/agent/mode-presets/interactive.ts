@@ -9,7 +9,8 @@ import * as readline from "node:readline/promises"
 import type { AgentConfig } from "@/agent"
 import { buildSystemPrompt } from "@/agent"
 import type { PermissionContext } from "@/permission"
-import { createLegacyRuntimeFromAgentConfigBase } from "@/sdk/runtime/compat"
+import type { RuntimeAgentTurnAssembler } from "@/sdk/runtime"
+import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime/bridge"
 import { StdoutStream, type StreamPort, TeeStream } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
 import {
@@ -62,9 +63,7 @@ const runInteractiveTerminal = async (req: AssembleRequest): Promise<void> => {
   const base = buildInteractiveBase(req, abort.signal)
   const assemble = (
     messages: Parameters<typeof assembleAgentConfig>[0]["base"]["messages"],
-    _turnDeps: Parameters<
-      NonNullable<Parameters<typeof createLegacyRuntimeFromAgentConfigBase>[0]["assembleConfig"]>
-    >[1],
+    _turnDeps: Parameters<RuntimeAgentTurnAssembler>[1],
   ): AgentConfig =>
     assembleAgentConfig({
       ...req,
@@ -74,7 +73,7 @@ const runInteractiveTerminal = async (req: AssembleRequest): Promise<void> => {
         signal: base.signal,
       },
     })
-  const { runtime: runtimeFacade } = await createLegacyRuntimeFromAgentConfigBase({
+  const { runtime: runtimeFacade } = await createRuntimeFromAgentConfigBase({
     base,
     assembleConfig: assemble,
     history: [...base.messages],

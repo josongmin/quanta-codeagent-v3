@@ -3,6 +3,7 @@ import type { AgentOutcome } from "../../../../src/agent"
 import type { IdleMonitor } from "../../../../src/apps/cli/idle-monitor"
 import type { LifecyclePills } from "../../../../src/apps/cli/lifecycle-pills"
 import type { RejectCounter } from "../../../../src/apps/cli/reject-counter"
+import { createCliRuntimeBridge } from "../../../../src/apps/cli/repl/runtime-bridge"
 import type {
   RunSessionLoopDeps,
   SessionLoopSinks,
@@ -185,7 +186,7 @@ const buildSetup = (
     turnSummary: stubSummary(),
     debugHandle: undefined,
     timelinePanel: undefined,
-    sessionDeps: {
+    runtimeBridge: createCliRuntimeBridge({
       llm: llmStub,
       permission: { mode: "default" },
       signal: new AbortController().signal,
@@ -194,7 +195,7 @@ const buildSetup = (
         specs: () => [],
         all: () => [],
       },
-    } as never,
+    } as never),
     costPanel: undefined,
     branchProgress: undefined,
     planStore: undefined,

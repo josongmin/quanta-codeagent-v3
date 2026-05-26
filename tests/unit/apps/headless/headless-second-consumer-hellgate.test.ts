@@ -163,9 +163,9 @@ describe("ADR-0308 headless second-consumer hellgate", () => {
     expect(violations).toEqual([])
   })
 
-  test("CASE 2b: headless source uses the single compat owner, not raw compat helpers", () => {
+  test("CASE 2b: headless source uses the sdk runtime bridge, not raw compat helpers", () => {
     const source = readFileSync(join(HEADLESS_DIR, "index.ts"), "utf8")
-    expect(source).toContain('from "@/sdk/runtime/compat"')
+    expect(source).toContain('from "@/sdk/runtime/bridge"')
     expect(source).not.toContain("createLegacyRunnerSessionHost(")
     expect(source).not.toContain('from "@/runner/session-execution-plane"')
     expect(source).not.toContain('from "@/runner/session-memory-auto"')

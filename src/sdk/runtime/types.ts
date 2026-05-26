@@ -19,6 +19,8 @@ import type {
   TurnRunCommand,
 } from "@/protocol/session"
 
+export type { RuntimeAgentConfigBase, RuntimeAgentTurnAssembler } from "./base"
+
 export interface SessionDispatchOptions {
   readonly signal?: AbortSignal
 }

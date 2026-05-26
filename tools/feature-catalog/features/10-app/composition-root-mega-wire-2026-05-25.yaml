@@ -77,3 +77,9 @@ defaults:
   identityModeVariant: absent (default-OFF; --identity-mode wires registry)
   playbookTrigger: absent (default-OFF; never auto-bound)
   automationEngine: absent (default-OFF; never auto-ticked)
+notes: |
+  This row describes the bare unified-agent composition root only. The main
+  REPL/CLI product path closes several of these slots downstream via
+  `repl-slash-ctx-mega-wire`, `surface-composition-wire-r1`, the shared
+  execution-plane builder, and session-memory-auto composition. Read this as
+  base-wire truth, not as the full shipped interactive-surface inventory.

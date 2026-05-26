@@ -7,12 +7,12 @@ const REPO_ROOT = join(import.meta.dir, "..", "..")
 const read = (path: string): string => readFileSync(join(REPO_ROOT, path), "utf8")
 
 describe("slash state SSOT hellgate", () => {
-  test("surface-compose projects slash state from sessionDeps only", () => {
+  test("surface-compose projects slash state from the runtime bridge only", () => {
     const src = read("src/apps/cli/repl/surface-compose.ts")
-    expect(src).toContain("toolProfileState: setup.sessionDeps.toolProfileState")
-    expect(src).toContain("identityModeState: setup.sessionDeps.identityModeState")
+    expect(src).toContain("toolProfileState: setup.runtimeBridge.getToolProfileState()")
+    expect(src).toContain("identityModeState: setup.runtimeBridge.getIdentityModeState()")
     expect(src).toContain("onIdentityModeChange: setup.refreshSystemPrompt")
-    expect(src).toContain("focusChain: setup.sessionDeps.focusChain")
+    expect(src).toContain("focusChain: setup.runtimeBridge.getFocusChain()")
   })
 
   test("slash adapters prefer authoritative session-owned state", () => {
@@ -23,11 +23,13 @@ describe("slash state SSOT hellgate", () => {
     expect(src).toContain("buildFocusChainAdapter(args.focusChain.tracker)")
   })
 
-  test("session deps and AgentConfig expose the same live state slots", () => {
-    const deps = read("src/apps/cli/repl/session-deps-compose.ts")
-    expect(deps).toContain("toolProfileState: boot.toolProfileState")
-    expect(deps).toContain("identityModeState: boot.identityModeState")
-    expect(deps).toContain("focusChain: boot.focusChain")
+  test("runtime deps and AgentConfig expose the same live state slots", () => {
+    const deps = read("src/host/runtime/session-host.ts")
+    expect(deps).toContain("toolProfileState: args.boot.toolProfileState")
+    expect(deps).toContain("identityModeState: args.boot.identityModeState")
+    expect(deps).toContain(
+      "args.boot.focusChain !== undefined ? { focusChain: args.boot.focusChain } : {}",
+    )
 
     const config = read("src/runner/assemble/config.ts")
     expect(config).toContain("system: d.systemSource?.get() ?? d.system")

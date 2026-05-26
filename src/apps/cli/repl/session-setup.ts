@@ -16,7 +16,7 @@ import type { BranchProgressTracker } from "../branch-search-progress"
 import type { CostPanel } from "../cost-panel"
 import type { DebugCmdState } from "../debug-cmd"
 import type { IdleMonitor } from "../idle-monitor"
-import type { SessionDeps, Tooling } from "../internal"
+import type { Tooling } from "../internal"
 import type { LifecyclePills } from "../lifecycle-pills"
 import type { McpSurfaceInfo } from "../mcp-cmd"
 import type { RejectCounter } from "../reject-counter"
@@ -26,6 +26,7 @@ import type { TimelinePanel } from "../timeline-panel"
 import type { TurnIndicator } from "../turn-indicator"
 import type { TurnSummaryCollector } from "../turn-summary"
 import { type CliFeatureConfig, readCliFeatureConfig } from "./cli-feature-config"
+import type { CliRuntimeBridge } from "./runtime-bridge"
 import { composeCliSessionDeps } from "./session-deps-compose"
 import { readSessionRuntimeConfig } from "./session-runtime-config"
 /** Track D — DebugTracerHandle. Surface owns the live state + the
@@ -130,7 +131,7 @@ export interface SessionSetupResult {
    *  land on a clean screen. Absent ⇒ no tee allocated (byte-identical
    *  default-OFF). */
   readonly timelinePanel: TimelinePanel | undefined
-  readonly sessionDeps: SessionDeps
+  readonly runtimeBridge: CliRuntimeBridge
   readonly costPanel: CostPanel | undefined
   readonly branchProgress: BranchProgressTracker | undefined
   readonly planStore: PlanStore | undefined
@@ -206,7 +207,7 @@ export const setupSession = async (
     timelineStream,
   )
 
-  const { sessionDeps } = await composeCliSessionDeps({
+  const { runtimeBridge } = await composeCliSessionDeps({
     boot,
     turnStream,
     loadPermissionStore: deps.loadPermissionStore,
@@ -217,14 +218,15 @@ export const setupSession = async (
   // ADR-0269 Phase 3 closure — install the process-level fs-jail decision
   // sink. fs-jail (storage/service.ts) can't import @/stream (slice-fence),
   // so it carries a module-level sink slot the composition root fills with
-  // the *same* DecisionEmitter that's now in `sessionDeps.decisionEmitter`.
+  // the *same* DecisionEmitter that's now on the runtime bridge.
   // FsJailDecisionEvent is a structural mirror of DecisionEvent so both
   // ends type-check without a cross-slice import. The matching
   // `clearFsJailDecisionSink()` is wrapped into `shutdownMcp` below so
   // session-end tears it down before sibling processes (or a re-entered
   // setupSession in tests) inherit a stale sink.
-  if (sessionDeps.decisionEmitter !== undefined) {
-    setFsJailDecisionSink(sessionDeps.decisionEmitter)
+  const decisionEmitter = runtimeBridge.getDecisionEmitter()
+  if (decisionEmitter !== undefined) {
+    setFsJailDecisionSink(decisionEmitter)
   }
 
   const pills = deps.installPills({
@@ -274,7 +276,7 @@ export const setupSession = async (
     turnSummary,
     debugHandle,
     timelinePanel,
-    sessionDeps,
+    runtimeBridge,
     costPanel: boot.costPanel as CostPanel | undefined,
     branchProgress: boot.branchProgress as BranchProgressTracker | undefined,
     planStore: boot.planStore,

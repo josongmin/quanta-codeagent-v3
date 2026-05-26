@@ -118,7 +118,7 @@ describe("session-setup — dependency contract (compile-time shape lock)", () =
       "turnSummary",
       "debugHandle",
       "timelinePanel",
-      "sessionDeps",
+      "runtimeBridge",
       "costPanel",
       "branchProgress",
       "planStore",
@@ -494,14 +494,14 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
     expect(result.statusBar).toBeDefined()
   })
 
-  test("wires reviewer + plan-exit + user-input host ports into sessionDeps", async () => {
+  test("wires reviewer + plan-exit + user-input host ports into the runtime bridge", async () => {
     const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
     const { deps } = makeStubDeps()
     const result = await setupSession(deps)
-    expect(result.sessionDeps.admissibility?.reviewerPort).toBeDefined()
-    expect(result.sessionDeps.admissibility?.defaultReviewer).toBe("user")
-    expect(result.sessionDeps.planExitPort).toBeDefined()
-    expect(result.sessionDeps.userInputPort).toBeDefined()
+    expect(result.runtimeBridge.getAdmissibility()?.reviewerPort).toBeDefined()
+    expect(result.runtimeBridge.getAdmissibility()?.defaultReviewer).toBe("user")
+    expect(result.runtimeBridge.getPlanExitPort()).toBeDefined()
+    expect(result.runtimeBridge.getUserInputPort()).toBeDefined()
   })
 
   test("switches the CLI default reviewer to auto_review when the auto classifier is live", async () => {
@@ -511,7 +511,7 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
       const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
       const { deps } = makeStubDeps()
       const result = await setupSession(deps)
-      expect(result.sessionDeps.admissibility?.defaultReviewer).toBe("auto_review")
+      expect(result.runtimeBridge.getAdmissibility()?.defaultReviewer).toBe("auto_review")
 
       const action: ToolActionKeyed = {
         tool: "edit_file",
@@ -526,7 +526,7 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
         configReviewer: "auto_review",
         decidedAt: 42,
       }
-      const admissibility = result.sessionDeps.admissibility
+      const admissibility = result.runtimeBridge.getAdmissibility()
       expect(admissibility).toBeDefined()
       if (admissibility === undefined) throw new Error("admissibility must be defined")
       const reviewerPort = admissibility.reviewerPort
@@ -576,9 +576,9 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
           fakeReviewer as unknown as ReturnType<SetupSessionDeps["materializeReviewerAgent"]>,
       }
       const result = await setupSession(depsWithReviewer)
-      expect(result.sessionDeps.admissibility?.defaultReviewer).toBe("guardian_subagent")
-      expect(result.sessionDeps.admissibility?.permissionStore).toBe(permissionStore)
-      const admissibility = result.sessionDeps.admissibility
+      expect(result.runtimeBridge.getAdmissibility()?.defaultReviewer).toBe("guardian_subagent")
+      expect(result.runtimeBridge.getAdmissibility()?.permissionStore).toBe(permissionStore)
+      const admissibility = result.runtimeBridge.getAdmissibility()
       expect(admissibility).toBeDefined()
       if (admissibility === undefined) throw new Error("admissibility must be defined")
       const reviewerPort = admissibility.reviewerPort
@@ -628,7 +628,7 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
       const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
       const { deps } = makeStubDeps({ permissionStore })
       const result = await setupSession(deps)
-      expect(result.sessionDeps.admissibility?.defaultReviewer).toBe("user")
+      expect(result.runtimeBridge.getAdmissibility()?.defaultReviewer).toBe("user")
     } finally {
       if (prevPermission === undefined) delete process.env.QUANTA_PERMISSION
       else process.env.QUANTA_PERMISSION = prevPermission

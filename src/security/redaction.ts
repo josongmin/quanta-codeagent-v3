@@ -142,11 +142,19 @@ const patterns: ReadonlyArray<Pattern> = [
     kind: "stripe_secret_key",
     regex: /\b(?:sk_live_|sk_test_|rk_live_|rk_test_)[A-Za-z0-9]{20,}\b/g,
   },
-  // OpenAI API key — `sk-` followed by ≥32 alphanumeric (avoid clash with
-  // anthropic above by negative-lookahead on `ant-`).
+  // OpenAI proj-key (2024+) — `sk-proj-` followed by a long mixed-class body
+  // containing `_` / `-`. Order matters: matched BEFORE the classic shape so
+  // a `sk-proj-…` does not get sliced at the first `-`.
   {
     kind: "openai_api_key",
-    regex: /\bsk-(?!ant-)(?!live_)(?!test_)[A-Za-z0-9]{32,}\b/g,
+    regex: /\bsk-proj-[A-Za-z0-9_-]{20,}\b/g,
+  },
+  // OpenAI classic API key — `sk-` followed by ≥32 alphanumeric (avoid clash
+  // with anthropic above by negative-lookahead on `ant-`; avoid stripe by
+  // ruling out `live_`/`test_`).
+  {
+    kind: "openai_api_key",
+    regex: /\bsk-(?!ant-)(?!proj-)(?!live_)(?!test_)[A-Za-z0-9]{32,}\b/g,
   },
   // Authorization Bearer header.
   {

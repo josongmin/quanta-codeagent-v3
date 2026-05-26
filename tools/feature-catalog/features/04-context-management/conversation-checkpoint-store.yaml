@@ -33,11 +33,11 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold:
-  reason: 'Pure store primitive — no current consumer (loop NEVER instantiates). Awaits /rewind slash command or auto-recovery hook to opt-in via defaultConversationCheckpointStore(). Plane-clean (zero coupling to loop/recovery/session-resources/permission).'
-  promotion_path: 'Wire a consumer (e.g. /rewind, message-rewind UI, or post-tool-failure auto-checkpoint hook); add integration test asserting loop ↔ store seam; add observability event on record/restore.'
+deliberate_hold: null
 notes: |
-  Default-OFF — loop 은 본 store 를 instantiate 하지 않는다. 미래의 `/rewind` slash
-  command / auto-recovery hook 이 `defaultConversationCheckpointStore()` 로 opt-in.
-  `@/agent/loop` / `@/agent/recovery` / `@/agent/session-resources` / `@/permission`
-  의존 0(plane-clean — 그들이 consumer 이지 collaborator 가 아님).
+  Pure store primitive remains plane-clean — the loop does not own or
+  instantiate it directly. Current consumers live in the CLI/REPL surface
+  layer (`/rewind-conv`, turn-end auto-record, fork-session adapters),
+  which opt in via `defaultConversationCheckpointStore()` while keeping
+  `@/agent/conversation-checkpoint` free of loop/recovery/session-resource
+  imports.

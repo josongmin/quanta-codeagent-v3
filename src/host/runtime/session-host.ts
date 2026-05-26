@@ -15,6 +15,7 @@ import { runOnce } from "@/runner/orchestrate/run-once"
 import { runSideChat } from "@/runner/orchestrate/side-chat"
 import { buildSharedExecutionPlaneSessionDeps } from "@/runner/session-execution-plane"
 import { buildSessionMemoryAutoWires } from "@/runner/session-memory-auto"
+import type { RuntimeAgentConfigBase, RuntimeAgentTurnAssembler } from "@/sdk/runtime/base"
 import type { SessionMeta } from "@/session"
 import { createSingleSessionRuntimeHost } from "./builder"
 import type { RuntimeHost, RuntimeSessionConfig } from "./types"
@@ -43,10 +44,9 @@ export interface LegacyRunnerSessionHost extends SessionHost {
   replaceMessages(messages: readonly Message[]): void
 }
 
-export type LegacySessionConfigAssembler = (messages: Message[], deps: SessionDeps) => AgentConfig
+export type LegacySessionConfigAssembler = RuntimeAgentTurnAssembler
 
-export type LegacySessionDepsSource = Omit<AgentConfig, "modePolicy" | "budgetMeter"> &
-  Pick<Partial<SessionDeps>, "systemSource" | "toolProfileState" | "identityModeState">
+export type LegacySessionDepsSource = RuntimeAgentConfigBase
 
 export interface LegacyExecutionPlaneComposeArgs {
   readonly history: readonly Message[]

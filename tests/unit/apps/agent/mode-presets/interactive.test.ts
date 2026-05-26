@@ -17,7 +17,8 @@ import { runMode } from "@/../src/apps/agent/mode-presets/interactive"
 import type { AgentConfig, AgentOutcome } from "@/agent"
 import type { LLMPort } from "@/llm"
 import type { PermissionContext } from "@/permission"
-import { createLegacyRuntimeFromAgentConfigBase } from "@/sdk/runtime/compat"
+import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
+import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime/bridge"
 import type { StreamPort } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
 
@@ -58,8 +59,8 @@ describe("interactive.runMode — guard", () => {
       new URL("../../../../../src/apps/agent/mode-presets/interactive.ts", import.meta.url),
       "utf8",
     )
-    expect(src).toContain('from "@/sdk/runtime/compat"')
-    expect(src).toContain('from "@/sdk/runtime/compat"')
+    expect(src).toContain('from "@/sdk/runtime/bridge"')
+    expect(src).toContain('from "@/sdk/runtime"')
     expect(src).not.toContain("createLegacyRunnerSessionHost(")
     expect(src).not.toContain("runInteractive(")
     expect(src).not.toContain("buildInteractiveOptionalDeps")
@@ -95,7 +96,7 @@ describe("interactive.runMode — hermetic via seams.runAgent", () => {
     expect(out.exitCode).toBe(1)
   })
 
-  test("createLegacyRuntimeFromAgentConfigBase preserves the live optional session slots", async () => {
+  test("createRuntimeFromAgentConfigBase preserves the live optional session slots", async () => {
     const systemSource = { get: () => "SYS", set: () => undefined }
     const toolProfileState = { get: () => "write", set: () => undefined } as never
     const identityModeState = { get: () => "review", set: () => undefined } as never
@@ -133,9 +134,9 @@ describe("interactive.runMode — hermetic via seams.runAgent", () => {
       identityModeState,
       focusChain,
       granularRegistry,
-    } as unknown as Parameters<typeof createLegacyRuntimeFromAgentConfigBase>[0]["base"]
+    } as unknown as RuntimeAgentConfigBase
 
-    const { sessionDeps: deps, runtime } = await createLegacyRuntimeFromAgentConfigBase({
+    const { sessionDeps: deps, runtime } = await createRuntimeFromAgentConfigBase({
       base,
       history: [],
       state: undefined,

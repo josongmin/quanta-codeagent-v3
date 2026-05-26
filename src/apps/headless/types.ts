@@ -62,7 +62,7 @@ export interface HeadlessRunInput {
 
 /** Public proof that the second-consumer surface got the same reusable
  *  execution-plane and memory-auto wires without leaking the internal
- *  `SessionDeps` bag across the headless public seam. */
+ *  runtime-deps bag across the headless public seam. */
 export interface HeadlessRuntimeWires {
   readonly executionPlane: {
     readonly conversationCheckpoint: boolean
@@ -104,6 +104,6 @@ export interface HeadlessRunResult extends SessionBootstrapResult {
    *  headless callers may ignore the field. */
   readonly events: readonly AgentEvent[]
   /** Lean proof that reusable execution/memory wires were mounted without
-   *  exposing the full internal `SessionDeps` bag on the headless public API. */
+   *  exposing the full internal runtime-deps bag on the headless public API. */
   readonly wires: HeadlessRuntimeWires
 }

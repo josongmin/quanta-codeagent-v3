@@ -75,6 +75,7 @@ notes: |
     16 accept → terminal posture; 17 throwing detector survived
     (defense-in-depth).
   Sibling to ADR-0140 (background subagent caller wire) — that slice is the
-  EXECUTOR; this slice is the OBSERVER. A future host-side wire is
-  responsible for binding `accept` ⇒ `BackgroundSubagentScheduler.fork`
-  and rendering the prompt UI.
+  EXECUTOR; this slice is the OBSERVER. The shared REPL execution-plane wire
+  now binds `accept` ⇒ `BackgroundSubagentScheduler.fork`; other surfaces may
+  still choose their own prompt/rendering policy on top of the same observer
+  ports.

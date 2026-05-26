@@ -22,24 +22,134 @@ import type {
 } from "./callback-port"
 import { CALLBACK_PATH, CALLBACK_PORTS } from "./config"
 
-const SUCCESS_HTML = `<!DOCTYPE html><html><head><title>quanta — signed in</title>
-<style>body{font-family:-apple-system,system-ui,sans-serif;background:#0b0d10;color:#e6edf3;margin:0;display:flex;align-items:center;justify-content:center;height:100vh}
-.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:32px 40px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.4)}
-h1{margin:0 0 8px;font-size:22px;color:#3fb950}
-p{margin:0;color:#8b949e;font-size:13px}</style></head>
-<body><div class="card"><h1>✓ Signed in to ChatGPT</h1><p>You can close this tab and return to your terminal.</p></div></body></html>`
+// Shared "graph-paper" stylesheet — light theme, dot grid, brutalist card,
+// monospace prompt. Inlined so the loopback server is fully self-contained
+// (no static-asset serving, no CDN).
+const SHARED_CSS = `
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  font-family:"JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
+  background-color:#f4f1ea;
+  background-image:
+    radial-gradient(#cfc9bb 1px,transparent 1.4px),
+    radial-gradient(#e3decf 1px,transparent 1.4px);
+  background-size:18px 18px,18px 18px;
+  background-position:0 0,9px 9px;
+  color:#1a1a1a;
+  display:flex;align-items:center;justify-content:center;
+  min-height:100vh;padding:24px;
+}
+.frame{
+  background:#fffdf7;
+  border:2px solid #1a1a1a;
+  box-shadow:6px 6px 0 #1a1a1a;
+  max-width:560px;width:100%;
+}
+.titlebar{
+  background:#1a1a1a;color:#f4f1ea;
+  border-bottom:2px solid #1a1a1a;
+  padding:7px 12px;display:flex;align-items:center;gap:6px;
+  font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+}
+.tdot{width:10px;height:10px;display:inline-block}
+.tdot.r{background:#e0533c}.tdot.y{background:#e3a72b}.tdot.g{background:#3fa45a}
+.titlebar .label{margin-left:10px;opacity:.85}
+.body{padding:24px 24px 20px}
+pre.glyph{
+  margin:0 0 14px;color:#1f7a3a;font-size:11px;line-height:1;
+  white-space:pre;letter-spacing:0;
+}
+pre.glyph.err{color:#b8302a}
+h1{
+  margin:0 0 6px;font-size:17px;font-weight:700;letter-spacing:.01em;
+  display:flex;align-items:baseline;gap:8px;
+}
+h1 .lead{color:#1f7a3a}
+h1.err .lead{color:#b8302a}
+p.msg{margin:0;color:#5a544a;font-size:13px;line-height:1.5;word-break:break-word}
+.prompt{
+  margin-top:18px;padding:10px 12px;
+  background:#1a1a1a;color:#f4f1ea;
+  font-size:12px;letter-spacing:.02em;
+  border:2px solid #1a1a1a;
+}
+.prompt .sigil{color:#e3a72b;margin-right:8px}
+.prompt .dim{opacity:.55}
+.cursor{
+  display:inline-block;width:7px;height:13px;background:#f4f1ea;
+  vertical-align:-2px;margin-left:4px;animation:blink 1s steps(2) infinite;
+}
+@keyframes blink{50%{background:transparent}}
+.meta{
+  margin-top:14px;padding-top:12px;
+  border-top:1px dashed #c8c2b3;
+  display:flex;gap:14px;flex-wrap:wrap;
+  color:#7a7468;font-size:11px;letter-spacing:.02em;
+}
+.meta b{color:#1a1a1a;font-weight:600;margin-right:4px}
+`
+
+// 13-row pixel checkmark — full-blocks on dotted underlay. Hand-pixeled to
+// stay readable at 11px without needing an SVG.
+const PIXEL_CHECK = `
+░░░░░░░░░░░░░░░░░░░░░░░██
+░░░░░░░░░░░░░░░░░░░░░░██░
+░░░░░░░░░░░░░░░░░░░░░██░░
+░░░░░░░░░░░░░░░░░░░░██░░░
+██░░░░░░░░░░░░░░░░░██░░░░
+░██░░░░░░░░░░░░░░░██░░░░░
+░░██░░░░░░░░░░░░░██░░░░░░
+░░░██░░░░░░░░░░░██░░░░░░░
+░░░░██░░░░░░░░░██░░░░░░░░
+░░░░░██░░░░░░░██░░░░░░░░░
+░░░░░░██░░░░░██░░░░░░░░░░
+░░░░░░░██░░░██░░░░░░░░░░░
+░░░░░░░░█████░░░░░░░░░░░░`
+
+const PIXEL_CROSS = `
+██░░░░░░░░░░░░░░░░░░░░░██
+░██░░░░░░░░░░░░░░░░░░░██░
+░░██░░░░░░░░░░░░░░░░░██░░
+░░░██░░░░░░░░░░░░░░░██░░░
+░░░░██░░░░░░░░░░░░░██░░░░
+░░░░░██░░░░░░░░░░░██░░░░░
+░░░░░░██░░░░░░░░░██░░░░░░
+░░░░░░░██░░░░░░░██░░░░░░░
+░░░░░░░░█████████░░░░░░░░
+░░░░░░░██░░░░░░░██░░░░░░░
+░░░░░░██░░░░░░░░░██░░░░░░
+░░░░░██░░░░░░░░░░░██░░░░░
+░░░░██░░░░░░░░░░░░░██░░░░`
+
+const SUCCESS_HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>quanta — signed in</title>
+<style>${SHARED_CSS}</style></head>
+<body><main class="frame">
+<div class="titlebar"><span class="tdot r"></span><span class="tdot y"></span><span class="tdot g"></span><span class="label">quanta:auth — chatgpt-oauth</span></div>
+<div class="body">
+<pre class="glyph" aria-hidden="true">${PIXEL_CHECK}</pre>
+<h1><span class="lead">[ok]</span><span>Signed in to ChatGPT</span></h1>
+<p class="msg">You can close this tab and return to your terminal.</p>
+<div class="prompt"><span class="sigil">$</span>quanta status<span class="dim"> # token persisted</span><span class="cursor"></span></div>
+<div class="meta"><span><b>provider</b>chatgpt-oauth</span><span><b>scope</b>openid · profile · email</span><span><b>via</b>loopback</span></div>
+</div></main></body></html>`
 
 const escapeHtml = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
 
 const errorHtml = (
   msg: string,
-): string => `<!DOCTYPE html><html><head><title>quanta — login failed</title>
-<style>body{font-family:-apple-system,system-ui,sans-serif;background:#0b0d10;color:#e6edf3;margin:0;display:flex;align-items:center;justify-content:center;height:100vh}
-.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:32px 40px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.4);max-width:480px}
-h1{margin:0 0 8px;font-size:22px;color:#f85149}
-p{margin:0;color:#8b949e;font-size:13px;word-break:break-word}</style></head>
-<body><div class="card"><h1>✗ Login failed</h1><p>${escapeHtml(msg)}</p></div></body></html>`
+): string => `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>quanta — login failed</title>
+<style>${SHARED_CSS}</style></head>
+<body><main class="frame">
+<div class="titlebar"><span class="tdot r"></span><span class="tdot y"></span><span class="tdot g"></span><span class="label">quanta:auth — chatgpt-oauth</span></div>
+<div class="body">
+<pre class="glyph err" aria-hidden="true">${PIXEL_CROSS}</pre>
+<h1 class="err"><span class="lead">[err]</span><span>Login failed</span></h1>
+<p class="msg">${escapeHtml(msg)}</p>
+<div class="prompt"><span class="sigil">$</span>quanta /login --chatgpt<span class="dim"> # retry</span><span class="cursor"></span></div>
+<div class="meta"><span><b>provider</b>chatgpt-oauth</span><span><b>stage</b>callback</span><span><b>action</b>retry</span></div>
+</div></main></body></html>`
 
 const tryListen = (port: number): Promise<{ server: Server; port: number } | null> =>
   new Promise((resolve) => {

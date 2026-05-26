@@ -19,7 +19,7 @@ const walkTs = (dir: string): string[] => {
 }
 
 describe("CLI runtime SDK cutover source gates", () => {
-  test("app surfaces no longer import session-host.ts or runner side ports directly", () => {
+  test("app surfaces no longer import raw compat owners or runner side ports directly", () => {
     const offenders: Array<{ path: string; needle: string }> = []
     for (const file of walkTs(APPS_ROOT)) {
       const src = readFileSync(file, "utf8")
@@ -29,13 +29,21 @@ describe("CLI runtime SDK cutover source gates", () => {
       if (src.includes('from "@/runner/side-conversation-port"')) {
         offenders.push({ path: file, needle: "@/runner/side-conversation-port" })
       }
+      if (src.includes('from "@/sdk/runtime/compat"')) {
+        offenders.push({ path: file, needle: "@/sdk/runtime/compat" })
+      }
+      if (src.includes('from "@/runner/assemble/config"')) {
+        offenders.push({ path: file, needle: "@/runner/assemble/config" })
+      }
     }
     expect(offenders).toEqual([])
   })
 
   test("session-loop consumes sdk runtime, not runner interactive primitives", () => {
     const src = readSource("src/apps/cli/repl/session-loop.ts")
-    expect(src).toContain('from "@/sdk/runtime/compat"')
+    expect(src).toContain('from "@/sdk/runtime"')
+    expect(src).not.toContain('from "@/sdk/runtime/bridge"')
+    expect(src).not.toContain('from "@/sdk/runtime/compat"')
     expect(src).not.toContain('from "@/runner"')
     expect(src).not.toContain("runInteractive(")
     expect(src).not.toContain("runOnce(")
@@ -68,9 +76,9 @@ describe("CLI runtime SDK cutover source gates", () => {
     expect(repl).not.toContain('from "@/runner"')
     expect(repl).not.toContain('from "@/runner/session-execution-plane"')
 
-    expect(deps).toContain('from "@/runner/assemble/config"')
-    expect(deps).toContain('from "@/sdk/runtime/compat"')
-    expect(deps).toContain("composeBootstrapLegacySessionDeps")
+    expect(deps).toContain('from "@/sdk/runtime/bridge"')
+    expect(deps).toContain("composeBootstrapRuntimeDeps")
+    expect(deps).not.toContain('from "@/runner/assemble/config"')
     expect(deps).not.toContain('from "@/runner/session-memory-auto"')
     expect(deps).not.toContain('from "../config-assemble"')
 
@@ -81,7 +89,7 @@ describe("CLI runtime SDK cutover source gates", () => {
     expect(setup).not.toContain('from "@/host/runtime/session-host"')
     expect(setup).not.toContain('from "@/runner/assemble/config"')
 
-    expect(internal).toContain('export type { SessionDeps } from "@/runner/assemble/config"')
+    expect(internal).not.toContain('export type { SessionDeps } from "@/runner/assemble/config"')
     expect(internal).not.toContain("export { assembleConfig")
     expect(internal).not.toContain("./config-assemble")
   })

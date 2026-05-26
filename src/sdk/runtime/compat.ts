@@ -6,15 +6,12 @@ import {
   composeLegacySessionDeps,
   createSingleLegacyRuntimeHost,
   type LegacyRunnerSessionHostOptions,
-  type LegacySessionConfigAssembler,
-  type LegacySessionDepsSource,
 } from "@/host/runtime/session-host"
 import type { Message } from "@/llm"
 import type { SessionDeps } from "@/runner/assemble/config"
 import { createRuntime, type RuntimeFacade } from "@/sdk/runtime"
 import type { SessionMeta } from "@/session"
-
-export type { LegacySessionDepsSource } from "@/host/runtime/session-host"
+import type { RuntimeAgentConfigBase, RuntimeAgentTurnAssembler } from "./base"
 
 export interface CreateLegacyRuntimeFacadeArgs extends LegacyRunnerSessionHostOptions {}
 
@@ -26,8 +23,8 @@ export const createLegacyRuntimeFacade = async (
   })
 
 export interface CreateLegacyRuntimeFromAgentConfigBaseArgs {
-  readonly base: LegacySessionDepsSource
-  readonly assembleConfig?: LegacySessionConfigAssembler
+  readonly base: RuntimeAgentConfigBase
+  readonly assembleConfig?: RuntimeAgentTurnAssembler
   readonly history?: readonly Message[]
   readonly state: string | undefined
   readonly idMeta: SessionMeta | undefined
@@ -88,7 +85,7 @@ export const createLegacyRuntimeFromBootstrap = async (
 export const materializeLegacyReviewerAgent = (
   boot: SessionBootstrapResult,
   baseSessionDeps: SessionDeps,
-  assembleConfig?: LegacySessionConfigAssembler,
+  assembleConfig?: RuntimeAgentTurnAssembler,
 ): ReturnType<SessionBootstrapResult["materializeReviewerAgent"]> => {
   return boot.materializeReviewerAgent(
     assembleLegacyAgentConfig([], baseSessionDeps, assembleConfig),
