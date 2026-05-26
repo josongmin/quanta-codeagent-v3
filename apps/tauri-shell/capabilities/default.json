@@ -27,12 +27,12 @@
       "identifier": "shell:allow-execute",
       "allow": [
         {
-          "name": "binaries/quanta-web-daemon",
+          "name": "quanta-web-daemon",
           "sidecar": true,
           "args": true
         },
         {
-          "name": "binaries/screen-ocr",
+          "name": "screen-ocr",
           "sidecar": true,
           "args": [
             "list-windows",
@@ -47,8 +47,8 @@
     {
       "identifier": "shell:allow-kill",
       "allow": [
-        { "name": "binaries/quanta-web-daemon", "sidecar": true },
-        { "name": "binaries/screen-ocr", "sidecar": true }
+        { "name": "quanta-web-daemon", "sidecar": true },
+        { "name": "screen-ocr", "sidecar": true }
       ]
     }
   ]

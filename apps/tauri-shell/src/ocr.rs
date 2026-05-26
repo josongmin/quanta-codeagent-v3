@@ -11,7 +11,7 @@ use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 
 use crate::error::{AppError, AppResult};
 
-const SIDECAR_NAME: &str = "binaries/screen-ocr";
+const SIDECAR_NAME: &str = "screen-ocr";
 
 /// Window descriptor returned by `screen-ocr list-windows`. Field set is
 /// intentionally minimal so the Swift sidecar can evolve without churn here.

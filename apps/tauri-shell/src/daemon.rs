@@ -21,7 +21,7 @@ use tokio::sync::Mutex;
 
 use crate::error::{AppError, AppResult};
 
-const SIDECAR_NAME: &str = "binaries/quanta-web-daemon";
+const SIDECAR_NAME: &str = "quanta-web-daemon";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DaemonInfo {
