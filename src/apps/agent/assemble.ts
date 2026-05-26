@@ -30,7 +30,7 @@ import {
   type ModePolicy,
   type RunMode,
 } from "@/agent"
-import type { LegacySessionDepsSource } from "@/host/runtime/session-host"
+import type { LegacySessionDepsSource } from "@/sdk/runtime/compat"
 
 /** Mode-preset-extra payloads (RFC may-22 Phase 4+). Each field is OPTIONAL
  *  on `AssembleRequest` so legacy callers (the assemble unit test, anything

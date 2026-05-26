@@ -3,9 +3,12 @@ import { createOnConfirmReviewerPort } from "@/agent"
 import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import { createClassifierBackedAutoReview } from "@/agent/reviewer-port"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
-import { assembleLegacyAgentConfig, composeLegacySessionDeps } from "@/host/runtime/session-host"
 import type { PermissionStore, ToolAction } from "@/permission"
 import type { SessionDeps } from "@/runner/assemble/config"
+import {
+  composeBootstrapLegacySessionDeps,
+  materializeLegacyReviewerAgent,
+} from "@/sdk/runtime/compat"
 import { decisionEmitterFromStream, type StreamPort } from "@/stream"
 import { diffPreviewEnabled, renderActionDiff } from "../diff-preview"
 import type { IdleMonitor } from "../idle-monitor"
@@ -62,7 +65,7 @@ const buildBaseSessionDeps = (args: {
   readonly planExitPort: ReturnType<typeof createCliPlanExitPort>
   readonly userInputPort: ReturnType<typeof createCliUserInputPort>
   readonly summarizerLlm?: ReturnType<typeof buildSummarizerLlm>
-}): Parameters<typeof composeLegacySessionDeps>[0] => {
+}): Parameters<typeof composeBootstrapLegacySessionDeps>[0] => {
   const { boot, turnStream, onConfirm, planExitPort, userInputPort, summarizerLlm } = args
   const shellSnapshot = buildShellSnapshotConfig()
   return {
@@ -91,9 +94,7 @@ const buildAdmissibility = (args: {
   const { boot, onConfirm, sandboxProfile, permissionStore, autoReview, baseSessionDeps } = args
   const userReviewerPort = createOnConfirmReviewerPort({ onConfirm })
   const threadPermission = permissionStore?.getThread(boot.sessionId)
-  const reviewerAgent = boot.materializeReviewerAgent(
-    assembleLegacyAgentConfig([], baseSessionDeps),
-  )
+  const reviewerAgent = materializeLegacyReviewerAgent(boot, baseSessionDeps)
   const guardianReview =
     reviewerAgent !== undefined
       ? boot.createSubagentBackedGuardianReview({
@@ -155,7 +156,7 @@ export const composeCliSessionDeps = async (
     userInputPort,
     ...(summarizerLlm !== undefined ? { summarizerLlm } : {}),
   })
-  const sessionDeps = await composeLegacySessionDeps({
+  const sessionDeps = await composeBootstrapLegacySessionDeps({
     ...composePlan,
     ...(args.convStore !== undefined
       ? {

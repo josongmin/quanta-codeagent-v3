@@ -79,7 +79,9 @@ const minimalArgs = (): BuildReplSlashCtxArgs => ({
   planStore: undefined,
   branchProgress: undefined,
   getHistory: () => [],
-  sideConvPort: {} as BuildReplSlashCtxArgs["sideConvPort"],
+  startSideConversation: (async () =>
+    ({}) as never) as BuildReplSlashCtxArgs["startSideConversation"],
+  isSideConversationWired: () => true,
   abortSignal: new AbortController().signal,
   debugHandle: undefined,
   llm: {} as BuildReplSlashCtxArgs["llm"],

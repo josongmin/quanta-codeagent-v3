@@ -1,4 +1,4 @@
-import type { ImageBlock } from "@/llm"
+import type { ImageBlock, Message } from "@/llm"
 
 export interface SessionCommandEnvelope<TType extends string> {
   readonly sessionId: string
@@ -26,6 +26,11 @@ export interface SessionToolProfileSetCommand
   readonly profile: string
 }
 
+export interface SessionTranscriptReplaceCommand
+  extends SessionCommandEnvelope<"session.transcript.replace"> {
+  readonly messages: readonly Message[]
+}
+
 export interface ApprovalRespondCommand extends SessionCommandEnvelope<"approval.respond"> {
   readonly approvalId: string
   readonly decision: "approve" | "deny"
@@ -36,6 +41,7 @@ export type SessionCommand =
   | TurnRunCommand
   | TurnCancelCommand
   | SessionIdentitySetCommand
+  | SessionTranscriptReplaceCommand
   | SessionToolProfileSetCommand
   | ApprovalRespondCommand
 
@@ -43,6 +49,7 @@ export const SESSION_COMMAND_TYPES = [
   "approval.respond",
   "input.append",
   "session.identity.set",
+  "session.transcript.replace",
   "session.tool_profile.set",
   "turn.cancel",
   "turn.run",

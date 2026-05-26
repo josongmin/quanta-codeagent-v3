@@ -4,6 +4,8 @@ export type {
   RuntimeFacade,
   RuntimeSession,
   RuntimeSessionConfig,
+  RuntimeSideConversationArgs,
+  RuntimeSideConversationResult,
   SessionDispatchOptions,
   SessionDispatchResult,
 } from "./types"

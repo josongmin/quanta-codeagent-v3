@@ -1,10 +1,11 @@
-import type { ImageBlock } from "@/llm"
+import type { ImageBlock, Message } from "@/llm"
 import type { ApprovalRespondCommand, SessionCommand, SessionEvent } from "@/protocol/session"
 import { SessionProtocolValidationError, SessionRevisionConflictError } from "@/protocol/session"
-import { type KernelSessionState, toSessionStateView } from "./state"
+import { type KernelSessionState, summarizeTranscript, toSessionStateView } from "./state"
 
 type HostAction =
   | { readonly kind: "none" }
+  | { readonly kind: "replace_transcript"; readonly messages: readonly Message[] }
   | { readonly kind: "run_turn"; readonly prompt: string; readonly images: readonly ImageBlock[] }
 
 export interface ReducerResult {
@@ -99,6 +100,32 @@ export const reduceSessionCommand = (
       return {
         state: nextState,
         hostAction: { kind: "none" },
+        events: [
+          {
+            eventId: crypto.randomUUID(),
+            seq: state.seq + 1,
+            revision: nextState.revision,
+            emittedAt,
+            causedByCommandId: command.commandId,
+            type: "session.state.updated",
+            state: toSessionStateView(nextState),
+          },
+        ],
+      }
+    }
+    case "session.transcript.replace": {
+      if (state.status === "running" || state.pendingApproval !== null) {
+        throw new SessionProtocolValidationError("transcript_replace_unavailable")
+      }
+      const { lastOutcomeReason: _lastOutcomeReason, ...stateWithoutOutcome } = state
+      const nextState = withRevision({
+        ...stateWithoutOutcome,
+        status: "idle",
+        transcript: summarizeTranscript(command.messages),
+      })
+      return {
+        state: nextState,
+        hostAction: { kind: "replace_transcript", messages: [...command.messages] },
         events: [
           {
             eventId: crypto.randomUUID(),

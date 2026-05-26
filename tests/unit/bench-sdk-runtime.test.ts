@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Instance } from "@/apps/bench/types"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
+import { __resetRuntimeConfig } from "@/shared/runtime-config"
 
 class NoopLLM implements LLMPort {
   async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
@@ -20,6 +21,11 @@ const sdkCalls = {
   sessionClose: 0,
   runtimeClose: 0,
 }
+
+const originalBenchHome = process.env.QUANTA_BENCH_HOME
+const testBenchHome = mkdtempSync(join(tmpdir(), "bench-sdk-home-"))
+process.env.QUANTA_BENCH_HOME = testBenchHome
+__resetRuntimeConfig()
 
 const originalSdkModule = await import("@/sdk/runtime")
 await mock.module("@/sdk/runtime", () => ({
@@ -60,16 +66,24 @@ await mock.module("@/sdk/runtime", () => ({
           turn: {
             run: async (_meta?: unknown, options?: { signal?: AbortSignal }) => {
               sdkCalls.turnRun += 1
-              await hostSession.runTurn({
+              const result = await hostSession.runTurn({
                 prompt,
                 ...(options?.signal !== undefined ? { signal: options.signal } : {}),
               })
-              return { revision: 2, seq: 2, events: [] }
+              return { revision: 2, seq: 2, events: [], turn: result }
             },
           },
           identity: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
           toolProfile: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
           approval: { respond: async () => ({ revision: 0, seq: 0, events: [] }) },
+          transcript: {
+            replace: async () => ({
+              revision: 0,
+              seq: 0,
+              events: [],
+              transcript: { messages: [] },
+            }),
+          },
         }
       },
       close: async () => {
@@ -86,6 +100,10 @@ const { runInstance } = await import(benchEvalModuleUrl.href)
 afterAll(async () => {
   await mock.module("@/sdk/runtime", () => originalSdkModule)
   mock.restore()
+  if (originalBenchHome === undefined) delete process.env.QUANTA_BENCH_HOME
+  else process.env.QUANTA_BENCH_HOME = originalBenchHome
+  __resetRuntimeConfig()
+  rmSync(testBenchHome, { recursive: true, force: true })
 })
 
 beforeEach(() => {
@@ -113,7 +131,9 @@ describe("apps/bench/eval SDK cutover", () => {
         maxTurns: 2,
         timeoutMs: 20_000,
       })
-      expect(result.passed).toBe(true)
+      expect(result.id).toBe(instance.id)
+      expect(result.passed).toBe(false)
+      expect(result.error).toContain("empty prediction")
       expect(sdkCalls.createRuntime).toBe(1)
       expect(sdkCalls.createSession).toBe(1)
       expect(sdkCalls.turnRun).toBe(1)

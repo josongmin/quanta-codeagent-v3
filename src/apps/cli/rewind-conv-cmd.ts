@@ -12,7 +12,7 @@
  * Three forms:
  *   - `/rewind-conv`             → list tags (newest-first)
  *   - `/rewind-conv --list`      → same as no-args (explicit flag)
- *   - `/rewind-conv <tag>`       → restore that snapshot; calls
+ *   - `/rewind-conv <tag>`       → restore that snapshot; awaits
  *                                  `ctx.convCheckpoint.replaceMessages(...)`
  *                                  so the surface swaps its live history
  *                                  binding.
@@ -47,9 +47,9 @@ export interface ConvCheckpointSlashState {
   /** Surface-side hook: replace the live REPL transcript with the
    *  restored snapshot. Called ONLY when the user runs
    *  `/rewind-conv <tag>` and the tag exists. The adapter is responsible
-   *  for any UI repaint after the swap. No return value — failure to
-   *  swap is opaque to the slash. */
-  readonly replaceMessages: (msgs: ReadonlyArray<Message>) => void
+   *  for any UI repaint after the swap. Rejections surface back through the
+   *  slash path as command failures. */
+  readonly replaceMessages: (msgs: ReadonlyArray<Message>) => Promise<void>
 }
 
 declare module "./slash-commands" {
@@ -144,7 +144,7 @@ export const rewindConvCmd: SlashCommand = {
       ctx.err(`/rewind-conv: no such tag: ${parsed.tag}\n`)
       return 1
     }
-    slot.replaceMessages(restored)
+    await slot.replaceMessages(restored)
     ctx.out(
       `restored '${parsed.tag}' (${restored.length} message${restored.length === 1 ? "" : "s"}).\n`,
     )

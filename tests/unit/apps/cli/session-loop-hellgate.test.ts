@@ -214,16 +214,6 @@ const buildSetup = (
       set: () => undefined,
     },
     refreshSystemPrompt: () => undefined,
-    sideConversationPort: {
-      start: async () =>
-        ({
-          outcome: { messages: [] },
-          answerText: "",
-          inputTokens: 0,
-          outputTokens: 0,
-          toolsAvailable: 0,
-        }) as never,
-    },
     shutdownMcp: async () => undefined,
     // ADR-0301 — `--playbook-trigger` CLI flag echo. The loop spreads this
     // by-presence onto `maybeStartPlaybookTriggerWire({ cliFlag })`; the
@@ -315,9 +305,8 @@ beforeAll(async () => {
   originalLegacyHostModule = { ...legacyHost }
   originalPromptPipelineModule = { ...promptPipeline }
 
-  await mock.module("@/host/runtime/session-host", () => ({
-    ...legacyHost,
-    createLegacyRunnerSessionHost: (options: typeof bridgeState.options) => {
+  await mock.module("@/host/runtime/session-host", () => {
+    const createMockLegacyRunnerSessionHost = (options: typeof bridgeState.options) => {
       bridgeState.options = options
       bridgeState.messages = []
       bridgeState.outcome = undefined
@@ -353,8 +342,15 @@ beforeAll(async () => {
           bridgeState.closeCalls += 1
         },
       }
-    },
-  }))
+    }
+    return {
+      ...legacyHost,
+      createLegacyRunnerSessionHost: createMockLegacyRunnerSessionHost,
+      createSingleLegacyRuntimeHost: (options: typeof bridgeState.options) => ({
+        createSessionHost: async () => createMockLegacyRunnerSessionHost(options),
+      }),
+    }
+  })
 
   await mock.module("@/sdk/runtime", () => ({
     ...sdk,
@@ -417,17 +413,23 @@ beforeAll(async () => {
             turn: {
               run: async (_meta?: unknown, options?: { signal?: AbortSignal }) => {
                 runtimeCalls.turnRun += 1
-                await hostSession.runTurn({
+                const result = await hostSession.runTurn({
                   prompt,
                   ...(imageCount > 0 ? { images: new Array(imageCount).fill(null) } : {}),
                   ...(options?.signal !== undefined ? { signal: options.signal } : {}),
                 })
-                return { revision: 2, seq: 2, events: [] }
+                return { revision: 2, seq: 2, events: [], turn: result }
               },
             },
             identity: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
             toolProfile: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
             approval: { respond: async () => ({ revision: 0, seq: 0, events: [] }) },
+            transcript: {
+              replace: async (messages: readonly Message[]) => {
+                bridgeState.messages = [...messages]
+                return { revision: 3, seq: 3, events: [], transcript: { messages: [...messages] } }
+              },
+            },
           }
         },
         close: async () => {
@@ -696,11 +698,11 @@ describe("session-loop — interactive branch (no argPrompt)", () => {
     expect(setup.__pillsDisposeCalls.n).toBe(1)
   })
 
-  test("registerReplaceMessages keeps the legacy host history in sync", async () => {
+  test("registerReplaceMessages routes transcript restore through the runtime session", async () => {
     const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
     const setup = buildSetup(undefined)
     const sinks = buildSinks()
-    let replaceMessages: ((messages: ReadonlyArray<Message>) => void) | undefined
+    let replaceMessages: ((messages: ReadonlyArray<Message>) => Promise<void>) | undefined
     await runSessionLoop({
       setup,
       dispatchSlash: async () => false,
@@ -713,7 +715,7 @@ describe("session-loop — interactive branch (no argPrompt)", () => {
     const nextMessages = [
       { role: "user", content: [{ type: "text", text: "rewound" }] },
     ] as unknown as Message[]
-    replaceMessages?.(nextMessages)
+    await replaceMessages?.(nextMessages)
     expect(bridgeState.messages).toEqual(nextMessages)
   })
 

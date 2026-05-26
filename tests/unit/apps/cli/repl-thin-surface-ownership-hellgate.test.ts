@@ -21,13 +21,13 @@ describe("CLI repl thin-surface ownership hellgate", () => {
     expect(repl).not.toContain("./repl/execution-plane-wire")
 
     const deps = read("src/apps/cli/repl/session-deps-compose.ts")
-    expect(deps).toContain('from "@/host/runtime/session-host"')
-    expect(deps).toContain("composeLegacySessionDeps")
+    expect(deps).toContain('from "@/sdk/runtime/compat"')
+    expect(deps).toContain("composeBootstrapLegacySessionDeps")
     expect(deps).not.toContain('from "@/runner/session-memory-auto"')
     expect(deps).not.toContain("./session-memory-auto")
 
     const setup = read("src/apps/cli/repl/session-setup.ts")
-    expect(setup).toContain("buildLegacySideConversationPort")
+    expect(setup).not.toContain("buildLegacySideConversationPort")
     expect(setup).not.toContain("./side-conv-wire")
   })
 

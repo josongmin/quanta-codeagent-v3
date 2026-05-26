@@ -1,34 +1,21 @@
 import type { Message } from "@/llm"
-import type { ArtifactRef, SessionCommand, SessionEvent } from "@/protocol/session"
-import type { KernelDispatchContext } from "./ports"
+import type {
+  ArtifactRef,
+  SessionCommand,
+  SessionEvent,
+  SessionTranscriptReplaceCommand,
+  TurnRunCommand,
+} from "@/protocol/session"
+import { SessionProtocolValidationError } from "@/protocol/session"
+import type { KernelDispatchContext, SessionHostTurnResult } from "./ports"
 import { reduceSessionCommand } from "./reducer"
-import { type KernelSessionState, toSessionStateView } from "./state"
+import { type KernelSessionState, summarizeTranscript, toSessionStateView } from "./state"
 
 const appendEvents = async (
   eventLog: KernelDispatchContext["eventLog"],
   events: readonly SessionEvent[],
 ): Promise<void> => {
   for (const event of events) await eventLog.append(event)
-}
-
-const lastTextBlock = (message: Message | undefined): string | undefined => {
-  if (message === undefined) return undefined
-  return message.content
-    .filter((block) => block.type === "text")
-    .map((block) => (block.type === "text" ? block.text : ""))
-    .join("")
-}
-
-const extractTranscript = (messages: readonly Message[]) => {
-  const lastUser = [...messages].reverse().find((message) => message.role === "user")
-  const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant")
-  const lastUserText = lastTextBlock(lastUser)
-  const lastAssistantText = lastTextBlock(lastAssistant)
-  return {
-    messageCount: messages.length,
-    ...(lastUserText !== undefined ? { lastUserText } : {}),
-    ...(lastAssistantText !== undefined ? { lastAssistantText } : {}),
-  }
 }
 
 const readyEvents = (args: {
@@ -50,6 +37,241 @@ const readyEvents = (args: {
 export interface KernelDispatchResult {
   readonly state: KernelSessionState
   readonly events: readonly SessionEvent[]
+  readonly transcriptMessages?: readonly Message[]
+  readonly turnResult?: SessionHostTurnResult
+}
+
+const replaceTranscript = (
+  command: SessionTranscriptReplaceCommand,
+  ctx: KernelDispatchContext,
+  nextState: KernelSessionState,
+  reduced: ReturnType<typeof reduceSessionCommand>,
+  events: readonly SessionEvent[],
+): KernelDispatchResult => {
+  if (ctx.host.replaceMessages === undefined) {
+    throw new SessionProtocolValidationError("transcript_replace_unsupported")
+  }
+  if (reduced.hostAction.kind !== "replace_transcript") {
+    throw new SessionProtocolValidationError("bad_transcript_replace_host_action")
+  }
+  ctx.host.replaceMessages(reduced.hostAction.messages)
+  return {
+    state: nextState,
+    events,
+    transcriptMessages: [...command.messages],
+  }
+}
+
+const approvalEventsForTurn = (args: {
+  readonly state: KernelSessionState
+  readonly command: TurnRunCommand
+  readonly approval: NonNullable<SessionHostTurnResult["approvalRequest"]>
+  readonly ctx: KernelDispatchContext
+}): readonly SessionEvent[] => [
+  {
+    eventId: crypto.randomUUID(),
+    seq: args.state.seq - 1,
+    revision: args.state.revision,
+    emittedAt: args.ctx.clock.now().toISOString(),
+    causedByCommandId: args.command.commandId,
+    type: "approval.requested",
+    approval: args.approval,
+  },
+  {
+    eventId: crypto.randomUUID(),
+    seq: args.state.seq,
+    revision: args.state.revision,
+    emittedAt: args.ctx.clock.now().toISOString(),
+    causedByCommandId: args.command.commandId,
+    type: "session.state.updated",
+    state: toSessionStateView(args.state),
+  },
+]
+
+const onApprovalRequested = async (args: {
+  readonly state: KernelSessionState
+  readonly command: TurnRunCommand
+  readonly result: SessionHostTurnResult
+  readonly ctx: KernelDispatchContext
+  readonly events: readonly SessionEvent[]
+}): Promise<KernelDispatchResult> => {
+  const approval = args.result.approvalRequest
+  if (approval === undefined) {
+    throw new SessionProtocolValidationError("missing_approval_request")
+  }
+  const nextState: KernelSessionState = {
+    ...args.state,
+    revision: args.state.revision + 1,
+    seq: args.state.seq + 2,
+    status: "awaiting_approval",
+    pendingApproval: approval,
+  }
+  const approvalEvents = approvalEventsForTurn({
+    state: nextState,
+    command: args.command,
+    approval,
+    ctx: args.ctx,
+  })
+  await appendEvents(args.ctx.eventLog, approvalEvents)
+  return {
+    state: nextState,
+    events: [...args.events, ...approvalEvents],
+    turnResult: args.result,
+  }
+}
+
+const completionEventsForTurn = (args: {
+  readonly state: KernelSessionState
+  readonly command: TurnRunCommand
+  readonly artifacts: readonly ArtifactRef[]
+  readonly ctx: KernelDispatchContext
+}): readonly SessionEvent[] => {
+  const emittedAt = args.ctx.clock.now().toISOString()
+  const artifactEvents = readyEvents({
+    state: args.state,
+    commandId: args.command.commandId,
+    emittedAt,
+    artifacts: args.artifacts,
+  })
+  const completionSeq = args.state.seq + artifactEvents.length + 1
+  return [
+    ...artifactEvents,
+    {
+      eventId: crypto.randomUUID(),
+      seq: completionSeq,
+      revision: args.state.revision,
+      emittedAt,
+      causedByCommandId: args.command.commandId,
+      type: "turn.completed",
+      outcomeReason: args.state.lastOutcomeReason ?? "completed",
+    },
+    {
+      eventId: crypto.randomUUID(),
+      seq: completionSeq + 1,
+      revision: args.state.revision,
+      emittedAt,
+      causedByCommandId: args.command.commandId,
+      type: "session.state.updated",
+      state: toSessionStateView(args.state),
+    },
+  ]
+}
+
+const onTurnCompleted = async (args: {
+  readonly state: KernelSessionState
+  readonly command: TurnRunCommand
+  readonly result: SessionHostTurnResult
+  readonly ctx: KernelDispatchContext
+  readonly events: readonly SessionEvent[]
+}): Promise<KernelDispatchResult> => {
+  const artifacts = [...(args.result.artifacts ?? [])]
+  const completedState: KernelSessionState = {
+    ...args.state,
+    revision: args.state.revision + 1,
+    status: "idle",
+    draftInput: "",
+    draftImages: [],
+    pendingApproval: null,
+    transcript: summarizeTranscript(args.result.messages),
+    artifacts: [...args.state.artifacts, ...artifacts],
+    lastOutcomeReason: args.result.outcome.reason,
+  }
+  const completionEvents = completionEventsForTurn({
+    state: completedState,
+    command: args.command,
+    artifacts,
+    ctx: args.ctx,
+  })
+  const seq = completionEvents.at(-1)?.seq ?? completedState.seq
+  const nextState: KernelSessionState = {
+    ...completedState,
+    seq,
+  }
+  await appendEvents(args.ctx.eventLog, completionEvents)
+  return {
+    state: nextState,
+    events: [...args.events, ...completionEvents],
+    turnResult: args.result,
+    transcriptMessages: [...args.result.messages],
+  }
+}
+
+const onTurnFailed = async (args: {
+  readonly state: KernelSessionState
+  readonly command: TurnRunCommand
+  readonly error: unknown
+  readonly ctx: KernelDispatchContext
+  readonly events: readonly SessionEvent[]
+}): Promise<KernelDispatchResult> => {
+  const nextState: KernelSessionState = {
+    ...args.state,
+    revision: args.state.revision + 1,
+    seq: args.state.seq + 2,
+    status: "failed",
+    lastOutcomeReason: "error",
+  }
+  const failedEvents: SessionEvent[] = [
+    {
+      eventId: crypto.randomUUID(),
+      seq: nextState.seq - 1,
+      revision: nextState.revision,
+      emittedAt: args.ctx.clock.now().toISOString(),
+      causedByCommandId: args.command.commandId,
+      type: "turn.failed",
+      message: args.error instanceof Error ? args.error.message : String(args.error),
+    },
+    {
+      eventId: crypto.randomUUID(),
+      seq: nextState.seq,
+      revision: nextState.revision,
+      emittedAt: args.ctx.clock.now().toISOString(),
+      causedByCommandId: args.command.commandId,
+      type: "session.state.updated",
+      state: toSessionStateView(nextState),
+    },
+  ]
+  await appendEvents(args.ctx.eventLog, failedEvents)
+  return { state: nextState, events: [...args.events, ...failedEvents] }
+}
+
+const runTurn = async (args: {
+  readonly state: KernelSessionState
+  readonly command: TurnRunCommand
+  readonly ctx: KernelDispatchContext
+  readonly reduced: ReturnType<typeof reduceSessionCommand>
+  readonly events: readonly SessionEvent[]
+}): Promise<KernelDispatchResult> => {
+  const hostAction = args.reduced.hostAction
+  try {
+    const result = await args.ctx.host.runTurn({
+      prompt: hostAction.kind === "run_turn" ? hostAction.prompt : "",
+      ...(hostAction.kind === "run_turn" ? { images: hostAction.images } : {}),
+      ...(args.ctx.signal !== undefined ? { signal: args.ctx.signal } : {}),
+    })
+    return result.approvalRequest !== undefined
+      ? await onApprovalRequested({
+          state: args.state,
+          command: args.command,
+          result,
+          ctx: args.ctx,
+          events: args.events,
+        })
+      : await onTurnCompleted({
+          state: args.state,
+          command: args.command,
+          result,
+          ctx: args.ctx,
+          events: args.events,
+        })
+  } catch (error) {
+    return await onTurnFailed({
+      state: args.state,
+      command: args.command,
+      error,
+      ctx: args.ctx,
+      events: args.events,
+    })
+  }
 }
 
 export const dispatchSessionCommand = async (
@@ -60,7 +282,7 @@ export const dispatchSessionCommand = async (
   const emittedAt = ctx.clock.now().toISOString()
   const reduced = reduceSessionCommand(state, command, emittedAt)
   const immediateEvents = [...reduced.events]
-  let nextState: KernelSessionState = {
+  const nextState: KernelSessionState = {
     ...reduced.state,
     seq: state.seq + immediateEvents.length,
   }
@@ -73,123 +295,16 @@ export const dispatchSessionCommand = async (
     case "session.tool_profile.set":
       await ctx.host.setToolProfile?.(command.profile)
       return { state: nextState, events: immediateEvents }
-    case "turn.run": {
-      try {
-        const result = await ctx.host.runTurn({
-          prompt: reduced.hostAction.kind === "run_turn" ? reduced.hostAction.prompt : "",
-          ...(reduced.hostAction.kind === "run_turn" ? { images: reduced.hostAction.images } : {}),
-          ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
-        })
-        if (result.approvalRequest !== undefined) {
-          nextState = {
-            ...nextState,
-            revision: nextState.revision + 1,
-            seq: nextState.seq + 2,
-            status: "awaiting_approval",
-            pendingApproval: result.approvalRequest,
-          }
-          const approvalEvents: SessionEvent[] = [
-            {
-              eventId: crypto.randomUUID(),
-              seq: nextState.seq - 1,
-              revision: nextState.revision,
-              emittedAt: ctx.clock.now().toISOString(),
-              causedByCommandId: command.commandId,
-              type: "approval.requested",
-              approval: result.approvalRequest,
-            },
-            {
-              eventId: crypto.randomUUID(),
-              seq: nextState.seq,
-              revision: nextState.revision,
-              emittedAt: ctx.clock.now().toISOString(),
-              causedByCommandId: command.commandId,
-              type: "session.state.updated",
-              state: toSessionStateView(nextState),
-            },
-          ]
-          await appendEvents(ctx.eventLog, approvalEvents)
-          return { state: nextState, events: [...immediateEvents, ...approvalEvents] }
-        }
-        const artifacts = [...(result.artifacts ?? [])]
-        nextState = {
-          ...nextState,
-          revision: nextState.revision + 1,
-          status: "idle",
-          draftInput: "",
-          draftImages: [],
-          pendingApproval: null,
-          transcript: extractTranscript(result.messages),
-          artifacts: [...nextState.artifacts, ...artifacts],
-          lastOutcomeReason: result.outcome.reason,
-        }
-        const emitted = ctx.clock.now().toISOString()
-        const artifactEvents = readyEvents({
-          state: nextState,
-          commandId: command.commandId,
-          emittedAt: emitted,
-          artifacts,
-        })
-        const completionSeq = nextState.seq + artifactEvents.length + 1
-        const completionEvents: SessionEvent[] = [
-          ...artifactEvents,
-          {
-            eventId: crypto.randomUUID(),
-            seq: completionSeq,
-            revision: nextState.revision,
-            emittedAt: emitted,
-            causedByCommandId: command.commandId,
-            type: "turn.completed",
-            outcomeReason: result.outcome.reason,
-          },
-          {
-            eventId: crypto.randomUUID(),
-            seq: completionSeq + 1,
-            revision: nextState.revision,
-            emittedAt: emitted,
-            causedByCommandId: command.commandId,
-            type: "session.state.updated",
-            state: toSessionStateView(nextState),
-          },
-        ]
-        nextState = {
-          ...nextState,
-          seq: completionSeq + 1,
-        }
-        await appendEvents(ctx.eventLog, completionEvents)
-        return { state: nextState, events: [...immediateEvents, ...completionEvents] }
-      } catch (error) {
-        nextState = {
-          ...nextState,
-          revision: nextState.revision + 1,
-          seq: nextState.seq + 2,
-          status: "failed",
-          lastOutcomeReason: "error",
-        }
-        const failedEvents: SessionEvent[] = [
-          {
-            eventId: crypto.randomUUID(),
-            seq: nextState.seq - 1,
-            revision: nextState.revision,
-            emittedAt: ctx.clock.now().toISOString(),
-            causedByCommandId: command.commandId,
-            type: "turn.failed",
-            message: error instanceof Error ? error.message : String(error),
-          },
-          {
-            eventId: crypto.randomUUID(),
-            seq: nextState.seq,
-            revision: nextState.revision,
-            emittedAt: ctx.clock.now().toISOString(),
-            causedByCommandId: command.commandId,
-            type: "session.state.updated",
-            state: toSessionStateView(nextState),
-          },
-        ]
-        await appendEvents(ctx.eventLog, failedEvents)
-        return { state: nextState, events: [...immediateEvents, ...failedEvents] }
-      }
-    }
+    case "session.transcript.replace":
+      return replaceTranscript(command, ctx, nextState, reduced, immediateEvents)
+    case "turn.run":
+      return await runTurn({
+        state: nextState,
+        command,
+        ctx,
+        reduced,
+        events: immediateEvents,
+      })
     default:
       return { state: nextState, events: immediateEvents }
   }

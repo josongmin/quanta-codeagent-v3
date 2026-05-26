@@ -6,6 +6,9 @@ export type {
   KernelEventLogPort,
   SessionHost,
   SessionHostDescription,
+  SessionHostSideConversationArgs,
+  SessionHostSideConversationInheritance,
+  SessionHostSideConversationResult,
   SessionHostTurnResult,
 } from "./ports"
 export { systemClock } from "./ports"

@@ -26,7 +26,6 @@
 
 import { describe, expect, test } from "bun:test"
 import type { Message } from "@/llm"
-import type { SideConversationPort, SideConversationStartArgs } from "@/runner"
 import {
   type BranchProgressState,
   createBranchProgressTracker,
@@ -333,7 +332,7 @@ describe("/side: side-chat port wire", () => {
     expect(cap.out).toContain("isolated agent loop")
   })
 
-  test("PRESENT side state ENTERS real branch — port.start spy called with the question", async () => {
+  test("PRESENT side state ENTERS real branch — start spy called with the question", async () => {
     // ADR-0304 — REGRESSION CLASS CAUGHT (kept from the pre-port era):
     // the prior test used a structurally-invalid fake state (`deps: {
     // signal: ... } as never`), swallowed every throw via `.catch(() =>
@@ -342,33 +341,26 @@ describe("/side: side-chat port wire", () => {
     // dispatch entirely (e.g. changed `if (state === undefined)` to
     // `if (true)`) would still print the header and pass.
     //
-    // After ADR-0304 the slash command no longer touches `runSideChat`
-    // directly — it calls `state.port.start(...)`. We spy on the port to
-    // (a) prove dispatch actually crossed the gate, (b) verify the
-    // question + transcript snapshot were forwarded, (c) short-circuit
-    // before the runner so we don't need heavy deps.
+    // After the Runtime SDK cutover the slash command no longer touches
+    // `runSideChat` directly — it calls the injected `state.start(...)`.
+    // We spy on that starter to prove dispatch crossed the gate.
     let startCalls = 0
-    let startArgs: SideConversationStartArgs | undefined
+    let startArgs: Parameters<SideCmdSlashState["start"]>[0] | undefined
     const SENTINEL = "ADR-0304-PORT-START-REACHED"
-    const fakePort: SideConversationPort = {
-      start: async (req): Promise<never> => {
-        startCalls++
-        startArgs = req
-        throw new Error(SENTINEL)
-      },
+    const fakeStart: SideCmdSlashState["start"] = async (req): Promise<never> => {
+      startCalls++
+      startArgs = req
+      throw new Error(SENTINEL)
     }
     const out: string[] = []
     const err: string[] = []
-    const liveTranscript: Message[] = [
-      { role: "user", content: [{ type: "text", text: "main-u" }] },
-    ]
     const ctx: SlashContext = {
       out: (s) => out.push(s),
       err: (s) => err.push(s),
       cwd: "/tmp",
       side: {
-        port: fakePort,
-        getHistory: () => liveTranscript,
+        start: fakeStart,
+        isWired: () => true,
         signal: new AbortController().signal,
       } satisfies SideCmdSlashState,
     }
@@ -381,12 +373,9 @@ describe("/side: side-chat port wire", () => {
     // Header painted before the throw (positive control).
     expect(out.join("")).toContain("- /side - hello world")
     // CRITICAL — proves real branch was engaged. start() called EXACTLY
-    // ONCE with the prompt as the `question` and the live transcript as
-    // `messages`.
+    // ONCE with the prompt as the `question`.
     expect(startCalls).toBe(1)
     expect(startArgs?.question).toBe("hello world")
-    expect(startArgs?.messages.length).toBe(1)
-    expect((startArgs?.messages[0]?.content[0] as { text?: string })?.text).toBe("main-u")
     // No `inherit` / `tools` / `maxTurns` requested ⇒ port receives them
     // as `undefined` (no per-call override) so the adapter falls back to
     // its closed-over defaults.
@@ -398,13 +387,11 @@ describe("/side: side-chat port wire", () => {
     const cap: CapturedCtx = { out: "", err: "" }
     let startCalls = 0
     const fakeState: SideCmdSlashState = {
-      port: {
-        start: async () => {
-          startCalls++
-          throw new Error("should not reach")
-        },
+      start: async () => {
+        startCalls++
+        throw new Error("should not reach")
       },
-      getHistory: () => [],
+      isWired: () => true,
       signal: new AbortController().signal,
     }
     const ctx: SlashContext = { ...makeBase(cap), side: fakeState }

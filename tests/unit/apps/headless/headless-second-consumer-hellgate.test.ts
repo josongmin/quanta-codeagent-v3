@@ -96,7 +96,6 @@ const readHeadless = (): ReadonlyArray<{ readonly path: string; readonly body: s
 const ALLOWED_PREFIXES: readonly string[] = [
   "@/host/bootstrap",
   "@/host/runtime",
-  "@/host/runtime/session-host",
   "@/runner/assemble/config",
   "@/runner/assemble/tooling",
   "@/runner/orchestrate/resume-fsm",
@@ -166,9 +165,12 @@ describe("ADR-0308 headless second-consumer hellgate", () => {
 
   test("CASE 2b: headless source uses the single compat owner, not raw compat helpers", () => {
     const source = readFileSync(join(HEADLESS_DIR, "index.ts"), "utf8")
-    expect(source).toContain('from "@/host/runtime/session-host"')
+    expect(source).toContain('from "@/sdk/runtime/compat"')
+    expect(source).not.toContain("createLegacyRunnerSessionHost(")
     expect(source).not.toContain('from "@/runner/session-execution-plane"')
     expect(source).not.toContain('from "@/runner/session-memory-auto"')
+    expect(source).not.toContain("peekMessages(")
+    expect(source).not.toContain("peekLastOutcome(")
   })
 
   test("CASE 2d: headless never imports runner public barrels", () => {

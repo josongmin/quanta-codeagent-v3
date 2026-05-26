@@ -1,6 +1,10 @@
 import type { AgentConfig, AgentOutcome } from "@/agent"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
-import type { SessionHost } from "@/kernel/session"
+import type {
+  SessionHost,
+  SessionHostSideConversationArgs,
+  SessionHostSideConversationResult,
+} from "@/kernel/session"
 import type { Message } from "@/llm"
 import { type CapabilityManifest, normalizeCapabilityManifest } from "@/protocol/session"
 import {
@@ -8,14 +12,12 @@ import {
   type SessionDeps,
 } from "@/runner/assemble/config"
 import { runOnce } from "@/runner/orchestrate/run-once"
-import { runSideChat, type SideChatResult } from "@/runner/orchestrate/side-chat"
+import { runSideChat } from "@/runner/orchestrate/side-chat"
 import { buildSharedExecutionPlaneSessionDeps } from "@/runner/session-execution-plane"
 import { buildSessionMemoryAutoWires } from "@/runner/session-memory-auto"
-import type {
-  SideConversationPort,
-  SideConversationStartArgs,
-} from "@/runner/side-conversation-port"
 import type { SessionMeta } from "@/session"
+import { createSingleSessionRuntimeHost } from "./builder"
+import type { RuntimeHost, RuntimeSessionConfig } from "./types"
 
 interface LegacyBootBindings {
   readonly mode: SessionBootstrapResult["mode"]
@@ -83,13 +85,6 @@ export interface LegacyBootstrapSessionDepsArgs {
 export interface ComposeLegacySessionDepsArgs extends LegacyBootstrapSessionDepsArgs {
   readonly execution?: Omit<LegacyExecutionPlaneComposeArgs, "sessionDeps">
   readonly memoryAuto?: Omit<LegacyMemoryAutoComposeArgs, "sessionDeps">
-}
-
-export interface BuildLegacySideConversationPortArgs {
-  readonly sessionDeps: SessionDeps
-  readonly assembleTurnConfig?: LegacySessionConfigAssembler
-  readonly defaultTools?: readonly string[]
-  readonly defaultMaxTurns?: number
 }
 
 export const buildCapabilityManifestFromLegacySessionDeps = (
@@ -304,26 +299,30 @@ export const buildSessionDepsFromAgentConfigBase = (base: LegacySessionDepsSourc
   }
 }
 
-export const buildLegacySideConversationPort = (
-  args: BuildLegacySideConversationPortArgs,
-): SideConversationPort => ({
-  start: async (req: SideConversationStartArgs): Promise<SideChatResult> => {
-    const maxTurns = req.maxTurns ?? args.defaultMaxTurns
-    const tools = req.tools ?? args.defaultTools
-    const mainHistory: readonly Message[] = req.messages
-    return runSideChat({
-      deps: args.sessionDeps,
-      assembleConfig: (messages, deps) =>
-        assembleLegacyAgentConfig(messages, deps, args.assembleTurnConfig),
-      prompt: req.question,
-      mainHistory,
-      signal: req.signal,
-      ...(req.inherit !== undefined ? { contextInheritance: req.inherit } : {}),
-      ...(tools !== undefined ? { toolAllowlist: tools } : {}),
-      ...(maxTurns !== undefined ? { maxTurns } : {}),
-    })
-  },
-})
+export interface StartLegacySideConversationArgs extends SessionHostSideConversationArgs {
+  readonly sessionDeps: SessionDeps
+  readonly assembleTurnConfig?: LegacySessionConfigAssembler
+  readonly defaultTools?: readonly string[]
+  readonly defaultMaxTurns?: number
+}
+
+export const startLegacySideConversation = async (
+  args: StartLegacySideConversationArgs,
+): Promise<SessionHostSideConversationResult> => {
+  const maxTurns = args.maxTurns ?? args.defaultMaxTurns
+  const tools = args.tools ?? args.defaultTools
+  return await runSideChat({
+    deps: args.sessionDeps,
+    assembleConfig: (messages, deps) =>
+      assembleLegacyAgentConfig(messages, deps, args.assembleTurnConfig),
+    prompt: args.question,
+    mainHistory: args.messages,
+    signal: args.signal,
+    ...(args.inherit !== undefined ? { contextInheritance: args.inherit } : {}),
+    ...(tools !== undefined ? { toolAllowlist: tools } : {}),
+    ...(maxTurns !== undefined ? { maxTurns } : {}),
+  })
+}
 
 export const createLegacyRunnerSessionHost = (
   options: LegacyRunnerSessionHostOptions,
@@ -379,6 +378,21 @@ export const createLegacyRunnerSessionHost = (
     setToolProfile: async (profile) => {
       options.boot?.toolProfileState?.set(profile as never)
     },
+    startSideConversation: async (
+      args: SessionHostSideConversationArgs,
+    ): Promise<SessionHostSideConversationResult> =>
+      await startLegacySideConversation({
+        sessionDeps: options.sessionDeps,
+        question: args.question,
+        messages: args.messages,
+        signal: args.signal,
+        ...(options.assembleConfig !== undefined
+          ? { assembleTurnConfig: options.assembleConfig }
+          : {}),
+        ...(args.inherit !== undefined ? { inherit: args.inherit } : {}),
+        ...(args.tools !== undefined ? { tools: args.tools } : {}),
+        ...(args.maxTurns !== undefined ? { maxTurns: args.maxTurns } : {}),
+      }),
     peekMessages: () => [...history],
     peekLastOutcome: () => lastOutcome,
     replaceMessages: (messages) => {
@@ -387,3 +401,10 @@ export const createLegacyRunnerSessionHost = (
     close,
   }
 }
+
+export const createSingleLegacyRuntimeHost = (
+  options: LegacyRunnerSessionHostOptions,
+): RuntimeHost =>
+  createSingleSessionRuntimeHost((_config: RuntimeSessionConfig) =>
+    createLegacyRunnerSessionHost(options),
+  )

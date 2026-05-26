@@ -1,4 +1,4 @@
-import type { ImageBlock } from "@/llm"
+import type { ImageBlock, Message } from "@/llm"
 import type {
   ArtifactRef,
   CapabilityManifest,
@@ -36,6 +36,26 @@ export interface CreateKernelSessionStateInput {
   readonly capabilityManifest: CapabilityManifest
   readonly identityMode?: string
   readonly toolProfile?: string
+}
+
+const lastTextBlock = (message: Message | undefined): string | undefined => {
+  if (message === undefined) return undefined
+  return message.content
+    .filter((block) => block.type === "text")
+    .map((block) => (block.type === "text" ? block.text : ""))
+    .join("")
+}
+
+export const summarizeTranscript = (messages: readonly Message[]): KernelTranscriptState => {
+  const lastUser = [...messages].reverse().find((message) => message.role === "user")
+  const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant")
+  const lastUserText = lastTextBlock(lastUser)
+  const lastAssistantText = lastTextBlock(lastAssistant)
+  return {
+    messageCount: messages.length,
+    ...(lastUserText !== undefined ? { lastUserText } : {}),
+    ...(lastAssistantText !== undefined ? { lastAssistantText } : {}),
+  }
 }
 
 export const createKernelSessionState = (

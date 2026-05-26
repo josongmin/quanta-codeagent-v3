@@ -16,6 +16,7 @@ export type {
   SessionCommandType,
   SessionIdentitySetCommand,
   SessionToolProfileSetCommand,
+  SessionTranscriptReplaceCommand,
   TurnCancelCommand,
   TurnRunCommand,
 } from "./commands"

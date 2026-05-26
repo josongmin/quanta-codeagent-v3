@@ -56,6 +56,10 @@
  *
  * Never crashes when keys are absent — prints guidance and exits 0.
  */
+// Side-effect: register all 12 knobs into the framework registry. MUST come
+// before any code path that calls resolveKnobs/knobsForSurface — without
+// this import the registry is empty and report/telemetry record nothing.
+import "@/runner/knobs/knobs"
 import { existsSync, readFileSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 import { join, resolve } from "node:path"

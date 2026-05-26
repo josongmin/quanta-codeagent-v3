@@ -1,11 +1,10 @@
 import type { AgentConfig, AgentOutcome } from "@/agent"
 import { startAutomationEngineTicker } from "@/agent/loop-helpers"
-import { createSingleSessionRuntimeHost } from "@/host/runtime"
-import { createLegacyRunnerSessionHost } from "@/host/runtime/session-host"
 import type { Message } from "@/llm"
 import { injectSimulatedTurn, type LastTurnOutcome, REACTOR_ENV_FLAG } from "@/reactor"
 import { assembleAutomation } from "@/scheduler/runtime-wire"
-import { createRuntime } from "@/sdk/runtime"
+import type { RuntimeSideConversationArgs, RuntimeSideConversationResult } from "@/sdk/runtime"
+import { createLegacyRuntimeFacade } from "@/sdk/runtime/compat"
 import { logger } from "@/shared"
 import type { PlaybookPlanQueueSink } from "@/skill/playbook"
 import { automationUpdateTool, ToolRegistry } from "@/tool"
@@ -74,7 +73,13 @@ export interface RunSessionLoopDeps {
    *  can mutate the live `history` binding. Called once before the
    *  interactive driver starts. Absent ⇒ `/rewind-conv` restore still
    *  succeeds against the store but the surface transcript stays stale. */
-  readonly registerReplaceMessages?: (fn: (msgs: ReadonlyArray<Message>) => void) => void
+  readonly registerReplaceMessages?: (fn: (msgs: ReadonlyArray<Message>) => Promise<void>) => void
+  /** Runtime-owned `/side` starter slot. The loop installs the live session
+   *  method once the runtime session exists; slash surfaces read it lazily at
+   *  invocation time so they never capture a stale or pre-session closure. */
+  readonly registerSideConversationStart?: (
+    fn: ((args: RuntimeSideConversationArgs) => Promise<RuntimeSideConversationResult>) | undefined,
+  ) => void
   /** ADR-0293 — playbook-trigger seam the loop attaches to once it owns the
    *  `ExternalPromptQueue` (the queue is the sink target). Absent ⇒ no
    *  trigger wire is constructed (default-OFF byte-identical). */
@@ -102,22 +107,6 @@ const mapAgentOutcomeToReactorOutcome = (outcome: AgentOutcome): LastTurnOutcome
     case "error":
     case "refusal":
       return "fail"
-  }
-}
-
-const peekOutcomeReason = (
-  outcome: AgentOutcome | undefined,
-): AgentOutcome["reason"] | undefined => {
-  switch (outcome?.reason) {
-    case "completed":
-    case "max_turns":
-    case "aborted":
-    case "budget_exhausted":
-    case "error":
-    case "refusal":
-      return outcome.reason
-    default:
-      return undefined
   }
 }
 
@@ -149,6 +138,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     registerExitTeardown,
     convCheckpointWire,
     registerReplaceMessages,
+    registerSideConversationStart,
     playbookSeam,
     playbookCliFlag,
   } = deps
@@ -203,7 +193,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
         }
       : sessionDeps
 
-  const sessionHost = createLegacyRunnerSessionHost({
+  const runtimeFacade = await createLegacyRuntimeFacade({
     boot: {
       mode: setup.mode,
       refreshSystemPrompt: setup.refreshSystemPrompt,
@@ -217,9 +207,6 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     shutdown: async () => undefined,
     mcpClients: setup.mcpClients as Array<{ stop: () => Promise<void> }>,
   })
-  const runtimeFacade = await createRuntime({
-    host: createSingleSessionRuntimeHost(() => sessionHost),
-  })
   const session = await runtimeFacade.createSession({
     cwd: setup.cwd,
     model: setup.model,
@@ -231,6 +218,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
       ? { toolProfile: activeSessionDeps.toolProfileState.get() }
       : {}),
   })
+  registerSideConversationStart?.((args) => session.side.start(args))
 
   // ADR-0292 — install the `/rewind-conv` swap closure so the slash can mutate
   // the live history binding the loop reads each turn. No-throw on the swap;
@@ -238,9 +226,10 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
   // adapter — this is the inner closure the adapter delegates to).
   const installHistoryReplaceWire = (): void => {
     if (registerReplaceMessages === undefined) return
-    registerReplaceMessages((msgs: ReadonlyArray<Message>): void => {
-      surfaceState = updateSessionState(surfaceState, { history: [...msgs] })
-      sessionHost.replaceMessages(msgs)
+    registerReplaceMessages(async (msgs: ReadonlyArray<Message>): Promise<void> => {
+      const result = await session.transcript.replace(msgs, undefined, { signal: abort.signal })
+      const nextHistory = result.transcript?.messages ?? [...msgs]
+      surfaceState = updateSessionState(surfaceState, { history: nextHistory })
     })
   }
   installHistoryReplaceWire()
@@ -301,9 +290,12 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     await session.input.append(args.text, images.length > 0 ? { images } : undefined, {
       signal: args.turnSignal,
     })
-    await session.turn.run(undefined, { signal: args.turnSignal })
-    const messages = sessionHost.peekMessages()
-    const outcomeReason = peekOutcomeReason(sessionHost.peekLastOutcome())
+    const result = await session.turn.run(undefined, { signal: args.turnSignal })
+    if (result.turn === undefined) {
+      throw new Error("runtime session turn completed without a turn payload")
+    }
+    const messages = result.turn.messages
+    const outcomeReason = result.turn.outcome.reason
     return {
       messages,
       ...(outcomeReason !== undefined ? { outcomeReason } : {}),

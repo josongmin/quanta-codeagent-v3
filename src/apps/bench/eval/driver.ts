@@ -99,15 +99,8 @@ const promptTextFromMessages = (messages: readonly Message[]): string => {
   return ""
 }
 
-interface BenchSessionHost extends SessionHost {
-  peekMessages(): readonly Message[]
-  peekLastOutcome(): AgentOutcome | undefined
-}
-
-const createBenchSessionHost = (config: AgentConfig): BenchSessionHost => {
+const createBenchSessionHost = (config: AgentConfig): SessionHost => {
   const sessionId = `bench-${crypto.randomUUID()}`
-  let messages: readonly Message[] = [...config.messages]
-  let outcome: AgentOutcome | undefined
   return {
     describe: () => ({
       sessionId,
@@ -121,12 +114,8 @@ const createBenchSessionHost = (config: AgentConfig): BenchSessionHost => {
         ...config,
         ...(signal !== undefined ? { signal } : {}),
       })
-      messages = result.messages
-      outcome = result
-      return { outcome: result, messages }
+      return { outcome: result, messages: result.messages }
     },
-    peekMessages: () => [...messages],
-    peekLastOutcome: () => outcome,
     close: async () => undefined,
   }
 }
@@ -149,8 +138,8 @@ const runAgentViaSdk = async (config: AgentConfig): Promise<AgentOutcome> => {
     await session.input.append(promptTextFromMessages(config.messages), undefined, {
       signal: config.signal,
     })
-    await session.turn.run(undefined, { signal: config.signal })
-    const outcome = hostSession.peekLastOutcome()
+    const turn = await session.turn.run(undefined, { signal: config.signal })
+    const outcome = turn.turn?.outcome
     if (outcome === undefined) throw new Error("bench SDK session completed without an outcome")
     return outcome
   } finally {

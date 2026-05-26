@@ -20,13 +20,9 @@
 
 import type { AgentOutcome } from "@/agent"
 import { bootstrapSession, type SessionBootstrapResult } from "@/host/bootstrap"
-import { createSingleSessionRuntimeHost } from "@/host/runtime"
-import {
-  composeLegacySessionDeps,
-  createLegacyRunnerSessionHost,
-} from "@/host/runtime/session-host"
 import type { SessionDeps } from "@/runner/assemble/config"
-import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
+import type { RuntimeSession } from "@/sdk/runtime"
+import { createLegacyRuntimeFromBootstrap } from "@/sdk/runtime/compat"
 import { buildFakeBootstrapDeps, buildFakeRuntime, RecordingStream } from "./fake-deps"
 import { FakeLlm } from "./fake-llm"
 import type {
@@ -60,29 +56,31 @@ const completionsOf = (input: HeadlessRunInput): readonly FakeCompletion[] => {
  *  recording stream. Surface-clean: only fields the headless path needs
  *  (no admissibility, no plan-store, no follow-up queue). The signal flows
  *  through from the caller via `boot.abort.signal`. */
-const composeHeadlessSessionDeps = async (
+const buildHeadlessLegacyRuntimeArgs = (
   boot: SessionBootstrapResult,
   input: HeadlessRunInput,
   stream: RecordingStream,
-): Promise<SessionDeps> => {
-  return await composeLegacySessionDeps({
-    boot,
-    stream,
-    // The headless surface does not interact with a human — `onConfirm` denies
-    // every prompt so any tool that escalates is safely refused. Pair with a
-    // pre-approved tool registry (or `mode: "bypass"`) for tool-call tests.
-    onConfirm: async () => false,
-    execution: {
-      history: boot.history,
-      cwd: boot.cwd,
-      envSource: input.env ?? {},
-    },
-    memoryAuto: {
-      env: input.env ?? {},
-      homeDir: input.homeDir ?? "/tmp",
-    },
-  })
-}
+): Parameters<typeof createLegacyRuntimeFromBootstrap>[0] => ({
+  boot,
+  stream,
+  // The headless surface does not interact with a human — `onConfirm` denies
+  // every prompt so any tool that escalates is safely refused. Pair with a
+  // pre-approved tool registry (or `mode: "bypass"`) for tool-call tests.
+  onConfirm: async () => false,
+  execution: {
+    history: boot.history,
+    cwd: boot.cwd,
+    envSource: input.env ?? {},
+  },
+  memoryAuto: {
+    env: input.env ?? {},
+    homeDir: input.homeDir ?? "/tmp",
+  },
+  history: [...boot.history],
+  state: boot.features.state,
+  idMeta: boot.idMeta,
+  shutdown: boot.shutdownMcp,
+})
 
 const abortedOutcome = (messages: readonly import("@/llm").Message[]): AgentOutcome => ({
   reason: "aborted",
@@ -145,20 +143,14 @@ export const runHeadlessOnce = async (input: HeadlessRunInput): Promise<Headless
   }
 
   let session: RuntimeSession | undefined
-  let runtimeFacade: Awaited<ReturnType<typeof createRuntime>> | undefined
+  let runtimeFacade:
+    | Awaited<ReturnType<typeof createLegacyRuntimeFromBootstrap>>["runtime"]
+    | undefined
   try {
-    const sessionDeps = await composeHeadlessSessionDeps(boot, input, stream)
-    const sessionHost = createLegacyRunnerSessionHost({
-      boot,
-      sessionDeps,
-      history: [...boot.history],
-      state: boot.features.state,
-      idMeta: boot.idMeta,
-      shutdown: boot.shutdownMcp,
-    })
-    runtimeFacade = await createRuntime({
-      host: createSingleSessionRuntimeHost(() => sessionHost),
-    })
+    const { runtime, sessionDeps } = await createLegacyRuntimeFromBootstrap(
+      buildHeadlessLegacyRuntimeArgs(boot, input, stream),
+    )
+    runtimeFacade = runtime
     session = await runtimeFacade.createSession({
       cwd: boot.cwd,
       model: boot.model,
@@ -169,7 +161,7 @@ export const runHeadlessOnce = async (input: HeadlessRunInput): Promise<Headless
       ...(boot.toolProfileState !== undefined ? { toolProfile: boot.toolProfileState.get() } : {}),
     })
     if (input.signal?.aborted === true) {
-      const messages = [...sessionHost.peekMessages()]
+      const messages = [...boot.history]
       return {
         ...boot,
         outcome: abortedOutcome(messages),
@@ -179,12 +171,15 @@ export const runHeadlessOnce = async (input: HeadlessRunInput): Promise<Headless
       }
     }
     await session.input.append(input.prompt, undefined, { signal: boot.abort.signal })
-    await session.turn.run(undefined, { signal: boot.abort.signal })
-    const outcome = sessionHost.peekLastOutcome() ?? abortedOutcome(sessionHost.peekMessages())
+    const turn = await session.turn.run(undefined, { signal: boot.abort.signal })
+    if (turn.turn === undefined) {
+      throw new Error("headless SDK session completed without a turn payload")
+    }
+    const outcome = turn.turn.outcome
     return {
       ...boot,
       outcome,
-      messages: sessionHost.peekMessages(),
+      messages: turn.turn.messages,
       events: stream.events,
       wires: summarizeHeadlessWires(sessionDeps),
     }

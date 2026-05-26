@@ -53,7 +53,7 @@ import { runSlashCommand } from "../../src/apps/cli/slash-commands"
 const buildCtx = (
   overrides?: Partial<SlashContext> & {
     readonly wire?: ConvCheckpointWire
-    readonly onReplace?: (msgs: ReadonlyArray<Message>) => void
+    readonly onReplace?: (msgs: ReadonlyArray<Message>) => Promise<void> | void
   },
 ): {
   ctx: SlashContext
@@ -73,7 +73,14 @@ const buildCtx = (
     },
     cwd: "/tmp",
     ...(wire !== undefined
-      ? { convCheckpoint: { wire, replaceMessages: onReplace ?? (() => {}) } }
+      ? {
+          convCheckpoint: {
+            wire,
+            replaceMessages: async (messages) => {
+              await onReplace?.(messages)
+            },
+          },
+        }
       : {}),
   }
   // Strip our private helper fields so we don't leak them into the
@@ -272,7 +279,7 @@ describe("/rewind-conv — slash hellgate", () => {
     const captured: ReadonlyArray<Message>[] = []
     const { ctx, out, err } = buildCtx({
       wire,
-      onReplace: (m2) => {
+      onReplace: async (m2) => {
         captured.push(m2)
       },
     })

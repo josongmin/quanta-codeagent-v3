@@ -6,11 +6,9 @@ import {
   type SessionBootstrapDeps,
   type SessionBootstrapResult,
 } from "@/host/bootstrap"
-import { buildLegacySideConversationPort } from "@/host/runtime/session-host"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
 import type { StructuredLogger } from "@/observability"
 import type { PermissionMode, PermissionStore } from "@/permission"
-import type { SideConversationPort } from "@/runner/side-conversation-port"
 import { clearFsJailDecisionSink, setFsJailDecisionSink } from "@/storage"
 import type { StreamPort } from "@/stream"
 import type { TaskRegistry } from "@/subagent"
@@ -141,9 +139,6 @@ export interface SessionSetupResult {
   readonly argPrompt: string | undefined
   readonly systemSource: SessionBootstrapResult["systemSource"]
   readonly refreshSystemPrompt: SessionBootstrapResult["refreshSystemPrompt"]
-  /** CLI-minted `/side` port. Setup owns the old config/deps capture so the
-   *  downstream surface composer only consumes a typed port. */
-  readonly sideConversationPort: SideConversationPort
   /** Tear down MCP clients on REPL exit. The host calls this in the
    *  `finally` of `runRepl`. */
   readonly shutdownMcp: () => Promise<void>
@@ -231,9 +226,6 @@ export const setupSession = async (
   if (sessionDeps.decisionEmitter !== undefined) {
     setFsJailDecisionSink(sessionDeps.decisionEmitter)
   }
-  const sideConversationPort = buildLegacySideConversationPort({
-    sessionDeps,
-  })
 
   const pills = deps.installPills({
     statusBar,
@@ -291,7 +283,6 @@ export const setupSession = async (
     argPrompt: boot.argPrompt,
     systemSource: boot.systemSource,
     refreshSystemPrompt: boot.refreshSystemPrompt,
-    sideConversationPort,
     shutdownMcp: async () => {
       // ADR-0269 Phase 3 closure — clear the fs-jail sink BEFORE MCP
       // teardown so a sibling/re-entered session never inherits this

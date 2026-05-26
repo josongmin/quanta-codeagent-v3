@@ -9,6 +9,7 @@ import {
 } from "@/agent/conversation-checkpoint"
 import type { Message } from "@/llm"
 import { buildCostDashboard, GEN_AI_ATTRS, renderDashboardText } from "@/observability"
+import type { RuntimeSideConversationArgs, RuntimeSideConversationResult } from "@/sdk/runtime"
 import {
   loadSessionById,
   type SavedSession,
@@ -190,7 +191,13 @@ export interface ReplSurfaceWires {
    *  binding when `/rewind-conv <tag>` restores a snapshot. Wired by the
    *  loop via a setter so the closure captures the loop-internal `let`
    *  history reference rather than the snapshot at compose time. */
-  readonly setReplaceMessages: (fn: (msgs: ReadonlyArray<Message>) => void) => void
+  readonly setReplaceMessages: (fn: (msgs: ReadonlyArray<Message>) => Promise<void>) => void
+  /** Runtime-owned `/side` starter slot. Installed by the loop once the live
+   *  runtime session exists; until then `/side` keeps its historical
+   *  "not wired" surface behavior. */
+  readonly setSideConversationStart: (
+    fn: ((args: RuntimeSideConversationArgs) => Promise<RuntimeSideConversationResult>) | undefined,
+  ) => void
 }
 
 /** Project the LEGACY slots (pre-ADR-0291). Extracted so the combined
@@ -353,11 +360,19 @@ export const composeSurfaceWires = (
   // the projection no-throw (the slash command never crashes if the loop
   // hasn't installed yet — it just degrades to "restored N messages" without
   // a visible history swap).
-  let replaceMessages: (msgs: ReadonlyArray<Message>) => void = () => {
+  let replaceMessages: (msgs: ReadonlyArray<Message>) => Promise<void> = async () => {
     /* installed by the loop once it owns surfaceState */
   }
-  const setReplaceMessages = (fn: (msgs: ReadonlyArray<Message>) => void): void => {
+  let sideConversationStart:
+    | ((args: RuntimeSideConversationArgs) => Promise<RuntimeSideConversationResult>)
+    | undefined
+  const setReplaceMessages = (fn: (msgs: ReadonlyArray<Message>) => Promise<void>): void => {
     replaceMessages = fn
+  }
+  const setSideConversationStart = (
+    fn: ((args: RuntimeSideConversationArgs) => Promise<RuntimeSideConversationResult>) | undefined,
+  ): void => {
+    sideConversationStart = fn
   }
 
   // ADR-0294 — sessionIo: always wire from the V2 session store. The slash
@@ -375,9 +390,13 @@ export const composeSurfaceWires = (
     planStore: setup.planStore,
     branchProgress: setup.branchProgress,
     getHistory: () => state.history,
-    // The setup seam captures `SessionDeps` + `assembleConfig` once and
-    // exposes the typed side-conversation port only.
-    sideConvPort: setup.sideConversationPort,
+    startSideConversation: async (args) => {
+      if (sideConversationStart === undefined) {
+        throw new Error("side chat not wired in this surface")
+      }
+      return await sideConversationStart(args)
+    },
+    isSideConversationWired: () => sideConversationStart !== undefined,
     abortSignal: setup.abort.signal,
     debugHandle: setup.debugHandle,
     llm: setup.llm,
@@ -426,9 +445,9 @@ export const composeSurfaceWires = (
           // No-throw guard around the loop-installed swap closure. The loop
           // calls `setReplaceMessages` once it owns the surface-state
           // binding; before that, `replaceMessages` is a no-op stub.
-          replaceMessages: (msgs: ReadonlyArray<Message>): void => {
+          replaceMessages: async (msgs: ReadonlyArray<Message>): Promise<void> => {
             try {
-              replaceMessages(msgs)
+              await replaceMessages(msgs)
             } catch (e) {
               logger.warn(
                 `convCheckpoint.replaceMessages threw: ${
@@ -457,6 +476,7 @@ export const composeSurfaceWires = (
     composerHandle,
     textInbox,
     setReplaceMessages,
+    setSideConversationStart,
   }
 }
 

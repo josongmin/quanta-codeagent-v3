@@ -89,7 +89,58 @@ describe("@/kernel/session", () => {
     expect(result.state.draftInput).toBe("")
     expect(result.state.draftImages).toEqual([])
     expect(result.state.transcript.lastAssistantText).toBe("pong")
+    expect(result.turnResult?.outcome.reason).toBe("completed")
+    expect(result.transcriptMessages).toEqual(makeOutcome("completed").messages)
     expect(result.events.map((event) => event.type)).toContain("turn.completed")
+  })
+
+  test("replaces transcript through the kernel-owned command path", async () => {
+    const manifest = {
+      approvals: "none" as const,
+      tools: false,
+      memory: false,
+      artifacts: false,
+      subagents: false,
+      automation: false,
+      shellSnapshot: false,
+      transport: "inproc" as const,
+    }
+    let replaced: readonly unknown[] = []
+    const state = createKernelSessionState({
+      sessionId: "s1",
+      permissionMode: "default",
+      capabilityManifest: manifest,
+    })
+    const messages = makeOutcome("completed").messages
+    const result = await dispatchSessionCommand(
+      state,
+      {
+        sessionId: "s1",
+        commandId: "c3",
+        issuedAt: "2026-05-26T00:00:02.000Z",
+        type: "session.transcript.replace",
+        messages,
+      },
+      {
+        clock: systemClock,
+        eventLog: new InMemorySessionEventLog(),
+        host: {
+          describe: () => ({
+            sessionId: "s1",
+            permissionMode: "default",
+            capabilityManifest: manifest,
+          }),
+          runTurn: async () => ({ outcome: makeOutcome("completed"), messages: [] }),
+          replaceMessages: (nextMessages) => {
+            replaced = [...nextMessages]
+          },
+          close: async () => undefined,
+        },
+      },
+    )
+    expect(result.state.transcript.messageCount).toBe(messages.length)
+    expect(result.transcriptMessages).toEqual(messages)
+    expect(replaced).toEqual(messages)
   })
 
   test("rejects stale revisions", async () => {

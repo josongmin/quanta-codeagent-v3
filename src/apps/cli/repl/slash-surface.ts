@@ -9,7 +9,7 @@ import type {
   IdentityModeSessionState,
   ToolProfileSessionState,
 } from "@/runner/assemble/session-state"
-import type { SideConversationPort } from "@/runner/side-conversation-port"
+import type { RuntimeSideConversationArgs, RuntimeSideConversationResult } from "@/sdk/runtime"
 import type { SessionEnvelopeRecord } from "@/session"
 import type { BranchProgressTracker } from "../branch-search-progress"
 import type { CostPanel } from "../cost-panel"
@@ -61,10 +61,10 @@ export type ReplSlashCtx = Partial<{
   history: HistorySessionState
   branchSearch: () => import("../branch-search-progress").BranchProgressState
   /** `/side` SessionState FACTORY — built fresh on each invocation so the
-   *  `getHistory` accessor reflects the live transcript rather than a stale
-   *  snapshot captured when the REPL started. The state's `port` field is
-   *  the surface-built {@link SideConversationPort}; engine-internal types
-   *  stay encapsulated inside the port adapter (ADR-0304). */
+   *  starter sees the live transcript rather than a stale snapshot captured
+   *  when the REPL started. The state's `start` field is the surface-built
+   *  runtime-side starter; engine-internal types stay encapsulated inside the
+   *  adapter (ADR-0304 / Runtime SDK cutover). */
   side: () => SideCmdSlashState
   /** ADR-0239 — debug-tracer runtime toggle. Present iff the boot gate
    *  (`QUANTA_DEBUG=1` + TTY) allocated the mutable proxy port; absent ⇒
@@ -153,10 +153,14 @@ export interface BuildReplSlashCtxArgs {
   /** Returns the live transcript reference so slash surfaces never read a
    *  stale `history` binding. */
   getHistory: () => readonly Message[]
-  /** ADR-0304 — surface-built {@link SideConversationPort}. Encapsulates
-   *  engine-internal collaborators (built once by the surface composer)
-   *  so the slash-surface layer stays free of them. */
-  sideConvPort: SideConversationPort
+  /** Runtime-owned side-conversation starter. Surface-compose injects a live
+   *  getter-backed closure so `/side` sees the current runtime session method
+   *  instead of a stale or pre-session binding. */
+  startSideConversation: (
+    args: RuntimeSideConversationArgs,
+  ) => Promise<RuntimeSideConversationResult>
+  /** Live runtime-side availability probe. */
+  isSideConversationWired: () => boolean
   abortSignal: AbortSignal
   /** ADR-0239 — debug-tracer surface handle. Absent ⇒ `/debug` prints
    *  "not wired" (boot-time tee was not allocated). */
@@ -343,7 +347,8 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     planStore,
     branchProgress,
     getHistory,
-    sideConvPort,
+    startSideConversation,
+    isSideConversationWired,
     abortSignal,
     debugHandle,
     llm,
@@ -367,8 +372,16 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     ...(branchProgress !== undefined ? { branchSearch: () => branchProgress.snapshot() } : {}),
     history: { messages: getHistory },
     side: (): SideCmdSlashState => ({
-      port: sideConvPort,
-      getHistory,
+      start: async ({ question, inherit, tools, maxTurns, signal }) =>
+        await startSideConversation({
+          question,
+          messages: getHistory(),
+          signal,
+          ...(inherit !== undefined ? { inherit } : {}),
+          ...(tools !== undefined ? { tools } : {}),
+          ...(maxTurns !== undefined ? { maxTurns } : {}),
+        }),
+      isWired: isSideConversationWired,
       signal: abortSignal,
     }),
     // ADR-0239 — `/debug` runtime toggle. Absent ⇒ slash prints "not wired".

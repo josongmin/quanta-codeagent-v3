@@ -23,27 +23,22 @@
  * Default-OFF: without an injected {@link SideCmdSlashState} on
  * {@link SlashContext.side}, the command prints "side chat not wired in this
  * surface" and exits 0 (byte-identical to NOT registering the command). The
- * surface (REPL / one-shot session) is responsible for wiring a
- * {@link SideConversationPort} (built once via the surface's
- * `buildSideConversationPort` adapter) + a live-transcript accessor + an
- * abort signal.
+ * surface (REPL / one-shot session) is responsible for wiring a runtime-owned
+ * side-conversation starter + an abort signal.
  *
- * Slice contract: lives in `src/apps/cli/**` — allowed to import `@/runner`
- * (where {@link SideConversationPort} and `SIDE_CHAT_*` constants live) per
- * the CLI's position at the top of the DAG. The command body NEVER reads
+ * Slice contract: lives in `src/apps/cli/**`. The command body NEVER reads
  * `process.env` — the surface composer maps `QUANTA_SIDE_*` env onto the
- * adapter's defaults at construction. The slash command itself NEVER
- * imports `OrchestrateDeps` / `RunOnceInput` / `assembleConfig` — those
- * belong with the port adapter (ADR-0304).
+ * adapter's defaults at construction. The slash command itself NEVER imports
+ * `OrchestrateDeps` / `RunOnceInput` / `assembleConfig` — those belong with
+ * the runtime/session host adapter.
  */
 
-import type { Message } from "@/llm"
 import {
   SIDE_CHAT_DEFAULT_READ_ONLY,
   SIDE_CHAT_MAX_TURNS_CAP,
   type SideChatContextInheritance,
 } from "@/runner/orchestrate/side-chat"
-import type { SideConversationPort } from "@/runner/side-conversation-port"
+import type { RuntimeSideConversationResult } from "@/sdk/runtime"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 
 /**
@@ -51,13 +46,11 @@ import type { SlashCommand, SlashContext } from "./slash-commands"
  * (`apps/cli/repl.ts` or a future session loop) onto its
  * {@link SlashContext.side} field. Absent ⇒ "/side: not wired" + exit 0.
  *
- *  - `port` — surface-built {@link SideConversationPort}. The port captures
- *    the main session's `SessionDeps` + `assembleConfig` in closure scope;
- *    the slash command itself never sees those.
- *  - `getHistory` — live-transcript accessor. Called PER `/side` invocation
- *    so the snapshot passed into `port.start({ messages })` reflects the
- *    actual transcript at call time (rather than a stale binding captured
- *    when the REPL booted). Used read-only for `--inherit=last-turn`.
+ *  - `start` — runtime-owned starter. The surface owns the live runtime
+ *    session and injects a closure that snapshots history at call time before
+ *    delegating to `session.side.start(...)`.
+ *  - `isWired` — live runtime-session availability probe. False means the
+ *    current surface has not attached a side-conversation starter yet.
  *  - `defaultTools` — surface-resolved default allowlist (typically
  *    {@link SIDE_CHAT_DEFAULT_READ_ONLY}, optionally overridden via
  *    `QUANTA_SIDE_DEFAULT_TOOLS`). A per-call `--tools=` flag wins.
@@ -65,12 +58,18 @@ import type { SlashCommand, SlashContext } from "./slash-commands"
  *    read from `QUANTA_SIDE_MAX_TURNS` if set). Forwarded to the port when
  *    no per-call override is supplied; the runner additionally clamps to
  *    {@link SIDE_CHAT_MAX_TURNS_CAP}.
- *  - `signal` — surface-supplied abort signal. Passed through `port.start`
+ *  - `signal` — surface-supplied abort signal. Passed through `start`
  *    per-call (every invocation re-reads the surface's current signal).
  */
 export interface SideCmdSlashState {
-  readonly port: SideConversationPort
-  readonly getHistory: () => readonly Message[]
+  readonly start: (args: {
+    readonly question: string
+    readonly inherit?: SideChatContextInheritance
+    readonly tools?: readonly string[]
+    readonly maxTurns?: number
+    readonly signal: AbortSignal
+  }) => Promise<RuntimeSideConversationResult>
+  readonly isWired: () => boolean
   readonly defaultTools?: readonly string[]
   readonly defaultMaxTurns?: number
   readonly signal: AbortSignal
@@ -220,16 +219,15 @@ export const sideCmd: SlashCommand = {
     }
 
     const state = ctx.side
-    if (state === undefined) {
+    if (state === undefined || state.isWired() !== true) {
       ctx.out("/side: not wired in this surface\n")
       return 0
     }
 
     renderHeader(ctx, parsed.prompt)
     try {
-      const result = await state.port.start({
+      const result = await state.start({
         question: parsed.prompt,
-        messages: state.getHistory(),
         signal: state.signal,
         ...(parsed.inherit !== undefined ? { inherit: parsed.inherit } : {}),
         ...(parsed.tools !== undefined ? { tools: parsed.tools } : {}),

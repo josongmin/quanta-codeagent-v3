@@ -81,7 +81,15 @@ const minimalCtxArgs = (overrides: Partial<BuildReplSlashCtxArgs> = {}): BuildRe
     planStore: undefined,
     branchProgress: undefined,
     getHistory: () => [] as Message[],
-    sideConvPort: { start: async () => undefined } as unknown as BuildReplSlashCtxArgs["sideConvPort"],
+    startSideConversation: (async () =>
+      ({
+        outcome: { messages: [] },
+        answerText: "",
+        inputTokens: 0,
+        outputTokens: 0,
+        toolsAvailable: 0,
+      }) as never) as unknown as BuildReplSlashCtxArgs["startSideConversation"],
+    isSideConversationWired: () => true,
     abortSignal: abort.signal,
     debugHandle: undefined,
     llm: {

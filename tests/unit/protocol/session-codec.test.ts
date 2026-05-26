@@ -30,6 +30,29 @@ describe("@/protocol/session codec", () => {
     })
   })
 
+  test("round-trips transcript replace commands", () => {
+    const raw = encodeSessionCommand({
+      sessionId: "s1",
+      commandId: "c2",
+      issuedAt: "2026-05-26T00:00:02.000Z",
+      type: "session.transcript.replace",
+      messages: [
+        { role: "user", content: [{ type: "text", text: "ping" }] },
+        { role: "assistant", content: [{ type: "text", text: "pong" }] },
+      ],
+    })
+    expect(decodeSessionCommand(raw)).toEqual({
+      sessionId: "s1",
+      commandId: "c2",
+      issuedAt: "2026-05-26T00:00:02.000Z",
+      type: "session.transcript.replace",
+      messages: [
+        { role: "user", content: [{ type: "text", text: "ping" }] },
+        { role: "assistant", content: [{ type: "text", text: "pong" }] },
+      ],
+    })
+  })
+
   test("round-trips events with ordering metadata", () => {
     const raw = encodeSessionEvent({
       eventId: "e1",

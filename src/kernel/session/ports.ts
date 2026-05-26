@@ -30,6 +30,25 @@ export interface SessionHostTurnResult {
   readonly approvalRequest?: PendingApprovalView
 }
 
+export type SessionHostSideConversationInheritance = "none" | "system" | "last-turn"
+
+export interface SessionHostSideConversationArgs {
+  readonly question: string
+  readonly inherit?: SessionHostSideConversationInheritance
+  readonly tools?: readonly string[]
+  readonly maxTurns?: number
+  readonly signal: AbortSignal
+  readonly messages: readonly Message[]
+}
+
+export interface SessionHostSideConversationResult {
+  readonly outcome: AgentOutcome
+  readonly answerText: string
+  readonly inputTokens: number
+  readonly outputTokens: number
+  readonly toolsAvailable: number
+}
+
 export interface SessionHost {
   describe(): SessionHostDescription
   runTurn(args: {
@@ -39,6 +58,9 @@ export interface SessionHost {
   }): Promise<SessionHostTurnResult>
   setIdentityMode?(mode: string): Promise<void> | void
   setToolProfile?(profile: string): Promise<void> | void
+  startSideConversation?(
+    args: SessionHostSideConversationArgs,
+  ): Promise<SessionHostSideConversationResult>
   peekMessages?(): readonly Message[]
   peekLastOutcome?(): AgentOutcome | undefined
   replaceMessages?(messages: readonly Message[]): void

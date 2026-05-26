@@ -8,13 +8,8 @@
 import * as readline from "node:readline/promises"
 import type { AgentConfig } from "@/agent"
 import { buildSystemPrompt } from "@/agent"
-import { createSingleSessionRuntimeHost } from "@/host/runtime"
-import {
-  buildSessionDepsFromAgentConfigBase,
-  createLegacyRunnerSessionHost,
-} from "@/host/runtime/session-host"
 import type { PermissionContext } from "@/permission"
-import { createRuntime } from "@/sdk/runtime"
+import { createLegacyRuntimeFromAgentConfigBase } from "@/sdk/runtime/compat"
 import { StdoutStream, type StreamPort, TeeStream } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
 import {
@@ -65,10 +60,11 @@ const makeAbortError = (): Error & { code?: string } => {
 const runInteractiveTerminal = async (req: AssembleRequest): Promise<void> => {
   const abort = new AbortController()
   const base = buildInteractiveBase(req, abort.signal)
-  const deps = buildSessionDepsFromAgentConfigBase(base)
   const assemble = (
     messages: Parameters<typeof assembleAgentConfig>[0]["base"]["messages"],
-    _turnDeps: typeof deps,
+    _turnDeps: Parameters<
+      NonNullable<Parameters<typeof createLegacyRuntimeFromAgentConfigBase>[0]["assembleConfig"]>
+    >[1],
   ): AgentConfig =>
     assembleAgentConfig({
       ...req,
@@ -78,16 +74,13 @@ const runInteractiveTerminal = async (req: AssembleRequest): Promise<void> => {
         signal: base.signal,
       },
     })
-  const sessionHost = createLegacyRunnerSessionHost({
-    sessionDeps: deps,
+  const { runtime: runtimeFacade } = await createLegacyRuntimeFromAgentConfigBase({
+    base,
     assembleConfig: assemble,
     history: [...base.messages],
     state: undefined,
     idMeta: undefined,
     shutdown: async () => undefined,
-  })
-  const runtimeFacade = await createRuntime({
-    host: createSingleSessionRuntimeHost(() => sessionHost),
   })
   const session = await runtimeFacade.createSession({
     cwd: base.cwd,

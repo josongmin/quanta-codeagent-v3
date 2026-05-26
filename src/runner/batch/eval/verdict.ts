@@ -78,6 +78,23 @@ export const verify = async (
       reportPath: "",
     }
   }
+  // Empty-patch guard — when the agent produced no diff (LLM error, abort,
+  // empty completion) running the FAIL_TO_PASS tests on the UNPATCHED
+  // sandbox returns whatever the base commit produces. For swebench
+  // instances that's *supposed* to fail (F2P = fail-to-pass), but pytest
+  // `-k` substring matching can collect tests that pass on base too,
+  // yielding a false PASS. Fail-closed: empty patch ⇒ unresolved.
+  if (patch.trim() === "") {
+    return {
+      passed: false,
+      error: "empty prediction (agent produced no patch)",
+      command: instance.testCmd,
+      exitCode: 1,
+      failedTests: [],
+      logTail: "agent produced empty patch — testCmd skipped (fail-closed)",
+      reportPath: "",
+    }
+  }
   const test = await exec(instance.testCmd, sandbox, deps.timeoutMs)
   // Pytest summary parsing — exit code alone is unreliable when the shell
   // wrapper got SIGTERM'd (exit 143) AFTER pytest already printed its

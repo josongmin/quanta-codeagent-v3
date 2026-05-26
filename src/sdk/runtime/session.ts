@@ -14,6 +14,7 @@ import type {
   SessionEvent,
   SessionIdentitySetCommand,
   SessionToolProfileSetCommand,
+  SessionTranscriptReplaceCommand,
   TurnRunCommand,
 } from "@/protocol/session"
 import { SessionClosedError } from "@/protocol/session"
@@ -51,6 +52,23 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
       revision: state.revision,
       seq: state.seq,
       events: result.events,
+      ...(result.transcriptMessages !== undefined
+        ? { transcript: { messages: [...result.transcriptMessages] } }
+        : {}),
+      ...(result.turnResult !== undefined
+        ? {
+            turn: {
+              outcome: result.turnResult.outcome,
+              messages: [...result.turnResult.messages],
+              ...(result.turnResult.artifacts !== undefined
+                ? { artifacts: [...result.turnResult.artifacts] }
+                : {}),
+              ...(result.turnResult.approvalRequest !== undefined
+                ? { approvalRequest: result.turnResult.approvalRequest }
+                : {}),
+            },
+          }
+        : {}),
     }
   }
 
@@ -122,6 +140,18 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
     ...commandMeta(meta),
   })
 
+  const buildTranscriptReplace = (
+    messages: readonly import("@/llm").Message[],
+    meta:
+      | Partial<Omit<SessionTranscriptReplaceCommand, "sessionId" | "type" | "messages">>
+      | undefined,
+  ): SessionTranscriptReplaceCommand => ({
+    sessionId,
+    type: "session.transcript.replace",
+    messages: [...messages],
+    ...commandMeta(meta),
+  })
+
   return {
     sessionId,
     dispatch,
@@ -156,6 +186,19 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
     approval: {
       respond: async (approvalId, decision, meta, options) =>
         dispatch(buildApprovalRespond(approvalId, decision, meta), options),
+    },
+    transcript: {
+      replace: async (messages, meta, options) =>
+        dispatch(buildTranscriptReplace(messages, meta), options),
+    },
+    side: {
+      start: async (sideArgs, _options) => {
+        if (closed) throw new SessionClosedError(sessionId)
+        if (args.hostSession.startSideConversation === undefined) {
+          throw new Error("side conversation is not supported by this runtime session host")
+        }
+        return await args.hostSession.startSideConversation(sideArgs)
+      },
     },
   }
 }
