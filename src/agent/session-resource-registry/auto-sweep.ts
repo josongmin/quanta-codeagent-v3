@@ -360,8 +360,14 @@ const sweepOnce = async (
       const result = await sweepDiskRegistry({ storageDir: diskDir, now })
       safeCounter(metricsEmitter, "codex_r2.sweep.disk_evicted", result.evicted)
       safeCounter(metricsEmitter, "codex_r2.sweep.disk_truncated", result.truncated)
+      // R2-audit fix — Wiring-proof zero-delta `disk_failed` counter so the
+      // gauge timeline distinguishes "ran OK" from "threw silently". The
+      // success path emits delta 0 unconditionally so a gap in the time
+      // series means "the timer is not ticking", not "we're not erroring".
+      safeCounter(metricsEmitter, "codex_r2.sweep.disk_failed", 0)
     } catch {
       // NO-THROW.
+      safeCounter(metricsEmitter, "codex_r2.sweep.disk_failed", 1)
     }
   }
   if (sqlitePath.length > 0) {
@@ -373,8 +379,11 @@ const sweepOnce = async (
         walSizeThresholdBytes,
         walCheckpointUpgradeMode,
       )
+      // R2-audit fix — symmetrical zero-delta `sqlite_failed`.
+      safeCounter(metricsEmitter, "codex_r2.sweep.sqlite_failed", 0)
     } catch {
       // NO-THROW.
+      safeCounter(metricsEmitter, "codex_r2.sweep.sqlite_failed", 1)
     }
   }
 

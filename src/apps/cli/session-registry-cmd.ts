@@ -93,6 +93,10 @@ const HELP_LINES: readonly string[] = [
   "  1. QUANTA_SESSION_REGISTRY_SQLITE_PATH   — sqlite adapter (ADR-0367)",
   "  2. QUANTA_SESSION_REGISTRY_DISK_DIR      — disk adapter (ADR-0351)",
   "  3. (otherwise)                           — in-memory singleton (ADR-0345)",
+  "",
+  "WAL checkpoint knobs (sqlite adapter, both optional):",
+  "  QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES  — escalate beyond PASSIVE when WAL > N (ADR-0375/0390)",
+  '  QUANTA_SESSION_REGISTRY_WAL_CHECKPOINT_MODE  — "RESTART" (default) | "TRUNCATE" (ADR-0385/0390)',
 ]
 
 /**
