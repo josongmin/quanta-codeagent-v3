@@ -2,9 +2,10 @@
  * ADR-0320 — `src/memory/typed-event/` barrel.
  *
  * Sibling slice to `src/memory/stage1-store/`. Exposes the closed port
- * `TypedHistoryEventStore`, the 6-variant `TypedHistoryEvent` union
- * (5 variants from ADR-0320 + `compaction_event` added by ADR-0324),
- * and the default in-memory factory.
+ * `TypedHistoryEventStore`, the 8-variant `TypedHistoryEvent` union
+ * (5 variants from ADR-0320 + `compaction_event` added by ADR-0324 +
+ * `plugin_activation` / `app_activation` added by ADR-0335), and the
+ * default in-memory factory.
  *
  * **Not re-exported from `@/memory`** — this slice is default-OFF
  * until ADR-0321 wires a producer in `@/agent`. Callers reach it via
@@ -18,12 +19,18 @@
 export { createInMemoryTypedHistoryEventStore } from "./in-memory-store"
 export type { TypedHistoryEventStore } from "./port"
 export type {
+  AppActivationEvent,
+  AppActivationSurface,
+  AppActivationTrigger,
   CompactionEventReason,
   CompactionEventTrigger,
   CompactionEventVariant,
   ContextUpdateEvent,
   ContextUpdateField,
   ModeChangeEvent,
+  PluginActivationEvent,
+  PluginActivationTrigger,
+  PluginCapability,
   ReasoningEchoEvent,
   RepoRulesChangeEvent,
   SkillActivationEvent,

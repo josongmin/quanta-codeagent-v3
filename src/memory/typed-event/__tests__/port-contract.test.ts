@@ -6,9 +6,9 @@
  * closed-port contract was widened without a new ADR — that's the
  * load-bearing invariant of the slice-fence.
  *
- * 6 variants: ADR-0320 (5: context_update / skill_activation /
+ * 8 variants: ADR-0320 (5: context_update / skill_activation /
  * repo_rules_change / mode_change / reasoning_echo) + ADR-0324
- * (compaction_event).
+ * (compaction_event) + ADR-0335 (plugin_activation, app_activation).
  *
  * The test body runs at runtime as a sanity smoke (one assertion per
  * variant tag), but the real test is `tsc --noEmit`: every type
@@ -30,9 +30,10 @@ type Equals<A, B> =
 
 type AssertTrue<T extends true> = T
 
-// 1) Variant set is exactly the 6 declared in ADR-0320 (5 original) +
-//    ADR-0324 (compaction_event). Adding a 7th requires a new ADR; the
-//    type guard fires at the compile step.
+// 1) Variant set is exactly the 8 declared in ADR-0320 (5 original) +
+//    ADR-0324 (compaction_event) + ADR-0335 (plugin_activation,
+//    app_activation). Adding a 9th requires a new ADR; the type guard
+//    fires at the compile step.
 type _VariantSet = AssertTrue<
   Equals<
     TypedHistoryEventKind,
@@ -42,6 +43,8 @@ type _VariantSet = AssertTrue<
     | "mode_change"
     | "reasoning_echo"
     | "compaction_event"
+    | "plugin_activation"
+    | "app_activation"
   >
 >
 
@@ -90,6 +93,8 @@ describe("ADR-0320 port-contract", () => {
       "mode_change",
       "reasoning_echo",
       "compaction_event",
+      "plugin_activation",
+      "app_activation",
     ]
     for (const tag of tags) {
       const _exhaustive: TypedHistoryEventKind = tag
@@ -100,6 +105,8 @@ describe("ADR-0320 port-contract", () => {
         case "mode_change":
         case "reasoning_echo":
         case "compaction_event":
+        case "plugin_activation":
+        case "app_activation":
           break
         default: {
           const _never: never = _exhaustive
@@ -107,6 +114,6 @@ describe("ADR-0320 port-contract", () => {
         }
       }
     }
-    expect(tags.length).toBe(6)
+    expect(tags.length).toBe(8)
   })
 })

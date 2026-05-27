@@ -76,6 +76,8 @@ rule.
 | `mode_change`        | `{ prev: string; next: string; reason? }`                                |
 | `reasoning_echo`     | `{ signature; redacted: boolean; tokenCount? }`                          |
 | `compaction_event` (ADR-0324) | `{ trigger: "pre_sampling" \| "mid_turn" \| "user_requested"; reason: "context_limit" \| "token_budget" \| "manual"; tokensBefore; tokensAfter; messagesRemoved }` |
+| `plugin_activation` (ADR-0335) | `{ pluginId; trigger: "user" \| "auto" \| "system"; capabilities: readonly ("Interactive" \| "Read" \| "Write")[] }` |
+| `app_activation` (ADR-0335) | `{ appId; surface: "cli" \| "web-tauri" \| "cli-browser"; trigger: "user" \| "auto" \| "system" }` |
 
 Every variant additionally carries `at: number` (epoch ms) and
 optional `turnId?: string`. `turnId` is producer-supplied; the store
@@ -87,13 +89,15 @@ The variant union is **closed-port**: widening it requires a new ADR
 that explicitly amends this section. Five variants were sealed by the
 original ADR; subsequent rows record each amendment.
 
-| date       | ADR       | transition | added variant      | rationale (1-line)                                                       |
-|------------|-----------|------------|--------------------|--------------------------------------------------------------------------|
-| 2026-05-27 | ADR-0324  | 5 → 6      | `compaction_event` | Absorb Codex `ResponseItem::Compaction / ContextCompaction / CompactionTrigger` so the model sees compaction passes as a typed narrative event (orthogonal to wm mutation). |
+| date       | ADR       | transition | added variant       | rationale (1-line)                                                       |
+|------------|-----------|------------|---------------------|--------------------------------------------------------------------------|
+| 2026-05-27 | ADR-0324  | 5 → 6      | `compaction_event`  | Absorb Codex `ResponseItem::Compaction / ContextCompaction / CompactionTrigger` so the model sees compaction passes as a typed narrative event (orthogonal to wm mutation). |
+| 2026-05-27 | ADR-0335  | 6 → 8      | `plugin_activation` + `app_activation` | Close Codex r2 absorption residual wire — Codex `.codex-plugin/plugin.json` activation (capability-scoped tool manifest) + quanta surface app mention (`@@app-name` bound to CLI / Web-Tauri / CLI-browser per `memory/surface-model`). |
 
-The `compaction_event` variant is additive — it does not replace,
-shadow, or alter any of the original 5 variants, and the wm mutation
-channel is unaffected. Producer wiring lives in a separate ADR.
+All extension variants are additive — none replace, shadow, or alter
+any of the original 5 variants, and the wm mutation channel is
+unaffected. Producer wiring lives in separate ADRs (ADR-0335 schema
+only; resolver impl deferred to ADR-0336).
 
 ## Non-goals
 

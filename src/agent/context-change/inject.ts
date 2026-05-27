@@ -117,6 +117,31 @@ const buildOne = (event: ContextEvent): Message => {
         `at: ${event.at}${turnSuffix}`,
       ].join("\n")
       break
+    // ADR-0335 — 7th variant. A Codex `.codex-plugin/plugin.json`-style
+    // plugin manifest was enabled this turn. `capabilities` renders as
+    // a comma-separated list (empty ⇒ literal "(none)" so the absence
+    // is unambiguous in the prompt).
+    case "plugin_activation":
+      tag = "plugin-activation"
+      body = [
+        `plugin: ${event.pluginId}`,
+        `trigger: ${event.trigger}`,
+        `capabilities: ${event.capabilities.length > 0 ? event.capabilities.join(", ") : "(none)"}`,
+        `at: ${event.at}${turnSuffix}`,
+      ].join("\n")
+      break
+    // ADR-0335 — 8th variant. An "app" mention resolved; the `surface`
+    // field labels which quanta environment the app is bound to
+    // (CLI / Web-Tauri / CLI-embedded browser) per `memory/surface-model`.
+    case "app_activation":
+      tag = "app-activation"
+      body = [
+        `app: ${event.appId}`,
+        `surface: ${event.surface}`,
+        `trigger: ${event.trigger}`,
+        `at: ${event.at}${turnSuffix}`,
+      ].join("\n")
+      break
   }
 
   return {

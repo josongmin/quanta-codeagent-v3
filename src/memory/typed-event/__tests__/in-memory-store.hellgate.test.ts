@@ -7,8 +7,9 @@
  *   - append + snapshot preserves insertion order
  *   - `since(t)` is INCLUSIVE on the lower bound
  *   - `clear` returns the store to empty
- *   - each of the 6 variants round-trips byte-identical (5 ADR-0320 +
- *     compaction_event from ADR-0324)
+ *   - each of the 8 variants round-trips byte-identical (5 ADR-0320 +
+ *     compaction_event from ADR-0324 + plugin_activation + app_activation
+ *     from ADR-0335)
  *   - `turnId` is optional (absent in snapshot when omitted)
  *   - large-N (10k) snapshot deep-equals the appended sequence
  *   - same-`at` events stay in insertion order
@@ -17,18 +18,29 @@
  *   - compaction_event: tokensAfter > tokensBefore is NOT rejected by
  *     the store (producer responsibility, no `append`-side validation)
  *   - compaction_event: `turnId` optional (mirrors other variants)
+ *   - plugin_activation: 3 triggers × multi-capability round-trip
+ *   - plugin_activation: empty capabilities array accepted
+ *   - plugin_activation: empty pluginId accepted (validation = producer)
+ *   - app_activation: 3 surfaces × 3 triggers round-trip (9 combos)
+ *   - app_activation: empty appId accepted (validation = producer)
+ *   - 8-variant union exhaustiveness (compile-time)
+ *   - compaction_event: 3-reason set (context_limit / token_budget /
+ *     manual) producer-emit verified
  */
 
 import { describe, expect, test } from "bun:test"
 import {
+  type AppActivationEvent,
   type CompactionEventVariant,
   type ContextUpdateEvent,
   createInMemoryTypedHistoryEventStore,
   type ModeChangeEvent,
+  type PluginActivationEvent,
   type ReasoningEchoEvent,
   type RepoRulesChangeEvent,
   type SkillActivationEvent,
   type TypedHistoryEvent,
+  type TypedHistoryEventKind,
 } from ".."
 
 describe("ADR-0320 typed-event in-memory store — hellgate", () => {
@@ -86,7 +98,7 @@ describe("ADR-0320 typed-event in-memory store — hellgate", () => {
     expect(store.snapshot()).toEqual([{ kind: "mode_change", prev: "c", next: "d", at: 3 }])
   })
 
-  test("each of the 6 variants round-trips byte-identical", () => {
+  test("each of the 8 variants round-trips byte-identical", () => {
     const store = createInMemoryTypedHistoryEventStore()
     const ctx: ContextUpdateEvent = {
       kind: "context_update",
@@ -136,20 +148,40 @@ describe("ADR-0320 typed-event in-memory store — hellgate", () => {
       at: 6,
       turnId: "t-3",
     }
+    const plugin: PluginActivationEvent = {
+      kind: "plugin_activation",
+      pluginId: "git-tools",
+      trigger: "user",
+      capabilities: ["Interactive", "Read", "Write"],
+      at: 7,
+      turnId: "t-4",
+    }
+    const app: AppActivationEvent = {
+      kind: "app_activation",
+      appId: "browser",
+      surface: "cli-browser",
+      trigger: "auto",
+      at: 8,
+      turnId: "t-4",
+    }
     store.append(ctx)
     store.append(skill)
     store.append(rules)
     store.append(mode)
     store.append(reason)
     store.append(compaction)
+    store.append(plugin)
+    store.append(app)
     const snap = store.snapshot()
-    expect(snap.length).toBe(6)
+    expect(snap.length).toBe(8)
     expect(snap[0]).toEqual(ctx)
     expect(snap[1]).toEqual(skill)
     expect(snap[2]).toEqual(rules)
     expect(snap[3]).toEqual(mode)
     expect(snap[4]).toEqual(reason)
     expect(snap[5]).toEqual(compaction)
+    expect(snap[6]).toEqual(plugin)
+    expect(snap[7]).toEqual(app)
   })
 
   test("`turnId` is optional — absent in snapshot when omitted", () => {
@@ -349,6 +381,240 @@ describe("ADR-0320 typed-event in-memory store — hellgate", () => {
     // `exactOptionalPropertyTypes` invariant: the property key must
     // not be auto-introduced when the producer omits it.
     expect(Object.hasOwn(snap[1] as object, "turnId")).toBe(false)
+  })
+
+  // ----- ADR-0335 plugin_activation variant hellgate -----
+
+  test("plugin_activation: all 3 trigger values × multi-capability round-trip", () => {
+    const store = createInMemoryTypedHistoryEventStore()
+    const triggers: PluginActivationEvent["trigger"][] = ["user", "auto", "system"]
+    const caps: PluginActivationEvent["capabilities"] = ["Interactive", "Read", "Write"]
+    for (let i = 0; i < triggers.length; i++) {
+      const t = triggers[i] as PluginActivationEvent["trigger"]
+      store.append({
+        kind: "plugin_activation",
+        pluginId: `p-${i}`,
+        trigger: t,
+        capabilities: caps,
+        at: i,
+      })
+    }
+    const snap = store.snapshot()
+    expect(snap.length).toBe(3)
+    expect((snap[0] as PluginActivationEvent).trigger).toBe("user")
+    expect((snap[1] as PluginActivationEvent).trigger).toBe("auto")
+    expect((snap[2] as PluginActivationEvent).trigger).toBe("system")
+    // capabilities round-trip exactly
+    for (const e of snap) {
+      expect((e as PluginActivationEvent).capabilities).toEqual(caps)
+    }
+  })
+
+  test("plugin_activation: empty capabilities array is accepted", () => {
+    const store = createInMemoryTypedHistoryEventStore()
+    const ev: PluginActivationEvent = {
+      kind: "plugin_activation",
+      pluginId: "empty-cap",
+      trigger: "auto",
+      capabilities: [],
+      at: 1,
+    }
+    store.append(ev)
+    const snap = store.snapshot()
+    expect(snap.length).toBe(1)
+    expect((snap[0] as PluginActivationEvent).capabilities).toEqual([])
+    // The store contract is total: even a 0-capability discovery
+    // emits — the model sees "a plugin was discovered" without
+    // re-parsing the manifest.
+    expect(snap[0]).toEqual(ev)
+  })
+
+  test("plugin_activation: empty pluginId accepted (producer-side validation)", () => {
+    // Mirrors the compaction_event "store does not validate" invariant —
+    // `port.ts:append` is total. A blank id is a producer bug, not a
+    // store bug; recording it preserves the failure for triage.
+    const store = createInMemoryTypedHistoryEventStore()
+    const ev: PluginActivationEvent = {
+      kind: "plugin_activation",
+      pluginId: "",
+      trigger: "system",
+      capabilities: ["Read"],
+      at: 1,
+    }
+    expect(() => store.append(ev)).not.toThrow()
+    const snap = store.snapshot()
+    expect((snap[0] as PluginActivationEvent).pluginId).toBe("")
+  })
+
+  test("plugin_activation: `turnId` is optional — absent when omitted", () => {
+    const store = createInMemoryTypedHistoryEventStore()
+    const withId: PluginActivationEvent = {
+      kind: "plugin_activation",
+      pluginId: "with",
+      trigger: "user",
+      capabilities: ["Interactive"],
+      at: 1,
+      turnId: "t-10",
+    }
+    const withoutId: PluginActivationEvent = {
+      kind: "plugin_activation",
+      pluginId: "without",
+      trigger: "user",
+      capabilities: ["Interactive"],
+      at: 2,
+    }
+    store.append(withId)
+    store.append(withoutId)
+    const snap = store.snapshot()
+    expect((snap[0] as PluginActivationEvent).turnId).toBe("t-10")
+    expect((snap[1] as PluginActivationEvent).turnId).toBeUndefined()
+    expect(Object.hasOwn(snap[1] as object, "turnId")).toBe(false)
+  })
+
+  // ----- ADR-0335 app_activation variant hellgate -----
+
+  test("app_activation: 3 surfaces × 3 triggers round-trip (9 combos)", () => {
+    const store = createInMemoryTypedHistoryEventStore()
+    const surfaces: AppActivationEvent["surface"][] = ["cli", "web-tauri", "cli-browser"]
+    const triggers: AppActivationEvent["trigger"][] = ["user", "auto", "system"]
+    let i = 0
+    for (const s of surfaces) {
+      for (const t of triggers) {
+        store.append({
+          kind: "app_activation",
+          appId: `app-${s}-${t}`,
+          surface: s,
+          trigger: t,
+          at: i,
+        })
+        i++
+      }
+    }
+    const snap = store.snapshot()
+    expect(snap.length).toBe(9)
+    // Verify every (surface, trigger) cell shows up exactly once.
+    const seen = new Set<string>()
+    for (const e of snap) {
+      const a = e as AppActivationEvent
+      seen.add(`${a.surface}/${a.trigger}`)
+    }
+    expect(seen.size).toBe(9)
+    for (const s of surfaces) {
+      for (const t of triggers) {
+        expect(seen.has(`${s}/${t}`)).toBe(true)
+      }
+    }
+  })
+
+  test("app_activation: empty appId accepted (producer-side validation)", () => {
+    const store = createInMemoryTypedHistoryEventStore()
+    const ev: AppActivationEvent = {
+      kind: "app_activation",
+      appId: "",
+      surface: "web-tauri",
+      trigger: "auto",
+      at: 1,
+    }
+    expect(() => store.append(ev)).not.toThrow()
+    const snap = store.snapshot()
+    expect((snap[0] as AppActivationEvent).appId).toBe("")
+  })
+
+  test("app_activation: `turnId` is optional — absent when omitted", () => {
+    const store = createInMemoryTypedHistoryEventStore()
+    const withId: AppActivationEvent = {
+      kind: "app_activation",
+      appId: "with",
+      surface: "cli",
+      trigger: "user",
+      at: 1,
+      turnId: "t-11",
+    }
+    const withoutId: AppActivationEvent = {
+      kind: "app_activation",
+      appId: "without",
+      surface: "cli",
+      trigger: "user",
+      at: 2,
+    }
+    store.append(withId)
+    store.append(withoutId)
+    const snap = store.snapshot()
+    expect((snap[0] as AppActivationEvent).turnId).toBe("t-11")
+    expect((snap[1] as AppActivationEvent).turnId).toBeUndefined()
+    expect(Object.hasOwn(snap[1] as object, "turnId")).toBe(false)
+  })
+
+  // ----- ADR-0335 union-level invariants -----
+
+  test("8-variant union exhaustiveness (compile + runtime smoke)", () => {
+    // If a future change drops a variant from the union, the `never`
+    // arm below disappears at compile and the test fails to typecheck.
+    const tags: TypedHistoryEventKind[] = [
+      "context_update",
+      "skill_activation",
+      "repo_rules_change",
+      "mode_change",
+      "reasoning_echo",
+      "compaction_event",
+      "plugin_activation",
+      "app_activation",
+    ]
+    for (const tag of tags) {
+      switch (tag) {
+        case "context_update":
+        case "skill_activation":
+        case "repo_rules_change":
+        case "mode_change":
+        case "reasoning_echo":
+        case "compaction_event":
+        case "plugin_activation":
+        case "app_activation":
+          break
+        default: {
+          const _never: never = tag
+          throw new Error(`unreachable: ${String(_never)}`)
+        }
+      }
+    }
+    expect(tags.length).toBe(8)
+  })
+
+  test("compaction_event reason set: producer can emit all 3 reasons end-to-end", () => {
+    // ADR-0335 confirms ADR-0324's `CompactionEventReason` already
+    // carries all 3 values (`context_limit | token_budget | manual`).
+    // No schema change in this ADR — the reason axis is producer
+    // policy. This test pins the producer-emit contract: each reason
+    // round-trips through the store unmodified.
+    const store = createInMemoryTypedHistoryEventStore()
+    const reasons: CompactionEventVariant["reason"][] = ["context_limit", "token_budget", "manual"]
+    for (let i = 0; i < reasons.length; i++) {
+      const r = reasons[i] as CompactionEventVariant["reason"]
+      store.append({
+        kind: "compaction_event",
+        // pair each reason with a sensible producer-emit trigger so
+        // the (reason, trigger) tuple reads as a real production path:
+        //   context_limit ⇒ pre_sampling (provider ceiling)
+        //   token_budget  ⇒ mid_turn     (breaker fired)
+        //   manual        ⇒ user_requested (slash command)
+        trigger:
+          r === "context_limit"
+            ? "pre_sampling"
+            : r === "token_budget"
+              ? "mid_turn"
+              : "user_requested",
+        reason: r,
+        tokensBefore: 8_000,
+        tokensAfter: 4_000,
+        messagesRemoved: 5,
+        at: i,
+      })
+    }
+    const snap = store.snapshot()
+    expect(snap.length).toBe(3)
+    expect((snap[0] as CompactionEventVariant).reason).toBe("context_limit")
+    expect((snap[1] as CompactionEventVariant).reason).toBe("token_budget")
+    expect((snap[2] as CompactionEventVariant).reason).toBe("manual")
   })
 
   test("`snapshot()` is frozen — mutation attempts throw in strict mode", () => {

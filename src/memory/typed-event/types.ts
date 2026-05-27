@@ -13,12 +13,21 @@
  * stream — wm is not mutated, and no production code path is auto-wired
  * (Wave-B / ADR-0321 wires producers later).
  *
- * **Closed set of 6 variants.** Extending this union requires a new ADR
- * (closed-port pattern, RFC §3.1 layering). The 6th variant
- * (`compaction_event`) was added by ADR-0324 to mirror Codex
- * `ResponseItem::Compaction / ContextCompaction / CompactionTrigger`
- * so the model can see "compaction occurred" as a typed narrative
- * event (orthogonal to the wm mutation channel).
+ * **Closed set of 8 variants.** Extending this union requires a new ADR
+ * (closed-port pattern, RFC §3.1 layering).
+ *  - Variants 1-5 (`context_update`, `skill_activation`,
+ *    `repo_rules_change`, `mode_change`, `reasoning_echo`) come from the
+ *    original ADR-0320 seal.
+ *  - The 6th variant (`compaction_event`) was added by ADR-0324 to mirror
+ *    Codex `ResponseItem::Compaction / ContextCompaction /
+ *    CompactionTrigger` so the model can see "compaction occurred" as a
+ *    typed narrative event (orthogonal to the wm mutation channel).
+ *  - The 7th + 8th variants (`plugin_activation`, `app_activation`) were
+ *    added by ADR-0335 to absorb the Codex r2 plugin/app activation
+ *    surface: `plugin_activation` mirrors Codex's `.codex-plugin/plugin.json`
+ *    discovery + enable flow, and `app_activation` mirrors the Codex
+ *    `@@app-name` mention bound to a quanta surface (CLI / Web-Tauri /
+ *    CLI-embedded browser).
  */
 
 /** Fields whose value swap is captured by a {@link ContextUpdateEvent}. */
@@ -137,6 +146,70 @@ export interface CompactionEventVariant {
   readonly turnId?: string
 }
 
+/** Trigger source for a {@link PluginActivationEvent} — who/what enabled
+ *  the plugin this turn. Matches the {@link SkillActivationTrigger}
+ *  closed set so producers can share enum vocab across variants. */
+export type PluginActivationTrigger = "user" | "auto" | "system"
+
+/** Capability surface a plugin manifest declared, in the Codex
+ *  `.codex-plugin/plugin.json` 3-way closed enum
+ *  (`memory/codex-plugin-manifest-pattern`). The capability set is
+ *  ADDITIVE — a plugin may declare zero, one, two, or all three. */
+export type PluginCapability = "Interactive" | "Read" | "Write"
+
+/**
+ * A plugin (Codex `.codex-plugin/plugin.json`-style manifest) was
+ * enabled this turn. Distinct from {@link SkillActivationEvent}
+ * because plugins carry **tool manifests + scoped capabilities** (not
+ * just description + body): the `capabilities` field records the
+ * declared surface so a downstream consumer can reason about what
+ * effects the plugin may produce without re-parsing the manifest.
+ *
+ * `capabilities` is a `readonly` array (zero or more entries) — empty
+ * is legal (a manifest with no declared capability set still emits the
+ * event so the model sees the discovery occurred). Producers are
+ * responsible for de-duping the array; the store does not validate.
+ */
+export interface PluginActivationEvent {
+  readonly kind: "plugin_activation"
+  readonly pluginId: string
+  readonly trigger: PluginActivationTrigger
+  readonly capabilities: readonly PluginCapability[]
+  readonly at: number
+  readonly turnId?: string
+}
+
+/** Surface a quanta app maps to. Mirrors the `memory/surface-model`
+ *  3-surface closed enum: CLI process, Tauri shell + Web UI, and the
+ *  CLI-embedded browser (subagent / embedded WebView). */
+export type AppActivationSurface = "cli" | "web-tauri" | "cli-browser"
+
+/** Trigger source for an {@link AppActivationEvent}. Shared with
+ *  {@link SkillActivationTrigger} / {@link PluginActivationTrigger} for
+ *  cross-variant enum vocab parity. */
+export type AppActivationTrigger = "user" | "auto" | "system"
+
+/**
+ * An "app" mention resolved this turn. In quanta's surface model an app
+ * maps to a surface (CLI / Web-Tauri / CLI-embedded browser); the
+ * `surface` field carries that label so the model can reason about
+ * which environment is active. Mirrors Codex `@@app-name` resolution
+ * (memory `codex-r2-wire`).
+ *
+ * Distinct from {@link PluginActivationEvent} because an app
+ * activation is **environment-scoped** (which surface is now
+ * conversational) whereas a plugin activation is
+ * **manifest-scoped** (a tool/capability bundle was enabled).
+ */
+export interface AppActivationEvent {
+  readonly kind: "app_activation"
+  readonly appId: string
+  readonly surface: AppActivationSurface
+  readonly trigger: AppActivationTrigger
+  readonly at: number
+  readonly turnId?: string
+}
+
 /**
  * Closed discriminated union of typed side-channel history events.
  * Extending requires a new ADR (closed-port pattern).
@@ -148,6 +221,8 @@ export type TypedHistoryEvent =
   | ModeChangeEvent
   | ReasoningEchoEvent
   | CompactionEventVariant
+  | PluginActivationEvent
+  | AppActivationEvent
 
 /** Variant tags. Useful for exhaustiveness checks at callsites. */
 export type TypedHistoryEventKind = TypedHistoryEvent["kind"]
