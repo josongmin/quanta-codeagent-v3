@@ -79,3 +79,10 @@ export {
   sweepSqliteRegistry,
 } from "./sqlite-adapter"
 export type { RegistryConfig, SessionResourceRegistry, SessionResources } from "./types"
+// ADR-0383 — Unified mint API (additive, non-breaking). Wraps ADR-0347
+//   `getGlobalSessionResourceRegistry()` + ADR-0372
+//   `buildCallerOwnedRegistryWithTelemetry()` behind a single
+//   `getOrCreateRegistry(opts)` entry point. Default routes to the
+//   global singleton — byte-identical reference equality when opts
+//   absent. See `unified-api.ts` for the 5-case decision table.
+export { getOrCreateRegistry, type UnifiedRegistryOptions } from "./unified-api"
