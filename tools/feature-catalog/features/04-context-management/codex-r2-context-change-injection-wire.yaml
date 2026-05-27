@@ -1,0 +1,50 @@
+id: codex-r2-context-change-injection-wire
+title: Context-change persistent injection + buildTurnContext seam (ADR-0321 / 0327 / 0329)
+section: 4
+subsystem: state-diff narrative channel into the per-turn prompt
+order: 101
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "default-off"]
+depends_on: [codex-r2-typed-event-store]
+purpose: |
+  Three-layer wire from state-diff producer to the model's per-turn view.
+  ADR-0321 detector + buildPersistentInjectionMessages emit
+  `<context-update>` envelopes via embedUntrusted. ADR-0327 adds the
+  buildTurnContext seam — TurnContextInput gains 3 optional slots
+  (contextChangeEvents / mentionInjectionMessages / systemPromptCache+Key)
+  spliced AFTER baseMessages and BEFORE the trailing `<system-reminder>`
+  so the model reads state transitions as chronological pre-turn signals.
+  ADR-0329 closure factory `createContextEventsProducer({store,
+  getSnapshot, sessionId?})` ties the wire to a sessionId — cursor =
+  `at+1` exclusive, atomic prev-snapshot advance, first-call baseline-only.
+  ALL three slots absent ⇒ byte-identical to pre-ADR-0327 path (pinned by
+  hellgate).
+evidence:
+  code:
+    - src/agent/context-change/detector.ts
+    - src/agent/context-change/inject.ts
+    - src/agent/context-change/snapshot.ts
+    - src/agent/context-change/types.ts
+    - src/agent/context-events-producer/factory.ts
+    - src/agent/prompt.ts
+  adrs:
+    - docs/decisions/0321-context-change-persistent-injection.md
+    - docs/decisions/0327-buildturncontext-wire-seam.md
+    - docs/decisions/0329-context-events-closure-factory.md
+  tests:
+    unit:
+      - src/agent/context-change/__tests__/detector.hellgate.test.ts
+      - src/agent/context-change/__tests__/inject.hellgate.test.ts
+      - src/agent/context-events-producer/__tests__/factory.hellgate.test.ts
+      - tests/unit/prompt-adr-0327-wire-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Producer (loop-side wire) lives in AgentConfig.contextEventsForTurn slot — NO-THROW closure pattern. The `<system-reminder>` tail still rides at the messages end (ADR-0004 cache-prefix invariant unchanged).'

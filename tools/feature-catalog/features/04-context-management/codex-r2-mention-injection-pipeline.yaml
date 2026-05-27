@@ -1,0 +1,58 @@
+id: codex-r2-mention-injection-pipeline
+title: Mention-injection pipeline + skill resolver + plugin activation trigger (ADR-0325 / 0330 / 0340)
+section: 4
+subsystem: explicit-mention-driven context channel (Codex `build_skills_and_plugins` mirror)
+order: 102
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "default-off"]
+depends_on: [codex-r2-typed-event-store]
+purpose: |
+  4-layer mention pipeline parsing `@skill` / `plugin://name` / `@@app`
+  out of user input and producing persistent typed events + injection
+  messages. ADR-0325 ships parser + resolver port + event-emitter +
+  inject-message builder (parser: ASCII kebab `[a-z][a-z0-9-]*`, email FP
+  rejected via `\w`-negative left-boundary, dedup by (kind, target)).
+  ADR-0330 adds the skill-only resolver impl `createSkillOnlyResolver`
+  rooted in `SkillRegistryReadOnly` (progressive-disclosure first-line of
+  description). ADR-0340 closes the dangling primitives:
+  `createPluginActivationHandler` per-session closure does MCP spawn +
+  skill resolve + typed-event emit; `activatePluginsFromMentions`
+  aggregates across multiple plugin mentions. AgentConfig.activatePlugins
+  function slot is closure-pattern (NO-THROW, idempotent per pluginId).
+evidence:
+  code:
+    - src/agent/mention-injection/parser.ts
+    - src/agent/mention-injection/resolver.ts
+    - src/agent/mention-injection/event-emitter.ts
+    - src/agent/mention-injection/inject-messages.ts
+    - src/agent/mention-runner/runner.ts
+    - src/agent/mention-runner/skill-resolver.ts
+    - src/agent/plugin-activation-handler/handler.ts
+    - src/agent/plugin-activation-handler/composite-activation.ts
+    - src/skill/registry-readonly.ts
+  adrs:
+    - docs/decisions/0325-mention-based-explicit-injection.md
+    - docs/decisions/0330-mention-runner-skill-resolver.md
+    - docs/decisions/0340-plugin-activation-trigger.md
+  tests:
+    unit:
+      - src/agent/mention-injection/__tests__/parser.hellgate.test.ts
+      - src/agent/mention-injection/__tests__/resolver.hellgate.test.ts
+      - src/agent/mention-injection/__tests__/event-emitter.hellgate.test.ts
+      - src/agent/mention-injection/__tests__/inject-messages.hellgate.test.ts
+      - src/agent/mention-runner/__tests__/skill-resolver.hellgate.test.ts
+      - src/agent/mention-runner/__tests__/runner.hellgate.test.ts
+      - src/agent/plugin-activation-handler/__tests__/handler.hellgate.test.ts
+      - src/agent/plugin-activation-handler/__tests__/composite-activation.hellgate.test.ts
+      - tests/unit/skill-registry-readonly.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Plugin/app resolver impl moved to ADR-0336 composite resolver — skill-only runner here stays for the lean default path. Loop hook (mention parse + activatePlugins call + activeSkills union) deferred — composition root or future loop ADR responsibility.'

@@ -1,0 +1,41 @@
+id: codex-r2-typed-event-store
+title: Typed history event store (ADR-0320 + ADR-0335)
+section: 4
+subsystem: Codex-r2 typed-event side channel (parallel to wm)
+order: 100
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "default-off"]
+depends_on: []
+purpose: |
+  Closed-port typed event store that sits PARALLEL to the working memory
+  message buffer. ADR-0320 ships the 5-variant foundation
+  (context_update / skill_activation / repo_rules_change / mode_change /
+  reasoning_echo) + in-memory adapter; ADR-0324 added the 6th variant
+  compaction_event; ADR-0335 extended to 8 variants (plugin_activation,
+  app_activation) verified against Codex Desktop bundle ground truth.
+  `since(at)` semantics is INCLUSIVE on the lower bound. wm is never
+  mutated by this slice — additive side-channel.
+evidence:
+  code:
+    - src/memory/typed-event/types.ts
+    - src/memory/typed-event/port.ts
+    - src/memory/typed-event/in-memory-store.ts
+    - src/memory/typed-event/index.ts
+  adrs:
+    - docs/decisions/0320-typed-history-event-store.md
+    - docs/decisions/0335-typed-event-closed-set-bulk-extension.md
+  tests:
+    unit:
+      - src/memory/typed-event/__tests__/in-memory-store.hellgate.test.ts
+      - src/memory/typed-event/__tests__/port-contract.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Closed-set extension log in ADR-0320 body records every variant addition; widening the union requires a new ADR.'

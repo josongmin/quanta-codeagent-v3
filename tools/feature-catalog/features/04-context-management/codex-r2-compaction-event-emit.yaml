@@ -1,0 +1,44 @@
+id: codex-r2-compaction-event-emit
+title: Compaction event emit (proactive + reactive) — ADR-0324 / 0331
+section: 4
+subsystem: typed-history narrative for compaction passes
+order: 103
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "default-off"]
+depends_on: [codex-r2-typed-event-store]
+purpose: |
+  Codex `Compaction / ContextCompaction / CompactionTrigger` ResponseItem
+  parity in quanta. ADR-0324 added `compaction_event` as the 6th variant
+  of the ADR-0320 closed-set (trigger: pre_sampling | mid_turn |
+  user_requested; reason: context_limit | token_budget | manual;
+  tokensBefore / tokensAfter / messagesRemoved / at / turnId?). ADR-0331
+  wires the emit from BOTH compaction call-sites:
+  `maybeCompact` (proactive — trigger="pre_sampling") and
+  `applyNonSuccessRecoveryAction` (reactive — trigger="mid_turn",
+  reason="context_limit"). Both fire AFTER `wm.replace` confirms the
+  compaction landed, NO-THROW (a thrown emitter is swallowed — pure
+  observability). AgentConfig.compactionEventEmit slot absent ⇒
+  byte-identical to legacy.
+evidence:
+  code:
+    - src/memory/typed-event/types.ts
+    - src/agent/loop.ts
+    - src/agent/context-change/inject.ts
+  adrs:
+    - docs/decisions/0324-compaction-typed-history-event.md
+    - docs/decisions/0331-reactive-compaction-emit-wire.md
+  tests:
+    unit:
+      - src/memory/typed-event/__tests__/in-memory-store.hellgate.test.ts
+      - tests/unit/loop-reactive-compaction-emit-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: 'Reactive site emits ONLY `context_limit` reason today (PTL trigger is by-construction context-limit). `token_budget` / `manual` producers require a future ADR — schema is already in place.'
