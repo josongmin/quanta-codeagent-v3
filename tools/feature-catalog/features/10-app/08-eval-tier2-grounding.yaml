@@ -28,13 +28,27 @@ purpose: |
   first-class: `grounding preflight` exercises provider/auth/parser seams
   before the full suite, payloads carry `errorKind` + route metadata
   (`provider/model/surfaceId/transportId/authMode`), `report` consumes the
-  persisted run summary for provenance, `compare` emits run-to-run bucket/case
-  drift, `regress` enforces a strict fail-closed baseline gate, and
+  persisted run summary for provenance, `baseline` resolves the latest prior
+  comparable run automatically, `compare` emits run-to-run bucket/case drift,
+  `regress` enforces a strict fail-closed baseline gate, run summaries carry
+  harness/corpus/route fingerprints to reject apples-to-oranges comparisons,
+  canary gate enforces both top-line thresholds and critical-bucket invariants
+  (`must_clarify` recall, `stale_context_trap` attachment rate,
+  `summary_equivalence` pair rate, `wrong_thread_adversarial` wrong-thread
+  rate), and critical-bucket regressions are surfaced independently of
+  top-line metrics. The loader is fail-closed authority too: pair groups must
+  preserve one raw + one summary case with matching scenario contracts, and
+  canary authority buckets must retain critical examples at runtime load time.
+  `gate` emits a dedicated structured verdict artifact instead of reusing the
+  broader report payload, `regress` emits its own structured verdict artifact
+  instead of reusing compare output, workflow orchestration consumes run and
+  baseline JSON authority instead of scraping stdout with `sed`, and
   `runGrounding` supports bounded concurrency for live corpora.
 evidence:
   code:
     - src/apps/eval/grounding/schema.ts
     - src/apps/eval/grounding/loader.ts
+    - src/apps/eval/grounding/baseline.ts
     - src/apps/eval/grounding/diagnostics.ts
     - src/apps/eval/grounding/parser.ts
     - src/apps/eval/grounding/probe.ts
@@ -47,6 +61,7 @@ evidence:
   tests:
     unit:
       - tests/unit/eval-grounding-schema.test.ts
+      - tests/unit/eval-grounding-baseline.test.ts
       - tests/unit/eval-grounding-parser.test.ts
       - tests/unit/eval-grounding-diagnostics.test.ts
       - tests/unit/eval-grounding-scorer-hellgate.test.ts
@@ -69,4 +84,17 @@ notes: |
   `chatgpt-oauth`, because live preflight proved the OAuth route can fail with
   token invalidation independently of grounding quality. Manual
   `workflow_dispatch` can supply `baseline_run_id` to emit `compare` artifacts
-  and enforce the strict regression gate against a prior run.
+  and enforce the strict regression gate against a prior run. Without a manual
+  baseline, the workflow resolves the latest prior finished comparable run
+  automatically. New grounding runs persist `harnessFingerprint`,
+  `caseSetFingerprint`, and `routeFingerprint` in the run summary so
+  baseline/compare/regress can reject semantic drift structurally. Current
+  canary blocking thresholds are `wrong_thread_rate == 0`,
+  `clarify_recall == 1.0`, `summary_equivalence_rate == 1.0`,
+  `thread_selection_accuracy >= 0.97`, `referent_accuracy >= 0.95`, and
+  `exact_tuple_match_rate >= 0.90`; `intent_accuracy` and `scope_accuracy`
+  remain diagnostic, not ship-blocking, until a later gate revision.
+  `harnessFingerprint` includes loader/gate contract versions in addition to
+  parser/scorer/report/compare versions. The live workflow now persists
+  `*-run.json`, `*-gate.json`, and `*-regress.json` artifacts so postmortem
+  analysis reads structured authority instead of stdout reconstruction.

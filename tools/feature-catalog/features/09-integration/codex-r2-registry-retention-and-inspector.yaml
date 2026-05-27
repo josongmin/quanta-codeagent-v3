@@ -1,0 +1,61 @@
+id: codex-r2-registry-retention-and-inspector
+title: Session registry retention sweep + inspector slash (ADR-0367 / 0369 / 0370)
+section: 9
+subsystem: production-ready ops surface for ADR-0345 session-resource-registry
+order: 104
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "production-wired"]
+depends_on:
+  - codex-r2-composition-install-and-registry
+  - codex-r2-disk-persistence-and-env-swap
+purpose: |
+  Three-ADR closeout that takes ADR-0348 jsonl + ADR-0361 sqlite adapters
+  from "exists" to "operator-ready". ADR-0367 adds
+  `QUANTA_SESSION_REGISTRY_SQLITE_PATH` env-var to the global lazy-init
+  priority chain (sqlite > disk > in-memory) with NO-THROW fallback at
+  every step. ADR-0369 wires `sweepDiskRegistry` + `sweepSqliteRegistry`
+  to an on-startup + 60s periodic auto-sweep via `startAutoSweep` —
+  shared NOOP handle when no env var set (zero allocation, byte-identical
+  to legacy in-memory path). ADR-0370 ships an operator inspector + the
+  `/session-registry stats` slash command — backend auto-detect, sqlite
+  opened `readonly: true`, formatter outputs Sessions/Events/Cache/Bytes/
+  WAL with Codex `logs_2.sqlite` parity tag. ADR-0368 (flock telemetry
+  composition wire) deferred — architectural mismatch documented (global
+  lazy-init singleton vs per-call cfg.metrics).
+evidence:
+  code:
+    - src/agent/session-resource-registry/global.ts
+    - src/agent/session-resource-registry/auto-sweep.ts
+    - src/agent/session-resource-registry/inspector.ts
+    - src/apps/cli/session-registry-cmd.ts
+    - src/apps/cli/slash/registry-app.ts
+  adrs:
+    - docs/decisions/0367-sqlite-session-registry-env-var-swap.md
+    - docs/decisions/0368-flock-telemetry-composition-wire-deferred.md
+    - docs/decisions/0369-session-registry-auto-sweep.md
+    - docs/decisions/0370-session-registry-inspector-slash.md
+  tests:
+    unit:
+      - tests/unit/session-registry-env-swap-hellgate.test.ts
+      - tests/unit/auto-sweep-hellgate.test.ts
+      - src/agent/session-resource-registry/__tests__/inspector.hellgate.test.ts
+      - tests/unit/session-registry-slash.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: env QUANTA_SESSION_REGISTRY_SQLITE_PATH
+    type: 'string?'
+    default: 'unset (falls through to disk env, then in-memory)'
+    notes: 'Read once at first global registry call. Empty / unset / hosed path ⇒ NO-THROW fallback chain.'
+  - name: AutoSweepConfig.intervalMs
+    type: 'number?'
+    default: '60_000 (60s)'
+    notes: '`<= 0` disables periodic (on-startup only). Both env backends swept disk→sqlite, independent NO-THROW.'
+deliberate_hold: null
+notes: 'Codex parity: `~/.codex/logs_2.sqlite` operators reach stats via shell sqlite3; our slash command surfaces the same numbers in-band. ADR-0368 defer rationale: 4 design options analyzed, all introduce singleton fragility — re-open when multi-process or multi-tenant deployment surfaces a concrete trigger.'
