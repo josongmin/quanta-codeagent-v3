@@ -36,6 +36,30 @@ ADR-0336 had not yet shipped a parser. In fact ADR-0039 ships one. This
 ADR therefore concentrates on the launcher + registry primitives and
 explicitly notes the parser redundancy below.
 
+### Two plugin manifest systems coexist on main
+
+A subsequent fact-check found ADR-0336 (`src/agent/plugin-discovery/`)
+also landed in the R5 close-out sprint. Main therefore carries **two
+plugin manifest shapes** in parallel:
+
+- **ADR-0039** (`@/skill/plugin-manifest`): `.quanta-plugin/plugin.json` +
+  sibling `.mcp.json`, with `MCPServerSpec` (`{command, args, env?}`)
+  wrapped in `Record<string, MCPServerSpec>`. Production loader exists
+  (`@/skill/plugin-loader`).
+- **ADR-0336** (`@/agent/plugin-discovery`): `.codex-plugin/plugin.json`
+  Codex-style manifest with `mcpServers?: readonly {name: string; command?: string}[]`
+  (different shape — array of {name, command}, no args / env).
+
+This launcher consumes the **ADR-0039 shape verbatim** (`MCPServerSpec`).
+An ADR-0336 manifest cannot feed `launchPluginMcpServers` directly
+without an adapter. The two systems are deliberately kept disjoint by
+this ADR — picking a unified manifest shape requires a separate decision
+ADR (which Codex variant to canonicalise? does Codex's array shape need
+`args`/`env`? how does `.mcp.json` sibling vs in-manifest `mcpServers`
+differ?). Until that ADR lands, callers that have an ADR-0336
+`PluginManifest` and want to launch its declared servers must convert
+each entry to `MCPServerSpec` at the call site.
+
 ## Decision
 
 Ship a new leaf slice `src/agent/plugin-mcp-launcher/`:
