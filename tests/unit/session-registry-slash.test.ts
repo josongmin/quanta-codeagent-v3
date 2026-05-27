@@ -307,4 +307,50 @@ describe("ADR-0376 /session-registry help discovery", () => {
     expect(err).toContain("stats")
     expect(err).toContain("help")
   })
+
+  // ─── ADR-0379 `cleanup` sub-command ────────────────────────────────────
+
+  test("[18] cleanup is a known sub-command (no unknown-subcommand error)", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const ctx = makeCtx()
+    const exit = await cmd.run(["cleanup"], ctx)
+    expect(exit).toBe(0)
+    const err = ctx.errBuf.join("")
+    expect(err).not.toContain("unknown subcommand")
+  })
+
+  test("[19] cleanup renders stats + 'Sweep complete' marker", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const ctx = makeCtx()
+    await cmd.run(["cleanup"], ctx)
+    const out = ctx.outBuf.join("")
+    expect(out).toContain("Session Registry")
+    expect(out).toContain("Sweep complete.")
+  })
+
+  test("[20] help menu lists the new `cleanup` sub-command", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const ctx = makeCtx()
+    const exit = await cmd.run(["help"], ctx)
+    expect(exit).toBe(0)
+    const out = ctx.outBuf.join("")
+    expect(out).toContain("cleanup")
+    expect(out).toContain("ADR-0379")
+  })
+
+  test("[21] unknown-sub error message mentions 'cleanup' in known list", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const ctx = makeCtx()
+    await cmd.run(["bogus"], ctx)
+    const err = ctx.errBuf.join("")
+    expect(err).toContain("cleanup")
+  })
 })

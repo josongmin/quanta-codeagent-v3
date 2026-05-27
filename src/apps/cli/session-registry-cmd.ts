@@ -38,6 +38,7 @@
  * because the operator explicitly asked for the mutation.
  */
 
+import { startAutoSweep } from "@/agent/session-resource-registry/auto-sweep"
 import { getGlobalSessionResourceRegistry } from "@/agent/session-resource-registry/global"
 import {
   formatRegistryStats,
@@ -59,6 +60,7 @@ const HELP_LINES: readonly string[] = [
   "Sub-commands:",
   "  stats         Print backend + sessions/events/bytes (default)",
   "  evict <id>    Force-evict one session by id (idempotent)",
+  "  cleanup       Run an immediate retention sweep + post-sweep stats (ADR-0379)",
   "  help          Show this menu",
   "",
   "Backend detect priority (first match wins):",
@@ -70,7 +72,7 @@ const HELP_LINES: readonly string[] = [
 // `SUBCOMMANDS` doubles as completion source + unknown-subcommand hint.
 // Keep alphabetical-ish; the "known one of" stderr message renders the
 // SAME ordering for grep-stability across operator log lines.
-const SUBCOMMANDS = ["stats", "evict", "help"] as const
+const SUBCOMMANDS = ["stats", "evict", "cleanup", "help"] as const
 type Subcommand = (typeof SUBCOMMANDS)[number]
 const isSubcommand = (s: string): s is Subcommand => (SUBCOMMANDS as readonly string[]).includes(s)
 
@@ -164,6 +166,41 @@ export const sessionRegistryCmd: SlashCommand = {
     }
     if (sub === "help") return renderHelp(ctx)
     if (sub === "evict") return renderEvict(args.slice(1), ctx)
+    if (sub === "cleanup") return renderCleanup(ctx)
     return renderStats(ctx)
   },
+}
+
+/**
+ * ADR-0379 — `/session-registry cleanup` handler.
+ *
+ * Runs an immediate sweep via `startAutoSweep().sweepNow()` then stops
+ * the returned handle so we do NOT leak a periodic timer registered by
+ * this slash invocation. Env-var detection (sqlite > disk > none) is
+ * delegated to `startAutoSweep`; an unset registry env ⇒ NOOP handle ⇒
+ * the sweep is a fast no-op + we still render the current stats.
+ *
+ * The sweep is fire-and-await so the operator sees the post-sweep
+ * stats (events evicted, WAL bytes, etc.) in the rendered output.
+ * NO-THROW: any failure short-circuits to "cleanup failed" + exit 1
+ * (operator explicitly requested the mutation; surface the failure).
+ */
+const renderCleanup = async (ctx: SlashContext): Promise<number> => {
+  let handle: ReturnType<typeof startAutoSweep> | undefined
+  try {
+    handle = startAutoSweep()
+    await handle.sweepNow()
+    // Render post-sweep stats so the operator sees what changed.
+    const stats = await inspectGlobalRegistry()
+    ctx.out(`${formatRegistryStats(stats)}\nSweep complete.\n`)
+    return 0
+  } catch (e) {
+    ctx.err(`/session-registry: cleanup failed: ${errMessage(e)}\n`)
+    return 1
+  } finally {
+    // CRITICAL: stop() unregisters the periodic timer registered by
+    // `startAutoSweep` so the slash does not leak a setInterval per
+    // invocation. NO-THROW + idempotent (per ADR-0369).
+    handle?.stop()
+  }
 }
