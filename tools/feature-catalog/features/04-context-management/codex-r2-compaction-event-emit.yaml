@@ -39,6 +39,10 @@ evidence:
       - tests/unit/loop-reactive-compaction-emit-hellgate.test.ts
     integration: []
     contract: []
-knobs: []
+knobs:
+  - name: AgentConfig.compactionEventEmit
+    type: '(event: CompactionEventVariant) => void'
+    default: 'undefined (no emit, byte-identical legacy)'
+    notes: 'When set, fires at both proactive (maybeCompact) and reactive (applyNonSuccessRecoveryAction) sites AFTER wm.replace lands. NO-THROW: a thrown emitter is swallowed.'
 deliberate_hold: null
 notes: 'Reactive site emits ONLY `context_limit` reason today (PTL trigger is by-construction context-limit). `token_budget` / `manual` producers require a future ADR — schema is already in place.'
