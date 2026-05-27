@@ -25,21 +25,38 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import type { HistorySanitizationPort } from "@/memory/history-sanitization"
+import type {
+  HistorySanitizationPort,
+  SanitizationMessageLike,
+} from "@/memory/history-sanitization"
 import { LLMError } from "@/shared"
 import type { LLMPort } from "../../ports"
-import type { StreamEvent, StreamInput } from "../../types"
+import type { Message, StreamEvent, StreamInput } from "../../types"
 import { DEFAULT_MAX_ATTEMPTS, DEFAULT_PLACEHOLDER, withImageSanitizationRetry } from ".."
 
-type Recorder = { reasons: string[]; placeholders: string[]; calls: number }
+type Recorder = {
+  reasons: string[]
+  placeholders: string[]
+  calls: number
+  snapshotCalls: number
+}
 
 /** Build a port that records every call and returns the configured result.
- *  Optionally throws on the Nth invocation to exercise the no-throw shim. */
+ *  Optionally throws on the Nth invocation to exercise the no-throw shim.
+ *
+ *  ADR-0337: optional `snapshotResults` lets a test scenario drive a sequence
+ *  of `snapshotMessages()` returns (or `{throws: ...}` to simulate a hostile
+ *  adapter). Default: returns `[]` (degenerate ⇒ wrap falls back to caller's
+ *  `input.messages`, byte-identical to the pre-ADR-0337 retry path). */
 const recordingPort = (
   results: ReadonlyArray<{ replacedCount: number; wasMutated: boolean }>,
-  opts?: { throwOn?: number },
+  opts?: {
+    throwOn?: number
+    snapshotResults?: ReadonlyArray<readonly SanitizationMessageLike[] | { throws: unknown }>
+    snapshotDefault?: readonly SanitizationMessageLike[]
+  },
 ): { port: HistorySanitizationPort; rec: Recorder } => {
-  const rec: Recorder = { reasons: [], placeholders: [], calls: 0 }
+  const rec: Recorder = { reasons: [], placeholders: [], calls: 0, snapshotCalls: 0 }
   const port: HistorySanitizationPort = {
     replaceLastTurnImages(reason, placeholder) {
       rec.calls += 1
@@ -54,6 +71,15 @@ const recordingPort = (
     replaceLastNMessagesImages(_n, _reason, _placeholder) {
       return { replacedCount: 0, wasMutated: false }
     },
+    snapshotMessages() {
+      const i = rec.snapshotCalls
+      rec.snapshotCalls += 1
+      const scripted = opts?.snapshotResults?.[i]
+      if (scripted === undefined) return opts?.snapshotDefault ?? []
+      if (Array.isArray(scripted)) return scripted as readonly SanitizationMessageLike[]
+      // {throws: ...} variant
+      throw (scripted as { throws: unknown }).throws
+    },
   }
   return { port, rec }
 }
@@ -66,13 +92,15 @@ type CallScript = ReadonlyArray<readonly StreamEvent[] | { throws: unknown }>
 const scriptedInner = (
   script: CallScript,
   extras?: { model?: string; provider?: string; authMode?: string; midStreamThrow?: unknown },
-): { inner: LLMPort; calls: () => number } => {
+): { inner: LLMPort; calls: () => number; inputs: () => readonly StreamInput[] } => {
   let calls = 0
+  const seenInputs: StreamInput[] = []
   const inner: LLMPort = {
     ...(extras?.model !== undefined ? { model: extras.model } : {}),
     ...(extras?.provider !== undefined ? { provider: extras.provider } : {}),
     ...(extras?.authMode !== undefined ? { authMode: extras.authMode } : {}),
-    async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
+    async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
+      seenInputs.push(input)
       const i = calls
       calls += 1
       const entry = script[i]
@@ -90,7 +118,7 @@ const scriptedInner = (
       }
     },
   }
-  return { inner, calls: () => calls }
+  return { inner, calls: () => calls, inputs: () => seenInputs }
 }
 
 const emptyInput = (): StreamInput => ({ messages: [], tools: [] })
@@ -335,6 +363,7 @@ describe("ADR-0328 withImageSanitizationRetry", () => {
         nCalled += 1
         return { replacedCount: 0, wasMutated: false }
       },
+      snapshotMessages: () => [],
     }
     const ok: StreamEvent[] = [{ type: "message_stop", stop_reason: "end_turn" }]
     const { inner } = scriptedInner([
@@ -344,5 +373,214 @@ describe("ADR-0328 withImageSanitizationRetry", () => {
     const wrapped = withImageSanitizationRetry(inner, port)
     await drain(wrapped.stream(emptyInput()))
     expect(nCalled).toBe(0)
+  })
+
+  // ─── ADR-0337 ──────────────────────────────────────────────────────────
+  // wm-live re-snapshot on retry. Closes the ADR-0328/0333 limitation where
+  // the retry used the caller's STALE `input.messages` (snapshotted before
+  // sanitize). Coverage:
+  //
+  //  - retry input.messages === port.snapshotMessages() result (E2E mock)
+  //  - snapshotMessages throws ⇒ fall back to caller's input.messages
+  //  - snapshotMessages returns [] ⇒ fall back to caller's input.messages
+  //  - other StreamInput knobs (tools, system, toolChoice, thinking, signal,
+  //    turnTimingCapture, onChunk) preserved verbatim across retry
+  //  - happy path (no retry) NEVER calls snapshotMessages — byte-identical
+  //  - snapshotMessages only called AFTER sanitize wasMutated:true
+  //  - successive retries each rebuild from a fresh snapshot
+  //  - wm.replace + adapter end-to-end: real WorkingMemory threaded
+  // ───────────────────────────────────────────────────────────────────────
+  describe("ADR-0337 wm-live re-snapshot on retry", () => {
+    const cleanMessages: Message[] = [
+      { role: "user", content: [{ type: "text", text: "after sanitize" }] },
+    ]
+    const staleMessages: Message[] = [
+      {
+        role: "user",
+        content: [{ type: "image", data: "bytes", mediaType: "image/png" }],
+      },
+    ]
+
+    test("retry input.messages === port.snapshotMessages() result (sanitized buffer wins)", async () => {
+      const ok: StreamEvent[] = [{ type: "message_stop", stop_reason: "end_turn" }]
+      const { inner, inputs } = scriptedInner([
+        { throws: new LLMError("invalid image", { kind: "invalid_image" }) },
+        ok,
+      ])
+      const { port, rec } = recordingPort([{ replacedCount: 1, wasMutated: true }], {
+        snapshotResults: [cleanMessages],
+      })
+      const wrapped = withImageSanitizationRetry(inner, port)
+      const input: StreamInput = { messages: staleMessages, tools: [] }
+      await drain(wrapped.stream(input))
+      // First inner.stream call saw the caller's stale buffer (pre-sanitize).
+      expect(inputs()[0]?.messages).toBe(staleMessages)
+      // Second inner.stream call saw the wm-live snapshot — same VALUES, but
+      // a fresh array (slice-defended).
+      expect(inputs()[1]?.messages).toEqual(cleanMessages)
+      expect(inputs()[1]?.messages).not.toBe(staleMessages)
+      // snapshotMessages called exactly once (after the sanitize).
+      expect(rec.snapshotCalls).toBe(1)
+    })
+
+    test("snapshotMessages THROWS ⇒ retry falls back to caller's input.messages (NO-THROW)", async () => {
+      const ok: StreamEvent[] = [{ type: "message_stop", stop_reason: "end_turn" }]
+      const { inner, inputs } = scriptedInner([
+        { throws: new LLMError("invalid image", { kind: "invalid_image" }) },
+        ok,
+      ])
+      const { port } = recordingPort([{ replacedCount: 1, wasMutated: true }], {
+        snapshotResults: [{ throws: new Error("port snapshot crash") }],
+      })
+      const wrapped = withImageSanitizationRetry(inner, port)
+      const input: StreamInput = { messages: staleMessages, tools: [] }
+      const events = await drain(wrapped.stream(input))
+      // Wrap never throws — happy completion proves the fallback path.
+      expect(events).toEqual(ok)
+      // Retry input fell back to the caller's reference (byte-identical to
+      // pre-ADR-0337 retry behaviour).
+      expect(inputs()[1]?.messages).toBe(staleMessages)
+    })
+
+    test("snapshotMessages returns [] ⇒ retry falls back to caller's input.messages", async () => {
+      const ok: StreamEvent[] = [{ type: "message_stop", stop_reason: "end_turn" }]
+      const { inner, inputs } = scriptedInner([
+        { throws: new LLMError("invalid image", { kind: "invalid_image" }) },
+        ok,
+      ])
+      const { port } = recordingPort([{ replacedCount: 1, wasMutated: true }], {
+        snapshotResults: [[]],
+      })
+      const wrapped = withImageSanitizationRetry(inner, port)
+      const input: StreamInput = { messages: staleMessages, tools: [] }
+      await drain(wrapped.stream(input))
+      // Empty snapshot ⇒ degenerate ⇒ fall back to original input reference.
+      expect(inputs()[1]?.messages).toBe(staleMessages)
+    })
+
+    test("other StreamInput knobs (tools/system/toolChoice/thinking/signal) preserved across wm-live retry", async () => {
+      const ok: StreamEvent[] = [{ type: "message_stop", stop_reason: "end_turn" }]
+      const { inner, inputs } = scriptedInner([
+        { throws: new LLMError("invalid image", { kind: "invalid_image" }) },
+        ok,
+      ])
+      const { port } = recordingPort([{ replacedCount: 1, wasMutated: true }], {
+        snapshotResults: [cleanMessages],
+      })
+      const wrapped = withImageSanitizationRetry(inner, port)
+      const controller = new AbortController()
+      const chunkHook = () => {}
+      const timingCapture = { markRequestSent: () => {} }
+      const input: StreamInput = {
+        messages: staleMessages,
+        tools: [
+          {
+            name: "echo",
+            description: "echo",
+            input_schema: { type: "object", properties: {}, required: [] },
+          },
+        ],
+        system: "be helpful",
+        toolChoice: { kind: "auto" },
+        thinking: { type: "enabled", budget_tokens: 1024 },
+        signal: controller.signal,
+        turnTimingCapture: timingCapture,
+        onChunk: chunkHook,
+      }
+      await drain(wrapped.stream(input))
+      const retry = inputs()[1]
+      expect(retry).toBeDefined()
+      if (retry === undefined) return
+      // Every knob except `messages` is preserved by-reference (object spread).
+      expect(retry.tools).toBe(input.tools)
+      expect(retry.system).toBe(input.system)
+      expect(retry.toolChoice).toBe(input.toolChoice)
+      expect(retry.thinking).toBe(input.thinking)
+      expect(retry.signal).toBe(controller.signal)
+      expect(retry.turnTimingCapture).toBe(timingCapture)
+      expect(retry.onChunk).toBe(chunkHook)
+      // `messages` is the fresh snapshot.
+      expect(retry.messages).toEqual(cleanMessages)
+    })
+
+    test("happy path (no invalid_image, no retry) ⇒ snapshotMessages NEVER called", async () => {
+      const events: StreamEvent[] = [{ type: "message_stop", stop_reason: "end_turn" }]
+      const { inner } = scriptedInner([events])
+      const { port, rec } = recordingPort([])
+      const wrapped = withImageSanitizationRetry(inner, port)
+      await drain(wrapped.stream(emptyInput()))
+      expect(rec.snapshotCalls).toBe(0)
+    })
+
+    test("snapshotMessages NOT called when sanitize returned wasMutated:false (Codex break parity)", async () => {
+      const err = new LLMError("invalid image", { kind: "invalid_image" })
+      const { inner } = scriptedInner([{ throws: err }])
+      const { port, rec } = recordingPort([{ replacedCount: 0, wasMutated: false }], {
+        snapshotResults: [cleanMessages],
+      })
+      const wrapped = withImageSanitizationRetry(inner, port)
+      await expect(drain(wrapped.stream(emptyInput()))).rejects.toBe(err)
+      // Sanitize attempted but reported no mutation ⇒ no retry path runs ⇒
+      // snapshotMessages was never reached.
+      expect(rec.snapshotCalls).toBe(0)
+    })
+
+    test("two successive retries each rebuild from a fresh snapshot (maxAttempts=2)", async () => {
+      const err1 = new LLMError("invalid 1", { kind: "invalid_image" })
+      const err2 = new LLMError("invalid 2", { kind: "invalid_image" })
+      const ok: StreamEvent[] = [{ type: "message_stop", stop_reason: "end_turn" }]
+      const { inner, inputs } = scriptedInner([{ throws: err1 }, { throws: err2 }, ok])
+      const mid: Message[] = [{ role: "user", content: [{ type: "text", text: "mid" }] }]
+      const final: Message[] = [{ role: "user", content: [{ type: "text", text: "final" }] }]
+      const { port, rec } = recordingPort(
+        [
+          { replacedCount: 1, wasMutated: true },
+          { replacedCount: 1, wasMutated: true },
+        ],
+        { snapshotResults: [mid, final] },
+      )
+      const wrapped = withImageSanitizationRetry(inner, port, { maxAttempts: 2 })
+      await drain(wrapped.stream({ messages: staleMessages, tools: [] }))
+      expect(inputs().length).toBe(3)
+      expect(inputs()[1]?.messages).toEqual(mid)
+      expect(inputs()[2]?.messages).toEqual(final)
+      expect(rec.snapshotCalls).toBe(2)
+    })
+
+    test("end-to-end: real WorkingMemory + adapter ⇒ retry sees the sanitized turn", async () => {
+      // Drive the actual `createWorkingMemoryHistorySanitization(wm)` rather
+      // than a recording mock. Confirms the closed-port extension is wired
+      // straight through `wm.snapshot()`.
+      const { createWorkingMemoryHistorySanitization } = await import(
+        "@/memory/history-sanitization"
+      )
+      const { createWorkingMemory } = await import("../../../memory/working")
+
+      const seed: Message[] = [
+        { role: "user", content: [{ type: "text", text: "look at this:" }] },
+        {
+          role: "user",
+          content: [{ type: "image", data: "AAA", mediaType: "image/png" }],
+        },
+      ]
+      const wm = createWorkingMemory<Message>(seed)
+      const port = createWorkingMemoryHistorySanitization(wm)
+
+      const ok: StreamEvent[] = [{ type: "message_stop", stop_reason: "end_turn" }]
+      const { inner, inputs } = scriptedInner([
+        { throws: new LLMError("invalid image", { kind: "invalid_image" }) },
+        ok,
+      ])
+      const wrapped = withImageSanitizationRetry(inner, port, {
+        placeholder: "[invalid image removed]",
+      })
+      // The caller's input.messages is the PRE-sanitize snapshot — same
+      // shape the agent loop would pass.
+      await drain(wrapped.stream({ messages: wm.snapshot() as Message[], tools: [] }))
+      // Retry saw the sanitized tail: the image block ⇒ text placeholder.
+      const retryMsgs = inputs()[1]?.messages ?? []
+      expect(retryMsgs.length).toBe(2)
+      expect(retryMsgs[1]?.content).toEqual([{ type: "text", text: "[invalid image removed]" }])
+    })
   })
 })

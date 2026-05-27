@@ -8,7 +8,7 @@
  * follow-up ADR, default-OFF until then.
  */
 
-export type { HistorySanitizationPort } from "./port"
+export type { HistorySanitizationPort, SanitizationMessageLike } from "./port"
 export type { SanitizationReason, SanitizationResult } from "./types"
 export { SANITIZATION_REASONS } from "./types"
 export { createWorkingMemoryHistorySanitization } from "./working-memory-adapter"

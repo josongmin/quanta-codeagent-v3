@@ -42,7 +42,7 @@
  */
 
 import type { WorkingMemory } from "../working"
-import type { HistorySanitizationPort } from "./port"
+import type { HistorySanitizationPort, SanitizationMessageLike } from "./port"
 import type { SanitizationReason, SanitizationResult } from "./types"
 
 /** Structural minimum for a message in the buffer. Matches `Message` from
@@ -218,6 +218,29 @@ const sanitizeTail = <M extends MsgLike>(
  * placeholder defaults or telemetry off it; that is intentionally not in
  * scope for ADR-0323.
  */
+/**
+ * Defensive snapshot used by {@link HistorySanitizationPort.snapshotMessages}.
+ * NO-THROW: returns `[]` on any underlying failure (e.g. `wm.snapshot()`
+ * crashing in a hostile adapter). The shape is widened structurally to
+ * {@link SanitizationMessageLike} so the port surface does not require
+ * consumers to know the concrete `Message` type.
+ *
+ * The cast `as readonly SanitizationMessageLike[]` is sound because
+ * `M extends MsgLike` (`role`/`content`) which is a structural superset of
+ * the port's `SanitizationMessageLike` (`readonly role`/`readonly content`):
+ * a mutable `string` field is assignable to a `readonly string` viewing
+ * position, and `wm.snapshot()` already returns `readonly M[]`.
+ */
+const safeSnapshot = <M extends MsgLike>(
+  wm: WorkingMemory<M>,
+): readonly SanitizationMessageLike[] => {
+  try {
+    return wm.snapshot() as unknown as readonly SanitizationMessageLike[]
+  } catch {
+    return []
+  }
+}
+
 export const createWorkingMemoryHistorySanitization = <M extends MsgLike>(
   wm: WorkingMemory<M>,
 ): HistorySanitizationPort => ({
@@ -230,5 +253,8 @@ export const createWorkingMemoryHistorySanitization = <M extends MsgLike>(
     placeholder: string,
   ): SanitizationResult {
     return sanitizeTail(wm, n, placeholder)
+  },
+  snapshotMessages(): readonly SanitizationMessageLike[] {
+    return safeSnapshot(wm)
   },
 })

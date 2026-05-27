@@ -351,4 +351,79 @@ describe("HELLGATE — history-sanitization working-memory adapter", () => {
     expect(snap[0]?.content).toEqual([{ type: "text", text: PLACEHOLDER }])
     expect(snap[1]?.content).toEqual([{ type: "text", text: PLACEHOLDER }])
   })
+
+  // ─── ADR-0337 snapshotMessages accessor ────────────────────────────────
+  test("snapshotMessages: empty wm ⇒ []", () => {
+    const wm = newWm([])
+    const port = createWorkingMemoryHistorySanitization(wm)
+    expect(port.snapshotMessages()).toEqual([])
+  })
+
+  test("snapshotMessages: multi-turn buffer returns exact tail", () => {
+    const msgs: Msg[] = [userText("first"), userImage(1), userText("third")]
+    const wm = newWm(msgs)
+    const port = createWorkingMemoryHistorySanitization(wm)
+    const snap = port.snapshotMessages()
+    expect(snap.length).toBe(3)
+    // Element identity preserved (snapshot is shallow copy).
+    expect(snap[0]).toBe(msgs[0])
+    expect(snap[1]).toBe(msgs[1])
+    expect(snap[2]).toBe(msgs[2])
+  })
+
+  test("snapshotMessages: reflects the POST-sanitize buffer after replaceLastTurnImages", () => {
+    const wm = newWm([userText("first"), userImage(1)])
+    const port = createWorkingMemoryHistorySanitization(wm)
+    const r = port.replaceLastTurnImages("invalid_image", PLACEHOLDER)
+    expect(r.wasMutated).toBe(true)
+    const snap = port.snapshotMessages()
+    // The image-bearing message is now a text-placeholder message.
+    expect(snap.length).toBe(2)
+    expect((snap[1] as Msg).content).toEqual([{ type: "text", text: PLACEHOLDER }])
+  })
+
+  test("snapshotMessages: shallow-copy semantics — mutating the result does not poison the wm", () => {
+    const msgs: Msg[] = [userText("a"), userText("b")]
+    const wm = newWm(msgs)
+    const port = createWorkingMemoryHistorySanitization(wm)
+    const snap = port.snapshotMessages()
+    // The returned array is readonly per the type. To prove the wm-internal
+    // backing isn't aliased, cast and splice; subsequent snapshotMessages
+    // must still return the original 2-element view.
+    ;(snap as unknown as Msg[]).splice(0, snap.length)
+    const refetch = port.snapshotMessages()
+    expect(refetch.length).toBe(2)
+  })
+
+  test("snapshotMessages: NO-THROW — degenerate wm-like adapter throwing snapshot returns []", () => {
+    // Construct a hostile WorkingMemory-shaped object that throws from snapshot().
+    // This proves the `safeSnapshot` swallow shim in the adapter holds.
+    const hostile = {
+      messages: [] as Msg[],
+      snapshot(): readonly Msg[] {
+        throw new Error("simulated wm crash")
+      },
+      append(_m: Msg) {},
+      replace(_m: Msg[]) {},
+      get(_i: number): Msg | undefined {
+        return undefined
+      },
+    } as unknown as WorkingMemory<Msg>
+    const port = createWorkingMemoryHistorySanitization(hostile)
+    expect(port.snapshotMessages()).toEqual([])
+  })
+
+  test("snapshotMessages: type widening — returned shape is structural SanitizationMessageLike", () => {
+    // Compile-time check that the port's return type is widened structurally
+    // (role: string, content: unknown). Runtime: assert role/content presence.
+    const wm = newWm([userImage(1, 2)])
+    const port = createWorkingMemoryHistorySanitization(wm)
+    const snap = port.snapshotMessages()
+    expect(snap.length).toBe(1)
+    const first = snap[0]
+    expect(first).toBeDefined()
+    if (first === undefined) return
+    expect(typeof first.role).toBe("string")
+    expect(first.content).toBeDefined()
+  })
 })

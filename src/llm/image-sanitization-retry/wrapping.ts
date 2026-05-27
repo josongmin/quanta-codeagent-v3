@@ -17,16 +17,38 @@
  *         // ... else: surface Error + break
  *     }
  *
- * Our `continue` is "re-iterate `inner.stream(input)` exactly once". We do
- * NOT re-issue with a different StreamInput — the inner adapter reads
- * messages from the WorkingMemory snapshot the loop already passed in. The
- * port mutates the shared `WorkingMemory<Message>` so the SAME `input.messages`
- * reference, when re-snapshotted by the inner adapter on next call, would
- * see the sanitized buffer. HOWEVER our inner adapters read `input.messages`
- * by-reference at call time and do NOT re-snapshot the WorkingMemory mid-call,
- * so this wrap is correct ONLY when the AgentConfig wires `port` as a
- * `createWorkingMemoryHistorySanitization(wm)` bound to the SAME `wm` that
- * the agent loop assembles `input.messages` from BEFORE each stream call.
+ * Our `continue` re-iterates `inner.stream(freshInput)` exactly once, where
+ * `freshInput` carries the wm's POST-sanitize messages — see "wm-live retry"
+ * below for the rationale.
+ *
+ * # wm-live retry (ADR-0337) — closes ADR-0328/0333 stale-input limitation
+ *
+ * Pre-ADR-0337: the decorator re-passed the SAME `input` reference, including
+ * the SAME `input.messages` array that was snapshotted by the loop BEFORE the
+ * pre-sanitize stream attempt. The wm mutation done by
+ * `port.replaceLastTurnImages` was therefore INVISIBLE to the inner adapter
+ * on retry: it re-serialized the stale poisoned buffer and the provider
+ * re-rejected with the same 400.
+ *
+ * Post-ADR-0337: between the sanitize call and the retry stream, we ask the
+ * port for `snapshotMessages()` — a wm-live re-snapshot of the buffer the
+ * sanitize just mutated — and build a fresh `StreamInput` whose `messages`
+ * field points at the sanitized snapshot. All other knobs (`tools`, `system`,
+ * `toolChoice`, `thinking`, `signal`, `turnTimingCapture`, `onChunk`) are
+ * preserved by spread, so byte-identical wire shape EXCEPT for the now-clean
+ * message tail. Codex parity is finally honest: `state.history.replace_last_turn_images`
+ * is observed by the next sample because the next sample reads from the SAME
+ * `state.history`.
+ *
+ * # NO-THROW fallback on snapshotMessages
+ *
+ * `HistorySanitizationPort.snapshotMessages` is contractually no-throw and
+ * MUST return a `readonly` view of the current wm buffer (default adapter
+ * delegates to `wm.snapshot()`). Defense-in-depth: if a hostile adapter
+ * throws or returns an empty array (degenerate / malformed), the retry FALLS
+ * BACK to the caller's `input.messages`. This keeps the wrap correct for
+ * legacy `HistorySanitizationPort` mocks (the wrap's pre-ADR-0337 hellgate
+ * cases continue to pass byte-identical events through the retry).
  *
  * # Mid-stream throws DO NOT participate
  *
@@ -66,7 +88,7 @@
 import type { HistorySanitizationPort } from "@/memory/history-sanitization"
 import { LLMError } from "@/shared"
 import type { LLMPort } from "../ports"
-import type { StreamEvent, StreamInput } from "../types"
+import type { Message, StreamEvent, StreamInput } from "../types"
 import {
   DEFAULT_MAX_ATTEMPTS,
   DEFAULT_PLACEHOLDER,
@@ -109,6 +131,37 @@ const safeSanitize = (
   } catch {
     return { replacedCount: 0, wasMutated: false }
   }
+}
+
+/** ADR-0337 — build a fresh {@link StreamInput} for the retry attempt whose
+ *  `messages` field is the POST-sanitize wm snapshot.
+ *
+ *  Calls `port.snapshotMessages()` defensively (NO-THROW: any thrown value or
+ *  empty / non-array return collapses to "fall back to the original input").
+ *  When the wm-live snapshot is usable, we spread the original `input` and
+ *  overwrite ONLY `messages` — every other StreamInput knob (`tools`,
+ *  `system`, `toolChoice`, `thinking`, `signal`, `turnTimingCapture`,
+ *  `onChunk`) is preserved verbatim.
+ *
+ *  The structural cast from `readonly SanitizationMessageLike[]` to
+ *  `Message[]` is sound at the wire boundary: the default adapter
+ *  `createWorkingMemoryHistorySanitization(wm)` is bound to a
+ *  `WorkingMemory<Message>` (`src/agent/loop.ts:2171`), so the snapshot
+ *  elements ARE `Message`s. The port surface is intentionally structural so
+ *  the `@/memory` slice does not import `@/llm`. We slice() to defeat the
+ *  `readonly` view — `StreamInput.messages` is declared mutable. */
+const buildWmLiveInput = (port: HistorySanitizationPort, input: StreamInput): StreamInput => {
+  let fresh: readonly unknown[]
+  try {
+    fresh = port.snapshotMessages()
+  } catch {
+    return input
+  }
+  if (!Array.isArray(fresh) || fresh.length === 0) return input
+  // Defensive copy: `StreamInput.messages` is mutable per its type; some
+  // inner adapters may push tool-result fragments. The slice() severs the
+  // readonly view from the wm buffer.
+  return { ...input, messages: (fresh as readonly Message[]).slice() }
 }
 
 /** Decide whether the current pre-stream throw is recoverable. Pulled out of
@@ -181,11 +234,17 @@ export const withImageSanitizationRetry = (
       // iterations are post-sanitize retries. Recovery decision is delegated
       // to `decideRecovery` to keep this generator's cognitive complexity
       // under the biome cap — every retry branch is one line here.
+      //
+      // ADR-0337: `currentInput` is rebound to a wm-live snapshot AFTER a
+      // successful sanitize call, so the retry sees the cleaned messages.
+      // The first attempt always uses the caller's `input` verbatim
+      // (byte-identical to the pre-ADR happy path).
       const sanitize = (): { readonly wasMutated: boolean } => safeSanitize(port, placeholder)
+      let currentInput = input
       for (let attempt = 0; attempt <= maxAttempts; attempt++) {
         let yielded = false
         try {
-          for await (const ev of inner.stream(input)) {
+          for await (const ev of inner.stream(currentInput)) {
             yielded = true
             yield ev
           }
@@ -194,7 +253,10 @@ export const withImageSanitizationRetry = (
           if (decideRecovery(e, yielded, attempt, maxAttempts, sanitize) === "throw") {
             throw e
           }
-          // wasMutated ⇒ fall through, re-stream the inner.
+          // wasMutated ⇒ fall through, re-stream the inner with the
+          // POST-sanitize wm snapshot. Falls back to the prior `currentInput`
+          // if the port can't deliver a usable snapshot (NO-THROW invariant).
+          currentInput = buildWmLiveInput(port, currentInput)
         }
       }
       // Structurally unreachable (decideRecovery either returns "retry"

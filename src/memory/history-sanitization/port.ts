@@ -18,14 +18,39 @@
  *   - Default-OFF. No production code wires this port in ADR-0323 — wiring at
  *     the adapter boundary is a follow-up ADR (see `0323-image-history-sanitization.md`
  *     "Non-goals").
- *   - Closed. Adding a method requires a new ADR. The two methods cover the
- *     Codex parity case (`replaceLastTurnImages`) and the more aggressive
- *     "scrub the last N messages" pass needed when an image survived multiple
- *     turns (a quanta-specific extension since our turn boundary is structural
- *     rather than indexed).
+ *   - Closed. Adding a method requires a new ADR. The two replace-methods
+ *     cover the Codex parity case (`replaceLastTurnImages`) and the more
+ *     aggressive "scrub the last N messages" pass needed when an image
+ *     survived multiple turns (a quanta-specific extension since our turn
+ *     boundary is structural rather than indexed). The `snapshotMessages`
+ *     read accessor was added by ADR-0337 (closed-port extension log below).
+ *
+ * # Closed-port extension log
+ *
+ * The interface is closed-port: widening it requires a new ADR that
+ * explicitly amends this section. The original ADR-0323 sealed two methods
+ * (`replaceLastTurnImages`, `replaceLastNMessagesImages`); subsequent rows
+ * record each amendment.
+ *
+ * | date       | ADR       | transition | added member           | rationale (1-line)                                                       |
+ * |------------|-----------|------------|------------------------|--------------------------------------------------------------------------|
+ * | 2026-05-27 | ADR-0337  | 2 → 3      | `snapshotMessages()`   | wm-live re-snapshot accessor so retry decorators see the sanitized turn instead of the caller's stale `input.messages` reference (closes ADR-0328/0333 limitation). |
+ *
+ * The `snapshotMessages` member is additive — it does not replace, shadow,
+ * or alter either of the original two methods, and the mutation channel is
+ * unaffected. Consumer wiring lives in ADR-0337.
  */
 
 import type { SanitizationReason, SanitizationResult } from "./types"
+
+/** Structural minimum for a message returned by {@link HistorySanitizationPort.snapshotMessages}.
+ *  Matches `Message` from `@/llm/types.ts` without importing it (slice-fence:
+ *  `@/memory` must not import `@/llm`). Callers that need the concrete
+ *  `Message` shape can cast at the wire boundary — the port is structural. */
+export interface SanitizationMessageLike {
+  readonly role: string
+  readonly content: unknown
+}
 
 export interface HistorySanitizationPort {
   /**
@@ -58,4 +83,26 @@ export interface HistorySanitizationPort {
     reason: SanitizationReason,
     placeholder: string,
   ): SanitizationResult
+
+  /**
+   * ADR-0337 — return the current wm messages snapshot.
+   *
+   * Used by retry decorators (notably `withImageSanitizationRetry`) to
+   * re-snapshot the wm AFTER a `replaceLast*Images` call mutated the buffer,
+   * so the retry sees the SANITIZED turn rather than the caller's stale
+   * `input.messages` reference (the snapshot taken by the loop BEFORE the
+   * pre-sanitize stream attempt).
+   *
+   * Contract:
+   *   - NO-THROW. Adapters MUST swallow every error and return `[]` rather
+   *     than poison the retry loop. Consumers treat a thrown / empty result
+   *     as "fall back to the caller's `input.messages`".
+   *   - Snapshot semantics. The returned array MUST be a shallow copy (or
+   *     `readonly` view) of the wm's current buffer; mutating the returned
+   *     reference MUST NOT poison the wm. The default adapter delegates to
+   *     `wm.snapshot()`, which is already a defensive shallow copy.
+   *   - Cheap. Called once per retry attempt by the decorator — adapters
+   *     SHOULD not allocate beyond the snapshot copy.
+   */
+  snapshotMessages(): readonly SanitizationMessageLike[]
 }
