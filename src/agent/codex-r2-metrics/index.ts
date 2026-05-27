@@ -12,5 +12,9 @@
  *      composition root.
  */
 export { withCacheMetrics } from "./cache-metrics-decorator"
+export {
+  adaptMetricsRegistryToEmitter,
+  looksLikeMetricsRegistry,
+} from "./metrics-adapter"
 export { withRegistryMetrics } from "./registry-metrics-decorator"
 export type { CodexR2MetricsConfig, MetricEmitterPort } from "./types"

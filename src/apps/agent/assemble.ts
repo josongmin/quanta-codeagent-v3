@@ -30,11 +30,20 @@ import {
   type ModePolicy,
   type RunMode,
 } from "@/agent"
+import {
+  adaptMetricsRegistryToEmitter,
+  looksLikeMetricsRegistry,
+  type MetricEmitterPort,
+  withCacheMetrics,
+} from "@/agent/codex-r2-metrics"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import { captureSnapshot } from "@/agent/context-change"
 import { autoWirePluginActivation } from "@/agent/plugin-activation-handler"
 import { getGlobalSessionResourceRegistry } from "@/agent/session-resource-registry"
-import { createInMemorySystemPromptCache } from "@/llm/system-prompt-cache"
+import {
+  createInMemorySystemPromptCache,
+  type SystemPromptCachePort,
+} from "@/llm/system-prompt-cache"
 import { createInMemoryTypedHistoryEventStore } from "@/memory/typed-event"
 import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
 
@@ -177,9 +186,37 @@ export const assembleAgentConfig = (req: AssembleRequest): AgentConfig => {
     cfg.sessionId !== undefined
       ? getGlobalSessionResourceRegistry().getOrCreate(cfg.sessionId)
       : null
+  // ADR-0358 — when `cfg.metrics` is structurally a MetricsRegistry
+  // (ADR-0144 port) AND the caller has NOT pre-supplied a cache, wrap
+  // the session-scoped cache with `withCacheMetrics` so cache hit/miss/
+  // invalidation counters land on the operator registry. NO-THROW
+  // (looksLikeMetricsRegistry is a pure shape check + adapter is pure
+  // delegation). Caller-override-precedence (ADR-0332): a pre-set
+  // `cfg.systemPromptCache` is preserved by `installCodexR2Wires`,
+  // so the wrap here only affects the default cache we are about to
+  // install — we never re-wrap a caller-supplied cache. Bench surface
+  // (sessionResources === null) ⇒ wrap skipped ⇒ byte-identical replay.
+  const metricsEmitter: MetricEmitterPort | undefined =
+    cfg.metrics !== undefined && looksLikeMetricsRegistry(cfg.metrics)
+      ? adaptMetricsRegistryToEmitter(cfg.metrics)
+      : undefined
+  const baseCache: SystemPromptCachePort =
+    sessionResources?.cache ?? createInMemorySystemPromptCache()
+  const wrappedCache: SystemPromptCachePort =
+    metricsEmitter !== undefined && sessionResources !== null && cfg.systemPromptCache === undefined
+      ? withCacheMetrics(baseCache, { emitter: metricsEmitter })
+      : baseCache
+  // ADR-0360 — expose the adapted emitter on `cfg` via structural side-
+  // channel so `resolvePluginActivationForTurn` (ADR-0346) can emit
+  // per-turn activation telemetry. Structural-only — does NOT mutate
+  // AgentConfig type surface; absent emitter ⇒ field stays unset ⇒
+  // the activation hook degrades to legacy no-emit.
+  if (metricsEmitter !== undefined) {
+    ;(cfg as { metricsEmitter?: MetricEmitterPort }).metricsEmitter = metricsEmitter
+  }
   installCodexR2Wires(cfg, {
     ...(cfg.sessionId !== undefined ? { sessionId: cfg.sessionId } : {}),
-    systemPromptCache: sessionResources?.cache ?? createInMemorySystemPromptCache(),
+    systemPromptCache: wrappedCache,
     store: sessionResources?.store ?? createInMemoryTypedHistoryEventStore(),
     getSnapshot: () =>
       captureSnapshot({

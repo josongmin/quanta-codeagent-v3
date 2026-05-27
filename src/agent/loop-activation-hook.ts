@@ -47,6 +47,7 @@
  *   appended).
  */
 
+import type { MetricEmitterPort } from "@/agent/codex-r2-metrics"
 import type { ParsedMention } from "@/agent/mention-injection"
 import type { AggregatedActivation } from "@/agent/plugin-activation-handler"
 import { type ActiveSkillDescriptor, unionActiveSkills } from "@/agent/plugin-skill-extension"
@@ -54,12 +55,19 @@ import { type ActiveSkillDescriptor, unionActiveSkills } from "@/agent/plugin-sk
 /**
  * Narrow subset of `AgentConfig` that the hook reads. Kept structural so
  * tests can pass a 1-field object without conjuring an entire AgentConfig.
+ *
+ * `metricsEmitter` is an ADR-0360 structural side-channel — composition
+ * roots (ADR-0358 §assemble.ts) may set
+ * `(cfg as { metricsEmitter?: MetricEmitterPort }).metricsEmitter` to a
+ * `MetricEmitterPort` (ADR-0352). Absent ⇒ per-turn activation telemetry
+ * is OFF and the hook is byte-identical to the ADR-0346 baseline.
  */
 export interface ActivationHookConfigLike {
   readonly activatePlugins?: (
     mentions: readonly ParsedMention[],
     opts?: { readonly turnId?: string },
   ) => Promise<AggregatedActivation>
+  readonly metricsEmitter?: MetricEmitterPort
 }
 
 /**
@@ -120,6 +128,35 @@ export const augmentActiveSkillsWithPlugin = (
  *                             Absent activator OR empty user text OR zero
  *                             mentions ⇒ canonical-empty `EMPTY` constant.
  */
+/**
+ * ADR-0360 — best-effort emit. The emitter contract is already NO-THROW
+ * (ADR-0352 §types.ts) and the ADR-0358 adapter delegates to a
+ * MetricsRegistry that silently coerces poison values, but we wrap
+ * every emit in try/catch as defence-in-depth so even a hostile custom
+ * emitter cannot break the activation hook.
+ *
+ * Codex OTel attribute vocabulary mapping (memory
+ * `codex-otel-attribute-vocabulary`): the `codex_r2.activation.*` series
+ * is the v3 equivalent of Codex's `codex.turn.*` span family — same
+ * shape (count + sum_ms), same labels-as-attrs convention.
+ */
+const safeEmit = (
+  emitter: MetricEmitterPort | undefined,
+  fn: (e: MetricEmitterPort) => void,
+): void => {
+  if (emitter === undefined) return
+  try {
+    fn(emitter)
+  } catch {
+    // emitter is best-effort — NEVER throw out of this wrapper.
+  }
+}
+
+/** Monotonic clock seam — `performance.now()` is non-decreasing on
+ *  every platform Bun targets so latency math is safe even if the
+ *  wall clock jumps. */
+const monotonicNow = (): number => performance.now()
+
 export const resolvePluginActivationForTurn = async (
   config: ActivationHookConfigLike,
   latestUserText: string | undefined,
@@ -139,6 +176,12 @@ export const resolvePluginActivationForTurn = async (
     return EMPTY
   }
   if (mentions.length === 0) return EMPTY
+  const emitter = config.metricsEmitter
+  const startedAt = monotonicNow()
+  // ADR-0360 — counter: total activation invocations (post-mentions, pre-
+  // activator). Emitted up-front so a thrown activator still bumps the
+  // call counter — operators can compute error_rate = errors / calls.
+  safeEmit(emitter, (e) => e.counter("codex_r2.activation.calls", 1))
   try {
     const opts = turnId !== undefined ? { turnId } : undefined
     const agg = await config.activatePlugins(mentions, opts)
@@ -146,8 +189,20 @@ export const resolvePluginActivationForTurn = async (
     // `{ handles, resolvedSkills }` but a non-conforming impl must not
     // poison the loop. Treat anything non-array as empty.
     const resolved = Array.isArray(agg?.resolvedSkills) ? agg.resolvedSkills : []
+    const elapsedMs = monotonicNow() - startedAt
+    safeEmit(emitter, (e) => {
+      // Counter approach (ADR-0360 Option B): sum_ms as a monotonic
+      // counter + calls counter ⇒ mean latency = sum_ms / calls.
+      // Avoids extending MetricEmitterPort with `histogram` (ADR-0352
+      // shape stays 2-method).
+      e.counter("codex_r2.activation.sum_latency_ms", Math.max(0, elapsedMs))
+      // Per-call resolved-skills count — useful for sizing the active-
+      // skills channel under different plugin populations.
+      e.counter("codex_r2.activation.resolved_skills_count", resolved.length)
+    })
     return { resolvedSkills: resolved }
   } catch {
+    safeEmit(emitter, (e) => e.counter("codex_r2.activation.errors", 1))
     return EMPTY
   }
 }
