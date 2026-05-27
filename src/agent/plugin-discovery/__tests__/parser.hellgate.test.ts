@@ -5,11 +5,16 @@
  *   B. Required field absence                      (2)
  *   C. id↔name fallback                            (2)
  *   D. Capabilities — enum closure + emptiness     (3)
- *   E. mcpServers — array shape + sanitization     (2)
+ *   E. mcpServers — Record shape + sanitization    (2)   [ADR-0341]
  *   F. skills — array shape                        (1)
  *   G. Forward-compat: unknown fields dropped      (1)
  *
  * Total = 14 cases (>= the required 10).
+ *
+ * Per ADR-0341, `mcpServers` is `Record<string, MCPServerSpec>` where
+ * `MCPServerSpec = { command, args, env? }` — same canonical shape as
+ * ADR-0039 `@/skill/plugin-manifest`. Pre-ADR-0341 array-of-`{name,
+ * command?}` shape is no longer accepted.
  */
 
 import { describe, expect, test } from "bun:test"
@@ -76,20 +81,25 @@ describe("parsePluginManifest — ADR-0336 hellgate", () => {
     expect(m?.capabilities).toEqual([])
   })
 
-  // -------- E. mcpServers -----------------------------------------
+  // -------- E. mcpServers (ADR-0341 Record shape) -----------------
 
-  test("E1 — well-formed mcpServers preserved", () => {
+  test("E1 — well-formed mcpServers Record preserved (command/args/env)", () => {
     const m = parsePluginManifest(
-      '{"id": "p", "mcpServers": [{"name": "gh", "command": "gh-mcp"}, {"name": "fs"}]}',
+      '{"id": "p", "mcpServers": {"gh": {"command": "gh-mcp", "args": ["serve"], "env": {"K": "v"}}, "fs": {"command": "fs-mcp", "args": []}}}',
     )
-    expect(m?.mcpServers).toEqual([{ name: "gh", command: "gh-mcp" }, { name: "fs" }])
+    expect(m?.mcpServers).toEqual({
+      gh: { command: "gh-mcp", args: ["serve"], env: { K: "v" } },
+      fs: { command: "fs-mcp", args: [] },
+    })
   })
 
-  test("E2 — mcpServers entries lacking name are dropped", () => {
+  test("E2 — mcpServers entries lacking command are dropped", () => {
     const m = parsePluginManifest(
-      '{"id": "p", "mcpServers": [{"command": "orphan"}, {"name": "ok"}]}',
+      '{"id": "p", "mcpServers": {"orphan": {"args": ["x"]}, "ok": {"command": "ok-mcp", "args": []}}}',
     )
-    expect(m?.mcpServers).toEqual([{ name: "ok" }])
+    expect(m?.mcpServers).toEqual({
+      ok: { command: "ok-mcp", args: [] },
+    })
   })
 
   // -------- F. skills ---------------------------------------------

@@ -17,6 +17,17 @@
  * (+ optional `.mcp.json` + optional `skills/{name}/SKILL.md` files).
  * The capability enum is closed: `Interactive | Read | Write`.
  *
+ * **ADR-0341 (mcpServers shape unification).** This module's
+ * `mcpServers` field carries the SAME shape as ADR-0039's
+ * `@/skill/plugin-manifest` `MCPServerSpec` (a `Record<string, {command,
+ * args, env?}>`). The shape is verified against the on-disk Codex
+ * Desktop bundle (`.vite/build/main-BwqrdVu3.js:13430`,
+ * `mcpServers: e.Dr(e.Or(), Wh).optional()` where the value schema
+ * carries `command/args/env/headers/type/url/disabled/enabled` — the
+ * canonical MCP-spec shape). The pre-ADR-0341 array-of-`{name,
+ * command?}` shape was an absorption miss and has been removed; see
+ * ADR-0341 for the migration rationale.
+ *
  * Default-OFF: this slice ships parser + registry port + discovery +
  * an in-memory adapter. No production path imports the module —
  * wire-up is the responsibility of the composition root that builds
@@ -37,19 +48,22 @@
  */
 export type PluginCapability = "Interactive" | "Read" | "Write"
 
+import type { MCPServerSpec } from "@/skill/plugin-manifest"
+
 /**
- * A single declared MCP server entry inside a plugin manifest.
- * Simplification of Codex's full `.mcp.json` shape — only the fields
- * the resolver needs are captured. Forward-compat: additional fields
- * in the on-disk JSON are dropped silently.
+ * MCP server entry shape carried under a plugin manifest's `mcpServers`
+ * Record. Re-exported from ADR-0039's `@/skill/plugin-manifest` so
+ * there is exactly ONE canonical MCP-server type across the codebase
+ * (ADR-0341 unification decision). Shape:
  *
- * `name` is required; `command` is optional (a manifest may declare a
- * server by name and resolve the command elsewhere, e.g. via env).
+ *   { command: string; args: readonly string[]; env?: Record<string,string> }
+ *
+ * The re-export is intentional — calling sites can import either
+ * `from "@/skill/plugin-manifest"` or `from "@/agent/plugin-discovery"`
+ * and get the identical type. Sites that already import from the
+ * skill slice are left unmodified.
  */
-export interface PluginMcpServer {
-  readonly name: string
-  readonly command?: string
-}
+export type { MCPServerSpec }
 
 /**
  * Parsed `.codex-plugin/plugin.json` manifest.
@@ -59,9 +73,13 @@ export interface PluginMcpServer {
  *   - `name` non-empty.
  *   - `capabilities` is a (possibly empty) array of {@link PluginCapability}.
  *     Unknown strings in the source JSON are silently dropped.
- *   - `mcpServers` / `skills` arrays are optional; absence is distinct
- *     from empty (`undefined` ⇒ the manifest did not declare the field;
- *     `[]` ⇒ the manifest declared an empty list).
+ *   - `mcpServers` is optional; absence is distinct from empty
+ *     (`undefined` ⇒ the manifest did not declare the field;
+ *     `{}` ⇒ the manifest declared an empty Record). Per ADR-0341,
+ *     the shape is `Record<string, MCPServerSpec>` — the canonical
+ *     MCP-spec form that ADR-0039 already validates and that
+ *     ADR-0338's `launchPluginMcpServers` consumes verbatim.
+ *   - `skills` is optional; absence is distinct from empty.
  *
  * Forward-compat: unknown top-level fields are dropped by the parser.
  */
@@ -77,8 +95,10 @@ export interface PluginManifest {
   readonly description?: string
   /** Closed enum capabilities. */
   readonly capabilities: readonly PluginCapability[]
-  /** Optional MCP server declarations. */
-  readonly mcpServers?: readonly PluginMcpServer[]
+  /** Optional MCP server declarations, keyed by server name. Shape
+   *  matches ADR-0039 `MCPServerSpec` so the launcher (ADR-0338)
+   *  consumes a discovered manifest directly. */
+  readonly mcpServers?: Readonly<Record<string, MCPServerSpec>>
   /** Optional declared skill names. Forward-compat with future
    *  plugin-skill activation ADR. */
   readonly skills?: readonly string[]

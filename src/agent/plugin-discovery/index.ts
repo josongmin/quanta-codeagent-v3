@@ -26,8 +26,8 @@ export {
 export { parsePluginManifest } from "./parser"
 export type {
   FilesystemPort,
+  MCPServerSpec,
   PluginCapability,
   PluginManifest,
-  PluginMcpServer,
   PluginRegistryPort,
 } from "./types"
