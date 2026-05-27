@@ -1,11 +1,11 @@
 /**
  * ★ HELLGATE — ADR-0370 session-registry inspector + `/session-registry`
- * slash render path.
+ * slash render path + ADR-0377 cross-platform path normalization.
  *
  * Pins the operator-visibility contract for the three backends
  * (in-memory / disk / sqlite) plus the formatter + slash registration.
  *
- * Coverage (15 cases):
+ * Coverage (15 cases ADR-0370 + 8 cases ADR-0377 = 23):
  *   1.  empty in-memory     → backend="in-memory", sessions=0
  *   2.  populated in-memory → sessions count matches registry.size()
  *   3.  empty disk dir      → backend="disk", sessions=0, totalBytes=0
@@ -21,6 +21,16 @@
  *  13.  formatter unavail   → contains "unavailable" when available=false
  *  14.  formatter sqlite    → contains "Codex" parity tag
  *  15.  formatter disk      → no Codex tag (only sqlite gets it)
+ *
+ *  ADR-0377 — cross-platform path normalization (Codex parity = POSIX):
+ *  16.  disk path backslash    → output forward-slash only
+ *  17.  disk path forward      → unchanged
+ *  18.  disk path mixed sep    → all backslashes flipped
+ *  19.  sqlite path backslash  → output forward-slash only
+ *  20.  in-memory backend      → path field absent / undefined
+ *  21.  formatter disk Path:   → renders "Path:" line with normalized value
+ *  22.  formatter sqlite Path: → renders "Path:" line with normalized value
+ *  23.  formatter in-memory    → no "Path:" line emitted
  *
  * Slash-registration is covered by `tests/unit/session-registry-slash.test.ts`
  * (separate file — the slice fence forbids importing `@/apps/cli/*` from
@@ -272,5 +282,91 @@ describe("ADR-0370 session-registry inspector — hellgate", () => {
     expect(out).toContain("Total bytes")
     // No Codex parity tag — disk backend is JSONL, not Codex's sqlite.
     expect(out).not.toContain("Codex")
+  })
+
+  // ─────────────────────────────────────────────────────────────────────
+  // ADR-0377 — cross-platform inspector path normalization (Codex parity
+  // = POSIX style forward slashes). Backslash → forward slash; no home
+  // expansion; no absolute → relative rewrite.
+  // ─────────────────────────────────────────────────────────────────────
+
+  test("[16] ADR-0377 disk path with backslashes → forward slash only", async () => {
+    // POSIX accepts backslash as a literal filename char so readdir
+    // simply fails (available=false). The path field must still echo
+    // the input with backslashes flipped — operator visibility holds
+    // even on the unavailable branch.
+    const winLike = String.raw`C:\Users\op\AppData\Local\quanta\disk`
+    const s = await inspectDiskRegistryByPath(winLike)
+    expect(s.backend).toBe("disk")
+    expect(s.path).toBe("C:/Users/op/AppData/Local/quanta/disk")
+    expect(s.path).not.toContain("\\")
+  })
+
+  test("[17] ADR-0377 disk path already forward-slash → unchanged", async () => {
+    const { dir, cleanup } = makeTmpDir("disk-norm-fwd")
+    const s = await inspectDiskRegistryByPath(dir)
+    expect(s.path).toBe(dir.replace(/\\/g, "/"))
+    expect(s.path).not.toContain("\\")
+    cleanup()
+  })
+
+  test("[18] ADR-0377 disk path with mixed separators → all flipped", async () => {
+    const mixed = String.raw`C:/Users\op/AppData\Local/quanta`
+    const s = await inspectDiskRegistryByPath(mixed)
+    expect(s.path).toBe("C:/Users/op/AppData/Local/quanta")
+    expect(s.path).not.toContain("\\")
+  })
+
+  test("[19] ADR-0377 sqlite path with backslashes → forward slash only", async () => {
+    const winLike = String.raw`C:\Users\op\AppData\Local\quanta\registry.db`
+    const s = await inspectSqliteRegistryByPath(winLike)
+    expect(s.backend).toBe("sqlite")
+    expect(s.path).toBe("C:/Users/op/AppData/Local/quanta/registry.db")
+    expect(s.path).not.toContain("\\")
+  })
+
+  test("[20] ADR-0377 in-memory backend → no path field", () => {
+    const reg = createInMemorySessionResourceRegistry()
+    const s = inspectInMemoryRegistry(reg)
+    expect(s.backend).toBe("in-memory")
+    expect(s.path).toBeUndefined()
+  })
+
+  test("[21] ADR-0377 formatter renders Path: line for disk backend", () => {
+    const out = formatRegistryStats({
+      backend: "disk",
+      sessions: 2,
+      totalBytes: 1024,
+      path: "C:/Users/op/AppData/Local/quanta/disk",
+      available: true,
+    })
+    expect(out).toContain("Path:")
+    expect(out).toContain("C:/Users/op/AppData/Local/quanta/disk")
+    expect(out).not.toContain("\\")
+  })
+
+  test("[22] ADR-0377 formatter renders Path: line for sqlite backend", () => {
+    const out = formatRegistryStats({
+      backend: "sqlite",
+      sessions: 1,
+      totalEvents: 5,
+      totalCacheEntries: 2,
+      totalBytes: 1024,
+      walSize: 0,
+      path: "/Users/op/.quanta/sessions.sqlite",
+      available: true,
+    })
+    expect(out).toContain("Path:")
+    expect(out).toContain("/Users/op/.quanta/sessions.sqlite")
+  })
+
+  test("[23] ADR-0377 formatter omits Path: line for in-memory backend", () => {
+    const out = formatRegistryStats({
+      backend: "in-memory",
+      sessions: 3,
+      available: true,
+    })
+    // in-memory has no on-disk path; the Path: row must not be rendered.
+    expect(out).not.toContain("Path:")
   })
 })

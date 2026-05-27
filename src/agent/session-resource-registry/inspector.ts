@@ -1,5 +1,9 @@
 /**
  * ADR-0370 — Operator visibility for `SessionResourceRegistry`.
+ * ADR-0377 — Cross-platform path normalization for the inspector
+ *            (`storageDir` / `databasePath` rendered POSIX-style for
+ *            Codex parity; closed-port read-only `path?` field added
+ *            without widening the port itself).
  *
  * The closed `SessionResourceRegistry` port (ADR-0345) only exposes
  * `getOrCreate` / `peek` / `evict` / `size` / `clear` — none of which
@@ -118,6 +122,21 @@ export interface RegistryStats {
    *  "unavailable". The numeric fields are still safe to read
    *  (zeroed) in either case. */
   readonly available: boolean
+  /**
+   * ADR-0377 — backend storage location, normalized to POSIX (forward-
+   * slash) form so Windows operators and Codex parity readers see the
+   * same shape. `undefined` for the in-memory backend (no on-disk
+   * location). Echoed even on the `available:false` branch so a
+   * mistyped path is visible to the operator. No `~` expansion / no
+   * absolute→relative rewrite — the value is the path the inspector
+   * was handed, transformed only by `\` → `/`.
+   *
+   * This is a read-only addition to the snapshot shape; callers that
+   * spread the previous shape continue to work byte-identically
+   * because the field is optional and consumers either read it or
+   * ignore it.
+   */
+  readonly path?: string
 }
 
 const ZERO_DISK_STATS: RegistryStats = {
@@ -139,6 +158,26 @@ const ZERO_SQLITE_STATS: RegistryStats = {
   ttlMs: SQLITE_DEFAULT_TTL_MS,
   maxBytes: SQLITE_DEFAULT_MAX_TOTAL_BYTES,
   available: false,
+}
+
+/**
+ * ADR-0377 — flip Windows backslashes to POSIX forward slashes so the
+ * inspector surface is identical across platforms (Codex parity = POSIX).
+ * Defensive against non-string input even though the type contract
+ * forbids it — the inspector is operator-facing and NO-THROW is a
+ * cross-cutting invariant for this module.
+ *
+ * Scope (deliberately narrow):
+ *   - Replace every literal `\` with `/`.
+ *   - Do NOT expand `~` (the operator may be reading a path from
+ *     another machine's config — surfacing the literal is honest).
+ *   - Do NOT canonicalize via `path.resolve` (the operator needs to
+ *     see exactly the path the backend was handed).
+ *   - Do NOT collapse `//` runs (preserve the input shape).
+ */
+const normalizePath = (p: string): string => {
+  if (typeof p !== "string") return ""
+  return p.replace(/\\/g, "/")
 }
 
 /**
@@ -191,13 +230,19 @@ const readSessionDirSizes = async (sessionDir: string): Promise<DiskFileSizes> =
  * Inspect a disk-backed registry by walking the storage directory.
  * Reads file sizes only — no JSONL parsing — so a corrupt body
  * cannot poison the byte total. NO-THROW.
+ *
+ * ADR-0377: the returned `path` field is the input `storageDir`
+ * with backslashes flipped to forward slashes. Echoed on BOTH
+ * branches (success + unavailable) so a typo'd path is still
+ * visible to the operator in the slash output.
  */
 export const inspectDiskRegistryByPath = async (storageDir: string): Promise<RegistryStats> => {
+  const path = normalizePath(storageDir)
   let entries: string[]
   try {
     entries = await readdir(storageDir)
   } catch {
-    return ZERO_DISK_STATS
+    return { ...ZERO_DISK_STATS, path }
   }
   let sessions = 0
   let totalBytes = 0
@@ -221,6 +266,7 @@ export const inspectDiskRegistryByPath = async (storageDir: string): Promise<Reg
     totalBytes,
     ttlMs: DISK_DEFAULT_TTL_MS,
     maxBytes: DEFAULT_MAX_SESSION_BYTES,
+    path,
     available: true,
   }
 }
@@ -264,13 +310,16 @@ const safeSum = (db: Database, sql: string): number => {
  * in a `finally` so a transient error cannot leak a connection.
  */
 export const inspectSqliteRegistryByPath = async (databasePath: string): Promise<RegistryStats> => {
+  const path = normalizePath(databasePath)
   let db: Database
   try {
     // Open read-only so a concurrent writer cannot stall the
     // operator's inspect call. `Database` second-arg is the open mode.
     db = new Database(databasePath, { readonly: true })
   } catch {
-    return ZERO_SQLITE_STATS
+    // ADR-0377: still echo the normalized path so the operator can
+    // see WHICH path failed to open.
+    return { ...ZERO_SQLITE_STATS, path }
   }
   let sessions = 0
   let totalEvents = 0
@@ -300,6 +349,7 @@ export const inspectSqliteRegistryByPath = async (databasePath: string): Promise
     walSize,
     ttlMs: SQLITE_DEFAULT_TTL_MS,
     maxBytes: SQLITE_DEFAULT_MAX_TOTAL_BYTES,
+    path,
     available: true,
   }
 }
@@ -368,6 +418,7 @@ const formatDays = (ms: number): string => {
  *
  *   ## Session Registry — sqlite (Codex parity)
  *
+ *   Path:           /home/op/.quanta/sessions.sqlite
  *   Sessions:           42
  *   Events:           1283
  *   Cache entries:      67
@@ -379,6 +430,14 @@ const formatDays = (ms: number): string => {
  * Numeric padding is best-effort — the formatter intentionally does
  * NOT do column-precise alignment (terminal width is unknown) but
  * keeps a stable 2-column layout so operators can grep.
+ *
+ * ADR-0377: the `Path:` line is emitted whenever `s.path` is defined
+ * — it appears for the disk + sqlite backends (always-on) and is
+ * absent for in-memory (which does not have an on-disk location).
+ * The value is rendered as-is — `normalizePath` was already applied
+ * at the inspect site, so the formatter never sees a backslash here.
+ * The `Path:` line is also emitted on the `available:false` branch
+ * so an operator can see WHICH path failed.
  */
 export const formatRegistryStats = (s: RegistryStats): string => {
   const lines: string[] = []
@@ -386,6 +445,7 @@ export const formatRegistryStats = (s: RegistryStats): string => {
   const paritySuffix = s.backend === "sqlite" ? " (Codex logs_2.sqlite parity)" : ""
   lines.push(`${title}${paritySuffix}`)
   lines.push("")
+  if (s.path !== undefined) lines.push(`Path:            ${s.path}`)
   if (!s.available) {
     lines.push("(unavailable — backend reachable but reports an error)")
     return `${lines.join("\n")}\n`
