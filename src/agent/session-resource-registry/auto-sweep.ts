@@ -277,6 +277,10 @@ const sweepOnce = async (
       const totalEvicted = result.evictedByTtl + result.evictedBySize
       safeCounter(metricsEmitter, "codex_r2.sweep.sqlite_evicted", totalEvicted)
       safeCounter(metricsEmitter, "codex_r2.sweep.sqlite_checkpointed", result.checkpointed ? 1 : 0)
+      // ADR-0378 — Surface post-sweep WAL size as a gauge so operators can
+      // measure ADR-0375 threshold drift without external sqlite shell. 0
+      // when WAL missing (drained) or unobservable (permission error).
+      safeGauge(metricsEmitter, "codex_r2.sqlite.wal_bytes", result.walSize)
     } catch {
       // NO-THROW.
     }

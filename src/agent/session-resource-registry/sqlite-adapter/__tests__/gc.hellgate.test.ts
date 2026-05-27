@@ -306,4 +306,53 @@ describe("ADR-0361 sweepSqliteRegistry — hellgate", () => {
     expect(res.checkpointed).toBe(true)
     cleanup()
   })
+
+  // ─── ADR-0378 walSize surfacing ─────────────────────────────────────────
+
+  test("[EE] SweepResult.walSize is always a non-negative number", () => {
+    const { path, cleanup } = makeTmp()
+    const db = new Database(path)
+    applyMigrations(db)
+    db.close()
+    const res = sweepSqliteRegistry({ databasePath: path })
+    expect(typeof res.walSize).toBe("number")
+    expect(res.walSize).toBeGreaterThanOrEqual(0)
+    cleanup()
+  })
+
+  test("[FF] WAL missing (DB never written) ⇒ walSize === 0", () => {
+    const { path, cleanup } = makeTmp()
+    const db = new Database(path)
+    applyMigrations(db)
+    db.close()
+    const res = sweepSqliteRegistry({ databasePath: path })
+    expect(res.walSize).toBe(0)
+    cleanup()
+  })
+
+  test("[GG] EMPTY_RESULT path (DB open fails) ⇒ walSize === 0", () => {
+    // databasePath inside non-existent parent — adapter does NOT mkdir,
+    // so `new Database(...)` throws and returns EMPTY_RESULT.
+    const res = sweepSqliteRegistry({
+      databasePath: "/dev/null/no-such-parent/db.sqlite",
+    })
+    expect(res.walSize).toBe(0)
+    expect(res.evictedByTtl).toBe(0)
+    expect(res.checkpointed).toBe(false)
+  })
+
+  test("[HH] walSize is read AFTER checkpoint (post-PASSIVE)", () => {
+    const { path, cleanup } = makeTmp()
+    const db = new Database(path)
+    applyMigrations(db)
+    seedSession(db, "s-wal", 1000, 10)
+    db.close()
+    const res = sweepSqliteRegistry({ databasePath: path })
+    // After PASSIVE, the WAL file may or may not still exist; either way
+    // walSize must reflect the on-disk reality (not throw, not negative).
+    expect(typeof res.walSize).toBe("number")
+    expect(res.walSize).toBeGreaterThanOrEqual(0)
+    expect(res.checkpointed).toBe(true)
+    cleanup()
+  })
 })

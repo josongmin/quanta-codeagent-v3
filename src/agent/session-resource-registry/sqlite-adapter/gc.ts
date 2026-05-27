@@ -69,6 +69,14 @@ export interface SweepResult {
    * `walSizeThresholdBytes` is absent.
    */
   readonly walRestarted: boolean
+  /**
+   * ADR-0378 — WAL file size in bytes at the END of the sweep (after
+   * PASSIVE + optional RESTART). NO-THROW: missing WAL file ⇒ 0.
+   * Surfaced so the caller (auto-sweep) can emit a `wal_bytes` gauge for
+   * operator-side WAL-bloat observability — the root data ADR-0375
+   * threshold tuning needs.
+   */
+  readonly walSize: number
 }
 
 const EMPTY_RESULT: SweepResult = {
@@ -76,6 +84,7 @@ const EMPTY_RESULT: SweepResult = {
   evictedBySize: 0,
   checkpointed: false,
   walRestarted: false,
+  walSize: 0,
 }
 
 /**
@@ -196,11 +205,15 @@ export const sweepSqliteRegistry = (cfg: SqliteRegistryConfig): SweepResult => {
     }
   }
 
+  // ADR-0378 — Read WAL size at the END (post-PASSIVE + optional RESTART).
+  // NO-THROW (`readWalSize` already handles ENOENT + permission errors).
+  const walSize = readWalSize(cfg.databasePath)
+
   try {
     db.close()
   } catch {
     // NO-THROW.
   }
 
-  return { evictedByTtl, evictedBySize, checkpointed, walRestarted }
+  return { evictedByTtl, evictedBySize, checkpointed, walRestarted, walSize }
 }

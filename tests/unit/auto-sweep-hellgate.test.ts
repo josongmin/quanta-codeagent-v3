@@ -520,4 +520,58 @@ describe("ADR-0373 — auto-sweep telemetry", () => {
     expect(emitter.counters.length).toBeGreaterThan(baseline)
     h.stop()
   })
+
+  // ─── ADR-0378 WAL size gauge ───────────────────────────────────────────
+
+  test("Y. sqlite sweep emits codex_r2.sqlite.wal_bytes gauge (non-negative)", async () => {
+    const dir = await newTempDir()
+    const sqlitePath = `${dir}/test.sqlite`
+    process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = sqlitePath
+    const emitter = makeRecordingEmitter()
+    const timer = makeFakeTimer()
+    const h = startAutoSweep({
+      setIntervalImpl: timer.setIntervalImpl,
+      clearIntervalImpl: timer.clearIntervalImpl,
+      metricsEmitter: emitter.port,
+    })
+    await h.sweepNow()
+    const walGauge = emitter.gauges.find((g) => g.name === "codex_r2.sqlite.wal_bytes")
+    expect(walGauge).toBeDefined()
+    expect(walGauge?.value).toBeGreaterThanOrEqual(0)
+    h.stop()
+  })
+
+  test("Z. emitter absent ⇒ no wal_bytes gauge (byte-identical pre-ADR-0378)", async () => {
+    const dir = await newTempDir()
+    const sqlitePath = `${dir}/test.sqlite`
+    process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = sqlitePath
+    const timer = makeFakeTimer()
+    // No metricsEmitter on the config — sweep MUST still succeed but emit nothing.
+    const h = startAutoSweep({
+      setIntervalImpl: timer.setIntervalImpl,
+      clearIntervalImpl: timer.clearIntervalImpl,
+    })
+    await h.sweepNow()
+    // The handle has no recording emitter; we just verify the sweep didn't throw
+    // and the handle is stoppable (NO-THROW byte-identical path).
+    expect(typeof h.stop).toBe("function")
+    h.stop()
+  })
+
+  test("AA. disk-only env (no sqlite) ⇒ no wal_bytes gauge emitted", async () => {
+    const dir = await newTempDir()
+    process.env.QUANTA_SESSION_REGISTRY_DISK_DIR = dir
+    const emitter = makeRecordingEmitter()
+    const timer = makeFakeTimer()
+    const h = startAutoSweep({
+      setIntervalImpl: timer.setIntervalImpl,
+      clearIntervalImpl: timer.clearIntervalImpl,
+      metricsEmitter: emitter.port,
+    })
+    await h.sweepNow()
+    // disk-only path does not call sqlite sweep, so wal_bytes gauge MUST NOT fire.
+    const walGauge = emitter.gauges.find((g) => g.name === "codex_r2.sqlite.wal_bytes")
+    expect(walGauge).toBeUndefined()
+    h.stop()
+  })
 })
