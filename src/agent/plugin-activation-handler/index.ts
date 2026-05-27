@@ -31,6 +31,8 @@
  * `@/agent/dispatch`, `@/agent/prompt`, or `@/agent/types`.
  */
 
+export type { AutoWireDeps } from "./auto-wire"
+export { autoWirePluginActivation } from "./auto-wire"
 export { activatePluginsFromMentions } from "./composite-activation"
 export { createPluginActivationHandler } from "./handler"
 // ADR-0341 retired the mcp-shape-adapter — PluginManifest.mcpServers is now

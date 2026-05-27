@@ -32,6 +32,7 @@ import {
 } from "@/agent"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import { captureSnapshot } from "@/agent/context-change"
+import { autoWirePluginActivation } from "@/agent/plugin-activation-handler"
 import { getGlobalSessionResourceRegistry } from "@/agent/session-resource-registry"
 import { createInMemorySystemPromptCache } from "@/llm/system-prompt-cache"
 import { createInMemoryTypedHistoryEventStore } from "@/memory/typed-event"
@@ -191,5 +192,14 @@ export const assembleAgentConfig = (req: AssembleRequest): AgentConfig => {
         activeSkills: [],
       }),
   })
+  // ADR-0350 — auto-wire `cfg.activatePlugins` from a workspace-anchored
+  // plugin scan so the ADR-0346 loop hook gets a real activator instead
+  // of remaining a no-op. NO-THROW + caller-override-precedence: a host
+  // that pre-sets `cfg.activatePlugins` keeps its own activator; an empty
+  // / missing plugin root leaves the slot undefined ⇒ loop hook short-
+  // circuits ⇒ byte-identical legacy. Intentionally NOT called from the
+  // bench composition root (ADR-0334 row 4): bench cfg has no sessionId
+  // and stays empty-deps for replay determinism.
+  autoWirePluginActivation(cfg)
   return cfg
 }
