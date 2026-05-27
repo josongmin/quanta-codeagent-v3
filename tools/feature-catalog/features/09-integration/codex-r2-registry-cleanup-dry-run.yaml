@@ -50,4 +50,4 @@ knobs:
     default: 'absent (sweep commits per ADR-0379)'
     notes: 'When present anywhere in sub-args after `cleanup`, switches to preview-only mode.'
 deliberate_hold: null
-notes: 'TTL-count-matches-sweep + size-count-matches-sweep cases [JJ] + [KK] prove the SELECT WHERE clause inverts the DELETE WHERE clause correctly. Idempotent guarantee enforced by case [5] (disk) + case [MM] (sqlite). Non-goals: per-session-ID detail listing + truncation byte estimates + dry-run for evict.'
+notes: 'TTL-count-matches-sweep + size-count-matches-sweep cases [TT] + [UU] (renumbered from [JJ]+[KK] during R15 cherry-pick to avoid collision with ADR-0385 [II]..[RR]) prove the SELECT WHERE clause inverts the DELETE WHERE clause correctly. Idempotent guarantee enforced by case [5] (disk) + case [WW] (sqlite, was [MM]). Non-goals: per-session-ID detail listing + truncation byte estimates + dry-run for evict.'
