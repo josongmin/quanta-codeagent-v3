@@ -23,6 +23,7 @@ import { permissionCmd } from "../permission-explain"
 import { isRewindEnabled, rewindCommands } from "../rewind-cmd"
 import { rewindConvCmd } from "../rewind-conv-cmd"
 import { rewindToolCmd } from "../rewind-tool-cmd"
+import { sessionRegistryCmd } from "../session-registry-cmd"
 import { knobsCmd } from "../slash-commands-knobs"
 import type { SlashCommand } from "../slash-contract"
 
@@ -47,4 +48,6 @@ export const APP_SLASH_COMMANDS: readonly SlashCommand[] = [
   ...MEMORY_COMMANDS,
   rewindConvCmd,
   knobsCmd,
+  // ADR-0370 — operator visibility for the session-resource-registry slice.
+  sessionRegistryCmd,
 ]

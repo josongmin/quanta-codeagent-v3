@@ -1127,6 +1127,7 @@
         "!tests/unit/cli/**",
         "!tests/unit/apps/cli/**",
         "!tests/unit/session-export-import-slash-hellgate.test.ts",
+        "!tests/unit/session-registry-slash.test.ts",
         "!tests/unit/auth/auth-ui.test.ts",
         "!tests/unit/dotenv.test.ts",
         "!tests/unit/env-knob-branches.test.ts",

@@ -124,6 +124,8 @@ describe("BUILTINS table", () => {
       "/rewind-tool",
       "/memory",
       "/rewind-conv",
+      "/knobs",
+      "/session-registry",
     ])
   })
 })
