@@ -30,6 +30,14 @@ import { buildSessionFeatures } from "./features"
 import type { TurnDiffSession } from "./git-observability"
 import { buildGuardChain, metaUser, runGuardChain } from "./guards"
 import { renderIdeContext } from "./ide-context"
+// ADR-0346 — per-turn plugin activation hook. Called from `prepareTurnContext`
+// BEFORE `buildTurnContext`; absent `cfg.activatePlugins` ⇒ canonical-empty
+// resolvedSkills ⇒ caller's `activeSkills` returned by reference (byte-
+// identical pass-through).
+import {
+  augmentActiveSkillsWithPlugin,
+  resolvePluginActivationForTurn,
+} from "./loop-activation-hook"
 import {
   attachCapEnforcer,
   attachDedupGate,
@@ -1076,6 +1084,18 @@ const prepareTurnContext = async (
   // producer must not break the turn — failures degrade to "no splice".
   const contextEvents = resolveContextEventsForTurn(config)
   const mentionMessages = resolveMentionInjectionMessages(config, wm)
+  // ADR-0346 — per-turn plugin activation. Mirrors the same parse path
+  // mention-injection uses (last user-role text in wm), passes the parsed
+  // mentions through `cfg.activatePlugins` (ADR-0340), and unions the
+  // resolved plugin skills into the active-skills channel for this turn.
+  // NO-THROW + absent activator ⇒ EMPTY ⇒ `unionActiveSkills` returns the
+  // caller's `activeSkills` unchanged (byte-identical legacy).
+  const pluginActivation = await resolvePluginActivationForTurn(
+    config,
+    latestUserTextFromWm(wm),
+    `t${turn}`,
+  )
+  const augmentedSkills = augmentActiveSkillsWithPlugin(activeSkills, pluginActivation)
   const ctx = buildTurnContext({
     baseMessages: [...wm.snapshot()],
     cwd: config.cwd,
@@ -1094,8 +1114,11 @@ const prepareTurnContext = async (
       : {}),
     // Cached at session start by `buildSessionFeatures`; passed through every
     // turn without re-discovery (Codex anti-reread). Absent ⇒ no block in the
-    // rendered reminder (byte-identical for skill-less sessions).
-    ...(activeSkills !== undefined ? { activeSkills } : {}),
+    // rendered reminder (byte-identical for skill-less sessions). ADR-0346:
+    // when activation contributes plugin skills, `augmentedSkills` is the
+    // caller-wins union; when none, it IS the caller's `activeSkills` by
+    // reference so this branch is byte-identical to legacy.
+    ...(augmentedSkills !== undefined ? { activeSkills: augmentedSkills } : {}),
     ...(wsSnapshot !== undefined ? { workingState: wsSnapshot } : {}),
     ...(hookPromptInjects !== undefined && hookPromptInjects.length > 0
       ? { hookPromptInjects }
