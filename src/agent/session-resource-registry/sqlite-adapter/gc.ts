@@ -183,6 +183,133 @@ const runWalUpgrade = (
 }
 
 /**
+ * ADR-0387 — Result of a dry-run candidate count. Same axes as
+ * {@link SweepResult.evictedByTtl} / `evictedBySize` but stated as
+ * "WOULD evict" + a paired `inspectedSessions` so an operator can
+ * sanity-check the denominator.
+ */
+export interface SqliteCleanupCandidates {
+  /** Sessions whose `last_touched < now() - ttlMs`. */
+  readonly wouldEvictByTtl: number
+  /**
+   * Sessions whose cumulative `total_estimated_bytes` (ORDER BY
+   * last_touched DESC) exceeds `maxTotalBytes` — the sliding-window
+   * eviction candidates. Computed AFTER simulating the TTL filter
+   * (matches sweep ordering: TTL first, then sliding-window).
+   */
+  readonly wouldEvictBySize: number
+  /** Total sessions inspected (pre-TTL count of `sessions` rows). */
+  readonly inspectedSessions: number
+  /** WAL file size at count time. Mirrors `SweepResult.walSize`. */
+  readonly walSize: number
+}
+
+const EMPTY_CANDIDATES: SqliteCleanupCandidates = {
+  wouldEvictByTtl: 0,
+  wouldEvictBySize: 0,
+  inspectedSessions: 0,
+  walSize: 0,
+}
+
+/**
+ * ADR-0387 — Count candidates a `sweepSqliteRegistry` call WOULD evict
+ * without mutating any row. Used by `/session-registry cleanup
+ * --dry-run` for operator preview.
+ *
+ * Algorithm — INVERSE of the sweep DELETE:
+ *
+ *   1. TTL count   ⇒ `SELECT COUNT(*) FROM sessions WHERE last_touched < ?`
+ *   2. Size count  ⇒ same `SUM OVER (ORDER BY last_touched DESC)` window
+ *                    but `WHERE cum > maxTotalBytes` is counted, not
+ *                    deleted. CRITICAL: the TTL-filtered set is the
+ *                    input — older-than-TTL sessions are excluded so
+ *                    the sliding window matches what sweep would do
+ *                    AFTER the TTL pass.
+ *
+ * NO-THROW: open-fail / corrupt DB ⇒ all-zero result. Wraps every step
+ * in try/catch (same defensive shape as `sweepSqliteRegistry`).
+ *
+ * Idempotent — performs ZERO writes. DB rows + WAL contents are
+ * byte-identical before and after the call.
+ */
+export const countSqliteRegistryCleanupCandidates = (
+  cfg: SqliteRegistryConfig,
+): SqliteCleanupCandidates => {
+  let db: Database
+  try {
+    db = new Database(cfg.databasePath)
+    applyMigrations(db)
+  } catch {
+    return EMPTY_CANDIDATES
+  }
+
+  const now = cfg.now ?? Date.now
+  const ttlMs = cfg.ttlMs ?? DEFAULT_TTL_MS
+  const maxTotalBytes = cfg.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES
+  const cutoff = now() - ttlMs
+
+  let wouldEvictByTtl = 0
+  let wouldEvictBySize = 0
+  let inspectedSessions = 0
+
+  // 1. TTL candidate count.
+  try {
+    const row = db.query("SELECT COUNT(*) AS c FROM sessions WHERE last_touched < ?").get(cutoff)
+    wouldEvictByTtl = (row as { c: number }).c
+  } catch {
+    // NO-THROW.
+  }
+
+  // 2. Sliding-window candidate count.
+  //
+  //    Same window as the sweep DELETE but EXCLUDING rows the TTL pass
+  //    would have already removed (sweep applies them in this order).
+  //    `WHERE cum > maxTotalBytes` counts sessions whose cumulative
+  //    bytes (newest → oldest) overflow the cap — equivalent to the
+  //    DELETE's selection set.
+  try {
+    const row = db
+      .query(`
+        SELECT COUNT(*) AS c FROM (
+          SELECT
+            session_id,
+            SUM(total_estimated_bytes) OVER (
+              ORDER BY last_touched DESC
+              ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+            ) AS cum
+          FROM sessions
+          WHERE last_touched >= ?
+        ) WHERE cum > ?
+      `)
+      .get(cutoff, maxTotalBytes)
+    wouldEvictBySize = (row as { c: number }).c
+  } catch {
+    // NO-THROW.
+  }
+
+  // 3. Inspected denominator — TOTAL sessions on disk (operator's
+  //    mental model: "how many rows did we look at"). Matches the
+  //    disk-adapter's `inspectedSessions` semantics.
+  try {
+    const row = db.query("SELECT COUNT(*) AS c FROM sessions").get()
+    inspectedSessions = (row as { c: number }).c
+  } catch {
+    // NO-THROW.
+  }
+
+  // WAL size for the rendered output (informational; matches SweepResult shape).
+  const walSize = readWalSize(cfg.databasePath)
+
+  try {
+    db.close()
+  } catch {
+    // NO-THROW.
+  }
+
+  return { wouldEvictByTtl, wouldEvictBySize, inspectedSessions, walSize }
+}
+
+/**
  * One sweep of the registry GC. Idempotent: safe to call on an empty
  * DB or a freshly-swept DB (every step is a no-op when there is
  * nothing to evict).

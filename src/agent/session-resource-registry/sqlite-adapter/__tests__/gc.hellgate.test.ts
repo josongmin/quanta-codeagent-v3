@@ -20,7 +20,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { sweepSqliteRegistry } from "../gc"
+import { countSqliteRegistryCleanupCandidates, sweepSqliteRegistry } from "../gc"
 import { applyMigrations } from "../schema"
 
 const makeTmp = (): { path: string; cleanup: () => void } => {
@@ -579,5 +579,113 @@ describe("ADR-0361 sweepSqliteRegistry — hellgate", () => {
     expect(res.walRestarted && res.walTruncated).toBe(false)
     expect(res.checkpointed).toBe(true)
     cleanup()
+  })
+
+  // ─── ADR-0387 — countSqliteRegistryCleanupCandidates (dry-run) ─────────
+  //
+  // 5 cases. Same SQL shape as sweepSqliteRegistry but using SELECT
+  // COUNT instead of DELETE. The sliding-window SQL is INVERTED relative
+  // to sweep — same `SUM OVER` window but `WHERE cum > maxTotalBytes` is
+  // a count of rows that WOULD be deleted (not actually deleted).
+  // Verifies the count matches what a subsequent sweep DELETE would
+  // produce (case [TT + UU]).
+  describe("ADR-0387 countSqliteRegistryCleanupCandidates", () => {
+    test("[SS] empty DB ⇒ all zeros", () => {
+      const { path, cleanup } = makeTmp()
+      const db = new Database(path)
+      applyMigrations(db)
+      db.close()
+      const res = countSqliteRegistryCleanupCandidates({ databasePath: path })
+      expect(res.wouldEvictByTtl).toBe(0)
+      expect(res.wouldEvictBySize).toBe(0)
+      expect(res.inspectedSessions).toBe(0)
+      expect(typeof res.walSize).toBe("number")
+      expect(res.walSize).toBeGreaterThanOrEqual(0)
+      cleanup()
+    })
+
+    test("[TT] TTL candidate count matches what sweep would delete", () => {
+      const { path, cleanup } = makeTmp()
+      const db = new Database(path)
+      applyMigrations(db)
+      seedSession(db, "old-a", 100, 10)
+      seedSession(db, "old-b", 200, 10)
+      seedSession(db, "fresh", 1_000_000, 10)
+      db.close()
+      const dry = countSqliteRegistryCleanupCandidates({
+        databasePath: path,
+        ttlMs: 1000,
+        now: () => 1_000_500,
+      })
+      expect(dry.wouldEvictByTtl).toBe(2)
+      expect(dry.inspectedSessions).toBe(3)
+      // Then actually sweep — the count MUST match.
+      const wet = sweepSqliteRegistry({
+        databasePath: path,
+        ttlMs: 1000,
+        now: () => 1_000_500,
+      })
+      expect(wet.evictedByTtl).toBe(dry.wouldEvictByTtl)
+      cleanup()
+    })
+
+    test("[UU] Size sliding-window candidate count matches sweep", () => {
+      const { path, cleanup } = makeTmp()
+      const db = new Database(path)
+      applyMigrations(db)
+      // 4 × 100 bytes = 400. Cap 250 keeps newest 2; evict oldest 2.
+      seedSession(db, "s1", 1000, 100) // newest
+      seedSession(db, "s2", 900, 100)
+      seedSession(db, "s3", 800, 100)
+      seedSession(db, "s4", 700, 100) // oldest
+      db.close()
+      const dry = countSqliteRegistryCleanupCandidates({
+        databasePath: path,
+        maxTotalBytes: 250,
+        ttlMs: 999_999_999,
+        now: () => 1000,
+      })
+      expect(dry.wouldEvictBySize).toBeGreaterThanOrEqual(1)
+      // Then actually sweep — counts must match.
+      const wet = sweepSqliteRegistry({
+        databasePath: path,
+        maxTotalBytes: 250,
+        ttlMs: 999_999_999,
+        now: () => 1000,
+      })
+      expect(wet.evictedBySize).toBe(dry.wouldEvictBySize)
+      cleanup()
+    })
+
+    test("[VV] DB open fails ⇒ zero values, NO-THROW", () => {
+      const res = countSqliteRegistryCleanupCandidates({
+        databasePath: "/dev/null/no-such-parent/db.sqlite",
+      })
+      expect(res.wouldEvictByTtl).toBe(0)
+      expect(res.wouldEvictBySize).toBe(0)
+      expect(res.inspectedSessions).toBe(0)
+      expect(res.walSize).toBe(0)
+    })
+
+    test("[WW] idempotent — DB rows unchanged after count call", () => {
+      const { path, cleanup } = makeTmp()
+      const db = new Database(path)
+      applyMigrations(db)
+      seedSession(db, "old", 100, 10)
+      seedSession(db, "fresh", 1_000_000, 10)
+      db.close()
+      // Count
+      countSqliteRegistryCleanupCandidates({
+        databasePath: path,
+        ttlMs: 1000,
+        now: () => 1_000_500,
+      })
+      // Read post-count session count — MUST equal pre-count (no DELETE).
+      const db2 = new Database(path)
+      const c = (db2.query("SELECT COUNT(*) AS c FROM sessions").get() as { c: number }).c
+      expect(c).toBe(2)
+      db2.close()
+      cleanup()
+    })
   })
 })

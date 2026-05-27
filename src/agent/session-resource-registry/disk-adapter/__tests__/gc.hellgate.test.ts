@@ -18,7 +18,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { sweepDiskRegistry } from "../gc"
+import { countDiskRegistryCleanupCandidates, sweepDiskRegistry } from "../gc"
 import { DEFAULT_MAX_SESSION_BYTES, DEFAULT_TTL_MS } from "../types"
 
 const tempStorage = async (): Promise<string> => mkdtemp(join(tmpdir(), "adr0348-gc-"))
@@ -173,5 +173,97 @@ describe("ADR-0348-gc §H — permission / corrupt subentry swallowed", () => {
     // The stray file remains too
     const stray = await readFile(join(root, "stray-file.txt"), "utf8")
     expect(stray).toBe("hello")
+  })
+})
+
+// ─── ADR-0387 — countDiskRegistryCleanupCandidates (dry-run) ──────────────
+//
+// 5 cases. Same axes as sweepDiskRegistry (TTL + size cap) but using
+// SELECT/scan-only semantics: NO fs mutation (no unlink, no writeFile).
+// The function returns the candidate count so an operator can preview
+// `cleanup --dry-run` output without committing the sweep.
+describe("ADR-0387 countDiskRegistryCleanupCandidates — hellgate", () => {
+  test("[1] empty dir ⇒ wouldEvict 0 / inspectedSessions 0", async () => {
+    const root = await tempStorage()
+    const res = await countDiskRegistryCleanupCandidates({ storageDir: root })
+    expect(res.wouldEvictByTtl).toBe(0)
+    expect(res.wouldEvictBySize).toBe(0)
+    expect(res.inspectedSessions).toBe(0)
+    expect(res.storageDir).toBe(root)
+  })
+
+  test("[2] TTL candidates counted correctly", async () => {
+    const root = await tempStorage()
+    const now = 100_000_000
+    // 2 expired, 1 fresh
+    await writeSession(root, "old-a", { lastTouched: now - 60 * 60 * 1000 })
+    await writeSession(root, "old-b", { lastTouched: now - 60 * 60 * 1000 })
+    await writeSession(root, "fresh", { lastTouched: now - 100 })
+    const res = await countDiskRegistryCleanupCandidates({
+      storageDir: root,
+      ttlMs: 60_000,
+      now: () => now,
+    })
+    expect(res.wouldEvictByTtl).toBe(2)
+    expect(res.inspectedSessions).toBe(3)
+    // No fs changes: all three dirs still exist
+    expect(await dirExists(join(root, "old-a"))).toBe(true)
+    expect(await dirExists(join(root, "old-b"))).toBe(true)
+    expect(await dirExists(join(root, "fresh"))).toBe(true)
+  })
+
+  test("[3] size-cap candidates counted (oversize ⇒ wouldEvictBySize >= 1)", async () => {
+    const root = await tempStorage()
+    const now = 100_000_000
+    const big = Array.from({ length: 100 }, (_, i) =>
+      JSON.stringify({ kind: "context_update", field: "cwd", prev: "a", next: "b", at: i }),
+    ).join("\n")
+    await writeSession(root, "big", { lastTouched: now, eventsBody: big })
+    await writeSession(root, "small", { lastTouched: now, eventsBody: "{}" })
+    const res = await countDiskRegistryCleanupCandidates({
+      storageDir: root,
+      ttlMs: DEFAULT_TTL_MS,
+      maxSessionBytes: 500,
+      now: () => now,
+    })
+    expect(res.wouldEvictBySize).toBe(1)
+    expect(res.wouldEvictByTtl).toBe(0)
+    expect(res.inspectedSessions).toBe(2)
+    // Idempotent: bytes on disk unchanged
+    const stillBig = await readFile(join(root, "big", "events.jsonl"), "utf8")
+    expect(Buffer.byteLength(stillBig, "utf8")).toBe(Buffer.byteLength(big, "utf8"))
+  })
+
+  test("[4] missing storageDir ⇒ zero values, NO-THROW", async () => {
+    const res = await countDiskRegistryCleanupCandidates({
+      storageDir: "/no/such/dir/for/adr0387/dry-run",
+    })
+    expect(res.wouldEvictByTtl).toBe(0)
+    expect(res.wouldEvictBySize).toBe(0)
+    expect(res.inspectedSessions).toBe(0)
+    expect(res.storageDir).toBe("/no/such/dir/for/adr0387/dry-run")
+  })
+
+  test("[5] idempotent — second call sees identical state (no fs mutation)", async () => {
+    const root = await tempStorage()
+    const now = 100_000_000
+    await writeSession(root, "expired", { lastTouched: now - 10_000_000 })
+    await writeSession(root, "fresh", { lastTouched: now })
+    const res1 = await countDiskRegistryCleanupCandidates({
+      storageDir: root,
+      ttlMs: 60_000,
+      now: () => now,
+    })
+    const res2 = await countDiskRegistryCleanupCandidates({
+      storageDir: root,
+      ttlMs: 60_000,
+      now: () => now,
+    })
+    // The two calls return identical results (no mutation between them).
+    expect(res2.wouldEvictByTtl).toBe(res1.wouldEvictByTtl)
+    expect(res2.inspectedSessions).toBe(res1.inspectedSessions)
+    // And the expired session is STILL on disk (count, not sweep).
+    expect(await dirExists(join(root, "expired"))).toBe(true)
+    expect(await dirExists(join(root, "fresh"))).toBe(true)
   })
 })

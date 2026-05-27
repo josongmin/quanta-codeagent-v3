@@ -189,6 +189,117 @@ const processEntry = async (
 }
 
 /**
+ * ADR-0387 — Result of a dry-run candidate count. Same axes as
+ * {@link SweepResult} but stated as "WOULD evict" + a paired
+ * `inspectedSessions` so an operator can sanity-check the denominator.
+ */
+export interface DiskCleanupCandidates {
+  /** Sessions whose `meta.lastTouched` is older than the TTL cutoff. */
+  readonly wouldEvictByTtl: number
+  /**
+   * Sessions whose combined `events.jsonl + prompt-cache.jsonl` body
+   * exceeds the per-session byte cap (and would therefore be truncated
+   * by `sweepDiskRegistry`). Counted SESSION-wise, not byte-wise, so
+   * the value pairs cleanly with `SweepResult.truncated`.
+   */
+  readonly wouldEvictBySize: number
+  /** Total number of top-level entries inspected under `storageDir`. */
+  readonly inspectedSessions: number
+  /** Echo of `cfg.storageDir` so the operator output identifies the path. */
+  readonly storageDir: string
+}
+
+const EMPTY_CANDIDATES = (storageDir: string): DiskCleanupCandidates => ({
+  wouldEvictByTtl: 0,
+  wouldEvictBySize: 0,
+  inspectedSessions: 0,
+  storageDir,
+})
+
+/** Per-entry classification for the dry-run count. Distinguishes
+ *  TTL-expired from oversize so they roll up into separate counters. */
+type CandidateFate = "skip" | "ttl-candidate" | "size-candidate" | "untouched"
+
+/** Read total byte length of `events.jsonl + prompt-cache.jsonl` for one
+ *  session dir. Missing files contribute 0. NO-THROW. */
+const sessionByteLen = async (sessionDir: string): Promise<number> => {
+  const events = await readFileSafe(join(sessionDir, EVENTS_FILENAME))
+  const cache = await readFileSafe(join(sessionDir, CACHE_FILENAME))
+  return byteLen(events) + byteLen(cache)
+}
+
+/** Decide whether one filesystem entry would be evicted by TTL or by
+ *  size. Mirrors {@link processEntry} but performs NO mutation —
+ *  uses only `stat`/`readFile`. NO-THROW. */
+const classifyEntry = async (
+  sessionDir: string,
+  ttlMs: number,
+  maxBytes: number,
+  currentNow: number,
+): Promise<CandidateFate> => {
+  let st: { isDirectory: () => boolean }
+  try {
+    st = await stat(sessionDir)
+  } catch {
+    return "skip"
+  }
+  if (!st.isDirectory()) return "skip"
+
+  const meta = await readMeta(sessionDir)
+  // TTL takes precedence over size (mirrors sweep's processEntry).
+  if (meta !== null && currentNow - meta.lastTouched >= ttlMs) {
+    return "ttl-candidate"
+  }
+  const total = await sessionByteLen(sessionDir)
+  return total > maxBytes ? "size-candidate" : "untouched"
+}
+
+/**
+ * ADR-0387 — Count candidates a `sweepDiskRegistry` call WOULD evict
+ * without mutating the filesystem. Used by `/session-registry cleanup
+ * --dry-run` for operator preview.
+ *
+ * Algorithm: identical scan + classification to `sweepDiskRegistry`,
+ * but `rm` / `writeFile` calls are replaced with counter increments.
+ * `readMeta` + `stat` + `readFile` are read-only.
+ *
+ * NO-THROW: missing `storageDir` ⇒ all-zero counts; per-entry stat /
+ * read errors are classified as `"skip"` (consistent with sweep).
+ *
+ * Idempotent — two consecutive calls return identical results on a
+ * stable filesystem (the function performs zero writes).
+ */
+export const countDiskRegistryCleanupCandidates = async (
+  cfg: DiskRegistryConfig,
+): Promise<DiskCleanupCandidates> => {
+  const ttlMs = cfg.ttlMs ?? DEFAULT_TTL_MS
+  const maxBytes = cfg.maxSessionBytes ?? DEFAULT_MAX_SESSION_BYTES
+  const now = cfg.now ?? Date.now
+
+  let entries: string[]
+  try {
+    entries = await readdir(cfg.storageDir)
+  } catch {
+    return EMPTY_CANDIDATES(cfg.storageDir)
+  }
+
+  let wouldEvictByTtl = 0
+  let wouldEvictBySize = 0
+  let inspectedSessions = 0
+  const currentNow = now()
+
+  for (const entry of entries) {
+    const sessionDir = join(cfg.storageDir, entry)
+    const fate = await classifyEntry(sessionDir, ttlMs, maxBytes, currentNow)
+    if (fate === "skip") continue
+    inspectedSessions += 1
+    if (fate === "ttl-candidate") wouldEvictByTtl += 1
+    else if (fate === "size-candidate") wouldEvictBySize += 1
+  }
+  return { wouldEvictByTtl, wouldEvictBySize, inspectedSessions, storageDir: cfg.storageDir }
+}
+
+/**
  * Sweep `storageDir` for TTL-expired sessions + oversize jsonl files.
  *
  * Returns counts for observability. NO-THROW: a missing `storageDir`

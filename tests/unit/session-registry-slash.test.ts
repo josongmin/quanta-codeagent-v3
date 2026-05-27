@@ -353,6 +353,73 @@ describe("ADR-0376 /session-registry help discovery", () => {
     const err = ctx.errBuf.join("")
     expect(err).toContain("cleanup")
   })
+
+  // ─── ADR-0387 `cleanup --dry-run` flag ─────────────────────────────────
+
+  test("[32] cleanup --dry-run renders 'Dry-run:' header + exit 0", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const ctx = makeCtx()
+    const exit = await cmd.run(["cleanup", "--dry-run"], ctx)
+    expect(exit).toBe(0)
+    const out = ctx.outBuf.join("")
+    expect(out).toContain("Dry-run:")
+    expect(ctx.errBuf).toEqual([])
+  })
+
+  test("[33] cleanup --dry-run does NOT run sweep ('Sweep complete' absent)", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const ctx = makeCtx()
+    await cmd.run(["cleanup", "--dry-run"], ctx)
+    const out = ctx.outBuf.join("")
+    // The sweep marker MUST NOT appear in dry-run output.
+    expect(out).not.toContain("Sweep complete.")
+  })
+
+  test("[34] cleanup --dry-run leaves in-memory registry size unchanged", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const reg = getGlobalSessionResourceRegistry()
+    reg.getOrCreate("session-stable-a")
+    reg.getOrCreate("session-stable-b")
+    expect(reg.size()).toBe(2)
+    const ctx = makeCtx()
+    const exit = await cmd.run(["cleanup", "--dry-run"], ctx)
+    expect(exit).toBe(0)
+    // Registry MUST be untouched — dry-run is read-only.
+    expect(reg.size()).toBe(2)
+  })
+
+  test("[35] cleanup (no flag) preserves ADR-0379 behavior — sweep marker present", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const ctx = makeCtx()
+    const exit = await cmd.run(["cleanup"], ctx)
+    expect(exit).toBe(0)
+    const out = ctx.outBuf.join("")
+    // ADR-0379 contract — the sweep ran + the marker is rendered.
+    expect(out).toContain("Sweep complete.")
+    expect(out).not.toContain("Dry-run:")
+  })
+
+  test("[36] cleanup --dry-run --bogus extra flag is gracefully ignored", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const ctx = makeCtx()
+    const exit = await cmd.run(["cleanup", "--dry-run", "--unknown-flag"], ctx)
+    // Extra flags after --dry-run do NOT toggle the mode back on — the
+    // contract treats them as informational noise. exit MUST stay 0.
+    expect(exit).toBe(0)
+    const out = ctx.outBuf.join("")
+    expect(out).toContain("Dry-run:")
+    expect(out).not.toContain("Sweep complete.")
+  })
 })
 
 // ─── ADR-0384 — evict hygiene message ──────────────────────────────────

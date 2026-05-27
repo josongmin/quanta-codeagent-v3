@@ -1,15 +1,15 @@
 /**
- * ADR-0370 + ADR-0374 + ADR-0376 + ADR-0379 + ADR-0384 + ADR-0386 —
+ * ADR-0370 + ADR-0374 + ADR-0376 + ADR-0379 + ADR-0384 + ADR-0386 + ADR-0387 —
  * `/session-registry` slash command.
  *
  * Operator visibility (ADR-0370) + targeted eviction (ADR-0374) + sub-command
  * discovery (ADR-0376) + retention sweep (ADR-0379) + evict hygiene (ADR-0384)
- * + bulk-pattern evict (ADR-0386) for the `SessionResourceRegistry` slice
- * (ADR-0345 in-memory / ADR-0348 disk / ADR-0361 sqlite). Mirrors
- * Codex's admin habit of running `sqlite3 ~/.codex/logs_2.sqlite
- * 'SELECT COUNT(*), SUM(estimated_bytes) FROM …'` without giving
- * the operator a sql shell, and adds the targeted-`DELETE` that
- * Codex operators do with `sqlite3 logs_2.sqlite 'DELETE FROM
+ * + bulk-pattern evict (ADR-0386) + cleanup dry-run (ADR-0387) for the
+ * `SessionResourceRegistry` slice (ADR-0345 in-memory / ADR-0348 disk /
+ * ADR-0361 sqlite). Mirrors Codex's admin habit of running
+ * `sqlite3 ~/.codex/logs_2.sqlite 'SELECT COUNT(*), SUM(estimated_bytes)
+ * FROM …'` without giving the operator a sql shell, and adds the targeted-
+ * `DELETE` that Codex operators do with `sqlite3 logs_2.sqlite 'DELETE FROM
  * sessions WHERE id = …'`.
  *
  * # Subcommands
@@ -60,11 +60,13 @@
  */
 
 import { startAutoSweep } from "@/agent/session-resource-registry/auto-sweep"
+import { countDiskRegistryCleanupCandidates } from "@/agent/session-resource-registry/disk-adapter/gc"
 import { getGlobalSessionResourceRegistry } from "@/agent/session-resource-registry/global"
 import {
   formatRegistryStats,
   inspectGlobalRegistry,
 } from "@/agent/session-resource-registry/inspector"
+import { countSqliteRegistryCleanupCandidates } from "@/agent/session-resource-registry/sqlite-adapter/gc"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 
 /**
@@ -84,6 +86,7 @@ const HELP_LINES: readonly string[] = [
   "  evict --pattern <glob>  Bulk-evict every in-process id matching the glob",
   "                          (`*` and `?` only; max 100 matches; ADR-0386)",
   "  cleanup                 Run an immediate retention sweep + post-sweep stats (ADR-0379)",
+  "  cleanup --dry-run       Preview sweep candidates WITHOUT committing (ADR-0387)",
   "  help                    Show this menu",
   "",
   "Backend detect priority (first match wins):",
@@ -320,7 +323,13 @@ export const sessionRegistryCmd: SlashCommand = {
       }
       return renderEvict(args.slice(1), ctx)
     }
-    if (sub === "cleanup") return renderCleanup(ctx)
+    if (sub === "cleanup") {
+      const subArgs = args.slice(1)
+      // ADR-0387 — `--dry-run` flag preview mode. Any position in the
+      // sub-args list counts; extra unrelated flags are ignored.
+      if (subArgs.includes("--dry-run")) return renderCleanupDryRun(ctx)
+      return renderCleanup(ctx)
+    }
     return renderStats(ctx)
   },
 }
@@ -356,5 +365,69 @@ const renderCleanup = async (ctx: SlashContext): Promise<number> => {
     // `startAutoSweep` so the slash does not leak a setInterval per
     // invocation. NO-THROW + idempotent (per ADR-0369).
     handle?.stop()
+  }
+}
+
+/**
+ * ADR-0387 — `cleanup --dry-run` handler.
+ *
+ * Preview the sweep candidate counts WITHOUT committing the eviction.
+ * Calls the leaf `count*RegistryCleanupCandidates` functions for whichever
+ * backends are configured via the same env vars `startAutoSweep` consults:
+ *
+ *   - `QUANTA_SESSION_REGISTRY_DISK_DIR`    — disk backend candidates
+ *   - `QUANTA_SESSION_REGISTRY_SQLITE_PATH` — sqlite backend candidates
+ *
+ * Neither env set ⇒ output reports "no backend configured" + exit 0 (the
+ * in-memory adapter never accumulates on-disk debt — there is nothing to
+ * preview).
+ *
+ * The count functions are NO-THROW + idempotent; this handler wraps the
+ * top-level call defensively so a regression cannot crash the REPL.
+ * On failure, exit 1 + render the error on stderr (operator explicitly
+ * requested the preview).
+ */
+const renderCleanupDryRun = async (ctx: SlashContext): Promise<number> => {
+  try {
+    const diskDir = process.env.QUANTA_SESSION_REGISTRY_DISK_DIR
+    const sqlitePath = process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH
+
+    const lines: string[] = ["## Session Registry — Dry-run", ""]
+
+    if (diskDir === undefined && sqlitePath === undefined) {
+      lines.push("Dry-run: no on-disk backend configured (in-memory only — nothing to preview).")
+      ctx.out(`${lines.join("\n")}\n`)
+      return 0
+    }
+
+    if (typeof diskDir === "string" && diskDir.length > 0) {
+      const disk = await countDiskRegistryCleanupCandidates({ storageDir: diskDir })
+      lines.push(
+        `Dry-run: disk backend (${disk.storageDir})`,
+        `  would evict by TTL:    ${disk.wouldEvictByTtl}`,
+        `  would evict by size:   ${disk.wouldEvictBySize}`,
+        `  inspected sessions:    ${disk.inspectedSessions}`,
+        "",
+      )
+    }
+
+    if (typeof sqlitePath === "string" && sqlitePath.length > 0) {
+      const sqlite = countSqliteRegistryCleanupCandidates({ databasePath: sqlitePath })
+      lines.push(
+        `Dry-run: sqlite backend (${sqlitePath})`,
+        `  would evict by TTL:    ${sqlite.wouldEvictByTtl}`,
+        `  would evict by size:   ${sqlite.wouldEvictBySize}`,
+        `  inspected sessions:    ${sqlite.inspectedSessions}`,
+        `  WAL size (bytes):      ${sqlite.walSize}`,
+        "",
+      )
+    }
+
+    lines.push("(no commit — re-run without --dry-run to apply)")
+    ctx.out(`${lines.join("\n")}\n`)
+    return 0
+  } catch (e) {
+    ctx.err(`/session-registry: cleanup --dry-run failed: ${errMessage(e)}\n`)
+    return 1
   }
 }
