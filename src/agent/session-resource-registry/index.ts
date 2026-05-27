@@ -18,11 +18,6 @@
  * a separate ADR.
  */
 
-// ADR-0347 — Process-level singleton wire for composition roots.
-export {
-  getGlobalSessionResourceRegistry,
-  resetGlobalSessionResourceRegistry,
-} from "./global"
 // ADR-0348 — Disk-persistent adapter (explicit opt-in, sibling slice).
 export { createDiskSessionResourceRegistry } from "./disk-adapter/disk-store"
 export type { SweepResult } from "./disk-adapter/gc"
@@ -44,5 +39,10 @@ export type {
   PersistedSessionResources,
 } from "./disk-adapter/types"
 export { DEFAULT_MAX_SESSION_BYTES, DEFAULT_TTL_MS } from "./disk-adapter/types"
+// ADR-0347 — Process-level singleton wire for composition roots.
+export {
+  getGlobalSessionResourceRegistry,
+  resetGlobalSessionResourceRegistry,
+} from "./global"
 export { createInMemorySessionResourceRegistry } from "./in-memory-registry"
 export type { RegistryConfig, SessionResourceRegistry, SessionResources } from "./types"
