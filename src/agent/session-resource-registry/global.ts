@@ -42,12 +42,21 @@
  *   - Config knobs (maxEntries / idleTtlMs) on the singleton
  */
 
+import { type AutoSweepHandle, startAutoSweep } from "./auto-sweep"
 import { createDiskSessionResourceRegistry } from "./disk-adapter/disk-store"
 import { createInMemorySessionResourceRegistry } from "./in-memory-registry"
 import { createSqliteSessionResourceRegistry } from "./sqlite-adapter"
 import type { SessionResourceRegistry } from "./types"
 
 let instance: SessionResourceRegistry | null = null
+
+/**
+ * ADR-0369 — Periodic auto-sweep handle. Lazy-init: minted on the same
+ * first `getGlobalSessionResourceRegistry()` call that mints the
+ * registry singleton. NULL when the env vars are unset (the auto-sweep
+ * itself decides; we just hold the handle so `reset…` can stop it).
+ */
+let autoSweepHandle: AutoSweepHandle | null = null
 
 /**
  * ADR-0351 (disk) + ADR-0367 (sqlite) — env-var backend swap.
@@ -105,7 +114,22 @@ const buildDefaultRegistry = (): SessionResourceRegistry => {
  * `installCodexR2Wires` to look up (or mint) the session resources.
  */
 export const getGlobalSessionResourceRegistry = (): SessionResourceRegistry => {
-  if (instance === null) instance = buildDefaultRegistry()
+  if (instance === null) {
+    instance = buildDefaultRegistry()
+    // ADR-0369 — Schedule the retention sweep on the SAME first-call
+    // path. `startAutoSweep` returns a NO-OP handle when neither env
+    // var is set, so the in-memory default path pays zero cost (no
+    // setInterval registered). The handle is stored so `reset…` can
+    // tear it down for test isolation.
+    if (autoSweepHandle === null) {
+      try {
+        autoSweepHandle = startAutoSweep()
+      } catch {
+        // NO-THROW — a sweep wire failure must not break the registry
+        // singleton bootstrap. The registry is fully usable without it.
+      }
+    }
+  }
   return instance
 }
 
@@ -116,5 +140,13 @@ export const getGlobalSessionResourceRegistry = (): SessionResourceRegistry => {
  * becomes garbage as soon as no caller holds a reference.
  */
 export const resetGlobalSessionResourceRegistry = (): void => {
+  // ADR-0369 — Stop the auto-sweep timer BEFORE clearing the instance so
+  // the next `getGlobalSessionResourceRegistry()` call mints a fresh
+  // registry AND a fresh sweep handle. `stop()` is NO-THROW + idempotent
+  // (see `auto-sweep.ts`), so it is safe whether or not a handle exists.
+  if (autoSweepHandle !== null) {
+    autoSweepHandle.stop()
+    autoSweepHandle = null
+  }
   instance = null
 }

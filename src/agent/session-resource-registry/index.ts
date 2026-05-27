@@ -18,6 +18,15 @@
  * a separate ADR.
  */
 
+// ADR-0369 — Auto-sweep wire (on-startup + periodic). Default-OFF
+//   (env-gated); composition roots seldom need direct access — the
+//   handle is owned by `global.ts`. Exported for tests + observability.
+export {
+  type AutoSweepConfig,
+  type AutoSweepHandle,
+  DEFAULT_AUTO_SWEEP_INTERVAL_MS,
+  startAutoSweep,
+} from "./auto-sweep"
 // ADR-0348 — Disk-persistent adapter (explicit opt-in, sibling slice).
 export { createDiskSessionResourceRegistry } from "./disk-adapter/disk-store"
 export type { AcquireSessionLockOpts, SessionLock } from "./disk-adapter/file-lock"
