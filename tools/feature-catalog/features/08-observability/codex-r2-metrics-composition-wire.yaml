@@ -1,0 +1,55 @@
+id: codex-r2-metrics-composition-wire
+title: Composition-root metrics wire + activation telemetry (ADR-0358 / 0360)
+section: 8
+subsystem: production wire-up for ADR-0352 decorators + per-turn activation latency
+order: 102
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "production-wired"]
+depends_on:
+  - codex-r2-observability-decorators
+  - codex-r2-composition-install-and-registry
+  - codex-r2-loop-activation-hook
+purpose: |
+  Closes ADR-0352 default-OFF state. ADR-0358 ships
+  `adaptMetricsRegistryToEmitter(MetricsRegistry → MetricEmitterPort)` —
+  one-line shim from ADR-0144 production registry to the orthogonal
+  port the ADR-0352 decorators consume. `looksLikeMetricsRegistry()`
+  duck-tests `cfg.metrics` (typed as legacy `Metrics` class) to
+  distinguish at runtime — hosts passing the legacy class get
+  byte-identical posture, hosts passing a `MetricsRegistry`-shaped
+  object get the wrap. assemble.ts 12-line block (after
+  sessionResources + autoWirePluginActivation): build emitter, wrap
+  cache via `withCacheMetrics`, structural-cast a `metricsEmitter`
+  side-channel onto cfg so ADR-0360 reads without AgentConfig type
+  mutation. ADR-0360 telemetry: `codex_r2.activation.{calls,
+  sum_latency_ms, resolved_skills_count, errors}` emitted at the
+  ADR-0346 hook entry/exit. `performance.now()` avoids wall-clock
+  jumps poisoning latency math.
+evidence:
+  code:
+    - src/agent/codex-r2-metrics/metrics-adapter.ts
+    - src/agent/loop-activation-hook.ts
+    - src/apps/agent/assemble.ts
+  adrs:
+    - docs/decisions/0358-codex-r2-metrics-composition-wire.md
+    - docs/decisions/0360-activation-hook-telemetry.md
+  tests:
+    unit:
+      - src/agent/codex-r2-metrics/__tests__/metrics-adapter.hellgate.test.ts
+      - tests/unit/composition-codex-r2-metrics-wire-hellgate.test.ts
+      - tests/unit/loop-activation-telemetry-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: AgentConfig.metrics
+    type: 'MetricsRegistry | Metrics (legacy)'
+    default: 'undefined (no wire, byte-identical)'
+    notes: 'Duck-tested at runtime — only MetricsRegistry-shaped objects activate the wire. Legacy Metrics class consumers unaffected.'
+deliberate_hold: null
+notes: 'OTel mapping: rewrite prefix `codex_r2.` → `codex.` to bridge Codex-flavored OTel dashboards (memory `codex-otel-attribute-vocabulary`). Histogram support requires extending MetricEmitterPort — Option B (sum + count) chosen to avoid port mutation.'
