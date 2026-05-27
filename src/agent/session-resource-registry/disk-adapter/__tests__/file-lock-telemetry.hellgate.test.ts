@@ -25,7 +25,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { MetricEmitterPort } from "@/agent/codex-r2-metrics"
+import type { MetricEmitterPort } from "@/observability/codex-r2-metrics"
 import {
   __resetProcessHolders,
   acquireSessionLock,

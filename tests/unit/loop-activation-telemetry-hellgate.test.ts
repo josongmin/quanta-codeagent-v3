@@ -24,12 +24,12 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import type { MetricEmitterPort } from "@/agent/codex-r2-metrics"
 import {
   type ActivationHookConfigLike,
   resolvePluginActivationForTurn,
 } from "@/agent/loop-activation-hook"
 import type { AggregatedActivation } from "@/agent/plugin-activation-handler"
+import type { MetricEmitterPort } from "@/observability/codex-r2-metrics"
 
 interface Captured {
   name: string

@@ -47,10 +47,10 @@
  *   appended).
  */
 
-import type { MetricEmitterPort } from "@/agent/codex-r2-metrics"
 import type { ParsedMention } from "@/agent/mention-injection"
 import type { AggregatedActivation } from "@/agent/plugin-activation-handler"
 import { type ActiveSkillDescriptor, unionActiveSkills } from "@/agent/plugin-skill-extension"
+import type { MetricEmitterPort } from "@/observability/codex-r2-metrics"
 
 /**
  * Narrow subset of `AgentConfig` that the hook reads. Kept structural so

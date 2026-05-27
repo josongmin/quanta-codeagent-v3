@@ -30,12 +30,6 @@ import {
   type ModePolicy,
   type RunMode,
 } from "@/agent"
-import {
-  adaptMetricsRegistryToEmitter,
-  looksLikeMetricsRegistry,
-  type MetricEmitterPort,
-  withCacheMetrics,
-} from "@/agent/codex-r2-metrics"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import { captureSnapshot } from "@/agent/context-change"
 import { autoWirePluginActivation } from "@/agent/plugin-activation-handler"
@@ -45,6 +39,12 @@ import {
   type SystemPromptCachePort,
 } from "@/llm/system-prompt-cache"
 import { createInMemoryTypedHistoryEventStore } from "@/memory/typed-event"
+import {
+  adaptMetricsRegistryToEmitter,
+  looksLikeMetricsRegistry,
+  type MetricEmitterPort,
+  withCacheMetrics,
+} from "@/observability/codex-r2-metrics"
 import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
 
 /** Mode-preset-extra payloads (RFC may-22 Phase 4+). Each field is OPTIONAL

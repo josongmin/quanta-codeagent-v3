@@ -21,10 +21,10 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import type { MetricEmitterPort } from "@/agent/codex-r2-metrics"
 import type { AgentConfig } from "@/agent/types"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { asCacheKey, createInMemorySystemPromptCache } from "@/llm/system-prompt-cache"
+import type { MetricEmitterPort } from "@/observability/codex-r2-metrics"
 import type { MetricSnapshot, MetricsRegistry } from "@/observability/metrics/port"
 import { type AssembleRequest, assembleAgentConfig } from "../../src/apps/agent/assemble"
 

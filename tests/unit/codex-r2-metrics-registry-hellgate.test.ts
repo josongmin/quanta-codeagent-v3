@@ -3,8 +3,8 @@
  */
 import { describe, expect, test } from "bun:test"
 import { createInMemorySessionResourceRegistry } from "@/agent/session-resource-registry"
-import { withRegistryMetrics } from "../registry-metrics-decorator"
-import type { MetricEmitterPort } from "../types"
+import { withRegistryMetrics } from "@/observability/codex-r2-metrics/registry-metrics-decorator"
+import type { MetricEmitterPort } from "@/observability/codex-r2-metrics/types"
 
 interface Capture {
   counters: Array<{ name: string; delta: number; attrs?: Readonly<Record<string, string>> }>

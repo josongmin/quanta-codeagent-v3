@@ -6,8 +6,8 @@
  */
 import { describe, expect, test } from "bun:test"
 import { asCacheKey, createInMemorySystemPromptCache } from "@/llm/system-prompt-cache"
-import { withCacheMetrics } from "../cache-metrics-decorator"
-import type { MetricEmitterPort } from "../types"
+import { withCacheMetrics } from "@/observability/codex-r2-metrics/cache-metrics-decorator"
+import type { MetricEmitterPort } from "@/observability/codex-r2-metrics/types"
 
 interface Capture {
   counters: Array<{ name: string; delta: number; attrs?: Readonly<Record<string, string>> }>

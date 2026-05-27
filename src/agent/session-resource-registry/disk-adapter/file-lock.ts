@@ -85,7 +85,7 @@
 
 import { mkdir, open, stat, unlink } from "node:fs/promises"
 import { join } from "node:path"
-import type { MetricEmitterPort } from "@/agent/codex-r2-metrics"
+import type { MetricEmitterPort } from "@/observability/codex-r2-metrics"
 
 /** Default acquisition timeout — 5s. Above the expected hold by orders
  *  of magnitude (the disk-store holds the lock for one synchronous

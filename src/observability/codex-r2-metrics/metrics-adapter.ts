@@ -19,12 +19,14 @@
  * `observe`. It also exposes `snapshot()` / `reset()` / `flush()` for
  * the operator-facing `/metrics` endpoint.
  *
- * `MetricEmitterPort` (ADR-0352 §types.ts) is the agent-side EMIT
- * surface — minimal subset (counter + gauge only) that the codex-r2
- * decorators emit through. It lives in the agent slice on purpose:
- * `@/agent/codex-r2-metrics` MUST stay plane-clean from `@/observability`
- * so the decorators can be unit-tested without standing up a full
- * registry. The shim closes the seam.
+ * `MetricEmitterPort` (ADR-0352 §types.ts) is the EMIT surface — minimal
+ * subset (counter + gauge + optional histogram, ADR-0366) that the
+ * codex-r2 decorators emit through. ADR-0366 relocated this slice from
+ * `@/agent/codex-r2-metrics` to `@/observability/codex-r2-metrics` so
+ * the shim and the registry it adapts live in the same plane (composition
+ * roots in `@/apps/agent` cross-import via the public surface); the
+ * decorators can still be unit-tested without standing up a full
+ * registry — `MetricEmitterPort` stays the only emit surface they touch.
  *
  * # Codex OTel attribute vocabulary alignment
  *
@@ -71,8 +73,9 @@ import type { MetricEmitterPort } from "./types"
  *
  * The returned port:
  *
- *   - `counter(name, delta, attrs)` ⇒ `registry.increment(name, delta, attrs)`
- *   - `gauge(name, value, attrs)`   ⇒ `registry.gauge(name, value, attrs)`
+ *   - `counter(name, delta, attrs)`    ⇒ `registry.increment(name, delta, attrs)`
+ *   - `gauge(name, value, attrs)`      ⇒ `registry.gauge(name, value, attrs)`
+ *   - `histogram(name, value, attrs)`  ⇒ `registry.observe(name, value, attrs)` (ADR-0366)
  *
  * Labels (`attrs`) are passed through as-is. The codex-r2 decorators
  * supply `Readonly<Record<string,string>>`; the registry signature
@@ -80,6 +83,18 @@ import type { MetricEmitterPort } from "./types"
  * `readonly` brand without copying. This is sound because the registry
  * never mutates the labels — it uses them only to compute the
  * series-id key.
+ *
+ * # Histogram (ADR-0366)
+ *
+ * `histogram` is provided unconditionally by the adapter even though
+ * `MetricEmitterPort.histogram` is OPTIONAL — callers that have a real
+ * registry always get the full surface. Wrapped in try/catch so a
+ * misbehaving `registry.observe` (e.g., a custom OTel adapter that
+ * throws on malformed values) cannot poison decorator code paths.
+ * The shipped decorators (cache + registry) do NOT call `histogram`
+ * today; the method exists so sibling slices (per-turn timing, plan
+ * queue latency, etc.) can emit through the same port without
+ * widening it further.
  *
  * Adapter is intentionally a closure factory (NOT a stateless top-level
  * fn) so multiple registries can be wired without aliasing — calling
@@ -92,6 +107,13 @@ export const adaptMetricsRegistryToEmitter = (registry: MetricsRegistry): Metric
   },
   gauge: (name, value, attrs) => {
     registry.gauge(name, value, attrs as Record<string, string> | undefined)
+  },
+  histogram: (name, value, attrs) => {
+    try {
+      registry.observe(name, value, attrs as Record<string, string> | undefined)
+    } catch {
+      // best-effort — a buggy `observe` MUST NOT poison the emit path.
+    }
   },
 })
 

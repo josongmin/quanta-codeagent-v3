@@ -43,9 +43,9 @@
  * the deserializer drops the partial line via NO-THROW and continues.
  */
 
-import type { MetricEmitterPort } from "@/agent/codex-r2-metrics"
 import type { SystemPromptCacheKey } from "@/llm/system-prompt-cache"
 import type { TypedHistoryEvent } from "@/memory/typed-event"
+import type { MetricEmitterPort } from "@/observability/codex-r2-metrics"
 import type { AcquireSessionLockOpts } from "./file-lock"
 
 /**
