@@ -1,5 +1,5 @@
 /**
- * ★ ADR-0370 — `/session-registry` slash command wire test.
+ * ★ ADR-0370 + ADR-0374 + ADR-0376 — `/session-registry` slash command wire test.
  *
  * Lives in `tests/unit/` (NOT under `src/agent/.../​__tests__/`) because
  * the slice fence forbids library slices importing `@/apps/cli/*`.
@@ -8,15 +8,36 @@
  * pins the inspector contract; this file pins ONLY the CLI registration
  * + the `run`-path NO-THROW invariant.
  *
- * Coverage (5 cases):
- *   1.  `/session-registry` is present in `BUILTINS`
- *   2.  command has `run` + `describe` + correct category
- *   3.  `run [no args]` writes a stats block to `out` + exits 0
- *   4.  `run ["help"]` writes the help menu + exits 0
- *   5.  `run ["unknown"]` writes to `err` + exits 1
+ * Coverage:
+ *   ADR-0370 (5 cases — baseline):
+ *     1.  `/session-registry` is present in `BUILTINS`
+ *     2.  command has `run` + `describe` + correct category
+ *     3.  `run [no args]` writes a stats block to `out` + exits 0
+ *     4.  `run ["help"]` writes the help menu + exits 0
+ *     5.  `run ["unknown"]` writes to `err` + exits 1
+ *
+ *   ADR-0374 (evict sub-command — 7 cases):
+ *     6.  `run ["evict"]` (no id) → stderr "usage" + exit 1 (NO-THROW)
+ *     7.  `run ["evict", "session-x"]` → success message on out + exit 0
+ *     8.  `run ["evict", "session-x"]` → calls registry.evict(sessionId) once
+ *     9.  `run ["evict", "unknown-id"]` → idempotent success (ADR-0345)
+ *     10. `run ["evict", "session-x"]` then `run [stats]` → sessions count drops
+ *     11. registry.evict throws → graceful error on stderr + exit 1 (NO-THROW)
+ *     12. `run ["evict", "session-x", "extra"]` → only first id is evicted
+ *
+ *   ADR-0376 (help discovery — 5 cases):
+ *     13. help output lists all sub-commands (stats / evict / help)
+ *     14. help output shows `evict <id>` usage
+ *     15. help output mentions backend detect priority (sqlite > disk > in-memory)
+ *     16. `run ["help"]` is NO-THROW + exit 0 (already covered, re-pinned)
+ *     17. unknown sub-command stderr includes "evict" in the known list
  */
 
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
+import {
+  getGlobalSessionResourceRegistry,
+  resetGlobalSessionResourceRegistry,
+} from "@/agent/session-resource-registry/global"
 import { BUILTINS } from "@/apps/cli/slash-commands"
 import type { SlashContext } from "@/apps/cli/slash-contract"
 
@@ -42,6 +63,18 @@ const makeCtx = (): CapturedCtx => {
     cwd: process.cwd(),
   }
 }
+
+// Per-test registry isolation so the singleton from earlier tests
+// (or sibling files) does not pollute the assertions below. The
+// registry is process-local so a `resetGlobalSessionResourceRegistry()`
+// at every boundary suffices.
+beforeEach(() => {
+  resetGlobalSessionResourceRegistry()
+})
+
+afterEach(() => {
+  resetGlobalSessionResourceRegistry()
+})
 
 describe("ADR-0370 /session-registry slash wire", () => {
   test("[1] BUILTINS contains /session-registry", () => {
@@ -93,5 +126,185 @@ describe("ADR-0370 /session-registry slash wire", () => {
     const err = ctx.errBuf.join("")
     expect(err).toContain("unknown subcommand")
     expect(err).toContain("bogus")
+  })
+})
+
+describe("ADR-0374 /session-registry evict <id>", () => {
+  test("[6] run [evict] (no id) → usage on stderr + exit 1", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const ctx = makeCtx()
+    const exit = await cmd.run(["evict"], ctx)
+    expect(exit).toBe(1)
+    const err = ctx.errBuf.join("")
+    expect(err).toContain("usage")
+    expect(err).toContain("/session-registry evict <sessionId>")
+    expect(ctx.outBuf).toEqual([])
+  })
+
+  test("[7] run [evict, session-x] → success on out + exit 0", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    // Pre-seed the registry so the evict has a target.
+    getGlobalSessionResourceRegistry().getOrCreate("session-x")
+    const ctx = makeCtx()
+    const exit = await cmd.run(["evict", "session-x"], ctx)
+    expect(exit).toBe(0)
+    const out = ctx.outBuf.join("")
+    expect(out).toContain("evicted")
+    expect(out).toContain("session-x")
+    expect(ctx.errBuf).toEqual([])
+  })
+
+  test("[8] run [evict, id] calls registry.evict(id) exactly once", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const reg = getGlobalSessionResourceRegistry()
+    const spy = mock(reg.evict.bind(reg))
+    // Replace evict on the singleton instance so the slash hits the spy.
+    ;(reg as { evict: (id: string) => void }).evict = spy
+    const ctx = makeCtx()
+    const exit = await cmd.run(["evict", "session-spy"], ctx)
+    expect(exit).toBe(0)
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy.mock.calls[0]).toEqual(["session-spy"])
+  })
+
+  test("[9] run [evict, unknown-id] is idempotent — success even with no entry", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    // Registry empty — evict on an unknown id must be a NO-THROW no-op
+    // and the slash must still report success (ADR-0345 idempotent contract).
+    const ctx = makeCtx()
+    const exit = await cmd.run(["evict", "never-existed"], ctx)
+    expect(exit).toBe(0)
+    const out = ctx.outBuf.join("")
+    expect(out).toContain("evicted")
+    expect(out).toContain("never-existed")
+    expect(ctx.errBuf).toEqual([])
+  })
+
+  test("[10] evict then stats → sessions count reflects removal", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const reg = getGlobalSessionResourceRegistry()
+    reg.getOrCreate("session-a")
+    reg.getOrCreate("session-b")
+    expect(reg.size()).toBe(2)
+    const ctx1 = makeCtx()
+    await cmd.run(["evict", "session-a"], ctx1)
+    expect(reg.size()).toBe(1)
+    const ctx2 = makeCtx()
+    await cmd.run(["stats"], ctx2)
+    const out = ctx2.outBuf.join("")
+    expect(out).toContain("Sessions:")
+    // The stats line carries the post-evict count.
+    expect(out).toMatch(/Sessions:\s+1/)
+  })
+
+  test("[11] registry.evict throws → graceful stderr + exit 1 (NO-THROW slash)", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const reg = getGlobalSessionResourceRegistry()
+    ;(reg as { evict: (id: string) => void }).evict = () => {
+      throw new Error("disk-io-error")
+    }
+    const ctx = makeCtx()
+    // The slash itself MUST NOT throw — the await resolves to an exit code.
+    const exit = await cmd.run(["evict", "session-q"], ctx)
+    expect(exit).toBe(1)
+    const err = ctx.errBuf.join("")
+    expect(err).toContain("evict failed")
+    expect(err).toContain("disk-io-error")
+  })
+
+  test("[12] extra args after id are ignored (only first id evicted)", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const reg = getGlobalSessionResourceRegistry()
+    const evicted: string[] = []
+    ;(reg as { evict: (id: string) => void }).evict = (id) => {
+      evicted.push(id)
+    }
+    const ctx = makeCtx()
+    const exit = await cmd.run(["evict", "session-x", "extra", "junk"], ctx)
+    expect(exit).toBe(0)
+    expect(evicted).toEqual(["session-x"])
+  })
+})
+
+describe("ADR-0376 /session-registry help discovery", () => {
+  test("[13] help lists every sub-command (stats / evict / help)", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const ctx = makeCtx()
+    const exit = await cmd.run(["help"], ctx)
+    expect(exit).toBe(0)
+    const out = ctx.outBuf.join("")
+    expect(out).toContain("stats")
+    expect(out).toContain("evict")
+    expect(out).toContain("help")
+  })
+
+  test("[14] help shows `evict <id>` usage shape", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const ctx = makeCtx()
+    await cmd.run(["help"], ctx)
+    const out = ctx.outBuf.join("")
+    // Must include the placeholder so operators see the required arg.
+    expect(out).toMatch(/evict\s+<.*id.*>/i)
+  })
+
+  test("[15] help shows backend detect priority chain", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const ctx = makeCtx()
+    await cmd.run(["help"], ctx)
+    const out = ctx.outBuf.join("")
+    // Priority chain — the precedence is the operator's mental model.
+    expect(out).toContain("QUANTA_SESSION_REGISTRY_SQLITE_PATH")
+    expect(out).toContain("QUANTA_SESSION_REGISTRY_DISK_DIR")
+    expect(out).toContain("in-memory")
+  })
+
+  test("[16] help is NO-THROW + exit 0 (re-pin of [4])", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const ctx = makeCtx()
+    let threw = false
+    try {
+      const exit = await cmd.run(["help"], ctx)
+      expect(exit).toBe(0)
+    } catch {
+      threw = true
+    }
+    expect(threw).toBe(false)
+    expect(ctx.errBuf).toEqual([])
+  })
+
+  test("[17] unknown sub-command surfaces 'evict' in known list", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const ctx = makeCtx()
+    const exit = await cmd.run(["typo"], ctx)
+    expect(exit).toBe(1)
+    const err = ctx.errBuf.join("")
+    expect(err).toContain("unknown subcommand")
+    expect(err).toContain("evict")
+    expect(err).toContain("stats")
+    expect(err).toContain("help")
   })
 })
