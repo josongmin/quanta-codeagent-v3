@@ -130,6 +130,19 @@ export interface SessionResourceRegistry {
    * MAY because of an intervening TTL sweep race (single-thread Node
    * event loop ⇒ this cannot happen within a microtask, but a future
    * worker-pool adapter could surface the gap).
+   *
+   * R3-audit-note (TTL semantics — backend drift):
+   *   - The in-memory adapter (ADR-0345) sweeps `idleTtlMs`-expired
+   *     entries before returning, so the list reflects only currently
+   *     live ids.
+   *   - The disk (ADR-0348) and sqlite (ADR-0361) adapters do NOT
+   *     honour `idleTtlMs` on this method — they return the in-process
+   *     Map contents directly (eviction happens via the retention
+   *     sweep, not via lazy per-call TTL). This is intentional: bulk
+   *     callers (e.g. `/session-registry evict --pattern`) walk only
+   *     the in-process entries; expired-but-unswept persisted entries
+   *     are invisible by construction. ADR-0386 §"Why in-process keys
+   *     only" documents the trade-off.
    */
   listSessionIds(): readonly string[]
 }

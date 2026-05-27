@@ -152,8 +152,20 @@ byte-identical when `walCheckpointUpgradeMode` is absent.
   warrants.
 - **Threshold auto-derivation**: no growth-rate observation to
   automatically pick a threshold or mode — operator-supplied only.
-- **Wiring from `startAutoSweep` / env-vars**: ADR-0369's auto-sweep
-  config does NOT yet forward a `walCheckpointUpgradeMode` field. A
-  follow-up wire (sibling to the deferred
-  `QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES` env-swap) adds
-  `QUANTA_SESSION_REGISTRY_WAL_UPGRADE_MODE`.
+- ~~**Wiring from `startAutoSweep` / env-vars**~~ **(SATISFIED by
+  ADR-0390, 2026-05-28)**: ADR-0390 added `walSizeThresholdBytes` +
+  `walCheckpointUpgradeMode` to `AutoSweepConfig`, plus the env-var
+  pair `QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES` +
+  `QUANTA_SESSION_REGISTRY_WAL_CHECKPOINT_MODE`. The production
+  auto-sweep path now reaches this ADR's TRUNCATE branch.
+
+## References
+
+- ADR-0144 — `MetricsRegistry` shape
+- ADR-0369 — auto-sweep (extends to thread this ADR's knobs via ADR-0390)
+- ADR-0373 — auto-sweep telemetry baseline
+- ADR-0375 — WAL size threshold + RESTART (the sibling this ADR extends)
+- ADR-0378 — `wal_bytes` gauge (the observability surface operators
+  use to tune the threshold this ADR's mode acts upon)
+- ADR-0390 — auto-sweep WAL knob wire (closes the production-path gap
+  identified in Non-goals above)
