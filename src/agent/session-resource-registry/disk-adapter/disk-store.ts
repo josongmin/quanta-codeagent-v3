@@ -331,10 +331,25 @@ export const createDiskSessionResourceRegistry = (
   // `clear` resolve the promise then release the lock.
   const lockMap = new Map<string, Promise<SessionLock | null>>()
 
+  // ADR-0364 — Merge the optional top-level `cfg.metricsEmitter` into
+  // the `AcquireSessionLockOpts`. `cfg.lock.metricsEmitter` (if set)
+  // wins by precedence; the top-level slot is purely an ergonomic
+  // sibling for composition roots that already own one emitter
+  // instance and don't want to splay it into the lock-knob bag.
+  // `exactOptionalPropertyTypes` requires we omit the key entirely
+  // when the resolved value is undefined.
+  const resolvedLockOpts: import("./file-lock").AcquireSessionLockOpts = (() => {
+    const base = cfg.lock ?? {}
+    const emitter = base.metricsEmitter ?? cfg.metricsEmitter
+    return emitter === undefined ? base : { ...base, metricsEmitter: emitter }
+  })()
+
   const ensureLock = (sessionId: string): Promise<SessionLock | null> => {
     const existing = lockMap.get(sessionId)
     if (existing !== undefined) return existing
-    const acquired = acquireSessionLock(cfg.storageDir, sessionId, cfg.lock ?? {}).catch(() => null)
+    const acquired = acquireSessionLock(cfg.storageDir, sessionId, resolvedLockOpts).catch(
+      () => null,
+    )
     lockMap.set(sessionId, acquired)
     return acquired
   }

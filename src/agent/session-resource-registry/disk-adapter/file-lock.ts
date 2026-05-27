@@ -1,6 +1,6 @@
 /**
- * ADR-0356 — Per-session lockfile for the disk-backed
- * `SessionResourceRegistry` (ADR-0348).
+ * ADR-0356 (+ ADR-0364 telemetry) — Per-session lockfile for the
+ * disk-backed `SessionResourceRegistry` (ADR-0348).
  *
  * ADR-0348 is single-writer by design (see `disk-store.ts` §Concurrency).
  * When two quanta processes target the same `storageDir` for the same
@@ -36,7 +36,9 @@
  *   3. Attempt `fs.open(lockPath, "wx")` — Node `wx` ≡ POSIX
  *      `O_CREAT | O_EXCL | O_WRONLY`. The atomic exclusive-create is
  *      the same primitive that `src/stream/adapters/jsonl-retention.ts`
- *      uses for its tmpfile.
+ *      uses for its tmpfile. On Windows this maps to
+ *      `CreateFileW(CREATE_NEW)` — same atomic semantic, different API
+ *      name. See ADR-0365 for the Windows investigation + decision.
  *   4. On `EEXIST`:
  *        a. `stat` the existing lockfile. If `mtime + staleThresholdMs
  *           < now`, treat as a crashed-process leftover: `unlink` it
@@ -83,6 +85,7 @@
 
 import { mkdir, open, stat, unlink } from "node:fs/promises"
 import { join } from "node:path"
+import type { MetricEmitterPort } from "@/agent/codex-r2-metrics"
 
 /** Default acquisition timeout — 5s. Above the expected hold by orders
  *  of magnitude (the disk-store holds the lock for one synchronous
@@ -145,6 +148,26 @@ export interface AcquireSessionLockOpts {
   /** Clock seam — tests pass a deterministic source. Default
    *  `Date.now`. */
   readonly now?: () => number
+  /**
+   * ADR-0364 — Optional telemetry sink. When provided, each lock
+   * acquisition outcome emits a counter on the {@link MetricEmitterPort}
+   * (ADR-0352) under the `codex_r2.lock.*` namespace, plus a latency
+   * gauge for successful + timed-out paths. Absent ⇒ ZERO emit calls,
+   * keeping ADR-0356 byte-identical.
+   *
+   * Metric vocabulary (Codex OTel mirror — see
+   * `codex-otel-attribute-vocabulary` memory):
+   *   - `codex_r2.lock.acquire_success`   counter  +1 on each acquire
+   *   - `codex_r2.lock.acquire_timeout`   counter  +1 on each timeout
+   *   - `codex_r2.lock.acquire_fail`      counter  +1 on each fs error
+   *   - `codex_r2.lock.stale_reclaim`     counter  +1 on each stale reap
+   *   - `codex_r2.lock.acquire_latency_ms` gauge   wall-clock elapsed
+   *
+   * Emit is best-effort + NO-THROW — a hostile emitter cannot poison
+   * acquire (the call is wrapped in try/catch defence-in-depth even
+   * though `MetricEmitterPort` already promises NO-THROW).
+   */
+  readonly metricsEmitter?: MetricEmitterPort
 }
 
 /** Same `[A-Za-z0-9_-]` allowlist the disk-store uses for `safeId`.
@@ -200,6 +223,34 @@ const readMtimeMs = async (path: string): Promise<number | null> => {
  *  outer wall-clock budget. */
 const sleep = (ms: number): Promise<void> =>
   ms <= 0 ? Promise.resolve() : new Promise((r) => setTimeout(r, ms))
+
+/**
+ * ADR-0364 — Best-effort emit wrapper. The {@link MetricEmitterPort}
+ * already promises NO-THROW (ADR-0352 §types.ts), but we wrap every
+ * call in try/catch as defence-in-depth so even a hostile custom
+ * emitter cannot break the acquire path. Returns void; any failure is
+ * silently swallowed (operators see missing-metric, not a broken lock).
+ */
+const safeEmit = (
+  emitter: MetricEmitterPort | undefined,
+  fn: (e: MetricEmitterPort) => void,
+): void => {
+  if (emitter === undefined) return
+  try {
+    fn(emitter)
+  } catch {
+    // emitter is best-effort — NEVER throw out of this wrapper.
+  }
+}
+
+/** ADR-0364 metric names. Centralized so the suffix list lives in one
+ *  place; the constant export lets hellgate tests assert exact strings
+ *  without retyping. */
+export const LOCK_METRIC_ACQUIRE_SUCCESS = "codex_r2.lock.acquire_success" as const
+export const LOCK_METRIC_ACQUIRE_TIMEOUT = "codex_r2.lock.acquire_timeout" as const
+export const LOCK_METRIC_ACQUIRE_FAIL = "codex_r2.lock.acquire_fail" as const
+export const LOCK_METRIC_STALE_RECLAIM = "codex_r2.lock.stale_reclaim" as const
+export const LOCK_METRIC_ACQUIRE_LATENCY_MS = "codex_r2.lock.acquire_latency_ms" as const
 
 /** Try one exclusive-create. Returns:
  *    - `"acquired"` on success (the caller owns the lockfile);
@@ -260,6 +311,12 @@ interface LoopCtx {
   timeoutMs: number
   staleThresholdMs: number
   now: () => number
+  /** ADR-0364 — Optional telemetry sink. Threaded into the loop so the
+   *  stale-reclaim emit fires at the EXACT instant the reap decision is
+   *  made (rather than at the outer acquire layer, which would lose
+   *  visibility into how many stale-reap cycles a single acquire
+   *  triggered before success). */
+  emitter?: MetricEmitterPort
 }
 
 const loopOnce = async (ctx: LoopCtx): Promise<LoopStep> => {
@@ -272,6 +329,9 @@ const loopOnce = async (ctx: LoopCtx): Promise<LoopStep> => {
   // EEXIST — consider stale-reap, then check budget.
   const mtimeMs = await readMtimeMs(ctx.lockPath)
   if (mtimeMs !== null && ctx.now() - mtimeMs >= ctx.staleThresholdMs) {
+    // ADR-0364 — emit BEFORE the unlink so a reclaim followed by a
+    // subsequent contention races doesn't double-count the same reap.
+    safeEmit(ctx.emitter, (e) => e.counter(LOCK_METRIC_STALE_RECLAIM, 1))
     await unlinkSafe(ctx.lockPath)
     return "retry"
   }
@@ -288,6 +348,61 @@ const loopOnce = async (ctx: LoopCtx): Promise<LoopStep> => {
  *
  * NO-THROW.
  */
+/** ADR-0364 — emit the outcome counter (+ latency gauge for the
+ *  success / timeout paths) in a single helper so the acquire function
+ *  itself stays under the biome cognitive-complexity ceiling. The
+ *  `fail` path skips the latency gauge — fs errors carry no
+ *  operationally-actionable timing signal (a `mkdir` ENOSPC fails
+ *  instantly; the value is always near-zero noise). */
+const emitOutcome = (
+  emitter: MetricEmitterPort | undefined,
+  outcome: "success" | "timeout" | "fail",
+  latencyMs: number,
+): void => {
+  if (emitter === undefined) return
+  const counterName =
+    outcome === "success"
+      ? LOCK_METRIC_ACQUIRE_SUCCESS
+      : outcome === "timeout"
+        ? LOCK_METRIC_ACQUIRE_TIMEOUT
+        : LOCK_METRIC_ACQUIRE_FAIL
+  safeEmit(emitter, (e) => {
+    e.counter(counterName, 1)
+    if (outcome !== "fail") {
+      e.gauge(LOCK_METRIC_ACQUIRE_LATENCY_MS, Math.max(0, latencyMs))
+    }
+  })
+}
+
+/** Drive the acquire-or-wait loop until a terminal outcome is reached.
+ *  Extracted from {@link acquireSessionLock} to keep the public fn
+ *  under the biome cognitive-complexity ceiling. Emits the terminal
+ *  outcome counter + latency gauge before returning. */
+const runAcquireLoop = async (
+  ctx: LoopCtx,
+  retryIntervalMs: number,
+  emitter: MetricEmitterPort | undefined,
+): Promise<SessionLock | null> => {
+  while (true) {
+    const step = await loopOnce(ctx)
+    if (step === "acquired") {
+      emitOutcome(emitter, "success", ctx.now() - ctx.start)
+      return makeLock(ctx.lockPath)
+    }
+    if (step === "failed") {
+      emitOutcome(emitter, "fail", ctx.now() - ctx.start)
+      return null
+    }
+    if (step === "timeout") {
+      emitOutcome(emitter, "timeout", ctx.now() - ctx.start)
+      return null
+    }
+    // step === "retry": sleep then loop. With `retryIntervalMs === 0`
+    // this is a pure microtask yield.
+    await sleep(retryIntervalMs)
+  }
+}
+
 export const acquireSessionLock = async (
   storageDir: string,
   sessionId: string,
@@ -297,13 +412,20 @@ export const acquireSessionLock = async (
   const retryIntervalMs = opts.retryIntervalMs ?? DEFAULT_LOCK_RETRY_INTERVAL_MS
   const staleThresholdMs = opts.staleThresholdMs ?? DEFAULT_LOCK_STALE_THRESHOLD_MS
   const now = opts.now ?? Date.now
+  const emitter = opts.metricsEmitter
 
   const sessionDir = join(storageDir, safeId(sessionId))
   const lockPath = join(sessionDir, LOCK_FILENAME)
 
+  // ADR-0364 — capture start BEFORE any fs work so the latency gauge
+  // includes mkdir + every retry. `now` is the user-supplied seam (tests
+  // pass a mock); production defaults to `Date.now` so wall-clock ms.
+  const wallStart = now()
+
   if (!(await ensureDir(sessionDir))) {
     // Filesystem unusable — the disk-store's higher layer falls back
     // to memory-only.
+    emitOutcome(emitter, "fail", 0)
     return null
   }
 
@@ -312,27 +434,23 @@ export const acquireSessionLock = async (
   const sameProcess = processHolders.get(lockPath)
   if (sameProcess !== undefined) {
     sameProcess.refCount += 1
+    // ADR-0364 — re-entrant acquisitions count as success (sibling
+    // handle handed out). Latency captured for operator visibility
+    // into the re-entry rate (≈ 0 in practice).
+    emitOutcome(emitter, "success", now() - wallStart)
     return makeLock(lockPath)
   }
 
   const pid = typeof process !== "undefined" && typeof process.pid === "number" ? process.pid : 0
-  const ctx: LoopCtx = {
-    lockPath,
-    pid,
-    start: now(),
-    timeoutMs,
-    staleThresholdMs,
-    now,
-  }
+  // `exactOptionalPropertyTypes` makes `emitter?: MetricEmitterPort` reject
+  // an assigned `undefined` — omit the key entirely when absent so the
+  // optional contract holds.
+  const ctx: LoopCtx =
+    emitter === undefined
+      ? { lockPath, pid, start: wallStart, timeoutMs, staleThresholdMs, now }
+      : { lockPath, pid, start: wallStart, timeoutMs, staleThresholdMs, now, emitter }
 
-  while (true) {
-    const step = await loopOnce(ctx)
-    if (step === "acquired") return makeLock(lockPath)
-    if (step === "failed" || step === "timeout") return null
-    // step === "retry": sleep then loop. With `retryIntervalMs === 0`
-    // this is a pure microtask yield.
-    await sleep(retryIntervalMs)
-  }
+  return runAcquireLoop(ctx, retryIntervalMs, emitter)
 }
 
 /** Construct the {@link SessionLock} returned from a successful

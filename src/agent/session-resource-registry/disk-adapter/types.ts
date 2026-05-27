@@ -43,6 +43,7 @@
  * the deserializer drops the partial line via NO-THROW and continues.
  */
 
+import type { MetricEmitterPort } from "@/agent/codex-r2-metrics"
 import type { SystemPromptCacheKey } from "@/llm/system-prompt-cache"
 import type { TypedHistoryEvent } from "@/memory/typed-event"
 import type { AcquireSessionLockOpts } from "./file-lock"
@@ -94,6 +95,21 @@ export interface DiskRegistryConfig {
    * before the ADR.
    */
   readonly lock?: AcquireSessionLockOpts
+  /**
+   * ADR-0364 — Optional telemetry sink for lock acquire / release /
+   * timeout / stale-reclaim counters + latency gauge. When set, the
+   * disk-store forwards the emitter through to {@link acquireSessionLock}
+   * for every per-session lock attempt.
+   *
+   * Resolution precedence: a `metricsEmitter` set on `cfg.lock` wins
+   * over this top-level field. Equivalent surface — the top-level
+   * field exists for ergonomics so a composition root that already
+   * owns one emitter does not have to splay it into `lock`.
+   *
+   * Absent on BOTH paths ⇒ ZERO emit calls, byte-identical to
+   * ADR-0356.
+   */
+  readonly metricsEmitter?: MetricEmitterPort
 }
 
 /** One persisted cache entry as serialized on disk. The on-disk shape

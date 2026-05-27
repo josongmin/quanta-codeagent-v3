@@ -1,0 +1,43 @@
+id: windows-flock-strategy
+title: Windows flock strategy — Node `wx` retained (ADR-0365 negative)
+section: 9
+subsystem: per-session lockfile portability note for Windows targets
+order: 104
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: none
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "negative-decision", "doc-only"]
+depends_on:
+  - codex-r2-multi-process-flock
+purpose: |
+  Investigation + memorialization: Node `fs.open(path, "wx")` maps to
+  `CreateFileW(CREATE_NEW)` on Windows, which is atomic at the kernel
+  level on every supported volume (NTFS / ReFS / modern SMB2/3). The
+  ADR-0356 exclusive-create primitive is therefore Windows-correct as
+  written; no `LockFileEx` native binding is required. Legacy SMB1 /
+  pre-Server-2008 file shares are explicitly out of support — they
+  fall into the same negative scope ADR-0355 already declared for
+  cross-machine NFS leases. Forward path: if a future deployment
+  requires range-lock semantics on legacy volumes, a sibling ADR can
+  introduce an OPTIONAL `lockStrategy?` seam without disturbing the
+  default exclusive-create path.
+evidence:
+  code:
+    - src/agent/session-resource-registry/disk-adapter/file-lock.ts
+  adrs:
+    - docs/decisions/0365-windows-flock-strategy.md
+  tests:
+    unit: []
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Negative decision — code change: zero. Inline reference added to
+  `file-lock.ts` module header pointing to ADR-0365 so the next time
+  someone asks "should we switch to LockFileEx?" the answer is one
+  link away.
