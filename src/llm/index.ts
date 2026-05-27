@@ -1,5 +1,6 @@
 export { AnthropicAdapter } from "./adapters/anthropic"
 export { OpenAIAdapter } from "./adapters/openai"
+export { OpenAIResponsesAdapter } from "./adapters/openai-responses"
 export type { AssembledTurn } from "./assemble"
 export { assembleFromEvents, determinePhases, hasToolUse } from "./assemble"
 export type { CreateLLMOptions, EnvLike, Provider } from "./factory"
@@ -53,3 +54,17 @@ export type {
   ToolSchema,
   ToolUseBlock,
 } from "./types"
+export type {
+  LlmCheckpoint,
+  LlmSurfaceId,
+  LlmTransportId,
+  PromptCacheRetention,
+  ResponsesContinuationMode,
+  ResponsesContinuationObservation,
+  ResponsesContinuationPhase,
+  ResponsesContinuationReason,
+  ResponsesCheckpoint,
+} from "./target-metadata"
+export type { ResponsesContinuationEntry, ResponsesContinuationStore } from "./responses-continuation-store"
+export { defaultResponsesContinuationStore } from "./responses-continuation-store"
+export { responsesContinuationLlmPort } from "./responses-continuation-wrapping"

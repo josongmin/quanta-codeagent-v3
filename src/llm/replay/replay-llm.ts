@@ -21,6 +21,7 @@
 
 import type { LLMPort } from "../ports"
 import type { StreamEvent, StreamInput } from "../types"
+import type { LlmSurfaceId, LlmTransportId } from "@/shared/llm-route-types"
 import { recordingLlmPort } from "./recording-llm"
 import {
   type MatchPolicy,
@@ -43,6 +44,8 @@ export interface ReplayLlmOpts {
   /** Identity for the synthetic port (mirrors what a real adapter exposes). */
   readonly model?: string
   readonly provider?: string
+  readonly surfaceId?: LlmSurfaceId
+  readonly transportId?: LlmTransportId
   readonly authMode?: string
 }
 
@@ -81,6 +84,8 @@ export function replayLlmPort(opts: ReplayLlmOpts): LLMPort {
   const port: LLMPort = {
     ...(opts.model !== undefined ? { model: opts.model } : {}),
     ...(opts.provider !== undefined ? { provider: opts.provider } : {}),
+    ...(opts.surfaceId !== undefined ? { surfaceId: opts.surfaceId } : {}),
+    ...(opts.transportId !== undefined ? { transportId: opts.transportId } : {}),
     ...(opts.authMode !== undefined ? { authMode: opts.authMode } : {}),
     stream(input: StreamInput): AsyncIterable<StreamEvent> {
       async function* run(): AsyncIterable<StreamEvent> {

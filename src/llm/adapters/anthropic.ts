@@ -1,16 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk"
 import { LLMError } from "@/shared/errors"
 import type { LLMPort } from "../ports"
+import { buildAnthropicMessagesRequest } from "../anthropic-messages-codec"
 import { withStreamTimeout } from "../stream-timeout"
-import type {
-  ContentBlock,
-  Message,
-  StreamEvent,
-  StreamInput,
-  SystemPromptInput,
-  ToolChoice,
-} from "../types"
+import type { StreamEvent, StreamInput } from "../types"
 import { buildUsageEvent, parseToolInputOrThrow, resolveAdapterStreamTimeouts } from "./shared"
+export { buildAnthropicMessagesRequest, toAnthropicToolChoice } from "../anthropic-messages-codec"
 
 interface AnthropicConfig {
   apiKey: string
@@ -88,219 +83,12 @@ export type RawDelta =
   // emits this as a content_block_delta just before the block's stop.
   | { type: "signature_delta"; signature: string }
 
-const toAnthropicContent = (block: ContentBlock): Anthropic.ContentBlockParam | null => {
-  switch (block.type) {
-    case "text":
-      return { type: "text", text: block.text }
-    case "tool_use":
-      return { type: "tool_use", id: block.id, name: block.name, input: block.input }
-    case "tool_result":
-      return {
-        type: "tool_result",
-        tool_use_id: block.tool_use_id,
-        // ADR-0126: when the dispatch seam attached `contentBlocks` (image-
-        // bearing tool result), send the structured array on the wire so the
-        // model actually sees the image. Our `ImageBlock` (`{data, mediaType}`)
-        // maps to the SDK's `ImageBlockParam` (`source: {type:"base64",
-        // media_type, data}`). Text parts pass through as `TextBlockParam`.
-        // Absent ⇒ legacy string `content` (byte-identical pre-feature).
-        content:
-          block.contentBlocks !== undefined
-            ? block.contentBlocks.map((p) =>
-                p.type === "text"
-                  ? ({ type: "text", text: p.text } satisfies Anthropic.TextBlockParam)
-                  : ({
-                      type: "image",
-                      source: {
-                        type: "base64",
-                        media_type: p.mediaType as
-                          | "image/jpeg"
-                          | "image/png"
-                          | "image/gif"
-                          | "image/webp",
-                        data: p.data,
-                      },
-                    } satisfies Anthropic.ImageBlockParam),
-              )
-            : block.content,
-        ...(block.is_error ? { is_error: true } : {}),
-      }
-    case "thinking": {
-      // ADR-0076 Gap-2 carry-over: re-send the thinking block so the provider
-      // keeps multi-turn extended-thinking context. The Messages API REQUIRES
-      // the original cryptographic signature back verbatim on plaintext
-      // thinking — without it the request 400s. A redacted block carries its
-      // opaque ciphertext in `thinking` and re-serializes as redacted_thinking.
-      //
-      // Byte-identical guard: when extended-thinking was never enabled, no
-      // ThinkingBlock is ever assembled (assemble.ts only builds one from a
-      // thinking_delta, which adapters emit only under an active budget). A
-      // signature-less plaintext block can therefore only be a stale artifact
-      // (e.g. a hand-built message); we DROP it rather than fail the request,
-      // exactly as the pre-feature path did.
-      //
-      // `satisfies` (not `as`) on both arms — the SDK's `ContentBlockParam`
-      // union exports `RedactedThinkingBlockParam` / `ThinkingBlockParam`
-      // structurally; `satisfies` catches a future required-field widening
-      // at compile time whereas `as` would silently mask it.
-      if (block.redacted) {
-        return {
-          type: "redacted_thinking",
-          data: block.thinking,
-        } satisfies Anthropic.ContentBlockParam
-      }
-      if (block.signature === undefined) return null
-      return {
-        type: "thinking",
-        thinking: block.thinking,
-        signature: block.signature,
-      } satisfies Anthropic.ContentBlockParam
-    }
-    case "image":
-      // ADR-0083 multi-modal: Anthropic Messages API base64 image source. The
-      // media type is narrowed to the SDK's accepted literal set; the CLI
-      // image-loader only ever emits one of these four, so the cast is safe.
-      return {
-        type: "image",
-        source: {
-          type: "base64",
-          media_type: block.mediaType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
-          data: block.data,
-        },
-      } satisfies Anthropic.ContentBlockParam
-    case "document":
-      // ADR-0137 native document block: Anthropic Messages API base64 document
-      // source (PDF only today). The SDK's ContentBlockParam union accepts
-      // `application/pdf` as the media type via the document block param. The
-      // `pdf_read` tool magic-byte-sniffs `%PDF-` BEFORE attaching, so any
-      // block reaching this arm is byte-verified upstream.
-      return {
-        type: "document",
-        source: {
-          type: "base64",
-          media_type: block.mediaType as "application/pdf",
-          data: block.data,
-        },
-      } satisfies Anthropic.ContentBlockParam
-    default: {
-      // Exhaustiveness pin: a future `ContentBlock` variant must come back
-      // here and decide its Anthropic mapping consciously — silent drop is
-      // not acceptable for a content-bearing block. The `never` cast fails
-      // compilation if the union widens; runtime fall-through is impossible.
-      const _exhaustive: never = block
-      return _exhaustive
-    }
-  }
-}
-
-/** Map our system input to Anthropic's `system` param. A plain string passes
- *  through verbatim (legacy behavior). Block form becomes structured text
- *  params; the block flagged `cache:true` gets an ephemeral `cache_control`
- *  breakpoint so the static prefix is cached across turns. */
-const toAnthropicSystem = (system: SystemPromptInput): string | Anthropic.TextBlockParam[] => {
-  if (typeof system === "string") return system
-  return system.map((b) => ({
-    type: "text",
-    text: b.text,
-    ...(b.cache ? { cache_control: { type: "ephemeral" as const } } : {}),
-  }))
-}
-
-/** Mark the LAST TEXT block of the last message with an ephemeral
- *  `cache_control` breakpoint, caching the whole conversation prefix (static
- *  system + prior turns) up to the per-turn tail. Mutates a shallow copy.
- *
- *  R-Phase5 P0-B: the Anthropic API only honors `cache_control` on `text`
- *  blocks (server-side it is silently dropped on `tool_use` / `tool_result` /
- *  `thinking` blocks, AND some SDK / server versions reject the request
- *  outright). The prior implementation blindly stamped the TAIL block — when
- *  the last message ended with a tool_use (assistant just issued a call) or
- *  tool_result (user just returned a result), the breakpoint silently
- *  evaporated and the cache never landed on the conversation prefix.
- *
- *  Walk BACKWARD from the tail to find the last `text` block; attach the
- *  breakpoint there. If no text block exists in the last message (a turn
- *  that's purely tool_use / tool_result with no narration), return unchanged
- *  — the cache prefix on the SYSTEM blocks still applies, and the
- *  conversation-prefix breakpoint just doesn't bind this turn. Pure shallow
- *  copy, no mutation of input. */
-const cacheConversationPrefix = (messages: Anthropic.MessageParam[]): Anthropic.MessageParam[] => {
-  if (messages.length === 0) return messages
-  const lastIdx = messages.length - 1
-  const last = messages[lastIdx] as Anthropic.MessageParam
-  if (typeof last.content === "string" || last.content.length === 0) return messages
-  const blocks = [...last.content]
-  let textIdx = -1
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    if ((blocks[i] as { type?: string }).type === "text") {
-      textIdx = i
-      break
-    }
-  }
-  if (textIdx === -1) return messages
-  blocks[textIdx] = {
-    ...(blocks[textIdx] as Anthropic.TextBlockParam),
-    cache_control: { type: "ephemeral" },
-  } as Anthropic.TextBlockParam
-  const out = [...messages]
-  out[lastIdx] = { ...last, content: blocks }
-  return out
-}
-
-const toAnthropicMessages = (messages: Message[]): Anthropic.MessageParam[] =>
-  messages.map((m) => ({
-    role: m.role,
-    content: m.content
-      .map(toAnthropicContent)
-      .filter((b): b is Anthropic.ContentBlockParam => b !== null),
-  }))
-
-/**
- * ADR-0079 — map our orthogonal {@link ToolChoice} to Anthropic's `tool_choice`
- * shape. Closed switch with a `never` default so adding a new variant is a
- * compile error here AND in the OpenAI adapter. The `auto` case returns
- * `undefined` so callers OMIT the field on the wire — byte-identical to the
- * pre-feature path. A `tool` choice whose `name` is not present in the request
- * `tools` is a caller bug; we throw at the adapter so the request never reaches
- * the provider with an unresolvable name (no silent fallback).
- */
-export const toAnthropicToolChoice = (
-  choice: ToolChoice | undefined,
-  toolNames: readonly string[],
-): Anthropic.MessageCreateParams["tool_choice"] | undefined => {
-  if (choice === undefined) return undefined
-  switch (choice.kind) {
-    case "auto":
-      // Byte-identical to pre-feature: OMIT the field. The SDK default is
-      // auto, so emitting `{type:"auto"}` would be semantically identical
-      // but a different wire payload — we choose the omit form so the
-      // default-OFF promise holds at the byte level.
-      return undefined
-    case "any":
-      return { type: "any" }
-    case "none":
-      return { type: "none" }
-    case "tool":
-      if (!toolNames.includes(choice.name)) {
-        throw new LLMError(
-          `tool_choice references unregistered tool name "${choice.name}" ` +
-            `(registered: ${toolNames.length === 0 ? "<none>" : toolNames.join(", ")})`,
-        )
-      }
-      return { type: "tool", name: choice.name }
-    default: {
-      // Exhaustiveness check — adding a new ToolChoice variant without
-      // updating this switch is a compile error.
-      const _exhaustive: never = choice
-      return _exhaustive
-    }
-  }
-}
-
 export class AnthropicAdapter implements LLMPort {
   private readonly client: Anthropic
   readonly model: string
   readonly provider = "anthropic"
+  readonly surfaceId = "anthropic-messages"
+  readonly transportId = "public"
   readonly authMode = "Anthropic BYOK"
   private readonly maxTokens: number
   readonly betaHeaders: readonly string[]
@@ -332,28 +120,9 @@ export class AnthropicAdapter implements LLMPort {
   }
 
   private async openRawStream(input: StreamInput): Promise<AsyncIterable<RawEvent>> {
-    // ADR-0079 — resolve tool_choice BEFORE the create() call so an
-    // unregistered-tool-name throw surfaces from the same try/catch as any
-    // other request-construction failure. `undefined` ⇒ field omitted on the
-    // wire, byte-identical to the pre-feature path.
-    const toolNames = input.tools.map((t) => t.name)
-    const toolChoice = toAnthropicToolChoice(input.toolChoice, toolNames)
     try {
       return (await this.client.messages.create(
-        {
-          model: this.model,
-          max_tokens: this.maxTokens,
-          stream: true,
-          ...(input.system ? { system: toAnthropicSystem(input.system) } : {}),
-          ...(input.thinking ? { thinking: input.thinking } : {}),
-          messages: cacheConversationPrefix(toAnthropicMessages(input.messages)),
-          tools: input.tools.map((t) => ({
-            name: t.name,
-            description: t.description,
-            input_schema: t.input_schema as Anthropic.Tool.InputSchema,
-          })),
-          ...(toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
-        },
+        buildAnthropicMessagesRequest(this.model, this.maxTokens, input),
         // Caller cancellation: the SDK request-options `signal` aborts the
         // underlying fetch — covers the create()/TTFT phase that the stream
         // wrapper cannot see (it only decorates the AsyncIterable returned

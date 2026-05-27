@@ -8,6 +8,7 @@ import {
   buildResponsesBody,
   ChatGPTOAuthAdapter,
 } from "@/llm/adapters/chatgpt-oauth"
+import { defaultResponsesContinuationStore } from "@/llm"
 import type { StreamEvent, StreamInput } from "@/llm/types"
 import type { TurnTimingCapture } from "@/observability"
 import { LLMError } from "@/shared"
@@ -75,6 +76,34 @@ const seedToken = async (
 const emptyStreamInput = (): StreamInput => ({
   messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
   tools: [],
+})
+
+const inputTurn1 = (): StreamInput => ({
+  messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+  tools: [],
+  promptCacheKey: "lane-1",
+})
+
+const inputTurn2 = (): StreamInput => ({
+  messages: [
+    { role: "user", content: [{ type: "text", text: "hi" }] },
+    { role: "assistant", content: [{ type: "text", text: "hello" }] },
+    { role: "user", content: [{ type: "text", text: "next" }] },
+  ],
+  tools: [],
+  promptCacheKey: "lane-1",
+})
+
+const inputTurn3 = (): StreamInput => ({
+  messages: [
+    { role: "user", content: [{ type: "text", text: "hi" }] },
+    { role: "assistant", content: [{ type: "text", text: "hello" }] },
+    { role: "user", content: [{ type: "text", text: "next" }] },
+    { role: "assistant", content: [{ type: "text", text: "done" }] },
+    { role: "user", content: [{ type: "text", text: "again" }] },
+  ],
+  tools: [],
+  promptCacheKey: "lane-1",
 })
 
 const collect = async (gen: AsyncIterable<StreamEvent>): Promise<StreamEvent[]> => {
@@ -156,7 +185,15 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     expect(h.originator).toBe("codex_cli")
     expect(h.accept).toBe("text/event-stream")
 
-    expect(events[0]).toEqual({ type: "text_delta", delta: "hello" })
+    expect(events.find((e) => e.type === "llm_continuation")).toEqual({
+      type: "llm_continuation",
+      surfaceId: "openai-responses",
+      transportId: "chatgpt-oauth",
+      phase: "prepare",
+      mode: "full",
+      reason: "no_prompt_cache_key",
+    })
+    expect(events.find((e) => e.type === "text_delta")).toEqual({ type: "text_delta", delta: "hello" })
     expect(events.find((e) => e.type === "usage")).toMatchObject({
       type: "usage",
       inputTokens: 3,
@@ -403,6 +440,322 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     expect((caught as LLMError).kind).toBe("rate_limit")
     expect((caught as LLMError).statusCode).toBe(429)
   })
+
+  test("forwards max_output_tokens on the Responses POST", async () => {
+    await seedToken()
+    let postedBody: Record<string, unknown> | null = null
+    const fetchImpl = async (url: string, init?: RequestInit): Promise<Response> => {
+      if (url.includes("/codex/models")) {
+        return catalogResponse([{ model: "gpt-5", is_default: true }])
+      }
+      postedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>
+      return sseResponse([
+        'data: {"type":"response.completed","response":{"usage":{"input_tokens":1,"output_tokens":1}}}\n\n',
+        "data: [DONE]\n\n",
+      ])
+    }
+    const a = new ChatGPTOAuthAdapter({
+      model: "gpt-5",
+      env: { QUANTA_PREFS_HOME: dir },
+      fetchImpl,
+      nowMs: () => FIXED_NOW,
+      maxTokens: 321,
+    })
+    await collect(a.stream(emptyStreamInput()))
+    expect(postedBody).toMatchObject({ max_output_tokens: 321 })
+  })
+
+  test("first-chunk timeout before response headers fails closed as stream_corrupt", async () => {
+    await seedToken()
+    const fetchImpl = async (url: string, init?: RequestInit): Promise<Response> => {
+      if (url.includes("/codex/models")) {
+        return catalogResponse([{ model: "gpt-5", is_default: true }])
+      }
+      return await new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          "abort",
+          () => {
+            reject(init.signal?.reason ?? new Error("aborted"))
+          },
+          { once: true },
+        )
+      })
+    }
+    const a = new ChatGPTOAuthAdapter({
+      model: "gpt-5",
+      env: { QUANTA_PREFS_HOME: dir },
+      fetchImpl,
+      nowMs: () => FIXED_NOW,
+      streamFirstChunkMs: 5,
+      streamIdleMs: 5,
+    })
+    let caught: unknown
+    try {
+      for await (const _ of a.stream(emptyStreamInput())) void _
+    } catch (e) {
+      caught = e
+    }
+    expect(caught).toBeInstanceOf(LLMError)
+    expect((caught as LLMError).kind).toBe("stream_corrupt")
+    expect((caught as LLMError).provider).toBe("chatgpt-oauth")
+    expect((caught as LLMError).message).toContain("first-chunk timeout")
+  })
+
+  test("strict-extension turn uses previous_response_id with delta-only input when a continuation store is wired", async () => {
+    await seedToken()
+    const store = defaultResponsesContinuationStore()
+    const posts: Record<string, unknown>[] = []
+    const fetchImpl = async (url: string, init?: RequestInit): Promise<Response> => {
+      if (url.includes("/codex/models")) {
+        return catalogResponse([{ model: "gpt-5", is_default: true }])
+      }
+      posts.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>)
+      if (posts.length === 1) {
+        return sseResponse([
+          'data: {"type":"response.output_item.done","item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello","annotations":[]}]}}\n\n',
+          'data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5","usage":{"input_tokens":1,"output_tokens":1}}}\n\n',
+          "data: [DONE]\n\n",
+        ])
+      }
+      return sseResponse([
+        'data: {"type":"response.output_item.done","item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done","annotations":[]}]}}\n\n',
+        'data: {"type":"response.completed","response":{"id":"resp_2","model":"gpt-5","usage":{"input_tokens":1,"output_tokens":1}}}\n\n',
+        "data: [DONE]\n\n",
+      ])
+    }
+    const a = new ChatGPTOAuthAdapter({
+      model: "gpt-5",
+      env: { QUANTA_PREFS_HOME: dir },
+      fetchImpl,
+      nowMs: () => FIXED_NOW,
+    })
+
+    await collect(a.stream({ ...inputTurn1(), responsesContinuation: { store } }))
+    const secondTurnEvents = await collect(a.stream({ ...inputTurn2(), responsesContinuation: { store } }))
+
+    expect(posts).toHaveLength(2)
+    expect(posts[0]?.previous_response_id).toBeUndefined()
+    expect(posts[1]?.previous_response_id).toBe("resp_1")
+    expect(posts[1]?.input).toEqual([
+      {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "next" }],
+      },
+    ])
+    expect(secondTurnEvents.find((e) => e.type === "llm_continuation")).toEqual({
+      type: "llm_continuation",
+      surfaceId: "openai-responses",
+      transportId: "chatgpt-oauth",
+      phase: "prepare",
+      mode: "resume",
+      reason: "prepared_resume",
+    })
+  })
+
+  test("404 stale previous_response_id self-heals but does not permanently disable resume for the route", async () => {
+    await seedToken()
+    const store = defaultResponsesContinuationStore()
+    const posts: Record<string, unknown>[] = []
+    const fetchImpl = async (url: string, init?: RequestInit): Promise<Response> => {
+      if (url.includes("/codex/models")) {
+        return catalogResponse([{ model: "gpt-5", is_default: true }])
+      }
+      posts.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>)
+      if (posts.length === 1) {
+        return sseResponse([
+          'data: {"type":"response.output_item.done","item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello","annotations":[]}]}}\n\n',
+          'data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5","usage":{"input_tokens":1,"output_tokens":1}}}\n\n',
+          "data: [DONE]\n\n",
+        ])
+      }
+      if (posts.length === 2) {
+        return new Response('{"error":{"message":"unknown previous response"}}', {
+          status: 404,
+          headers: { "content-type": "application/json" },
+        })
+      }
+      if (posts.length === 3) {
+        return sseResponse([
+          'data: {"type":"response.output_item.done","item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done","annotations":[]}]}}\n\n',
+          'data: {"type":"response.completed","response":{"id":"resp_2","model":"gpt-5","usage":{"input_tokens":3,"output_tokens":1}}}\n\n',
+          "data: [DONE]\n\n",
+        ])
+      }
+      return sseResponse([
+        'data: {"type":"response.output_item.done","item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"again-done","annotations":[]}]}}\n\n',
+        'data: {"type":"response.completed","response":{"id":"resp_3","model":"gpt-5","usage":{"input_tokens":1,"output_tokens":1}}}\n\n',
+        "data: [DONE]\n\n",
+      ])
+    }
+    const a = new ChatGPTOAuthAdapter({
+      model: "gpt-5",
+      env: { QUANTA_PREFS_HOME: dir },
+      fetchImpl,
+      nowMs: () => FIXED_NOW,
+    })
+
+    await collect(a.stream({ ...inputTurn1(), responsesContinuation: { store } }))
+    const secondTurnEvents = await collect(a.stream({ ...inputTurn2(), responsesContinuation: { store } }))
+    await collect(a.stream({ ...inputTurn3(), responsesContinuation: { store } }))
+
+    expect(posts).toHaveLength(4)
+    expect(posts[1]?.previous_response_id).toBe("resp_1")
+    expect((posts[1]?.input as unknown[])?.length).toBe(1)
+    expect(posts[2]?.previous_response_id).toBeUndefined()
+    expect((posts[2]?.input as unknown[])?.length).toBe(3)
+    expect(posts[3]?.previous_response_id).toBe("resp_2")
+    expect(posts[3]?.input).toEqual([
+      {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "again" }],
+      },
+    ])
+    expect(
+      secondTurnEvents.filter((e) => e.type === "llm_continuation"),
+    ).toEqual([
+      {
+        type: "llm_continuation",
+        surfaceId: "openai-responses",
+        transportId: "chatgpt-oauth",
+        phase: "prepare",
+        mode: "resume",
+        reason: "prepared_resume",
+      },
+      {
+        type: "llm_continuation",
+        surfaceId: "openai-responses",
+        transportId: "chatgpt-oauth",
+        phase: "retry",
+        mode: "full_retry",
+        reason: "stale_previous_response",
+        statusCode: 404,
+      },
+    ])
+  })
+
+  test("400 resume rejection self-heals once and permanently disables resume for that route", async () => {
+    await seedToken()
+    const store = defaultResponsesContinuationStore()
+    const posts: Record<string, unknown>[] = []
+    const fetchImpl = async (url: string, init?: RequestInit): Promise<Response> => {
+      if (url.includes("/codex/models")) {
+        return catalogResponse([{ model: "gpt-5", is_default: true }])
+      }
+      posts.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>)
+      if (posts.length === 1) {
+        return sseResponse([
+          'data: {"type":"response.output_item.done","item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello","annotations":[]}]}}\n\n',
+          'data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5","usage":{"input_tokens":1,"output_tokens":1}}}\n\n',
+          "data: [DONE]\n\n",
+        ])
+      }
+      if (posts.length === 2) {
+        return new Response('{"error":{"message":"previous_response_id is not supported here"}}', {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        })
+      }
+      if (posts.length === 3) {
+        return sseResponse([
+          'data: {"type":"response.output_item.done","item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done","annotations":[]}]}}\n\n',
+          'data: {"type":"response.completed","response":{"id":"resp_2","model":"gpt-5","usage":{"input_tokens":3,"output_tokens":1}}}\n\n',
+          "data: [DONE]\n\n",
+        ])
+      }
+      return sseResponse([
+        'data: {"type":"response.output_item.done","item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"again-done","annotations":[]}]}}\n\n',
+        'data: {"type":"response.completed","response":{"id":"resp_3","model":"gpt-5","usage":{"input_tokens":5,"output_tokens":1}}}\n\n',
+        "data: [DONE]\n\n",
+      ])
+    }
+    const a = new ChatGPTOAuthAdapter({
+      model: "gpt-5",
+      env: { QUANTA_PREFS_HOME: dir },
+      fetchImpl,
+      nowMs: () => FIXED_NOW,
+    })
+
+    await collect(a.stream({ ...inputTurn1(), responsesContinuation: { store } }))
+    const secondTurnEvents = await collect(a.stream({ ...inputTurn2(), responsesContinuation: { store } }))
+    await collect(a.stream({ ...inputTurn3(), responsesContinuation: { store } }))
+
+    expect(posts).toHaveLength(4)
+    expect(posts[1]?.previous_response_id).toBe("resp_1")
+    expect((posts[1]?.input as unknown[])?.length).toBe(1)
+    expect(posts[2]?.previous_response_id).toBeUndefined()
+    expect((posts[2]?.input as unknown[])?.length).toBe(3)
+    expect(posts[3]?.previous_response_id).toBeUndefined()
+    expect((posts[3]?.input as unknown[])?.length).toBe(5)
+    expect(
+      secondTurnEvents.filter((e) => e.type === "llm_continuation"),
+    ).toEqual([
+      {
+        type: "llm_continuation",
+        surfaceId: "openai-responses",
+        transportId: "chatgpt-oauth",
+        phase: "prepare",
+        mode: "resume",
+        reason: "prepared_resume",
+      },
+      {
+        type: "llm_continuation",
+        surfaceId: "openai-responses",
+        transportId: "chatgpt-oauth",
+        phase: "retry",
+        mode: "full_retry",
+        reason: "resume_rejected",
+        statusCode: 400,
+      },
+    ])
+  })
+
+  test("response.completed with a response id emits an OpenAI Responses checkpoint", async () => {
+    await seedToken()
+    const checkpoints: unknown[] = []
+    const fetchImpl = async (url: string): Promise<Response> => {
+      if (url.includes("/codex/models")) {
+        return catalogResponse([{ model: "gpt-5", is_default: true }])
+      }
+      return sseResponse([
+        'data: {"type":"response.completed","response":{"id":"resp_123","model":"gpt-5","usage":{"input_tokens":1,"output_tokens":2}}}\n\n',
+        "data: [DONE]\n\n",
+      ])
+    }
+    const a = new ChatGPTOAuthAdapter({
+      model: "gpt-5",
+      env: { QUANTA_PREFS_HOME: dir },
+      fetchImpl,
+      nowMs: () => FIXED_NOW,
+    })
+    const events = await collect(
+      a.stream({
+        ...emptyStreamInput(),
+        promptCacheKey: "session-42",
+        onCheckpoint: (checkpoint) => {
+          checkpoints.push(checkpoint)
+        },
+      }),
+    )
+
+    expect(events.find((e) => e.type === "usage")).toMatchObject({
+      type: "usage",
+      inputTokens: 1,
+      outputTokens: 2,
+      model: "gpt-5",
+    })
+    expect(checkpoints).toEqual([
+      {
+        type: "openai-responses",
+        model: "gpt-5",
+        surfaceId: "openai-responses",
+        transportId: "chatgpt-oauth",
+        responseId: "resp_123",
+        promptCacheKey: "session-42",
+      },
+    ])
+  })
 })
 
 describe("buildResponsesBody", () => {
@@ -501,5 +854,19 @@ describe("buildResponsesBody", () => {
       name: "bash",
       description: "run a command",
     })
+  })
+
+  test("forwards prompt cache routing fields when supplied", () => {
+    const body = buildResponsesBody(
+      {
+        messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+        tools: [],
+        promptCacheKey: "thread-7",
+        promptCacheRetention: "24h",
+      },
+      "gpt-5-codex",
+    )
+    expect(body.prompt_cache_key).toBe("thread-7")
+    expect(body.prompt_cache_retention).toBe("24h")
   })
 })

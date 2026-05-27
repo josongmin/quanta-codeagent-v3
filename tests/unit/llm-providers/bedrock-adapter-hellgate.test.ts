@@ -202,6 +202,27 @@ describe("BedrockProviderAdapter — hellgate", () => {
     expect(log.params?.stream).toBe(true)
   })
 
+  test("HELL-D3: request shaping reuses the canonical Anthropic Messages builder", async () => {
+    const log: CallLog = {}
+    const a = new BedrockProviderAdapter(base(), { clientFactory: recordingFactory(log) })
+    for await (const _ of a.stream({
+      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      system: [{ type: "text", text: "STATIC", cache: true }],
+      tools: [],
+    })) {
+      // drain
+    }
+    expect(log.params?.system).toEqual([
+      { type: "text", text: "STATIC", cache_control: { type: "ephemeral" } },
+    ])
+    expect(log.params?.messages).toEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: "hi", cache_control: { type: "ephemeral" } }],
+      },
+    ])
+  })
+
   test("HELL-E1: SDK throw on create() is mapped to LLMError", async () => {
     const a = new BedrockProviderAdapter(base(), {
       clientFactory: recordingFactory({}, { throwOnCreate: new Error("boom") }),

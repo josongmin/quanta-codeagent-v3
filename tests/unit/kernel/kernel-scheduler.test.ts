@@ -349,6 +349,153 @@ describe("kernel scheduler approval flow", () => {
     expect(turn.state.transcript.streamingAssistantText).toBeUndefined()
   })
 
+  test("maps llm request and continuation host events into session protocol events", async () => {
+    let state = createKernelSessionState({
+      sessionId: "s3b",
+      permissionMode: "default",
+      capabilityManifest: manifest,
+    })
+    const committed: Array<{ types: string[] }> = []
+    const host = {
+      describe: () => ({
+        sessionId: "s3b",
+        permissionMode: "default",
+        capabilityManifest: manifest,
+      }),
+      runTurn: async ({
+        onEvent,
+      }: {
+        onEvent?: (
+          event:
+            | {
+                type: "llm.request"
+                model: string
+                provider?: string
+                surfaceId?: "openai-responses"
+                transportId?: "public"
+                authMode?: string
+              }
+            | {
+                type: "llm.continuation"
+                provider?: string
+                surfaceId: "openai-responses"
+                transportId: "public"
+                phase: "prepare"
+                mode: "resume"
+                reason: "prepared_resume"
+              }
+            | { type: "assistant_text.delta"; delta: string }
+        ) => void
+      }) => {
+        onEvent?.({
+          type: "llm.request",
+          model: "gpt-5",
+          provider: "openai",
+          surfaceId: "openai-responses",
+          transportId: "public",
+          authMode: "OpenAI BYOK",
+        })
+        onEvent?.({
+          type: "llm.continuation",
+          provider: "openai",
+          surfaceId: "openai-responses",
+          transportId: "public",
+          phase: "prepare",
+          mode: "resume",
+          reason: "prepared_resume",
+        })
+        onEvent?.({ type: "assistant_text.delta", delta: "pong" })
+        const messages = messagesOf("ping", "pong")
+        return {
+          outcome: {
+            reason: "completed",
+            turns: 1,
+            messages,
+          } as AgentOutcome,
+          messages,
+        }
+      },
+      close: async () => undefined,
+    }
+    const eventLog = new InMemorySessionEventLog()
+
+    state = (
+      await dispatchSessionCommand(
+        state,
+        {
+          sessionId: "s3b",
+          commandId: "c1",
+          issuedAt: "2026-05-27T00:01:00.000Z",
+          type: "input.append",
+          text: "ping",
+        },
+        {
+          clock: makeClock("2026-05-27T00:01:00.000Z"),
+          eventLog,
+          host,
+        },
+      )
+    ).state
+
+    const turn = await dispatchSessionCommand(
+      state,
+      {
+        sessionId: "s3b",
+        commandId: "c2",
+        issuedAt: "2026-05-27T00:01:01.000Z",
+        expectedRevision: state.revision,
+        type: "turn.run",
+      },
+      {
+        clock: makeClock(
+          "2026-05-27T00:01:01.000Z",
+          "2026-05-27T00:01:02.000Z",
+          "2026-05-27T00:01:03.000Z",
+          "2026-05-27T00:01:04.000Z",
+          "2026-05-27T00:01:05.000Z",
+        ),
+        eventLog,
+        host,
+        onCommitted: ({ events }) => {
+          committed.push({ types: events.map((event) => event.type) })
+        },
+      },
+    )
+
+    expect(turn.events.map((event) => event.type)).toEqual([
+      "turn.started",
+      "session.state.updated",
+      "turn.llm.request",
+      "turn.llm.continuation",
+      "turn.output.delta",
+      "turn.completed",
+      "session.state.updated",
+    ])
+    expect(turn.events[2]).toMatchObject({
+      type: "turn.llm.request",
+      model: "gpt-5",
+      provider: "openai",
+      surfaceId: "openai-responses",
+      transportId: "public",
+      authMode: "OpenAI BYOK",
+    })
+    expect(turn.events[3]).toMatchObject({
+      type: "turn.llm.continuation",
+      provider: "openai",
+      surfaceId: "openai-responses",
+      transportId: "public",
+      phase: "prepare",
+      mode: "resume",
+      reason: "prepared_resume",
+    })
+    expect(committed).toEqual([
+      { types: ["turn.started", "session.state.updated"] },
+      { types: ["turn.llm.request"] },
+      { types: ["turn.llm.continuation"] },
+      { types: ["turn.output.delta"] },
+    ])
+  })
+
   test("maps logical error outcomes to turn.failed with the detailed error message", async () => {
     let state = createKernelSessionState({
       sessionId: "s4",

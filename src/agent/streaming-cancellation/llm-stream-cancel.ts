@@ -119,11 +119,13 @@ export const cancellableStream = (opts: CancellableStreamOpts): CancellableStrea
       }
       case "thinking_delta":
       case "signature_delta":
+      case "llm_continuation":
       case "response_in_progress":
       case "message_stop": {
         // Not salvage-relevant. Thinking/signature reconstruct downstream;
-        // response_in_progress is non-cumulative heartbeat; message_stop is
-        // a terminator handled by the iterator boundary itself.
+        // llm_continuation is wire-routing metadata; response_in_progress is
+        // non-cumulative heartbeat; message_stop is a terminator handled by
+        // the iterator boundary itself.
         return
       }
     }

@@ -31,10 +31,11 @@ import {
   writeToken,
 } from "@/auth/chatgpt-oauth"
 import { LLMError } from "@/shared"
-import type { LLMErrorKind } from "@/shared/errors"
+import { buildResponsesBody } from "../openai-responses-wire"
 import type { LLMPort } from "../ports"
-import { parseToolInputOrThrow } from "./shared"
-import type { Message, StreamEvent, StreamInput, SystemPromptInput, ToolSchema } from "../types"
+import { prepareResponsesContinuationRequest, responsesStatusToKind, streamResponsesSurface } from "../responses-stream"
+import type { StreamEvent, StreamInput } from "../types"
+import { resolveAdapterStreamTimeouts, type AdapterStreamTimeoutConfig } from "./shared"
 
 const RESPONSES_PATH = "/responses"
 const MODELS_PATH = "/models"
@@ -60,7 +61,7 @@ export const __resetCatalogCacheForTest = (): void => {
   modelCatalogCache.clear()
 }
 
-export interface ChatGPTOAuthConfig {
+export interface ChatGPTOAuthConfig extends AdapterStreamTimeoutConfig {
   readonly model: string
   /** Env source for resolveOAuthConfig + token path. The composition root
    *  passes its already-loaded env (mirrors the factory's `EnvLike`
@@ -70,15 +71,7 @@ export interface ChatGPTOAuthConfig {
   readonly fetchImpl?: FetchLike
   /** Test seam: pin time so refresh / expiry checks are deterministic. */
   readonly nowMs?: () => number
-}
-
-const statusToKind = (status: number): LLMErrorKind => {
-  if (status === 401 || status === 403) return "auth"
-  if (status === 429) return "rate_limit"
-  if (status === 404) return "not_found"
-  if (status === 400 || status === 422) return "bad_request"
-  if (status >= 500 && status < 600) return "server_error"
-  return "unknown"
+  readonly maxTokens?: number
 }
 
 /** Refresh the access token if it expires within this many ms — a 1-minute
@@ -91,18 +84,24 @@ export class ChatGPTOAuthAdapter implements LLMPort {
   readonly model: string
   /** Pinned provider id for the pre-stream `llm_request` marker. */
   readonly provider = "chatgpt-oauth"
+  readonly surfaceId = "openai-responses"
+  readonly transportId = "chatgpt-oauth"
   /** Human-readable auth-mode label — distinguishes the subscription path
    *  from a BYOK API-key call in the CLI runtime banner + `/status`. */
   readonly authMode = "ChatGPT subscription"
   private readonly env: Record<string, string | undefined>
   private readonly fetchImpl: FetchLike
   private readonly nowMs: () => number
+  private readonly maxTokens: number | undefined
+  private readonly streamTimeoutMs: { firstChunkMs: number; idleMs: number }
 
   constructor(config: ChatGPTOAuthConfig) {
     this.model = config.model
     this.env = config.env
     this.fetchImpl = config.fetchImpl ?? ((url, init) => fetch(url, init))
     this.nowMs = config.nowMs ?? (() => Date.now())
+    this.maxTokens = config.maxTokens
+    this.streamTimeoutMs = resolveAdapterStreamTimeouts(config)
   }
 
   private async ensureFreshToken(): Promise<TokenRecord> {
@@ -169,7 +168,11 @@ export class ChatGPTOAuthAdapter implements LLMPort {
       throw new LLMError(
         `chatgpt-oauth /models lookup failed: ${res.status} ${res.statusText}` +
           (text ? ` — ${text.slice(0, 200)}` : ""),
-        { kind: statusToKind(res.status), statusCode: res.status, provider: "chatgpt-oauth" },
+        {
+          kind: responsesStatusToKind(res.status),
+          statusCode: res.status,
+          provider: "chatgpt-oauth",
+        },
       )
     }
     const parsed = (await res.json().catch(() => null)) as unknown
@@ -214,6 +217,7 @@ export class ChatGPTOAuthAdapter implements LLMPort {
     const catalog = await this.fetchModelCatalog(baseURL, token, cfg)
     const resolved = this.resolveModelFromCatalog(catalog)
     const effectiveModel = resolved.model
+    const continuationStore = input.responsesContinuation?.store
 
     const url = `${baseURL}${RESPONSES_PATH}`
     const headers: Record<string, string> = {
@@ -227,13 +231,19 @@ export class ChatGPTOAuthAdapter implements LLMPort {
       headers["chatgpt-account-id"] = token.account_id
     }
 
-    const body = buildResponsesBody(input, effectiveModel)
+    const prepared = prepareResponsesContinuationRequest({
+      input,
+      model: effectiveModel,
+      transportId: "chatgpt-oauth",
+      ...(this.maxTokens !== undefined ? { maxOutputTokens: this.maxTokens } : {}),
+      ...(continuationStore !== undefined ? { continuationStore } : {}),
+    })
 
     // DEBUG: dump request body shape (truncate image data URLs) so we can
     // see whether `input_image` parts are reaching the wire. Remove once
     // vision is verified end-to-end.
     if (process.env.QUANTA_DEBUG_OAUTH === "1") {
-      const debugJson = JSON.stringify(body, (_k, v) => {
+      const debugJson = JSON.stringify(prepared.body, (_k, v) => {
         if (typeof v === "string" && v.startsWith("data:") && v.length > 80) {
           return `${v.slice(0, 60)}…[${v.length} chars]`
         }
@@ -242,42 +252,19 @@ export class ChatGPTOAuthAdapter implements LLMPort {
       process.stderr.write(`[oauth body] ${debugJson}\n`)
     }
 
-    // Stamp the actual provider wire boundary after token/catalog preflight.
-    input.turnTimingCapture?.markRequestSent()
-    const res = await this.fetchImpl(url, {
-      method: "POST",
+    yield* streamResponsesSurface({
+      provider: "chatgpt-oauth",
+      transportId: "chatgpt-oauth",
+      model: effectiveModel,
+      input,
+      request: prepared,
+      fetchImpl: this.fetchImpl,
+      url,
       headers,
-      body: JSON.stringify(body),
-      ...(input.signal !== undefined ? { signal: input.signal } : {}),
+      timeoutMs: this.streamTimeoutMs,
+      ...(continuationStore !== undefined ? { continuationStore } : {}),
+      disableResumeOnStatuses: new Set([400, 422]),
     })
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => "")
-      throw new LLMError(
-        `chatgpt-oauth request failed: ${res.status} ${res.statusText}` +
-          (text ? ` — ${text.slice(0, 200)}` : ""),
-        {
-          kind: statusToKind(res.status),
-          statusCode: res.status,
-          provider: "chatgpt-oauth",
-        },
-      )
-    }
-
-    if (res.body === null) {
-      throw new LLMError("chatgpt-oauth response has no body", {
-        kind: "stream_corrupt",
-        provider: "chatgpt-oauth",
-      })
-    }
-
-    // ADR-0234: thread the per-call spinner-stall tick hook into the SSE
-    // parser. This adapter does NOT wrap with `withStreamTimeout` (it parses
-    // raw fetch SSE itself), so the parser carries the same swallow-policy
-    // locally — a faulty surface detector MUST NOT poison the live producer.
-    // Absent ⇒ parser sees `undefined` and skips the call (byte-identical
-    // to pre-feature).
-    yield* parseSSE(res.body, effectiveModel, input.onChunk)
   }
 }
 
@@ -340,333 +327,5 @@ const extractCatalogModels = (
   )
 }
 
-// ────────────────────────────────────────────────────────────────────────
-// StreamInput → Responses API request body
-// ────────────────────────────────────────────────────────────────────────
-
-interface ResponsesInputItem {
-  readonly type: string
-  readonly [k: string]: unknown
-}
-
-const flattenSystem = (s: SystemPromptInput | undefined): string => {
-  if (s === undefined) return ""
-  if (typeof s === "string") return s
-  return s.map((b) => b.text).join("\n\n")
-}
-
-const messageToItems = (m: Message): ResponsesInputItem[] => {
-  const items: ResponsesInputItem[] = []
-  const textParts: ResponsesInputItem[] = []
-  for (const b of m.content) {
-    if (b.type === "text") {
-      textParts.push({
-        type: m.role === "assistant" ? "output_text" : "input_text",
-        text: b.text,
-      })
-    } else if (b.type === "tool_use") {
-      items.push({
-        type: "function_call",
-        call_id: b.id,
-        name: b.name,
-        arguments: JSON.stringify(b.input ?? {}),
-      })
-    } else if (b.type === "tool_result") {
-      // ADR-0126: `b.contentBlocks` (when present) carries image attachments.
-      // The Responses API `function_call_output.output` field is string-only
-      // — use the legacy `b.content` view; structured form ignored at this
-      // surface (vision input would ride elsewhere). Byte-identical.
-      items.push({
-        type: "function_call_output",
-        call_id: b.tool_use_id,
-        output: b.content,
-      })
-    } else if (b.type === "image" && m.role === "user") {
-      // Vision input — Responses API `input_image` part. `detail: "high"`
-      // forces the model to actually attend to the image (some configs
-      // treat absent `detail` as "skip" on large attachments).
-      textParts.push({
-        type: "input_image",
-        image_url: `data:${b.mediaType};base64,${b.data}`,
-      } as unknown as ResponsesInputItem)
-    }
-    // thinking blocks: not surfaced on the Responses input shape — Phase-2.1
-    // follow-up.
-  }
-  if (textParts.length > 0) {
-    items.push({ type: "message", role: m.role, content: textParts })
-  }
-  return items
-}
-
-const toolsToResponsesShape = (tools: readonly ToolSchema[]): readonly ResponsesInputItem[] =>
-  tools.map((t) => ({
-    type: "function",
-    name: t.name,
-    description: t.description,
-    parameters: t.input_schema,
-  }))
-
-/** Fallback instruction string used when the caller provides no `system`.
- *  The Responses API rejects the request with HTTP 400 "Instructions are
- *  required" when this field is absent or empty (probe-verified
- *  2026-05-23), so a non-empty default is mandatory. */
-const DEFAULT_INSTRUCTIONS = "You are a helpful assistant."
-
-export const buildResponsesBody = (input: StreamInput, model: string): Record<string, unknown> => {
-  const items: ResponsesInputItem[] = []
-  for (const m of input.messages) {
-    for (const it of messageToItems(m)) items.push(it)
-  }
-  const sys = flattenSystem(input.system)
-  // ChatGPT-account `/responses` REQUIRES a non-empty `instructions` field —
-  // the system prompt goes here, NOT into the input array as a
-  // `role:"system"` message (probe-verified 400 otherwise). Empty caller
-  // system ⇒ minimal default so the request still composes.
-  const instructions = sys !== "" ? sys : DEFAULT_INSTRUCTIONS
-  // Service-tier knob — matches ChatGPT's "Standard / Fast" toggle. Codex
-  // sends this same field on `/codex/responses`. Values:
-  //   auto      — let backend pick (default)
-  //   default   — standard tier
-  //   flex      — slower, cheaper queue
-  //   priority  — ChatGPT's "Fast" mode (1.5× speed, more usage)
-  //   scale     — high-throughput tier
-  // Set via `QUANTA_SERVICE_TIER`; absent ⇒ omitted (backend default).
-  // `QUANTA_FAST=1` is shorthand for `priority`.
-  const tierRaw = process.env.QUANTA_SERVICE_TIER
-  const tierFromFast = process.env.QUANTA_FAST === "1" ? "priority" : undefined
-  const serviceTier = tierFromFast ?? tierRaw
-
-  // Reasoning effort knob — matches ChatGPT UI's "Low / Medium / High /
-  // Extra High" picker. Responses API spec: `reasoning: { effort }`.
-  // Values: "minimal" | "low" | "medium" | "high"  (Extra High maps to
-  // "high" on the OpenAI API — there is no distinct "extra" value on
-  // the wire). Set via `QUANTA_REASONING_EFFORT`; absent ⇒ omitted
-  // (backend / model default).
-  const effortRaw = process.env.QUANTA_REASONING_EFFORT?.toLowerCase()
-  const reasoningEffort =
-    effortRaw === "minimal" ||
-    effortRaw === "low" ||
-    effortRaw === "medium" ||
-    effortRaw === "high"
-      ? effortRaw
-      : undefined
-
-  return {
-    model,
-    instructions,
-    input: items,
-    stream: true,
-    tools: toolsToResponsesShape(input.tools),
-    parallel_tool_calls: false,
-    store: false,
-    ...(serviceTier !== undefined && serviceTier.length > 0
-      ? { service_tier: serviceTier }
-      : {}),
-    ...(reasoningEffort !== undefined
-      ? { reasoning: { effort: reasoningEffort } }
-      : {}),
-  }
-}
-
-// ────────────────────────────────────────────────────────────────────────
-// SSE parser
-// ────────────────────────────────────────────────────────────────────────
-
-interface SSEEvent {
-  readonly event?: string
-  readonly data: string
-}
-
-const parseSSEEvent = (raw: string): SSEEvent | null => {
-  let event: string | undefined
-  const dataParts: string[] = []
-  for (const line of raw.split("\n")) {
-    if (line.startsWith(":")) continue
-    if (line.startsWith("event:")) event = line.slice(6).trim()
-    else if (line.startsWith("data:")) dataParts.push(line.slice(5).replace(/^ /, ""))
-  }
-  if (dataParts.length === 0) return null
-  return event !== undefined
-    ? { event, data: dataParts.join("\n") }
-    : { data: dataParts.join("\n") }
-}
-
-async function* parseSSEStream(body: ReadableStream<Uint8Array>): AsyncGenerator<SSEEvent> {
-  const reader = body.getReader()
-  const decoder = new TextDecoder()
-  let buf = ""
-  try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buf += decoder.decode(value, { stream: true })
-      let i: number
-      while ((i = buf.indexOf("\n\n")) >= 0) {
-        const raw = buf.slice(0, i)
-        buf = buf.slice(i + 2)
-        const ev = parseSSEEvent(raw)
-        if (ev !== null) yield ev
-      }
-    }
-    if (buf.trim() !== "") {
-      const ev = parseSSEEvent(buf)
-      if (ev !== null) yield ev
-    }
-  } finally {
-    reader.releaseLock()
-  }
-}
-
-interface ResponsesEvent {
-  readonly type?: string
-  readonly delta?: string
-  readonly item?: {
-    type?: string
-    id?: string
-    call_id?: string
-    name?: string
-    arguments?: string
-  }
-  readonly response?: {
-    model?: string
-    usage?: {
-      input_tokens?: number
-      output_tokens?: number
-      cached_input_tokens?: number
-    }
-  }
-  readonly item_id?: string
-}
-
+export { buildResponsesBody }
 const isObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object"
-
-/** ADR-0234: invoke the optional onChunk hook, swallowing any error so a
- *  faulty spinner-stall detector never poisons the SSE producer. Mirrors
- *  `notifyChunkArrival` in `src/llm/stream-timeout.ts` — same contract,
- *  local to this adapter because it parses SSE itself rather than wrapping
- *  with `withStreamTimeout`. */
-const notifyChunkArrival = (onChunk: (() => void) | undefined): void => {
-  if (onChunk === undefined) return
-  try {
-    onChunk()
-  } catch {
-    // Intentionally silent — detector book-keeping must never break the
-    // producer.
-  }
-}
-
-async function* parseSSE(
-  body: ReadableStream<Uint8Array>,
-  fallbackModel: string,
-  onChunk?: () => void,
-): AsyncGenerator<StreamEvent> {
-  const toolCalls = new Map<string, { name: string; args: string }>()
-  let usage: {
-    input: number
-    output: number
-    cached?: number
-    model?: string
-  } | null = null
-
-  for await (const sseEv of parseSSEStream(body)) {
-    if (sseEv.data === "[DONE]") break
-    // ADR-0234: a frame arrived from the wire — bump the per-correlation
-    // `lastEventMs` even when we end up `continue`-ing past it (e.g.
-    // heartbeat / unknown event types). Anchored BEFORE the JSON parse so
-    // a malformed frame that throws still counts as "the stream is alive".
-    notifyChunkArrival(onChunk)
-    let json: unknown
-    try {
-      json = JSON.parse(sseEv.data)
-    } catch (e) {
-      // Wire-level corruption: a `data:` frame whose body is not valid JSON
-      // is unrecoverable for this stream. Other adapters route comparable
-      // SDK-thrown wire errors through `LLMError.fromSdkError` so the typed
-      // `.kind`/`.statusCode` flow is uniform across providers. Do the same
-      // here instead of silently swallowing the frame (and risking dropped
-      // tool calls / silent truncation of the response).
-      throw LLMError.fromSdkError("chatgpt-oauth", e, "chatgpt-oauth SSE parse error")
-    }
-    if (!isObject(json)) continue
-    const ev = json as ResponsesEvent
-    const t = ev.type
-
-    if (t === "response.output_text.delta") {
-      if (typeof ev.delta === "string" && ev.delta !== "") {
-        yield { type: "text_delta", delta: ev.delta }
-      }
-      continue
-    }
-
-    if (t === "response.reasoning_summary_text.delta" || t === "response.reasoning.delta") {
-      if (typeof ev.delta === "string" && ev.delta !== "") {
-        yield { type: "thinking_delta", text: ev.delta }
-      }
-      continue
-    }
-
-    if (t === "response.output_item.added" && ev.item?.type === "function_call") {
-      const id = ev.item.call_id ?? ev.item.id ?? ""
-      const name = ev.item.name ?? ""
-      if (id !== "" && name !== "") {
-        toolCalls.set(id, { name, args: "" })
-        yield { type: "tool_use_start", id, name }
-      }
-      continue
-    }
-
-    if (t === "response.function_call_arguments.delta") {
-      const id = ev.item_id ?? ""
-      const delta = ev.delta ?? ""
-      if (id !== "" && delta !== "") {
-        const slot = toolCalls.get(id)
-        if (slot) slot.args += delta
-        yield { type: "tool_use_delta", id, delta }
-      }
-      continue
-    }
-
-    if (t === "response.output_item.done" && ev.item?.type === "function_call") {
-      const id = ev.item.call_id ?? ev.item.id ?? ""
-      const slot = toolCalls.get(id)
-      const raw = ev.item.arguments ?? slot?.args ?? "{}"
-      const input = parseToolInputOrThrow(raw, id, "chatgpt-oauth", "with-cause")
-      yield { type: "tool_use_end", id, input }
-      toolCalls.delete(id)
-      continue
-    }
-
-    if (t === "response.completed") {
-      const u = ev.response?.usage
-      if (u !== undefined) {
-        usage = {
-          input: u.input_tokens ?? 0,
-          output: u.output_tokens ?? 0,
-          ...(typeof u.cached_input_tokens === "number" ? { cached: u.cached_input_tokens } : {}),
-          ...(typeof ev.response?.model === "string" ? { model: ev.response.model } : {}),
-        }
-      }
-      continue
-    }
-
-    if (t === "response.failed" || t === "response.incomplete") {
-      yield {
-        type: "message_stop",
-        stop_reason: t === "response.failed" ? "error" : "incomplete",
-      }
-      return
-    }
-  }
-
-  if (usage !== null) {
-    yield {
-      type: "usage",
-      inputTokens: usage.input,
-      outputTokens: usage.output,
-      ...(usage.cached !== undefined ? { cacheReadTokens: usage.cached } : {}),
-      model: usage.model ?? fallbackModel,
-    }
-  }
-  yield { type: "message_stop", stop_reason: "end_turn" }
-}

@@ -170,6 +170,20 @@ describe("StdoutStream", () => {
     expect(rendered).toContain("recovery (compact)")
   })
 
+  test("llm_continuation renders a dim continuation status line", () => {
+    new StdoutStream().emit({
+      type: "llm_continuation",
+      provider: "openai",
+      surfaceId: "openai-responses",
+      transportId: "public",
+      phase: "retry",
+      mode: "full_retry",
+      reason: "resume_rejected",
+      statusCode: 400,
+    })
+    expect(out()).toBe(`${DIM}↺ continuation (full_retry/retry: resume_rejected 400)${RESET}\n`)
+  })
+
   test("implements StreamPort.emit and renders all variants once each", () => {
     const events: AgentEvent[] = [
       { type: "turn_start", turn: 1 },

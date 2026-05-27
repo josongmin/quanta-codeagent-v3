@@ -27,7 +27,12 @@ import {
   wrapSubagentRunner,
 } from "@/agent/subagent-typed"
 import type { AgentConfig } from "@/agent/types"
-import type { Message } from "@/llm"
+import {
+  defaultResponsesContinuationStore,
+  responsesContinuationLlmPort,
+  type Message,
+  type ResponsesContinuationStore,
+} from "@/llm"
 import { assembleConfig, type SessionDeps } from "./assemble/config"
 
 export interface SharedExecutionPlaneArgs {
@@ -36,11 +41,14 @@ export interface SharedExecutionPlaneArgs {
   readonly cwd: string
   readonly envSource: Readonly<Record<string, string | undefined>>
   readonly convStore?: ConversationCheckpointStore
+  readonly responsesStore?: ResponsesContinuationStore
 }
 
 type SharedExecutionPlaneDeps = Pick<
   AgentConfig,
+  | "llm"
   | "conversationCheckpoint"
+  | "responsesContinuation"
   | "fork"
   | "forkSession"
   | "delegation"
@@ -55,6 +63,7 @@ export interface SharedExecutionPlaneRuntimeArgs {
   readonly cwd: string
   readonly envSource: Readonly<Record<string, string | undefined>>
   readonly convStore?: ConversationCheckpointStore
+  readonly responsesStore?: ResponsesContinuationStore
 }
 
 const normalizeBgStatus = (status: string): SubagentStatus =>
@@ -120,6 +129,7 @@ export const buildSharedExecutionPlaneSessionDeps = async (
     cwd: args.cwd,
     envSource: args.envSource,
     ...(args.convStore !== undefined ? { convStore: args.convStore } : {}),
+    ...(args.responsesStore !== undefined ? { responsesStore: args.responsesStore } : {}),
   })
 }
 
@@ -127,9 +137,12 @@ export const buildSharedExecutionPlaneRuntimeAugments = async (
   args: SharedExecutionPlaneRuntimeArgs,
 ): Promise<Partial<SharedExecutionPlaneDeps>> => {
   const convStore = args.convStore ?? defaultConversationCheckpointStore()
+  const responsesStore = args.responsesStore ?? defaultResponsesContinuationStore()
   const forkWire = defaultCheckpointBaseWire({ store: convStore })
   const base: Partial<SharedExecutionPlaneDeps> = {
+    llm: responsesContinuationLlmPort({ inner: args.parentConfig.llm, store: responsesStore }),
     conversationCheckpoint: { store: convStore },
+    responsesContinuation: { store: responsesStore },
     fork: { forker: forkWire.base },
     forkSession: { forker: forkWire.forker },
   }

@@ -20,8 +20,8 @@
  *    It NEVER mutates the event or influences control flow.
  *  - **No `AgentEvent` shape change** — every signal comes from events the
  *    loop ALREADY emits (`tool_call`, `tool_result`, `recovery`,
- *    `context_compacted`, `usage`) or from `AgentOutcome.memoryCitations`. We
- *    only consume.
+ *    `context_compacted`, `usage`, `llm_continuation`) or from
+ *    `AgentOutcome.memoryCitations`. We only consume.
  *  - **No secret exposure** — `redactionRollup` count is surfaced (if at all
  *    in a future row), never the redacted span text. HITL deny reason strings
  *    are NOT surfaced (HARD_DENY regex must not leak).
@@ -54,6 +54,8 @@ interface TurnSignals {
   compactions: ReadonlyArray<CompactionMark>
   /** Cumulative usage (last `usage` event wins — providers emit cumulative). */
   usage: { inputTokens: number; outputTokens: number } | undefined
+  /** Responses continuation-wire outcomes surfaced on the agent event rail. */
+  continuation: { resumed: number; retried: number; disabled: number }
 }
 
 interface CompactionMark {
@@ -69,6 +71,7 @@ const freshSignals = (): TurnSignals => ({
   verifyGuardTrips: 0,
   compactions: [],
   usage: undefined,
+  continuation: { resumed: 0, retried: 0, disabled: 0 },
 })
 
 export interface TurnSummaryCollector {
@@ -169,6 +172,15 @@ export const createTurnSummary = (opts: TurnSummaryOptions = {}): TurnSummaryCol
           outputTokens: event.outputTokens,
         }
         return
+      case "llm_continuation":
+        if (event.phase === "prepare" && event.mode === "resume") {
+          signals.continuation.resumed += 1
+        }
+        if (event.phase === "retry" && event.mode === "full_retry") {
+          signals.continuation.retried += 1
+          if (event.reason === "resume_rejected") signals.continuation.disabled += 1
+        }
+        return
       default:
         // Closed-union exhaustiveness: any other event is ignored. We do NOT
         // assert `never` here — the union is large and additive, and the
@@ -227,6 +239,8 @@ const renderSummary = (signals: TurnSignals, outcome: AgentOutcome, ctx: RenderC
   if (memory) lines.push(memory)
   const recovery = formatRecoveryRow(signals)
   if (recovery) lines.push(recovery)
+  const continuation = formatContinuationRow(signals)
+  if (continuation) lines.push(continuation)
   if (ctx.verbose) {
     const usage = formatUsageRow(signals)
     if (usage) lines.push(usage)
@@ -297,6 +311,17 @@ const formatRecoveryRow = (s: TurnSignals): string => {
   return `${gray("⟲ recovery:")} ${parts.join(" · ")}`
 }
 
+/** Continuation row — `↺ continuation: resume×N · retry×M · disabled×K`.
+ *  Hidden when the turn never attempted or retried a Responses resume path. */
+const formatContinuationRow = (s: TurnSignals): string => {
+  const parts: string[] = []
+  if (s.continuation.resumed > 0) parts.push(`resume×${s.continuation.resumed}`)
+  if (s.continuation.retried > 0) parts.push(`retry×${s.continuation.retried}`)
+  if (s.continuation.disabled > 0) parts.push(red(`disabled×${s.continuation.disabled}`))
+  if (parts.length === 0) return ""
+  return `${cyan("↺ continuation:")} ${parts.join(" · ")}`
+}
+
 /** Usage row (verbose only) — `$ Xtok in / Y tok out`. */
 const formatUsageRow = (s: TurnSignals): string => {
   if (s.usage === undefined) return ""
@@ -313,6 +338,7 @@ export const __internal = Object.freeze({
   formatCompactRow,
   formatMemoryRow,
   formatRecoveryRow,
+  formatContinuationRow,
   formatUsageRow,
   renderSummary,
 })

@@ -180,6 +180,50 @@ describe("createTurnSummary: recovery row (excluding compact + unverified)", () 
   })
 })
 
+describe("createTurnSummary: continuation row", () => {
+  test("resume + retry + disable counts surface on one row", () => {
+    const c = createTurnSummary()
+    c.onEvent({
+      type: "llm_continuation",
+      provider: "openai",
+      surfaceId: "openai-responses",
+      transportId: "public",
+      phase: "prepare",
+      mode: "resume",
+      reason: "prepared_resume",
+    })
+    c.onEvent({
+      type: "llm_continuation",
+      provider: "openai",
+      surfaceId: "openai-responses",
+      transportId: "public",
+      phase: "retry",
+      mode: "full_retry",
+      reason: "resume_rejected",
+      statusCode: 400,
+    })
+    const out = stripAnsi(c.render(baseOutcome()))
+    expect(out).toMatch(/continuation:/)
+    expect(out).toMatch(/resume×1/)
+    expect(out).toMatch(/retry×1/)
+    expect(out).toMatch(/disabled×1/)
+  })
+
+  test("full fallback without a resume attempt stays hidden", () => {
+    const c = createTurnSummary()
+    c.onEvent({
+      type: "llm_continuation",
+      provider: "openai",
+      surfaceId: "openai-responses",
+      transportId: "public",
+      phase: "prepare",
+      mode: "full",
+      reason: "no_entry",
+    })
+    expect(stripAnsi(c.render(baseOutcome()))).not.toMatch(/continuation:/)
+  })
+})
+
 describe("createTurnSummary: ANSI escapes + box wrapper", () => {
   test("output contains ANSI escape sequences when colour ON", () => {
     setColorPolicy("on")

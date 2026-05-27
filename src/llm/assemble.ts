@@ -128,6 +128,11 @@ export const assembleFromEvents = (events: StreamEvent[]): AssembledTurn => {
         // reconstructed message is identical whether or not a usage event was
         // emitted. Listed explicitly to satisfy the `default: never` pin below.
         break
+      case "llm_continuation":
+        // Responses continuation routing metadata. Not content; assemblers
+        // must ignore it so the reconstructed message remains stable whether
+        // or not the transport opportunistically resumes.
+        break
       case "message_stop":
         stopReason = ev.stop_reason
         break

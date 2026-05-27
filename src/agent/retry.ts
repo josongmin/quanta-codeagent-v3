@@ -1,4 +1,5 @@
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
+import type { LlmSurfaceId, LlmTransportId } from "@/shared/llm-route-types"
 import { LLMError } from "@/shared"
 import type { ErrorClassifier, RetryRouter } from "./error-routing"
 
@@ -194,6 +195,10 @@ export class RetryingLLM implements LLMPort {
    *  `undefined`) to satisfy `exactOptionalPropertyTypes`, mirroring
    *  `FallbackLLM`. */
   readonly model?: string
+  readonly provider?: string
+  readonly surfaceId?: LlmSurfaceId
+  readonly transportId?: LlmTransportId
+  readonly authMode?: string
   private readonly inner: LLMPort
   private readonly maxRetries: number
   private readonly baseDelayMs: number
@@ -208,6 +213,14 @@ export class RetryingLLM implements LLMPort {
     this.inner = opts.inner
     const innerModel = opts.inner.model
     if (innerModel !== undefined) this.model = innerModel
+    const innerProvider = opts.inner.provider
+    if (innerProvider !== undefined) this.provider = innerProvider
+    const innerSurfaceId = opts.inner.surfaceId
+    if (innerSurfaceId !== undefined) this.surfaceId = innerSurfaceId
+    const innerTransportId = opts.inner.transportId
+    if (innerTransportId !== undefined) this.transportId = innerTransportId
+    const innerAuthMode = opts.inner.authMode
+    if (innerAuthMode !== undefined) this.authMode = innerAuthMode
     this.maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES
     this.baseDelayMs = opts.baseDelayMs ?? DEFAULT_BASE_DELAY_MS
     this.signal = opts.signal

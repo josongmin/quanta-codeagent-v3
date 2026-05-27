@@ -139,6 +139,8 @@ export const withFailureCounter = (
   const port: LLMPort = {
     ...(inner.model !== undefined ? { model: inner.model } : {}),
     ...(inner.provider !== undefined ? { provider: inner.provider } : {}),
+    ...(inner.surfaceId !== undefined ? { surfaceId: inner.surfaceId } : {}),
+    ...(inner.transportId !== undefined ? { transportId: inner.transportId } : {}),
     ...(inner.authMode !== undefined ? { authMode: inner.authMode } : {}),
     async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
       let yielded = false

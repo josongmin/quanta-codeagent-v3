@@ -1,3 +1,14 @@
+import type {
+  LlmCheckpoint,
+  LlmSurfaceId,
+  LlmTransportId,
+  PromptCacheRetention,
+  ResponsesContinuationMode,
+  ResponsesContinuationPhase,
+  ResponsesContinuationReason,
+} from "./target-metadata"
+import type { ResponsesContinuationStore } from "./responses-continuation-store"
+
 export interface Message {
   role: "user" | "assistant"
   content: ContentBlock[]
@@ -176,6 +187,21 @@ export type StreamEvent =
       cacheReadTokens?: number
       model: string
     }
+  /** OpenAI Responses continuation-wire observation. Emitted when a Responses
+   *  surface decides whether to send a full input, resume from a prior
+   *  `previous_response_id`, or self-heal after a resume failure. This is
+   *  transport/control metadata, not assistant content: assemblers and text
+   *  collectors MUST ignore it. The union is closed so new failure / fallback
+   *  reasons become explicit compile-time work across adapters and observers. */
+  | {
+      type: "llm_continuation"
+      surfaceId: LlmSurfaceId
+      transportId: LlmTransportId
+      phase: ResponsesContinuationPhase
+      mode: ResponsesContinuationMode
+      reason: ResponsesContinuationReason
+      statusCode?: number
+    }
   /** Heartbeat: provider is still "thinking" — no new content yet. Surfaced
    *  ONLY by adapters that decode an OpenAI Responses API `response.in_progress`
    *  event (see ADR-0048). Carries an optional human-readable `message`,
@@ -235,6 +261,15 @@ export interface StreamInput {
    *  → absent is byte-identical to the pre-feature path (no signal forwarded,
    *  no behavioural change). */
   signal?: AbortSignal
+  /** Optional stable routing key for OpenAI prompt caching. When present,
+   *  compatible surfaces forward it as `prompt_cache_key` so repeated turns
+   *  in the same logical thread hash into the same cache bucket more often.
+   *  Surfaces that do not expose this concept ignore it. */
+  promptCacheKey?: string
+  /** Optional extended prompt-cache retention knob for compatible OpenAI
+   *  surfaces. Omitted by default; callers that care about longer-lived cache
+   *  prefixes opt in explicitly. */
+  promptCacheRetention?: PromptCacheRetention
   /**
    * Wall-clock capture for the active provider wire request.
    * The loop passes this through so the adapter can stamp the actual POST
@@ -259,4 +294,15 @@ export interface StreamInput {
    * zero behavioural change).
    */
   onChunk?: () => void
+  /** Optional terminal checkpoint sink. Responses surfaces call this when the
+   *  server returns a resumable response id; other surfaces never invoke it.
+   *  Best-effort by contract: adapters swallow callback failures so a caller's
+   *  bookkeeping cannot poison the live stream. */
+  onCheckpoint?: (checkpoint: LlmCheckpoint) => void
+  /** Optional per-session Responses continuation store. Session-owned wrapper
+   *  ports inject this so stateful `previous_response_id` routing stays
+   *  outside the adapter instance and cannot leak across sessions that share
+   *  one boot-time `LLMPort`. Surfaces without a store omit it; adapters fall
+   *  back to their local default. */
+  responsesContinuation?: { store: ResponsesContinuationStore }
 }

@@ -1,5 +1,15 @@
 import type { AgentOutcome } from "@/agent"
-import type { ImageBlock, Message } from "@/llm"
+import type {
+  ImageBlock,
+  Message,
+} from "@/llm"
+import type {
+  LlmSurfaceId,
+  LlmTransportId,
+  ResponsesContinuationMode,
+  ResponsesContinuationPhase,
+  ResponsesContinuationReason,
+} from "@/shared/llm-route-types"
 import type {
   ArtifactRef,
   CapabilityManifest,
@@ -55,12 +65,30 @@ export interface SessionHostTurnResult {
 /**
  * Streaming event variants the SessionHost can yield through `runTurn`'s
  * `onEvent` callback. The scheduler maps these 1-to-1 onto wire events
- * (`turn.output.delta` / `tool.invoked` / `tool.completed`) and the
- * `usage` variant feeds `KernelSessionState.lastTokenUsage` so the next
- * `turn.completed` carries it.
+ * (`turn.output.delta` / `turn.llm.request` / `turn.llm.continuation` /
+ * `tool.invoked` / `tool.completed`) and the `usage` variant feeds
+ * `KernelSessionState.lastTokenUsage` so the next `turn.completed` carries it.
  */
 export type SessionHostTurnEvent =
   | { readonly type: "assistant_text.delta"; readonly delta: string }
+  | {
+      readonly type: "llm.request"
+      readonly model: string
+      readonly provider?: string
+      readonly surfaceId?: LlmSurfaceId
+      readonly transportId?: LlmTransportId
+      readonly authMode?: string
+    }
+  | {
+      readonly type: "llm.continuation"
+      readonly provider?: string
+      readonly surfaceId: LlmSurfaceId
+      readonly transportId: LlmTransportId
+      readonly phase: ResponsesContinuationPhase
+      readonly mode: ResponsesContinuationMode
+      readonly reason: ResponsesContinuationReason
+      readonly statusCode?: number
+    }
   | {
       readonly type: "tool.invoked"
       readonly toolCallId: string

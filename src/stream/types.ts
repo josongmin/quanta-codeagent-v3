@@ -1,3 +1,11 @@
+import type {
+  LlmSurfaceId,
+  LlmTransportId,
+  ResponsesContinuationMode,
+  ResponsesContinuationPhase,
+  ResponsesContinuationReason,
+} from "@/shared/llm-route-types"
+
 /**
  * Cross-slice mirror — keep in sync with @/agent/plan/types.ts; adding fields
  * there MUST also add here. RFC §3.1 slice isolation forbids the import.
@@ -79,10 +87,30 @@ export type AgentEvent =
        *  (API-key) call from a ChatGPT-subscription (OAuth) call so the
        *  user can see which billing line they're hitting. */
       provider?: string
+      /** Optional wire-surface id (`anthropic-messages`,
+       *  `openai-chat-completions`, `openai-responses`). */
+      surfaceId?: LlmSurfaceId
+      /** Optional transport id (`public`, `bedrock`, `vertex`, `foundry`,
+       *  `mantle`, `chatgpt-oauth`). */
+      transportId?: LlmTransportId
       /** Optional human-readable auth-mode label
        *  ("ChatGPT subscription" / "OpenAI BYOK" / …). The renderer paints
        *  this verbatim — keep it short and unambiguous. */
       authMode?: string
+    }
+  // OpenAI Responses continuation-wire observation. Emitted when a stateful
+  // Responses surface chooses full-vs-resume input shaping or self-heals after
+  // a failed `previous_response_id` attempt. Closed union: a new continuation
+  // decision / failure mode must extend every consumer explicitly.
+  | {
+      type: "llm_continuation"
+      provider?: string
+      surfaceId: LlmSurfaceId
+      transportId: LlmTransportId
+      phase: ResponsesContinuationPhase
+      mode: ResponsesContinuationMode
+      reason: ResponsesContinuationReason
+      statusCode?: number
     }
   | { type: "assistant_text"; delta: string }
   // ADR-0048 in-progress heartbeat — surfaced from a provider's

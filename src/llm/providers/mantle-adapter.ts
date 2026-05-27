@@ -34,6 +34,8 @@ import { ProviderError } from "./provider-port"
 export class MantleProviderAdapter implements LlmProvider {
   readonly providerId: ProviderId = "mantle"
   readonly provider = "anthropic"
+  readonly surfaceId = "anthropic-messages"
+  readonly transportId = "mantle"
   readonly authMode = "Anthropic Mantle"
   readonly model: string
 

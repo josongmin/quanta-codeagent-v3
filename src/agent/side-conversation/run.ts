@@ -386,6 +386,7 @@ const drainStream = async (
       messages,
       system: SIDE_CONVERSATION_PROMPT,
       tools,
+      ...(opts.parentSessionId.length > 0 ? { promptCacheKey: opts.parentSessionId } : {}),
       ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
     })) {
       if (opts.signal?.aborted) throw new SideConversationAbortedError()

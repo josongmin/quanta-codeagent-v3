@@ -25,6 +25,8 @@ import { ProviderError } from "./provider-port"
 export class DefaultProviderAdapter implements LlmProvider {
   readonly providerId: ProviderId = "default"
   readonly provider = "anthropic"
+  readonly surfaceId = "anthropic-messages"
+  readonly transportId = "public"
   readonly authMode = "Anthropic BYOK"
   readonly model: string
   private readonly inner: AnthropicAdapter

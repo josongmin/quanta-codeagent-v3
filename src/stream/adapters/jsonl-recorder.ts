@@ -242,6 +242,7 @@ const KIND_MAP: Record<AgentEvent["type"], TrajectoryKind> = {
   session_start: "session_start",
   turn_start: "turn_start",
   llm_request: "llm_request",
+  llm_continuation: "recovery",
   assistant_text: "assistant_text",
   tool_call: "tool_call",
   tool_progress: "tool_progress",
@@ -316,9 +317,18 @@ const dataOf = (e: AgentEvent): Record<string, unknown> => {
     case "turn_start":
       return { turn: e.turn }
     case "llm_request":
-      // RFC-0002 §5.2 llm_request contract: just the model id (scrubbed via
-      // the single makeEvent/redactValue source like every other payload).
-      return { model: e.model }
+      // RFC-0002 §5.2 llm_request contract: model id required, route metadata
+      // optional. The model still flows through the same redaction path as
+      // every other payload field.
+      return {
+        model: e.model,
+        ...(e.provider !== undefined ? { provider: e.provider } : {}),
+        ...(e.surfaceId !== undefined ? { surfaceId: e.surfaceId } : {}),
+        ...(e.transportId !== undefined ? { transportId: e.transportId } : {}),
+        ...(e.authMode !== undefined ? { authMode: e.authMode } : {}),
+      }
+    case "llm_continuation":
+      return llmContinuationData(e)
     case "assistant_text":
       return { delta: e.delta }
     case "tool_call":
@@ -431,6 +441,24 @@ const decisionData = (e: Extract<AgentEvent, { type: "decision" }>): Record<stri
   ...(e.ruleId !== undefined ? { ruleId: e.ruleId } : {}),
   ...(e.hookName !== undefined ? { hookName: e.hookName } : {}),
   ...(e.metadata !== undefined ? { metadata: e.metadata } : {}),
+})
+
+/** Responses continuation-wire observation payload. Rides the existing
+ *  `recovery` family because this is same-turn transport metadata, not a new
+ *  top-level trajectory kind. `reason:"llm_continuation"` keeps the line
+ *  greppable while `continuationReason` carries the closed decision/fallback
+ *  taxonomy from the LLM surface. */
+const llmContinuationData = (
+  e: Extract<AgentEvent, { type: "llm_continuation" }>,
+): Record<string, unknown> => ({
+  reason: "llm_continuation",
+  ...(e.provider !== undefined ? { provider: e.provider } : {}),
+  surfaceId: e.surfaceId,
+  transportId: e.transportId,
+  phase: e.phase,
+  mode: e.mode,
+  continuationReason: e.reason,
+  ...(e.statusCode !== undefined ? { statusCode: e.statusCode } : {}),
 })
 
 /** Knob telemetry (2026-05-26): per-run resolved knob posture payload. The
@@ -605,6 +633,7 @@ const spanOf = (e: AgentEvent, turnSpanId: string): { spanId?: string; parentSpa
     // request.spanId === usage.spanId === `llm:${turnSpanId}`, parented at the
     // turn span. One request → one usage per turn keeps the pair unambiguous.
     case "llm_request":
+    case "llm_continuation":
     case "usage":
       return { spanId: `llm:${turnSpanId}`, parentSpanId: turnSpanId }
     default:

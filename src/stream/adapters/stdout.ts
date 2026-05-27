@@ -134,6 +134,9 @@ export class StdoutStream implements StreamPort {
         this.write(`${DIM}— llm request (${event.model})${badge} —${RESET}\n`)
         break
       }
+      case "llm_continuation":
+        this.write(renderLlmContinuation(event))
+        break
       case "in_progress":
         // ADR-0048: provider "thinking…" heartbeat. The two optional-field
         // branches live in `renderInProgress` so this case stays a single
@@ -246,6 +249,14 @@ const renderInProgress = (event: Extract<AgentEvent, { type: "in_progress" }>): 
   const msg =
     event.message !== undefined && event.message !== "" ? `: ${oneLine(event.message)}` : ""
   return `${DIM}… thinking${pct}${msg}${RESET}\n`
+}
+
+/** OpenAI Responses continuation-wire observation. */
+const renderLlmContinuation = (
+  event: Extract<AgentEvent, { type: "llm_continuation" }>,
+): string => {
+  const status = event.statusCode !== undefined ? ` ${event.statusCode}` : ""
+  return `${DIM}↺ continuation (${event.mode}/${event.phase}: ${event.reason}${status})${RESET}\n`
 }
 
 /** Plan-mode cluster (P3): plan_created one-liner. Format pin —

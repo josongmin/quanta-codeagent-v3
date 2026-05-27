@@ -1,4 +1,4 @@
-import type { LLMPort, Message, ModelCandidate } from "@/llm"
+import type { LLMPort, Message, ModelCandidate, ResponsesContinuationStore } from "@/llm"
 import type { LlmProvider } from "@/llm/providers"
 import type { CodeActionPort, FormatPort, RenameApplyPort, SignatureHelpPort } from "@/lsp"
 import type { EmbedderPort, PersistentStorePort } from "@/memory"
@@ -987,6 +987,15 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   conversationCheckpoint?: { store: ConversationCheckpointStore }
   /**
+   * OpenAI Responses continuation store (helper-only). Session composition
+   * roots wire one lane-scoped store and execution-plane wrappers inject it
+   * into `StreamInput.responsesContinuation` so continuation state remains
+   * session-owned even when one boot-time `LLMPort` is shared across multiple
+   * sessions. Absent ⇒ no explicit store; adapters may fall back to their
+   * local default.
+   */
+  responsesContinuation?: { store: ResponsesContinuationStore }
+  /**
    * ADR-0300 — per-tool granular checkpoint registry. Sibling of
    * {@link conversationCheckpoint} for ADR-0124's conversation face:
    * this slot owns per-tool-call file+task snapshots that the
@@ -1573,6 +1582,7 @@ export type FeaturesConfig = Pick<
   // read them, and keeps the Pick union from drifting away from AgentConfig.
   | "budgetLedger"
   | "conversationCheckpoint"
+  | "responsesContinuation"
   | "llmProvider"
   | "lspPorts"
   | "metrics"

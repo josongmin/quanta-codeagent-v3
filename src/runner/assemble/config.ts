@@ -106,6 +106,10 @@ export interface SessionDeps {
   /** ADR-0124 helper-only conversation checkpoint store. Lets surfaces share
    *  one snapshot store across fork/rewind/recovery consumers. */
   conversationCheckpoint?: AgentConfig["conversationCheckpoint"]
+  /** Session-owned Responses continuation store. Execution-plane wrappers
+   *  consume this to keep `previous_response_id` state off shared adapter
+   *  instances. */
+  responsesContinuation?: AgentConfig["responsesContinuation"]
   /** ADR-0207 helper-only usage/selection cache for cross-session memory
    *  injection and promotion bookkeeping. */
   stage1OutputsStore?: AgentConfig["stage1OutputsStore"]
@@ -293,6 +297,7 @@ const buildExecutionPlaneSpreads = (d: SessionDeps): Partial<AgentConfig> => ({
   ...(d.conversationCheckpoint !== undefined
     ? { conversationCheckpoint: d.conversationCheckpoint }
     : {}),
+  ...(d.responsesContinuation !== undefined ? { responsesContinuation: d.responsesContinuation } : {}),
   ...(d.granularRegistry !== undefined ? { granularRegistry: d.granularRegistry } : {}),
   ...(d.stage1OutputsStore !== undefined ? { stage1OutputsStore: d.stage1OutputsStore } : {}),
   ...(d.automationEngine !== undefined ? { automationEngine: d.automationEngine } : {}),

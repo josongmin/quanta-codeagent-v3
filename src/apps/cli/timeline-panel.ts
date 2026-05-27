@@ -143,6 +143,8 @@ const renderBody = (event: AgentEvent): string => {
       return `turn ${event.turn}`
     case "llm_request":
       return `llm_request ${event.model}`
+    case "llm_continuation":
+      return `llm_continuation ${event.mode} ${event.reason}`
     case "assistant_text":
       return `assistant_text ${event.delta.length}b`
     case "in_progress":

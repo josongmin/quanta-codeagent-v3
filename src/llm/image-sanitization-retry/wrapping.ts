@@ -228,6 +228,8 @@ export const withImageSanitizationRetry = (
   return {
     ...(inner.model !== undefined ? { model: inner.model } : {}),
     ...(inner.provider !== undefined ? { provider: inner.provider } : {}),
+    ...(inner.surfaceId !== undefined ? { surfaceId: inner.surfaceId } : {}),
+    ...(inner.transportId !== undefined ? { transportId: inner.transportId } : {}),
     ...(inner.authMode !== undefined ? { authMode: inner.authMode } : {}),
     async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
       // Attempt loop. `attempt === 0` is the original call; subsequent

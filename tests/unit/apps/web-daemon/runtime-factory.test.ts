@@ -53,11 +53,13 @@ describe("web-daemon runtime factory", () => {
     expect(turn.events.map((event) => event.type)).toEqual([
       "turn.started",
       "session.state.updated",
+      "turn.llm.request",
       "turn.output.delta",
       "turn.output.delta",
       "turn.completed",
       "session.state.updated",
     ])
+    expect(seen).toContain("turn.llm.request")
     expect(seen).toContain("turn.output.delta")
     expect((await session.snapshot()).state.lastAssistantText).toBe("pong")
 

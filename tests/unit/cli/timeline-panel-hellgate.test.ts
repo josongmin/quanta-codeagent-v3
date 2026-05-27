@@ -94,6 +94,22 @@ describe("timeline-panel hellgate", () => {
     for (let i = 1; i <= 5; i++) expect(lastVisible).not.toContain(`turn ${i} `)
   })
 
+  test("formatEventLine renders llm_continuation with mode + reason", () => {
+    const line = formatEventLine(
+      {
+        type: "llm_continuation",
+        provider: "openai",
+        surfaceId: "openai-responses",
+        transportId: "public",
+        phase: "prepare",
+        mode: "resume",
+        reason: "prepared_resume",
+      },
+      0,
+    )
+    expect(line).toContain("llm_continuation resume prepared_resume")
+  })
+
   test("install + emit only writes DECSTBM + paint frames (status bar row untouched)", () => {
     const sink = makeFakeSink()
     const panel = createTimelinePanel({

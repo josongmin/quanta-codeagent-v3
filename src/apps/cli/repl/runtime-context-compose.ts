@@ -3,6 +3,7 @@ import { createOnConfirmReviewerPort } from "@/agent"
 import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import { createClassifierBackedAutoReview } from "@/agent/reviewer-port"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
+import type { ResponsesContinuationStore } from "@/llm"
 import type { PermissionStore, ToolAction } from "@/permission"
 import type { PendingApprovalView } from "@/protocol/session"
 import { composeRuntimeBootstrapContext, type RuntimeContext } from "@/sdk/runtime"
@@ -56,6 +57,7 @@ export interface ComposeCliRuntimeContextArgs {
   readonly loadPermissionStore: () => Promise<PermissionStore | undefined>
   readonly sandboxProfile: CliReviewerSandboxProfile
   readonly convStore?: ConversationCheckpointStore
+  readonly responsesStore?: ResponsesContinuationStore
   readonly envSource?: Readonly<Record<string, string | undefined>>
 }
 
@@ -205,13 +207,14 @@ export const composeCliRuntimeContext = async (
       permissionStore,
       autoReview,
     }),
-    ...(args.convStore !== undefined
+    ...(args.convStore !== undefined || args.responsesStore !== undefined
       ? {
           execution: {
             history: boot.history,
             cwd: boot.cwd,
-            convStore: args.convStore,
             envSource: args.envSource ?? process.env,
+            ...(args.convStore !== undefined ? { convStore: args.convStore } : {}),
+            ...(args.responsesStore !== undefined ? { responsesStore: args.responsesStore } : {}),
           },
         }
       : {}),

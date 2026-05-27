@@ -76,6 +76,66 @@ describe("@/protocol/session codec", () => {
     })
   })
 
+  test("round-trips llm request and continuation session events", () => {
+    const requestRaw = encodeSessionEvent({
+      eventId: "e-llm-1",
+      seq: 5,
+      revision: 7,
+      emittedAt: "2026-05-27T00:00:01.000Z",
+      causedByCommandId: "c-llm",
+      type: "turn.llm.request",
+      model: "gpt-5",
+      provider: "openai",
+      surfaceId: "openai-responses",
+      transportId: "public",
+      authMode: "OpenAI BYOK",
+    })
+    expect(decodeSessionEvent(requestRaw)).toEqual({
+      eventId: "e-llm-1",
+      seq: 5,
+      revision: 7,
+      emittedAt: "2026-05-27T00:00:01.000Z",
+      causedByCommandId: "c-llm",
+      type: "turn.llm.request",
+      model: "gpt-5",
+      provider: "openai",
+      surfaceId: "openai-responses",
+      transportId: "public",
+      authMode: "OpenAI BYOK",
+    })
+
+    const continuationRaw = encodeSessionEvent({
+      eventId: "e-llm-2",
+      seq: 6,
+      revision: 8,
+      emittedAt: "2026-05-27T00:00:02.000Z",
+      causedByCommandId: "c-llm",
+      type: "turn.llm.continuation",
+      provider: "chatgpt-oauth",
+      surfaceId: "openai-responses",
+      transportId: "chatgpt-oauth",
+      phase: "retry",
+      mode: "full_retry",
+      reason: "resume_rejected",
+      statusCode: 400,
+    })
+    expect(decodeSessionEvent(continuationRaw)).toEqual({
+      eventId: "e-llm-2",
+      seq: 6,
+      revision: 8,
+      emittedAt: "2026-05-27T00:00:02.000Z",
+      causedByCommandId: "c-llm",
+      type: "turn.llm.continuation",
+      provider: "chatgpt-oauth",
+      surfaceId: "openai-responses",
+      transportId: "chatgpt-oauth",
+      phase: "retry",
+      mode: "full_retry",
+      reason: "resume_rejected",
+      statusCode: 400,
+    })
+  })
+
   test("round-trips turn.started image attachments", () => {
     const raw = encodeSessionEvent({
       eventId: "e2",

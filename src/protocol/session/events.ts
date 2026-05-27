@@ -1,4 +1,13 @@
-import type { ImageBlock } from "@/llm"
+import type {
+  ImageBlock,
+} from "@/llm"
+import type {
+  LlmSurfaceId,
+  LlmTransportId,
+  ResponsesContinuationMode,
+  ResponsesContinuationPhase,
+  ResponsesContinuationReason,
+} from "@/shared/llm-route-types"
 import type { CapabilityManifest } from "./capabilities"
 import type { ArtifactRef, PendingApprovalView, SessionStateView } from "./snapshot"
 
@@ -49,6 +58,24 @@ export interface TurnCompletedEvent extends SessionEventEnvelope<"turn.completed
 
 export interface TurnOutputDeltaEvent extends SessionEventEnvelope<"turn.output.delta"> {
   readonly delta: string
+}
+
+export interface TurnLlmRequestEvent extends SessionEventEnvelope<"turn.llm.request"> {
+  readonly model: string
+  readonly provider?: string
+  readonly surfaceId?: LlmSurfaceId
+  readonly transportId?: LlmTransportId
+  readonly authMode?: string
+}
+
+export interface TurnLlmContinuationEvent extends SessionEventEnvelope<"turn.llm.continuation"> {
+  readonly provider?: string
+  readonly surfaceId: LlmSurfaceId
+  readonly transportId: LlmTransportId
+  readonly phase: ResponsesContinuationPhase
+  readonly mode: ResponsesContinuationMode
+  readonly reason: ResponsesContinuationReason
+  readonly statusCode?: number
 }
 
 export interface TurnFailedEvent extends SessionEventEnvelope<"turn.failed"> {
@@ -103,6 +130,8 @@ export type SessionEvent =
   | ToolCompletedEvent
   | ToolInvokedEvent
   | TurnCompletedEvent
+  | TurnLlmContinuationEvent
+  | TurnLlmRequestEvent
   | TurnOutputDeltaEvent
   | TurnFailedEvent
   | TurnStartedEvent
@@ -117,6 +146,8 @@ export const SESSION_EVENT_TYPES = [
   "tool.completed",
   "tool.invoked",
   "turn.completed",
+  "turn.llm.continuation",
+  "turn.llm.request",
   "turn.output.delta",
   "turn.failed",
   "turn.started",

@@ -64,6 +64,7 @@ const abortedOutcome = (messages: readonly Message[]): AgentOutcome => ({
 const EMPTY_WIRES: HeadlessRuntimeWires = {
   executionPlane: {
     conversationCheckpoint: false,
+    responsesContinuation: false,
     fork: false,
     forkSession: false,
     delegation: false,

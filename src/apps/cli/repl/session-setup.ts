@@ -6,7 +6,7 @@ import {
   type SessionBootstrapDeps,
   type SessionBootstrapResult,
 } from "@/host/bootstrap"
-import type { ImageBlock, LLMPort, Message } from "@/llm"
+import type { ImageBlock, LLMPort, Message, ResponsesContinuationStore } from "@/llm"
 import type { StructuredLogger } from "@/observability"
 import type { PermissionMode, PermissionStore } from "@/permission"
 import type { PendingApprovalView } from "@/protocol/session"
@@ -163,7 +163,10 @@ export interface SessionSetupResult {
  *  status chrome and interactive prompt-only ports. */
 export const setupSession = async (
   deps: SetupSessionDeps,
-  options: { readonly convStore?: ConversationCheckpointStore } = {},
+  options: {
+    readonly convStore?: ConversationCheckpointStore
+    readonly responsesStore?: ResponsesContinuationStore
+  } = {},
 ): Promise<SessionSetupResult> => {
   const runtime = readSessionRuntimeConfig()
   const featureCfg = readCliFeatureConfig(runtime.env, runtime.stdoutIsTTY, process.stderr.isTTY)
@@ -215,6 +218,7 @@ export const setupSession = async (
     loadPermissionStore: deps.loadPermissionStore,
     sandboxProfile: runtime.sandboxProfile,
     ...(options.convStore !== undefined ? { convStore: options.convStore } : {}),
+    ...(options.responsesStore !== undefined ? { responsesStore: options.responsesStore } : {}),
     envSource: runtime.env,
   })
   // ADR-0269 Phase 3 closure — install the process-level fs-jail decision

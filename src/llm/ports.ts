@@ -1,3 +1,4 @@
+import type { LlmSurfaceId, LlmTransportId } from "@/shared/llm-route-types"
 import type { StreamEvent, StreamInput } from "./types"
 
 export interface LLMPort {
@@ -13,6 +14,13 @@ export interface LLMPort {
    *  auth-mode badge alongside the model. Lightweight test doubles may
    *  omit it; the renderer just paints the model when absent. */
   readonly provider?: string
+  /** Optional canonical wire-surface id (`anthropic-messages`,
+   *  `openai-chat-completions`, `openai-responses`). Lets telemetry separate
+   *  vendor choice from request grammar. */
+  readonly surfaceId?: LlmSurfaceId
+  /** Optional transport id (`public`, `bedrock`, `vertex`, `foundry`,
+   *  `mantle`, `chatgpt-oauth`). Orthogonal to `surfaceId`. */
+  readonly transportId?: LlmTransportId
   /** Optional human-readable auth-mode label
    *  (`"ChatGPT subscription"` / `"OpenAI BYOK"` / `"Anthropic BYOK"`).
    *  Same emission rules as {@link provider}. */

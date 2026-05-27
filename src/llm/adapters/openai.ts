@@ -326,6 +326,8 @@ export class OpenAIAdapter implements LLMPort {
   private readonly client: OpenAI
   readonly model: string
   readonly provider = "openai"
+  readonly surfaceId = "openai-chat-completions"
+  readonly transportId = "public"
   readonly authMode = "OpenAI BYOK"
   private readonly maxTokens: number
   /** T1 stream-hang guard: pinned at construction (env knobs + optional
@@ -352,6 +354,10 @@ export class OpenAIAdapter implements LLMPort {
   }
 
   private async openRawStream(input: StreamInput): Promise<AsyncIterable<RawChunk>> {
+    const promptCacheRetention =
+      input.promptCacheRetention === "in-memory"
+        ? "in_memory"
+        : input.promptCacheRetention
     // Token-cap param naming diverges between OpenAI families:
     //  - Legacy chat models (`gpt-4o`, `gpt-4`, `gpt-3.5-*`, `gpt-4-turbo`,
     //    `chatgpt-4o-latest`, …) accept `max_tokens`.
@@ -382,6 +388,10 @@ export class OpenAIAdapter implements LLMPort {
             type: "function" as const,
             function: { name: t.name, description: t.description, parameters: t.input_schema },
           })),
+          ...(input.promptCacheKey !== undefined ? { prompt_cache_key: input.promptCacheKey } : {}),
+          ...(promptCacheRetention !== undefined
+            ? { prompt_cache_retention: promptCacheRetention }
+            : {}),
           ...(toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
         },
         // Caller cancellation: the SDK request-options `signal` aborts the

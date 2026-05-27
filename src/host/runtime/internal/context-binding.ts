@@ -8,7 +8,12 @@ import type {
   SessionHostSideConversationResult,
   SessionHostTurnEvent,
 } from "@/kernel/session"
-import type { ContentBlock, ImageBlock, Message } from "@/llm"
+import type {
+  ContentBlock,
+  ImageBlock,
+  Message,
+  ResponsesContinuationStore,
+} from "@/llm"
 import { inferReviewKind, reasonCodeFor, type ToolAction } from "@/permission"
 import type { CapabilityManifest, PendingApprovalView } from "@/protocol/session"
 import type {
@@ -86,6 +91,7 @@ interface RuntimeAssemblerContext {
   readonly fork: AgentConfig["fork"]
   readonly forkSession: AgentConfig["forkSession"]
   readonly conversationCheckpoint: AgentConfig["conversationCheckpoint"]
+  readonly responsesContinuation: AgentConfig["responsesContinuation"]
   readonly stage1OutputsStore: AgentConfig["stage1OutputsStore"]
   readonly automationEngine: AgentConfig["automationEngine"]
   readonly admissibility: AgentConfig["admissibility"]
@@ -113,6 +119,7 @@ interface RuntimeContextSnapshot {
   readonly planExitPort?: AgentConfig["planExitPort"]
   readonly userInputPort?: AgentConfig["userInputPort"]
   readonly conversationCheckpoint?: AgentConfig["conversationCheckpoint"]
+  readonly responsesContinuation?: AgentConfig["responsesContinuation"]
   readonly fork?: AgentConfig["fork"]
   readonly forkSession?: AgentConfig["forkSession"]
   readonly delegation?: AgentConfig["delegation"]
@@ -139,6 +146,7 @@ type RuntimeContextPatch = Partial<
     | "planExitPort"
     | "userInputPort"
     | "conversationCheckpoint"
+    | "responsesContinuation"
     | "fork"
     | "forkSession"
     | "delegation"
@@ -181,6 +189,7 @@ interface RuntimeExecutionComposeArgs {
   readonly cwd: string
   readonly envSource: Readonly<Record<string, string | undefined>>
   readonly convStore?: ConversationCheckpointStore
+  readonly responsesStore?: ResponsesContinuationStore
   readonly turnAssembler?: RuntimeAgentTurnAssembler
 }
 
@@ -325,6 +334,7 @@ const buildAssemblerContext = (
   fork: base.fork,
   forkSession: base.forkSession,
   conversationCheckpoint: base.conversationCheckpoint,
+  responsesContinuation: base.responsesContinuation,
   stage1OutputsStore: base.stage1OutputsStore,
   automationEngine: base.automationEngine,
   admissibility: base.admissibility,
@@ -474,6 +484,7 @@ const extendBaseWithExecutionPlane = async (
     cwd: args.cwd,
     envSource: args.envSource,
     ...(args.convStore !== undefined ? { convStore: args.convStore } : {}),
+    ...(args.responsesStore !== undefined ? { responsesStore: args.responsesStore } : {}),
   })
   return { ...args.base, ...augments }
 }
@@ -515,6 +526,7 @@ const buildOptionalSnapshotFields = (
   ...whenDefined("planExitPort", base.planExitPort),
   ...whenDefined("userInputPort", base.userInputPort),
   ...whenDefined("conversationCheckpoint", base.conversationCheckpoint),
+  ...whenDefined("responsesContinuation", base.responsesContinuation),
   ...whenDefined("fork", base.fork),
   ...whenDefined("forkSession", base.forkSession),
   ...whenDefined("delegation", base.delegation),
@@ -820,6 +832,26 @@ const toSessionHostTurnEvent = (event: AgentEvent): SessionHostTurnEvent | undef
       return event.delta.length > 0
         ? { type: "assistant_text.delta", delta: event.delta }
         : undefined
+    case "llm_request":
+      return {
+        type: "llm.request",
+        model: event.model,
+        ...(event.provider !== undefined ? { provider: event.provider } : {}),
+        ...(event.surfaceId !== undefined ? { surfaceId: event.surfaceId } : {}),
+        ...(event.transportId !== undefined ? { transportId: event.transportId } : {}),
+        ...(event.authMode !== undefined ? { authMode: event.authMode } : {}),
+      }
+    case "llm_continuation":
+      return {
+        type: "llm.continuation",
+        ...(event.provider !== undefined ? { provider: event.provider } : {}),
+        surfaceId: event.surfaceId,
+        transportId: event.transportId,
+        phase: event.phase,
+        mode: event.mode,
+        reason: event.reason,
+        ...(event.statusCode !== undefined ? { statusCode: event.statusCode } : {}),
+      }
     case "tool_call":
       return {
         type: "tool.invoked",

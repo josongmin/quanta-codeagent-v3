@@ -5,6 +5,7 @@ import {
   createSubagentBackedGuardianReview,
   materializeReviewerAgent,
 } from "@/agent/tier1/reviewer-subagent"
+import { defaultResponsesContinuationStore } from "@/llm"
 import { buildShellOtelObserver } from "@/observability"
 import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
 import { runSessionCommand as runSessionCommandInner } from "@/runner/session-ops"
@@ -253,7 +254,8 @@ const sessionSetupDeps: Parameters<typeof setupSession>[0] = {
  *  per-turn render sinks; byte-identical default behavior. */
 export const runRepl = async (): Promise<void> => {
   const convStore = defaultConversationCheckpointStore()
-  const setup = await setupSession(sessionSetupDeps, { convStore })
+  const responsesStore = defaultResponsesContinuationStore()
+  const setup = await setupSession(sessionSetupDeps, { convStore, responsesStore })
   const featureCfg = setup.featureCfg
   const surfaceState = createSurfaceState({
     imageQueue: setup.argPrompt ? undefined : buildImageQueue(featureCfg),

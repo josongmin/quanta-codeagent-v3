@@ -5,6 +5,7 @@ import type { LLMProvider } from "@/shared/errors"
 import { AnthropicAdapter } from "./adapters/anthropic"
 import { ChatGPTOAuthAdapter } from "./adapters/chatgpt-oauth"
 import { OpenAIAdapter } from "./adapters/openai"
+import { OpenAIResponsesAdapter } from "./adapters/openai-responses"
 import type { LLMPort } from "./ports"
 
 /** Canonical provider identifier. Re-exports the `LLMProvider` union already
@@ -50,6 +51,10 @@ export interface CreateLLMOptions {
   /** OpenAI-compatible endpoint override (`OPENAI_BASE_URL`). Ignored by
    *  Anthropic. */
   baseURL?: string
+  /** OpenAI wire surface preference. `auto` preserves the current default
+   *  by selecting `responses` on the official OpenAI API and
+   *  `chat-completions` on custom OpenAI-compatible base URLs. */
+  surface?: "auto" | "chat-completions" | "responses"
   /** Anthropic `anthropic-beta` channels. Ignored by OpenAI. */
   betaHeaders?: readonly string[]
   /** Per-adapter completion token cap (adapter default 8192 when omitted). */
@@ -88,8 +93,9 @@ const ADAPTER_REGISTRY: Record<
   Provider,
   (apiKey: string, model: string, opts: CreateLLMOptions, env: EnvLikeDecl) => LLMPort
 > = {
-  openai: (apiKey, model, opts, _env) =>
-    new OpenAIAdapter({
+  openai: (apiKey, model, opts, env) => {
+    const surface = resolveOpenAISurface(opts, env)
+    const shared = {
       apiKey,
       model,
       ...(opts.baseURL !== undefined ? { baseURL: opts.baseURL } : {}),
@@ -98,7 +104,11 @@ const ADAPTER_REGISTRY: Record<
         ? { streamFirstChunkMs: opts.streamFirstChunkMs }
         : {}),
       ...(opts.streamIdleMs !== undefined ? { streamIdleMs: opts.streamIdleMs } : {}),
-    }),
+    }
+    return surface === "responses"
+      ? new OpenAIResponsesAdapter(shared)
+      : new OpenAIAdapter(shared)
+  },
   anthropic: (apiKey, model, opts, _env) =>
     new AnthropicAdapter({
       apiKey,
@@ -116,7 +126,15 @@ const ADAPTER_REGISTRY: Record<
   // and locates `~/.quanta/auth/chatgpt.json` without reading process.env
   // directly.
   "chatgpt-oauth": (_apiKey, model, _opts, env) =>
-    new ChatGPTOAuthAdapter({ model, env }),
+    new ChatGPTOAuthAdapter({
+      model,
+      env,
+      ...(_opts.maxTokens !== undefined ? { maxTokens: _opts.maxTokens } : {}),
+      ...(_opts.streamFirstChunkMs !== undefined
+        ? { streamFirstChunkMs: _opts.streamFirstChunkMs }
+        : {}),
+      ...(_opts.streamIdleMs !== undefined ? { streamIdleMs: _opts.streamIdleMs } : {}),
+    }),
 }
 
 /** Read-only view of the env we consult for provider selection / keys. The
@@ -126,6 +144,26 @@ const ADAPTER_REGISTRY: Record<
  *  `process.env` outside `runtime-config.ts`). The three composition-root call
  *  sites (`cli`/`bench`/`eval`) pass their already-loaded env. */
 export type EnvLike = Record<string, string | undefined>
+
+const resolveOpenAISurface = (
+  opts: CreateLLMOptions,
+  env: EnvLikeDecl,
+): "chat-completions" | "responses" => {
+  const raw = opts.surface ?? env.QUANTA_OPENAI_SURFACE ?? "auto"
+  if (raw === "responses") return "responses"
+  if (raw === "chat-completions") return "chat-completions"
+
+  const baseURL = (opts.baseURL ?? env.OPENAI_BASE_URL)?.replace(/\/+$/, "")
+  if (
+    baseURL === undefined ||
+    baseURL === "" ||
+    baseURL === "https://api.openai.com/v1" ||
+    baseURL === "https://api.openai.com"
+  ) {
+    return "responses"
+  }
+  return "chat-completions"
+}
 
 /** Cheap sync probe — does a ChatGPT-OAuth token file exist on disk? Used
  *  by {@link pickProvider} so a logged-in user gets `chatgpt-oauth` without

@@ -1,9 +1,14 @@
+import { defaultConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import type {
   SessionBootstrapDeps,
   SessionBootstrapResult,
   SessionRuntimeConfigShape,
 } from "@/host/bootstrap"
 import { bootstrapSession } from "@/host/bootstrap"
+import {
+  defaultResponsesContinuationStore,
+  type ResponsesContinuationStore,
+} from "@/llm/responses-continuation-store"
 import type { RuntimeContext, RuntimeFacade, RuntimeSession } from "@/sdk/runtime"
 import {
   attachSessionTransport,
@@ -36,6 +41,8 @@ const buildHeadlessRuntimeArgs = (
   boot: SessionBootstrapResult,
   input: HeadlessRunInput,
   stream: RecordingStream,
+  convStore: ReturnType<typeof defaultConversationCheckpointStore>,
+  responsesStore: ResponsesContinuationStore,
 ): Parameters<typeof createRuntimeFromBootstrap>[0] => ({
   boot,
   stream,
@@ -43,7 +50,9 @@ const buildHeadlessRuntimeArgs = (
   execution: {
     history: boot.history,
     cwd: boot.cwd,
+    convStore,
     envSource: input.env ?? {},
+    responsesStore,
   },
   memoryAuto: {
     env: input.env ?? {},
@@ -73,6 +82,8 @@ export const openHeadlessRuntimeSession = async (
   args: OpenHeadlessRuntimeSessionArgs,
 ): Promise<HeadlessSessionBridge> => {
   const boot = await bootstrapSession(args.deps, args.runtime, {})
+  const convStore = defaultConversationCheckpointStore()
+  const responsesStore = defaultResponsesContinuationStore()
 
   if (args.input.signal) {
     if (args.input.signal.aborted) boot.abort.abort()
@@ -80,7 +91,7 @@ export const openHeadlessRuntimeSession = async (
   }
 
   const { runtime, runtimeContext } = await createRuntimeFromBootstrap(
-    buildHeadlessRuntimeArgs(boot, args.input, args.stream),
+    buildHeadlessRuntimeArgs(boot, args.input, args.stream, convStore, responsesStore),
   )
   const session = await runtime.createSession(buildHeadlessSessionConfig(boot))
   const transportHandle =

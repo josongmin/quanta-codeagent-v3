@@ -28,6 +28,7 @@ describe("T5 headless SDK parity", () => {
     expect(result.cwd).toBe("/tmp/headless")
     expect(result.snapshot?.sessionId).toBe(result.sessionId)
     expect(result.wires.executionPlane).toBeDefined()
+    expect(result.wires.executionPlane.responsesContinuation).toBe(true)
     expect(result.wires.memoryAuto).toBeDefined()
     expect(Array.isArray(result.events)).toBe(true)
     expect(Array.isArray(result.messages)).toBe(true)

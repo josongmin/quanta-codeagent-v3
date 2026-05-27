@@ -44,6 +44,8 @@ export type {
   ToolCompletedEvent,
   ToolInvokedEvent,
   TurnCompletedEvent,
+  TurnLlmContinuationEvent,
+  TurnLlmRequestEvent,
   TurnOutputDeltaEvent,
   TurnFailedEvent,
   TurnStartedEvent,

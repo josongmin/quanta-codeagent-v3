@@ -97,6 +97,8 @@ function defaultHashRequest(req: StreamInput, policy: MatchPolicy): string {
       tools: req.tools,
       thinking: req.thinking ?? null,
       toolChoice: req.toolChoice ?? null,
+      promptCacheKey: req.promptCacheKey ?? null,
+      promptCacheRetention: req.promptCacheRetention ?? null,
     })
   } else if (policy === "messages-only") {
     payload = stableStringify(extractMessagesPayload(req.messages))

@@ -41,9 +41,23 @@ export function recordingLlmPort(opts: RecordingLlmOpts): LLMPort {
   const now = opts.now ?? Date.now
   const hashFn = opts.hashRequest ?? ((req: StreamInput) => defaultHashRequest(req, "exact"))
 
+  const stripEphemeralRequest = (input: StreamInput): StreamInput => {
+    const {
+      signal: _signal,
+      turnTimingCapture: _turnTimingCapture,
+      onChunk: _onChunk,
+      onCheckpoint: _onCheckpoint,
+      responsesContinuation: _responsesContinuation,
+      ...rest
+    } = input
+    return rest
+  }
+
   const port: LLMPort = {
     ...(opts.inner.model !== undefined ? { model: opts.inner.model } : {}),
     ...(opts.inner.provider !== undefined ? { provider: opts.inner.provider } : {}),
+    ...(opts.inner.surfaceId !== undefined ? { surfaceId: opts.inner.surfaceId } : {}),
+    ...(opts.inner.transportId !== undefined ? { transportId: opts.inner.transportId } : {}),
     ...(opts.inner.authMode !== undefined ? { authMode: opts.inner.authMode } : {}),
     stream(input: StreamInput): AsyncIterable<StreamEvent> {
       const startedAt = now()
@@ -71,7 +85,7 @@ export function recordingLlmPort(opts: RecordingLlmOpts): LLMPort {
         const model = opts.inner.model ?? "unknown"
         const baseRecord: RecordedInteraction = {
           id,
-          request: input,
+          request: stripEphemeralRequest(input),
           events: captured.slice(),
           metadata: {
             recordedAt: startedAt,

@@ -12,7 +12,7 @@ import { afterAll, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { LLMPort } from "@/llm"
+import { defaultResponsesContinuationStore, type LLMPort } from "@/llm"
 import type { StreamEvent, StreamInput } from "@/llm"
 import {
   defaultHashRequest,
@@ -308,6 +308,34 @@ describe("B. recordingLlmPort", () => {
       return block?.type === "text" ? block.text : ""
     })
     expect(texts).toEqual(["one", "two", "three"])
+  })
+
+  test("14. recording strips ephemeral runtime-only request fields", async () => {
+    const port = recordingLlmPort({
+      inner: stubInner([{ type: "message_stop", stop_reason: "end_turn" }]),
+      store,
+    })
+    const ctrl = new AbortController()
+    const responsesStore = defaultResponsesContinuationStore()
+    await drain(
+      port.stream(
+        req("ephemeral", {
+          signal: ctrl.signal,
+          onChunk: () => {},
+          onCheckpoint: () => {},
+          responsesContinuation: { store: responsesStore },
+          turnTimingCapture: {
+            markRequestSent: () => {},
+          },
+        }),
+      ),
+    )
+    const loaded = await store.load()
+    expect(loaded[0]?.request.signal).toBeUndefined()
+    expect(loaded[0]?.request.onChunk).toBeUndefined()
+    expect(loaded[0]?.request.onCheckpoint).toBeUndefined()
+    expect(loaded[0]?.request.turnTimingCapture).toBeUndefined()
+    expect(loaded[0]?.request.responsesContinuation).toBeUndefined()
   })
 })
 

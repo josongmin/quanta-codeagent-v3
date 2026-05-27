@@ -41,6 +41,7 @@ export interface CreateRuntimeFacadeArgs extends InternalCreateRuntimeFacadeArgs
 export interface RuntimeWireSummary {
   readonly executionPlane: {
     readonly conversationCheckpoint: boolean
+    readonly responsesContinuation: boolean
     readonly fork: boolean
     readonly forkSession: boolean
     readonly delegation: boolean
@@ -150,6 +151,7 @@ const applyRuntimeFacadeComposeOptions = (
 const summarizeRuntimeSnapshot = (snapshot: RuntimeContextSnapshot): RuntimeWireSummary => ({
   executionPlane: {
     conversationCheckpoint: snapshot.conversationCheckpoint !== undefined,
+    responsesContinuation: snapshot.responsesContinuation !== undefined,
     fork: snapshot.fork !== undefined,
     forkSession: snapshot.forkSession !== undefined,
     delegation: snapshot.delegation !== undefined,

@@ -73,6 +73,7 @@ export interface HeadlessRunInput {
 export interface HeadlessRuntimeWires {
   readonly executionPlane: {
     readonly conversationCheckpoint: boolean
+    readonly responsesContinuation: boolean
     readonly fork: boolean
     readonly forkSession: boolean
     readonly delegation: boolean

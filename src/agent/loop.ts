@@ -251,7 +251,28 @@ const emitLlmRequest = (config: AgentConfig): void => {
     type: "llm_request",
     model: configuredModel(config.llm),
     ...(config.llm.provider !== undefined ? { provider: config.llm.provider } : {}),
+    ...(config.llm.surfaceId !== undefined ? { surfaceId: config.llm.surfaceId } : {}),
+    ...(config.llm.transportId !== undefined ? { transportId: config.llm.transportId } : {}),
     ...(config.llm.authMode !== undefined ? { authMode: config.llm.authMode } : {}),
+  })
+}
+
+/** Observation-only bridge for stateful Responses continuation routing. Keeps
+ *  the authoritative decision in `@/llm` as a `StreamEvent`, then projects it
+ *  onto the agent event rail so jsonl / CLI / dashboards see the same truth. */
+const emitLlmContinuation = (
+  config: AgentConfig,
+  ev: Extract<StreamEvent, { type: "llm_continuation" }>,
+): void => {
+  config.stream.emit({
+    type: "llm_continuation",
+    ...(config.llm.provider !== undefined ? { provider: config.llm.provider } : {}),
+    surfaceId: ev.surfaceId,
+    transportId: ev.transportId,
+    phase: ev.phase,
+    mode: ev.mode,
+    reason: ev.reason,
+    ...(ev.statusCode !== undefined ? { statusCode: ev.statusCode } : {}),
   })
 }
 
@@ -342,6 +363,7 @@ async function* teeUsage(
       : src
   for await (const ev of guarded) {
     if (ev.type === "usage") emitUsage(config, ev, recorder, collector)
+    if (ev.type === "llm_continuation") emitLlmContinuation(config, ev)
     yield ev
   }
 }
@@ -538,6 +560,9 @@ const streamConsume = async (
           tools: specs,
           ...(turnLlm.thinking !== undefined ? { thinking: turnLlm.thinking } : {}),
           ...(toolChoice.kind !== "auto" ? { toolChoice } : {}),
+          ...(config.sessionId !== undefined && config.sessionId.length > 0
+            ? { promptCacheKey: config.sessionId }
+            : {}),
           // Thread the loop's abort signal (user Ctrl+C / cancel) into the LLM
           // stream so an in-flight provider request aborts on cancel instead of
           // hanging the socket until completion/timeout. Same signal already

@@ -469,6 +469,7 @@ describe("ADR-0308 headless second-consumer hellgate", () => {
 
     expect(result).not.toHaveProperty("sessionDeps")
     expect(result.wires.executionPlane.conversationCheckpoint).toBe(true)
+    expect(result.wires.executionPlane.responsesContinuation).toBe(true)
   })
 
   test("CASE 16: subagent-enabled headless runs gain live execution-plane slots", async () => {
@@ -479,6 +480,7 @@ describe("ADR-0308 headless second-consumer hellgate", () => {
     })
 
     expect(result.wires.executionPlane.conversationCheckpoint).toBe(true)
+    expect(result.wires.executionPlane.responsesContinuation).toBe(true)
     expect(result.wires.executionPlane.fork).toBe(true)
     expect(result.wires.executionPlane.forkSession).toBe(true)
     expect(result.wires.executionPlane.delegation).toBe(true)

@@ -146,6 +146,62 @@ describe("JsonlRecorder — RFC-0002 §5.2 new variants", () => {
     expect(line?.data).toEqual({ model: "claude-x" })
   })
 
+  test("llm_request preserves optional route metadata when present", () => {
+    const path = join(dir, "i1.0.jsonl")
+    const rec = new JsonlRecorder(path, { ctx: CTX, ...fixedClocks() })
+    rec.emit({
+      type: "llm_request",
+      model: "gpt-5",
+      provider: "chatgpt-oauth",
+      surfaceId: "openai-responses",
+      transportId: "chatgpt-oauth",
+      authMode: "ChatGPT subscription",
+    })
+    rec.close()
+
+    const [line] = readLines(path)
+    expect(line?.kind).toBe("llm_request")
+    expect(line?.data).toEqual({
+      model: "gpt-5",
+      provider: "chatgpt-oauth",
+      surfaceId: "openai-responses",
+      transportId: "chatgpt-oauth",
+      authMode: "ChatGPT subscription",
+    })
+  })
+
+  test("llm_continuation maps to kind:recovery with continuation payload on the llm span", () => {
+    const path = join(dir, "i1.0.jsonl")
+    const rec = new JsonlRecorder(path, { ctx: CTX, ...fixedClocks() })
+    rec.emit({ type: "turn_start", turn: 1 })
+    rec.emit({ type: "llm_request", model: "gpt-5" })
+    rec.emit({
+      type: "llm_continuation",
+      provider: "openai",
+      surfaceId: "openai-responses",
+      transportId: "public",
+      phase: "prepare",
+      mode: "resume",
+      reason: "prepared_resume",
+    })
+    rec.emit({ type: "usage", inputTokens: 3, outputTokens: 4, model: "gpt-5" })
+    rec.close()
+
+    const [, req, continuation, usage] = readLines(path)
+    expect(continuation?.kind).toBe("recovery")
+    expect(continuation?.data).toEqual({
+      reason: "llm_continuation",
+      provider: "openai",
+      surfaceId: "openai-responses",
+      transportId: "public",
+      phase: "prepare",
+      mode: "resume",
+      continuationReason: "prepared_resume",
+    })
+    expect(req?.spanId).toBe(continuation?.spanId)
+    expect(continuation?.spanId).toBe(usage?.spanId)
+  })
+
   test("§11 span pair: llm_request and the turn's llm_usage share ONE span", () => {
     const path = join(dir, "i1.0.jsonl")
     const rec = new JsonlRecorder(path, { ctx: CTX, ...fixedClocks() })

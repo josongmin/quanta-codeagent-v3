@@ -140,7 +140,13 @@ const categorize = (event: AgentEvent): DebugCategory => {
   const t = event.type
   if (t === "tool_call" || t === "tool_result" || t === "tool_progress") return "tools"
   if (t === "decision") return "decisions"
-  if (t === "llm_request" || t === "usage" || t === "assistant_text" || t === "in_progress") {
+  if (
+    t === "llm_request" ||
+    t === "llm_continuation" ||
+    t === "usage" ||
+    t === "assistant_text" ||
+    t === "in_progress"
+  ) {
     return "llm"
   }
   if (t.startsWith("memory_")) return "memory"
@@ -230,6 +236,8 @@ const formatDetail = (e: AgentEvent): string => {
       return formatDecision(e)
     case "llm_request":
       return `model=${e.model}${e.provider ? ` provider=${e.provider}` : ""}`
+    case "llm_continuation":
+      return `${e.mode} ${e.phase} ${e.reason}${e.statusCode !== undefined ? ` status=${e.statusCode}` : ""}`
     case "usage": {
       const cache = typeof e.cacheReadTokens === "number" ? ` cache=${e.cacheReadTokens}` : ""
       return `in=${e.inputTokens} out=${e.outputTokens}${cache}`

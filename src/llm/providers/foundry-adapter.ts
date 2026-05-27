@@ -40,10 +40,10 @@
 
 import { LLMError } from "@/shared/errors"
 import {
+  buildAnthropicMessagesRequest,
   mapRawEvent,
   type OpenSlots,
   type RawEvent,
-  toAnthropicToolChoice,
 } from "../adapters/anthropic"
 import { resolveAdapterStreamTimeouts } from "../adapters/shared"
 import { withStreamTimeout } from "../stream-timeout"
@@ -212,6 +212,8 @@ const formatEndpoint = (opts: FoundryClientOptions): string => {
 export class FoundryProviderAdapter implements LlmProvider {
   readonly providerId: ProviderId = "foundry"
   readonly provider = "anthropic"
+  readonly surfaceId = "anthropic-messages"
+  readonly transportId = "foundry"
   readonly authMode = "Azure AI Foundry"
   readonly model: string
   readonly endpoint: string
@@ -292,24 +294,12 @@ export class FoundryProviderAdapter implements LlmProvider {
     client: FoundryClientLike,
     input: StreamInput,
   ): Promise<AsyncIterable<RawEvent>> {
-    const toolNames = input.tools.map((t) => t.name)
-    const toolChoice = toAnthropicToolChoice(input.toolChoice, toolNames)
     try {
       return await client.messages.create(
-        {
-          model: this.model,
-          max_tokens: this.maxTokens,
-          stream: true,
-          ...(input.system ? { system: input.system } : {}),
-          ...(input.thinking ? { thinking: input.thinking } : {}),
-          messages: input.messages.map((m) => ({ role: m.role, content: m.content })),
-          tools: input.tools.map((t) => ({
-            name: t.name,
-            description: t.description,
-            input_schema: t.input_schema,
-          })),
-          ...(toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
-        },
+        buildAnthropicMessagesRequest(this.model, this.maxTokens, input) as unknown as Record<
+          string,
+          unknown
+        >,
         input.signal ? { signal: input.signal } : undefined,
       )
     } catch (e) {

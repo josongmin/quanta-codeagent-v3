@@ -525,6 +525,8 @@ describe("Exhaustive AgentEvent switch covers the 6 new variants (drift gate)", 
         return "turn_start"
       case "llm_request":
         return "llm_request"
+      case "llm_continuation":
+        return "llm_continuation"
       case "assistant_text":
         return "assistant_text"
       case "in_progress":
@@ -577,6 +579,16 @@ describe("Exhaustive AgentEvent switch covers the 6 new variants (drift gate)", 
   }
 
   test("each new variant discriminates to its `type` string", () => {
+    expect(
+      discriminate({
+        type: "llm_continuation",
+        surfaceId: "openai-responses",
+        transportId: "public",
+        phase: "prepare",
+        mode: "resume",
+        reason: "prepared_resume",
+      }),
+    ).toBe("llm_continuation")
     expect(discriminate({ type: "plan_created", plan: samplePlan })).toBe("plan_created")
     expect(discriminate({ type: "plan_updated", delta: sampleDelta, version: 1 })).toBe(
       "plan_updated",

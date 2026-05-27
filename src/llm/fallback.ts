@@ -1,4 +1,5 @@
 import { LLMError } from "@/shared"
+import type { LlmSurfaceId, LlmTransportId } from "@/shared/llm-route-types"
 import type { LLMPort } from "./ports"
 import type { StreamEvent, StreamInput } from "./types"
 
@@ -139,6 +140,10 @@ export class FallbackLLM implements LLMPort {
    *  streams from first — so a fallback chain still emits a faithful
    *  pre-stream `llm_request`. Absent if the primary omits `model`. */
   readonly model?: string
+  readonly provider?: string
+  readonly surfaceId?: LlmSurfaceId
+  readonly transportId?: LlmTransportId
+  readonly authMode?: string
 
   constructor(opts: FallbackLLMOptions) {
     if (opts.providers.length === 0) {
@@ -149,6 +154,14 @@ export class FallbackLLM implements LLMPort {
     // an absent model stays absent rather than an explicit `undefined`).
     const primaryModel = opts.providers[0]?.model
     if (primaryModel !== undefined) this.model = primaryModel
+    const primaryProvider = opts.providers[0]?.provider
+    if (primaryProvider !== undefined) this.provider = primaryProvider
+    const primarySurfaceId = opts.providers[0]?.surfaceId
+    if (primarySurfaceId !== undefined) this.surfaceId = primarySurfaceId
+    const primaryTransportId = opts.providers[0]?.transportId
+    if (primaryTransportId !== undefined) this.transportId = primaryTransportId
+    const primaryAuthMode = opts.providers[0]?.authMode
+    if (primaryAuthMode !== undefined) this.authMode = primaryAuthMode
     this.signal = opts.signal
     this.isFallbackTrigger = opts.isFallbackTrigger ?? isFallbackTrigger
     this.metrics = opts.metrics ?? NOOP_FALLBACK_METRICS

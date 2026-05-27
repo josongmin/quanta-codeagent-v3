@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import { defaultConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import { AGENT_MODES } from "@/agent/subagent-typed"
-import type { Message } from "@/llm"
+import {
+  defaultResponsesContinuationStore,
+  type LLMPort,
+  type Message,
+  type StreamEvent,
+  type StreamInput,
+} from "@/llm"
 import type { SessionDeps } from "@/runner/assemble/config"
 import { buildSharedExecutionPlaneSessionDeps } from "@/runner/session-execution-plane"
 import { ToolRegistry } from "@/tool"
@@ -12,7 +18,13 @@ const mkMsg = (text: string): Message => ({
 })
 
 const baseSessionDeps = (): SessionDeps => ({
-  llm: {} as never,
+  llm: {
+    stream: (_input: StreamInput): AsyncIterable<StreamEvent> => ({
+      async *[Symbol.asyncIterator]() {
+        // empty
+      },
+    }),
+  } satisfies LLMPort,
   registry: new ToolRegistry([]),
   stream: { emit: () => {} },
   permission: { mode: "acceptEdits" },
@@ -83,5 +95,39 @@ describe("session execution plane", () => {
     expect(wired.autoBackground?.detector).toBeDefined()
     expect(wired.autoBackground?.proposer).toBeDefined()
     expect(wired.autoBackground?.thresholdMs).toBe(2500)
+  })
+
+  test("execution plane wraps llm with the supplied Responses continuation store", async () => {
+    const seen: StreamInput[] = []
+    const responsesStore = defaultResponsesContinuationStore()
+    const deps = baseSessionDeps()
+    deps.llm = {
+      surfaceId: "openai-responses",
+      stream: (input: StreamInput): AsyncIterable<StreamEvent> => ({
+        async *[Symbol.asyncIterator]() {
+          seen.push(input)
+        },
+      }),
+    }
+    const wired = await buildSharedExecutionPlaneSessionDeps({
+      history: [mkMsg("seed")],
+      sessionDeps: deps,
+      cwd: deps.cwd,
+      convStore: defaultConversationCheckpointStore(),
+      responsesStore,
+      envSource: {},
+    })
+
+    expect(wired.responsesContinuation?.store).toBe(responsesStore)
+    expect(wired.llm).toBeDefined()
+    for await (const _ of wired.llm!.stream({
+      messages: [mkMsg("hi")],
+      tools: [],
+    })) {
+      // drain
+    }
+
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.responsesContinuation?.store).toBe(responsesStore)
   })
 })

@@ -168,6 +168,25 @@ describe("debug-tracer · per-variant lines", () => {
     expect(ln).toContain("provider=openai")
   })
 
+  test("llm_continuation renders mode + reason + status", () => {
+    const { trace, lines } = makeTracer()
+    trace({
+      type: "llm_continuation",
+      provider: "chatgpt-oauth",
+      surfaceId: "openai-responses",
+      transportId: "chatgpt-oauth",
+      phase: "retry",
+      mode: "full_retry",
+      reason: "resume_rejected",
+      statusCode: 400,
+    })
+    expect(lines).toHaveLength(1)
+    const ln = lines[0] ?? ""
+    expect(ln).toContain("llm_continuation")
+    expect(ln).toContain("full_retry retry resume_rejected")
+    expect(ln).toContain("status=400")
+  })
+
   test("recovery renders reason + truncated detail", () => {
     const { trace, lines } = makeTracer()
     trace({ type: "recovery", reason: "backoff", detail: "rate-limit retry in 1s" })

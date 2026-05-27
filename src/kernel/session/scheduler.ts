@@ -293,6 +293,54 @@ const emitTurnStreamEvent = async (args: {
   readonly emitted: SessionEvent
 }> => {
   switch (args.event.type) {
+    case "llm.request": {
+      const nextState: KernelSessionState = {
+        ...args.state,
+        revision: args.state.revision + 1,
+        seq: args.state.seq + 1,
+      }
+      const sessionEvent: SessionEvent = {
+        eventId: crypto.randomUUID(),
+        seq: nextState.seq,
+        revision: nextState.revision,
+        emittedAt: args.ctx.clock.now().toISOString(),
+        causedByCommandId: args.command.commandId,
+        type: "turn.llm.request",
+        model: args.event.model,
+        ...(args.event.provider !== undefined ? { provider: args.event.provider } : {}),
+        ...(args.event.surfaceId !== undefined ? { surfaceId: args.event.surfaceId } : {}),
+        ...(args.event.transportId !== undefined ? { transportId: args.event.transportId } : {}),
+        ...(args.event.authMode !== undefined ? { authMode: args.event.authMode } : {}),
+      }
+      await appendEvents(args.ctx.eventLog, [sessionEvent])
+      await args.ctx.onCommitted?.({ state: nextState, events: [sessionEvent] })
+      return { state: nextState, emitted: sessionEvent }
+    }
+    case "llm.continuation": {
+      const nextState: KernelSessionState = {
+        ...args.state,
+        revision: args.state.revision + 1,
+        seq: args.state.seq + 1,
+      }
+      const sessionEvent: SessionEvent = {
+        eventId: crypto.randomUUID(),
+        seq: nextState.seq,
+        revision: nextState.revision,
+        emittedAt: args.ctx.clock.now().toISOString(),
+        causedByCommandId: args.command.commandId,
+        type: "turn.llm.continuation",
+        ...(args.event.provider !== undefined ? { provider: args.event.provider } : {}),
+        surfaceId: args.event.surfaceId,
+        transportId: args.event.transportId,
+        phase: args.event.phase,
+        mode: args.event.mode,
+        reason: args.event.reason,
+        ...(args.event.statusCode !== undefined ? { statusCode: args.event.statusCode } : {}),
+      }
+      await appendEvents(args.ctx.eventLog, [sessionEvent])
+      await args.ctx.onCommitted?.({ state: nextState, events: [sessionEvent] })
+      return { state: nextState, emitted: sessionEvent }
+    }
     case "assistant_text.delta": {
       const nextText = `${args.state.transcript.streamingAssistantText ?? ""}${args.event.delta}`
       const nextState: KernelSessionState = {
