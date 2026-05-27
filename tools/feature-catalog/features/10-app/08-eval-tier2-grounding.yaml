@@ -43,7 +43,11 @@ purpose: |
   broader report payload, `regress` emits its own structured verdict artifact
   instead of reusing compare output, workflow orchestration consumes run and
   baseline JSON authority instead of scraping stdout with `sed`, and
-  `runGrounding` supports bounded concurrency for live corpora.
+  `runGrounding` supports bounded concurrency for live corpora. The CLI accepts
+  `--store-dir DIR` so isolated test fixtures, replayed artifacts, and ad-hoc
+  analysis do not have to share the repo-default `evals/runs`. Report/gate/
+  compare/regress load only the targeted run JSONL instead of rescanning the
+  entire eval history for every lookup.
 evidence:
   code:
     - src/apps/eval/grounding/schema.ts
@@ -98,3 +102,7 @@ notes: |
   parser/scorer/report/compare versions. The live workflow now persists
   `*-run.json`, `*-gate.json`, and `*-regress.json` artifacts so postmortem
   analysis reads structured authority instead of stdout reconstruction.
+  `summary_equivalence` pair scoring is cross-bucket by design: the summary
+  role lives in the `summary_equivalence` bucket, but its raw/source pair may
+  remain in the original failure bucket such as `tool_noise` or
+  `stale_context_trap`.
