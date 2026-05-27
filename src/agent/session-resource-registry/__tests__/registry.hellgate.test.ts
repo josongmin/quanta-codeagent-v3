@@ -315,3 +315,34 @@ describe("ADR-0386 §T — TTL sweep affects listing too", () => {
     expect(ids).not.toContain("also-alive")
   })
 })
+
+// R1-audit strengthening — fresh-snapshot invariant
+describe("ADR-0386 §U — listSessionIds returns a fresh snapshot, not a live view", () => {
+  test("caller mutation of returned array does NOT affect future calls", () => {
+    const reg = createInMemorySessionResourceRegistry()
+    reg.getOrCreate("a")
+    reg.getOrCreate("b")
+    const ids = reg.listSessionIds() as string[]
+    // Caller attempts to corrupt the underlying state through the
+    // returned array. The port doc promises a fresh-array snapshot;
+    // this push MUST NOT leak into the registry.
+    try {
+      ids.push("hax")
+    } catch {
+      // Frozen arrays are also acceptable (caller mutation simply throws).
+    }
+    const idsAgain = reg.listSessionIds()
+    expect(idsAgain).not.toContain("hax")
+    expect(idsAgain.length).toBe(2)
+  })
+
+  test("returned array reference is NOT the internal map's key array", () => {
+    const reg = createInMemorySessionResourceRegistry()
+    reg.getOrCreate("a")
+    const first = reg.listSessionIds()
+    const second = reg.listSessionIds()
+    // Two calls return INDEPENDENT arrays (no shared reference). If
+    // they shared a reference, sorting one would affect the other.
+    expect(first).not.toBe(second)
+  })
+})

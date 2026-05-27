@@ -572,4 +572,76 @@ describe("ADR-0386 /session-registry evict --pattern <glob>", () => {
     expect(reg.peek("safe-1")).not.toBeNull()
     expect(reg.peek(".*")).not.toBeNull()
   })
+
+  // R1-audit strengthening — full regex-metachar matrix
+  test("[37] glob injection — every regex metachar is escaped literally (NOT a wildcard)", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    // Each metachar paired with a "decoy" id that would match if the
+    // metachar leaked through. Pattern is the literal char; decoy must
+    // NEVER be evicted.
+    const metas = [
+      { pattern: "+", decoy: "x", literal: "+" },
+      { pattern: "(", decoy: "y", literal: "(" },
+      { pattern: ")", decoy: "z", literal: ")" },
+      { pattern: "|", decoy: "a", literal: "|" },
+      { pattern: "[", decoy: "b", literal: "[" },
+      { pattern: "]", decoy: "c", literal: "]" },
+      { pattern: "{", decoy: "d", literal: "{" },
+      { pattern: "}", decoy: "e", literal: "}" },
+      { pattern: "^", decoy: "f", literal: "^" },
+      { pattern: "$", decoy: "g", literal: "$" },
+      { pattern: "\\", decoy: "h", literal: "\\" },
+    ]
+    for (const { pattern, decoy, literal } of metas) {
+      const reg = getGlobalSessionResourceRegistry()
+      reg.evict(decoy)
+      reg.evict(literal)
+      reg.getOrCreate(decoy)
+      reg.getOrCreate(literal)
+      const ctx = makeCtx()
+      await cmd.run(["evict", "--pattern", pattern], ctx)
+      // Decoy MUST survive — the metachar did not escape the glob alphabet.
+      expect(reg.peek(decoy)).not.toBeNull()
+      // Literal id matching the pattern is evicted iff the pattern is anchored
+      // (`^...$`) and matches the literal — for single-char metas this means
+      // only the literal id is evicted, never the decoy.
+      reg.evict(literal)
+      reg.evict(decoy)
+    }
+  })
+
+  test('[38] empty pattern — `evict --pattern ""` ⇒ usage on stderr + exit 1', async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const ctx = makeCtx()
+    const exit = await cmd.run(["evict", "--pattern", ""], ctx)
+    expect(exit).toBe(1)
+    expect(ctx.errBuf.join("")).toContain("usage")
+  })
+
+  test("[39] safety-cap — production code MUST refuse before any evict fires (spy on evict)", async () => {
+    // Spy on the global registry's evict to prove order-of-operations:
+    // listSessionIds → cap check → (NEVER reach evict loop when > cap).
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const reg = getGlobalSessionResourceRegistry()
+    for (let i = 0; i < 105; i++) reg.getOrCreate(`spy-${i}`)
+    let evictCount = 0
+    const originalEvict = reg.evict.bind(reg)
+    ;(reg as unknown as { evict: (id: string) => void }).evict = (id: string) => {
+      evictCount += 1
+      originalEvict(id)
+    }
+    const ctx = makeCtx()
+    const exit = await cmd.run(["evict", "--pattern", "spy-*"], ctx)
+    expect(exit).toBe(1)
+    // CRITICAL — cap check fires BEFORE the evict loop. Zero evicts.
+    expect(evictCount).toBe(0)
+    // Restore the original method so subsequent tests aren't affected.
+    ;(reg as unknown as { evict: (id: string) => void }).evict = originalEvict
+  })
 })

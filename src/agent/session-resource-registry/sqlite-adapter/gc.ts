@@ -159,6 +159,13 @@ const runWalUpgrade = (
   if (typeof cfg.walSizeThresholdBytes !== "number") {
     return { walRestarted: false, walTruncated: false }
   }
+  // R1-audit (cross-cut F2) — Reject non-finite / negative thresholds so
+  // `walSize <= -1` does not falsely escalate every sweep. ADR-0390's
+  // auto-sweep resolver already rejects, but the slice contract holds
+  // here as defense-in-depth for direct callers of `sweepSqliteRegistry`.
+  if (!Number.isFinite(cfg.walSizeThresholdBytes) || cfg.walSizeThresholdBytes < 0) {
+    return { walRestarted: false, walTruncated: false }
+  }
   const walSize = readWalSize(cfg.databasePath)
   if (walSize <= cfg.walSizeThresholdBytes) {
     return { walRestarted: false, walTruncated: false }

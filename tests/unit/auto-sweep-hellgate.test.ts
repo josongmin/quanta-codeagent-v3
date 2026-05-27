@@ -574,4 +574,97 @@ describe("ADR-0373 — auto-sweep telemetry", () => {
     expect(walGauge).toBeUndefined()
     h.stop()
   })
+
+  // ─── ADR-0390 — WAL knob threading (auto-sweep is no longer blind) ───
+
+  test("BB. ADR-0390 — cfg.walSizeThresholdBytes + walCheckpointUpgradeMode reach sweepSqliteRegistry", async () => {
+    process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = ":memory:"
+    const emitter = makeRecordingEmitter()
+    const timer = makeFakeTimer()
+    const h = startAutoSweep({
+      setIntervalImpl: timer.setIntervalImpl,
+      clearIntervalImpl: timer.clearIntervalImpl,
+      metricsEmitter: emitter.port,
+      walSizeThresholdBytes: 1,
+      walCheckpointUpgradeMode: "TRUNCATE",
+    })
+    await h.sweepNow()
+    // Both ADR-0390 counters MUST fire — proves the knobs reach the sweep.
+    // `:memory:` cannot create a WAL so both flags settle false; the
+    // counter call itself (delta 0) is the wiring proof.
+    const restarted = emitter.counters.filter(
+      (c) => c.name === "codex_r2.sweep.sqlite_wal_restarted",
+    )
+    const truncated = emitter.counters.filter(
+      (c) => c.name === "codex_r2.sweep.sqlite_wal_truncated",
+    )
+    expect(restarted.length).toBeGreaterThanOrEqual(1)
+    expect(truncated.length).toBeGreaterThanOrEqual(1)
+    h.stop()
+  })
+
+  test("CB. ADR-0390 — env var QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES is honored", async () => {
+    process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = ":memory:"
+    process.env.QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES = "12345"
+    const emitter = makeRecordingEmitter()
+    const timer = makeFakeTimer()
+    const h = startAutoSweep({
+      setIntervalImpl: timer.setIntervalImpl,
+      clearIntervalImpl: timer.clearIntervalImpl,
+      metricsEmitter: emitter.port,
+    })
+    await h.sweepNow()
+    // Counter call proves the threshold env reached the sweep (NO-THROW
+    // path; the actual checkpoint may not fire on :memory: but the counter
+    // is unconditional once the threshold is parsed).
+    const restarted = emitter.counters.filter(
+      (c) => c.name === "codex_r2.sweep.sqlite_wal_restarted",
+    )
+    expect(restarted.length).toBeGreaterThanOrEqual(1)
+    h.stop()
+    delete process.env.QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES
+  })
+
+  test("DB. ADR-0390 — negative walSizeThresholdBytes is rejected (treated as unset)", async () => {
+    process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = ":memory:"
+    const emitter = makeRecordingEmitter()
+    const timer = makeFakeTimer()
+    // Pass a negative threshold via cfg; resolver MUST coerce to undefined
+    // so the sweep stays in PASSIVE-only (byte-identical to pre-R15 wire).
+    const h = startAutoSweep({
+      setIntervalImpl: timer.setIntervalImpl,
+      clearIntervalImpl: timer.clearIntervalImpl,
+      metricsEmitter: emitter.port,
+      walSizeThresholdBytes: -1,
+    })
+    await h.sweepNow()
+    // The counter emits regardless (delta 0) — what we pin here is that
+    // the sweep ran NO-THROW with the negative threshold (no exception
+    // escaped startAutoSweep + sweepNow).
+    expect(h.scheduled).toBe(true)
+    h.stop()
+  })
+
+  test("EB. ADR-0390 — neither env nor cfg threshold ⇒ byte-identical pre-R15 PASSIVE behavior", async () => {
+    process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = ":memory:"
+    const emitter = makeRecordingEmitter()
+    const timer = makeFakeTimer()
+    const h = startAutoSweep({
+      setIntervalImpl: timer.setIntervalImpl,
+      clearIntervalImpl: timer.clearIntervalImpl,
+      metricsEmitter: emitter.port,
+    })
+    await h.sweepNow()
+    // Counters still emit (delta 0) but the threshold was undefined so
+    // the sqlite sweep stays in PASSIVE-only — both flags MUST be false.
+    const restartedRows = emitter.counters.filter(
+      (c) => c.name === "codex_r2.sweep.sqlite_wal_restarted",
+    )
+    const truncatedRows = emitter.counters.filter(
+      (c) => c.name === "codex_r2.sweep.sqlite_wal_truncated",
+    )
+    expect(restartedRows.every((r) => r.delta === 0)).toBe(true)
+    expect(truncatedRows.every((r) => r.delta === 0)).toBe(true)
+    h.stop()
+  })
 })

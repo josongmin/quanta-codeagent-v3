@@ -406,11 +406,11 @@ describe("ADR-0361 sweepSqliteRegistry — hellgate", () => {
     db.exec("PRAGMA journal_mode = WAL")
     for (let i = 0; i < 100; i++) seedSession(db, `s${i}`, 1000 + i, 100)
     // DO NOT close — leave the WAL on disk so threshold check sees > 0 bytes.
-    let walExists = false
+    let walSizeBefore = 0
     try {
-      walExists = statSync(`${path}-wal`).size > 0
+      walSizeBefore = statSync(`${path}-wal`).size
     } catch {
-      walExists = false
+      walSizeBefore = 0
     }
     db.close()
     const res = sweepSqliteRegistry({
@@ -418,17 +418,28 @@ describe("ADR-0361 sweepSqliteRegistry — hellgate", () => {
       walSizeThresholdBytes: 1,
       walCheckpointUpgradeMode: "TRUNCATE",
     })
-    // If the WAL actually had content pre-sweep, TRUNCATE must have run.
-    // If close() drained it away, walTruncated may be false — but
-    // walRestarted MUST stay false either way (we picked TRUNCATE mode).
+    // ADR-0385 contract: TRUNCATE mode selected, threshold = 1 ⇒ the
+    // sweep MUST never set walRestarted, regardless of whether the WAL
+    // existed pre-sweep.
     expect(res.walRestarted).toBe(false)
-    expect(typeof res.walTruncated).toBe("boolean")
-    if (walExists) {
-      // Path was reachable; the truncate call either succeeded
-      // (walTruncated=true) or failed NO-THROW (walTruncated=false).
-      // Both are valid outcomes for case KK.
+    // R1-audit-strengthened: if the WAL actually existed pre-sweep, the
+    // TRUNCATE branch MUST have run. db.close() may drain WAL via a
+    // checkpoint, but `walSizeBefore > 0` is captured BEFORE close, so a
+    // positive value proves the WAL was real when the sweep was queued.
+    // The threshold check inside the sweep re-reads, so we ALSO require
+    // the actual post-sweep size to be at most the pre-sweep size (TRUNCATE
+    // never grows the WAL).
+    if (walSizeBefore > 0) {
+      expect(res.walTruncated).toBe(true)
+    } else {
+      // Some environments drain WAL via close-time checkpoint before our
+      // sweep can observe it; in that case the threshold check sees 0 and
+      // both flags MUST stay false (no escalation when there's nothing
+      // to truncate).
+      expect(res.walTruncated).toBe(false)
     }
     expect(res.checkpointed).toBe(true)
+    expect(res.walSize).toBeLessThanOrEqual(walSizeBefore)
     cleanup()
   })
 
@@ -558,13 +569,23 @@ describe("ADR-0361 sweepSqliteRegistry — hellgate", () => {
     cleanup()
   })
 
-  test("[RR] NO-THROW — invalid mode coerces to noop boolean (defense in depth)", () => {
-    // The type prevents this at compile time, but the runtime contract is
-    // "any failure ⇒ walTruncated false, sweep still succeeds".
+  test("[RR] NO-THROW — invalid mode is REJECTED by ALLOWED_UPGRADE_MODES whitelist (both flags false)", () => {
+    // ADR-0385 §"Why a whitelist" — `ALLOWED_UPGRADE_MODES` MUST reject
+    // unknown strings before reaching the PRAGMA literal. This case
+    // forces the WAL above threshold via a real journal file so the
+    // ONLY thing keeping `walRestarted` false is the whitelist reject.
     const { path, cleanup } = makeTmp()
     const db = new Database(path)
     applyMigrations(db)
-    seedSession(db, "s1", 1000, 10)
+    db.exec("PRAGMA journal_mode = WAL")
+    for (let i = 0; i < 100; i++) seedSession(db, `s${i}`, 1000 + i, 100)
+    // Don't close — keep the WAL on disk so the threshold check sees > 1 byte.
+    let walSizeBefore = 0
+    try {
+      walSizeBefore = statSync(`${path}-wal`).size
+    } catch {
+      walSizeBefore = 0
+    }
     db.close()
     const res = sweepSqliteRegistry({
       databasePath: path,
@@ -572,12 +593,17 @@ describe("ADR-0361 sweepSqliteRegistry — hellgate", () => {
       // Cast: simulate downstream caller passing a stray value.
       walCheckpointUpgradeMode: "BOGUS" as unknown as "TRUNCATE",
     })
-    // The sweep must NOT throw. Either:
-    //   - the adapter rejects the unknown mode (both flags false), OR
-    //   - the adapter passes it to SQLite which errors NO-THROW.
-    // The mutual exclusion invariant still holds.
-    expect(res.walRestarted && res.walTruncated).toBe(false)
+    // R1-audit-strengthened. PRE-sweep WAL was non-zero (when the
+    // close-time checkpoint did not drain it); if the whitelist did not
+    // reject, sweep would fall through to RESTART default + set
+    // `walRestarted=true`. We assert BOTH flags false to pin the
+    // whitelist reject path.
+    expect(res.walRestarted).toBe(false)
+    expect(res.walTruncated).toBe(false)
     expect(res.checkpointed).toBe(true)
+    // Strengthens against a future regression where BOGUS coerces to "":
+    // walSize MUST never grow under an unknown mode.
+    expect(res.walSize).toBeLessThanOrEqual(Math.max(walSizeBefore, 0))
     cleanup()
   })
 

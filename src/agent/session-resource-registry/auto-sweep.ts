@@ -76,6 +76,7 @@
 import type { MetricEmitterPort } from "@/observability/codex-r2-metrics/types"
 import { sweepDiskRegistry } from "./disk-adapter/gc"
 import { sweepSqliteRegistry } from "./sqlite-adapter/gc"
+import type { SqliteRegistryConfig } from "./sqlite-adapter/types"
 
 /** Configuration for `startAutoSweep`. All fields optional. */
 export interface AutoSweepConfig {
@@ -128,6 +129,24 @@ export interface AutoSweepConfig {
    * absent the slice is byte-identical to ADR-0369.
    */
   readonly metricsEmitter?: MetricEmitterPort
+  /**
+   * ADR-0390 — forward to {@link SqliteRegistryConfig.walSizeThresholdBytes}.
+   * When supplied (and the env-resolved sqlitePath is non-empty), the
+   * auto-sweep's sqlite pass runs the ADR-0375 RESTART check (or ADR-0385
+   * TRUNCATE when {@link walCheckpointUpgradeMode} is also set). Default
+   * absent ⇒ PASSIVE-only checkpoint, byte-identical to pre-R15 auto-sweep.
+   *
+   * Negative / non-finite values are rejected here (treated as absent) to
+   * spare every caller the same guard.
+   */
+  readonly walSizeThresholdBytes?: number
+  /**
+   * ADR-0390 — forward to {@link SqliteRegistryConfig.walCheckpointUpgradeMode}.
+   * Only meaningful when {@link walSizeThresholdBytes} is also set. Unknown
+   * strings reach `sweepSqliteRegistry` which silently coerces to noop
+   * per ADR-0385's `ALLOWED_UPGRADE_MODES` whitelist.
+   */
+  readonly walCheckpointUpgradeMode?: SqliteRegistryConfig["walCheckpointUpgradeMode"]
 }
 
 /**
@@ -180,6 +199,10 @@ const NOOP_HANDLE: AutoSweepHandle = {
 /** Env var names — kept here so the wire is single-sourced. */
 const DISK_DIR_ENV = "QUANTA_SESSION_REGISTRY_DISK_DIR"
 const SQLITE_PATH_ENV = "QUANTA_SESSION_REGISTRY_SQLITE_PATH"
+/** ADR-0390 — env override for ADR-0375 WAL size threshold. Parsed as base-10 integer; non-finite ⇒ unset. */
+const WAL_THRESHOLD_ENV = "QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES"
+/** ADR-0390 — env override for ADR-0385 WAL upgrade mode. Whitelist enforced downstream. */
+const WAL_MODE_ENV = "QUANTA_SESSION_REGISTRY_WAL_CHECKPOINT_MODE"
 
 const resolveDiskDir = (cfg: AutoSweepConfig | undefined): string => {
   // Explicit cfg field wins over env. Empty string is treated as unset
@@ -193,6 +216,38 @@ const resolveSqlitePath = (cfg: AutoSweepConfig | undefined): string => {
   if (typeof cfg?.sqlitePath === "string") return cfg.sqlitePath
   const fromEnv = process.env[SQLITE_PATH_ENV]
   return typeof fromEnv === "string" ? fromEnv : ""
+}
+
+/**
+ * ADR-0390 — resolve the WAL size threshold for the sqlite sweep.
+ * cfg wins over env. Negative / NaN / non-finite ⇒ undefined so
+ * `sweepSqliteRegistry` falls back to PASSIVE-only (byte-identical
+ * to pre-R15 auto-sweep).
+ */
+const resolveWalThresholdBytes = (cfg: AutoSweepConfig | undefined): number | undefined => {
+  if (typeof cfg?.walSizeThresholdBytes === "number") {
+    return Number.isFinite(cfg.walSizeThresholdBytes) && cfg.walSizeThresholdBytes >= 0
+      ? cfg.walSizeThresholdBytes
+      : undefined
+  }
+  const fromEnv = process.env[WAL_THRESHOLD_ENV]
+  if (typeof fromEnv !== "string" || fromEnv.length === 0) return undefined
+  const parsed = Number.parseInt(fromEnv, 10)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined
+}
+
+/**
+ * ADR-0390 — resolve the WAL upgrade mode. cfg wins over env. Unknown
+ * strings forwarded as-is; `sweepSqliteRegistry`'s `ALLOWED_UPGRADE_MODES`
+ * whitelist silently coerces them to noop (defense in depth).
+ */
+const resolveWalUpgradeMode = (
+  cfg: AutoSweepConfig | undefined,
+): SqliteRegistryConfig["walCheckpointUpgradeMode"] => {
+  if (typeof cfg?.walCheckpointUpgradeMode === "string") return cfg.walCheckpointUpgradeMode
+  const fromEnv = process.env[WAL_MODE_ENV]
+  if (typeof fromEnv !== "string" || fromEnv.length === 0) return undefined
+  return fromEnv as SqliteRegistryConfig["walCheckpointUpgradeMode"]
 }
 
 /**
@@ -237,6 +292,42 @@ const safeLatency = (emitter: MetricEmitterPort | undefined, value: number): voi
 }
 
 /**
+ * ADR-0390 — Run one sqlite sweep with the WAL knobs threaded. Extracted
+ * from `sweepOnce` so the per-backend dispatch stays under the cognitive
+ * complexity cap. NO-THROW: caller guards.
+ */
+const runSqliteSweep = (
+  sqlitePath: string,
+  now: () => number,
+  metricsEmitter: MetricEmitterPort | undefined,
+  walSizeThresholdBytes: number | undefined,
+  walCheckpointUpgradeMode: SqliteRegistryConfig["walCheckpointUpgradeMode"],
+): void => {
+  const sqliteCfg: SqliteRegistryConfig = { databasePath: sqlitePath, now }
+  if (walSizeThresholdBytes !== undefined) {
+    ;(
+      sqliteCfg as { -readonly [K in keyof SqliteRegistryConfig]: SqliteRegistryConfig[K] }
+    ).walSizeThresholdBytes = walSizeThresholdBytes
+  }
+  if (walCheckpointUpgradeMode !== undefined) {
+    ;(
+      sqliteCfg as { -readonly [K in keyof SqliteRegistryConfig]: SqliteRegistryConfig[K] }
+    ).walCheckpointUpgradeMode = walCheckpointUpgradeMode
+  }
+  const result = sweepSqliteRegistry(sqliteCfg)
+  const totalEvicted = result.evictedByTtl + result.evictedBySize
+  safeCounter(metricsEmitter, "codex_r2.sweep.sqlite_evicted", totalEvicted)
+  safeCounter(metricsEmitter, "codex_r2.sweep.sqlite_checkpointed", result.checkpointed ? 1 : 0)
+  // ADR-0378 — Post-sweep WAL size gauge.
+  safeGauge(metricsEmitter, "codex_r2.sqlite.wal_bytes", result.walSize)
+  // ADR-0390 — Wiring proof counters. Always emit (delta 0 when the
+  // upgrade did not fire) so operators can confirm the knob is reaching
+  // the sweep even on a quiet workload.
+  safeCounter(metricsEmitter, "codex_r2.sweep.sqlite_wal_restarted", result.walRestarted ? 1 : 0)
+  safeCounter(metricsEmitter, "codex_r2.sweep.sqlite_wal_truncated", result.walTruncated ? 1 : 0)
+}
+
+/**
  * Run one sweep over both configured backends. NO-THROW: any error
  * inside `sweepDiskRegistry` or `sweepSqliteRegistry` is swallowed so
  * the timer survives.
@@ -250,6 +341,8 @@ const sweepOnce = async (
   sqlitePath: string,
   now: () => number,
   metricsEmitter: MetricEmitterPort | undefined,
+  walSizeThresholdBytes: number | undefined,
+  walCheckpointUpgradeMode: SqliteRegistryConfig["walCheckpointUpgradeMode"],
 ): Promise<void> => {
   // Use the injected `now` clock for the wall-clock measurement too so
   // tests can drive latency deterministically. ADR-0373 telemetry value
@@ -273,14 +366,13 @@ const sweepOnce = async (
   }
   if (sqlitePath.length > 0) {
     try {
-      const result = sweepSqliteRegistry({ databasePath: sqlitePath, now })
-      const totalEvicted = result.evictedByTtl + result.evictedBySize
-      safeCounter(metricsEmitter, "codex_r2.sweep.sqlite_evicted", totalEvicted)
-      safeCounter(metricsEmitter, "codex_r2.sweep.sqlite_checkpointed", result.checkpointed ? 1 : 0)
-      // ADR-0378 — Surface post-sweep WAL size as a gauge so operators can
-      // measure ADR-0375 threshold drift without external sqlite shell. 0
-      // when WAL missing (drained) or unobservable (permission error).
-      safeGauge(metricsEmitter, "codex_r2.sqlite.wal_bytes", result.walSize)
+      runSqliteSweep(
+        sqlitePath,
+        now,
+        metricsEmitter,
+        walSizeThresholdBytes,
+        walCheckpointUpgradeMode,
+      )
     } catch {
       // NO-THROW.
     }
@@ -324,11 +416,16 @@ export const startAutoSweep = (cfg?: AutoSweepConfig): AutoSweepHandle => {
   const sched = cfg?.setIntervalImpl ?? setInterval
   const cancel = cfg?.clearIntervalImpl ?? clearInterval
   const emitter = cfg?.metricsEmitter
+  // ADR-0390 — Resolve once at start. Periodic ticks pin the values they
+  // saw at `startAutoSweep` time; env changes mid-process require a
+  // restart (same convention as `diskDir` / `sqlitePath`).
+  const walSizeThresholdBytes = resolveWalThresholdBytes(cfg)
+  const walCheckpointUpgradeMode = resolveWalUpgradeMode(cfg)
 
   // On-startup sweep. Fire-and-forget; callers can `await sweepNow()`
   // to synchronise. We DO NOT await here to keep `startAutoSweep`
   // itself synchronous + cheap.
-  void sweepOnce(diskDir, sqlitePath, now, emitter)
+  void sweepOnce(diskDir, sqlitePath, now, emitter, walSizeThresholdBytes, walCheckpointUpgradeMode)
 
   let timer: NodeJS.Timeout | null = null
   let stopped = false
@@ -336,7 +433,14 @@ export const startAutoSweep = (cfg?: AutoSweepConfig): AutoSweepHandle => {
   if (intervalMs > 0) {
     timer = sched(() => {
       if (stopped) return
-      void sweepOnce(diskDir, sqlitePath, now, emitter)
+      void sweepOnce(
+        diskDir,
+        sqlitePath,
+        now,
+        emitter,
+        walSizeThresholdBytes,
+        walCheckpointUpgradeMode,
+      )
     }, intervalMs)
   }
 
@@ -355,7 +459,14 @@ export const startAutoSweep = (cfg?: AutoSweepConfig): AutoSweepHandle => {
   }
 
   const sweepNow = async (): Promise<void> => {
-    await sweepOnce(diskDir, sqlitePath, now, emitter)
+    await sweepOnce(
+      diskDir,
+      sqlitePath,
+      now,
+      emitter,
+      walSizeThresholdBytes,
+      walCheckpointUpgradeMode,
+    )
   }
 
   return { stop, sweepNow, scheduled: timer !== null }
