@@ -65,12 +65,42 @@ export interface SqliteRegistryConfig {
    * WAL after ~10 days. PASSIVE may complete without shrinking the WAL
    * (writers proceed concurrently; the WAL keeps growing). RESTART
    * blocks new writers until the WAL is drained — safe but briefly
-   * pauses writes. Sibling TRUNCATE (drop WAL to size 0) is intentionally
-   * NOT done here; see ADR-0375 §Non-goals.
+   * pauses writes.
+   *
+   * The companion knob {@link walCheckpointUpgradeMode} (ADR-0385)
+   * chooses between RESTART (default) and TRUNCATE (zero out the WAL
+   * file) for the escalation. When this threshold is absent, the
+   * upgrade-mode option is ignored entirely (PASSIVE-only).
    *
    * Absent ⇒ PASSIVE-only (ADR-0361 byte-identical behaviour).
    */
   readonly walSizeThresholdBytes?: number
+  /**
+   * ADR-0385 — checkpoint mode selector for the WAL-size escalation
+   * path. Active only when {@link walSizeThresholdBytes} is set AND the
+   * WAL file exceeds the threshold; otherwise ignored.
+   *
+   *   - `"RESTART"`  — `PRAGMA wal_checkpoint(RESTART)`. Force-drains
+   *      the WAL but leaves the file at its current allocated size for
+   *      SQLite's later reuse. Briefly blocks new writers. This is the
+   *      ADR-0375 baseline.
+   *   - `"TRUNCATE"` — `PRAGMA wal_checkpoint(TRUNCATE)`. Same drain
+   *      semantics as RESTART, plus zeroes out the WAL file (size 0
+   *      after the call). Slightly longer briefly-blocking window;
+   *      maximally aggressive WAL reclamation. Use for extreme
+   *      retention scenarios (Codex `logs_2.sqlite` 14 GB WAL parity).
+   *
+   * Default: `undefined` ⇒ behaves exactly like ADR-0375 ("RESTART"
+   * semantics) for full backward compatibility. The literal string
+   * `"RESTART"` is identical to the default; it just makes the choice
+   * explicit at the call site.
+   *
+   * The result surfaces the outcome on
+   * {@link SweepResult.walRestarted} (RESTART specifically) or
+   * {@link SweepResult.walTruncated} (TRUNCATE specifically). The two
+   * flags are mutually exclusive: at most one can be `true` per sweep.
+   */
+  readonly walCheckpointUpgradeMode?: "RESTART" | "TRUNCATE"
 }
 
 /**

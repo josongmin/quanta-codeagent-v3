@@ -66,15 +66,35 @@ export interface SweepResult {
    * ADR-0375 — `true` iff a RESTART checkpoint actually ran (i.e. the
    * `<databasePath>-wal` file was over `walSizeThresholdBytes` AND the
    * RESTART call did not throw). Always `false` when
-   * `walSizeThresholdBytes` is absent.
+   * `walSizeThresholdBytes` is absent OR when the operator selected the
+   * sibling TRUNCATE mode via {@link SqliteRegistryConfig.walCheckpointUpgradeMode}.
+   *
+   * Mutually exclusive with {@link walTruncated}: at most one of the
+   * two is `true` per sweep.
    */
   readonly walRestarted: boolean
   /**
+   * ADR-0385 — `true` iff a TRUNCATE checkpoint actually ran (i.e. the
+   * `<databasePath>-wal` file was over `walSizeThresholdBytes`, mode
+   * was `"TRUNCATE"`, AND the TRUNCATE call did not throw). Always
+   * `false` when the mode is `"RESTART"` / absent / threshold not
+   * exceeded.
+   *
+   * TRUNCATE specifically: RESTART semantics + zero out the WAL file.
+   * Slightly longer briefly-blocking window than RESTART; choose this
+   * when maximal WAL reclamation matters more than the writer-pause
+   * difference.
+   *
+   * Mutually exclusive with {@link walRestarted}: at most one of the
+   * two is `true` per sweep.
+   */
+  readonly walTruncated: boolean
+  /**
    * ADR-0378 — WAL file size in bytes at the END of the sweep (after
-   * PASSIVE + optional RESTART). NO-THROW: missing WAL file ⇒ 0.
-   * Surfaced so the caller (auto-sweep) can emit a `wal_bytes` gauge for
-   * operator-side WAL-bloat observability — the root data ADR-0375
-   * threshold tuning needs.
+   * PASSIVE + optional RESTART/TRUNCATE). NO-THROW: missing WAL file
+   * ⇒ 0. Surfaced so the caller (auto-sweep) can emit a `wal_bytes`
+   * gauge for operator-side WAL-bloat observability — the root data
+   * ADR-0375 threshold tuning needs.
    */
   readonly walSize: number
 }
@@ -84,8 +104,19 @@ const EMPTY_RESULT: SweepResult = {
   evictedBySize: 0,
   checkpointed: false,
   walRestarted: false,
+  walTruncated: false,
   walSize: 0,
 }
+
+/**
+ * ADR-0385 — closed-set whitelist for the checkpoint upgrade mode. Any
+ * value outside the set is silently rejected (NO-THROW) and degrades to
+ * "no upgrade run" — both `walRestarted` and `walTruncated` stay `false`.
+ * Defense in depth: the TypeScript signature already prevents this, but
+ * downstream JS callers (e.g. composition roots reading env-vars) MAY
+ * pass an unknown string.
+ */
+const ALLOWED_UPGRADE_MODES = new Set(["RESTART", "TRUNCATE"])
 
 /**
  * ADR-0375 — Read WAL file size on disk. NO-THROW: a missing WAL file
@@ -103,6 +134,51 @@ const readWalSize = (databasePath: string): number => {
     // logically "drained" and the threshold check naturally evaluates
     // `0 > threshold` ⇒ false, so RESTART does not fire.
     return 0
+  }
+}
+
+/**
+ * ADR-0375 + ADR-0385 — checkpoint escalation helper. Returns the two
+ * mutually exclusive outcome flags.
+ *
+ * Dispatch:
+ *   - `walSizeThresholdBytes` absent             ⇒ no-op (both false).
+ *   - WAL ≤ threshold                            ⇒ no-op (both false).
+ *   - mode absent / "RESTART"                    ⇒ PRAGMA wal_checkpoint(RESTART).
+ *   - mode "TRUNCATE"                            ⇒ PRAGMA wal_checkpoint(TRUNCATE).
+ *   - mode unknown (defense in depth)            ⇒ silent reject; both false.
+ *   - PRAGMA throws (e.g. SQLITE_BUSY)           ⇒ NO-THROW; both false.
+ *
+ * Mutual exclusion is guaranteed by construction: each branch sets at
+ * most one of the two flags.
+ */
+const runWalUpgrade = (
+  db: Database,
+  cfg: SqliteRegistryConfig,
+): { readonly walRestarted: boolean; readonly walTruncated: boolean } => {
+  if (typeof cfg.walSizeThresholdBytes !== "number") {
+    return { walRestarted: false, walTruncated: false }
+  }
+  const walSize = readWalSize(cfg.databasePath)
+  if (walSize <= cfg.walSizeThresholdBytes) {
+    return { walRestarted: false, walTruncated: false }
+  }
+  const mode = cfg.walCheckpointUpgradeMode ?? "RESTART"
+  if (!ALLOWED_UPGRADE_MODES.has(mode)) {
+    return { walRestarted: false, walTruncated: false }
+  }
+  try {
+    // The mode string is whitelisted above ⇒ safe to splice into the
+    // PRAGMA literal (no user-controlled string reaches the SQL surface).
+    db.exec(`PRAGMA wal_checkpoint(${mode})`)
+    return mode === "RESTART"
+      ? { walRestarted: true, walTruncated: false }
+      : { walRestarted: false, walTruncated: true }
+  } catch {
+    // NO-THROW — RESTART/TRUNCATE may report SQLITE_BUSY under concurrent
+    // writers; we degrade silently and leave the PASSIVE outcome in
+    // place. Both flags stay `false`.
+    return { walRestarted: false, walTruncated: false }
   }
 }
 
@@ -132,6 +208,7 @@ export const sweepSqliteRegistry = (cfg: SqliteRegistryConfig): SweepResult => {
   let evictedBySize = 0
   let checkpointed = false
   let walRestarted = false
+  let walTruncated = false
 
   // 1. TTL eviction.
   try {
@@ -181,29 +258,12 @@ export const sweepSqliteRegistry = (cfg: SqliteRegistryConfig): SweepResult => {
     checkpointed = false
   }
 
-  // 4. ADR-0375 — WAL-size-threshold RESTART escalation. PASSIVE is
-  //    non-blocking but may leave the WAL on disk (writers in flight).
-  //    RESTART force-drains the WAL so the file shrinks; it briefly
-  //    blocks new writers, hence opt-in via `walSizeThresholdBytes`.
-  //
-  //    Codex `logs_2.sqlite` field data: 14.8 GB DB + 14 GB WAL after
-  //    ~10 days of heavy use ⇒ PASSIVE-only is insufficient at scale.
-  //
-  //    The check is `> threshold` (strict): threshold 0 + non-empty WAL
-  //    ⇒ RESTART (edge case DD); threshold 0 + empty WAL ⇒ no-op.
-  if (typeof cfg.walSizeThresholdBytes === "number") {
-    const walSize = readWalSize(cfg.databasePath)
-    if (walSize > cfg.walSizeThresholdBytes) {
-      try {
-        db.exec("PRAGMA wal_checkpoint(RESTART)")
-        walRestarted = true
-      } catch {
-        // NO-THROW — RESTART may report SQLITE_BUSY under concurrent
-        // writers; we degrade silently and leave the PASSIVE outcome
-        // in place.
-      }
-    }
-  }
+  // 4. ADR-0375 + ADR-0385 — WAL-size-threshold checkpoint escalation.
+  //    Helper isolates the dispatch logic so the top-level sweep stays
+  //    within the biome cognitive-complexity budget.
+  const upgrade = runWalUpgrade(db, cfg)
+  walRestarted = upgrade.walRestarted
+  walTruncated = upgrade.walTruncated
 
   // ADR-0378 — Read WAL size at the END (post-PASSIVE + optional RESTART).
   // NO-THROW (`readWalSize` already handles ENOENT + permission errors).
@@ -215,5 +275,5 @@ export const sweepSqliteRegistry = (cfg: SqliteRegistryConfig): SweepResult => {
     // NO-THROW.
   }
 
-  return { evictedByTtl, evictedBySize, checkpointed, walRestarted, walSize }
+  return { evictedByTtl, evictedBySize, checkpointed, walRestarted, walTruncated, walSize }
 }
