@@ -33,8 +33,10 @@
 
 export { activatePluginsFromMentions } from "./composite-activation"
 export { createPluginActivationHandler } from "./handler"
-export type { AdaptedMcpEntry } from "./mcp-shape-adapter"
-export { adaptMcpServersToSpec } from "./mcp-shape-adapter"
+// ADR-0341 retired the mcp-shape-adapter — PluginManifest.mcpServers is now
+// a Record<string, MCPServerSpec> (Codex parity), so the handler iterates
+// the manifest directly. The adapter file + its barrel entries were dropped
+// in the reconcile commit; no caller imports them.
 export type {
   ActivationCallOpts,
   ActivationHandler,

@@ -58,7 +58,10 @@ import {
   type ActiveSkillDescriptor,
   resolvePluginSkillsForActivation,
 } from "@/agent/plugin-skill-extension"
-import { adaptMcpServersToSpec } from "./mcp-shape-adapter"
+import type { MCPServerSpec } from "@/skill/plugin-manifest"
+// ADR-0341 retired the mcp-shape-adapter — ADR-0336 PluginManifest.mcpServers
+// is now `Record<string, MCPServerSpec>` (Codex verbatim), so this handler
+// iterates the manifest entries directly without the array→record bridge.
 import type {
   ActivationCallOpts,
   ActivationHandler,
@@ -132,21 +135,28 @@ const launchOne = async (
   }
 }
 
-/** Spawn every adapted MCP server for the plugin. Skips already-tracked
- *  serverIds (idempotency through the registry, mirrors ADR-0338). */
+/** Spawn every declared MCP server for the plugin. Skips already-tracked
+ *  serverIds (idempotency through the registry, mirrors ADR-0338).
+ *  Post-ADR-0341: `sources` is the unified `Record<string, MCPServerSpec>`
+ *  from the canonical PluginManifest shape — no adapter needed. */
 const runMcpStep = async (
   cfg: ActivationHandlerConfig,
   pluginId: string,
-  sources: readonly import("@/agent/plugin-discovery").PluginMcpServer[] | undefined,
+  sources: Readonly<Record<string, MCPServerSpec>> | undefined,
 ): Promise<readonly McpServerHandle[]> => {
   const port = cfg.mcpLauncherPort
   const registry = cfg.mcpRegistry
   if (port === undefined || registry === undefined) return []
-  const adapted = adaptMcpServersToSpec(sources)
-  if (adapted.length === 0) return []
+  if (sources === undefined) return []
+  // Deterministic order — `Object.keys(...).sort()` matches the launcher's
+  // own iteration order (ADR-0338 §"deterministic lex-order").
+  const serverNames = Object.keys(sources).sort()
+  if (serverNames.length === 0) return []
 
   const out: McpServerHandle[] = []
-  for (const { name: serverName, spec } of adapted) {
+  for (const serverName of serverNames) {
+    const spec = sources[serverName]
+    if (spec === undefined) continue
     const serverId = composeServerId(pluginId, serverName)
     if (registry.hasServerId(serverId)) {
       const existing = registry.handlesFor(pluginId).find((h) => h.serverId === serverId)

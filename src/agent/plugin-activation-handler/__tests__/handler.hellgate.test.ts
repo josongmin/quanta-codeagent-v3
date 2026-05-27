@@ -22,20 +22,22 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import type { PluginManifest, PluginMcpServer, PluginRegistryPort } from "@/agent/plugin-discovery"
+import type { PluginManifest, PluginRegistryPort } from "@/agent/plugin-discovery"
 import {
   composeServerId,
   createInMemoryPluginMcpRegistry,
   type McpLauncherPort,
 } from "@/agent/plugin-mcp-launcher"
 import type { SkillActivationEventLike } from "@/agent/plugin-skill-extension"
+import type { MCPServerSpec } from "@/skill/plugin-manifest"
 import type { SkillRegistryReadOnly } from "@/skill/registry-readonly"
 import { createPluginActivationHandler } from "../handler"
 
-/** Build a minimal ADR-0336 manifest. */
+/** Build a minimal ADR-0336 manifest. Post-ADR-0341 `mcpServers` is the
+ *  Codex-canonical `Record<string, MCPServerSpec>` shape. */
 const mkManifest = (
   id: string,
-  opts: { mcpServers?: readonly PluginMcpServer[]; skills?: readonly string[] } = {},
+  opts: { mcpServers?: Readonly<Record<string, MCPServerSpec>>; skills?: readonly string[] } = {},
 ): PluginManifest => {
   const m: PluginManifest = {
     id,
@@ -43,7 +45,7 @@ const mkManifest = (
     capabilities: [],
   }
   if (opts.mcpServers !== undefined)
-    (m as { mcpServers?: readonly PluginMcpServer[] }).mcpServers = opts.mcpServers
+    (m as { mcpServers?: Readonly<Record<string, MCPServerSpec>> }).mcpServers = opts.mcpServers
   if (opts.skills !== undefined) (m as { skills?: readonly string[] }).skills = opts.skills
   return m
 }
@@ -102,7 +104,7 @@ describe("createPluginActivationHandler — ADR-0340 hellgate", () => {
     const registry = createInMemoryPluginMcpRegistry()
     const handler = createPluginActivationHandler({
       pluginRegistry: mkPluginRegistry({
-        gh: mkManifest("gh", { mcpServers: [{ name: "fs", command: "/usr/bin/node" }] }),
+        gh: mkManifest("gh", { mcpServers: { fs: { command: "/usr/bin/node", args: [] } } }),
       }),
       mcpLauncherPort: port,
       mcpRegistry: registry,
@@ -120,11 +122,11 @@ describe("createPluginActivationHandler — ADR-0340 hellgate", () => {
     const handler = createPluginActivationHandler({
       pluginRegistry: mkPluginRegistry({
         gh: mkManifest("gh", {
-          mcpServers: [
-            { name: "fs", command: "/a" },
-            { name: "git", command: "/b" },
-            { name: "shell", command: "/c" },
-          ],
+          mcpServers: {
+            fs: { command: "/a", args: [] },
+            git: { command: "/b", args: [] },
+            shell: { command: "/c", args: [] },
+          },
         }),
       }),
       mcpLauncherPort: port,
@@ -139,7 +141,7 @@ describe("createPluginActivationHandler — ADR-0340 hellgate", () => {
     const handler = createPluginActivationHandler({
       pluginRegistry: mkPluginRegistry({
         a: mkManifest("a", {
-          mcpServers: [{ name: "fs", command: "/x" }],
+          mcpServers: { fs: { command: "/x", args: [] } },
           skills: ["pr-review"],
         }),
       }),
@@ -155,7 +157,7 @@ describe("createPluginActivationHandler — ADR-0340 hellgate", () => {
     const handler = createPluginActivationHandler({
       pluginRegistry: mkPluginRegistry({
         a: mkManifest("a", {
-          mcpServers: [{ name: "fs", command: "/x" }],
+          mcpServers: { fs: { command: "/x", args: [] } },
           skills: ["pr-review"],
         }),
       }),
@@ -174,7 +176,7 @@ describe("createPluginActivationHandler — ADR-0340 hellgate", () => {
     const handler = createPluginActivationHandler({
       pluginRegistry: mkPluginRegistry({
         a: mkManifest("a", {
-          mcpServers: [{ name: "fs", command: "/x" }],
+          mcpServers: { fs: { command: "/x", args: [] } },
           skills: ["pr-review"],
         }),
       }),
@@ -191,7 +193,7 @@ describe("createPluginActivationHandler — ADR-0340 hellgate", () => {
     const registry = createInMemoryPluginMcpRegistry()
     const handler = createPluginActivationHandler({
       pluginRegistry: mkPluginRegistry({
-        gh: mkManifest("gh", { mcpServers: [{ name: "fs", command: "/a" }] }),
+        gh: mkManifest("gh", { mcpServers: { fs: { command: "/a", args: [] } } }),
       }),
       mcpLauncherPort: port,
       mcpRegistry: registry,
@@ -211,7 +213,7 @@ describe("createPluginActivationHandler — ADR-0340 hellgate", () => {
     const registry = createInMemoryPluginMcpRegistry()
     const handler = createPluginActivationHandler({
       pluginRegistry: mkPluginRegistry({
-        x: mkManifest("x", { mcpServers: [{ name: "fs", command: "/a" }] }),
+        x: mkManifest("x", { mcpServers: { fs: { command: "/a", args: [] } } }),
       }),
       mcpLauncherPort: port,
       mcpRegistry: registry,
@@ -277,25 +279,28 @@ describe("createPluginActivationHandler — ADR-0340 hellgate", () => {
     expect(events[0]?.turnId).toBe("t-42")
   })
 
-  test("N. ADR-0336 manifest (array mcpServers) ⇒ adapted via shape adapter", async () => {
+  test("N. Record manifest with deterministic lex-order ⇒ launcher sees sorted serverNames", async () => {
     const { port, calls } = mkPort()
     const registry = createInMemoryPluginMcpRegistry()
-    // ADR-0336 array shape — three entries, one missing command (dropped).
+    // Post-ADR-0341: PluginManifest.mcpServers is Record<string, MCPServerSpec>.
+    // The handler iterates `Object.keys(...).sort()` so the launcher sees a
+    // deterministic order regardless of insertion. The manifest parser (ADR-0336
+    // post-0341) is responsible for dropping invalid entries up front; the
+    // handler does NOT re-validate spec shape.
     const handler = createPluginActivationHandler({
       pluginRegistry: mkPluginRegistry({
         gh: mkManifest("gh", {
-          mcpServers: [
-            { name: "fs", command: "/a" },
-            { name: "no-cmd" },
-            { name: "git", command: "/b" },
-          ],
+          mcpServers: {
+            // intentionally non-lex insertion order — handler must sort
+            git: { command: "/b", args: [] },
+            fs: { command: "/a", args: [] },
+          },
         }),
       }),
       mcpLauncherPort: port,
       mcpRegistry: registry,
     })
     const out = await handler("gh")
-    // adapter drops `no-cmd` (missing command); launcher only sees fs + git
     expect(calls.map((c) => c.serverName)).toEqual(["fs", "git"])
     expect(out.mcpHandles).toHaveLength(2)
   })
@@ -327,7 +332,7 @@ describe("createPluginActivationHandler — ADR-0340 hellgate", () => {
     const registry = createInMemoryPluginMcpRegistry()
     const handler = createPluginActivationHandler({
       pluginRegistry: mkPluginRegistry({
-        gh: mkManifest("gh", { mcpServers: [{ name: "fs", command: "/a" }] }),
+        gh: mkManifest("gh", { mcpServers: { fs: { command: "/a", args: [] } } }),
       }),
       mcpLauncherPort: port,
       mcpRegistry: registry,
