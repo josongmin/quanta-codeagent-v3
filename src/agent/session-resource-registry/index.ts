@@ -18,5 +18,9 @@
  * a separate ADR.
  */
 
+export {
+  getGlobalSessionResourceRegistry,
+  resetGlobalSessionResourceRegistry,
+} from "./global"
 export { createInMemorySessionResourceRegistry } from "./in-memory-registry"
 export type { RegistryConfig, SessionResourceRegistry, SessionResources } from "./types"

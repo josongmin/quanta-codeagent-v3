@@ -32,6 +32,7 @@ import {
 } from "@/agent"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import { captureSnapshot } from "@/agent/context-change"
+import { getGlobalSessionResourceRegistry } from "@/agent/session-resource-registry"
 import { createInMemorySystemPromptCache } from "@/llm/system-prompt-cache"
 import { createInMemoryTypedHistoryEventStore } from "@/memory/typed-event"
 import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
@@ -164,10 +165,21 @@ export const assembleAgentConfig = (req: AssembleRequest): AgentConfig => {
   // ADR-0334 — populate the ADR-0327-family wire slots on the freshly
   // assembled cfg. Idempotent + caller-override-precedence (ADR-0332):
   // any slot the caller already set on `req.base` is preserved verbatim.
+  //
+  // ADR-0347 — when `sessionId` is present, look up `{ store, cache }`
+  // via the process-level singleton registry so a same-`sessionId`
+  // re-assemble REUSES prior typed-history events and warmed
+  // system-prompt cache entries. When `sessionId` is absent (legacy
+  // callers / one-shot bench-style usage) fall back to the fresh
+  // factory pair — byte-identical to the ADR-0334 baseline.
+  const sessionResources =
+    cfg.sessionId !== undefined
+      ? getGlobalSessionResourceRegistry().getOrCreate(cfg.sessionId)
+      : null
   installCodexR2Wires(cfg, {
     ...(cfg.sessionId !== undefined ? { sessionId: cfg.sessionId } : {}),
-    systemPromptCache: createInMemorySystemPromptCache(),
-    store: createInMemoryTypedHistoryEventStore(),
+    systemPromptCache: sessionResources?.cache ?? createInMemorySystemPromptCache(),
+    store: sessionResources?.store ?? createInMemoryTypedHistoryEventStore(),
     getSnapshot: () =>
       captureSnapshot({
         cwd: cfg.cwd,
