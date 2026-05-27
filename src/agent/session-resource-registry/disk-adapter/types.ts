@@ -45,6 +45,7 @@
 
 import type { SystemPromptCacheKey } from "@/llm/system-prompt-cache"
 import type { TypedHistoryEvent } from "@/memory/typed-event"
+import type { AcquireSessionLockOpts } from "./file-lock"
 
 /**
  * Construction-time config for the disk-backed registry. `ttlMs` /
@@ -80,6 +81,19 @@ export interface DiskRegistryConfig {
   readonly maxSessionBytes?: number
   /** Clock seam. Default `Date.now`. */
   readonly now?: () => number
+  /**
+   * ADR-0356 — Multi-process lockfile knobs. When set (even partially)
+   * the disk-store uses the provided values; otherwise the defaults
+   * from {@link file-lock} (5 s timeout / 100 ms retry / 30 s stale).
+   *
+   * The lock itself is ALWAYS engaged — these options only tune the
+   * acquisition policy. Failure to acquire degrades to in-memory only
+   * (the disk-mirror writes are suppressed for that session) so the
+   * default-OFF byte-identical contract holds: a single-process
+   * deployment never observes contention and behaves exactly as
+   * before the ADR.
+   */
+  readonly lock?: AcquireSessionLockOpts
 }
 
 /** One persisted cache entry as serialized on disk. The on-disk shape

@@ -20,6 +20,17 @@
 
 // ADR-0348 — Disk-persistent adapter (explicit opt-in, sibling slice).
 export { createDiskSessionResourceRegistry } from "./disk-adapter/disk-store"
+export type { AcquireSessionLockOpts, SessionLock } from "./disk-adapter/file-lock"
+// ADR-0356 — Multi-process lockfile (used internally by ADR-0348 +
+// optionally consumable by external composition roots that want to
+// gate their own per-session ops on the same lock).
+export {
+  acquireSessionLock,
+  DEFAULT_LOCK_RETRY_INTERVAL_MS,
+  DEFAULT_LOCK_STALE_THRESHOLD_MS,
+  DEFAULT_LOCK_TIMEOUT_MS,
+  LOCK_FILENAME,
+} from "./disk-adapter/file-lock"
 export type { SweepResult } from "./disk-adapter/gc"
 export { sweepDiskRegistry } from "./disk-adapter/gc"
 export {

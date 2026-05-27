@@ -36,10 +36,14 @@
  *
  * # Concurrency
  *
- * Single-writer model. The disk-store does NOT take a flock — two
- * processes pointed at the same `storageDir` for the same session WILL
- * race. The slice fence calls this out as a non-goal (see types.ts
- * docblock + ADR-0348 §Non-goals).
+ * Single-machine multi-process safe via ADR-0356 per-session lockfile
+ * (`.lock` under `<storageDir>/<sanitizedId>/`). The lock is acquired
+ * LAZILY on first `getOrCreate(id)` and held for the lifetime of that
+ * session in this process; `evict(id)` / `clear()` release. A process
+ * that loses contention (timeout) falls back to memory-only — disk
+ * writes for that session are suppressed but the in-memory store +
+ * cache remain usable. Cross-machine (NFS lease) is NOT covered — see
+ * ADR-0355 negative.
  *
  * # Slice fence
  *
@@ -63,6 +67,7 @@ import {
   type TypedHistoryEventStore,
 } from "@/memory/typed-event"
 import type { SessionResourceRegistry, SessionResources } from "../types"
+import { acquireSessionLock, type SessionLock } from "./file-lock"
 import { CACHE_FILENAME, EVENTS_FILENAME, META_FILENAME, sweepDiskRegistry } from "./gc"
 import {
   parseCacheBody,
@@ -187,11 +192,18 @@ const writeMeta = async (
 
 /** Wrap an `in-memory` typed-event store so every `append` is mirrored
  *  to disk. Failures on the disk side are swallowed (NO-THROW) — the
- *  in-memory side is the source of truth for the running process. */
+ *  in-memory side is the source of truth for the running process.
+ *
+ *  ADR-0356: every disk-mirror op chains on `lockReady` — when the
+ *  per-session lock could not be acquired (multi-process contention)
+ *  `lockReady` resolves to `null` and ALL disk writes are suppressed.
+ *  The in-memory append still runs synchronously, so the running
+ *  process keeps a usable store — just without crash-recovery. */
 const wrapStoreWithDiskMirror = (
   inner: TypedHistoryEventStore,
   cfg: DiskRegistryConfig,
   sessionId: string,
+  lockReady: Promise<SessionLock | null>,
 ): TypedHistoryEventStore => {
   const eventsPath = join(sessionDirOf(cfg, sessionId), EVENTS_FILENAME)
   return {
@@ -200,8 +212,11 @@ const wrapStoreWithDiskMirror = (
       const line = serializeEventLine(event)
       // Fire-and-forget: disk mirror MUST NOT block / throw for the
       // append contract to stay sync. Errors land in the swallowed
-      // `appendFileSafe` rejection.
-      void ensureDir(sessionDirOf(cfg, sessionId)).then(() => appendFileSafe(eventsPath, line))
+      // `appendFileSafe` rejection. Lock failure (null) ⇒ skip disk.
+      void lockReady.then((lock) => {
+        if (lock === null) return
+        return ensureDir(sessionDirOf(cfg, sessionId)).then(() => appendFileSafe(eventsPath, line))
+      })
     },
     snapshot() {
       return inner.snapshot()
@@ -214,18 +229,24 @@ const wrapStoreWithDiskMirror = (
       // On clear, truncate the on-disk file (best effort). This matches
       // the in-memory contract — session-boundary reset wipes the
       // append-only log.
-      void writeAtomicSafe(eventsPath, "")
+      void lockReady.then((lock) => {
+        if (lock === null) return
+        return writeAtomicSafe(eventsPath, "")
+      })
     },
   }
 }
 
 /** Wrap an in-memory cache so every `getOrBuild` MISS is mirrored to
  *  disk (`prompt-cache.jsonl`). Hits do NOT touch the disk. Invalidations
- *  / `clearAll` mirror to disk too (best effort). NO-THROW. */
+ *  / `clearAll` mirror to disk too (best effort). NO-THROW.
+ *
+ *  ADR-0356: same `lockReady` gate as {@link wrapStoreWithDiskMirror}. */
 const wrapCacheWithDiskMirror = (
   inner: SystemPromptCachePort,
   cfg: DiskRegistryConfig,
   sessionId: string,
+  lockReady: Promise<SessionLock | null>,
 ): SystemPromptCachePort => {
   const cachePath = join(sessionDirOf(cfg, sessionId), CACHE_FILENAME)
   return {
@@ -241,7 +262,10 @@ const wrapCacheWithDiskMirror = (
           builtAt: out.builtAt,
         }
         const line = serializeCacheLine(persisted)
-        void ensureDir(sessionDirOf(cfg, sessionId)).then(() => appendFileSafe(cachePath, line))
+        void lockReady.then((lock) => {
+          if (lock === null) return
+          return ensureDir(sessionDirOf(cfg, sessionId)).then(() => appendFileSafe(cachePath, line))
+        })
       }
       return out
     },
@@ -253,11 +277,17 @@ const wrapCacheWithDiskMirror = (
       // The append-only file is rewritten on invalidate so the disk
       // shows the post-invalidate state. Cheap because typical cache
       // size is O(1) per session.
-      void rewriteCacheFile(inner, cachePath)
+      void lockReady.then((lock) => {
+        if (lock === null) return
+        return rewriteCacheFile(inner, cachePath)
+      })
     },
     clearAll(reason) {
       inner.clearAll(reason)
-      void writeAtomicSafe(cachePath, "")
+      void lockReady.then((lock) => {
+        if (lock === null) return
+        return writeAtomicSafe(cachePath, "")
+      })
     },
     stats() {
       return inner.stats()
@@ -294,6 +324,28 @@ export const createDiskSessionResourceRegistry = (
 ): SessionResourceRegistry => {
   const now = cfg.now ?? Date.now
   const entries = new Map<string, Entry>()
+  // ADR-0356 — per-session lock acquisitions. Key: sessionId. Value:
+  // the promise of a (best-effort) `SessionLock | null`. We resolve
+  // the lock LAZILY on first `getOrCreate` and reuse the promise for
+  // every subsequent disk-mirror op on the same session. `evict` /
+  // `clear` resolve the promise then release the lock.
+  const lockMap = new Map<string, Promise<SessionLock | null>>()
+
+  const ensureLock = (sessionId: string): Promise<SessionLock | null> => {
+    const existing = lockMap.get(sessionId)
+    if (existing !== undefined) return existing
+    const acquired = acquireSessionLock(cfg.storageDir, sessionId, cfg.lock ?? {}).catch(() => null)
+    lockMap.set(sessionId, acquired)
+    return acquired
+  }
+
+  const releaseLock = (sessionId: string): void => {
+    const promise = lockMap.get(sessionId)
+    if (promise === undefined) return
+    lockMap.delete(sessionId)
+    void promise.then((lock) => (lock !== null ? lock.release() : undefined)).catch(() => undefined)
+  }
+
   // Track which session ids we have already swept; sweep runs lazily
   // at most once per `getOrCreate` to keep the sync surface fast.
   let sweepInFlight: Promise<void> | null = null
@@ -346,19 +398,34 @@ export const createDiskSessionResourceRegistry = (
       const t = now()
       if (hit !== undefined) {
         hit.lastTouched = t
-        void writeMeta(cfg, sessionId, t)
+        // ADR-0356: still gated on the existing lock — same `lockMap`
+        // entry from the original mint. Re-touch must not write the
+        // meta.json on a lock-failed session (would race with another
+        // process that holds the lock).
+        const lockReady = ensureLock(sessionId)
+        void lockReady.then((lock) => {
+          if (lock === null) return
+          return writeMeta(cfg, sessionId, t)
+        })
         return hit.resources
       }
+      // ADR-0356 — acquire the per-session lock. The promise is reused
+      // by every disk-mirror op for the rest of this session's lifetime
+      // (`evict`/`clear` release it).
+      const lockReady = ensureLock(sessionId)
       // Mint synchronously — fresh inner containers, wrapped for disk
       // mirror. Schedule disk replay onto the same inner containers.
       const innerStore = createInMemoryTypedHistoryEventStore()
       const innerCache = createInMemorySystemPromptCache()
-      const store = wrapStoreWithDiskMirror(innerStore, cfg, sessionId)
-      const cache = wrapCacheWithDiskMirror(innerCache, cfg, sessionId)
+      const store = wrapStoreWithDiskMirror(innerStore, cfg, sessionId, lockReady)
+      const cache = wrapCacheWithDiskMirror(innerCache, cfg, sessionId, lockReady)
       const resources: SessionResources = { store, cache }
       entries.set(sessionId, { resources, lastTouched: t })
-      // Background replay — populate inner containers from disk.
-      void (async () => {
+      // Background replay — populate inner containers from disk. Gated
+      // on lock: a process without the lock should NOT read the other
+      // process's mid-flight state.
+      void lockReady.then(async (lock) => {
+        if (lock === null) return
         try {
           const persisted = await loadPersisted(cfg, sessionId)
           if (persisted === null) return
@@ -372,8 +439,11 @@ export const createDiskSessionResourceRegistry = (
         } catch {
           // NO-THROW: replay failure leaves the fresh pair as-is.
         }
-      })()
-      void writeMeta(cfg, sessionId, t)
+      })
+      void lockReady.then((lock) => {
+        if (lock === null) return
+        return writeMeta(cfg, sessionId, t)
+      })
       return resources
     } catch {
       // Worst case: filesystem dead. Hand back a memory-only pair so
@@ -394,6 +464,11 @@ export const createDiskSessionResourceRegistry = (
   const evict = (sessionId: string): void => {
     try {
       entries.delete(sessionId)
+      // ADR-0356: release the lock BEFORE removing the session dir so
+      // a sibling process that was waiting can immediately reclaim.
+      // The rm includes the .lock file itself; the release is a no-op
+      // by the time the unlink fires.
+      releaseLock(sessionId)
       // Best-effort disk cleanup. Fire-and-forget.
       void rm(sessionDirOf(cfg, sessionId), { recursive: true, force: true }).catch(() => undefined)
     } catch {
@@ -416,6 +491,10 @@ export const createDiskSessionResourceRegistry = (
       for (const id of entries.keys()) ids.push(id)
       entries.clear()
       for (const id of ids) {
+        // ADR-0356: release per-session locks so siblings can reclaim
+        // immediately. The lock release races with the rm — both are
+        // best-effort and idempotent.
+        releaseLock(id)
         void rm(sessionDirOf(cfg, id), { recursive: true, force: true }).catch(() => undefined)
       }
     } catch {
