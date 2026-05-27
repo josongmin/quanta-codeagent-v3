@@ -156,6 +156,24 @@ describe("JsonlRecorder — RFC-0002 §5.2 new variants", () => {
       surfaceId: "openai-responses",
       transportId: "chatgpt-oauth",
       authMode: "ChatGPT subscription",
+      policy: {
+        mode: "review",
+        baseSystem: "default",
+        systemLayout: "single_block",
+        repoRulesPresent: true,
+        sessionCtxPresent: false,
+        userAppendPresent: false,
+        selectedGlobRuleNames: ["react.mdc"],
+        activeSkillNames: ["rr"],
+        workingStatePresent: false,
+        memoryContextPresent: true,
+        contextChangeCount: 0,
+        mentionInjectionCount: 1,
+        hookContext: "after_system",
+        summaryPrefix: "conversation_summary",
+        toolChoice: "any",
+        promptCacheKeyPresent: true,
+      },
     })
     rec.close()
 
@@ -167,6 +185,24 @@ describe("JsonlRecorder — RFC-0002 §5.2 new variants", () => {
       surfaceId: "openai-responses",
       transportId: "chatgpt-oauth",
       authMode: "ChatGPT subscription",
+      policy: {
+        mode: "review",
+        baseSystem: "default",
+        systemLayout: "single_block",
+        repoRulesPresent: true,
+        sessionCtxPresent: false,
+        userAppendPresent: false,
+        selectedGlobRuleNames: ["react.mdc"],
+        activeSkillNames: ["rr"],
+        workingStatePresent: false,
+        memoryContextPresent: true,
+        contextChangeCount: 0,
+        mentionInjectionCount: 1,
+        hookContext: "after_system",
+        summaryPrefix: "conversation_summary",
+        toolChoice: "any",
+        promptCacheKeyPresent: true,
+      },
     })
   })
 

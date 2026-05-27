@@ -1,4 +1,4 @@
-import type { LLMPort, Message, StreamEvent, SystemPromptInput } from "@/llm"
+import type { LLMPort, Message, StreamEvent, SystemPromptInput, ToolChoice } from "@/llm"
 import { withImageSanitizationRetry } from "@/llm/image-sanitization-retry"
 import { createWorkingMemory, type WorkingMemory } from "@/memory"
 import { createWorkingMemoryHistorySanitization } from "@/memory/history-sanitization"
@@ -12,6 +12,7 @@ import {
   type TurnTiming,
 } from "@/observability"
 import { normalizeRedactionConfig } from "@/security"
+import type { PromptPolicySnapshot, TurnPolicySnapshot } from "@/shared"
 import { errMessage, LLMError } from "@/shared"
 import { compactIfNeeded, estimateTokens, reactiveCompact } from "./compaction"
 import { CompactionBreaker } from "./compaction-breaker"
@@ -254,7 +255,18 @@ const isSessionApprovalRequiredError = (error: unknown): boolean => {
  *  span. Like `emitRecovery`/`emitUsage` this is observation-only: NullStream
  *  swallows it, control flow / emit ordering / the default-OFF byte-identical
  *  contract are untouched. */
-const emitLlmRequest = (config: AgentConfig): void => {
+const finalizeTurnPolicy = (args: {
+  readonly promptPolicy: PromptPolicySnapshot
+  readonly toolChoice: ToolChoice
+  readonly promptCacheKey?: string
+}): TurnPolicySnapshot => ({
+  ...args.promptPolicy,
+  toolChoice: args.toolChoice.kind,
+  ...(args.toolChoice.kind === "tool" ? { toolChoiceToolName: args.toolChoice.name } : {}),
+  promptCacheKeyPresent: args.promptCacheKey !== undefined && args.promptCacheKey.length > 0,
+})
+
+const emitLlmRequest = (config: AgentConfig, policy: TurnPolicySnapshot): void => {
   config.stream.emit({
     type: "llm_request",
     model: configuredModel(config.llm),
@@ -262,6 +274,7 @@ const emitLlmRequest = (config: AgentConfig): void => {
     ...(config.llm.surfaceId !== undefined ? { surfaceId: config.llm.surfaceId } : {}),
     ...(config.llm.transportId !== undefined ? { transportId: config.llm.transportId } : {}),
     ...(config.llm.authMode !== undefined ? { authMode: config.llm.authMode } : {}),
+    policy,
   })
 }
 
@@ -499,8 +512,7 @@ const resolveSkillTurnOverride = (
 const streamConsume = async (
   session: TurnSession,
   state: TurnState,
-  messages: Message[],
-  system: SystemPromptInput,
+  ctx: ReturnType<typeof buildTurnContext>,
 ): Promise<StreamConsumeResult> => {
   // R2-B P1: destructure into the same local names the original body used so
   // every reference below stays byte-identical (config/recorder/skillGate/…).
@@ -510,6 +522,7 @@ const streamConsume = async (
   // here — the local references were move-only, with no behavioural change.
   const { config, specs, recorder, skillGate } = session
   const { collector, toolChoiceState, onTurnTiming } = state
+  const { messages, system } = ctx
   // ADR-0079 — resolve the pre-call tool_choice from the loop-owned turn state.
   // `consumeTurnSignals` reads + clears the 1-turn-TTL flags armed by the
   // verify/closeout guards on the PRIOR stream's finish-intent; `resolveToolChoice`
@@ -523,7 +536,14 @@ const streamConsume = async (
   // the SAME per-turn llm span so probe/§9 can pair request↔usage. Pure
   // observation: NullStream swallows it; the stream open + recovery control
   // flow below is byte-identical to the pre-emit path.
-  emitLlmRequest(config)
+  emitLlmRequest(
+    config,
+    finalizeTurnPolicy({
+      promptPolicy: ctx.promptPolicy,
+      toolChoice,
+      ...(config.sessionId !== undefined ? { promptCacheKey: config.sessionId } : {}),
+    }),
+  )
   // RFC may-22 Phase 1: BudgetMeter tick — one model_call per stream open.
   // SAME-TURN retries open a new stream so they count distinctly, which
   // matches `maxModelCalls` semantics (a single turn may legitimately spend
@@ -1357,7 +1377,7 @@ const runTurn = async (
       citations,
       turnInjects,
     )
-    const result = await streamConsume(session, state, ctx.messages, ctx.system)
+    const result = await streamConsume(session, state, ctx)
     if ("aborted" in result) return { kind: "aborted" }
 
     // ADR-0242 — Cursor 8-arm stop_reason typed router. `resolveTurnAction`

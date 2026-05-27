@@ -29,7 +29,22 @@ export const replaySnapshotLite = (
   return {
     snapshot: {
       ...snapshot,
-      state: { ...snapshot.state },
+      state: {
+        ...snapshot.state,
+        ...(snapshot.state.lastLlmRequest !== undefined
+          ? {
+              lastLlmRequest: {
+                ...snapshot.state.lastLlmRequest,
+                ...(snapshot.state.lastLlmRequest.policy !== undefined
+                  ? { policy: { ...snapshot.state.lastLlmRequest.policy } }
+                  : {}),
+              },
+            }
+          : {}),
+        ...(snapshot.state.lastLlmContinuation !== undefined
+          ? { lastLlmContinuation: { ...snapshot.state.lastLlmContinuation } }
+          : {}),
+      },
       capabilities: { ...snapshot.capabilities },
       pendingApproval: snapshot.pendingApproval === null ? null : { ...snapshot.pendingApproval },
       openArtifacts: snapshot.openArtifacts.map((artifact) => ({ ...artifact })),

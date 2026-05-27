@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "id": "current-threshold-fact-lookup",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    { "role": "assistant", "text": "Active thread context_grounding is using thresholds wrong_thread_rate == 0 and exact_tuple_match_rate >= 0.90." }
+  ],
+  "targetUtterance": "현재 기준선이 뭐였지?",
+  "gold": {
+    "activeThreadId": "context_grounding",
+    "referentId": "context_grounding",
+    "intent": "fact_lookup",
+    "scope": "current_workstream",
+    "shouldClarify": false,
+    "confidence": "high"
+  },
+  "bucket": "reference",
+  "severity": "high"
+}

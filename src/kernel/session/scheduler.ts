@@ -298,6 +298,14 @@ const emitTurnStreamEvent = async (args: {
         ...args.state,
         revision: args.state.revision + 1,
         seq: args.state.seq + 1,
+        lastLlmRequest: {
+          model: args.event.model,
+          ...(args.event.provider !== undefined ? { provider: args.event.provider } : {}),
+          ...(args.event.surfaceId !== undefined ? { surfaceId: args.event.surfaceId } : {}),
+          ...(args.event.transportId !== undefined ? { transportId: args.event.transportId } : {}),
+          ...(args.event.authMode !== undefined ? { authMode: args.event.authMode } : {}),
+          ...(args.event.policy !== undefined ? { policy: args.event.policy } : {}),
+        },
       }
       const sessionEvent: SessionEvent = {
         eventId: crypto.randomUUID(),
@@ -311,6 +319,7 @@ const emitTurnStreamEvent = async (args: {
         ...(args.event.surfaceId !== undefined ? { surfaceId: args.event.surfaceId } : {}),
         ...(args.event.transportId !== undefined ? { transportId: args.event.transportId } : {}),
         ...(args.event.authMode !== undefined ? { authMode: args.event.authMode } : {}),
+        ...(args.event.policy !== undefined ? { policy: args.event.policy } : {}),
       }
       await appendEvents(args.ctx.eventLog, [sessionEvent])
       await args.ctx.onCommitted?.({ state: nextState, events: [sessionEvent] })
@@ -321,6 +330,15 @@ const emitTurnStreamEvent = async (args: {
         ...args.state,
         revision: args.state.revision + 1,
         seq: args.state.seq + 1,
+        lastLlmContinuation: {
+          ...(args.event.provider !== undefined ? { provider: args.event.provider } : {}),
+          surfaceId: args.event.surfaceId,
+          transportId: args.event.transportId,
+          phase: args.event.phase,
+          mode: args.event.mode,
+          reason: args.event.reason,
+          ...(args.event.statusCode !== undefined ? { statusCode: args.event.statusCode } : {}),
+        },
       }
       const sessionEvent: SessionEvent = {
         eventId: crypto.randomUUID(),

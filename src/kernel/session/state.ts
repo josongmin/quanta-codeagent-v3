@@ -6,6 +6,10 @@ import type {
   SessionSnapshotLite,
   SessionStateView,
 } from "@/protocol/session"
+import type {
+  LlmContinuationObservation,
+  LlmRequestObservation,
+} from "@/shared/llm-route-types"
 import { SingleWriterLease } from "./lease"
 
 export interface KernelTranscriptState {
@@ -48,6 +52,14 @@ export interface KernelSessionState {
   /** Token usage from the most recent `turn.completed`. Cumulative tally is
    *  the UI's concern; the kernel only holds the latest. */
   readonly lastTokenUsage?: KernelTokenUsage
+  /** Most recent request-route observation emitted by the running/completed
+   *  turn. Mirrors `turn.llm.request` so snapshot-only consumers can inspect
+   *  the last effective request without replaying the event log. */
+  readonly lastLlmRequest?: LlmRequestObservation & {
+    readonly policy?: import("@/shared/turn-policy-types").TurnPolicySnapshot
+  }
+  /** Most recent Responses continuation-routing decision, if any. */
+  readonly lastLlmContinuation?: LlmContinuationObservation
 }
 
 export interface CreateKernelSessionStateInput {
@@ -110,6 +122,7 @@ export const toSessionStateView = (state: KernelSessionState): SessionStateView 
   permissionMode: state.permissionMode,
   ...(state.identityMode !== undefined ? { identityMode: state.identityMode } : {}),
   ...(state.toolProfile !== undefined ? { toolProfile: state.toolProfile } : {}),
+  ...(state.modelSlug !== undefined ? { modelSlug: state.modelSlug } : {}),
   messageCount: state.transcript.messageCount,
   ...(state.transcript.lastUserText !== undefined
     ? { lastUserText: state.transcript.lastUserText }
@@ -121,6 +134,10 @@ export const toSessionStateView = (state: KernelSessionState): SessionStateView 
     ? { streamingAssistantText: state.transcript.streamingAssistantText }
     : {}),
   ...(state.lastOutcomeReason !== undefined ? { lastOutcomeReason: state.lastOutcomeReason } : {}),
+  ...(state.lastLlmRequest !== undefined ? { lastLlmRequest: state.lastLlmRequest } : {}),
+  ...(state.lastLlmContinuation !== undefined
+    ? { lastLlmContinuation: state.lastLlmContinuation }
+    : {}),
 })
 
 export const toSessionSnapshotLite = (state: KernelSessionState): SessionSnapshotLite => ({

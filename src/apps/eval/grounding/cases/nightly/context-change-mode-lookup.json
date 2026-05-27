@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "id": "context-change-mode-lookup",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "contextChanges": [
+    { "field": "mode", "prev": "default", "next": "review" }
+  ],
+  "history": [
+    {
+      "role": "assistant",
+      "text": "Active thread feature_catalog_cleanup just switched into review mode."
+    }
+  ],
+  "targetUtterance": "지금 뭐 기준으로 봐야 해?",
+  "gold": {
+    "activeThreadId": "feature_catalog_cleanup",
+    "referentId": "review_mode",
+    "intent": "fact_lookup",
+    "scope": "specific_subthread",
+    "shouldClarify": false,
+    "confidence": "medium"
+  },
+  "bucket": "topic_switch_return",
+  "severity": "medium"
+}

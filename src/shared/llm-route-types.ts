@@ -22,6 +22,14 @@ export type LlmTransportId =
  *  widening is explicit at compile time. */
 export type PromptCacheRetention = "in-memory" | "24h"
 
+export interface LlmRequestObservation {
+  readonly model: string
+  readonly provider?: string
+  readonly surfaceId?: LlmSurfaceId
+  readonly transportId?: LlmTransportId
+  readonly authMode?: string
+}
+
 /** OpenAI Responses continuation-routing taxonomy. Shared across the wire,
  *  observer stream, and external protocol surfaces so fallback reasons do not
  *  silently drift across layers. */
@@ -46,4 +54,8 @@ export interface ResponsesContinuationObservation {
   readonly mode: ResponsesContinuationMode
   readonly reason: ResponsesContinuationReason
   readonly statusCode?: number
+}
+
+export interface LlmContinuationObservation extends ResponsesContinuationObservation {
+  readonly provider?: string
 }

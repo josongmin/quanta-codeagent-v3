@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "id": "explicit-current-workstream-status",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    { "role": "assistant", "text": "Current thread prompt_rules is still active. oauth_abort_flow is explicitly paused." }
+  ],
+  "targetUtterance": "현재 작업 기준으로 뭐 남았어?",
+  "gold": {
+    "activeThreadId": "prompt_rules",
+    "referentId": "prompt_rules",
+    "intent": "status_check",
+    "scope": "current_workstream",
+    "shouldClarify": false,
+    "confidence": "high"
+  },
+  "bucket": "multi_workstream",
+  "severity": "high"
+}

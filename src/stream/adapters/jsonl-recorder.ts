@@ -326,6 +326,7 @@ const dataOf = (e: AgentEvent): Record<string, unknown> => {
         ...(e.surfaceId !== undefined ? { surfaceId: e.surfaceId } : {}),
         ...(e.transportId !== undefined ? { transportId: e.transportId } : {}),
         ...(e.authMode !== undefined ? { authMode: e.authMode } : {}),
+        ...(e.policy !== undefined ? { policy: e.policy } : {}),
       }
     case "llm_continuation":
       return llmContinuationData(e)

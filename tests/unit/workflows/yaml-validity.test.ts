@@ -15,6 +15,7 @@ const AGENT_WORKFLOWS = [
   "agent-nightly-regression.yml",
   "agent-auto-fix.yml",
 ] as const
+const VALIDATED_WORKFLOWS = [...AGENT_WORKFLOWS, "grounding-live-gate.yml"] as const
 
 const loadWorkflow = (name: string): { src: string; parsed: { [k: string]: YamlValue } } => {
   const src = readFileSync(join(WORKFLOWS_DIR, name), "utf8")
@@ -22,7 +23,7 @@ const loadWorkflow = (name: string): { src: string; parsed: { [k: string]: YamlV
 }
 
 describe("workflow yaml validity", () => {
-  for (const name of AGENT_WORKFLOWS) {
+  for (const name of VALIDATED_WORKFLOWS) {
     test(`${name}: parses and has top-level on + jobs`, () => {
       const { parsed } = loadWorkflow(name)
       expect(parsed.on).toBeDefined()
@@ -95,8 +96,38 @@ describe("workflow yaml validity", () => {
     expect(src).toContain("--report")
   })
 
+  test("grounding-live-gate.yml: has pull_request + workflow_dispatch + schedule triggers", () => {
+    const { parsed } = loadWorkflow("grounding-live-gate.yml")
+    const on = asObject(parsed.on as YamlValue)
+    expect(on.pull_request).toBeDefined()
+    expect(on.workflow_dispatch).toBeDefined()
+    expect(on.schedule).toBeDefined()
+  })
+
+  test("grounding-live-gate.yml: has canary + nightly jobs with eval grounding commands", () => {
+    const { src, parsed } = loadWorkflow("grounding-live-gate.yml")
+    const jobs = asObject(parsed.jobs as YamlValue)
+    expect(jobs.canary).toBeDefined()
+    expect(jobs.nightly).toBeDefined()
+    expect(src).toContain("bun run eval grounding preflight")
+    expect(src).toContain("bun run eval grounding run --suite canary")
+    expect(src).toContain("bun run eval grounding run --suite nightly")
+    expect(src).toContain("--concurrency 4")
+    expect(src).toContain("bun run eval grounding report --run-id")
+    expect(src).toContain("grounding-gate")
+  })
+
+  test("grounding-live-gate.yml: uploads JSONL + markdown + JSON artifacts", () => {
+    const { src } = loadWorkflow("grounding-live-gate.yml")
+    expect(src).toContain("actions/upload-artifact@v4")
+    expect(src).toContain("canary-report.md")
+    expect(src).toContain("nightly-report.md")
+    expect(src).toContain("*.jsonl")
+    expect(src).toContain("report.json")
+  })
+
   test("every authored workflow declares an explicit timeout-minutes (belt+braces over BudgetCaps)", () => {
-    for (const name of AGENT_WORKFLOWS) {
+    for (const name of VALIDATED_WORKFLOWS) {
       const { parsed } = loadWorkflow(name)
       const jobs = asObject(parsed.jobs as YamlValue)
       for (const jobId of Object.keys(jobs)) {

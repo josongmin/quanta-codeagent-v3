@@ -840,6 +840,7 @@ const toSessionHostTurnEvent = (event: AgentEvent): SessionHostTurnEvent | undef
         ...(event.surfaceId !== undefined ? { surfaceId: event.surfaceId } : {}),
         ...(event.transportId !== undefined ? { transportId: event.transportId } : {}),
         ...(event.authMode !== undefined ? { authMode: event.authMode } : {}),
+        ...(event.policy !== undefined ? { policy: event.policy } : {}),
       }
     case "llm_continuation":
       return {

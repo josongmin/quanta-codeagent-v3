@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "id": "screenshot-failure-raw",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    { "role": "assistant", "text": "Active thread screenshot_send is debugging image capture and send." },
+    {
+      "role": "assistant",
+      "text": "Latest tool result latest_capture_failure: capture_image -> permission denied for Screen Recording."
+    }
+  ],
+  "targetUtterance": "왜 실패한거냐?",
+  "gold": {
+    "activeThreadId": "screenshot_send",
+    "referentId": "latest_capture_failure",
+    "intent": "explain",
+    "scope": "latest_tool_result",
+    "shouldClarify": false,
+    "confidence": "high"
+  },
+  "bucket": "tool_noise",
+  "severity": "critical",
+  "pairId": "pair-screenshot-failure",
+  "pairRole": "raw"
+}

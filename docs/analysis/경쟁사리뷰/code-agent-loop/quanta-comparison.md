@@ -619,6 +619,7 @@
 | C3 | escapeReminderBoundary가 다중 위조 boundary 무력화, genuine 1개 유지 | [prompt-escape-hellgate](../../../tests/unit/prompt-escape-hellgate.test.ts) | src/agent/prompt.ts escapeReminderBoundary |
 | C4 | 4-section cache breakpoint cap, prefix byte-identical | [prompt-sections-hellgate](../../../tests/unit/prompt-sections-hellgate.test.ts) | ADR-0004 cache prefix (src/agent/prompt-sections.ts MAX_CACHE_BREAKPOINTS=4) |
 | C5 | memory recall hard filters, supersede 체인, eviction 30d 경계 | [memory-hellgate](../../../tests/unit/memory-hellgate.test.ts) | src/memory/{ranking,dedup,eviction,consolidate}.ts |
+| C9 | context grounding scorer가 wrong-thread / must-clarify / stale-context miss를 fail-closed로 차단 | [eval-grounding-scorer-hellgate](../../../tests/unit/eval-grounding-scorer-hellgate.test.ts) | src/apps/eval/grounding/scorer.ts |
 | C7/D5 | verify-guard가 거짓말 명령 22종을 차단, 진짜 러너 13생태계만 satisfy | [verify-guard-hellgate](../../../tests/unit/verify-guard-hellgate.test.ts) | ADR-0067 (src/agent/verify-guard.ts + verify-signal.ts) |
 | D6 | thrash breaker 3-strike + 15% progress 경계 | [compaction-breaker-hellgate](../../../tests/unit/compaction-breaker-hellgate.test.ts) | src/agent/compaction-breaker.ts DEFAULT_COMPACTION_BREAKER_CAPS |
 | E2 | edit exact→fuzzy→strategy-hint 3단, V4A rename atomic | [edit-recovery-hellgate](../../../tests/unit/edit-recovery-hellgate.test.ts) | src/tool/edit/{fuzzy,strategy-hint}.ts + src/patch (V4A) |

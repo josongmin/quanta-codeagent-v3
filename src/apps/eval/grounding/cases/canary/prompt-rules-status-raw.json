@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "id": "prompt-rules-status-raw",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    { "role": "assistant", "text": "Open threads: prompt_rules, oauth_abort_flow." },
+    { "role": "user", "text": "Stay on prompt_rules only." },
+    {
+      "role": "assistant",
+      "text": "Current thread prompt_rules: landed prompt policy snapshots; only proof rail cleanup remains."
+    }
+  ],
+  "targetUtterance": "야 이제 다 해결됐냐?",
+  "gold": {
+    "activeThreadId": "prompt_rules",
+    "referentId": "prompt_rules",
+    "intent": "status_check",
+    "scope": "current_workstream",
+    "shouldClarify": false,
+    "confidence": "high"
+  },
+  "bucket": "ellipsis",
+  "severity": "critical",
+  "pairId": "pair-prompt-rules-status",
+  "pairRole": "raw"
+}

@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "id": "approval-request-feature-catalog",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    {
+      "role": "assistant",
+      "text": "Active thread feature_catalog_sync updated the umbrella eval entry and added a grounding sub-feature."
+    }
+  ],
+  "targetUtterance": "이거 카탈로그까지 올려도 되냐?",
+  "gold": {
+    "activeThreadId": "feature_catalog_sync",
+    "referentId": "feature_catalog_sync",
+    "intent": "approval_request",
+    "scope": "current_workstream",
+    "shouldClarify": false,
+    "confidence": "high"
+  },
+  "bucket": "multi_workstream",
+  "severity": "medium"
+}

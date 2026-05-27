@@ -52,11 +52,23 @@ describe("workflow permission bounds", () => {
     expect(perms(wf)["pull-requests"]).toBeUndefined()
   })
 
+  test("grounding-live-gate: contents:read only", () => {
+    const wf = loadParsed("grounding-live-gate.yml")
+    expect(perms(wf).contents).toBe("read")
+    expect(perms(wf).contents).not.toBe("write")
+  })
+
+  test("grounding-live-gate: no pull-requests permission (no comments / no mutations)", () => {
+    const wf = loadParsed("grounding-live-gate.yml")
+    expect(perms(wf)["pull-requests"]).toBeUndefined()
+  })
+
   test("no workflow uses pull_request_target (prompt-injection footgun)", () => {
     for (const name of [
       "agent-pr-review.yml",
       "agent-nightly-regression.yml",
       "agent-auto-fix.yml",
+      "grounding-live-gate.yml",
     ]) {
       const src = readFileSync(join(WORKFLOWS_DIR, name), "utf8")
       // The string may appear in a comment; strip line-comments before checking.
@@ -71,6 +83,16 @@ describe("workflow permission bounds", () => {
   test("pr-review uses pull_request (untrusted-by-default)", () => {
     const wf = loadParsed("agent-pr-review.yml")
     expect(asObject(wf.on as YamlValue).pull_request).toBeDefined()
+  })
+
+  test("grounding-live-gate uses pull_request with a label guard, not unconditional PR execution", () => {
+    const wf = loadParsed("grounding-live-gate.yml")
+    expect(asObject(wf.on as YamlValue).pull_request).toBeDefined()
+    const jobs = asObject(wf.jobs as YamlValue)
+    const canary = asObject(jobs.canary as YamlValue)
+    expect(typeof canary.if).toBe("string")
+    expect(canary.if as string).toContain("grounding-gate")
+    expect(canary.if as string).toContain("workflow_dispatch")
   })
 
   test("auto-fix has concurrency-or-label guard (no runaway runs on every label)", () => {

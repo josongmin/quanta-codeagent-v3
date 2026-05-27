@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "id": "shared-word-wrong-thread-trap",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    { "role": "assistant", "text": "Old closed thread report_ui changed the summary panel." },
+    {
+      "role": "assistant",
+      "text": "Current active thread grounding_report is computing summary_equivalence_rate."
+    }
+  ],
+  "targetUtterance": "리포트 쪽 계속해.",
+  "gold": {
+    "activeThreadId": "grounding_report",
+    "referentId": "grounding_report",
+    "intent": "execute_change",
+    "scope": "current_workstream",
+    "shouldClarify": false,
+    "confidence": "medium"
+  },
+  "bucket": "wrong_thread_adversarial",
+  "severity": "medium"
+}

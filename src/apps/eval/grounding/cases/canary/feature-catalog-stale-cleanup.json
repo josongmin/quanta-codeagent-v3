@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "id": "feature-catalog-stale-cleanup",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    { "role": "assistant", "text": "Archived thread feature_catalog_cleanup is done." },
+    {
+      "role": "assistant",
+      "text": "Current thread feature_catalog_review is active; from here, 'that cleanup' means the current review pass, not the archived branch."
+    }
+  ],
+  "targetUtterance": "cleanup 그거 계속해.",
+  "gold": {
+    "activeThreadId": "feature_catalog_review",
+    "referentId": "feature_catalog_review",
+    "intent": "execute_change",
+    "scope": "current_workstream",
+    "shouldClarify": false,
+    "confidence": "medium"
+  },
+  "bucket": "stale_context_trap",
+  "severity": "high"
+}

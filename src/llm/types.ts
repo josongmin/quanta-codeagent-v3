@@ -1,6 +1,5 @@
 import type {
   LlmCheckpoint,
-  LlmSurfaceId,
   LlmTransportId,
   PromptCacheRetention,
   ResponsesContinuationMode,
@@ -193,9 +192,9 @@ export type StreamEvent =
    *  transport/control metadata, not assistant content: assemblers and text
    *  collectors MUST ignore it. The union is closed so new failure / fallback
    *  reasons become explicit compile-time work across adapters and observers. */
-  | {
+    | {
       type: "llm_continuation"
-      surfaceId: LlmSurfaceId
+      surfaceId: "openai-responses"
       transportId: LlmTransportId
       phase: ResponsesContinuationPhase
       mode: ResponsesContinuationMode

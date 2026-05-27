@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "id": "context-grounding-now-done",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    { "role": "assistant", "text": "Active thread context_grounding is implementing the structured probe and scorer." }
+  ],
+  "targetUtterance": "이제 됐냐?",
+  "gold": {
+    "activeThreadId": "context_grounding",
+    "referentId": "context_grounding",
+    "intent": "status_check",
+    "scope": "current_workstream",
+    "shouldClarify": false,
+    "confidence": "high"
+  },
+  "bucket": "ellipsis",
+  "severity": "high"
+}

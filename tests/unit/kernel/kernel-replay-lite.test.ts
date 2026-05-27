@@ -38,7 +38,45 @@ const makeSnapshot = (): SessionSnapshotLite => ({
 
 describe("kernel replay-lite", () => {
   test("clones snapshot and retains only post-snapshot tail events", () => {
-    const snapshot = makeSnapshot()
+    const snapshot: SessionSnapshotLite = {
+      ...makeSnapshot(),
+      state: {
+        ...makeSnapshot().state,
+        lastLlmRequest: {
+          model: "gpt-5",
+          provider: "openai",
+          surfaceId: "openai-responses",
+          transportId: "public",
+          authMode: "OpenAI BYOK",
+          policy: {
+            mode: "review",
+            baseSystem: "default",
+            systemLayout: "single_block",
+            repoRulesPresent: true,
+            sessionCtxPresent: false,
+            userAppendPresent: false,
+            selectedGlobRuleNames: ["react.mdc"],
+            activeSkillNames: ["rr"],
+            workingStatePresent: false,
+            memoryContextPresent: true,
+            contextChangeCount: 0,
+            mentionInjectionCount: 1,
+            hookContext: "after_system",
+            summaryPrefix: "conversation_summary",
+            toolChoice: "any",
+            promptCacheKeyPresent: true,
+          },
+        },
+        lastLlmContinuation: {
+          provider: "openai",
+          surfaceId: "openai-responses",
+          transportId: "public",
+          phase: "prepare",
+          mode: "resume",
+          reason: "prepared_resume",
+        },
+      },
+    }
     const tail = [
       {
         eventId: "e10",
@@ -75,6 +113,9 @@ describe("kernel replay-lite", () => {
     expect(replay.snapshot).toEqual(snapshot)
     expect(replay.snapshot).not.toBe(snapshot)
     expect(replay.snapshot.state).not.toBe(snapshot.state)
+    expect(replay.snapshot.state.lastLlmRequest).not.toBe(snapshot.state.lastLlmRequest)
+    expect(replay.snapshot.state.lastLlmRequest?.policy).not.toBe(snapshot.state.lastLlmRequest?.policy)
+    expect(replay.snapshot.state.lastLlmContinuation).not.toBe(snapshot.state.lastLlmContinuation)
     expect(replay.snapshot.openArtifacts).not.toBe(snapshot.openArtifacts)
     expect(replay.tail.map((event) => event.seq)).toEqual([11, 12])
 

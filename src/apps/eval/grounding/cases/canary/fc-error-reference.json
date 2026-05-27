@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "id": "fc-error-reference",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    { "role": "assistant", "text": "Active thread feature_catalog is blocked on latest tool result fc_validate_failure." }
+  ],
+  "targetUtterance": "그 에러 기준으로 다시 말해봐.",
+  "gold": {
+    "activeThreadId": "feature_catalog",
+    "referentId": "fc_validate_failure",
+    "intent": "explain",
+    "scope": "latest_tool_result",
+    "shouldClarify": false,
+    "confidence": "high"
+  },
+  "bucket": "reference",
+  "severity": "high"
+}

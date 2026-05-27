@@ -109,6 +109,59 @@ describe("buildTurnContext dynamic context message", () => {
     expect(text).toContain("PLAN MODE is active")
     expect(text).toContain("remember this")
   })
+
+  test("captures effective prompt policy metadata without leaking prompt text", () => {
+    const out = buildTurnContext(
+      base({
+        baseMessages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "<conversation summary>\ncarry forward only" }],
+          },
+        ],
+        mode: "review",
+        system: "CUSTOM BASE",
+        repoRules: {
+          sourcePath: "/repo/AGENTS.md",
+          entrypoint: "AGENTS.md",
+          body: "repo-authority",
+          loadedAt: 1,
+        },
+        sessionCtx: "session-static",
+        userAppend: "user-static",
+        globRules: [
+          {
+            sourcePath: "/repo/.cursor/rules/react.mdc",
+            globs: ["*.tsx"],
+            alwaysApply: false,
+            body: "tsx only",
+          },
+        ],
+        changedPaths: ["src/App.tsx"],
+        activeSkills: [{ name: "rr", description: "review skill" }],
+        memoryContext: "remember this",
+        hookPromptInjects: [{ injectBeforeUser: "hook-before", injectAfterSystem: "hook-after" }],
+        mentionInjectionMessages: [{ role: "user", content: [{ type: "text", text: "@foo" }] }],
+      }),
+    )
+
+    expect(out.promptPolicy).toEqual({
+      mode: "review",
+      baseSystem: "caller_provided",
+      systemLayout: "four_section",
+      repoRulesPresent: true,
+      sessionCtxPresent: true,
+      userAppendPresent: true,
+      selectedGlobRuleNames: ["react.mdc"],
+      activeSkillNames: ["rr"],
+      workingStatePresent: false,
+      memoryContextPresent: true,
+      contextChangeCount: 0,
+      mentionInjectionCount: 1,
+      hookContext: "both",
+      summaryPrefix: "conversation_summary",
+    })
+  })
 })
 
 describe("buildTurnContext mode resolution (Phase 0)", () => {

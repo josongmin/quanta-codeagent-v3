@@ -9,6 +9,14 @@
  * Storage format: JSONL, append-only. Each line is exactly one
  * `EvalRecord` (envelope) carrying one of the tier-specific payloads.
  */
+import type {
+  GroundingBucket,
+  GroundingDecision,
+  GroundingPairRole,
+  GroundingSeverity,
+  GroundingSuite,
+} from "../grounding/schema"
+import type { GroundingErrorKind } from "../grounding/diagnostics"
 import type { CoverageLevel, EvalTier, UseCaseId, Verdict } from "../types"
 
 export const SCHEMA_VERSION = 1 as const
@@ -17,7 +25,14 @@ export const SCHEMA_VERSION = 1 as const
  *  `result-store.readAll` validates every line's `payload.kind` against this
  *  set before yielding, so an unknown kind is DROPPED rather than silently
  *  flowing through to `report/coverage-matrix.verdictFromRecord`. */
-export const PAYLOAD_KINDS = ["audit", "synthetic", "public", "trajectory", "compare"] as const
+export const PAYLOAD_KINDS = [
+  "audit",
+  "synthetic",
+  "grounding",
+  "public",
+  "trajectory",
+  "compare",
+] as const
 export type PayloadKind = (typeof PAYLOAD_KINDS)[number]
 
 const PAYLOAD_KIND_SET: ReadonlySet<string> = new Set(PAYLOAD_KINDS)
@@ -38,7 +53,13 @@ export interface EvalRecord {
    *  trajectory uses the classifier output; public uses the mapping table. */
   usecase: UseCaseId
   /** Tier-specific payload (discriminated by `tier`). */
-  payload: AuditPayload | SyntheticPayload | PublicPayload | TrajectoryPayload | ComparePayload
+  payload:
+    | AuditPayload
+    | SyntheticPayload
+    | GroundingPayload
+    | PublicPayload
+    | TrajectoryPayload
+    | ComparePayload
 }
 
 // ── Tier-specific payloads ──────────────────────────────────────────────────
@@ -99,7 +120,44 @@ export interface SyntheticPayload {
   costUsd?: number
 }
 
-/** Tier 2 — one public benchmark instance verdict. */
+/** Tier 2 — one structured context-grounding case verdict. */
+export interface GroundingPayload {
+  kind: "grounding"
+  suite: GroundingSuite
+  caseId: string
+  verdict: Verdict
+  bucket: GroundingBucket
+  severity: GroundingSeverity
+  gold: GroundingDecision
+  actual?: GroundingDecision
+  matches: {
+    activeThread: boolean
+    referent: boolean
+    intent: boolean
+    scope: boolean
+    shouldClarify: boolean
+    exactTuple: boolean
+    wrongThread: boolean
+    mustClarifyMiss: boolean
+    staleContextTrapMiss: boolean
+  }
+  pairId?: string
+  pairRole?: GroundingPairRole
+  rawResponse: string
+  parseError?: string
+  errorKind?: GroundingErrorKind
+  provider?: string
+  model?: string
+  surfaceId?: string
+  transportId?: string
+  authMode?: string
+  durationMs: number
+  metrics?: readonly Metric[]
+  tokens?: TokenUsage
+  costUsd?: number
+}
+
+/** Tier 3 — one public benchmark instance verdict. */
 export interface PublicPayload {
   kind: "public"
   /** Adapter name, e.g. `swebench-verified`. */
@@ -118,7 +176,7 @@ export interface PublicPayload {
   costUsd?: number
 }
 
-/** Tier 3 — one real session classified + replayed (replay optional). */
+/** Tier 4 — one real session classified + replayed (replay optional). */
 export interface TrajectoryPayload {
   kind: "trajectory"
   /** Source JSONL path. */
@@ -137,7 +195,7 @@ export interface TrajectoryPayload {
   }
 }
 
-/** Tier 4 — one A/B head-to-head verdict between agents. */
+/** Tier 5 — one A/B head-to-head verdict between agents. */
 export interface ComparePayload {
   kind: "compare"
   scenarioId: string

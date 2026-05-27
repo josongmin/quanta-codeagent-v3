@@ -138,7 +138,12 @@ export const reduceSessionCommand = (
         throw new SessionProtocolValidationError("transcript_replace_unavailable")
       }
       const nextMessages = [...command.messages]
-      const { lastOutcomeReason: _lastOutcomeReason, ...stateWithoutOutcome } = state
+      const {
+        lastOutcomeReason: _lastOutcomeReason,
+        lastLlmRequest: _lastLlmRequest,
+        lastLlmContinuation: _lastLlmContinuation,
+        ...stateWithoutOutcome
+      } = state
       const nextState = withRevision({
         ...stateWithoutOutcome,
         status: "idle",

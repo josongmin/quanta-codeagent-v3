@@ -11,7 +11,14 @@ import type { EvalRecord } from "../storage"
 import { allLeaves, leafById, parseId, TAXONOMY } from "../taxonomy"
 import type { CoverageLevel, EvalTier, UseCaseId, Verdict } from "../types"
 
-const TIER_ORDER: readonly EvalTier[] = ["audit", "synthetic", "public", "trajectory", "compare"]
+const TIER_ORDER: readonly EvalTier[] = [
+  "audit",
+  "synthetic",
+  "grounding",
+  "public",
+  "trajectory",
+  "compare",
+]
 
 const VERDICT_RANK: Record<Verdict, number> = {
   pass: 4,
@@ -51,7 +58,7 @@ export interface MajorBlock {
 }
 
 /** ADR-0087 — token + cost rollup summed over every payload that carries the
- *  additive `tokens`/`costUsd` fields (synthetic + public). Absent from the
+ *  additive `tokens`/`costUsd` fields (synthetic + grounding + public). Absent from the
  *  matrix entirely when NO record reported any usage, so the rendered report is
  *  byte-identical to the pre-feature path on a usage-free corpus. */
 export interface TokenCostRollup {
@@ -82,6 +89,8 @@ const verdictFromRecord = (rec: EvalRecord): Verdict => {
       return COVERAGE_TO_VERDICT[p.coverage]
     case "synthetic":
       return p.verdict
+    case "grounding":
+      return p.verdict
     case "public":
       return p.verdict
     case "trajectory":
@@ -103,7 +112,7 @@ export const buildCoverageMatrix = (records: Iterable<EvalRecord>): CoverageMatr
   const byUsecase = new Map<UseCaseId, Record<EvalTier, MatrixCell>>()
   let seen = 0
   // ADR-0087 — running token/cost rollup. `roll.records` stays 0 until a
-  // synthetic/public payload carries `tokens`, at which point the rollup is
+  // synthetic/grounding/public payload carries `tokens`, at which point the rollup is
   // attached; an all-usage-free corpus leaves `tokenCost` undefined.
   const roll: TokenCostRollup = {
     prompt: 0,
@@ -115,7 +124,10 @@ export const buildCoverageMatrix = (records: Iterable<EvalRecord>): CoverageMatr
   for (const rec of records) {
     seen += 1
     const p = rec.payload
-    if ((p.kind === "synthetic" || p.kind === "public") && p.tokens !== undefined) {
+    if (
+      (p.kind === "synthetic" || p.kind === "grounding" || p.kind === "public") &&
+      p.tokens !== undefined
+    ) {
       roll.prompt += p.tokens.prompt
       roll.completion += p.tokens.completion
       roll.cacheRead += p.tokens.cacheRead ?? 0
@@ -128,6 +140,7 @@ export const buildCoverageMatrix = (records: Iterable<EvalRecord>): CoverageMatr
       row = {
         audit: emptyCell(),
         synthetic: emptyCell(),
+        grounding: emptyCell(),
         public: emptyCell(),
         trajectory: emptyCell(),
         compare: emptyCell(),
@@ -147,6 +160,7 @@ export const buildCoverageMatrix = (records: Iterable<EvalRecord>): CoverageMatr
         const cells = byUsecase.get(l.id) ?? {
           audit: emptyCell(),
           synthetic: emptyCell(),
+          grounding: emptyCell(),
           public: emptyCell(),
           trajectory: emptyCell(),
           compare: emptyCell(),

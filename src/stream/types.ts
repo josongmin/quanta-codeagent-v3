@@ -5,6 +5,7 @@ import type {
   ResponsesContinuationPhase,
   ResponsesContinuationReason,
 } from "@/shared/llm-route-types"
+import type { TurnPolicySnapshot } from "@/shared/turn-policy-types"
 
 /**
  * Cross-slice mirror — keep in sync with @/agent/plan/types.ts; adding fields
@@ -97,6 +98,9 @@ export type AgentEvent =
        *  ("ChatGPT subscription" / "OpenAI BYOK" / …). The renderer paints
        *  this verbatim — keep it short and unambiguous. */
       authMode?: string
+      /** Effective prompt/turn policy at the request boundary. Observability
+       *  only: names/counts/booleans, never prompt text. */
+      policy?: TurnPolicySnapshot
     }
   // OpenAI Responses continuation-wire observation. Emitted when a stateful
   // Responses surface chooses full-vs-resume input shaping or self-heals after
@@ -105,7 +109,7 @@ export type AgentEvent =
   | {
       type: "llm_continuation"
       provider?: string
-      surfaceId: LlmSurfaceId
+      surfaceId: "openai-responses"
       transportId: LlmTransportId
       phase: ResponsesContinuationPhase
       mode: ResponsesContinuationMode

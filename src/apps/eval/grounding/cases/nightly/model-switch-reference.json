@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "id": "model-switch-reference",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "contextChanges": [
+    { "field": "model", "prev": "gpt-4o", "next": "gpt-4.1" }
+  ],
+  "history": [
+    {
+      "role": "assistant",
+      "text": "Active thread responses_migration switched the evaluator model from gpt-4o to gpt-4.1."
+    }
+  ],
+  "targetUtterance": "그 모델 기준으로 다시 설명해.",
+  "gold": {
+    "activeThreadId": "responses_migration",
+    "referentId": "gpt-4.1",
+    "intent": "explain",
+    "scope": "specific_subthread",
+    "shouldClarify": false,
+    "confidence": "high"
+  },
+  "bucket": "reference",
+  "severity": "medium"
+}

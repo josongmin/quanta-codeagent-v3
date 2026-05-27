@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "id": "ambiguous-same-noun-two-files",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    {
+      "role": "assistant",
+      "text": "Active thread route_cleanup touched src/apps/eval/index.ts and src/apps/headless/index.ts."
+    },
+    {
+      "role": "assistant",
+      "text": "Both files were referred to as the index entrypoint in the last turn."
+    }
+  ],
+  "targetUtterance": "엔트리포인트부터 고쳐.",
+  "gold": {
+    "activeThreadId": "route_cleanup",
+    "referentId": null,
+    "intent": "execute_change",
+    "scope": "specific_file",
+    "shouldClarify": true,
+    "confidence": "high"
+  },
+  "bucket": "must_clarify",
+  "severity": "medium"
+}

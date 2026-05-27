@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "id": "tool-noise-json-block",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    { "role": "assistant", "text": "Active thread storage_roundtrip is checking JSONL persistence." },
+    {
+      "role": "assistant",
+      "text": "Tool output: ```json\n{\"kind\":\"grounding\",\"caseId\":\"ambiguous-two-threads\",\"parseError\":\"no JSON object in response\"}\n```"
+    }
+  ],
+  "targetUtterance": "여기서 깨진 지점 설명해.",
+  "gold": {
+    "activeThreadId": "storage_roundtrip",
+    "referentId": "ambiguous-two-threads",
+    "intent": "explain",
+    "scope": "latest_tool_result",
+    "shouldClarify": false,
+    "confidence": "high"
+  },
+  "bucket": "tool_noise",
+  "severity": "medium"
+}

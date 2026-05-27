@@ -194,6 +194,7 @@
 | Project Information | Change history | 최근 변경 | TBD |  |  |
 | LLM Directives | 모델 직접 지시 | "한국어로 답해" | TBD |  |  |
 | LLM Directives | Output format 강제 | "코드만, 설명 X" | TBD |  |  |
+| Conversation State | 멀티턴 thread grounding | ""이제 다 됐냐?"", ""그거 다시 돌려봐"", ""여기서 말하는 그거 뭐였지?"" | TBD |  |  |
 | Examples | Few-shot 예시 | 입출력 샘플 | TBD |  |  |
 
 ### 대11. Operational / DevOps (학술 분류 약함, 실무 큼)

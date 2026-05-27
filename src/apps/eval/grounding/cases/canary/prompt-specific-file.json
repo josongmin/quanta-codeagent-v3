@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "id": "prompt-specific-file",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    { "role": "assistant", "text": "Active thread prompt_rules is narrowing to src/agent/prompt.ts for the next patch." }
+  ],
+  "targetUtterance": "그럼 src/agent/prompt.ts만 손봐.",
+  "gold": {
+    "activeThreadId": "prompt_rules",
+    "referentId": "src/agent/prompt.ts",
+    "intent": "execute_change",
+    "scope": "specific_file",
+    "shouldClarify": false,
+    "confidence": "high"
+  },
+  "bucket": "reference",
+  "severity": "high"
+}

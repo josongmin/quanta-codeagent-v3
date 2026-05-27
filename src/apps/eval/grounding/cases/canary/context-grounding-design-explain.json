@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "id": "context-grounding-design-explain",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    { "role": "assistant", "text": "Active thread context_grounding chose a structured probe instead of a prose judge." }
+  ],
+  "targetUtterance": "이거 왜 이렇게 설계했는지 설명해.",
+  "gold": {
+    "activeThreadId": "context_grounding",
+    "referentId": "context_grounding",
+    "intent": "explain",
+    "scope": "current_workstream",
+    "shouldClarify": false,
+    "confidence": "high"
+  },
+  "bucket": "reference",
+  "severity": "high"
+}

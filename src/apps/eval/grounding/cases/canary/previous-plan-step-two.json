@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "id": "previous-plan-step-two",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    {
+      "role": "assistant",
+      "text": "Active thread prompt_rules plan: prompt_rules_step_1 = add payload, prompt_rules_step_2 = add scorer hellgate, prompt_rules_step_3 = wire workflow."
+    }
+  ],
+  "targetUtterance": "2번부터 해.",
+  "gold": {
+    "activeThreadId": "prompt_rules",
+    "referentId": "prompt_rules_step_2",
+    "intent": "execute_change",
+    "scope": "specific_subthread",
+    "shouldClarify": false,
+    "confidence": "high"
+  },
+  "bucket": "reference",
+  "severity": "high"
+}

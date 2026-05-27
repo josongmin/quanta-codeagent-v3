@@ -1,4 +1,8 @@
 import type { CapabilityManifest } from "./capabilities"
+import type {
+  LlmContinuationObservation,
+  LlmRequestObservation,
+} from "@/shared/llm-route-types"
 
 export interface ArtifactRef {
   readonly artifactId: string
@@ -22,11 +26,16 @@ export interface SessionStateView {
   readonly permissionMode: string
   readonly identityMode?: string
   readonly toolProfile?: string
+  readonly modelSlug?: string
   readonly messageCount: number
   readonly lastUserText?: string
   readonly lastAssistantText?: string
   readonly streamingAssistantText?: string
   readonly lastOutcomeReason?: string
+  readonly lastLlmRequest?: LlmRequestObservation & {
+    readonly policy?: import("@/shared/turn-policy-types").TurnPolicySnapshot
+  }
+  readonly lastLlmContinuation?: LlmContinuationObservation
 }
 
 export interface SessionSnapshotLite {

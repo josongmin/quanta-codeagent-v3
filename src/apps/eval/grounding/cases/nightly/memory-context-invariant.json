@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "id": "memory-context-invariant",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "memoryContext": "Remember: fail_closed_policy means wrong_thread must stay 0 and must_clarify recall must stay 1.0.",
+  "history": [
+    {
+      "role": "assistant",
+      "text": "Active thread grounding_gate is tuning the release thresholds for the grounding suite."
+    }
+  ],
+  "targetUtterance": "그 제약 아직 유지하냐?",
+  "gold": {
+    "activeThreadId": "grounding_gate",
+    "referentId": "fail_closed_policy",
+    "intent": "status_check",
+    "scope": "specific_subthread",
+    "shouldClarify": false,
+    "confidence": "medium"
+  },
+  "bucket": "reference",
+  "severity": "medium"
+}

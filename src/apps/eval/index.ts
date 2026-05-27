@@ -1,14 +1,15 @@
 #!/usr/bin/env bun
 
 /**
- * `bun run eval <subcommand>` — Tier 0–4 verification harness.
+ * `bun run eval <subcommand>` — Tier 0–5 verification harness.
  *
  * Subcommands:
  *   audit                          Tier 0 static coverage matrix
  *   synthetic [--usecase ID] [--all]   Tier 1 LLM-judged scenario runs
- *   public swebench-verified [--report PATH]   Tier 2 wraps bench-report
- *   trajectory classify --input DIR   Tier 3 label real sessions
- *   compare --scenario ID --usecase ID --agents quanta,claude-code   Tier 4 (stub)
+ *   grounding run --suite canary|nightly       Tier 2 structured grounding probe
+ *   public swebench-verified [--report PATH]   Tier 3 wraps bench-report
+ *   trajectory classify --input DIR   Tier 4 label real sessions
+ *   compare --scenario ID --usecase ID --agents quanta,claude-code   Tier 5 (stub)
  *   report                         render aggregate matrix to stdout
  *   classify "<text>"              ad-hoc one-off taxonomy classifier
  *
@@ -19,14 +20,23 @@
  * Exits 0 in all "no work to do / missing key" paths so a CI matrix entry that
  * has no API key configured does not break the build — it prints guidance.
  */
-import { existsSync, readFileSync } from "node:fs"
-import { resolve } from "node:path"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { dirname, resolve } from "node:path"
 import { DEFAULT_MODEL, type LLMPort, type Provider, pickProvider, tryCreateLLM } from "@/llm"
 import { errMessage, logger, setTerminalIo } from "@/shared"
 import { runAudit } from "./audit"
 import { isKnownAdapter, KNOWN_ADAPTERS, runCompare } from "./compare"
+import {
+  buildGroundingReport,
+  evaluateGroundingGate,
+  GROUNDING_GATE_PROFILES,
+  isGroundingGateProfile,
+  runGroundingPreflightCheck,
+  runGrounding,
+} from "./grounding"
 import { runSwebenchAdapter } from "./public"
 import { buildReport } from "./report"
+import { ResultStore } from "./storage"
 import { generateScenarios, runSynthetic } from "./synthetic"
 import { classifyQuery } from "./taxonomy"
 import { classifyTrajectories, freezeFixture, replayFixture } from "./trajectory"
@@ -51,6 +61,12 @@ const argValue = (flag: string): string | undefined => {
   const i = argv.indexOf(flag)
   if (i < 0 || i + 1 >= argv.length) return undefined
   return argv[i + 1]
+}
+
+const writeTextFile = (path: string, text: string): void => {
+  const out = resolve(process.cwd(), path)
+  mkdirSync(dirname(out), { recursive: true })
+  writeFileSync(out, text)
 }
 
 // ── tiny dotenv (no dep, first-wins; mirrors apps/bench) ─────────────────────
@@ -131,6 +147,123 @@ const cmdSynthetic = async (): Promise<number> => {
     `synthetic run=${summary.runId} total=${summary.total} pass=${summary.counts.pass} partial=${summary.counts.partial} fail=${summary.counts.fail} err=${summary.counts.error} (${summary.durationMs}ms)`,
   )
   return 0
+}
+
+const cmdGrounding = async (): Promise<number> => {
+  const sub = argv[1]
+  switch (sub) {
+    case "run": {
+      const suite = argValue("--suite")
+      if (suite !== "canary" && suite !== "nightly") {
+        console.error("eval grounding run: --suite must be canary or nightly")
+        return 1
+      }
+      const limitRaw = argValue("--limit")
+      const limit =
+        limitRaw !== undefined ? Number.parseInt(limitRaw, 10) : undefined
+      if (
+        limitRaw !== undefined &&
+        (!Number.isFinite(limit) || limit === undefined || limit < 0 || !Number.isInteger(limit))
+      ) {
+        console.error(`eval grounding run: invalid --limit ${limitRaw}`)
+        return 1
+      }
+      const concurrencyRaw = argValue("--concurrency")
+      const concurrency =
+        concurrencyRaw !== undefined ? Number.parseInt(concurrencyRaw, 10) : undefined
+      if (
+        concurrencyRaw !== undefined &&
+        (!Number.isFinite(concurrency) ||
+          concurrency === undefined ||
+          concurrency < 1 ||
+          !Number.isInteger(concurrency))
+      ) {
+        console.error(`eval grounding run: invalid --concurrency ${concurrencyRaw}`)
+        return 1
+      }
+      const agent = resolveLLM("agent")
+      if (agent === null) return 0
+      const summary = await runGrounding({
+        llm: agent.llm,
+        suite,
+        ...(argValue("--case") !== undefined ? { caseId: argValue("--case")! } : {}),
+        ...(limit !== undefined ? { limit } : {}),
+        ...(concurrency !== undefined ? { concurrency } : {}),
+      })
+      console.log(
+        `grounding run=${summary.runId} suite=${summary.suite} total=${summary.total} pass=${summary.counts.pass} partial=${summary.counts.partial} fail=${summary.counts.fail} err=${summary.counts.error} concurrency=${summary.concurrency} (${summary.durationMs}ms)`,
+      )
+      return 0
+    }
+    case "preflight": {
+      const agent = resolveLLM("agent")
+      if (agent === null) return 0
+      const out = await runGroundingPreflightCheck(agent.llm)
+      const jsonOut = argValue("--json-out")
+      const payload = {
+        provider: out.provider ?? null,
+        model: out.model ?? null,
+        surfaceId: out.surfaceId ?? null,
+        transportId: out.transportId ?? null,
+        authMode: out.authMode ?? null,
+        durationMs: out.durationMs,
+        ok: out.error === undefined && out.decision !== undefined,
+        error: out.error ?? null,
+        errorKind: out.errorKind ?? null,
+        rawText: out.rawText,
+      }
+      if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(payload, null, 2)}\n`)
+      console.log(JSON.stringify(payload, null, 2))
+      return payload.ok ? 0 : 1
+    }
+    case "report": {
+      const runId = argValue("--run-id")
+      if (runId === undefined) {
+        console.error("eval grounding report: --run-id <id> is required")
+        return 1
+      }
+      const out = buildGroundingReport(new ResultStore().readAll(), runId)
+      const markdownOut = argValue("--markdown-out")
+      const jsonOut = argValue("--json-out")
+      if (markdownOut !== undefined) writeTextFile(markdownOut, out.markdown)
+      if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(out.report, null, 2)}\n`)
+      console.log(out.markdown)
+      console.error(out.headline)
+      return 0
+    }
+    case "gate": {
+      const runId = argValue("--run-id")
+      if (runId === undefined) {
+        console.error("eval grounding gate: --run-id <id> is required")
+        return 1
+      }
+      const profile = argValue("--profile")
+      if (profile === undefined || !isGroundingGateProfile(profile)) {
+        console.error(
+          `eval grounding gate: --profile must be one of ${GROUNDING_GATE_PROFILES.join(", ")}`,
+        )
+        return 1
+      }
+      const out = buildGroundingReport(new ResultStore().readAll(), runId)
+      const markdownOut = argValue("--markdown-out")
+      const jsonOut = argValue("--json-out")
+      if (markdownOut !== undefined) writeTextFile(markdownOut, out.markdown)
+      if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(out.report, null, 2)}\n`)
+      const failures = evaluateGroundingGate(out.report, profile)
+      if (failures.length === 0) {
+        console.error(`grounding gate passed: profile=${profile} runId=${runId}`)
+        return 0
+      }
+      console.error(`grounding gate failed: profile=${profile} runId=${runId}`)
+      for (const failure of failures) {
+        console.error(`- ${failure.metric}: expected ${failure.expected}, got ${failure.actual}`)
+      }
+      return 1
+    }
+    default:
+      console.error("eval grounding: subcommand must be one of: run, preflight, report, gate")
+      return 1
+  }
 }
 
 const cmdPublic = async (): Promise<number> => {
@@ -308,18 +441,23 @@ const cmdClassify = async (): Promise<number> => {
   return 0
 }
 
-const HELP = `quanta eval — verification harness (Tier 0..4)
+const HELP = `quanta eval — verification harness (Tier 0..5)
 
   audit                                      Tier 0 static coverage
   synthetic [--usecase ID]                   Tier 1 LLM-judged scenarios
+  grounding run --suite canary|nightly       Tier 2 structured context-grounding probe
+  grounding preflight                        Tier 2 provider/route/parser health check
+  grounding report --run-id ID               Tier 2 grounding metrics report
+  grounding gate --run-id ID --profile canary
+                                             Tier 2 grounding release gate
   generate --usecase ID [--count N]          Tier 1 auto-generate scenarios (LLM)
-  public swebench-verified [--report PATH]   Tier 2 wraps bench-report.json
-  trajectory classify --input DIR            Tier 3 label real sessions
-  trajectory replay --fixture <jsonl>        Tier 3 re-execute a fixture + diff
+  public swebench-verified [--report PATH]   Tier 3 wraps bench-report.json
+  trajectory classify --input DIR            Tier 4 label real sessions
+  trajectory replay --fixture <jsonl>        Tier 4 re-execute a fixture + diff
   trajectory freeze --source <jsonl> --usecase ID [--prompt TEXT]
-                                             Tier 3 promote a session to fixture
+                                             Tier 4 promote a session to fixture
   compare --scenario ID --usecase ID [--agents quanta,claude-code,...]
-                                             Tier 4 head-to-head + pairwise judge
+                                             Tier 5 head-to-head + pairwise judge
   report                                     render aggregate matrix
   classify "<text>"                          ad-hoc taxonomy classifier
 `
@@ -331,6 +469,8 @@ const main = async (): Promise<number> => {
       return cmdAudit()
     case "synthetic":
       return cmdSynthetic()
+    case "grounding":
+      return cmdGrounding()
     case "generate":
       return cmdGenerate()
     case "public":

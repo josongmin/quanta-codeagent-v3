@@ -1,4 +1,11 @@
+import { basename } from "node:path"
 import type { Message, SystemBlock } from "@/llm"
+import type {
+  AgentPromptMode,
+  PromptHookContextMode,
+  PromptPolicySnapshot,
+  PromptSummaryPrefix,
+} from "@/shared"
 import { buildPersistentInjectionMessages } from "./context-change"
 import { type GlobRule, renderGlobRulesBlock, selectGlobRules } from "./glob-rules"
 import { assertValidIdentityLines } from "./identity"
@@ -98,7 +105,7 @@ const identityLines = (identity: readonly string[] | undefined): readonly string
  *  Adding values to this union is BACKWARD-COMPATIBLE: existing 4-mode callers
  *  still typecheck; new modes default to fail-closed in `mode.ts`'s admissibility
  *  gate unless explicitly added to `MUTATING_MODES`. */
-export type AgentMode = "default" | "plan" | "review" | "audit" | "architect" | "editor"
+export type AgentMode = AgentPromptMode
 
 export interface TurnContextInput {
   baseMessages: Message[]
@@ -208,6 +215,7 @@ export interface TurnContextInput {
 export interface TurnContext {
   system: SystemBlock[]
   messages: Message[]
+  promptPolicy: PromptPolicySnapshot
 }
 
 const PLAN_NOTICE = [
@@ -387,19 +395,22 @@ const appendHookContextMessage = (
  *  freshly-emitted guidance is read last by the model. `injectBeforeUser`
  *  is NOT folded here — it rides as a separate user-side message in
  *  {@link buildTurnContext}. */
-const buildDynamicContext = (input: TurnContextInput): string | undefined => {
+const buildDynamicContext = (
+  input: TurnContextInput,
+  effectiveMode: AgentMode,
+  selectedGlobRules: readonly GlobRule[],
+): string | undefined => {
   const parts: string[] = [todayDateLine(input.now), `Working directory: ${input.cwd}`]
   // SSOT mode precedence (ADR-0018): prompt + dispatch share resolveAgentMode
   // so the per-turn notice and the dispatch admissibility gate never disagree.
-  const notice = modeNotice(resolveAgentMode(input.mode, input.planMode))
+  const notice = modeNotice(effectiveMode)
   if (notice) parts.push("", notice)
   if (input.repoRules) parts.push("", renderRepoRulesBlock(input.repoRules))
   // File-scoped rules (Cursor `.cursor/rules` parity) ride right after the
   // top-level repo contract — both are repo authority, but these are selected
   // per-turn by the files in play. Absent / no selection ⇒ no block.
-  if (input.globRules && input.globRules.length > 0) {
-    const selected = selectGlobRules(input.globRules, input.changedPaths ?? [])
-    const block = renderGlobRulesBlock(selected)
+  if (selectedGlobRules.length > 0) {
+    const block = renderGlobRulesBlock([...selectedGlobRules])
     if (block) parts.push("", block)
   }
   if (input.activeSkills && input.activeSkills.length > 0) {
@@ -416,6 +427,31 @@ const buildDynamicContext = (input: TurnContextInput): string | undefined => {
   if (memory) parts.push("", memory)
   appendHookContextDynamicTail(parts, input.hookPromptInjects)
   return parts.join("\n")
+}
+
+const hasText = (value: string | undefined): boolean => value !== undefined && value.trim().length > 0
+
+const resolveHookContextMode = (
+  injects: readonly import("./hooks").HookPromptInject[] | undefined,
+): PromptHookContextMode => {
+  const beforeUser = collectHookPromptSide(injects, "injectBeforeUser") !== undefined
+  const afterSystem = collectHookPromptSide(injects, "injectAfterSystem") !== undefined
+  if (beforeUser && afterSystem) return "both"
+  if (beforeUser) return "before_user"
+  if (afterSystem) return "after_system"
+  return "none"
+}
+
+const resolveSummaryPrefix = (messages: readonly Message[]): PromptSummaryPrefix => {
+  for (const message of messages) {
+    if (message.role !== "user") continue
+    for (const block of message.content) {
+      if (block.type !== "text") continue
+      if (block.text.startsWith("<continuation summary>\n")) return "continuation_summary"
+      if (block.text.startsWith("<conversation summary>\n")) return "conversation_summary"
+    }
+  }
+  return "none"
 }
 
 /**
@@ -441,6 +477,11 @@ export const buildTurnContext = (input: TurnContextInput): TurnContext => {
     (projectMd !== undefined && projectMd.trim().length > 0) ||
     (input.userAppend !== undefined && input.userAppend.trim().length > 0) ||
     (input.sessionCtx !== undefined && input.sessionCtx.trim().length > 0)
+  const effectiveMode = resolveAgentMode(input.mode, input.planMode)
+  const selectedGlobRules =
+    input.globRules !== undefined && input.globRules.length > 0
+      ? selectGlobRules(input.globRules, input.changedPaths ?? [])
+      : []
   const system: SystemBlock[] = useSectioned
     ? (() => {
         const sections = fourSectionPreset({
@@ -457,7 +498,7 @@ export const buildTurnContext = (input: TurnContextInput): TurnContext => {
         return buildSectionedSystemBlocks(sections)
       })()
     : [{ type: "text", text: basePrompt, cache: true }]
-  const dynamic = buildDynamicContext(input)
+  const dynamic = buildDynamicContext(input, effectiveMode, selectedGlobRules)
   const messages: Message[] = [...input.baseMessages]
   appendHookContextMessage(messages, input.hookPromptInjects)
   // ADR-0321 + ADR-0325 wire — persistent injection channels.
@@ -481,7 +522,26 @@ export const buildTurnContext = (input: TurnContextInput): TurnContext => {
       content: [{ type: "text", text: embedUntrusted("system-reminder", dynamic) }],
     })
   }
-  return { system, messages }
+  return {
+    system,
+    messages,
+    promptPolicy: {
+      mode: effectiveMode,
+      baseSystem: input.system !== undefined ? "caller_provided" : "default",
+      systemLayout: useSectioned ? "four_section" : "single_block",
+      repoRulesPresent: hasText(projectMd),
+      sessionCtxPresent: hasText(input.sessionCtx),
+      userAppendPresent: hasText(input.userAppend),
+      selectedGlobRuleNames: selectedGlobRules.map((rule) => basename(rule.sourcePath)),
+      activeSkillNames: input.activeSkills?.map((skill) => skill.name) ?? [],
+      workingStatePresent: input.workingState !== undefined,
+      memoryContextPresent: hasText(input.memoryContext),
+      contextChangeCount: input.contextChangeEvents?.length ?? 0,
+      mentionInjectionCount: input.mentionInjectionMessages?.length ?? 0,
+      hookContext: resolveHookContextMode(input.hookPromptInjects),
+      summaryPrefix: resolveSummaryPrefix(input.baseMessages),
+    },
+  }
 }
 
 // ─── ADR-0327 wire helpers ───────────────────────────────────────────────────

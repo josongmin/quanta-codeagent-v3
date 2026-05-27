@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "id": "session-transport-subthread",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    { "role": "assistant", "text": "Active thread session_transport has two subthreads: ws_reuse and sse_fallback." },
+    { "role": "assistant", "text": "Both are still open, but the last discussion focused on ws_reuse." }
+  ],
+  "targetUtterance": "ws_reuse 쪽만 더 파.",
+  "gold": {
+    "activeThreadId": "session_transport",
+    "referentId": "ws_reuse",
+    "intent": "execute_change",
+    "scope": "specific_subthread",
+    "shouldClarify": false,
+    "confidence": "high"
+  },
+  "bucket": "reference",
+  "severity": "high"
+}

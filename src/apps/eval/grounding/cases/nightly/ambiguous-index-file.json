@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "id": "ambiguous-index-file",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    {
+      "role": "assistant",
+      "text": "Active thread ui_polish is touching src/apps/eval/index.ts and src/apps/cli/index.ts."
+    },
+    {
+      "role": "assistant",
+      "text": "Both files were described as index files in the last update."
+    }
+  ],
+  "targetUtterance": "index 쪽부터 해.",
+  "gold": {
+    "activeThreadId": "ui_polish",
+    "referentId": null,
+    "intent": "execute_change",
+    "scope": "specific_file",
+    "shouldClarify": true,
+    "confidence": "high"
+  },
+  "bucket": "must_clarify",
+  "severity": "medium"
+}

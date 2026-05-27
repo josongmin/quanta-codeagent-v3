@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "id": "ambiguous-two-files",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    { "role": "assistant", "text": "Active thread prompt_rules is touching src/agent/prompt.ts and src/agent/loop.ts." },
+    { "role": "assistant", "text": "Both files still have open edits." }
+  ],
+  "targetUtterance": "그 파일만 건드려.",
+  "gold": {
+    "activeThreadId": "prompt_rules",
+    "referentId": null,
+    "intent": "execute_change",
+    "scope": "specific_file",
+    "shouldClarify": true,
+    "confidence": "high"
+  },
+  "bucket": "must_clarify",
+  "severity": "critical"
+}

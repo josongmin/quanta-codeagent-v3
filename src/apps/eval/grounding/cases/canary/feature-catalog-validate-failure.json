@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "id": "feature-catalog-validate-failure",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    { "role": "assistant", "text": "Active thread feature_catalog is wiring a new eval feature entry." },
+    {
+      "role": "assistant",
+      "text": "Latest tool result fc_validate_failure: bun fc validate failed because one evidence path is missing."
+    }
+  ],
+  "targetUtterance": "왜 깨진거지?",
+  "gold": {
+    "activeThreadId": "feature_catalog",
+    "referentId": "fc_validate_failure",
+    "intent": "explain",
+    "scope": "latest_tool_result",
+    "shouldClarify": false,
+    "confidence": "high"
+  },
+  "bucket": "tool_noise",
+  "severity": "high"
+}

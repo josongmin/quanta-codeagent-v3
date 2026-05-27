@@ -1,6 +1,10 @@
 export { assertNever } from "./assert-never"
 export { byteCompare } from "./byte-compare"
 export { classify } from "./error-classifier"
+export type {
+  LlmContinuationObservation,
+  LlmRequestObservation,
+} from "./llm-route-types"
 export type { LLMErrorKind, LLMProvider } from "./errors"
 export {
   errMessage,
@@ -23,6 +27,16 @@ export {
   SWEBENCH_CACHE_LEVELS,
 } from "./runtime-config"
 export type { ShellExecEvent, ShellExecObserver } from "./shell-exec-types"
+export type {
+  AgentPromptMode,
+  PromptBaseSystem,
+  PromptHookContextMode,
+  PromptPolicySnapshot,
+  PromptSummaryPrefix,
+  PromptSystemLayout,
+  TurnPolicySnapshot,
+  TurnPolicyToolChoiceKind,
+} from "./turn-policy-types"
 export type {
   DegradedData,
   LlmUsageData,

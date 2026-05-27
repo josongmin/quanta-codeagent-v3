@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "id": "working-state-owner-shortlist",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "workingState": {
+    "ownerShortlist": [
+      { "file": "src/apps/eval/index.ts", "reason": "primary owner" },
+      { "file": "src/apps/eval/grounding/report.ts", "reason": "metric rendering" }
+    ],
+    "blockers": [],
+    "nextStepQueue": [],
+    "deferredValidation": []
+  },
+  "history": [
+    {
+      "role": "assistant",
+      "text": "Active thread prompt_cache_resume is patching eval grounding artifacts."
+    },
+    {
+      "role": "assistant",
+      "text": "Owner shortlist currently ranks src/apps/eval/index.ts first, then src/apps/eval/grounding/report.ts."
+    }
+  ],
+  "targetUtterance": "그 파일부터 손봐.",
+  "gold": {
+    "activeThreadId": "prompt_cache_resume",
+    "referentId": "src/apps/eval/index.ts",
+    "intent": "execute_change",
+    "scope": "specific_file",
+    "shouldClarify": false,
+    "confidence": "high"
+  },
+  "bucket": "reference",
+  "severity": "medium"
+}

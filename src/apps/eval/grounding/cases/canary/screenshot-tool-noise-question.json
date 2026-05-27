@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "id": "screenshot-tool-noise-question",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    { "role": "assistant", "text": "Active thread screenshot_send is debugging image selection and send." },
+    {
+      "role": "assistant",
+      "text": "Tool output: {\"error\":\"permission denied\",\"ref\":\"latest_capture_failure\",\"surface\":\"screen_recording\"}"
+    }
+  ],
+  "targetUtterance": "여기서 뭐가 문제야?",
+  "gold": {
+    "activeThreadId": "screenshot_send",
+    "referentId": "latest_capture_failure",
+    "intent": "explain",
+    "scope": "latest_tool_result",
+    "shouldClarify": false,
+    "confidence": "high"
+  },
+  "bucket": "tool_noise",
+  "severity": "high"
+}

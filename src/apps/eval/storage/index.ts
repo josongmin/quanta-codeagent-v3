@@ -3,6 +3,7 @@ export type {
   AuditPayload,
   ComparePayload,
   EvalRecord,
+  GroundingPayload,
   PublicPayload,
   RunSummaryRecord,
   SyntheticPayload,

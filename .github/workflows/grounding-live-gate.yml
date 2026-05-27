@@ -1,0 +1,148 @@
+# Context-grounding live gate.
+#
+# Canary is opt-in blocking: manual dispatch or PR label `grounding-gate`.
+# Nightly is trend-oriented: cron only, same command surface, same artifacts.
+# Read-only token posture; no PR comments, no writes, no pull_request_target.
+name: grounding-live-gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  schedule:
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    name: grounding canary
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork && contains(github.event.pull_request.labels.*.name, 'grounding-gate'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      QUANTA_PROVIDER: ${{ vars.QUANTA_PROVIDER }}
+      QUANTA_MODEL: ${{ vars.QUANTA_MODEL }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: install deps
+        run: bun install --frozen-lockfile
+      - name: assert live key present
+        run: |
+          if [ -z "${OPENAI_API_KEY:-}" ]; then
+            echo "::error::OPENAI_API_KEY is required for grounding live gate"
+            exit 1
+          fi
+      - name: preflight route + parser health
+        run: |
+          export QUANTA_PROVIDER="${QUANTA_PROVIDER:-openai}"
+          export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
+          mkdir -p "$RUNNER_TEMP/grounding"
+          bun run eval grounding preflight --json-out "$RUNNER_TEMP/grounding/canary-preflight.json" | tee "$RUNNER_TEMP/grounding/canary-preflight.txt"
+      - name: run canary suite
+        run: |
+          export QUANTA_PROVIDER="${QUANTA_PROVIDER:-openai}"
+          export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
+          mkdir -p "$RUNNER_TEMP/grounding"
+          bun run eval grounding run --suite canary --concurrency 4 | tee "$RUNNER_TEMP/grounding/canary-run.txt"
+          run_id=$(sed -n 's/.*run=\([^ ]*\).*/\1/p' "$RUNNER_TEMP/grounding/canary-run.txt" | head -1)
+          if [ -z "$run_id" ]; then
+            echo "::error::failed to extract run id from grounding output"
+            exit 1
+          fi
+          echo "RUN_ID=$run_id" >> "$GITHUB_ENV"
+      - name: render canary report + enforce thresholds
+        run: |
+          export QUANTA_PROVIDER="${QUANTA_PROVIDER:-openai}"
+          export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
+          bun run eval grounding report --run-id "$RUN_ID" --markdown-out "$RUNNER_TEMP/grounding/canary-report.md" --json-out "$RUNNER_TEMP/grounding/canary-report.json"
+          bun run eval grounding gate --run-id "$RUN_ID" --profile canary
+          cp "evals/runs/$RUN_ID.jsonl" "$RUNNER_TEMP/grounding/$RUN_ID.jsonl"
+      - name: upload canary artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: grounding-canary-${{ env.RUN_ID || github.run_id }}
+          path: |
+            ${{ runner.temp }}/grounding/canary-run.txt
+            ${{ runner.temp }}/grounding/canary-preflight.txt
+            ${{ runner.temp }}/grounding/canary-preflight.json
+            ${{ runner.temp }}/grounding/canary-report.md
+            ${{ runner.temp }}/grounding/canary-report.json
+            ${{ runner.temp }}/grounding/*.jsonl
+
+  nightly:
+    name: grounding nightly
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      QUANTA_PROVIDER: ${{ vars.QUANTA_PROVIDER }}
+      QUANTA_MODEL: ${{ vars.QUANTA_MODEL }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: install deps
+        run: bun install --frozen-lockfile
+      - name: assert live key present
+        run: |
+          if [ -z "${OPENAI_API_KEY:-}" ]; then
+            echo "::error::OPENAI_API_KEY is required for grounding nightly"
+            exit 1
+          fi
+      - name: preflight route + parser health
+        run: |
+          export QUANTA_PROVIDER="${QUANTA_PROVIDER:-openai}"
+          export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
+          mkdir -p "$RUNNER_TEMP/grounding"
+          bun run eval grounding preflight --json-out "$RUNNER_TEMP/grounding/nightly-preflight.json" | tee "$RUNNER_TEMP/grounding/nightly-preflight.txt"
+      - name: run nightly suite
+        run: |
+          export QUANTA_PROVIDER="${QUANTA_PROVIDER:-openai}"
+          export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
+          mkdir -p "$RUNNER_TEMP/grounding"
+          bun run eval grounding run --suite nightly --concurrency 4 | tee "$RUNNER_TEMP/grounding/nightly-run.txt"
+          run_id=$(sed -n 's/.*run=\([^ ]*\).*/\1/p' "$RUNNER_TEMP/grounding/nightly-run.txt" | head -1)
+          if [ -z "$run_id" ]; then
+            echo "::error::failed to extract run id from grounding output"
+            exit 1
+          fi
+          echo "RUN_ID=$run_id" >> "$GITHUB_ENV"
+      - name: render nightly report
+        run: |
+          export QUANTA_PROVIDER="${QUANTA_PROVIDER:-openai}"
+          export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
+          bun run eval grounding report --run-id "$RUN_ID" --markdown-out "$RUNNER_TEMP/grounding/nightly-report.md" --json-out "$RUNNER_TEMP/grounding/nightly-report.json"
+          cp "evals/runs/$RUN_ID.jsonl" "$RUNNER_TEMP/grounding/$RUN_ID.jsonl"
+      - name: upload nightly artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: grounding-nightly-${{ env.RUN_ID || github.run_id }}
+          path: |
+            ${{ runner.temp }}/grounding/nightly-run.txt
+            ${{ runner.temp }}/grounding/nightly-preflight.txt
+            ${{ runner.temp }}/grounding/nightly-preflight.json
+            ${{ runner.temp }}/grounding/nightly-report.md
+            ${{ runner.temp }}/grounding/nightly-report.json
+            ${{ runner.temp }}/grounding/*.jsonl

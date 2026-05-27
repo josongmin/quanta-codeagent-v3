@@ -43,6 +43,7 @@
     "eval": "bun run src/apps/eval/index.ts",
     "eval:audit": "bun run src/apps/eval/index.ts audit",
     "eval:synthetic": "bun run src/apps/eval/index.ts synthetic",
+    "eval:grounding": "bun run src/apps/eval/index.ts grounding",
     "eval:trajectory": "bun run src/apps/eval/index.ts trajectory",
     "eval:replay": "bun run src/apps/eval/index.ts trajectory replay",
     "eval:compare": "bun run src/apps/eval/index.ts compare",

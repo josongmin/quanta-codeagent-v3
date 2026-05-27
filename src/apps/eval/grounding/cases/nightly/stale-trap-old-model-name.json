@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "id": "stale-trap-old-model-name",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    { "role": "assistant", "text": "Earlier closed thread legacy_eval used gpt-4o." },
+    {
+      "role": "assistant",
+      "text": "Current active thread grounding_gate is validating gpt-4.1 thresholds."
+    }
+  ],
+  "targetUtterance": "그 모델 쪽도 끝났냐?",
+  "gold": {
+    "activeThreadId": "grounding_gate",
+    "referentId": "gpt-4.1",
+    "intent": "status_check",
+    "scope": "specific_subthread",
+    "shouldClarify": false,
+    "confidence": "medium"
+  },
+  "bucket": "stale_context_trap",
+  "severity": "medium"
+}

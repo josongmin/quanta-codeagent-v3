@@ -10,6 +10,7 @@ import type {
   ResponsesContinuationPhase,
   ResponsesContinuationReason,
 } from "@/shared/llm-route-types"
+import type { TurnPolicySnapshot } from "@/shared/turn-policy-types"
 import type {
   ArtifactRef,
   CapabilityManifest,
@@ -78,11 +79,12 @@ export type SessionHostTurnEvent =
       readonly surfaceId?: LlmSurfaceId
       readonly transportId?: LlmTransportId
       readonly authMode?: string
+      readonly policy?: TurnPolicySnapshot
     }
   | {
       readonly type: "llm.continuation"
       readonly provider?: string
-      readonly surfaceId: LlmSurfaceId
+      readonly surfaceId: "openai-responses"
       readonly transportId: LlmTransportId
       readonly phase: ResponsesContinuationPhase
       readonly mode: ResponsesContinuationMode

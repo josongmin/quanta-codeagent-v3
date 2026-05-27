@@ -374,6 +374,24 @@ describe("kernel scheduler approval flow", () => {
                 surfaceId?: "openai-responses"
                 transportId?: "public"
                 authMode?: string
+                policy?: {
+                  mode: "review"
+                  baseSystem: "default"
+                  systemLayout: "single_block"
+                  repoRulesPresent: true
+                  sessionCtxPresent: false
+                  userAppendPresent: false
+                  selectedGlobRuleNames: readonly ["react.mdc"]
+                  activeSkillNames: readonly ["rr"]
+                  workingStatePresent: false
+                  memoryContextPresent: true
+                  contextChangeCount: 0
+                  mentionInjectionCount: 1
+                  hookContext: "after_system"
+                  summaryPrefix: "conversation_summary"
+                  toolChoice: "any"
+                  promptCacheKeyPresent: true
+                }
               }
             | {
                 type: "llm.continuation"
@@ -394,6 +412,24 @@ describe("kernel scheduler approval flow", () => {
           surfaceId: "openai-responses",
           transportId: "public",
           authMode: "OpenAI BYOK",
+          policy: {
+            mode: "review",
+            baseSystem: "default",
+            systemLayout: "single_block",
+            repoRulesPresent: true,
+            sessionCtxPresent: false,
+            userAppendPresent: false,
+            selectedGlobRuleNames: ["react.mdc"],
+            activeSkillNames: ["rr"],
+            workingStatePresent: false,
+            memoryContextPresent: true,
+            contextChangeCount: 0,
+            mentionInjectionCount: 1,
+            hookContext: "after_system",
+            summaryPrefix: "conversation_summary",
+            toolChoice: "any",
+            promptCacheKeyPresent: true,
+          },
         })
         onEvent?.({
           type: "llm.continuation",
@@ -478,6 +514,24 @@ describe("kernel scheduler approval flow", () => {
       surfaceId: "openai-responses",
       transportId: "public",
       authMode: "OpenAI BYOK",
+      policy: {
+        mode: "review",
+        baseSystem: "default",
+        systemLayout: "single_block",
+        repoRulesPresent: true,
+        sessionCtxPresent: false,
+        userAppendPresent: false,
+        selectedGlobRuleNames: ["react.mdc"],
+        activeSkillNames: ["rr"],
+        workingStatePresent: false,
+        memoryContextPresent: true,
+        contextChangeCount: 0,
+        mentionInjectionCount: 1,
+        hookContext: "after_system",
+        summaryPrefix: "conversation_summary",
+        toolChoice: "any",
+        promptCacheKeyPresent: true,
+      },
     })
     expect(turn.events[3]).toMatchObject({
       type: "turn.llm.continuation",
@@ -494,6 +548,39 @@ describe("kernel scheduler approval flow", () => {
       { types: ["turn.llm.continuation"] },
       { types: ["turn.output.delta"] },
     ])
+    expect(turn.state.lastLlmRequest).toEqual({
+      model: "gpt-5",
+      provider: "openai",
+      surfaceId: "openai-responses",
+      transportId: "public",
+      authMode: "OpenAI BYOK",
+      policy: {
+        mode: "review",
+        baseSystem: "default",
+        systemLayout: "single_block",
+        repoRulesPresent: true,
+        sessionCtxPresent: false,
+        userAppendPresent: false,
+        selectedGlobRuleNames: ["react.mdc"],
+        activeSkillNames: ["rr"],
+        workingStatePresent: false,
+        memoryContextPresent: true,
+        contextChangeCount: 0,
+        mentionInjectionCount: 1,
+        hookContext: "after_system",
+        summaryPrefix: "conversation_summary",
+        toolChoice: "any",
+        promptCacheKeyPresent: true,
+      },
+    })
+    expect(turn.state.lastLlmContinuation).toEqual({
+      provider: "openai",
+      surfaceId: "openai-responses",
+      transportId: "public",
+      phase: "prepare",
+      mode: "resume",
+      reason: "prepared_resume",
+    })
   })
 
   test("maps logical error outcomes to turn.failed with the detailed error message", async () => {

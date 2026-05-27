@@ -340,6 +340,15 @@ export const TAXONOMY: readonly UseCaseMajor[] = [
         leaf(m, "direct-instr", "모델 직접 지시", ["한국어로 답해"], ["wang2026"]),
         leaf(m, "output-format", "Output format 강제", ["코드만, 설명 X"], ["wang2026"]),
       ]),
+      mid("persistent-context", "conversation-state", "Conversation State", (m) => [
+        leaf(
+          m,
+          "thread-grounding",
+          "멀티턴 thread grounding",
+          ['"이제 다 됐냐?"', '"그거 다시 돌려봐"', '"여기서 말하는 그거 뭐였지?"'],
+          ["none"],
+        ),
+      ]),
       mid("persistent-context", "examples", "Examples", (m) => [
         leaf(m, "few-shot", "Few-shot 예시", ["입출력 샘플"], ["wang2026"]),
       ]),

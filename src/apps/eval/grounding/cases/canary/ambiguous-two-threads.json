@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "id": "ambiguous-two-threads",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    { "role": "assistant", "text": "Two open threads remain: prompt_rules and feature_catalog." },
+    { "role": "assistant", "text": "Both are unfinished and both were mentioned in the last status pass." }
+  ],
+  "targetUtterance": "그거 먼저 끝내.",
+  "gold": {
+    "activeThreadId": null,
+    "referentId": null,
+    "intent": "execute_change",
+    "scope": "current_workstream",
+    "shouldClarify": true,
+    "confidence": "high"
+  },
+  "bucket": "must_clarify",
+  "severity": "critical"
+}
