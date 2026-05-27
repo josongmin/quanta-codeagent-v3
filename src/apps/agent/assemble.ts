@@ -34,6 +34,7 @@ import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import { captureSnapshot } from "@/agent/context-change"
 import { autoWirePluginActivation } from "@/agent/plugin-activation-handler"
 import { getGlobalSessionResourceRegistry } from "@/agent/session-resource-registry"
+import { buildCallerOwnedRegistryWithTelemetry } from "@/agent/session-resource-registry/caller-owned-builder"
 import {
   createInMemorySystemPromptCache,
   type SystemPromptCachePort,
@@ -182,24 +183,39 @@ export const assembleAgentConfig = (req: AssembleRequest): AgentConfig => {
   // system-prompt cache entries. When `sessionId` is absent (legacy
   // callers / one-shot bench-style usage) fall back to the fresh
   // factory pair — byte-identical to the ADR-0334 baseline.
-  const sessionResources =
-    cfg.sessionId !== undefined
-      ? getGlobalSessionResourceRegistry().getOrCreate(cfg.sessionId)
-      : null
+  //
   // ADR-0358 — when `cfg.metrics` is structurally a MetricsRegistry
   // (ADR-0144 port) AND the caller has NOT pre-supplied a cache, wrap
   // the session-scoped cache with `withCacheMetrics` so cache hit/miss/
   // invalidation counters land on the operator registry. NO-THROW
   // (looksLikeMetricsRegistry is a pure shape check + adapter is pure
-  // delegation). Caller-override-precedence (ADR-0332): a pre-set
-  // `cfg.systemPromptCache` is preserved by `installCodexR2Wires`,
-  // so the wrap here only affects the default cache we are about to
-  // install — we never re-wrap a caller-supplied cache. Bench surface
-  // (sessionResources === null) ⇒ wrap skipped ⇒ byte-identical replay.
+  // delegation).
   const metricsEmitter: MetricEmitterPort | undefined =
     cfg.metrics !== undefined && looksLikeMetricsRegistry(cfg.metrics)
       ? adaptMetricsRegistryToEmitter(cfg.metrics)
       : undefined
+  // ADR-0372 — Caller-owned registry path for flock telemetry. When
+  // `cfg.metrics` is a real MetricsRegistry (i.e. `metricsEmitter` is
+  // set), mint a FRESH disk-adapter with the emitter injected so the
+  // ADR-0364 lock counters land on the same registry instead of being
+  // dropped on the floor (ADR-0368 documented why the global singleton
+  // cannot accept the emitter). When `metricsEmitter` is absent, the
+  // legacy global-singleton path is preserved verbatim ⇒ byte-identical
+  // for hosts that do NOT thread metrics through.
+  const sessionResources =
+    cfg.sessionId !== undefined
+      ? metricsEmitter !== undefined
+        ? buildCallerOwnedRegistryWithTelemetry({
+            emitter: metricsEmitter,
+            sessionId: cfg.sessionId,
+          }).getOrCreate(cfg.sessionId)
+        : getGlobalSessionResourceRegistry().getOrCreate(cfg.sessionId)
+      : null
+  // Caller-override-precedence (ADR-0332): a pre-set
+  // `cfg.systemPromptCache` is preserved by `installCodexR2Wires`,
+  // so the wrap here only affects the default cache we are about to
+  // install — we never re-wrap a caller-supplied cache. Bench surface
+  // (sessionResources === null) ⇒ wrap skipped ⇒ byte-identical replay.
   const baseCache: SystemPromptCachePort =
     sessionResources?.cache ?? createInMemorySystemPromptCache()
   const wrappedCache: SystemPromptCachePort =
