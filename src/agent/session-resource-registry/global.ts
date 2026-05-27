@@ -42,19 +42,46 @@
  *   - Config knobs (maxEntries / idleTtlMs) on the singleton
  */
 
+import { createDiskSessionResourceRegistry } from "./disk-adapter/disk-store"
 import { createInMemorySessionResourceRegistry } from "./in-memory-registry"
 import type { SessionResourceRegistry } from "./types"
 
 let instance: SessionResourceRegistry | null = null
 
 /**
+ * ADR-0351 — Disk adapter env-var swap.
+ *
+ * When `QUANTA_SESSION_REGISTRY_DISK_DIR` env var is set (and non-empty)
+ * the first `getGlobalSessionResourceRegistry()` call mints a
+ * `createDiskSessionResourceRegistry({ storageDir })` instead of the
+ * in-memory default. Subsequent calls reuse the same instance per the
+ * usual lazy-init contract. Absent env var ⇒ legacy in-memory path
+ * (byte-identical to pre-ADR-0351). NO-THROW: if the disk adapter
+ * throws on construction we fall back to in-memory + log nothing —
+ * a misconfigured env var must not abort process startup.
+ */
+const buildDefaultRegistry = (): SessionResourceRegistry => {
+  const diskDir = process.env.QUANTA_SESSION_REGISTRY_DISK_DIR
+  if (diskDir !== undefined && diskDir.length > 0) {
+    try {
+      return createDiskSessionResourceRegistry({ storageDir: diskDir })
+    } catch {
+      // Disk adapter unavailable ⇒ silently fall back so a hosed env
+      // var cannot break every quanta process on the machine.
+    }
+  }
+  return createInMemorySessionResourceRegistry()
+}
+
+/**
  * Get-or-mint the process-level singleton. First call constructs the
- * default in-memory registry; every subsequent call returns the SAME
+ * default registry (disk-backed when `QUANTA_SESSION_REGISTRY_DISK_DIR`
+ * is set, in-memory otherwise); every subsequent call returns the SAME
  * reference. Composition roots call this exactly once per
  * `installCodexR2Wires` to look up (or mint) the session resources.
  */
 export const getGlobalSessionResourceRegistry = (): SessionResourceRegistry => {
-  if (instance === null) instance = createInMemorySessionResourceRegistry()
+  if (instance === null) instance = buildDefaultRegistry()
   return instance
 }
 
