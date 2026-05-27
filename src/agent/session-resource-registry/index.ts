@@ -56,4 +56,17 @@ export {
   resetGlobalSessionResourceRegistry,
 } from "./global"
 export { createInMemorySessionResourceRegistry } from "./in-memory-registry"
+export type { SqliteRegistryConfig, SweepResult as SqliteSweepResult } from "./sqlite-adapter"
+// ADR-0361 — SQLite-backed adapter (Codex `logs_2.sqlite` WAL parity).
+//   Sibling to the in-memory + JSONL adapters above; same closed
+//   `SessionResourceRegistry` port (ADR-0345). Default-OFF — global
+//   singleton does NOT auto-mount this backend; opt-in via direct
+//   factory call until a follow-up ADR adds an env-var swap on the
+//   ADR-0351 pattern.
+export {
+  createSqliteSessionResourceRegistry,
+  DEFAULT_MAX_TOTAL_BYTES as SQLITE_DEFAULT_MAX_TOTAL_BYTES,
+  DEFAULT_TTL_MS as SQLITE_DEFAULT_TTL_MS,
+  sweepSqliteRegistry,
+} from "./sqlite-adapter"
 export type { RegistryConfig, SessionResourceRegistry, SessionResources } from "./types"
