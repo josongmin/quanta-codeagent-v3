@@ -30,6 +30,10 @@ import {
   type ModePolicy,
   type RunMode,
 } from "@/agent"
+import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
+import { captureSnapshot } from "@/agent/context-change"
+import { createInMemorySystemPromptCache } from "@/llm/system-prompt-cache"
+import { createInMemoryTypedHistoryEventStore } from "@/memory/typed-event"
 import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
 
 /** Mode-preset-extra payloads (RFC may-22 Phase 4+). Each field is OPTIONAL
@@ -152,9 +156,28 @@ export const assembleAgentConfig = (req: AssembleRequest): AgentConfig => {
     exhaustion,
   })
 
-  return {
+  const cfg: AgentConfig = {
     ...req.base,
     modePolicy: policy,
     budgetMeter: meter,
   }
+  // ADR-0334 — populate the ADR-0327-family wire slots on the freshly
+  // assembled cfg. Idempotent + caller-override-precedence (ADR-0332):
+  // any slot the caller already set on `req.base` is preserved verbatim.
+  installCodexR2Wires(cfg, {
+    ...(cfg.sessionId !== undefined ? { sessionId: cfg.sessionId } : {}),
+    systemPromptCache: createInMemorySystemPromptCache(),
+    store: createInMemoryTypedHistoryEventStore(),
+    getSnapshot: () =>
+      captureSnapshot({
+        cwd: cfg.cwd,
+        mode: typeof cfg.mode === "string" ? cfg.mode : "default",
+        model: (cfg.llm as { model?: string }).model ?? "",
+        repoRulesPaths:
+          cfg.repoRules?.layers?.map((l) => l.sourcePath) ??
+          (cfg.repoRules !== undefined ? [cfg.repoRules.sourcePath] : []),
+        activeSkills: [],
+      }),
+  })
+  return cfg
 }

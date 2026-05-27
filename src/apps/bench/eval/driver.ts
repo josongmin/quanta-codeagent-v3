@@ -1,4 +1,5 @@
 import { type AgentConfig, type AgentOutcome, runAgent } from "@/agent"
+import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import { createSingleSessionRuntimeHost } from "@/host/runtime"
 import type { SessionHost } from "@/kernel/session"
 import type { LLMPort, Message } from "@/llm"
@@ -99,6 +100,10 @@ const promptTextFromMessages = (messages: readonly Message[]): string => {
 
 const createBenchSessionHost = (config: AgentConfig): SessionHost => {
   const sessionId = `bench-${crypto.randomUUID()}`
+  // ADR-0334 — bench passes EMPTY deps so the install is a no-op
+  // (byte-identical replay). The call site is recorded so a future
+  // bench-determinism audit can opt deps in via a single edit.
+  installCodexR2Wires(config, {})
   return {
     describe: () => ({
       sessionId,

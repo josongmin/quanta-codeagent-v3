@@ -8,6 +8,7 @@
 import * as readline from "node:readline/promises"
 import type { AgentConfig } from "@/agent"
 import { buildSystemPrompt } from "@/agent"
+import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import type { PermissionContext } from "@/permission"
 import type { RuntimeAgentTurnAssembler } from "@/sdk/runtime"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
@@ -135,6 +136,10 @@ export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {
     throw new Error(`interactive.runMode: req.mode must be "interactive", got "${req.mode}"`)
   }
   const cfg = assembleAgentConfig({ ...req, base: stubBase(req) })
+  // ADR-0334 — interactive surface explicitly tags the cfg as ADR-0327-
+  // family wired. `assembleAgentConfig` already attempted the install;
+  // this redundant pass is documentary (idempotent — ADR-0332 §I).
+  installCodexR2Wires(cfg, cfg.sessionId !== undefined ? { sessionId: cfg.sessionId } : {})
 
   if (req.seams?.runAgent) {
     const runner = resolveRunAgent(req.seams)

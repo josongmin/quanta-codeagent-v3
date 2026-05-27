@@ -22,6 +22,7 @@
  */
 
 import { type AgentConfig, type AgentOutcome, runAgent } from "@/agent"
+import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 
 /** Result the lifecycle wrapper hands back to `index.ts`. */
 export interface RunOutcome {
@@ -132,6 +133,12 @@ export const runAgentLifecycleWith = async (
     ...cfgWithoutSignal,
     signal: controller.signal,
   } as AgentConfig
+
+  // ADR-0334 — belt-and-suspenders install. The cfg here was usually
+  // pre-wired by `assembleAgentConfig` (ADR-0334 §assemble); the call is
+  // idempotent (ADR-0332 §Idempotent — already-set slots are preserved)
+  // so a host that bypassed assemble still gets the wire pass attempted.
+  installCodexR2Wires(cfg, cfg.sessionId !== undefined ? { sessionId: cfg.sessionId } : {})
 
   const onSigint = (): void => {
     controller.abort()
