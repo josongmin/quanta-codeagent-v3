@@ -1,0 +1,36 @@
+/**
+ * ADR-0336 — `src/agent/plugin-app-resolver/` barrel.
+ *
+ * Closes ADR-0330's negative invariants
+ * (`resolvePlugin → null` / `resolveApp → null`) by providing real
+ * `MentionResolverPort` impls for the plugin and app kinds. Also
+ * exports a composite factory that wires all three kinds (skill +
+ * plugin + app) in one call — the production sibling to ADR-0330's
+ * `createSkillOnlyResolver`.
+ *
+ * Default-OFF: this barrel is NOT re-exported from `@/agent`.
+ * Callers reach it via the explicit `@/agent/plugin-app-resolver`
+ * path from the composition root that wants full mention coverage.
+ *
+ * Closed surface:
+ *   - `createPluginResolver(registry?)`         — plugin sub-resolver.
+ *   - `createAppResolver(catalog?)`             — app sub-resolver.
+ *   - `createSkillResolver(skills?)`            — skill sub-resolver.
+ *   - `createCompositeMentionResolver(deps)`    — combine all three.
+ *   - `CompositeResolverDeps`                   — dependency bag type.
+ *   - `LocalPluginActivationEvent` /            — LOCAL MOCKS pending
+ *     `LocalAppActivationEvent`                   ADR-0335 integration.
+ */
+
+export { createAppResolver } from "./app-resolver"
+export {
+  type CompositeResolverDeps,
+  createCompositeMentionResolver,
+} from "./composite-resolver"
+export { createPluginResolver } from "./plugin-resolver"
+export { createSkillResolver } from "./skill-resolver"
+export type {
+  LocalAppActivationEvent,
+  LocalPluginActivationEvent,
+  SkillRegistryReadOnly,
+} from "./types"
