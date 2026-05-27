@@ -70,5 +70,14 @@ export const withRegistryMetrics = (
         emit.gauge(`${reg}.size`, 0)
       })
     },
+    /** ADR-0386 — read-only enumerate, telemetry pass-through.
+     *  We emit a `list_calls` counter so an operator can spot bulk-evict
+     *  thrash + dashboards can ratio it against `evictions`. The inner
+     *  call return is passed through verbatim. */
+    listSessionIds(): readonly string[] {
+      const ids = inner.listSessionIds()
+      safeEmit(() => emit.counter(`${reg}.list_calls`, 1))
+      return ids
+    },
   }
 }

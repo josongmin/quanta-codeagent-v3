@@ -265,4 +265,42 @@ describe("ADR-0361 sqlite-store — hellgate (port-aligned)", () => {
     expect(r2.store.snapshot().length).toBe(10)
     cleanup()
   })
+
+  // ─── ADR-0386 — `listSessionIds` read-only extension ────────────────
+
+  test("[17] ADR-0386 — listSessionIds on empty registry ⇒ []", () => {
+    const { path, cleanup } = makeTmp()
+    const reg = createSqliteSessionResourceRegistry({ databasePath: path })
+    const ids = reg.listSessionIds()
+    expect(Array.isArray(ids)).toBe(true)
+    expect(ids.length).toBe(0)
+    cleanup()
+  })
+
+  test("[18] ADR-0386 — listSessionIds returns all in-process ids", () => {
+    const { path, cleanup } = makeTmp()
+    const reg = createSqliteSessionResourceRegistry({ databasePath: path })
+    reg.getOrCreate("sess-A")
+    reg.getOrCreate("sess-B")
+    reg.getOrCreate("sess-C")
+    const ids = reg.listSessionIds()
+    const set = new Set(ids)
+    expect(set.size).toBe(3)
+    expect(set.has("sess-A")).toBe(true)
+    expect(set.has("sess-B")).toBe(true)
+    expect(set.has("sess-C")).toBe(true)
+    cleanup()
+  })
+
+  test("[19] ADR-0386 — evict drops id from listSessionIds", () => {
+    const { path, cleanup } = makeTmp()
+    const reg = createSqliteSessionResourceRegistry({ databasePath: path })
+    reg.getOrCreate("sess-X")
+    reg.getOrCreate("sess-Y")
+    reg.evict("sess-X")
+    const ids = reg.listSessionIds()
+    expect(ids).not.toContain("sess-X")
+    expect(ids).toContain("sess-Y")
+    cleanup()
+  })
 })

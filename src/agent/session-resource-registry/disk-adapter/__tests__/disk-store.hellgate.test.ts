@@ -17,7 +17,13 @@
  *   M. cache replay on rebuild (text byte-identical)              (1)
  *   N. size() reflects in-memory tracked entries                  (1)
  *
- *  Total = 14 cases.
+ *  --- ADR-0386 read-only `listSessionIds` extension ---
+ *
+ *   O. empty storageDir ⇒ listSessionIds returns []               (1)
+ *   P. populated session dirs ⇒ listSessionIds returns ids        (1)
+ *   Q. fs error / missing dir ⇒ listSessionIds NO-THROW + []      (1)
+ *
+ *  Total = 17 cases.
  */
 
 import { describe, expect, test } from "bun:test"
@@ -327,5 +333,49 @@ describe("ADR-0348 §N — size() reflects in-memory tracked entries", () => {
     expect(reg.size()).toBe(1)
     reg.clear()
     expect(reg.size()).toBe(0)
+  })
+})
+
+// ─── ADR-0386 — `listSessionIds` for disk-adapter ──────────────────────
+
+describe("ADR-0386 §O — empty storageDir ⇒ listSessionIds returns []", () => {
+  test("freshly created disk registry with no session dirs ⇒ empty listing", async () => {
+    const dir = await tempStorage()
+    const reg = createDiskSessionResourceRegistry({ storageDir: dir })
+    const ids = reg.listSessionIds()
+    expect(Array.isArray(ids)).toBe(true)
+    expect(ids.length).toBe(0)
+  })
+})
+
+describe("ADR-0386 §P — populated session dirs ⇒ listSessionIds returns ids", () => {
+  test("two getOrCreate calls ⇒ both ids enumerated", async () => {
+    const dir = await tempStorage()
+    const reg = createDiskSessionResourceRegistry({ storageDir: dir })
+    reg.getOrCreate("sess-P-1")
+    reg.getOrCreate("sess-P-2")
+    const ids = reg.listSessionIds()
+    const set = new Set(ids)
+    expect(set.has("sess-P-1")).toBe(true)
+    expect(set.has("sess-P-2")).toBe(true)
+  })
+})
+
+describe("ADR-0386 §Q — fs failure ⇒ listSessionIds NO-THROW + []", () => {
+  test("registry on nonexistent path ⇒ [] (no throw)", async () => {
+    // Use a path that does NOT exist + was NEVER mkdir'd so the fs walk fails.
+    const nonexistent = join(await tempStorage(), "does", "not", "exist", "deep")
+    const reg = createDiskSessionResourceRegistry({ storageDir: nonexistent })
+    // listSessionIds reads in-memory Map (no fs IO at all in disk-store impl),
+    // so a missing parent dir cannot cause a throw. Assert empty + no throw.
+    let threw = false
+    let ids: readonly string[] = []
+    try {
+      ids = reg.listSessionIds()
+    } catch {
+      threw = true
+    }
+    expect(threw).toBe(false)
+    expect(ids.length).toBe(0)
   })
 })

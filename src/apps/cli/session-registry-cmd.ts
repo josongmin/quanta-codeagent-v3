@@ -1,8 +1,10 @@
 /**
- * ADR-0370 + ADR-0374 + ADR-0376 — `/session-registry` slash command.
+ * ADR-0370 + ADR-0374 + ADR-0376 + ADR-0379 + ADR-0384 + ADR-0386 —
+ * `/session-registry` slash command.
  *
  * Operator visibility (ADR-0370) + targeted eviction (ADR-0374) + sub-command
- * discovery (ADR-0376) for the `SessionResourceRegistry` slice
+ * discovery (ADR-0376) + retention sweep (ADR-0379) + evict hygiene (ADR-0384)
+ * + bulk-pattern evict (ADR-0386) for the `SessionResourceRegistry` slice
  * (ADR-0345 in-memory / ADR-0348 disk / ADR-0361 sqlite). Mirrors
  * Codex's admin habit of running `sqlite3 ~/.codex/logs_2.sqlite
  * 'SELECT COUNT(*), SUM(estimated_bytes) FROM …'` without giving
@@ -12,18 +14,37 @@
  *
  * # Subcommands
  *
- *   - `/session-registry` (no args)        — alias for `stats`
- *   - `/session-registry stats`            — print the stats block
- *   - `/session-registry evict <id>`       — force-evict a session by id
- *                                            (ADR-0374; idempotent per
- *                                            ADR-0345 closed-port contract)
- *   - `/session-registry help`             — sub-command discovery
- *                                            (ADR-0376)
+ *   - `/session-registry` (no args)            — alias for `stats`
+ *   - `/session-registry stats`                — print the stats block
+ *   - `/session-registry evict <id>`           — force-evict a session by id
+ *                                                (ADR-0374 + ADR-0384 hygiene)
+ *   - `/session-registry evict --pattern <g>`  — bulk evict matching ids
+ *                                                (ADR-0386, glob: `*`+`?`,
+ *                                                cap 100)
+ *   - `/session-registry cleanup`              — retention sweep (ADR-0379)
+ *   - `/session-registry help`                 — sub-command discovery
+ *                                                (ADR-0376)
  *
- * Further write subcommands (`clear`, `vacuum`) remain OUT OF SCOPE — they
- * require a separate mutation-policy ADR (bulk drop is a foot-gun without
- * a confirm gesture). `evict <id>` is admissible because it is per-id and
- * operator-explicit — the operator has already typed the id.
+ * # ADR-0384 — evict hygiene message
+ *
+ * Single-id evict now surfaces a post-evict snapshot (`Sessions:` count
+ * + `(irreversible)` warning) so the operator sees the impact and the
+ * "no undo" semantics. Pre-evict snapshot is NOT taken (the
+ * `inspectGlobalRegistry()` walk is expensive on the sqlite backend);
+ * the message is informational rather than a strict diff. The existing
+ * `evicted <id>` line is preserved byte-identical for downstream parsers.
+ *
+ * # ADR-0386 — bulk-pattern evict
+ *
+ * `evict --pattern <glob>` walks the in-process Map (via the new
+ * `listSessionIds()` port method), matches every id against the glob,
+ * and force-evicts each match. Safety caps:
+ *   - matches > 100 ⇒ refuse with `Too many matches (N)` + exit 1
+ *   - matches == 0 ⇒ `No sessions matched <pattern>` + exit 0
+ *
+ * Glob alphabet: `*` (any chars) + `?` (single char). Every other regex
+ * metacharacter is escaped — `evict --pattern "a.b"` only matches the
+ * literal id `a.b`, NOT `axb`.
  *
  * # NO-THROW
  *
@@ -58,16 +79,53 @@ const HELP_LINES: readonly string[] = [
   "## /session-registry — Operator surface for session registry",
   "",
   "Sub-commands:",
-  "  stats         Print backend + sessions/events/bytes (default)",
-  "  evict <id>    Force-evict one session by id (idempotent)",
-  "  cleanup       Run an immediate retention sweep + post-sweep stats (ADR-0379)",
-  "  help          Show this menu",
+  "  stats                   Print backend + sessions/events/bytes (default)",
+  "  evict <id>              Force-evict one session by id (idempotent)",
+  "  evict --pattern <glob>  Bulk-evict every in-process id matching the glob",
+  "                          (`*` and `?` only; max 100 matches; ADR-0386)",
+  "  cleanup                 Run an immediate retention sweep + post-sweep stats (ADR-0379)",
+  "  help                    Show this menu",
   "",
   "Backend detect priority (first match wins):",
   "  1. QUANTA_SESSION_REGISTRY_SQLITE_PATH   — sqlite adapter (ADR-0367)",
   "  2. QUANTA_SESSION_REGISTRY_DISK_DIR      — disk adapter (ADR-0351)",
   "  3. (otherwise)                           — in-memory singleton (ADR-0345)",
 ]
+
+/**
+ * ADR-0386 — Safety cap. A glob that matches > 100 in-process sessions
+ * is almost certainly an operator typo (`*` typed in a hurry). We refuse
+ * the eviction rather than rip through the whole registry. The threshold
+ * is informed by typical operator working sets (a single dev/test box
+ * rarely holds > 100 live session ids at once; the SQLite backend's
+ * default retention is 14 days × ~1 session/dev/day).
+ */
+const BULK_EVICT_MAX_MATCHES = 100
+
+/**
+ * ADR-0386 — Compile a glob pattern (`*`, `?`) into a strict regex.
+ *
+ * Algorithm:
+ *   1. Escape every regex metacharacter EXCEPT `*` and `?` so a pattern
+ *      like `"a.b"` matches the literal id `"a.b"` (NOT regex any-char).
+ *   2. Replace `*` with `.*` (zero-or-more any-char).
+ *   3. Replace `?` with `.`  (exactly-one any-char).
+ *   4. Anchor with `^` + `$` so the match is the WHOLE id, not a prefix.
+ *
+ * Injection safety: the user's pattern is fed into `replace` then wrapped
+ * with `^…$` — the only chars that survive untranslated are the literal
+ * glob alphabet (`*` + `?`); everything else is regex-escaped. A pattern
+ * like `"\.+"`, `"(.*)"`, `"a|b"` produces a regex that matches ONLY the
+ * literal characters typed (e.g. `^\.\+$` — matches the literal `.+`).
+ */
+const globToRegex = (pattern: string): RegExp => {
+  // Step 1: escape regex specials EXCEPT * and ? (which we handle next).
+  // Set is from the MDN guide for RegExp source escaping.
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&")
+  // Step 2 + 3: translate the glob alphabet to regex.
+  const wild = escaped.replace(/\*/g, ".*").replace(/\?/g, ".")
+  return new RegExp(`^${wild}$`)
+}
 
 // `SUBCOMMANDS` doubles as completion source + unknown-subcommand hint.
 // Keep alphabetical-ish; the "known one of" stderr message renders the
@@ -106,23 +164,28 @@ const renderHelp = (ctx: SlashContext): number => {
 }
 
 /**
- * ADR-0374 — `evict <id>` handler.
+ * ADR-0374 + ADR-0384 — `evict <id>` handler.
  *
  * Missing id ⇒ usage line on stderr + exit 1 (operator typo, not an
  * inspector failure). Idempotent success ⇒ exit 0 even if `id` was never
  * registered, mirroring the closed-port `evict` contract (ADR-0345
  * §"Idempotent — unknown id ⇒ no-op").
  *
+ * ADR-0384 — Post-evict hygiene: emit a multi-line block with the
+ * post-evict `Sessions:` count and the literal `(irreversible)` warning
+ * so the operator sees the IMPACT + the NO-UNDO semantic. The original
+ * `evicted <id>` line is preserved verbatim for downstream parsers
+ * (test [7] / [8] / [9] in `session-registry-slash.test.ts`).
+ *
  * Hostile implementations or future adapter regressions that throw are
  * swallowed here — the slash itself MUST NOT crash the REPL. Caller
  * sees the error message on stderr + exit 1.
  *
- * Extra args after `<id>` are intentionally ignored: a future
- * `evict <id1> <id2> …` bulk form would invert exit-code semantics
- * (partial failure handling); we keep the contract simple by anchoring
- * on the single-id form and rejecting bulk at the ADR level.
+ * Cost: post-evict `inspectGlobalRegistry()` is one inspect-call (sqlite
+ * COUNT+SUM / disk fs walk / Map size). NOT taken pre-evict — the diff
+ * would double the cost and the operator only needs the post-state.
  */
-const renderEvict = (args: readonly string[], ctx: SlashContext): number => {
+const renderEvict = async (args: readonly string[], ctx: SlashContext): Promise<number> => {
   const sessionId = args[0]
   if (sessionId === undefined || sessionId.length === 0) {
     ctx.err("/session-registry: usage: /session-registry evict <sessionId>\n")
@@ -130,10 +193,86 @@ const renderEvict = (args: readonly string[], ctx: SlashContext): number => {
   }
   try {
     getGlobalSessionResourceRegistry().evict(sessionId)
-    ctx.out(`evicted ${sessionId}\n`)
+    // ADR-0384 — post-evict hygiene block. Inspector is NO-THROW; the
+    // try/catch around the whole evict path catches a registry.evict
+    // throw before we get here, so any failure on this read is purely
+    // a defence-in-depth fallthrough.
+    let postSessions = ""
+    try {
+      const stats = await inspectGlobalRegistry()
+      postSessions = `Sessions: ${stats.sessions}\n`
+    } catch {
+      // NO-THROW — if inspect somehow fails after a successful evict,
+      // we still emit the primary `evicted` line. The hygiene block is
+      // informational, not load-bearing.
+    }
+    ctx.out(`evicted ${sessionId}\n${postSessions}(irreversible)\n`)
     return 0
   } catch (e) {
     ctx.err(`/session-registry: evict failed: ${errMessage(e)}\n`)
+    return 1
+  }
+}
+
+/**
+ * ADR-0386 — `evict --pattern <glob>` bulk handler.
+ *
+ * Algorithm:
+ *   1. Read `listSessionIds()` from the live registry (in-process Map).
+ *   2. Compile the pattern via `globToRegex` (escape + `*`→`.*` + `?`→`.`).
+ *   3. Filter ids by `regex.test(id)`.
+ *   4. Safety: 0 matches ⇒ `No sessions matched` + exit 0;
+ *               > BULK_EVICT_MAX_MATCHES ⇒ refuse + exit 1.
+ *   5. Loop `registry.evict(id)` for each match. NO-THROW: a hostile
+ *      evict aborts the loop with the partial count + exit 1.
+ *
+ * The summary line carries the eviction count so downstream tooling
+ * can grep. Pattern is echoed in the output for log clarity.
+ */
+const renderBulkEvict = async (pattern: string, ctx: SlashContext): Promise<number> => {
+  const registry = getGlobalSessionResourceRegistry()
+  let regex: RegExp
+  try {
+    regex = globToRegex(pattern)
+  } catch (e) {
+    // globToRegex can throw on a pathological pattern (e.g. an unpaired
+    // surrogate); the NO-THROW guarantee is on the slash, not the helper.
+    ctx.err(`/session-registry: invalid pattern: ${errMessage(e)}\n`)
+    return 1
+  }
+  let ids: readonly string[] = []
+  try {
+    ids = registry.listSessionIds()
+  } catch {
+    // NO-THROW: a failure here ⇒ empty matches; surfaced as "no matches".
+    ids = []
+  }
+  const matches: string[] = []
+  for (const id of ids) {
+    if (regex.test(id)) matches.push(id)
+  }
+  if (matches.length === 0) {
+    ctx.out(`No sessions matched ${pattern}\n`)
+    return 0
+  }
+  if (matches.length > BULK_EVICT_MAX_MATCHES) {
+    ctx.err(
+      `/session-registry: Too many matches (${matches.length} > ${BULK_EVICT_MAX_MATCHES}). Refine the pattern or use 'evict <id>' per session.\n`,
+    )
+    return 1
+  }
+  let evictedCount = 0
+  try {
+    for (const id of matches) {
+      registry.evict(id)
+      evictedCount += 1
+    }
+    ctx.out(`evicted ${evictedCount} sessions matching ${pattern}\n(irreversible)\n`)
+    return 0
+  } catch (e) {
+    ctx.err(
+      `/session-registry: bulk evict aborted after ${evictedCount}/${matches.length}: ${errMessage(e)}\n`,
+    )
     return 1
   }
 }
@@ -165,7 +304,22 @@ export const sessionRegistryCmd: SlashCommand = {
       return 1
     }
     if (sub === "help") return renderHelp(ctx)
-    if (sub === "evict") return renderEvict(args.slice(1), ctx)
+    if (sub === "evict") {
+      // ADR-0386 — `evict --pattern <glob>` dispatch.
+      // `--pattern` MAY be the first or any subsequent arg; we look at
+      // arg[1] (the first sub-arg of `evict`) for grep stability with
+      // shell habit (`/session-registry evict --pattern "test-*"`).
+      const sub1 = args[1]
+      if (sub1 === "--pattern") {
+        const pattern = args[2]
+        if (pattern === undefined || pattern.length === 0) {
+          ctx.err("/session-registry: usage: /session-registry evict --pattern <glob>\n")
+          return 1
+        }
+        return renderBulkEvict(pattern, ctx)
+      }
+      return renderEvict(args.slice(1), ctx)
+    }
     if (sub === "cleanup") return renderCleanup(ctx)
     return renderStats(ctx)
   },

@@ -105,6 +105,33 @@ export interface SessionResourceRegistry {
 
   /** Drop all. Test reset / shutdown. NO-THROW. */
   clear(): void
+
+  /**
+   * ADR-0386 — read-only enumerate of currently tracked session ids.
+   *
+   * Returns a snapshot array of every session id the in-process backend
+   * is currently tracking. The semantics intentionally mirror `size()`:
+   *   - For the in-memory backend (ADR-0345) this is `Map.keys()`.
+   *   - For the disk backend (ADR-0348) this is the in-process Map
+   *     (NOT a filesystem walk — `size()` deliberately does not paginate
+   *     the storage dir either; cross-process visibility is out of scope).
+   *   - For the sqlite backend (ADR-0361) this is the in-process Map
+   *     (NOT a `SELECT session_id FROM sessions`; same reasoning).
+   *
+   * Order is implementation-defined. Callers MUST treat the order as
+   * unstable. The returned array is a snapshot — subsequent registry
+   * mutations do NOT mutate it. The reference is typed `readonly` to
+   * prevent accidental in-place mutation, but the underlying array is a
+   * fresh allocation, not the backing Map's internal storage.
+   *
+   * NO-THROW: any backend failure ⇒ `[]`. Pathological backends MAY
+   * return an empty array even when `size()` reports a non-zero count;
+   * callers should not assume `size() === listSessionIds().length` at
+   * MAY because of an intervening TTL sweep race (single-thread Node
+   * event loop ⇒ this cannot happen within a microtask, but a future
+   * worker-pool adapter could surface the gap).
+   */
+  listSessionIds(): readonly string[]
 }
 
 /**

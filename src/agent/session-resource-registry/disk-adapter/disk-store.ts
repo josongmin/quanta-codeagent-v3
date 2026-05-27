@@ -517,7 +517,23 @@ export const createDiskSessionResourceRegistry = (
     }
   }
 
-  return { getOrCreate, peek, evict, size, clear }
+  /**
+   * ADR-0386 — read-only enumerate of in-process tracked session ids.
+   *
+   * Reads from the in-process Map (same surface as `size()`). Does NOT
+   * walk `cfg.storageDir` — cross-process visibility is out of scope
+   * for this port (operators reach cross-process state through the
+   * inspector / sqlite admin path). NO-THROW.
+   */
+  const listSessionIds = (): readonly string[] => {
+    try {
+      return Array.from(entries.keys())
+    } catch {
+      return []
+    }
+  }
+
+  return { getOrCreate, peek, evict, size, clear, listSessionIds }
 }
 
 // Exposed for tests — the in-memory cache exposes only an opaque

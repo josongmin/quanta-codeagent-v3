@@ -400,5 +400,22 @@ export const createSqliteSessionResourceRegistry = (
     }
   }
 
-  return { getOrCreate, peek, evict, size, clear }
+  /**
+   * ADR-0386 — read-only enumerate of in-process tracked session ids.
+   *
+   * Reads from the in-process Map (same surface as `size()`). Does NOT
+   * issue `SELECT session_id FROM sessions` — the SQLite file is the
+   * durable mirror, not the source of truth for in-process port
+   * semantics (cross-process visibility belongs to the inspector
+   * slash command, not the closed port). NO-THROW.
+   */
+  const listSessionIds = (): readonly string[] => {
+    try {
+      return Array.from(entries.keys())
+    } catch {
+      return []
+    }
+  }
+
+  return { getOrCreate, peek, evict, size, clear, listSessionIds }
 }

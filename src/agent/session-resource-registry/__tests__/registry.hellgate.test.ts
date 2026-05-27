@@ -17,7 +17,16 @@
  *   M. clock seam determinism (now() mock controls eviction)    (1)
  *   N. peek does NOT bump lastTouched (read-only contract)      (1)
  *
- *  Total = 14 cases.
+ *  --- ADR-0386 closed-port read-only `listSessionIds` extension ---
+ *
+ *   O. listSessionIds on empty registry ⇒ []                    (1)
+ *   P. listSessionIds after getOrCreate ⇒ all ids               (1)
+ *   Q. duplicate getOrCreate same id ⇒ 1 entry in listing       (1)
+ *   R. evict drops id from listSessionIds                       (1)
+ *   S. clear drops every id from listSessionIds                 (1)
+ *   T. TTL sweep evicts ⇒ listSessionIds omits expired ids      (1)
+ *
+ *  Total = 20 cases.
  */
 
 import { describe, expect, test } from "bun:test"
@@ -224,5 +233,85 @@ describe("ADR-0345 §N — peek does NOT bump lastTouched (read-only)", () => {
     expect(reg.peek("a")).toBeNull()
     expect(reg.peek("b")).not.toBeNull()
     expect(reg.peek("c")).not.toBeNull()
+  })
+})
+
+// ─── ADR-0386 — `listSessionIds` read-only port extension ──────────────
+
+describe("ADR-0386 §O — listSessionIds on empty registry", () => {
+  test("empty registry ⇒ empty array", () => {
+    const reg = createInMemorySessionResourceRegistry()
+    const ids = reg.listSessionIds()
+    expect(Array.isArray(ids)).toBe(true)
+    expect(ids.length).toBe(0)
+  })
+})
+
+describe("ADR-0386 §P — listSessionIds returns all minted ids", () => {
+  test("after 3 getOrCreate calls ⇒ all 3 ids present (set comparison)", () => {
+    const reg = createInMemorySessionResourceRegistry()
+    reg.getOrCreate("a")
+    reg.getOrCreate("b")
+    reg.getOrCreate("c")
+    const ids = reg.listSessionIds()
+    expect(ids.length).toBe(3)
+    const set = new Set(ids)
+    expect(set.has("a")).toBe(true)
+    expect(set.has("b")).toBe(true)
+    expect(set.has("c")).toBe(true)
+  })
+})
+
+describe("ADR-0386 §Q — duplicate getOrCreate ⇒ single listing entry", () => {
+  test("same id 3x ⇒ list shows id exactly once", () => {
+    const reg = createInMemorySessionResourceRegistry()
+    reg.getOrCreate("same")
+    reg.getOrCreate("same")
+    reg.getOrCreate("same")
+    const ids = reg.listSessionIds()
+    expect(ids.length).toBe(1)
+    expect(ids[0]).toBe("same")
+  })
+})
+
+describe("ADR-0386 §R — evict drops id from listing", () => {
+  test("evict id ⇒ listSessionIds omits it", () => {
+    const reg = createInMemorySessionResourceRegistry()
+    reg.getOrCreate("a")
+    reg.getOrCreate("b")
+    reg.evict("a")
+    const ids = reg.listSessionIds()
+    expect(ids.length).toBe(1)
+    expect(ids).toContain("b")
+    expect(ids).not.toContain("a")
+  })
+})
+
+describe("ADR-0386 §S — clear drops every id from listing", () => {
+  test("clear ⇒ listSessionIds empty", () => {
+    const reg = createInMemorySessionResourceRegistry()
+    reg.getOrCreate("a")
+    reg.getOrCreate("b")
+    reg.getOrCreate("c")
+    reg.clear()
+    expect(reg.listSessionIds().length).toBe(0)
+  })
+})
+
+describe("ADR-0386 §T — TTL sweep affects listing too", () => {
+  test("expired entries are absent from listSessionIds", () => {
+    let t = 100
+    const reg = createInMemorySessionResourceRegistry({ idleTtlMs: 100, now: () => t })
+    reg.getOrCreate("alive")
+    t = 105
+    reg.getOrCreate("also-alive")
+    // Advance past TTL of 'alive' but not 'also-alive'
+    t = 210
+    // Force a sweep via size() which calls sweepTtl
+    reg.size()
+    const ids = reg.listSessionIds()
+    // 'alive' (t=100, ageDelta=110≥100) evicted; 'also-alive' (t=105, ageDelta=105≥100) also evicted
+    expect(ids).not.toContain("alive")
+    expect(ids).not.toContain("also-alive")
   })
 })

@@ -354,3 +354,155 @@ describe("ADR-0376 /session-registry help discovery", () => {
     expect(err).toContain("cleanup")
   })
 })
+
+// ─── ADR-0384 — evict hygiene message ──────────────────────────────────
+
+describe("ADR-0384 /session-registry evict hygiene message", () => {
+  test("[22] evict success message includes 'irreversible' warning", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    getGlobalSessionResourceRegistry().getOrCreate("session-h1")
+    const ctx = makeCtx()
+    const exit = await cmd.run(["evict", "session-h1"], ctx)
+    expect(exit).toBe(0)
+    const out = ctx.outBuf.join("")
+    expect(out.toLowerCase()).toContain("irreversible")
+  })
+
+  test("[23] evict success message includes 'Sessions:' post-evict count", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const reg = getGlobalSessionResourceRegistry()
+    reg.getOrCreate("session-h2a")
+    reg.getOrCreate("session-h2b")
+    const ctx = makeCtx()
+    await cmd.run(["evict", "session-h2a"], ctx)
+    const out = ctx.outBuf.join("")
+    // Must surface session count change so operator sees the impact.
+    expect(out).toContain("Sessions:")
+  })
+
+  test("[24] evict on unknown id ⇒ 'irreversible' still appears (idempotent + hygiene)", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const ctx = makeCtx()
+    const exit = await cmd.run(["evict", "never-existed-h3"], ctx)
+    expect(exit).toBe(0)
+    const out = ctx.outBuf.join("")
+    expect(out).toContain("evicted")
+    expect(out.toLowerCase()).toContain("irreversible")
+  })
+})
+
+// ─── ADR-0386 — bulk evict --pattern ───────────────────────────────────
+
+describe("ADR-0386 /session-registry evict --pattern <glob>", () => {
+  test("[25] pattern 'test-*' evicts all matching ids", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const reg = getGlobalSessionResourceRegistry()
+    reg.getOrCreate("test-1")
+    reg.getOrCreate("test-2")
+    reg.getOrCreate("prod-1")
+    const ctx = makeCtx()
+    const exit = await cmd.run(["evict", "--pattern", "test-*"], ctx)
+    expect(exit).toBe(0)
+    expect(reg.peek("test-1")).toBeNull()
+    expect(reg.peek("test-2")).toBeNull()
+    expect(reg.peek("prod-1")).not.toBeNull()
+    const out = ctx.outBuf.join("")
+    expect(out).toMatch(/2/)
+  })
+
+  test("[26] pattern matching zero sessions ⇒ 'No sessions matched' + exit 0", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const ctx = makeCtx()
+    const exit = await cmd.run(["evict", "--pattern", "absent-*"], ctx)
+    expect(exit).toBe(0)
+    const out = ctx.outBuf.join("") + ctx.errBuf.join("")
+    expect(out.toLowerCase()).toContain("no sessions matched")
+  })
+
+  test("[27] pattern matching > 100 sessions ⇒ error + exit 1 (safety cap)", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const reg = getGlobalSessionResourceRegistry()
+    for (let i = 0; i < 101; i++) reg.getOrCreate(`bulk-${i}`)
+    const ctx = makeCtx()
+    const exit = await cmd.run(["evict", "--pattern", "bulk-*"], ctx)
+    expect(exit).toBe(1)
+    const err = ctx.errBuf.join("")
+    expect(err.toLowerCase()).toContain("too many matches")
+    // Safety cap: nothing should be evicted on overflow.
+    expect(reg.size()).toBe(101)
+  })
+
+  test("[28] '*' wildcard matches everything", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const reg = getGlobalSessionResourceRegistry()
+    reg.getOrCreate("alpha")
+    reg.getOrCreate("beta")
+    reg.getOrCreate("gamma")
+    const ctx = makeCtx()
+    const exit = await cmd.run(["evict", "--pattern", "*"], ctx)
+    expect(exit).toBe(0)
+    expect(reg.size()).toBe(0)
+  })
+
+  test("[29] '?' wildcard matches single char", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const reg = getGlobalSessionResourceRegistry()
+    reg.getOrCreate("aa")
+    reg.getOrCreate("ab")
+    reg.getOrCreate("abc") // length 3 — should NOT match "a?"
+    const ctx = makeCtx()
+    const exit = await cmd.run(["evict", "--pattern", "a?"], ctx)
+    expect(exit).toBe(0)
+    expect(reg.peek("aa")).toBeNull()
+    expect(reg.peek("ab")).toBeNull()
+    expect(reg.peek("abc")).not.toBeNull()
+  })
+
+  test("[30] regex special chars in pattern are escaped (literal '.')", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const reg = getGlobalSessionResourceRegistry()
+    reg.getOrCreate("a.b")
+    reg.getOrCreate("axb") // would match if '.' were treated as regex any-char
+    const ctx = makeCtx()
+    const exit = await cmd.run(["evict", "--pattern", "a.b"], ctx)
+    expect(exit).toBe(0)
+    expect(reg.peek("a.b")).toBeNull()
+    // The literal-dot semantics protects ids that happen to share the
+    // regex-any-char shape from accidental eviction.
+    expect(reg.peek("axb")).not.toBeNull()
+  })
+
+  test("[31] glob injection safety — regex special chars cannot escape the glob alphabet", async () => {
+    const cmd = findCmd()
+    expect(cmd).toBeDefined()
+    if (cmd === undefined) return
+    const reg = getGlobalSessionResourceRegistry()
+    reg.getOrCreate("safe-1")
+    reg.getOrCreate(".*") // literal ".*" id should not be evicted by anything but its own literal pattern
+    // A pattern of ".+" should NOT evict anything (no regex evaluation):
+    const ctx = makeCtx()
+    await cmd.run(["evict", "--pattern", ".+"], ctx)
+    // ".+" pattern → literal "\.\+" regex → only matches the literal string ".+"
+    // Neither "safe-1" nor ".*" contains the literal characters ".+", so both survive.
+    expect(reg.peek("safe-1")).not.toBeNull()
+    expect(reg.peek(".*")).not.toBeNull()
+  })
+})

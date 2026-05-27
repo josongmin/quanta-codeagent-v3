@@ -152,6 +152,23 @@ class InMemorySessionResourceRegistry implements SessionResourceRegistry {
       // NO-THROW.
     }
   }
+
+  /**
+   * ADR-0386 — read-only enumerate.
+   *
+   * Sweeps TTL before reading so an expired entry cannot appear in the
+   * listing (consistent with `peek` + `size`). Returns a fresh
+   * `Array.from(this.entries.keys())` so the caller cannot mutate the
+   * backing Map by accident. NO-THROW.
+   */
+  listSessionIds(): readonly string[] {
+    try {
+      this.sweepTtl(this.now())
+      return Array.from(this.entries.keys())
+    } catch {
+      return []
+    }
+  }
 }
 
 /**
