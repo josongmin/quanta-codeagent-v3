@@ -44,23 +44,46 @@
 
 import { createDiskSessionResourceRegistry } from "./disk-adapter/disk-store"
 import { createInMemorySessionResourceRegistry } from "./in-memory-registry"
+import { createSqliteSessionResourceRegistry } from "./sqlite-adapter"
 import type { SessionResourceRegistry } from "./types"
 
 let instance: SessionResourceRegistry | null = null
 
 /**
- * ADR-0351 — Disk adapter env-var swap.
+ * ADR-0351 (disk) + ADR-0367 (sqlite) — env-var backend swap.
  *
- * When `QUANTA_SESSION_REGISTRY_DISK_DIR` env var is set (and non-empty)
- * the first `getGlobalSessionResourceRegistry()` call mints a
- * `createDiskSessionResourceRegistry({ storageDir })` instead of the
- * in-memory default. Subsequent calls reuse the same instance per the
- * usual lazy-init contract. Absent env var ⇒ legacy in-memory path
- * (byte-identical to pre-ADR-0351). NO-THROW: if the disk adapter
- * throws on construction we fall back to in-memory + log nothing —
- * a misconfigured env var must not abort process startup.
+ * Priority order on first `getGlobalSessionResourceRegistry()` call:
+ *
+ *   1. `QUANTA_SESSION_REGISTRY_SQLITE_PATH` (non-empty)
+ *      ⇒ `createSqliteSessionResourceRegistry({ databasePath })`
+ *      (ADR-0361, most durable: Codex `logs_2.sqlite` WAL parity).
+ *   2. `QUANTA_SESSION_REGISTRY_DISK_DIR` (non-empty)
+ *      ⇒ `createDiskSessionResourceRegistry({ storageDir })`
+ *      (ADR-0348, per-session JSONL files).
+ *   3. otherwise ⇒ `createInMemorySessionResourceRegistry()`
+ *      (ADR-0345 default, byte-identical to pre-ADR-0351).
+ *
+ * Both env vars set ⇒ SQLite wins (more durable + Codex parity).
+ *
+ * NO-THROW invariant: if any backend's constructor throws (unreadable
+ * file, parent dir missing, disk full, etc.) the next fallback in the
+ * chain is tried, terminating at in-memory. A misconfigured env var
+ * MUST NOT abort process startup. Subsequent calls reuse the same
+ * instance per the usual lazy-init contract (env read EXACTLY ONCE
+ * per process or per `resetGlobalSessionResourceRegistry()`).
  */
 const buildDefaultRegistry = (): SessionResourceRegistry => {
+  // 1. SQLite (ADR-0367) — most durable backend wins when both env vars set.
+  const sqlitePath = process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH
+  if (sqlitePath !== undefined && sqlitePath.length > 0) {
+    try {
+      return createSqliteSessionResourceRegistry({ databasePath: sqlitePath })
+    } catch {
+      // SQLite adapter unavailable ⇒ fall through to disk / in-memory
+      // so a hosed env var cannot break every quanta process.
+    }
+  }
+  // 2. Disk JSONL (ADR-0351).
   const diskDir = process.env.QUANTA_SESSION_REGISTRY_DISK_DIR
   if (diskDir !== undefined && diskDir.length > 0) {
     try {
@@ -70,6 +93,7 @@ const buildDefaultRegistry = (): SessionResourceRegistry => {
       // var cannot break every quanta process on the machine.
     }
   }
+  // 3. In-memory default (ADR-0345).
   return createInMemorySessionResourceRegistry()
 }
 
