@@ -1,0 +1,49 @@
+id: codex-r2-observability-decorators
+title: Cache + registry observability metric decorators (ADR-0352)
+section: 8
+subsystem: codex-r2 cache/registry telemetry via wrapping decorators
+order: 101
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "default-off"]
+depends_on:
+  - codex-r2-system-prompt-cache-and-audit
+  - codex-r2-composition-install-and-registry
+purpose: |
+  Two NO-THROW wrapping decorators emit hit/miss/eviction counters as
+  the ADR-0326 system-prompt cache + ADR-0345/0348 session-resource
+  registry are exercised. `withCacheMetrics(inner, cfg)` emits
+  `codex_r2.cache.{hits,misses,peek_hits,peek_misses,invalidations,size}`;
+  `withRegistryMetrics(inner, cfg)` mirrors on the registry port. Each
+  decorator preserves the underlying port's return value byte-identical
+  and swallows emitter exceptions so instrumentation cannot break the
+  cache/registry hot path. The slice declares its own minimal
+  `MetricEmitterPort` (plane-clean — no transitive dependency on
+  `@/observability/metrics`); composition roots adapt the ADR-0144
+  `MetricsRegistry` via a one-line shim.
+evidence:
+  code:
+    - src/agent/codex-r2-metrics/types.ts
+    - src/agent/codex-r2-metrics/cache-metrics-decorator.ts
+    - src/agent/codex-r2-metrics/registry-metrics-decorator.ts
+    - src/agent/codex-r2-metrics/index.ts
+  adrs:
+    - docs/decisions/0352-codex-r2-observability-metrics.md
+  tests:
+    unit:
+      - src/agent/codex-r2-metrics/__tests__/cache-metrics.hellgate.test.ts
+      - src/agent/codex-r2-metrics/__tests__/registry-metrics.hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: CodexR2MetricsConfig.prefix
+    type: string?
+    default: '"codex_r2"'
+    notes: 'Prefix prepended to every metric name. Override per-deploy to namespace into a multi-tenant metrics store.'
+deliberate_hold: null
+notes: 'Production wire-up (auto-wrap inside assemble.ts) deferred to a future ADR. Drift-detector observability (ADR-0326 DriftDetectedError counter) is a candidate sibling decorator — separate ADR. Histogram support requires extending MetricEmitterPort — separate ADR.'

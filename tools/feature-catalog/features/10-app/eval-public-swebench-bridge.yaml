@@ -1,7 +1,7 @@
 id: eval-public-swebench-bridge
-title: eval Tier 2 — public bench bridge (SWE-bench Verified report → PublicPayload)
+title: eval Tier 3 — public bench bridge (SWE-bench Verified report → PublicPayload)
 section: 10
-subsystem: eval 앱 — Tier 2 외부 벤치 wiring
+subsystem: eval 앱 — Tier 3 외부 벤치 wiring
 order: 90
 maturity: L2
 status: stable
@@ -13,7 +13,7 @@ owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [assert-never-exhaustiveness, byte-stable-string-comparator, errors-helper-fix, eval-storage-result-store, runtime-config-ssot]
 purpose: |
-  Tier 2는 의도적으로 THIN BRIDGE — `apps/bench/`의 기존 harness가 생산한
+  Tier 3는 의도적으로 THIN BRIDGE — `apps/bench/`의 기존 harness가 생산한
   `bench-report.json`을 읽어서 eval store가 이해하는 `PublicPayload`로 번역.
   Bench CLI 로직을 duplicate하지 않고 (`bench/index.ts` 직접 import 안 함)
   같은 dataset path를 reading하는 방식. `BenchMapping` 테이블이

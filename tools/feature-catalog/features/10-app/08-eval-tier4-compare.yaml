@@ -1,8 +1,8 @@
 id: eval-tier4-compare
-title: eval Tier-4 — A/B pairwise compare across CLI adapters (quanta/cursor/claude/aider)
+title: eval Tier-5 — A/B pairwise compare across CLI adapters (quanta/cursor/claude/aider)
 section: 10
-subsystem: eval 앱 Tier-4 — pairwise compare (RFC-0003)
-order: 84
+subsystem: eval 앱 Tier-5 — pairwise compare (RFC-0003)
+order: 85
 maturity: L4
 status: stable
 ui_surfaces: [cli]
@@ -14,7 +14,7 @@ owners: ["@songmin"]
 labels: ["surface:bench", "absorbed:claude-code", "absorbed:cursor"]
 depends_on: [eval-five-tier]
 purpose: |
-  Tier-4 of the 5-tier eval stack (umbrella: `eval-five-tier`). The only
+  Tier-5 of the 6-tier eval stack (umbrella id: `eval-five-tier`). The only
   tier that runs TWO agents on the same prompt and asks an LLM judge to
   pick a winner (`pairwise-judge.ts`). 4 CLI adapters share the
   `cli-base.ts` argv-pinning + SIGTERM→SIGKILL grace + stderr-tail

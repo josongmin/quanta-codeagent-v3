@@ -13,7 +13,7 @@ owners: ["@songmin"]
 labels: ["surface:bench"]
 depends_on: [eval-schema-additive, eval-five-tier]
 purpose: |
-  Tier-1 of the 5-tier eval stack (umbrella: `eval-five-tier`). Generates
+  Tier-1 of the 6-tier eval stack (umbrella id: `eval-five-tier`). Generates
   synthetic single-turn scenarios from declared `scenarios/` fixtures via
   `generator.ts` (deterministic schema-validated, distinct shape from
   trajectory replay), runs them through the real agent via `runner.ts`,
