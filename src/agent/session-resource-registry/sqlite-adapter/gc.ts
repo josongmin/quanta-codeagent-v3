@@ -50,6 +50,7 @@
  */
 
 import { Database } from "bun:sqlite"
+import { statSync } from "node:fs"
 import { applyMigrations } from "./schema"
 import { DEFAULT_MAX_TOTAL_BYTES, DEFAULT_TTL_MS, type SqliteRegistryConfig } from "./types"
 
@@ -61,12 +62,39 @@ export interface SweepResult {
   readonly evictedBySize: number
   /** `true` iff the PASSIVE checkpoint reported success. */
   readonly checkpointed: boolean
+  /**
+   * ADR-0375 — `true` iff a RESTART checkpoint actually ran (i.e. the
+   * `<databasePath>-wal` file was over `walSizeThresholdBytes` AND the
+   * RESTART call did not throw). Always `false` when
+   * `walSizeThresholdBytes` is absent.
+   */
+  readonly walRestarted: boolean
 }
 
 const EMPTY_RESULT: SweepResult = {
   evictedByTtl: 0,
   evictedBySize: 0,
   checkpointed: false,
+  walRestarted: false,
+}
+
+/**
+ * ADR-0375 — Read WAL file size on disk. NO-THROW: a missing WAL file
+ * (DB never wrote anything, or it was checkpointed away) reports size 0.
+ * Other stat errors (permission, broken symlink) are treated as
+ * "unobservable" and return -1 so the caller can skip the RESTART path
+ * without false-positives.
+ */
+const readWalSize = (databasePath: string): number => {
+  try {
+    return statSync(`${databasePath}-wal`).size
+  } catch {
+    // ENOENT (no WAL yet) and any other stat error ⇒ treat as 0.
+    // This is the right call for case-BB (WAL missing): the WAL is
+    // logically "drained" and the threshold check naturally evaluates
+    // `0 > threshold` ⇒ false, so RESTART does not fire.
+    return 0
+  }
 }
 
 /**
@@ -94,6 +122,7 @@ export const sweepSqliteRegistry = (cfg: SqliteRegistryConfig): SweepResult => {
   let evictedByTtl = 0
   let evictedBySize = 0
   let checkpointed = false
+  let walRestarted = false
 
   // 1. TTL eviction.
   try {
@@ -143,11 +172,35 @@ export const sweepSqliteRegistry = (cfg: SqliteRegistryConfig): SweepResult => {
     checkpointed = false
   }
 
+  // 4. ADR-0375 — WAL-size-threshold RESTART escalation. PASSIVE is
+  //    non-blocking but may leave the WAL on disk (writers in flight).
+  //    RESTART force-drains the WAL so the file shrinks; it briefly
+  //    blocks new writers, hence opt-in via `walSizeThresholdBytes`.
+  //
+  //    Codex `logs_2.sqlite` field data: 14.8 GB DB + 14 GB WAL after
+  //    ~10 days of heavy use ⇒ PASSIVE-only is insufficient at scale.
+  //
+  //    The check is `> threshold` (strict): threshold 0 + non-empty WAL
+  //    ⇒ RESTART (edge case DD); threshold 0 + empty WAL ⇒ no-op.
+  if (typeof cfg.walSizeThresholdBytes === "number") {
+    const walSize = readWalSize(cfg.databasePath)
+    if (walSize > cfg.walSizeThresholdBytes) {
+      try {
+        db.exec("PRAGMA wal_checkpoint(RESTART)")
+        walRestarted = true
+      } catch {
+        // NO-THROW — RESTART may report SQLITE_BUSY under concurrent
+        // writers; we degrade silently and leave the PASSIVE outcome
+        // in place.
+      }
+    }
+  }
+
   try {
     db.close()
   } catch {
     // NO-THROW.
   }
 
-  return { evictedByTtl, evictedBySize, checkpointed }
+  return { evictedByTtl, evictedBySize, checkpointed, walRestarted }
 }

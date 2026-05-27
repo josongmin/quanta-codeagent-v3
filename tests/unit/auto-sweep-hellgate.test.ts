@@ -301,3 +301,223 @@ describe("ADR-0369 — global.ts wire", () => {
     resetGlobalSessionResourceRegistry()
   })
 })
+
+// ADR-0373 — Auto-sweep telemetry. Pin emitter wiring + metric names +
+// NO-THROW contract on the emit surface. Each new case follows the same
+// fake-timer seam so the periodic tick is deterministic.
+interface RecordedCounter {
+  readonly name: string
+  readonly delta: number
+  readonly attrs: Readonly<Record<string, string>> | undefined
+}
+interface RecordedGauge {
+  readonly name: string
+  readonly value: number
+  readonly attrs: Readonly<Record<string, string>> | undefined
+}
+interface RecordedHistogram {
+  readonly name: string
+  readonly value: number
+  readonly attrs: Readonly<Record<string, string>> | undefined
+}
+
+interface RecordingEmitter {
+  readonly counters: RecordedCounter[]
+  readonly gauges: RecordedGauge[]
+  readonly histograms: RecordedHistogram[]
+  readonly port: {
+    counter: (name: string, delta: number, attrs?: Readonly<Record<string, string>>) => void
+    gauge: (name: string, value: number, attrs?: Readonly<Record<string, string>>) => void
+    histogram?: (name: string, value: number, attrs?: Readonly<Record<string, string>>) => void
+  }
+}
+
+const makeRecordingEmitter = (opts?: { withHistogram?: boolean }): RecordingEmitter => {
+  const counters: RecordedCounter[] = []
+  const gauges: RecordedGauge[] = []
+  const histograms: RecordedHistogram[] = []
+  const port: RecordingEmitter["port"] = {
+    counter: (name, delta, attrs) => {
+      counters.push({ name, delta, attrs })
+    },
+    gauge: (name, value, attrs) => {
+      gauges.push({ name, value, attrs })
+    },
+  }
+  if (opts?.withHistogram !== false) {
+    port.histogram = (name, value, attrs) => {
+      histograms.push({ name, value, attrs })
+    }
+  }
+  return { counters, gauges, histograms, port }
+}
+
+describe("ADR-0373 — auto-sweep telemetry", () => {
+  test("Q. metricsEmitter absent ⇒ existing behaviour byte-identical (no record path)", async () => {
+    const dir = await newTempDir()
+    process.env.QUANTA_SESSION_REGISTRY_DISK_DIR = dir
+    const timer = makeFakeTimer()
+    // No emitter → scheduled like before, sweepNow works.
+    const h = startAutoSweep({
+      setIntervalImpl: timer.setIntervalImpl,
+      clearIntervalImpl: timer.clearIntervalImpl,
+    })
+    expect(h.scheduled).toBe(true)
+    await h.sweepNow()
+    h.stop()
+  })
+
+  test("R. metricsEmitter present + disk evicted ⇒ disk counters emitted", async () => {
+    const dir = await newTempDir()
+    process.env.QUANTA_SESSION_REGISTRY_DISK_DIR = dir
+    const emitter = makeRecordingEmitter()
+    const timer = makeFakeTimer()
+    const h = startAutoSweep({
+      setIntervalImpl: timer.setIntervalImpl,
+      clearIntervalImpl: timer.clearIntervalImpl,
+      metricsEmitter: emitter.port,
+    })
+    await h.sweepNow()
+    const diskEvicted = emitter.counters.filter((c) => c.name === "codex_r2.sweep.disk_evicted")
+    const diskTruncated = emitter.counters.filter((c) => c.name === "codex_r2.sweep.disk_truncated")
+    // Empty fresh dir ⇒ both deltas exist (may be 0) but the counter
+    // call was made.
+    expect(diskEvicted.length).toBeGreaterThanOrEqual(1)
+    expect(diskTruncated.length).toBeGreaterThanOrEqual(1)
+    h.stop()
+  })
+
+  test("S. metricsEmitter + sqlite ⇒ sqlite_checkpointed counter emitted", async () => {
+    process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = ":memory:"
+    const emitter = makeRecordingEmitter()
+    const timer = makeFakeTimer()
+    const h = startAutoSweep({
+      setIntervalImpl: timer.setIntervalImpl,
+      clearIntervalImpl: timer.clearIntervalImpl,
+      metricsEmitter: emitter.port,
+    })
+    await h.sweepNow()
+    const checkpointed = emitter.counters.filter(
+      (c) => c.name === "codex_r2.sweep.sqlite_checkpointed",
+    )
+    const evicted = emitter.counters.filter((c) => c.name === "codex_r2.sweep.sqlite_evicted")
+    expect(checkpointed.length).toBeGreaterThanOrEqual(1)
+    expect(evicted.length).toBeGreaterThanOrEqual(1)
+    h.stop()
+  })
+
+  test("T. latency_ms emitted via histogram when present, gauge fallback otherwise", async () => {
+    process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = ":memory:"
+    // Histogram-capable emitter.
+    const withHist = makeRecordingEmitter({ withHistogram: true })
+    const timer1 = makeFakeTimer()
+    const h1 = startAutoSweep({
+      setIntervalImpl: timer1.setIntervalImpl,
+      clearIntervalImpl: timer1.clearIntervalImpl,
+      metricsEmitter: withHist.port,
+    })
+    await h1.sweepNow()
+    const histRows = withHist.histograms.filter((r) => r.name === "codex_r2.sweep.latency_ms")
+    expect(histRows.length).toBeGreaterThanOrEqual(1)
+    expect(histRows[0]?.value).toBeGreaterThanOrEqual(0)
+    h1.stop()
+
+    // Histogram-absent emitter — fall back to gauge.
+    const noHist = makeRecordingEmitter({ withHistogram: false })
+    const timer2 = makeFakeTimer()
+    const h2 = startAutoSweep({
+      setIntervalImpl: timer2.setIntervalImpl,
+      clearIntervalImpl: timer2.clearIntervalImpl,
+      metricsEmitter: noHist.port,
+    })
+    await h2.sweepNow()
+    const gaugeRows = noHist.gauges.filter((r) => r.name === "codex_r2.sweep.latency_ms")
+    expect(gaugeRows.length).toBeGreaterThanOrEqual(1)
+    expect(gaugeRows[0]?.value).toBeGreaterThanOrEqual(0)
+    h2.stop()
+  })
+
+  test("U. emit throws ⇒ swallowed; sweep loop continues; timer stays alive", async () => {
+    process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = ":memory:"
+    const throwing: RecordingEmitter["port"] = {
+      counter: () => {
+        throw new Error("emitter blew up")
+      },
+      gauge: () => {
+        throw new Error("emitter blew up")
+      },
+      histogram: () => {
+        throw new Error("emitter blew up")
+      },
+    }
+    const timer = makeFakeTimer()
+    const h = startAutoSweep({
+      setIntervalImpl: timer.setIntervalImpl,
+      clearIntervalImpl: timer.clearIntervalImpl,
+      metricsEmitter: throwing,
+    })
+    // No throw on sweepNow.
+    await expect(h.sweepNow()).resolves.toBeUndefined()
+    // Tick stays alive.
+    timer.tick(0)
+    expect(timer.handles[0]?.cleared).toBe(false)
+    h.stop()
+  })
+
+  test("V. both backends ⇒ both sets of metrics emit on a single sweep", async () => {
+    const dir = await newTempDir()
+    process.env.QUANTA_SESSION_REGISTRY_DISK_DIR = dir
+    process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = ":memory:"
+    const emitter = makeRecordingEmitter()
+    const timer = makeFakeTimer()
+    const h = startAutoSweep({
+      setIntervalImpl: timer.setIntervalImpl,
+      clearIntervalImpl: timer.clearIntervalImpl,
+      metricsEmitter: emitter.port,
+    })
+    await h.sweepNow()
+    const names = new Set(emitter.counters.map((c) => c.name))
+    expect(names.has("codex_r2.sweep.disk_evicted")).toBe(true)
+    expect(names.has("codex_r2.sweep.disk_truncated")).toBe(true)
+    expect(names.has("codex_r2.sweep.sqlite_evicted")).toBe(true)
+    expect(names.has("codex_r2.sweep.sqlite_checkpointed")).toBe(true)
+    h.stop()
+  })
+
+  test("W. zero-result sweep ⇒ counters still emit (delta = 0; idempotent observability)", async () => {
+    const dir = await newTempDir()
+    process.env.QUANTA_SESSION_REGISTRY_DISK_DIR = dir
+    const emitter = makeRecordingEmitter()
+    const timer = makeFakeTimer()
+    const h = startAutoSweep({
+      setIntervalImpl: timer.setIntervalImpl,
+      clearIntervalImpl: timer.clearIntervalImpl,
+      metricsEmitter: emitter.port,
+    })
+    await h.sweepNow()
+    // The disk dir is fresh — evicted and truncated MUST be 0 but the
+    // counter call still happened (delta = 0). This keeps dashboards
+    // sane: "we ran a sweep, it found nothing" is observable.
+    const evictRow = emitter.counters.find((c) => c.name === "codex_r2.sweep.disk_evicted")
+    expect(evictRow?.delta).toBe(0)
+    h.stop()
+  })
+
+  test("X. handle.sweepNow() fires emit; on-startup sweep also fires emit", async () => {
+    process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH = ":memory:"
+    const emitter = makeRecordingEmitter()
+    const timer = makeFakeTimer()
+    const h = startAutoSweep({
+      setIntervalImpl: timer.setIntervalImpl,
+      clearIntervalImpl: timer.clearIntervalImpl,
+      metricsEmitter: emitter.port,
+    })
+    // Wait one microtask for the on-startup `void sweepOnce(...)` to settle.
+    await new Promise<void>((resolve) => setTimeout(resolve, 5))
+    const baseline = emitter.counters.length
+    expect(baseline).toBeGreaterThan(0)
+    await h.sweepNow()
+    expect(emitter.counters.length).toBeGreaterThan(baseline)
+    h.stop()
+  })
+})

@@ -55,6 +55,22 @@ export interface SqliteRegistryConfig {
    * exercise TTL / sliding-window deterministically.
    */
   readonly now?: () => number
+  /**
+   * ADR-0375 — WAL-size escalation threshold (bytes). When provided AND
+   * the `<databasePath>-wal` file exceeds this size at sweep time,
+   * `sweepSqliteRegistry` upgrades the PASSIVE checkpoint to RESTART so
+   * the WAL is fully drained.
+   *
+   * Codex `logs_2.sqlite` production calibration: 14.8 GB DB + 14 GB
+   * WAL after ~10 days. PASSIVE may complete without shrinking the WAL
+   * (writers proceed concurrently; the WAL keeps growing). RESTART
+   * blocks new writers until the WAL is drained — safe but briefly
+   * pauses writes. Sibling TRUNCATE (drop WAL to size 0) is intentionally
+   * NOT done here; see ADR-0375 §Non-goals.
+   *
+   * Absent ⇒ PASSIVE-only (ADR-0361 byte-identical behaviour).
+   */
+  readonly walSizeThresholdBytes?: number
 }
 
 /**

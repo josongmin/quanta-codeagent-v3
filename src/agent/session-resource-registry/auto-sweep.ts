@@ -73,6 +73,7 @@
  * existing port or factory.
  */
 
+import type { MetricEmitterPort } from "@/observability/codex-r2-metrics/types"
 import { sweepDiskRegistry } from "./disk-adapter/gc"
 import { sweepSqliteRegistry } from "./sqlite-adapter/gc"
 
@@ -113,6 +114,20 @@ export interface AutoSweepConfig {
    * `setIntervalImpl`.
    */
   readonly clearIntervalImpl?: (handle: NodeJS.Timeout) => void
+  /**
+   * ADR-0373 — Optional observability hook. When supplied, every
+   * `sweepOnce` invocation emits:
+   *   - `codex_r2.sweep.disk_evicted`        (counter, delta from sweep result)
+   *   - `codex_r2.sweep.disk_truncated`      (counter)
+   *   - `codex_r2.sweep.sqlite_evicted`      (counter, evictedByTtl + evictedBySize)
+   *   - `codex_r2.sweep.sqlite_checkpointed` (counter, 1 on success, 0 on miss)
+   *   - `codex_r2.sweep.latency_ms`          (histogram if available, else gauge)
+   *
+   * Emit calls are NO-THROW: a misbehaving emitter is swallowed so the
+   * sweep loop's NO-THROW contract is preserved. Default-OFF — when
+   * absent the slice is byte-identical to ADR-0369.
+   */
+  readonly metricsEmitter?: MetricEmitterPort
 }
 
 /**
@@ -181,24 +196,95 @@ const resolveSqlitePath = (cfg: AutoSweepConfig | undefined): string => {
 }
 
 /**
+ * NO-THROW wrapper around emitter calls. ADR-0373 contract says emit is
+ * best-effort — a misbehaving emitter must not break the sweep loop.
+ */
+const safeCounter = (emitter: MetricEmitterPort | undefined, name: string, delta: number): void => {
+  if (emitter === undefined) return
+  try {
+    emitter.counter(name, delta)
+  } catch {
+    // NO-THROW.
+  }
+}
+
+const safeGauge = (emitter: MetricEmitterPort | undefined, name: string, value: number): void => {
+  if (emitter === undefined) return
+  try {
+    emitter.gauge(name, value)
+  } catch {
+    // NO-THROW.
+  }
+}
+
+/**
+ * Histogram emit with gauge fallback. `histogram` is optional on the
+ * port (ADR-0366 added it after the original `MetricEmitterPort`
+ * shape) — when absent, we fall back to a gauge so timing observability
+ * is never silently dropped.
+ */
+const safeLatency = (emitter: MetricEmitterPort | undefined, value: number): void => {
+  if (emitter === undefined) return
+  if (typeof emitter.histogram === "function") {
+    try {
+      emitter.histogram("codex_r2.sweep.latency_ms", value)
+      return
+    } catch {
+      // NO-THROW; fall through to gauge.
+    }
+  }
+  safeGauge(emitter, "codex_r2.sweep.latency_ms", value)
+}
+
+/**
  * Run one sweep over both configured backends. NO-THROW: any error
  * inside `sweepDiskRegistry` or `sweepSqliteRegistry` is swallowed so
  * the timer survives.
+ *
+ * ADR-0373: when `metricsEmitter` is supplied, emit retention metrics
+ * after each backend completes. The emit surface is independently
+ * NO-THROW (see `safeCounter` / `safeGauge` / `safeLatency`).
  */
-const sweepOnce = async (diskDir: string, sqlitePath: string, now: () => number): Promise<void> => {
+const sweepOnce = async (
+  diskDir: string,
+  sqlitePath: string,
+  now: () => number,
+  metricsEmitter: MetricEmitterPort | undefined,
+): Promise<void> => {
+  // Use the injected `now` clock for the wall-clock measurement too so
+  // tests can drive latency deterministically. ADR-0373 telemetry value
+  // is not model-facing / replay-stable in the prompt sense, but routing
+  // through the same clock seam keeps the slice consistent with the
+  // domain-clock-injection invariant.
+  //
+  // Skip the wall-clock read entirely when there is no emitter, so the
+  // emitter-absent path is byte-identical to ADR-0369 (no extra `now()`
+  // call per tick).
+  const wallStart = metricsEmitter !== undefined ? now() : 0
+
   if (diskDir.length > 0) {
     try {
-      await sweepDiskRegistry({ storageDir: diskDir, now })
+      const result = await sweepDiskRegistry({ storageDir: diskDir, now })
+      safeCounter(metricsEmitter, "codex_r2.sweep.disk_evicted", result.evicted)
+      safeCounter(metricsEmitter, "codex_r2.sweep.disk_truncated", result.truncated)
     } catch {
       // NO-THROW.
     }
   }
   if (sqlitePath.length > 0) {
     try {
-      sweepSqliteRegistry({ databasePath: sqlitePath, now })
+      const result = sweepSqliteRegistry({ databasePath: sqlitePath, now })
+      const totalEvicted = result.evictedByTtl + result.evictedBySize
+      safeCounter(metricsEmitter, "codex_r2.sweep.sqlite_evicted", totalEvicted)
+      safeCounter(metricsEmitter, "codex_r2.sweep.sqlite_checkpointed", result.checkpointed ? 1 : 0)
     } catch {
       // NO-THROW.
     }
+  }
+
+  if (metricsEmitter !== undefined) {
+    const elapsed = now() - wallStart
+    safeLatency(metricsEmitter, elapsed >= 0 ? elapsed : 0)
   }
 }
 
@@ -233,11 +319,12 @@ export const startAutoSweep = (cfg?: AutoSweepConfig): AutoSweepHandle => {
   const now = cfg?.now ?? Date.now
   const sched = cfg?.setIntervalImpl ?? setInterval
   const cancel = cfg?.clearIntervalImpl ?? clearInterval
+  const emitter = cfg?.metricsEmitter
 
   // On-startup sweep. Fire-and-forget; callers can `await sweepNow()`
   // to synchronise. We DO NOT await here to keep `startAutoSweep`
   // itself synchronous + cheap.
-  void sweepOnce(diskDir, sqlitePath, now)
+  void sweepOnce(diskDir, sqlitePath, now, emitter)
 
   let timer: NodeJS.Timeout | null = null
   let stopped = false
@@ -245,7 +332,7 @@ export const startAutoSweep = (cfg?: AutoSweepConfig): AutoSweepHandle => {
   if (intervalMs > 0) {
     timer = sched(() => {
       if (stopped) return
-      void sweepOnce(diskDir, sqlitePath, now)
+      void sweepOnce(diskDir, sqlitePath, now, emitter)
     }, intervalMs)
   }
 
@@ -264,7 +351,7 @@ export const startAutoSweep = (cfg?: AutoSweepConfig): AutoSweepHandle => {
   }
 
   const sweepNow = async (): Promise<void> => {
-    await sweepOnce(diskDir, sqlitePath, now)
+    await sweepOnce(diskDir, sqlitePath, now, emitter)
   }
 
   return { stop, sweepNow, scheduled: timer !== null }
