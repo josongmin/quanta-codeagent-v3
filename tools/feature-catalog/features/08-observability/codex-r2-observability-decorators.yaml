@@ -28,16 +28,16 @@ purpose: |
   `MetricsRegistry` via a one-line shim.
 evidence:
   code:
-    - src/agent/codex-r2-metrics/types.ts
-    - src/agent/codex-r2-metrics/cache-metrics-decorator.ts
-    - src/agent/codex-r2-metrics/registry-metrics-decorator.ts
-    - src/agent/codex-r2-metrics/index.ts
+    - src/observability/codex-r2-metrics/types.ts
+    - src/observability/codex-r2-metrics/cache-metrics-decorator.ts
+    - src/observability/codex-r2-metrics/registry-metrics-decorator.ts
+    - src/observability/codex-r2-metrics/index.ts
   adrs:
     - docs/decisions/0352-codex-r2-observability-metrics.md
   tests:
     unit:
-      - src/agent/codex-r2-metrics/__tests__/cache-metrics.hellgate.test.ts
-      - src/agent/codex-r2-metrics/__tests__/registry-metrics.hellgate.test.ts
+      - tests/unit/codex-r2-metrics-cache-hellgate.test.ts
+      - tests/unit/codex-r2-metrics-registry-hellgate.test.ts
     integration: []
     contract: []
 knobs:

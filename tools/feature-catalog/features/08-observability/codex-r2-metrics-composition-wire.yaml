@@ -33,7 +33,7 @@ purpose: |
   jumps poisoning latency math.
 evidence:
   code:
-    - src/agent/codex-r2-metrics/metrics-adapter.ts
+    - src/observability/codex-r2-metrics/metrics-adapter.ts
     - src/agent/loop-activation-hook.ts
     - src/apps/agent/assemble.ts
   adrs:
@@ -41,7 +41,7 @@ evidence:
     - docs/decisions/0360-activation-hook-telemetry.md
   tests:
     unit:
-      - src/agent/codex-r2-metrics/__tests__/metrics-adapter.hellgate.test.ts
+      - tests/unit/codex-r2-metrics-adapter-hellgate.test.ts
       - tests/unit/composition-codex-r2-metrics-wire-hellgate.test.ts
       - tests/unit/loop-activation-telemetry-hellgate.test.ts
     integration: []
