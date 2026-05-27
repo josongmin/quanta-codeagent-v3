@@ -1468,6 +1468,24 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    *  NO-THROW: callback errors are swallowed so an emitter glitch cannot
    *  break the turn. Absent ⇒ no emit (byte-identical). */
   compactionEventEmit?: (event: import("@/memory/typed-event").CompactionEventVariant) => void
+
+  /** ADR-0340 — plugin activation closure. When set, the loop / surface
+   *  hook may call `activatePlugins(parsedMentions, { turnId })` once per
+   *  turn after `parseMentions` to spawn each plugin's declared MCP
+   *  servers (ADR-0338) and resolve its declared skills (ADR-0339). The
+   *  returned `AggregatedActivation.resolvedSkills` is intended to be
+   *  unioned into `TurnContextInput.activeSkills` via
+   *  `unionActiveSkills`; the returned `handles` are session-scoped
+   *  (the composition root retains the `PluginMcpRegistry` lifetime and
+   *  calls `shutdownAll()` on session end).
+   *
+   *  NO-THROW: thrown errors degrade to `{ handles: [], resolvedSkills: [] }`
+   *  so a misconfigured plugin handler cannot break the turn. Absent ⇒
+   *  no activation, no spawn, byte-identical legacy behaviour. */
+  activatePlugins?: (
+    mentions: readonly import("@/agent/mention-injection").ParsedMention[],
+    opts?: { readonly turnId?: string },
+  ) => Promise<import("@/agent/plugin-activation-handler").AggregatedActivation>
 }
 
 // ─────────────────────────────────────────────────────────────────────────
