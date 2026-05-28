@@ -13,12 +13,13 @@ config_refs:
   env:
     - QUANTA_MENTION_FILE
     - QUANTA_MENTION_SYMBOL
+    - QUANTA_MENTION_SKILL
     - QUANTA_MENTION_FILE_MAX_BYTES
     - QUANTA_MENTION_FILE_TAIL_RATIO
     - QUANTA_MENTION_SYMBOL_RESOLVER
     - QUANTA_MENTION_SYMBOL_TIMEOUT_MS
 owners: ["@songmin"]
-labels: ["surface:core", "absorbed:cursor", "default-off"]
+labels: ["surface:core", "absorbed:cursor", "default-on"]
 depends_on: [codex-r2-typed-event-store]
 purpose: |
   Supersedes ADR-0325 (3-kind sync) + ADR-0330 (sync runner). Extends the
@@ -39,24 +40,39 @@ purpose: |
   lookup ports, `lsp|semantic|auto` priority (auto = LSP first, semantic
   fallback), per-strategy timeout, NO-THROW on throw/reject/timeout.
 
-  Default-OFF: no production path imports the slice; zero file/symbol input
-  is byte-identical to the legacy 3-kind path. `AgentConfig.mentionInjector`
-  is now `Promise`-shaped; `AgentConfig.mentionInjection` carries the DI bag
-  (fileResolver / symbolResolver / maxFileBytes / tailRatio / symbolPriority
-  / symbolTimeoutMs).
+  ADR-0422 WIRE-UP (closes the deliberate_hold): two SymbolLookup adapters
+  (createLspSymbolLookup over lsp-bridge's nav provider /
+  createSemanticSymbolLookup over the search-index backend, both
+  graceful-null) + a DRY buildDefaultMentionResolver that reads the
+  QUANTA_MENTION_* env (default-ON, =off per kind) and composes file/symbol/
+  skill. apps/agent/assemble.ts + the CLI/host-runtime (mention-wire.ts →
+  buildAgentConfigFromBase via idempotent installCodexR2Wires) both build via
+  the shared builder, so @file + @symbol work on every surface.
+
+  Default-ON with GRACEFUL OMIT: an absent dep (no LSP anchor / no populated
+  index / no skill registry) leaves that kind unwired ⇒ null, never a
+  regression. Zero-mention input + every knob =off are byte-identical to the
+  legacy 3-kind path. `AgentConfig.mentionInjector` is `Promise`-shaped;
+  `AgentConfig.mentionInjection` carries the DI bag.
 evidence:
   code:
     - src/agent/mention-injection/types.ts
     - src/agent/mention-injection/parser.ts
     - src/agent/mention-injection/resolver.ts
     - src/agent/mention-injection/symbol-resolver.ts
+    - src/agent/mention-injection/symbol-lookup-lsp.ts
+    - src/agent/mention-injection/symbol-lookup-semantic.ts
     - src/agent/mention-injection/index.ts
     - src/agent/mention-runner/runner.ts
     - src/agent/mention-runner/skill-resolver.ts
+    - src/agent/mention-runner/default-resolver.ts
     - src/agent/plugin-app-resolver/composite-resolver.ts
     - src/agent/plugin-app-resolver/file-resolver.ts
+    - src/apps/agent/assemble.ts
+    - src/host/runtime/internal/mention-wire.ts
   adrs:
     - docs/decisions/0418-async-mention-resolver-and-file-symbol.md
+    - docs/decisions/0422-mention-wire-symbol-skill-cli.md
     - docs/decisions/0325-mention-based-explicit-injection.md
     - docs/decisions/0330-mention-runner-skill-resolver.md
   tests:
@@ -67,11 +83,15 @@ evidence:
       - src/agent/mention-injection/__tests__/resolver-file.hellgate.test.ts
       - src/agent/mention-injection/__tests__/resolver-async.hellgate.test.ts
       - src/agent/mention-injection/__tests__/symbol-resolver.hellgate.test.ts
+      - src/agent/mention-injection/__tests__/symbol-lookup-lsp.hellgate.test.ts
+      - src/agent/mention-injection/__tests__/symbol-lookup-semantic.hellgate.test.ts
       - src/agent/mention-runner/__tests__/runner.hellgate.test.ts
       - src/agent/mention-runner/__tests__/skill-resolver.hellgate.test.ts
+      - src/agent/mention-runner/__tests__/default-resolver.hellgate.test.ts
       - src/agent/plugin-app-resolver/__tests__/file-resolver.hellgate.test.ts
       - src/agent/plugin-app-resolver/__tests__/composite-resolver.hellgate.test.ts
       - src/agent/plugin-app-resolver/__tests__/composite-resolver-file.hellgate.test.ts
+      - src/host/runtime/internal/__tests__/mention-wire.hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -81,6 +101,9 @@ knobs:
   - name: QUANTA_MENTION_SYMBOL
     default: 'on'
     purpose: 'Enable @symbol mention resolution (off ⇒ symbol mentions skipped).'
+  - name: QUANTA_MENTION_SKILL
+    default: 'on'
+    purpose: 'Enable @skill mention resolution (off ⇒ skill mentions skipped; ADR-0422).'
   - name: QUANTA_MENTION_FILE_MAX_BYTES
     default: '100000'
     purpose: 'File read cap before head/tail truncation (lib default 262144).'
@@ -93,20 +116,17 @@ knobs:
   - name: QUANTA_MENTION_SYMBOL_TIMEOUT_MS
     default: '5000'
     purpose: 'Per-strategy @symbol lookup timeout in ms (hung strategy ⇒ null / fallback).'
-deliberate_hold:
-  reason: |
-    Production wire (env → DI bag → createCompositeMentionResolver →
-    mentionInjector, plus the @symbol adapters over @/agent/lsp-bridge and
-    @/runner/assemble/search-index-backend) is deferred to a follow-up
-    wire-up ADR. The slice ships ports + logic + tests default-OFF.
-  promotion_path: |
-    A composition root reads QUANTA_MENTION_* env into AgentConfig.
-    mentionInjection, builds the symbol resolver over lsp-bridge +
-    search-index-backend, threads file/symbol resolvers into
-    createCompositeMentionResolver, and assigns the resulting async
-    createMentionInjector to AgentConfig.mentionInjector.
 notes: |
   Cursor/IDE @-mention parity. Supersedes the 3-kind sync mention slice and
   the dropped @file: explicit-prefix syntax. An uppercase-leading dotted
   token like @README.md classifies as a SYMBOL (README.md) by the cascade —
   documented behaviour, not a bug. Frozen at 5 kinds.
+
+  ADR-0422 closed the ADR-0418 deliberate_hold: the env→builder→composite→
+  mentionInjector wire is live on the CLI + every host-runtime surface (and
+  the unified-agent assemble surface). @symbol ships two graceful-null
+  adapters (LSP nav / semantic index). Honest residual: the LSP adapter is
+  graceful-null until a surface threads a language-server anchor file, and
+  @skill / the semantic strategy are wired by callers that thread a registry
+  / populated index (no heuristic scan, no empty-index misses at the
+  assemble/CLI layer).
