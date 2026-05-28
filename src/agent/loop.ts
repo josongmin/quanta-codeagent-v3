@@ -44,6 +44,7 @@ import {
   attachDedupGate,
   attachLocalizePhase,
   buildGitDirectiveEmit,
+  buildPostCompactEmit,
   buildPreCompactHook,
   buildSeedMessages,
   buildTtftAttrs,
@@ -787,6 +788,19 @@ const maybeCompact = async (
   // `loop-helpers#buildPreCompactHook`; absent `config.hooks` ⇒ `undefined`
   // (compactIfNeeded fast-paths past the await — byte-identical legacy).
   const preCompactHook = buildPreCompactHook(config.hooks)
+  // ADR-0409 wire — thread the post_compact emit + objective bridge so the
+  // compaction-visibility taxonomy actually fires in production (audit R2 F1).
+  // Absent hooks/objective ⇒ fields omitted ⇒ compactIfNeeded byte-identical.
+  const postCompactEmit = buildPostCompactEmit(config.hooks, config.sessionId ?? "")
+  const objectiveSetNextActions = config.objective
+    ? (tid: string, actions: readonly string[]): void => {
+        try {
+          config.objective?.setNextActions(tid, actions)
+        } catch {
+          // NO-THROW: objective wire failure must not perturb compaction.
+        }
+      }
+    : undefined
   try {
     result = await compactIfNeeded({
       messages: snapshot,
@@ -801,6 +815,17 @@ const maybeCompact = async (
         : {}),
       ...(config.compaction.keepRecentTurns !== undefined
         ? { keepRecentTurns: config.compaction.keepRecentTurns }
+        : {}),
+      // ADR-0409 — post_compact event + Objective.setNextActions bridge.
+      // Proactive site ⇒ token_budget_exceeded. threadId = config.sessionId
+      // (the natural per-thread key the Objective port uses).
+      ...(postCompactEmit !== undefined ? { postCompactEmit } : {}),
+      ...(objectiveSetNextActions !== undefined ? { objectiveSetNextActions } : {}),
+      ...(postCompactEmit !== undefined || objectiveSetNextActions !== undefined
+        ? { recoveryReason: "token_budget_exceeded" as const }
+        : {}),
+      ...(config.sessionId !== undefined && config.sessionId.length > 0
+        ? { threadId: config.sessionId }
         : {}),
       // ADR-0075 — Cursor HITL hook. Absent `onPreCompact` ⇒ NO preflight
       // attribute set (compactIfNeeded fast-paths past the await, byte-
@@ -1270,6 +1295,31 @@ const applyNonSuccessRecoveryAction = async (
   })
   wm.replace(compacted.messages)
   resetEffortClassifier(config.effortClassifier)
+  // ADR-0409 wire — fire the post_compact emit + Objective bridge at the
+  // REACTIVE site too. The proactive site uses `compactIfNeeded`'s
+  // `postCompactEmit` path; reactiveCompact doesn't accept the callback, so
+  // we emit inline here. `reason:"ptl_reactive"` distinguishes mid-turn PTL
+  // recovery from the proactive token-budget trigger. Subscriber-less +
+  // objective-absent ⇒ no-op (byte-identical). NO-THROW.
+  try {
+    const provenance: import("@/agent/recovery-reason").RecoveryProvenance = {
+      reason: "ptl_reactive",
+      tokensBefore: before,
+      tokensAfter: after,
+      turnsDropped: Math.max(snapshot.length - compacted.messages.length, 0),
+      turnsKept: compacted.messages.length,
+      compactedAt: Date.now(),
+    }
+    const threadId = config.sessionId ?? ""
+    await config.hooks?.emit({ type: "post_compact", threadId, provenance })
+    if (config.objective !== undefined && threadId.length > 0) {
+      config.objective.setNextActions(threadId, [
+        "Resuming after mid-turn compaction (PTL recovery)",
+      ])
+    }
+  } catch {
+    // NO-THROW: post-compact emit/bridge failure must not abort the turn.
+  }
   return CONTINUE
 }
 

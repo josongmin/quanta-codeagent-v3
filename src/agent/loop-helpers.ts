@@ -154,6 +154,24 @@ export const buildPreCompactHook = (hooks: HookBus | undefined): PreCompactHookF
   }
 }
 
+/** ADR-0409 — sibling of {@link buildPreCompactHook} for the `post_compact`
+ *  HookBus event. Fires AFTER a compaction settles with the typed
+ *  {@link RecoveryProvenance} (reason / tokens before-after / turns
+ *  dropped-kept / summary + resume strings). The bus already fast-paths the
+ *  zero-subscriber case, so an unsubscribed event is byte-identical to the
+ *  pre-ADR-0409 path. NO-THROW: the emit itself runs inside compaction's own
+ *  try/catch around `postCompactEmit`. Returns `undefined` when no hook bus
+ *  is wired so `compactIfNeeded` omits the field entirely (legacy fast-path). */
+export const buildPostCompactEmit = (
+  hooks: HookBus | undefined,
+  threadId: string,
+): ((provenance: import("@/agent/recovery-reason").RecoveryProvenance) => Promise<void>) | undefined => {
+  if (hooks === undefined) return undefined
+  return async (provenance) => {
+    await hooks.emit({ type: "post_compact", threadId, provenance })
+  }
+}
+
 /**
  * T3 — pre-flight dedup gate. ON by default with `DEFAULT_DEDUP_GATE_CAPS` so
  * a pallets-style env-loop thrash is structurally braked. Honors a
