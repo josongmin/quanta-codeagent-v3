@@ -46,7 +46,7 @@ evidence:
     - src/agent/approval-gate-wire/wire.ts
     - src/agent/approval-gate-wire/index.ts
     - src/agent/admissibility-gate.ts
-  adrs: [405]
+  adrs: [407]
   tests:
     unit:
       - tests/unit/approval-gate-wire-hellgate.test.ts

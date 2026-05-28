@@ -56,7 +56,7 @@ evidence:
     - src/agent/approval-state-machine/types.ts
     - src/agent/approval-state-machine/store.ts
     - src/agent/approval-state-machine/index.ts
-  adrs: [399]
+  adrs: [403]
   tests:
     unit:
       - tests/unit/approval-state-machine-hellgate.test.ts

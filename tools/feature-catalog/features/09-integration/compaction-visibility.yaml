@@ -54,7 +54,7 @@ evidence:
     - src/agent/microcompact/index.ts
     - src/agent/hooks.ts
     - src/agent/compaction.ts
-  adrs: [407]
+  adrs: [409]
   tests:
     unit:
       - tests/unit/recovery-reason-hellgate.test.ts
