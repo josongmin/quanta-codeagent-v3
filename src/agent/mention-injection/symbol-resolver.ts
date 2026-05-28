@@ -70,7 +70,18 @@ export interface SymbolResolverConfig {
   readonly maxHits?: number
 }
 
+/** Per-strategy wall-clock cap. LSP `workspaceSymbol` and the vector probe
+ *  both typically resolve well under a second; 5s leaves headroom for a
+ *  cold-start language server + a GC pause without dragging the turn. Tune
+ *  via the `timeoutMs` config field or the `QUANTA_MENTION_SYMBOL_TIMEOUT_MS`
+ *  env knob — not a heuristic threshold, a wall-clock ceiling. */
 const DEFAULT_TIMEOUT_MS = 5_000
+/** Cap on hits RENDERED into the prompt body. DISTINCT from the upstream
+ *  lookup caps (`symbol-lookup-lsp.DEFAULT_MAX_HITS` = LSP projection slice;
+ *  `symbol-lookup-semantic.DEFAULT_TOP_K` = index probe size). Five keeps the
+ *  injected context terse; tune via the `maxHits` config field. The two-layer
+ *  cap design (upstream wide → renderer tight) is intentional, not the
+ *  audit-flagged "DEFAULT_MAX_HITS inconsistency". */
 const DEFAULT_MAX_HITS = 5
 
 /** Wrap a promise in a timeout. Resolves to `null` on timeout (NO-THROW).

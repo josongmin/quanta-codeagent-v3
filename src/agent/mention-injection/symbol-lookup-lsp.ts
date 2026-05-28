@@ -43,6 +43,12 @@ export interface LspSymbolLookupOptions {
   readonly maxHits?: number
 }
 
+/** Upstream projection cap — the LSP `workspaceSymbol` response is sliced to
+ *  this many BEFORE the outer `symbol-resolver` applies its own (smaller)
+ *  `DEFAULT_MAX_HITS=5` for the rendered prompt body. 25 absorbs noisy
+ *  match-anywhere queries (e.g. `@foo` against a large codebase) without
+ *  unbounded memory; the resolver tightens for display. Two distinct caps by
+ *  design, NOT the audit-flagged "5 vs 25 inconsistency". */
 const DEFAULT_MAX_HITS = 25
 
 /** Project an LSP `NavSymbolInfo` into the mention `SymbolHit` envelope.

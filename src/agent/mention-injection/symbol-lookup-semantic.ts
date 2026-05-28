@@ -55,6 +55,9 @@ export interface SemanticSymbolLookupOptions {
   readonly topK?: number
 }
 
+/** Vector index probe size. Matches the resolver's `DEFAULT_MAX_HITS=5` so the
+ *  semantic strategy contributes its full quota to the merged hit list without
+ *  over-probing the backend on every name. Tune via `topK`. */
 const DEFAULT_TOP_K = 5
 
 const metaString = (v: unknown): string => (typeof v === "string" ? v : "")

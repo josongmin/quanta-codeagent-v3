@@ -84,7 +84,8 @@ export interface SynthesizeAnchorsOptions {
    *  {@link nodeFsAnchorDirLister}). */
   readonly lister: AnchorDirLister
   /** Hard ceiling on entries inspected (NO-THROW backstop, not a tuning knob).
-   *  Default 50_000. `<= 0` ⇒ default. */
+   *  Default 1_000_000 — exists only to fast-exit symlink loops / fs cycles,
+   *  not to bound accuracy on real trees. `<= 0` ⇒ default. */
   readonly maxEntries?: number
 }
 
@@ -94,7 +95,12 @@ export interface SynthesizedAnchor {
   readonly language: string
 }
 
-const DEFAULT_MAX_ENTRIES = 50_000
+/** Pathological-tree guard, NOT a tuning knob: a typical pruned src tree is
+ *  <100k entries, so 1M ≫ any legitimate workspace. The cap exists ONLY to
+ *  fast-exit a symlink loop / fs cycle (since we lack visited-realpath
+ *  tracking yet); legitimate trees never reach it. The audit flagged the old
+ *  50k as a magic threshold — bumped to 1M and re-anchored as a backstop. */
+const DEFAULT_MAX_ENTRIES = 1_000_000
 
 /** Directory NAMES that are never descended into. These dominate a real
  *  checkout (dependency trees, VCS metadata) and never legitimately hold the

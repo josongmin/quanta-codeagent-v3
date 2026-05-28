@@ -95,13 +95,28 @@ const nodeFsAnchorDirLister: AnchorDirLister = {
   },
 }
 
-/** Memoize an async factory so the underlying lookup is built at most once per
- *  port lifetime (the first `findSymbol`), regardless of concurrent calls. */
+/** Memoize a successful async factory result. ONLY fulfilled promises are
+ *  cached — if `factory()` rejects, the cache is reset so the NEXT caller
+ *  retries from scratch. This closes the audit-H "permanent dead" hole where
+ *  a transient first-call failure (e.g. fs hiccup, backend cold-start race)
+ *  would otherwise be cached as a permanent rejected Promise, turning the
+ *  whole `@symbol` strategy into silent null for the rest of the session.
+ *  Concurrent in-flight callers still share the SAME pending promise (no
+ *  double-build), so the contract is "at most one build in flight at a time
+ *  AND at most one cached success — failures retry". */
 const once = <T>(factory: () => Promise<T>): (() => Promise<T>) => {
   let cached: Promise<T> | undefined
   return () => {
-    if (cached === undefined) cached = factory()
-    return cached
+    const existing = cached
+    if (existing !== undefined) return existing
+    const pending = factory()
+    cached = pending
+    pending.catch(() => {
+      // Only reset if we still own the slot — a successor caller's pending
+      // promise must not be clobbered if it raced past the check above.
+      if (cached === pending) cached = undefined
+    })
+    return pending
   }
 }
 
@@ -139,12 +154,12 @@ const buildSemanticLookup = async (
   try {
     // Dynamic import keeps the `@/runner` cross-slice edge at the composition
     // root and out of any static agent-slice graph.
-    const { buildSemanticBackend, selectIndexEmbedder } = await import(
+    const { buildSemanticBackend, resolveIndexEmbedder } = await import(
       "@/runner/assemble/search-index-backend"
     )
-    const embed = selectIndexEmbedder(env)
-    const backend = buildSemanticBackend(env, embed)
-    return createSemanticSymbolLookup({ index: backend.port, embed })
+    const resolvedEmbedder = resolveIndexEmbedder(env)
+    const backend = buildSemanticBackend(env, resolvedEmbedder.embed, { resolvedEmbedder })
+    return createSemanticSymbolLookup({ index: backend.port, embed: resolvedEmbedder.embed })
   } catch (e) {
     logger.warn(
       `mention @symbol: semantic backend build failed (${(e as Error).message}); skipping.`,
