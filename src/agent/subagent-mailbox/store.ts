@@ -1,0 +1,350 @@
+/**
+ * ADR-0416 — In-memory `MailboxPort` implementation.
+ *
+ * Zero-dep reference store (only `crypto.randomUUID`). The single mutator of
+ * the message log. Determinism:
+ *   - frozen messages returned to callers (no post-return mutation leaks).
+ *   - injected `now` clock seam (default `Date.now`) for stable timestamps.
+ *
+ * NO-THROW contract: every method wraps its body in a try/catch and degrades to
+ * a safe value (`send` ⇒ a best-effort message; readers ⇒ `[]`; `ack` ⇒ `null`;
+ * `pendingFor` ⇒ `0`) on ANY internal error or malformed input. No method throws.
+ *
+ * Delivery model (see ./types doc + ADR-0416):
+ *   - DIRECT  (`to === agentId`): a per-message `deliveredAt` stamp.
+ *   - BROADCAST(`to === "*"`): per-AGENT `lastReadAt` cursor. A broadcast is
+ *     delivered ONCE PER AGENT (each reader has its own cursor) and NEVER to
+ *     its own sender.
+ *
+ * Eviction: bounded by `maxRetained` (default 1024) + `retentionMs` (default
+ * 3_600_000ms). Reclaims DELIVERED-before-UNDELIVERED, oldest-`sentAt` first.
+ */
+
+import { randomUUID } from "node:crypto"
+import type {
+  CreateSubagentMailboxOptions,
+  MailboxMessage,
+  MailboxMessageKind,
+  MailboxPort,
+  MailboxSnapshot,
+} from "./types"
+
+const DEFAULT_MAX_RETAINED = 1024
+const DEFAULT_RETENTION_MS = 3_600_000
+const BROADCAST = "*"
+
+/** Internal mutable cell. `deliveredAt` is the DIRECT-delivery stamp; broadcast
+ *  delivery is tracked separately via per-agent cursors. */
+interface Cell {
+  id: string
+  from: string
+  to: string
+  kind: MailboxMessageKind
+  body: string
+  correlationId?: string
+  sentAt: number
+  deliveredAt?: number
+}
+
+const isNonEmptyString = (v: unknown): v is string => typeof v === "string" && v.length > 0
+const isString = (v: unknown): v is string => typeof v === "string"
+const isKind = (v: unknown): v is MailboxMessageKind =>
+  v === "request" || v === "response" || v === "broadcast"
+
+const finiteOrUndefined = (v: unknown): number | undefined =>
+  typeof v === "number" && Number.isFinite(v) ? v : undefined
+const finiteOrZero = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0)
+
+/** Project a cell to the frozen public message. Omits optional keys when
+ *  absent (exactOptional) so a `response` round-trips without a stray
+ *  `correlationId: undefined`. */
+const toMessage = (cell: Cell): MailboxMessage =>
+  Object.freeze({
+    id: cell.id,
+    from: cell.from,
+    to: cell.to,
+    kind: cell.kind,
+    body: cell.body,
+    sentAt: cell.sentAt,
+    ...(cell.correlationId !== undefined ? { correlationId: cell.correlationId } : {}),
+    ...(cell.deliveredAt !== undefined ? { deliveredAt: cell.deliveredAt } : {}),
+  })
+
+/** Does `cell` match the (sanitized) `list` filter? Module-level so the port's
+ *  `list` body stays under the cognitive-complexity cap. */
+const matchesFilter = (
+  cell: Cell,
+  filter?: { from?: string; to?: string; kind?: MailboxMessageKind },
+): boolean => {
+  if (isString(filter?.from) && cell.from !== filter.from) return false
+  if (isString(filter?.to) && cell.to !== filter.to) return false
+  if (isKind(filter?.kind) && cell.kind !== filter.kind) return false
+  return true
+}
+
+/** A broadcast is "fully seen" once at least one distinct non-sender agent has
+ *  a cursor past it (it has served active readers; an entirely-unseen broadcast
+ *  stays undelivered). Module-level so callers stay under the complexity cap. */
+const broadcastSeen = (cell: Cell, cursors: Map<string, number>): boolean => {
+  if (cell.to !== BROADCAST) return false
+  for (const [agentId, cursor] of cursors) {
+    if (agentId !== cell.from && cursor >= cell.sentAt) return true
+  }
+  return false
+}
+
+/** Eviction ordering key: 0 = delivered (evict first), 1 = undelivered. */
+const deliveredRank = (cell: Cell, cursors: Map<string, number>): 0 | 1 =>
+  cell.deliveredAt !== undefined || broadcastSeen(cell, cursors) ? 0 : 1
+
+/** Reclaim cells past `maxRetained` (delivered-before-undelivered, oldest
+ *  `sentAt` first) and any older than `retentionMs`. Mutates `cells` in place.
+ *  Module-level so `createSubagentMailbox` stays under the complexity cap. */
+const evict = (
+  cells: Map<string, Cell>,
+  cursors: Map<string, number>,
+  maxRetained: number,
+  retentionMs: number,
+  t: number,
+): void => {
+  if (retentionMs > 0) {
+    for (const [id, c] of cells) {
+      if (t - c.sentAt > retentionMs) cells.delete(id)
+    }
+  }
+  if (cells.size <= maxRetained) return
+  const all = [...cells.values()].sort((a, b) => {
+    const ra = deliveredRank(a, cursors)
+    const rb = deliveredRank(b, cursors)
+    return ra !== rb ? ra - rb : a.sentAt - b.sentAt
+  })
+  let drop = cells.size - maxRetained
+  for (const c of all) {
+    if (drop <= 0) break
+    cells.delete(c.id)
+    drop--
+  }
+}
+
+/** Mark the picked cells delivered for `agentId` and advance the broadcast
+ *  cursor, returning the projected messages. DIRECT cells get a per-message
+ *  `deliveredAt` stamp; broadcast idempotency comes from advancing the agent's
+ *  cursor past the newest delivered `sentAt`. Module-level so `read` stays under
+ *  the complexity cap. */
+const markDelivered = (
+  picked: Cell[],
+  agentId: string,
+  cursors: Map<string, number>,
+  maxSeenSentAt: number,
+  t: number,
+): MailboxMessage[] => {
+  const out: MailboxMessage[] = []
+  for (const c of picked) {
+    if (c.to === agentId && c.deliveredAt === undefined) c.deliveredAt = t
+    out.push(toMessage(c))
+  }
+  if (maxSeenSentAt >= 0) {
+    const prev = cursors.get(agentId) ?? -1
+    if (maxSeenSentAt > prev) cursors.set(agentId, maxSeenSentAt)
+  }
+  return out
+}
+
+/** Reconstruct a mutable cell from a (possibly hostile) public message.
+ *  Returns null when the record is structurally unusable. */
+const cellFromMessage = (m: unknown): Cell | null => {
+  if (m === null || typeof m !== "object") return null
+  const rec = m as Partial<MailboxMessage>
+  if (!isKind(rec.kind)) return null
+  const correlationId = isString(rec.correlationId) ? rec.correlationId : undefined
+  const deliveredAt = finiteOrUndefined(rec.deliveredAt)
+  return {
+    id: isNonEmptyString(rec.id) ? rec.id : `msg_${randomUUID()}`,
+    from: isString(rec.from) ? rec.from : "",
+    to: isString(rec.to) ? rec.to : "",
+    kind: rec.kind,
+    body: isString(rec.body) ? rec.body : "",
+    ...(correlationId !== undefined ? { correlationId } : {}),
+    sentAt: finiteOrZero(rec.sentAt),
+    ...(deliveredAt !== undefined ? { deliveredAt } : {}),
+  }
+}
+
+export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): MailboxPort => {
+  const now = opts?.now ?? Date.now
+  const maxRetained =
+    typeof opts?.maxRetained === "number" &&
+    Number.isFinite(opts.maxRetained) &&
+    opts.maxRetained > 0
+      ? Math.floor(opts.maxRetained)
+      : DEFAULT_MAX_RETAINED
+  const retentionMs =
+    typeof opts?.retentionMs === "number" &&
+    Number.isFinite(opts.retentionMs) &&
+    opts.retentionMs > 0
+      ? opts.retentionMs
+      : DEFAULT_RETENTION_MS
+
+  /** Insertion order preserved by Map iteration; `id → Cell`. */
+  const cells = new Map<string, Cell>()
+  /** Per-agent broadcast read cursor: `agentId → lastReadAt (sentAt watermark)`.
+   *  A broadcast with `sentAt > cursor` is undelivered for that agent. */
+  const broadcastCursor = new Map<string, number>()
+
+  const clockNow = (): number => {
+    try {
+      const t = now()
+      return Number.isFinite(t) ? t : Date.now()
+    } catch {
+      return Date.now()
+    }
+  }
+
+  /** Selection predicate: is `cell` addressed to `agentId` and not-yet-seen? */
+  const isUndeliveredFor = (cell: Cell, agentId: string): boolean => {
+    if (cell.from === agentId) return false // never deliver to self
+    if (cell.to === agentId) return cell.deliveredAt === undefined
+    if (cell.to === BROADCAST) {
+      const cursor = broadcastCursor.get(agentId) ?? -1
+      return cell.sentAt > cursor
+    }
+    return false
+  }
+
+  /** Collect undelivered messages for `agentId` honoring `since` + `limit`. */
+  const collect = (
+    agentId: string,
+    opts2?: { limit?: number; since?: number },
+  ): { cells: Cell[]; maxSeenSentAt: number } => {
+    const since = finiteOrUndefined(opts2?.since)
+    const limit = finiteOrUndefined(opts2?.limit)
+    const out: Cell[] = []
+    let maxSeenSentAt = -1
+    for (const c of cells.values()) {
+      if (!isUndeliveredFor(c, agentId)) continue
+      if (since !== undefined && c.sentAt <= since) continue
+      out.push(c)
+      if (c.sentAt > maxSeenSentAt) maxSeenSentAt = c.sentAt
+    }
+    out.sort((a, b) => a.sentAt - b.sentAt)
+    if (limit !== undefined && limit >= 0 && out.length > limit) {
+      return { cells: out.slice(0, limit), maxSeenSentAt }
+    }
+    return { cells: out, maxSeenSentAt }
+  }
+
+  return {
+    send(init): MailboxMessage {
+      try {
+        const t = clockNow()
+        const correlationId = isString(init?.correlationId) ? init.correlationId : undefined
+        const cell: Cell = {
+          id: `msg_${randomUUID()}`,
+          from: isString(init?.from) ? init.from : "",
+          to: isString(init?.to) ? init.to : "",
+          kind: isKind(init?.kind) ? init.kind : "request",
+          body: isString(init?.body) ? init.body : "",
+          ...(correlationId !== undefined ? { correlationId } : {}),
+          sentAt: t,
+        }
+        cells.set(cell.id, cell)
+        evict(cells, broadcastCursor, maxRetained, retentionMs, t)
+        return toMessage(cell)
+      } catch {
+        // Best-effort message even on catastrophic failure (port contract).
+        return Object.freeze({
+          id: `msg_${randomUUID()}`,
+          from: "",
+          to: "",
+          kind: "request",
+          body: "",
+          sentAt: Date.now(),
+        })
+      }
+    },
+
+    read(agentId, opts2): readonly MailboxMessage[] {
+      try {
+        if (!isNonEmptyString(agentId)) return Object.freeze([])
+        const { cells: picked, maxSeenSentAt } = collect(agentId, opts2)
+        const out = markDelivered(picked, agentId, broadcastCursor, maxSeenSentAt, clockNow())
+        return Object.freeze(out)
+      } catch {
+        return Object.freeze([])
+      }
+    },
+
+    peek(agentId, opts2): readonly MailboxMessage[] {
+      try {
+        if (!isNonEmptyString(agentId)) return Object.freeze([])
+        const { cells: picked } = collect(agentId, opts2)
+        return Object.freeze(picked.map(toMessage))
+      } catch {
+        return Object.freeze([])
+      }
+    },
+
+    ack(messageId): MailboxMessage | null {
+      try {
+        if (!isNonEmptyString(messageId)) return null
+        const c = cells.get(messageId)
+        if (c === undefined) return null
+        if (c.deliveredAt === undefined) c.deliveredAt = clockNow()
+        return toMessage(c)
+      } catch {
+        return null
+      }
+    },
+
+    list(filter): readonly MailboxMessage[] {
+      try {
+        const out: MailboxMessage[] = []
+        for (const c of cells.values()) {
+          if (matchesFilter(c, filter)) out.push(toMessage(c))
+        }
+        return Object.freeze(out)
+      } catch {
+        return Object.freeze([])
+      }
+    },
+
+    pendingFor(agentId): number {
+      try {
+        if (!isNonEmptyString(agentId)) return 0
+        let n = 0
+        for (const c of cells.values()) {
+          if (isUndeliveredFor(c, agentId)) n++
+        }
+        return n
+      } catch {
+        return 0
+      }
+    },
+
+    toSnapshot(): MailboxSnapshot {
+      try {
+        return Object.freeze({
+          messages: Object.freeze([...cells.values()].map(toMessage)),
+        })
+      } catch {
+        return Object.freeze({ messages: Object.freeze([]) })
+      }
+    },
+
+    fromSnapshot(snap): void {
+      try {
+        // REPLACE, not merge.
+        cells.clear()
+        broadcastCursor.clear()
+        const messages = (snap as MailboxSnapshot | undefined)?.messages
+        if (!Array.isArray(messages)) return
+        for (const m of messages) {
+          const cell = cellFromMessage(m)
+          if (cell !== null) cells.set(cell.id, cell)
+        }
+      } catch {
+        // leave whatever survived; never throw
+      }
+    },
+  }
+}

@@ -61,6 +61,7 @@ import type { ShadowVerifyPort } from "./shadow-verify"
 import type { ActiveTurnState } from "./steering"
 import type { StopReasonPolicy } from "./stop-reason"
 import type { BackgroundSubagentScheduler } from "./subagent-background"
+import type { MailboxPort } from "./subagent-mailbox"
 import type { Submission } from "./submission"
 import type { SkillsBlock, SubagentBlock, WorkingStateBlock } from "./types/agent-capabilities"
 import type {
@@ -773,6 +774,14 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * the other.
    */
   subagentBackground?: { readonly scheduler: BackgroundSubagentScheduler }
+  /**
+   * ADR-0416 managed-subagent mailbox (Codex `multi_agents_v2.send_message`).
+   * When set, `buildSubagentMailboxBlock` registers the `subagent_send_message`
+   * tool bound to this port so agents can exchange messages (parent↔child,
+   * sibling↔sibling, broadcast) WITHOUT teardown. Absent ⇒ tool NOT registered
+   * (default-OFF, byte-identical for every legacy caller — RFC §1.2).
+   */
+  subagentMailbox?: MailboxPort
   /**
    * ADR-0223 auto-background after 2 s — Claude Code UX absorption. When set,
    * dispatch wraps each tool `execute()` with two-line `tickToolStart` /
@@ -1661,6 +1670,7 @@ export type FeaturesConfig = Pick<
   | "shadowOdb"
   | "shadowVerify"
   | "subagentBackground"
+  | "subagentMailbox"
   | "delegation"
   | "fork"
   | "onProgress"
