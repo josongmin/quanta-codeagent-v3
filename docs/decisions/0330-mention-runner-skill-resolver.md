@@ -1,7 +1,11 @@
 # ADR-0330 — Mention runner: skill resolver impl + injector composition
 
-- Status: Accepted (slice landed, default-OFF; AgentConfig wire-up
-  deferred to ADR-0327)
+- Status: **Superseded by ADR-0418** (the sync `createMentionInjector` /
+  `createSkillOnlyResolver` return-shapes are now async — `Promise<readonly
+  Message[]>` — so `@file` / `@symbol` resolvers can do I/O; the skill-only
+  semantics are otherwise unchanged).
+- Status (historical): Accepted (slice landed, default-OFF; AgentConfig
+  wire-up deferred to ADR-0327)
 - Date: 2026-05-27
 - Related: ADR-0325 (mention-injection slice — this ADR ships the
   resolver impl + production composition for it), ADR-0134 (`@/skill`

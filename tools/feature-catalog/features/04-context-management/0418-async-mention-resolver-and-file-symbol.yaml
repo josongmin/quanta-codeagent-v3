@@ -1,0 +1,112 @@
+id: async-mention-resolver-and-file-symbol
+title: Async mention resolver + @file / @symbol mention kinds (ADR-0418)
+section: 4
+subsystem: Mention-driven explicit context injection (5-kind, async resolver)
+order: 101
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+config_refs:
+  env:
+    - QUANTA_MENTION_FILE
+    - QUANTA_MENTION_SYMBOL
+    - QUANTA_MENTION_FILE_MAX_BYTES
+    - QUANTA_MENTION_FILE_TAIL_RATIO
+    - QUANTA_MENTION_SYMBOL_RESOLVER
+    - QUANTA_MENTION_SYMBOL_TIMEOUT_MS
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:cursor", "default-off"]
+depends_on: [codex-r2-typed-event-store]
+purpose: |
+  Supersedes ADR-0325 (3-kind sync) + ADR-0330 (sync runner). Extends the
+  mention enum to 5 kinds (skill | plugin | app | file | symbol) and flips
+  the resolver port + injector to ASYNC so the new kinds can do I/O.
+
+  Parser uses a DETERMINISTIC priority cascade on each `@<rest>` payload
+  (first match wins): slash → file; uppercase-start → symbol (with optional
+  one-level `.member`); lowercase-start + dot → file; lowercase-kebab →
+  skill. `@@app` and `plugin://name` keep their own alternatives. Examples:
+  `@./Foo`→file, `@Foo.bar`→symbol, `@a.b`→file, `@code-review`→skill.
+
+  `buildInjectionFragments` is async + parallel (`Promise.all`, per-mention
+  NO-THROW so one failure drops only that mention, input-order-stable
+  output, HARD kind dispatch). `@file` resolver = async fs read inside a
+  realpath + is-path-inside jail (binary sniff, 256 KiB default cap,
+  `tailRatio` head/tail split). `@symbol` resolver = injected LSP + semantic
+  lookup ports, `lsp|semantic|auto` priority (auto = LSP first, semantic
+  fallback), per-strategy timeout, NO-THROW on throw/reject/timeout.
+
+  Default-OFF: no production path imports the slice; zero file/symbol input
+  is byte-identical to the legacy 3-kind path. `AgentConfig.mentionInjector`
+  is now `Promise`-shaped; `AgentConfig.mentionInjection` carries the DI bag
+  (fileResolver / symbolResolver / maxFileBytes / tailRatio / symbolPriority
+  / symbolTimeoutMs).
+evidence:
+  code:
+    - src/agent/mention-injection/types.ts
+    - src/agent/mention-injection/parser.ts
+    - src/agent/mention-injection/resolver.ts
+    - src/agent/mention-injection/symbol-resolver.ts
+    - src/agent/mention-injection/index.ts
+    - src/agent/mention-runner/runner.ts
+    - src/agent/mention-runner/skill-resolver.ts
+    - src/agent/plugin-app-resolver/composite-resolver.ts
+    - src/agent/plugin-app-resolver/file-resolver.ts
+  adrs:
+    - docs/decisions/0418-async-mention-resolver-and-file-symbol.md
+    - docs/decisions/0325-mention-based-explicit-injection.md
+    - docs/decisions/0330-mention-runner-skill-resolver.md
+  tests:
+    unit:
+      - src/agent/mention-injection/__tests__/parser.hellgate.test.ts
+      - src/agent/mention-injection/__tests__/parser-file-symbol.hellgate.test.ts
+      - src/agent/mention-injection/__tests__/resolver.hellgate.test.ts
+      - src/agent/mention-injection/__tests__/resolver-file.hellgate.test.ts
+      - src/agent/mention-injection/__tests__/resolver-async.hellgate.test.ts
+      - src/agent/mention-injection/__tests__/symbol-resolver.hellgate.test.ts
+      - src/agent/mention-runner/__tests__/runner.hellgate.test.ts
+      - src/agent/mention-runner/__tests__/skill-resolver.hellgate.test.ts
+      - src/agent/plugin-app-resolver/__tests__/file-resolver.hellgate.test.ts
+      - src/agent/plugin-app-resolver/__tests__/composite-resolver.hellgate.test.ts
+      - src/agent/plugin-app-resolver/__tests__/composite-resolver-file.hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_MENTION_FILE
+    default: 'on'
+    purpose: 'Enable @file mention resolution (off ⇒ file mentions skipped).'
+  - name: QUANTA_MENTION_SYMBOL
+    default: 'on'
+    purpose: 'Enable @symbol mention resolution (off ⇒ symbol mentions skipped).'
+  - name: QUANTA_MENTION_FILE_MAX_BYTES
+    default: '100000'
+    purpose: 'File read cap before head/tail truncation (lib default 262144).'
+  - name: QUANTA_MENTION_FILE_TAIL_RATIO
+    default: '0.5'
+    purpose: 'Fraction of the cap reserved for the file tail (0..1; lib default 0 = head-only).'
+  - name: QUANTA_MENTION_SYMBOL_RESOLVER
+    default: 'auto'
+    purpose: '@symbol lookup strategy: lsp | semantic | auto (auto = LSP first, semantic fallback).'
+  - name: QUANTA_MENTION_SYMBOL_TIMEOUT_MS
+    default: '5000'
+    purpose: 'Per-strategy @symbol lookup timeout in ms (hung strategy ⇒ null / fallback).'
+deliberate_hold:
+  reason: |
+    Production wire (env → DI bag → createCompositeMentionResolver →
+    mentionInjector, plus the @symbol adapters over @/agent/lsp-bridge and
+    @/runner/assemble/search-index-backend) is deferred to a follow-up
+    wire-up ADR. The slice ships ports + logic + tests default-OFF.
+  promotion_path: |
+    A composition root reads QUANTA_MENTION_* env into AgentConfig.
+    mentionInjection, builds the symbol resolver over lsp-bridge +
+    search-index-backend, threads file/symbol resolvers into
+    createCompositeMentionResolver, and assigns the resulting async
+    createMentionInjector to AgentConfig.mentionInjector.
+notes: |
+  Cursor/IDE @-mention parity. Supersedes the 3-kind sync mention slice and
+  the dropped @file: explicit-prefix syntax. An uppercase-leading dotted
+  token like @README.md classifies as a SYMBOL (README.md) by the cascade —
+  documented behaviour, not a bug. Frozen at 5 kinds.

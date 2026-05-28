@@ -1,6 +1,9 @@
 # ADR-0325 — Mention-based explicit context injection
 
-- Status: Accepted (slice landed, default-OFF; wire-up deferred)
+- Status: **Superseded by ADR-0418** (the 3-kind enum + sync resolver port
+  are replaced by a 5-kind enum `skill|plugin|app|file|symbol` + an async
+  resolver port; the legacy 3-kind subset stays behaviourally identical).
+- Status (historical): Accepted (slice landed, default-OFF; wire-up deferred)
 - Date: 2026-05-27
 - Related: ADR-0320 (typed history event store — consumed via
   `@/memory/typed-event`), ADR-0321 (snapshot-diff producer — sibling
