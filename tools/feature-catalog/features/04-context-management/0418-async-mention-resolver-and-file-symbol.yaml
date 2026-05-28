@@ -49,11 +49,27 @@ purpose: |
   buildAgentConfigFromBase via idempotent installCodexR2Wires) both build via
   the shared builder, so @file + @symbol work on every surface.
 
-  Default-ON with GRACEFUL OMIT: an absent dep (no LSP anchor / no populated
-  index / no skill registry) leaves that kind unwired ⇒ null, never a
-  regression. Zero-mention input + every knob =off are byte-identical to the
-  legacy 3-kind path. `AgentConfig.mentionInjector` is `Promise`-shaped;
-  `AgentConfig.mentionInjection` carries the DI bag.
+  ADR-0423 PRODUCTION @symbol (closes ADR-0422's anchor hold): a
+  DETERMINISTIC LSP anchor synthesizer (`synthesizeLspAnchors`) walks cwd
+  breadth-first (entries sorted per directory) and takes the
+  lexicographically-first source file of each supported language — keyed by
+  server binary from the single lsp-bridge SERVERS table — as that
+  language's anchor. `createUnionLspSymbolLookup` then fans
+  `workspaceSymbol(name)` across every synthesized anchor and merges hits
+  (multi-language repo probes both servers). No scores, no thresholds. The
+  host-composition `buildMentionSymbolDeps` pairs this with the REAL
+  `@/runner` semantic backend (`selectIndexEmbedder` + `buildSemanticBackend`)
+  and feeds both ports to `buildDefaultMentionResolver` at BOTH call sites
+  (assemble.ts + mention-wire.ts), built LAZILY on first findSymbol so config
+  assembly stays synchronous. So production @Symbol now resolves (LSP anchored
+  → semantic fallback under `auto`) instead of unconditionally null.
+
+  Default-ON with GRACEFUL OMIT: an absent dep (no supported file ⇒ no anchor /
+  no populated index / no skill registry / language server not installed)
+  leaves that strategy answering null, never a regression. Zero-mention input
+  + every knob =off are byte-identical to the legacy 3-kind path.
+  `AgentConfig.mentionInjector` is `Promise`-shaped; `AgentConfig.mentionInjection`
+  carries the DI bag.
 evidence:
   code:
     - src/agent/mention-injection/types.ts
@@ -62,7 +78,9 @@ evidence:
     - src/agent/mention-injection/symbol-resolver.ts
     - src/agent/mention-injection/symbol-lookup-lsp.ts
     - src/agent/mention-injection/symbol-lookup-semantic.ts
+    - src/agent/mention-injection/anchor-synth.ts
     - src/agent/mention-injection/index.ts
+    - src/agent/lsp-bridge.ts
     - src/agent/mention-runner/runner.ts
     - src/agent/mention-runner/skill-resolver.ts
     - src/agent/mention-runner/default-resolver.ts
@@ -70,9 +88,11 @@ evidence:
     - src/agent/plugin-app-resolver/file-resolver.ts
     - src/apps/agent/assemble.ts
     - src/host/runtime/internal/mention-wire.ts
+    - src/host/runtime/internal/mention-symbol-deps.ts
   adrs:
     - docs/decisions/0418-async-mention-resolver-and-file-symbol.md
     - docs/decisions/0422-mention-wire-symbol-skill-cli.md
+    - docs/decisions/0423-mention-symbol-production-wire.md
     - docs/decisions/0325-mention-based-explicit-injection.md
     - docs/decisions/0330-mention-runner-skill-resolver.md
   tests:
@@ -85,6 +105,8 @@ evidence:
       - src/agent/mention-injection/__tests__/symbol-resolver.hellgate.test.ts
       - src/agent/mention-injection/__tests__/symbol-lookup-lsp.hellgate.test.ts
       - src/agent/mention-injection/__tests__/symbol-lookup-semantic.hellgate.test.ts
+      - src/agent/mention-injection/__tests__/anchor-synth.hellgate.test.ts
+      - src/host/runtime/internal/__tests__/mention-symbol-deps.hellgate.test.ts
       - src/agent/mention-runner/__tests__/runner.hellgate.test.ts
       - src/agent/mention-runner/__tests__/skill-resolver.hellgate.test.ts
       - src/agent/mention-runner/__tests__/default-resolver.hellgate.test.ts
@@ -124,9 +146,12 @@ notes: |
 
   ADR-0422 closed the ADR-0418 deliberate_hold: the env→builder→composite→
   mentionInjector wire is live on the CLI + every host-runtime surface (and
-  the unified-agent assemble surface). @symbol ships two graceful-null
-  adapters (LSP nav / semantic index). Honest residual: the LSP adapter is
-  graceful-null until a surface threads a language-server anchor file, and
-  @skill / the semantic strategy are wired by callers that thread a registry
-  / populated index (no heuristic scan, no empty-index misses at the
-  assemble/CLI layer).
+  the unified-agent assemble surface). ADR-0423 then closed ADR-0422's anchor
+  hold: production @symbol is now BACKED, not unconditionally null — the
+  deterministic anchor synthesizer supplies the LSP anchor (no surface needs to
+  thread one) and buildMentionSymbolDeps threads the real semantic backend, so
+  both the LSP and semantic strategies are wired at assemble + host-runtime.
+  Honest residual: LSP hits still require an installed language server (pyright
+  / typescript-language-server) — graceful-null without one; the semantic
+  strategy only hits once the search index has entries (QUANTA_INDEX). @skill
+  is still wired only by callers that thread a registry.
