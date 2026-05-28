@@ -33,13 +33,17 @@ import { loadEnvFiles } from "@/shared/env-files"
 
 loadEnvFiles([".env.dev", ".env.local", ".env"])
 
-import { buildSystemPrompt } from "@/agent"
+import { buildSystemPrompt, HookBus } from "@/agent"
 import { defaultDelegationRunner } from "@/agent/delegation-runner"
 import { defaultFocusChainTracker, type FocusChainPort } from "@/agent/focus-chain"
 import type { ForkSessionPort } from "@/agent/fork-session"
 import { defaultCheckpointBaseWire } from "@/agent/fork-session-wire"
 import { defaultIdentityProvider, type IdentityMode } from "@/agent/identity"
-import { type ObservabilityWireHandle, wireObservability } from "@/agent/observability-wire"
+import {
+  type ObservabilityHookBus,
+  type ObservabilityWireHandle,
+  wireObservability,
+} from "@/agent/observability-wire"
 import {
   fsBackedStickyModelStore,
   inMemoryStickyModelStore,
@@ -350,30 +354,86 @@ const resolveForkSession = (
 }
 
 /**
- * ADR-0404 — composition-root observability wire. Returns the wire handle
- * (with 4 ports + idempotent NO-THROW detach) when `QUANTA_OBSERVABILITY ===
+ * ADR-0415 — adapt a live {@link HookBus} to the duck-typed
+ * {@link ObservabilityHookBus} surface the wire consumes. The wire NEVER
+ * imports `@/agent/hooks` (slice fence), so the composition root owns the
+ * adapter.
+ *
+ * `HookBus.on(type, handler)` returns `this` (no public unsubscribe path —
+ * handlers are registered once at startup), so `subscribe()` returns a NO-OP
+ * detach closure. The wire's `handle.detach()` is idempotent + drops its own
+ * refs regardless; a no-op host unsubscribe is the documented contract (see
+ * `observability-wire/types.ts`). A throwing `on()` propagates so the wire's
+ * own try/catch degrades the subscription to inert (ports still populate).
+ */
+const toObservabilityHookBus = (bus: HookBus): ObservabilityHookBus => ({
+  subscribe: (event, handler) => {
+    bus.on(event, handler as never)
+    // hooks.ts exposes no `off()` — the registration is permanent for the
+    // process lifetime. handle.detach() drops the wire's local refs.
+    return () => undefined
+  },
+})
+
+/**
+ * ADR-0404 + ADR-0415 — composition-root observability wire. Returns the wire
+ * handle (4 ports + idempotent NO-THROW detach) when `QUANTA_OBSERVABILITY ===
  * "on"`; otherwise the noop handle (no port instances; no hook subscription).
  *
  * The helper is intentionally env-projecting (single canonical knob, strict
- * "on") so the wire itself stays env-agnostic. `hookBus` is omitted today —
- * AgentConfig has no first-class HookBus slot; a follow-up slice can adapt
- * the host's bus and pass it through. Until then, attribution is silently
- * SKIPPED while the 4 ports are still populated (objective + shadowVerify
- * slots are consumed by the existing wave-2 helpers; runLedger /
- * approvalStateMachine ride the wire handle for future consumers).
+ * "on") so the wire itself stays env-agnostic. ADR-0415 closes the deliberate
+ * Wave-3 hold: the optional `hookBus` (adapted from the surface's live
+ * {@link HookBus}) is forwarded so run-ledger-attribution actually subscribes
+ * to `post_tool_use` in production. Absent ⇒ ports still populate but
+ * attribution is silently inert (legacy Wave-3 behavior, preserved for callers
+ * that do not thread a bus).
  *
  * Default-OFF byte-identical: `QUANTA_OBSERVABILITY !== "on"` ⇒ noop handle
- * ⇒ both conditional spreads below see `undefined` ⇒ slots OMITTED ⇒
- * AgentConfig is byte-identical to the legacy path (RFC §1.2).
+ * ⇒ every conditional spread at the call site sees `undefined` ⇒ slots OMITTED
+ * ⇒ AgentConfig is byte-identical to the legacy path (RFC §1.2).
  */
-const resolveObservabilityWire = (env: NodeJS.ProcessEnv): ObservabilityWireHandle =>
+export const resolveObservabilityWire = (
+  env: NodeJS.ProcessEnv,
+  opts: { readonly hookBus?: HookBus } = {},
+): ObservabilityWireHandle =>
   wireObservability({
     enabled: env.QUANTA_OBSERVABILITY === "on",
     repoRoot: process.cwd(),
-    // hookBus omitted — AgentConfig has no first-class HookBus seam today.
-    // A follow-up slice can adapt the surface's HookBus via the duck-typed
-    // `ObservabilityHookBus` surface re-exported on the slice barrel.
+    // ADR-0415 — forward the adapted live bus so attribution subscribes to
+    // `post_tool_use`. Omitted ⇒ ports populate, attribution stays inert.
+    ...(opts.hookBus !== undefined ? { hookBus: toObservabilityHookBus(opts.hookBus) } : {}),
   })
+
+/**
+ * ADR-0415 — resolve the observability wire + project it into the conditional
+ * AgentConfig slot fragment in ONE call. When `QUANTA_OBSERVABILITY === "on"`,
+ * mints the canonical {@link HookBus} (the same bus the loop emits
+ * `post_tool_use` to), wires attribution onto it, and returns the four ports
+ * + the bus as `hooks`. Gate OFF ⇒ no bus is constructed and `slots` is `{}`
+ * (byte-identical default-OFF; `base.hooks` stays untouched for the knobs
+ * layer). Extracted from `buildBaseFromArgs` to keep that function under
+ * biome's cognitive-complexity cap. Every field is presence-only.
+ */
+const resolveObservabilitySlots = (
+  env: NodeJS.ProcessEnv,
+): Partial<
+  Pick<
+    AssembleRequest["base"],
+    "hooks" | "objective" | "runLedger" | "approvalStateMachine" | "shadowVerify"
+  >
+> => {
+  const bus = env.QUANTA_OBSERVABILITY === "on" ? new HookBus() : undefined
+  const wire = resolveObservabilityWire(env, bus !== undefined ? { hookBus: bus } : {})
+  return {
+    ...(wire.objective !== undefined ? { objective: wire.objective } : {}),
+    ...(wire.shadowVerify !== undefined ? { shadowVerify: wire.shadowVerify } : {}),
+    ...(wire.runLedger !== undefined ? { runLedger: wire.runLedger } : {}),
+    ...(wire.approvalStateMachine !== undefined
+      ? { approvalStateMachine: wire.approvalStateMachine }
+      : {}),
+    ...(bus !== undefined ? { hooks: bus } : {}),
+  }
+}
 
 /** ADR-0279 — composition-root automation slot. Returns `null` when
  *  `QUANTA_AUTOMATION !== "on"` (slot OMITTED; byte-identical legacy).
@@ -490,10 +550,13 @@ export const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["b
   // spawn wrapper; both reads share `resolveSandboxProfileFromEnv` so
   // they agree.
   const sandboxProfile = resolveSandboxProfileFromEnv(env)
-  // ADR-0404 — composition-root observability wire. Single invocation per
-  // surface entry (default-OFF: `QUANTA_OBSERVABILITY !== "on"` ⇒ noop handle,
-  // every spread below sees undefined ⇒ AgentConfig byte-identical legacy).
-  const observabilityWire = resolveObservabilityWire(env)
+  // ADR-0404 + ADR-0415 — composition-root observability slots. Single helper
+  // call: gate ON ⇒ mints the canonical HookBus (the same bus the loop emits
+  // `post_tool_use` to), wires attribution onto it, and returns the four ports
+  // + `hooks`. Gate OFF ⇒ `{}` (byte-identical legacy; the knobs layer still
+  // owns the `QUANTA_BENCH_HOOKS` bus). One spread keeps `buildBaseFromArgs`
+  // under biome's cognitive-complexity cap.
+  const observabilitySlots = resolveObservabilitySlots(env)
   // ADR-0236 — `--no-auto-background`: future hosts that wire `autoBackground`
   // by default can call `resolveAutoBackgroundOverride(p.noAutoBackground)` to
   // hard-force the slot OFF. Today no host defaults it on, so the flag has no
@@ -531,15 +594,11 @@ export const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["b
     // ADR-0279 — spread the automation slot conditionally (default-OFF;
     // `exactOptionalPropertyTypes` — no `undefined` literal on the config).
     ...(automationSlot !== null ? { automationEngine: automationSlot } : {}),
-    // ADR-0404 — composition-root observability wire. Default-OFF: when
-    // `QUANTA_OBSERVABILITY !== "on"` the handle is the shared NOOP_HANDLE
-    // (both fields undefined ⇒ slots OMITTED ⇒ byte-identical legacy).
-    ...(observabilityWire.objective !== undefined
-      ? { objective: observabilityWire.objective }
-      : {}),
-    ...(observabilityWire.shadowVerify !== undefined
-      ? { shadowVerify: observabilityWire.shadowVerify }
-      : {}),
+    // ADR-0404 + ADR-0415 — composition-root observability slots (objective +
+    // shadowVerify + the ADR-0414-promoted runLedger / approvalStateMachine +
+    // the canonical `hooks` bus attribution subscribed to). Default-OFF: `{}`
+    // when `QUANTA_OBSERVABILITY !== "on"` ⇒ AgentConfig byte-identical legacy.
+    ...observabilitySlots,
   }
 
   attachExecutionPlaneSlots(base, p)

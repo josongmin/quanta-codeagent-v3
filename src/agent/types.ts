@@ -1040,7 +1040,7 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   readonly objective?: ObjectivePort
   /**
-   * ADR-0414 — Run Ledger port slot (ADR-0395 substrate consumer wire).
+   * ADR-0415 — Run Ledger port slot (ADR-0395 substrate consumer wire).
    *
    * When set, the composition-root observability wire (ADR-0406) injects the
    * shared `RunLedgerPort` here so surface consumers (web-daemon
@@ -1052,7 +1052,7 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   readonly runLedger?: RunLedgerPort
   /**
-   * ADR-0414 — Approval state-machine port slot (ADR-0403 substrate consumer
+   * ADR-0415 — Approval state-machine port slot (ADR-0403 substrate consumer
    * wire). When set, the approval-gate wire (ADR-0407) records HITL approvals
    * here (attributing to Objective.blockers + Run Ledger.waiting) so the user
    * sees "why stopped / resume-from-step". Absent ⇒ legacy HITL passthrough,

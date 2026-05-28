@@ -10,7 +10,16 @@
  */
 
 import type { AgentConfig } from "@/agent"
-import { buildSystemPrompt } from "@/agent"
+import { buildSystemPrompt, HookBus } from "@/agent"
+import type { ApprovalStateMachinePort } from "@/agent/approval-state-machine"
+import type { ObjectivePort } from "@/agent/objective"
+import {
+  type ObservabilityHookBus,
+  type ObservabilityWireHandle,
+  wireObservability,
+} from "@/agent/observability-wire"
+import type { RunLedgerPort } from "@/agent/run-ledger"
+import type { ShadowVerifyPort } from "@/agent/shadow-verify"
 import { assembleAgentConfig } from "@/apps/agent/assemble"
 import { pickProvider, tryCreateLLM } from "@/llm"
 import type { PermissionContext } from "@/permission"
@@ -23,6 +32,79 @@ import {
 } from "@/sdk/runtime"
 import { StdoutStream } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
+
+/**
+ * ADR-0415 — `RuntimeFacade` widened with the four read-only observability
+ * ports so the web-daemon's ADR-0408 emitter can read live Objective /
+ * RunLedger / ApprovalStateMachine state WITHOUT reaching into the runtime
+ * internals (`@/sdk/runtime`'s `RuntimeFacade` interface stays untouched —
+ * the slice fence forbids mutating it). Every field is OPTIONAL: the daemon
+ * reads them defensively and the emitter no-ops when all are absent
+ * (default-OFF byte-identical when `QUANTA_OBSERVABILITY !== "on"`).
+ */
+export interface ObservableRuntimeFacade extends RuntimeFacade {
+  readonly objective?: ObjectivePort
+  readonly runLedger?: RunLedgerPort
+  readonly approvalStateMachine?: ApprovalStateMachinePort
+  readonly shadowVerify?: ShadowVerifyPort
+}
+
+/**
+ * ADR-0415 — attach the wire handle's four ports onto a `RuntimeFacade` as
+ * read-only getters proxied from the handle, returning the widened
+ * {@link ObservableRuntimeFacade}. Uses `Object.defineProperties` (NOT a
+ * shallow copy) so the original facade's prototype-bound methods
+ * (`createSession` / `close`) keep working. When the handle is the noop
+ * (gate OFF) every getter reads `undefined` ⇒ the emitter stays silent.
+ */
+export const attachObservabilityPorts = (
+  facade: RuntimeFacade,
+  handle: ObservabilityWireHandle,
+): ObservableRuntimeFacade =>
+  Object.defineProperties(facade as ObservableRuntimeFacade, {
+    objective: { get: () => handle.objective, enumerable: true },
+    runLedger: { get: () => handle.runLedger, enumerable: true },
+    approvalStateMachine: { get: () => handle.approvalStateMachine, enumerable: true },
+    shadowVerify: { get: () => handle.shadowVerify, enumerable: true },
+  })
+
+/**
+ * ADR-0415 — adapt a live {@link HookBus} to the duck-typed
+ * {@link ObservabilityHookBus} the wire consumes (slice fence: the wire never
+ * imports `@/agent/hooks`). `HookBus.on()` has no public unsubscribe, so the
+ * detach is a no-op; `handle.detach()` drops the wire's local refs regardless.
+ */
+const toObservabilityHookBus = (bus: HookBus): ObservabilityHookBus => ({
+  subscribe: (event, handler) => {
+    bus.on(event, handler as never)
+    return () => undefined
+  },
+})
+
+/**
+ * ADR-0415 — project the per-session observability wire into the conditional
+ * AgentConfig slot fragment. Extracted from the factory closure to keep that
+ * closure under biome's cognitive-complexity cap as the spread count grows.
+ * Pure: every field is presence-only (absent ⇒ slot omitted; default-OFF
+ * byte-identical under `exactOptionalPropertyTypes`).
+ */
+const observabilitySlots = (observability: {
+  readonly handle: ObservabilityWireHandle
+  readonly bus: HookBus | undefined
+}): Partial<
+  Pick<AgentConfig, "hooks" | "objective" | "runLedger" | "approvalStateMachine" | "shadowVerify">
+> => {
+  const { handle, bus } = observability
+  return {
+    ...(bus !== undefined ? { hooks: bus } : {}),
+    ...(handle.objective !== undefined ? { objective: handle.objective } : {}),
+    ...(handle.runLedger !== undefined ? { runLedger: handle.runLedger } : {}),
+    ...(handle.approvalStateMachine !== undefined
+      ? { approvalStateMachine: handle.approvalStateMachine }
+      : {}),
+    ...(handle.shadowVerify !== undefined ? { shadowVerify: handle.shadowVerify } : {}),
+  }
+}
 
 type InteractiveTurnDeps = Pick<
   RuntimeAgentConfigBase,
@@ -51,11 +133,38 @@ export const buildInteractiveTurnAssembler =
   }
 
 /**
+ * ADR-0404 + ADR-0415 — per-session observability wire for the web-daemon
+ * surface. Mints the canonical {@link HookBus} the loop emits `post_tool_use`
+ * to (the SAME bus run-ledger-attribution subscribes to) and stitches the four
+ * ports together. Default-OFF byte-identical: `QUANTA_OBSERVABILITY !== "on"`
+ * ⇒ `bus` is `undefined`, the wire is the shared noop handle, every port is
+ * absent ⇒ the session config + facade are byte-identical to the legacy path.
+ */
+const wireSessionObservability = (
+  env: Record<string, string | undefined>,
+  cwd: string,
+): { readonly handle: ObservabilityWireHandle; readonly bus: HookBus | undefined } => {
+  if (env.QUANTA_OBSERVABILITY !== "on") {
+    return { handle: wireObservability(), bus: undefined }
+  }
+  const bus = new HookBus()
+  const handle = wireObservability({
+    enabled: true,
+    repoRoot: cwd,
+    hookBus: toObservabilityHookBus(bus),
+  })
+  return { handle, bus }
+}
+
+/**
  * Build a `runtimeFactory` suitable for `WebDaemonConfig`. The LLM port is
  * resolved ONCE at boot (env-driven provider pick); each invocation of the
- * returned factory mints a fresh `RuntimeFacade` (= fresh session host).
+ * returned factory mints a fresh {@link ObservableRuntimeFacade} (= fresh
+ * session host) whose four observability getters proxy that session's wire
+ * handle (ADR-0415). The widened return type is structurally a `RuntimeFacade`
+ * so `WebDaemonConfig.runtimeFactory` accepts it unchanged.
  */
-export const buildProductionRuntimeFactory = (): (() => Promise<RuntimeFacade>) => {
+export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntimeFacade>) => {
   const env = process.env as Record<string, string | undefined>
   const provider = pickProvider(env)
   const llm = tryCreateLLM(provider, {}, env)
@@ -66,7 +175,7 @@ export const buildProductionRuntimeFactory = (): (() => Promise<RuntimeFacade>) 
     )
   }
 
-  return async (): Promise<RuntimeFacade> => {
+  return async (): Promise<ObservableRuntimeFacade> => {
     const cwd = process.cwd()
     const abort = new AbortController()
     const permission: PermissionContext = { mode: "default" }
@@ -80,6 +189,12 @@ export const buildProductionRuntimeFactory = (): (() => Promise<RuntimeFacade>) 
       ...(skillsDir !== undefined ? { dir: skillsDir } : {}),
       enabled: parseEnvFlag(env.QUANTA_SKILLS, true),
     })
+    // ADR-0415 — per-session observability wire. Gate OFF ⇒ noop handle +
+    // undefined bus ⇒ `observabilitySlots` returns `{}` (byte-identical legacy).
+    // Threading the live bus + promoted ports onto the session config makes the
+    // loop's dispatch emit onto the SAME bus attribution subscribed to, and the
+    // approval-gate wire read ONE unified model.
+    const observability = wireSessionObservability(env, cwd)
     const base: Omit<AgentConfig, "modePolicy" | "budgetMeter"> = {
       llm,
       registry: new ToolRegistry(buildDefaultTools()),
@@ -92,6 +207,7 @@ export const buildProductionRuntimeFactory = (): (() => Promise<RuntimeFacade>) 
       signal: abort.signal,
       ...(subagent !== undefined ? { subagent } : {}),
       ...(skills !== undefined ? { skills } : {}),
+      ...observabilitySlots(observability),
     }
     const turnAssembler = buildInteractiveTurnAssembler(base)
     const { runtime } = await createRuntimeFromAgentConfigBase({
@@ -102,6 +218,8 @@ export const buildProductionRuntimeFactory = (): (() => Promise<RuntimeFacade>) 
       idMeta: undefined,
       shutdown: async () => undefined,
     })
-    return runtime
+    // ADR-0415 — expose the wire ports on the facade so the daemon's emitter
+    // reads live state. Gate OFF ⇒ getters read undefined ⇒ emitter silent.
+    return attachObservabilityPorts(runtime, observability.handle)
   }
 }
