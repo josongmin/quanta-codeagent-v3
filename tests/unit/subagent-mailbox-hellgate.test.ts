@@ -371,7 +371,9 @@ describe("subagent mailbox — wire (ADR-0416)", () => {
   test("(29) builder returns the tool bound to the SAME port instance", async () => {
     const port = createSubagentMailbox()
     const tools = buildSubagentMailboxBlock(baseCfg({ subagentMailbox: port }))
-    expect(tools.length).toBe(1)
+    // ADR-0419 added a sibling read tool, so the builder now returns 2; the
+    // send tool is still present and bound to the SAME port instance.
+    expect(tools.some((t) => t.name === "subagent_send_message")).toBe(true)
     const tool = findTool(tools, "subagent_send_message")
     await drain(tool, { to: "child", kind: "request", body: "via-builder" })
     // the SAME port observes the send

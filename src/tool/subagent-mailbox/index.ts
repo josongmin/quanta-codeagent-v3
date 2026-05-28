@@ -1,32 +1,33 @@
-/** ADR-0416 — Subagent mailbox LLM tool (`subagent_send_message`) wired to the
- *  ADR-0416 `MailboxPort`.
+/** ADR-0416 / ADR-0419 — Subagent mailbox LLM tools (`subagent_send_message`
+ *  + `subagent_read_messages`) wired to the ADR-0416 `MailboxPort`.
  *
- *  This slice exposes the inter-agent mailbox SEND surface to the LLM so a
- *  running agent can message its parent, a sibling, or broadcast to every other
- *  agent WITHOUT teardown — closing the structural gap that quanta subagents are
- *  fork-and-forget. Codex `multi_agents_v2.send_message(agent_id, msg)` parity.
+ *  This slice exposes the inter-agent mailbox SEND + READ surfaces to the LLM so
+ *  a running agent can message its parent, a sibling, or broadcast to every other
+ *  agent WITHOUT teardown — and then POLL its own inbox for incoming mail —
+ *  closing the structural gap that quanta subagents are fork-and-forget. Codex
+ *  `multi_agents_v2.send_message(agent_id, msg)` parity.
  *
- *  ONE tool, one closed port:
- *    - `subagent_send_message` — enqueue a message into the mailbox.
+ *  TWO tools, one closed port:
+ *    - `subagent_send_message`  — enqueue a message into the mailbox (ADR-0416).
+ *    - `subagent_read_messages` — drain / peek the caller's inbox (ADR-0419,
+ *      closes the ADR-0416 read deferral).
  *
- *  NO READ tool THIS WAVE: incoming messages are surfaced to a recipient via
- *  the existing `task_output` summary / child-seed channels (ADR documents this
- *  deferral). The send surface lands first because it is the strictly-additive
- *  half — a recipient that never polls simply leaves the message unread (the
- *  store retains/evicts it).
+ *  Sender / reader id: derived from `ctx`. `ToolContext` carries no session id
+ *  today, so we derive a stable-per-depth label from `ctx.depth` (root = "root",
+ *  child = "agent@depth-N"). Both tools share the SAME `senderId` helper so the
+ *  agent that sent under a depth-derived label reads its own inbox under that
+ *  identical label. The literal target `"parent"` (send only) is rewritten to the
+ *  parent's derived label. This keeps the tool slice free of any `@/agent` import.
  *
- *  Sender id: derived from `ctx`. `ToolContext` carries no session id today, so
- *  we derive a stable-per-depth sender label from `ctx.depth` (root = "root",
- *  child = "agent@depth-N"). The literal target `"parent"` is rewritten to the
- *  parent's derived label so a child can address its parent without knowing the
- *  parent's id. This keeps the tool slice free of any `@/agent` import.
- *
- *  HITL tier: `pre-approval-ok` (information-class — no FS / shell / network
- *  side effect; the only effect is an in-memory enqueue).
+ *  HITL tier: `pre-approval-ok` for BOTH (information-class — no FS / shell /
+ *  network side effect; send only enqueues in memory, read only polls memory).
+ *  `subagent_read_messages` is additionally `isReadOnly: true` (a poll mutates
+ *  only the in-memory delivery cursor, never observable state the loop snapshots).
  *
  *  NO-THROW: zod `safeParse` catches malformed input at the boundary; the port
  *  call is wrapped in try/catch so a hostile throwing port surfaces as
- *  `{ ok: false, output: "send failed: ..." }` instead of bubbling past the loop.
+ *  `{ ok: false, output: "send failed: ..." }` / `"read failed: ..."` instead of
+ *  bubbling past the loop.
  *
  *  SLICE FENCE: imports `@/agent/subagent-mailbox` (the closed ADR-0416
  *  substrate) for typed `MailboxPort` + `MailboxMessage`, `../types` (Tool /
@@ -130,9 +131,75 @@ const buildSubagentSendMessage = (port: MailboxPort): Tool<SubagentSendMessageIn
   },
 })
 
-/** Build the subagent-mailbox tool wired to a single `MailboxPort`. Returned as
+// ─────────────────────────────────────────────────────────────────────────────
+// ADR-0419 — READ side (`subagent_read_messages`). Closes the ADR-0416 deferral.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const READ_MODE_ENUM = ["read", "peek"] as const
+
+export const subagentReadMessagesSchema = z.object({
+  mode: z
+    .enum(READ_MODE_ENUM)
+    .optional()
+    .describe('"read" marks delivered (default); "peek" leaves undelivered.'),
+  limit: z.number().int().positive().optional().describe("Max messages to return (oldest-first)."),
+})
+export type SubagentReadMessagesInput = z.infer<typeof subagentReadMessagesSchema>
+
+/** Render one inbox message to a concise model-facing line:
+ *  `from→to [kind] body (id, correlationId?)`. */
+const renderMessage = (m: MailboxMessage): string => {
+  const tail = m.correlationId !== undefined ? `(${m.id}, ${m.correlationId})` : `(${m.id})`
+  return `${m.from}→${m.to} [${m.kind}] ${m.body} ${tail}`
+}
+
+/** Render the full inbox view: messages oldest-first (the port already returns
+ *  them sorted by `sentAt`) plus a trailing `pending: <n>` line. Empty inbox ⇒
+ *  the literal `"(no messages)"` followed by the pending line. */
+const renderInbox = (messages: readonly MailboxMessage[], pending: number): string => {
+  const body = messages.length === 0 ? "(no messages)" : messages.map(renderMessage).join("\n")
+  return `${body}\npending: ${pending}`
+}
+
+const buildSubagentReadMessages = (port: MailboxPort): Tool<SubagentReadMessagesInput> => ({
+  name: "subagent_read_messages",
+  description:
+    "Poll your own inbox for messages other agents sent you (or broadcast). " +
+    '`mode`: "read" (default) returns undelivered messages addressed to you and ' +
+    'MARKS them delivered so a re-read is idempotent; "peek" returns the same ' +
+    "set WITHOUT marking (leaves them pending). `limit` caps the oldest-first " +
+    "result. Each line is `from→to [kind] body (id, correlationId?)`; a trailing " +
+    "`pending: <n>` line reports how many messages remain undelivered to you " +
+    "AFTER this call. Your identity is derived from your subagent depth (root / " +
+    "agent@depth-N), matching subagent_send_message.",
+  inputSchema: subagentReadMessagesSchema,
+  isReadOnly: () => true,
+  isConcurrencySafe: () => false,
+  hitlTier: () => "pre-approval-ok",
+  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    const parsed = subagentReadMessagesSchema.safeParse(input)
+    if (!parsed.success) {
+      yield { type: "result", result: errResult(`invalid input: ${parsed.error.message}`) }
+      return
+    }
+    try {
+      const agentId = senderId(ctx)
+      const mode = parsed.data.mode ?? "read"
+      const opts = parsed.data.limit !== undefined ? { limit: parsed.data.limit } : undefined
+      const messages = mode === "peek" ? port.peek(agentId, opts) : port.read(agentId, opts)
+      const pending = port.pendingFor(agentId)
+      yield { type: "result", result: { ok: true, output: renderInbox(messages, pending) } }
+    } catch (e) {
+      yield { type: "result", result: errResult(`read failed: ${errMessage(e)}`) }
+    }
+  },
+})
+
+/** Build the subagent-mailbox tools wired to a single `MailboxPort`. Returned as
  *  a stable array so the tier-1 composer can spread it uniformly (mirrors
- *  `objectiveTools` / `subagentBgTools` shape). */
+ *  `objectiveTools` / `subagentBgTools` shape). Both the SEND (ADR-0416) and READ
+ *  (ADR-0419) tools share the SAME port instance and the SAME id-derivation. */
 export const subagentMailboxTools = (port: MailboxPort): Tool[] => [
   buildSubagentSendMessage(port) as Tool,
+  buildSubagentReadMessages(port) as Tool,
 ]

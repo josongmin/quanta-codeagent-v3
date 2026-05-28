@@ -1,8 +1,10 @@
 /**
- * Tier-1 per-subsystem builder: SUBAGENT MAILBOX block (ADR-0416).
+ * Tier-1 per-subsystem builder: SUBAGENT MAILBOX block (ADR-0416 + ADR-0419).
  *
- * Returns the `subagent_send_message` tool when `config.subagentMailbox` is
- * wired; empty array otherwise.
+ * Returns BOTH the `subagent_send_message` (ADR-0416, SEND) and
+ * `subagent_read_messages` (ADR-0419, READ — closes the ADR-0416 read deferral)
+ * tools when `config.subagentMailbox` is wired; empty array otherwise. The two
+ * tools share the SAME `MailboxPort` instance via `subagentMailboxTools(port)`.
  *
  * DEFAULT-OFF: `config.subagentMailbox` absent ⇒ this builder returns [], so the
  * loop sees no extra tools and the ToolRegistry stays byte-identical. Mirrors
@@ -18,7 +20,7 @@ import type { Tool } from "@/tool"
 import { subagentMailboxTools } from "@/tool/subagent-mailbox"
 import type { AgentConfig } from "../types"
 
-/** Build the subagent-mailbox tool when `config.subagentMailbox` is wired. */
+/** Build the subagent-mailbox tools when `config.subagentMailbox` is wired. */
 export const buildSubagentMailboxBlock = (config: AgentConfig): Tool[] => {
   const port = config.subagentMailbox
   if (port === undefined) return []
