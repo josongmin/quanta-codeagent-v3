@@ -126,19 +126,22 @@ const buildContextEventsProducer = (
 /** Build the inline mention-injector closure. Parses the user-input text,
  *  resolves fragments through the resolver, builds inject-messages, and
  *  (when `store` is present) emits skill events to the typed-history
- *  store. NO-THROW envelope at the closure-entry boundary. */
+ *  store. NO-THROW envelope at the closure-entry boundary.
+ *
+ *  ADR-0418: `buildInjectionFragments` is async (file / symbol I/O), so this
+ *  closure is async and `cfg.mentionInjector` is `Promise`-shaped. */
 const buildMentionInjector = (
   resolver: MentionResolverPort,
   store: TypedHistoryEventStore | undefined,
   sessionId: string | undefined,
   now: () => number,
-): ((userInputText: string) => readonly Message[]) => {
+): ((userInputText: string) => Promise<readonly Message[]>) => {
   let turnSeq = 0
-  return (userInputText: string): readonly Message[] => {
+  return async (userInputText: string): Promise<readonly Message[]> => {
     try {
       const mentions = parseMentions(userInputText)
       if (mentions.length === 0) return []
-      const fragments = buildInjectionFragments(mentions, resolver)
+      const fragments = await buildInjectionFragments(mentions, resolver)
       if (fragments.length === 0) return []
       if (store !== undefined) {
         turnSeq++

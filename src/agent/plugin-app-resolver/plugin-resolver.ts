@@ -67,7 +67,7 @@ const safeLookup = (
 export const createPluginResolver = (
   registry?: PluginRegistryPort,
 ): MentionResolverPort["resolvePlugin"] => {
-  return (target: string) => {
+  return async (target: string) => {
     if (typeof target !== "string" || target.length === 0) return null
     const manifest = safeLookup(registry, target)
     if (manifest === null) return null

@@ -57,7 +57,7 @@ const safeLookup = (
 export const createSkillResolver = (
   skills?: SkillRegistryReadOnly,
 ): MentionResolverPort["resolveSkill"] => {
-  return (target: string) => {
+  return async (target: string) => {
     if (typeof target !== "string" || target.length === 0) return null
     const entry = safeLookup(skills, target)
     if (entry === null) return null

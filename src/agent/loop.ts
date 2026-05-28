@@ -922,19 +922,23 @@ const resolveContextEventsForTurn = (
   }
 }
 
-/** ADR-0327 — invoke the optional mention-injector with NO-THROW. The runner
- *  is fed the LAST user-role text content in working memory (the model's
- *  current prompt). Empty or non-user tail ⇒ runner not called, empty
- *  array returned. A thrown runner returns to "no splice" same as absent. */
-const resolveMentionInjectionMessages = (
+/** ADR-0327 / ADR-0418 — invoke the optional mention-injector with NO-THROW.
+ *  The runner is fed the LAST user-role text content in working memory (the
+ *  model's current prompt). Empty or non-user tail ⇒ runner not called, empty
+ *  array returned. A thrown / rejected runner returns to "no splice" same as
+ *  absent.
+ *
+ *  ADR-0418: the runner is async (file / symbol mentions do I/O). We `await`
+ *  the result here; the surrounding try/catch also absorbs a rejected promise. */
+const resolveMentionInjectionMessages = async (
   config: AgentConfig,
   wm: WorkingMemory<Message>,
-): readonly Message[] => {
+): Promise<readonly Message[]> => {
   if (config.mentionInjector === undefined) return []
   const userText = latestUserTextFromWm(wm)
   if (userText === undefined || userText.length === 0) return []
   try {
-    return config.mentionInjector(userText)
+    return await config.mentionInjector(userText)
   } catch {
     return []
   }
@@ -1104,7 +1108,7 @@ const prepareTurnContext = async (
   // resulting events / messages ride the same call. NO-THROW: a misconfigured
   // producer must not break the turn — failures degrade to "no splice".
   const contextEvents = resolveContextEventsForTurn(config)
-  const mentionMessages = resolveMentionInjectionMessages(config, wm)
+  const mentionMessages = await resolveMentionInjectionMessages(config, wm)
   // ADR-0346 — per-turn plugin activation. Mirrors the same parse path
   // mention-injection uses (last user-role text in wm), passes the parsed
   // mentions through `cfg.activatePlugins` (ADR-0340), and unions the

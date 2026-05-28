@@ -1535,12 +1535,14 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    *  cannot break the turn. Absent / empty ⇒ no splice (byte-identical). */
   contextEventsForTurn?: () => readonly import("@/agent/context-change").ContextEvent[]
 
-  /** ADR-0325 — mention-injection runner. When set, the loop extracts the
-   *  latest user-role text content and invokes the runner; the returned
-   *  messages are forwarded to `mentionInjectionMessages`. NO-THROW
-   *  invariant: a thrown error is logged and converted to `[]`. Absent ⇒ no
-   *  parse, no injection (byte-identical). */
-  mentionInjector?: (userInputText: string) => readonly import("@/llm").Message[]
+  /** ADR-0325 / ADR-0418 — mention-injection runner. When set, the loop
+   *  extracts the latest user-role text content, `await`s the runner, and
+   *  forwards the returned messages to `mentionInjectionMessages`. ASYNC
+   *  (ADR-0418 supersedes ADR-0325's sync shape) so `@file` / `@symbol`
+   *  resolvers can do I/O. NO-THROW invariant: a thrown / rejected runner is
+   *  converted to `[]`. Absent ⇒ no parse, no injection (byte-identical). */
+  mentionInjector?: (userInputText: string) => Promise<readonly import("@/llm").Message[]>
+
 
   /** ADR-0324 — typed compaction-event emitter. Called when a proactive
    *  (top-of-turn `maybeCompact`) compaction succeeds. The callback is

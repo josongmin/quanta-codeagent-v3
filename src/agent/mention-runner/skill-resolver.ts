@@ -1,7 +1,7 @@
 /**
- * ADR-0330 — Skill-only `MentionResolverPort` impl.
+ * ADR-0330 / ADR-0418 — Skill-only `MentionResolverPort` impl (async).
  *
- * Builds a `MentionResolverPort` (ADR-0325) where:
+ * Builds a `MentionResolverPort` (ADR-0325 + ADR-0418) where:
  *
  *   - `resolveSkill(target)` consults the injected
  *     {@link SkillRegistryReadOnly}. Hit ⇒ `{ bodyText: firstLine }`.
@@ -10,11 +10,20 @@
  *     parity with `src/agent/prompt.ts`'s active-skills block.
  *
  *   - `resolvePlugin(target)` ALWAYS returns `null`. Frozen by
- *     ADR-0330 — plugin manifest discovery is a future ADR.
+ *     ADR-0330 — plugin manifest discovery is the composite resolver.
  *
  *   - `resolveApp(target)` ALWAYS returns `null`. Frozen by ADR-0330 —
- *     the "app" concept requires a quanta surface-model mapping that
- *     is a separate ADR.
+ *     the "app" concept requires a quanta surface-model mapping.
+ *
+ *   - `resolveFile(target)` ALWAYS returns `null`. ADR-0418 negative
+ *     invariant — caller wires a file resolver explicitly (composite).
+ *
+ *   - `resolveSymbol(target)` ALWAYS returns `null`. ADR-0418 negative
+ *     invariant — caller wires a symbol resolver explicitly (composite).
+ *
+ * Async: every method returns `Promise<…>` to match the ADR-0418 port
+ * shape. The underlying skill registry is sync (in-memory lookup) — we
+ * bridge the sync core to the async port (no artificial latency).
  *
  * NO-THROW: every method swallows registry exceptions and returns
  * `null`. Belt-and-suspenders since {@link buildInjectionFragments}
@@ -77,16 +86,23 @@ const safeLookup = (
  */
 export const createSkillOnlyResolver = (skills?: SkillRegistryReadOnly): MentionResolverPort => {
   return {
-    resolveSkill(target: string) {
+    async resolveSkill(target: string) {
       const entry = safeLookup(skills, target)
       if (entry === null) return null
       return { bodyText: firstLineOf(entry.description) }
     },
-    // Frozen by ADR-0330 — see file header.
-    resolvePlugin(_target: string) {
+    // Frozen by ADR-0330 — composite resolver closes plugin / app.
+    async resolvePlugin(_target: string) {
       return null
     },
-    resolveApp(_target: string) {
+    async resolveApp(_target: string) {
+      return null
+    },
+    // Frozen by ADR-0418 negative invariant — caller wires explicitly.
+    async resolveFile(_target: string) {
+      return null
+    },
+    async resolveSymbol(_target: string) {
       return null
     },
   }

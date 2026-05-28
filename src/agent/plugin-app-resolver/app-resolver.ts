@@ -46,7 +46,7 @@ const bodyTextFrom = (descriptor: AppDescriptor): string => {
  *                  resolves to `null` (skipped).
  */
 export const createAppResolver = (catalog?: AppCatalogPort): MentionResolverPort["resolveApp"] => {
-  return (target: string) => {
+  return async (target: string) => {
     if (typeof target !== "string" || target.length === 0) return null
     const descriptor = safeLookup(catalog, target)
     if (descriptor === null) return null
