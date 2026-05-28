@@ -1131,6 +1131,7 @@
         "!tests/unit/auth/auth-ui.test.ts",
         "!tests/unit/dotenv.test.ts",
         "!tests/unit/env-knob-branches.test.ts",
+        "!tests/unit/build-memory-config-delegation-hellgate.test.ts",
         "!tests/integration/session-ux-e2e.test.ts",
         "!tests/integration/session-chaos-and-attack.test.ts",
         "!tests/integration/session-stress-and-concurrent.test.ts",
