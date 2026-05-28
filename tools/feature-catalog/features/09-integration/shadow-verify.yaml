@@ -1,0 +1,54 @@
+id: shadow-verify
+title: ADR-0396 Shadow Verify — apply-before-show in a scratch overlay (Wave 1 port + runner)
+section: 9
+subsystem: Pre-apply verification (shadow overlay)
+order: 396
+maturity: L2
+status: new
+ui_surfaces: [none]
+monitoring: n-a
+modes: [n-a]
+configurable: none
+owners: ["@songmin"]
+labels: [surface:core]
+depends_on: []
+purpose: |
+  Multi-file edits change UX more by PRE-APPLY VERIFICATION than by the proposal
+  itself. Closed ShadowVerifyPort + DI runner that: opens an isolated SCRATCH
+  overlay (never the real workspace), applies the opaque patch (V4A/unified diff),
+  runs requested lint/typecheck/targeted-test checks there, and returns failing
+  diagnostics annotated by source — so the agent can show "fixed it AND here's
+  where it breaks" before touching real files. ok = applied && no error-severity
+  diagnostic (warning/info surface but don't fail). NO-THROW to caller (every dep
+  call wrapped; throw → error diag). Scratch ALWAYS disposed in finally (dispose
+  failure swallowed; no-leak proven by dispose-count assertion). AbortSignal
+  honored (pre-abort short-circuits; mid-flight abort stops remaining checks;
+  signal threaded to open/apply/run). Wave 1 = port + runner with INJECTED
+  scratch/applier/checker ports satisfied by fakes; default-OFF, nothing wired.
+  Wave 2 wires real git-worktree scratch + V4A applier + LSP-diagnostics checker
+  adapters + loop / LLM-tool registration.
+evidence:
+  code:
+    - src/agent/shadow-verify/types.ts
+    - src/agent/shadow-verify/runner.ts
+    - src/agent/shadow-verify/index.ts
+  adrs: [396]
+  tests:
+    unit:
+      - tests/unit/shadow-verify-hellgate.test.ts
+knobs: []
+deliberate_hold:
+  reason: |
+    Wave 1 ships the closed port contract + the dependency-injected runner only.
+    The scratch/applier/checker are injected ports satisfied by fakes in tests;
+    no real git-worktree provider, V4A applier, or LSP-diagnostics adapter exists
+    yet, and the slice is not wired into the loop or registered as an LLM tool.
+  promotion_path: |
+    Wave 2 (separate ADR): real ShadowScratchPort (git worktree) + ShadowApplyPort
+    (V4A/unified-diff applier) + ShadowCheckPort (LSP diagnostics + targeted test
+    runner) adapters, then loop / LLM-tool wiring with patch-annotated diagnostic
+    rendering. Promote to L3+ once an end-to-end wire exists.
+notes: |
+  TDD RED→GREEN→REFACTOR. 22 hellgate cases (HELL-SV-01..20) / 80 expects.
+  Slice fence: NO imports from @/agent core, @/apps, @/lsp, @/tool, @/patch,
+  @/runtime — pure orchestration over injected ports. tsc 0 new / biome 0.
