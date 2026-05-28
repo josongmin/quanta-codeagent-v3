@@ -55,8 +55,36 @@ const schema = z.object({
 
 type Input = z.infer<typeof schema>
 
-const MAX_OUTPUT = 30_000
+/**
+ * ADR-0406 — bash no longer head-only-truncates its own output.
+ *
+ * The previous `MAX_OUTPUT = 30_000` head-only slice was applied INSIDE bash
+ * before the registry's authoritative head+tail `capToolOutput` (default
+ * 200 K via `DEFAULT_TOOL_OUTPUT_MAX`) ever saw the result. That meant:
+ *   - the registry's head+tail layer had nothing left to cut (bash had
+ *     already discarded the tail), so determinator-bearing tails (errors,
+ *     exit summaries) were silently lost;
+ *   - the truncation message format was bash-specific (`(truncated, N more
+ *     chars)`), divergent from the registry's `<persisted-output>` wrapper
+ *     that the rest of the toolchain emits.
+ *
+ * Foreground (`formatRunBody`) and bg-completed (`buildBackgroundCompletedResult`)
+ * paths now return the raw stdout/stderr body verbatim. The registry caps
+ * via head+tail, persisting the full payload to `.quanta/tool-output/<uuid>.txt`
+ * when over budget.
+ *
+ * Memory note: the underlying `runShell` call already buffers stdout/stderr
+ * in memory; removing the post-buffering slice is memory-neutral. The
+ * background placeholder path (`buildBackgroundPlaceholderResult`) keeps its
+ * TAIL-only `tailMaxOutput` cap because it samples an in-flight, unbounded
+ * stream — semantically distinct from a completed buffer.
+ */
 const CMD_PREVIEW = 80
+/** Tail-only cap for the in-flight bg PLACEHOLDER snapshot (not the
+ *  completed result). Streaming child processes can grow without bound, so
+ *  the placeholder samples the most-recent {@link MAX_BG_PLACEHOLDER_OUTPUT}
+ *  bytes only. Completed bodies bypass this cap and delegate to the registry. */
+const MAX_BG_PLACEHOLDER_OUTPUT = 30_000
 /** Local stderr-tail cap on `evidence.stderr`. Dispatch re-trims to its own
  *  smaller `STDERR_TAIL_CAP` (2000) as a defense-in-depth backstop, so this
  *  cap only bounds the per-tool attachment size. */
@@ -193,17 +221,18 @@ const buildPerCallWrap =
     }
   }
 
-/** Format the combined stdout/stderr body + status banner. */
+/** Format the combined stdout/stderr body + status banner.
+ *
+ *  ADR-0406: no length cap here. The registry's `capToolOutput` is the single
+ *  authoritative truncator (head + tail, persists overflow). Bash returns the
+ *  buffered body verbatim. */
 const formatRunBody = (r: {
   stdout: string
   stderr: string
   exitCode: number
   timedOut: boolean
 }): { readonly status: string; readonly body: string } => {
-  let body = [r.stdout, r.stderr].filter(Boolean).join("\n").trimEnd()
-  if (body.length > MAX_OUTPUT) {
-    body = `${body.slice(0, MAX_OUTPUT)}\n… (truncated, ${body.length - MAX_OUTPUT} more chars)`
-  }
+  const body = [r.stdout, r.stderr].filter(Boolean).join("\n").trimEnd()
   const status = r.timedOut ? "timed out" : r.exitCode === 0 ? "exit 0" : `exit ${r.exitCode}`
   return { status, body }
 }
@@ -215,8 +244,10 @@ const formatRunBody = (r: {
  *  prevents. Keep this in sync with the runtime default. */
 const DEFAULT_BG_TIMEOUT_MS = 120_000
 
-/** Tail-truncate a buffer to ≤MAX_OUTPUT. */
-const tailMaxOutput = (s: string): string => (s.length > MAX_OUTPUT ? s.slice(-MAX_OUTPUT) : s)
+/** Tail-truncate the in-flight placeholder buffer. Streaming-only — completed
+ *  bodies delegate to the registry's head+tail `capToolOutput`. */
+const tailMaxOutput = (s: string): string =>
+  s.length > MAX_BG_PLACEHOLDER_OUTPUT ? s.slice(-MAX_BG_PLACEHOLDER_OUTPUT) : s
 
 /** Build the bg-placeholder result when the deadline elapsed and the process
  *  is still running. */
@@ -243,17 +274,18 @@ const buildBackgroundPlaceholderResult = (
   }
 }
 
-/** Build the final result when the bg shell completed before the deadline. */
+/** Build the final result when the bg shell completed before the deadline.
+ *
+ *  ADR-0406: no length cap here. The registry's `capToolOutput` truncates
+ *  oversized bodies with head+tail and persists the full payload to a
+ *  spill file. */
 const buildBackgroundCompletedResult = (snap: {
   status: string
   stdout: string
   stderr: string
   exitCode: number | null
 }): ToolEvent => {
-  let body = [snap.stdout, snap.stderr].filter(Boolean).join("\n").trimEnd()
-  if (body.length > MAX_OUTPUT) {
-    body = `${body.slice(0, MAX_OUTPUT)}\n… (truncated, ${body.length - MAX_OUTPUT} more chars)`
-  }
+  const body = [snap.stdout, snap.stderr].filter(Boolean).join("\n").trimEnd()
   const exit = snap.exitCode ?? -1
   const isKilled = snap.status === "killed" || snap.status === "aborted"
   const status = isKilled ? "killed" : `exit ${exit}`
