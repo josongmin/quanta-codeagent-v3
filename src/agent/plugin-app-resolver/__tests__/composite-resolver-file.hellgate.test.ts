@@ -1,0 +1,62 @@
+/**
+ * ADR-0413 — Composite resolver `files` dep hellgate (additive to ADR-0336).
+ *
+ *   A. no `files` dep ⇒ port has NO resolveFile key (legacy shape)  (2)
+ *   B. `files` dep wired ⇒ resolveFile reads the file               (1)
+ *   C. file dep does NOT leak into skill/plugin/app dispatch        (1)
+ *
+ * Total = 4 cases. The ADR-0336 composite hellgate proves the 3-kind
+ * shape is byte-identical (no edit there).
+ */
+
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { createCompositeMentionResolver } from "../composite-resolver"
+
+let root: string
+
+beforeAll(() => {
+  root = mkdtempSync(join(tmpdir(), "quanta-composite-file-"))
+  writeFileSync(join(root, "note.txt"), "hello from file\n", "utf8")
+})
+
+afterAll(() => {
+  rmSync(root, { recursive: true, force: true })
+})
+
+describe("createCompositeMentionResolver files dep — ADR-0413 hellgate", () => {
+  // -------- A. legacy shape preserved -------------------------------
+
+  test("A1 — no files dep ⇒ resolveFile key is absent (legacy 3-kind shape)", () => {
+    const port = createCompositeMentionResolver()
+    expect("resolveFile" in port).toBe(false)
+    expect(port.resolveFile).toBeUndefined()
+  })
+
+  test("A2 — no files dep ⇒ 3-kind methods still present", () => {
+    const port = createCompositeMentionResolver()
+    expect(typeof port.resolveSkill).toBe("function")
+    expect(typeof port.resolvePlugin).toBe("function")
+    expect(typeof port.resolveApp).toBe("function")
+  })
+
+  // -------- B. files dep wired --------------------------------------
+
+  test("B1 — files dep wired ⇒ resolveFile reads the workspace file", () => {
+    const port = createCompositeMentionResolver({ files: { root } })
+    expect(typeof port.resolveFile).toBe("function")
+    expect(port.resolveFile?.("note.txt")).toEqual({ bodyText: "hello from file\n" })
+    expect(port.resolveFile?.("missing.txt")).toBeNull()
+  })
+
+  // -------- C. isolation --------------------------------------------
+
+  test("C1 — files dep does NOT make skill/plugin/app resolve (no leak)", () => {
+    const port = createCompositeMentionResolver({ files: { root } })
+    expect(port.resolveSkill?.("note.txt")).toBeNull()
+    expect(port.resolvePlugin?.("note.txt")).toBeNull()
+    expect(port.resolveApp?.("note.txt")).toBeNull()
+  })
+})
