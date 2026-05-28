@@ -59,6 +59,7 @@ import {
 import type { RulesStore } from "@/rules"
 import { errMessage, writeStderr } from "@/shared"
 import { safeEmitDecision } from "@/stream"
+import { createApprovalGate } from "./approval-gate-wire"
 import {
   buildDenySteerMessage,
   type ConfirmDecision,
@@ -180,6 +181,14 @@ export interface AdmissibilityWaveAOptions {
    * shape.
    */
   reviewKindOverride?: import("@/permission").ReviewKind
+  /**
+   * ADR-0407 — approval-state-machine wire. When supplied, every reviewer
+   * escalation is opened as an approval (attributing the pause to Objective
+   * + Run Ledger via `ApprovalStateMachinePort.request`) and settled on the
+   * way out. Absent ⇒ byte-identical legacy resolver path (no SM calls).
+   * NO-THROW: SM failure cannot perturb the reviewer's decision.
+   */
+  approvalStateMachine?: import("@/agent/approval-state-machine").ApprovalStateMachinePort
 }
 
 /* ------------------------------------------------------------------------- *
@@ -360,7 +369,26 @@ const reviewAndDecide = async (
   // shape. The port may consume `ctx.reviewKind` to render a kind-typed UI; if
   // it doesn't, the field is ignored (byte-identical legacy port behavior).
   const ctx = buildReviewContext(config, action, opts)
-  const dec = await reviewAction(keyed, ctx, opts.reviewerPort)
+  // ADR-0407 — attribute reviewer escalations to Objective+RunLedger via the
+  // approval-SM when wired. Default-OFF ⇒ byte-identical legacy passthrough.
+  const gate = createApprovalGate(
+    opts.approvalStateMachine !== undefined ? { approvalSM: opts.approvalStateMachine } : {},
+  )
+  const reviewerPort = opts.reviewerPort
+  let dec!: Awaited<ReturnType<typeof reviewAction>>
+  await gate.open(
+    {
+      threadId: config.sessionId ?? "",
+      kind: origin === "rule" ? "permission" : "escalation",
+      reason: `${origin}-escalation:${action.tool}`,
+      proposedAction: actionKey,
+      resumeStep: `dispatch:${call.id}`,
+    },
+    async () => {
+      dec = await reviewAction(keyed, ctx, reviewerPort)
+      return isAllowed(dec.outcome) ? "approve" : "deny"
+    },
+  )
 
   // ADR-0070 — validate the OPTIONAL richer verb against the reviewKind.
   // A port that returns a verb illegal for the kind (e.g. `allowlist_commands`
