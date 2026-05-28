@@ -11,21 +11,16 @@
 
 import { relative, sep } from "node:path"
 import {
+  type CodebaseIndexer,
   createBunRipgrepSpawner,
   createDefaultIndexer,
   createRipgrepLexicalSearch,
-  type CodebaseIndexer,
-  type IndexerFileChunk,
 } from "@/retrieval"
-import type { SearchHit, SearchPipeline, SemanticIndex } from "@/retrieval/pipeline"
+import type { SearchPipeline } from "@/retrieval/pipeline"
 import { logger } from "@/shared"
 import { searchCodebaseTool, type Tool } from "@/tool"
 import { assemblePipeline, type PipelinePreset, type PipelineWireOverrides } from "./pipeline"
-
-interface ChunkUpsertPort {
-  upsert(chunk: IndexerFileChunk): void
-  delete(path: string): void
-}
+import { buildSemanticBackend, selectIndexEmbedder } from "./search-index-backend"
 
 export interface WiredSearchPipeline {
   readonly pipeline: SearchPipeline
@@ -82,72 +77,6 @@ const rememberActiveWire = (wire: WiredSearchPipeline | null): WiredSearchPipeli
   return wire
 }
 
-const hashEmbed = (text: string, dim = 64): readonly number[] => {
-  const out = new Float64Array(dim)
-  const tokens = text
-    .toLowerCase()
-    .split(/[^a-z0-9_]+/u)
-    .filter((t) => t.length > 0)
-  for (const tok of tokens) {
-    let h = 2166136261 >>> 0
-    for (let i = 0; i < tok.length; i++) {
-      h = Math.imul(h ^ tok.charCodeAt(i), 16777619) >>> 0
-    }
-    out[h % dim] = (out[h % dim] ?? 0) + 1
-  }
-  let norm = 0
-  for (let i = 0; i < dim; i++) norm += (out[i] ?? 0) * (out[i] ?? 0)
-  norm = Math.sqrt(norm) || 1
-  const arr: number[] = new Array(dim)
-  for (let i = 0; i < dim; i++) arr[i] = (out[i] ?? 0) / norm
-  return arr
-}
-
-interface InMemoryIndex {
-  readonly port: SemanticIndex
-  readonly upsert: ChunkUpsertPort
-}
-
-const newInMemoryIndex = (): InMemoryIndex => {
-  type Entry = { readonly vec: readonly number[]; readonly chunk: IndexerFileChunk }
-  const store = new Map<string, Entry>()
-  const chunkId = (c: IndexerFileChunk): string => `${c.path}:${c.startLine}-${c.endLine}`
-  return {
-    port: {
-      async query(vec: readonly number[], k: number): Promise<readonly SearchHit[]> {
-        const out: SearchHit[] = []
-        for (const [id, { vec: v, chunk }] of store) {
-          let dot = 0
-          const len = Math.min(v.length, vec.length)
-          for (let i = 0; i < len; i++) dot += (v[i] ?? 0) * (vec[i] ?? 0)
-          out.push({
-            id,
-            score: dot,
-            text: chunk.text,
-            source: "semantic",
-            metadata: {
-              path: chunk.path,
-              startLine: chunk.startLine,
-              endLine: chunk.endLine,
-            },
-          })
-        }
-        return out.sort((a, b) => b.score - a.score).slice(0, k)
-      },
-    },
-    upsert: {
-      upsert(chunk: IndexerFileChunk): void {
-        store.set(chunkId(chunk), { vec: hashEmbed(chunk.text), chunk })
-      },
-      delete(path: string): void {
-        for (const id of store.keys()) {
-          if (id.startsWith(`${path}:`)) store.delete(id)
-        }
-      },
-    },
-  }
-}
-
 const buildLexicalOverride = (cwd: string): NonNullable<PipelineWireOverrides["lex"]> => {
   const inner = createRipgrepLexicalSearch({
     root: cwd,
@@ -189,7 +118,11 @@ const startIndexer = (
   readonly indexer: CodebaseIndexer
   readonly intervalHandle: ReturnType<typeof setInterval> | null
 } => {
-  const sem = newInMemoryIndex()
+  // The SAME embed function backs both upsert vectors and the pipeline query
+  // embedder — otherwise stored and query vectors come from different models.
+  // Default-OFF: with no `QUANTA_EMBED_PROVIDER` this IS the legacy hashEmbed.
+  const embed = selectIndexEmbedder(env)
+  const sem = buildSemanticBackend(env, embed)
   const indexer = createDefaultIndexer({
     scanner: {
       root: cwd,
@@ -217,7 +150,7 @@ const startIndexer = (
   }
   return {
     sem: sem.port,
-    embedder: { embed: async (text: string) => hashEmbed(text) },
+    embedder: { embed: async (text: string) => embed(text) },
     indexer,
     intervalHandle,
   }

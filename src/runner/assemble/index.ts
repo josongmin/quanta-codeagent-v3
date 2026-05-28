@@ -58,6 +58,15 @@ export {
 } from "./retrieval-localize-bridge"
 export { rankWithRetrievalStack } from "./retrieval-memory-bridge"
 export {
+  buildSemanticBackend,
+  type ChunkUpsertPort,
+  hashEmbed,
+  type IndexEmbed,
+  isPersistOn,
+  type SemanticBackend,
+  selectIndexEmbedder,
+} from "./search-index-backend"
+export {
   buildSearchPipelineFromEnv,
   clearSearchPipelineWireForTests,
   type WiredSearchPipeline,
