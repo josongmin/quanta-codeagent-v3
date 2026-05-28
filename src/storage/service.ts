@@ -2,6 +2,7 @@ import { realpathSync } from "node:fs"
 import { mkdir, rename, stat, unlink } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { QuantaError, runtimeConfig } from "@/shared"
+import { writeFileAtomic as writeFileAtomicRaw } from "./atomic-write"
 import type { FileInfo } from "./types"
 
 /** Raised when a tool's filesystem access escapes its `ctx.cwd` jail root.
@@ -307,6 +308,24 @@ export interface FileSystemPort {
   writeFile(path: string, content: string, baseDir?: string): Promise<void>
   statFile(path: string, baseDir?: string): Promise<FileInfo>
   fileExists(path: string, baseDir?: string): Promise<boolean>
+  /** ADR-0397 — OPTIONAL 2-phase temp+rename commit. When present, callers
+   *  with a precondition (e.g. `edit`'s `expected_hash`) MAY route their
+   *  on-disk commit through this method so the file is EITHER fully replaced
+   *  OR untouched (no partial-write window). Callers MUST treat absence as
+   *  "fall back to {@link writeFile}" — the existing in-memory test fakes do
+   *  not implement this method, and the default-OFF tool path (no
+   *  `expected_hash` supplied) never invokes it, so legacy ports remain
+   *  byte-identical. */
+  writeFileAtomic?(path: string, content: string, baseDir?: string): Promise<void>
+}
+
+const defaultWriteFileAtomic = async (
+  path: string,
+  content: string,
+  baseDir?: string,
+): Promise<void> => {
+  const abs = resolvePath(path, baseDir)
+  await writeFileAtomicRaw(abs, content)
 }
 
 /** Real `@/storage`-backed {@link FileSystemPort}. The default for every tool;
@@ -316,4 +335,5 @@ export const defaultFileSystemPort: FileSystemPort = {
   writeFile,
   statFile,
   fileExists,
+  writeFileAtomic: defaultWriteFileAtomic,
 }

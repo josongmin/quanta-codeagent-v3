@@ -634,6 +634,20 @@ export type ToolFailure =
    *  requested — explicitly NOT falling back to an unsandboxed legacy spawn
    *  (fail-closed posture). `reason` is the opaque stable tag from the port. */
   | { mode: "sandbox_unavailable"; reason: string }
+  /** ADR-0397 — `edit`/`write` tool was called with an `expected_hash`
+   *  precondition that did NOT match the current file's sha256. The on-disk
+   *  bytes are UNTOUCHED (no partial write, no rollback to perform). The
+   *  caller (model or human gate) can re-read the file and decide whether the
+   *  divergence is intentional (give up the edit) or stale-context (re-issue
+   *  with the fresh `expected_hash`). The two hashes are surfaced as hex
+   *  strings so downstream tooling can diff them without re-reading the
+   *  file. `path` is the file the precondition guarded. */
+  | {
+      mode: "stale_precondition"
+      path?: string
+      expectedHash: string
+      actualHash: string
+    }
 
 /** Closed enum of OS-sandbox violation kinds. Each arm maps a class of OS
  *  denial to a stable tag the model can branch on. Adding a new arm requires

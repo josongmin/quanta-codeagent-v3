@@ -159,6 +159,8 @@ describe("(d) exhaustiveness — switch over ToolFailure['mode'] with never defa
         return `sandbox_violation:${f.reason}`
       case "sandbox_unavailable":
         return `sandbox_unavailable:${f.reason}`
+      case "stale_precondition":
+        return `stale_precondition:${f.path ?? "?"}:${f.actualHash}!=${f.expectedHash}`
       default: {
         const _exhaustive: never = f
         return _exhaustive
@@ -178,5 +180,15 @@ describe("(d) exhaustiveness — switch over ToolFailure['mode'] with never defa
       "spawn_error:not found",
     )
     expect(describeFailure({ mode: "error", modelVisibleError: "boom" })).toBe("error:boom")
+    // ADR-0397 — `stale_precondition` carries both hashes for model-side
+    // re-read / re-issue branching.
+    expect(
+      describeFailure({
+        mode: "stale_precondition",
+        path: "/p",
+        expectedHash: "e",
+        actualHash: "a",
+      }),
+    ).toBe("stale_precondition:/p:a!=e")
   })
 })
