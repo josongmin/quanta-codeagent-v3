@@ -288,7 +288,12 @@ export function buildEvidenceSummary(feature: Feature): string {
     parts.push(bits.join("/"))
   }
   if (feature.knobs.length > 0) {
-    parts.push(`⚙️${feature.knobs.join(", ")}`)
+    // knobs entries are either plain strings (legacy shape) or
+    // `{ name, default, purpose }` objects (current yaml shape). Render the
+    // name so `.join` never emits "[object Object]".
+    const knobLabel = (k: unknown): string =>
+      typeof k === "string" ? k : (((k as { name?: unknown }).name as string) ?? String(k))
+    parts.push(`⚙️${(feature.knobs as readonly unknown[]).map(knobLabel).join(", ")}`)
   }
   return parts.join(" · ")
 }
