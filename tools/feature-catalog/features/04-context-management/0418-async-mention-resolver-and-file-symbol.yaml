@@ -61,13 +61,17 @@ purpose: |
   `@/runner` semantic backend (`selectIndexEmbedder` + `buildSemanticBackend`)
   and feeds both ports to `buildDefaultMentionResolver` at BOTH call sites
   (assemble.ts + mention-wire.ts), built LAZILY on first findSymbol so config
-  assembly stays synchronous. So production @Symbol now resolves (LSP anchored
-  → semantic fallback under `auto`) instead of unconditionally null.
+  assembly stays synchronous. So production @Symbol is now WIRED (LSP anchored
+  → semantic fallback under `auto`) — graceful-null without an installed language
+  server / a populated index, not unconditionally null by construction.
 
   Default-ON with GRACEFUL OMIT: an absent dep (no supported file ⇒ no anchor /
   no populated index / no skill registry / language server not installed)
-  leaves that strategy answering null, never a regression. Zero-mention input
-  + every knob =off are byte-identical to the legacy 3-kind path.
+  leaves that strategy answering null, never a regression. In a fresh checkout
+  with no language server installed and an empty index, @symbol therefore still
+  resolves null — the wire is present, the backing data is not. @skill resolves
+  null at the assemble/CLI layer because no surface threads a `skills` registry.
+  Zero-mention input + every knob =off are byte-identical to the legacy 3-kind path.
   `AgentConfig.mentionInjector` is `Promise`-shaped; `AgentConfig.mentionInjection`
   carries the DI bag.
 evidence:
@@ -125,10 +129,10 @@ knobs:
     purpose: 'Enable @symbol mention resolution (off ⇒ symbol mentions skipped).'
   - name: QUANTA_MENTION_SKILL
     default: 'on'
-    purpose: 'Enable @skill mention resolution (off ⇒ skill mentions skipped; ADR-0422).'
+    purpose: 'Enable @skill mention resolution (ADR-0422). NO-OP at the assemble/CLI layer — no read-only skill registry is threaded by buildMentionSymbolDeps, so @skill resolves null until a caller supplies `skills` to buildDefaultMentionResolver.'
   - name: QUANTA_MENTION_FILE_MAX_BYTES
-    default: '100000'
-    purpose: 'File read cap before head/tail truncation (lib default 262144).'
+    default: '262144'
+    purpose: 'File read cap (bytes) before head/tail truncation. Unset ⇒ lib default 262144 (256 KiB) from file-resolver DEFAULT_FILE_RESOLVER_MAX_BYTES.'
   - name: QUANTA_MENTION_FILE_TAIL_RATIO
     default: '0.5'
     purpose: 'Fraction of the cap reserved for the file tail (0..1; lib default 0 = head-only).'
@@ -147,11 +151,15 @@ notes: |
   ADR-0422 closed the ADR-0418 deliberate_hold: the env→builder→composite→
   mentionInjector wire is live on the CLI + every host-runtime surface (and
   the unified-agent assemble surface). ADR-0423 then closed ADR-0422's anchor
-  hold: production @symbol is now BACKED, not unconditionally null — the
-  deterministic anchor synthesizer supplies the LSP anchor (no surface needs to
-  thread one) and buildMentionSymbolDeps threads the real semantic backend, so
-  both the LSP and semantic strategies are wired at assemble + host-runtime.
-  Honest residual: LSP hits still require an installed language server (pyright
-  / typescript-language-server) — graceful-null without one; the semantic
-  strategy only hits once the search index has entries (QUANTA_INDEX). @skill
-  is still wired only by callers that thread a registry.
+  hold: production @symbol is now WIRED (not unconditionally null by
+  construction) — the deterministic anchor synthesizer supplies the LSP anchor
+  (no surface needs to thread one) and buildMentionSymbolDeps threads the real
+  semantic backend, so both the LSP and semantic strategies are wired at
+  assemble + host-runtime.
+  Honest residual: a wired strategy still answers null until its backing data
+  exists — LSP hits require an installed language server (pyright /
+  typescript-language-server), graceful-null without one; the semantic strategy
+  only hits once the search index has entries (QUANTA_INDEX). So in a fresh
+  checkout (no LS, empty index) @symbol still resolves null. @skill is wired
+  only by callers that thread a `skills` registry — at the assemble/CLI layer
+  none does, so @skill resolves null there.
