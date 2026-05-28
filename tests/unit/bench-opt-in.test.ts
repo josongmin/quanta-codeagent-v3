@@ -34,6 +34,9 @@ const ENV_KEYS = [
   "QUANTA_BENCH_SUBAGENT",
   "QUANTA_BENCH_SKILLS",
   "QUANTA_LSP_TOOLS",
+  // ADR-0414 determinism-guard test sets these; tracked so they're cleaned up.
+  "QUANTA_MEMORY",
+  "QUANTA_MEMORY_AUTO",
 ] as const
 
 const snapshot = (): Map<string, string | undefined> => {
@@ -261,6 +264,30 @@ describe("buildConfig — bench opt-ins wired into AgentConfig", () => {
     process.env.QUANTA_BENCH_SUBAGENT = savedSub ?? "1"
     process.env.QUANTA_BENCH_SKILLS = savedSk ?? "1"
     expect(cfg.registry.specs().length).toBeGreaterThan(baseline.registry.specs().length)
+  })
+
+  // ── ADR-0414 (TKT-003) replay/bench determinism guard ──────────────────
+  test("bench config NEVER wires memory even when the default-ON memory env is set (determinism guard)", () => {
+    // TKT-003 req #3: memory learning went default-ON in the CLI/agent
+    // surfaces, but the BENCH driver builds its own AgentConfig and must NOT
+    // pick it up (a non-deterministic recalled context would corrupt
+    // measurement + replay). Set the FULL default-ON memory env, then assert
+    // the bench config has zero memory wiring. This locks the
+    // composition-root isolation so a future careless edit that reaches for
+    // `buildStore()`/`buildMemoryForSession` from the bench path fails here.
+    process.env.QUANTA_MEMORY = "memory"
+    process.env.QUANTA_MEMORY_AUTO = "on"
+    const ac = new AbortController()
+    const cfg = buildConfig(baseInstance(false), baseDeps, "/tmp/sb", ac.signal, stubStream)
+    // The bench `buildConfig` return type does not even DECLARE these keys
+    // (they're never set), so the compile-time narrowing is itself part of
+    // the guard. Cast to a record for the runtime key-absence assertion so a
+    // future edit that starts setting them is caught here too.
+    const asRecord = cfg as Record<string, unknown>
+    expect("store" in asRecord).toBe(false)
+    expect("memory" in asRecord).toBe(false)
+    expect("embedder" in asRecord).toBe(false)
+    expect("sessionId" in asRecord).toBe(false)
   })
 
   test("byte-identical core fields when all opt-ins unset (compaction, cwd, permission, system, maxTurns)", () => {
