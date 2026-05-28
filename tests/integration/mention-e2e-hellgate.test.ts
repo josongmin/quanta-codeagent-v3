@@ -17,16 +17,39 @@
  * so the injector under test is the EXACT closure the loop calls at
  * `loop.ts:941` (`await config.mentionInjector(userText)`).
  *
- * @symbol / @skill cannot be proven through the production wires alone because
- * the production LSP adapter is anchor-gated (deliberate hold — ADR-0422) and
- * no skill registry exists at config time. So this battery ALSO drives the
- * composite resolver DIRECTLY with FAKE injected deps (a fake LSP SymbolLookup
- * with an anchor, a fake SkillRegistryReadOnly) to prove the graceful-null
- * kinds are NOT permanently dead — they resolve for real the instant a dep is
- * supplied (which is what the production wire will do once an anchor exists).
+ * @symbol IS now backed in production: ADR-0423 wires `buildMentionSymbolDeps`
+ * into BOTH `apps/agent/assemble.ts` (`mentionResolverDep` → `buildDefaultMentionResolver`)
+ * and the host-runtime `mention-wire.ts`, so the production assemble path
+ * lazily synthesizes a deterministic LSP anchor (`synthesizeLspAnchors` walks
+ * the real workspace), builds a union LSP lookup over it, AND attaches a
+ * semantic-index fallback — the always-`null` placeholder the ADR-0422 hold
+ * left behind is GONE. This battery proves that at TWO levels:
+ *
+ *   (a) PRODUCTION COMPOSITION (the §3a block): drive the EXACT
+ *       `buildMentionSymbolDeps` helper assemble calls — over a REAL temp
+ *       workspace holding a `.ts` file — with a fake LSP *provider* injected
+ *       via its documented `lspProvider` seam. The fake records the anchor file
+ *       it is `open`-ed against. We assert the fragment IS injected AND the
+ *       anchor synthesized (and opened) is the REAL `.ts` file on disk —
+ *       proving the real anchor-synth → union-LSP → resolve path executes.
+ *   (b) ASSEMBLE WIRING (the §3b block): the no-seam
+ *       `assembleAgentConfig(...).mentionInjector("@Sym")` reaches a NON-NULL
+ *       symbol resolver (the live `lspNavProvider()` returns null because no
+ *       language server is installed in the test env, so the fragment is
+ *       gracefully dropped — but the call path is live, NOT a dead short-
+ *       circuit, which the assertion on `buildMentionSymbolDeps(cwd, env)`
+ *       attaching real `{ lsp, semantic }` ports pins).
+ *
+ * @skill still cannot be proven through the production wires (no skill registry
+ * exists at config-assembly time — the per-turn inventory is built inside the
+ * loop), so the @skill block below drives the composite resolver DIRECTLY with
+ * a fake `SkillRegistryReadOnly` to prove that kind is not permanently dead.
  *
  * Everything uses a REAL temp workspace + REAL fs.readFile. The only stubs are
- * the LLM/registry/stream cores that `assembleAgentConfig` never reads.
+ * the LLM/registry/stream cores that `assembleAgentConfig` never reads, plus
+ * the injected fake LSP provider (a fake *server*, not a fake resolver — the
+ * resolver, anchor-synth, union-LSP, and composite are all the real production
+ * code) in the §3a production-composition block.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
@@ -43,11 +66,14 @@ import {
   type SymbolHit,
   type SymbolLookupLspPort,
 } from "@/agent/mention-injection"
+import { buildDefaultMentionResolver } from "@/agent/mention-runner"
 import {
   createCompositeMentionResolver,
   type SkillRegistryReadOnly,
 } from "@/agent/plugin-app-resolver"
+import { buildMentionSymbolDeps } from "@/host/runtime/internal/mention-symbol-deps"
 import { installCliMentionInjector } from "@/host/runtime/internal/mention-wire"
+import type { LspNavProvider, LspNavSession, NavSymbolInfo } from "@/tool"
 
 /** The unified-agent mode the CLI REPL assembles under. */
 const MODE = "interactive" as const
@@ -199,6 +225,143 @@ describe("mention wire — END-TO-END hellgate (real fs, real wires)", () => {
         },
       })
       const out = await inj("jump to @FooBar")
+      expect(out.length).toBe(0)
+    })
+  })
+
+  // ============================================================
+  // 3a. @symbol PRODUCTION composition — ADR-0423: real anchor synth
+  //     over a REAL workspace, fake LSP *provider* (a fake server, not
+  //     a fake resolver). Drives the EXACT `buildMentionSymbolDeps`
+  //     helper `apps/agent/assemble.ts` calls, fed into the EXACT
+  //     `buildDefaultMentionResolver` it uses. Proves the deliberate-hold
+  //     null placeholder is gone: a real `.ts` file ⇒ a synthesized
+  //     anchor ⇒ a workspace-symbol query against THAT file ⇒ injection.
+  // ============================================================
+  describe("@symbol: PRODUCTION assemble composition synthesizes a REAL anchor", () => {
+    /** A fake LSP nav SESSION whose `workspaceSymbol` returns one hit and
+     *  records nothing itself — the recording happens on `open` below. */
+    const fakeSession = (hit: NavSymbolInfo): LspNavSession =>
+      ({
+        workspaceSymbol: async () => [hit],
+        stop: async () => undefined,
+      }) as unknown as LspNavSession
+
+    /** A fake provider that RECORDS every anchor file it is `open`-ed against,
+     *  so the test can assert the synthesizer picked the REAL `.ts` file on
+     *  disk (proving the anchor walk ran over the real workspace, not a stub). */
+    const recordingProvider = (opened: string[], hit: NavSymbolInfo): LspNavProvider =>
+      ({
+        unavailableReason: () => "fake",
+        open: async (filePath: string) => {
+          opened.push(filePath)
+          return fakeSession(hit)
+        },
+      }) as unknown as LspNavProvider
+
+    test("real `.ts` file ⇒ anchor synthesized + opened ⇒ @symbol injected", async () => {
+      // REAL workspace: one nested .ts source file (the deterministic anchor).
+      mkdirSync(join(dir, "lib"), { recursive: true })
+      const anchorRel = join("lib", "thing.ts")
+      const anchorAbs = join(dir, anchorRel)
+      writeFileSync(anchorAbs, "export class FooBar {}\n")
+      const opened: string[] = []
+      const hit: NavSymbolInfo = {
+        name: "FooBar",
+        kind: "class",
+        range: { start: { line: 6, character: 0 }, end: { line: 6, character: 6 } },
+        selectionRange: { start: { line: 6, character: 0 }, end: { line: 6, character: 6 } },
+        uri: "lib/thing.ts",
+        containerName: "Lib",
+      }
+      // EXACT production composition: the deps `assembleAgentConfig` builds
+      // (`buildMentionSymbolDeps`) fed into the resolver it builds
+      // (`buildDefaultMentionResolver`). Only the LSP *provider* is faked.
+      const deps = buildMentionSymbolDeps(dir, process.env, {
+        lspProvider: recordingProvider(opened, hit),
+        // Keep the semantic strategy a deterministic no-op so the assertion is
+        // about the REAL LSP anchor path, not the (env-dependent) backend.
+        semanticLookup: null,
+      })
+      // The production builder MUST attach a real LSP port (not the null hold).
+      expect(deps.lsp).toBeDefined()
+      const resolver = buildDefaultMentionResolver({ cwd: dir, env: process.env, ...deps })
+      const frags = await buildInjectionFragments(parseMentions("jump to @FooBar"), resolver)
+      const out = buildMentionInjectionMessages(frags)
+
+      // 1. The fragment IS injected (no longer a dead null).
+      expect(out.length).toBe(1)
+      const text = allText(out)
+      expect(text).toContain("kind: symbol")
+      expect(text).toContain("target: FooBar")
+      // 2. The synthesizer opened the LSP session against the REAL `.ts` file
+      //    it found by walking the temp workspace — proving real anchor synth.
+      expect(opened.length).toBeGreaterThanOrEqual(1)
+      expect(opened).toContain(anchorAbs)
+    })
+
+    test("EMPTY workspace (no source file) ⇒ no anchor ⇒ @symbol gracefully null", async () => {
+      // No `.ts`/`.py`/… anywhere ⇒ `synthesizeLspAnchors` returns [] ⇒ the
+      // union LSP port answers null ⇒ the provider is NEVER opened.
+      const opened: string[] = []
+      const hit: NavSymbolInfo = {
+        name: "FooBar",
+        kind: "class",
+        range: { start: { line: 0, character: 0 }, end: { line: 0, character: 6 } },
+        selectionRange: { start: { line: 0, character: 0 }, end: { line: 0, character: 6 } },
+      }
+      const deps = buildMentionSymbolDeps(dir, process.env, {
+        lspProvider: recordingProvider(opened, hit),
+        semanticLookup: null,
+      })
+      const resolver = buildDefaultMentionResolver({ cwd: dir, env: process.env, ...deps })
+      const out = buildMentionInjectionMessages(
+        await buildInjectionFragments(parseMentions("jump to @FooBar"), resolver),
+      )
+      expect(out.length).toBe(0)
+      // No anchor synthesized ⇒ no server was ever opened.
+      expect(opened.length).toBe(0)
+    })
+  })
+
+  // ============================================================
+  // 3b. @symbol ASSEMBLE wiring — the NO-SEAM production path.
+  //     `assembleAgentConfig` calls `buildMentionSymbolDeps(cwd, env)`
+  //     with NO seams (the live `lspNavProvider()` + real semantic
+  //     backend). With no language server installed in the test env the
+  //     fragment is gracefully dropped — but the symbol resolver IS wired
+  //     (NOT the dead null short-circuit ADR-0422 left behind). We pin the
+  //     wiring by asserting the production builder attaches real ports.
+  // ============================================================
+  describe("@symbol: assembleAgentConfig wires a NON-NULL symbol resolver (ADR-0423)", () => {
+    test("default-ON: buildMentionSymbolDeps(cwd, env) attaches real lsp + semantic ports", () => {
+      // This is the EXACT call `mentionResolverDep` makes inside assemble
+      // (no seams). The deliberate-hold placeholder would have returned {}.
+      const deps = buildMentionSymbolDeps(dir, process.env)
+      expect(deps.lsp).toBeDefined()
+      expect(deps.semantic).toBeDefined()
+      expect(typeof deps.lsp?.findSymbol).toBe("function")
+      expect(typeof deps.semantic?.findSymbol).toBe("function")
+    })
+
+    test("QUANTA_MENTION_SYMBOL=off: buildMentionSymbolDeps short-circuits to {}", () => {
+      process.env[SYMBOL] = "off"
+      const deps = buildMentionSymbolDeps(dir, process.env)
+      expect(deps.lsp).toBeUndefined()
+      expect(deps.semantic).toBeUndefined()
+    })
+
+    test("assemble injector takes the live symbol path (graceful null w/o a real server)", async () => {
+      // A real `.ts` exists ⇒ an anchor IS synthesized; the live
+      // `lspNavProvider().open` returns null because no typescript-language-
+      // server binary is installed in the test env ⇒ the union LSP answers
+      // null; the real semantic backend over an empty index answers null too
+      // ⇒ the fragment is gracefully dropped. The point is the call path is
+      // LIVE end-to-end (no throw, no hang) — proven by the §3a recording
+      // test that the SAME helper synthesizes + opens a real anchor.
+      writeFileSync(join(dir, "live.ts"), "export const X = 1\n")
+      const cfg = assembleAgentConfig({ mode: MODE, base: makeBase(dir, "sym-live") })
+      const out = await inject(cfg, "jump to @FooBar")
       expect(out.length).toBe(0)
     })
   })
