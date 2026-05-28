@@ -38,6 +38,12 @@ export {
   parseRecallTiers,
 } from "./memory"
 export {
+  buildMemoryForSession,
+  type MemoryAutoTriggerPolicy,
+  type MemorySessionOverride,
+  type MemorySessionSlot,
+} from "./memory-factory"
+export {
   assemblePipeline,
   type PipelinePreset,
   type PipelineWireOverrides,

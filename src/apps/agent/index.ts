@@ -25,6 +25,7 @@ import {
   buildRetrievalStackCore,
   buildSearchPipelineFromEnv,
   clearSearchPipelineWireForTests,
+  parseEnvFlag,
   type RetrievalStack,
 } from "@/runner/assemble"
 import { resolveSandboxProfileFromEnv } from "@/runtime"
@@ -140,29 +141,31 @@ const buildBaseRegistry = (args: {
   ])
 
 /**
- * ADR-0281 + ADR-0282 — composition-root wire for the memory
+ * ADR-0281 + ADR-0282 + ADR-0413 — composition-root wire for the memory
  * auto-trigger + cross-session inject slices.
  *
  * Reads three env knobs and produces a small typed config object the
  * host plugs into its session-start / session-end hooks:
  *
- *   - `QUANTA_MEMORY_AUTO`        — "on" enables the slice; any other
- *                                   value (incl. absent / "1" / "true")
- *                                   ⇒ disabled (returns `null`).
+ *   - `QUANTA_MEMORY_AUTO`        — ADR-0413: default ON. Falsey set
+ *                                   `0 / off / no / false` (case-insensitive,
+ *                                   trim via `parseEnvFlag`) ⇒ disabled
+ *                                   (returns `null`). Any other value
+ *                                   (incl. absent / "on" / "1" / "true")
+ *                                   ⇒ enabled.
  *   - `QUANTA_MEMORY_THRESHOLD`   — promote threshold (default 0.7).
  *                                   Invalid number ⇒ default.
  *   - `QUANTA_MEMORY_MIN_USAGE`   — minimum usageCount gate (default 1).
  *                                   Invalid int ⇒ default.
  *
- * Default-OFF: when `QUANTA_MEMORY_AUTO !== "on"`, returns `null`
- * (slot omitted at host plug site ⇒ byte-identical legacy). The
- * function is PURE w.r.t. its input env view; no `process.env` reads.
- *
- * The return shape carries the resolved `TriggerPolicy` only — the
- * host wires the concrete `MemoryAutoTrigger` / `CrossSessionInjector`
- * because those need a `Phase1Port` (LLM seam) + stage1 stores the
- * surface owns. This helper exists so HELL-MAT-22 can lock the env
- * projection deterministically.
+ * Default-ON (ADR-0413): a fresh install with no env knobs gets the
+ * cross-session memory slice. The legacy default-OFF behavior is
+ * reachable via `QUANTA_MEMORY_AUTO=off`. The function is PURE w.r.t.
+ * its input env view; no `process.env` reads. The single canonical
+ * resolver lives at `src/runner/assemble/memory-factory.ts` —
+ * `buildMemoryForSession`; this surface wrapper exists for HELL-MAT-22
+ * legacy lock-in plus a typed-shape mirror surfaces can reach without
+ * pulling the whole memory factory into their compile graph.
  */
 export const assembleMemoryAuto = (
   env: NodeJS.ProcessEnv,
@@ -170,7 +173,7 @@ export const assembleMemoryAuto = (
   readonly enabled: true
   readonly policy: { readonly promoteThreshold: number; readonly minUsageCount: number }
 } | null => {
-  if (env.QUANTA_MEMORY_AUTO !== "on") return null
+  if (!parseEnvFlag(env.QUANTA_MEMORY_AUTO, /* defaultOn */ true)) return null
   const rawT = env.QUANTA_MEMORY_THRESHOLD
   const rawU = env.QUANTA_MEMORY_MIN_USAGE
   const parsedT = rawT === undefined ? 0.7 : Number(rawT)

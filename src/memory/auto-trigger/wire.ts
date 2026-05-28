@@ -1,5 +1,5 @@
 /**
- * ADR-0281 + ADR-0282 — env → `TriggerPolicy` projection helper.
+ * ADR-0281 + ADR-0282 + ADR-0413 — env → `TriggerPolicy` projection helper.
  *
  * Co-located WITH the slice (rather than in `@/apps/agent`) so the
  * commit landing the slice is self-contained: the hellgate's
@@ -13,17 +13,20 @@
  * Reads three env knobs and produces a small typed config object the
  * host plugs into its session-start / session-end hooks:
  *
- *   - `QUANTA_MEMORY_AUTO`        — "on" enables the slice; any other
- *                                   value (incl. absent / "1" / "true")
- *                                   ⇒ disabled (returns `null`).
+ *   - `QUANTA_MEMORY_AUTO`        — default ON (ADR-0413). Falsey set
+ *                                   `0 / off / no / false` (case-insensitive,
+ *                                   trim) ⇒ disabled (returns `null`).
+ *                                   Any other value (incl. absent / "on" /
+ *                                   "1" / "true") ⇒ enabled.
  *   - `QUANTA_MEMORY_THRESHOLD`   — promote threshold (default 0.7).
  *                                   Invalid number ⇒ default.
  *   - `QUANTA_MEMORY_MIN_USAGE`   — minimum usageCount gate (default 1).
  *                                   Invalid int OR negative ⇒ default.
  *
- * Default-OFF: when `QUANTA_MEMORY_AUTO !== "on"`, returns `null`
- * (slot omitted at host plug site ⇒ byte-identical legacy). The
- * function is PURE w.r.t. its input env view; no `process.env` reads.
+ * Default-ON (ADR-0413): a fresh install with no env knobs gets cross-
+ * session memory automatically. The legacy default-OFF behavior is
+ * reachable via `QUANTA_MEMORY_AUTO=off`. The function is PURE w.r.t.
+ * its input env view; no `process.env` reads.
  *
  * The return shape carries the resolved `TriggerPolicy` only — the
  * host wires the concrete `MemoryAutoTrigger` / `CrossSessionInjector`
@@ -31,6 +34,7 @@
  * surface owns.
  */
 
+import { parseEnvFlag } from "@/runner/assemble/env-flag"
 import { DEFAULT_TRIGGER_POLICY, type TriggerPolicy } from "./types"
 
 /** Return shape of {@link assembleMemoryAuto}. `null` ⇒ disabled. */
@@ -39,11 +43,11 @@ export interface MemoryAutoSlot {
   readonly policy: TriggerPolicy
 }
 
-/** Project an env view to a `MemoryAutoSlot` or `null` (default-OFF). */
+/** Project an env view to a `MemoryAutoSlot` or `null`. ADR-0413: default ON. */
 export const assembleMemoryAuto = (
   env: Readonly<Record<string, string | undefined>>,
 ): MemoryAutoSlot | null => {
-  if (env.QUANTA_MEMORY_AUTO !== "on") return null
+  if (!parseEnvFlag(env.QUANTA_MEMORY_AUTO, /* defaultOn */ true)) return null
   const rawT = env.QUANTA_MEMORY_THRESHOLD
   const rawU = env.QUANTA_MEMORY_MIN_USAGE
   const parsedT = rawT === undefined ? DEFAULT_TRIGGER_POLICY.promoteThreshold : Number(rawT)

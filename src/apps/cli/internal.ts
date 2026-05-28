@@ -16,6 +16,7 @@ import {
   buildEmbedderCore,
   buildLLMCore,
   buildMemoryConfigCore,
+  buildMemoryForSession,
   buildSearchPipelineFromEnv,
   buildSkillsConfigCore,
   buildStoreCore,
@@ -111,12 +112,15 @@ export const buildLLM = (provider: Provider, model: string): LLMPort =>
 export { DEFAULT_MODEL }
 
 /**
- * Build the long-term memory store from env. Default OFF so plain runs are
- * unchanged: `QUANTA_MEMORY=sqlite` → on-disk SqliteStore (path from
- * `QUANTA_MEMORY_PATH`, default `.quanta/memory.sqlite`); `=memory` →
- * volatile InMemoryStore; unset / `off` → no store.
+ * Build the long-term memory store from env. ADR-0413 changed the default
+ * from OFF to ON: unset / truthy `QUANTA_MEMORY` ⇒ on-disk SqliteStore
+ * (path from `QUANTA_MEMORY_PATH`, default `.quanta/memory.sqlite`).
+ * `QUANTA_MEMORY=memory` ⇒ volatile InMemoryStore; `=off` / `0` / `false` /
+ * `no` ⇒ no store (legacy default-OFF byte-identical escape hatch).
  *
- * Long-term memory env (all default OFF / behavior-preserving when no store):
+ * Long-term memory env:
+ *   QUANTA_MEMORY              on (default) | off | 0 | 1 | sqlite | memory | …
+ *   QUANTA_MEMORY_PATH         override sqlite path (default `.quanta/memory.sqlite`)
  *   QUANTA_MEMORY_EMBED        openai (default when store + OPENAI_API_KEY) | off
  *   QUANTA_MEMORY_EMBED_MODEL  override embedding model (else adapter default)
  *   QUANTA_MEMORY_RECALL_LIMIT int → memory.recallLimit
@@ -126,14 +130,15 @@ export { DEFAULT_MODEL }
  *                              registering the memory_* self-edit tools)
  *   QUANTA_MEMORY_RECALL_TIERS comma list of episodic,semantic →
  *                              memory.recallTiers (invalid/empty ⇒ omitted)
+ *   QUANTA_MEMORY_AUTO         on (default) | off — cross-session auto-trigger
+ *   QUANTA_MEMORY_THRESHOLD    float → auto-trigger promote threshold (default 0.7)
+ *   QUANTA_MEMORY_MIN_USAGE    int → auto-trigger minUsageCount gate (default 1)
+ *
+ * Legacy shim — implementation delegates to ADR-0413
+ * `buildMemoryForSession` so the default-ON contract is centralized.
  */
 export const buildStore = (): ReturnType<typeof buildStoreCore> =>
-  buildStoreCore({
-    ...(process.env.QUANTA_MEMORY !== undefined ? { kind: process.env.QUANTA_MEMORY } : {}),
-    ...(process.env.QUANTA_MEMORY_PATH !== undefined
-      ? { path: process.env.QUANTA_MEMORY_PATH }
-      : {}),
-  })
+  buildMemoryForSession(process.env).store
 
 /**
  * Build the semantic embedder from env. Default OFF so lexical-only recall is
@@ -161,24 +166,41 @@ export const buildEmbedder = (
 export { parseRecallTiers }
 
 /**
- * Build the `memory` tuning block from env. Returns `undefined` when there is
- * no store AND no flag set, so the config key is omitted entirely and current
- * behavior is preserved exactly (respecting `exactOptionalPropertyTypes`).
+ * Build the `memory` tuning block from env. ADR-0413: delegates to
+ * `buildMemoryForSession`. Returns `undefined` only when `QUANTA_MEMORY=off`
+ * (the single-knob escape hatch); otherwise the block is returned even when
+ * empty so the loop's `config.store` check threads through identically.
+ *
+ * `store` parameter is preserved for back-compat (legacy callers pass the
+ * result of `buildStore()` here) but is now informational only — the factory
+ * resolves the store internally from the same env view, so `store` is ignored
+ * unless it's `undefined` (in which case the caller already opted out and
+ * the config block is collapsed to legacy-OFF for symmetry).
  */
 export const buildMemoryConfig = (
   store: ReturnType<typeof buildStoreCore>,
 ): AgentConfig["memory"] | undefined => {
-  const rawLimit = process.env.QUANTA_MEMORY_RECALL_LIMIT
-  const limit = rawLimit !== undefined ? Number.parseInt(rawLimit, 10) : Number.NaN
-  const recallTiers = parseRecallTiers(process.env.QUANTA_MEMORY_RECALL_TIERS)
-  return buildMemoryConfigCore({
-    store,
-    ...(Number.isFinite(limit) ? { recallLimit: limit } : {}),
-    ...(process.env.QUANTA_MEMORY_DISTILL === "off" ? { distill: false } : {}),
-    ...(process.env.QUANTA_MEMORY_CONSOLIDATE === "off" ? { consolidate: false } : {}),
-    ...(process.env.QUANTA_MEMORY_SELF_EDIT === "off" ? { selfEditTools: false } : {}),
-    ...(recallTiers ? { recallTiers } : {}),
-  })
+  // Legacy contract: when `store === undefined` (caller already saw the
+  // escape hatch fire), short-circuit so the config block follows. This
+  // preserves the env-knob-branches.test.ts assertion that
+  // `buildMemoryConfig(undefined)` returns `undefined` when no env knobs
+  // are set. Sub-knob branches (recallLimit / distill / etc.) still work
+  // because `buildMemoryConfigCore` returns a block when ANY knob is set
+  // even with `store=undefined`.
+  if (store === undefined) {
+    const rawLimit = process.env.QUANTA_MEMORY_RECALL_LIMIT
+    const limit = rawLimit !== undefined ? Number.parseInt(rawLimit, 10) : Number.NaN
+    const recallTiers = parseRecallTiers(process.env.QUANTA_MEMORY_RECALL_TIERS)
+    return buildMemoryConfigCore({
+      store,
+      ...(Number.isFinite(limit) ? { recallLimit: limit } : {}),
+      ...(process.env.QUANTA_MEMORY_DISTILL === "off" ? { distill: false } : {}),
+      ...(process.env.QUANTA_MEMORY_CONSOLIDATE === "off" ? { consolidate: false } : {}),
+      ...(process.env.QUANTA_MEMORY_SELF_EDIT === "off" ? { selfEditTools: false } : {}),
+      ...(recallTiers ? { recallTiers } : {}),
+    })
+  }
+  return buildMemoryForSession(process.env).config
 }
 
 /**

@@ -190,15 +190,37 @@ describe("pickProvider — QUANTA_PROVIDER branches + auto-detect", () => {
   })
 })
 
-describe("buildStore — QUANTA_MEMORY branches", () => {
-  test("unset → undefined (default-OFF, byte-identical)", () => {
-    expect(buildStore()).toBeUndefined()
+describe("buildStore — QUANTA_MEMORY branches (ADR-0413 default-ON)", () => {
+  test("unset → SqliteStore (ADR-0413 default-ON; legacy default-OFF behavior reachable via QUANTA_MEMORY=off)", () => {
+    // The sqlite adapter opens the file eagerly — point at a tmp path so
+    // the default-ON path can construct without crashing on a missing
+    // `.quanta/` parent directory.
+    const { mkdtempSync, rmSync } = require("node:fs")
+    const { tmpdir } = require("node:os")
+    const { join } = require("node:path")
+    const dir = mkdtempSync(join(tmpdir(), "env-knob-default-on-")) as string
+    try {
+      process.env.QUANTA_MEMORY_PATH = join(dir, "default-on.sqlite")
+      const s = buildStore()
+      expect(s).toBeDefined()
+      expect(typeof s?.recall).toBe("function")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
-  test("QUANTA_MEMORY=off → undefined (explicit opt-out)", () => {
+  test("QUANTA_MEMORY=off → undefined (legacy escape hatch, byte-identical to pre-ADR-0413)", () => {
     process.env.QUANTA_MEMORY = "off"
     expect(buildStore()).toBeUndefined()
   })
+
+  test.each(["0", "false", "no"])(
+    "QUANTA_MEMORY=%p → undefined (additional falsey aliases under ADR-0413)",
+    (raw) => {
+      process.env.QUANTA_MEMORY = raw
+      expect(buildStore()).toBeUndefined()
+    },
+  )
 
   test("QUANTA_MEMORY=memory → InMemoryStore instance (volatile)", () => {
     process.env.QUANTA_MEMORY = "memory"
@@ -228,9 +250,22 @@ describe("buildStore — QUANTA_MEMORY branches", () => {
     }
   })
 
-  test("QUANTA_MEMORY=unknown-kind → undefined (unrecognised value is treated as off)", () => {
-    process.env.QUANTA_MEMORY = "redis"
-    expect(buildStore()).toBeUndefined()
+  test("QUANTA_MEMORY=unknown-kind → sqlite (ADR-0413: unknown truthy ⇒ default kind)", () => {
+    // Pre-ADR-0413 this returned undefined (unknown treated as off). Post,
+    // unknown-truthy is treated as the default kind so operators who set
+    // QUANTA_MEMORY=1 / "true" / typo-truthy still get persistent memory.
+    const { mkdtempSync, rmSync } = require("node:fs")
+    const { tmpdir } = require("node:os")
+    const { join } = require("node:path")
+    const dir = mkdtempSync(join(tmpdir(), "env-knob-unknown-")) as string
+    try {
+      process.env.QUANTA_MEMORY = "redis"
+      process.env.QUANTA_MEMORY_PATH = join(dir, "unknown.sqlite")
+      const s = buildStore()
+      expect(s).toBeDefined()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 
