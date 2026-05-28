@@ -39,6 +39,8 @@ import type { ConversationCheckpointStore } from "./conversation-checkpoint"
 import type { DedupGate, DedupGateCaps } from "./dispatch-dedup"
 import type { DispatchGuard } from "./dispatch-guard"
 import type { EffortLevel } from "./effort"
+import type { EffortClassifierPort } from "./effort-classifier"
+import type { FastApplyFallbackPort } from "./fast-apply-fallback"
 import type { FollowUpQueue, PausedReason } from "./follow-up-queue"
 import type { SessionForker } from "./fork-session"
 import type { GlobRule } from "./glob-rules"
@@ -658,6 +660,26 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * override still wins when present.
    */
   sessionEffort?: () => EffortLevel | undefined
+  /**
+   * ADR-0417 (absorption gap A1) — prompt-keyword + tool-failure effort
+   * escalation classifier. Session-scoped advisory: it watches user prompts
+   * for "think harder" style keywords and accumulates per-tool failures,
+   * surfacing a recommended {@link EffortLevel}. ADVISORY ONLY — this slot is
+   * a pure port; the consumer wire (loop / prompt-pipeline folding the
+   * recommendation into per-turn effort) is DEFERRED to a later wave. Absent
+   * ⇒ no classification, byte-identical (RFC §1.2 default-OFF).
+   */
+  effortClassifier?: EffortClassifierPort
+  /**
+   * ADR-0417 (absorption gap A2) — apply-patch fast-apply fallback. When
+   * `apply_patch` rejects a V4A patch (anchor drift / parse error), one
+   * focused side-conversation attempt re-emits the patch given the failure
+   * reason. This slot is a pure port; the consumer wire (apply-patch.ts
+   * invoking it on a typed failure before surfacing the error) is DEFERRED to
+   * a later wave. Absent ⇒ no fallback attempt, byte-identical (RFC §1.2
+   * default-OFF).
+   */
+  fastApplyFallback?: FastApplyFallbackPort
   /**
    * Self-inspection / self-mutation seam consumed by the `session_config`
    * tool. Read + write over the agent's own SDK posture (effort tier, identity
@@ -1661,6 +1683,9 @@ export type FeaturesConfig = Pick<
   | "lspPorts"
   | "metrics"
   | "osSandbox"
+  // ─── ADR-0417 (ports-only, consumer wire deferred) ───
+  | "effortClassifier"
+  | "fastApplyFallback"
 >
 
 /** Narrow contract for per-turn prompt / context assembly (the loop's

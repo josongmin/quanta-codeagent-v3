@@ -1,0 +1,77 @@
+id: effort-classifier
+title: Prompt-keyword + tool-failure effort escalation classifier
+section: 9
+subsystem: Effort axis (ADR-0417 gap A1)
+order: 417
+maturity: L2
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "default-off", "ports-only"]
+depends_on: []
+purpose: |
+  Session-scoped advisory classifier (`createEffortClassifier`) that watches
+  user prompts for "think harder" style keywords and accumulates per-tool
+  failure counts, surfacing a recommended `EffortLevel` (the 5-tier
+  `default|low|medium|high|max` axis from `src/agent/effort.ts`).
+
+  Default keyword rules (Claude/Codex vocabulary): `/ultrathink|think harder/i`
+  → max; `/think hard|deeper/i` → high; `/be thorough/i` → high. Tool failures
+  accumulate per-tool; at the threshold (default 3) a
+  `tool_failure_accumulation` signal votes the `failureLevel` (default high).
+
+  The rolled-up recommendation is HIGHEST-WINS (`max>high>medium>low>default`)
+  and never downgrades — a later low-intensity signal cannot pull an already-
+  escalated session back down. `reset()` clears all accumulated state.
+
+  Pure leaf: imports only `EffortLevel` from the sibling `./effort` pure leaf;
+  no `@/llm`, no loop, no tool. NO-THROW at the port boundary — malformed
+  prompts (empty / whitespace / unicode) and pathological caller RegExps
+  yield empty signals rather than throwing into a turn. The recommendation is
+  ADVISORY ONLY; this slice never mutates effort itself.
+evidence:
+  code:
+    - src/agent/effort-classifier/types.ts
+    - src/agent/effort-classifier/keyword-detector.ts
+    - src/agent/effort-classifier/store.ts
+    - src/agent/effort-classifier/index.ts
+  adrs: [417]
+  tests:
+    unit:
+      - tests/unit/effort-classifier-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: keywordRules
+    default: 'ultrathink|think harder→max; think hard|deeper→high; be thorough→high'
+    purpose: 'replace the default prompt-keyword → tier rule set'
+  - name: failureThreshold
+    default: '3'
+    purpose: 'cumulative per-tool failure count that fires an escalation signal'
+  - name: failureLevel
+    default: 'high'
+    purpose: 'tier voted by a tool-failure-accumulation signal'
+config_refs:
+  env: []
+deliberate_hold:
+  reason: |
+    PORTS ONLY this wave. The `AgentConfig.effortClassifier` slot is present
+    but inert — no consumer triggers it. `src/agent/loop.ts` and
+    `prompt-pipeline.ts` are deliberately NOT modified (keeps blast-radius
+    small + avoids collision with sibling worktrees). Default-OFF: absent slot
+    ⇒ byte-identical to the pre-ADR path (RFC §1.2).
+  promotion_path: |
+    A follow-up ADR wires the loop to (1) feed each seed user message to
+    `onUserPrompt`, (2) feed dispatch tool failures to `onToolFailure`, and
+    (3) fold `currentRecommendation().level` into the per-turn effort
+    resolution (precedence below an explicit skill/session override). Surfacing
+    the recommendation on a status line / OTel attribute is part of the same
+    wire.
+notes: |
+  ADR-0417 absorption gap A1. Sibling to `src/agent/effort.ts` (the sealed
+  5-tier axis) — this slice consumes that vocabulary, never re-defines it. All
+  matchers are concrete regex predicates + integer counters (no heuristic /
+  fuzzy / LLM-judged intent — per [[no-heuristics-only-validated]]).
