@@ -19,7 +19,7 @@ import {
   buildMemoryForSession,
   buildSearchPipelineFromEnv,
   buildSkillsConfigCore,
-  buildStoreCore,
+  type buildStoreCore,
   buildStreamingCore,
   buildSubagentConfigCore,
   buildSummarizerLlmCore,
@@ -112,15 +112,18 @@ export const buildLLM = (provider: Provider, model: string): LLMPort =>
 export { DEFAULT_MODEL }
 
 /**
- * Build the long-term memory store from env. ADR-0413 changed the default
- * from OFF to ON: unset / truthy `QUANTA_MEMORY` ⇒ on-disk SqliteStore
- * (path from `QUANTA_MEMORY_PATH`, default `.quanta/memory.sqlite`).
- * `QUANTA_MEMORY=memory` ⇒ volatile InMemoryStore; `=off` / `0` / `false` /
- * `no` ⇒ no store (legacy default-OFF byte-identical escape hatch).
+ * Build the long-term memory store from env. ADR-0414 changed the default
+ * from OFF to ON. The default-ON store is the VOLATILE `InMemoryStore` (no
+ * disk side effect — TKT-003 req #4): unset / bare-truthy `QUANTA_MEMORY`
+ * (`1` / `true` / `on` / `""` / unknown) ⇒ volatile InMemoryStore.
+ * `QUANTA_MEMORY=sqlite` ⇒ on-disk SqliteStore (the ONLY persistent opt-in;
+ * path from `QUANTA_MEMORY_PATH`, default `.quanta/memory.sqlite`).
+ * `QUANTA_MEMORY=memory` ⇒ volatile InMemoryStore (explicit). `=off` / `0` /
+ * `false` / `no` ⇒ no store (legacy default-OFF byte-identical escape hatch).
  *
  * Long-term memory env:
- *   QUANTA_MEMORY              on (default) | off | 0 | 1 | sqlite | memory | …
- *   QUANTA_MEMORY_PATH         override sqlite path (default `.quanta/memory.sqlite`)
+ *   QUANTA_MEMORY              on (default, volatile) | off | 0 | 1 | sqlite | memory | …
+ *   QUANTA_MEMORY_PATH         override sqlite path (sqlite kind only; default `.quanta/memory.sqlite`)
  *   QUANTA_MEMORY_EMBED        openai (default when store + OPENAI_API_KEY) | off
  *   QUANTA_MEMORY_EMBED_MODEL  override embedding model (else adapter default)
  *   QUANTA_MEMORY_RECALL_LIMIT int → memory.recallLimit
@@ -134,7 +137,7 @@ export { DEFAULT_MODEL }
  *   QUANTA_MEMORY_THRESHOLD    float → auto-trigger promote threshold (default 0.7)
  *   QUANTA_MEMORY_MIN_USAGE    int → auto-trigger minUsageCount gate (default 1)
  *
- * Legacy shim — implementation delegates to ADR-0413
+ * Legacy shim — implementation delegates to ADR-0414
  * `buildMemoryForSession` so the default-ON contract is centralized.
  */
 export const buildStore = (): ReturnType<typeof buildStoreCore> =>
@@ -166,7 +169,7 @@ export const buildEmbedder = (
 export { parseRecallTiers }
 
 /**
- * Build the `memory` tuning block from env. ADR-0413: delegates to
+ * Build the `memory` tuning block from env. ADR-0414: delegates to
  * `buildMemoryForSession`. Returns `undefined` only when `QUANTA_MEMORY=off`
  * (the single-knob escape hatch); otherwise the block is returned even when
  * empty so the loop's `config.store` check threads through identically.

@@ -113,7 +113,7 @@ describe("session-memory-auto", () => {
     expect(writes).toEqual(["summary"])
   })
 
-  test("buildSessionMemoryAutoWires returns undefined when the feature is explicitly off (ADR-0413: default-ON, off via QUANTA_MEMORY_AUTO=off)", async () => {
+  test("buildSessionMemoryAutoWires returns undefined when the feature is explicitly off (ADR-0414: default-ON, off via QUANTA_MEMORY_AUTO=off)", async () => {
     const llm = { stream: async function* () {} } as never
     const out = await buildSessionMemoryAutoWires({
       env: { QUANTA_MEMORY_AUTO: "off" },
@@ -124,7 +124,7 @@ describe("session-memory-auto", () => {
     expect(out).toBeUndefined()
   })
 
-  test("buildSessionMemoryAutoWires returns wires by default (ADR-0413: empty env ⇒ default-ON)", async () => {
+  test("buildSessionMemoryAutoWires returns wires by default (ADR-0414: empty env ⇒ default-ON)", async () => {
     const llm = { stream: async function* () {} } as never
     const out = await buildSessionMemoryAutoWires({
       env: {},

@@ -16,8 +16,10 @@
  *   - `createPluginResolver(registry?)`         — plugin sub-resolver.
  *   - `createAppResolver(catalog?)`             — app sub-resolver.
  *   - `createSkillResolver(skills?)`            — skill sub-resolver.
- *   - `createCompositeMentionResolver(deps)`    — combine all three.
+ *   - `createFileResolver(opts)`                — file sub-resolver (ADR-0413).
+ *   - `createCompositeMentionResolver(deps)`    — combine all four.
  *   - `CompositeResolverDeps`                   — dependency bag type.
+ *   - `FileResolverOptions`                     — file-resolver options (ADR-0413).
  *   - `LocalPluginActivationEvent` /            — LOCAL MOCKS pending
  *     `LocalAppActivationEvent`                   ADR-0335 integration.
  */
@@ -27,6 +29,7 @@ export {
   type CompositeResolverDeps,
   createCompositeMentionResolver,
 } from "./composite-resolver"
+export { createFileResolver, type FileResolverOptions } from "./file-resolver"
 export { createPluginResolver } from "./plugin-resolver"
 export { createSkillResolver } from "./skill-resolver"
 export type {

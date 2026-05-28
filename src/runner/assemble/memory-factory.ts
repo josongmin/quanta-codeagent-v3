@@ -1,5 +1,10 @@
 /**
- * ADR-0413 — Memory learning DEFAULT-ON via session factory.
+ * ADR-0414 — Memory learning DEFAULT-ON via session factory.
+ *
+ * (Renumbered from 0413 → 0414 under the user-deference ADR-collision policy:
+ *  the user's in-flight `0413-file-mention-kind-sync-additive.md` keeps 0413;
+ *  this memory slice + its sibling AgentConfig-slot Part 1 take the next free
+ *  number 0414.)
  *
  * Single canonical entry point that projects an env view + per-session
  * override into the three memory slots a surface needs to wire:
@@ -37,12 +42,8 @@
 
 import type { AgentConfig } from "@/agent"
 import type { PersistentStorePort } from "@/memory"
-import {
-  buildMemoryConfigCore,
-  type MemoryConfigAssembleInput,
-  parseRecallTiers,
-} from "./memory"
 import { parseEnvFlag } from "./env-flag"
+import { buildMemoryConfigCore, type MemoryConfigAssembleInput, parseRecallTiers } from "./memory"
 import { buildStoreCore } from "./store"
 
 /* ------------------------------------------------------------------ */
@@ -100,26 +101,34 @@ const DEFAULT_AUTO_TRIGGER_POLICY: MemoryAutoTriggerPolicy = {
 
 /** Resolve the `kind` argument to `buildStoreCore` from the env value
  *  and the default-ON contract. Accepts the legacy literal kinds
- *  ("sqlite" / "memory") AND the new truthy/falsey set. */
+ *  ("sqlite" / "memory") AND the new truthy/falsey set.
+ *
+ *  SAFETY (TKT-003 req #4): the default-ON kind is the VOLATILE
+ *  `InMemoryStore`, never the on-disk `SqliteStore`. A fresh run with no
+ *  env knob (or a bare truthy `QUANTA_MEMORY=1`) learns in-process only and
+ *  writes NOTHING to disk — so turning the feature on by default introduces
+ *  zero filesystem side effects. Persistent cross-process memory is an
+ *  EXPLICIT opt-in: the operator must set `QUANTA_MEMORY=sqlite` (with an
+ *  optional `QUANTA_MEMORY_PATH`). This keeps the default safe while still
+ *  giving the model in-session recall + consolidation. */
 const resolveStoreKind = (raw: string | undefined): string | undefined => {
-  if (raw === undefined) return "sqlite"
+  if (raw === undefined) return "memory"
   const v = raw.trim().toLowerCase()
-  // Explicit kinds — pass through verbatim (preserves legacy callers).
+  // Explicit kinds — pass through verbatim. `sqlite` is the ONLY way to opt
+  // into the on-disk store (persistent memory is opt-in, never default).
   if (v === "sqlite" || v === "memory") return v
-  // Falsey set — disable store entirely.
+  // Falsey set — disable store entirely (legacy default-OFF escape hatch).
   if (v === "0" || v === "false" || v === "off" || v === "no") return undefined
-  // Truthy set (incl. empty string) — pick the default kind so operators
-  // who set `QUANTA_MEMORY=1` get persistent memory not volatile.
-  if (parseEnvFlag(raw, /* defaultOn */ true)) return "sqlite"
+  // Truthy set (incl. empty string) — default to the VOLATILE kind so an
+  // operator who sets a bare `QUANTA_MEMORY=1` still gets no-disk memory.
+  if (parseEnvFlag(raw, /* defaultOn */ true)) return "memory"
   return undefined
 }
 
 /** Resolve the auto-trigger policy from env. Default-ON unless the
  *  operator explicitly opts out. Mirrors the env truth-table of
  *  `parseEnvFlag` — invalid value ⇒ default = ON. */
-const resolveAutoTrigger = (
-  env: NodeJS.ProcessEnv,
-): MemoryAutoTriggerPolicy | undefined => {
+const resolveAutoTrigger = (env: NodeJS.ProcessEnv): MemoryAutoTriggerPolicy | undefined => {
   const enabled = parseEnvFlag(env.QUANTA_MEMORY_AUTO, /* defaultOn */ true)
   if (!enabled) return undefined
   const rawT = env.QUANTA_MEMORY_THRESHOLD
@@ -210,9 +219,7 @@ export const buildMemoryForSession = (
   // Auto-trigger: override wins; null forces off, undefined falls through
   // to env. The env path is default-ON.
   const autoTrigger =
-    override?.autoTrigger === null
-      ? undefined
-      : (override?.autoTrigger ?? resolveAutoTrigger(env))
+    override?.autoTrigger === null ? undefined : (override?.autoTrigger ?? resolveAutoTrigger(env))
   return {
     ...(store !== undefined ? { store } : {}),
     ...(config !== undefined ? { config } : {}),

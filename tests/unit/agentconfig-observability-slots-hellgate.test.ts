@@ -1,5 +1,5 @@
 /**
- * ADR-0413 Part 1 — AgentConfig slot promotion hellgate.
+ * ADR-0414 Part 1 — AgentConfig slot promotion hellgate.
  *
  * Wave-3 parked `runLedger` + `approvalStateMachine` on the observability-wire
  * handle because AgentConfig had no slot. This pins that the two slots now
@@ -13,7 +13,7 @@ import { createObjectiveStore } from "@/agent/objective"
 import { createRunLedger } from "@/agent/run-ledger"
 import type { AgentConfig } from "@/agent/types"
 
-describe("ADR-0413 AgentConfig observability slots", () => {
+describe("ADR-0414 AgentConfig observability slots", () => {
   test("[1] runLedger slot accepts a RunLedgerPort + is readable", () => {
     const ledger = createRunLedger()
     const cfg: Pick<AgentConfig, "runLedger"> = { runLedger: ledger }

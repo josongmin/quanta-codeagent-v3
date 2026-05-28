@@ -26,6 +26,7 @@ import type { AppCatalogPort } from "@/agent/app-catalog"
 import type { MentionResolverPort } from "@/agent/mention-injection"
 import type { PluginRegistryPort } from "@/agent/plugin-discovery"
 import { createAppResolver } from "./app-resolver"
+import { createFileResolver, type FileResolverOptions } from "./file-resolver"
 import { createPluginResolver } from "./plugin-resolver"
 import { createSkillResolver } from "./skill-resolver"
 import type { SkillRegistryReadOnly } from "./types"
@@ -41,6 +42,11 @@ export interface CompositeResolverDeps {
   readonly skills?: SkillRegistryReadOnly
   readonly plugins?: PluginRegistryPort
   readonly apps?: AppCatalogPort
+  /** ADR-0413 — file-mention resolver options (workspace root + cap).
+   *  Omit ⇒ the port has NO `resolveFile` and every `@file` mention
+   *  resolves to `null` (skipped) — byte-identical to the legacy
+   *  3-kind composite. */
+  readonly files?: FileResolverOptions
 }
 
 /**
@@ -54,9 +60,14 @@ export const createCompositeMentionResolver = (
   const resolveSkill = createSkillResolver(deps.skills)
   const resolvePlugin = createPluginResolver(deps.plugins)
   const resolveApp = createAppResolver(deps.apps)
-  return {
+  const base: MentionResolverPort = {
     resolveSkill,
     resolvePlugin,
     resolveApp,
   }
+  // ADR-0413 — only attach `resolveFile` when a `files` dep is supplied,
+  // so the legacy 3-kind shape (no `resolveFile` key) is preserved when
+  // the caller opts out.
+  if (deps.files === undefined) return base
+  return { ...base, resolveFile: createFileResolver(deps.files) }
 }

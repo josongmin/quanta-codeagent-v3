@@ -201,18 +201,39 @@ describe("CLI export-closure assembly (in-process e2e)", () => {
     // is now part of the product baseline (search facade + helper-only pipeline
     // slot), and subagent + skills are now default-ON (env-disablable), so the
     // no-knob assembly wires their empty capability blocks.
-    expect(config.store).toBeUndefined()
+    //
+    // ADR-0414 (TKT-003): memory learning is ALSO default-ON now, wired to the
+    // VOLATILE InMemoryStore (no disk side effect — req #4). So a no-knob run
+    // gets a store + sessionId + memory block + the default `compaction: {}`
+    // block (the store-gated branch in buildToolingCore). The embedder stays
+    // OFF (no OPENAI_API_KEY in this hermetic env). `QUANTA_MEMORY=off` is the
+    // byte-identical legacy escape hatch (covered in Test E below).
+    expect(config.store).toBeDefined()
+    expect(typeof config.store?.recall).toBe("function")
     expect(config.embedder).toBeUndefined()
-    expect(config.memory).toBeUndefined()
+    expect(config.memory).toBeDefined()
     expect(config.subagent).toEqual({})
     expect(config.skills).toEqual({})
     expect(config.compactionBreaker).toBeUndefined()
     expect(config.verifyGuard).toBeUndefined()
     expect(config.planMode).toBeUndefined()
     expect(config.metrics).toBeUndefined()
-    expect(config.compaction).toBeUndefined()
-    expect(config.sessionId).toBeUndefined()
+    expect(config.compaction).toEqual({})
+    expect(config.sessionId).toBeDefined()
     expect(config.searchPipeline).toBeDefined()
+  })
+
+  // ── Test E — QUANTA_MEMORY=off is the byte-identical legacy escape hatch ──
+  test("E: QUANTA_MEMORY=off ⇒ no store / no memory / no sessionId (legacy default-OFF byte-identical)", async () => {
+    process.env.QUANTA_MEMORY = "off"
+    const { config } = await assemble(workspace)
+    // The single-knob escape hatch collapses the whole memory bundle, exactly
+    // reproducing the pre-ADR-0414 default-OFF assembly (no store-gated branch).
+    expect(config.store).toBeUndefined()
+    expect(config.embedder).toBeUndefined()
+    expect(config.memory).toBeUndefined()
+    expect(config.sessionId).toBeUndefined()
+    expect(config.compaction).toBeUndefined()
   })
 
   // ── Test B — helper resolution is logged + memory/store-gated branch fires ─

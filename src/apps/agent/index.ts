@@ -141,13 +141,13 @@ const buildBaseRegistry = (args: {
   ])
 
 /**
- * ADR-0281 + ADR-0282 + ADR-0413 — composition-root wire for the memory
+ * ADR-0281 + ADR-0282 + ADR-0414 — composition-root wire for the memory
  * auto-trigger + cross-session inject slices.
  *
  * Reads three env knobs and produces a small typed config object the
  * host plugs into its session-start / session-end hooks:
  *
- *   - `QUANTA_MEMORY_AUTO`        — ADR-0413: default ON. Falsey set
+ *   - `QUANTA_MEMORY_AUTO`        — ADR-0414: default ON. Falsey set
  *                                   `0 / off / no / false` (case-insensitive,
  *                                   trim via `parseEnvFlag`) ⇒ disabled
  *                                   (returns `null`). Any other value
@@ -158,7 +158,7 @@ const buildBaseRegistry = (args: {
  *   - `QUANTA_MEMORY_MIN_USAGE`   — minimum usageCount gate (default 1).
  *                                   Invalid int ⇒ default.
  *
- * Default-ON (ADR-0413): a fresh install with no env knobs gets the
+ * Default-ON (ADR-0414): a fresh install with no env knobs gets the
  * cross-session memory slice. The legacy default-OFF behavior is
  * reachable via `QUANTA_MEMORY_AUTO=off`. The function is PURE w.r.t.
  * its input env view; no `process.env` reads. The single canonical

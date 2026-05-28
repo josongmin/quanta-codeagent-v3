@@ -7,6 +7,8 @@
  *   `@skill-name`       → MentionKind = "skill"
  *   `plugin://name`     → MentionKind = "plugin"
  *   `@@app-name`        → MentionKind = "app"
+ *   `@file:<path>`      → MentionKind = "file"  (ADR-0413, explicit prefix)
+ *   `@<path>` w/ `/`|`.`→ MentionKind = "file"  (ADR-0413, bare path)
  *
  * Syntax rules (LOCKED — extending requires a new ADR):
  *
@@ -35,6 +37,27 @@
  *   7. Empty target after sigil (`@`, `plugin://`, `@@`) is NOT a
  *      mention. The full sigil MUST be followed by a valid identifier.
  *
+ * ADR-0413 — `@file` syntax (ADDITIVE; the 3-kind rules above are
+ * unchanged for inputs without a file mention):
+ *
+ *   8. File-path alphabet: `[A-Za-z0-9._/-]` (mixed case + `.` + `/`
+ *      allowed — file paths are NOT kebab-restricted). Whitespace and any
+ *      other byte terminate the path. `..` / absolute-path / traversal
+ *      handling is the resolver + fs-jail's job, NOT the lexer's.
+ *   9. Explicit form `@file:<path>` — the `file:` prefix is reserved;
+ *      `<path>` is one or more path-alphabet chars. Always wins over the
+ *      `@skill` alternative (matched first).
+ *  10. Bare form `@<path>` — matches only when `<path>` starts with a
+ *      path-alphabet char and contains at least one `/` or `.`. This
+ *      "must contain `/` or `.`" rule is the disambiguator: `@code-review`
+ *      (no `/`, no `.`) stays a `skill`; `@src/x.ts` / `@README.md`
+ *      become a `file`. The bare-file alternative is tried AFTER the
+ *      explicit `@file:` form but BEFORE `@skill`, so `@path/x` never
+ *      mis-classifies as skill `path`.
+ *  11. File `target` is the raw path (sigil/`file:` prefix stripped). It
+ *      is NOT length-capped at 64 (paths are legitimately longer); the
+ *      path-alphabet run is itself the only length bound.
+ *
  * NO-THROW invariant: any input string produces a `readonly ParsedMention[]`.
  * Pure: no clock read, no I/O, no global state.
  */
@@ -50,16 +73,37 @@ const MAX_TARGET_LEN = 64
  * group so the kind switch is regex-driven (not post-hoc string-prefix
  * sniffing — that would mis-classify `@@x` as `skill`).
  *
- * IMPORTANT ordering: `@@app` MUST be tried before `@skill`, otherwise the
- * single-`@` alternative consumes the first `@` and leaves `@app` dangling
- * as a fresh skill match. Plugin scheme is independent (no `@` prefix).
+ * IMPORTANT ordering (alternatives are tried left-to-right at each match
+ * position):
  *
- * The trailing negative-lookahead `(?![a-z0-9-])` enforces rule 4
- * (right-boundary). The non-capturing wrapper `(?:...)` keeps the group
- * indices stable.
+ *   1. `@@app`     — MUST precede `@skill`, otherwise the single-`@`
+ *                    alternative consumes the first `@` and leaves `@app`
+ *                    dangling as a fresh skill match.
+ *   2. `@file:`    — explicit file prefix (ADR-0413). MUST precede `@skill`
+ *                    so `@file:Makefile` is a file even when the path has
+ *                    no `/` or `.` (the bare-file alternative would reject
+ *                    it, and `@skill` would mis-grab `file`).
+ *   3. `@<path>`   — bare file path (ADR-0413). MUST precede `@skill` so
+ *                    `@src/x.ts` is a file, not skill `src`. The mandatory
+ *                    `[./]` class means a `/`-or-`.`-free token (e.g.
+ *                    `@code-review`) skips this alternative and falls to
+ *                    `@skill`.
+ *   4. `plugin://` — independent scheme (no `@` prefix); order-insensitive.
+ *   5. `@skill`    — kebab identifier; the residual single-`@` case. Guards
+ *                    against the reserved `@file:` prefix with a `(?!file:)`
+ *                    lookahead so a malformed `@file:` (empty path) does NOT
+ *                    degrade into a `skill` named `file` — it is simply not
+ *                    a mention (rule 9: the explicit prefix needs ≥1 path
+ *                    char). A bare `@file` with no colon is still a valid
+ *                    skill mention.
+ *
+ * Right-boundary: the three legacy alternatives keep their negative
+ * lookahead `(?![a-z0-9-])` (rule 4). The file alternatives use
+ * `(?![A-Za-z0-9._/-])` so the match stops only at a non-path byte (a
+ * trailing path char would otherwise be a prefix of a longer path).
  */
 const MENTION_RE =
-  /(?<app>@@(?<appName>[a-z][a-z0-9-]*))(?![a-z0-9-])|(?<plugin>plugin:\/\/(?<pluginName>[a-z][a-z0-9-]*))(?![a-z0-9-])|(?<skill>@(?<skillName>[a-z][a-z0-9-]*))(?![a-z0-9-])/g
+  /(?<app>@@(?<appName>[a-z][a-z0-9-]*))(?![a-z0-9-])|(?<fileExplicit>@file:(?<fileExplicitPath>[A-Za-z0-9._/-]+))(?![A-Za-z0-9._/-])|(?<fileBare>@(?<fileBarePath>[A-Za-z0-9_-]*[./][A-Za-z0-9._/-]*))(?![A-Za-z0-9._/-])|(?<plugin>plugin:\/\/(?<pluginName>[a-z][a-z0-9-]*))(?![a-z0-9-])|(?<skill>@(?!file:)(?<skillName>[a-z][a-z0-9-]*))(?![a-z0-9-])/g
 
 /**
  * Left-boundary predicate (rule 3). `prevChar` is the codepoint
@@ -89,6 +133,13 @@ const dispatchKind = (
   if (groups.app !== undefined && groups.appName !== undefined) {
     return { kind: "app", target: groups.appName }
   }
+  // ADR-0413 — both file forms map to kind="file" with the raw path target.
+  if (groups.fileExplicit !== undefined && groups.fileExplicitPath !== undefined) {
+    return { kind: "file", target: groups.fileExplicitPath }
+  }
+  if (groups.fileBare !== undefined && groups.fileBarePath !== undefined) {
+    return { kind: "file", target: groups.fileBarePath }
+  }
   if (groups.plugin !== undefined && groups.pluginName !== undefined) {
     return { kind: "plugin", target: groups.pluginName }
   }
@@ -113,7 +164,10 @@ const validateMatch = (m: RegExpMatchArray, text: string): ParsedMention | null 
 
   const dispatch = dispatchKind(m.groups ?? {})
   if (dispatch === null) return null
-  if (dispatch.target.length > MAX_TARGET_LEN) return null
+  // The 64-char cap is for kebab identifiers (skill/plugin/app); file
+  // paths (ADR-0413) are legitimately longer and bounded by the
+  // path-alphabet run instead (rule 11).
+  if (dispatch.kind !== "file" && dispatch.target.length > MAX_TARGET_LEN) return null
 
   return {
     kind: dispatch.kind,

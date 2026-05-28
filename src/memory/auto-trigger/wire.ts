@@ -1,5 +1,5 @@
 /**
- * ADR-0281 + ADR-0282 + ADR-0413 — env → `TriggerPolicy` projection helper.
+ * ADR-0281 + ADR-0282 + ADR-0414 — env → `TriggerPolicy` projection helper.
  *
  * Co-located WITH the slice (rather than in `@/apps/agent`) so the
  * commit landing the slice is self-contained: the hellgate's
@@ -13,7 +13,7 @@
  * Reads three env knobs and produces a small typed config object the
  * host plugs into its session-start / session-end hooks:
  *
- *   - `QUANTA_MEMORY_AUTO`        — default ON (ADR-0413). Falsey set
+ *   - `QUANTA_MEMORY_AUTO`        — default ON (ADR-0414). Falsey set
  *                                   `0 / off / no / false` (case-insensitive,
  *                                   trim) ⇒ disabled (returns `null`).
  *                                   Any other value (incl. absent / "on" /
@@ -23,7 +23,7 @@
  *   - `QUANTA_MEMORY_MIN_USAGE`   — minimum usageCount gate (default 1).
  *                                   Invalid int OR negative ⇒ default.
  *
- * Default-ON (ADR-0413): a fresh install with no env knobs gets cross-
+ * Default-ON (ADR-0414): a fresh install with no env knobs gets cross-
  * session memory automatically. The legacy default-OFF behavior is
  * reachable via `QUANTA_MEMORY_AUTO=off`. The function is PURE w.r.t.
  * its input env view; no `process.env` reads.
@@ -43,7 +43,7 @@ export interface MemoryAutoSlot {
   readonly policy: TriggerPolicy
 }
 
-/** Project an env view to a `MemoryAutoSlot` or `null`. ADR-0413: default ON. */
+/** Project an env view to a `MemoryAutoSlot` or `null`. ADR-0414: default ON. */
 export const assembleMemoryAuto = (
   env: Readonly<Record<string, string | undefined>>,
 ): MemoryAutoSlot | null => {

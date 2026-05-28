@@ -1,11 +1,13 @@
 /**
- * ADR-0413 HELLGATE — `buildMemoryForSession` single canonical factory
+ * ADR-0414 HELLGATE — `buildMemoryForSession` single canonical factory
  * that resolves store + config + auto-trigger slots with default-ON
  * semantics and bench/replay escape hatch.
  *
  * Adversarial matrix:
- *   - default-ON: unset env ⇒ sqlite store, memory config, auto-trigger on
+ *   - default-ON: unset env ⇒ VOLATILE InMemoryStore, memory config,
+ *     auto-trigger on (TKT-003 req #4 — default never writes to disk)
  *   - explicit kinds: sqlite / memory / 1 / true / yes / on / "" ⇒ store on
+ *     (only `sqlite` opens an on-disk store; all other truthy ⇒ volatile)
  *   - falsey values: 0 / off / no / false (lower + upper trim) ⇒ all OFF
  *   - case-insensitive parse for falsey values + truthy values
  *   - override.storeDisabled flips the WHOLE bundle to `{}` even when env
@@ -48,14 +50,14 @@ const withTmpSqlite = (run: (path: string) => void): void => {
 }
 
 describe("buildMemoryForSession — default-ON contract", () => {
-  test("env unset ⇒ all three slots present (store=sqlite, config truthy, autoTrigger default policy)", () => {
-    withTmpSqlite((p) => {
-      const slot = buildMemoryForSession(env({ QUANTA_MEMORY_PATH: p }))
-      expect(slot.store).toBeDefined()
-      expect(typeof slot.store?.recall).toBe("function")
-      expect(slot.config).toBeDefined()
-      expect(slot.autoTrigger).toEqual({ promoteThreshold: 0.7, minUsageCount: 1 })
-    })
+  test("env unset ⇒ all three slots present (store=VOLATILE InMemoryStore, config truthy, autoTrigger default policy) — NO disk write", () => {
+    // TKT-003 req #4 — the unset default must NOT touch disk, so no
+    // `QUANTA_MEMORY_PATH` / tmp dir is needed: a bare call yields a store.
+    const slot = buildMemoryForSession(env({}))
+    expect(slot.store).toBeDefined()
+    expect(typeof slot.store?.recall).toBe("function")
+    expect(slot.config).toBeDefined()
+    expect(slot.autoTrigger).toEqual({ promoteThreshold: 0.7, minUsageCount: 1 })
   })
 
   test("QUANTA_MEMORY=memory ⇒ volatile InMemoryStore (no sqlite path needed)", () => {
@@ -66,15 +68,25 @@ describe("buildMemoryForSession — default-ON contract", () => {
   })
 
   test.each(["1", "true", "on", "yes", "", "TRUE", "On"])(
-    "QUANTA_MEMORY=%p (truthy) ⇒ store=sqlite (the default kind)",
+    "QUANTA_MEMORY=%p (bare truthy) ⇒ VOLATILE store (default kind never writes to disk)",
     (raw) => {
-      withTmpSqlite((p) => {
-        const slot = buildMemoryForSession(env({ QUANTA_MEMORY: raw, QUANTA_MEMORY_PATH: p }))
-        expect(slot.store).toBeDefined()
-        expect(slot.config).toBeDefined()
-      })
+      // No tmp dir / path needed — a bare truthy value resolves to the
+      // volatile kind, NOT sqlite (persistent is `QUANTA_MEMORY=sqlite` only).
+      const slot = buildMemoryForSession(env({ QUANTA_MEMORY: raw }))
+      expect(slot.store).toBeDefined()
+      expect(typeof slot.store?.recall).toBe("function")
+      expect(slot.config).toBeDefined()
     },
   )
+
+  test("QUANTA_MEMORY=sqlite ⇒ on-disk store (the ONLY persistent opt-in)", () => {
+    withTmpSqlite((p) => {
+      const slot = buildMemoryForSession(env({ QUANTA_MEMORY: "sqlite", QUANTA_MEMORY_PATH: p }))
+      expect(slot.store).toBeDefined()
+      expect(typeof slot.store?.recall).toBe("function")
+      expect(slot.config).toBeDefined()
+    })
+  })
 })
 
 describe("buildMemoryForSession — falsey QUANTA_MEMORY collapses entire bundle", () => {

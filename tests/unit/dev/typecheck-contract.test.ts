@@ -26,7 +26,11 @@ describe("typecheck contract", () => {
     const testsConfig = readJson<{ include: string[]; exclude: string[] }>("tsconfig.typecheck.tests.json")
     expect(srcConfig.include).toEqual(["src", "tools"])
     expect(srcConfig.exclude).toContain("tests")
-    expect(testsConfig.include).toEqual(["tests"])
+    expect(srcConfig.exclude).toContain("src/**/__tests__")
+    expect(testsConfig.include).toContain("tests")
+    expect(testsConfig.include).toContain("src/**/*.d.ts")
+    expect(testsConfig.include).toContain("tools/**/*.d.ts")
+    expect(testsConfig.include).toContain("src/**/__tests__/**/*.ts")
     expect(testsConfig.exclude).toContain("tests/smoke/fixtures")
   })
 
