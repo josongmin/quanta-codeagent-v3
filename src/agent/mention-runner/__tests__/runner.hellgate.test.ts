@@ -1,5 +1,5 @@
 /**
- * ADR-0330 — `createMentionInjector` hellgate.
+ * ADR-0330 / ADR-0418 — `createMentionInjector` async hellgate.
  *
  *   A. Empty / no-mention input                 (2)
  *   B. Known skill ⇒ single message             (1)
@@ -35,23 +35,23 @@ const textOf = (msg: { content: ReadonlyArray<unknown> } | undefined): string =>
 describe("createMentionInjector — ADR-0330 hellgate", () => {
   // -------- A. empty / no-mention ------------------------------------
 
-  test("A1 — empty input ⇒ []", () => {
+  test("A1 — empty input ⇒ []", async () => {
     const inject = createMentionInjector({ skills: fakeSkills({}) })
-    expect(inject("")).toEqual([])
+    expect(await inject("")).toEqual([])
   })
 
-  test("A2 — input with no mentions ⇒ []", () => {
+  test("A2 — input with no mentions ⇒ []", async () => {
     const inject = createMentionInjector({ skills: fakeSkills({ x: "X tagline" }) })
-    expect(inject("just some text, no sigils")).toEqual([])
+    expect(await inject("just some text, no sigils")).toEqual([])
   })
 
   // -------- B. known skill -------------------------------------------
 
-  test("B1 — known @skill ⇒ 1 <mention> message", () => {
+  test("B1 — known @skill ⇒ 1 <mention> message", async () => {
     const inject = createMentionInjector({
       skills: fakeSkills({ "code-review": "Review the diff for correctness bugs" }),
     })
-    const out = inject("please run @code-review now")
+    const out = await inject("please run @code-review now")
     expect(out).toHaveLength(1)
     const t = textOf(out[0])
     expect(t.startsWith("<mention>")).toBe(true)
@@ -63,71 +63,71 @@ describe("createMentionInjector — ADR-0330 hellgate", () => {
 
   // -------- C. unknown skill -----------------------------------------
 
-  test("C1 — unknown @skill ⇒ resolver returns null ⇒ no message", () => {
+  test("C1 — unknown @skill ⇒ resolver returns null ⇒ no message", async () => {
     const inject = createMentionInjector({ skills: fakeSkills({}) })
-    expect(inject("@unknown-skill go")).toEqual([])
+    expect(await inject("@unknown-skill go")).toEqual([])
   })
 
   // -------- D. mixed known + unknown ---------------------------------
 
-  test("D1 — mixed known + unknown ⇒ only known appears", () => {
+  test("D1 — mixed known + unknown ⇒ only known appears", async () => {
     const inject = createMentionInjector({
       skills: fakeSkills({ "code-review": "known tagline" }),
     })
-    const out = inject("@code-review then @missing-one")
+    const out = await inject("@code-review then @missing-one")
     expect(out).toHaveLength(1)
     expect(textOf(out[0])).toContain("target: code-review")
   })
 
   // -------- E. plugin frozen-null ------------------------------------
 
-  test("E1 — plugin://gh ⇒ no message (plugin resolver always null)", () => {
+  test("E1 — plugin://gh ⇒ no message (plugin resolver always null)", async () => {
     const inject = createMentionInjector({
       // Even if a "gh" skill existed, plugin resolver does not touch the
       // skill registry — frozen by ADR-0330.
       skills: fakeSkills({ gh: "would-be body" }),
     })
-    expect(inject("use plugin://gh now")).toEqual([])
+    expect(await inject("use plugin://gh now")).toEqual([])
   })
 
   // -------- F. app frozen-null ---------------------------------------
 
-  test("F1 — @@app-x ⇒ no message (app resolver always null)", () => {
+  test("F1 — @@app-x ⇒ no message (app resolver always null)", async () => {
     const inject = createMentionInjector({
       skills: fakeSkills({ "app-x": "would-be body" }),
     })
-    expect(inject("open @@app-x please")).toEqual([])
+    expect(await inject("open @@app-x please")).toEqual([])
   })
 
   // -------- G. NO-THROW (hostile registry) ---------------------------
 
-  test("G1 — registry.lookup throws ⇒ unknown-treated, no message, no escape", () => {
+  test("G1 — registry.lookup throws ⇒ unknown-treated, no message, no escape", async () => {
     const hostile: SkillRegistryReadOnly = {
       lookup() {
         throw new Error("boom")
       },
     }
     const inject = createMentionInjector({ skills: hostile })
-    expect(inject("@anything go")).toEqual([])
+    expect(await inject("@anything go")).toEqual([])
   })
 
   // -------- H. dedup -------------------------------------------------
 
-  test("H1 — same @skill mentioned twice ⇒ exactly 1 message (parser dedup)", () => {
+  test("H1 — same @skill mentioned twice ⇒ exactly 1 message (parser dedup)", async () => {
     const inject = createMentionInjector({
       skills: fakeSkills({ x: "X tagline" }),
     })
-    const out = inject("first @x and then @x again")
+    const out = await inject("first @x and then @x again")
     expect(out).toHaveLength(1)
   })
 
   // -------- I. order preservation ------------------------------------
 
-  test("I1 — multiple known skills preserve first-occurrence order", () => {
+  test("I1 — multiple known skills preserve first-occurrence order", async () => {
     const inject = createMentionInjector({
       skills: fakeSkills({ alpha: "A", beta: "B", gamma: "C" }),
     })
-    const out = inject("@gamma then @alpha then @beta")
+    const out = await inject("@gamma then @alpha then @beta")
     expect(out).toHaveLength(3)
     expect(textOf(out[0])).toContain("target: gamma")
     expect(textOf(out[1])).toContain("target: alpha")
@@ -136,11 +136,11 @@ describe("createMentionInjector — ADR-0330 hellgate", () => {
 
   // -------- J. first-line semantics ----------------------------------
 
-  test("J1 — multi-line description ⇒ only first line shows in body", () => {
+  test("J1 — multi-line description ⇒ only first line shows in body", async () => {
     const inject = createMentionInjector({
       skills: fakeSkills({ x: "Tagline only.\nSecret body must NOT leak." }),
     })
-    const out = inject("@x")
+    const out = await inject("@x")
     expect(out).toHaveLength(1)
     const t = textOf(out[0])
     expect(t).toContain("Tagline only.")

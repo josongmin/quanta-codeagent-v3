@@ -177,7 +177,7 @@ describe("ADR-0334 §D — bench driver passes EMPTY deps", () => {
 
 describe("ADR-0334 §E — caller-override precedence across surfaces", () => {
   test("host pre-populated mentionInjector survives assemble + lifecycle install", async () => {
-    const hostInjector = () => []
+    const hostInjector = async () => []
     const cfg = assembleAgentConfig({
       mode: "interactive",
       base: { ...baseFor(), mentionInjector: hostInjector },

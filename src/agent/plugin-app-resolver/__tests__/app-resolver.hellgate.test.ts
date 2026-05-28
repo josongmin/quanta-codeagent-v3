@@ -21,22 +21,22 @@ const stubCatalog = (lookup: (id: string) => AppDescriptor | null): AppCatalogPo
   list: () => [],
 })
 
-describe("createAppResolver — ADR-0336 hellgate", () => {
+describe("createAppResolver — ADR-0336/0418 async hellgate", () => {
   // -------- A. catalog absent / null -----------------------------
 
-  test("A1 — catalog omitted ⇒ null", () => {
+  test("A1 — catalog omitted ⇒ null", async () => {
     const resolve = createAppResolver()
-    expect(resolve?.("browser")).toBeNull()
+    expect(await resolve?.("browser")).toBeNull()
   })
 
-  test("A2 — catalog.lookup returns null ⇒ null", () => {
+  test("A2 — catalog.lookup returns null ⇒ null", async () => {
     const resolve = createAppResolver(stubCatalog(() => null))
-    expect(resolve?.("missing")).toBeNull()
+    expect(await resolve?.("missing")).toBeNull()
   })
 
   // -------- B. hit with description ------------------------------
 
-  test("B1 — descriptor with description ⇒ bodyText = surface + ' — ' + description", () => {
+  test("B1 — descriptor with description ⇒ bodyText = surface + ' — ' + description", async () => {
     const resolve = createAppResolver(
       stubCatalog(() => ({
         id: "browser",
@@ -44,32 +44,32 @@ describe("createAppResolver — ADR-0336 hellgate", () => {
         description: "the embedded browser",
       })),
     )
-    expect(resolve?.("browser")).toEqual({
+    expect(await resolve?.("browser")).toEqual({
       bodyText: "surface: cli-browser — the embedded browser",
     })
   })
 
   // -------- C. hit without description ---------------------------
 
-  test("C1 — descriptor without description ⇒ bodyText = surface only", () => {
+  test("C1 — descriptor without description ⇒ bodyText = surface only", async () => {
     const resolve = createAppResolver(stubCatalog(() => ({ id: "x", surface: "cli" })))
-    expect(resolve?.("x")).toEqual({ bodyText: "surface: cli" })
+    expect(await resolve?.("x")).toEqual({ bodyText: "surface: cli" })
   })
 
   // -------- D. NO-THROW invariant --------------------------------
 
-  test("D1 — catalog throws ⇒ null", () => {
+  test("D1 — catalog throws ⇒ null", async () => {
     const resolve = createAppResolver(
       stubCatalog(() => {
         throw new Error("hostile catalog")
       }),
     )
-    expect(resolve?.("anything")).toBeNull()
+    expect(await resolve?.("anything")).toBeNull()
   })
 
   // -------- E. empty / whitespace target -------------------------
 
-  test("E1 — empty target ⇒ null (no lookup call)", () => {
+  test("E1 — empty target ⇒ null (no lookup call)", async () => {
     let called = false
     const resolve = createAppResolver(
       stubCatalog(() => {
@@ -77,16 +77,16 @@ describe("createAppResolver — ADR-0336 hellgate", () => {
         return null
       }),
     )
-    expect(resolve?.("")).toBeNull()
+    expect(await resolve?.("")).toBeNull()
     expect(called).toBe(false)
   })
 
   // -------- F. all 3 default surfaces resolvable -----------------
 
-  test("F1 — defaultAppCatalog resolves all three surface ids", () => {
+  test("F1 — defaultAppCatalog resolves all three surface ids", async () => {
     const resolve = createAppResolver(defaultAppCatalog)
-    expect(resolve?.("cli")?.bodyText).toContain("surface: cli")
-    expect(resolve?.("browser")?.bodyText).toContain("surface: cli-browser")
-    expect(resolve?.("desktop")?.bodyText).toContain("surface: web-tauri")
+    expect((await resolve?.("cli"))?.bodyText).toContain("surface: cli")
+    expect((await resolve?.("browser"))?.bodyText).toContain("surface: cli-browser")
+    expect((await resolve?.("desktop"))?.bodyText).toContain("surface: web-tauri")
   })
 })

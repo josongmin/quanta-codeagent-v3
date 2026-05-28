@@ -25,58 +25,58 @@ const fakeSkills = (table: Readonly<Record<string, string>>): SkillRegistryReadO
   },
 })
 
-describe("createCompositeMentionResolver — ADR-0336 hellgate", () => {
+describe("createCompositeMentionResolver — ADR-0336/0418 async hellgate", () => {
   // -------- A. empty deps ----------------------------------------
 
-  test("A1 — empty deps ⇒ all three kinds return null", () => {
+  test("A1 — empty deps ⇒ all three kinds return null", async () => {
     const port = createCompositeMentionResolver()
-    expect(port.resolveSkill?.("any")).toBeNull()
-    expect(port.resolvePlugin?.("any")).toBeNull()
-    expect(port.resolveApp?.("any")).toBeNull()
+    expect(await port.resolveSkill?.("any")).toBeNull()
+    expect(await port.resolvePlugin?.("any")).toBeNull()
+    expect(await port.resolveApp?.("any")).toBeNull()
   })
 
   // -------- B. skill-only ----------------------------------------
 
-  test("B1 — skill-only deps ⇒ plugin/app still null, skill works", () => {
+  test("B1 — skill-only deps ⇒ plugin/app still null, skill works", async () => {
     const port = createCompositeMentionResolver({
       skills: fakeSkills({ "code-review": "Review the diff" }),
     })
-    expect(port.resolveSkill?.("code-review")).toEqual({ bodyText: "Review the diff" })
-    expect(port.resolvePlugin?.("code-review")).toBeNull()
-    expect(port.resolveApp?.("code-review")).toBeNull()
+    expect(await port.resolveSkill?.("code-review")).toEqual({ bodyText: "Review the diff" })
+    expect(await port.resolvePlugin?.("code-review")).toBeNull()
+    expect(await port.resolveApp?.("code-review")).toBeNull()
   })
 
   // -------- C. plugin-only ---------------------------------------
 
-  test("C1 — plugin-only deps ⇒ skill/app null, plugin works", () => {
+  test("C1 — plugin-only deps ⇒ skill/app null, plugin works", async () => {
     const port = createCompositeMentionResolver({
       plugins: createInMemoryPluginRegistry([
         { id: "gh", name: "GitHub", capabilities: ["Read"], description: "GH desc" },
       ]),
     })
-    expect(port.resolveSkill?.("gh")).toBeNull()
-    expect(port.resolvePlugin?.("gh")).toEqual({ bodyText: "GH desc" })
-    expect(port.resolveApp?.("gh")).toBeNull()
+    expect(await port.resolveSkill?.("gh")).toBeNull()
+    expect(await port.resolvePlugin?.("gh")).toEqual({ bodyText: "GH desc" })
+    expect(await port.resolveApp?.("gh")).toBeNull()
   })
 
   // -------- D. app-only ------------------------------------------
 
-  test("D1 — app-only deps ⇒ skill/plugin null, app works", () => {
+  test("D1 — app-only deps ⇒ skill/plugin null, app works", async () => {
     const port = createCompositeMentionResolver({
       apps: createInMemoryAppCatalog([
         { id: "browser", surface: "cli-browser", description: "the browser" },
       ]),
     })
-    expect(port.resolveSkill?.("browser")).toBeNull()
-    expect(port.resolvePlugin?.("browser")).toBeNull()
-    expect(port.resolveApp?.("browser")).toEqual({
+    expect(await port.resolveSkill?.("browser")).toBeNull()
+    expect(await port.resolvePlugin?.("browser")).toBeNull()
+    expect(await port.resolveApp?.("browser")).toEqual({
       bodyText: "surface: cli-browser — the browser",
     })
   })
 
   // -------- E. all three wired -----------------------------------
 
-  test("E1 — all three deps wired ⇒ each kind resolves independently", () => {
+  test("E1 — all three deps wired ⇒ each kind resolves independently", async () => {
     const port = createCompositeMentionResolver({
       skills: fakeSkills({ s: "skill body" }),
       plugins: createInMemoryPluginRegistry([
@@ -84,14 +84,14 @@ describe("createCompositeMentionResolver — ADR-0336 hellgate", () => {
       ]),
       apps: createInMemoryAppCatalog([{ id: "a", surface: "cli", description: "app body" }]),
     })
-    expect(port.resolveSkill?.("s")).toEqual({ bodyText: "skill body" })
-    expect(port.resolvePlugin?.("p")).toEqual({ bodyText: "plug body" })
-    expect(port.resolveApp?.("a")).toEqual({ bodyText: "surface: cli — app body" })
+    expect(await port.resolveSkill?.("s")).toEqual({ bodyText: "skill body" })
+    expect(await port.resolvePlugin?.("p")).toEqual({ bodyText: "plug body" })
+    expect(await port.resolveApp?.("a")).toEqual({ bodyText: "surface: cli — app body" })
   })
 
   // -------- F. kind-dispatch isolation ---------------------------
 
-  test("F1 — same target across kinds resolves independently (no fallthrough)", () => {
+  test("F1 — same target across kinds resolves independently (no fallthrough)", async () => {
     // Three deps all keyed by "shared" — confirm each method consults
     // ONLY its own registry / catalog (no cross-kind fallback).
     const port = createCompositeMentionResolver({
@@ -103,14 +103,14 @@ describe("createCompositeMentionResolver — ADR-0336 hellgate", () => {
         { id: "shared", surface: "cli-browser", description: "app-shared" },
       ]),
     })
-    expect(port.resolveSkill?.("shared")?.bodyText).toBe("skill-shared")
-    expect(port.resolvePlugin?.("shared")?.bodyText).toBe("plugin-shared")
-    expect(port.resolveApp?.("shared")?.bodyText).toBe("surface: cli-browser — app-shared")
+    expect((await port.resolveSkill?.("shared"))?.bodyText).toBe("skill-shared")
+    expect((await port.resolvePlugin?.("shared"))?.bodyText).toBe("plugin-shared")
+    expect((await port.resolveApp?.("shared"))?.bodyText).toBe("surface: cli-browser — app-shared")
   })
 
   // -------- G. NO-THROW across all three -------------------------
 
-  test("G1 — hostile dep throws on every kind ⇒ all three return null", () => {
+  test("G1 — hostile dep throws on every kind ⇒ all three return null", async () => {
     const throwingSkills: SkillRegistryReadOnly = {
       lookup() {
         throw new Error("skill boom")
@@ -133,8 +133,8 @@ describe("createCompositeMentionResolver — ADR-0336 hellgate", () => {
       plugins: throwingPlugins,
       apps: throwingApps,
     })
-    expect(port.resolveSkill?.("x")).toBeNull()
-    expect(port.resolvePlugin?.("x")).toBeNull()
-    expect(port.resolveApp?.("x")).toBeNull()
+    expect(await port.resolveSkill?.("x")).toBeNull()
+    expect(await port.resolvePlugin?.("x")).toBeNull()
+    expect(await port.resolveApp?.("x")).toBeNull()
   })
 })

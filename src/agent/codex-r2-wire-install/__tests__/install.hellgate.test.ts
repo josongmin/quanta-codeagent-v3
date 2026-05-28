@@ -43,9 +43,9 @@ const makeSnapshot = (
 })
 
 const stubResolver: MentionResolverPort = {
-  resolveSkill: (target) => ({ bodyText: `skill:${target}` }),
-  resolvePlugin: () => null,
-  resolveApp: () => null,
+  resolveSkill: async (target) => ({ bodyText: `skill:${target}` }),
+  resolvePlugin: async () => null,
+  resolveApp: async () => null,
 }
 
 describe("ADR-0332 §A — empty deps", () => {
@@ -126,21 +126,21 @@ describe("ADR-0332 §C — compaction-event emit", () => {
 })
 
 describe("ADR-0332 §D — mention injector", () => {
-  test("resolver ⇒ mentionInjector wired; parses + builds messages", () => {
+  test("resolver ⇒ mentionInjector wired; parses + builds messages", async () => {
     const cfg = makeBareCfg()
     installCodexR2Wires(cfg, { mentionResolver: stubResolver })
     expect(cfg.mentionInjector).toBeDefined()
 
-    const msgs = cfg.mentionInjector?.("hey @demo please") ?? []
+    const msgs = (await cfg.mentionInjector?.("hey @demo please")) ?? []
     expect(msgs.length).toBe(1)
     expect(msgs[0]?.role).toBe("user")
   })
 
-  test("resolver + store ⇒ mention skill events also land on store", () => {
+  test("resolver + store ⇒ mention skill events also land on store", async () => {
     const cfg = makeBareCfg()
     const store = createInMemoryTypedHistoryEventStore()
     installCodexR2Wires(cfg, { mentionResolver: stubResolver, store })
-    cfg.mentionInjector?.("hey @demo please")
+    await cfg.mentionInjector?.("hey @demo please")
     const events = store.snapshot()
     expect(events.length).toBe(1)
     expect(events[0]?.kind).toBe("skill_activation")
@@ -186,7 +186,7 @@ describe("ADR-0332 §G — image-sanitization-retry slot", () => {
 describe("ADR-0332 §H — caller-override precedence", () => {
   test("cfg.mentionInjector already set ⇒ install does NOT overwrite", () => {
     const cfg = makeBareCfg()
-    const sentinel = (_t: string) => []
+    const sentinel = async (_t: string) => []
     cfg.mentionInjector = sentinel
     installCodexR2Wires(cfg, { mentionResolver: stubResolver })
     expect(cfg.mentionInjector).toBe(sentinel)

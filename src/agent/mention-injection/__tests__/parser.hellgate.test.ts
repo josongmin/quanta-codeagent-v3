@@ -1,5 +1,5 @@
 /**
- * ADR-0325 — Mention parser hellgate.
+ * ADR-0325 / ADR-0418 — Mention parser hellgate (legacy 3-kind subset).
  *
  *   A. Empty / boundary                         (2)
  *   B. Sigil alternatives + dedup               (5)
@@ -8,7 +8,10 @@
  *   E. Span correctness                         (2)
  *   F. Mixed input order preservation           (1)
  *
- * Total = 17 cases (>= the required 15).
+ * Total = 17 cases (>= the required 15). These prove the skill / plugin /
+ * app classification is unchanged under ADR-0418's cascade for kebab /
+ * plugin:// / @@ inputs. The file/symbol cascade is proven separately in
+ * `parser-file-symbol.hellgate.test.ts`.
  */
 
 import { describe, expect, test } from "bun:test"
@@ -94,8 +97,16 @@ describe("parseMentions — ADR-0325 hellgate", () => {
     expect(parseMentions("see @123abc")).toEqual([])
   })
 
-  test("D2 — uppercase identifier is NOT a mention (ASCII-lowercase only)", () => {
-    expect(parseMentions("@Code-Review")).toEqual([])
+  test("D2 — uppercase identifier is NOT a SKILL (ADR-0418: routes to symbol)", () => {
+    // Under the ADR-0418 cascade, an uppercase-leading `@<rest>` is a
+    // SYMBOL, not a skill. `@Code-Review` ⇒ symbol `Code` (the `-` is not
+    // in the symbol alphabet, so it stops there). The KEY invariant for
+    // THIS legacy-subset suite is: it is NOT a `skill`.
+    const out = parseMentions("@Code-Review")
+    expect(out).toHaveLength(1)
+    expect(out[0]?.kind).toBe("symbol")
+    expect(out[0]?.kind).not.toBe("skill")
+    expect(out[0]?.target).toBe("Code")
   })
 
   test("D3 — identifier > 64 chars is rejected", () => {

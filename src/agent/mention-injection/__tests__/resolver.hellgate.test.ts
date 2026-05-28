@@ -37,23 +37,23 @@ const APP_M: ParsedMention = {
 }
 
 const makeResolver = (overrides: Partial<MentionResolverPort> = {}): MentionResolverPort => ({
-  resolveSkill: () => null,
-  resolvePlugin: () => null,
-  resolveApp: () => null,
+  resolveSkill: async () => null,
+  resolvePlugin: async () => null,
+  resolveApp: async () => null,
   ...overrides,
 })
 
-describe("buildInjectionFragments — ADR-0325 hellgate", () => {
+describe("buildInjectionFragments — ADR-0325/0418 async hellgate", () => {
   // -------- A. empty / boundary --------------------------------------
 
-  test("A1 — empty mentions ⇒ []", () => {
-    expect(buildInjectionFragments([], makeResolver())).toEqual([])
+  test("A1 — empty mentions ⇒ []", async () => {
+    expect(await buildInjectionFragments([], makeResolver())).toEqual([])
   })
 
-  test("A2 — resolver returns empty string body ⇒ fragment IS produced (not skipped)", () => {
-    const out = buildInjectionFragments(
+  test("A2 — resolver returns empty string body ⇒ fragment IS produced (not skipped)", async () => {
+    const out = await buildInjectionFragments(
       [SKILL_M],
-      makeResolver({ resolveSkill: () => ({ bodyText: "" }) }),
+      makeResolver({ resolveSkill: async () => ({ bodyText: "" }) }),
     )
     expect(out).toHaveLength(1)
     expect(out[0]?.bodyText).toBe("")
@@ -61,18 +61,21 @@ describe("buildInjectionFragments — ADR-0325 hellgate", () => {
 
   // -------- B. unknown ⇒ skip ----------------------------------------
 
-  test("B1 — resolver returns null ⇒ fragment skipped", () => {
-    const out = buildInjectionFragments([SKILL_M], makeResolver({ resolveSkill: () => null }))
+  test("B1 — resolver returns null ⇒ fragment skipped", async () => {
+    const out = await buildInjectionFragments(
+      [SKILL_M],
+      makeResolver({ resolveSkill: async () => null }),
+    )
     expect(out).toEqual([])
   })
 
   // -------- C. NO-THROW invariant ------------------------------------
 
-  test("C1 — resolver throws ⇒ swallow, treat as null, no escape", () => {
-    const out = buildInjectionFragments(
+  test("C1 — resolver throws ⇒ swallow, treat as null, no escape", async () => {
+    const out = await buildInjectionFragments(
       [SKILL_M],
       makeResolver({
-        resolveSkill: () => {
+        resolveSkill: async () => {
           throw new Error("hostile registry")
         },
       }),
@@ -80,24 +83,36 @@ describe("buildInjectionFragments — ADR-0325 hellgate", () => {
     expect(out).toEqual([])
   })
 
+  test("C2 — resolver REJECTS (async rejection) ⇒ swallow, no escape", async () => {
+    const out = await buildInjectionFragments(
+      [SKILL_M],
+      makeResolver({ resolveSkill: () => Promise.reject(new Error("rejected")) }),
+    )
+    expect(out).toEqual([])
+  })
+
   // -------- D. kind dispatch hard isolation --------------------------
 
-  test("D1 — skill mention is NEVER routed to resolvePlugin / resolveApp", () => {
-    const resolveSkill = mock(() => null)
-    const resolvePlugin = mock(() => ({ bodyText: "plugin-wrong" }))
-    const resolveApp = mock(() => ({ bodyText: "app-wrong" }))
-    const out = buildInjectionFragments([SKILL_M], { resolveSkill, resolvePlugin, resolveApp })
+  test("D1 — skill mention is NEVER routed to resolvePlugin / resolveApp", async () => {
+    const resolveSkill = mock(async () => null)
+    const resolvePlugin = mock(async () => ({ bodyText: "plugin-wrong" }))
+    const resolveApp = mock(async () => ({ bodyText: "app-wrong" }))
+    const out = await buildInjectionFragments([SKILL_M], {
+      resolveSkill,
+      resolvePlugin,
+      resolveApp,
+    })
     expect(out).toEqual([])
     expect(resolveSkill).toHaveBeenCalledTimes(1)
     expect(resolvePlugin).not.toHaveBeenCalled()
     expect(resolveApp).not.toHaveBeenCalled()
   })
 
-  test("D2 — each of 3 kinds routes to the matching method exactly once", () => {
-    const resolveSkill = mock(() => ({ bodyText: "S-body" }))
-    const resolvePlugin = mock(() => ({ bodyText: "P-body" }))
-    const resolveApp = mock(() => ({ bodyText: "A-body" }))
-    const out = buildInjectionFragments([SKILL_M, PLUGIN_M, APP_M], {
+  test("D2 — each of 3 kinds routes to the matching method exactly once", async () => {
+    const resolveSkill = mock(async () => ({ bodyText: "S-body" }))
+    const resolvePlugin = mock(async () => ({ bodyText: "P-body" }))
+    const resolveApp = mock(async () => ({ bodyText: "A-body" }))
+    const out = await buildInjectionFragments([SKILL_M, PLUGIN_M, APP_M], {
       resolveSkill,
       resolvePlugin,
       resolveApp,
@@ -111,13 +126,13 @@ describe("buildInjectionFragments — ADR-0325 hellgate", () => {
 
   // -------- E. mixed kind ordering -----------------------------------
 
-  test("E1 — output order matches input order of RESOLVED mentions (skipped ones drop out)", () => {
-    const out = buildInjectionFragments(
+  test("E1 — output order matches input order of RESOLVED mentions (skipped ones drop out)", async () => {
+    const out = await buildInjectionFragments(
       [SKILL_M, PLUGIN_M, APP_M],
       makeResolver({
-        resolveSkill: () => ({ bodyText: "S" }),
-        resolvePlugin: () => null, // skipped
-        resolveApp: () => ({ bodyText: "A" }),
+        resolveSkill: async () => ({ bodyText: "S" }),
+        resolvePlugin: async () => null, // skipped
+        resolveApp: async () => ({ bodyText: "A" }),
       }),
     )
     expect(out).toHaveLength(2)
@@ -130,16 +145,16 @@ describe("buildInjectionFragments — ADR-0325 hellgate", () => {
 
   // -------- F. partial-port safety -----------------------------------
 
-  test("F1 — resolver missing a method (undefined cast) ⇒ that kind is silently skipped", () => {
+  test("F1 — resolver missing a method (undefined cast) ⇒ that kind is silently skipped", async () => {
     // Build a partial port. We assert the cast is intentional via a comment.
     const partial = {
-      resolveSkill: () => ({ bodyText: "S" }),
+      resolveSkill: async () => ({ bodyText: "S" }),
       // resolvePlugin missing entirely
-      resolveApp: () => ({ bodyText: "A" }),
+      resolveApp: async () => ({ bodyText: "A" }),
       // biome-ignore lint/suspicious/noExplicitAny: deliberate partial-port hostile shape
     } as any as MentionResolverPort
 
-    const out = buildInjectionFragments([SKILL_M, PLUGIN_M, APP_M], partial)
+    const out = await buildInjectionFragments([SKILL_M, PLUGIN_M, APP_M], partial)
     expect(out).toHaveLength(2)
     expect(out.map((f) => f.kind)).toEqual(["skill", "app"])
   })
