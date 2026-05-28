@@ -408,4 +408,27 @@ describe("HELLGATE [ADR-0394] — updatedAt clock seam", () => {
     expect(obj.createdAt).toBeGreaterThanOrEqual(before)
     expect(obj.createdAt).toBeLessThanOrEqual(after)
   })
+
+  // Audit R2 (F3): bounded growth defensive caps. The agent populates its own
+  // threads, but a pathological loop could otherwise grow these unbounded.
+  test("successCriteria capped at MAX_CRITERIA_PER_OBJECTIVE (256) — extras dropped", () => {
+    const store = createObjectiveStore({ now: () => 1000 })
+    const huge = Array.from({ length: 300 }, (_, i) => `criterion-${i}`)
+    const obj = store.set(TID, { goal: "g", successCriteria: huge })
+    expect(obj.successCriteria.length).toBe(256)
+    expect(obj.successCriteria[0]?.text).toBe("criterion-0")
+    expect(obj.successCriteria[255]?.text).toBe("criterion-255")
+  })
+
+  test("addBlocker capped at MAX_BLOCKERS_PER_OBJECTIVE (64) — extras silently dropped", () => {
+    const store = createObjectiveStore({ now: () => 1000 })
+    store.set(TID, { goal: "g" })
+    for (let i = 0; i < 80; i++) {
+      store.addBlocker(TID, { reason: `blk-${i}`, waitingOn: "user" })
+    }
+    const obj = store.get(TID)
+    expect(obj?.blockers.length).toBe(64)
+    expect(obj?.blockers[0]?.reason).toBe("blk-0")
+    expect(obj?.blockers[63]?.reason).toBe("blk-63")
+  })
 })

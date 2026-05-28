@@ -87,11 +87,21 @@ const toObjective = (cell: Cell): Objective =>
     updatedAt: cell.updatedAt,
   })
 
+/** Audit R2 (F3) defensive caps. The agent populates its own threads, so the
+ *  exploit surface is "agent misbehaves and floods its own state" — but a
+ *  bounded cap is cheap and mirrors the mailbox/run-ledger/approval-LRU
+ *  retention discipline. Tuned far above any realistic objective: 256 success
+ *  criteria + 64 simultaneous blockers per thread are already absurd; the cap
+ *  exists purely to bound pathological growth. */
+const MAX_CRITERIA_PER_OBJECTIVE = 256
+const MAX_BLOCKERS_PER_OBJECTIVE = 64
+
 const sanitizeCriteria = (raw: readonly string[] | undefined): SuccessCriterion[] => {
   if (!Array.isArray(raw)) return []
   const out: SuccessCriterion[] = []
   for (const entry of raw) {
     if (typeof entry !== "string") continue
+    if (out.length >= MAX_CRITERIA_PER_OBJECTIVE) break
     out.push({ id: randomUUID(), text: entry, met: false })
   }
   return out
@@ -206,6 +216,11 @@ export const createObjectiveStore = (opts?: { now?: () => number }): ObjectivePo
 
     addBlocker(threadId, blocker): Objective | null {
       return mutate(threadId, (cell) => {
+        // Audit R2 (F3): bounded blocker count per objective. Silently dropping
+        // is correct here — an agent that has hit 64 simultaneous unresolved
+        // blockers on one thread is already in a pathological state; adding a
+        // 65th would not help diagnosis.
+        if (cell.blockers.length >= MAX_BLOCKERS_PER_OBJECTIVE) return
         const waitingOn: WaitingOn =
           blocker?.waitingOn === "user" ||
           blocker?.waitingOn === "tool" ||
