@@ -1,5 +1,5 @@
 /**
- * ADR-0413 — Resolver `file` kind dispatch hellgate (additive to ADR-0325).
+ * ADR-0414 — Resolver `file` kind dispatch hellgate (additive to ADR-0325).
  *
  *   A. file mention routes to resolveFile ONLY        (1)
  *   B. resolveFile null ⇒ skipped                     (1)
@@ -32,7 +32,7 @@ const base = (overrides: Partial<MentionResolverPort> = {}): MentionResolverPort
   ...overrides,
 })
 
-describe("buildInjectionFragments file kind — ADR-0413 hellgate", () => {
+describe("buildInjectionFragments file kind — ADR-0414 hellgate", () => {
   test("A1 — file mention routes ONLY to resolveFile", () => {
     const resolveSkill = mock(() => ({ bodyText: "S-wrong" }))
     const resolvePlugin = mock(() => ({ bodyText: "P-wrong" }))

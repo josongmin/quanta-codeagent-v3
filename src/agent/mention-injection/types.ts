@@ -28,7 +28,7 @@
 
 /**
  * Closed set of mention kinds. Mirrors Codex's `build_skills_and_plugins`
- * three-way dispatch (skill / plugin / app), extended by ADR-0413 with a
+ * three-way dispatch (skill / plugin / app), extended by ADR-0414 with a
  * fourth sync `file` kind.
  *
  * - `skill` — user-invocable skill bundle (matches `@kebab-name`).
@@ -36,14 +36,14 @@
  * - `app` — third-party / OS app integration (matches `@@kebab-name`,
  *   double-`@` to disambiguate from `skill`).
  * - `file` — workspace file reference (matches `@file:<path>` or a bare
- *   `@<path>` containing `/` or `.`). ADDED by ADR-0413 as a pure-sync,
+ *   `@<path>` containing `/` or `.`). ADDED by ADR-0414 as a pure-sync,
  *   additive extension: resolution is `fs.readFileSync`, which fits the
  *   existing sync resolver contract with zero signature changes. The
  *   three legacy kinds are byte-identical.
  *
  * **Frozen at 4 kinds.** Extending (e.g. a future async `symbol` kind,
  * which would force the resolver/injector sync→async cascade) requires a
- * new ADR — see ADR-0413 §"deliberate_hold".
+ * new ADR — see ADR-0414 §"deliberate_hold".
  */
 export type MentionKind = "skill" | "plugin" | "app" | "file"
 

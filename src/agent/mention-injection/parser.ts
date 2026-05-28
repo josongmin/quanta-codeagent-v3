@@ -7,8 +7,8 @@
  *   `@skill-name`       → MentionKind = "skill"
  *   `plugin://name`     → MentionKind = "plugin"
  *   `@@app-name`        → MentionKind = "app"
- *   `@file:<path>`      → MentionKind = "file"  (ADR-0413, explicit prefix)
- *   `@<path>` w/ `/`|`.`→ MentionKind = "file"  (ADR-0413, bare path)
+ *   `@file:<path>`      → MentionKind = "file"  (ADR-0414, explicit prefix)
+ *   `@<path>` w/ `/`|`.`→ MentionKind = "file"  (ADR-0414, bare path)
  *
  * Syntax rules (LOCKED — extending requires a new ADR):
  *
@@ -37,7 +37,7 @@
  *   7. Empty target after sigil (`@`, `plugin://`, `@@`) is NOT a
  *      mention. The full sigil MUST be followed by a valid identifier.
  *
- * ADR-0413 — `@file` syntax (ADDITIVE; the 3-kind rules above are
+ * ADR-0414 — `@file` syntax (ADDITIVE; the 3-kind rules above are
  * unchanged for inputs without a file mention):
  *
  *   8. File-path alphabet: `[A-Za-z0-9._/-]` (mixed case + `.` + `/`
@@ -79,11 +79,11 @@ const MAX_TARGET_LEN = 64
  *   1. `@@app`     — MUST precede `@skill`, otherwise the single-`@`
  *                    alternative consumes the first `@` and leaves `@app`
  *                    dangling as a fresh skill match.
- *   2. `@file:`    — explicit file prefix (ADR-0413). MUST precede `@skill`
+ *   2. `@file:`    — explicit file prefix (ADR-0414). MUST precede `@skill`
  *                    so `@file:Makefile` is a file even when the path has
  *                    no `/` or `.` (the bare-file alternative would reject
  *                    it, and `@skill` would mis-grab `file`).
- *   3. `@<path>`   — bare file path (ADR-0413). MUST precede `@skill` so
+ *   3. `@<path>`   — bare file path (ADR-0414). MUST precede `@skill` so
  *                    `@src/x.ts` is a file, not skill `src`. The mandatory
  *                    `[./]` class means a `/`-or-`.`-free token (e.g.
  *                    `@code-review`) skips this alternative and falls to
@@ -133,7 +133,7 @@ const dispatchKind = (
   if (groups.app !== undefined && groups.appName !== undefined) {
     return { kind: "app", target: groups.appName }
   }
-  // ADR-0413 — both file forms map to kind="file" with the raw path target.
+  // ADR-0414 — both file forms map to kind="file" with the raw path target.
   if (groups.fileExplicit !== undefined && groups.fileExplicitPath !== undefined) {
     return { kind: "file", target: groups.fileExplicitPath }
   }
@@ -165,7 +165,7 @@ const validateMatch = (m: RegExpMatchArray, text: string): ParsedMention | null 
   const dispatch = dispatchKind(m.groups ?? {})
   if (dispatch === null) return null
   // The 64-char cap is for kebab identifiers (skill/plugin/app); file
-  // paths (ADR-0413) are legitimately longer and bounded by the
+  // paths (ADR-0414) are legitimately longer and bounded by the
   // path-alphabet run instead (rule 11).
   if (dispatch.kind !== "file" && dispatch.target.length > MAX_TARGET_LEN) return null
 

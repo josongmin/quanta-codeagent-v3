@@ -1,5 +1,5 @@
 /**
- * ADR-0413 — Composite resolver `files` dep hellgate (additive to ADR-0336).
+ * ADR-0414 — Composite resolver `files` dep hellgate (additive to ADR-0336).
  *
  *   A. no `files` dep ⇒ port has NO resolveFile key (legacy shape)  (2)
  *   B. `files` dep wired ⇒ resolveFile reads the file               (1)
@@ -9,10 +9,10 @@
  * shape is byte-identical (no edit there).
  */
 
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { createCompositeMentionResolver } from "../composite-resolver"
 
 let root: string
@@ -26,7 +26,7 @@ afterAll(() => {
   rmSync(root, { recursive: true, force: true })
 })
 
-describe("createCompositeMentionResolver files dep — ADR-0413 hellgate", () => {
+describe("createCompositeMentionResolver files dep — ADR-0414 hellgate", () => {
   // -------- A. legacy shape preserved -------------------------------
 
   test("A1 — no files dep ⇒ resolveFile key is absent (legacy 3-kind shape)", () => {

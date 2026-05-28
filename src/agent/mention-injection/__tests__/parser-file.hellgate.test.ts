@@ -1,5 +1,5 @@
 /**
- * ADR-0413 — `@file` mention parser hellgate (additive to ADR-0325).
+ * ADR-0414 — `@file` mention parser hellgate (additive to ADR-0325).
  *
  *   A. @file:<path> explicit prefix              (3)
  *   B. bare @<path> with `/` or `.`              (4)
@@ -15,7 +15,7 @@
 import { describe, expect, test } from "bun:test"
 import { parseMentions } from "../parser"
 
-describe("parseMentions @file — ADR-0413 hellgate", () => {
+describe("parseMentions @file — ADR-0414 hellgate", () => {
   // -------- A. explicit @file: prefix --------------------------------
 
   test("A1 — @file:src/x.ts ⇒ kind=file, target is the raw path", () => {

@@ -1,4 +1,9 @@
-# ADR-0413 — `@file` mention kind (sync, additive extension of frozen ADR-0325)
+# ADR-0414 — `@file` mention kind (sync, additive extension of frozen ADR-0325)
+
+> Renumbered from a drafted 0413 under the user-deference ADR-collision
+> policy: a parallel track landed `0413-memory-learning-default-on-via-session-factory.md`
+> (plus an "ADR-0413 Part 1" runLedger/approvalStateMachine commit). The user
+> keeps 0413; this slice moved to the next free number, 0414.
 
 **Status:** Accepted (2026-05-28)
 **Slice:**
