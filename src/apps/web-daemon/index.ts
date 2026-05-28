@@ -21,9 +21,8 @@
  */
 
 import type { RuntimeFacade } from "@/sdk/runtime"
-import { createObservabilityEmitter } from "./observability-emitter"
 import type { ObservableRuntimeFacade } from "./runtime-factory"
-import { startWebDaemon } from "./server"
+import { type ObservabilityPorts, startWebDaemon } from "./server"
 import type { WebDaemonConfig, WebDaemonHandle } from "./types"
 
 const DEFAULT_PORT = 4096
@@ -70,23 +69,35 @@ const resolveObservableFactory = async (
 }
 
 /**
- * ADR-0406 + ADR-0415 — start the observability emitter fed by the four live
- * facade ports. Default-OFF: a facade with no ports (or `undefined`) ⇒ the
- * emitter installs no timer + never writes to the wire (silent no-op). The
- * daemon's WS sink is per-connection (the server fans deltas out via the
- * session transport); until a daemon-level broadcast sink exists the emitter
- * runs port-only — the live ports are the load-bearing ADR-0415 deliverable.
+ * ADR-0415 + ADR-0420 — project the live facade ports into the per-connection
+ * observability port bundle the server attaches to each WebSocket. ADR-0415
+ * fed these ports to a port-ONLY emitter (no sink ⇒ frames went nowhere);
+ * ADR-0420 closes that deferral: the server mints ONE emitter per connection
+ * whose `ws` sink forwards `observability.snapshot`/`.delta` frames to the
+ * connected UI. Returns `undefined` when the facade is absent (gate OFF ⇒ the
+ * server attaches no sink ⇒ byte-identical) or carries no readable port.
  */
-const startObservabilityEmitter = (facade: ObservableRuntimeFacade | undefined): void => {
-  if (facade === undefined) return
-  createObservabilityEmitter({
+const buildObservabilityPorts = (
+  facade: ObservableRuntimeFacade | undefined,
+): ObservabilityPorts | undefined => {
+  if (facade === undefined) return undefined
+  const ports: ObservabilityPorts = {
     ...(facade.objective !== undefined ? { objective: facade.objective } : {}),
     ...(facade.runLedger !== undefined ? { runLedger: facade.runLedger } : {}),
     ...(facade.approvalStateMachine !== undefined
       ? { approvalSM: facade.approvalStateMachine }
       : {}),
-  })
-  process.stderr.write("web-daemon: observability emitter live (ports wired)\n")
+  }
+  // No readable port ⇒ no sink (the emitter would be silent anyway; skip the
+  // per-connection allocation to keep the gate-ON-but-portless path cheap).
+  if (
+    ports.objective === undefined &&
+    ports.runLedger === undefined &&
+    ports.approvalSM === undefined
+  ) {
+    return undefined
+  }
+  return ports
 }
 
 /**
@@ -102,7 +113,11 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
 
   const { runtimeFactory, facade: observableFacade } = await resolveObservableFactory(baseFactory)
 
-  const config: WebDaemonConfig = {
+  // ADR-0420 — per-connection observability sink bundle. Gate OFF ⇒ undefined
+  // ⇒ the server attaches no sink (byte-identical legacy).
+  const observabilityPorts = buildObservabilityPorts(observableFacade)
+
+  const config: WebDaemonConfig & { observabilityPorts?: ObservabilityPorts } = {
     port: overrides?.port ?? parsePort(process.env.QUANTA_WEB_PORT),
     bind: overrides?.bind ?? parseBind(process.env.QUANTA_WEB_BIND),
     authToken:
@@ -111,6 +126,7 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
         : parseAuthToken(process.env.QUANTA_WEB_AUTH_TOKEN),
     runtimeFactory,
     sessionConfig: overrides?.sessionConfig ?? {},
+    ...(observabilityPorts !== undefined ? { observabilityPorts } : {}),
   }
 
   // Port-collision fallback: if the requested port is taken (EADDRINUSE
@@ -132,11 +148,15 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
   }
   process.stderr.write(`web-daemon: listening on ${handle.hostname}:${handle.port}\n`)
 
-  // ADR-0406 + ADR-0415 — observability emitter (Running/Waiting/Completed +
-  // Objective + Approvals pane). ADR-0415 closes the Wave-3 hold: the emitter
-  // now reads the four live ports off the eagerly-minted observable facade
-  // (gate OFF ⇒ `observableFacade` is undefined ⇒ silent no-op, byte-identical).
-  startObservabilityEmitter(observableFacade)
+  // ADR-0406 + ADR-0415 + ADR-0420 — observability pane (Running/Waiting/
+  // Completed + Objective + Approvals). ADR-0415 wired the four live ports off
+  // the eagerly-minted observable facade; ADR-0420 closes the emitter-port-only
+  // deferral by attaching a per-connection WS sink inside `startWebDaemon`
+  // (`config.observabilityPorts`, set above). Gate OFF ⇒ `observableFacade`
+  // is undefined ⇒ `observabilityPorts` is undefined ⇒ no sink (byte-identical).
+  if (observabilityPorts !== undefined) {
+    process.stderr.write("web-daemon: observability sink live (per-connection WS)\n")
+  }
 
   const shutdown = async (sig: NodeJS.Signals): Promise<void> => {
     try {

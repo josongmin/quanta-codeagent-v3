@@ -20,6 +20,10 @@ import { type SessionTransport, wrapWebSocketLikeAsSessionTransport } from "@/ip
 import type { RuntimeFacade, RuntimeSession } from "@/sdk/runtime"
 import { logger } from "@/shared"
 import {
+  createObservabilityEmitter,
+  type ObservabilityEmitterHandle,
+} from "./observability-emitter"
+import {
   createSessionRegistry,
   type RegisteredSession,
   type SessionRegistry,
@@ -46,6 +50,84 @@ import {
 interface WSData {
   /** Filled in by `open()` after upgrade. */
   adapter: BunWebSocketAdapter | undefined
+  /**
+   * ADR-0420 — per-connection observability emitter (gate ON only). `open()`
+   * attaches one bridging this socket to the daemon's live ports; `close()`
+   * stops it so we never emit to a dead socket. `undefined` ⇒ gate OFF
+   * (byte-identical: no sink, no frames).
+   */
+  observability: ObservabilityEmitterHandle | undefined
+}
+
+/** Minimal `ServerWebSocket`-like surface the observability sink writes to.
+ *  The daemon's `ServerWebSocket<WSData>` satisfies it; the hellgate passes a
+ *  fake recording `.send(...)`. */
+interface ObservabilitySendable {
+  send(data: string | Uint8Array): unknown
+}
+
+/**
+ * ADR-0420 — observability port bundle the daemon hands to each connection so
+ * it can mint a per-connection emitter. Mirrors the emitter's option names
+ * (consume-only — the emitter slice is sealed). All ports optional: the
+ * `index.ts` composition root only passes the ones the live facade exposes.
+ */
+export interface ObservabilityPorts {
+  readonly objective?: ObservabilityEmitterPort<"objective">
+  readonly runLedger?: ObservabilityEmitterPort<"runLedger">
+  readonly approvalSM?: ObservabilityEmitterPort<"approvalSM">
+  readonly threadId?: string
+  readonly intervalMs?: number
+  /** Test seam — deterministic timer so the hellgate drives `tick()` itself. */
+  readonly timer?: ObservabilityEmitterTimer
+}
+
+// Re-derive the port option types straight from the sealed emitter options so
+// this surface can never drift from what `createObservabilityEmitter` accepts.
+type ObservabilityEmitterOptions = NonNullable<
+  Parameters<typeof createObservabilityEmitter>[0]
+>
+type ObservabilityEmitterPort<K extends keyof ObservabilityEmitterOptions> = NonNullable<
+  ObservabilityEmitterOptions[K]
+>
+type ObservabilityEmitterTimer = NonNullable<ObservabilityEmitterOptions["timer"]>
+
+/**
+ * ADR-0420 — bridge a served WebSocket to the observability emitter.
+ *
+ * Returns `null` when `ports` is absent (gate OFF ⇒ no sink, byte-identical).
+ * Otherwise mints a per-connection emitter whose `ws` sink forwards encoded
+ * frames straight to `ws.send(...)`. The first tick is a `observability.snapshot`
+ * (the emitter's contract); subsequent ticks emit `observability.delta` when
+ * the live ports differ. The returned handle's `stop()` MUST be called on
+ * disconnect so the emitter stops writing to a dead socket.
+ *
+ * NO-THROW: a throwing `ws.send` is swallowed inside the emitter; mint never
+ * throws on a hostile socket.
+ */
+export const attachObservabilitySink = (
+  ws: ObservabilitySendable,
+  ports: ObservabilityPorts | undefined,
+): ObservabilityEmitterHandle | null => {
+  if (ports === undefined) return null
+  return createObservabilityEmitter({
+    ws: {
+      send: (frame: string): void => {
+        try {
+          ws.send(frame)
+        } catch {
+          // Dead/throwing socket — swallow. The emitter also guards, but we
+          // belt-and-brace here so a non-emitter caller is equally safe.
+        }
+      },
+    },
+    ...(ports.objective !== undefined ? { objective: ports.objective } : {}),
+    ...(ports.runLedger !== undefined ? { runLedger: ports.runLedger } : {}),
+    ...(ports.approvalSM !== undefined ? { approvalSM: ports.approvalSM } : {}),
+    ...(ports.threadId !== undefined ? { threadId: ports.threadId } : {}),
+    ...(ports.intervalMs !== undefined ? { intervalMs: ports.intervalMs } : {}),
+    ...(ports.timer !== undefined ? { timer: ports.timer } : {}),
+  })
 }
 
 const constantTimeEquals = (a: string, b: string): boolean => {
@@ -320,7 +402,18 @@ const buildRegisteredSession = async (
   registry.add(socketKey, entry)
 }
 
-export const startWebDaemon = async (config: WebDaemonConfig): Promise<WebDaemonHandle> => {
+/**
+ * ADR-0420 — `WebDaemonConfig` plus the optional observability port bundle.
+ * Kept local to the server (rather than widening the shared `WebDaemonConfig`)
+ * so the gate-OFF surface is byte-identical: callers that never set
+ * `observabilityPorts` get exactly the legacy behaviour. The composition root
+ * (`./index.ts`) populates it only when `QUANTA_OBSERVABILITY=on`.
+ */
+export interface WebDaemonServerConfig extends WebDaemonConfig {
+  readonly observabilityPorts?: ObservabilityPorts
+}
+
+export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<WebDaemonHandle> => {
   const runtime = await config.runtimeFactory()
   // ONE shared session for the whole daemon lifetime. New WS connections
   // join the same session instead of minting a fresh one — see the
@@ -360,7 +453,9 @@ export const startWebDaemon = async (config: WebDaemonConfig): Promise<WebDaemon
         return authReject()
       }
     }
-    const upgraded = server.upgrade(req, { data: { adapter: undefined } })
+    const upgraded = server.upgrade(req, {
+      data: { adapter: undefined, observability: undefined },
+    })
     if (!upgraded) return new Response("upgrade failed", { status: 400 })
     // 101 is sent by Bun on successful upgrade — return undefined so Bun
     // owns the response.
@@ -495,6 +590,11 @@ export const startWebDaemon = async (config: WebDaemonConfig): Promise<WebDaemon
         // Attach adapter immediately so a fast inbound frame is buffered to
         // the right adapter; the registered session is filled in below.
         ws.data.adapter = adapter
+        // ADR-0420 — bridge this socket to the observability emitter (gate ON
+        // only). `null` ⇒ gate OFF (byte-identical: no sink, no frames). The
+        // emitter's first tick is a snapshot; deltas follow as the live ports
+        // change. `close()` stops it so we never emit to a dead socket.
+        ws.data.observability = attachObservabilitySink(ws, config.observabilityPorts) ?? undefined
         try {
           await buildRegisteredSession(registry, ws, adapter, sharedSession)
         } catch (error) {
@@ -514,6 +614,10 @@ export const startWebDaemon = async (config: WebDaemonConfig): Promise<WebDaemon
       },
       async close(ws: ServerWebSocket<WSData>) {
         ws.data.adapter?.handleClose()
+        // ADR-0420 — detach the observability sink before evicting so the
+        // emitter timer stops and no further frames target the dead socket.
+        ws.data.observability?.stop()
+        ws.data.observability = undefined
         await registry.evict(ws)
       },
     },
