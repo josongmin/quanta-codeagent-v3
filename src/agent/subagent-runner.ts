@@ -203,7 +203,12 @@ const buildSeedPrompt = (req: SubagentRequest): string => {
  *  buildSeedPrompt(req) }] }]` — see {@link buildSeedPrompt} for the
  *  five-field (priorAttempt / ownedSurfaces / forbiddenSurfaces /
  *  checkpointPath / resultShape) augmentation rules. */
-const buildChildConfig = (parent: AgentConfig, req: SubagentRequest, cwd: string): AgentConfig => {
+const buildChildConfig = (
+  parent: AgentConfig,
+  req: SubagentRequest,
+  cwd: string,
+  mailboxIds: { agentId: string; parentId: string },
+): AgentConfig => {
   const seed: Message[] = [
     { role: "user", content: [{ type: "text", text: buildSeedPrompt(req) }] },
   ]
@@ -229,6 +234,18 @@ const buildChildConfig = (parent: AgentConfig, req: SubagentRequest, cwd: string
     // bounds real multi-level recursion. Duck-typed cast sets it
     // unconditionally without tripping exactOptionalPropertyTypes.
     ...({ depth: req.depth } as { depth: number }),
+    // ADR-0416 sibling-identity fix — thread the DETERMINISTIC mailbox label
+    // for this child (`parentLabel/seq`) + the parent's label. dispatch.ts
+    // surfaces these onto ToolContext.agentLabel / parentAgentLabel so the
+    // subagent-mailbox tools address each sibling UNIQUELY (audit H). The
+    // mailbox PORT itself is propagated below so the child shares the parent's
+    // single in-memory mailbox instance (a child fork can both send and read).
+    mailboxAgentId: mailboxIds.agentId,
+    mailboxParentId: mailboxIds.parentId,
+    // Propagated so a forked child can participate in the SAME inter-agent
+    // mailbox (parent↔child + sibling↔sibling). The port is an in-process
+    // shared-by-reference instance — safe across the worktree-isolation fork.
+    ...(parent.subagentMailbox ? { subagentMailbox: parent.subagentMailbox } : {}),
     // Kept (safe to share, no parent-state mutation):
     ...(parent.onConfirm ? { onConfirm: parent.onConfirm } : {}),
     ...(parent.embedder ? { embedder: parent.embedder } : {}),
@@ -284,6 +301,16 @@ export const createSubagentRunner = (
   const wt = opts.withWorktree ?? withWorktree
   const now = opts.now ?? Date.now
 
+  // ADR-0416 sibling-identity fix — this runner's parent mailbox label and a
+  // DETERMINISTIC per-runner ordinal. Each spawn mints `parentLabel/seq`
+  // (`root/0`, `root/1`, …) so siblings forked at the same depth get DISTINCT
+  // stable ids. Replay-friendly: the counter (not a clock / uuid) is the only
+  // source of per-sibling uniqueness, so a recorded session re-mints identical
+  // labels. The root session has no `mailboxAgentId` ⇒ its children are
+  // `root/0`, `root/1`; a depth-2 child of `root/0` is `root/0/0`, etc.
+  const parentMailboxLabel = parent.mailboxAgentId ?? "root"
+  let childOrdinal = 0
+
   return async (req: SubagentRequest): Promise<SubagentResult> => {
     if (req.depth > maxDepth) {
       return { ok: false, finalText: "max subagent depth exceeded", turns: 0 }
@@ -291,6 +318,14 @@ export const createSubagentRunner = (
 
     const wantsWorktree = req.isolation === "worktree"
     const isolate = wantsWorktree && (await gitProbe(parent.cwd))
+
+    // Deterministic stable mailbox id for this child (`parentLabel/seq`). The
+    // ordinal increments AFTER capture so the first child of root is `root/0`.
+    const mailboxIds = {
+      agentId: `${parentMailboxLabel}/${childOrdinal}`,
+      parentId: parentMailboxLabel,
+    }
+    childOrdinal += 1
 
     // id is sanitized by withWorktree's safeId; depth+prompt make it
     // human-traceable while staying within the worktree-name charset.
@@ -308,12 +343,12 @@ export const createSubagentRunner = (
       ? toResult(
           (
             await wt(subagentId, parent.cwd, async (worktreePath) => {
-              const child = buildChildConfig(parent, req, worktreePath)
+              const child = buildChildConfig(parent, req, worktreePath, mailboxIds)
               return run(child)
             })
           ).value,
         )
-      : toResult(await run(buildChildConfig(parent, req, parent.cwd)))
+      : toResult(await run(buildChildConfig(parent, req, parent.cwd, mailboxIds)))
 
     // ADR-0133 — fire `subagent_stop` after the child completes (any reason).
     await emitSubagentStopHook(parent, { subagentId, result: childResult })

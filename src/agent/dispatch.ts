@@ -375,6 +375,19 @@ const buildRequestPlanExit = (
     : undefined
 }
 
+/** ADR-0416 sibling-identity fix — project the STABLE mailbox labels onto the
+ *  ToolContext partial. Each label is omitted when its `AgentConfig` slot is
+ *  absent (root session / legacy caller) so the subagent-mailbox tools fall
+ *  back to the depth-derived label and the ctx stays byte-identical. Extracted
+ *  from `buildToolContext` to keep that builder under the cognitive-complexity
+ *  cap. */
+const mailboxLabels = (
+  config: AgentConfig,
+): { agentLabel?: string; parentAgentLabel?: string } => ({
+  ...(config.mailboxAgentId !== undefined ? { agentLabel: config.mailboxAgentId } : {}),
+  ...(config.mailboxParentId !== undefined ? { parentAgentLabel: config.mailboxParentId } : {}),
+})
+
 const buildToolContext = (args: {
   config: AgentConfig
   workingState: WorkingStateHandle | undefined
@@ -388,6 +401,12 @@ const buildToolContext = (args: {
     signal: config.signal,
     gitWriteGuard: gitWriteProtectReason,
     ...(config.depth !== undefined ? { depth: config.depth } : {}),
+    // ADR-0416 sibling-identity fix — surface the STABLE per-agent mailbox
+    // label (and the parent's) so the subagent-mailbox tools address each
+    // sibling uniquely. ABSENT (root session / legacy caller) ⇒ omitted ⇒ the
+    // tools fall back to the depth-derived label (byte-identical). Extracted to
+    // a helper so this builder stays under the biome cognitive-complexity cap.
+    ...mailboxLabels(config),
     ...(workingState !== undefined ? { workingState } : {}),
     ...(requestPlanExit !== undefined ? { requestPlanExit } : {}),
     ...(reviewerAgent !== undefined ? { reviewerAgent } : {}),

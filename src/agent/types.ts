@@ -783,6 +783,29 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   subagentMailbox?: MailboxPort
   /**
+   * ADR-0416 sibling-identity fix (audit H) — STABLE per-agent mailbox label
+   * for THIS agent. The subagent runner mints a DETERMINISTIC child id
+   * (`parentLabel/seq` — a replay-friendly ordinal counter, never a random
+   * uuid / clock) and threads it here onto the forked child config; the
+   * dispatch seam surfaces it onto `ToolContext.agentLabel` so the
+   * subagent-mailbox tools address each sibling UNIQUELY instead of collapsing
+   * every same-depth sibling onto a single `agent@depth-N` label. Absent ⇒ the
+   * tools fall back to the depth-derived label (byte-identical for the root
+   * session and every legacy caller). The root session leaves this UNSET; only
+   * forked children carry it.
+   */
+  mailboxAgentId?: string
+  /**
+   * ADR-0416 sibling-identity fix (audit H) — the STABLE mailbox label of the
+   * agent that spawned THIS one. Surfaced onto `ToolContext.parentAgentLabel`
+   * so `subagent_send_message`'s `"parent"` target resolves to the EXACT parent
+   * that forked this child (even when siblings share a depth) rather than depth
+   * arithmetic. The runner sets this to the parent's `mailboxAgentId` (or
+   * `"root"` for a depth-1 child of the root session). Absent ⇒ `"parent"`
+   * falls back to depth math (byte-identical legacy).
+   */
+  mailboxParentId?: string
+  /**
    * ADR-0223 auto-background after 2 s — Claude Code UX absorption. When set,
    * dispatch wraps each tool `execute()` with two-line `tickToolStart` /
    * `tickToolEnd` calls into `autoBackground.detector` so a host poll can ask
