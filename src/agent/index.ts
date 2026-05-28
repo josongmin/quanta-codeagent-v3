@@ -56,9 +56,9 @@ export {
   composeGlobRulesWithDetected,
   GLOB_RULE_DIRS,
   type GlobRule,
+  type LoadGlobRulesWithVendorsOpts,
   loadGlobRules,
   loadGlobRulesWithVendors,
-  type LoadGlobRulesWithVendorsOpts,
   MAX_RENDER_BYTES,
   MAX_RULE_BYTES,
   MAX_RULE_FILES,
@@ -123,6 +123,13 @@ export {
 export { runAgent } from "./loop"
 export { lspDiagnosticsTool, lspNavToolList } from "./lsp-bridge"
 export {
+  attachLspDiagnosticsHook,
+  type LspDiagnosticsHookHandle,
+  type LspDiagnosticsHookOptions,
+  type OpenDiagnosticsSession,
+  type PromptInjectPush,
+} from "./lsp-diagnostics-hook"
+export {
   loadMcpTools,
   mcpToolName,
   mcpToolToTool,
@@ -177,7 +184,6 @@ export {
   type RepoRules,
   renderRepoRulesBlock,
 } from "./repo-rules"
-export { createOnConfirmReviewerPort, type OnConfirmReviewerPortOptions } from "./reviewer-port"
 export {
   DEFAULT_SAMPLES as REPRO_TEST_DEFAULT_SAMPLES,
   DEFAULT_TIMEOUT_MS as REPRO_TEST_DEFAULT_TIMEOUT_MS,
@@ -197,6 +203,7 @@ export {
   stripPythonComments,
 } from "./repro-test"
 export { isRetryable, RetryingLLM, type RetryingLLMOptions } from "./retry"
+export { createOnConfirmReviewerPort, type OnConfirmReviewerPortOptions } from "./reviewer-port"
 export {
   type AgentMode as RunMode,
   ALL_AGENT_MODES,

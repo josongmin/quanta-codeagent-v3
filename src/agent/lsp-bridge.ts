@@ -1,5 +1,11 @@
 import { extname } from "node:path"
-import { type LspClient, PyrightAdapter, TypescriptAdapter } from "@/lsp"
+import {
+  DefaultRenameApplyAdapter,
+  type LspClient,
+  PyrightAdapter,
+  type RenameWorkspaceEdit,
+  TypescriptAdapter,
+} from "@/lsp"
 import { logger } from "@/shared"
 import {
   lspNavTools as buildLspNavTools,
@@ -8,6 +14,8 @@ import {
   diagnosticsTool,
   type LspNavProvider,
   type LspNavSession,
+  lspRenameApplyTool,
+  type RenameApplyPort,
   type Tool,
 } from "@/tool"
 
@@ -210,4 +218,87 @@ export const lspNavProvider = (): LspNavProvider => ({
  * `QUANTA_LSP_TOOLS=full` is set; with the knob unset the tool surface is
  * unchanged. Nothing here spawns a server until a tool is actually called.
  */
-export const lspNavToolList = (): Tool[] => buildLspNavTools(lspNavProvider())
+/* ------------------------------------------------------------------------- *
+ * LSP rename (ADR-0380, S2) — the `lsp_rename_apply` mutating tool.
+ *
+ * Sibling of the read-only nav tools: issues `textDocument/rename` then APPLIES
+ * the resulting workspace edit via the 2-phase atomic commit
+ * (`LspClient.applyWorkspaceEdit`, ADR-0152). DESTRUCTIVE + always-confirm HITL
+ * (owned by the tool factory in `@/tool/lsp_nav/rename-apply.ts`).
+ *
+ * The tool consumes a `RenameApplyPort` (compute THEN apply, two calls). Both
+ * calls must hit the SAME opened server so the edit applies against the state
+ * the rename was computed from — so the port is STATEFUL: `computeRename` opens
+ * + holds the client; if it yields no edit (null / empty) the client is stopped
+ * immediately (the tool will NOT call `applyEdit`); `applyEdit` reuses the held
+ * client and stops it in a `finally`. The tool is `isConcurrencySafe:false`, so
+ * calls are serialized and a single held slot can never race. Default-OFF:
+ * appended to `lspNavToolList()` (same `QUANTA_LSP_TOOLS=full` gate as nav).
+ * --------------------------------------------------------------------------*/
+
+/** Stateful `RenameApplyPort` over `specFor` + a per-invocation `LspClient`.
+ *  Each `computeRename` opens a fresh client (the rename targets the file's
+ *  language server); the matching `applyEdit` reuses and stops it. */
+const lspRenameApplyPort = (cwd: string): RenameApplyPort => {
+  let held: LspClient | null = null
+  const stopHeld = async (): Promise<void> => {
+    const c = held
+    held = null
+    if (c) await c.stop().catch(() => undefined)
+  }
+  const adapter = (client: LspClient): DefaultRenameApplyAdapter =>
+    new DefaultRenameApplyAdapter(client)
+  return {
+    computeRename: async (file, line, col, newName, signal) => {
+      const spec = specFor(file)
+      if (!spec) return null
+      if (!(await isAvailable(spec.bin))) return null
+      // A held client from a prior aborted call must not leak.
+      await stopHeld()
+      const client = spec.create(cwd)
+      try {
+        await client.start()
+      } catch (e) {
+        logger.warn("lsp: failed to start language server (rename)", {
+          bin: spec.bin,
+          error: String(e),
+        })
+        await client.stop().catch(() => undefined)
+        return null
+      }
+      held = client
+      let edit: RenameWorkspaceEdit | null
+      try {
+        edit = await adapter(client).computeRename(file, line, col, newName, signal)
+      } catch (e) {
+        await stopHeld()
+        throw e
+      }
+      // No edit ⇒ the tool short-circuits and never calls `applyEdit`, so stop
+      // the held client now to avoid a leaked server.
+      if (edit === null || edit.changes.length === 0) await stopHeld()
+      return edit
+    },
+    applyEdit: async (edit, signal) => {
+      const client = held
+      if (!client) throw new Error("lsp_rename_apply: applyEdit called before computeRename")
+      try {
+        await adapter(client).applyEdit(edit, signal)
+      } finally {
+        await stopHeld()
+      }
+    },
+  }
+}
+
+/**
+ * Build the LSP-backed nav tool set (8 read-only nav tools + 1 mutating
+ * `lsp_rename_apply` = 9). The CLI appends these to the registry only when
+ * `QUANTA_LSP_TOOLS=full` is set; with the knob unset the tool surface is
+ * unchanged (default-OFF, byte-identical). Nothing here spawns a server until
+ * a tool is actually called.
+ */
+export const lspNavToolList = (): Tool[] => [
+  ...buildLspNavTools(lspNavProvider()),
+  lspRenameApplyTool(lspRenameApplyPort(process.cwd())) as Tool,
+]

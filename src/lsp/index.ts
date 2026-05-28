@@ -1,13 +1,14 @@
 export { LspClient, type LspClientOptions, type LspClientSpec } from "./adapters/base"
+// ── ADR-0141 expansion (sibling ports + default adapters) ─────────────────
+export { DefaultCodeActionAdapter } from "./adapters/default-code-action"
+export { DefaultFormatAdapter } from "./adapters/default-format"
+export { DefaultRenameApplyAdapter } from "./adapters/default-rename-apply"
+export { DefaultSignatureHelpAdapter } from "./adapters/default-signature-help"
 export type { PyrightAdapterOptions } from "./adapters/pyright"
 export { PyrightAdapter } from "./adapters/pyright"
 export type { TypescriptAdapterOptions } from "./adapters/typescript"
 export { languageIdFor, TypescriptAdapter } from "./adapters/typescript"
 export type { LspPort } from "./ports"
-// ── ADR-0141 expansion (sibling ports + default adapters) ─────────────────
-export { DefaultCodeActionAdapter } from "./adapters/default-code-action"
-export { DefaultFormatAdapter } from "./adapters/default-format"
-export { DefaultSignatureHelpAdapter } from "./adapters/default-signature-help"
 export type {
   CodeAction,
   CodeActionDocumentEdit,

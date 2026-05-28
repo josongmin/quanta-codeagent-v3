@@ -352,6 +352,30 @@ const toCodeActionWorkspaceEdit = (raw: RawWorkspaceEdit): CodeActionWorkspaceEd
   return { changes: [] }
 }
 
+/** Normalize the two LSP `WorkspaceEdit` variants into the `RenameWorkspaceEdit`
+ *  port shape. Structurally identical to {@link toCodeActionWorkspaceEdit} but
+ *  typed to the rename port so `computeRename` returns the exact contract the
+ *  `RenameApplyPort` expects (no `as`-cast across the two families). */
+const toRenameWorkspaceEdit = (raw: RawWorkspaceEdit): RenameWorkspaceEdit => {
+  if (raw.documentChanges) {
+    return {
+      changes: raw.documentChanges.map((d) => ({
+        uri: d.textDocument.uri,
+        edits: (d.edits ?? []).map(toCodeActionTextEdit),
+      })),
+    }
+  }
+  if (raw.changes) {
+    return {
+      changes: Object.entries(raw.changes).map(([uri, edits]) => ({
+        uri,
+        edits: edits.map(toCodeActionTextEdit),
+      })),
+    }
+  }
+  return { changes: [] }
+}
+
 const mapCodeAction = (e: RawCodeActionEntry): CodeAction => {
   if (isCommandOnly(e)) {
     return { title: e.title, kind: "quickfix" }
@@ -658,11 +682,15 @@ export class LspClient implements LspPort {
     signal?: AbortSignal,
   ): Promise<Location[] | null> {
     const uri = await this.ensureOpen(filePath, signal)
-    const raw = await this.callOrNullOnUnsupported("textDocument/references", {
-      textDocument: { uri },
-      position: pos,
-      context: { includeDeclaration },
-    }, signal)
+    const raw = await this.callOrNullOnUnsupported(
+      "textDocument/references",
+      {
+        textDocument: { uri },
+        position: pos,
+        context: { includeDeclaration },
+      },
+      signal,
+    )
     if (raw === null || raw === undefined) return null
     if (!Array.isArray(raw)) return null
     return (raw as RawLocation[]).map(toLocation)
@@ -670,10 +698,14 @@ export class LspClient implements LspPort {
 
   async hover(filePath: string, pos: Pos, signal?: AbortSignal): Promise<Hover | null> {
     const uri = await this.ensureOpen(filePath, signal)
-    const raw = await this.callOrNullOnUnsupported("textDocument/hover", {
-      textDocument: { uri },
-      position: pos,
-    }, signal)
+    const raw = await this.callOrNullOnUnsupported(
+      "textDocument/hover",
+      {
+        textDocument: { uri },
+        position: pos,
+      },
+      signal,
+    )
     if (raw === null || raw === undefined) return null
     const h = raw as RawHover
     const contents = flattenHoverContents(h.contents)
@@ -698,9 +730,13 @@ export class LspClient implements LspPort {
 
   async documentSymbol(filePath: string, signal?: AbortSignal): Promise<SymbolInfo[] | null> {
     const uri = await this.ensureOpen(filePath, signal)
-    const raw = (await this.callOrNullOnUnsupported("textDocument/documentSymbol", {
-      textDocument: { uri },
-    }, signal)) as RawDocumentSymbolResult | undefined
+    const raw = (await this.callOrNullOnUnsupported(
+      "textDocument/documentSymbol",
+      {
+        textDocument: { uri },
+      },
+      signal,
+    )) as RawDocumentSymbolResult | undefined
     if (raw === null || raw === undefined) return null
     if (!Array.isArray(raw) || raw.length === 0) return []
     if (isSymbolInformationList(raw)) return raw.map((s) => mapSymbolInformation(s))
@@ -710,9 +746,13 @@ export class LspClient implements LspPort {
   }
 
   async workspaceSymbol(query: string, signal?: AbortSignal): Promise<SymbolInfo[] | null> {
-    const raw = (await this.callOrNullOnUnsupported("workspace/symbol", {
-      query,
-    }, signal)) as RawWorkspaceSymbolResult | undefined
+    const raw = (await this.callOrNullOnUnsupported(
+      "workspace/symbol",
+      {
+        query,
+      },
+      signal,
+    )) as RawWorkspaceSymbolResult | undefined
     if (raw === null || raw === undefined) return null
     if (!Array.isArray(raw)) return null
     if (raw.length === 0) return []
@@ -725,15 +765,52 @@ export class LspClient implements LspPort {
     signal?: AbortSignal,
   ): Promise<RenamePreview | null> {
     const uri = await this.ensureOpen(filePath, signal)
-    const raw = (await this.callOrNullOnUnsupported("textDocument/prepareRename", {
-      textDocument: { uri },
-      position: pos,
-    }, signal)) as RawPrepareRenameResult | undefined
+    const raw = (await this.callOrNullOnUnsupported(
+      "textDocument/prepareRename",
+      {
+        textDocument: { uri },
+        position: pos,
+      },
+      signal,
+    )) as RawPrepareRenameResult | undefined
     if (raw === null || raw === undefined) return null
     if (isRawRange(raw)) return { range: toRange(raw), placeholder: "" }
     if (raw.defaultBehavior === true) return null
     if (raw.range === undefined) return null
     return { range: toRange(raw.range), placeholder: raw.placeholder ?? "" }
+  }
+
+  /** ADR-0380 (S2) — `textDocument/rename`. Sibling of {@link prepareRename}:
+   *  `prepareRename` only PROBES whether the cursor sits on a renameable
+   *  identifier; THIS issues the actual rename and returns the
+   *  {@link RenameWorkspaceEdit} the server proposes (every file + edit). The
+   *  caller (`RenameApplyPort.applyEdit`) commits it via
+   *  {@link applyWorkspaceEdit} (2-phase atomic).
+   *
+   *  Mirrors the nav-RPC posture exactly: lazy-open the document, issue via
+   *  `callOrNullOnUnsupported` so a server without the `rename` capability
+   *  surfaces as `null` (not a throw), and normalize the wire `WorkspaceEdit`
+   *  (legacy `changes` map OR newer `documentChanges` array) to the port
+   *  shape. A `null` server payload ⇒ `null`; an empty edit (neither field)
+   *  ⇒ `{ changes: [] }` (symbol unused — the tool treats it as a no-op). */
+  async computeRename(
+    filePath: string,
+    pos: Pos,
+    newName: string,
+    signal?: AbortSignal,
+  ): Promise<RenameWorkspaceEdit | null> {
+    const uri = await this.ensureOpen(filePath, signal)
+    const raw = (await this.callOrNullOnUnsupported(
+      "textDocument/rename",
+      {
+        textDocument: { uri },
+        position: pos,
+        newName,
+      },
+      signal,
+    )) as RawWorkspaceEdit | undefined
+    if (raw === null || raw === undefined) return null
+    return toRenameWorkspaceEdit(raw)
   }
 
   // --- ADR-0143 — wire methods for the 4 expansion ports -----------------
@@ -797,10 +874,14 @@ export class LspClient implements LspPort {
     signal?: AbortSignal,
   ): Promise<readonly SignatureInfo[] | null> {
     const uri = await this.ensureOpen(file, signal)
-    const raw = (await this.callOrNullOnUnsupported("textDocument/signatureHelp", {
-      textDocument: { uri },
-      position: { line, character: col },
-    }, signal)) as RawSignatureHelpResult | undefined
+    const raw = (await this.callOrNullOnUnsupported(
+      "textDocument/signatureHelp",
+      {
+        textDocument: { uri },
+        position: { line, character: col },
+      },
+      signal,
+    )) as RawSignatureHelpResult | undefined
     if (raw === null || raw === undefined) return null
     if (!Array.isArray(raw.signatures)) return []
     return raw.signatures.map(mapSignature)
@@ -1111,10 +1192,14 @@ export class LspClient implements LspPort {
     signal?: AbortSignal,
   ): Promise<Location[] | null> {
     const uri = await this.ensureOpen(filePath, signal)
-    const raw = (await this.callOrNullOnUnsupported(method, {
-      textDocument: { uri },
-      position: pos,
-    }, signal)) as RawDefinitionResult | undefined
+    const raw = (await this.callOrNullOnUnsupported(
+      method,
+      {
+        textDocument: { uri },
+        position: pos,
+      },
+      signal,
+    )) as RawDefinitionResult | undefined
     if (raw === null || raw === undefined) return null
     if (Array.isArray(raw)) {
       if (raw.length === 0) return []

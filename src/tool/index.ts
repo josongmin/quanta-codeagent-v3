@@ -117,9 +117,16 @@ export type {
   NavRenamePreview,
   NavSymbolInfo,
   NavSymbolKind,
+  RenameApplyPort,
+  RenameApplyPortDocumentEdit,
+  RenameApplyPortPos,
+  RenameApplyPortRange,
+  RenameApplyPortTextEdit,
+  RenameApplyPortWorkspaceEdit,
 } from "./lsp_nav"
 export {
   lspNavTools,
+  lspRenameApplyTool,
   nullLspNavProvider,
 } from "./lsp_nav"
 // MCP tasks tools (ADR-0196). Caller-wired: registered only when the apps
