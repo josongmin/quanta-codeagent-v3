@@ -70,8 +70,10 @@ describe("ADR-0334 §A — assemble.ts wires slots when sessionId present", () =
     expect(cfg.contextEventsForTurn).toBeDefined()
     // Compaction-event emit (store ⇒ wired).
     expect(cfg.compactionEventEmit).toBeDefined()
-    // No mention-resolver wired (assemble doesn't have a registry).
-    expect(cfg.mentionInjector).toBeUndefined()
+    // Mention injector wired (ADR-0422/0423): assemble builds the @file +
+    // @symbol composite via buildDefaultMentionResolver, default-ON. @skill is
+    // omitted (assemble has no skill registry). QUANTA_MENTION_FILE=off opts out.
+    expect(cfg.mentionInjector).toBeDefined()
     // No image-retry slot (ADR-0333 owns that wrap).
     expect(cfg.imageSanitizationRetry).toBeUndefined()
   })
