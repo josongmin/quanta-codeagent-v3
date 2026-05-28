@@ -1,51 +1,53 @@
 /**
- * ADR-0325 — Mention-driven explicit context-injection types.
+ * ADR-0325 / ADR-0418 — Mention-driven explicit context-injection types.
  *
- * Closed-port + closed-enum surface. The 3-kind {@link MentionKind} enum
- * is FROZEN by this ADR; extending the kind set requires a new ADR.
+ * Status: the 3-kind enum (`skill | plugin | app`) frozen by ADR-0325 and the
+ * 4-kind sync extension (`+ file`) of ADR-0413 are both **SUPERSEDED by
+ * ADR-0418**. The kind enum is now 5-way (`skill | plugin | app | file |
+ * symbol`) and the resolver port is **async** (see `./resolver`) so file
+ * reads and symbol (LSP / semantic) lookups can perform I/O without blocking.
+ *
+ * The original ADR-0325 contract is preserved as a structural subset: a
+ * conformant 5-kind resolver still answers `skill | plugin | app` the same
+ * way it always did, and a parser caller that emits NO file/symbol mention
+ * sees byte-identical mention lists for the legacy subset.
  *
  * Sibling to ADR-0321's snapshot-diff producer:
  *   - ADR-0321 produces typed events from PASSIVE state diffs (cwd /
  *     mode / repo-rules / active-skills / model swap), one per turn.
- *   - ADR-0325 (this slice) produces typed events from EXPLICIT user
- *     mentions in the per-turn input (`@skill`, `plugin://`, `@@app`),
- *     so the model receives a persistent record of the activation that
- *     the user typed verbatim.
+ *   - ADR-0325 (this slice, post-ADR-0418) produces typed events from
+ *     EXPLICIT user mentions in the per-turn input (`@skill`,
+ *     `plugin://`, `@@app`, `@path/to/file`, `@SymbolName`), so the
+ *     model receives a persistent record of the activation that the
+ *     user typed verbatim.
  *
  * Codex absorption: `codex-rs/core/src/session/turn.rs:436-575`
- *   (`build_skills_and_plugins`). Codex parses `@skill` and `plugin://`
- *   mentions out of the user message, resolves them via the skill /
- *   plugin registries, and shoves the resolved bodies into the history
- *   stream as `ResponseItem`s. Quanta mirrors the producer shape but
- *   targets two consumers: ADR-0320's `TypedHistoryEventStore` (for the
- *   replayable side-channel) and the ADR-0321 inject-message format
- *   (for the per-turn prompt splice).
+ *   (`build_skills_and_plugins`). Quanta extends with file + symbol
+ *   kinds (ADR-0418) to reach Cursor / IDE-mention parity.
  *
  * Default-OFF: this slice ships parser + resolver port + emitter +
- * inject builder. No registry adapter is wired, no production path
- * imports the module — wire-up is a follow-up ADR.
+ * inject builder + file/symbol resolver factories. No production path
+ * imports the module until a wire-up ADR lands; the legacy 3-kind
+ * behaviour is byte-identical for zero-file/zero-symbol inputs.
  */
 
 /**
  * Closed set of mention kinds. Mirrors Codex's `build_skills_and_plugins`
- * three-way dispatch (skill / plugin / app), extended by ADR-0413 with a
- * fourth sync `file` kind.
+ * three-way dispatch, extended by ADR-0418 with `file` and `symbol`:
  *
  * - `skill` — user-invocable skill bundle (matches `@kebab-name`).
  * - `plugin` — installable plugin (matches `plugin://kebab-name`).
  * - `app` — third-party / OS app integration (matches `@@kebab-name`,
  *   double-`@` to disambiguate from `skill`).
- * - `file` — workspace file reference (matches `@file:<path>` or a bare
- *   `@<path>` containing `/` or `.`). ADDED by ADR-0413 as a pure-sync,
- *   additive extension: resolution is `fs.readFileSync`, which fits the
- *   existing sync resolver contract with zero signature changes. The
- *   three legacy kinds are byte-identical.
+ * - `file` — workspace path (ADR-0418, matches `@path/to/file` — contains
+ *   `/` — or a lowercase-leading dotted token `@foo.ts`).
+ * - `symbol` — code symbol (ADR-0418, matches `@FooBar` or
+ *   `@MyClass.method` — must start uppercase ASCII).
  *
- * **Frozen at 4 kinds.** Extending (e.g. a future async `symbol` kind,
- * which would force the resolver/injector sync→async cascade) requires a
- * new ADR — see ADR-0413 §"deliberate_hold".
+ * **Extending requires a new ADR.** The current 5-kind enum is fixed by
+ * ADR-0418; further kinds must explicitly supersede 0418.
  */
-export type MentionKind = "skill" | "plugin" | "app" | "file"
+export type MentionKind = "skill" | "plugin" | "app" | "file" | "symbol"
 
 /**
  * A single parsed mention. {@link span} carries the half-open
@@ -56,9 +58,14 @@ export type MentionKind = "skill" | "plugin" | "app" | "file"
  */
 export interface ParsedMention {
   readonly kind: MentionKind
-  /** Skill name / plugin URI tail / app name. ASCII-only, kebab-case.
+  /** Skill name / plugin URI tail / app name / file path / symbol name.
+   *  For `skill | plugin | app`: ASCII kebab-case. For `file`: arbitrary
+   *  workspace-relative or `./`-prefixed path (post-sigil). For `symbol`:
+   *  ASCII alphanumeric starting uppercase, optional `.member` suffix.
    *  Does NOT include the leading sigil(s) — for `@code-review` this is
-   *  `code-review`, for `plugin://github` this is `github`. */
+   *  `code-review`, for `plugin://github` this is `github`, for
+   *  `@src/foo.ts` this is `src/foo.ts`, for `@FooBar.method` this is
+   *  `FooBar.method`. */
   readonly target: string
   /** Half-open char-offset range `[start, end)` in the original input. */
   readonly span: { readonly start: number; readonly end: number }

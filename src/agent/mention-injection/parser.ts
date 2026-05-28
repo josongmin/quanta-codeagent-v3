@@ -1,62 +1,64 @@
 /**
- * ADR-0325 — Pure mention parser for user input text.
+ * ADR-0325 / ADR-0418 — Pure mention parser for user input text.
  *
- * Three closed-enum mention sigils (mirrors Codex
- * `build_skills_and_plugins` in `codex-rs/core/src/session/turn.rs:436-575`):
+ * FIVE closed-enum mention sigils (ADR-0325 + ADR-0418):
  *
- *   `@skill-name`       → MentionKind = "skill"
- *   `plugin://name`     → MentionKind = "plugin"
- *   `@@app-name`        → MentionKind = "app"
- *   `@file:<path>`      → MentionKind = "file"  (ADR-0413, explicit prefix)
- *   `@<path>` w/ `/`|`.`→ MentionKind = "file"  (ADR-0413, bare path)
+ *   `@skill-name`                 → MentionKind = "skill"
+ *   `plugin://name`               → MentionKind = "plugin"
+ *   `@@app-name`                  → MentionKind = "app"
+ *   `@path/to/file` / `@foo.ts`   → MentionKind = "file"   (ADR-0418)
+ *   `@FooBar` / `@MyClass.method` → MentionKind = "symbol" (ADR-0418)
  *
- * Syntax rules (LOCKED — extending requires a new ADR):
+ * Syntax rules — DETERMINISTIC priority resolution (ADR-0418 §4, VERBATIM):
  *
- *   1. Identifier alphabet: `[a-z][a-z0-9-]*` (ASCII kebab-case, must
- *      start with a lowercase letter). Unicode names are rejected; this
- *      is a known limitation, NOT a TODO. Codex's registries use
- *      ASCII-only identifiers, so we match.
- *   2. Identifier length: ≥ 1 and ≤ 64 chars (post-sigil). Longer matches
- *      are rejected — the parser is a frontend for explicit user
- *      activation, not arbitrary text. 64 is generous (Codex skill ids
- *      empirically stay under 32).
- *   3. Left-boundary: the sigil MUST sit at the start of the input OR
- *      immediately after a whitespace / punctuation byte. The full
- *      "not a word character" predicate is JS `\w`-negative
- *      (`/[\w]/.test(prev) === false`). This rules out `foo@bar.com`
- *      (`@` follows `o`, a word character ⇒ not a mention).
- *   4. Right-boundary: the trailing char after the identifier MUST NOT
- *      be `[a-z0-9-]` (otherwise we'd be reading a prefix of a longer
- *      identifier — the regex `\b`-style stop). End-of-input counts as
- *      a boundary.
- *   5. Dedup: per `(kind, target)` pair, KEEP THE FIRST occurrence.
- *      Subsequent matches are dropped. Insertion order is preserved.
- *   6. Code fences / inline backticks are NOT treated specially — a
- *      mention inside ```@skill-name``` is still parsed. Documented as
- *      a limitation; downstream may strip before calling if needed.
- *   7. Empty target after sigil (`@`, `plugin://`, `@@`) is NOT a
- *      mention. The full sigil MUST be followed by a valid identifier.
+ *   The parser MUST classify each `@<rest>` match deterministically.
+ *   Order of attempts on the `<rest>` payload (FIRST match wins):
  *
- * ADR-0413 — `@file` syntax (ADDITIVE; the 3-kind rules above are
- * unchanged for inputs without a file mention):
+ *     1. `@@<kebab>` (double-`@`) → kind=app, target=app-name (matched
+ *        by its own regex alternative, so it never enters the @-cascade).
+ *     2. `<rest>` contains `/` → kind=file. The whole path (until a
+ *        whitespace / unsupported char) is the target. (slash → file)
+ *     3. `<rest>` starts with `[A-Z]` (uppercase ASCII letter) →
+ *        kind=symbol. Identifier alphabet `[A-Za-z0-9_]`, optional
+ *        `.<identifier>` suffix (one level: `Class.method`).
+ *        (uppercase-start → symbol)
+ *     4. `<rest>` starts with `[a-z]` AND contains `.` → kind=file.
+ *        Lowercase-leading dotted token (e.g. `@a.b`, `@foo.ts`).
+ *        (dot + lowercase-start → file)
+ *     5. `<rest>` is a pure ASCII kebab-case identifier
+ *        `[a-z][a-z0-9-]*` (length ≤ 64) → kind=skill.
+ *        (lowercase-kebab → skill)
  *
- *   8. File-path alphabet: `[A-Za-z0-9._/-]` (mixed case + `.` + `/`
- *      allowed — file paths are NOT kebab-restricted). Whitespace and any
- *      other byte terminate the path. `..` / absolute-path / traversal
- *      handling is the resolver + fs-jail's job, NOT the lexer's.
- *   9. Explicit form `@file:<path>` — the `file:` prefix is reserved;
- *      `<path>` is one or more path-alphabet chars. Always wins over the
- *      `@skill` alternative (matched first).
- *  10. Bare form `@<path>` — matches only when `<path>` starts with a
- *      path-alphabet char and contains at least one `/` or `.`. This
- *      "must contain `/` or `.`" rule is the disambiguator: `@code-review`
- *      (no `/`, no `.`) stays a `skill`; `@src/x.ts` / `@README.md`
- *      become a `file`. The bare-file alternative is tried AFTER the
- *      explicit `@file:` form but BEFORE `@skill`, so `@path/x` never
- *      mis-classifies as skill `path`.
- *  11. File `target` is the raw path (sigil/`file:` prefix stripped). It
- *      is NOT length-capped at 64 (paths are legitimately longer); the
- *      path-alphabet run is itself the only length bound.
+ *   `plugin://name` is parsed via its own alternative (no `@` prefix);
+ *   precedence is independent of the @-cascade above. `@@app` is matched
+ *   FIRST so the single-`@` alternative does not eat the leading `@`.
+ *
+ *   Tie-break documentation (ADR-0418 §4 — verbatim examples):
+ *     - `@./Foo`     → kind=file   (contains `/`)
+ *     - `@Foo.bar`   → kind=symbol (starts uppercase, `.member` allowed)
+ *     - `@a.b`       → kind=file   (lowercase start + contains `.`)
+ *     - `@code-review` → kind=skill (kebab, no `.` no `/`)
+ *
+ * Other rules (LOCKED — extending requires a new ADR):
+ *
+ *   1. Skill identifier alphabet: `[a-z][a-z0-9-]*` (ASCII kebab-case,
+ *      starts lowercase). Length 1..64.
+ *   2. File path alphabet: `[A-Za-z0-9_./~-]` (workspace-relative
+ *      paths). Length 1..512 (post-sigil). Whitespace terminates.
+ *   3. Symbol alphabet: `[A-Z][A-Za-z0-9_]*` optional `.[A-Za-z_][A-Za-z0-9_]*`.
+ *      Length 1..128 (post-sigil).
+ *   4. App identifier alphabet: ASCII kebab `[a-z][a-z0-9-]*`, length 1..64.
+ *   5. Plugin identifier alphabet: ASCII kebab `[a-z][a-z0-9-]*`, 1..64.
+ *   6. Left-boundary: the leading sigil MUST sit at start-of-input OR
+ *      immediately after a NON-word char (JS `[^\w]`). Email `foo@bar.com`
+ *      is rejected because `o` (left of `@`) is `\w`.
+ *   7. Right-boundary: post-identifier char MUST NOT continue the kind's
+ *      alphabet (otherwise we'd be reading a prefix). End-of-input is a
+ *      boundary.
+ *   8. Dedup: per `(kind, target)` pair, FIRST occurrence wins. Order is
+ *      preserved.
+ *   9. Code fences / inline backticks are NOT treated specially.
+ *   10. Empty target after a sigil is NOT a mention.
  *
  * NO-THROW invariant: any input string produces a `readonly ParsedMention[]`.
  * Pure: no clock read, no I/O, no global state.
@@ -64,117 +66,179 @@
 
 import type { MentionKind, ParsedMention } from "./types"
 
-/** Max identifier length (post-sigil). */
-const MAX_TARGET_LEN = 64
+/** Max identifier length (post-sigil) for skill / app / plugin. */
+const MAX_KEBAB_LEN = 64
+/** Max path length (post-sigil) for `file`. */
+const MAX_FILE_LEN = 512
+/** Max symbol length (post-sigil) for `symbol`. */
+const MAX_SYMBOL_LEN = 128
 
 /**
- * Combined regex. Each alternative captures the FULL match (sigil + ident)
- * via the named-group `raw` for offset bookkeeping, plus a kind-tagged
- * group so the kind switch is regex-driven (not post-hoc string-prefix
- * sniffing — that would mis-classify `@@x` as `skill`).
+ * Master regex. Each alternative captures the FULL match via named groups:
  *
- * IMPORTANT ordering (alternatives are tried left-to-right at each match
- * position):
+ *   - `app`     : `@@<kebab>` (must precede the `@<rest>` alternative).
+ *   - `plugin`  : `plugin://<kebab>` (independent of `@`).
+ *   - `at`      : `@<rest>` — POST-MATCH classified into file / symbol /
+ *                 skill by `classifyAtPayload`. The `<rest>` capture is
+ *                 `atPayload`.
  *
- *   1. `@@app`     — MUST precede `@skill`, otherwise the single-`@`
- *                    alternative consumes the first `@` and leaves `@app`
- *                    dangling as a fresh skill match.
- *   2. `@file:`    — explicit file prefix (ADR-0413). MUST precede `@skill`
- *                    so `@file:Makefile` is a file even when the path has
- *                    no `/` or `.` (the bare-file alternative would reject
- *                    it, and `@skill` would mis-grab `file`).
- *   3. `@<path>`   — bare file path (ADR-0413). MUST precede `@skill` so
- *                    `@src/x.ts` is a file, not skill `src`. The mandatory
- *                    `[./]` class means a `/`-or-`.`-free token (e.g.
- *                    `@code-review`) skips this alternative and falls to
- *                    `@skill`.
- *   4. `plugin://` — independent scheme (no `@` prefix); order-insensitive.
- *   5. `@skill`    — kebab identifier; the residual single-`@` case. Guards
- *                    against the reserved `@file:` prefix with a `(?!file:)`
- *                    lookahead so a malformed `@file:` (empty path) does NOT
- *                    degrade into a `skill` named `file` — it is simply not
- *                    a mention (rule 9: the explicit prefix needs ≥1 path
- *                    char). A bare `@file` with no colon is still a valid
- *                    skill mention.
- *
- * Right-boundary: the three legacy alternatives keep their negative
- * lookahead `(?![a-z0-9-])` (rule 4). The file alternatives use
- * `(?![A-Za-z0-9._/-])` so the match stops only at a non-path byte (a
- * trailing path char would otherwise be a prefix of a longer path).
+ * The trailing negative-lookahead for `app` / `plugin` (`(?![a-z0-9-])`)
+ * enforces the kebab right-boundary. The `at` alternative uses a broader
+ * payload regex; right-boundary is enforced per-kind in `classifyAtPayload`.
  */
 const MENTION_RE =
-  /(?<app>@@(?<appName>[a-z][a-z0-9-]*))(?![a-z0-9-])|(?<fileExplicit>@file:(?<fileExplicitPath>[A-Za-z0-9._/-]+))(?![A-Za-z0-9._/-])|(?<fileBare>@(?<fileBarePath>[A-Za-z0-9_-]*[./][A-Za-z0-9._/-]*))(?![A-Za-z0-9._/-])|(?<plugin>plugin:\/\/(?<pluginName>[a-z][a-z0-9-]*))(?![a-z0-9-])|(?<skill>@(?!file:)(?<skillName>[a-z][a-z0-9-]*))(?![a-z0-9-])/g
+  /(?<app>@@(?<appName>[a-z][a-z0-9-]*))(?![a-z0-9-])|(?<plugin>plugin:\/\/(?<pluginName>[a-z][a-z0-9-]*))(?![a-z0-9-])|(?<at>@(?<atPayload>[A-Za-z_./~][A-Za-z0-9_./~-]*))/g
+
+/** Pure kebab identifier check for skill / app / plugin. */
+const KEBAB_RE = /^[a-z][a-z0-9-]*$/
+/** Symbol identifier (uppercase-leading), optional `.member` suffix. */
+const SYMBOL_RE = /^[A-Z][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?$/
+/** File-path alphabet allowed AFTER the `@`. */
+const FILE_PATH_RE = /^[A-Za-z0-9_./~][A-Za-z0-9_./~-]*$/
 
 /**
- * Left-boundary predicate (rule 3). `prevChar` is the codepoint
+ * Left-boundary predicate (rule 6). `prevChar` is the codepoint
  * immediately BEFORE the match start (or `""` at start-of-input). A
  * mention starts only when the previous char is not a JS word char.
- *
- * Why JS `\w` semantics (`[A-Za-z0-9_]`):
- *   - `@bar.com` post-`foo` ⇒ `foo` ends with a word char ⇒ NOT a
- *     mention. ✅ rejects email false positives.
- *   - `(@skill)` (`(` is non-word) ⇒ mention. ✅
- *   - `\n@skill` ⇒ mention. ✅
- *   - `hello @skill` (space) ⇒ mention. ✅
- *   - `_@skill` ⇒ `_` is word ⇒ NOT a mention (intentional — a leading
- *     underscore-letter run is treated as one identifier).
  */
 const isLeftBoundaryOk = (prevChar: string): boolean => {
   if (prevChar === "") return true
   return /[^\w]/.test(prevChar)
 }
 
-/** Dispatch the captured groups to a kind / target pair. Exhaustive: the
- *  regex guarantees exactly one of `skill`/`plugin`/`app` is set per match,
- *  so the final `null` is unreachable when the regex matched. */
-const dispatchKind = (
-  groups: Record<string, string | undefined>,
-): { kind: MentionKind; target: string } | null => {
-  if (groups.app !== undefined && groups.appName !== undefined) {
-    return { kind: "app", target: groups.appName }
+/** Narrow the regex-captured payload to the file-path alphabet, trimming
+ *  trailing characters that escape the alphabet. Returns null if EMPTY
+ *  after narrowing. */
+const narrowFilePayload = (payload: string): string | null => {
+  let end = payload.length
+  while (end > 0) {
+    const ch = payload[end - 1] ?? ""
+    if (FILE_PATH_RE.test(ch)) break
+    end--
   }
-  // ADR-0413 — both file forms map to kind="file" with the raw path target.
-  if (groups.fileExplicit !== undefined && groups.fileExplicitPath !== undefined) {
-    return { kind: "file", target: groups.fileExplicitPath }
+  if (end === 0) return null
+  const candidate = payload.slice(0, end)
+  if (!FILE_PATH_RE.test(candidate)) return null
+  return candidate
+}
+
+/** Narrow the regex-captured payload to the symbol alphabet. The master
+ *  regex may have captured trailing path-like chars (`-`, `/`, `~`); we
+ *  accept the longest symbol-alphabet prefix. */
+const narrowSymbolPayload = (payload: string): string | null => {
+  const m = payload.match(/^[A-Z][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?/)
+  if (m === null) return null
+  if (!SYMBOL_RE.test(m[0])) return null
+  return m[0]
+}
+
+/** Narrow the regex-captured payload to the kebab alphabet (skill case). */
+const narrowKebabPayload = (payload: string): string | null => {
+  const m = payload.match(/^[a-z][a-z0-9-]*/)
+  if (m === null) return null
+  if (!KEBAB_RE.test(m[0])) return null
+  // Right-boundary: char immediately after the kebab must NOT continue
+  // the kebab alphabet. `.` and `/` would have been routed to file/symbol
+  // earlier, so the only "continues the alphabet" residue is `[a-z0-9-]`;
+  // the greedy regex already consumed all of those, so a non-empty
+  // remainder here is always a genuine terminator — accept.
+  if (m[0].length < payload.length) {
+    const next = payload[m[0].length] ?? ""
+    if (/[a-z0-9-]/.test(next)) return null
   }
-  if (groups.fileBare !== undefined && groups.fileBarePath !== undefined) {
-    return { kind: "file", target: groups.fileBarePath }
-  }
-  if (groups.plugin !== undefined && groups.pluginName !== undefined) {
-    return { kind: "plugin", target: groups.pluginName }
-  }
-  if (groups.skill !== undefined && groups.skillName !== undefined) {
-    return { kind: "skill", target: groups.skillName }
-  }
-  return null
+  return m[0]
+}
+
+type AtClass = { kind: MentionKind; target: string } | null
+
+/** Narrow + length-cap a file payload into a `file` classification. */
+const asFile = (payload: string): AtClass => {
+  const cleaned = narrowFilePayload(payload)
+  if (cleaned === null || cleaned.length > MAX_FILE_LEN) return null
+  return { kind: "file", target: cleaned }
+}
+
+/** Narrow + length-cap a symbol payload into a `symbol` classification. */
+const asSymbol = (payload: string): AtClass => {
+  const cleaned = narrowSymbolPayload(payload)
+  if (cleaned === null || cleaned.length > MAX_SYMBOL_LEN) return null
+  return { kind: "symbol", target: cleaned }
+}
+
+/** Narrow + length-cap a kebab payload into a `skill` classification. */
+const asSkill = (payload: string): AtClass => {
+  const kebab = narrowKebabPayload(payload)
+  if (kebab === null || kebab.length > MAX_KEBAB_LEN) return null
+  return { kind: "skill", target: kebab }
 }
 
 /**
- * Validate one regex match against all syntax rules (left-boundary,
- * kind dispatch, max-length). Returns the would-be {@link ParsedMention}
- * or `null` if the match is rejected by any rule. Pure.
+ * Classify the payload of an `@<rest>` match per the ADR-0418 §4 priority
+ * cascade. Returns the classified `(kind, target)` pair, or `null` if the
+ * payload doesn't fit any kind.
+ *
+ * Cascade order (FIRST match wins): slash→file, uppercase→symbol,
+ * lowercase+dot→file, lowercase-kebab→skill.
+ */
+const classifyAtPayload = (payload: string): AtClass => {
+  if (payload.includes("/")) return asFile(payload) // priority 2
+  if (/^[A-Z]/.test(payload)) return asSymbol(payload) // priority 3
+  if (/^[a-z]/.test(payload) && payload.includes(".")) return asFile(payload) // priority 4
+  if (/^[a-z]/.test(payload)) return asSkill(payload) // priority 5
+  return null
+}
+
+/** Build a {@link ParsedMention} from a verbatim-raw kebab match (app /
+ *  plugin). Returns null when the identifier blows the kebab cap. */
+const kebabMention = (
+  kind: "app" | "plugin",
+  target: string,
+  start: number,
+  raw: string,
+): ParsedMention | null => {
+  if (target.length > MAX_KEBAB_LEN) return null
+  return { kind, target, span: { start, end: start + raw.length }, raw }
+}
+
+/** Classify the captured `@<rest>` payload + project it into a
+ *  {@link ParsedMention}. The `raw` is RECONSTRUCTED from the narrowed
+ *  target (`@${target}`) so an over-captured payload does not inflate the
+ *  span past the consumed slice. */
+const atMention = (payload: string, start: number): ParsedMention | null => {
+  const classified = classifyAtPayload(payload)
+  if (classified === null) return null
+  const raw = `@${classified.target}`
+  return {
+    kind: classified.kind,
+    target: classified.target,
+    span: { start, end: start + raw.length },
+    raw,
+  }
+}
+
+/**
+ * Validate one regex match against all syntax rules. Returns the
+ * would-be {@link ParsedMention} or `null` if rejected. Pure.
  */
 const validateMatch = (m: RegExpMatchArray, text: string): ParsedMention | null => {
   const start = m.index
   if (start === undefined) return null
 
-  const raw = m[0]
   const prevChar = start === 0 ? "" : (text[start - 1] ?? "")
   if (!isLeftBoundaryOk(prevChar)) return null
 
-  const dispatch = dispatchKind(m.groups ?? {})
-  if (dispatch === null) return null
-  // The 64-char cap is for kebab identifiers (skill/plugin/app); file
-  // paths (ADR-0413) are legitimately longer and bounded by the
-  // path-alphabet run instead (rule 11).
-  if (dispatch.kind !== "file" && dispatch.target.length > MAX_TARGET_LEN) return null
+  const groups = m.groups ?? {}
 
-  return {
-    kind: dispatch.kind,
-    target: dispatch.target,
-    span: { start, end: start + raw.length },
-    raw,
+  if (groups.app !== undefined && groups.appName !== undefined) {
+    return kebabMention("app", groups.appName, start, m[0])
   }
+  if (groups.plugin !== undefined && groups.pluginName !== undefined) {
+    return kebabMention("plugin", groups.pluginName, start, m[0])
+  }
+  if (groups.at !== undefined && groups.atPayload !== undefined) {
+    return atMention(groups.atPayload, start)
+  }
+  return null
 }
 
 /**
@@ -182,9 +246,7 @@ const validateMatch = (m: RegExpMatchArray, text: string): ParsedMention | null 
  * explicit mentions. NO-THROW: degenerate inputs produce `[]`.
  *
  * Dedup key: `${kind}\x1f${target}` — a separator that cannot appear in
- * the identifier alphabet so `kind=skill,target="a-b"` is distinct from
- * a hypothetical `kind=skill-a,target="b"` (which can't be produced
- * anyway, since `skill` is enum-closed).
+ * any kind's identifier alphabet, so cross-kind targets do not collide.
  */
 export const parseMentions = (userInputText: string): readonly ParsedMention[] => {
   if (typeof userInputText !== "string" || userInputText.length === 0) {
@@ -194,7 +256,6 @@ export const parseMentions = (userInputText: string): readonly ParsedMention[] =
   const out: ParsedMention[] = []
   const seen = new Set<string>()
 
-  // Reset stateful regex (defensive — module-level flag could be re-used).
   MENTION_RE.lastIndex = 0
   for (const m of userInputText.matchAll(MENTION_RE)) {
     const candidate = validateMatch(m, userInputText)
