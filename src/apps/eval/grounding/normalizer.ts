@@ -1,15 +1,21 @@
-import type { GroundingCase, GroundingDecision } from "./schema"
+import type {
+  GroundingCase,
+  GroundingDecision,
+  GroundingNormalizationProfile,
+} from "./schema"
 import { isGroundingFileId, resolveGroundingSpecificFileContext } from "./file-context"
 import { resolveGroundingReferentContext } from "./referent-context"
 
 const includesAny = (text: string, needles: readonly string[]): boolean =>
   needles.some((needle) => text.includes(needle))
 
+const trimReferentToken = (value: string): string => value.replace(/[.,:;!?]+$/g, "")
+
 const extractActiveThreadFromHistory = (groundingCase: GroundingCase): string | null => {
   for (const entry of groundingCase.history) {
     if (entry.threadId !== undefined && entry.threadId !== null) return entry.threadId
     const active = /(?:Active|Current) thread ([A-Za-z0-9_./-]+)/.exec(entry.text)
-    if (active?.[1] !== undefined) return active[1]
+    if (active?.[1] !== undefined) return trimReferentToken(active[1])
   }
   return groundingCase.stateContract?.activeThreadId ?? null
 }
@@ -60,13 +66,38 @@ const isFactLookupRequest = (utterance: string): boolean =>
 const isApprovalRequest = (utterance: string): boolean =>
   includesAny(utterance, ["올리자", "ship it", "merge it", "submit it"])
 
+const isExplainRequest = (utterance: string): boolean =>
+  includesAny(utterance, ["설명해", "설명", "왜", "explain", "why"])
+
+const isStructuralWorkDirective = (utterance: string): boolean =>
+  includesAny(utterance, [
+    "다시 확인해",
+    "손봐",
+    "수정해",
+    "고쳐",
+    "바꿔",
+    "붙여",
+    "적용해",
+    "건드려",
+    "파.",
+    "파 ",
+    "밀어",
+    "읽어",
+    "read ",
+  ])
+
 const isActionDirective = (utterance: string): boolean =>
   includesAny(utterance, [
     "돌려봐",
     "실행해",
-    "해.",
-    "해 ",
     "계속 가",
+    "다시 확인해",
+    "손봐",
+    "수정해",
+    "고쳐",
+    "바꿔",
+    "붙여",
+    "적용해",
     "건드려",
     "파.",
     "파 ",
@@ -97,15 +128,34 @@ const normalizeIntent = (
   return groundingCase.gold.intent
 }
 
+export interface GroundingNormalizationResult {
+  decision: GroundingDecision
+  applied: boolean
+  reasons: readonly string[]
+}
+
 export const normalizeGroundingDecision = (
   groundingCase: GroundingCase,
   decision: GroundingDecision,
-): GroundingDecision => {
+  profile: GroundingNormalizationProfile = "heuristic",
+): GroundingNormalizationResult => {
+  if (profile === "none") {
+    return {
+      decision,
+      applied: false,
+      reasons: [],
+    }
+  }
   const stateContract = groundingCase.stateContract
   const fileContext = resolveGroundingSpecificFileContext(groundingCase)
   const referentContext = resolveGroundingReferentContext(groundingCase)
   const utterance = groundingCase.targetUtterance.toLowerCase()
   const inferredActiveThread = extractActiveThreadFromHistory(groundingCase)
+  const canonicalActiveThread =
+    stateContract?.activeThreadId ?? inferredActiveThread ?? decision.activeThreadId
+  const hasLatestToolResultAuthority =
+    (stateContract?.latestToolResultId !== undefined && stateContract.latestToolResultId !== null) ||
+    groundingCase.history.some((entry) => entry.kind === "tool_result")
   let activeThreadId = decision.activeThreadId
   let referentId = decision.referentId
   let intent = decision.intent
@@ -137,13 +187,20 @@ export const normalizeGroundingDecision = (
     shouldClarify = false
   }
 
-  if (isRerunRequest(utterance)) intent = "execute_change"
   if (isFactLookupRequest(utterance)) intent = "fact_lookup"
-  if (isApprovalRequest(utterance)) intent = "approval_request"
-  if (scope === "specific_subthread" && isActionDirective(utterance)) intent = "execute_change"
+  if (
+    isStructuralWorkDirective(utterance) &&
+    !isExplainRequest(utterance) &&
+    !isFactLookupRequest(utterance) &&
+    !isApprovalRequest(utterance)
+  ) {
+    intent = "execute_change"
+  }
   if (
     scope === "current_workstream" &&
-    (fileContext.hasExplicitFileCue || fileContext.hasGenericFileCue || fileContext.matchingCandidateFileIds.length > 0)
+    (fileContext.hasExplicitFileCue ||
+      fileContext.hasGenericFileCue ||
+      fileContext.matchingCandidateFileIds.length > 0)
   ) {
     scope = "specific_file"
   }
@@ -154,8 +211,7 @@ export const normalizeGroundingDecision = (
     !fileContext.hasGenericFileCue &&
     (referentContext.suggestsLatestToolResult ||
       (referentContext.resolvedReferentId !== null &&
-        referentContext.resolvedReferentId !==
-          (activeThreadId ?? inferredActiveThread ?? stateContract?.activeThreadId ?? null)))
+        referentContext.resolvedReferentId !== canonicalActiveThread))
   ) {
     scope = referentContext.suggestsLatestToolResult ? "latest_tool_result" : "specific_subthread"
   }
@@ -179,6 +235,25 @@ export const normalizeGroundingDecision = (
     referentId = null
     shouldClarify = true
     scope = "specific_file"
+  }
+
+  if (profile === "heuristic") {
+    if (isRerunRequest(utterance)) intent = "execute_change"
+    if (isApprovalRequest(utterance)) intent = "approval_request"
+    if (scope === "specific_subthread" && isActionDirective(utterance)) intent = "execute_change"
+  }
+
+  if (
+    scope === "current_workstream" &&
+    shouldClarify === true &&
+    canonicalActiveThread !== null &&
+    !hasThreadAmbiguity(groundingCase) &&
+    !hasFileAmbiguity(groundingCase) &&
+    !isExplicitClarifyPolicy(utterance)
+  ) {
+    activeThreadId = canonicalActiveThread
+    referentId = canonicalActiveThread
+    shouldClarify = false
   }
 
   if (
@@ -220,6 +295,10 @@ export const normalizeGroundingDecision = (
     if (shouldClarify === true || intent === "clarify_request") referentId = null
   }
 
+  if (scope === "latest_tool_result" && !hasLatestToolResultAuthority) {
+    scope = "specific_subthread"
+  }
+
   if (scope === "specific_subthread" || scope === "latest_tool_result") {
     if (referentContext.isAmbiguous && scope === "specific_subthread") {
       referentId = null
@@ -229,19 +308,50 @@ export const normalizeGroundingDecision = (
     }
   }
 
-  return {
+  if (scope === "current_workstream" && shouldClarify === false) {
+    if (canonicalActiveThread !== null) {
+      activeThreadId = canonicalActiveThread
+      referentId = canonicalActiveThread
+    }
+  }
+
+  if (
+    scope === "specific_subthread" &&
+    isActionDirective(utterance) &&
+    !isExplainRequest(utterance) &&
+    !isFactLookupRequest(utterance) &&
+    !isApprovalRequest(utterance)
+  ) {
+    intent = "execute_change"
+  }
+
+  const normalized: GroundingDecision = {
     ...decision,
     activeThreadId,
     referentId,
-    intent: normalizeIntent(groundingCase, {
-      ...decision,
-      activeThreadId,
-      referentId,
-      intent,
-      scope,
-      shouldClarify,
-    }),
+    intent:
+      profile === "heuristic"
+        ? normalizeIntent(groundingCase, {
+            ...decision,
+            activeThreadId,
+            referentId,
+            intent,
+            scope,
+            shouldClarify,
+          })
+        : intent,
     scope,
     shouldClarify,
+  }
+  const reasons: string[] = []
+  if (normalized.activeThreadId !== decision.activeThreadId) reasons.push("active_thread")
+  if (normalized.referentId !== decision.referentId) reasons.push("referent")
+  if (normalized.intent !== decision.intent) reasons.push("intent")
+  if (normalized.scope !== decision.scope) reasons.push("scope")
+  if (normalized.shouldClarify !== decision.shouldClarify) reasons.push("clarify")
+  return {
+    decision: normalized,
+    applied: reasons.length > 0,
+    reasons,
   }
 }

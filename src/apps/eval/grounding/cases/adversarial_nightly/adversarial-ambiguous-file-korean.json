@@ -1,0 +1,44 @@
+{
+  "schema": 2,
+  "id": "adversarial-ambiguous-file-korean",
+  "corpus": "adversarial_nightly",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    {
+      "role": "assistant",
+      "threadId": "prompt_rules",
+      "text": "Active thread prompt_rules is editing src/agent/prompt.ts and src/agent/loop.ts."
+    },
+    {
+      "role": "assistant",
+      "threadId": "prompt_rules",
+      "text": "Both files still need changes before closeout."
+    }
+  ],
+  "targetUtterance": "그 파일만 건드려.",
+  "gold": {
+    "activeThreadId": "prompt_rules",
+    "referentId": null,
+    "intent": "execute_change",
+    "scope": "specific_file",
+    "shouldClarify": true,
+    "confidence": "high"
+  },
+  "bucket": "must_clarify",
+  "severity": "medium",
+  "stateContract": {
+    "activeThreadId": "prompt_rules",
+    "candidateFileIds": ["src/agent/loop.ts", "src/agent/prompt.ts"],
+    "primaryFileId": "src/agent/prompt.ts"
+  },
+  "candidateThreadIds": ["prompt_rules"],
+  "candidateReferentIds": ["src/agent/loop.ts", "src/agent/prompt.ts"],
+  "ambiguityClass": "file",
+  "blockingEligible": false,
+  "sourceProvenance": {
+    "kind": "manual"
+  },
+  "humanAudit": {
+    "status": "none"
+  }
+}

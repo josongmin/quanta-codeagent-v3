@@ -80,7 +80,7 @@ const historyReferents = (groundingCase: GroundingCase): readonly string[] =>
 
 const currentHistoryReferent = (groundingCase: GroundingCase): string | null => {
   for (let index = groundingCase.history.length - 1; index >= 0; index -= 1) {
-    const entry = groundingCase.history[index]
+    const entry = groundingCase.history[index]!
     if (entry.referentId !== undefined && entry.referentId !== null && !isGroundingFileId(entry.referentId)) {
       return entry.referentId
     }

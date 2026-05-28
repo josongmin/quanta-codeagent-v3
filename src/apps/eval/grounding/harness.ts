@@ -6,14 +6,17 @@ import { shortHash, stableJson } from "./stable-json"
 
 const HARNESS_SOURCE_FILES = [
   "compare.ts",
+  "config.ts",
   "file-context.ts",
   "harness.ts",
   "loader.ts",
   "normalizer.ts",
   "parser.ts",
   "probe.ts",
+  "replay-scaffold.ts",
   "referent-context.ts",
   "report.ts",
+  "route-matrix.ts",
   "schema.ts",
   "scorer.ts",
   "stable-json.ts",

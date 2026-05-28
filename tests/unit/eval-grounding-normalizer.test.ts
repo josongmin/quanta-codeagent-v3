@@ -30,7 +30,7 @@ describe("grounding decision normalizer", () => {
       shouldClarify: false,
       confidence: "high",
     })
-    expect(out.referentId).toBe("prompt_rules")
+    expect(out.decision.referentId).toBe("prompt_rules")
   })
 
   test("fills missing activeThreadId and latest tool result from stateContract", () => {
@@ -60,8 +60,8 @@ describe("grounding decision normalizer", () => {
         confidence: "high",
       },
     )
-    expect(out.activeThreadId).toBe("screenshot_send")
-    expect(out.referentId).toBe("latest_capture_failure")
+    expect(out.decision.activeThreadId).toBe("screenshot_send")
+    expect(out.decision.referentId).toBe("latest_capture_failure")
   })
 
   test("preserves latent intent when the model asks for clarification", () => {
@@ -86,7 +86,7 @@ describe("grounding decision normalizer", () => {
         confidence: "medium",
       },
     )
-    expect(out.intent).toBe("execute_change")
+    expect(out.decision.intent).toBe("execute_change")
   })
 
   test("promotes rerun and threshold lookup cues to the correct intent", () => {
@@ -104,7 +104,7 @@ describe("grounding decision normalizer", () => {
         confidence: "high",
       },
     )
-    expect(rerun.intent).toBe("execute_change")
+    expect(rerun.decision.intent).toBe("execute_change")
 
     const lookup = normalizeGroundingDecision(
       baseCase({
@@ -119,7 +119,7 @@ describe("grounding decision normalizer", () => {
         confidence: "high",
       },
     )
-    expect(lookup.intent).toBe("fact_lookup")
+    expect(lookup.decision.intent).toBe("fact_lookup")
   })
 
   test("detects explicit clarify, entire-session, and subthread cues", () => {
@@ -142,9 +142,9 @@ describe("grounding decision normalizer", () => {
         confidence: "medium",
       },
     )
-    expect(clarify.intent).toBe("clarify_request")
-    expect(clarify.scope).toBe("specific_file")
-    expect(clarify.activeThreadId).toBe("prompt_rules")
+    expect(clarify.decision.intent).toBe("clarify_request")
+    expect(clarify.decision.scope).toBe("specific_file")
+    expect(clarify.decision.activeThreadId).toBe("prompt_rules")
 
     const overview = normalizeGroundingDecision(
       baseCase({
@@ -165,9 +165,9 @@ describe("grounding decision normalizer", () => {
         confidence: "medium",
       },
     )
-    expect(overview.scope).toBe("entire_session")
-    expect(overview.activeThreadId).toBeNull()
-    expect(overview.referentId).toBeNull()
+    expect(overview.decision.scope).toBe("entire_session")
+    expect(overview.decision.activeThreadId).toBeNull()
+    expect(overview.decision.referentId).toBeNull()
 
     const step = normalizeGroundingDecision(
       baseCase({
@@ -188,8 +188,8 @@ describe("grounding decision normalizer", () => {
         confidence: "high",
       },
     )
-    expect(step.scope).toBe("specific_subthread")
-    expect(step.referentId).toBe("prompt_rules_step_2")
+    expect(step.decision.scope).toBe("specific_subthread")
+    expect(step.decision.referentId).toBe("prompt_rules_step_2")
   })
 
   test("forces clarify on generic ambiguous thread or file references", () => {
@@ -210,9 +210,9 @@ describe("grounding decision normalizer", () => {
         confidence: "medium",
       },
     )
-    expect(ambiguousThreads.shouldClarify).toBe(true)
-    expect(ambiguousThreads.activeThreadId).toBeNull()
-    expect(ambiguousThreads.referentId).toBeNull()
+    expect(ambiguousThreads.decision.shouldClarify).toBe(true)
+    expect(ambiguousThreads.decision.activeThreadId).toBeNull()
+    expect(ambiguousThreads.decision.referentId).toBeNull()
 
     const ambiguousFiles = normalizeGroundingDecision(
       baseCase({
@@ -231,9 +231,9 @@ describe("grounding decision normalizer", () => {
         confidence: "medium",
       },
     )
-    expect(ambiguousFiles.shouldClarify).toBe(true)
-    expect(ambiguousFiles.scope).toBe("specific_file")
-    expect(ambiguousFiles.referentId).toBeNull()
+    expect(ambiguousFiles.decision.shouldClarify).toBe(true)
+    expect(ambiguousFiles.decision.scope).toBe("specific_file")
+    expect(ambiguousFiles.decision.referentId).toBeNull()
   })
 
   test("promotes imperative subthread cues to execute_change", () => {
@@ -256,7 +256,7 @@ describe("grounding decision normalizer", () => {
         confidence: "high",
       },
     )
-    expect(out.intent).toBe("execute_change")
+    expect(out.decision.intent).toBe("execute_change")
   })
 
   test("resolves specific_file referents from explicit paths and owner authority", () => {
@@ -289,8 +289,8 @@ describe("grounding decision normalizer", () => {
         confidence: "high",
       },
     )
-    expect(explicit.scope).toBe("specific_file")
-    expect(explicit.referentId).toBe("src/agent/prompt.ts")
+    expect(explicit.decision.scope).toBe("specific_file")
+    expect(explicit.decision.referentId).toBe("src/agent/prompt.ts")
 
     const ownerShortlist = normalizeGroundingDecision(
       baseCase({
@@ -330,8 +330,8 @@ describe("grounding decision normalizer", () => {
         confidence: "high",
       },
     )
-    expect(ownerShortlist.scope).toBe("specific_file")
-    expect(ownerShortlist.referentId).toBe("src/apps/eval/index.ts")
+    expect(ownerShortlist.decision.scope).toBe("specific_file")
+    expect(ownerShortlist.decision.referentId).toBe("src/apps/eval/index.ts")
   })
 
   test("resolves structured subthread referents and ship-it approval cues", () => {
@@ -364,9 +364,9 @@ describe("grounding decision normalizer", () => {
         confidence: "medium",
       },
     )
-    expect(subthread.scope).toBe("specific_subthread")
-    expect(subthread.referentId).toBe("stale_refresh_token_path")
-    expect(subthread.intent).toBe("execute_change")
+    expect(subthread.decision.scope).toBe("specific_subthread")
+    expect(subthread.decision.referentId).toBe("stale_refresh_token_path")
+    expect(subthread.decision.intent).toBe("execute_change")
 
     const approval = normalizeGroundingDecision(
       baseCase({
@@ -395,7 +395,7 @@ describe("grounding decision normalizer", () => {
         confidence: "medium",
       },
     )
-    expect(approval.intent).toBe("approval_request")
+    expect(approval.decision.intent).toBe("approval_request")
   })
 
   test("does not over-promote current workstream cases that only restate the active thread", () => {
@@ -420,8 +420,41 @@ describe("grounding decision normalizer", () => {
         confidence: "high",
       },
     )
-    expect(out.scope).toBe("current_workstream")
-    expect(out.intent).toBe("status_check")
+    expect(out.decision.scope).toBe("current_workstream")
+    expect(out.decision.intent).toBe("status_check")
+  })
+
+  test("canonicalizes current_workstream referents back to the active thread", () => {
+    const out = normalizeGroundingDecision(
+      baseCase({
+        history: [
+          {
+            role: "assistant",
+            text: "Active thread prompt_rules has a patch ready for merge.",
+          },
+        ],
+        targetUtterance: "그럼 이거 머지해도 되냐?",
+        gold: {
+          activeThreadId: "prompt_rules",
+          referentId: "prompt_rules",
+          intent: "approval_request",
+          scope: "current_workstream",
+          shouldClarify: false,
+          confidence: "high",
+        },
+      }),
+      {
+        activeThreadId: "prompt_rules",
+        referentId: "patch_ready_for_merge",
+        intent: "approval_request",
+        scope: "current_workstream",
+        shouldClarify: false,
+        confidence: "high",
+      },
+      "structural",
+    )
+    expect(out.decision.referentId).toBe("prompt_rules")
+    expect(out.decision.activeThreadId).toBe("prompt_rules")
   })
 
   test("demotes non-file specific_file predictions back to specific_subthread", () => {
@@ -459,8 +492,146 @@ describe("grounding decision normalizer", () => {
         confidence: "high",
       },
     )
-    expect(out.scope).toBe("specific_subthread")
-    expect(out.referentId).toBe("current_runner_log")
-    expect(out.intent).toBe("execute_change")
+    expect(out.decision.scope).toBe("specific_subthread")
+    expect(out.decision.referentId).toBe("current_runner_log")
+    expect(out.decision.intent).toBe("execute_change")
+  })
+
+  test("repairs over-clarified current workstream predictions when one active thread is authoritative", () => {
+    const out = normalizeGroundingDecision(
+      baseCase({
+        history: [
+          {
+            role: "assistant",
+            text: "Active thread context_grounding chose a structured probe instead of a prose judge.",
+          },
+        ],
+        targetUtterance: "이거 왜 이렇게 설계했는지 설명해.",
+        gold: {
+          activeThreadId: "context_grounding",
+          referentId: "context_grounding",
+          intent: "explain",
+          scope: "current_workstream",
+          shouldClarify: false,
+          confidence: "high",
+        },
+      }),
+      {
+        activeThreadId: null,
+        referentId: null,
+        intent: "explain",
+        scope: "current_workstream",
+        shouldClarify: true,
+        confidence: "low",
+      },
+      "structural",
+    )
+    expect(out.decision.activeThreadId).toBe("context_grounding")
+    expect(out.decision.referentId).toBe("context_grounding")
+    expect(out.decision.shouldClarify).toBe(false)
+    expect(out.decision.intent).toBe("explain")
+  })
+
+  test("demotes unsupported latest_tool_result scope and preserves explanation intents", () => {
+    const latest = normalizeGroundingDecision(
+      baseCase({
+        history: [
+          {
+            role: "assistant",
+            threadId: "doc_sync",
+            referentId: "doc_sync_recent_change",
+            text: "Active thread doc_sync last changed the persistent-context section and added the thread-grounding row.",
+          },
+        ],
+        targetUtterance: "방금 뭘 바꿨지?",
+        gold: {
+          activeThreadId: "doc_sync",
+          referentId: "doc_sync_recent_change",
+          intent: "fact_lookup",
+          scope: "specific_subthread",
+          shouldClarify: false,
+          confidence: "high",
+        },
+      }),
+      {
+        activeThreadId: "doc_sync",
+        referentId: "doc_sync_recent_change",
+        intent: "explain",
+        scope: "latest_tool_result",
+        shouldClarify: false,
+        confidence: "high",
+      },
+      "structural",
+    )
+    expect(latest.decision.intent).toBe("fact_lookup")
+    expect(latest.decision.scope).toBe("specific_subthread")
+
+    const explain = normalizeGroundingDecision(
+      baseCase({
+        history: [
+          {
+            role: "assistant",
+            threadId: "responses_migration",
+            referentId: "gpt-4.1",
+            text: "Active thread responses_migration switched the evaluator model from gpt-4o to gpt-4.1.",
+          },
+        ],
+        targetUtterance: "그 모델 기준으로 다시 설명해.",
+        gold: {
+          activeThreadId: "responses_migration",
+          referentId: "gpt-4.1",
+          intent: "explain",
+          scope: "specific_subthread",
+          shouldClarify: false,
+          confidence: "high",
+        },
+      }),
+      {
+        activeThreadId: "responses_migration",
+        referentId: "gpt-4.1",
+        intent: "explain",
+        scope: "current_workstream",
+        shouldClarify: false,
+        confidence: "high",
+      },
+      "structural",
+    )
+    expect(explain.decision.scope).toBe("specific_subthread")
+    expect(explain.decision.intent).toBe("explain")
+  })
+
+  test("raw/structural/heuristic normalization profiles stay separated", () => {
+    const groundingCase = baseCase({
+      targetUtterance: "그거 다시 돌려봐",
+      stateContract: { activeThreadId: "oauth_abort_flow" },
+      gold: {
+        activeThreadId: "oauth_abort_flow",
+        referentId: "oauth_abort_flow",
+        intent: "execute_change",
+        scope: "current_workstream",
+        shouldClarify: false,
+        confidence: "high",
+      },
+    })
+    const decision = {
+      activeThreadId: "oauth_abort_flow",
+      referentId: null,
+      intent: "status_check" as const,
+      scope: "current_workstream" as const,
+      shouldClarify: false,
+      confidence: "high" as const,
+    }
+
+    const raw = normalizeGroundingDecision(groundingCase, decision, "none")
+    expect(raw.decision).toEqual(decision)
+    expect(raw.applied).toBe(false)
+
+    const structural = normalizeGroundingDecision(groundingCase, decision, "structural")
+    expect(structural.decision.referentId).toBe("oauth_abort_flow")
+    expect(structural.decision.intent).toBe("status_check")
+
+    const heuristic = normalizeGroundingDecision(groundingCase, decision, "heuristic")
+    expect(heuristic.decision.referentId).toBe("oauth_abort_flow")
+    expect(heuristic.decision.intent).toBe("execute_change")
   })
 })

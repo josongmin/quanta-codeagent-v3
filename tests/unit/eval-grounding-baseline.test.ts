@@ -18,6 +18,10 @@ describe("grounding baseline resolver", () => {
       status: "finished",
       params: {
         suite: "canary",
+        corpus: "canary",
+        mode: "engine",
+        probeProfile: "runtime_parity",
+        normalizationProfile: "structural",
         harnessFingerprint: "h1",
         routeFingerprint: "r1",
         caseSetFingerprint: "c1",
@@ -33,6 +37,10 @@ describe("grounding baseline resolver", () => {
       status: "finished",
       params: {
         suite: "canary",
+        corpus: "canary",
+        mode: "engine",
+        probeProfile: "runtime_parity",
+        normalizationProfile: "structural",
         harnessFingerprint: "h1",
         routeFingerprint: "r1",
         caseSetFingerprint: "c1",
@@ -48,6 +56,10 @@ describe("grounding baseline resolver", () => {
       status: "finished",
       params: {
         suite: "canary",
+        corpus: "canary",
+        mode: "engine",
+        probeProfile: "runtime_parity",
+        normalizationProfile: "structural",
         harnessFingerprint: "h1",
         routeFingerprint: "r1",
         caseSetFingerprint: "c1",
@@ -63,6 +75,10 @@ describe("grounding baseline resolver", () => {
       baselineRunId: "newer",
       reason: "resolved latest prior finished comparable grounding run",
       suite: "canary",
+      corpus: "canary",
+      mode: "engine",
+      probeProfile: "runtime_parity",
+      normalizationProfile: "structural",
       harnessFingerprint: "h1",
       routeFingerprint: "r1",
       caseSetFingerprint: "c1",
@@ -93,7 +109,7 @@ describe("grounding baseline resolver", () => {
     ).toEqual({
       status: "candidate_unverified",
       candidateRunId: "candidate",
-      reason: "candidate run summary is missing suite or fingerprint fields",
+      reason: "candidate run summary is missing corpus/mode/profile or fingerprint fields",
       suite: "canary",
     })
   })
@@ -112,6 +128,10 @@ describe("grounding baseline resolver", () => {
           status: "finished",
           params: {
             suite: "canary",
+            corpus: "canary",
+            mode: "engine",
+            probeProfile: "runtime_parity",
+            normalizationProfile: "structural",
             harnessFingerprint: "h1",
             routeFingerprint: "r1",
             caseSetFingerprint: "c1",
@@ -128,6 +148,10 @@ describe("grounding baseline resolver", () => {
           status: "finished",
           params: {
             suite: "canary",
+            corpus: "canary",
+            mode: "engine",
+            probeProfile: "runtime_parity",
+            normalizationProfile: "structural",
             harnessFingerprint: "h1",
             routeFingerprint: "r2",
             caseSetFingerprint: "c1",
@@ -137,8 +161,12 @@ describe("grounding baseline resolver", () => {
     ).toEqual({
       status: "not_found",
       candidateRunId: "candidate",
-      reason: "no prior finished grounding run matched suite and fingerprints",
+      reason: "no prior finished grounding run matched corpus/mode/profiles and fingerprints",
       suite: "canary",
+      corpus: "canary",
+      mode: "engine",
+      probeProfile: "runtime_parity",
+      normalizationProfile: "structural",
       harnessFingerprint: "h1",
       routeFingerprint: "r1",
       caseSetFingerprint: "c1",

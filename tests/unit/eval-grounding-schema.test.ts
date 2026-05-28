@@ -411,4 +411,31 @@ describe("grounding schema", () => {
       rmSync(root, { recursive: true, force: true })
     }
   })
+
+  test("loader rejects blocking replay/adversarial fixtures without reviewed human audit", () => {
+    const root = mkdtempSync(join(tmpdir(), "grounding-blocking-governance-"))
+    try {
+      const replay = join(root, "replay_critical")
+      mkdirSync(replay, { recursive: true })
+      writeCase(
+        replay,
+        "replay-blocking",
+        minimalCase({
+          id: "replay-blocking",
+          corpus: "replay_critical",
+          blockingEligible: true,
+          sourceProvenance: {
+            kind: "trajectory_freeze",
+            sessionId: "session-1",
+          },
+          humanAudit: { status: "none" },
+        }),
+      )
+      expect(() => loadGroundingCases({ corpus: "replay_critical", casesRoot: root })).toThrow(
+        "blocking replay/adversarial fixtures require humanAudit.status=reviewed",
+      )
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
 })

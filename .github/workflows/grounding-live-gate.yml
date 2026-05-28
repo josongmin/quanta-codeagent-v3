@@ -12,8 +12,12 @@ on:
     - cron: "0 9 * * *"
   workflow_dispatch:
     inputs:
-      baseline_run_id:
-        description: Optional prior grounding run id for compare/regress
+      baseline_raw_run_id:
+        description: Optional prior raw-canary grounding run id for compare/regress
+        required: false
+        type: string
+      baseline_engine_run_id:
+        description: Optional prior engine-canary grounding run id for compare/regress
         required: false
         type: string
 
@@ -30,7 +34,9 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       QUANTA_PROVIDER: ${{ vars.QUANTA_PROVIDER }}
       QUANTA_MODEL: ${{ vars.QUANTA_MODEL }}
-      GROUNDING_BASELINE_RUN_ID: ${{ github.event.inputs.baseline_run_id || '' }}
+      QUANTA_OPENAI_SURFACE: responses
+      GROUNDING_RAW_BASELINE_RUN_ID: ${{ github.event.inputs.baseline_raw_run_id || '' }}
+      GROUNDING_ENGINE_BASELINE_RUN_ID: ${{ github.event.inputs.baseline_engine_run_id || '' }}
     steps:
       - name: checkout
         uses: actions/checkout@v4
@@ -56,65 +62,109 @@ jobs:
           export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
           mkdir -p "$RUNNER_TEMP/grounding"
           bun run eval grounding preflight --json-out "$RUNNER_TEMP/grounding/canary-preflight.json" | tee "$RUNNER_TEMP/grounding/canary-preflight.txt"
-      - name: run canary suite
+      - name: run raw canary suite
         run: |
           export QUANTA_PROVIDER="${QUANTA_PROVIDER:-openai}"
           export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
           mkdir -p "$RUNNER_TEMP/grounding"
-          bun run eval grounding run --suite canary --concurrency 4 --json-out "$RUNNER_TEMP/grounding/canary-run.json" | tee "$RUNNER_TEMP/grounding/canary-run.txt"
-          run_id=$(node -e 'const fs=require("node:fs"); const path=process.argv[1]; const json=JSON.parse(fs.readFileSync(path,"utf8")); process.stdout.write(typeof json.runId === "string" ? json.runId : "")' "$RUNNER_TEMP/grounding/canary-run.json")
+          bun run eval grounding run --mode raw --suite canary --concurrency 4 --json-out "$RUNNER_TEMP/grounding/raw-canary-run.json" | tee "$RUNNER_TEMP/grounding/raw-canary-run.txt"
+          run_id=$(node -e 'const fs=require("node:fs"); const path=process.argv[1]; const json=JSON.parse(fs.readFileSync(path,"utf8")); process.stdout.write(typeof json.runId === "string" ? json.runId : "")' "$RUNNER_TEMP/grounding/raw-canary-run.json")
           if [ -z "$run_id" ]; then
-            echo "::error::failed to extract run id from grounding output"
+            echo "::error::failed to extract raw run id from grounding output"
             exit 1
           fi
-          echo "RUN_ID=$run_id" >> "$GITHUB_ENV"
-      - name: render canary report + enforce thresholds
+          echo "RAW_RUN_ID=$run_id" >> "$GITHUB_ENV"
+      - name: run engine canary suite
         run: |
           export QUANTA_PROVIDER="${QUANTA_PROVIDER:-openai}"
           export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
-          bun run eval grounding report --run-id "$RUN_ID" --markdown-out "$RUNNER_TEMP/grounding/canary-report.md" --json-out "$RUNNER_TEMP/grounding/canary-report.json"
-          bun run eval grounding gate --run-id "$RUN_ID" --profile canary --markdown-out "$RUNNER_TEMP/grounding/canary-gate.md" --json-out "$RUNNER_TEMP/grounding/canary-gate.json"
-          cp "evals/runs/$RUN_ID.jsonl" "$RUNNER_TEMP/grounding/$RUN_ID.jsonl"
-      - name: resolve comparable baseline
+          mkdir -p "$RUNNER_TEMP/grounding"
+          bun run eval grounding run --mode engine --suite canary --concurrency 4 --json-out "$RUNNER_TEMP/grounding/engine-canary-run.json" | tee "$RUNNER_TEMP/grounding/engine-canary-run.txt"
+          run_id=$(node -e 'const fs=require("node:fs"); const path=process.argv[1]; const json=JSON.parse(fs.readFileSync(path,"utf8")); process.stdout.write(typeof json.runId === "string" ? json.runId : "")' "$RUNNER_TEMP/grounding/engine-canary-run.json")
+          if [ -z "$run_id" ]; then
+            echo "::error::failed to extract engine run id from grounding output"
+            exit 1
+          fi
+          echo "ENGINE_RUN_ID=$run_id" >> "$GITHUB_ENV"
+      - name: render canary reports + enforce route matrix
+        run: |
+          export QUANTA_PROVIDER="${QUANTA_PROVIDER:-openai}"
+          export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
+          bun run eval grounding report --run-id "$RAW_RUN_ID" --markdown-out "$RUNNER_TEMP/grounding/raw-canary-report.md" --json-out "$RUNNER_TEMP/grounding/raw-canary-report.json"
+          bun run eval grounding report --run-id "$ENGINE_RUN_ID" --markdown-out "$RUNNER_TEMP/grounding/engine-canary-report.md" --json-out "$RUNNER_TEMP/grounding/engine-canary-report.json"
+          bun run eval grounding gate --route-matrix primary-openai --run-ids "$RAW_RUN_ID,$ENGINE_RUN_ID" --profile canary --markdown-out "$RUNNER_TEMP/grounding/canary-matrix-gate.md" --json-out "$RUNNER_TEMP/grounding/canary-matrix-gate.json"
+          cp "evals/runs/$RAW_RUN_ID.jsonl" "$RUNNER_TEMP/grounding/$RAW_RUN_ID.jsonl"
+          cp "evals/runs/$ENGINE_RUN_ID.jsonl" "$RUNNER_TEMP/grounding/$ENGINE_RUN_ID.jsonl"
+      - name: resolve raw baseline
         run: |
           mkdir -p "$RUNNER_TEMP/grounding"
-          if [ -n "${GROUNDING_BASELINE_RUN_ID:-}" ]; then
-            printf 'grounding baseline candidate=%s status=resolved baseline=%s reason=manual override\n' "$RUN_ID" "$GROUNDING_BASELINE_RUN_ID" | tee "$RUNNER_TEMP/grounding/canary-baseline.txt"
-            printf '{\n  "status": "resolved",\n  "candidateRunId": "%s",\n  "baselineRunId": "%s",\n  "reason": "manual override"\n}\n' "$RUN_ID" "$GROUNDING_BASELINE_RUN_ID" > "$RUNNER_TEMP/grounding/canary-baseline.json"
+          if [ -n "${GROUNDING_RAW_BASELINE_RUN_ID:-}" ]; then
+            printf 'grounding baseline candidate=%s status=resolved baseline=%s reason=manual override\n' "$RAW_RUN_ID" "$GROUNDING_RAW_BASELINE_RUN_ID" | tee "$RUNNER_TEMP/grounding/raw-canary-baseline.txt"
+            printf '{\n  "status": "resolved",\n  "candidateRunId": "%s",\n  "baselineRunId": "%s",\n  "reason": "manual override"\n}\n' "$RAW_RUN_ID" "$GROUNDING_RAW_BASELINE_RUN_ID" > "$RUNNER_TEMP/grounding/raw-canary-baseline.json"
           else
-            bun run eval grounding baseline --candidate "$RUN_ID" --json-out "$RUNNER_TEMP/grounding/canary-baseline.json" | tee "$RUNNER_TEMP/grounding/canary-baseline.txt"
+            bun run eval grounding baseline --candidate "$RAW_RUN_ID" --json-out "$RUNNER_TEMP/grounding/raw-canary-baseline.json" | tee "$RUNNER_TEMP/grounding/raw-canary-baseline.txt"
           fi
-          baseline_run_id=$(node -e 'const fs=require("node:fs"); const path=process.argv[1]; const json=JSON.parse(fs.readFileSync(path,"utf8")); process.stdout.write(typeof json.baselineRunId === "string" ? json.baselineRunId : "")' "$RUNNER_TEMP/grounding/canary-baseline.json")
+          baseline_run_id=$(node -e 'const fs=require("node:fs"); const path=process.argv[1]; const json=JSON.parse(fs.readFileSync(path,"utf8")); process.stdout.write(typeof json.baselineRunId === "string" ? json.baselineRunId : "")' "$RUNNER_TEMP/grounding/raw-canary-baseline.json")
           if [ -n "$baseline_run_id" ]; then
-            echo "GROUNDING_BASELINE_RUN_ID=$baseline_run_id" >> "$GITHUB_ENV"
+            echo "GROUNDING_RAW_BASELINE_RUN_ID=$baseline_run_id" >> "$GITHUB_ENV"
           fi
-      - name: compare against baseline when resolved
-        if: env.GROUNDING_BASELINE_RUN_ID != ''
+      - name: compare raw against baseline when resolved
+        if: env.GROUNDING_RAW_BASELINE_RUN_ID != ''
         run: |
           export QUANTA_PROVIDER="${QUANTA_PROVIDER:-openai}"
           export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
-          bun run eval grounding compare --baseline "$GROUNDING_BASELINE_RUN_ID" --candidate "$RUN_ID" --markdown-out "$RUNNER_TEMP/grounding/canary-compare.md" --json-out "$RUNNER_TEMP/grounding/canary-compare.json"
-          bun run eval grounding regress --baseline "$GROUNDING_BASELINE_RUN_ID" --candidate "$RUN_ID" --profile strict --markdown-out "$RUNNER_TEMP/grounding/canary-regress.md" --json-out "$RUNNER_TEMP/grounding/canary-regress.json"
+          bun run eval grounding compare --baseline "$GROUNDING_RAW_BASELINE_RUN_ID" --candidate "$RAW_RUN_ID" --markdown-out "$RUNNER_TEMP/grounding/raw-canary-compare.md" --json-out "$RUNNER_TEMP/grounding/raw-canary-compare.json"
+          bun run eval grounding regress --baseline "$GROUNDING_RAW_BASELINE_RUN_ID" --candidate "$RAW_RUN_ID" --profile strict --markdown-out "$RUNNER_TEMP/grounding/raw-canary-regress.md" --json-out "$RUNNER_TEMP/grounding/raw-canary-regress.json"
+      - name: resolve engine baseline
+        run: |
+          mkdir -p "$RUNNER_TEMP/grounding"
+          if [ -n "${GROUNDING_ENGINE_BASELINE_RUN_ID:-}" ]; then
+            printf 'grounding baseline candidate=%s status=resolved baseline=%s reason=manual override\n' "$ENGINE_RUN_ID" "$GROUNDING_ENGINE_BASELINE_RUN_ID" | tee "$RUNNER_TEMP/grounding/engine-canary-baseline.txt"
+            printf '{\n  "status": "resolved",\n  "candidateRunId": "%s",\n  "baselineRunId": "%s",\n  "reason": "manual override"\n}\n' "$ENGINE_RUN_ID" "$GROUNDING_ENGINE_BASELINE_RUN_ID" > "$RUNNER_TEMP/grounding/engine-canary-baseline.json"
+          else
+            bun run eval grounding baseline --candidate "$ENGINE_RUN_ID" --json-out "$RUNNER_TEMP/grounding/engine-canary-baseline.json" | tee "$RUNNER_TEMP/grounding/engine-canary-baseline.txt"
+          fi
+          baseline_run_id=$(node -e 'const fs=require("node:fs"); const path=process.argv[1]; const json=JSON.parse(fs.readFileSync(path,"utf8")); process.stdout.write(typeof json.baselineRunId === "string" ? json.baselineRunId : "")' "$RUNNER_TEMP/grounding/engine-canary-baseline.json")
+          if [ -n "$baseline_run_id" ]; then
+            echo "GROUNDING_ENGINE_BASELINE_RUN_ID=$baseline_run_id" >> "$GITHUB_ENV"
+          fi
+      - name: compare engine against baseline when resolved
+        if: env.GROUNDING_ENGINE_BASELINE_RUN_ID != ''
+        run: |
+          export QUANTA_PROVIDER="${QUANTA_PROVIDER:-openai}"
+          export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
+          bun run eval grounding compare --baseline "$GROUNDING_ENGINE_BASELINE_RUN_ID" --candidate "$ENGINE_RUN_ID" --markdown-out "$RUNNER_TEMP/grounding/engine-canary-compare.md" --json-out "$RUNNER_TEMP/grounding/engine-canary-compare.json"
+          bun run eval grounding regress --baseline "$GROUNDING_ENGINE_BASELINE_RUN_ID" --candidate "$ENGINE_RUN_ID" --profile strict --markdown-out "$RUNNER_TEMP/grounding/engine-canary-regress.md" --json-out "$RUNNER_TEMP/grounding/engine-canary-regress.json"
       - name: upload canary artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: grounding-canary-${{ env.RUN_ID || github.run_id }}
+          name: grounding-canary-${{ env.ENGINE_RUN_ID || github.run_id }}
           path: |
-            ${{ runner.temp }}/grounding/canary-run.txt
+            ${{ runner.temp }}/grounding/raw-canary-run.txt
+            ${{ runner.temp }}/grounding/engine-canary-run.txt
             ${{ runner.temp }}/grounding/canary-preflight.txt
             ${{ runner.temp }}/grounding/canary-preflight.json
-            ${{ runner.temp }}/grounding/canary-run.json
-            ${{ runner.temp }}/grounding/canary-baseline.txt
-            ${{ runner.temp }}/grounding/canary-baseline.json
-            ${{ runner.temp }}/grounding/canary-report.md
-            ${{ runner.temp }}/grounding/canary-report.json
-            ${{ runner.temp }}/grounding/canary-gate.md
-            ${{ runner.temp }}/grounding/canary-gate.json
-            ${{ runner.temp }}/grounding/canary-compare.md
-            ${{ runner.temp }}/grounding/canary-compare.json
-            ${{ runner.temp }}/grounding/canary-regress.md
-            ${{ runner.temp }}/grounding/canary-regress.json
+            ${{ runner.temp }}/grounding/raw-canary-run.json
+            ${{ runner.temp }}/grounding/engine-canary-run.json
+            ${{ runner.temp }}/grounding/raw-canary-baseline.txt
+            ${{ runner.temp }}/grounding/raw-canary-baseline.json
+            ${{ runner.temp }}/grounding/engine-canary-baseline.txt
+            ${{ runner.temp }}/grounding/engine-canary-baseline.json
+            ${{ runner.temp }}/grounding/raw-canary-report.md
+            ${{ runner.temp }}/grounding/raw-canary-report.json
+            ${{ runner.temp }}/grounding/engine-canary-report.md
+            ${{ runner.temp }}/grounding/engine-canary-report.json
+            ${{ runner.temp }}/grounding/canary-matrix-gate.md
+            ${{ runner.temp }}/grounding/canary-matrix-gate.json
+            ${{ runner.temp }}/grounding/raw-canary-compare.md
+            ${{ runner.temp }}/grounding/raw-canary-compare.json
+            ${{ runner.temp }}/grounding/raw-canary-regress.md
+            ${{ runner.temp }}/grounding/raw-canary-regress.json
+            ${{ runner.temp }}/grounding/engine-canary-compare.md
+            ${{ runner.temp }}/grounding/engine-canary-compare.json
+            ${{ runner.temp }}/grounding/engine-canary-regress.md
+            ${{ runner.temp }}/grounding/engine-canary-regress.json
             ${{ runner.temp }}/grounding/*.jsonl
 
   nightly:
@@ -126,6 +176,7 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       QUANTA_PROVIDER: ${{ vars.QUANTA_PROVIDER }}
       QUANTA_MODEL: ${{ vars.QUANTA_MODEL }}
+      QUANTA_OPENAI_SURFACE: responses
     steps:
       - name: checkout
         uses: actions/checkout@v4
@@ -151,23 +202,33 @@ jobs:
           export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
           mkdir -p "$RUNNER_TEMP/grounding"
           bun run eval grounding preflight --json-out "$RUNNER_TEMP/grounding/nightly-preflight.json" | tee "$RUNNER_TEMP/grounding/nightly-preflight.txt"
-      - name: run nightly suite
+      - name: run assisted nightly suite
         run: |
           export QUANTA_PROVIDER="${QUANTA_PROVIDER:-openai}"
           export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
           mkdir -p "$RUNNER_TEMP/grounding"
-          bun run eval grounding run --suite nightly --concurrency 4 --json-out "$RUNNER_TEMP/grounding/nightly-run.json" | tee "$RUNNER_TEMP/grounding/nightly-run.txt"
+          bun run eval grounding run --mode assisted --suite nightly --concurrency 4 --json-out "$RUNNER_TEMP/grounding/nightly-run.json" | tee "$RUNNER_TEMP/grounding/nightly-run.txt"
           run_id=$(node -e 'const fs=require("node:fs"); const path=process.argv[1]; const json=JSON.parse(fs.readFileSync(path,"utf8")); process.stdout.write(typeof json.runId === "string" ? json.runId : "")' "$RUNNER_TEMP/grounding/nightly-run.json")
           if [ -z "$run_id" ]; then
             echo "::error::failed to extract run id from grounding output"
             exit 1
           fi
           echo "RUN_ID=$run_id" >> "$GITHUB_ENV"
-      - name: render nightly report
+      - name: run replay/adversarial diagnostics
+        run: |
+          export QUANTA_PROVIDER="${QUANTA_PROVIDER:-openai}"
+          export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
+          bun run eval grounding run --mode raw --corpus replay_critical --concurrency 2 --json-out "$RUNNER_TEMP/grounding/replay-critical-run.json" | tee "$RUNNER_TEMP/grounding/replay-critical-run.txt"
+          bun run eval grounding run --mode engine --corpus adversarial_canary --concurrency 2 --json-out "$RUNNER_TEMP/grounding/adversarial-canary-run.json" | tee "$RUNNER_TEMP/grounding/adversarial-canary-run.txt"
+      - name: render nightly reports
         run: |
           export QUANTA_PROVIDER="${QUANTA_PROVIDER:-openai}"
           export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
           bun run eval grounding report --run-id "$RUN_ID" --markdown-out "$RUNNER_TEMP/grounding/nightly-report.md" --json-out "$RUNNER_TEMP/grounding/nightly-report.json"
+          replay_run_id=$(node -e 'const fs=require("node:fs"); const path=process.argv[1]; const json=JSON.parse(fs.readFileSync(path,"utf8")); process.stdout.write(typeof json.runId === "string" ? json.runId : "")' "$RUNNER_TEMP/grounding/replay-critical-run.json")
+          adversarial_run_id=$(node -e 'const fs=require("node:fs"); const path=process.argv[1]; const json=JSON.parse(fs.readFileSync(path,"utf8")); process.stdout.write(typeof json.runId === "string" ? json.runId : "")' "$RUNNER_TEMP/grounding/adversarial-canary-run.json")
+          bun run eval grounding report --run-id "$replay_run_id" --markdown-out "$RUNNER_TEMP/grounding/replay-critical-report.md" --json-out "$RUNNER_TEMP/grounding/replay-critical-report.json"
+          bun run eval grounding report --run-id "$adversarial_run_id" --markdown-out "$RUNNER_TEMP/grounding/adversarial-canary-report.md" --json-out "$RUNNER_TEMP/grounding/adversarial-canary-report.json"
           cp "evals/runs/$RUN_ID.jsonl" "$RUNNER_TEMP/grounding/$RUN_ID.jsonl"
       - name: resolve nightly baseline
         run: |
@@ -194,10 +255,16 @@ jobs:
             ${{ runner.temp }}/grounding/nightly-preflight.txt
             ${{ runner.temp }}/grounding/nightly-preflight.json
             ${{ runner.temp }}/grounding/nightly-run.json
+            ${{ runner.temp }}/grounding/replay-critical-run.json
+            ${{ runner.temp }}/grounding/adversarial-canary-run.json
             ${{ runner.temp }}/grounding/nightly-baseline.txt
             ${{ runner.temp }}/grounding/nightly-baseline.json
             ${{ runner.temp }}/grounding/nightly-report.md
             ${{ runner.temp }}/grounding/nightly-report.json
+            ${{ runner.temp }}/grounding/replay-critical-report.md
+            ${{ runner.temp }}/grounding/replay-critical-report.json
+            ${{ runner.temp }}/grounding/adversarial-canary-report.md
+            ${{ runner.temp }}/grounding/adversarial-canary-report.json
             ${{ runner.temp }}/grounding/nightly-compare.md
             ${{ runner.temp }}/grounding/nightly-compare.json
             ${{ runner.temp }}/grounding/nightly-regress.md

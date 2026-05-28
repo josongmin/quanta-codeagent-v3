@@ -43,6 +43,11 @@ describe("grounding diagnostics", () => {
     expect(classifyGroundingInfraError("401 Unauthorized token_invalidated")).toBe("auth")
     expect(classifyGroundingInfraError("credit balance is too low")).toBe("billing")
     expect(classifyGroundingInfraError("429 rate limit")).toBe("rate_limit")
+    expect(
+      classifyGroundingInfraError(
+        "503 Service Unavailable — upstream connect error or disconnect/reset before headers",
+      ),
+    ).toBe("network")
   })
 
   test("preflight surfaces route metadata and auth errors", async () => {

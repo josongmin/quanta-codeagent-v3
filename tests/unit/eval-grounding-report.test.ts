@@ -6,48 +6,53 @@ import {
   evaluateGroundingGate,
 } from "@/../src/apps/eval/grounding"
 
-const payload = (over: Partial<GroundingPayload> = {}): GroundingPayload => ({
-  kind: "grounding",
-  suite: "canary",
-  caseId: "case",
-  verdict: "pass",
-  bucket: "reference",
-  severity: "medium",
-  gold: {
+const payload = (over: Partial<GroundingPayload> = {}): GroundingPayload => {
+  const actual = over.actual ?? {
     activeThreadId: "prompt_rules",
     referentId: "prompt_rules",
     intent: "status_check",
     scope: "current_workstream",
     shouldClarify: false,
     confidence: "high",
-  },
-  actual: {
-    activeThreadId: "prompt_rules",
-    referentId: "prompt_rules",
-    intent: "status_check",
-    scope: "current_workstream",
-    shouldClarify: false,
-    confidence: "high",
-  },
-  matches: {
-    activeThread: true,
-    referent: true,
-    intent: true,
-    scope: true,
-    shouldClarify: true,
-    exactTuple: true,
-    wrongThread: false,
-    mustClarifyMiss: false,
-    staleContextTrapMiss: false,
-  },
-  rawResponse: "{}",
-  durationMs: 10,
-  provider: "openai",
-  model: "gpt-4.1",
-  surfaceId: "openai-responses",
-  transportId: "public",
-  ...over,
-})
+  }
+  return {
+    kind: "grounding",
+    suite: "canary",
+    caseId: "case",
+    verdict: "pass",
+    bucket: "reference",
+    severity: "medium",
+    gold: {
+      activeThreadId: "prompt_rules",
+      referentId: "prompt_rules",
+      intent: "status_check",
+      scope: "current_workstream",
+      shouldClarify: false,
+      confidence: "high",
+    },
+    actual,
+    scoredActual: over.scoredActual ?? actual,
+    matches: {
+      activeThread: true,
+      referent: true,
+      intent: true,
+      scope: true,
+      shouldClarify: true,
+      exactTuple: true,
+      wrongThread: false,
+      mustClarifyMiss: false,
+      staleContextTrapMiss: false,
+    },
+    rawResponse: "{}",
+    structuredOutputValid: true,
+    durationMs: 10,
+    provider: "openai",
+    model: "gpt-4.1",
+    surfaceId: "openai-responses",
+    transportId: "public",
+    ...over,
+  }
+}
 
 const record = (runId: string, p: GroundingPayload): EvalRecord => ({
   ts: 1,
@@ -437,7 +442,6 @@ describe("grounding report", () => {
     ).toBe(1)
     expect(gate.result).toEqual({
       runId,
-      suite: "canary",
       profile: "canary",
       passed: true,
       route: {

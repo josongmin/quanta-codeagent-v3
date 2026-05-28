@@ -104,7 +104,8 @@ describe("workflow yaml validity", () => {
     expect(on.schedule).toBeDefined()
     const dispatch = asObject(on.workflow_dispatch as YamlValue)
     const inputs = asObject(dispatch.inputs as YamlValue)
-    expect(inputs.baseline_run_id).toBeDefined()
+    expect(inputs.baseline_raw_run_id).toBeDefined()
+    expect(inputs.baseline_engine_run_id).toBeDefined()
   })
 
   test("grounding-live-gate.yml: has canary + nightly jobs with eval grounding commands", () => {
@@ -114,36 +115,53 @@ describe("workflow yaml validity", () => {
     expect(jobs.nightly).toBeDefined()
     expect(src).toContain("bun run eval grounding preflight")
     expect(src).toContain(
-      'bun run eval grounding run --suite canary --concurrency 4 --json-out "$RUNNER_TEMP/grounding/canary-run.json"',
+      'bun run eval grounding run --mode raw --suite canary --concurrency 4 --json-out "$RUNNER_TEMP/grounding/raw-canary-run.json"',
     )
     expect(src).toContain(
-      'bun run eval grounding run --suite nightly --concurrency 4 --json-out "$RUNNER_TEMP/grounding/nightly-run.json"',
+      'bun run eval grounding run --mode engine --suite canary --concurrency 4 --json-out "$RUNNER_TEMP/grounding/engine-canary-run.json"',
+    )
+    expect(src).toContain(
+      'bun run eval grounding run --mode assisted --suite nightly --concurrency 4 --json-out "$RUNNER_TEMP/grounding/nightly-run.json"',
+    )
+    expect(src).toContain(
+      'bun run eval grounding run --mode raw --corpus replay_critical --concurrency 2 --json-out "$RUNNER_TEMP/grounding/replay-critical-run.json"',
+    )
+    expect(src).toContain(
+      'bun run eval grounding run --mode engine --corpus adversarial_canary --concurrency 2 --json-out "$RUNNER_TEMP/grounding/adversarial-canary-run.json"',
     )
     expect(src).toContain("bun run eval grounding baseline --candidate")
     expect(src).toContain("--concurrency 4")
     expect(src).toContain("bun run eval grounding report --run-id")
     expect(src).toContain("bun run eval grounding compare --baseline")
     expect(src).toContain("bun run eval grounding regress --baseline")
+    expect(src).toContain("bun run eval grounding gate --route-matrix primary-openai")
     expect(src).toContain('node -e \'const fs=require("node:fs")')
     expect(src).not.toContain("sed -n 's/.*run=")
     expect(src).not.toContain("sed -n 's/.* baseline=")
     expect(src).toContain("grounding-gate")
+    expect(src).toContain("QUANTA_OPENAI_SURFACE: responses")
   })
 
   test("grounding-live-gate.yml: uploads JSONL + markdown + JSON artifacts", () => {
     const { src } = loadWorkflow("grounding-live-gate.yml")
     expect(src).toContain("actions/upload-artifact@v4")
-    expect(src).toContain("canary-run.json")
-    expect(src).toContain("canary-report.md")
-    expect(src).toContain("canary-baseline.txt")
-    expect(src).toContain("canary-baseline.json")
-    expect(src).toContain("canary-gate.md")
-    expect(src).toContain("canary-gate.json")
-    expect(src).toContain("canary-compare.md")
-    expect(src).toContain("canary-regress.md")
-    expect(src).toContain("canary-regress.json")
+    expect(src).toContain("raw-canary-run.json")
+    expect(src).toContain("engine-canary-run.json")
+    expect(src).toContain("raw-canary-report.md")
+    expect(src).toContain("engine-canary-report.md")
+    expect(src).toContain("raw-canary-baseline.txt")
+    expect(src).toContain("engine-canary-baseline.txt")
+    expect(src).toContain("canary-matrix-gate.md")
+    expect(src).toContain("canary-matrix-gate.json")
+    expect(src).toContain("raw-canary-compare.md")
+    expect(src).toContain("raw-canary-regress.md")
+    expect(src).toContain("engine-canary-regress.json")
     expect(src).toContain("nightly-run.json")
     expect(src).toContain("nightly-report.md")
+    expect(src).toContain("replay-critical-run.json")
+    expect(src).toContain("replay-critical-report.md")
+    expect(src).toContain("adversarial-canary-run.json")
+    expect(src).toContain("adversarial-canary-report.md")
     expect(src).toContain("nightly-baseline.txt")
     expect(src).toContain("nightly-baseline.json")
     expect(src).toContain("nightly-compare.md")

@@ -12,48 +12,53 @@ const runEval = (...args: string[]) =>
     encoding: "utf8",
   })
 
-const payload = (over: Partial<GroundingPayload> = {}): GroundingPayload => ({
-  kind: "grounding",
-  suite: "canary",
-  caseId: "case",
-  verdict: "pass",
-  bucket: "reference",
-  severity: "critical",
-  gold: {
+const payload = (over: Partial<GroundingPayload> = {}): GroundingPayload => {
+  const actual = over.actual ?? {
     activeThreadId: "prompt_rules",
     referentId: "prompt_rules",
     intent: "status_check",
     scope: "current_workstream",
     shouldClarify: false,
     confidence: "high",
-  },
-  actual: {
-    activeThreadId: "prompt_rules",
-    referentId: "prompt_rules",
-    intent: "status_check",
-    scope: "current_workstream",
-    shouldClarify: false,
-    confidence: "high",
-  },
-  matches: {
-    activeThread: true,
-    referent: true,
-    intent: true,
-    scope: true,
-    shouldClarify: true,
-    exactTuple: true,
-    wrongThread: false,
-    mustClarifyMiss: false,
-    staleContextTrapMiss: false,
-  },
-  rawResponse: "{}",
-  durationMs: 10,
-  provider: "openai",
-  model: "gpt-4.1",
-  surfaceId: "openai-responses",
-  transportId: "public",
-  ...over,
-})
+  }
+  return {
+    kind: "grounding",
+    suite: "canary",
+    caseId: "case",
+    verdict: "pass",
+    bucket: "reference",
+    severity: "critical",
+    gold: {
+      activeThreadId: "prompt_rules",
+      referentId: "prompt_rules",
+      intent: "status_check",
+      scope: "current_workstream",
+      shouldClarify: false,
+      confidence: "high",
+    },
+    actual,
+    scoredActual: over.scoredActual ?? actual,
+    matches: {
+      activeThread: true,
+      referent: true,
+      intent: true,
+      scope: true,
+      shouldClarify: true,
+      exactTuple: true,
+      wrongThread: false,
+      mustClarifyMiss: false,
+      staleContextTrapMiss: false,
+    },
+    rawResponse: "{}",
+    structuredOutputValid: true,
+    durationMs: 10,
+    provider: "openai",
+    model: "gpt-4.1",
+    surfaceId: "openai-responses",
+    transportId: "public",
+    ...over,
+  }
+}
 
 const readJson = (path: string): unknown => JSON.parse(readFileSync(path, "utf8"))
 
@@ -61,19 +66,21 @@ describe("eval grounding CLI", () => {
   test("--help includes the grounding subcommands", () => {
     const out = runEval("--help")
     expect(out.status).toBe(0)
-    expect(out.stdout).toContain("grounding run --suite canary|nightly")
+    expect(out.stdout).toContain("grounding run [--mode raw|engine|assisted]")
     expect(out.stdout).toContain("grounding preflight")
     expect(out.stdout).toContain("grounding report --run-id ID")
     expect(out.stdout).toContain("grounding baseline --candidate ID")
+    expect(out.stdout).toContain("grounding gate --route-matrix primary-openai")
     expect(out.stdout).toContain("grounding compare --baseline ID --candidate ID")
     expect(out.stdout).toContain("grounding regress --baseline ID --candidate ID --profile strict")
+    expect(out.stdout).toContain("grounding scaffold-replay --source JSONL --gold-json PATH --out PATH")
   })
 
   test("grounding requires a valid subcommand", () => {
     const out = runEval("grounding")
     expect(out.status).toBe(1)
     expect(out.stderr).toContain(
-      "eval grounding: subcommand must be one of: run, preflight, report, baseline, gate, compare, regress",
+      "eval grounding: subcommand must be one of: run, preflight, report, baseline, gate, compare, regress, scaffold-replay",
     )
   })
 
@@ -81,6 +88,14 @@ describe("eval grounding CLI", () => {
     const badSuite = runEval("grounding", "run", "--suite", "bogus")
     expect(badSuite.status).toBe(1)
     expect(badSuite.stderr).toContain("--suite must be canary or nightly")
+
+    const badCorpus = runEval("grounding", "run", "--corpus", "bogus")
+    expect(badCorpus.status).toBe(1)
+    expect(badCorpus.stderr).toContain("--corpus must be one of")
+
+    const badMode = runEval("grounding", "run", "--mode", "bogus")
+    expect(badMode.status).toBe(1)
+    expect(badMode.stderr).toContain("--mode must be one of")
 
     const missingRunId = runEval("grounding", "report")
     expect(missingRunId.status).toBe(1)
@@ -97,6 +112,17 @@ describe("eval grounding CLI", () => {
     const badProfile = runEval("grounding", "gate", "--run-id", "x", "--profile", "nightly")
     expect(badProfile.status).toBe(1)
     expect(badProfile.stderr).toContain("--profile must be one of canary")
+
+    const missingRouteRunIds = runEval(
+      "grounding",
+      "gate",
+      "--route-matrix",
+      "primary-openai",
+      "--profile",
+      "canary",
+    )
+    expect(missingRouteRunIds.status).toBe(1)
+    expect(missingRouteRunIds.stderr).toContain("--run-ids <id1,id2,...> is required")
 
     const missingCompare = runEval("grounding", "compare", "--baseline", "a")
     expect(missingCompare.status).toBe(1)
@@ -179,6 +205,10 @@ describe("eval grounding CLI", () => {
           status: "finished",
           params: {
             suite: "canary",
+            corpus: "canary",
+            mode: "engine",
+            probeProfile: "runtime_parity",
+            normalizationProfile: "structural",
             provider: "openai",
             model: "gpt-4.1",
             surfaceId: "openai-responses",
@@ -209,6 +239,10 @@ describe("eval grounding CLI", () => {
         baselineRunId: "baseline-run",
         reason: "resolved latest prior finished comparable grounding run",
         suite: "canary",
+        corpus: "canary",
+        mode: "engine",
+        probeProfile: "runtime_parity",
+        normalizationProfile: "structural",
         harnessFingerprint: "harness-1",
         routeFingerprint: "route-1",
         caseSetFingerprint: "cases-1",
@@ -229,6 +263,8 @@ describe("eval grounding CLI", () => {
       expect(readJson(reportJson)).toMatchObject({
         runId: "candidate-run",
         suite: "canary",
+        corpus: "canary",
+        mode: "engine",
         counts: { pass: 3, partial: 0, fail: 0, error: 0, skipped: 0 },
       })
 
@@ -249,6 +285,8 @@ describe("eval grounding CLI", () => {
       expect(readJson(gateJson)).toEqual({
         runId: "candidate-run",
         suite: "canary",
+        corpus: "canary",
+        mode: "engine",
         profile: "canary",
         passed: true,
         route: {
@@ -305,9 +343,21 @@ describe("eval grounding CLI", () => {
         comparable: true,
         comparability: {
           suite: "match",
+          corpus: "match",
+          mode: "match",
+          probeProfile: "match",
+          normalizationProfile: "match",
           harness: "match",
           route: "match",
           caseSet: "match",
+          baselineCorpus: "canary",
+          candidateCorpus: "canary",
+          baselineMode: "engine",
+          candidateMode: "engine",
+          baselineProbeProfile: "runtime_parity",
+          candidateProbeProfile: "runtime_parity",
+          baselineNormalizationProfile: "structural",
+          candidateNormalizationProfile: "structural",
           baselineHarnessFingerprint: "harness-1",
           candidateHarnessFingerprint: "harness-1",
           baselineRouteFingerprint: "route-1",
@@ -316,6 +366,28 @@ describe("eval grounding CLI", () => {
           candidateCaseSetFingerprint: "cases-1",
         },
         failures: [],
+      })
+
+      const matrixJson = join(artifactsDir, "matrix.json")
+      const matrixGate = runEval(
+        "grounding",
+        "gate",
+        "--route-matrix",
+        "primary-openai",
+        "--run-ids",
+        "candidate-run",
+        "--profile",
+        "canary",
+        "--store-dir",
+        storeDir,
+        "--json-out",
+        matrixJson,
+      )
+      expect(matrixGate.status).toBe(1)
+      expect(readJson(matrixJson)).toMatchObject({
+        matrix: "primary-openai",
+        profile: "canary",
+        passed: false,
       })
     } finally {
       rmSync(root, { recursive: true, force: true })

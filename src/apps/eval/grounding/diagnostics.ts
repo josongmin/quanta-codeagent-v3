@@ -42,7 +42,11 @@ export const classifyGroundingInfraError = (message: string): GroundingErrorKind
     has(message, "etimedout") ||
     has(message, "network") ||
     has(message, "fetch failed") ||
-    has(message, "socket")
+    has(message, "socket") ||
+    has(message, "connection refused") ||
+    has(message, "upstream connect error") ||
+    has(message, "reset before headers") ||
+    has(message, "remote connection failure")
   ) {
     return "network"
   }
@@ -50,4 +54,8 @@ export const classifyGroundingInfraError = (message: string): GroundingErrorKind
 }
 
 export const classifyGroundingParserError = (message: string): GroundingErrorKind =>
-  message === "no JSON object in response" ? "non_json_response" : "invalid_decision_shape"
+  message === "no JSON object in response" ||
+  message === "response is empty" ||
+  message.startsWith("JSON parse failed:")
+    ? "non_json_response"
+    : "invalid_decision_shape"

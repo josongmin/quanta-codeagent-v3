@@ -5,6 +5,7 @@ export interface GroundingRouteMatrixCell {
   readonly mode: GroundingMode
   readonly corpus: GroundingCorpus
   readonly provider?: string
+  readonly model?: string
   readonly surfaceId?: string
   readonly transportId?: string
   readonly authMode?: string

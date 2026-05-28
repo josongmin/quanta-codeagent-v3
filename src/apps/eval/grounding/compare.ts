@@ -80,8 +80,8 @@ export interface GroundingComparisonReport {
     baselineCaseSetFingerprint?: string
     candidateCaseSetFingerprint?: string
   }
-  baseline: Pick<GroundingReport, "suite" | "route" | "counts" | "metrics" | "run">
-  candidate: Pick<GroundingReport, "suite" | "route" | "counts" | "metrics" | "run">
+  baseline: Pick<GroundingReport, "suite" | "corpus" | "mode" | "route" | "counts" | "metrics" | "run">
+  candidate: Pick<GroundingReport, "suite" | "corpus" | "mode" | "route" | "counts" | "metrics" | "run">
   metricDeltas: GroundingMetricDeltaSet
   bucketDeltas: readonly GroundingBucketDelta[]
   changes: readonly GroundingCaseChange[]
@@ -277,7 +277,10 @@ const caseChange = (
   }
   const baselineVerdict = baseline?.verdict as Verdict
   const candidateVerdict = candidate?.verdict as Verdict
-  const changedFields = changedDecisionFields(baseline?.actual, candidate?.actual)
+  const changedFields = changedDecisionFields(
+    baseline?.scoredActual ?? baseline?.actual,
+    candidate?.scoredActual ?? candidate?.actual,
+  )
   if (baselineVerdict !== candidateVerdict) changedFields.push("verdict")
   if (baseline?.errorKind !== candidate?.errorKind) changedFields.push("errorKind")
   if (changedFields.length === 0) return null
@@ -659,6 +662,54 @@ export const evaluateGroundingRegression = (
           candidate: comparison.candidate.suite ?? "unknown",
         })
       }
+      if (comparison.comparability.corpus === "mismatch") {
+        failures.push({
+          kind: "corpus_mismatch",
+          message: "baseline and candidate corpora differ",
+          baseline: comparison.comparability.baselineCorpus ?? "unknown",
+          candidate: comparison.comparability.candidateCorpus ?? "unknown",
+        })
+      }
+      if (comparison.comparability.mode === "mismatch") {
+        failures.push({
+          kind: "mode_mismatch",
+          message: "baseline and candidate modes differ",
+          baseline: comparison.comparability.baselineMode ?? "unknown",
+          candidate: comparison.comparability.candidateMode ?? "unknown",
+        })
+      }
+      if (comparison.comparability.probeProfile === "unknown") {
+        failures.push({
+          kind: "probe_profile_unverified",
+          message: "missing probe profiles; comparison is not structurally verifiable",
+          baseline: comparison.comparability.baselineProbeProfile ?? "unknown",
+          candidate: comparison.comparability.candidateProbeProfile ?? "unknown",
+        })
+      }
+      if (comparison.comparability.probeProfile === "mismatch") {
+        failures.push({
+          kind: "probe_profile_mismatch",
+          message: "baseline and candidate probe profiles differ",
+          baseline: comparison.comparability.baselineProbeProfile ?? "unknown",
+          candidate: comparison.comparability.candidateProbeProfile ?? "unknown",
+        })
+      }
+      if (comparison.comparability.normalizationProfile === "unknown") {
+        failures.push({
+          kind: "normalization_profile_unverified",
+          message: "missing normalization profiles; comparison is not structurally verifiable",
+          baseline: comparison.comparability.baselineNormalizationProfile ?? "unknown",
+          candidate: comparison.comparability.candidateNormalizationProfile ?? "unknown",
+        })
+      }
+      if (comparison.comparability.normalizationProfile === "mismatch") {
+        failures.push({
+          kind: "normalization_profile_mismatch",
+          message: "baseline and candidate normalization profiles differ",
+          baseline: comparison.comparability.baselineNormalizationProfile ?? "unknown",
+          candidate: comparison.comparability.candidateNormalizationProfile ?? "unknown",
+        })
+      }
       if (comparison.comparability.harness === "unknown") {
         failures.push({
           kind: "harness_unverified",
@@ -774,6 +825,14 @@ export const evaluateGroundingRegression = (
           message: "exact tuple match rate decreased",
           baseline: metrics.exact_tuple_match_rate.baseline,
           candidate: metrics.exact_tuple_match_rate.candidate,
+        })
+      }
+      if (metrics.structured_output_validity.delta < 0) {
+        failures.push({
+          kind: "structured_output_validity_decrease",
+          message: "structured output validity decreased",
+          baseline: metrics.structured_output_validity.baseline,
+          candidate: metrics.structured_output_validity.candidate,
         })
       }
       failures.push(...criticalBucketFailures(comparison))

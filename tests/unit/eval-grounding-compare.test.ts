@@ -7,48 +7,53 @@ import {
   evaluateGroundingRegression,
 } from "@/../src/apps/eval/grounding"
 
-const payload = (over: Partial<GroundingPayload> = {}): GroundingPayload => ({
-  kind: "grounding",
-  suite: "canary",
-  caseId: "case",
-  verdict: "pass",
-  bucket: "reference",
-  severity: "high",
-  gold: {
+const payload = (over: Partial<GroundingPayload> = {}): GroundingPayload => {
+  const actual = over.actual ?? {
     activeThreadId: "prompt_rules",
     referentId: "prompt_rules",
     intent: "status_check",
     scope: "current_workstream",
     shouldClarify: false,
     confidence: "high",
-  },
-  actual: {
-    activeThreadId: "prompt_rules",
-    referentId: "prompt_rules",
-    intent: "status_check",
-    scope: "current_workstream",
-    shouldClarify: false,
-    confidence: "high",
-  },
-  matches: {
-    activeThread: true,
-    referent: true,
-    intent: true,
-    scope: true,
-    shouldClarify: true,
-    exactTuple: true,
-    wrongThread: false,
-    mustClarifyMiss: false,
-    staleContextTrapMiss: false,
-  },
-  rawResponse: "{}",
-  durationMs: 10,
-  provider: "openai",
-  model: "gpt-4.1",
-  surfaceId: "openai-responses",
-  transportId: "public",
-  ...over,
-})
+  }
+  return {
+    kind: "grounding",
+    suite: "canary",
+    caseId: "case",
+    verdict: "pass",
+    bucket: "reference",
+    severity: "high",
+    gold: {
+      activeThreadId: "prompt_rules",
+      referentId: "prompt_rules",
+      intent: "status_check",
+      scope: "current_workstream",
+      shouldClarify: false,
+      confidence: "high",
+    },
+    actual,
+    scoredActual: over.scoredActual ?? actual,
+    matches: {
+      activeThread: true,
+      referent: true,
+      intent: true,
+      scope: true,
+      shouldClarify: true,
+      exactTuple: true,
+      wrongThread: false,
+      mustClarifyMiss: false,
+      staleContextTrapMiss: false,
+    },
+    rawResponse: "{}",
+    structuredOutputValid: true,
+    durationMs: 10,
+    provider: "openai",
+    model: "gpt-4.1",
+    surfaceId: "openai-responses",
+    transportId: "public",
+    ...over,
+  }
+}
 
 const record = (runId: string, p: GroundingPayload): EvalRecord => ({
   ts: 1,
@@ -72,7 +77,18 @@ const summary = (
   counts,
   durationMs: 100,
   status: "finished",
-  ...(params !== undefined ? { params } : {}),
+  ...(params !== undefined
+    ? {
+        params: {
+          suite: "canary",
+          corpus: "canary",
+          mode: "engine",
+          probeProfile: "runtime_parity",
+          normalizationProfile: "structural",
+          ...params,
+        },
+      }
+    : {}),
 })
 
 describe("grounding compare", () => {
@@ -204,9 +220,21 @@ describe("grounding compare", () => {
 
     expect(out.comparison.comparability).toEqual({
       suite: "match",
+      corpus: "match",
+      mode: "match",
+      probeProfile: "match",
+      normalizationProfile: "match",
       harness: "match",
       route: "match",
       caseSet: "match",
+      baselineCorpus: "canary",
+      candidateCorpus: "canary",
+      baselineMode: "engine",
+      candidateMode: "engine",
+      baselineProbeProfile: "runtime_parity",
+      candidateProbeProfile: "runtime_parity",
+      baselineNormalizationProfile: "structural",
+      candidateNormalizationProfile: "structural",
       baselineHarnessFingerprint: "harness-1",
       candidateHarnessFingerprint: "harness-1",
       baselineRouteFingerprint: "route-1",
@@ -341,9 +369,21 @@ describe("grounding compare", () => {
       comparable: true,
       comparability: {
         suite: "match",
+        corpus: "match",
+        mode: "match",
+        probeProfile: "match",
+        normalizationProfile: "match",
         harness: "match",
         route: "match",
         caseSet: "match",
+        baselineCorpus: "canary",
+        candidateCorpus: "canary",
+        baselineMode: "engine",
+        candidateMode: "engine",
+        baselineProbeProfile: "runtime_parity",
+        candidateProbeProfile: "runtime_parity",
+        baselineNormalizationProfile: "structural",
+        candidateNormalizationProfile: "structural",
         baselineHarnessFingerprint: "harness-1",
         candidateHarnessFingerprint: "harness-1",
         baselineRouteFingerprint: "route-1",
@@ -487,6 +527,30 @@ describe("grounding compare", () => {
     )
     expect(out.comparison.comparable).toBe(false)
     expect(evaluateGroundingRegression(out.comparison, "strict")).toEqual([
+      {
+        kind: "corpus_mismatch",
+        message: "baseline and candidate corpora differ",
+        baseline: "unknown",
+        candidate: "unknown",
+      },
+      {
+        kind: "mode_mismatch",
+        message: "baseline and candidate modes differ",
+        baseline: "unknown",
+        candidate: "unknown",
+      },
+      {
+        kind: "probe_profile_unverified",
+        message: "missing probe profiles; comparison is not structurally verifiable",
+        baseline: "unknown",
+        candidate: "unknown",
+      },
+      {
+        kind: "normalization_profile_unverified",
+        message: "missing normalization profiles; comparison is not structurally verifiable",
+        baseline: "unknown",
+        candidate: "unknown",
+      },
       {
         kind: "harness_unverified",
         message: "missing harness fingerprints; comparison is not structurally verifiable",

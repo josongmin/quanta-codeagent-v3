@@ -466,6 +466,10 @@ export const parseGroundingCase = (raw: unknown): GroundingCase => {
   if (!isOneOf(severity, GROUNDING_SEVERITIES)) {
     throw new Error(`grounding case severity must be one of ${GROUNDING_SEVERITIES.join(", ")}`)
   }
+  const corpus = raw["corpus"]
+  if (corpus !== undefined && !isOneOf(corpus, GROUNDING_CORPORA)) {
+    throw new Error(`grounding case corpus must be one of ${GROUNDING_CORPORA.join(", ")}`)
+  }
   const mode = raw["mode"]
   if (mode !== undefined && !isOneOf(mode, AGENT_MODES)) {
     throw new Error(`grounding case mode must be one of ${AGENT_MODES.join(", ")}`)
@@ -518,6 +522,7 @@ export const parseGroundingCase = (raw: unknown): GroundingCase => {
     gold: parseDecision(raw["gold"], "gold"),
     bucket,
     severity,
+    ...(corpus !== undefined ? { corpus } : {}),
     ...(mode !== undefined ? { mode } : {}),
     ...(cwd !== undefined ? { cwd } : {}),
     ...(memoryContext !== undefined ? { memoryContext } : {}),

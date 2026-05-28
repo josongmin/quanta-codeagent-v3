@@ -4,7 +4,6 @@ import { isGroundingFileId, resolveGroundingSpecificFileContext } from "./file-c
 import { resolveGroundingReferentContext } from "./referent-context"
 import {
   parseGroundingCase,
-  type GroundingAmbiguityClass,
   type GroundingCase,
   type GroundingCorpus,
   type GroundingHistoryEntry,
@@ -340,6 +339,11 @@ export const loadGroundingCases = (opts: LoadGroundingCasesOpts): readonly Groun
     }
     for (const file of listJson(dir)) {
       const parsed = parseGroundingCase(JSON.parse(readFileSync(file, "utf8")))
+      if (parsed.corpus !== undefined && parsed.corpus !== corpus) {
+        throw new Error(
+          `grounding case ${parsed.id} corpus mismatch: fixture=${parsed.corpus} loader=${corpus}`,
+        )
+      }
       if (seen.has(parsed.id)) throw new Error(`duplicate grounding case id: ${parsed.id}`)
       seen.add(parsed.id)
       out.push({

@@ -42,6 +42,27 @@ class FlakyFirstChunkTimeoutLLM implements LLMPort {
   }
 }
 
+class FlakyTransportLLM implements LLMPort {
+  readonly provider = "chatgpt-oauth"
+  readonly model = "gpt-5"
+  calls = 0
+
+  async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
+    this.calls += 1
+    if (this.calls === 1) {
+      throw new Error(
+        "chatgpt-oauth responses request failed: 503 Service Unavailable — upstream connect error or disconnect/reset before headers",
+      )
+    }
+    yield {
+      type: "text_delta",
+      delta:
+        '{"activeThreadId":"prompt_rules","referentId":"prompt_rules","intent":"status_check","scope":"current_workstream","shouldClarify":false,"confidence":"high"}',
+    }
+    yield { type: "message_stop", stop_reason: "end_turn" }
+  }
+}
+
 const flattenText = (input: StreamInput | undefined): string =>
   (input?.messages ?? [])
     .flatMap((message) => message.content)
@@ -106,14 +127,17 @@ describe("grounding probe rendering", () => {
     expect(manifest.contract.schemaVersion).toBe(2)
     expect(manifest.sourceFiles.map((entry) => entry.file)).toEqual([
       "compare.ts",
+      "config.ts",
       "file-context.ts",
       "harness.ts",
       "loader.ts",
       "normalizer.ts",
       "parser.ts",
       "probe.ts",
+      "replay-scaffold.ts",
       "referent-context.ts",
       "report.ts",
+      "route-matrix.ts",
       "schema.ts",
       "scorer.ts",
       "stable-json.ts",
@@ -126,6 +150,31 @@ describe("grounding probe rendering", () => {
     const groundingCase: GroundingCase = {
       schema: 2,
       id: "retry",
+      usecase: "persistent-context.conversation-state.thread-grounding",
+      history: [{ role: "assistant", text: "Active thread prompt_rules." }],
+      targetUtterance: "야 이제 다 해결됐냐?",
+      gold: {
+        activeThreadId: "prompt_rules",
+        referentId: "prompt_rules",
+        intent: "status_check",
+        scope: "current_workstream",
+        shouldClarify: false,
+        confidence: "high",
+      },
+      bucket: "ellipsis",
+      severity: "critical",
+    }
+    const result = await runGroundingProbe(groundingCase, { llm, now: () => 0 })
+    expect(result.error).toBeUndefined()
+    expect(result.decision?.activeThreadId).toBe("prompt_rules")
+    expect(llm.calls).toBe(2)
+  })
+
+  test("retries a transient empty-body transport failure once before surfacing an error", async () => {
+    const llm = new FlakyTransportLLM()
+    const groundingCase: GroundingCase = {
+      schema: 2,
+      id: "retry-transport",
       usecase: "persistent-context.conversation-state.thread-grounding",
       history: [{ role: "assistant", text: "Active thread prompt_rules." }],
       targetUtterance: "야 이제 다 해결됐냐?",

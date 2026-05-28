@@ -2,6 +2,12 @@ import type { EvalRecord, GroundingPayload, RunSummaryRecord } from "../storage"
 import type { Verdict } from "../types"
 import type { GroundingErrorKind } from "./diagnostics"
 import { GROUNDING_BUCKETS, type GroundingBucket, type GroundingMode, type GroundingSeverity } from "./schema"
+import type {
+  GroundingRouteMatrix,
+  GroundingRouteMatrixCell,
+  GroundingRouteMatrixName,
+} from "./route-matrix"
+import { GROUNDING_ROUTE_MATRICES } from "./route-matrix"
 
 export interface GroundingMetrics {
   thread_selection_accuracy: number
@@ -108,6 +114,37 @@ export interface GroundingGateOutput {
   result: GroundingGateResult
 }
 
+export interface GroundingRouteMatrixFailure {
+  kind: "missing_cell" | "duplicate_cell" | "cell_gate_failure"
+  cellId: string
+  message: string
+  runIds?: readonly string[]
+}
+
+export interface GroundingRouteMatrixCellResult {
+  cellId: string
+  mode: GroundingMode
+  corpus: string
+  route: GroundingReport["route"]
+  runId?: string
+  passed: boolean
+  failures: readonly GroundingGateFailure[]
+}
+
+export interface GroundingRouteMatrixGateResult {
+  matrix: GroundingRouteMatrixName
+  profile: GroundingGateProfile
+  passed: boolean
+  failures: readonly GroundingRouteMatrixFailure[]
+  cells: readonly GroundingRouteMatrixCellResult[]
+}
+
+export interface GroundingRouteMatrixGateOutput {
+  headline: string
+  markdown: string
+  result: GroundingRouteMatrixGateResult
+}
+
 export const isGroundingGateProfile = (value: string): value is GroundingGateProfile =>
   GROUNDING_GATE_PROFILES.includes(value as GroundingGateProfile)
 
@@ -142,10 +179,7 @@ const severityRank: Record<GroundingSeverity, number> = {
 }
 
 const actualTuple = (payload: GroundingPayload, which: "scored" | "raw"): string | null => {
-  const actual =
-    which === "raw"
-      ? payload.rawActual
-      : payload.scoredActual ?? payload.actual
+  const actual = which === "raw" ? payload.rawActual : payload.scoredActual ?? payload.actual
   return actual === undefined
     ? null
     : JSON.stringify({
@@ -288,9 +322,8 @@ const buildGroundingMetricsWithSource = (
   }
 }
 
-export const buildGroundingMetrics = (
-  payloads: readonly GroundingPayload[],
-): GroundingMetrics => buildGroundingMetricsWithSource(payloads, "scored")
+export const buildGroundingMetrics = (payloads: readonly GroundingPayload[]): GroundingMetrics =>
+  buildGroundingMetricsWithSource(payloads, "scored")
 
 const buildNormalizationLift = (
   metrics: GroundingMetrics,
@@ -307,10 +340,23 @@ const buildNormalizationLift = (
 export const buildGroundingBucketReports = (
   payloads: readonly GroundingPayload[],
 ): readonly GroundingBucketReport[] => {
+  const summaryPairClosure = (scoped: readonly GroundingPayload[]): readonly GroundingPayload[] => {
+    const pairIds = new Set(
+      scoped
+        .map((payload) => payload.pairId)
+        .filter((pairId): pairId is string => typeof pairId === "string" && pairId !== ""),
+    )
+    if (pairIds.size === 0) return scoped
+    return payloads.filter((payload) => payload.pairId !== undefined && pairIds.has(payload.pairId))
+  }
   const out: GroundingBucketReport[] = []
   for (const bucket of GROUNDING_BUCKETS) {
     const scoped = payloads.filter((payload) => payload.bucket === bucket)
     if (scoped.length === 0) continue
+    const metricPayloads = bucket === "summary_equivalence" ? summaryPairClosure(scoped) : scoped
+    const rawMetrics = metricPayloads.some((payload) => payload.rawActual !== undefined)
+      ? buildGroundingMetricsWithSource(metricPayloads, "raw")
+      : undefined
     let maxSeverity: GroundingSeverity = "medium"
     let criticalCases = 0
     for (const payload of scoped) {
@@ -323,10 +369,8 @@ export const buildGroundingBucketReports = (
       maxSeverity,
       criticalCases,
       counts: countVerdicts(scoped),
-      metrics: buildGroundingMetricsWithSource(scoped, "scored"),
-      rawMetrics: scoped.some((payload) => payload.rawActual !== undefined)
-        ? buildGroundingMetricsWithSource(scoped, "raw")
-        : undefined,
+      metrics: buildGroundingMetricsWithSource(metricPayloads, "scored"),
+      ...(rawMetrics !== undefined ? { rawMetrics } : {}),
     })
   }
   return out
@@ -348,9 +392,7 @@ const summaryParam = (summary: RunSummaryRecord | null | undefined, key: string)
   return typeof value === "string" ? value : undefined
 }
 
-const summaryRunView = (
-  summary: RunSummaryRecord | null | undefined,
-): GroundingReport["run"] | undefined => {
+const summaryRunView = (summary: RunSummaryRecord | null | undefined): GroundingReport["run"] | undefined => {
   if (summary === null || summary === undefined) return undefined
   return {
     durationMs: summary.durationMs,
@@ -479,10 +521,8 @@ const CANARY_THRESHOLDS = {
   structured_output_validity: 1,
 } as const
 
-const bucketById = (
-  report: GroundingReport,
-  bucket: GroundingBucket,
-): GroundingBucketReport | undefined => report.buckets.find((entry) => entry.bucket === bucket)
+const bucketById = (report: GroundingReport, bucket: GroundingBucket): GroundingBucketReport | undefined =>
+  report.buckets.find((entry) => entry.bucket === bucket)
 
 const renderGateMarkdown = (result: GroundingGateResult): string => {
   const lines: string[] = []
@@ -516,6 +556,53 @@ const renderGateMarkdown = (result: GroundingGateResult): string => {
   }
   return lines.join("\n")
 }
+
+const renderRouteMatrixGateMarkdown = (result: GroundingRouteMatrixGateResult): string => {
+  const lines: string[] = []
+  lines.push(`# Grounding Route Matrix Gate — ${result.matrix}`)
+  lines.push("")
+  lines.push(`Profile: ${result.profile}`)
+  lines.push(`Status: ${result.passed ? "PASS" : "FAIL"}`)
+  lines.push("")
+  lines.push("## Cells")
+  lines.push("")
+  lines.push("| Cell | Run | Mode | Corpus | Status | Route | Failures |")
+  lines.push("|---|---|---|---|---|---|---|")
+  for (const cell of result.cells) {
+    const routeBits = [
+      cell.route.provider,
+      cell.route.model,
+      cell.route.surfaceId,
+      cell.route.transportId,
+    ].filter((value): value is string => value !== undefined && value !== "")
+    lines.push(
+      `| ${cell.cellId} | ${cell.runId ?? "-"} | ${cell.mode} | ${cell.corpus} | ${cell.passed ? "PASS" : "FAIL"} | ${routeBits.length > 0 ? routeBits.join(" / ") : "unknown"} | ${cell.failures.length} |`,
+    )
+  }
+  lines.push("")
+  lines.push("## Failures")
+  lines.push("")
+  if (result.failures.length === 0) {
+    lines.push("- none")
+  } else {
+    for (const failure of result.failures) {
+      lines.push(`- ${failure.kind}:${failure.cellId} ${failure.message}`)
+    }
+  }
+  return lines.join("\n")
+}
+
+const matchesMatrixCell = (
+  report: GroundingReport,
+  cell: GroundingRouteMatrixCell,
+): boolean =>
+  report.mode === cell.mode &&
+  report.corpus === cell.corpus &&
+  (cell.provider === undefined || report.route.provider === cell.provider) &&
+  (cell.model === undefined || report.route.model === cell.model) &&
+  (cell.surfaceId === undefined || report.route.surfaceId === cell.surfaceId) &&
+  (cell.transportId === undefined || report.route.transportId === cell.transportId) &&
+  (cell.authMode === undefined || report.route.authMode === cell.authMode)
 
 export const evaluateGroundingGate = (
   report: GroundingReport,
@@ -646,10 +733,95 @@ export const buildGroundingGateResult = (
   }
 }
 
+export const buildGroundingRouteMatrixGateResult = (
+  reports: readonly GroundingReport[],
+  matrixName: GroundingRouteMatrixName,
+  profile: GroundingGateProfile,
+): GroundingRouteMatrixGateOutput => {
+  const matrix: GroundingRouteMatrix = GROUNDING_ROUTE_MATRICES[matrixName]
+  const failures: GroundingRouteMatrixFailure[] = []
+  const cells: GroundingRouteMatrixCellResult[] = []
+  for (const cell of matrix.cells) {
+    const matches = reports.filter((report) => matchesMatrixCell(report, cell))
+    if (matches.length === 0) {
+      failures.push({
+        kind: "missing_cell",
+        cellId: cell.id,
+        message: "no run matched required matrix cell",
+      })
+      cells.push({
+        cellId: cell.id,
+        mode: cell.mode,
+        corpus: cell.corpus,
+        route: {
+          ...(cell.provider !== undefined ? { provider: cell.provider } : {}),
+          ...(cell.model !== undefined ? { model: cell.model } : {}),
+          ...(cell.surfaceId !== undefined ? { surfaceId: cell.surfaceId } : {}),
+          ...(cell.transportId !== undefined ? { transportId: cell.transportId } : {}),
+          ...(cell.authMode !== undefined ? { authMode: cell.authMode } : {}),
+        },
+        passed: false,
+        failures: [],
+      })
+      continue
+    }
+    if (matches.length > 1) {
+      failures.push({
+        kind: "duplicate_cell",
+        cellId: cell.id,
+        message: "multiple runs matched one required matrix cell",
+        runIds: matches.map((report) => report.runId),
+      })
+      const primary = matches[0] as GroundingReport
+      cells.push({
+        cellId: cell.id,
+        mode: cell.mode,
+        corpus: cell.corpus,
+        route: primary.route,
+        runId: primary.runId,
+        passed: false,
+        failures: [],
+      })
+      continue
+    }
+    const report = matches[0] as GroundingReport
+    const gate = buildGroundingGateResult(report, profile)
+    if (gate.result.failures.length > 0) {
+      failures.push({
+        kind: "cell_gate_failure",
+        cellId: cell.id,
+        message: `run ${report.runId} failed ${profile} gate`,
+        runIds: [report.runId],
+      })
+    }
+    cells.push({
+      cellId: cell.id,
+      mode: cell.mode,
+      corpus: cell.corpus,
+      route: report.route,
+      runId: report.runId,
+      passed: gate.result.failures.length === 0,
+      failures: gate.result.failures,
+    })
+  }
+  const result: GroundingRouteMatrixGateResult = {
+    matrix: matrixName,
+    profile,
+    passed: failures.length === 0,
+    failures,
+    cells,
+  }
+  return {
+    headline: `${result.passed ? "grounding route matrix gate passed" : "grounding route matrix gate failed"}: matrix=${matrixName} profile=${profile} cells=${cells.length}`,
+    markdown: renderRouteMatrixGateMarkdown(result),
+    result,
+  }
+}
+
 export const buildGroundingReport = (
   records: Iterable<EvalRecord>,
   runId: string,
-  summary: RunSummaryRecord | null | undefined,
+  summary?: RunSummaryRecord | null,
 ): GroundingReportOutput => {
   const payloads = filterGroundingRecords(records, runId)
   const counts = countVerdicts(payloads)
@@ -657,24 +829,25 @@ export const buildGroundingReport = (
   const rawMetrics = payloads.some((payload) => payload.rawActual !== undefined)
     ? buildGroundingMetricsWithSource(payloads, "raw")
     : undefined
+  const suite = summaryParam(summary, "suite")
+  const corpus = summaryParam(summary, "corpus")
+  const mode = summaryParam(summary, "mode")
+  const probeProfile = summaryParam(summary, "probeProfile")
+  const normalizationProfile = summaryParam(summary, "normalizationProfile")
+  const outputProtocol = summaryParam(summary, "outputProtocol")
+  const run = summaryRunView(summary)
   const report: GroundingReport = {
     runId,
-    ...(summaryParam(summary, "suite") !== undefined ? { suite: summaryParam(summary, "suite") } : {}),
-    ...(summaryParam(summary, "corpus") !== undefined ? { corpus: summaryParam(summary, "corpus") } : {}),
-    ...(summaryParam(summary, "mode") !== undefined ? { mode: summaryParam(summary, "mode") as GroundingMode } : {}),
-    ...(summaryParam(summary, "probeProfile") !== undefined
-      ? { probeProfile: summaryParam(summary, "probeProfile") }
-      : {}),
-    ...(summaryParam(summary, "normalizationProfile") !== undefined
-      ? { normalizationProfile: summaryParam(summary, "normalizationProfile") }
-      : {}),
-    ...(summaryParam(summary, "outputProtocol") !== undefined
-      ? { structuredOutputProtocol: summaryParam(summary, "outputProtocol") }
-      : {}),
+    ...(suite !== undefined ? { suite } : {}),
+    ...(corpus !== undefined ? { corpus } : {}),
+    ...(mode !== undefined ? { mode: mode as GroundingMode } : {}),
+    ...(probeProfile !== undefined ? { probeProfile } : {}),
+    ...(normalizationProfile !== undefined ? { normalizationProfile } : {}),
+    ...(outputProtocol !== undefined ? { structuredOutputProtocol: outputProtocol } : {}),
     total: payloads.length,
     counts,
     route: reportRoute(payloads, summary),
-    run: summaryRunView(summary),
+    ...(run !== undefined ? { run } : {}),
     errorKinds: buildErrorKinds(payloads),
     metrics,
     ...(rawMetrics !== undefined ? { rawMetrics } : {}),

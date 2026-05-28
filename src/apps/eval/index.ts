@@ -6,7 +6,8 @@
  * Subcommands:
  *   audit                          Tier 0 static coverage matrix
  *   synthetic [--usecase ID] [--all]   Tier 1 LLM-judged scenario runs
- *   grounding run --suite canary|nightly       Tier 2 structured grounding probe
+ *   grounding run [--mode raw|engine|assisted] [--suite canary|nightly|--corpus ...]
+ *                                             Tier 2 structured grounding probe
  *   grounding compare/regress               Tier 2 run-to-run delta + regression gate
  *   public swebench-verified [--report PATH]   Tier 3 wraps bench-report
  *   trajectory classify --input DIR   Tier 4 label real sessions
@@ -30,16 +31,21 @@ import { isKnownAdapter, KNOWN_ADAPTERS, runCompare } from "./compare"
 import {
   buildGroundingComparison,
   buildGroundingGateResult,
+  buildGroundingRouteMatrixGateResult,
   buildGroundingRegressionResult,
   buildGroundingReport,
+  GROUNDING_CORPORA,
   evaluateGroundingRegression,
   GROUNDING_GATE_PROFILES,
+  GROUNDING_MODES,
   GROUNDING_REGRESSION_PROFILES,
   isGroundingGateProfile,
   isGroundingRegressionProfile,
+  isGroundingRouteMatrixName,
   resolveGroundingBaseline,
   runGroundingPreflightCheck,
   runGrounding,
+  writeGroundingReplayScaffold,
 } from "./grounding"
 import { runSwebenchAdapter } from "./public"
 import { buildReport } from "./report"
@@ -74,6 +80,18 @@ const writeTextFile = (path: string, text: string): void => {
   const out = resolve(process.cwd(), path)
   mkdirSync(dirname(out), { recursive: true })
   writeFileSync(out, text)
+}
+
+const readJsonFile = (path: string): unknown =>
+  JSON.parse(readFileSync(resolve(process.cwd(), path), "utf8"))
+
+const csvValues = (raw: string | undefined): readonly string[] | undefined => {
+  if (raw === undefined) return undefined
+  const values = raw
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value !== "")
+  return values.length === 0 ? undefined : values
 }
 
 // ── tiny dotenv (no dep, first-wins; mirrors apps/bench) ─────────────────────
@@ -167,8 +185,20 @@ const cmdGrounding = async (): Promise<number> => {
   switch (sub) {
     case "run": {
       const suite = argValue("--suite")
-      if (suite !== "canary" && suite !== "nightly") {
+      const corpus = argValue("--corpus")
+      if (suite !== undefined && suite !== "canary" && suite !== "nightly") {
         console.error("eval grounding run: --suite must be canary or nightly")
+        return 1
+      }
+      if (corpus !== undefined && !GROUNDING_CORPORA.includes(corpus as (typeof GROUNDING_CORPORA)[number])) {
+        console.error(
+          `eval grounding run: --corpus must be one of ${GROUNDING_CORPORA.join(", ")}`,
+        )
+        return 1
+      }
+      const mode = argValue("--mode")
+      if (mode !== undefined && !GROUNDING_MODES.includes(mode as (typeof GROUNDING_MODES)[number])) {
+        console.error(`eval grounding run: --mode must be one of ${GROUNDING_MODES.join(", ")}`)
         return 1
       }
       const limitRaw = argValue("--limit")
@@ -198,7 +228,9 @@ const cmdGrounding = async (): Promise<number> => {
       if (agent === null) return 0
       const summary = await runGrounding({
         llm: agent.llm,
-        suite,
+        ...(suite !== undefined ? { suite } : {}),
+        ...(corpus !== undefined ? { corpus: corpus as (typeof GROUNDING_CORPORA)[number] } : {}),
+        ...(mode !== undefined ? { mode: mode as (typeof GROUNDING_MODES)[number] } : {}),
         ...(storeDir !== undefined ? { storeDir } : {}),
         ...(argValue("--case") !== undefined ? { caseId: argValue("--case")! } : {}),
         ...(limit !== undefined ? { limit } : {}),
@@ -207,7 +239,7 @@ const cmdGrounding = async (): Promise<number> => {
       const jsonOut = argValue("--json-out")
       if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(summary, null, 2)}\n`)
       console.log(
-        `grounding run=${summary.runId} suite=${summary.suite} total=${summary.total} pass=${summary.counts.pass} partial=${summary.counts.partial} fail=${summary.counts.fail} err=${summary.counts.error} concurrency=${summary.concurrency} (${summary.durationMs}ms)`,
+        `grounding run=${summary.runId} corpus=${summary.corpus} mode=${summary.mode} total=${summary.total} pass=${summary.counts.pass} partial=${summary.counts.partial} fail=${summary.counts.fail} err=${summary.counts.error} concurrency=${summary.concurrency} (${summary.durationMs}ms)`,
       )
       return 0
     }
@@ -262,6 +294,40 @@ const cmdGrounding = async (): Promise<number> => {
       return 0
     }
     case "gate": {
+      const routeMatrix = argValue("--route-matrix")
+      if (routeMatrix !== undefined) {
+        if (!isGroundingRouteMatrixName(routeMatrix)) {
+          console.error("eval grounding gate: --route-matrix must name a known matrix")
+          return 1
+        }
+        const runIds = csvValues(argValue("--run-ids"))
+        if (runIds === undefined || runIds.length === 0) {
+          console.error("eval grounding gate: --run-ids <id1,id2,...> is required with --route-matrix")
+          return 1
+        }
+        const profile = argValue("--profile")
+        if (profile === undefined || !isGroundingGateProfile(profile)) {
+          console.error(
+            `eval grounding gate: --profile must be one of ${GROUNDING_GATE_PROFILES.join(", ")}`,
+          )
+          return 1
+        }
+        const reports = runIds.map((runId) => loadGroundingReport(runId).report)
+        const gate = buildGroundingRouteMatrixGateResult(reports, routeMatrix, profile)
+        const markdownOut = argValue("--markdown-out")
+        const jsonOut = argValue("--json-out")
+        if (markdownOut !== undefined) writeTextFile(markdownOut, gate.markdown)
+        if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(gate.result, null, 2)}\n`)
+        if (gate.result.failures.length === 0) {
+          console.error(`grounding route-matrix gate passed: matrix=${routeMatrix}`)
+          return 0
+        }
+        console.error(`grounding route-matrix gate failed: matrix=${routeMatrix}`)
+        for (const failure of gate.result.failures) {
+          console.error(`- ${failure.kind}:${failure.cellId} ${failure.message}`)
+        }
+        return 1
+      }
       const runId = argValue("--run-id")
       if (runId === undefined) {
         console.error("eval grounding gate: --run-id <id> is required")
@@ -289,6 +355,68 @@ const cmdGrounding = async (): Promise<number> => {
         console.error(`- ${failure.metric}: expected ${failure.expected}, got ${failure.actual}`)
       }
       return 1
+    }
+    case "scaffold-replay": {
+      const source = argValue("--source")
+      const id = argValue("--id")
+      const targetUtterance = argValue("--target-utterance")
+      const bucket = argValue("--bucket")
+      const severity = argValue("--severity")
+      const corpus = argValue("--corpus")
+      const goldJson = argValue("--gold-json")
+      const outPath = argValue("--out")
+      if (
+        source === undefined ||
+        id === undefined ||
+        targetUtterance === undefined ||
+        bucket === undefined ||
+        severity === undefined ||
+        corpus === undefined ||
+        goldJson === undefined ||
+        outPath === undefined
+      ) {
+        console.error(
+          "eval grounding scaffold-replay: --source, --id, --target-utterance, --bucket, --severity, --corpus, --gold-json, --out are required",
+        )
+        return 1
+      }
+      if (corpus !== "replay_critical" && corpus !== "replay_nightly") {
+        console.error("eval grounding scaffold-replay: --corpus must be replay_critical or replay_nightly")
+        return 1
+      }
+      const sessionSnapshotPath = argValue("--session-snapshot")
+      const stateJsonPath = argValue("--state-json")
+      const candidateThreadIds = csvValues(argValue("--candidate-threads"))
+      const candidateReferentIds = csvValues(argValue("--candidate-referents"))
+      const ambiguityClass = argValue("--ambiguity-class")
+      const blockingEligible = argValue("--blocking-eligible")
+      const scaffoldOpts: Parameters<typeof writeGroundingReplayScaffold>[0] = {
+        source,
+        id,
+        corpus,
+        targetUtterance,
+        bucket: bucket as never,
+        severity: severity as never,
+        gold: readJsonFile(goldJson) as never,
+        outPath,
+      }
+      if (sessionSnapshotPath !== undefined) scaffoldOpts.sessionSnapshotPath = sessionSnapshotPath
+      if (stateJsonPath !== undefined) scaffoldOpts.stateContract = readJsonFile(stateJsonPath) as never
+      if (candidateThreadIds !== undefined) scaffoldOpts.candidateThreadIds = candidateThreadIds
+      if (candidateReferentIds !== undefined) scaffoldOpts.candidateReferentIds = candidateReferentIds
+      if (ambiguityClass !== undefined) scaffoldOpts.ambiguityClass = ambiguityClass as never
+      if (blockingEligible !== undefined) scaffoldOpts.blockingEligible = blockingEligible === "true"
+      const result = writeGroundingReplayScaffold(scaffoldOpts)
+      const jsonOut = argValue("--json-out")
+      const payload = {
+        outPath: result.outPath,
+        id: result.fixture.id,
+        corpus: result.fixture.corpus ?? corpus,
+        source: result.fixture.sourceProvenance ?? null,
+      }
+      if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(payload, null, 2)}\n`)
+      console.log(`grounding scaffold-replay wrote ${result.outPath}`)
+      return 0
     }
     case "compare": {
       const baselineRunId = argValue("--baseline")
@@ -350,7 +478,7 @@ const cmdGrounding = async (): Promise<number> => {
     }
     default:
       console.error(
-        "eval grounding: subcommand must be one of: run, preflight, report, baseline, gate, compare, regress",
+        "eval grounding: subcommand must be one of: run, preflight, report, baseline, gate, compare, regress, scaffold-replay",
       )
       return 1
   }
@@ -535,16 +663,21 @@ const HELP = `quanta eval — verification harness (Tier 0..5)
 
   audit                                      Tier 0 static coverage
   synthetic [--usecase ID]                   Tier 1 LLM-judged scenarios
-  grounding run --suite canary|nightly       Tier 2 structured context-grounding probe
+  grounding run [--mode raw|engine|assisted] [--suite canary|nightly|--corpus CORPUS]
+                                             Tier 2 structured context-grounding probe
   grounding preflight                        Tier 2 provider/route/parser health check
   grounding report --run-id ID               Tier 2 grounding metrics report
   grounding baseline --candidate ID          Tier 2 resolve latest comparable baseline
   grounding gate --run-id ID --profile canary
                                              Tier 2 grounding release gate
+  grounding gate --route-matrix primary-openai --run-ids ID,ID --profile canary
+                                             Tier 2 route-matrix release gate
   grounding compare --baseline ID --candidate ID
                                              Tier 2 run-to-run grounding delta
   grounding regress --baseline ID --candidate ID --profile strict
                                              Tier 2 fail-closed regression gate
+  grounding scaffold-replay --source JSONL --gold-json PATH --out PATH
+                                             Tier 2 replay fixture scaffold
                                              add --store-dir DIR to isolate run storage
   generate --usecase ID [--count N]          Tier 1 auto-generate scenarios (LLM)
   public swebench-verified [--report PATH]   Tier 3 wraps bench-report.json

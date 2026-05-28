@@ -7,48 +7,16 @@ import {
   resolveGroundingExecutionConfig,
   type GroundingExecutionConfig,
 } from "./config"
-import { buildGroundingHarnessManifest, groundingHarnessFingerprint } from "./harness"
-import type { GroundingErrorKind } from "./diagnostics"
-import { classifyGroundingInfraError, classifyGroundingParserError, GROUNDING_ERROR_KINDS } from "./diagnostics"
+import { groundingHarnessFingerprint } from "./harness"
 import { loadGroundingCases, type LoadGroundingCasesOpts } from "./loader"
 import {
-  resolveGroundingBaseline,
-  type GroundingBaselineResolution,
-  type GroundingBaselineStatus,
-} from "./baseline"
-import {
-  buildGroundingComparison,
-  buildGroundingRegressionResult,
-  evaluateGroundingRegression,
-  GROUNDING_REGRESSION_PROFILES,
-  isGroundingRegressionProfile,
-  type GroundingComparisonOutput,
-  type GroundingRegressionFailure,
-  type GroundingRegressionProfile,
-} from "./compare"
-import {
-  buildGroundingGateResult,
-  buildGroundingReport,
-  buildGroundingBucketReports,
-  buildGroundingMetrics,
-  evaluateGroundingGate,
-  GROUNDING_GATE_PROFILES,
-  isGroundingGateProfile,
-  type GroundingGateFailure,
-  type GroundingGateProfile,
-  type GroundingReportOutput,
-} from "./report"
-import {
-  resolveGroundingProbeProfile,
   runGroundingPreflight,
   runGroundingProbe,
   type GroundingPreflightResult,
 } from "./probe"
-import { normalizeGroundingDecision, type GroundingNormalizationResult } from "./normalizer"
-import { GROUNDING_ROUTE_MATRICES, isGroundingRouteMatrixName, type GroundingRouteMatrixName } from "./route-matrix"
+import { normalizeGroundingDecision } from "./normalizer"
 import { emptyGroundingMatches, scoreGroundingDecision } from "./scorer"
 import type { GroundingCase, GroundingCorpus, GroundingMode, GroundingSuite } from "./schema"
-import { GROUNDING_HARNESS_CONTRACT, parseGroundingCase } from "./schema"
 import { shortHash, stableJson } from "./stable-json"
 
 export {
@@ -76,6 +44,7 @@ export {
 } from "./compare"
 export {
   buildGroundingGateResult,
+  buildGroundingRouteMatrixGateResult,
   buildGroundingReport,
   buildGroundingBucketReports,
   buildGroundingMetrics,
@@ -86,16 +55,24 @@ export {
   type GroundingGateOutput,
   type GroundingGateProfile,
   type GroundingGateResult,
+  type GroundingRouteMatrixFailure,
+  type GroundingRouteMatrixGateOutput,
+  type GroundingRouteMatrixGateResult,
   type GroundingReportOutput,
 } from "./report"
 export {
   GROUNDING_BUCKETS,
+  GROUNDING_CORPORA,
   GROUNDING_CONFIDENCE,
   GROUNDING_HARNESS_CONTRACT,
   GROUNDING_HISTORY_METADATA_FIELDS,
   GROUNDING_HISTORY_KINDS,
   GROUNDING_INTENTS,
+  GROUNDING_MODES,
+  GROUNDING_NORMALIZATION_PROFILES,
+  GROUNDING_OUTPUT_PROTOCOLS,
   GROUNDING_PAIR_ROLES,
+  GROUNDING_PROBE_PROFILES,
   GROUNDING_SCHEMA_VERSION,
   GROUNDING_SCOPES,
   GROUNDING_SEVERITIES,
@@ -103,16 +80,24 @@ export {
   GROUNDING_SUITES,
   GROUNDING_USECASE,
   parseGroundingCase,
+  type GroundingAmbiguityClass,
   type GroundingBucket,
   type GroundingCase,
   type GroundingConfidence,
+  type GroundingCorpus,
   type GroundingContextChange,
   type GroundingDecision,
   type GroundingHistoryEntry,
   type GroundingHistoryKind,
+  type GroundingHumanAudit,
   type GroundingIntent,
+  type GroundingMode,
+  type GroundingNormalizationProfile,
+  type GroundingOutputProtocol,
   type GroundingPairRole,
+  type GroundingProbeProfile,
   type GroundingSeverity,
+  type GroundingSourceProvenance,
   type GroundingStateContract,
   type GroundingSuite,
 } from "./schema"
@@ -150,6 +135,13 @@ export {
   type GroundingRouteMatrixCell,
   type GroundingRouteMatrixName,
 } from "./route-matrix"
+export {
+  buildGroundingReplayScaffold,
+  writeGroundingReplayScaffold,
+  type BuildGroundingReplayScaffoldOpts,
+  type GroundingReplayScaffoldResult,
+  type WriteGroundingReplayScaffoldOpts,
+} from "./replay-scaffold"
 
 export interface GroundingRunOpts extends LoadGroundingCasesOpts {
   llm: LLMPort
@@ -313,7 +305,7 @@ export const runGroundingPreflightCheck = async (
 export const runGrounding = async (opts: GroundingRunOpts): Promise<GroundingRunSummary> => {
   const start = Date.now()
   const corpus = resolveGroundingCorpus(opts.corpus, opts.suite)
-  const mode = opts.mode ?? "assisted"
+  const mode = opts.mode ?? "engine"
   const execConfig = resolveGroundingExecutionConfig(mode)
   const store = new ResultStore({
     ...(opts.storeDir !== undefined ? { dir: opts.storeDir } : {}),
@@ -344,6 +336,7 @@ export const runGrounding = async (opts: GroundingRunOpts): Promise<GroundingRun
   const route = llmRoute(opts.llm)
   const routeFp = routeFingerprint(route)
   const harnessFp = groundingHarnessFingerprint()
+  const suite = manualSuiteForCorpus(corpus)
   await store.finish({
     runId,
     tier: "grounding",
@@ -352,7 +345,7 @@ export const runGrounding = async (opts: GroundingRunOpts): Promise<GroundingRun
     durationMs,
     status: "finished",
     params: {
-      suite: manualSuiteForCorpus(corpus) ?? corpus,
+      suite: suite ?? corpus,
       corpus,
       mode,
       probeProfile: execConfig.probeProfile,
@@ -374,7 +367,7 @@ export const runGrounding = async (opts: GroundingRunOpts): Promise<GroundingRun
   })
   return {
     runId,
-    ...(manualSuiteForCorpus(corpus) !== undefined ? { suite: manualSuiteForCorpus(corpus) } : {}),
+    ...(suite !== undefined ? { suite } : {}),
     corpus,
     mode,
     probeProfile: execConfig.probeProfile,

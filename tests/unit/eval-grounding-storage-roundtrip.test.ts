@@ -36,6 +36,14 @@ describe("grounding storage roundtrip", () => {
           shouldClarify: false,
           confidence: "high",
         },
+        scoredActual: {
+          activeThreadId: "prompt_rules",
+          referentId: "prompt_rules",
+          intent: "status_check",
+          scope: "current_workstream",
+          shouldClarify: false,
+          confidence: "high",
+        },
         matches: {
           activeThread: true,
           referent: true,
@@ -48,6 +56,7 @@ describe("grounding storage roundtrip", () => {
           staleContextTrapMiss: false,
         },
         rawResponse: "{}",
+        structuredOutputValid: true,
         durationMs: 88,
         tokens: { prompt: 10, completion: 3, cacheRead: 2 },
         costUsd: 0.123,
