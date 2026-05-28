@@ -1587,6 +1587,7 @@ export type FeaturesConfig = Pick<
   | "shadowCheckpoint"
   | "shadowOdb"
   | "subagentBackground"
+  | "delegation"
   | "fork"
   | "onProgress"
   | "planExitPort"

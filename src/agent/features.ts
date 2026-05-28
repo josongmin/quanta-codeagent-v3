@@ -58,6 +58,7 @@ import {
   buildBranchSearchBlock,
   buildBudgetBlock,
   buildClassifierBlock,
+  buildDelegateBlock,
   buildForkSessionBlock,
   buildPlanExitBlock,
   buildPlanMutationBlock,
@@ -155,6 +156,9 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
 
   // ADR-0140 — background-subagent tools (default-OFF: empty when subagentBackground absent)
   extraTools.push(...buildSubagentBgBlock(config))
+
+  // ADR-0393 — synchronous delegate tool (default-OFF: empty when delegation absent)
+  extraTools.push(...buildDelegateBlock(config))
 
   // ADR-0136 — budget_status tool (default-OFF: empty array when budgetLedger absent)
   extraTools.push(...buildBudgetBlock(config))
