@@ -150,18 +150,28 @@ export const lspDiagnosticsProvider = (): DiagnosticsProvider => ({
 export const lspDiagnosticsTool = (): Tool => diagnosticsTool(lspDiagnosticsProvider()) as Tool
 
 /** ADR-0381 wiring helper — default edit-class tool → file-path extractor map.
- *  Quanta's `edit` and `write` tools take `file_path` in their input schema.
- *  `apply_patch` requires patch-body parsing and is intentionally out of
- *  scope (separate follow-up). */
+ *  `edit` / `write` take `file_path` in their input schema; `apply_patch`
+ *  takes a V4A patch body — the first `*** Update File:` / `*** Add File:`
+ *  op header gives the path that should get diagnostics. `Delete` (no file
+ *  left to diagnose) and `Move` (requires the `*** Move to:` line) are
+ *  intentionally skipped — separate follow-up if a real need surfaces. */
 export const lspDefaultEditTools = (): Map<string, (input: unknown) => string | null> => {
   const extractFilePath = (input: unknown): string | null => {
     if (typeof input !== "object" || input === null) return null
     const v = (input as Record<string, unknown>).file_path
     return typeof v === "string" && v.length > 0 ? v : null
   }
-  return new Map([
+  const extractApplyPatchPath = (input: unknown): string | null => {
+    if (typeof input !== "object" || input === null) return null
+    const patch = (input as Record<string, unknown>).patch
+    if (typeof patch !== "string") return null
+    const m = patch.match(/^\*\*\* (?:Update|Add) File: (.+)$/m)
+    return m?.[1]?.trim() ?? null
+  }
+  return new Map<string, (input: unknown) => string | null>([
     ["edit", extractFilePath],
     ["write", extractFilePath],
+    ["apply_patch", extractApplyPatchPath],
   ])
 }
 
