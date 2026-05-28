@@ -77,9 +77,6 @@ export const createCompositeMentionResolver = (
   // factory return is `... | undefined` (optional port member), but the
   // closure never IS undefined; pin it to a concrete fn type so the
   // `exactOptionalPropertyTypes` assignment to `resolveFile?` is exact.
-  // ADR-0418 — only attach file / symbol methods when their dep is
-  // supplied, so the legacy 3-kind shape (no `resolveFile` /
-  // `resolveSymbol` key) is preserved when the caller opts out.
   if (deps.files !== undefined) {
     base.resolveFile = createFileResolver(deps.files)
   }
