@@ -14,8 +14,9 @@
  *      read its entries and sort them lexicographically (`<` on the raw name)
  *      so the traversal order is byte-stable across runs / filesystems.
  *   2. The FIRST file encountered (in that deterministic order) whose
- *      lowercase extension is in {@link LSP_SUPPORTED_EXTENSIONS} for a given
- *      LANGUAGE becomes that language's anchor.
+ *      lowercase extension maps to a LANGUAGE in the injected
+ *      `extensionToLanguage` table (built from lsp-bridge's `SERVERS` via
+ *      `lspExtensionToLanguage`) becomes that language's anchor.
  *   3. A workspace may contain several languages (e.g. a `.ts` file and a
  *      `.py` file). Each supported language that is PRESENT yields one anchor,
  *      so the caller can build a UNION lookup (one `createLspSymbolLookup` per

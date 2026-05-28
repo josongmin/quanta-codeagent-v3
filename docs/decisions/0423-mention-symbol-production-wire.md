@@ -12,8 +12,8 @@ ports + ADR-0422's adapters/builder are unchanged; this only adds an anchor
 synthesizer, a union LSP lookup, a host-composition deps builder, and fills
 the two existing `buildDefaultMentionResolver` call sites.
 **Slices:**
-`src/agent/lsp-bridge.ts` (`LSP_SUPPORTED_EXTENSIONS` + `lspExtensionToLanguage`
-exports off the single `SERVERS` table) +
+`src/agent/lsp-bridge.ts` (`lspExtensionToLanguage` export off the single
+`SERVERS` table) +
 `src/agent/mention-injection/` (`anchor-synth` synthesizer + `symbol-lookup-lsp`
 `createUnionLspSymbolLookup` + `index` barrel) +
 `src/host/runtime/internal/mention-symbol-deps.ts` (host-composition deps
@@ -39,10 +39,12 @@ So production `@Symbol` was always `null` — the deliberate hold.
 ### 1. Deterministic LSP anchor synthesizer (no heuristics)
 
 `src/agent/lsp-bridge.ts` exports the single source of truth off the existing
-`SERVERS` table: `LSP_SUPPORTED_EXTENSIONS` (the lowercase extensions) and
-`lspExtensionToLanguage()` (extension → server *binary*, so the extensions one
-server handles — typescript: `.ts`/`.tsx`/`.js`/`.jsx`/`.mjs`/`.cjs` — collapse
-to one key). Adding a language stays a one-line `SERVERS` edit (OCP).
+`SERVERS` table: `lspExtensionToLanguage()` (extension → server *binary*, so the
+extensions one server handles — typescript: `.ts`/`.tsx`/`.js`/`.jsx`/`.mjs`/
+`.cjs` — collapse to one key). Adding a language stays a one-line `SERVERS` edit
+(OCP). (An earlier draft also exported a flat `LSP_SUPPORTED_EXTENSIONS` array;
+it was never consumed — the synthesizer reads the map's keys directly — and has
+been removed.)
 
 `synthesizeLspAnchors({ cwd, extensionToLanguage, lister, maxEntries? })`
 (`mention-injection/anchor-synth.ts`) applies a **fully deterministic rule**:

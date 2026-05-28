@@ -77,19 +77,6 @@ const specFor = (filePath: string): ServerSpec | null => {
 }
 
 /**
- * ADR-0422 follow-up — the lowercase file extensions (leading dot, e.g.
- * `.ts`, `.py`) for which {@link SERVERS} can select a language server.
- * Exported as the SINGLE source of truth so the mention-injection anchor
- * synthesizer reasons about "which extensions can open an LSP session"
- * WITHOUT re-declaring the extension list (OCP: adding a language to
- * {@link SERVERS} automatically widens this set). Frozen so consumers cannot
- * mutate the shared table. Deterministic order: SERVERS row order, then the
- * per-row `exts` order — no sorting, no heuristics. */
-export const LSP_SUPPORTED_EXTENSIONS: readonly string[] = Object.freeze(
-  SERVERS.flatMap((entry) => entry.exts),
-)
-
-/**
  * ADR-0422 follow-up — lowercase extension → LANGUAGE KEY (the server binary,
  * which is the server identity). Built from the SAME {@link SERVERS} table so
  * the extensions a single server handles (typescript: `.ts`/`.tsx`/`.js`/…)
