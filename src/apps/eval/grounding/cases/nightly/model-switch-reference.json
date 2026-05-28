@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "model-switch-reference",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "contextChanges": [
@@ -8,6 +8,9 @@
   "history": [
     {
       "role": "assistant",
+      "kind": "directive",
+      "threadId": "responses_migration",
+      "referentId": "gpt-4.1",
       "text": "Active thread responses_migration switched the evaluator model from gpt-4o to gpt-4.1."
     }
   ],

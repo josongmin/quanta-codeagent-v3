@@ -1,9 +1,15 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "ambiguous-two-files",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "history": [
-    { "role": "assistant", "text": "Active thread prompt_rules is touching src/agent/prompt.ts and src/agent/loop.ts." },
+    {
+      "role": "assistant",
+      "kind": "directive",
+      "threadId": "prompt_rules",
+      "mentionedFileIds": ["src/agent/prompt.ts", "src/agent/loop.ts"],
+      "text": "Active thread prompt_rules is touching src/agent/prompt.ts and src/agent/loop.ts."
+    },
     { "role": "assistant", "text": "Both files still have open edits." }
   ],
   "targetUtterance": "그 파일만 건드려.",

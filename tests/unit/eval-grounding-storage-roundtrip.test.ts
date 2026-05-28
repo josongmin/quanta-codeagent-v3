@@ -53,11 +53,43 @@ describe("grounding storage roundtrip", () => {
         costUsd: 0.123,
       },
     })
+    await store.finish({
+      runId,
+      tier: "grounding",
+      argv: ["grounding", "run", "--suite", "canary"],
+      counts: { pass: 1, partial: 0, fail: 0, error: 0, skipped: 0 },
+      durationMs: 88,
+      status: "finished",
+      params: {
+        suite: "canary",
+        provider: "openai",
+        model: "gpt-4.1",
+        concurrency: 4,
+      },
+    })
     await store.drain()
 
     const records = [...new ResultStore({ dir }).readAll()]
     expect(records).toHaveLength(1)
     expect(records[0]?.payload.kind).toBe("grounding")
+    expect([...new ResultStore({ dir }).readRunRecords(runId)]).toEqual(records)
+    expect([...new ResultStore({ dir }).readRunRecords("missing-run")]).toEqual([])
+    expect(new ResultStore({ dir }).readRunSummary(runId)).toEqual({
+      ts: 4567,
+      schema: 1,
+      runId,
+      tier: "grounding",
+      argv: ["grounding", "run", "--suite", "canary"],
+      counts: { pass: 1, partial: 0, fail: 0, error: 0, skipped: 0 },
+      durationMs: 88,
+      status: "finished",
+      params: {
+        suite: "canary",
+        provider: "openai",
+        model: "gpt-4.1",
+        concurrency: 4,
+      },
+    })
 
     const matrix = buildCoverageMatrix(records)
     expect(matrix.tokenCost).toEqual({

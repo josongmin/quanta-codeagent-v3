@@ -1,13 +1,26 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "prompt-rules-status-raw",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "history": [
-    { "role": "assistant", "text": "Open threads: prompt_rules, oauth_abort_flow." },
-    { "role": "user", "text": "Stay on prompt_rules only." },
     {
       "role": "assistant",
-      "text": "Current thread prompt_rules: landed prompt policy snapshots; only proof rail cleanup remains."
+      "kind": "message",
+      "text": "Open threads: prompt_rules, oauth_abort_flow.",
+      "mentionedThreadIds": ["oauth_abort_flow", "prompt_rules"]
+    },
+    {
+      "role": "user",
+      "kind": "directive",
+      "text": "Stay on prompt_rules only.",
+      "threadId": "prompt_rules"
+    },
+    {
+      "role": "assistant",
+      "kind": "message",
+      "text": "Current thread prompt_rules: landed prompt policy snapshots; only proof rail cleanup remains.",
+      "threadId": "prompt_rules",
+      "policyMarkers": ["closeout"]
     }
   ],
   "targetUtterance": "야 이제 다 해결됐냐?",
@@ -21,6 +34,12 @@
   },
   "bucket": "ellipsis",
   "severity": "critical",
+  "stateContract": {
+    "activeThreadId": "prompt_rules",
+    "visibleThreadIds": ["oauth_abort_flow", "prompt_rules"],
+    "pausedThreadIds": ["oauth_abort_flow"],
+    "policyMarkers": ["closeout"]
+  },
   "pairId": "pair-prompt-rules-status",
   "pairRole": "raw"
 }

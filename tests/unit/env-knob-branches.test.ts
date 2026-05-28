@@ -19,7 +19,7 @@
  *   QUANTA_SKILLS_DIR, OPENAI_API_KEY / ANTHROPIC_API_KEY auto-detect.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -56,6 +56,7 @@ const ENV_KEYS = [
   // for every test so a real `/login` token on the host machine does not
   // leak into `chatgpt-oauth` selection.
   "QUANTA_PREFS_HOME",
+  "CODEX_HOME",
 ] as const
 
 const snapshot = (): Map<string, string | undefined> => {
@@ -73,6 +74,7 @@ const restore = (m: Map<string, string | undefined>): void => {
 
 let saved: Map<string, string | undefined>
 let prefsHome: string | null = null
+let codexHome: string | null = null
 beforeEach(() => {
   saved = snapshot()
   for (const k of ENV_KEYS) delete process.env[k]
@@ -80,6 +82,8 @@ beforeEach(() => {
   // fresh empty dir so `pickProvider` never sees a stray on-disk token.
   prefsHome = mkdtempSync(join(tmpdir(), "env-knob-prefs-"))
   process.env.QUANTA_PREFS_HOME = prefsHome
+  codexHome = mkdtempSync(join(tmpdir(), "env-knob-codex-"))
+  process.env.CODEX_HOME = codexHome
 })
 afterEach(() => {
   if (prefsHome !== null) {
@@ -89,6 +93,14 @@ afterEach(() => {
       // best-effort cleanup
     }
     prefsHome = null
+  }
+  if (codexHome !== null) {
+    try {
+      rmSync(codexHome, { recursive: true, force: true })
+    } catch {
+      // best-effort cleanup
+    }
+    codexHome = null
   }
   restore(saved)
 })
@@ -131,6 +143,42 @@ describe("pickProvider — QUANTA_PROVIDER branches + auto-detect", () => {
 
   test("no explicit + no keys → anthropic default (key-error surfaces at buildLLM, not here)", () => {
     expect(pickProvider()).toBe("anthropic")
+  })
+
+  test("Codex chatgpt auth fallback → chatgpt-oauth", () => {
+    const idToken = [
+      "eyJhbGciOiJSUzI1NiJ9",
+      Buffer.from(
+        JSON.stringify({
+          exp: 1_924_992_000,
+          "https://api.openai.com/auth": {
+            chatgpt_plan_type: "pro",
+            chatgpt_account_id: "acct-codex",
+          },
+        }),
+        "utf8",
+      )
+        .toString("base64")
+        .replace(/=+$/, "")
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_"),
+      "sig",
+    ].join(".")
+    writeFileSync(
+      join(codexHome ?? "", "auth.json"),
+      JSON.stringify({
+        auth_mode: "chatgpt",
+        OPENAI_API_KEY: null,
+        tokens: {
+          id_token: idToken,
+          access_token: idToken,
+          refresh_token: "rt-codex",
+          account_id: "acct-codex",
+        },
+      }),
+      { encoding: "utf8", mode: 0o600 },
+    )
+    expect(pickProvider()).toBe("chatgpt-oauth")
   })
 })
 
@@ -243,7 +291,12 @@ describe("parseRecallTiers — comma-separated tier list", () => {
 })
 
 describe("buildSubagentConfig — QUANTA_SUBAGENT + max-depth", () => {
-  test("unset → undefined (default-OFF, byte-identical)", () => {
+  test("unset → {} (default-ON; QUANTA_SUBAGENT absent ⇒ enabled)", () => {
+    expect(buildSubagentConfig()).toEqual({})
+  })
+
+  test("QUANTA_SUBAGENT=0 → undefined (explicit opt-out, byte-identical loop)", () => {
+    process.env.QUANTA_SUBAGENT = "0"
     expect(buildSubagentConfig()).toBeUndefined()
   })
 
@@ -295,13 +348,13 @@ describe("buildVerifyGuardConfig — QUANTA_VERIFY_GUARD + max-trips", () => {
 })
 
 describe("buildSkillsConfig — QUANTA_SKILLS_DIR", () => {
-  test("unset → undefined (no skill discovery, no Skill/ToolSearch tools)", () => {
-    expect(buildSkillsConfig()).toBeUndefined()
+  test("unset → {} (default-ON: bundled system skills, Skill/ToolSearch registered)", () => {
+    expect(buildSkillsConfig()).toEqual({})
   })
 
-  test("empty string → undefined (treated as unset)", () => {
+  test("empty QUANTA_SKILLS_DIR → {} (dir treated as unset, falls back to default-ON bundled)", () => {
     process.env.QUANTA_SKILLS_DIR = ""
-    expect(buildSkillsConfig()).toBeUndefined()
+    expect(buildSkillsConfig()).toEqual({})
   })
 
   test("path set → { dir }", () => {
@@ -320,8 +373,8 @@ describe("buildSkillsConfig — QUANTA_SKILLS_DIR", () => {
     expect(buildSkillsConfig()).toEqual({ dir: "/custom/skills" })
   })
 
-  test("QUANTA_SKILLS unset/non-1 → undefined (byte-identical default-OFF preserved)", () => {
-    process.env.QUANTA_SKILLS = "yes" // not exactly "1"
+  test("QUANTA_SKILLS=0 → undefined (explicit opt-out, byte-identical no-skill loop)", () => {
+    process.env.QUANTA_SKILLS = "0"
     expect(buildSkillsConfig()).toBeUndefined()
   })
 })

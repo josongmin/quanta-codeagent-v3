@@ -88,11 +88,13 @@ triage 보조에만 쓴다.
 ## Corpus model
 
 한 fixture는 transcript와 gold decision, 그리고 failure-class metadata를 가진다.
+v2부터는 pair-comparability authority를 위해 `stateContract`가 추가된다.
 
 ```ts
 interface GroundingExample {
+  schema: 2
   id: string
-  transcript: TurnRecord[]
+  transcript: GroundingHistoryEntry[]
   userUtterance: string
   gold: GroundingDecision
   bucket:
@@ -106,6 +108,14 @@ interface GroundingExample {
     | "must_clarify"
     | "wrong_thread_adversarial"
   severity: "critical" | "high" | "medium"
+  stateContract?: {
+    activeThreadId: string | null
+    visibleThreadIds?: string[]
+    pausedThreadIds?: string[]
+    latestToolResultId?: string | null
+    latestToolName?: string
+    policyMarkers?: string[]
+  }
   notes?: string
 }
 ```
@@ -114,13 +124,18 @@ interface GroundingExample {
 state를 가진다.
 
 - role
-- thread id
-- utterance
-- optional tool/result summary
-- optional compaction marker
-- optional policy marker
+- text
+- optional `kind`: `message | directive | tool_result | summary`
+- optional `threadId`
+- optional `referentId`
+- optional `toolName`
+- optional `mentionedThreadIds`
+- optional `policyMarkers`
 
 이 벤치의 목적은 prompt text 재생이 아니라 conversational state 해석 정확도다.
+특히 `summary_equivalence` pair는 raw/summary prose 자체가 아니라 동일한
+`stateContract`를 공유해야 한다. loader는 pair별 raw/summary `stateContract`
+동등성과 structured history metadata 존재를 fail-closed로 강제한다.
 
 ## Evaluation axes
 
@@ -181,14 +196,31 @@ Gate는 3층으로 나눈다.
 
 - critical corpus `wrong_thread_rate == 0`
 - critical corpus `must_clarify recall == 1.0`
-- critical corpus `summary_equivalence_rate >= 0.98`
+- critical corpus `summary_equivalence_rate == 1.0`
 - critical corpus `thread_selection_accuracy >= 0.97`
 - critical corpus `referent_accuracy >= 0.95`
-- critical corpus `intent_accuracy >= 0.97`
-- critical corpus `scope_accuracy >= 0.97`
+- critical corpus `exact_tuple_match_rate >= 0.90`
 
 Threshold는 empirical baseline 이후 조정 가능하다. 하지만 `wrong_thread`와
 `must_clarify miss`는 relaxed metric으로 다루지 않는다.
+
+canary hard gate는 top-line threshold 하나로 끝나지 않는다. `must_clarify`,
+`stale_context_trap`, `summary_equivalence`, `wrong_thread_adversarial` bucket에
+critical case가 존재하면, 해당 bucket의 아래 invariant도 독립적으로 만족해야 한다.
+
+- `must_clarify` critical bucket `clarify_recall == 1.0`
+- `stale_context_trap` critical bucket `stale_context_attachment_rate == 0`
+- `summary_equivalence` critical bucket `summary_equivalence_rate == 1.0`
+- `wrong_thread_adversarial` critical bucket `wrong_thread_rate == 0`
+
+`intent_accuracy`와 `scope_accuracy`는 계속 집계하지만, 현재 canary ship gate의
+blocking authority는 아니다. top-line `exact_tuple_match_rate`와 critical bucket
+hard fail이 그 drift를 간접적으로 압박한다.
+
+regression comparability는 manual version tuple에 기대지 않는다. harness
+fingerprint는 schema contract literal만이 아니라 `schema/loader/parser/probe/scorer/
+report/compare` source manifest hash를 함께 포함한다. source가 바뀌면 baseline
+selection과 strict regress comparability도 자동으로 갈라진다.
 
 ## Implementation shape
 
@@ -196,10 +228,12 @@ Threshold는 empirical baseline 이후 조정 가능하다. 하지만 `wrong_thr
 
 - `src/apps/eval/grounding/schema.ts`
 - `src/apps/eval/grounding/loader.ts`
+- `src/apps/eval/grounding/baseline.ts`
 - `src/apps/eval/grounding/parser.ts`
 - `src/apps/eval/grounding/probe.ts`
 - `src/apps/eval/grounding/scorer.ts`
 - `src/apps/eval/grounding/report.ts`
+- `src/apps/eval/grounding/compare.ts`
 - `src/apps/eval/grounding/index.ts`
 - `src/apps/eval/grounding/cases/canary/*.json`
 - `src/apps/eval/grounding/cases/nightly/*.json`
@@ -217,6 +251,9 @@ CLI surface:
 bun run eval grounding run --suite canary
 bun run eval grounding run --suite nightly
 bun run eval grounding report --run-id <id>
+bun run eval grounding baseline --candidate <id>
+bun run eval grounding compare --baseline <id> --candidate <id>
+bun run eval grounding regress --baseline <id> --candidate <id> --profile strict
 ```
 
 fixture contract은 v1에서 text-only transcript로 고정한다.
@@ -234,9 +271,37 @@ probe는 real prompt assembly path를 직접 탄다.
 - `tools: []`
 - benchmark-only trailing user probe
 - balanced-object extraction parser
+- loader는 corpus를 fail-closed로 lint한다:
+  - pair group은 exactly one `raw` + one `summary`
+  - `summary` role은 `summary_equivalence` bucket이어야 한다
+  - raw/summary pair는 같은 scenario contract (`targetUtterance`, `gold`, context knobs, severity)를 공유해야 한다
+  - canary authority buckets (`must_clarify`, `stale_context_trap`, `summary_equivalence`, `wrong_thread_adversarial`)는 runtime load 시점에도 critical case 존재가 강제된다
 - stream/parse failure는 `verdict:"error"`로 기록
 - live route 문제는 `grounding preflight`가 먼저 분리한다
 - live corpora는 bounded concurrency로 실행 가능하다
+- report는 persisted run summary를 읽어 route/duration/params provenance를 복원한다
+- run command는 structured run summary artifact를 직접 쓸 수 있어 workflow가 stdout `sed` scraping에 의존하지 않는다
+- grounding CLI는 `--store-dir DIR`를 받아 ad-hoc analysis, isolated test fixtures,
+  CI artifact replay를 repo-default `evals/runs`와 분리할 수 있다
+- report/gate/compare/regress는 해당 run의 JSONL만 직접 읽는다. 한 grounding run을
+  해석하기 위해 전체 eval history를 다시 스캔하지 않는다.
+- gate는 report artifact를 재사용하지 않고 별도 structured verdict artifact를 만든다:
+  - `profile`
+  - `passed`
+  - `failures[]`
+  - run route/count summary
+- regress도 compare artifact를 재사용하지 않고 별도 structured regression verdict artifact를 만든다:
+  - `profile`
+  - `passed`
+  - `comparable`
+  - `comparability`
+  - `failures[]`
+- baseline은 persisted run summary에서 latest prior comparable run을 자동 선택한다
+- compare/regress는 baseline 대비 metric/bucket/case drift를 구조적으로 판정한다
+- run summary는 `harnessFingerprint` / `caseSetFingerprint` / `routeFingerprint`를 포함해 harness drift, corpus drift, route drift를 explicit comparability check로 올린다
+- `harnessFingerprint`는 schema/parser/scorer/report/compare뿐 아니라 loader/gate contract version도 포함한다
+- canary gate는 top-line threshold 외에 critical bucket invariant를 별도 hard failure로 승격한다
+- strict regression gate는 top-line metric 외에 critical bucket regression도 별도 failure로 승격한다
 
 ## Scoring rules
 
@@ -255,6 +320,13 @@ Primary scorer는 exact-match + explicit failure buckets다.
 - raw transcript decision
 - summarized transcript decision
 - 두 decision이 같아야 pass
+
+raw/source case와 summary case는 반드시 같은 bucket일 필요가 없다. 실제 corpus에서는
+raw/source 사례가 원래 failure class (`tool_noise`, `stale_context_trap`, `ellipsis`
+등)를 유지하고, summary role만 `summary_equivalence` bucket에 들어간다. 따라서
+`summary_equivalence` bucket metric은 bucket-local payload만으로 계산하지 않고,
+summary role이 가리키는 raw counterpart를 cross-bucket으로 복원해 pair rate를
+계산한다.
 
 `must_clarify` 케이스는 false positive보다 false negative가 위험하다.
 즉, 애매한데도 특정 referent를 찍는 쪽을 더 강하게 벌점 준다.

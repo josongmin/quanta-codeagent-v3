@@ -1,11 +1,15 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "oauth-rerun-summary",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "history": [
     {
       "role": "assistant",
-      "text": "Conversation summary: oauth_abort_flow is the active thread. The cancel-path patch exists, but the browser flow still needs a rerun."
+      "kind": "summary",
+      "text": "Conversation summary: oauth_abort_flow is the active thread. The cancel-path patch exists, but the browser flow still needs a rerun.",
+      "threadId": "oauth_abort_flow",
+      "mentionedThreadIds": ["prompt_rules"],
+      "policyMarkers": ["patch_landed", "needs_rerun"]
     }
   ],
   "targetUtterance": "그거 다시 돌려봐",
@@ -19,6 +23,12 @@
   },
   "bucket": "summary_equivalence",
   "severity": "critical",
+  "stateContract": {
+    "activeThreadId": "oauth_abort_flow",
+    "visibleThreadIds": ["oauth_abort_flow", "prompt_rules"],
+    "pausedThreadIds": ["prompt_rules"],
+    "policyMarkers": ["patch_landed", "needs_rerun"]
+  },
   "pairId": "pair-oauth-rerun",
   "pairRole": "summary"
 }

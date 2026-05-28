@@ -1,11 +1,15 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "prompt-rules-status-summary",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "history": [
     {
       "role": "assistant",
-      "text": "Conversation summary: active thread prompt_rules. oauth_abort_flow is paused. prompt_rules is in closeout and the user is checking completion."
+      "kind": "summary",
+      "text": "Conversation summary: active thread prompt_rules. oauth_abort_flow is paused. prompt_rules is in closeout and the user is checking completion.",
+      "threadId": "prompt_rules",
+      "mentionedThreadIds": ["oauth_abort_flow"],
+      "policyMarkers": ["closeout"]
     }
   ],
   "targetUtterance": "야 이제 다 해결됐냐?",
@@ -19,6 +23,12 @@
   },
   "bucket": "summary_equivalence",
   "severity": "critical",
+  "stateContract": {
+    "activeThreadId": "prompt_rules",
+    "visibleThreadIds": ["oauth_abort_flow", "prompt_rules"],
+    "pausedThreadIds": ["oauth_abort_flow"],
+    "policyMarkers": ["closeout"]
+  },
   "pairId": "pair-prompt-rules-status",
   "pairRole": "summary"
 }

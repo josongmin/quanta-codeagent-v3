@@ -12,7 +12,10 @@ import { ModeBadge } from "./components/ModeBadge"
 import { PortBadge } from "./components/PortBadge"
 import {
   buildDefaultSlashCommands,
+  isSlashMode,
+  type SlashCommand,
   type SlashCommandContext,
+  splitDraft,
 } from "./components/SlashPalette"
 import {
   buildLlmConfigSlashCommands,
@@ -380,11 +383,43 @@ export const App = (): JSX.Element => {
     [attachment.attachFile],
   )
 
+  // Held by ref so `submit` (declared before `slashCommands`) can route a
+  // leading-`/` draft to the matching client-side slash action instead of
+  // shoving the literal "/login" string into a turn — the latter is what
+  // burned us before: the slash action ran AND the LLM saw "/login" as a
+  // prompt, triggering a stale-token `/models` call.
+  const slashCommandsRef = useRef<readonly SlashCommand[]>([])
+
+  const resolveSlashCommand = useCallback(
+    (text: string): { cmd: SlashCommand; rest: string } | null => {
+      if (!isSlashMode(text)) return null
+      const { slug, rest } = splitDraft(text)
+      const list = slashCommandsRef.current
+      const cmd =
+        list.find((c) => c.slug.toLowerCase() === slug) ??
+        list.find((c) => c.aliases?.some((a) => a.toLowerCase() === slug))
+      return cmd === undefined ? null : { cmd, rest }
+    },
+    [],
+  )
+
   const submit = useCallback(
     (text: string): void => {
       if (connection.kind !== "connected") return
       const trimmed = text.trim()
       if (trimmed.length === 0 && attachment.pendingImages.length === 0) return
+      const slash = resolveSlashCommand(trimmed)
+      if (slash !== null) {
+        // Run the slash action, clear draft, and DO NOT send a turn. The
+        // action may itself append a system message via `appendClientMessage`
+        // (e.g. "browser opened — finish the ChatGPT login flow"). Its
+        // string return value (legacy SlashPalette `onAccept` payload) is
+        // ignored here — only the palette path uses it.
+        void Promise.resolve(slash.cmd.action(slash.rest))
+        setDraft("")
+        attachment.clear()
+        return
+      }
       sendTurn(trimmed, attachment.toImageBlocks())
       setDraft("")
       attachment.clear()
@@ -394,6 +429,7 @@ export const App = (): JSX.Element => {
       attachment.pendingImages.length,
       attachment.toImageBlocks,
       connection.kind,
+      resolveSlashCommand,
       sendTurn,
     ],
   )
@@ -470,6 +506,13 @@ export const App = (): JSX.Element => {
     appendClientMessage,
     getSlashContext,
   ])
+
+  // Keep the ref in sync so `submit`'s slash-routing path sees the latest
+  // command set (esp. when `resolvedConnection` becomes non-null after the
+  // first daemon-info round-trip and the auth/llm commands appear).
+  useEffect(() => {
+    slashCommandsRef.current = slashCommands
+  }, [slashCommands])
 
   const canRestartDaemon = readTauriInvoke() !== undefined
   const resolvedModel =

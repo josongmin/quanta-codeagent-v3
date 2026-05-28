@@ -26,6 +26,7 @@ import {
   buildVerifyGuardConfigCore,
   composeLLMCore,
   DEFAULT_MODEL,
+  parseEnvFlag,
   parseFallbackModels,
   parseRecallTiers,
   pickProviderCore,
@@ -182,10 +183,12 @@ export const buildMemoryConfig = (
 
 /**
  * Resolve the `subagent` config block from env (Tier 1 capability, ADR-0011).
- * Default OFF: `QUANTA_SUBAGENT` unset ⇒ `undefined` so the key is omitted
- * entirely and the `Agent`/`Task`/`TaskOutput`/`TaskStop` tools are NOT
- * registered (loop byte-identical). When set, an optional integer
- * `QUANTA_SUBAGENT_MAX_DEPTH` caps recursion (else the runner's default).
+ * Default ON: `QUANTA_SUBAGENT` unset ⇒ enabled, so the `agent`/`task_output`/
+ * `task_stop` tools ARE registered and the model can fan out subagents from a
+ * plain-language request. Set `QUANTA_SUBAGENT=0` (or `false`/`off`/`no`) to
+ * disable (restores the byte-identical no-subagent loop for CI/bench). An
+ * optional integer `QUANTA_SUBAGENT_MAX_DEPTH` caps recursion (else the
+ * runner's default).
  */
 export const buildSubagentConfig = (
   /** Optional surface-provided TaskRegistry. When supplied AND the env flag
@@ -194,7 +197,7 @@ export const buildSubagentConfig = (
    *  Unset ⇒ byte-identical to today (loop mints its own). */
   taskRegistry?: import("@/subagent").TaskRegistry,
 ): AgentConfig["subagent"] | undefined => {
-  const enabled = process.env.QUANTA_SUBAGENT !== undefined
+  const enabled = parseEnvFlag(process.env.QUANTA_SUBAGENT, true)
   const rawDepth = process.env.QUANTA_SUBAGENT_MAX_DEPTH
   const depth = rawDepth !== undefined ? Number.parseInt(rawDepth, 10) : Number.NaN
   return buildSubagentConfigCore({
@@ -224,12 +227,12 @@ export const buildVerifyGuardConfig = (): AgentConfig["verifyGuard"] | undefined
 /**
  * Resolve the `skills` config block from env (Tier 1 capability, ADR-0011 +
  * ADR-0045 system-skills follow-up). Three states:
- *   - `QUANTA_SKILLS_DIR=<path>`     → `{ dir }`  user dir + bundled system skills
- *   - `QUANTA_SKILLS=1` / `--skills` → `{}`       bundled system skills ONLY
- *     (localize-fault, progress-audit available without a user dir — the
- *     whole point of bundled discipline skills per ADR-0045)
- *   - none of the above             → `undefined` byte-identical default-OFF
- *     (no Skill/ToolSearch tools registered; RFC §1.2)
+ *   - `QUANTA_SKILLS_DIR=<path>`      → `{ dir }`  user dir + bundled system skills
+ *   - default (or `QUANTA_SKILLS=1`)  → `{}`       bundled system skills, so the
+ *     model sees the skill catalogue + trigger rules and can auto-invoke
+ *     (localize-fault, progress-audit available without a user dir per ADR-0045)
+ *   - `QUANTA_SKILLS=0` (or false/off/no) → `undefined`  no Skill/ToolSearch tools
+ *     (opt-out restores the byte-identical no-skill loop for CI/bench)
  * A user dir wins over the bare flag (it's a superset — it also pulls system
  * skills in via `buildSkillFeatures`'s merge).
  */
@@ -237,7 +240,7 @@ export const buildSkillsConfig = (): AgentConfig["skills"] | undefined => {
   const dir = process.env.QUANTA_SKILLS_DIR
   return buildSkillsConfigCore({
     ...(dir !== undefined ? { dir } : {}),
-    enabled: process.env.QUANTA_SKILLS === "1" || hasArg("--skills"),
+    enabled: parseEnvFlag(process.env.QUANTA_SKILLS, true) || hasArg("--skills"),
   })
 }
 

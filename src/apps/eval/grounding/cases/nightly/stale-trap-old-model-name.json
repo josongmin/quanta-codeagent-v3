@@ -1,11 +1,19 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "stale-trap-old-model-name",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "history": [
-    { "role": "assistant", "text": "Earlier closed thread legacy_eval used gpt-4o." },
     {
       "role": "assistant",
+      "threadId": "legacy_eval",
+      "referentId": "gpt-4o",
+      "text": "Earlier closed thread legacy_eval used gpt-4o."
+    },
+    {
+      "role": "assistant",
+      "kind": "directive",
+      "threadId": "grounding_gate",
+      "referentId": "gpt-4.1",
       "text": "Current active thread grounding_gate is validating gpt-4.1 thresholds."
     }
   ],

@@ -1,9 +1,15 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "explicit-clarify-behavior",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "history": [
-    { "role": "assistant", "text": "Active thread prompt_rules still has two candidate files: src/agent/prompt.ts and src/agent/loop.ts." }
+    {
+      "role": "assistant",
+      "kind": "directive",
+      "threadId": "prompt_rules",
+      "mentionedFileIds": ["src/agent/prompt.ts", "src/agent/loop.ts"],
+      "text": "Active thread prompt_rules still has two candidate files: src/agent/prompt.ts and src/agent/loop.ts."
+    }
   ],
   "targetUtterance": "애매하면 먼저 물어봐.",
   "gold": {

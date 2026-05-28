@@ -1,14 +1,20 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "explain-specific-subthread",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "history": [
     {
       "role": "assistant",
+      "kind": "directive",
+      "threadId": "transport_cleanup",
+      "mentionedReferentIds": ["resume_disable", "stale_retry"],
       "text": "Active thread transport_cleanup is split into resume_disable and stale_retry subthreads."
     },
     {
       "role": "assistant",
+      "threadId": "transport_cleanup",
+      "referentId": "stale_retry",
+      "mentionedReferentIds": ["resume_disable", "stale_retry"],
       "text": "The last update was about stale_retry clearing a stale previous_response_id and retrying once."
     }
   ],

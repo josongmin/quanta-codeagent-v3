@@ -11,8 +11,10 @@
 
 import type { AgentConfig } from "@/agent"
 import { buildSystemPrompt } from "@/agent"
+import { assembleAgentConfig } from "@/apps/agent/assemble"
 import { pickProvider, tryCreateLLM } from "@/llm"
 import type { PermissionContext } from "@/permission"
+import { buildSkillsConfigCore, buildSubagentConfigCore, parseEnvFlag } from "@/runner/assemble"
 import {
   createRuntimeFromAgentConfigBase,
   type RuntimeAgentConfigBase,
@@ -21,33 +23,32 @@ import {
 } from "@/sdk/runtime"
 import { StdoutStream } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
-import { assembleAgentConfig } from "@/apps/agent/assemble"
 
 type InteractiveTurnDeps = Pick<
   RuntimeAgentConfigBase,
   "cwd" | "llm" | "maxTurns" | "permission" | "registry" | "signal" | "stream" | "system"
 >
 
-export const buildInteractiveTurnAssembler = (
-  base: Omit<AgentConfig, "modePolicy" | "budgetMeter">,
-): RuntimeAgentTurnAssembler => (messages, turnDeps) => {
-  const deps = turnDeps as InteractiveTurnDeps
-  return assembleAgentConfig({
-    mode: "interactive",
-    base: {
-      ...base,
-      llm: deps.llm,
-      registry: deps.registry,
-      stream: deps.stream,
-      permission: deps.permission,
-      messages,
-      system: deps.system,
-      cwd: deps.cwd,
-      maxTurns: deps.maxTurns,
-      signal: deps.signal,
-    },
-  })
-}
+export const buildInteractiveTurnAssembler =
+  (base: Omit<AgentConfig, "modePolicy" | "budgetMeter">): RuntimeAgentTurnAssembler =>
+  (messages, turnDeps) => {
+    const deps = turnDeps as InteractiveTurnDeps
+    return assembleAgentConfig({
+      mode: "interactive",
+      base: {
+        ...base,
+        llm: deps.llm,
+        registry: deps.registry,
+        stream: deps.stream,
+        permission: deps.permission,
+        messages,
+        system: deps.system,
+        cwd: deps.cwd,
+        maxTurns: deps.maxTurns,
+        signal: deps.signal,
+      },
+    })
+  }
 
 /**
  * Build a `runtimeFactory` suitable for `WebDaemonConfig`. The LLM port is
@@ -69,6 +70,16 @@ export const buildProductionRuntimeFactory = (): (() => Promise<RuntimeFacade>) 
     const cwd = process.cwd()
     const abort = new AbortController()
     const permission: PermissionContext = { mode: "default" }
+    // Default-ON (env-disablable) capability blocks — same truth table as the
+    // CLI (`internal.ts`), so the web/tauri surface gets subagent fan-out + the
+    // skill catalogue/auto-trigger by default. `QUANTA_SUBAGENT=0` /
+    // `QUANTA_SKILLS=0` opt out; `QUANTA_SKILLS_DIR` adds a user skill dir.
+    const subagent = buildSubagentConfigCore({ enabled: parseEnvFlag(env.QUANTA_SUBAGENT, true) })
+    const skillsDir = env.QUANTA_SKILLS_DIR
+    const skills = buildSkillsConfigCore({
+      ...(skillsDir !== undefined ? { dir: skillsDir } : {}),
+      enabled: parseEnvFlag(env.QUANTA_SKILLS, true),
+    })
     const base: Omit<AgentConfig, "modePolicy" | "budgetMeter"> = {
       llm,
       registry: new ToolRegistry(buildDefaultTools()),
@@ -79,6 +90,8 @@ export const buildProductionRuntimeFactory = (): (() => Promise<RuntimeFacade>) 
       cwd,
       maxTurns: 200,
       signal: abort.signal,
+      ...(subagent !== undefined ? { subagent } : {}),
+      ...(skills !== undefined ? { skills } : {}),
     }
     const turnAssembler = buildInteractiveTurnAssembler(base)
     const { runtime } = await createRuntimeFromAgentConfigBase({

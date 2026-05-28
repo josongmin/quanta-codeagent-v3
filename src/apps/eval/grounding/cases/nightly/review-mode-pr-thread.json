@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "review-mode-pr-thread",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "mode": "review",

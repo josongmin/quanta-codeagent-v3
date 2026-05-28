@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "memory-context-invariant",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "memoryContext": "Remember: fail_closed_policy means wrong_thread must stay 0 and must_clarify recall must stay 1.0.",

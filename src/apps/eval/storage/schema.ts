@@ -10,10 +10,18 @@
  * `EvalRecord` (envelope) carrying one of the tier-specific payloads.
  */
 import type {
+  GroundingAmbiguityClass,
   GroundingBucket,
   GroundingDecision,
+  GroundingCorpus,
+  GroundingHumanAudit,
+  GroundingMode,
+  GroundingNormalizationProfile,
+  GroundingOutputProtocol,
   GroundingPairRole,
+  GroundingProbeProfile,
   GroundingSeverity,
+  GroundingSourceProvenance,
   GroundingSuite,
 } from "../grounding/schema"
 import type { GroundingErrorKind } from "../grounding/diagnostics"
@@ -123,13 +131,31 @@ export interface SyntheticPayload {
 /** Tier 2 — one structured context-grounding case verdict. */
 export interface GroundingPayload {
   kind: "grounding"
+  mode?: GroundingMode
+  corpus?: GroundingCorpus
+  probeProfile?: GroundingProbeProfile
+  normalizationProfile?: GroundingNormalizationProfile
+  structuredOutputProtocol?: GroundingOutputProtocol
+  structuredOutputValid?: boolean
   suite: GroundingSuite
   caseId: string
   verdict: Verdict
   bucket: GroundingBucket
   severity: GroundingSeverity
   gold: GroundingDecision
+  rawActual?: GroundingDecision
+  normalizedActual?: GroundingDecision
+  scoredActual?: GroundingDecision
+  /** Back-compat alias for old reports/tests. Equals `scoredActual` on new runs. */
   actual?: GroundingDecision
+  normalizationApplied?: boolean
+  normalizationReasons?: readonly string[]
+  sourceProvenance?: GroundingSourceProvenance
+  humanAudit?: GroundingHumanAudit
+  candidateThreadIds?: readonly string[]
+  candidateReferentIds?: readonly string[]
+  ambiguityClass?: GroundingAmbiguityClass
+  blockingEligible?: boolean
   matches: {
     activeThread: boolean
     referent: boolean

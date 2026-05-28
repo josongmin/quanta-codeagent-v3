@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "summary-memory-vs-current",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "memoryContext": "Earlier lane oauth_abort_flow was blocked by missing endpoint parity proof.",

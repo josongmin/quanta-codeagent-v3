@@ -1,6 +1,4 @@
-import { existsSync } from "node:fs"
-import { homedir } from "node:os"
-import { join } from "node:path"
+import { hasUsableChatgptToken } from "@/auth/chatgpt-oauth"
 import type { LLMProvider } from "@/shared/errors"
 import { AnthropicAdapter } from "./adapters/anthropic"
 import { ChatGPTOAuthAdapter } from "./adapters/chatgpt-oauth"
@@ -170,10 +168,7 @@ const resolveOpenAISurface = (
  *  having to set `QUANTA_PROVIDER`. The probe checks file existence only;
  *  token validity (expiry / signature) is established when the adapter
  *  actually streams (it refreshes on the fly if needed). */
-const hasChatgptOAuthToken = (env: EnvLike): boolean => {
-  const home = env.QUANTA_PREFS_HOME ?? join(homedir(), ".quanta")
-  return existsSync(join(home, "auth", "chatgpt.json"))
-}
+const hasChatgptOAuthToken = (env: EnvLike): boolean => hasUsableChatgptToken(env)
 
 /** Canonical provider selection. Precedence (top wins):
  *   1. Explicit `QUANTA_PROVIDER` (when it names a registered provider).

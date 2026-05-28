@@ -1,11 +1,16 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "screenshot-failure-summary",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "history": [
     {
       "role": "assistant",
-      "text": "Conversation summary: screenshot_send is active. The latest result latest_capture_failure is a Screen Recording permission denial."
+      "kind": "summary",
+      "text": "Conversation summary: screenshot_send is active. The latest result latest_capture_failure is a Screen Recording permission denial.",
+      "threadId": "screenshot_send",
+      "referentId": "latest_capture_failure",
+      "toolName": "capture_image",
+      "policyMarkers": ["screen_recording_denied"]
     }
   ],
   "targetUtterance": "왜 실패한거냐?",
@@ -19,6 +24,13 @@
   },
   "bucket": "summary_equivalence",
   "severity": "critical",
+  "stateContract": {
+    "activeThreadId": "screenshot_send",
+    "visibleThreadIds": ["screenshot_send"],
+    "latestToolResultId": "latest_capture_failure",
+    "latestToolName": "capture_image",
+    "policyMarkers": ["screen_recording_denied"]
+  },
   "pairId": "pair-screenshot-failure",
   "pairRole": "summary"
 }

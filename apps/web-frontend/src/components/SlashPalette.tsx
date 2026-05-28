@@ -40,7 +40,7 @@ export interface SlashPaletteProps {
 export const isSlashMode = (draft: string): boolean =>
   draft.startsWith("/") && !draft.slice(1).includes("\n")
 
-const splitDraft = (draft: string): { slug: string; rest: string } => {
+export const splitDraft = (draft: string): { slug: string; rest: string } => {
   const trimmed = draft.replace(/^\//, "")
   const spaceIdx = trimmed.indexOf(" ")
   if (spaceIdx === -1) {

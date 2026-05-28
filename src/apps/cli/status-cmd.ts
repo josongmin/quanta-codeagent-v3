@@ -11,12 +11,13 @@
  */
 
 import {
-  chatgptTokenPath,
+  type ChatgptTokenSource,
   isExpired,
-  readToken,
-  resolveQuantaHome,
+  readResolvedToken,
+  resolveChatgptTokenCandidates,
   type TokenRecord,
 } from "@/auth/chatgpt-oauth"
+import { pickProvider } from "@/llm"
 import {
   bold,
   cyan,
@@ -56,41 +57,36 @@ const resolveActiveProvider = (
   env: Record<string, string | undefined>,
   hasToken: boolean,
 ): { name: string; styled: string } => {
-  const explicit = env.QUANTA_PROVIDER
-  if (explicit === "chatgpt-oauth") {
-    if (hasToken) {
-      return { name: explicit, styled: `${cyan(explicit)}${authBadge(explicit)}` }
+  const provider = pickProvider(env)
+  if (provider === "chatgpt-oauth") {
+    if (!hasToken) {
+      return {
+        name: provider,
+        styled: `${cyan(provider)} ${red("(no token — run /login)")}`,
+      }
     }
     return {
-      name: explicit,
-      styled: `${cyan(explicit)} ${red("(no token — run /login)")}`,
+      name: provider,
+      styled:
+        env.QUANTA_PROVIDER === "chatgpt-oauth"
+          ? `${cyan(provider)}${authBadge(provider)}`
+          : `${cyan(provider)}${authBadge(provider)} ${dim("(auto — token on disk)")}`,
     }
   }
-  if (explicit === "anthropic" || explicit === "openai") {
-    return { name: explicit, styled: `${cyan(explicit)}${authBadge(explicit)}` }
-  }
-  if (env.ANTHROPIC_API_KEY !== undefined) {
-    return { name: "anthropic", styled: `${cyan("anthropic")}${authBadge("anthropic")}` }
-  }
-  if (env.OPENAI_API_KEY !== undefined) {
-    return { name: "openai", styled: `${cyan("openai")}${authBadge("openai")}` }
-  }
-  if (hasToken) {
+  if (provider === "anthropic" && env.QUANTA_PROVIDER === undefined && !hasToken) {
     return {
-      name: "chatgpt-oauth",
-      styled: `${cyan("chatgpt-oauth")}${authBadge("chatgpt-oauth")} ${dim("(auto — token on disk)")}`,
+      name: provider,
+      styled: `${cyan(provider)}${authBadge(provider)} ${dim("(default, no key configured)")}`,
     }
   }
-  return {
-    name: "anthropic",
-    styled: `${cyan("anthropic")}${authBadge("anthropic")} ${dim("(default, no key configured)")}`,
-  }
+  return { name: provider, styled: `${cyan(provider)}${authBadge(provider)}` }
 }
 
 const renderTokenSection = (
   rec: TokenRecord | null,
   err: string | null,
   tokenPath: string,
+  tokenSource: ChatgptTokenSource | null,
   nowMs: number,
 ): string[] => {
   const out: string[] = [bold("ChatGPT-OAuth")]
@@ -133,6 +129,9 @@ const renderTokenSection = (
       `    ${kvLine("refreshed", `${gray(rec.last_refresh)} ${dim(`(${humanRel(rec.last_refresh, nowMs, { agoOnly: true })})`)}`, 11)}`,
     )
   }
+  if (tokenSource !== null) {
+    out.push(`    ${kvLine("source", gray(tokenSource === "quanta" ? "quanta prefs" : "codex login"), 11)}`)
+  }
   out.push(`    ${kvLine("path", gray(tokenPath), 11)}`)
   return out
 }
@@ -153,26 +152,34 @@ export const buildStatusCmd = (deps: StatusDeps = {}): SlashCommand => ({
   category: "session",
   async run(_args, ctx: SlashContext) {
     const env = deps.env ?? process.env
-    const home = ctx.prefsHome ?? resolveQuantaHome(env)
-    const tokenPath = chatgptTokenPath(home)
     const nowMs = deps.nowMs?.() ?? (ctx.now ? ctx.now() : Date.now())
+    const tokenEnv = {
+      ...env,
+      ...(ctx.prefsHome !== undefined ? { QUANTA_PREFS_HOME: ctx.prefsHome } : {}),
+    }
+    const tokenPath = resolveChatgptTokenCandidates(tokenEnv)[0]?.path ?? ""
 
     let token: TokenRecord | null = null
     let tokenErr: string | null = null
+    let tokenPathUsed = tokenPath
+    let tokenSource: ChatgptTokenSource | null = null
     try {
-      token = await readToken(tokenPath)
+      const resolved = await readResolvedToken(tokenEnv)
+      token = resolved?.record ?? null
+      tokenPathUsed = resolved?.path ?? tokenPath
+      tokenSource = resolved?.source ?? null
     } catch (e) {
       tokenErr = (e as Error).message
     }
 
-    const active = resolveActiveProvider(env, token !== null && tokenErr === null)
+    const active = resolveActiveProvider(tokenEnv, token !== null && tokenErr === null)
 
     const lines: string[] = [
       `${bold("Active provider")}  ${active.styled}`,
       "",
       ...renderByokSection(env),
       "",
-      ...renderTokenSection(token, tokenErr, tokenPath, nowMs),
+      ...renderTokenSection(token, tokenErr, tokenPathUsed, tokenSource, nowMs),
     ]
     ctx.out(
       `${renderBox(lines, {

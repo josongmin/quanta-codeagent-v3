@@ -19,6 +19,7 @@ export {
   type SummarizerLlmAssembleInput,
 } from "./compaction"
 export { compactionDep } from "./config"
+export { parseEnvFlag } from "./env-flag"
 export {
   buildLLMCore,
   type ComposeLlmInput,

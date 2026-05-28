@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "repo-rules-current-thread",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "repoRulesText": "Stay on docs_sync until the user explicitly changes threads. Do not jump to ci_gate on your own.",

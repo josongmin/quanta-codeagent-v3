@@ -1,10 +1,14 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "previous-plan-step-two",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "history": [
     {
       "role": "assistant",
+      "kind": "directive",
+      "threadId": "prompt_rules",
+      "referentId": "prompt_rules_step_2",
+      "mentionedReferentIds": ["prompt_rules_step_1", "prompt_rules_step_2", "prompt_rules_step_3"],
       "text": "Active thread prompt_rules plan: prompt_rules_step_1 = add payload, prompt_rules_step_2 = add scorer hellgate, prompt_rules_step_3 = wire workflow."
     }
   ],

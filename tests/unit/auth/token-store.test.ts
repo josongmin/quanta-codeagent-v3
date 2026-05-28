@@ -3,6 +3,9 @@ import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/pr
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import {
+  hasUsableChatgptToken,
+  readCodexAuthToken,
+  readResolvedToken,
   type TokenRecord,
   TokenStoreError,
   deleteToken,
@@ -20,15 +23,36 @@ const sampleRecord: TokenRecord = {
   last_refresh: "2026-05-23T00:00:00.000Z",
 }
 
+const toBase64Url = (s: string): string =>
+  Buffer.from(s, "utf8").toString("base64").replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_")
+
+const fakeJwt = (payload: Record<string, unknown>): string => {
+  const header = toBase64Url('{"alg":"RS256"}')
+  const body = toBase64Url(JSON.stringify(payload))
+  return `${header}.${body}.sig`
+}
+
+const fakeCodexIdToken = (): string =>
+  fakeJwt({
+    exp: 1_924_992_000,
+    "https://api.openai.com/auth": {
+      chatgpt_plan_type: "pro",
+      chatgpt_account_id: "acct-codex",
+    },
+  })
+
 let dir: string
 let tokenPath: string
+let codexPath: string
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "tokstore-"))
   tokenPath = join(dir, "auth", "chatgpt.json")
+  codexPath = join(dir, ".codex", "auth.json")
   // Pre-create the parent so the tests that bypass writeToken (writing
   // malformed contents directly via writeFile) don't ENOENT.
   await mkdir(dirname(tokenPath), { recursive: true })
+  await mkdir(dirname(codexPath), { recursive: true })
 })
 
 afterEach(async () => {
@@ -83,6 +107,115 @@ describe("token-store.read/write", () => {
       lingers = false
     }
     expect(lingers).toBe(false)
+  })
+
+  test("readCodexAuthToken projects Codex auth.json into TokenRecord", async () => {
+    await writeFile(
+      codexPath,
+      JSON.stringify({
+        auth_mode: "chatgpt",
+        last_refresh: "2026-05-23T00:00:00.000Z",
+        OPENAI_API_KEY: null,
+        tokens: {
+          id_token: fakeCodexIdToken(),
+          access_token: fakeJwt({ exp: 1_924_992_000 }),
+          refresh_token: "rt-codex",
+          account_id: "acct-codex",
+        },
+      }),
+      "utf8",
+    )
+    if (process.platform !== "win32") await chmod(codexPath, 0o600)
+
+    const back = await readCodexAuthToken(codexPath)
+    expect(back).toMatchObject({
+      access_token: expect.any(String),
+      refresh_token: "rt-codex",
+      account_id: "acct-codex",
+      plan_type: "pro",
+      last_refresh: "2026-05-23T00:00:00.000Z",
+    })
+    expect(back?.expires_at).toBe("2031-01-01T00:00:00.000Z")
+  })
+
+  test("readResolvedToken prefers quanta token over Codex fallback", async () => {
+    await writeToken(tokenPath, sampleRecord)
+    await writeFile(
+      codexPath,
+      JSON.stringify({
+        auth_mode: "chatgpt",
+        tokens: {
+          id_token: fakeCodexIdToken(),
+          access_token: fakeJwt({ exp: 1_924_992_000 }),
+          refresh_token: "rt-codex",
+          account_id: "acct-codex",
+        },
+      }),
+      "utf8",
+    )
+    if (process.platform !== "win32") await chmod(codexPath, 0o600)
+
+    const resolved = await readResolvedToken({
+      QUANTA_PREFS_HOME: dir,
+      CODEX_HOME: join(dir, ".codex"),
+    })
+    expect(resolved).toMatchObject({
+      source: "quanta",
+      path: tokenPath,
+      record: sampleRecord,
+    })
+  })
+
+  test("readResolvedToken honors QUANTA_CHATGPT_AUTH_SOURCE=codex", async () => {
+    await writeToken(tokenPath, sampleRecord)
+    await writeFile(
+      codexPath,
+      JSON.stringify({
+        auth_mode: "chatgpt",
+        tokens: {
+          id_token: fakeCodexIdToken(),
+          access_token: fakeJwt({ exp: 1_924_992_000 }),
+          refresh_token: "rt-codex",
+          account_id: "acct-codex",
+        },
+      }),
+      "utf8",
+    )
+    if (process.platform !== "win32") await chmod(codexPath, 0o600)
+
+    const resolved = await readResolvedToken({
+      QUANTA_PREFS_HOME: dir,
+      CODEX_HOME: join(dir, ".codex"),
+      QUANTA_CHATGPT_AUTH_SOURCE: "codex",
+    })
+    expect(resolved).toMatchObject({
+      source: "codex",
+      path: codexPath,
+    })
+  })
+
+  test("hasUsableChatgptToken accepts Codex chatgpt auth bundle", async () => {
+    await writeFile(
+      codexPath,
+      JSON.stringify({
+        auth_mode: "chatgpt",
+        tokens: {
+          id_token: fakeCodexIdToken(),
+          access_token: fakeJwt({ exp: 1_924_992_000 }),
+          refresh_token: "rt-codex",
+          account_id: "acct-codex",
+        },
+      }),
+      "utf8",
+    )
+    if (process.platform !== "win32") await chmod(codexPath, 0o600)
+
+    expect(
+      hasUsableChatgptToken({
+        QUANTA_PREFS_HOME: dir,
+        CODEX_HOME: join(dir, ".codex"),
+      }),
+    ).toBe(true)
   })
 })
 

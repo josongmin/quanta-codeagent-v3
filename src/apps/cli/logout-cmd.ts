@@ -11,10 +11,9 @@
  */
 
 import {
-  chatgptTokenPath,
   deleteToken,
-  readToken,
-  resolveQuantaHome,
+  readResolvedToken,
+  resolveChatgptTokenCandidates,
   type TokenRecord,
 } from "@/auth/chatgpt-oauth"
 import { bold, cyan, dim, gray, green, kvLine, red, renderBox, yellow } from "./auth-ui"
@@ -65,6 +64,22 @@ const renderAlreadyOut = (path: string): string =>
     },
   )}\n`
 
+const renderExternallyManaged = (path: string): string =>
+  `${renderBox(
+    [
+      `${yellow("●")} ${bold("Managed by Codex")}`,
+      "",
+      kvLine("path", gray(path), 11),
+      "",
+      `${dim("This token comes from Codex. Sign out there to remove it.")}`,
+    ],
+    {
+      title: "ChatGPT Sign-Out",
+      titleStyle: cyan,
+      footer: "ADR-0094 · chatgpt-oauth Phase 2",
+    },
+  )}\n`
+
 const renderError = (path: string, detail: string): string =>
   `${renderBox(
     [`${red("✗")} ${bold("Logout failed")}`, "", dim(detail), kvLine("path", gray(path), 11)],
@@ -85,29 +100,42 @@ export const buildLogoutCmd = (deps: LogoutDeps = {}): SlashCommand => ({
       return 1
     }
     const env = deps.env ?? process.env
-    const home = ctx.prefsHome ?? resolveQuantaHome(env)
-    const path = chatgptTokenPath(home)
+    const tokenEnv = {
+      ...env,
+      ...(ctx.prefsHome !== undefined ? { QUANTA_PREFS_HOME: ctx.prefsHome } : {}),
+    }
+    const path = resolveChatgptTokenCandidates(tokenEnv)[0]?.path ?? ""
 
     let prior: TokenRecord | null = null
+    let source: "quanta" | "codex" | null = null
+    let pathUsed = path
     try {
-      prior = await readToken(path)
+      const resolved = await readResolvedToken(tokenEnv)
+      prior = resolved?.record ?? null
+      source = resolved?.source ?? null
+      pathUsed = resolved?.path ?? path
     } catch {
       // Read errors (bad perms / shape) are non-fatal here — the user
       // explicitly asked to delete. Fall through to the delete attempt.
     }
 
+    if (source === "codex") {
+      ctx.out(renderExternallyManaged(pathUsed))
+      return 2
+    }
+
     if (prior === null) {
-      ctx.out(renderAlreadyOut(path))
+      ctx.out(renderAlreadyOut(pathUsed))
       return 0
     }
 
     try {
-      await deleteToken(path)
+      await deleteToken(pathUsed)
     } catch (e) {
-      ctx.err(renderError(path, (e as Error).message))
+      ctx.err(renderError(pathUsed, (e as Error).message))
       return 1
     }
-    ctx.out(renderLoggedOut(path, prior))
+    ctx.out(renderLoggedOut(pathUsed, prior))
     return 0
   },
 })

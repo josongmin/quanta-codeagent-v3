@@ -13,3 +13,14 @@ export const resolveQuantaHome = (env: Record<string, string | undefined>): stri
 
 /** Disk path for the ChatGPT-OAuth token JSON. */
 export const chatgptTokenPath = (home: string): string => join(home, "auth", "chatgpt.json")
+
+/** Resolve the home directory used for Codex state. The desktop app exports
+ *  `CODEX_HOME`; when absent we mirror its default `~/.codex`. */
+export const resolveCodexHome = (env: Record<string, string | undefined>): string => {
+  const override = env.CODEX_HOME
+  if (override !== undefined && override !== "") return override
+  return join(homedir(), ".codex")
+}
+
+/** Disk path for Codex's auth bundle. */
+export const codexAuthPath = (home: string): string => join(home, "auth.json")

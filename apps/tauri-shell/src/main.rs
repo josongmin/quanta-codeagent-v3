@@ -101,6 +101,7 @@ fn main() {
             commands::enable_hotkey,
             commands::disable_hotkey,
             commands::hotkey_status,
+            commands::open_external_url,
         ])
         .build(tauri::generate_context!());
 

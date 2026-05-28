@@ -11,6 +11,11 @@ on:
   schedule:
     - cron: "0 9 * * *"
   workflow_dispatch:
+    inputs:
+      baseline_run_id:
+        description: Optional prior grounding run id for compare/regress
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -25,6 +30,7 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       QUANTA_PROVIDER: ${{ vars.QUANTA_PROVIDER }}
       QUANTA_MODEL: ${{ vars.QUANTA_MODEL }}
+      GROUNDING_BASELINE_RUN_ID: ${{ github.event.inputs.baseline_run_id || '' }}
     steps:
       - name: checkout
         uses: actions/checkout@v4
@@ -55,8 +61,8 @@ jobs:
           export QUANTA_PROVIDER="${QUANTA_PROVIDER:-openai}"
           export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
           mkdir -p "$RUNNER_TEMP/grounding"
-          bun run eval grounding run --suite canary --concurrency 4 | tee "$RUNNER_TEMP/grounding/canary-run.txt"
-          run_id=$(sed -n 's/.*run=\([^ ]*\).*/\1/p' "$RUNNER_TEMP/grounding/canary-run.txt" | head -1)
+          bun run eval grounding run --suite canary --concurrency 4 --json-out "$RUNNER_TEMP/grounding/canary-run.json" | tee "$RUNNER_TEMP/grounding/canary-run.txt"
+          run_id=$(node -e 'const fs=require("node:fs"); const path=process.argv[1]; const json=JSON.parse(fs.readFileSync(path,"utf8")); process.stdout.write(typeof json.runId === "string" ? json.runId : "")' "$RUNNER_TEMP/grounding/canary-run.json")
           if [ -z "$run_id" ]; then
             echo "::error::failed to extract run id from grounding output"
             exit 1
@@ -67,8 +73,28 @@ jobs:
           export QUANTA_PROVIDER="${QUANTA_PROVIDER:-openai}"
           export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
           bun run eval grounding report --run-id "$RUN_ID" --markdown-out "$RUNNER_TEMP/grounding/canary-report.md" --json-out "$RUNNER_TEMP/grounding/canary-report.json"
-          bun run eval grounding gate --run-id "$RUN_ID" --profile canary
+          bun run eval grounding gate --run-id "$RUN_ID" --profile canary --markdown-out "$RUNNER_TEMP/grounding/canary-gate.md" --json-out "$RUNNER_TEMP/grounding/canary-gate.json"
           cp "evals/runs/$RUN_ID.jsonl" "$RUNNER_TEMP/grounding/$RUN_ID.jsonl"
+      - name: resolve comparable baseline
+        run: |
+          mkdir -p "$RUNNER_TEMP/grounding"
+          if [ -n "${GROUNDING_BASELINE_RUN_ID:-}" ]; then
+            printf 'grounding baseline candidate=%s status=resolved baseline=%s reason=manual override\n' "$RUN_ID" "$GROUNDING_BASELINE_RUN_ID" | tee "$RUNNER_TEMP/grounding/canary-baseline.txt"
+            printf '{\n  "status": "resolved",\n  "candidateRunId": "%s",\n  "baselineRunId": "%s",\n  "reason": "manual override"\n}\n' "$RUN_ID" "$GROUNDING_BASELINE_RUN_ID" > "$RUNNER_TEMP/grounding/canary-baseline.json"
+          else
+            bun run eval grounding baseline --candidate "$RUN_ID" --json-out "$RUNNER_TEMP/grounding/canary-baseline.json" | tee "$RUNNER_TEMP/grounding/canary-baseline.txt"
+          fi
+          baseline_run_id=$(node -e 'const fs=require("node:fs"); const path=process.argv[1]; const json=JSON.parse(fs.readFileSync(path,"utf8")); process.stdout.write(typeof json.baselineRunId === "string" ? json.baselineRunId : "")' "$RUNNER_TEMP/grounding/canary-baseline.json")
+          if [ -n "$baseline_run_id" ]; then
+            echo "GROUNDING_BASELINE_RUN_ID=$baseline_run_id" >> "$GITHUB_ENV"
+          fi
+      - name: compare against baseline when resolved
+        if: env.GROUNDING_BASELINE_RUN_ID != ''
+        run: |
+          export QUANTA_PROVIDER="${QUANTA_PROVIDER:-openai}"
+          export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
+          bun run eval grounding compare --baseline "$GROUNDING_BASELINE_RUN_ID" --candidate "$RUN_ID" --markdown-out "$RUNNER_TEMP/grounding/canary-compare.md" --json-out "$RUNNER_TEMP/grounding/canary-compare.json"
+          bun run eval grounding regress --baseline "$GROUNDING_BASELINE_RUN_ID" --candidate "$RUN_ID" --profile strict --markdown-out "$RUNNER_TEMP/grounding/canary-regress.md" --json-out "$RUNNER_TEMP/grounding/canary-regress.json"
       - name: upload canary artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -78,8 +104,17 @@ jobs:
             ${{ runner.temp }}/grounding/canary-run.txt
             ${{ runner.temp }}/grounding/canary-preflight.txt
             ${{ runner.temp }}/grounding/canary-preflight.json
+            ${{ runner.temp }}/grounding/canary-run.json
+            ${{ runner.temp }}/grounding/canary-baseline.txt
+            ${{ runner.temp }}/grounding/canary-baseline.json
             ${{ runner.temp }}/grounding/canary-report.md
             ${{ runner.temp }}/grounding/canary-report.json
+            ${{ runner.temp }}/grounding/canary-gate.md
+            ${{ runner.temp }}/grounding/canary-gate.json
+            ${{ runner.temp }}/grounding/canary-compare.md
+            ${{ runner.temp }}/grounding/canary-compare.json
+            ${{ runner.temp }}/grounding/canary-regress.md
+            ${{ runner.temp }}/grounding/canary-regress.json
             ${{ runner.temp }}/grounding/*.jsonl
 
   nightly:
@@ -121,8 +156,8 @@ jobs:
           export QUANTA_PROVIDER="${QUANTA_PROVIDER:-openai}"
           export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
           mkdir -p "$RUNNER_TEMP/grounding"
-          bun run eval grounding run --suite nightly --concurrency 4 | tee "$RUNNER_TEMP/grounding/nightly-run.txt"
-          run_id=$(sed -n 's/.*run=\([^ ]*\).*/\1/p' "$RUNNER_TEMP/grounding/nightly-run.txt" | head -1)
+          bun run eval grounding run --suite nightly --concurrency 4 --json-out "$RUNNER_TEMP/grounding/nightly-run.json" | tee "$RUNNER_TEMP/grounding/nightly-run.txt"
+          run_id=$(node -e 'const fs=require("node:fs"); const path=process.argv[1]; const json=JSON.parse(fs.readFileSync(path,"utf8")); process.stdout.write(typeof json.runId === "string" ? json.runId : "")' "$RUNNER_TEMP/grounding/nightly-run.json")
           if [ -z "$run_id" ]; then
             echo "::error::failed to extract run id from grounding output"
             exit 1
@@ -134,6 +169,21 @@ jobs:
           export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
           bun run eval grounding report --run-id "$RUN_ID" --markdown-out "$RUNNER_TEMP/grounding/nightly-report.md" --json-out "$RUNNER_TEMP/grounding/nightly-report.json"
           cp "evals/runs/$RUN_ID.jsonl" "$RUNNER_TEMP/grounding/$RUN_ID.jsonl"
+      - name: resolve nightly baseline
+        run: |
+          mkdir -p "$RUNNER_TEMP/grounding"
+          bun run eval grounding baseline --candidate "$RUN_ID" --json-out "$RUNNER_TEMP/grounding/nightly-baseline.json" | tee "$RUNNER_TEMP/grounding/nightly-baseline.txt"
+          baseline_run_id=$(node -e 'const fs=require("node:fs"); const path=process.argv[1]; const json=JSON.parse(fs.readFileSync(path,"utf8")); process.stdout.write(typeof json.baselineRunId === "string" ? json.baselineRunId : "")' "$RUNNER_TEMP/grounding/nightly-baseline.json")
+          if [ -n "$baseline_run_id" ]; then
+            echo "GROUNDING_BASELINE_RUN_ID=$baseline_run_id" >> "$GITHUB_ENV"
+          fi
+      - name: compare nightly against resolved baseline
+        if: env.GROUNDING_BASELINE_RUN_ID != ''
+        run: |
+          export QUANTA_PROVIDER="${QUANTA_PROVIDER:-openai}"
+          export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
+          bun run eval grounding compare --baseline "$GROUNDING_BASELINE_RUN_ID" --candidate "$RUN_ID" --markdown-out "$RUNNER_TEMP/grounding/nightly-compare.md" --json-out "$RUNNER_TEMP/grounding/nightly-compare.json"
+          bun run eval grounding regress --baseline "$GROUNDING_BASELINE_RUN_ID" --candidate "$RUN_ID" --profile strict --markdown-out "$RUNNER_TEMP/grounding/nightly-regress.md" --json-out "$RUNNER_TEMP/grounding/nightly-regress.json"
       - name: upload nightly artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -143,6 +193,13 @@ jobs:
             ${{ runner.temp }}/grounding/nightly-run.txt
             ${{ runner.temp }}/grounding/nightly-preflight.txt
             ${{ runner.temp }}/grounding/nightly-preflight.json
+            ${{ runner.temp }}/grounding/nightly-run.json
+            ${{ runner.temp }}/grounding/nightly-baseline.txt
+            ${{ runner.temp }}/grounding/nightly-baseline.json
             ${{ runner.temp }}/grounding/nightly-report.md
             ${{ runner.temp }}/grounding/nightly-report.json
+            ${{ runner.temp }}/grounding/nightly-compare.md
+            ${{ runner.temp }}/grounding/nightly-compare.json
+            ${{ runner.temp }}/grounding/nightly-regress.md
+            ${{ runner.temp }}/grounding/nightly-regress.json
             ${{ runner.temp }}/grounding/*.jsonl

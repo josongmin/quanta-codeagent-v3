@@ -7,10 +7,13 @@
  *  the canonical `response.*` event names and map them to {@link StreamEvent}.
  *
  *  Token freshness is enforced at the top of each `stream()` call:
- *    1. Read token from disk (`~/.quanta/auth/chatgpt.json`).
+ *    1. Read token from disk (`~/.quanta/auth/chatgpt.json`), falling back
+ *       to Codex's `~/.codex/auth.json` ChatGPT bundle when quanta has not
+ *       persisted its own copy yet.
  *    2. If `expires_at` is within the next 60 s, run a refresh first and
- *       persist the new bundle. Refresh shares an in-flight guard with the
- *       auth module so concurrent streams collapse to one issuer hit.
+ *       persist the new bundle to quanta's canonical token path. Refresh
+ *       shares an in-flight guard with the auth module so concurrent streams
+ *       collapse to one issuer hit.
  *    3. POST with `Authorization: Bearer ${access_token}` +
  *       `ChatGPT-Account-Id` + `OAI-Product-Sku` + `originator`.
  *
@@ -22,8 +25,9 @@
 import {
   type FetchLike,
   chatgptTokenPath,
+  deleteToken,
   isExpired,
-  readToken,
+  readResolvedToken,
   refreshToken,
   resolveOAuthConfig,
   resolveQuantaHome,
@@ -107,13 +111,17 @@ export class ChatGPTOAuthAdapter implements LLMPort {
   private async ensureFreshToken(): Promise<TokenRecord> {
     const home = resolveQuantaHome(this.env)
     const path = chatgptTokenPath(home)
-    const rec = await readToken(path)
-    if (rec === null) {
-      throw new LLMError("ChatGPT-OAuth: not signed in — run `quanta /login --chatgpt` first.", {
-        kind: "auth",
-        provider: "chatgpt-oauth",
-      })
+    const resolved = await readResolvedToken(this.env)
+    if (resolved === null) {
+      throw new LLMError(
+        "ChatGPT-OAuth: not signed in — run `quanta /login --chatgpt`, or sign in to Codex first.",
+        {
+          kind: "auth",
+          provider: "chatgpt-oauth",
+        },
+      )
     }
+    const rec = resolved.record
     if (!isExpired(rec, this.nowMs(), TOKEN_REFRESH_SKEW_MS)) return rec
     const cfg = resolveOAuthConfig(this.env)
     try {
@@ -128,7 +136,7 @@ export class ChatGPTOAuthAdapter implements LLMPort {
     } catch (e) {
       throw new LLMError(
         `ChatGPT-OAuth token refresh failed: ${(e as Error).message}. ` +
-          "Run `quanta /login --chatgpt` to sign in again.",
+          "Run `quanta /login --chatgpt` or sign in to Codex again.",
         { kind: "auth", provider: "chatgpt-oauth", cause: e },
       )
     }
@@ -209,62 +217,111 @@ export class ChatGPTOAuthAdapter implements LLMPort {
     return { model: fallback, swappedFrom: wanted }
   }
 
+  /** Best-effort purge of an invalidated quanta-managed token. Returns
+   *  `true` when our copy was deleted, `false` when there was nothing to
+   *  delete OR the token is owned by another tool (Codex) — in that case
+   *  we MUST NOT delete it, the user has to re-sign-in through that tool. */
+  private async purgeQuantaTokenBestEffort(): Promise<boolean> {
+    try {
+      const resolved = await readResolvedToken(this.env)
+      if (resolved === null) return false
+      if (resolved.source !== "quanta") return false
+      await deleteToken(resolved.path)
+      return true
+    } catch {
+      // Filesystem hiccup — surface the original 401 to the user instead
+      // of masking it with a delete error. The next call will try again.
+      return false
+    }
+  }
+
+  /** True only for a server-side token-invalidation 401 — NOT for other
+   *  `kind: "auth"` errors like "not signed in" (refresh failed before any
+   *  HTTP call) or "empty catalog" (success status but no models). Those
+   *  must NOT trigger token purge — there's nothing wrong with the bundle. */
+  private static is401AuthError(error: unknown): boolean {
+    if (!(error instanceof LLMError)) return false
+    return error.statusCode === 401
+  }
+
   async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
-    const token = await this.ensureFreshToken()
-    const cfg = resolveOAuthConfig(this.env)
-    const baseURL = cfg.apiBase.endsWith("/codex") ? cfg.apiBase : `${cfg.apiBase}/codex`
+    try {
+      const token = await this.ensureFreshToken()
+      const cfg = resolveOAuthConfig(this.env)
+      const baseURL = cfg.apiBase.endsWith("/codex") ? cfg.apiBase : `${cfg.apiBase}/codex`
 
-    const catalog = await this.fetchModelCatalog(baseURL, token, cfg)
-    const resolved = this.resolveModelFromCatalog(catalog)
-    const effectiveModel = resolved.model
-    const continuationStore = input.responsesContinuation?.store
+      const catalog = await this.fetchModelCatalog(baseURL, token, cfg)
+      const resolved = this.resolveModelFromCatalog(catalog)
+      const effectiveModel = resolved.model
+      const continuationStore = input.responsesContinuation?.store
 
-    const url = `${baseURL}${RESPONSES_PATH}`
-    const headers: Record<string, string> = {
-      "content-type": "application/json",
-      accept: "text/event-stream",
-      authorization: `Bearer ${token.access_token}`,
-      "oai-product-sku": cfg.sku,
-      originator: cfg.originator,
-    }
-    if (token.account_id !== undefined) {
-      headers["chatgpt-account-id"] = token.account_id
-    }
+      const url = `${baseURL}${RESPONSES_PATH}`
+      const headers: Record<string, string> = {
+        "content-type": "application/json",
+        accept: "text/event-stream",
+        authorization: `Bearer ${token.access_token}`,
+        "oai-product-sku": cfg.sku,
+        originator: cfg.originator,
+      }
+      if (token.account_id !== undefined) {
+        headers["chatgpt-account-id"] = token.account_id
+      }
 
-    const prepared = prepareResponsesContinuationRequest({
-      input,
-      model: effectiveModel,
-      transportId: "chatgpt-oauth",
-      ...(this.maxTokens !== undefined ? { maxOutputTokens: this.maxTokens } : {}),
-      ...(continuationStore !== undefined ? { continuationStore } : {}),
-    })
-
-    // DEBUG: dump request body shape (truncate image data URLs) so we can
-    // see whether `input_image` parts are reaching the wire. Remove once
-    // vision is verified end-to-end.
-    if (process.env.QUANTA_DEBUG_OAUTH === "1") {
-      const debugJson = JSON.stringify(prepared.body, (_k, v) => {
-        if (typeof v === "string" && v.startsWith("data:") && v.length > 80) {
-          return `${v.slice(0, 60)}…[${v.length} chars]`
-        }
-        return v
+      const prepared = prepareResponsesContinuationRequest({
+        input,
+        model: effectiveModel,
+        transportId: "chatgpt-oauth",
+        ...(this.maxTokens !== undefined ? { maxOutputTokens: this.maxTokens } : {}),
+        ...(continuationStore !== undefined ? { continuationStore } : {}),
       })
-      process.stderr.write(`[oauth body] ${debugJson}\n`)
-    }
 
-    yield* streamResponsesSurface({
-      provider: "chatgpt-oauth",
-      transportId: "chatgpt-oauth",
-      model: effectiveModel,
-      input,
-      request: prepared,
-      fetchImpl: this.fetchImpl,
-      url,
-      headers,
-      timeoutMs: this.streamTimeoutMs,
-      ...(continuationStore !== undefined ? { continuationStore } : {}),
-      disableResumeOnStatuses: new Set([400, 422]),
-    })
+      if (process.env.QUANTA_DEBUG_OAUTH === "1") {
+        const debugJson = JSON.stringify(prepared.body, (_k, v) => {
+          if (typeof v === "string" && v.startsWith("data:") && v.length > 80) {
+            return `${v.slice(0, 60)}…[${v.length} chars]`
+          }
+          return v
+        })
+        process.stderr.write(`[oauth body] ${debugJson}\n`)
+      }
+
+      yield* streamResponsesSurface({
+        provider: "chatgpt-oauth",
+        transportId: "chatgpt-oauth",
+        model: effectiveModel,
+        input,
+        request: prepared,
+        fetchImpl: this.fetchImpl,
+        url,
+        headers,
+        timeoutMs: this.streamTimeoutMs,
+        ...(continuationStore !== undefined ? { continuationStore } : {}),
+        disableResumeOnStatuses: new Set([400, 422]),
+      })
+    } catch (error) {
+      // Server-side token invalidation (401) — happens when the user signs
+      // out from chatgpt.com on another device, OpenAI force-rotates, etc.
+      // The on-disk bundle is dead weight at that point: every subsequent
+      // call would 401 again until `/login` overwrites it. Purge our copy
+      // proactively so the provider router falls through to whatever else
+      // is configured (BYOK key, anthropic, etc.) instead of looping.
+      if (ChatGPTOAuthAdapter.is401AuthError(error)) {
+        const purged = await this.purgeQuantaTokenBestEffort()
+        const hint = purged
+          ? "Local token deleted — run /login to sign in again."
+          : "Token is managed externally (e.g. Codex CLI) — sign out and back in there."
+        throw new LLMError(
+          `ChatGPT-OAuth token invalidated by server (401). ${hint}`,
+          {
+            kind: "auth",
+            statusCode: 401,
+            provider: "chatgpt-oauth",
+            cause: error,
+          },
+        )
+      }
+      throw error
+    }
   }
 }
 

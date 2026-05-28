@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "approval-request-feature-catalog",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "history": [

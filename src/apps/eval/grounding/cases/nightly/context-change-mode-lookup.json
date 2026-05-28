@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "context-change-mode-lookup",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "contextChanges": [
@@ -8,6 +8,9 @@
   "history": [
     {
       "role": "assistant",
+      "kind": "directive",
+      "threadId": "feature_catalog_cleanup",
+      "referentId": "review_mode",
       "text": "Active thread feature_catalog_cleanup just switched into review mode."
     }
   ],

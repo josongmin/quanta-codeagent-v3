@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises"
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { buildLoginCmd } from "../../../src/apps/cli/login-cmd"
@@ -71,10 +71,31 @@ const fakeIdToken = (plan: string): string => {
   const h = toBase64Url('{"alg":"RS256"}')
   const b = toBase64Url(
     JSON.stringify({
+      exp: 1_924_992_000,
       "https://api.openai.com/auth": { chatgpt_plan_type: plan, chatgpt_account_id: "acct-1" },
     }),
   )
   return `${h}.${b}.sig`
+}
+
+const writeCodexAuth = async (home: string, plan = "pro"): Promise<void> => {
+  const path = join(home, "auth.json")
+  await writeFile(
+    path,
+    JSON.stringify({
+      auth_mode: "chatgpt",
+      OPENAI_API_KEY: null,
+      last_refresh: "2026-05-23T00:00:00.000Z",
+      tokens: {
+        id_token: fakeIdToken(plan),
+        access_token: fakeIdToken(plan),
+        refresh_token: "rt-codex",
+        account_id: "acct-1",
+      },
+    }),
+    "utf8",
+  )
+  if (process.platform !== "win32") await chmod(path, 0o600)
 }
 
 const mockTokenResponse = (plan: string): Response =>
@@ -89,13 +110,16 @@ const mockTokenResponse = (plan: string): Response =>
   )
 
 let dir: string
+let codexHome: string
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "logincmd-"))
+  codexHome = await mkdtemp(join(tmpdir(), "logincmd-codex-"))
 })
 
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true })
+  await rm(codexHome, { recursive: true, force: true })
 })
 
 describe("/login command", () => {
@@ -182,7 +206,7 @@ describe("/login command", () => {
 describe("/status command", () => {
   test("no token + no env keys → default anthropic with hint", async () => {
     const cmd = buildStatusCmd({
-      env: { QUANTA_PREFS_HOME: dir },
+      env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome },
       nowMs: () => Date.parse("2026-05-23T00:00:00.000Z"),
     })
     const cap = makeCtx(dir)
@@ -200,6 +224,7 @@ describe("/status command", () => {
     const cmd = buildStatusCmd({
       env: {
         QUANTA_PREFS_HOME: dir,
+        CODEX_HOME: codexHome,
         ANTHROPIC_API_KEY: "sk-a",
         OPENAI_API_KEY: "sk-o",
       },
@@ -221,7 +246,7 @@ describe("/status command", () => {
       account_id: "acct-1",
     })
     const cmd = buildStatusCmd({
-      env: { QUANTA_PREFS_HOME: dir, QUANTA_PROVIDER: "chatgpt-oauth" },
+      env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome, QUANTA_PROVIDER: "chatgpt-oauth" },
       nowMs: () => Date.parse("2026-05-23T00:00:00.000Z"),
     })
     const cap = makeCtx(dir)
@@ -235,12 +260,27 @@ describe("/status command", () => {
 
   test("explicit chatgpt-oauth but no token → red 'no token' hint", async () => {
     const cmd = buildStatusCmd({
-      env: { QUANTA_PREFS_HOME: dir, QUANTA_PROVIDER: "chatgpt-oauth" },
+      env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome, QUANTA_PROVIDER: "chatgpt-oauth" },
       nowMs: () => Date.parse("2026-05-23T00:00:00.000Z"),
     })
     const cap = makeCtx(dir)
     await cmd.run([], cap.ctx)
     expect(stripAnsi(cap.out)).toContain("no token")
+  })
+
+  test("Codex auth fallback → shows active token source and path", async () => {
+    await writeCodexAuth(codexHome)
+    const cmd = buildStatusCmd({
+      env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome },
+      nowMs: () => Date.parse("2026-05-23T00:00:00.000Z"),
+    })
+    const cap = makeCtx(dir)
+    await cmd.run([], cap.ctx)
+    const out = stripAnsi(cap.out)
+    expect(out).toContain("chatgpt-oauth")
+    expect(out).toContain("auto — token on disk")
+    expect(out).toContain("codex login")
+    expect(out).toContain(join(codexHome, "auth.json"))
   })
 
   test("expired token → shows expired state", async () => {
@@ -250,7 +290,7 @@ describe("/status command", () => {
       expires_at: "2020-01-01T00:00:00.000Z",
     })
     const cmd = buildStatusCmd({
-      env: { QUANTA_PREFS_HOME: dir },
+      env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome },
       nowMs: () => Date.parse("2026-05-23T00:00:00.000Z"),
     })
     const cap = makeCtx(dir)
@@ -268,7 +308,7 @@ describe("/logout command", () => {
   })
 
   test("absent token → 'not signed in' yellow path + exit 0", async () => {
-    const cmd = buildLogoutCmd({ env: {} })
+    const cmd = buildLogoutCmd({ env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome } })
     const cap = makeCtx(dir)
     const exit = await cmd.run([], cap.ctx)
     expect(exit).toBe(0)
@@ -296,7 +336,7 @@ describe("/logout command", () => {
       account_id: "acct-1",
     })
 
-    const cmd = buildLogoutCmd({ env: {} })
+    const cmd = buildLogoutCmd({ env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome } })
     const cap = makeCtx(dir)
     const exit = await cmd.run([], cap.ctx)
     expect(exit).toBe(0)
@@ -323,12 +363,23 @@ describe("/logout command", () => {
       refresh_token: "rt",
       expires_at: "2030-01-01T00:00:00.000Z",
     })
-    const cmd = buildLogoutCmd({ env: {} })
+    const cmd = buildLogoutCmd({ env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome } })
     const first = makeCtx(dir)
     expect(await cmd.run([], first.ctx)).toBe(0)
     expect(stripAnsi(first.out)).toContain("Signed out")
     const second = makeCtx(dir)
     expect(await cmd.run([], second.ctx)).toBe(0)
     expect(stripAnsi(second.out)).toContain("Not signed in")
+  })
+
+  test("Codex-managed token → logout refuses local deletion", async () => {
+    await writeCodexAuth(codexHome)
+    const cmd = buildLogoutCmd({ env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome } })
+    const cap = makeCtx(dir)
+    const exit = await cmd.run([], cap.ctx)
+    expect(exit).toBe(2)
+    const out = stripAnsi(cap.out)
+    expect(out).toContain("Managed by Codex")
+    expect(out).toContain(join(codexHome, "auth.json"))
   })
 })

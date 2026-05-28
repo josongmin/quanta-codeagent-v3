@@ -29,9 +29,12 @@
 
 import {
   chatgptTokenPath,
+  deleteToken,
   exchangeCode,
   isClientIdConfigured,
+  readResolvedToken,
   resolveOAuthConfig,
+  resolveChatgptTokenCandidates,
   resolveQuantaHome,
   runBrowserFlow,
   writeToken,
@@ -120,11 +123,24 @@ export const handleAuthLoginStart = async (): Promise<Response> => {
 /** Delete the on-disk token so the next LLM call has to re-login.
  *  Returns 200 even if the file didn't exist (idempotent). */
 export const handleAuthLogout = async (): Promise<Response> => {
-  const { rm } = await import("node:fs/promises")
+  const fallbackPath = resolveChatgptTokenCandidates(process.env)[0]?.path ?? ""
   try {
-    await rm(chatgptTokenPath(resolveQuantaHome(process.env)), { force: true })
-    logger.info("web-daemon: /auth/logout — token removed")
-    return jsonResponse(200, { ok: true })
+    const resolved = await readResolvedToken(process.env)
+    if (resolved?.source === "codex") {
+      return jsonResponse(409, {
+        ok: false,
+        error: "externally_managed_token",
+        source: "codex",
+        path: resolved.path,
+        hint: "sign out from Codex to remove this token",
+      })
+    }
+    const path = resolved?.path ?? fallbackPath
+    await deleteToken(path)
+    logger.info("web-daemon: /auth/logout — token removed", {
+      source: resolved?.source ?? "quanta",
+    })
+    return jsonResponse(200, { ok: true, source: resolved?.source ?? "quanta", path })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     return jsonResponse(500, { error: "logout_failed", message })
@@ -134,21 +150,23 @@ export const handleAuthLogout = async (): Promise<Response> => {
 /** Lightweight `who am I` — reads the on-disk token (if any) and reports
  *  a redacted summary so the frontend can show "logged in as …". */
 export const handleAuthStatus = async (): Promise<Response> => {
-  const { readFile } = await import("node:fs/promises")
-  const home = resolveQuantaHome(process.env)
-  const path = chatgptTokenPath(home)
+  const path = resolveChatgptTokenCandidates(process.env)[0]?.path ?? ""
   try {
-    const raw = await readFile(path, "utf-8")
-    const json = JSON.parse(raw) as Record<string, unknown>
+    const resolved = await readResolvedToken(process.env)
+    if (resolved === null) {
+      return jsonResponse(200, { loggedIn: false, path })
+    }
     return jsonResponse(200, {
       loggedIn: true,
-      plan_type: json.plan_type ?? null,
-      account_id: typeof json.account_id === "string" ? json.account_id : null,
-      expires_at: json.expires_at ?? null,
+      source: resolved.source,
+      path: resolved.path,
+      plan_type: resolved.record.plan_type ?? null,
+      account_id: resolved.record.account_id ?? null,
+      expires_at: resolved.record.expires_at,
     })
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
-    logger.warn("web-daemon: /auth/status read fail", { home, path, error: msg })
-    return jsonResponse(200, { loggedIn: false, home, path, error: msg })
+    logger.warn("web-daemon: /auth/status read fail", { path, error: msg })
+    return jsonResponse(200, { loggedIn: false, path, error: msg })
   }
 }

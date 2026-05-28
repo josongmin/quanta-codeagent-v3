@@ -1,14 +1,18 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "ambiguous-same-noun-two-files",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "history": [
     {
       "role": "assistant",
+      "kind": "directive",
+      "threadId": "route_cleanup",
+      "mentionedFileIds": ["src/apps/eval/index.ts", "src/apps/headless/index.ts"],
       "text": "Active thread route_cleanup touched src/apps/eval/index.ts and src/apps/headless/index.ts."
     },
     {
       "role": "assistant",
+      "mentionedFileIds": ["src/apps/eval/index.ts", "src/apps/headless/index.ts"],
       "text": "Both files were referred to as the index entrypoint in the last turn."
     }
   ],

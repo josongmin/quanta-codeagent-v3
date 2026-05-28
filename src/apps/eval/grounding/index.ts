@@ -1,11 +1,36 @@
 import type { LLMPort } from "@/llm"
 import { makeRunId, ResultStore, type GroundingPayload } from "../storage"
 import type { Verdict } from "../types"
+import {
+  manualSuiteForCorpus,
+  resolveGroundingCorpus,
+  resolveGroundingExecutionConfig,
+  type GroundingExecutionConfig,
+} from "./config"
+import { buildGroundingHarnessManifest, groundingHarnessFingerprint } from "./harness"
 import type { GroundingErrorKind } from "./diagnostics"
 import { classifyGroundingInfraError, classifyGroundingParserError, GROUNDING_ERROR_KINDS } from "./diagnostics"
 import { loadGroundingCases, type LoadGroundingCasesOpts } from "./loader"
 import {
+  resolveGroundingBaseline,
+  type GroundingBaselineResolution,
+  type GroundingBaselineStatus,
+} from "./baseline"
+import {
+  buildGroundingComparison,
+  buildGroundingRegressionResult,
+  evaluateGroundingRegression,
+  GROUNDING_REGRESSION_PROFILES,
+  isGroundingRegressionProfile,
+  type GroundingComparisonOutput,
+  type GroundingRegressionFailure,
+  type GroundingRegressionProfile,
+} from "./compare"
+import {
+  buildGroundingGateResult,
   buildGroundingReport,
+  buildGroundingBucketReports,
+  buildGroundingMetrics,
   evaluateGroundingGate,
   GROUNDING_GATE_PROFILES,
   isGroundingGateProfile,
@@ -14,31 +39,67 @@ import {
   type GroundingReportOutput,
 } from "./report"
 import {
+  resolveGroundingProbeProfile,
   runGroundingPreflight,
   runGroundingProbe,
   type GroundingPreflightResult,
 } from "./probe"
+import { normalizeGroundingDecision, type GroundingNormalizationResult } from "./normalizer"
+import { GROUNDING_ROUTE_MATRICES, isGroundingRouteMatrixName, type GroundingRouteMatrixName } from "./route-matrix"
 import { emptyGroundingMatches, scoreGroundingDecision } from "./scorer"
-import type { GroundingCase, GroundingSuite } from "./schema"
-import { parseGroundingCase } from "./schema"
+import type { GroundingCase, GroundingCorpus, GroundingMode, GroundingSuite } from "./schema"
+import { GROUNDING_HARNESS_CONTRACT, parseGroundingCase } from "./schema"
+import { shortHash, stableJson } from "./stable-json"
 
 export {
+  manualSuiteForCorpus,
+  resolveGroundingCorpus,
+  resolveGroundingExecutionConfig,
+  type GroundingExecutionConfig,
+} from "./config"
+export {
+  resolveGroundingBaseline,
+  type GroundingBaselineResolution,
+  type GroundingBaselineStatus,
+} from "./baseline"
+export {
+  buildGroundingComparison,
+  buildGroundingRegressionResult,
+  evaluateGroundingRegression,
+  GROUNDING_REGRESSION_PROFILES,
+  isGroundingRegressionProfile,
+  type GroundingComparisonOutput,
+  type GroundingRegressionFailure,
+  type GroundingRegressionOutput,
+  type GroundingRegressionProfile,
+  type GroundingRegressionResult,
+} from "./compare"
+export {
+  buildGroundingGateResult,
   buildGroundingReport,
+  buildGroundingBucketReports,
+  buildGroundingMetrics,
   evaluateGroundingGate,
   GROUNDING_GATE_PROFILES,
   isGroundingGateProfile,
   type GroundingGateFailure,
+  type GroundingGateOutput,
   type GroundingGateProfile,
+  type GroundingGateResult,
   type GroundingReportOutput,
 } from "./report"
 export {
   GROUNDING_BUCKETS,
   GROUNDING_CONFIDENCE,
+  GROUNDING_HARNESS_CONTRACT,
+  GROUNDING_HISTORY_METADATA_FIELDS,
+  GROUNDING_HISTORY_KINDS,
   GROUNDING_INTENTS,
   GROUNDING_PAIR_ROLES,
   GROUNDING_SCHEMA_VERSION,
   GROUNDING_SCOPES,
   GROUNDING_SEVERITIES,
+  GROUNDING_STATE_CONTRACT_FIELDS,
   GROUNDING_SUITES,
   GROUNDING_USECASE,
   parseGroundingCase,
@@ -47,9 +108,12 @@ export {
   type GroundingConfidence,
   type GroundingContextChange,
   type GroundingDecision,
+  type GroundingHistoryEntry,
+  type GroundingHistoryKind,
   type GroundingIntent,
   type GroundingPairRole,
   type GroundingSeverity,
+  type GroundingStateContract,
   type GroundingSuite,
 } from "./schema"
 export {
@@ -62,13 +126,34 @@ export { extractJsonObject, parseGroundingDecisionText } from "./parser"
 export { loadGroundingCases } from "./loader"
 export { emptyGroundingMatches, scoreGroundingDecision } from "./scorer"
 export {
+  extractGroundingFileIds,
+  isGroundingFileId,
+  resolveGroundingSpecificFileContext,
+  type GroundingSpecificFileContext,
+} from "./file-context"
+export {
+  resolveGroundingReferentContext,
+  type GroundingReferentContext,
+} from "./referent-context"
+export {
   runGroundingPreflight,
   runGroundingProbe,
+  resolveGroundingProbeProfile,
   type GroundingPreflightResult,
 } from "./probe"
+export { normalizeGroundingDecision } from "./normalizer"
+export { buildGroundingHarnessManifest, groundingHarnessFingerprint } from "./harness"
+export {
+  GROUNDING_ROUTE_MATRICES,
+  isGroundingRouteMatrixName,
+  type GroundingRouteMatrix,
+  type GroundingRouteMatrixCell,
+  type GroundingRouteMatrixName,
+} from "./route-matrix"
 
 export interface GroundingRunOpts extends LoadGroundingCasesOpts {
   llm: LLMPort
+  mode?: GroundingMode
   caseId?: string
   limit?: number
   concurrency?: number
@@ -86,11 +171,19 @@ export interface GroundingRunRoute {
 
 export interface GroundingRunSummary extends GroundingRunRoute {
   runId: string
-  suite: GroundingSuite
+  suite?: GroundingSuite
+  corpus: GroundingCorpus
+  mode: GroundingMode
+  probeProfile: GroundingExecutionConfig["probeProfile"]
+  normalizationProfile: GroundingExecutionConfig["normalizationProfile"]
+  outputProtocol: GroundingExecutionConfig["outputProtocol"]
   total: number
   counts: Record<Verdict, number>
   durationMs: number
   concurrency: number
+  caseSetFingerprint: string
+  routeFingerprint: string
+  harnessFingerprint: string
 }
 
 interface GroundingCaseExecution {
@@ -114,24 +207,50 @@ const llmRoute = (llm: LLMPort): GroundingRunRoute => ({
   ...(llm.authMode !== undefined ? { authMode: llm.authMode } : {}),
 })
 
+const caseSetFingerprint = (cases: readonly GroundingCase[]): string => shortHash(stableJson(cases))
+
+const routeFingerprint = (route: GroundingRunRoute): string => shortHash(stableJson(route))
+
 const executeGroundingCase = async (
   groundingCase: GroundingCase,
   opts: GroundingRunOpts,
+  execConfig: GroundingExecutionConfig,
 ): Promise<GroundingCaseExecution> => {
   const probe = await runGroundingProbe(groundingCase, {
     llm: opts.llm,
+    probeProfile: execConfig.probeProfile,
+    outputProtocol: execConfig.outputProtocol,
     ...(opts.now !== undefined ? { now: opts.now } : {}),
   })
   let verdict: Verdict = "error"
   const matches = emptyGroundingMatches()
-  if (probe.error === undefined && probe.decision !== undefined) {
-    const scored = scoreGroundingDecision(groundingCase, probe.decision)
+  const normalization =
+    probe.error === undefined && probe.decision !== undefined
+      ? normalizeGroundingDecision(
+          groundingCase,
+          probe.decision,
+          execConfig.normalizationProfile,
+        )
+      : undefined
+  const rawActual = probe.error === undefined ? probe.decision : undefined
+  const normalizedActual =
+    execConfig.normalizationProfile === "none" ? undefined : normalization?.decision
+  const scoredActual =
+    execConfig.normalizationProfile === "none" ? rawActual : normalizedActual
+  if (probe.error === undefined && scoredActual !== undefined) {
+    const scored = scoreGroundingDecision(groundingCase, scoredActual)
     verdict = scored.verdict
     Object.assign(matches, scored.matches)
   }
   const payload: GroundingPayload = {
     kind: "grounding",
-    suite: opts.suite,
+    suite: manualSuiteForCorpus(groundingCase.corpus ?? "canary") ?? "canary",
+    corpus: groundingCase.corpus ?? "canary",
+    mode: execConfig.mode,
+    probeProfile: execConfig.probeProfile,
+    normalizationProfile: execConfig.normalizationProfile,
+    structuredOutputProtocol: execConfig.outputProtocol,
+    structuredOutputValid: probe.structuredOutputValid,
     caseId: groundingCase.id,
     verdict,
     bucket: groundingCase.bucket,
@@ -141,7 +260,17 @@ const executeGroundingCase = async (
     matches,
     durationMs: probe.durationMs,
     ...llmRoute(opts.llm),
-    ...(probe.decision !== undefined ? { actual: probe.decision } : {}),
+    ...(rawActual !== undefined ? { rawActual } : {}),
+    ...(normalizedActual !== undefined ? { normalizedActual } : {}),
+    ...(scoredActual !== undefined ? { scoredActual, actual: scoredActual } : {}),
+    normalizationApplied: normalization?.applied ?? false,
+    ...(normalization !== undefined ? { normalizationReasons: [...normalization.reasons] } : {}),
+    ...(groundingCase.sourceProvenance !== undefined ? { sourceProvenance: groundingCase.sourceProvenance } : {}),
+    ...(groundingCase.humanAudit !== undefined ? { humanAudit: groundingCase.humanAudit } : {}),
+    ...(groundingCase.candidateThreadIds !== undefined ? { candidateThreadIds: groundingCase.candidateThreadIds } : {}),
+    ...(groundingCase.candidateReferentIds !== undefined ? { candidateReferentIds: groundingCase.candidateReferentIds } : {}),
+    ...(groundingCase.ambiguityClass !== undefined ? { ambiguityClass: groundingCase.ambiguityClass } : {}),
+    ...(groundingCase.blockingEligible !== undefined ? { blockingEligible: groundingCase.blockingEligible } : {}),
     ...(groundingCase.pairId !== undefined ? { pairId: groundingCase.pairId } : {}),
     ...(groundingCase.pairRole !== undefined ? { pairRole: groundingCase.pairRole } : {}),
     ...(probe.error !== undefined ? { parseError: probe.error } : {}),
@@ -183,20 +312,24 @@ export const runGroundingPreflightCheck = async (
 
 export const runGrounding = async (opts: GroundingRunOpts): Promise<GroundingRunSummary> => {
   const start = Date.now()
+  const corpus = resolveGroundingCorpus(opts.corpus, opts.suite)
+  const mode = opts.mode ?? "assisted"
+  const execConfig = resolveGroundingExecutionConfig(mode)
   const store = new ResultStore({
     ...(opts.storeDir !== undefined ? { dir: opts.storeDir } : {}),
     ...(opts.now !== undefined ? { now: opts.now } : {}),
   })
   const runId = makeRunId("grounding", opts.now)
-  const loaded = loadGroundingCases(opts)
+  const loaded = loadGroundingCases({ ...opts, corpus })
   const filtered = loaded.filter((groundingCase) =>
     opts.caseId === undefined ? true : groundingCase.id === opts.caseId,
   )
   const selected =
     opts.limit !== undefined && opts.limit >= 0 ? filtered.slice(0, opts.limit) : filtered
   const concurrency = Math.max(1, Math.floor(opts.concurrency ?? 1))
+  const caseFingerprint = caseSetFingerprint(selected)
   const executed = await mapWithConcurrency(selected, concurrency, (groundingCase) =>
-    executeGroundingCase(groundingCase, opts),
+    executeGroundingCase(groundingCase, opts, execConfig),
   )
   const counts = emptyCounts()
   for (const [index, execution] of executed.entries()) {
@@ -209,6 +342,8 @@ export const runGrounding = async (opts: GroundingRunOpts): Promise<GroundingRun
   }
   const durationMs = Date.now() - start
   const route = llmRoute(opts.llm)
+  const routeFp = routeFingerprint(route)
+  const harnessFp = groundingHarnessFingerprint()
   await store.finish({
     runId,
     tier: "grounding",
@@ -217,10 +352,19 @@ export const runGrounding = async (opts: GroundingRunOpts): Promise<GroundingRun
     durationMs,
     status: "finished",
     params: {
-      suite: opts.suite,
+      suite: manualSuiteForCorpus(corpus) ?? corpus,
+      corpus,
+      mode,
+      probeProfile: execConfig.probeProfile,
+      normalizationProfile: execConfig.normalizationProfile,
+      outputProtocol: execConfig.outputProtocol,
       model: opts.llm.model ?? "unknown",
       provider: opts.llm.provider ?? "unknown",
       concurrency,
+      caseCount: selected.length,
+      caseSetFingerprint: caseFingerprint,
+      routeFingerprint: routeFp,
+      harnessFingerprint: harnessFp,
       ...(opts.llm.surfaceId !== undefined ? { surfaceId: opts.llm.surfaceId } : {}),
       ...(opts.llm.transportId !== undefined ? { transportId: opts.llm.transportId } : {}),
       ...(opts.llm.authMode !== undefined ? { authMode: opts.llm.authMode } : {}),
@@ -230,11 +374,19 @@ export const runGrounding = async (opts: GroundingRunOpts): Promise<GroundingRun
   })
   return {
     runId,
-    suite: opts.suite,
+    ...(manualSuiteForCorpus(corpus) !== undefined ? { suite: manualSuiteForCorpus(corpus) } : {}),
+    corpus,
+    mode,
+    probeProfile: execConfig.probeProfile,
+    normalizationProfile: execConfig.normalizationProfile,
+    outputProtocol: execConfig.outputProtocol,
     total: selected.length,
     counts,
     durationMs,
     concurrency,
+    caseSetFingerprint: caseFingerprint,
+    routeFingerprint: routeFp,
+    harnessFingerprint: harnessFp,
     ...route,
   }
 }

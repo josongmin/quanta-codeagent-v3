@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "active-skills-carryover",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "contextChanges": [
@@ -8,6 +8,9 @@
   "history": [
     {
       "role": "assistant",
+      "kind": "directive",
+      "threadId": "architecture_review",
+      "referentId": "rr",
       "text": "Active thread architecture_review enabled the rr review skill for this lane."
     }
   ],

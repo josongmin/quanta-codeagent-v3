@@ -134,11 +134,20 @@ export class ResultStore {
       .filter((f) => f.endsWith(".jsonl"))
       .sort()
     for (const f of files) {
-      yield* this.readOne(f)
+      yield* this.readFile(f)
     }
   }
 
-  private *readOne(file: string): Generator<EvalRecord> {
+  /** Read only one run file. Missing files yield nothing; malformed records
+   *  are dropped under the same validation contract as `readAll()`. */
+  *readRunRecords(runId: string): Generator<EvalRecord> {
+    const file = `${runId}.jsonl`
+    const path = this.fileFor(runId)
+    if (!existsSync(path)) return
+    yield* this.readFile(file)
+  }
+
+  private *readFile(file: string): Generator<EvalRecord> {
     const path = join(this.dir, file)
     let text: string
     try {
@@ -200,6 +209,63 @@ export class ResultStore {
       }
       yield obj as EvalRecord
     }
+  }
+
+  /** Read the terminal run summary line for a specific run id. Returns null
+   *  when the file is absent, malformed, mismatched-schema, or the summary
+   *  line was never written. */
+  readRunSummary(runId: string): RunSummaryRecord | null {
+    const path = this.fileFor(runId)
+    if (!existsSync(path)) return null
+    let text: string
+    try {
+      text = readFileSync(path, "utf8")
+    } catch (e) {
+      logger.warn("eval.store: read summary failed", {
+        runId,
+        error: errMessage(e),
+      })
+      return null
+    }
+    let out: RunSummaryRecord | null = null
+    for (const line of text.split("\n")) {
+      if (line === "") continue
+      let obj: {
+        schema?: unknown
+        kind?: unknown
+        runId?: unknown
+      }
+      try {
+        obj = JSON.parse(line)
+      } catch {
+        continue
+      }
+      if (obj.kind !== "run_summary") continue
+      if (obj.schema !== SCHEMA_VERSION) continue
+      if (obj.runId !== runId) continue
+      const { kind: _kind, ...summary } = obj as RunSummaryRecord & { kind: "run_summary" }
+      out = summary
+    }
+    return out
+  }
+
+  /** Read every terminal run summary, newest first. Unknown-schema or
+   *  malformed summary lines are dropped. */
+  readRunSummaries(tier?: EvalTier): readonly RunSummaryRecord[] {
+    if (!existsSync(this.dir)) return []
+    const out: RunSummaryRecord[] = []
+    const files = readdirSync(this.dir)
+      .filter((f) => f.endsWith(".jsonl"))
+      .sort()
+    for (const file of files) {
+      const runId = file.slice(0, -".jsonl".length)
+      const summary = this.readRunSummary(runId)
+      if (summary === null) continue
+      if (tier !== undefined && summary.tier !== tier) continue
+      out.push(summary)
+    }
+    out.sort((a, b) => b.ts - a.ts)
+    return out
   }
 
   /** Absolute path of the file for a given run id (callers may inspect). */

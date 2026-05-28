@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { chatgptTokenPath, writeToken } from "@/auth/chatgpt-oauth"
@@ -32,14 +32,17 @@ const FIXED_NOW = Date.parse("2026-05-23T12:00:00.000Z")
 const futureExpiry = new Date(FIXED_NOW + 24 * 3600_000).toISOString()
 
 let dir: string
+let codexHome: string
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "cgo-adapter-"))
+  codexHome = await mkdtemp(join(tmpdir(), "cgo-codex-"))
   __resetCatalogCacheForTest()
 })
 
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true })
+  await rm(codexHome, { recursive: true, force: true })
 })
 
 /** Multi-call fetch mock — dispatches by URL substring so a `/models` GET
@@ -71,6 +74,41 @@ const seedToken = async (
     plan_type: "pro",
     ...overrides,
   })
+}
+
+const toBase64Url = (s: string): string =>
+  Buffer.from(s, "utf8").toString("base64").replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_")
+
+const fakeJwt = (payload: Record<string, unknown>): string => {
+  const h = toBase64Url('{"alg":"RS256"}')
+  const b = toBase64Url(JSON.stringify(payload))
+  return `${h}.${b}.sig`
+}
+
+const writeCodexAuth = async (plan = "pro", exp = 1_924_992_000): Promise<void> => {
+  const path = join(codexHome, "auth.json")
+  await writeFile(
+    path,
+    JSON.stringify({
+      auth_mode: "chatgpt",
+      OPENAI_API_KEY: null,
+      last_refresh: new Date(FIXED_NOW).toISOString(),
+      tokens: {
+        id_token: fakeJwt({
+          exp,
+          "https://api.openai.com/auth": {
+            chatgpt_plan_type: plan,
+            chatgpt_account_id: "acct-codex",
+          },
+        }),
+        access_token: fakeJwt({ exp }),
+        refresh_token: "rt-codex",
+        account_id: "acct-codex",
+      },
+    }),
+    "utf8",
+  )
+  if (process.platform !== "win32") await chmod(path, 0o600)
 }
 
 const emptyStreamInput = (): StreamInput => ({
@@ -131,7 +169,7 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
   test("missing token → typed auth LLMError", async () => {
     const a = new ChatGPTOAuthAdapter({
       model: "gpt-5-codex",
-      env: { QUANTA_PREFS_HOME: dir },
+      env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome },
       nowMs: () => FIXED_NOW,
     })
     let caught: unknown
@@ -162,7 +200,7 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     }
     const a = new ChatGPTOAuthAdapter({
       model: "gpt-5-codex",
-      env: { QUANTA_PREFS_HOME: dir },
+      env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome },
       fetchImpl,
       nowMs: () => FIXED_NOW,
     })
@@ -206,6 +244,83 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     })
   })
 
+  test("Codex auth fallback: uses ~/.codex/auth.json when quanta token is absent", async () => {
+    await writeCodexAuth()
+    const captured: { url: string; init: RequestInit }[] = []
+    const fetchImpl = async (url: string, init?: RequestInit): Promise<Response> => {
+      captured.push({ url, init: init ?? {} })
+      if (url.includes("/codex/models")) {
+        return catalogResponse([{ model: "gpt-5", is_default: true }])
+      }
+      return sseResponse([
+        'data: {"type":"response.completed","response":{"model":"gpt-5","usage":{"input_tokens":1,"output_tokens":0}}}\n\n',
+        "data: [DONE]\n\n",
+      ])
+    }
+    const a = new ChatGPTOAuthAdapter({
+      model: "gpt-5",
+      env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome },
+      fetchImpl,
+      nowMs: () => FIXED_NOW,
+    })
+
+    await collect(a.stream(emptyStreamInput()))
+
+    expect(captured.length).toBe(2)
+    const h = captured[1]?.init.headers as Record<string, string>
+    expect(h.authorization).toContain("Bearer ")
+    expect(h["chatgpt-account-id"]).toBe("acct-codex")
+  })
+
+  test("expired Codex auth refreshes and persists the fresh bundle to quanta prefs", async () => {
+    await writeCodexAuth("pro", 1_600_000_000)
+    const fetchImpl = async (url: string, init?: RequestInit): Promise<Response> => {
+      if (url.includes("/oauth/token")) {
+        return new Response(
+          JSON.stringify({
+            access_token: "at-refreshed",
+            refresh_token: "rt-refreshed",
+            id_token: fakeJwt({
+              exp: 1_924_992_000,
+              "https://api.openai.com/auth": {
+                chatgpt_plan_type: "pro",
+                chatgpt_account_id: "acct-1",
+              },
+            }),
+            expires_in: 3600,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        )
+      }
+      if (url.includes("/codex/models")) {
+        return catalogResponse([{ model: "gpt-5", is_default: true }])
+      }
+      expect((init?.headers as Record<string, string>).authorization).toBe("Bearer at-refreshed")
+      return sseResponse([
+        'data: {"type":"response.completed","response":{"model":"gpt-5","usage":{"input_tokens":0,"output_tokens":0}}}\n\n',
+        "data: [DONE]\n\n",
+      ])
+    }
+    const a = new ChatGPTOAuthAdapter({
+      model: "gpt-5",
+      env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome },
+      fetchImpl,
+      nowMs: () => FIXED_NOW,
+    })
+
+    await collect(a.stream(emptyStreamInput()))
+
+    const persisted = JSON.parse(await readFile(chatgptTokenPath(dir), "utf8")) as {
+      access_token: string
+      refresh_token: string
+    }
+    expect(persisted.access_token).toBe("at-refreshed")
+    expect(persisted.refresh_token).toBe("rt-refreshed")
+    if (process.platform !== "win32") {
+      expect((await stat(chatgptTokenPath(dir))).mode & 0o777).toBe(0o600)
+    }
+  })
+
   test("marks requestSentAt on the actual /responses POST, not during /models preflight", async () => {
     await seedToken()
     const marks: string[] = []
@@ -242,7 +357,7 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     }
     const a = new ChatGPTOAuthAdapter({
       model: "gpt-5",
-      env: { QUANTA_PREFS_HOME: dir },
+      env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome },
       fetchImpl,
       nowMs: () => FIXED_NOW,
     })
@@ -274,7 +389,7 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     }
     const a = new ChatGPTOAuthAdapter({
       model: "gpt-5-codex", // not in catalog → must swap
-      env: { QUANTA_PREFS_HOME: dir },
+      env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome },
       fetchImpl,
       nowMs: () => FIXED_NOW,
     })
@@ -298,7 +413,7 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     }
     const a = new ChatGPTOAuthAdapter({
       model: "gpt-5",
-      env: { QUANTA_PREFS_HOME: dir },
+      env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome },
       fetchImpl,
       nowMs: () => FIXED_NOW,
     })
@@ -313,7 +428,7 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     const fetchImpl = async (): Promise<Response> => catalogResponse([])
     const a = new ChatGPTOAuthAdapter({
       model: "gpt-5",
-      env: { QUANTA_PREFS_HOME: dir },
+      env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome },
       fetchImpl,
       nowMs: () => FIXED_NOW,
     })
@@ -344,7 +459,7 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     }
     const a = new ChatGPTOAuthAdapter({
       model: "gpt-5-codex",
-      env: { QUANTA_PREFS_HOME: dir },
+      env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome },
       fetchImpl,
       nowMs: () => FIXED_NOW,
     })
@@ -370,7 +485,7 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     }
     const a = new ChatGPTOAuthAdapter({
       model: "gpt-5-codex",
-      env: { QUANTA_PREFS_HOME: dir },
+      env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome },
       fetchImpl,
       nowMs: () => FIXED_NOW,
     })
@@ -398,7 +513,7 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     }
     const a = new ChatGPTOAuthAdapter({
       model: "gpt-5",
-      env: { QUANTA_PREFS_HOME: dir },
+      env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome },
       fetchImpl,
       nowMs: () => FIXED_NOW,
     })
@@ -426,7 +541,7 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     }
     const a = new ChatGPTOAuthAdapter({
       model: "gpt-5",
-      env: { QUANTA_PREFS_HOME: dir },
+      env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome },
       fetchImpl,
       nowMs: () => FIXED_NOW,
     })
@@ -456,7 +571,7 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     }
     const a = new ChatGPTOAuthAdapter({
       model: "gpt-5",
-      env: { QUANTA_PREFS_HOME: dir },
+      env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome },
       fetchImpl,
       nowMs: () => FIXED_NOW,
       maxTokens: 321,
@@ -483,7 +598,7 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     }
     const a = new ChatGPTOAuthAdapter({
       model: "gpt-5",
-      env: { QUANTA_PREFS_HOME: dir },
+      env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome },
       fetchImpl,
       nowMs: () => FIXED_NOW,
       streamFirstChunkMs: 5,
@@ -525,7 +640,7 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     }
     const a = new ChatGPTOAuthAdapter({
       model: "gpt-5",
-      env: { QUANTA_PREFS_HOME: dir },
+      env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome },
       fetchImpl,
       nowMs: () => FIXED_NOW,
     })
@@ -590,7 +705,7 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     }
     const a = new ChatGPTOAuthAdapter({
       model: "gpt-5",
-      env: { QUANTA_PREFS_HOME: dir },
+      env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome },
       fetchImpl,
       nowMs: () => FIXED_NOW,
     })
@@ -672,7 +787,7 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     }
     const a = new ChatGPTOAuthAdapter({
       model: "gpt-5",
-      env: { QUANTA_PREFS_HOME: dir },
+      env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome },
       fetchImpl,
       nowMs: () => FIXED_NOW,
     })
@@ -725,7 +840,7 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     }
     const a = new ChatGPTOAuthAdapter({
       model: "gpt-5",
-      env: { QUANTA_PREFS_HOME: dir },
+      env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome },
       fetchImpl,
       nowMs: () => FIXED_NOW,
     })

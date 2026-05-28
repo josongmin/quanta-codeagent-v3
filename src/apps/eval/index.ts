@@ -7,6 +7,7 @@
  *   audit                          Tier 0 static coverage matrix
  *   synthetic [--usecase ID] [--all]   Tier 1 LLM-judged scenario runs
  *   grounding run --suite canary|nightly       Tier 2 structured grounding probe
+ *   grounding compare/regress               Tier 2 run-to-run delta + regression gate
  *   public swebench-verified [--report PATH]   Tier 3 wraps bench-report
  *   trajectory classify --input DIR   Tier 4 label real sessions
  *   compare --scenario ID --usecase ID --agents quanta,claude-code   Tier 5 (stub)
@@ -27,10 +28,16 @@ import { errMessage, logger, setTerminalIo } from "@/shared"
 import { runAudit } from "./audit"
 import { isKnownAdapter, KNOWN_ADAPTERS, runCompare } from "./compare"
 import {
+  buildGroundingComparison,
+  buildGroundingGateResult,
+  buildGroundingRegressionResult,
   buildGroundingReport,
-  evaluateGroundingGate,
+  evaluateGroundingRegression,
   GROUNDING_GATE_PROFILES,
+  GROUNDING_REGRESSION_PROFILES,
   isGroundingGateProfile,
+  isGroundingRegressionProfile,
+  resolveGroundingBaseline,
   runGroundingPreflightCheck,
   runGrounding,
 } from "./grounding"
@@ -151,6 +158,12 @@ const cmdSynthetic = async (): Promise<number> => {
 
 const cmdGrounding = async (): Promise<number> => {
   const sub = argv[1]
+  const storeDir = argValue("--store-dir")
+  const store = new ResultStore({
+    ...(storeDir !== undefined ? { dir: storeDir } : {}),
+  })
+  const loadGroundingReport = (runId: string) =>
+    buildGroundingReport(store.readRunRecords(runId), runId, store.readRunSummary(runId))
   switch (sub) {
     case "run": {
       const suite = argValue("--suite")
@@ -186,10 +199,13 @@ const cmdGrounding = async (): Promise<number> => {
       const summary = await runGrounding({
         llm: agent.llm,
         suite,
+        ...(storeDir !== undefined ? { storeDir } : {}),
         ...(argValue("--case") !== undefined ? { caseId: argValue("--case")! } : {}),
         ...(limit !== undefined ? { limit } : {}),
         ...(concurrency !== undefined ? { concurrency } : {}),
       })
+      const jsonOut = argValue("--json-out")
+      if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(summary, null, 2)}\n`)
       console.log(
         `grounding run=${summary.runId} suite=${summary.suite} total=${summary.total} pass=${summary.counts.pass} partial=${summary.counts.partial} fail=${summary.counts.fail} err=${summary.counts.error} concurrency=${summary.concurrency} (${summary.durationMs}ms)`,
       )
@@ -222,13 +238,27 @@ const cmdGrounding = async (): Promise<number> => {
         console.error("eval grounding report: --run-id <id> is required")
         return 1
       }
-      const out = buildGroundingReport(new ResultStore().readAll(), runId)
+      const out = loadGroundingReport(runId)
       const markdownOut = argValue("--markdown-out")
       const jsonOut = argValue("--json-out")
       if (markdownOut !== undefined) writeTextFile(markdownOut, out.markdown)
       if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(out.report, null, 2)}\n`)
       console.log(out.markdown)
       console.error(out.headline)
+      return 0
+    }
+    case "baseline": {
+      const candidateRunId = argValue("--candidate")
+      if (candidateRunId === undefined) {
+        console.error("eval grounding baseline: --candidate <id> is required")
+        return 1
+      }
+      const out = resolveGroundingBaseline(candidateRunId, store.readRunSummaries("grounding"))
+      const jsonOut = argValue("--json-out")
+      if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(out, null, 2)}\n`)
+      console.log(
+        `grounding baseline candidate=${candidateRunId} status=${out.status}${out.baselineRunId !== undefined ? ` baseline=${out.baselineRunId}` : ""} reason=${out.reason}`,
+      )
       return 0
     }
     case "gate": {
@@ -244,24 +274,84 @@ const cmdGrounding = async (): Promise<number> => {
         )
         return 1
       }
-      const out = buildGroundingReport(new ResultStore().readAll(), runId)
+      const out = loadGroundingReport(runId)
+      const gate = buildGroundingGateResult(out.report, profile)
       const markdownOut = argValue("--markdown-out")
       const jsonOut = argValue("--json-out")
-      if (markdownOut !== undefined) writeTextFile(markdownOut, out.markdown)
-      if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(out.report, null, 2)}\n`)
-      const failures = evaluateGroundingGate(out.report, profile)
-      if (failures.length === 0) {
+      if (markdownOut !== undefined) writeTextFile(markdownOut, gate.markdown)
+      if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(gate.result, null, 2)}\n`)
+      if (gate.result.failures.length === 0) {
         console.error(`grounding gate passed: profile=${profile} runId=${runId}`)
         return 0
       }
       console.error(`grounding gate failed: profile=${profile} runId=${runId}`)
-      for (const failure of failures) {
+      for (const failure of gate.result.failures) {
         console.error(`- ${failure.metric}: expected ${failure.expected}, got ${failure.actual}`)
       }
       return 1
     }
+    case "compare": {
+      const baselineRunId = argValue("--baseline")
+      const candidateRunId = argValue("--candidate")
+      if (baselineRunId === undefined || candidateRunId === undefined) {
+        console.error("eval grounding compare: --baseline <id> and --candidate <id> are required")
+        return 1
+      }
+      const out = buildGroundingComparison(
+        loadGroundingReport(baselineRunId).report,
+        loadGroundingReport(candidateRunId).report,
+      )
+      const markdownOut = argValue("--markdown-out")
+      const jsonOut = argValue("--json-out")
+      if (markdownOut !== undefined) writeTextFile(markdownOut, out.markdown)
+      if (jsonOut !== undefined) {
+        writeTextFile(jsonOut, `${JSON.stringify(out.comparison, null, 2)}\n`)
+      }
+      console.log(out.markdown)
+      console.error(out.headline)
+      return 0
+    }
+    case "regress": {
+      const baselineRunId = argValue("--baseline")
+      const candidateRunId = argValue("--candidate")
+      if (baselineRunId === undefined || candidateRunId === undefined) {
+        console.error("eval grounding regress: --baseline <id> and --candidate <id> are required")
+        return 1
+      }
+      const profile = argValue("--profile")
+      if (profile === undefined || !isGroundingRegressionProfile(profile)) {
+        console.error(
+          `eval grounding regress: --profile must be one of ${GROUNDING_REGRESSION_PROFILES.join(", ")}`,
+        )
+        return 1
+      }
+      const out = buildGroundingComparison(
+        loadGroundingReport(baselineRunId).report,
+        loadGroundingReport(candidateRunId).report,
+      )
+      const markdownOut = argValue("--markdown-out")
+      const jsonOut = argValue("--json-out")
+      const regression = buildGroundingRegressionResult(out.comparison, profile)
+      if (markdownOut !== undefined) writeTextFile(markdownOut, regression.markdown)
+      if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(regression.result, null, 2)}\n`)
+      if (regression.result.failures.length === 0) {
+        console.error(
+          `grounding regress passed: profile=${profile} baseline=${baselineRunId} candidate=${candidateRunId}`,
+        )
+        return 0
+      }
+      console.error(
+        `grounding regress failed: profile=${profile} baseline=${baselineRunId} candidate=${candidateRunId}`,
+      )
+      for (const failure of regression.result.failures) {
+        console.error(`- ${failure.kind}: ${failure.message}`)
+      }
+      return 1
+    }
     default:
-      console.error("eval grounding: subcommand must be one of: run, preflight, report, gate")
+      console.error(
+        "eval grounding: subcommand must be one of: run, preflight, report, baseline, gate, compare, regress",
+      )
       return 1
   }
 }
@@ -448,8 +538,14 @@ const HELP = `quanta eval — verification harness (Tier 0..5)
   grounding run --suite canary|nightly       Tier 2 structured context-grounding probe
   grounding preflight                        Tier 2 provider/route/parser health check
   grounding report --run-id ID               Tier 2 grounding metrics report
+  grounding baseline --candidate ID          Tier 2 resolve latest comparable baseline
   grounding gate --run-id ID --profile canary
                                              Tier 2 grounding release gate
+  grounding compare --baseline ID --candidate ID
+                                             Tier 2 run-to-run grounding delta
+  grounding regress --baseline ID --candidate ID --profile strict
+                                             Tier 2 fail-closed regression gate
+                                             add --store-dir DIR to isolate run storage
   generate --usecase ID [--count N]          Tier 1 auto-generate scenarios (LLM)
   public swebench-verified [--report PATH]   Tier 3 wraps bench-report.json
   trajectory classify --input DIR            Tier 4 label real sessions

@@ -75,11 +75,14 @@ const resetEnv = (): void => {
 }
 
 let workspace: string
+let codexHome: string
 const realArgv = process.argv
 
 beforeEach(() => {
   resetEnv()
   workspace = mkdtempSync(join(tmpdir(), "cli-export-asm-"))
+  codexHome = mkdtempSync(join(tmpdir(), "cli-export-codex-"))
+  process.env.CODEX_HOME = codexHome
   // Hermetic argv: a single positional one-shot prompt, no flags.
   process.argv = ["bun", "src/apps/cli/index.ts", "echo", "hi"]
 })
@@ -92,6 +95,7 @@ afterEach(() => {
   }
   Object.assign(process.env, REAL_ENV)
   rmSync(workspace, { recursive: true, force: true })
+  rmSync(codexHome, { recursive: true, force: true })
 })
 
 /**
@@ -193,14 +197,15 @@ describe("CLI export-closure assembly (in-process e2e)", () => {
     expect(specs.length).toBeGreaterThan(0)
     expect(specs.some((s: { name: string }) => s.name === "search_codebase")).toBe(true)
 
-    // Optional subsystems remain OFF by default, but generic repo search is
-    // now part of the product baseline, so the search facade and helper-only
-    // pipeline slot are expected in the no-knob assembly.
+    // Most optional subsystems remain OFF by default, but generic repo search
+    // is now part of the product baseline (search facade + helper-only pipeline
+    // slot), and subagent + skills are now default-ON (env-disablable), so the
+    // no-knob assembly wires their empty capability blocks.
     expect(config.store).toBeUndefined()
     expect(config.embedder).toBeUndefined()
     expect(config.memory).toBeUndefined()
-    expect(config.subagent).toBeUndefined()
-    expect(config.skills).toBeUndefined()
+    expect(config.subagent).toEqual({})
+    expect(config.skills).toEqual({})
     expect(config.compactionBreaker).toBeUndefined()
     expect(config.verifyGuard).toBeUndefined()
     expect(config.planMode).toBeUndefined()

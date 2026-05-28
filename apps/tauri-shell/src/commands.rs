@@ -62,3 +62,44 @@ pub async fn disable_hotkey<R: Runtime>(app: AppHandle<R>) -> AppResult<()> {
 pub fn hotkey_status<R: Runtime>(app: AppHandle<R>) -> AppResult<bool> {
     Ok(hotkey::is_enabled(&app))
 }
+
+/// Open `url` in the user's default OS browser (macOS `open`). Used by the
+/// frontend's `/login` slash to escape the Tauri webview — `window.open`
+/// is silently no-op'd by WKWebView for `_blank` targets without explicit
+/// capability, and a normal browser's popup-blocker bites in `async`
+/// contexts. So we shell out from Rust, which has no such restriction.
+///
+/// URL host is allowlisted to OpenAI / ChatGPT issuers so a compromised
+/// frontend asset can't weaponize this command for arbitrary navigation.
+#[tauri::command]
+pub fn open_external_url(url: String) -> AppResult<()> {
+    use crate::error::AppError;
+    // Parse without `url` crate so we don't add a transitive dep just for
+    // host extraction. The host allowlist below is the security boundary.
+    let rest = url
+        .strip_prefix("https://")
+        .ok_or_else(|| AppError::Internal(format!("only https urls allowed: {url}")))?;
+    let host_end = rest
+        .find(|c: char| c == '/' || c == '?' || c == '#')
+        .unwrap_or(rest.len());
+    let host_and_port = &rest[..host_end];
+    let host = host_and_port.split(':').next().unwrap_or(host_and_port);
+    let allowed = matches!(
+        host,
+        "auth.openai.com"
+            | "chat.openai.com"
+            | "chatgpt.com"
+            | "openai.com"
+            | "platform.openai.com"
+    );
+    if !allowed {
+        return Err(AppError::Internal(format!(
+            "host not allowlisted for open_external_url: {host}"
+        )));
+    }
+    std::process::Command::new("/usr/bin/open")
+        .arg(&url)
+        .status()
+        .map_err(|e| AppError::Internal(format!("open spawn failed: {e}")))?;
+    Ok(())
+}

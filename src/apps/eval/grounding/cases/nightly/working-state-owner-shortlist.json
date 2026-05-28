@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "working-state-owner-shortlist",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "workingState": {
@@ -14,10 +14,13 @@
   "history": [
     {
       "role": "assistant",
+      "kind": "directive",
+      "threadId": "prompt_cache_resume",
       "text": "Active thread prompt_cache_resume is patching eval grounding artifacts."
     },
     {
       "role": "assistant",
+      "mentionedFileIds": ["src/apps/eval/index.ts", "src/apps/eval/grounding/report.ts"],
       "text": "Owner shortlist currently ranks src/apps/eval/index.ts first, then src/apps/eval/grounding/report.ts."
     }
   ],

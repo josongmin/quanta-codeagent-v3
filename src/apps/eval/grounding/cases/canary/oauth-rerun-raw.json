@@ -1,11 +1,28 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "oauth-rerun-raw",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "history": [
-    { "role": "assistant", "text": "prompt_rules is paused. Active thread oauth_abort_flow is the login abort callback bug." },
-    { "role": "user", "text": "좋아 oauth_abort_flow 계속 가." },
-    { "role": "assistant", "text": "I fixed the cancel button path, but I did not rerun the browser flow yet." }
+    {
+      "role": "assistant",
+      "kind": "message",
+      "text": "prompt_rules is paused. Active thread oauth_abort_flow is the login abort callback bug.",
+      "threadId": "oauth_abort_flow",
+      "mentionedThreadIds": ["oauth_abort_flow", "prompt_rules"]
+    },
+    {
+      "role": "user",
+      "kind": "directive",
+      "text": "좋아 oauth_abort_flow 계속 가.",
+      "threadId": "oauth_abort_flow"
+    },
+    {
+      "role": "assistant",
+      "kind": "message",
+      "text": "I fixed the cancel button path, but I did not rerun the browser flow yet.",
+      "threadId": "oauth_abort_flow",
+      "policyMarkers": ["patch_landed", "needs_rerun"]
+    }
   ],
   "targetUtterance": "그거 다시 돌려봐",
   "gold": {
@@ -18,6 +35,12 @@
   },
   "bucket": "reference",
   "severity": "critical",
+  "stateContract": {
+    "activeThreadId": "oauth_abort_flow",
+    "visibleThreadIds": ["oauth_abort_flow", "prompt_rules"],
+    "pausedThreadIds": ["prompt_rules"],
+    "policyMarkers": ["patch_landed", "needs_rerun"]
+  },
   "pairId": "pair-oauth-rerun",
   "pairRole": "raw"
 }

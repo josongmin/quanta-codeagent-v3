@@ -1,15 +1,20 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "cwd-specific-file",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "cwd": "/repo/packages/eval",
   "history": [
     {
       "role": "assistant",
+      "kind": "directive",
+      "threadId": "taxonomy_sync",
+      "referentId": "src/apps/eval/taxonomy/usecases.ts",
+      "mentionedFileIds": ["src/apps/eval/taxonomy/usecases.ts"],
       "text": "Active thread taxonomy_sync is editing src/apps/eval/taxonomy/usecases.ts from the eval package."
     },
     {
       "role": "assistant",
+      "mentionedFileIds": ["src/apps/eval/taxonomy/usecases.ts"],
       "text": "The taxonomy leaf for thread grounding lives in src/apps/eval/taxonomy/usecases.ts."
     }
   ],

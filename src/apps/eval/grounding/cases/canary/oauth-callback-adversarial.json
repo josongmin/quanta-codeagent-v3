@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "id": "oauth-callback-adversarial",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "history": [
