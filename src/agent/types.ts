@@ -53,6 +53,7 @@ import type { PlanQueueStore } from "./plan-queue"
 import type { AgentMode } from "./prompt"
 import type { RepoRules } from "./repo-rules"
 import type { ModePolicy } from "./run-mode"
+import type { ShadowVerifyPort } from "./shadow-verify"
 import type { ActiveTurnState } from "./steering"
 import type { StopReasonPolicy } from "./stop-reason"
 import type { BackgroundSubagentScheduler } from "./subagent-background"
@@ -727,6 +728,16 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    *  (which trusts `Tool.isReadOnly()`).
    */
   shadowCheckpoint?: { mode: CheckpointTriggerMode; oracle?: DestructivenessOracle }
+  /**
+   * ADR-0400 Shadow Verify port slot (sibling of ADR-0396 wave-1 port). When
+   * set, `buildShadowVerifyBlock` registers the `shadow_verify` LLM tool
+   * bound to this port. Absent ⇒ tool NOT registered (default-OFF, byte-
+   * identical for every legacy caller — RFC §1.2). The composition root
+   * builds the port via `createShadowVerifyAdapters(cwd)` +
+   * `createShadowVerify(deps)` (real worktree + V4A + LSP/test adapters);
+   * tests may inject a fake port directly.
+   */
+  shadowVerify?: ShadowVerifyPort
   /**
    * ADR-0140 background-subagent caller wire (sibling to ADR-0130 helper).
    * When set, `buildSubagentBgBlock` registers the 3 `subagent_fork` /
@@ -1604,6 +1615,7 @@ export type FeaturesConfig = Pick<
   | "branchSearch"
   | "shadowCheckpoint"
   | "shadowOdb"
+  | "shadowVerify"
   | "subagentBackground"
   | "delegation"
   | "fork"

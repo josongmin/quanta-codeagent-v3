@@ -64,6 +64,7 @@ import {
   buildPlanExitBlock,
   buildPlanMutationBlock,
   buildShadowBlock,
+  buildShadowVerifyBlock,
   buildSkillBlock,
   buildSubagentBgBlock,
   buildSubagentBlock,
@@ -154,6 +155,9 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
 
   // ADR-0201 — fork_session tool (default-OFF: empty array when fork absent)
   extraTools.push(...buildForkSessionBlock(config))
+
+  // ADR-0400 — shadow_verify tool (default-OFF: empty when shadowVerify absent)
+  extraTools.push(...buildShadowVerifyBlock(config))
 
   // ADR-0140 — background-subagent tools (default-OFF: empty when subagentBackground absent)
   extraTools.push(...buildSubagentBgBlock(config))
