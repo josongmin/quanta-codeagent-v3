@@ -3,9 +3,23 @@
   "id": "topic-switch-return-explain",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "history": [
-    { "role": "assistant", "text": "Active thread prompt_rules is about prompt policy observability." },
-    { "role": "assistant", "text": "We briefly detoured into unrelated build noise." },
-    { "role": "assistant", "text": "Back on prompt_rules now." }
+    {
+      "role": "assistant",
+      "threadId": "prompt_rules",
+      "referentId": "prompt_rules",
+      "text": "Active thread prompt_rules is about prompt policy observability."
+    },
+    {
+      "role": "assistant",
+      "mentionedThreadIds": ["prompt_rules"],
+      "text": "We briefly detoured into unrelated build noise."
+    },
+    {
+      "role": "assistant",
+      "threadId": "prompt_rules",
+      "referentId": "prompt_rules",
+      "text": "Back on prompt_rules now."
+    }
   ],
   "targetUtterance": "아까 그 규칙 얘기로 돌아가서 설명해봐.",
   "gold": {
@@ -17,5 +31,10 @@
     "confidence": "high"
   },
   "bucket": "topic_switch_return",
-  "severity": "high"
+  "severity": "high",
+  "stateContract": {
+    "activeThreadId": "prompt_rules",
+    "visibleThreadIds": ["prompt_rules"]
+  },
+  "candidateThreadIds": ["prompt_rules"]
 }

@@ -22,5 +22,11 @@
     "confidence": "high"
   },
   "bucket": "reference",
-  "severity": "high"
+  "severity": "high",
+  "stateContract": {
+    "activeThreadId": "prompt_rules",
+    "visibleThreadIds": ["prompt_rules"]
+  },
+  "candidateThreadIds": ["prompt_rules"],
+  "candidateReferentIds": ["prompt_rules_step_1", "prompt_rules_step_2", "prompt_rules_step_3"]
 }

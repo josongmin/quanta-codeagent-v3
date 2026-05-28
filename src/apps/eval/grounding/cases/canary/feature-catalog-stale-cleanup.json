@@ -3,9 +3,18 @@
   "id": "feature-catalog-stale-cleanup",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "history": [
-    { "role": "assistant", "text": "Archived thread feature_catalog_cleanup is done." },
     {
       "role": "assistant",
+      "threadId": "feature_catalog_cleanup",
+      "referentId": "feature_catalog_cleanup",
+      "mentionedThreadIds": ["feature_catalog_cleanup", "feature_catalog_review"],
+      "text": "Archived thread feature_catalog_cleanup is done."
+    },
+    {
+      "role": "assistant",
+      "threadId": "feature_catalog_review",
+      "referentId": "feature_catalog_review",
+      "mentionedThreadIds": ["feature_catalog_cleanup", "feature_catalog_review"],
       "text": "Current thread feature_catalog_review is active; from here, 'that cleanup' means the current review pass, not the archived branch."
     }
   ],
@@ -19,5 +28,11 @@
     "confidence": "medium"
   },
   "bucket": "stale_context_trap",
-  "severity": "high"
+  "severity": "high",
+  "stateContract": {
+    "activeThreadId": "feature_catalog_review",
+    "visibleThreadIds": ["feature_catalog_cleanup", "feature_catalog_review"],
+    "pausedThreadIds": ["feature_catalog_cleanup"]
+  },
+  "candidateThreadIds": ["feature_catalog_cleanup", "feature_catalog_review"]
 }

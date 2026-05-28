@@ -28,15 +28,27 @@ export const CapabilitySchema = z.enum(["Interactive", "Read", "Write"])
 export type Capability = z.infer<typeof CapabilitySchema>
 
 /** MCP server descriptor. Shape matches the standard `.mcp.json` server entry
- *  (Anthropic MCP spec): `{ command, args, env? }`. Strict on purpose so a
- *  manifest typo cannot turn into a silent server-spawn miss. */
+ *  (Anthropic MCP spec): `{ command, args, env?, url?, headers? }`. Strict on
+ *  purpose so a manifest typo cannot turn into a silent server-spawn miss.
+ *
+ *  Carriers: stdio (spawn `command`) is the default. Setting `url` opts into
+ *  the Streamable-HTTP + SSE carrier (ADR-0391); `command` may then be empty.
+ *  The refine guarantees at least one of `command` / `url` is present, so the
+ *  previous "command non-empty" invariant is preserved for the stdio-only
+ *  callers. */
 export const MCPServerSpecSchema = z
   .object({
-    command: z.string().min(1, "mcp server command must be non-empty"),
+    command: z.string(),
     args: z.array(z.string()),
     env: z.record(z.string(), z.string()).optional(),
+    url: z.string().url().optional(),
+    headers: z.record(z.string(), z.string()).optional(),
   })
   .strict()
+  .refine(
+    (s) => s.command.length > 0 || s.url !== undefined,
+    "mcp server requires either non-empty `command` (stdio) or `url` (http)",
+  )
 export type MCPServerSpec = z.infer<typeof MCPServerSpecSchema>
 
 /** Author metadata. `email` and `url` are optional per the recovered shape;

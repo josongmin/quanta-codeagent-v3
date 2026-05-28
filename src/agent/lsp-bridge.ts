@@ -18,6 +18,8 @@ import {
   type RenameApplyPort,
   type Tool,
 } from "@/tool"
+import { attachLspDiagnosticsHook, type LspDiagnosticsHookHandle } from "./lsp-diagnostics-hook"
+import type { AgentConfig } from "./types"
 
 /**
  * LSP → Tool bridge (mirrors `mcp-bridge.ts`; RFC §3.1 / §13).
@@ -146,6 +148,41 @@ export const lspDiagnosticsProvider = (): DiagnosticsProvider => ({
  * here spawns a server until the tool is actually called.
  */
 export const lspDiagnosticsTool = (): Tool => diagnosticsTool(lspDiagnosticsProvider()) as Tool
+
+/** ADR-0381 wiring helper — default edit-class tool → file-path extractor map.
+ *  Quanta's `edit` and `write` tools take `file_path` in their input schema.
+ *  `apply_patch` requires patch-body parsing and is intentionally out of
+ *  scope (separate follow-up). */
+export const lspDefaultEditTools = (): Map<string, (input: unknown) => string | null> => {
+  const extractFilePath = (input: unknown): string | null => {
+    if (typeof input !== "object" || input === null) return null
+    const v = (input as Record<string, unknown>).file_path
+    return typeof v === "string" && v.length > 0 ? v : null
+  }
+  return new Map([
+    ["edit", extractFilePath],
+    ["write", extractFilePath],
+  ])
+}
+
+/** ADR-0381 composition wire — env-gated default-OFF attach.
+ *  Returns the dispose handle when `QUANTA_LSP_DIAGNOSTICS_HOOK=1` AND the
+ *  `AgentConfig` carries both seam slots (`hooks`, `subagentPendingPrompt`);
+ *  otherwise returns `undefined` so the loop body is byte-identical. */
+export const attachLspDiagnosticsHookIfEnabled = (
+  cfg: AgentConfig,
+): LspDiagnosticsHookHandle | undefined => {
+  if (process.env.QUANTA_LSP_DIAGNOSTICS_HOOK !== "1") return undefined
+  if (cfg.hooks === undefined) return undefined
+  if (cfg.subagentPendingPrompt === undefined) return undefined
+  return attachLspDiagnosticsHook({
+    hooks: cfg.hooks,
+    push: cfg.subagentPendingPrompt,
+    editTools: lspDefaultEditTools(),
+    open: (filePath, cwd) => lspDiagnosticsProvider().open(filePath, cwd),
+    cwd: cfg.cwd,
+  })
+}
 
 /* ------------------------------------------------------------------------- *
  * LSP nav (definition/references/hover/symbol/rename-preview) — Codex

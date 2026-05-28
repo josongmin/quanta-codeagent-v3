@@ -480,11 +480,19 @@ export const resolveMcpConfigPath = (
 
 const pluginSpecToServerConfig = (
   name: string,
-  spec: { command: string; args: string[]; env?: Record<string, string> | undefined },
+  spec: {
+    command: string
+    args: string[]
+    env?: Record<string, string> | undefined
+    url?: string | undefined
+    headers?: Record<string, string> | undefined
+  },
 ): McpServerConfig => ({
   name,
-  command: [spec.command, ...spec.args],
+  command: spec.command.length > 0 ? [spec.command, ...spec.args] : [],
   ...(spec.env !== undefined ? { env: spec.env } : {}),
+  ...(spec.url !== undefined ? { url: spec.url } : {}),
+  ...(spec.headers !== undefined ? { headers: spec.headers } : {}),
 })
 
 /** Read MCP server configs from a config file. Accepts BOTH:

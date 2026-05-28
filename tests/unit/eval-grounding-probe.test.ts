@@ -178,6 +178,44 @@ describe("grounding probe rendering", () => {
     const rendered = flattenText(llm.captured)
     expect(rendered).not.toContain("Decision rules:")
     expect(rendered).toContain("Use only the provided conversation context")
+    expect(rendered).toContain("Field semantics:")
+    expect(rendered).toContain("intent = the user's underlying goal")
+  })
+
+  test("minimal probe still describes tuple semantics without evaluator rules", async () => {
+    const llm = new CaptureLLM()
+    const groundingCase: GroundingCase = {
+      schema: 2,
+      id: "minimal",
+      usecase: "persistent-context.conversation-state.thread-grounding",
+      history: [{ role: "assistant", text: "Active thread prompt_rules." }],
+      targetUtterance: "야 이제 다 해결됐냐?",
+      gold: {
+        activeThreadId: "prompt_rules",
+        referentId: "prompt_rules",
+        intent: "status_check",
+        scope: "current_workstream",
+        shouldClarify: false,
+        confidence: "high",
+      },
+      bucket: "ellipsis",
+      severity: "critical",
+      stateContract: {
+        activeThreadId: "prompt_rules",
+      },
+      candidateThreadIds: ["prompt_rules"],
+    }
+    await runGroundingProbe(groundingCase, {
+      llm,
+      probeProfile: "minimal",
+      now: () => 0,
+    })
+    const rendered = flattenText(llm.captured)
+    expect(rendered).not.toContain("Decision rules:")
+    expect(rendered).toContain("Field semantics:")
+    expect(rendered).toContain("Authoritative candidate constraints:")
+    expect(rendered).toContain('"candidateThreadIds":["prompt_rules"]')
+    expect(rendered).toContain("For current_workstream use the thread id")
   })
 
   test("retries a first-chunk timeout once before surfacing an error", async () => {

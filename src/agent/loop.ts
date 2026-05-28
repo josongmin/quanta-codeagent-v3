@@ -51,6 +51,7 @@ import {
   scanEnvelopeForRedactions,
   wireHookPromptPending,
 } from "./loop-helpers"
+import { attachLspDiagnosticsHookIfEnabled } from "./lsp-bridge"
 import { persistSession, recallContext } from "./memory"
 import { runMemoryConsolidatorHook } from "./memory-consolidator-hook"
 import { AgentRecorder } from "./metrics"
@@ -2529,18 +2530,27 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
  *  required restructuring every return path. */
 const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
   const ctx = await createRunAgentContext(config)
-  const startOutcome = await runSessionStartSequence({
-    cfg: ctx.cfg,
-    wm: ctx.wm,
-    sessionId: ctx.sessionId,
-    taskRegistry: ctx.features.taskRegistry,
-  })
-  if (startOutcome === "aborted") {
-    return ctx.finish("aborted", 0, interruptedCategory("user"))
+  // ADR-0381 follow-up — opt-in LSP diagnostics auto-injection. env-gated
+  // (`QUANTA_LSP_DIAGNOSTICS_HOOK=1`) AND requires both seam slots
+  // (`hooks` + `subagentPendingPrompt`); absent ⇒ `undefined` ⇒ no handler,
+  // byte-identical loop. Disposed in `finally` so a flaky LSP cannot leak.
+  const diagnosticsHook = attachLspDiagnosticsHookIfEnabled(ctx.cfg)
+  try {
+    const startOutcome = await runSessionStartSequence({
+      cfg: ctx.cfg,
+      wm: ctx.wm,
+      sessionId: ctx.sessionId,
+      taskRegistry: ctx.features.taskRegistry,
+    })
+    if (startOutcome === "aborted") {
+      return ctx.finish("aborted", 0, interruptedCategory("user"))
+    }
+    const finished = await runAgentTurnLoop(ctx)
+    if (finished !== undefined) {
+      return finished
+    }
+    return ctx.finish("max_turns", ctx.cfg.maxTurns, completedCategory("max_turns"))
+  } finally {
+    await diagnosticsHook?.dispose()
   }
-  const finished = await runAgentTurnLoop(ctx)
-  if (finished !== undefined) {
-    return finished
-  }
-  return ctx.finish("max_turns", ctx.cfg.maxTurns, completedCategory("max_turns"))
 }

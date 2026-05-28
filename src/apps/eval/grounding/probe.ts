@@ -62,6 +62,23 @@ const buildProbePrompt = (
           JSON.stringify(groundingCase.stateContract),
           "",
         ]
+  const candidateAuthority = {
+    ...(groundingCase.candidateThreadIds !== undefined
+      ? { candidateThreadIds: groundingCase.candidateThreadIds }
+      : {}),
+    ...(groundingCase.candidateReferentIds !== undefined
+      ? { candidateReferentIds: groundingCase.candidateReferentIds }
+      : {}),
+    ...(groundingCase.ambiguityClass !== undefined ? { ambiguityClass: groundingCase.ambiguityClass } : {}),
+  }
+  const candidateAuthorityBlock =
+    Object.keys(candidateAuthority).length === 0
+      ? []
+      : [
+          "Authoritative candidate constraints:",
+          JSON.stringify(candidateAuthority),
+          "",
+        ]
   const protocolLine =
     outputProtocol === "provider_structured_object"
       ? 'Return exactly one JSON object. The root may either be the decision object itself or wrap it under "decision".'
@@ -69,12 +86,25 @@ const buildProbePrompt = (
   const base = [
     "Resolve the user's underspecified utterance against the prior conversation context.",
     "History messages may include a <grounding-meta>{...}</grounding-meta> header; treat that JSON as authoritative context metadata.",
+    "When authoritative metadata and weaker prose cues conflict, prefer the authoritative metadata.",
     ...stateContractBlock,
+    ...candidateAuthorityBlock,
   ]
   const shape = [
     "Do NOT answer the utterance itself.",
     protocolLine,
     'Shape: {"activeThreadId": string|null, "referentId": string|null, "intent": "status_check"|"execute_change"|"explain"|"approval_request"|"clarify_request"|"fact_lookup", "scope": "current_workstream"|"entire_session"|"latest_tool_result"|"specific_file"|"specific_subthread", "shouldClarify": boolean, "confidence": "high"|"medium"|"low"}',
+    "Field semantics:",
+    "- activeThreadId = the single active/current workstream thread when identifiable, else null.",
+    "- referentId = the concrete target id. For current_workstream use the thread id when the whole workstream is the target. For entire_session use null. For latest_tool_result use the latest result id. For specific_file use the file path. For specific_subthread use the subthread or plan-step id. Leave it null only when the target remains unresolved.",
+    "- intent = the user's underlying goal, not your response act. If clarification would be needed, keep the latent intent and set shouldClarify=true.",
+    "- shouldClarify = true only when multiple plausible targets remain unresolved after using authoritative metadata.",
+    "- Do not invent a concrete thread, file, or subthread id from multiple authoritative candidates. If the utterance does not uniquely narrow the target, keep the id null and set shouldClarify=true.",
+    "- If multiple file, subthread, or thread candidates remain and the utterance uses a generic reference to that target class, keep the latent intent, set shouldClarify=true, and leave the unresolved id null.",
+    "- Use clarify_request only when the utterance itself is about clarification behavior or directly asks for clarification. A clarification-policy utterance about file candidates still uses scope=specific_file even when no single file is chosen.",
+    "- If the utterance instructs the assistant to ask first, clarify first, or request disambiguation before proceeding, treat that utterance as clarify_request rather than execute_change.",
+    'Intent labels: status_check=status or progress, not a concrete-detail lookup. execute_change=do or continue work on the target. explain=why or how rationale, including why something failed. approval_request=ship/merge/readiness approval. clarify_request=the utterance itself is about clarification behavior or directly asks for clarification. fact_lookup=retrieve a concrete detail such as a threshold, value, id, filename, or prior decision from context or history.',
+    "Scope labels: current_workstream=the active thread as a whole, entire_session=cross-thread session status, latest_tool_result=the most recent tool output, specific_file=one file, specific_subthread=one named step or subtask.",
   ]
   const rules =
     probeProfile === "minimal"
@@ -83,7 +113,6 @@ const buildProbePrompt = (
         ? [
             "Use only the provided conversation context, <grounding-meta> annotations, and authoritative state snapshot.",
             "Do not rely on evaluator-specific repair policies or extra benchmark assumptions.",
-            "Interpret labels semantically: status_check=status/progress, execute_change=do or continue work on the target, explain=why/how rationale, approval_request=ship/merge/ready approval, clarify_request=ask the user to disambiguate, fact_lookup=retrieve a concrete detail from context/history.",
           ]
         : [
             "Decision rules:",
