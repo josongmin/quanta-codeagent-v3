@@ -26,6 +26,15 @@ export { buildMentionInjectionMessages } from "./inject-messages"
 export { parseMentions } from "./parser"
 export type { MentionResolverPort, MentionResolverResult } from "./resolver"
 export { buildInjectionFragments } from "./resolver"
+export type { LspSymbolLookupOptions } from "./symbol-lookup-lsp"
+export { createLspSymbolLookup } from "./symbol-lookup-lsp"
+export type {
+  SemanticQueryPort,
+  SemanticSearchHitLike,
+  SemanticSymbolLookupOptions,
+  SymbolEmbed,
+} from "./symbol-lookup-semantic"
+export { createSemanticSymbolLookup } from "./symbol-lookup-semantic"
 export type {
   SymbolHit,
   SymbolLookupLspPort,
