@@ -101,3 +101,83 @@ export const createLspSymbolLookup = (opts: LspSymbolLookupOptions): SymbolLooku
     },
   }
 }
+
+/** Options for {@link createUnionLspSymbolLookup}. */
+export interface UnionLspSymbolLookupOptions {
+  /** Nav provider (e.g. `lspNavProvider()`). Shared by every anchor. */
+  readonly provider: LspNavProvider
+  /** Workspace root passed to `provider.open(anchorFile, cwd)`. */
+  readonly cwd: string
+  /** Anchor files — one per language present in the workspace (synthesized by
+   *  the deterministic `synthesizeLspAnchors`). Empty ⇒ every lookup is `null`
+   *  (LSP strategy disabled). */
+  readonly anchorFiles: readonly string[]
+  /** Cap on projected hits PER ANCHOR. Default 25. `<= 0` ⇒ default. */
+  readonly maxHits?: number
+}
+
+/** Stable dedup key for a {@link SymbolHit} so the same workspace symbol
+ *  returned by two anchors (rare, but possible if one source file matched two
+ *  language servers) is not double-rendered. */
+const hitKey = (h: SymbolHit): string => `${h.path}:${h.line}:${h.snippet ?? ""}`
+
+/** Query every per-anchor port in order and merge their hits, deduped by first
+ *  occurrence. Extracted so the union closure stays under the cognitive-
+ *  complexity cap. NO-THROW (each port already guards). */
+const mergeAnchorHits = async (
+  ports: readonly SymbolLookupLspPort[],
+  name: string,
+): Promise<readonly SymbolHit[]> => {
+  const merged: SymbolHit[] = []
+  const seen = new Set<string>()
+  for (const port of ports) {
+    const hits = await port.findSymbol(name)
+    if (hits === null) continue
+    for (const h of hits) {
+      const key = hitKey(h)
+      if (!seen.has(key)) {
+        seen.add(key)
+        merged.push(h)
+      }
+    }
+  }
+  return merged
+}
+
+/**
+ * Build a {@link SymbolLookupLspPort} that fans a query across SEVERAL anchor
+ * files — one per language present in the workspace — and MERGES the hits. A
+ * multi-language repo (`.ts` + `.py`) thus probes BOTH language servers under a
+ * single `@symbol` lookup. Each anchor is queried via {@link createLspSymbolLookup}
+ * so the per-anchor NO-THROW / always-stop-session contract is preserved; a
+ * thrown / null anchor simply contributes nothing.
+ *
+ * Order is DETERMINISTIC: hits are concatenated in `anchorFiles` order (which
+ * the synthesizer produces deterministically), deduped by first occurrence.
+ * Empty result across all anchors ⇒ `null` (so `auto` treats it as a miss).
+ *
+ * @param opts — provider + workspace root + the synthesized anchor file list.
+ */
+export const createUnionLspSymbolLookup = (
+  opts: UnionLspSymbolLookupOptions,
+): SymbolLookupLspPort => {
+  const anchors = Array.isArray(opts.anchorFiles) ? opts.anchorFiles : []
+  const ports = anchors
+    .filter((a): a is string => typeof a === "string" && a.length > 0)
+    .map((anchorFile) =>
+      createLspSymbolLookup({
+        provider: opts.provider,
+        cwd: opts.cwd,
+        anchorFile,
+        ...(opts.maxHits !== undefined ? { maxHits: opts.maxHits } : {}),
+      }),
+    )
+  return {
+    findSymbol: async (name: string): Promise<readonly SymbolHit[] | null> => {
+      if (typeof name !== "string" || name.length === 0) return null
+      if (ports.length === 0) return null
+      const merged = await mergeAnchorHits(ports, name)
+      return merged.length > 0 ? merged : null
+    },
+  }
+}

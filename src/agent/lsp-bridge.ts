@@ -76,6 +76,34 @@ const specFor = (filePath: string): ServerSpec | null => {
   return SERVERS.find((entry) => entry.exts.includes(ext))?.spec ?? null
 }
 
+/**
+ * ADR-0422 follow-up — the lowercase file extensions (leading dot, e.g.
+ * `.ts`, `.py`) for which {@link SERVERS} can select a language server.
+ * Exported as the SINGLE source of truth so the mention-injection anchor
+ * synthesizer reasons about "which extensions can open an LSP session"
+ * WITHOUT re-declaring the extension list (OCP: adding a language to
+ * {@link SERVERS} automatically widens this set). Frozen so consumers cannot
+ * mutate the shared table. Deterministic order: SERVERS row order, then the
+ * per-row `exts` order — no sorting, no heuristics. */
+export const LSP_SUPPORTED_EXTENSIONS: readonly string[] = Object.freeze(
+  SERVERS.flatMap((entry) => entry.exts),
+)
+
+/**
+ * ADR-0422 follow-up — lowercase extension → LANGUAGE KEY (the server binary,
+ * which is the server identity). Built from the SAME {@link SERVERS} table so
+ * the extensions a single server handles (typescript: `.ts`/`.tsx`/`.js`/…)
+ * all map to ONE key. The anchor synthesizer keys by this value so a
+ * multi-extension language collapses to a single anchor (one server, one
+ * session), never one anchor per extension. Frozen. */
+export const lspExtensionToLanguage = (): ReadonlyMap<string, string> => {
+  const map = new Map<string, string>()
+  for (const entry of SERVERS) {
+    for (const ext of entry.exts) map.set(ext.toLowerCase(), entry.spec.bin)
+  }
+  return map
+}
+
 /** Probe whether a server binary is launchable. Cached per process so a single
  *  agent run does not re-spawn `--version` for every diagnostics call. */
 /** Wall-clock budget for the `<bin> --version` availability probe. Set short

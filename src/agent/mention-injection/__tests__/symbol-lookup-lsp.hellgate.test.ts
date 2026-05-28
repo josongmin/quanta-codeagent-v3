@@ -16,7 +16,7 @@
 
 import { describe, expect, test } from "bun:test"
 import type { LspNavProvider, LspNavSession, NavSymbolInfo, NavSymbolKind } from "@/tool"
-import { createLspSymbolLookup } from "../symbol-lookup-lsp"
+import { createLspSymbolLookup, createUnionLspSymbolLookup } from "../symbol-lookup-lsp"
 
 const sym = (
   name: string,
@@ -219,5 +219,89 @@ describe("createLspSymbolLookup — ADR-0422 hellgate", () => {
     })
     const hits = await port.findSymbol("S")
     expect(hits?.length).toBe(3)
+  })
+})
+
+describe("createUnionLspSymbolLookup — ADR-0422 follow-up hellgate", () => {
+  test("U1 — empty anchor list ⇒ null (LSP strategy disabled)", async () => {
+    const port = createUnionLspSymbolLookup({
+      provider: provider(async () => fakeSession(async () => [sym("X", 0, { uri: "x.ts" })])),
+      cwd: "/repo",
+      anchorFiles: [],
+    })
+    expect(await port.findSymbol("X")).toBeNull()
+  })
+
+  test("U2 — empty / hostile name ⇒ null", async () => {
+    const port = createUnionLspSymbolLookup({
+      provider: provider(async () => fakeSession(async () => [sym("X", 0, { uri: "x.ts" })])),
+      cwd: "/repo",
+      anchorFiles: ["/repo/a.ts"],
+    })
+    expect(await port.findSymbol("")).toBeNull()
+  })
+
+  test("U3 — fans across anchors and MERGES hits from each language server", async () => {
+    // Two anchors (.ts + .py). The provider returns a different hit per file
+    // extension so we can prove BOTH servers were probed.
+    const port = createUnionLspSymbolLookup({
+      provider: provider(async (file) =>
+        fakeSession(async () =>
+          file.endsWith(".py")
+            ? [sym("Foo", 10, { uri: "py/foo.py" })]
+            : [sym("Foo", 20, { uri: "ts/foo.ts" })],
+        ),
+      ),
+      cwd: "/repo",
+      anchorFiles: ["/repo/ts/anchor.ts", "/repo/py/anchor.py"],
+    })
+    const hits = await port.findSymbol("Foo")
+    expect(hits?.map((h) => h.path).sort()).toEqual(["py/foo.py", "ts/foo.ts"])
+  })
+
+  test("U4 — one anchor misses (null), the other hits ⇒ the hit survives", async () => {
+    const port = createUnionLspSymbolLookup({
+      provider: provider(async (file) =>
+        fakeSession(async () => (file.endsWith(".py") ? null : [sym("Bar", 3, { uri: "x.ts" })])),
+      ),
+      cwd: "/repo",
+      anchorFiles: ["/repo/x.ts", "/repo/y.py"],
+    })
+    const hits = await port.findSymbol("Bar")
+    expect(hits?.length).toBe(1)
+    expect(hits?.[0]?.path).toBe("x.ts")
+  })
+
+  test("U5 — duplicate hit from two anchors is deduped (first occurrence)", async () => {
+    const port = createUnionLspSymbolLookup({
+      provider: provider(async () => fakeSession(async () => [sym("Dup", 5, { uri: "same.ts" })])),
+      cwd: "/repo",
+      anchorFiles: ["/repo/a.ts", "/repo/b.ts"],
+    })
+    const hits = await port.findSymbol("Dup")
+    expect(hits?.length).toBe(1)
+  })
+
+  test("U6 — all anchors miss ⇒ null", async () => {
+    const port = createUnionLspSymbolLookup({
+      provider: provider(async () => fakeSession(async () => [])),
+      cwd: "/repo",
+      anchorFiles: ["/repo/a.ts", "/repo/b.py"],
+    })
+    expect(await port.findSymbol("Nope")).toBeNull()
+  })
+
+  test("U7 — a throwing anchor ⇒ NO-THROW, contributes nothing", async () => {
+    const port = createUnionLspSymbolLookup({
+      provider: provider(async (file) => {
+        if (file.endsWith(".py")) throw new Error("server crash")
+        return fakeSession(async () => [sym("Ok", 1, { uri: "ok.ts" })])
+      }),
+      cwd: "/repo",
+      anchorFiles: ["/repo/a.ts", "/repo/b.py"],
+    })
+    const hits = await port.findSymbol("Ok")
+    expect(hits?.length).toBe(1)
+    expect(hits?.[0]?.path).toBe("ok.ts")
   })
 })
