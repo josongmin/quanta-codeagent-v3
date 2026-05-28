@@ -12,12 +12,18 @@
  *    - `subagent_read_messages` — drain / peek the caller's inbox (ADR-0419,
  *      closes the ADR-0416 read deferral).
  *
- *  Sender / reader id: derived from `ctx`. `ToolContext` carries no session id
- *  today, so we derive a stable-per-depth label from `ctx.depth` (root = "root",
- *  child = "agent@depth-N"). Both tools share the SAME `senderId` helper so the
- *  agent that sent under a depth-derived label reads its own inbox under that
- *  identical label. The literal target `"parent"` (send only) is rewritten to the
- *  parent's derived label. This keeps the tool slice free of any `@/agent` import.
+ *  Sender / reader id: derived from `ctx`. PREFERRED is the STABLE per-agent
+ *  mailbox label `ctx.agentLabel` (the subagent runner mints a deterministic
+ *  `parentLabel/seq` id and the dispatch seam surfaces it). When absent we FALL
+ *  BACK to a stable-per-depth label from `ctx.depth` (root = "root", child =
+ *  "agent@depth-N"). The depth-only fallback is correct for root↔single-child,
+ *  but it COLLAPSES every sibling forked at the same depth onto one label — so a
+ *  parent's DIRECT message to one sibling could be consumed by another. The
+ *  stable `agentLabel` is the structural fix for that (audit H). Both tools share
+ *  the SAME `senderId` helper so the agent that sent under a label reads its own
+ *  inbox under that identical label. The literal target `"parent"` (send only)
+ *  resolves to `ctx.parentAgentLabel` when present, else the depth-derived parent
+ *  label. This keeps the tool slice free of any `@/agent` import.
  *
  *  HITL tier: `pre-approval-ok` for BOTH (information-class — no FS / shell /
  *  network side effect; send only enqueues in memory, read only polls memory).
@@ -53,22 +59,37 @@ export const subagentSendMessageSchema = z.object({
 })
 export type SubagentSendMessageInput = z.infer<typeof subagentSendMessageSchema>
 
-/** Derive a stable sender label from the calling agent's recursion depth.
- *  `ToolContext` has no session id today; depth is the only stable agent-
- *  identity signal the dispatch seam threads in (`AgentConfig.depth`). Root
- *  (0 / absent) ⇒ "root"; a child at depth N ⇒ "agent@depth-N". */
-const senderId = (ctx: ToolContext): string => {
+/** A usable stable label is a non-empty string. The runner mints these
+ *  deterministically (`parentLabel/seq`); a hostile / empty value falls through
+ *  to the depth fallback rather than corrupting addressing. */
+const usableLabel = (v: unknown): v is string => typeof v === "string" && v.length > 0
+
+/** Depth-derived label (the FALLBACK identity): root (0 / absent) ⇒ "root";
+ *  a child at depth N ⇒ "agent@depth-N". Correct for root↔single-child, but
+ *  COLLAPSES same-depth siblings onto one label — which is exactly why the
+ *  stable `agentLabel` seam exists (audit H). */
+const depthLabel = (ctx: ToolContext): string => {
   const d = ctx.depth
   const depth = typeof d === "number" && Number.isFinite(d) && d >= 0 ? Math.floor(d) : 0
   return depth === 0 ? "root" : `agent@depth-${depth}`
 }
 
-/** Resolve the literal target `"parent"` to the parent's derived label so a
- *  child can address its parent without knowing the id. A depth-N child's
- *  parent is depth N-1. Everything else (a concrete id or `"*"`) passes
+/** Resolve the calling agent's mailbox identity. PREFERS the stable
+ *  `ctx.agentLabel` (deterministic per-agent id from the subagent runner);
+ *  FALLS BACK to the depth-derived label so a legacy caller that sets only
+ *  `ctx.depth` is byte-identical. */
+const senderId = (ctx: ToolContext): string =>
+  usableLabel(ctx.agentLabel) ? ctx.agentLabel : depthLabel(ctx)
+
+/** Resolve the literal target `"parent"`. PREFERS the stable
+ *  `ctx.parentAgentLabel` (the exact agent that spawned this one) so a child
+ *  addresses the right parent even when siblings share a depth; FALLS BACK to
+ *  depth arithmetic (a depth-N child's parent is depth N-1) when the stable
+ *  parent label is absent. Everything else (a concrete id or `"*"`) passes
  *  through verbatim. */
 const resolveTarget = (to: string, ctx: ToolContext): string => {
   if (to !== "parent") return to
+  if (usableLabel(ctx.parentAgentLabel)) return ctx.parentAgentLabel
   const d = ctx.depth
   const depth = typeof d === "number" && Number.isFinite(d) && d >= 0 ? Math.floor(d) : 0
   const parentDepth = depth > 0 ? depth - 1 : 0

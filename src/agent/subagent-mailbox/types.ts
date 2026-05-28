@@ -34,9 +34,11 @@ export interface MailboxMessage {
   readonly body: string
   readonly correlationId?: string
   readonly sentAt: number
-  /** Set the first time the message is delivered to its target via `read`.
-   *  For a broadcast this reflects the FIRST per-agent delivery (the store
-   *  tracks per-agent lastReadAt for broadcast fan-out). */
+  /** Set the first time the message is delivered to a recipient via `read`.
+   *  For a DIRECT message the store tracks delivery PER RECIPIENT (audit-H
+   *  fix); this public field projects the EARLIEST recipient's stamp. For a
+   *  broadcast it reflects the FIRST per-agent delivery (the store tracks
+   *  per-agent lastReadAt for broadcast fan-out). */
   readonly deliveredAt?: number
 }
 

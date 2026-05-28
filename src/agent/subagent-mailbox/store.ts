@@ -11,7 +11,13 @@
  * `pendingFor` ⇒ `0`) on ANY internal error or malformed input. No method throws.
  *
  * Delivery model (see ./types doc + ADR-0416):
- *   - DIRECT  (`to === agentId`): a per-message `deliveredAt` stamp.
+ *   - DIRECT  (`to === agentId`): a PER-RECIPIENT delivered set
+ *     (`directDelivered: recipientId → deliveredAt`). The public
+ *     `MailboxMessage.deliveredAt` reflects the FIRST recipient's stamp. Per-
+ *     recipient tracking (rather than a single shared `deliveredAt` stamp) is
+ *     the audit-H structural fix: one recipient draining its inbox can NEVER
+ *     mark another agent's DIRECT mail delivered, so multi-sibling direct
+ *     routing is reliable even if two readers transiently match the same `to`.
  *   - BROADCAST(`to === "*"`): per-AGENT `lastReadAt` cursor. A broadcast is
  *     delivered ONCE PER AGENT (each reader has its own cursor) and NEVER to
  *     its own sender.
@@ -33,8 +39,11 @@ const DEFAULT_MAX_RETAINED = 1024
 const DEFAULT_RETENTION_MS = 3_600_000
 const BROADCAST = "*"
 
-/** Internal mutable cell. `deliveredAt` is the DIRECT-delivery stamp; broadcast
- *  delivery is tracked separately via per-agent cursors. */
+/** Internal mutable cell. DIRECT delivery is tracked PER RECIPIENT via
+ *  `directDelivered` (recipientId → deliveredAt) — the audit-H fix so one
+ *  reader cannot consume another agent's direct mail. The public
+ *  `MailboxMessage.deliveredAt` is projected as the EARLIEST recipient stamp.
+ *  Broadcast delivery is tracked separately via per-agent cursors. */
 interface Cell {
   id: string
   from: string
@@ -43,7 +52,18 @@ interface Cell {
   body: string
   correlationId?: string
   sentAt: number
-  deliveredAt?: number
+  /** recipientId → first-delivery timestamp. Empty ⇒ undelivered to anyone. */
+  directDelivered: Map<string, number>
+}
+
+/** Earliest per-recipient delivery stamp on a cell (the public
+ *  `MailboxMessage.deliveredAt`), or `undefined` when delivered to no one. */
+const earliestDelivered = (cell: Cell): number | undefined => {
+  let min: number | undefined
+  for (const t of cell.directDelivered.values()) {
+    if (min === undefined || t < min) min = t
+  }
+  return min
 }
 
 const isNonEmptyString = (v: unknown): v is string => typeof v === "string" && v.length > 0
@@ -58,8 +78,9 @@ const finiteOrZero = (v: unknown): number => (typeof v === "number" && Number.is
 /** Project a cell to the frozen public message. Omits optional keys when
  *  absent (exactOptional) so a `response` round-trips without a stray
  *  `correlationId: undefined`. */
-const toMessage = (cell: Cell): MailboxMessage =>
-  Object.freeze({
+const toMessage = (cell: Cell): MailboxMessage => {
+  const deliveredAt = earliestDelivered(cell)
+  return Object.freeze({
     id: cell.id,
     from: cell.from,
     to: cell.to,
@@ -67,8 +88,9 @@ const toMessage = (cell: Cell): MailboxMessage =>
     body: cell.body,
     sentAt: cell.sentAt,
     ...(cell.correlationId !== undefined ? { correlationId: cell.correlationId } : {}),
-    ...(cell.deliveredAt !== undefined ? { deliveredAt: cell.deliveredAt } : {}),
+    ...(deliveredAt !== undefined ? { deliveredAt } : {}),
   })
+}
 
 /** Does `cell` match the (sanitized) `list` filter? Module-level so the port's
  *  `list` body stays under the cognitive-complexity cap. */
@@ -93,9 +115,10 @@ const broadcastSeen = (cell: Cell, cursors: Map<string, number>): boolean => {
   return false
 }
 
-/** Eviction ordering key: 0 = delivered (evict first), 1 = undelivered. */
+/** Eviction ordering key: 0 = delivered (evict first), 1 = undelivered. A
+ *  DIRECT cell counts as delivered once ANY recipient has consumed it. */
 const deliveredRank = (cell: Cell, cursors: Map<string, number>): 0 | 1 =>
-  cell.deliveredAt !== undefined || broadcastSeen(cell, cursors) ? 0 : 1
+  cell.directDelivered.size > 0 || broadcastSeen(cell, cursors) ? 0 : 1
 
 /** Reclaim cells past `maxRetained` (delivered-before-undelivered, oldest
  *  `sentAt` first) and any older than `retentionMs`. Mutates `cells` in place.
@@ -127,10 +150,11 @@ const evict = (
 }
 
 /** Mark the picked cells delivered for `agentId` and advance the broadcast
- *  cursor, returning the projected messages. DIRECT cells get a per-message
- *  `deliveredAt` stamp; broadcast idempotency comes from advancing the agent's
- *  cursor past the newest delivered `sentAt`. Module-level so `read` stays under
- *  the complexity cap. */
+ *  cursor, returning the projected messages. DIRECT cells get a PER-RECIPIENT
+ *  `directDelivered[agentId]` stamp (so another recipient's delivery state is
+ *  untouched — the audit-H fix); broadcast idempotency comes from advancing the
+ *  agent's cursor past the newest delivered `sentAt`. Module-level so `read`
+ *  stays under the complexity cap. */
 const markDelivered = (
   picked: Cell[],
   agentId: string,
@@ -140,7 +164,7 @@ const markDelivered = (
 ): MailboxMessage[] => {
   const out: MailboxMessage[] = []
   for (const c of picked) {
-    if (c.to === agentId && c.deliveredAt === undefined) c.deliveredAt = t
+    if (c.to === agentId && !c.directDelivered.has(agentId)) c.directDelivered.set(agentId, t)
     out.push(toMessage(c))
   }
   if (maxSeenSentAt >= 0) {
@@ -158,15 +182,24 @@ const cellFromMessage = (m: unknown): Cell | null => {
   if (!isKind(rec.kind)) return null
   const correlationId = isString(rec.correlationId) ? rec.correlationId : undefined
   const deliveredAt = finiteOrUndefined(rec.deliveredAt)
+  const to = isString(rec.to) ? rec.to : ""
+  // Snapshot carries only a single public `deliveredAt`. Reconstruct the
+  // per-recipient map: a delivered DIRECT message (concrete `to`, not "*")
+  // re-seeds `{ [to]: deliveredAt }`; broadcasts keep an empty direct map
+  // (their delivery lives in the per-agent cursor, not the snapshot).
+  const directDelivered = new Map<string, number>()
+  if (deliveredAt !== undefined && to.length > 0 && to !== BROADCAST) {
+    directDelivered.set(to, deliveredAt)
+  }
   return {
     id: isNonEmptyString(rec.id) ? rec.id : `msg_${randomUUID()}`,
     from: isString(rec.from) ? rec.from : "",
-    to: isString(rec.to) ? rec.to : "",
+    to,
     kind: rec.kind,
     body: isString(rec.body) ? rec.body : "",
     ...(correlationId !== undefined ? { correlationId } : {}),
     sentAt: finiteOrZero(rec.sentAt),
-    ...(deliveredAt !== undefined ? { deliveredAt } : {}),
+    directDelivered,
   }
 }
 
@@ -200,10 +233,12 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
     }
   }
 
-  /** Selection predicate: is `cell` addressed to `agentId` and not-yet-seen? */
+  /** Selection predicate: is `cell` addressed to `agentId` and not-yet-seen?
+   *  DIRECT delivery is checked PER RECIPIENT (`directDelivered.has(agentId)`)
+   *  so a sibling consuming its own mail never hides another sibling's. */
   const isUndeliveredFor = (cell: Cell, agentId: string): boolean => {
     if (cell.from === agentId) return false // never deliver to self
-    if (cell.to === agentId) return cell.deliveredAt === undefined
+    if (cell.to === agentId) return !cell.directDelivered.has(agentId)
     if (cell.to === BROADCAST) {
       const cursor = broadcastCursor.get(agentId) ?? -1
       return cell.sentAt > cursor
@@ -246,6 +281,7 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
           body: isString(init?.body) ? init.body : "",
           ...(correlationId !== undefined ? { correlationId } : {}),
           sentAt: t,
+          directDelivered: new Map<string, number>(),
         }
         cells.set(cell.id, cell)
         evict(cells, broadcastCursor, maxRetained, retentionMs, t)
@@ -289,7 +325,13 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
         if (!isNonEmptyString(messageId)) return null
         const c = cells.get(messageId)
         if (c === undefined) return null
-        if (c.deliveredAt === undefined) c.deliveredAt = clockNow()
+        // Out-of-band acknowledge for the addressed recipient — marks the
+        // DIRECT message delivered to `c.to` so a later `read(c.to)` no longer
+        // surfaces it. A broadcast / empty `to` has no single recipient to ack;
+        // it still round-trips the message unchanged. Idempotent per recipient.
+        if (c.to.length > 0 && c.to !== BROADCAST && !c.directDelivered.has(c.to)) {
+          c.directDelivered.set(c.to, clockNow())
+        }
         return toMessage(c)
       } catch {
         return null

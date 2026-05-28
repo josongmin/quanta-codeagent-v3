@@ -23,6 +23,14 @@ import type { ShellExecObserver } from "./shell-exec-types"
  *                           `@/agent/agent-loop`). Consumer: `@/subagent`
  *                           depth gate. Absent ⇒ treated as 0.
  *
+ *   - `agentLabel?` /       ADR-0416 sibling-identity fix. Provider: dispatch
+ *     `parentAgentLabel?`   seam from `AgentConfig.mailboxAgentId` /
+ *                           `mailboxParentId` (the subagent runner mints a
+ *                           deterministic `parentLabel/seq` child id). Consumer:
+ *                           the subagent-mailbox tools' `senderId` /
+ *                           `resolveTarget`. Absent ⇒ depth-derived fallback
+ *                           (byte-identical legacy).
+ *
  *   - `workingState?`       Codex memory L3 absorption. Provider: agent loop
  *                           when `AgentConfig.workingState` is set (composition
  *                           root in `@/agent/working-state`). Consumer: the
@@ -99,6 +107,26 @@ export interface ToolContext {
    *  absent ⇒ treated as 0. Propagated by the dispatch seam from
    *  `AgentConfig.depth` (subagent absorption, ADR-0011). */
   depth?: number
+  /** ADR-0416 sibling-identity fix — STABLE per-agent mailbox identity. The
+   *  subagent-mailbox tools (`subagent_send_message` / `subagent_read_messages`)
+   *  prefer this label over the depth-derived one when computing the caller's
+   *  sender / inbox id. Depth ALONE collapses every sibling forked at the same
+   *  depth onto a single label (`agent@depth-N`), so a parent's DIRECT message
+   *  to one sibling could be consumed by another. The subagent runner mints a
+   *  DETERMINISTIC id (`parentLabel/seq` — replay-friendly ordinal, not a uuid)
+   *  and the dispatch seam surfaces it here from `AgentConfig.mailboxAgentId`.
+   *  Absent ⇒ the tools fall back to the depth-derived label (byte-identical
+   *  for every legacy caller that sets only `ctx.depth`). Duck-typed so `@/tool`
+   *  never imports `@/agent`. */
+  agentLabel?: string
+  /** ADR-0416 sibling-identity fix — the STABLE mailbox identity of the agent
+   *  that spawned this one. `subagent_send_message` resolves the literal target
+   *  `"parent"` to THIS label when present (instead of depth arithmetic), so a
+   *  child addresses the EXACT parent that forked it even when siblings share a
+   *  depth. Surfaced by the dispatch seam from `AgentConfig.mailboxParentId`.
+   *  Absent ⇒ `"parent"` falls back to the depth-derived parent label
+   *  (byte-identical legacy). Duck-typed so `@/tool` never imports `@/agent`. */
+  parentAgentLabel?: string
   /** Session-scoped WorkingState handle (Codex memory L3 absorption). Optional
    *  and duck-typed so the `@/tool` slice never imports `@/agent`: the agent
    *  loop builds the concrete instance when `AgentConfig.workingState` is set,
