@@ -1,0 +1,40 @@
+id: bash-output-cap-delegation
+title: bash head-only 30K truncation 제거 → registry capToolOutput head+tail 위임 (ADR-0411)
+section: 2
+subsystem: 도구 시스템 — output truncation policy
+order: 411
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: n-a
+owners: ["@songmin"]
+labels: ["surface:core", "ux-touched"]
+depends_on: [bash-tool, registry-cap-tool-output]
+purpose: |
+  bash가 자체 30K head-only truncation으로 출력 끝부분(에러 메시지/exit
+  summary)을 잘라서 디버그 정보 손실되던 문제 폐쇄. `formatRunBody`와
+  `buildBackgroundCompletedResult` 둘 다 head-only slice 제거 — raw body
+  반환. registry의 `capToolOutput`(200K head+tail, 이미 wired)에 위임 ⇒
+  명령 끝부분이 truncation에서 살아남는다. 메모리 안전: runShell이 이미
+  buffer한 후 ShellResult 반환이라 삭제된 slice는 buffering **이후**
+  실행 — 메모리 중립.
+evidence:
+  code:
+    - src/tool/bash/index.ts
+    - src/tool/registry.ts
+    - src/tool/output-spill.ts
+  adrs: [411]
+  tests:
+    unit:
+      - tests/unit/bash-output-cap-delegation-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  bash placeholder/in-flight stream sampling은 별도 `MAX_BG_PLACEHOLDER_OUTPUT`
+  으로 분리(여전히 tail-only) — 즉 in-flight ≠ completed 경로.
+  사용자 명령 출력이 200K 초과 시 capToolOutput이 head+tail로 자르고 전체
+  본문을 `.quanta/tool-output/<uuid>.txt`로 spill — bounded streaming-to-disk.

@@ -1,0 +1,42 @@
+id: semantic-index-real-embedder
+title: semantic index 실 embedder + sqlite delta persist (ADR-0392)
+section: 5
+subsystem: 메모리 — semantic search backend
+order: 392
+maturity: L3
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on: [search-pipeline-from-env]
+config_refs:
+  env: ["QUANTA_EMBED_PROVIDER", "QUANTA_INDEX_PERSIST", "QUANTA_INDEX_DB_PATH"]
+purpose: |
+  startIndexer가 더 이상 placeholder hashEmbed(64-d FNV)만 쓰지 않는다 —
+  ADR-0261 embedder 레지스트리(createEmbedderFromEnv: openai/voyage/cohere/
+  ollama/headless)에 wired. env 미설정 / embedder null / err / empty / throw
+  ⇒ hashEmbed fallback(lexical-default 안전). 또 sqlite-vss 기반 delta
+  persist 추가: `QUANTA_INDEX_PERSIST=on` + `QUANTA_INDEX_DB_PATH=<file>`
+  (default `:memory:`)일 때만 활성. default-OFF: 두 knob 미설정 ⇒ in-memory
+  + hashEmbed ⇒ byte-identical.
+evidence:
+  code:
+    - src/runner/assemble/search-index-backend.ts
+    - src/runner/assemble/search-pipeline.ts
+    - src/retrieval/engines/embedder/registry.ts
+    - src/retrieval/engines/store/sqlite-vss-store.ts
+  adrs: [392]
+  tests:
+    unit:
+      - tests/unit/runner/search-index-backend.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  lexical search는 default — semantic은 보조. real embedder 미설정 시
+  hashEmbed로 graceful fallback이라 사용자가 embedder 모르고 쓰는 경우에도
+  lexical 동작 byte-identical.

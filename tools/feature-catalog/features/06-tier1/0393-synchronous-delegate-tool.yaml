@@ -1,0 +1,45 @@
+id: synchronous-delegate-tool
+title: 동기 delegate 도구 — mode-typed in-band boomerang (ADR-0393)
+section: 6
+subsystem: Tier-1 — synchronous delegation surface
+order: 393
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1"]
+depends_on: [subagent-typed-port, agent-delegation-runner]
+purpose: |
+  quanta엔 이미 background subagent(subagent_fork/poll/await, ADR-0140)와
+  6-tool(spawn_agent 등)이 있다. 이건 **동기** delegation 도구 — 부모가
+  자식에 위임하고 결과를 그 자리에서 받는(boomerang) LLM-facing surface.
+  closed-enum mode(architect/editor/debug/tdd/explore — explore는 메서드
+  아니라 mode VALUE, port에 `explore` 메서드 없음), SessionDeps.delegation
+  .delegate 호출, NO-THROW(port throw ⇒ ok:false). HITL `always-confirm`.
+  describe에 "when not to use" 명시(동기라 부모 블락 ⇒ 병렬엔 subagent_fork
+  써라). Default-OFF: config.delegation 미설정 ⇒ extraTools 미등록 ⇒
+  byte-identical.
+evidence:
+  code:
+    - src/tool/delegate/port.ts
+    - src/tool/delegate/delegate.ts
+    - src/tool/delegate/index.ts
+    - src/agent/tier1/delegate.ts
+    - src/agent/features.ts
+    - src/agent/subagent-typed/port.ts
+    - src/runner/session-execution-plane.ts
+  adrs: [393]
+  tests:
+    unit:
+      - tests/unit/delegate-tool-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  fork 패턴 미러(subagent-bg 구조). 14 hellgate(`explore` 메서드 부재 봉인
+  포함). DelegationPort.delegate는 SessionDeps에 adaptDelegation으로 이미
+  배선됨 — 도구 surface만 신규.

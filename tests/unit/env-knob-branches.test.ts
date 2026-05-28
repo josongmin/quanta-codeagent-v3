@@ -57,6 +57,14 @@ const ENV_KEYS = [
   // leak into `chatgpt-oauth` selection.
   "QUANTA_PREFS_HOME",
   "CODEX_HOME",
+  // ADR-0392 — semantic index real embedder + sqlite delta persist
+  "QUANTA_INDEX_PERSIST",
+  "QUANTA_INDEX_DB_PATH",
+  "QUANTA_EMBED_PROVIDER",
+  // ADR-0405 — edit-after-diagnostics hook (composition wire)
+  "QUANTA_LSP_DIAGNOSTICS_HOOK",
+  // ADR-0412 — check_secrets LLM-facing tool
+  "QUANTA_SECRET_CHECK_TOOL",
 ] as const
 
 const snapshot = (): Map<string, string | undefined> => {

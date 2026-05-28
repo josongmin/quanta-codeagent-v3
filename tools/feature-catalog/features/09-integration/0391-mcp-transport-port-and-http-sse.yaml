@@ -1,0 +1,44 @@
+id: mcp-transport-port-and-http-sse
+title: MCP transport port + stdio 분리 + Streamable-HTTP/SSE 카리어 (ADR-0391)
+section: 9
+subsystem: MCP — transport 추상화 + 원격 서버 지원
+order: 391
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:mcp-spec"]
+depends_on: [mcp-client, mcp-bridge]
+purpose: |
+  client.ts core(request/dispatch/pending/timeout)는 불변. stdio 4곳
+  (start/send/pumpStdout/stop)을 transport port 뒤로 분리 — `McpTransport`
+  interface(start/send/onMessage/onExit/close). 3 impl: stdio(verbatim
+  move), http-sse(MCP Streamable-HTTP — POST send + SSE/JSON reply +
+  Mcp-Session-Id capture/echo + DELETE-on-close). `.mcp.json`의 server
+  entry에 `url` 필드 적으면 자동 HTTP transport, 없으면 stdio (default
+  byte-identical). plugin manifest MCPServerSpecSchema에도 url/headers
+  optional 추가(refine: command non-empty OR url).
+evidence:
+  code:
+    - src/mcp/transports/port.ts
+    - src/mcp/transports/stdio.ts
+    - src/mcp/transports/http-sse.ts
+    - src/mcp/client.ts
+    - src/mcp/types.ts
+    - src/skill/plugin-manifest.ts
+    - src/apps/cli/internal.ts
+  adrs: [391]
+  tests:
+    unit:
+      - tests/unit/mcp/transport-port-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  jsonrpc.ts (encodeMessage + LineReader)는 이미 transport-agnostic이라
+  미수정. 25 hellgate(byte-identical stdio + http SSE/JSON + 202 notif +
+  malformed payload skip + envelope fail-closed) 봉인.

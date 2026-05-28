@@ -1,0 +1,49 @@
+id: default-on-subagent-and-skills
+title: subagent + skills default-ON 전환 — surface-agnostic env-off-switch
+order: 999
+section: 6
+subsystem: Tier-1 — default-OFF 원칙 의도적 예외
+maturity: L4
+status: new
+ui_surfaces: [cli, web, tauri]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "ux-touched", "tier:1"]
+depends_on: [subagent-tier1, skills-tier1, agent-loop-cli]
+config_refs:
+  env: ["QUANTA_SUBAGENT", "QUANTA_SKILLS", "QUANTA_SKILLS_DIR"]
+purpose: |
+  RFC §1.2 default-OFF byte-identical 원칙의 **의도적 예외**. Codex/Claude
+  Code/Cursor 모두 subagent + skills를 default로 켠다 — quanta가 default
+  -OFF면 모델이 자연어로 "병렬로 해줘"/"스킬 알아서 써줘"라 해도 안 먹힌다
+  (도구 미등록 + 스킬 카탈로그 미주입 ⇒ 모델 눈에 안 보임). 이 ADR에서 둘
+  다 default-ON으로 뒤집되 env off-switch 유지: `QUANTA_SUBAGENT=0`/`QUANTA
+  _SKILLS=0`(또는 false/off/no) ⇒ OFF, CI/벤치의 byte-identical 재현성용
+  탈출구. 신규 surface-agnostic pure helper `parseEnvFlag(raw, defaultOn)`
+  를 `@/runner/assemble`에 두고 CLI/web-daemon 양쪽이 동일 시맨틱 공유
+  (tauri는 web-daemon sidecar라 자동 커버).
+evidence:
+  code:
+    - src/runner/assemble/env-flag.ts
+    - src/runner/assemble/index.ts
+    - src/apps/cli/internal.ts
+    - src/apps/web-daemon/runtime-factory.ts
+    - src/agent/features.ts
+    - src/agent/prompt.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/env-knob-branches.test.ts
+      - tests/integration/cli-export-assembly.test.ts
+      - tests/unit/features.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  스킬 켜지면 `renderActiveSkillsBlock`이 시스템 프롬프트에 "## Active
+  skills" + Trigger rules(룰2 mandatory) 자동 주입 ⇒ Claude Code 자동 트리거
+  동급. subagent 켜지면 agent/task_output/task_stop 도구 노출 ⇒ 자연어
+  "병렬로" 호출 가능. byte-identical 원칙은 env=0으로 복원 가능.
