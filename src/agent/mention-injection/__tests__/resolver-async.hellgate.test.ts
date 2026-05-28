@@ -43,20 +43,41 @@ const port = (overrides: Partial<MentionResolverPort> = {}): MentionResolverPort
 describe("buildInjectionFragments async parallelism — ADR-0418 hellgate", () => {
   // -------- A. parallelism -------------------------------------------
 
-  test("A1 — 3 skill mentions each ~40ms resolve in PARALLEL (< sum)", async () => {
+  test("A1 — 3 skill mentions resolve CONCURRENTLY (max in-flight >= 2)", async () => {
+    // DETERMINISTIC parallelism proof: instead of asserting wall-clock <
+    // sum (CI-load flaky, and a "nearly-serial" 3×latency-but-overlapping
+    // bug would still squeak under a generous ceiling), instrument the
+    // resolver to track how many calls are IN FLIGHT at once. A serial
+    // implementation never exceeds 1; `Promise.all` over independent I/O
+    // reaches the mention count. We gate on `>= 2` (strictly parallel) so
+    // the assertion is robust to scheduler jitter yet fails the instant the
+    // pipeline regresses to awaiting one mention before starting the next.
     const mentions = [SK("a", 0), SK("b", 4), SK("c", 8)]
+    let active = 0
+    let maxConcurrent = 0
+    // A barrier the first arrivals park on guarantees they overlap regardless
+    // of how fast each resolves — `release()` is only called once every call
+    // has entered, so a serial pipeline would DEADLOCK here (and time out),
+    // while a parallel one sails through. No wall-clock assertion needed.
+    let release!: () => void
+    const allEntered = new Promise<void>((r) => {
+      release = r
+    })
     const p = port({
       resolveSkill: async (t) => {
-        await delay(40)
+        active += 1
+        maxConcurrent = Math.max(maxConcurrent, active)
+        if (active === mentions.length) release()
+        await allEntered
+        active -= 1
         return { bodyText: t }
       },
     })
-    const t0 = Date.now()
     const out = await buildInjectionFragments(mentions, p)
-    const elapsed = Date.now() - t0
     expect(out).toHaveLength(3)
-    // serial would be ~120ms; parallel ≈ 40ms. Generous ceiling avoids flake.
-    expect(elapsed).toBeLessThan(110)
+    // All three were in flight simultaneously (parallel), never one-at-a-time.
+    expect(maxConcurrent).toBe(mentions.length)
+    expect(maxConcurrent).toBeGreaterThanOrEqual(2)
   })
 
   test("A2 — all three resolver fns invoked (concurrent kinds)", async () => {
