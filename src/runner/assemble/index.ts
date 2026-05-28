@@ -42,6 +42,7 @@ export {
   type MemoryAutoTriggerPolicy,
   type MemorySessionOverride,
   type MemorySessionSlot,
+  resolveMemoryConfigFromEnv,
 } from "./memory-factory"
 export {
   assemblePipeline,

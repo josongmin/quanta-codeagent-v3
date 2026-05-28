@@ -147,14 +147,28 @@ const resolveAutoTrigger = (env: NodeJS.ProcessEnv): MemoryAutoTriggerPolicy | u
   return { promoteThreshold, minUsageCount }
 }
 
-/** Resolve the memory tuning config from env + store. Mirrors the legacy
- *  `buildMemoryConfig` exactly so the `MemoryConfigAssembleInput` shape
- *  feeding `buildMemoryConfigCore` is verbatim of what cli/internal.ts
- *  produced before — i.e. byte-identical config bytes when env matches. */
-const resolveMemoryConfig = (
+/**
+ * Resolve the memory tuning config from env + store. This is the SINGLE
+ * source of truth for the env → `MemoryConfigAssembleInput` projection
+ * (recallLimit / distill / consolidate / selfEditTools / recallTiers).
+ *
+ * ADR-0414 centralization: the CLI surface (`src/apps/cli/internal.ts`
+ * `buildMemoryConfig`) USED to re-read the same `QUANTA_MEMORY_*` knobs into
+ * an identical `buildMemoryConfigCore` call — a verbatim copy-paste of this
+ * function. That copy is gone: `buildMemoryConfig` now delegates here so the
+ * env-read truth lives in exactly one place. `buildMemoryForSession` also
+ * routes through this helper, so every surface produces byte-identical config
+ * bytes for the same env.
+ *
+ * Pure w.r.t `process.env` (the caller passes the env view). The `store`
+ * argument only affects whether an EMPTY block is still returned (a present
+ * store forces a truthy block so the loop wires it; absent store + no knobs
+ * collapses to `undefined`) — it never changes the knob values.
+ */
+export const resolveMemoryConfigFromEnv = (
   env: NodeJS.ProcessEnv,
   store: PersistentStorePort | undefined,
-  override: MemorySessionOverride | undefined,
+  override?: MemorySessionOverride,
 ): AgentConfig["memory"] | undefined => {
   const rawLimit = env.QUANTA_MEMORY_RECALL_LIMIT
   const envLimit = rawLimit !== undefined ? Number.parseInt(rawLimit, 10) : Number.NaN
@@ -217,7 +231,7 @@ export const buildMemoryForSession = (
         ? { path: env.QUANTA_MEMORY_PATH }
         : {}),
   })
-  const config = resolveMemoryConfig(env, store, override)
+  const config = resolveMemoryConfigFromEnv(env, store, override)
   // Auto-trigger: override wins; null forces off, undefined falls through
   // to env. The env path is default-ON.
   const autoTrigger =
