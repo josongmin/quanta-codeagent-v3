@@ -18,6 +18,7 @@ export interface GroundingBaselineResolution {
   normalizationProfile?: string
   harnessFingerprint?: string
   routeFingerprint?: string
+  executionContractFingerprint?: string
   caseSetFingerprint?: string
 }
 
@@ -47,6 +48,7 @@ export const resolveGroundingBaseline = (
   const normalizationProfile = runParamString(candidate, "normalizationProfile")
   const harnessFingerprint = runParamString(candidate, "harnessFingerprint")
   const routeFingerprint = runParamString(candidate, "routeFingerprint")
+  const executionContractFingerprint = runParamString(candidate, "executionContractFingerprint")
   const caseSetFingerprint = runParamString(candidate, "caseSetFingerprint")
   if (
     suite === undefined ||
@@ -56,6 +58,7 @@ export const resolveGroundingBaseline = (
     normalizationProfile === undefined ||
     harnessFingerprint === undefined ||
     routeFingerprint === undefined ||
+    executionContractFingerprint === undefined ||
     caseSetFingerprint === undefined
   ) {
     return {
@@ -69,6 +72,7 @@ export const resolveGroundingBaseline = (
       ...(normalizationProfile !== undefined ? { normalizationProfile } : {}),
       ...(harnessFingerprint !== undefined ? { harnessFingerprint } : {}),
       ...(routeFingerprint !== undefined ? { routeFingerprint } : {}),
+      ...(executionContractFingerprint !== undefined ? { executionContractFingerprint } : {}),
       ...(caseSetFingerprint !== undefined ? { caseSetFingerprint } : {}),
     }
   }
@@ -85,6 +89,7 @@ export const resolveGroundingBaseline = (
       runParamString(summary, "normalizationProfile") === normalizationProfile &&
       runParamString(summary, "harnessFingerprint") === harnessFingerprint &&
       runParamString(summary, "routeFingerprint") === routeFingerprint &&
+      runParamString(summary, "executionContractFingerprint") === executionContractFingerprint &&
       runParamString(summary, "caseSetFingerprint") === caseSetFingerprint
     )
   })
@@ -100,6 +105,7 @@ export const resolveGroundingBaseline = (
       normalizationProfile,
       harnessFingerprint,
       routeFingerprint,
+      executionContractFingerprint,
       caseSetFingerprint,
     }
   }
@@ -115,6 +121,7 @@ export const resolveGroundingBaseline = (
     normalizationProfile,
     harnessFingerprint,
     routeFingerprint,
+    executionContractFingerprint,
     caseSetFingerprint,
   }
 }

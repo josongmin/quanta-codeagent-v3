@@ -10,7 +10,11 @@ export type {
   RedactResult,
 } from "./redaction"
 export { assertKindWired, redactSecrets } from "./redaction"
-export type { NormalizedRedactionConfig, RedactionConfig } from "./redaction-config"
+export type {
+  NormalizedRedactionConfig,
+  PiiRedactionConfig,
+  RedactionConfig,
+} from "./redaction-config"
 export {
   normalizeRedactionConfig,
   REDACTION_DISABLED_WITHOUT_ACK_MESSAGE,

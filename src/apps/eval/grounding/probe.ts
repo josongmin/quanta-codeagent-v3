@@ -81,18 +81,8 @@ const buildProbePrompt = (
       ? []
       : probeProfile === "runtime_parity"
         ? [
-            "Decision rules:",
-            "- intent is the user's underlying goal, not the assistant's response act.",
-            "- Imperative work directives such as 다시 확인해, 손봐, 읽어, keep going, or ship/merge style asks imply intent=execute_change.",
-            "- Requests asking why/how or containing 설명해, explain, or why imply intent=explain even if phrased with an imperative ending.",
-            "- Questions about recent changes or thresholds imply intent=fact_lookup.",
-            "- If exactly one current active thread is identifiable and the utterance targets the current workstream, do not return activeThreadId=null.",
-            "- If exactly one current active thread is identifiable and no ambiguity remains, do not set shouldClarify=true.",
-            "- If scope=current_workstream, shouldClarify=false, and no narrower file/tool/subthread referent is implied, set referentId equal to activeThreadId.",
-            "- If the utterance names a concrete file path, or authoritative metadata leaves exactly one file candidate, use scope=specific_file and set referentId to that file path.",
-            "- Use scope=latest_tool_result only when authoritative state or history indicates an actual latest tool result. Otherwise prefer current_workstream or specific_subthread.",
-            "- Prefer current/active over paused, archived, historical, or background threads when those conflict.",
-            "- Only set shouldClarify=true when multiple plausible threads or referents remain after applying active-vs-paused and latest-result cues.",
+            "Use only the provided conversation context, <grounding-meta> annotations, and authoritative state snapshot.",
+            "Do not rely on evaluator-specific repair policies or extra benchmark assumptions.",
           ]
         : [
             "Decision rules:",

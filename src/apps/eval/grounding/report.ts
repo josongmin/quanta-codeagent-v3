@@ -47,6 +47,7 @@ export interface GroundingReport {
   probeProfile?: string
   normalizationProfile?: string
   structuredOutputProtocol?: string
+  executionContractFingerprint?: string
   total: number
   counts: Record<Verdict, number>
   route: {
@@ -115,7 +116,7 @@ export interface GroundingGateOutput {
 }
 
 export interface GroundingRouteMatrixFailure {
-  kind: "missing_cell" | "duplicate_cell" | "cell_gate_failure"
+  kind: "missing_cell" | "duplicate_cell" | "cell_gate_failure" | "unmatched_run"
   cellId: string
   message: string
   runIds?: readonly string[]
@@ -125,6 +126,9 @@ export interface GroundingRouteMatrixCellResult {
   cellId: string
   mode: GroundingMode
   corpus: string
+  probeProfile?: string
+  normalizationProfile?: string
+  structuredOutputProtocol?: string
   route: GroundingReport["route"]
   runId?: string
   passed: boolean
@@ -434,6 +438,9 @@ const renderMarkdown = (report: GroundingReport): string => {
   if (report.structuredOutputProtocol !== undefined) {
     lines.push(`Output protocol: ${report.structuredOutputProtocol}`)
   }
+  if (report.executionContractFingerprint !== undefined) {
+    lines.push(`Execution contract: ${report.executionContractFingerprint}`)
+  }
   const routeBits = [
     report.route.provider,
     report.route.model,
@@ -566,8 +573,8 @@ const renderRouteMatrixGateMarkdown = (result: GroundingRouteMatrixGateResult): 
   lines.push("")
   lines.push("## Cells")
   lines.push("")
-  lines.push("| Cell | Run | Mode | Corpus | Status | Route | Failures |")
-  lines.push("|---|---|---|---|---|---|---|")
+  lines.push("| Cell | Run | Mode | Corpus | Probe | Normalize | Output | Status | Route | Failures |")
+  lines.push("|---|---|---|---|---|---|---|---|---|---|")
   for (const cell of result.cells) {
     const routeBits = [
       cell.route.provider,
@@ -576,7 +583,7 @@ const renderRouteMatrixGateMarkdown = (result: GroundingRouteMatrixGateResult): 
       cell.route.transportId,
     ].filter((value): value is string => value !== undefined && value !== "")
     lines.push(
-      `| ${cell.cellId} | ${cell.runId ?? "-"} | ${cell.mode} | ${cell.corpus} | ${cell.passed ? "PASS" : "FAIL"} | ${routeBits.length > 0 ? routeBits.join(" / ") : "unknown"} | ${cell.failures.length} |`,
+      `| ${cell.cellId} | ${cell.runId ?? "-"} | ${cell.mode} | ${cell.corpus} | ${cell.probeProfile ?? "-"} | ${cell.normalizationProfile ?? "-"} | ${cell.structuredOutputProtocol ?? "-"} | ${cell.passed ? "PASS" : "FAIL"} | ${routeBits.length > 0 ? routeBits.join(" / ") : "unknown"} | ${cell.failures.length} |`,
     )
   }
   lines.push("")
@@ -602,7 +609,12 @@ const matchesMatrixCell = (
   (cell.model === undefined || report.route.model === cell.model) &&
   (cell.surfaceId === undefined || report.route.surfaceId === cell.surfaceId) &&
   (cell.transportId === undefined || report.route.transportId === cell.transportId) &&
-  (cell.authMode === undefined || report.route.authMode === cell.authMode)
+  (cell.authMode === undefined || report.route.authMode === cell.authMode) &&
+  (cell.probeProfile === undefined || report.probeProfile === cell.probeProfile) &&
+  (cell.normalizationProfile === undefined ||
+    report.normalizationProfile === cell.normalizationProfile) &&
+  (cell.structuredOutputProtocol === undefined ||
+    report.structuredOutputProtocol === cell.structuredOutputProtocol)
 
 export const evaluateGroundingGate = (
   report: GroundingReport,
@@ -753,6 +765,13 @@ export const buildGroundingRouteMatrixGateResult = (
         cellId: cell.id,
         mode: cell.mode,
         corpus: cell.corpus,
+        ...(cell.probeProfile !== undefined ? { probeProfile: cell.probeProfile } : {}),
+        ...(cell.normalizationProfile !== undefined
+          ? { normalizationProfile: cell.normalizationProfile }
+          : {}),
+        ...(cell.structuredOutputProtocol !== undefined
+          ? { structuredOutputProtocol: cell.structuredOutputProtocol }
+          : {}),
         route: {
           ...(cell.provider !== undefined ? { provider: cell.provider } : {}),
           ...(cell.model !== undefined ? { model: cell.model } : {}),
@@ -777,6 +796,13 @@ export const buildGroundingRouteMatrixGateResult = (
         cellId: cell.id,
         mode: cell.mode,
         corpus: cell.corpus,
+        ...(cell.probeProfile !== undefined ? { probeProfile: cell.probeProfile } : {}),
+        ...(cell.normalizationProfile !== undefined
+          ? { normalizationProfile: cell.normalizationProfile }
+          : {}),
+        ...(cell.structuredOutputProtocol !== undefined
+          ? { structuredOutputProtocol: cell.structuredOutputProtocol }
+          : {}),
         route: primary.route,
         runId: primary.runId,
         passed: false,
@@ -798,10 +824,26 @@ export const buildGroundingRouteMatrixGateResult = (
       cellId: cell.id,
       mode: cell.mode,
       corpus: cell.corpus,
+      ...(cell.probeProfile !== undefined ? { probeProfile: cell.probeProfile } : {}),
+      ...(cell.normalizationProfile !== undefined
+        ? { normalizationProfile: cell.normalizationProfile }
+        : {}),
+      ...(cell.structuredOutputProtocol !== undefined
+        ? { structuredOutputProtocol: cell.structuredOutputProtocol }
+        : {}),
       route: report.route,
       runId: report.runId,
       passed: gate.result.failures.length === 0,
       failures: gate.result.failures,
+    })
+  }
+  for (const report of reports) {
+    if (matrix.cells.some((cell) => matchesMatrixCell(report, cell))) continue
+    failures.push({
+      kind: "unmatched_run",
+      cellId: report.runId,
+      message: "provided run did not match any required matrix cell",
+      runIds: [report.runId],
     })
   }
   const result: GroundingRouteMatrixGateResult = {
@@ -835,6 +877,7 @@ export const buildGroundingReport = (
   const probeProfile = summaryParam(summary, "probeProfile")
   const normalizationProfile = summaryParam(summary, "normalizationProfile")
   const outputProtocol = summaryParam(summary, "outputProtocol")
+  const executionContractFingerprint = summaryParam(summary, "executionContractFingerprint")
   const run = summaryRunView(summary)
   const report: GroundingReport = {
     runId,
@@ -844,6 +887,7 @@ export const buildGroundingReport = (
     ...(probeProfile !== undefined ? { probeProfile } : {}),
     ...(normalizationProfile !== undefined ? { normalizationProfile } : {}),
     ...(outputProtocol !== undefined ? { structuredOutputProtocol: outputProtocol } : {}),
+    ...(executionContractFingerprint !== undefined ? { executionContractFingerprint } : {}),
     total: payloads.length,
     counts,
     route: reportRoute(payloads, summary),

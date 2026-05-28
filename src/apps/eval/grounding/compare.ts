@@ -64,6 +64,7 @@ export interface GroundingComparisonReport {
     normalizationProfile: GroundingComparabilityStatus
     harness: GroundingComparabilityStatus
     route: GroundingComparabilityStatus
+    executionContract: GroundingComparabilityStatus
     caseSet: GroundingComparabilityStatus
     baselineCorpus?: string
     candidateCorpus?: string
@@ -77,6 +78,8 @@ export interface GroundingComparisonReport {
     candidateHarnessFingerprint?: string
     baselineRouteFingerprint?: string
     candidateRouteFingerprint?: string
+    baselineExecutionContractFingerprint?: string
+    candidateExecutionContractFingerprint?: string
     baselineCaseSetFingerprint?: string
     candidateCaseSetFingerprint?: string
   }
@@ -111,6 +114,8 @@ export interface GroundingRegressionFailure {
     | "harness_mismatch"
     | "route_unverified"
     | "route_mismatch"
+    | "execution_contract_unverified"
+    | "execution_contract_mismatch"
     | "case_fingerprint_unverified"
     | "case_fingerprint_mismatch"
     | "case_set_mismatch"
@@ -342,7 +347,7 @@ const renderMarkdown = (comparison: GroundingComparisonReport): string => {
   lines.push(`Corpus: ${comparison.comparability.baselineCorpus ?? "unknown"} -> ${comparison.comparability.candidateCorpus ?? "unknown"}`)
   lines.push(`Mode: ${comparison.comparability.baselineMode ?? "unknown"} -> ${comparison.comparability.candidateMode ?? "unknown"}`)
   lines.push(
-    `Comparability: suite=${comparison.comparability.suite}, corpus=${comparison.comparability.corpus}, mode=${comparison.comparability.mode}, probeProfile=${comparison.comparability.probeProfile}, normalizationProfile=${comparison.comparability.normalizationProfile}, harness=${comparison.comparability.harness}, route=${comparison.comparability.route}, caseSet=${comparison.comparability.caseSet}`,
+    `Comparability: suite=${comparison.comparability.suite}, corpus=${comparison.comparability.corpus}, mode=${comparison.comparability.mode}, probeProfile=${comparison.comparability.probeProfile}, normalizationProfile=${comparison.comparability.normalizationProfile}, harness=${comparison.comparability.harness}, route=${comparison.comparability.route}, executionContract=${comparison.comparability.executionContract}, caseSet=${comparison.comparability.caseSet}`,
   )
   lines.push("")
   lines.push("## Metrics")
@@ -389,7 +394,7 @@ const renderRegressionMarkdown = (result: GroundingRegressionResult): string => 
   lines.push(`Status: ${result.passed ? "PASS" : "FAIL"}`)
   lines.push(`Comparable: ${result.comparable ? "yes" : "no"}`)
   lines.push(
-    `Comparability: suite=${result.comparability.suite}, corpus=${result.comparability.corpus}, mode=${result.comparability.mode}, probeProfile=${result.comparability.probeProfile}, normalizationProfile=${result.comparability.normalizationProfile}, harness=${result.comparability.harness}, route=${result.comparability.route}, caseSet=${result.comparability.caseSet}`,
+    `Comparability: suite=${result.comparability.suite}, corpus=${result.comparability.corpus}, mode=${result.comparability.mode}, probeProfile=${result.comparability.probeProfile}, normalizationProfile=${result.comparability.normalizationProfile}, harness=${result.comparability.harness}, route=${result.comparability.route}, executionContract=${result.comparability.executionContract}, caseSet=${result.comparability.caseSet}`,
   )
   lines.push("")
   lines.push("## Failures")
@@ -525,6 +530,10 @@ export const buildGroundingComparison = (
     runParamString(baseline, "routeFingerprint"),
     runParamString(candidate, "routeFingerprint"),
   )
+  const executionContractStatus = comparabilityStatus(
+    runParamString(baseline, "executionContractFingerprint"),
+    runParamString(candidate, "executionContractFingerprint"),
+  )
   const caseSetStatus = comparabilityStatus(
     runParamString(baseline, "caseSetFingerprint"),
     runParamString(candidate, "caseSetFingerprint"),
@@ -541,6 +550,14 @@ export const buildGroundingComparison = (
   const candidateNormalizationProfile = runParamString(candidate, "normalizationProfile")
   const baselineRouteFingerprint = runParamString(baseline, "routeFingerprint")
   const candidateRouteFingerprint = runParamString(candidate, "routeFingerprint")
+  const baselineExecutionContractFingerprint = runParamString(
+    baseline,
+    "executionContractFingerprint",
+  )
+  const candidateExecutionContractFingerprint = runParamString(
+    candidate,
+    "executionContractFingerprint",
+  )
   const baselineCaseSetFingerprint = runParamString(baseline, "caseSetFingerprint")
   const candidateCaseSetFingerprint = runParamString(candidate, "caseSetFingerprint")
   const bucketDeltas: GroundingBucketDelta[] = []
@@ -587,6 +604,7 @@ export const buildGroundingComparison = (
       normalizationProfileStatus === "match" &&
       harnessStatus === "match" &&
       routeStatus === "match" &&
+      executionContractStatus === "match" &&
       caseSetStatus === "match" &&
       regressions.every((change) => change.kind !== "missing_in_candidate") &&
       changes.every((change) => change.kind !== "new_in_candidate"),
@@ -598,6 +616,7 @@ export const buildGroundingComparison = (
       normalizationProfile: normalizationProfileStatus,
       harness: harnessStatus,
       route: routeStatus,
+      executionContract: executionContractStatus,
       caseSet: caseSetStatus,
       ...(baseline.corpus !== undefined ? { baselineCorpus: baseline.corpus } : {}),
       ...(candidate.corpus !== undefined ? { candidateCorpus: candidate.corpus } : {}),
@@ -611,6 +630,12 @@ export const buildGroundingComparison = (
       ...(candidateHarnessFingerprint !== undefined ? { candidateHarnessFingerprint } : {}),
       ...(baselineRouteFingerprint !== undefined ? { baselineRouteFingerprint } : {}),
       ...(candidateRouteFingerprint !== undefined ? { candidateRouteFingerprint } : {}),
+      ...(baselineExecutionContractFingerprint !== undefined
+        ? { baselineExecutionContractFingerprint }
+        : {}),
+      ...(candidateExecutionContractFingerprint !== undefined
+        ? { candidateExecutionContractFingerprint }
+        : {}),
       ...(baselineCaseSetFingerprint !== undefined ? { baselineCaseSetFingerprint } : {}),
       ...(candidateCaseSetFingerprint !== undefined ? { candidateCaseSetFingerprint } : {}),
     },
@@ -740,6 +765,22 @@ export const evaluateGroundingRegression = (
           message: "baseline and candidate route fingerprints differ",
           baseline: comparison.comparability.baselineRouteFingerprint ?? "unknown",
           candidate: comparison.comparability.candidateRouteFingerprint ?? "unknown",
+        })
+      }
+      if (comparison.comparability.executionContract === "unknown") {
+        failures.push({
+          kind: "execution_contract_unverified",
+          message: "missing execution contract fingerprints; comparison is not structurally verifiable",
+          baseline: comparison.comparability.baselineExecutionContractFingerprint ?? "unknown",
+          candidate: comparison.comparability.candidateExecutionContractFingerprint ?? "unknown",
+        })
+      }
+      if (comparison.comparability.executionContract === "mismatch") {
+        failures.push({
+          kind: "execution_contract_mismatch",
+          message: "baseline and candidate execution contract fingerprints differ",
+          baseline: comparison.comparability.baselineExecutionContractFingerprint ?? "unknown",
+          candidate: comparison.comparability.candidateExecutionContractFingerprint ?? "unknown",
         })
       }
       if (comparison.comparability.caseSet === "unknown") {

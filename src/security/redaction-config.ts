@@ -1,3 +1,5 @@
+import type { PiiScannerOpts } from "./pii-redaction"
+
 /**
  * Redaction opt-out gate (ADR-0078). The redaction layer is DEFAULT-ON.
  * Disabling it at the host level requires an explicit `acknowledgedRisk`
@@ -10,10 +12,48 @@
  * startup so a misconfigured host fails fast — never mid-turn.
  */
 
+/**
+ * Optional PII-redaction wire (ADR-0399). Sibling branch to the secret
+ * layer; orthogonal toggle. Default-OFF — when `pii` is absent or
+ * `pii.enabled !== true`, the dispatch seam SKIPS the PII pass entirely and
+ * the loop is byte-identical to the secret-only baseline.
+ *
+ * Knobs forwarded to `compositePiiScanner` (no extra normalization here so
+ * the secret layer's normalization invariants stay byte-identical):
+ *
+ *   - `kinds` — restrict the scan to a subset of {@link PiiKind} (omitted ⇒
+ *     ALL kinds);
+ *   - `allowlist` — exact-string passthrough (fixture tokens trusted by the
+ *     caller);
+ *   - `redactionTemplate` — per-kind placeholder override (omitted ⇒
+ *     DEFAULT_REDACTION_TEMPLATES).
+ *
+ * The `pii.enabled` flag is a strict-`=== true` toggle. Any other value
+ * (false / undefined / absent block) means OFF. This mirrors the
+ * `disabled === true` strict-true policy on the secret branch.
+ *
+ * NOT in scope for ADR-0399: the async secret-detection module
+ * (`src/security/secret-detection/`). That module is detection-only and
+ * cannot drop into the sync `applyRedaction` masking slot — its wire is a
+ * separate ADR (gate/tool seam, not redaction-pipeline drop-in).
+ */
 export interface RedactionConfig {
   readonly disabled?: boolean
   readonly acknowledgedRisk?: string
   readonly whitelist?: ReadonlyArray<RegExp>
+  readonly pii?: PiiRedactionConfig
+}
+
+/**
+ * Per-call PII-redaction config (ADR-0399). All fields optional with
+ * documented defaults so a minimal `{ enabled: true }` is the canonical
+ * "turn it on" form. The `kinds` / `allowlist` / `redactionTemplate` knobs
+ * forward straight through to `compositePiiScanner` (typed via
+ * `PiiScannerOpts` so a kind added to the closed enum is a TS error here
+ * at compile time).
+ */
+export interface PiiRedactionConfig extends PiiScannerOpts {
+  readonly enabled?: boolean
 }
 
 export interface NormalizedRedactionConfig {

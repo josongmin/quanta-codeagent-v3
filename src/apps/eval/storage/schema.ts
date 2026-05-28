@@ -137,6 +137,7 @@ export interface GroundingPayload {
   normalizationProfile?: GroundingNormalizationProfile
   structuredOutputProtocol?: GroundingOutputProtocol
   structuredOutputValid?: boolean
+  executionContractFingerprint?: string
   suite: GroundingSuite
   caseId: string
   verdict: Verdict

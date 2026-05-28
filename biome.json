@@ -1554,6 +1554,31 @@
       }
     },
     {
+      "includes": ["**/src/apps/eval/grounding/normalization/structural.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "./heuristic",
+                      "./heuristic.ts",
+                      "@/apps/eval/grounding/normalization/heuristic",
+                      "@/apps/eval/grounding/normalization/heuristic.ts"
+                    ],
+                    "message": "Grounding normalization seam: structural normalization must remain authority-only. Heuristic lexical repair belongs in normalization/heuristic.ts."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["**/src/apps/probe/**"],
       "linter": {
         "rules": {

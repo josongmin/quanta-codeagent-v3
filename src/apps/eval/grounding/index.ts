@@ -10,6 +10,11 @@ import {
 import { groundingHarnessFingerprint } from "./harness"
 import { loadGroundingCases, type LoadGroundingCasesOpts } from "./loader"
 import {
+  buildGroundingExecutionContract,
+  groundingExecutionContractFingerprint,
+  type GroundingExecutionRoute,
+} from "./execution-contract"
+import {
   runGroundingPreflight,
   runGroundingProbe,
   type GroundingPreflightResult,
@@ -129,6 +134,12 @@ export {
 export { normalizeGroundingDecision } from "./normalizer"
 export { buildGroundingHarnessManifest, groundingHarnessFingerprint } from "./harness"
 export {
+  buildGroundingExecutionContract,
+  groundingExecutionContractFingerprint,
+  type GroundingExecutionContract,
+  type GroundingExecutionRoute,
+} from "./execution-contract"
+export {
   GROUNDING_ROUTE_MATRICES,
   isGroundingRouteMatrixName,
   type GroundingRouteMatrix,
@@ -153,15 +164,7 @@ export interface GroundingRunOpts extends LoadGroundingCasesOpts {
   now?: () => number
 }
 
-export interface GroundingRunRoute {
-  provider?: string
-  model?: string
-  surfaceId?: string
-  transportId?: string
-  authMode?: string
-}
-
-export interface GroundingRunSummary extends GroundingRunRoute {
+export interface GroundingRunSummary extends GroundingExecutionRoute {
   runId: string
   suite?: GroundingSuite
   corpus: GroundingCorpus
@@ -175,6 +178,7 @@ export interface GroundingRunSummary extends GroundingRunRoute {
   concurrency: number
   caseSetFingerprint: string
   routeFingerprint: string
+  executionContractFingerprint: string
   harnessFingerprint: string
 }
 
@@ -191,7 +195,7 @@ const emptyCounts = (): Record<Verdict, number> => ({
   skipped: 0,
 })
 
-const llmRoute = (llm: LLMPort): GroundingRunRoute => ({
+const llmRoute = (llm: LLMPort): GroundingExecutionRoute => ({
   ...(llm.provider !== undefined ? { provider: llm.provider } : {}),
   ...(llm.model !== undefined ? { model: llm.model } : {}),
   ...(llm.surfaceId !== undefined ? { surfaceId: llm.surfaceId } : {}),
@@ -229,6 +233,10 @@ const executeGroundingCase = async (
     execConfig.normalizationProfile === "none" ? undefined : normalization?.decision
   const scoredActual =
     execConfig.normalizationProfile === "none" ? rawActual : normalizedActual
+  const route = llmRoute(opts.llm)
+  const executionContractFingerprint = groundingExecutionContractFingerprint(
+    buildGroundingExecutionContract(route, execConfig, groundingCase.corpus ?? "canary"),
+  )
   if (probe.error === undefined && scoredActual !== undefined) {
     const scored = scoreGroundingDecision(groundingCase, scoredActual)
     verdict = scored.verdict
@@ -257,6 +265,7 @@ const executeGroundingCase = async (
     ...(scoredActual !== undefined ? { scoredActual, actual: scoredActual } : {}),
     normalizationApplied: normalization?.applied ?? false,
     ...(normalization !== undefined ? { normalizationReasons: [...normalization.reasons] } : {}),
+    executionContractFingerprint,
     ...(groundingCase.sourceProvenance !== undefined ? { sourceProvenance: groundingCase.sourceProvenance } : {}),
     ...(groundingCase.humanAudit !== undefined ? { humanAudit: groundingCase.humanAudit } : {}),
     ...(groundingCase.candidateThreadIds !== undefined ? { candidateThreadIds: groundingCase.candidateThreadIds } : {}),
@@ -335,6 +344,9 @@ export const runGrounding = async (opts: GroundingRunOpts): Promise<GroundingRun
   const durationMs = Date.now() - start
   const route = llmRoute(opts.llm)
   const routeFp = routeFingerprint(route)
+  const executionContractFp = groundingExecutionContractFingerprint(
+    buildGroundingExecutionContract(route, execConfig, corpus),
+  )
   const harnessFp = groundingHarnessFingerprint()
   const suite = manualSuiteForCorpus(corpus)
   await store.finish({
@@ -357,6 +369,7 @@ export const runGrounding = async (opts: GroundingRunOpts): Promise<GroundingRun
       caseCount: selected.length,
       caseSetFingerprint: caseFingerprint,
       routeFingerprint: routeFp,
+      executionContractFingerprint: executionContractFp,
       harnessFingerprint: harnessFp,
       ...(opts.llm.surfaceId !== undefined ? { surfaceId: opts.llm.surfaceId } : {}),
       ...(opts.llm.transportId !== undefined ? { transportId: opts.llm.transportId } : {}),
@@ -379,6 +392,7 @@ export const runGrounding = async (opts: GroundingRunOpts): Promise<GroundingRun
     concurrency,
     caseSetFingerprint: caseFingerprint,
     routeFingerprint: routeFp,
+    executionContractFingerprint: executionContractFp,
     harnessFingerprint: harnessFp,
     ...route,
   }

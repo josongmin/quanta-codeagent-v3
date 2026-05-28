@@ -6,6 +6,7 @@ import {
   type PermissionContext,
 } from "@/permission"
 import { type RedactionHit, redactSecrets, type SensitivityClass } from "@/security"
+import { compositePiiScanner } from "@/security/pii-redaction"
 import { QuantaError, toError } from "@/shared"
 import type { ToolContext, ToolResult, WorkingStateHandle } from "@/tool"
 import { composeToolResultContent } from "@/tool/image/compose"
@@ -735,20 +736,53 @@ const execute = async (
  * via `config.redaction.disabled === true` (validated at startup) we
  * skip — the disabled mode is announced as a `<system-reminder>` so the
  * model is never silently unprotected.
+ *
+ * ADR-0399 application point #2 — OPTIONAL PII-redaction pass. Runs AFTER
+ * the secret pass on the already-secret-masked text (so a secret placeholder
+ * can never accidentally re-expose PII that was hiding inside the secret
+ * span, and PII never accidentally rewrites a `[REDACTED:*]` token already
+ * substituted by secret-redaction). Strict gate: `pii?.enabled === true`
+ * — any other value (false / undefined / absent block) means OFF and the
+ * scanner is never instantiated. Default-OFF: absent config ⇒ byte-identical
+ * to the secret-only baseline. Orthogonal to the secret branch — the two
+ * passes never cross-talk; either branch can be on with the other off.
+ *
+ * NOT in scope for ADR-0399: the async `src/security/secret-detection/`
+ * module is detection-only (no splice) and cannot drop in here. Its wire
+ * is a separate gate/tool ADR.
  */
 const applyRedaction = (
   text: string,
   call: ToolUseBlock,
   config: AgentConfig,
 ): { output: string; hits: ReadonlyArray<RedactionHit> } => {
-  if (config.redaction?.disabled === true) {
-    return { output: text, hits: [] }
+  let postSecret = text
+  let hits: ReadonlyArray<RedactionHit> = []
+  if (config.redaction?.disabled !== true) {
+    const src = deriveSourceClass(call, config)
+    const result = redactSecrets(text, {
+      origin: "tool_result",
+      ...(src !== null ? { sourceClass: src.cls, sourceLabel: src.label } : {}),
+      ...(config.redaction?.whitelist !== undefined
+        ? { whitelist: config.redaction.whitelist }
+        : {}),
+    })
+    postSecret = result.text
+    hits = result.hits
   }
-  const src = deriveSourceClass(call, config)
-  const result = redactSecrets(text, {
-    origin: "tool_result",
-    ...(src !== null ? { sourceClass: src.cls, sourceLabel: src.label } : {}),
-    ...(config.redaction?.whitelist !== undefined ? { whitelist: config.redaction.whitelist } : {}),
-  })
-  return { output: result.text, hits: result.hits }
+  // PII pass — independent toggle. Strict `=== true` so any other shape
+  // (false / undefined / missing block) keeps the byte-identical secret-only
+  // path. The scanner is opts-in by call, no shared mutable state.
+  const piiConfig = config.redaction?.pii
+  if (piiConfig?.enabled === true) {
+    const scanner = compositePiiScanner({
+      ...(piiConfig.kinds !== undefined ? { kinds: piiConfig.kinds } : {}),
+      ...(piiConfig.allowlist !== undefined ? { allowlist: piiConfig.allowlist } : {}),
+      ...(piiConfig.redactionTemplate !== undefined
+        ? { redactionTemplate: piiConfig.redactionTemplate }
+        : {}),
+    })
+    postSecret = scanner.redactText(postSecret)
+  }
+  return { output: postSecret, hits }
 }
