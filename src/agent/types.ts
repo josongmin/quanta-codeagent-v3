@@ -25,6 +25,7 @@ import type { ShadowOdb } from "@/storage"
 import type { DecisionEmitter, StreamPort } from "@/stream"
 import type { ShellExecObserver, ToolRegistry, UserInputRequester } from "@/tool"
 import type { WebSearchProvider } from "@/tool/web"
+import type { ApprovalStateMachinePort } from "./approval-state-machine"
 import type { AutoBackgroundConfig } from "./auto-background"
 import type { BranchSearchConfig, ProgressLine } from "./branch-search"
 import type { BudgetMeter } from "./budget"
@@ -52,6 +53,7 @@ import type { PlanExitPort } from "./plan-exit-flow"
 import type { PlanQueueStore } from "./plan-queue"
 import type { AgentMode } from "./prompt"
 import type { RepoRules } from "./repo-rules"
+import type { RunLedgerPort } from "./run-ledger"
 import type { ModePolicy } from "./run-mode"
 import type { ShadowVerifyPort } from "./shadow-verify"
 import type { ActiveTurnState } from "./steering"
@@ -1007,6 +1009,26 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   readonly objective?: ObjectivePort
   /**
+   * ADR-0413 — Run Ledger port slot (ADR-0395 substrate consumer wire).
+   *
+   * When set, the composition-root observability wire (ADR-0406) injects the
+   * shared `RunLedgerPort` here so surface consumers (web-daemon
+   * observability-emitter, future UI) + the run-ledger-attribution hook
+   * subscriber (ADR-0401) read/write ONE unified long-running-work model.
+   * Absent ⇒ no ledger; byte-identical default-OFF (RFC §1.2). Promoted from
+   * the wire handle (Wave-3 deliberate hold) so it is reachable as a
+   * first-class AgentConfig slot, not just inside the wire closure.
+   */
+  readonly runLedger?: RunLedgerPort
+  /**
+   * ADR-0413 — Approval state-machine port slot (ADR-0403 substrate consumer
+   * wire). When set, the approval-gate wire (ADR-0407) records HITL approvals
+   * here (attributing to Objective.blockers + Run Ledger.waiting) so the user
+   * sees "why stopped / resume-from-step". Absent ⇒ legacy HITL passthrough,
+   * byte-identical default-OFF. Promoted from the Wave-3 wire handle.
+   */
+  readonly approvalStateMachine?: ApprovalStateMachinePort
+  /**
    * ADR-0124 conversation-checkpoint slot (helper-only). When set, callers
    * (apps/agent bootstrap, future `/rewind` slash command, future
    * auto-recovery hook) record/restore the `messages[]` history through this
@@ -1631,6 +1653,8 @@ export type FeaturesConfig = Pick<
   // read them, and keeps the Pick union from drifting away from AgentConfig.
   | "budgetLedger"
   | "objective"
+  | "runLedger"
+  | "approvalStateMachine"
   | "conversationCheckpoint"
   | "responsesContinuation"
   | "llmProvider"
