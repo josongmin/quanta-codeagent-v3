@@ -1,4 +1,4 @@
-# ADR-0406 — Bash output truncation delegated to registry `capToolOutput`
+# ADR-0411 — Bash output truncation delegated to registry `capToolOutput`
 
 **Status:** Accepted (2026-05-28)
 **Slice:** `src/tool/bash/index.ts` (cap removal in `formatRunBody` +

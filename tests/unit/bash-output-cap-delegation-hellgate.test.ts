@@ -1,5 +1,5 @@
 /**
- * Hellgate (TKT-001 / ADR-0406): the bash tool must NOT pre-truncate its
+ * Hellgate (TKT-001 / ADR-0411): the bash tool must NOT pre-truncate its
  * output with a head-only `MAX_OUTPUT = 30_000` slice. The registry's
  * `capToolOutput` is the single authoritative truncator (head + tail,
  * default 200K via {@link DEFAULT_TOOL_OUTPUT_MAX}). Pre-truncation by bash
@@ -153,7 +153,7 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 
 // ─────────────────────────── tests ──────────────────────────────────────────
 
-describe("bash output cap delegation hellgate (TKT-001 / ADR-0406)", () => {
+describe("bash output cap delegation hellgate (TKT-001 / ADR-0411)", () => {
   test("1. small output is byte-identical (no truncation banner)", async () => {
     const { result } = await collect(bashTool, { command: "echo hi" }, ctx())
     expect(result.output).toBe("[exit 0]\nhi")

@@ -56,7 +56,7 @@ const schema = z.object({
 type Input = z.infer<typeof schema>
 
 /**
- * ADR-0406 — bash no longer head-only-truncates its own output.
+ * ADR-0411 — bash no longer head-only-truncates its own output.
  *
  * The previous `MAX_OUTPUT = 30_000` head-only slice was applied INSIDE bash
  * before the registry's authoritative head+tail `capToolOutput` (default
@@ -223,7 +223,7 @@ const buildPerCallWrap =
 
 /** Format the combined stdout/stderr body + status banner.
  *
- *  ADR-0406: no length cap here. The registry's `capToolOutput` is the single
+ *  ADR-0411: no length cap here. The registry's `capToolOutput` is the single
  *  authoritative truncator (head + tail, persists overflow). Bash returns the
  *  buffered body verbatim. */
 const formatRunBody = (r: {
@@ -276,7 +276,7 @@ const buildBackgroundPlaceholderResult = (
 
 /** Build the final result when the bg shell completed before the deadline.
  *
- *  ADR-0406: no length cap here. The registry's `capToolOutput` truncates
+ *  ADR-0411: no length cap here. The registry's `capToolOutput` truncates
  *  oversized bodies with head+tail and persists the full payload to a
  *  spill file. */
 const buildBackgroundCompletedResult = (snap: {
