@@ -498,6 +498,26 @@ export const buildGroundingComparison = (
 ): GroundingComparisonOutput => {
   const baselineBuckets = bucketMap(baseline.buckets)
   const candidateBuckets = bucketMap(candidate.buckets)
+  const corpusStatus =
+    baseline.corpus === undefined || candidate.corpus === undefined
+      ? "mismatch"
+      : baseline.corpus === candidate.corpus
+        ? "match"
+        : "mismatch"
+  const modeStatus =
+    baseline.mode === undefined || candidate.mode === undefined
+      ? "mismatch"
+      : baseline.mode === candidate.mode
+        ? "match"
+        : "mismatch"
+  const probeProfileStatus = comparabilityStatus(
+    runParamString(baseline, "probeProfile"),
+    runParamString(candidate, "probeProfile"),
+  )
+  const normalizationProfileStatus = comparabilityStatus(
+    runParamString(baseline, "normalizationProfile"),
+    runParamString(candidate, "normalizationProfile"),
+  )
   const routeStatus = comparabilityStatus(
     runParamString(baseline, "routeFingerprint"),
     runParamString(candidate, "routeFingerprint"),
@@ -512,6 +532,10 @@ export const buildGroundingComparison = (
   )
   const baselineHarnessFingerprint = runParamString(baseline, "harnessFingerprint")
   const candidateHarnessFingerprint = runParamString(candidate, "harnessFingerprint")
+  const baselineProbeProfile = runParamString(baseline, "probeProfile")
+  const candidateProbeProfile = runParamString(candidate, "probeProfile")
+  const baselineNormalizationProfile = runParamString(baseline, "normalizationProfile")
+  const candidateNormalizationProfile = runParamString(candidate, "normalizationProfile")
   const baselineRouteFingerprint = runParamString(baseline, "routeFingerprint")
   const candidateRouteFingerprint = runParamString(candidate, "routeFingerprint")
   const baselineCaseSetFingerprint = runParamString(baseline, "caseSetFingerprint")
@@ -554,6 +578,10 @@ export const buildGroundingComparison = (
     candidateRunId: candidate.runId,
     comparable:
       baseline.suite === candidate.suite &&
+      corpusStatus === "match" &&
+      modeStatus === "match" &&
+      probeProfileStatus === "match" &&
+      normalizationProfileStatus === "match" &&
       harnessStatus === "match" &&
       routeStatus === "match" &&
       caseSetStatus === "match" &&
@@ -561,9 +589,21 @@ export const buildGroundingComparison = (
       changes.every((change) => change.kind !== "new_in_candidate"),
     comparability: {
       suite: baseline.suite === candidate.suite ? "match" : "mismatch",
+      corpus: corpusStatus,
+      mode: modeStatus,
+      probeProfile: probeProfileStatus,
+      normalizationProfile: normalizationProfileStatus,
       harness: harnessStatus,
       route: routeStatus,
       caseSet: caseSetStatus,
+      ...(baseline.corpus !== undefined ? { baselineCorpus: baseline.corpus } : {}),
+      ...(candidate.corpus !== undefined ? { candidateCorpus: candidate.corpus } : {}),
+      ...(baseline.mode !== undefined ? { baselineMode: baseline.mode } : {}),
+      ...(candidate.mode !== undefined ? { candidateMode: candidate.mode } : {}),
+      ...(baselineProbeProfile !== undefined ? { baselineProbeProfile } : {}),
+      ...(candidateProbeProfile !== undefined ? { candidateProbeProfile } : {}),
+      ...(baselineNormalizationProfile !== undefined ? { baselineNormalizationProfile } : {}),
+      ...(candidateNormalizationProfile !== undefined ? { candidateNormalizationProfile } : {}),
       ...(baselineHarnessFingerprint !== undefined ? { baselineHarnessFingerprint } : {}),
       ...(candidateHarnessFingerprint !== undefined ? { candidateHarnessFingerprint } : {}),
       ...(baselineRouteFingerprint !== undefined ? { baselineRouteFingerprint } : {}),
@@ -576,6 +616,8 @@ export const buildGroundingComparison = (
       counts: baseline.counts,
       metrics: baseline.metrics,
       ...(baseline.suite !== undefined ? { suite: baseline.suite } : {}),
+      ...(baseline.corpus !== undefined ? { corpus: baseline.corpus } : {}),
+      ...(baseline.mode !== undefined ? { mode: baseline.mode } : {}),
       ...(baseline.run !== undefined ? { run: baseline.run } : {}),
     },
     candidate: {
@@ -583,6 +625,8 @@ export const buildGroundingComparison = (
       counts: candidate.counts,
       metrics: candidate.metrics,
       ...(candidate.suite !== undefined ? { suite: candidate.suite } : {}),
+      ...(candidate.corpus !== undefined ? { corpus: candidate.corpus } : {}),
+      ...(candidate.mode !== undefined ? { mode: candidate.mode } : {}),
       ...(candidate.run !== undefined ? { run: candidate.run } : {}),
     },
     metricDeltas: metricDeltaSet(baseline.metrics, candidate.metrics),
