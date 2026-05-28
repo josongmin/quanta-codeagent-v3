@@ -13,8 +13,10 @@
  *
  * Builds the DRY composite via `buildDefaultMentionResolver`:
  *   - `@file`   — workspace root = `cfg.cwd` (`QUANTA_MENTION_FILE`).
- *   - `@symbol` — LSP nav adapter (graceful-null until a language server +
- *                 anchor exist; `QUANTA_MENTION_SYMBOL`).
+ *   - `@symbol` — LSP union over DETERMINISTICALLY-synthesized anchors (ADR-0422
+ *                 follow-up) + semantic-index fallback (`auto`), both built by
+ *                 `buildMentionSymbolDeps`. Graceful-null until a language
+ *                 server is installed / the index has entries; `QUANTA_MENTION_SYMBOL`.
  *   - `@skill`  — omitted (no read-only skill registry exists at this layer;
  *                 the per-turn inventory is built inside the loop).
  *
@@ -25,9 +27,8 @@
 
 import type { AgentConfig } from "@/agent"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
-import { lspNavProvider } from "@/agent/lsp-bridge"
-import { createLspSymbolLookup } from "@/agent/mention-injection"
 import { buildDefaultMentionResolver } from "@/agent/mention-runner"
+import { buildMentionSymbolDeps } from "./mention-symbol-deps"
 
 /** Install the mention-injector on a host-runtime AgentConfig. Returns the
  *  same (mutated) config for fluent use at the call site. */
@@ -37,7 +38,7 @@ export const installCliMentionInjector = (cfg: AgentConfig): AgentConfig => {
     const mentionResolver = buildDefaultMentionResolver({
       cwd: cfg.cwd,
       env: process.env,
-      lsp: createLspSymbolLookup({ provider: lspNavProvider(), cwd: cfg.cwd }),
+      ...buildMentionSymbolDeps(cfg.cwd, process.env),
     })
     installCodexR2Wires(cfg, {
       mentionResolver,

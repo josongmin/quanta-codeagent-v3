@@ -32,12 +32,11 @@ import {
 } from "@/agent"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import { captureSnapshot } from "@/agent/context-change"
-import { lspNavProvider } from "@/agent/lsp-bridge"
-import { createLspSymbolLookup } from "@/agent/mention-injection"
 import { buildDefaultMentionResolver } from "@/agent/mention-runner"
 import { autoWirePluginActivation } from "@/agent/plugin-activation-handler"
 import { getGlobalSessionResourceRegistry } from "@/agent/session-resource-registry"
 import { buildCallerOwnedRegistryWithTelemetry } from "@/agent/session-resource-registry/caller-owned-builder"
+import { buildMentionSymbolDeps } from "@/host/runtime/internal/mention-symbol-deps"
 import {
   createInMemorySystemPromptCache,
   type SystemPromptCachePort,
@@ -151,11 +150,14 @@ export const resolveRunAgent = (
 ): ((cfg: AgentConfig) => Promise<AgentOutcome>) => seams?.runAgent ?? defaultRunAgent
 
 /** ADR-0422 — mention resolver dep via the DRY `buildDefaultMentionResolver`.
- *  @file (workspace root = cwd) + @symbol (LSP nav adapter — graceful-null
- *  until a language server + anchor are present) are wired here; @skill is
- *  gracefully omitted because no read-only skill registry exists at config-
- *  assembly time (the per-turn inventory is built inside the loop). Each kind
- *  is independently gated by its `QUANTA_MENTION_*` knob (default-ON). The
+ *  @file (workspace root = cwd) + @symbol are wired here; @skill is gracefully
+ *  omitted because no read-only skill registry exists at config-assembly time
+ *  (the per-turn inventory is built inside the loop). @symbol is now BACKED in
+ *  production (ADR-0422 follow-up): `buildMentionSymbolDeps` supplies a
+ *  deterministically-anchored LSP union lookup PLUS a semantic-index fallback
+ *  (`auto` priority), each lazily built on first use so config assembly stays
+ *  synchronous + zero-cost when no `@symbol` is mentioned. Each kind is
+ *  independently gated by its `QUANTA_MENTION_*` knob (default-ON). The
  *  resulting composite is always set; with every knob `=off` it resolves every
  *  mention to `null` (byte-identical to the legacy 3-kind path). Extracted so
  *  the assembleAgentConfig closure stays under biome's cognitive-complexity
@@ -164,7 +166,7 @@ const mentionResolverDep = (cwd: string) => ({
   mentionResolver: buildDefaultMentionResolver({
     cwd,
     env: process.env,
-    lsp: createLspSymbolLookup({ provider: lspNavProvider(), cwd }),
+    ...buildMentionSymbolDeps(cwd, process.env),
   }),
 })
 
