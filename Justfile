@@ -70,7 +70,11 @@ smoke-report:
 
 # Type-check the whole tree (no emit).
 typecheck:
-    ./node_modules/.bin/tsc --noEmit
+    {{BUN}} run typecheck
+
+# Full type-check gate including tests.
+typecheck-all:
+    {{BUN}} run typecheck:all
 
 # Lint via Biome (warnings non-gating; non-zero exit on errors only).
 lint:
@@ -86,4 +90,4 @@ test *args:
     {{BUN}} test tests/unit tests/integration {{args}}
 
 # Full pre-commit gate: typecheck → lint → test → smoke (tier-0 replay).
-gates: typecheck lint test smoke
+gates: typecheck-all lint test smoke
