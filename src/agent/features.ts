@@ -57,6 +57,7 @@ import type { SkillTurnOverride } from "./loop"
 import {
   buildBranchSearchBlock,
   buildBudgetBlock,
+  buildCheckSecretsBlock,
   buildClassifierBlock,
   buildDelegateBlock,
   buildForkSessionBlock,
@@ -171,6 +172,10 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
 
   // ADR-0136 — budget_status tool (default-OFF: empty array when budgetLedger absent)
   extraTools.push(...buildBudgetBlock(config))
+
+  // ADR-0404 — check_secrets LLM tool (default-OFF: env-gated on
+  // QUANTA_SECRET_CHECK_TOOL=on; legacy callers byte-identical).
+  extraTools.push(...buildCheckSecretsBlock())
 
   // ADR-0127 (Part 3) / ADR-0148 — web_search tool (default-OFF: empty when
   // `webSearch.provider` absent; concrete provider is operator-owned).

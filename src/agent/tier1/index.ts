@@ -17,6 +17,12 @@
 export { buildClassifierBlock } from "./auto-classifier"
 export { buildBranchSearchBlock } from "./branch-search"
 export { buildBudgetBlock } from "./budget"
+export {
+  buildCheckSecretsBlock,
+  CHECK_SECRETS_ENABLED_VALUE,
+  CHECK_SECRETS_ENV_FLAG,
+  type CheckSecretsEnvReader,
+} from "./check-secrets"
 export { buildDelegateBlock } from "./delegate"
 export { buildForkSessionBlock } from "./fork-session"
 export { buildObjectiveBlock } from "./objective"
