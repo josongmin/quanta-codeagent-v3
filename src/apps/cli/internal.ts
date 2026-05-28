@@ -15,7 +15,6 @@ import {
   buildCompactionBreakerConfigCore,
   buildEmbedderCore,
   buildLLMCore,
-  buildMemoryConfigCore,
   buildMemoryForSession,
   buildSearchPipelineFromEnv,
   buildSkillsConfigCore,
@@ -32,6 +31,7 @@ import {
   parseRecallTiers,
   pickProviderCore,
   type Provider as RunnerProvider,
+  resolveMemoryConfigFromEnv,
 } from "@/runner/assemble"
 import type { Tooling } from "@/runner/assemble/tooling"
 import { resolveSandboxProfileFromEnv } from "@/runtime"
@@ -169,42 +169,29 @@ export const buildEmbedder = (
 export { parseRecallTiers }
 
 /**
- * Build the `memory` tuning block from env. ADR-0413: delegates to
- * `buildMemoryForSession`. Returns `undefined` only when `QUANTA_MEMORY=off`
- * (the single-knob escape hatch); otherwise the block is returned even when
- * empty so the loop's `config.store` check threads through identically.
+ * Build the `memory` tuning block from env. ADR-0414 single-source-of-truth:
+ * this is a THIN shim that delegates the env → config projection to the
+ * factory's {@link resolveMemoryConfigFromEnv} — the SAME helper
+ * `buildMemoryForSession` uses internally. The CLI no longer re-reads any
+ * `QUANTA_MEMORY_*` tuning knob (recallLimit / distill / consolidate /
+ * selfEdit / recallTiers); that truth lives in exactly one place.
  *
- * `store` parameter is preserved for back-compat (legacy callers pass the
- * result of `buildStore()` here) but is now informational only — the factory
- * resolves the store internally from the same env view, so `store` is ignored
- * unless it's `undefined` (in which case the caller already opted out and
- * the config block is collapsed to legacy-OFF for symmetry).
+ * Contract (unchanged, now centralized):
+ *   - `store === undefined` + no knobs ⇒ `undefined` (key omitted).
+ *   - `store === undefined` + any sub-knob set ⇒ a block carrying that knob
+ *     (the loop's `config.store` check is separate; the block is informational
+ *     until a store is wired). This is the legacy escape-hatch symmetry: a
+ *     caller that already opted out of the store can still surface a tuning
+ *     block when an operator set a sub-knob.
+ *   - `store` present ⇒ a truthy block (possibly empty) so the loop wires it.
+ *
+ * The `store` argument is forwarded verbatim to the factory helper, which
+ * uses it ONLY to decide whether an empty block is still returned — never to
+ * change a knob value. Byte-identical config bytes for the same env.
  */
 export const buildMemoryConfig = (
   store: ReturnType<typeof buildStoreCore>,
-): AgentConfig["memory"] | undefined => {
-  // Legacy contract: when `store === undefined` (caller already saw the
-  // escape hatch fire), short-circuit so the config block follows. This
-  // preserves the env-knob-branches.test.ts assertion that
-  // `buildMemoryConfig(undefined)` returns `undefined` when no env knobs
-  // are set. Sub-knob branches (recallLimit / distill / etc.) still work
-  // because `buildMemoryConfigCore` returns a block when ANY knob is set
-  // even with `store=undefined`.
-  if (store === undefined) {
-    const rawLimit = process.env.QUANTA_MEMORY_RECALL_LIMIT
-    const limit = rawLimit !== undefined ? Number.parseInt(rawLimit, 10) : Number.NaN
-    const recallTiers = parseRecallTiers(process.env.QUANTA_MEMORY_RECALL_TIERS)
-    return buildMemoryConfigCore({
-      store,
-      ...(Number.isFinite(limit) ? { recallLimit: limit } : {}),
-      ...(process.env.QUANTA_MEMORY_DISTILL === "off" ? { distill: false } : {}),
-      ...(process.env.QUANTA_MEMORY_CONSOLIDATE === "off" ? { consolidate: false } : {}),
-      ...(process.env.QUANTA_MEMORY_SELF_EDIT === "off" ? { selfEditTools: false } : {}),
-      ...(recallTiers ? { recallTiers } : {}),
-    })
-  }
-  return buildMemoryForSession(process.env).config
-}
+): AgentConfig["memory"] | undefined => resolveMemoryConfigFromEnv(process.env, store)
 
 /**
  * Resolve the `subagent` config block from env (Tier 1 capability, ADR-0011).
