@@ -31,7 +31,7 @@ evidence:
     - src/agent/mention-injection/resolver.ts
     - src/agent/mention-injection/event-emitter.ts
     - src/agent/mention-injection/inject-messages.ts
-    - src/agent/mention-runner/runner.ts
+    - src/agent/mention-runner/default-resolver.ts
     - src/agent/mention-runner/skill-resolver.ts
     - src/agent/plugin-activation-handler/handler.ts
     - src/agent/plugin-activation-handler/composite-activation.ts
@@ -47,7 +47,7 @@ evidence:
       - src/agent/mention-injection/__tests__/event-emitter.hellgate.test.ts
       - src/agent/mention-injection/__tests__/inject-messages.hellgate.test.ts
       - src/agent/mention-runner/__tests__/skill-resolver.hellgate.test.ts
-      - src/agent/mention-runner/__tests__/runner.hellgate.test.ts
+      - src/agent/mention-runner/__tests__/default-resolver.hellgate.test.ts
       - src/agent/plugin-activation-handler/__tests__/handler.hellgate.test.ts
       - src/agent/plugin-activation-handler/__tests__/composite-activation.hellgate.test.ts
       - tests/unit/skill-registry-readonly.test.ts

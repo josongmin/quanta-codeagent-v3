@@ -85,7 +85,7 @@ evidence:
     - src/agent/mention-injection/anchor-synth.ts
     - src/agent/mention-injection/index.ts
     - src/agent/lsp-bridge.ts
-    - src/agent/mention-runner/runner.ts
+    - src/agent/mention-runner/default-resolver.ts
     - src/agent/mention-runner/skill-resolver.ts
     - src/agent/mention-runner/default-resolver.ts
     - src/agent/plugin-app-resolver/composite-resolver.ts
@@ -111,7 +111,7 @@ evidence:
       - src/agent/mention-injection/__tests__/symbol-lookup-semantic.hellgate.test.ts
       - src/agent/mention-injection/__tests__/anchor-synth.hellgate.test.ts
       - src/host/runtime/internal/__tests__/mention-symbol-deps.hellgate.test.ts
-      - src/agent/mention-runner/__tests__/runner.hellgate.test.ts
+      - src/agent/mention-runner/__tests__/default-resolver.hellgate.test.ts
       - src/agent/mention-runner/__tests__/skill-resolver.hellgate.test.ts
       - src/agent/mention-runner/__tests__/default-resolver.hellgate.test.ts
       - src/agent/plugin-app-resolver/__tests__/file-resolver.hellgate.test.ts
