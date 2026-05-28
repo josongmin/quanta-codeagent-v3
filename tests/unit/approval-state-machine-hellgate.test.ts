@@ -606,4 +606,27 @@ describe("ADR-0403 approval-state-machine — frozen returns", () => {
     const arr = asm.list()
     expect(Object.isFrozen(arr)).toBe(true)
   })
+
+  // Audit R2 (F3): bounded retention — settled requests LRU-evicted past
+  // maxRetained; PENDING never evicted (an unresolved pause stays observable).
+  it("settled requests are LRU-evicted past maxRetained; pending survive", () => {
+    const asm = createApprovalStateMachine({ now: stepClock(), maxRetained: 3 })
+    // 5 requests, settle the first 4 (oldest), leave the 5th pending.
+    const ids = [0, 1, 2, 3, 4].map((i) => ask(asm, { threadId: `t${i}` }).id)
+    for (const id of ids.slice(0, 4)) asm.settle(id, "approve")
+    // Over cap (5 > 3) ⇒ oldest settled dropped; total ≤ 3.
+    expect(asm.list().length).toBeLessThanOrEqual(3)
+    // The still-pending newest MUST survive.
+    expect(asm.get(ids[4] as string)?.status).toBe("pending")
+    // The oldest settled (id[0]) MUST have been evicted first.
+    expect(asm.get(ids[0] as string)).toBeNull()
+  })
+
+  it("pending requests are NEVER evicted even when over maxRetained", () => {
+    const asm = createApprovalStateMachine({ now: stepClock(), maxRetained: 2 })
+    // 5 pending, none settled ⇒ none can be evicted (no settled candidates).
+    const ids = [0, 1, 2, 3, 4].map((i) => ask(asm, { threadId: `p${i}` }).id)
+    expect(asm.list().length).toBe(5)
+    for (const id of ids) expect(asm.get(id)?.status).toBe("pending")
+  })
 })

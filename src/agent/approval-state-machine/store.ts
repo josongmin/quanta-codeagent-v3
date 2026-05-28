@@ -253,14 +253,44 @@ const settleLedger = (
   }
 }
 
+/** Default cap on retained requests. SETTLED records are LRU-evicted past
+ *  this; PENDING records are never evicted (a pause must stay observable until
+ *  resolved). Mirrors the mailbox / run-ledger bounded-retention discipline so
+ *  a long session cannot grow the request Map without bound. */
+const DEFAULT_MAX_RETAINED = 1024
+
 export const createApprovalStateMachine = (opts?: {
   now?: () => number
   objective?: ObjectivePort
   ledger?: RunLedgerPort
+  maxRetained?: number
 }): ApprovalStateMachinePort => {
   const objective = opts?.objective
   const ledger = opts?.ledger
+  const maxRetained =
+    typeof opts?.maxRetained === "number" && Number.isFinite(opts.maxRetained) && opts.maxRetained > 0
+      ? Math.floor(opts.maxRetained)
+      : DEFAULT_MAX_RETAINED
   const requests = new Map<string, ApprovalRequest>()
+
+  /** Audit R2 (F3): evict oldest SETTLED requests when over `maxRetained`.
+   *  PENDING are never dropped (an unresolved pause must stay visible). NO-THROW. */
+  const evictIfOverCap = (): void => {
+    try {
+      if (requests.size <= maxRetained) return
+      const settled = [...requests.values()]
+        .filter((r) => r.status !== "pending")
+        .sort((a, b) => (a.settledAt ?? a.createdAt) - (b.settledAt ?? b.createdAt))
+      let over = requests.size - maxRetained
+      for (const r of settled) {
+        if (over <= 0) break
+        requests.delete(r.id)
+        over -= 1
+      }
+    } catch {
+      // NO-THROW — eviction is best-effort hygiene, never breaks the port.
+    }
+  }
 
   /** Defensive clock: a host-supplied `now` that throws or returns a
    *  non-finite value falls back to `Date.now()`. */
@@ -280,6 +310,10 @@ export const createApprovalStateMachine = (opts?: {
   const store = (r: ApprovalRequest): ApprovalRequest => {
     const frozen = freezeRequest(r)
     requests.set(frozen.id, frozen)
+    // Evict AFTER every set (request creation + settle/expire/cancel
+    // transitions) so the "settle later" pattern triggers eviction once a
+    // record becomes settled — request-time alone can't (all-pending then).
+    evictIfOverCap()
     return frozen
   }
 
