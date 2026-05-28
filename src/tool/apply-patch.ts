@@ -30,7 +30,8 @@ import * as path from "node:path"
 import { z } from "zod"
 import { type ApplyResult, applyPatch, type PatchFileSystemPort, parsePatch } from "@/patch"
 import { FsJailError, resolveJailed } from "@/storage"
-import type { Tool, ToolContext, ToolEvent } from "./types"
+import { classifyFastApplyError, failingTargetPath } from "./apply-patch-fallback-wire"
+import type { FastApplyFallbackSeam, Tool, ToolContext, ToolEvent } from "./types"
 
 /**
  * Raised when a `FsJailFileSystemPort` operation resolves to a path outside
@@ -190,6 +191,90 @@ function formatApplyResult(r: ApplyResult): string {
   return parts.length === 0 ? "apply_patch: no-op patch" : parts.join("; ")
 }
 
+/**
+ * Parse + apply a V4A patch text against the port. THROWS the canonical typed
+ * errors (`PatchParseError` / `PatchApplyError` / `PatchAnchorNotFoundError` /
+ * `FsJailViolationError`) on failure — exactly the pre-ADR-0421 contract. The
+ * fallback retry in `execute` wraps this; on the happy path it is the only
+ * thing that runs (byte-identical when no fallback port is attached).
+ */
+async function parseAndApply(patchText: string, port: PatchFileSystemPort): Promise<ApplyResult> {
+  // parsePatch throws PatchParseError on grammar violation — propagate.
+  // applyPatch throws PatchApplyError / PatchAnchorNotFoundError on apply
+  // failure — propagate. FsJailFileSystemPort throws FsJailViolationError
+  // on boundary breach — propagate. NO silent catch, NO graceful skip.
+  const patch = parsePatch(patchText)
+  // No observer argument: the patch slice owns OTel emission on its own
+  // (ADR-0028 `quanta.patch.op` + `quanta.patch.fuzzy_match_tier` are wired
+  // inside `applier.ts`, which keeps `@/tool/apply-patch` free of
+  // `@/observability` and respects the `@/tool/**` slice-isolation fence).
+  return applyPatch(patch, port)
+}
+
+/**
+ * ADR-0421 — attempt ONE fast-apply fallback re-emit after a recoverable V4A
+ * failure. Returns the retry's `ApplyResult` + `modelUsed` when the fallback
+ * rescued the patch, or `null` to signal "surface the ORIGINAL error" for
+ * EVERY non-rescue path (unrecoverable error kind, aborted signal, fallback
+ * declined / threw, no patch re-emitted, retry also failed). NO-THROW: the
+ * port contract is no-throw, but a misbehaving port that throws is caught here
+ * too so the original failure always wins. At most ONE attempt — no loop.
+ */
+async function tryFastApplyFallback(
+  originalPatchText: string,
+  originalError: unknown,
+  port: PatchFileSystemPort,
+  fallback: FastApplyFallbackSeam,
+  signal: AbortSignal,
+): Promise<{ result: ApplyResult; modelUsed?: string } | null> {
+  const errorKind = classifyFastApplyError(originalError)
+  // FsJailViolationError + any non-patch error are not re-emittable — a model
+  // cannot fix a security-boundary breach, so we never spend a fallback on it.
+  if (errorKind === null) return null
+  // Honour an already-aborted turn before any I/O / dispatch.
+  if (signal.aborted) return null
+
+  const errorMessage =
+    originalError instanceof Error ? originalError.message : String(originalError)
+  // Read the failing op's current bytes so the model can re-anchor against
+  // them. Best-effort: a missing/unreadable target simply omits the snapshot.
+  const sourceFile = failingTargetPath(originalError)
+  let sourceContent: string | undefined
+  if (sourceFile !== undefined) {
+    try {
+      sourceContent = await port.readFile(sourceFile)
+    } catch {
+      sourceContent = undefined
+    }
+  }
+
+  let attempt: Awaited<ReturnType<FastApplyFallbackSeam["attempt"]>>
+  try {
+    attempt = await fallback.attempt(
+      {
+        failure: { patch: originalPatchText, errorKind, errorMessage },
+        ...(sourceFile !== undefined ? { sourceFile } : {}),
+        ...(sourceContent !== undefined ? { sourceContent } : {}),
+      },
+      signal,
+    )
+  } catch {
+    // A port that breaks its no-throw contract MUST NOT mask the real failure.
+    return null
+  }
+
+  if (attempt.ok !== true || attempt.newPatch === null) return null
+
+  // Re-run the V4A applier ONCE with the re-emitted patch. A retry that also
+  // fails surfaces the ORIGINAL error (caller re-throws it), never the retry's.
+  try {
+    const result = await parseAndApply(attempt.newPatch, port)
+    return attempt.modelUsed !== undefined ? { result, modelUsed: attempt.modelUsed } : { result }
+  } catch {
+    return null
+  }
+}
+
 export const applyPatchTool: Tool<Input> = {
   name: "apply_patch",
   description:
@@ -204,21 +289,36 @@ export const applyPatchTool: Tool<Input> = {
   hitlTier: (): "pre-approval-ok" => "pre-approval-ok",
 
   async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
-    // parsePatch throws PatchParseError on grammar violation — propagate.
-    // applyPatch throws PatchApplyError / PatchAnchorNotFoundError on apply
-    // failure — propagate. FsJailFileSystemPort throws FsJailViolationError
-    // on boundary breach — propagate. NO silent catch, NO graceful skip;
-    // the dispatch seam decides how to surface the failure.
-    const patch = parsePatch(input.patch)
     const port = new FsJailFileSystemPort({ jailRoot: ctx.cwd })
-    // No observer argument: the patch slice owns OTel emission on its own
-    // (ADR-0028 `quanta.patch.op` + `quanta.patch.fuzzy_match_tier` are wired
-    // inside `applier.ts`, which keeps `@/tool/apply-patch` free of
-    // `@/observability` and respects the `@/tool/**` slice-isolation fence).
-    const result = await applyPatch(patch, port)
-    yield {
-      type: "result",
-      result: { ok: true, output: formatApplyResult(result) },
+
+    // Default-OFF fast path: no fallback port attached ⇒ the parse + apply
+    // throws its typed error straight to the dispatch seam, byte-identical to
+    // the pre-ADR-0421 contract (NO catch, NO fallback attempt).
+    const fallback = ctx.fastApplyFallback
+    if (fallback === undefined) {
+      const result = await parseAndApply(input.patch, port)
+      yield { type: "result", result: { ok: true, output: formatApplyResult(result) } }
+      return
+    }
+
+    // Fallback wired: parse + apply once; on a RECOVERABLE V4A failure, make
+    // ONE fast-apply re-emit attempt + retry. Any non-rescue path re-throws
+    // the ORIGINAL typed error (NOT the retry's) so callers see unchanged
+    // failure semantics (ADR-0421).
+    try {
+      const result = await parseAndApply(input.patch, port)
+      yield { type: "result", result: { ok: true, output: formatApplyResult(result) } }
+    } catch (err) {
+      const rescued = await tryFastApplyFallback(input.patch, err, port, fallback, ctx.signal)
+      if (rescued === null) throw err
+      const note =
+        rescued.modelUsed !== undefined
+          ? ` (recovered via fast-apply fallback, model ${rescued.modelUsed})`
+          : " (recovered via fast-apply fallback)"
+      yield {
+        type: "result",
+        result: { ok: true, output: `${formatApplyResult(rescued.result)}${note}` },
+      }
     }
   },
 }

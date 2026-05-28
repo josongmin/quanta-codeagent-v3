@@ -1,0 +1,90 @@
+id: fast-apply-wire
+title: Apply-patch fast-apply fallback WIRE (retry on V4A failure)
+section: 9
+subsystem: Apply-patch recovery (ADR-0421, closes ADR-0417 gap A2 apply-wire)
+order: 4211
+maturity: L2
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "default-off", "wire"]
+depends_on:
+  - fast-apply-fallback
+purpose: |
+  Wires the ADR-0417 `FastApplyFallbackPort` (previously a pure port with no
+  consumer) into the `apply_patch` tool. When a V4A patch FAILS to apply, the
+  tool optionally calls the fallback (executor-model re-emits the patch) and
+  retries the V4A applier ONCE.
+
+  Seam: a new OPTIONAL `ToolContext.fastApplyFallback` (duck-typed
+  `FastApplyFallbackSeam`, structural mirror of `FastApplyFallbackPort` so the
+  `@/tool` slice never imports `@/agent`). The dispatch seam (composition root
+  in `@/agent`, a SEPARATE follow-up) wires the concrete port from
+  `AgentConfig.fastApplyFallback`.
+
+  Flow when the port is present and `parseAndApply` throws:
+
+    - `classifyFastApplyError(err)` maps the V4A error class to the closed
+      `errorKind` (`anchor_not_found` | `apply_error` | `parse_error`), or
+      `null` for non-recoverable errors. `FsJailViolationError` + any
+      non-patch error ⇒ `null` (a re-emit cannot escape a SECURITY boundary,
+      so no fallback is spent — the error surfaces immediately).
+    - an already-aborted `ctx.signal` short-circuits (no I/O, no dispatch).
+    - `failingTargetPath(err)` pulls `.path` off anchor/apply errors so the
+      wire reads the failing file's current bytes (re-anchoring snapshot) via
+      the already-constructed `PatchFileSystemPort`. Parse errors have no
+      bound target ⇒ no snapshot.
+    - `fallback.attempt({ failure, sourceFile?, sourceContent? }, signal)` is
+      guarded by a try/catch — a port that breaks its no-throw contract MUST
+      NOT mask the real failure.
+    - `ok:true` + non-null `newPatch` ⇒ re-run `parseAndApply` ONCE. A retry
+      that ALSO fails surfaces the ORIGINAL error (never the retry's).
+      `ok:false` / aborted / thrown / no-patch ⇒ original error.
+
+  On a rescued apply the terminal `result.output` appends
+  ` (recovered via fast-apply fallback, model <modelUsed>)` so the trajectory
+  records the recovery.
+
+  Default-OFF (RFC §1.2): port absent on `ToolContext` ⇒ the V4A failure
+  throws immediately, NO fallback attempt — byte-identical to the pre-ADR
+  path. NO infinite loop: at most ONE attempt + ONE retry. NO-THROW seam.
+  The patch slice's OTel emission (ADR-0028, wired in `applier.ts`) is
+  untouched.
+evidence:
+  code:
+    - src/tool/apply-patch.ts
+    - src/tool/apply-patch-fallback-wire.ts
+    - src/tool/types.ts
+  adrs: [421]
+  tests:
+    unit:
+      - tests/unit/apply-patch-fast-apply-wire-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+config_refs:
+  env: []
+deliberate_hold:
+  reason: |
+    The TOOL-SIDE wire is complete + default-OFF. The remaining piece is the
+    AGENT-SIDE composition-root: the adapter mapping the real
+    `RoleModelResolver` + `dispatchSideConversation` onto `RoleResolverLike` /
+    `SideConversationLike`, plus the dispatch seam threading
+    `AgentConfig.fastApplyFallback` onto `ToolContext.fastApplyFallback`. Until
+    that lands the slot is inert and the tool path is byte-identical. `loop.ts`
+    / `prompt-pipeline.ts` are deliberately untouched (ADR-0417 §A1
+    effort-classifier prompt-hook is a separate deferred piece; user in-flight
+    on ADR-0418 there).
+  promotion_path: |
+    Follow-up ADR: (1) build the composition-root fallback adapter, (2) thread
+    `AgentConfig.fastApplyFallback` onto `ToolContext.fastApplyFallback` in the
+    dispatch seam, (3) close ADR-0417 §A1 effort-classifier prompt-hook wire.
+notes: |
+  ADR-0421, closes ADR-0417 gap A2 apply-wire. Error classification is
+  `instanceof` on the closed `@/patch` error classes; the retry count is a
+  hard 1 — no fuzzy repair (per [[no-heuristics-only-validated]]). Hellgate
+  was RED (12/18) before the wire, GREEN (18/18) after; the 6 port-absent
+  cases passed at RED, proving the default-OFF path was already byte-identical.

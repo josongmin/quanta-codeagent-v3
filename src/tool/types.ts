@@ -194,6 +194,56 @@ export interface ToolContext {
    *  `SessionConfigSeam` in `./session_config`) so the `@/tool` slice never
    *  imports `@/agent`. */
   sessionConfig?: SessionConfigSeam
+  /** ADR-0421 — OPTIONAL fast-apply fallback port (ADR-0417 apply-wire). The
+   *  `apply_patch` tool calls this ONCE when a V4A patch FAILS to apply
+   *  (anchor drift / generic apply error / parse error): it hands the failing
+   *  patch + the derived `errorKind` + the target file snapshot to the
+   *  fallback, which asks a fast executor model to re-emit the patch. On
+   *  `{ok:true,newPatch}` the tool re-runs the V4A applier ONCE with the new
+   *  patch; on `{ok:false}` (or a retry that also fails, or a port throw) the
+   *  ORIGINAL typed error surfaces unchanged. Duck-typed (structural mirror of
+   *  `FastApplyFallbackPort` in `@/agent/fast-apply-fallback`) so the `@/tool`
+   *  slice never imports `@/agent` — the dispatch seam wires the concrete port
+   *  from `AgentConfig.fastApplyFallback`. ABSENT ⇒ exact pre-ADR behavior
+   *  (the V4A error throws immediately, NO fallback attempt, byte-identical). */
+  fastApplyFallback?: FastApplyFallbackSeam
+}
+
+/** ADR-0421 — duck-typed mirror of `FastApplyFallbackPort` from
+ *  `@/agent/fast-apply-fallback` (kept here so `@/tool` stays slice-isolated
+ *  from `@/agent` — RFC §3.1; biome enforces). `attempt` is NO-THROW at the
+ *  port boundary (the producer collapses every dep failure to `{ok:false}`);
+ *  the consumer (`apply_patch`) additionally guards against a port that breaks
+ *  its contract by throwing. The closed `errorKind` literal union mirrors the
+ *  producer's `FastApplyFailure["errorKind"]`; a new kind requires updating
+ *  BOTH the producer AND this mirror. */
+export type FastApplyFailureKind = "anchor_not_found" | "apply_error" | "parse_error"
+
+/** Structural mirror of `FastApplyFailure`. */
+export interface FastApplyFailureMirror {
+  readonly patch: string
+  readonly errorKind: FastApplyFailureKind
+  readonly errorMessage: string
+}
+
+/** Structural mirror of `FastApplyAttemptResult`. */
+export interface FastApplyAttemptResultMirror {
+  readonly ok: boolean
+  readonly newPatch: string | null
+  readonly rationale: string
+  readonly modelUsed?: string
+}
+
+/** Structural mirror of `FastApplyFallbackPort`. */
+export interface FastApplyFallbackSeam {
+  attempt(
+    input: {
+      failure: FastApplyFailureMirror
+      sourceFile?: string
+      sourceContent?: string
+    },
+    signal?: AbortSignal,
+  ): Promise<FastApplyAttemptResultMirror>
 }
 
 /** Canonical seam declaration for the `session_config` tool. Lives in
