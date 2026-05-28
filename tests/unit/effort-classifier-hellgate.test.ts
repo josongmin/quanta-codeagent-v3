@@ -188,4 +188,27 @@ describe("ADR-0417 effort-classifier hellgate", () => {
     // unicode-embedded keyword still matches
     expect(c.onUserPrompt("日本語 think hard 🚀").length).toBeGreaterThanOrEqual(1)
   })
+
+  // Audit R2 (F5): word-boundary anchors block identifier / path / token
+  // false positives. A `\b`-anchored keyword should NOT match inside another
+  // word, but a real space-separated occurrence MUST still fire.
+  test("HELL-EC-15 \\b: keyword does NOT match inside an identifier or path", () => {
+    const c = createEffortClassifier()
+    // identifier — surrounded by word chars
+    expect(c.onUserPrompt("const myUltrathinkVariable = 1")).toEqual([])
+    expect(c.onUserPrompt("foo.ultrathinkable.bar")).toEqual([])
+    // path segments — kebab/underscore neighbors are word-chars under \b
+    expect(c.onUserPrompt("/tmp/ultrathinker/file.txt")).toEqual([])
+    expect(c.onUserPrompt("noultrathinkhere")).toEqual([])
+    // negative for "think hard" inside identifier
+    expect(c.onUserPrompt("isThinkHarderEnabled")).toEqual([])
+  })
+
+  test("HELL-EC-16 \\b: real space-separated keyword still fires (positive control)", () => {
+    const c = createEffortClassifier()
+    const sigs = c.onUserPrompt("please ultrathink about this")
+    expect(sigs.length).toBeGreaterThanOrEqual(1)
+    expect(sigs[0]?.kind).toBe("keyword")
+    expect(c.currentRecommendation().level).toBe("max")
+  })
 })

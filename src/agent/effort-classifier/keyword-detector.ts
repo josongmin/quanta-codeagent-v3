@@ -24,11 +24,21 @@ export const EFFORT_INTENSITY: Record<EffortLevel, number> = {
   max: 4,
 }
 
-/** Default keyword rules. Order is irrelevant — collapse is by intensity. */
+/** Default keyword rules. Order is irrelevant — collapse is by intensity.
+ *
+ *  Audit R2 (F5): word-boundary anchors (`\b`) on every keyword block false
+ *  positives in identifiers (`myUltrathinkVariable`), paths (`/path/ultrathink-
+ *  dir`), and concatenated tokens. Each keyword is a multi-word ALT inside a
+ *  non-capturing group so `\b` brackets the entire phrase verbatim. The
+ *  inside-code-block / inside-quotes false positive remains by design — the
+ *  detector is a token-level signal, not a markdown parser, and tagging it as
+ *  signal-only (escalate-floor, never de-escalate, per session-state docstring)
+ *  bounds the blast radius of any residual false positive to a single session's
+ *  token budget. */
 export const DEFAULT_KEYWORD_RULES: readonly KeywordRule[] = [
-  { pattern: /ultrathink|think harder/i, level: "max" },
-  { pattern: /think hard|deeper/i, level: "high" },
-  { pattern: /be thorough/i, level: "high" },
+  { pattern: /\b(?:ultrathink|think harder)\b/i, level: "max" },
+  { pattern: /\b(?:think hard|deeper)\b/i, level: "high" },
+  { pattern: /\bbe thorough\b/i, level: "high" },
 ]
 
 /** The higher-intensity of two tiers (highest-wins). */
