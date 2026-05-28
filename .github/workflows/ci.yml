@@ -27,6 +27,19 @@ jobs:
         with:
           bun-version: latest
       - run: bun install --frozen-lockfile
+      - name: restore typecheck incremental cache
+        # Cache ONLY .tsbuildinfo. The local skip stamps are mtime-based and
+        # are not portable across fresh CI checkouts, but tsc incremental state
+        # still helps repeated PR/main runs re-check less work.
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/typescript/typecheck-src.tsbuildinfo
+            .cache/typescript/typecheck-tests.tsbuildinfo
+            .cache/typescript/typecheck-all.tsbuildinfo
+          key: ${{ runner.os }}-typecheck-${{ hashFiles('package.json', 'bun.lock', 'tsconfig.json', 'tsconfig.base.json', 'tsconfig.typecheck.src.json', 'tsconfig.typecheck.tests.json', 'tools/dev/typecheck.ts') }}-${{ github.ref_name }}
+          restore-keys: |
+            ${{ runner.os }}-typecheck-${{ hashFiles('package.json', 'bun.lock', 'tsconfig.json', 'tsconfig.base.json', 'tsconfig.typecheck.src.json', 'tsconfig.typecheck.tests.json', 'tools/dev/typecheck.ts') }}-
       - name: typecheck
         run: bun run typecheck:all
       - name: lint + slice isolation (biome overrides enforce boundaries)

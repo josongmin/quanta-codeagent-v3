@@ -29,6 +29,7 @@
 import { computeRetryDelayMs } from "./reconnect"
 import {
   decodeEventFrame,
+  decodeObservabilityFrame,
   decodeRejectedFrame,
   decodeSnapshotFrame,
   encodeCommandFrame,
@@ -37,6 +38,7 @@ import {
 } from "./envelope"
 import type {
   ConnectionState,
+  ObservabilityMessage,
   SessionCommand,
   SessionEvent,
   SessionEventType,
@@ -69,6 +71,7 @@ export type EventHandler<TType extends SessionEventType = SessionEventType> = (
 
 export type ConnectionHandler = (state: ConnectionState) => void
 export type SnapshotHandler = (snapshot: SessionSnapshotLite) => void
+export type ObservabilityHandler = (message: ObservabilityMessage) => void
 
 /**
  * Minimal interface SessionClient depends on — the global `WebSocket` ctor
@@ -114,14 +117,12 @@ const HANDSHAKE_DISCOVERY_SESSION_ID = "ui-session"
 /* ------------------------------------------------------------------ */
 
 export class SessionClient {
-  readonly #eventHandlers = new Map<
-    SessionEventType,
-    Set<EventHandler<SessionEventType>>
-  >()
+  readonly #eventHandlers = new Map<SessionEventType, Set<EventHandler<SessionEventType>>>()
   readonly #wildcardEventHandlers = new Set<(event: SessionEvent) => void>()
   readonly #rejectedHandlers = new Set<(frame: SessionRejectedFrame) => void>()
   readonly #connectionHandlers = new Set<ConnectionHandler>()
   readonly #snapshotHandlers = new Set<SnapshotHandler>()
+  readonly #observabilityHandlers = new Set<ObservabilityHandler>()
   readonly #wsCtor: WebSocketCtor
   readonly #setTimer: (cb: () => void, ms: number) => unknown
   readonly #clearTimer: (handle: unknown) => void
@@ -136,16 +137,14 @@ export class SessionClient {
   /** Server-minted session id learned via connect-reject discovery or snapshot. */
   #sessionId: string | null = null
   #lastSnapshot: SessionSnapshotLite | null = null
+  #lastObservability: ObservabilityMessage | null = null
   readonly #sessionIdHandlers = new Set<(id: string) => void>()
 
   constructor(options: SessionClientOptions = {}) {
     const ctor =
       options.webSocketCtor ??
-      (typeof globalThis !== "undefined" &&
-      "WebSocket" in (globalThis as Record<string, unknown>)
-        ? ((globalThis as { WebSocket?: WebSocketCtor }).WebSocket as
-            | WebSocketCtor
-            | undefined)
+      (typeof globalThis !== "undefined" && "WebSocket" in (globalThis as Record<string, unknown>)
+        ? ((globalThis as { WebSocket?: WebSocketCtor }).WebSocket as WebSocketCtor | undefined)
         : undefined)
     if (ctor === undefined) {
       throw new Error(
@@ -153,12 +152,9 @@ export class SessionClient {
       )
     }
     this.#wsCtor = ctor
-    this.#setTimer =
-      options.setTimer ??
-      ((cb, ms) => setTimeout(cb, ms) as unknown as number)
+    this.#setTimer = options.setTimer ?? ((cb, ms) => setTimeout(cb, ms) as unknown as number)
     this.#clearTimer =
-      options.clearTimer ??
-      ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>))
+      options.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>))
     this.#log = options.log ?? ((level, msg) => console[level](msg))
   }
 
@@ -189,10 +185,7 @@ export class SessionClient {
 
   send(command: SessionCommand): void {
     if (this.#ws === null || this.#ws.readyState !== READYSTATE_OPEN) {
-      this.#log(
-        "warn",
-        `[SessionClient] dropping command type=${command.type} — socket not open`,
-      )
+      this.#log("warn", `[SessionClient] dropping command type=${command.type} — socket not open`)
       return
     }
     if (this.#state.kind !== "connected") {
@@ -227,10 +220,7 @@ export class SessionClient {
 
   /* ---------------- Subscriptions ------------------------------- */
 
-  on<TType extends SessionEventType>(
-    type: TType,
-    handler: EventHandler<TType>,
-  ): () => void {
+  on<TType extends SessionEventType>(type: TType, handler: EventHandler<TType>): () => void {
     let set = this.#eventHandlers.get(type)
     if (set === undefined) {
       set = new Set()
@@ -287,6 +277,20 @@ export class SessionClient {
     }
   }
 
+  onObservability(handler: ObservabilityHandler): () => void {
+    this.#observabilityHandlers.add(handler)
+    if (this.#lastObservability !== null) {
+      try {
+        handler(this.#lastObservability)
+      } catch {
+        // swallow — surface to console via #log instead
+      }
+    }
+    return () => {
+      this.#observabilityHandlers.delete(handler)
+    }
+  }
+
   onConnectionChange(handler: ConnectionHandler): () => void {
     this.#connectionHandlers.add(handler)
     // Replay current state so the subscriber renders immediately without
@@ -320,9 +324,7 @@ export class SessionClient {
     } catch (err) {
       this.#log(
         "warn",
-        `[SessionClient] WebSocket ctor threw — scheduling reconnect: ${String(
-          err,
-        )}`,
+        `[SessionClient] WebSocket ctor threw — scheduling reconnect: ${String(err)}`,
       )
       this.#scheduleReconnect("ctor_threw")
       return
@@ -336,9 +338,7 @@ export class SessionClient {
       // non-empty discovery sentinel; the daemon rejects it with the real
       // session id and we immediately retry with that value.
       try {
-        ws.send(
-          encodeConnectFrame(this.#sessionId ?? HANDSHAKE_DISCOVERY_SESSION_ID),
-        )
+        ws.send(encodeConnectFrame(this.#sessionId ?? HANDSHAKE_DISCOVERY_SESSION_ID))
       } catch (err) {
         this.#log("warn", `[SessionClient] connect frame failed: ${String(err)}`)
       }
@@ -401,10 +401,7 @@ export class SessionClient {
     const snapshot = decodeSnapshotFrame(data)
     if (snapshot !== null) {
       this.#lastSnapshot = snapshot
-      if (
-        this.#sessionId === null ||
-        this.#sessionId !== snapshot.sessionId
-      ) {
+      if (this.#sessionId === null || this.#sessionId !== snapshot.sessionId) {
         this.#adoptSessionId(snapshot.sessionId)
       }
       this.#setState({ kind: "connected" })
@@ -412,10 +409,19 @@ export class SessionClient {
         try {
           handler(snapshot)
         } catch (err) {
-          this.#log(
-            "warn",
-            `[SessionClient] snapshot handler threw: ${String(err)}`,
-          )
+          this.#log("warn", `[SessionClient] snapshot handler threw: ${String(err)}`)
+        }
+      }
+      return
+    }
+    const observability = decodeObservabilityFrame(data)
+    if (observability !== null) {
+      this.#lastObservability = observability
+      for (const handler of [...this.#observabilityHandlers]) {
+        try {
+          handler(observability)
+        } catch (err) {
+          this.#log("warn", `[SessionClient] observability handler threw: ${String(err)}`)
         }
       }
       return
@@ -423,11 +429,8 @@ export class SessionClient {
     const event = decodeEventFrame(data)
     if (event === null) {
       const kind = peekEnvelopeKind(data)
-      if (kind !== "snapshot" && kind !== "rejected") {
-        this.#log(
-          "warn",
-          `[SessionClient] dropping unrecognised frame (kind=${String(kind)})`,
-        )
+      if (kind !== "snapshot" && kind !== "rejected" && kind !== "observability") {
+        this.#log("warn", `[SessionClient] dropping unrecognised frame (kind=${String(kind)})`)
       }
       return
     }
@@ -443,9 +446,7 @@ export class SessionClient {
         } catch (err) {
           this.#log(
             "warn",
-            `[SessionClient] event handler threw for type=${event.type}: ${String(
-              err,
-            )}`,
+            `[SessionClient] event handler threw for type=${event.type}: ${String(err)}`,
           )
         }
       }
@@ -454,10 +455,7 @@ export class SessionClient {
       try {
         handler(event)
       } catch (err) {
-        this.#log(
-          "warn",
-          `[SessionClient] wildcard handler threw: ${String(err)}`,
-        )
+        this.#log("warn", `[SessionClient] wildcard handler threw: ${String(err)}`)
       }
     }
   }
@@ -487,10 +485,7 @@ export class SessionClient {
       try {
         handler(next)
       } catch (err) {
-        this.#log(
-          "warn",
-          `[SessionClient] connection handler threw: ${String(err)}`,
-        )
+        this.#log("warn", `[SessionClient] connection handler threw: ${String(err)}`)
       }
     }
   }

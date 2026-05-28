@@ -20,14 +20,12 @@ import {
 } from "@/agent/observability-wire"
 import type { RunLedgerPort } from "@/agent/run-ledger"
 import type { ShadowVerifyPort } from "@/agent/shadow-verify"
-import { assembleAgentConfig } from "@/apps/agent/assemble"
+import { buildInteractiveTurnAssembler as buildSharedInteractiveTurnAssembler } from "@/apps/agent/interactive-turn-assembler"
 import { pickProvider, tryCreateLLM } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { buildSkillsConfigCore, buildSubagentConfigCore, parseEnvFlag } from "@/runner/assemble"
 import {
   createRuntimeFromAgentConfigBase,
-  type RuntimeAgentConfigBase,
-  type RuntimeAgentTurnAssembler,
   type RuntimeFacade,
 } from "@/sdk/runtime"
 import { StdoutStream } from "@/stream"
@@ -106,31 +104,7 @@ const observabilitySlots = (observability: {
   }
 }
 
-type InteractiveTurnDeps = Pick<
-  RuntimeAgentConfigBase,
-  "cwd" | "llm" | "maxTurns" | "permission" | "registry" | "signal" | "stream" | "system"
->
-
-export const buildInteractiveTurnAssembler =
-  (base: Omit<AgentConfig, "modePolicy" | "budgetMeter">): RuntimeAgentTurnAssembler =>
-  (messages, turnDeps) => {
-    const deps = turnDeps as InteractiveTurnDeps
-    return assembleAgentConfig({
-      mode: "interactive",
-      base: {
-        ...base,
-        llm: deps.llm,
-        registry: deps.registry,
-        stream: deps.stream,
-        permission: deps.permission,
-        messages,
-        system: deps.system,
-        cwd: deps.cwd,
-        maxTurns: deps.maxTurns,
-        signal: deps.signal,
-      },
-    })
-  }
+export const buildInteractiveTurnAssembler = buildSharedInteractiveTurnAssembler
 
 /**
  * ADR-0404 + ADR-0415 — per-session observability wire for the web-daemon
@@ -209,7 +183,7 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       ...(skills !== undefined ? { skills } : {}),
       ...observabilitySlots(observability),
     }
-    const turnAssembler = buildInteractiveTurnAssembler(base)
+    const turnAssembler = buildInteractiveTurnAssembler()
     const { runtime } = await createRuntimeFromAgentConfigBase({
       base,
       turnAssembler,

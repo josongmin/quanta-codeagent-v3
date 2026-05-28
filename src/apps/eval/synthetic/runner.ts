@@ -20,7 +20,7 @@ import { mkdirSync, writeFileSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, relative, resolve, sep } from "node:path"
-import { buildSystemPrompt, runAgent } from "@/agent"
+import { buildSystemPrompt, runAgent, wireOptionalAgentPorts } from "@/agent"
 import type { LLMPort, Message } from "@/llm"
 import { costUsd } from "@/observability/pricing"
 import type { PermissionContext } from "@/permission"
@@ -206,20 +206,22 @@ export const runScenario = async (scenario: Scenario, opts: RunOpts): Promise<Ru
     let stopReason = "completed"
     let turns = 0
     try {
-      const outcome = await runAgent({
-        llm: opts.llm,
-        // DIP factory: synthetic scenarios run against the default port surface;
-        // sandbox confinement comes from the tmp-dir cwd + `forbidden` matcher,
+      const outcome = await runAgent(
+        wireOptionalAgentPorts({
+          llm: opts.llm,
+          // DIP factory: synthetic scenarios run against the default port surface;
+          // sandbox confinement comes from the tmp-dir cwd + `forbidden` matcher,
         // not from substituting fs ports here.
         registry: new ToolRegistry(buildDefaultTools()),
         stream,
         permission,
         messages,
         system: buildSystemPrompt(sandbox),
-        cwd: sandbox,
-        maxTurns: opts.maxTurns ?? scenario.maxTurns ?? DEFAULT_MAX_TURNS,
-        signal: controller.signal,
-      })
+          cwd: sandbox,
+          maxTurns: opts.maxTurns ?? scenario.maxTurns ?? DEFAULT_MAX_TURNS,
+          signal: controller.signal,
+        }),
+      )
       stopReason = timedOut ? "timeout" : outcome.reason
       turns = outcome.turns
     } finally {

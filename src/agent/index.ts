@@ -127,6 +127,7 @@ export {
   parseAgentlessResponse,
 } from "./issue-hint"
 export { runAgent } from "./loop"
+export { wireOptionalAgentPorts } from "./optional-ports"
 export { lspDiagnosticsTool, lspNavToolList } from "./lsp-bridge"
 export {
   attachLspDiagnosticsHook,

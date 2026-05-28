@@ -34,7 +34,7 @@ describe("web-daemon runtime factory", () => {
 
     const { runtime } = await createRuntimeFromAgentConfigBase({
       base,
-      turnAssembler: buildInteractiveTurnAssembler(base),
+      turnAssembler: buildInteractiveTurnAssembler(),
       history: [],
       state: undefined,
       idMeta: undefined,

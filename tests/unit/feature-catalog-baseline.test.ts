@@ -4,6 +4,7 @@ import {
   countBiomeErrors,
   countTscErrors,
   parseBunTestOutput,
+  TYPECHECK_BASELINE_CMD,
 } from "../../tools/feature-catalog/refresh-baseline"
 
 describe("parseBunTestOutput", () => {
@@ -114,5 +115,11 @@ describe("countBiomeErrors", () => {
 
   test("clean output → 0", () => {
     expect(countBiomeErrors("Checked 315 files in 372ms. No fixes applied.")).toBe(0)
+  })
+})
+
+describe("TYPECHECK_BASELINE_CMD", () => {
+  test("routes baseline refresh through the repo typecheck runner", () => {
+    expect([...TYPECHECK_BASELINE_CMD]).toEqual(["bun", "run", "typecheck:all"])
   })
 })

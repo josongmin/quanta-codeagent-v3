@@ -54,7 +54,14 @@ export interface SessionDeps {
   skillsConfig: AgentConfig["skills"] | undefined
   compactionBreakerConfig: AgentConfig["compactionBreaker"] | undefined
   verifyGuardConfig: AgentConfig["verifyGuard"] | undefined
+  /** Surface-owned alternate LLM registry for per-turn model selection
+   *  (`session_config` / skill overrides / fast-apply fallback resolver).
+   *  Absent ⇒ the primary `llm` is the only selectable port. */
+  modelCandidates?: AgentConfig["modelCandidates"]
   summarizerLlm: LLMPort | undefined
+  /** Session-scoped role→model override carrier shared with any consumer that
+   *  needs role-based model selection (for example fast-apply fallback). */
+  roleModelResolver?: AgentConfig["roleModelResolver"]
   /** ADR-0081 shell-output-delta observer composed by the surface. Absent ⇒
    *  runShell stays on its legacy buffered path (byte-identical). */
   onShellEvent: AgentConfig["onShellEvent"] | undefined
@@ -151,6 +158,12 @@ export interface SessionDeps {
    *  turn without re-assembling AgentConfig. Absent ⇒ omitted entirely
    *  (byte-identical default-OFF: no `thinking` field on LLMInput). */
   sessionEffort?: AgentConfig["sessionEffort"]
+  /** Session-scoped advisory effort classifier. Absent ⇒ the loop's
+   *  escalate-only floor remains a no-op. */
+  effortClassifier?: AgentConfig["effortClassifier"]
+  /** Apply-patch fast fallback port. Absent ⇒ `apply_patch` remains on the
+   *  single-attempt legacy path. */
+  fastApplyFallback?: AgentConfig["fastApplyFallback"]
   /** ADR-0269 Phase 3 closure — gate-decision emitter port. When present,
    *  `runAdmissibilityGate` (permission/rule/hook) + dispatch's cap
    *  reminder + loop's budget-exhaustion + storage's fs-jail deny each
@@ -269,6 +282,13 @@ const buildObservabilityAndPortsSpreads = (d: SessionDeps): Partial<AgentConfig>
   ...(d.planStore !== undefined ? { planStore: d.planStore } : {}),
 })
 
+const buildOptionalAgentPortSpreads = (d: SessionDeps): Partial<AgentConfig> => ({
+  ...(d.modelCandidates !== undefined ? { modelCandidates: d.modelCandidates } : {}),
+  ...(d.roleModelResolver !== undefined ? { roleModelResolver: d.roleModelResolver } : {}),
+  ...(d.effortClassifier !== undefined ? { effortClassifier: d.effortClassifier } : {}),
+  ...(d.fastApplyFallback !== undefined ? { fastApplyFallback: d.fastApplyFallback } : {}),
+})
+
 /** Capability + observability spreads (Phase 2 of the optional-key
  *  cohort). Pure. Byte-identical to the inline chain. */
 const buildCapabilityAndObservabilitySpreads = (d: SessionDeps): Partial<AgentConfig> => ({
@@ -280,6 +300,7 @@ const buildCapabilityAndObservabilitySpreads = (d: SessionDeps): Partial<AgentCo
   ...(d.searchPipeline !== undefined ? { searchPipeline: d.searchPipeline } : {}),
   ...(d.shellSnapshot !== undefined ? { shellSnapshot: d.shellSnapshot } : {}),
   ...(d.sessionEffort !== undefined ? { sessionEffort: d.sessionEffort } : {}),
+  ...buildOptionalAgentPortSpreads(d),
   ...buildObservabilityAndPortsSpreads(d),
   ...buildPromptVariantSpreads(d),
 })

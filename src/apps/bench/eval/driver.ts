@@ -1,4 +1,4 @@
-import { type AgentConfig, type AgentOutcome, runAgent } from "@/agent"
+import { type AgentConfig, type AgentOutcome, runAgent, wireOptionalAgentPorts } from "@/agent"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import { createSingleSessionRuntimeHost } from "@/host/runtime"
 import type { SessionHost } from "@/kernel/session"
@@ -99,22 +99,23 @@ const promptTextFromMessages = (messages: readonly Message[]): string => {
 }
 
 const createBenchSessionHost = (config: AgentConfig): SessionHost => {
+  const wiredConfig = wireOptionalAgentPorts(config)
   const sessionId = `bench-${crypto.randomUUID()}`
   // ADR-0334 — bench passes EMPTY deps so the install is a no-op
   // (byte-identical replay). The call site is recorded so a future
   // bench-determinism audit can opt deps in via a single edit.
-  installCodexR2Wires(config, {})
+  installCodexR2Wires(wiredConfig, {})
   return {
     describe: () => ({
       sessionId,
-      permissionMode: config.permission.mode,
-      capabilityManifest: capabilityManifestForConfig(config),
+      permissionMode: wiredConfig.permission.mode,
+      capabilityManifest: capabilityManifestForConfig(wiredConfig),
       identityMode: "default",
       toolProfile: "write",
     }),
     runTurn: async ({ signal }) => {
       const result = await runAgent({
-        ...config,
+        ...wiredConfig,
         ...(signal !== undefined ? { signal } : {}),
       })
       return { outcome: result, messages: result.messages }

@@ -1,10 +1,6 @@
 import type { AgentConfig } from "@/agent"
 import type { Message } from "@/llm"
 
-export type RuntimeAgentTurnAssembler = {
-  bivarianceHack(messages: Message[], deps: unknown): AgentConfig
-}["bivarianceHack"]
-
 export interface RuntimeAgentConfigAugments {
   systemSource?: unknown
   followUpQueue?: unknown
@@ -35,3 +31,9 @@ export interface RuntimeAgentConfigAugments {
 
 export type RuntimeAgentConfigBase = Omit<AgentConfig, "modePolicy" | "budgetMeter"> &
   RuntimeAgentConfigAugments
+
+export type RuntimeAgentTurnDeps = RuntimeAgentConfigBase
+
+export type RuntimeAgentTurnAssembler = {
+  bivarianceHack(messages: Message[], deps: RuntimeAgentTurnDeps): AgentConfig
+}["bivarianceHack"]

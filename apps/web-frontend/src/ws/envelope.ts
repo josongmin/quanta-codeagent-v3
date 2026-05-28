@@ -15,6 +15,7 @@
 import type {
   CommandEnvelope,
   EventEnvelope,
+  ObservabilityMessage,
   SessionCommand,
   SessionEvent,
   SessionEventType,
@@ -54,34 +55,63 @@ const isNumber = (value: unknown): value is number =>
 const isEventTypeTag = (value: unknown): value is SessionEventType =>
   isString(value) && (EVENT_TYPES as readonly string[]).includes(value)
 
+const OBSERVABILITY_MESSAGE_KINDS = [
+  "observability.snapshot",
+  "observability.delta",
+] as const satisfies readonly ObservabilityMessage["kind"][]
+
+const isObservabilityMessageKind = (value: unknown): value is ObservabilityMessage["kind"] =>
+  isString(value) && (OBSERVABILITY_MESSAGE_KINDS as readonly string[]).includes(value)
+
+const isNullableRecord = (value: unknown): boolean => value === null || isRecord(value)
+
+const isRunChanges = (value: unknown): boolean =>
+  Array.isArray(value) &&
+  value.every(
+    (item) => isRecord(item) && isString(item.id) && (item.entry === null || isRecord(item.entry)),
+  )
+
+const isApprovalChanges = (value: unknown): boolean =>
+  Array.isArray(value) &&
+  value.every(
+    (item) =>
+      isRecord(item) && isString(item.id) && (item.approval === null || isRecord(item.approval)),
+  )
+
+const isObservabilityMessage = (value: unknown): value is ObservabilityMessage => {
+  if (!isRecord(value)) return false
+  if (!isObservabilityMessageKind(value.kind)) return false
+  if (!isNumber(value.emittedAt)) return false
+  if (value.kind === "observability.snapshot") {
+    return (
+      Array.isArray(value.runs) &&
+      Array.isArray(value.approvals) &&
+      isNullableRecord(value.objective)
+    )
+  }
+  if (value.runChanges !== undefined && !isRunChanges(value.runChanges)) return false
+  if (value.approvalChanges !== undefined && !isApprovalChanges(value.approvalChanges)) return false
+  if (value.objectiveChanged !== undefined && !isNullableRecord(value.objectiveChanged))
+    return false
+  return true
+}
+
 const isSessionStateView = (value: unknown): boolean => {
   if (!isRecord(value)) return false
   if (!isString(value.status)) return false
   if (!isString(value.draftInput)) return false
   if (!isString(value.permissionMode)) return false
   if (!isNumber(value.messageCount)) return false
-  if (
-    value.lastUserText !== undefined &&
-    !isString(value.lastUserText)
-  ) {
+  if (value.lastUserText !== undefined && !isString(value.lastUserText)) {
     return false
   }
-  if (
-    value.lastAssistantText !== undefined &&
-    !isString(value.lastAssistantText)
-  ) {
+  if (value.lastAssistantText !== undefined && !isString(value.lastAssistantText)) {
     return false
   }
-  if (
-    value.streamingAssistantText !== undefined &&
-    !isString(value.streamingAssistantText)
-  ) {
+  if (value.streamingAssistantText !== undefined && !isString(value.streamingAssistantText)) {
     return false
   }
-  if (
-    value.lastOutcomeReason !== undefined &&
-    !isString(value.lastOutcomeReason)
-  ) {
+  if (value.lastOutcomeReason !== undefined && !isString(value.lastOutcomeReason)) {
     return false
   }
   return true
@@ -145,9 +175,7 @@ export const decodeEventFrame = (raw: unknown): SessionEvent | null => {
  *    `{version, kind:"rejected", sessionId, target, reason, commandId?, ...}`
  *  The daemon sends this when the client's connect-frame sessionId doesn't
  *  match the server's session; `sessionId` is the canonical id to adopt. */
-export const decodeRejectedFrame = (
-  raw: unknown,
-): SessionRejectedFrame | null => {
+export const decodeRejectedFrame = (raw: unknown): SessionRejectedFrame | null => {
   if (!isString(raw)) return null
   let parsed: unknown
   try {
@@ -177,17 +205,13 @@ export const decodeRejectedFrame = (
     ...(typeof parsed.expectedRevision === "number"
       ? { expectedRevision: parsed.expectedRevision }
       : {}),
-    ...(typeof parsed.actualRevision === "number"
-      ? { actualRevision: parsed.actualRevision }
-      : {}),
+    ...(typeof parsed.actualRevision === "number" ? { actualRevision: parsed.actualRevision } : {}),
     ...(isString(parsed.issue) ? { issue: parsed.issue } : {}),
   }
 }
 
 /** Decode a snapshot control frame into the UI-visible snapshot view. */
-export const decodeSnapshotFrame = (
-  raw: unknown,
-): SessionSnapshotLite | null => {
+export const decodeSnapshotFrame = (raw: unknown): SessionSnapshotLite | null => {
   if (!isString(raw)) return null
   let parsed: unknown
   try {
@@ -213,6 +237,21 @@ export const decodeSnapshotFrame = (
   }
   if (!Array.isArray(payload.openArtifacts)) return null
   return payload as unknown as SessionSnapshotLite
+}
+
+/** Decode an `observability` envelope into the snapshot/delta payload. */
+export const decodeObservabilityFrame = (raw: unknown): ObservabilityMessage | null => {
+  if (!isString(raw)) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw) as unknown
+  } catch {
+    return null
+  }
+  if (!isRecord(parsed)) return null
+  if (parsed.kind !== "observability") return null
+  if (!isString(parsed.version) || parsed.version.length === 0) return null
+  return isObservabilityMessage(parsed.payload) ? parsed.payload : null
 }
 
 /**

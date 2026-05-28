@@ -51,7 +51,7 @@
  */
 
 import type { AgentConfig, BranchSearchConfig } from "@/agent"
-import { buildSystemPrompt } from "@/agent"
+import { buildSystemPrompt, wireOptionalAgentPorts } from "@/agent"
 import type { PermissionContext } from "@/permission"
 import { StdoutStream, type StreamPort } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
@@ -88,7 +88,7 @@ const buildIdeBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" | "b
     req.base.registry instanceof ToolRegistry
       ? req.base.registry
       : new ToolRegistry(buildDefaultTools())
-  return {
+  return wireOptionalAgentPorts({
     ...req.base,
     llm: req.base.llm,
     registry,
@@ -101,7 +101,7 @@ const buildIdeBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" | "b
     signal: req.base.signal ?? new AbortController().signal,
     // branch_search default-on unless the caller already chose.
     branchSearch: req.base.branchSearch ?? IDE_BRANCH_SEARCH,
-  }
+  })
 }
 
 export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {

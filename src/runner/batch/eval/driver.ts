@@ -37,6 +37,7 @@ import {
   type ReproWriteFilePort,
   runAgent,
   selectReproTest,
+  wireOptionalAgentPorts,
 } from "@/agent"
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
@@ -869,7 +870,7 @@ export const buildConfig = (
       content: [{ type: "text", text }],
     },
   ]
-  return {
+  return wireOptionalAgentPorts({
     llm: deps.llm,
     registry,
     stream,
@@ -903,7 +904,7 @@ export const buildConfig = (
     ...(opt.skills !== undefined ? { skills: opt.skills } : {}),
     ...(opt.localizePhase !== undefined ? { localizePhase: opt.localizePhase } : {}),
     ...(opt.branchSearch !== undefined ? { branchSearch: opt.branchSearch } : {}),
-  }
+  })
 }
 
 interface Phase {

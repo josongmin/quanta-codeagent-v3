@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  decodeObservabilityFrame,
   decodeSnapshotFrame,
   decodeRejectedFrame,
   decodeEventFrame,
@@ -301,10 +302,89 @@ describe("decodeSnapshotFrame", () => {
   })
 })
 
+describe("decodeObservabilityFrame", () => {
+  it("returns the snapshot payload for a well-formed observability frame", () => {
+    const raw = JSON.stringify({
+      version: "observability.v1",
+      kind: "observability",
+      payload: {
+        kind: "observability.snapshot",
+        runs: [],
+        objective: null,
+        approvals: [],
+        emittedAt: 123,
+      },
+    })
+    expect(decodeObservabilityFrame(raw)).toEqual({
+      kind: "observability.snapshot",
+      runs: [],
+      objective: null,
+      approvals: [],
+      emittedAt: 123,
+    })
+  })
+
+  it("returns the delta payload for a well-formed observability frame", () => {
+    const raw = JSON.stringify({
+      version: "observability.v1",
+      kind: "observability",
+      payload: {
+        kind: "observability.delta",
+        runChanges: [{ id: "run-1", entry: null }],
+        objectiveChanged: null,
+        approvalChanges: [{ id: "approval-1", approval: null }],
+        emittedAt: 456,
+      },
+    })
+    expect(decodeObservabilityFrame(raw)).toEqual({
+      kind: "observability.delta",
+      runChanges: [{ id: "run-1", entry: null }],
+      objectiveChanged: null,
+      approvalChanges: [{ id: "approval-1", approval: null }],
+      emittedAt: 456,
+    })
+  })
+
+  it("returns null for malformed or non-observability frames", () => {
+    expect(decodeObservabilityFrame("{")).toBeNull()
+    expect(
+      decodeObservabilityFrame(
+        JSON.stringify({
+          version: "observability.v1",
+          kind: "observability",
+          payload: {
+            kind: "observability.snapshot",
+            runs: "nope",
+            objective: null,
+            approvals: [],
+            emittedAt: 1,
+          },
+        }),
+      ),
+    ).toBeNull()
+    expect(
+      decodeObservabilityFrame(
+        JSON.stringify({
+          version: "observability.v1",
+          kind: "event",
+          payload: {
+            kind: "observability.snapshot",
+            runs: [],
+            objective: null,
+            approvals: [],
+            emittedAt: 1,
+          },
+        }),
+      ),
+    ).toBeNull()
+  })
+})
+
 describe("peekEnvelopeKind", () => {
   it("returns the kind tag verbatim for any object envelope", () => {
     expect(peekEnvelopeKind('{"kind":"snapshot"}')).toBe("snapshot")
     expect(peekEnvelopeKind('{"kind":"rejected"}')).toBe("rejected")
+    expect(peekEnvelopeKind('{"kind":"observability"}')).toBe("observability")
   })
 
   it("returns null when input is not a string or not JSON", () => {

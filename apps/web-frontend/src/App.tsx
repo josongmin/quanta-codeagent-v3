@@ -21,7 +21,7 @@ import { isHotkeyImagePayload, type PendingImageAttachment } from "./composer/im
 import { useImageAttachment } from "./composer/use-image-attachment"
 import type { ConnectionState, SessionEvent, SessionStateView } from "./types/protocol"
 import { SessionClient } from "./ws/client"
-import { useObservabilityState } from "./ws/observability-hooks"
+import { type ObservabilitySource, useObservabilityState } from "./ws/observability-hooks"
 import {
   type CumulativeTokenUsage,
   useConnectionState,
@@ -495,11 +495,13 @@ export const App = (): JSX.Element => {
   const resolvedModel =
     modelSlug ?? (import.meta.env.VITE_QUANTA_MODEL as string | undefined) ?? "gpt-5"
 
-  // ADR-0406 — observability pane state. With no `observability.*` frames on
-  // the wire (default-OFF backend) the hook returns an empty state and the
-  // pane renders placeholders. Live wire-up to the SessionClient is a
-  // follow-up — for now we pass `null` so the pane stays empty by design.
-  const observability = useObservabilityState(null)
+  const observabilitySource = useMemo<ObservabilitySource>(
+    () => ({
+      subscribe: (handler) => client.onObservability(handler),
+    }),
+    [client],
+  )
+  const observability = useObservabilityState(observabilitySource)
 
   return (
     <div className="flex h-full min-h-screen flex-col bg-neutral-950 text-neutral-100">

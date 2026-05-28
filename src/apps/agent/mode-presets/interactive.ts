@@ -10,7 +10,6 @@ import type { AgentConfig } from "@/agent"
 import { buildSystemPrompt } from "@/agent"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import type { PermissionContext } from "@/permission"
-import type { RuntimeAgentTurnAssembler } from "@/sdk/runtime"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
 import { StdoutStream, type StreamPort, TeeStream } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
@@ -20,6 +19,7 @@ import {
   type RunOutcome,
   resolveRunAgent,
 } from "../assemble"
+import { buildInteractiveTurnAssembler } from "../interactive-turn-assembler"
 import { exitCodeForOutcome } from "../run"
 
 interface PromptSourceLike {
@@ -62,21 +62,10 @@ const makeAbortError = (): Error & { code?: string } => {
 const runInteractiveTerminal = async (req: AssembleRequest): Promise<void> => {
   const abort = new AbortController()
   const base = buildInteractiveBase(req, abort.signal)
-  const assemble = (
-    messages: Parameters<typeof assembleAgentConfig>[0]["base"]["messages"],
-    _turnDeps: Parameters<RuntimeAgentTurnAssembler>[1],
-  ): AgentConfig =>
-    assembleAgentConfig({
-      ...req,
-      base: {
-        ...base,
-        messages,
-        signal: base.signal,
-      },
-    })
+  const { base: _base, mode: _mode, ...assemblerReq } = req
   const { runtime: runtimeFacade } = await createRuntimeFromAgentConfigBase({
     base,
-    turnAssembler: assemble,
+    turnAssembler: buildInteractiveTurnAssembler(assemblerReq),
     history: [...base.messages],
     state: undefined,
     idMeta: undefined,

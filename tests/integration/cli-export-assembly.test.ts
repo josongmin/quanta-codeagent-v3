@@ -315,4 +315,58 @@ describe("CLI export-closure assembly (in-process e2e)", () => {
     expect(cfg.planExitPort).toBe(planExitPort)
     expect(cfg.userInputPort).toBe(userInputPort)
   })
+
+  test("F: assembleConfig threads optional agent ports through SessionDeps", () => {
+    const llm: LLMPort = new StubLLM()
+    const alt: LLMPort = new StubLLM()
+    const roleModelResolver = {
+      resolve: (role: "executor" | "default", defaultModel: string) =>
+        role === "executor" ? "alt-model" : defaultModel,
+    } satisfies NonNullable<SessionDeps["roleModelResolver"]>
+    const effortClassifier = {
+      onUserPrompt: () => [],
+      onToolFailure: () => [],
+      currentRecommendation: () => ({ level: "high" as const, signals: [], reason: "test" }),
+      reset: () => undefined,
+    } satisfies NonNullable<SessionDeps["effortClassifier"]>
+    const fastApplyFallback = {
+      attempt: async () => ({ ok: false, newPatch: null, rationale: "test" }),
+    } satisfies NonNullable<SessionDeps["fastApplyFallback"]>
+    const modelCandidates = [{ id: "alt-model", port: alt }] as const
+
+    const cfg = assembleConfig([{ role: "user", content: [{ type: "text", text: "go" }] }], {
+      llm,
+      registry: buildTooling([], [], [], [], new StructuredLogger()).registry,
+      stream: { emit: () => undefined },
+      permission: { mode: "default" },
+      system: buildSystemPrompt(workspace, { persona: "default" }),
+      cwd: workspace,
+      maxTurns: 1,
+      signal: new AbortController().signal,
+      onConfirm: async (_a: ToolAction) => false,
+      store: undefined,
+      sessionId: "sess-1",
+      embedder: undefined,
+      memoryConfig: undefined,
+      planMode: false,
+      metrics: undefined,
+      run: undefined,
+      subagentConfig: undefined,
+      skillsConfig: undefined,
+      compactionBreakerConfig: undefined,
+      verifyGuardConfig: undefined,
+      modelCandidates,
+      summarizerLlm: undefined,
+      roleModelResolver,
+      onShellEvent: undefined,
+      workMetricsSink: undefined,
+      effortClassifier,
+      fastApplyFallback,
+    })
+
+    expect(cfg.modelCandidates).toBe(modelCandidates)
+    expect(cfg.roleModelResolver).toBe(roleModelResolver)
+    expect(cfg.effortClassifier).toBe(effortClassifier)
+    expect(cfg.fastApplyFallback).toBe(fastApplyFallback)
+  })
 })

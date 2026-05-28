@@ -51,7 +51,7 @@
  */
 
 import type { AgentConfig, BranchSearchConfig } from "@/agent"
-import { buildSystemPrompt } from "@/agent"
+import { buildSystemPrompt, wireOptionalAgentPorts } from "@/agent"
 import type { PermissionContext } from "@/permission"
 import { StdoutStream, type StreamPort } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
@@ -86,7 +86,7 @@ const buildDaemonBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" |
     req.base.registry instanceof ToolRegistry
       ? req.base.registry
       : new ToolRegistry(buildDefaultTools())
-  return {
+  return wireOptionalAgentPorts({
     ...req.base,
     llm: req.base.llm,
     registry,
@@ -98,7 +98,7 @@ const buildDaemonBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" |
     maxTurns: req.base.maxTurns ?? 40,
     signal: req.base.signal ?? new AbortController().signal,
     branchSearch: req.base.branchSearch ?? DAEMON_BRANCH_SEARCH,
-  }
+  })
 }
 
 export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {

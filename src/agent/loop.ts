@@ -447,53 +447,64 @@ const buildSkillGate = (
   }
 }
 
-/** Resolve the per-turn LLM port + thinking budget given the active skill's
- *  override (if any). Pure: no clock, no IO. Precedence is skill > session >
- *  default. A `model` override swaps the port to the matching
+type ResolvedTurnOverride = {
+  llm: LLMPort
+  budgetTokens?: number
+  explicitOff: boolean
+}
+
+/** Resolve the per-turn LLM port + MANUAL effort result given the active
+ *  skill's override (if any). Pure: no clock, no IO. Precedence is skill >
+ *  session > default. A `model` override swaps the port to the matching
  *  `config.modelCandidates` entry by id; an unknown id (or no candidate
  *  registry) leaves `config.llm` untouched (advisory degrade — the model id
  *  alone cannot construct a port).
  *
- *  Effort resolution per call site:
- *   - Skill with a named tier OR numeric effort ⇒ skill wins (a named
- *     `"default"` or non-positive numeric is treated as an EXPLICIT "no
- *     thinking" choice and also wins, byte-identical to the pre-session-
- *     effort behavior for skill-declared overrides).
- *   - Skill model-only (no `effort:`) OR no skill override ⇒ fall through to
- *     `config.sessionEffort?.()` (read once per turn so a runtime `/effort`
- *     mutation reflects on the next turn without re-assembling AgentConfig).
- *     A session `"default"`/absent ⇒ no `thinking` field on LLMInput
- *     (byte-identical to today). */
+ *  Important for ADR-0417: the return shape preserves whether the manual
+ *  resolution chose an EXPLICIT "off" (`explicitOff:true`) versus simple
+ *  silence (`budgetTokens` absent, `explicitOff:false`). The classifier layer
+ *  may only escalate over silence/manual-positive budgets; it MUST NOT revive
+ *  an explicit skill-off such as `effort: 0`. */
 const resolveSkillTurnOverride = (
   config: AgentConfig,
   override: SkillTurnOverride | undefined,
-): { llm: LLMPort; thinking?: { type: "enabled"; budget_tokens: number } } => {
+): ResolvedTurnOverride => {
   const swapped =
     override?.model !== undefined
       ? config.modelCandidates?.find((c) => c.id === override.model)?.port
       : undefined
   const llm = swapped ?? config.llm
-  // `null` ⇒ no skill effort signal (fall through to session). `undefined` ⇒
-  // skill explicitly chose "no thinking" (do NOT fall through). A positive
-  // number ⇒ explicit budget.
-  const skillBudget: number | undefined | null =
-    override === undefined || override.effort === undefined
-      ? null
-      : typeof override.effort === "number"
-        ? override.effort
-        : effortToTokenBudget(override.effort)
-  const sessionBudget =
-    skillBudget === null
-      ? ((): number | undefined => {
-          const lvl = config.sessionEffort?.()
-          return lvl !== undefined ? effortToTokenBudget(lvl) : undefined
-        })()
-      : undefined
-  const budget = skillBudget ?? sessionBudget
-  if (budget !== undefined && budget > 0) {
-    return { llm, thinking: { type: "enabled", budget_tokens: budget } }
+  const overrideEffort = override?.effort
+  const skillHasEffortSignal = overrideEffort !== undefined
+  const skillBudget = !skillHasEffortSignal
+    ? undefined
+    : typeof overrideEffort === "number"
+      ? overrideEffort
+      : effortToTokenBudget(overrideEffort)
+  if (skillHasEffortSignal) {
+    return skillBudget !== undefined && skillBudget > 0
+      ? { llm, budgetTokens: skillBudget, explicitOff: false }
+      : { llm, explicitOff: true }
   }
-  return { llm }
+  const sessionLevel = config.sessionEffort?.()
+  const sessionBudget = sessionLevel !== undefined ? effortToTokenBudget(sessionLevel) : undefined
+  return sessionBudget !== undefined && sessionBudget > 0
+    ? { llm, budgetTokens: sessionBudget, explicitOff: false }
+    : { llm, explicitOff: false }
+}
+
+const applyEffortClassifierFloor = (
+  resolved: ResolvedTurnOverride,
+  classifier: AgentConfig["effortClassifier"],
+): { llm: LLMPort; thinking?: { type: "enabled"; budget_tokens: number } } => {
+  if (resolved.explicitOff) return { llm: resolved.llm }
+  const classifierLevel = classifier?.currentRecommendation().level
+  const classifierBudget =
+    classifierLevel !== undefined ? effortToTokenBudget(classifierLevel) : undefined
+  const budgetTokens = Math.max(resolved.budgetTokens ?? 0, classifierBudget ?? 0)
+  return budgetTokens > 0
+    ? { llm: resolved.llm, thinking: { type: "enabled", budget_tokens: budgetTokens } }
+    : { llm: resolved.llm }
 }
 
 /**
@@ -565,7 +576,10 @@ const streamConsume = async (
   // turn (a sibling skill with no override clears it back to session/default).
   // Absent gate / absent override ⇒ `{ llm: config.llm }` with no `thinking`,
   // i.e. byte-identical to the pre-feature stream call.
-  const turnLlm = resolveSkillTurnOverride(config, skillGate?.activeOverride())
+  const turnLlm = applyEffortClassifierFloor(
+    resolveSkillTurnOverride(config, skillGate?.activeOverride()),
+    config.effortClassifier,
+  )
   // ADR-0077 Plane-B (L4 wire): timing capture shared with the adapter.
   // The adapter stamps `requestSentAt` at the actual POST boundary; the
   // stream dispatcher stamps `firstTokenAt` on the first output chunk and
@@ -843,6 +857,7 @@ const maybeCompact = async (
       at: Date.now(),
     })
     wm.replace(result.messages)
+    resetEffortClassifier(config.effortClassifier)
     // ADR-0075 archive + marker. Strictly AFTER `wm.replace`: a subscriber
     // that reacts to `context_compacted` by reading `wm` (e.g. a debug UI
     // snapshotting "history at compaction time") must see the post-compaction
@@ -959,6 +974,27 @@ const latestUserTextFromWm = (wm: WorkingMemory<Message>): string | undefined =>
     return undefined
   }
   return undefined
+}
+
+const observeEffortClassifierPrompt = (
+  classifier: AgentConfig["effortClassifier"],
+  text: string | undefined,
+): void => {
+  if (classifier === undefined || text === undefined || text.length === 0) return
+  try {
+    classifier.onUserPrompt(text)
+  } catch {
+    // Advisory only — classifier faults must not perturb the loop.
+  }
+}
+
+const resetEffortClassifier = (classifier: AgentConfig["effortClassifier"]): void => {
+  if (classifier === undefined) return
+  try {
+    classifier.reset()
+  } catch {
+    // Advisory only — classifier faults must not perturb the loop.
+  }
 }
 
 /** Abort-aware sleep used by the in-loop turn-retry backoff. Resolves early
@@ -1233,6 +1269,7 @@ const applyNonSuccessRecoveryAction = async (
     at: Date.now(),
   })
   wm.replace(compacted.messages)
+  resetEffortClassifier(config.effortClassifier)
   return CONTINUE
 }
 
@@ -2007,6 +2044,7 @@ const runSessionStartSequence = async (args: {
     const denied = await emitUserPromptSubmitHook(args.cfg, args.wm, args.sessionId)
     if (denied !== null) return "aborted"
   }
+  observeEffortClassifierPrompt(args.cfg.effortClassifier, latestUserTextFromWm(args.wm))
   await restoreFollowUpQueueSnapshot(args.cfg)
   await restorePlanSnapshot(args.cfg)
   return handleSubmissionControlOp(args.cfg, args.taskRegistry) === "aborted"
@@ -2050,7 +2088,10 @@ const syncQueuedTurnInputs = async (args: {
   if (followUpResult !== null) args.wm.append(followUpResult)
   const actionOutcome = await pollConversationAction(args.cfg, args.taskRegistry)
   if (actionOutcome.kind === "finish_aborted") return "aborted"
-  if (actionOutcome.kind === "injection") args.wm.append(actionOutcome.message)
+  if (actionOutcome.kind === "injection") {
+    args.wm.append(actionOutcome.message)
+    observeEffortClassifierPrompt(args.cfg.effortClassifier, latestUserTextFromWm(args.wm))
+  }
   return "continue"
 }
 

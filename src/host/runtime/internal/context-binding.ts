@@ -1,5 +1,6 @@
 import { type AgentConfig, type AgentOutcome, runAgent } from "@/agent"
 import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
+import { wireOptionalAgentPorts } from "@/agent/optional-ports"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
 import type {
   SessionHost,
@@ -19,7 +20,11 @@ import type {
 import { persistTurn } from "@/runner/orchestrate/persist-turn"
 import { buildSharedExecutionPlaneRuntimeAugments } from "@/runner/session-execution-plane"
 import { buildSessionMemoryAutoWires } from "@/runner/session-memory-auto"
-import type { RuntimeAgentConfigBase, RuntimeAgentTurnAssembler } from "@/sdk/runtime/base"
+import type {
+  RuntimeAgentConfigBase,
+  RuntimeAgentTurnAssembler,
+  RuntimeAgentTurnDeps,
+} from "@/sdk/runtime/base"
 import type { SessionMeta } from "@/session"
 import type { AgentEvent } from "@/stream"
 import { automationUpdateTool, type Tool, ToolRegistry } from "@/tool"
@@ -48,58 +53,6 @@ interface BootBindings {
   readonly refreshSystemPrompt: SessionBootstrapResult["refreshSystemPrompt"]
   readonly toolProfileState?: SessionBootstrapResult["toolProfileState"] | undefined
   readonly identityModeState?: SessionBootstrapResult["identityModeState"] | undefined
-}
-
-interface RuntimeAssemblerContext {
-  readonly llm: AgentConfig["llm"]
-  readonly registry: AgentConfig["registry"]
-  readonly stream: AgentConfig["stream"]
-  readonly permission: AgentConfig["permission"]
-  readonly system: string
-  readonly systemSource?: SystemSource
-  readonly cwd: string
-  readonly maxTurns: number
-  readonly signal: AbortSignal
-  readonly onConfirm: NonNullable<AgentConfig["onConfirm"]>
-  readonly store: AgentConfig["store"]
-  readonly sessionId: string
-  readonly embedder: AgentConfig["embedder"]
-  readonly memoryConfig: AgentConfig["memory"]
-  readonly planMode: boolean
-  readonly metrics: AgentConfig["metrics"]
-  readonly run: AgentConfig["run"]
-  readonly subagentConfig: AgentConfig["subagent"]
-  readonly skillsConfig: AgentConfig["skills"]
-  readonly compactionBreakerConfig: AgentConfig["compactionBreaker"]
-  readonly verifyGuardConfig: AgentConfig["verifyGuard"]
-  readonly summarizerLlm?: NonNullable<AgentConfig["compaction"]>["summarizerLlm"]
-  readonly onShellEvent: AgentConfig["onShellEvent"]
-  readonly workMetricsSink: AgentConfig["workMetricsSink"]
-  readonly followUpQueue: AgentConfig["followUpQueue"]
-  readonly planStore: AgentConfig["planStore"]
-  readonly retrievalStack: AgentConfig["retrievalStack"]
-  readonly searchPipeline: AgentConfig["searchPipeline"]
-  readonly memoryConsolidator: AgentConfig["memoryConsolidator"]
-  readonly sessionCtx: AgentConfig["sessionCtx"]
-  readonly delegation: AgentConfig["delegation"]
-  readonly subagentBackground: AgentConfig["subagentBackground"]
-  readonly autoBackground: AgentConfig["autoBackground"]
-  readonly fork: AgentConfig["fork"]
-  readonly forkSession: AgentConfig["forkSession"]
-  readonly conversationCheckpoint: AgentConfig["conversationCheckpoint"]
-  readonly responsesContinuation: AgentConfig["responsesContinuation"]
-  readonly stage1OutputsStore: AgentConfig["stage1OutputsStore"]
-  readonly automationEngine: AgentConfig["automationEngine"]
-  readonly admissibility: AgentConfig["admissibility"]
-  readonly planExitPort: AgentConfig["planExitPort"]
-  readonly userInputPort: AgentConfig["userInputPort"]
-  readonly toolProfileState?: ToolProfileSessionState
-  readonly identityModeState?: IdentityModeSessionState
-  readonly focusChain: AgentConfig["focusChain"]
-  readonly shellSnapshot: AgentConfig["shellSnapshot"]
-  readonly sessionEffort: AgentConfig["sessionEffort"]
-  readonly decisionEmitter: AgentConfig["decisionEmitter"]
-  readonly granularRegistry: AgentConfig["granularRegistry"]
 }
 
 interface RuntimeContextSnapshot {
@@ -246,6 +199,13 @@ const ensureSessionId = (base: RuntimeBase): RuntimeBase =>
 
 const getSessionId = (base: RuntimeBase): string => base.sessionId ?? crypto.randomUUID()
 
+const DEFAULT_RUNTIME_ENV: Readonly<Record<string, string | undefined>> = process.env
+
+const wireRuntimePorts = (
+  base: RuntimeBase,
+  env: Readonly<Record<string, string | undefined>> = DEFAULT_RUNTIME_ENV,
+): RuntimeBase => sanitizeRuntimeBase(wireOptionalAgentPorts(base, env))
+
 const buildCapabilityManifest = (base: RuntimeBase): CapabilityManifest =>
   deriveCapabilityManifest({
     approvals: base.onConfirm !== undefined,
@@ -288,62 +248,28 @@ const toIdentityModeConfig = (state: IdentityModeSessionState | undefined): Part
         },
       }
 
-const buildAssemblerContext = (
-  base: RuntimeBase,
-  signal: AbortSignal | undefined,
-): RuntimeAssemblerContext => ({
-  llm: base.llm,
-  registry: base.registry,
-  stream: base.stream,
-  permission: base.permission,
-  system: base.system,
-  ...(base.systemSource !== undefined ? { systemSource: base.systemSource } : {}),
-  cwd: base.cwd,
-  maxTurns: base.maxTurns,
-  signal: signal ?? base.signal,
-  onConfirm: base.onConfirm ?? (async () => false),
-  store: base.store,
-  sessionId: base.sessionId ?? crypto.randomUUID(),
-  embedder: base.embedder,
-  memoryConfig: base.memory,
-  planMode: base.planMode === true,
-  metrics: base.metrics,
-  run: base.run,
-  subagentConfig: base.subagent,
-  skillsConfig: base.skills,
-  compactionBreakerConfig: base.compactionBreaker,
-  verifyGuardConfig: base.verifyGuard,
-  ...(base.compaction?.summarizerLlm !== undefined
-    ? { summarizerLlm: base.compaction.summarizerLlm }
-    : {}),
-  onShellEvent: base.onShellEvent,
-  workMetricsSink: base.workMetricsSink,
-  followUpQueue: base.followUpQueue,
-  planStore: base.planStore,
-  retrievalStack: base.retrievalStack,
-  searchPipeline: base.searchPipeline,
-  memoryConsolidator: base.memoryConsolidator,
-  sessionCtx: base.sessionCtx,
-  delegation: base.delegation,
-  subagentBackground: base.subagentBackground,
-  autoBackground: base.autoBackground,
-  fork: base.fork,
-  forkSession: base.forkSession,
-  conversationCheckpoint: base.conversationCheckpoint,
-  responsesContinuation: base.responsesContinuation,
-  stage1OutputsStore: base.stage1OutputsStore,
-  automationEngine: base.automationEngine,
-  admissibility: base.admissibility,
-  planExitPort: base.planExitPort,
-  userInputPort: base.userInputPort,
-  ...(base.toolProfileState !== undefined ? { toolProfileState: base.toolProfileState } : {}),
-  ...(base.identityModeState !== undefined ? { identityModeState: base.identityModeState } : {}),
-  focusChain: base.focusChain,
-  shellSnapshot: base.shellSnapshot,
-  sessionEffort: base.sessionEffort,
-  decisionEmitter: base.decisionEmitter,
-  granularRegistry: base.granularRegistry,
-})
+const buildTurnAssemblerDeps = (args: {
+  readonly base: RuntimeBase
+  readonly messages: readonly Message[]
+  readonly signal: AbortSignal | undefined
+}): RuntimeAgentTurnDeps => {
+  const {
+    approvalProtocol: _approvalProtocol,
+    systemSource,
+    messages: _baseMessages,
+    signal: _baseSignal,
+    system,
+    ...rest
+  } = args.base
+
+  return withDefinedProps({
+    ...(rest as RuntimeAgentTurnDeps),
+    messages: [...args.messages],
+    system: systemSource?.get() ?? system,
+    signal: args.signal ?? args.base.signal,
+    ...(systemSource !== undefined ? { systemSource } : {}),
+  })
+}
 
 const buildAgentConfigFromBase = (args: {
   readonly base: RuntimeBase
@@ -353,7 +279,14 @@ const buildAgentConfigFromBase = (args: {
 }): AgentConfig => {
   if (args.turnAssembler !== undefined) {
     return installCliMentionInjector(
-      args.turnAssembler([...args.messages], buildAssemblerContext(args.base, args.signal)),
+      args.turnAssembler(
+        [...args.messages],
+        buildTurnAssemblerDeps({
+          base: args.base,
+          messages: args.messages,
+          signal: args.signal,
+        }),
+      ),
     )
   }
 
@@ -1148,7 +1081,7 @@ export const createRuntimeContextBindingFromAgentConfigBase = (args: {
   readonly turnAssembler?: RuntimeAgentTurnAssembler
 }): RuntimeContextBinding =>
   createRuntimeContextBinding({
-    base: ensureSessionId(args.base as RuntimeBase),
+    base: wireRuntimePorts(ensureSessionId(args.base as RuntimeBase)),
     ...(args.turnAssembler !== undefined ? { turnAssembler: args.turnAssembler } : {}),
   })
 
@@ -1206,7 +1139,7 @@ export const createRuntimeContextBindingFromBootstrap = async (
   }
 
   return createRuntimeContextBinding({
-    base,
+    base: wireRuntimePorts(base),
     ...(args.turnAssembler !== undefined ? { turnAssembler: args.turnAssembler } : {}),
   })
 }

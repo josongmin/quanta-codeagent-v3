@@ -334,6 +334,15 @@ const prependCapReminder = (out: DispatchResult, reminder: string): DispatchResu
   },
 })
 
+const observeEffortClassifierToolFailure = (
+  classifier: AgentConfig["effortClassifier"],
+  toolName: string,
+  out: DispatchResult,
+): void => {
+  if (classifier === undefined || out.ok) return
+  classifier.onToolFailure(toolName)
+}
+
 /** ADR-0223 wrap: `execute(...)` bracketed by stuck-detector ticks so the
  *  auto-background slice can poll "is this tool past the 2s threshold?" without
  *  any per-call timer. Extracted to keep `dispatchToolInner` under biome's
@@ -548,6 +557,7 @@ const dispatchToolInner = async (
   // circuits before allocation; finally runs unconditionally so a throwing
   // `execute()` cannot leak a tracker entry).
   const out = await executeWithStuckTracking(effectiveCall, config, ctx, onProgress)
+  observeEffortClassifierToolFailure(config.effortClassifier, effectiveCall.name, out)
   // When a reminder was generated, prepend it as a `<system-reminder>` block
   // in the tool result output so the model reads the enforcement hint alongside
   // the tool output. `prependCapReminder` is extracted to keep complexity low.

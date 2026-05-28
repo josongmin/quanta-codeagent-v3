@@ -29,7 +29,7 @@ import { mkdirSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
-import { buildSystemPrompt, runAgent } from "@/agent"
+import { buildSystemPrompt, runAgent, wireOptionalAgentPorts } from "@/agent"
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { errMessage, logger, type RunContext } from "@/shared"
@@ -207,20 +207,22 @@ export const replayFixture = async (opts: ReplayOpts): Promise<ReplayResult> => 
     let replayTurns = 0
     let runError: string | undefined
     try {
-      const outcome = await runAgent({
-        llm: opts.llm,
-        // DIP factory: trajectory replay runs against the SAME default port
-        // surface as production (no replay-specific fs/diagnostics ports),
+      const outcome = await runAgent(
+        wireOptionalAgentPorts({
+          llm: opts.llm,
+          // DIP factory: trajectory replay runs against the SAME default port
+          // surface as production (no replay-specific fs/diagnostics ports),
         // byte-identical to the prior singleton.
         registry: new ToolRegistry(buildDefaultTools()),
         stream,
         permission,
         messages,
         system: buildSystemPrompt(sandbox),
-        cwd: sandbox,
-        maxTurns: opts.maxTurns ?? Math.max(original.turns + 2, DEFAULT_MIN_REPLAY_TURNS),
-        signal: controller.signal,
-      })
+          cwd: sandbox,
+          maxTurns: opts.maxTurns ?? Math.max(original.turns + 2, DEFAULT_MIN_REPLAY_TURNS),
+          signal: controller.signal,
+        }),
+      )
       replayTurns = outcome.turns
       if (outcome.reason === "error") runError = "runAgent reported error"
     } catch (e) {

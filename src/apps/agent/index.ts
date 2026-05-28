@@ -33,7 +33,7 @@ import { loadEnvFiles } from "@/shared/env-files"
 
 loadEnvFiles([".env.dev", ".env.local", ".env"])
 
-import { buildSystemPrompt, HookBus } from "@/agent"
+import { buildSystemPrompt, HookBus, wireOptionalAgentPorts } from "@/agent"
 import { defaultDelegationRunner } from "@/agent/delegation-runner"
 import { defaultFocusChainTracker, type FocusChainPort } from "@/agent/focus-chain"
 import type { ForkSessionPort } from "@/agent/fork-session"
@@ -602,7 +602,7 @@ export const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["b
   }
 
   attachExecutionPlaneSlots(base, p)
-  return base
+  return wireOptionalAgentPorts(base)
 }
 
 const applyModeSpecificRequestFields = (out: AssembleRequest, p: AssembleRequestPartial): void => {

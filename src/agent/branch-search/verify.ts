@@ -11,6 +11,7 @@ import { runShell } from "@/runtime"
 import type { Verifier, VerifierSignal } from "./types"
 
 type Clock = () => number
+export const DEFAULT_TSC_VERIFY_CMD = "bun run typecheck"
 // Inject seam (proven pattern: see `agent/streaming-cancellation/default.ts`).
 // Each verifier delegates to `Date.now` when `opts.clock` is absent, so the
 // production behavior is byte-identical.
@@ -36,7 +37,7 @@ export const tscVerifier =
   (opts?: { tscCmd?: string; timeoutMs?: number; clock?: Clock }): Verifier =>
   async (cand) => {
     const clock = opts?.clock ?? wallClock
-    const cmd = opts?.tscCmd ?? "tsc --noEmit"
+    const cmd = opts?.tscCmd ?? DEFAULT_TSC_VERIFY_CMD
     const { value: r, durationMs } = await timed(clock, () =>
       runShell(cmd, {
         cwd: cand.workspace,
@@ -48,7 +49,11 @@ export const tscVerifier =
       {
         kind: "tsc",
         pass,
-        detail: pass ? "tsc clean" : r.timedOut ? "tsc timed out" : firstLine(r.stdout || r.stderr),
+        detail: pass
+          ? "typecheck clean"
+          : r.timedOut
+            ? "typecheck timed out"
+            : firstLine(r.stdout || r.stderr),
         durationMs,
       },
     ]

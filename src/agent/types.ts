@@ -1,4 +1,5 @@
 import type { LLMPort, Message, ModelCandidate, ResponsesContinuationStore } from "@/llm"
+import type { RoleModelResolver } from "@/llm/role-model-override"
 import type { LlmProvider } from "@/llm/providers"
 import type { CodeActionPort, FormatPort, RenameApplyPort, SignatureHelpPort } from "@/lsp"
 import type { EmbedderPort, PersistentStorePort } from "@/memory"
@@ -681,6 +682,14 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * default-OFF).
    */
   fastApplyFallback?: FastApplyFallbackPort
+  /**
+   * Session-scoped role→model override carrier (ADR-0256). Surfaces that need a
+   * live executor/default model resolver thread the SAME resolver instance here
+   * so helper wires (for example fast-apply fallback) do not mint private
+   * per-consumer state. Absent ⇒ no role override state is available and
+   * consumers must degrade to their default-model path.
+   */
+  roleModelResolver?: RoleModelResolver
   /**
    * Self-inspection / self-mutation seam consumed by the `session_config`
    * tool. Read + write over the agent's own SDK posture (effort tier, identity

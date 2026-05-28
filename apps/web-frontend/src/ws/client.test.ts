@@ -106,6 +106,19 @@ const encodeSnapshotFrame = (sessionId: string): string =>
     },
   })
 
+const encodeObservabilityFrame = (): string =>
+  JSON.stringify({
+    version: "observability.v1",
+    kind: "observability",
+    payload: {
+      kind: "observability.snapshot",
+      runs: [],
+      objective: null,
+      approvals: [],
+      emittedAt: 123,
+    },
+  })
+
 const buildHarness = (): Harness => {
   const fakes: FakeWebSocket[] = []
   const timers: Array<{ cb: () => void; ms: number; handle: number }> = []
@@ -339,6 +352,51 @@ describe("SessionClient", () => {
     h.fakes[0]?._simulateMessage(encodeSnapshotFrame("srv-1"))
 
     expect(seen).toEqual(["idle"])
+  })
+
+  it("dispatches observability frames to observability subscribers", () => {
+    const h = buildHarness()
+    const seen: string[] = []
+
+    h.client.onObservability((message) => {
+      seen.push(message.kind)
+    })
+    h.client.connect({ url: "ws://localhost/x" })
+    h.fakes[0]?._simulateOpen()
+    h.fakes[0]?._simulateMessage(encodeObservabilityFrame())
+
+    expect(seen).toEqual(["observability.snapshot"])
+  })
+
+  it("replays the last observability frame to late subscribers", () => {
+    const h = buildHarness()
+    const seen: string[] = []
+
+    h.client.connect({ url: "ws://localhost/x" })
+    h.fakes[0]?._simulateOpen()
+    h.fakes[0]?._simulateMessage(encodeObservabilityFrame())
+    h.client.onObservability((message) => {
+      seen.push(message.kind)
+    })
+
+    expect(seen).toEqual(["observability.snapshot"])
+  })
+
+  it("keeps the last observability snapshot across reconnects until a fresh frame arrives", () => {
+    const h = buildHarness()
+    const seen: string[] = []
+
+    h.client.connect({ url: "ws://localhost/x" })
+    h.fakes[0]?._simulateOpen()
+    h.fakes[0]?._simulateMessage(encodeObservabilityFrame())
+    h.fakes[0]?._simulateClose(1006, "abnormal")
+    h.runNextTimer()
+    h.fakes[1]?._simulateOpen()
+    h.client.onObservability((message) => {
+      seen.push(message.kind)
+    })
+
+    expect(seen).toEqual(["observability.snapshot"])
   })
 
   it("reuses the learned canonical sessionId on the next socket open after reconnect", () => {

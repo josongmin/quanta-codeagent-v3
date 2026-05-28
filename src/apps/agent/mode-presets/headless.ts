@@ -23,7 +23,7 @@
  */
 
 import type { AgentConfig } from "@/agent"
-import { buildSystemPrompt } from "@/agent"
+import { buildSystemPrompt, wireOptionalAgentPorts } from "@/agent"
 import type { Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { logger } from "@/shared"
@@ -54,7 +54,7 @@ const buildHeadlessBase = (
       ? req.base.registry
       : new ToolRegistry(buildDefaultTools())
   const messages: Message[] = [{ role: "user", content: [{ type: "text", text: prompt }] }]
-  return {
+  return wireOptionalAgentPorts({
     ...req.base,
     llm: req.base.llm,
     registry,
@@ -65,7 +65,7 @@ const buildHeadlessBase = (
     cwd,
     maxTurns: req.base.maxTurns ?? 20,
     signal: req.base.signal ?? new AbortController().signal,
-  }
+  })
 }
 
 /**

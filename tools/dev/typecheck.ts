@@ -129,6 +129,7 @@ if (!(target in targetConfig)) {
 const selected = targetConfig[target]
 const start = performance.now()
 const skipAllowed = process.env["QUANTA_TYPECHECK_NO_SKIP"] !== "1"
+const debugEnabled = process.env["QUANTA_TYPECHECK_DEBUG"] === "1"
 const buildInfoPath = join(repoRoot, selected.buildInfo)
 const stampPath = join(repoRoot, selected.stamp)
 
@@ -141,6 +142,12 @@ console.log(
 const fingerprint = await buildFingerprint(target, selected.config)
 const previousFingerprint = await loadPreviousFingerprint(selected.stamp)
 const buildInfoExists = await safeStat(selected.buildInfo)
+
+if (debugEnabled) {
+  console.log(
+    `typecheck debug target=${target} previousFingerprint=${previousFingerprint ?? "null"} currentFingerprint=${fingerprint} buildInfoExists=${buildInfoExists !== null}`,
+  )
+}
 
 if (skipAllowed && buildInfoExists !== null && previousFingerprint === fingerprint) {
   const durationMs = Math.round(performance.now() - start)
@@ -179,6 +186,10 @@ if (exitCode === 0) {
       {
         target,
         fingerprint,
+        debug: {
+          target,
+          computedAt: new Date().toISOString(),
+        },
         config: selected.config,
         buildInfo: selected.buildInfo,
       },

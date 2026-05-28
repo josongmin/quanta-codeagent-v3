@@ -6,7 +6,7 @@
  * synthesize the "검증 베이스라인" line in the rendered catalog.
  *
  * Gates:
- *   1. tsc --noEmit            → exit code + error-line count
+ *   1. repo typecheck:all      → exit code + TS error-line count
  *   2. biome check authoritative targets → exit code + (best-effort) error count
  *   3. bun test (unit + integration, then per-tier for file/test counts)
  *
@@ -61,10 +61,10 @@ export const parseBunTestOutput = (text: string): TestSummary | null => {
 }
 
 /**
- * Count TS error lines in `tsc --noEmit` stderr/stdout. Each error of the
- * form `path/file.ts(LINE,COL): error TSxxxx: …` counts as one. The line is
- * matched conservatively to avoid double-counting trailing context lines
- * (`Found 12 errors.` summary etc.).
+ * Count TS error lines surfaced by the repo's typecheck runner. The wrapped
+ * `tsc` diagnostics still use the canonical
+ * `path/file.ts(LINE,COL): error TSxxxx: …` shape, so we count exactly those
+ * rows and ignore wrapper chatter / trailing summaries.
  */
 export const countTscErrors = (text: string): number => {
   const re = /^[^\n]*\(\d+,\d+\):\s+error\s+TS\d+:/gm
@@ -92,6 +92,8 @@ interface CmdResult {
   stdout: string
   stderr: string
 }
+
+export const TYPECHECK_BASELINE_CMD = ["bun", "run", "typecheck:all"] as const
 
 const run = async (argv: string[], cwd: string): Promise<CmdResult> => {
   const proc = Bun.spawn(argv, { cwd, stdout: "pipe", stderr: "pipe", env: process.env })
@@ -142,11 +144,10 @@ const isMain = (): boolean => {
 
 const main = async (): Promise<number> => {
   const repoRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))))
-  const tscBin = join(repoRoot, "node_modules/.bin/tsc")
   const biomeBin = join(repoRoot, "node_modules/.bin/biome")
 
-  process.stderr.write("[baseline] tsc --noEmit …\n")
-  const tsc = await run([tscBin, "--noEmit"], repoRoot)
+  process.stderr.write("[baseline] bun run typecheck:all …\n")
+  const tsc = await run([...TYPECHECK_BASELINE_CMD], repoRoot)
   const tscErrors = countTscErrors(`${tsc.stdout}\n${tsc.stderr}`)
 
   process.stderr.write("[baseline] biome check …\n")
