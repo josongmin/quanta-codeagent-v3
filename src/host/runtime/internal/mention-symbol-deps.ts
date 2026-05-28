@@ -87,12 +87,17 @@ export interface MentionSymbolDeps {
 
 /** A `node:fs`-backed {@link AnchorDirLister}. `withFileTypes` gives the
  *  file/dir discriminator without a per-entry `stat`. The synthesizer swallows
- *  readDir rejections so a transient fs error skips a subtree, not the run. */
+ *  readDir rejections so a transient fs error skips a subtree, not the run.
+ *  `canonicalize` resolves a directory to its realpath so symlink loops
+ *  (`/a/link → /b`, `/b/link → /a`) are detected by the synthesizer's visited
+ *  set — without this the walk would burn entries until the 1M backstop on a
+ *  workspace containing recursive symlinks. */
 const nodeFsAnchorDirLister: AnchorDirLister = {
   readDir: async (dir: string): Promise<readonly AnchorDirEntry[]> => {
     const dirents = await fsp.readdir(dir, { withFileTypes: true })
     return dirents.map((d) => ({ name: d.name, isDirectory: d.isDirectory() }))
   },
+  canonicalize: (dir: string): Promise<string> => fsp.realpath(dir),
 }
 
 /** Memoize a successful async factory result. ONLY fulfilled promises are

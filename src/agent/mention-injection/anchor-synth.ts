@@ -54,6 +54,19 @@
  * NO-THROW: a `readdir` rejection on any directory is swallowed (that subtree
  * is skipped); a total failure yields an empty anchor list. The synthesizer
  * never throws and never hangs (it is bounded by `maxEntries`).
+ *
+ * SYMLINK LOOPS: the walk maintains a VISITED set keyed by each directory's
+ * CANONICAL path (`lister.canonicalize`, when provided — typically `fs.realpath`).
+ * A symlink loop (`/a/link → /b`, `/b/link → /a`) resolves both endpoints to
+ * the same canonical key, so the second entry is recognised as already-visited
+ * and pruned BEFORE the readDir. Determinism: the canonical key is computed
+ * once per directory; a `canonicalize` rejection ⇒ fallback to the input path
+ * as the visited key (still deterministic, the 1M `maxEntries` backstop is the
+ * NO-THROW guarantee that termination cannot regress). Without a working
+ * `canonicalize` (test fakes, in-memory trees, `node:fs` realpath rejecting)
+ * the visited set still acts as an idempotent guard against duplicate enqueue
+ * by input path — every dir is visited at most ONCE per key, so a tree without
+ * cycles is byte-identical to the pre-visited-set behavior.
  */
 
 import { extname, join } from "node:path"
@@ -65,6 +78,21 @@ export interface AnchorDirLister {
   /** List a directory's entries. MUST reject (not return partial) on error;
    *  the synthesizer swallows the rejection and skips that subtree. */
   readDir(dir: string): Promise<readonly AnchorDirEntry[]>
+  /**
+   * Optional. Resolve a directory path to its CANONICAL form (follow symlinks
+   * to their real target). The synthesizer uses this as the visited-set key so
+   * a symlink loop (`A → B → A`) is detected after the first descent — the
+   * second entry to A is recognised as already-visited and skipped.
+   *
+   * NO-THROW contract: rejection ⇒ the synthesizer falls back to the input
+   * path verbatim as the visited key (still deterministic, still bounded by
+   * the 1M backstop). Adapters that cannot canonicalize (test fakes, in-memory
+   * trees) may simply omit this — the synthesizer treats `undefined` the same
+   * way (the input path is the key). For a tree WITHOUT cycles this changes
+   * nothing (every directory has a unique input path); for a tree WITH cycles,
+   * a working `canonicalize` collapses the cycle to one visit.
+   */
+  canonicalize?(dir: string): Promise<string>
 }
 
 /** One directory entry — name + a file/dir discriminator. */
@@ -117,11 +145,27 @@ const isPrunedDirName = (name: string): boolean =>
 
 /** Mutable walk state threaded through the per-directory scan. `found` maps a
  *  language key to its winning anchor; `inspected` counts entries against the
- *  hard ceiling; `exhausted` flips once the ceiling is hit (NO-THROW backstop). */
+ *  hard ceiling; `exhausted` flips once the ceiling is hit (NO-THROW backstop);
+ *  `visitedCanonical` records every canonical directory key that has already
+ *  been entered (symlink-loop guard — see file header). */
 interface WalkState {
   readonly found: Map<string, string>
   inspected: number
   exhausted: boolean
+  readonly visitedCanonical: Set<string>
+}
+
+/** NO-THROW canonicalization: ask the lister for `dir`'s canonical (realpath)
+ *  form. Rejection (or a missing port method) ⇒ fall back to the input path so
+ *  the visited set still acts as an idempotent guard against duplicate enqueue
+ *  by input path — every directory is visited at most ONCE per key. */
+const canonicalKey = async (dir: string, lister: AnchorDirLister): Promise<string> => {
+  if (lister.canonicalize === undefined) return dir
+  try {
+    return await lister.canonicalize(dir)
+  } catch {
+    return dir
+  }
 }
 
 /** Sort entries by raw name (`<`) for filesystem-independent traversal order. */
@@ -188,11 +232,23 @@ export const synthesizeLspAnchors = async (
   // loop terminates by QUEUE EXHAUSTION instead. Exhaustion is fast because
   // `scanDir` prunes node_modules/.git/dot-dirs from the queue (audit-H fix).
   const allLanguages = new Set(opts.extensionToLanguage.values())
-  const state: WalkState = { found: new Map<string, string>(), inspected: 0, exhausted: false }
+  const state: WalkState = {
+    found: new Map<string, string>(),
+    inspected: 0,
+    exhausted: false,
+    visitedCanonical: new Set<string>(),
+  }
 
   // Breadth-first queue of directories. Seed with the root (the root is never
-  // pruned — only its dot-prefixed/node_modules/.git SUBDIRECTORIES are).
+  // pruned — only its dot-prefixed/node_modules/.git SUBDIRECTORIES are). The
+  // root's canonical key is recorded BEFORE the loop so a symlink BACK to the
+  // root from any descendant is recognised as a revisit and pruned. The
+  // canonical key is computed at enqueue time (i.e. the FIRST time a path is
+  // considered) — re-canonicalising at dequeue would double the realpath work
+  // and admit a TOCTOU race where a symlink swap mid-walk produces divergent
+  // keys for the same logical directory.
   const queue: string[] = [opts.cwd]
+  state.visitedCanonical.add(await canonicalKey(opts.cwd, opts.lister))
   while (queue.length > 0 && !state.exhausted && state.found.size < allLanguages.size) {
     const dir = queue.shift()
     if (dir === undefined) break
@@ -204,8 +260,14 @@ export const synthesizeLspAnchors = async (
       continue // NO-THROW: skip an unreadable subtree.
     }
     // Enqueue subdirs AFTER all files in this directory are examined so a
-    // shallower file always out-ranks a deeper one (breadth-first).
+    // shallower file always out-ranks a deeper one (breadth-first). For each
+    // candidate subdir, canonicalise FIRST and check the visited set: a
+    // symlink loop's second arm collapses to a previously-recorded key and is
+    // pruned BEFORE readDir is called on it.
     for (const sub of scanDir(dir, entries, opts.extensionToLanguage, maxEntries, state)) {
+      const key = await canonicalKey(sub, opts.lister)
+      if (state.visitedCanonical.has(key)) continue
+      state.visitedCanonical.add(key)
       queue.push(sub)
     }
   }
