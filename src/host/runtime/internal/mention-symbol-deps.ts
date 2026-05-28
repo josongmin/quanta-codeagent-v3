@@ -56,6 +56,7 @@ import {
   type SymbolLookupSemanticPort,
   synthesizeLspAnchors,
 } from "@/agent/mention-injection"
+import { parseEnvFlag } from "@/runner/assemble"
 import { logger } from "@/shared"
 import type { LspNavProvider } from "@/tool"
 
@@ -189,7 +190,9 @@ export const buildMentionSymbolDeps = (
   env: MentionSymbolDepsEnv,
   seams: MentionSymbolDepsSeams = {},
 ): MentionSymbolDeps => {
-  if (env.QUANTA_MENTION_SYMBOL === "off") return {}
+  // Canonical falsey set via parseEnvFlag (default-ON; `0`/`false`/`off`/`no`
+  // all disable) — keeps mention/memory knob semantics consistent.
+  if (!parseEnvFlag(env.QUANTA_MENTION_SYMBOL, /* defaultOn */ true)) return {}
   return {
     lsp: lazyLookupPort(() => buildLspLookup(cwd, seams)),
     semantic: lazyLookupPort(() => buildSemanticLookup(env, seams)),

@@ -118,9 +118,8 @@ const buildSubagentSendMessage = (port: MailboxPort): Tool<SubagentSendMessageIn
     '"parent" to address the agent that spawned you. `kind`: request / ' +
     "response / broadcast (use `correlation_id` to tie a response to a prior " +
     "request). The recipient receives the message the next time it polls its " +
-    "inbox (no read tool this wave; incoming surfaces via task_output / child " +
-    "seed). Returns the queued message. An unknown target sits unread until " +
-    "that agent (eventually) reads.",
+    "inbox via `subagent_read_messages`. Returns the queued message. An " +
+    "unknown target sits unread until that agent (eventually) reads.",
   inputSchema: subagentSendMessageSchema,
   isReadOnly: () => false,
   isConcurrencySafe: () => false,

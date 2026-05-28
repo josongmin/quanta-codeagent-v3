@@ -43,6 +43,7 @@ import {
   type FileResolverOptions,
   type SkillRegistryReadOnly,
 } from "@/agent/plugin-app-resolver"
+import { parseEnvFlag } from "@/runner/assemble"
 
 /** Env subset the builder reads. A plain bag so callers can pass
  *  `process.env` OR a hermetic record (tests / non-Node hosts). */
@@ -62,8 +63,11 @@ export interface BuildDefaultMentionResolverOptions {
   readonly semantic?: SymbolLookupSemanticPort
 }
 
-/** A knob is ON unless explicitly set to the string `"off"`. */
-const isOn = (env: MentionEnv, key: string): boolean => env[key] !== "off"
+/** A knob is ON unless explicitly disabled. Delegates to the canonical
+ *  `parseEnvFlag` truth table so the falsey set (`0`/`false`/`off`/`no`) is
+ *  shared with memory + all other default-ON knobs across the codebase — no
+ *  more mention-only `!== "off"` asymmetry that audit found. */
+const isOn = (env: MentionEnv, key: string): boolean => parseEnvFlag(env[key], /* defaultOn */ true)
 
 const parsePositiveNumber = (raw: string | undefined): number | undefined => {
   if (raw === undefined) return undefined

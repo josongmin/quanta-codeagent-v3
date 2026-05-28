@@ -91,10 +91,13 @@ describe("emitter — disabled path", () => {
     ledger.start({ id: "r1", kind: "shell", owner: "t", title: "echo" })
     const timer = timerOf()
     const h = createObservabilityEmitter({ runLedger: ledger, timer })
-    h.tick()
-    h.stop()
-    // No sink to inspect — assertion is the no-throw + clean stop.
-    expect(true).toBe(true)
+    // Ports present but no sink ⇒ no frames to inspect; the assertion is that
+    // the tick+stop sequence completes silently without throwing (was a
+    // vacuous `expect(true)` — replaced with a real no-throw envelope).
+    expect(() => {
+      h.tick()
+      h.stop()
+    }).not.toThrow()
   })
 
   test("sink present but no ports ⇒ silent", () => {
@@ -114,8 +117,9 @@ describe("emitter — disabled path", () => {
     const h = createObservabilityEmitter({ ws: sink, runLedger: ledger, timer })
     h.stop()
     h.stop()
-    h.stop()
-    expect(true).toBe(true)
+    // Idempotent: the third stop after two prior stops still does not throw
+    // (was a vacuous `expect(true)` — now actually exercises the idempotence).
+    expect(() => h.stop()).not.toThrow()
   })
 })
 
