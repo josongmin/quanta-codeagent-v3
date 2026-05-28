@@ -1,12 +1,12 @@
 /**
- * ADR-0414 — File resolver impl (the `resolveFile` method of an
+ * ADR-0413 — File resolver impl (the `resolveFile` method of an
  * ADR-0325 `MentionResolverPort`).
  *
  * Reads a workspace file SYNCHRONOUSLY (`fs.readFileSync`) and renders
  * its body as the mention bodyText. This is the kind that makes `@file`
  * safe to add to the frozen-sync resolver port: file IO is sync, so no
  * `resolve*` signature flips to `Promise` (unlike a future `@symbol`,
- * which needs an async symbol index — see ADR-0414 §"deliberate_hold").
+ * which needs an async symbol index — see ADR-0413 §"deliberate_hold").
  *
  * Security — fs-jail (SYNC):
  *   The resolver captures a workspace `root` and rejects any `target`
@@ -32,8 +32,8 @@
 
 import { readFileSync, realpathSync, statSync } from "node:fs"
 import { isAbsolute, resolve as resolvePath } from "node:path"
-import isPathInside from "is-path-inside"
 import type { MentionResolverPort } from "@/agent/mention-injection"
+import isPathInside from "is-path-inside"
 
 /** Options for {@link createFileResolver}. */
 export interface FileResolverOptions {
@@ -124,8 +124,7 @@ export const createFileResolver = (
   opts: FileResolverOptions,
 ): NonNullable<MentionResolverPort["resolveFile"]> => {
   const root = opts?.root
-  const maxBytes =
-    typeof opts?.maxBytes === "number" && opts.maxBytes > 0 ? opts.maxBytes : MAX_BYTES
+  const maxBytes = typeof opts?.maxBytes === "number" && opts.maxBytes > 0 ? opts.maxBytes : MAX_BYTES
   return (target: string) => {
     if (typeof root !== "string" || root.length === 0) return null
     if (typeof target !== "string" || target.length === 0) return null

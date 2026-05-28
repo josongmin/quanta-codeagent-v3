@@ -35,11 +35,11 @@ export interface MentionResolverPort {
   resolveSkill(target: string): MentionResolverResult | null
   resolvePlugin(target: string): MentionResolverResult | null
   resolveApp(target: string): MentionResolverResult | null
-  /** ADR-0414 — resolve a `@file` mention to its body text. SYNC
+  /** ADR-0413 — resolve a `@file` mention to its body text. SYNC
    *  (`fs.readFileSync`-backed adapter). `target` is the raw file path
    *  (sigil/prefix stripped). Returns `null` for missing / outside-jail /
    *  binary / unreadable files (skip — graceful). MUST NOT throw. Optional
-   *  on the port: a resolver that pre-dates ADR-0414 (e.g. ADR-0330's
+   *  on the port: a resolver that pre-dates ADR-0413 (e.g. ADR-0330's
    *  skill-only flavour) omits it, and a `file` mention then resolves to
    *  `null` (skipped) — byte-identical to the legacy 3-kind behaviour. */
   resolveFile?(target: string): MentionResolverResult | null

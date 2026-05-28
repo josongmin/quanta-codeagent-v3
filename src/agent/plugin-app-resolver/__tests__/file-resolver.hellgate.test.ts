@@ -1,5 +1,5 @@
 /**
- * ADR-0414 — File resolver (sync) hellgate.
+ * ADR-0413 — File resolver (sync) hellgate.
  *
  *   A. Hit ⇒ bodyText = file content                 (2)
  *   B. Miss / dir / unreadable ⇒ null                 (3)
@@ -12,10 +12,10 @@
  * the sync fs-jail + readFileSync path is exercised end-to-end.
  */
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { createFileResolver } from "../file-resolver"
 
 let root: string
@@ -50,7 +50,7 @@ afterAll(() => {
   rmSync(outside, { recursive: true, force: true })
 })
 
-describe("createFileResolver — ADR-0414 hellgate", () => {
+describe("createFileResolver — ADR-0413 hellgate", () => {
   // -------- A. hit --------------------------------------------------
 
   test("A1 — relative path hit ⇒ bodyText is the file content", () => {

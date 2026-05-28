@@ -42,7 +42,7 @@ export interface CompositeResolverDeps {
   readonly skills?: SkillRegistryReadOnly
   readonly plugins?: PluginRegistryPort
   readonly apps?: AppCatalogPort
-  /** ADR-0414 — file-mention resolver options (workspace root + cap).
+  /** ADR-0413 — file-mention resolver options (workspace root + cap).
    *  Omit ⇒ the port has NO `resolveFile` and every `@file` mention
    *  resolves to `null` (skipped) — byte-identical to the legacy
    *  3-kind composite. */
@@ -65,7 +65,7 @@ export const createCompositeMentionResolver = (
     resolvePlugin,
     resolveApp,
   }
-  // ADR-0414 — only attach `resolveFile` when a `files` dep is supplied,
+  // ADR-0413 — only attach `resolveFile` when a `files` dep is supplied,
   // so the legacy 3-kind shape (no `resolveFile` key) is preserved when
   // the caller opts out.
   if (deps.files === undefined) return base
