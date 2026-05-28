@@ -1,4 +1,4 @@
-# ADR-0397 — Atomic write + sha256 hash precondition for `edit` / `write`
+# ADR-0398 — Atomic write + sha256 hash precondition for `edit` / `write`
 
 **Status:** Accepted (2026-05-28)
 **Slice:** `src/storage/atomic-write.ts` (new leaf) + `src/storage/service.ts` (port extension) + `src/tool/edit/index.ts` (gate + commit route) + `src/tool/types.ts` (`stale_precondition` failure mode) + hellgate.

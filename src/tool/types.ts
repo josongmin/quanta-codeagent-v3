@@ -634,7 +634,7 @@ export type ToolFailure =
    *  requested — explicitly NOT falling back to an unsandboxed legacy spawn
    *  (fail-closed posture). `reason` is the opaque stable tag from the port. */
   | { mode: "sandbox_unavailable"; reason: string }
-  /** ADR-0397 — `edit`/`write` tool was called with an `expected_hash`
+  /** ADR-0398 — `edit`/`write` tool was called with an `expected_hash`
    *  precondition that did NOT match the current file's sha256. The on-disk
    *  bytes are UNTOUCHED (no partial write, no rollback to perform). The
    *  caller (model or human gate) can re-read the file and decide whether the

@@ -1,4 +1,4 @@
-/** ADR-0397 — atomic write + sha256 hash precondition (storage-slice adapter).
+/** ADR-0398 — atomic write + sha256 hash precondition (storage-slice adapter).
  *
  *  Single-file 2-phase temp+rename adapter co-located inside `@/storage`. Used
  *  by the `edit` / `write` tools as the on-disk commit primitive when the

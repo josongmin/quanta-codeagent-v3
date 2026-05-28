@@ -180,7 +180,7 @@ describe("(d) exhaustiveness — switch over ToolFailure['mode'] with never defa
       "spawn_error:not found",
     )
     expect(describeFailure({ mode: "error", modelVisibleError: "boom" })).toBe("error:boom")
-    // ADR-0397 — `stale_precondition` carries both hashes for model-side
+    // ADR-0398 — `stale_precondition` carries both hashes for model-side
     // re-read / re-issue branching.
     expect(
       describeFailure({

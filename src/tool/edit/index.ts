@@ -17,7 +17,7 @@ const schema = z.object({
     .describe(
       "If exact match fails, retry with whitespace-tolerant fuzzy matching (default false)",
     ),
-  /** ADR-0397 — OPTIONAL sha256 hex precondition. When supplied, the tool
+  /** ADR-0398 — OPTIONAL sha256 hex precondition. When supplied, the tool
    *  computes the sha256 of the file's CURRENT bytes and refuses the write if
    *  it differs. Returns `failure.mode: "stale_precondition"` with the two
    *  hashes; the on-disk content is untouched. Default-OFF: absent ⇒ legacy
@@ -56,7 +56,7 @@ const buildMismatchResult = (
   }
 }
 
-/** ADR-0397 — pure precondition gate. Returns a `stale_precondition` failure
+/** ADR-0398 — pure precondition gate. Returns a `stale_precondition` failure
  *  result when `expectedHash` is set and disagrees with `sha256Hex(source)`;
  *  returns `null` when the precondition is absent or matching (commit may
  *  proceed). Extracted so the generator body stays under the biome cognitive-
@@ -111,7 +111,7 @@ const planEdit = async (
   return { kind: "ready", next: result.next, message: result.message }
 }
 
-/** ADR-0397 — route the commit through `writeFileAtomic` when the caller
+/** ADR-0398 — route the commit through `writeFileAtomic` when the caller
  *  threaded `expected_hash` AND the port supports it; otherwise legacy
  *  `writeFile`. Extracted to keep `execute` flat. */
 const commitEdit = async (

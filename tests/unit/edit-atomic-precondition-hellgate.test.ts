@@ -1,4 +1,4 @@
-/** ADR-0397 hellgate — atomic write + sha256 hash precondition.
+/** ADR-0398 hellgate — atomic write + sha256 hash precondition.
  *
  *  Five adversarial invariants the `edit` tool MUST honor when the optional
  *  `expected_hash` opt-in is threaded:
@@ -99,7 +99,7 @@ const makeRecordingFullPort = (seed: Record<string, string>) => {
   return { port, files, writes }
 }
 
-describe("ADR-0397 edit + expected_hash precondition", () => {
+describe("ADR-0398 edit + expected_hash precondition", () => {
   test("default-OFF: no expected_hash ⇒ writes through legacy fs.writeFile (no atomic method needed)", async () => {
     const path = "/in-mem/legacy-default-off.txt"
     const { port, files, writes } = makeRecordingLegacyPort({
@@ -194,7 +194,7 @@ describe("ADR-0397 edit + expected_hash precondition", () => {
   })
 })
 
-describe("ADR-0397 writeFileAtomic adapter — atomic invariants on the real FS", () => {
+describe("ADR-0398 writeFileAtomic adapter — atomic invariants on the real FS", () => {
   test("happy path: 2-phase commit replaces content end-to-end", async () => {
     const f = join(dir, "atomic-happy.txt")
     writeFileSync(f, "before")

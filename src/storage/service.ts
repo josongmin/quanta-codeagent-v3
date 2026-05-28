@@ -308,7 +308,7 @@ export interface FileSystemPort {
   writeFile(path: string, content: string, baseDir?: string): Promise<void>
   statFile(path: string, baseDir?: string): Promise<FileInfo>
   fileExists(path: string, baseDir?: string): Promise<boolean>
-  /** ADR-0397 — OPTIONAL 2-phase temp+rename commit. When present, callers
+  /** ADR-0398 — OPTIONAL 2-phase temp+rename commit. When present, callers
    *  with a precondition (e.g. `edit`'s `expected_hash`) MAY route their
    *  on-disk commit through this method so the file is EITHER fully replaced
    *  OR untouched (no partial-write window). Callers MUST treat absence as
