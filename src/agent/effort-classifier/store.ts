@@ -4,6 +4,14 @@
  * Holds the session-accumulated state: the running highest-wins recommendation
  * level, the per-tool failure counters, and the signal log. Pure w.r.t. IO and
  * clock — purely a state machine fed by `onUserPrompt` / `onToolFailure`.
+ *
+ * UNBOUNDED: the `signals` array + `failureCounts` map grow monotonically per
+ * session by design — the contract is "session-accumulated escalate-only
+ * floor" (see audit R2 F5 verdict). The natural reset point is compaction
+ * (`loop.ts` calls `reset()` on every `wm.replace(...)`), which bounds growth
+ * in practice. Hosts running without compaction should call `reset()` at
+ * turn boundaries themselves. Recognised by the audit-ratchet under the
+ * `// UNBOUNDED:` marker — keep this comment intact.
  */
 
 import { DEFAULT_EFFORT, type EffortLevel } from "../effort"
