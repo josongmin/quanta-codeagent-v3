@@ -1,5 +1,5 @@
 /**
- * ADR-0397 — Run Ledger attribution via hook bus: closed port + matcher
+ * ADR-0401 — Run Ledger attribution via hook bus: closed port + matcher
  * contract.
  *
  * Wave-1 (ADR-0395) shipped `@/agent/run-ledger` as a pure store. This wave

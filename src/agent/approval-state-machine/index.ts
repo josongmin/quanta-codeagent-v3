@@ -1,5 +1,5 @@
 /**
- * ADR-0399 — Approval state machine slice barrel.
+ * ADR-0403 — Approval state machine slice barrel.
  *
  * The ONLY allowed import path for the approval state machine model + store.
  *

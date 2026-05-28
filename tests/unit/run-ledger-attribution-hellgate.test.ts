@@ -1,5 +1,5 @@
 /**
- * ADR-0397 — Run Ledger attribution via hook bus — hellgate.
+ * ADR-0401 — Run Ledger attribution via hook bus — hellgate.
  *
  * Adversarial battery over the hook-bus subscriber that drives the wave-1
  * ledger (`@/agent/run-ledger`, ADR-0395). Wave-1 shipped pure store; this
@@ -60,7 +60,7 @@ const matchEvent = (
 
 const defaultMatcher = (): LedgerMatcher => createDefaultLedgerMatcher()
 
-describe("ADR-0397 default ledger matcher — bash detached", () => {
+describe("ADR-0401 default ledger matcher — bash detached", () => {
   it("detects bash background launch from output string", () => {
     const m = defaultMatcher()
     const out = `[bash background] shellId=sh_abc123 status=running\n(deadline 5000ms elapsed — process detached; use bash_await or bash_kill)\n--- output so far ---\nbuilding...`
@@ -132,7 +132,7 @@ describe("ADR-0397 default ledger matcher — bash detached", () => {
   })
 })
 
-describe("ADR-0397 default ledger matcher — subagent", () => {
+describe("ADR-0401 default ledger matcher — subagent", () => {
   it("agent background launch ⇒ start kind:subagent", () => {
     const m = defaultMatcher()
     const out = `Subagent launched in background. task_id: t_42\nowner_token: tok_zzz\nPoll with task_output({ task_id: "t_42" }) or cancel with task_stop({ task_id: "t_42", owner_token: "tok_zzz" }).`
@@ -227,7 +227,7 @@ describe("ADR-0397 default ledger matcher — subagent", () => {
   })
 })
 
-describe("ADR-0397 default ledger matcher — mcp tasks", () => {
+describe("ADR-0401 default ledger matcher — mcp tasks", () => {
   it("get_mcp_task completed ⇒ settle completed", () => {
     const m = defaultMatcher()
     const out = `mcp_t_99 [completed]\ncompleted: payload body`
@@ -288,7 +288,7 @@ describe("ADR-0397 default ledger matcher — mcp tasks", () => {
   })
 })
 
-describe("ADR-0397 default ledger matcher — robustness (NO-THROW)", () => {
+describe("ADR-0401 default ledger matcher — robustness (NO-THROW)", () => {
   it("unknown tool name ⇒ null", () => {
     const m = defaultMatcher()
     expect(matchEvent(m, "read", "anything", true, {})).toBeNull()
@@ -381,7 +381,7 @@ describe("ADR-0397 default ledger matcher — robustness (NO-THROW)", () => {
   })
 })
 
-describe("ADR-0397 hook-bus subscriber", () => {
+describe("ADR-0401 hook-bus subscriber", () => {
   const buildLedger = (): RunLedgerPort => createRunLedger({ now: stepClock() })
 
   it("subscriber observes a bash background start + records via ledger", () => {

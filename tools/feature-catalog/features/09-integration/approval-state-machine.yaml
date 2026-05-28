@@ -1,7 +1,7 @@
 id: approval-state-machine
-title: Approval state machine (ADR-0399 port + store)
+title: Approval state machine (ADR-0403 port + store)
 section: 9
-subsystem: Approval state machine (ADR-0399)
+subsystem: Approval state machine (ADR-0403)
 order: 399
 maturity: L2
 status: new

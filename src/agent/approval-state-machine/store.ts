@@ -1,5 +1,5 @@
 /**
- * ADR-0399 — In-memory `ApprovalStateMachinePort` implementation.
+ * ADR-0403 — In-memory `ApprovalStateMachinePort` implementation.
  *
  * Zero-dep reference store. The only mutator of the approval state machine.
  * Mirrors the Objective (ADR-0394) + Run Ledger (ADR-0395) port shape:

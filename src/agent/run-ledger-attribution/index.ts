@@ -1,5 +1,5 @@
 /**
- * ADR-0397 — Run Ledger attribution slice barrel.
+ * ADR-0401 — Run Ledger attribution slice barrel.
  *
  * The ONLY allowed import path from `@/agent/run-ledger-attribution`.
  * Re-exports the matcher contract, the default matcher factory, and the

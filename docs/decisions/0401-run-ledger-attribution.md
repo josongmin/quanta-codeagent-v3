@@ -1,4 +1,4 @@
-# ADR-0397 — Run Ledger attribution via hook bus
+# ADR-0401 — Run Ledger attribution via hook bus
 
 **Status:** Accepted (2026-05-28)
 **Slice:** `src/agent/run-ledger-attribution/` (new: `types.ts` + `matchers.ts` +

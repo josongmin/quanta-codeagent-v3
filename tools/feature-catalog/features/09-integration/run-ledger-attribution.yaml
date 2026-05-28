@@ -1,5 +1,5 @@
 id: run-ledger-attribution
-title: ADR-0397 Run-ledger attribution via hook bus (bash/subagent/mcp observer)
+title: ADR-0401 Run-ledger attribution via hook bus (bash/subagent/mcp observer)
 section: 9
 subsystem: Long-running work observability (ADR-0395 wave-2)
 order: 397
@@ -50,7 +50,7 @@ evidence:
     - src/agent/run-ledger-attribution/subscriber.ts
     - src/agent/run-ledger-attribution/index.ts
   adrs:
-    - docs/decisions/0397-run-ledger-attribution.md
+    - docs/decisions/0401-run-ledger-attribution.md
     - 395
   tests:
     unit:

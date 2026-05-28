@@ -1,5 +1,5 @@
 /**
- * ADR-0399 — Approval state machine (types).
+ * ADR-0403 — Approval state machine (types).
  *
  * quanta's HITL / `request_user_input` already lets the agent stop and ask the
  * user a question, but the *product experience* is weak: when the agent halts

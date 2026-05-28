@@ -1,5 +1,5 @@
 /**
- * ADR-0397 — Hook handler closure that drives the run ledger.
+ * ADR-0401 — Hook handler closure that drives the run ledger.
  *
  * The subscriber is the ONLY runtime-side surface in this slice. The
  * composition root subscribes it to the `post_tool_use` event on the

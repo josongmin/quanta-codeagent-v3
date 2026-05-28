@@ -1,5 +1,5 @@
 /**
- * ADR-0399 — Approval state machine hellgate.
+ * ADR-0403 — Approval state machine hellgate.
  *
  * Adversarial battery over the closed `ApprovalStateMachinePort`. This wave is
  * the PORT + STORE layer — wiring into admissibility-gate / request_user_input
@@ -67,7 +67,7 @@ const ask = (
     ...(over.options !== undefined ? { options: over.options } : {}),
   })
 
-describe("ADR-0399 approval-state-machine — request shape", () => {
+describe("ADR-0403 approval-state-machine — request shape", () => {
   it("request returns status='pending' with createdAt stamped + minted id", () => {
     const now = stepClock()
     const asm = createApprovalStateMachine({ now })
@@ -115,7 +115,7 @@ describe("ADR-0399 approval-state-machine — request shape", () => {
   })
 })
 
-describe("ADR-0399 approval-state-machine — settle transitions", () => {
+describe("ADR-0403 approval-state-machine — settle transitions", () => {
   it("settle(approve) transitions pending ⇒ approved with settledAt stamped", () => {
     const now = stepClock(100, 5)
     const asm = createApprovalStateMachine({ now })
@@ -160,7 +160,7 @@ describe("ADR-0399 approval-state-machine — settle transitions", () => {
   })
 })
 
-describe("ADR-0399 approval-state-machine — expire / cancel", () => {
+describe("ADR-0403 approval-state-machine — expire / cancel", () => {
   it("expire from pending ⇒ expired with settledAt", () => {
     const asm = createApprovalStateMachine({ now: stepClock(0, 5) })
     const r = ask(asm) // 0
@@ -200,7 +200,7 @@ describe("ADR-0399 approval-state-machine — expire / cancel", () => {
   })
 })
 
-describe("ADR-0399 approval-state-machine — list / pending filters", () => {
+describe("ADR-0403 approval-state-machine — list / pending filters", () => {
   it("pending() returns only pending records", () => {
     const asm = createApprovalStateMachine({ now: stepClock() })
     const r1 = ask(asm, { threadId: "A" })
@@ -235,7 +235,7 @@ describe("ADR-0399 approval-state-machine — list / pending filters", () => {
   })
 })
 
-describe("ADR-0399 approval-state-machine — attribution WITH objective + ledger", () => {
+describe("ADR-0403 approval-state-machine — attribution WITH objective + ledger", () => {
   const seed = () => {
     const objective: ObjectivePort = createObjectiveStore({ now: stepClock(0, 1) })
     const ledger: RunLedgerPort = createRunLedger({ now: stepClock(0, 1) })
@@ -313,7 +313,7 @@ describe("ADR-0399 approval-state-machine — attribution WITH objective + ledge
   })
 })
 
-describe("ADR-0399 approval-state-machine — attribution WITHOUT optional ports", () => {
+describe("ADR-0403 approval-state-machine — attribution WITHOUT optional ports", () => {
   it("no objective + no ledger ⇒ no blockerId / no runEntryId, state still tracks", () => {
     const asm = createApprovalStateMachine({ now: stepClock() })
     const r = ask(asm)
@@ -346,7 +346,7 @@ describe("ADR-0399 approval-state-machine — attribution WITHOUT optional ports
   })
 })
 
-describe("ADR-0399 approval-state-machine — hostile attribution fakes do NOT propagate", () => {
+describe("ADR-0403 approval-state-machine — hostile attribution fakes do NOT propagate", () => {
   /** A hostile ObjectivePort that throws on every mutator. NO method returns
    *  a valid value — used to prove the approval state survives a misbehaving
    *  attribution port. */
@@ -475,7 +475,7 @@ describe("ADR-0399 approval-state-machine — hostile attribution fakes do NOT p
   })
 })
 
-describe("ADR-0399 approval-state-machine — snapshot round-trip", () => {
+describe("ADR-0403 approval-state-machine — snapshot round-trip", () => {
   it("toSnapshot + fromSnapshot deep-equal restores the records", () => {
     const asm1 = createApprovalStateMachine({ now: stepClock() })
     const r1 = ask(asm1, { threadId: "A" })
@@ -537,7 +537,7 @@ describe("ADR-0399 approval-state-machine — snapshot round-trip", () => {
   })
 })
 
-describe("ADR-0399 approval-state-machine — NO-THROW on hostile input", () => {
+describe("ADR-0403 approval-state-machine — NO-THROW on hostile input", () => {
   it("request with a non-object payload still returns a valid pending record", () => {
     const asm = createApprovalStateMachine({ now: stepClock() })
     // @ts-expect-error — hostile input
@@ -589,7 +589,7 @@ describe("ADR-0399 approval-state-machine — NO-THROW on hostile input", () => 
   })
 })
 
-describe("ADR-0399 approval-state-machine — frozen returns", () => {
+describe("ADR-0403 approval-state-machine — frozen returns", () => {
   it("returned records are frozen (cannot be mutated by a caller)", () => {
     const asm = createApprovalStateMachine({ now: stepClock() })
     const r = ask(asm)

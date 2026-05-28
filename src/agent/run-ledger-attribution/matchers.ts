@@ -1,5 +1,5 @@
 /**
- * ADR-0397 — Default matcher composition.
+ * ADR-0401 — Default matcher composition.
  *
  * The default matcher is the union of six small per-tool matchers, each
  * named after the tool whose `post_tool_use` event it observes. Each leaf

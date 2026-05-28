@@ -1,4 +1,4 @@
-# ADR-0399 — Approval state machine (port + store)
+# ADR-0403 — Approval state machine (port + store)
 
 **Status:** Accepted (2026-05-28)
 **Slice:** `src/agent/approval-state-machine/` (new: `types.ts` + `store.ts` +
