@@ -146,11 +146,20 @@ export const subagentReadMessagesSchema = z.object({
 })
 export type SubagentReadMessagesInput = z.infer<typeof subagentReadMessagesSchema>
 
+/** Escape control chars in a message body so a hostile/garbled body cannot
+ *  forge additional inbox lines. Each rendered message MUST occupy exactly one
+ *  line; without this, a body containing a newline + a fake `victim→root
+ *  [response] …` line would be parsed by the reading model as a SEPARATE
+ *  message (sender spoofing). Newlines/CR collapse to the literal two-char
+ *  `\n`; the 8 KB body content is otherwise preserved verbatim. */
+const escapeBodyForLine = (body: string): string => body.replace(/\r\n|\r|\n/g, "\\n")
+
 /** Render one inbox message to a concise model-facing line:
- *  `from→to [kind] body (id, correlationId?)`. */
+ *  `from→to [kind] body (id, correlationId?)`. One line per message — the body
+ *  is newline-escaped so it cannot inject a forged second line. */
 const renderMessage = (m: MailboxMessage): string => {
   const tail = m.correlationId !== undefined ? `(${m.id}, ${m.correlationId})` : `(${m.id})`
-  return `${m.from}→${m.to} [${m.kind}] ${m.body} ${tail}`
+  return `${m.from}→${m.to} [${m.kind}] ${escapeBodyForLine(m.body)} ${tail}`
 }
 
 /** Render the full inbox view: messages oldest-first (the port already returns
