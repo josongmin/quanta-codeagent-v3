@@ -8,12 +8,7 @@ import type {
   SessionHostSideConversationResult,
   SessionHostTurnEvent,
 } from "@/kernel/session"
-import type {
-  ContentBlock,
-  ImageBlock,
-  Message,
-  ResponsesContinuationStore,
-} from "@/llm"
+import type { ContentBlock, ImageBlock, Message, ResponsesContinuationStore } from "@/llm"
 import { inferReviewKind, reasonCodeFor, type ToolAction } from "@/permission"
 import type { CapabilityManifest, PendingApprovalView } from "@/protocol/session"
 import type {
@@ -31,6 +26,7 @@ import { automationUpdateTool, type Tool, ToolRegistry } from "@/tool"
 import { createSingleSessionRuntimeHost } from "../builder"
 import { deriveCapabilityManifest } from "../capabilities"
 import type { RuntimeHost, RuntimeSessionConfig } from "../types"
+import { installCliMentionInjector } from "./mention-wire"
 
 type RuntimeBase = RuntimeAgentConfigBase & {
   approvalProtocol?: RuntimeApprovalProtocolConfig
@@ -356,7 +352,9 @@ const buildAgentConfigFromBase = (args: {
   readonly turnAssembler?: RuntimeAgentTurnAssembler
 }): AgentConfig => {
   if (args.turnAssembler !== undefined) {
-    return args.turnAssembler([...args.messages], buildAssemblerContext(args.base, args.signal))
+    return installCliMentionInjector(
+      args.turnAssembler([...args.messages], buildAssemblerContext(args.base, args.signal)),
+    )
   }
 
   const {
@@ -370,14 +368,14 @@ const buildAgentConfigFromBase = (args: {
     ...rest
   } = args.base
 
-  return {
+  return installCliMentionInjector({
     ...(rest as Omit<AgentConfig, "messages" | "signal" | "system">),
     messages: [...args.messages],
     system: systemSource?.get() ?? system,
     signal: args.signal ?? args.base.signal,
     ...toToolProfileConfig(toolProfileState),
     ...toIdentityModeConfig(identityModeState),
-  }
+  })
 }
 
 const buildAgentConfigFromBaseInput = (args: {

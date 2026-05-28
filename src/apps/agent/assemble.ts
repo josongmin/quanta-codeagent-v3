@@ -32,8 +32,10 @@ import {
 } from "@/agent"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import { captureSnapshot } from "@/agent/context-change"
+import { lspNavProvider } from "@/agent/lsp-bridge"
+import { createLspSymbolLookup } from "@/agent/mention-injection"
+import { buildDefaultMentionResolver } from "@/agent/mention-runner"
 import { autoWirePluginActivation } from "@/agent/plugin-activation-handler"
-import { createCompositeMentionResolver } from "@/agent/plugin-app-resolver"
 import { getGlobalSessionResourceRegistry } from "@/agent/session-resource-registry"
 import { buildCallerOwnedRegistryWithTelemetry } from "@/agent/session-resource-registry/caller-owned-builder"
 import {
@@ -148,15 +150,23 @@ export const resolveRunAgent = (
   seams: AssembleRequestSeams | undefined,
 ): ((cfg: AgentConfig) => Promise<AgentOutcome>) => seams?.runAgent ?? defaultRunAgent
 
-/** ADR-0418 — @file mention resolver dep. file-only composite: @file reads
- *  workspace files rooted at cwd; @symbol (LSP/semantic adapters) + @skill
- *  (registry) are separate follow-ups, so those kinds resolve null for now.
- *  Default-ON; QUANTA_MENTION_FILE=off opts out. Extracted so the
- *  assembleAgentConfig closure stays under biome's cognitive-complexity cap. */
-const mentionResolverDep = (cwd: string) =>
-  process.env.QUANTA_MENTION_FILE !== "off"
-    ? { mentionResolver: createCompositeMentionResolver({ files: { root: cwd } }) }
-    : {}
+/** ADR-0422 — mention resolver dep via the DRY `buildDefaultMentionResolver`.
+ *  @file (workspace root = cwd) + @symbol (LSP nav adapter — graceful-null
+ *  until a language server + anchor are present) are wired here; @skill is
+ *  gracefully omitted because no read-only skill registry exists at config-
+ *  assembly time (the per-turn inventory is built inside the loop). Each kind
+ *  is independently gated by its `QUANTA_MENTION_*` knob (default-ON). The
+ *  resulting composite is always set; with every knob `=off` it resolves every
+ *  mention to `null` (byte-identical to the legacy 3-kind path). Extracted so
+ *  the assembleAgentConfig closure stays under biome's cognitive-complexity
+ *  cap. */
+const mentionResolverDep = (cwd: string) => ({
+  mentionResolver: buildDefaultMentionResolver({
+    cwd,
+    env: process.env,
+    lsp: createLspSymbolLookup({ provider: lspNavProvider(), cwd }),
+  }),
+})
 
 /** Single source of truth for "config for this mode" assembly. */
 export const assembleAgentConfig = (req: AssembleRequest): AgentConfig => {
