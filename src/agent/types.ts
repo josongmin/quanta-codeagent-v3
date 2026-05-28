@@ -45,6 +45,7 @@ import type { HandoffRequiredEvent } from "./hitl-tier"
 import type { HookBus } from "./hooks"
 import type { IdeContextProvider } from "./ide-context"
 import type { LocalizePhaseConfig, LocalizePhaseState } from "./localize-phase-guard"
+import type { ObjectivePort } from "./objective"
 import type { PlanStore } from "./plan/state"
 import type { PlanExitOutcome } from "./plan-exit"
 import type { PlanExitPort } from "./plan-exit-flow"
@@ -978,6 +979,23 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   budgetLedger?: BudgetLedger
   /**
+   * ADR-0398 — Objective port slot (ADR-0394 substrate consumer wire).
+   *
+   * When set, `buildObjectiveBlock` (tier-1) registers the 3 LLM tools
+   * `objective_set` / `objective_update` / `objective_get` bound to this
+   * port so the agent can declare its own per-thread objective (goal /
+   * success criteria / blockers / next actions / budget) and surface them
+   * to the user. Absent ⇒ the 3 tools are NOT registered, the loop is
+   * byte-identical for every legacy caller (RFC §1.2 default-OFF).
+   *
+   * Caller-wire (typically the composition root) constructs the port via
+   * `createObjectiveStore()` (in-memory reference impl) — a future ADR
+   * may add a persistent backing. Top-level (not nested) so future
+   * consumers (compaction-preserve-objective, subagent-result attribution)
+   * can read this slot directly.
+   */
+  readonly objective?: ObjectivePort
+  /**
    * ADR-0124 conversation-checkpoint slot (helper-only). When set, callers
    * (apps/agent bootstrap, future `/rewind` slash command, future
    * auto-recovery hook) record/restore the `messages[]` history through this
@@ -1600,6 +1618,7 @@ export type FeaturesConfig = Pick<
   // Pick documents that future caller-wire-time consumers in features.ts will
   // read them, and keeps the Pick union from drifting away from AgentConfig.
   | "budgetLedger"
+  | "objective"
   | "conversationCheckpoint"
   | "responsesContinuation"
   | "llmProvider"

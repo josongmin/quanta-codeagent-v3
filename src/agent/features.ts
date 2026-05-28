@@ -60,6 +60,7 @@ import {
   buildClassifierBlock,
   buildDelegateBlock,
   buildForkSessionBlock,
+  buildObjectiveBlock,
   buildPlanExitBlock,
   buildPlanMutationBlock,
   buildShadowBlock,
@@ -159,6 +160,10 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
 
   // ADR-0393 — synchronous delegate tool (default-OFF: empty when delegation absent)
   extraTools.push(...buildDelegateBlock(config))
+
+  // ADR-0398 — objective_set / objective_update / objective_get tools
+  // (default-OFF: empty array when objective port absent)
+  extraTools.push(...buildObjectiveBlock(config))
 
   // ADR-0136 — budget_status tool (default-OFF: empty array when budgetLedger absent)
   extraTools.push(...buildBudgetBlock(config))
