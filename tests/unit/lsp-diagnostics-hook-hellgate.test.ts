@@ -1,5 +1,5 @@
 /**
- * Hellgate — edit-after-diagnostics auto-injection hook (ADR-0381, A3).
+ * Hellgate — edit-after-diagnostics auto-injection hook (ADR-0405, A3).
  *
  * `attachLspDiagnosticsHook` registers a `post_tool_use` HANDLER that, after an
  * edit-class tool runs, fetches LSP diagnostics for the edited file and pushes

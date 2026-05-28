@@ -149,7 +149,7 @@ export const lspDiagnosticsProvider = (): DiagnosticsProvider => ({
  */
 export const lspDiagnosticsTool = (): Tool => diagnosticsTool(lspDiagnosticsProvider()) as Tool
 
-/** ADR-0381 wiring helper — default edit-class tool → file-path extractor map.
+/** ADR-0405 wiring helper — default edit-class tool → file-path extractor map.
  *  `edit` / `write` take `file_path` in their input schema; `apply_patch`
  *  takes a V4A patch body — the first `*** Update File:` / `*** Add File:`
  *  op header gives the path that should get diagnostics. `Delete` (no file
@@ -175,7 +175,7 @@ export const lspDefaultEditTools = (): Map<string, (input: unknown) => string | 
   ])
 }
 
-/** ADR-0381 composition wire — env-gated default-OFF attach.
+/** ADR-0405 composition wire — env-gated default-OFF attach.
  *  Returns the dispose handle when `QUANTA_LSP_DIAGNOSTICS_HOOK=1` AND the
  *  `AgentConfig` carries both seam slots (`hooks`, `subagentPendingPrompt`);
  *  otherwise returns `undefined` so the loop body is byte-identical. */
@@ -266,7 +266,7 @@ export const lspNavProvider = (): LspNavProvider => ({
  * unchanged. Nothing here spawns a server until a tool is actually called.
  */
 /* ------------------------------------------------------------------------- *
- * LSP rename (ADR-0380, S2) — the `lsp_rename_apply` mutating tool.
+ * LSP rename (ADR-0404, S2) — the `lsp_rename_apply` mutating tool.
  *
  * Sibling of the read-only nav tools: issues `textDocument/rename` then APPLIES
  * the resulting workspace edit via the 2-phase atomic commit

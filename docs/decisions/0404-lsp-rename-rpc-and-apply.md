@@ -1,4 +1,4 @@
-# ADR-0380 — `lsp_rename` — `textDocument/rename` RPC + atomic apply
+# ADR-0404 — `lsp_rename` — `textDocument/rename` RPC + atomic apply
 
 Status: Accepted — 2026-05-28
 Supersedes: none

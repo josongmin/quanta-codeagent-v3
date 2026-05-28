@@ -1,5 +1,5 @@
 /**
- * Hellgate — `LspClient.computeRename` RPC (ADR-0380, S2).
+ * Hellgate — `LspClient.computeRename` RPC (ADR-0404, S2).
  *
  * The `textDocument/rename` wire method. Sibling of the existing nav RPCs
  * (`definition`/`references`/…) and `prepareRename` (which only PROBES). This

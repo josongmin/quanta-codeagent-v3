@@ -1,5 +1,5 @@
 /**
- * Hellgate — `DefaultRenameApplyAdapter` (ADR-0380, S2).
+ * Hellgate — `DefaultRenameApplyAdapter` (ADR-0404, S2).
  *
  * Wires the canonical `RenameApplyPort` to a real `LspClient` via:
  *   computeRename → `LspClient.computeRename` (textDocument/rename RPC)

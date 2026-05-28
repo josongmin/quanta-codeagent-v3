@@ -1,4 +1,4 @@
-# ADR-0381 — edit-after-diagnostics auto-injection hook
+# ADR-0405 — edit-after-diagnostics auto-injection hook
 
 Status: Accepted — 2026-05-28
 Supersedes: none
@@ -113,4 +113,4 @@ ADR — mirrors the established "slot/seam first, surface-wire later" pattern
   already bounds accumulation per ADR-0133; emitting on every error-bearing
   edit is the intended ambient behavior.
 - Multi-file diagnostics (only the edited file is checked) — a rename touching
-  N files is the `lsp_rename_apply` path (ADR-0380), not this hook.
+  N files is the `lsp_rename_apply` path (ADR-0404), not this hook.

@@ -1,4 +1,4 @@
-/** ADR-0381 (A3) — edit-after-diagnostics auto-injection hook.
+/** ADR-0405 (A3) — edit-after-diagnostics auto-injection hook.
  *
  *  Registers a `post_tool_use` HANDLER on a {@link HookBus} that, after an
  *  edit-class tool runs, fetches LSP diagnostics for the edited file and pushes

@@ -1,5 +1,5 @@
 /**
- * Hellgate — LSP rename bridge wiring (ADR-0380, S2).
+ * Hellgate — LSP rename bridge wiring (ADR-0404, S2).
  *
  * Seals that the agent-slice bridge assembles a real `RenameApplyPort` (backed
  * by an `LspClient` + `DefaultRenameApplyAdapter`) into the `lsp_rename_apply`

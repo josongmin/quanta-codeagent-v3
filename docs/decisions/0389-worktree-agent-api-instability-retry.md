@@ -50,7 +50,7 @@ When a sprint has 5+ follow-ups of mixed size, sort by tool-budget:
 - **Largest 1** → worktree dispatch with extra context budget.
 
 R14 used this split: ADR-0378 + ADR-0379 (smallest) landed direct;
-ADR-0380/0381/0382 (larger) deferred to R15 worktree dispatch.
+ADR-0404/0381/0382 (larger) deferred to R15 worktree dispatch.
 R15 followed the pattern: ADR-0384/0385/0386/0387 in worktrees;
 ADR-0388 + ADR-0389 direct on main (markdown-only).
 

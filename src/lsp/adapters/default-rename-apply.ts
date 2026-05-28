@@ -1,9 +1,9 @@
-/** ADR-0380 (S2) — default `RenameApplyPort` adapter.
+/** ADR-0404 (S2) — default `RenameApplyPort` adapter.
  *
  *  Wires the canonical `RenameApplyPort` (`../ports/rename-apply-port`) to a
  *  `LspClient` (`./base.ts`) via two wire methods:
  *    - `computeRename` → `LspClient.computeRename` (the `textDocument/rename`
- *      RPC added in ADR-0380), returning the proposed {@link RenameWorkspaceEdit}.
+ *      RPC added in ADR-0404), returning the proposed {@link RenameWorkspaceEdit}.
  *    - `applyEdit`     → `LspClient.applyWorkspaceEdit` (the 2-phase temp+rename
  *      atomic commit completed in ADR-0152) — reused verbatim, never re-implemented.
  *

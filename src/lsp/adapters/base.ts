@@ -780,7 +780,7 @@ export class LspClient implements LspPort {
     return { range: toRange(raw.range), placeholder: raw.placeholder ?? "" }
   }
 
-  /** ADR-0380 (S2) — `textDocument/rename`. Sibling of {@link prepareRename}:
+  /** ADR-0404 (S2) — `textDocument/rename`. Sibling of {@link prepareRename}:
    *  `prepareRename` only PROBES whether the cursor sits on a renameable
    *  identifier; THIS issues the actual rename and returns the
    *  {@link RenameWorkspaceEdit} the server proposes (every file + edit). The

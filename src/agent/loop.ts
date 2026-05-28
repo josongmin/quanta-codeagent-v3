@@ -2530,7 +2530,7 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
  *  required restructuring every return path. */
 const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
   const ctx = await createRunAgentContext(config)
-  // ADR-0381 follow-up — opt-in LSP diagnostics auto-injection. env-gated
+  // ADR-0405 follow-up — opt-in LSP diagnostics auto-injection. env-gated
   // (`QUANTA_LSP_DIAGNOSTICS_HOOK=1`) AND requires both seam slots
   // (`hooks` + `subagentPendingPrompt`); absent ⇒ `undefined` ⇒ no handler,
   // byte-identical loop. Disposed in `finally` so a flaky LSP cannot leak.
