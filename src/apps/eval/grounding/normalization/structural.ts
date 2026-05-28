@@ -142,6 +142,16 @@ export const normalizeGroundingDecisionStructurally = (
   }
 
   if (
+    groundingCase.ambiguityClass === "thread" &&
+    (groundingCase.candidateThreadIds?.length ?? threadCandidates.length) > 1 &&
+    scope === "current_workstream"
+  ) {
+    activeThreadId = null
+    referentId = null
+    shouldClarify = true
+  }
+
+  if (
     (scope === "current_workstream" || scope === "specific_file") &&
     chosenFileId !== null &&
     (!decisionReferentIsFile || referentId !== chosenFileId || scope !== "specific_file")
@@ -171,6 +181,17 @@ export const normalizeGroundingDecisionStructurally = (
       latestToolResultId !== null && referentId === latestToolResultId
         ? "latest_tool_result"
         : "specific_subthread"
+  }
+
+  if (
+    groundingCase.ambiguityClass === "file" &&
+    fileContext.candidateFileIds.length > 1 &&
+    (scope === "current_workstream" || scope === "specific_file")
+  ) {
+    scope = "specific_file"
+    referentId = null
+    shouldClarify = true
+    if (canonicalActiveThread !== null) activeThreadId = canonicalActiveThread
   }
 
   if (

@@ -3,8 +3,16 @@
   "id": "ambiguous-two-threads",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "history": [
-    { "role": "assistant", "text": "Two open threads remain: prompt_rules and feature_catalog." },
-    { "role": "assistant", "text": "Both are unfinished and both were mentioned in the last status pass." }
+    {
+      "role": "assistant",
+      "mentionedThreadIds": ["prompt_rules", "feature_catalog"],
+      "text": "Two open threads remain: prompt_rules and feature_catalog."
+    },
+    {
+      "role": "assistant",
+      "mentionedThreadIds": ["prompt_rules", "feature_catalog"],
+      "text": "Both are unfinished and both were mentioned in the last status pass."
+    }
   ],
   "targetUtterance": "그거 먼저 끝내.",
   "gold": {
@@ -16,5 +24,11 @@
     "confidence": "high"
   },
   "bucket": "must_clarify",
-  "severity": "critical"
+  "severity": "critical",
+  "stateContract": {
+    "activeThreadId": null,
+    "visibleThreadIds": ["feature_catalog", "prompt_rules"]
+  },
+  "candidateThreadIds": ["feature_catalog", "prompt_rules"],
+  "ambiguityClass": "thread"
 }

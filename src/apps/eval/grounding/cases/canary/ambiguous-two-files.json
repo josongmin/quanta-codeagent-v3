@@ -10,7 +10,12 @@
       "mentionedFileIds": ["src/agent/prompt.ts", "src/agent/loop.ts"],
       "text": "Active thread prompt_rules is touching src/agent/prompt.ts and src/agent/loop.ts."
     },
-    { "role": "assistant", "text": "Both files still have open edits." }
+    {
+      "role": "assistant",
+      "threadId": "prompt_rules",
+      "mentionedFileIds": ["src/agent/prompt.ts", "src/agent/loop.ts"],
+      "text": "Both files still have open edits."
+    }
   ],
   "targetUtterance": "그 파일만 건드려.",
   "gold": {
@@ -22,5 +27,12 @@
     "confidence": "high"
   },
   "bucket": "must_clarify",
-  "severity": "critical"
+  "severity": "critical",
+  "stateContract": {
+    "activeThreadId": "prompt_rules",
+    "visibleThreadIds": ["prompt_rules"],
+    "candidateFileIds": ["src/agent/loop.ts", "src/agent/prompt.ts"]
+  },
+  "candidateThreadIds": ["prompt_rules"],
+  "ambiguityClass": "file"
 }

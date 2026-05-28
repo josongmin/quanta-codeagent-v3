@@ -83,6 +83,7 @@ const buildProbePrompt = (
         ? [
             "Use only the provided conversation context, <grounding-meta> annotations, and authoritative state snapshot.",
             "Do not rely on evaluator-specific repair policies or extra benchmark assumptions.",
+            "Interpret labels semantically: status_check=status/progress, execute_change=do or continue work on the target, explain=why/how rationale, approval_request=ship/merge/ready approval, clarify_request=ask the user to disambiguate, fact_lookup=retrieve a concrete detail from context/history.",
           ]
         : [
             "Decision rules:",

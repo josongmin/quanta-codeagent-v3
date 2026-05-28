@@ -753,4 +753,66 @@ describe("grounding decision normalizer", () => {
     expect(ambiguousThreads.decision.shouldClarify).toBe(false)
     expect(ambiguousThreads.decision.activeThreadId).toBe("prompt_rules")
   })
+
+  test("structural mode uses authoritative ambiguityClass and candidate sets to force clarify", () => {
+    const ambiguousThread = normalizeGroundingDecision(
+      baseCase({
+        history: [
+          {
+            role: "assistant",
+            mentionedThreadIds: ["prompt_rules", "feature_catalog"],
+            text: "Two open threads remain: prompt_rules and feature_catalog.",
+          },
+        ],
+        candidateThreadIds: ["prompt_rules", "feature_catalog"],
+        ambiguityClass: "thread",
+        stateContract: {
+          activeThreadId: null,
+          visibleThreadIds: ["feature_catalog", "prompt_rules"],
+        },
+      }),
+      {
+        activeThreadId: "prompt_rules",
+        referentId: "prompt_rules",
+        intent: "execute_change",
+        scope: "current_workstream",
+        shouldClarify: false,
+        confidence: "medium",
+      },
+      "structural",
+    )
+    expect(ambiguousThread.decision.activeThreadId).toBeNull()
+    expect(ambiguousThread.decision.referentId).toBeNull()
+    expect(ambiguousThread.decision.shouldClarify).toBe(true)
+
+    const ambiguousFile = normalizeGroundingDecision(
+      baseCase({
+        history: [
+          {
+            role: "assistant",
+            threadId: "prompt_rules",
+            mentionedFileIds: ["src/agent/prompt.ts", "src/agent/loop.ts"],
+            text: "Active thread prompt_rules is touching src/agent/prompt.ts and src/agent/loop.ts.",
+          },
+        ],
+        ambiguityClass: "file",
+        stateContract: {
+          activeThreadId: "prompt_rules",
+          candidateFileIds: ["src/agent/loop.ts", "src/agent/prompt.ts"],
+        },
+      }),
+      {
+        activeThreadId: "prompt_rules",
+        referentId: "src/agent/prompt.ts",
+        intent: "execute_change",
+        scope: "specific_file",
+        shouldClarify: false,
+        confidence: "medium",
+      },
+      "structural",
+    )
+    expect(ambiguousFile.decision.scope).toBe("specific_file")
+    expect(ambiguousFile.decision.referentId).toBeNull()
+    expect(ambiguousFile.decision.shouldClarify).toBe(true)
+  })
 })
