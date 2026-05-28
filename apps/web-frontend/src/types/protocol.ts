@@ -39,12 +39,7 @@ export interface CapabilityManifest {
 
 /* --- Snapshot views ---------------------------------------------------- */
 
-export type SessionStatus =
-  | "idle"
-  | "running"
-  | "awaiting_approval"
-  | "failed"
-  | "closed"
+export type SessionStatus = "idle" | "running" | "awaiting_approval" | "failed" | "closed"
 
 export interface SessionStateView {
   readonly status: SessionStatus
@@ -109,19 +104,16 @@ export interface ImageBlock {
   readonly data: string
 }
 
-export interface InputAppendCommand
-  extends SessionCommandEnvelope<"input.append"> {
+export interface InputAppendCommand extends SessionCommandEnvelope<"input.append"> {
   readonly text: string
   readonly images?: readonly ImageBlock[]
 }
 
 export interface TurnRunCommand extends SessionCommandEnvelope<"turn.run"> {}
 
-export interface TurnCancelCommand
-  extends SessionCommandEnvelope<"turn.cancel"> {}
+export interface TurnCancelCommand extends SessionCommandEnvelope<"turn.cancel"> {}
 
-export interface ApprovalRespondCommand
-  extends SessionCommandEnvelope<"approval.respond"> {
+export interface ApprovalRespondCommand extends SessionCommandEnvelope<"approval.respond"> {
   readonly approvalId: string
   readonly decision: "approve" | "deny"
 }
@@ -148,21 +140,18 @@ interface SessionEventEnvelope<TType extends string> {
   readonly type: TType
 }
 
-export interface SessionCreatedEvent
-  extends SessionEventEnvelope<"session.created"> {
+export interface SessionCreatedEvent extends SessionEventEnvelope<"session.created"> {
   readonly capabilityManifest: CapabilityManifest
   /** Active model slug (e.g. `gpt-5`, `claude-sonnet-4-6`). Optional —
    *  populated by runtimes that can introspect their LLM port. */
   readonly model?: string
 }
 
-export interface SessionStateUpdatedEvent
-  extends SessionEventEnvelope<"session.state.updated"> {
+export interface SessionStateUpdatedEvent extends SessionEventEnvelope<"session.state.updated"> {
   readonly state: SessionStateView
 }
 
-export interface TurnStartedEvent
-  extends SessionEventEnvelope<"turn.started"> {
+export interface TurnStartedEvent extends SessionEventEnvelope<"turn.started"> {
   readonly prompt: string
   readonly images?: readonly ImageBlock[]
 }
@@ -176,8 +165,7 @@ export interface TokenUsage {
   readonly costMicroUsd?: number
 }
 
-export interface TurnCompletedEvent
-  extends SessionEventEnvelope<"turn.completed"> {
+export interface TurnCompletedEvent extends SessionEventEnvelope<"turn.completed"> {
   readonly outcomeReason: string
   readonly assistantText?: string
   readonly tokenUsage?: TokenUsage
@@ -185,16 +173,14 @@ export interface TurnCompletedEvent
 }
 
 /** Tool invocation life-cycle (mirrors upstream `ToolInvokedEvent`). */
-export interface ToolInvokedEvent
-  extends SessionEventEnvelope<"tool.invoked"> {
+export interface ToolInvokedEvent extends SessionEventEnvelope<"tool.invoked"> {
   readonly toolCallId: string
   readonly toolName: string
   readonly argsPreview?: string
 }
 
 /** Tool completion life-cycle (mirrors upstream `ToolCompletedEvent`). */
-export interface ToolCompletedEvent
-  extends SessionEventEnvelope<"tool.completed"> {
+export interface ToolCompletedEvent extends SessionEventEnvelope<"tool.completed"> {
   readonly toolCallId: string
   readonly toolName: string
   readonly outcome: "ok" | "error" | "denied" | "timeout"
@@ -202,8 +188,7 @@ export interface ToolCompletedEvent
   readonly durationMs?: number
 }
 
-export interface TurnOutputDeltaEvent
-  extends SessionEventEnvelope<"turn.output.delta"> {
+export interface TurnOutputDeltaEvent extends SessionEventEnvelope<"turn.output.delta"> {
   readonly delta: string
 }
 
@@ -211,24 +196,20 @@ export interface TurnFailedEvent extends SessionEventEnvelope<"turn.failed"> {
   readonly message: string
 }
 
-export interface ApprovalRequestedEvent
-  extends SessionEventEnvelope<"approval.requested"> {
+export interface ApprovalRequestedEvent extends SessionEventEnvelope<"approval.requested"> {
   readonly approval: PendingApprovalView
 }
 
-export interface ApprovalResolvedEvent
-  extends SessionEventEnvelope<"approval.resolved"> {
+export interface ApprovalResolvedEvent extends SessionEventEnvelope<"approval.resolved"> {
   readonly approvalId: string
   readonly decision: "approve" | "deny"
 }
 
-export interface ArtifactReadyEvent
-  extends SessionEventEnvelope<"artifact.ready"> {
+export interface ArtifactReadyEvent extends SessionEventEnvelope<"artifact.ready"> {
   readonly artifact: ArtifactRef
 }
 
-export interface SessionClosedEvent
-  extends SessionEventEnvelope<"session.closed"> {}
+export interface SessionClosedEvent extends SessionEventEnvelope<"session.closed"> {}
 
 export type SessionEvent =
   | SessionCreatedEvent
@@ -275,10 +256,7 @@ export interface SessionRejectedFrame {
  * IPC `WireEnvelope` (`src/ipc/event-bridge.ts`) — the daemon adapts at
  * the WS boundary.
  */
-export interface SessionWireEnvelope<
-  TKind extends "command" | "event" | "snapshot",
-  TPayload,
-> {
+export interface SessionWireEnvelope<TKind extends "command" | "event" | "snapshot", TPayload> {
   readonly version: string
   readonly kind: TKind
   readonly payload: TPayload
@@ -312,3 +290,121 @@ export type ConnectionState =
       readonly reason?: string
     }
   | { readonly kind: "closed" }
+
+/* --- ADR-0406 — Observability protocol --------------------------------- */
+
+/**
+ * Observability pane WS protocol — mirrors `src/protocol/observability/`
+ * upstream. Same copy-not-import pattern as the rest of this file: the
+ * frontend lives outside the bun tsconfig's `paths`, so we re-state the
+ * shapes here. Source of truth: `src/protocol/observability/messages.ts`.
+ *
+ * The frontend NEVER imports `@/agent/*` runtime — it consumes these shapes
+ * structurally via WS frames decoded by `apps/web-frontend/src/ws/`.
+ */
+
+export type RunKind = "shell" | "subagent" | "mcp_task" | "exec"
+export type RunStatus = "running" | "waiting" | "completed" | "failed" | "stopped"
+export type WaitingOnTarget = "user" | "tool" | "network" | "child_agent"
+
+export interface RunArtifact {
+  readonly kind: "log" | "stdout" | "summary" | "file"
+  readonly ref: string
+}
+
+export interface RunEntry {
+  readonly id: string
+  readonly kind: RunKind
+  readonly owner: string
+  readonly title: string
+  readonly status: RunStatus
+  readonly startedAt: number
+  readonly lastEventAt: number
+  readonly waitingOn?: WaitingOnTarget
+  readonly resumeAction?: string
+  readonly artifacts: readonly RunArtifact[]
+  readonly error?: string
+}
+
+export type ObjectiveStatus = "active" | "blocked" | "completed"
+
+export interface SuccessCriterion {
+  readonly id: string
+  readonly text: string
+  readonly met: boolean
+}
+
+export interface Blocker {
+  readonly id: string
+  readonly reason: string
+  readonly waitingOn: WaitingOnTarget
+  readonly since: number
+}
+
+export interface ObjectiveBudget {
+  readonly maxTokens?: number
+  readonly tokensUsed: number
+  readonly maxTurns?: number
+  readonly turnsUsed: number
+}
+
+export interface Objective {
+  readonly threadId: string
+  readonly goal: string
+  readonly successCriteria: readonly SuccessCriterion[]
+  readonly status: ObjectiveStatus
+  readonly budget: ObjectiveBudget
+  readonly blockers: readonly Blocker[]
+  readonly nextActions: readonly string[]
+  readonly createdAt: number
+  readonly updatedAt: number
+}
+
+export type ApprovalKind = "permission" | "clarification" | "escalation"
+export type ApprovalDecision = "approve" | "deny" | "modify"
+export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "cancelled"
+
+export interface ApprovalRequest {
+  readonly id: string
+  readonly threadId: string
+  readonly kind: ApprovalKind
+  readonly reason: string
+  readonly proposedAction: string
+  readonly resumeStep: string
+  readonly options?: readonly string[]
+  readonly status: ApprovalStatus
+  readonly createdAt: number
+  readonly settledAt?: number
+  readonly decision?: ApprovalDecision
+  readonly modifiedAction?: string
+  readonly blockerId?: string
+  readonly runEntryId?: string
+}
+
+export interface ObservabilitySnapshotMessage {
+  readonly kind: "observability.snapshot"
+  readonly runs: readonly RunEntry[]
+  readonly objective: Objective | null
+  readonly approvals: readonly ApprovalRequest[]
+  readonly emittedAt: number
+}
+
+export interface RunChange {
+  readonly id: string
+  readonly entry: RunEntry | null
+}
+
+export interface ApprovalChange {
+  readonly id: string
+  readonly approval: ApprovalRequest | null
+}
+
+export interface ObservabilityDeltaMessage {
+  readonly kind: "observability.delta"
+  readonly runChanges?: readonly RunChange[]
+  readonly objectiveChanged?: Objective | null
+  readonly approvalChanges?: readonly ApprovalChange[]
+  readonly emittedAt: number
+}
+
+export type ObservabilityMessage = ObservabilitySnapshotMessage | ObservabilityDeltaMessage

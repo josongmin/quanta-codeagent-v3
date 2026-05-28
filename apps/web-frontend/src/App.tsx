@@ -1,14 +1,10 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import {
-  isHotkeyImagePayload,
-  type PendingImageAttachment,
-} from "./composer/image-attachment"
-import { useImageAttachment } from "./composer/use-image-attachment"
 import { ChatPanel } from "./components/ChatPanel"
 import { ConnectionUrlPill } from "./components/ConnectionUrlPill"
 import { HeaderTitle } from "./components/HeaderTitle"
 import { HotkeyToast } from "./components/HotkeyToast"
 import { ModeBadge } from "./components/ModeBadge"
+import { ObservabilityPane } from "./components/ObservabilityPane"
 import { PortBadge } from "./components/PortBadge"
 import {
   buildDefaultSlashCommands,
@@ -17,19 +13,15 @@ import {
   type SlashCommandContext,
   splitDraft,
 } from "./components/SlashPalette"
-import {
-  buildLlmConfigSlashCommands,
-  httpUrlFromWsUrl,
-} from "./components/slash-llm-config"
-import { buildAuthSlashCommands } from "./components/slash-auth"
 import { StatusBar } from "./components/StatusBar"
+import { buildAuthSlashCommands } from "./components/slash-auth"
+import { buildLlmConfigSlashCommands, httpUrlFromWsUrl } from "./components/slash-llm-config"
 import { TokenCounter } from "./components/TokenCounter"
-import type {
-  ConnectionState,
-  SessionEvent,
-  SessionStateView,
-} from "./types/protocol"
+import { isHotkeyImagePayload, type PendingImageAttachment } from "./composer/image-attachment"
+import { useImageAttachment } from "./composer/use-image-attachment"
+import type { ConnectionState, SessionEvent, SessionStateView } from "./types/protocol"
 import { SessionClient } from "./ws/client"
+import { useObservabilityState } from "./ws/observability-hooks"
 import {
   type CumulativeTokenUsage,
   useConnectionState,
@@ -91,9 +83,7 @@ interface SessionChromeProps {
   readonly canRestartDaemon: boolean
 }
 
-const getEnv = (key: "VITE_QUANTA_WS_URL" | "VITE_QUANTA_AUTH_TOKEN"):
-  | string
-  | undefined => {
+const getEnv = (key: "VITE_QUANTA_WS_URL" | "VITE_QUANTA_AUTH_TOKEN"): string | undefined => {
   const env = (
     import.meta as unknown as {
       env?: Partial<Record<string, string>>
@@ -116,9 +106,7 @@ const readQueryConfig = (): { wsUrl: string; authToken?: string } | undefined =>
     const ws = params.get("ws")
     if (ws === null || ws.length === 0) return undefined
     const token = params.get("token")
-    return token !== null && token.length > 0
-      ? { wsUrl: ws, authToken: token }
-      : { wsUrl: ws }
+    return token !== null && token.length > 0 ? { wsUrl: ws, authToken: token } : { wsUrl: ws }
   } catch {
     return undefined
   }
@@ -126,9 +114,11 @@ const readQueryConfig = (): { wsUrl: string; authToken?: string } | undefined =>
 
 const readInjectedConfig = (): QuantaInjectedConfig | undefined => {
   if (typeof window === "undefined") return undefined
-  const injected = (window as unknown as {
-    __QUANTA_CONFIG__?: QuantaInjectedConfig
-  }).__QUANTA_CONFIG__
+  const injected = (
+    window as unknown as {
+      __QUANTA_CONFIG__?: QuantaInjectedConfig
+    }
+  ).__QUANTA_CONFIG__
   if (injected === undefined || injected === null) return undefined
   if (typeof injected !== "object") return undefined
   return injected
@@ -144,10 +134,7 @@ const isLikelyTauriWebview = (): boolean => {
   return "__TAURI_INTERNALS__" in window
 }
 
-const toResolved = (
-  url: string,
-  token: string | undefined,
-): { url: string; token?: string } =>
+const toResolved = (url: string, token: string | undefined): { url: string; token?: string } =>
   typeof token !== "string" || token.length === 0 ? { url } : { url, token }
 
 const resolveConnectionConfig = async (): Promise<{ url: string; token?: string }> => {
@@ -215,9 +202,7 @@ export const App = (): JSX.Element => {
     modelSlug,
     tokenUsage,
   } = useSessionEvents(client)
-  const [learnedSessionId, setLearnedSessionId] = useState<string | null>(
-    () => client.sessionId,
-  )
+  const [learnedSessionId, setLearnedSessionId] = useState<string | null>(() => client.sessionId)
   useEffect(() => {
     const off = client.onSessionId(setLearnedSessionId)
     return off
@@ -278,7 +263,9 @@ export const App = (): JSX.Element => {
     let retryHandle: ReturnType<typeof setTimeout> | null = null
     let generation = 0
 
-    const connectWithResolvedConfig = async (reason: "initial" | "config-ready" | "retry"): Promise<void> => {
+    const connectWithResolvedConfig = async (
+      reason: "initial" | "config-ready" | "retry",
+    ): Promise<void> => {
       const currentGeneration = ++generation
       try {
         const { url, token } = await resolveConnectionConfig()
@@ -439,8 +426,7 @@ export const App = (): JSX.Element => {
     submitRef.current = submit
   }, [submit])
 
-  const inputDisabled =
-    connection.kind !== "connected" || learnedSessionId === null
+  const inputDisabled = connection.kind !== "connected" || learnedSessionId === null
 
   const slashContextRef = useRef<SlashCommandContext>(
     buildSlashContextSnapshot({
@@ -461,14 +447,7 @@ export const App = (): JSX.Element => {
       messageCount: messages.length,
       tokenUsage,
     })
-  }, [
-    modelSlug,
-    connection,
-    learnedSessionId,
-    sessionState,
-    messages.length,
-    tokenUsage,
-  ])
+  }, [modelSlug, connection, learnedSessionId, sessionState, messages.length, tokenUsage])
   const getSlashContext = useCallback((): SlashCommandContext => {
     return slashContextRef.current
   }, [])
@@ -489,9 +468,7 @@ export const App = (): JSX.Element => {
     if (resolvedConnection === null) return base
     const sharedEndpoint = {
       httpUrl: httpUrlFromWsUrl(resolvedConnection.url),
-      ...(resolvedConnection.token !== undefined
-        ? { token: resolvedConnection.token }
-        : {}),
+      ...(resolvedConnection.token !== undefined ? { token: resolvedConnection.token } : {}),
       onResult: (msg: string, kind: "ok" | "err"): void => {
         appendClientMessage(kind === "err" ? "error" : "system", msg)
       },
@@ -516,9 +493,13 @@ export const App = (): JSX.Element => {
 
   const canRestartDaemon = readTauriInvoke() !== undefined
   const resolvedModel =
-    modelSlug ??
-    (import.meta.env.VITE_QUANTA_MODEL as string | undefined) ??
-    "gpt-5"
+    modelSlug ?? (import.meta.env.VITE_QUANTA_MODEL as string | undefined) ?? "gpt-5"
+
+  // ADR-0406 — observability pane state. With no `observability.*` frames on
+  // the wire (default-OFF backend) the hook returns an empty state and the
+  // pane renders placeholders. Live wire-up to the SessionClient is a
+  // follow-up — for now we pass `null` so the pane stays empty by design.
+  const observability = useObservabilityState(null)
 
   return (
     <div className="flex h-full min-h-screen flex-col bg-neutral-950 text-neutral-100">
@@ -530,22 +511,25 @@ export const App = (): JSX.Element => {
         tokenUsage={tokenUsage}
         canRestartDaemon={canRestartDaemon}
       />
-      <ChatPanel
-        messages={messages}
-        streamingMessageId={streamingMessageId}
-        draft={draft}
-        onDraftChange={setDraft}
-        onSubmit={submit}
-        inputRef={inputRef}
-        disabled={inputDisabled}
-        pendingImages={attachment.pendingImages}
-        attachmentError={attachment.attachmentError}
-        onAttachImageFile={attachImageFile}
-        onRemovePendingImage={attachment.removeAt}
-        onClearAllPendingImages={attachment.clear}
-        sessionStatus={sessionState?.status ?? null}
-        slashCommands={slashCommands}
-      />
+      <div className="flex min-h-0 flex-1 flex-row">
+        <ChatPanel
+          messages={messages}
+          streamingMessageId={streamingMessageId}
+          draft={draft}
+          onDraftChange={setDraft}
+          onSubmit={submit}
+          inputRef={inputRef}
+          disabled={inputDisabled}
+          pendingImages={attachment.pendingImages}
+          attachmentError={attachment.attachmentError}
+          onAttachImageFile={attachImageFile}
+          onRemovePendingImage={attachment.removeAt}
+          onClearAllPendingImages={attachment.clear}
+          sessionStatus={sessionState?.status ?? null}
+          slashCommands={slashCommands}
+        />
+        <ObservabilityPane state={observability} />
+      </div>
       <HotkeyToast />
     </div>
   )
@@ -584,9 +568,7 @@ const SessionChrome = memo(
             <StatusBar
               connection={connection}
               sessionStatus={sessionState?.status ?? null}
-              {...(canRestartDaemon
-                ? { onRestartDaemon: restartDaemonViaTauri }
-                : {})}
+              {...(canRestartDaemon ? { onRestartDaemon: restartDaemonViaTauri } : {})}
             />
           </div>
         </header>
@@ -600,14 +582,10 @@ interface HotkeySendPayload {
   readonly triggeredAtMs: number
 }
 
-const isHotkeySendPayload = (
-  value: unknown,
-): value is HotkeySendPayload => {
+const isHotkeySendPayload = (value: unknown): value is HotkeySendPayload => {
   if (value === null || typeof value !== "object") return false
   const obj = value as Record<string, unknown>
-  return (
-    obj.kind === "quanta:hotkey-send" && typeof obj.triggeredAtMs === "number"
-  )
+  return obj.kind === "quanta:hotkey-send" && typeof obj.triggeredAtMs === "number"
 }
 
 interface HotkeyCapturePayload {
@@ -615,15 +593,10 @@ interface HotkeyCapturePayload {
   readonly text: string
 }
 
-const isHotkeyCapturePayload = (
-  value: unknown,
-): value is HotkeyCapturePayload => {
+const isHotkeyCapturePayload = (value: unknown): value is HotkeyCapturePayload => {
   if (value === null || typeof value !== "object") return false
   const obj = value as Record<string, unknown>
-  return (
-    obj.kind === "quanta:hotkey-capture" &&
-    typeof obj.text === "string"
-  )
+  return obj.kind === "quanta:hotkey-capture" && typeof obj.text === "string"
 }
 
 type TauriInvoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>
@@ -650,9 +623,7 @@ const restartDaemonViaTauri = async (): Promise<void> => {
   await invoke("restart_daemon")
 }
 
-const resolveTauriDaemonInfo = async (
-  invoke: TauriInvoke,
-): Promise<DaemonInfoPayload> => {
+const resolveTauriDaemonInfo = async (invoke: TauriInvoke): Promise<DaemonInfoPayload> => {
   let lastError: unknown = null
   let startAttempted = false
 

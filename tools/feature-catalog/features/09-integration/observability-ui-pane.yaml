@@ -1,0 +1,88 @@
+id: observability-ui-pane
+title: Observability UI pane (Running / Waiting / Completed + Objective + Approvals)
+section: 9
+subsystem: Observability UI (ADR-0408)
+order: 406
+maturity: L3
+status: new
+ui_surfaces: [web, tauri]
+monitoring: n-a
+modes: [interactive, daemon, ide]
+configurable: integrated
+config_refs:
+  env: [QUANTA_OBSERVABILITY]
+owners: ["@songmin"]
+labels: ["surface:web"]
+depends_on: [run-ledger, objective-first-class, approval-state-machine]
+purpose: |
+  Render the three Wave-1/2 long-running-work state machines (RunLedger /
+  Objective / Approval state machine) in a SEPARATE pane alongside the chat
+  so the operator sees Running / Waiting / Completed + the per-thread
+  Objective + Pending Approvals at a glance — the structural UX gap vs
+  Codex/Claude that the user called out.
+
+  Two new WS messages (`observability.snapshot` + `observability.delta`)
+  ride the existing daemon transport. The emitter polls the three closed
+  ports on a 250ms cadence, diffs structurally (the stores return freshly
+  frozen copies — reference equality would flood the wire), and emits only
+  the axes that changed. Hostile ports (throwing `list`/`get`/`pending`)
+  are caught per-axis; the previous captured value is retained.
+
+  Default-OFF: the emitter ticks only when `QUANTA_OBSERVABILITY=on` AND
+  ports are injected. With no frames received the pane renders empty
+  placeholders so the env-OFF path is byte-identical. Slice fence: the
+  protocol module imports TYPES ONLY from the three @/agent/* port
+  barrels; the emitter imports those + the protocol codec; the frontend
+  never imports @/agent/* runtime. No modification to src/agent/*,
+  src/apps/agent/*, src/runner/*, src/host/*, or apps/tauri-shell/*.
+evidence:
+  code:
+    - src/protocol/observability/index.ts
+    - src/protocol/observability/messages.ts
+    - src/apps/web-daemon/observability-emitter.ts
+    - src/apps/web-daemon/index.ts
+    - apps/web-frontend/src/ws/observability-hooks.ts
+    - apps/web-frontend/src/components/ObservabilityPane.tsx
+    - apps/web-frontend/src/types/protocol.ts
+    - apps/web-frontend/src/App.tsx
+  adrs: [406]
+  tests:
+    unit:
+      - tests/unit/observability-protocol-hellgate.test.ts
+      - tests/unit/observability-emitter-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_OBSERVABILITY
+    default: 'off'
+    purpose: 'When "on" the web daemon initialises the observability emitter scaffold; ticks happen only when ports are also injected by the composition root.'
+deliberate_hold:
+  reason: |
+    Live wiring of the three ports (ObjectivePort / RunLedgerPort /
+    ApprovalStateMachinePort) through `runtimeFactory` is intentionally
+    deferred to a follow-up wave — the composition root currently does not
+    expose them via `RuntimeFacade`, and the ADR's hard-fence forbids
+    modifying src/agent/* or src/sdk/runtime in this wave. The emitter
+    scaffold is wired and the env knob is real today; the no-port path is
+    designed to stay silent so this is a zero-risk staging move.
+  promotion_path: |
+    Follow-up wave exposes the three ports on RuntimeFacade and wires the
+    daemon to construct the emitter with `{ws, objective, runLedger,
+    approvalSM}`; the env knob then drives live ticking. No protocol
+    changes needed — the shape pinned in this ADR is the target shape.
+notes: |
+  Two new WS messages (`observability.snapshot` + `observability.delta`),
+  one daemon-side emitter, one React hook + reducer, one pane component.
+  Protocol slice imports types only; emitter slice imports the three port
+  type barrels + the protocol codec; frontend slice maintains the
+  long-standing copy-not-import pattern for protocol types (the frontend
+  tsconfig is independent from the bun project's paths).
+
+  Hellgate counts: protocol 24 cases / 47 expects, emitter 21 cases / 41
+  expects, total 45 / 88 / 0 fail. The frontend reducer + pane component
+  are NOT TDD'd in this wave (UI dynamics live behind the wire and need
+  a browser; E2E follow-up will cover that).
+
+  Negative invariants pinned in the ADR: not a tool surface, not a
+  polling-from-the-frontend surface (diff lives in the daemon), not
+  wired into src/agent/*, not a transcript replacement.

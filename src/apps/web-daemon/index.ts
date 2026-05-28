@@ -20,6 +20,7 @@
  * sidecar binaries independent of `import.meta.main` quirks.
  */
 
+import { createObservabilityEmitter } from "./observability-emitter"
 import { startWebDaemon } from "./server"
 import type { WebDaemonConfig, WebDaemonHandle } from "./types"
 
@@ -54,8 +55,7 @@ const parseAuthToken = (raw: string | undefined): string | undefined => {
  */
 export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDaemonHandle> => {
   const runtimeFactory =
-    overrides?.runtimeFactory ??
-    (await import("./runtime-factory")).buildProductionRuntimeFactory()
+    overrides?.runtimeFactory ?? (await import("./runtime-factory")).buildProductionRuntimeFactory()
   const config: WebDaemonConfig = {
     port: overrides?.port ?? parsePort(process.env.QUANTA_WEB_PORT),
     bind: overrides?.bind ?? parseBind(process.env.QUANTA_WEB_BIND),
@@ -85,6 +85,16 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
     handle = await startWebDaemon({ ...config, port: 0 })
   }
   process.stderr.write(`web-daemon: listening on ${handle.hostname}:${handle.port}\n`)
+
+  // ADR-0406 — observability emitter (Running/Waiting/Completed + Objective +
+  // Approvals pane on the frontend). Default-OFF: the emitter only ticks when
+  // `QUANTA_OBSERVABILITY=on` AND ports are injected by the composition root.
+  // Wiring the runtime-side ports is a follow-up; here we initialise the
+  // scaffold so the env knob is real today and the no-port path stays silent.
+  if (process.env.QUANTA_OBSERVABILITY === "on") {
+    createObservabilityEmitter({})
+    process.stderr.write("web-daemon: observability emitter scaffold ready\n")
+  }
 
   const shutdown = async (sig: NodeJS.Signals): Promise<void> => {
     try {
