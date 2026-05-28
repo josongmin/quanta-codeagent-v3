@@ -173,7 +173,7 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
   // ADR-0136 — budget_status tool (default-OFF: empty array when budgetLedger absent)
   extraTools.push(...buildBudgetBlock(config))
 
-  // ADR-0404 — check_secrets LLM tool (default-OFF: env-gated on
+  // ADR-0412 — check_secrets LLM tool (default-OFF: env-gated on
   // QUANTA_SECRET_CHECK_TOOL=on; legacy callers byte-identical).
   extraTools.push(...buildCheckSecretsBlock())
 

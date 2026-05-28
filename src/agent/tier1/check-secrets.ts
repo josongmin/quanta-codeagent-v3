@@ -1,5 +1,5 @@
 /**
- * Tier-1 per-subsystem builder: CHECK_SECRETS block (ADR-0404).
+ * Tier-1 per-subsystem builder: CHECK_SECRETS block (ADR-0412).
  *
  * Returns `[checkSecretsTool]` when the env knob `QUANTA_SECRET_CHECK_TOOL`
  * is set to the canonical string `"on"`; `[]` otherwise (DEFAULT-OFF —

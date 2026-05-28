@@ -1,5 +1,5 @@
 /**
- * ★ CONTRACT — ADR-0404 `check_secrets` LLM-facing tool over the async
+ * ★ CONTRACT — ADR-0412 `check_secrets` LLM-facing tool over the async
  *   `compositeSecretScanner`. The tool is registered ONLY when the env knob
  *   `QUANTA_SECRET_CHECK_TOOL` equals exactly `"on"`; every other value
  *   (absent / `"1"` / `"true"` / `"yes"` / `"off"` / empty) ⇒ NOT registered

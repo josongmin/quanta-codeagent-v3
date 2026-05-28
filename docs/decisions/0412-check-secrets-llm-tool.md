@@ -1,4 +1,4 @@
-# ADR-0404 — `check_secrets` LLM-facing tool over async secret-detection
+# ADR-0412 — `check_secrets` LLM-facing tool over async secret-detection
 
 **Status:** Accepted (2026-05-28)
 **Slice:** new `src/tool/check_secrets.ts` (leaf tool) + new `src/agent/tier1/check-secrets.ts` (env-gated tier-1 builder) + 1-line wires in `src/agent/tier1/index.ts` and `src/agent/features.ts` + hellgate `tests/unit/check-secrets-tool-hellgate.test.ts`.

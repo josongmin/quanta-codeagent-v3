@@ -1,5 +1,5 @@
 /**
- * `check_secrets` tool (ADR-0404).
+ * `check_secrets` tool (ADR-0412).
  *
  * LLM-facing surface over the async `compositeSecretScanner` from
  * `@/security/secret-detection`. The model invokes this tool when it needs a
