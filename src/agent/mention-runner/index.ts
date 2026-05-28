@@ -11,14 +11,21 @@
  * the AgentConfig wire-up ADR (ADR-0327) lands.
  *
  * Closed surface:
- *   - `createSkillOnlyResolver(skills?)` — `MentionResolverPort` impl.
- *   - `createMentionInjector(cfg)`       — composes parser+resolver+builder
- *                                          into the per-turn injector function.
- *   - `SkillRegistryReadOnly`            — read-only registry port type
- *                                          (structurally compatible with
- *                                          `@/skill/registry-readonly`).
+ *   - `createSkillOnlyResolver(skills?)`     — `MentionResolverPort` impl.
+ *   - `createMentionInjector(cfg)`           — composes parser+resolver+builder
+ *                                              into the per-turn injector fn.
+ *   - `buildDefaultMentionResolver(opts)`    — ADR-0422 DRY composite builder
+ *                                              (env knobs → file/symbol/skill).
+ *   - `SkillRegistryReadOnly`                — read-only registry port type
+ *                                              (structurally compatible with
+ *                                              `@/skill/registry-readonly`).
  */
 
+export type {
+  BuildDefaultMentionResolverOptions,
+  MentionEnv,
+} from "./default-resolver"
+export { buildDefaultMentionResolver } from "./default-resolver"
 export { createMentionInjector } from "./runner"
 export { createSkillOnlyResolver } from "./skill-resolver"
 export type { MentionRunnerConfig, SkillRegistryReadOnly } from "./types"
