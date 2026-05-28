@@ -31,6 +31,7 @@
  */
 
 import type { MentionResolverPort } from "@/agent/mention-injection"
+import { logger } from "@/shared"
 import type { SkillRegistryReadOnly } from "./types"
 
 /**
@@ -70,7 +71,8 @@ const safeLookup = (
     // Sanitize at the boundary — registry could be untyped.
     if (typeof entry.description !== "string") return null
     return { name: entry.name, description: entry.description }
-  } catch {
+  } catch (e) {
+    logger.warn(`mention.skill-resolver: ${(e as Error).message}`)
     return null
   }
 }

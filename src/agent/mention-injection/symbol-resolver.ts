@@ -29,6 +29,7 @@
  * map onto `priority` / `timeoutMs` at the wire.
  */
 
+import { logger } from "@/shared"
 import type { MentionResolverResult } from "./resolver"
 
 /** A single symbol match — minimal envelope so adapters (LSP, semantic
@@ -110,7 +111,8 @@ const withTimeout = async <T>(
     const winner = await Promise.race([p, timeoutP])
     if (timer !== undefined) clearTimeout(timer)
     return winner
-  } catch {
+  } catch (e) {
+    logger.warn(`mention.symbol-resolver.withTimeout: ${(e as Error).message}`)
     if (timer !== undefined) clearTimeout(timer)
     return null
   }
@@ -146,7 +148,8 @@ const safeLookup = async (
     const hits = await withTimeout(inner, timeoutMs, ac.signal)
     if (hits === null || !Array.isArray(hits)) return null
     return hits
-  } catch {
+  } catch (e) {
+    logger.warn(`mention.symbol-resolver.safeLookup: ${(e as Error).message}`)
     return null
   } finally {
     ac.abort()

@@ -27,6 +27,7 @@
  * response cannot balloon the prompt; the resolver also caps at render time.
  */
 
+import { logger } from "@/shared"
 import type { LspNavProvider, NavSymbolInfo } from "@/tool"
 import type { SymbolHit, SymbolLookupLspPort } from "./symbol-resolver"
 
@@ -81,7 +82,8 @@ const lookupVia = async (
     const infos = await session.workspaceSymbol(name)
     if (infos === null || !Array.isArray(infos) || infos.length === 0) return null
     return infos.slice(0, cap).map(toHit)
-  } catch {
+  } catch (e) {
+    logger.warn(`mention.symbol-lookup-lsp: ${(e as Error).message}`)
     return null
   } finally {
     if (session !== null) await session.stop().catch(() => undefined)

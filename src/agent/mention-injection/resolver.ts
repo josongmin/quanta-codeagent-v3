@@ -27,6 +27,7 @@
  * `file-resolver.ts` / `symbol-resolver.ts`.
  */
 
+import { logger } from "@/shared"
 import type { InjectionFragment, MentionKind, ParsedMention } from "./types"
 
 /**
@@ -78,7 +79,8 @@ const safeCall = async (
     const v = await fn(target)
     if (v === null || v === undefined) return null
     return v
-  } catch {
+  } catch (e) {
+    logger.warn(`mention.resolver: ${(e as Error).message}`)
     return null
   }
 }

@@ -27,6 +27,7 @@
  */
 
 import type { SkillActivationEvent, TypedHistoryEventStore } from "@/memory/typed-event"
+import { logger } from "@/shared"
 import type { InjectionFragment } from "./types"
 
 /** Build the `skill_activation` event for a single skill fragment. The
@@ -52,7 +53,8 @@ const safeAppend = (store: TypedHistoryEventStore, event: SkillActivationEvent):
   if (typeof store.append !== "function") return
   try {
     store.append(event)
-  } catch {
+  } catch (e) {
+    logger.warn(`mention.event-emitter: ${(e as Error).message}`)
     /* swallow — side-channel, never crash the turn */
   }
 }
