@@ -38,6 +38,7 @@ import { defaultFocusChainTracker, type FocusChainPort } from "@/agent/focus-cha
 import type { ForkSessionPort } from "@/agent/fork-session"
 import { defaultCheckpointBaseWire } from "@/agent/fork-session-wire"
 import { defaultIdentityProvider, type IdentityMode } from "@/agent/identity"
+import { type ObservabilityWireHandle, wireObservability } from "@/agent/observability-wire"
 import {
   fsBackedStickyModelStore,
   inMemoryStickyModelStore,
@@ -345,6 +346,32 @@ const resolveForkSession = (
   }
 }
 
+/**
+ * ADR-0404 — composition-root observability wire. Returns the wire handle
+ * (with 4 ports + idempotent NO-THROW detach) when `QUANTA_OBSERVABILITY ===
+ * "on"`; otherwise the noop handle (no port instances; no hook subscription).
+ *
+ * The helper is intentionally env-projecting (single canonical knob, strict
+ * "on") so the wire itself stays env-agnostic. `hookBus` is omitted today —
+ * AgentConfig has no first-class HookBus slot; a follow-up slice can adapt
+ * the host's bus and pass it through. Until then, attribution is silently
+ * SKIPPED while the 4 ports are still populated (objective + shadowVerify
+ * slots are consumed by the existing wave-2 helpers; runLedger /
+ * approvalStateMachine ride the wire handle for future consumers).
+ *
+ * Default-OFF byte-identical: `QUANTA_OBSERVABILITY !== "on"` ⇒ noop handle
+ * ⇒ both conditional spreads below see `undefined` ⇒ slots OMITTED ⇒
+ * AgentConfig is byte-identical to the legacy path (RFC §1.2).
+ */
+const resolveObservabilityWire = (env: NodeJS.ProcessEnv): ObservabilityWireHandle =>
+  wireObservability({
+    enabled: env.QUANTA_OBSERVABILITY === "on",
+    repoRoot: process.cwd(),
+    // hookBus omitted — AgentConfig has no first-class HookBus seam today.
+    // A follow-up slice can adapt the surface's HookBus via the duck-typed
+    // `ObservabilityHookBus` surface re-exported on the slice barrel.
+  })
+
 /** ADR-0279 — composition-root automation slot. Returns `null` when
  *  `QUANTA_AUTOMATION !== "on"` (slot OMITTED; byte-identical legacy).
  *  When the env gate is on, constructs an `AutomationEngineSlot` over an
@@ -460,6 +487,10 @@ export const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["b
   // spawn wrapper; both reads share `resolveSandboxProfileFromEnv` so
   // they agree.
   const sandboxProfile = resolveSandboxProfileFromEnv(env)
+  // ADR-0404 — composition-root observability wire. Single invocation per
+  // surface entry (default-OFF: `QUANTA_OBSERVABILITY !== "on"` ⇒ noop handle,
+  // every spread below sees undefined ⇒ AgentConfig byte-identical legacy).
+  const observabilityWire = resolveObservabilityWire(env)
   // ADR-0236 — `--no-auto-background`: future hosts that wire `autoBackground`
   // by default can call `resolveAutoBackgroundOverride(p.noAutoBackground)` to
   // hard-force the slot OFF. Today no host defaults it on, so the flag has no
@@ -497,6 +528,15 @@ export const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["b
     // ADR-0279 — spread the automation slot conditionally (default-OFF;
     // `exactOptionalPropertyTypes` — no `undefined` literal on the config).
     ...(automationSlot !== null ? { automationEngine: automationSlot } : {}),
+    // ADR-0404 — composition-root observability wire. Default-OFF: when
+    // `QUANTA_OBSERVABILITY !== "on"` the handle is the shared NOOP_HANDLE
+    // (both fields undefined ⇒ slots OMITTED ⇒ byte-identical legacy).
+    ...(observabilityWire.objective !== undefined
+      ? { objective: observabilityWire.objective }
+      : {}),
+    ...(observabilityWire.shadowVerify !== undefined
+      ? { shadowVerify: observabilityWire.shadowVerify }
+      : {}),
   }
 
   attachExecutionPlaneSlots(base, p)

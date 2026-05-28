@@ -1,0 +1,105 @@
+id: observability-wire
+title: ADR-0406 Composition-root observability wire (Objective + RunLedger + ApprovalSM + ShadowVerify)
+section: 9
+subsystem: Long-running work observability (ADR-0394/0395/0396/0400/0401/0403 closeout)
+order: 404
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [interactive, headless, batch, daemon, ide]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "default-off"]
+depends_on:
+  - objective-first-class
+  - run-ledger
+  - run-ledger-attribution
+  - approval-state-machine
+  - shadow-verify
+  - shadow-verify-adapters
+purpose: |
+  Wave-1 + Wave-2 shipped four pure typed observability ports — `Objective`
+  (ADR-0394), `RunLedger` (ADR-0395), `ApprovalStateMachine` (ADR-0403), and
+  `ShadowVerify` (ADR-0396/0400) — plus the `run-ledger-attribution` hook
+  subscriber (ADR-0401). All five are SEALED slices with zero composition-
+  time consumers; `AgentConfig.objective` / `AgentConfig.shadowVerify` were
+  populated by NOBODY at runtime, so every downstream consumer no-oped.
+
+  This slice closes the seam with a single helper:
+  `wireObservability(opts) → ObservabilityWireHandle`. The helper:
+    1. Instantiates the four ports ONCE per host (each factory is failure-
+       isolated — a throw on one degrades that slot to undefined and leaves
+       the other three populated).
+    2. Cross-wires `approvalStateMachine` over `objective + runLedger` so
+       HITL pauses attribute into both sibling stores.
+    3. Subscribes `createRunLedgerHookSubscriber({ledger})` to the host's
+       `post_tool_use` hook bus via a DUCK-TYPED `ObservabilityHookBus`
+       surface (the slice never imports `@/agent/hooks` — slice fence).
+    4. Returns an idempotent NO-THROW `detach()` that unsubscribes the
+       hook handler. Safe to call any number of times, NO-THROWs even if
+       the host's unsubscribe callback throws.
+
+  Default-OFF (RFC §1.2): `opts.enabled !== true` ⇒ noop handle. ZERO port
+  instances allocated. ZERO hook subscriptions. Composition root reads
+  `process.env.QUANTA_OBSERVABILITY === "on"` to flip the gate.
+
+  Slice fence: imports only `@/agent/objective`, `@/agent/run-ledger`,
+  `@/agent/run-ledger-attribution`, `@/agent/approval-state-machine`,
+  `@/agent/shadow-verify`, `@/agent/shadow-verify-adapters`. NEVER touches
+  `@/agent/loop`, `@/agent/dispatch`, `@/agent/prompt`, or `@/agent/hooks`.
+evidence:
+  code:
+    - src/agent/observability-wire/types.ts
+    - src/agent/observability-wire/wire.ts
+    - src/agent/observability-wire/index.ts
+    - src/apps/agent/index.ts
+  adrs:
+    - docs/decisions/0406-composition-root-observability-wire.md
+    - 394
+    - 395
+    - 396
+    - 400
+    - 401
+    - 403
+  tests:
+    unit:
+      - tests/unit/observability-wire-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_OBSERVABILITY
+    default: 'off'
+    purpose: 'observability ports wire ON (composition-root gate, strict "on")'
+config_refs:
+  env: [QUANTA_OBSERVABILITY]
+deliberate_hold:
+  reason: |
+    `ObservabilityHookBus` adapter is not wired into the composition root
+    yet — AgentConfig has no first-class HookBus slot at the surface entry,
+    so attribution is silently skipped when the gate is on. The four ports
+    still wire (Objective + ShadowVerify on AgentConfig slots; RunLedger +
+    ApprovalSM live on the wire handle for future consumers).
+  promotion_path: |
+    Follow-up slice threads the surface's `HookBus` into `wireObservability`
+    via a tiny adapter (~10 LOC):
+        wireObservability({
+          enabled: env.QUANTA_OBSERVABILITY === "on",
+          repoRoot: process.cwd(),
+          hookBus: {
+            subscribe: (event, handler) => {
+              bus.on(event, handler as never)
+              return () => undefined
+            },
+          },
+        })
+    Once landed, `post_tool_use` events drive ledger start/touch/settle.
+notes: |
+  Closeout wire for the wave-1/2 observability ADR cluster — the four sealed
+  ports finally have a single composition-root home. Surface diff is < 25
+  lines (one import block + one helper + one invocation + two spreads). The
+  wire helper is a leaf module: zero peer-slice imports beyond the five
+  observability slices it stitches together. 21 hellgate cases / 75 expects
+  pin the contract (default-OFF noop, full-wire happy path, partial inputs,
+  detach idempotency + NO-THROW, factory failure isolation, double-wire
+  isolation, malformed hook event tolerance).
