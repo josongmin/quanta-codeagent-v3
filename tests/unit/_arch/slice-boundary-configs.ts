@@ -201,7 +201,7 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
       "@/lsp",
       "@/stream",
     ],
-    envAllowFiles: ["client.ts", "isolated-client.ts"],
+    envAllowFiles: ["client.ts", "isolated-client.ts", "stdio.ts"],
     requireSliceBarrel: true,
   },
   rules: {

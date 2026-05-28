@@ -9,7 +9,7 @@ export {
   fullNegotiator,
   type McpCapabilityRecord,
 } from "./capabilities"
-export { McpClient, McpError } from "./client"
+export { McpClient, type McpClientTransport, McpError } from "./client"
 export {
   type CliPrompterIO,
   cliPrompter,
@@ -31,4 +31,21 @@ export {
   type TaskState,
   TERMINAL_TASK_STATES,
 } from "./tasks"
+export {
+  type HttpFetchFn,
+  type HttpFetchResponse,
+  HttpSseMcpTransport,
+  type HttpSseTransportOpts,
+} from "./transports/http-sse"
+export type {
+  McpTransport,
+  McpTransportExitHandler,
+  McpTransportMessageHandler,
+  McpTransportPayload,
+} from "./transports/port"
+export {
+  StdioMcpTransport,
+  type StdioSpawnFn,
+  type StdioTransportOpts,
+} from "./transports/stdio"
 export type { McpCallResult, McpServerConfig, McpToolDef } from "./types"

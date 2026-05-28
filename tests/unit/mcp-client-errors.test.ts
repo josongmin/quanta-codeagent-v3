@@ -17,20 +17,39 @@
  * pure API contract check on the McpClient class.
  */
 import { describe, expect, test } from "bun:test"
-import { McpClient, McpError } from "@/mcp"
+import { McpClient, McpError, StdioMcpTransport } from "@/mcp"
+
+/** Build a `StdioMcpTransport` whose spawn yields a process with the given
+ *  `stdin` (or none). The transport is the post-ADR-0391 seam that owns the
+ *  stdin-write path; installing it lets us pin the same fail-closed write
+ *  contracts that previously lived inline in `client.ts`. */
+const probeStdioTransport = (
+  name: string,
+  stdin: { write: (chunk: unknown) => unknown } | undefined,
+): StdioMcpTransport => {
+  const fakeProc = stdin ? { stdin } : {}
+  const transport = new StdioMcpTransport(
+    { name, command: ["/bin/false"] },
+    // biome-ignore lint/suspicious/noExplicitAny: deliberate fake proc for the write-path probe.
+    { spawn: () => fakeProc as any },
+  )
+  // Mark the transport "started" by seeding its private proc (no real spawn).
+  ;(transport as unknown as { proc: unknown }).proc = fakeProc
+  return transport
+}
 
 class TransportProbeMcpClient extends McpClient {
-  installTransport(stdin: { write: (chunk: string) => unknown } | undefined): void {
+  installTransport(stdin: { write: (chunk: unknown) => unknown } | undefined): void {
     const self = this as unknown as {
       started: boolean
       stopped: boolean
       exited: boolean
-      proc: { stdin?: { write: (chunk: string) => unknown } } | null
+      transport: StdioMcpTransport
     }
     self.started = true
     self.stopped = false
     self.exited = false
-    self.proc = stdin ? { stdin } : {}
+    self.transport = probeStdioTransport("probe", stdin)
   }
 
   pendingCount(): number {

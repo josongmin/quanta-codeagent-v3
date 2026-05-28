@@ -1,7 +1,9 @@
-import type { Subprocess } from "bun"
-import { logger, QuantaError } from "@/shared"
+import { QuantaError } from "@/shared"
 import { type CapabilityNegotiator, defaultNegotiator } from "./capabilities"
-import { encodeMessage, isResponse, type JsonRpcMessage, LineReader } from "./jsonrpc"
+import { isResponse, type JsonRpcMessage } from "./jsonrpc"
+import { HttpSseMcpTransport } from "./transports/http-sse"
+import type { McpTransport } from "./transports/port"
+import { StdioMcpTransport } from "./transports/stdio"
 import type { McpCallResult, McpServerConfig, McpToolDef } from "./types"
 
 const PROTOCOL_VERSION = "2025-06-18"
@@ -71,62 +73,83 @@ const capResultText = (text: string): string => {
   return `${text.slice(0, MAX_RESULT_CHARS)}\n[truncated: ${omitted} bytes omitted]`
 }
 
-/** Build the spawn env. The full parent env is intentionally NOT inherited so
- *  host secrets never reach an arbitrary server; only PATH is kept so the
- *  command resolves, plus anything the config explicitly opted in. */
-const buildEnv = (configEnv?: Record<string, string>): Record<string, string> => {
-  const base: Record<string, string> = {}
-  const path = process.env.PATH
-  if (path !== undefined) base.PATH = path
-  return configEnv === undefined ? base : { ...base, ...configEnv }
+/** How to construct the carrier for a {@link McpClient}. Omitting it (the
+ *  default) selects the stdio transport, which is byte-identical to every
+ *  pre-ADR-0391 deployment. A function lets callers fully control construction
+ *  (e.g. an HTTP transport, or a test double); an explicit `McpTransport`
+ *  instance is also accepted. */
+export type McpClientTransport = McpTransport | ((config: McpServerConfig) => McpTransport)
+
+/** Build the default transport for a config. Stdio is the default carrier; the
+ *  HTTP-SSE carrier is selected only when the config carries a `url` (an
+ *  explicit opt-in), preserving stdio byte-identity for every command-based
+ *  server. */
+const defaultTransportFor = (config: McpServerConfig): McpTransport => {
+  if (config.url !== undefined && config.url !== "") {
+    return new HttpSseMcpTransport({
+      url: config.url,
+      name: config.name,
+      ...(config.headers !== undefined ? { headers: config.headers } : {}),
+    })
+  }
+  return new StdioMcpTransport(config)
 }
 
-/** A real MCP client speaking newline-delimited JSON-RPC 2.0 over stdio.
+/** A real MCP client speaking newline-delimited JSON-RPC 2.0 over a pluggable
+ *  {@link McpTransport} (default: stdio).
  *
- *  Lifecycle: spawn → `initialize` → `notifications/initialized` → ready →
- *  `tools/list` / `tools/call` → `stop()`. Requests are correlated by an
- *  incrementing id with a per-request timeout; every pending request is
- *  rejected if the process exits, so there are never leaked timers or
- *  unhandled rejections. `stop()` is idempotent. */
+ *  Lifecycle: transport.start → `initialize` → `notifications/initialized` →
+ *  ready → `tools/list` / `tools/call` → `stop()`. Requests are correlated by
+ *  an incrementing id with a per-request timeout; every pending request is
+ *  rejected if the transport exits, so there are never leaked timers or
+ *  unhandled rejections. `stop()` is idempotent.
+ *
+ *  The request/dispatch/pending/timeout *core* is transport-agnostic: it only
+ *  ever calls `transport.send` and consumes decoded messages via
+ *  `transport.onMessage`. */
 export class McpClient {
   private readonly config: McpServerConfig
   private readonly requestTimeoutMs: number
   private readonly negotiator: CapabilityNegotiator
+  private readonly transport: McpTransport
 
-  private proc: Subprocess<"pipe", "pipe", "pipe"> | null = null
-  private readonly reader = new LineReader()
   private nextId = 1
   private readonly pending = new Map<number, PendingRequest>()
-  private readPump: Promise<void> | null = null
   private started = false
   private stopped = false
   private exited = false
+  private unsubscribeMessage: (() => void) | null = null
+  private unsubscribeExit: (() => void) | null = null
 
   /** `negotiator` is OPTIONAL (ADR-0196): omitting it preserves the
    *  pre-ADR behavior (`capabilities: {}`) — byte-identical for every
    *  existing caller. The composition root injects `fullNegotiator()` when
-   *  `QUANTA_MCP_CAPS=full` is set. */
-  constructor(config: McpServerConfig, opts?: { negotiator?: CapabilityNegotiator }) {
+   *  `QUANTA_MCP_CAPS=full` is set.
+   *
+   *  `transport` is OPTIONAL (ADR-0391): omitting it selects stdio (or HTTP-SSE
+   *  if the config carries a `url`) — byte-identical to the pre-port client for
+   *  every command-based server. */
+  constructor(
+    config: McpServerConfig,
+    opts?: { negotiator?: CapabilityNegotiator; transport?: McpClientTransport },
+  ) {
     this.config = config
     this.requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS
     this.negotiator = opts?.negotiator ?? defaultNegotiator
+    const t = opts?.transport
+    this.transport =
+      t === undefined ? defaultTransportFor(config) : typeof t === "function" ? t(config) : t
   }
 
   async start(): Promise<void> {
     if (this.started) return
     this.started = true
-    if (this.config.command.length === 0) {
+    if (this.config.command.length === 0 && (this.config.url ?? "") === "") {
       throw new McpError(`mcp server "${this.config.name}" has empty command`)
     }
-    this.proc = Bun.spawn(this.config.command, {
-      cwd: this.config.cwd ?? process.cwd(),
-      env: buildEnv(this.config.env),
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    this.readPump = this.pumpStdout()
-    this.watchExit()
+    this.unsubscribeMessage = this.transport.onMessage((msg) => this.dispatch(msg))
+    this.unsubscribeExit = this.transport.onExit(() => this.onTransportExit())
+    await this.transport.start()
 
     await this.request("initialize", {
       protocolVersion: PROTOCOL_VERSION,
@@ -175,28 +198,18 @@ export class McpClient {
   async stop(): Promise<void> {
     if (this.stopped) return
     this.stopped = true
-    const proc = this.proc
-    if (!proc) return
     this.failAllPending(new McpError(`mcp server "${this.config.name}" stopped`))
-    try {
-      proc.stdin?.end()
-    } catch {
-      // stdin may already be closed
-    }
-    try {
-      proc.kill()
-    } catch {
-      // process may have already exited
-    }
-    await proc.exited.catch(() => undefined)
-    await this.readPump?.catch(() => undefined)
-    this.proc = null
+    this.unsubscribeMessage?.()
+    this.unsubscribeMessage = null
+    await this.transport.close()
+    this.unsubscribeExit?.()
+    this.unsubscribeExit = null
   }
 
   // --- internals -----------------------------------------------------------
 
   private ensureReady(): void {
-    if (!this.started || this.stopped || !this.proc) {
+    if (!this.started || this.stopped || this.exited) {
       throw new McpError(`mcp server "${this.config.name}" is not running`)
     }
   }
@@ -226,33 +239,13 @@ export class McpClient {
     this.send({ jsonrpc: "2.0", method, params })
   }
 
+  /** Hand a payload to the transport. A transport-level enqueue failure is
+   *  wrapped as an {@link McpError} so callers branch on a stable type; the
+   *  transport never throws here (it returns the error). */
   private send(payload: unknown): Error | null {
-    const stdin = this.proc?.stdin
-    if (!stdin) {
-      const err = new McpError(`mcp server "${this.config.name}" transport unavailable: stdin closed`)
-      logger.warn("mcp: failed to write to server stdin", { error: err.message })
-      return err
-    }
-    try {
-      stdin.write(encodeMessage(payload))
-      return null
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      logger.warn("mcp: failed to write to server stdin", { error: msg })
-      return new McpError(`mcp server "${this.config.name}" transport write failed: ${msg}`)
-    }
-  }
-
-  private async pumpStdout(): Promise<void> {
-    const stdout = this.proc?.stdout
-    if (!stdout) return
-    try {
-      for await (const chunk of stdout) {
-        for (const msg of this.reader.push(chunk)) this.dispatch(msg)
-      }
-    } catch (e) {
-      logger.debug("mcp: stdout pump ended", { error: String(e) })
-    }
+    const err = this.transport.send(payload)
+    if (err === null) return null
+    return err instanceof McpError ? err : new McpError(err.message, { cause: err })
   }
 
   private dispatch(msg: JsonRpcMessage): void {
@@ -267,14 +260,9 @@ export class McpClient {
     }
   }
 
-  private watchExit(): void {
-    const proc = this.proc
-    if (!proc) return
-    const onExit = () => {
-      this.exited = true
-      this.failAllPending(new McpError(`mcp server "${this.config.name}" exited`))
-    }
-    proc.exited.then(onExit).catch(onExit)
+  private onTransportExit(): void {
+    this.exited = true
+    this.failAllPending(new McpError(`mcp server "${this.config.name}" exited`))
   }
 
   private failAllPending(reason: Error): void {
