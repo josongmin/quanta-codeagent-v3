@@ -1,8 +1,8 @@
 id: memory-learning-default-on
-title: Memory learning default-ON via session factory (ADR-0414)
+title: Memory learning default-ON via session factory (ADR-0413)
 section: 5
 subsystem: L2 memory bootstrap — single default-ON session factory
-order: 414
+order: 413
 maturity: L4
 status: stable
 ui_surfaces: [cli]
@@ -40,7 +40,7 @@ evidence:
     - src/apps/cli/internal.ts                # buildStore delegation + env doc
     - src/memory/auto-trigger/wire.ts         # auto-trigger slot
     - src/apps/agent/index.ts                 # unified-agent composition
-  adrs: [414]
+  adrs: [413]
   tests:
     unit:
       - tests/unit/memory-factory-hellgate.test.ts
