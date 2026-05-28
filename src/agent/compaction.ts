@@ -1,6 +1,7 @@
 import type { ContentBlock, LLMPort, Message, SystemPromptInput } from "@/llm"
 import { assembleFromEvents } from "@/llm"
 import { runtimeConfig } from "@/shared"
+import type { RecoveryProvenance, RecoveryReason } from "./recovery-reason"
 
 /**
  * Single-tier conversation compaction (RFC §8 Phase 2 / §1.2: one tier, no
@@ -218,6 +219,16 @@ export interface CompactInput {
     messagesToCompact: number
     isFirstCompaction: boolean
   }) => Promise<{ abortReason: string | null }>
+  /** ADR-0409 — `post_compact` emission bridge. Absent ⇒ existing path
+   *  byte-identical. NO-THROW: emitter errors are swallowed. */
+  postCompactEmit?: (provenance: RecoveryProvenance) => void | Promise<void>
+  /** ADR-0409 — threadId for provenance + Objective wire. */
+  threadId?: string
+  /** ADR-0409 — minimal Objective wire (callback, not the full port — keeps
+   *  the slice fence intact). NO-THROW: errors swallowed. */
+  objectiveSetNextActions?: (threadId: string, actions: readonly string[]) => void
+  /** ADR-0409 — explicit reason override (default `"token_budget_exceeded"`). */
+  recoveryReason?: RecoveryReason
 }
 
 export type CompactResult =
@@ -427,5 +438,46 @@ export const compactIfNeeded = async (input: CompactInput): Promise<CompactResul
     content: [{ type: "text", text: `<conversation summary>\n${summary}` }],
   }
   const messages = [synthetic, ...suffix]
-  return { compacted: true, messages, summaryTokens: estimateTokens([synthetic]) }
+  const summaryTokens = estimateTokens([synthetic])
+  // ADR-0409 — post_compact emission + Objective wire. Byte-identical when
+  // neither callback is set. NO-THROW (observability never aborts the turn).
+  await emitPostCompactIfWired(input, prefix.length, suffix.length, currentTokens, messages)
+  return { compacted: true, messages, summaryTokens }
+}
+
+/** ADR-0409 — fire `postCompactEmit` and the Objective wire if either is set.
+ *  Both seams are NO-THROW (any error is swallowed so an emitter glitch never
+ *  aborts the compaction). Kept as a separate helper so `compactIfNeeded`'s
+ *  cognitive complexity stays under the biome cap. */
+const emitPostCompactIfWired = async (
+  input: CompactInput,
+  prefixLen: number,
+  suffixLen: number,
+  tokensBefore: number,
+  messages: Message[],
+): Promise<void> => {
+  if (input.postCompactEmit === undefined && input.objectiveSetNextActions === undefined) return
+  const provenance: RecoveryProvenance = {
+    reason: input.recoveryReason ?? "token_budget_exceeded",
+    tokensBefore,
+    tokensAfter: estimateTokens(messages),
+    turnsDropped: prefixLen,
+    turnsKept: suffixLen,
+    resumeStep: `resume after compaction — kept last ${suffixLen} turn(s), summarized ${prefixLen}`,
+    compactedAt: Date.now(),
+  }
+  try {
+    await input.postCompactEmit?.(provenance)
+  } catch {
+    /* swallowed */
+  }
+  if (input.objectiveSetNextActions !== undefined && input.threadId !== undefined) {
+    try {
+      input.objectiveSetNextActions(input.threadId, [
+        `agent compacted: reason ${provenance.reason} — ${provenance.resumeStep}`,
+      ])
+    } catch {
+      /* swallowed */
+    }
+  }
 }

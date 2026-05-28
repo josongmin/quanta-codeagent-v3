@@ -1,0 +1,79 @@
+id: compaction-visibility
+title: Compaction visibility — RecoveryReason + microcompact + post_compact (ADR-0409)
+section: 9
+subsystem: Agent recovery (ADR-0409)
+order: 27
+maturity: L4
+status: new
+ui_surfaces: [cli, web, tauri]
+monitoring: integrated
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: ["surface:core", "agent:recovery", "default-off"]
+depends_on: [hookbus, agent-objective-port]
+purpose: |
+  Compaction은 그동안 silent internal optimization이었음 — 사용자는 왜 잊었는지,
+  어디서 재개해야 하는지 알 수 없어 신뢰가 깨졌음. ADR-0409은 compaction을
+  USER-VISIBLE RESUME CONTRACT로 승격:
+
+  (1) `RecoveryReason` closed enum (7 arms: token_budget_exceeded / ptl_reactive /
+      drift_breaker / manual / context_change / fork_branch / microcompact) +
+      `RecoveryProvenance` (tokensBefore/After, turnsDropped/Kept, summaryRef,
+      resumeStep, compactedAt) 타이핑.
+
+  (2) `MicroCompactPort` — full reset 대신 oldest N% drop. system 메시지 +
+      마지막 K turn 보존. NO-THROW pure function. dropRatio outside [0,1] clamp.
+      malformed input ⇒ 입력 unchanged + provenance turnsDropped:0.
+
+  (3) `post_compact` hook event variant + `compactIfNeeded`의 optional
+      `postCompactEmit` / `objectiveSetNextActions` / `threadId` /
+      `recoveryReason` 필드. 미주입 시 byte-identical legacy path.
+      compactIfNeeded settle 후 1회 emit, 그리고 (threadId 있을 때)
+      `objective.setNextActions(threadId, ["agent compacted: reason X —
+      resume after compaction — kept last N turn(s), summarized M"])`로
+      surface가 읽을 수 있게 함. emit/objective callback throw ⇒ 삼키고
+      compaction은 성공 (NO-THROW seam).
+
+  Slice fence: recovery-reason은 leaf (zero deps); microcompact은
+  recovery-reason TYPES만 import (no @/llm, no @/agent/loop/dispatch/compaction);
+  compaction.ts는 recovery-reason TYPES만 추가 import (no @/agent/objective —
+  full ObjectivePort 대신 callback closure로 coupling 최소화).
+  Default-OFF / wave-3 sibling 다른 슬라이스 (observability-wire,
+  approval-gate-wire, web-daemon emitter, frontend) mutate 없음.
+  loop.ts 와이어링 (config.objective.setNextActions로 closure 구성 +
+  HookBus.emit("post_compact") subscriber)은 deferred — 이 wave는 contract만.
+evidence:
+  code:
+    - src/agent/recovery-reason/types.ts
+    - src/agent/recovery-reason/index.ts
+    - src/agent/microcompact/types.ts
+    - src/agent/microcompact/compactor.ts
+    - src/agent/microcompact/index.ts
+    - src/agent/hooks.ts
+    - src/agent/compaction.ts
+  adrs: [407]
+  tests:
+    unit:
+      - tests/unit/recovery-reason-hellgate.test.ts
+      - tests/unit/microcompact-hellgate.test.ts
+      - tests/unit/compaction-post-event-hellgate.test.ts
+      - tests/unit/compaction.test.ts
+      - tests/unit/compaction-precompact.test.ts
+      - tests/unit/compaction-archive-loop.test.ts
+      - tests/unit/compaction-breaker-hellgate.test.ts
+      - tests/unit/compaction-summarizer.test.ts
+      - tests/unit/loop-reactive-compaction-emit-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  2026-05-28 ship. 43 신규 hellgate (109 expects) + 57 기존 compaction tests
+  byte-identical (214 expects, 0 regression). tsc 0 / biome 0 errors on
+  슬라이스. Diff: hooks.ts +13/-0; compaction.ts +49/-1 (interface 5 fields +
+  emit helper + 1-line callsite). 다음 wave: loop.ts에서
+  config.objective.setNextActions로 closure 구성 + HookBus.emit("post_compact")
+  subscriber wire-up. microcompact는 future tool/env knob으로 invoke.

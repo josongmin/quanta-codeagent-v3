@@ -1,5 +1,6 @@
 import type { StructuredLogger } from "@/observability"
 import { runtimeConfig } from "@/shared"
+import type { RecoveryProvenance } from "./recovery-reason"
 import { matchTool, type ToolMatcher } from "./tool-matchers"
 
 /**
@@ -144,6 +145,18 @@ export type HookEvent =
       type: "pre_compact"
       messagesToCompact: number
       isFirstCompaction: boolean
+    }
+  // ADR-0409 — NEW. Fired by `compaction.ts` IMMEDIATELY AFTER a successful
+  // compaction (or microcompact) settles. Carries `RecoveryProvenance` so a
+  // subscriber sees WHY the compaction happened + the resume contract
+  // (`resumeStep` is the human-readable "agent compacted: reason X —
+  // resuming at step Y" string the Objective surfaces in nextActions).
+  // Subscriber-less ⇒ existing compaction path byte-identical (the bus
+  // fast-paths the empty-handler-list case).
+  | {
+      type: "post_compact"
+      threadId: string
+      provenance: RecoveryProvenance
     }
   // ADR-0133 — NEW. Fired by `subagent-runner.ts` immediately after the child
   // config has been built and BEFORE the child `runAgent` is invoked.
