@@ -59,7 +59,7 @@ evidence:
     - src/agent/tier1/index.ts
     - src/agent/features.ts
     - src/agent/types.ts
-  adrs: [398]
+  adrs: [402]
   tests:
     unit:
       - tests/unit/objective-tools-hellgate.test.ts
