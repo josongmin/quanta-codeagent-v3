@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import type { EvalRecord, GroundingPayload } from "@/../src/apps/eval/storage"
 import {
   buildGroundingGateResult,
+  buildGroundingRouteMatrixGateResult,
   buildGroundingReport,
   evaluateGroundingGate,
 } from "@/../src/apps/eval/grounding"
@@ -462,5 +463,261 @@ describe("grounding report", () => {
     expect(gate.markdown).toContain("# Grounding Gate")
     expect(gate.markdown).toContain("Status: PASS")
     expect(gate.markdown).toContain("## Failures")
+  })
+
+  test("route matrix gate pins exact execution contract fields and rejects unmatched runs", () => {
+    const rawRunId = "raw-canary"
+    const engineRunId = "engine-canary"
+    const driftRunId = "engine-drift"
+    const records: EvalRecord[] = [
+      record(rawRunId, payload({ caseId: "raw-a", pairId: "pair-1", pairRole: "raw" })),
+      record(
+        rawRunId,
+        payload({
+          caseId: "raw-b",
+          bucket: "summary_equivalence",
+          pairId: "pair-1",
+          pairRole: "summary",
+        }),
+      ),
+      record(
+        rawRunId,
+        payload({
+          caseId: "raw-c",
+          bucket: "must_clarify",
+          gold: {
+            activeThreadId: "prompt_rules",
+            referentId: null,
+            intent: "clarify_request",
+            scope: "current_workstream",
+            shouldClarify: true,
+            confidence: "high",
+          },
+          actual: {
+            activeThreadId: "prompt_rules",
+            referentId: null,
+            intent: "clarify_request",
+            scope: "current_workstream",
+            shouldClarify: true,
+            confidence: "high",
+          },
+        }),
+      ),
+      record(engineRunId, payload({ caseId: "engine-a", pairId: "pair-2", pairRole: "raw" })),
+      record(
+        engineRunId,
+        payload({
+          caseId: "engine-b",
+          bucket: "summary_equivalence",
+          pairId: "pair-2",
+          pairRole: "summary",
+        }),
+      ),
+      record(
+        engineRunId,
+        payload({
+          caseId: "engine-c",
+          bucket: "must_clarify",
+          gold: {
+            activeThreadId: "prompt_rules",
+            referentId: null,
+            intent: "clarify_request",
+            scope: "current_workstream",
+            shouldClarify: true,
+            confidence: "high",
+          },
+          actual: {
+            activeThreadId: "prompt_rules",
+            referentId: null,
+            intent: "clarify_request",
+            scope: "current_workstream",
+            shouldClarify: true,
+            confidence: "high",
+          },
+        }),
+      ),
+      record(driftRunId, payload({ caseId: "drift-a", pairId: "pair-3", pairRole: "raw" })),
+      record(
+        driftRunId,
+        payload({
+          caseId: "drift-b",
+          bucket: "summary_equivalence",
+          pairId: "pair-3",
+          pairRole: "summary",
+        }),
+      ),
+      record(
+        driftRunId,
+        payload({
+          caseId: "drift-c",
+          bucket: "must_clarify",
+          gold: {
+            activeThreadId: "prompt_rules",
+            referentId: null,
+            intent: "clarify_request",
+            scope: "current_workstream",
+            shouldClarify: true,
+            confidence: "high",
+          },
+          actual: {
+            activeThreadId: "prompt_rules",
+            referentId: null,
+            intent: "clarify_request",
+            scope: "current_workstream",
+            shouldClarify: true,
+            confidence: "high",
+          },
+        }),
+      ),
+    ]
+    const raw = buildGroundingReport(records, rawRunId, {
+      ts: 1,
+      schema: 1,
+      runId: rawRunId,
+      tier: "grounding",
+      argv: [],
+      counts: { pass: 3, partial: 0, fail: 0, error: 0, skipped: 0 },
+      durationMs: 1,
+      status: "finished",
+      params: {
+        suite: "canary",
+        corpus: "canary",
+        mode: "raw",
+        probeProfile: "minimal",
+        normalizationProfile: "none",
+        outputProtocol: "exact_json",
+        provider: "openai",
+        model: "gpt-4.1",
+        surfaceId: "openai-responses",
+        transportId: "public",
+      },
+    }).report
+    const engine = buildGroundingReport(records, engineRunId, {
+      ts: 1,
+      schema: 1,
+      runId: engineRunId,
+      tier: "grounding",
+      argv: [],
+      counts: { pass: 3, partial: 0, fail: 0, error: 0, skipped: 0 },
+      durationMs: 1,
+      status: "finished",
+      params: {
+        suite: "canary",
+        corpus: "canary",
+        mode: "engine",
+        probeProfile: "runtime_parity",
+        normalizationProfile: "structural",
+        outputProtocol: "exact_json",
+        provider: "openai",
+        model: "gpt-4.1",
+        surfaceId: "openai-responses",
+        transportId: "public",
+      },
+    }).report
+    const drift = buildGroundingReport(records, driftRunId, {
+      ts: 1,
+      schema: 1,
+      runId: driftRunId,
+      tier: "grounding",
+      argv: [],
+      counts: { pass: 3, partial: 0, fail: 0, error: 0, skipped: 0 },
+      durationMs: 1,
+      status: "finished",
+      params: {
+        suite: "canary",
+        corpus: "canary",
+        mode: "engine",
+        probeProfile: "assisted",
+        normalizationProfile: "heuristic",
+        outputProtocol: "exact_json",
+        provider: "openai",
+        model: "gpt-4.1",
+        surfaceId: "openai-responses",
+        transportId: "public",
+      },
+    }).report
+
+    const pass = buildGroundingRouteMatrixGateResult([raw, engine], "primary-openai", "canary")
+    expect(pass.result.passed).toBe(true)
+
+    const fail = buildGroundingRouteMatrixGateResult([raw, drift], "primary-openai", "canary")
+    expect(fail.result.passed).toBe(false)
+    expect(fail.result.failures).toEqual([
+      {
+        kind: "missing_cell",
+        cellId: "engine-openai-responses-public",
+        message: "no run matched required matrix cell",
+      },
+      {
+        kind: "unmatched_run",
+        cellId: "engine-drift",
+        message: "provided run did not match any required matrix cell",
+        runIds: ["engine-drift"],
+      },
+    ])
+  })
+
+  test("route matrix gate fails on duplicate exact-contract matches", () => {
+    const rawA = buildGroundingReport(
+      [record("raw-a", payload())],
+      "raw-a",
+      {
+        ts: 1,
+        schema: 1,
+        runId: "raw-a",
+        tier: "grounding",
+        argv: [],
+        counts: { pass: 1, partial: 0, fail: 0, error: 0, skipped: 0 },
+        durationMs: 1,
+        status: "finished",
+        params: {
+          suite: "canary",
+          corpus: "canary",
+          mode: "raw",
+          probeProfile: "minimal",
+          normalizationProfile: "none",
+          outputProtocol: "exact_json",
+          provider: "openai",
+          model: "gpt-4.1",
+          surfaceId: "openai-responses",
+          transportId: "public",
+        },
+      },
+    ).report
+    const rawB = buildGroundingReport(
+      [record("raw-b", payload())],
+      "raw-b",
+      {
+        ts: 1,
+        schema: 1,
+        runId: "raw-b",
+        tier: "grounding",
+        argv: [],
+        counts: { pass: 1, partial: 0, fail: 0, error: 0, skipped: 0 },
+        durationMs: 1,
+        status: "finished",
+        params: {
+          suite: "canary",
+          corpus: "canary",
+          mode: "raw",
+          probeProfile: "minimal",
+          normalizationProfile: "none",
+          outputProtocol: "exact_json",
+          provider: "openai",
+          model: "gpt-4.1",
+          surfaceId: "openai-responses",
+          transportId: "public",
+        },
+      },
+    ).report
+
+    const out = buildGroundingRouteMatrixGateResult([rawA, rawB], "primary-openai", "canary")
+    expect(out.result.passed).toBe(false)
+    expect(out.result.failures[0]).toEqual({
+      kind: "duplicate_cell",
+      cellId: "raw-openai-responses-public",
+      message: "multiple runs matched one required matrix cell",
+      runIds: ["raw-a", "raw-b"],
+    })
   })
 })

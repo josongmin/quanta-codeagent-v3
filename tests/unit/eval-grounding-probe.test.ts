@@ -128,10 +128,13 @@ describe("grounding probe rendering", () => {
     expect(manifest.sourceFiles.map((entry) => entry.file)).toEqual([
       "compare.ts",
       "config.ts",
+      "execution-contract.ts",
       "file-context.ts",
       "harness.ts",
       "loader.ts",
       "normalizer.ts",
+      "normalization/heuristic.ts",
+      "normalization/structural.ts",
       "parser.ts",
       "probe.ts",
       "replay-scaffold.ts",
@@ -143,6 +146,38 @@ describe("grounding probe rendering", () => {
       "stable-json.ts",
     ])
     expect(groundingHarnessFingerprint()).toHaveLength(16)
+  })
+
+  test("runtime-parity probe omits evaluator decision rules", async () => {
+    const llm = new CaptureLLM()
+    const groundingCase: GroundingCase = {
+      schema: 2,
+      id: "runtime-parity",
+      usecase: "persistent-context.conversation-state.thread-grounding",
+      history: [{ role: "assistant", text: "Active thread prompt_rules." }],
+      targetUtterance: "야 이제 다 해결됐냐?",
+      gold: {
+        activeThreadId: "prompt_rules",
+        referentId: "prompt_rules",
+        intent: "status_check",
+        scope: "current_workstream",
+        shouldClarify: false,
+        confidence: "high",
+      },
+      bucket: "ellipsis",
+      severity: "critical",
+      stateContract: {
+        activeThreadId: "prompt_rules",
+      },
+    }
+    await runGroundingProbe(groundingCase, {
+      llm,
+      probeProfile: "runtime_parity",
+      now: () => 0,
+    })
+    const rendered = flattenText(llm.captured)
+    expect(rendered).not.toContain("Decision rules:")
+    expect(rendered).toContain("Use only the provided conversation context")
   })
 
   test("retries a first-chunk timeout once before surfacing an error", async () => {

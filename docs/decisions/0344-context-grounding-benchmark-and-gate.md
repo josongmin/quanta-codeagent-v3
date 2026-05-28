@@ -40,9 +40,14 @@ release gate가 없다.
 
 ## Decision
 
-`context grounding`을 별도 benchmark surface로 정의한다. 이 surface는
-`agent가 지금 무엇을 가리키는지, 무엇을 묻는지, 얼마나 확실한지, clarification이
-필요한지`를 구조화된 label로 평가한다.
+`context grounding`은 하나의 tier(`grounding`) 안에서 orthogonal axes로 분리한다.
+
+- `mode`: `raw | engine | assisted`
+- `corpus`: `canary | nightly | replay_critical | replay_nightly | adversarial_canary | adversarial_nightly`
+- `execution contract`: provider/model/surface/transport/auth + probe/normalization/output protocol
+
+이 surface는 `agent가 지금 무엇을 가리키는지, 무엇을 묻는지, 얼마나 확실한지,
+clarification이 필요한지`를 구조화된 label로 평가한다.
 
 평가의 primary artifact는 자연어 응답이 아니라 아래 decision tuple이다.
 
@@ -185,8 +190,9 @@ Gate는 3층으로 나눈다.
 1. `schema + scorer hellgate`
    - deterministic
    - CI blocking
-2. `canary grounding gate`
-   - 작고 curated된 critical corpus
+2. `blocking canary gates`
+   - `raw + canary + primary-openai exact contract`
+   - `engine + canary + primary-openai exact contract`
    - release-adjacent blocking
 3. `full grounding regression`
    - larger corpus
@@ -217,10 +223,16 @@ critical case가 존재하면, 해당 bucket의 아래 invariant도 독립적으
 blocking authority는 아니다. top-line `exact_tuple_match_rate`와 critical bucket
 hard fail이 그 drift를 간접적으로 압박한다.
 
+`assisted`는 diagnostic only다. blocking authority에 참여하지 않는다.
+
+`engine`은 runtime-parity lane이다. `runtime_parity` probe와 `structural`
+normalization만 허용한다. lexical cue lift, evaluator rulebook, benchmark-local
+heuristic repair는 `assisted`에만 남긴다.
+
 regression comparability는 manual version tuple에 기대지 않는다. harness
 fingerprint는 schema contract literal만이 아니라 `schema/loader/parser/probe/scorer/
-report/compare` source manifest hash를 함께 포함한다. source가 바뀌면 baseline
-selection과 strict regress comparability도 자동으로 갈라진다.
+report/compare/execution-contract/normalization/*` source manifest hash를 함께 포함한다.
+또 baseline/regress/matrix gate는 `executionContractFingerprint`까지 일치해야 comparable로 본다.
 
 ## Implementation shape
 
@@ -231,12 +243,20 @@ selection과 strict regress comparability도 자동으로 갈라진다.
 - `src/apps/eval/grounding/baseline.ts`
 - `src/apps/eval/grounding/parser.ts`
 - `src/apps/eval/grounding/probe.ts`
+- `src/apps/eval/grounding/execution-contract.ts`
 - `src/apps/eval/grounding/scorer.ts`
+- `src/apps/eval/grounding/normalization/structural.ts`
+- `src/apps/eval/grounding/normalization/heuristic.ts`
 - `src/apps/eval/grounding/report.ts`
 - `src/apps/eval/grounding/compare.ts`
 - `src/apps/eval/grounding/index.ts`
 - `src/apps/eval/grounding/cases/canary/*.json`
 - `src/apps/eval/grounding/cases/nightly/*.json`
+- `src/apps/eval/grounding/cases/replay_critical/*.json`
+- `src/apps/eval/grounding/cases/replay_nightly/*.json`
+- `src/apps/eval/grounding/cases/adversarial_canary/*.json`
+- `src/apps/eval/grounding/cases/adversarial_nightly/*.json`
+- `src/apps/eval/grounding/replay_drafts/*.json`
 
 storage/report/taxonomy SSOT도 같이 widened 됐다.
 
@@ -248,15 +268,19 @@ storage/report/taxonomy SSOT도 같이 widened 됐다.
 CLI surface:
 
 ```sh
-bun run eval grounding run --suite canary
-bun run eval grounding run --suite nightly
+bun run eval grounding run --mode raw --suite canary
+bun run eval grounding run --mode engine --suite canary
+bun run eval grounding run --mode assisted --suite nightly
+bun run eval grounding run --mode raw --corpus replay_critical
+bun run eval grounding run --mode engine --corpus adversarial_canary
 bun run eval grounding report --run-id <id>
 bun run eval grounding baseline --candidate <id>
 bun run eval grounding compare --baseline <id> --candidate <id>
 bun run eval grounding regress --baseline <id> --candidate <id> --profile strict
+bun run eval grounding gate --route-matrix primary-openai --run-ids <id,id> --profile canary
+bun run eval grounding scaffold-replay --source <jsonl> --out <draft.json>
+bun run eval grounding promote-replay --draft <draft.json> --gold-json <gold.json> --corpus replay_critical --out <case.json>
 ```
-
-fixture contract은 v1에서 text-only transcript로 고정한다.
 
 - `history: { role, text }[]`
 - optional knobs: `mode`, `cwd`, `memoryContext`, `workingState`, `repoRulesText`, `contextChanges`

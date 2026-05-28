@@ -147,11 +147,18 @@ export {
   type GroundingRouteMatrixName,
 } from "./route-matrix"
 export {
-  buildGroundingReplayScaffold,
-  writeGroundingReplayScaffold,
-  type BuildGroundingReplayScaffoldOpts,
-  type GroundingReplayScaffoldResult,
-  type WriteGroundingReplayScaffoldOpts,
+  buildGroundingReplayDraft,
+  promoteGroundingReplayDraft,
+  readGroundingReplayDraft,
+  writeGroundingReplayDraft,
+  writePromotedGroundingReplayCase,
+  type BuildGroundingReplayDraftOpts,
+  type GroundingReplayDraft,
+  type GroundingReplayDraftResult,
+  type GroundingReplayPromotionResult,
+  type PromoteGroundingReplayDraftOpts,
+  type WriteGroundingReplayDraftOpts,
+  type WritePromotedGroundingReplayCaseOpts,
 } from "./replay-scaffold"
 
 export interface GroundingRunOpts extends LoadGroundingCasesOpts {
@@ -205,7 +212,7 @@ const llmRoute = (llm: LLMPort): GroundingExecutionRoute => ({
 
 const caseSetFingerprint = (cases: readonly GroundingCase[]): string => shortHash(stableJson(cases))
 
-const routeFingerprint = (route: GroundingRunRoute): string => shortHash(stableJson(route))
+const routeFingerprint = (route: GroundingExecutionRoute): string => shortHash(stableJson(route))
 
 const executeGroundingCase = async (
   groundingCase: GroundingCase,

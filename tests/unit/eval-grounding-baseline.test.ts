@@ -24,6 +24,7 @@ describe("grounding baseline resolver", () => {
         normalizationProfile: "structural",
         harnessFingerprint: "h1",
         routeFingerprint: "r1",
+        executionContractFingerprint: "x1",
         caseSetFingerprint: "c1",
       },
     })
@@ -43,6 +44,7 @@ describe("grounding baseline resolver", () => {
         normalizationProfile: "structural",
         harnessFingerprint: "h1",
         routeFingerprint: "r1",
+        executionContractFingerprint: "x1",
         caseSetFingerprint: "c1",
       },
     })
@@ -62,6 +64,7 @@ describe("grounding baseline resolver", () => {
         normalizationProfile: "structural",
         harnessFingerprint: "h1",
         routeFingerprint: "r1",
+        executionContractFingerprint: "x1",
         caseSetFingerprint: "c1",
       },
     })
@@ -81,6 +84,7 @@ describe("grounding baseline resolver", () => {
       normalizationProfile: "structural",
       harnessFingerprint: "h1",
       routeFingerprint: "r1",
+      executionContractFingerprint: "x1",
       caseSetFingerprint: "c1",
     })
   })
@@ -134,6 +138,7 @@ describe("grounding baseline resolver", () => {
             normalizationProfile: "structural",
             harnessFingerprint: "h1",
             routeFingerprint: "r1",
+            executionContractFingerprint: "x1",
             caseSetFingerprint: "c1",
           },
         },
@@ -154,6 +159,7 @@ describe("grounding baseline resolver", () => {
             normalizationProfile: "structural",
             harnessFingerprint: "h1",
             routeFingerprint: "r2",
+            executionContractFingerprint: "x1",
             caseSetFingerprint: "c1",
           },
         },
@@ -169,6 +175,7 @@ describe("grounding baseline resolver", () => {
       normalizationProfile: "structural",
       harnessFingerprint: "h1",
       routeFingerprint: "r1",
+      executionContractFingerprint: "x1",
       caseSetFingerprint: "c1",
     })
   })

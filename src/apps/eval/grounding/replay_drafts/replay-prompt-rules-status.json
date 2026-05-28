@@ -1,0 +1,36 @@
+{
+  "schema": 2,
+  "id": "replay-prompt-rules-status",
+  "usecase": "persistent-context.conversation-state.thread-grounding",
+  "history": [
+    {
+      "role": "user",
+      "text": "프롬프트 규칙 관련 작업부터 정리해."
+    },
+    {
+      "role": "assistant",
+      "kind": "summary",
+      "threadId": "prompt_rules",
+      "policyMarkers": ["mode:default", "summary:none"],
+      "text": "Conversation summary: prompt_rules is the active thread and closeout work remains."
+    }
+  ],
+  "targetUtterance": "야 이제 다 해결됐냐?",
+  "bucket": "ellipsis",
+  "severity": "critical",
+  "stateContract": {
+    "activeThreadId": "prompt_rules",
+    "visibleThreadIds": ["oauth_abort_flow", "prompt_rules"],
+    "policyMarkers": ["mode:default", "summary:none"]
+  },
+  "candidateThreadIds": ["prompt_rules"],
+  "ambiguityClass": "none",
+  "sourceProvenance": {
+    "kind": "trajectory_freeze",
+    "sessionId": "replay-session-prompt-rules",
+    "seqRange": [1, 24]
+  },
+  "humanAudit": {
+    "status": "none"
+  }
+}

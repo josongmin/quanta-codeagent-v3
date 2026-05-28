@@ -42,10 +42,12 @@ import {
   isGroundingGateProfile,
   isGroundingRegressionProfile,
   isGroundingRouteMatrixName,
+  readGroundingReplayDraft,
   resolveGroundingBaseline,
   runGroundingPreflightCheck,
   runGrounding,
-  writeGroundingReplayScaffold,
+  writeGroundingReplayDraft,
+  writePromotedGroundingReplayCase,
 } from "./grounding"
 import { runSwebenchAdapter } from "./public"
 import { buildReport } from "./report"
@@ -362,8 +364,6 @@ const cmdGrounding = async (): Promise<number> => {
       const targetUtterance = argValue("--target-utterance")
       const bucket = argValue("--bucket")
       const severity = argValue("--severity")
-      const corpus = argValue("--corpus")
-      const goldJson = argValue("--gold-json")
       const outPath = argValue("--out")
       if (
         source === undefined ||
@@ -371,17 +371,11 @@ const cmdGrounding = async (): Promise<number> => {
         targetUtterance === undefined ||
         bucket === undefined ||
         severity === undefined ||
-        corpus === undefined ||
-        goldJson === undefined ||
         outPath === undefined
       ) {
         console.error(
-          "eval grounding scaffold-replay: --source, --id, --target-utterance, --bucket, --severity, --corpus, --gold-json, --out are required",
+          "eval grounding scaffold-replay: --source, --id, --target-utterance, --bucket, --severity, --out are required",
         )
-        return 1
-      }
-      if (corpus !== "replay_critical" && corpus !== "replay_nightly") {
-        console.error("eval grounding scaffold-replay: --corpus must be replay_critical or replay_nightly")
         return 1
       }
       const sessionSnapshotPath = argValue("--session-snapshot")
@@ -389,15 +383,12 @@ const cmdGrounding = async (): Promise<number> => {
       const candidateThreadIds = csvValues(argValue("--candidate-threads"))
       const candidateReferentIds = csvValues(argValue("--candidate-referents"))
       const ambiguityClass = argValue("--ambiguity-class")
-      const blockingEligible = argValue("--blocking-eligible")
-      const scaffoldOpts: Parameters<typeof writeGroundingReplayScaffold>[0] = {
+      const scaffoldOpts: Parameters<typeof writeGroundingReplayDraft>[0] = {
         source,
         id,
-        corpus,
         targetUtterance,
         bucket: bucket as never,
         severity: severity as never,
-        gold: readJsonFile(goldJson) as never,
         outPath,
       }
       if (sessionSnapshotPath !== undefined) scaffoldOpts.sessionSnapshotPath = sessionSnapshotPath
@@ -405,17 +396,68 @@ const cmdGrounding = async (): Promise<number> => {
       if (candidateThreadIds !== undefined) scaffoldOpts.candidateThreadIds = candidateThreadIds
       if (candidateReferentIds !== undefined) scaffoldOpts.candidateReferentIds = candidateReferentIds
       if (ambiguityClass !== undefined) scaffoldOpts.ambiguityClass = ambiguityClass as never
-      if (blockingEligible !== undefined) scaffoldOpts.blockingEligible = blockingEligible === "true"
-      const result = writeGroundingReplayScaffold(scaffoldOpts)
+      const result = writeGroundingReplayDraft(scaffoldOpts)
+      const jsonOut = argValue("--json-out")
+      const payload = {
+        outPath: result.outPath,
+        id: result.draft.id,
+        source: result.draft.sourceProvenance,
+      }
+      if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(payload, null, 2)}\n`)
+      console.log(`grounding scaffold-replay wrote ${result.outPath}`)
+      return 0
+    }
+    case "promote-replay": {
+      const draftPath = argValue("--draft")
+      const goldJson = argValue("--gold-json")
+      const corpus = argValue("--corpus")
+      const outPath = argValue("--out")
+      if (
+        draftPath === undefined ||
+        goldJson === undefined ||
+        corpus === undefined ||
+        outPath === undefined
+      ) {
+        console.error(
+          "eval grounding promote-replay: --draft, --gold-json, --corpus, --out are required",
+        )
+        return 1
+      }
+      if (corpus !== "replay_critical" && corpus !== "replay_nightly") {
+        console.error("eval grounding promote-replay: --corpus must be replay_critical or replay_nightly")
+        return 1
+      }
+      const blockingEligibleRaw = argValue("--blocking-eligible")
+      const reviewer = argValue("--reviewer")
+      const reviewedAt = argValue("--reviewed-at")
+      const humanAudit =
+        reviewer !== undefined || reviewedAt !== undefined
+          ? {
+              status: "reviewed" as const,
+              ...(reviewer !== undefined ? { reviewer } : {}),
+              ...(reviewedAt !== undefined ? { reviewedAt } : {}),
+            }
+          : undefined
+      const result = writePromotedGroundingReplayCase({
+        draft: readGroundingReplayDraft(draftPath),
+        gold: readJsonFile(goldJson) as never,
+        corpus,
+        ...(blockingEligibleRaw !== undefined
+          ? { blockingEligible: blockingEligibleRaw === "true" }
+          : {}),
+        ...(humanAudit !== undefined ? { humanAudit } : {}),
+        outPath,
+      })
       const jsonOut = argValue("--json-out")
       const payload = {
         outPath: result.outPath,
         id: result.fixture.id,
         corpus: result.fixture.corpus ?? corpus,
         source: result.fixture.sourceProvenance ?? null,
+        humanAudit: result.fixture.humanAudit ?? null,
       }
       if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(payload, null, 2)}\n`)
-      console.log(`grounding scaffold-replay wrote ${result.outPath}`)
+      console.log(`grounding promote-replay wrote ${result.outPath}`)
       return 0
     }
     case "compare": {
@@ -478,7 +520,7 @@ const cmdGrounding = async (): Promise<number> => {
     }
     default:
       console.error(
-        "eval grounding: subcommand must be one of: run, preflight, report, baseline, gate, compare, regress, scaffold-replay",
+        "eval grounding: subcommand must be one of: run, preflight, report, baseline, gate, compare, regress, scaffold-replay, promote-replay",
       )
       return 1
   }
@@ -676,8 +718,10 @@ const HELP = `quanta eval — verification harness (Tier 0..5)
                                              Tier 2 run-to-run grounding delta
   grounding regress --baseline ID --candidate ID --profile strict
                                              Tier 2 fail-closed regression gate
-  grounding scaffold-replay --source JSONL --gold-json PATH --out PATH
-                                             Tier 2 replay fixture scaffold
+  grounding scaffold-replay --source JSONL --out PATH
+                                             Tier 2 replay draft scaffold (gold-blind)
+  grounding promote-replay --draft PATH --gold-json PATH --corpus replay_critical|replay_nightly --out PATH
+                                             Tier 2 replay draft promotion to runnable fixture
                                              add --store-dir DIR to isolate run storage
   generate --usecase ID [--count N]          Tier 1 auto-generate scenarios (LLM)
   public swebench-verified [--report PATH]   Tier 3 wraps bench-report.json

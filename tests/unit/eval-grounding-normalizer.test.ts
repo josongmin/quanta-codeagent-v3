@@ -503,6 +503,7 @@ describe("grounding decision normalizer", () => {
         history: [
           {
             role: "assistant",
+            threadId: "context_grounding",
             text: "Active thread context_grounding chose a structured probe instead of a prose judge.",
           },
         ],
@@ -532,7 +533,7 @@ describe("grounding decision normalizer", () => {
     expect(out.decision.intent).toBe("explain")
   })
 
-  test("demotes unsupported latest_tool_result scope and preserves explanation intents", () => {
+  test("demotes unsupported latest_tool_result scope without lexical intent repair in structural mode", () => {
     const latest = normalizeGroundingDecision(
       baseCase({
         history: [
@@ -563,7 +564,7 @@ describe("grounding decision normalizer", () => {
       },
       "structural",
     )
-    expect(latest.decision.intent).toBe("fact_lookup")
+    expect(latest.decision.intent).toBe("explain")
     expect(latest.decision.scope).toBe("specific_subthread")
 
     const explain = normalizeGroundingDecision(
@@ -633,5 +634,123 @@ describe("grounding decision normalizer", () => {
     const heuristic = normalizeGroundingDecision(groundingCase, decision, "heuristic")
     expect(heuristic.decision.referentId).toBe("oauth_abort_flow")
     expect(heuristic.decision.intent).toBe("execute_change")
+  })
+
+  test("structural mode does not upgrade approval or explain intents from lexical cues", () => {
+    const approval = normalizeGroundingDecision(
+      baseCase({
+        targetUtterance: "그럼 이거 그냥 올리자.",
+      }),
+      {
+        activeThreadId: "workflow_gate",
+        referentId: "workflow_gate",
+        intent: "execute_change",
+        scope: "current_workstream",
+        shouldClarify: false,
+        confidence: "medium",
+      },
+      "structural",
+    )
+    expect(approval.decision.intent).toBe("execute_change")
+
+    const explain = normalizeGroundingDecision(
+      baseCase({
+        targetUtterance: "왜 그랬는지 설명해.",
+      }),
+      {
+        activeThreadId: "context_grounding",
+        referentId: "context_grounding",
+        intent: "status_check",
+        scope: "current_workstream",
+        shouldClarify: false,
+        confidence: "medium",
+      },
+      "structural",
+    )
+    expect(explain.decision.intent).toBe("status_check")
+
+    const threshold = normalizeGroundingDecision(
+      baseCase({
+        targetUtterance: "현재 기준선이 뭐였지?",
+      }),
+      {
+        activeThreadId: "context_grounding",
+        referentId: "context_grounding",
+        intent: "explain",
+        scope: "current_workstream",
+        shouldClarify: false,
+        confidence: "medium",
+      },
+      "structural",
+    )
+    expect(threshold.decision.intent).toBe("explain")
+  })
+
+  test("structural mode refuses session-wide, step-number, and prose ambiguity lifts", () => {
+    const sessionWide = normalizeGroundingDecision(
+      baseCase({
+        history: [
+          {
+            role: "assistant",
+            text: "prompt_rules is near closeout, feature_catalog is mid-flight, oauth_abort_flow is paused.",
+          },
+        ],
+        targetUtterance: "지금 전체적으로 뭐 남았냐?",
+      }),
+      {
+        activeThreadId: "prompt_rules",
+        referentId: "prompt_rules",
+        intent: "status_check",
+        scope: "current_workstream",
+        shouldClarify: false,
+        confidence: "medium",
+      },
+      "structural",
+    )
+    expect(sessionWide.decision.scope).toBe("current_workstream")
+
+    const step = normalizeGroundingDecision(
+      baseCase({
+        history: [
+          {
+            role: "assistant",
+            text: "Active thread prompt_rules plan: prompt_rules_step_1 = add payload, prompt_rules_step_2 = add scorer hellgate.",
+          },
+        ],
+        targetUtterance: "2번부터 해.",
+      }),
+      {
+        activeThreadId: "prompt_rules",
+        referentId: null,
+        intent: "execute_change",
+        scope: "current_workstream",
+        shouldClarify: false,
+        confidence: "high",
+      },
+      "structural",
+    )
+    expect(step.decision.scope).toBe("current_workstream")
+    expect(step.decision.referentId).toBe("prompt_rules")
+
+    const ambiguousThreads = normalizeGroundingDecision(
+      baseCase({
+        history: [
+          { role: "assistant", text: "Two open threads remain: prompt_rules and feature_catalog." },
+          { role: "assistant", text: "Both are unfinished and both were mentioned in the last status pass." },
+        ],
+        targetUtterance: "그거 먼저 끝내.",
+      }),
+      {
+        activeThreadId: "prompt_rules",
+        referentId: "prompt_rules",
+        intent: "execute_change",
+        scope: "current_workstream",
+        shouldClarify: false,
+        confidence: "medium",
+      },
+      "structural",
+    )
+    expect(ambiguousThreads.decision.shouldClarify).toBe(false)
+    expect(ambiguousThreads.decision.activeThreadId).toBe("prompt_rules")
   })
 })

@@ -73,14 +73,17 @@ describe("eval grounding CLI", () => {
     expect(out.stdout).toContain("grounding gate --route-matrix primary-openai")
     expect(out.stdout).toContain("grounding compare --baseline ID --candidate ID")
     expect(out.stdout).toContain("grounding regress --baseline ID --candidate ID --profile strict")
-    expect(out.stdout).toContain("grounding scaffold-replay --source JSONL --gold-json PATH --out PATH")
+    expect(out.stdout).toContain("grounding scaffold-replay --source JSONL --out PATH")
+    expect(out.stdout).toContain(
+      "grounding promote-replay --draft PATH --gold-json PATH --corpus replay_critical|replay_nightly --out PATH",
+    )
   })
 
   test("grounding requires a valid subcommand", () => {
     const out = runEval("grounding")
     expect(out.status).toBe(1)
     expect(out.stderr).toContain(
-      "eval grounding: subcommand must be one of: run, preflight, report, baseline, gate, compare, regress, scaffold-replay",
+      "eval grounding: subcommand must be one of: run, preflight, report, baseline, gate, compare, regress, scaffold-replay, promote-replay",
     )
   })
 
@@ -128,6 +131,18 @@ describe("eval grounding CLI", () => {
     expect(missingCompare.status).toBe(1)
     expect(missingCompare.stderr).toContain("--baseline <id> and --candidate <id> are required")
 
+    const missingScaffoldReplay = runEval("grounding", "scaffold-replay", "--source", "x")
+    expect(missingScaffoldReplay.status).toBe(1)
+    expect(missingScaffoldReplay.stderr).toContain(
+      "--source, --id, --target-utterance, --bucket, --severity, --out are required",
+    )
+
+    const missingPromoteReplay = runEval("grounding", "promote-replay", "--draft", "x")
+    expect(missingPromoteReplay.status).toBe(1)
+    expect(missingPromoteReplay.stderr).toContain(
+      "--draft, --gold-json, --corpus, --out are required",
+    )
+
     const badRegressionProfile = runEval(
       "grounding",
       "regress",
@@ -140,6 +155,21 @@ describe("eval grounding CLI", () => {
     )
     expect(badRegressionProfile.status).toBe(1)
     expect(badRegressionProfile.stderr).toContain("--profile must be one of strict")
+
+    const badReplayCorpus = runEval(
+      "grounding",
+      "promote-replay",
+      "--draft",
+      "x",
+      "--gold-json",
+      "y",
+      "--corpus",
+      "bogus",
+      "--out",
+      "z",
+    )
+    expect(badReplayCorpus.status).toBe(1)
+    expect(badReplayCorpus.stderr).toContain("--corpus must be replay_critical or replay_nightly")
   })
 
   test("grounding run rejects invalid concurrency", () => {
@@ -215,6 +245,7 @@ describe("eval grounding CLI", () => {
             transportId: "public",
             harnessFingerprint: "harness-1",
             routeFingerprint: "route-1",
+            executionContractFingerprint: "exec-1",
             caseSetFingerprint: "cases-1",
           },
         })
@@ -245,6 +276,7 @@ describe("eval grounding CLI", () => {
         normalizationProfile: "structural",
         harnessFingerprint: "harness-1",
         routeFingerprint: "route-1",
+        executionContractFingerprint: "exec-1",
         caseSetFingerprint: "cases-1",
       })
 
@@ -349,6 +381,7 @@ describe("eval grounding CLI", () => {
           normalizationProfile: "match",
           harness: "match",
           route: "match",
+          executionContract: "match",
           caseSet: "match",
           baselineCorpus: "canary",
           candidateCorpus: "canary",
@@ -362,6 +395,8 @@ describe("eval grounding CLI", () => {
           candidateHarnessFingerprint: "harness-1",
           baselineRouteFingerprint: "route-1",
           candidateRouteFingerprint: "route-1",
+          baselineExecutionContractFingerprint: "exec-1",
+          candidateExecutionContractFingerprint: "exec-1",
           baselineCaseSetFingerprint: "cases-1",
           candidateCaseSetFingerprint: "cases-1",
         },

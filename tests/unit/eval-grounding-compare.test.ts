@@ -194,6 +194,7 @@ describe("grounding compare", () => {
           surfaceId: "openai-responses",
           transportId: "public",
           routeFingerprint: "route-1",
+          executionContractFingerprint: "exec-1",
           caseSetFingerprint: "cases-1",
         },
       ),
@@ -212,6 +213,7 @@ describe("grounding compare", () => {
           surfaceId: "openai-responses",
           transportId: "public",
           routeFingerprint: "route-1",
+          executionContractFingerprint: "exec-1",
           caseSetFingerprint: "cases-1",
         },
       ),
@@ -226,6 +228,7 @@ describe("grounding compare", () => {
       normalizationProfile: "match",
       harness: "match",
       route: "match",
+      executionContract: "match",
       caseSet: "match",
       baselineCorpus: "canary",
       candidateCorpus: "canary",
@@ -239,6 +242,8 @@ describe("grounding compare", () => {
       candidateHarnessFingerprint: "harness-1",
       baselineRouteFingerprint: "route-1",
       candidateRouteFingerprint: "route-1",
+      baselineExecutionContractFingerprint: "exec-1",
+      candidateExecutionContractFingerprint: "exec-1",
       baselineCaseSetFingerprint: "cases-1",
       candidateCaseSetFingerprint: "cases-1",
     })
@@ -341,6 +346,7 @@ describe("grounding compare", () => {
           suite: "canary",
           harnessFingerprint: "harness-1",
           routeFingerprint: "route-1",
+          executionContractFingerprint: "exec-1",
           caseSetFingerprint: "cases-1",
         },
       ),
@@ -355,6 +361,7 @@ describe("grounding compare", () => {
           suite: "canary",
           harnessFingerprint: "harness-1",
           routeFingerprint: "route-1",
+          executionContractFingerprint: "exec-1",
           caseSetFingerprint: "cases-1",
         },
       ),
@@ -375,6 +382,7 @@ describe("grounding compare", () => {
         normalizationProfile: "match",
         harness: "match",
         route: "match",
+        executionContract: "match",
         caseSet: "match",
         baselineCorpus: "canary",
         candidateCorpus: "canary",
@@ -388,6 +396,8 @@ describe("grounding compare", () => {
         candidateHarnessFingerprint: "harness-1",
         baselineRouteFingerprint: "route-1",
         candidateRouteFingerprint: "route-1",
+        baselineExecutionContractFingerprint: "exec-1",
+        candidateExecutionContractFingerprint: "exec-1",
         baselineCaseSetFingerprint: "cases-1",
         candidateCaseSetFingerprint: "cases-1",
       },
@@ -416,6 +426,7 @@ describe("grounding compare", () => {
             suite: "canary",
             harnessFingerprint: "harness-1",
             routeFingerprint: "route-1",
+            executionContractFingerprint: "exec-1",
             caseSetFingerprint: "cases-1",
           },
         ),
@@ -430,6 +441,7 @@ describe("grounding compare", () => {
             suite: "canary",
             harnessFingerprint: "harness-1",
             routeFingerprint: "route-1",
+            executionContractFingerprint: "exec-1",
             caseSetFingerprint: "cases-1",
           },
         ),
@@ -472,6 +484,7 @@ describe("grounding compare", () => {
             suite: "canary",
             harnessFingerprint: "harness-a",
             routeFingerprint: "route-a",
+            executionContractFingerprint: "exec-a",
             caseSetFingerprint: "cases-a",
           },
         ),
@@ -486,6 +499,7 @@ describe("grounding compare", () => {
             suite: "canary",
             harnessFingerprint: "harness-b",
             routeFingerprint: "route-b",
+            executionContractFingerprint: "exec-b",
             caseSetFingerprint: "cases-b",
           },
         ),
@@ -506,10 +520,66 @@ describe("grounding compare", () => {
         candidate: "route-b",
       },
       {
+        kind: "execution_contract_mismatch",
+        message: "baseline and candidate execution contract fingerprints differ",
+        baseline: "exec-a",
+        candidate: "exec-b",
+      },
+      {
         kind: "case_fingerprint_mismatch",
         message: "baseline and candidate case-set fingerprints differ",
         baseline: "cases-a",
         candidate: "cases-b",
+      },
+    ])
+  })
+
+  test("strict regression gate fails on execution contract mismatch even when route matches", () => {
+    const baselineRunId = "baseline-exec"
+    const candidateRunId = "candidate-exec"
+    const records: EvalRecord[] = [
+      record(baselineRunId, payload({ caseId: "shared" })),
+      record(candidateRunId, payload({ caseId: "shared" })),
+    ]
+    const out = buildGroundingComparison(
+      buildGroundingReport(
+        records,
+        baselineRunId,
+        summary(
+          baselineRunId,
+          { pass: 1, partial: 0, fail: 0, error: 0, skipped: 0 },
+          {
+            suite: "canary",
+            harnessFingerprint: "harness-1",
+            routeFingerprint: "route-1",
+            executionContractFingerprint: "exec-raw",
+            caseSetFingerprint: "cases-1",
+          },
+        ),
+      ).report,
+      buildGroundingReport(
+        records,
+        candidateRunId,
+        summary(
+          candidateRunId,
+          { pass: 1, partial: 0, fail: 0, error: 0, skipped: 0 },
+          {
+            suite: "canary",
+            harnessFingerprint: "harness-1",
+            routeFingerprint: "route-1",
+            executionContractFingerprint: "exec-engine",
+            caseSetFingerprint: "cases-1",
+          },
+        ),
+      ).report,
+    )
+    expect(out.comparison.comparable).toBe(false)
+    expect(evaluateGroundingRegression(out.comparison, "strict")).toEqual([
+      {
+        kind: "execution_contract_mismatch",
+        message: "baseline and candidate execution contract fingerprints differ",
+        baseline: "exec-raw",
+        candidate: "exec-engine",
       },
     ])
   })
@@ -560,6 +630,12 @@ describe("grounding compare", () => {
       {
         kind: "route_unverified",
         message: "missing route fingerprints; comparison is not structurally verifiable",
+        baseline: "unknown",
+        candidate: "unknown",
+      },
+      {
+        kind: "execution_contract_unverified",
+        message: "missing execution contract fingerprints; comparison is not structurally verifiable",
         baseline: "unknown",
         candidate: "unknown",
       },

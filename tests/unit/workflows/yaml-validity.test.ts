@@ -121,14 +121,16 @@ describe("workflow yaml validity", () => {
       'bun run eval grounding run --mode engine --suite canary --concurrency 4 --json-out "$RUNNER_TEMP/grounding/engine-canary-run.json"',
     )
     expect(src).toContain(
-      'bun run eval grounding run --mode assisted --suite nightly --concurrency 4 --json-out "$RUNNER_TEMP/grounding/nightly-run.json"',
+      "run_lane assisted-nightly assisted --suite nightly 4",
     )
-    expect(src).toContain(
-      'bun run eval grounding run --mode raw --corpus replay_critical --concurrency 2 --json-out "$RUNNER_TEMP/grounding/replay-critical-run.json"',
-    )
-    expect(src).toContain(
-      'bun run eval grounding run --mode engine --corpus adversarial_canary --concurrency 2 --json-out "$RUNNER_TEMP/grounding/adversarial-canary-run.json"',
-    )
+    expect(src).toContain("run_lane raw-replay-critical raw --corpus replay_critical 2")
+    expect(src).toContain("run_lane engine-replay-critical engine --corpus replay_critical 2")
+    expect(src).toContain("run_lane raw-replay-nightly raw --corpus replay_nightly 2")
+    expect(src).toContain("run_lane engine-replay-nightly engine --corpus replay_nightly 2")
+    expect(src).toContain("run_lane raw-adversarial-canary raw --corpus adversarial_canary 2")
+    expect(src).toContain("run_lane engine-adversarial-canary engine --corpus adversarial_canary 2")
+    expect(src).toContain("run_lane raw-adversarial-nightly raw --corpus adversarial_nightly 2")
+    expect(src).toContain("run_lane engine-adversarial-nightly engine --corpus adversarial_nightly 2")
     expect(src).toContain("bun run eval grounding baseline --candidate")
     expect(src).toContain("--concurrency 4")
     expect(src).toContain("bun run eval grounding report --run-id")
@@ -140,6 +142,14 @@ describe("workflow yaml validity", () => {
     expect(src).not.toContain("sed -n 's/.* baseline=")
     expect(src).toContain("grounding-gate")
     expect(src).toContain("QUANTA_OPENAI_SURFACE: responses")
+  })
+
+  test("grounding-live-gate.yml: canary blocking job never runs assisted mode", () => {
+    const { src } = loadWorkflow("grounding-live-gate.yml")
+    const canaryStart = src.indexOf("jobs:\n  canary:")
+    const nightlyStart = src.indexOf("\n  nightly:")
+    const canarySlice = canaryStart >= 0 && nightlyStart > canaryStart ? src.slice(canaryStart, nightlyStart) : src
+    expect(canarySlice).not.toContain("--mode assisted")
   })
 
   test("grounding-live-gate.yml: uploads JSONL + markdown + JSON artifacts", () => {
@@ -156,17 +166,24 @@ describe("workflow yaml validity", () => {
     expect(src).toContain("raw-canary-compare.md")
     expect(src).toContain("raw-canary-regress.md")
     expect(src).toContain("engine-canary-regress.json")
-    expect(src).toContain("nightly-run.json")
-    expect(src).toContain("nightly-report.md")
-    expect(src).toContain("replay-critical-run.json")
-    expect(src).toContain("replay-critical-report.md")
-    expect(src).toContain("adversarial-canary-run.json")
-    expect(src).toContain("adversarial-canary-report.md")
-    expect(src).toContain("nightly-baseline.txt")
-    expect(src).toContain("nightly-baseline.json")
-    expect(src).toContain("nightly-compare.md")
-    expect(src).toContain("nightly-regress.md")
-    expect(src).toContain("nightly-regress.json")
+    expect(src).toContain("assisted-nightly-run.json")
+    expect(src).toContain("assisted-nightly-report.md")
+    expect(src).toContain("raw-replay-critical-run.json")
+    expect(src).toContain("raw-replay-critical-report.md")
+    expect(src).toContain("engine-replay-critical-run.json")
+    expect(src).toContain("engine-replay-critical-report.md")
+    expect(src).toContain("raw-replay-nightly-run.json")
+    expect(src).toContain("engine-replay-nightly-run.json")
+    expect(src).toContain("raw-adversarial-canary-run.json")
+    expect(src).toContain("engine-adversarial-canary-run.json")
+    expect(src).toContain("raw-adversarial-nightly-run.json")
+    expect(src).toContain("engine-adversarial-nightly-run.json")
+    expect(src).toContain("assisted-nightly-baseline.txt")
+    expect(src).toContain("raw-replay-critical-baseline.json")
+    expect(src).toContain("engine-replay-critical-regress.json")
+    expect(src).toContain("raw-adversarial-nightly-compare.md")
+    expect(src).toContain("engine-adversarial-nightly-regress.json")
+    expect(src).toContain("nightly-runs.tsv")
     expect(src).toContain("*.jsonl")
     expect(src).toContain("report.json")
   })

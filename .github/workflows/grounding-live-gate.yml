@@ -202,71 +202,151 @@ jobs:
           export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
           mkdir -p "$RUNNER_TEMP/grounding"
           bun run eval grounding preflight --json-out "$RUNNER_TEMP/grounding/nightly-preflight.json" | tee "$RUNNER_TEMP/grounding/nightly-preflight.txt"
-      - name: run assisted nightly suite
+      - name: run nightly diagnostic matrix
         run: |
           export QUANTA_PROVIDER="${QUANTA_PROVIDER:-openai}"
           export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
           mkdir -p "$RUNNER_TEMP/grounding"
-          bun run eval grounding run --mode assisted --suite nightly --concurrency 4 --json-out "$RUNNER_TEMP/grounding/nightly-run.json" | tee "$RUNNER_TEMP/grounding/nightly-run.txt"
-          run_id=$(node -e 'const fs=require("node:fs"); const path=process.argv[1]; const json=JSON.parse(fs.readFileSync(path,"utf8")); process.stdout.write(typeof json.runId === "string" ? json.runId : "")' "$RUNNER_TEMP/grounding/nightly-run.json")
-          if [ -z "$run_id" ]; then
-            echo "::error::failed to extract run id from grounding output"
-            exit 1
-          fi
-          echo "RUN_ID=$run_id" >> "$GITHUB_ENV"
-      - name: run replay/adversarial diagnostics
-        run: |
-          export QUANTA_PROVIDER="${QUANTA_PROVIDER:-openai}"
-          export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
-          bun run eval grounding run --mode raw --corpus replay_critical --concurrency 2 --json-out "$RUNNER_TEMP/grounding/replay-critical-run.json" | tee "$RUNNER_TEMP/grounding/replay-critical-run.txt"
-          bun run eval grounding run --mode engine --corpus adversarial_canary --concurrency 2 --json-out "$RUNNER_TEMP/grounding/adversarial-canary-run.json" | tee "$RUNNER_TEMP/grounding/adversarial-canary-run.txt"
+          : > "$RUNNER_TEMP/grounding/nightly-runs.tsv"
+          run_lane() {
+            local label="$1"
+            local mode="$2"
+            local selector_flag="$3"
+            local selector_value="$4"
+            local concurrency="$5"
+            local json_path="$RUNNER_TEMP/grounding/${label}-run.json"
+            local txt_path="$RUNNER_TEMP/grounding/${label}-run.txt"
+            bun run eval grounding run --mode "$mode" "$selector_flag" "$selector_value" --concurrency "$concurrency" --json-out "$json_path" | tee "$txt_path"
+            local run_id
+            run_id=$(node -e 'const fs=require("node:fs"); const path=process.argv[1]; const json=JSON.parse(fs.readFileSync(path,"utf8")); process.stdout.write(typeof json.runId === "string" ? json.runId : "")' "$json_path")
+            if [ -z "$run_id" ]; then
+              echo "::error::failed to extract run id for ${label}"
+              exit 1
+            fi
+            printf '%s\t%s\n' "$label" "$run_id" >> "$RUNNER_TEMP/grounding/nightly-runs.tsv"
+            cp "evals/runs/$run_id.jsonl" "$RUNNER_TEMP/grounding/$run_id.jsonl"
+            if [ "$label" = "assisted-nightly" ]; then
+              echo "RUN_ID=$run_id" >> "$GITHUB_ENV"
+            fi
+          }
+          run_lane assisted-nightly assisted --suite nightly 4
+          run_lane raw-replay-critical raw --corpus replay_critical 2
+          run_lane engine-replay-critical engine --corpus replay_critical 2
+          run_lane raw-replay-nightly raw --corpus replay_nightly 2
+          run_lane engine-replay-nightly engine --corpus replay_nightly 2
+          run_lane raw-adversarial-canary raw --corpus adversarial_canary 2
+          run_lane engine-adversarial-canary engine --corpus adversarial_canary 2
+          run_lane raw-adversarial-nightly raw --corpus adversarial_nightly 2
+          run_lane engine-adversarial-nightly engine --corpus adversarial_nightly 2
       - name: render nightly reports
         run: |
           export QUANTA_PROVIDER="${QUANTA_PROVIDER:-openai}"
           export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
-          bun run eval grounding report --run-id "$RUN_ID" --markdown-out "$RUNNER_TEMP/grounding/nightly-report.md" --json-out "$RUNNER_TEMP/grounding/nightly-report.json"
-          replay_run_id=$(node -e 'const fs=require("node:fs"); const path=process.argv[1]; const json=JSON.parse(fs.readFileSync(path,"utf8")); process.stdout.write(typeof json.runId === "string" ? json.runId : "")' "$RUNNER_TEMP/grounding/replay-critical-run.json")
-          adversarial_run_id=$(node -e 'const fs=require("node:fs"); const path=process.argv[1]; const json=JSON.parse(fs.readFileSync(path,"utf8")); process.stdout.write(typeof json.runId === "string" ? json.runId : "")' "$RUNNER_TEMP/grounding/adversarial-canary-run.json")
-          bun run eval grounding report --run-id "$replay_run_id" --markdown-out "$RUNNER_TEMP/grounding/replay-critical-report.md" --json-out "$RUNNER_TEMP/grounding/replay-critical-report.json"
-          bun run eval grounding report --run-id "$adversarial_run_id" --markdown-out "$RUNNER_TEMP/grounding/adversarial-canary-report.md" --json-out "$RUNNER_TEMP/grounding/adversarial-canary-report.json"
-          cp "evals/runs/$RUN_ID.jsonl" "$RUNNER_TEMP/grounding/$RUN_ID.jsonl"
-      - name: resolve nightly baseline
+          while IFS=$'\t' read -r label run_id; do
+            bun run eval grounding report --run-id "$run_id" --markdown-out "$RUNNER_TEMP/grounding/${label}-report.md" --json-out "$RUNNER_TEMP/grounding/${label}-report.json"
+          done < "$RUNNER_TEMP/grounding/nightly-runs.tsv"
+      - name: compare nightly lanes against resolved baselines
         run: |
           mkdir -p "$RUNNER_TEMP/grounding"
-          bun run eval grounding baseline --candidate "$RUN_ID" --json-out "$RUNNER_TEMP/grounding/nightly-baseline.json" | tee "$RUNNER_TEMP/grounding/nightly-baseline.txt"
-          baseline_run_id=$(node -e 'const fs=require("node:fs"); const path=process.argv[1]; const json=JSON.parse(fs.readFileSync(path,"utf8")); process.stdout.write(typeof json.baselineRunId === "string" ? json.baselineRunId : "")' "$RUNNER_TEMP/grounding/nightly-baseline.json")
-          if [ -n "$baseline_run_id" ]; then
-            echo "GROUNDING_BASELINE_RUN_ID=$baseline_run_id" >> "$GITHUB_ENV"
-          fi
-      - name: compare nightly against resolved baseline
-        if: env.GROUNDING_BASELINE_RUN_ID != ''
-        run: |
           export QUANTA_PROVIDER="${QUANTA_PROVIDER:-openai}"
           export QUANTA_MODEL="${QUANTA_MODEL:-gpt-4.1}"
-          bun run eval grounding compare --baseline "$GROUNDING_BASELINE_RUN_ID" --candidate "$RUN_ID" --markdown-out "$RUNNER_TEMP/grounding/nightly-compare.md" --json-out "$RUNNER_TEMP/grounding/nightly-compare.json"
-          bun run eval grounding regress --baseline "$GROUNDING_BASELINE_RUN_ID" --candidate "$RUN_ID" --profile strict --markdown-out "$RUNNER_TEMP/grounding/nightly-regress.md" --json-out "$RUNNER_TEMP/grounding/nightly-regress.json"
+          while IFS=$'\t' read -r label run_id; do
+            bun run eval grounding baseline --candidate "$run_id" --json-out "$RUNNER_TEMP/grounding/${label}-baseline.json" | tee "$RUNNER_TEMP/grounding/${label}-baseline.txt"
+            baseline_run_id=$(node -e 'const fs=require("node:fs"); const path=process.argv[1]; const json=JSON.parse(fs.readFileSync(path,"utf8")); process.stdout.write(typeof json.baselineRunId === "string" ? json.baselineRunId : "")' "$RUNNER_TEMP/grounding/${label}-baseline.json")
+            if [ -n "$baseline_run_id" ]; then
+              bun run eval grounding compare --baseline "$baseline_run_id" --candidate "$run_id" --markdown-out "$RUNNER_TEMP/grounding/${label}-compare.md" --json-out "$RUNNER_TEMP/grounding/${label}-compare.json"
+              bun run eval grounding regress --baseline "$baseline_run_id" --candidate "$run_id" --profile strict --markdown-out "$RUNNER_TEMP/grounding/${label}-regress.md" --json-out "$RUNNER_TEMP/grounding/${label}-regress.json"
+            fi
+          done < "$RUNNER_TEMP/grounding/nightly-runs.tsv"
       - name: upload nightly artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: grounding-nightly-${{ env.RUN_ID || github.run_id }}
           path: |
-            ${{ runner.temp }}/grounding/nightly-run.txt
+            ${{ runner.temp }}/grounding/assisted-nightly-run.txt
             ${{ runner.temp }}/grounding/nightly-preflight.txt
             ${{ runner.temp }}/grounding/nightly-preflight.json
-            ${{ runner.temp }}/grounding/nightly-run.json
-            ${{ runner.temp }}/grounding/replay-critical-run.json
-            ${{ runner.temp }}/grounding/adversarial-canary-run.json
-            ${{ runner.temp }}/grounding/nightly-baseline.txt
-            ${{ runner.temp }}/grounding/nightly-baseline.json
-            ${{ runner.temp }}/grounding/nightly-report.md
-            ${{ runner.temp }}/grounding/nightly-report.json
-            ${{ runner.temp }}/grounding/replay-critical-report.md
-            ${{ runner.temp }}/grounding/replay-critical-report.json
-            ${{ runner.temp }}/grounding/adversarial-canary-report.md
-            ${{ runner.temp }}/grounding/adversarial-canary-report.json
-            ${{ runner.temp }}/grounding/nightly-compare.md
-            ${{ runner.temp }}/grounding/nightly-compare.json
-            ${{ runner.temp }}/grounding/nightly-regress.md
-            ${{ runner.temp }}/grounding/nightly-regress.json
+            ${{ runner.temp }}/grounding/assisted-nightly-run.json
+            ${{ runner.temp }}/grounding/raw-replay-critical-run.json
+            ${{ runner.temp }}/grounding/engine-replay-critical-run.json
+            ${{ runner.temp }}/grounding/raw-replay-nightly-run.json
+            ${{ runner.temp }}/grounding/engine-replay-nightly-run.json
+            ${{ runner.temp }}/grounding/raw-adversarial-canary-run.json
+            ${{ runner.temp }}/grounding/engine-adversarial-canary-run.json
+            ${{ runner.temp }}/grounding/raw-adversarial-nightly-run.json
+            ${{ runner.temp }}/grounding/engine-adversarial-nightly-run.json
+            ${{ runner.temp }}/grounding/assisted-nightly-baseline.txt
+            ${{ runner.temp }}/grounding/assisted-nightly-baseline.json
+            ${{ runner.temp }}/grounding/raw-replay-critical-baseline.txt
+            ${{ runner.temp }}/grounding/raw-replay-critical-baseline.json
+            ${{ runner.temp }}/grounding/engine-replay-critical-baseline.txt
+            ${{ runner.temp }}/grounding/engine-replay-critical-baseline.json
+            ${{ runner.temp }}/grounding/raw-replay-nightly-baseline.txt
+            ${{ runner.temp }}/grounding/raw-replay-nightly-baseline.json
+            ${{ runner.temp }}/grounding/engine-replay-nightly-baseline.txt
+            ${{ runner.temp }}/grounding/engine-replay-nightly-baseline.json
+            ${{ runner.temp }}/grounding/raw-adversarial-canary-baseline.txt
+            ${{ runner.temp }}/grounding/raw-adversarial-canary-baseline.json
+            ${{ runner.temp }}/grounding/engine-adversarial-canary-baseline.txt
+            ${{ runner.temp }}/grounding/engine-adversarial-canary-baseline.json
+            ${{ runner.temp }}/grounding/raw-adversarial-nightly-baseline.txt
+            ${{ runner.temp }}/grounding/raw-adversarial-nightly-baseline.json
+            ${{ runner.temp }}/grounding/engine-adversarial-nightly-baseline.txt
+            ${{ runner.temp }}/grounding/engine-adversarial-nightly-baseline.json
+            ${{ runner.temp }}/grounding/assisted-nightly-report.md
+            ${{ runner.temp }}/grounding/assisted-nightly-report.json
+            ${{ runner.temp }}/grounding/raw-replay-critical-report.md
+            ${{ runner.temp }}/grounding/raw-replay-critical-report.json
+            ${{ runner.temp }}/grounding/engine-replay-critical-report.md
+            ${{ runner.temp }}/grounding/engine-replay-critical-report.json
+            ${{ runner.temp }}/grounding/raw-replay-nightly-report.md
+            ${{ runner.temp }}/grounding/raw-replay-nightly-report.json
+            ${{ runner.temp }}/grounding/engine-replay-nightly-report.md
+            ${{ runner.temp }}/grounding/engine-replay-nightly-report.json
+            ${{ runner.temp }}/grounding/raw-adversarial-canary-report.md
+            ${{ runner.temp }}/grounding/raw-adversarial-canary-report.json
+            ${{ runner.temp }}/grounding/engine-adversarial-canary-report.md
+            ${{ runner.temp }}/grounding/engine-adversarial-canary-report.json
+            ${{ runner.temp }}/grounding/raw-adversarial-nightly-report.md
+            ${{ runner.temp }}/grounding/raw-adversarial-nightly-report.json
+            ${{ runner.temp }}/grounding/engine-adversarial-nightly-report.md
+            ${{ runner.temp }}/grounding/engine-adversarial-nightly-report.json
+            ${{ runner.temp }}/grounding/assisted-nightly-compare.md
+            ${{ runner.temp }}/grounding/assisted-nightly-compare.json
+            ${{ runner.temp }}/grounding/assisted-nightly-regress.md
+            ${{ runner.temp }}/grounding/assisted-nightly-regress.json
+            ${{ runner.temp }}/grounding/raw-replay-critical-compare.md
+            ${{ runner.temp }}/grounding/raw-replay-critical-compare.json
+            ${{ runner.temp }}/grounding/raw-replay-critical-regress.md
+            ${{ runner.temp }}/grounding/raw-replay-critical-regress.json
+            ${{ runner.temp }}/grounding/engine-replay-critical-compare.md
+            ${{ runner.temp }}/grounding/engine-replay-critical-compare.json
+            ${{ runner.temp }}/grounding/engine-replay-critical-regress.md
+            ${{ runner.temp }}/grounding/engine-replay-critical-regress.json
+            ${{ runner.temp }}/grounding/raw-replay-nightly-compare.md
+            ${{ runner.temp }}/grounding/raw-replay-nightly-compare.json
+            ${{ runner.temp }}/grounding/raw-replay-nightly-regress.md
+            ${{ runner.temp }}/grounding/raw-replay-nightly-regress.json
+            ${{ runner.temp }}/grounding/engine-replay-nightly-compare.md
+            ${{ runner.temp }}/grounding/engine-replay-nightly-compare.json
+            ${{ runner.temp }}/grounding/engine-replay-nightly-regress.md
+            ${{ runner.temp }}/grounding/engine-replay-nightly-regress.json
+            ${{ runner.temp }}/grounding/raw-adversarial-canary-compare.md
+            ${{ runner.temp }}/grounding/raw-adversarial-canary-compare.json
+            ${{ runner.temp }}/grounding/raw-adversarial-canary-regress.md
+            ${{ runner.temp }}/grounding/raw-adversarial-canary-regress.json
+            ${{ runner.temp }}/grounding/engine-adversarial-canary-compare.md
+            ${{ runner.temp }}/grounding/engine-adversarial-canary-compare.json
+            ${{ runner.temp }}/grounding/engine-adversarial-canary-regress.md
+            ${{ runner.temp }}/grounding/engine-adversarial-canary-regress.json
+            ${{ runner.temp }}/grounding/raw-adversarial-nightly-compare.md
+            ${{ runner.temp }}/grounding/raw-adversarial-nightly-compare.json
+            ${{ runner.temp }}/grounding/raw-adversarial-nightly-regress.md
+            ${{ runner.temp }}/grounding/raw-adversarial-nightly-regress.json
+            ${{ runner.temp }}/grounding/engine-adversarial-nightly-compare.md
+            ${{ runner.temp }}/grounding/engine-adversarial-nightly-compare.json
+            ${{ runner.temp }}/grounding/engine-adversarial-nightly-regress.md
+            ${{ runner.temp }}/grounding/engine-adversarial-nightly-regress.json
+            ${{ runner.temp }}/grounding/nightly-runs.tsv
             ${{ runner.temp }}/grounding/*.jsonl

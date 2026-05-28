@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
-import { basename, join } from "node:path"
+import { join } from "node:path"
 import { GROUNDING_HARNESS_CONTRACT } from "./schema"
 import { shortHash, stableJson } from "./stable-json"
 
@@ -33,7 +33,7 @@ const sourceHash = (file: string): string =>
 export const buildGroundingHarnessManifest = () => ({
   contract: GROUNDING_HARNESS_CONTRACT,
   sourceFiles: HARNESS_SOURCE_FILES.map((file) => ({
-    file: basename(file),
+    file,
     sha256: sourceHash(file),
   })),
 })
