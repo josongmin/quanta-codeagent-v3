@@ -2,7 +2,7 @@ import type { Tool, ToolContext, ToolEvent } from "../types"
 import { safeRun, stderrReason } from "./_shared"
 import { type GitRunner, type GitStatusInput, gitStatusInputSchema } from "./types"
 
-interface ParsedStatus {
+export interface ParsedStatus {
   branch: string
   ahead: number
   behind: number
@@ -100,7 +100,11 @@ const parseEntry = (line: string): FileEntry | null => {
   return null
 }
 
-const parsePorcelainV2 = (stdout: string): ParsedStatus => {
+/** Exported for cross-slice reuse (ADR-0397 env/build dynamic context).
+ *  Consumers feed the stdout of `git status --porcelain=v2 --branch`; the
+ *  function never throws and returns sane defaults for malformed input
+ *  (`branch: "(detached)"`, `ahead/behind: 0`, `files: []`). */
+export const parsePorcelainV2 = (stdout: string): ParsedStatus => {
   const out: ParsedStatus = { branch: "(detached)", ahead: 0, behind: 0, files: [] }
   for (const line of stdout.split("\n")) {
     if (!line) continue

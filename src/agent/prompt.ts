@@ -7,6 +7,7 @@ import type {
   PromptSummaryPrefix,
 } from "@/shared"
 import { buildPersistentInjectionMessages } from "./context-change"
+import { renderEnvBlock, type TurnEnvContext } from "./env-context"
 import { type GlobRule, renderGlobRulesBlock, selectGlobRules } from "./glob-rules"
 import { assertValidIdentityLines } from "./identity"
 import { resolveAgentMode } from "./mode"
@@ -210,6 +211,15 @@ export interface TurnContextInput {
    *  chronological order is `context-update → mention-injection → reminder`.
    *  Empty / absent ⇒ no splice, byte-identical. */
   mentionInjectionMessages?: readonly Message[]
+
+  /** ADR-0397 — per-turn env / build dynamic context (platform / shell /
+   *  git-status / pkg-mgr). Mirrors the clock-injection pattern
+   *  ({@link now}): when ABSENT or fully empty, buildDynamicContext emits
+   *  ZERO new bytes (byte-identical to the pre-ADR-0397 path); when present,
+   *  the renderer is a pure function of the provided fields (replay
+   *  deterministic). The live probe lives in
+   *  `src/agent/env-context.ts#probeTurnEnv` — opt-in, caller-invoked. */
+  env?: TurnEnvContext
 }
 
 export interface TurnContext {
@@ -405,6 +415,12 @@ const buildDynamicContext = (
   // so the per-turn notice and the dispatch admissibility gate never disagree.
   const notice = modeNotice(effectiveMode)
   if (notice) parts.push("", notice)
+  // ADR-0397 env block — sits ABOVE repo-rules because env/build context is
+  // host-static authority (the platform/shell/pkg-mgr don't change mid-turn
+  // and the git snapshot is taken at turn boundary). Absent / empty env ⇒
+  // renderEnvBlock returns undefined and parts stay byte-identical.
+  const envBlock = renderEnvBlock(input.env)
+  if (envBlock) parts.push("", envBlock)
   if (input.repoRules) parts.push("", renderRepoRulesBlock(input.repoRules))
   // File-scoped rules (Cursor `.cursor/rules` parity) ride right after the
   // top-level repo contract — both are repo authority, but these are selected
@@ -429,7 +445,8 @@ const buildDynamicContext = (
   return parts.join("\n")
 }
 
-const hasText = (value: string | undefined): boolean => value !== undefined && value.trim().length > 0
+const hasText = (value: string | undefined): boolean =>
+  value !== undefined && value.trim().length > 0
 
 const resolveHookContextMode = (
   injects: readonly import("./hooks").HookPromptInject[] | undefined,

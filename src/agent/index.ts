@@ -53,6 +53,12 @@ export {
   type SkillEffortAdvisory,
 } from "./effort"
 export {
+  type ProbeTurnEnvOpts,
+  probeTurnEnv,
+  renderEnvBlock,
+  type TurnEnvContext,
+} from "./env-context"
+export {
   composeGlobRulesWithDetected,
   GLOB_RULE_DIRS,
   type GlobRule,
