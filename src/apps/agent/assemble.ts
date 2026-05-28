@@ -33,6 +33,7 @@ import {
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import { captureSnapshot } from "@/agent/context-change"
 import { autoWirePluginActivation } from "@/agent/plugin-activation-handler"
+import { createCompositeMentionResolver } from "@/agent/plugin-app-resolver"
 import { getGlobalSessionResourceRegistry } from "@/agent/session-resource-registry"
 import { buildCallerOwnedRegistryWithTelemetry } from "@/agent/session-resource-registry/caller-owned-builder"
 import {
@@ -147,6 +148,16 @@ export const resolveRunAgent = (
   seams: AssembleRequestSeams | undefined,
 ): ((cfg: AgentConfig) => Promise<AgentOutcome>) => seams?.runAgent ?? defaultRunAgent
 
+/** ADR-0418 — @file mention resolver dep. file-only composite: @file reads
+ *  workspace files rooted at cwd; @symbol (LSP/semantic adapters) + @skill
+ *  (registry) are separate follow-ups, so those kinds resolve null for now.
+ *  Default-ON; QUANTA_MENTION_FILE=off opts out. Extracted so the
+ *  assembleAgentConfig closure stays under biome's cognitive-complexity cap. */
+const mentionResolverDep = (cwd: string) =>
+  process.env.QUANTA_MENTION_FILE !== "off"
+    ? { mentionResolver: createCompositeMentionResolver({ files: { root: cwd } }) }
+    : {}
+
 /** Single source of truth for "config for this mode" assembly. */
 export const assembleAgentConfig = (req: AssembleRequest): AgentConfig => {
   const policy: ModePolicy = MODE_PRESETS[req.mode]
@@ -234,6 +245,9 @@ export const assembleAgentConfig = (req: AssembleRequest): AgentConfig => {
     ...(cfg.sessionId !== undefined ? { sessionId: cfg.sessionId } : {}),
     systemPromptCache: wrappedCache,
     store: sessionResources?.store ?? createInMemoryTypedHistoryEventStore(),
+    // ADR-0418 — @file mention resolver (helper keeps this closure under the
+    // cognitive-complexity cap). Default-ON; QUANTA_MENTION_FILE=off opts out.
+    ...mentionResolverDep(cfg.cwd),
     getSnapshot: () =>
       captureSnapshot({
         cwd: cfg.cwd,
