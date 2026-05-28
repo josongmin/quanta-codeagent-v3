@@ -112,7 +112,7 @@ export const buildLLM = (provider: Provider, model: string): LLMPort =>
 export { DEFAULT_MODEL }
 
 /**
- * Build the long-term memory store from env. ADR-0414 changed the default
+ * Build the long-term memory store from env. ADR-0413 changed the default
  * from OFF to ON. The default-ON store is the VOLATILE `InMemoryStore` (no
  * disk side effect — TKT-003 req #4): unset / bare-truthy `QUANTA_MEMORY`
  * (`1` / `true` / `on` / `""` / unknown) ⇒ volatile InMemoryStore.
@@ -137,7 +137,7 @@ export { DEFAULT_MODEL }
  *   QUANTA_MEMORY_THRESHOLD    float → auto-trigger promote threshold (default 0.7)
  *   QUANTA_MEMORY_MIN_USAGE    int → auto-trigger minUsageCount gate (default 1)
  *
- * Legacy shim — implementation delegates to ADR-0414
+ * Legacy shim — implementation delegates to ADR-0413
  * `buildMemoryForSession` so the default-ON contract is centralized.
  */
 export const buildStore = (): ReturnType<typeof buildStoreCore> =>
@@ -169,7 +169,7 @@ export const buildEmbedder = (
 export { parseRecallTiers }
 
 /**
- * Build the `memory` tuning block from env. ADR-0414: delegates to
+ * Build the `memory` tuning block from env. ADR-0413: delegates to
  * `buildMemoryForSession`. Returns `undefined` only when `QUANTA_MEMORY=off`
  * (the single-knob escape hatch); otherwise the block is returned even when
  * empty so the loop's `config.store` check threads through identically.

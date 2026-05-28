@@ -1,10 +1,12 @@
 /**
- * ADR-0414 — Memory learning DEFAULT-ON via session factory.
+ * ADR-0413 — Memory learning DEFAULT-ON via session factory.
  *
- * (Renumbered from 0413 → 0414 under the user-deference ADR-collision policy:
- *  the user's in-flight `0413-file-mention-kind-sync-additive.md` keeps 0413;
- *  this memory slice + its sibling AgentConfig-slot Part 1 take the next free
- *  number 0414.)
+ * (The canonical decision record is
+ *  `docs/decisions/0413-memory-learning-default-on-via-session-factory.md`,
+ *  which coexists at number 0413 alongside the user's
+ *  `0413-file-mention-kind-sync-additive.md`. An earlier draft planned a
+ *  0413 → 0414 renumber, but no 0414 record was ever cut, so this slice's
+ *  canonical number is 0413 — matched by the feature catalog `adrs: [413]`.)
  *
  * Single canonical entry point that projects an env view + per-session
  * override into the three memory slots a surface needs to wire:
