@@ -317,7 +317,16 @@ export const makeBashTool = (opts: MakeBashToolOpts = {}): Tool<Input> => {
     name: "bash",
     description:
       "Run a shell command (bash). Returns combined stdout/stderr and exit code. " +
-      "Non-zero exit is reported, not thrown.",
+      "Non-zero exit is reported, not thrown. " +
+      // ADR-0410 — steer the model toward the right tool for file ops. The
+      // shell is for one-shot search/diff/exec; per-file read/edit lives in
+      // dedicated tools that the dispatcher can audit and reverse.
+      "Prefer `read`, `grep`, and `edit` for file inspection and modification — " +
+      "use bash ONLY when the task finishes in a single shell command " +
+      "(file search via rg/fd, diff/git inspection, scoped exec). " +
+      "Do NOT use bash for cat/sed/awk over files — `read` covers file reading and " +
+      "`edit` covers targeted in-file string replacement, with proper sandbox " +
+      "and reversal semantics.",
     inputSchema: schema,
     isReadOnly: () => false,
     // Arbitrary shell side effects are unknowable; never run concurrently.

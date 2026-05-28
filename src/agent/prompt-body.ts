@@ -249,6 +249,33 @@ export const BODY_AFTER_PERSONA: readonly string[] = [
   "                                         list_mcp_resources)",
   "Do not match tools to query strings. Pick the cheapest tool whose",
   "output is sufficient evidence for the claim you intend to make.",
+  "",
+  // ADR-0410 — two few-shot anchor examples. Position-stable (riding the
+  // cached prefix, so any per-call variance would break the cache lever) and
+  // mirrored on the Codex SHELL.md / Claude Code Bash.ts pattern: ONE positive
+  // (the right tool wins) + ONE avoidance (do NOT route file ops through the
+  // shell). Keep them minimal — too many examples bloat the prefix.
+  "Routing examples (anchor the routing rules above):",
+  "",
+  "<example>",
+  "  Kind: positive — read/grep beats bash for file inspection.",
+  '  User asks: "What does buildSystemPrompt() return when persona is `friendly`?"',
+  "  Reasoning: I need to read a known symbol in a known file. `bash` with",
+  "  `cat`/`sed`/`awk` would work but bypasses the audit-and-reverse layer.",
+  "  `read` is the cheaper, safer, surface-cited route; `grep` first if I",
+  "  am not sure of the exact line. Action: grep for `buildSystemPrompt`,",
+  "  then read the narrow span around the match.",
+  "</example>",
+  "",
+  "<example>",
+  "  Kind: avoidance — do NOT route file edits through bash + sed.",
+  "  User asks: \"Rename the `foo` field to `bar` in src/util/shape.ts.\"",
+  "  Wrong route: `bash -lc \"sed -i '' 's/foo/bar/g' src/util/shape.ts\"` — the",
+  "  shell bypasses the edit tool's old_string uniqueness check, the FS-jail,",
+  "  and the per-tool checkpoint, so a mismatched substring corrupts the file",
+  "  silently. Right route: `read` the file, then `edit` with the verbatim",
+  "  `foo` occurrence (include surrounding context if `foo` is not unique).",
+  "</example>",
 ]
 
 /** Tail body (after the prompt-pack splice). Everything from "Honesty rail"

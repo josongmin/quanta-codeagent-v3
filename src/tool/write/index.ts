@@ -18,7 +18,16 @@ type Input = z.infer<typeof schema>
 export const makeWriteTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<Input> =>
   defineTool<Input>({
     name: "write",
-    description: "Write a file, creating or fully overwriting it. Creates parent dirs.",
+    // ADR-0410 — when-not-to-use clause. Mirrors Codex `apply_patch` and
+    // Claude Code 2.1.138 `tools/Write.ts` patterns: name `edit` as the
+    // partial-mutation alternative, and flag repeated writes to the same
+    // file as an anti-pattern (the empirical regression signal).
+    description:
+      "Write a file, creating or fully overwriting it. Creates parent dirs. " +
+      "Do NOT use write for partial mutation of an existing file — use `edit` " +
+      "instead. Multiple consecutive writes to the same file is almost always " +
+      "a wrong pattern (you are overwriting your own previous write); read the " +
+      "current bytes and use `edit` instead.",
     inputSchema: schema,
     isReadOnly: () => false,
     // Mutates the filesystem; conservatively never run concurrently.

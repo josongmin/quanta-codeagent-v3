@@ -134,7 +134,16 @@ const commitEdit = async (
  *  tests pass an in-memory port for isolation. */
 export const makeEditTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<Input> => ({
   name: "edit",
-  description: "Exact string replacement in an existing file. old_string must match verbatim.",
+  // ADR-0410 — when-not-to-use clause. Codex L83-110 (`apply_patch`) and
+  // Claude Code 2.1.138 `tools/Edit.ts` both attach a do-not-use list to the
+  // edit description; the negative anchors cut a recurring mis-routing
+  // (write-when-edit, edit-when-write, ambiguous old_string).
+  description:
+    "Exact string replacement in an existing file. old_string must match verbatim. " +
+    "Do NOT use edit to create a new file — use `write` instead. " +
+    "Do NOT use edit when old_string is not unique in the file — include more " +
+    "surrounding context to make it unique, or set `replace_all: true` for " +
+    "intentional bulk replacement.",
   inputSchema: schema,
   isReadOnly: () => false,
   // Mutates the filesystem; conservatively never run concurrently.
