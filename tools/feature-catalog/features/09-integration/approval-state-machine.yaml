@@ -1,0 +1,101 @@
+id: approval-state-machine
+title: Approval state machine (ADR-0399 port + store)
+section: 9
+subsystem: Approval state machine (ADR-0399)
+order: 399
+maturity: L2
+status: new
+ui_surfaces: [none]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: none
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on: []
+purpose: |
+  Closed port + in-memory store for HITL approval / clarification / escalation
+  requests. quanta already has the *mechanism* for stopping the agent and
+  asking the operator (HITL tier registry, `request_user_input`,
+  `always-confirm` / `hand-off-required`), but it has no first-class STATE
+  MODEL for that stop: WHY now, exactly WHICH step resumes after approval, and
+  the pause is invisible to the per-thread Objective (ADR-0394) + unified Run
+  Ledger (ADR-0395).
+
+  This wave ships the SUBSTRATE: the typed model (`ApprovalRequest` /
+  `ApprovalKind` / `ApprovalDecision` / `ApprovalStatus` / `ApprovalSnapshot`),
+  the closed `ApprovalStateMachinePort`, and a zero-dep in-memory store
+  (`createApprovalStateMachine`). NOT yet wired into `admissibility-gate.ts`
+  or `request_user_input` (existing HITL code is UNCHANGED). Pure new slice
+  `src/agent/approval-state-machine/` — only `node:crypto` for randomUUID
+  + types-only imports from `@/agent/objective` + `@/agent/run-ledger`.
+
+  Status transitions pinned: request ⇒ pending; settle(approve|modify) ⇒
+  approved (idempotent on already-settled, settledAt not re-bumped on no-op);
+  settle(deny) ⇒ denied; expire from pending ⇒ expired (no-op on settled);
+  cancel from pending ⇒ cancelled (no-op on settled); any mutator on unknown
+  id ⇒ null (no exception). Attribution invariants: when optional `objective`
+  / `ledger` ports are supplied, `request()` calls
+  `objective.addBlocker({reason, waitingOn:"user"})` (captures newest blocker
+  id) + `ledger.start({id:<approvalId>, kind:"exec", owner:threadId,
+  title:reason, resumeAction:resumeStep})` then
+  `ledger.touch(id,{status:"waiting", waitingOn:"user"})`. `settle/expire/
+  cancel` clear the matched blocker AND `ledger.settle(id, "completed"|
+  "stopped")` mapped from decision (approve/modify⇒completed;
+  deny/expire/cancel⇒stopped). When the ports are absent, attribution is a
+  no-op — approval state still tracks. HOSTILE-PORT INVARIANT: a throwing
+  `addBlocker` / `start` / `touch` / `clearBlocker` / `settle` does NOT
+  propagate — attribution is best-effort, approval state is authoritative.
+
+  NO-THROW on every method (unknown id / malformed input / hostile clock /
+  hostile attribution port). Frozen returns (record + list array). Snapshot
+  replaces-not-merges; malformed entries silently dropped. Default-OFF:
+  importing the barrel allocates nothing — agent stays byte-identical until a
+  follow-up wave wires the gate into request/settle.
+evidence:
+  code:
+    - src/agent/approval-state-machine/types.ts
+    - src/agent/approval-state-machine/store.ts
+    - src/agent/approval-state-machine/index.ts
+  adrs: [399]
+  tests:
+    unit:
+      - tests/unit/approval-state-machine-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: now
+    where: createApprovalStateMachine({ now })
+    default: 'Date.now'
+    purpose: injected clock seam for deterministic createdAt/settledAt stamps
+  - name: objective
+    where: createApprovalStateMachine({ objective })
+    purpose: optional ObjectivePort — when supplied, request() attributes the pause via addBlocker(waitingOn:"user") and settle/expire/cancel clear the blocker. Attribution failures (hostile port throws) do not propagate.
+  - name: ledger
+    where: createApprovalStateMachine({ ledger })
+    purpose: optional RunLedgerPort — when supplied, request() starts a kind="exec" entry transitioned to waiting/user and settle/expire/cancel terminate it as completed (approve/modify) or stopped (deny/expire/cancel). Attribution failures do not propagate.
+deliberate_hold:
+  reason: |
+    PORT + STORE wave. The closed port + in-memory store are hellgate-proven,
+    but no code path calls them yet: the admissibility-gate, request_user_input
+    tool, HITL tier registry, and CLI/web surfaces are UNTOUCHED — by design,
+    so this wave is byte-identical / default-OFF and cannot regress existing
+    HITL behaviour. Attribution semantics (which gate event maps to which
+    approval kind) belong to a dedicated wiring wave.
+  promotion_path: |
+    A later wave wires `createApprovalStateMachine` into the agent composition
+    root and has the admissibility-gate / `request_user_input` produce
+    approval requests instead of inline HITL prompts. A surface
+    (CLI status bar / web/Tauri panel) then reads `pending()` to render the
+    pause with `reason`, `resumeStep`, and the back-refs to Objective.blockers
+    + RunLedger.waiting() it implies. Promote to L3 once a real producer is
+    wired and a surface consumes the state.
+notes: |
+  Slice fence verified: imports = `node:crypto` (randomUUID) + types-only from
+  `@/agent/objective` + `@/agent/run-ledger`. NO `@/agent` core, NO `@/apps`,
+  NO `@/tool`. The store is sibling-shaped to ObjectiveStore (ADR-0394) and
+  RunLedger (ADR-0395) — frozen returns, NO-THROW, injected clock — so the
+  three slices compose with a uniform discipline. 44 hellgate cases / 110
+  expects pin every status transition per kind, attribution WITH/WITHOUT
+  optional ports, hostile-port survival, snapshot round-trip + replace-not-
+  merge, multi-thread isolation, frozen returns, and NO-THROW on every
+  hostile input axis.

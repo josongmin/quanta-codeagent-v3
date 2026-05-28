@@ -1,0 +1,447 @@
+/**
+ * ADR-0399 — In-memory `ApprovalStateMachinePort` implementation.
+ *
+ * Zero-dep reference store. The only mutator of the approval state machine.
+ * Mirrors the Objective (ADR-0394) + Run Ledger (ADR-0395) port shape:
+ *   - frozen returns (no post-return mutation leaks),
+ *   - NO-THROW contract on every method,
+ *   - injected `now` clock seam for deterministic tests.
+ *
+ * Attribution: the store calls `objective.addBlocker` + `ledger.start`/`touch`/
+ * `settle` ONLY when those ports are supplied via `deps`. The calls are wrapped
+ * in try/catch so a misbehaving / hostile fake CANNOT break the approval state
+ * itself — the request is still recorded, just without a `blockerId` /
+ * `runEntryId` back-reference. That is the slice's hard invariant: attribution
+ * is best-effort, approval state is authoritative.
+ *
+ * Slice fence: imports = `node:crypto` (for `randomUUID`), `@/agent/objective`
+ * (TYPES ONLY), `@/agent/run-ledger` (TYPES ONLY), and `./types`. NO `@/agent`
+ * core, NO `@/apps`, NO `@/tool`.
+ */
+
+import { randomUUID } from "node:crypto"
+import type { ObjectivePort } from "@/agent/objective"
+import type { RunLedgerPort } from "@/agent/run-ledger"
+import type {
+  ApprovalDecision,
+  ApprovalKind,
+  ApprovalRequest,
+  ApprovalSnapshot,
+  ApprovalStateMachinePort,
+  ApprovalStatus,
+} from "./types"
+
+/** Closed allow-lists used by NO-THROW guards. Anything outside these is
+ *  silently ignored / coerced; we never throw on a bad enum value. */
+const APPROVAL_KIND = new Set<ApprovalKind>(["permission", "clarification", "escalation"])
+const APPROVAL_STATUS = new Set<ApprovalStatus>([
+  "pending",
+  "approved",
+  "denied",
+  "expired",
+  "cancelled",
+])
+const APPROVAL_DECISION = new Set<ApprovalDecision>(["approve", "deny", "modify"])
+
+/** Maximum number of `options` retained on a request (defensive cap, matches
+ *  the port doc "3 max"). Extra options are silently truncated. */
+const MAX_OPTIONS = 3
+
+const isString = (v: unknown): v is string => typeof v === "string"
+
+const finiteOrNow = (v: unknown, fallback: () => number): number =>
+  typeof v === "number" && Number.isFinite(v) ? v : fallback()
+
+/** Coerce + freeze a list of clarification options (cap = MAX_OPTIONS).
+ *  A non-array / hostile value returns `null` (omit the field). */
+const normalizeOptions = (raw: unknown): readonly string[] | null => {
+  if (!Array.isArray(raw)) return null
+  const out: string[] = []
+  for (const v of raw) {
+    if (isString(v)) out.push(v)
+    if (out.length >= MAX_OPTIONS) break
+  }
+  return out.length === 0 ? null : Object.freeze(out)
+}
+
+/** Freeze a record (and its options array) so a returned reference is inert. */
+const freezeRequest = (r: ApprovalRequest): ApprovalRequest => {
+  const optsFrozen = r.options ? Object.freeze([...r.options]) : undefined
+  const base: ApprovalRequest = {
+    ...r,
+    ...(optsFrozen !== undefined ? { options: optsFrozen } : {}),
+  }
+  return Object.freeze(base)
+}
+
+/** Build the initial pending record. Pure — clock value passed in. */
+const buildPending = (
+  init: {
+    threadId: string
+    kind: ApprovalKind
+    reason: string
+    proposedAction: string
+    resumeStep: string
+    options?: readonly string[]
+  },
+  at: number,
+): ApprovalRequest => {
+  const opts = normalizeOptions(init.options)
+  return {
+    id: randomUUID(),
+    threadId: isString(init.threadId) ? init.threadId : "",
+    kind: APPROVAL_KIND.has(init.kind) ? init.kind : "permission",
+    reason: isString(init.reason) ? init.reason : "",
+    proposedAction: isString(init.proposedAction) ? init.proposedAction : "",
+    resumeStep: isString(init.resumeStep) ? init.resumeStep : "",
+    ...(opts !== null ? { options: opts } : {}),
+    status: "pending",
+    createdAt: at,
+  }
+}
+
+/** Map a decision → a Run Ledger terminal status.
+ *  approve / modify ⇒ completed; deny ⇒ stopped. */
+const decisionToLedgerStatus = (d: ApprovalDecision): "completed" | "stopped" =>
+  d === "approve" || d === "modify" ? "completed" : "stopped"
+
+/** Map a status that exits via expire/cancel → ledger terminal.
+ *  Both halt the wait without an explicit user decision ⇒ stopped. */
+const statusToLedgerStatus = (s: ApprovalStatus): "completed" | "stopped" => {
+  if (s === "approved") return "completed"
+  return "stopped"
+}
+
+/** Required-field gate for a hostile snapshot entry. Returns `null` if any
+ *  required field is missing or has the wrong type — keeps `cleanSnapshotEntry`
+ *  under the cognitive-complexity cap. */
+const hasValidRequired = (r: Record<string, unknown>): boolean => {
+  if (!isString(r.id) || r.id.length === 0) return false
+  if (!isString(r.threadId)) return false
+  if (!APPROVAL_KIND.has(r.kind as ApprovalKind)) return false
+  if (!APPROVAL_STATUS.has(r.status as ApprovalStatus)) return false
+  if (!isString(r.reason)) return false
+  if (!isString(r.proposedAction)) return false
+  if (!isString(r.resumeStep)) return false
+  return true
+}
+
+/** Build the optional-fields portion of a record (everything beyond the
+ *  required gate). Each optional is omitted when absent (exactOptional). */
+const buildOptionalFields = (r: Record<string, unknown>): Partial<ApprovalRequest> => {
+  const opts = normalizeOptions(r.options)
+  const settledAt =
+    typeof r.settledAt === "number" && Number.isFinite(r.settledAt) ? r.settledAt : undefined
+  const decision = APPROVAL_DECISION.has(r.decision as ApprovalDecision)
+    ? (r.decision as ApprovalDecision)
+    : undefined
+  const modifiedAction = isString(r.modifiedAction) ? r.modifiedAction : undefined
+  const blockerId = isString(r.blockerId) ? r.blockerId : undefined
+  const runEntryId = isString(r.runEntryId) ? r.runEntryId : undefined
+  return {
+    ...(opts !== null ? { options: opts } : {}),
+    ...(settledAt !== undefined ? { settledAt } : {}),
+    ...(decision !== undefined ? { decision } : {}),
+    ...(modifiedAction !== undefined ? { modifiedAction } : {}),
+    ...(blockerId !== undefined ? { blockerId } : {}),
+    ...(runEntryId !== undefined ? { runEntryId } : {}),
+  }
+}
+
+/** Defensive snapshot-entry normaliser. Returns `null` on hostile input. */
+const cleanSnapshotEntry = (e: unknown): ApprovalRequest | null => {
+  if (e === null || typeof e !== "object") return null
+  const r = e as Record<string, unknown>
+  if (!hasValidRequired(r)) return null
+  const createdAt =
+    typeof r.createdAt === "number" && Number.isFinite(r.createdAt) ? r.createdAt : 0
+  return freezeRequest({
+    id: r.id as string,
+    threadId: r.threadId as string,
+    kind: r.kind as ApprovalKind,
+    reason: r.reason as string,
+    proposedAction: r.proposedAction as string,
+    resumeStep: r.resumeStep as string,
+    status: r.status as ApprovalStatus,
+    createdAt,
+    ...buildOptionalFields(r),
+  })
+}
+
+/** Capture the id of the NEWEST blocker on an Objective — used after a
+ *  successful `objective.addBlocker` to record `blockerId` on the request. */
+const newestBlockerId = (objective: ObjectivePort, threadId: string): string | null => {
+  try {
+    const obj = objective.get(threadId)
+    if (obj === null) return null
+    const blockers = obj.blockers
+    if (!Array.isArray(blockers) || blockers.length === 0) return null
+    const last = blockers[blockers.length - 1]
+    return last && isString(last.id) ? last.id : null
+  } catch {
+    return null
+  }
+}
+
+/** Try to attribute the pause to the Objective. Returns the new blocker id,
+ *  or `null` on any failure. NO-THROW. */
+const attributeObjective = (
+  objective: ObjectivePort | undefined,
+  threadId: string,
+  reason: string,
+): string | null => {
+  if (objective === undefined) return null
+  try {
+    const updated = objective.addBlocker(threadId, { reason, waitingOn: "user" })
+    if (updated === null) return null
+    return newestBlockerId(objective, threadId)
+  } catch {
+    return null
+  }
+}
+
+/** Try to attribute the pause to the Run Ledger. Returns the entry id used,
+ *  or `null` on any failure. NO-THROW. */
+const attributeLedger = (
+  ledger: RunLedgerPort | undefined,
+  approvalId: string,
+  threadId: string,
+  reason: string,
+  resumeStep: string,
+): string | null => {
+  if (ledger === undefined) return null
+  try {
+    ledger.start({
+      id: approvalId,
+      kind: "exec",
+      owner: threadId,
+      title: reason,
+      resumeAction: resumeStep,
+    })
+    ledger.touch(approvalId, { status: "waiting", waitingOn: "user" })
+    return approvalId
+  } catch {
+    return null
+  }
+}
+
+/** Best-effort: clear the matched objective blocker. NO-THROW. */
+const clearObjectiveBlocker = (
+  objective: ObjectivePort | undefined,
+  threadId: string,
+  blockerId: string | undefined,
+): void => {
+  if (objective === undefined || blockerId === undefined) return
+  try {
+    objective.clearBlocker(threadId, blockerId)
+  } catch {
+    // attribution failure must not break approval state
+  }
+}
+
+/** Best-effort: settle the matched ledger entry. NO-THROW. */
+const settleLedger = (
+  ledger: RunLedgerPort | undefined,
+  runEntryId: string | undefined,
+  status: "completed" | "stopped",
+): void => {
+  if (ledger === undefined || runEntryId === undefined) return
+  try {
+    ledger.settle(runEntryId, status)
+  } catch {
+    // attribution failure must not break approval state
+  }
+}
+
+export const createApprovalStateMachine = (opts?: {
+  now?: () => number
+  objective?: ObjectivePort
+  ledger?: RunLedgerPort
+}): ApprovalStateMachinePort => {
+  const objective = opts?.objective
+  const ledger = opts?.ledger
+  const requests = new Map<string, ApprovalRequest>()
+
+  /** Defensive clock: a host-supplied `now` that throws or returns a
+   *  non-finite value falls back to `Date.now()`. */
+  const clock = (): number => {
+    try {
+      const t = opts?.now ? opts.now() : Date.now()
+      return Number.isFinite(t) ? t : finiteOrNow(undefined, () => Date.now())
+    } catch {
+      try {
+        return Date.now()
+      } catch {
+        return 0
+      }
+    }
+  }
+
+  const store = (r: ApprovalRequest): ApprovalRequest => {
+    const frozen = freezeRequest(r)
+    requests.set(frozen.id, frozen)
+    return frozen
+  }
+
+  const matchesFilter = (
+    r: ApprovalRequest,
+    f: { status?: ApprovalStatus; threadId?: string },
+  ): boolean => {
+    if (f.status !== undefined && r.status !== f.status) return false
+    if (f.threadId !== undefined && r.threadId !== f.threadId) return false
+    return true
+  }
+
+  /** Lookup + run `fn` on a pending entry. Returns null on unknown id; returns
+   *  the existing entry unchanged on an already-settled record (idempotent
+   *  no-op). NO-THROW. */
+  const onlyIfPending = (
+    id: string,
+    fn: (cur: ApprovalRequest) => ApprovalRequest,
+  ): ApprovalRequest | null => {
+    try {
+      if (!isString(id)) return null
+      const cur = requests.get(id)
+      if (cur === undefined) return null
+      if (cur.status !== "pending") return cur
+      return store(fn(cur))
+    } catch {
+      return null
+    }
+  }
+
+  return {
+    request(req): ApprovalRequest {
+      try {
+        const at = clock()
+        // Garbage in still produces a non-null ApprovalRequest (port contract).
+        const safe =
+          req !== null && typeof req === "object"
+            ? req
+            : {
+                threadId: "",
+                kind: "permission" as ApprovalKind,
+                reason: "",
+                proposedAction: "",
+                resumeStep: "",
+              }
+        const pending = buildPending(safe, at)
+        // Best-effort attribution — failure must not propagate.
+        const blockerId = attributeObjective(objective, pending.threadId, pending.reason)
+        const runEntryId = attributeLedger(
+          ledger,
+          pending.id,
+          pending.threadId,
+          pending.reason,
+          pending.resumeStep,
+        )
+        return store({
+          ...pending,
+          ...(blockerId !== null ? { blockerId } : {}),
+          ...(runEntryId !== null ? { runEntryId } : {}),
+        })
+      } catch {
+        // Fall back to an empty pending — the port contract forbids throwing.
+        return store(
+          buildPending(
+            {
+              threadId: "",
+              kind: "permission",
+              reason: "",
+              proposedAction: "",
+              resumeStep: "",
+            },
+            0,
+          ),
+        )
+      }
+    },
+
+    settle(id, decision, settleOpts): ApprovalRequest | null {
+      // Idempotent: settling an already-settled record is a no-op returning it.
+      return onlyIfPending(id, (cur) => {
+        const d = APPROVAL_DECISION.has(decision) ? decision : "deny"
+        const status: ApprovalStatus = d === "deny" ? "denied" : "approved"
+        const modifiedAction =
+          d === "modify" && settleOpts && isString(settleOpts.modifiedAction)
+            ? settleOpts.modifiedAction
+            : undefined
+        const next: ApprovalRequest = {
+          ...cur,
+          status,
+          settledAt: clock(),
+          decision: d,
+          ...(modifiedAction !== undefined ? { modifiedAction } : {}),
+        }
+        clearObjectiveBlocker(objective, cur.threadId, cur.blockerId)
+        settleLedger(ledger, cur.runEntryId, decisionToLedgerStatus(d))
+        return next
+      })
+    },
+
+    expire(id): ApprovalRequest | null {
+      return onlyIfPending(id, (cur) => {
+        const next: ApprovalRequest = { ...cur, status: "expired", settledAt: clock() }
+        clearObjectiveBlocker(objective, cur.threadId, cur.blockerId)
+        settleLedger(ledger, cur.runEntryId, statusToLedgerStatus("expired"))
+        return next
+      })
+    },
+
+    cancel(id): ApprovalRequest | null {
+      return onlyIfPending(id, (cur) => {
+        const next: ApprovalRequest = { ...cur, status: "cancelled", settledAt: clock() }
+        clearObjectiveBlocker(objective, cur.threadId, cur.blockerId)
+        settleLedger(ledger, cur.runEntryId, statusToLedgerStatus("cancelled"))
+        return next
+      })
+    },
+
+    get(id): ApprovalRequest | null {
+      try {
+        if (!isString(id)) return null
+        return requests.get(id) ?? null
+      } catch {
+        return null
+      }
+    },
+
+    list(filter): readonly ApprovalRequest[] {
+      try {
+        const f = filter && typeof filter === "object" ? filter : {}
+        const out: ApprovalRequest[] = []
+        for (const r of requests.values()) if (matchesFilter(r, f)) out.push(r)
+        return Object.freeze(out)
+      } catch {
+        return Object.freeze([])
+      }
+    },
+
+    pending(): readonly ApprovalRequest[] {
+      return this.list({ status: "pending" })
+    },
+
+    toSnapshot(): ApprovalSnapshot {
+      try {
+        return Object.freeze({ approvals: Object.freeze([...requests.values()]) })
+      } catch {
+        return Object.freeze({ approvals: Object.freeze([]) })
+      }
+    },
+
+    fromSnapshot(snap): void {
+      try {
+        if (snap === null || typeof snap !== "object") return
+        const raw = (snap as ApprovalSnapshot).approvals
+        if (!Array.isArray(raw)) return
+        requests.clear()
+        for (const e of raw) {
+          const clean = cleanSnapshotEntry(e)
+          if (clean !== null) requests.set(clean.id, clean)
+        }
+      } catch {
+        // leave whatever survived; never throw
+      }
+    },
+  }
+}
