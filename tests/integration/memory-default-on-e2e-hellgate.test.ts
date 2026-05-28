@@ -451,28 +451,23 @@ describe("ADR-0414 e2e — auto-trigger gate is orthogonal to the store", () => 
     expect(slot.autoTrigger).toBeUndefined()
   })
 
-  test("sqlite path with a NON-EXISTENT parent directory ⇒ graceful (no throw at factory boundary)", () => {
-    // The factory must not crash when handed a path whose parent dir is absent;
-    // the sqlite adapter is responsible for creating the file. Assert the call
-    // does not throw and yields a store (or surfaces a typed error, not a crash
-    // of the whole factory).
+  test("sqlite path with a NON-EXISTENT parent directory ⇒ deterministic THROW (bun:sqlite cannot create the file)", () => {
+    // CONTRACT (empirically pinned): `bun:sqlite`'s `new Database(path)` does
+    // NOT create intermediate directories — opening a db whose parent dir is
+    // absent fails with "unable to open database file". Neither `buildStoreCore`
+    // (store.ts) nor `buildMemoryForSession` wraps the constructor, so the
+    // factory THROWS deterministically on a missing-parent path. We pin that
+    // exact contract: a regression that started swallowing the error (and
+    // silently returning a store-less or partial bundle) OR that started
+    // auto-creating the parent dir would flip this assertion and be caught.
     const { dir, cleanup } = mkTmp("missing-parent")
     try {
       const nestedPath = join(dir, "does", "not", "exist", "memory.sqlite")
-      // bun:sqlite creates intermediate dirs? If not, this throws — we assert
-      // the boundary behavior explicitly so a regression is visible.
-      let threw = false
-      try {
-        const slot = buildMemoryForSession(
-          env({ QUANTA_MEMORY: "sqlite", QUANTA_MEMORY_PATH: nestedPath }),
-        )
-        expect(slot.store).toBeDefined()
-      } catch {
-        threw = true
-      }
-      // Either outcome is acceptable as long as it is deterministic; we record
-      // the contract: the factory does not silently return a partial bundle.
-      expect(typeof threw).toBe("boolean")
+      expect(() =>
+        buildMemoryForSession(env({ QUANTA_MEMORY: "sqlite", QUANTA_MEMORY_PATH: nestedPath })),
+      ).toThrow(/unable to open database file/)
+      // And the failed open left NO file behind (no partial side effect).
+      expect(existsSync(nestedPath)).toBe(false)
     } finally {
       cleanup()
     }
