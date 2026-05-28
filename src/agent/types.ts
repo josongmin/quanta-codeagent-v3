@@ -1543,6 +1543,27 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    *  converted to `[]`. Absent ⇒ no parse, no injection (byte-identical). */
   mentionInjector?: (userInputText: string) => Promise<readonly import("@/llm").Message[]>
 
+  /** ADR-0418 — declarative DI knobs for the `@file` / `@symbol` mention
+   *  resolvers. A composition root reads `QUANTA_MENTION_FILE*` /
+   *  `QUANTA_MENTION_SYMBOL*` env into this bag (or a host injects it
+   *  directly) and threads it into `createCompositeMentionResolver`. This is
+   *  the DATA shape only — the wire from this bag to a built `mentionInjector`
+   *  is the composition root's job. Absent ⇒ file/symbol mentions resolve to
+   *  `null` (skipped), byte-identical to the legacy 3-kind path. */
+  mentionInjection?: {
+    /** Pre-built `@file` resolver (e.g. from `createFileResolver`). */
+    readonly fileResolver?: (target: string) => Promise<{ readonly bodyText: string } | null>
+    /** Pre-built `@symbol` resolver (e.g. from `createSymbolResolver`). */
+    readonly symbolResolver?: (target: string) => Promise<{ readonly bodyText: string } | null>
+    /** File read cap before truncation (default 256 KiB). */
+    readonly maxFileBytes?: number
+    /** Fraction of the cap reserved for the file tail (0..1, default 0). */
+    readonly tailRatio?: number
+    /** `@symbol` lookup strategy: `lsp` | `semantic` | `auto` (default auto). */
+    readonly symbolPriority?: "lsp" | "semantic" | "auto"
+    /** Per-strategy `@symbol` lookup timeout in ms (default 5000). */
+    readonly symbolTimeoutMs?: number
+  }
 
   /** ADR-0324 — typed compaction-event emitter. Called when a proactive
    *  (top-of-turn `maybeCompact`) compaction succeeds. The callback is

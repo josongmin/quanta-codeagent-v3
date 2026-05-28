@@ -130,4 +130,58 @@ describe("createFileResolver — ADR-0413 hellgate", () => {
     // biome-ignore lint/suspicious/noExplicitAny: deliberate hostile cast for NO-THROW invariant
     expect(await resolve(undefined as any)).toBeNull()
   })
+
+  // -------- G. ADR-0418 knobs: maxBytes / tailRatio / empty ----------
+
+  test("G1 — maxBytes boundary: size === cap ⇒ verbatim (not truncated)", async () => {
+    const resolve = createFileResolver({ root, maxBytes: 20 })
+    // src/hello.ts = "export const hi = 1\n" = exactly 20 bytes
+    expect(await resolve("src/hello.ts")).toEqual({ bodyText: "export const hi = 1\n" })
+  })
+
+  test("G2 — maxBytes invalid (0 / negative / NaN) ⇒ default cap (file read verbatim)", async () => {
+    for (const bad of [0, -5, Number.NaN]) {
+      const resolve = createFileResolver({ root, maxBytes: bad })
+      expect(await resolve("README.md")).toEqual({ bodyText: "# Title\nbody line\n" })
+    }
+  })
+
+  test("G3 — tailRatio default 0 ⇒ head-only legacy marker on over-cap", async () => {
+    const resolve = createFileResolver({ root, maxBytes: 10 })
+    const res = await resolve("big.txt")
+    expect(res?.bodyText.startsWith("xxxxxxxxxx")).toBe(true)
+    expect(res?.bodyText).toContain("truncated — file is")
+    expect(res?.bodyText).not.toContain("[truncated") // not the head+tail form
+  })
+
+  test("G4 — tailRatio 1 ⇒ tail-only window on over-cap", async () => {
+    const resolve = createFileResolver({ root, maxBytes: 10, tailRatio: 1 })
+    const res = await resolve("big.txt")
+    expect(res?.bodyText).toBe("x".repeat(10)) // pure tail, no marker
+  })
+
+  test("G5 — tailRatio 0.5 ⇒ head+tail window with omitted-byte marker", async () => {
+    const resolve = createFileResolver({ root, maxBytes: 10, tailRatio: 0.5 })
+    const res = await resolve("big.txt")
+    expect(res?.bodyText).toContain("…[truncated")
+    expect(res?.bodyText).toContain("bytes]…")
+  })
+
+  test("G6 — tailRatio out of range (>1, <0) clamps to [0,1]", async () => {
+    const tail = createFileResolver({ root, maxBytes: 10, tailRatio: 5 }) // clamps to 1
+    expect((await tail("big.txt"))?.bodyText).toBe("x".repeat(10))
+    const head = createFileResolver({ root, maxBytes: 10, tailRatio: -3 }) // clamps to 0
+    expect((await head("big.txt"))?.bodyText).toContain("truncated — file is")
+  })
+
+  test("G7 — empty file ⇒ empty-string body (present fragment, NOT null)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "quanta-file-empty-"))
+    writeFileSync(join(dir, "empty.txt"), "")
+    try {
+      const resolve = createFileResolver({ root: dir })
+      expect(await resolve("empty.txt")).toEqual({ bodyText: "" })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })
