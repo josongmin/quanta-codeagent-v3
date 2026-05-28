@@ -11,10 +11,9 @@
  * ADR-0323 history-sanitization, ADR-0325 mention-injection resolver
  * port, ADR-0326 system-prompt-cache, ADR-0328 image-sanitization-
  * retry config). Future absorbs of a higher-level
- * `createContextEventsProducer` / `createMentionInjector` factory
- * may add convenience wrappers; until then the install helper owns
- * the closure assembly inline so a composition root needs only the
- * stateless primitive deps below.
+ * `createContextEventsProducer` factory may add convenience wrappers;
+ * until then the install helper owns the closure assembly inline so a
+ * composition root needs only the stateless primitive deps below.
  */
 
 import type { TurnStateSnapshot } from "@/agent/context-change"

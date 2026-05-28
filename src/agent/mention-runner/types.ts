@@ -3,9 +3,9 @@
  *
  * This slice is the production wire of ADR-0325's `MentionResolverPort`.
  * It supplies a SKILL-ONLY resolver (no plugin / no app — see ADR §3
- * Non-goals) and a thin composition function that produces the
- * `(userInputText: string) => readonly Message[]` value that `AgentConfig`
- * is expected to wire (slot reserved in ADR-0327).
+ * Non-goals) plus the ADR-0422 DRY composite builder
+ * (`buildDefaultMentionResolver`) the surfaces compose the
+ * `AgentConfig.mentionInjector` from.
  *
  * Closed shapes — `SkillRegistryReadOnly` mirrors the read-only adapter
  * that lives in @/skill. The mention runner accepts an INJECTED instance
@@ -29,20 +29,4 @@
 export interface SkillRegistryReadOnly {
   /** Returns the descriptor or `null` for unknown / malformed entries. */
   lookup(name: string): { readonly name: string; readonly description: string } | null
-}
-
-/**
- * Configuration bag for {@link createMentionInjector}. All knobs optional.
- *
- * - `skills` — read-only registry the skill resolver delegates to. When
- *   omitted, the skill resolver behaves as if the registry were empty
- *   (every `@skill` mention resolves to `null` ⇒ skipped fragment).
- *
- * Plugin / app resolver knobs are INTENTIONALLY ABSENT. They live in
- * future ADRs (plugin manifest discovery + app concept definition).
- * Both resolver methods on the returned port always return `null` —
- * this is a frozen invariant of ADR-0330.
- */
-export interface MentionRunnerConfig {
-  readonly skills?: SkillRegistryReadOnly
 }
