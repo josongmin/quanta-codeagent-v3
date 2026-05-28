@@ -4,8 +4,10 @@
 **Extends:** ADR-0422 (mention wire-up: `@symbol` adapters + DRY builder +
 CLI/host-runtime injector). This closes ADR-0422's two honest holes — the LSP
 adapter had no anchor at config-assembly time, and the semantic strategy was
-not wired at the assemble/CLI layer — so production `@Symbol` actually
-resolves instead of being unconditionally `null`. NO supersede: ADR-0418's
+not wired at the assemble/CLI layer — so production `@Symbol` is now WIRED at
+both call sites (graceful-null without an installed language server / a
+populated index) instead of being unconditionally `null` by construction. NO
+supersede: ADR-0418's
 ports + ADR-0422's adapters/builder are unchanged; this only adds an anchor
 synthesizer, a union LSP lookup, a host-composition deps builder, and fills
 the two existing `buildDefaultMentionResolver` call sites.
@@ -103,9 +105,11 @@ fallback).
 
 ## Consequences
 
-- Production `@Symbol` now resolves: given a supported source file (anchor
+- Production `@Symbol` is now WIRED: given a supported source file (anchor
   synthesized) + an installed language server it returns LSP hits; otherwise it
-  falls back to the semantic index (when populated via `QUANTA_INDEX`).
+  falls back to the semantic index (when populated via `QUANTA_INDEX`). In a
+  fresh checkout with no language server installed and an empty index it still
+  resolves `null` — the wire is present, the backing data is not (see residual).
 - **Honest residual:** LSP hits still require an installed `pyright` /
   `typescript-language-server` (graceful-null without one — unprovable in CI,
   hence the fake-provider tests); the semantic strategy only hits once the index
