@@ -401,6 +401,12 @@ const buildToolContext = (args: {
       return seam !== undefined ? { shellSnapshot: seam } : {}
     })(),
     ...(config.sessionConfigPort !== undefined ? { sessionConfig: config.sessionConfigPort } : {}),
+    // ADR-0421 wire-finish — thread the fast-apply fallback port from
+    // AgentConfig into the ToolContext so `apply_patch` actually receives it.
+    // ABSENT ⇒ ctx field absent ⇒ apply_patch byte-identical (default-OFF).
+    ...(config.fastApplyFallback !== undefined
+      ? { fastApplyFallback: config.fastApplyFallback }
+      : {}),
   }
 }
 
