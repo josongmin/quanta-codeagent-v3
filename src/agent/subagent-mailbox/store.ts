@@ -145,6 +145,23 @@ const isUndeliveredFromSender = (
   return deliveredRank(cell, cursors) === 1
 }
 
+/** Apply the per-sender quota to every distinct sender currently present in
+ *  `cells`. Module-level so `fromSnapshot` stays under the cognitive-complexity
+ *  cap. NO-OP when `cap` is undefined / not positive / not finite. The snapshot
+ *  hole (audit-H R3): without this sweep, an adversarial snapshot can seed
+ *  any number of undelivered cells past `cap` for a single sender, and the
+ *  `send`-time quota would not retroactively reclaim them. */
+const enforcePerSenderQuotaAll = (
+  cells: Map<string, Cell>,
+  cursors: Map<string, number>,
+  cap: number | undefined,
+): void => {
+  if (cap === undefined || !Number.isFinite(cap) || cap <= 0) return
+  const seenSenders = new Set<string>()
+  for (const c of cells.values()) seenSenders.add(c.from)
+  for (const sender of seenSenders) enforcePerSenderQuota(cells, cursors, sender, cap)
+}
+
 /** Per-sender quota: ensure `sender` holds at most `cap` undelivered cells.
  *  Evicts THAT sender's oldest-`sentAt` undelivered cells (FIFO per-sender)
  *  until the cap is met. Other senders' cells are never touched — that is
@@ -459,6 +476,14 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
           const cell = cellFromMessage(m)
           if (cell !== null) cells.set(cell.id, cell)
         }
+        // Snapshot hole closeout (audit-H R3): an adversarial snapshot can
+        // smuggle in undelivered cells far above the per-sender quota — the
+        // quota then only applies to FUTURE `send`s, so the seeded excess
+        // sits in the cells map and re-creates the R2 DoS surface. Apply
+        // the quota to every distinct sender present in the imported
+        // snapshot so the in-memory state is bounded the moment restore
+        // completes. NO-OP when `maxUndeliveredPerSender` is OFF.
+        enforcePerSenderQuotaAll(cells, broadcastCursor, maxUndeliveredPerSender)
       } catch (e) {
         logger.warn(`subagent-mailbox.fromSnapshot: ${errMessage(e)}`)
         // leave whatever survived; never throw
