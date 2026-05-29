@@ -1,10 +1,6 @@
 export { assertNever } from "./assert-never"
 export { byteCompare } from "./byte-compare"
 export { classify } from "./error-classifier"
-export type {
-  LlmContinuationObservation,
-  LlmRequestObservation,
-} from "./llm-route-types"
 export type { LLMErrorKind, LLMProvider } from "./errors"
 export {
   errMessage,
@@ -15,8 +11,18 @@ export {
   ToolInputError,
   toError,
 } from "./errors"
+export type {
+  LlmContinuationObservation,
+  LlmRequestObservation,
+} from "./llm-route-types"
 export type { LogLevel } from "./logger"
-export { LOG_LEVEL_ORDER, levelEnabled, logger } from "./logger"
+export {
+  __resetLoggerRateLimit,
+  __setLoggerNow,
+  LOG_LEVEL_ORDER,
+  levelEnabled,
+  logger,
+} from "./logger"
 export { omitUndef } from "./optional"
 export type { RunContext } from "./run-context"
 export type { RuntimeConfig, SwebenchCacheLevel } from "./runtime-config"
@@ -27,16 +33,14 @@ export {
   SWEBENCH_CACHE_LEVELS,
 } from "./runtime-config"
 export type { ShellExecEvent, ShellExecObserver } from "./shell-exec-types"
-export type {
-  AgentPromptMode,
-  PromptBaseSystem,
-  PromptHookContextMode,
-  PromptPolicySnapshot,
-  PromptSummaryPrefix,
-  PromptSystemLayout,
-  TurnPolicySnapshot,
-  TurnPolicyToolChoiceKind,
-} from "./turn-policy-types"
+export type { TerminalIo, TerminalWriter } from "./terminal-io"
+export {
+  __resetTerminalIo,
+  getTerminalIo,
+  setTerminalIo,
+  writeStderr,
+  writeStdout,
+} from "./terminal-io"
 export type {
   DegradedData,
   LlmUsageData,
@@ -57,13 +61,15 @@ export {
   redactValue,
   TRAJECTORY_SCHEMA,
 } from "./trajectory"
-export type { TerminalIo, TerminalWriter } from "./terminal-io"
-export {
-  __resetTerminalIo,
-  getTerminalIo,
-  setTerminalIo,
-  writeStderr,
-  writeStdout,
-} from "./terminal-io"
+export type {
+  AgentPromptMode,
+  PromptBaseSystem,
+  PromptHookContextMode,
+  PromptPolicySnapshot,
+  PromptSummaryPrefix,
+  PromptSystemLayout,
+  TurnPolicySnapshot,
+  TurnPolicyToolChoiceKind,
+} from "./turn-policy-types"
 export type { HITLTier, Id, Result } from "./types"
 export { ALL_HITL_TIERS, err, ok } from "./types"

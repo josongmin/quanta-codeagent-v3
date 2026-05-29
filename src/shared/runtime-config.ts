@@ -257,6 +257,14 @@ export interface RuntimeConfig {
    *  eviction; pending/running entries are never evicted (see
    *  `default-registry.ts` invariant #3). */
   readonly deferredCap: number | undefined
+  /** R4 audit-H — disable the logger label-keyed leaky-bucket rate limiter
+   *  (`QUANTA_LOG_RATE_LIMIT=off`). Default false (rate limit ON). Set to
+   *  `off` to restore unbounded `logger.{info,warn,error,debug}` semantics —
+   *  useful during incident triage where suppressing same-label spam would
+   *  hide a forensic signal. The default-ON posture closes the audit-H DoS
+   *  surface where a hostile catch in a hot loop could emit millions of
+   *  `logger.warn` lines and stall stderr backpressure. */
+  readonly logRateLimitDisabled: boolean
 }
 
 const stringOrUndef = (raw: string | undefined): string | undefined =>
@@ -316,6 +324,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     ),
     asyncTools: parseBool(env["QUANTA_ASYNC_TOOLS"]),
     deferredCap: parsePositiveInt(env["QUANTA_DEFERRED_CAP"], "QUANTA_DEFERRED_CAP"),
+    logRateLimitDisabled: env["QUANTA_LOG_RATE_LIMIT"] === "off",
   })
 }
 
