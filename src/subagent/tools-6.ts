@@ -69,8 +69,23 @@ export const ExecCommandInputSchema = z
     /** If true, allocate a PTY so subsequent `write_stdin` calls can feed
      *  input. Default false (one-shot). */
     pty: z.boolean().optional(),
-    /** Optional env overlay. Merged onto the inherited env. */
-    env: z.record(z.string(), z.string()).optional(),
+    /** Optional env overlay. Merged onto the inherited env. R4 audit-M closure:
+     *  per-entry key/value caps + per-record entry cap. POSIX permits an env
+     *  KEY up to 256 bytes (most kernels accept far more, but anything past
+     *  that is a copy-paste accident); values are capped at 8 KB (matches
+     *  send_input/mailbox-body discipline elsewhere in the closed 6-tool set).
+     *  64 entries is well above any realistic overlay — a child shell that
+     *  needs more than 64 NEW env vars on top of the inherited process env is
+     *  almost certainly a hostile DoS attempt (`MALLOC_*`/`LD_*`/synthetic
+     *  prefix spray). Without these caps a single `exec_command` could ship a
+     *  multi-megabyte env block and trigger `E2BIG` on the kernel side after
+     *  the dispatcher has already paid the allocation cost. */
+    env: z
+      .record(z.string().min(1).max(256), z.string().max(8192))
+      .refine((rec) => Object.keys(rec).length <= 64, {
+        message: "env may not contain more than 64 entries",
+      })
+      .optional(),
   })
   .strict()
 export type ExecCommandInput = z.infer<typeof ExecCommandInputSchema>
