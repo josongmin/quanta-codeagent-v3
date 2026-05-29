@@ -24,6 +24,16 @@
  *
  * Eviction: bounded by `maxRetained` (default 1024) + `retentionMs` (default
  * 3_600_000ms). Reclaims DELIVERED-before-UNDELIVERED, oldest-`sentAt` first.
+ *
+ * Per-sender quota (audit-H R2): `maxUndeliveredPerSender` (default OFF) caps
+ * how many UNDELIVERED cells any single `from` may simultaneously occupy. A
+ * hostile sender flooding `send({ to: "ghost-X" })` would otherwise have its
+ * unread cells consume the entire global `maxRetained` budget, then force the
+ * global LRU to evict legit sibling mail (which sits at the same `rank=1`
+ * undelivered tier). With the knob set, a `send` that pushes the sender past
+ * its quota first evicts THAT sender's own oldest undelivered cell (FIFO
+ * per-sender) before falling through to global eviction — confining the blast
+ * radius to the offender. Counter is purely per-`from`; no heuristics.
  */
 
 import { randomUUID } from "node:crypto"
@@ -120,6 +130,50 @@ const broadcastSeen = (cell: Cell, cursors: Map<string, number>): boolean => {
  *  DIRECT cell counts as delivered once ANY recipient has consumed it. */
 const deliveredRank = (cell: Cell, cursors: Map<string, number>): 0 | 1 =>
   cell.directDelivered.size > 0 || broadcastSeen(cell, cursors) ? 0 : 1
+
+/** Is `cell` an UNDELIVERED-to-anyone cell attributable to `sender`? Used by
+ *  the per-sender quota: a DIRECT cell counts as long as no recipient has
+ *  consumed it (`directDelivered.size === 0`); a BROADCAST counts as long as
+ *  no non-sender agent's cursor has reached it. Module-level so the closure
+ *  per-send predicate inlines the same definition the eviction loop uses. */
+const isUndeliveredFromSender = (
+  cell: Cell,
+  sender: string,
+  cursors: Map<string, number>,
+): boolean => {
+  if (cell.from !== sender) return false
+  return deliveredRank(cell, cursors) === 1
+}
+
+/** Per-sender quota: ensure `sender` holds at most `cap` undelivered cells.
+ *  Evicts THAT sender's oldest-`sentAt` undelivered cells (FIFO per-sender)
+ *  until the cap is met. Other senders' cells are never touched — that is
+ *  the audit-H R2 isolation guarantee. NO-OP when `cap` is undefined / not
+ *  positive / not finite (default-OFF legacy behavior). */
+const enforcePerSenderQuota = (
+  cells: Map<string, Cell>,
+  cursors: Map<string, number>,
+  sender: string,
+  cap: number | undefined,
+): void => {
+  if (cap === undefined || !Number.isFinite(cap) || cap <= 0) return
+  // Tally + collect this sender's undelivered cells in insertion order
+  // (Map iteration is insertion order, and `sentAt` is monotonic per
+  // `clockNow`, so this IS the FIFO order). Stop at the first delivered
+  // cell or non-match — we only care about the undelivered tail.
+  const undelivered: Cell[] = []
+  for (const c of cells.values()) {
+    if (isUndeliveredFromSender(c, sender, cursors)) undelivered.push(c)
+  }
+  if (undelivered.length <= cap) return
+  undelivered.sort((a, b) => a.sentAt - b.sentAt)
+  let drop = undelivered.length - cap
+  for (const c of undelivered) {
+    if (drop <= 0) break
+    cells.delete(c.id)
+    drop--
+  }
+}
 
 /** Reclaim cells past `maxRetained` (delivered-before-undelivered, oldest
  *  `sentAt` first) and any older than `retentionMs`. Mutates `cells` in place.
@@ -218,6 +272,14 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
     opts.retentionMs > 0
       ? opts.retentionMs
       : DEFAULT_RETENTION_MS
+  /** Per-sender undelivered cap (audit-H R2). `undefined` ⇒ default-OFF
+   *  (legacy behavior, byte-identical). Positive finite integer ⇒ enabled. */
+  const maxUndeliveredPerSender =
+    typeof opts?.maxUndeliveredPerSender === "number" &&
+    Number.isFinite(opts.maxUndeliveredPerSender) &&
+    opts.maxUndeliveredPerSender > 0
+      ? Math.floor(opts.maxUndeliveredPerSender)
+      : undefined
 
   /** Insertion order preserved by Map iteration; `id → Cell`. */
   const cells = new Map<string, Cell>()
@@ -286,6 +348,10 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
           directDelivered: new Map<string, number>(),
         }
         cells.set(cell.id, cell)
+        // Per-sender quota runs BEFORE the global LRU so a hostile sender's
+        // excess always lands on its OWN oldest undelivered cell — never on a
+        // legitimate sibling's at the same `rank=1` undelivered tier.
+        enforcePerSenderQuota(cells, broadcastCursor, cell.from, maxUndeliveredPerSender)
         evict(cells, broadcastCursor, maxRetained, retentionMs, t)
         return toMessage(cell)
       } catch (e) {

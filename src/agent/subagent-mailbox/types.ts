@@ -104,9 +104,21 @@ export interface MailboxPort {
 }
 
 /** Factory options. `now` for determinism; `retentionMs` / `maxRetained` cap
- *  retained-message growth. */
+ *  retained-message growth.
+ *
+ *  `maxUndeliveredPerSender` (audit-H R2 fix, default OFF / undefined) caps the
+ *  number of UNDELIVERED cells any single `from` may simultaneously occupy. A
+ *  hostile subagent flooding `send({ to: "ghost-X" })` with non-existent target
+ *  ids would otherwise consume the entire global `maxRetained` budget with
+ *  undelivered cells, forcing every subsequent `send` to evict by global
+ *  oldest-`sentAt`-first — silently evicting legitimate sibling mail. With
+ *  this knob set, a `send` that pushes the sender past its quota evicts THAT
+ *  sender's own oldest undelivered cell first (FIFO per-sender), isolating
+ *  the blast radius to the offender. A positive integer enables the cap;
+ *  `undefined` / non-positive / non-finite ⇒ legacy behavior (byte-identical). */
 export type CreateSubagentMailboxOptions = {
   now?: () => number
   retentionMs?: number
   maxRetained?: number
+  maxUndeliveredPerSender?: number
 }
