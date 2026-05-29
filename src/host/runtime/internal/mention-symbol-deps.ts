@@ -213,3 +213,11 @@ export const buildMentionSymbolDeps = (
     semantic: lazyLookupPort(() => buildSemanticLookup(env, seams)),
   }
 }
+
+/** Test-only re-export. The internal `once` memoizer's retry-on-throw contract
+ *  (audit-H closeout) is structurally unreachable through the public seams —
+ *  production callers `buildLspLookup` / `buildSemanticLookup` wrap their own
+ *  bodies in try/catch and return `null` rather than rejecting. So the only
+ *  way to PIN the "cache only fulfilled / reset on reject / share in-flight"
+ *  invariant against a silent revert is to test `once` directly. */
+export const __test = { once }
