@@ -55,17 +55,54 @@ export const levelEnabled = (level: LogLevel, threshold: LogLevel): boolean =>
  *  reordering via U+202E RTL override). The intentional terminating `\n`
  *  appended in `write` is OUTSIDE this layer, so single-line discipline is
  *  preserved. NOTE: `new RegExp(string)` avoids biome's
- *  `noControlCharactersInRegex` rule trip on the literal form. */
+ *  `noControlCharactersInRegex` rule trip on the literal form.
+ *
+ *  R5 audit-M3 closure — NFKC NORMALIZATION FIRST. Without it, a hostile
+ *  string can bypass every regex by smuggling forge characters through
+ *  Unicode equivalents the strip set does not enumerate:
+ *    - combining marks (U+0300-U+036F) make `[error]` visually identical
+ *      to a payload built from `[`+`e`+`<combining accent>`+`r`… etc.
+ *    - presentation-form / compatibility characters (e.g. fullwidth `[`
+ *      U+FF3B, halfwidth digits, ligature `ﬁ`) decompose to ASCII under
+ *      NFKC, exposing them to the existing CSI / OSC regexes.
+ *    - IDN homograph attacks against label-grep alerting collapse under
+ *      NFKC because Latin/Cyrillic look-alikes are NOT NFKC-equivalent
+ *      (so they STILL pass through — operators must rely on label-prefix
+ *      whitelisting for that vector; NFKC handles the compatibility class
+ *      only, not the confusable class).
+ *  NFKC is decision-deterministic (Unicode standard, ECMA-402 `String.
+ *  prototype.normalize`), constant-rate per byte, and runs BEFORE the
+ *  control/ANSI strip so canonicalised forge characters land in the strip
+ *  set. Soft hyphen (U+00AD) is added to the BIDI_ZW set because NFKC does
+ *  NOT decompose it, but it is a documented invisible / token-splitter
+ *  forge character.
+ *
+ *  NOTE on failure mode: `normalize("NFKC")` can throw RangeError on lone
+ *  unpaired surrogates in some engines. We wrap in a try/catch so a hostile
+ *  surrogate cannot break the logger itself; on failure we fall through to
+ *  the raw regex pass (still safer than nothing). */
 const ANSI_OSC_DCS_APC_RE = new RegExp(
   "\\u001b\\][\\s\\S]*?(?:\\u0007|\\u001b\\\\)|\\u001b[PX^_][\\s\\S]*?\\u001b\\\\",
   "g",
 )
 const ANSI_CSI_RE = new RegExp("\\u001b\\[[0-9;?]*[ -/]*[@-~]", "g")
 const CONTROL_RE = new RegExp("[\\u0000-\\u0008\\u000a-\\u001f\\u007f-\\u009f]", "g")
-const BIDI_ZW_RE = new RegExp("[\\u200b-\\u200f\\u202a-\\u202e\\u2066-\\u2069\\ufeff]", "g")
+/** Bidi controls + zero-width + soft hyphen (U+00AD).
+ *  Soft hyphen is invisible in most terminals but splits grep-anchored
+ *  alert tokens (`credenti­als` ≠ `credentials` for naive regex), and NFKC
+ *  does not decompose it. R5 audit-M3 closure. */
+const BIDI_ZW_RE = new RegExp("[\\u00ad\\u200b-\\u200f\\u202a-\\u202e\\u2066-\\u2069\\ufeff]", "g")
+
+const normalizeNfkc = (s: string): string => {
+  try {
+    return s.normalize("NFKC")
+  } catch {
+    return s
+  }
+}
 
 const sanitizeLogText = (s: string): string =>
-  s
+  normalizeNfkc(s)
     .replace(ANSI_OSC_DCS_APC_RE, "")
     .replace(ANSI_CSI_RE, "")
     .replace(CONTROL_RE, "?")
