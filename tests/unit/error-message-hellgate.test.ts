@@ -157,34 +157,43 @@ describe("errMessage hellgate — R1 silent-undefined guard", () => {
     expect(errMessage(new Rich())).toBe("rich message")
   })
 
-  test("R5 audit-H closure: Object.create(null) returns sentinel (no throw)", () => {
-    // R5 hardened errMessage with try/catch around String(e). null-prototype
-    // objects (no @@toPrimitive / toString / valueOf) now degrade to the
-    // <unstringifiable> sentinel rather than re-throwing out of the catch
-    // block. Closes the hole the R1 audit deferred as a separate ADR.
+  test("R5/R8 audit closure: Object.create(null) returns tagged sentinel", () => {
+    // R5 wrapped String(e) in try/catch → <unstringifiable> sentinel.
+    // R8 added a best-effort throw shape tag (typeof + constructor.name).
+    // null-prototype object: typeof=object, no constructor → "object".
     const nullProto = Object.create(null) as Record<string, unknown>
     nullProto.code = "E_NULLPROTO"
-    expect(errMessage(nullProto)).toBe("<unstringifiable>")
+    expect(errMessage(nullProto)).toBe("<unstringifiable:object>")
   })
 
-  test("R5 audit-H closure: object with throwing toString returns sentinel (no throw)", () => {
-    // R5: a hostile object whose .toString() throws no longer escapes
-    // errMessage; degrades to the <unstringifiable> sentinel.
+  test("R5/R8 audit closure: throwing toString returns tagged sentinel", () => {
     const hostile = {
       toString(): string {
         throw new Error("toString throws")
       },
     }
-    expect(errMessage(hostile)).toBe("<unstringifiable>")
+    // Plain object literal: typeof=object, constructor.name="Object".
+    expect(errMessage(hostile)).toBe("<unstringifiable:object/Object>")
   })
 
-  test("R5 audit-H closure: object with throwing @@toPrimitive returns sentinel", () => {
+  test("R5/R8 audit closure: throwing @@toPrimitive returns tagged sentinel", () => {
     const hostile = {
       [Symbol.toPrimitive](): string {
         throw new Error("toPrimitive throws")
       },
     }
-    expect(errMessage(hostile)).toBe("<unstringifiable>")
+    expect(errMessage(hostile)).toBe("<unstringifiable:object/Object>")
+  })
+
+  test("R8 audit closure: custom-class throwing toString preserves constructor name", () => {
+    class HostileEvent {
+      toString(): string {
+        throw new Error("blocked")
+      }
+    }
+    // Custom class name leaks into the sentinel for forensic — what threw
+    // is now traceable even when String(e) blew up.
+    expect(errMessage(new HostileEvent())).toBe("<unstringifiable:object/HostileEvent>")
   })
 
   test("19-site invariant: template interpolation NEVER yields '...: undefined' for the audit hole class", () => {

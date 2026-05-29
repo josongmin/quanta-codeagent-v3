@@ -447,10 +447,36 @@ export const errMessage = (e: unknown): string => {
   // R5 audit-H: `String(e)` re-throws when e.toString / Symbol.toPrimitive
   // throw — those exceptions would escape the originating catch and crash
   // the host. The whole point of `errMessage` is "extract a label even from
-  // hostile throws", so a throwing stringifier degrades to a fixed sentinel.
+  // hostile throws", so a throwing stringifier degrades to a typed sentinel
+  // that preserves forensic info (R8 audit-M closure — bare `<unstringifiable>`
+  // erased the throw's shape, breaking forensic).
   try {
     return String(e)
   } catch {
-    return "<unstringifiable>"
+    return `<unstringifiable:${unstringifiableTag(e)}>`
   }
+}
+
+/** Best-effort throw shape tag for the `<unstringifiable>` sentinel. Probes
+ *  typeof + constructor name without invoking any user-defined `.toString` /
+ *  `@@toPrimitive` (those are what threw). Every probe is independently
+ *  try/caught so a deeply hostile object cannot escape this function either. */
+const unstringifiableTag = (e: unknown): string => {
+  let kind = "unknown"
+  try {
+    kind = typeof e
+  } catch {
+    /* ignore — typeof should never throw, but defense in depth */
+  }
+  if (kind !== "object" || e === null) return kind
+  try {
+    const ctor = (e as { constructor?: { name?: unknown } }).constructor
+    const name = ctor?.name
+    if (typeof name === "string" && name.length > 0 && name.length <= 64) {
+      return `object/${name}`
+    }
+  } catch {
+    /* hostile getter — fall through to plain "object" */
+  }
+  return "object"
 }
