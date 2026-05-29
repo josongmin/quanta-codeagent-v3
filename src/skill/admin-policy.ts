@@ -23,6 +23,7 @@
 
 import { join } from "node:path"
 import { z } from "zod"
+import { errMessage } from "@/shared"
 import type { AdminPolicyReader } from "./admin-policy-loader-fs"
 
 // Re-export the port type so callers can construct a typed reader without
@@ -61,7 +62,7 @@ export const parseAdminPolicy = (
   try {
     json = JSON.parse(raw)
   } catch (e) {
-    return { ok: false, error: `org-policy.json: invalid JSON (${(e as Error).message})` }
+    return { ok: false, error: `org-policy.json: invalid JSON (${errMessage(e)})` }
   }
   const parsed = AdminPolicySchema.safeParse(json)
   if (!parsed.success) {

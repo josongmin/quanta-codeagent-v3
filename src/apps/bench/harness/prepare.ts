@@ -8,7 +8,7 @@
  * NEVER throws — an unavailable harness / non-zero exit / spawn error all
  * resolve to `{ ok: false, … }` so the caller (bench CLI) can report + exit.
  */
-import { runtimeConfig } from "@/shared"
+import { errMessage, runtimeConfig } from "@/shared"
 import { hostArch } from "./arch"
 import { type HarnessConfig, harnessFlags, resolveHarnessConfig } from "./config"
 import { type DockerSpawn, listSwebenchImages } from "./images"
@@ -196,7 +196,7 @@ export const prepareImages = async (opts: PrepareImagesOpts): Promise<PrepareIma
     return {
       ok: false,
       preexistingEnvImages,
-      log: `prepare_images invocation failed: ${(e as Error).message}`,
+      log: `prepare_images invocation failed: ${errMessage(e)}`,
     }
   }
 }

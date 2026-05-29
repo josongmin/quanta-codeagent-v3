@@ -5,6 +5,7 @@
  * the duck-typed {@link ToolContext.planMutator} seam. Registered only when
  * `ctx.planMutator` is wired (default-OFF byte-identical otherwise).
  */
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { planErrorMessage, planFailure } from "./error-mapping"
 import { type CreatePlanInput, createPlanSchema } from "./schemas"
@@ -38,7 +39,7 @@ export const createPlanTool = (): Tool<CreatePlanInput> => ({
         type: "result",
         result: {
           ok: false,
-          output: `create_plan failed: ${(e as Error).message ?? String(e)}`,
+          output: `create_plan failed: ${errMessage(e)}`,
           failure: { mode: "error", modelVisibleError: "internal mutator error" },
         },
       }

@@ -5,6 +5,7 @@
  * existing `ToolContext.planMutator.current()` path to the model so CAS
  * retries can fetch the latest `expected_version` without mutating.
  */
+import { errMessage } from "@/shared"
 import type { PlanReadonlyView, Tool, ToolContext, ToolEvent } from "../types"
 import { type CurrentPlanInput, currentPlanSchema } from "./schemas"
 
@@ -47,7 +48,7 @@ export const currentPlanTool = (): Tool<CurrentPlanInput> => ({
         type: "result",
         result: {
           ok: false,
-          output: `current_plan failed: ${(e as Error).message ?? String(e)}`,
+          output: `current_plan failed: ${errMessage(e)}`,
           failure: { mode: "error", modelVisibleError: "internal mutator error" },
         },
       }

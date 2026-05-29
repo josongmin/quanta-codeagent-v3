@@ -15,6 +15,7 @@
  *  both structurally. Plane-clean: only `zod` + `../types` + in-file mirror. */
 
 import { z } from "zod"
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
 // ── Duck-typed mirror of `RenameApplyPort` ─────────────────────────────────
@@ -126,7 +127,7 @@ export const lspRenameApplyTool = (port: RenameApplyPort): Tool<LspRenameApplyIn
         type: "result",
         result: {
           ok: false,
-          output: `lsp_rename_apply unavailable: ${(e as Error).message}`,
+          output: `lsp_rename_apply unavailable: ${errMessage(e)}`,
         },
       }
       return
@@ -159,7 +160,7 @@ export const lspRenameApplyTool = (port: RenameApplyPort): Tool<LspRenameApplyIn
         type: "result",
         result: {
           ok: false,
-          output: `lsp_rename_apply applyEdit failed: ${(e as Error).message}`,
+          output: `lsp_rename_apply applyEdit failed: ${errMessage(e)}`,
         },
       }
       return

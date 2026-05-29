@@ -16,6 +16,7 @@
  *  `@/lsp`, `@/storage`. */
 
 import { z } from "zod"
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
 // ── Duck-typed mirror of `CodeActionPort` (`@/lsp/ports/code-action-port`) ──
@@ -158,7 +159,7 @@ export const lspCodeActionTool = (port: CodeActionPort): Tool<LspCodeActionInput
         type: "result",
         result: {
           ok: false,
-          output: `lsp_code_action unavailable: ${(e as Error).message}`,
+          output: `lsp_code_action unavailable: ${errMessage(e)}`,
         },
       }
       return

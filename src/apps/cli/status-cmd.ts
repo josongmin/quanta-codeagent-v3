@@ -18,6 +18,7 @@ import {
   type TokenRecord,
 } from "@/auth/chatgpt-oauth"
 import { pickProvider } from "@/llm"
+import { errMessage } from "@/shared"
 import {
   bold,
   cyan,
@@ -130,7 +131,9 @@ const renderTokenSection = (
     )
   }
   if (tokenSource !== null) {
-    out.push(`    ${kvLine("source", gray(tokenSource === "quanta" ? "quanta prefs" : "codex login"), 11)}`)
+    out.push(
+      `    ${kvLine("source", gray(tokenSource === "quanta" ? "quanta prefs" : "codex login"), 11)}`,
+    )
   }
   out.push(`    ${kvLine("path", gray(tokenPath), 11)}`)
   return out
@@ -169,7 +172,7 @@ export const buildStatusCmd = (deps: StatusDeps = {}): SlashCommand => ({
       tokenPathUsed = resolved?.path ?? tokenPath
       tokenSource = resolved?.source ?? null
     } catch (e) {
-      tokenErr = (e as Error).message
+      tokenErr = errMessage(e)
     }
 
     const active = resolveActiveProvider(tokenEnv, token !== null && tokenErr === null)

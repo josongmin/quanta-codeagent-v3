@@ -29,6 +29,7 @@ import {
   UsageTap,
 } from "@/runner/batch/eval/driver"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
+import { errMessage } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import type { Instance, InstanceResult } from "../types"
 import { runEnvPrep } from "./env-prep"
@@ -426,7 +427,7 @@ export const runInstance = async (
       passed: false,
       patch: phase.patch,
       turns: phase.turns,
-      error: (error as Error).message,
+      error: errMessage(error),
     }
   } finally {
     clearTimeout(deadline)

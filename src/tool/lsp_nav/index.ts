@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { errMessage } from "@/shared"
 import { FsJailError, type JailedPath, resolveJailed } from "@/storage"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { formatHover, formatLocations, formatRenamePreview, formatSymbols } from "./formatters"
@@ -25,24 +26,6 @@ import type {
  * diagnostics tool does it). This keeps the tools unit-testable with a fake
  * provider in the normal gate (no real server needed).
  */
-
-export {
-  formatHover,
-  formatLocations,
-  formatRenamePreview,
-  formatSymbols,
-} from "./formatters"
-export type {
-  LspNavProvider,
-  LspNavSession,
-  NavHover,
-  NavLocation,
-  NavPos,
-  NavRange,
-  NavRenamePreview,
-  NavSymbolInfo,
-  NavSymbolKind,
-} from "./types"
 
 // ── ADR-0141 expansion ────────────────────────────────────────────────────
 // Four new tool slices (code-action / rename-apply / format / signature-help)
@@ -71,6 +54,12 @@ export {
   lspFormatTool,
 } from "./format"
 export {
+  formatHover,
+  formatLocations,
+  formatRenamePreview,
+  formatSymbols,
+} from "./formatters"
+export {
   type LspRenameApplyInput,
   lspRenameApplyInputSchema,
   lspRenameApplyTool,
@@ -89,6 +78,17 @@ export {
   type SignatureHelpPortInfo,
   type SignatureHelpPortParameter,
 } from "./signature-help"
+export type {
+  LspNavProvider,
+  LspNavSession,
+  NavHover,
+  NavLocation,
+  NavPos,
+  NavRange,
+  NavRenamePreview,
+  NavSymbolInfo,
+  NavSymbolKind,
+} from "./types"
 
 /** Shared 1-based position input — converted to 0-based NavPos internally. */
 const positionSchema = z.object({
@@ -165,7 +165,7 @@ async function* openOrEmitUnavailable(
   } catch (e) {
     yield {
       type: "result",
-      result: { ok: false, output: `${toolName} unavailable: ${(e as Error).message}` },
+      result: { ok: false, output: `${toolName} unavailable: ${errMessage(e)}` },
     }
     return null
   }
@@ -203,7 +203,7 @@ async function* runSession<R>(
   } catch (e) {
     yield {
       type: "result",
-      result: { ok: false, output: `${toolName} failed: ${(e as Error).message}` },
+      result: { ok: false, output: `${toolName} failed: ${errMessage(e)}` },
     }
   } finally {
     await session.stop().catch(() => undefined)

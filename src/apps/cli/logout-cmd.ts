@@ -16,6 +16,7 @@ import {
   resolveChatgptTokenCandidates,
   type TokenRecord,
 } from "@/auth/chatgpt-oauth"
+import { errMessage } from "@/shared"
 import { bold, cyan, dim, gray, green, kvLine, red, renderBox, yellow } from "./auth-ui"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 
@@ -37,10 +38,7 @@ const renderLoggedOut = (path: string, prior: TokenRecord | null): string => {
   if (prior !== null && prior.account_id !== undefined) {
     lines.push(kvLine("was account", gray(prior.account_id), 11))
   }
-  lines.push(
-    "",
-    `${dim("Sign in again any time with ")}${cyan("/login --chatgpt")}${dim(".")}`,
-  )
+  lines.push("", `${dim("Sign in again any time with ")}${cyan("/login --chatgpt")}${dim(".")}`)
   return `${renderBox(lines, {
     title: "ChatGPT Sign-Out",
     titleStyle: cyan,
@@ -132,7 +130,7 @@ export const buildLogoutCmd = (deps: LogoutDeps = {}): SlashCommand => ({
     try {
       await deleteToken(pathUsed)
     } catch (e) {
-      ctx.err(renderError(pathUsed, (e as Error).message))
+      ctx.err(renderError(pathUsed, errMessage(e)))
       return 1
     }
     ctx.out(renderLoggedOut(pathUsed, prior))

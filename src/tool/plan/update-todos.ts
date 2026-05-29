@@ -6,6 +6,7 @@
  * preserves unspecified fields; `merge:false` clears optional ones (null
  * sentinel always clears regardless).
  */
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { planErrorMessage, planFailure } from "./error-mapping"
 import { type UpdateTodosInput, updateTodosSchema } from "./schemas"
@@ -40,7 +41,7 @@ export const updateTodosTool = (): Tool<UpdateTodosInput> => ({
         type: "result",
         result: {
           ok: false,
-          output: `update_todos failed: ${(e as Error).message ?? String(e)}`,
+          output: `update_todos failed: ${errMessage(e)}`,
           failure: { mode: "error", modelVisibleError: "internal mutator error" },
         },
       }

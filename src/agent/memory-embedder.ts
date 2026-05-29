@@ -1,6 +1,6 @@
 import OpenAI from "openai"
 import type { EmbedderPort } from "@/memory"
-import { LLMError } from "@/shared"
+import { errMessage, LLMError } from "@/shared"
 
 /**
  * Concrete {@link EmbedderPort} implementations (RFC §6.3, long-term memory).
@@ -74,7 +74,7 @@ export class OpenAIEmbedder implements EmbedderPort {
         })
         for (const d of res.data) out.push(d.embedding)
       } catch (e) {
-        throw new LLMError(`OpenAI embeddings failed: ${(e as Error).message}`, {
+        throw new LLMError(`OpenAI embeddings failed: ${errMessage(e)}`, {
           cause: e,
         })
       }

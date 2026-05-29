@@ -42,6 +42,7 @@ import isPathInside from "is-path-inside"
 import { importSessionFromJson, SessionImportError } from "@/session/import-export"
 import { exportSessionToFile } from "@/session/import-export-fs"
 import type { SavedSession } from "@/session/types"
+import { errMessage } from "@/shared"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 
 /* ------------------------------------------------------------------ */
@@ -351,7 +352,7 @@ export const sessionCmd: SlashCommand = {
     try {
       flags = parseFlags(rest)
     } catch (e) {
-      ctx.err(`${(e as Error).message}\n`)
+      ctx.err(`${errMessage(e)}\n`)
       return 1
     }
     if (sub === "export") return runExport(flags, ctx, ctx.sessionIo)

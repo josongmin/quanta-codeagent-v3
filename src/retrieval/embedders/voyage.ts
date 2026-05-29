@@ -9,18 +9,21 @@
  * Transport is INJECTED via {@link VoyageHttp} so tests can avoid network
  * and the slice never imports a vendor SDK.
  */
-import { LLMError } from "@/shared"
-import { isAbortError, throwIfAborted } from "./_abort"
+import { errMessage, LLMError } from "@/shared"
 import type { EmbeddingAdapterOptions, EmbeddingPort } from "../embedding-port"
+import { isAbortError, throwIfAborted } from "./_abort"
 
 const DEFAULT_MODEL = "voyage-3"
 const DEFAULT_BATCH = 128
 
 export interface VoyageHttp {
-  embeddingsCreate(body: {
-    model: string
-    input: readonly string[]
-  }, opts?: { signal?: AbortSignal }): Promise<{ data: { embedding: readonly number[] }[] }>
+  embeddingsCreate(
+    body: {
+      model: string
+      input: readonly string[]
+    },
+    opts?: { signal?: AbortSignal },
+  ): Promise<{ data: { embedding: readonly number[] }[] }>
 }
 
 export interface VoyageEmbedderOptions extends EmbeddingAdapterOptions {
@@ -56,7 +59,7 @@ export const createVoyageEmbedder = (opts: VoyageEmbedderOptions): EmbeddingPort
           for (const d of res.data) out.push(d.embedding)
         } catch (e) {
           if (isAbortError(e)) throw e
-          throw new LLMError(`Voyage retrieval embeddings failed: ${(e as Error).message}`, {
+          throw new LLMError(`Voyage retrieval embeddings failed: ${errMessage(e)}`, {
             cause: e,
           })
         }

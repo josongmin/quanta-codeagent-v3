@@ -6,6 +6,7 @@
  * a future `--list-images` can show the operator their cache footprint. NEVER
  * mutates Docker state and NEVER throws (daemon down / parse error ⇒ []).
  */
+import { errMessage } from "@/shared"
 import { hostArch } from "./arch"
 
 export type ImageTier = "base" | "env" | "instance"
@@ -54,7 +55,7 @@ export const defaultDockerSpawn: DockerSpawn = async (argv) => {
       clearTimeout(timer)
     }
   } catch (e) {
-    return { code: -1, stdout: "", stderr: (e as Error).message }
+    return { code: -1, stdout: "", stderr: errMessage(e) }
   }
 }
 

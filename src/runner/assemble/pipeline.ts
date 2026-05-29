@@ -27,19 +27,19 @@ import {
   type EmbedCache as PipelineEmbedCache,
   type Embedder as PipelineEmbedder,
   type LexicalSearch as PipelineLexicalSearch,
-  parallelRrfPipeline,
   type Reranker as PipelineReranker,
   type SearchHit as PipelineSearchHit,
-  type SearchPipeline,
   type SearchQuery as PipelineSearchQuery,
-  semanticOnlyPipeline,
   type SemanticIndex as PipelineSemanticIndex,
-  semanticThenRerankPipeline,
+  parallelRrfPipeline,
+  type SearchPipeline,
   type Stage,
+  semanticOnlyPipeline,
+  semanticThenRerankPipeline,
 } from "@/retrieval/pipeline"
 import { createRerankerFromEnv } from "@/retrieval/reranker"
 import { createHeadlessEmbedder } from "@/retrieval/semantic"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 
 export type PipelinePreset =
   | "none"
@@ -119,7 +119,7 @@ const adaptReranker = (env: NodeJS.ProcessEnv): PipelineReranker | undefined => 
     }
   } catch (e) {
     logger.warn(
-      `pipeline-wire: reranker factory failed (${(e as Error).message}); ` +
+      `pipeline-wire: reranker factory failed (${errMessage(e)}); ` +
         "falling back to disabled pipeline (set QUANTA_RERANKER=identity to opt out).",
     )
     return undefined
@@ -243,7 +243,7 @@ export const assemblePipeline = (
     }
   } catch (e) {
     logger.warn(
-      `pipeline-wire: ${preset} preset build failed (${(e as Error).message}); ` +
+      `pipeline-wire: ${preset} preset build failed (${errMessage(e)}); ` +
         "falling back to disabled pipeline.",
     )
     return null

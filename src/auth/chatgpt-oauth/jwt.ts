@@ -5,6 +5,8 @@
  *  call. NEVER trust local claims for security decisions — only display +
  *  preflight UX gating. */
 
+import { errMessage } from "@/shared"
+
 export interface ChatGPTClaims {
   readonly sub?: string
   readonly email?: string
@@ -29,8 +31,7 @@ const fromBase64Url = (s: string): Buffer => {
   return Buffer.from(padded + pad, "base64")
 }
 
-const isObject = (v: unknown): v is Record<string, unknown> =>
-  v !== null && typeof v === "object"
+const isObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object"
 
 const OPENAI_AUTH_NS = "https://api.openai.com/auth"
 
@@ -47,9 +48,7 @@ const extractClaims = (payload: Record<string, unknown>): ChatGPTClaims => {
     ...(typeof ns.chatgpt_account_id === "string"
       ? { chatgpt_account_id: ns.chatgpt_account_id }
       : {}),
-    ...(typeof ns.chatgpt_user_id === "string"
-      ? { chatgpt_user_id: ns.chatgpt_user_id }
-      : {}),
+    ...(typeof ns.chatgpt_user_id === "string" ? { chatgpt_user_id: ns.chatgpt_user_id } : {}),
   }
 }
 
@@ -65,13 +64,13 @@ export const decodeJwtClaims = (token: string): ChatGPTClaims => {
   try {
     raw = fromBase64Url(payloadSeg).toString("utf8")
   } catch (e) {
-    throw new JwtDecodeError(`base64url decode failed: ${(e as Error).message}`)
+    throw new JwtDecodeError(`base64url decode failed: ${errMessage(e)}`)
   }
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
   } catch (e) {
-    throw new JwtDecodeError(`json parse failed: ${(e as Error).message}`)
+    throw new JwtDecodeError(`json parse failed: ${errMessage(e)}`)
   }
   if (!isObject(parsed)) {
     throw new JwtDecodeError("payload is not a JSON object")

@@ -11,7 +11,7 @@
  * only). The contract is shape-only — the adapter normalises responses to
  * `StoredHit[]`.
  */
-import { err, ok, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 import { makeHit } from "./_filter"
 import type { VectorStore } from "./port"
 import type { Filter, StoreCapabilities, StoredDoc, StoredHit, StoreError } from "./types"
@@ -40,7 +40,7 @@ const post = async (
     if (apiKey !== undefined && apiKey !== "") headers.authorization = `Bearer ${apiKey}`
     res = await fetchImpl(url, { method: "POST", headers, body: JSON.stringify(body) })
   } catch (e) {
-    return err({ kind: "network", detail: (e as Error).message })
+    return err({ kind: "network", detail: errMessage(e) })
   }
   if (!res.ok) {
     const text = await res.text().catch(() => "")
@@ -49,7 +49,7 @@ const post = async (
   try {
     return ok(await res.json())
   } catch (e) {
-    return err({ kind: "invalid-response", detail: (e as Error).message })
+    return err({ kind: "invalid-response", detail: errMessage(e) })
   }
 }
 

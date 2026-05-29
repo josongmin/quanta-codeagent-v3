@@ -3,6 +3,7 @@
  * leaves a dangling dependency, the WHOLE batch is rejected with
  * `dependency_unknown` (no partial removal).
  */
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { planErrorMessage, planFailure } from "./error-mapping"
 import { type RemoveTodosInput, removeTodosSchema } from "./schemas"
@@ -36,7 +37,7 @@ export const removeTodosTool = (): Tool<RemoveTodosInput> => ({
         type: "result",
         result: {
           ok: false,
-          output: `remove_todos failed: ${(e as Error).message ?? String(e)}`,
+          output: `remove_todos failed: ${errMessage(e)}`,
           failure: { mode: "error", modelVisibleError: "internal mutator error" },
         },
       }

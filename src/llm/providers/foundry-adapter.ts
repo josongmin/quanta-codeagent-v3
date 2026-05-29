@@ -38,7 +38,7 @@
  *     constant on first import to flag API-drift early.
  */
 
-import { LLMError } from "@/shared/errors"
+import { errMessage, LLMError } from "@/shared/errors"
 import {
   buildAnthropicMessagesRequest,
   mapRawEvent,
@@ -151,8 +151,7 @@ const validateConfig = (config: ProviderConfig): void => {
   }
   const hasResource =
     config.auth.azureResource !== undefined && config.auth.azureResource.length > 0
-  const hasBaseUrl =
-    config.auth.azureEndpoint !== undefined && config.auth.azureEndpoint.length > 0
+  const hasBaseUrl = config.auth.azureEndpoint !== undefined && config.auth.azureEndpoint.length > 0
   if (hasResource && hasBaseUrl) {
     throw new ProviderError(
       "provider-misconfigured",
@@ -252,7 +251,7 @@ export class FoundryProviderAdapter implements LlmProvider {
         if (e instanceof ProviderError) throw e
         throw new ProviderError(
           "provider-misconfigured",
-          `Foundry client construction failed (auth-failed): ${(e as Error).message}`,
+          `Foundry client construction failed (auth-failed): ${errMessage(e)}`,
           { cause: e, providerId: "foundry" },
         )
       }
@@ -281,7 +280,7 @@ export class FoundryProviderAdapter implements LlmProvider {
       // typed misconfigured rather than leak the SDK-internal error.
       throw new ProviderError(
         "provider-misconfigured",
-        `Foundry client construction failed (auth-failed): ${(e as Error).message}`,
+        `Foundry client construction failed (auth-failed): ${errMessage(e)}`,
         { cause: e, providerId: "foundry" },
       )
     }
@@ -312,13 +311,12 @@ export class FoundryProviderAdapter implements LlmProvider {
       // `Anthropic.APIError`-like with name/code that we map to typed
       // `auth-failed`. We pin on the message prefix because the SDK
       // re-exports its error classes without a stable nominal name.
-      const msg = (e as Error).message ?? ""
+      const msg = errMessage(e)
       if (/AccessDenied|Unauthorized|InvalidAuthentication/i.test(msg)) {
-        throw new ProviderError(
-          "provider-misconfigured",
-          `Foundry stream auth failed: ${msg}`,
-          { cause: e, providerId: "foundry" },
-        )
+        throw new ProviderError("provider-misconfigured", `Foundry stream auth failed: ${msg}`, {
+          cause: e,
+          providerId: "foundry",
+        })
       }
       throw LLMError.fromSdkError("anthropic", e)
     }

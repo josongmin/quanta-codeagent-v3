@@ -34,6 +34,7 @@
  */
 
 import type { RuntimeSideConversationArgs, RuntimeSideConversationResult } from "@/sdk/runtime"
+import { errMessage } from "@/shared"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 
 type SideChatContextInheritance = NonNullable<RuntimeSideConversationArgs["inherit"]>
@@ -235,7 +236,7 @@ export const sideCmd: SlashCommand = {
     try {
       parsed = parseSideCmdArgs(args)
     } catch (e) {
-      ctx.err(`${(e as Error).message}\n`)
+      ctx.err(`${errMessage(e)}\n`)
       return 1
     }
 

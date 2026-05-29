@@ -17,7 +17,7 @@
  *   responsibility, NOT a leaf slice import.
  */
 
-import { ok, err, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 import type { RemoteRunner } from "./port"
 import {
   RemoteError,
@@ -32,7 +32,10 @@ import { validateSpec } from "./validate"
  *  Mirrors a tiny subset of the Skybridge microVM lifecycle. */
 export interface AppleVZHost {
   start(image: string, cmd: readonly string[]): Promise<{ readonly vmId: string }>
-  observe(vmId: string): Promise<{ readonly status: "pending" | "running" | "succeeded" | "failed" | "cancelled"; readonly exitCode?: number | undefined }>
+  observe(vmId: string): Promise<{
+    readonly status: "pending" | "running" | "succeeded" | "failed" | "cancelled"
+    readonly exitCode?: number | undefined
+  }>
   terminate(vmId: string): Promise<void>
   follow(vmId: string, signal?: AbortSignal | undefined): AsyncIterable<string>
 }
@@ -72,7 +75,7 @@ export const createAppleVZAdapter = (opts: AppleVZAdapterOpts = {}): RemoteRunne
         handleToVm.set(id, vm.vmId)
         return ok({ id, backend: "apple-vz" })
       } catch (e) {
-        return err(new RemoteError("transport", (e as Error).message, "apple-vz"))
+        return err(new RemoteError("transport", errMessage(e), "apple-vz"))
       }
     },
 
@@ -91,7 +94,7 @@ export const createAppleVZAdapter = (opts: AppleVZAdapterOpts = {}): RemoteRunne
           observedAtMs: nowMs(),
         })
       } catch (e) {
-        return err(new RemoteError("transport", (e as Error).message, "apple-vz"))
+        return err(new RemoteError("transport", errMessage(e), "apple-vz"))
       }
     },
 
@@ -105,7 +108,7 @@ export const createAppleVZAdapter = (opts: AppleVZAdapterOpts = {}): RemoteRunne
         await host.terminate(vmId)
         return ok(undefined)
       } catch (e) {
-        return err(new RemoteError("transport", (e as Error).message, "apple-vz"))
+        return err(new RemoteError("transport", errMessage(e), "apple-vz"))
       }
     },
 

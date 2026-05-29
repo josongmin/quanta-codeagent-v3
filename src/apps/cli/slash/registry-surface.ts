@@ -24,7 +24,7 @@ import { existsSync } from "node:fs"
 import { access, mkdir, readFile, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
-import { runtimeConfig } from "@/shared"
+import { errMessage, runtimeConfig } from "@/shared"
 import { formatBranchesPanel } from "../branch-search-progress"
 import { editMessageCmd } from "../edit-message-cmd"
 import { editPlanCmd } from "../edit-plan-cmd"
@@ -136,7 +136,7 @@ const usageCmd: SlashCommand = {
     try {
       raw = await readFile(path, "utf8")
     } catch (e) {
-      ctx.err(`usage: failed to read ${path}: ${(e as Error).message}\n`)
+      ctx.err(`usage: failed to read ${path}: ${errMessage(e)}\n`)
       return 1
     }
     const { input, output, lines } = tallyUsage(raw)

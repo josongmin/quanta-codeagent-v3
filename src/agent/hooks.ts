@@ -1,5 +1,5 @@
 import type { StructuredLogger } from "@/observability"
-import { runtimeConfig } from "@/shared"
+import { errMessage, runtimeConfig } from "@/shared"
 import type { RecoveryProvenance } from "./recovery-reason"
 import { matchTool, type ToolMatcher } from "./tool-matchers"
 
@@ -755,7 +755,7 @@ export class HookBus {
     } catch (e) {
       this.logger?.error("hook.handler.error", {
         event: event.type,
-        error: (e as Error).message,
+        error: errMessage(e),
       })
       return undefined
     }

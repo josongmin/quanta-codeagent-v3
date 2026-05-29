@@ -40,6 +40,7 @@
  */
 
 import type { Message } from "@/llm"
+import { errMessage } from "@/shared"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 
 /* ------------------------------------------------------------------ */
@@ -467,7 +468,7 @@ export const historyCmd: SlashCommand = {
     try {
       parsed = parseHistoryArgs(args)
     } catch (e) {
-      ctx.err(`${(e as Error).message}\n`)
+      ctx.err(`${errMessage(e)}\n`)
       return 1
     }
     const cap = resolveCap(parsed.last, process.env.QUANTA_HISTORY_DEFAULT_N)

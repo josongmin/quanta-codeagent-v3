@@ -7,7 +7,7 @@
  * adapter's `embed()` body small and inside biome's cognitive-complexity
  * budget.
  */
-import { err, ok, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 import type { EmbedError } from "./types"
 
 export type FetchFn = (input: string, init?: RequestInit) => Promise<Response>
@@ -16,7 +16,7 @@ export type FetchFn = (input: string, init?: RequestInit) => Promise<Response>
 export const classifyFetchError = (e: unknown): EmbedError => {
   const name = (e as { name?: string } | null)?.name
   if (name === "AbortError" || name === "TimeoutError") return { kind: "aborted" }
-  return { kind: "network", detail: (e as Error).message }
+  return { kind: "network", detail: errMessage(e) }
 }
 
 /** Parse `retry-after` (seconds) into ms → rate-limited arm. */
@@ -40,7 +40,7 @@ export const parseJsonOr = async <T>(res: Response): Promise<Result<T, EmbedErro
   try {
     return ok((await res.json()) as T)
   } catch (e) {
-    return err({ kind: "invalid-response", detail: (e as Error).message })
+    return err({ kind: "invalid-response", detail: errMessage(e) })
   }
 }
 

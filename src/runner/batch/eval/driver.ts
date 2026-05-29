@@ -41,6 +41,7 @@ import {
 } from "@/agent"
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
+import { errMessage } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
 import { type AttemptObservation, BenchObserver, UsageTap } from "../observe"
@@ -1259,7 +1260,7 @@ export const runInstanceOnce = async (
       passed: false,
       patch: phase.patch,
       turns: phase.turns,
-      error: (e as Error).message,
+      error: errMessage(e),
     }
   } finally {
     clearTimeout(deadline)

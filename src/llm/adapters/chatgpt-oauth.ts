@@ -23,9 +23,9 @@
  */
 
 import {
-  type FetchLike,
   chatgptTokenPath,
   deleteToken,
+  type FetchLike,
   isExpired,
   readResolvedToken,
   refreshToken,
@@ -34,12 +34,16 @@ import {
   type TokenRecord,
   writeToken,
 } from "@/auth/chatgpt-oauth"
-import { LLMError } from "@/shared"
+import { errMessage, LLMError } from "@/shared"
 import { buildResponsesBody } from "../openai-responses-wire"
 import type { LLMPort } from "../ports"
-import { prepareResponsesContinuationRequest, responsesStatusToKind, streamResponsesSurface } from "../responses-stream"
+import {
+  prepareResponsesContinuationRequest,
+  responsesStatusToKind,
+  streamResponsesSurface,
+} from "../responses-stream"
 import type { StreamEvent, StreamInput } from "../types"
-import { resolveAdapterStreamTimeouts, type AdapterStreamTimeoutConfig } from "./shared"
+import { type AdapterStreamTimeoutConfig, resolveAdapterStreamTimeouts } from "./shared"
 
 const RESPONSES_PATH = "/responses"
 const MODELS_PATH = "/models"
@@ -135,7 +139,7 @@ export class ChatGPTOAuthAdapter implements LLMPort {
       return next
     } catch (e) {
       throw new LLMError(
-        `ChatGPT-OAuth token refresh failed: ${(e as Error).message}. ` +
+        `ChatGPT-OAuth token refresh failed: ${errMessage(e)}. ` +
           "Run `quanta /login --chatgpt` or sign in to Codex again.",
         { kind: "auth", provider: "chatgpt-oauth", cause: e },
       )
@@ -310,15 +314,12 @@ export class ChatGPTOAuthAdapter implements LLMPort {
         const hint = purged
           ? "Local token deleted — run /login to sign in again."
           : "Token is managed externally (e.g. Codex CLI) — sign out and back in there."
-        throw new LLMError(
-          `ChatGPT-OAuth token invalidated by server (401). ${hint}`,
-          {
-            kind: "auth",
-            statusCode: 401,
-            provider: "chatgpt-oauth",
-            cause: error,
-          },
-        )
+        throw new LLMError(`ChatGPT-OAuth token invalidated by server (401). ${hint}`, {
+          kind: "auth",
+          statusCode: 401,
+          provider: "chatgpt-oauth",
+          cause: error,
+        })
       }
       throw error
     }
@@ -385,4 +386,5 @@ const extractCatalogModels = (
 }
 
 export { buildResponsesBody }
+
 const isObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object"

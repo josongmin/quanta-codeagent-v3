@@ -8,7 +8,7 @@
  * or no argument). `main(argv)` is exported so tests invoke it directly.
  */
 import type { TrajectoryEvent } from "@/shared"
-import { logger, setTerminalIo } from "@/shared"
+import { errMessage, logger, setTerminalIo } from "@/shared"
 import { observeFunnel, renderFunnel } from "./funnel"
 import { type AttemptTraj, loadRun, type ParsedRun, type RunSummaryLike } from "./parse"
 import { costJson, renderCost, renderHotspots, renderTimeline } from "./render"
@@ -176,7 +176,7 @@ export const main = async (argv: string[]): Promise<number> => {
   try {
     run = loadRun(args.path)
   } catch (e) {
-    logger.error(`probe: ${(e as Error).message}`)
+    logger.error(`probe: ${errMessage(e)}`)
     return 1
   }
   if (run.instances.size === 0) {

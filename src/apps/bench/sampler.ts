@@ -20,6 +20,8 @@
  * the bench runner types; the bench CLI specialises it to InstanceResult.
  */
 
+import { errMessage } from "@/shared"
+
 /** A scored, completed (or failed) trajectory. `value` is undefined iff the
  *  attempt threw — such attempts get score -Infinity and never abort the
  *  batch. */
@@ -56,7 +58,7 @@ const runOne = async <T>(
     const value = await input.makeAttempt(index)
     return { index, value, score: input.score(value, index) }
   } catch (e) {
-    return { index, score: Number.NEGATIVE_INFINITY, error: (e as Error).message }
+    return { index, score: Number.NEGATIVE_INFINITY, error: errMessage(e) }
   }
 }
 

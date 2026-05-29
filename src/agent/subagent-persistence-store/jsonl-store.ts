@@ -26,6 +26,7 @@ import { createHash } from "node:crypto"
 import { appendFile, mkdir, readdir, readFile, rm } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { errMessage } from "@/shared"
 import { type PersistedHandle, PersistenceError, type PersistentSchedulerStore } from "./types"
 
 /** Length of the hex prefix used as the per-workspace directory name. Matches
@@ -141,7 +142,7 @@ const findHandleFileAcrossWorkspaces = async (
     workspaceDirs = await readdir(baseDir)
   } catch (e: unknown) {
     if ((e as { code?: string } | null)?.code === "ENOENT") return undefined
-    throw new PersistenceError("io-failed", `readdir base: ${(e as Error).message}`)
+    throw new PersistenceError("io-failed", `readdir base: ${errMessage(e)}`)
   }
   for (const wsd of workspaceDirs) {
     const candidate = handleFile(join(baseDir, wsd), id)
@@ -152,7 +153,7 @@ const findHandleFileAcrossWorkspaces = async (
     } catch (e: unknown) {
       const code = (e as { code?: string } | null)?.code
       if (code === "ENOENT") continue
-      throw new PersistenceError("io-failed", `readFile probe: ${(e as Error).message}`)
+      throw new PersistenceError("io-failed", `readFile probe: ${errMessage(e)}`)
     }
   }
   return undefined
@@ -167,7 +168,7 @@ const readLatestHandle = async (path: string): Promise<PersistedHandle | null> =
     body = await readFile(path, "utf8")
   } catch (e: unknown) {
     if ((e as { code?: string } | null)?.code === "ENOENT") return null
-    throw new PersistenceError("io-failed", `readFile ${path}: ${(e as Error).message}`)
+    throw new PersistenceError("io-failed", `readFile ${path}: ${errMessage(e)}`)
   }
   const lines = body.split("\n")
   // Walk backwards to skip trailing newlines / empty lines.
@@ -182,7 +183,7 @@ const readLatestHandle = async (path: string): Promise<PersistedHandle | null> =
     } catch (e: unknown) {
       throw new PersistenceError(
         "parse-failed",
-        `last-line JSON.parse failed in ${path}: ${(e as Error).message}`,
+        `last-line JSON.parse failed in ${path}: ${errMessage(e)}`,
       )
     }
     const h = parseHandle(parsed)
@@ -229,7 +230,7 @@ export const defaultJsonlSchedulerStore = (opts?: JsonlStoreOpts): PersistentSch
         await appendFile(target, line, "utf8")
       } catch (e: unknown) {
         if (e instanceof PersistenceError) throw e
-        throw new PersistenceError("io-failed", `save ${handle.id}: ${(e as Error).message}`)
+        throw new PersistenceError("io-failed", `save ${handle.id}: ${errMessage(e)}`)
       }
     },
 
@@ -240,7 +241,7 @@ export const defaultJsonlSchedulerStore = (opts?: JsonlStoreOpts): PersistentSch
         return await readLatestHandle(path)
       } catch (e: unknown) {
         if (e instanceof PersistenceError) throw e
-        throw new PersistenceError("io-failed", `load ${id}: ${(e as Error).message}`)
+        throw new PersistenceError("io-failed", `load ${id}: ${errMessage(e)}`)
       }
     },
 
@@ -251,7 +252,7 @@ export const defaultJsonlSchedulerStore = (opts?: JsonlStoreOpts): PersistentSch
         files = await readdir(wsDir)
       } catch (e: unknown) {
         if ((e as { code?: string } | null)?.code === "ENOENT") return []
-        throw new PersistenceError("io-failed", `list readdir: ${(e as Error).message}`)
+        throw new PersistenceError("io-failed", `list readdir: ${errMessage(e)}`)
       }
       const handles: PersistedHandle[] = []
       for (const f of files) {
@@ -279,7 +280,7 @@ export const defaultJsonlSchedulerStore = (opts?: JsonlStoreOpts): PersistentSch
         await rm(path, { force: true })
       } catch (e: unknown) {
         if (e instanceof PersistenceError) throw e
-        throw new PersistenceError("io-failed", `delete ${id}: ${(e as Error).message}`)
+        throw new PersistenceError("io-failed", `delete ${id}: ${errMessage(e)}`)
       }
     },
 
@@ -291,7 +292,7 @@ export const defaultJsonlSchedulerStore = (opts?: JsonlStoreOpts): PersistentSch
         files = await readdir(wsDir)
       } catch (e: unknown) {
         if ((e as { code?: string } | null)?.code === "ENOENT") return 0
-        throw new PersistenceError("io-failed", `prune readdir: ${(e as Error).message}`)
+        throw new PersistenceError("io-failed", `prune readdir: ${errMessage(e)}`)
       }
       let removed = 0
       for (const f of files) {
@@ -313,7 +314,7 @@ export const defaultJsonlSchedulerStore = (opts?: JsonlStoreOpts): PersistentSch
             await rm(path, { force: true })
             removed += 1
           } catch (e: unknown) {
-            throw new PersistenceError("io-failed", `prune rm ${path}: ${(e as Error).message}`)
+            throw new PersistenceError("io-failed", `prune rm ${path}: ${errMessage(e)}`)
           }
         }
       }

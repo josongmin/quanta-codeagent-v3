@@ -17,6 +17,7 @@
 
 import { spawn } from "node:child_process"
 import { URLSearchParams } from "node:url"
+import { errMessage } from "@/shared"
 import { BrowserFlowError } from "./browser-flow-error"
 import type { OAuthCallbackProvider } from "./callback-port"
 import { createCliOAuthCallback } from "./cli-callback"
@@ -50,7 +51,7 @@ const openBrowserDefault = (url: string): void => {
     const child = spawn(cmd, args, { detached: true, stdio: "ignore" })
     child.unref()
   } catch (e) {
-    throw new BrowserFlowError("open_failed", `failed to launch browser: ${(e as Error).message}`)
+    throw new BrowserFlowError("open_failed", `failed to launch browser: ${errMessage(e)}`)
   }
 }
 

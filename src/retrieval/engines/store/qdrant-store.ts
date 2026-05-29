@@ -9,7 +9,7 @@
  *
  * Transport (`fetch`) is INJECTED per ADR-0159 — no `qdrant-client` import.
  */
-import { err, ok, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 import { makeHit } from "./_filter"
 import type { VectorStore } from "./port"
 import type { Filter, StoreCapabilities, StoredDoc, StoredHit, StoreError } from "./types"
@@ -44,7 +44,7 @@ const send = async (
   try {
     res = await fetchImpl(url, { method, headers: headersWith(apiKey), body: JSON.stringify(body) })
   } catch (e) {
-    return err({ kind: "network", detail: (e as Error).message })
+    return err({ kind: "network", detail: errMessage(e) })
   }
   if (!res.ok) {
     const text = await res.text().catch(() => "")
@@ -53,7 +53,7 @@ const send = async (
   try {
     return ok(await res.json())
   } catch (e) {
-    return err({ kind: "invalid-response", detail: (e as Error).message })
+    return err({ kind: "invalid-response", detail: errMessage(e) })
   }
 }
 

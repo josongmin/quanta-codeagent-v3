@@ -45,6 +45,7 @@
  *      tests do not touch disk.  Integration tests bind it to
  *      `node:fs/promises`.
  */
+import { errMessage } from "@/shared"
 import { MEMORY_DIR_MODE, MEMORY_MAX_BYTES, MEMORY_SUMMARY_MAX_BYTES } from "./constants"
 import type { GitPort } from "./git"
 import { type MemoryDirPaths, MemoryWriteError } from "./types"
@@ -131,7 +132,7 @@ export class MemoryWriter {
         mode: MEMORY_DIR_MODE,
       })
     } catch (err) {
-      throw new MemoryWriteError(`mkdir failed: ${(err as Error).message}`, this.paths.root)
+      throw new MemoryWriteError(`mkdir failed: ${errMessage(err)}`, this.paths.root)
     }
     // chmod is separate from mkdir's `mode` because the `mode` option
     // is only applied at CREATE time — an existing dir keeps its prior
@@ -140,7 +141,7 @@ export class MemoryWriter {
     try {
       await this.fs.chmod(this.paths.root, MEMORY_DIR_MODE)
     } catch (err) {
-      throw new MemoryWriteError(`chmod failed: ${(err as Error).message}`, this.paths.root)
+      throw new MemoryWriteError(`chmod failed: ${errMessage(err)}`, this.paths.root)
     }
     if (this.opts.gitEnabled ?? true) {
       const already = await this.git.isRepo(this.paths.root)
@@ -171,7 +172,7 @@ export class MemoryWriter {
       return await this.fs.readFile(p, "utf8")
     } catch (err) {
       if (isENOENT(err)) return null
-      throw new MemoryWriteError(`readFile failed: ${(err as Error).message}`, p)
+      throw new MemoryWriteError(`readFile failed: ${errMessage(err)}`, p)
     }
   }
 
@@ -218,7 +219,7 @@ export class MemoryWriter {
       writtenTemps.push(tempSummary)
     } catch (err) {
       await this.cleanupTemps(writtenTemps)
-      throw new MemoryWriteError(`temp write failed: ${(err as Error).message}`, this.paths.root)
+      throw new MemoryWriteError(`temp write failed: ${errMessage(err)}`, this.paths.root)
     }
 
     // Phase B — 3 renames.  Ordered (memory → raw → summary).  POSIX
@@ -236,7 +237,7 @@ export class MemoryWriter {
       remainingTemps.shift()
     } catch (err) {
       await this.cleanupTemps(remainingTemps)
-      throw new MemoryWriteError(`rename failed: ${(err as Error).message}`, this.paths.root)
+      throw new MemoryWriteError(`rename failed: ${errMessage(err)}`, this.paths.root)
     }
 
     // Phase C — git commit (when enabled).
@@ -251,7 +252,7 @@ export class MemoryWriter {
         // history is missing (watermark must NOT advance, see
         // runPhase2()).
         throw new MemoryWriteError(
-          `rename succeeded but git commit failed: ${(err as Error).message}`,
+          `rename succeeded but git commit failed: ${errMessage(err)}`,
           this.paths.root,
         )
       }

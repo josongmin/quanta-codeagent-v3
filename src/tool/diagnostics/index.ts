@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { errMessage } from "@/shared"
 import { FsJailError, resolveJailed } from "@/storage"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
@@ -128,7 +129,7 @@ export const diagnosticsTool = (provider: DiagnosticsProvider): Tool<Input> => (
       // Spawn/handshake failure must degrade gracefully, not crash the turn.
       yield {
         type: "result",
-        result: { ok: false, output: `diagnostics unavailable: ${(e as Error).message}` },
+        result: { ok: false, output: `diagnostics unavailable: ${errMessage(e)}` },
       }
       return
     }
@@ -155,7 +156,7 @@ export const diagnosticsTool = (provider: DiagnosticsProvider): Tool<Input> => (
     } catch (e) {
       yield {
         type: "result",
-        result: { ok: false, output: `diagnostics failed: ${(e as Error).message}` },
+        result: { ok: false, output: `diagnostics failed: ${errMessage(e)}` },
       }
     } finally {
       await session.stop().catch(() => undefined)

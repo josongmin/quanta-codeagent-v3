@@ -15,6 +15,7 @@
  *  `@/lsp/ports/format-port.ts`; duck-typed mirror declared HERE. */
 
 import { z } from "zod"
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
 // ── Duck-typed mirror of `FormatPort` ──────────────────────────────────────
@@ -119,7 +120,7 @@ export const lspFormatTool = (port: FormatPort): Tool<LspFormatInput> => ({
         type: "result",
         result: {
           ok: false,
-          output: `lsp_format unavailable: ${(e as Error).message}`,
+          output: `lsp_format unavailable: ${errMessage(e)}`,
         },
       }
       return

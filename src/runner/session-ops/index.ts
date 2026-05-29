@@ -13,6 +13,7 @@ import {
   sessionFilePath,
   unarchiveSession,
 } from "@/session"
+import { errMessage } from "@/shared"
 import {
   applyListPipeline,
   buildSessionListEntries,
@@ -448,7 +449,7 @@ const cmdFork = async (args: string[], deps: SessionCommandDeps): Promise<number
   try {
     wt = await createPersistentWorktree(newId, sourceCwd)
   } catch (e) {
-    const detail = e instanceof WorktreeForkError ? (e.detail ?? e.message) : (e as Error).message
+    const detail = e instanceof WorktreeForkError ? (e.detail ?? e.message) : errMessage(e)
     deps.err(errLine("fork", `worktree creation failed: ${detail}`))
     return 1
   }
@@ -465,7 +466,7 @@ const cmdFork = async (args: string[], deps: SessionCommandDeps): Promise<number
   } catch (e) {
     // Rollback: the session was never persisted but the worktree IS on disk.
     await removeWorktree(wt.worktreePath, sourceCwd, { branch: wt.branch }).catch(() => undefined)
-    deps.err(errLine("fork", `failed to save forked session: ${(e as Error).message}`))
+    deps.err(errLine("fork", `failed to save forked session: ${errMessage(e)}`))
     return 1
   }
 }
@@ -565,7 +566,7 @@ const cmdDelete = async (args: string[], deps: SessionCommandDeps): Promise<numb
         )
       }
     } catch (e) {
-      deps.err(`warning: worktree cleanup failed: ${(e as Error).message}\n`)
+      deps.err(`warning: worktree cleanup failed: ${errMessage(e)}\n`)
     }
   }
   await deleteSession(id)

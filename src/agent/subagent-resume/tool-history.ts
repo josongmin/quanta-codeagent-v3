@@ -34,6 +34,7 @@ import { createHash } from "node:crypto"
 import { appendFile, mkdir, readdir, readFile, rm } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { errMessage } from "@/shared"
 import type { IdempotencyTier } from "./idempotency"
 
 /** One captured tool call. ALWAYS append-only — successive calls add new
@@ -120,11 +121,8 @@ const resolveBaseDir = (opts: JsonlToolHistoryStoreOpts | undefined): string => 
   return join(home, ".quanta", "scheduler-tool-history")
 }
 
-const workspaceDir = (
-  baseDir: string,
-  hasher: (w: string) => string,
-  workspace: string,
-): string => join(baseDir, hasher(workspace))
+const workspaceDir = (baseDir: string, hasher: (w: string) => string, workspace: string): string =>
+  join(baseDir, hasher(workspace))
 
 const handleFile = (workspaceDirPath: string, id: string): string => {
   const sanitized = id.replace(/[\\/]/g, "_")
@@ -192,7 +190,7 @@ const readAllRecords = async (path: string): Promise<ToolCallRecord[]> => {
     body = await readFile(path, "utf8")
   } catch (e: unknown) {
     if ((e as { code?: string } | null)?.code === "ENOENT") return []
-    throw new Error(`tool-history readFile ${path}: ${(e as Error).message}`)
+    throw new Error(`tool-history readFile ${path}: ${errMessage(e)}`)
   }
   const out: ToolCallRecord[] = []
   for (const rawLine of body.split("\n")) {
@@ -223,7 +221,7 @@ const findHistoryFileAcrossWorkspaces = async (
     workspaceDirs = await readdir(baseDir)
   } catch (e: unknown) {
     if ((e as { code?: string } | null)?.code === "ENOENT") return undefined
-    throw new Error(`tool-history readdir base: ${(e as Error).message}`)
+    throw new Error(`tool-history readdir base: ${errMessage(e)}`)
   }
   for (const wsd of workspaceDirs) {
     const candidate = handleFile(join(baseDir, wsd), id)
@@ -233,7 +231,7 @@ const findHistoryFileAcrossWorkspaces = async (
     } catch (e: unknown) {
       const code = (e as { code?: string } | null)?.code
       if (code === "ENOENT") continue
-      throw new Error(`tool-history probe ${candidate}: ${(e as Error).message}`)
+      throw new Error(`tool-history probe ${candidate}: ${errMessage(e)}`)
     }
   }
   return undefined
@@ -262,7 +260,7 @@ export const defaultJsonlToolHistoryStore = (
         const line = `${JSON.stringify(record)}\n`
         await appendFile(target, line, "utf8")
       } catch (e: unknown) {
-        throw new Error(`tool-history append ${handleId}: ${(e as Error).message}`)
+        throw new Error(`tool-history append ${handleId}: ${errMessage(e)}`)
       }
     },
 
@@ -289,7 +287,7 @@ export const defaultJsonlToolHistoryStore = (
       try {
         await rm(path, { force: true })
       } catch (e: unknown) {
-        throw new Error(`tool-history rm ${path}: ${(e as Error).message}`)
+        throw new Error(`tool-history rm ${path}: ${errMessage(e)}`)
       }
       return before.length
     },

@@ -1,4 +1,5 @@
 import { resolve as resolvePath } from "node:path"
+import { errMessage } from "@/shared"
 import { loadImageBlock } from "./image-loader"
 import type { ImageQueue } from "./image-queue"
 
@@ -86,7 +87,7 @@ const runAdd = (ctx: ImageCmdCtx, paths: readonly string[]): number => {
     try {
       block = loadImageBlock(abs)
     } catch (e) {
-      ctx.err(`/image add: ${(e as Error).message}\n`)
+      ctx.err(`/image add: ${errMessage(e)}\n`)
       return 1
     }
     const res = ctx.queue.add({ path: abs, block })

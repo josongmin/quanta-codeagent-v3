@@ -8,6 +8,7 @@
  *  `@/lsp/ports/signature-help-port.ts`; duck-typed mirror declared HERE. */
 
 import { z } from "zod"
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
 // ── Duck-typed mirror of `SignatureHelpPort` ───────────────────────────────
@@ -103,7 +104,7 @@ export const lspSignatureHelpTool = (port: SignatureHelpPort): Tool<LspSignature
         type: "result",
         result: {
           ok: false,
-          output: `lsp_signature_help unavailable: ${(e as Error).message}`,
+          output: `lsp_signature_help unavailable: ${errMessage(e)}`,
         },
       }
       return

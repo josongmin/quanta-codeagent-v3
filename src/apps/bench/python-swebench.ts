@@ -34,7 +34,7 @@
  */
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { runtimeConfig } from "@/shared"
+import { errMessage, runtimeConfig } from "@/shared"
 import { benchWorkRoot } from "./corpus/paths"
 import { type HarnessConfig, harnessFlags, resolveHarnessConfig } from "./harness"
 import type { Instance } from "./types"
@@ -244,19 +244,35 @@ export const evaluateWithPythonSwebench = async (
 ): Promise<PySwebenchResult> => {
   const meta = instance.swebench
   if (!meta) {
-    return { resolved: false, gradingCompleted: false, log: `instance ${instance.id} has no swebench metadata` }
+    return {
+      resolved: false,
+      gradingCompleted: false,
+      log: `instance ${instance.id} has no swebench metadata`,
+    }
   }
   if (prediction.trim() === "") {
-    return { resolved: false, gradingCompleted: false, log: `empty prediction for ${meta.instanceId}` }
+    return {
+      resolved: false,
+      gradingCompleted: false,
+      log: `empty prediction for ${meta.instanceId}`,
+    }
   }
 
   const spawn = opts.spawn ?? defaultSpawn
   if (!(await isPythonSwebenchAvailable(opts))) {
-    return { resolved: false, gradingCompleted: false, log: "python swebench harness unavailable (import failed)" }
+    return {
+      resolved: false,
+      gradingCompleted: false,
+      log: "python swebench harness unavailable (import failed)",
+    }
   }
   const python = opts.probe ? pythonCandidates()[0]! : await resolvePython(spawn)
   if (!python) {
-    return { resolved: false, gradingCompleted: false, log: "no python interpreter could import swebench" }
+    return {
+      resolved: false,
+      gradingCompleted: false,
+      log: "no python interpreter could import swebench",
+    }
   }
 
   const modelName = opts.modelName ?? "quanta"
@@ -304,7 +320,11 @@ export const evaluateWithPythonSwebench = async (
     ].join("\n")
     return { resolved, gradingCompleted, log }
   } catch (e) {
-    return { resolved: false, gradingCompleted: false, log: `python harness invocation failed: ${(e as Error).message}` }
+    return {
+      resolved: false,
+      gradingCompleted: false,
+      log: `python harness invocation failed: ${errMessage(e)}`,
+    }
   } finally {
     await rm(work, { recursive: true, force: true })
   }

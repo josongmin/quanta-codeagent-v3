@@ -71,7 +71,7 @@ import {
   selectInstances,
   writeArtifacts as writeBatchArtifacts,
 } from "@/runner/batch/core"
-import { byteCompare, logger, runtimeConfig, setTerminalIo } from "@/shared"
+import { byteCompare, errMessage, logger, runtimeConfig, setTerminalIo } from "@/shared"
 import {
   aggregate,
   benchRunDir,
@@ -344,7 +344,7 @@ const runSwebenchTask = async (
       passed: false,
       patch: "",
       turns: 0,
-      error: (e as Error).message,
+      error: errMessage(e),
     }
   } finally {
     await rm(work, { recursive: true, force: true })
@@ -702,7 +702,7 @@ export const runMain = async (deps: MainDeps = {}): Promise<void> => {
 // the runtime started from; unit tests start from `bun test` and never match.
 if (import.meta.main) {
   runMain().catch((e) => {
-    logger.error(`bench fatal: ${(e as Error).message}`)
+    logger.error(`bench fatal: ${errMessage(e)}`)
     // Top-level fatal still goes through the injectable exit binding so a
     // test that started the CLI with a no-op exit observes the failing code.
     exitFn(1)

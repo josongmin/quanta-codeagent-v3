@@ -18,6 +18,7 @@ import {
   runImport,
 } from "@/migration"
 import type { SessionCommandDeps } from "@/runner/session-ops"
+import { errMessage } from "@/shared"
 
 /** Concrete (non-optional) shape of the runner's optional importHandler.
  *  We export this so factory consumers get a non-undefined type — the
@@ -95,7 +96,7 @@ const cliImportHandler: ImportHandlerFn = async (args, deps) => {
       detail: `translated_sessions=${result.sessionsTranslated}, counted_skills=${result.skillsCounted}, persisted_sessions=0`,
     })
   } catch (e) {
-    deps.err(`session import: warning: failed to write import log: ${(e as Error).message}\n`)
+    deps.err(`session import: warning: failed to write import log: ${errMessage(e)}\n`)
   }
 
   if (!ok) {

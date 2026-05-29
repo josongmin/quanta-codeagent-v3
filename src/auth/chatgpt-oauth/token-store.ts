@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs"
 import { chmod, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
+import { errMessage } from "@/shared"
 import { decodeJwtClaims } from "./jwt"
 import { chatgptTokenPath, codexAuthPath, resolveCodexHome, resolveQuantaHome } from "./paths"
 
@@ -121,23 +122,20 @@ const parseCodexAuthObject = (parsed: unknown): TokenRecord => {
   }
 }
 
-const readParsedFileSync = <T>(
-  path: string,
-  parse: (parsed: unknown) => T,
-): T | null => {
+const readParsedFileSync = <T>(path: string, parse: (parsed: unknown) => T): T | null => {
   let raw: string
   try {
     raw = readFileSync(path, "utf8")
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return null
-    throw new TokenStoreError(`read failed: ${(e as Error).message}`)
+    throw new TokenStoreError(`read failed: ${errMessage(e)}`)
   }
   assertPrivateFileMode(path, statSync(path).mode & 0o777)
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
   } catch (e) {
-    throw new TokenStoreError(`json parse failed: ${(e as Error).message}`)
+    throw new TokenStoreError(`json parse failed: ${errMessage(e)}`)
   }
   return parse(parsed)
 }
@@ -151,14 +149,14 @@ const readParsedFile = async <T>(
     raw = await readFile(path, "utf8")
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return null
-    throw new TokenStoreError(`read failed: ${(e as Error).message}`)
+    throw new TokenStoreError(`read failed: ${errMessage(e)}`)
   }
   assertPrivateFileMode(path, (await stat(path)).mode & 0o777)
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
   } catch (e) {
-    throw new TokenStoreError(`json parse failed: ${(e as Error).message}`)
+    throw new TokenStoreError(`json parse failed: ${errMessage(e)}`)
   }
   return parse(parsed)
 }
@@ -254,7 +252,7 @@ export const deleteToken = async (path: string): Promise<void> => {
     await unlink(path)
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return
-    throw new TokenStoreError(`delete failed: ${(e as Error).message}`)
+    throw new TokenStoreError(`delete failed: ${errMessage(e)}`)
   }
 }
 

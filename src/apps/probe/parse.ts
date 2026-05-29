@@ -10,7 +10,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { basename, join } from "node:path"
 import type { TrajectoryEvent } from "@/shared"
-import { isTrajectoryEvent } from "@/shared"
+import { errMessage, isTrajectoryEvent } from "@/shared"
 
 /** Result of parsing one trajectory file. `skipped` = garbage/foreign lines. */
 export interface ParsedTrajectory {
@@ -93,7 +93,7 @@ export const loadTrajectory = (file: string): ParsedTrajectory => {
   try {
     text = readFileSync(file, "utf8")
   } catch (e) {
-    return { events: [], skipped: 0, warnings: [`unreadable: ${file} (${(e as Error).message})`] }
+    return { events: [], skipped: 0, warnings: [`unreadable: ${file} (${errMessage(e)})`] }
   }
   const events: TrajectoryEvent[] = []
   let skipped = 0
@@ -130,7 +130,7 @@ const readJsonSidecar = <T>(dir: string, name: string, warnings: string[]): T | 
   try {
     return JSON.parse(readFileSync(path, "utf8")) as T
   } catch (e) {
-    warnings.push(`${name}: malformed JSON (${(e as Error).message})`)
+    warnings.push(`${name}: malformed JSON (${errMessage(e)})`)
     return undefined
   }
 }

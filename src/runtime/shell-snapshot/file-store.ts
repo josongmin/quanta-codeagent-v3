@@ -18,6 +18,7 @@ import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:f
 import { writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { errMessage } from "@/shared"
 import type { SnapErr } from "./types"
 
 /** Resolve the on-disk directory. Exported so tests can override `HOME`
@@ -68,7 +69,7 @@ export const writeSnapshot = async (
   } catch (e) {
     return {
       ok: false,
-      err: { kind: "write-failed", shell, detail: String((e as Error).message) },
+      err: { kind: "write-failed", shell, detail: errMessage(e) },
     }
   }
   const path = join(dir, `${id}.sh`)
@@ -77,7 +78,7 @@ export const writeSnapshot = async (
   } catch (e) {
     return {
       ok: false,
-      err: { kind: "write-failed", shell, detail: String((e as Error).message) },
+      err: { kind: "write-failed", shell, detail: errMessage(e) },
     }
   }
   return { ok: true, path }

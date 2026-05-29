@@ -19,7 +19,7 @@
  * Plane-clean: imports the port + `@/llm` siblings only. No `@/agent`.
  */
 
-import { LLMError } from "@/shared/errors"
+import { errMessage, LLMError } from "@/shared/errors"
 import {
   buildAnthropicMessagesRequest,
   mapRawEvent,
@@ -149,7 +149,7 @@ export class BedrockProviderAdapter implements LlmProvider {
       // typed misconfigured rather than leak the SDK-internal error.
       throw new ProviderError(
         "provider-misconfigured",
-        `Bedrock client construction failed (auth-failed): ${(e as Error).message}`,
+        `Bedrock client construction failed (auth-failed): ${errMessage(e)}`,
         { cause: e, providerId: "bedrock" },
       )
     }

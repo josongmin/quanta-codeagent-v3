@@ -22,12 +22,8 @@
  * dispatcher directly with a string buffer + a stub runner.
  */
 
-import {
-  type RemoteHandle,
-  type RemoteRunner,
-  type RemoteSpec,
-  type RemoteStatus,
-} from "@/remote"
+import type { RemoteHandle, RemoteRunner, RemoteSpec, RemoteStatus } from "@/remote"
+import { errMessage } from "@/shared"
 
 /** Exit codes — fixed integers used by tests for HELL-CR-05 / HELL-CR-08. */
 export const EXIT_OK = 0
@@ -56,7 +52,7 @@ const HELP = [
   "quanta remote — remote execution plane",
   "",
   "Usage:",
-  "  quanta remote run \"<task>\"            Spawn workload (handle JSON to stdout)",
+  '  quanta remote run "<task>"            Spawn workload (handle JSON to stdout)',
   "    [--image <img>] [--timeout-ms <ms>] [--workdir <wd>]",
   "  quanta remote status <handle>           Status snapshot JSON",
   "  quanta remote logs <handle>             Stream logs to stdout",
@@ -136,10 +132,7 @@ const parseRunArgs = (
 /* Per-subcommand handlers                                             */
 /* ------------------------------------------------------------------ */
 
-const handleRun = async (
-  argv: readonly string[],
-  deps: RemoteCmdDeps,
-): Promise<number> => {
+const handleRun = async (argv: readonly string[], deps: RemoteCmdDeps): Promise<number> => {
   if (deps.runner === null) return notConfigured(deps.io)
   const parsed = parseRunArgs(argv)
   if (!parsed.ok) {
@@ -187,10 +180,7 @@ const reconstructHandle = (id: string): RemoteHandle | null => {
   return { id, backend: "docker" }
 }
 
-const handleStatus = async (
-  argv: readonly string[],
-  deps: RemoteCmdDeps,
-): Promise<number> => {
+const handleStatus = async (argv: readonly string[], deps: RemoteCmdDeps): Promise<number> => {
   if (deps.runner === null) return notConfigured(deps.io)
   const id = argv[0]
   if (id === undefined) {
@@ -211,10 +201,7 @@ const handleStatus = async (
   return EXIT_OK
 }
 
-const handleCancel = async (
-  argv: readonly string[],
-  deps: RemoteCmdDeps,
-): Promise<number> => {
+const handleCancel = async (argv: readonly string[], deps: RemoteCmdDeps): Promise<number> => {
   if (deps.runner === null) return notConfigured(deps.io)
   const id = argv[0]
   if (id === undefined) {
@@ -235,10 +222,7 @@ const handleCancel = async (
   return EXIT_OK
 }
 
-const handleLogs = async (
-  argv: readonly string[],
-  deps: RemoteCmdDeps,
-): Promise<number> => {
+const handleLogs = async (argv: readonly string[], deps: RemoteCmdDeps): Promise<number> => {
   if (deps.runner === null) return notConfigured(deps.io)
   const id = argv[0]
   if (id === undefined) {
@@ -258,7 +242,7 @@ const handleLogs = async (
     }
     return EXIT_OK
   } catch (e) {
-    deps.io.err(`error: ${(e as Error).message}\n`)
+    deps.io.err(`error: ${errMessage(e)}\n`)
     return EXIT_TRANSPORT
   }
 }

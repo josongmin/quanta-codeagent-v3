@@ -9,6 +9,7 @@
  * for tests. Defaults are `Date.now` and the global `fetch`.
  */
 
+import { errMessage } from "@/shared"
 import type { JwksClient } from "./port"
 import {
   type JsonWebKey,
@@ -56,7 +57,7 @@ export function defaultJwksClient(opts: DefaultJwksClientOpts = {}): JwksClient 
     try {
       resp = await fetchImpl(url)
     } catch (err) {
-      throw new JwksFetchError(`network error: ${(err as Error).message}`, url)
+      throw new JwksFetchError(`network error: ${errMessage(err)}`, url)
     }
     if (!resp.ok) {
       throw new JwksFetchError(`HTTP ${resp.status}`, url)
@@ -65,7 +66,7 @@ export function defaultJwksClient(opts: DefaultJwksClientOpts = {}): JwksClient 
     try {
       body = await resp.json()
     } catch (err) {
-      throw new JwksFetchError(`invalid JSON: ${(err as Error).message}`, url)
+      throw new JwksFetchError(`invalid JSON: ${errMessage(err)}`, url)
     }
     if (!body || typeof body !== "object" || !Array.isArray((body as { keys?: unknown }).keys)) {
       throw new JwksFetchError("missing keys[] array", url)

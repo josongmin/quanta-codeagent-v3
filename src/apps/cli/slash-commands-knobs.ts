@@ -41,6 +41,7 @@ import {
   resolveKnobs,
   writeKnobConfig,
 } from "@/runner/knobs"
+import { errMessage } from "@/shared"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 
 /** Surface-wire contract passed to {@link buildKnobsSlash}. */
@@ -236,7 +237,7 @@ const doSet = (args: readonly string[], wire: KnobsSurfaceWire, ctx: SlashContex
   try {
     warning = wire.setOverride(id, raw)
   } catch (e) {
-    ctx.err(`/knobs set: ${(e as Error).message}\n`)
+    ctx.err(`/knobs set: ${errMessage(e)}\n`)
     return 1
   }
   ctx.out(`/knobs: ${id} = ${raw} (session override)\n`)
@@ -328,7 +329,7 @@ const doSave = async (
   try {
     await wire.save()
   } catch (e) {
-    ctx.err(`/knobs save: ${(e as Error).message}\n`)
+    ctx.err(`/knobs save: ${errMessage(e)}\n`)
     return 1
   }
   ctx.out(`/knobs: saved ${count} override(s) → ${wire.configPath}\n`)

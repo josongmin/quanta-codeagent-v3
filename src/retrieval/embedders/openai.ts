@@ -13,18 +13,21 @@
  * by passing an adapter; tests inject a fake. The slice never imports the
  * `openai` package directly (the assembler/caller does).
  */
-import { LLMError } from "@/shared"
-import { isAbortError, throwIfAborted } from "./_abort"
+import { errMessage, LLMError } from "@/shared"
 import type { EmbeddingAdapterOptions, EmbeddingPort } from "../embedding-port"
+import { isAbortError, throwIfAborted } from "./_abort"
 
 const DEFAULT_MODEL = "text-embedding-3-small"
 const DEFAULT_BATCH = 96
 
 export interface EmbeddingsHttp {
-  embeddingsCreate(body: {
-    model: string
-    input: readonly string[]
-  }, opts?: { signal?: AbortSignal }): Promise<{ data: { embedding: readonly number[] }[] }>
+  embeddingsCreate(
+    body: {
+      model: string
+      input: readonly string[]
+    },
+    opts?: { signal?: AbortSignal },
+  ): Promise<{ data: { embedding: readonly number[] }[] }>
 }
 
 export interface OpenAIRetrievalEmbedderOptions extends EmbeddingAdapterOptions {
@@ -60,7 +63,7 @@ export const createOpenAIEmbedder = (opts: OpenAIRetrievalEmbedderOptions): Embe
           for (const d of res.data) out.push(d.embedding)
         } catch (e) {
           if (isAbortError(e)) throw e
-          throw new LLMError(`OpenAI retrieval embeddings failed: ${(e as Error).message}`, {
+          throw new LLMError(`OpenAI retrieval embeddings failed: ${errMessage(e)}`, {
             cause: e,
           })
         }

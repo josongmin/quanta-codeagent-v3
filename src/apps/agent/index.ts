@@ -70,7 +70,7 @@ import {
 import { type LLMPort, pickProvider, tryCreateLLM } from "@/llm"
 import { type CapabilityNegotiator, defaultNegotiator, fullNegotiator } from "@/mcp"
 import { type AutomationEngineSlot, assembleAutomation } from "@/scheduler/runtime-wire"
-import { logger, runtimeConfig, setTerminalIo } from "@/shared"
+import { errMessage, logger, runtimeConfig, setTerminalIo } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
 import type { AssembleRequest } from "./assemble"
@@ -204,7 +204,7 @@ const buildRetrievalStackFromEnv = (env: NodeJS.ProcessEnv): RetrievalStack | un
     return buildRetrievalStackCore({ enabled: true })
   } catch (e) {
     logger.warn(
-      `retrieval-stack disabled (build failed): ${(e as Error).message}. ` +
+      `retrieval-stack disabled (build failed): ${errMessage(e)}. ` +
         `set QUANTA_RETRIEVAL_HYBRID=1 with a registered reranker to re-enable.`,
     )
     return undefined
@@ -256,9 +256,7 @@ const resolveStickyModelStore = (
     // Defense-in-depth: a corrupted home dir or read-only fs should NOT
     // crash the agent surface — fall back to in-memory and log. The store
     // becomes process-scoped (no persistence across runs) but the agent runs.
-    logger.warn(
-      `sticky-model fs store unavailable (${(e as Error).message}); falling back to in-memory.`,
-    )
+    logger.warn(`sticky-model fs store unavailable (${errMessage(e)}); falling back to in-memory.`)
     return { store: inMemoryStickyModelStore() }
   }
 }
@@ -800,7 +798,7 @@ const liftToAssembleRequest = (p: AssembleRequestPartial): AssembleRequest => {
 // `import.meta.main` is the Bun-native check (also true under `bun run`).
 if (import.meta.main) {
   runMain().catch((e) => {
-    process.stderr.write(`fatal: ${(e as Error).message}\n`)
+    process.stderr.write(`fatal: ${errMessage(e)}\n`)
     process.exit(1)
   })
 }

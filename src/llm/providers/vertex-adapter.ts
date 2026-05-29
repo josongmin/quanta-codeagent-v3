@@ -24,7 +24,7 @@
  * Plane-clean: imports the port + `@/llm` siblings only. No `@/agent`.
  */
 
-import { LLMError } from "@/shared/errors"
+import { errMessage, LLMError } from "@/shared/errors"
 import {
   buildAnthropicMessagesRequest,
   mapRawEvent,
@@ -149,7 +149,7 @@ export class VertexProviderAdapter implements LlmProvider {
     } catch (e) {
       throw new ProviderError(
         "provider-misconfigured",
-        `Vertex client construction failed (auth-failed): ${(e as Error).message}`,
+        `Vertex client construction failed (auth-failed): ${errMessage(e)}`,
         { cause: e, providerId: "vertex" },
       )
     }

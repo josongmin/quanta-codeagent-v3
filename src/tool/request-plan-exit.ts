@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "./types"
 
 /**
@@ -77,7 +78,7 @@ export const requestPlanExitTool = (): Tool<Input> => ({
     } catch (e) {
       yield {
         type: "result",
-        result: { ok: false, output: `plan-exit failed: ${(e as Error).message ?? String(e)}` },
+        result: { ok: false, output: `plan-exit failed: ${errMessage(e)}` },
       }
     }
   },

@@ -641,7 +641,7 @@ const streamConsume = async (
       throw e
     }
     samplingStatus = "error"
-    const message = e instanceof LLMError ? e.message : (e as Error).message
+    const message = e instanceof LLMError ? e.message : errMessage(e)
     return { error: e, message }
   } finally {
     stop?.()

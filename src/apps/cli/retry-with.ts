@@ -41,6 +41,7 @@ import {
   type StreamInput,
   streamWithModel,
 } from "@/llm"
+import { errMessage } from "@/shared"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 
 /**
@@ -132,7 +133,7 @@ export const retryWithCmd: SlashCommand = {
     try {
       parsed = parseRetryWithArgs(args)
     } catch (e) {
-      ctx.err(`${(e as Error).message}\n`)
+      ctx.err(`${errMessage(e)}\n`)
       return 1
     }
 

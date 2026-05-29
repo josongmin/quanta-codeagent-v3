@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { McpClient, McpError, type McpServerConfig, type McpToolDef } from "@/mcp"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 
 /**
@@ -65,7 +65,7 @@ export const mcpToolToTool = (client: McpClient, def: McpToolDef, serverName: st
         const res = await client.callTool(def.name, input)
         yield { type: "result", result: { ok: res.ok, output: res.content } }
       } catch (e) {
-        const message = isMcpError(e) ? e.message : (e as Error).message
+        const message = isMcpError(e) ? e.message : errMessage(e)
         yield { type: "result", result: { ok: false, output: message } }
       }
     },
@@ -91,7 +91,7 @@ export const loadMcpTools = async (
       for (const def of defs) tools.push(mcpToolToTool(client, def, config.name))
       clients.push(client)
     } catch (e) {
-      logger.warn(`mcp: skipping server "${config.name}": ${(e as Error).message}`)
+      logger.warn(`mcp: skipping server "${config.name}": ${errMessage(e)}`)
       await client.stop().catch(() => undefined)
     }
   }

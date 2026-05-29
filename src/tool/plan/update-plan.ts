@@ -2,6 +2,7 @@
  * `update_plan` tool (ADR-0095 draft) — meta-only updates (name, overview,
  * isProject, phase reorder). Does NOT touch todos; use update_todos for that.
  */
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { planErrorMessage, planFailure } from "./error-mapping"
 import { type UpdatePlanInput, updatePlanSchema } from "./schemas"
@@ -42,7 +43,7 @@ export const updatePlanTool = (): Tool<UpdatePlanInput> => ({
         type: "result",
         result: {
           ok: false,
-          output: `update_plan failed: ${(e as Error).message ?? String(e)}`,
+          output: `update_plan failed: ${errMessage(e)}`,
           failure: { mode: "error", modelVisibleError: "internal mutator error" },
         },
       }
