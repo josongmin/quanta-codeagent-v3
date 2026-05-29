@@ -31,13 +31,13 @@
  * `@/permission`, `@/tool`.
  */
 
+import { errMessage } from "@/shared"
 import {
   defaultIdempotencyClassifier,
   type IdempotencyClassifier,
   type IdempotencyTier,
 } from "./idempotency"
 import type { ToolCallRecord } from "./tool-history"
-
 /** Decision arm for one tool call. Exhaustive 4-way union — caller branches
  *  on `action` and consumes the relevant fields. */
 export type ToolReplayDecision =
@@ -152,7 +152,7 @@ export const defaultToolReplayPolicy = (): ToolReplayPolicy => ({
       }
     } catch (e) {
       // NO-THROW contract: collapse any policy-internal throw into halt.
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = errMessage(e)
       return { action: "halt", reason: `policy threw: ${msg}` }
     }
   },
@@ -258,7 +258,7 @@ export const replayToolHistory = async (
           restoredCommit: record.shadowCommit,
         })
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e)
+        const msg = errMessage(e)
         outcomes.push({
           toolUseId: record.toolUseId,
           toolName: record.toolName,

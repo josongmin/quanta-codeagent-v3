@@ -24,7 +24,7 @@
  *  This transport is OPT-IN: the client defaults to stdio, so existing
  *  deployments are byte-identical. */
 
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import { isResponse, type JsonRpcMessage } from "../jsonrpc"
 import type {
   McpTransport,
@@ -145,7 +145,7 @@ export class HttpSseMcpTransport implements McpTransport {
       return new Error(`mcp server "${this.name}" transport unavailable: closed`)
     }
     void this.post(payload).catch((e) => {
-      logger.warn("mcp: http POST failed", { server: this.name, error: String(e) })
+      logger.warn("mcp: http POST failed", { server: this.name, error: errMessage(e) })
     })
     return null
   }
@@ -162,7 +162,7 @@ export class HttpSseMcpTransport implements McpTransport {
           headers: this.requestHeaders({}),
         })
       } catch (e) {
-        logger.debug("mcp: http session DELETE failed", { server: this.name, error: String(e) })
+        logger.debug("mcp: http session DELETE failed", { server: this.name, error: errMessage(e) })
       }
     }
     await this.serverStreamPump?.catch(() => undefined)
@@ -228,7 +228,7 @@ export class HttpSseMcpTransport implements McpTransport {
       })
     } catch (e) {
       // Network error opening the channel — proceed POST-only.
-      logger.debug("mcp: standalone SSE GET failed", { server: this.name, error: String(e) })
+      logger.debug("mcp: standalone SSE GET failed", { server: this.name, error: errMessage(e) })
       return
     }
     // 405 = server has no standalone stream; that's spec-legal, proceed.
@@ -262,7 +262,7 @@ export class HttpSseMcpTransport implements McpTransport {
       const data = sseDataFromBlock(buffer)
       if (data !== null) this.decodeAndEmit(data)
     } catch (e) {
-      logger.debug("mcp: SSE stream ended", { server: this.name, error: String(e) })
+      logger.debug("mcp: SSE stream ended", { server: this.name, error: errMessage(e) })
     } finally {
       reader.releaseLock?.()
     }

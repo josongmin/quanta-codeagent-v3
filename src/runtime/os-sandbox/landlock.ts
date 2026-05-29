@@ -1,6 +1,6 @@
+import { errMessage } from "@/shared"
 import { compileBubblewrapArgs } from "./bubblewrap"
 import type { SandboxedSpawnResult, SandboxedSpawnSpec, SandboxPolicy, Spawner } from "./types"
-
 /**
  * Linux sandbox backend — **Phase 2: bubblewrap shell-out** (ADR-0150).
  *
@@ -84,7 +84,7 @@ export const spawnViaBubblewrap = async (
       sandboxApplied: true,
     }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     return {
       exitCode: 127,
       stdout: "",
@@ -139,7 +139,7 @@ const runDirect = async (
       ...(meta.degradeReason !== undefined ? { degradeReason: meta.degradeReason } : {}),
     }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     return {
       exitCode: 127,
       stdout: "",

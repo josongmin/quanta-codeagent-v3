@@ -29,8 +29,8 @@
 
 import type { GranularRegistryPort } from "@/agent/checkpoint/granular-registry"
 import type { Message } from "@/llm"
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
-
 /** Construction options. Each port is injected so unit tests can pin the
  *  recorder's behavior without touching the real registry / file system. */
 export interface PerToolSnapshotRecorderOpts {
@@ -93,11 +93,7 @@ const buildFilesBefore = async (
       if (content === null) continue
       out.set(path, content)
     } catch (e) {
-      logger?.warn(
-        `per-tool-snapshot-recorder: readFile threw for ${path}: ${
-          e instanceof Error ? e.message : String(e)
-        }`,
-      )
+      logger?.warn(`per-tool-snapshot-recorder: readFile threw for ${path}: ${errMessage(e)}`)
     }
   }
   return out
@@ -113,11 +109,7 @@ const safeExtractPaths = (
   try {
     return extractor(toolName, input)
   } catch (e) {
-    logger?.warn(
-      `per-tool-snapshot-recorder: extractPaths threw for ${toolName}: ${
-        e instanceof Error ? e.message : String(e)
-      }`,
-    )
+    logger?.warn(`per-tool-snapshot-recorder: extractPaths threw for ${toolName}: ${errMessage(e)}`)
     return []
   }
 }
@@ -159,9 +151,7 @@ export const createPerToolSnapshotRecorder = (
       }
     } catch (e) {
       logger?.warn(
-        `per-tool-snapshot-recorder: registry.record threw for ${toolName}: ${
-          e instanceof Error ? e.message : String(e)
-        }`,
+        `per-tool-snapshot-recorder: registry.record threw for ${toolName}: ${errMessage(e)}`,
       )
     }
   }
@@ -180,9 +170,9 @@ export const createPerToolSnapshotRecorder = (
               await captureSnapshot(tool.name, input)
             } catch (e) {
               logger?.warn(
-                `per-tool-snapshot-recorder: captureSnapshot threw for ${tool.name}: ${
-                  e instanceof Error ? e.message : String(e)
-                }`,
+                `per-tool-snapshot-recorder: captureSnapshot threw for ${tool.name}: ${errMessage(
+                  e,
+                )}`,
               )
             }
             // Delegate to the original execute — the tool sees no wrap.

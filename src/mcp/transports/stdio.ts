@@ -11,7 +11,7 @@
  *  command resolves, plus anything the config explicitly opted in. */
 
 import type { Subprocess } from "bun"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import { encodeMessage, LineReader } from "../jsonrpc"
 import type { McpServerConfig } from "../types"
 import type {
@@ -108,7 +108,7 @@ export class StdioMcpTransport implements McpTransport {
       stdin.write(encodeMessage(payload))
       return null
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = errMessage(e)
       logger.warn("mcp: failed to write to server stdin", { error: msg })
       return new Error(`mcp server "${this.config.name}" transport write failed: ${msg}`)
     }
@@ -142,7 +142,7 @@ export class StdioMcpTransport implements McpTransport {
         for (const msg of this.reader.push(chunk)) this.emitMessage(msg)
       }
     } catch (e) {
-      logger.debug("mcp: stdout pump ended", { error: String(e) })
+      logger.debug("mcp: stdout pump ended", { error: errMessage(e) })
     }
   }
 

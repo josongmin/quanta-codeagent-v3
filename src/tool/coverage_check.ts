@@ -35,10 +35,10 @@ import {
   defaultV8CoverageSource,
   type FileCoverage,
 } from "@/observability/coverage"
+import { errMessage } from "@/shared"
 import { FsJailError } from "@/storage"
 import { resolveJailedDoc } from "./_shared/resolve-jailed-doc"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "./types"
-
 export const coverageCheckInputSchema = z.object({
   coverageJsonPath: z
     .string()
@@ -154,7 +154,7 @@ const preflight = async (
       }
     }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     const isEnoent =
       typeof e === "object" && e !== null && (e as { code?: unknown }).code === "ENOENT"
     return {
@@ -200,7 +200,7 @@ export const coverageCheckTool: Tool<CoverageCheckInput> = {
         }
         return
       }
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = errMessage(e)
       yield {
         type: "result",
         result: errResult(`coverage: unexpected error: ${msg}`, {

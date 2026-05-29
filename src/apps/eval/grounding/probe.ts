@@ -1,17 +1,17 @@
-import type { ContextEvent } from "@/agent/context-change"
 import { buildTurnContext, type RepoRules } from "@/agent"
+import type { ContextEvent } from "@/agent/context-change"
 import type { LLMPort, Message } from "@/llm"
 import { costUsd } from "@/observability/pricing"
+import { errMessage } from "@/shared"
 import type { TokenUsage } from "../storage/schema"
 import { classifyGroundingInfraError, type GroundingErrorKind } from "./diagnostics"
-import { parseGroundingDecisionText, type GroundingParseResult } from "./parser"
+import { type GroundingParseResult, parseGroundingDecisionText } from "./parser"
 import type {
   GroundingCase,
   GroundingMode,
   GroundingOutputProtocol,
   GroundingProbeProfile,
 } from "./schema"
-
 export interface GroundingProbeOpts {
   llm: LLMPort
   probeProfile?: GroundingProbeProfile
@@ -57,11 +57,7 @@ const buildProbePrompt = (
   const stateContractBlock =
     groundingCase.stateContract === undefined
       ? []
-      : [
-          "Authoritative state snapshot:",
-          JSON.stringify(groundingCase.stateContract),
-          "",
-        ]
+      : ["Authoritative state snapshot:", JSON.stringify(groundingCase.stateContract), ""]
   const candidateAuthority = {
     ...(groundingCase.candidateThreadIds !== undefined
       ? { candidateThreadIds: groundingCase.candidateThreadIds }
@@ -69,16 +65,14 @@ const buildProbePrompt = (
     ...(groundingCase.candidateReferentIds !== undefined
       ? { candidateReferentIds: groundingCase.candidateReferentIds }
       : {}),
-    ...(groundingCase.ambiguityClass !== undefined ? { ambiguityClass: groundingCase.ambiguityClass } : {}),
+    ...(groundingCase.ambiguityClass !== undefined
+      ? { ambiguityClass: groundingCase.ambiguityClass }
+      : {}),
   }
   const candidateAuthorityBlock =
     Object.keys(candidateAuthority).length === 0
       ? []
-      : [
-          "Authoritative candidate constraints:",
-          JSON.stringify(candidateAuthority),
-          "",
-        ]
+      : ["Authoritative candidate constraints:", JSON.stringify(candidateAuthority), ""]
   const protocolLine =
     outputProtocol === "provider_structured_object"
       ? 'Return exactly one JSON object. The root may either be the decision object itself or wrap it under "decision".'
@@ -103,7 +97,7 @@ const buildProbePrompt = (
     "- If multiple file, subthread, or thread candidates remain and the utterance uses a generic reference to that target class, keep the latent intent, set shouldClarify=true, and leave the unresolved id null.",
     "- Use clarify_request only when the utterance itself is about clarification behavior or directly asks for clarification. A clarification-policy utterance about file candidates still uses scope=specific_file even when no single file is chosen.",
     "- If the utterance instructs the assistant to ask first, clarify first, or request disambiguation before proceeding, treat that utterance as clarify_request rather than execute_change.",
-    'Intent labels: status_check=status or progress, not a concrete-detail lookup. execute_change=do or continue work on the target. explain=why or how rationale, including why something failed. approval_request=ship/merge/readiness approval. clarify_request=the utterance itself is about clarification behavior or directly asks for clarification. fact_lookup=retrieve a concrete detail such as a threshold, value, id, filename, or prior decision from context or history.',
+    "Intent labels: status_check=status or progress, not a concrete-detail lookup. execute_change=do or continue work on the target. explain=why or how rationale, including why something failed. approval_request=ship/merge/readiness approval. clarify_request=the utterance itself is about clarification behavior or directly asks for clarification. fact_lookup=retrieve a concrete detail such as a threshold, value, id, filename, or prior decision from context or history.",
     "Scope labels: current_workstream=the active thread as a whole, entire_session=cross-thread session status, latest_tool_result=the most recent tool output, specific_file=one file, specific_subthread=one named step or subtask.",
   ]
   const rules =
@@ -127,13 +121,19 @@ const buildProbePrompt = (
             "- Prefer current/active over paused, archived, historical, or background threads when those conflict.",
             "- Only set shouldClarify=true when multiple plausible threads or referents remain after applying active-vs-paused and latest-result cues.",
           ]
-  return [...base, ...rules, ...shape, "", "Target utterance:", groundingCase.targetUtterance].join("\n")
+  return [...base, ...rules, ...shape, "", "Target utterance:", groundingCase.targetUtterance].join(
+    "\n",
+  )
 }
 
 const joinPseudo = (cwd: string, file: string): string =>
   cwd.endsWith("/") ? `${cwd}${file}` : `${cwd}/${file}`
 
-const toRepoRules = (text: string | undefined, cwd: string, now: () => number): RepoRules | undefined =>
+const toRepoRules = (
+  text: string | undefined,
+  cwd: string,
+  now: () => number,
+): RepoRules | undefined =>
   text === undefined
     ? undefined
     : {
@@ -149,7 +149,8 @@ const renderHistoryEntry = (entry: GroundingCase["history"][number]): string => 
   if (entry.threadId !== undefined) meta["threadId"] = entry.threadId
   if (entry.referentId !== undefined) meta["referentId"] = entry.referentId
   if (entry.mentionedFileIds !== undefined) meta["mentionedFileIds"] = entry.mentionedFileIds
-  if (entry.mentionedReferentIds !== undefined) meta["mentionedReferentIds"] = entry.mentionedReferentIds
+  if (entry.mentionedReferentIds !== undefined)
+    meta["mentionedReferentIds"] = entry.mentionedReferentIds
   if (entry.toolName !== undefined) meta["toolName"] = entry.toolName
   if (entry.mentionedThreadIds !== undefined) meta["mentionedThreadIds"] = entry.mentionedThreadIds
   if (entry.policyMarkers !== undefined) meta["policyMarkers"] = entry.policyMarkers
@@ -163,7 +164,9 @@ const toHistoryMessages = (history: GroundingCase["history"]): Message[] =>
     content: [{ type: "text", text: renderHistoryEntry(entry) }],
   }))
 
-const toContextEvents = (events: GroundingCase["contextChanges"]): readonly ContextEvent[] | undefined =>
+const toContextEvents = (
+  events: GroundingCase["contextChanges"],
+): readonly ContextEvent[] | undefined =>
   events?.map((event, index) => ({
     kind: "context_update",
     field: event.field,
@@ -224,7 +227,7 @@ const runGroundingStream = async (
         }
       }
     } catch (error) {
-      const message = `llm stream failed: ${error instanceof Error ? error.message : String(error)}`
+      const message = `llm stream failed: ${errMessage(error)}`
       if (attempt === 0 && isRetryableGroundingStreamError(message, rawText)) continue
       return {
         rawText,
@@ -270,7 +273,9 @@ export const runGroundingProbe = async (
     ...(groundingCase.memoryContext !== undefined
       ? { memoryContext: groundingCase.memoryContext }
       : {}),
-    ...(groundingCase.workingState !== undefined ? { workingState: groundingCase.workingState } : {}),
+    ...(groundingCase.workingState !== undefined
+      ? { workingState: groundingCase.workingState }
+      : {}),
     ...(repoRules !== undefined ? { repoRules } : {}),
     ...(contextChangeEvents !== undefined ? { contextChangeEvents } : {}),
     now,
@@ -280,7 +285,9 @@ export const runGroundingProbe = async (
     ...prompt.messages,
     {
       role: "user",
-      content: [{ type: "text", text: buildProbePrompt(groundingCase, probeProfile, outputProtocol) }],
+      content: [
+        { type: "text", text: buildProbePrompt(groundingCase, probeProfile, outputProtocol) },
+      ],
     },
   ]
   return runGroundingStream(opts.llm, prompt.system, messages, outputProtocol)
@@ -290,30 +297,37 @@ export const runGroundingPreflight = async (
   opts: GroundingProbeOpts,
 ): Promise<GroundingPreflightResult> => {
   const prompt = buildTurnContext({
-    baseMessages: [{ role: "assistant", content: [{ type: "text", text: "Active thread preflight." }] }],
+    baseMessages: [
+      { role: "assistant", content: [{ type: "text", text: "Active thread preflight." }] },
+    ],
     cwd: process.cwd(),
     now: opts.now ?? Date.now,
   })
-  const result = await runGroundingStream(opts.llm, prompt.system, [
-    ...prompt.messages,
-    {
-      role: "user",
-      content: [
-        {
-          type: "text",
-          text: [
-            "Resolve the user's underspecified utterance against the prior conversation context.",
-            "Do NOT answer the utterance itself.",
-            "Return exactly one JSON object and no prose.",
-            'Shape: {"activeThreadId": string|null, "referentId": string|null, "intent": "status_check"|"execute_change"|"explain"|"approval_request"|"clarify_request"|"fact_lookup", "scope": "current_workstream"|"entire_session"|"latest_tool_result"|"specific_file"|"specific_subthread", "shouldClarify": boolean, "confidence": "high"|"medium"|"low"}',
-            "",
-            "Target utterance:",
-            "이제 다 됐냐?",
-          ].join("\n"),
-        },
-      ],
-    },
-  ], opts.outputProtocol ?? "exact_json")
+  const result = await runGroundingStream(
+    opts.llm,
+    prompt.system,
+    [
+      ...prompt.messages,
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              "Resolve the user's underspecified utterance against the prior conversation context.",
+              "Do NOT answer the utterance itself.",
+              "Return exactly one JSON object and no prose.",
+              'Shape: {"activeThreadId": string|null, "referentId": string|null, "intent": "status_check"|"execute_change"|"explain"|"approval_request"|"clarify_request"|"fact_lookup", "scope": "current_workstream"|"entire_session"|"latest_tool_result"|"specific_file"|"specific_subthread", "shouldClarify": boolean, "confidence": "high"|"medium"|"low"}',
+              "",
+              "Target utterance:",
+              "이제 다 됐냐?",
+            ].join("\n"),
+          },
+        ],
+      },
+    ],
+    opts.outputProtocol ?? "exact_json",
+  )
   return {
     ...result,
     ...(opts.llm.provider !== undefined ? { provider: opts.llm.provider } : {}),

@@ -1,12 +1,12 @@
+import { errMessage } from "@/shared"
+import { classifyGroundingParserError, type GroundingErrorKind } from "./diagnostics"
 import {
   GROUNDING_CONFIDENCE,
   GROUNDING_INTENTS,
   GROUNDING_SCOPES,
-  type GroundingOutputProtocol,
   type GroundingDecision,
+  type GroundingOutputProtocol,
 } from "./schema"
-import { classifyGroundingParserError, type GroundingErrorKind } from "./diagnostics"
-
 export interface GroundingParseResult {
   rawText: string
   structuredOutputProtocol: GroundingOutputProtocol
@@ -73,7 +73,7 @@ const parseJsonRoot = (rawText: string): unknown => {
   try {
     parsed = JSON.parse(trimmed)
   } catch (error) {
-    throw new Error(`JSON parse failed: ${error instanceof Error ? error.message : String(error)}`)
+    throw new Error(`JSON parse failed: ${errMessage(error)}`)
   }
   return parsed
 }
@@ -113,7 +113,7 @@ export const parseGroundingDecisionText = (
       decision,
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
+    const message = errMessage(error)
     return {
       rawText,
       structuredOutputProtocol: protocol,

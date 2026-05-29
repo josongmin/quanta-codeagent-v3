@@ -19,6 +19,7 @@
  * `SubagentRunner` for ADR-0130.
  */
 
+import { errMessage } from "@/shared"
 import type { SubagentResult, SubagentRunner } from "@/subagent"
 import { failureBoomerang, successBoomerang } from "./boomerang"
 import { chainParentSignal, makeChildCorrelation } from "./isolated-context"
@@ -30,7 +31,6 @@ import type {
   DelegationRequest,
   ModeProfile,
 } from "./port"
-
 /** Runner port — the host injects ONE function that runs a child agent under
  *  the supplied profile and returns a typed outcome. The runner's contract:
  *
@@ -203,7 +203,7 @@ const reduceThrow = (
   durationMs: number,
   childAborted: boolean,
 ): BoomerangResult => {
-  const msg = err instanceof Error ? err.message : String(err)
+  const msg = errMessage(err)
   if (childAborted) return projectCancellation(mode, msg, 0, durationMs)
   return failureBoomerang({
     mode,

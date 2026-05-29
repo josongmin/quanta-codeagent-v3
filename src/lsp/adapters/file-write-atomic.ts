@@ -27,6 +27,7 @@ import {
   unlink as fsUnlink,
   readdir,
 } from "node:fs/promises"
+import { errMessage } from "@/shared"
 import type {
   FileWriteBatch,
   FileWriteFs,
@@ -124,7 +125,7 @@ export const atomicFileWriteStrategy = (
           prepared.push({ tempPath, entry })
         } catch (e) {
           phaseAFailIndex = i
-          phaseAFailReason = e instanceof Error ? e.message : String(e)
+          phaseAFailReason = errMessage(e)
           break
         }
       }
@@ -209,9 +210,7 @@ export const atomicFileWriteStrategy = (
               outcomes.push({
                 kind: "failed",
                 path: entry.path,
-                reason: `EXDEV cross-fs rename + copyFile fallback failed: ${
-                  copyErr instanceof Error ? copyErr.message : String(copyErr)
-                }`,
+                reason: `EXDEV cross-fs rename + copyFile fallback failed: ${errMessage(copyErr)}`,
               })
               commitFailed = true
               continue
@@ -220,7 +219,7 @@ export const atomicFileWriteStrategy = (
           outcomes.push({
             kind: "failed",
             path: entry.path,
-            reason: e instanceof Error ? e.message : String(e),
+            reason: errMessage(e),
           })
           commitFailed = true
         }

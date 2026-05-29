@@ -25,6 +25,7 @@
  * injects the real spawner.
  */
 
+import { errMessage } from "@/shared"
 import type {
   McpSandbox,
   McpSandboxAvailability,
@@ -153,7 +154,7 @@ export const passthroughMcpSandbox = (cfg: McpSandboxConfig = {}): McpSandbox =>
         // Spawner failure: degraded handle with backendId="error". No throw —
         // the no-throw contract collapses backend failure to a typed-shape
         // return. Caller branches on sandboxApplied=false + degradeReason.
-        const msg = err instanceof Error ? err.message : String(err)
+        const msg = errMessage(err)
         return {
           serverId: spec.id,
           profile: policy.profile,

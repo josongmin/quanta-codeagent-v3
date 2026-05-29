@@ -62,9 +62,9 @@ import {
   context as otelContext,
   trace as otelTrace,
 } from "@opentelemetry/api"
+import { errMessage } from "@/shared"
 import { noopTracer } from "./noop-tracer"
 import type { Span, SpanAttributes, SpanContext, SpanKind, SpanStatusCode, Tracer } from "./port"
-
 // ────────────────────────────────────────────────────────────────────────────
 // Public surface
 // ────────────────────────────────────────────────────────────────────────────
@@ -347,7 +347,7 @@ export const otelTracer = (opts?: OtelTracerOpts): Tracer => {
           span.recordException(e)
           span.setStatus("error", e.message)
         } else {
-          span.setStatus("error", String(e))
+          span.setStatus("error", errMessage(e))
         }
         throw e
       } finally {

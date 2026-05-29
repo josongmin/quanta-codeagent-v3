@@ -12,9 +12,9 @@
  *  (`subagent_poll` / `subagent_await`) but NOT a cancel tool. */
 
 import { z } from "zod"
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import type { BackgroundSubagentSchedulerPort, SubagentBgSpec } from "./port"
-
 export const subagentForkInputSchema = z.object({
   task: z.string().min(1).describe("The prompt handed to the background subagent."),
   modelOverride: z.string().optional().describe("Optional model id swap for this run."),
@@ -69,7 +69,7 @@ export const subagentForkTool = (
     try {
       id = scheduler.fork(spec)
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = errMessage(e)
       // Producer-side `SubagentBackgroundError("cap-exceeded")` carries a
       // message that already begins with `cap-exceeded:` — surface it
       // verbatim so callers see the typed code.

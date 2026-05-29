@@ -48,12 +48,12 @@
  */
 
 import { randomBytes } from "node:crypto"
+import { errMessage } from "@/shared"
 import type {
   SubagentResult as SliceRunnerOutcome,
   SubagentRequest,
   SubagentRunner,
 } from "@/subagent"
-
 /** Opaque handle id — `bg-<16hex>`. Stable for the scheduler's lifetime. */
 export type SubagentHandleId = string
 
@@ -429,7 +429,7 @@ export const defaultBackgroundSubagentScheduler = (
    *  and genuine error (→ failed). */
   const applyRunnerFailure = (entry: Entry, e: unknown): void => {
     if (entry.result.status === "cancelled") return
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     if (entry.abortCtrl.signal.aborted) {
       entry.result.status = "cancelled"
       entry.result.outputSummary = "(cancelled)"

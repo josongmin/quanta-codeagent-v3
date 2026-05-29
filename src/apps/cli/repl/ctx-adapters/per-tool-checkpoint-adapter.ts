@@ -26,8 +26,8 @@ import type {
   ThreeWayRestorePort,
 } from "@/agent/per-tool-checkpoint"
 import type { Message } from "@/llm"
+import { errMessage } from "@/shared"
 import type { PerToolCheckpointSlashState } from "../../rewind-tool-cmd"
-
 export interface PerToolCheckpointAdapterArgs {
   readonly registry: GranularRegistry
   readonly restore?: ThreeWayRestorePort
@@ -130,7 +130,7 @@ const registryFailure = (toolCallId: string, err: unknown): SnapshotRestoreResul
   ok: false,
   errorCode: "registry-failure",
   toolCallId,
-  message: `per-tool-checkpoint: registry threw: ${err instanceof Error ? err.message : String(err)}`,
+  message: `per-tool-checkpoint: registry threw: ${errMessage(err)}`,
 })
 
 /** Try to read a snapshot from the registry. NO-THROW — wraps the call

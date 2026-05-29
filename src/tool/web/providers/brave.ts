@@ -31,8 +31,8 @@
  * results for "<query>"` exactly as designed for empty searches.
  */
 
+import { errMessage } from "@/shared"
 import type { WebSearchHit, WebSearchProvider } from "../search"
-
 /** Default Brave Search REST endpoint. Overridable for tests (in-process
  *  fake) and for self-hosted / reverse-proxy deployments. */
 export const BRAVE_DEFAULT_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
@@ -159,7 +159,7 @@ const doFetch = async (
   } catch (err) {
     // Network errors (DNS failure, connection refused, abort, TLS) — wrap
     // as a `BraveSearchError` so the caller has a uniform throw shape.
-    const msg = err instanceof Error ? err.message : String(err)
+    const msg = errMessage(err)
     throw new BraveSearchError(`network: ${msg}`)
   }
 }
@@ -185,7 +185,7 @@ const parseJson = async (response: Response): Promise<unknown> => {
   try {
     return await response.json()
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
+    const msg = errMessage(err)
     throw new BraveSearchError(`parse-failed: ${msg}`)
   }
 }

@@ -1,3 +1,4 @@
+import { errMessage } from "@/shared"
 import type { ToolResult } from "../types"
 import type { DeferredResultRegistry, DeferredWork } from "./port"
 import type { DeferredError, DeferredHandle, Status } from "./types"
@@ -123,8 +124,7 @@ export class DefaultDeferredResultRegistry implements DeferredResultRegistry {
             this.#transition(entry, { kind: "cancelled", error: { kind: "cancelled" } })
             return
           }
-          const message =
-            err instanceof Error ? err.message : typeof err === "string" ? err : String(err)
+          const message = errMessage(err)
           this.#transition(entry, {
             kind: "failed",
             error: { kind: "worker-threw", message },

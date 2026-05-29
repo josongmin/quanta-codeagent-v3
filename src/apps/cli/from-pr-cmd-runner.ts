@@ -20,7 +20,7 @@
  */
 
 import { parseArgs } from "node:util"
-
+import { errMessage } from "@/shared"
 import { type FromPrCmdArgs, type FromPrCmdEvent, runFromPrCmd } from "./from-pr-cmd"
 import {
   createBunGhCliPort,
@@ -75,7 +75,7 @@ const parseArgv = (argv: readonly string[]): ParseResult => {
       },
     })
   } catch (error) {
-    return { kind: "err", message: error instanceof Error ? error.message : String(error) }
+    return { kind: "err", message: errMessage(error) }
   }
   const v = parsed.values
   if (v.help === true) {

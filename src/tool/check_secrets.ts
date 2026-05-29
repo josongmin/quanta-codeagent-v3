@@ -43,9 +43,9 @@
 
 import { z } from "zod"
 import { compositeSecretScanner, type SecretFinding } from "@/security/secret-detection"
+import { errMessage } from "@/shared"
 import type { Tool } from "@/tool"
 import { defineTool } from "@/tool"
-
 /** Discriminated input: scan an in-memory string OR a file path. Exactly one
  *  must be set. Zod's `.refine` enforces the XOR at validation time so the
  *  tool body sees a structurally-valid input. */
@@ -147,7 +147,7 @@ export const checkSecretsTool: Tool<CheckSecretsInput, CheckSecretsStructured> =
         },
       }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = errMessage(e)
       yield {
         type: "result",
         result: {

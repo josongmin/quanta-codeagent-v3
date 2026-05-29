@@ -26,8 +26,8 @@
  * byte-identical to its pre-ADR-0116 behaviour.
  */
 
+import { errMessage } from "@/shared"
 import type { ShadowOdb } from "@/storage/shadow-odb"
-
 /** Quantified measurement of how much one candidate's workspace diverged
  *  from the anchor point. All fields non-negative integers. Pure data —
  *  no I/O, no methods. */
@@ -133,7 +133,7 @@ export const shadowOdbAnchor = (odb: ShadowOdb, baseCwd: string): BranchSearchAn
           registered = true
           return { ok: true }
         } catch (err) {
-          const reason = err instanceof Error ? err.message : String(err)
+          const reason = errMessage(err)
           return { ok: false, reason }
         } finally {
           registerCallInFlight = null

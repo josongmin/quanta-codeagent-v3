@@ -29,6 +29,7 @@
 
 import { promises as fs } from "node:fs"
 import { isAbsolute, join, sep } from "node:path"
+import { errMessage } from "@/shared"
 import { defaultGitRunner, type GitRunner, type GitRunResult } from "@/tool/git"
 import { evictLru } from "./cleanup"
 import { workspaceHash } from "./hash"
@@ -72,7 +73,7 @@ const validateWorkspaceRoot = async (workspaceRoot: string): Promise<string> => 
   try {
     leaf = await fs.lstat(workspaceRoot)
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
+    const msg = errMessage(err)
     throw new ShadowOdbError("symlink-in-path", `cannot stat ${workspaceRoot}: ${msg}`)
   }
   if (leaf.isSymbolicLink()) {
@@ -93,7 +94,7 @@ const validateWorkspaceRoot = async (workspaceRoot: string): Promise<string> => 
   try {
     return await fs.realpath(workspaceRoot)
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
+    const msg = errMessage(err)
     throw new ShadowOdbError("symlink-in-path", `realpath failed for ${workspaceRoot}: ${msg}`)
   }
 }
@@ -143,7 +144,7 @@ const runShadow = async (
   try {
     return await runner.run(shadowArgs(gitDir, workTree, rest), workTree)
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
+    const msg = errMessage(err)
     throw new ShadowOdbError("spawn-failed", `shadow git ${rest.join(" ")} failed: ${msg}`)
   }
 }
@@ -370,7 +371,7 @@ export const defaultShadowOdb = (cfg: ShadowOdbConfig = {}): ShadowOdb => {
       }
     } catch (err) {
       if (err instanceof ShadowOdbError) throw err
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = errMessage(err)
       throw new ShadowOdbError("spawn-failed", `shadow git init failed: ${msg}`)
     }
   }

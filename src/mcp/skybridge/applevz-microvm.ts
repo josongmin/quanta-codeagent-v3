@@ -17,6 +17,7 @@
  * so the swap is local to this file.
  */
 
+import { errMessage } from "@/shared"
 import {
   type McpSandbox,
   type McpSandboxAvailability,
@@ -27,7 +28,6 @@ import {
   type McpServerSpec,
   type SkybridgeSpawner,
 } from "./types"
-
 /**
  * Detect `vz` CLI availability. Returns binary path OR `null`.
  *
@@ -120,11 +120,9 @@ export const appleVzMicroVmSandbox = (cfg: McpSandboxConfig = {}): McpSandbox =>
       try {
         raw = await spawner(runArgs, buildAppleVzOpts(spec))
       } catch (e) {
-        throw new McpSandboxError(
-          "spawn-failed",
-          `vz shell spawn failed: ${e instanceof Error ? e.message : String(e)}`,
-          { cause: e },
-        )
+        throw new McpSandboxError("spawn-failed", `vz shell spawn failed: ${errMessage(e)}`, {
+          cause: e,
+        })
       }
 
       return {

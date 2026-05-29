@@ -33,6 +33,7 @@
  *  child's intermediate messages or tool transcripts. */
 
 import { z } from "zod"
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import {
   type AgentMode,
@@ -154,7 +155,7 @@ export const delegateTool = (port: DelegationPort): Tool<DelegateInput> => ({
       // The port contract is NO-THROW for operational failures; a throw here
       // is an unexpected (programmer-bug) path. Surface it as a graceful
       // ok:false rather than letting it bubble past the loop.
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = errMessage(e)
       yield { type: "result", result: { ok: false, output: `delegate error: ${msg}` } }
       return
     }

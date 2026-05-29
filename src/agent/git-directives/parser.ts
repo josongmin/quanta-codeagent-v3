@@ -15,7 +15,7 @@
  *   5. Per-kind shape check on the parsed object.
  */
 
-import { err, ok, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 import { GIT_DIRECTIVE_KINDS, type GitDirective, type GitDirectiveParseError } from "./types"
 
 const PREFIX = "::git-"
@@ -39,7 +39,7 @@ export const parse = (line: string): Result<GitDirective, GitDirectiveParseError
   } catch (e) {
     return err({
       kind: "malformed-directive",
-      reason: e instanceof Error ? e.message : String(e),
+      reason: errMessage(e),
     })
   }
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {

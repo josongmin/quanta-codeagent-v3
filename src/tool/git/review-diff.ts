@@ -16,6 +16,7 @@
  *  the tool yields a deterministic `ok:false` (no throw, no crash). */
 
 import { z } from "zod"
+import { errMessage } from "@/shared"
 import type { ReviewerRequest, ReviewerResult, Tool, ToolContext, ToolEvent } from "../types"
 import { safeRun, stderrReason } from "./_shared"
 import type { GitRunner } from "./types"
@@ -202,7 +203,7 @@ const renderReport = (report: ReviewReport): string => {
 
 /** Wrap an error value into a model-facing message. Small helper so the
  *  reviewer-call try/catch in `execute` stays a one-liner (keeps cog cap). */
-const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+const errMsg = (e: unknown): string => errMessage(e)
 
 /** Discriminated outcome of the `git diff` extraction step. Pulled out of
  *  `execute()` so the main generator stays linear (each branch yields once

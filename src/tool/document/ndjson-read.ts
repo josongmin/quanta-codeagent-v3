@@ -8,11 +8,11 @@
 
 import { lstat } from "node:fs/promises"
 import { z } from "zod"
+import { errMessage } from "@/shared"
 import { FsJailError } from "@/storage"
 import { resolveJailedDoc } from "../_shared/resolve-jailed-doc"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 import { parseNdjson } from "./ndjson-parse"
-
 export const NDJSON_READ_DEFAULT_MAX_LINES = 100
 export const NDJSON_READ_MAX_LINES_CEILING = 1000
 export const NDJSON_READ_MAX_OUTPUT = 50_000
@@ -101,7 +101,7 @@ const statPhase = async (
     }
     return { kind: "ok" }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     const isEnoent =
       typeof e === "object" && e !== null && (e as { code?: unknown }).code === "ENOENT"
     return {
@@ -165,7 +165,7 @@ export const ndjsonReadTool: Tool<NdjsonReadInput> = {
     try {
       text = await Bun.file(pre.abs).text()
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = errMessage(e)
       yield {
         type: "result",
         result: errResult(`read failed: ${msg}`, { mode: "error", modelVisibleError: msg }),

@@ -38,6 +38,7 @@
  */
 
 import type { Message } from "@/llm"
+import { errMessage } from "@/shared"
 import type {
   BackgroundSubagentScheduler,
   SubagentHandleId,
@@ -48,10 +49,7 @@ import type {
   PersistedSubagentStatus,
   PersistentSchedulerStore,
 } from "../subagent-persistence-store"
-import {
-  defaultIdempotencyClassifier,
-  type IdempotencyClassifier,
-} from "./idempotency"
+import { defaultIdempotencyClassifier, type IdempotencyClassifier } from "./idempotency"
 import type { ResumeDecision, ResumePolicy } from "./policy"
 import { buildReplaySpec, type ReplayContext, type ReplayPolicy } from "./replay"
 import type { ToolHistoryStore } from "./tool-history"
@@ -62,7 +60,6 @@ import {
   type ToolReplayOutcome,
   type ToolReplayPolicy,
 } from "./tool-replay"
-
 /** Per-handle outcome of one resume sweep. One entry per `"interrupted"`
  *  handle in store order. */
 export interface ResumeOutcome {
@@ -218,7 +215,7 @@ const markFailed = (old: PersistedHandle, reason: string, tNow: number): Persist
 })
 
 /** Extract a stable error message from a caught `unknown` throwable. */
-const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+const errMsg = (e: unknown): string => errMessage(e)
 
 /** Apply the `"resume"` branch — optionally consult the replay composer, then
  *  fork in the scheduler + flip OLD to `"resumed"` in the store.
@@ -385,7 +382,7 @@ export const resumeInterruptedHandles = async (
     try {
       decision = policy.decide(handle)
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = errMessage(e)
       outcomes.push({
         id: handle.id,
         // Synthetic decision so the outcome shape stays uniform — caller can

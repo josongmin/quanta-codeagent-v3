@@ -14,8 +14,8 @@
  * surface that wires `ctx.skills`.
  */
 
+import { errMessage } from "@/shared"
 import type { SkillRow, SlashContext } from "../slash-contract"
-
 /** Grapheme-cluster-aware truncator. Walks {@link Intl.Segmenter}'s grapheme
  *  boundaries so an emoji / combining-mark / high-plane char near the limit is
  *  never split (naive `slice(0, max-3) + "..."` can yield half a surrogate pair
@@ -86,7 +86,7 @@ export const runSkillsRender = async (
     renderSkills(ctx, rows, prefix)
     return 0
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     ctx.err(`${name}: discovery failed: ${msg}\n`)
     return 1
   }

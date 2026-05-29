@@ -13,7 +13,7 @@
  *
  * Boundary behavior is the canonical Reranker contract — see port.ts.
  */
-import { err, ok, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 import type { Reranker } from "./port"
 import type { RerankError, RerankedHit, RerankerCapabilities } from "./types"
 
@@ -62,7 +62,7 @@ const classify = (e: unknown): RerankError => {
   const status = statusOf(e)
   if (status === 401 || status === 403) return { kind: "auth-failed" }
   if (status === 429) return { kind: "rate-limited" }
-  const message = e instanceof Error ? e.message : String(e)
+  const message = errMessage(e)
   return { kind: "transport", message }
 }
 

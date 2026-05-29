@@ -39,8 +39,8 @@
 
 import { z } from "zod"
 import type { CachePerformanceSnapshot, PromptCacheObserver } from "@/observability/prompt-cache"
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "./types"
-
 /** Input schema. All fields are OPTIONAL — the most common invocation is
  *  `prompt_cache_status()` (no args) to get the lifetime + per-session
  *  rollup. `sessionId` narrows to one session's drill-down (still includes
@@ -252,7 +252,7 @@ export const promptCacheStatusTool = (
     try {
       snap = observer.snapshot()
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = errMessage(e)
       const result: ToolResult = {
         ok: false,
         output: `prompt_cache_status: snapshot failed: ${msg}`,

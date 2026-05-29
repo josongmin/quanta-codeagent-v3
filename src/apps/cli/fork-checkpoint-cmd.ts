@@ -22,8 +22,8 @@
  */
 
 import type { ForkSessionPort } from "@/agent/fork-session"
+import { errMessage } from "@/shared"
 import type { SlashCommand, SlashContext } from "./slash-commands"
-
 /** Slash-context slot wired by the REPL surface. Absent ⇒ command is a
  *  friendly "not wired" no-op (exit 0). */
 export interface ForkSessionSlashState {
@@ -153,7 +153,7 @@ const runForkMode = async (
     // ForkSessionPort.fork is contractually no-throw; this branch only fires
     // if a malformed adapter slipped past contract tests. Surface explicitly
     // rather than crash the REPL.
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     ctx.err(`/fork-checkpoint: port threw (contract violation): ${msg}\n`)
     return 1
   }

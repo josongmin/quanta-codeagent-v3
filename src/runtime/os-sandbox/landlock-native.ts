@@ -30,6 +30,7 @@
  * file = separate fallback tier in `default.ts`.
  */
 
+import { errMessage } from "@/shared"
 import type {
   OsSandbox,
   OsSandboxConfig,
@@ -39,7 +40,6 @@ import type {
   SandboxPolicy,
   Spawner,
 } from "./types"
-
 /** napi-rs spawn result shape (camelCase across the napi boundary). */
 export interface NapiSpawnResult {
   readonly exitCode: number
@@ -260,7 +260,7 @@ const passthrough = async (
       ...(meta.degradeReason !== undefined ? { degradeReason: meta.degradeReason } : {}),
     }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     return {
       exitCode: 127,
       stdout: "",
@@ -331,7 +331,7 @@ export const nativeLandlockOsSandbox = (cfg?: NativeLandlockConfig): OsSandbox =
         const raw = await Promise.resolve(binding.spawn_sandboxed(napiSpec, napiPolicy))
         return mapNapiResult(raw)
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e)
+        const msg = errMessage(e)
         return {
           exitCode: 127,
           stdout: "",

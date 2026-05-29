@@ -8,7 +8,7 @@ import type {
   RuntimeSideConversationArgs,
   RuntimeSideConversationResult,
 } from "@/sdk/runtime"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import type { PlaybookPlanQueueSink } from "@/skill/playbook"
 import { startReactorWatchBridge } from "../reactor-watch-bridge"
 import type { ConvCheckpointWire } from "./conv-checkpoint-wire"
@@ -244,7 +244,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     try {
       convCheckpointWire.recordTurn(msgs)
     } catch (e) {
-      logger.warn(`conv-checkpoint recordTurn threw: ${e instanceof Error ? e.message : String(e)}`)
+      logger.warn(`conv-checkpoint recordTurn threw: ${errMessage(e)}`)
     }
   }
 
@@ -263,7 +263,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
         } catch (e) {
           return {
             ok: false,
-            reason: e instanceof Error ? e.message : String(e),
+            reason: errMessage(e),
           }
         }
       },

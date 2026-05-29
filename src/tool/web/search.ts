@@ -17,8 +17,8 @@
  */
 
 import { z } from "zod"
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
-
 export const WEB_SEARCH_DEFAULT_LIMIT = 5
 export const WEB_SEARCH_MAX_LIMIT = 20
 export const WEB_SEARCH_QUERY_MAX = 500
@@ -124,7 +124,7 @@ export const webSearchTool = (provider?: WebSearchProvider): Tool<WebSearchInput
       try {
         hits = await provider.search(parsed.data.query, limit, ctx.signal)
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e)
+        const msg = errMessage(e)
         yield {
           type: "result",
           result: errResult(`provider error: ${msg}`, {

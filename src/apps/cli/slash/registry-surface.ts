@@ -350,7 +350,7 @@ const planCmd: SlashCommand = {
     try {
       plan = ctx.planSnapshot()
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = errMessage(e)
       ctx.err(`/plan: snapshot failed: ${msg}\n`)
       return 1
     }

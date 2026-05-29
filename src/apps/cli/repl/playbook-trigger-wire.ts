@@ -30,13 +30,13 @@
 
 import { existsSync, statSync } from "node:fs"
 import { resolve as resolvePath } from "node:path"
+import { errMessage } from "@/shared"
 import {
   createInlineTriggerWatcher,
   type PlaybookPlanQueueSink,
   type PlaybookRegistry,
   startPlaybookFromTrigger,
 } from "@/skill/playbook"
-
 /** Handle returned by {@link maybeStartPlaybookTriggerWire}. `stop()` is
  *  idempotent; `isActive()` reports whether the env/flag opt-in fired. */
 export interface PlaybookTriggerWireHandle {
@@ -96,7 +96,7 @@ const safeSink = (
     try {
       return sink.enqueue(input)
     } catch (e) {
-      const reason = e instanceof Error ? e.message : String(e)
+      const reason = errMessage(e)
       logger.warn(`[playbook-trigger] sink threw: ${reason}`)
       return { ok: false, reason }
     }
@@ -142,7 +142,7 @@ export const maybeStartPlaybookTriggerWire = (
       defaultRoot: validated,
     })
   } catch (e) {
-    const reason = e instanceof Error ? e.message : String(e)
+    const reason = errMessage(e)
     logger.warn(`[playbook-trigger] startPlaybookFromTrigger threw: ${reason}`)
     return NOOP_HANDLE
   }

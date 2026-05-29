@@ -24,8 +24,8 @@ import {
   type BgShellSnapshot,
   getBashBgRegistry,
 } from "@/runtime/bash-bg-registry"
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent, ToolResult, ToolResultEvidence } from "../types"
-
 export const bashAwaitInputSchema = z.object({
   shell_id: z
     .string()
@@ -73,7 +73,7 @@ const compileRegexOrFail = (
   try {
     return { ok: true, compiled: new RegExp(regex, "s") }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     return {
       ok: false,
       result: {

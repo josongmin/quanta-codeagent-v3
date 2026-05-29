@@ -58,6 +58,7 @@ import {
   type ActiveSkillDescriptor,
   resolvePluginSkillsForActivation,
 } from "@/agent/plugin-skill-extension"
+import { errMessage } from "@/shared"
 import type { MCPServerSpec } from "@/skill/plugin-manifest"
 // ADR-0341 retired the mcp-shape-adapter — ADR-0336 PluginManifest.mcpServers
 // is now `Record<string, MCPServerSpec>` (Codex verbatim), so this handler
@@ -131,7 +132,7 @@ const launchOne = async (
       shutdown: () => handle.shutdown(),
     }
   } catch (e) {
-    return buildFailedHandle(expectedId, e instanceof Error ? e.message : String(e))
+    return buildFailedHandle(expectedId, errMessage(e))
   }
 }
 

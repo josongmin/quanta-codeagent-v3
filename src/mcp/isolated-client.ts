@@ -35,7 +35,7 @@ import {
   PluginHost,
   PluginHostError,
 } from "@/plugin-isolation"
-import { logger, QuantaError } from "@/shared"
+import { errMessage, logger, QuantaError } from "@/shared"
 import type { McpCallResult, McpServerConfig, McpToolDef } from "./types"
 
 const PROTOCOL_VERSION = "2025-06-18"
@@ -182,7 +182,9 @@ export class IsolatedMcpClient {
       void this.host.stop().catch(() => undefined)
       this.host = null
       this.started = false
-      throw new IsolatedMcpError(`mcp server "${this.config.name}" initialize failed: ${String(e)}`)
+      throw new IsolatedMcpError(
+        `mcp server "${this.config.name}" initialize failed: ${errMessage(e)}`,
+      )
     }
   }
 
@@ -247,7 +249,7 @@ export class IsolatedMcpClient {
       try {
         await host.stop()
       } catch (e) {
-        logger.debug("isolated-mcp: stop encountered error", { error: String(e) })
+        logger.debug("isolated-mcp: stop encountered error", { error: errMessage(e) })
       }
     }
   }

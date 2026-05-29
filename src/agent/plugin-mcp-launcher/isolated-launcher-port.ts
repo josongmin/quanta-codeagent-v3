@@ -31,6 +31,7 @@
 
 import { IsolatedMcpClient, type IsolatedMcpClientOpts } from "@/mcp/isolated-client"
 import type { McpServerConfig } from "@/mcp/types"
+import { errMessage } from "@/shared"
 import type { McpLauncherPort, McpLaunchOpts, McpServerHandle, PluginMcpServerSpec } from "./types"
 
 const composeServerId = (pluginId: string, serverName: string): string =>
@@ -109,7 +110,7 @@ export const createIsolatedMcpLauncherPort = (
         return {
           serverId,
           ready: false,
-          error: e instanceof Error ? e.message : String(e),
+          error: errMessage(e),
           shutdown: async () => {
             // Already stopped above.
           },

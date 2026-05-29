@@ -37,7 +37,7 @@ import type {
   TurnContextRecord,
 } from "@/session"
 import { findByToolCallId, type InspectGroup } from "@/session/inspect-source"
-import { redactValue } from "@/shared"
+import { errMessage, redactValue } from "@/shared"
 import type { SlashCommand } from "./slash-commands"
 
 /* ─── public surface — pure handler ──────────────────────────────────── */
@@ -83,7 +83,7 @@ export const runInspectCmd = async (
   try {
     envelopes = await deps.readSessionJsonl(sessionId)
   } catch (e) {
-    const detail = e instanceof Error ? e.message : String(e)
+    const detail = errMessage(e)
     const msg = `/inspect: failed to read session ${sessionId}: ${detail}`
     deps.out(`${msg}\n`)
     return { exitCode: 1, message: msg }
@@ -347,7 +347,7 @@ const defaultReadSessionJsonl = async (
     // ENOENT ⇒ session JSONL never written (the envelope rail is opt-in
     // — many sessions only have the snapshot JSON). Treat as "empty".
     const code = (e as NodeJS.ErrnoException | undefined)?.code
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     if (code === "ENOENT" || /not found/i.test(msg)) return []
     throw e
   }

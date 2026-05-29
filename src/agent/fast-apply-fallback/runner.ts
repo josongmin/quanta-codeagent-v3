@@ -8,6 +8,7 @@
  * NEVER throws into the caller's turn.
  */
 
+import { errMessage } from "@/shared"
 import type {
   FastApplyAttemptResult,
   FastApplyFailure,
@@ -125,4 +126,4 @@ export const createFastApplyFallback = (deps: FastApplyFallbackDeps): FastApplyF
   }
 }
 
-const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err))
+const errText = (err: unknown): string => errMessage(err)

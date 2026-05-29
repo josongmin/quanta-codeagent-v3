@@ -15,7 +15,7 @@
  * `/voice` slash command.
  */
 
-import { err, ok, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 import type { FetchLike } from "./openai-whisper-transcriber"
 import type { TranscribeReq, TranscriberError, TranscriberPort, VoiceTranscript } from "./port"
 
@@ -168,7 +168,7 @@ const parseBody = async (res: Response): Promise<Result<VoiceTranscript, Transcr
     return err({
       kind: "transcription-failed",
       status: res.status,
-      degradeReason: `deepgram JSON parse failed: ${e instanceof Error ? e.message : String(e)}`,
+      degradeReason: `deepgram JSON parse failed: ${errMessage(e)}`,
     })
   }
   if (!isObj(json)) {
@@ -237,7 +237,7 @@ const doFetch = async (args: DoFetchArgs): Promise<FetchOutcome> => {
     return {
       err: {
         kind: "network-error",
-        degradeReason: e instanceof Error ? e.message : String(e),
+        degradeReason: errMessage(e),
       },
     }
   }

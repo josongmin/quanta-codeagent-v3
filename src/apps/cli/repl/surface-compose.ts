@@ -20,7 +20,7 @@ import {
   type SessionEnvelopeRecord,
   saveSessionById,
 } from "@/session"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import { runImageCmd } from "../image-cmd"
 import type { ImageQueue } from "../image-queue"
 import { createPromptHistory, type PromptHistory } from "../prompt-history"
@@ -126,7 +126,7 @@ const buildDefaultSessionIo = (): SessionIoState => ({
       const found = await loadSessionById(id)
       return found ?? null
     } catch (e) {
-      logger.warn(`sessionIo.readSession failed: ${e instanceof Error ? e.message : String(e)}`)
+      logger.warn(`sessionIo.readSession failed: ${errMessage(e)}`)
       return null
     }
   },
@@ -455,11 +455,7 @@ export const composeSurfaceWires = (
             try {
               await replaceMessages(msgs)
             } catch (e) {
-              logger.warn(
-                `convCheckpoint.replaceMessages threw: ${
-                  e instanceof Error ? e.message : String(e)
-                }`,
-              )
+              logger.warn(`convCheckpoint.replaceMessages threw: ${errMessage(e)}`)
             }
           },
         }
@@ -549,7 +545,7 @@ const snapshotAndFlushLifecyclePills = (setup: SessionSetupResult): void => {
 }
 
 const renderTurnError = (error: unknown, statusBar: StatusBar): void => {
-  const msg = error instanceof Error ? error.message : String(error)
+  const msg = errMessage(error)
   process.stderr.write(`\n\x1b[31merror:\x1b[0m ${msg}\n`)
   statusBar.transient(`error: ${msg.slice(0, 120)}`, 4000)
 }

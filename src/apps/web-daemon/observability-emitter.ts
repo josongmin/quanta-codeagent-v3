@@ -38,6 +38,7 @@ import {
   type RunChange,
 } from "@/protocol/observability"
 
+import { errMessage } from "@/shared"
 /** WS-like send sink — every existing daemon transport (Bun.serve socket /
  *  unit test stub) satisfies this. The emitter never reads from the wire. */
 export interface ObservabilitySink {
@@ -224,7 +225,7 @@ export const createObservabilityEmitter = (
       try {
         options.ws.send(encodeObservabilityFrame(msg))
       } catch (err) {
-        log("warn", `observability: ws.send threw: ${String(err)}`)
+        log("warn", `observability: ws.send threw: ${errMessage(err)}`)
       }
       return
     }
@@ -232,7 +233,7 @@ export const createObservabilityEmitter = (
       try {
         options.send(msg)
       } catch (err) {
-        log("warn", `observability: send seam threw: ${String(err)}`)
+        log("warn", `observability: send seam threw: ${errMessage(err)}`)
       }
     }
   }

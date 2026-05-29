@@ -21,15 +21,15 @@
  */
 
 import type { DelegationRunnerPort } from "@/agent/delegation-runner"
+import { errMessage } from "@/shared"
 import type { LaneManager } from "./port"
 import {
+  DEFAULT_MAX_CONCURRENCY,
   type LaneError,
   type LaneHandle,
   type LaneResult,
   type LaneSpec,
-  DEFAULT_MAX_CONCURRENCY,
 } from "./types"
-
 export interface DefaultLaneManagerOpts {
   /** Injected runner — every lane dispatches its delegate spec through this
    *  port. The runner builds its own child agent (or stub). When absent,
@@ -158,16 +158,17 @@ export const defaultLaneManager = (opts?: DefaultLaneManagerOpts): LaneManager =
       // asynchronously when the parent signal fires. The Boolean() unwrap
       // defeats the stale narrowing.
       const laneCtrl = new AbortController()
-      if (Boolean(managerCtrl.signal.aborted)) laneCtrl.abort()
+      if (managerCtrl.signal.aborted) laneCtrl.abort()
       else managerCtrl.signal.addEventListener("abort", () => laneCtrl.abort(), { once: true })
 
       // Merge the spec.delegate.signal with the lane controller — the
       // delegation runner already handles signal-aborted, so we only need
       // to pass the merged one through.
       const childSpec = handle.spec.delegate
-      const mergedSignal = childSpec.signal !== undefined
-        ? mergeSignals(childSpec.signal, laneCtrl.signal)
-        : laneCtrl.signal
+      const mergedSignal =
+        childSpec.signal !== undefined
+          ? mergeSignals(childSpec.signal, laneCtrl.signal)
+          : laneCtrl.signal
 
       const boomerang = await runner.delegate({
         ...childSpec,
@@ -177,7 +178,11 @@ export const defaultLaneManager = (opts?: DefaultLaneManagerOpts): LaneManager =
       // If the lane was aborted during the run, surface aborted regardless
       // of the boomerang shape (boomerang.errorKind may already be "cancelled"
       // — we project to the typed LaneError surface).
-      if (laneCtrl.signal.aborted === true && !boomerang.ok && boomerang.errorKind === "cancelled") {
+      if (
+        laneCtrl.signal.aborted === true &&
+        !boomerang.ok &&
+        boomerang.errorKind === "cancelled"
+      ) {
         const r: LaneResult = {
           id: handle.id,
           ok: false,
@@ -197,7 +202,7 @@ export const defaultLaneManager = (opts?: DefaultLaneManagerOpts): LaneManager =
       }
       return r
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = errMessage(err)
       const r: LaneResult = {
         id: handle.id,
         ok: false,
@@ -235,7 +240,7 @@ export const defaultLaneManager = (opts?: DefaultLaneManagerOpts): LaneManager =
         (err) => {
           // Defense-in-depth — runLane already wraps everything, but if a
           // future change introduces a throw, surface as spawn-failed.
-          const msg = err instanceof Error ? err.message : String(err)
+          const msg = errMessage(err)
           const fallback: LaneResult = {
             id,
             ok: false,

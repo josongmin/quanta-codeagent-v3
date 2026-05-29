@@ -17,7 +17,7 @@
  * the sink has been written to.
  */
 
-import { err, ok, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 import { checkPhase } from "./phase-guard"
 import type { DirectiveEmitterPort, EmitContext } from "./port"
 import { serialize } from "./serializer"
@@ -55,7 +55,7 @@ export const defaultEmitter = (sink: DirectiveSink): DirectiveEmitterPort => ({
       // as typed error rather than propagating — no-throw public surface.
       return err({
         kind: "invalid-directive",
-        reason: e instanceof Error ? e.message : String(e),
+        reason: errMessage(e),
       })
     }
   },

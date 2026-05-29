@@ -1,3 +1,4 @@
+import { errMessage } from "@/shared"
 import { isSessionCommandType, type SessionCommand } from "./commands"
 import { SessionProtocolValidationError } from "./errors"
 import { isSessionEventType, type SessionEvent } from "./events"
@@ -16,7 +17,7 @@ const parseJson = (raw: string): unknown => {
   } catch (error) {
     throw new SessionProtocolValidationError(
       "invalid_json",
-      `invalid session protocol json: ${error instanceof Error ? error.message : String(error)}`,
+      `invalid session protocol json: ${errMessage(error)}`,
     )
   }
 }

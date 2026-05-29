@@ -23,8 +23,8 @@
  * NOT an error — DDG returns this for the majority of queries.
  */
 
+import { errMessage } from "@/shared"
 import type { WebSearchHit, WebSearchProvider } from "../search"
-
 /** Default DuckDuckGo Instant Answer endpoint. */
 export const DDG_DEFAULT_ENDPOINT = "https://api.duckduckgo.com/"
 
@@ -95,7 +95,7 @@ const doFetch = async (
   try {
     return await fetcher(url, init)
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
+    const msg = errMessage(err)
     throw new Error(`duckduckgo network: ${msg}`)
   }
 }
@@ -105,7 +105,7 @@ const parseJson = async (response: Response): Promise<unknown> => {
   try {
     return await response.json()
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
+    const msg = errMessage(err)
     throw new Error(`duckduckgo parse-failed: ${msg}`)
   }
 }

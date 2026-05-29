@@ -14,7 +14,7 @@
  * default.
  */
 
-import { err, ok, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 import type { TranscribeReq, TranscriberError, TranscriberPort, VoiceTranscript } from "./port"
 
 export const WHISPER_ENDPOINT_V3 = "https://api.openai.com/v1/audio/transcriptions"
@@ -109,7 +109,7 @@ const parseFetchError = (args: ParseFetchErrorArgs): TranscriberError => {
   if (timedOut) return { kind: "timeout", elapsedMs }
   return {
     kind: "network-error",
-    degradeReason: e instanceof Error ? e.message : String(e),
+    degradeReason: errMessage(e),
   }
 }
 
@@ -191,7 +191,7 @@ const parseBody = async (res: Response): Promise<Result<VoiceTranscript, Transcr
     return err({
       kind: "transcription-failed",
       status: res.status,
-      degradeReason: `whisper JSON parse failed: ${e instanceof Error ? e.message : String(e)}`,
+      degradeReason: `whisper JSON parse failed: ${errMessage(e)}`,
     })
   }
   if (!isObj(json)) {

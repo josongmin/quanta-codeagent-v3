@@ -270,7 +270,7 @@ export const sideCmd: SlashCommand = {
       renderFooter(ctx, result.toolsAvailable, result.inputTokens, result.outputTokens)
       return 0
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = errMessage(e)
       ctx.err(`/side: ${msg}\n`)
       return 1
     }

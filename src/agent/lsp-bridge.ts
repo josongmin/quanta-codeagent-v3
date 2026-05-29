@@ -6,7 +6,7 @@ import {
   type RenameWorkspaceEdit,
   TypescriptAdapter,
 } from "@/lsp"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import {
   lspNavTools as buildLspNavTools,
   type DiagnosticsProvider,
@@ -149,7 +149,7 @@ export const lspDiagnosticsProvider = (): DiagnosticsProvider => ({
     try {
       await client.start()
     } catch (e) {
-      logger.warn("lsp: failed to start language server", { bin: spec.bin, error: String(e) })
+      logger.warn("lsp: failed to start language server", { bin: spec.bin, error: errMessage(e) })
       await client.stop().catch(() => undefined)
       return null
     }
@@ -265,7 +265,7 @@ export const lspNavProvider = (): LspNavProvider => ({
     } catch (e) {
       logger.warn("lsp: failed to start language server (nav)", {
         bin: spec.bin,
-        error: String(e),
+        error: errMessage(e),
       })
       await client.stop().catch(() => undefined)
       return null
@@ -323,7 +323,7 @@ const lspRenameApplyPort = (cwd: string): RenameApplyPort => {
       } catch (e) {
         logger.warn("lsp: failed to start language server (rename)", {
           bin: spec.bin,
-          error: String(e),
+          error: errMessage(e),
         })
         await client.stop().catch(() => undefined)
         return null

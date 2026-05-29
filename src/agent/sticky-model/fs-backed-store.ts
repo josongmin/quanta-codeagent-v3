@@ -24,7 +24,7 @@ import { mkdir, readFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import writeFileAtomic from "write-file-atomic"
-import { QuantaError } from "@/shared"
+import { errMessage, QuantaError } from "@/shared"
 import type { AgentMode } from "../prompt"
 import type { StickyModelLoadResult, StickyModelSetResult, StickyModelStore } from "./port"
 
@@ -150,7 +150,7 @@ export const fsBackedStickyModelStore = (opts?: FsBackedStickyModelStoreOpts): S
         await writeFileAtomic(path, JSON.stringify(next, null, 2))
         return { ok: true }
       } catch (cause: unknown) {
-        const reason = cause instanceof Error ? cause.message : String(cause)
+        const reason = errMessage(cause)
         return {
           ok: false,
           error: new StickyModelWriteError(path, reason, { cause }),

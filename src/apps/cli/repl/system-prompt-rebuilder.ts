@@ -21,6 +21,7 @@
 
 import type { ModeVariantKey } from "@/agent/system-prompt"
 
+import { errMessage } from "@/shared"
 /** Recompute the current system prompt against whatever upstream state has
  *  changed (identity mode swap today, future plugin reload tomorrow). Pure
  *  of side effects; the caller decides what to do with the result. No-throw
@@ -60,7 +61,7 @@ export const createSystemPromptRebuilder = (
     try {
       return args.baseBuilder(args.mode(), args.cwd)
     } catch (e) {
-      const reason = e instanceof Error ? e.message : String(e)
+      const reason = errMessage(e)
       return formatFallback(reason)
     }
   },

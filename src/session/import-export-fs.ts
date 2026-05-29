@@ -20,6 +20,7 @@
  * automatic parent-dir creation on `Bun.write`).
  */
 
+import { errMessage } from "@/shared"
 import {
   exportSessionToJson,
   importSessionFromJson,
@@ -29,7 +30,6 @@ import {
   type SessionImportResult,
 } from "./import-export"
 import type { SavedSession } from "./types"
-
 /** Export `session` and write the JSON envelope to `filePath`. Parent
  *  directories are created by Bun.write automatically. Throws on disk I/O
  *  failure (EACCES, ENOSPC, etc.) — the caller is expected to be running in
@@ -61,7 +61,7 @@ export const importSessionFromFile = async (
   } catch (e) {
     throw new SessionImportError(
       "malformed",
-      `session envelope file read failed (${filePath}): ${e instanceof Error ? e.message : String(e)}`,
+      `session envelope file read failed (${filePath}): ${errMessage(e)}`,
     )
   }
   return importSessionFromJson(text, opts)

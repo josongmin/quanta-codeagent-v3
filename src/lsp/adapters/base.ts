@@ -3,7 +3,7 @@ import { readdir, rename, unlink } from "node:fs/promises"
 import { basename, dirname } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import type { Subprocess } from "bun"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import type { LspPort } from "../ports"
 import type {
   CodeAction,
@@ -971,9 +971,9 @@ export class LspClient implements LspPort {
         const remaining = prepared.length - i
         const err = new Error(
           `LSP applyWorkspaceEdit Phase 2 (commit) failed on "${entry.target}" ` +
-            `(${i}/${prepared.length} files renamed, ${remaining} tmp file(s) remain): ${
-              e instanceof Error ? e.message : String(e)
-            }`,
+            `(${i}/${prepared.length} files renamed, ${remaining} tmp file(s) remain): ${errMessage(
+              e,
+            )}`,
         )
         throw err
       }
@@ -1219,7 +1219,7 @@ export class LspClient implements LspPort {
       stdin.write(encodeMessage(payload))
       return null
     } catch (e) {
-      const err = e instanceof Error ? e : new Error(String(e))
+      const err = e instanceof Error ? e : new Error(errMessage(e))
       logger.warn("lsp: failed to write to server stdin", { error: err.message })
       return new Error(`LSP transport write failed: ${err.message}`)
     }
@@ -1235,7 +1235,7 @@ export class LspClient implements LspPort {
         }
       }
     } catch (e) {
-      logger.debug("lsp: stdout pump ended", { error: String(e) })
+      logger.debug("lsp: stdout pump ended", { error: errMessage(e) })
     }
   }
 

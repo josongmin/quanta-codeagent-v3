@@ -33,6 +33,7 @@ import type { BudgetLedger } from "@/agent/budget-ledger"
 import type { PlanQueueStore } from "@/agent/plan-queue"
 import type { BackgroundSubagentScheduler } from "@/agent/subagent-background"
 import type { LlmProvider } from "@/llm/providers"
+import { errMessage } from "@/shared"
 import type { ShadowOdb } from "@/storage/shadow-odb"
 import type { Tool } from "@/tool"
 import { buildHealthSnapshot, writeHealthSnapshot } from "./health-snapshot"
@@ -43,7 +44,6 @@ import { instrumentPlanQueue } from "./instrument-plan-queue"
 import { instrumentShadowOdb } from "./instrument-shadow"
 import { instrumentTools } from "./instrument-tool"
 import type { MetricsRegistry } from "./port"
-
 export interface ObservabilityBag {
   readonly llmProvider?: LlmProvider
   readonly scheduler?: BackgroundSubagentScheduler
@@ -210,13 +210,13 @@ export const withFullObservability = (
       const writeOpts = pathOpt !== undefined ? { path: pathOpt } : {}
       const warn = opts.warn
       lastInFlight = writeHealthSnapshot(snap, writeOpts).catch((err: unknown) => {
-        const msg = `[observability] health snapshot write failed: ${err instanceof Error ? err.message : String(err)}`
+        const msg = `[observability] health snapshot write failed: ${errMessage(err)}`
         // Slice invariant: warn opt only; no console.* fallback.
         warn?.(msg)
         return ""
       })
     } catch (err) {
-      const msg = `[observability] health snapshot build failed: ${err instanceof Error ? err.message : String(err)}`
+      const msg = `[observability] health snapshot build failed: ${errMessage(err)}`
       // Slice invariant: warn opt only; no console.* fallback.
       opts.warn?.(msg)
     }

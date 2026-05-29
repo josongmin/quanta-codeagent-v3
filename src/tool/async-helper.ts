@@ -1,8 +1,8 @@
 import type { z } from "zod"
+import { errMessage } from "@/shared"
 import type { DeferredResultRegistry } from "./deferred/port"
 import { type DefineToolSpec, defineTool } from "./factory"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "./types"
-
 /**
  * ADR-0287 — `defineToolAsync` wrapper. The async-tool seam.
  *
@@ -101,7 +101,7 @@ export const defineToolAsync = <I, O = unknown>(spec: DefineToolAsyncSpec<I, O>)
           const result = await spec.work(input, ctx, ctx.signal)
           yield { type: "result", result }
         } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e)
+          const msg = errMessage(e)
           yield {
             type: "result",
             result: {

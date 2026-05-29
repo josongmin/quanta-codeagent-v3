@@ -14,9 +14,9 @@
  * never infer comments from titles or notifications; the JSON is the truth.
  */
 
+import { errMessage } from "@/shared"
 import type { GhCliPort, GhCliResult } from "./trigger-source-ci"
 import type { ClockPort, ProactiveTrigger, TriggerSourcePort } from "./types"
-
 /**
  * Watermark store — a tiny KV. Production binds a file-backed impl
  * (`.quanta/reactor-watermarks.json`); tests use a Map wrapper.
@@ -73,7 +73,14 @@ export const createPrCommentTriggerSource = (opts: PrCommentTriggerOpts): Trigge
       const watermark = existing ?? new Date(opts.clockPort.now()).toISOString()
       if (existing === undefined) {
         // Seed and short-circuit: nothing is "newer than now".
-        if (!(await safeSaveWatermark(opts.watermarkStore, opts.watermarkKey, watermark, opts.onError)))
+        if (
+          !(await safeSaveWatermark(
+            opts.watermarkStore,
+            opts.watermarkKey,
+            watermark,
+            opts.onError,
+          ))
+        )
           return []
         return []
       }
@@ -107,7 +114,9 @@ export const createPrCommentTriggerSource = (opts: PrCommentTriggerOpts): Trigge
       // consumer crashes before processing, the comment is lost — same
       // tradeoff as the CI source's in-memory dedup. The cron watcher SHOULD
       // pass a durable store and accept this at-most-once semantics.)
-      if (!(await safeSaveWatermark(opts.watermarkStore, opts.watermarkKey, maxStamp, opts.onError)))
+      if (
+        !(await safeSaveWatermark(opts.watermarkStore, opts.watermarkKey, maxStamp, opts.onError))
+      )
         return []
 
       const triggers: ProactiveTrigger[] = []
@@ -174,9 +183,7 @@ const safeLoadWatermark = async (
   try {
     return { ok: true, value: await store.load(key) }
   } catch (error) {
-    onError?.(
-      `reactor.pr_comment.watermark.load failed (${key}): ${error instanceof Error ? error.message : String(error)}`,
-    )
+    onError?.(`reactor.pr_comment.watermark.load failed (${key}): ${errMessage(error)}`)
     return { ok: false }
   }
 }
@@ -191,9 +198,7 @@ const safeSaveWatermark = async (
     await store.save(key, value)
     return true
   } catch (error) {
-    onError?.(
-      `reactor.pr_comment.watermark.save failed (${key}): ${error instanceof Error ? error.message : String(error)}`,
-    )
+    onError?.(`reactor.pr_comment.watermark.save failed (${key}): ${errMessage(error)}`)
     return false
   }
 }

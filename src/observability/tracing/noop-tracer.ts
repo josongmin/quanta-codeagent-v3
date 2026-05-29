@@ -21,6 +21,7 @@
  * cost when the user hasn't opted in.
  */
 
+import { errMessage } from "@/shared"
 import type { Span, SpanAttributes, SpanContext, SpanKind, SpanStatusCode, Tracer } from "./port"
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -138,7 +139,7 @@ export const noopTracer: Tracer = {
         span.recordException(e)
         span.setStatus("error", e.message)
       } else {
-        span.setStatus("error", String(e))
+        span.setStatus("error", errMessage(e))
       }
       throw e
     } finally {

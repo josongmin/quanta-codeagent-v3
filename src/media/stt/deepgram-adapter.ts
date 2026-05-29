@@ -1,4 +1,4 @@
-import { err, ok, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 import type { AudioBlob } from "../voice/types"
 import type { SpeechToTextPort } from "./port"
 import type { SttError, Transcript } from "./types"
@@ -74,7 +74,7 @@ export const createDeepgramAdapter = (opts: DeepgramAdapterOpts): SpeechToTextPo
       } catch (e) {
         return err({
           kind: "network-error",
-          degradeReason: e instanceof Error ? e.message : String(e),
+          degradeReason: errMessage(e),
         })
       }
       if (res.status === 401 || res.status === 403) {
@@ -102,7 +102,7 @@ export const createDeepgramAdapter = (opts: DeepgramAdapterOpts): SpeechToTextPo
         return err({
           kind: "transcription-failed",
           status: res.status,
-          degradeReason: `deepgram JSON parse failed: ${e instanceof Error ? e.message : String(e)}`,
+          degradeReason: `deepgram JSON parse failed: ${errMessage(e)}`,
         })
       }
       const alt = extractAlt(json)

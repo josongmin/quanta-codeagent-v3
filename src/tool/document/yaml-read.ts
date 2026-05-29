@@ -33,10 +33,10 @@
 import { lstat } from "node:fs/promises"
 import { parse, YAMLParseError } from "yaml"
 import { z } from "zod"
+import { errMessage } from "@/shared"
 import { FsJailError } from "@/storage"
 import { resolveJailedDoc } from "../_shared/resolve-jailed-doc"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
-
 export const YAML_READ_DEFAULT_MAX_KEYS = 200
 export const YAML_READ_MAX_KEYS_CEILING = 5000
 export const YAML_READ_MAX_OUTPUT = 50_000
@@ -151,7 +151,7 @@ const statPhase = async (
     }
     return { kind: "ok" }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     const isEnoent =
       typeof e === "object" && e !== null && (e as { code?: unknown }).code === "ENOENT"
     return {
@@ -188,7 +188,7 @@ const parsePhase = (
         }),
       }
     }
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     return {
       kind: "fail",
       result: errResult(`YAML parse failed (${visiblePath}): ${msg}`, {
@@ -234,7 +234,7 @@ export const yamlReadTool: Tool<YamlReadInput> = {
     try {
       text = await Bun.file(pre.abs).text()
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = errMessage(e)
       yield {
         type: "result",
         result: errResult(`read failed: ${msg}`, { mode: "error", modelVisibleError: msg }),

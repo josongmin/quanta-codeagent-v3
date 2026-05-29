@@ -31,9 +31,9 @@
 
 import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
+import { errMessage } from "@/shared"
 import { bold, cyan, dim, green, red, renderBox, yellow } from "@/ui/ui-helpers"
 import type { SlashCommand, SlashContext } from "./slash-commands"
-
 /* ------------------------------------------------------------------ */
 /* Surface contract                                                    */
 /* ------------------------------------------------------------------ */
@@ -281,7 +281,7 @@ const renderConfigBlock = async (configPath: string): Promise<string> => {
   try {
     raw = await readFile(configPath, "utf8")
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     return renderBox([`${dim("path:")} ${configPath}`, "", red(`(read failed: ${msg})`)], {
       title: "MCP config",
       titleStyle: bold,

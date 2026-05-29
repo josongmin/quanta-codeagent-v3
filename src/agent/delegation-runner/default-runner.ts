@@ -17,18 +17,18 @@
  */
 
 import {
-  type AgentMode,
   AGENT_MODES,
+  type AgentMode,
   type BoomerangResult,
   type DelegationPort,
   defaultDelegationRouter,
   failureBoomerang,
   type TypedDelegationRunner,
 } from "@/agent/subagent-typed"
+import { errMessage } from "@/shared"
 import { headlessDelegationRunner } from "./headless-stub"
 import type { DelegationRunnerPort } from "./port"
 import { type DelegateSpec, MAX_DEPTH } from "./types"
-
 export interface DefaultDelegationRunnerOpts {
   /** Injected {@link TypedDelegationRunner} — the actual child agent driver.
    *  Tests + default-OFF surfaces inject {@link headlessDelegationRunner};
@@ -94,9 +94,9 @@ export const defaultDelegationRunner = (
         // We don't know if `spec.mode` is a valid AgentMode here; coerce
         // safely. The boomerang's `mode` field is for trace only; the host
         // branches on errorKind, not on mode.
-        const safeMode = ((AGENT_MODES as readonly string[]).includes(spec.mode)
-          ? spec.mode
-          : "explore") as AgentMode
+        const safeMode = (
+          (AGENT_MODES as readonly string[]).includes(spec.mode) ? spec.mode : "explore"
+        ) as AgentMode
         return failureBoomerang({
           mode: safeMode,
           errorKind: "runner-error",
@@ -145,7 +145,7 @@ export const defaultDelegationRunner = (
         // Defense-in-depth: the router shouldn't throw, but if a custom
         // runner panics in a path the router didn't catch, we still surface
         // a typed boomerang here (NEVER throw past the public port).
-        const msg = err instanceof Error ? err.message : String(err)
+        const msg = errMessage(err)
         return failureBoomerang({
           mode: spec.mode,
           errorKind: "runner-error",

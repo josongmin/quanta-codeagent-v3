@@ -21,6 +21,7 @@
  * typed `degradeReason`.
  */
 
+import { errMessage } from "@/shared"
 import { compileBubblewrapArgs } from "./bubblewrap"
 import { spawnViaBubblewrap } from "./landlock"
 import { compileLandlockCliArgs, LANDLOCK_CLI_NETWORK_DEFERRED_MARKER } from "./landlock-cli"
@@ -33,7 +34,6 @@ import type {
   SandboxPolicy,
   Spawner,
 } from "./types"
-
 export type LinuxSandboxBackend = "bubblewrap" | "landlock-cli"
 
 /** Compile a {@link SandboxPolicy} to the backend-specific argv. Pure. Returns
@@ -110,7 +110,7 @@ const passthrough = async (
       ...(meta.degradeReason !== undefined ? { degradeReason: meta.degradeReason } : {}),
     }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     return {
       exitCode: 127,
       stdout: "",
@@ -166,7 +166,7 @@ export const linuxOsSandbox = (cfg?: OsSandboxConfig): OsSandbox => {
           ...(networkDeferred ? { degradeReason: "landlock-network-policy-not-enforced" } : {}),
         }
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e)
+        const msg = errMessage(e)
         return {
           exitCode: 127,
           stdout: "",

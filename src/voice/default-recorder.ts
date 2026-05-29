@@ -27,7 +27,7 @@
  *     to the transcriber.
  */
 
-import { err, ok, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 import type { AudioRecorderPort } from "./port"
 import type {
   AudioBytes,
@@ -264,7 +264,7 @@ const buildInternalStop = (args: BuildHandleArgs): RecorderHandle["_internal"] =
         ok: false,
         error: {
           kind: "io-error",
-          degradeReason: e instanceof Error ? e.message : String(e),
+          degradeReason: errMessage(e),
         },
       }
       if (signal !== undefined) signal.removeEventListener("abort", onAbort)
@@ -320,7 +320,7 @@ export const createPlatformRecorder = (
       } catch (e) {
         return err({
           kind: "spawn-failed",
-          degradeReason: e instanceof Error ? e.message : String(e),
+          degradeReason: errMessage(e),
         })
       }
       const internal = buildInternalStop({

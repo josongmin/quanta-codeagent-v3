@@ -148,15 +148,16 @@ export const createCancellationController = (
       // already settled. This is the trade-off the ADR documents.
       for (let i = 0; i < snapshot.length; i += parallelism) {
         const wave = snapshot.slice(i, i + parallelism)
-        const settled = await Promise.allSettled(
-          wave.map((h) => h.cleanup(finalCause, partial)),
-        )
+        const settled = await Promise.allSettled(wave.map((h) => h.cleanup(finalCause, partial)))
         for (let j = 0; j < settled.length; j++) {
           const s = settled[j]
           if (s !== undefined && s.status === "rejected") {
             const r: unknown = s.reason
-            const msg =
-              r instanceof Error ? r.message : typeof r === "string" ? r : String(r)
+            // Plane-clean (header): inline the canonical errMessage body
+            // (byte-identical to `src/shared/errors.ts` `errMessage`). The
+            // pre-existing `typeof r === "string" ? r : String(r)` chain was
+            // redundant — `String(str) === str` for any string `str`.
+            const msg = r instanceof Error ? r.message : String(r)
             const h = wave[j]
             const name = h !== undefined ? h.name : "<unknown>"
             errors.push(`${name}: ${msg}`)

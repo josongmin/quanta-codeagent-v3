@@ -24,9 +24,9 @@
  * see the override for every external-editor surface.
  */
 
+import { errMessage } from "@/shared"
 import { defaultEditorSpawn, editInTemp, renderEditResult, resolveEditor } from "./edit-plan-cmd"
 import type { SlashCommand } from "./slash-commands"
-
 /* ------------------------------------------------------------------ */
 /* SlashContext extension                                              */
 /* ------------------------------------------------------------------ */
@@ -72,7 +72,7 @@ export const editMessageCmd: SlashCommand = {
       const v = ctx.composerEdit.getPending()
       pending = v instanceof Promise ? await v : v
     } catch (e) {
-      ctx.err(`/edit-message: getPending failed: ${e instanceof Error ? e.message : String(e)}\n`)
+      ctx.err(`/edit-message: getPending failed: ${errMessage(e)}\n`)
       return 1
     }
     const editor = resolveEditor(ctx.editorOverride, ctx.editorEnv ?? process.env)
@@ -90,7 +90,7 @@ export const editMessageCmd: SlashCommand = {
       const r = ctx.composerEdit.setPending(res.text)
       if (r instanceof Promise) await r
     } catch (e) {
-      ctx.err(`/edit-message: setPending failed: ${e instanceof Error ? e.message : String(e)}\n`)
+      ctx.err(`/edit-message: setPending failed: ${errMessage(e)}\n`)
       return 1
     }
     ctx.out(`/edit-message: updated (${res.text.length} chars) — press Enter to send\n`)

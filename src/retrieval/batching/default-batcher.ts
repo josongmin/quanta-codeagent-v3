@@ -14,7 +14,7 @@
  *
  * The slice is wire-shape only — no production caller is re-pointed.
  */
-import { err, ok, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 import type { EmbedBatcher } from "./port"
 import { createSingleFlight } from "./single-flight"
 import type { BatchConfig, BatchError, EmbeddingVector } from "./types"
@@ -140,7 +140,7 @@ export const createDefaultBatcher = (opts: DefaultBatcherOptions): EmbedBatcher 
       const vectors = await opts.embedder.embed(texts)
       resolveVectors(texts, vectors, defByText)
     } catch (e) {
-      failChunk(texts, e instanceof Error ? e.message : String(e), defByText)
+      failChunk(texts, errMessage(e), defByText)
     }
   }
 

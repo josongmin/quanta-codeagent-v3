@@ -37,6 +37,7 @@
  */
 
 import { z } from "zod"
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 import { htmlToMarkdown } from "./html-to-markdown"
 
@@ -163,7 +164,7 @@ const preflight = (
   try {
     url = new URL(parsed.data.url)
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     return { kind: "fail", result: errResult(`invalid URL: ${msg}`) }
   }
   if (url.protocol !== "https:") {
@@ -215,10 +216,7 @@ const readCappedBody = async (
   res: Response,
   maxBytes: number,
   signal: AbortSignal,
-): Promise<
-  | { kind: "ok"; bytes: Uint8Array; truncated: boolean }
-  | { kind: "aborted" }
-> => {
+): Promise<{ kind: "ok"; bytes: Uint8Array; truncated: boolean } | { kind: "aborted" }> => {
   const reader = res.body?.getReader()
   if (reader === undefined) {
     // Body-less response (HEAD-like) — return empty.
@@ -337,7 +335,7 @@ const fetchPhase = async (
     const res = await fetcher(url, { signal, redirect: "follow" })
     return { kind: "ok", res }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     return {
       kind: "fail",
       result: errResult(`fetch failed: ${msg}`, {
@@ -376,13 +374,11 @@ const decodeBodyPhase = async (
   | { kind: "fail"; result: ToolResult }
   | { kind: "ok"; bytes: Uint8Array; body: string; truncated: boolean }
 > => {
-  let bodyOut:
-    | { kind: "ok"; bytes: Uint8Array; truncated: boolean }
-    | { kind: "aborted" }
+  let bodyOut: { kind: "ok"; bytes: Uint8Array; truncated: boolean } | { kind: "aborted" }
   try {
     bodyOut = await readCappedBody(res, maxBytes, signal)
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     return {
       kind: "fail",
       result: errResult(`body read failed: ${msg}`, {

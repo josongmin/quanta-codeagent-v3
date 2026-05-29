@@ -18,22 +18,18 @@ import { networkInterfaces } from "node:os"
 import type { Server, ServerWebSocket } from "bun"
 import { type SessionTransport, wrapWebSocketLikeAsSessionTransport } from "@/ipc/session"
 import type { RuntimeFacade, RuntimeSession } from "@/sdk/runtime"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
+import { handleAuthLoginStart, handleAuthLogout, handleAuthStatus } from "./auth-routes"
 import {
   createObservabilityEmitter,
   type ObservabilityEmitterHandle,
 } from "./observability-emitter"
+import { openThreadStore } from "./persistence-sqlite"
 import {
   createSessionRegistry,
   type RegisteredSession,
   type SessionRegistry,
 } from "./session-registry"
-import {
-  handleAuthLoginStart,
-  handleAuthLogout,
-  handleAuthStatus,
-} from "./auth-routes"
-import { openThreadStore } from "./persistence-sqlite"
 import type { WebDaemonConfig, WebDaemonHandle, WebDaemonHealth } from "./types"
 import {
   type BunServerWebSocketLike,
@@ -84,9 +80,7 @@ export interface ObservabilityPorts {
 
 // Re-derive the port option types straight from the sealed emitter options so
 // this surface can never drift from what `createObservabilityEmitter` accepts.
-type ObservabilityEmitterOptions = NonNullable<
-  Parameters<typeof createObservabilityEmitter>[0]
->
+type ObservabilityEmitterOptions = NonNullable<Parameters<typeof createObservabilityEmitter>[0]>
 type ObservabilityEmitterPort<K extends keyof ObservabilityEmitterOptions> = NonNullable<
   ObservabilityEmitterOptions[K]
 >
@@ -176,7 +170,7 @@ const CONFIG_ALLOWED_KEYS = new Set([
   "QUANTA_MODEL",
   "QUANTA_REASONING_EFFORT",
 ])
-const CONFIG_VALUE_PATTERN = /^[A-Za-z0-9_.:\-]{0,64}$/
+const CONFIG_VALUE_PATTERN = /^[A-Za-z0-9_.:-]{0,64}$/
 
 const handleConfigPost = async (req: Request): Promise<Response> => {
   let body: unknown
@@ -338,9 +332,10 @@ interface ReachableIp {
  */
 const collectReachableIps = (bind: string): readonly ReachableIp[] => {
   const wildcard = bind === "0.0.0.0" || bind === "::" || bind === ""
-  const loopback: ReachableIp = bind === "::" || bind === "::1"
-    ? { label: "loopback", family: "IPv6", address: "::1" }
-    : { label: "loopback", family: "IPv4", address: "127.0.0.1" }
+  const loopback: ReachableIp =
+    bind === "::" || bind === "::1"
+      ? { label: "loopback", family: "IPv6", address: "::1" }
+      : { label: "loopback", family: "IPv4", address: "127.0.0.1" }
   if (!wildcard && bind !== "0.0.0.0") {
     if (bind === "127.0.0.1" || bind === "::1" || bind === "localhost") {
       return [loopback]
@@ -425,8 +420,7 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
   // SQLite-backed thread persistence — append every SessionEvent on the
   // shared session to `~/.quanta/web-daemon/threads.db` (override path
   // via `QUANTA_WEB_DB_DIR`). Disable by setting `QUANTA_WEB_DB=off`.
-  const threadStore =
-    process.env.QUANTA_WEB_DB === "off" ? null : openThreadStore()
+  const threadStore = process.env.QUANTA_WEB_DB === "off" ? null : openThreadStore()
   let unsubPersist: (() => void) | null = null
   if (threadStore !== null) {
     threadStore.upsertThread({ id: sharedSession.sessionId })
@@ -435,7 +429,7 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
         threadStore.appendEvent(sharedSession.sessionId, event)
       } catch (error) {
         logger.warn("web-daemon: sqlite append failed", {
-          error: error instanceof Error ? error.message : String(error),
+          error: errMessage(error),
         })
       }
     })
@@ -599,7 +593,7 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
           await buildRegisteredSession(registry, ws, adapter, sharedSession)
         } catch (error) {
           logger.error("web-daemon: failed to create runtime session", {
-            error: error instanceof Error ? error.message : String(error),
+            error: errMessage(error),
           })
           adapter.handleClose()
           try {
@@ -660,7 +654,7 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
       threadStore?.close()
       await runtime.close().catch((error: unknown) => {
         logger.warn("web-daemon: runtime.close failed", {
-          error: error instanceof Error ? error.message : String(error),
+          error: errMessage(error),
         })
       })
     },

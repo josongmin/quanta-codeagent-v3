@@ -31,6 +31,7 @@
  * construction-time write semantics are preserved verbatim.
  */
 
+import { errMessage } from "@/shared"
 import {
   buildHealthSnapshot,
   type HealthSnapshotBuildOpts,
@@ -137,7 +138,7 @@ export const startHealthSnapshotWatcher = (opts: WatcherOpts): WatcherHandle => 
       const snap = buildHealthSnapshot(bag, snapshotBuild)
       await writeHealthSnapshot(snap, snapshotWrite)
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = errMessage(err)
       warn(`health-snapshot-watcher: emit failed: ${msg}`)
       // State NOT poisoned — next interval/signal/manual call retries
       // with fresh bag. Snapshot is operator-facing convenience; a

@@ -60,7 +60,7 @@
  *    diagnose a half-wired host.
  */
 
-import { ok, type Result } from "@/shared"
+import { errMessage, ok, type Result } from "@/shared"
 import type { DirectiveEmitterPort } from "./port"
 import type { EmitError, GitDirective } from "./types"
 
@@ -157,7 +157,7 @@ export const buildGitDirectiveCollector = (
             ok: false,
             error: {
               kind: "invalid-directive",
-              reason: e instanceof Error ? e.message : String(e),
+              reason: errMessage(e),
             },
           })
         }

@@ -41,8 +41,8 @@ import { spawn } from "node:child_process"
 import { mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { errMessage } from "@/shared"
 import type { SlashCommand } from "./slash-commands"
-
 /* ------------------------------------------------------------------ */
 /* SlashContext extension                                              */
 /* ------------------------------------------------------------------ */
@@ -167,7 +167,7 @@ export const editInTemp = async (a: EditInTempArgs): Promise<EditInTempResult> =
     return {
       kind: "fs_failed",
       stage: "mkdtemp",
-      message: e instanceof Error ? e.message : String(e),
+      message: errMessage(e),
     }
   }
   const path = join(dir, `quanta.${a.suffix}`)
@@ -177,7 +177,7 @@ export const editInTemp = async (a: EditInTempArgs): Promise<EditInTempResult> =
     return {
       kind: "fs_failed",
       stage: "write",
-      message: e instanceof Error ? e.message : String(e),
+      message: errMessage(e),
     }
   }
   const code = await a.spawn(a.editor.cmd, [...a.editor.args, path])
@@ -187,7 +187,7 @@ export const editInTemp = async (a: EditInTempArgs): Promise<EditInTempResult> =
   try {
     edited = await readFile(path, "utf8")
   } catch (e) {
-    return { kind: "fs_failed", stage: "read", message: e instanceof Error ? e.message : String(e) }
+    return { kind: "fs_failed", stage: "read", message: errMessage(e) }
   }
   return { kind: "ok", text: edited, changed: edited !== a.body }
 }
@@ -247,7 +247,7 @@ export const editPlanCmd: SlashCommand = {
       const v = ctx.planEdit.getPlan()
       current = v instanceof Promise ? await v : v
     } catch (e) {
-      ctx.err(`/edit-plan: getPlan failed: ${e instanceof Error ? e.message : String(e)}\n`)
+      ctx.err(`/edit-plan: getPlan failed: ${errMessage(e)}\n`)
       return 1
     }
     const editor = resolveEditor(ctx.editorOverride, ctx.editorEnv ?? process.env)
@@ -266,7 +266,7 @@ export const editPlanCmd: SlashCommand = {
       const r = ctx.planEdit.setPlan(res.text)
       if (r instanceof Promise) await r
     } catch (e) {
-      ctx.err(`/edit-plan: setPlan failed: ${e instanceof Error ? e.message : String(e)}\n`)
+      ctx.err(`/edit-plan: setPlan failed: ${errMessage(e)}\n`)
       return 1
     }
     ctx.out(`/edit-plan: updated (${res.text.length} chars)\n`)

@@ -21,6 +21,7 @@
  */
 
 import type { RuntimeFacade } from "@/sdk/runtime"
+import { errMessage } from "@/shared"
 import type { ObservableRuntimeFacade } from "./runtime-factory"
 import { type ObservabilityPorts, startWebDaemon } from "./server"
 import type { WebDaemonConfig, WebDaemonHandle } from "./types"
@@ -138,7 +139,7 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
   try {
     handle = await startWebDaemon(config)
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error)
+    const msg = errMessage(error)
     const strict = process.env.QUANTA_WEB_STRICT_PORT === "1"
     if (strict || !msg.toLowerCase().includes("port")) throw error
     process.stderr.write(
@@ -183,9 +184,7 @@ if (import.meta.main) {
     try {
       await main()
     } catch (error: unknown) {
-      process.stderr.write(
-        `web-daemon: fatal: ${error instanceof Error ? error.message : String(error)}\n`,
-      )
+      process.stderr.write(`web-daemon: fatal: ${errMessage(error)}\n`)
       process.exit(1)
     }
   })()

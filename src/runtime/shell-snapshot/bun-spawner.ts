@@ -30,8 +30,8 @@
  * type) and the Bun global. No reach across slices.
  */
 
+import { errMessage } from "@/shared"
 import type { SnapshotSpawner } from "./zsh-capture"
-
 /** Default hard-timeout for `capture` calls when the caller does not pass
  *  one. Mirrors the slice-default `DEFAULT_CAPTURE_TIMEOUT_MS` (10s) — kept
  *  in sync via the explicit upstream constant. The factory accepts an
@@ -84,7 +84,7 @@ export const createBunSpawner = (opts: BunSpawnerOptions = {}): SnapshotSpawner 
           stderr: "pipe",
         })
       } catch (e) {
-        const detail = e instanceof Error ? e.message : String(e)
+        const detail = errMessage(e)
         return { code: null, stdout: "", timedOut: false, spawnFailed: true, detail }
       }
 

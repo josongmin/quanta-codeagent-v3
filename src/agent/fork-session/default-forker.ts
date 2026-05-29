@@ -23,7 +23,7 @@
  */
 
 import { randomUUID } from "node:crypto"
-import { err, ok, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 import type { ConversationCheckpointStore } from "../conversation-checkpoint"
 import { defaultBranchIdMinter, isWellFormedBranchId } from "./branch-id"
 import { defaultLineage, type Lineage } from "./lineage"
@@ -195,7 +195,7 @@ const tagShadow = async (
     await shadowOdb.registerHead(workspaceRoot)
     return null
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     return {
       code: "shadow-odb-failed",
       message: `fork-session: shadow ODB tag failed (session forked, link recorded): ${msg}`,

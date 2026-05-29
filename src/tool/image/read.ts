@@ -27,10 +27,10 @@ import { lstat } from "node:fs/promises"
 import path from "node:path"
 import { z } from "zod"
 import type { ImageBlock } from "@/llm"
+import { errMessage } from "@/shared"
 import { FsJailError } from "@/storage"
 import { resolveJailedDoc } from "../_shared/resolve-jailed-doc"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
-
 export const readImageInputSchema = z.object({
   path: z.string().min(1).describe("Repo-relative or absolute path to the image file"),
 })
@@ -147,7 +147,7 @@ const statPhase = async (
     }
     return { kind: "ok", stat }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     const isEnoent =
       typeof e === "object" && e !== null && (e as { code?: unknown }).code === "ENOENT"
     return {
@@ -175,7 +175,7 @@ const decodePhase = async (
   try {
     bytes = await Bun.file(abs).bytes()
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     return {
       kind: "fail",
       result: errResult(`read failed: ${msg}`, { mode: "error", modelVisibleError: msg }),

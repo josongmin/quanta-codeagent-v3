@@ -36,6 +36,7 @@
  */
 
 import { z } from "zod"
+import { errMessage } from "@/shared"
 import type { SessionConfigSeam, Tool, ToolContext, ToolEvent, ToolResult } from "./types"
 
 export type { SessionConfigSeam }
@@ -230,7 +231,7 @@ export const sessionConfigTool: Tool<SessionConfigInput> = {
       try {
         output = renderSnapshot(seam)
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e)
+        const msg = errMessage(e)
         const result: ToolResult = {
           ok: false,
           output: `session_config: snapshot read failed: ${msg}`,
@@ -247,7 +248,7 @@ export const sessionConfigTool: Tool<SessionConfigInput> = {
     try {
       prev = seam.readEffort()
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = errMessage(e)
       const result: ToolResult = {
         ok: false,
         output: `session_config: pre-write read failed: ${msg}`,
@@ -259,7 +260,7 @@ export const sessionConfigTool: Tool<SessionConfigInput> = {
     try {
       seam.writeEffort(input.level)
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = errMessage(e)
       const result: ToolResult = {
         ok: false,
         output: `session_config: write failed: ${msg}`,

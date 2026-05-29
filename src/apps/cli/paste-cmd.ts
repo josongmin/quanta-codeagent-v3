@@ -36,9 +36,9 @@ import { spawn } from "node:child_process"
 import { readFile, stat } from "node:fs/promises"
 import { isAbsolute } from "node:path"
 import { platform } from "node:process"
+import { errMessage } from "@/shared"
 import type { SlashCommand } from "./slash-commands"
 import type { TextInbox } from "./text-inbox"
-
 /* ------------------------------------------------------------------ */
 /* clipboard reader port                                                */
 /* ------------------------------------------------------------------ */
@@ -106,7 +106,7 @@ const runOnce = (cmd: string, args: readonly string[]): Promise<SpawnResult> =>
       child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] })
     } catch (e) {
       finish(127)
-      spawnError = e instanceof Error ? e.message : String(e)
+      spawnError = errMessage(e)
       return
     }
     const timer = setTimeout(() => {
@@ -264,7 +264,7 @@ const probePath = async (
       file: { path: text, body, bytes: st.size, truncated: false },
     }
   } catch (e) {
-    const m = e instanceof Error ? e.message : String(e)
+    const m = errMessage(e)
     return { kind: "error", message: `read failed: ${m}` }
   }
 }

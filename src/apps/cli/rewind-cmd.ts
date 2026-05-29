@@ -43,8 +43,8 @@ import {
   rewindSession,
   type SavedSession,
 } from "@/session"
+import { errMessage } from "@/shared"
 import type { SlashCommand, SlashContext } from "./slash-commands"
-
 /* ------------------------------------------------------------------ */
 /* SlashContext extension                                              */
 /* ------------------------------------------------------------------ */
@@ -509,7 +509,7 @@ const forkCmdImpl: SlashCommand = {
       )
       return 0
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = errMessage(e)
       ctx.err(`/fork: ${msg}\n`)
       return 1
     }

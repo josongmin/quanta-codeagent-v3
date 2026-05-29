@@ -55,7 +55,7 @@ import type {
   TurnContextRecord,
 } from "@/session"
 import { findByToolCallId, type InspectGroup } from "@/session/inspect-source"
-import { redactValue } from "@/shared"
+import { errMessage, redactValue } from "@/shared"
 import type { SlashCommand } from "./slash-commands"
 
 /* ─── public surface — pure handler ──────────────────────────────────── */
@@ -128,7 +128,7 @@ const preflight = async (toolCallIdOrLast: string, deps: WhyCmdDeps): Promise<Pr
   try {
     envelopes = await deps.readSessionEnvelopes(sessionId)
   } catch (e) {
-    const detail = e instanceof Error ? e.message : String(e)
+    const detail = errMessage(e)
     deps.out(`/why: failed to read session ${sessionId}: ${detail}\n`)
     return { ok: false }
   }
@@ -185,7 +185,7 @@ const callMetaLLM = async (
       events.push(ev)
     }
   } catch (e) {
-    const reason = e instanceof Error ? e.message : String(e)
+    const reason = errMessage(e)
     deps.out(`/why: meta query failed: ${reason}\n`)
     return null
   }
@@ -601,7 +601,7 @@ const defaultReadSessionEnvelopes = async (
     }
   } catch (e) {
     const code = (e as NodeJS.ErrnoException | undefined)?.code
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     if (code === "ENOENT" || /not found/i.test(msg)) return []
     throw e
   }

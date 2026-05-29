@@ -28,9 +28,9 @@
 
 import { z } from "zod"
 import type { ImageBlock } from "@/llm"
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 import { MAX_IMAGE_BYTES, type SupportedMediaType, sniffMediaType } from "./read"
-
 export const readImageUrlInputSchema = z.object({
   url: z.string().url().describe("HTTPS image URL"),
 })
@@ -115,7 +115,7 @@ const preflight = (
   try {
     url = new URL(parsed.data.url)
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     return { kind: "fail", result: errResult(`invalid URL: ${msg}`) }
   }
   if (url.protocol !== "https:") {
@@ -145,7 +145,7 @@ const fetchPhase = async (
     const res = await fetcher(url, { signal, redirect: "follow" })
     return { kind: "ok", res }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     return {
       kind: "fail",
       result: errResult(`fetch failed: ${msg}`, { mode: "error", modelVisibleError: msg }),
@@ -164,7 +164,7 @@ const readBytes = async (
     const ab = await res.arrayBuffer()
     return { kind: "ok", bytes: new Uint8Array(ab) }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     return {
       kind: "fail",
       result: errResult(`body read failed: ${msg}`, { mode: "error", modelVisibleError: msg }),

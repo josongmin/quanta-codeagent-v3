@@ -23,6 +23,7 @@
  * IPC fallback before vsock) with OSS tooling.
  */
 
+import { errMessage } from "@/shared"
 import {
   type McpSandbox,
   type McpSandboxAvailability,
@@ -34,7 +35,6 @@ import {
   type SkybridgeRunner,
   type SkybridgeSpawner,
 } from "./types"
-
 /**
  * Detect Lima availability. Returns the binary path (treated as a version
  * proxy when no runner is wired) OR `null`. Pure probe — no side effects on
@@ -205,11 +205,7 @@ const ensureVmRunning = async (
   try {
     await runner(["lima", "start", vmName])
   } catch (e) {
-    throw new McpSandboxError(
-      "spawn-failed",
-      `lima start failed: ${e instanceof Error ? e.message : String(e)}`,
-      { cause: e },
-    )
+    throw new McpSandboxError("spawn-failed", `lima start failed: ${errMessage(e)}`, { cause: e })
   }
 }
 
@@ -260,11 +256,9 @@ export const limaMicroVmSandbox = (cfg: McpSandboxConfig = {}): McpSandbox => {
       try {
         raw = await spawner(runArgs, buildSpawnOpts(spec))
       } catch (e) {
-        throw new McpSandboxError(
-          "spawn-failed",
-          `lima shell spawn failed: ${e instanceof Error ? e.message : String(e)}`,
-          { cause: e },
-        )
+        throw new McpSandboxError("spawn-failed", `lima shell spawn failed: ${errMessage(e)}`, {
+          cause: e,
+        })
       }
 
       // Lima exposes a socket per VM at ~/.lima/<vm>/ga.sock; we report it

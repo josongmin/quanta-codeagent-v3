@@ -17,6 +17,7 @@
 
 import { z } from "zod"
 import type { PipelineError, SearchHit, SearchPipeline } from "@/retrieval/pipeline"
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 
 const DEFAULT_K = 10
@@ -124,7 +125,7 @@ export const searchCodebaseTool = (pipeline: SearchPipeline): Tool<SearchCodebas
     try {
       outcome = await pipeline.search({ text: parsed.data.query, k })
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = errMessage(e)
       yield {
         type: "result",
         result: errResult(`pipeline threw: ${msg}`, "stage-failed"),

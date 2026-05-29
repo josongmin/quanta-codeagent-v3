@@ -27,6 +27,7 @@
 
 import { z } from "zod"
 import type { Objective, ObjectivePort, ObjectiveStatus, WaitingOn } from "@/agent/objective"
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -195,7 +196,7 @@ const buildObjectiveSet = (port: ObjectivePort): Tool<ObjectiveSetInput> => ({
       const o = port.set(parsed.data.thread_id, init)
       yield { type: "result", result: okResult(o) }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = errMessage(e)
       yield { type: "result", result: errResult(`objective_set error: ${msg}`) }
     }
   },
@@ -255,7 +256,7 @@ const buildObjectiveUpdate = (port: ObjectivePort): Tool<ObjectiveUpdateInput> =
       }
       yield { type: "result", result: okResult(result) }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = errMessage(e)
       yield { type: "result", result: errResult(`objective_update error: ${msg}`) }
     }
   },
@@ -288,7 +289,7 @@ const buildObjectiveGet = (port: ObjectivePort): Tool<ObjectiveGetInput> => ({
       }
       yield { type: "result", result: okResult(o) }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = errMessage(e)
       yield { type: "result", result: errResult(`objective_get error: ${msg}`) }
     }
   },

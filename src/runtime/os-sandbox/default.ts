@@ -1,4 +1,5 @@
 import { spawn as nodeSpawn } from "node:child_process"
+import { errMessage } from "@/shared"
 import { isBubblewrapAvailable, spawnViaBubblewrap } from "./landlock"
 import {
   detectNativeLandlock,
@@ -15,7 +16,6 @@ import type {
   SandboxPolicy,
   Spawner,
 } from "./types"
-
 /**
  * Default {@link OsSandbox} implementation. Closed-port DI: pass `cfg.spawner`
  * to inject a fake in tests; production wires the real Bun-spawn-compatible
@@ -132,7 +132,7 @@ const runSeatbelt = async (args: {
       sandboxApplied: true,
     }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     return {
       exitCode: 127,
       stdout: "",
@@ -164,7 +164,7 @@ const passthrough = async (
       ...(meta.degradeReason !== undefined ? { degradeReason: meta.degradeReason } : {}),
     }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     return {
       exitCode: 127,
       stdout: "",

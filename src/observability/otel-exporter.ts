@@ -55,6 +55,7 @@
  * surface entirely (the spec wire shape is stable; the SDK API churns).
  */
 
+import { errMessage } from "@/shared"
 import type { MetricSink } from "./metrics/port"
 import { noopTracer } from "./tracing/noop-tracer"
 import type {
@@ -65,7 +66,6 @@ import type {
   SpanStatusCode,
   Tracer,
 } from "./tracing/port"
-
 // ────────────────────────────────────────────────────────────────────────────
 // Export envelope shapes — the typed records that producers hand to the
 // exporter. Intentionally minimal: only the fields that survive the OTLP/JSON
@@ -399,7 +399,7 @@ export const otelHttpExporter = (opts: OtelExporterOpts): OtelExporter => {
     try {
       serialized = JSON.stringify(body)
     } catch (e) {
-      safeWarn(`[otel-exporter] serialize ${path}: ${e instanceof Error ? e.message : String(e)}`)
+      safeWarn(`[otel-exporter] serialize ${path}: ${errMessage(e)}`)
       return false
     }
     try {
@@ -417,7 +417,7 @@ export const otelHttpExporter = (opts: OtelExporterOpts): OtelExporter => {
       }
       return true
     } catch (e) {
-      safeWarn(`[otel-exporter] POST ${path}: ${e instanceof Error ? e.message : String(e)}`)
+      safeWarn(`[otel-exporter] POST ${path}: ${errMessage(e)}`)
       return false
     }
   }
@@ -692,7 +692,7 @@ export const buildExportingTracer = (
           span.recordException(e)
           span.setStatus("error", e.message)
         } else {
-          span.setStatus("error", String(e))
+          span.setStatus("error", errMessage(e))
         }
         throw e
       } finally {

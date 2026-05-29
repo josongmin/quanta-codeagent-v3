@@ -1,4 +1,4 @@
-import { err, ok, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 import type { AudioBlob } from "../voice/types"
 import type { FetchLike } from "./deepgram-adapter"
 import type { SpeechToTextPort } from "./port"
@@ -46,7 +46,7 @@ export const createWhisperAdapter = (opts: WhisperAdapterOpts): SpeechToTextPort
       } catch (e) {
         return err({
           kind: "network-error",
-          degradeReason: e instanceof Error ? e.message : String(e),
+          degradeReason: errMessage(e),
         })
       }
       if (res.status === 401 || res.status === 403) {
@@ -69,7 +69,7 @@ export const createWhisperAdapter = (opts: WhisperAdapterOpts): SpeechToTextPort
         return err({
           kind: "transcription-failed",
           status: res.status,
-          degradeReason: `whisper JSON parse failed: ${e instanceof Error ? e.message : String(e)}`,
+          degradeReason: `whisper JSON parse failed: ${errMessage(e)}`,
         })
       }
       if (!isObj(json)) {

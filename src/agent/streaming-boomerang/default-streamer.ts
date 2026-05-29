@@ -32,6 +32,7 @@
  * No `@/agent/loop`, no `@/llm`, no `@/tool`. Pure structural code.
  */
 
+import { errMessage } from "@/shared"
 import type { StreamingBoomerang, StreamingBoomerangSpec } from "./port"
 import {
   type BoomerangChunk,
@@ -40,7 +41,6 @@ import {
   type ChunkProducerHandle,
   StreamingBoomerangError,
 } from "./types"
-
 /** A producer body the streamer drives. The body is invoked with one
  *  {@link ChunkProducerHandle}; it MUST call exactly one terminal handle
  *  (`done` or `fail`) before returning. Throwing escapes as a terminal
@@ -169,7 +169,7 @@ const driveProducer = (channel: ClosableChannel, producer: ChunkProducer): Promi
     try {
       await producer(handle)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = errMessage(err)
       await channel
         .pushTerminal({
           kind: "error",

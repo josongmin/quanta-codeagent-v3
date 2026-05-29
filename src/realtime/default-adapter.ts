@@ -24,7 +24,7 @@
  * Plane-clean: imports only `@/shared` + sibling files.
  */
 
-import { err, ok, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 import type { RealtimePort, RealtimeUnsubscribe } from "./port"
 import { negotiateSdp } from "./sdp-negotiator"
 import type {
@@ -109,7 +109,7 @@ export const createBunWebSocketAdapter = (opts?: BunAdapterOpts): RealtimePort =
     } catch (e) {
       return err({
         kind: "io-error",
-        degradeReason: e instanceof Error ? e.message : String(e),
+        degradeReason: errMessage(e),
       })
     }
   }
@@ -165,7 +165,7 @@ export const createBunWebSocketAdapter = (opts?: BunAdapterOpts): RealtimePort =
         status = "closed"
         return err({
           kind: "connect-failed",
-          degradeReason: e instanceof Error ? e.message : String(e),
+          degradeReason: errMessage(e),
         })
       }
       ws = socket
@@ -256,7 +256,7 @@ export const createBunWebSocketAdapter = (opts?: BunAdapterOpts): RealtimePort =
       } catch (e) {
         return err({
           kind: "io-error",
-          degradeReason: e instanceof Error ? e.message : String(e),
+          degradeReason: errMessage(e),
         })
       }
     },
@@ -314,9 +314,7 @@ export const createBunWebSocketAdapter = (opts?: BunAdapterOpts): RealtimePort =
         } catch (e) {
           status = "closed"
           detachSocket()
-          resolve(
-            err({ kind: "io-error", degradeReason: e instanceof Error ? e.message : String(e) }),
-          )
+          resolve(err({ kind: "io-error", degradeReason: errMessage(e) }))
         }
       })
     },

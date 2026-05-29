@@ -1,4 +1,4 @@
-import { err, ok, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 import type { CaptureOpts, VoiceInputPort } from "./port"
 import type { AudioBlob, CaptureError } from "./types"
 
@@ -89,7 +89,7 @@ const trySpawn = (
   } catch (e) {
     return err({
       kind: "spawn-failed",
-      degradeReason: e instanceof Error ? e.message : String(e),
+      degradeReason: errMessage(e),
     })
   }
 }

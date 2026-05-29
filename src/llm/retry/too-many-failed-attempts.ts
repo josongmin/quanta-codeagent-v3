@@ -58,7 +58,7 @@
  * separate budget-window) extend this same type.
  */
 
-import { LLMError, type LLMProvider } from "@/shared"
+import { errMessage, LLMError, type LLMProvider } from "@/shared"
 import type { LLMPort } from "../ports"
 import type { StreamEvent, StreamInput } from "../types"
 
@@ -194,7 +194,7 @@ const wrapAsTooMany = (cause: unknown, count: number, cap: number): LLMError => 
   const statusCode: number | undefined = cause instanceof LLMError ? cause.statusCode : undefined
   const providerCode: string | undefined =
     cause instanceof LLMError ? cause.providerCode : undefined
-  const innerMsg = cause instanceof Error ? cause.message : String(cause)
+  const innerMsg = errMessage(cause)
   return new LLMError(`too many consecutive LLM failures (${count}/${cap}): ${innerMsg}`, {
     cause,
     kind: "too_many_failed_attempts",

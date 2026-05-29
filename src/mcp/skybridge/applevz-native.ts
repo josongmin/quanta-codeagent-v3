@@ -28,6 +28,7 @@
  * any availability shape — that's the closed-port DI seam.
  */
 
+import { errMessage } from "@/shared"
 import {
   type McpSandbox,
   type McpSandboxAvailability,
@@ -37,7 +38,6 @@ import {
   type McpSandboxPolicy,
   type McpServerSpec,
 } from "./types"
-
 /** napi-rs spawn result shape (camelCase across napi boundary; matches
  *  `crates/darwin-vz-helper/src/lib.rs::NapiVmSpawnResult`). */
 export interface NapiVmSpawnResult {
@@ -302,7 +302,7 @@ export const nativeAppleVzSandbox = (cfg?: NativeAppleVzConfig): McpSandbox => {
       try {
         raw = await Promise.resolve(binding.spawn_vm_for_mcp(napiSpec, napiPolicy))
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e)
+        const msg = errMessage(e)
         throw new McpSandboxError(
           "backend-unavailable",
           `darwin-vz: native spawn failed (${msg})`,

@@ -24,15 +24,11 @@
  * or written and runtime is byte-identical to ADR-0172 baseline.
  */
 
-import {
-  mkdir as fsMkdir,
-  rename as fsRename,
-  writeFile as fsWriteFile,
-} from "node:fs/promises"
+import { mkdir as fsMkdir, rename as fsRename, writeFile as fsWriteFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, isAbsolute, join } from "node:path"
 
-import { QuantaError } from "@/shared"
+import { errMessage, QuantaError } from "@/shared"
 
 import type { ObservabilityBag } from "./observability-helper"
 
@@ -221,7 +217,7 @@ export const writeHealthSnapshot = async (
     await fsOps.rename(tmpPath, finalPath)
     return finalPath
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
+    const msg = errMessage(err)
     throw new HealthSnapshotError("write-failed", `failed to write ${finalPath}: ${msg}`)
   }
 }

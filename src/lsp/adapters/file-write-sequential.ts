@@ -13,6 +13,7 @@ import {
   unlink as fsUnlink,
   readdir,
 } from "node:fs/promises"
+import { errMessage } from "@/shared"
 import type {
   FileWriteBatch,
   FileWriteFs,
@@ -78,7 +79,7 @@ export const sequentialFileWriteStrategy = (
           out.push({
             kind: "failed",
             path: entry.path,
-            reason: e instanceof Error ? e.message : String(e),
+            reason: errMessage(e),
           })
         }
       }

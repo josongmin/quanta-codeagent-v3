@@ -33,13 +33,13 @@ import {
   exchangeCode,
   isClientIdConfigured,
   readResolvedToken,
-  resolveOAuthConfig,
   resolveChatgptTokenCandidates,
+  resolveOAuthConfig,
   resolveQuantaHome,
   runBrowserFlow,
   writeToken,
 } from "@/auth/chatgpt-oauth"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 
 const jsonResponse = (status: number, body: unknown): Response =>
   new Response(JSON.stringify(body), {
@@ -103,7 +103,7 @@ export const handleAuthLoginStart = async (): Promise<Response> => {
         plan: record.plan_type ?? "unknown",
       })
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      const message = errMessage(error)
       // If we never even produced a URL (e.g. callback provider failed to
       // bind a loopback port), surface it to the HTTP response.
       urlReject(new Error(message))
@@ -115,7 +115,7 @@ export const handleAuthLoginStart = async (): Promise<Response> => {
     const authorizeUrl = await urlPromise
     return jsonResponse(200, { authorizeUrl })
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
+    const message = errMessage(error)
     return jsonResponse(500, { error: "login_setup_failed", message })
   }
 }
@@ -142,7 +142,7 @@ export const handleAuthLogout = async (): Promise<Response> => {
     })
     return jsonResponse(200, { ok: true, source: resolved?.source ?? "quanta", path })
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
+    const message = errMessage(error)
     return jsonResponse(500, { error: "logout_failed", message })
   }
 }
@@ -165,7 +165,7 @@ export const handleAuthStatus = async (): Promise<Response> => {
       expires_at: resolved.record.expires_at,
     })
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error)
+    const msg = errMessage(error)
     logger.warn("web-daemon: /auth/status read fail", { path, error: msg })
     return jsonResponse(200, { loggedIn: false, path, error: msg })
   }

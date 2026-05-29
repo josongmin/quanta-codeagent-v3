@@ -26,7 +26,7 @@
 
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs"
 import { dirname } from "node:path"
-import { omitUndef, type Result } from "@/shared"
+import { errMessage, omitUndef, type Result } from "@/shared"
 import { InMemoryRadarStore } from "./in-memory-store"
 import type { RadarOpError, RadarStore } from "./port"
 import type { CardKind, CardStatus, ProposeOpts, RadarCard } from "./types"
@@ -133,7 +133,7 @@ export class JsonlFileRadarStore implements RadarStore {
       try {
         chmodSync(this.filePath, 0o600)
       } catch (e) {
-        this.onWarn(`radar-store: chmod 0600 failed for ${this.filePath}: ${String(e)}`)
+        this.onWarn(`radar-store: chmod 0600 failed for ${this.filePath}: ${errMessage(e)}`)
       }
     }
 

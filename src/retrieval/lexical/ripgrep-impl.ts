@@ -23,7 +23,7 @@
  * `shell-snapshot/bun-spawner.ts`.
  */
 
-import { err, ok, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 import type { LexicalDoc, LexicalIndexResult, LexicalQueryOptions, LexicalSearch } from "./port"
 import type { LexicalDegradeReason, LexicalError, LexicalHit } from "./types"
 
@@ -84,7 +84,7 @@ const isENOENT = (e: unknown): boolean => {
   return false
 }
 
-const detailOf = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+const detailOf = (e: unknown): string => errMessage(e)
 
 const trimSnippet = (raw: unknown): string => {
   if (typeof raw !== "string") return ""

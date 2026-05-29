@@ -192,7 +192,7 @@ const runExport = async (
   try {
     session = await sio.readSession(id)
   } catch (e) {
-    ctx.err(`/session export: read failed: ${e instanceof Error ? e.message : String(e)}\n`)
+    ctx.err(`/session export: read failed: ${errMessage(e)}\n`)
     return 1
   }
   if (session === null) {
@@ -202,7 +202,7 @@ const runExport = async (
   try {
     await exportSessionToFile(session, { quantaVersion: QUANTA_VERSION, now: () => now }, outPath)
   } catch (e) {
-    ctx.err(`/session export: write failed: ${e instanceof Error ? e.message : String(e)}\n`)
+    ctx.err(`/session export: write failed: ${errMessage(e)}\n`)
     return 1
   }
   // Re-stat to report bytes written. Stat failure is non-fatal — surface a
@@ -232,7 +232,7 @@ const checkImportFile = async (
   try {
     st = await stat(path)
   } catch (e) {
-    ctx.err(`/session import: ${e instanceof Error ? e.message : String(e)}\n`)
+    ctx.err(`/session import: ${errMessage(e)}\n`)
     return { ok: false }
   }
   if (st.size > IMPORT_SIZE_CAP_BYTES) {
@@ -262,7 +262,7 @@ const readAndParseEnvelope = async (
   try {
     text = await Bun.file(absPath).text()
   } catch (e) {
-    ctx.err(`/session import: ${e instanceof Error ? e.message : String(e)}\n`)
+    ctx.err(`/session import: ${errMessage(e)}\n`)
     return { ok: false }
   }
   try {
@@ -272,7 +272,7 @@ const readAndParseEnvelope = async (
     if (e instanceof SessionImportError) {
       ctx.err(`/session import: ${e.code}: ${e.message}\n`)
     } else {
-      ctx.err(`/session import: ${e instanceof Error ? e.message : String(e)}\n`)
+      ctx.err(`/session import: ${errMessage(e)}\n`)
     }
     return { ok: false }
   }
@@ -315,7 +315,7 @@ const runImport = async (
   try {
     await sio.writeSession(newId, rewritten)
   } catch (e) {
-    ctx.err(`/session import: write failed: ${e instanceof Error ? e.message : String(e)}\n`)
+    ctx.err(`/session import: write failed: ${errMessage(e)}\n`)
     return 1
   }
 

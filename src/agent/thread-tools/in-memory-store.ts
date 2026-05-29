@@ -18,7 +18,7 @@
  * `@/agent/loop`, no `@/agent/dispatch`.
  */
 
-import { err, ok, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 import type { Tool } from "@/tool"
 import { defaultLazyResolver, type LazyResolver } from "./lazy-resolver"
 import type { ListOpts, ThreadToolRegistry } from "./port"
@@ -58,7 +58,7 @@ export const inMemoryThreadToolStore = (opts?: InMemoryThreadToolStoreOpts): Thr
         try {
           built = spec.factory()
         } catch (cause) {
-          const msg = cause instanceof Error ? cause.message : String(cause)
+          const msg = errMessage(cause)
           // Eager-factory failure does NOT insert the spec: the registry
           // stays in its pre-call state. The empty bucket we may have
           // just created is left in place (cheap — Map<string, Spec>()) —

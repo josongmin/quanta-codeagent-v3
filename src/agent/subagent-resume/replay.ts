@@ -49,6 +49,7 @@ import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoin
 import type { PersistedHandle } from "@/agent/subagent-persistence-store"
 import type { Message } from "@/llm"
 
+import { errMessage } from "@/shared"
 /** What the policy decided for one handle. 3-arm union mirrors the
  *  `ResumeDecision` shape (ADR-0159) — exhaustive + auditable. */
 export type ReplayDecision =
@@ -215,7 +216,7 @@ export const buildReplaySpec = async (
   try {
     snapshot = ctx.checkpointStore.restore(snapshotId)
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
+    const msg = errMessage(e)
     const decision: ReplayDecision = {
       action: "skip-replay",
       reason: `store-failed: ${msg}`,

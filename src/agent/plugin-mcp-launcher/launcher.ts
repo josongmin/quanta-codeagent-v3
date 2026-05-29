@@ -34,6 +34,7 @@
  * call launchPluginMcpServers" belongs to a follow-up ADR.
  */
 
+import { errMessage } from "@/shared"
 import type { PluginManifest } from "@/skill/plugin-manifest"
 import type {
   McpLauncherPort,
@@ -41,7 +42,6 @@ import type {
   PluginMcpRegistry,
   PluginMcpServerSpec,
 } from "./types"
-
 /** Compose the canonical `serverId` from plugin + server names. Exposed
  *  so tests and adapter authors can build the same id without re-
  *  inventing the joiner. The `::` separator is unambiguous because
@@ -94,7 +94,7 @@ const safeLaunchOne = async (
       shutdown: () => handle.shutdown(),
     }
   } catch (e) {
-    return failedHandle(serverId, e instanceof Error ? e.message : String(e))
+    return failedHandle(serverId, errMessage(e))
   }
 }
 

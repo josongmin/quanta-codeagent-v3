@@ -26,7 +26,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { err, ok, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 import type { TranscribeReq, TranscriberError, TranscriberPort, VoiceTranscript } from "./port"
 
 /** Spawned-binary surface — tests inject a fake spawner so no real
@@ -239,7 +239,7 @@ export const createLocalWhisperTranscriber = (opts: LocalWhisperOpts = {}): Tran
           return err({
             kind: "transcription-failed",
             status: 0,
-            degradeReason: e instanceof Error ? e.message : String(e),
+            degradeReason: errMessage(e),
           })
         }
         const startedAt = Date.now()
@@ -260,7 +260,7 @@ export const createLocalWhisperTranscriber = (opts: LocalWhisperOpts = {}): Tran
           return err({
             kind: "transcription-failed",
             status: 0,
-            degradeReason: `whisper-cpp output not found: ${e instanceof Error ? e.message : String(e)}`,
+            degradeReason: `whisper-cpp output not found: ${errMessage(e)}`,
           })
         }
         if (text.length === 0) {

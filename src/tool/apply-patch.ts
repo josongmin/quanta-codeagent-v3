@@ -29,10 +29,10 @@ import * as nodeFs from "node:fs/promises"
 import * as path from "node:path"
 import { z } from "zod"
 import { type ApplyResult, applyPatch, type PatchFileSystemPort, parsePatch } from "@/patch"
+import { errMessage } from "@/shared"
 import { FsJailError, resolveJailed } from "@/storage"
 import { classifyFastApplyError, failingTargetPath } from "./apply-patch-fallback-wire"
 import type { FastApplyFallbackSeam, Tool, ToolContext, ToolEvent } from "./types"
-
 /**
  * Raised when a `FsJailFileSystemPort` operation resolves to a path outside
  * the jail root. Distinct from `@/storage/FsJailError` so callers can
@@ -234,8 +234,7 @@ async function tryFastApplyFallback(
   // Honour an already-aborted turn before any I/O / dispatch.
   if (signal.aborted) return null
 
-  const errorMessage =
-    originalError instanceof Error ? originalError.message : String(originalError)
+  const errorMessage = errMessage(originalError)
   // Read the failing op's current bytes so the model can re-anchor against
   // them. Best-effort: a missing/unreadable target simply omits the snapshot.
   const sourceFile = failingTargetPath(originalError)

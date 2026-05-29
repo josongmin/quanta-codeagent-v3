@@ -47,8 +47,8 @@
  */
 
 import { createHash, randomBytes } from "node:crypto"
+import { errMessage } from "@/shared"
 import type { SavedSession } from "./types"
-
 /**
  * Wire-stable session export envelope. Versioned so a future schema bump can
  * land additively without breaking older importers. `version: 1` is the
@@ -536,7 +536,7 @@ export const importSessionFromJson = (
   } catch (e) {
     throw new SessionImportError(
       "malformed",
-      `session envelope JSON parse failed: ${e instanceof Error ? e.message : String(e)}`,
+      `session envelope JSON parse failed: ${errMessage(e)}`,
     )
   }
   return importSession(parsed as AnySessionExportEnvelope, opts)
