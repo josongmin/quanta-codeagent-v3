@@ -27,6 +27,7 @@
  * always call this helper; the gating is here.
  */
 
+import { errMessage } from "@/shared"
 import type { PlanQueueStore } from "../../agent/plan-queue"
 import {
   type PlaybookAutoDispatchController,
@@ -130,7 +131,7 @@ export const adaptPlanQueueStoreToSink = (store: PlanQueueStore): PlaybookPlanQu
       })
       return { ok: true }
     } catch (e) {
-      return { ok: false, reason: e instanceof Error ? e.message : String(e) }
+      return { ok: false, reason: errMessage(e) }
     }
   },
 })

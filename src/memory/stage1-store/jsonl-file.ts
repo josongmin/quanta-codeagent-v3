@@ -21,6 +21,7 @@
 
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs"
 import { dirname } from "node:path"
+import { errMessage } from "@/shared"
 import { InMemoryStage1Store } from "./in-memory"
 import type { Stage1ListFilter, Stage1OutputsStore, Stage1PruneOpts } from "./port"
 import type { Stage1Entry } from "./types"
@@ -98,7 +99,7 @@ export class JsonlFileStage1Store implements Stage1OutputsStore {
       try {
         chmodSync(this.filePath, 0o600)
       } catch (e) {
-        this.onWarn(`stage1-store: chmod 0600 failed for ${this.filePath}: ${String(e)}`)
+        this.onWarn(`stage1-store: chmod 0600 failed for ${this.filePath}: ${errMessage(e)}`)
       }
       this.hydrate()
     }

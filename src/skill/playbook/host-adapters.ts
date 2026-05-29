@@ -11,6 +11,7 @@
  */
 
 import type { PlanQueueStore } from "@/agent/plan-queue"
+import { errMessage } from "@/shared"
 import {
   type PlaybookAutoDispatchController,
   type PlaybookAutoDispatchOptions,
@@ -39,7 +40,7 @@ export const adaptPlanQueueStoreToSink = (store: PlanQueueStore): PlaybookPlanQu
       })
       return { ok: true }
     } catch (e) {
-      const reason = e instanceof Error ? e.message : String(e)
+      const reason = errMessage(e)
       return { ok: false, reason }
     }
   },

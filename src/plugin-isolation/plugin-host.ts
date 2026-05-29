@@ -27,7 +27,7 @@
  *    `exitPromise`, then resolves.
  */
 
-import { logger, QuantaError } from "@/shared"
+import { errMessage, logger, QuantaError } from "@/shared"
 import type { IsolatedProcess } from "./types"
 
 export const DEFAULT_CALL_TIMEOUT_MS = 30_000
@@ -298,7 +298,7 @@ export class PluginHost {
         logger.warn("plugin-host: notification handler threw", {
           serviceName: this.proc.serviceName,
           method: n.method,
-          error: String(e),
+          error: errMessage(e),
         })
       }
     }

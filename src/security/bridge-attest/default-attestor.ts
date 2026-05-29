@@ -19,6 +19,7 @@
  * `{ kind: "deny", reason }` + a `preflight-error` audit event.
  */
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
+import { errMessage } from "@/shared"
 import { logger } from "@/shared/logger"
 import type { BridgeAttestor } from "./port"
 import type {
@@ -206,7 +207,7 @@ export const defaultAttestor = (opts: DefaultAttestorOpts = {}): BridgeAttestor 
       if (verdict.kind === "prompt-user") return handlePromptUser(requestId, verdict.reason)
       return await handleAllow(requestId, req)
     } catch (e) {
-      const error = e instanceof Error ? e.message : String(e)
+      const error = errMessage(e)
       emit({ kind: "preflight-error", requestId, at: clock(), error })
       emit({ kind: "attest-audit", requestId, at: clock(), summary: `error: ${error}` })
       return { kind: "deny", reason: `preflight failed: ${error}` }

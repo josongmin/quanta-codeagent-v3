@@ -31,6 +31,7 @@
 import { existsSync, type FSWatcher, statSync, watch } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { isAbsolute, resolve as resolvePath } from "node:path"
+import { errMessage } from "@/shared"
 import { scanFile } from "./comment-scanner"
 import { createDebouncer, type Debouncer } from "./debouncer"
 import type { InlineTriggerWatcher, Subscription, TriggerCallback, WatchResult } from "./port"
@@ -113,7 +114,7 @@ const installOne = (
   try {
     w = watch(root, { recursive: true })
   } catch (e) {
-    return { ok: false, detail: e instanceof Error ? e.message : String(e) }
+    return { ok: false, detail: errMessage(e) }
   }
   const handler = (_ev: string, filename: string | Buffer | null) => {
     const abs = toAbsolutePath(root, filename)

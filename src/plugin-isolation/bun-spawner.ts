@@ -30,7 +30,7 @@
  */
 
 import type { Subprocess } from "bun"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import {
   DEFAULT_GRACEFUL_KILL_MS,
   DEFAULT_SPAWN_TIMEOUT_MS,
@@ -234,7 +234,7 @@ const createMessagePump = (
     } catch (e) {
       logger.debug("plugin-isolation: stdout pump ended with error", {
         serviceName,
-        error: String(e),
+        error: errMessage(e),
       })
     }
     // Last partial line (no trailing \n) is intentionally dropped — the line
@@ -257,7 +257,7 @@ const createSendBridge = (
     } catch (e) {
       logger.warn("plugin-isolation: send dropped (json-encode failed)", {
         serviceName,
-        error: String(e),
+        error: errMessage(e),
       })
       return
     }
@@ -277,7 +277,7 @@ const createSendBridge = (
     } catch (e) {
       logger.debug("plugin-isolation: stdin write skipped (child closed)", {
         serviceName,
-        error: String(e),
+        error: errMessage(e),
       })
     }
   }
@@ -308,7 +308,7 @@ const createListenerRegistry = (): ListenerRegistry => {
         try {
           h(msg)
         } catch (e) {
-          logger.warn("plugin-isolation: listener threw", { error: String(e) })
+          logger.warn("plugin-isolation: listener threw", { error: errMessage(e) })
         }
       })
     }
@@ -444,7 +444,7 @@ const createSpawnWatchdog = (
       reject(
         new IsolatedSpawnError(
           "spawn-failed",
-          `plugin "${serviceName}" exit observation failed: ${String(e)}`,
+          `plugin "${serviceName}" exit observation failed: ${errMessage(e)}`,
         ),
       )
     },
@@ -482,7 +482,7 @@ export const createBunSpawner = (): IsolatedProcessSpawnerPort => ({
     } catch (e) {
       throw new IsolatedSpawnError(
         "spawn-failed",
-        `plugin "${serviceName}" spawn failed: ${String(e)}`,
+        `plugin "${serviceName}" spawn failed: ${errMessage(e)}`,
       )
     }
 

@@ -27,7 +27,7 @@
  * across slices.
  */
 
-import { err, ok, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 import type {
   KernelListing,
   NodeReplExecOptions,
@@ -111,7 +111,7 @@ export const createDefaultNodeReplKernel = (opts: DefaultKernelOptions = {}): No
           stderr: "pipe",
         })
       } catch (e) {
-        const detail = e instanceof Error ? e.message : String(e)
+        const detail = errMessage(e)
         // ENOENT on `node` → node-missing; anything else (EACCES, EAGAIN)
         // surfaces as spawn-failed with the platform detail.
         if (detail.toLowerCase().includes("enoent")) {
@@ -160,7 +160,7 @@ export const createDefaultNodeReplKernel = (opts: DefaultKernelOptions = {}): No
         }
         return err({
           kind: "spawn-failed",
-          detail: e instanceof Error ? e.message : String(e),
+          detail: errMessage(e),
         })
       }
       const warmRead = await readUntil(stdoutReader, warmupSentinel, readyTimeoutMs)
@@ -270,7 +270,7 @@ const writeStdin = (k: LiveKernel, s: string): { ok: true } | { ok: false; detai
     ;(k.proc.stdin as { write: (s: string) => unknown }).write(s)
     return { ok: true }
   } catch (e) {
-    return { ok: false, detail: e instanceof Error ? e.message : String(e) }
+    return { ok: false, detail: errMessage(e) }
   }
 }
 
@@ -389,7 +389,7 @@ const readUntil = async (
       done = chunk.done
       value = chunk.value
     } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+      return { ok: false, error: errMessage(e) }
     }
     if (done) {
       return { ok: false, error: "stream closed" }

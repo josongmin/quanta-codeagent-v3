@@ -26,6 +26,7 @@ import {
   renderMemorySection,
 } from "@/memory/cross-session"
 import { JsonlFileStage1Store, type Stage1OutputsStore } from "@/memory/stage1-store"
+import { errMessage } from "@/shared"
 
 const noopWarn = (_msg: string): void => {}
 
@@ -172,9 +173,7 @@ const runSessionStartPhase2AutoTrigger = async (
     )
     if (outcome.kind === "error") warnPhase2Failure(opts.logWarn, outcome.message)
   } catch (e) {
-    opts.logWarn(
-      `session-start memory phase2 bootstrap failed: ${e instanceof Error ? e.message : String(e)}`,
-    )
+    opts.logWarn(`session-start memory phase2 bootstrap failed: ${errMessage(e)}`)
   }
 }
 

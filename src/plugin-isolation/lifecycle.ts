@@ -32,7 +32,7 @@
  *    globals).
  */
 
-import { logger, QuantaError } from "@/shared"
+import { errMessage, logger, QuantaError } from "@/shared"
 import { PluginHost } from "./plugin-host"
 import type { IsolatedProcessSpawnerPort, SpawnOpts } from "./types"
 
@@ -127,7 +127,7 @@ export class PluginLifecycleManager {
       return host
     } catch (e) {
       this._state = "dead"
-      throw new LifecycleError("spawn-failed", `lifecycle initial spawn failed: ${String(e)}`)
+      throw new LifecycleError("spawn-failed", `lifecycle initial spawn failed: ${errMessage(e)}`)
     }
   }
 
@@ -232,7 +232,7 @@ export class PluginLifecycleManager {
         this._state = "running"
       })
       .catch((e) => {
-        logger.warn("plugin-lifecycle: restart spawn failed", { error: String(e) })
+        logger.warn("plugin-lifecycle: restart spawn failed", { error: errMessage(e) })
         this._state = "dead"
       })
   }

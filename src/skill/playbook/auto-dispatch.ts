@@ -30,6 +30,7 @@
  *     "watcher without a queue" rig used in tests).
  */
 
+import { errMessage } from "@/shared"
 import { matchesGlobSubset } from "./inline-trigger-watcher"
 import type {
   InlineTriggerFire,
@@ -133,7 +134,7 @@ export const dispatchPlaybook = (input: {
     return {
       kind: "sink-rejected",
       playbook: playbookName,
-      reason: e instanceof Error ? e.message : String(e),
+      reason: errMessage(e),
     }
   }
   if (outcome.ok) return { kind: "enqueued", playbook: playbookName }
