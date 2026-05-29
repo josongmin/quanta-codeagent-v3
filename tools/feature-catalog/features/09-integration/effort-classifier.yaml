@@ -38,7 +38,7 @@ evidence:
     - src/agent/effort-classifier/keyword-detector.ts
     - src/agent/effort-classifier/store.ts
     - src/agent/effort-classifier/index.ts
-  adrs: [417]
+  adrs: [417, 426]
   tests:
     unit:
       - tests/unit/effort-classifier-hellgate.test.ts

@@ -30,7 +30,7 @@ evidence:
     - src/subagent/dispatch-6.ts
     - src/subagent/registry.ts
     - src/subagent/index.ts
-  adrs: [41]
+  adrs: [41, 426]
   tests:
     unit:
       - tests/unit/subagent-tools-6-contracts.test.ts

@@ -66,7 +66,7 @@ evidence:
     - src/agent/tier1/index.ts
     - src/agent/features.ts
     - src/agent/types.ts
-  adrs: [416]
+  adrs: [416, 426]
   tests:
     unit:
       - tests/unit/subagent-mailbox-hellgate.test.ts

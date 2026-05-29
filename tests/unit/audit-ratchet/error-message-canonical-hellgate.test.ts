@@ -82,6 +82,14 @@ const ALLOWED_TERNARY_INLINE_SITES = new Set<string>([
   // (`tests/unit/integrations/github/slice-fence-static-hellgate-r3.test.ts`)
   // pins that no `@/shared` import survives.
   "apps/cli/from-pr-cmd.ts",
+  // ADR-0165 coverage adapter quartet — each file's header pins the
+  // "Plane-clean: imports ONLY `node:fs/promises` + …" contract: no
+  // `@/agent`, `@/tool`, `@/llm`, `@/shared`. Two raw-message catch sites per
+  // file (io-failed / json-malformed boundaries) stay inline by design.
+  "observability/coverage/v8-source.ts",
+  "observability/coverage/c8-source.ts",
+  "observability/coverage/ast-source.ts",
+  "observability/coverage/istanbul-source.ts",
 ])
 
 /**
