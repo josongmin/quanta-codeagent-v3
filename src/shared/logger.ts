@@ -22,14 +22,26 @@
  * unbounded for incident triage where the suppressed signal itself is
  * forensic. See `log-rate-limit.ts` module-doc for capacity / refill
  * justification.
+ *
+ * ## Multi-tenant caller seam (R9 — R6 audit Agent2 #4 closure)
+ *
+ * Each of the four severity methods accepts an optional third arg
+ * `{ caller }`. When omitted (every existing call site as of this commit)
+ * the formatted output line is BYTE-IDENTICAL to the pre-seam shape —
+ * single-process slices in the current desktop shape see no change. When
+ * provided, the caller id is folded into the rate-limit BUCKET LABEL only
+ * (via {@link labelFor}); the visible log line is unchanged. This gives
+ * per-tenant quota isolation without re-shaping recorded session framing.
+ * Threshold gating runs BEFORE the caller is read so a hostile caller
+ * cannot smuggle a debug-level line past the configured threshold.
  */
-import { consume, labelFor, rateLimitNow } from "./log-rate-limit"
+import { consume, type LogCallSite, labelFor, rateLimitNow } from "./log-rate-limit"
 import { sanitizeLogText } from "./log-sanitize"
 import { type LogLevel, runtimeConfig } from "./runtime-config"
 import { writeStderr } from "./terminal-io"
 
-export { __resetLoggerRateLimit, __setLoggerNow } from "./log-rate-limit"
-export type { LogLevel }
+export { __resetLoggerRateLimit, __setLoggerNow, sanitizeCaller } from "./log-rate-limit"
+export type { LogCallSite, LogLevel }
 
 /** Canonical severity ordering (debug < info < warn < error). Single source
  *  of truth for every level-gating logger so the two output formats (this
@@ -44,8 +56,10 @@ export const LOG_LEVEL_ORDER: Record<LogLevel, number> = { debug: 0, info: 1, wa
 export const levelEnabled = (level: LogLevel, threshold: LogLevel): boolean =>
   LOG_LEVEL_ORDER[level] >= LOG_LEVEL_ORDER[threshold]
 
-const write = (level: LogLevel, msg: string, meta?: unknown): void => {
+const write = (level: LogLevel, msg: string, meta?: unknown, callSite?: LogCallSite): void => {
   const cfg = runtimeConfig()
+  // Threshold gate FIRST — a hostile caller MUST NOT be able to smuggle a
+  // debug-level line past the configured threshold by attaching a caller.
   if (!levelEnabled(level, cfg.logLevel)) return
   const safeMsg = sanitizeLogText(msg)
   const line = `[${level}] ${safeMsg}`
@@ -54,7 +68,10 @@ const write = (level: LogLevel, msg: string, meta?: unknown): void => {
     writeStderr(`${text}\n`)
     return
   }
-  const label = labelFor(safeMsg)
+  // Caller flows into the BUCKET LABEL only — the output line shape is
+  // byte-identical regardless of caller (see file docblock §"Multi-tenant
+  // caller seam").
+  const label = labelFor(safeMsg, callSite?.caller)
   const decision = consume(label, level, rateLimitNow())
   if (!decision.emit) return
   if (decision.flushLine !== undefined) {
@@ -64,8 +81,10 @@ const write = (level: LogLevel, msg: string, meta?: unknown): void => {
 }
 
 export const logger = {
-  debug: (msg: string, meta?: unknown) => write("debug", msg, meta),
-  info: (msg: string, meta?: unknown) => write("info", msg, meta),
-  warn: (msg: string, meta?: unknown) => write("warn", msg, meta),
-  error: (msg: string, meta?: unknown) => write("error", msg, meta),
+  debug: (msg: string, meta?: unknown, callSite?: LogCallSite) =>
+    write("debug", msg, meta, callSite),
+  info: (msg: string, meta?: unknown, callSite?: LogCallSite) => write("info", msg, meta, callSite),
+  warn: (msg: string, meta?: unknown, callSite?: LogCallSite) => write("warn", msg, meta, callSite),
+  error: (msg: string, meta?: unknown, callSite?: LogCallSite) =>
+    write("error", msg, meta, callSite),
 }

@@ -38,9 +38,50 @@
  * R5 audit-M2 closure: `[` / `]` are stripped from the LABEL when formatting
  * the suppression flush line so a hostile message-prefix cannot forge a
  * fake severity tag inside the flush template.
+ *
+ * R9 multi-tenant caller seam (R6 audit Agent2 #4 closure): the labeller
+ * accepts an optional `caller` (per-tenant / per-slice id) and namespaces
+ * the bucket label as `${caller}::${prefix}`. Two slices that emit the
+ * same `slice.op:` prefix get distinct buckets so an adversarial slice
+ * cannot quota-starve a benign sibling by spamming a shared message
+ * prefix. The line FORMAT is unchanged (back-compat byte-identical when
+ * caller omitted — every existing call site as of this commit); only the
+ * INTERNAL bucket key changes. {@link sanitizeCaller} strips the
+ * layer-owned `::` separator from injected ids (no sibling-bucket forgery)
+ * + caps at 64 chars + collapses blank → undefined.
  */
 
 import type { LogLevel } from "./runtime-config"
+
+/** Optional call-site descriptor — see module-doc §"R9 multi-tenant caller
+ *  seam". Default-OFF: omitting the field (every existing call site as of
+ *  this commit) keeps the bucket label byte-identical to the legacy
+ *  message-prefix-only form. */
+export interface LogCallSite {
+  /** Stable slice / tenant id (e.g. `"slice.search"`, `"tenant-A"`). Used
+   *  ONLY as a bucket namespace; never emitted on the output line. Caller
+   *  is responsible for choosing a stable id; this layer sanitizes (see
+   *  {@link sanitizeCaller}). */
+  readonly caller?: string
+}
+
+/** Strip the `::` namespace separator from a caller id so a malicious
+ *  caller can't synthesize a sibling's bucket by embedding `tenantB::`
+ *  inside its own id. Also trims surrounding whitespace and caps at 64
+ *  chars so a giant caller can't be used to amplify a single bucket key.
+ *  Empty / blank → `undefined` (treat as no caller; back-compat byte-
+ *  identical to omitting the param). A single `:` is preserved — common
+ *  in slice ids like `slice.op:phase`.
+ *
+ *  PURE: no I/O, no allocation beyond the result string, no observable
+ *  side effects. Safe to call inside the hot logger write path. */
+export const sanitizeCaller = (raw: string | undefined): string | undefined => {
+  if (raw === undefined) return undefined
+  // Strip every literal `::` occurrence (the separator we own) then trim.
+  const stripped = raw.replaceAll("::", "").trim()
+  if (stripped.length === 0) return undefined
+  return stripped.length > 64 ? stripped.slice(0, 64) : stripped
+}
 
 /** Per-label bucket state. `tokens` is a float — fractional refill is
  *  allowed so a 250 ms gap restores 0.25 tokens. `suppressed` counts the
@@ -162,9 +203,17 @@ export const consume = (label: string, level: LogLevel, now: number): BucketDeci
 export const rateLimitNow = (): number => loggerNow()
 
 /** Resolve the label for `msg` (colon-bounded prefix, ≤128 chars, else first
- *  64 chars of the message). Exported so the writer can derive the label
- *  from the already-sanitized text. */
-export const labelFor = (msg: string): string => labelOf(msg)
+ *  64 chars of the message). When `caller` is supplied (after
+ *  {@link sanitizeCaller}), the label is namespaced as
+ *  `${caller}::${prefix}` so two slices that emit the same prefix get
+ *  distinct buckets. Caller omitted → byte-identical to the legacy
+ *  prefix-only label (back-compat invariant). Exported so the writer can
+ *  derive the label from the already-sanitized text. */
+export const labelFor = (msg: string, caller?: string): string => {
+  const prefix = labelOf(msg)
+  const safeCaller = sanitizeCaller(caller)
+  return safeCaller === undefined ? prefix : `${safeCaller}::${prefix}`
+}
 
 /** Test-only: clear the rate-limit state so a test starts from a clean LRU.
  *  Production code MUST NOT call this — the scanner forbids it outside tests. */

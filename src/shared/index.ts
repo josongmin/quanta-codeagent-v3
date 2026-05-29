@@ -15,13 +15,14 @@ export type {
   LlmContinuationObservation,
   LlmRequestObservation,
 } from "./llm-route-types"
-export type { LogLevel } from "./logger"
+export type { LogCallSite, LogLevel } from "./logger"
 export {
   __resetLoggerRateLimit,
   __setLoggerNow,
   LOG_LEVEL_ORDER,
   levelEnabled,
   logger,
+  sanitizeCaller,
 } from "./logger"
 export { omitUndef } from "./optional"
 export type { RunContext } from "./run-context"
