@@ -29,6 +29,7 @@ import {
 } from "@/agent/approval-state-machine"
 import type { Objective, ObjectivePort } from "@/agent/objective"
 import type { RunEntry, RunLedgerPort } from "@/agent/run-ledger"
+import { __resetLoggerRateLimit } from "@/shared"
 import { __resetTerminalIo, setTerminalIo } from "@/shared/terminal-io"
 
 /** Capture every stderr write into an in-memory list. The logger writes
@@ -135,10 +136,17 @@ const ledgerWithThrowingSettle = (): RunLedgerPort => {
 let stderr: { lines: string[]; restore: () => void }
 
 beforeEach(() => {
+  // R5 cold-start=1: the label-keyed leaky bucket persists across tests.
+  // If a prior case already emitted the `approval-state.attr.clearBlocker`
+  // (or `…settleLedger`) label, this test's first throw is SUPPRESSED and
+  // the warn-line assertion flips RED. Reset the bucket map so every test
+  // gets a fresh cold-start budget on every label.
+  __resetLoggerRateLimit()
   stderr = captureStderr()
 })
 afterEach(() => {
   stderr.restore()
+  __resetLoggerRateLimit()
 })
 
 const ask = (asm: ApprovalStateMachinePort) =>
@@ -216,6 +224,11 @@ describe("R3 audit-H — approval-state attribution catches emit logger.warn", (
   it("deny / expire / cancel decisions ALSO trip both catches when both ports throw", () => {
     for (const verb of ["deny", "expire", "cancel"] as const) {
       stderr.lines.length = 0
+      // Each iteration uses the SAME labels (`approval-state.attr.*`). Reset
+      // the leaky bucket per-iteration so each verb gets a fresh cold-start
+      // budget on every label — the test pins per-verb behaviour, not the
+      // bucket's cross-verb sharing.
+      __resetLoggerRateLimit()
       const asm = createApprovalStateMachine({
         now: stepClock(),
         objective: objectiveWithThrowingClear(),
