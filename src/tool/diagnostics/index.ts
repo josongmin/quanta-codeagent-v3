@@ -43,8 +43,20 @@ export interface DiagnosticsProvider {
   open(filePath: string, cwd: string): Promise<DiagnosticsSession | null>
 }
 
+// R3 audit-M3 cap. PATH_MAX on Linux is 4096; macOS HFS+ caps individual
+// components at 255 but allows long total paths; pyright/typescript-lsp both
+// process the path as a single string. Bounding to PATH_MAX keeps the
+// LSP-spawn surface within OS-native limits and rejects pathological inputs
+// before they ever reach `resolveJailed`. min(1) blocks an empty string from
+// reaching the jail (which would resolve to cwd).
+const MAX_PATH_CHARS = 4096
+
 const schema = z.object({
-  path: z.string().describe("File to type-check / lint via its language server"),
+  path: z
+    .string()
+    .min(1)
+    .max(MAX_PATH_CHARS)
+    .describe("File to type-check / lint via its language server"),
 })
 
 type Input = z.infer<typeof schema>

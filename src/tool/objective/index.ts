@@ -41,17 +41,31 @@ const WAITING_ENUM = [
   "child_agent",
 ] as const satisfies readonly WaitingOn[]
 
+// R3 audit-M2/M3 caps: every free-form string field gets a finite upper bound
+// so an adversarial LLM cannot push the per-thread Objective into a memory-
+// blow-up surface, and every numeric field is restricted to safe-integer
+// + non-negative + finite (rejecting NaN / Infinity / negatives / floats).
+// The constants are the structural ceilings (not heuristics): 8000 chars
+// covers ~2k tokens, the practical free-form ceiling; 2000 chars per list
+// item + 256 items per array bound the worst-case payload at ~512KB which
+// stays under any LLM tool-call ceiling.
+const MAX_GOAL_CHARS = 8000
+const MAX_REASON_CHARS = 8000
+const MAX_LIST_ITEM_CHARS = 2000
+const MAX_LIST_ITEMS = 256
+
 export const objectiveSetSchema = z.object({
   thread_id: z.string().min(1).describe("Thread/conversation id this objective belongs to"),
-  goal: z.string().min(1).describe("The current objective in 1-2 sentences"),
+  goal: z.string().min(1).max(MAX_GOAL_CHARS).describe("The current objective in 1-2 sentences"),
   success_criteria: z
-    .array(z.string())
+    .array(z.string().max(MAX_LIST_ITEM_CHARS))
+    .max(MAX_LIST_ITEMS)
     .optional()
     .describe("List of testable criteria (e.g. 'tests pass', 'tsc 0')"),
   budget: z
     .object({
-      max_tokens: z.number().optional(),
-      max_turns: z.number().optional(),
+      max_tokens: z.number().int().nonnegative().finite().optional(),
+      max_turns: z.number().int().nonnegative().finite().optional(),
     })
     .optional()
     .describe("Optional budget envelope (caller-side caps; informational)"),
@@ -67,26 +81,26 @@ export const objectiveUpdateSchema = z.object({
     }),
     z.object({
       kind: z.literal("addBlocker"),
-      reason: z.string(),
+      reason: z.string().min(1).max(MAX_REASON_CHARS),
       waiting_on: z.enum(WAITING_ENUM),
     }),
     z.object({
       kind: z.literal("clearBlocker"),
-      blocker_id: z.string(),
+      blocker_id: z.string().min(1).max(MAX_LIST_ITEM_CHARS),
     }),
     z.object({
       kind: z.literal("nextActions"),
-      actions: z.array(z.string()),
+      actions: z.array(z.string().max(MAX_LIST_ITEM_CHARS)).max(MAX_LIST_ITEMS),
     }),
     z.object({
       kind: z.literal("markCriterion"),
-      criterion_id: z.string(),
+      criterion_id: z.string().min(1).max(MAX_LIST_ITEM_CHARS),
       met: z.boolean(),
     }),
     z.object({
       kind: z.literal("recordUsage"),
-      tokens: z.number().optional(),
-      turns: z.number().optional(),
+      tokens: z.number().int().nonnegative().finite().optional(),
+      turns: z.number().int().nonnegative().finite().optional(),
     }),
   ]),
 })
