@@ -90,86 +90,103 @@ describe("R4 audit-H — logger leaky-bucket DoS closure (R5 cold-start tokens=1
   })
 
   test("(2) suppression count is flushed before the next allowed line", () => {
+    // R5 cold-start=1: first emit lands, then bucket is empty.
     logger.warn("slice.op: msg")
     expect(lineCount()).toBe(1)
     // Hammer the bucket while it's starved — 50 drops accumulate.
     for (let i = 0; i < 50; i++) logger.warn("slice.op: msg")
-    expect(lineCount()).toBe(10) // still 10 — all suppressed
+    expect(lineCount()).toBe(1) // all 50 suppressed under cold-start exhaust
     // Advance > 1 second so the bucket refills at least 1 token.
     advance(1100)
     logger.warn("slice.op: msg AFTER")
-    // Expect TWO writes: the suppression flush + the actual message.
-    expect(lineCount()).toBe(12)
+    // Expect TWO additional writes: the suppression flush + the actual message
+    // (3 lines total: cold-start + flush + AFTER).
+    expect(lineCount()).toBe(3)
     // The flush line precedes the message.
-    const flush = captured[10] ?? ""
-    const after = captured[11] ?? ""
+    const flush = captured[1] ?? ""
+    const after = captured[2] ?? ""
     expect(flush).toContain("[suppressed 50 more from slice.op]")
     expect(after).toContain("msg AFTER")
   })
 
-  test("(3) 5s idle refills bucket back to capacity; another burst of 10 passes", () => {
-    for (let i = 0; i < 10; i++) logger.warn("slice.op: a")
-    expect(lineCount()).toBe(10)
-    // Idle 5s → 5 tokens refilled (cap=10, currently 0 → 5)
+  test("(3) 5s idle refills 5 tokens — drains exactly 5 messages before bucket empties", () => {
+    // R5 cold-start=1: warm up the bucket so refill semantics are tested
+    // independent of the cold-start initial token.
+    logger.warn("slice.op: warmup") // cold-start emit, tokens=0
+    expect(lineCount()).toBe(1)
+    // Idle 5s → 5 tokens refilled (cap=10, currently 0 → 5).
     advance(5000)
     for (let i = 0; i < 5; i++) logger.warn("slice.op: b")
-    // Each of the 5 emits; the FIRST one carries no flush prefix (no drops
-    // since the last allowed write — case (2) covers the flush path).
-    expect(lineCount()).toBe(15)
-    // 6th in this batch would be suppressed (bucket empty again)
+    // 5 emits land. No suppression flush precedes the first (no drops
+    // happened between cold-start emit and the 5s wait).
+    expect(lineCount()).toBe(6)
+    // 6th in this batch is suppressed (bucket empty again at tokens=0).
     logger.warn("slice.op: c")
-    expect(lineCount()).toBe(15)
+    expect(lineCount()).toBe(6)
   })
 
-  test("(4) different labels each get their own capacity-10 bucket", () => {
+  test("(4) different labels each get their own bucket — no cross-label sharing", () => {
+    // R5 cold-start=1: A 10 writes → 1 emit + 9 suppressed. B identical.
+    // The invariant pinned here is PER-LABEL ISOLATION — B's first emit is
+    // unaffected by A's prior 10 writes (no shared bucket).
     for (let i = 0; i < 10; i++) logger.warn(`A.op: ${i}`)
+    expect(lineCount()).toBe(1) // A: cold-start emit, rest suppressed
     for (let i = 0; i < 10; i++) logger.warn(`B.op: ${i}`)
-    expect(lineCount()).toBe(20)
-    // A's 11th is suppressed
+    expect(lineCount()).toBe(2) // B: own cold-start emit (proves isolation)
+    // A's 11th is still suppressed (no refill yet).
     logger.warn("A.op: overflow")
-    expect(lineCount()).toBe(20)
-    // B is unaffected — but B has also drained to 0 by now, so any B emit
-    // is also suppressed. Confirm A's suppression didn't take from B's
-    // budget by advancing 1100ms (B refills 1 token) and emitting once.
+    expect(lineCount()).toBe(2)
+    // Advance 1100ms → BOTH A and B refill 1 token. Emit one on B to
+    // confirm A's suppression didn't drain B's budget (cross-talk check).
     advance(1100)
     logger.warn("B.op: post")
-    expect(lineCount()).toBe(21)
-    expect(captured[20]).toContain("B.op: post")
+    // 3rd write line = B.op: post (preceded by a suppression flush for B's
+    // earlier 9 drops). Pin both by indexing rather than total count, since
+    // the flush line bumps `lineCount` to 4.
+    expect(lineCount()).toBe(4)
+    const flush = captured[2] ?? ""
+    const after = captured[3] ?? ""
+    expect(flush).toContain("[suppressed 9 more from B.op]")
+    expect(after).toContain("B.op: post")
   })
 
-  test("(5) LRU >= 32 labels evicts the oldest — its state is forgotten", () => {
-    // Fill LRU with 32 distinct labels at capacity 1 each (one emit each).
+  test("(5) LRU >= 32 labels evicts the oldest — evicted state is forgotten on re-touch", () => {
+    // R5 cold-start=1: each fresh label gets ONE emit before suppression.
+    // Fill LRU with 32 distinct labels — 32 emits total.
     for (let i = 0; i < 32; i++) logger.warn(`L${i}.op: seed`)
     expect(lineCount()).toBe(32)
-    // Drain L0 with 9 more emits + 5 suppressed (now L0.bucket = empty,
-    // suppressed=5)
-    for (let i = 0; i < 9; i++) logger.warn("L0.op: drain")
-    for (let i = 0; i < 5; i++) logger.warn("L0.op: dropped")
-    expect(lineCount()).toBe(41)
-    // Insert a 33rd label — L0 is the LRU head (most recently touched is L0
-    // actually because we just hammered it). To force eviction of the OLDEST,
-    // we touch a NEW label which evicts the OLDEST cold one (L1, the LRU
-    // head since L0 just moved to the tail). Insert 32 more new labels so
-    // EVERY original L0..L31 is forced out of the LRU.
+    // Spam L0 with 14 writes — 1st was already emitted in seed loop, so
+    // L0.tokens=0; all 14 land in `suppressed`.
+    for (let i = 0; i < 14; i++) logger.warn("L0.op: dropped")
+    expect(lineCount()).toBe(32) // all 14 suppressed
+    // Insert 32 more new labels. Each fresh label = 1 cold-start emit. The
+    // LRU evicts oldest first; since L0 just moved to the tail (most recently
+    // touched), L1..L31 are evicted FIRST, then L0 once enough new labels
+    // arrive (32 new > 31 cold + L0 → L0 evicted somewhere in the run).
     for (let i = 32; i < 64; i++) logger.warn(`L${i}.op: late`)
-    expect(lineCount()).toBe(73)
-    // Now L0's state is gone (evicted long ago). A fresh L0 write gets a
-    // fresh capacity-10 bucket — and CRUCIALLY no stale "[suppressed 5 ...]"
-    // flush from the prior eviction-victim state.
+    expect(lineCount()).toBe(64) // 32 cold-start emits for L32..L63
+    // L0's bucket has been evicted (along with its suppressed=14 count). A
+    // fresh L0 write seeds a NEW bucket — cold-start 1 token, no carried
+    // suppression flush. The key invariant: NO stale "[suppressed 14 ...]"
+    // line leaks from the prior eviction-victim state.
     logger.warn("L0.op: rebirth")
-    expect(lineCount()).toBe(74)
-    expect(captured[73]).not.toContain("[suppressed")
-    expect(captured[73]).toContain("L0.op: rebirth")
+    expect(lineCount()).toBe(65)
+    expect(captured[64]).not.toContain("[suppressed")
+    expect(captured[64]).toContain("L0.op: rebirth")
   })
 
   test("(6) colon-less messages still get a (truncated-prefix) label and are rate-limited", () => {
     // No colon → label = first 64 chars of the message. Same exact string
     // = same label = same bucket.
+    //
+    // R5 cold-start=1: 10 identical writes → 1 emit + 9 suppressed.
     const msg = "no colon here just a long ordinary message"
     for (let i = 0; i < 10; i++) logger.warn(msg)
-    expect(lineCount()).toBe(10)
+    expect(lineCount()).toBe(1)
     logger.warn(msg)
-    expect(lineCount()).toBe(10) // 11th suppressed
+    expect(lineCount()).toBe(1) // 11th still suppressed (no refill yet)
+    // The label-derivation pathway IS being exercised (without it, every
+    // distinct call would be its own bucket and all 11 would have emitted).
   })
 
   test("(7) QUANTA_LOG_RATE_LIMIT=off disables limiting — 1000 writes all land", () => {
@@ -180,33 +197,56 @@ describe("R4 audit-H — logger leaky-bucket DoS closure (R5 cold-start tokens=1
   })
 
   test("(8) suppression flush line format is the operator-grep contract", () => {
-    for (let i = 0; i < 10; i++) logger.warn("auth.signin: failed")
-    for (let i = 0; i < 7; i++) logger.warn("auth.signin: failed")
+    // R5 cold-start=1: first emit lands, next 16 are suppressed.
+    logger.warn("auth.signin: failed") // emit 1 (cold-start)
+    for (let i = 0; i < 16; i++) logger.warn("auth.signin: failed") // all suppressed
+    expect(lineCount()).toBe(1)
+    // Advance > 1 second so the bucket refills 1 token → next write emits
+    // both the suppression flush (16 drops) and the actual message.
     advance(1100)
     logger.warn("auth.signin: failed")
-    // First 10 originals → suppression flush → 1 more allowed
-    expect(lineCount()).toBe(12)
-    const flush = captured[10] ?? ""
+    expect(lineCount()).toBe(3) // cold-start + flush + new emit
+    const flush = captured[1] ?? ""
     // Format: `[<level>] [suppressed <N> more from <label>]\n`
-    expect(flush).toBe("[warn] [suppressed 7 more from auth.signin]\n")
+    expect(flush).toBe("[warn] [suppressed 16 more from auth.signin]\n")
   })
 
   test("(9) info+warn+error sharing one label share one bucket", () => {
-    // Burn budget with mixed severities under the SAME label.
-    for (let i = 0; i < 4; i++) logger.info("svc.x: a")
-    for (let i = 0; i < 4; i++) logger.warn("svc.x: a")
-    for (let i = 0; i < 2; i++) logger.error("svc.x: a")
-    expect(lineCount()).toBe(10) // all 10 emit under shared bucket
-    logger.error("svc.x: a") // suppressed because bucket is empty
-    expect(lineCount()).toBe(10)
+    // R5 cold-start=1: the SAME label across THREE severities still drains
+    // the SAME bucket — the first call (info) emits, every subsequent call
+    // is suppressed regardless of level.
+    logger.info("svc.x: a") // cold-start: emit
+    expect(lineCount()).toBe(1)
+    logger.warn("svc.x: a") // shared bucket exhausted: suppressed
+    logger.error("svc.x: a") // ditto
+    expect(lineCount()).toBe(1) // proves shared-bucket invariant
+    // Confirm severity-mix dropping is tracked: refill 1 token and a new
+    // emit flushes the prior 2 drops as a single suppression line.
+    advance(1100)
+    logger.error("svc.x: a")
+    expect(lineCount()).toBe(3)
+    const flush = captured[1] ?? ""
+    // Flush emits at the last-suppressed level (error) — operator sees a
+    // matching severity prefix.
+    expect(flush).toBe("[error] [suppressed 2 more from svc.x]\n")
   })
 
   test("(10) sustained spam on label A does not starve label B (no cross-talk)", () => {
-    // Spam A for 60 calls (10 emit, 50 dropped). All under one bucket.
+    // R5 cold-start=1: spam A for 60 calls (1 emit cold-start, 59 dropped).
     for (let i = 0; i < 60; i++) logger.warn("A.op: x")
-    expect(lineCount()).toBe(10)
-    // B has never been touched — full bucket, capacity 10.
+    expect(lineCount()).toBe(1)
+    // B has never been touched — fresh bucket, cold-start=1 token. The 1st
+    // emit goes through; the next 9 are suppressed. The starvation closure
+    // here is the per-label isolation invariant, NOT capacity-10 propagation.
     for (let i = 0; i < 10; i++) logger.warn("B.op: y")
-    expect(lineCount()).toBe(20)
+    expect(lineCount()).toBe(2)
+    // Both labels can keep up with refill rate — advance 1.1s and both
+    // refill 1 token; both emit once each. This is the load-bearing test:
+    // A's sustained 60-call spam did NOT take from B's refill schedule.
+    advance(1100)
+    logger.warn("A.op: x")
+    logger.warn("B.op: y")
+    // 2 emits + 2 suppression flushes (A had 59 drops, B had 9 drops).
+    expect(lineCount()).toBe(6)
   })
 })
