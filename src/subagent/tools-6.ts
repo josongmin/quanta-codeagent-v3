@@ -57,8 +57,10 @@ const ErrorShape = z
 export const ExecCommandInputSchema = z
   .object({
     /** The command line. Interpreted by the host shell — caller is
-     *  responsible for argv quoting; we do NOT auto-shell-escape. */
-    command: z.string().min(1),
+     *  responsible for argv quoting; we do NOT auto-shell-escape. Capped at
+     *  64KB so a hostile / oversized command cannot DoS the shell-arg buffer
+     *  (Linux ARG_MAX ≈ 128KB; we leave headroom for env + argv0). */
+    command: z.string().min(1).max(65536),
     /** Working directory. Required for explicitness — defaulting silently
      *  to cwd has bitten Codex sessions in the past. */
     cwd: z.string().min(1),
@@ -97,7 +99,10 @@ export type ExecCommandOutput = z.infer<typeof ExecCommandOutputSchema>
 export const WriteStdinInputSchema = z
   .object({
     pid: z.number().int().positive(),
-    data: z.string(),
+    /** Bytes to feed to the PTY. Capped at 64KB so a single write_stdin
+     *  cannot DoS the PTY ring buffer (the kernel's pipe buf is ~64KB on
+     *  Linux + macOS; larger payloads should be chunked across calls). */
+    data: z.string().max(65536),
     /** When true, append a `\n` to `data` (saves callers the chore for
      *  line-buffered REPLs). Default false. */
     appendNewline: z.boolean().optional(),
@@ -123,7 +128,10 @@ export type WriteStdinOutput = z.infer<typeof WriteStdinOutputSchema>
  *  `close_agent` / `send_input` reference. */
 export const SpawnAgentInputSchema = z
   .object({
-    prompt: z.string().min(1),
+    /** Child agent's seed prompt. Capped at 32KB — a single subagent prompt
+     *  larger than that should be staged via memory/skills instead of
+     *  inlined into the spawn arg. */
+    prompt: z.string().min(1).max(32768),
     /** Optional named profile (e.g. "Explore", "Plan"). Absent ⇒ default. */
     agentType: z.string().min(1).optional(),
     /** Explicit tool-name allowlist filtering the child's registry. */
@@ -202,7 +210,10 @@ export type CloseAgentOutput = z.infer<typeof CloseAgentOutputSchema>
 export const SendInputInputSchema = z
   .object({
     agentId: z.string().min(1),
-    message: z.string().min(1),
+    /** Conversational message forwarded to a paused child. Capped at 8KB
+     *  to mirror the mailbox body cap (`MAILBOX_BODY_MAX = 8000`) — a
+     *  message larger than that is almost always a copy-paste accident. */
+    message: z.string().min(1).max(8192),
   })
   .strict()
 export type SendInputInput = z.infer<typeof SendInputInputSchema>
