@@ -152,4 +152,36 @@ describe("errMessage", () => {
     expect(out).toBe("x")
     expect(Date.now() - start).toBeLessThan(50) // conservative: ms, not seconds
   })
+
+  // R6 baseline-coverage rung: the R5 try/catch hardening of `String(e)`
+  // degrades hostile non-Error throws to the literal `<unstringifiable>`
+  // sentinel rather than propagating the secondary throw out of `errMessage`.
+  // The exhaustive hostile-input surface is pinned by
+  // `tests/unit/error-message-hellgate.test.ts`; these three cases live here
+  // so the baseline unit test ALSO fails RED if the sentinel is removed
+  // (defence in depth — a hellgate-only pin can be missed by a partial-suite
+  // edit).
+  test("R5 sentinel: object with throwing toString → '<unstringifiable>'", () => {
+    const hostile = {
+      toString(): string {
+        throw new Error("toString throws")
+      },
+    }
+    expect(errMessage(hostile)).toBe("<unstringifiable>")
+  })
+
+  test("R5 sentinel: object with throwing Symbol.toPrimitive → '<unstringifiable>'", () => {
+    const hostile = {
+      [Symbol.toPrimitive](): string {
+        throw new Error("toPrimitive throws")
+      },
+    }
+    expect(errMessage(hostile)).toBe("<unstringifiable>")
+  })
+
+  test("R5 sentinel: Object.create(null) → '<unstringifiable>' (no `.toString` on the prototype chain)", () => {
+    const nullProto = Object.create(null) as Record<string, unknown>
+    nullProto.code = "E_NULLPROTO"
+    expect(errMessage(nullProto)).toBe("<unstringifiable>")
+  })
 })
