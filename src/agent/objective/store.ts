@@ -20,6 +20,7 @@
  */
 
 import { randomUUID } from "node:crypto"
+import { logger } from "@/shared"
 import type {
   Blocker,
   Objective,
@@ -309,7 +310,13 @@ const finiteOrZero = (v: unknown): number => (typeof v === "number" && Number.is
  *  a 1M-entry `successCriteria` array and inflate the in-memory cell past the
  *  256-criterion live cap that `set()` enforces. Slice equally with the live
  *  path so byte-identical snapshot round-trip from a healthy run stays exact
- *  (every healthy snapshot is already ≤ MAX_CRITERIA_PER_OBJECTIVE). */
+ *  (every healthy snapshot is already ≤ MAX_CRITERIA_PER_OBJECTIVE).
+ *
+ *  R5 audit-H4 closure: emit a `logger.warn` when the cap is hit so the
+ *  truncation is observable (silent truncation was invisible to operators
+ *  inspecting why a snapshot lost data). Single line per rebuild — the
+ *  label-keyed leaky bucket in `logger.ts` bounds the rate even under a
+ *  pathological replay flood. */
 const rebuildCriteria = (raw: unknown): SuccessCriterion[] => {
   if (!Array.isArray(raw)) return []
   const out: SuccessCriterion[] = []
@@ -322,12 +329,19 @@ const rebuildCriteria = (raw: unknown): SuccessCriterion[] => {
       met: c.met === true,
     })
   }
+  if (raw.length > MAX_CRITERIA_PER_OBJECTIVE) {
+    logger.warn(
+      `objective.rebuild.truncate: criteria=${raw.length} capped to ${MAX_CRITERIA_PER_OBJECTIVE}`,
+    )
+  }
   return out
 }
 
 /** Mirror of `rebuildCriteria` for the 64-blocker live cap. Hostile snapshot
  *  could otherwise ship N blockers and stick the objective in `blocked` state
- *  forever (status derivation requires blockers.length === 0 to leave). */
+ *  forever (status derivation requires blockers.length === 0 to leave).
+ *
+ *  R5 audit-H4 closure: same observability discipline as `rebuildCriteria`. */
 const rebuildBlockers = (raw: unknown): Blocker[] => {
   if (!Array.isArray(raw)) return []
   const out: Blocker[] = []
@@ -340,6 +354,11 @@ const rebuildBlockers = (raw: unknown): Blocker[] => {
       waitingOn: b.waitingOn,
       since: finiteOrZero(b.since),
     })
+  }
+  if (raw.length > MAX_BLOCKERS_PER_OBJECTIVE) {
+    logger.warn(
+      `objective.rebuild.truncate: blockers=${raw.length} capped to ${MAX_BLOCKERS_PER_OBJECTIVE}`,
+    )
   }
   return out
 }
