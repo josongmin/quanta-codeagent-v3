@@ -35,6 +35,14 @@
  *   - falsey return values  : 0/false/null/undefined are cacheable successes    (×4 axes)
  *   - non-Error throws      : strings, undefined, null all reset the cache      (×3 axes)
  *   - post-reject race      : new caller arrives BEFORE the catch handler fires (×1 axis)
+ *   - drop-without-await    : `void get()` (no await, no catch) — production
+ *                              wrappers buildLspLookup / buildSemanticLookup
+ *                              swallow throws and return null, so the OUTER
+ *                              caller often drops the rejected promise on the
+ *                              floor. The internal `pending.catch(() => …)`
+ *                              MUST still fire to reset the cache, otherwise
+ *                              the next caller is stuck with the permanent-
+ *                              dead Promise. (×2 axes)
  *
  * Determinism: factory `callCount` is asserted as an exact integer. No timing,
  * no setTimeout — every wait is `await` on a fulfilled / rejected promise.
@@ -323,5 +331,56 @@ describe("once() — retry-on-throw hellgate (audit-H closeout)", () => {
     expect(factoryCalls).toBe(2)
     // (don't strand p3 — resolve via the same rejectFactory pointer.)
     rejectFactory?.("ok3")
+  })
+
+  // ─── drop-without-await: caller never awaits / catches the rejection ──────
+  test("void get() with a rejecting factory: NEXT caller still gets a fresh build", async () => {
+    // The shape of the production caller path: `buildLspLookup` and
+    // `buildSemanticLookup` are wrapped by `lazyLookupPort`, which does
+    // `await get()` inside a try/catch. But an even-more-leaky caller —
+    // anything that fires `get()` as a side-effect (e.g. a prefetch hook,
+    // a warm-up path that ignores the return) and drops the promise on
+    // the floor — must NOT lock the cache to a permanent rejection. The
+    // internal `pending.catch(() => …)` swallows the unhandled-rejection
+    // signal AND resets the cache; the NEXT real caller sees an ok build.
+    const { fn, getCalls } = makeScripted(["throw", "ok"])
+    const get = once(fn)
+    // Drop the rejected promise on the floor. We attach a no-op catch
+    // ONLY to suppress Node's unhandled-rejection warning during the
+    // test run (this is the equivalent of the internal `pending.catch`
+    // already inside `once`, from the caller's perspective — it does
+    // NOT influence the cache-reset behavior, which the implementation
+    // performs unconditionally).
+    void get().catch(() => undefined)
+    // Microtask flush so the internal catch handler runs BEFORE the next
+    // call observes the slot. This is the same ordering production gets:
+    // `await lookup.findSymbol(...)` flushes microtasks between calls.
+    await Promise.resolve()
+    await Promise.resolve()
+    // Next caller: fresh build, success.
+    const ok = await get()
+    expect(ok).toBe(1)
+    expect(getCalls()).toBe(2)
+  })
+
+  test("void get() rejection does NOT leak a cached rejected Promise to the next caller", async () => {
+    // Stronger form of the previous case: the SECOND caller's returned
+    // Promise identity MUST differ from the first (proves the cache slot
+    // was cleared, not papered over with a rethrow-the-old-rejection).
+    let n = 0
+    const fn = (): Promise<number> => {
+      n += 1
+      if (n === 1) return Promise.reject(new Error("drop-and-floor"))
+      return Promise.resolve(7)
+    }
+    const get = once(fn)
+    const dropped = get()
+    void dropped.catch(() => undefined) // floor the rejection (caller never awaited)
+    await Promise.resolve()
+    await Promise.resolve()
+    const p2 = get()
+    expect(p2).not.toBe(dropped)
+    expect(await p2).toBe(7)
+    expect(n).toBe(2)
   })
 })

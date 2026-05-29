@@ -175,7 +175,12 @@ describe("subagent mailbox — per-sender undelivered quota (audit-H R2)", () =>
     mb.send({ from: "s", to: "x", kind: "request", body: "4" })
     // All 4 cells coexist: 2 delivered + 2 fresh undelivered.
     expect(mb.list().length).toBe(4)
-    expect(mb.list().map((m) => m.body).sort()).toEqual(["1", "2", "3", "4"])
+    expect(
+      mb
+        .list()
+        .map((m) => m.body)
+        .sort(),
+    ).toEqual(["1", "2", "3", "4"])
   })
 
   test("(7) cap=1 edge: only the most-recent undelivered cell from the sender remains", () => {
