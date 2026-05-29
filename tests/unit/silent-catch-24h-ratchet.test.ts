@@ -107,9 +107,9 @@ describe("R3 audit-H — pinned labels survive on every audited catch site", () 
   }
 })
 
-describe("R3 audit-H — bare-catch count must NOT grow beyond baseline", () => {
+describe("R3 audit-H — bare-catch count must EQUAL baseline (R5 tightened)", () => {
   for (const [file, baseline] of Object.entries(BARE_CATCH_BASELINE)) {
-    test(`${file} bare-catch count <= ${baseline}`, () => {
+    test(`${file} bare-catch count === ${baseline}`, () => {
       const observed = countBareCatches(file)
       if (observed > baseline) {
         throw new Error(
@@ -119,7 +119,21 @@ describe("R3 audit-H — bare-catch count must NOT grow beyond baseline", () => 
             `with a stable label prefix.`,
         )
       }
-      expect(observed).toBeLessThanOrEqual(baseline)
+      if (observed < baseline) {
+        // R5: progress is GOOD but ratchet must move forward — the BASELINE
+        // table is the source of truth and a decrement means a swallow was
+        // successfully migrated. Edit the BASELINE constant to ${observed}
+        // in the same change so the next regression hits the new floor.
+        throw new Error(
+          `Silent-catch IMPROVEMENT in ${file}: ${observed} bare-catches ` +
+            `(baseline = ${baseline}). Progress is welcome but the ratchet ` +
+            `must move forward — tighten BASELINE to ${observed} in the ` +
+            `same change. (Drift in either direction breaks attribution.)`,
+        )
+      }
+      // Strictly equal — the baseline is the floor AND the ceiling. Any drift
+      // (up = regression, down = un-recorded migration) fails the ratchet.
+      expect(observed).toBe(baseline)
     })
   }
 })
