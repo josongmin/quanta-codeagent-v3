@@ -57,7 +57,7 @@
  */
 
 import { extname, join } from "node:path"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 
 /** Minimal directory-listing port. Injected so the synthesizer is hermetic in
  *  tests (a fake tree) and decoupled from `node:fs` in the core. */
@@ -200,7 +200,7 @@ export const synthesizeLspAnchors = async (
     try {
       entries = await opts.lister.readDir(dir)
     } catch (e) {
-      logger.warn(`mention.anchor-synth.readDir(${dir}): ${(e as Error).message}`)
+      logger.warn(`mention.anchor-synth.readDir(${dir}): ${errMessage(e)}`)
       continue // NO-THROW: skip an unreadable subtree.
     }
     // Enqueue subdirs AFTER all files in this directory are examined so a

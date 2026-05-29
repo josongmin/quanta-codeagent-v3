@@ -23,7 +23,7 @@
  * result maps to `null` too (so `auto` priority treats it as a miss).
  */
 
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import type { SymbolHit, SymbolLookupSemanticPort } from "./symbol-resolver"
 
 /** One semantic hit — the minimal subset of the pipeline `SearchHit` this
@@ -99,7 +99,7 @@ export const createSemanticSymbolLookup = (
         const projected = hits.map(toHit).filter((h): h is SymbolHit => h !== null)
         return projected.length > 0 ? projected : null
       } catch (e) {
-        logger.warn(`mention.symbol-lookup-semantic: ${(e as Error).message}`)
+        logger.warn(`mention.symbol-lookup-semantic: ${errMessage(e)}`)
         return null
       }
     },

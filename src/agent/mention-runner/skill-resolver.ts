@@ -31,7 +31,7 @@
  */
 
 import type { MentionResolverPort } from "@/agent/mention-injection"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import type { SkillRegistryReadOnly } from "./types"
 
 /**
@@ -72,7 +72,7 @@ const safeLookup = (
     if (typeof entry.description !== "string") return null
     return { name: entry.name, description: entry.description }
   } catch (e) {
-    logger.warn(`mention.skill-resolver: ${(e as Error).message}`)
+    logger.warn(`mention.skill-resolver: ${errMessage(e)}`)
     return null
   }
 }

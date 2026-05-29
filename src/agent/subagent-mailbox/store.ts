@@ -27,7 +27,7 @@
  */
 
 import { randomUUID } from "node:crypto"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import type {
   CreateSubagentMailboxOptions,
   MailboxMessage,
@@ -230,7 +230,7 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
       const t = now()
       return Number.isFinite(t) ? t : Date.now()
     } catch (e) {
-      logger.warn(`subagent-mailbox.clockNow: ${(e as Error).message}`)
+      logger.warn(`subagent-mailbox.clockNow: ${errMessage(e)}`)
       return Date.now()
     }
   }
@@ -289,7 +289,7 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
         evict(cells, broadcastCursor, maxRetained, retentionMs, t)
         return toMessage(cell)
       } catch (e) {
-        logger.warn(`subagent-mailbox.send: ${(e as Error).message}`)
+        logger.warn(`subagent-mailbox.send: ${errMessage(e)}`)
         // Best-effort message even on catastrophic failure (port contract).
         return Object.freeze({
           id: `msg_${randomUUID()}`,
@@ -309,7 +309,7 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
         const out = markDelivered(picked, agentId, broadcastCursor, maxSeenSentAt, clockNow())
         return Object.freeze(out)
       } catch (e) {
-        logger.warn(`subagent-mailbox.read: ${(e as Error).message}`)
+        logger.warn(`subagent-mailbox.read: ${errMessage(e)}`)
         return Object.freeze([])
       }
     },
@@ -320,7 +320,7 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
         const { cells: picked } = collect(agentId, opts2)
         return Object.freeze(picked.map(toMessage))
       } catch (e) {
-        logger.warn(`subagent-mailbox.peek: ${(e as Error).message}`)
+        logger.warn(`subagent-mailbox.peek: ${errMessage(e)}`)
         return Object.freeze([])
       }
     },
@@ -339,7 +339,7 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
         }
         return toMessage(c)
       } catch (e) {
-        logger.warn(`subagent-mailbox.ack: ${(e as Error).message}`)
+        logger.warn(`subagent-mailbox.ack: ${errMessage(e)}`)
         return null
       }
     },
@@ -352,7 +352,7 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
         }
         return Object.freeze(out)
       } catch (e) {
-        logger.warn(`subagent-mailbox.list: ${(e as Error).message}`)
+        logger.warn(`subagent-mailbox.list: ${errMessage(e)}`)
         return Object.freeze([])
       }
     },
@@ -366,7 +366,7 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
         }
         return n
       } catch (e) {
-        logger.warn(`subagent-mailbox.pendingFor: ${(e as Error).message}`)
+        logger.warn(`subagent-mailbox.pendingFor: ${errMessage(e)}`)
         return 0
       }
     },
@@ -377,7 +377,7 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
           messages: Object.freeze([...cells.values()].map(toMessage)),
         })
       } catch (e) {
-        logger.warn(`subagent-mailbox.toSnapshot: ${(e as Error).message}`)
+        logger.warn(`subagent-mailbox.toSnapshot: ${errMessage(e)}`)
         return Object.freeze({ messages: Object.freeze([]) })
       }
     },
@@ -394,7 +394,7 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
           if (cell !== null) cells.set(cell.id, cell)
         }
       } catch (e) {
-        logger.warn(`subagent-mailbox.fromSnapshot: ${(e as Error).message}`)
+        logger.warn(`subagent-mailbox.fromSnapshot: ${errMessage(e)}`)
         // leave whatever survived; never throw
       }
     },

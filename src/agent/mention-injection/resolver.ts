@@ -27,7 +27,7 @@
  * `file-resolver.ts` / `symbol-resolver.ts`.
  */
 
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import type { InjectionFragment, MentionKind, ParsedMention } from "./types"
 
 /**
@@ -80,7 +80,7 @@ const safeCall = async (
     if (v === null || v === undefined) return null
     return v
   } catch (e) {
-    logger.warn(`mention.resolver: ${(e as Error).message}`)
+    logger.warn(`mention.resolver: ${errMessage(e)}`)
     return null
   }
 }

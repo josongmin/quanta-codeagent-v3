@@ -29,7 +29,7 @@
  * map onto `priority` / `timeoutMs` at the wire.
  */
 
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import type { MentionResolverResult } from "./resolver"
 
 /** A single symbol match — minimal envelope so adapters (LSP, semantic
@@ -112,7 +112,7 @@ const withTimeout = async <T>(
     if (timer !== undefined) clearTimeout(timer)
     return winner
   } catch (e) {
-    logger.warn(`mention.symbol-resolver.withTimeout: ${(e as Error).message}`)
+    logger.warn(`mention.symbol-resolver.withTimeout: ${errMessage(e)}`)
     if (timer !== undefined) clearTimeout(timer)
     return null
   }
@@ -149,7 +149,7 @@ const safeLookup = async (
     if (hits === null || !Array.isArray(hits)) return null
     return hits
   } catch (e) {
-    logger.warn(`mention.symbol-resolver.safeLookup: ${(e as Error).message}`)
+    logger.warn(`mention.symbol-resolver.safeLookup: ${errMessage(e)}`)
     return null
   } finally {
     ac.abort()

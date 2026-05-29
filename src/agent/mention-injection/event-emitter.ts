@@ -27,7 +27,7 @@
  */
 
 import type { SkillActivationEvent, TypedHistoryEventStore } from "@/memory/typed-event"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import type { InjectionFragment } from "./types"
 
 /** Build the `skill_activation` event for a single skill fragment. The
@@ -54,7 +54,7 @@ const safeAppend = (store: TypedHistoryEventStore, event: SkillActivationEvent):
   try {
     store.append(event)
   } catch (e) {
-    logger.warn(`mention.event-emitter: ${(e as Error).message}`)
+    logger.warn(`mention.event-emitter: ${errMessage(e)}`)
     /* swallow — side-channel, never crash the turn */
   }
 }

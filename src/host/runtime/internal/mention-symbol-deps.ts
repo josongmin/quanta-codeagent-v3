@@ -57,7 +57,7 @@ import {
   synthesizeLspAnchors,
 } from "@/agent/mention-injection"
 import { parseEnvFlag } from "@/runner/assemble"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import type { LspNavProvider } from "@/tool"
 
 /** Env bag this builder reads (semantic backend selection + the symbol knob). */
@@ -139,7 +139,7 @@ const buildLspLookup = async (
       anchorFiles: anchors.map((a) => a.anchorFile),
     })
   } catch (e) {
-    logger.warn(`mention @symbol: LSP anchor synthesis failed (${(e as Error).message}); skipping.`)
+    logger.warn(`mention @symbol: LSP anchor synthesis failed (${errMessage(e)}); skipping.`)
     return null
   }
 }
@@ -161,9 +161,7 @@ const buildSemanticLookup = async (
     const backend = buildSemanticBackend(env, resolvedEmbedder.embed, { resolvedEmbedder })
     return createSemanticSymbolLookup({ index: backend.port, embed: resolvedEmbedder.embed })
   } catch (e) {
-    logger.warn(
-      `mention @symbol: semantic backend build failed (${(e as Error).message}); skipping.`,
-    )
+    logger.warn(`mention @symbol: semantic backend build failed (${errMessage(e)}); skipping.`)
     return null
   }
 }
