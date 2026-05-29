@@ -442,5 +442,15 @@ export const toError = (e: unknown): Error =>
  * mass migration. The `tests/unit/errors.test.ts` "regression: does NOT
  * recurse on itself" case will hang every consumer if it does.
  */
-export const errMessage = (e: unknown): string =>
-  e instanceof Error ? e.message : String(e)
+export const errMessage = (e: unknown): string => {
+  if (e instanceof Error) return e.message
+  // R5 audit-H: `String(e)` re-throws when e.toString / Symbol.toPrimitive
+  // throw — those exceptions would escape the originating catch and crash
+  // the host. The whole point of `errMessage` is "extract a label even from
+  // hostile throws", so a throwing stringifier degrades to a fixed sentinel.
+  try {
+    return String(e)
+  } catch {
+    return "<unstringifiable>"
+  }
+}

@@ -117,7 +117,15 @@ const refill = (b: Bucket, now: number): void => {
 }
 
 /** Touch `label` so it moves to the LRU tail. Returns the bucket (existing
- *  or freshly seeded full). Evicts the LRU head if capacity exceeded. */
+ *  or freshly seeded with `tokens: 1`). Evicts the LRU head if capacity
+ *  exceeded.
+ *
+ *  R5 audit-H closure — fresh bucket starts with 1 token (the first line
+ *  passes), NOT `BUCKET_CAPACITY`. Otherwise an attacker who triggers
+ *  `LABEL_LRU_MAX + 1` distinct labels evicts an old bucket and gets a
+ *  full re-arm on re-touch (32 unique decoys × 10 capacity = 320/sec
+ *  sustained vs the documented 1/sec rate). Now sustained rate is bounded
+ *  by refill regardless of LRU churn. */
 const touchBucket = (label: string, now: number): Bucket => {
   const existing = buckets.get(label)
   if (existing !== undefined) {
@@ -133,7 +141,9 @@ const touchBucket = (label: string, now: number): Bucket => {
     if (oldestKey !== undefined) buckets.delete(oldestKey)
   }
   const fresh: Bucket = {
-    tokens: BUCKET_CAPACITY,
+    // R5 audit-H: 1 token (NOT capacity) — cold-start gives one free line;
+    // sustained spam is bounded by refill rate (1/s).
+    tokens: 1,
     lastRefillMs: now,
     suppressed: 0,
     lastSuppressedLevel: "warn",
@@ -142,10 +152,15 @@ const touchBucket = (label: string, now: number): Bucket => {
   return fresh
 }
 
+/** Strip `[` / `]` from a label so a hostile message-prefix cannot forge a
+ *  fake suppression line (R5 audit-M2). `[error] [fake ` becomes `?error? ?fake`
+ *  when concatenated into the flush template. */
+const stripBracketsForFlush = (label: string): string => label.replace(/[[\]]/g, "?")
+
 /** Format the suppression flush line. Kept as a separate fn so the test can
  *  pin the exact shape — operators grep for `[suppressed`. */
 const formatSuppressionLine = (level: LogLevel, label: string, count: number): string =>
-  `[${level}] [suppressed ${count} more from ${label}]`
+  `[${level}] [suppressed ${count} more from ${stripBracketsForFlush(label)}]`
 
 /** Decision returned by the bucket gate: either emit the original line
  *  (optionally prefixed by a flushed suppression line if the bucket just
