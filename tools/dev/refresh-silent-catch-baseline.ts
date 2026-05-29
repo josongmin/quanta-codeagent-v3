@@ -244,9 +244,39 @@ const run = async (argv: string[], cwd: string): Promise<CmdResult> => {
 
 export const DEFAULT_TARGET_TEST = "tests/unit/silent-catch-24h-ratchet.test.ts"
 
-const resolveTarget = (repoRoot: string): string => {
+/** R10 — `--check` mode flag. The script's primary mode REWRITES the
+ *  BASELINES table (auto-tighten on improvement, refuse on regression);
+ *  CI cannot opt into the rewrite, so it needs a READ-ONLY shape that
+ *  signals "human attention required" via a distinct exit code without
+ *  mutating the working tree. Argv order is `--check` first or as the
+ *  only argument (treated as a flag, NOT a target path). The legacy
+ *  positional target path stays untouched (operators still run
+ *  `baseline:silent-catch path/to/test.ts` for one-off rewrites). */
+export const CHECK_FLAG = "--check"
+
+const isCheckFlag = (s: string | undefined): boolean => s === CHECK_FLAG
+
+/** Parse the argv tail honoring `--check` as a leading flag. Returns the
+ *  resolved target string (`undefined` ⇒ fall back to env / default) and
+ *  whether the script is in check-mode. */
+export const parseArgv = (
+  argv: readonly string[],
+): { target: string | undefined; check: boolean } => {
+  // `argv[0]`/`argv[1]` are `bun`/`refresh-silent-catch-baseline.ts`; the
+  // user-visible args start at index 2.
+  const rest = argv.slice(2)
+  if (rest.length === 0) return { target: undefined, check: false }
+  const head = rest[0]
+  if (isCheckFlag(head)) return { target: rest[1], check: true }
+  // `--check` could also trail the target (a common ergonomic mistake);
+  // accept either order, but never elsewhere — a `--check` in the middle
+  // of an unrelated arg list is an operator error worth surfacing.
+  if (rest.length >= 2 && isCheckFlag(rest[1])) return { target: head, check: true }
+  return { target: head, check: false }
+}
+
+const resolveTarget = (repoRoot: string, fromArgv: string | undefined): string => {
   const fromEnv = process.env.QUANTA_SILENT_CATCH_RATCHET_TEST
-  const fromArgv = process.argv[2]
   const raw = fromArgv ?? fromEnv ?? DEFAULT_TARGET_TEST
   return isAbsolute(raw) ? raw : join(repoRoot, raw)
 }
@@ -258,63 +288,134 @@ const isMain = (): boolean => {
   return here === argv1
 }
 
+/** Exit codes — overloaded so check-mode preserves write-mode semantics:
+ *    0  : ok (no tighten needed; no regression)
+ *    1  : write-mode regression (refuses to refresh)
+ *    2  : structural — BASELINES table not parseable (both modes)
+ *    3  : write-mode post-write fatal (table no longer parseable after write)
+ *    4  : write-mode idempotence check failed OR check-mode tighten needed
+ *    5  : check-mode regression detected (distinct from write-mode 1 so a CI
+ *         step can recognise "ratchet would not move backwards" vs
+ *         "regression hit"). */
+export const EXIT_OK = 0
+export const EXIT_WRITE_REGRESSION = 1
+export const EXIT_PARSE_FATAL = 2
+export const EXIT_POST_WRITE_FATAL = 3
+export const EXIT_CHECK_TIGHTEN_NEEDED = 4
+export const EXIT_CHECK_REGRESSION = 5
+
+/** Format the tag-prefix every script line uses (`[silent-catch-baseline ...]`).
+ *  Centralised so check-mode vs write-mode don't drift the operator-grep
+ *  contract. */
+const tag = (check: boolean): string => `[silent-catch-baseline${check ? " --check" : ""}]`
+
+/** Emit the "target absent" idempotent no-op line. Same shape across both
+ *  modes so the CI step never trips on a pre-wired ratchet contract. */
+const emitTargetAbsent = (target: string, check: boolean): void => {
+  process.stdout.write(
+    `${tag(check)} target ratchet test absent at ${target}; nothing to refresh (idempotent no-op).\n` +
+      "  When the test lands with a BASELINES table, re-run this script.\n",
+  )
+}
+
+/** Emit the "BASELINES not parseable" diagnostic. Check-mode degrades to a
+ *  stdout notice (CI step stays green so landing the script before the
+ *  ratchet contract migrates does not block unrelated PRs); write-mode
+ *  emits the harder stderr fatal. Returns the exit code the caller should
+ *  use. */
+const emitTableMissing = (target: string, check: boolean): number => {
+  if (check) {
+    process.stdout.write(
+      `${tag(true)} target ${target} has no BASELINES table; nothing to check (wire-up pending).\n`,
+    )
+    return EXIT_OK
+  }
+  process.stderr.write(
+    `${tag(false)} FATAL: target ${target} does not contain the canonical\n` +
+      "  `const BASELINES: ReadonlyArray<{ id: string; observed: number }> = [ … ]`\n" +
+      "  declaration. Rewriter refuses to guess.\n",
+  )
+  return EXIT_PARSE_FATAL
+}
+
+/** Emit a regression diagnostic. Same body across modes; the exit code
+ *  differentiation lives in the caller. */
+const emitRegression = (
+  regs: readonly { id: string; baseline: number; observed: number }[],
+  check: boolean,
+): void => {
+  process.stderr.write(
+    `${tag(check)} REGRESSION DETECTED — ${check ? "CI gate FAILS" : "refusing to refresh"}.\n` +
+      "  The following buckets exceeded their pinned baseline:\n" +
+      regs.map((r) => `    - ${r.id}: observed=${r.observed} > baseline=${r.baseline}\n`).join("") +
+      "  Fix the silent-catch site (or justify the increase in an ADR), then re-run.\n",
+  )
+}
+
+/** Emit unknown-id warnings (never blocks — surfaced for manual add). */
+const emitUnknownIds = (ids: readonly string[]): void => {
+  if (ids.length === 0) return
+  process.stderr.write(
+    "[silent-catch-baseline] WARN: observed buckets not present in BASELINES — add manually:\n" +
+      ids.map((id) => `    + ${id}\n`).join(""),
+  )
+}
+
+/** Emit the "tighten available" check-mode notice (operator must rerun
+ *  write-mode locally + commit the diff). */
+const emitCheckTightenAvailable = (
+  tightened: readonly { id: string; from: number; to: number }[],
+): void => {
+  process.stderr.write(
+    `${tag(true)} tighten available for ${tightened.length} bucket(s):\n` +
+      tightened.map((t) => `    - ${t.id}: ${t.from} → ${t.to}\n`).join("") +
+      "  Run `bun run baseline:silent-catch` locally and commit the tightened " +
+      "BASELINES table to clear the CI gate.\n",
+  )
+}
+
 const main = async (): Promise<number> => {
   const repoRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))))
-  const target = resolve(resolveTarget(repoRoot))
+  const { target: argvTarget, check } = parseArgv(process.argv)
+  const target = resolve(resolveTarget(repoRoot, argvTarget))
 
   if (!existsSync(target)) {
-    // Idempotent no-op: the ratchet test is a deliberate forthcoming
-    // addition. Operators running this script before it lands should
-    // see a clear, non-error explanation rather than a stack trace.
-    process.stdout.write(
-      `[silent-catch-baseline] target ratchet test absent at ${target}; nothing to refresh (idempotent no-op).\n` +
-        "  When the test lands with a BASELINES table, re-run this script.\n",
-    )
-    return 0
+    emitTargetAbsent(target, check)
+    return EXIT_OK
   }
 
   const source = await readFile(target, "utf8")
   const table = findBaselineTable(source)
-  if (table === null) {
-    process.stderr.write(
-      `[silent-catch-baseline] FATAL: target ${target} does not contain the canonical\n` +
-        "  `const BASELINES: ReadonlyArray<{ id: string; observed: number }> = [ … ]`\n" +
-        "  declaration. Rewriter refuses to guess.\n",
-    )
-    return 2
-  }
+  if (table === null) return emitTableMissing(target, check)
 
-  process.stderr.write(`[silent-catch-baseline] running bun test ${target} …\n`)
+  process.stderr.write(`${tag(check)} running bun test ${target} …\n`)
   const testRun = await run(["bun", "test", target], repoRoot)
   const captured = `${testRun.stdout}\n${testRun.stderr}`
   const observed = parseObservedRows(captured)
   const plan = planTighten(table.rows, observed)
 
   if (plan.regressions.length > 0) {
-    process.stderr.write(
-      "[silent-catch-baseline] REGRESSION DETECTED — refusing to refresh.\n" +
-        "  The following buckets exceeded their pinned baseline:\n" +
-        plan.regressions
-          .map((r) => `    - ${r.id}: observed=${r.observed} > baseline=${r.baseline}\n`)
-          .join("") +
-        "  Fix the silent-catch site (or justify the increase in an ADR), then re-run.\n",
-    )
-    return 1
+    emitRegression(plan.regressions, check)
+    return check ? EXIT_CHECK_REGRESSION : EXIT_WRITE_REGRESSION
   }
 
-  if (plan.unknownIds.length > 0) {
-    process.stderr.write(
-      "[silent-catch-baseline] WARN: observed buckets not present in BASELINES — add manually:\n" +
-        plan.unknownIds.map((id) => `    + ${id}\n`).join(""),
-    )
-  }
+  emitUnknownIds(plan.unknownIds)
 
   if (plan.tightened.length === 0) {
     process.stdout.write(
-      `[silent-catch-baseline] no tighten needed (${plan.unchanged.length} steady,` +
-        ` ${plan.missingFromOutput.length} not reported).\n`,
+      `${tag(check)} no tighten needed ` +
+        `(${plan.unchanged.length} steady, ${plan.missingFromOutput.length} not reported).\n`,
     )
-    return 0
+    return EXIT_OK
+  }
+
+  if (check) {
+    // R10 — check-mode SHORT-CIRCUITS before the write phase. CI cannot
+    // commit a tightened baseline; a human operator must run the write
+    // mode locally and stage the diff. Exit 4 = "your baseline could move
+    // forward — run `bun run baseline:silent-catch` locally and commit."
+    emitCheckTightenAvailable(plan.tightened)
+    return EXIT_CHECK_TIGHTEN_NEEDED
   }
 
   const next = applyTighten(source, table.rows, plan)
@@ -328,7 +429,7 @@ const main = async (): Promise<number> => {
     process.stderr.write(
       "[silent-catch-baseline] FATAL: post-write BASELINES table no longer parseable.\n",
     )
-    return 3
+    return EXIT_POST_WRITE_FATAL
   }
   const planAfter = planTighten(tableAfter.rows, observed)
   if (planAfter.tightened.length !== 0) {
@@ -336,7 +437,11 @@ const main = async (): Promise<number> => {
       "[silent-catch-baseline] FATAL: idempotence check failed — second pass would still tighten:\n" +
         planAfter.tightened.map((t) => `    - ${t.id}: ${t.from} → ${t.to}\n`).join(""),
     )
-    return 4
+    // Overloaded with EXIT_CHECK_TIGHTEN_NEEDED (4): the two paths are
+    // disjoint (this block is unreachable in `--check` mode) so the code
+    // collision is intentional and the user-facing meaning ("a tighten
+    // would still apply") is congruent across both modes.
+    return EXIT_CHECK_TIGHTEN_NEEDED
   }
 
   process.stdout.write(
@@ -345,7 +450,7 @@ const main = async (): Promise<number> => {
       `  ${plan.unchanged.length} steady, ${plan.missingFromOutput.length} not reported.\n` +
       "  Re-run the test to confirm GREEN, then commit the tightened baseline.\n",
   )
-  return 0
+  return EXIT_OK
 }
 
 if (isMain()) {

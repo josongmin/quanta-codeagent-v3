@@ -26,7 +26,9 @@
 import { describe, expect, test } from "bun:test"
 import {
   applyTighten,
+  CHECK_FLAG,
   findBaselineTable,
+  parseArgv,
   parseObservedRows,
   planTighten,
 } from "../../tools/dev/refresh-silent-catch-baseline"
@@ -204,5 +206,52 @@ describe("applyTighten + idempotence", () => {
     const t = findBaselineTable(SOURCE)
     const plan = planTighten((t as NonNullable<typeof t>).rows, [])
     expect(applyTighten(SOURCE, (t as NonNullable<typeof t>).rows, plan)).toBe(SOURCE)
+  })
+})
+
+describe("parseArgv (R10 --check flag)", () => {
+  // Real argv shape: ["bun", "<script>", ...userArgs]. parseArgv slices off
+  // the first two indices, so we mirror that shape here.
+  const argv = (...rest: string[]): readonly string[] => ["bun", "script.ts", ...rest]
+
+  test("no args → check=false, target=undefined (default mode, env / fallback wins)", () => {
+    expect(parseArgv(argv())).toEqual({ target: undefined, check: false })
+  })
+
+  test("--check alone → check=true, target=undefined", () => {
+    expect(parseArgv(argv(CHECK_FLAG))).toEqual({ target: undefined, check: true })
+  })
+
+  test("--check followed by a path → check=true, target=<path>", () => {
+    expect(parseArgv(argv(CHECK_FLAG, "tests/unit/foo.test.ts"))).toEqual({
+      target: "tests/unit/foo.test.ts",
+      check: true,
+    })
+  })
+
+  test("path followed by --check → check=true, target=<path> (ergonomic alt-order)", () => {
+    expect(parseArgv(argv("tests/unit/foo.test.ts", CHECK_FLAG))).toEqual({
+      target: "tests/unit/foo.test.ts",
+      check: true,
+    })
+  })
+
+  test("bare positional path (no flag) → check=false, target=<path> (legacy)", () => {
+    expect(parseArgv(argv("tests/unit/foo.test.ts"))).toEqual({
+      target: "tests/unit/foo.test.ts",
+      check: false,
+    })
+  })
+
+  test("--check in 3rd position is NOT honored (operator error surfaced)", () => {
+    // We accept --check ONLY as the 1st or 2nd user-visible arg. Anywhere
+    // else and the parser treats it as a target path — the resolver will
+    // then fail to find a file named `--check` and the operator sees the
+    // file-not-found path (clearer error than silently honoring it).
+    expect(parseArgv(argv("foo", "bar", CHECK_FLAG))).toEqual({ target: "foo", check: false })
+  })
+
+  test("CHECK_FLAG export is the literal `--check`", () => {
+    expect(CHECK_FLAG).toBe("--check")
   })
 })
