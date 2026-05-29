@@ -304,28 +304,45 @@ export const createObjectiveStore = (opts?: { now?: () => number }): ObjectivePo
 
 const finiteOrZero = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0)
 
-const rebuildCriteria = (raw: unknown): SuccessCriterion[] =>
-  Array.isArray(raw)
-    ? raw
-        .filter((c): c is SuccessCriterion => c !== null && typeof c === "object")
-        .map((c) => ({
-          id: isNonEmptyString(c.id) ? c.id : randomUUID(),
-          text: typeof c.text === "string" ? c.text : "",
-          met: c.met === true,
-        }))
-    : []
+/** Re-apply the live `sanitizeCriteria` caps when rebuilding from a snapshot.
+ *  R4 audit-M closure: without this, a hostile/corrupted snapshot could ship
+ *  a 1M-entry `successCriteria` array and inflate the in-memory cell past the
+ *  256-criterion live cap that `set()` enforces. Slice equally with the live
+ *  path so byte-identical snapshot round-trip from a healthy run stays exact
+ *  (every healthy snapshot is already ≤ MAX_CRITERIA_PER_OBJECTIVE). */
+const rebuildCriteria = (raw: unknown): SuccessCriterion[] => {
+  if (!Array.isArray(raw)) return []
+  const out: SuccessCriterion[] = []
+  for (const c of raw) {
+    if (c === null || typeof c !== "object") continue
+    if (out.length >= MAX_CRITERIA_PER_OBJECTIVE) break
+    out.push({
+      id: isNonEmptyString(c.id) ? c.id : randomUUID(),
+      text: typeof c.text === "string" ? c.text : "",
+      met: c.met === true,
+    })
+  }
+  return out
+}
 
-const rebuildBlockers = (raw: unknown): Blocker[] =>
-  Array.isArray(raw)
-    ? raw
-        .filter((b): b is Blocker => b !== null && typeof b === "object")
-        .map((b) => ({
-          id: isNonEmptyString(b.id) ? b.id : randomUUID(),
-          reason: typeof b.reason === "string" ? b.reason : "",
-          waitingOn: b.waitingOn,
-          since: finiteOrZero(b.since),
-        }))
-    : []
+/** Mirror of `rebuildCriteria` for the 64-blocker live cap. Hostile snapshot
+ *  could otherwise ship N blockers and stick the objective in `blocked` state
+ *  forever (status derivation requires blockers.length === 0 to leave). */
+const rebuildBlockers = (raw: unknown): Blocker[] => {
+  if (!Array.isArray(raw)) return []
+  const out: Blocker[] = []
+  for (const b of raw) {
+    if (b === null || typeof b !== "object") continue
+    if (out.length >= MAX_BLOCKERS_PER_OBJECTIVE) break
+    out.push({
+      id: isNonEmptyString(b.id) ? b.id : randomUUID(),
+      reason: typeof b.reason === "string" ? b.reason : "",
+      waitingOn: b.waitingOn,
+      since: finiteOrZero(b.since),
+    })
+  }
+  return out
+}
 
 /** Reconstruct a mutable cell from a (possibly hostile) public Objective. */
 function cellFromObjective(o: unknown): Cell | null {
