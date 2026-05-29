@@ -26,10 +26,22 @@ export const LOG_LEVEL_ORDER: Record<LogLevel, number> = { debug: 0, info: 1, wa
 export const levelEnabled = (level: LogLevel, threshold: LogLevel): boolean =>
   LOG_LEVEL_ORDER[level] >= LOG_LEVEL_ORDER[threshold]
 
+/** Strip C0/C1/DEL control chars (incl. embedded `\n`/`\r`/`\b`) and ANSI CSI
+ *  escape sequences so a hostile `e.message` cannot forge log lines (R2 audit-M
+ *  — `[error] credentials leaked: <admin-token>` injection via `\n` in thrown
+ *  payload). The intentional terminating `\n` appended in `write` is OUTSIDE
+ *  this layer, so single-line discipline is preserved. */
+const sanitizeLogText = (s: string): string =>
+  s
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    .replace(/[\x00-\x08\x0a-\x1f\x7f-\x9f]/g, "?")
+
 const write = (level: LogLevel, msg: string, meta?: unknown): void => {
   if (!levelEnabled(level, runtimeConfig().logLevel)) return
-  const line = `[${level}] ${msg}`
-  const text = meta === undefined ? line : `${line} ${JSON.stringify(meta)}`
+  const safeMsg = sanitizeLogText(msg)
+  const line = `[${level}] ${safeMsg}`
+  const text =
+    meta === undefined ? line : `${line} ${sanitizeLogText(JSON.stringify(meta))}`
   writeStderr(`${text}\n`)
 }
 

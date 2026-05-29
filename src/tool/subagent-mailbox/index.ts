@@ -51,11 +51,27 @@ const KIND_ENUM = [
   "broadcast",
 ] as const satisfies readonly MailboxMessageKind[]
 
+// Input caps (R2 audit-H — DoS via 16MB `to`/100MB `correlation_id` → 1024-cell
+// retention × cap = bounded memory; `limit` cap is intent signalling — `collect`
+// is already self-bound by `cells.size ≤ 1024`):
+//   - `to` ≤ 128: agent ids are deterministic `parentLabel/seq` (< 64 chars);
+//     128 is a generous backstop, not a tuning knob.
+//   - `correlation_id` ≤ 128: same shape as message id (ulid-class).
+//   - `limit` ≤ 256: ≥ 1024-cell hard ceiling caps a single drain; 256 is
+//     a comfortable per-tool-call return ceiling.
+const TO_MAX = 128
+const CORRELATION_ID_MAX = 128
+const READ_LIMIT_MAX = 256
+
 export const subagentSendMessageSchema = z.object({
-  to: z.string().describe('Target agent id, "*" broadcast, or "parent".'),
+  to: z
+    .string()
+    .min(1)
+    .max(TO_MAX)
+    .describe('Target agent id, "*" broadcast, or "parent".'),
   kind: z.enum(KIND_ENUM),
   body: z.string().min(1).max(8000),
-  correlation_id: z.string().optional(),
+  correlation_id: z.string().max(CORRELATION_ID_MAX).optional(),
 })
 export type SubagentSendMessageInput = z.infer<typeof subagentSendMessageSchema>
 
@@ -162,7 +178,13 @@ export const subagentReadMessagesSchema = z.object({
     .enum(READ_MODE_ENUM)
     .optional()
     .describe('"read" marks delivered (default); "peek" leaves undelivered.'),
-  limit: z.number().int().positive().optional().describe("Max messages to return (oldest-first)."),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(READ_LIMIT_MAX)
+    .optional()
+    .describe("Max messages to return (oldest-first)."),
 })
 export type SubagentReadMessagesInput = z.infer<typeof subagentReadMessagesSchema>
 
