@@ -67,6 +67,7 @@ import {
   inspectGlobalRegistry,
 } from "@/agent/session-resource-registry/inspector"
 import { countSqliteRegistryCleanupCandidates } from "@/agent/session-resource-registry/sqlite-adapter/gc"
+import { errMessage } from "@/shared"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 
 /**
@@ -140,16 +141,6 @@ const globToRegex = (pattern: string): RegExp => {
 const SUBCOMMANDS = ["stats", "evict", "cleanup", "help"] as const
 type Subcommand = (typeof SUBCOMMANDS)[number]
 const isSubcommand = (s: string): s is Subcommand => (SUBCOMMANDS as readonly string[]).includes(s)
-
-const errMessage = (e: unknown): string => {
-  if (e instanceof Error) return e.message
-  if (typeof e === "string") return e
-  try {
-    return JSON.stringify(e)
-  } catch {
-    return String(e)
-  }
-}
 
 const renderStats = async (ctx: SlashContext): Promise<number> => {
   try {

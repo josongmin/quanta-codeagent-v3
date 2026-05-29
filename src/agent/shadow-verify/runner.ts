@@ -16,6 +16,7 @@
  * diagnostic rather than propagating to the caller.
  */
 
+import { errMessage } from "@/shared"
 import type {
   ShadowCheck,
   ShadowDiagnostic,
@@ -24,10 +25,6 @@ import type {
   ShadowVerifyRequest,
   ShadowVerifyResult,
 } from "./types"
-
-/** Pure: extract a stable message string from an unknown thrown value. */
-const errMessage = (e: unknown): string =>
-  e instanceof Error ? e.message : typeof e === "string" ? e : String(e)
 
 /** Pure: the diagnostic source attributed to apply/open failures — the first
  *  requested check, defaulting to "lint" when no checks were requested. */

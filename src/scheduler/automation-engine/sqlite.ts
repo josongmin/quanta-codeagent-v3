@@ -31,6 +31,7 @@
  */
 
 import type { Database } from "bun:sqlite"
+import { errMessage } from "@/shared"
 import type { RRule, Weekday } from "../types"
 import type {
   AutomationEnginePort,
@@ -157,9 +158,6 @@ const ioFail = (message: string): EngineResult<never> => ({
   code: "io-failed",
   message,
 })
-
-const errMessage = (e: unknown): string =>
-  e instanceof Error ? e.message : typeof e === "string" ? e : "unknown"
 
 const defaultIdAlloc = (kind: "run" | "inbox", automationId: string, firedAt: number): string =>
   `${kind}-${automationId}-${firedAt}`

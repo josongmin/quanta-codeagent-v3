@@ -29,6 +29,7 @@ import {
   type TokenRecord,
   writeToken,
 } from "@/auth/chatgpt-oauth"
+import { errMessage } from "@/shared"
 import {
   bold,
   cyan,
@@ -126,9 +127,6 @@ const renderError = (title: string, detail: string, hint?: string): string => {
   }
   return `${renderBox(lines, { title: "ChatGPT Sign-In", titleStyle: cyan })}\n`
 }
-
-const errMessage = (e: unknown): string =>
-  e instanceof Error ? e.message : typeof e === "string" ? e : JSON.stringify(e)
 
 const buildErrorRender = (e: unknown): string => {
   if (e instanceof BrowserFlowError) {

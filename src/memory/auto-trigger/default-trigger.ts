@@ -27,6 +27,7 @@
  * `catch {}` losing context). Logger sink defaults to no-op.
  */
 
+import { errMessage } from "@/shared"
 import type { Phase1Port, Stage1StorePort } from "../consolidate"
 import { runPhase1 } from "../consolidate"
 import type { Stage1Entry, Stage1OutputsStore } from "../stage1-store"
@@ -224,9 +225,6 @@ export class DefaultMemoryAutoTrigger implements MemoryAutoTrigger {
 }
 
 // ── Local helpers ──────────────────────────────────────────────────────
-
-const errMessage = (e: unknown): string =>
-  e instanceof Error ? e.message : typeof e === "string" ? e : String(e)
 
 const isAbortError = (e: unknown): e is Error =>
   e instanceof Error && (e.name === "AbortError" || e.message.toLowerCase().includes("abort"))
