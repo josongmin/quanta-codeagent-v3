@@ -89,18 +89,21 @@ describe("R2 audit-H — logger sanitize control / ANSI", () => {
     expect(out.includes("y")).toBe(true)
   })
 
-  test("(4) bidi override U+202E SURVIVES (intentional Unicode passthrough)", () => {
-    // Documented sanitize limit: the slice ONLY strips C0/C1/DEL + ANSI CSI.
-    // Unicode bidi overrides require a higher-level filter (renderer concern).
+  test("(4) bidi override U+202E STRIPPED (R3 forge-vector defence)", () => {
+    // R3 audit-H expanded: bidi overrides (U+202A-U+202E) + isolates
+    // (U+2066-U+2069) visually reorder `[error]` → `[rorre]`, fooling log
+    // scraping. Stripped at sanitize.
     logger.info("safe‮evil")
     const out = lastLine()
-    expect(out.includes("‮")).toBe(true)
+    expect(out.includes("‮")).toBe(false)
   })
 
-  test("(5) zero-width space U+200B SURVIVES (intentional Unicode passthrough)", () => {
+  test("(5) zero-width space U+200B STRIPPED (R3 forge-vector defence)", () => {
+    // Zero-width chars (U+200B-U+200F, U+FEFF) craft visually identical
+    // tokens bypassing grep-based alerting. Stripped at sanitize.
     logger.info("hello​world")
     const out = lastLine()
-    expect(out.includes("​")).toBe(true)
+    expect(out.includes("​")).toBe(false)
   })
 
   test("(6) TAB is preserved (whitelisted — not a forge vector)", () => {
