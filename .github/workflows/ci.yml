@@ -67,6 +67,17 @@ jobs:
           bun fc validate
           bun fc diff
           bun fc lint
+      - name: silent-catch baseline gate (R10 — read-only --check mode)
+        # Read-only counterpart of `bun run baseline:silent-catch`. CI cannot
+        # commit a tightened BASELINES table, so this step BLOCKS when:
+        #   exit 4 — a tighten is available (operator must run the script
+        #            locally + commit the diff)
+        #   exit 5 — a silent-catch regression was detected (a bare `} catch {`
+        #            crept back in past the pinned baseline; fix or ADR-justify)
+        # Exit 0 covers both "ratchet steady" and "BASELINES table not yet
+        # wired" so landing the script before the ratchet contract migrates
+        # does not block unrelated PRs (idempotent no-op shape).
+        run: bun run baseline:silent-catch --check
 
   feature-catalog-pr:
     name: feature-catalog (PR — added src must be in fc)
