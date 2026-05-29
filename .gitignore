@@ -58,8 +58,11 @@ Thumbs.db
 # Bun (binary lockfile; commit bun.lock)
 bun.lockb
 
-# Test / coverage
-coverage/
+# Test / coverage — root-anchored so it only matches the project-root test
+# output dir, NOT every nested `coverage/`. The anchor-less form silently
+# excluded `src/observability/coverage/` (9 production files / ~2700 LOC)
+# until R8 audit-closeout caught it.
+/coverage/
 .nyc_output/
 
 # Cache
@@ -72,3 +75,8 @@ coverage/
 tests/smoke/swebench/predictions.jsonl
 tests/smoke/swebench/bench-report.json
 tests/smoke/swebench/recordings/trajectories/
+
+# R8 audit-closeout — `.js` mirrors of `.ts` sources are bun build artifacts;
+# tracking them is the R6 "tier-bypass" hazard (a `.js` import path bypasses
+# every R3/R4/R5 fix). Source-of-truth is `.ts` only.
+src/observability/coverage/*.js
