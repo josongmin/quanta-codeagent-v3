@@ -157,29 +157,34 @@ describe("errMessage hellgate — R1 silent-undefined guard", () => {
     expect(errMessage(new Rich())).toBe("rich message")
   })
 
-  test("KNOWN LIMITATION: Object.create(null) throws inside String() — errMessage propagates", () => {
-    // Pinned as KNOWN-BAD for future hardening. `String(Object.create(null))`
-    // throws TypeError("No default value") because null-prototype objects
-    // have no `@@toPrimitive` / `toString` / `valueOf`. errMessage does NOT
-    // catch this — it would re-throw out of the catch block. This is OUT
-    // OF SCOPE for the R1 audit fix (which targets the `(e as Error).message`
-    // → undefined hole). errMessage is pinned by 70+ call sites and an
-    // anti-recursion doc-comment, so hardening it is a separate ADR.
+  test("R5 audit-H closure: Object.create(null) returns sentinel (no throw)", () => {
+    // R5 hardened errMessage with try/catch around String(e). null-prototype
+    // objects (no @@toPrimitive / toString / valueOf) now degrade to the
+    // <unstringifiable> sentinel rather than re-throwing out of the catch
+    // block. Closes the hole the R1 audit deferred as a separate ADR.
     const nullProto = Object.create(null) as Record<string, unknown>
     nullProto.code = "E_NULLPROTO"
-    expect(() => errMessage(nullProto)).toThrow(/No default value|cannot convert/i)
+    expect(errMessage(nullProto)).toBe("<unstringifiable>")
   })
 
-  test("KNOWN LIMITATION: object with throwing toString — errMessage propagates", () => {
-    // Pinned as KNOWN-BAD. A hostile object whose `.toString()` throws
-    // crashes `String(e)`, which propagates out of errMessage. Same
-    // out-of-scope note as the null-proto case above.
+  test("R5 audit-H closure: object with throwing toString returns sentinel (no throw)", () => {
+    // R5: a hostile object whose .toString() throws no longer escapes
+    // errMessage; degrades to the <unstringifiable> sentinel.
     const hostile = {
       toString(): string {
         throw new Error("toString throws")
       },
     }
-    expect(() => errMessage(hostile)).toThrow("toString throws")
+    expect(errMessage(hostile)).toBe("<unstringifiable>")
+  })
+
+  test("R5 audit-H closure: object with throwing @@toPrimitive returns sentinel", () => {
+    const hostile = {
+      [Symbol.toPrimitive](): string {
+        throw new Error("toPrimitive throws")
+      },
+    }
+    expect(errMessage(hostile)).toBe("<unstringifiable>")
   })
 
   test("19-site invariant: template interpolation NEVER yields '...: undefined' for the audit hole class", () => {

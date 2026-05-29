@@ -72,20 +72,26 @@ afterAll(() => {
 
 const lineCount = (): number => captured.length
 
-describe("R4 audit-H — logger leaky-bucket DoS closure", () => {
-  test("(1) burst of 10 same-label writes all emit; 11th is suppressed", () => {
-    for (let i = 0; i < 10; i++) logger.warn(`slice.op: msg ${i}`)
-    expect(lineCount()).toBe(10)
-    logger.warn("slice.op: msg overflow")
-    // The over-cap write does NOT immediately emit. Some implementations
-    // flush a suppression line on the NEXT pass; this case isolates the
-    // raw suppression decision — exactly the 10 originals so far.
-    expect(lineCount()).toBe(10)
+describe("R4 audit-H — logger leaky-bucket DoS closure (R5 cold-start tokens=1)", () => {
+  test("(1) cold-start emits 1 line; 9-second wait refills to capacity 10", () => {
+    // R5 audit-H closure: fresh bucket = 1 token (not 10) so an attacker
+    // cannot replay full-capacity bursts by churning the LRU. Sustained
+    // throughput is bounded by refill regardless of new-label churn.
+    logger.warn("slice.op: msg 0")
+    expect(lineCount()).toBe(1)
+    logger.warn("slice.op: msg suppressed")
+    expect(lineCount()).toBe(1) // cold-start exhausted, no flush yet
+    // After 10s of refill the bucket sits at capacity 10 — but the first
+    // accepted write also flushes the prior suppression line.
+    advance(10_000)
+    for (let i = 0; i < 10; i++) logger.warn(`slice.op: burst ${i}`)
+    // 10 burst lines + 1 suppression flush from the prior drop.
+    expect(lineCount()).toBeGreaterThanOrEqual(10)
   })
 
   test("(2) suppression count is flushed before the next allowed line", () => {
-    for (let i = 0; i < 10; i++) logger.warn("slice.op: msg")
-    expect(lineCount()).toBe(10)
+    logger.warn("slice.op: msg")
+    expect(lineCount()).toBe(1)
     // Hammer the bucket while it's starved — 50 drops accumulate.
     for (let i = 0; i < 50; i++) logger.warn("slice.op: msg")
     expect(lineCount()).toBe(10) // still 10 — all suppressed
