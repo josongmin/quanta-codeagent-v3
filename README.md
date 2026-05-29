@@ -105,6 +105,9 @@ retry가 최내곽, fallback이 최외곽이며 `QUANTA_PERMISSION=auto` 분류�
 | `bun run probe` | trajectory 비권위 inspector (RFC-0002 §7, ADR-0010) |
 | `bun run build` | `dist/agent` 단일 바이너리 컴파일 |
 | `bun run install:cli` | 빌드 후 `~/.local/bin/quanta`에 전역 설치 (PATH 확인 포함) |
+| `bun run baseline:silent-catch` | silent-catch ratchet의 `BASELINES` 표를 실제 관찰값으로 자동 tighten (감소 시에만 갱신·idempotent·target test 부재 시 no-op) |
+
+silent-catch 사이트를 줄였을 때 `bun run baseline:silent-catch`를 실행하고 커밋한다.
 
 테스트 4티어(unit/integration/contract/eval) 설계·관리: ADR-0003 (`docs/decisions/0003-test-pyramid.md`), RFC §10. CI: `.github/workflows/ci.yml`.
 
