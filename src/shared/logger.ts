@@ -1,5 +1,15 @@
 /**
- * Structured stderr logger.
+ * Structured stderr logger — composition root for the three pipeline stages:
+ *
+ *   1. sanitize  → {@link ./log-sanitize.ts}    (pure, no state)
+ *   2. gate      → {@link ./log-rate-limit.ts}  (label-keyed leaky bucket)
+ *   3. write     → {@link ./terminal-io.ts}     (stderr sink)
+ *
+ * R8 audit SRP split: this file was 272 LOC with four interleaved
+ * responsibilities (sanitize / rate-limit / level-gating + write / test
+ * seam). The split keeps level-gating + the four-method `logger` surface
+ * here (where most call sites land via the `@/shared` barrel) and pushes
+ * the sanitize regex set and the bucket machinery into siblings.
  *
  * Threshold gating reads from {@link runtimeConfig} on every `write` call so
  * an env override applied AFTER module load (integration tests, child-spawn
@@ -8,229 +18,31 @@
  *
  * Logs go to stderr so stdout stays reserved for the agent stream.
  *
- * R4 audit-H DoS closure — LABEL-KEYED LEAKY BUCKET. A hostile / mis-prompted
- * code path that triggers `logger.warn` inside a hot catch can emit millions
- * of lines per second, exhausting host stderr backpressure. We meter each
- * write by the first colon-delimited token of the message (the canonical
- * `<slice>.<op>:` label set by the 24h-ratchet errMessage swap), keep an LRU
- * of 32 active labels, and refill 1 token/sec up to a capacity of 10. Bursts
- * survive — sustained spam is dropped with a single suppressed-count flush
- * line. Default ON; `QUANTA_LOG_RATE_LIMIT=off` reverts to unbounded for
- * incident triage where the suppressed signal itself is forensic.
- *
- * Parameter justification:
- *   - capacity 10  : a single catch site emitting 10 distinct lines per turn
- *                    is well above realistic worst case; first 10 always pass.
- *   - refill 1/s   : 60 lines/min sustained per label fits an angry but real
- *                    failure mode (e.g. a degraded backend retrying every
- *                    second); above that, the operator gets a count summary
- *                    instead of a flood.
- *   - 32 labels    : the audited 24h-ratchet swap produced ~30 distinct
- *                    `<slice>.<op>:` prefixes across the source tree; an LRU
- *                    of 32 keeps every legitimate label hot during a run.
+ * Rate-limit knob: `QUANTA_LOG_RATE_LIMIT=off` reverts the gate to
+ * unbounded for incident triage where the suppressed signal itself is
+ * forensic. See `log-rate-limit.ts` module-doc for capacity / refill
+ * justification.
  */
+import { consume, labelFor, rateLimitNow } from "./log-rate-limit"
+import { sanitizeLogText } from "./log-sanitize"
 import { type LogLevel, runtimeConfig } from "./runtime-config"
 import { writeStderr } from "./terminal-io"
 
+export { __resetLoggerRateLimit, __setLoggerNow } from "./log-rate-limit"
 export type { LogLevel }
 
 /** Canonical severity ordering (debug < info < warn < error). Single source
  *  of truth for every level-gating logger so the two output formats (this
- *  line logger + `@/observability`'s JSON logger) can never disagree on which
- *  levels are enabled at a given threshold. */
+ *  line logger + `@/observability`'s JSON logger) can never disagree on
+ *  which levels are enabled at a given threshold. */
 export const LOG_LEVEL_ORDER: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 }
 
 /** Should a record at `level` be emitted given the configured `threshold`?
  *  Both arguments are level NAMES (not numeric ranks) so callers never touch
- *  the ordering map directly. `error` is the strictest threshold; `debug` the
- *  loosest. */
+ *  the ordering map directly. `error` is the strictest threshold; `debug`
+ *  the loosest. */
 export const levelEnabled = (level: LogLevel, threshold: LogLevel): boolean =>
   LOG_LEVEL_ORDER[level] >= LOG_LEVEL_ORDER[threshold]
-
-/** Strip control chars (C0/C1/DEL, embedded `\n`/`\r`/`\b`), ANSI escape
- *  sequences (CSI / OSC / DCS / APC / SOS / PM, terminated by BEL or ESC-\),
- *  and Unicode bidi / zero-width chars so a hostile `e.message` cannot forge
- *  log lines (R2 audit-M / R3 audit-H — `[error] credentials leaked: …`
- *  injection via `\n`, terminal-title forge via `\x1b]0;…\x07`, visual
- *  reordering via U+202E RTL override). The intentional terminating `\n`
- *  appended in `write` is OUTSIDE this layer, so single-line discipline is
- *  preserved. NOTE: `new RegExp(string)` avoids biome's
- *  `noControlCharactersInRegex` rule trip on the literal form.
- *
- *  R5 audit-M3 closure — NFKC NORMALIZATION FIRST. Without it, a hostile
- *  string can bypass every regex by smuggling forge characters through
- *  Unicode equivalents the strip set does not enumerate:
- *    - combining marks (U+0300-U+036F) make `[error]` visually identical
- *      to a payload built from `[`+`e`+`<combining accent>`+`r`… etc.
- *    - presentation-form / compatibility characters (e.g. fullwidth `[`
- *      U+FF3B, halfwidth digits, ligature `ﬁ`) decompose to ASCII under
- *      NFKC, exposing them to the existing CSI / OSC regexes.
- *    - IDN homograph attacks against label-grep alerting collapse under
- *      NFKC because Latin/Cyrillic look-alikes are NOT NFKC-equivalent
- *      (so they STILL pass through — operators must rely on label-prefix
- *      whitelisting for that vector; NFKC handles the compatibility class
- *      only, not the confusable class).
- *  NFKC is decision-deterministic (Unicode standard, ECMA-402 `String.
- *  prototype.normalize`), constant-rate per byte, and runs BEFORE the
- *  control/ANSI strip so canonicalised forge characters land in the strip
- *  set. Soft hyphen (U+00AD) is added to the BIDI_ZW set because NFKC does
- *  NOT decompose it, but it is a documented invisible / token-splitter
- *  forge character.
- *
- *  NOTE on failure mode: `normalize("NFKC")` can throw RangeError on lone
- *  unpaired surrogates in some engines. We wrap in a try/catch so a hostile
- *  surrogate cannot break the logger itself; on failure we fall through to
- *  the raw regex pass (still safer than nothing). */
-const ANSI_OSC_DCS_APC_RE = new RegExp(
-  "\\u001b\\][\\s\\S]*?(?:\\u0007|\\u001b\\\\)|\\u001b[PX^_][\\s\\S]*?\\u001b\\\\",
-  "g",
-)
-const ANSI_CSI_RE = new RegExp("\\u001b\\[[0-9;?]*[ -/]*[@-~]", "g")
-const CONTROL_RE = new RegExp("[\\u0000-\\u0008\\u000a-\\u001f\\u007f-\\u009f]", "g")
-/** Bidi controls + zero-width + soft hyphen (U+00AD) + lone surrogates
- *  (U+D800-U+DFFF).
- *  Soft hyphen is invisible but splits grep-anchored alert tokens. Lone
- *  surrogates corrupt UTF-8 at the terminal level (R6 audit-M closure —
- *  NFKC throws on lone surrogates, the try/catch fallback leaves them in
- *  the raw stream, and no other regex catches them). NFKC does not
- *  decompose any of these. */
-const BIDI_ZW_RE = new RegExp(
-  "[\\u00ad\\u200b-\\u200f\\u202a-\\u202e\\u2066-\\u2069\\ufeff\\ud800-\\udfff]",
-  "g",
-)
-
-const normalizeNfkc = (s: string): string => {
-  try {
-    return s.normalize("NFKC")
-  } catch {
-    return s
-  }
-}
-
-const sanitizeLogText = (s: string): string =>
-  normalizeNfkc(s)
-    .replace(ANSI_OSC_DCS_APC_RE, "")
-    .replace(ANSI_CSI_RE, "")
-    .replace(CONTROL_RE, "?")
-    .replace(BIDI_ZW_RE, "")
-
-// ─── label-keyed leaky bucket (R4 audit-H) ─────────────────────────────────
-
-/** Per-label bucket state. `tokens` is a float — fractional refill is allowed
- *  so a 250 ms gap restores 0.25 tokens. `suppressed` counts the writes
- *  rejected since the bucket last emptied (flushed on the next allowed write
- *  or after a 1s idle window). */
-interface Bucket {
-  tokens: number
-  lastRefillMs: number
-  suppressed: number
-  /** Last severity dropped — the flush line is emitted at this level so an
-   *  operator scanning for `[warn]`/`[error]` still sees the suppression. */
-  lastSuppressedLevel: LogLevel
-}
-
-const BUCKET_CAPACITY = 10
-const BUCKET_REFILL_PER_MS = 1 / 1000 // 1 token per second
-const LABEL_LRU_MAX = 32
-
-/** Clock seam — tests inject `__setLoggerNow` to drive bucket time. */
-let loggerNow: () => number = () => Date.now()
-
-/** Active buckets, keyed by label. Map insertion order is the LRU; we move
- *  a key to the end on every write so the oldest cold label is the first to
- *  be evicted when capacity is reached. */
-const buckets: Map<string, Bucket> = new Map()
-
-/** Extract the rate-limit label from a message. Uses the first colon-bounded
- *  token (matches the `<slice>.<op>:` convention from the 24h silent-catch
- *  ratchet). Falls back to the first 64 chars of the message for messages
- *  without a colon — that's a stable per-callsite identity, just less precise. */
-const labelOf = (msg: string): string => {
-  const idx = msg.indexOf(":")
-  if (idx > 0 && idx <= 128) return msg.slice(0, idx)
-  return msg.length <= 64 ? msg : msg.slice(0, 64)
-}
-
-/** Refill `b` based on elapsed wall-clock since `lastRefillMs`. Cap at
- *  BUCKET_CAPACITY so an idle bucket cannot accumulate unbounded credit. */
-const refill = (b: Bucket, now: number): void => {
-  const dt = Math.max(0, now - b.lastRefillMs)
-  b.tokens = Math.min(BUCKET_CAPACITY, b.tokens + dt * BUCKET_REFILL_PER_MS)
-  b.lastRefillMs = now
-}
-
-/** Touch `label` so it moves to the LRU tail. Returns the bucket (existing
- *  or freshly seeded with `tokens: 1`). Evicts the LRU head if capacity
- *  exceeded.
- *
- *  R5 audit-H closure — fresh bucket starts with 1 token (the first line
- *  passes), NOT `BUCKET_CAPACITY`. Otherwise an attacker who triggers
- *  `LABEL_LRU_MAX + 1` distinct labels evicts an old bucket and gets a
- *  full re-arm on re-touch (32 unique decoys × 10 capacity = 320/sec
- *  sustained vs the documented 1/sec rate). Now sustained rate is bounded
- *  by refill regardless of LRU churn. */
-const touchBucket = (label: string, now: number): Bucket => {
-  const existing = buckets.get(label)
-  if (existing !== undefined) {
-    // Move to tail (LRU touch).
-    buckets.delete(label)
-    buckets.set(label, existing)
-    return existing
-  }
-  // New label. If at capacity, evict the oldest (Map iteration order = insert
-  // order, mutated on each touch above).
-  if (buckets.size >= LABEL_LRU_MAX) {
-    const oldestKey = buckets.keys().next().value
-    if (oldestKey !== undefined) buckets.delete(oldestKey)
-  }
-  const fresh: Bucket = {
-    // R5 audit-H: 1 token (NOT capacity) — cold-start gives one free line;
-    // sustained spam is bounded by refill rate (1/s).
-    tokens: 1,
-    lastRefillMs: now,
-    suppressed: 0,
-    lastSuppressedLevel: "warn",
-  }
-  buckets.set(label, fresh)
-  return fresh
-}
-
-/** Strip `[` / `]` from a label so a hostile message-prefix cannot forge a
- *  fake suppression line (R5 audit-M2). `[error] [fake ` becomes `?error? ?fake`
- *  when concatenated into the flush template. */
-const stripBracketsForFlush = (label: string): string => label.replace(/[[\]]/g, "?")
-
-/** Format the suppression flush line. Kept as a separate fn so the test can
- *  pin the exact shape — operators grep for `[suppressed`. */
-const formatSuppressionLine = (level: LogLevel, label: string, count: number): string =>
-  `[${level}] [suppressed ${count} more from ${stripBracketsForFlush(label)}]`
-
-/** Decision returned by the bucket gate: either emit the original line
- *  (optionally prefixed by a flushed suppression line if the bucket just
- *  came back from suppression), or drop it. */
-interface BucketDecision {
-  emit: boolean
-  flushLine?: string
-}
-
-const consume = (label: string, level: LogLevel, now: number): BucketDecision => {
-  const b = touchBucket(label, now)
-  refill(b, now)
-  if (b.tokens >= 1) {
-    b.tokens -= 1
-    if (b.suppressed > 0) {
-      const flushLine = formatSuppressionLine(b.lastSuppressedLevel, label, b.suppressed)
-      b.suppressed = 0
-      return { emit: true, flushLine }
-    }
-    return { emit: true }
-  }
-  // Token-starved: count the drop. The flush line will fire on the next
-  // allowed write (or via the periodic check below).
-  b.suppressed += 1
-  b.lastSuppressedLevel = level
-  return { emit: false }
-}
 
 const write = (level: LogLevel, msg: string, meta?: unknown): void => {
   const cfg = runtimeConfig()
@@ -242,8 +54,8 @@ const write = (level: LogLevel, msg: string, meta?: unknown): void => {
     writeStderr(`${text}\n`)
     return
   }
-  const label = labelOf(safeMsg)
-  const decision = consume(label, level, loggerNow())
+  const label = labelFor(safeMsg)
+  const decision = consume(label, level, rateLimitNow())
   if (!decision.emit) return
   if (decision.flushLine !== undefined) {
     writeStderr(`${decision.flushLine}\n`)
@@ -256,17 +68,4 @@ export const logger = {
   info: (msg: string, meta?: unknown) => write("info", msg, meta),
   warn: (msg: string, meta?: unknown) => write("warn", msg, meta),
   error: (msg: string, meta?: unknown) => write("error", msg, meta),
-}
-
-/** Test-only: clear the rate-limit state so a test starts from a clean LRU.
- *  Production code MUST NOT call this — the scanner forbids it outside tests. */
-export const __resetLoggerRateLimit = (): void => {
-  buckets.clear()
-  loggerNow = () => Date.now()
-}
-
-/** Test-only: inject a synthetic clock so the test can drive bucket refill
- *  deterministically. Pass `null` to restore `Date.now`. */
-export const __setLoggerNow = (fn: (() => number) | null): void => {
-  loggerNow = fn ?? (() => Date.now())
 }
