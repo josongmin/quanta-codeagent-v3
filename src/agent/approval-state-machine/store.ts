@@ -15,13 +15,15 @@
  * is best-effort, approval state is authoritative.
  *
  * Slice fence: imports = `node:crypto` (for `randomUUID`), `@/agent/objective`
- * (TYPES ONLY), `@/agent/run-ledger` (TYPES ONLY), and `./types`. NO `@/agent`
- * core, NO `@/apps`, NO `@/tool`.
+ * (TYPES ONLY), `@/agent/run-ledger` (TYPES ONLY), `@/shared` (leaf utils:
+ * `errMessage` + `logger` for attribution-catch telemetry), and `./types`. NO
+ * `@/agent` core, NO `@/apps`, NO `@/tool`.
  */
 
 import { randomUUID } from "node:crypto"
 import type { ObjectivePort } from "@/agent/objective"
 import type { RunLedgerPort } from "@/agent/run-ledger"
+import { errMessage, logger } from "@/shared"
 import type {
   ApprovalDecision,
   ApprovalKind,
@@ -234,8 +236,9 @@ const clearObjectiveBlocker = (
   if (objective === undefined || blockerId === undefined) return
   try {
     objective.clearBlocker(threadId, blockerId)
-  } catch {
-    // attribution failure must not break approval state
+  } catch (e) {
+    // attribution failure must not break approval state — log + swallow
+    logger.warn(`approval-state.attr.clearBlocker: ${errMessage(e)}`)
   }
 }
 
@@ -248,8 +251,9 @@ const settleLedger = (
   if (ledger === undefined || runEntryId === undefined) return
   try {
     ledger.settle(runEntryId, status)
-  } catch {
-    // attribution failure must not break approval state
+  } catch (e) {
+    // attribution failure must not break approval state — log + swallow
+    logger.warn(`approval-state.attr.settleLedger: ${errMessage(e)}`)
   }
 }
 

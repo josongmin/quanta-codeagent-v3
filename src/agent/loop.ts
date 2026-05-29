@@ -13,7 +13,7 @@ import {
 } from "@/observability"
 import { normalizeRedactionConfig } from "@/security"
 import type { PromptPolicySnapshot, TurnPolicySnapshot } from "@/shared"
-import { errMessage, LLMError } from "@/shared"
+import { errMessage, LLMError, logger } from "@/shared"
 import { compactIfNeeded, estimateTokens, reactiveCompact } from "./compaction"
 import { CompactionBreaker } from "./compaction-breaker"
 import {
@@ -796,8 +796,9 @@ const maybeCompact = async (
     ? (tid: string, actions: readonly string[]): void => {
         try {
           config.objective?.setNextActions(tid, actions)
-        } catch {
-          // NO-THROW: objective wire failure must not perturb compaction.
+        } catch (e) {
+          // NO-THROW: objective wire failure must not perturb compaction — log + swallow.
+          logger.warn(`loop.objectiveSetNextActions: ${errMessage(e)}`)
         }
       }
     : undefined

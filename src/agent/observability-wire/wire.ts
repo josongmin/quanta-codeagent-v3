@@ -15,11 +15,13 @@
  * but attribution is silently not active). The detach closure itself is
  * idempotent + NO-THROW even when the host's unsubscribe-callback throws.
  *
- * Slice fence (enforced by lint + by import-shape): ONLY the wave-1/2 sealed
- * slices + their attribution/adapter slices are imported here. NEVER
- * `@/agent/hooks` (we use the duck-typed `ObservabilityHookBus` instead),
- * NEVER `@/agent/loop`, NEVER `@/agent/dispatch`, NEVER `@/agent/prompt`,
- * NEVER `@/agent/types`. The wire is a leaf module.
+ * Slice fence (enforced by lint + by import-shape): the wave-1/2 sealed
+ * slices + their attribution/adapter slices + `@/shared` leaf utils
+ * (`errMessage`/`logger` for telemetry on the subscribe/unsubscribe catches)
+ * are the ONLY imports. NEVER `@/agent/hooks` (we use the duck-typed
+ * `ObservabilityHookBus` instead), NEVER `@/agent/loop`, NEVER
+ * `@/agent/dispatch`, NEVER `@/agent/prompt`, NEVER `@/agent/types`. The
+ * wire is a leaf module.
  */
 
 import type { ApprovalStateMachinePort } from "@/agent/approval-state-machine"
@@ -32,6 +34,7 @@ import { createRunLedgerHookSubscriber } from "@/agent/run-ledger-attribution"
 import type { ShadowVerifyPort } from "@/agent/shadow-verify"
 import { createShadowVerify } from "@/agent/shadow-verify"
 import { createShadowVerifyAdapters } from "@/agent/shadow-verify-adapters"
+import { errMessage, logger } from "@/shared"
 import type { ObservabilityWireHandle, ObservabilityWireOpts } from "./types"
 
 /**
@@ -170,8 +173,9 @@ const setupSubscription = (
   let unsubscribe: (() => void) | undefined
   try {
     unsubscribe = opts.hookBus.subscribe("post_tool_use", handler)
-  } catch {
-    // Hook bus rejected the registration — fall back to noop detach.
+  } catch (e) {
+    // Hook bus rejected the registration — log + fall back to noop detach.
+    logger.warn(`observability-wire.subscribe: ${errMessage(e)}`)
     return noopDetach
   }
 
@@ -181,8 +185,9 @@ const setupSubscription = (
     detached = true
     try {
       unsubscribe?.()
-    } catch {
-      // Host unsubscribe closure threw — NO-THROW contract: swallow.
+    } catch (e) {
+      // Host unsubscribe closure threw — NO-THROW contract: log + swallow.
+      logger.warn(`observability-wire.unsubscribe: ${errMessage(e)}`)
     }
     // Drop the closure reference so a long-lived handle does not keep the
     // host's unsubscribe state alive.

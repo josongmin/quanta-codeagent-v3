@@ -54,6 +54,7 @@ import type { AgentConfig } from "@/agent/types"
 import { asCacheKey } from "@/llm/system-prompt-cache"
 import type { Message } from "@/llm/types"
 import type { TypedHistoryEventStore } from "@/memory/typed-event"
+import { errMessage, logger } from "@/shared"
 import type { CodexR2WireDeps } from "./types"
 
 /** Belt-and-suspenders setter: writes `obj[key] = value` inside a
@@ -78,8 +79,9 @@ const appendAllSafe = (store: TypedHistoryEventStore, events: readonly ContextEv
   for (const ev of events) {
     try {
       store.append(ev)
-    } catch {
-      // side-channel — swallow.
+    } catch (e) {
+      // side-channel — log + swallow.
+      logger.warn(`codex-r2-wire.appendAllSafe: ${errMessage(e)}`)
     }
   }
 }
@@ -117,7 +119,9 @@ const buildContextEventsProducer = (
       prev = current
       if (store !== undefined && events.length > 0) appendAllSafe(store, events)
       return events
-    } catch {
+    } catch (e) {
+      // closure-entry NO-THROW — log + swallow.
+      logger.warn(`codex-r2-wire.contextEventsForTurn: ${errMessage(e)}`)
       return []
     }
   }
@@ -149,7 +153,9 @@ const buildMentionInjector = (
         emitMentionEvents(fragments, store, now(), turnId)
       }
       return buildMentionInjectionMessages(fragments)
-    } catch {
+    } catch (e) {
+      // closure-entry NO-THROW — log + swallow.
+      logger.warn(`codex-r2-wire.mentionInjector: ${errMessage(e)}`)
       return []
     }
   }
@@ -163,8 +169,9 @@ const buildCompactionEventEmit = (
   return (event) => {
     try {
       store.append(event)
-    } catch {
-      // side-channel — swallow.
+    } catch (e) {
+      // side-channel — log + swallow.
+      logger.warn(`codex-r2-wire.compactionEventEmit: ${errMessage(e)}`)
     }
   }
 }

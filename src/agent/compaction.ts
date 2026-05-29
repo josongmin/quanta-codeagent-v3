@@ -1,6 +1,6 @@
 import type { ContentBlock, LLMPort, Message, SystemPromptInput } from "@/llm"
 import { assembleFromEvents } from "@/llm"
-import { runtimeConfig } from "@/shared"
+import { errMessage, logger, runtimeConfig } from "@/shared"
 import type { RecoveryProvenance, RecoveryReason } from "./recovery-reason"
 
 /**
@@ -468,16 +468,18 @@ const emitPostCompactIfWired = async (
   }
   try {
     await input.postCompactEmit?.(provenance)
-  } catch {
-    /* swallowed */
+  } catch (e) {
+    // side-channel — log + swallow.
+    logger.warn(`compaction.postCompactEmit: ${errMessage(e)}`)
   }
   if (input.objectiveSetNextActions !== undefined && input.threadId !== undefined) {
     try {
       input.objectiveSetNextActions(input.threadId, [
         `agent compacted: reason ${provenance.reason} — ${provenance.resumeStep}`,
       ])
-    } catch {
-      /* swallowed */
+    } catch (e) {
+      // side-channel — log + swallow.
+      logger.warn(`compaction.objectiveSetNextActions: ${errMessage(e)}`)
     }
   }
 }
