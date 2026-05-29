@@ -15,7 +15,7 @@ export type {
   LlmContinuationObservation,
   LlmRequestObservation,
 } from "./llm-route-types"
-export type { LogCallSite, LogLevel } from "./logger"
+export type { LogCallSite, Logger, LogLevel } from "./logger"
 export {
   __resetLoggerRateLimit,
   __setLoggerNow,

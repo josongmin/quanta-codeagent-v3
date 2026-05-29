@@ -27,7 +27,7 @@
  *    `exitPromise`, then resolves.
  */
 
-import { errMessage, logger, QuantaError } from "@/shared"
+import { errMessage, type Logger, logger, QuantaError } from "@/shared"
 import type { IsolatedProcess } from "./types"
 
 export const DEFAULT_CALL_TIMEOUT_MS = 30_000
@@ -107,10 +107,20 @@ export class PluginHost {
   private exited = false
   private stopping: Promise<void> | null = null
   private readonly unsubscribeMessages: () => void
+  /** R10 wire — per-tenant child logger bound to `proc.serviceName`. Every
+   *  inbound-frame warn-log (5 sites in this class, all sharing the
+   *  `plugin-host:` prefix) flows through this sub-logger so the leaky-
+   *  bucket label is namespaced PER PLUGIN. A hostile plugin spamming
+   *  malformed frames can no longer starve a benign sibling plugin's
+   *  quota — each `PluginHost` instance owns its own bucket. Output line
+   *  shape is unchanged: caller flows into the bucket label only (see
+   *  `@/shared` logger docblock §"R9 multi-tenant caller seam"). */
+  private readonly log: Logger
 
   constructor(proc: IsolatedProcess, opts: PluginHostOpts = {}) {
     this.proc = proc
     this.defaultCallTimeoutMs = opts.defaultCallTimeoutMs ?? DEFAULT_CALL_TIMEOUT_MS
+    this.log = logger.child({ caller: proc.serviceName })
     this.unsubscribeMessages = proc.onMessage((m) => {
       this.handleIncoming(m)
     })
@@ -239,7 +249,7 @@ export class PluginHost {
 
   private handleIncoming(raw: unknown): void {
     if (!isObj(raw)) {
-      logger.warn("plugin-host: dropping non-object frame", {
+      this.log.warn("plugin-host: dropping non-object frame", {
         serviceName: this.proc.serviceName,
       })
       return
@@ -252,7 +262,7 @@ export class PluginHost {
       this.handleNotification(raw as unknown as JsonRpcNotification)
       return
     }
-    logger.warn("plugin-host: dropping malformed envelope", {
+    this.log.warn("plugin-host: dropping malformed envelope", {
       serviceName: this.proc.serviceName,
       keys: Object.keys(raw).slice(0, 8),
     })
@@ -262,7 +272,7 @@ export class PluginHost {
     const id = res.id
     const entry = this.pending.get(id)
     if (!entry) {
-      logger.warn("plugin-host: dropping response for unknown/duplicate id", {
+      this.log.warn("plugin-host: dropping response for unknown/duplicate id", {
         serviceName: this.proc.serviceName,
         id,
       })
@@ -284,7 +294,7 @@ export class PluginHost {
   private handleNotification(n: JsonRpcNotification): void {
     const handlers = this.notifHandlers.get(n.method)
     if (!handlers || handlers.size === 0) {
-      logger.warn("plugin-host: unhandled notification", {
+      this.log.warn("plugin-host: unhandled notification", {
         serviceName: this.proc.serviceName,
         method: n.method,
       })
@@ -295,7 +305,7 @@ export class PluginHost {
       try {
         h(n.params)
       } catch (e) {
-        logger.warn("plugin-host: notification handler threw", {
+        this.log.warn("plugin-host: notification handler threw", {
           serviceName: this.proc.serviceName,
           method: n.method,
           error: errMessage(e),
