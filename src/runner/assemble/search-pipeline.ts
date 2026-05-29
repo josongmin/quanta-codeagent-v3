@@ -17,10 +17,14 @@ import {
   createRipgrepLexicalSearch,
 } from "@/retrieval"
 import type { SearchPipeline } from "@/retrieval/pipeline"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import { searchCodebaseTool, type Tool } from "@/tool"
 import { assemblePipeline, type PipelinePreset, type PipelineWireOverrides } from "./pipeline"
-import { buildSemanticBackend, selectIndexEmbedder } from "./search-index-backend"
+import {
+  buildSemanticBackend,
+  resolveIndexEmbedder,
+  type SearchIndexMetrics,
+} from "./search-index-backend"
 
 export interface WiredSearchPipeline {
   readonly pipeline: SearchPipeline
@@ -112,6 +116,7 @@ const buildLexicalOverride = (cwd: string): NonNullable<PipelineWireOverrides["l
 const startIndexer = (
   env: NodeJS.ProcessEnv,
   cwd: string,
+  metrics?: SearchIndexMetrics,
 ): {
   readonly sem: NonNullable<PipelineWireOverrides["sem"]>
   readonly embedder: NonNullable<PipelineWireOverrides["embedder"]>
@@ -121,8 +126,13 @@ const startIndexer = (
   // The SAME embed function backs both upsert vectors and the pipeline query
   // embedder — otherwise stored and query vectors come from different models.
   // Default-OFF: with no `QUANTA_EMBED_PROVIDER` this IS the legacy hashEmbed.
-  const embed = selectIndexEmbedder(env)
-  const sem = buildSemanticBackend(env, embed)
+  const resolvedEmbedder = resolveIndexEmbedder(env, undefined, {
+    ...(metrics !== undefined ? { metrics } : {}),
+  })
+  const sem = buildSemanticBackend(env, resolvedEmbedder.embed, {
+    resolvedEmbedder,
+    ...(metrics !== undefined ? { metrics } : {}),
+  })
   const indexer = createDefaultIndexer({
     scanner: {
       root: cwd,
@@ -130,8 +140,22 @@ const startIndexer = (
     },
     upsert: sem.upsert,
   })
+  let reconcile = Promise.resolve()
+  const queueReconcile = (): void => {
+    if (sem.reconcileCorpus === undefined) return
+    reconcile = reconcile
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          await sem.reconcileCorpus?.(indexer.getCorpus())
+        } catch (e) {
+          logger.warn(`search index reconcile failed: ${errMessage(e)}`)
+        }
+      })
+  }
   void indexer.scanInitial().then((r) => {
     if (!r.ok) logger.warn(`indexer scanInitial failed: ${r.error.kind}`)
+    else queueReconcile()
   })
   const intervalMsRaw = env.QUANTA_INDEX_INTERVAL_MS
   const intervalMs =
@@ -142,7 +166,9 @@ const startIndexer = (
     void indexer.scanDelta().then((r) => {
       if (!r.ok && r.error.kind !== "scan-in-progress") {
         logger.warn(`indexer scanDelta failed: ${r.error.kind}`)
+        return
       }
+      if (r.ok) queueReconcile()
     })
   }, intervalMs)
   if (typeof intervalHandle === "object" && intervalHandle !== null && "unref" in intervalHandle) {
@@ -150,7 +176,7 @@ const startIndexer = (
   }
   return {
     sem: sem.port,
-    embedder: { embed: async (text: string) => embed(text) },
+    embedder: { embed: async (text: string) => resolvedEmbedder.embed(text) },
     indexer,
     intervalHandle,
   }
@@ -178,6 +204,7 @@ const lexicalOnlyPipeline = (
 export const buildSearchPipelineFromEnv = (
   env: NodeJS.ProcessEnv,
   cwd: string,
+  metrics?: SearchIndexMetrics,
 ): WiredSearchPipeline | null => {
   const indexOn = isOn(env.QUANTA_INDEX)
   const { preset, explicit } = buildRequestedPreset(env, indexOn)
@@ -197,7 +224,7 @@ export const buildSearchPipelineFromEnv = (
       )
       effectivePreset = DEFAULT_NO_INDEX_PRESET
     } else {
-      const semantic = startIndexer(env, cwd)
+      const semantic = startIndexer(env, cwd, metrics)
       overrides = {
         ...overrides,
         sem: semantic.sem,

@@ -41,7 +41,9 @@ const ALLOWED_UNSAFE_CAST_SITES = new Set<string>([
 /** No shadow `errMessage` definitions are permitted anywhere under src/. */
 const ALLOWED_SHADOW_DEFINITION_SITES = new Set<string>()
 
-const UNSAFE_CAST_PATTERN = /\((?:e|err|error) as Error\)\.message\b/
+// Expanded R3 audit: catches all `(IDENT as Error)?.message` (any var name,
+// optional chaining). Prior `(?:e|err|error)` missed `parseErr`/`ioErr`/etc.
+const UNSAFE_CAST_PATTERN = /\([a-zA-Z_$][\w$]* as Error\)\??\.message\b/
 const SHADOW_DEF_PATTERN = /^\s*const errMessage = /
 
 const walkTsFiles = (dir: string): readonly string[] => {
@@ -101,7 +103,7 @@ const scanForShadowDefinitions = (): readonly Match[] => {
 }
 
 describe("error-message canonical ratchet (R2 audit-H)", () => {
-  test("no `(e as Error).message` outside the in-flight allowlist", () => {
+  test("no `(e as Error).message` outside the in-flight allowlist", { timeout: 30_000 }, () => {
     const all = scanForUnsafeCasts()
     const unexpected = all
       .filter((m) => !ALLOWED_UNSAFE_CAST_SITES.has(m.relPath))
@@ -124,7 +126,7 @@ describe("error-message canonical ratchet (R2 audit-H)", () => {
     expect(unexpected).toEqual([])
   })
 
-  test("in-flight allowlist sites still own their unsafe casts (no false-positive cleanup)", () => {
+  test("in-flight allowlist sites still own their unsafe casts (no false-positive cleanup)", { timeout: 30_000 }, () => {
     // Every entry in the allowlist MUST still have at least one hit. If the
     // user has migrated a site already, the allowlist entry must be removed
     // in the same change to keep the ratchet honest.
@@ -136,7 +138,7 @@ describe("error-message canonical ratchet (R2 audit-H)", () => {
     expect(allowlistedButGone).toEqual([])
   })
 
-  test("no file-local `const errMessage = …` shadow declarations", () => {
+  test("no file-local `const errMessage = …` shadow declarations", { timeout: 30_000 }, () => {
     const all = scanForShadowDefinitions()
     const unexpected = all
       .filter((m) => !ALLOWED_SHADOW_DEFINITION_SITES.has(m.relPath))

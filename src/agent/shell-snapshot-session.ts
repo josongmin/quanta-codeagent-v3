@@ -25,6 +25,7 @@
 
 import type { SnapshotHandle } from "@/runtime/shell-snapshot"
 import type { ShellSnapshotRestoreSeam } from "@/runtime/types"
+import { errMessage } from "@/shared"
 import type { AgentConfig } from "./types"
 
 /** 10 days — the default retention window for `~/.quanta/shell_snapshots/`.
@@ -147,7 +148,7 @@ export const buildShellSnapshotSession = (
     } catch (e) {
       // Defense-in-depth: the port's contract is no-throw, but a hostile
       // adapter that throws must not crash the turn.
-      emitError(`shell-snapshot capture threw: ${String((e as Error)?.message ?? e)}`)
+      emitError(`shell-snapshot capture threw: ${errMessage(e)}`)
     }
   }
 
@@ -179,12 +180,12 @@ export const buildShellSnapshotSession = (
       try {
         await port.prune(cleanupOlderThanMs)
       } catch (e) {
-        emitError(`shell-snapshot prune failed: ${String((e as Error)?.message ?? e)}`)
+        emitError(`shell-snapshot prune failed: ${errMessage(e)}`)
       }
       try {
         await port.pruneToSizeBudget(maxSizeBytes)
       } catch (e) {
-        emitError(`shell-snapshot size-prune failed: ${String((e as Error)?.message ?? e)}`)
+        emitError(`shell-snapshot size-prune failed: ${errMessage(e)}`)
       }
     },
   }

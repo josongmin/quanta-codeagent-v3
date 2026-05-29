@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent, UserInputOutcome } from "./types"
 
 /**
@@ -91,7 +92,7 @@ export const requestUserInputTool = (): Tool<Input> => ({
       if (input.multiline !== undefined) req.multiline = input.multiline
       outcome = await requester(req)
     } catch (e) {
-      const msg = (e as Error)?.message ?? String(e)
+      const msg = errMessage(e)
       yield {
         type: "result",
         result: {

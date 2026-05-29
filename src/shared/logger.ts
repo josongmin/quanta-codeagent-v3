@@ -26,15 +26,29 @@ export const LOG_LEVEL_ORDER: Record<LogLevel, number> = { debug: 0, info: 1, wa
 export const levelEnabled = (level: LogLevel, threshold: LogLevel): boolean =>
   LOG_LEVEL_ORDER[level] >= LOG_LEVEL_ORDER[threshold]
 
-/** Strip C0/C1/DEL control chars (incl. embedded `\n`/`\r`/`\b`) and ANSI CSI
- *  escape sequences so a hostile `e.message` cannot forge log lines (R2 audit-M
- *  — `[error] credentials leaked: <admin-token>` injection via `\n` in thrown
- *  payload). The intentional terminating `\n` appended in `write` is OUTSIDE
- *  this layer, so single-line discipline is preserved. */
+/** Strip control chars (C0/C1/DEL, embedded `\n`/`\r`/`\b`), ANSI escape
+ *  sequences (CSI / OSC / DCS / APC / SOS / PM, terminated by BEL or ESC-\),
+ *  and Unicode bidi / zero-width chars so a hostile `e.message` cannot forge
+ *  log lines (R2 audit-M / R3 audit-H — `[error] credentials leaked: …`
+ *  injection via `\n`, terminal-title forge via `\x1b]0;…\x07`, visual
+ *  reordering via U+202E RTL override). The intentional terminating `\n`
+ *  appended in `write` is OUTSIDE this layer, so single-line discipline is
+ *  preserved. NOTE: `new RegExp(string)` avoids biome's
+ *  `noControlCharactersInRegex` rule trip on the literal form. */
+const ANSI_OSC_DCS_APC_RE = new RegExp(
+  "\\u001b\\][\\s\\S]*?(?:\\u0007|\\u001b\\\\)|\\u001b[PX^_][\\s\\S]*?\\u001b\\\\",
+  "g",
+)
+const ANSI_CSI_RE = new RegExp("\\u001b\\[[0-9;?]*[ -/]*[@-~]", "g")
+const CONTROL_RE = new RegExp("[\\u0000-\\u0008\\u000a-\\u001f\\u007f-\\u009f]", "g")
+const BIDI_ZW_RE = new RegExp("[\\u200b-\\u200f\\u202a-\\u202e\\u2066-\\u2069\\ufeff]", "g")
+
 const sanitizeLogText = (s: string): string =>
   s
-    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
-    .replace(/[\x00-\x08\x0a-\x1f\x7f-\x9f]/g, "?")
+    .replace(ANSI_OSC_DCS_APC_RE, "")
+    .replace(ANSI_CSI_RE, "")
+    .replace(CONTROL_RE, "?")
+    .replace(BIDI_ZW_RE, "")
 
 const write = (level: LogLevel, msg: string, meta?: unknown): void => {
   if (!levelEnabled(level, runtimeConfig().logLevel)) return
