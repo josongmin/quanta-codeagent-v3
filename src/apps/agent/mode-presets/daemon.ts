@@ -96,7 +96,9 @@ const buildDaemonBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" |
     system: req.base.system ?? buildSystemPrompt(cwd),
     cwd,
     maxTurns: req.base.maxTurns ?? 40,
-    signal: req.base.signal ?? new AbortController().signal,
+    // T01 (audit L5 H-2): inherit the composition-root's REAL SIGINT-wired
+    // signal; dead throwaway controller removed.
+    signal: req.base.signal,
     branchSearch: req.base.branchSearch ?? DAEMON_BRANCH_SEARCH,
   })
 }

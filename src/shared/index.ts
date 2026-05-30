@@ -1,3 +1,20 @@
+export type {
+  AbortableReadable,
+  AbortableReader,
+  AbortReasonKind,
+  DeadlineFetchFn,
+  FetchWithDeadlineOpts,
+  TimerPort,
+} from "./abortable"
+export {
+  AbortError,
+  abortableSleep,
+  abortReasonOf,
+  drainAbortable,
+  fetchWithDeadline,
+  isAbort,
+  throwIfAborted,
+} from "./abortable"
 export { assertNever } from "./assert-never"
 export { byteCompare } from "./byte-compare"
 export { classify } from "./error-classifier"

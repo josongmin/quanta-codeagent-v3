@@ -180,9 +180,20 @@ const buildWrappedStream = <T>(
           })
           const nextPromise = iter.next().then((r) => ({ timedOut: false as const, r }))
 
-          // eslint-disable-next-line no-await-in-loop
-          const winner = await Promise.race([nextPromise, timeoutPromise])
-          if (timerHandle !== undefined) clearTimer(timerHandle)
+          // T01 (audit L6 C2): clear the deadline timer on EVERY exit path of the
+          // race — including when `iter.next()` REJECTS and wins the race. The
+          // bare `clearTimer` after the race was skipped on a rejecting stream,
+          // accumulating one `ms`-length `setTimeout` handle per fast reject and
+          // pinning the event loop. `try/finally` makes the clear unconditional.
+          let winner:
+            | { readonly timedOut: true }
+            | { readonly timedOut: false; readonly r: IteratorResult<T> }
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            winner = await Promise.race([nextPromise, timeoutPromise])
+          } finally {
+            if (timerHandle !== undefined) clearTimer(timerHandle)
+          }
 
           if (winner.timedOut) {
             const error = buildTimeoutError(reason, ms, opts.provider)

@@ -21,7 +21,7 @@
 import * as nodeFs from "node:fs/promises"
 import * as path from "node:path"
 import { applyPatch, type PatchFileSystemPort, parsePatch } from "@/patch"
-import { errMessage } from "@/shared"
+import { abortReasonOf, errMessage, throwIfAborted } from "@/shared"
 import type { ShadowApplyPort } from "../shadow-verify"
 
 /**
@@ -84,14 +84,23 @@ export const createV4AApplyPort = (): ShadowApplyPort => ({
   async apply(
     handle: string,
     patchText: string,
-    _signal?: AbortSignal,
+    signal?: AbortSignal,
   ): Promise<{ ok: boolean; error?: string }> {
     try {
+      // T01 (audit L3 C-9): honor cancellation. The V4A applier
+      // (`@/patch.applyPatch`) does not yet take a signal, so we gate at the
+      // boundary: if the verify was already cancelled, do NOT start the patch
+      // application (it touches the scratch worktree fs). This is the honest
+      // contract — once `applyPatch` is in flight the individual fs writes are
+      // not interruptible, so the gate fires BEFORE the work begins. A typed
+      // `aborted` reason is returned, never a silent fallthrough.
+      throwIfAborted(signal)
       const patch = parsePatch(patchText)
       const fs = scratchFsPort(handle)
       await applyPatch(patch, fs)
       return { ok: true }
     } catch (e) {
+      if (abortReasonOf(e) !== null) return { ok: false, error: "aborted" }
       return { ok: false, error: errMessage(e) }
     }
   },

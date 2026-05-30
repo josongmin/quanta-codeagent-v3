@@ -1,9 +1,13 @@
-import { err, errMessage, ok, type Result } from "@/shared"
+import { abortReasonOf, err, errMessage, fetchWithDeadline, ok, type Result } from "@/shared"
 import type { AudioBlob } from "../voice/types"
-import type { SpeechToTextPort } from "./port"
+import type { SpeechToTextPort, TranscribeOpts } from "./port"
 import type { SttError, Transcript } from "./types"
 
 export const DEEPGRAM_ENDPOINT = "https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true"
+
+/** Default STT round-trip budget (audit L9 H4). A provider connection that
+ *  hangs past this degrades to a typed `timeout` instead of blocking forever. */
+export const DEFAULT_STT_TIMEOUT_MS = 30_000
 
 /** Minimal fetch surface — `typeof globalThis.fetch` constrained to the
  *  one call shape we make. Lets tests inject a captured-args fake without
@@ -54,24 +58,41 @@ export const createDeepgramAdapter = (opts: DeepgramAdapterOpts): SpeechToTextPo
   const fetchFn: FetchLike = opts.fetchFn ?? ((input, init) => fetch(input, init))
   const endpoint = opts.endpoint ?? DEEPGRAM_ENDPOINT
   return {
-    async transcribe(blob: AudioBlob): Promise<Result<Transcript, SttError>> {
+    async transcribe(
+      blob: AudioBlob,
+      reqOpts?: TranscribeOpts,
+    ): Promise<Result<Transcript, SttError>> {
       if (!mimeOk(blob.mime)) {
         return err({ kind: "unsupported-mime", mime: blob.mime })
       }
       if (blob.bytes.byteLength === 0) {
         return err({ kind: "empty-audio" })
       }
+      // T01 (audit L9 H4): wire BOTH a deadline AND the caller signal into the
+      // fetch via the shared primitive so a hung Deepgram connection cannot
+      // block the caller forever. Cancellation maps to a typed `timeout` /
+      // `aborted` SttError rather than a silent hang or generic network-error.
+      const timeoutMs = reqOpts?.timeoutMs ?? DEFAULT_STT_TIMEOUT_MS
       let res: Response
       try {
-        res = await fetchFn(endpoint, {
+        res = await fetchWithDeadline(endpoint, {
           method: "POST",
           headers: {
             Authorization: `Token ${opts.apiKey}`,
             "Content-Type": blob.mime,
           },
           body: blob.bytes,
+          timeoutMs,
+          ...(reqOpts?.signal !== undefined ? { signal: reqOpts.signal } : {}),
+          // The shared primitive types `body` as `unknown` (carrier-agnostic);
+          // the adapter's `FetchLike` seam takes `RequestInit`. The body we pass
+          // is a real `BodyInit` (Uint8Array), so the bridge cast is sound.
+          fetchFn: (input, init) => fetchFn(input, init as RequestInit),
         })
       } catch (e) {
+        const reason = abortReasonOf(e)
+        if (reason === "timeout") return err({ kind: "timeout", timeoutMs })
+        if (reason === "abort") return err({ kind: "aborted" })
         return err({
           kind: "network-error",
           degradeReason: errMessage(e),

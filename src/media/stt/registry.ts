@@ -3,7 +3,7 @@ import type { AudioBlob } from "../voice/types"
 import { createDeepgramAdapter, type FetchLike } from "./deepgram-adapter"
 import { headlessSpeechToText } from "./headless-stub"
 import { createWhisperAdapter } from "./openai-whisper-adapter"
-import type { SpeechToTextPort } from "./port"
+import type { SpeechToTextPort, TranscribeOpts } from "./port"
 import type { SttError, Transcript } from "./types"
 
 export type SttSelection = "deepgram" | "whisper" | "headless-stub"
@@ -56,11 +56,16 @@ export const createSttFromEnv = (opts: SttRegistryOpts = {}): SpeechToTextPort =
       ...(opts.fetchFn !== undefined ? { fetchFn: opts.fetchFn } : {}),
     })
     return {
-      async transcribe(blob: AudioBlob): Promise<Result<Transcript, SttError>> {
-        const first = await primary.transcribe(blob)
+      async transcribe(
+        blob: AudioBlob,
+        reqOpts?: TranscribeOpts,
+      ): Promise<Result<Transcript, SttError>> {
+        // T01 (audit L9 H4): forward the deadline/signal to BOTH adapters so the
+        // fallback path is also cancellable end-to-end.
+        const first = await primary.transcribe(blob, reqOpts)
         if (first.ok) return first
         if (isInputErr(first.error)) return first
-        return secondary.transcribe(blob)
+        return secondary.transcribe(blob, reqOpts)
       },
     }
   }

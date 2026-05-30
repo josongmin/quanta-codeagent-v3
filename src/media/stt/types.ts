@@ -23,3 +23,9 @@ export type SttError =
   | { readonly kind: "unsupported-mime"; readonly mime: string }
   | { readonly kind: "empty-audio" }
   | { readonly kind: "network-error"; readonly degradeReason: string }
+  // T01 (audit L9 H4): the STT round-trip now carries a deadline + caller
+  // signal. A hung provider connection that exceeds the deadline degrades to
+  // a TYPED `timeout` (with the elapsed budget), and a caller-cancelled request
+  // degrades to `aborted` — never a silent hang or an untyped network-error.
+  | { readonly kind: "timeout"; readonly timeoutMs: number }
+  | { readonly kind: "aborted" }

@@ -77,7 +77,9 @@ const stubBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" | "budge
     system: req.base.system ?? "",
     cwd: req.base.cwd ?? process.cwd(),
     maxTurns: req.base.maxTurns ?? 60,
-    signal: req.base.signal ?? new AbortController().signal,
+    // T01 (audit L5 H-2): inherit the composition-root's REAL SIGINT-wired
+    // signal; dead throwaway controller removed.
+    signal: req.base.signal,
   }
 }
 

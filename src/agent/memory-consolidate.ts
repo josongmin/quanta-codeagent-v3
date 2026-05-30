@@ -177,11 +177,17 @@ export const arbitrateConsolidation = async (
   if (opts?.signal?.aborted) return heuristic(candidate, dupes)
   try {
     const events: StreamEvent[] = []
+    // T01 (audit L3 C-6): forward the caller signal into the provider stream so
+    // a cancelled consolidation aborts the in-flight HTTP request instead of
+    // letting it run to completion (wasted tokens + delayed socket release).
+    // The pre-loop + per-chunk `aborted` checks below remain as the heuristic
+    // fallback for an abort observed AFTER the stream started.
     for await (const ev of llm.stream({
       messages: [
         { role: "user", content: [{ type: "text", text: buildPrompt(candidate, dupes) }] },
       ],
       tools: [],
+      ...(opts?.signal !== undefined ? { signal: opts.signal } : {}),
     })) {
       if (opts?.signal?.aborted) return heuristic(candidate, dupes)
       events.push(ev)

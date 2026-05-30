@@ -20,6 +20,7 @@ import {
   type PersistentWorktree,
   removeWorktree,
 } from "@/runtime/worktree-fork"
+import { throwIfAborted } from "@/shared"
 import type { ShadowScratchPort } from "../shadow-verify"
 
 /**
@@ -35,7 +36,15 @@ import type { ShadowScratchPort } from "../shadow-verify"
  *                   forked off HEAD of THIS repo.
  */
 export const createScratchWorktreePort = (repoRoot: string): ShadowScratchPort => ({
-  async open(_signal?: AbortSignal): Promise<{ handle: string; dispose: () => Promise<void> }> {
+  async open(signal?: AbortSignal): Promise<{ handle: string; dispose: () => Promise<void> }> {
+    // T01 (audit L3 C-10): honor cancellation before the multi-second
+    // `git worktree add` I/O. The underlying `createPersistentWorktree` chain
+    // (`runWorktreeAddWithRetry → git → runShell`) is owned by `@/runtime` and
+    // does not yet take a signal, so this seam cannot interrupt the git process
+    // once spawned. The HONEST contract: gate at the boundary so a verify that
+    // was already cancelled does NOT spawn the worktree at all; the runner
+    // converts the thrown typed AbortError into an error-severity diagnostic.
+    throwIfAborted(signal)
     const id = `shadow-verify-${randomUUID()}`
     const wt: PersistentWorktree = await createPersistentWorktree(id, repoRoot)
     const dispose = async (): Promise<void> => {

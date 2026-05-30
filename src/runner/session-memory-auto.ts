@@ -26,7 +26,7 @@ import {
   renderMemorySection,
 } from "@/memory/cross-session"
 import { JsonlFileStage1Store, type Stage1OutputsStore } from "@/memory/stage1-store"
-import { errMessage } from "@/shared"
+import { errMessage, throwIfAborted } from "@/shared"
 
 const noopWarn = (_msg: string): void => {}
 
@@ -188,6 +188,13 @@ export const buildSessionMemoryAutoWires = async (
   const paths = resolveMemoryDirPaths(input.homeDir ?? homedir())
   const writer = new FileMemoryWriter(paths, nodeFsPort, new ChildProcessGitPort(), { now })
   await writer.ensureDir()
+  // T01 (audit L5 M-10): gate on the caller signal before opening the SQLite
+  // store. `new Database(...)` (bun:sqlite) is a SYNCHRONOUS native open — once
+  // it begins it cannot be interrupted, so the honest contract is a pre-flight
+  // gate that fails fast when the session was already aborted, rather than
+  // pretending the open itself is cancellable. Threaded after the (awaitable)
+  // `ensureDir` so an abort during dir creation is caught here too.
+  throwIfAborted(input.signal)
   const stage1Db = new Database(resolveStage1SqlitePath(paths.root))
   stage1Db.exec("PRAGMA journal_mode = WAL")
   const phase1Store: Stage1StorePort = new SqliteStage1Store(stage1Db)

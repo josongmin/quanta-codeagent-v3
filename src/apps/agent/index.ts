@@ -487,7 +487,16 @@ const attachExecutionPlaneSlots = (
  *  shared `@/llm` factory (OCP/DIP). `process.env` is handed to the factory
  *  HERE — the single composition-root touchpoint — so the factory stays env-
  *  agnostic and the canonical {@link DEFAULT_MODEL} (no local copy) is used. */
-export const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["base"] => {
+export const buildBaseFromArgs = (
+  p: AssembleRequestPartial,
+  /** T01 (audit L5 H-2): the REAL composition-root cancellation signal. The
+   *  composition root (`runMain`) owns ONE controller and wires SIGINT to it
+   *  once, then threads `controller.signal` here so every mode-preset inherits
+   *  a live cancel point. When absent (non-`runMain` callers / older SDK seams)
+   *  we still fall back to a fresh controller's signal, but production always
+   *  injects the live one. */
+  signal?: AbortSignal,
+): AssembleRequest["base"] => {
   // QUANTA_PROVIDER drives the factory pick; an explicit `--provider` flag must
   // still win, so seed it into the env view the factory reads.
   const env =
@@ -573,7 +582,12 @@ export const buildBaseFromArgs = (p: AssembleRequestPartial): AssembleRequest["b
     system,
     cwd: process.cwd(),
     maxTurns: p.dials?.maxTurns ?? 30,
-    signal: new AbortController().signal,
+    // T01 (audit L5 H-2): use the composition-root's REAL cancellation signal
+    // when injected (SIGINT-wired in `runMain`). The `?? new AbortController()`
+    // is NOT a live-path placeholder — it is the fallback only for callers that
+    // construct a base without a composition root (kept so the field stays
+    // typed-required). Production always passes the live signal.
+    signal: signal ?? new AbortController().signal,
     // ADR-0159 wire: when the operator opted in (QUANTA_RETRIEVAL_HYBRID=1),
     // hand the surface-built stack to every mode runner via the shared base.
     // Absent ⇒ slot is omitted entirely (`exactOptionalPropertyTypes` → no
@@ -723,6 +737,10 @@ export interface MainDeps {
   stdout?: (s: string) => void
   stderr?: (s: string) => void
   exit?: (code: number) => void
+  /** T01 (audit L5 H-2): test seam to inject the cancellation signal instead of
+   *  letting `runMain` own a SIGINT-wired controller. Tests that don't want a
+   *  real `process.on("SIGINT")` side effect pass their own signal here. */
+  signal?: AbortSignal
 }
 
 /** Default loader — dynamic import keeps `index.ts` decoupled from preset shape. */
@@ -769,14 +787,37 @@ export const runMain = async (deps: MainDeps = {}): Promise<void> => {
 
   const dispatcher = await loadDispatcher(args.mode)
   const partial = toAssembleRequest(args)
+
+  // T01 (audit L5 H-2 / M-6): the composition root owns ONE real cancellation
+  // controller and wires SIGINT to it exactly once — previously every preset
+  // inherited a dead `new AbortController().signal` so Ctrl+C was silently
+  // ignored in 5 of 6 modes. Tests inject `deps.signal` to avoid the real
+  // `process.on` side effect; production installs the handler and detaches it
+  // in `finally` so a long-lived host process never leaks listeners.
+  let owned: AbortController | undefined
+  let signal: AbortSignal
+  let onSigint: (() => void) | undefined
+  if (deps.signal !== undefined) {
+    signal = deps.signal
+  } else {
+    owned = new AbortController()
+    signal = owned.signal
+    onSigint = (): void => owned?.abort()
+    process.on("SIGINT", onSigint)
+  }
+
   // Translate flat CLI shape → nested AssembleRequest the runners consume
   // (each runner reads its own mode-specific extras: req.headless / req.batch
   // / req.ciBot). The `base` is a stub — runners build the real AgentConfig
   // internally; assemble.ts only needs `base` populated for modePolicy +
   // budgetMeter, which the runners assemble themselves.
-  const fullReq = liftToAssembleRequest(partial)
-  const outcome = await dispatcher.runMode(fullReq)
-  exit(outcome.exitCode)
+  const fullReq = liftToAssembleRequest(partial, signal)
+  try {
+    const outcome = await dispatcher.runMode(fullReq)
+    exit(outcome.exitCode)
+  } finally {
+    if (onSigint !== undefined) process.off("SIGINT", onSigint)
+  }
 }
 
 /** Translate the flat CLI projection to the nested AssembleRequest shape
@@ -784,8 +825,11 @@ export const runMain = async (deps: MainDeps = {}): Promise<void> => {
  *  active mode; other slots stay undefined. The `base` is populated with
  *  an LLM built from provider/model (operator flags + env API keys) so the
  *  per-mode runner can rely on `req.base.llm` being a real adapter. */
-const liftToAssembleRequest = (p: AssembleRequestPartial): AssembleRequest => {
-  const base = buildBaseFromArgs(p)
+const liftToAssembleRequest = (
+  p: AssembleRequestPartial,
+  signal?: AbortSignal,
+): AssembleRequest => {
+  const base = buildBaseFromArgs(p, signal)
   const out: AssembleRequest = { mode: p.mode, base }
   if (p.dials !== undefined) out.dials = p.dials
   if (p.exhaustion !== undefined) out.exhaustion = p.exhaustion

@@ -1232,7 +1232,10 @@ export const runInstanceOnce = async (
             reproHint,
           )
         : await runAgentPhase(instance, deps, sandbox, abort.signal, w, precomputedHint, reproHint)
-    const v = await verify(instance, phase.patch, sandbox, deps)
+    // T01 (audit L5 H-5): thread the per-instance deadline signal into verify so
+    // the official harness grading + its transient-crash retry sleep stop when
+    // the instance deadline fires instead of cascading into the next instance.
+    const v = await verify(instance, phase.patch, sandbox, { ...deps, signal: abort.signal })
 
     const extra: Partial<InstanceResult> = {}
     if (deps.observe && w.observer) {

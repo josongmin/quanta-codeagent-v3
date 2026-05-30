@@ -106,6 +106,11 @@ export class HttpSseMcpTransport implements McpTransport {
   private exitFired = false
   private serverStreamAbort: AbortController | null = null
   private serverStreamPump: Promise<void> | null = null
+  /** T01 (audit L9 H12): every in-flight POST (and the SSE reader it may be
+   *  draining) is tracked here so `close()` can abort them together — a hung
+   *  POST that the server answers with an unbounded SSE body previously leaked
+   *  its socket + reader past `close()`. */
+  private readonly inFlightPosts = new Set<AbortController>()
 
   constructor(opts: HttpSseTransportOpts) {
     this.url = opts.url
@@ -154,6 +159,11 @@ export class HttpSseMcpTransport implements McpTransport {
     if (this.closed) return
     this.closed = true
     this.serverStreamAbort?.abort()
+    // T01 (audit L9 H12): abort every in-flight POST + its SSE reader so no
+    // socket/stream survives close. `consumeSseBody` is wired to these signals,
+    // so the reader is cancelled (pipe released), not merely abandoned.
+    for (const ctrl of [...this.inFlightPosts]) ctrl.abort()
+    this.inFlightPosts.clear()
     // Best-effort DELETE to end the server session, if one was assigned.
     if (this.sessionId !== null) {
       try {
@@ -182,38 +192,48 @@ export class HttpSseMcpTransport implements McpTransport {
   }
 
   private async post(payload: McpTransportPayload): Promise<void> {
-    const res = await this.fetchFn(this.url, {
-      method: "POST",
-      headers: this.requestHeaders({
-        "content-type": "application/json",
-        accept: "application/json, text/event-stream",
-      }),
-      body: JSON.stringify(payload),
-    })
+    // T01 (audit L9 H12): each POST gets a tracked AbortController so `close()`
+    // can sever the request + any SSE body it is draining. The signal is wired
+    // into both the fetch AND `consumeSseBody`'s reader.
+    const ctrl = new AbortController()
+    this.inFlightPosts.add(ctrl)
+    try {
+      const res = await this.fetchFn(this.url, {
+        method: "POST",
+        headers: this.requestHeaders({
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+        }),
+        body: JSON.stringify(payload),
+        signal: ctrl.signal,
+      })
 
-    // Capture a server-assigned session id (typically on the initialize reply).
-    const assigned = res.headers.get(SESSION_HEADER)
-    if (assigned !== null && assigned !== "" && this.sessionId === null) {
-      this.sessionId = assigned
+      // Capture a server-assigned session id (typically on the initialize reply).
+      const assigned = res.headers.get(SESSION_HEADER)
+      if (assigned !== null && assigned !== "" && this.sessionId === null) {
+        this.sessionId = assigned
+      }
+
+      if (!res.ok) {
+        logger.warn("mcp: http POST non-2xx", { server: this.name, status: res.status })
+        return
+      }
+
+      // 202 Accepted (notification / fire-and-forget) → no body to consume.
+      if (res.status === 202) return
+
+      const contentType = (res.headers.get("content-type") ?? "").toLowerCase()
+      if (contentType.includes("text/event-stream")) {
+        await this.consumeSseBody(res.body, ctrl.signal)
+        return
+      }
+      // Single JSON response.
+      const text = await res.text()
+      if (text.trim().length === 0) return
+      this.decodeAndEmit(text)
+    } finally {
+      this.inFlightPosts.delete(ctrl)
     }
-
-    if (!res.ok) {
-      logger.warn("mcp: http POST non-2xx", { server: this.name, status: res.status })
-      return
-    }
-
-    // 202 Accepted (notification / fire-and-forget) → no body to consume.
-    if (res.status === 202) return
-
-    const contentType = (res.headers.get("content-type") ?? "").toLowerCase()
-    if (contentType.includes("text/event-stream")) {
-      await this.consumeSseBody(res.body)
-      return
-    }
-    // Single JSON response.
-    const text = await res.text()
-    if (text.trim().length === 0) return
-    this.decodeAndEmit(text)
   }
 
   private async openStandaloneStream(): Promise<void> {
@@ -235,15 +255,28 @@ export class HttpSseMcpTransport implements McpTransport {
     if (!res.ok || res.status === 405) return
     const contentType = (res.headers.get("content-type") ?? "").toLowerCase()
     if (!contentType.includes("text/event-stream")) return
-    await this.consumeSseBody(res.body)
+    await this.consumeSseBody(res.body, abort.signal)
   }
 
   /** Read an SSE byte stream, splitting on blank-line event boundaries and
-   *  emitting each event's `data:` payload as a decoded JSON-RPC message. */
-  private async consumeSseBody(body: ReadableStream<Uint8Array> | null): Promise<void> {
+   *  emitting each event's `data:` payload as a decoded JSON-RPC message.
+   *  T01 (audit L9 H12): `signal` (the owning POST / standalone-GET controller)
+   *  cancels the reader so `close()` releases the socket instead of leaking it
+   *  behind a server that streams an unbounded body. */
+  private async consumeSseBody(
+    body: ReadableStream<Uint8Array> | null,
+    signal?: AbortSignal,
+  ): Promise<void> {
     if (body === null) return
     const reader = body.getReader()
     let buffer = ""
+    const onAbort = (): void => {
+      void reader.cancel(signal?.reason).catch(() => undefined)
+    }
+    if (signal !== undefined) {
+      if (signal.aborted) onAbort()
+      else signal.addEventListener("abort", onAbort, { once: true })
+    }
     try {
       for (;;) {
         const { value, done } = await reader.read()
@@ -264,6 +297,7 @@ export class HttpSseMcpTransport implements McpTransport {
     } catch (e) {
       logger.debug("mcp: SSE stream ended", { server: this.name, error: errMessage(e) })
     } finally {
+      if (signal !== undefined) signal.removeEventListener("abort", onAbort)
       reader.releaseLock?.()
     }
   }

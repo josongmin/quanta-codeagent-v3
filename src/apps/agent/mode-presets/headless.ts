@@ -64,7 +64,11 @@ const buildHeadlessBase = (
     system: req.base.system ?? buildSystemPrompt(cwd),
     cwd,
     maxTurns: req.base.maxTurns ?? 20,
-    signal: req.base.signal ?? new AbortController().signal,
+    // T01 (audit L5 H-2): inherit the composition-root's REAL signal. The
+    // dead `?? new AbortController().signal` throwaway is removed — `req.base`
+    // carries a live SIGINT-wired signal (required field), so Ctrl+C now
+    // reaches the loop instead of being swallowed by a dropped controller.
+    signal: req.base.signal,
   })
 }
 

@@ -113,7 +113,8 @@ const spawnGhRunner =
   (
     repoCwd: string,
   ): ((args: string[]) => Promise<{ stdout: string; stderr: string; exitCode: number }>) =>
-  async (args) => spawnGh(repoCwd, ["gh", ...args], GH_SUBPROCESS_TIMEOUT_MS)
+  async (args) =>
+    spawnGh(repoCwd, ["gh", ...args], GH_SUBPROCESS_TIMEOUT_MS)
 
 const spawnToolGhRunner =
   (repoCwd: string): ToolGhRunner =>
@@ -177,17 +178,17 @@ const gitRunnerFromSeam = (seam: NonNullable<AssembleRequestSeams["gitRun"]>): G
 /** Adapt the ci-bot host `gh` runner to the `@/tool/gh` ToolRunner shape.
  *  The tool slice builds argv as `["gh", ...]`; the host runner expects only
  *  the subcommand tail because it adds the binary itself. */
-const ghToolRunnerFrom = (
-  gh: CiBotWiring["gh"],
-): ToolGhRunner => async (argv, _cwd, _timeoutMs) => {
-  const args = argv[0] === "gh" ? argv.slice(1) : argv
-  const result = await gh([...args])
-  return {
-    code: result.exitCode,
-    stdout: result.stdout,
-    stderr: result.stderr,
+const ghToolRunnerFrom =
+  (gh: CiBotWiring["gh"]): ToolGhRunner =>
+  async (argv, _cwd, _timeoutMs) => {
+    const args = argv[0] === "gh" ? argv.slice(1) : argv
+    const result = await gh([...args])
+    return {
+      code: result.exitCode,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    }
   }
-}
 
 /** Build the ci-bot wiring bundle: a `ToolRegistry` containing the git tools
  *  (wrapped in the branch-only guard) plus the READ-ONLY GitHub inspection
@@ -295,7 +296,9 @@ const buildCiBotBase = (
     system: req.base.system ?? buildSystemPrompt(cwd),
     cwd,
     maxTurns: req.base.maxTurns ?? 30,
-    signal: req.base.signal ?? new AbortController().signal,
+    // T01 (audit L5 H-2): inherit the composition-root's REAL SIGINT-wired
+    // signal; dead throwaway controller removed.
+    signal: req.base.signal,
   }
 }
 

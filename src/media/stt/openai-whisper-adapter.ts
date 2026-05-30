@@ -1,7 +1,7 @@
-import { err, errMessage, ok, type Result } from "@/shared"
+import { abortReasonOf, err, errMessage, fetchWithDeadline, ok, type Result } from "@/shared"
 import type { AudioBlob } from "../voice/types"
-import type { FetchLike } from "./deepgram-adapter"
-import type { SpeechToTextPort } from "./port"
+import { DEFAULT_STT_TIMEOUT_MS, type FetchLike } from "./deepgram-adapter"
+import type { SpeechToTextPort, TranscribeOpts } from "./port"
 import type { SttError, Transcript } from "./types"
 
 export const WHISPER_ENDPOINT = "https://api.openai.com/v1/audio/transcriptions"
@@ -24,7 +24,10 @@ export const createWhisperAdapter = (opts: WhisperAdapterOpts): SpeechToTextPort
   const endpoint = opts.endpoint ?? WHISPER_ENDPOINT
   const model = opts.model ?? WHISPER_MODEL
   return {
-    async transcribe(blob: AudioBlob): Promise<Result<Transcript, SttError>> {
+    async transcribe(
+      blob: AudioBlob,
+      reqOpts?: TranscribeOpts,
+    ): Promise<Result<Transcript, SttError>> {
       if (!mimeOk(blob.mime)) {
         return err({ kind: "unsupported-mime", mime: blob.mime })
       }
@@ -36,14 +39,25 @@ export const createWhisperAdapter = (opts: WhisperAdapterOpts): SpeechToTextPort
       form.append("model", model)
       form.append("response_format", "verbose_json")
 
+      // T01 (audit L9 H4): deadline + caller signal via the shared primitive so
+      // a hung Whisper connection degrades to a typed `timeout` / `aborted`.
+      const timeoutMs = reqOpts?.timeoutMs ?? DEFAULT_STT_TIMEOUT_MS
       let res: Response
       try {
-        res = await fetchFn(endpoint, {
+        res = await fetchWithDeadline(endpoint, {
           method: "POST",
           headers: { Authorization: `Bearer ${opts.apiKey}` },
           body: form,
+          timeoutMs,
+          ...(reqOpts?.signal !== undefined ? { signal: reqOpts.signal } : {}),
+          // body is a real `BodyInit` (FormData); bridge the primitive's
+          // carrier-agnostic `unknown` body to the adapter's `RequestInit` seam.
+          fetchFn: (input, init) => fetchFn(input, init as RequestInit),
         })
       } catch (e) {
+        const reason = abortReasonOf(e)
+        if (reason === "timeout") return err({ kind: "timeout", timeoutMs })
+        if (reason === "abort") return err({ kind: "aborted" })
         return err({
           kind: "network-error",
           degradeReason: errMessage(e),

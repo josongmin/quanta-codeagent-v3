@@ -36,6 +36,11 @@ export interface VerifyOutcome {
 
 export interface VerifyDeps {
   timeoutMs: number
+  /** T01 (audit L5 H-5): per-instance deadline / cancel signal. Threaded from
+   *  `runInstanceOnce`'s `abort.signal` so a verify that is past its deadline
+   *  stops the underlying harness work (and its transient-crash retry sleep)
+   *  instead of running to completion and cascading into the next instance. */
+  signal?: AbortSignal
   pythonSwebench?: {
     evaluate?: PythonSwebenchEvaluate
     opts?: unknown
@@ -61,7 +66,13 @@ export const verify = async (
         reportPath: "",
       }
     }
-    const r = await evaluate(instance, patch, deps.pythonSwebench.opts ?? {})
+    // T01 (audit L5 H-5): forward the per-instance signal into the harness opts
+    // so `evaluateWithPythonSwebench` can race its retry sleep against abort.
+    // The `opts` is `unknown` at this seam (the harness module owns its shape);
+    // we merge the signal as a typed extra without disturbing the rest.
+    const baseOpts = (deps.pythonSwebench.opts ?? {}) as Record<string, unknown>
+    const harnessOpts = deps.signal !== undefined ? { ...baseOpts, signal: deps.signal } : baseOpts
+    const r = await evaluate(instance, patch, harnessOpts)
     const command = `python -m swebench.harness.run_evaluation (${instance.swebench.instanceId})`
     // REAL patch fail (`gradingCompleted:true + resolved:false`) → no `error`
     // (clean `passed:false`, classifier falls to `completed_unresolved`).

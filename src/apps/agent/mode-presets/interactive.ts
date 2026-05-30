@@ -60,8 +60,14 @@ const makeAbortError = (): Error & { code?: string } => {
 }
 
 const runInteractiveTerminal = async (req: AssembleRequest): Promise<void> => {
+  // T01 (audit L5 M-6): one cancel point per mode. The interactive surface owns
+  // a local controller for its own SIGINT handler, but it MUST also honor the
+  // composition-root signal (an upstream abort / parent cancel) — previously it
+  // ignored `req.base.signal` entirely. Compose the two so EITHER source stops
+  // the REPL loop. `AbortSignal.any` propagates the first to fire.
   const abort = new AbortController()
-  const base = buildInteractiveBase(req, abort.signal)
+  const signal: AbortSignal = AbortSignal.any([req.base.signal, abort.signal])
+  const base = buildInteractiveBase(req, signal)
   const { base: _base, mode: _mode, ...assemblerReq } = req
   const { runtime: runtimeFacade } = await createRuntimeFromAgentConfigBase({
     base,
@@ -101,12 +107,14 @@ const runInteractiveTerminal = async (req: AssembleRequest): Promise<void> => {
   }
   try {
     process.on("SIGINT", onSigint)
-    while (!abort.signal.aborted) {
-      const next = await promptSource.next(abort.signal)
-      if (next === null || abort.signal.aborted) break
+    // Loop on the COMPOSED signal so an upstream composition-root abort ends the
+    // REPL just like a local SIGINT does (audit L5 M-6).
+    while (!signal.aborted) {
+      const next = await promptSource.next(signal)
+      if (next === null || signal.aborted) break
       if (next === "") continue
-      await session.input.append(next, undefined, { signal: abort.signal })
-      await session.turn.run(undefined, { signal: abort.signal })
+      await session.input.append(next, undefined, { signal })
+      await session.turn.run(undefined, { signal })
     }
   } finally {
     process.off("SIGINT", onSigint)
@@ -114,11 +122,13 @@ const runInteractiveTerminal = async (req: AssembleRequest): Promise<void> => {
     await session.close().catch(() => undefined)
     await runtimeFacade.close().catch(() => undefined)
   }
-  if (abort.signal.aborted) throw makeAbortError()
+  if (signal.aborted) throw makeAbortError()
 }
 
 const stubBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" | "budgetMeter"> =>
-  buildInteractiveBase(req, req.base.signal ?? new AbortController().signal)
+  // T01 (audit L5 M-6): the seam path (stubbed runner) reuses the composition-
+  // root signal directly; the dead throwaway controller is removed.
+  buildInteractiveBase(req, req.base.signal)
 
 export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {
   if (req.mode !== "interactive") {

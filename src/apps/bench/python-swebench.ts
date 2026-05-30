@@ -34,7 +34,7 @@
  */
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { errMessage, runtimeConfig } from "@/shared"
+import { abortableSleep, abortReasonOf, errMessage, runtimeConfig } from "@/shared"
 import { benchWorkRoot } from "./corpus/paths"
 import { type HarnessConfig, harnessFlags, resolveHarnessConfig } from "./harness"
 import type { Instance } from "./types"
@@ -95,6 +95,13 @@ export interface PySwebenchOpts {
   modelName?: string
   /** Wall-clock budget for the harness invocation. Default 1800000 (30m). */
   timeoutMs?: number
+  /** T01 (audit L5 H-5 / M-8): per-instance cancellation. When the eval driver's
+   *  per-instance deadline fires, the transient-crash retry sleep races against
+   *  this signal instead of blocking the full 5s, and the retry is skipped
+   *  entirely if already aborted. The spawn boundary itself is owned by the
+   *  injected `Spawn` seam (which threads its own process timeout); this signal
+   *  governs the harness-level orchestration (retry sleep + pre-retry gate). */
+  signal?: AbortSignal
   /** Resolved harness config (cache/clean/workers/namespace/forceRebuild).
    *  Absent ⇒ `resolveHarnessConfig()` is called inside `buildArgv` to pull
    *  the frozen runtime-config defaults. Tests inject explicit configs. */
@@ -301,10 +308,20 @@ export const evaluateWithPythonSwebench = async (
     let resolvedIds = await collectResolvedIds(work)
     let retried = false
     if (run.code !== 0 && resolvedIds.length === 0 && !harnessReachedSummary(run.stdout)) {
-      retried = true
-      await new Promise((r) => setTimeout(r, 5000))
-      run = await spawn(argv, work, opts.timeoutMs ?? 1800000)
-      resolvedIds = await collectResolvedIds(work)
+      // T01 (audit L5 M-8): the 5s transient-crash settle now RACES the abort
+      // signal instead of blocking. If the per-instance deadline fires during
+      // the settle (or was already past), skip the retry entirely and surface
+      // the first run — previously the eval driver's deadline could not stop
+      // this sleep, cascading the timeout into the next instance.
+      try {
+        await abortableSleep(5000, opts.signal)
+        retried = true
+        run = await spawn(argv, work, opts.timeoutMs ?? 1800000)
+        resolvedIds = await collectResolvedIds(work)
+      } catch (e) {
+        if (abortReasonOf(e) === null) throw e
+        // Cancelled mid-settle: keep the first (failed) run, mark NOT retried.
+      }
     }
     const resolved = resolvedIds.includes(meta.instanceId)
     const gradingCompleted = harnessReachedSummary(run.stdout)
