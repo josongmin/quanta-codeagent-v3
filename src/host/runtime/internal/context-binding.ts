@@ -610,12 +610,30 @@ interface PendingRuntimeApprovalRecord {
   readonly actionKey: string
 }
 
-const actionKeyOf = (registry: ToolRegistry, action: ToolAction): string => {
+/** T03 (audit L5 H-1/M-3) — an approval grant is an opaque, single-use LEASE
+ *  scoped to ONE turn/action instance, not a broad action-kind key held for the
+ *  session lifetime. The lease carries the `actionKey` it satisfies so a re-run
+ *  of the approved action matches, but it is keyed by the opaque `approvalId`
+ *  so two concurrent same-`actionKey` actions can NOT share one grant. */
+interface RuntimeApprovalLease {
+  readonly approvalId: string
+  readonly actionKey: string
+}
+
+/** Sentinel returned by {@link actionKeyOf} when shell extraction throws. A
+ *  thrown extraction must FAIL CLOSED (force a prompt) rather than collapse to a
+ *  broad tool-name-only key that a stale lease could match (audit L5 H-1). */
+const SHELL_EXTRACT_FAILED = Symbol("shell-extract-failed")
+
+const actionKeyOf = (
+  registry: ToolRegistry,
+  action: ToolAction,
+): string | typeof SHELL_EXTRACT_FAILED => {
   let shellCommand: string | null
   try {
     shellCommand = registry.extractShellCommand(action.tool, action.input)
   } catch {
-    shellCommand = null
+    return SHELL_EXTRACT_FAILED
   }
   return shellCommand !== null ? `${action.tool}|${shellCommand}` : action.tool
 }
@@ -631,18 +649,45 @@ const approvalPlaceholderOutcome = (messages: readonly Message[]): AgentOutcome 
 
 const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
   const pending = new Map<string, PendingRuntimeApprovalRecord>()
-  const grants = new Set<string>()
+  // T03 — leases keyed by opaque approvalId (NOT a broad actionKey). Single-use
+  // and turn-scoped: a lease that enters a `runWithProtocol` scope without being
+  // consumed is cleared when that scope exits, so an approval cannot leak past
+  // the immediate re-run (audit L5 H-1).
+  const leases = new Map<string, RuntimeApprovalLease>()
+
+  /** Claim AT MOST ONE unclaimed lease whose `actionKey` matches. The lookup +
+   *  delete is synchronous (no `await` between find and consume) so two
+   *  concurrent same-key `onConfirm` calls can never both claim the same lease —
+   *  the second mints its own approval rather than racing the first (audit L5
+   *  M-3). A `SHELL_EXTRACT_FAILED` action key never matches any lease ⇒ it
+   *  always re-prompts (fail closed). */
+  const claimLease = (actionKey: string | typeof SHELL_EXTRACT_FAILED): boolean => {
+    if (actionKey === SHELL_EXTRACT_FAILED) return false
+    for (const [approvalId, lease] of leases) {
+      if (lease.actionKey === actionKey) {
+        leases.delete(approvalId)
+        return true
+      }
+    }
+    return false
+  }
 
   const onConfirm: NonNullable<AgentConfig["onConfirm"]> = async (action) => {
     const actionKey = actionKeyOf(base.registry, action)
-    if (grants.delete(actionKey)) return true
+    if (claimLease(actionKey)) return true
 
     const approval: PendingApprovalView = {
       approvalId: crypto.randomUUID(),
       reason: reasonOf(action),
       requestedAt: new Date().toISOString(),
     }
-    pending.set(approval.approvalId, { approval, actionKey })
+    // A throwing shell extraction has no stable key; record the sentinel string
+    // form only for diagnostics — it can never match a future lease.
+    pending.set(approval.approvalId, {
+      approval,
+      actionKey:
+        actionKey === SHELL_EXTRACT_FAILED ? `${action.tool}|<shell-extract-failed>` : actionKey,
+    })
     throw new RuntimeApprovalRequiredError(approval)
   }
 
@@ -652,18 +697,28 @@ const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
       if (slot === undefined) return await work()
       const previous = slot.current
       slot.current = onConfirm
+      // Snapshot the leases present at scope entry; any of these still present
+      // at scope exit were NOT consumed by this turn run and are stale — clear
+      // them so an approval is good for exactly one turn (audit L5 H-1).
+      const armedAtEntry = new Set(leases.keys())
       try {
         return await work()
       } finally {
         slot.current = previous
+        for (const approvalId of armedAtEntry) leases.delete(approvalId)
       }
     },
     resolveApproval: (approvalId: string, decision: "approve" | "deny"): void => {
       const record = pending.get(approvalId)
       if (record === undefined) return
       pending.delete(approvalId)
-      if (decision === "approve") grants.add(record.actionKey)
+      if (decision === "approve") {
+        leases.set(approvalId, { approvalId, actionKey: record.actionKey })
+      }
     },
+    /** Test seam — never call in production. Exposes the live lease ledger so
+     *  hellgates can assert turn-scoping without reaching into the closure. */
+    onConfirm,
   }
 }
 
@@ -1142,4 +1197,12 @@ export const createRuntimeContextBindingFromBootstrap = async (
     base: wireRuntimePorts(base),
     ...(args.turnAssembler !== undefined ? { turnAssembler: args.turnAssembler } : {}),
   })
+}
+
+/** T03 — test seam. Exposes the otherwise module-private approval-lease
+ *  controller so grant-isolation hellgates can drive it directly (turn-scoping,
+ *  concurrent same-key actions, fail-closed shell extraction) without standing
+ *  up a whole runtime host. NOT part of the production API surface. */
+export const __testing = {
+  createRuntimeApprovalProtocolController,
 }

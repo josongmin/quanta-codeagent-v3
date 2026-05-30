@@ -11,6 +11,11 @@ type HostAction =
       readonly prompt: string
       readonly images: readonly ImageBlock[]
     }
+  /** T03 — the reducer OWNS the cancel decision; the scheduler is the sole
+   *  executor that aborts the live turn-owned controller. The reducer never
+   *  reaches into a controller itself (it stays pure) — it only declares that
+   *  the active turn (if any) must be torn down. */
+  | { readonly kind: "cancel_turn" }
 
 export interface ReducerResult {
   readonly state: KernelSessionState
@@ -194,8 +199,43 @@ export const reduceSessionCommand = (
         ],
       }
     }
-    case "turn.cancel":
-      return { state, hostAction: { kind: "none" }, events: [] }
+    case "turn.cancel": {
+      // T03 (audit L5 C-1): the handler is no longer inert. When a turn is in
+      // flight (running / awaiting an approval) cancel transitions session
+      // status back to `idle`, clears any pending approval + streaming draft,
+      // and emits a state echo so subscribers observe the cancellation. The
+      // `cancel_turn` hostAction tells the scheduler to abort the SAME
+      // turn-owned controller the active host work is observing. When the
+      // session is already idle/failed there is nothing to tear down — we still
+      // surface a `cancel_turn` so the scheduler can no-op the (absent) live
+      // controller deterministically, but we leave state untouched.
+      const hasActiveTurn = state.status === "running" || state.status === "awaiting_approval"
+      if (!hasActiveTurn) {
+        return { state, hostAction: { kind: "cancel_turn" }, events: [] }
+      }
+      const nextState = withRevision({
+        ...state,
+        status: "idle",
+        pendingApproval: null,
+        transcript: clearStreamingAssistantText(state.transcript),
+        lastOutcomeReason: "aborted",
+      })
+      return {
+        state: nextState,
+        hostAction: { kind: "cancel_turn" },
+        events: [
+          {
+            eventId: crypto.randomUUID(),
+            seq: state.seq + 1,
+            revision: nextState.revision,
+            emittedAt,
+            causedByCommandId: command.commandId,
+            type: "session.state.updated",
+            state: toSessionStateView(nextState),
+          },
+        ],
+      }
+    }
     case "turn.run": {
       if (!hasDraftTurnInput(state)) {
         throw new SessionProtocolValidationError("empty_turn_input")
