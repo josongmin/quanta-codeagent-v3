@@ -13,9 +13,9 @@ import {
 } from "@/observability"
 import { normalizeRedactionConfig } from "@/security"
 import type { PromptPolicySnapshot, TurnPolicySnapshot } from "@/shared"
-import { errMessage, LLMError, logger } from "@/shared"
+import { abortReasonOf, errMessage, LLMError, logger } from "@/shared"
 import { compactIfNeeded, estimateTokens, reactiveCompact } from "./compaction"
-import { CompactionBreaker } from "./compaction-breaker"
+import { type BreakerVerdict, CompactionBreaker } from "./compaction-breaker"
 import {
   appendSummary,
   type ConversationSummaryArchive,
@@ -111,7 +111,6 @@ import {
   buildVerifyGuard,
   buildWorkMetricsResources,
   createRedactionRollup,
-  emitWorkMetrics,
   sessionSpanAttrs,
   stampTurn,
   type ToolHistoryEntry,
@@ -126,6 +125,11 @@ import {
 } from "./stop-category"
 import { createStreamDispatcher, type TurnTimingAnchors } from "./stream-callbacks"
 import { streamingTurn } from "./streaming-dispatch"
+import {
+  appendPendingToolResults,
+  flushTurnObservability,
+  stripOrphanToolUse,
+} from "./turn-closeout"
 import { consumeTurnSignals, createToolChoiceTurnState, resolveToolChoice } from "./tool-choice"
 import { buildToolInputSeam } from "./tool-input-streaming"
 import { makeTurnHeader } from "./turn-kind"
@@ -618,6 +622,9 @@ const streamConsume = async (
         collector,
       ),
       isConcurrencySafe: (name, input) => config.registry.isConcurrencySafe(name, input),
+      // T02 M1 — early-start is read-only AND concurrency-safe; a mutating
+      // concurrency-safe tool is deferred so a refused turn never commits it.
+      isReadOnly: (name) => config.registry.isReadOnly(name),
       // L3 wire (absorb #1, ADR-0060): route streaming `tool_use_*` events to
       // each tool's optional `onInputStart/Delta/Available` callbacks. The
       // seam is a one-`Map.get` fast-path no-op for tools that declare none,
@@ -639,6 +646,24 @@ const streamConsume = async (
     if (isSessionApprovalRequiredError(e)) {
       samplingStatus = "error"
       throw e
+    }
+    // T02 H1 — a user cancel (Ctrl+C / Esc) that arrives WHILE a chunk is being
+    // awaited makes the adapter's `for await` throw an abort: the SDK
+    // `AbortError` is rethrown as `LLMError{kind:"aborted"}` (or a bare DOM
+    // `AbortError`). The cooperative `isAborted(signal)` check only runs AFTER a
+    // successful `next()`, so a throwing iterator skips it. Without this branch
+    // the abort falls through to `{error}` → `decideOnStreamError` →
+    // `classifyLLMError("aborted")="fatal"` → `{kind:"error"}` and the
+    // intentional cancel is misreported as a runtime failure (RUNTIME_UNKNOWN),
+    // poisoning metrics/triage/retry policy. Classify it as `aborted` here so
+    // the turn outcome authority routes it to `interruptedCategory("user")`.
+    if (
+      config.signal.aborted ||
+      (e instanceof LLMError && e.kind === "aborted") ||
+      abortReasonOf(e) !== null
+    ) {
+      samplingStatus = "aborted"
+      return { aborted: true }
     }
     samplingStatus = "error"
     const message = e instanceof LLMError ? e.message : errMessage(e)
@@ -743,8 +768,22 @@ const maybeCompact = async (
   breaker: CompactionBreaker | undefined,
   archive: ConversationSummaryArchive | undefined,
   turn: number,
-): Promise<void> => {
-  if (!config.compaction) return
+): Promise<BreakerVerdict> => {
+  if (!config.compaction) return { abort: false }
+  // T02 M3 — proactive compaction circuit breaker is now ENFORCED at this
+  // site. Before this check `maybeCompact` only fed `recordProactive(...)`
+  // strikes and never consulted `breaker.check()`, so the proactive
+  // `maxNoProgressProactive` cap was a dead knob: the over-threshold autocompact
+  // would re-fire (and re-invoke the summarizer LLM) every turn with no
+  // headroom gained. We consult the breaker FIRST; once it has tripped we skip
+  // compaction entirely and route the abort through the SAME terminal outcome
+  // path the reactive site uses (`runTurn` turns the returned verdict into a
+  // `{kind:"error", reason}` TurnResult), instead of a side branch.
+  const verdict = breaker?.check() ?? { abort: false }
+  if (verdict.abort) {
+    emitRecovery(config, "compact", "breaker-disabled")
+    return verdict
+  }
   // Capture the optional callback into a local so the spread below carries a
   // narrowed (non-undefined) reference into the closure without a non-null
   // assertion. Absent ⇒ `preflight` is omitted entirely from `compactIfNeeded`'s
@@ -855,7 +894,7 @@ const maybeCompact = async (
       type: "error",
       message: `proactive compaction failed: ${message}`,
     })
-    return
+    return { abort: false }
   }
   if (result.compacted) {
     // R-Phase2 P1-1: emit a `recovery:"compact"` event with `detail:"proactive"`
@@ -904,6 +943,7 @@ const maybeCompact = async (
       config.stream.emit({ type: "context_compacted", ...entry })
     }
   }
+  return { abort: false }
 }
 
 /** Pull the human-readable summary text out of the synthetic
@@ -1159,9 +1199,15 @@ const prepareTurnContext = async (
   turn: number,
   citations: MemoryCitation[],
   hookPromptInjects: readonly import("./hooks").HookPromptInject[] | undefined,
-): Promise<ReturnType<typeof buildTurnContext>> => {
+): Promise<{
+  readonly ctx: ReturnType<typeof buildTurnContext>
+  readonly breakerVerdict: BreakerVerdict
+}> => {
   const memoryContext = await resolveMemoryContext(config, wm, recorder, citations)
-  await maybeCompact(config, staticSystemFor(config), wm, breaker, archive, turn)
+  // T02 M3 — the proactive compaction breaker verdict is surfaced so `runTurn`
+  // can route an enforced breaker trip through the same terminal outcome path
+  // the reactive site uses, instead of a dead side branch.
+  const breakerVerdict = await maybeCompact(config, staticSystemFor(config), wm, breaker, archive, turn)
   // Codex absorption — memory L3: snapshot the session WorkingState on every attempt
   // so the per-turn reminder reflects mutations the tool just made earlier in
   // the same turn. Absent ⇒ block omitted, byte-identical.
@@ -1225,7 +1271,8 @@ const prepareTurnContext = async (
   // ADR-0080 — fold the IDE snapshot into the built context (no provider ⇒
   // returned unchanged, byte-identical). ADR-0078 — prepend the redaction-
   // disabled banner when opted out (enabled ⇒ unchanged).
-  return injectRedactionBanner(config, await injectIdeContext(config, ctx))
+  const finalCtx = injectRedactionBanner(config, await injectIdeContext(config, ctx))
+  return { ctx: finalCtx, breakerVerdict }
 }
 
 type Step = { done: false } | { done: true; result: TurnResult }
@@ -1245,10 +1292,17 @@ const applyNonSuccessRecoveryAction = async (
   }
   if (action.do === "refusal") {
     const success = result as StreamSuccess
-    wm.append(success.message)
+    // T02 M2 — a refusal turn skips the deferred tool dispatch phase, so any
+    // `tool_use` blocks queued mid-stream never produced a `tool_result`.
+    // Persisting them yields an invalid transcript (provider 400 on
+    // resume/fork/replay). Seal the assistant message through the closeout
+    // authority's `stripOrphanToolUse` before it lands in working memory; the
+    // visible refusal text is preserved.
+    const sealed = stripOrphanToolUse(success.message)
+    wm.append(sealed)
     return {
       done: true,
-      result: { kind: "refusal", rationale: action.rationale, message: success.message },
+      result: { kind: "refusal", rationale: action.rationale, message: sealed },
     }
   }
   if (action.do === "backoff") {
@@ -1458,7 +1512,7 @@ const runTurn = async (
 
     // Rebuilt every attempt: ctx.messages = canonical history + one ephemeral
     // reminder tail (the per-turn dynamic context, never persisted).
-    const ctx = await prepareTurnContext(
+    const { ctx, breakerVerdict } = await prepareTurnContext(
       config,
       wm,
       recorder,
@@ -1470,6 +1524,11 @@ const runTurn = async (
       citations,
       turnInjects,
     )
+    // T02 M3 — an ENFORCED proactive compaction breaker trip ends the turn
+    // through the same terminal `{kind:"error"}` route the reactive breaker
+    // uses (see `applyNonSuccessRecoveryAction`), not a side branch. The
+    // recovery event was already emitted at the `maybeCompact` site.
+    if (breakerVerdict.abort) return { kind: "error", reason: breakerVerdict.reason }
     const result = await streamConsume(session, state, ctx)
     if ("aborted" in result) return { kind: "aborted" }
 
@@ -2237,24 +2296,6 @@ interface RunAgentContext {
   readonly finish: FinishAgentSession
 }
 
-const flushTurnObservability = async (args: {
-  readonly cfg: AgentConfig
-  readonly stream: AgentConfig["stream"]
-  readonly turn: number
-  readonly turnDiffSession: TurnDiffSession | undefined
-  readonly gitDirectiveCollector: ReturnType<typeof buildGitDirectiveEmit> | undefined
-  readonly workCollector: TurnWorkMetricsCollector | undefined
-  readonly workTurnId: string | undefined
-  readonly result: TurnResult
-}): Promise<void> => {
-  if (args.turnDiffSession !== undefined) {
-    const diffEvent = await args.turnDiffSession.endTurn(args.turn)
-    if (diffEvent !== null) args.stream.emit(diffEvent)
-  }
-  args.gitDirectiveCollector?.flush()
-  emitWorkMetrics(args.cfg, args.workCollector, args.workTurnId, args.result.kind)
-}
-
 const resolveTurnLoopOutcome = async (args: {
   readonly cfg: AgentConfig
   readonly stream: AgentConfig["stream"]
@@ -2296,6 +2337,16 @@ const resolveTurnLoopOutcome = async (args: {
   args.recorder?.turn()
   const exhausted = args.cfg.budgetMeter?.checkExhausted()
   if (exhausted?.exhausted) {
+    // T02 H2 — when the budget trips at the END of a tool-producing turn, the
+    // assistant message (carrying the `tool_use` blocks) is already in working
+    // memory but the matching `tool_result` blocks have NOT been appended yet
+    // (that normally happens on the continue path below, line ~`wm.append`).
+    // Terminating here without sealing leaves the transcript ending on an
+    // unmatched `tool_use` → provider 400 on resume/fork. Seal it through the
+    // closeout authority before the terminal finish.
+    if (args.result.kind === "tools") {
+      appendPendingToolResults(args.wm, args.result.resultBlocks)
+    }
     emitBudgetExhaustedDecision(args.cfg.decisionEmitter, exhausted, { turn: args.turn })
     return {
       kind: "finish",
@@ -2471,15 +2522,18 @@ const createRunAgentContext = async (config: AgentConfig): Promise<RunAgentConte
 const executeTurnWithObservability = async (args: {
   readonly ctx: RunAgentContext
   readonly turn: number
-}): Promise<{
-  readonly result: TurnResult
-  readonly workCollector: TurnWorkMetricsCollector | undefined
-  readonly workTurnId: string | undefined
-}> => {
+}): Promise<{ readonly result: TurnResult }> => {
   const { collector: workCollector, turnId: workTurnId } = buildWorkMetricsResources(args.ctx.cfg)
   const turnId = args.ctx.cfg.activeTurnRef?.current.currentTurn?.turnId ?? crypto.randomUUID()
   const turnSpan: Span = startSpan(SPAN_NAMES.turn, turnSpanAttrs(turnId))
   let turnSpanStatus: "ok" | "error" | "aborted" = "ok"
+  // T02 M5 — `resultKind` drives the closeout observability flush. When
+  // `runTurn` THROWS (HITL approval pause / any non-LLMError escape) it never
+  // resolves a `TurnResult`, so the flush must still run with a defined kind.
+  // "error" is the conservative classification for an escaping throw (the host
+  // re-raises it as an approval placeholder above the loop); the work-metrics
+  // gate only suppresses "aborted", so "error" still emits the turn's metrics.
+  let flushKind: "tools" | "completed" | "aborted" | "error" | "refusal" = "error"
   let result: TurnResult
   try {
     if (args.ctx.turnDiffSession !== undefined) {
@@ -2491,15 +2545,37 @@ const executeTurnWithObservability = async (args: {
       collector: workCollector,
     }
     result = await runTurn(args.turn, args.ctx.session, state)
+    flushKind = result.kind
     turnSpanStatus =
       result.kind === "aborted" ? "aborted" : result.kind === "error" ? "error" : "ok"
   } catch (e) {
     turnSpanStatus = "error"
     throw e
   } finally {
+    // T02 M5 — turn observability closeout is OWNED here so it fires EXACTLY
+    // ONCE per turn on BOTH the normal-return AND the throw/pause path. Before
+    // this move the flush lived in the outer loop AFTER the normal return, so a
+    // throwing turn (approval pause) silently dropped `turn_diff` finalization,
+    // git-directive flush, and work-metrics emit (L1 M5). The flush is itself
+    // best-effort and must not mask the original throw — a flush failure on the
+    // throw path is logged, never re-raised over the in-flight exception.
+    try {
+      await flushTurnObservability({
+        cfg: args.ctx.cfg,
+        stream: args.ctx.cfg.stream,
+        turn: args.turn,
+        turnDiffSession: args.ctx.turnDiffSession,
+        gitDirectiveCollector: args.ctx.gitDirectiveCollector,
+        workCollector,
+        workTurnId,
+        resultKind: flushKind,
+      })
+    } catch (flushErr) {
+      logger.warn(`loop.flushTurnObservability: ${errMessage(flushErr)}`)
+    }
     endSpan(turnSpan, turnSpanStatus, attrs({}))
   }
-  return { result, workCollector, workTurnId }
+  return { result }
 }
 
 const runAgentTurnLoop = async (ctx: RunAgentContext): Promise<AgentOutcome | undefined> => {
@@ -2519,17 +2595,10 @@ const runAgentTurnLoop = async (ctx: RunAgentContext): Promise<AgentOutcome | un
       return ctx.finish("aborted", turn - 1, interruptedCategory("user"))
     }
 
-    const { result, workCollector, workTurnId } = await executeTurnWithObservability({ ctx, turn })
-    await flushTurnObservability({
-      cfg: ctx.cfg,
-      stream: ctx.cfg.stream,
-      turn,
-      turnDiffSession: ctx.turnDiffSession,
-      gitDirectiveCollector: ctx.gitDirectiveCollector,
-      workCollector,
-      workTurnId,
-      result,
-    })
+    // T02 M5 — observability closeout is flushed INSIDE
+    // `executeTurnWithObservability` (its `finally`), so it fires on the
+    // throw/pause path too; the outer loop only consumes the resolved result.
+    const { result } = await executeTurnWithObservability({ ctx, turn })
     const resolution = await resolveTurnLoopOutcome({
       cfg: ctx.cfg,
       stream: ctx.cfg.stream,

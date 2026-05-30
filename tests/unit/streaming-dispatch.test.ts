@@ -37,9 +37,13 @@ const block = (id: string, content: string, isError = false): DispatchOutcome =>
 
 /** A dispatch mock that records start/end ordering into `log`. `safe` decides
  *  which tool names are concurrency-safe. */
-const makeHarness = (safeNames: string[]) => {
+const makeHarness = (safeNames: string[], readOnlyNames: string[] = safeNames) => {
   const log: string[] = []
   const isConcurrencySafe = (name: string): boolean => safeNames.includes(name)
+  // T02 M1 — the loop now gates early-start on read-only AND concurrency-safe.
+  // The harness's "safe" tools (`read`) are also read-only, so by default the
+  // read-only set mirrors `safeNames`, preserving the prior overlap intent.
+  const isReadOnly = (name: string): boolean => readOnlyNames.includes(name)
   const dispatch = async (call: StreamingCall): Promise<DispatchOutcome> => {
     log.push(`start:${call.id}`)
     // A real (timer) gap so an early-started call is still in flight while the
@@ -48,7 +52,7 @@ const makeHarness = (safeNames: string[]) => {
     log.push(`end:${call.id}`)
     return block(call.id, `out-${call.id}`)
   }
-  return { log, isConcurrencySafe, dispatch }
+  return { log, isConcurrencySafe, isReadOnly, dispatch }
 }
 
 describe("streamingTurn", () => {
@@ -75,7 +79,7 @@ describe("streamingTurn", () => {
   })
 
   test("all-safe calls overlap: dispatch starts BEFORE the stream ends", async () => {
-    const { log, isConcurrencySafe, dispatch } = makeHarness(["read"])
+    const { log, isConcurrencySafe, isReadOnly, dispatch } = makeHarness(["read"])
     const events: StreamEvent[] = [
       ...toolUse("t1", "read", { p: "a" }),
       { type: "text_delta", delta: "thinking more..." },
@@ -86,6 +90,7 @@ describe("streamingTurn", () => {
     const res = await streamingTurn({
       events: gen(events, (ev) => log.push(`ev:${ev.type}`)),
       isConcurrencySafe,
+      isReadOnly,
       dispatch,
     })
     expect(res.kind).toBe("assembled")

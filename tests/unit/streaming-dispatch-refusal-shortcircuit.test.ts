@@ -54,14 +54,21 @@ const okBlock = (id: string, content: string): DispatchOutcome => ({
 interface Harness {
   dispatchCalls: string[]
   isConcurrencySafe: (name: string) => boolean
+  isReadOnly: (name: string) => boolean
   dispatch: (call: StreamingCall) => Promise<DispatchOutcome>
 }
 
-const makeHarness = (safeNames: string[]): Harness => {
+const makeHarness = (safeNames: string[], readOnlyNames: string[] = safeNames): Harness => {
   const dispatchCalls: string[] = []
   return {
     dispatchCalls,
     isConcurrencySafe: (name: string): boolean => safeNames.includes(name),
+    // T02 M1 — early-start requires read-only AND concurrency-safe. The
+    // overlap-safe tool here is `read` (read-only), so the read-only set
+    // mirrors `safeNames` by default; a concurrency-safe-but-MUTATING tool
+    // would pass `[]` here and so never early-start (it could not survive a
+    // refusal).
+    isReadOnly: (name: string): boolean => readOnlyNames.includes(name),
     dispatch: async (call: StreamingCall): Promise<DispatchOutcome> => {
       dispatchCalls.push(call.id)
       await new Promise((r) => setTimeout(r, 5))
@@ -119,13 +126,13 @@ describe("ADR-0076 Gap-5 — refusal short-circuits Phase 3 deferred dispatch", 
     // arrives AFTER the call started; the post-stream short-circuit can only
     // skip Phase 3, not un-start an already-running dispatch. Phase 2 awaits
     // it; Phase 4 collects its result.
-    const { dispatchCalls, isConcurrencySafe, dispatch } = makeHarness(["read"])
+    const { dispatchCalls, isConcurrencySafe, isReadOnly, dispatch } = makeHarness(["read"])
     const events: StreamEvent[] = [
       ...toolUse("safe1", "read", { path: "/a" }),
       { type: "text_delta", delta: "Decided to refuse" },
       { type: "message_stop", stop_reason: "refusal" },
     ]
-    const res = await streamingTurn({ events: gen(events), isConcurrencySafe, dispatch })
+    const res = await streamingTurn({ events: gen(events), isConcurrencySafe, isReadOnly, dispatch })
     expect(res.kind).toBe("assembled")
     if (res.kind !== "assembled") return
     expect(res.stopReason).toBe("refusal")
@@ -141,13 +148,13 @@ describe("ADR-0076 Gap-5 — refusal short-circuits Phase 3 deferred dispatch", 
     // First call is safe (starts immediately). Second call is unsafe — engages
     // the barrier. On refusal, the safe call resolves and the unsafe deferred
     // call NEVER dispatches.
-    const { dispatchCalls, isConcurrencySafe, dispatch } = makeHarness(["read"])
+    const { dispatchCalls, isConcurrencySafe, isReadOnly, dispatch } = makeHarness(["read"])
     const events: StreamEvent[] = [
       ...toolUse("safe1", "read", { path: "/a" }),
       ...toolUse("unsafe2", "bash", { command: "rm -rf" }),
       { type: "message_stop", stop_reason: "refusal" },
     ]
-    const res = await streamingTurn({ events: gen(events), isConcurrencySafe, dispatch })
+    const res = await streamingTurn({ events: gen(events), isConcurrencySafe, isReadOnly, dispatch })
     expect(res.kind).toBe("assembled")
     if (res.kind !== "assembled") return
     expect(dispatchCalls).toEqual(["safe1"])
@@ -197,5 +204,30 @@ describe("ADR-0076 Gap-5 — refusal short-circuits Phase 3 deferred dispatch", 
     const res = await streamingTurn({ events: gen(events), isConcurrencySafe, dispatch })
     if (res.kind !== "assembled") throw new Error("expected assembled")
     expect(dispatchCalls).toEqual(["t1"])
+  })
+
+  test("T02 M1: concurrency-safe but MUTATING tool is NOT early-started ⇒ refusal does not execute it", async () => {
+    // The exact L1 M1 hole: `session_config`/`automation_update` are
+    // `isConcurrencySafe:true` but `isReadOnly:false`. Pre-fix they early-start
+    // in flight, so a refusal that arrives AFTER the start could not un-commit
+    // the mutating side effect. With the read-only gate the tool is DEFERRED
+    // (read-only set is empty here), and the refusal short-circuit skips the
+    // deferred dispatch entirely — the mutating tool NEVER runs.
+    const { dispatchCalls, isConcurrencySafe, isReadOnly, dispatch } = makeHarness(
+      ["session_config"],
+      [], // concurrency-safe but NOT read-only
+    )
+    const events: StreamEvent[] = [
+      ...toolUse("m1", "session_config", { action: "set_effort", effort: "high" }),
+      { type: "text_delta", delta: "On reflection, I refuse." },
+      { type: "message_stop", stop_reason: "refusal" },
+    ]
+    const res = await streamingTurn({ events: gen(events), isConcurrencySafe, isReadOnly, dispatch })
+    expect(res.kind).toBe("assembled")
+    if (res.kind !== "assembled") return
+    expect(res.stopReason).toBe("refusal")
+    // The critical invariant — the mutating tool was NEVER dispatched.
+    expect(dispatchCalls).toEqual([])
+    expect(res.resultBlocks).toEqual([])
   })
 })

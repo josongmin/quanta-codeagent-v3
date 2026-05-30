@@ -97,6 +97,15 @@ export interface StreamingTurnArgs {
   events: AsyncIterable<StreamEvent>
   /** == `registry.isConcurrencySafe`, bound by the loop. */
   isConcurrencySafe: (name: string, input: unknown) => boolean
+  /** == `registry.isReadOnly`, bound by the loop (T02 M1). Early-start
+   *  (in-flight overlap before the turn outcome is known) is restricted to
+   *  tools that are read-only AND concurrency-safe, so a turn that ends in a
+   *  `refusal` cannot have already committed a MUTATING side effect. A tool
+   *  that is `isConcurrencySafe:true` but `isReadOnly:false` (e.g.
+   *  `session_config` / `automation_update`) is therefore deferred to the
+   *  post-stream serial phase, which the refusal short-circuit skips. Absent ⇒
+   *  treated as NOT read-only (fail-safe: defer rather than early-start). */
+  isReadOnly?: (name: string) => boolean
   /** == `dispatchTool` bound by the loop (gates + execute + hooks). */
   dispatch: StreamingDispatch
   /** Mirror of text deltas (the loop emits `assistant_text`). */
@@ -267,6 +276,7 @@ const scheduleResolvedCall = (
   state: TurnState,
   call: StreamingCall,
   isConcurrencySafe: StreamingTurnArgs["isConcurrencySafe"],
+  isReadOnly: StreamingTurnArgs["isReadOnly"],
   dispatch: StreamingDispatch,
   onToolStart: StreamingTurnArgs["onToolStart"],
 ): void => {
@@ -298,8 +308,29 @@ const scheduleResolvedCall = (
     return
   }
 
-  // Concurrency-safe AND no barrier yet ⇒ start it now, in flight, so it
-  // overlaps the remaining stream. NOT awaited here.
+  // T02 M1 — "concurrency-safe" is ORTHOGONAL to "read-only". A tool can be
+  // `isConcurrencySafe:true` while `isReadOnly:false` (e.g. `session_config`
+  // set_effort, `automation_update` schedule create/cancel). Early-start runs
+  // a call IN FLIGHT before the turn outcome is known; if the turn then ends in
+  // a `refusal` the refusal short-circuit can only skip the DEFERRED dispatch
+  // phase — it cannot un-start an already-fired in-flight call. So a refused
+  // turn would still commit that mutating side effect, breaking the "refusal
+  // executes nothing" invariant (ADR-0076 Gap-5). Restrict early-start to
+  // read-only tools: a non-read-only safe call is deferred (NOT barrier-
+  // engaging — later read-only safe calls may still overlap) so it only runs in
+  // the post-stream serial phase, which the refusal path skips. Fail-safe: an
+  // unwired `isReadOnly` (undefined) or a throwing predicate ⇒ NOT read-only ⇒
+  // defer.
+  let readOnly: boolean
+  try {
+    readOnly = isReadOnly?.(call.name) ?? false
+  } catch {
+    readOnly = false
+  }
+  if (!readOnly) return
+
+  // Read-only AND concurrency-safe AND no barrier yet ⇒ start it now, in
+  // flight, so it overlaps the remaining stream. NOT awaited here.
   onToolStart?.(call)
   slot.promise = dispatch(call)
 }
@@ -385,7 +416,14 @@ const handleToolUseEvent = (state: TurnState, ev: StreamEvent, args: StreamingTu
   fireToolInput(args.onToolInput, "available", ev)
   const call = resolveToolCall(state.rawEvents, ev.id)
   if (call === undefined) return
-  scheduleResolvedCall(state, call, args.isConcurrencySafe, args.dispatch, args.onToolStart)
+  scheduleResolvedCall(
+    state,
+    call,
+    args.isConcurrencySafe,
+    args.isReadOnly,
+    args.dispatch,
+    args.onToolStart,
+  )
 }
 
 /** Phase 3: run the deferred slots (the barrier call + everything after it,
