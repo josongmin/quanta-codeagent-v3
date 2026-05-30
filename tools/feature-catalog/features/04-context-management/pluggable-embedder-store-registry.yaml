@@ -45,11 +45,16 @@ evidence:
     - src/retrieval/engines/store/registry.ts
     - src/retrieval/engines/capabilities.ts
     - src/retrieval/engines/index.ts
-  adrs: [261, 254]
+    - src/runner/assemble/search-index-backend.ts
+    - src/runner/assemble/search-pipeline.ts
+  adrs: [261, 254, 424]
   tests:
     unit:
       - tests/unit/retrieval/engines-hellgate.test.ts
-    integration: []
+      - tests/unit/runner/search-index-backend.test.ts
+      - tests/unit/runner/search-pipeline.test.ts
+    integration:
+      - tests/integration/search-pipeline-lance-wire.test.ts
     contract: []
 knobs:
   - name: QUANTA_EMBED_PROVIDER
@@ -62,9 +67,27 @@ knobs:
     values: [in-memory, sqlite, lance, qdrant]
     default: '<unset>'
     purpose: 'select VectorStore factory via env; unset → registry returns null (caller-owned construction)'
-deliberate_hold:
-  reason: 'Default-OFF — `loop`/`semantic`/`hybrid-query` does NOT consume the new registry. Existing ADR-0254 wiring is byte-identical. Plane-clean (no @/agent, @/memory, @/observability edits).'
-  promotion_path: 'Wire a consumer (semantic.ts or hybrid-query.ts) to opt-in via createEmbedderFromEnv()/createStoreFromEnv(); add integration test; add metrics on embed-latency + query-latency.'
+  - name: QUANTA_LANCE_BASE_URL
+    type: string
+    default: '<unset>'
+    purpose: 'LanceDB REST base URL for the live search-index consumer when QUANTA_VECTOR_STORE=lance'
+  - name: QUANTA_LANCE_TABLE
+    type: string
+    default: '<unset>'
+    purpose: 'LanceDB table name for the live search-index consumer when QUANTA_VECTOR_STORE=lance'
+  - name: QUANTA_LANCE_API_KEY
+    type: string
+    default: '<unset>'
+    purpose: 'optional bearer token forwarded to the LanceDB REST adapter'
+  - name: QUANTA_QDRANT_COLLECTION
+    type: string
+    default: '<unset>'
+    purpose: 'Qdrant collection name for the live search-index consumer when QUANTA_VECTOR_STORE=qdrant'
+  - name: QUANTA_QDRANT_BASE_URL
+    type: string
+    default: '<unset>'
+    purpose: 'optional Qdrant base URL override (default adapter target remains localhost:6333)'
+deliberate_hold: null
 notes: |
   - exactOptionalPropertyTypes-safe: optional fields are absent or defined,
     never `undefined`. Uses `omitUndef` from `@/shared` where shape varies.
@@ -73,6 +96,10 @@ notes: |
     src/memory/consolidate/store.ts).
   - Headless stub: deterministic djb2 → Mulberry32. Same input → byte-identical
     output. Default dim 1536 (configurable per factory call).
+  - ADR-0424 closes the prior hold: the search-index consumer now projects
+    `QUANTA_VECTOR_STORE` into the live semantic backend, with same-dim
+    deterministic fallback on provider failure, explicit-store fail-closed
+    semantics, mutation-batch reconcile, and embed/query latency metrics.
   - sibling to ADR-0254 (NOT a replacement). Old `EmbeddingPort` + 8 vendor
     factories remain in place and in use; the new `Embedder` is the richer
     contract for new call sites.

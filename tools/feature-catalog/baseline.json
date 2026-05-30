@@ -1,19 +1,19 @@
 {
-  "generated_at": "2026-05-21T05:32:13.316Z",
+  "generated_at": "2026-05-29T12:58:06.607Z",
   "tsc": {
     "exit": 2,
-    "errors": 68
+    "errors": 38
   },
   "biome": {
     "exit": 1,
-    "errors": 2
+    "errors": 14
   },
   "tests": {
-    "pass": 4049,
-    "fail": 59,
+    "pass": 2,
+    "fail": 2,
     "skip": 2,
-    "expect_count": 253226,
-    "files": 299,
+    "expect_count": 3,
+    "files": 1237,
     "by_tier": {
       "unit": {
         "files": 0,
@@ -28,41 +28,5 @@
         "tests": 0
       }
     }
-  },
-  "fc": {
-    "empty_stubs_max": 1,
-    "orphan_adrs_grandfathered": [
-      112,
-      136,
-      146,
-      155,
-      155,
-      158,
-      158,
-      160,
-      160,
-      161,
-      161,
-      162,
-      162,
-      165,
-      166,
-      167,
-      169,
-      170,
-      170,
-      173,
-      173,
-      174,
-      174,
-      175,
-      175,
-      175,
-      178,
-      179,
-      180,
-      181
-    ],
-    "updated_at": "2026-05-24T17:35:57.700Z"
   }
 }

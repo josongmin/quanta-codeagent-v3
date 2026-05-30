@@ -253,12 +253,7 @@ describe("indexer — corner cases (HELL-IDX-10 … 17)", () => {
     const paths = Array.from(ix.getCorpus()).map((c) => c.path)
     // build/out.ts excluded; build/keep.ts re-included via !negation.
     expect(paths.some((p) => p.endsWith("out.ts"))).toBe(false)
-    // Note: gitignore directory recursion with negation has well-known
-    // subtleties (parent dir excluded prevents descent). We accept either
-    // "keep included" OR "fully consistent dir-excluded" — both honour
-    // the closed-port contract; assertion is that the parser DID NOT crash
-    // on blank line / comment / negation.
-    expect(paths).toBeDefined()
+    expect(paths.some((p) => p.endsWith("keep.ts"))).toBe(true)
     ix.stop()
   })
 

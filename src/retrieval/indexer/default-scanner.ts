@@ -107,6 +107,7 @@ const globToRegex = (glob: string): RegExp => {
 
 interface IgnoreMatcher {
   isIgnored(relPath: string): boolean
+  shouldDescend(relDir: string): boolean
 }
 
 /** Parse a `.gitignore`-style file body. Empty lines + `#` comments are
@@ -116,7 +117,13 @@ interface IgnoreMatcher {
  *  `/` matches directories, `**` matches across boundaries, otherwise
  *  the pattern is a substring match against any path segment. */
 const parseIgnore = (body: string): IgnoreMatcher => {
-  type Rule = { readonly regex: RegExp; readonly negate: boolean; readonly dirOnly: boolean }
+  type Rule = {
+    readonly regex: RegExp
+    readonly negate: boolean
+    readonly dirOnly: boolean
+    readonly rawPattern: string
+    readonly anchored: boolean
+  }
   const rules: Rule[] = []
   for (const raw of body.split("\n")) {
     const line = raw.trim()
@@ -133,21 +140,34 @@ const parseIgnore = (body: string): IgnoreMatcher => {
     const regexSrc = anchored
       ? `^${globToRegex(pat).source.slice(1, -1)}(?:/.*)?$`
       : `(?:^|/)${globToRegex(pat).source.slice(1, -1)}(?:/.*)?$`
-    rules.push({ regex: new RegExp(regexSrc), negate, dirOnly })
+    rules.push({ regex: new RegExp(regexSrc), negate, dirOnly, rawPattern: pat, anchored })
+  }
+  const isIgnored = (relPath: string): boolean => {
+    let ignored = false
+    for (const r of rules) {
+      if (r.regex.test(relPath)) ignored = !r.negate
+    }
+    return ignored
+  }
+  const mayNeedDescend = (relDir: string): boolean => {
+    const dirPrefix = relDir === "" ? "" : `${relDir}/`
+    return rules.some((r) => {
+      if (!r.negate) return false
+      if (!r.anchored && !r.rawPattern.includes("/")) return true
+      if (/[*?]/.test(r.rawPattern)) return true
+      return r.rawPattern === relDir || r.rawPattern.startsWith(dirPrefix)
+    })
   }
   return {
-    isIgnored(relPath: string): boolean {
-      let ignored = false
-      for (const r of rules) {
-        if (r.dirOnly) continue // dir-only rules are applied separately by the walker
-        if (r.regex.test(relPath)) ignored = !r.negate
-      }
-      return ignored
-    },
+    isIgnored,
+    shouldDescend: (relDir: string): boolean => !isIgnored(relDir) || mayNeedDescend(relDir),
   }
 }
 
-const EMPTY_MATCHER: IgnoreMatcher = { isIgnored: () => false }
+const EMPTY_MATCHER: IgnoreMatcher = {
+  isIgnored: () => false,
+  shouldDescend: () => true,
+}
 
 /** Load and combine ignore files present at `root`. Missing files are
  *  silently ignored (matches Cursor / git behaviour). */
@@ -197,7 +217,11 @@ async function* walk(
       const abs = join(dir, ent.name)
       const rel = toPosix(relative(root, abs))
       if (rel === "" || rel.startsWith("..")) continue
-      if (matcher.isIgnored(rel)) continue
+      if (ent.isDirectory()) {
+        if (matcher.isIgnored(rel) && !matcher.shouldDescend(rel)) continue
+      } else if (matcher.isIgnored(rel)) {
+        continue
+      }
       let stats: Awaited<ReturnType<typeof fsp.lstat>>
       try {
         stats = await fsp.lstat(abs)

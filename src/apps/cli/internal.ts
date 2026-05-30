@@ -745,11 +745,20 @@ export const buildTooling = (
    *  registry instance the loop uses. Unset ⇒ byte-identical to today
    *  (loop mints internally). */
   subagentTaskRegistry?: import("@/subagent").TaskRegistry,
+  metrics?: Metrics,
 ): Tooling => {
   const store = buildStore()
   const embedder = buildEmbedder(store)
   const sessionId = crypto.randomUUID()
-  const searchWire = buildSearchPipelineFromEnv(process.env, process.cwd())
+  const searchMetrics =
+    metrics === undefined
+      ? undefined
+      : {
+          observe(name: string, value: number) {
+            metrics.timer(name).record(value)
+          },
+        }
+  const searchWire = buildSearchPipelineFromEnv(process.env, process.cwd(), searchMetrics)
   const memoryConfig = buildMemoryConfig(store)
   const subagentConfig = buildSubagentConfig(subagentTaskRegistry)
   const skillsConfig = buildSkillsConfig()

@@ -21,8 +21,10 @@ import { errMessage, logger } from "@/shared"
 import { searchCodebaseTool, type Tool } from "@/tool"
 import { assemblePipeline, type PipelinePreset, type PipelineWireOverrides } from "./pipeline"
 import {
+  type ChunkUpsertPort,
   buildSemanticBackend,
   resolveIndexEmbedder,
+  type SemanticReconcileBatch,
   type SearchIndexMetrics,
 } from "./search-index-backend"
 
@@ -59,6 +61,9 @@ const relativizePath = (cwd: string, path: string): string => {
 
 const parseLineMeta = (v: string | undefined): number | undefined =>
   v !== undefined && /^\d+$/.test(v) ? Number(v) : undefined
+
+const trackedChunkId = (path: string, startLine: number, endLine: number): string =>
+  `${path}:${startLine}-${endLine}`
 
 const disposeWire = (wire: WiredSearchPipeline | null): void => {
   if (wire?.intervalHandle !== null && wire?.intervalHandle !== undefined) {
@@ -113,6 +118,49 @@ const buildLexicalOverride = (cwd: string): NonNullable<PipelineWireOverrides["l
   }
 }
 
+export interface TrackedSemanticUpsert {
+  readonly upsert: ChunkUpsertPort
+  takeBatch(): SemanticReconcileBatch | null
+  clear(): void
+}
+
+export const createTrackedSemanticUpsert = (inner: ChunkUpsertPort): TrackedSemanticUpsert => {
+  const changedPaths = new Map<string, string[]>()
+  const deletedPaths = new Set<string>()
+  return {
+    upsert: {
+      async upsert(chunk) {
+        await inner.upsert(chunk)
+        deletedPaths.delete(chunk.path)
+        const ids = changedPaths.get(chunk.path) ?? []
+        ids.push(trackedChunkId(chunk.path, chunk.startLine, chunk.endLine))
+        changedPaths.set(chunk.path, ids)
+      },
+      async delete(path) {
+        await inner.delete(path)
+        changedPaths.delete(path)
+        deletedPaths.add(path)
+      },
+    },
+    takeBatch() {
+      if (changedPaths.size === 0 && deletedPaths.size === 0) return null
+      const batch: SemanticReconcileBatch = {
+        changedPaths: new Map(
+          [...changedPaths].map(([path, ids]) => [path, [...ids] as readonly string[]]),
+        ),
+        deletedPaths: [...deletedPaths],
+      }
+      changedPaths.clear()
+      deletedPaths.clear()
+      return batch
+    },
+    clear() {
+      changedPaths.clear()
+      deletedPaths.clear()
+    },
+  }
+}
+
 const startIndexer = (
   env: NodeJS.ProcessEnv,
   cwd: string,
@@ -133,29 +181,37 @@ const startIndexer = (
     resolvedEmbedder,
     ...(metrics !== undefined ? { metrics } : {}),
   })
+  const trackedUpsert = createTrackedSemanticUpsert(sem.upsert)
   const indexer = createDefaultIndexer({
     scanner: {
       root: cwd,
       ...(env.QUANTA_INDEX_GLOB !== undefined ? { glob: env.QUANTA_INDEX_GLOB } : {}),
     },
-    upsert: sem.upsert,
+    upsert: trackedUpsert.upsert,
   })
   let reconcile = Promise.resolve()
-  const queueReconcile = (): void => {
-    if (sem.reconcileCorpus === undefined) return
+  const queueReconcile = (batch: SemanticReconcileBatch): void => {
+    if (sem.reconcileChanges === undefined) return
     reconcile = reconcile
       .catch(() => undefined)
       .then(async () => {
         try {
-          await sem.reconcileCorpus?.(indexer.getCorpus())
+          // Reconcile only the paths touched in the completed scan batch. This
+          // avoids the old full-corpus replay on every successful delta tick.
+          await sem.reconcileChanges?.(batch)
         } catch (e) {
           logger.warn(`search index reconcile failed: ${errMessage(e)}`)
         }
       })
   }
   void indexer.scanInitial().then((r) => {
-    if (!r.ok) logger.warn(`indexer scanInitial failed: ${r.error.kind}`)
-    else queueReconcile()
+    if (!r.ok) {
+      trackedUpsert.clear()
+      logger.warn(`indexer scanInitial failed: ${r.error.kind}`)
+      return
+    }
+    const batch = trackedUpsert.takeBatch()
+    if (batch !== null) queueReconcile(batch)
   })
   const intervalMsRaw = env.QUANTA_INDEX_INTERVAL_MS
   const intervalMs =
@@ -165,10 +221,13 @@ const startIndexer = (
   const intervalHandle = setInterval(() => {
     void indexer.scanDelta().then((r) => {
       if (!r.ok && r.error.kind !== "scan-in-progress") {
+        trackedUpsert.clear()
         logger.warn(`indexer scanDelta failed: ${r.error.kind}`)
         return
       }
-      if (r.ok) queueReconcile()
+      if (!r.ok) return
+      const batch = trackedUpsert.takeBatch()
+      if (batch !== null) queueReconcile(batch)
     })
   }, intervalMs)
   if (typeof intervalHandle === "object" && intervalHandle !== null && "unref" in intervalHandle) {

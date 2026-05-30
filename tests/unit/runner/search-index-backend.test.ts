@@ -15,6 +15,7 @@ import {
   buildSemanticBackend,
   hashEmbed,
   isPersistOn,
+  resolveIndexEmbedder,
   selectIndexEmbedder,
 } from "@/runner/assemble/search-index-backend"
 
@@ -26,6 +27,50 @@ const chunk = (path: string, text: string, start = 1, end = 5): IndexerFileChunk
   mtime: 0,
   sha: "0",
 })
+
+const batchFor = (
+  chunks: readonly IndexerFileChunk[],
+  deletedPaths: readonly string[] = [],
+) => {
+  const changedPaths = new Map<string, string[]>()
+  for (const c of chunks) {
+    const ids = changedPaths.get(c.path) ?? []
+    ids.push(`${c.path}:${c.startLine}-${c.endLine}`)
+    changedPaths.set(c.path, ids)
+  }
+  return {
+    changedPaths,
+    deletedPaths: [...deletedPaths],
+  }
+}
+
+const jsonResponse = (status: number, body: unknown): Response =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  })
+
+type Recorder = {
+  calls: Array<{ url: string; method: string; body: unknown }>
+  fetchImpl: (url: string, init?: RequestInit) => Promise<Response>
+}
+
+const recorder = (
+  reply: (req: { url: string; method: string; body: unknown }) => Response,
+): Recorder => {
+  const calls: Array<{ url: string; method: string; body: unknown }> = []
+  return {
+    calls,
+    fetchImpl: async (url, init) => {
+      const method = (init?.method as string | undefined) ?? "GET"
+      const bodyRaw = init?.body as string | undefined
+      const body = bodyRaw === undefined ? undefined : JSON.parse(bodyRaw)
+      const req = { url, method, body }
+      calls.push(req)
+      return reply(req)
+    },
+  }
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // A. Embedder selection
@@ -63,10 +108,12 @@ describe("selectIndexEmbedder — embedder selection", () => {
 
   test("A5. real embedder failure (missing api key) ⇒ hashEmbed fallback", async () => {
     // openai with no OPENAI_API_KEY ⇒ embed() returns err(missing-api-key);
-    // selector must fall back to hashEmbed, never throw.
+    // selector must preserve the provider dimension by falling back to the
+    // deterministic headless stub, never to 64-d hashEmbed.
     const embed = selectIndexEmbedder({ QUANTA_EMBED_PROVIDER: "openai" })
     const got = await embed("needs key")
-    expect(got).toEqual([...hashEmbed("needs key")])
+    expect(got.length).toBe(1536)
+    expect(got.length).not.toBe(hashEmbed("needs key").length)
   })
 
   test("A6. empty real-embedder output ⇒ hashEmbed fallback", async () => {
@@ -78,12 +125,12 @@ describe("selectIndexEmbedder — embedder selection", () => {
           return { ok: true as const, value: { vectors: [], modelTag: "stub" } }
         },
         async capabilities() {
-          return { dim: 0, maxInputBytes: 0, batchSize: 0, modelTag: "stub" }
+          return { dim: 8, maxInputBytes: 0, batchSize: 0, modelTag: "stub" }
         },
       }),
     )
     const got = await embed("xyz")
-    expect(got).toEqual([...hashEmbed("xyz")])
+    expect(got.length).toBe(8)
   })
 
   test("A7. throwing real embedder ⇒ hashEmbed fallback (no leak)", async () => {
@@ -92,11 +139,44 @@ describe("selectIndexEmbedder — embedder selection", () => {
         throw new Error("vendor blew up")
       },
       async capabilities() {
-        return { dim: 0, maxInputBytes: 0, batchSize: 0, modelTag: "x" }
+        return { dim: 5, maxInputBytes: 0, batchSize: 0, modelTag: "x" }
       },
     }))
     const got = await embed("boom")
-    expect(got).toEqual([...hashEmbed("boom")])
+    expect(got.length).toBe(5)
+  })
+
+  test("A8. metrics sink observes primary + fallback embed latency", async () => {
+    const seen: Array<{ name: string; labels?: Record<string, string> }> = []
+    const metrics = {
+      observe(name: string, _value: number, labels?: Record<string, string>) {
+        seen.push({ name, labels })
+      },
+    }
+    const primary = resolveIndexEmbedder({ QUANTA_EMBED_PROVIDER: "headless" }, undefined, { metrics })
+    await primary.embed("primary")
+    const fallback = resolveIndexEmbedder(
+      { QUANTA_EMBED_PROVIDER: "headless" },
+      () => ({
+        async embed() {
+          return { ok: false as const, error: { kind: "network", detail: "x" } }
+        },
+        async capabilities() {
+          return { dim: 9, maxInputBytes: 0, batchSize: 0, modelTag: "broken" }
+        },
+      }),
+      { metrics },
+    )
+    await fallback.embed("fallback")
+    expect(seen.some((s) => s.name === "search.index.embed.latency_ms" && s.labels?.mode === "primary")).toBe(
+      true,
+    )
+    expect(
+      seen.some(
+        (s) =>
+          s.name === "search.index.embed.latency_ms" && s.labels?.mode === "fallback-headless",
+      ),
+    ).toBe(true)
   })
 })
 
@@ -137,7 +217,7 @@ describe("buildSemanticBackend — sqlite persist", () => {
   test("B3. persist on ⇒ vectors survive across a fresh backend on the same db", async () => {
     const db = new Database(":memory:")
     const env = { QUANTA_INDEX_PERSIST: "on" } as const
-    const make = () => buildSemanticBackend(env, async (t) => hashEmbed(t), db)
+    const make = () => buildSemanticBackend(env, async (t) => hashEmbed(t), { db })
 
     const a = make()
     await a.upsert.upsert(chunk("svc.ts", "semantic index persistence roundtrip"))
@@ -154,7 +234,7 @@ describe("buildSemanticBackend — sqlite persist", () => {
     const backend = buildSemanticBackend(
       { QUANTA_INDEX_PERSIST: "on" },
       async (t) => hashEmbed(t),
-      db,
+      { db },
     )
     await backend.upsert.upsert(chunk("d.ts", "delete me please"))
     await backend.upsert.delete("d.ts")
@@ -167,7 +247,7 @@ describe("buildSemanticBackend — sqlite persist", () => {
     const backend = buildSemanticBackend(
       { QUANTA_INDEX_PERSIST: "on" },
       async (t) => hashEmbed(t),
-      db,
+      { db },
     )
     await backend.upsert.upsert(chunk("one.ts", "first chunk text", 10, 20))
     await backend.upsert.upsert(chunk("two.ts", "second chunk text", 30, 40))
@@ -179,5 +259,204 @@ describe("buildSemanticBackend — sqlite persist", () => {
     expect(top?.metadata?.startLine).toBe(10)
     expect(top?.metadata?.endLine).toBe(20)
     expect(top?.source).toBe("semantic")
+  })
+
+  test("B6. explicit Lance store ⇒ registry-backed backend hits REST adapter + reconcile deletes stale ids", async () => {
+    const rec = recorder((req) => {
+      if (req.url.endsWith("/upsert")) return jsonResponse(200, { ok: true })
+      if (req.url.endsWith("/query")) {
+        return jsonResponse(200, {
+          hits: [
+            {
+              id: "a.ts:1-5",
+              score: 0.99,
+              metadata: { path: "a.ts", startLine: 1, endLine: 5, text: "alpha" },
+            },
+          ],
+        })
+      }
+      if (req.url.endsWith("/delete")) return jsonResponse(200, { ok: true })
+      return jsonResponse(404, {})
+    })
+    const env = {
+      QUANTA_VECTOR_STORE: "lance",
+      QUANTA_LANCE_BASE_URL: "http://lance.test",
+      QUANTA_LANCE_TABLE: "docs",
+      QUANTA_EMBED_PROVIDER: "headless",
+    } as const
+    const resolved = resolveIndexEmbedder(env)
+    const backend = buildSemanticBackend(env, resolved.embed, {
+      resolvedEmbedder: resolved,
+      storeDeps: { lance: { fetchImpl: rec.fetchImpl } },
+    })
+    const first = chunk("a.ts", "alpha", 1, 5)
+    const stale = chunk("a.ts", "stale", 6, 10)
+    await backend.upsert.upsert(first)
+    await backend.upsert.upsert(stale)
+    await backend.reconcileChanges?.(batchFor([first, stale]))
+    await backend.reconcileChanges?.(batchFor([first]))
+    const hits = await backend.port.query(await resolved.embed("alpha"), 1)
+    expect(hits[0]?.metadata?.path).toBe("a.ts")
+    expect(rec.calls.some((c) => c.url === "http://lance.test/v1/table/docs/upsert")).toBe(true)
+    expect(rec.calls.some((c) => c.url === "http://lance.test/v1/table/docs/query")).toBe(true)
+    expect(
+      rec.calls.some(
+        (c) =>
+          c.url === "http://lance.test/v1/table/docs/delete" &&
+          JSON.stringify(c.body) === JSON.stringify({ ids: ["a.ts:6-10"] }),
+      ),
+    ).toBe(true)
+  })
+
+  test("B7. explicit Lance max-dim mismatch ⇒ backend hard-disables instead of silently falling back", async () => {
+    const rec = recorder(() => jsonResponse(200, { ok: true }))
+    const env = {
+      QUANTA_VECTOR_STORE: "lance",
+      QUANTA_LANCE_BASE_URL: "http://lance.test",
+      QUANTA_LANCE_TABLE: "docs",
+      QUANTA_LANCE_MAX_DIM: "32",
+      QUANTA_EMBED_PROVIDER: "headless",
+    } as const
+    const resolved = resolveIndexEmbedder(env)
+    const backend = buildSemanticBackend(env, resolved.embed, {
+      resolvedEmbedder: resolved,
+      storeDeps: { lance: { fetchImpl: rec.fetchImpl } },
+    })
+    await backend.upsert.upsert(chunk("fallback.ts", "alpha"))
+    const hits = await backend.port.query(await resolved.embed("alpha"), 1)
+    expect(hits).toHaveLength(0)
+    expect(rec.calls).toHaveLength(0)
+  })
+
+  test("B8. unknown explicit store ⇒ backend hard-disables instead of aliasing to legacy sqlite/in-memory", async () => {
+    const backend = buildSemanticBackend(
+      { QUANTA_VECTOR_STORE: "lancee", QUANTA_INDEX_PERSIST: "on" },
+      async (t) => hashEmbed(t),
+    )
+    await backend.upsert.upsert(chunk("disabled.ts", "alpha"))
+    const hits = await backend.port.query(hashEmbed("alpha"), 1)
+    expect(hits).toHaveLength(0)
+  })
+
+  test("B9. delete(path) failure keeps manifest so the same path can be retried", async () => {
+    let deleteOk = false
+    const rec = recorder((req) => {
+      if (req.url.endsWith("/upsert")) return jsonResponse(200, { ok: true })
+      if (req.url.endsWith("/delete")) {
+        return deleteOk ? jsonResponse(200, { ok: true }) : jsonResponse(503, { error: "retry" })
+      }
+      if (req.url.endsWith("/query")) return jsonResponse(200, { hits: [] })
+      return jsonResponse(404, {})
+    })
+    const env = {
+      QUANTA_VECTOR_STORE: "lance",
+      QUANTA_LANCE_BASE_URL: "http://lance.test",
+      QUANTA_LANCE_TABLE: "docs",
+      QUANTA_EMBED_PROVIDER: "headless",
+    } as const
+    const resolved = resolveIndexEmbedder(env)
+    const backend = buildSemanticBackend(env, resolved.embed, {
+      resolvedEmbedder: resolved,
+      storeDeps: { lance: { fetchImpl: rec.fetchImpl } },
+    })
+    await backend.upsert.upsert(chunk("retry.ts", "alpha"))
+    await backend.upsert.delete("retry.ts")
+    deleteOk = true
+    await backend.upsert.delete("retry.ts")
+    const deleteBodies = rec.calls
+      .filter((c) => c.url === "http://lance.test/v1/table/docs/delete")
+      .map((c) => JSON.stringify(c.body))
+    expect(deleteBodies).toEqual([
+      JSON.stringify({ ids: ["retry.ts:1-5"] }),
+      JSON.stringify({ ids: ["retry.ts:1-5"] }),
+    ])
+  })
+
+  test("B10. stale-id delete failure on rechunk keeps manifest so reconcile can retry", async () => {
+    let deleteOk = true
+    const rec = recorder((req) => {
+      if (req.url.endsWith("/upsert")) return jsonResponse(200, { ok: true })
+      if (req.url.endsWith("/delete")) {
+        return deleteOk ? jsonResponse(200, { ok: true }) : jsonResponse(503, { error: "retry" })
+      }
+      if (req.url.endsWith("/query")) return jsonResponse(200, { hits: [] })
+      return jsonResponse(404, {})
+    })
+    const env = {
+      QUANTA_VECTOR_STORE: "lance",
+      QUANTA_LANCE_BASE_URL: "http://lance.test",
+      QUANTA_LANCE_TABLE: "docs",
+      QUANTA_EMBED_PROVIDER: "headless",
+    } as const
+    const resolved = resolveIndexEmbedder(env)
+    const backend = buildSemanticBackend(env, resolved.embed, {
+      resolvedEmbedder: resolved,
+      storeDeps: { lance: { fetchImpl: rec.fetchImpl } },
+    })
+    const first = chunk("retry.ts", "alpha", 1, 5)
+    const stale = chunk("retry.ts", "stale", 6, 10)
+    await backend.upsert.upsert(first)
+    await backend.upsert.upsert(stale)
+    await backend.reconcileChanges?.(batchFor([first, stale]))
+    deleteOk = false
+    await backend.reconcileChanges?.(batchFor([first]))
+    deleteOk = true
+    await backend.reconcileChanges?.(batchFor([first]))
+    const deleteBodies = rec.calls
+      .filter((c) => c.url === "http://lance.test/v1/table/docs/delete")
+      .map((c) => JSON.stringify(c.body))
+      .filter((body) => body === JSON.stringify({ ids: ["retry.ts:6-10"] }))
+    expect(deleteBodies).toHaveLength(2)
+  })
+
+  test("B11. deleted-path reconcile failure keeps manifest so full-path cleanup can retry", async () => {
+    let deleteOk = true
+    const rec = recorder((req) => {
+      if (req.url.endsWith("/upsert")) return jsonResponse(200, { ok: true })
+      if (req.url.endsWith("/delete")) {
+        return deleteOk ? jsonResponse(200, { ok: true }) : jsonResponse(503, { error: "retry" })
+      }
+      if (req.url.endsWith("/query")) return jsonResponse(200, { hits: [] })
+      return jsonResponse(404, {})
+    })
+    const env = {
+      QUANTA_VECTOR_STORE: "lance",
+      QUANTA_LANCE_BASE_URL: "http://lance.test",
+      QUANTA_LANCE_TABLE: "docs",
+      QUANTA_EMBED_PROVIDER: "headless",
+    } as const
+    const resolved = resolveIndexEmbedder(env)
+    const backend = buildSemanticBackend(env, resolved.embed, {
+      resolvedEmbedder: resolved,
+      storeDeps: { lance: { fetchImpl: rec.fetchImpl } },
+    })
+    await backend.upsert.upsert(chunk("gone.ts", "alpha"))
+    deleteOk = false
+    await backend.reconcileChanges?.(batchFor([], ["gone.ts"]))
+    deleteOk = true
+    await backend.reconcileChanges?.(batchFor([], ["gone.ts"]))
+    const deleteBodies = rec.calls
+      .filter((c) => c.url === "http://lance.test/v1/table/docs/delete")
+      .map((c) => JSON.stringify(c.body))
+      .filter((body) => body === JSON.stringify({ ids: ["gone.ts:1-5"] }))
+    expect(deleteBodies).toHaveLength(2)
+  })
+
+  test("B12. query metrics land on the supplied sink", async () => {
+    const seen: Array<{ name: string; labels?: Record<string, string> }> = []
+    const metrics = {
+      observe(name: string, _value: number, labels?: Record<string, string>) {
+        seen.push({ name, labels })
+      },
+    }
+    const backend = buildSemanticBackend({}, async (t) => hashEmbed(t), { metrics })
+    await backend.upsert.upsert(chunk("metric.ts", "alpha"))
+    await backend.port.query(hashEmbed("alpha"), 1)
+    expect(
+      seen.some(
+        (s) =>
+          s.name === "search.index.query.latency_ms" && s.labels?.store === "legacy-in-memory",
+      ),
+    ).toBe(true)
   })
 })

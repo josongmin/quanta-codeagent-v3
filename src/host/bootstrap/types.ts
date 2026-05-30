@@ -173,6 +173,7 @@ export type BuildToolingFactory = (
   gitToolList: Tool[],
   slog: StructuredLogger,
   taskRegistry: TaskRegistry | undefined,
+  metrics?: Metrics,
 ) => Tooling
 
 /** Resolve default-OFF feature flags + bridged MCP/LSP/git tools from the

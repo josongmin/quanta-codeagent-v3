@@ -262,6 +262,7 @@ export const bootstrapSession = async (
       features.gitToolList,
       slog,
       lifecycleTaskRegistry,
+      features.metrics,
     )
 
     const mcpSurface = deps.buildMcpSurfaceInfo({
