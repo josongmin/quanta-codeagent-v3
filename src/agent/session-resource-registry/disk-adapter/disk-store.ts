@@ -204,12 +204,18 @@ const wrapStoreWithDiskMirror = (
   cfg: DiskRegistryConfig,
   sessionId: string,
   lockReady: Promise<SessionLock | null>,
+  touchOnActivity: (sessionId: string) => void,
 ): TypedHistoryEventStore => {
   const eventsPath = join(sessionDirOf(cfg, sessionId), EVENTS_FILENAME)
   return {
     append(event: TypedHistoryEvent): void {
       inner.append(event)
       const line = serializeEventLine(event)
+      // T04 — appending IS activity. Refresh freshness so the disk GC's TTL
+      // (which reads `meta.json.lastTouched`) does NOT evict a session that is
+      // still appending events through an already-handed-out store reference.
+      // This is the previously-missing axis of `lastTouched` ownership.
+      touchOnActivity(sessionId)
       // Fire-and-forget: disk mirror MUST NOT block / throw for the
       // append contract to stay sync. Errors land in the swallowed
       // `appendFileSafe` rejection. Lock failure (null) ⇒ skip disk.
@@ -380,6 +386,28 @@ export const createDiskSessionResourceRegistry = (
     cache: createInMemorySystemPromptCache(),
   })
 
+  // T04 — the SINGLE owner of session freshness. Every "this session is alive"
+  // signal funnels through here: getOrCreate (mint + cache-hit) AND the store
+  // append mirror. It (1) advances the in-memory `lastTouched` (drives the
+  // in-process LRU / size accounting) and (2) rewrites `meta.json.lastTouched`
+  // (drives the disk GC TTL). Both are gated on the per-session lock — a
+  // lock-failed (memory-only) session must NOT race the meta write with the
+  // process that actually holds the lock. NO-THROW (best-effort disk write).
+  //
+  // Replaces the previously-scattered `hit.lastTouched = t; writeMeta(...)`
+  // duplicated at each getOrCreate arm, and closes the gap where appends
+  // refreshed neither — letting the GC evict an actively-appending session.
+  const touchOnActivity = (sessionId: string): void => {
+    const t = now()
+    const entry = entries.get(sessionId)
+    if (entry !== undefined) entry.lastTouched = t
+    const lockReady = ensureLock(sessionId)
+    void lockReady.then((lock) => {
+      if (lock === null) return
+      return writeMeta(cfg, sessionId, t)
+    })
+  }
+
   // Synchronous getOrCreate contract: we must return SessionResources
   // immediately. For the first call on a sessionId, we mint a synchronous
   // pair (no disk read) and then BACKGROUND-resync from disk by appending
@@ -412,16 +440,10 @@ export const createDiskSessionResourceRegistry = (
       const hit = entries.get(sessionId)
       const t = now()
       if (hit !== undefined) {
-        hit.lastTouched = t
-        // ADR-0356: still gated on the existing lock — same `lockMap`
-        // entry from the original mint. Re-touch must not write the
-        // meta.json on a lock-failed session (would race with another
-        // process that holds the lock).
-        const lockReady = ensureLock(sessionId)
-        void lockReady.then((lock) => {
-          if (lock === null) return
-          return writeMeta(cfg, sessionId, t)
-        })
+        // T04 — cache-hit is activity. Funnel through the single freshness
+        // owner (advances in-memory lastTouched + rewrites meta.json, lock-
+        // gated) instead of an inline duplicate of the mint/append logic.
+        touchOnActivity(sessionId)
         return hit.resources
       }
       // ADR-0356 — acquire the per-session lock. The promise is reused
@@ -432,7 +454,7 @@ export const createDiskSessionResourceRegistry = (
       // mirror. Schedule disk replay onto the same inner containers.
       const innerStore = createInMemoryTypedHistoryEventStore()
       const innerCache = createInMemorySystemPromptCache()
-      const store = wrapStoreWithDiskMirror(innerStore, cfg, sessionId, lockReady)
+      const store = wrapStoreWithDiskMirror(innerStore, cfg, sessionId, lockReady, touchOnActivity)
       const cache = wrapCacheWithDiskMirror(innerCache, cfg, sessionId, lockReady)
       const resources: SessionResources = { store, cache }
       entries.set(sessionId, { resources, lastTouched: t })
@@ -455,10 +477,10 @@ export const createDiskSessionResourceRegistry = (
           // NO-THROW: replay failure leaves the fresh pair as-is.
         }
       })
-      void lockReady.then((lock) => {
-        if (lock === null) return
-        return writeMeta(cfg, sessionId, t)
-      })
+      // T04 — mint is activity. The single freshness owner writes the initial
+      // meta.json (lock-gated), replacing the inline duplicate. The entry's
+      // `lastTouched` was already seeded with `t` above.
+      touchOnActivity(sessionId)
       return resources
     } catch {
       // Worst case: filesystem dead. Hand back a memory-only pair so

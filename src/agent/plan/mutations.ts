@@ -27,6 +27,7 @@ import {
   type Phase,
   PLAN_LIMITS,
   type Plan,
+  type PlanDelta,
   type PlanMutationError,
   type PlanResult,
   type TodoItem,
@@ -62,6 +63,59 @@ const dedupeIds = (ids: readonly string[]): string | null => {
     seen.add(id)
   }
   return null
+}
+
+/**
+ * T04 owning-seam — re-derive every `phase.todoIds` from the authoritative
+ * `todo.phaseId` side so the two never drift.
+ *
+ * The reducers treat `todo.phaseId` as the SINGLE source of truth for
+ * membership; `phase.todoIds` is a DERIVED ordered view. This helper rebuilds
+ * each phase's `todoIds` to exactly the set of todos whose `phaseId` points at
+ * it, while PRESERVING the prior intra-phase order and APPENDING any newly
+ * bound todos (deterministic order: existing-first, then new-by-insertion).
+ *
+ * Guarantees post-condition for any plan it produces:
+ *   (a) todo.phaseId === ph.id            ⇒ ph.todoIds includes todo.id
+ *   (b) id ∈ ph.todoIds                   ⇒ todo exists ∧ todo.phaseId === ph.id
+ *   (c) no todo id appears in two phases' todoIds
+ *
+ * Pure — no I/O, deterministic given identical inputs.
+ */
+const syncPhaseMembership = (
+  phases: readonly Phase[],
+  todos: Readonly<Record<string, TodoItem>>,
+): Phase[] => {
+  // Group todo ids by their current phaseId (insertion order = Object key order
+  // for newly-built records; for existing todos we re-impose the prior phase
+  // order below so display stays stable).
+  const boundByPhase = new Map<string, string[]>()
+  for (const phase of phases) boundByPhase.set(phase.id, [])
+  for (const id of Object.keys(todos)) {
+    const todo = todos[id]
+    if (todo?.phaseId === undefined) continue
+    const bucket = boundByPhase.get(todo.phaseId)
+    if (bucket !== undefined) bucket.push(id)
+  }
+  return phases.map((phase) => {
+    const members = boundByPhase.get(phase.id) ?? []
+    const memberSet = new Set(members)
+    // Prior order first (only ids still bound here), then any new bindings.
+    const ordered: string[] = []
+    for (const id of phase.todoIds) {
+      if (memberSet.has(id)) {
+        ordered.push(id)
+        memberSet.delete(id)
+      }
+    }
+    for (const id of members) {
+      if (memberSet.has(id)) {
+        ordered.push(id)
+        memberSet.delete(id)
+      }
+    }
+    return { ...phase, todoIds: ordered }
+  })
 }
 
 /** Build a new TodoItem from NewTodo input. Generates id via injected idGen.
@@ -229,10 +283,14 @@ export const addTodos = (
   const dagOk = validateDag(newTodos)
   if (!dagOk.ok) return err(dagOk.error)
 
+  // T04 owning-seam: a new todo bound to a phase MUST appear in that phase's
+  // todoIds atomically — callers no longer compose a follow-up membership write.
+  const newPhases = syncPhaseMembership(plan.phases, newTodos)
   const newPlan: Plan = {
     ...plan,
     version: plan.version + 1,
     todos: newTodos,
+    phases: newPhases,
     updatedAt: now,
   }
   return { ok: true, value: { kind: "todos_added", added, plan: newPlan } }
@@ -350,7 +408,16 @@ export const updateTodos = (
   const dagOk = validateDag(newTodos)
   if (!dagOk.ok) return err(dagOk.error)
 
-  const newPlan: Plan = { ...plan, version: plan.version + 1, todos: newTodos, updatedAt: now }
+  // T04 owning-seam: any patch that changed/cleared a todo's phaseId MUST move
+  // it between phases atomically (no caller-side membership repair).
+  const newPhases = syncPhaseMembership(plan.phases, newTodos)
+  const newPlan: Plan = {
+    ...plan,
+    version: plan.version + 1,
+    todos: newTodos,
+    phases: newPhases,
+    updatedAt: now,
+  }
   return { ok: true, value: { kind: "todos_updated", updated, plan: newPlan } }
 }
 
@@ -458,6 +525,116 @@ export const updateMeta = (
   }
   // No structural change → noop kind (version still bumped per noop semantics).
   return { ok: true, value: { kind: "noop", plan: newPlan } }
+}
+
+// ── moveTodo (T04 atomic phase-membership owner) ──────────────────────────
+
+/**
+ * Atomically rebind ONE todo to a phase (or unbind it when `toPhaseId` is
+ * `null`). The store-level owner of `todo.phaseId` ↔ `phase.todoIds`: callers
+ * no longer compose an `updateTodos({phaseId})` followed by a phase-membership
+ * repair. Both sides move in a single version bump or neither does.
+ *
+ * Validation order: todo existence → target-phase existence (when non-null).
+ * On any error NO mutation is applied (the input plan is returned to the
+ * caller unchanged via the error result; store.ts keeps the prior plan).
+ */
+export const moveTodo = (
+  plan: Plan,
+  todoId: string,
+  toPhaseId: string | null,
+  now: number,
+): PlanResult => {
+  const existing = plan.todos[todoId]
+  if (existing === undefined) return err({ kind: "todo_not_found", id: todoId })
+  if (toPhaseId !== null && !plan.phases.some((p) => p.id === toPhaseId)) {
+    return err({ kind: "phase_not_found", id: toPhaseId })
+  }
+  const moved: TodoItem = {
+    ...existing,
+    updatedAt: now,
+    ...(toPhaseId !== null ? { phaseId: toPhaseId } : {}),
+  }
+  // exactOptionalPropertyTypes: when unbinding, the spread above omitted
+  // phaseId from the literal but `...existing` carried it — drop explicitly.
+  if (toPhaseId === null && moved.phaseId !== undefined) {
+    const { phaseId: _drop, ...rest } = moved
+    return finishMove(plan, todoId, rest, now)
+  }
+  return finishMove(plan, todoId, moved, now)
+}
+
+/** Shared tail of {@link moveTodo}: install the moved todo, re-derive phase
+ *  membership, bump version. Pure. */
+const finishMove = (plan: Plan, todoId: string, moved: TodoItem, now: number): PlanResult => {
+  const newTodos: Record<string, TodoItem> = { ...plan.todos, [todoId]: moved }
+  const newPhases = syncPhaseMembership(plan.phases, newTodos)
+  const newPlan: Plan = {
+    ...plan,
+    version: plan.version + 1,
+    todos: newTodos,
+    phases: newPhases,
+    updatedAt: now,
+  }
+  return { ok: true, value: { kind: "todos_updated", updated: [moved], plan: newPlan } }
+}
+
+// ── updateMetaAndReorder (T04 atomic meta+order owner) ────────────────────
+
+/**
+ * Apply a meta change AND an optional phase reorder as ONE atomic store
+ * mutation with a SINGLE version bump.
+ *
+ * Replaces the prior caller-side composition (`updateMeta` then
+ * `reorderPhases` — two store calls, two version bumps, partial-failure left
+ * the meta landed while the order didn't). Here both validations run FIRST;
+ * only if BOTH pass is a single new plan produced. Any failure returns an
+ * error and applies NOTHING (all-or-nothing).
+ *
+ * `phaseOrder === undefined` ⇒ meta-only (equivalent to {@link updateMeta}).
+ * Empty `args` + `phaseOrder` ⇒ reorder-only. Empty `args` + no order ⇒ a
+ * version-bumping no-op (mirrors the existing reducers' noop semantics).
+ */
+export const updateMetaAndReorder = (
+  plan: Plan,
+  args: { name?: string; overview?: string; isProject?: boolean },
+  phaseOrder: readonly string[] | undefined,
+  now: number,
+): PlanResult => {
+  // 1. Validate meta bounds (no mutation yet).
+  if (args.name !== undefined) {
+    const e = checkLen("name", args.name, PLAN_LIMITS.MAX_NAME)
+    if (e !== null) return err(e)
+  }
+  if (args.overview !== undefined) {
+    const e = checkLen("overview", args.overview, PLAN_LIMITS.MAX_OVERVIEW)
+    if (e !== null) return err(e)
+  }
+
+  // 2. Compute reordered phases (validated) WITHOUT bumping version — reuse the
+  //    reorderPhases reducer purely for its validation + ordering, then graft
+  //    the result onto the meta change as a single bump.
+  let phases = plan.phases
+  if (phaseOrder !== undefined) {
+    const reordered = reorderPhases(plan, phaseOrder, now)
+    if (!reordered.ok) return reordered
+    phases = reordered.value.plan.phases
+  }
+
+  // 3. Single atomic plan: meta fields + (possibly) reordered phases, ONE bump.
+  const newPlan: Plan = {
+    ...plan,
+    version: plan.version + 1,
+    phases,
+    ...(args.name !== undefined ? { name: args.name } : {}),
+    ...(args.overview !== undefined ? { overview: args.overview } : {}),
+    ...(args.isProject !== undefined ? { isProject: args.isProject } : {}),
+    updatedAt: now,
+  }
+  // Delta kind: a reorder happened ⇒ "phases_reordered"; otherwise meta-only ⇒
+  // "noop" (no structural list change), matching updateMeta's classification.
+  const kind: PlanDelta["kind"] = phaseOrder !== undefined ? "phases_reordered" : "noop"
+  return { ok: true, value: { kind, plan: newPlan } }
 }
 
 // Helper for transitions module re-export (avoid extra import in tests).

@@ -159,31 +159,17 @@ export const planStoreToMutator = (store: PlanStore): PlanMutator => ({
     adapt(store.updateTodos(patches.map(coerceTodoPatch), merge, expectedVersion)),
   removeTodos: (ids, expectedVersion) => adapt(store.removeTodos(ids, expectedVersion)),
   updateMeta: (args, expectedVersion) => {
-    // phaseOrder is in args but updateMeta on the producer doesn't accept it
-    // directly — split into two reducer calls: updateMeta then reorderPhases.
-    // Both bump version; if reorderPhases fails, the meta change still landed.
-    // Documented behavior: meta first, then optional reorder.
+    // T04: meta change + optional phase reorder are ONE atomic store mutation
+    // (single version bump, all-or-nothing). The store owns the composition —
+    // the adapter no longer chains `updateMeta` then `reorderPhases` (two bumps
+    // where a failing reorder left the meta landed). `phaseOrder === undefined`
+    // ⇒ meta-only; empty meta + order ⇒ reorder-only; empty + none ⇒ noop bump.
     const metaArgs = {
       ...(args.name !== undefined ? { name: args.name } : {}),
       ...(args.overview !== undefined ? { overview: args.overview } : {}),
       ...(args.isProject !== undefined ? { isProject: args.isProject } : {}),
     }
-    const metaTouched =
-      args.name !== undefined || args.overview !== undefined || args.isProject !== undefined
-    if (metaTouched) {
-      const r1 = store.updateMeta(metaArgs, expectedVersion)
-      if (!r1.ok) return adapt(r1)
-      if (args.phaseOrder !== undefined) {
-        const r2 = store.reorderPhases(args.phaseOrder, r1.value.plan.version)
-        return adapt(r2)
-      }
-      return adapt(r1)
-    }
-    if (args.phaseOrder !== undefined) {
-      return adapt(store.reorderPhases(args.phaseOrder, expectedVersion))
-    }
-    // No-op call — still return a noop result via updateMeta path.
-    return adapt(store.updateMeta({}, expectedVersion))
+    return adapt(store.updateMetaAndReorder(metaArgs, args.phaseOrder, expectedVersion))
   },
   current: () => {
     const p = store.current()

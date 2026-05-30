@@ -15,8 +15,10 @@ import { randomBytes } from "node:crypto"
 import {
   addTodos as addTodosReducer,
   createPlan as createPlanReducer,
+  moveTodo as moveTodoReducer,
   removeTodos as removeTodosReducer,
   reorderPhases as reorderPhasesReducer,
+  updateMetaAndReorder as updateMetaAndReorderReducer,
   updateMeta as updateMetaReducer,
   updateTodos as updateTodosReducer,
 } from "./mutations"
@@ -38,6 +40,24 @@ export interface PlanStore {
     args: { name?: string; overview?: string; isProject?: boolean },
     expectedVersion: number,
   ): PlanResult<PlanDelta>
+  /**
+   * T04 — atomic meta change + optional phase reorder in ONE CAS mutation
+   * (single version bump). Replaces the prior caller-side composition of
+   * `updateMeta` + `reorderPhases` (two bumps; partial-failure left meta
+   * landed but order not). All-or-nothing: a failing reorder rolls back the
+   * meta change too. `phaseOrder === undefined` ⇒ meta-only.
+   */
+  updateMetaAndReorder(
+    args: { name?: string; overview?: string; isProject?: boolean },
+    phaseOrder: readonly string[] | undefined,
+    expectedVersion: number,
+  ): PlanResult<PlanDelta>
+  /**
+   * T04 — atomically rebind ONE todo to a phase (`toPhaseId`) or unbind it
+   * (`null`). The store is the sole owner of `todo.phaseId` ↔ `phase.todoIds`:
+   * both sides move together or neither does (no caller-side membership repair).
+   */
+  moveTodo(todoId: string, toPhaseId: string | null, expectedVersion: number): PlanResult<PlanDelta>
   snapshot(): PlanSnapshot | null
   restore(snap: PlanSnapshot): PlanResult<true>
   /**
@@ -166,6 +186,26 @@ export const createInMemoryPlanStore = (opts: CreateInMemoryPlanStoreOpts): Plan
           error: { kind: "version_conflict", expected: expectedVersion, actual: -1 },
         }
       return apply(updateMetaReducer(plan, args, opts.now()))
+    },
+    updateMetaAndReorder: (args, phaseOrder, expectedVersion) => {
+      const c = cas(expectedVersion)
+      if (!c.ok) return c
+      if (plan === null)
+        return {
+          ok: false,
+          error: { kind: "version_conflict", expected: expectedVersion, actual: -1 },
+        }
+      return apply(updateMetaAndReorderReducer(plan, args, phaseOrder, opts.now()))
+    },
+    moveTodo: (todoId, toPhaseId, expectedVersion) => {
+      const c = cas(expectedVersion)
+      if (!c.ok) return c
+      if (plan === null)
+        return {
+          ok: false,
+          error: { kind: "version_conflict", expected: expectedVersion, actual: -1 },
+        }
+      return apply(moveTodoReducer(plan, todoId, toPhaseId, opts.now()))
     },
     snapshot: () => (plan === null ? null : toSnapshot(plan)),
     restore: (snap) => {
