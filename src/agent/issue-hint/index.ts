@@ -38,14 +38,22 @@ export {
   composeAgentlessHint,
   parseAgentlessResponse,
 } from "./agentless-localize"
+export type { BudgetOverflow, BudgetSegment } from "./budget-collector"
+export { collectBudgeted } from "./budget-collector"
 export { composeIssueHint } from "./compose"
-export { extractCodeFences, extractTracebackPaths } from "./extract-code"
+export type { CodeFenceSegment } from "./extract-code"
+export {
+  extractCodeFenceSegments,
+  extractCodeFences,
+  extractTracebackPaths,
+} from "./extract-code"
 export { extractErrors } from "./extract-errors"
 export { extractExpectedActual } from "./extract-expected-actual"
 export { extractFiles } from "./extract-files"
 export { extractRefs } from "./extract-refs"
 export { extractSymbols } from "./extract-symbols"
-export { extractTracebacks } from "./extract-tracebacks"
+export type { TracebackSegment } from "./extract-tracebacks"
+export { extractTracebackSegments, extractTracebacks } from "./extract-tracebacks"
 export { EMPTY_HINT, type IssueHint } from "./types"
 
 /** Options for `extractIssueHint`. `withExpectedActual` toggles the opt-in

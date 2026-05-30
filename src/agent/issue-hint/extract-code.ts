@@ -9,7 +9,10 @@
  *     head+tail compression (head + "\n…\n" + last 10 non-empty lines) so
  *     when a fence overflows, the most localization-relevant lines — the ones
  *     at the end of the snippet (commonly the exception, the wrong result,
- *     or the final assertion) — survive intact.
+ *     or the final assertion) — survive intact. The overflow policy is OWNED
+ *     by the shared `budget-collector.ts` (one collector decides head/tail
+ *     reservation once); `extractCodeFenceSegments` surfaces the overflow as
+ *     OBSERVABLE metadata, and `extractCodeFences` projects to body strings.
  *
  *   - **tracebackPaths**: file:line pairs parsed from two common traceback
  *     formats:
@@ -29,10 +32,12 @@
  * downstream callers may want the original (it could be a legitimate part of
  * a coded example).
  */
+import { type BudgetOverflow, type BudgetSegment, collectBudgeted } from "./budget-collector"
 import { stripAnsi } from "./normalize"
 
 const MAX_FENCE_BYTES = 4 * 1024
 const FENCE_TAIL_LINES = 10
+const FENCE_ELLIPSIS = "\n…\n"
 const MAX_PATH_LEN = 200
 
 /** Triple-backtick fence with optional language tag. Lazy body so consecutive
@@ -47,31 +52,34 @@ const PY_TB_RE = /File\s+"([^"\n]+)",\s+line\s+(\d+)/g
  *  emit only path:line. */
 const STACK_RE = /\bat\s+[\w.$<>]+\s*\(([^)\n]+?):(\d+)(?::\d+)?\)/g
 
-/** Head + tail compression for over-cap fence bodies. Same policy as the
- *  traceback compressor — keep all but the final TAIL_LINES of head, then
- *  ellipsis, then last 10 non-empty lines. */
-const compressFence = (body: string): string => {
-  if (body.length <= MAX_FENCE_BYTES) return body
-  const lines = body.split("\n")
-  const tail: string[] = []
-  for (let i = lines.length - 1; i >= 0 && tail.length < FENCE_TAIL_LINES; i--) {
-    const line = lines[i]
-    if (line === undefined) continue
-    if (line.trim() === "") continue
-    tail.unshift(line)
-  }
-  const tailText = tail.join("\n")
-  const ellipsis = "\n…\n"
-  const headBudget = MAX_FENCE_BYTES - tailText.length - ellipsis.length
-  if (headBudget <= 0) {
-    return `${body.slice(0, MAX_FENCE_BYTES - ellipsis.length)}${ellipsis}`
-  }
-  return `${body.slice(0, headBudget)}${ellipsis}${tailText}`
+/** Head + tail compression for over-cap fence bodies. Delegates to the shared
+ *  budget collector (`budget-collector.ts`) — the SINGLE owner of the overflow
+ *  policy that both this extractor and the traceback extractor share. The
+ *  collector reserves the tail FIRST so the final lines (commonly the
+ *  exception / wrong result / final assertion) ALWAYS survive, even when the
+ *  tail alone would have exhausted the budget (the former C-11 tail-drop bug). */
+const compressFence = (body: string): BudgetSegment =>
+  collectBudgeted(body, {
+    maxBytes: MAX_FENCE_BYTES,
+    tailLines: FENCE_TAIL_LINES,
+    ellipsis: FENCE_ELLIPSIS,
+  })
+
+/** A code fence with its (possibly compacted) verbatim body and an OBSERVABLE
+ *  `overflow` record — `null` when the body fit, populated when compaction
+ *  fired. Lets downstream consumers tell that the head/middle was elided
+ *  instead of inferring it from the `…` glyph. */
+export interface CodeFenceSegment {
+  readonly body: string
+  readonly overflow: BudgetOverflow | null
 }
 
-export const extractCodeFences = (text: string): readonly string[] => {
+/** Extract code fences WITH observable overflow metadata. The string-only
+ *  `extractCodeFences` is a thin projection of this (`.body`), kept for the
+ *  many callers and the `IssueHint.codeFences` shape that expect `string[]`. */
+export const extractCodeFenceSegments = (text: string): readonly CodeFenceSegment[] => {
   if (typeof text !== "string" || text === "") return []
-  const out: string[] = []
+  const out: CodeFenceSegment[] = []
   const seen = new Set<string>()
   FENCE_RE.lastIndex = 0
   for (const m of text.matchAll(FENCE_RE)) {
@@ -79,13 +87,16 @@ export const extractCodeFences = (text: string): readonly string[] => {
     if (typeof body !== "string") continue
     const trimmed = body.replace(/\s+$/g, "") // strip trailing whitespace only
     if (trimmed.trim() === "") continue
-    const compressed = compressFence(trimmed)
-    if (seen.has(compressed)) continue
-    seen.add(compressed)
-    out.push(compressed)
+    const seg = compressFence(trimmed)
+    if (seen.has(seg.text)) continue
+    seen.add(seg.text)
+    out.push({ body: seg.text, overflow: seg.overflow })
   }
   return out
 }
+
+export const extractCodeFences = (text: string): readonly string[] =>
+  extractCodeFenceSegments(text).map((s) => s.body)
 
 const acceptTbEntry = (
   rawPath: string | undefined,
