@@ -1,97 +1,23 @@
 /**
- * Pure git merge-conflict parser (ADR-0111 — SOTA++ git ecosystem absorption,
- * cursor-git.md §⑧ fix-merge-conflicts skill prerequisite).
+ * Canonical git merge-conflict parser (SSOT — T13, audit L9 H13).
  *
- * # Why this exists
- *
- * Skills and tools that need to programmatically inspect merge conflicts in a
- * file currently have two bad choices: shell out to git (slow, requires real
- * repo state, conflates parse with policy), or hand-roll a string scan every
- * time. This module is the typed-and-tested parser shared by all of them.
- *
- * A future `fix-merge-conflicts` skill (or a git tool) takes the file contents
- * (already on disk, the agent just `Read` them), feeds the string here, and
- * works on the typed {@link ConflictBlock}[] — no second I/O, no git binary,
- * no ambiguity about marker shape.
- *
- * # Default-OFF
- *
- * Nobody in the loop imports this file today. A future skill / tool opts in by
- * importing {@link parseConflicts}. Adoption is a one-line wrap.
- *
- * # Contract
- *
- *  1. **Pure.** No I/O, no `Buffer`, no `child_process`. Input is a `string`
- *     (the entire file contents), output is the typed {@link ConflictParseResult}.
- *     The parser does NOT consult the filesystem to verify the conflict is
- *     real — that is the caller's concern.
- *  2. **No-throw.** Malformed conflicts produce a typed
- *     {@link ConflictParseDiagnostic} on the result, NEVER a throw. The ONLY
- *     thrown exception is {@link ConflictParserInputError}, raised when the
- *     input is not a string (a programmer bug — not a domain failure).
- *  3. **exactOptionalPropertyTypes.** Optional fields (`base`, `baseLabel`)
- *     are OMITTED from the block, never set to `undefined`. The condition-set
- *     spread pattern is used at the construction site.
- *  4. **Plane-clean.** Imports nothing from `@/agent`, `@/tool`,
- *     `@/permission`, etc. Only `@/shared` (for the {@link QuantaError}
- *     base class).
- *  5. **Segment-anchored markers.** A marker is recognised ONLY when it sits
- *     at column 0 of a line. A literal `<<<<<<< ` inside a string literal
- *     or comment that happens to begin a line WILL match — the parser is NOT
- *     language-aware. This is a deliberate limitation; document it on the
- *     caller side (the typical caller is `git ls-files -u` output, where the
- *     limitation is irrelevant).
- *
- * # Markers
- *
- * Per git convention (`merge.conflictStyle` = `merge` or `diff3`):
- *
- *   - `<<<<<<< <label>`  start of `ours` (7+ `<`, then a single space, then the label)
- *   - `||||||| <label>`  start of `base` (diff3/three-way only)
- *   - `=======`          separator (7+ `=`, no label after)
- *   - `>>>>>>> <label>`  end of `theirs`
- *
- * Marker lengths >= 7 are accepted (git emits exactly 7 by default; some
- * higher-conflict-depth merges emit more). Marker lengths < 7 are rejected.
- * A marker that lacks the trailing space (e.g. `<<<<<<<HEAD`) is reported as
- * {@link ConflictParseDiagnostic} `marker_at_offset` and the block at that
- * position is dropped (its boundary cannot be trusted).
- *
- * # Style discrimination
- *
- *  - `two-way`   `<<<` / `===` / `>>>` only (no base section)
- *  - `three-way` `<<<` / `|||` / `===` / `>>>` (git's default `merge` style
- *                tracks the merge base but doesn't render it; we still emit
- *                this label when the `|||` line is present)
- *  - `diff3`     Same shape as `three-way`. We expose both literals so callers
- *                that distinguish on `merge.conflictStyle = diff3` (where the
- *                base section is verbose) have the vocabulary; today the
- *                parser maps any `|||`-bearing block to `three-way` (the
- *                conservative choice). `diff3` is reserved for a future
- *                heuristic — kept in the union for forward-compat.
- *
- * # Nested conflicts
- *
- * A `<<<<<<< ` encountered while a conflict is still open is recorded as a
- * `nested` {@link ConflictParseDiagnostic}, but the OUTER block is still
- * emitted: the nested markers ride along inside the outer block's `ours`
- * content verbatim. This is the safer choice for callers (you can't lose data
- * by accident) and matches what `git diff --check` reports.
+ * The single owner of conflict-parsing for the whole codebase. The former
+ * tool-layer copy (src/tool/git/conflict-parser) now forwards here. This is
+ * the richer, fully-tested implementation (marker-length matching, nested /
+ * missing_theirs / unterminated diagnostics) promoted from the tool layer so
+ * the library slice owns it and the duplicate can never re-diverge.
  */
 
 import { QuantaError } from "@/shared"
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Closed union of marker styles. `diff3` is reserved for a future heuristic
- *  (verbose merge-base rendering); today's parser emits `two-way` or `three-way`.
- *  Keeping `diff3` in the union avoids a breaking change later. */
+/** Closed union of marker styles. `diff3` is reserved for a future
+ *  verbose-merge-base heuristic; today the parser emits `"two-way"` or
+ *  `"three-way"` only. The literal is in the union so callers that branch on
+ *  `merge.conflictStyle = diff3` keep a stable vocabulary without a future
+ *  breaking change. */
 export type ConflictMarkerStyle = "two-way" | "three-way" | "diff3"
 
-/** Runtime mirror of the union. Used by callers/tests for exhaustive coverage
- *  assertions without `as const` gymnastics over a string-literal tuple. */
+/** Runtime mirror of the union for exhaustive-coverage assertions. */
 export const ALL_MARKER_STYLES: ReadonlyArray<ConflictMarkerStyle> = [
   "two-way",
   "three-way",
@@ -103,417 +29,87 @@ export interface ConflictBlock {
   /** Discriminator. `two-way` lacks `base`/`baseLabel`; `three-way`/`diff3`
    *  have both (possibly empty). */
   readonly style: ConflictMarkerStyle
-  /** Label after the `<<<<<<< ` marker (typically `HEAD`). Preserved verbatim
-   *  including any internal whitespace. Empty string when the open marker had
-   *  no label at all (rare but tolerated). */
+  /** Text after `<<<<<<< ` on the open line (verbatim, may be `""`). */
   readonly oursLabel: string
-  /** Label after the `>>>>>>> ` marker (typically the merged-in branch name). */
+  /** Text after `>>>>>>> ` on the close line. */
   readonly theirsLabel: string
-  /** Label after the `||||||| ` marker. Present for three-way/diff3 only. */
+  /** Text after `||||||| ` on the base line — present for three-way / diff3
+   *  only. OMITTED for two-way (never `undefined`). */
   readonly baseLabel?: string
-  /** Content between the open marker and the separator (or the base marker
-   *  when present). Trailing newline preserved. May be empty. */
+  /** Content between the open marker and the separator / base marker. */
   readonly ours: string
-  /** Content between the separator and the close marker. Trailing newline
-   *  preserved. May be empty. */
+  /** Content between the separator and the close marker. */
   readonly theirs: string
-  /** Content between the base marker and the separator. Present for
-   *  three-way/diff3 only. May be empty. */
+  /** Content between the base marker and the separator. Present for three-way
+   *  / diff3 only. OMITTED for two-way (never `undefined`). */
   readonly base?: string
-  /** 1-indexed line of the `<<<<<<<` marker. */
+  /** 1-indexed line of `<<<<<<<`. */
   readonly startLine: number
-  /** 1-indexed line of the `>>>>>>>` marker. */
+  /** 1-indexed line of `>>>>>>>`. */
   readonly endLine: number
   /** 0-indexed char offset of the `<` of the open marker. */
   readonly startOffset: number
-  /** 0-indexed char offset one past the end of the close-marker line
-   *  (exclusive of the trailing line terminator, if any). */
+  /** 0-indexed char offset one past the last char of the close-marker LINE,
+   *  exclusive of the trailing line-terminator. So
+   *  `source.slice(startOffset, endOffset)` reproduces the conflict block
+   *  excluding the trailing newline. */
   readonly endOffset: number
 }
 
 /** Closed union — extending requires every exhaustive switch to be updated. */
 export interface ConflictParseDiagnostic {
   readonly kind:
-    | "unterminated" // open marker with no matching `>>>>>>>` reached EOF
-    | "no_separator" // open and close present, but `=======` missing between them
-    | "marker_at_offset" // marker present but malformed (e.g. no trailing space)
-    | "nested" // a second `<<<<<<<` opened while another was still open
-    | "missing_ours" // close marker without any preceding open marker
-    | "missing_theirs" // separator without any preceding open marker
-  /** 1-indexed line where the diagnostic was raised. May equal `lineCount + 1`
-   *  when the diagnostic is "ran past EOF" (unterminated). */
+    | "unterminated" // open with no `>>>>>>>` reached EOF
+    | "no_separator" // open + close but no `=======` between
+    | "marker_at_offset" // marker present but malformed (length mismatch, no space, etc.)
+    | "nested" // a second `<<<<<<<` opened while another was open
+    | "missing_ours" // close marker without preceding open
+    | "missing_theirs" // separator without preceding open
+  /** 1-indexed; may equal `lineCount + 1` for EOF-overrun. */
   readonly line: number
   /** Human-readable explanation. Stable enough to log; do not pattern-match. */
   readonly message: string
 }
 
 export interface ConflictParseResult {
-  readonly blocks: readonly ConflictBlock[]
-  readonly diagnostics: readonly ConflictParseDiagnostic[]
-  /** Convenience: true iff `blocks.length > 0`. The invariant is enforced at
-   *  construction so callers can branch on it without an extra `.length` read. */
-  readonly hasConflicts: boolean
+  readonly blocks: ReadonlyArray<ConflictBlock>
+  readonly diagnostics: ReadonlyArray<ConflictParseDiagnostic>
 }
 
-/** Thrown ONLY when the input is not a string. Domain failures (malformed
- *  conflicts) are reported via {@link ConflictParseDiagnostic} instead. */
+/** Thrown ONLY when the input isn't a string. Domain failures (malformed
+ *  conflicts) are reported via {@link ConflictParseDiagnostic}. */
 export class ConflictParserInputError extends QuantaError {
   constructor(message: string) {
     super("conflict_parser_input", message)
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Marker regexes
-// ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Marker matchers — anchored to the START of the string we feed them (we
- * always feed a single line, never the whole document, so `^` here is the
- * line's column 0).
- *
- * The patterns require:
- *   - 7+ of the marker char
- *   - either: a single space followed by an optional label (with at least
- *     one trailing char, possibly all whitespace — the label slot must exist
- *     so that bare `<<<<<<<HEAD` (no space) is rejected as `marker_at_offset`).
- *   - OR end-of-line (for `=======` which has no label).
- *
- * The label capture is greedy and stops at the line end (we strip CR if
- * present before feeding the line to the matcher).
- */
-const OPEN_RE = /^<{7,}(?: (.*))?$/
-const BASE_RE = /^\|{7,}(?: (.*))?$/
-const SEP_RE = /^={7,}$/
-const CLOSE_RE = /^>{7,}(?: (.*))?$/
-
-/** A line that STARTS with the marker char run but the regex didn't accept
- *  (e.g. `<<<<<<<HEAD` — no space). Used to emit `marker_at_offset`. */
-const OPEN_MALFORMED_RE = /^<{7,}/
-const CLOSE_MALFORMED_RE = /^>{7,}/
-const BASE_MALFORMED_RE = /^\|{7,}/
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Public entrypoint
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Outcome of inspecting one top-level (i.e. NOT inside a block scan) line:
- *  optionally a new block, zero-or-more diagnostics, and the index to resume at. */
-interface TopLevelStep {
-  readonly block?: ConflictBlock
-  readonly diagnostics: ConflictParseDiagnostic[]
-  readonly next: number
-}
-
-/** Inspect `lines[idx]` at top-level: dispatch to {@link parseBlock} for an
- *  open marker, emit `marker_at_offset` for malformed markers, emit
- *  `missing_ours` for an orphan close, advance one line otherwise. Extracted
- *  from `parseConflicts` to keep the top-level loop's cognitive complexity in
- *  check (biome complexity rule). */
-const classifyTopLevel = (lines: ReadonlyArray<LineRec>, idx: number): TopLevelStep => {
-  const line = lines[idx]
-  if (!line) return { diagnostics: [], next: idx + 1 }
-  const text = line.text
-
-  if (OPEN_RE.test(text)) {
-    const result = parseBlock(lines, idx)
-    return result.kind === "ok"
-      ? { block: result.block, diagnostics: result.diagnostics, next: result.consumedUntil }
-      : { diagnostics: result.diagnostics, next: result.consumedUntil }
-  }
-  if (OPEN_MALFORMED_RE.test(text)) {
-    return {
-      diagnostics: [
-        {
-          kind: "marker_at_offset",
-          line: line.lineNumber,
-          message: `malformed open marker at line ${line.lineNumber}: expected '<<<<<<< <label>' with a space before the label`,
-        },
-      ],
-      next: idx + 1,
-    }
-  }
-  if (CLOSE_RE.test(text)) {
-    return {
-      diagnostics: [
-        {
-          kind: "missing_ours",
-          line: line.lineNumber,
-          message: `close marker '>>>>>>>' at line ${line.lineNumber} without a preceding '<<<<<<<' open marker`,
-        },
-      ],
-      next: idx + 1,
-    }
-  }
-  if (CLOSE_MALFORMED_RE.test(text)) {
-    return {
-      diagnostics: [
-        {
-          kind: "marker_at_offset",
-          line: line.lineNumber,
-          message: `malformed close marker at line ${line.lineNumber}: expected '>>>>>>> <label>' with a space before the label`,
-        },
-      ],
-      next: idx + 1,
-    }
-  }
-  return { diagnostics: [], next: idx + 1 }
-}
-
-/**
- * Parse merge-conflict markers from a file's contents.
- *
- * Pure. Never throws on malformed input — diagnostics are reported in the
- * returned {@link ConflictParseResult}. The ONLY throw path is a non-string
- * argument (treated as a programmer bug).
- */
-export const parseConflicts = (source: string): ConflictParseResult => {
-  if (typeof source !== "string") {
-    throw new ConflictParserInputError(
-      `parseConflicts expects a string, got ${source === null ? "null" : typeof source}`,
-    )
-  }
-  if (source.length === 0) {
-    return { blocks: [], diagnostics: [], hasConflicts: false }
-  }
-
-  const lines = splitLinesWithOffsets(source)
-  const blocks: ConflictBlock[] = []
-  const diagnostics: ConflictParseDiagnostic[] = []
-
-  let i = 0
-  while (i < lines.length) {
-    const line = lines[i]
-    if (!line) {
-      i++
-      continue
-    }
-    const step = classifyTopLevel(lines, i)
-    for (const d of step.diagnostics) diagnostics.push(d)
-    if (step.block) blocks.push(step.block)
-    i = step.next
-  }
-
-  // Orphan separators are intentionally NOT flagged at the top level: a bare
-  // `=======` is overwhelmingly a markdown horizontal rule or ASCII art, not
-  // a conflict residue, so flagging it would be high-noise. `missing_theirs`
-  // (the matching diagnostic kind) is reserved for a future caller that wants
-  // to enforce stricter shape (e.g. a precommit hook scanning indexed files).
-
-  return Object.freeze({
-    blocks: Object.freeze(blocks),
-    diagnostics: Object.freeze(diagnostics),
-    hasConflicts: blocks.length > 0,
-  })
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Block parser
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** A line + the offsets needed to reconstruct content slices. `text` is the
- *  line WITHOUT its line terminator (CR or CRLF stripped); `termLen` records
- *  how many terminator bytes followed so we can re-add them to ours/theirs
- *  content. */
-interface LineRec {
-  readonly text: string
-  readonly lineNumber: number // 1-indexed
-  readonly startOffset: number // offset of first char of text
-  readonly termLen: number // 0 (EOF), 1 (\n), or 2 (\r\n)
-}
-
-type BlockParse =
-  | {
-      readonly kind: "ok"
-      readonly block: ConflictBlock
-      readonly diagnostics: ConflictParseDiagnostic[]
-      readonly consumedUntil: number // index AFTER the close-marker line
-    }
-  | {
-      readonly kind: "fail"
-      readonly diagnostics: ConflictParseDiagnostic[]
-      readonly consumedUntil: number // where to resume the outer scan
-    }
-
-/** Output of the inner block scan — indices into `lines` for each landmark,
- *  plus the captured base label and any diagnostics emitted during the scan
- *  (nested markers, malformed `|||` lines). `-1` ⇒ landmark not seen. */
-interface BlockScan {
-  readonly baseStartIdx: number
-  readonly baseLabel?: string
-  readonly sepIdx: number
-  readonly closeIdx: number
-  readonly closeLabel: string
-  readonly diagnostics: ConflictParseDiagnostic[]
-}
-
-/** Inner scan for one block's landmarks. Splits the nest-tracking out so
- *  {@link parseBlock} stays under biome's cognitive-complexity bar. */
-const scanBlockBody = (lines: ReadonlyArray<LineRec>, startIdx: number): BlockScan => {
-  const diagnostics: ConflictParseDiagnostic[] = []
-  let baseStartIdx = -1
-  let baseLabel: string | undefined
-  let sepIdx = -1
-  let closeIdx = -1
-  let closeLabel = ""
-  let nestDepth = 0
-
-  for (let j = startIdx + 1; j < lines.length; j++) {
-    const rec = lines[j]
-    if (!rec) continue
-    const t = rec.text
-
-    if (OPEN_RE.test(t)) {
-      if (nestDepth === 0) {
-        diagnostics.push({
-          kind: "nested",
-          line: rec.lineNumber,
-          message: `nested '<<<<<<<' open marker at line ${rec.lineNumber} while previous conflict is still open`,
-        })
-      }
-      nestDepth++
-      continue
-    }
-    // Inside a nested block: watch only for its matching close. Other markers
-    // are opaque content of the OUTER ours/theirs.
-    if (nestDepth > 0) {
-      if (CLOSE_RE.test(t)) nestDepth--
-      continue
-    }
-
-    if (sepIdx === -1 && baseStartIdx === -1) {
-      const bm = BASE_RE.exec(t)
-      if (bm) {
-        baseStartIdx = j
-        baseLabel = (bm[1] ?? "").trim()
-        continue
-      }
-      if (BASE_MALFORMED_RE.test(t)) {
-        diagnostics.push({
-          kind: "marker_at_offset",
-          line: rec.lineNumber,
-          message: `malformed base marker at line ${rec.lineNumber}: expected '||||||| <label>' with a space before the label`,
-        })
-      }
-    }
-    if (sepIdx === -1 && SEP_RE.test(t)) {
-      sepIdx = j
-      continue
-    }
-    const cm = CLOSE_RE.exec(t)
-    if (cm) {
-      closeIdx = j
-      closeLabel = (cm[1] ?? "").trim()
-      break
-    }
-  }
-
-  return {
-    baseStartIdx,
-    ...(baseLabel !== undefined ? { baseLabel } : {}),
-    sepIdx,
-    closeIdx,
-    closeLabel,
-    diagnostics,
-  }
-}
-
-const parseBlock = (lines: ReadonlyArray<LineRec>, startIdx: number): BlockParse => {
-  const openLine = lines[startIdx]
-  if (!openLine) {
-    return { kind: "fail", diagnostics: [], consumedUntil: startIdx + 1 }
-  }
-  const openMatch = OPEN_RE.exec(openLine.text)
-  if (!openMatch) {
-    // Defensive — the caller already checked, so this branch is unreachable.
-    return { kind: "fail", diagnostics: [], consumedUntil: startIdx + 1 }
-  }
-  const oursLabel = (openMatch[1] ?? "").trim()
-
-  const scan = scanBlockBody(lines, startIdx)
-  const diags: ConflictParseDiagnostic[] = [...scan.diagnostics]
-
-  if (scan.closeIdx === -1) {
-    diags.push({
-      kind: "unterminated",
-      line: openLine.lineNumber,
-      message: `unterminated conflict: open marker at line ${openLine.lineNumber} has no matching '>>>>>>>' before EOF`,
-    })
-    return { kind: "fail", diagnostics: diags, consumedUntil: lines.length }
-  }
-  if (scan.sepIdx === -1) {
-    diags.push({
-      kind: "no_separator",
-      line: openLine.lineNumber,
-      message: `conflict at line ${openLine.lineNumber} has open and close markers but no '=======' separator between them`,
-    })
-    return { kind: "fail", diagnostics: diags, consumedUntil: scan.closeIdx + 1 }
-  }
-
-  const oursEndIdx = scan.baseStartIdx !== -1 ? scan.baseStartIdx : scan.sepIdx
-  const ours = sliceLines(lines, startIdx + 1, oursEndIdx)
-  const base =
-    scan.baseStartIdx !== -1 ? sliceLines(lines, scan.baseStartIdx + 1, scan.sepIdx) : undefined
-  const theirs = sliceLines(lines, scan.sepIdx + 1, scan.closeIdx)
-
-  const closeLine = lines[scan.closeIdx]
-  if (!closeLine) {
-    // Shouldn't happen — closeIdx was found in-bounds — but keeps the typing tight.
-    return { kind: "fail", diagnostics: diags, consumedUntil: lines.length }
-  }
-
-  const style: ConflictMarkerStyle = scan.baseStartIdx !== -1 ? "three-way" : "two-way"
-  const endOffset = closeLine.startOffset + closeLine.text.length
-
-  const block: ConflictBlock = {
-    style,
-    oursLabel,
-    theirsLabel: scan.closeLabel,
-    ...(scan.baseLabel !== undefined ? { baseLabel: scan.baseLabel } : {}),
-    ours,
-    theirs,
-    ...(base !== undefined ? { base } : {}),
-    startLine: openLine.lineNumber,
-    endLine: closeLine.lineNumber,
-    startOffset: openLine.startOffset,
-    endOffset,
-  }
-
-  return { kind: "ok", block, diagnostics: diags, consumedUntil: scan.closeIdx + 1 }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Line splitter
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Split `source` into per-line records. Tolerates a mix of `\n` and `\r\n`
- * terminators inside the same string (rare but real — generated files
- * concatenated from different tools).
- *
- * The final record has `termLen: 0` when the source does not end with a line
- * terminator (a conflict that spans EOF). When it DOES end with a terminator,
- * we DO NOT emit a trailing empty line — that matches `String.split` semantics
- * for the common case but matters here because an extra phantom line would
- * confuse `endLine` math.
- */
+/** Per-line record. `text` excludes the line terminator; `termLen` records how
+ *  many terminator bytes followed (0 at EOF, 1 for `\n`, 2 for `\r\n`) so we
+ *  can reconstruct content and compute `endOffset` accurately under any mix. */
+interface LineRec {
+  readonly text: string
+  readonly lineNumber: number
+  readonly startOffset: number
+  readonly termLen: 0 | 1 | 2
+}
+
+/** Tolerates `\n`, `\r\n`, mixed; last line may have no terminator (`termLen=0`). */
 const splitLinesWithOffsets = (source: string): LineRec[] => {
   const out: LineRec[] = []
   let pos = 0
   let lineNo = 1
   while (pos < source.length) {
-    // Find the next \n.
     const nlIdx = source.indexOf("\n", pos)
     if (nlIdx === -1) {
-      // No more terminators — last line spans EOF.
-      out.push({
-        text: source.slice(pos),
-        lineNumber: lineNo,
-        startOffset: pos,
-        termLen: 0,
-      })
-      pos = source.length
-      break
+      out.push({ text: source.slice(pos), lineNumber: lineNo, startOffset: pos, termLen: 0 })
+      return out
     }
     const hasCR = nlIdx > pos && source.charCodeAt(nlIdx - 1) === 13 /* \r */
     const textEnd = hasCR ? nlIdx - 1 : nlIdx
@@ -530,8 +126,8 @@ const splitLinesWithOffsets = (source: string): LineRec[] => {
 }
 
 /** Reconstruct the substring covered by `lines[fromIdx .. toIdxExclusive)`,
- *  including each line's trailing terminator (so callers see `\n` / `\r\n`
- *  exactly as it appeared in the source). When `from >= to` returns `""`. */
+ *  including each line's trailing terminator (so callers see `\n`/`\r\n`
+ *  exactly as it appeared in the source). When `from >= to`, returns `""`. */
 const sliceLines = (lines: ReadonlyArray<LineRec>, from: number, toExclusive: number): string => {
   if (from >= toExclusive) return ""
   let s = ""
@@ -541,7 +137,561 @@ const sliceLines = (lines: ReadonlyArray<LineRec>, from: number, toExclusive: nu
     s += rec.text
     if (rec.termLen === 2) s += "\r\n"
     else if (rec.termLen === 1) s += "\n"
-    // termLen 0 ⇒ EOF, append nothing
   }
   return s
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Marker classification
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Tolerated marker lengths. Git emits 7 in the default merge; -X diff3 may
+ *  emit 8 in deep nests; some pathological merges emit 6. Outside this band
+ *  is NOT a real conflict marker — passed as plain text. */
+const TOLERATED_LENGTHS = new Set<number>([6, 7, 8])
+
+/** Lower bound for "looks like a marker char-run that we should classify"
+ *  (used to detect malformed cases). Matches the smallest tolerated length so
+ *  we don't accidentally diagnose `<<<` heredocs / `===` markdown HRs / `|||`
+ *  table separators / etc. as malformed markers. */
+const MIN_MARKER_RUN = 6
+
+/** Count the leading run of `ch` at the start of `text`. Returns 0 when the
+ *  first char doesn't match. */
+const leadingRun = (text: string, ch: string): number => {
+  let n = 0
+  while (n < text.length && text.charAt(n) === ch) n += 1
+  return n
+}
+
+/** Tail after a marker run, sans the SINGLE space separator. Returns:
+ *   - `{ ok: true, label: "" }` when the line is exactly the marker run (no label)
+ *   - `{ ok: true, label: "<label>" }` when the run is followed by " <label>"
+ *   - `{ ok: false }` for malformed (no separating space, e.g. `<<<<<<<HEAD`).
+ */
+type LabelParse = { readonly ok: true; readonly label: string } | { readonly ok: false }
+
+const parseLabel = (text: string, runLen: number): LabelParse => {
+  if (text.length === runLen) return { ok: true, label: "" }
+  if (text.charAt(runLen) === " ") return { ok: true, label: text.slice(runLen + 1) }
+  return { ok: false }
+}
+
+/** Classification of a line's leading marker (if any). */
+type MarkerLine =
+  | { readonly kind: "open"; readonly runLen: number; readonly label: string }
+  | { readonly kind: "close"; readonly runLen: number; readonly label: string }
+  | { readonly kind: "base"; readonly runLen: number; readonly label: string }
+  | { readonly kind: "sep"; readonly runLen: number }
+  | { readonly kind: "open_malformed"; readonly runLen: number }
+  | { readonly kind: "close_malformed"; readonly runLen: number }
+  | { readonly kind: "base_malformed"; readonly runLen: number }
+  | { readonly kind: "sep_malformed"; readonly runLen: number }
+  | { readonly kind: "none" }
+
+const classifyOpenLike = (text: string, runLen: number): MarkerLine => {
+  // A run of `<` shorter than the minimum band, OR length 9+ → not a marker.
+  if (runLen < MIN_MARKER_RUN || !TOLERATED_LENGTHS.has(runLen)) return { kind: "none" }
+  const lp = parseLabel(text, runLen)
+  if (!lp.ok) return { kind: "open_malformed", runLen }
+  return { kind: "open", runLen, label: lp.label }
+}
+
+const classifyCloseLike = (text: string, runLen: number): MarkerLine => {
+  if (runLen < MIN_MARKER_RUN || !TOLERATED_LENGTHS.has(runLen)) return { kind: "none" }
+  const lp = parseLabel(text, runLen)
+  if (!lp.ok) return { kind: "close_malformed", runLen }
+  return { kind: "close", runLen, label: lp.label }
+}
+
+const classifyBaseLike = (text: string, runLen: number): MarkerLine => {
+  if (runLen < MIN_MARKER_RUN || !TOLERATED_LENGTHS.has(runLen)) return { kind: "none" }
+  const lp = parseLabel(text, runLen)
+  if (!lp.ok) return { kind: "base_malformed", runLen }
+  return { kind: "base", runLen, label: lp.label }
+}
+
+const classifySepLike = (text: string, runLen: number): MarkerLine => {
+  if (runLen < MIN_MARKER_RUN || !TOLERATED_LENGTHS.has(runLen)) return { kind: "none" }
+  // Separator MUST be exactly the marker run, no label.
+  if (text.length === runLen) return { kind: "sep", runLen }
+  return { kind: "sep_malformed", runLen }
+}
+
+/** Classify a line's leading marker (if any). Dispatch by first char. */
+const classifyLine = (text: string): MarkerLine => {
+  const ch = text.charAt(0)
+  if (ch === "<") return classifyOpenLike(text, leadingRun(text, "<"))
+  if (ch === ">") return classifyCloseLike(text, leadingRun(text, ">"))
+  if (ch === "|") return classifyBaseLike(text, leadingRun(text, "|"))
+  if (ch === "=") return classifySepLike(text, leadingRun(text, "="))
+  return { kind: "none" }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Block-body scanner
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Outcome of {@link scanBlockBody}. */
+interface BlockScan {
+  /** Index of the base marker line, or -1 if not present. */
+  readonly baseIdx: number
+  readonly baseLabel?: string
+  /** Index of the separator line, or -1. */
+  readonly sepIdx: number
+  /** Index of the close line, or -1 (block didn't close). */
+  readonly closeIdx: number
+  readonly closeLabel: string
+  /** True when a length-mismatched marker was seen — the block is abandoned. */
+  readonly lengthMismatch: boolean
+  /** True when a nested open was seen — the block is abandoned. */
+  readonly nested: boolean
+  /** Where the outer loop should resume scanning (always > startIdx). */
+  readonly resumeAt: number
+  /** Diagnostics emitted during the scan. */
+  readonly diagnostics: ConflictParseDiagnostic[]
+}
+
+/** Append a fail-scan result. Helper to keep `scanBlockBody` flat. */
+const fail = (
+  partial: Pick<BlockScan, "baseIdx" | "sepIdx" | "diagnostics">,
+  resumeAt: number,
+  reason: "length" | "nested",
+): BlockScan => ({
+  baseIdx: partial.baseIdx,
+  sepIdx: partial.sepIdx,
+  closeIdx: -1,
+  closeLabel: "",
+  lengthMismatch: reason === "length",
+  nested: reason === "nested",
+  resumeAt,
+  diagnostics: partial.diagnostics,
+})
+
+/** Mutable per-block state used by the body-scan step handlers. */
+interface BlockScanState {
+  baseIdx: number
+  baseLabel: string | undefined
+  sepIdx: number
+  diagnostics: ConflictParseDiagnostic[]
+}
+
+/** Per-line verdict the step handlers return to the outer loop. */
+type StepVerdict =
+  | { readonly kind: "continue" }
+  | { readonly kind: "abandon"; readonly result: BlockScan }
+  | { readonly kind: "complete"; readonly result: BlockScan }
+
+/** Build a successful complete-scan result. */
+const complete = (state: BlockScanState, closeIdx: number, closeLabel: string): BlockScan => ({
+  baseIdx: state.baseIdx,
+  ...(state.baseLabel !== undefined ? { baseLabel: state.baseLabel } : {}),
+  sepIdx: state.sepIdx,
+  closeIdx,
+  closeLabel,
+  lengthMismatch: false,
+  nested: false,
+  resumeAt: closeIdx + 1,
+  diagnostics: state.diagnostics,
+})
+
+/** Build a fail-scan result preserving the partial state. */
+const abandon = (state: BlockScanState, resumeAt: number, reason: "length" | "nested"): BlockScan =>
+  fail(
+    { baseIdx: state.baseIdx, sepIdx: state.sepIdx, diagnostics: state.diagnostics },
+    resumeAt,
+    reason,
+  )
+
+/** Handle a nested open or malformed open inside an active block. */
+const handleNestedOrMalformedOpen = (
+  state: BlockScanState,
+  rec: LineRec,
+  j: number,
+  malformed: boolean,
+): StepVerdict => {
+  if (malformed) {
+    state.diagnostics.push({
+      kind: "marker_at_offset",
+      line: rec.lineNumber,
+      message: `malformed open marker at line ${rec.lineNumber}: expected '<<<<<<< <label>' (with a single space before label)`,
+    })
+    return { kind: "abandon", result: abandon(state, j + 1, "length") }
+  }
+  state.diagnostics.push({
+    kind: "nested",
+    line: rec.lineNumber,
+    message: `nested '<<<<<<<' open marker at line ${rec.lineNumber} while previous conflict is still open`,
+  })
+  return { kind: "abandon", result: abandon(state, j + 1, "nested") }
+}
+
+/** Handle a base marker (`|||||||`) inside the block. */
+const handleBase = (
+  state: BlockScanState,
+  rec: LineRec,
+  j: number,
+  runLen: number,
+  label: string,
+  openRunLen: number,
+): StepVerdict => {
+  if (state.sepIdx !== -1 || state.baseIdx !== -1) {
+    state.diagnostics.push({
+      kind: "marker_at_offset",
+      line: rec.lineNumber,
+      message: `unexpected base marker at line ${rec.lineNumber}`,
+    })
+    return { kind: "abandon", result: abandon(state, j + 1, "length") }
+  }
+  if (runLen !== openRunLen) {
+    state.diagnostics.push({
+      kind: "marker_at_offset",
+      line: rec.lineNumber,
+      message: `base marker length ${runLen} at line ${rec.lineNumber} does not match open length ${openRunLen}`,
+    })
+    return { kind: "abandon", result: abandon(state, j + 1, "length") }
+  }
+  state.baseIdx = j
+  state.baseLabel = label
+  return { kind: "continue" }
+}
+
+/** Handle a separator (`=======`) inside the block. */
+const handleSep = (
+  state: BlockScanState,
+  rec: LineRec,
+  j: number,
+  runLen: number,
+  openRunLen: number,
+): StepVerdict => {
+  if (state.sepIdx !== -1) {
+    state.diagnostics.push({
+      kind: "marker_at_offset",
+      line: rec.lineNumber,
+      message: `unexpected second separator at line ${rec.lineNumber}`,
+    })
+    return { kind: "abandon", result: abandon(state, j + 1, "length") }
+  }
+  if (runLen !== openRunLen) {
+    state.diagnostics.push({
+      kind: "marker_at_offset",
+      line: rec.lineNumber,
+      message: `separator length ${runLen} at line ${rec.lineNumber} does not match open length ${openRunLen}`,
+    })
+    return { kind: "abandon", result: abandon(state, j + 1, "length") }
+  }
+  state.sepIdx = j
+  return { kind: "continue" }
+}
+
+/** Handle a close marker (`>>>>>>>`) inside the block. */
+const handleClose = (
+  state: BlockScanState,
+  rec: LineRec,
+  j: number,
+  runLen: number,
+  label: string,
+  openRunLen: number,
+): StepVerdict => {
+  if (runLen !== openRunLen) {
+    state.diagnostics.push({
+      kind: "marker_at_offset",
+      line: rec.lineNumber,
+      message: `close marker length ${runLen} at line ${rec.lineNumber} does not match open length ${openRunLen}`,
+    })
+    return { kind: "abandon", result: abandon(state, j + 1, "length") }
+  }
+  return { kind: "complete", result: complete(state, j, label) }
+}
+
+/** Step the per-line dispatch — one line of a block scan. */
+const stepBlock = (
+  state: BlockScanState,
+  rec: LineRec,
+  j: number,
+  openRunLen: number,
+): StepVerdict => {
+  const m = classifyLine(rec.text)
+  switch (m.kind) {
+    case "open":
+      return handleNestedOrMalformedOpen(state, rec, j, false)
+    case "open_malformed":
+      return handleNestedOrMalformedOpen(state, rec, j, true)
+    case "base":
+      return handleBase(state, rec, j, m.runLen, m.label, openRunLen)
+    case "base_malformed":
+      state.diagnostics.push({
+        kind: "marker_at_offset",
+        line: rec.lineNumber,
+        message: `malformed base marker at line ${rec.lineNumber}`,
+      })
+      return { kind: "abandon", result: abandon(state, j + 1, "length") }
+    case "sep":
+      return handleSep(state, rec, j, m.runLen, openRunLen)
+    case "sep_malformed":
+      // `=======xyz` style — overwhelmingly NOT a separator (markdown / etc).
+      // Don't abandon block on this; treat as plain content.
+      return { kind: "continue" }
+    case "close":
+      return handleClose(state, rec, j, m.runLen, m.label, openRunLen)
+    case "close_malformed":
+      state.diagnostics.push({
+        kind: "marker_at_offset",
+        line: rec.lineNumber,
+        message: `malformed close marker at line ${rec.lineNumber}: expected '>>>>>>> <label>' (with a single space before label)`,
+      })
+      return { kind: "abandon", result: abandon(state, j + 1, "length") }
+    case "none":
+      return { kind: "continue" }
+    default: {
+      const _exhaust: never = m
+      void _exhaust
+      return { kind: "continue" }
+    }
+  }
+}
+
+/** Build the EOF-reached fall-through result (no close encountered). */
+const eofScan = (state: BlockScanState, linesLen: number): BlockScan => ({
+  baseIdx: state.baseIdx,
+  ...(state.baseLabel !== undefined ? { baseLabel: state.baseLabel } : {}),
+  sepIdx: state.sepIdx,
+  closeIdx: -1,
+  closeLabel: "",
+  lengthMismatch: false,
+  nested: false,
+  resumeAt: linesLen,
+  diagnostics: state.diagnostics,
+})
+
+/**
+ * Scan the body of a conflict that opened at `lines[startIdx]` with the given
+ * `openRunLen`. Returns one of:
+ *   - closeIdx >= 0 + sepIdx >= 0: complete block (caller emits).
+ *   - closeIdx >= 0 + sepIdx === -1: open and close but no `=======`
+ *     (caller emits `no_separator`).
+ *   - closeIdx === -1 + nested:    nested second open (caller emits `nested`).
+ *   - closeIdx === -1 + lengthMismatch: length-mismatched in-block marker.
+ *   - closeIdx === -1 + neither:   ran to EOF (caller emits `unterminated`).
+ */
+const scanBlockBody = (
+  lines: ReadonlyArray<LineRec>,
+  startIdx: number,
+  openRunLen: number,
+): BlockScan => {
+  const state: BlockScanState = {
+    baseIdx: -1,
+    baseLabel: undefined,
+    sepIdx: -1,
+    diagnostics: [],
+  }
+  for (let j = startIdx + 1; j < lines.length; j++) {
+    const rec = lines[j]
+    if (!rec) continue
+    const verdict = stepBlock(state, rec, j, openRunLen)
+    if (verdict.kind === "abandon" || verdict.kind === "complete") return verdict.result
+  }
+  return eofScan(state, lines.length)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Top-level scanner
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A single top-level decision. */
+interface TopLevelStep {
+  readonly block?: ConflictBlock
+  readonly diagnostics: ReadonlyArray<ConflictParseDiagnostic>
+  readonly nextIdx: number
+}
+
+/** Build a `ConflictBlock` from a successful scan. Caller has already
+ *  validated `closeIdx !== -1` and `sepIdx !== -1`. */
+const buildBlock = (
+  lines: ReadonlyArray<LineRec>,
+  openIdx: number,
+  oursLabel: string,
+  scan: BlockScan,
+): ConflictBlock | null => {
+  const openLine = lines[openIdx]
+  const closeLine = lines[scan.closeIdx]
+  if (!openLine || !closeLine) return null
+
+  const oursEndIdx = scan.baseIdx !== -1 ? scan.baseIdx : scan.sepIdx
+  const ours = sliceLines(lines, openIdx + 1, oursEndIdx)
+  const base = scan.baseIdx !== -1 ? sliceLines(lines, scan.baseIdx + 1, scan.sepIdx) : undefined
+  const theirs = sliceLines(lines, scan.sepIdx + 1, scan.closeIdx)
+
+  const style: ConflictMarkerStyle = scan.baseIdx !== -1 ? "three-way" : "two-way"
+  const endOffset = closeLine.startOffset + closeLine.text.length
+
+  return {
+    style,
+    oursLabel,
+    theirsLabel: scan.closeLabel,
+    ...(scan.baseLabel !== undefined ? { baseLabel: scan.baseLabel } : {}),
+    ours,
+    theirs,
+    ...(base !== undefined ? { base } : {}),
+    startLine: openLine.lineNumber,
+    endLine: closeLine.lineNumber,
+    startOffset: openLine.startOffset,
+    endOffset,
+  }
+}
+
+/** Handle a top-level OPEN marker. Returns the next top-level step. Extracted
+ *  from {@link classifyTopLevel} to keep cognitive complexity under the cap. */
+const handleOpenAt = (
+  lines: ReadonlyArray<LineRec>,
+  idx: number,
+  openLine: LineRec,
+  openLabel: string,
+  openRunLen: number,
+): TopLevelStep => {
+  const scan = scanBlockBody(lines, idx, openRunLen)
+
+  if (scan.closeIdx === -1) {
+    // Three sub-cases: nested, length-mismatch (already diagnosed), or EOF.
+    if (!scan.nested && !scan.lengthMismatch) {
+      return {
+        diagnostics: [
+          ...scan.diagnostics,
+          {
+            kind: "unterminated",
+            line: lines.length + 1,
+            message: `unterminated conflict: open marker at line ${openLine.lineNumber} has no matching '>>>>>>>' before EOF`,
+          },
+        ],
+        nextIdx: scan.resumeAt,
+      }
+    }
+    // Nested / length-mismatch: spec says "resume scanning from after the
+    // second open" / "resume after the open" — `scan.resumeAt` encodes that.
+    return { diagnostics: scan.diagnostics, nextIdx: scan.resumeAt }
+  }
+
+  if (scan.sepIdx === -1) {
+    return {
+      diagnostics: [
+        ...scan.diagnostics,
+        {
+          kind: "no_separator",
+          line: openLine.lineNumber,
+          message: `conflict at line ${openLine.lineNumber} has open and close markers but no '=======' separator between them`,
+        },
+      ],
+      nextIdx: scan.resumeAt,
+    }
+  }
+
+  const block = buildBlock(lines, idx, openLabel, scan)
+  if (!block) return { diagnostics: scan.diagnostics, nextIdx: scan.resumeAt }
+  return { block, diagnostics: scan.diagnostics, nextIdx: scan.resumeAt }
+}
+
+/** Inspect `lines[idx]` at top-level. */
+const classifyTopLevel = (lines: ReadonlyArray<LineRec>, idx: number): TopLevelStep => {
+  const line = lines[idx]
+  if (!line) return { diagnostics: [], nextIdx: idx + 1 }
+
+  const m = classifyLine(line.text)
+
+  if (m.kind === "open") {
+    return handleOpenAt(lines, idx, line, m.label, m.runLen)
+  }
+
+  if (m.kind === "open_malformed") {
+    return {
+      diagnostics: [
+        {
+          kind: "marker_at_offset",
+          line: line.lineNumber,
+          message: `malformed open marker at line ${line.lineNumber}: expected '<<<<<<< <label>' (with a single space before label)`,
+        },
+      ],
+      nextIdx: idx + 1,
+    }
+  }
+  if (m.kind === "close") {
+    return {
+      diagnostics: [
+        {
+          kind: "missing_ours",
+          line: line.lineNumber,
+          message: `close marker '>>>>>>>' at line ${line.lineNumber} without a preceding '<<<<<<<' open marker`,
+        },
+      ],
+      nextIdx: idx + 1,
+    }
+  }
+  if (m.kind === "close_malformed") {
+    return {
+      diagnostics: [
+        {
+          kind: "marker_at_offset",
+          line: line.lineNumber,
+          message: `malformed close marker at line ${line.lineNumber}: expected '>>>>>>> <label>' (with a single space before label)`,
+        },
+      ],
+      nextIdx: idx + 1,
+    }
+  }
+  if (m.kind === "sep") {
+    return {
+      diagnostics: [
+        {
+          kind: "missing_theirs",
+          line: line.lineNumber,
+          message: `separator '=======' at line ${line.lineNumber} without a preceding '<<<<<<<' open marker`,
+        },
+      ],
+      nextIdx: idx + 1,
+    }
+  }
+  // base/base_malformed/sep_malformed/none at top level → ignore (not in spec).
+  return { diagnostics: [], nextIdx: idx + 1 }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public entrypoint
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Parse merge-conflict markers from a file's contents.
+ *
+ * Pure, never throws on malformed input (diagnostics on the result instead).
+ * The ONLY throw path is a non-string argument → {@link ConflictParserInputError}
+ * (treated as a programmer bug).
+ */
+export const parseConflicts = (source: string): ConflictParseResult => {
+  if (typeof source !== "string") {
+    throw new ConflictParserInputError(
+      `parseConflicts expects a string, got ${source === null ? "null" : typeof source}`,
+    )
+  }
+  if (source.length === 0) {
+    return Object.freeze({ blocks: Object.freeze([]), diagnostics: Object.freeze([]) })
+  }
+
+  const lines = splitLinesWithOffsets(source)
+  const blocks: ConflictBlock[] = []
+  const diagnostics: ConflictParseDiagnostic[] = []
+
+  let i = 0
+  while (i < lines.length) {
+    const step = classifyTopLevel(lines, i)
+    for (const d of step.diagnostics) diagnostics.push(d)
+    if (step.block) blocks.push(step.block)
+    if (step.nextIdx <= i) {
+      // Defensive: advancement is invariant. Bail rather than loop forever.
+      break
+    }
+    i = step.nextIdx
+  }
+
+  return Object.freeze({
+    blocks: Object.freeze(blocks),
+    diagnostics: Object.freeze(diagnostics),
+  })
 }
