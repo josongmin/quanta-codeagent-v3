@@ -2,7 +2,6 @@ import type { AgentConfig, AgentOutcome } from "@/agent"
 import { startAutomationEngineTicker } from "@/agent/loop-helpers"
 import type { Message } from "@/llm"
 import { injectSimulatedTurn, type LastTurnOutcome, REACTOR_ENV_FLAG } from "@/reactor"
-import { disposeActiveSearchPipeline } from "@/runner/assemble"
 import { assembleAutomation } from "@/scheduler/runtime-wire"
 import type {
   RuntimeFacadeComposeOptions,
@@ -96,6 +95,13 @@ export interface RunSessionLoopDeps {
    *  (`QUANTA_PLAYBOOK_TRIGGER=on` wins over flag=false) is enforced
    *  inside `maybeStartPlaybookTriggerWire`. */
   readonly playbookCliFlag?: boolean
+  /** L5 M-11 — THIS session's search-wire teardown (delta-scan `setInterval` +
+   *  indexer). The host passes `boot.tooling.searchPipelineDispose` so session
+   *  close releases the wire THIS session built, threaded per-session instead
+   *  of via a module singleton (so two concurrent sessions each dispose their
+   *  OWN wire). Absent ⇒ no wire was built (kill-switch / lexical-only);
+   *  nothing is registered (default-OFF byte-identical). */
+  readonly searchPipelineDispose?: () => void
 }
 
 /** Default Esc-Esc cancel window (ms). Matches the prior inline constant in
@@ -103,6 +109,19 @@ export interface RunSessionLoopDeps {
  *  the wrapTurn share ONE value (the prior code duplicated `ESC_WINDOW_MS`
  *  across both call sites). */
 const ESC_WINDOW_MS = 2000
+
+/** L5 M-11 — register THIS session's search-wire teardown on the close stack
+ *  when the host threaded one in (per-session, not the module singleton). Kept
+ *  as a free function so the branch lives OUTSIDE `runSessionLoop` (its
+ *  cognitive complexity is already at the biome cap). No-op when absent ⇒
+ *  default-OFF byte-identical (kill-switch / lexical-only path; no wire built). */
+const registerSearchPipelineDispose = (
+  closeStack: Array<{ label: string; dispose: () => void | Promise<void> }>,
+  dispose: (() => void) | undefined,
+): void => {
+  if (dispose === undefined) return
+  closeStack.push({ label: "searchPipeline.dispose", dispose: () => dispose() })
+}
 
 const mapAgentOutcomeToReactorOutcome = (outcome: AgentOutcome): LastTurnOutcome => {
   switch (outcome.reason) {
@@ -150,6 +169,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     runtimeFacadeCompose,
     playbookSeam,
     playbookCliFlag,
+    searchPipelineDispose,
   } = deps
   const {
     abort,
@@ -265,10 +285,15 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     }),
   )
   closeStack.push({ label: "session.close", dispose: () => session.close() })
-  // L5 M-11 — tear down the active search wire's delta-scan setInterval + indexer
-  // on session close so a long-lived session does not leak a scanning interval.
-  // Idempotent + a no-op when no pipeline is active.
-  closeStack.push({ label: "searchPipeline.dispose", dispose: () => disposeActiveSearchPipeline() })
+  // L5 M-11 — tear down THIS session's search wire (delta-scan setInterval +
+  // indexer) on session close so a long-lived session does not leak a scanning
+  // interval. Threaded per-session: `searchPipelineDispose` is the bound
+  // `searchWire.dispose` of the wire THIS session built (not a module
+  // singleton), so two concurrent sessions each release their OWN wire. The
+  // disposer is idempotent. Absent ⇒ no wire was built; nothing registered
+  // (default-OFF byte-identical). Registration lives in the free helper so the
+  // branch stays out of `runSessionLoop`'s complexity budget.
+  registerSearchPipelineDispose(closeStack, searchPipelineDispose)
   registerSideConversationStart?.((args) => session.side.start(args))
 
   // ADR-0292 — install the `/rewind-conv` swap closure so the slash can mutate

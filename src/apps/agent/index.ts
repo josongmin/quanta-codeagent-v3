@@ -496,6 +496,12 @@ export const buildBaseFromArgs = (
    *  we still fall back to a fresh controller's signal, but production always
    *  injects the live one. */
   signal?: AbortSignal,
+  /** L5 M-11 — out-collector for per-process teardown. When provided, the
+   *  search wire's `dispose` (delta-scan `setInterval` + indexer) is pushed
+   *  so the composition root (`runMain`) tears it down in its `finally`,
+   *  threaded per-process instead of via the module singleton. Absent (older
+   *  SDK seams / tests) ⇒ no disposer collected (behavior unchanged). */
+  disposers?: Array<() => void>,
 ): AssembleRequest["base"] => {
   // QUANTA_PROVIDER drives the factory pick; an explicit `--provider` flag must
   // still win, so seed it into the env view the factory reads.
@@ -532,6 +538,12 @@ export const buildBaseFromArgs = (
   // registered into the base registry below, and the helper-only pipeline slot
   // is spread into AgentConfig for any future pipeline consumers.
   const searchWire = buildSearchPipelineFromEnv(env, process.cwd())
+  // L5 M-11 — thread THIS process's wire teardown (delta-scan interval +
+  // indexer) up to `runMain`'s `finally` via the disposer collector, instead
+  // of relying on the module singleton. Idempotent; no-op when no wire built.
+  if (searchWire !== null && disposers !== undefined) {
+    disposers.push(() => searchWire.dispose())
+  }
   // ADR-0236 identity wire — `--identity-mode <m>` (precedence #1) ⇒ build
   // via the mode-variant registry; else fall back to the ADR-0198
   // `QUANTA_IDENTITY=1` env (precedence #2); else empty-string sentinel
@@ -614,7 +626,7 @@ export const buildBaseFromArgs = (
   }
 
   attachExecutionPlaneSlots(base, p)
-  return wireOptionalAgentPorts(base)
+  return wireOptionalAgentPorts(base, process.env)
 }
 
 const applyModeSpecificRequestFields = (out: AssembleRequest, p: AssembleRequestPartial): void => {
@@ -811,12 +823,38 @@ export const runMain = async (deps: MainDeps = {}): Promise<void> => {
   // / req.ciBot). The `base` is a stub — runners build the real AgentConfig
   // internally; assemble.ts only needs `base` populated for modePolicy +
   // budgetMeter, which the runners assemble themselves.
-  const fullReq = liftToAssembleRequest(partial, signal)
+  // L5 M-11 — process-lifetime disposer registry. The search wire built inside
+  // `buildBaseFromArgs` pushes its per-wire `dispose` (delta-scan setInterval +
+  // indexer) here; `runMain` runs each in `finally` so this composition root
+  // tears down THE wire it built, threaded per-process instead of via the
+  // module singleton. Each disposer is idempotent + surfaces (does not rethrow)
+  // its failure so one leaky teardown cannot mask the SIGINT-listener detach.
+  const disposers: Array<() => void> = []
+  const fullReq = liftToAssembleRequest(partial, signal, disposers)
   try {
     const outcome = await dispatcher.runMode(fullReq)
     exit(outcome.exitCode)
   } finally {
+    runProcessDisposers(disposers, stderr)
     if (onSigint !== undefined) process.off("SIGINT", onSigint)
+  }
+}
+
+/** L5 M-11 — run each process-lifetime disposer (today: the search wire's
+ *  delta-scan interval + indexer teardown) exactly once on shutdown. Each is
+ *  idempotent; a throw is surfaced to stderr (NOT rethrown) so one leaky
+ *  teardown cannot mask the rest or the SIGINT-listener detach. Kept as a free
+ *  function so the loop lives OUTSIDE `runMain`'s cognitive-complexity budget. */
+const runProcessDisposers = (
+  disposers: ReadonlyArray<() => void>,
+  stderr: (s: string) => void,
+): void => {
+  for (const dispose of disposers) {
+    try {
+      dispose()
+    } catch (e) {
+      stderr(`[teardown] search wire dispose failed: ${errMessage(e)}\n`)
+    }
   }
 }
 
@@ -828,8 +866,11 @@ export const runMain = async (deps: MainDeps = {}): Promise<void> => {
 const liftToAssembleRequest = (
   p: AssembleRequestPartial,
   signal?: AbortSignal,
+  /** L5 M-11 — forwarded to `buildBaseFromArgs` so the search wire's teardown
+   *  is collected for the composition root to run on process shutdown. */
+  disposers?: Array<() => void>,
 ): AssembleRequest => {
-  const base = buildBaseFromArgs(p, signal)
+  const base = buildBaseFromArgs(p, signal, disposers)
   const out: AssembleRequest = { mode: p.mode, base }
   if (p.dials !== undefined) out.dials = p.dials
   if (p.exhaustion !== undefined) out.exhaustion = p.exhaustion

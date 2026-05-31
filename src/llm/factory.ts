@@ -60,6 +60,16 @@ export interface CreateLLMOptions {
   /** T1 stream-hang guard overrides, forwarded to the adapter. */
   streamFirstChunkMs?: number
   streamIdleMs?: number
+  /** OpenAI `service_tier` (Responses surface). When omitted, the factory
+   *  derives it from the env (`QUANTA_SERVICE_TIER` / `QUANTA_FAST`) so the
+   *  adapter slice never reads process.env itself. */
+  serviceTier?: string
+  /** Reasoning effort (Responses surface). When omitted, derived from
+   *  `QUANTA_REASONING_EFFORT`. */
+  reasoningEffort?: string
+  /** ChatGPT-OAuth body debug logging. When omitted, derived from
+   *  `QUANTA_DEBUG_OAUTH === "1"`. */
+  debugOAuth?: boolean
 }
 
 /** Thrown by {@link createLLM} when the resolved provider has no API key and
@@ -103,9 +113,16 @@ const ADAPTER_REGISTRY: Record<
         : {}),
       ...(opts.streamIdleMs !== undefined ? { streamIdleMs: opts.streamIdleMs } : {}),
     }
-    return surface === "responses"
-      ? new OpenAIResponsesAdapter(shared)
-      : new OpenAIAdapter(shared)
+    if (surface !== "responses") return new OpenAIAdapter(shared)
+    // Responses surface honors the env-derived service_tier / reasoning effort,
+    // resolved HERE (composition root) and threaded in as plain adapter config.
+    const serviceTier = resolveServiceTier(opts, env)
+    const reasoningEffort = resolveReasoningEffort(opts, env)
+    return new OpenAIResponsesAdapter({
+      ...shared,
+      ...(serviceTier !== undefined ? { serviceTier } : {}),
+      ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+    })
   },
   anthropic: (apiKey, model, opts, _env) =>
     new AnthropicAdapter({
@@ -123,16 +140,22 @@ const ADAPTER_REGISTRY: Record<
   // is forwarded so the adapter resolves OAuth config (issuer/sku/originator)
   // and locates `~/.quanta/auth/chatgpt.json` without reading process.env
   // directly.
-  "chatgpt-oauth": (_apiKey, model, _opts, env) =>
-    new ChatGPTOAuthAdapter({
+  "chatgpt-oauth": (_apiKey, model, _opts, env) => {
+    const serviceTier = resolveServiceTier(_opts, env)
+    const reasoningEffort = resolveReasoningEffort(_opts, env)
+    return new ChatGPTOAuthAdapter({
       model,
       env,
+      debugOAuth: resolveDebugOAuth(_opts, env),
+      ...(serviceTier !== undefined ? { serviceTier } : {}),
+      ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
       ...(_opts.maxTokens !== undefined ? { maxTokens: _opts.maxTokens } : {}),
       ...(_opts.streamFirstChunkMs !== undefined
         ? { streamFirstChunkMs: _opts.streamFirstChunkMs }
         : {}),
       ...(_opts.streamIdleMs !== undefined ? { streamIdleMs: _opts.streamIdleMs } : {}),
-    }),
+    })
+  },
 }
 
 /** Read-only view of the env we consult for provider selection / keys. The
@@ -142,6 +165,29 @@ const ADAPTER_REGISTRY: Record<
  *  `process.env` outside `runtime-config.ts`). The three composition-root call
  *  sites (`cli`/`bench`/`eval`) pass their already-loaded env. */
 export type EnvLike = Record<string, string | undefined>
+
+/** Composition-root resolution of the Responses `service_tier`. Explicit
+ *  option wins; otherwise `QUANTA_FAST=1` ⇒ `"priority"`, else
+ *  `QUANTA_SERVICE_TIER`. Empty ⇒ undefined. Keeping this read HERE (the
+ *  factory already owns `env`) is what lets the adapter/wire slice stay free of
+ *  `process.env` (slice-boundary invariant). */
+const resolveServiceTier = (opts: CreateLLMOptions, env: EnvLikeDecl): string | undefined => {
+  if (opts.serviceTier !== undefined) return opts.serviceTier
+  const fromFast = env.QUANTA_FAST === "1" ? "priority" : undefined
+  const value = fromFast ?? env.QUANTA_SERVICE_TIER
+  return value !== undefined && value.length > 0 ? value : undefined
+}
+
+/** Composition-root resolution of the Responses reasoning effort. Explicit
+ *  option wins; otherwise `QUANTA_REASONING_EFFORT`. The wire normalizes the
+ *  closed value set — here we just forward the raw string. */
+const resolveReasoningEffort = (opts: CreateLLMOptions, env: EnvLikeDecl): string | undefined =>
+  opts.reasoningEffort ?? env.QUANTA_REASONING_EFFORT
+
+/** Composition-root resolution of the ChatGPT-OAuth body-debug flag. Explicit
+ *  option wins; otherwise `QUANTA_DEBUG_OAUTH === "1"`. */
+const resolveDebugOAuth = (opts: CreateLLMOptions, env: EnvLikeDecl): boolean =>
+  opts.debugOAuth ?? env.QUANTA_DEBUG_OAUTH === "1"
 
 const resolveOpenAISurface = (
   opts: CreateLLMOptions,

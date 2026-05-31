@@ -34,7 +34,7 @@ import {
   type TokenRecord,
   writeToken,
 } from "@/auth/chatgpt-oauth"
-import { errMessage, LLMError } from "@/shared"
+import { errMessage, LLMError, logger } from "@/shared"
 import { buildResponsesBody } from "../openai-responses-wire"
 import type { LLMPort } from "../ports"
 import {
@@ -80,6 +80,16 @@ export interface ChatGPTOAuthConfig extends AdapterStreamTimeoutConfig {
   /** Test seam: pin time so refresh / expiry checks are deterministic. */
   readonly nowMs?: () => number
   readonly maxTokens?: number
+  /** OpenAI `service_tier` — env-derived at the composition root and passed
+   *  in as plain config (this adapter never reads process.env). */
+  readonly serviceTier?: string
+  /** Reasoning effort — env-derived at the composition root and passed in. */
+  readonly reasoningEffort?: string
+  /** When true, the prepared request body is logged (truncating long data:
+   *  URLs) via the shared logger at debug level. Env-derived
+   *  (`QUANTA_DEBUG_OAUTH`) at the composition root — the slice itself takes a
+   *  plain boolean and routes through the logger port, never raw stderr. */
+  readonly debugOAuth?: boolean
 }
 
 /** Refresh the access token if it expires within this many ms — a 1-minute
@@ -102,6 +112,9 @@ export class ChatGPTOAuthAdapter implements LLMPort {
   private readonly nowMs: () => number
   private readonly maxTokens: number | undefined
   private readonly streamTimeoutMs: { firstChunkMs: number; idleMs: number }
+  private readonly serviceTier: string | undefined
+  private readonly reasoningEffort: string | undefined
+  private readonly debugOAuth: boolean
 
   constructor(config: ChatGPTOAuthConfig) {
     this.model = config.model
@@ -110,6 +123,9 @@ export class ChatGPTOAuthAdapter implements LLMPort {
     this.nowMs = config.nowMs ?? (() => Date.now())
     this.maxTokens = config.maxTokens
     this.streamTimeoutMs = resolveAdapterStreamTimeouts(config)
+    this.serviceTier = config.serviceTier
+    this.reasoningEffort = config.reasoningEffort
+    this.debugOAuth = config.debugOAuth ?? false
   }
 
   private async ensureFreshToken(): Promise<TokenRecord> {
@@ -276,17 +292,19 @@ export class ChatGPTOAuthAdapter implements LLMPort {
         model: effectiveModel,
         transportId: "chatgpt-oauth",
         ...(this.maxTokens !== undefined ? { maxOutputTokens: this.maxTokens } : {}),
+        ...(this.serviceTier !== undefined ? { serviceTier: this.serviceTier } : {}),
+        ...(this.reasoningEffort !== undefined ? { reasoningEffort: this.reasoningEffort } : {}),
         ...(continuationStore !== undefined ? { continuationStore } : {}),
       })
 
-      if (process.env.QUANTA_DEBUG_OAUTH === "1") {
+      if (this.debugOAuth) {
         const debugJson = JSON.stringify(prepared.body, (_k, v) => {
           if (typeof v === "string" && v.startsWith("data:") && v.length > 80) {
             return `${v.slice(0, 60)}…[${v.length} chars]`
           }
           return v
         })
-        process.stderr.write(`[oauth body] ${debugJson}\n`)
+        logger.debug(`[oauth body] ${debugJson}`)
       }
 
       yield* streamResponsesSurface({

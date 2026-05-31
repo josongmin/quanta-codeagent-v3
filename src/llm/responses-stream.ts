@@ -34,6 +34,13 @@ export interface PrepareResponsesContinuationRequestArgs {
   readonly transportId: LlmTransportId
   readonly maxOutputTokens?: number
   readonly continuationStore?: ResponsesContinuationStore
+  /** OpenAI `service_tier` — env-derived (`QUANTA_SERVICE_TIER`/`QUANTA_FAST`)
+   *  at the composition root, threaded through to `buildResponsesBody` as plain
+   *  config. Omitted ⇒ no `service_tier` field. */
+  readonly serviceTier?: string
+  /** Reasoning effort — env-derived (`QUANTA_REASONING_EFFORT`) at the
+   *  composition root, threaded through as plain config. Omitted ⇒ default. */
+  readonly reasoningEffort?: string
 }
 
 export interface ResponsesStreamConfig {
@@ -153,6 +160,8 @@ export const prepareResponsesContinuationRequest = (
   const fullBody = buildResponsesBody(args.input, args.model, {
     inputItems: fullInputItems,
     ...(args.maxOutputTokens !== undefined ? { maxOutputTokens: args.maxOutputTokens } : {}),
+    ...(args.serviceTier !== undefined ? { serviceTier: args.serviceTier } : {}),
+    ...(args.reasoningEffort !== undefined ? { reasoningEffort: args.reasoningEffort } : {}),
     store: false,
   })
   const requestFingerprint = fingerprintResponsesBody(fullBody)
@@ -263,6 +272,8 @@ export const prepareResponsesContinuationRequest = (
       inputItems: tail,
       previousResponseId: previous.responseId,
       ...(args.maxOutputTokens !== undefined ? { maxOutputTokens: args.maxOutputTokens } : {}),
+      ...(args.serviceTier !== undefined ? { serviceTier: args.serviceTier } : {}),
+      ...(args.reasoningEffort !== undefined ? { reasoningEffort: args.reasoningEffort } : {}),
       store: false,
     }),
     fullBody,

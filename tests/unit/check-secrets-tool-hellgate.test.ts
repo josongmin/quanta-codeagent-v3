@@ -20,6 +20,7 @@ import {
   CHECK_SECRETS_ENABLED_VALUE,
   CHECK_SECRETS_ENV_FLAG,
   type CheckSecretsEnvReader,
+  checkSecretsToolEnabled,
 } from "@/agent/tier1"
 import type { AgentConfig } from "@/agent/types"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool"
@@ -55,38 +56,48 @@ const structured = (r: ToolResult): CheckSecretsStructured => r.structured as Ch
 // A. ENV GATE — exactly `"on"` enables; everything else is default-OFF.
 // ────────────────────────────────────────────────────────────────────────────
 describe("check_secrets / A. env gate (default-OFF posture)", () => {
-  test("A1 — absent env ⇒ block returns []", () => {
-    expect(buildCheckSecretsBlock(envOf({}))).toEqual([])
+  // The env→boolean resolution lives at the composition root via
+  // `checkSecretsToolEnabled`; `buildCheckSecretsBlock` takes the plain boolean.
+  // Section A proves the env truth-table on the resolver AND the splat semantics
+  // on the builder.
+  test("A1 — absent env ⇒ resolver false ⇒ block []", () => {
+    expect(checkSecretsToolEnabled(envOf({}))).toBe(false)
+    expect(buildCheckSecretsBlock(false)).toEqual([])
   })
 
-  test("A2 — empty string ⇒ block returns []", () => {
-    expect(buildCheckSecretsBlock(envOf({ [CHECK_SECRETS_ENV_FLAG]: "" }))).toEqual([])
+  test("A2 — empty string ⇒ resolver false", () => {
+    expect(checkSecretsToolEnabled(envOf({ [CHECK_SECRETS_ENV_FLAG]: "" }))).toBe(false)
   })
 
   test("A3 — `'1'` does NOT enable (strict canonical value)", () => {
-    expect(buildCheckSecretsBlock(envOf({ [CHECK_SECRETS_ENV_FLAG]: "1" }))).toEqual([])
+    expect(checkSecretsToolEnabled(envOf({ [CHECK_SECRETS_ENV_FLAG]: "1" }))).toBe(false)
   })
 
   test("A4 — `'true'` does NOT enable", () => {
-    expect(buildCheckSecretsBlock(envOf({ [CHECK_SECRETS_ENV_FLAG]: "true" }))).toEqual([])
+    expect(checkSecretsToolEnabled(envOf({ [CHECK_SECRETS_ENV_FLAG]: "true" }))).toBe(false)
   })
 
   test("A5 — `'yes'` does NOT enable", () => {
-    expect(buildCheckSecretsBlock(envOf({ [CHECK_SECRETS_ENV_FLAG]: "yes" }))).toEqual([])
+    expect(checkSecretsToolEnabled(envOf({ [CHECK_SECRETS_ENV_FLAG]: "yes" }))).toBe(false)
   })
 
   test("A6 — `'off'` does NOT enable", () => {
-    expect(buildCheckSecretsBlock(envOf({ [CHECK_SECRETS_ENV_FLAG]: "off" }))).toEqual([])
+    expect(checkSecretsToolEnabled(envOf({ [CHECK_SECRETS_ENV_FLAG]: "off" }))).toBe(false)
   })
 
   test("A7 — `'On'` (wrong case) does NOT enable", () => {
-    expect(buildCheckSecretsBlock(envOf({ [CHECK_SECRETS_ENV_FLAG]: "On" }))).toEqual([])
+    expect(checkSecretsToolEnabled(envOf({ [CHECK_SECRETS_ENV_FLAG]: "On" }))).toBe(false)
   })
 
-  test("A8 — canonical `'on'` ⇒ block returns the single check_secrets tool", () => {
-    const tools = buildCheckSecretsBlock(envOf({ [CHECK_SECRETS_ENV_FLAG]: "on" }))
+  test("A8 — canonical `'on'` ⇒ resolver true ⇒ block returns the single tool", () => {
+    expect(checkSecretsToolEnabled(envOf({ [CHECK_SECRETS_ENV_FLAG]: "on" }))).toBe(true)
+    const tools = buildCheckSecretsBlock(true)
     expect(tools.length).toBe(1)
     expect(tools[0]?.name).toBe("check_secrets")
+  })
+
+  test("A8b — `buildCheckSecretsBlock(undefined)` ⇒ [] (default-OFF)", () => {
+    expect(buildCheckSecretsBlock(undefined)).toEqual([])
   })
 
   test("A9 — canonical-value constant equals the bare string `'on'`", () => {
@@ -99,35 +110,24 @@ describe("check_secrets / A. env gate (default-OFF posture)", () => {
 //    must not advertise `check_secrets`.
 // ────────────────────────────────────────────────────────────────────────────
 describe("check_secrets / B. byte-identical default-OFF in features composer", () => {
-  test("B1 — features.extraTools does NOT contain check_secrets when env unset", async () => {
-    const prior = process.env[CHECK_SECRETS_ENV_FLAG]
-    process.env[CHECK_SECRETS_ENV_FLAG] = undefined as unknown as string
-    delete process.env[CHECK_SECRETS_ENV_FLAG]
-    try {
-      const features = await buildSessionFeatures({
-        registry: { specs: () => [], get: () => undefined } as unknown as AgentConfig["registry"],
-        permission: { mode: "default" },
-      } as unknown as AgentConfig)
-      expect(features.extraTools.find((t) => t.name === "check_secrets")).toBeUndefined()
-    } finally {
-      if (prior !== undefined) process.env[CHECK_SECRETS_ENV_FLAG] = prior
-    }
+  // The gate is now a plain `AgentConfig.secretCheckToolEnabled` boolean
+  // resolved at the composition root (no `process.env` read inside the slice).
+  test("B1 — features.extraTools does NOT contain check_secrets when flag absent", async () => {
+    const features = await buildSessionFeatures({
+      registry: { specs: () => [], get: () => undefined } as unknown as AgentConfig["registry"],
+      permission: { mode: "default" },
+    } as unknown as AgentConfig)
+    expect(features.extraTools.find((t) => t.name === "check_secrets")).toBeUndefined()
   })
 
-  test("B2 — features.extraTools DOES contain check_secrets when env === 'on'", async () => {
-    const prior = process.env[CHECK_SECRETS_ENV_FLAG]
-    process.env[CHECK_SECRETS_ENV_FLAG] = "on"
-    try {
-      const features = await buildSessionFeatures({
-        registry: { specs: () => [], get: () => undefined } as unknown as AgentConfig["registry"],
-        permission: { mode: "default" },
-      } as unknown as AgentConfig)
-      const tool = features.extraTools.find((t) => t.name === "check_secrets")
-      expect(tool).toBeDefined()
-    } finally {
-      if (prior === undefined) delete process.env[CHECK_SECRETS_ENV_FLAG]
-      else process.env[CHECK_SECRETS_ENV_FLAG] = prior
-    }
+  test("B2 — features.extraTools DOES contain check_secrets when flag === true", async () => {
+    const features = await buildSessionFeatures({
+      registry: { specs: () => [], get: () => undefined } as unknown as AgentConfig["registry"],
+      permission: { mode: "default" },
+      secretCheckToolEnabled: true,
+    } as unknown as AgentConfig)
+    const tool = features.extraTools.find((t) => t.name === "check_secrets")
+    expect(tool).toBeDefined()
   })
 })
 

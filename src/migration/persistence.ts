@@ -6,10 +6,49 @@
  * {@link ImportLogBusyError} rather than silently merging.
  */
 
-import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
+import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { QuantaError } from "@/shared"
 import type { ImportLog, ImportLogEntry } from "./types"
+
+/**
+ * Durability barrier for the atomic append. Splits the temp-file fsync and the
+ * parent-directory fsync so a fault-injection test can stub them and PROVE the
+ * ordering invariant: the rename NEVER runs if the temp fsync failed (no torn
+ * file surfaces as committed). Defaults issue a real `fsync(2)`.
+ */
+export interface ImportLogSync {
+  /** Flush the temp file's bytes to stable storage BEFORE the rename. A
+   *  rejection ABORTS the append — the rename must not run. */
+  readonly syncFile: (path: string) => Promise<void>
+  /** Flush the parent directory AFTER a successful rename so the new dirent is
+   *  durable. Best-effort — a rejection is swallowed (some platforms reject a
+   *  directory fsync and the bytes are already safe). */
+  readonly syncDir: (dir: string) => Promise<void>
+}
+
+/** Real durability barrier — `fsync` via an `fs/promises` file handle. */
+export const defaultImportLogSync: ImportLogSync = {
+  syncFile: async (path) => {
+    const handle = await open(path, "r+")
+    try {
+      await handle.sync()
+    } finally {
+      await handle.close()
+    }
+  },
+  syncDir: async (dir) => {
+    let handle: Awaited<ReturnType<typeof open>> | undefined
+    try {
+      handle = await open(dir, "r")
+      await handle.sync()
+    } catch {
+      // Directory fsync rejected (e.g. Windows) — bytes already durable.
+    } finally {
+      if (handle !== undefined) await handle.close().catch(() => undefined)
+    }
+  },
+}
 
 /** Default log file location under `~/.quanta`. Caller-supplied `homeDir`
  *  lets tests redirect to a tmpdir. */
@@ -148,6 +187,7 @@ export const appendImportLog = async (
   homeDir: string,
   entry: ImportLogEntry,
   reclaim: ReclaimOptions = {},
+  sync: ImportLogSync = defaultImportLogSync,
 ): Promise<void> => {
   const path = importLogPath(homeDir)
   await mkdir(dirname(path), { recursive: true })
@@ -179,8 +219,22 @@ export const appendImportLog = async (
       entries: [...current.entries, entry],
     }
     const tmp = `${path}.tmp.${process.pid}.${crypto.randomUUID().slice(0, 8)}`
-    await writeFile(tmp, `${JSON.stringify(next, null, 2)}\n`, "utf8")
+    // Durability barrier (audit R2): write the temp, then FSYNC it BEFORE the
+    // rename. Without the fsync the bytes may live only in the page cache, so a
+    // crash between the write and the rename's metadata flush could leave a
+    // torn / zero-length file surviving under the FINAL name — a partial write
+    // masquerading as a committed log. If the fsync throws, the rename is
+    // SKIPPED and the temp is cleaned up, so the on-disk log is untouched.
+    try {
+      await writeFile(tmp, `${JSON.stringify(next, null, 2)}\n`, "utf8")
+      await sync.syncFile(tmp)
+    } catch (err) {
+      await rm(tmp, { force: true })
+      throw err
+    }
     await rename(tmp, path)
+    // Flush the parent dir so the rename's new dirent survives a crash.
+    await sync.syncDir(dirname(path))
   } finally {
     await rm(lock, { force: true })
   }

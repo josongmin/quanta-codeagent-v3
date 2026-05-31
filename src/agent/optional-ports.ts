@@ -47,7 +47,10 @@ const roleModelResolverOf = (base: OptionalPortBase): RoleModelResolver | undefi
 
 export const wireOptionalAgentPorts = <T extends OptionalPortBase>(
   base: T,
-  env: OptionalPortEnv = process.env,
+  // REQUIRED — the composition root (apps/host/runner) passes its already-loaded
+  // env so this slice never reads `process.env` itself (slice-boundary
+  // invariant). Pass `{}` for a hermetic wire (every `=on` gate stays off).
+  env: OptionalPortEnv,
 ): T => {
   let next = base
 

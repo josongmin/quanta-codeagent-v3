@@ -26,6 +26,13 @@ export interface Tooling {
   sessionId: string
   registry: ToolRegistry
   searchPipeline?: AgentConfig["searchPipeline"]
+  /** Per-session teardown for THE wire this tooling built (L5 M-11). The
+   *  surface registers it on its session close stack so the delta-scan
+   *  `setInterval` + indexer this session owns are released on session close —
+   *  threaded per-session, NOT via a module singleton (so two concurrent
+   *  sessions each dispose their OWN wire). Absent ⇒ no search wire was built
+   *  (kill-switch / lexical-only), so nothing to tear down. */
+  searchPipelineDispose?: () => void
   memoryConfig: AgentConfig["memory"] | undefined
   subagentConfig: AgentConfig["subagent"] | undefined
   skillsConfig: AgentConfig["skills"] | undefined
@@ -63,6 +70,11 @@ export interface ToolingAssembleInput {
    *  `AgentConfig` alongside `extraTools`. The loop does not read it directly;
    *  future retrieval-aware helpers can. */
   searchPipeline?: AgentConfig["searchPipeline"]
+  /** Per-session teardown for the search wire the surface built (L5 M-11).
+   *  The surface passes `searchWire.dispose` so the resulting `Tooling`
+   *  carries the THIS-session disposer up to its close stack. Absent ⇒ no
+   *  wire was built. */
+  searchPipelineDispose?: () => void
   /** Structured logger for per-config gate logs. The shape mirrors the prior
    *  inline `slog.info(...)` calls in `internal.ts#buildTooling` 1:1. */
   slog: StructuredLogger
@@ -97,6 +109,20 @@ export interface ToolingAssembleInput {
  *
  * When every opt-in tool array is empty and no config block is set, the
  * registry is byte-identical to a plain `new ToolRegistry(buildDefaultTools())`. */
+/** L5 M-11 — the two search slots (helper-only `searchPipeline` + the
+ *  per-session `searchPipelineDispose`) are prepared together so the
+ *  `buildToolingCore` `return` carries a SINGLE spread (keeps that function
+ *  under biome's cognitive-complexity cap). Each key is omitted when absent so
+ *  `exactOptionalPropertyTypes` never sees a literal `undefined`. */
+const buildSearchSlots = (
+  input: Pick<ToolingAssembleInput, "searchPipeline" | "searchPipelineDispose">,
+): Pick<Tooling, "searchPipeline" | "searchPipelineDispose"> => ({
+  ...(input.searchPipeline !== undefined ? { searchPipeline: input.searchPipeline } : {}),
+  ...(input.searchPipelineDispose !== undefined
+    ? { searchPipelineDispose: input.searchPipelineDispose }
+    : {}),
+})
+
 export const buildToolingCore = (input: ToolingAssembleInput): Tooling => {
   if (input.store && input.memoryKindLabel !== undefined && input.onMemoryReady !== undefined) {
     input.onMemoryReady(
@@ -133,7 +159,7 @@ export const buildToolingCore = (input: ToolingAssembleInput): Tooling => {
     embedder: input.embedder,
     sessionId: input.sessionId,
     registry,
-    ...(input.searchPipeline !== undefined ? { searchPipeline: input.searchPipeline } : {}),
+    ...buildSearchSlots(input),
     memoryConfig: input.memoryConfig,
     subagentConfig: input.subagentConfig,
     skillsConfig: input.skillsConfig,

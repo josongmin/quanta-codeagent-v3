@@ -905,7 +905,7 @@ export const buildConfig = (
     ...(opt.skills !== undefined ? { skills: opt.skills } : {}),
     ...(opt.localizePhase !== undefined ? { localizePhase: opt.localizePhase } : {}),
     ...(opt.branchSearch !== undefined ? { branchSearch: opt.branchSearch } : {}),
-  })
+  }, process.env)
 }
 
 interface Phase {

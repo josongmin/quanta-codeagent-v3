@@ -38,22 +38,25 @@ export const CHECK_SECRETS_ENV_FLAG = "QUANTA_SECRET_CHECK_TOOL" as const
 /** Canonical enabling value — the ONLY string that flips the gate on. */
 export const CHECK_SECRETS_ENABLED_VALUE = "on" as const
 
-/** Minimal env reader port — mirrors `EnvReader` in `runtime-wire.ts`. The
- *  default reads `process.env` directly. Tests inject a Map-backed fake. */
+/** Minimal env reader port. The composition root reads the env knob and
+ *  resolves the boolean gate via {@link checkSecretsToolEnabled}; this slice
+ *  never reads `process.env` itself (slice-boundary invariant). Kept exported
+ *  for the composition-root resolver + hellgate suite. */
 export interface CheckSecretsEnvReader {
   get(name: string): string | undefined
 }
 
-const defaultEnvReader: CheckSecretsEnvReader = {
-  get(name) {
-    return process.env[name]
-  },
-}
+/** Composition-root resolver: is the `check_secrets` tool enabled? The ONLY
+ *  enabling value is `"on"` (every other value ⇒ default-OFF). The composition
+ *  root passes its already-loaded env reader; the resolved boolean is what gets
+ *  threaded into `AgentConfig.secretCheckToolEnabled`. */
+export const checkSecretsToolEnabled = (env: CheckSecretsEnvReader): boolean =>
+  env.get(CHECK_SECRETS_ENV_FLAG) === CHECK_SECRETS_ENABLED_VALUE
 
-/** Build the check-secrets block. When the env knob is `"on"`, returns the
- *  single `check_secrets` tool; otherwise returns an empty array so the
- *  composer can splat without a conditional. */
-export const buildCheckSecretsBlock = (env: CheckSecretsEnvReader = defaultEnvReader): Tool[] => {
-  const value = env.get(CHECK_SECRETS_ENV_FLAG)
-  return value === CHECK_SECRETS_ENABLED_VALUE ? [checkSecretsTool as Tool] : []
-}
+/** Build the check-secrets block. When `enabled` is true, returns the single
+ *  `check_secrets` tool; otherwise returns an empty array so the composer can
+ *  splat without a conditional. The gate is env-derived
+ *  (`QUANTA_SECRET_CHECK_TOOL=on`) at the composition root — this slice takes a
+ *  plain boolean and never reads `process.env`. */
+export const buildCheckSecretsBlock = (enabled: boolean | undefined): Tool[] =>
+  enabled === true ? [checkSecretsTool as Tool] : []

@@ -1,7 +1,8 @@
 /** ADR-0398 — atomic single-file commit + sha256 hash helper. Re-exported so
  *  the tool slice can compute / compare precondition hashes WITHOUT crossing
  *  the slice fence into `@/llm`. */
-export { sha256Hex, writeFileAtomic } from "./atomic-write"
+export type { AtomicWriteSync } from "./atomic-write"
+export { defaultAtomicWriteSync, sha256Hex, writeFileAtomic } from "./atomic-write"
 export type { FileSystemPort, JailedPath } from "./service"
 export {
   clearFsJailDecisionSink,

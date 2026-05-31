@@ -293,6 +293,21 @@ describe("T03 kernel dispatch — H-8 signal.aborted is checked at dispatch leve
     )
     expect(hostRan).toBe(false)
     expect(result.state.status).not.toBe("running")
+    expect(result.state.lastOutcomeReason).toBe("aborted")
+    // STRENGTHENED (mutation-check blind-spot fix): `hostRan === false` alone is
+    // a DEFENCE-IN-DEPTH tautology — there is a SECOND, inner abort gate inside
+    // `runTurn` (it short-circuits an already-aborted turn controller before the
+    // host starts), so reverting the DISPATCH-level gate (the headline H-8 fix)
+    // still left this case green via the inner fallback. We now pin the
+    // DISPATCH gate specifically: it settles the turn WITHOUT ever entering the
+    // turn lifecycle, so the event log carries ONLY a `session.state.updated`
+    // echo — no `turn.started` (the reducer's turn.run immediate event) and no
+    // `turn.failed` (which the inner `onTurnAborted` fallback emits). If the
+    // dispatch gate is removed, `turn.run` reduces + falls to `onTurnAborted`,
+    // injecting `turn.started`/`turn.failed` and turning this RED.
+    const emittedTypes = result.events.map((e) => e.type)
+    expect(emittedTypes).not.toContain("turn.started")
+    expect(emittedTypes).not.toContain("turn.failed")
   })
 })
 

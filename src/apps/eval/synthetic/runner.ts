@@ -220,7 +220,7 @@ export const runScenario = async (scenario: Scenario, opts: RunOpts): Promise<Ru
           cwd: sandbox,
           maxTurns: opts.maxTurns ?? scenario.maxTurns ?? DEFAULT_MAX_TURNS,
           signal: controller.signal,
-        }),
+        }, process.env),
       )
       stopReason = timedOut ? "timeout" : outcome.reason
       turns = outcome.turns

@@ -195,6 +195,16 @@ export const assembleAgentConfig = (req: AssembleRequest): AgentConfig => {
     ...req.base,
     modePolicy: policy,
     budgetMeter: meter,
+    // ADR-0405 — resolve the LSP-diagnostics post-edit hook gate HERE (the
+    // composition root owns env). The agent slice takes a plain boolean so it
+    // never reads `process.env` itself (slice-boundary invariant). Caller
+    // override on `req.base` wins; otherwise `QUANTA_LSP_DIAGNOSTICS_HOOK=1`.
+    lspDiagnosticsHookEnabled:
+      req.base.lspDiagnosticsHookEnabled ?? process.env.QUANTA_LSP_DIAGNOSTICS_HOOK === "1",
+    // ADR-0412 — resolve the check_secrets tool gate HERE. Caller override on
+    // `req.base` wins; otherwise `QUANTA_SECRET_CHECK_TOOL=on`.
+    secretCheckToolEnabled:
+      req.base.secretCheckToolEnabled ?? process.env.QUANTA_SECRET_CHECK_TOOL === "on",
   }
   // ADR-0334 — populate the ADR-0327-family wire slots on the freshly
   // assembled cfg. Idempotent + caller-override-precedence (ADR-0332):

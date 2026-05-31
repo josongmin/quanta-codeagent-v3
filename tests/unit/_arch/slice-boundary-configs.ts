@@ -27,6 +27,24 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
   agent: {
     slice: "agent",
     denyImports: ["@/migration"],
+    // Documented env-boundary carve-outs (mirror of the `tool` slice's
+    // `from-env.ts`/`runner.ts` precedent). The session-resource-registry is a
+    // self-contained composition seam: ADR-0347's process-level lazy-init
+    // singleton + ADR-0368's caller-owned builder explicitly designed their
+    // env reads to live HERE — the header of `caller-owned-builder.ts` records
+    // that the four threading alternatives (env var / signature change /
+    // factory / etc.) all broke the first-call-wins lazy-init OR the
+    // multi-tenant observability invariant. These four files are the sanctioned
+    // env-resolution boundary for that subsystem. `inspector.hellgate.test.ts`
+    // legitimately save/restores `process.env` to drive the env-selected
+    // backend it is testing.
+    envAllowFiles: [
+      "global.ts",
+      "caller-owned-builder.ts",
+      "auto-sweep.ts",
+      "inspector.ts",
+      "inspector.hellgate.test.ts",
+    ],
     // `default-stdout-emitter.ts` (ADR-0220) deliberately exposes
     // `process.stderr` as the production default sink for git-directives.
     // The sink is injectable; the default literal is the documented
@@ -77,6 +95,14 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
   llm: {
     slice: "llm",
     denyImports: [...PEER_LIBRARY_DENY],
+    // Documented cross-slice contract (mirror of the `tool` slice's
+    // `@/observability/coverage` carve-out). ADR-0323/0328/0337 wire the
+    // image-sanitization retry path against `@/memory`'s `HistorySanitizationPort`
+    // — `wrapping.ts` consumes that port as a typed contract (import type), and
+    // the slice's end-to-end hellgate drives the real
+    // `createWorkingMemoryHistorySanitization(wm)` to prove the closed-port is
+    // wired straight through `wm.snapshot()`. Reviewed exception.
+    allowImports: ["@/memory/history-sanitization"],
     requireSliceBarrel: true,
   },
   permission: {

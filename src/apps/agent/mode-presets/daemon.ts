@@ -100,7 +100,7 @@ const buildDaemonBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" |
     // signal; dead throwaway controller removed.
     signal: req.base.signal,
     branchSearch: req.base.branchSearch ?? DAEMON_BRANCH_SEARCH,
-  })
+  }, process.env)
 }
 
 export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {

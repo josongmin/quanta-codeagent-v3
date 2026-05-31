@@ -782,7 +782,14 @@ export const buildTooling = (
     lspNavTools,
     gitToolList,
     ...(searchWire !== null
-      ? { extraTools: [searchWire.tool], searchPipeline: searchWire.pipeline }
+      ? {
+          extraTools: [searchWire.tool],
+          searchPipeline: searchWire.pipeline,
+          // L5 M-11 — thread THIS session's wire teardown (delta-scan interval
+          // + indexer) up to the session close stack, per-session (not via the
+          // module singleton). Bound so the disposer carries the wire identity.
+          searchPipelineDispose: () => searchWire.dispose(),
+        }
       : {}),
     slog,
     ...(process.env.QUANTA_MEMORY !== undefined

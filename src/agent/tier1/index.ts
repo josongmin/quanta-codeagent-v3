@@ -22,6 +22,7 @@ export {
   CHECK_SECRETS_ENABLED_VALUE,
   CHECK_SECRETS_ENV_FLAG,
   type CheckSecretsEnvReader,
+  checkSecretsToolEnabled,
 } from "./check-secrets"
 export { buildDelegateBlock } from "./delegate"
 export { buildForkSessionBlock } from "./fork-session"

@@ -1046,6 +1046,22 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
     push: (entry: import("./hooks").HookPromptInject) => unknown
   }
   /**
+   * ADR-0405 — gate for the LSP-diagnostics post-edit hook. Env-derived
+   * (`QUANTA_LSP_DIAGNOSTICS_HOOK === "1"`) at the COMPOSITION ROOT and threaded
+   * in as plain config so the agent slice never reads `process.env` itself
+   * (slice-boundary invariant). Absent / false ⇒ the hook is not attached and
+   * the loop body is byte-identical (RFC §1.2 default-OFF).
+   */
+  lspDiagnosticsHookEnabled?: boolean
+  /**
+   * ADR-0412 — gate for the `check_secrets` LLM tool. Env-derived
+   * (`QUANTA_SECRET_CHECK_TOOL === "on"`) at the COMPOSITION ROOT and threaded
+   * in as plain config so the agent slice never reads `process.env` itself
+   * (slice-boundary invariant). Absent / false ⇒ the tool is NOT registered and
+   * the tool set is byte-identical for every legacy caller (RFC §1.2 default-OFF).
+   */
+  secretCheckToolEnabled?: boolean
+  /**
    * ADR-0136 budget-ledger slot — token × pricing → $$ + soft/hard breach
    * events at session/daily scope. When set, `buildBudgetBlock` registers the
    * `budget_status` tool wired against this ledger. Absent ⇒ the tool is NOT

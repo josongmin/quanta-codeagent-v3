@@ -221,7 +221,7 @@ export const replayFixture = async (opts: ReplayOpts): Promise<ReplayResult> => 
           cwd: sandbox,
           maxTurns: opts.maxTurns ?? Math.max(original.turns + 2, DEFAULT_MIN_REPLAY_TURNS),
           signal: controller.signal,
-        }),
+        }, process.env),
       )
       replayTurns = outcome.turns
       if (outcome.reason === "error") runError = "runAgent reported error"

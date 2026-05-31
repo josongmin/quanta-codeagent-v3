@@ -190,14 +190,16 @@ export const lspDefaultEditTools = (): Map<string, (input: unknown) => string | 
   ])
 }
 
-/** ADR-0405 composition wire — env-gated default-OFF attach.
- *  Returns the dispose handle when `QUANTA_LSP_DIAGNOSTICS_HOOK=1` AND the
- *  `AgentConfig` carries both seam slots (`hooks`, `subagentPendingPrompt`);
- *  otherwise returns `undefined` so the loop body is byte-identical. */
+/** ADR-0405 composition wire — config-gated default-OFF attach.
+ *  Returns the dispose handle when `cfg.lspDiagnosticsHookEnabled` is true AND
+ *  the `AgentConfig` carries both seam slots (`hooks`, `subagentPendingPrompt`);
+ *  otherwise returns `undefined` so the loop body is byte-identical. The gate is
+ *  env-derived (`QUANTA_LSP_DIAGNOSTICS_HOOK`) at the composition root — this
+ *  slice takes a plain boolean and never reads `process.env`. */
 export const attachLspDiagnosticsHookIfEnabled = (
   cfg: AgentConfig,
 ): LspDiagnosticsHookHandle | undefined => {
-  if (process.env.QUANTA_LSP_DIAGNOSTICS_HOOK !== "1") return undefined
+  if (cfg.lspDiagnosticsHookEnabled !== true) return undefined
   if (cfg.hooks === undefined) return undefined
   if (cfg.subagentPendingPrompt === undefined) return undefined
   return attachLspDiagnosticsHook({

@@ -343,14 +343,3 @@ export const clearSearchPipelineWireForTests = (): void => {
   disposeWire(activeWire)
   activeWire = null
 }
-
-/**
- * Production teardown (L5 M-11): dispose the currently-active search wire's
- * owned resources (delta-scan `setInterval` + indexer). Idempotent + a no-op
- * when no pipeline is active. The CLI session loop registers this on its close
- * stack so a long-lived session does not leak a scanning interval; before this
- * the interval was cleared only when a NEW pipeline replaced the singleton.
- */
-export const disposeActiveSearchPipeline = (): void => {
-  activeWire?.dispose()
-}

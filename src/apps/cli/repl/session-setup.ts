@@ -113,6 +113,11 @@ export interface SessionSetupResult {
   readonly mcpTools: SessionBootstrapResult["features"]["mcpTools"]
   readonly mcpSurface: McpSurfaceInfo | undefined
   readonly skillsConfig: Tooling["skillsConfig"]
+  /** L5 M-11 — per-session search-wire teardown (delta-scan interval + indexer)
+   *  forwarded from `boot.tooling`. The host threads this into
+   *  `runSessionLoop({ searchPipelineDispose })` so session close releases THIS
+   *  session's wire (not a module singleton). Absent ⇒ no wire was built. */
+  readonly searchPipelineDispose: Tooling["searchPipelineDispose"]
   readonly lifecyclePills: LifecyclePills
   readonly lifecycleTaskRegistry: TaskRegistry | undefined
   readonly lifecycleFollowUpQueue: FollowUpQueue | undefined
@@ -270,6 +275,7 @@ export const setupSession = async (
     mcpTools: boot.features.mcpTools,
     mcpSurface: boot.mcpSurface as McpSurfaceInfo | undefined,
     skillsConfig: boot.tooling.skillsConfig,
+    searchPipelineDispose: boot.tooling.searchPipelineDispose,
     lifecyclePills: boot.lifecyclePills as unknown as LifecyclePills,
     lifecycleTaskRegistry: boot.lifecycleTaskRegistry,
     lifecycleFollowUpQueue: boot.lifecycleFollowUpQueue,

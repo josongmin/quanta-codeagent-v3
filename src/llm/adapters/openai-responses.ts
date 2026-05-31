@@ -11,6 +11,11 @@ interface OpenAIResponsesConfig extends AdapterStreamTimeoutConfig {
   baseURL?: string
   fetchImpl?: ResponsesFetchLike
   continuationStore?: ResponsesContinuationStore
+  /** OpenAI `service_tier` — env-derived at the composition root and passed
+   *  in as plain config (this adapter never reads process.env). */
+  serviceTier?: string
+  /** Reasoning effort — env-derived at the composition root and passed in. */
+  reasoningEffort?: string
 }
 
 const RESPONSES_PATH = "/responses"
@@ -28,6 +33,8 @@ export class OpenAIResponsesAdapter implements LLMPort {
   private readonly maxTokens: number
   private readonly streamTimeoutMs: { firstChunkMs: number; idleMs: number }
   private readonly continuationStore: ResponsesContinuationStore
+  private readonly serviceTier: string | undefined
+  private readonly reasoningEffort: string | undefined
 
   constructor(config: OpenAIResponsesConfig) {
     this.apiKey = config.apiKey
@@ -38,6 +45,8 @@ export class OpenAIResponsesAdapter implements LLMPort {
     this.streamTimeoutMs = resolveAdapterStreamTimeouts(config)
     this.continuationStore =
       config.continuationStore ?? defaultResponsesContinuationStore()
+    this.serviceTier = config.serviceTier
+    this.reasoningEffort = config.reasoningEffort
   }
 
   async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
@@ -53,6 +62,8 @@ export class OpenAIResponsesAdapter implements LLMPort {
         transportId: "public",
         maxOutputTokens: this.maxTokens,
         continuationStore,
+        ...(this.serviceTier !== undefined ? { serviceTier: this.serviceTier } : {}),
+        ...(this.reasoningEffort !== undefined ? { reasoningEffort: this.reasoningEffort } : {}),
       }),
       fetchImpl: this.fetchImpl,
       url: `${this.baseURL}${RESPONSES_PATH}`,

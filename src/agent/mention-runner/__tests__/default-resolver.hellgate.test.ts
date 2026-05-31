@@ -146,8 +146,10 @@ describe("buildDefaultMentionResolver — ADR-0422 hellgate", () => {
   // -------- E. file caps env mapping ---------------------------------
   test("E1 — file caps env produce a working file resolver", async () => {
     // Point root at a real tmp dir and read a file via the resolver.
+    const os = await import("node:os")
+    const path = await import("node:path")
     const dir = await import("node:fs/promises").then((m) =>
-      m.mkdtemp(`${process.env.TMPDIR ?? "/tmp"}/mention-`),
+      m.mkdtemp(path.join(os.tmpdir(), "mention-")),
     )
     const fs = await import("node:fs/promises")
     await fs.writeFile(`${dir}/note.txt`, "hello world", "utf8")

@@ -103,7 +103,7 @@ const buildIdeBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" | "b
     signal: req.base.signal,
     // branch_search default-on unless the caller already chose.
     branchSearch: req.base.branchSearch ?? IDE_BRANCH_SEARCH,
-  })
+  }, process.env)
 }
 
 export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {

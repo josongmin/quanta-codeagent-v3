@@ -100,7 +100,7 @@ const promptTextFromMessages = (messages: readonly Message[]): string => {
 }
 
 const createBenchSessionHost = (config: AgentConfig): SessionHost => {
-  const wiredConfig = wireOptionalAgentPorts(config)
+  const wiredConfig = wireOptionalAgentPorts(config, process.env)
   const sessionId = `bench-${crypto.randomUUID()}`
   // ADR-0334 — bench passes EMPTY deps so the install is a no-op
   // (byte-identical replay). The call site is recorded so a future

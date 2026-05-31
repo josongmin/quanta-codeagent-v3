@@ -294,6 +294,12 @@ export const runRepl = async (): Promise<void> => {
       // ADR-0301 — `--playbook-trigger` CLI flag echo. Spread conditionally
       // so `exactOptionalPropertyTypes` doesn't see a literal `undefined`.
       ...(setup.playbookCliFlag !== undefined ? { playbookCliFlag: setup.playbookCliFlag } : {}),
+      // L5 M-11 — per-session search-wire teardown threaded onto the loop's
+      // close stack (replaces the module-singleton dispose). Absent ⇒ no wire
+      // built; slot omitted (`exactOptionalPropertyTypes`-friendly).
+      ...(setup.searchPipelineDispose !== undefined
+        ? { searchPipelineDispose: setup.searchPipelineDispose }
+        : {}),
     })
   } finally {
     // Track T — tear down ring-buffer panel BEFORE other chrome dispose so

@@ -10,7 +10,9 @@ export { detectExternalAgents, detectorContracts } from "./detector"
 export { type RunImportOptions, runImport, UnknownProviderRejectedError } from "./importer"
 export {
   appendImportLog,
+  defaultImportLogSync,
   ImportLogBusyError,
+  type ImportLogSync,
   importLogPath,
   loadImportLog,
 } from "./persistence"

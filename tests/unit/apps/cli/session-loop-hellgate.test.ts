@@ -317,6 +317,10 @@ const buildSetup = async (
     mcpTools: [],
     mcpSurface: undefined,
     skillsConfig: undefined as never,
+    // L5 M-11 — per-session search-wire teardown. The fixture leaves it
+    // `undefined` (no wire built) by default; the dispose hellgates below
+    // inject their own via the `searchPipelineDispose` deps slot.
+    searchPipelineDispose: undefined,
     lifecyclePills: stubPills(),
     lifecycleTaskRegistry: undefined,
     lifecycleFollowUpQueue: undefined,
@@ -966,5 +970,139 @@ describe("session-loop — interactive branch (no argPrompt)", () => {
     })
     expect(sinks.events).toContain("error")
     expect((sinks.errs[0] as Error).message).toBe("boom")
+  })
+})
+
+// === L5 M-11 — per-session search-wire dispose THREADING ======================
+
+/**
+ * T06 threading hellgate: the search-wire teardown is now wired PER-SESSION
+ * onto the loop's close stack (it replaced the module-singleton
+ * `disposeActiveSearchPipeline()`). These proofs assert the multi-session
+ * correctness the singleton could NOT give:
+ *
+ *   - THREAD-1: session close calls THE session's own `searchPipelineDispose`
+ *     exactly once (the disposer the host threaded in for THIS session).
+ *   - THREAD-2: two sessions each running their OWN loop dispose their OWN
+ *     wire — never each other's. The singleton kept ONE `activeWire`, so the
+ *     second session's build silently disposed the first's interval; threading
+ *     makes the two teardowns independent.
+ *   - THREAD-3: absent slot ⇒ nothing to dispose (default-OFF byte-identical;
+ *     no throw when no wire was built — kill-switch / lexical-only path).
+ *   - THREAD-4: a throwing disposer is surfaced, NOT rethrown — one leaky
+ *     teardown cannot abort the rest of the close stack (session/runtimeFacade
+ *     still close).
+ */
+describe("session-loop — search-wire dispose threading (L5 M-11)", () => {
+  test("THREAD-1: one-shot session close calls THIS session's searchPipelineDispose once", async () => {
+    const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
+    const setup = await buildSetup("seed")
+    const sinks = buildSinks()
+    let disposeCalls = 0
+    await runSessionLoop({
+      setup,
+      dispatchSlash: async () => false,
+      sinks,
+      searchPipelineDispose: () => {
+        disposeCalls += 1
+      },
+    })
+    // The close stack drains exactly once on one-shot completion ⇒ THIS
+    // session's wire dispose fires exactly once (interval cleared).
+    expect(disposeCalls).toBe(1)
+    // And it is part of the SAME teardown that closes session + facade.
+    expect(runtimeCalls.sessionClose).toBe(1)
+    expect(runtimeCalls.runtimeClose).toBe(1)
+  })
+
+  test("THREAD-1b: interactive session close calls searchPipelineDispose once", async () => {
+    const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
+    const setup = await buildSetup(undefined)
+    const sinks = buildSinks()
+    promptQueue.push("ok", null)
+    let disposeCalls = 0
+    await runSessionLoop({
+      setup,
+      dispatchSlash: async () => false,
+      sinks,
+      registerExitTeardown: () => undefined,
+      searchPipelineDispose: () => {
+        disposeCalls += 1
+      },
+    })
+    expect(disposeCalls).toBe(1)
+  })
+
+  test("THREAD-2: two sessions dispose their OWN wire (not each other's)", async () => {
+    const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
+    // Two independent wires (e.g. two concurrent surfaces / a re-entered REPL).
+    let wireADisposed = 0
+    let wireBDisposed = 0
+
+    const setupA = await buildSetup("session-A-seed")
+    const sinksA = buildSinks()
+    await runSessionLoop({
+      setup: setupA,
+      dispatchSlash: async () => false,
+      sinks: sinksA,
+      searchPipelineDispose: () => {
+        wireADisposed += 1
+      },
+    })
+    // After session A closes, ITS wire is disposed and B's is untouched.
+    expect(wireADisposed).toBe(1)
+    expect(wireBDisposed).toBe(0)
+
+    const setupB = await buildSetup("session-B-seed")
+    const sinksB = buildSinks()
+    await runSessionLoop({
+      setup: setupB,
+      dispatchSlash: async () => false,
+      sinks: sinksB,
+      searchPipelineDispose: () => {
+        wireBDisposed += 1
+      },
+    })
+    // Session B's close disposed B's wire exactly once; A's stayed at 1 (B did
+    // NOT redispose A, and A's build did NOT pre-dispose B — the singleton's
+    // failure mode). Each session owns exactly one teardown of its own wire.
+    expect(wireBDisposed).toBe(1)
+    expect(wireADisposed).toBe(1)
+  })
+
+  test("THREAD-3: absent searchPipelineDispose ⇒ no throw, session still closes", async () => {
+    const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
+    const setup = await buildSetup("seed")
+    const sinks = buildSinks()
+    await expect(
+      runSessionLoop({
+        setup,
+        dispatchSlash: async () => false,
+        sinks,
+        // searchPipelineDispose omitted (kill-switch / lexical-only path)
+      }),
+    ).resolves.toBeUndefined()
+    expect(runtimeCalls.sessionClose).toBe(1)
+  })
+
+  test("THREAD-4: a throwing dispose is surfaced, not rethrown; facade still closes", async () => {
+    const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
+    const setup = await buildSetup("seed")
+    const sinks = buildSinks()
+    // The close stack surfaces (warns) disposer failures so one leaky teardown
+    // cannot mask the others — the loop must NOT reject.
+    await expect(
+      runSessionLoop({
+        setup,
+        dispatchSlash: async () => false,
+        sinks,
+        searchPipelineDispose: () => {
+          throw new Error("interval-clear-failed")
+        },
+      }),
+    ).resolves.toBeUndefined()
+    // Session + facade close ran despite the throwing search dispose.
+    expect(runtimeCalls.sessionClose).toBe(1)
+    expect(runtimeCalls.runtimeClose).toBe(1)
   })
 })

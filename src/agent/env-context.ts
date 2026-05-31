@@ -100,7 +100,11 @@ export const renderEnvBlock = (env: TurnEnvContext | undefined): string | undefi
  */
 export interface ProbeTurnEnvOpts {
   cwd: string
-  /** Process environment to read SHELL from. Defaults to `process.env`. */
+  /** Process environment to read SHELL from. Supplied by the composition root
+   *  (runner / CLI bootstrap) — this slice never reads `process.env` itself
+   *  (slice-boundary invariant). When omitted, the probe is hermetic: it reads
+   *  from an empty record, so the SHELL field is simply absent (NOT a fallback
+   *  to the ambient `process.env`). */
   processEnv?: Record<string, string | undefined>
   /** Pre-captured stdout of `git status --porcelain=v2 --branch`. When
    *  absent or empty, the gitStatus field is omitted. */
@@ -194,7 +198,9 @@ export const probeTurnEnv = (opts: ProbeTurnEnvOpts): TurnEnvContext => {
     // Defensive: leave field absent.
   }
   // Shell — only when an actual literal is present in the provided env.
-  const sourceEnv = opts.processEnv ?? process.env
+  // Absent `processEnv` ⇒ hermetic empty record (never the ambient
+  // `process.env`, which this slice must not read).
+  const sourceEnv = opts.processEnv ?? {}
   const shellRaw = sourceEnv.SHELL
   if (typeof shellRaw === "string" && shellRaw.length > 0) out.shell = shellRaw
   // Git status — only when stdout was supplied.

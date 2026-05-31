@@ -72,6 +72,15 @@ export interface BuildResponsesBodyOptions {
   readonly previousResponseId?: string
   readonly maxOutputTokens?: number
   readonly store?: boolean
+  /** OpenAI `service_tier` (e.g. `"priority"`, `"flex"`). Env-derived
+   *  (`QUANTA_SERVICE_TIER` / `QUANTA_FAST`) but resolved at the composition
+   *  root and threaded in as plain config — this wire never reads process.env
+   *  (slice-boundary invariant). Omitted ⇒ no `service_tier` field (default). */
+  readonly serviceTier?: string
+  /** Reasoning effort (`"minimal" | "low" | "medium" | "high"`). Env-derived
+   *  (`QUANTA_REASONING_EFFORT`) but resolved at the composition root and passed
+   *  in. Omitted ⇒ no `reasoning` field (default). */
+  readonly reasoningEffort?: string
 }
 
 const DEFAULT_INSTRUCTIONS = "You are a helpful assistant."
@@ -197,20 +206,21 @@ export const toResponsesToolChoice = (
   }
 }
 
-const resolveResponsesServiceTier = (): string | undefined => {
-  const tierRaw = process.env.QUANTA_SERVICE_TIER
-  const tierFromFast = process.env.QUANTA_FAST === "1" ? "priority" : undefined
-  const value = tierFromFast ?? tierRaw
-  return value !== undefined && value.length > 0 ? value : undefined
-}
+/** Normalize a caller-supplied `service_tier` value. Empty / undefined ⇒
+ *  omitted (no `service_tier` field). The composition root is responsible for
+ *  deriving this from `QUANTA_SERVICE_TIER` / `QUANTA_FAST` — this wire only
+ *  validates the plain value it is handed (no process.env read). */
+const normalizeResponsesServiceTier = (value: string | undefined): string | undefined =>
+  value !== undefined && value.length > 0 ? value : undefined
 
-const resolveResponsesReasoningEffort = (): string | undefined => {
-  const effortRaw = process.env.QUANTA_REASONING_EFFORT?.toLowerCase()
-  return effortRaw === "minimal" ||
-    effortRaw === "low" ||
-    effortRaw === "medium" ||
-    effortRaw === "high"
-    ? effortRaw
+/** Normalize a caller-supplied reasoning-effort value to the closed
+ *  `minimal | low | medium | high` set (case-insensitive). Anything else ⇒
+ *  omitted. Env derivation (`QUANTA_REASONING_EFFORT`) happens at the
+ *  composition root; this wire never reads process.env. */
+const normalizeResponsesReasoningEffort = (value: string | undefined): string | undefined => {
+  const effort = value?.toLowerCase()
+  return effort === "minimal" || effort === "low" || effort === "medium" || effort === "high"
+    ? effort
     : undefined
 }
 
@@ -224,8 +234,8 @@ export const buildResponsesBody = (
     const flattened = flattenResponsesSystem(input.system)
     return flattened !== "" ? flattened : DEFAULT_INSTRUCTIONS
   })()
-  const serviceTier = resolveResponsesServiceTier()
-  const reasoningEffort = resolveResponsesReasoningEffort()
+  const serviceTier = normalizeResponsesServiceTier(options.serviceTier)
+  const reasoningEffort = normalizeResponsesReasoningEffort(options.reasoningEffort)
   const toolChoice = toResponsesToolChoice(
     input.toolChoice,
     input.tools.map((tool) => tool.name),

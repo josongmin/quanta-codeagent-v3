@@ -69,7 +69,7 @@ const buildHeadlessBase = (
     // carries a live SIGINT-wired signal (required field), so Ctrl+C now
     // reaches the loop instead of being swallowed by a dropped controller.
     signal: req.base.signal,
-  })
+  }, process.env)
 }
 
 /**
