@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util"
-import { LLMError } from "@/shared"
+import { dispatchNoThrow, LLMError } from "@/shared"
 import type { LLMProvider } from "@/shared/errors"
 import { parseToolInputOrThrow } from "./adapters/shared"
 import type { LlmCheckpoint, PromptCacheRetention, ResponsesCheckpoint } from "./target-metadata"
@@ -79,13 +79,15 @@ const DEFAULT_INSTRUCTIONS = "You are a helpful assistant."
 const isObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object"
 
+// L6 H1 / cross-cutting theme 2: every best-effort host callback in this wire
+// (`onChunk` / `onReasoning` / `onOutputItemDone` / `onCompleted`) routes
+// through the shared no-throw dispatcher. Previously only `onChunk` was
+// wrapped; a throwing checkpoint/observability sink on any of the others
+// propagated out of `parseResponsesEvents`, corrupting the toolCalls map and
+// leaving the continuation store stale. The dispatcher is the ONE owner so a
+// newly-added host callback can't silently forget the guard.
 const notifyChunkArrival = (onChunk: (() => void) | undefined): void => {
-  if (onChunk === undefined) return
-  try {
-    onChunk()
-  } catch {
-    // Best-effort hook only.
-  }
+  dispatchNoThrow(onChunk)
 }
 
 export const flattenResponsesSystem = (system: SystemPromptInput | undefined): string => {
@@ -401,7 +403,7 @@ export async function* parseResponsesEvents(
       if (typeof event.delta === "string" && event.delta !== "") {
         yield { type: "thinking_delta", text: event.delta }
       }
-      opts.onReasoning?.()
+      dispatchNoThrow(opts.onReasoning)
       continue
     }
 
@@ -441,8 +443,8 @@ export async function* parseResponsesEvents(
         yield { type: "tool_use_end", id, input }
         toolCalls.delete(id)
       }
-      if (rawType === "reasoning") opts.onReasoning?.()
-      opts.onOutputItemDone?.({
+      if (rawType === "reasoning") dispatchNoThrow(opts.onReasoning)
+      dispatchNoThrow(opts.onOutputItemDone, {
         rawType,
         normalized: normalizeResponsesOutputItem(event.item),
       })
@@ -459,7 +461,7 @@ export async function* parseResponsesEvents(
           ...(typeof cached === "number" ? { cached } : {}),
           ...(typeof event.response?.model === "string" ? { model: event.response.model } : {}),
         }
-        opts.onCompleted?.({
+        dispatchNoThrow(opts.onCompleted, {
           ...(typeof event.response?.id === "string" && event.response.id !== ""
             ? { responseId: event.response.id }
             : {}),
@@ -474,7 +476,7 @@ export async function* parseResponsesEvents(
           },
         })
       } else {
-        opts.onCompleted?.({
+        dispatchNoThrow(opts.onCompleted, {
           ...(typeof event.response?.id === "string" && event.response.id !== ""
             ? { responseId: event.response.id }
             : {}),
@@ -509,10 +511,7 @@ export const emitResponsesCheckpoint = (
   onCheckpoint: ((checkpoint: LlmCheckpoint) => void) | undefined,
   checkpoint: ResponsesCheckpoint,
 ): void => {
-  if (onCheckpoint === undefined) return
-  try {
-    onCheckpoint(checkpoint)
-  } catch {
-    // Best-effort bookkeeping only.
-  }
+  // L6 H1: best-effort checkpoint sink — route through the shared no-throw
+  // dispatcher so a throwing host bookkeeper can never abort the wire.
+  dispatchNoThrow(onCheckpoint, checkpoint)
 }

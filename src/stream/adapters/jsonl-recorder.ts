@@ -120,9 +120,11 @@ export class JsonlRecorder implements StreamPort {
   }
 
   private handleCap(): void {
+    // L6 M6(b): every event past the cap is a real drop — count them all.
+    // Only the degraded cap-line is emitted once (capDone guard below).
+    this.dropped += 1
     if (this.capDone) return
     this.capDone = true
-    this.dropped += 1
     try {
       const line = JSON.stringify(
         this.frame(
@@ -221,9 +223,12 @@ export class JsonlRecorder implements StreamPort {
    *  of a run can't crash the agent (mirrors the non-strict emit contract). */
   close(): void {
     if (this.closed) return
-    this.closed = true
+    // L6 M6(a): flush BEFORE flipping `closed`. A flush failure must leave the
+    // recorder re-closable so a later close() retries the pending buffer; if we
+    // set the flag first, a transient disk error permanently traps the data.
     try {
       this.flush()
+      this.closed = true
     } catch (e) {
       // strict mode still surfaces the failure; non-strict records a degraded
       // line and swallows so a torn-down volume can't fault the shutdown path.

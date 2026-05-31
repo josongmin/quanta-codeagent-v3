@@ -181,7 +181,11 @@ const hasChatgptOAuthToken = (env: EnvLike): boolean => hasUsableChatgptToken(en
  *  Validity check uses {@link DEFAULT_MODEL} keys so the explicit branch
  *  stays in lockstep with the registry. */
 export const pickProvider = (env: EnvLike): Provider => {
-  const explicit = env.QUANTA_PROVIDER
+  // L6 M2: trim `QUANTA_PROVIDER` before the `in DEFAULT_MODEL` lookup. A
+  // value like `" anthropic "` (trailing whitespace from a `.env` line)
+  // otherwise misses the lookup and silently falls through to env detection —
+  // the same `.trim()` discipline `provider-router.ts` already applies.
+  const explicit = env.QUANTA_PROVIDER?.trim()
   if (explicit !== undefined && explicit in DEFAULT_MODEL) return explicit as Provider
   if (hasChatgptOAuthToken(env)) return "chatgpt-oauth"
   if (env.ANTHROPIC_API_KEY !== undefined) return "anthropic"

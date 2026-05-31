@@ -41,6 +41,8 @@ export {
   logger,
   sanitizeCaller,
 } from "./logger"
+export type { NoThrowErrorSink } from "./no-throw-dispatch"
+export { dispatchNoThrow, dispatchNoThrowWith, notifyAllNoThrow } from "./no-throw-dispatch"
 export { omitUndef } from "./optional"
 export type { RunContext } from "./run-context"
 export type { RuntimeConfig, SwebenchCacheLevel } from "./runtime-config"

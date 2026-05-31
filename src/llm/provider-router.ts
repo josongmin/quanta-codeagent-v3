@@ -32,6 +32,7 @@
  * from the existing port for back-compat. NO SDK touches.
  */
 
+import { isTruthyEnv, providerCredentials } from "./provider-metadata"
 import type {
   LlmProvider,
   ProviderCredentialKind,
@@ -86,16 +87,11 @@ export const ANTHROPIC_BASE_URL_ENV_KEYS = {
   // through `CLAUDE_CODE_USE_MANTLE` only as of 2026-05-24.
 } as const
 
-/** Strict truthy check for boolean env vars. We accept the four spellings the
- *  user community uses ("1" / "true" / "TRUE" / "yes") and reject everything
- *  else, including the empty string, "0", "false", and arbitrary numbers
- *  ("2" is NOT truthy — operators who typo their env file should hear
- *  about it, not get a silent route). */
-const isTruthy = (v: string | undefined): boolean => {
-  if (v === undefined) return false
-  const trimmed = v.trim().toLowerCase()
-  return trimmed === "1" || trimmed === "true" || trimmed === "yes"
-}
+/** Strict truthy check for boolean env vars — delegates to the canonical
+ *  {@link isTruthyEnv} authority (audit L6 M11). The grammar (`"1"`/`"true"`/
+ *  `"yes"`, trimmed + lowercased, everything else rejected) lives in ONE place
+ *  so the router and the foundry registry can never diverge. */
+const isTruthy = isTruthyEnv
 
 /** Thrown when two or more `CLAUDE_CODE_USE_*` keys are simultaneously truthy.
  *  Cloud transports are mutually exclusive; silently picking one would hide
@@ -154,28 +150,19 @@ const detectAnthropicBaseUrlEnv = (env: RouterEnv): LlmProvider | undefined => {
   return undefined
 }
 
-/** Map a cloud transport to its native credential kind / source pair. */
+/** Credential {kind, source} for a resolved provider. Delegates to the
+ *  canonical {@link providerCredentials} authority (audit L6 M1). The OLD
+ *  inline `switch` had a `default` arm that returned `{api-key, env}` for ANY
+ *  provider it didn't name — so an EXPLICIT `chatgpt-oauth` selection (Layer 1)
+ *  got the WRONG `{api-key, env}` pair instead of `{oauth, file}`, mis-routing
+ *  the on-disk bundle down the env-key refresh path. The authority's lookup is
+ *  total over the closed union, so that fall-through is structurally gone. */
 const cloudCreds = (
   provider: LlmProvider,
 ): {
   kind: ProviderCredentialKind
   source: ProviderCredentialSource
-} => {
-  switch (provider) {
-    case "bedrock":
-      return { kind: "aws-iam", source: "env" }
-    case "vertex":
-      return { kind: "gcp-sa", source: "env" }
-    case "foundry":
-      return { kind: "azure-msi", source: "env" }
-    case "mantle":
-      // Mantle uses Anthropic's internal token bridge — we model it as
-      // api-key-from-env until the real spec lands (Phase 2).
-      return { kind: "api-key", source: "env" }
-    default:
-      return { kind: "api-key", source: "env" }
-  }
-}
+} => providerCredentials(provider)
 
 /**
  * Resolve the active provider through the seven-layer precedence ladder

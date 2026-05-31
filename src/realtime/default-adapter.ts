@@ -24,7 +24,7 @@
  * Plane-clean: imports only `@/shared` + sibling files.
  */
 
-import { err, errMessage, ok, type Result } from "@/shared"
+import { dispatchNoThrow, err, errMessage, notifyAllNoThrow, ok, type Result } from "@/shared"
 import type { RealtimePort, RealtimeUnsubscribe } from "./port"
 import { negotiateSdp } from "./sdp-negotiator"
 import type {
@@ -129,8 +129,12 @@ export const createBunWebSocketAdapter = (opts?: BunAdapterOpts): RealtimePort =
       // binary. Logging would require @/observability which violates plane-clean.
       return
     }
-    const snapshot = handlers.slice()
-    for (const h of snapshot) h(msg)
+    // L6 H8: isolate sibling subscribers — a single throwing handler must not
+    // starve the rest of the fan-out. `notifyAllNoThrow` snapshots-safe (we
+    // already `.slice()` so concurrent unsubscribe during dispatch is safe) and
+    // swallows each handler's throw independently (matches the documented
+    // isolation contract `event-bridge.ts` / `ws-adapter.ts` already honour).
+    notifyAllNoThrow(handlers.slice(), undefined, msg)
   }
 
   const detachSocket = (): void => {
@@ -285,8 +289,13 @@ export const createBunWebSocketAdapter = (opts?: BunAdapterOpts): RealtimePort =
     },
 
     async close(code?: number, reason?: string): Promise<Result<void, RealtimeError>> {
-      if (status === "closed" || !ws) {
-        status = "closed"
+      // L6 C1: the guard MUST also cover `"closing"`. A second close() entering
+      // while the first is mid-flight previously fell through to the
+      // already-closed path below and resolved ONLY itself — leaving the first
+      // close promise hung forever (port.ts:87 idempotency violation). Treat a
+      // re-entrant close as a clean idempotent ok; the in-flight close drives
+      // the single onclose teardown.
+      if (status === "closed" || status === "closing" || !ws) {
         return ok(undefined)
       }
       status = "closing"
@@ -296,7 +305,9 @@ export const createBunWebSocketAdapter = (opts?: BunAdapterOpts): RealtimePort =
         socket.onclose = (ev: { code: number; reason: string }): void => {
           status = "closed"
           detachSocket()
-          if (prevOnClose) prevOnClose.call(socket, ev)
+          // L6 H7: a throwing chained handler must NOT skip the resolve() and
+          // strand the close promise. Route it through the no-throw dispatcher.
+          dispatchNoThrow(prevOnClose ? () => prevOnClose.call(socket, ev) : undefined)
           resolve(ok(undefined))
         }
         try {

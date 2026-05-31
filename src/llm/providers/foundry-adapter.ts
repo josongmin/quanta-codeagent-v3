@@ -329,9 +329,10 @@ export class FoundryProviderAdapter implements LlmProvider {
     // unambiguous — a status panel reads "aborted before stream open"
     // rather than "stream-failed with AbortError".
     if (input.signal?.aborted) {
-      throw new ProviderError("provider-unsupported", "Foundry stream aborted before stream open", {
-        providerId: "foundry",
-      })
+      // L6 M10a: a caller-driven abort is a typed `aborted` outcome, not a
+      // provider-capability failure. Classifying it as provider-unsupported
+      // made a status panel read "Foundry can't do this" for a plain cancel.
+      throw new LLMError("Foundry stream aborted before stream open", { kind: "aborted" })
     }
     const client = await this.resolveClient()
     const raw = await this.openRawStream(client, input)

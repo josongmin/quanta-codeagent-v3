@@ -437,18 +437,23 @@ export class OpenAIAdapter implements LLMPort {
       usageModel: this.model,
     }
 
+    // L6 H2: `finalizeCalls` MUST run inside the same try/catch as the stream
+    // drain. `parseToolInputOrThrow` (malformed tool-call JSON) throws here, and
+    // pre-fix that escaped as a non-structured Error — bypassing the loop's
+    // retry/classification (which branches on `LLMError.kind`). Route it through
+    // the SAME single error-mapping fn (`LLMError.fromSdkError`) so finalize,
+    // abort, and drain all classify consistently.
     try {
       for await (const chunk of guarded) yield* processChunk(chunk, st)
+      yield* finalizeCalls(st.pending)
+      const usageEvent = buildUsageEvent(st.rawUsage, st.usageModel)
+      if (usageEvent) yield usageEvent
+      yield {
+        type: "message_stop",
+        stop_reason: st.finish ? (STOP_REASON[st.finish] ?? st.finish) : "end_turn",
+      }
     } catch (e) {
       throw LLMError.fromSdkError("openai", e, "OpenAI stream error")
-    }
-
-    yield* finalizeCalls(st.pending)
-    const usageEvent = buildUsageEvent(st.rawUsage, st.usageModel)
-    if (usageEvent) yield usageEvent
-    yield {
-      type: "message_stop",
-      stop_reason: st.finish ? (STOP_REASON[st.finish] ?? st.finish) : "end_turn",
     }
   }
 }

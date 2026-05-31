@@ -22,6 +22,7 @@
 import type { LLMPort } from "../ports"
 import type { StreamEvent, StreamInput } from "../types"
 import type { LlmSurfaceId, LlmTransportId } from "@/shared/llm-route-types"
+import { throwIfAborted } from "@/shared"
 import { recordingLlmPort } from "./recording-llm"
 import {
   type MatchPolicy,
@@ -107,6 +108,10 @@ export function replayLlmPort(opts: ReplayLlmOpts): LLMPort {
           throw new ReplayMissError(input, policy)
         }
         for await (const ev of upstream.stream(input)) {
+          // L6 M9: honour caller cancellation between yields so the passthrough
+          // path has parity with the replay-hit path (replayEvents already does
+          // this). A bare for-await would ignore an abort fired mid-drain.
+          throwIfAborted(input.signal)
           yield ev
         }
       }

@@ -1,4 +1,4 @@
-import { LLMError } from "@/shared"
+import { errMessage, LLMError, logger } from "@/shared"
 import type { LLMErrorKind, LLMProvider } from "@/shared/errors"
 import {
   buildResponsesBody,
@@ -95,6 +95,23 @@ export const responsesStatusToKind = (status: number): LLMErrorKind => {
   if (status === 400 || status === 422) return "bad_request"
   if (status >= 500 && status < 600) return "server_error"
   return "unknown"
+}
+
+/** L6 M4: read an error-response body, returning `""` on failure but logging
+ *  WHY the read failed (truncated stream / aborted socket) so the lost
+ *  diagnostic context is at least visible to an operator. The status/kind
+ *  classification is unaffected — only the human-readable tail is best-effort. */
+const readBodyTextOrLog = async (res: Response, provider: LLMProvider): Promise<string> => {
+  try {
+    return await res.text()
+  } catch (e) {
+    logger.warn("responses-stream: failed to read error response body", {
+      provider,
+      status: res.status,
+      error: errMessage(e),
+    })
+    return ""
+  }
 }
 
 export const buildResponsesFirstChunkTimeoutError = (
@@ -385,7 +402,11 @@ export async function* streamResponsesSurface(
     }
 
     if (!res.ok) {
-      const text = await res.text().catch(() => "")
+      // L6 M4: the provider error body carries the actionable diagnostic. A
+      // silent `.catch(() => "")` discards it on a read failure — keep the
+      // status/kind classification, but log WHY the body was unreadable so an
+      // operator isn't left with a bare status code.
+      const text = await readBodyTextOrLog(res, config.provider)
       throw new LLMError(
         `${config.provider} responses request failed: ${res.status} ${res.statusText}` +
           (text ? ` — ${text.slice(0, 200)}` : ""),
