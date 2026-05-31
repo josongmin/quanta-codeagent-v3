@@ -52,6 +52,56 @@ export const MAX_PTY = 32
 /** Soft default for `wait_agent` blocking timeouts. Mirrors `task_output`'s
  *  30s upper bound; callers can override via `timeoutMs`. */
 const DEFAULT_WAIT_AGENT_TIMEOUT_MS = 30_000
+
+/**
+ * B2 — closed-port bound on the caller-supplied blocking timeout.
+ *
+ * `wait_agent` / `task_output(block:true)` previously accepted ANY positive int
+ * (`tools-6.ts WaitAgentInputSchema.timeoutMs`) and applied it verbatim, with a
+ * hardcoded 30s default. That left two holes: (1) no default policy seam, and
+ * (2) an unbounded per-call override (a hostile / hallucinated `timeoutMs:
+ * 999_999_999` pins a loop slot for ~11 days). This policy clamps the supplied
+ * value into `[minMs, maxMs]` (CLAMP, not reject — robustness over rigidity)
+ * and supplies `defaultMs` when omitted. Injected via the deps struct (closed
+ * port): handlers never read a global.
+ */
+export interface WaitTimeoutPolicy {
+  /** Floor for the effective timeout. A supplied value below this is raised. */
+  readonly minMs: number
+  /** Ceiling for the effective timeout. A supplied value above this is lowered. */
+  readonly maxMs: number
+  /** Effective timeout when the caller omits `timeoutMs`. */
+  readonly defaultMs: number
+}
+
+/**
+ * The default policy — byte-identical to the pre-B2 behavior: omitted ⇒ 30s.
+ * `maxMs` is deliberately generous (1h) so every pre-B2 caller's override stays
+ * inside the band (no existing call is clamped). `minMs` is 1ms (the schema
+ * already rejects ≤0), so the only callers it affects are pathological ones.
+ */
+export const DEFAULT_WAIT_TIMEOUT_POLICY: WaitTimeoutPolicy = {
+  minMs: 1,
+  maxMs: 3_600_000,
+  defaultMs: DEFAULT_WAIT_AGENT_TIMEOUT_MS,
+}
+
+/**
+ * Resolve the effective blocking timeout. Pure + total: when `requested` is
+ * omitted ⇒ `policy.defaultMs`; otherwise the requested value clamped into
+ * `[minMs, maxMs]`. A degenerate policy (`minMs > maxMs`) collapses to `maxMs`
+ * (the ceiling wins — never returns a value above the hard ceiling). With
+ * {@link DEFAULT_WAIT_TIMEOUT_POLICY} and any pre-B2 caller this is the
+ * identity on the requested value (or 30s when omitted).
+ */
+export const clampWaitTimeout = (
+  policy: WaitTimeoutPolicy,
+  requested: number | undefined,
+): number => {
+  const want = requested ?? policy.defaultMs
+  const raised = Math.max(want, policy.minMs)
+  return Math.min(raised, policy.maxMs)
+}
 /** Startup grace for `exec_command({pty:true})`: if the child is still alive
  *  after this window, we attach it into the PTY table and return its pid
  *  instead of blocking until natural exit. Short-lived commands that exit
@@ -378,7 +428,21 @@ interface SpawnAgentDeps {
   /** Caller's own current recursion depth, used to compute the child's depth
    *  (parent + 1). Defaults to 0 (root). */
   parentDepth?: number
+  /** B3 — closed-port per-session cap on CONCURRENT running subagents. When
+   *  set, `spawn_agent` counts currently-running TaskRegistry records and
+   *  rejects (cause:"concurrency_cap") any spawn that would exceed it. Absent
+   *  ⇒ UNLIMITED (opt-in): the default preserves every existing test (which
+   *  spawns without a cap) byte-for-byte. The value comes from deps/config,
+   *  never an inlined constant at the call site. Mirrors the background
+   *  scheduler's `DEFAULT_MAX_CONCURRENT` knob (`subagent-background.ts`) but
+   *  applies to the FOREGROUND spawn path, which had no cap. */
+  maxConcurrent?: number
 }
+
+/** Count currently-running tasks in the registry — the B3 concurrency gauge.
+ *  Reuses the registry's existing `pendingIds()` (running-only snapshot), so
+ *  only RUNNING records count against the cap (settled tasks free a slot). */
+const countRunning = (registry: TaskRegistry): number => registry.pendingIds().length
 
 /** Spawn a child subagent through the injected runner. Returns the registry
  *  task id which `wait_agent` / `close_agent` / `send_input` reference. The
@@ -394,6 +458,16 @@ export const handleSpawnAgent = async (
     return errSpawn(
       `Subagent denied: depth ${childDepth} exceeds maxDepth ${cap}`,
       "depth_exceeded",
+    )
+  }
+
+  // B3 — per-session concurrency cap. Counted BEFORE registering this task so
+  // the cap is the number of OTHER running children (a cap of N admits exactly
+  // N concurrent). Mirrors the `pty_cap` structured-error pattern above.
+  if (deps.maxConcurrent !== undefined && countRunning(deps.registry) >= deps.maxConcurrent) {
+    return errSpawn(
+      `Subagent denied: ${deps.maxConcurrent} concurrent subagents already running (cap reached).`,
+      "concurrency_cap",
     )
   }
 
@@ -425,6 +499,10 @@ export const handleSpawnAgent = async (
 
 interface WaitAgentDeps {
   registry: TaskRegistry
+  /** B2 — closed-port timeout bounds. Absent ⇒ {@link DEFAULT_WAIT_TIMEOUT_POLICY}
+   *  (30s default, generous ceiling) so the legacy no-policy call path is
+   *  byte-identical. */
+  timeoutPolicy?: WaitTimeoutPolicy
 }
 
 /** Map a settled TaskRecord status string to the contract-narrowed union
@@ -473,7 +551,12 @@ export const handleWaitAgent = async (
   if (rec === undefined) {
     return errWait(`No agent found with id ${input.agentId}`, "id_unknown")
   }
-  const timeoutMs = input.timeoutMs ?? DEFAULT_WAIT_AGENT_TIMEOUT_MS
+  // B2 — clamp the caller-supplied timeout into the injected policy band.
+  // Default policy ⇒ omitted yields 30s; any pre-B2 override passes through.
+  const timeoutMs = clampWaitTimeout(
+    deps.timeoutPolicy ?? DEFAULT_WAIT_TIMEOUT_POLICY,
+    input.timeoutMs,
+  )
 
   if (rec.status !== "running") return renderSettled(rec)
 

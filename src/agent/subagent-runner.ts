@@ -99,6 +99,56 @@ export interface SubagentRunnerOptions {
    *  monotonic-ish source of uniqueness across siblings spawned in the same
    *  parent turn. Default `Date.now`. */
   now?: () => number
+  /** B1 — OPT-IN closed-port tool-namespacing strategy. When set, the child's
+   *  filtered tool registry is rewritten so the model sees SCOPED tool names
+   *  (e.g. `root_0__exec_command`) and dispatch resolves them back to the real
+   *  tools. This prevents name collisions when multiple sibling children run
+   *  concurrently and their tool surfaces are surfaced to a shared consumer.
+   *  Absent ⇒ raw names (byte-identical to today). See {@link namespaceRegistry}. */
+  toolNamespace?: ToolNamespaceStrategy
+}
+
+/**
+ * B1 — closed-port tool-namespacing strategy. Maps a raw tool name to a scoped
+ * name given the child's stable namespace token (its mailbox label, e.g.
+ * `root/0`). The strategy MUST be injective per-namespace (distinct raw names
+ * map to distinct scoped names) so dispatch can round-trip. The runner builds
+ * the child registry keyed by the scoped name; `dispatch.ts` resolves a tool
+ * call via `registry.get(call.name)`, so a scoped name the model emits resolves
+ * directly back to the real tool — no separate reverse map needed.
+ */
+export interface ToolNamespaceStrategy {
+  /** `(namespaceToken, rawToolName) → scopedToolName`. */
+  scope(namespaceToken: string, rawToolName: string): string
+}
+
+/** A sensible default strategy the host can opt into: `prefixToolNamespace`.
+ *  Produces `${safe(token)}__${rawName}` where `safe` replaces any char outside
+ *  `[A-Za-z0-9_]` with `_` (most tool-name validators / model APIs reject `/`
+ *  and other punctuation, so the raw `root/0` label is sanitized). Injective
+ *  per namespace because only the raw-name suffix varies within one token. */
+export const prefixToolNamespace: ToolNamespaceStrategy = {
+  scope(namespaceToken: string, rawToolName: string): string {
+    const safe = namespaceToken.replace(/[^A-Za-z0-9_]/g, "_")
+    return `${safe}__${rawToolName}`
+  },
+}
+
+/** Apply a {@link ToolNamespaceStrategy} to a registry, returning a NEW
+ *  registry whose tools carry scoped names. Each tool is shallow-cloned with
+ *  only `name` overridden (unknown Tool fields are preserved via spread), so
+ *  the model sees the scoped name AND dispatch (`registry.get(scopedName)`)
+ *  resolves to the same `run`. Pure: the source registry is not mutated. */
+const namespaceRegistry = (
+  source: ToolRegistry,
+  strategy: ToolNamespaceStrategy,
+  namespaceToken: string,
+): ToolRegistry => {
+  const scoped = source.all().map((tool) => ({
+    ...tool,
+    name: strategy.scope(namespaceToken, tool.name),
+  }))
+  return new ToolRegistry(scoped)
 }
 
 /** Join the trailing assistant turn's text blocks into the child's answer.
@@ -208,16 +258,28 @@ const buildChildConfig = (
   req: SubagentRequest,
   cwd: string,
   mailboxIds: { agentId: string; parentId: string },
+  toolNamespace?: ToolNamespaceStrategy,
 ): AgentConfig => {
   const seed: Message[] = [
     { role: "user", content: [{ type: "text", text: buildSeedPrompt(req) }] },
   ]
+  // B1 — start from the parent's ALLOW-LIST-filtered registry (unchanged
+  // default path). When a namespacing strategy is injected, rewrite it so the
+  // child's tools carry scoped names (keyed by the scoped name, so dispatch
+  // round-trips). The child's mailbox label (`mailboxIds.agentId`, e.g.
+  // `root/0`) is the per-child namespace token — distinct per sibling, so
+  // concurrent siblings cannot collide. Absent ⇒ raw names (byte-identical).
+  const filtered = filterRegistry(parent.registry, req.toolFilter)
+  const childRegistry =
+    toolNamespace !== undefined
+      ? namespaceRegistry(filtered, toolNamespace, mailboxIds.agentId)
+      : filtered
   // Shallow clone, then strip the inheritance-unsafe keys. We rebuild the
   // object explicitly (rather than `delete`) to satisfy
   // exactOptionalPropertyTypes: omit keys entirely, never assign `undefined`.
   const child: AgentConfig = {
     llm: parent.llm,
-    registry: filterRegistry(parent.registry, req.toolFilter),
+    registry: childRegistry,
     stream: parent.stream,
     permission: parent.permission,
     messages: seed,
@@ -300,6 +362,9 @@ export const createSubagentRunner = (
   const gitProbe = opts.isGitRepo ?? isGitRepo
   const wt = opts.withWorktree ?? withWorktree
   const now = opts.now ?? Date.now
+  // B1 — undefined ⇒ raw tool names (default, byte-identical). When set, child
+  // registries are rewritten with scoped names per the injected strategy.
+  const toolNamespace = opts.toolNamespace
 
   // ADR-0416 sibling-identity fix — this runner's parent mailbox label and a
   // DETERMINISTIC per-runner ordinal. Each spawn mints `parentLabel/seq`
@@ -343,12 +408,12 @@ export const createSubagentRunner = (
       ? toResult(
           (
             await wt(subagentId, parent.cwd, async (worktreePath) => {
-              const child = buildChildConfig(parent, req, worktreePath, mailboxIds)
+              const child = buildChildConfig(parent, req, worktreePath, mailboxIds, toolNamespace)
               return run(child)
             })
           ).value,
         )
-      : toResult(await run(buildChildConfig(parent, req, parent.cwd, mailboxIds)))
+      : toResult(await run(buildChildConfig(parent, req, parent.cwd, mailboxIds, toolNamespace)))
 
     // ADR-0133 — fire `subagent_stop` after the child completes (any reason).
     await emitSubagentStopHook(parent, { subagentId, result: childResult })

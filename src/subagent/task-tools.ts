@@ -18,6 +18,43 @@ type OutputInput = z.infer<typeof outputSchema>
  *  blocked indefinitely". Callers can override via `timeout_ms`. */
 const DEFAULT_TASK_OUTPUT_BLOCK_MS = 30_000
 
+/**
+ * B2 — closed-port bound on the caller-supplied `timeout_ms`. Previously
+ * `task_output(block:true)` applied any positive int verbatim (the schema only
+ * rejected non-numbers), so a hostile / hallucinated `timeout_ms: 1e12` kept a
+ * tool call blocked for ~31 years. This policy clamps the requested value into
+ * `[minMs, maxMs]` (CLAMP, not reject — robustness over rigidity) and supplies
+ * `defaultMs` when omitted. Mirrors `wait_agent`'s `WaitTimeoutPolicy`
+ * (handlers-6.ts); kept as a SEPARATE type here so this contract slice stays
+ * zod-only (handlers-6 pulls in `bun` Subprocess types). The host wires the
+ * SAME bounds into both families.
+ */
+export interface TaskOutputTimeoutPolicy {
+  /** Floor for the effective block timeout. */
+  readonly minMs: number
+  /** Ceiling for the effective block timeout. */
+  readonly maxMs: number
+  /** Effective timeout when the caller omits `timeout_ms`. */
+  readonly defaultMs: number
+}
+
+/** Default policy — byte-identical to the pre-B2 behavior: omitted ⇒ 30s; a
+ *  generous 1h ceiling so no existing override is clamped; 1ms floor. */
+export const DEFAULT_TASK_OUTPUT_TIMEOUT_POLICY: TaskOutputTimeoutPolicy = {
+  minMs: 1,
+  maxMs: 3_600_000,
+  defaultMs: DEFAULT_TASK_OUTPUT_BLOCK_MS,
+}
+
+/** Pure, total clamp of `requested` into `[minMs, maxMs]`; omitted ⇒
+ *  `defaultMs`. A degenerate `minMs > maxMs` collapses to the ceiling
+ *  (`maxMs` wins — never returns above the hard ceiling). With the default
+ *  policy this is the identity on any pre-B2 caller (or 30s when omitted). */
+export const clampTaskOutputTimeout = (
+  policy: TaskOutputTimeoutPolicy,
+  requested: number | undefined,
+): number => Math.min(Math.max(requested ?? policy.defaultMs, policy.minMs), policy.maxMs)
+
 const stopSchema = z.object({
   task_id: z.string().describe("Id of the background task to cancel"),
   owner_token: z
@@ -87,8 +124,14 @@ const waitForSettle = async (
   return registry.get(taskId)
 }
 
-/** `task_output` — poll (or block on) a background subagent task by id. */
-export const createTaskOutputTool = (registry: TaskRegistry): Tool<OutputInput> => ({
+/** `task_output` — poll (or block on) a background subagent task by id.
+ *  B2: an optional {@link TaskOutputTimeoutPolicy} clamps the caller's
+ *  `timeout_ms`. Omitted ⇒ {@link DEFAULT_TASK_OUTPUT_TIMEOUT_POLICY}, which is
+ *  byte-identical to the pre-B2 behavior (omitted timeout ⇒ 30s). */
+export const createTaskOutputTool = (
+  registry: TaskRegistry,
+  timeoutPolicy: TaskOutputTimeoutPolicy = DEFAULT_TASK_OUTPUT_TIMEOUT_POLICY,
+): Tool<OutputInput> => ({
   name: "task_output",
   description:
     "Read the status/result of a background subagent task. Set block:true to " +
@@ -110,7 +153,8 @@ export const createTaskOutputTool = (registry: TaskRegistry): Tool<OutputInput> 
         registry,
         input.task_id,
         ctx,
-        input.timeout_ms ?? DEFAULT_TASK_OUTPUT_BLOCK_MS,
+        // B2 — clamp the caller-supplied timeout into the injected band.
+        clampTaskOutputTimeout(timeoutPolicy, input.timeout_ms),
       )
       if (rec && !settled(rec)) {
         yield {

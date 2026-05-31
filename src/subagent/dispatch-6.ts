@@ -22,6 +22,7 @@ import {
   handleWriteStdin,
   type InputChannelRegistry,
   type PtyTable,
+  type WaitTimeoutPolicy,
 } from "./handlers-6"
 import type { TaskRegistry } from "./registry"
 import {
@@ -48,6 +49,12 @@ export interface Subagent6Deps {
   /** Forwarded to spawn_agent depth checks. */
   maxDepth?: number
   parentDepth?: number
+  /** B3 — forwarded to spawn_agent's per-session concurrent-subagent cap.
+   *  Absent ⇒ unlimited (opt-in, byte-identical default). */
+  maxConcurrent?: number
+  /** B2 — forwarded to wait_agent's timeout clamp. Absent ⇒ handler default
+   *  policy (30s default, generous ceiling). */
+  waitTimeoutPolicy?: WaitTimeoutPolicy
   /** Forwarded to close_agent ownership-token enforcement. */
   ownerToken?: string
   /** Forwarded to exec_command timeout/abort plumbing. */
@@ -130,6 +137,7 @@ const routeSpawnAgent: Route = async (input, deps) => {
     registry: deps.registry,
     ...(deps.maxDepth !== undefined ? { maxDepth: deps.maxDepth } : {}),
     ...(deps.parentDepth !== undefined ? { parentDepth: deps.parentDepth } : {}),
+    ...(deps.maxConcurrent !== undefined ? { maxConcurrent: deps.maxConcurrent } : {}),
   })
 }
 
@@ -139,6 +147,7 @@ const routeWaitAgent: Route = async (input, deps) => {
   }
   return handleWaitAgent(input as Parameters<typeof handleWaitAgent>[0], {
     registry: deps.registry,
+    ...(deps.waitTimeoutPolicy !== undefined ? { timeoutPolicy: deps.waitTimeoutPolicy } : {}),
   })
 }
 
