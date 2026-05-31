@@ -86,3 +86,103 @@ export const formatContextUsage = (used: number, max: number, model?: string): s
 
   return `${renderBar(ratio)} ${formatTokens(usedClamped)}/${formatTokens(max)} (${pctLabel}) · ${modelLabel}`
 }
+
+// ── Track D: segmented multi-category usage bar (Cursor UsageBar shape) ──────
+//
+// Additive + default-OFF: the single-bar `formatContextUsage` above is left
+// byte-identical and remains the status-line default. This view is surfaced
+// only via the `/context` slash command.
+//
+// The bar has a FIXED width (`SEGMENTED_BAR_CELLS`) so it is stable regardless
+// of how many categories are present. Each category occupies a number of cells
+// proportional to its token share (largest-remainder ⇒ cells sum EXACTLY to
+// the bar width), with a distinct fill glyph per category so segments are
+// visible without ANSI color.
+
+/**
+ * Structural shape the renderer needs from a context-usage breakdown. Declared
+ * locally (NOT imported from `@/agent`) to keep this file's slice fence intact —
+ * the header forbids `@/agent` imports so the helper stays liftable into a
+ * Tauri / Web bundle. `@/agent/context/usage-breakdown.ContextUsageBreakdown`
+ * is structurally assignable to this. */
+export interface SegmentedUsageView {
+  readonly segments: ReadonlyArray<{ readonly id: string; readonly tokens: number }>
+  readonly total: number
+  readonly max: number
+  readonly model?: string
+}
+
+/** Percentage (0–100, rounded) of the window consumed. Never NaN. */
+const viewPercent = (b: SegmentedUsageView): number => {
+  if (!(b.max > 0)) return 0
+  return Math.min(100, Math.round((b.total / b.max) * 100))
+}
+
+/** Fixed cell width of the segmented bar. */
+export const SEGMENTED_BAR_CELLS = 24
+
+/** Per-segment fill glyph (rotates by segment index; deterministic). */
+const SEGMENT_GLYPH = ["█", "▓", "▒", "▆", "▅", "▄", "▃"] as const
+
+/**
+ * Allocate `cells` across segments weighted by token count, summing EXACTLY to
+ * `cells` (largest-remainder). Stable tie-break by index ⇒ deterministic.
+ */
+const allocateCells = (tokens: readonly number[], total: number, cells: number): number[] => {
+  if (total <= 0) return tokens.map(() => 0)
+  const exact = tokens.map((t) => (t / total) * cells)
+  const floored = exact.map((x) => Math.floor(x))
+  let remainder = cells - floored.reduce((a, b) => a + b, 0)
+  const order = exact
+    .map((x, i) => ({ i, frac: x - Math.floor(x) }))
+    .sort((a, b) => b.frac - a.frac || a.i - b.i)
+  const out = [...floored]
+  for (const { i } of order) {
+    if (remainder <= 0) break
+    out[i] = (out[i] ?? 0) + 1
+    remainder -= 1
+  }
+  return out
+}
+
+/**
+ * Render a segmented, multi-category context-usage view: a fixed-width bar
+ * followed by one legend row per present category. Pure function, no I/O.
+ *
+ * Example (truncated):
+ *   `[███████▓▓▓▒▒░░░░░░░░░░░░░] 76.8k/120k · 64% Full · gpt-5`
+ *   `  █ System        40.0k (52%)`
+ *   `  ▓ Rules         20.0k (26%)`
+ *   `  ▒ Conversation  16.8k (22%)`
+ */
+export const formatSegmentedUsage = (b: SegmentedUsageView): string => {
+  const pct = viewPercent(b)
+  const cellsPerSegment = allocateCells(
+    b.segments.map((s) => s.tokens),
+    b.total,
+    SEGMENTED_BAR_CELLS,
+  )
+  let used = 0
+  let bar = ""
+  for (let i = 0; i < b.segments.length; i++) {
+    const cells = cellsPerSegment[i] ?? 0
+    used += cells
+    bar += (SEGMENT_GLYPH[i % SEGMENT_GLYPH.length] ?? "█").repeat(cells)
+  }
+  bar += EMPTY_CELL.repeat(Math.max(0, SEGMENTED_BAR_CELLS - used))
+
+  const fullness = pct >= 100 ? "Full" : `${pct}% Full`
+  const head = `[${bar}] ${formatTokens(b.total)}/${formatTokens(b.max)} · ${fullness}${
+    b.model !== undefined && b.model !== "" ? ` · ${b.model}` : ""
+  }`
+
+  const lines: string[] = [head]
+  for (let i = 0; i < b.segments.length; i++) {
+    const s = b.segments[i]
+    if (s === undefined) continue
+    const glyph = SEGMENT_GLYPH[i % SEGMENT_GLYPH.length] ?? "█"
+    const share = b.total > 0 ? Math.round((s.tokens / b.total) * 100) : 0
+    lines.push(`  ${glyph} ${s.id.padEnd(12)} ${formatTokens(s.tokens)} (${share}%)`)
+  }
+  return lines.join("\n")
+}

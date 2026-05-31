@@ -44,6 +44,7 @@ import { sessionCmd } from "../session-cmd"
 import type { SlashCommand, SlashContext } from "../slash-contract"
 import { snapshotCmd } from "../snapshot-cmd"
 import { statusCmd } from "../status-cmd"
+import { formatSegmentedUsage } from "../status-line"
 import { webCmd } from "../web-cmd"
 import { renderWorkingStatePanel } from "../working-state-panel"
 import { runSkillsRender } from "./render-helpers"
@@ -87,11 +88,21 @@ const writePrefs = async (path: string, prefs: Preferences): Promise<void> => {
 
 const contextCmd: SlashCommand = {
   name: "/context",
-  describe: "Show current context-window usage",
+  describe: "Show segmented context-window usage (System/Rules/Conversation/…)",
   async run(_args, ctx) {
+    // Track D: when the surface wires the `contextUsage` seam, render the
+    // segmented per-category breakdown (Cursor UsageBar shape). The breakdown
+    // is computed by the host from the latest assembled prompt using the
+    // loop's OWN token estimator (no second heuristic here).
+    const breakdown = ctx.contextUsage?.()
+    if (breakdown !== undefined) {
+      ctx.out(`${formatSegmentedUsage(breakdown)}\n`)
+      return 0
+    }
+    // Fallback (seam absent / no prompt assembled yet): legacy placeholder line
+    // + the env-reported last token count, byte-identical to the prior body.
     const lastTokens = runtimeConfig().lastTokens
-    ctx.out("context: not yet wired (Phase 1 placeholder)\n")
-    ctx.out("Reports tokens-used / remaining once the loop exports per-turn usage.\n")
+    ctx.out("context: no prompt assembled yet (per-turn usage not available)\n")
     if (lastTokens !== undefined && lastTokens !== "") {
       ctx.out(`last reported tokens: ${lastTokens}\n`)
     }

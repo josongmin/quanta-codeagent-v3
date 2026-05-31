@@ -163,3 +163,22 @@ export const validateSectionsCacheBudget = (
   if (cachedCount <= MAX_CACHE_BREAKPOINTS) return { ok: true }
   return { ok: false, cachedCount, limit: MAX_CACHE_BREAKPOINTS }
 }
+
+/** Cursor-style context category a section is billed to in the segmented usage
+ *  breakdown (Track D). Co-located with the section definition so the mapping
+ *  has a SINGLE source of truth — the breakdown module imports this and never
+ *  duplicates it. Keyed by the four canonical section names produced by
+ *  {@link fourSectionPreset} / {@link defaultPromptSections}:
+ *
+ *    base         → "System"       (harness/system prompt)
+ *    project_md   → "Rules"        (project memory / CLAUDE.md = instructions)
+ *    session_ctx  → "Conversation" (prior session context + distilled memory)
+ *    user_append  → "Conversation" (user-supplied static prefix)
+ *
+ *  An unmapped/diagnostic name falls back to "System" at the call site. */
+export const SECTION_CONTEXT_CATEGORY: Record<string, string> = {
+  base: "System",
+  project_md: "Rules",
+  session_ctx: "Conversation",
+  user_append: "Conversation",
+}

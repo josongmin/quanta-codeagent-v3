@@ -35,6 +35,13 @@ export interface SlashContext {
   readonly side?: SideCmdSlashState | undefined
   /** Sticky cumulative cost dashboard render seam. */
   readonly cost?: (() => string) | undefined
+  /** Track D — segmented context-window usage seam. Returns the breakdown for
+   *  the latest assembled prompt (per-category token segments), or undefined
+   *  when no prompt has been assembled yet. Wired by the REPL surface; absent ⇒
+   *  `/context` falls back to the legacy placeholder line. The view type is the
+   *  structural shape the renderer needs (defined in `status-line.ts`, no
+   *  `@/agent` import) — `ContextUsageBreakdown` is assignable to it. */
+  readonly contextUsage?: (() => import("./status-line").SegmentedUsageView | undefined) | undefined
   /** Read-only plan-store snapshot accessor. */
   readonly planSnapshot?: (() => import("@/agent/plan/types").Plan | null) | undefined
   /** Read-only WorkingState snapshot. */
