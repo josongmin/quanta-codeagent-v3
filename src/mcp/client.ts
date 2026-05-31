@@ -1,5 +1,12 @@
 import { QuantaError } from "@/shared"
 import { type CapabilityNegotiator, defaultNegotiator } from "./capabilities"
+import { headlessRejecter } from "./elicitation"
+import {
+  type ElicitationResponse,
+  isElicitationMethod,
+  routeElicitation,
+} from "./elicitation/inbound-router"
+import type { ElicitationPrompter } from "./elicitation/port"
 import { isResponse, type JsonRpcMessage } from "./jsonrpc"
 import { HttpSseMcpTransport } from "./transports/http-sse"
 import type { McpTransport } from "./transports/port"
@@ -112,6 +119,7 @@ export class McpClient {
   private readonly requestTimeoutMs: number
   private readonly negotiator: CapabilityNegotiator
   private readonly transport: McpTransport
+  private readonly elicitationPrompter: ElicitationPrompter
 
   private nextId = 1
   private readonly pending = new Map<number, PendingRequest>()
@@ -131,7 +139,11 @@ export class McpClient {
    *  every command-based server. */
   constructor(
     config: McpServerConfig,
-    opts?: { negotiator?: CapabilityNegotiator; transport?: McpClientTransport },
+    opts?: {
+      negotiator?: CapabilityNegotiator
+      transport?: McpClientTransport
+      elicitationPrompter?: ElicitationPrompter
+    },
   ) {
     this.config = config
     this.requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS
@@ -139,6 +151,11 @@ export class McpClient {
     const t = opts?.transport
     this.transport =
       t === undefined ? defaultTransportFor(config) : typeof t === "function" ? t(config) : t
+    // Track C: when no prompter is injected, default to the headless rejecter.
+    // This makes inbound `elicitation/create` requests resolve to a proper
+    // `{action:"decline"}` response instead of being silently dropped — well-
+    // defined and byte-identical-safe (no double prompts in tests).
+    this.elicitationPrompter = opts?.elicitationPrompter ?? headlessRejecter
   }
 
   async start(): Promise<void> {
@@ -249,15 +266,50 @@ export class McpClient {
   }
 
   private dispatch(msg: JsonRpcMessage): void {
-    if (!isResponse(msg)) return
-    const id = typeof msg.id === "number" ? msg.id : Number(msg.id)
-    const entry = this.takePending(id)
-    if (!entry) return
-    if (msg.error) {
-      entry.reject(new McpError(`mcp error ${msg.error.code}: ${msg.error.message}`))
-    } else {
-      entry.resolve(msg.result)
+    if (isResponse(msg)) {
+      const id = typeof msg.id === "number" ? msg.id : Number(msg.id)
+      const entry = this.takePending(id)
+      if (!entry) return
+      if (msg.error) {
+        entry.reject(new McpError(`mcp error ${msg.error.code}: ${msg.error.message}`))
+      } else {
+        entry.resolve(msg.result)
+      }
+      return
     }
+    // Track C: an inbound REQUEST (has both `id` and `method`) is a call FROM
+    // the server. Route elicitation requests to the prompter and reply.
+    // Notifications (a `method` WITHOUT an `id`) carry no reply obligation and
+    // are ignored — byte-identical to the pre-Track-C behavior.
+    if ("method" in msg && "id" in msg) {
+      this.handleInboundRequest(msg.id, msg.method, "params" in msg ? msg.params : undefined)
+    }
+  }
+
+  /** Service an inbound server→client JSON-RPC request. Today only elicitation
+   *  is handled; any other inbound method gets a `-32601 method not found`
+   *  JSON-RPC error so the server is never left hanging on a dropped request.
+   *  Never throws (the prompter contract is no-throw, and any unexpected
+   *  failure is mapped to a `decline` response). */
+  private handleInboundRequest(id: number | string, method: string, params: unknown): void {
+    if (!isElicitationMethod(method)) {
+      this.send({
+        jsonrpc: "2.0",
+        id,
+        error: { code: -32601, message: `method not found: ${method}` },
+      })
+      return
+    }
+    void routeElicitation(this.elicitationPrompter, method, params).then(
+      (response: ElicitationResponse) => {
+        this.send({ jsonrpc: "2.0", id, result: response })
+      },
+      // Defensive: the prompter contract is no-throw, but if a custom impl
+      // rejects we still must answer rather than drop the request.
+      () => {
+        this.send({ jsonrpc: "2.0", id, result: { action: "decline" } })
+      },
+    )
   }
 
   private onTransportExit(): void {
