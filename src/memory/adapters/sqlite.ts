@@ -47,6 +47,30 @@ const NEW_COLUMNS: ReadonlyArray<readonly [string, string]> = [
 ]
 
 /**
+ * Audit C-18 — typed corrupt-embedding degradation signal. A stored embedding
+ * BLOB whose byte length is not a positive multiple of 4 (odd / partial write /
+ * legacy corruption) cannot be decoded; the row still loads (fail-open
+ * ranking), but the demotion to "no embedding" is no longer SILENT — it is
+ * surfaced through {@link SqliteStoreOptions.onCorruptEmbedding} so operators
+ * can see the data-quality issue instead of being blind to it.
+ */
+export interface CorruptEmbeddingEvent {
+  /** The affected row's id. */
+  readonly id: string
+  /** Raw BLOB byte length that failed to decode. */
+  readonly byteLength: number
+}
+
+/** Construction options. All optional — default behavior is byte-identical to
+ *  the pre-C-18 store (no observer ⇒ silent fail-open, as before). */
+export interface SqliteStoreOptions {
+  /** Invoked (no-throw — a throwing observer is swallowed) once per row that
+   *  carries a non-null but undecodable embedding BLOB, during read paths
+   *  ({@link SqliteStore.get} / {@link SqliteStore.all} / {@link SqliteStore.recall}). */
+  readonly onCorruptEmbedding?: (event: CorruptEmbeddingEvent) => void
+}
+
+/**
  * Durable {@link PersistentStorePort} backed by `bun:sqlite` (zero npm deps).
  *
  * The schema is created idempotently (CREATE TABLE IF NOT EXISTS) and
@@ -63,9 +87,14 @@ export class SqliteStore implements PersistentStorePort {
   private readonly selectAllStmt: ReturnType<Database["query"]>
   private readonly selectByIdStmt: ReturnType<Database["query"]>
   private readonly deleteStmt: ReturnType<Database["query"]>
+  private readonly onCorruptEmbedding?: (event: CorruptEmbeddingEvent) => void
 
-  /** @param path file path, or ":memory:" for an ephemeral db. */
-  constructor(path = ":memory:") {
+  /** @param path file path, or ":memory:" for an ephemeral db.
+   *  @param opts optional observability seam (see {@link SqliteStoreOptions}). */
+  constructor(path = ":memory:", opts: SqliteStoreOptions = {}) {
+    if (opts.onCorruptEmbedding !== undefined) {
+      this.onCorruptEmbedding = opts.onCorruptEmbedding
+    }
     this.db = new Database(path)
     this.db.exec("PRAGMA journal_mode = WAL")
     this.db.exec(`
@@ -176,18 +205,46 @@ export class SqliteStore implements PersistentStorePort {
   }
 
   delete(id: string): Promise<void> {
-    this.deleteStmt.run(id)
+    // R-Phase5 / audit C-5: a DELETE has the same synchronous failure modes as
+    // save()'s INSERT (database locked / disk full / handle closed). The
+    // signature promises `Promise<void>`, so a synchronous throw would bypass
+    // the promise boundary and escape callers' `await` try/catch (the eviction
+    // sweep / memory-tools delete). Normalize the failure into a rejected
+    // promise so the contract holds end-to-end.
+    try {
+      this.deleteStmt.run(id)
+    } catch (e) {
+      return Promise.reject(new Error(`SqliteStore.delete(${id}) failed: ${errMessage(e)}`))
+    }
     return Promise.resolve()
+  }
+
+  /** Map a row to an entry, surfacing a corrupt-embedding degradation (C-18)
+   *  via the injected observer before delegating to the shared mapper. The
+   *  observer is no-throw — a hostile observer can never break a read. */
+  private toEntry(row: MemoryRow): MemoryEntry {
+    if (
+      this.onCorruptEmbedding !== undefined &&
+      row.embedding !== null &&
+      deserializeVec(row.embedding) === undefined
+    ) {
+      try {
+        this.onCorruptEmbedding({ id: row.id, byteLength: row.embedding.byteLength })
+      } catch {
+        // Observability is advisory; never let it break the read.
+      }
+    }
+    return rowToEntry(row)
   }
 
   get(id: string): Promise<MemoryEntry | undefined> {
     const row = this.selectByIdStmt.get(id) as MemoryRow | null
-    return Promise.resolve(row ? normalizeEntry(rowToEntry(row)) : undefined)
+    return Promise.resolve(row ? normalizeEntry(this.toEntry(row)) : undefined)
   }
 
   all(): Promise<MemoryEntry[]> {
     const rows = this.selectAllStmt.all() as MemoryRow[]
-    return Promise.resolve(rows.map((r) => normalizeEntry(rowToEntry(r))))
+    return Promise.resolve(rows.map((r) => normalizeEntry(this.toEntry(r))))
   }
 
   recall(query: MemoryQuery): Promise<MemoryEntry[]> {
@@ -202,8 +259,14 @@ export class SqliteStore implements PersistentStorePort {
     } else {
       rows = this.selectAllStmt.all() as MemoryRow[]
     }
-    const entries = rows.map(rowToEntry)
+    const entries = rows.map((r) => this.toEntry(r))
     return Promise.resolve(rankEntries(entries, query))
+  }
+
+  /** Test-only: the raw underlying handle, so a hellgate can inject a corrupt
+   *  embedding BLOB the public API cannot produce. NOT for production use. */
+  rawDbForTest(): Database {
+    return this.db
   }
 
   /** Release the underlying db handle. */

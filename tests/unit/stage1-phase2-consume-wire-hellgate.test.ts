@@ -6,19 +6,17 @@
  *   - Empty threadId ⇒ refresh + `thread_id_empty` (NO reads).
  *   - Missing record ⇒ refresh + `no_record`.
  *   - Fresh record + low usage ⇒ REUSE; verb order:
- *       read → incrementUsageCount → selectForPhase2 (3 calls).
+ *       read → reuseConsumedEntry (2 calls — audit C-1 single atomic consume).
  *   - Expired record (age > thresholdSec*1000) ⇒ refresh + `expired`.
  *   - Over-used record (usageCount >= maxUsageBeforeRefresh) ⇒ refresh +
  *     `over_used`.
  *   - Knob defaults pinned: stage1ReuseThresholdSec=3600 / maxUsage=5.
  *   - Knob defaults applied on invalid input (NaN/Infinity/<=0).
  *   - read throws ⇒ refresh + `store_error` (no escape).
- *   - incrementUsageCount throws AFTER successful read ⇒ refresh +
- *     `store_error` (selection skipped — half-mutated state never returned
- *     to caller as reuse).
- *   - selectForPhase2 throws ⇒ refresh + `store_error`.
- *   - 4-verb mutate ordering: increment BEFORE select (so a select-throw
- *     leaves the row with an accurate usageCount).
+ *   - reuseConsumedEntry throws OR returns ok:false AFTER a successful read ⇒
+ *     refresh + `store_error` (caller never acts on a half-mutated record).
+ *   - Single-bump invariant (audit C-1): one reuse bumps usageCount by EXACTLY
+ *     +1 (not +2) — selection + usage accounting cannot drift.
  *   - Byte-identical to store-absent path: outcome SHAPE is the same
  *     discriminated union; refresh.reason distinguishes WHY.
  *
@@ -90,6 +88,10 @@ const wrapSpy = (inner: Stage1StorePortV2): SpyStore => {
       calls.push("selectForPhase2")
       return inner.selectForPhase2(ids)
     },
+    reuseConsumedEntry: async (id) => {
+      calls.push("reuseConsumedEntry")
+      return inner.reuseConsumedEntry(id)
+    },
   }
   return { inner, calls, port }
 }
@@ -124,7 +126,7 @@ describe("consumeStage1ForPhase2 — default-OFF (store missing)", () => {
 })
 
 describe("consumeStage1ForPhase2 — happy reuse path", () => {
-  test("fresh record + low usage ⇒ reuse + 3-verb order: read → increment → select", async () => {
+  test("fresh record + low usage ⇒ reuse + 2-verb order: read → reuseConsumedEntry", async () => {
     const generatedAt = 1_700_000_000_000
     const { store, threadId } = await seedStore({ generatedAt })
     const spy = wrapSpy(store)
@@ -138,12 +140,12 @@ describe("consumeStage1ForPhase2 — happy reuse path", () => {
       expect(out.record.threadId).toBe(threadId)
       expect(out.record.rolloutSummary).toBe("summary")
     }
-    // VERB ORDER pinned. Increment MUST come BEFORE select so a select
-    // throw still leaves an accurate usageCount on the row.
-    expect(spy.calls).toEqual(["read", "incrementUsageCount", "selectForPhase2"])
+    // VERB ORDER pinned (audit C-1): the reuse path performs ONE atomic
+    // consume — never a hand-composed increment + select (that double-bumped).
+    expect(spy.calls).toEqual(["read", "reuseConsumedEntry"])
   })
 
-  test("reuse bumps usageCount AND flips selectedForPhase2 (post-state visible to next read)", async () => {
+  test("reuse bumps usageCount by EXACTLY +1 AND flips selectedForPhase2 (no double-bump)", async () => {
     const generatedAt = 1_700_000_000_000
     const { store, threadId } = await seedStore({ generatedAt })
     const out = await consumeStage1ForPhase2({
@@ -152,12 +154,17 @@ describe("consumeStage1ForPhase2 — happy reuse path", () => {
       now: () => generatedAt + 1_000,
     })
     expect(out.kind).toBe("reuse")
+    // The returned record reflects the post-consume state directly.
+    if (out.kind === "reuse") {
+      expect(out.record.usageCount).toBe(1)
+      expect(out.record.selectedForPhase2).toBe(true)
+    }
     // Verify the post-state with a direct read against the in-memory store.
     const after = await store.read(threadId)
     expect(after.ok).toBe(true)
     if (after.ok && after.value) {
-      // increment +1 (from 0 to 1), then selectForPhase2 also +1 (now 2)
-      expect(after.value.usageCount).toBe(2)
+      // Audit C-1: single atomic consume ⇒ +1, NOT +2.
+      expect(after.value.usageCount).toBe(1)
       expect(after.value.selectedForPhase2).toBe(true)
     }
   })
@@ -278,6 +285,7 @@ describe("consumeStage1ForPhase2 — no-throw under store failure", () => {
       },
       incrementUsageCount: async () => ({ ok: false, code: "io-failed", message: "n/a" }),
       selectForPhase2: async () => ({ ok: false, code: "io-failed", message: "n/a" }),
+      reuseConsumedEntry: async () => ({ ok: false, code: "io-failed", message: "n/a" }),
     }
     const out = await consumeStage1ForPhase2({
       store: throwingStore,
@@ -289,7 +297,7 @@ describe("consumeStage1ForPhase2 — no-throw under store failure", () => {
     }
   })
 
-  test("incrementUsageCount throws AFTER successful read ⇒ refresh + store_error (selection NOT attempted)", async () => {
+  test("reuseConsumedEntry throws AFTER successful read ⇒ refresh + store_error (no escape)", async () => {
     const generatedAt = 1_700_000_000_000
     const { store, threadId } = await seedStore({ generatedAt })
     const calls: string[] = []
@@ -299,13 +307,11 @@ describe("consumeStage1ForPhase2 — no-throw under store failure", () => {
         calls.push("read")
         return store.read(id)
       },
-      incrementUsageCount: async () => {
-        calls.push("incrementUsageCount")
-        throw new Error("inc boom")
-      },
-      selectForPhase2: async (ids) => {
-        calls.push("selectForPhase2")
-        return store.selectForPhase2(ids)
+      incrementUsageCount: async (id) => store.incrementUsageCount(id),
+      selectForPhase2: async (ids) => store.selectForPhase2(ids),
+      reuseConsumedEntry: async () => {
+        calls.push("reuseConsumedEntry")
+        throw new Error("consume boom")
       },
     }
     const out = await consumeStage1ForPhase2({
@@ -317,13 +323,10 @@ describe("consumeStage1ForPhase2 — no-throw under store failure", () => {
     if (out.kind === "refresh") {
       expect(out.reason).toBe("store_error")
     }
-    // CRITICAL: selectForPhase2 must NOT be called when increment throws —
-    // a half-mutated record (selected but with stale usageCount) is worse
-    // than a clean refresh.
-    expect(calls).toEqual(["read", "incrementUsageCount"])
+    expect(calls).toEqual(["read", "reuseConsumedEntry"])
   })
 
-  test("selectForPhase2 throws ⇒ refresh + store_error (increment already applied)", async () => {
+  test("reuseConsumedEntry returns ok:false AFTER read ⇒ refresh + store_error (caller does not act on half-mutation)", async () => {
     const generatedAt = 1_700_000_000_000
     const { store, threadId } = await seedStore({ generatedAt })
     const calls: string[] = []
@@ -333,13 +336,11 @@ describe("consumeStage1ForPhase2 — no-throw under store failure", () => {
         calls.push("read")
         return store.read(id)
       },
-      incrementUsageCount: async (id) => {
-        calls.push("incrementUsageCount")
-        return store.incrementUsageCount(id)
-      },
-      selectForPhase2: async () => {
-        calls.push("selectForPhase2")
-        throw new Error("select boom")
+      incrementUsageCount: async (id) => store.incrementUsageCount(id),
+      selectForPhase2: async (ids) => store.selectForPhase2(ids),
+      reuseConsumedEntry: async () => {
+        calls.push("reuseConsumedEntry")
+        return { ok: false, code: "io-failed", message: "disk wedge" }
       },
     }
     const out = await consumeStage1ForPhase2({
@@ -351,14 +352,7 @@ describe("consumeStage1ForPhase2 — no-throw under store failure", () => {
     if (out.kind === "refresh") {
       expect(out.reason).toBe("store_error")
     }
-    // Increment happened (visible in the row state), select did not.
-    expect(calls).toEqual(["read", "incrementUsageCount", "selectForPhase2"])
-    const after = await store.read(threadId)
-    expect(after.ok).toBe(true)
-    if (after.ok && after.value) {
-      expect(after.value.usageCount).toBe(1) // incremented
-      expect(after.value.selectedForPhase2).toBe(false) // select failed
-    }
+    expect(calls).toEqual(["read", "reuseConsumedEntry"])
   })
 
   test("read returns ok:false ⇒ refresh + no_record (degenerate Stage1Result.ok=false treated as miss)", async () => {
@@ -371,6 +365,7 @@ describe("consumeStage1ForPhase2 — no-throw under store failure", () => {
       }),
       incrementUsageCount: async () => ({ ok: false, code: "io-failed", message: "n/a" }),
       selectForPhase2: async () => ({ ok: false, code: "io-failed", message: "n/a" }),
+      reuseConsumedEntry: async () => ({ ok: false, code: "io-failed", message: "n/a" }),
     }
     const out = await consumeStage1ForPhase2({
       store: failingStore,

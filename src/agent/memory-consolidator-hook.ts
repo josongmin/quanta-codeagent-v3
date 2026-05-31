@@ -143,6 +143,29 @@ const applyRedactor = (
  *  is already wrapping up; we MUST NOT throw. */
 export type ConsolidatorHookLogger = (event: ConsolidatorHookOutcome) => void
 
+/**
+ * Audit C-2/C-3/C-4 — invoke an OPTIONAL observer (logger/hook) so a hostile
+ * or buggy callback can NEVER abort the flow that emitted it.
+ *
+ * One shared no-throw boundary instead of an inline `try/catch {}` per call
+ * site (G2/G5 — the no-throw guarantee is a cross-cutting concern, so it lives
+ * in exactly one place). A throwing observer is swallowed BY CONSTRUCTION: the
+ * three consolidator entry points document a NO-THROW contract
+ * ("the session-finishing path is never derailed", "every failure path returns
+ * an outcome", "MUST NOT crash the session-start path") and this is what makes
+ * that true rather than merely asserted. Absent observer ⇒ zero allocation,
+ * zero call.
+ */
+const emitObservation = <E>(observer: ((event: E) => void) | undefined, event: E): void => {
+  if (observer === undefined) return
+  try {
+    observer(event)
+  } catch {
+    // No-throw contract: an observer is advisory; its failure must never
+    // derail the session-finishing / session-start path it reports on.
+  }
+}
+
 const mirrorStage1ToOutputsStore = (
   slot: Stage1OutputsStore | undefined,
   out: Phase1Outcome & { kind: "distilled" },
@@ -171,7 +194,9 @@ export const runMemoryConsolidatorHook = async (
   log?: ConsolidatorHookLogger,
 ): Promise<ConsolidatorHookOutcome> => {
   const result = await runMemoryConsolidatorHookInner(input)
-  log?.(result)
+  // C-3: a throwing logger here would propagate to runAgent's finally and flip
+  // a successful session span to error. No-throw by construction.
+  emitObservation(log, result)
   return result
 }
 
@@ -340,7 +365,10 @@ export const runMemoryPhase2AutoTrigger = async (
   log?: Phase2AutoTriggerLogger,
 ): Promise<Phase2AutoTriggerOutcome> => {
   const result = await runPhase2AutoTriggerInner(input, log)
-  log?.(result)
+  // C-4: a throwing logger must not reject this hook's Promise (its documented
+  // contract is "every failure path returns an outcome"). No-throw by
+  // construction.
+  emitObservation(log, result)
   return result
 }
 
@@ -387,10 +415,13 @@ const dispatchPhase2Background = (
   queueMicrotask(() => {
     runPhase2(phase2Input, cfg.port, cfg.store, cfg.writer)
       .then((outcome) => {
-        log?.({ kind: "completed", outcome })
+        // C-2: a throwing logger inside this .then would reject the chain; with
+        // no outer handler it becomes a process-level unhandledRejection that
+        // could crash the session-start path. No-throw by construction.
+        emitObservation(log, { kind: "completed", outcome })
       })
       .catch((e: unknown) => {
-        log?.({ kind: "error", message: errMessage(e) })
+        emitObservation(log, { kind: "error", message: errMessage(e) })
       })
       .finally(() => {
         _inflight.delete(cfg.writer)
@@ -518,17 +549,18 @@ export interface Stage1ConsumeInput {
 
 /** Pure-ish helper that decides REUSE vs REFRESH for one threadId.
  *
- *  Verb ordering when reusing (the test pins this):
- *    1. `store.read(threadId)`              — fetch the existing record.
+ *  Verb ordering when reusing:
+ *    1. `store.read(threadId)`            — fetch the existing record.
  *    2. Decide freshness + usage cap.
- *    3. `store.incrementUsageCount(tid)`    — bump the read count.
- *    4. `store.selectForPhase2([tid])`      — flip the promotion flag.
+ *    3. `store.reuseConsumedEntry(tid)`   — ONE atomic consume: flip the
+ *       promotion flag AND account exactly +1 usage.
  *
- *  Step 3+4 are SEPARATE calls so each surface is observable in tests
- *  AND so a `incrementUsageCount` failure does not also clobber the
- *  selection state. A throw in either mutate call demotes the outcome
- *  to a refresh (the read returned a usable record, so the host can
- *  still proceed — but the next call will see the stale state).
+ *  Audit C-1: step 3 is a SINGLE owning-seam operation, NOT a hand-composed
+ *  `incrementUsageCount` (+1) followed by `selectForPhase2` (+1) — that
+ *  sequence double-counted usage and let selection + accounting drift. The
+ *  atomic op makes the double-bump structurally impossible. A throw demotes
+ *  the outcome to a refresh (the read returned a usable record, so the host
+ *  can still proceed via phase1).
  */
 export const consumeStage1ForPhase2 = async (
   input: Stage1ConsumeInput,
@@ -571,21 +603,22 @@ export const consumeStage1ForPhase2 = async (
   if (record.usageCount >= maxUsage) {
     return { kind: "refresh", reason: "over_used" }
   }
-  // Reuse — bump usage THEN flip selection. Each mutation is best-effort
-  // (no-throw contract); a store throw is logged via the outcome shape
-  // upstream (we just degrade to refresh so the caller does not act on
-  // a half-mutated record).
+  // Reuse — consume the entry in ONE atomic operation (select + usage +1).
+  // Audit C-1: this replaces the old incrementUsageCount-then-selectForPhase2
+  // pair that double-bumped usage. Best-effort (no-throw contract): a store
+  // throw OR a typed error result demotes to refresh so the caller never acts
+  // on a half-mutated record.
   try {
-    await input.store.incrementUsageCount(input.threadId)
+    const consumed = await input.store.reuseConsumedEntry(input.threadId)
+    if (!consumed.ok) {
+      return { kind: "refresh", reason: "store_error" }
+    }
+    // Return the post-consume record so the caller sees the bumped usage +
+    // promotion flag (the read-side `record` predates the mutation).
+    return { kind: "reuse", record: consumed.value }
   } catch {
     return { kind: "refresh", reason: "store_error" }
   }
-  try {
-    await input.store.selectForPhase2([input.threadId])
-  } catch {
-    return { kind: "refresh", reason: "store_error" }
-  }
-  return { kind: "reuse", record }
 }
 
 /** Coerce a config knob to its positive-finite value or fall back to the

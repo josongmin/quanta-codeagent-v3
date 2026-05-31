@@ -70,19 +70,31 @@ export type Stage1ErrorResult =
   | { readonly ok: false; readonly code: "invalid-input"; readonly message: string }
 
 /**
- * 4-verb store seam:
+ * 5-verb store seam:
  *   - `write`                  — upsert by threadId (Phase 1 entry point).
  *   - `read`                   — fetch by threadId (Phase 2 picker reads here).
  *   - `incrementUsageCount`    — atomic +1 (picker bumps after using a row).
- *   - `selectForPhase2`        — pure-ish filter (caller passes candidates;
+ *   - `selectForPhase2`        — batch promotion (caller passes candidates;
  *                                store records the selection so subsequent
  *                                phases see `selectedForPhase2 === true`).
+ *   - `reuseConsumedEntry`     — ADR-0233 / audit C-1 owning-seam: ONE atomic
+ *                                operation that "consumes" a single entry for
+ *                                Phase-2 reuse — marks it selected AND accounts
+ *                                exactly +1 usage. See its contract below.
  *
  * The selection contract:
  *   `selectForPhase2(threadIds)` marks each as selected AND increments
  *   `usageCount` atomically per row. Returns the records actually flipped
  *   (rows missing in the store are silently skipped — caller observes via
  *   length comparison).
+ *
+ * The reuse contract (audit C-1 — double-bump prevention):
+ *   `reuseConsumedEntry(threadId)` is the SINGLE semantic operation a Phase-2
+ *   reuse path must call. Composing `incrementUsageCount` + `selectForPhase2`
+ *   by hand double-counts usage (both bump) and lets selection + accounting
+ *   drift. This op flips `selectedForPhase2 = true` and accounts the read as
+ *   EXACTLY +1 in one mutation, so the two surfaces can never disagree. A
+ *   missing row ⇒ `not-found` (no silent create); empty id ⇒ `invalid-input`.
  */
 export interface Stage1StorePortV2 {
   write(input: WriteInput): Promise<Stage1Result<Stage1Record>>
@@ -91,4 +103,7 @@ export interface Stage1StorePortV2 {
   selectForPhase2(
     threadIds: ReadonlyArray<string>,
   ): Promise<Stage1Result<ReadonlyArray<Stage1Record>>>
+  /** Atomically consume ONE entry for Phase-2 reuse: select + usage `+1`
+   *  (never `+2`). The owning seam for the reuse path. */
+  reuseConsumedEntry(threadId: string): Promise<Stage1Result<Stage1Record>>
 }

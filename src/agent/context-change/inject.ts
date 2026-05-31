@@ -142,6 +142,18 @@ const buildOne = (event: ContextEvent): Message => {
         `at: ${event.at}${turnSuffix}`,
       ].join("\n")
       break
+    // Audit C-7 — exhaustiveness guard. Adding a new kind to the
+    // `TypedHistoryEvent` union without a matching `case` above makes `event`
+    // here NOT `never`, so this assignment is a COMPILE error until the new
+    // arm is rendered. The throw is the runtime backstop for a forged event
+    // whose `kind` is outside the union — it can never emit
+    // `embedUntrusted(undefined, undefined)`.
+    default: {
+      const _exhaustive: never = event
+      throw new Error(
+        `buildOne: unknown ContextEvent kind: ${(_exhaustive as { kind?: unknown }).kind ?? "(missing)"}`,
+      )
+    }
   }
 
   return {

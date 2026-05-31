@@ -145,6 +145,36 @@ export const inMemoryStage1Store = (): Stage1StorePortV2 => {
       }
       return Promise.resolve({ ok: true, value: Object.freeze(out) })
     },
+
+    reuseConsumedEntry(threadId: string): Promise<Stage1Result<Stage1Record>> {
+      // Audit C-1 owning seam: ONE mutation that flips the promotion flag AND
+      // accounts exactly +1 usage. Never composed from incrementUsageCount +
+      // selectForPhase2 (that double-bumps), so selection and usage accounting
+      // cannot drift.
+      if (threadId.length === 0) {
+        return Promise.resolve(invalid("threadId is empty"))
+      }
+      const existing = rows.get(threadId)
+      if (existing === undefined) {
+        return Promise.resolve(notFound(threadId))
+      }
+      const next = buildRecord({
+        threadId: existing.threadId,
+        rolloutSlug: existing.rolloutSlug,
+        rolloutSummary: existing.rolloutSummary,
+        rawMemory: existing.rawMemory,
+        preferenceSignals: existing.preferenceSignals,
+        generatedAt: existing.generatedAt,
+        usageCount: existing.usageCount + 1,
+        selectedForPhase2: true,
+        ...(existing.outcome !== undefined ? { outcome: existing.outcome } : {}),
+        ...(existing.outcomeEvidence !== undefined && existing.outcomeEvidence !== null
+          ? { outcomeEvidence: existing.outcomeEvidence }
+          : {}),
+      })
+      rows.set(threadId, next)
+      return Promise.resolve({ ok: true, value: next })
+    },
   }
 }
 

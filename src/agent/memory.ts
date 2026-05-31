@@ -12,6 +12,7 @@ import {
   planEviction,
   scoreEntry,
 } from "@/memory"
+import { throwIfAborted } from "@/shared"
 import { arbitrateConsolidation, type ConsolidationOp } from "./memory-consolidate"
 import { distillSession, finalAssistantText } from "./memory-distill"
 import { emptyPersistStats, type PersistStats, type RecallStats } from "./memory-stats"
@@ -385,9 +386,15 @@ const sweepEviction = async (
   all: readonly MemoryEntry[],
   now: number,
 ): Promise<void> => {
+  // Audit C-20: honor caller cancellation before starting the sweep — and at
+  // the head of each decay/delete iteration — using the T01 shared primitive
+  // (no local abort helper). The AbortError propagates to persistSession's
+  // best-effort catch, which returns early with whatever stats accrued.
+  throwIfAborted(deps.signal)
   const plan = planEviction(all, deps.evictionCaps, now)
   const byId = new Map(all.map((e) => [e.id, e]))
   for (const id of plan.decay) {
+    throwIfAborted(deps.signal)
     const e = byId.get(id)
     if (!e) continue
     try {
@@ -400,6 +407,7 @@ const sweepEviction = async (
     }
   }
   for (const id of plan.delete) {
+    throwIfAborted(deps.signal)
     try {
       await deps.store.delete(id)
       stats.deleted++
@@ -432,7 +440,13 @@ export const persistSession = async (deps: PersistDeps, input: PersistInput): Pr
     const snapshot: MemoryEntry[] = [...(await deps.store.all())]
 
     const now = (deps.now ?? Date.now)()
+    // Audit C-20: a mid-persist cancel must stop the loop — previously only the
+    // distill phase observed the signal, so persist kept committing records the
+    // caller no longer wanted. The throw lands in the best-effort catch below
+    // (early return with whatever was already saved).
+    throwIfAborted(deps.signal)
     for (const record of records) {
+      throwIfAborted(deps.signal)
       const candidate = await buildCandidate(deps, input.sessionId, record, now)
       const dupes = findNearDuplicates(candidate, snapshot)
       const op = await decideOp(deps, candidate, dupes)

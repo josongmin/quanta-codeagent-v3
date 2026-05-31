@@ -203,5 +203,24 @@ export const sqliteStage1Store = (db: Database): Stage1StorePortV2 => {
       }
       return { ok: true, value: Object.freeze(out) }
     },
+
+    reuseConsumedEntry(threadId: string): Promise<Stage1Result<Stage1Record>> {
+      // Audit C-1 owning seam: select + single usage bump in ONE statement, so
+      // the reuse path can never double-count (it no longer composes
+      // incrementUsageCount + selectForPhase2, both of which bump). The
+      // canonical `selectMarkStmt` already encodes exactly this: flip the
+      // promotion flag AND `usage_count = usage_count + 1` atomically.
+      if (threadId.length === 0) return Promise.resolve(invalid("threadId is empty"))
+      const before = readRowAsRecord(threadId)
+      if (before === null) return Promise.resolve(notFound(threadId))
+      try {
+        selectMarkStmt.run({ $thread_id: threadId, $now: Date.now() })
+      } catch (e) {
+        return Promise.resolve(ioFail(`reuseConsumedEntry failed: ${errMessage(e)}`))
+      }
+      const after = readRowAsRecord(threadId)
+      if (after === null) return Promise.resolve(ioFail("row vanished after reuse"))
+      return Promise.resolve({ ok: true, value: after })
+    },
   }
 }
