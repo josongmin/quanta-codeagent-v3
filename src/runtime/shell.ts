@@ -5,6 +5,61 @@ import type { RunShellEvent, ShellOptions, ShellResult } from "./types"
 
 const DEFAULT_TIMEOUT_MS = 120_000
 
+/**
+ * Typed sandbox-application status for a single `runShell` invocation (T08 —
+ * May-31 bugbash, audit L8 M2 — degraded-sandbox honesty).
+ *
+ * The OS-sandbox wrap (`ShellSandboxSlot.wrap` / `perCallWrap`) returns whether
+ * the sandbox was ACTUALLY applied or DEGRADED to passthrough — but `runShell`
+ * previously discarded that, so an effectively-unsandboxed (degraded) run was
+ * indistinguishable to its caller from a fully-sandboxed one. Callers can now
+ * observe the honest verdict via {@link ShellOptions.onSandboxStatus}.
+ *
+ *   - `{ applied: true }`          — at least one wrap layer applied a sandbox
+ *                                    AND no layer degraded.
+ *   - `{ applied: false, reason }` — no sandbox was active for this spawn
+ *                                    (`reason: "no-sandbox-installed"`), OR a
+ *                                    requested wrap degraded to passthrough
+ *                                    (`reason` = the wrap's opaque
+ *                                    `degradeReason`). The reason is a STABLE
+ *                                    OPAQUE tag — never a Seatbelt profile body
+ *                                    / libsandbox internals (anti-leak).
+ *
+ * Default-OFF: absent `onSandboxStatus` ⇒ the status is not even computed and
+ * the spawn path is byte-identical to the pre-T08 code.
+ */
+export type ShellSandboxStatus =
+  | { readonly applied: true }
+  | { readonly applied: false; readonly reason: string }
+
+/** Local structural extension of {@link ShellOptions} carrying the T08
+ *  degraded-sandbox observer. Declared here (not in `@/runtime` `types.ts`) so
+ *  the wire stays in the single owning file; `runShell` reads it off the
+ *  options bag structurally. */
+type ShellOptionsWithSandboxStatus = ShellOptions & {
+  /** OPTIONAL honesty hook — invoked exactly once, BEFORE spawn, with the
+   *  typed {@link ShellSandboxStatus} for this call. Absent ⇒ no status
+   *  computed (byte-identical legacy). MUST NOT throw; a throwing observer is
+   *  the caller's bug and is not guarded here. */
+  onSandboxStatus?: (status: ShellSandboxStatus) => void
+}
+
+/** Fold a single wrap layer's `(sandboxApplied, degradeReason?)` outcome into
+ *  the running status. First degradation reason wins; a later applied layer
+ *  cannot un-degrade an earlier honest degradation. Pure. */
+const foldSandboxStatus = (
+  prior: ShellSandboxStatus,
+  layer: { readonly sandboxApplied: boolean; readonly degradeReason?: string | undefined },
+): ShellSandboxStatus => {
+  // Once degraded, stay degraded (don't let a no-op later layer claim applied).
+  if (!prior.applied) return prior
+  if (layer.degradeReason !== undefined) {
+    return { applied: false, reason: layer.degradeReason }
+  }
+  if (layer.sandboxApplied) return { applied: true }
+  return prior
+}
+
 /** Run a command through the system shell. Captures stdout/stderr, never
  *  throws on non-zero exit (the caller decides what a failure means).
  *
@@ -64,10 +119,45 @@ export const runShell = async (
   //   per-call wrap → slot wrap → snapshot restore.
   const baseArgv: ReadonlyArray<string> = ["bash", "-lc", command]
   const perCallWrap = options.perCallWrap
-  const perCallArgv =
-    perCallWrap !== undefined ? (await perCallWrap(baseArgv, cwd)).argv : [...baseArgv]
+  // T08 (audit L8 M2) — track whether ANY wrap layer actually sandboxed the
+  // spawn vs degraded to passthrough, so an `onSandboxStatus` observer learns
+  // the honest verdict. Seed `applied:false/no-sandbox-installed`: with no
+  // per-call wrap and no installed slot the spawn is unsandboxed, and that is
+  // the truth the caller must be told (not a silent "looks fine").
+  const onSandboxStatus = (options as ShellOptionsWithSandboxStatus).onSandboxStatus
+  // Seed neutral-applied; flip to degraded if a layer degrades. If NO wrap
+  // layer runs at all the spawn is unsandboxed — reported as such below.
+  let sandboxStatus: ShellSandboxStatus = { applied: true }
+  let anyWrapLayerRan = false
+
+  let perCallArgv: string[]
+  if (perCallWrap !== undefined) {
+    const wrapped = await perCallWrap(baseArgv, cwd)
+    perCallArgv = wrapped.argv
+    anyWrapLayerRan = true
+    if (onSandboxStatus !== undefined) sandboxStatus = foldSandboxStatus(sandboxStatus, wrapped)
+  } else {
+    perCallArgv = [...baseArgv]
+  }
+
   const slot = getShellSandbox()
-  const sandboxedArgv = slot !== undefined ? (await slot.wrap(perCallArgv, cwd)).argv : perCallArgv
+  let sandboxedArgv: string[]
+  if (slot !== undefined) {
+    const wrapped = await slot.wrap(perCallArgv, cwd)
+    sandboxedArgv = wrapped.argv
+    anyWrapLayerRan = true
+    if (onSandboxStatus !== undefined) sandboxStatus = foldSandboxStatus(sandboxStatus, wrapped)
+  } else {
+    sandboxedArgv = perCallArgv
+  }
+
+  // Emit the honest sandbox verdict exactly once, before spawn. No wrap layer
+  // ran ⇒ the spawn is unsandboxed (`no-sandbox-installed`). Anti-leak: every
+  // reason is an opaque tag (the wrap's `degradeReason` or the no-sandbox
+  // sentinel), never a profile body.
+  if (onSandboxStatus !== undefined) {
+    onSandboxStatus(anyWrapLayerRan ? sandboxStatus : { applied: false, reason: "no-sandbox-installed" })
+  }
   // ADR-0204 wire — when a snapshot seam is supplied, restore wraps the argv
   // so the spawned shell sources the captured per-turn env. Absent ⇒
   // `sandboxedArgv` flows through unchanged (byte-identical legacy).

@@ -68,6 +68,30 @@ export type ParseOutcome<T> =
   | { kind: "version-mismatch"; foundVersion: number | string | null }
   | { kind: "shape-invalid"; reason: string }
 
+/**
+ * Typed persistence outcome (T08 — May-31 bugbash, audit L8 M5/M6).
+ *
+ * The store's in-memory state is ALWAYS authoritative — a failed flush never
+ * loses the live grant/denial. But the prior `flush(): Promise<void>` made the
+ * durable-write failure INVISIBLE to the caller: a `grant()` that landed in
+ * memory but never reached disk (EACCES on `~/.quanta`, a full disk, a
+ * read-only mount) resolved `await flush()` exactly like a successful write.
+ * A caller that needs the grant to survive a process restart (a CI bot pinning
+ * a host to read-only; a security denial that MUST persist) had no way to know
+ * it didn't.
+ *
+ * `flush()` now returns this discriminated outcome so callers can DISTINGUISH
+ * "applied in memory" (`durable: false` + opaque `reason`) from "durably
+ * persisted" (`durable: true`). It is part of the store contract, not a log
+ * line. Callers that don't care keep ignoring the return (it widens
+ * `Promise<void>` → `Promise<PersistOutcome>`, source-compatible).
+ */
+export type PersistOutcome =
+  | { readonly durable: true }
+  | { readonly durable: false; readonly reason: string }
+
+const PERSISTED: PersistOutcome = Object.freeze({ durable: true })
+
 export interface JsonStateFileOptions<T> {
   /** Absolute path of the JSON state file. */
   filePath: string
@@ -118,8 +142,17 @@ export interface JsonStateFile<T> {
    *  second call is a no-op once the first `load()` has resolved. */
   load(setState: (state: T) => void): Promise<void>
   /** Flush the current state (via `getState`) to disk now. A true "bytes are
-   *  durable" barrier — also drains any in-flight/queued write. */
+   *  durable" barrier — also drains any in-flight/queued write. Returns void
+   *  for source-compatibility with existing callers; use {@link flushDurable}
+   *  when you need to know whether the bytes actually reached disk. */
   flush(getState: () => T): Promise<void>
+  /** Like {@link flush}, but resolves with a typed {@link PersistOutcome}:
+   *  `{durable:true}` when the bytes reached disk, or `{durable:false, reason}`
+   *  when the write failed (the in-memory state is still authoritative; the
+   *  caller decides whether non-durability matters). Part of the store
+   *  contract — persistence failure is observable, not just logged (audit
+   *  L8 M5/M6). */
+  flushDurable(getState: () => T): Promise<PersistOutcome>
   /** Schedule a debounced flush (the mutation just happened). */
   flushDebounced(getState: () => T): void
   /** Drain any in-flight write, then remove the file. Resets `loaded` so a
@@ -131,7 +164,7 @@ export const createJsonStateFile = <T>(opts: JsonStateFileOptions<T>): JsonState
   const { filePath, debounceMs, emptyState, serialize, parse, stateVersion, mergeWithDisk } = opts
   let loaded = false
   let pendingTimer: ReturnType<typeof setTimeout> | null = null
-  let pendingFlush: Promise<void> | null = null
+  let pendingFlush: Promise<PersistOutcome> | null = null
   /** Snapshot getter captured at the time a flush is scheduled, so a debounced
    *  or queued write serializes the LATEST state at write time. */
   let snapshotState: () => T = emptyState
@@ -185,7 +218,7 @@ export const createJsonStateFile = <T>(opts: JsonStateFileOptions<T>): JsonState
     return outcome.kind === "ok" ? outcome.state : null
   }
 
-  const writeToDisk = async (): Promise<void> => {
+  const writeToDisk = async (): Promise<PersistOutcome> => {
     try {
       await mkdir(dirname(filePath), { recursive: true })
       const inMemory = snapshotState()
@@ -203,6 +236,7 @@ export const createJsonStateFile = <T>(opts: JsonStateFileOptions<T>): JsonState
       // The merged state is now what's on disk → it becomes our new baseline so
       // the next 3-way merge diffs against what we actually persisted.
       baseline = merged
+      return PERSISTED
     } catch (e) {
       const message = errMessage(e)
       stderrWarn(`flush failed (${filePath}): ${message}`)
@@ -213,6 +247,9 @@ export const createJsonStateFile = <T>(opts: JsonStateFileOptions<T>): JsonState
       } catch {
         // tmp may not exist — that's fine.
       }
+      // In-memory state stays authoritative; the caller learns the bytes did
+      // NOT reach disk via the typed outcome (audit L8 M5/M6).
+      return { durable: false, reason: message }
     }
   }
 
@@ -236,9 +273,9 @@ export const createJsonStateFile = <T>(opts: JsonStateFileOptions<T>): JsonState
    *   - clean + in-flight ⇒ just return the in-flight promise (no double-write).
    *   - clean + idle ⇒ no-op (returns resolved promise).
    */
-  const enqueueWrite = (): Promise<void> => {
-    if (!dirty) return pendingFlush ?? Promise.resolve()
-    const prior = pendingFlush ?? Promise.resolve()
+  const enqueueWrite = (): Promise<PersistOutcome> => {
+    if (!dirty) return pendingFlush ?? Promise.resolve(PERSISTED)
+    const prior = pendingFlush ?? Promise.resolve(PERSISTED)
     // Capture the dirty bit at queue time so a NEW mutation arriving while
     // we're awaiting `prior` still gets its own write (it re-sets dirty).
     dirty = false
@@ -251,16 +288,29 @@ export const createJsonStateFile = <T>(opts: JsonStateFileOptions<T>): JsonState
     return next
   }
 
-  const flush = async (getState: () => T): Promise<void> => {
+  const flushDurable = async (getState: () => T): Promise<PersistOutcome> => {
     snapshotState = getState
     if (pendingTimer !== null) {
       clearTimeout(pendingTimer)
       pendingTimer = null
     }
+    // First-persist barrier: if nothing has ever reached disk (baseline null),
+    // an explicit flushDurable must ATTEMPT the write — otherwise enqueueWrite's
+    // `!dirty` short-circuit returns {durable:true} without touching disk, so a
+    // read-only/unwritable target would falsely report success (audit L8 M5/M6).
+    // Once a baseline exists, normal dirty-tracking holds (idempotent flushes
+    // stay no-ops so repeated/clean flushes don't bump mtime).
+    if (baseline === null) dirty = true
     // If a debounced write was queued but not yet started, run it now
     // (combined with any new mutations since). Also waits on any in-flight
-    // write so `await flush()` is a true "bytes are durable" barrier.
-    await enqueueWrite()
+    // write so `await flush()` is a true "bytes are durable" barrier — and
+    // returns whether those bytes actually reached disk (audit L8 M5/M6).
+    return enqueueWrite()
+  }
+
+  /** Void-returning flush — source-compatible with the pre-T08 callers. */
+  const flush = async (getState: () => T): Promise<void> => {
+    await flushDurable(getState)
   }
 
   const flushDebounced = (getState: () => T): void => {
@@ -378,5 +428,5 @@ export const createJsonStateFile = <T>(opts: JsonStateFileOptions<T>): JsonState
     }
   }
 
-  return { load, flush, flushDebounced, reset }
+  return { load, flush, flushDurable, flushDebounced, reset }
 }

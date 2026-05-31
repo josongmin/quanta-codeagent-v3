@@ -17,6 +17,8 @@
  * checker itself contains zero IO.
  */
 
+import { isAbsolute, relative, resolve, sep } from "node:path"
+import isPathInside from "is-path-inside"
 import type {
   FileSystemAccess,
   FileSystemEntry,
@@ -45,24 +47,42 @@ interface ResolvedEntry {
   readonly access: FileSystemAccess
 }
 
-/** True when `entryPath` is a path-prefix of (or equal to) `candidate`. The
- *  comparison is byte-literal — no realpath, no symlink follow (the OS
- *  sandbox layer covers symlink escape). A trailing separator on the entry
- *  is treated as "directory containing"; absent, the entry matches itself
- *  AND any path under it. */
-const pathPrefixMatches = (entryPath: string, candidate: string): boolean => {
-  if (entryPath === candidate) return true
-  // Treat the entry as a directory boundary — `/repo` matches `/repo/x.ts`
-  // but NOT `/repo2/x.ts`. We append a `/` (or `\` on Win32 — but `/` works
-  // for the simple prefix case; Win32 callers normalize separators upstream).
-  const boundary = entryPath.endsWith("/") || entryPath.endsWith("\\") ? entryPath : `${entryPath}/`
-  if (candidate.startsWith(boundary)) return true
-  // Also handle Win32 separator case explicitly when the entry didn't end
-  // with one.
-  if (!entryPath.endsWith("/") && !entryPath.endsWith("\\")) {
-    if (candidate.startsWith(`${entryPath}\\`)) return true
+/**
+ * Canonical path normalization + root-containment primitive (T08 — May-31
+ * bugbash, audit L8 H3). ONE helper — the SAME `is-path-inside` containment
+ * primitive is reused by the DXT entry resolver (`plugin-isolation/dxt-loader`
+ * `resolveEntrySafe`) so there is a single source of truth for "is `candidate`
+ * within `root`" across permission checks AND plugin-path resolution.
+ *
+ * The prior implementation prefix-matched the RAW byte strings. That fails
+ * OPEN against lexical traversal: a candidate `/repo/../etc/passwd`
+ * byte-prefix-matches the allow-root `/repo/` and was granted, even though the
+ * resolved path escapes the root entirely. We now `resolve()` BOTH sides first
+ * (collapsing `.`/`..` and producing absolute paths) and then ask the mature
+ * `is-path-inside` library whether the resolved candidate is the root itself
+ * or strictly under it.
+ *
+ * Fail-closed posture: a relative entry/candidate that cannot be made absolute,
+ * or any normalization that lands the candidate outside the root, returns
+ * `false` (deny) — never an implicit allow. Symlink-target escape is still the
+ * OS-sandbox layer's job (this is a lexical guard); but lexical `..` traversal
+ * — the cheap, no-FS escape — is now closed here.
+ */
+export const containsPath = (entryPath: string, candidate: string): boolean => {
+  // Both sides MUST be absolute for a meaningful containment decision. A
+  // relative input is ambiguous (resolved against cwd) — refuse rather than
+  // guess, so an allow-root only ever covers a concretely-rooted candidate.
+  if (!isAbsolute(entryPath) || !isAbsolute(candidate)) return false
+  const root = resolve(entryPath)
+  const target = resolve(candidate)
+  if (root === target) return true
+  // Defense-in-depth: even though `is-path-inside` resolves internally, assert
+  // the post-resolution relation does NOT begin with a `..` segment.
+  const rel = relative(root, target)
+  if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    return false
   }
-  return false
+  return isPathInside(target, root)
 }
 
 /** Resolve one {@link FileSystemPath} to an absolute string via the resolver. */
@@ -88,7 +108,7 @@ const entriesAllow = (
   for (const e of entries) {
     const abs = resolvePath(e.path, resolver)
     const resolved: ResolvedEntry = { path: abs, access: e.access }
-    if (!pathPrefixMatches(resolved.path, candidate)) continue
+    if (!containsPath(resolved.path, candidate)) continue
     if (!coversAccess(resolved, requested)) continue
     return true
   }

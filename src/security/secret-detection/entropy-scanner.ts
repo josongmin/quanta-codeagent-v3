@@ -10,9 +10,12 @@
  * hashes (SHA-256), UUIDs, and dense base64 data blobs all clear 4.5 bits/char.
  * We attack this with two filters:
  *
- *   1. Structural skip — hex-only strings of length 32/40/64/128 (MD5/SHA1/
- *      SHA256/SHA512 lengths) and canonical 8-4-4-4-12 UUID shapes are
- *      skipped before the entropy gate even runs.
+ *   1. Structural skip — only UNAMBIGUOUS non-secret SHAPES (canonical
+ *      8-4-4-4-12 UUIDs) are skipped before the entropy gate runs. Bare
+ *      hex-hash-length strings are NO LONGER blanket-skipped (audit L8 M8):
+ *      a 64-hex secret is byte-identical to a SHA256 digest, so skipping it
+ *      would guarantee a carried-secret blind spot. See
+ *      {@link isStructuralNonSecret}.
  *   2. Confidence band — every entropy hit fires `confidence: "medium"`, so
  *      a composite scan demotes them when a pattern-anchored finding covers
  *      the same span (see `composite-scanner.ts`).
@@ -58,23 +61,45 @@ export const shannonEntropyBits = (s: string): number => {
 }
 
 /**
- * Structural-shape skip filter. Returns `true` for tokens that LOOK high-
- * entropy but are documented non-secrets (hex hash digests + UUIDs).
+ * Structural-shape skip filter. Returns `true` for tokens that are
+ * UNAMBIGUOUSLY non-secret SHAPES — i.e. shapes a raw credential cannot take.
  *
- * The lengths are exact (32 / 40 / 64 / 128) to match MD5 / SHA1 / SHA256 /
- * SHA512 hex digests. A 33-char hex string is treated as a candidate secret
- * — operators who hash-prefix tokens for reference cards still get the
- * entropy warning.
+ * T08 — May-31 bugbash, audit L8 M8 (carried 64-hex hole)
+ * ──────────────────────────────────────────────────────
+ * The prior filter ALSO skipped any bare hex string of length 32/40/64/128 as
+ * an "MD5/SHA1/SHA256/SHA512 digest". That is a GUARANTEED blind spot: a great
+ * many vendors issue secrets as exactly-64-hex tokens (and 32-hex API keys),
+ * which are byte-identical to a SHA256/MD5 digest. A *secret detector* that
+ * resolves that ambiguity by always treating 64-hex as a digest will NEVER
+ * flag a carried 64-hex credential — the exact hole the audit names.
+ *
+ * Entropy cannot distinguish a digest from a secret of the same shape, so we
+ * stop pretending it can: we no longer blanket-skip bare hex-hash lengths.
+ * Such a token now surfaces as a `confidence: "medium"` `generic-high-entropy`
+ * finding — which is precisely what the confidence band exists for: a
+ * composite scan (`composite-scanner.ts`) demotes it when a pattern-anchored
+ * digest/non-secret context covers the same span, so the false-positive cost
+ * is paid only where there is no anchoring context. Fail toward DETECTION, not
+ * toward silence.
+ *
+ * What stays skipped: the canonical dashed UUID (8-4-4-4-12). A UUID's dashed
+ * shape is one a raw credential token does not take, so skipping it does not
+ * open a carried-secret hole — it only suppresses a well-known noise source.
+ *
+ * SCOPING — pure-hex secrets are NOT a supported detector class here.
+ * Shannon entropy over a 16-symbol hex alphabet maxes at log2(16)=4.0
+ * bits/char, BELOW the 4.5 b/c default cut-off. So a hex-encoded credential
+ * (e.g. a bare 64-hex token) cannot clear the entropy gate REGARDLESS of this
+ * structural filter — the entropy scanner structurally cannot detect hex-only
+ * secrets. Catching those is the PATTERN scanner's job (a vendor-anchored
+ * `^[0-9a-f]{64}$`-with-context regex in `pattern-scanner.ts`), not entropy's.
+ * Removing the blanket hex skip above still matters for the catchable case:
+ * mixed-alphabet 32/40/64/128-char tokens (base64 / base62 secrets) that DO
+ * clear 4.5 b/c are no longer silently dropped just for hitting a digest
+ * LENGTH.
  */
 const isStructuralNonSecret = (token: string): boolean => {
-  // Hex-hash lengths.
-  if (
-    (token.length === 32 || token.length === 40 || token.length === 64 || token.length === 128) &&
-    /^[0-9a-f]+$/i.test(token)
-  ) {
-    return true
-  }
-  // UUID 8-4-4-4-12.
+  // UUID 8-4-4-4-12 — a fixed dashed shape, never a raw secret token.
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token)) {
     return true
   }

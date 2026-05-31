@@ -78,7 +78,12 @@
 
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { createJsonStateFile, type JsonStateFile, type ParseOutcome } from "./json-state-file"
+import {
+  createJsonStateFile,
+  type JsonStateFile,
+  type ParseOutcome,
+  type PersistOutcome,
+} from "./json-state-file"
 import type {
   TrustScope,
   TrustScopeAction,
@@ -144,6 +149,13 @@ export interface PersistentTrustScopeRegistry extends TrustScopeRegistry {
   /** Force-flush any pending debounced writes. Used by tests and clean
    *  process-exit paths so a grant landed during the last tick survives. */
   flush(): Promise<void>
+  /** Like {@link flush} but resolves with a typed {@link PersistOutcome} so a
+   *  security-sensitive caller (a CLI granting/revoking, a denial that MUST
+   *  survive a restart) can DISTINGUISH "the grant is live in memory" from
+   *  "the grant is durably on disk" (audit L8 M6). `durable:false` carries an
+   *  opaque reason and means BOTH files OR either file failed to persist; the
+   *  in-memory registry is still authoritative. */
+  flushDurable(): Promise<PersistOutcome>
   /** Remove a grant. Mirrors {@link grant}'s shape. Best-effort — a record
    *  that does not exist is a no-op. */
   revoke(projectKey: string, grant: TrustScopeGrant): void
@@ -562,6 +574,19 @@ export const createPersistentTrustScopeRegistry = (
     if (overlayFile !== null) await overlayFile.flush(() => overlayState)
   }
 
+  const doFlushDurable = async (): Promise<PersistOutcome> => {
+    const globalOutcome = await globalFile.flushDurable(() => globalState)
+    const overlayOutcome =
+      overlayFile !== null
+        ? await overlayFile.flushDurable(() => overlayState)
+        : ({ durable: true } as PersistOutcome)
+    // Durable only when BOTH files persisted. Surface the first failure reason
+    // so the caller has something actionable (opaque, not a stack trace).
+    if (!globalOutcome.durable) return globalOutcome
+    if (!overlayOutcome.durable) return overlayOutcome
+    return { durable: true }
+  }
+
   const doHasGrant = (projectKey: string, action: TrustScopeAction): boolean => {
     const win = findWinning(projectKey, action)
     if (win === null) return false
@@ -610,6 +635,7 @@ export const createPersistentTrustScopeRegistry = (
   return {
     hydrate: doHydrate,
     flush: doFlush,
+    flushDurable: doFlushDurable,
     hasGrant: doHasGrant,
     consume: doConsume,
     grant: doGrant,

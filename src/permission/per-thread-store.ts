@@ -45,9 +45,16 @@ export const clearThreadPermission = (threadId: string, store: PermissionStore):
  *   - `read-only`          → false
  *   - `workspace-write`    → true ONLY if `workdir` is under one of
  *                            `writableRoots` (caller-supplied list of
- *                            absolute prefixes). Empty/absent `writableRoots`
- *                            ⇒ defaults to "writable" (the workspace root
- *                            itself is implicit). */
+ *                            absolute prefixes).
+ *
+ *  Fail-closed (T08 — May-31 bugbash, audit L8 H4): an EMPTY or absent
+ *  `writableRoots` is NOT "writable anywhere". The prior code returned `true`
+ *  for an empty list — a `workspace-write` thread whose writable-root list
+ *  was never populated (a config gap, or a root list that got filtered to
+ *  empty) silently became writable across the whole filesystem. An empty
+ *  writable-root set means "no root is writable" ⇒ DENY. Callers that want the
+ *  workspace root writable MUST list it explicitly. Containment uses a
+ *  separator-anchored prefix so `/repo` covers `/repo/x` but not `/repo2/x`. */
 export const threadAllowsMutation = (perm: ThreadPermission, workdir: string): boolean => {
   switch (perm.sandboxPolicy.type) {
     case "danger-full-access":
@@ -56,7 +63,7 @@ export const threadAllowsMutation = (perm: ThreadPermission, workdir: string): b
       return false
     case "workspace-write": {
       const roots = perm.sandboxPolicy.writableRoots
-      if (!roots || roots.length === 0) return true
+      if (!roots || roots.length === 0) return false
       return roots.some((r) => workdir === r || workdir.startsWith(`${r}/`))
     }
     default: {

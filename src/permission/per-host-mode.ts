@@ -72,28 +72,61 @@ export const clearHostMode = (hostId: string, store: PermissionStore): void => {
   store.clearHost(hostId)
 }
 
-/** Decide whether the host-mode default permits a mutating action.
+/**
+ * Typed host-mode mutation verdict (T08 — May-31 bugbash, audit L8 H5).
  *
- *   - `full-access` → true
- *   - `read-only`   → false
- *   - `custom`      → true (the "custom" sentinel means the host has a
- *                    bespoke policy defined elsewhere — defer to the
- *                    global default rather than block here).
+ *   - `"allow"`   — the host is pinned `full-access`.
+ *   - `"deny"`    — the host is pinned `read-only`.
+ *   - `"defer"`   — the host is pinned `custom`: a bespoke policy that THIS
+ *                   function cannot resolve. The caller MUST resolve it (load
+ *                   the per-host custom policy) before acting — it is NOT an
+ *                   implicit allow.
+ *   - `"unpinned"`— the caller never pinned a mode for this host; the
+ *                   precedence chain falls through to the global default.
  *
- *  Returns `undefined` when the caller did not pin a mode for this host;
- *  the precedence chain then falls through to the global default. */
-export const hostAllowsMutation = (mode: HostAgentMode | undefined): boolean | undefined => {
-  if (mode === undefined) return undefined
+ * Replacing the prior `boolean | undefined` shape: the old code mapped
+ * `custom` to `true` (allow), so a host an operator deliberately marked
+ * "custom — restrict me later" silently became fully writable. `custom` is
+ * now `defer` — fail-CLOSED until the bespoke policy is resolved.
+ */
+export type HostMutationVerdict = "allow" | "deny" | "defer" | "unpinned"
+
+/** Decide whether the host-mode default permits a mutating action, as a typed
+ *  verdict (see {@link HostMutationVerdict}). `custom` ⇒ `defer` (the caller
+ *  must resolve the bespoke policy — never an implicit allow). `undefined`
+ *  mode ⇒ `unpinned` (fall through to the global default). */
+export const hostMutationVerdict = (mode: HostAgentMode | undefined): HostMutationVerdict => {
+  if (mode === undefined) return "unpinned"
   switch (mode) {
     case "full-access":
-      return true
+      return "allow"
     case "read-only":
-      return false
+      return "deny"
     case "custom":
-      return true
+      return "defer"
     default: {
       const _exhaustive: never = mode
       throw new Error(`unhandled HostAgentMode: ${String(_exhaustive)}`)
     }
+  }
+}
+
+/** Back-compat boolean adapter for existing callers that still expect the
+ *  pre-T08 `boolean | undefined` shape. Maps the typed verdict to the legacy
+ *  tri-state, but with the SECURITY-CORRECTED `custom` mapping: `custom` no
+ *  longer returns `true` — it returns `undefined` (caller must resolve the
+ *  bespoke policy / fall to the global default) so it is never an implicit
+ *  allow. Prefer {@link hostMutationVerdict} in new code. */
+export const hostAllowsMutation = (mode: HostAgentMode | undefined): boolean | undefined => {
+  const verdict = hostMutationVerdict(mode)
+  switch (verdict) {
+    case "allow":
+      return true
+    case "deny":
+      return false
+    default:
+      // `defer` (custom) and `unpinned` BOTH fall through to the caller's
+      // global-default resolution — NOT an implicit allow.
+      return undefined
   }
 }

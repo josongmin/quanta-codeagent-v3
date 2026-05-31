@@ -140,8 +140,27 @@ export const decideBranchOnly = (
   }
 
   if (sub === "reset") {
-    // `git reset --hard origin/main` etc.
-    const after = toks.slice(toks.indexOf(sub) + 1).filter((t) => !t.startsWith("-"))
+    const allToks = toks.slice(toks.indexOf(sub) + 1)
+    const after = allToks.filter((t) => !t.startsWith("-"))
+    // Audit L8 H1 fix: a DESTRUCTIVE reset (`--hard`/`--merge`/`--keep`) while
+    // HEAD is on a protected branch moves/discards the PROTECTED branch's own
+    // history — even when no explicit ref is named (`git reset --hard`,
+    // `git reset --hard HEAD~1`, `git reset --hard @{u}`). The prior code only
+    // denied when an explicit protected-branch REF was the target, so a
+    // working-on-main `git reset --hard origin/main`→ caught, but a bare
+    // `git reset --hard HEAD~3` on main → fell through to allow and rewrote
+    // the protected branch. Deny any destructive reset on a protected current
+    // branch, regardless of (or absent) the target ref.
+    const isDestructive = allToks.some(
+      (t) => t === "--hard" || t === "--merge" || t === "--keep",
+    )
+    if (isDestructive && currentBranch && protectedBranches.includes(currentBranch)) {
+      return {
+        allowed: false,
+        reason: `destructive git reset on protected branch '${currentBranch}' denied (gitWrite=branch-only). It rewrites the protected branch — switch to a feature branch first.`,
+      }
+    }
+    // `git reset --hard origin/main` etc. — explicit protected-branch target.
     for (const ref of after) {
       if (targetsProtectedBranch(ref, protectedBranches)) {
         return {

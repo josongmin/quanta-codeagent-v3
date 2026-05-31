@@ -28,7 +28,8 @@
  */
 
 import { readFile, stat } from "node:fs/promises"
-import { dirname, isAbsolute, normalize, relative, resolve } from "node:path"
+import { dirname, isAbsolute, normalize, resolve } from "node:path"
+import isPathInside from "is-path-inside"
 import { z } from "zod"
 import { errMessage, QuantaError } from "@/shared"
 import { PluginHost } from "./plugin-host"
@@ -142,7 +143,16 @@ export const validateDxt = async (
 
 /** Resolve `entry` against `manifestDir` and ensure it does NOT escape the
  *  manifest directory (no `..`, no absolute paths outside). Returns the
- *  absolute resolved path. */
+ *  absolute resolved path.
+ *
+ *  T08 — May-31 bugbash, audit L8 M4: containment now goes through the SAME
+ *  `is-path-inside` primitive the permission access-check (`@/permission`
+ *  `access-check.ts` `containsPath`) uses, so "is this path within that root"
+ *  has ONE source of truth across permission checks AND DXT entry resolution.
+ *  (Slice isolation forbids `@/plugin-isolation` from importing `@/permission`
+ *  directly, so the shared element is the underlying `is-path-inside` library
+ *  call, invoked identically by both — not a cross-slice import.) The entry
+ *  directory ITSELF (`entry === "."`) is permitted as inside. */
 const resolveEntrySafe = (manifestDir: string, entry: string, manifestPath: string): string => {
   // Reject absolute entries outright — DXT contract is relative-to-pkg-root.
   if (isAbsolute(entry)) {
@@ -152,12 +162,11 @@ const resolveEntrySafe = (manifestDir: string, entry: string, manifestPath: stri
       manifestPath,
     )
   }
-  const normalised = normalize(entry)
-  const absolute = resolve(manifestDir, normalised)
-  const rel = relative(manifestDir, absolute)
-  // After normalisation, the entry must NOT escape (rel starts with ".." or
-  // is absolute).
-  if (rel.startsWith("..") || isAbsolute(rel)) {
+  const root = resolve(manifestDir)
+  const absolute = resolve(root, normalize(entry))
+  // Inside iff the resolved entry IS the root or is strictly under it. Same
+  // containment primitive as the permission access-check.
+  if (absolute !== root && !isPathInside(absolute, root)) {
     throw new DxtError(
       "entry-escape",
       `entry "${entry}" resolves outside manifest directory (${absolute})`,
