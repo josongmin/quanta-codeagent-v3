@@ -10,9 +10,10 @@
  *   2. Provider credential metadata — ONE table, owned by
  *      `src/llm/provider-metadata.ts`.
  */
+
+import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { describe, expect, test } from "bun:test"
 
 const root = process.cwd()
 const read = (p: string): string => readFileSync(join(root, p), "utf8")
@@ -35,10 +36,9 @@ describe("L9 H13 — conflict-parser single source of truth", () => {
   })
 
   test("exactly one module declares `export const parseConflicts`", () => {
-    const owners = [
-      "src/git/conflict-parser.ts",
-      "src/tool/git/conflict-parser/parse.ts",
-    ].filter((p) => /export\s+const\s+parseConflicts\s*=/.test(read(p)))
+    const owners = ["src/git/conflict-parser.ts", "src/tool/git/conflict-parser/parse.ts"].filter(
+      (p) => /export\s+const\s+parseConflicts\s*=/.test(read(p)),
+    )
     expect(owners).toEqual(["src/git/conflict-parser.ts"])
   })
 })
@@ -56,5 +56,26 @@ describe("L6 M1 — provider credential metadata single source of truth", () => 
   test("provider-router consumes the metadata authority (does not re-derive it)", () => {
     const src = read("src/llm/provider-router.ts")
     expect(src).toMatch(/from "\.\/provider-metadata"/)
+  })
+})
+
+describe("L6 M11 — truthy-env grammar single source of truth", () => {
+  test("only provider-metadata.ts declares the {1,true,yes} truthy set", () => {
+    // The literal set must live in exactly one module. Any surface that
+    // re-spells `"1" / "true" / "yes"` has forked the grammar (audit L6 M11).
+    const candidates = [
+      "src/llm/provider-metadata.ts",
+      "src/llm/provider-router.ts",
+      "src/llm/providers/registry.ts",
+    ].filter((p) => /["']1["']\s*(?:,|\)|\])/.test(read(p)) && /["']yes["']/.test(read(p)))
+    expect(candidates).toEqual(["src/llm/provider-metadata.ts"])
+  })
+
+  test("registry consumes isTruthyEnv from the metadata authority (no local copy)", () => {
+    const src = read("src/llm/providers/registry.ts")
+    expect(src).toMatch(/from "\.\.\/provider-metadata"/)
+    expect(src).toMatch(/\bisTruthyEnv\b/)
+    // The old hand-rolled predicate is gone.
+    expect(src).not.toMatch(/isFoundryUseTruthy/)
   })
 })

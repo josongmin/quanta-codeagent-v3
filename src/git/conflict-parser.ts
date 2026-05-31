@@ -84,8 +84,6 @@ export class ConflictParserInputError extends QuantaError {
   }
 }
 
-
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Line splitter
 // ─────────────────────────────────────────────────────────────────────────────
@@ -145,16 +143,25 @@ const sliceLines = (lines: ReadonlyArray<LineRec>, from: number, toExclusive: nu
 // Marker classification
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Tolerated marker lengths. Git emits 7 in the default merge; -X diff3 may
- *  emit 8 in deep nests; some pathological merges emit 6. Outside this band
- *  is NOT a real conflict marker — passed as plain text. */
-const TOLERATED_LENGTHS = new Set<number>([6, 7, 8])
-
-/** Lower bound for "looks like a marker char-run that we should classify"
- *  (used to detect malformed cases). Matches the smallest tolerated length so
- *  we don't accidentally diagnose `<<<` heredocs / `===` markdown HRs / `|||`
- *  table separators / etc. as malformed markers. */
+/** Lower bound for "looks like a marker char-run that we should classify".
+ *  git itself recognises a conflict marker as a run of `>= 7` of the marker
+ *  char (`<{7,}` etc.). We accept `>= MIN_MARKER_RUN` with an UNBOUNDED upper
+ *  end so longer-than-default markers (deep `-X diff3` nests, hand-crafted
+ *  `<<<<<<<<<`) are NOT silently swallowed as plain text. The OPEN/CLOSE
+ *  length-MATCH rule (a block's close run must equal its open run) is enforced
+ *  separately in the body scanner, so widening the band does not loosen
+ *  matching.
+ *
+ *  `MIN_MARKER_RUN` is held at 6 (one below git's 7) only because an existing
+ *  test (B6) asserts a length-6 matched pair parses; this stays strictly below
+ *  the 7-char heredoc/markdown-HR cases that real source never reaches as a
+ *  pure run. Everything `>= MIN_MARKER_RUN` is classified; shorter runs (`<<<`
+ *  heredocs, `===` markdown HRs, `|||` table separators) are plain text. */
 const MIN_MARKER_RUN = 6
+
+/** True when a leading char-run length is long enough to be a conflict marker.
+ *  Unbounded upper end — git's `>= 7` rule, relaxed to `>= MIN_MARKER_RUN`. */
+const isMarkerRun = (runLen: number): boolean => runLen >= MIN_MARKER_RUN
 
 /** Count the leading run of `ch` at the start of `text`. Returns 0 when the
  *  first char doesn't match. */
@@ -190,29 +197,30 @@ type MarkerLine =
   | { readonly kind: "none" }
 
 const classifyOpenLike = (text: string, runLen: number): MarkerLine => {
-  // A run of `<` shorter than the minimum band, OR length 9+ → not a marker.
-  if (runLen < MIN_MARKER_RUN || !TOLERATED_LENGTHS.has(runLen)) return { kind: "none" }
+  // A run of `<` shorter than the minimum (git's `>= 7`, relaxed to `>= 6`) →
+  // not a marker. No upper bound — `<<<<<<<<<` and longer are real markers.
+  if (!isMarkerRun(runLen)) return { kind: "none" }
   const lp = parseLabel(text, runLen)
   if (!lp.ok) return { kind: "open_malformed", runLen }
   return { kind: "open", runLen, label: lp.label }
 }
 
 const classifyCloseLike = (text: string, runLen: number): MarkerLine => {
-  if (runLen < MIN_MARKER_RUN || !TOLERATED_LENGTHS.has(runLen)) return { kind: "none" }
+  if (!isMarkerRun(runLen)) return { kind: "none" }
   const lp = parseLabel(text, runLen)
   if (!lp.ok) return { kind: "close_malformed", runLen }
   return { kind: "close", runLen, label: lp.label }
 }
 
 const classifyBaseLike = (text: string, runLen: number): MarkerLine => {
-  if (runLen < MIN_MARKER_RUN || !TOLERATED_LENGTHS.has(runLen)) return { kind: "none" }
+  if (!isMarkerRun(runLen)) return { kind: "none" }
   const lp = parseLabel(text, runLen)
   if (!lp.ok) return { kind: "base_malformed", runLen }
   return { kind: "base", runLen, label: lp.label }
 }
 
 const classifySepLike = (text: string, runLen: number): MarkerLine => {
-  if (runLen < MIN_MARKER_RUN || !TOLERATED_LENGTHS.has(runLen)) return { kind: "none" }
+  if (!isMarkerRun(runLen)) return { kind: "none" }
   // Separator MUST be exactly the marker run, no label.
   if (text.length === runLen) return { kind: "sep", runLen }
   return { kind: "sep_malformed", runLen }

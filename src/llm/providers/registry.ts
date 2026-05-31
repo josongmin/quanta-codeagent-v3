@@ -26,6 +26,7 @@
  * `@/llm/factory`'s `EnvLike` SSOT discipline).
  */
 
+import { isTruthyEnv } from "../provider-metadata"
 import { BedrockProviderAdapter } from "./bedrock-adapter"
 import { DefaultProviderAdapter } from "./default-adapter"
 import { FoundryProviderAdapter } from "./foundry-adapter"
@@ -138,16 +139,12 @@ export const resolveProvider = (explicit?: string, env: ProviderEnv = {}): Resol
   //   - `ANTHROPIC_FOUNDRY_RESOURCE`     non-empty  (SDK resource-name path)
   //   - `QUANTA_USE_FOUNDRY`             truthy     (quanta-native switch)
   //   - `CLAUDE_CODE_USE_FOUNDRY`        truthy     (Claude-CLI mirror)
-  // routes to Foundry. The boolean switches use the SAME truthy grammar as
-  // `provider-router.ts` (the only SSOT lives there, but the rule is
-  // identical: trimmed, lowercased, in {"1","true","yes"}). We do NOT import
-  // `provider-router` here — the registry stays a leaf module — so the
-  // grammar is repeated locally with a JSDoc cross-reference.
-  const isFoundryUseTruthy = (v: string | undefined): boolean => {
-    if (v === undefined) return false
-    const t = v.trim().toLowerCase()
-    return t === "1" || t === "true" || t === "yes"
-  }
+  // routes to Foundry. The boolean switches use the canonical truthy grammar
+  // consumed via `isTruthyEnv` — the SSOT in `provider-metadata.ts` (which owns
+  // the accepted-spelling set; audit L6 M11). The registry no longer
+  // hand-rolls a local copy; `provider-metadata` is a plane-clean leaf (it
+  // imports only `provider-types`), so importing it does not create a cycle
+  // nor drag a transitive dependency.
   const foundryUrl = env[PROVIDER_ENV_KEYS.foundry]
   const foundryResource = env[FOUNDRY_EXTRA_ENV_KEYS.resource]
   const foundryQuantaUse = env[FOUNDRY_EXTRA_ENV_KEYS.quantaUse]
@@ -155,8 +152,8 @@ export const resolveProvider = (explicit?: string, env: ProviderEnv = {}): Resol
   if (
     (foundryUrl !== undefined && foundryUrl.length > 0) ||
     (foundryResource !== undefined && foundryResource.length > 0) ||
-    isFoundryUseTruthy(foundryQuantaUse) ||
-    isFoundryUseTruthy(foundryClaudeUse)
+    isTruthyEnv(foundryQuantaUse) ||
+    isTruthyEnv(foundryClaudeUse)
   ) {
     return { id: "foundry", factory: FACTORIES.foundry }
   }

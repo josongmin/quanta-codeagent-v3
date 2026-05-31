@@ -169,6 +169,37 @@ describe("conflict-parser — Group B marker length", () => {
     expect(r.blocks).toEqual([])
     expect(r.diagnostics.some((d) => d.kind === "marker_at_offset")).toBe(true)
   })
+
+  test("B10: length-9 markers (matching) → parsed as two-way (git `>=7`, no upper cap)", () => {
+    const src = "<<<<<<<<< a\nO\n=========\nT\n>>>>>>>>> b\n"
+    const r = parseConflicts(src)
+    expect(r.blocks.length).toBe(1)
+    const b = r.blocks[0]
+    if (!b) throw new Error("expected block")
+    expect(b.style).toBe("two-way")
+    expect(b.oursLabel).toBe("a")
+    expect(b.theirsLabel).toBe("b")
+    expect(b.ours).toBe("O\n")
+    expect(b.theirs).toBe("T\n")
+  })
+
+  test("B11: length-11 markers (matching) → parsed as two-way", () => {
+    const src = "<<<<<<<<<<< HEAD\nO\n===========\nT\n>>>>>>>>>>> b\n"
+    const r = parseConflicts(src)
+    expect(r.blocks.length).toBe(1)
+    const b = r.blocks[0]
+    if (!b) throw new Error("expected block")
+    expect(b.style).toBe("two-way")
+    expect(b.oursLabel).toBe("HEAD")
+    expect(b.theirsLabel).toBe("b")
+  })
+
+  test("B12: length-9 mismatched (open=9, close=7) → marker_at_offset, abandoned", () => {
+    const src = "<<<<<<<<< a\nO\n=========\nT\n>>>>>>> b\n"
+    const r = parseConflicts(src)
+    expect(r.blocks).toEqual([])
+    expect(r.diagnostics.some((d) => d.kind === "marker_at_offset")).toBe(true)
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────────────

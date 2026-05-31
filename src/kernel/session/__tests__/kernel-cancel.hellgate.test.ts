@@ -160,9 +160,24 @@ describe("T03 kernel cancel — reducer owns cancel, scheduler executes", () => 
   })
 
   test("turn.cancel composes with the caller's external signal (does not replace it)", async () => {
+    // Audit R1 W1: this used to be tautological — it only asserted
+    // `external.signal.aborted === true` after calling `external.abort()`, which
+    // proves nothing about COMPOSITION. We now park the host turn on a gate,
+    // capture the exact signal handed to `host.runTurn`, abort the EXTERNAL
+    // controller MID-FLIGHT, and prove the captured host signal flips to aborted
+    // — i.e. the caller's signal is genuinely composed into the turn-owned one,
+    // not merely held by the caller. Mirrors the cancel-propagation case but
+    // drives the EXTERNAL source instead of `turn.cancel`.
     const { state, eventLog } = await seedRunningState("cx-3")
     const external = new AbortController()
+
     let observed: AbortSignal | undefined
+    let abortedDuringTurn = false
+    let resolveTurn: (() => void) | undefined
+    const turnGate = new Promise<void>((r) => {
+      resolveTurn = r
+    })
+
     const host: SessionHost = {
       describe: () => ({
         sessionId: "cx-3",
@@ -171,14 +186,23 @@ describe("T03 kernel cancel — reducer owns cancel, scheduler executes", () => 
       }),
       runTurn: async ({ signal }) => {
         observed = signal
+        // Park so the external abort can land while this turn is in flight.
+        await turnGate
+        abortedDuringTurn = signal?.aborted === true
         return {
-          outcome: { reason: "completed", turns: 1, messages: messagesOf("ping") } as AgentOutcome,
+          outcome: {
+            reason: abortedDuringTurn ? "aborted" : "completed",
+            turns: 1,
+            messages: messagesOf("ping"),
+          } as AgentOutcome,
           messages: messagesOf("ping"),
         }
       },
       close: async () => undefined,
     }
-    await dispatchSessionCommand(
+
+    // Kick the turn with the caller's external signal (do not await — it parks).
+    const turnPromise = dispatchSessionCommand(
       state,
       {
         sessionId: "cx-3",
@@ -189,11 +213,21 @@ describe("T03 kernel cancel — reducer owns cancel, scheduler executes", () => 
       },
       { clock, eventLog, host, signal: external.signal },
     )
+
+    // Let runTurn capture the composed signal + park.
+    await new Promise<void>((r) => setTimeout(r, 5))
     expect(observed).toBeDefined()
-    // External abort after a fresh turn started must still be observable through
-    // the composed signal of the NEXT turn.
+    expect(observed?.aborted).toBe(false)
+
+    // Drive the EXTERNAL source mid-flight: the composed signal the host already
+    // holds must flip to aborted (composition, not replacement).
     external.abort()
-    expect(external.signal.aborted).toBe(true)
+    expect(observed?.aborted).toBe(true)
+
+    resolveTurn?.()
+    const result = await turnPromise
+    expect(abortedDuringTurn).toBe(true)
+    expect(result.state.lastOutcomeReason).toBe("aborted")
   })
 
   test("turn.cancel for an idle session is a clean no-op (no live turn to abort)", async () => {
@@ -259,6 +293,117 @@ describe("T03 kernel dispatch — H-8 signal.aborted is checked at dispatch leve
     )
     expect(hostRan).toBe(false)
     expect(result.state.status).not.toBe("running")
+  })
+})
+
+describe("T03 controller-registration window — R2 H1: turn.cancel lands BEFORE host start", () => {
+  test("turn.cancel during the pre-host event-log-write window reaches the live controller and settles aborted", async () => {
+    // Audit R2 H1: a `turn.run` now PRE-REGISTERS its AbortController in
+    // `activeTurnControllers` BEFORE the awaited `appendEvents`/`notifyCommitted`,
+    // and `runTurn` short-circuits to aborted if that controller is already
+    // aborted before the host starts. Under the OLD order (register only AFTER
+    // those awaits) a `turn.cancel` dispatched in this window found NO controller,
+    // fell through to `lease.runWith`, and threw `SessionSingleWriterLeaseError`
+    // while the turn ran uncancelled.
+    //
+    // We reproduce the WINDOW by making the FIRST append AFTER seeding artificially
+    // slow (~30ms), starting a `turn.run` (not awaited), then dispatching
+    // `turn.cancel` after only ~5ms — i.e. INSIDE the slow append, before the host
+    // is ever invoked. (The H-8 test deliberately sleeps 5ms to STEP OVER this
+    // window so the controller is already adopted by the parked host; this one must
+    // land while the dispatch arm is still awaiting the immediate-events append.)
+    const inner = new InMemorySessionEventLog()
+    let armed = false
+    const slowFirstAppendLog = {
+      async append(event: Parameters<InMemorySessionEventLog["append"]>[0]): Promise<void> {
+        if (armed) {
+          // Delay only the first armed append — this is the dispatch arm's
+          // immediate-events write, the exact window the cancel must hit.
+          armed = false
+          await new Promise<void>((r) => setTimeout(r, 30))
+        }
+        inner.append(event)
+      },
+      list: () => inner.list(),
+    }
+
+    // Seed against the same inner log so transcript/seq stay consistent, then arm.
+    const eventLog = new InMemorySessionEventLog()
+    let state = createKernelSessionState({
+      sessionId: "cx-win",
+      permissionMode: "default",
+      capabilityManifest: manifest,
+    })
+    let hostRan = false
+    const idleHost: SessionHost = {
+      describe: () => ({
+        sessionId: "cx-win",
+        permissionMode: "default",
+        capabilityManifest: manifest,
+      }),
+      runTurn: async () => {
+        hostRan = true
+        return {
+          outcome: { reason: "completed", turns: 1, messages: messagesOf("ping") } as AgentOutcome,
+          messages: messagesOf("ping"),
+        }
+      },
+      close: async () => undefined,
+    }
+    state = (
+      await dispatchSessionCommand(
+        state,
+        {
+          sessionId: "cx-win",
+          commandId: "seed",
+          issuedAt: clock.now().toISOString(),
+          type: "input.append",
+          text: "ping",
+        },
+        { clock, eventLog, host: idleHost },
+      )
+    ).state
+
+    // Arm the slow first append: the NEXT append (turn.run's immediate events) is
+    // delayed ~30ms, opening the controller-registration window.
+    armed = true
+    const turnPromise = dispatchSessionCommand(
+      state,
+      {
+        sessionId: "cx-win",
+        commandId: "run",
+        issuedAt: clock.now().toISOString(),
+        expectedRevision: state.revision,
+        type: "turn.run",
+      },
+      { clock, eventLog: slowFirstAppendLog, host: idleHost },
+    )
+
+    // Land the cancel INSIDE the window: 5ms << the 30ms append delay, so the
+    // dispatch arm is still awaiting the immediate-events append and the host has
+    // not started — yet the controller is already pre-registered.
+    await new Promise<void>((r) => setTimeout(r, 5))
+    const cancelPromise = dispatchSessionCommand(
+      state,
+      {
+        sessionId: "cx-win",
+        commandId: "cancel",
+        issuedAt: clock.now().toISOString(),
+        type: "turn.cancel",
+      },
+      { clock, eventLog: slowFirstAppendLog, host: idleHost },
+    )
+
+    // (a) The window cancel must NOT throw (no SessionSingleWriterLeaseError):
+    // it takes the live-controller fast-path, never contends on the held lease.
+    await expect(cancelPromise).resolves.toBeDefined()
+
+    // (b) The turn settles aborted: host work either never ran or was torn down.
+    const result = await turnPromise
+    expect(hostRan).toBe(false)
+    expect(result.state.status).not.toBe("running")
+    expect(result.state.status).toBe("idle")
+    expect(result.state.lastOutcomeReason).toBe("aborted")
   })
 })
 

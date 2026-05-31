@@ -18,10 +18,11 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { type AgentConfig, BudgetMeter, runAgent } from "@/agent"
+import { type AgentConfig, BudgetMeter, runAgent, type WorkMetricsSink } from "@/agent"
 import type { TurnDiffSession } from "@/agent/git-observability"
 import type { GitDirectiveCollector } from "@/git/directive-emit/turn-collector"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
+import type { WorkMetrics } from "@/observability"
 import { __resetDefaultPermissionStore, type PermissionContext } from "@/permission"
 import { __resetRuntimeConfig, LLMError } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
@@ -79,6 +80,37 @@ class NullStream implements StreamPort {
   readonly events: AgentEvent[] = []
   emit(event: AgentEvent): void {
     this.events.push(event)
+  }
+}
+
+/** An LLM whose stream THROWS a session-approval-required escape the instant
+ *  its iterator is advanced — the exact shape `isSessionApprovalRequiredError`
+ *  recognizes (an `approval` object carrying `{approvalId, reason, requestedAt}`).
+ *  `streamConsume` re-throws this past the recovery FSM, so the throw escapes
+ *  `runTurn` → `executeTurnWithObservability` (T02 M5 throw/pause path). */
+class ApprovalRequiredLLM implements LLMPort {
+  calls = 0
+  readonly model = "test-model"
+  // biome-ignore lint/correctness/useYield: the throw IS the body; no event is yielded.
+  async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
+    this.calls += 1
+    throw {
+      approval: {
+        approvalId: "appr-1",
+        reason: "HITL approval required before tool dispatch",
+        requestedAt: Date.now(),
+      },
+    }
+  }
+}
+
+/** A WorkMetricsSink that counts emit calls so M5 can assert the work-metrics
+ *  flush fired exactly once (default-OFF: the loop only builds the collector +
+ *  emits when this sink is wired). */
+class CountingWorkMetricsSink implements WorkMetricsSink {
+  emits = 0
+  emit(_m: WorkMetrics, _ctx: { turnId: string }): void {
+    this.emits += 1
   }
 }
 
@@ -232,6 +264,41 @@ describe("T02 M5 — turn observability closeout", () => {
     expect(diff.endTurns).toBe(1)
     expect(collector.flushes).toBe(1)
   })
+
+  // W2 — the WHOLE POINT of T02 M5: the flush moved into
+  // `executeTurnWithObservability`'s `finally` so it fires even when the turn
+  // THROWS out of `runTurn` (a HITL approval-required escape). The prior M5
+  // cases only drove `completed` / `refusal` (normal RETURNS) and so never
+  // exercised the throw/pause path the move existed to fix.
+  test("turn that THROWS (HITL approval escape) STILL flushes diff+directive+work-metrics exactly once, and the throw propagates", async () => {
+    const diff = new CountingDiffSession()
+    const collector = new CountingDirectiveCollector()
+    const work = new CountingWorkMetricsSink()
+    const cfg = baseCfg({
+      llm: new ApprovalRequiredLLM(),
+      cwd: dir,
+      gitObservability: { enabled: true, session: diff },
+      gitDirectiveEmit: { enabled: true, collector },
+      workMetricsSink: work,
+    })
+    // The approval-required escape is re-raised past the recovery FSM, so it
+    // propagates out of `runAgent` — it is NOT converted into an outcome.
+    let threw = false
+    await runAgent(cfg).catch((e) => {
+      threw = true
+      // The original approval escape — not a wrapped flush/observability error.
+      expect((e as { approval?: unknown }).approval).toBeDefined()
+    })
+    expect(threw).toBe(true)
+    // Despite the throw, the closeout flush in the `finally` fired EXACTLY ONCE
+    // for the (single) thrown turn: turn-diff endTurn, git-directive flush, and
+    // work-metrics emit (the throw classifies as `error`, which still emits
+    // metrics — only `aborted` suppresses them).
+    expect(diff.startTurns).toBe(1)
+    expect(diff.endTurns).toBe(1)
+    expect(collector.flushes).toBe(1)
+    expect(work.emits).toBe(1)
+  })
 })
 
 // ── M3 — proactive compaction breaker actually trips ──────────────────────
@@ -242,5 +309,41 @@ describe("T02 M3 — proactive compaction circuit breaker is enforced", () => {
     const outcome = await runAgent(cfg)
     expect(outcome.reason).toBe("completed")
     expect(orphanToolUseIds(outcome.messages)).toEqual([])
+  })
+
+  // W3 — the headline of T02 M3: with compaction CONFIGURED, `maybeCompact`
+  // reaches `breaker.check()` (it no longer returns at the `if (!config.compaction)`
+  // guard), and an already-tripped breaker routes the turn through the SAME
+  // terminal `{kind:"error", reason}` path the reactive site uses — emitting the
+  // `compact`/`breaker-disabled` recovery event. The prior "enforced" case
+  // configured NO compaction, so it only proved the trivial guard-return path.
+  test("compaction configured + breaker tripped ⇒ {kind:error} carrying the breaker reason + emits recovery compact/breaker-disabled", async () => {
+    const stream = new NullStream()
+    // `maxNoProgressProactive: 0` ⇒ `proactiveStrikes (0) >= cap (0)` ⇒ the
+    // breaker is tripped from the FIRST `check()` (no warm-up compactions
+    // needed). With `compaction` present, `maybeCompact` consults the breaker
+    // BEFORE `compactIfNeeded`, so the configured threshold is irrelevant — the
+    // abort fires first.
+    const cfg = baseCfg({
+      llm: new FakeLLM([text("should-never-stream")]),
+      cwd: dir,
+      stream,
+      compaction: {},
+      compactionBreaker: { caps: { maxNoProgressProactive: 0 } },
+    })
+    const outcome = await runAgent(cfg)
+    // Terminal error carrying the breaker's verbatim abort reason — classified
+    // as the compaction-thrash failure category (not a generic runtime error).
+    expect(outcome.reason).toBe("error")
+    expect(outcome.stopCategory?.kind).toBe("failed")
+    expect(outcome.stopCategory?.reasonCode).toBe("compaction.thrash")
+    // The recovery event the `maybeCompact` site emits when the breaker trips.
+    const recovery = stream.events.find((e) => e.type === "recovery")
+    expect(recovery).toBeDefined()
+    expect(recovery).toMatchObject({ reason: "compact", detail: "breaker-disabled" })
+    // The terminal `error` AgentEvent carries the breaker's rapid-refill reason.
+    const err = stream.events.find((e) => e.type === "error")
+    expect(err).toBeDefined()
+    expect((err as { message: string }).message).toContain("rapid_refill_breaker")
   })
 })
