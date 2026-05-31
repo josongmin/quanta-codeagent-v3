@@ -1,7 +1,8 @@
 /**
  * LanceDB REST VectorStore adapter — ADR-0261.
  *
- * Targets a LanceDB HTTP server (lance-rest / `lancedb serve`):
+ * Targets a Lance-compatible HTTP server (for example lance-rest,
+ * `lancedb serve`, or a compatible test shim):
  *
  *   POST {baseURL}/v1/table/{table}/upsert   { docs: [...] }
  *   POST {baseURL}/v1/table/{table}/query    { vector, k, filter? }    → { hits }

@@ -55,7 +55,8 @@ evidence:
       - tests/unit/runner/search-pipeline.test.ts
     integration:
       - tests/integration/search-pipeline-lance-wire.test.ts
-    contract: []
+    contract:
+      - tests/contract/lance-real-wire.test.ts
 knobs:
   - name: QUANTA_EMBED_PROVIDER
     type: enum
@@ -100,6 +101,11 @@ notes: |
     `QUANTA_VECTOR_STORE` into the live semantic backend, with same-dim
     deterministic fallback on provider failure, explicit-store fail-closed
     semantics, mutation-batch reconcile, and embed/query latency metrics.
+  - Contract evidence splits by proof tier: the integration rail uses a
+    stateful in-proc REST fixture, while `tests/contract/lance-real-wire.test.ts`
+    uses real `python+lancedb` storage semantics behind a compatible HTTP shim.
+    That rail proves live Lance backing + restart-safe manifest cleanup, not an
+    official vendor-owned daemon binary.
   - sibling to ADR-0254 (NOT a replacement). Old `EmbeddingPort` + 8 vendor
     factories remain in place and in use; the new `Embedder` is the richer
     contract for new call sites.

@@ -150,7 +150,7 @@ describe("selectIndexEmbedder — embedder selection", () => {
     const seen: Array<{ name: string; labels?: Record<string, string> }> = []
     const metrics = {
       observe(name: string, _value: number, labels?: Record<string, string>) {
-        seen.push({ name, labels })
+        seen.push(labels === undefined ? { name } : { name, labels })
       },
     }
     const primary = resolveIndexEmbedder({ QUANTA_EMBED_PROVIDER: "headless" }, undefined, { metrics })
@@ -446,7 +446,7 @@ describe("buildSemanticBackend — sqlite persist", () => {
     const seen: Array<{ name: string; labels?: Record<string, string> }> = []
     const metrics = {
       observe(name: string, _value: number, labels?: Record<string, string>) {
-        seen.push({ name, labels })
+        seen.push(labels === undefined ? { name } : { name, labels })
       },
     }
     const backend = buildSemanticBackend({}, async (t) => hashEmbed(t), { metrics })
@@ -458,5 +458,45 @@ describe("buildSemanticBackend — sqlite persist", () => {
           s.name === "search.index.query.latency_ms" && s.labels?.store === "legacy-in-memory",
       ),
     ).toBe(true)
+  })
+
+  test("B13. remote store restart without a persistent manifest cannot discover stale ids to delete", async () => {
+    const rec = recorder((req) => {
+      if (req.url.endsWith("/upsert")) return jsonResponse(200, { ok: true })
+      if (req.url.endsWith("/delete")) return jsonResponse(200, { ok: true })
+      if (req.url.endsWith("/query")) return jsonResponse(200, { hits: [] })
+      return jsonResponse(404, {})
+    })
+    const env = {
+      QUANTA_VECTOR_STORE: "lance",
+      QUANTA_LANCE_BASE_URL: "http://lance.test",
+      QUANTA_LANCE_TABLE: "docs",
+      QUANTA_EMBED_PROVIDER: "headless",
+    } as const
+    const resolved = resolveIndexEmbedder(env)
+    const firstBackend = buildSemanticBackend(env, resolved.embed, {
+      resolvedEmbedder: resolved,
+      storeDeps: { lance: { fetchImpl: rec.fetchImpl } },
+    })
+    const first = chunk("restart.ts", "alpha", 1, 5)
+    const stale = chunk("restart.ts", "beta", 6, 10)
+    await firstBackend.upsert.upsert(first)
+    await firstBackend.upsert.upsert(stale)
+    await firstBackend.reconcileChanges?.(batchFor([first, stale]))
+
+    const beforeRestart = rec.calls.length
+    const secondBackend = buildSemanticBackend(env, resolved.embed, {
+      resolvedEmbedder: resolved,
+      storeDeps: { lance: { fetchImpl: rec.fetchImpl } },
+    })
+    const rewritten = chunk("restart.ts", "gamma", 1, 1)
+    await secondBackend.upsert.upsert(rewritten)
+    await secondBackend.reconcileChanges?.(batchFor([rewritten]))
+
+    const deleteBodies = rec.calls
+      .slice(beforeRestart)
+      .filter((c) => c.url === "http://lance.test/v1/table/docs/delete")
+      .map((c) => JSON.stringify(c.body))
+    expect(deleteBodies).toEqual([])
   })
 })

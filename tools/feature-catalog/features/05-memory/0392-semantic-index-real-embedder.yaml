@@ -51,7 +51,8 @@ evidence:
       - tests/unit/runner/search-pipeline.test.ts
     integration:
       - tests/integration/search-pipeline-lance-wire.test.ts
-    contract: []
+    contract:
+      - tests/contract/lance-real-wire.test.ts
 knobs:
   - name: QUANTA_VECTOR_STORE
     type: enum
@@ -73,3 +74,8 @@ notes: |
   lexical 동작 byte-identical. provider를 명시적으로 고른 후 실패하면
   fallback도 같은 차원(dim)을 유지한다. store를 명시적으로 고른 후
   misconfig되면 fallback indexing 대신 disabled/no-op로 fail-closed한다.
+  Lance contract proof는 두 층이다: integration rail은 stateful in-proc
+  REST fixture로 live wire/restart-safe manifest branch를 deterministically
+  고정하고, contract rail은 real `python+lancedb` backing을 compatible
+  HTTP shim 뒤에 둔다. 따라서 현재 closure는 “real Lance backing semantics”
+  기준이지, 공식 daemon binary parity claim은 아니다.

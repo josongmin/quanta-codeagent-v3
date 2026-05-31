@@ -10,7 +10,8 @@
   `src/runner/assemble/search-pipeline.ts`,
   `src/host/runtime/internal/mention-symbol-deps.ts`,
   `tests/unit/runner/search-index-backend.test.ts`,
-  `tests/integration/search-pipeline-lance-wire.test.ts`
+  `tests/integration/search-pipeline-lance-wire.test.ts`,
+  `tests/contract/lance-real-wire.test.ts`
 
 ## Context
 
@@ -120,6 +121,22 @@ An optional structural sink
 CLI bootstrap adapts its legacy `Metrics` timer registry onto this sink.
 Callers without metrics remain byte-identical.
 
+### 5. Proof boundary
+
+The Lance contract tier is split deliberately:
+
+- `tests/integration/search-pipeline-lance-wire.test.ts` uses a stateful
+  in-proc HTTP fixture to prove the live search/index consumer wire,
+  restart-safe manifest cleanup, and stale-delete sequencing deterministically.
+- `tests/contract/lance-real-wire.test.ts` uses real `python+lancedb`
+  table/storage semantics behind a compatible REST shim. This proves the
+  adapter/search wire against a real Lance backing store, including restart-safe
+  stale cleanup when `QUANTA_INDEX_DB_PATH` is set.
+
+The current contract proof does **not** claim a vendor-owned Lance daemon
+binary. The sealed adapter remains shape-based by design; the contract tier
+proves that shape against a real Lance persistence engine plus an HTTP bridge.
+
 ## Consequences
 
 **Positive**
@@ -142,3 +159,6 @@ Callers without metrics remain byte-identical.
 - The consumer cutover lives in `@/runner` assembly, not in the sealed
   retrieval leaf slices. That is intentional: leaf slices stay pure ports +
   adapters, composition owns env + fallback policy.
+- Official Lance daemon/runtime behaviour can still diverge from the compatible
+  shim used in tests. That risk is now explicit instead of being overstated as
+  a stronger proof level than the repo actually has.

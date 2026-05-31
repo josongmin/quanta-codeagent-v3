@@ -1,7 +1,7 @@
 # Test-pyramid CI (ADR-0003, RFC §10).
 #
 #   pyramid   unit + integration — deterministic, fast, BLOCKING on every push/PR
-#   contract  real Docker + language servers — REQUIRE_CONTRACT, BLOCKING on PR/main
+#   contract  real Docker + language servers + python+lancedb — REQUIRE_CONTRACT, BLOCKING on PR/main
 #   eval      real LLM on a synthetic SWE-bench corpus — NON-BLOCKING, trend only
 #
 # The pyramid job is the merge gate. contract gates main. eval never gates.
@@ -96,7 +96,7 @@ jobs:
         run: bun fc check-changed origin/${{ github.event.pull_request.base.ref }}
 
   contract:
-    name: contract (docker + language servers)
+    name: contract (docker + language servers + python+lancedb)
     runs-on: ubuntu-latest
     # Blocking on PRs and main; skipped on the nightly schedule trigger.
     if: github.event_name != 'schedule'
@@ -107,7 +107,14 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - run: bun install --frozen-lockfile
+      - name: provision LanceDB contract runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "lancedb==0.25.3"
       - name: provision language servers
         run: bun add -g pyright typescript typescript-language-server
       - name: docker sanity (ubuntu runners ship the daemon)

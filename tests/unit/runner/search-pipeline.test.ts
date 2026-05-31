@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import type { IndexerFileChunk } from "@/retrieval"
-import { createTrackedSemanticUpsert } from "@/runner/assemble/search-pipeline"
+import type { IndexError, IndexerFileChunk } from "@/retrieval"
+import {
+  createTrackedSemanticUpsert,
+  resolveTrackedScanOutcome,
+} from "@/runner/assemble/search-pipeline"
 
 const chunk = (path: string, startLine: number, endLine: number): IndexerFileChunk => ({
   path,
@@ -10,6 +13,9 @@ const chunk = (path: string, startLine: number, endLine: number): IndexerFileChu
   mtime: 0,
   sha: "0",
 })
+
+const failed = (kind: IndexError["kind"]) =>
+  ({ ok: false as const, error: { kind } })
 
 describe("createTrackedSemanticUpsert", () => {
   test("returns null when no scan mutations were observed", () => {
@@ -53,6 +59,42 @@ describe("createTrackedSemanticUpsert", () => {
 
     await tracked.upsert.upsert(chunk("drop.ts", 1, 1))
     tracked.clear()
+    expect(tracked.takeBatch()).toBeNull()
+  })
+
+  test("resolveTrackedScanOutcome queues the pending batch on a successful scan", async () => {
+    const tracked = createTrackedSemanticUpsert({
+      async upsert() {},
+      async delete() {},
+    })
+    await tracked.upsert.upsert(chunk("a.ts", 1, 5))
+    const outcome = resolveTrackedScanOutcome(tracked, { ok: true })
+    expect(outcome.kind).toBe("queue")
+    if (outcome.kind !== "queue") throw new Error("unreachable")
+    expect(outcome.batch.changedPaths.get("a.ts")).toEqual(["a.ts:1-5"])
+    expect(tracked.takeBatch()).toBeNull()
+  })
+
+  test("resolveTrackedScanOutcome keeps the pending batch intact on scan-in-progress", async () => {
+    const tracked = createTrackedSemanticUpsert({
+      async upsert() {},
+      async delete() {},
+    })
+    await tracked.upsert.delete("hold.ts")
+    const outcome = resolveTrackedScanOutcome(tracked, failed("scan-in-progress"))
+    expect(outcome).toEqual({ kind: "noop" })
+    const batch = tracked.takeBatch()
+    expect(batch?.deletedPaths).toEqual(["hold.ts"])
+  })
+
+  test("resolveTrackedScanOutcome clears the pending batch on terminal scan failure", async () => {
+    const tracked = createTrackedSemanticUpsert({
+      async upsert() {},
+      async delete() {},
+    })
+    await tracked.upsert.upsert(chunk("drop.ts", 1, 1))
+    const outcome = resolveTrackedScanOutcome(tracked, failed("scan-failed"))
+    expect(outcome).toEqual({ kind: "clear", errorKind: "scan-failed" })
     expect(tracked.takeBatch()).toBeNull()
   })
 })

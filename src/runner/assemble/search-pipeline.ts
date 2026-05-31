@@ -15,6 +15,7 @@ import {
   createBunRipgrepSpawner,
   createDefaultIndexer,
   createRipgrepLexicalSearch,
+  type IndexError,
 } from "@/retrieval"
 import type { SearchPipeline } from "@/retrieval/pipeline"
 import { errMessage, logger } from "@/shared"
@@ -132,6 +133,15 @@ export interface TrackedSemanticUpsert {
   clear(): void
 }
 
+type ScanResultLike =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly error: { readonly kind: IndexError["kind"] } }
+
+export type TrackedScanOutcome =
+  | { readonly kind: "queue"; readonly batch: SemanticReconcileBatch }
+  | { readonly kind: "clear"; readonly errorKind: IndexError["kind"] }
+  | { readonly kind: "noop" }
+
 export const createTrackedSemanticUpsert = (inner: ChunkUpsertPort): TrackedSemanticUpsert => {
   const changedPaths = new Map<string, string[]>()
   const deletedPaths = new Set<string>()
@@ -167,6 +177,19 @@ export const createTrackedSemanticUpsert = (inner: ChunkUpsertPort): TrackedSema
       deletedPaths.clear()
     },
   }
+}
+
+export const resolveTrackedScanOutcome = (
+  tracked: Pick<TrackedSemanticUpsert, "takeBatch" | "clear">,
+  scan: ScanResultLike,
+): TrackedScanOutcome => {
+  if (!scan.ok) {
+    if (scan.error.kind === "scan-in-progress") return { kind: "noop" }
+    tracked.clear()
+    return { kind: "clear", errorKind: scan.error.kind }
+  }
+  const batch = tracked.takeBatch()
+  return batch === null ? { kind: "noop" } : { kind: "queue", batch }
 }
 
 const startIndexer = (
@@ -212,14 +235,18 @@ const startIndexer = (
         }
       })
   }
-  void indexer.scanInitial().then((r) => {
-    if (!r.ok) {
-      trackedUpsert.clear()
-      logger.warn(`indexer scanInitial failed: ${r.error.kind}`)
+  const handleScanResult = (phase: "scanInitial" | "scanDelta", scan: ScanResultLike): void => {
+    const outcome = resolveTrackedScanOutcome(trackedUpsert, scan)
+    if (outcome.kind === "queue") {
+      queueReconcile(outcome.batch)
       return
     }
-    const batch = trackedUpsert.takeBatch()
-    if (batch !== null) queueReconcile(batch)
+    if (outcome.kind === "clear") {
+      logger.warn(`indexer ${phase} failed: ${outcome.errorKind}`)
+    }
+  }
+  void indexer.scanInitial().then((r) => {
+    handleScanResult("scanInitial", r)
   })
   const intervalMsRaw = env.QUANTA_INDEX_INTERVAL_MS
   const intervalMs =
@@ -228,14 +255,7 @@ const startIndexer = (
       : DEFAULT_INTERVAL_MS
   const intervalHandle = setInterval(() => {
     void indexer.scanDelta().then((r) => {
-      if (!r.ok && r.error.kind !== "scan-in-progress") {
-        trackedUpsert.clear()
-        logger.warn(`indexer scanDelta failed: ${r.error.kind}`)
-        return
-      }
-      if (!r.ok) return
-      const batch = trackedUpsert.takeBatch()
-      if (batch !== null) queueReconcile(batch)
+      handleScanResult("scanDelta", r)
     })
   }, intervalMs)
   if (typeof intervalHandle === "object" && intervalHandle !== null && "unref" in intervalHandle) {
