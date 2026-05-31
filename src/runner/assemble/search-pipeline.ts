@@ -33,6 +33,14 @@ export interface WiredSearchPipeline {
   readonly tool: Tool
   readonly indexer: CodebaseIndexer | null
   readonly intervalHandle: ReturnType<typeof setInterval> | null
+  /**
+   * Tear down THIS wire's owned resources (delta-scan `setInterval` + indexer)
+   * (L5 M-11). Session teardown calls this so a long-lived session does not
+   * leak a scanning interval; idempotent (a second call is a no-op). Before
+   * this seam, the interval was only cleared when the global singleton was
+   * replaced by a NEW pipeline — never on session close.
+   */
+  dispose(): void
 }
 
 let activeWire: WiredSearchPipeline | null = null
@@ -315,11 +323,18 @@ export const buildSearchPipelineFromEnv = (
     }
   }
 
+  let disposed = false
   const wire: WiredSearchPipeline = {
     pipeline,
     tool: searchCodebaseTool(pipeline) as Tool,
     indexer,
     intervalHandle,
+    dispose: () => {
+      if (disposed) return
+      disposed = true
+      disposeIndexer(indexer, intervalHandle)
+      if (activeWire === wire) activeWire = null
+    },
   }
   return rememberActiveWire(wire)
 }
