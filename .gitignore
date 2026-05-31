@@ -3,6 +3,7 @@ node_modules/
 
 # Reverse-engineering corpus (beautified third-party app code, not for commit)
 .extracted_source/
+.extracted_source_prev/
 
 # Build
 dist/
