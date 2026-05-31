@@ -1,8 +1,12 @@
 import type { CliPromptInput } from "./prompt-types"
 
 type QueueWaiter = {
-  readonly resolve: (value: CliPromptInput | null) => void
-  readonly abort: () => void
+  /** Settle this waiter EXACTLY ONCE. Both `push()` (resolve with a prompt)
+   *  and the abort listener (resolve with `null`) call this; whichever wins
+   *  the race settles, the loser is a no-op. Also removes the waiter from the
+   *  pending list and detaches the abort listener so neither can fire twice
+   *  (L5 M-14). */
+  settle: (value: CliPromptInput | null) => void
 }
 
 /**
@@ -26,8 +30,9 @@ export class ExternalPromptQueue {
   push(prompt: CliPromptInput): void {
     const waiter = this.#waiters.shift()
     if (waiter !== undefined) {
-      waiter.abort()
-      waiter.resolve(prompt)
+      // `settle` is idempotent and self-removes the listener — no separate
+      // abort()/resolve() two-step that could interleave with an abort event.
+      waiter.settle(prompt)
       return
     }
     this.#items.push(prompt)
@@ -42,13 +47,19 @@ export class ExternalPromptQueue {
     if (queued !== undefined) return Promise.resolve(queued)
     if (signal?.aborted === true) return Promise.resolve(null)
     return new Promise<CliPromptInput | null>((resolve) => {
-      const onAbort = (): void => {
-        this.#waiters = this.#waiters.filter((entry) => entry !== waiter)
-        resolve(null)
-      }
+      let settled = false
+      const onAbort = (): void => waiter.settle(null)
       const waiter: QueueWaiter = {
-        resolve,
-        abort: () => signal?.removeEventListener("abort", onAbort),
+        settle: (value) => {
+          if (settled) return
+          settled = true
+          // Detach BEFORE removing from the list so a concurrent abort event
+          // cannot re-enter, and drop this waiter from the pending set so a
+          // later `push()` never hands a prompt to an already-settled waiter.
+          signal?.removeEventListener("abort", onAbort)
+          this.#waiters = this.#waiters.filter((entry) => entry !== waiter)
+          resolve(value)
+        },
       }
       signal?.addEventListener("abort", onAbort, { once: true })
       this.#waiters.push(waiter)

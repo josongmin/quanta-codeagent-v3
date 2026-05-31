@@ -210,6 +210,32 @@ const removeFileIfExists = async (path: string): Promise<void> => {
   }
 }
 
+/**
+ * Commit the derived `index.jsonl` entry AFTER the per-id snapshot JSON has
+ * already been written (the snapshot is the source of truth; the index is a
+ * derived cache). (L9 M6) If `upsertMeta` throws (e.g. index rename EACCES),
+ * the snapshot is ALREADY durable on disk — propagating the throw would make
+ * the whole save look failed while the session actually exists, and a
+ * listing-driven UI would never list it (so reconcile-on-load never fires to
+ * self-heal). Instead we surface the index failure as a typed partial-success
+ * warning and DO NOT rethrow: the snapshot stands, and the next
+ * `loadSessionById` of this id re-upserts via `reconcileIndexFromMeta`. This
+ * is the compensating path for "snapshot ahead of index".
+ */
+const commitMetaAfterSnapshot = async (
+  meta: SessionMeta,
+  provider: SessionRootProvider | undefined,
+): Promise<void> => {
+  try {
+    await upsertMeta(meta, provider)
+  } catch (e) {
+    logger.warn(
+      `session ${meta.id}: snapshot committed but index upsert failed (${errMessage(e)}); ` +
+        `session is durable on disk and the index self-heals on next load.`,
+    )
+  }
+}
+
 export const saveSessionById = async (
   meta: SessionMeta,
   payload: SavePayload,
@@ -227,7 +253,7 @@ export const saveSessionById = async (
     messages: payload.messages,
   }
   await writeSessionFile(path, JSON.stringify(saved))
-  await upsertMeta(touched, provider)
+  await commitMetaAfterSnapshot(touched, provider)
 }
 
 /** Reconcile the lightweight index with a session's on-disk meta. The per-id
@@ -290,7 +316,7 @@ export const archiveSession = async (id: string, provider?: SessionRootProvider)
     const nextMeta: SessionMeta = { ...existing.meta, archived: true, lastTouched: Date.now() }
     const updated: SavedSession = { ...existing, meta: nextMeta }
     await writeSessionFile(archivedPath, JSON.stringify(updated))
-    await upsertMeta(nextMeta, provider)
+    await commitMetaAfterSnapshot(nextMeta, provider)
     return
   }
   const existing = await readSavedSession(activePath)
@@ -299,7 +325,7 @@ export const archiveSession = async (id: string, provider?: SessionRootProvider)
   const updated: SavedSession = { ...existing, meta: nextMeta }
   await writeSessionFile(archivedPath, JSON.stringify(updated))
   await removeFileIfExists(activePath)
-  await upsertMeta(nextMeta, provider)
+  await commitMetaAfterSnapshot(nextMeta, provider)
 }
 
 export const unarchiveSession = async (
@@ -317,7 +343,7 @@ export const unarchiveSession = async (
     const nextMeta: SessionMeta = { ...existing.meta, archived: false, lastTouched: Date.now() }
     const updated: SavedSession = { ...existing, meta: nextMeta }
     await writeSessionFile(activePath, JSON.stringify(updated))
-    await upsertMeta(nextMeta, provider)
+    await commitMetaAfterSnapshot(nextMeta, provider)
     return
   }
   const existing = await readSavedSession(archivedPath)
@@ -326,7 +352,7 @@ export const unarchiveSession = async (
   const updated: SavedSession = { ...existing, meta: nextMeta }
   await writeSessionFile(activePath, JSON.stringify(updated))
   await removeFileIfExists(archivedPath)
-  await upsertMeta(nextMeta, provider)
+  await commitMetaAfterSnapshot(nextMeta, provider)
 }
 
 export const renameSession = async (
@@ -342,7 +368,7 @@ export const renameSession = async (
     : await resolveSessionFilePath(id, provider)
   const updated: SavedSession = { ...existing, meta: nextMeta }
   await writeSessionFile(path, JSON.stringify(updated))
-  await upsertMeta(nextMeta, provider)
+  await commitMetaAfterSnapshot(nextMeta, provider)
 }
 
 export const forkSession = async (
@@ -377,7 +403,7 @@ export const forkSession = async (
     messages: messagesCopy,
   }
   await writeSessionFile(await resolveSessionFilePath(newId, provider), JSON.stringify(saved))
-  await upsertMeta(newMeta, provider)
+  await commitMetaAfterSnapshot(newMeta, provider)
   return newId
 }
 
@@ -473,6 +499,6 @@ export const rewindToMessage = async (
     ? await resolveArchivedFilePath(sessionId, provider)
     : await resolveSessionFilePath(sessionId, provider)
   await writeSessionFile(path, JSON.stringify(updated))
-  await upsertMeta(nextMeta, provider)
+  await commitMetaAfterSnapshot(nextMeta, provider)
   return { removed }
 }

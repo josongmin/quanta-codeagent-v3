@@ -23,6 +23,7 @@ import type {
   TurnRunCommand,
 } from "@/protocol/session"
 import { SessionClosedError } from "@/protocol/session"
+import { errMessage, logger } from "@/shared"
 import { SessionSubscriptionHub } from "./subscription"
 import type { RuntimeSession, SessionDispatchOptions, SessionDispatchResult } from "./types"
 
@@ -48,10 +49,27 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
       snapshot: toSessionSnapshotLite(state),
       ...(replayWindow !== undefined ? { tailLimit: replayWindow } : {}),
       onCommand: async (command) => {
-        transportDispatchQueue = transportDispatchQueue.then(async () => {
+        // Sequence transport-issued commands on a single tail so they apply in
+        // order. The tail MUST NOT stay rejected after one dispatch throws:
+        // append a `.catch` BEFORE storing it back so a poisoned promise can
+        // never wedge every subsequent command (L5 H-3). The caller still sees
+        // the failure for THIS command (we re-await the un-caught run below).
+        const run = transportDispatchQueue.then(async () => {
           await dispatch(command)
         })
-        await transportDispatchQueue
+        transportDispatchQueue = run.catch(() => undefined)
+        await run
+      },
+      // L5 H-3: transport errors and rejected commands were silently dropped —
+      // the bridge fired these callbacks but `session.ts` never supplied them,
+      // so a failed transport / rejected command vanished with no diagnostic.
+      onBridgeError: ({ error }) => {
+        logger.error(`session transport bridge error (session=${sessionId}): ${errMessage(error)}`)
+      },
+      onCommandRejected: ({ command, error }) => {
+        logger.warn(
+          `session transport command rejected (session=${sessionId}, type=${command.type}): ${errMessage(error)}`,
+        )
       },
     })
     return transportBridge

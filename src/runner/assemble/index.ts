@@ -71,6 +71,7 @@ export {
   type IndexEmbed,
   isPersistOn,
   type SemanticBackend,
+  type SemanticBackendState,
   selectIndexEmbedder,
 } from "./search-index-backend"
 export {

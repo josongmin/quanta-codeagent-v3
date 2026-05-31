@@ -42,7 +42,7 @@ import {
   type VectorStore,
 } from "@/retrieval/engines"
 import type { SearchHit, SemanticIndex } from "@/retrieval/pipeline"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 
 /** Caller-supplied upsert surface — mirrors `IndexerChunkUpsertPort`. */
 export interface ChunkUpsertPort {
@@ -50,11 +50,32 @@ export interface ChunkUpsertPort {
   delete(path: string): Promise<void> | void
 }
 
+/**
+ * Typed health of a wired semantic backend (T06 / L5 H-4 + M-13).
+ *
+ *   - `"ready"`    — a usable store (in-memory / sqlite / vector) is backing
+ *                    the port; upsert + query operate normally.
+ *   - `"degraded"` — the requested store could not be opened but the wire is
+ *                    falling back to a usable store (implicit selection only).
+ *   - `"failed"`   — an EXPLICIT request is unusable (invalid `QUANTA_VECTOR_STORE`
+ *                    spelling). The backend is inert (query ⇒ `[]`, upsert/delete
+ *                    no-op) and consumers MUST treat this as a hard config error,
+ *                    NOT a silently-empty index.
+ */
+export type SemanticBackendState = "ready" | "degraded" | "failed"
+
 /** A wired semantic backend: a query port + the upsert surface the indexer drives. */
 export interface SemanticBackend {
   readonly port: SemanticIndex
   readonly upsert: ChunkUpsertPort
   readonly reconcileChanges?: (batch: SemanticReconcileBatch) => Promise<void>
+  /**
+   * Typed health so a consumer (indexer wire / mention symbol deps) can detect
+   * a broken backend instead of treating a disabled/inert store as a normal
+   * empty index. `reason` is set whenever state is not `"ready"`. (L5 H-4/M-13.)
+   */
+  readonly state: SemanticBackendState
+  readonly stateReason?: string
 }
 
 export interface SemanticReconcileBatch {
@@ -163,8 +184,12 @@ const safeObserve = (
   if (metrics === undefined) return
   try {
     metrics.observe(name, value, labels)
-  } catch {
-    /* metrics are optional; recorder failures must not affect retrieval */
+  } catch (e) {
+    // Metrics are optional; recorder failures must not affect retrieval. But a
+    // throwing recorder is a wiring fault, not an absent one — surface it once
+    // at debug so "metrics not configured" is distinguishable from "metrics
+    // silently failing" (L5 M-12).
+    logger.debug(`search index metric "${name}" observe failed: ${errMessage(e)}`)
   }
 }
 
@@ -275,10 +300,14 @@ const newInMemoryBackend = (
   metrics?: SearchIndexMetrics,
   nowMs?: () => number,
   storeLabel = "legacy-in-memory",
+  state: SemanticBackendState = "ready",
+  stateReason?: string,
 ): SemanticBackend => {
   type Entry = { readonly vec: readonly number[]; readonly chunk: IndexerFileChunk }
   const store = new Map<string, Entry>()
   return {
+    state,
+    ...(stateReason !== undefined ? { stateReason } : {}),
     port: {
       async query(vec: readonly number[], k: number): Promise<readonly SearchHit[]> {
         const t0 = nowOrDate(nowMs)
@@ -565,6 +594,7 @@ const buildVectorStoreBackend = (
 ): SemanticBackend => {
   const ensureRuntime = async (): Promise<VectorStoreRuntime | null> => runtimePromise
   return {
+    state: "ready",
     port: {
       async query(vec: readonly number[], k: number): Promise<readonly SearchHit[]> {
         const runtime = await ensureRuntime()
@@ -652,7 +682,12 @@ const buildVectorStoreBackend = (
   }
 }
 
-const newDisabledBackend = (): SemanticBackend => ({
+const newDisabledBackend = (reason: string): SemanticBackend => ({
+  // An EXPLICIT but unusable store request. `failed` (not `degraded`) so the
+  // consumer treats this as a hard config error, not a silently-empty index
+  // (L5 H-4/M-13). The port stays inert so we never index/query elsewhere.
+  state: "failed",
+  stateReason: reason,
   port: {
     async query(): Promise<readonly SearchHit[]> {
       return []
@@ -684,16 +719,24 @@ export const buildSemanticBackend = (
     return newInMemoryBackend(embed, opts.metrics, opts.nowMs)
   }
   if (selection.kind === "invalid-explicit") {
-    logger.warn(
-      `search index store "${selection.raw}" unknown; semantic backend disabled for explicit QUANTA_VECTOR_STORE.`,
-    )
-    return newDisabledBackend()
+    // Fail-CLOSED on an explicit typo (`QUANTA_VECTOR_STORE=lannce`). We keep
+    // the backend inert (no silent fallback to a different store) AND surface
+    // a typed `failed` state so the consumer can refuse to wire a broken
+    // index rather than dropping chunks into a black hole (L5 H-4/M-13).
+    const reason = `unknown QUANTA_VECTOR_STORE "${selection.raw}" (expected in-memory | sqlite | lance | qdrant)`
+    logger.error(`search index store ${reason}; semantic backend FAILED (explicit store, fail-closed).`)
+    return newDisabledBackend(reason)
   }
   const runtime = buildVectorStoreRuntime(env, selection, resolvedEmbedder, opts)
   const fallback = newInMemoryBackend(embed, opts.metrics, opts.nowMs, "legacy-fallback")
   const vectorBacked = buildVectorStoreBackend(embed, runtime, opts.metrics, opts.nowMs)
   const explicitDisabled = selection.kind === "explicit"
   return {
+    // A usable store was selected (explicit or implicit). If the runtime fails
+    // to OPEN later, an explicit request stays inert (no cross-store fallback)
+    // and an implicit request falls back to in-memory — both handled per-op
+    // below; the static state here reflects the SELECTION being valid.
+    state: "ready",
     port: {
       async query(vec, k) {
         const resolved = await runtime

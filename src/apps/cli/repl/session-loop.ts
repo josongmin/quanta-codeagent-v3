@@ -197,6 +197,29 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
         }
       : runtimeFacadeCompose
 
+  // L5 H-7 — single close stack (LIFO disposer registry). Each resource
+  // registers its compensating teardown IMMEDIATELY after construction, so a
+  // throw during the REST of session init can never leave a runtimeFacade,
+  // session, or playbook watcher alive. `drainCloseStack` runs every disposer
+  // exactly once, newest-first, and surfaces (does not rethrow) disposer
+  // failures so one leaky teardown cannot mask the others (L5 M-1: MCP stop
+  // failure is no longer swallowed silently — it lands as a warn here).
+  const closeStack: Array<{ label: string; dispose: () => void | Promise<void> }> = []
+  let closeStackDrained = false
+  const drainCloseStack = async (): Promise<void> => {
+    if (closeStackDrained) return
+    closeStackDrained = true
+    while (closeStack.length > 0) {
+      const entry = closeStack.pop()
+      if (entry === undefined) break
+      try {
+        await entry.dispose()
+      } catch (e) {
+        logger.warn(`session-loop teardown "${entry.label}" failed: ${errMessage(e)}`)
+      }
+    }
+  }
+
   const runtimeFacade = await runtimeContext.createRuntimeFacade({
     boot: {
       mode: setup.mode,
@@ -211,6 +234,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     mcpClients: setup.mcpClients as Array<{ stop: () => Promise<void> }>,
     ...(runtimeCompose !== undefined ? { compose: runtimeCompose } : {}),
   })
+  closeStack.push({ label: "runtimeFacade.close", dispose: () => runtimeFacade.close() })
   const session = await runtimeFacade.createSession({
     cwd: setup.cwd,
     model: setup.model,
@@ -220,6 +244,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
       : {}),
     ...(activeToolProfileState !== undefined ? { toolProfile: activeToolProfileState.get() } : {}),
   })
+  closeStack.push({ label: "session.close", dispose: () => session.close() })
   registerSideConversationStart?.((args) => session.side.start(args))
 
   // ADR-0292 — install the `/rewind-conv` swap closure so the slash can mutate
@@ -278,6 +303,12 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     return handle
   }
   attachPlaybookHandle()
+  // L5 H-7 — register the playbook detach on the close stack the moment the
+  // watcher is (possibly) attached, so a throw in the REST of init still stops
+  // the file watcher. `detach()` is idempotent + a no-op when nothing attached.
+  if (playbookSeam !== undefined) {
+    closeStack.push({ label: "playbookSeam.detach", dispose: () => playbookSeam.detach() })
+  }
 
   type SessionTurnPayload = NonNullable<Awaited<ReturnType<typeof session.turn.run>>["turn"]>
 
@@ -373,13 +404,11 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
         },
       )
     } finally {
-      await session.close()
-      await runtimeFacade.close()
+      // L5 H-7 — single teardown authority. Drains session.close +
+      // runtimeFacade.close + playbookSeam.detach (registered above) LIFO,
+      // even if the turn body threw before completing.
+      await drainCloseStack()
     }
-    // ADR-0293 — even on one-shot exit, stop the playbook handle so a stray
-    // watcher does not outlive the process. seam.detach() stops the handle
-    // and clears the slot in one call.
-    playbookSeam?.detach()
   }
   // One-shot dispatch: drive a SINGLE turn through `runOneTurn` then return.
   if (setup.argPrompt) {
@@ -394,10 +423,20 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     statusBar.teardown()
   })
 
+  // L5 H-7 — the interactive SETUP (automation ticker / reactor bridge /
+  // prompt pipeline) plus the run loop live inside ONE try/finally so a throw
+  // during any awaited setup step still drains the close stack (no leaked
+  // facade / session / watcher / ticker / bridge on partial init).
+  try {
   const automationTicker =
     liveAutomationSlot !== undefined
       ? startAutomationEngineTicker({ automationEngine: liveAutomationSlot } as AgentConfig)
       : undefined
+  if (automationTicker !== undefined) {
+    // L5 H-7 — register before the next awaited init step (reactor bridge) can
+    // throw, so the ticker is stopped even on a partial interactive init.
+    closeStack.push({ label: "automationTicker.stop", dispose: () => automationTicker.stop() })
+  }
 
   // Initial blank row matches the prior `runReplLoopRaw` header write so
   // the very first composer row sits one line below the resume log.
@@ -440,6 +479,9 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
           },
         })
       : undefined
+  if (reactorBridge !== undefined) {
+    closeStack.push({ label: "reactorBridge.close", dispose: () => reactorBridge.close() })
+  }
 
   const runInteractiveBranch = async (): Promise<void> => {
     while (abort.signal.aborted !== true) {
@@ -486,15 +528,12 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     }
   }
 
-  try {
     await runInteractiveBranch()
   } finally {
-    automationTicker?.stop()
-    await reactorBridge?.close()
-    await session.close()
-    await runtimeFacade.close()
-    // ADR-0293 — lifecycle detach (stops handle + clears the seam slot
-    // even on abnormal shutdown). Idempotent.
-    playbookSeam?.detach()
+    // L5 H-7 — single teardown authority. LIFO drain stops background
+    // producers (reactor bridge, automation ticker) and the playbook watcher
+    // BEFORE closing the session + runtimeFacade, matching the prior manual
+    // order, and runs even on abnormal shutdown. Idempotent.
+    await drainCloseStack()
   }
 }

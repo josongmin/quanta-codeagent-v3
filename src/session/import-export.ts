@@ -344,19 +344,46 @@ const buildV2Envelope = (
   return out
 }
 
+/** Stringify with alphabetically-sorted object keys at every depth; arrays keep
+ *  positional order. Mirrors the canonical serializer used by the on-disk
+ *  envelope writer (`envelope-encoder.ts`) but is inlined here so this module
+ *  stays plane-clean (no `node:fs` pulled in transitively via that module).
+ *  Primitives delegate to `JSON.stringify` for spec-correct escaping. */
+const stringifyCanonical = (value: unknown): string => {
+  if (value === null) return "null"
+  const t = typeof value
+  if (t === "number" || t === "string" || t === "boolean") return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(stringifyCanonical).join(",")}]`
+  if (t === "object") {
+    const obj = value as Record<string, unknown>
+    const parts: string[] = []
+    for (const k of Object.keys(obj).sort()) {
+      const v = obj[k]
+      if (v === undefined) continue // mirror JSON.stringify: drop undefined props
+      parts.push(`${JSON.stringify(k)}:${stringifyCanonical(v)}`)
+    }
+    return `{${parts.join(",")}}`
+  }
+  // undefined / function / symbol / bigint are not legal JSON — same as
+  // JSON.stringify of a top-level non-value, fail loud rather than silently.
+  throw new TypeError(`session digest: value of type ${t} is not JSON-serialisable`)
+}
+
 /** Compute the sha256 digest over the canonical `{session, sidecar}`
- *  serialization. Top-level keys are fixed-order (`session` then `sidecar`)
- *  for stability — JSON.stringify preserves insertion order, so we build
- *  the body object in a deterministic order. Inner objects are NOT
- *  key-sorted: the on-the-wire envelope has been JSON.parse / JSON.stringify'd
- *  already (via the deep-clone), so its internal key order is the source of
- *  truth and both exporter and importer see the same string. */
+ *  serialization. (L9 M4) The digest is computed over a KEY-SORTED canonical
+ *  string, NOT raw `JSON.stringify`. Raw stringify is key-ORDER dependent, so a
+ *  benign re-serialization (a JSON proxy, a Postgres `jsonb` column that
+ *  reorders keys, or a hand-rebuilt envelope) reordered the body keys and
+ *  produced a spurious `digest-mismatch` on an UNTAMPERED body. Canonical
+ *  serialization makes the digest invariant to key order at every depth while
+ *  staying sensitive to any actual value/structure change. Exporter AND
+ *  importer both call THIS function, so they stay aligned. */
 const computeBodyDigest = (
   session: SavedSession,
   sidecar: SessionExportEnvelope["sidecar"] | undefined,
 ): { algo: "sha256"; hex: string } => {
   const body = sidecar === undefined ? { session } : { session, sidecar }
-  const hex = createHash("sha256").update(JSON.stringify(body)).digest("hex")
+  const hex = createHash("sha256").update(stringifyCanonical(body)).digest("hex")
   return { algo: "sha256", hex }
 }
 

@@ -86,13 +86,24 @@ export class ResultStore {
    *  Returns the awaited promise so callers can `await store.append(...)`
    *  when they need strict ordering. */
   private enqueue(runId: string, write: () => void): Promise<void> {
+    // `get` then `set` are NOT separated by an await, so within one `enqueue`
+    // call no other code can interleave — the tail chain stays a strict FIFO
+    // per runId (L5 M-9: no duplicated chains / lost enqueue). After the tail
+    // settles we drop it from the Map IFF it is still the current tail, so a
+    // long-lived process running thousands of runIds does not leak one settled
+    // promise per id forever.
     const prev = this.writeTails.get(runId) ?? Promise.resolve()
-    const next = prev.then(write).catch((e) => {
-      logger.warn("eval.store: append failed", {
-        runId,
-        error: errMessage(e),
+    const next = prev
+      .then(write)
+      .catch((e) => {
+        logger.warn("eval.store: append failed", {
+          runId,
+          error: errMessage(e),
+        })
       })
-    })
+      .finally(() => {
+        if (this.writeTails.get(runId) === next) this.writeTails.delete(runId)
+      })
     this.writeTails.set(runId, next)
     return next
   }
