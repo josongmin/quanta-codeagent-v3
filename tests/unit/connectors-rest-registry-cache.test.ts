@@ -15,6 +15,7 @@ import type {
   FetchPortResponse,
 } from "@/connectors"
 import { createRestConnectorRegistry } from "@/connectors"
+import { ConnectorOutageError } from "@/connectors/rest-registry"
 
 const sample: Connector = {
   id: "github",
@@ -181,7 +182,9 @@ describe("connectors / rest-registry cache", () => {
     expect(calls).toBe(1)
   })
 
-  test("UNIT-7: list returns [] when no cache and network fails", async () => {
+  test("UNIT-7: list throws ConnectorOutageError when no cache and network fails", async () => {
+    // T11 / L9 H7: an outage with no cached fallback is a DISTINCT typed
+    // result from an empty catalog — it must NOT be folded into `[]`.
     const cache = fakeCache()
     const fetchPort: FetchPort = async () => {
       throw new Error("net")
@@ -192,7 +195,7 @@ describe("connectors / rest-registry cache", () => {
       clockPort: clockOf(),
       cachePort: cache,
     })
-    expect(await reg.list()).toEqual([])
+    await expect(reg.list()).rejects.toBeInstanceOf(ConnectorOutageError)
   })
 
   test("UNIT-8: refresh outcome distinguishes fresh vs cached-fresh vs cached-degraded", async () => {

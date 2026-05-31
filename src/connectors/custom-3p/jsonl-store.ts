@@ -19,8 +19,9 @@
  * matches ADR statement).
  */
 
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises"
+import { chmod, mkdir, readFile } from "node:fs/promises"
 import { dirname } from "node:path"
+import writeFileAtomic from "write-file-atomic"
 import { createInMemoryCustom3pRegistry } from "./in-memory-registry"
 import type { Custom3pRegistry, HealthProbe } from "./port"
 import { Custom3pError, type LifecycleState, type ProviderId, type ProviderSpec } from "./types"
@@ -117,9 +118,19 @@ export const createJsonlCustom3pRegistry = (config: JsonlRegistryConfig): Custom
     }
     const body = lines.length === 0 ? "" : `${lines.join("\n")}\n`
     try {
-      await writeFile(config.path, body, { encoding: "utf-8", mode: fileMode })
-      // writeFile honors `mode` only on file creation. Force chmod so an
-      // existing file with a wider mode is tightened back to the contract.
+      // Atomic full-file rewrite (T11 / L9 H8): `write-file-atomic` writes to
+      // a temp sibling, fsyncs it, then `rename`s into place — so the
+      // authoritative snapshot is either the COMPLETE old set or the COMPLETE
+      // new set, never a truncated partial line after a crash mid-write. The
+      // `mode` option seals the temp at `0o600` BEFORE the rename, so the
+      // secret-bearing `apiKey` rows are never momentarily world-readable
+      // (the prior raw `writeFile`+`chmod` left a widening window). On a
+      // failed write the helper cleans up its own temp, leaving no garbage
+      // sibling.
+      await writeFileAtomic(config.path, body, { mode: fileMode, fsync: true })
+      // `write-file-atomic` honors `mode` only on the freshly-created temp.
+      // Force chmod so an EXISTING file that survived a prior wide-mode write
+      // is tightened back to the contract (idempotent for the common case).
       await chmod(config.path, fileMode)
     } catch (err) {
       throw new Custom3pError("store-write-failed", `write failed: ${config.path}`, { cause: err })

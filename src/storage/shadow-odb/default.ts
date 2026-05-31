@@ -31,6 +31,7 @@ import { promises as fs } from "node:fs"
 import { isAbsolute, join, sep } from "node:path"
 import { errMessage } from "@/shared"
 import { defaultGitRunner, type GitRunner, type GitRunResult } from "@/tool/git"
+import { writeFileAtomic } from "../atomic-write"
 import { evictLru } from "./cleanup"
 import { workspaceHash } from "./hash"
 import {
@@ -400,7 +401,12 @@ export const defaultShadowOdb = (cfg: ShadowOdbConfig = {}): ShadowOdb => {
     if (await isAlreadyInitialized(markerPath)) return
     await gitInitShadow(st.shadowDir)
     await applyShadowConfig(st)
-    await fs.writeFile(markerPath, `${now().toISOString()}\n`, "utf8")
+    // T11 / L9 H9: write the init marker through the slice's ONE atomic write
+    // helper (temp + rename). The next `init` short-circuits on the marker's
+    // PRESENCE, so a non-atomic write could leave a 0-byte / partial marker
+    // that makes a re-init skip `applyShadowConfig` — a half-configured store
+    // masquerading as "ready". Atomic write makes the marker absent-or-complete.
+    await writeFileAtomic(markerPath, `${now().toISOString()}\n`)
   }
 
   const registerInner = async (st: WorkspaceState, workspaceRoot: string): Promise<string> => {

@@ -73,7 +73,11 @@ const inventory = async (snapshotsRoot: string): Promise<ShadowEntry[]> => {
  *  the total cumulative size is at or below `maxBytes`. Returns the
  *  number of workspace stores removed. */
 export const evictLru = async (baseDir: string, maxBytes: number): Promise<number> => {
-  if (maxBytes < 0) return 0
+  // T11 / L9 H9: a malformed cap must NEVER be interpreted as "evict
+  // everything". `NaN < 0` is false and `total <= NaN` is always false, so a
+  // NaN cap would otherwise sweep EVERY snapshot — wiping the user's entire
+  // shadow store. We treat any non-finite or negative cap as a no-op guard.
+  if (!Number.isFinite(maxBytes) || maxBytes < 0) return 0
   const snapshotsRoot = join(baseDir, "snapshots")
   const entries = await inventory(snapshotsRoot)
   let total = entries.reduce((s, e) => s + e.bytes, 0)

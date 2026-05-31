@@ -26,6 +26,7 @@ import type {
   FetchPortResponse,
 } from "@/connectors"
 import { createRestConnectorRegistry } from "@/connectors"
+import { ConnectorOutageError } from "@/connectors/rest-registry"
 
 interface FakeFetchScript {
   readonly status: number
@@ -159,7 +160,10 @@ describe("connector-registry-rest-hellgate", () => {
     expect(await reg.list()).toEqual([sampleConn])
   })
 
-  test("HELL-5: 5xx without cache → cached-degraded, list returns []", async () => {
+  test("HELL-5: 5xx without cache → refresh cached-degraded, list throws outage", async () => {
+    // T11 / L9 H7: refresh() reports the degraded outcome, but list() must
+    // NOT masquerade an outage-with-no-fallback as an empty catalog — it
+    // throws a typed ConnectorOutageError so the caller can branch.
     const fake = makeFakeFetch([{ status: 500, body: "" }])
     const clock = makeFakeClock()
     const cache = makeFakeCache()
@@ -170,7 +174,7 @@ describe("connector-registry-rest-hellgate", () => {
       cachePort: cache,
     })
     expect(await reg.refresh()).toBe("cached-degraded")
-    expect(await reg.list()).toEqual([])
+    await expect(reg.list()).rejects.toBeInstanceOf(ConnectorOutageError)
   })
 
   test("HELL-6: malformed JSON body → degraded fallback", async () => {

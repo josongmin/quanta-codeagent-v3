@@ -23,6 +23,32 @@ import type {
   RefreshOutcome,
 } from "./types"
 
+/**
+ * Raised by {@link ConnectorRegistryPort.list} (T11, audit L9 H7) when the
+ * registry is unreachable AND there is no cached catalog to fall back on.
+ *
+ * Honesty contract: a connector outage with no fallback is a DISTINCT state
+ * from an empty catalog. `list()` MUST NOT fold "I could not reach the
+ * registry" into `[]` (the `warn-once-return-[]` anti-pattern) — that would
+ * let a transient server outage masquerade as "the user has no connectors".
+ * Callers branch on this error to retry / surface "registry unreachable" /
+ * refuse to treat the catalog as authoritatively empty.
+ *
+ * A genuinely-empty catalog (server returned `[]` with 200) is NOT an outage
+ * and `list()` returns `[]` for it.
+ */
+export class ConnectorOutageError extends Error {
+  /** Stable discriminant — callers branch without parsing the message. */
+  readonly code = "registry-unreachable" as const
+  /** The registry base URL that could not be reached (for diagnostics). */
+  readonly baseUrl: string
+  constructor(baseUrl: string, options?: { cause?: unknown }) {
+    super(`connector registry unreachable and no cached catalog: ${baseUrl}`, options)
+    this.name = "ConnectorOutageError"
+    this.baseUrl = baseUrl
+  }
+}
+
 /** Default cache TTL — RFC 8414 §4 SHOULD recommendation. */
 const DEFAULT_CACHE_TTL_MS = 24 * 60 * 60 * 1000
 
@@ -104,9 +130,12 @@ export const createRestConnectorRegistry = (config: RestRegistryConfig): Connect
     try {
       const res = await config.fetchPort(url, { method: "GET" })
       if (!res.ok) {
-        // 5xx (or any non-ok) → serve stale if we have it.
+        // 5xx (or any non-ok) → serve stale if we have it. `memo` stays
+        // `undefined` when there is no cache to fall back on; `list()`
+        // converts that into a typed `ConnectorOutageError` so an outage
+        // never masquerades as an empty catalog (T11 / L9 H7).
         await loadFromCache()
-        return memo !== undefined ? "cached-degraded" : "cached-degraded"
+        return "cached-degraded"
       }
       const body = await res.text()
       const parsed = parseResponse(body)
@@ -141,7 +170,16 @@ export const createRestConnectorRegistry = (config: RestRegistryConfig): Connect
     if (memo === undefined || !isFresh(memoWrittenAt)) {
       await refresh()
     }
-    return memo ?? []
+    // After a refresh attempt, `memo === undefined` means: the registry was
+    // unreachable AND there was no cached catalog to fall back on. We refuse
+    // to fold that into `[]` — an outage is a DISTINCT typed result from an
+    // empty catalog (T11 / L9 H7 owning-seam invariant). A genuinely-empty
+    // catalog (server 200 with `[]`, or a cached `[]`) leaves `memo === []`,
+    // which we return as the authoritative answer.
+    if (memo === undefined) {
+      throw new ConnectorOutageError(config.baseUrl)
+    }
+    return memo
   }
 
   const get = async (id: string): Promise<Connector | undefined> => {
