@@ -77,6 +77,7 @@ export {
 export {
   buildSearchPipelineFromEnv,
   clearSearchPipelineWireForTests,
+  disposeActiveSearchPipeline,
   type WiredSearchPipeline,
 } from "./search-pipeline"
 export {

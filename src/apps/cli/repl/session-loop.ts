@@ -2,6 +2,7 @@ import type { AgentConfig, AgentOutcome } from "@/agent"
 import { startAutomationEngineTicker } from "@/agent/loop-helpers"
 import type { Message } from "@/llm"
 import { injectSimulatedTurn, type LastTurnOutcome, REACTOR_ENV_FLAG } from "@/reactor"
+import { disposeActiveSearchPipeline } from "@/runner/assemble"
 import { assembleAutomation } from "@/scheduler/runtime-wire"
 import type {
   RuntimeFacadeComposeOptions,
@@ -264,6 +265,10 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     }),
   )
   closeStack.push({ label: "session.close", dispose: () => session.close() })
+  // L5 M-11 — tear down the active search wire's delta-scan setInterval + indexer
+  // on session close so a long-lived session does not leak a scanning interval.
+  // Idempotent + a no-op when no pipeline is active.
+  closeStack.push({ label: "searchPipeline.dispose", dispose: () => disposeActiveSearchPipeline() })
   registerSideConversationStart?.((args) => session.side.start(args))
 
   // ADR-0292 — install the `/rewind-conv` swap closure so the slash can mutate
