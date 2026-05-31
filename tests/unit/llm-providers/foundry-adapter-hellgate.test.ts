@@ -38,6 +38,7 @@ import {
 } from "@/llm/providers/foundry-adapter"
 import type { ProviderConfig } from "@/llm/providers/provider-port"
 import { ProviderError } from "@/llm/providers/provider-port"
+import { LLMError } from "@/shared"
 
 const base = (over: Partial<ProviderConfig> = {}): ProviderConfig => ({
   providerId: "foundry",
@@ -201,11 +202,12 @@ describe("foundry-adapter — hellgate (D: function / class parity)", () => {
       }
       throw new Error("should not complete cleanly")
     } catch (e) {
-      expect(e).toBeInstanceOf(ProviderError)
-      const err = e as ProviderError
-      expect(err.code).toBe("provider-unsupported")
+      // L6 M10a: a caller abort is a typed `aborted` outcome, not a
+      // provider-capability failure (was wrongly ProviderError/provider-unsupported).
+      expect(e).toBeInstanceOf(LLMError)
+      const err = e as LLMError
+      expect(err.kind).toBe("aborted")
       expect(err.message).toContain("aborted")
-      expect(err.providerId).toBe("foundry")
     }
   })
 })

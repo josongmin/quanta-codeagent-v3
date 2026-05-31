@@ -97,6 +97,10 @@ describe("A4 — [s1,s2,u1,s3,s4]: leading safe overlap, barrier, trailing seria
     const res = await streamingTurn({
       events: gen(events, (e) => log.push(`ev:${e.type}`)),
       isConcurrencySafe,
+      // T02 M1: early-start (in-flight overlap) is now gated on read-only too.
+      // In this suite the concurrency-safe tools ARE the read tools, so the
+      // read-only axis tracks the safe set; without it they correctly defer.
+      isReadOnly: isConcurrencySafe,
       dispatch,
     })
     expect(res.kind).toBe("assembled")
