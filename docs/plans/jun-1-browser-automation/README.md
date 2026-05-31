@@ -1,6 +1,6 @@
 # Jun 1 — Browser Automation Slice (interactive CDP driving)
 
-> 설계/근거 문서 (**무엇·왜**). 착수 절차·웨이브·증명 게이트는 [EXECUTION.md](EXECUTION.md).
+> 설계/근거 문서 (**무엇·왜**). 아키텍처·핵심 로직·구현 방법은 [ARCHITECTURE.md](ARCHITECTURE.md). 착수 절차·웨이브·증명 게이트는 [EXECUTION.md](EXECUTION.md).
 > Baseline 스냅샷: repo HEAD `0802ba65` (clean). 웨이브 디스패치 전 HEAD 재확인.
 
 ## 0. 동기 — 마지막 남은 순수 기능 갭

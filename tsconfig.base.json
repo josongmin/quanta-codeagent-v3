@@ -93,6 +93,8 @@
       "@/media/*": ["./src/media/*"],
       "@/voice": ["./src/voice/index.ts"],
       "@/voice/*": ["./src/voice/*"],
+      "@/browser": ["./src/browser/index.ts"],
+      "@/browser/*": ["./src/browser/*"],
       "@/realtime": ["./src/realtime/index.ts"],
       "@/realtime/*": ["./src/realtime/*"],
       "@/radar": ["./src/radar/index.ts"],
