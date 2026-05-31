@@ -35,12 +35,15 @@ const isInputErr = (e: SttError): boolean =>
   e.kind === "unsupported-mime" || e.kind === "empty-audio"
 
 /** Errors for which retrying the secondary provider is pointless or harmful:
- *  input-shape problems (the secondary would reject the same blob) and
- *  caller-driven abort / deadline (the caller cancelled, or the single deadline
- *  elapsed — running the secondary would burn a wasted round-trip on a FRESH
- *  deadline). Audit round-1 M1. */
-const isTerminalErr = (e: SttError): boolean =>
-  isInputErr(e) || e.kind === "aborted" || e.kind === "timeout"
+ *  input-shape problems (the secondary would reject the same blob) and a
+ *  caller-driven `aborted` (the caller cancelled — the SAME signal is forwarded
+ *  to the secondary, so it would just abort again). Audit R1 M1 / R2 #3.
+ *
+ *  NOTE: `timeout` is deliberately NOT terminal — a primary timeout means that
+ *  provider hung, which is exactly the provider-specific failure `fallbackOnError`
+ *  exists to recover from; the secondary gets its own fresh deadline and may
+ *  well succeed. `network-error` / `rate-limited` likewise fall through. */
+const isTerminalErr = (e: SttError): boolean => isInputErr(e) || e.kind === "aborted"
 
 /** Build a single STT port from env. When both keys exist + `fallbackOnError`
  *  is set, a deepgram failure (other than input-shape errors) chains to

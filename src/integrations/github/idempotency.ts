@@ -142,6 +142,12 @@ export const createDurableDeliveryStore = (
 
   const runSave = async (): Promise<void> => {
     try {
+      // Audit R2 H-R2-1: wait for disk hydration before snapshotting. An add()
+      // that races ahead of load() would otherwise persist a PARTIAL set (only
+      // the freshly-added id) and atomically clobber the on-disk dump, losing
+      // every prior id across a restart → suppressed deliveries re-fire. `ready`
+      // self-catches load errors, so this never throws here.
+      await ready
       await persist.save(opts.persistPath, core.snapshot())
     } catch (e) {
       opts.onError?.(

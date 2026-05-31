@@ -596,6 +596,10 @@ const runTurn = async (args: {
   readonly ctx: KernelDispatchContext
   readonly reduced: ReturnType<typeof reduceSessionCommand>
   readonly events: readonly SessionEvent[]
+  /** Audit R2 H1: pre-created + pre-registered by the dispatch arm BEFORE the
+   *  awaited event-log write, so a window turn.cancel can reach it. When absent,
+   *  runTurn creates + registers its own. */
+  readonly turnController?: AbortController
 }): Promise<KernelDispatchResult> => {
   const hostAction = args.reduced.hostAction
   let streamState = args.state
@@ -606,10 +610,28 @@ const runTurn = async (args: {
   // SAME signal this host turn observes. Composed with the caller's external
   // signal so both cancellation owners tear one effective signal.
   const sessionId = args.state.sessionId
-  const turnController = new AbortController()
+  const turnController = args.turnController ?? new AbortController()
+  // When the dispatch arm pre-registered the controller (audit R2 H1) do NOT
+  // re-register; otherwise install it now. The `finally` teardown is identical.
+  if (args.turnController === undefined) {
+    activeTurnControllers.set(sessionId, turnController)
+  }
   const composed = composeTurnSignal(turnController, args.ctx.signal)
-  activeTurnControllers.set(sessionId, turnController)
   try {
+    // Audit R2 H1: a turn.cancel during the pre-host event-log-write window
+    // aborts THIS controller via the cancel fast-path. Never start host work on
+    // an already-cancelled turn — settle it aborted immediately (the `finally`
+    // still clears the controller + disposes the composed signal).
+    if (turnController.signal.aborted) {
+      await pendingStream
+      return await onTurnAborted({
+        state: streamState,
+        command: args.command,
+        error: turnController.signal.reason ?? new Error("turn cancelled before host start"),
+        ctx: args.ctx,
+        events: [...args.events, ...streamedEvents],
+      })
+    }
     const result = await args.ctx.host.runTurn({
       history: hostAction.kind === "run_turn" ? hostAction.history : args.state.messages,
       prompt: hostAction.kind === "run_turn" ? hostAction.prompt : "",
@@ -764,8 +786,30 @@ export const dispatchSessionCommand = async (
       ...reduced.state,
       seq: state.seq + immediateEvents.length,
     }
-    await appendEvents(ctx.eventLog, immediateEvents)
-    await notifyCommitted(ctx, { state: nextState, events: immediateEvents })
+    // Audit R2 H1: register the turn-owned cancel controller BEFORE the awaited
+    // event-log persistence so a turn.cancel dispatched during that window —
+    // which cannot acquire the held single-writer lease — reaches a LIVE target
+    // via the fast-path instead of contending on the lease (which throws
+    // lease-held while the turn proceeds uncancelled).
+    let preRegisteredController: AbortController | undefined
+    if (command.type === "turn.run") {
+      preRegisteredController = new AbortController()
+      activeTurnControllers.set(state.sessionId, preRegisteredController)
+    }
+    try {
+      await appendEvents(ctx.eventLog, immediateEvents)
+      await notifyCommitted(ctx, { state: nextState, events: immediateEvents })
+    } catch (e) {
+      // Persistence failed before runTurn could adopt the controller — drop it
+      // so the pre-registration doesn't leak a stale entry.
+      if (
+        preRegisteredController !== undefined &&
+        activeTurnControllers.get(state.sessionId) === preRegisteredController
+      ) {
+        activeTurnControllers.delete(state.sessionId)
+      }
+      throw e
+    }
 
     switch (command.type) {
       case "session.identity.set":
@@ -793,6 +837,9 @@ export const dispatchSessionCommand = async (
           ctx,
           reduced,
           events: immediateEvents,
+          ...(preRegisteredController !== undefined
+            ? { turnController: preRegisteredController }
+            : {}),
         })
       default:
         return { state: nextState, events: immediateEvents }

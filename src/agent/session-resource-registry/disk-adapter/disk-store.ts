@@ -204,18 +204,22 @@ const wrapStoreWithDiskMirror = (
   cfg: DiskRegistryConfig,
   sessionId: string,
   lockReady: Promise<SessionLock | null>,
-  touchOnActivity: (sessionId: string) => void,
+  touchOnActivity: (sessionId: string) => boolean,
 ): TypedHistoryEventStore => {
   const eventsPath = join(sessionDirOf(cfg, sessionId), EVENTS_FILENAME)
   return {
     append(event: TypedHistoryEvent): void {
       inner.append(event)
-      const line = serializeEventLine(event)
       // T04 — appending IS activity. Refresh freshness so the disk GC's TTL
       // (which reads `meta.json.lastTouched`) does NOT evict a session that is
       // still appending events through an already-handed-out store reference.
-      // This is the previously-missing axis of `lastTouched` ownership.
-      touchOnActivity(sessionId)
+      // Audit R2 #1: the boolean reports liveness — an evicted session must NOT
+      // resurrect its on-disk dir/events.jsonl via this mirror (the captured
+      // `lockReady` resolves to a released-but-non-null lock after evict, so the
+      // `lock === null` guard alone does not stop the write).
+      const live = touchOnActivity(sessionId)
+      if (!live) return
+      const line = serializeEventLine(event)
       // Fire-and-forget: disk mirror MUST NOT block / throw for the
       // append contract to stay sync. Errors land in the swallowed
       // `appendFileSafe` rejection. Lock failure (null) ⇒ skip disk.
@@ -397,14 +401,17 @@ export const createDiskSessionResourceRegistry = (
   // Replaces the previously-scattered `hit.lastTouched = t; writeMeta(...)`
   // duplicated at each getOrCreate arm, and closes the gap where appends
   // refreshed neither — letting the GC evict an actively-appending session.
-  const touchOnActivity = (sessionId: string): void => {
+  // Returns whether the session is LIVE (present in `entries`). Audit R1
+  // B-MEDIUM + R2 #1: an evicted/unknown session (entries.delete + lock released
+  // by evict) must NOT be re-locked, re-meta'd, OR have its events mirror
+  // re-written by a late append through a stale store handle — doing any of
+  // those resurrects the session dir on disk, leaks the re-acquired lock (evict
+  // already dropped its lockMap key, so nothing releases it), and defers TTL-GC.
+  // The boolean lets the append disk-mirror skip the resurrection too (the meta
+  // write is skipped here directly).
+  const touchOnActivity = (sessionId: string): boolean => {
     const entry = entries.get(sessionId)
-    // Audit R1 B-MEDIUM: an evicted/unknown session (entries.delete + lock
-    // released by evict) must NOT be re-locked or have its meta re-written by a
-    // late append through a stale store handle — doing so resurrects the session
-    // dir on disk, leaks the re-acquired lock (evict already dropped its lockMap
-    // key, so nothing releases it), and defers TTL-GC for a full window.
-    if (entry === undefined) return
+    if (entry === undefined) return false
     const t = now()
     entry.lastTouched = t
     const lockReady = ensureLock(sessionId)
@@ -412,6 +419,7 @@ export const createDiskSessionResourceRegistry = (
       if (lock === null) return
       return writeMeta(cfg, sessionId, t)
     })
+    return true
   }
 
   // Synchronous getOrCreate contract: we must return SessionResources

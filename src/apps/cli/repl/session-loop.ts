@@ -219,6 +219,21 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
       }
     }
   }
+  // Audit R1 C-F1 + R2 #2: every awaited/throwing INIT step that runs in the gap
+  // between a close-stack registration and the branch try/finally blocks must
+  // drain on throw — otherwise an already-registered facade/session/watcher
+  // leaks. Wrapping each such step in `guardInit` closes the whole class (R1
+  // missed `createSession`, which R2 then found). Drain is idempotent, so the
+  // branch finallys still compose. Sync steps (e.g. attachPlaybookHandle) work
+  // too — `await step()` accepts a non-promise return.
+  const guardInit = async <T>(step: () => T | Promise<T>): Promise<T> => {
+    try {
+      return await step()
+    } catch (e) {
+      await drainCloseStack()
+      throw e
+    }
+  }
 
   const runtimeFacade = await runtimeContext.createRuntimeFacade({
     boot: {
@@ -235,15 +250,19 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     ...(runtimeCompose !== undefined ? { compose: runtimeCompose } : {}),
   })
   closeStack.push({ label: "runtimeFacade.close", dispose: () => runtimeFacade.close() })
-  const session = await runtimeFacade.createSession({
-    cwd: setup.cwd,
-    model: setup.model,
-    permissionMode: runtimeContext.permissionMode(),
-    ...(activeIdentityModeState !== undefined
-      ? { identityMode: activeIdentityModeState.get() }
-      : {}),
-    ...(activeToolProfileState !== undefined ? { toolProfile: activeToolProfileState.get() } : {}),
-  })
+  const session = await guardInit(() =>
+    runtimeFacade.createSession({
+      cwd: setup.cwd,
+      model: setup.model,
+      permissionMode: runtimeContext.permissionMode(),
+      ...(activeIdentityModeState !== undefined
+        ? { identityMode: activeIdentityModeState.get() }
+        : {}),
+      ...(activeToolProfileState !== undefined
+        ? { toolProfile: activeToolProfileState.get() }
+        : {}),
+    }),
+  )
   closeStack.push({ label: "session.close", dispose: () => session.close() })
   registerSideConversationStart?.((args) => session.side.start(args))
 
@@ -303,17 +322,9 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     return handle
   }
   // Audit R1 C-F1: attachPlaybookHandle() allocates a filesystem watcher
-  // (maybeStartPlaybookTriggerWire) that can throw, and it runs in the gap
-  // BETWEEN the facade/session close-stack registrations and the branch
-  // try/finally blocks. A throw here would escape runSessionLoop with the
-  // facade + session already registered but never drained. Drain on throw
-  // (drainCloseStack is idempotent, so the branch finallys still compose).
-  try {
-    attachPlaybookHandle()
-  } catch (e) {
-    await drainCloseStack()
-    throw e
-  }
+  // (maybeStartPlaybookTriggerWire) that can throw, in the same init gap —
+  // guardInit drains the close stack on throw so the facade + session don't leak.
+  await guardInit(() => attachPlaybookHandle())
   // L5 H-7 — register the playbook detach on the close stack the moment the
   // watcher is (possibly) attached, so a throw in the REST of init still stops
   // the file watcher. `detach()` is idempotent + a no-op when nothing attached.
