@@ -9,9 +9,16 @@
  *
  * Idempotency: each body is suffixed with an HTML comment
  * `<!-- quanta:idempotency=<key> -->`. When the API echoes back an existing
- * comment containing the SAME key, the sink PATCHes it instead of POSTing a
- * new one. Body bytes are capped at 65,000 (GH API limit; the marker is
- * counted within the cap so it always survives).
+ * comment containing the SAME key, the sink reconciles instead of POSTing a
+ * duplicate. The reconcile shape differs per verb (audit L9 H10):
+ *   - `postComment` (issue comment): find-existing → PATCH body.
+ *   - `postReviewComment` (inline review comment): find-existing → PATCH body
+ *     (`/pulls/comments/<id>`).
+ *   - `postReview` (PR review): a review body is IMMUTABLE once submitted, so
+ *     dedup is an idempotent SKIP — a prior review carrying the marker is
+ *     returned instead of submitting a duplicate review.
+ * Body bytes are capped at 65,000 (GH API limit; the marker is counted within
+ * the cap so it always survives).
  *
  * **Concurrent-race resolution (post-then-reconcile)** — GitHub API has no
  * conditional-write primitive (no If-None-Match on comments), so two
@@ -120,10 +127,32 @@ export const createPrOutputSink = (opts: PrOutputSinkOpts): PrOutputSink => {
     },
     async postReview({ verdict, body, key }): Promise<OutputPostResult> {
       const prepared = prepareBody(body, key)
+      // Audit L9 H10: a review's body is immutable once submitted (GH has no
+      // edit-review-body API), so dedup is idempotent SKIP — if a review
+      // carrying THIS marker already exists, we return it instead of POSTing a
+      // duplicate review on every retry / runner-restart / webhook re-delivery.
+      if (hiddenMarkerEnabled) {
+        const existing = await findExistingReview(opts, key, prefix, opts.signal)
+        if (existing !== undefined) {
+          return Object.freeze({
+            ok: true,
+            ...(existing.htmlUrl !== undefined ? { url: existing.htmlUrl } : {}),
+          })
+        }
+      }
       return await postReview(opts, verdict, prepared, opts.signal)
     },
     async postReviewComment({ file, line, body, key }): Promise<OutputPostResult> {
       const prepared = prepareBody(body, key)
+      // Audit L9 H10: inline review comments DO support PATCH, so we mirror the
+      // issue-comment path — find-existing → PATCH, else POST. Without this a
+      // retry stamps the same marker and POSTs a duplicate inline comment.
+      if (hiddenMarkerEnabled) {
+        const existing = await findExistingReviewComment(opts, key, prefix, opts.signal)
+        if (existing !== undefined) {
+          return await patchReviewComment(opts, existing.id, prepared, opts.signal)
+        }
+      }
       return await postReviewComment(opts, file, line, prepared, opts.signal)
     },
   }
@@ -177,6 +206,83 @@ const findExistingComment = async (
     if (rows.length < 100) return undefined // last page (fewer than per_page rows)
   }
   return undefined
+}
+
+/** Find a prior REVIEW carrying our marker (audit L9 H10). Reviews are paged
+ *  at `/pulls/<n>/reviews`; we match the marker inside `body`. Returns the
+ *  first match's id + html_url, or undefined. Errors → undefined (no-throw),
+ *  same fail-open posture as the issue-comment finder. */
+const findExistingReview = async (
+  opts: PrOutputSinkOpts,
+  key: IdempotencyKey,
+  prefix: string,
+  signal: AbortSignal | undefined,
+): Promise<MarkerMatchedComment | undefined> => {
+  const needle = `${prefix}${key}${IDEMPOTENCY_MARKER_SUFFIX}`
+  for (let page = 1; page <= COMMENT_LIST_MAX_PAGES; page++) {
+    if (signal?.aborted === true) return undefined
+    const path = `repos/${opts.repoSlug}/pulls/${opts.prNumber}/reviews?per_page=100&page=${page}`
+    const res = await safeRun(opts.ghCliPort, ["api", path], opts.repoCwd, signal)
+    if (res === undefined || res.exitCode !== 0) return undefined
+    const rows = safeJsonArray<{ id?: number; body?: string; html_url?: string }>(res.stdout)
+    if (rows === undefined || rows.length === 0) return undefined
+    for (const row of rows) {
+      if (typeof row.id !== "number" || row.id <= 0) continue
+      if (typeof row.body !== "string") continue
+      if (!row.body.includes(needle)) continue
+      return Object.freeze({
+        id: row.id,
+        htmlUrl: typeof row.html_url === "string" && row.html_url.length > 0 ? row.html_url : undefined,
+      })
+    }
+    if (rows.length < 100) return undefined
+  }
+  return undefined
+}
+
+/** Find a prior inline REVIEW COMMENT carrying our marker (audit L9 H10).
+ *  Inline comments live at `/pulls/<n>/comments` and support PATCH, so the
+ *  caller reconciles via {@link patchReviewComment}. */
+const findExistingReviewComment = async (
+  opts: PrOutputSinkOpts,
+  key: IdempotencyKey,
+  prefix: string,
+  signal: AbortSignal | undefined,
+): Promise<ExistingComment | undefined> => {
+  const needle = `${prefix}${key}${IDEMPOTENCY_MARKER_SUFFIX}`
+  for (let page = 1; page <= COMMENT_LIST_MAX_PAGES; page++) {
+    if (signal?.aborted === true) return undefined
+    const path = `repos/${opts.repoSlug}/pulls/${opts.prNumber}/comments?per_page=100&page=${page}`
+    const res = await safeRun(opts.ghCliPort, ["api", path], opts.repoCwd, signal)
+    if (res === undefined || res.exitCode !== 0) return undefined
+    const rows = safeJsonArray<{ id?: number; body?: string }>(res.stdout)
+    if (rows === undefined || rows.length === 0) return undefined
+    for (const row of rows) {
+      if (typeof row.id !== "number" || row.id <= 0) continue
+      if (typeof row.body !== "string") continue
+      if (row.body.includes(needle)) return { id: row.id, body: row.body }
+    }
+    if (rows.length < 100) return undefined
+  }
+  return undefined
+}
+
+/** PATCH an existing inline review comment by id (audit L9 H10). Distinct path
+ *  from issue comments: `/pulls/comments/<id>` not `/issues/comments/<id>`. */
+const patchReviewComment = async (
+  opts: PrOutputSinkOpts,
+  commentId: number,
+  body: string,
+  signal: AbortSignal | undefined,
+): Promise<OutputPostResult> => {
+  const path = `repos/${opts.repoSlug}/pulls/comments/${commentId}`
+  const res = await safeRun(
+    opts.ghCliPort,
+    ["api", "--method", "PATCH", path, "-f", `body=${body}`],
+    opts.repoCwd,
+    signal,
+  )
+  return parseResult(res)
 }
 
 const patchComment = async (

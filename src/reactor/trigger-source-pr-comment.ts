@@ -17,6 +17,24 @@
 import { errMessage } from "@/shared"
 import type { GhCliPort, GhCliResult } from "./trigger-source-ci"
 import type { ClockPort, ProactiveTrigger, TriggerSourcePort } from "./types"
+
+/**
+ * `<owner>/<repo>` shape gate (audit L9 H6). The slug is interpolated raw into
+ * a `gh api repos/<slug>/…` path; without this gate a hostile/misconfigured
+ * `repoSlug` like `"foo/bar/comments?per_page=1&x="` or one containing `../`
+ * rewrites the GitHub REST endpoint (path traversal / query injection at the
+ * network boundary). We allow only `word.-` segments separated by a single
+ * `/`, which is a superset of every legal GitHub `owner/repo` and a strict
+ * subset of anything that could escape the intended path segment.
+ */
+const REPO_SLUG_RE = /^[\w.-]+\/[\w.-]+$/
+const isValidRepoSlug = (slug: string): boolean =>
+  typeof slug === "string" && REPO_SLUG_RE.test(slug)
+/** PR / issue number gate (audit L9 H6) — a positive 32-bit-safe integer.
+ *  Anything else (float, NaN, negative, `1/comments?x=`) is refused before it
+ *  reaches the path. */
+const isValidPrNumber = (n: number): boolean =>
+  typeof n === "number" && Number.isInteger(n) && n > 0 && n <= Number.MAX_SAFE_INTEGER
 /**
  * Watermark store — a tiny KV. Production binds a file-backed impl
  * (`.quanta/reactor-watermarks.json`); tests use a Map wrapper.
@@ -62,6 +80,19 @@ export const createPrCommentTriggerSource = (opts: PrCommentTriggerOpts): Trigge
     async poll(pollOpts): Promise<readonly ProactiveTrigger[]> {
       const signal = pollOpts?.signal
       if (signal !== undefined && signal.aborted) return []
+
+      // Boundary gate (audit L9 H6): never interpolate an unvalidated slug /
+      // number into the gh-api path. A bad value collapses to an empty poll
+      // (same degrade contract as a gh failure) and surfaces via `onError` so
+      // the misconfiguration is observable, not silently injecting.
+      if (!isValidRepoSlug(opts.repoSlug)) {
+        opts.onError?.(`reactor.pr_comment.invalid_repo_slug: ${String(opts.repoSlug)}`)
+        return []
+      }
+      if (!isValidPrNumber(opts.prNumber)) {
+        opts.onError?.(`reactor.pr_comment.invalid_pr_number: ${String(opts.prNumber)}`)
+        return []
+      }
 
       // First poll: seed the watermark with "now" so we don't backfill the
       // entire comment history at first sight (a fresh process should react

@@ -17,11 +17,31 @@
 import type { BridgeTransport, WireEnvelope } from "../event-bridge"
 import { isWireEnvelope } from "../event-bridge"
 
-/** Read-side port — a Node Readable narrowed to the methods we use. */
+/** Terminal lifecycle events on the read side (audit L9 M18b). A Node
+ *  `Readable` emits `'end'` (clean EOF), `'close'` (fd released), and `'error'`
+ *  (broken pipe / dead partner). We subscribe to all three so a dead peer is
+ *  OBSERVED and the transport tears itself down — previously only `'data'` was
+ *  wired, so a broken pipe silently dropped frames and left a half-open peer in
+ *  the bridge's bookkeeping. */
+type ReaderLifecycleEvent = "end" | "close" | "error"
+
+/** Read-side port — a Node Readable narrowed to the methods we use. The port
+ *  type pins ONLY the `'data'` contract so existing minimal fixtures (which
+ *  emit only `'data'`) stay structurally assignable; lifecycle subscription is
+ *  feature-detected at runtime against the real Node `EventEmitter` surface
+ *  (a real `Readable` always has it). */
 export interface StdioReader {
   on(event: "data", handler: (chunk: Buffer | string) => void): unknown
   off?(event: "data", handler: (chunk: Buffer | string) => void): unknown
   removeListener?(event: "data", handler: (chunk: Buffer | string) => void): unknown
+}
+
+/** The lifecycle-aware view we narrow to at runtime when the reader supports
+ *  it (every real Node `Readable` does). */
+interface LifecycleReader {
+  on(event: ReaderLifecycleEvent, handler: (arg?: unknown) => void): unknown
+  off?(event: ReaderLifecycleEvent, handler: (arg?: unknown) => void): unknown
+  removeListener?(event: ReaderLifecycleEvent, handler: (arg?: unknown) => void): unknown
 }
 
 /** Write-side port — a Node Writable narrowed to the methods we use. */
@@ -32,6 +52,12 @@ export interface StdioWriter {
 export interface CreateStdioTransportOpts {
   readonly reader: StdioReader
   readonly writer: StdioWriter
+  /** Terminal-event sink (audit L9 M18b). Invoked exactly ONCE when the read
+   *  side ends / closes / errors (or when `close()` is called by the owner), so
+   *  the bridge can REAP a half-open peer instead of leaving it wired. The
+   *  `reason` distinguishes a clean EOF from a broken pipe. Optional — owners
+   *  that don't reap can omit it. */
+  readonly onClose?: (reason: "end" | "close" | "error" | "local", detail?: unknown) => void
 }
 
 /**
@@ -92,7 +118,63 @@ export const createStdioTransport = (opts: CreateStdioTransportOpts): BridgeTran
     }
   }
 
+  // Runtime view for lifecycle subscription. A real Node `Readable` always has
+  // `on`/`off`; minimal `'data'`-only fixtures simply won't emit the lifecycle
+  // events (so the wiring is inert for them, not wrong).
+  const lifecycle = opts.reader as unknown as LifecycleReader
+
+  // Detach helper — tolerate `off` / `removeListener` / neither (fixtures vary).
+  const detachData = (): void => {
+    if (typeof opts.reader.off === "function") opts.reader.off("data", onData)
+    else if (typeof opts.reader.removeListener === "function")
+      opts.reader.removeListener("data", onData)
+  }
+  const detachLifecycle = (
+    event: ReaderLifecycleEvent,
+    handler: (arg?: unknown) => void,
+  ): void => {
+    if (typeof lifecycle.off === "function") lifecycle.off(event, handler)
+    else if (typeof lifecycle.removeListener === "function")
+      lifecycle.removeListener(event, handler)
+  }
+
+  // Lifecycle handlers (audit L9 M18b). Any terminal read-side event tears the
+  // transport down and notifies the owner so a dead partner is reaped instead
+  // of leaving a half-open peer wired with frames silently dropped.
+  const onEnd = (): void => {
+    void teardown("end")
+  }
+  const onClose = (): void => {
+    void teardown("close")
+  }
+  const onError = (detail?: unknown): void => {
+    void teardown("error", detail)
+  }
+
+  const teardown = async (
+    reason: "end" | "close" | "error" | "local",
+    detail?: unknown,
+  ): Promise<void> => {
+    if (closed) return
+    closed = true
+    handlers.clear()
+    detachData()
+    detachLifecycle("end", onEnd)
+    detachLifecycle("close", onClose)
+    detachLifecycle("error", onError)
+    buffer = ""
+    opts.onClose?.(reason, detail)
+  }
+
   opts.reader.on("data", onData)
+  // 'error' on a Readable with no listener throws — wiring one is mandatory for
+  // a broken pipe not to crash the process. `on` is always present on a real
+  // Readable; the cast is the runtime lifecycle view.
+  if (typeof lifecycle.on === "function") {
+    lifecycle.on("end", onEnd)
+    lifecycle.on("close", onClose)
+    lifecycle.on("error", onError)
+  }
 
   return {
     async send(envelope) {
@@ -107,18 +189,7 @@ export const createStdioTransport = (opts: CreateStdioTransportOpts): BridgeTran
       }
     },
     async close() {
-      if (closed) return
-      closed = true
-      handlers.clear()
-      // Best-effort detach — both `off` and `removeListener` are valid
-      // Node Readable APIs; we tolerate either or none (test fixtures
-      // sometimes omit both).
-      if (typeof opts.reader.off === "function") {
-        opts.reader.off("data", onData)
-      } else if (typeof opts.reader.removeListener === "function") {
-        opts.reader.removeListener("data", onData)
-      }
-      buffer = ""
+      await teardown("local")
     },
   }
 }

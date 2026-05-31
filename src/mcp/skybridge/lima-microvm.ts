@@ -216,6 +216,34 @@ const buildSpawnOpts = (
   ...(spec.env !== undefined ? { env: spec.env } : {}),
 })
 
+/**
+ * Honesty derivation (audit L9 M17). The Phase-2 path launches the MCP server
+ * inside a Lima Linux guest via `lima shell` — that gives a real process +
+ * kernel boundary. But `compileLimaConfig`'s `limayaml` (mounts allowlist /
+ * `memory` cap / `networks`) is NOT written to disk nor passed to `lima start`
+ * in Phase 2, so any policy-SPECIFIC constraint the caller asked for is DROPPED
+ * at the guest-config layer.
+ *
+ * We therefore cannot honestly report `sandboxApplied:true` when the policy
+ * requested constraints we did not enforce. This returns the list of dropped
+ * constraints (empty ⇒ a bare VM with no extra constraints ⇒ the kernel
+ * boundary alone is honestly "applied").
+ */
+const droppedPolicyConstraints = (policy: McpSandboxPolicy): string[] => {
+  const dropped: string[] = []
+  if (policy.hostReadAllowlist !== undefined && policy.hostReadAllowlist.length > 0) {
+    dropped.push("hostReadAllowlist")
+  }
+  if (policy.hostWriteAllowlist !== undefined && policy.hostWriteAllowlist.length > 0) {
+    dropped.push("hostWriteAllowlist")
+  }
+  if (policy.networkAllowlist !== undefined && policy.networkAllowlist.length > 0) {
+    dropped.push("networkAllowlist")
+  }
+  if (policy.memoryMb !== undefined) dropped.push("memoryMb")
+  return dropped
+}
+
 const idempotentStop = (inner: { stop: () => Promise<void> }): (() => Promise<void>) => {
   let stopped = false
   return async () => {
@@ -236,8 +264,12 @@ const idempotentStop = (inner: { stop: () => Promise<void> }): (() => Promise<vo
  *   2. Resolve VM name from spec.id.
  *   3. If VM not running → `lima start <vmName>` (via runner).
  *   4. `cfg.spawner(["lima", "shell", <vm>, "--", ...spec.command], opts)`.
- *   5. Return a handle with `sandboxApplied=true`, `ipcChannel.kind="named-pipe"`
- *      (the Lima socket path), `backendId=<vmName>`.
+ *   5. Return a handle with `ipcChannel.kind="named-pipe"` (the Lima socket
+ *      path), `backendId=<vmName>`, and an HONEST `sandboxApplied` (audit L9
+ *      M17): `true` only when the policy requested no constraints beyond the
+ *      VM/kernel boundary; otherwise `false` + a `degradeReason` naming the
+ *      dropped constraints, because Phase 2 does not apply the compiled
+ *      `limayaml` (mounts/memory/networks).
  *
  * `stop`:
  *   - Stops the spawned shell process (per-MCP). Does NOT tear down the VM
@@ -261,13 +293,26 @@ export const limaMicroVmSandbox = (cfg: McpSandboxConfig = {}): McpSandbox => {
         })
       }
 
+      // Honesty derivation (audit L9 M17): `sandboxApplied` reflects what the
+      // guest ACTUALLY enforces. The VM gives a kernel boundary, but Phase 2
+      // does not apply the compiled `limayaml` constraints — so when the policy
+      // asked for any of them we report `sandboxApplied:false` + a
+      // `degradeReason` naming exactly what was dropped, rather than claiming an
+      // isolation that is not in effect.
+      const dropped = droppedPolicyConstraints(policy)
+      const sandboxApplied = dropped.length === 0
       // Lima exposes a socket per VM at ~/.lima/<vm>/ga.sock; we report it
       // as the named-pipe ref so callers that bypass stdio can locate it.
       return {
         serverId: spec.id,
         profile: policy.profile,
         backendId: vmName,
-        sandboxApplied: true,
+        sandboxApplied,
+        ...(sandboxApplied
+          ? {}
+          : {
+              degradeReason: `lima Phase 2 applies the VM/kernel boundary but NOT the compiled limayaml; these policy constraints were dropped: ${dropped.join(", ")}`,
+            }),
         ipcChannel: { kind: "named-pipe", ref: `lima-socket:${vmName}` },
         stop: idempotentStop(raw),
       }

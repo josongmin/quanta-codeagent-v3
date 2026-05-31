@@ -144,7 +144,26 @@ export const createSessionTransportBridge = (
   let snapshot = cloneSnapshot(opts.snapshot)
   let tail = trimTail(snapshot, [], opts.tailLimit ?? DEFAULT_TAIL_LIMIT)
   let commandReplayIndex = rebuildCommandReplayIndex(tail)
+  // M18(a): the command-dedup window. Previously this Map only ever GREW —
+  // a long-lived daemon session accumulated one entry per accepted command
+  // forever, and the dedup window silently diverged from the BOUNDED replay
+  // window (`commandReplayIndex`, derived from a `tailLimit`-capped tail). We
+  // now bound the dedup window to the same magnitude (`tailLimit`) with FIFO
+  // eviction. `pending` entries are pruned the moment the command reaches a
+  // terminal transition (accepted → keep for dedup; errored → delete), and the
+  // whole Map is capped so it cannot outgrow the replay window it guards.
+  const commandStateCap = Math.max(1, opts.tailLimit ?? DEFAULT_TAIL_LIMIT)
   const commandStates = new Map<string, "pending" | "accepted">()
+  const recordCommandState = (commandId: string, state: "pending" | "accepted"): void => {
+    // Re-insert to refresh FIFO recency on the accepted-terminal transition.
+    commandStates.delete(commandId)
+    while (commandStates.size >= commandStateCap) {
+      const oldest = commandStates.keys().next().value
+      if (oldest === undefined) break
+      commandStates.delete(oldest)
+    }
+    commandStates.set(commandId, state)
+  }
   type Peer = {
     readonly transport: SessionTransport
     unsubscribe: (() => void) | undefined
@@ -274,11 +293,13 @@ export const createSessionTransportBridge = (
       return
     }
 
-    commandStates.set(command.commandId, "pending")
+    recordCommandState(command.commandId, "pending")
     try {
       await opts.onCommand?.(command)
-      commandStates.set(command.commandId, "accepted")
+      // Terminal transition: keep the accepted id in the (bounded) dedup window.
+      recordCommandState(command.commandId, "accepted")
     } catch (error) {
+      // Terminal transition: a failed command is pruned so a retry can re-run.
       commandStates.delete(command.commandId)
       reportBridgeError(peer, error)
     }

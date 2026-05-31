@@ -5,10 +5,26 @@ import {
   encodeSessionCommand,
   encodeSessionEvent,
   encodeSessionSnapshot,
+  isSessionProtocolVersion,
   SESSION_PROTOCOL_VERSION,
   SessionProtocolValidationError,
 } from "@/protocol/session"
 import type { SessionTransportMessage } from "./types"
+
+/**
+ * Control-frame version gate (audit L9 M18c). The `connect` / `rejected`
+ * control envelopes are stamped with `version: SESSION_PROTOCOL_VERSION` by
+ * {@link encodeControlEnvelope}, but their decoders previously NEVER read it —
+ * so a peer speaking a different protocol version could complete the handshake
+ * through the negotiation hole, while the sibling command/event/snapshot codec
+ * (`@/protocol/session`) already rejects `bad_version`. We close the hole by
+ * validating the control-frame version with the SAME gate.
+ */
+const requireProtocolVersion = (envelope: Record<string, unknown>): void => {
+  if (!isSessionProtocolVersion(envelope.version)) {
+    throw new SessionProtocolValidationError("bad_version")
+  }
+}
 
 const expectObject = (value: unknown): Record<string, unknown> => {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -71,6 +87,7 @@ const encodeControlEnvelope = (
 
 const decodeConnectMessage = (raw: string): SessionTransportMessage => {
   const envelope = expectObject(JSON.parse(raw) as unknown)
+  requireProtocolVersion(envelope)
   const resumeFromSeq = decodeOptionalNumber(
     envelope.resumeFromSeq,
     "bad_transport_resume_from_seq",
@@ -84,6 +101,7 @@ const decodeConnectMessage = (raw: string): SessionTransportMessage => {
 
 const decodeRejectedMessage = (raw: string): SessionTransportMessage => {
   const envelope = expectObject(JSON.parse(raw) as unknown)
+  requireProtocolVersion(envelope)
   const target = decodeString(envelope.target, "bad_transport_reject_target")
   const reason = decodeString(envelope.reason, "bad_transport_reject_reason")
   if (target !== "connect" && target !== "command") {

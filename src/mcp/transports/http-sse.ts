@@ -24,7 +24,7 @@
  *  This transport is OPT-IN: the client defaults to stdio, so existing
  *  deployments are byte-identical. */
 
-import { errMessage, logger } from "@/shared"
+import { errMessage, logger, throwIfAborted } from "@/shared"
 import { isResponse, type JsonRpcMessage } from "../jsonrpc"
 import type {
   McpTransport,
@@ -239,15 +239,35 @@ export class HttpSseMcpTransport implements McpTransport {
   private async openStandaloneStream(): Promise<void> {
     const abort = new AbortController()
     this.serverStreamAbort = abort
+    // If close() already fired (the standalone GET races a fast teardown), the
+    // controller is aborted up front so the fetch is severed and we never begin
+    // draining a body the transport no longer owns.
+    if (this.closed) abort.abort()
     let res: HttpFetchResponse
     try {
-      res = await this.fetchFn(this.url, {
+      const handshake = this.fetchFn(this.url, {
         method: "GET",
         headers: this.requestHeaders({ accept: "text/event-stream" }),
         signal: abort.signal,
       })
+      // Race the handshake against abort. A fetch impl that ignores the signal
+      // must not keep this pump pending past close() (close() awaits it) nor let
+      // us open a reader on a torn-down transport (audit L9 H12).
+      res = await Promise.race([
+        handshake,
+        new Promise<HttpFetchResponse>((_, reject) => {
+          if (abort.signal.aborted) {
+            reject(new Error("standalone GET aborted"))
+            return
+          }
+          abort.signal.addEventListener("abort", () => reject(new Error("standalone GET aborted")), {
+            once: true,
+          })
+        }),
+      ])
     } catch (e) {
-      // Network error opening the channel — proceed POST-only.
+      // Network error opening the channel, or close() aborted the handshake —
+      // proceed POST-only and let the pump settle so close() never wedges.
       logger.debug("mcp: standalone SSE GET failed", { server: this.name, error: errMessage(e) })
       return
     }
@@ -255,6 +275,15 @@ export class HttpSseMcpTransport implements McpTransport {
     if (!res.ok || res.status === 405) return
     const contentType = (res.headers.get("content-type") ?? "").toLowerCase()
     if (!contentType.includes("text/event-stream")) return
+    // close() may have fired while the GET handshake was in flight — don't open
+    // a reader on a torn-down transport (the abort already fired; this is the
+    // belt-and-braces guard so the standalone-GET lifetime is owned exactly as
+    // tightly as the POST lifetime).
+    try {
+      throwIfAborted(abort.signal)
+    } catch {
+      return
+    }
     await this.consumeSseBody(res.body, abort.signal)
   }
 
@@ -270,16 +299,31 @@ export class HttpSseMcpTransport implements McpTransport {
     if (body === null) return
     const reader = body.getReader()
     let buffer = ""
+    // Resolves the moment the owning signal aborts. We race it against
+    // reader.read() so the drain loop exits PROMPTLY on close() even when
+    // reader.cancel() does not unblock an already-pending read() — a real
+    // hazard with some SSE bodies/proxies that would otherwise wedge close()
+    // (which awaits this pump) forever (audit L9 H12).
+    const ABORTED = Symbol("aborted")
     const onAbort = (): void => {
       void reader.cancel(signal?.reason).catch(() => undefined)
     }
+    let abortWait: Promise<typeof ABORTED> = new Promise(() => {})
     if (signal !== undefined) {
-      if (signal.aborted) onAbort()
-      else signal.addEventListener("abort", onAbort, { once: true })
+      abortWait = new Promise<typeof ABORTED>((resolve) => {
+        const fire = (): void => {
+          onAbort()
+          resolve(ABORTED)
+        }
+        if (signal.aborted) fire()
+        else signal.addEventListener("abort", fire, { once: true })
+      })
     }
     try {
       for (;;) {
-        const { value, done } = await reader.read()
+        const next = await Promise.race([reader.read(), abortWait])
+        if (next === ABORTED) break
+        const { value, done } = next
         if (done) break
         if (value !== undefined) buffer += this.decoder.decode(value, { stream: true })
         let boundary = buffer.indexOf("\n\n")

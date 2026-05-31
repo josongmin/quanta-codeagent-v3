@@ -25,8 +25,19 @@ export {
   GH_ACTIONS_TRIGGER_ENV,
   matchMention,
 } from "./event-source-actions"
-export type { DeliveryStore, DeliveryStoreOpts } from "./idempotency"
-export { computeIdempotencyKey, createDeliveryStore } from "./idempotency"
+export type {
+  DeliveryPersistPort,
+  DeliveryStore,
+  DeliveryStoreOpts,
+  DurableDeliveryStore,
+  DurableDeliveryStoreOpts,
+} from "./idempotency"
+export {
+  computeIdempotencyKey,
+  createDeliveryStore,
+  createDurableDeliveryStore,
+} from "./idempotency"
+export { defaultDeliveryPersist } from "./adapters/delivery-persist-fs"
 export type { MentionFilter, MentionFilterOpts } from "./mention-filter"
 export { createMentionFilter } from "./mention-filter"
 export type { LoadPrContextOpts } from "./pr-context-loader"
