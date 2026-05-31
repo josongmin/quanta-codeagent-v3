@@ -20,12 +20,22 @@
 import type {
   AutomationEnginePort,
   AutomationRun,
+  ClaimedRun,
+  ClaimOpts,
   EngineAutomation,
   EngineResult,
+  FinalizeInput,
   InboxItem,
   MarkRunInput,
   ScheduleInput,
 } from "./port"
+import {
+  advancedStatus,
+  defaultRunIdAllocator,
+  makeSeq,
+  mintClaimToken,
+  type RunIdAllocator,
+} from "./run-model"
 
 /**
  * Build an in-memory engine. Each call returns an INDEPENDENT instance —
@@ -36,8 +46,9 @@ import type {
  * NOT guaranteed unique under same-ms double-fire (tests inject a counter).
  */
 export interface InMemoryAutomationEngineOpts {
-  /** Override run / inbox id generation. Pure, deterministic. */
-  readonly idAllocator?: (kind: "run" | "inbox", automationId: string, firedAt: number) => string
+  /** Override run / inbox id generation. Pure, deterministic. The `seq`
+   *  argument is a monotonic same-ms disambiguator (T10 M8). */
+  readonly idAllocator?: RunIdAllocator
 }
 
 export interface InMemoryAutomationEngine extends AutomationEnginePort {
@@ -53,7 +64,8 @@ export const inMemoryAutomationEngine = (
   const rows = new Map<string, EngineAutomation>()
   const runsBacking: AutomationRun[] = []
   const inboxBacking: InboxItem[] = []
-  const idAlloc = opts.idAllocator ?? defaultIdAlloc
+  const idAlloc = opts.idAllocator ?? defaultRunIdAllocator
+  const nextSeq = makeSeq()
 
   // exactOptional: rebuild row WITHOUT setting absent optional keys to
   // `undefined`. Re-used by `schedule` and `markRun` so the omission rule
@@ -69,6 +81,8 @@ export const inMemoryAutomationEngine = (
     fireCount: number
     lastRunAt?: number
     lastError?: string
+    claimToken?: string
+    claimedAt?: number
   }): EngineAutomation => {
     const base = {
       id: over.id,
@@ -84,7 +98,60 @@ export const inMemoryAutomationEngine = (
       ...base,
       ...(over.lastRunAt !== undefined ? { lastRunAt: over.lastRunAt } : {}),
       ...(over.lastError !== undefined ? { lastError: over.lastError } : {}),
+      ...(over.claimToken !== undefined ? { claimToken: over.claimToken } : {}),
+      ...(over.claimedAt !== undefined ? { claimedAt: over.claimedAt } : {}),
     }
+  }
+
+  /** Append run + inbox rows + advance the automation. Shared by `markRun`
+   *  and `finalize` so both paths are byte-equal. Caller guarantees `existing`
+   *  is a live (non-cancelled) row. */
+  const recordAndAdvance = (
+    existing: EngineAutomation,
+    input: {
+      id: string
+      firedAt: number
+      outcome: "fired" | "errored"
+      errorMessage?: string
+      nextRunAt: number | null
+      inboxTitle: string
+      inboxSummary: string
+    },
+  ): EngineAutomation => {
+    const seq = nextSeq()
+    const runId = idAlloc("run", input.id, input.firedAt, seq)
+    runsBacking.push(buildRun(input, runId))
+    const inboxId = idAlloc("inbox", input.id, input.firedAt, seq)
+    inboxBacking.push({
+      id: inboxId,
+      automationId: input.id,
+      title: input.inboxTitle,
+      summary: input.inboxSummary,
+      createdAt: input.firedAt,
+      read: false,
+    })
+    const status = advancedStatus(input.outcome, input.nextRunAt !== null)
+    const advanced = buildRow({
+      id: existing.id,
+      title: existing.title,
+      rule: existing.rule,
+      prompt: existing.prompt,
+      // When the row is being retired, freeze nextRunAt at firedAt so the
+      // sort stays meaningful and queries are deterministic.
+      nextRunAt: input.nextRunAt ?? input.firedAt,
+      status,
+      createdAt: existing.createdAt,
+      fireCount: existing.fireCount + 1,
+      lastRunAt: input.firedAt,
+      // Retain the error message whenever this fire errored — even when the
+      // row stays `scheduled` to retry (H5) so the host can observe it.
+      ...(input.outcome === "errored" && input.errorMessage !== undefined
+        ? { lastError: input.errorMessage }
+        : {}),
+      // claimToken/claimedAt cleared on finalize (omitted ⇒ absent).
+    })
+    rows.set(advanced.id, advanced)
+    return advanced
   }
 
   const engine: AutomationEnginePort = {
@@ -157,41 +224,61 @@ export const inMemoryAutomationEngine = (
           message: `automation '${input.id}' not found / cancelled`,
         })
       }
-      // Append the run-row first (atomic in-memory; SQLite adapter uses a tx).
-      const runId = idAlloc("run", input.id, input.firedAt)
-      const runRow = buildRun(input, runId)
-      runsBacking.push(runRow)
-      const inboxId = idAlloc("inbox", input.id, input.firedAt)
-      inboxBacking.push({
-        id: inboxId,
-        automationId: input.id,
-        title: input.inboxTitle,
-        summary: input.inboxSummary,
-        createdAt: input.firedAt,
-        read: false,
+      return Promise.resolve({ ok: true, value: recordAndAdvance(existing, input) })
+    },
+
+    claim(now: number, claimOpts?: ClaimOpts): Promise<EngineResult<ClaimedRun | null>> {
+      // Atomic in-memory: the whole selection + flip runs synchronously with
+      // no await, so two overlapping ticker callers cannot observe the same
+      // `scheduled` row before it becomes `running`.
+      let best: EngineAutomation | null = null
+      for (const r of rows.values()) {
+        const claimable =
+          (r.status === "scheduled" && r.nextRunAt <= now) ||
+          (r.status === "running" &&
+            claimOpts?.reclaimBefore !== undefined &&
+            r.claimedAt !== undefined &&
+            r.claimedAt <= claimOpts.reclaimBefore)
+        if (!claimable) continue
+        if (best === null) best = r
+        else if (r.nextRunAt < best.nextRunAt) best = r
+        else if (r.nextRunAt === best.nextRunAt && r.id < best.id) best = r
+      }
+      if (best === null) return Promise.resolve({ ok: true, value: null })
+      const claimToken = mintClaimToken(best.id, now, nextSeq())
+      const running = buildRow({
+        id: best.id,
+        title: best.title,
+        rule: best.rule,
+        prompt: best.prompt,
+        nextRunAt: best.nextRunAt,
+        status: "running",
+        createdAt: best.createdAt,
+        fireCount: best.fireCount,
+        ...(best.lastRunAt !== undefined ? { lastRunAt: best.lastRunAt } : {}),
+        ...(best.lastError !== undefined ? { lastError: best.lastError } : {}),
+        claimToken,
+        claimedAt: now,
       })
-      // Mutate the row last so a failure earlier would leave the row untouched
-      // (the in-memory path can't fail mid-way; the SQLite path uses a tx).
-      const nextStatus: EngineAutomation["status"] =
-        input.outcome === "errored" ? "errored" : input.nextRunAt === null ? "fired" : "scheduled"
-      const advanced = buildRow({
-        id: existing.id,
-        title: existing.title,
-        rule: existing.rule,
-        prompt: existing.prompt,
-        // When the row is being retired, freeze nextRunAt at firedAt so the
-        // sort stays meaningful and queries are deterministic.
-        nextRunAt: input.nextRunAt ?? input.firedAt,
-        status: nextStatus,
-        createdAt: existing.createdAt,
-        fireCount: existing.fireCount + 1,
-        lastRunAt: input.firedAt,
-        ...(input.outcome === "errored" && input.errorMessage !== undefined
-          ? { lastError: input.errorMessage }
-          : {}),
-      })
-      rows.set(advanced.id, advanced)
-      return Promise.resolve({ ok: true, value: advanced })
+      rows.set(running.id, running)
+      return Promise.resolve({ ok: true, value: { automation: running, claimToken } })
+    },
+
+    finalize(input: FinalizeInput): Promise<EngineResult<EngineAutomation>> {
+      const existing = rows.get(input.id)
+      if (
+        existing === undefined ||
+        existing.status === "cancelled" ||
+        existing.status !== "running" ||
+        existing.claimToken !== input.claimToken
+      ) {
+        return Promise.resolve({
+          ok: false,
+          code: "not-found",
+          message: `automation '${input.id}' not claimable / token mismatch`,
+        })
+      }
+      return Promise.resolve({ ok: true, value: recordAndAdvance(existing, input) })
     },
   }
 
@@ -201,6 +288,8 @@ export const inMemoryAutomationEngine = (
     cancel: engine.cancel,
     next: engine.next,
     markRun: engine.markRun,
+    claim: engine.claim,
+    finalize: engine.finalize,
     get runs(): ReadonlyArray<AutomationRun> {
       return Object.freeze([...runsBacking])
     },
@@ -214,9 +303,6 @@ export const inMemoryAutomationEngine = (
 // helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
-const defaultIdAlloc = (kind: "run" | "inbox", automationId: string, firedAt: number): string =>
-  `${kind}-${automationId}-${firedAt}`
-
 const sortByDueThenId = (rows: EngineAutomation[]): void => {
   rows.sort((a, b) => {
     if (a.nextRunAt !== b.nextRunAt) return a.nextRunAt - b.nextRunAt
@@ -224,7 +310,15 @@ const sortByDueThenId = (rows: EngineAutomation[]): void => {
   })
 }
 
-const buildRun = (input: MarkRunInput, runId: string): AutomationRun => {
+const buildRun = (
+  input: {
+    id: string
+    firedAt: number
+    outcome: "fired" | "errored"
+    errorMessage?: string
+  },
+  runId: string,
+): AutomationRun => {
   const base = {
     id: runId,
     automationId: input.id,

@@ -71,27 +71,31 @@ export interface TickOpts {
 /**
  * Execute exactly one tick. Returns a typed outcome — never throws.
  *
- * Semantics:
- *   1. Find next due → if `null`, return `idle`.
- *   2. Compute `nextFire` from the rule + the row's anchor — `null` if
+ * T10 `claim -> execute -> finalize` run model:
+ *   1. `claim(now)` atomically picks the soonest-due row, flips it to
+ *      `running`, and returns a claim token → if `null`, return `idle`. The
+ *      claim flip is engine-atomic so two overlapping ticks NEVER receive the
+ *      same row (no double-execution; L9 M11).
+ *   2. Compute `nextFire` from the rule + the row's anchor — `null` if the
  *      rule is exhausted (UNTIL past, COUNT met).
  *   3. Invoke `handler(automation)` — synchronously or async.
- *   4. On handler return: `markRun(outcome:"fired", nextRunAt)`.
- *   5. On handler throw: `markRun(outcome:"errored", nextRunAt)`. The error
- *      is preserved in `lastError`; the row stays `scheduled` so it can
- *      retry next tick (unless rule exhausted, in which case it transitions
- *      to `errored`).
+ *   4. `finalize(claimToken, outcome, nextRunAt)` records the run + inbox and
+ *      advances: a live future fire stays `scheduled` (retries next tick) even
+ *      when the handler threw (L9 H5); only a rule-exhausted error retires to
+ *      `errored`. The claim token guards against a stale worker finalizing a
+ *      row another worker now owns.
  */
 export const tickScheduler = async (opts: TickOpts): Promise<TickOutcome> => {
   const { engine, now, handler, inbox = defaultInboxBuilder } = opts
-  const nextRes = await engine.next(now)
-  if (!nextRes.ok) {
-    return { kind: "engine-error", at: now, error: nextRes }
+  const claimRes = await engine.claim(now)
+  if (!claimRes.ok) {
+    return { kind: "engine-error", at: now, error: claimRes }
   }
-  const due = nextRes.value
-  if (due === null) {
+  const claimed = claimRes.value
+  if (claimed === null) {
     return { kind: "idle", at: now }
   }
+  const due = claimed.automation
 
   const nextRunAt = computeNextFireAfter(due.rule, now, due.fireCount + 1)
   let handlerThrew: unknown
@@ -112,8 +116,9 @@ export const tickScheduler = async (opts: TickOpts): Promise<TickOutcome> => {
           : "handler threw non-Error"
   const built = inbox(due, outcome)
 
-  const markRes = await engine.markRun({
+  const finRes = await engine.finalize({
     id: due.id,
+    claimToken: claimed.claimToken,
     firedAt: now,
     outcome,
     ...(errorMessage !== undefined ? { errorMessage } : {}),
@@ -121,8 +126,8 @@ export const tickScheduler = async (opts: TickOpts): Promise<TickOutcome> => {
     inboxTitle: built.title,
     inboxSummary: built.summary,
   })
-  if (!markRes.ok) {
-    return { kind: "engine-error", at: now, error: markRes }
+  if (!finRes.ok) {
+    return { kind: "engine-error", at: now, error: finRes }
   }
   if (outcome === "errored") {
     return {

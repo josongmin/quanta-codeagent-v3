@@ -14,10 +14,13 @@ export { inMemoryAutomationEngine } from "./in-memory"
 export type {
   AutomationEnginePort,
   AutomationRun,
+  ClaimedRun,
+  ClaimOpts,
   EngineAutomation,
   EngineErrorResult,
   EngineResult,
   EngineStatus,
+  FinalizeInput,
   InboxItem,
   MarkRunInput,
   ScheduleInput,

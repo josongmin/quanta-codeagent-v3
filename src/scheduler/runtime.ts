@@ -82,8 +82,18 @@ export const createSchedulerRuntime = (opts: SchedulerRuntimeOpts): SchedulerRun
     let automations: ReadonlyArray<Automation>
     try {
       automations = await opts.store.load(opts.workspace)
-    } catch {
-      // Load errors are NO-THROW per the port contract; defensive double-guard.
+    } catch (e) {
+      // T10 M9 — a load fault (EACCES / partial-IO) is now a FIRST-CLASS error
+      // surfaced by the store (not collapsed to `[]`). It must be observable:
+      // a silent return makes a broken store indistinguishable from "no
+      // automations" — every automation silently stops firing. Emit a skip so
+      // an operator can see the tick aborted on a store fault.
+      opts.sink?.emit({
+        type: "scheduler.skipped",
+        automationId: `__store__:${stringifyError(e)}`,
+        reason: "store-load-failed",
+        at: now,
+      })
       return
     }
     for (const automation of automations) {
@@ -151,29 +161,55 @@ const processAutomation = async (
   } catch {
     // chooseModel's contract is non-throwing (it swallows port throws). This
     // catch is defense-in-depth.
-    await persistError(automation, "model probe threw unexpectedly", opts)
-    opts.sink?.emit({
-      type: "scheduler.error",
-      automationId: automation.id,
-      errorMessage: "model probe threw unexpectedly",
-      at: now,
-    })
-    return
-  }
-
-  if (chosen.reason === "all-unavailable") {
-    const msg = "all models unavailable"
-    await persistError(automation, msg, opts)
+    const msg = "model probe threw unexpectedly"
+    const persisted = await persistError(automation, msg, opts)
     opts.sink?.emit({
       type: "scheduler.error",
       automationId: automation.id,
       errorMessage: msg,
       at: now,
     })
+    emitIfPersistFailed(persisted, automation.id, now, opts)
     return
   }
 
-  // 4. Enqueue the prompt onto the agent loop. The reactor uses the same
+  if (chosen.reason === "all-unavailable") {
+    const msg = "all models unavailable"
+    const persisted = await persistError(automation, msg, opts)
+    opts.sink?.emit({
+      type: "scheduler.error",
+      automationId: automation.id,
+      errorMessage: msg,
+      at: now,
+    })
+    emitIfPersistFailed(persisted, automation.id, now, opts)
+    return
+  }
+
+  // 4. PERSIST-BEFORE-DISPATCH (T10 M7). The fire anchor (fireCount + 1,
+  //    lastFiredAt = now) is committed to the store BEFORE the prompt is
+  //    enqueued. A crash in the dispatch→return window therefore leaves the
+  //    advanced anchor on disk, so the reloaded automation is no longer due
+  //    and the mutating prompt is NOT re-dispatched. (Previously the order was
+  //    dispatch-then-save: a crash between the two re-fired the prompt every
+  //    tick — at-least-once on a mutating agent prompt with no idempotency.)
+  const fired = recordFire(automation, now)
+  try {
+    await opts.store.save(opts.workspace, fired)
+  } catch {
+    // The anchor did not advance. We do NOT dispatch — dispatching without a
+    // persisted anchor is the exact double-dispatch hazard M7 closes. Surface
+    // the failure so it cannot silently mark the fire complete.
+    opts.sink?.emit({
+      type: "scheduler.skipped",
+      automationId: automation.id,
+      reason: "store-save-failed",
+      at: now,
+    })
+    return
+  }
+
+  // 5. Enqueue the prompt onto the agent loop. The reactor uses the same
   //    port for `manual_resume` — we reuse the exact seam, not a new trigger.
   try {
     await opts.agentLoop.enqueueUserMessage(automation.prompt, {
@@ -181,31 +217,15 @@ const processAutomation = async (
     })
   } catch (e) {
     const msg = `enqueue failed: ${stringifyError(e)}`
-    await persistError(automation, msg, opts)
+    const persisted = await persistError(automation, msg, opts)
     opts.sink?.emit({
       type: "scheduler.error",
       automationId: automation.id,
       errorMessage: msg,
       at: now,
     })
+    emitIfPersistFailed(persisted, automation.id, now, opts)
     return
-  }
-
-  // 5. Persist the success (fireCount + 1, lastFiredAt = now).
-  const fired = recordFire(automation, now)
-  try {
-    await opts.store.save(opts.workspace, fired)
-  } catch {
-    opts.sink?.emit({
-      type: "scheduler.skipped",
-      automationId: automation.id,
-      reason: "store-save-failed",
-      at: now,
-    })
-    // The agent loop already received the prompt; we lost the persistence
-    // round-trip. Next tick will re-fire (the recorded state is the previous
-    // anchor — runtime is at-least-once for now, by design + a deliberate
-    // limitation documented in the ADR).
   }
 
   // 6. Emit the fire event.
@@ -219,17 +239,46 @@ const processAutomation = async (
   })
 }
 
+/**
+ * Persist the `error` transition. Returns `true` when the error state landed
+ * on disk, `false` when the save itself failed.
+ *
+ * T10 M10 — a failed error-state save used to be swallowed with a comment
+ * claiming "observable in next load attempt's failure"; that was false (load
+ * faults were ALSO swallowed, see M9, and even now a load fault surfaces as a
+ * DIFFERENT signal). A swallow here leaves the row `active` on disk so a
+ * permanently-failing model probe re-fires every tick with NO observability.
+ * We now return the failure so the caller emits an observable event.
+ */
 const persistError = async (
   automation: Automation,
   message: string,
   opts: SchedulerRuntimeOpts,
-): Promise<void> => {
+): Promise<boolean> => {
   const errored = markError(automation, message)
   try {
     await opts.store.save(opts.workspace, errored)
+    return true
   } catch {
-    // Swallow — `error` arm is observable in next load attempt's failure.
+    return false
   }
+}
+
+/** Emit a `store-save-failed` skip event when an error-state persist failed,
+ *  so the failure is observable rather than silently dropped (T10 M10). */
+const emitIfPersistFailed = (
+  persisted: boolean,
+  automationId: string,
+  now: number,
+  opts: SchedulerRuntimeOpts,
+): void => {
+  if (persisted) return
+  opts.sink?.emit({
+    type: "scheduler.skipped",
+    automationId,
+    reason: "store-save-failed",
+    at: now,
+  })
 }
 
 const skipReasonFromStatus = (s: Automation["status"]): "paused" | "deleted" | "status-error" => {

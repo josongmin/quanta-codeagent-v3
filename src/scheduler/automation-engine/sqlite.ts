@@ -36,13 +36,23 @@ import type { RRule, Weekday } from "../types"
 import type {
   AutomationEnginePort,
   AutomationRun,
+  ClaimedRun,
+  ClaimOpts,
   EngineAutomation,
   EngineResult,
   EngineStatus,
+  FinalizeInput,
   InboxItem,
   MarkRunInput,
   ScheduleInput,
 } from "./port"
+import {
+  advancedStatus,
+  defaultRunIdAllocator,
+  makeSeq,
+  mintClaimToken,
+  type RunIdAllocator,
+} from "./run-model"
 
 /** Idempotent migration — create all 3 tables + supporting indices. */
 export const ensureAutomationEngineSchema = (db: Database): void => {
@@ -57,9 +67,16 @@ export const ensureAutomationEngineSchema = (db: Database): void => {
       status          TEXT    NOT NULL,
       last_error      TEXT,
       created_at      INTEGER NOT NULL,
-      fire_count      INTEGER NOT NULL DEFAULT 0
+      fire_count      INTEGER NOT NULL DEFAULT 0,
+      claim_token     TEXT,
+      claimed_at      INTEGER
     )
   `)
+  // T10 — additive migration for DBs created before the claim/finalize run
+  // model. `ALTER TABLE ADD COLUMN` is idempotent here only via a probe (it
+  // throws on a duplicate column), so guard on the pragma column list.
+  ensureColumn(db, "automations", "claim_token", "TEXT")
+  ensureColumn(db, "automations", "claimed_at", "INTEGER")
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_automations_next_run
       ON automations(status, next_run_at)
@@ -95,6 +112,13 @@ export const ensureAutomationEngineSchema = (db: Database): void => {
   `)
 }
 
+/** Add `column` to `table` if a pre-T10 DB lacks it. Idempotent. */
+const ensureColumn = (db: Database, table: string, column: string, type: string): void => {
+  const cols = db.query(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+  if (cols.some((c) => c.name === column)) return
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`)
+}
+
 interface AutomationRow {
   id: string
   title: string
@@ -106,10 +130,16 @@ interface AutomationRow {
   last_error: string | null
   created_at: number
   fire_count: number
+  claim_token: string | null
+  claimed_at: number | null
 }
 
 const isEngineStatus = (s: string): s is EngineStatus =>
-  s === "scheduled" || s === "fired" || s === "cancelled" || s === "errored"
+  s === "scheduled" ||
+  s === "running" ||
+  s === "fired" ||
+  s === "cancelled" ||
+  s === "errored"
 
 const parseRuleJson = (raw: string): RRule | undefined => {
   let parsed: unknown
@@ -150,6 +180,8 @@ const rowToEngineAutomation = (row: AutomationRow): EngineAutomation | undefined
     ...base,
     ...(row.last_run_at !== null ? { lastRunAt: row.last_run_at } : {}),
     ...(row.last_error !== null ? { lastError: row.last_error } : {}),
+    ...(row.claim_token !== null ? { claimToken: row.claim_token } : {}),
+    ...(row.claimed_at !== null ? { claimedAt: row.claimed_at } : {}),
   }
 }
 
@@ -159,12 +191,10 @@ const ioFail = (message: string): EngineResult<never> => ({
   message,
 })
 
-const defaultIdAlloc = (kind: "run" | "inbox", automationId: string, firedAt: number): string =>
-  `${kind}-${automationId}-${firedAt}`
-
 export interface SqliteAutomationEngineOpts {
-  /** Override run / inbox id generation (tests). */
-  readonly idAllocator?: (kind: "run" | "inbox", automationId: string, firedAt: number) => string
+  /** Override run / inbox id generation (tests). The `seq` argument is a
+   *  monotonic same-ms disambiguator (T10 M8). */
+  readonly idAllocator?: RunIdAllocator
 }
 
 export const sqliteAutomationEngine = (
@@ -172,7 +202,8 @@ export const sqliteAutomationEngine = (
   opts: SqliteAutomationEngineOpts = {},
 ): AutomationEnginePort => {
   ensureAutomationEngineSchema(db)
-  const idAlloc = opts.idAllocator ?? defaultIdAlloc
+  const idAlloc = opts.idAllocator ?? defaultRunIdAllocator
+  const nextSeq = makeSeq()
 
   const insertStmt = db.query(`
     INSERT INTO automations
@@ -205,8 +236,32 @@ export const sqliteAutomationEngine = (
       next_run_at = $next_run_at,
       status      = $status,
       last_error  = $last_error,
-      fire_count  = fire_count + 1
+      fire_count  = fire_count + 1,
+      claim_token = NULL,
+      claimed_at  = NULL
     WHERE id = $id AND status != 'cancelled'
+  `)
+  // T10 — atomic claim. A SINGLE `UPDATE ... RETURNING` flips the soonest-due
+  // claimable row to `running` and hands it back, so two overlapping ticker
+  // callers can never receive the same row. A `scheduled` row is always
+  // claimable; a `running` row is claimable ONLY when its claim is stale
+  // (claimed_at <= $reclaim_before) — recovering a crashed worker's claim.
+  const claimStmt = db.query(`
+    UPDATE automations SET
+      status      = 'running',
+      claim_token = $claim_token,
+      claimed_at  = $claimed_at
+    WHERE id = (
+      SELECT id FROM automations
+      WHERE (status = 'scheduled' AND next_run_at <= $now)
+         OR (status = 'running'
+             AND $reclaim_before IS NOT NULL
+             AND claimed_at IS NOT NULL
+             AND claimed_at <= $reclaim_before)
+      ORDER BY next_run_at ASC, id ASC
+      LIMIT 1
+    )
+    RETURNING *
   `)
   const insertRunStmt = db.query(`
     INSERT INTO automation_runs (id, automation_id, fired_at, outcome, error_message)
@@ -306,56 +361,107 @@ export const sqliteAutomationEngine = (
           message: `automation '${input.id}' not found / cancelled`,
         })
       }
-      const nextStatus: EngineStatus =
-        input.outcome === "errored" ? "errored" : input.nextRunAt === null ? "fired" : "scheduled"
-      const persistedNextRunAt = input.nextRunAt ?? input.firedAt
-      const lastErrorBind: string | null =
-        input.outcome === "errored" && input.errorMessage !== undefined ? input.errorMessage : null
-      const errorMessageBind: string | null =
-        input.outcome === "errored" && input.errorMessage !== undefined ? input.errorMessage : null
-
-      const runId = idAlloc("run", input.id, input.firedAt)
-      const inboxId = idAlloc("inbox", input.id, input.firedAt)
-
-      // 3-table atomic write — bun:sqlite supports `db.transaction()`.
-      try {
-        db.transaction(() => {
-          insertRunStmt.run({
-            $id: runId,
-            $automation_id: input.id,
-            $fired_at: input.firedAt,
-            $outcome: input.outcome,
-            $error_message: errorMessageBind,
-          })
-          insertInboxStmt.run({
-            $id: inboxId,
-            $automation_id: input.id,
-            $title: input.inboxTitle,
-            $summary: input.inboxSummary,
-            $created_at: input.firedAt,
-          })
-          updateOnRunStmt.run({
-            $id: input.id,
-            $last_run_at: input.firedAt,
-            $next_run_at: persistedNextRunAt,
-            $status: nextStatus,
-            $last_error: lastErrorBind,
-          })
-        })()
-      } catch (e) {
-        return Promise.resolve(ioFail(`markRun failed: ${errMessage(e)}`))
-      }
-
-      const after = getStmt.get(input.id) as AutomationRow | null
-      if (after === null) {
-        return Promise.resolve(ioFail("markRun: row vanished after update"))
-      }
-      const mapped = rowToEngineAutomation(after)
-      if (mapped === undefined) {
-        return Promise.resolve(ioFail("markRun: row malformed after update"))
-      }
-      return Promise.resolve({ ok: true, value: mapped })
+      return Promise.resolve(runFinalize(input))
     },
+
+    claim(now: number, claimOpts?: ClaimOpts): Promise<EngineResult<ClaimedRun | null>> {
+      const claimToken = mintClaimToken(`pending-${now}`, now, nextSeq())
+      let row: unknown
+      try {
+        // Single atomic UPDATE...RETURNING — the row flips to `running` and is
+        // returned in ONE statement, so an overlapping claim cannot see it as
+        // `scheduled`.
+        row = claimStmt.get({
+          $now: now,
+          $claim_token: claimToken,
+          $claimed_at: now,
+          $reclaim_before: claimOpts?.reclaimBefore ?? null,
+        })
+      } catch (e) {
+        return Promise.resolve(ioFail(`claim failed: ${errMessage(e)}`))
+      }
+      if (row === null || row === undefined) {
+        return Promise.resolve({ ok: true, value: null })
+      }
+      const mapped = rowToEngineAutomation(row as AutomationRow)
+      if (mapped === undefined) {
+        return Promise.resolve(ioFail("claim: row malformed"))
+      }
+      return Promise.resolve({ ok: true, value: { automation: mapped, claimToken } })
+    },
+
+    finalize(input: FinalizeInput): Promise<EngineResult<EngineAutomation>> {
+      const existing = getStmt.get(input.id) as AutomationRow | null
+      if (
+        existing === null ||
+        existing.status !== "running" ||
+        existing.claim_token !== input.claimToken
+      ) {
+        return Promise.resolve({
+          ok: false,
+          code: "not-found",
+          message: `automation '${input.id}' not claimable / token mismatch`,
+        })
+      }
+      return Promise.resolve(runFinalize(input))
+    },
+  }
+
+  /** Shared finalize body for `markRun` + `finalize`: 3-table atomic write
+   *  (run + inbox + advance), with the post-fire status decided by the shared
+   *  {@link advancedStatus} rule so both verbs stay byte-equal. Caller has
+   *  already validated the row is finalize-eligible. */
+  function runFinalize(input: {
+    id: string
+    firedAt: number
+    outcome: "fired" | "errored"
+    errorMessage?: string
+    nextRunAt: number | null
+    inboxTitle: string
+    inboxSummary: string
+  }): EngineResult<EngineAutomation> {
+    const nextStatus: EngineStatus = advancedStatus(input.outcome, input.nextRunAt !== null)
+    const persistedNextRunAt = input.nextRunAt ?? input.firedAt
+    const errorBind: string | null =
+      input.outcome === "errored" && input.errorMessage !== undefined ? input.errorMessage : null
+
+    const seq = nextSeq()
+    const runId = idAlloc("run", input.id, input.firedAt, seq)
+    const inboxId = idAlloc("inbox", input.id, input.firedAt, seq)
+
+    try {
+      db.transaction(() => {
+        insertRunStmt.run({
+          $id: runId,
+          $automation_id: input.id,
+          $fired_at: input.firedAt,
+          $outcome: input.outcome,
+          $error_message: errorBind,
+        })
+        insertInboxStmt.run({
+          $id: inboxId,
+          $automation_id: input.id,
+          $title: input.inboxTitle,
+          $summary: input.inboxSummary,
+          $created_at: input.firedAt,
+        })
+        updateOnRunStmt.run({
+          $id: input.id,
+          $last_run_at: input.firedAt,
+          $next_run_at: persistedNextRunAt,
+          $status: nextStatus,
+          $last_error: errorBind,
+        })
+      })()
+    } catch (e) {
+      return ioFail(`finalize failed: ${errMessage(e)}`)
+    }
+
+    const after = getStmt.get(input.id) as AutomationRow | null
+    if (after === null) return ioFail("finalize: row vanished after update")
+    const mapped = rowToEngineAutomation(after)
+    if (mapped === undefined) return ioFail("finalize: row malformed after update")
+    return { ok: true, value: mapped }
   }
 }
 

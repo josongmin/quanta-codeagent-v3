@@ -190,7 +190,11 @@ describe("ADR-0215 — AutomationEnginePort adversarial battery", () => {
     expect(n.value).toBeNull()
   })
 
-  test("[8] markRun outcome=errored sets lastError + status=errored", async () => {
+  test("[8] markRun outcome=errored WITH a live future fire stays scheduled (retry), retains lastError", async () => {
+    // T10 H5 — a transient error on a recurring rule must NOT retire the row.
+    // It stays `scheduled` so the next tick retries; `lastError` is retained
+    // for observability. (Only a rule-EXHAUSTED error → `errored`, asserted in
+    // the T10 hellgate battery via nextRunAt=null.)
     const eng = inMemoryAutomationEngine()
     await eng.schedule({
       id: "a1",
@@ -210,8 +214,32 @@ describe("ADR-0215 — AutomationEnginePort adversarial battery", () => {
       inboxSummary: "y",
     })
     if (!r.ok) throw new Error("unreachable")
-    expect(r.value.status).toBe("errored")
+    expect(r.value.status).toBe("scheduled")
     expect(r.value.lastError).toBe("boom")
+  })
+
+  test("[8b] markRun outcome=errored with EXHAUSTED rule (nextRunAt=null) retires to errored", async () => {
+    const eng = inMemoryAutomationEngine()
+    await eng.schedule({
+      id: "a1",
+      title: "T",
+      rule: ruleOf("FREQ=DAILY"),
+      prompt: "p",
+      nextRunAt: utc(2026, 5, 25, 10),
+      createdAt: utc(2026, 5, 25),
+    })
+    const r = await eng.markRun({
+      id: "a1",
+      firedAt: utc(2026, 5, 25, 10),
+      outcome: "errored",
+      errorMessage: "final boom",
+      nextRunAt: null,
+      inboxTitle: "x",
+      inboxSummary: "y",
+    })
+    if (!r.ok) throw new Error("unreachable")
+    expect(r.value.status).toBe("errored")
+    expect(r.value.lastError).toBe("final boom")
   })
 
   test("[9] tickScheduler idle when no rows due", async () => {
@@ -246,10 +274,14 @@ describe("ADR-0215 — AutomationEnginePort adversarial battery", () => {
     expect(out.kind).toBe("errored")
     if (out.kind !== "errored") throw new Error("unreachable")
     expect(out.errorMessage).toBe("kaboom")
-    // The row recorded the error
+    // The row recorded the error. T10 H5: a recurring rule (FREQ=DAILY has a
+    // live future fire) does NOT retire to `errored` — it stays `scheduled` so
+    // the next tick retries. The tick RESULT is still `errored` and lastError
+    // is recorded (an exhausted rule with no future fire would retire; see the
+    // T10 runtime-correctness H5-1/H5-2 hellgates).
     const list = await eng.list()
     if (!list.ok) throw new Error("unreachable")
-    expect(list.value[0]!.status).toBe("errored")
+    expect(list.value[0]!.status).toBe("scheduled")
     expect(list.value[0]!.lastError).toBe("kaboom")
   })
 

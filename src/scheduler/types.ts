@@ -245,7 +245,12 @@ export type SchedulerEvent =
   | {
       readonly type: "scheduler.skipped"
       readonly automationId: string
-      readonly reason: "paused" | "deleted" | "status-error" | "store-save-failed"
+      readonly reason:
+        | "paused"
+        | "deleted"
+        | "status-error"
+        | "store-save-failed"
+        | "store-load-failed"
       readonly at: number
     }
 

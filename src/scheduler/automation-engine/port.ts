@@ -26,15 +26,22 @@
 
 import type { RRule } from "../types"
 
-/** 4-arm engine lifecycle. Distinct from `AutomationStatus` (host UX) — the
+/** 5-arm engine lifecycle. Distinct from `AutomationStatus` (host UX) — the
  *  engine only cares about fire-eligibility, so `paused` collapses to
  *  `cancelled` here (engine doesn't expose resume; that's the host's job by
- *  re-scheduling). */
-export type EngineStatus = "scheduled" | "fired" | "cancelled" | "errored"
+ *  re-scheduling).
+ *
+ *  `running` is the durable in-flight marker written by `claim()` — it is the
+ *  middle state of the `claim -> execute -> finalize` run model (T10). A row
+ *  in `running` is NOT re-handed-out by `next()`/`claim()` (so overlapping
+ *  ticks cannot double-execute it) UNTIL `finalize()` transitions it back to
+ *  `scheduled`/`fired`/`errored`, OR a restart reclaims a stale claim. */
+export type EngineStatus = "scheduled" | "running" | "fired" | "cancelled" | "errored"
 
 /** All engine statuses — closed array for exhaustiveness checks. */
 export const ALL_ENGINE_STATUSES: ReadonlyArray<EngineStatus> = [
   "scheduled",
+  "running",
   "fired",
   "cancelled",
   "errored",
@@ -63,12 +70,21 @@ export interface EngineAutomation {
   /** Closed engine lifecycle (see {@link EngineStatus}). */
   readonly status: EngineStatus
   /** Free-form error string when `status === 'errored'`. KEY OMITTED
-   *  otherwise. */
+   *  otherwise. Also retained while `status === 'scheduled'` after a
+   *  recoverable error so the host can observe the last failure even though
+   *  the row is still retrying (T10 H5). */
   readonly lastError?: string
   /** ms-epoch when the row was first scheduled. */
   readonly createdAt: number
   /** Cumulative fire count — preserved across status transitions. */
   readonly fireCount: number
+  /** Opaque token written by `claim()` and cleared by `finalize()`. Present
+   *  ONLY while `status === 'running'` (durable in-flight marker). KEY OMITTED
+   *  otherwise. */
+  readonly claimToken?: string
+  /** ms-epoch when the row was claimed. Present ONLY while
+   *  `status === 'running'`; used to reclaim stale claims after a crash. */
+  readonly claimedAt?: number
 }
 
 /** Input to `schedule()` — caller already computed `nextRunAt`. */
@@ -143,14 +159,81 @@ export interface AutomationEnginePort {
   cancel(id: string): Promise<EngineResult<void>>
   next(now: number): Promise<EngineResult<EngineAutomation | null>>
   markRun(input: MarkRunInput): Promise<EngineResult<EngineAutomation>>
+  /**
+   * T10 — the `claim` verb of the `claim -> execute -> finalize` run model.
+   *
+   * Atomically pick the soonest-due `scheduled` row at-or-before `now`, flip
+   * it to `running` with a fresh `claimToken`/`claimedAt`, and return it. The
+   * flip is a SINGLE atomic statement (SQLite `UPDATE ... RETURNING`; the
+   * in-memory engine does it under its synchronous critical section), so two
+   * overlapping ticker invocations can never receive the SAME row — a fired
+   * automation is executed at most once per due instant.
+   *
+   * `value: null` when nothing is claimable.
+   *
+   * `opts.reclaimBefore` — when set, a row already `running` whose `claimedAt`
+   * is `<= reclaimBefore` (a stale claim left by a crashed worker) is also
+   * eligible: it is re-claimed with a fresh token. Absent ⇒ only `scheduled`
+   * rows are claimable.
+   */
+  claim(now: number, opts?: ClaimOpts): Promise<EngineResult<ClaimedRun | null>>
+  /**
+   * T10 — the `finalize` verb. Records the run + inbox rows and advances the
+   * automation (back to `scheduled` for a live recurring fire, `fired` when
+   * the rule is exhausted, `errored` only when an error coincides with rule
+   * exhaustion). The supplied `claimToken` MUST match the row's current token
+   * (the token the matching `claim()` returned); a mismatch yields
+   * `not-found` so a stale worker cannot finalize a row another worker owns.
+   */
+  finalize(input: FinalizeInput): Promise<EngineResult<EngineAutomation>>
+}
+
+/** Options for {@link AutomationEnginePort.claim}. */
+export interface ClaimOpts {
+  /** Reclaim a stale `running` row whose `claimedAt <= reclaimBefore`. */
+  readonly reclaimBefore?: number
+}
+
+/** Result of a successful {@link AutomationEnginePort.claim}. */
+export interface ClaimedRun {
+  /** The claimed automation snapshot (status === 'running'). */
+  readonly automation: EngineAutomation
+  /** The token the caller passes back to {@link AutomationEnginePort.finalize}. */
+  readonly claimToken: string
+}
+
+/**
+ * Input to `finalize`. Mirrors {@link MarkRunInput} but carries the
+ * `claimToken` minted by `claim()`. `nextRunAt` semantics:
+ *   - number → row returns to `scheduled`, `nextRunAt` advances (the row
+ *              retries on its next due instant even when `outcome:"errored"`,
+ *              because a live future fire means the failure is transient).
+ *   - null   → rule exhausted: `fired` (success) or `errored` (failure).
+ */
+export interface FinalizeInput {
+  readonly id: string
+  readonly claimToken: string
+  readonly firedAt: number
+  readonly outcome: "fired" | "errored"
+  readonly errorMessage?: string
+  readonly nextRunAt: number | null
+  readonly inboxTitle: string
+  readonly inboxSummary: string
 }
 
 /**
  * Input to `markRun`. The caller (ticker) supplies the next-fire computation
  * outcome via `nextRunAt`:
- *   - number → row stays `scheduled`, its `nextRunAt` advances.
- *   - null   → row transitions to `fired` (rule exhausted) and stops being
- *              picked by `next()`.
+ *   - number → row stays `scheduled`, its `nextRunAt` advances. This holds
+ *              EVEN when `outcome:"errored"` — a live future fire means the
+ *              failure is transient and the automation retries next tick
+ *              (T10 H5). `lastError` is recorded but the row is NOT retired.
+ *   - null   → rule exhausted. `outcome:"fired"` → `fired`; `outcome:"errored"`
+ *              → `errored` (terminal). Either way it stops being picked.
+ *
+ * `markRun` is retained as the pre-T10 single-shot verb (no claim token). The
+ * T10 `claim -> finalize` pair is the idempotent run model; `markRun` shares
+ * the same advance/retire rules so both paths stay byte-equal.
  */
 export interface MarkRunInput {
   readonly id: string

@@ -63,6 +63,16 @@ export interface JsonlAutomationStoreOpts {
   readonly baseDir?: string
   /** Override hasher (tests only). */
   readonly workspaceHasher?: (workspace: string) => string
+  /** Override the file reader (tests inject fault-injection). Default
+   *  `node:fs/promises` `readFile`. Must reject with an ENOENT-coded error
+   *  when the file is absent. */
+  readonly reader?: (file: string) => Promise<string>
+  /** Override the appender (tests inject fault-injection). Default
+   *  `node:fs/promises` `appendFile`. */
+  readonly appender?: (file: string, line: string) => Promise<void>
+  /** Override directory creation (tests inject). Default `node:fs/promises`
+   *  `mkdir(dir, { recursive: true })`. */
+  readonly mkdirer?: (dir: string) => Promise<void>
 }
 
 const FILE_NAME = "automations.jsonl"
@@ -238,11 +248,14 @@ export const defaultJsonlAutomationStore = (
 ): AutomationStorePort => {
   const baseDir = resolveBaseDir(opts)
   const hasher = opts?.workspaceHasher ?? defaultWorkspaceHash
+  const readImpl = opts?.reader ?? ((file: string) => readFile(file, "utf8"))
+  const appendImpl = opts?.appender ?? ((file: string, line: string) => appendFile(file, line, "utf8"))
+  const mkdirImpl = opts?.mkdirer ?? (async (dir: string) => void (await mkdir(dir, { recursive: true })))
 
   const ensureDir = async (workspace: string): Promise<string> => {
     const dir = workspaceDir(baseDir, hasher, workspace)
     try {
-      await mkdir(dir, { recursive: true })
+      await mkdirImpl(dir)
     } catch (e) {
       throw new AutomationStoreError("io-failed", `mkdir failed: ${stringifyError(e)}`)
     }
@@ -255,11 +268,15 @@ export const defaultJsonlAutomationStore = (
       const file = automationsFile(dir)
       let text: string
       try {
-        text = await readFile(file, "utf8")
+        text = await readImpl(file)
       } catch (e) {
-        if (isEnoent(e)) return []
-        // Any other read failure: surface as empty list (NO-THROW contract).
-        return []
+        if (isEnoent(e)) return [] // genuinely absent ⇒ empty (no false fault)
+        // T10 M9 — a non-ENOENT read fault (EACCES / partial-IO) is a
+        // FIRST-CLASS error, NOT an empty list. Collapsing it to `[]` makes a
+        // permission/disk fault indistinguishable from "no automations" and
+        // silently stops every automation from firing. Surface it so the
+        // runtime can observe + sink it.
+        throw new AutomationStoreError("io-failed", `load failed: ${stringifyError(e)}`)
       }
       const map = buildLatestMap(text)
       return dropDeleted(map)
@@ -270,7 +287,7 @@ export const defaultJsonlAutomationStore = (
       const file = automationsFile(dir)
       const line = `${JSON.stringify(automation)}\n`
       try {
-        await appendFile(file, line, "utf8")
+        await appendImpl(file, line)
       } catch (e) {
         throw new AutomationStoreError("io-failed", `append failed: ${stringifyError(e)}`)
       }
@@ -285,21 +302,22 @@ export const defaultJsonlAutomationStore = (
       // record, copy + mark deleted. If absent, no-op (idempotent).
       let text: string
       try {
-        text = await readFile(file, "utf8")
+        text = await readImpl(file)
       } catch (e) {
         if (isEnoent(e)) return // unknown id, file doesn't exist
-        return
+        // T10 M9 — a read fault is first-class (same reasoning as load()).
+        throw new AutomationStoreError("io-failed", `delete read failed: ${stringifyError(e)}`)
       }
       const map = buildLatestMap(text)
       const found = map.get(id)
       if (found === undefined) return
       const tombstone: Automation = { ...found, status: "deleted" }
       try {
-        await appendFile(file, `${JSON.stringify(tombstone)}\n`, "utf8")
-      } catch {
-        // NO-THROW on delete — losing a tombstone leaves the record visible
-        // but the runtime's fireEligible predicate is on active-only, so
-        // worst case the operator sees a stale entry until next save.
+        await appendImpl(file, `${JSON.stringify(tombstone)}\n`)
+      } catch (e) {
+        // T10 M9 — a swallowed tombstone makes the caller believe the
+        // automation is gone while it keeps firing every tick. Surface it.
+        throw new AutomationStoreError("io-failed", `delete tombstone failed: ${stringifyError(e)}`)
       }
     },
   }
