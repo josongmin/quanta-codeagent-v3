@@ -40,6 +40,14 @@ export interface DefaultDispatchGuardOptions {
    *  default-on path safe: a host filter only fires when the operator wired
    *  one. An EMPTY array (`[]`) means "deny everything", per the detector. */
   readonly networkAllowlist?: readonly string[]
+  /** ADR-0135 `NetworkPolicy.perRequestApproval` honoring. When `true`, an
+   *  egress-bearing call whose host is NOT on `networkAllowlist` routes to an
+   *  `ask` decision (HITL confirmation) instead of a terminal `deny`. The
+   *  dispatch wire collapses `ask` to the `"guard-ask"` preview tag. Absent /
+   *  `false` ⇒ legacy behavior (off-allowlist host ⇒ hard `deny`). Only
+   *  consulted when `networkAllowlist` is also present (the host check is
+   *  SKIPPED entirely when the allowlist is absent). */
+  readonly perRequestApproval?: boolean
 }
 
 /** Pull a string field from an unknown record, narrow-typed. Returns null when
@@ -111,6 +119,15 @@ const checkHostAllowlist = (
   const urlOrHost = extractUrlOrHost(input)
   if (urlOrHost === null) return null
   if (isHostAllowed(urlOrHost, opts.networkAllowlist)) return null
+  // ADR-0135 `perRequestApproval`: an off-allowlist host routes to HITL `ask`
+  // rather than a terminal `deny`. The composer keeps `ask` (never collapses
+  // it to `allow`); the dispatch wire surfaces it as the `"guard-ask"` tag.
+  if (opts.perRequestApproval === true) {
+    return {
+      kind: "ask",
+      reason: `host '${urlOrHost}' not in network allowlist (size=${opts.networkAllowlist.length}); per-request approval required.`,
+    }
+  }
   return {
     kind: "deny",
     reason: `host '${urlOrHost}' not in network allowlist (size=${opts.networkAllowlist.length}).`,

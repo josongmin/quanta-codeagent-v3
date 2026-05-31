@@ -36,6 +36,7 @@
  */
 
 import { canAccess } from "./access-check"
+import { resolveProfileByName } from "./named-profiles"
 import type {
   FileSystemAccess,
   FileSystemSandboxPolicy,
@@ -69,6 +70,11 @@ interface ThreadLayered {
 export interface TwoLayerManager {
   /** Register / replace the {@link PermissionProfile} for `threadId`. */
   setPermissionProfile(threadId: string, profile: PermissionProfile): void
+  /** Track A2 — register / replace the profile for `threadId` BY NAME, resolved
+   *  through {@link NAMED_PROFILES}. Throws on an unknown / `custom` name (use
+   *  the struct API for bespoke `custom` profiles). Backward-compat: this is a
+   *  thin sugar over {@link setPermissionProfile} — the struct API is unchanged. */
+  setPermissionProfileByName(threadId: string, name: string): void
   /** Register / replace the {@link FileSystemSandboxPolicy} for `threadId`. */
   setFileSystemSandboxPolicy(threadId: string, sandbox: FileSystemSandboxPolicy): void
   /** Forget the layered state for `threadId`. After this, the gate abstains. */
@@ -108,6 +114,14 @@ export const createTwoLayerManager = (): TwoLayerManager => {
 
   return {
     setPermissionProfile(threadId, profile) {
+      upsert(threadId, (s) => {
+        s.profile = profile
+      })
+    },
+    setPermissionProfileByName(threadId, name) {
+      // Resolve through the registry (throws on unknown / `custom`), then reuse
+      // the struct path so there is ONE write site.
+      const profile = resolveProfileByName(name)
       upsert(threadId, (s) => {
         s.profile = profile
       })

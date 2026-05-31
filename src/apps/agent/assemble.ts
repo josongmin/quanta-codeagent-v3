@@ -32,6 +32,8 @@ import {
 } from "@/agent"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import { captureSnapshot } from "@/agent/context-change"
+import { buildNetworkDispatchGuard } from "@/agent/dispatch-guard"
+import { CI_BOT_DEFAULT_ALLOWLIST } from "@/runtime/network-allowlist"
 import { buildDefaultMentionResolver } from "@/agent/mention-runner"
 import { autoWirePluginActivation } from "@/agent/plugin-activation-handler"
 import { getGlobalSessionResourceRegistry } from "@/agent/session-resource-registry"
@@ -84,6 +86,14 @@ export interface CiBotExtras {
    *  comment back to GitHub (the `gh pr comment` write is skipped). The run
    *  still produces its outcome + exit code. Default = false (comment posted). */
   dryRun?: boolean
+  /** Track A1 — extra hosts to allow beyond the ci-bot default egress set when
+   *  the active mode's network posture is `allowlist`. Deduped against
+   *  {@link CI_BOT_DEFAULT_ALLOWLIST}. Absent ⇒ default set only. */
+  extraAllowedHosts?: readonly string[]
+  /** Track A1 — honor `NetworkPolicy.perRequestApproval`: when true, an
+   *  off-allowlist egress host routes to HITL `ask` (preview `"guard-ask"`)
+   *  instead of a terminal deny. Absent / false ⇒ off-list host ⇒ hard deny. */
+  perRequestApproval?: boolean
 }
 
 /** Run-outcome envelope returned by every mode runner. Mirrors the shape
@@ -170,6 +180,44 @@ const mentionResolverDep = (cwd: string) => ({
   }),
 })
 
+/**
+ * Track A1 — derive the network-egress {@link DispatchGuard} from the active
+ * mode's `NetworkLever`, closing the "defined-but-not-enforced" hole.
+ *
+ * Returns `undefined` when the mode imposes NO network restriction
+ * (`network.kind === "open"`) — the caller then leaves `cfg.dispatchGuard`
+ * unset so dispatch is BYTE-IDENTICAL to the pre-wire path. Only the
+ * restrictive postures (`allowlist` / `denied`) activate enforcement; this is
+ * the natural default-OFF.
+ *
+ *   - `allowlist` ⇒ guard over the ci-bot default allowlist (+ operator extras
+ *                   from `req.ciBot` when present, deduped). When the mode's
+ *                   `PermissionProfile.network.perRequestApproval` is true an
+ *                   off-list host routes to HITL `ask` rather than a hard deny.
+ *   - `denied`    ⇒ guard over an EMPTY allowlist ⇒ every egress-bearing tool
+ *                   call is denied.
+ *
+ * Extracted so the `assembleAgentConfig` closure stays under biome's
+ * cognitive-complexity cap.
+ */
+const networkDispatchGuardFor = (req: AssembleRequest, policy: ModePolicy) => {
+  const posture = policy.network.kind
+  if (posture === "open") return undefined
+  // For the allowlist posture, the effective hosts are the audited ci-bot
+  // default set (the single source of truth for "small + audited" egress)
+  // plus any operator-supplied extras on the ci-bot request, deduped.
+  const extras = req.ciBot?.extraAllowedHosts ?? []
+  const hosts =
+    extras.length > 0
+      ? Array.from(new Set([...CI_BOT_DEFAULT_ALLOWLIST, ...extras]))
+      : CI_BOT_DEFAULT_ALLOWLIST
+  return buildNetworkDispatchGuard({
+    posture,
+    hosts,
+    ...(req.ciBot?.perRequestApproval === true ? { perRequestApproval: true } : {}),
+  })
+}
+
 /** Single source of truth for "config for this mode" assembly. */
 export const assembleAgentConfig = (req: AssembleRequest): AgentConfig => {
   const policy: ModePolicy = MODE_PRESETS[req.mode]
@@ -205,6 +253,16 @@ export const assembleAgentConfig = (req: AssembleRequest): AgentConfig => {
     // `req.base` wins; otherwise `QUANTA_SECRET_CHECK_TOOL=on`.
     secretCheckToolEnabled:
       req.base.secretCheckToolEnabled ?? process.env.QUANTA_SECRET_CHECK_TOOL === "on",
+  }
+  // Track A1 — network-egress enforcement. Derive the dispatch guard from the
+  // active mode's NetworkLever. Caller-override-precedence (ADR-0332): a
+  // pre-set `req.base.dispatchGuard` wins. When the mode is `open`-network the
+  // helper returns undefined and we leave the slot UNSET ⇒ dispatch is
+  // byte-identical to the pre-wire path (the natural default-OFF — only
+  // restrictive modes activate enforcement).
+  if (cfg.dispatchGuard === undefined) {
+    const networkGuard = networkDispatchGuardFor(req, policy)
+    if (networkGuard !== undefined) cfg.dispatchGuard = networkGuard
   }
   // ADR-0334 — populate the ADR-0327-family wire slots on the freshly
   // assembled cfg. Idempotent + caller-override-precedence (ADR-0332):

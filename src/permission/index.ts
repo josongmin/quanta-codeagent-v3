@@ -67,6 +67,14 @@ export {
   OutcomeInvariantError,
   requiresUserConfirmation,
 } from "./outcome"
+export type { NamedProfileName } from "./named-profiles"
+export {
+  isNamedProfileName,
+  NAMED_PROFILE_NAMES,
+  NAMED_PROFILES,
+  resolvePermissionProfileField,
+  resolveProfileByName,
+} from "./named-profiles"
 export type { HostAgentMode } from "./per-host-mode"
 export {
   clearHostMode,
