@@ -302,7 +302,18 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     playbookSeam.attach(handle)
     return handle
   }
-  attachPlaybookHandle()
+  // Audit R1 C-F1: attachPlaybookHandle() allocates a filesystem watcher
+  // (maybeStartPlaybookTriggerWire) that can throw, and it runs in the gap
+  // BETWEEN the facade/session close-stack registrations and the branch
+  // try/finally blocks. A throw here would escape runSessionLoop with the
+  // facade + session already registered but never drained. Drain on throw
+  // (drainCloseStack is idempotent, so the branch finallys still compose).
+  try {
+    attachPlaybookHandle()
+  } catch (e) {
+    await drainCloseStack()
+    throw e
+  }
   // L5 H-7 — register the playbook detach on the close stack the moment the
   // watcher is (possibly) attached, so a throw in the REST of init still stops
   // the file watcher. `detach()` is idempotent + a no-op when nothing attached.

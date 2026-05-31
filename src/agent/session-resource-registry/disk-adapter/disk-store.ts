@@ -398,9 +398,15 @@ export const createDiskSessionResourceRegistry = (
   // duplicated at each getOrCreate arm, and closes the gap where appends
   // refreshed neither — letting the GC evict an actively-appending session.
   const touchOnActivity = (sessionId: string): void => {
-    const t = now()
     const entry = entries.get(sessionId)
-    if (entry !== undefined) entry.lastTouched = t
+    // Audit R1 B-MEDIUM: an evicted/unknown session (entries.delete + lock
+    // released by evict) must NOT be re-locked or have its meta re-written by a
+    // late append through a stale store handle — doing so resurrects the session
+    // dir on disk, leaks the re-acquired lock (evict already dropped its lockMap
+    // key, so nothing releases it), and defers TTL-GC for a full window.
+    if (entry === undefined) return
+    const t = now()
+    entry.lastTouched = t
     const lockReady = ensureLock(sessionId)
     void lockReady.then((lock) => {
       if (lock === null) return

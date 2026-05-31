@@ -480,23 +480,36 @@ export const otelHttpExporter = (opts: OtelExporterOpts): OtelExporter => {
    *  caps the buffer in practice, but the operator can detect via warn). */
   const flushSpans = async (): Promise<void> => {
     if (spanBuffer.length === 0) return
-    const snapshot = spanBuffer.slice()
+    // Take the whole buffer out by identity and clear it. Records that arrive
+    // DURING the awaited POST land in the now-empty buffer; the success path
+    // must never index by front-count, because boundedPush may have evicted the
+    // in-flight entries from the front mid-flush — that would drop UNSENT
+    // records beyond the documented drop-oldest overflow policy (audit R1 D-F1).
+    const snapshot = spanBuffer.splice(0, spanBuffer.length)
     const ok = await post(TRACES_PATH, serializeSpans(snapshot, serviceName))
     if (ok) {
-      // Remove the snapshot entries from the front of the buffer.
-      spanBuffer.splice(0, snapshot.length)
-      // Buffer drained — re-arm the overflow warning for any future wedge.
       if (spanBuffer.length < maxBufferSize) spanOverflowWarned = false
+    } else {
+      // Failed — re-queue the unsent snapshot ahead of any newcomers, then
+      // re-apply the cap (drop-oldest) so the buffer cannot grow unbounded.
+      spanBuffer.unshift(...snapshot)
+      if (spanBuffer.length > maxBufferSize) {
+        spanBuffer.splice(0, spanBuffer.length - maxBufferSize)
+      }
     }
   }
 
   const flushMetrics = async (): Promise<void> => {
     if (metricBuffer.length === 0) return
-    const snapshot = metricBuffer.slice()
+    const snapshot = metricBuffer.splice(0, metricBuffer.length)
     const ok = await post(METRICS_PATH, serializeMetrics(snapshot, serviceName))
     if (ok) {
-      metricBuffer.splice(0, snapshot.length)
       if (metricBuffer.length < maxBufferSize) metricOverflowWarned = false
+    } else {
+      metricBuffer.unshift(...snapshot)
+      if (metricBuffer.length > maxBufferSize) {
+        metricBuffer.splice(0, metricBuffer.length - maxBufferSize)
+      }
     }
   }
 

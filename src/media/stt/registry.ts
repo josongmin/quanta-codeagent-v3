@@ -34,6 +34,14 @@ export const selectSttAdapter = (env: Record<string, string | undefined>): SttSe
 const isInputErr = (e: SttError): boolean =>
   e.kind === "unsupported-mime" || e.kind === "empty-audio"
 
+/** Errors for which retrying the secondary provider is pointless or harmful:
+ *  input-shape problems (the secondary would reject the same blob) and
+ *  caller-driven abort / deadline (the caller cancelled, or the single deadline
+ *  elapsed — running the secondary would burn a wasted round-trip on a FRESH
+ *  deadline). Audit round-1 M1. */
+const isTerminalErr = (e: SttError): boolean =>
+  isInputErr(e) || e.kind === "aborted" || e.kind === "timeout"
+
 /** Build a single STT port from env. When both keys exist + `fallbackOnError`
  *  is set, a deepgram failure (other than input-shape errors) chains to
  *  whisper as a single retry. */
@@ -64,7 +72,7 @@ export const createSttFromEnv = (opts: SttRegistryOpts = {}): SpeechToTextPort =
         // fallback path is also cancellable end-to-end.
         const first = await primary.transcribe(blob, reqOpts)
         if (first.ok) return first
-        if (isInputErr(first.error)) return first
+        if (isTerminalErr(first.error)) return first
         return secondary.transcribe(blob, reqOpts)
       },
     }
