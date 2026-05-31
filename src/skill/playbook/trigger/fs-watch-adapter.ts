@@ -172,7 +172,11 @@ const watchImpl = (
     if (stopped) return
     debouncer.schedule(abs, () => {
       if (stopped) return
-      void scanAndEmit(abs, markers, callback, isStopped)
+      // Route the detached scan through a catch sink (audit L3 C-14): the
+      // debouncer fires sync, so a throwing/rejecting `callback` inside the
+      // async `scanAndEmit` would otherwise surface as an unhandled rejection
+      // and crash the process. Swallow — one bad fire must not kill the watcher.
+      void scanAndEmit(abs, markers, callback, isStopped).catch(() => {})
     })
   }
 

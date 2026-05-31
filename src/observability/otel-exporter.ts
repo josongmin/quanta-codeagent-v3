@@ -130,6 +130,13 @@ export interface OtelExporterOpts {
    *  timer. Default `5000` (5s). Set to `0` to disable the timer entirely
    *  (caller flushes manually). */
   readonly flushIntervalMs?: number
+  /** Hard cap on each in-memory buffer (spans + metrics counted separately).
+   *  When a flush keeps FAILING (collector down) the buffer would otherwise
+   *  grow without bound and OOM the process (audit L9 H1). On overflow the
+   *  OLDEST entries are dropped to make room for the newest (most-recent
+   *  observability is the most useful), and a `warn` is emitted. Default
+   *  `10_000`. Must be ≥ `batchSize`. */
+  readonly maxBufferSize?: number
   /** Clock — default `Date.now`. Test seam for deterministic timestamps. */
   readonly now?: () => number
   /** `setInterval` test seam — when present, the exporter uses this to
@@ -175,6 +182,7 @@ export interface OtelExporter {
 const DEFAULT_SERVICE_NAME = "quanta-codeagent"
 const DEFAULT_BATCH_SIZE = 64
 const DEFAULT_FLUSH_INTERVAL_MS = 5000
+const DEFAULT_MAX_BUFFER_SIZE = 10_000
 const TRACES_PATH = "/v1/traces"
 const METRICS_PATH = "/v1/metrics"
 
@@ -294,10 +302,28 @@ const serializeSpans = (
   ],
 })
 
+/** OTLP `AggregationTemporality` enum. DELTA=1, CUMULATIVE=2. */
+const AGG_TEMPORALITY_DELTA = 1
+
 /** Serialize an array of metrics → OTLP/JSON `resourceMetrics` envelope. Each
  *  metric is its own entry — we do NOT cross-aggregate samples with the same
  *  name in this exporter (the collector handles that). Counter → `sum`,
- *  histogram → `histogram` (single-point dataPoint), gauge → `gauge`. */
+ *  histogram → `histogram` (single-point dataPoint), gauge → `gauge`.
+ *
+ *  ── TEMPORALITY (audit L9 M1) + START-TIME (audit L9 M2) ──────────────────
+ *  This exporter ships each observation AS IT ARRIVES — every counter/histogram
+ *  dataPoint is a SINGLE DELTA sample, not a running cumulative total. The
+ *  pre-T09 code stamped these `aggregationTemporality: 2` (CUMULATIVE), which
+ *  tells the collector "this value is the total since startTime". Two bugs
+ *  followed:
+ *    - M1: the collector double-counts (it diffs consecutive cumulatives, but
+ *      our values are already deltas) — metric series come out inflated/wrong.
+ *    - M2: a CUMULATIVE point whose `startTimeUnixNano === timeUnixNano` (which
+ *      every first sample has, since we emit immediately) is REJECTED or
+ *      zero-dropped by spec-strict collectors ("zero-length cumulative window").
+ *  Emitting DELTA (1) fixes both: a delta point's window IS `[start, time]`
+ *  with start==time meaning "this instant", which is valid, and the value is
+ *  taken verbatim with no diffing. `isMonotonic` stays true for counters. */
 const serializeMetrics = (
   ms: ReadonlyArray<ExportMetric>,
   serviceName: string,
@@ -320,7 +346,7 @@ const serializeMetrics = (
                 name: m.name,
                 sum: {
                   dataPoints: [dp],
-                  aggregationTemporality: 2, // CUMULATIVE
+                  aggregationTemporality: AGG_TEMPORALITY_DELTA,
                   isMonotonic: true,
                 },
               }
@@ -338,11 +364,11 @@ const serializeMetrics = (
                       sum: m.value,
                     },
                   ],
-                  aggregationTemporality: 2,
+                  aggregationTemporality: AGG_TEMPORALITY_DELTA,
                 },
               }
             }
-            // gauge
+            // gauge — a gauge has NO temporality (it's a point-in-time value).
             return {
               name: m.name,
               gauge: { dataPoints: [dp] },
@@ -366,9 +392,20 @@ export const otelHttpExporter = (opts: OtelExporterOpts): OtelExporter => {
   const serviceName = opts.serviceName ?? DEFAULT_SERVICE_NAME
   const batchSize = opts.batchSize ?? DEFAULT_BATCH_SIZE
   const flushIntervalMs = opts.flushIntervalMs ?? DEFAULT_FLUSH_INTERVAL_MS
+  // Buffer cap is at least `batchSize` so a single batch always fits.
+  const maxBufferSize = Math.max(opts.maxBufferSize ?? DEFAULT_MAX_BUFFER_SIZE, batchSize)
   const setIntervalImpl =
     opts.setIntervalImpl ??
-    ((cb: () => void, ms: number): IntervalHandle => globalThis.setInterval(cb, ms))
+    ((cb: () => void, ms: number): IntervalHandle => {
+      // `unref()` so the recurring flush timer does NOT keep the Node event
+      // loop alive on its own (audit L9 M3 timer-exit): a short-lived CLI run
+      // that turned the exporter on would otherwise HANG at exit waiting on
+      // this interval. `teardown()` clears it for graceful shutdown; `unref`
+      // covers the path where the process is otherwise idle and should exit.
+      const handle = globalThis.setInterval(cb, ms)
+      ;(handle as { unref?: () => void }).unref?.()
+      return handle
+    })
   const clearIntervalImpl =
     opts.clearIntervalImpl ??
     ((handle: IntervalHandle): void => {
@@ -381,6 +418,11 @@ export const otelHttpExporter = (opts: OtelExporterOpts): OtelExporter => {
 
   const spanBuffer: ExportSpan[] = []
   const metricBuffer: ExportMetric[] = []
+  // Coalesce the overflow warning so a wedged collector doesn't produce one
+  // warn line per dropped record (which would just relocate the DoS to the
+  // logger). One warn per buffer until it next drains below the cap.
+  let spanOverflowWarned = false
+  let metricOverflowWarned = false
 
   const safeWarn = (msg: string): void => {
     if (warn === undefined) return
@@ -389,6 +431,17 @@ export const otelHttpExporter = (opts: OtelExporterOpts): OtelExporter => {
     } catch {
       // even the warn sink may throw — swallow
     }
+  }
+
+  /** Push `entry` onto `buf`, dropping the OLDEST entries when the cap would be
+   *  exceeded (audit L9 H1 — bound the in-memory buffer so a permanently
+   *  unreachable collector cannot OOM the process). Returns true if anything
+   *  was dropped. */
+  const boundedPush = <T>(buf: T[], entry: T): boolean => {
+    buf.push(entry)
+    if (buf.length <= maxBufferSize) return false
+    buf.splice(0, buf.length - maxBufferSize)
+    return true
   }
 
   /** POST one envelope to `${endpoint}${path}`. Returns true on 2xx, false on
@@ -432,6 +485,8 @@ export const otelHttpExporter = (opts: OtelExporterOpts): OtelExporter => {
     if (ok) {
       // Remove the snapshot entries from the front of the buffer.
       spanBuffer.splice(0, snapshot.length)
+      // Buffer drained — re-arm the overflow warning for any future wedge.
+      if (spanBuffer.length < maxBufferSize) spanOverflowWarned = false
     }
   }
 
@@ -441,6 +496,7 @@ export const otelHttpExporter = (opts: OtelExporterOpts): OtelExporter => {
     const ok = await post(METRICS_PATH, serializeMetrics(snapshot, serviceName))
     if (ok) {
       metricBuffer.splice(0, snapshot.length)
+      if (metricBuffer.length < maxBufferSize) metricOverflowWarned = false
     }
   }
 
@@ -477,7 +533,12 @@ export const otelHttpExporter = (opts: OtelExporterOpts): OtelExporter => {
 
   return {
     recordSpan(span) {
-      spanBuffer.push(span)
+      if (boundedPush(spanBuffer, span) && !spanOverflowWarned) {
+        spanOverflowWarned = true
+        safeWarn(
+          `[otel-exporter] span buffer hit cap (${maxBufferSize}) — dropping oldest spans (collector unreachable?)`,
+        )
+      }
       if (spanBuffer.length >= batchSize) {
         // Fire-and-forget — recordSpan is sync to match the tracer surface.
         // The flush awaits inside.
@@ -485,7 +546,12 @@ export const otelHttpExporter = (opts: OtelExporterOpts): OtelExporter => {
       }
     },
     recordMetric(metric) {
-      metricBuffer.push(metric)
+      if (boundedPush(metricBuffer, metric) && !metricOverflowWarned) {
+        metricOverflowWarned = true
+        safeWarn(
+          `[otel-exporter] metric buffer hit cap (${maxBufferSize}) — dropping oldest metrics (collector unreachable?)`,
+        )
+      }
       if (metricBuffer.length >= batchSize) {
         void flushAll()
       }

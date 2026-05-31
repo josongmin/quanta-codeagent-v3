@@ -43,7 +43,13 @@ export type {
   DockerLogStream,
   DockerProcess,
 } from "./docker-adapter"
-export { createLimaAdapter } from "./lima-adapter"
+export {
+  composeLimaCancelArgv,
+  composeLimaSpawnArgv,
+  composeLimaStatusArgv,
+  createLimaAdapter,
+  safeLimaId,
+} from "./lima-adapter"
 export type { LimaAdapterOpts, LimaExecResult, LimaProcess } from "./lima-adapter"
 export { createAppleVZAdapter } from "./apple-vz-adapter"
 export type { AppleVZAdapterOpts, AppleVZHost } from "./apple-vz-adapter"

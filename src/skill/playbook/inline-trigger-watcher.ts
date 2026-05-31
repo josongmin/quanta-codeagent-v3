@@ -39,6 +39,21 @@ import type {
 const DEFAULT_DEBOUNCE_MS = 200
 
 /**
+ * Hard upper bound on the number of glob variants {@link expandBraces} will
+ * produce (audit L3 C-13). Brace alternation is COMBINATORIAL — a watchGlob
+ * like `{a,b}{a,b}{a,b}…` (or deeply nested braces) explodes to 2^N strings,
+ * each compiled to a RegExp on every `fs.watch` event. An attacker who can
+ * author a playbook `watchGlob` could wedge the watcher (CPU + memory DoS).
+ *
+ * We cap expansion at 256 variants. Real globs (`{ts,tsx,js,jsx}`,
+ * `{src,test}/**`) sit far below this; anything above is pathological. When
+ * the cap is hit we FAIL SAFE: the glob is treated as a single literal (it
+ * simply won't brace-match), so a malicious glob disables ITS OWN trigger
+ * rather than the whole watcher.
+ */
+const MAX_BRACE_EXPANSIONS = 256
+
+/**
  * Default file-system adapter — uses `node:fs.watch`. Test rigs substitute
  * an in-memory port via {@link createMemoryWatcher}.
  */
@@ -53,6 +68,25 @@ const validateRoot = (
     return { ok: false, reason: "io-error" }
   }
   return { ok: true }
+}
+
+/**
+ * Route a fire-and-forget watch dispatch through a sink so a throwing /
+ * rejecting `onFire` callback can NEVER surface as an unhandled promise
+ * rejection (audit L3 C-14). `fs.watch` handlers are sync, so the async scan
+ * is dispatched detached — without this catch, a caller callback that threw
+ * would crash the process on the next tick. Errors are swallowed: the watcher
+ * is an operator convenience and one bad fire must not poison the stream.
+ */
+export const dispatchScan = (
+  abs: string,
+  marker: string,
+  onFire: InlineTriggerCallback,
+  firedAt: number,
+): void => {
+  void scanAndMaybeFire(abs, marker, onFire, firedAt).catch(() => {
+    // swallow — fire-and-forget dispatch must not reject unhandled.
+  })
 }
 
 /** Build the debounced fs.watch handler. Extracted to keep `start` simple. */
@@ -72,7 +106,7 @@ const buildFsHandler = (
     const prev = lastFire.get(abs) ?? 0
     if (now - prev < debounceMs) return
     lastFire.set(abs, now)
-    void scanAndMaybeFire(abs, spec.trigger.commentMarker, spec.onFire, now)
+    dispatchScan(abs, spec.trigger.commentMarker, spec.onFire, now)
   }
 }
 
@@ -231,18 +265,39 @@ export const matchesGlobSubset = (path: string, glob: string): boolean => {
   return false
 }
 
-const expandBraces = (glob: string): string[] => {
-  const m = glob.match(/^(.*?)\{([^{}]+)\}(.*)$/)
-  if (m === null) return [glob]
-  const [, pre, body, post] = m
-  const parts = (body ?? "").split(",")
-  const out: string[] = []
-  for (const p of parts) {
-    for (const tail of expandBraces(`${pre ?? ""}${p}${post ?? ""}`)) {
-      out.push(tail)
+/**
+ * Expand brace alternations into concrete glob strings, BOUNDED by
+ * {@link MAX_BRACE_EXPANSIONS} (audit L3 C-13). Exported so the hellgate can
+ * prove the bound directly. On overflow it returns the single literal glob —
+ * fail-safe: a pathological glob disables only itself.
+ */
+export const expandBraces = (glob: string): string[] => {
+  // Iterative worklist with a hard cap. Each pass expands the FIRST `{…}` in a
+  // pending string; the cap fences both nested and sequential blowups because
+  // the worklist can never exceed MAX_BRACE_EXPANSIONS entries.
+  let pending: string[] = [glob]
+  for (;;) {
+    let expandedAny = false
+    const next: string[] = []
+    for (const g of pending) {
+      const m = g.match(/^(.*?)\{([^{}]+)\}(.*)$/)
+      if (m === null) {
+        next.push(g)
+        continue
+      }
+      expandedAny = true
+      const [, pre, body, post] = m
+      for (const p of (body ?? "").split(",")) {
+        next.push(`${pre ?? ""}${p}${post ?? ""}`)
+        if (next.length > MAX_BRACE_EXPANSIONS) {
+          // Overflow — abandon expansion, treat the original glob literally.
+          return [glob]
+        }
+      }
     }
+    pending = next
+    if (!expandedAny) return pending
   }
-  return out
 }
 
 const matchOne = (path: string, glob: string): boolean => {

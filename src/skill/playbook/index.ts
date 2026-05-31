@@ -47,6 +47,8 @@ export { adaptPlanQueueStoreToSink, startPlaybookFromTrigger } from "./host-adap
 export {
   createInlineTriggerWatcher,
   createMemoryWatcher,
+  dispatchScan,
+  expandBraces,
   findMarkerLine,
   type MemoryWatcher,
   matchesGlobSubset,

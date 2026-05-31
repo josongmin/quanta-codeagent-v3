@@ -26,7 +26,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { err, errMessage, ok, type Result } from "@/shared"
+import { drainAbortable, err, errMessage, isAbort, ok, type Result } from "@/shared"
 import type { TranscribeReq, TranscriberError, TranscriberPort, VoiceTranscript } from "./port"
 
 /** Spawned-binary surface — tests inject a fake spawner so no real
@@ -96,23 +96,54 @@ const DEFAULT_TIMEOUT_MS = 120_000
 const BIN_MISSING_MSG =
   "whisper-cpp not found on PATH. Install via `brew install whisper-cpp` (macOS) or build from https://github.com/ggerganov/whisper.cpp."
 
-const readAll = async (stream: ReadableStream<Uint8Array> | null): Promise<string> => {
+/**
+ * Drain a child pipe to completion, collecting chunks. Consumes the SHARED
+ * `@/shared` `drainAbortable` primitive (ticket T09 / audit L9 H3) so that:
+ *   - BOTH stdout and stderr are read to EOF — leaving stdout undrained let
+ *     whisper.cpp's verbose progress fill the OS pipe buffer and DEADLOCK the
+ *     child (it blocks on `write()` while we wait on `exited`). This was the
+ *     reported H3 hang.
+ *   - on abort/timeout the underlying reader is CANCELLED (releasing the pipe
+ *     / fd), not merely abandoned mid-iteration.
+ *
+ * Returns the decoded text. An abort mid-drain is swallowed here (the caller
+ * classifies the run outcome from `aborted`/`timedOut`); we still surface
+ * whatever bytes arrived before cancellation.
+ */
+const drainPipe = async (
+  stream: ReadableStream<Uint8Array> | null,
+  signal: AbortSignal | undefined,
+): Promise<string> => {
   if (stream === null) return ""
-  const reader = stream.getReader()
   const chunks: Uint8Array[] = []
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    if (value !== undefined) chunks.push(value)
+  // Wrap the stream so `getReader()` resolves the DEFAULT reader (no BYOB
+  // overload) — the structural `AbortableReadable` the primitive expects.
+  const source = {
+    getReader: () => stream.getReader(),
   }
-  return new TextDecoder().decode(
-    chunks.reduce<Uint8Array>((acc, c) => {
-      const out = new Uint8Array(acc.byteLength + c.byteLength)
-      out.set(acc, 0)
-      out.set(c, acc.byteLength)
-      return out
-    }, new Uint8Array(0)),
-  )
+  try {
+    await drainAbortable<Uint8Array>(
+      source,
+      (chunk) => {
+        if (chunk !== undefined) chunks.push(chunk)
+      },
+      signal !== undefined ? { signal } : {},
+    )
+  } catch (e) {
+    // Abort/timeout is expected when the run is cancelled — the reader was
+    // cancelled by the primitive, releasing the pipe. Re-throw genuine errors.
+    if (!isAbort(e)) throw e
+  }
+  if (chunks.length === 0) return ""
+  let total = 0
+  for (const c of chunks) total += c.byteLength
+  const merged = new Uint8Array(total)
+  let off = 0
+  for (const c of chunks) {
+    merged.set(c, off)
+    off += c.byteLength
+  }
+  return new TextDecoder().decode(merged)
 }
 
 const buildArgv = (
@@ -145,11 +176,16 @@ interface RunBinaryResult {
 const runBinary = async (args: RunBinaryArgs): Promise<RunBinaryResult> => {
   let timedOut = false
   let aborted = false
+  // ONE controller drives BOTH pipe drains: when the child is killed (caller
+  // abort OR deadline) we cancel the readers so the drain promises settle and
+  // release the fds instead of hanging on a pipe that will never EOF.
+  const drainController = new AbortController()
   const onAbort = (): void => {
     aborted = true
     try {
       args.child.kill("SIGTERM")
     } catch {}
+    drainController.abort()
   }
   if (args.signal !== undefined) {
     if (args.signal.aborted) onAbort()
@@ -160,16 +196,25 @@ const runBinary = async (args: RunBinaryArgs): Promise<RunBinaryResult> => {
     try {
       args.child.kill("SIGTERM")
     } catch {}
+    drainController.abort()
   }, args.timeoutMs)
-  const stderrPromise = readAll(args.child.stderr)
+
+  // Drain BOTH pipes CONCURRENTLY (audit L9 H3): stdout MUST be consumed or
+  // whisper.cpp blocks on a full pipe and `exited` never resolves.
+  const stdoutPromise = drainPipe(args.child.stdout, drainController.signal)
+  const stderrPromise = drainPipe(args.child.stderr, drainController.signal)
   let code: number
   try {
     code = await args.child.exited
   } finally {
     clearTimeout(timer)
     if (args.signal !== undefined) args.signal.removeEventListener("abort", onAbort)
+    // The child has exited (or been killed); stop the drains and release the
+    // pipes regardless of which path we took.
+    drainController.abort()
   }
-  const stderr = await stderrPromise
+  // Collect whatever the pipes yielded (drains settle promptly post-abort).
+  const [, stderr] = await Promise.all([stdoutPromise, stderrPromise])
   const elapsedMs = Date.now() - args.startedAt
   if (timedOut) return { outcome: "timeout", code, stderr, elapsedMs }
   if (aborted) return { outcome: "aborted", code, stderr, elapsedMs }

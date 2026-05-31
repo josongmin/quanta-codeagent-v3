@@ -187,10 +187,17 @@ export const startHealthSnapshotWatcher = (opts: WatcherOpts): WatcherHandle => 
     const fire = (): void => {
       void requestEmit()
     }
-    intervalHandle =
-      opts.setInterval !== undefined
-        ? opts.setInterval(fire, intervalMs)
-        : setInterval(fire, intervalMs)
+    if (opts.setInterval !== undefined) {
+      intervalHandle = opts.setInterval(fire, intervalMs)
+    } else {
+      // `unref()` so the periodic re-emit timer does NOT keep the process
+      // alive on its own (audit L9 M3 timer-exit). The snapshot refresh is an
+      // operator convenience; a short-lived run that started the watcher must
+      // still be able to exit. `stop()` clears it for graceful shutdown.
+      const handle = setInterval(fire, intervalMs)
+      handle.unref?.()
+      intervalHandle = handle
+    }
   }
 
   // SIGHUP wiring (test seam takes precedence over process.on).
