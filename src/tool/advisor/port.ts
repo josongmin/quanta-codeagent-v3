@@ -1,4 +1,4 @@
-/** Advisor consult port — ADR-0257.
+/** Advisor consult port — ADR-0429.
  *
  *  The narrow, DUCK-TYPED surface the agent-callable `advisor` tool consumes to
  *  get a SECOND OPINION from a STRONGER / DIFFERENT model mid-loop. The tool

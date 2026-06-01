@@ -1,4 +1,4 @@
-/** Advisor tool slice barrel — ADR-0257.
+/** Advisor tool slice barrel — ADR-0429.
  *
  *  One LLM-facing tool (`advisor`) wrapping an {@link AdvisorPort}: consult a
  *  STRONGER / DIFFERENT model for a SECOND OPINION mid-loop and receive its

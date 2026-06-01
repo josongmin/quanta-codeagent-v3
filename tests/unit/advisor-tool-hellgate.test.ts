@@ -1,5 +1,5 @@
 /**
- * ADR-0257 hellgate — ADVISOR tool (`advisor`).
+ * ADR-0429 hellgate — ADVISOR tool (`advisor`).
  *
  * Agent-callable "consult a STRONGER/DIFFERENT model for a second opinion"
  * tool. Claude cc-cli ships `advisor_20260301{model}`. quanta today has

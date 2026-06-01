@@ -1,4 +1,4 @@
-/** `advisor` — agent-callable SECOND-OPINION consult (ADR-0257).
+/** `advisor` — agent-callable SECOND-OPINION consult (ADR-0429).
  *
  *  Lets the model DELIBERATELY consult a STRONGER / DIFFERENT model mid-loop and
  *  get its analysis back in-band. Claude cc-cli ships `advisor_20260301{model}`;

@@ -1,5 +1,5 @@
 /**
- * Tier-1 per-subsystem builder: ADVISOR block (ADR-0257).
+ * Tier-1 per-subsystem builder: ADVISOR block (ADR-0429).
  *
  * Returns the `advisor` tool when `config.advisor` is wired; empty array
  * otherwise.
