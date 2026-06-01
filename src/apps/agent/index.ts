@@ -69,7 +69,14 @@ import {
 } from "@/agent/tool-profile"
 import { type LLMPort, pickProvider, tryCreateLLM } from "@/llm"
 import { type CapabilityNegotiator, defaultNegotiator, fullNegotiator } from "@/mcp"
-import { createTwoLayerManager, isNamedProfileName, type TwoLayerManager } from "@/permission"
+import {
+  createTwoLayerManager,
+  isNamedProfileName,
+  type PermissionMode,
+  permissionModeFromProfile,
+  resolveProfileByName,
+  type TwoLayerManager,
+} from "@/permission"
 import { type AutomationEngineSlot, assembleAutomation } from "@/scheduler/runtime-wire"
 import { errMessage, logger, runtimeConfig, setTerminalIo } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
@@ -110,6 +117,35 @@ const resolveIdentityFromEnv = (env: NodeJS.ProcessEnv): readonly string[] | und
   if (env.QUANTA_IDENTITY !== "1") return undefined
   const raw = env.QUANTA_IDENTITY_MODE ?? "default"
   return defaultIdentityProvider().identityFor(raw as IdentityMode)
+}
+
+/** GAP2 — resolve the live `PermissionContext.mode` override from a named
+ *  permission profile selected at the composition root. The profile name comes
+ *  from `QUANTA_PERMISSION_PROFILE` (or a future `--permission-profile` CLI flag
+ *  the surface seeds into the env view). When set, the named profile is resolved
+ *  (FAIL-CLOSED: `resolveProfileByName` THROWS on an unknown name — a typo'd
+ *  profile must not silently fall back to a permissive mode) and its
+ *  `approval.mode` is DERIVED into the loop's `PermissionContext.mode` via the
+ *  pure `permissionModeFromProfile` mapper.
+ *
+ *  Returns `undefined` when no profile name is set ⇒ the caller leaves
+ *  `base.permission` untouched ⇒ byte-identical legacy (RFC §1.2). We DERIVE the
+ *  existing single permission context rather than publishing a second profile
+ *  manager: the network axis is already enforced by the A1 dispatch-guard and
+ *  the file-system axis is not dispatch-time-enforceable, so the only
+ *  non-duplicating wire is the approval→context-mode derive. */
+const resolvePermissionModeFromProfile = (
+  flag: import("./cli-args").PermissionProfileToken | undefined,
+  env: NodeJS.ProcessEnv,
+): PermissionMode | undefined => {
+  // Precedence MUST match resolvePermissionProfileManager: an explicit
+  // `--permission-profile` flag WINS over QUANTA_PERMISSION_PROFILE, so the
+  // derived mode and the published manager always describe the SAME profile.
+  const name = flag ?? env.QUANTA_PERMISSION_PROFILE
+  if (name === undefined || name === "") return undefined
+  // FAIL-CLOSED: throws on an unknown / `custom` name (a struct, not a registry
+  // entry) — the surface entry surfaces it rather than guessing a mode.
+  return permissionModeFromProfile(resolveProfileByName(name))
 }
 
 /** Resolve the retrieval-stack opt-in flag from the composition-root env view.
@@ -175,6 +211,29 @@ const resolvePermissionProfileManager = (
   const manager = createTwoLayerManager()
   manager.setPermissionProfileByName(PERMISSION_PROFILE_SESSION_THREAD, name)
   return manager
+}
+
+/** Resolve BOTH composition-root permission-profile wirings from one place so
+ *  `buildBaseFromArgs` carries a single call (keeps it under biome's
+ *  cognitive-complexity cap). The `manager` is the forward-compat per-thread
+ *  slot (A2); the `mode` is the behavior-LIVE PermissionContext override derived
+ *  from the same profile's approval pillar (GAP2). Both honor the same flag-wins
+ *  precedence and the same fail-closed throw, so they always agree. Absent
+ *  profile ⇒ `{}` (both undefined ⇒ byte-identical legacy). */
+const resolvePermissionProfileWiring = (
+  flag: import("./cli-args").PermissionProfileToken | undefined,
+  env: NodeJS.ProcessEnv,
+): {
+  /** Spread-ready slot (`{}` when absent) so the `base` literal carries no
+   *  conditional branch for it (keeps `buildBaseFromArgs` under the complexity cap). */
+  managerSlot: { permissionProfileManager?: TwoLayerManager }
+  mode: PermissionMode | undefined
+} => {
+  const manager = resolvePermissionProfileManager(flag, env)
+  return {
+    managerSlot: manager !== undefined ? { permissionProfileManager: manager } : {},
+    mode: resolvePermissionModeFromProfile(flag, env),
+  }
 }
 
 export const pickMcpNegotiator = (env: NodeJS.ProcessEnv): CapabilityNegotiator =>
@@ -625,12 +684,13 @@ export const buildBaseFromArgs = (
   // owns the `QUANTA_BENCH_HOOKS` bus). One spread keeps `buildBaseFromArgs`
   // under biome's cognitive-complexity cap.
   const observabilitySlots = resolveObservabilitySlots(env)
-  // Track A2 — composition-root named-permission-profile wire. Resolves the
-  // env/flag (flag WINS over QUANTA_PERMISSION_PROFILE), validates fail-closed
-  // (unknown name THROWS at startup), constructs a `TwoLayerManager`, and
-  // applies the profile via `setPermissionProfileByName`. Absent ⇒ `undefined`
-  // ⇒ slot omitted below (byte-identical legacy).
-  const permissionProfileManager = resolvePermissionProfileManager(p.permissionProfile, env)
+  // Track A2 + GAP2 — composition-root named-permission-profile wiring, resolved
+  // in ONE call (manager = forward-compat per-thread slot; mode = behavior-LIVE
+  // PermissionContext override derived from the profile's approval pillar). Both
+  // honor flag-wins precedence + fail-closed throw on an unknown name. Absent ⇒
+  // both undefined ⇒ byte-identical legacy.
+  const { managerSlot: permissionProfileSlot, mode: profilePermissionMode } =
+    resolvePermissionProfileWiring(p.permissionProfile, env)
   // ADR-0236 — `--no-auto-background`: future hosts that wire `autoBackground`
   // by default can call `resolveAutoBackgroundOverride(p.noAutoBackground)` to
   // hard-force the slot OFF. Today no host defaults it on, so the flag has no
@@ -644,7 +704,10 @@ export const buildBaseFromArgs = (
     // byte-identical to the `defaultTools` singleton.
     registry: buildBaseRegistry({ automationSlot, sandboxProfile, searchWire }),
     stream,
-    permission: { mode: "acceptEdits" },
+    // GAP2 — when a named permission profile is selected the live permission
+    // mode is DERIVED from its approval pillar; absent ⇒ the historical
+    // `acceptEdits` default (byte-identical).
+    permission: { mode: profilePermissionMode ?? "acceptEdits" },
     messages: [],
     system,
     cwd: process.cwd(),
@@ -681,7 +744,7 @@ export const buildBaseFromArgs = (
     // Track A2 — publish the named-permission-profile manager so a future loop
     // consumer can read the per-thread layered policy. Default-OFF: absent ⇒
     // slot omitted (`exactOptionalPropertyTypes` — no `undefined` literal).
-    ...(permissionProfileManager !== undefined ? { permissionProfileManager } : {}),
+    ...permissionProfileSlot,
   }
 
   attachExecutionPlaneSlots(base, p)

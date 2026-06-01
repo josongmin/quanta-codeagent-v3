@@ -4,6 +4,12 @@ import {
   type GranularRegistryPort,
 } from "@/agent/checkpoint/granular-registry"
 import {
+  buildUsageBreakdownDefault,
+  type ContextUsageBreakdown,
+  type PromptAssembledSnapshot,
+  snapshotToBreakdownInput,
+} from "@/agent/context/usage-breakdown"
+import {
   type ConversationCheckpointStore,
   defaultConversationCheckpointStore,
 } from "@/agent/conversation-checkpoint"
@@ -29,6 +35,7 @@ import type { ConvCheckpointSlashState } from "../rewind-conv-cmd"
 import type { SessionIoState } from "../session-cmd"
 import { isSlashCommand, runSlashCommand, type SlashContext } from "../slash-commands"
 import type { StatusBar } from "../status-bar"
+import type { SegmentedUsageView } from "../status-line"
 import { createTextInbox, type TextInbox } from "../text-inbox"
 import type { CliFeatureConfig } from "./cli-feature-config"
 import { type ContextUsageHolder, createContextUsageHolder } from "./context-usage-snapshot"
@@ -275,6 +282,10 @@ const buildSurfaceDispatch = (args: {
   readonly slashCtx: ReplSlashCtx
   readonly convCheckpointSlot: ConvCheckpointSlashState | undefined
   readonly sessionIo: SessionIoState
+  /** Live `/context` seam — returns the latest assembled-prompt breakdown
+   *  (written by the loop's `onPromptAssembled` sink) or `undefined` before
+   *  the first turn assembles a prompt. */
+  readonly contextUsage?: () => SegmentedUsageView | undefined
 }): ((input: string) => Promise<boolean>) => {
   return async (input: string): Promise<boolean> => {
     const head = input.split(/\s+/)[0] ?? ""
@@ -299,9 +310,47 @@ const buildSurfaceDispatch = (args: {
       // exactOptionalPropertyTypes).
       ...(args.convCheckpointSlot !== undefined ? { convCheckpoint: args.convCheckpointSlot } : {}),
       sessionIo: args.sessionIo,
+      // Live `/context` seam (Track D): when present, `/context` renders the
+      // segmented breakdown from the latest assembled prompt instead of the
+      // legacy placeholder. Absent ⇒ slot omitted ⇒ legacy fallback.
+      ...(args.contextUsage !== undefined ? { contextUsage: args.contextUsage } : {}),
     }
     await runSlashCommand(input, ctx)
     return true
+  }
+}
+
+/** Holder for the latest `/context` segmented breakdown. The loop's
+ *  `onPromptAssembled` sink writes here each turn; the slash command reads via
+ *  `current()`. Null until the first turn assembles a prompt (so `/context`
+ *  shows its legacy "no prompt assembled yet" fallback at session start). */
+interface PromptAssembledHolder {
+  readonly sink: NonNullable<RuntimeFacadeComposeOptions["onPromptAssembled"]>
+  current(): ContextUsageBreakdown | undefined
+}
+
+/** Convert the loop's canonical {@link PromptAssembledSnapshot} (assembled
+ *  `SystemBlock[]` + the turn's `promptPolicy` presence flags + model) into a
+ *  segmented {@link ContextUsageBreakdown} via the SSOT `snapshotToBreakdownInput`
+ *  + `buildUsageBreakdownDefault` (the loop's OWN token estimator — NO second
+ *  heuristic). `max` rides through the snapshot (0 ⇒ unknown window ⇒ the
+ *  renderer degrades to a `?`-percent bar; segments + totals still render). */
+const breakdownFromSnapshot = (snapshot: PromptAssembledSnapshot): ContextUsageBreakdown =>
+  buildUsageBreakdownDefault(snapshotToBreakdownInput(snapshot))
+
+/** Build the prompt-assembled holder + sink. Surface-owned mutable cell that
+ *  the loop writes (via `onPromptAssembled`) and `/context` reads. */
+const createPromptAssembledHolder = (model?: string): PromptAssembledHolder => {
+  let latest: ContextUsageBreakdown | undefined
+  return {
+    sink: (snapshot) => {
+      // Prefer the snapshot's own model id; fall back to the session model the
+      // holder was built with (the loop passes `max: 0` + may omit model).
+      const withModel: PromptAssembledSnapshot =
+        snapshot.model === undefined && model !== undefined ? { ...snapshot, model } : snapshot
+      latest = breakdownFromSnapshot(withModel)
+    },
+    current: () => latest,
   }
 }
 
@@ -355,8 +404,15 @@ export const composeSurfaceWires = (
     })
     registryToolMapper = (tool) => recorder.wrapTool(tool)
   }
+  // Prompt-assembled holder — the loop's `onPromptAssembled` sink writes the
+  // latest assembled-prompt breakdown here each turn; `/context` reads it via
+  // the `contextUsage` seam below. Mirrors the `granularRegistry` compose idiom:
+  // the sink is published on `runtimeFacadeCompose` and threaded into
+  // `createRuntimeFacade({ compose })` by the session loop.
+  const promptAssembled = createPromptAssembledHolder(setup.model)
   const runtimeFacadeCompose: RuntimeFacadeComposeOptions = {
     granularRegistry,
+    onPromptAssembled: promptAssembled.sink,
     ...(registryToolMapper !== undefined ? { registryToolMapper } : {}),
   }
   // ADR-0292 — turn-end record wire. Env-gated: `QUANTA_CHECKPOINT_CONV=on`
@@ -485,6 +541,7 @@ export const composeSurfaceWires = (
     slashCtx,
     convCheckpointSlot,
     sessionIo,
+    contextUsage: () => promptAssembled.current(),
   })
 
   return {

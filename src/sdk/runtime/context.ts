@@ -1,3 +1,4 @@
+import type { AgentConfig } from "@/agent"
 import type { GranularRegistryPort } from "@/agent/checkpoint/granular-registry"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
 import {
@@ -32,6 +33,12 @@ export interface RuntimeFacadeComposeOptions {
   readonly automationEngine?: NonNullable<RuntimeContextAutomationEngineView>
   readonly granularRegistry?: GranularRegistryPort
   readonly registryToolMapper?: (tool: Tool) => Tool
+  /** Per-turn prompt-assembled sink (mirrors `granularRegistry`). When set, it
+   *  is patched onto the runtime context state so the built `AgentConfig` carries
+   *  `onPromptAssembled` and the loop fires it each turn (REPL `/context` live
+   *  breakdown). Absent ⇒ slot omitted ⇒ `AgentConfig.onPromptAssembled`
+   *  undefined ⇒ loop byte-identical. */
+  readonly onPromptAssembled?: AgentConfig["onPromptAssembled"]
 }
 
 export interface CreateRuntimeFacadeArgs extends InternalCreateRuntimeFacadeArgs {
@@ -124,6 +131,11 @@ const applyRuntimeFacadeComposeOptions = (
   if (compose.granularRegistry !== undefined) {
     next = patchRuntimeContextState(next, {
       granularRegistry: compose.granularRegistry,
+    })
+  }
+  if (compose.onPromptAssembled !== undefined) {
+    next = patchRuntimeContextState(next, {
+      onPromptAssembled: compose.onPromptAssembled,
     })
   }
   if (compose.registryToolMapper !== undefined) {

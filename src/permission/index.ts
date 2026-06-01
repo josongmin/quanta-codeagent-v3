@@ -57,6 +57,14 @@ export type {
   ResolutionSource,
 } from "./inspector"
 export { getPermissionInspector } from "./inspector"
+export type { NamedProfileName } from "./named-profiles"
+export {
+  isNamedProfileName,
+  NAMED_PROFILE_NAMES,
+  NAMED_PROFILES,
+  resolvePermissionProfileField,
+  resolveProfileByName,
+} from "./named-profiles"
 export {
   ALL_OUTCOMES,
   ALL_REVIEWERS,
@@ -67,14 +75,6 @@ export {
   OutcomeInvariantError,
   requiresUserConfirmation,
 } from "./outcome"
-export type { NamedProfileName } from "./named-profiles"
-export {
-  isNamedProfileName,
-  NAMED_PROFILE_NAMES,
-  NAMED_PROFILES,
-  resolvePermissionProfileField,
-  resolveProfileByName,
-} from "./named-profiles"
 export type { HostAgentMode } from "./per-host-mode"
 export {
   clearHostMode,
@@ -155,6 +155,10 @@ export {
   recordRiskSeen,
   recordUserOverride,
 } from "./post-denial"
+export {
+  approvalModeToContextMode,
+  permissionModeFromProfile,
+} from "./profile-to-context"
 export {
   __resetPermissionRecorder,
   emitPermissionDecision,

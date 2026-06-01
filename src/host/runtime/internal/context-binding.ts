@@ -78,6 +78,7 @@ interface RuntimeContextSnapshot {
   readonly stage1OutputsStore?: AgentConfig["stage1OutputsStore"]
   readonly memoryConsolidator?: AgentConfig["memoryConsolidator"]
   readonly granularRegistry?: AgentConfig["granularRegistry"]
+  readonly onPromptAssembled?: AgentConfig["onPromptAssembled"]
 }
 
 type RuntimeContextPatch = Partial<
@@ -105,6 +106,7 @@ type RuntimeContextPatch = Partial<
     | "stage1OutputsStore"
     | "memoryConsolidator"
     | "granularRegistry"
+    | "onPromptAssembled"
   >
 >
 
@@ -467,6 +469,7 @@ const buildOptionalSnapshotFields = (
   ...whenDefined("stage1OutputsStore", base.stage1OutputsStore),
   ...whenDefined("memoryConsolidator", base.memoryConsolidator),
   ...whenDefined("granularRegistry", base.granularRegistry),
+  ...whenDefined("onPromptAssembled", base.onPromptAssembled),
 })
 
 const buildSnapshot = (base: RuntimeBase): RuntimeContextSnapshot => ({
