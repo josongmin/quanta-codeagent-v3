@@ -19,8 +19,10 @@ import { guardPageText, mapBrowserError } from "./result-map"
 import {
   type CdpInput,
   type ClickInput,
+  type ConsoleInput,
   cdpSchema,
   clickSchema,
+  consoleSchema,
   type DragInput,
   dragSchema,
   type FillInput,
@@ -31,6 +33,8 @@ import {
   navigateSchema,
   type PressKeyInput,
   pressKeySchema,
+  type ReadInput,
+  readSchema,
   type ScrollInput,
   type SelectOptionInput,
   screenshotSchema,
@@ -39,10 +43,17 @@ import {
   snapshotSchema,
   type TypeInput,
   typeSchema,
+  type WaitInput,
+  waitSchema,
 } from "./schemas"
 import { type BrowserSession, createBrowserSession } from "./session-holder"
 
 const CDP_OUTPUT_CAP = 20_000
+/** Cap the console dump rendered to the model (defense-in-depth on top of the
+ *  port's bounded ring buffer). */
+const CONSOLE_OUTPUT_CAP = 20_000
+/** Cap a single read's text/attribute output. */
+const READ_OUTPUT_CAP = 8_000
 /** Raw PNG byte cap before a screenshot is refused (≈ a few MB of base64). */
 const MAX_SCREENSHOT_BYTES = 4_000_000
 
@@ -392,6 +403,94 @@ const mouseClickXyTool = (port: BrowserPort, session: BrowserSession): Tool =>
     },
   })
 
+const consoleTool = (port: BrowserPort, session: BrowserSession): Tool =>
+  defineTool<ConsoleInput>({
+    name: "browser_console",
+    description:
+      "Read the captured console.* output + uncaught errors since the page loaded (a bounded ring buffer). Use it to verify the front end: did the app log an error, fail a fetch, throw? Pass clear:true to drain the buffer.",
+    inputSchema: consoleSchema,
+    isReadOnly: () => true,
+    isConcurrencySafe: () => false,
+    hitlTier: () => "pre-approval-ok",
+    async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+      const ens = await ensureHandle(session, ctx.signal)
+      if (!ens.ok) return yield { type: "result", result: ens.result }
+      const r = await port.consoleMessages(
+        ens.handle,
+        input.clear === true ? { clear: true } : undefined,
+      )
+      if (!r.ok) return yield { type: "result", result: mapBrowserError(r.error) }
+      // Each line's text is PAGE-CONTROLLED → guard every entry (strengthen #3).
+      const lines = r.value.entries.map((e) => `[${e.level}] ${guardPageText(e.text)}`)
+      const header =
+        r.value.dropped > 0
+          ? `(${r.value.dropped} earlier entr${r.value.dropped === 1 ? "y" : "ies"} dropped — buffer cap)\n`
+          : ""
+      const body = lines.length === 0 ? "(console empty)" : lines.join("\n")
+      yield {
+        type: "result",
+        result: { ok: true, output: (header + body).slice(0, CONSOLE_OUTPUT_CAP) },
+      }
+    },
+  })
+
+const waitTool = (port: BrowserPort, session: BrowserSession): Tool =>
+  defineTool<WaitInput>({
+    name: "browser_wait",
+    description:
+      "Wait for a CSS selector to appear in the DOM (for dynamic/SPA pages) before snapshotting or clicking. Times out (default 5s) if it never appears.",
+    inputSchema: waitSchema,
+    isReadOnly: () => true,
+    isConcurrencySafe: () => false,
+    hitlTier: () => "pre-approval-ok",
+    async *execute(input: WaitInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+      const ens = await ensureHandle(session, ctx.signal)
+      if (!ens.ok) return yield { type: "result", result: ens.result }
+      const r = await port.wait(
+        ens.handle,
+        {
+          selector: input.selector,
+          ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+        },
+        ctx.signal,
+      )
+      yield {
+        type: "result",
+        result: r.ok
+          ? { ok: true, output: `selector appeared: ${input.selector}` }
+          : mapBrowserError(r.error),
+      }
+    },
+  })
+
+const readTool = (port: BrowserPort, session: BrowserSession): Tool =>
+  defineTool<ReadInput>({
+    name: "browser_read",
+    description:
+      "Read a precise property off an element (by ref from a prior browser_snapshot): its rendered text, an attribute value, or whether it is visible. Use it to verify exact UI state a snapshot summarizes (e.g. is the error message shown? what is this input's value?).",
+    inputSchema: readSchema,
+    isReadOnly: () => true,
+    isConcurrencySafe: () => false,
+    hitlTier: () => "pre-approval-ok",
+    async *execute(input: ReadInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+      const ens = await ensureHandle(session, ctx.signal)
+      if (!ens.ok) return yield { type: "result", result: ens.result }
+      const r = await port.read(
+        ens.handle,
+        input.ref,
+        { what: input.what, ...(input.attr !== undefined ? { attr: input.attr } : {}) },
+        ctx.signal,
+      )
+      if (!r.ok) return yield { type: "result", result: mapBrowserError(r.error) }
+      // text/attribute are page-controlled → guard + cap; visible is a boolean.
+      const output =
+        typeof r.value.value === "boolean"
+          ? `visible: ${r.value.value}`
+          : guardPageText(r.value.value).slice(0, READ_OUTPUT_CAP)
+      yield { type: "result", result: { ok: true, output } }
+    },
+  })
+
 export interface BrowserToolset {
   readonly tools: Tool[]
   /** Tear down the browser session. Register into the composition root's
@@ -406,7 +505,7 @@ export interface BrowserToolsetOpts {
   readonly resolver?: DnsResolver
 }
 
-/** Build the browser toolset over a wired `BrowserPort`. The 6 tools share ONE
+/** Build the browser toolset over a wired `BrowserPort`. The 15 tools share ONE
  *  lazily-spawned session handle; `dispose()` closes it. */
 export const createBrowserToolset = (
   port: BrowserPort,
@@ -426,6 +525,9 @@ export const createBrowserToolset = (
     mouseClickXyTool(port, session),
     screenshotTool(port, session),
     cdpTool(port, session),
+    consoleTool(port, session),
+    waitTool(port, session),
+    readTool(port, session),
   ]
   return { tools, dispose: () => session.dispose() }
 }

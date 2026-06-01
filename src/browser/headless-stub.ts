@@ -19,9 +19,14 @@ import type {
   BrowserError,
   BrowserHandle,
   BrowserStartOpts,
+  ConsoleEntry,
+  ConsoleOpts,
   DomModel,
+  DomNode,
   PageSnapshot,
+  ReadOpts,
   TypeOpts,
+  WaitOpts,
 } from "./types"
 
 export interface HeadlessPage {
@@ -33,18 +38,46 @@ export interface HeadlessBrowserOpts {
   /** `url → page` fixtures. A navigate to an unknown url returns
    *  `Err{ navigation-denied }`. */
   readonly pages?: ReadonlyMap<string, HeadlessPage>
+  /** Seed the console buffer the deterministic `consoleMessages` returns. */
+  readonly consoleEntries?: readonly ConsoleEntry[]
+  /** Already-dropped count the stub reports (to exercise the truncation path). */
+  readonly consoleDropped?: number
+  /** Selectors `wait` resolves `ok` for; any other selector ⇒ `timeout`. */
+  readonly presentSelectors?: ReadonlySet<string>
 }
 
 interface SessionState {
   closed: boolean
   url: string
   readonly refMap: RefMap
+  consoleEntries: ConsoleEntry[]
+  consoleDropped: number
 }
 
 const PNG_MAGIC = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 
+/** Find the DomNode whose backendPath a ref resolves to (stub-side `read`). */
+const findNode = (node: DomNode, backendPath: string): DomNode | null => {
+  if (node.backendPath === backendPath) return node
+  for (const child of node.children ?? []) {
+    const hit = findNode(child, backendPath)
+    if (hit !== null) return hit
+  }
+  return null
+}
+
+/** Deterministic fixture-derived attribute lookup for the stub `read`. A few
+ *  well-known attrs map onto DomNode fields; everything else is "". */
+const nodeAttr = (node: DomNode, attr: string): string => {
+  if (attr === "value") return node.value ?? ""
+  if (attr === "placeholder") return node.placeholder ?? ""
+  if (attr === "href") return node.url ?? ""
+  return ""
+}
+
 export const createHeadlessBrowser = (opts: HeadlessBrowserOpts = {}): BrowserPort => {
   const pages = opts.pages ?? new Map<string, HeadlessPage>()
+  const presentSelectors = opts.presentSelectors ?? new Set<string>()
   const sessions = new Map<string, SessionState>()
   let seq = 0
 
@@ -65,7 +98,13 @@ export const createHeadlessBrowser = (opts: HeadlessBrowserOpts = {}): BrowserPo
     async spawn(_opts?: BrowserStartOpts): Promise<Result<BrowserHandle, BrowserError>> {
       seq += 1
       const id = `headless-${seq}`
-      sessions.set(id, { closed: false, url: "about:blank", refMap: createRefMap() })
+      sessions.set(id, {
+        closed: false,
+        url: "about:blank",
+        refMap: createRefMap(),
+        consoleEntries: [...(opts.consoleEntries ?? [])],
+        consoleDropped: opts.consoleDropped ?? 0,
+      })
       return ok({ id, backend: "headless" })
     },
 
@@ -172,6 +211,40 @@ export const createHeadlessBrowser = (opts: HeadlessBrowserOpts = {}): BrowserPo
       const s = live(h)
       if (!s.ok) return s
       return ok(PNG_MAGIC.slice())
+    },
+
+    async consoleMessages(h: BrowserHandle, cOpts?: ConsoleOpts) {
+      const s = live(h)
+      if (!s.ok) return s
+      const entries = s.value.consoleEntries.slice()
+      const dropped = s.value.consoleDropped
+      if (cOpts?.clear === true) {
+        s.value.consoleEntries = []
+        s.value.consoleDropped = 0
+      }
+      return ok({ entries, dropped })
+    },
+
+    async wait(h: BrowserHandle, wOpts: WaitOpts, signal?: AbortSignal) {
+      const s = live(h)
+      if (!s.ok) return s
+      if (signal?.aborted === true) return err({ kind: "cancelled" })
+      return presentSelectors.has(wOpts.selector)
+        ? ok(undefined)
+        : err({ kind: "timeout", ms: wOpts.timeoutMs ?? 5_000 })
+    },
+
+    async read(h: BrowserHandle, ref: string, rOpts: ReadOpts) {
+      const s = live(h)
+      if (!s.ok) return s
+      const path = s.value.refMap.resolve(ref)
+      if (path === null) return err({ kind: "element-not-found", ref })
+      const page = pages.get(s.value.url)
+      const node = page !== undefined ? findNode(page.dom.root, path) : null
+      if (node === null) return err({ kind: "element-not-found", ref })
+      if (rOpts.what === "text") return ok({ value: node.name })
+      if (rOpts.what === "visible") return ok({ value: true })
+      return ok({ value: nodeAttr(node, rOpts.attr ?? "") })
     },
 
     async cdp(h: BrowserHandle, method: string): Promise<Result<unknown, BrowserError>> {

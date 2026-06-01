@@ -66,6 +66,39 @@ export interface ScrollOpts {
 /** Drag destination — either another snapshot ref or absolute viewport coords. */
 export type DragTarget = { readonly ref: string } | { readonly x: number; readonly y: number }
 
+/** Console log level — `consoleAPICalled.type` is normalized into this closed
+ *  set; an uncaught exception maps to `error`; a `Log.entryAdded` keeps its own
+ *  level. Anything unrecognized falls back to `log`. */
+export type ConsoleLevel = "log" | "info" | "warn" | "error" | "debug"
+
+/** One captured console / error entry. `text` is PAGE-CONTROLLED (untrusted) —
+ *  the tool layer routes it through `guardPageText` before the model sees it. */
+export interface ConsoleEntry {
+  readonly level: ConsoleLevel
+  readonly text: string
+  readonly ts?: number
+}
+
+export interface ConsoleOpts {
+  /** Drain the ring buffer (and reset the dropped counter) after reading. */
+  readonly clear?: boolean
+}
+
+export interface WaitOpts {
+  readonly selector: string
+  /** Poll budget before `Err{timeout}` (default 5000). */
+  readonly timeoutMs?: number
+}
+
+/** What `read` extracts from the resolved element. */
+export type ReadWhat = "text" | "attribute" | "visible"
+
+export interface ReadOpts {
+  readonly what: ReadWhat
+  /** Required when `what === "attribute"`. */
+  readonly attr?: string
+}
+
 /** A single accessibility-tree node, already normalized by the in-page
  *  collector (name capped, hidden nodes dropped, iframes excluded). */
 export interface DomNode {

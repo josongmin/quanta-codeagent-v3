@@ -48,6 +48,9 @@ const BROWSER_TOOL_NAMES = [
   "browser_mouse_click_xy",
   "browser_screenshot",
   "browser_cdp",
+  "browser_console",
+  "browser_wait",
+  "browser_read",
 ]
 
 describe("browser wire — hellgate", () => {

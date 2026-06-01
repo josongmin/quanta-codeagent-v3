@@ -21,7 +21,7 @@
  *  - a denied CDP method through the tool ⇒ permission_denied (control: allowed);
  *  - schema-invalid inputs through ToolRegistry.run ⇒ throw ToolInputError
  *    (control: valid input runs);
- *  - the 12 tools present with the documented isReadOnly / isConcurrencySafe.
+ *  - the 15 tools present with the documented isReadOnly / isConcurrencySafe.
  */
 
 import { describe, expect, test } from "bun:test"
@@ -147,34 +147,43 @@ const abortAwareToolsetOnPage = async (): Promise<ReturnType<typeof createBrowse
   return ts
 }
 
-// ── the 12 tools surface ─────────────────────────────────────────────────────
+// ── the 15 tools surface ─────────────────────────────────────────────────────
 
-describe("HELLGATE browser edge — 12-tool surface contract", () => {
-  test("HELL-BE-01: exactly the 12 tools, with correct read-only / concurrency flags", () => {
+describe("HELLGATE browser edge — 15-tool surface contract", () => {
+  test("HELL-BE-01: exactly the 15 tools, with correct read-only / concurrency flags", () => {
     const ts = createBrowserToolset(createHeadlessBrowser({ pages: PAGES }))
     const names = ts.tools.map((t) => t.name).sort()
     expect(names).toEqual(
       [
         "browser_cdp",
         "browser_click",
+        "browser_console",
         "browser_drag",
         "browser_fill",
         "browser_mouse_click_xy",
         "browser_navigate",
         "browser_press_key",
+        "browser_read",
         "browser_screenshot",
         "browser_scroll",
         "browser_select_option",
         "browser_snapshot",
         "browser_type",
+        "browser_wait",
       ].sort(),
     )
-    // Read-only verbs are exactly snapshot + screenshot; everything mutating.
+    // Read-only verbs: snapshot + screenshot + the 3 new verification reads.
     const readOnly = ts.tools
       .filter((t) => t.isReadOnly())
       .map((t) => t.name)
       .sort()
-    expect(readOnly).toEqual(["browser_screenshot", "browser_snapshot"])
+    expect(readOnly).toEqual([
+      "browser_console",
+      "browser_read",
+      "browser_screenshot",
+      "browser_snapshot",
+      "browser_wait",
+    ])
     // NONE is concurrency-safe (a single shared stateful handle).
     for (const t of ts.tools) {
       expect(t.isConcurrencySafe({} as never)).toBe(false)

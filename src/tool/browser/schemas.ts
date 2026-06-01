@@ -70,3 +70,21 @@ export const mouseClickXySchema = z.object({
   y: z.number().finite().describe("viewport y"),
 })
 export type MouseClickXyInput = z.infer<typeof mouseClickXySchema>
+
+export const consoleSchema = z.object({
+  clear: z.boolean().optional().describe("drain the buffer after reading"),
+})
+export type ConsoleInput = z.infer<typeof consoleSchema>
+
+export const waitSchema = z.object({
+  selector: z.string().describe("CSS selector to wait for (e.g. '#result', '.error')"),
+  timeoutMs: z.number().finite().optional().describe("max wait in ms (default 5000)"),
+})
+export type WaitInput = z.infer<typeof waitSchema>
+
+export const readSchema = z.object({
+  ref: z.string().describe("element ref from a prior browser_snapshot"),
+  what: z.enum(["text", "attribute", "visible"]).describe("what to read off the element"),
+  attr: z.string().optional().describe("attribute name (required when what=attribute)"),
+})
+export type ReadInput = z.infer<typeof readSchema>

@@ -30,6 +30,13 @@ export interface CdpSession {
     method: string,
     opts?: CdpRequestOpts,
   ): Promise<Result<Readonly<Record<string, unknown>>, BrowserError>>
+  /** PERSISTENT event subscription (distinct from the one-shot `waitForEvent`):
+   *  `cb` stays registered and is invoked for EVERY matching session-scoped
+   *  event until `dispose`. Returns an unsubscribe fn. Used for console capture
+   *  + dialog auto-handling, where we react to a stream of events rather than
+   *  await one. Same sessionId filtering as `waitForEvent` (browser-level /
+   *  foreign-target events are dropped once a page session is attached). */
+  onEvent(method: string, cb: (params: Readonly<Record<string, unknown>>) => void): () => void
   /** Flat-protocol page session: once set, every subsequent `request` carries
    *  this `sessionId` so the Page / Runtime / Input domains route to the
    *  attached page target rather than the browser-level connection.
@@ -81,6 +88,8 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
   let pageSessionId: string | null = null
   const pending = new Map<number, (r: Result<unknown, BrowserError>) => void>()
   const eventWaiters = new Map<string, EventWaiter[]>()
+  type EventSub = (params: Readonly<Record<string, unknown>>) => void
+  const eventSubs = new Map<string, Set<EventSub>>()
 
   const DEAD_ERR = (): Result<never, BrowserError> =>
     err({ kind: "cdp-error", detail: "page target detached or crashed" })
@@ -95,6 +104,7 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
     pending.clear()
     for (const waiters of [...eventWaiters.values()]) for (const w of [...waiters]) w.onClosed()
     eventWaiters.clear()
+    eventSubs.clear() // persistent subscribers stop on a dead session
     for (const cb of [...deadCbs]) cb() // notify the adapter (R3 audit [7])
   }
 
@@ -124,22 +134,36 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
     }
   }
 
-  const routeEvent = (method: string, sessionId: unknown, rawParams: unknown): void => {
-    // Once attached to a page session, deliver only events from THAT session — a
-    // browser-level or foreign-target event with the same method name must not
-    // satisfy a page-scoped waitForEvent (R3 audit [4]).
-    if (pageSessionId !== null && sessionId !== pageSessionId) return
+  // An array satisfies `typeof === "object" && !== null`, so guard it out — an
+  // array-shaped CDP event payload must not leak through as Record params
+  // (edge audit bug #2).
+  const normalizeParams = (raw: unknown): Readonly<Record<string, unknown>> =>
+    (typeof raw === "object" && raw !== null && !Array.isArray(raw) ? raw : {}) as Readonly<
+      Record<string, unknown>
+    >
+
+  // Event from our page session? (a browser-level or foreign-target event with
+  // the same method name must not satisfy a page-scoped waiter — R3 audit [4].)
+  const isOurSession = (sessionId: unknown): boolean =>
+    pageSessionId === null || sessionId === pageSessionId
+
+  const deliverToWaiters = (method: string, params: Readonly<Record<string, unknown>>): void => {
     const waiters = eventWaiters.get(method)
-    if (waiters === undefined || waiters.length === 0) return
-    // An array satisfies `typeof === "object" && !== null`, so guard it out — an
-    // array-shaped CDP event payload must not leak through as Record params
-    // (edge audit bug #2).
-    const params = (
-      typeof rawParams === "object" && rawParams !== null && !Array.isArray(rawParams)
-        ? rawParams
-        : {}
-    ) as Readonly<Record<string, unknown>>
-    for (const w of waiters.splice(0)) w.deliver(params)
+    if (waiters !== undefined) for (const w of waiters.splice(0)) w.deliver(params)
+  }
+
+  // Persistent subscribers (console capture / dialog handler) stay registered;
+  // iterate a snapshot so an unsubscribe during dispatch is safe.
+  const deliverToSubs = (method: string, params: Readonly<Record<string, unknown>>): void => {
+    const subs = eventSubs.get(method)
+    if (subs !== undefined) for (const cb of [...subs]) cb(params)
+  }
+
+  const routeEvent = (method: string, sessionId: unknown, rawParams: unknown): void => {
+    if (!isOurSession(sessionId)) return
+    const params = normalizeParams(rawParams)
+    deliverToWaiters(method, params)
+    deliverToSubs(method, params)
   }
 
   deps.conn.onMessage((raw) => {
@@ -252,6 +276,21 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
       })
     },
 
+    onEvent(method: string, cb: (params: Readonly<Record<string, unknown>>) => void): () => void {
+      // A disposed/dead session delivers nothing — hand back an inert unsubscribe
+      // so the caller's bring-up wiring never throws.
+      if (disposed || dead) return () => {}
+      const set = eventSubs.get(method) ?? new Set<EventSub>()
+      set.add(cb)
+      eventSubs.set(method, set)
+      return () => {
+        const s = eventSubs.get(method)
+        if (s === undefined) return
+        s.delete(cb)
+        if (s.size === 0) eventSubs.delete(method)
+      }
+    },
+
     onDead(cb: () => void): void {
       if (dead)
         cb() // already dead — fire immediately so the caller can react
@@ -273,6 +312,7 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
         for (const waiter of [...waiters]) waiter.onClosed()
       }
       eventWaiters.clear()
+      eventSubs.clear()
       deps.conn.close()
     },
   }

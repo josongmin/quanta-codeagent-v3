@@ -3,6 +3,14 @@
  *  (system-chrome spawn) behind the same `BrowserPort`, with all IO injected. */
 
 export {
+  type ConsoleBuffer,
+  type ConsoleBufferOpts,
+  consoleArgsToText,
+  createConsoleBuffer,
+  mapConsoleApiType,
+  mapLogEntryLevel,
+} from "./cdp/console-buffer"
+export {
   defaultBrowserFs,
   defaultCdpTransport,
   defaultProcessSpawner,
@@ -41,9 +49,15 @@ export type {
   BrowserError,
   BrowserHandle,
   BrowserStartOpts,
+  ConsoleEntry,
+  ConsoleLevel,
+  ConsoleOpts,
   DomModel,
   DomNode,
   PageSnapshot,
+  ReadOpts,
+  ReadWhat,
   SnapshotOpts,
   TypeOpts,
+  WaitOpts,
 } from "./types"

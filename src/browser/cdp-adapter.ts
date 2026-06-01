@@ -21,6 +21,13 @@
 import { err, ok, type Result } from "@/shared"
 import { type CdpSession, createCdpSession } from "./cdp/cdp-session"
 import { COLLECT_SCRIPT, parseDomModel } from "./cdp/collect"
+import {
+  type ConsoleBuffer,
+  consoleArgsToText,
+  createConsoleBuffer,
+  mapConsoleApiType,
+  mapLogEntryLevel,
+} from "./cdp/console-buffer"
 import { readDevToolsEndpoint } from "./cdp/dev-tools-endpoint"
 import type {
   BrowserFs,
@@ -37,10 +44,14 @@ import type {
   BrowserError,
   BrowserHandle,
   BrowserStartOpts,
+  ConsoleEntry,
+  ConsoleOpts,
   DragTarget,
   PageSnapshot,
+  ReadOpts,
   ScrollOpts,
   TypeOpts,
+  WaitOpts,
 } from "./types"
 
 export const DEFAULT_CHROME_CANDIDATES = [
@@ -76,6 +87,7 @@ interface SessionState {
   readonly session: CdpSession
   readonly profileDir: string
   readonly refMap: RefMap
+  readonly console: ConsoleBuffer
 }
 
 const pathIndices = (path: string): number[] =>
@@ -147,6 +159,75 @@ const scrollByJs = (dx: number, dy: number): string =>
 
 const rectJs = (path: string): string =>
   `(() => { const el = ${resolveJs(path)}; if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.x + r.width/2, y: r.y + r.height/2 }; })()`
+
+// Read a precise property off the resolved element. Returns a tagged object so
+// the adapter can distinguish "element missing" (null) from a falsy-but-present
+// value (e.g. visible:false, empty text). text uses innerText (rendered text);
+// attribute returns "" when the attr is absent; visible folds offsetParent +
+// computed-style + a non-zero rect.
+const readJs = (path: string, what: string, attr: string | undefined): string => {
+  const a = JSON.stringify(attr ?? "")
+  const w = JSON.stringify(what)
+  return `(() => {
+    const el = ${resolveJs(path)};
+    if (!el) return null;
+    const what = ${w};
+    if (what === 'text') return { value: (el.innerText !== undefined ? el.innerText : el.textContent) || '' };
+    if (what === 'attribute') { const v = el.getAttribute(${a}); return { value: v === null ? '' : v }; }
+    const cs = getComputedStyle(el);
+    const r = el.getBoundingClientRect();
+    const vis = !!(el.offsetParent || (cs.position === 'fixed' && cs.display !== 'none')) && cs.visibility !== 'hidden' && cs.display !== 'none' && (r.width > 0 || r.height > 0);
+    return { value: vis };
+  })()`
+}
+
+const selectorPresentJs = (selector: string): string =>
+  `(() => { try { return !!document.querySelector(${JSON.stringify(selector)}); } catch { return false; } })()`
+
+/** Sleep `ms` on the injected scheduler, racing an optional abort and cancelling
+ *  the timer on settle (same deterministic pattern as readDevToolsEndpoint). */
+const sleep = (scheduler: Scheduler, ms: number, signal: AbortSignal | undefined): Promise<void> =>
+  new Promise<void>((resolve) => {
+    const cancel = scheduler.schedule(ms, () => {
+      signal?.removeEventListener("abort", onAbort)
+      resolve()
+    })
+    const onAbort = (): void => {
+      cancel()
+      resolve()
+    }
+    signal?.addEventListener("abort", onAbort, { once: true })
+  })
+
+interface PollDeps {
+  eval(expr: string, signal?: AbortSignal): Promise<Result<unknown, BrowserError>>
+  readonly scheduler: Scheduler
+  readonly clock: Clock
+}
+
+/** Poll the page for `opts.selector` until present, timeout, or abort. Kept at
+ *  module scope (out of the adapter object) so the loop's branching does not
+ *  inflate the adapter method's cognitive complexity. */
+const pollForSelector = async (
+  d: PollDeps,
+  opts: WaitOpts,
+  signal: AbortSignal | undefined,
+): Promise<Result<void, BrowserError>> => {
+  const isAborted = (): boolean => signal?.aborted === true
+  if (isAborted()) return err({ kind: "cancelled" })
+  const timeoutMs = opts.timeoutMs ?? 5_000
+  const pollMs = 100
+  const start = d.clock.now()
+  const js = selectorPresentJs(opts.selector)
+  for (;;) {
+    if (isAborted()) return err({ kind: "cancelled" })
+    const r = await d.eval(js, signal)
+    if (!r.ok) return r
+    if (r.value === true) return ok(undefined)
+    if (d.clock.now() - start >= timeoutMs) return err({ kind: "timeout", ms: timeoutMs })
+    await sleep(d.scheduler, pollMs, signal)
+  }
+}
 
 interface Pt {
   readonly x: number
@@ -334,11 +415,72 @@ export const resolveChromeBinary = (
 /** Connect the transport + enable the Page domain. A failed bring-up (chrome
  *  died right after the ws opened) surfaces as `spawn-failed` now rather than a
  *  confusing closed/timeout on first use (R1 audit [4]). */
+interface BringUp {
+  readonly session: CdpSession
+  readonly console: ConsoleBuffer
+}
+
+// Subscribe the persistent console/error/log streams into the ring buffer, plus
+// the dialog auto-dismiss. Called once after the page session is attached +
+// Page.enable succeeds. Runtime.enable / Log.enable are best-effort: a console
+// capture failure must NOT fail the whole bring-up (the page still drives), so
+// these errors are swallowed — the buffer simply stays empty.
+const installPageObservers = async (
+  session: CdpSession,
+  buffer: ConsoleBuffer,
+  opts: { signal?: AbortSignal } | undefined,
+): Promise<void> => {
+  // consoleAPICalled.type → level; args flattened to text.
+  session.onEvent("Runtime.consoleAPICalled", (p) => {
+    const entry: ConsoleEntry = {
+      level: mapConsoleApiType(p.type),
+      text: consoleArgsToText(p.args),
+      ...(typeof p.timestamp === "number" ? { ts: p.timestamp } : {}),
+    }
+    buffer.push(entry)
+  })
+  // exceptionThrown → level "error", text from exceptionDetails.text.
+  session.onEvent("Runtime.exceptionThrown", (p) => {
+    const d = p.exceptionDetails as
+      | { text?: unknown; exception?: { description?: unknown } }
+      | undefined
+    const text =
+      typeof d?.exception?.description === "string"
+        ? d.exception.description
+        : typeof d?.text === "string"
+          ? d.text
+          : "uncaught exception"
+    buffer.push({
+      level: "error",
+      text,
+      ...(typeof p.timestamp === "number" ? { ts: p.timestamp } : {}),
+    })
+  })
+  // Log.entryAdded → its own level + text.
+  session.onEvent("Log.entryAdded", (p) => {
+    const e = p.entry as { level?: unknown; text?: unknown; timestamp?: unknown } | undefined
+    buffer.push({
+      level: mapLogEntryLevel(e?.level),
+      text: typeof e?.text === "string" ? e.text : "",
+      ...(typeof e?.timestamp === "number" ? { ts: e.timestamp } : {}),
+    })
+  })
+  // SAFETY: a page alert()/confirm()/prompt() fires javascriptDialogOpening and
+  // BLOCKS the renderer (and thus every CDP request) until handled. Auto-DISMISS
+  // (accept:false) so a page can never wedge the automation. A future
+  // accept-policy is out of scope — default-dismiss is the safe posture.
+  session.onEvent("Page.javascriptDialogOpening", () => {
+    void session.request("Page.handleJavaScriptDialog", { accept: false })
+  })
+  await session.request("Runtime.enable", undefined, opts)
+  await session.request("Log.enable", undefined, opts)
+}
+
 const connectAndEnable = async (
   deps: CdpBrowserDeps,
   wsUrl: string,
   signal: AbortSignal | undefined,
-): Promise<Result<CdpSession, BrowserError>> => {
+): Promise<Result<BringUp, BrowserError>> => {
   const conn = await deps.transport.connect(wsUrl, signal)
   if (!conn.ok) return err({ kind: "spawn-failed", detail: conn.error.detail })
   const session = createCdpSession({ conn: conn.value, scheduler: deps.scheduler })
@@ -387,7 +529,12 @@ const connectAndEnable = async (
       detail: "Page.setDownloadBehavior(deny) failed during bring-up",
     })
   }
-  return ok(session)
+  // After the page session is live: subscribe console/error/log capture +
+  // dialog auto-dismiss, and enable the producing domains. Non-fatal — a console
+  // capture failure leaves the buffer empty but the page still drives.
+  const consoleBuffer = createConsoleBuffer()
+  await installPageObservers(session, consoleBuffer, opts)
+  return ok({ session, console: consoleBuffer })
 }
 
 export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
@@ -469,31 +616,33 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
           teardown()
           return endpoint
         }
-        const session = await connectAndEnable(deps, endpoint.value, opts?.signal)
-        if (!session.ok) {
+        const brought = await connectAndEnable(deps, endpoint.value, opts?.signal)
+        if (!brought.ok) {
           teardown()
-          return session
+          return brought
         }
+        const session = brought.value.session
         const state: SessionState = {
           closed: false,
           url: "about:blank",
           proc,
-          session: session.value,
+          session,
           profileDir,
           refMap: createRefMap(),
+          console: brought.value.console,
         }
         sessions.set(id, state)
         // R3 audit [1][7]: observe BOTH death modes → mark the SessionState closed
         // so live()/isLive() report it and the holder re-spawns instead of
         // wedging on a dead session. onDead = CDP-event/socket death; proc.exited
         // = process death (crash/OOM/external kill).
-        session.value.onDead(() => {
+        session.onDead(() => {
           state.closed = true
         })
         void proc.exited.then(() => {
           if (!state.closed) {
             state.closed = true
-            session.value.dispose()
+            session.dispose()
           }
         })
         return ok({ id, backend: "chromium" })
@@ -665,6 +814,41 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
       } catch {
         return err({ kind: "cdp-error", detail: "malformed base64 screenshot data" })
       }
+    },
+
+    async consoleMessages(h: BrowserHandle, opts?: ConsoleOpts) {
+      const s = live(h)
+      if (!s.ok) return s
+      const { entries, dropped } = s.value.console.drain(opts?.clear === true)
+      return ok({ entries, dropped })
+    },
+
+    async wait(h: BrowserHandle, opts: WaitOpts, signal?: AbortSignal) {
+      const s = live(h)
+      if (!s.ok) return s
+      return pollForSelector(
+        {
+          eval: (expr, sig) => evalValue(s.value, expr, sig),
+          scheduler: deps.scheduler,
+          clock: deps.clock,
+        },
+        opts,
+        signal,
+      )
+    },
+
+    async read(h: BrowserHandle, ref: string, opts: ReadOpts, signal?: AbortSignal) {
+      const s = live(h)
+      if (!s.ok) return s
+      const path = s.value.refMap.resolve(ref)
+      if (path === null) return err({ kind: "element-not-found", ref })
+      const r = await evalValue(s.value, readJs(path, opts.what, opts.attr), signal)
+      if (!r.ok) return r
+      const wrapped = r.value as { value?: unknown } | null
+      if (wrapped === null) return err({ kind: "element-not-found", ref })
+      const v = wrapped.value
+      if (typeof v === "string" || typeof v === "boolean") return ok({ value: v })
+      return err({ kind: "cdp-error", detail: "read returned a non-primitive value" })
     },
 
     async cdp(

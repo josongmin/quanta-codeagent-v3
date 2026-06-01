@@ -29,11 +29,15 @@ import type {
   BrowserError,
   BrowserHandle,
   BrowserStartOpts,
+  ConsoleEntry,
+  ConsoleOpts,
   DragTarget,
   PageSnapshot,
+  ReadOpts,
   ScrollOpts,
   SnapshotOpts,
   TypeOpts,
+  WaitOpts,
 } from "./types"
 
 export interface BrowserPort {
@@ -95,6 +99,27 @@ export interface BrowserPort {
     signal?: AbortSignal,
   ): Promise<Result<void, BrowserError>>
   screenshot(h: BrowserHandle, signal?: AbortSignal): Promise<Result<Uint8Array, BrowserError>>
+  /** Read the bounded console/error ring buffer captured since bring-up. Each
+   *  entry's `text` is page-controlled — the tool layer guards it. `clear`
+   *  drains the buffer. */
+  consoleMessages(
+    h: BrowserHandle,
+    opts?: ConsoleOpts,
+  ): Promise<
+    Result<{ readonly entries: readonly ConsoleEntry[]; readonly dropped: number }, BrowserError>
+  >
+  /** Wait for `opts.selector` to appear (poll on the injected scheduler), or
+   *  `Err{timeout}` after `opts.timeoutMs`. Honors the abort signal. */
+  wait(h: BrowserHandle, opts: WaitOpts, signal?: AbortSignal): Promise<Result<void, BrowserError>>
+  /** Read a precise property off the element a `ref` resolves to — `text`,
+   *  an `attribute` value, or `visible`. Page-controlled text/attribute is
+   *  guarded by the tool layer. */
+  read(
+    h: BrowserHandle,
+    ref: string,
+    opts: ReadOpts,
+    signal?: AbortSignal,
+  ): Promise<Result<{ readonly value: string | boolean }, BrowserError>>
   cdp(
     h: BrowserHandle,
     method: string,

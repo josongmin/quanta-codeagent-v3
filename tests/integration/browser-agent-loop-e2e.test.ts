@@ -85,6 +85,9 @@ const ALL_BROWSER_TOOLS = [
   "browser_mouse_click_xy",
   "browser_screenshot",
   "browser_cdp",
+  "browser_console",
+  "browser_wait",
+  "browser_read",
 ]
 
 // ── scripted-LLM + recording-stream doubles ──────────────────────────────────
@@ -436,7 +439,7 @@ describe("browser tools through the real agent loop — DISPOSE", () => {
 // ── (4) features-level seam (no full loop) ────────────────────────────────────
 
 describe("browser features seam — registry surface", () => {
-  test("(14) wired slot ⇒ all 12 browser tools land in the loop's registry", async () => {
+  test("(14) wired slot ⇒ all 15 browser tools land in the loop's registry", async () => {
     const { buildSessionFeatures } = await import("@/agent/features")
     const f = await buildSessionFeatures({
       registry: new ToolRegistry(defaultTools),

@@ -121,6 +121,9 @@ const flakyPort = () => {
     drag: async () => ok(undefined),
     mouseClickXY: async () => ok(undefined),
     screenshot: async () => ok(new Uint8Array()),
+    consoleMessages: async () => ok({ entries: [], dropped: 0 }),
+    wait: async () => ok(undefined),
+    read: async () => ok({ value: "" }),
     cdp: async () => ok({}),
     close: async (h) => {
       closed.push(h.id)
