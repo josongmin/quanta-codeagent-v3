@@ -37,6 +37,10 @@ interface TxScript {
   evalException?: string
   screenshot?: string | null
   enableError?: string
+  createTargetError?: string
+  noTargetId?: boolean
+  attachError?: string
+  noSessionId?: boolean
 }
 
 const spawner: ProcessSpawner = {
@@ -72,6 +76,25 @@ const evalBody = (id: number, expr: string, s: TxScript): string => {
   return JSON.stringify({ id, result: { result: { value } } })
 }
 
+// Bring-up reply (Target.* + Page.enable) — returns the wire JSON or null when
+// `m` is not a bring-up method. Keeps respond() under the complexity budget.
+const bringUpReply = (m: SentMsg, s: TxScript): string | null => {
+  if (m.method === "Target.createTarget") {
+    return s.createTargetError !== undefined
+      ? JSON.stringify({ id: m.id, error: { message: s.createTargetError } })
+      : JSON.stringify({ id: m.id, result: s.noTargetId === true ? {} : { targetId: "t1" } })
+  }
+  if (m.method === "Target.attachToTarget") {
+    return s.attachError !== undefined
+      ? JSON.stringify({ id: m.id, error: { message: s.attachError } })
+      : JSON.stringify({ id: m.id, result: s.noSessionId === true ? {} : { sessionId: "s1" } })
+  }
+  if (m.method === "Page.enable" && s.enableError !== undefined) {
+    return JSON.stringify({ id: m.id, error: { message: s.enableError } })
+  }
+  return null
+}
+
 const respond = (m: SentMsg, s: TxScript, emit: (raw: string) => void): void => {
   if (m.method === "Runtime.evaluate") {
     emit(evalBody(m.id, m.params.expression ?? "", s))
@@ -86,25 +109,21 @@ const respond = (m: SentMsg, s: TxScript, emit: (raw: string) => void): void => 
     )
     return
   }
-  if (m.method === "Target.createTarget") {
-    emit(JSON.stringify({ id: m.id, result: { targetId: "t1" } }))
-    return
-  }
-  if (m.method === "Target.attachToTarget") {
-    emit(JSON.stringify({ id: m.id, result: { sessionId: "s1" } }))
+  const bring = bringUpReply(m, s)
+  if (bring !== null) {
+    emit(bring)
     return
   }
   if (m.method === "Page.navigate" && s.navigateError !== undefined) {
     emit(JSON.stringify({ id: m.id, error: { message: s.navigateError } }))
     return
   }
-  if (m.method === "Page.enable" && s.enableError !== undefined) {
-    emit(JSON.stringify({ id: m.id, error: { message: s.enableError } }))
-    return
-  }
   emit(JSON.stringify({ id: m.id, result: {} }))
   if (m.method === "Page.navigate" && s.noLoad !== true) {
-    setTimeout(() => emit(JSON.stringify({ method: "Page.loadEventFired", params: {} })), 0)
+    setTimeout(
+      () => emit(JSON.stringify({ method: "Page.loadEventFired", params: {}, sessionId: "s1" })),
+      0,
+    )
   }
 }
 
@@ -263,5 +282,62 @@ describe("HELLGATE adapter branches — screenshot [28]", () => {
     const r = await b.screenshot(h)
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.error.kind).toBe("cdp-error")
+  })
+})
+
+describe("HELLGATE adapter branches — flat-session bring-up arms [13]", () => {
+  const recFs = (rm: string[]): BrowserFs => ({ ...fs, rmrf: (p) => rm.push(p) })
+  const build = (s: TxScript) => {
+    const rm: string[] = []
+    const b = createCdpBrowser({
+      spawner: {
+        which: () => "/usr/bin/google-chrome",
+        spawn: () => ({ pid: 1, kill: () => {}, exited: Promise.resolve(0) }),
+      },
+      transport: transport(s),
+      fs: recFs(rm),
+      scheduler: idleScheduler,
+      clock,
+      profileRoot: "/jail/b",
+      endpointTimeoutMs: 1000,
+    })
+    return { b, rm }
+  }
+  const ARMS: ReadonlyArray<[string, TxScript, string]> = [
+    ["Target.createTarget error", { createTargetError: "boom" }, "Target.createTarget"],
+    ["no targetId", { noTargetId: true }, "targetId"],
+    ["Target.attachToTarget error", { attachError: "nope" }, "Target.attachToTarget"],
+    ["no sessionId", { noSessionId: true }, "sessionId"],
+  ]
+  for (const [label, script, detailNeedle] of ARMS) {
+    test(`${label} ⇒ spawn-failed + profile cleaned`, async () => {
+      const { b, rm } = build(script)
+      const r = await b.spawn()
+      expect(r.ok).toBe(false)
+      if (!r.ok) {
+        expect(r.error.kind).toBe("spawn-failed")
+        if (r.error.kind === "spawn-failed") expect(r.error.detail).toContain(detailNeedle)
+      }
+      expect(rm).toHaveLength(1) // temp profile removed on the failed arm
+    })
+  }
+})
+
+describe("HELLGATE adapter — navigate invalidates stale refs [12]", () => {
+  test("a ref from page A is dead after navigating to page B (no re-snapshot)", async () => {
+    const b = browser({}) // COLLECT returns a DOM with one child ⇒ refs e1,e2
+    const h = await b.spawn()
+    expect(h.ok).toBe(true)
+    if (!h.ok) return
+    await b.navigate(h.value, "https://a.test/")
+    const snap = await b.snapshot(h.value)
+    expect(snap.ok).toBe(true)
+    const okClick = await b.click(h.value, "e2") // valid on page A
+    expect(okClick.ok).toBe(true)
+    // navigate to B → refMap.invalidate() fires; the old ref must now fail closed
+    await b.navigate(h.value, "https://b.test/")
+    const stale = await b.click(h.value, "e2")
+    expect(stale.ok).toBe(false)
+    if (!stale.ok) expect(stale.error.kind).toBe("element-not-found")
   })
 })

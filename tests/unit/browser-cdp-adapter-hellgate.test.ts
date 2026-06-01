@@ -96,7 +96,11 @@ const scriptedTransport = (script: ScriptOpts): CdpTransport => ({
       if (m.method === "Page.navigate") {
         // emit the load event on a later macrotask, after the adapter has
         // registered the waitForEvent waiter
-        setTimeout(() => onMsg(JSON.stringify({ method: "Page.loadEventFired", params: {} })), 0)
+        setTimeout(
+          () =>
+            onMsg(JSON.stringify({ method: "Page.loadEventFired", params: {}, sessionId: "s1" })),
+          0,
+        )
       }
     }
     const conn: CdpConnection = {

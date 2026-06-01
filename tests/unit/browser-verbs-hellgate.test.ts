@@ -147,7 +147,10 @@ const respondVerb = (m: VerbMsg, emit: (raw: string) => void): void => {
   }
   emit(JSON.stringify({ id: m.id, result: {} }))
   if (m.method === "Page.navigate") {
-    setTimeout(() => emit(JSON.stringify({ method: "Page.loadEventFired", params: {} })), 0)
+    setTimeout(
+      () => emit(JSON.stringify({ method: "Page.loadEventFired", params: {}, sessionId: "s1" })),
+      0,
+    )
   }
 }
 

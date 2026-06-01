@@ -126,9 +126,11 @@ const stripZone = (h: string): string => {
 }
 
 const normalizeHost = (hostname: string): string => {
+  // `.trim()` first — a leading/trailing space otherwise defeats both the v4 and
+  // localhost/v6 classification, allowing " 127.0.0.1" through (R3 audit [9]).
   // Strip a trailing FQDN root dot — `localhost.` / `127.0.0.1.` resolve to the
   // same host and must not bypass the deny (edge audit bug #1).
-  const h = stripZone(stripBrackets(hostname.toLowerCase()))
+  const h = stripZone(stripBrackets(hostname.trim().toLowerCase()))
   return h.endsWith(".") ? h.slice(0, -1) : h
 }
 

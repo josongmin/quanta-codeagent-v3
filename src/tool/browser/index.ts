@@ -101,7 +101,7 @@ const snapshotTool = (port: BrowserPort, session: BrowserSession): Tool =>
   defineTool<Record<string, never>>({
     name: "browser_snapshot",
     description:
-      "Capture an accessibility-tree snapshot of the current page (YAML). Each node has a ref you pass to browser_click / browser_type.",
+      "Capture an accessibility-tree snapshot of the current page (YAML). Each node has a ref you pass to browser_click / browser_type. Refs are valid only until the page changes — re-snapshot after any action that may mutate the DOM before reusing a ref (a stale ref after navigation fails closed; after an in-place mutation it may resolve to a different element).",
     inputSchema: snapshotSchema,
     isReadOnly: () => true,
     isConcurrencySafe: () => false,

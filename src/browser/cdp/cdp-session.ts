@@ -50,6 +50,7 @@ interface CdpMessage {
   readonly params?: unknown
   readonly result?: unknown
   readonly error?: { readonly message?: unknown }
+  readonly sessionId?: unknown
 }
 
 interface EventWaiter {
@@ -72,9 +73,33 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
   const defaultTimeoutMs = deps.defaultTimeoutMs ?? 30_000
   let seq = 0
   let disposed = false
+  let dead = false
   let pageSessionId: string | null = null
   const pending = new Map<number, (r: Result<unknown, BrowserError>) => void>()
   const eventWaiters = new Map<string, EventWaiter[]>()
+
+  const DEAD_ERR = (): Result<never, BrowserError> =>
+    err({ kind: "cdp-error", detail: "page target detached or crashed" })
+
+  /** Fail-fast on a detached/crashed page target — settle everything in flight
+   *  instead of letting each call grind to its full timeout (R3 audit [5]). */
+  const markDead = (): void => {
+    if (dead) return
+    dead = true
+    for (const settle of [...pending.values()]) settle(DEAD_ERR())
+    pending.clear()
+    for (const waiters of [...eventWaiters.values()]) for (const w of [...waiters]) w.onClosed()
+    eventWaiters.clear()
+  }
+
+  const isTargetGone = (msg: CdpMessage): boolean => {
+    if (msg.method === "Target.targetCrashed") return true
+    if (msg.method !== "Target.detachedFromTarget" || pageSessionId === null) return false
+    const p = msg.params
+    const sid =
+      typeof p === "object" && p !== null ? (p as { sessionId?: unknown }).sessionId : undefined
+    return sid === pageSessionId
+  }
 
   const routeReply = (id: number, msg: CdpMessage): void => {
     const settle = pending.get(id)
@@ -89,7 +114,11 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
     }
   }
 
-  const routeEvent = (method: string, rawParams: unknown): void => {
+  const routeEvent = (method: string, sessionId: unknown, rawParams: unknown): void => {
+    // Once attached to a page session, deliver only events from THAT session — a
+    // browser-level or foreign-target event with the same method name must not
+    // satisfy a page-scoped waitForEvent (R3 audit [4]).
+    if (pageSessionId !== null && sessionId !== pageSessionId) return
     const waiters = eventWaiters.get(method)
     if (waiters === undefined || waiters.length === 0) return
     // An array satisfies `typeof === "object" && !== null`, so guard it out — an
@@ -106,8 +135,16 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
   deps.conn.onMessage((raw) => {
     const msg = parseMessage(raw)
     if (msg === null) return
-    if (typeof msg.id === "number") routeReply(msg.id, msg)
-    else if (typeof msg.method === "string") routeEvent(msg.method, msg.params)
+    if (typeof msg.id === "number") {
+      routeReply(msg.id, msg)
+      return
+    }
+    if (typeof msg.method !== "string") return
+    if (isTargetGone(msg)) {
+      markDead()
+      return
+    }
+    routeEvent(msg.method, msg.sessionId, msg.params)
   })
 
   const armSettle = <T>(
@@ -145,6 +182,7 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
       opts?: CdpRequestOpts,
     ): Promise<Result<unknown, BrowserError>> {
       if (disposed) return Promise.resolve(err({ kind: "closed" }))
+      if (dead) return Promise.resolve(DEAD_ERR())
       const id = ++seq
       const timeoutMs = opts?.timeoutMs ?? defaultTimeoutMs
       return new Promise<Result<unknown, BrowserError>>((resolve) => {
@@ -171,6 +209,7 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
       opts?: CdpRequestOpts,
     ): Promise<Result<Readonly<Record<string, unknown>>, BrowserError>> {
       if (disposed) return Promise.resolve(err({ kind: "closed" }))
+      if (dead) return Promise.resolve(DEAD_ERR())
       const timeoutMs = opts?.timeoutMs ?? defaultTimeoutMs
       return new Promise<Result<Readonly<Record<string, unknown>>, BrowserError>>((resolve) => {
         const waiter: EventWaiter = {

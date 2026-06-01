@@ -242,9 +242,27 @@ const keyEventBase = (key: string): Record<string, unknown> => {
     }
   }
   if (key.length === 1) {
-    return { key, text: key, code: `Key${key.toUpperCase()}` }
+    // Only letters/digits have a derivable KeyboardEvent.code; for symbols a
+    // synthetic `Key<symbol>` is wrong — omit it and let the browser derive
+    // (R3 audit [6]).
+    const code = /[a-z]/i.test(key)
+      ? `Key${key.toUpperCase()}`
+      : /[0-9]/.test(key)
+        ? `Digit${key}`
+        : undefined
+    return code !== undefined ? { key, text: key, code } : { key, text: key }
   }
   return { key }
+}
+
+// Best-effort kill — Bun's Subprocess.kill() can throw (ESRCH/EPERM-style proc
+// states); a throw must NOT skip the profile rmrf that follows (R3 audit [3]).
+const killQuietly = (proc: SpawnedProcess): void => {
+  try {
+    proc.kill()
+  } catch {
+    // proc already gone / unkillable — the profile cleanup still runs
+  }
 }
 
 const mouseClick = async (
@@ -414,7 +432,7 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
       // Single cleanup path: ANY error/throw between spawn and a registered
       // session must kill the proc + remove the temp profile (R1 audit [19]).
       const teardown = (): void => {
-        proc.kill()
+        killQuietly(proc)
         deps.fs.rmrf(profileDir)
       }
       try {
@@ -618,7 +636,7 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
       if (s === undefined || s.closed) return ok(undefined)
       s.closed = true
       s.session.dispose()
-      s.proc.kill()
+      killQuietly(s.proc)
       deps.fs.rmrf(s.profileDir)
       return ok(undefined)
     },

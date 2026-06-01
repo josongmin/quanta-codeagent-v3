@@ -24,6 +24,7 @@ export const createBrowserSession = (port: BrowserPort): BrowserSession => {
   let handle: BrowserHandle | null = null
   let spawning: Promise<Result<BrowserHandle, BrowserError>> | null = null
   let disposed = false
+  let pendingClose: Promise<unknown> | null = null
 
   return {
     async ensure(signal?: AbortSignal): Promise<Result<BrowserHandle, BrowserError>> {
@@ -37,8 +38,12 @@ export const createBrowserSession = (port: BrowserPort): BrowserSession => {
           // R2 audit [1]: if dispose() raced the spawn, close the freshly-spawned
           // handle here instead of storing it — otherwise teardown (already past)
           // never closes it and the real Chrome proc + temp profile leak.
+          // R3 audit [1][2]: capture the close promise (caught, so a throwing close
+          // is NOT an unhandled rejection) so dispose() can AWAIT it — without this
+          // dispose returned before the close completed and a rejecting close
+          // escaped the no-throw seam.
           if (disposed) {
-            void port.close(r.value)
+            pendingClose = port.close(r.value).catch(() => {})
             return err({ kind: "closed" })
           }
           handle = r.value
@@ -59,9 +64,11 @@ export const createBrowserSession = (port: BrowserPort): BrowserSession => {
 
     async dispose(): Promise<void> {
       disposed = true
-      // Wait out an in-flight spawn so its handle is guaranteed closed (the
-      // `.then` above self-closes when it observes `disposed`); R2 audit [1].
+      // Wait out an in-flight spawn AND the self-close it may have started, so the
+      // freshly-spawned handle is genuinely closed by the time dispose() returns
+      // (R2 audit [1] + R3 audit [2]).
       if (spawning !== null) await spawning
+      if (pendingClose !== null) await pendingClose
       if (handle === null) return
       const h = handle
       handle = null

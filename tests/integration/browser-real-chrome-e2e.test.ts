@@ -493,10 +493,11 @@ describe("browser real-chrome e2e — chrome presence report", () => {
     expect(PROBE.detail.length).toBeGreaterThan(0)
   })
 
-  test("when chrome is present the real block runs IFF the adapter can bring a session up", () => {
-    if (HAS_CHROME && !CHROME_USABLE) {
-      expect(PROBE.detail.length).toBeGreaterThan(0)
+  test("chrome present ⇒ the adapter MUST bring a session up (no silent skip of a regression)", () => {
+    // FAIL-LOUD (R3 audit [11]): on a machine WITH chrome, a bring-up failure is
+    // a real regression the skip-gate would otherwise hide as 17 silent skips.
+    if (HAS_CHROME) {
+      expect(CHROME_USABLE).toBe(true) // PROBE.detail names the failure if this trips
     }
-    expect(true).toBe(true)
   })
 })

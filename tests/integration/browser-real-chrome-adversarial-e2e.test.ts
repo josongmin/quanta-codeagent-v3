@@ -420,6 +420,13 @@ describe.skipIf(!HAS_CHROME)("adversarial e2e — REAL chrome via cdp-adapter po
   // machines where chrome is present-but-unusable.
   const need = (): BrowserHandle | null => (chromeUsable ? handle : null)
 
+  // FAIL-LOUD (R3 audit [11]): this block only runs when chrome is PRESENT, so a
+  // failed bring-up here is a real regression — surface it instead of letting
+  // every `need()` short-circuit to a silent vacuous pass.
+  test("chrome is present ⇒ bring-up MUST succeed (else it is a regression, not a skip)", () => {
+    expect(chromeUsable).toBe(true)
+  })
+
   test("spawn succeeded + isolated profile dir created under temp profileRoot", () => {
     const h = need()
     if (h === null) return // chrome present but bring-up failed → skip cleanly

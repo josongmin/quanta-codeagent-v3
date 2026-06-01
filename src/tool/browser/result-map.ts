@@ -44,16 +44,19 @@ export const mapBrowserError = (e: BrowserError): ToolResult => {
         failure: { mode: "not_found" },
       }
     case "cdp-method-denied":
+      // `method` is model-supplied; defang any forged boundary (R3 audit [8]).
       return {
         ok: false,
-        output: `cdp method denied by allowlist: ${e.method}`,
+        output: `cdp method denied by allowlist: ${guardPageText(e.method)}`,
         failure: { mode: "permission_denied" },
       }
     case "cdp-error":
+      // `detail` is a CDP/page-derived error string — route it through the guard
+      // so a page cannot forge a <system-reminder> boundary in the error (R3 [8]).
       return {
         ok: false,
-        output: `browser protocol error: ${e.detail}`,
-        failure: { mode: "error", modelVisibleError: e.detail },
+        output: `browser protocol error: ${guardPageText(e.detail)}`,
+        failure: { mode: "error", modelVisibleError: guardPageText(e.detail) },
       }
     case "timeout":
       return {

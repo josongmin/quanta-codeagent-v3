@@ -86,6 +86,17 @@ A focused adversarial re-audit (post real-chrome) tried to falsify the 7 core cl
 
 **Suite total: 566 browser/ssrf/wire tests across 22 files, 0 fail; src tsc 0; biome 0/0.** No production code mutated beyond the `RefMap` seam (one new method) and its two `navigate` call sites — default-OFF wiring untouched, registry still byte-identical.
 
+## R3 deep-audit closeout (2026-06-01)
+
+A 5-lens deep audit (concurrency-lifecycle / flat-session-protocol / dom-walk / security-wiring / test-mutation) targeting code added since R2 — 13 confirmed, all fixed:
+- **flat-session protocol**: `routeEvent` now filters by `sessionId` (a foreign-target/browser-level event can no longer satisfy a page-scoped `waitForEvent`); `Target.detachedFromTarget`/`Target.targetCrashed` mark the session dead → in-flight + future calls fail fast instead of grinding to the timeout.
+- **lifecycle**: the dispose-during-spawn close is now caught + awaited (no unhandled rejection, genuinely closed before dispose returns); `proc.kill()` is best-effort so a throwing kill never skips the profile `rmrf`.
+- **security**: `classifyHost` trims whitespace (a leading/trailing space no longer bypasses SSRF); page-derived error detail (`cdp-error`/`cdp-method-denied`) routed through `guardPageText`.
+- **keys**: `keyEventBase` emits a correct `code` for digits/symbols (not a bogus `Key<symbol>`).
+- **tests**: +flat-session battery (sessionId stamping / event filter / detach-crash), navigate→`invalidate()` cross-navigation stale-ref coverage, all 5 bring-up error arms, and fail-loud real-chrome gates (a present-but-broken chrome is now a loud failure, not 17 silent skips).
+
+**Suite total: 578 tests across 23 files, 0 fail, 2484 expect() calls; src tsc 0; biome 0/0.**
+
 ## Still deferred (honest): `browser_tabs` (multi-target CDP — its own slice); download-INTO-jail (currently denied, which is the safe default; allowing+jailing needs CDP download-event plumbing); DNS-rebind connection pinning (CDP cannot cleanly pin a resolved address into the connection); a real-chrome smoke run for `cdp/defaults.ts` (needs a chrome binary in CI).
 
 **Deferred to Phase 2:** `browser_fill`/`select_option`/`scroll`/`press_key`/`drag`/`tabs`/`mouse_click_xy`; download-to-jail (strengthen #4); origin-allowlist layer on top of SSRF; richer collector fields (placeholder/options/level/nth — R1 [11]); DNS-rebind connection pinning; CLI composition-root population of `config.browser` ([9]/[13] operator step).
