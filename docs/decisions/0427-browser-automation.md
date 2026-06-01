@@ -97,6 +97,24 @@ A 5-lens deep audit (concurrency-lifecycle / flat-session-protocol / dom-walk / 
 
 **Suite total: 578 tests across 23 files, 0 fail, 2484 expect() calls; src tsc 0; biome 0/0.**
 
+## R4 cross-cutting closeout (2026-06-02)
+
+A 4-lens cross-cutting audit (resource-lifecycle / cancellation-threading / unbounded-input / multi-instance) over the whole slice — 5 confirmed real defects, all fixed + pinned by `browser-r4-hellgate` (chrome-free, mutation-verified):
+
+1. 🔴 **A hung DNS resolver hung the whole turn.** `guardNavigationUrl`'s name→IP lookup had no bound, so a slow/stuck resolver would block `browser_navigate` (and the agent turn) indefinitely. **Fix:** the lookup now races a `timeoutMs` deadline (default 5s, injectable for tests) and fails **closed** (`dns resolution timed out`).
+2. 🔴 **Pathological DOM depth could blow the parse.** A deeply self-nesting a11y tree walked unbounded. **Fix:** `MAX_DEPTH = 1000` caps both the in-page `COLLECT_SCRIPT` walk and the host-side `parseDomModel` rebuild — a 3000-deep model now parses safely, depth-capped, no overflow.
+3. 🟡 **Abort didn't thread into `snapshot`/`screenshot`/`cdp`.** Only `navigate`/actuation took a signal, so a cancelled turn could still issue a long snapshot/screenshot. **Fix:** the three read verbs now take an optional `signal?` threaded down to the CDP request; a pre-aborted signal cancels through the adapter, and `src/tool/browser/index.ts` passes `ctx.signal`.
+4. 🟡 **A throwing spawner leaked the profile dir.** If `spawner.spawn` threw (EMFILE, etc.) after the profile `mkdirp`, the dir was orphaned. **Fix:** spawn bring-up moved fully inside `try`; teardown best-effort `kill` + `rmrf(profileDir)` runs on every failure arm → `spawn-failed`.
+5. 🟡 **Concurrent adapters could collide on a shared `profileRoot`.** Two sessions from the same root + same `seq` produced the same dir. **Fix:** `uniqueNonce = ${pid}-${randomUUID().slice(0,8)}` is folded into the profile id, so distinct adapters get distinct dirs.
+
+Also: `runAgentInner`'s `finally` now runs `browserDispose?.()` on throw paths (not just clean exit), so a crashing turn still tears the browser down.
+
+**Scoped OUT of this slice (flagged, not silently dropped):**
+- **[1] verb-tiered HITL always-confirm core-gate.** The per-verb confirmation tiering (strengthen #5) currently lives as tool-side metadata; promoting it to a hard always-confirm gate touches the shared permission core that all 19 tools share — a cross-cutting change that belongs in the permission slice, not here.
+- **[7] per-turn browser lifecycle.** Today the browser is disposed at session teardown (+ on throw). True per-turn spawn/dispose needs session-registry lifecycle integration (handle ownership across turns) — a session-slice change, deferred to keep this slice plane-clean.
+
+**Suite total: browser-r4-hellgate 6/6; full browser/ssrf/wire suite 0 fail; src tsc 0; biome 0/0.**
+
 ## Still deferred (honest): `browser_tabs` (multi-target CDP — its own slice); download-INTO-jail (currently denied, which is the safe default; allowing+jailing needs CDP download-event plumbing); DNS-rebind connection pinning (CDP cannot cleanly pin a resolved address into the connection); a real-chrome smoke run for `cdp/defaults.ts` (needs a chrome binary in CI).
 
 **Deferred to Phase 2:** `browser_fill`/`select_option`/`scroll`/`press_key`/`drag`/`tabs`/`mouse_click_xy`; download-to-jail (strengthen #4); origin-allowlist layer on top of SSRF; richer collector fields (placeholder/options/level/nth — R1 [11]); DNS-rebind connection pinning; CLI composition-root population of `config.browser` ([9]/[13] operator step).

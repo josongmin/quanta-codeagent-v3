@@ -114,7 +114,7 @@ const snapshotTool = (port: BrowserPort, session: BrowserSession): Tool =>
         yield { type: "result", result: ens.result }
         return
       }
-      const r = await port.snapshot(ens.handle)
+      const r = await port.snapshot(ens.handle, undefined, ctx.signal)
       if (!r.ok) {
         yield { type: "result", result: mapBrowserError(r.error) }
         return
@@ -186,7 +186,7 @@ const screenshotTool = (port: BrowserPort, session: BrowserSession): Tool =>
         yield { type: "result", result: ens.result }
         return
       }
-      const r = await port.screenshot(ens.handle)
+      const r = await port.screenshot(ens.handle, ctx.signal)
       if (!r.ok) {
         yield { type: "result", result: mapBrowserError(r.error) }
         return
@@ -237,7 +237,7 @@ const cdpTool = (port: BrowserPort, session: BrowserSession): Tool =>
         yield { type: "result", result: ens.result }
         return
       }
-      const r = await port.cdp(ens.handle, input.method, input.params)
+      const r = await port.cdp(ens.handle, input.method, input.params, ctx.signal)
       if (!r.ok) {
         yield { type: "result", result: mapBrowserError(r.error) }
         return

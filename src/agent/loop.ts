@@ -2730,5 +2730,10 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
     return ctx.finish("max_turns", ctx.cfg.maxTurns, completedCategory("max_turns"))
   } finally {
     await diagnosticsHook?.dispose()
+    // R4 audit [3]: the browser (Chrome proc + temp profile) must be torn down on
+    // EVERY exit — including a thrown turn loop, where `ctx.finish()` (and its
+    // cleanupFinishedSession) is never reached. Idempotent: a normal finish
+    // already disposed it, and the session-holder no-ops a second call.
+    await ctx.features.browserDispose?.().catch(() => {})
   }
 }

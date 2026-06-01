@@ -44,7 +44,11 @@ export interface BrowserPort {
     url: string,
     signal?: AbortSignal,
   ): Promise<Result<{ readonly title: string }, BrowserError>>
-  snapshot(h: BrowserHandle, opts?: SnapshotOpts): Promise<Result<PageSnapshot, BrowserError>>
+  snapshot(
+    h: BrowserHandle,
+    opts?: SnapshotOpts,
+    signal?: AbortSignal,
+  ): Promise<Result<PageSnapshot, BrowserError>>
   click(h: BrowserHandle, ref: string, signal?: AbortSignal): Promise<Result<void, BrowserError>>
   type(
     h: BrowserHandle,
@@ -86,11 +90,12 @@ export interface BrowserPort {
     y: number,
     signal?: AbortSignal,
   ): Promise<Result<void, BrowserError>>
-  screenshot(h: BrowserHandle): Promise<Result<Uint8Array, BrowserError>>
+  screenshot(h: BrowserHandle, signal?: AbortSignal): Promise<Result<Uint8Array, BrowserError>>
   cdp(
     h: BrowserHandle,
     method: string,
     params?: Readonly<Record<string, unknown>>,
+    signal?: AbortSignal,
   ): Promise<Result<unknown, BrowserError>>
   close(h: BrowserHandle): Promise<Result<void, BrowserError>>
 }

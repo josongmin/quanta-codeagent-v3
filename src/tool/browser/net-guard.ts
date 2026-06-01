@@ -39,6 +39,7 @@ export const nodeDnsResolver: DnsResolver = {
 }
 
 const ALLOWED_PROTOCOLS = new Set(["http:", "https:"])
+const DNS_TIMEOUT_MS = 5_000
 
 /**
  * Parse + gate a navigation target. Async because the DNS step (when a resolver
@@ -53,6 +54,7 @@ const ALLOWED_PROTOCOLS = new Set(["http:", "https:"])
 export const guardNavigationUrl = async (
   raw: string,
   resolver?: DnsResolver,
+  timeoutMs: number = DNS_TIMEOUT_MS,
 ): Promise<NavGuardResult> => {
   let url: URL
   try {
@@ -68,11 +70,22 @@ export const guardNavigationUrl = async (
   // A public IP literal is allowed; a DNS name may still resolve to a private IP.
   if (isIpLiteral(url.hostname)) return { ok: true, url }
   if (resolver !== undefined) {
+    // R4 audit [4]: bound the lookup — a hung/slow resolver must not hang
+    // navigate (and the whole turn) indefinitely. Fail-closed on timeout.
     let addrs: readonly string[]
     try {
-      addrs = await resolver.lookup(url.hostname)
-    } catch {
-      return { ok: false, reason: `dns resolution failed for ${url.hostname}` }
+      addrs = await Promise.race([
+        resolver.lookup(url.hostname),
+        new Promise<never>((_, rej) =>
+          setTimeout(() => rej(new Error("dns-timeout")), timeoutMs),
+        ),
+      ])
+    } catch (e) {
+      const reason =
+        e instanceof Error && e.message === "dns-timeout"
+          ? "dns resolution timed out"
+          : "dns resolution failed"
+      return { ok: false, reason: `${reason} for ${url.hostname}` }
     }
     for (const addr of addrs) {
       const verdict = classifyHost(addr)

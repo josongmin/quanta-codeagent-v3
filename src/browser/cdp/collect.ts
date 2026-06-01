@@ -17,6 +17,10 @@ import type { DomModel, DomNode } from "../types"
 
 export const NAME_CAP = 200
 export const VALUE_CAP = 100
+/** Max recursion depth — a pathological/attacker DOM (10k+ deep) would otherwise
+ *  blow the JS stack (in-page walk AND the parse trust boundary) and allocate a
+ *  giant tree (R4 audit [5]). Past the cap, children are dropped. */
+export const MAX_DEPTH = 1000
 
 /** The script evaluated in-page. Kept as a string (runs in the browser, not in
  *  this runtime). Correctness of the walk is a real-browser smoke concern; the
@@ -37,7 +41,8 @@ export const COLLECT_SCRIPT = `(() => {
     const st = el.ownerDocument.defaultView.getComputedStyle(el);
     return st.display !== 'none' && st.visibility !== 'hidden' && el.getAttribute('aria-hidden') !== 'true';
   };
-  const walk = (el, path) => {
+  const MAX_DEPTH = ${MAX_DEPTH};
+  const walk = (el, path, depth) => {
     const node = { backendPath: path, role: roleOf(el), name: accName(el), tag: el.tagName.toLowerCase() };
     const st = states(el); if (st.length) node.states = st;
     if ('value' in el && el.value != null) node.value = String(el.value).slice(0, VALUE_CAP);
@@ -45,18 +50,19 @@ export const COLLECT_SCRIPT = `(() => {
     const lvl = /^H([1-6])$/.exec(el.tagName); if (lvl) node.level = Number(lvl[1]);
     else if (el.getAttribute('aria-level')) node.level = Number(el.getAttribute('aria-level'));
     if (el.tagName === 'A' && el.href) node.url = el.href;
+    if (depth >= MAX_DEPTH) return node;
     const kids = [];
     const children = el.shadowRoot ? el.shadowRoot.children : el.children;
     for (let i = 0; i < children.length; i++) {
       const c = children[i];
       if (c.tagName === 'IFRAME' || c.tagName === 'SCRIPT' || c.tagName === 'STYLE') continue;
       if (!visible(c)) continue;
-      kids.push(walk(c, path + '/' + i));
+      kids.push(walk(c, path + '/' + i, depth + 1));
     }
     if (kids.length) node.children = kids;
     return node;
   };
-  return JSON.stringify({ title: document.title, root: walk(document.body, '/') });
+  return JSON.stringify({ title: document.title, root: walk(document.body, '/', 0) });
 })()`
 
 const cap = (s: string, n: number): string => (s.length > n ? s.slice(0, n) : s)
@@ -84,18 +90,18 @@ const applyOptionalFields = (node: MutableNode, o: Record<string, unknown>): voi
 // fail-closed: a single malformed child rejects the whole subtree (null), an
 // absent/empty children list yields []. Mutually recursive with `asNode` —
 // declared as functions so hoisting handles the cycle.
-function parseChildren(raw: unknown): DomNode[] | null {
-  if (!Array.isArray(raw)) return []
+function parseChildren(raw: unknown, depth: number): DomNode[] | null {
+  if (depth >= MAX_DEPTH || !Array.isArray(raw)) return []
   const kids: DomNode[] = []
   for (const c of raw) {
-    const parsed = asNode(c)
+    const parsed = asNode(c, depth + 1)
     if (parsed === null) return null
     kids.push(parsed)
   }
   return kids
 }
 
-function asNode(v: unknown): DomNode | null {
+function asNode(v: unknown, depth: number): DomNode | null {
   if (typeof v !== "object" || v === null) return null
   const o = v as Record<string, unknown>
   if (
@@ -105,7 +111,7 @@ function asNode(v: unknown): DomNode | null {
   ) {
     return null
   }
-  const kids = parseChildren(o.children)
+  const kids = parseChildren(o.children, depth)
   if (kids === null) return null
   const node: MutableNode = {
     backendPath: o.backendPath,
@@ -132,7 +138,7 @@ export const parseDomModel = (raw: unknown): Result<DomModel, "malformed"> => {
   if (typeof value !== "object" || value === null) return err("malformed")
   const o = value as Record<string, unknown>
   if (typeof o.title !== "string") return err("malformed")
-  const root = asNode(o.root)
+  const root = asNode(o.root, 0)
   if (root === null) return err("malformed")
   return ok({ title: cap(o.title, NAME_CAP), root })
 }

@@ -255,6 +255,10 @@ const keyEventBase = (key: string): Record<string, unknown> => {
   return { key }
 }
 
+// Globally-unique profile-dir suffix (R4 audit [8]) — independent of the
+// per-instance seq so concurrent adapters sharing a profileRoot never collide.
+const uniqueNonce = (): string => `${process.pid}-${crypto.randomUUID().slice(0, 8)}`
+
 // Best-effort kill — Bun's Subprocess.kill() can throw (ESRCH/EPERM-style proc
 // states); a throw must NOT skip the profile rmrf that follows (R3 audit [3]).
 const killQuietly = (proc: SpawnedProcess): void => {
@@ -417,25 +421,29 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
       const bin = resolveChromeBinary(deps)
       if (bin === null) return err({ kind: "backend-missing" })
       seq += 1
-      const id = `cdp-${seq}`
+      // R4 audit [8]: a per-instance seq alone collides across adapter instances
+      // sharing a profileRoot (two sessions, same cwd → both "cdp-1"). A
+      // process+random nonce makes the --user-data-dir globally unique.
+      const id = `cdp-${seq}-${uniqueNonce()}`
       const profileDir = `${deps.profileRoot}/${id}`
-      deps.fs.mkdirp(profileDir)
-      const proc = deps.spawner.spawn([
-        bin,
-        "--headless=new",
-        "--remote-debugging-port=0",
-        `--user-data-dir=${profileDir}`,
-        "--no-first-run",
-        "--disable-gpu",
-        "--no-default-browser-check",
-      ])
-      // Single cleanup path: ANY error/throw between spawn and a registered
-      // session must kill the proc + remove the temp profile (R1 audit [19]).
+      // R4 audit [6]: proc may never be created if spawner.spawn() throws
+      // (EMFILE/EACCES); keep it nullable so teardown still rmrf's the mkdir'd dir.
+      let proc: SpawnedProcess | null = null
       const teardown = (): void => {
-        killQuietly(proc)
+        if (proc !== null) killQuietly(proc)
         deps.fs.rmrf(profileDir)
       }
       try {
+        deps.fs.mkdirp(profileDir)
+        proc = deps.spawner.spawn([
+          bin,
+          "--headless=new",
+          "--remote-debugging-port=0",
+          `--user-data-dir=${profileDir}`,
+          "--no-first-run",
+          "--disable-gpu",
+          "--no-default-browser-check",
+        ])
         const endpoint = await readDevToolsEndpoint({
           read: () => deps.fs.readFile(`${profileDir}/DevToolsActivePort`),
           scheduler: deps.scheduler,
@@ -495,10 +503,14 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
       return ok({ title: title.ok && typeof title.value === "string" ? title.value : "" })
     },
 
-    async snapshot(h: BrowserHandle): Promise<Result<PageSnapshot, BrowserError>> {
+    async snapshot(
+      h: BrowserHandle,
+      _opts?: unknown,
+      signal?: AbortSignal,
+    ): Promise<Result<PageSnapshot, BrowserError>> {
       const s = live(h)
       if (!s.ok) return s
-      const raw = await evalValue(s.value, COLLECT_SCRIPT)
+      const raw = await evalValue(s.value, COLLECT_SCRIPT, signal)
       if (!raw.ok) return raw
       const model = parseDomModel(raw.value)
       if (!model.ok) {
@@ -605,10 +617,17 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
       return mouseClick(s.value.session, x, y, signal)
     },
 
-    async screenshot(h: BrowserHandle): Promise<Result<Uint8Array, BrowserError>> {
+    async screenshot(
+      h: BrowserHandle,
+      signal?: AbortSignal,
+    ): Promise<Result<Uint8Array, BrowserError>> {
       const s = live(h)
       if (!s.ok) return s
-      const r = await s.value.session.request("Page.captureScreenshot", {})
+      const r = await s.value.session.request(
+        "Page.captureScreenshot",
+        {},
+        signal ? { signal } : undefined,
+      )
       if (!r.ok) return r
       const data = (r.value as { data?: unknown })?.data
       if (typeof data !== "string") return err({ kind: "cdp-error", detail: "no screenshot data" })
@@ -624,11 +643,12 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
       h: BrowserHandle,
       method: string,
       params?: Readonly<Record<string, unknown>>,
+      signal?: AbortSignal,
     ): Promise<Result<unknown, BrowserError>> {
       const s = live(h)
       if (!s.ok) return s
       if (!isCdpMethodAllowed(method)) return err({ kind: "cdp-method-denied", method })
-      return s.value.session.request(method, params)
+      return s.value.session.request(method, params, signal ? { signal } : undefined)
     },
 
     async close(h: BrowserHandle): Promise<Result<void, BrowserError>> {
