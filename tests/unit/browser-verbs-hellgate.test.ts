@@ -181,7 +181,7 @@ const adapter = () => {
   }
   const spawner: ProcessSpawner = {
     which: () => "/usr/bin/google-chrome",
-    spawn: () => ({ pid: 1, kill: () => {}, exited: Promise.resolve(0) }),
+    spawn: () => ({ pid: 1, kill: () => {}, exited: new Promise<number>(() => {}) }),
   }
   const scheduler: Scheduler = { schedule: () => () => {} }
   const clock: Clock = { now: () => 0 }

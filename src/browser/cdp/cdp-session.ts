@@ -35,6 +35,10 @@ export interface CdpSession {
    *  attached page target rather than the browser-level connection.
    *  Browser-level calls (the Target domain) must be made BEFORE this is set. */
   useSessionId(sessionId: string): void
+  /** Register a callback fired ONCE when the session dies (page target
+   *  detach/crash, or transport close). Lets the adapter mark its SessionState
+   *  closed so the holder can re-spawn (R3 audit [7]). */
+  onDead(cb: () => void): void
   dispose(): void
 }
 
@@ -83,6 +87,7 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
 
   /** Fail-fast on a detached/crashed page target — settle everything in flight
    *  instead of letting each call grind to its full timeout (R3 audit [5]). */
+  const deadCbs: Array<() => void> = []
   const markDead = (): void => {
     if (dead) return
     dead = true
@@ -90,10 +95,15 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
     pending.clear()
     for (const waiters of [...eventWaiters.values()]) for (const w of [...waiters]) w.onClosed()
     eventWaiters.clear()
+    for (const cb of [...deadCbs]) cb() // notify the adapter (R3 audit [7])
   }
 
   const isTargetGone = (msg: CdpMessage): boolean => {
     if (msg.method === "Target.targetCrashed") return true
+    // Inspector.detached = devtools-side detach of the attached page session
+    // (graceful) — arrives on our session in flat mode (R3 audit [4]).
+    if (msg.method === "Inspector.detached")
+      return pageSessionId === null || msg.sessionId === pageSessionId
     if (msg.method !== "Target.detachedFromTarget" || pageSessionId === null) return false
     const p = msg.params
     const sid =
@@ -146,6 +156,10 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
     }
     routeEvent(msg.method, msg.sessionId, msg.params)
   })
+
+  // Transport drop (socket close / process death) has no CDP event — hook it
+  // straight to markDead so a dead connection fails fast (R3 audit [1]).
+  deps.conn.onClose?.(markDead)
 
   const armSettle = <T>(
     timeoutMs: number,
@@ -236,6 +250,12 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
         list.push(waiter)
         eventWaiters.set(method, list)
       })
+    },
+
+    onDead(cb: () => void): void {
+      if (dead)
+        cb() // already dead — fire immediately so the caller can react
+      else deadCbs.push(cb)
     },
 
     useSessionId(sessionId: string): void {

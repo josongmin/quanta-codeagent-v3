@@ -100,6 +100,19 @@ export const defaultCdpTransport: CdpTransport = {
         onMessage: (cb) => {
           ws.addEventListener("message", (e: MessageEvent) => cb(String(e.data)))
         },
+        // R3 audit [1]: a dropped socket (chrome crash/OOM/kill) closes the ws
+        // WITHOUT any CDP event — fire the session's death hook so in-flight +
+        // future calls fail fast instead of hanging to the per-call timeout.
+        onClose: (cb) => {
+          let fired = false
+          const once = (): void => {
+            if (fired) return
+            fired = true
+            cb()
+          }
+          ws.addEventListener("close", once, { once: true })
+          ws.addEventListener("error", once, { once: true })
+        },
         close: () => ws.close(),
       }
       return ok(conn)

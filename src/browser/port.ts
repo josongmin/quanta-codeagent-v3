@@ -38,6 +38,10 @@ import type {
 
 export interface BrowserPort {
   availability(): string | null
+  /** Sync liveness — true iff the session exists and is neither closed nor dead
+   *  (page crash/detach/transport-drop). The holder re-spawns when this is false
+   *  so a dead browser does not wedge the whole task (R3 audit [2]). */
+  isLive(h: BrowserHandle): boolean
   spawn(opts?: BrowserStartOpts): Promise<Result<BrowserHandle, BrowserError>>
   navigate(
     h: BrowserHandle,

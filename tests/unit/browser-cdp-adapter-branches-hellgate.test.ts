@@ -45,7 +45,7 @@ interface TxScript {
 
 const spawner: ProcessSpawner = {
   which: () => "/usr/bin/google-chrome",
-  spawn: () => ({ pid: 1, kill: () => {}, exited: Promise.resolve(0) }),
+  spawn: () => ({ pid: 1, kill: () => {}, exited: new Promise<number>(() => {}) }),
 }
 const fs: BrowserFs = {
   existsSync: () => false,
@@ -248,7 +248,7 @@ describe("HELLGATE adapter branches — bring-up failure [18]", () => {
           kill: () => {
             killed += 1
           },
-          exited: Promise.resolve(0),
+          exited: new Promise<number>(() => {}),
         }),
       },
       transport: transport({ enableError: "Target closed" }),
@@ -292,7 +292,7 @@ describe("HELLGATE adapter branches — flat-session bring-up arms [13]", () => 
     const b = createCdpBrowser({
       spawner: {
         which: () => "/usr/bin/google-chrome",
-        spawn: () => ({ pid: 1, kill: () => {}, exited: Promise.resolve(0) }),
+        spawn: () => ({ pid: 1, kill: () => {}, exited: new Promise<number>(() => {}) }),
       },
       transport: transport(s),
       fs: recFs(rm),

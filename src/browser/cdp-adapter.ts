@@ -377,7 +377,16 @@ const connectAndEnable = async (
   }
   // R2 audit [8]: deny downloads at the source — a page must not be able to write
   // files outside the temp profile (defense-in-depth; download-to-jail is Phase 2).
-  await session.request("Page.setDownloadBehavior", { behavior: "deny" }, opts)
+  // R3 audit [3]: a failed deny would leave downloads ENABLED — fail bring-up
+  // rather than silently proceed with an unguarded download surface.
+  const dl = await session.request("Page.setDownloadBehavior", { behavior: "deny" }, opts)
+  if (!dl.ok) {
+    session.dispose()
+    return err({
+      kind: "spawn-failed",
+      detail: "Page.setDownloadBehavior(deny) failed during bring-up",
+    })
+  }
   return ok(session)
 }
 
@@ -416,6 +425,11 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
 
   return {
     availability: () => (resolveChromeBinary(deps) !== null ? "chromium" : null),
+
+    isLive: (h: BrowserHandle): boolean => {
+      const s = sessions.get(h.id)
+      return s !== undefined && !s.closed
+    },
 
     async spawn(opts?: BrowserStartOpts): Promise<Result<BrowserHandle, BrowserError>> {
       const bin = resolveChromeBinary(deps)
@@ -460,13 +474,27 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
           teardown()
           return session
         }
-        sessions.set(id, {
+        const state: SessionState = {
           closed: false,
           url: "about:blank",
           proc,
           session: session.value,
           profileDir,
           refMap: createRefMap(),
+        }
+        sessions.set(id, state)
+        // R3 audit [1][7]: observe BOTH death modes → mark the SessionState closed
+        // so live()/isLive() report it and the holder re-spawns instead of
+        // wedging on a dead session. onDead = CDP-event/socket death; proc.exited
+        // = process death (crash/OOM/external kill).
+        session.value.onDead(() => {
+          state.closed = true
+        })
+        void proc.exited.then(() => {
+          if (!state.closed) {
+            state.closed = true
+            session.value.dispose()
+          }
         })
         return ok({ id, backend: "chromium" })
       } catch (e) {

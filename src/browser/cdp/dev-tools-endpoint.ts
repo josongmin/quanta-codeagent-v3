@@ -54,8 +54,18 @@ export const readDevToolsEndpoint = async (
     if (deps.clock.now() - start >= timeoutMs) {
       return err({ kind: "spawn-failed", detail: "DevTools endpoint not ready before timeout" })
     }
+    // R3 audit [8]: race the poll sleep against abort and cancel the timer on
+    // settle — without this an abort waits a full pollMs and leaks the timer.
     await new Promise<void>((resolve) => {
-      deps.scheduler.schedule(pollMs, resolve)
+      const cancel = deps.scheduler.schedule(pollMs, () => {
+        deps.signal?.removeEventListener("abort", onAbort)
+        resolve()
+      })
+      const onAbort = (): void => {
+        cancel()
+        resolve()
+      }
+      deps.signal?.addEventListener("abort", onAbort, { once: true })
     })
   }
 }

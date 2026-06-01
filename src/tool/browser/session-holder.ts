@@ -28,8 +28,16 @@ export const createBrowserSession = (port: BrowserPort): BrowserSession => {
 
   return {
     async ensure(signal?: AbortSignal): Promise<Result<BrowserHandle, BrowserError>> {
-      if (disposed) return err({ kind: "closed" })
-      if (handle !== null) return ok(handle)
+      if (disposed) return err({ kind: "closed" }) // teardown is terminal
+      if (handle !== null) {
+        // R3 audit [2]: a cached handle whose session died (page crash/detach/
+        // transport-drop) must NOT be reused — drop it and re-spawn so the task
+        // recovers instead of every later call returning the same dead error.
+        if (port.isLive(handle)) return ok(handle)
+        const dead = handle
+        handle = null
+        void port.close(dead).catch(() => {}) // best-effort reap
+      }
       if (spawning !== null) return spawning
       spawning = port
         .spawn(signal ? { signal } : undefined)

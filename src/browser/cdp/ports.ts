@@ -34,6 +34,11 @@ export interface ProcessSpawner {
 export interface CdpConnection {
   send(payload: string): void
   onMessage(cb: (raw: string) => void): void
+  /** Fired ONCE when the transport drops (ws close/error / process death) —
+   *  lets the session fail every in-flight + future call fast instead of
+   *  grinding each to its timeout (R3 audit [1]). Optional: in-memory fakes that
+   *  never drop may omit it. */
+  onClose?(cb: () => void): void
   close(): void
 }
 

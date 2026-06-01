@@ -48,7 +48,7 @@ const spawnerThatFinds = (calls: { argv: readonly string[] | null }): ProcessSpa
   which: (cmd) => (cmd === "google-chrome" ? "/usr/bin/google-chrome" : null),
   spawn: (argv): SpawnedProcess => {
     calls.argv = argv
-    return { pid: 4242, kill: () => {}, exited: Promise.resolve(0) }
+    return { pid: 4242, kill: () => {}, exited: new Promise<number>(() => {}) }
   },
 })
 
@@ -151,7 +151,7 @@ describe("HELLGATE CDP adapter — orchestration over fakes", () => {
       ...baseDeps().deps,
       spawner: {
         which: () => null,
-        spawn: () => ({ pid: 0, kill: () => {}, exited: Promise.resolve(0) }),
+        spawn: () => ({ pid: 0, kill: () => {}, exited: new Promise<number>(() => {}) }),
       },
     })
     expect(noChrome.availability()).toBeNull()
@@ -177,7 +177,7 @@ describe("HELLGATE CDP adapter — orchestration over fakes", () => {
       ...deps,
       spawner: {
         which: () => null,
-        spawn: () => ({ pid: 0, kill: () => {}, exited: Promise.resolve(0) }),
+        spawn: () => ({ pid: 0, kill: () => {}, exited: new Promise<number>(() => {}) }),
       },
     })
     const h = await b.spawn()
@@ -282,7 +282,7 @@ describe("HELLGATE CDP adapter — orchestration over fakes", () => {
         kill: () => {
           killCount += 1
         },
-        exited: Promise.resolve(0),
+        exited: new Promise<number>(() => {}),
       }),
     }
     const b = createCdpBrowser({ ...deps, spawner: spy })

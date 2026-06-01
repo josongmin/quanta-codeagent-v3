@@ -57,6 +57,11 @@ export const createHeadlessBrowser = (opts: HeadlessBrowserOpts = {}): BrowserPo
   return {
     availability: (): string | null => "headless",
 
+    isLive: (h: BrowserHandle): boolean => {
+      const s = sessions.get(h.id)
+      return s !== undefined && !s.closed
+    },
+
     async spawn(_opts?: BrowserStartOpts): Promise<Result<BrowserHandle, BrowserError>> {
       seq += 1
       const id = `headless-${seq}`

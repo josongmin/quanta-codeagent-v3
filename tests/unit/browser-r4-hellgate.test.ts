@@ -102,7 +102,7 @@ const okFs = (): BrowserFs => ({
 })
 const okSpawner: ProcessSpawner = {
   which: () => "/usr/bin/google-chrome",
-  spawn: () => ({ pid: 1, kill: () => {}, exited: Promise.resolve(0) }),
+  spawn: () => ({ pid: 1, kill: () => {}, exited: new Promise<number>(() => {}) }),
 }
 const idle: Scheduler = { schedule: () => () => {} }
 const clock: Clock = { now: () => 0 }
