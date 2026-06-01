@@ -90,7 +90,7 @@ const resolveJs = (path: string): string => {
 }
 
 const clickJs = (path: string): string =>
-  `(() => { const el = ${resolveJs(path)}; if (!el) return false; el.click(); return true; })()`
+  `(() => { const el = ${resolveJs(path)}; if (!el) return false; if (el.focus) el.focus(); el.click(); return true; })()`
 
 // Branches on element kind (R1 audit [10]): form controls get `.value` set +
 // change event; contenteditable gets text appended into the node; anything else
@@ -101,6 +101,7 @@ const typeJs = (path: string, text: string, clear: boolean): string =>
     const el = ${resolveJs(path)};
     if (!el) return false;
     const t = ${JSON.stringify(text)};
+    if (el.focus) el.focus();
     if ('value' in el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT')) {
       if (${clear ? "true" : "false"}) el.value = '';
       el.value = (el.value || '') + t;
@@ -122,6 +123,7 @@ const fillJs = (path: string, value: string): string =>
     const el = ${resolveJs(path)};
     if (!el) return false;
     const v = ${JSON.stringify(value)};
+    if (el.focus) el.focus();
     if ('value' in el) { el.value = v; el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true})); return true; }
     if (el.isContentEditable) { el.textContent = v; el.dispatchEvent(new Event('input',{bubbles:true})); return true; }
     return false;
@@ -206,6 +208,45 @@ const refPoint = async (
   return ok({ x: pt.x, y: pt.y })
 }
 
+// Named-key descriptors. Real Blink needs windowsVirtualKeyCode + code (and a
+// `text` for text-generating keys) to drive implicit form submit / default
+// actions — `{key}` alone delivers an inert event (real-chrome e2e bug).
+const KEY_DESCRIPTORS: Record<string, { code: string; vk: number; text?: string }> = {
+  Enter: { code: "Enter", vk: 13, text: "\r" },
+  Tab: { code: "Tab", vk: 9 },
+  Escape: { code: "Escape", vk: 27 },
+  Backspace: { code: "Backspace", vk: 8 },
+  Delete: { code: "Delete", vk: 46 },
+  ArrowUp: { code: "ArrowUp", vk: 38 },
+  ArrowDown: { code: "ArrowDown", vk: 40 },
+  ArrowLeft: { code: "ArrowLeft", vk: 37 },
+  ArrowRight: { code: "ArrowRight", vk: 39 },
+  Home: { code: "Home", vk: 36 },
+  End: { code: "End", vk: 35 },
+  PageUp: { code: "PageUp", vk: 33 },
+  PageDown: { code: "PageDown", vk: 34 },
+  Space: { code: "Space", vk: 32, text: " " },
+}
+
+/** Build the Input.dispatchKeyEvent params for a key — full virtual-key fields
+ *  for named keys, a printable `text` for single characters. */
+const keyEventBase = (key: string): Record<string, unknown> => {
+  const named = KEY_DESCRIPTORS[key]
+  if (named !== undefined) {
+    return {
+      key,
+      code: named.code,
+      windowsVirtualKeyCode: named.vk,
+      nativeVirtualKeyCode: named.vk,
+      ...(named.text !== undefined ? { text: named.text } : {}),
+    }
+  }
+  if (key.length === 1) {
+    return { key, text: key, code: `Key${key.toUpperCase()}` }
+  }
+  return { key }
+}
+
 const mouseClick = async (
   session: CdpSession,
   x: number,
@@ -280,6 +321,31 @@ const connectAndEnable = async (
   if (!conn.ok) return err({ kind: "spawn-failed", detail: conn.error.detail })
   const session = createCdpSession({ conn: conn.value, scheduler: deps.scheduler })
   const opts = signal ? { signal } : undefined
+  // DevToolsActivePort gives the BROWSER-level endpoint, where Page.*/Runtime.*
+  // do not exist. Create + attach a page target (flat protocol) and route all
+  // subsequent page calls through its sessionId (real-chrome e2e bug fix). The
+  // Target.* calls below are browser-level — made BEFORE useSessionId.
+  const created = await session.request("Target.createTarget", { url: "about:blank" }, opts)
+  if (!created.ok) {
+    session.dispose()
+    return err({ kind: "spawn-failed", detail: "Target.createTarget failed during bring-up" })
+  }
+  const targetId = (created.value as { targetId?: unknown }).targetId
+  if (typeof targetId !== "string") {
+    session.dispose()
+    return err({ kind: "spawn-failed", detail: "Target.createTarget returned no targetId" })
+  }
+  const attached = await session.request("Target.attachToTarget", { targetId, flatten: true }, opts)
+  if (!attached.ok) {
+    session.dispose()
+    return err({ kind: "spawn-failed", detail: "Target.attachToTarget failed during bring-up" })
+  }
+  const sessionId = (attached.value as { sessionId?: unknown }).sessionId
+  if (typeof sessionId !== "string") {
+    session.dispose()
+    return err({ kind: "spawn-failed", detail: "Target.attachToTarget returned no sessionId" })
+  }
+  session.useSessionId(sessionId)
   // R2 audit [3]: thread the abort signal into the bring-up request too — a turn
   // aborted during a hung Page.enable must cancel promptly, not wait the timeout.
   const enabled = await session.request("Page.enable", undefined, opts)
@@ -480,15 +546,16 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
       const s = live(h)
       if (!s.ok) return s
       const opts = signal ? { signal } : undefined
+      const base = keyEventBase(key)
       const down = await s.value.session.request(
         "Input.dispatchKeyEvent",
-        { type: "keyDown", key },
+        { ...base, type: "keyDown" },
         opts,
       )
       if (!down.ok) return down
       const up = await s.value.session.request(
         "Input.dispatchKeyEvent",
-        { type: "keyUp", key },
+        { ...base, type: "keyUp" },
         opts,
       )
       return up.ok ? ok(undefined) : up

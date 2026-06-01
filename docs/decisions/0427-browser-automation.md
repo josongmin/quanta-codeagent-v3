@@ -65,6 +65,18 @@ A 7-dimension parallel edge battery (~334 cases: SSRF/IP forms, CDP protocol env
 
 **Suite total: 499 tests across 19 files, 0 fail, 2152 expect() calls; src tsc 0; biome 0/0.**
 
-**Still deferred (honest):** `browser_tabs` (multi-target CDP — its own slice); download-INTO-jail (currently denied, which is the safe default; allowing+jailing needs CDP download-event plumbing); DNS-rebind connection pinning (CDP cannot cleanly pin a resolved address into the connection); a real-chrome smoke run for `cdp/defaults.ts` (needs a chrome binary in CI).
+## Real-chrome e2e closeout (2026-06-01)
+
+A 3-tier e2e build (tier-1 real-chrome happy, tier-3 real-chrome adversarial, tier-2 deterministic agent-loop) against live headless Chrome — observing via a fixture HTTP server's `/report` sink driven by real in-page DOM events (the gated port has no model-reachable `Runtime.evaluate`, so read-back goes through real events + `snapshot`). This caught **3 real bugs the stub could never surface**:
+
+1. 🔴 **Adapter connected to the BROWSER-level DevTools endpoint and called page-only methods** (`Page.enable` → `-32601 not found`), so spawn() failed against every real Chrome. Fixed: bring-up now does `Target.createTarget` + `Target.attachToTarget{flatten:true}` + `session.useSessionId(sessionId)` (flat protocol) before Page.enable — `cdp-session` stamps the `sessionId` on every page-domain request.
+2. **`pressKey("Enter")` didn't submit forms** — `Input.dispatchKeyEvent` lacked `windowsVirtualKeyCode`/`code`/`text`. Fixed: a named-key descriptor table populates the virtual-key fields.
+3. **fill/type/click didn't focus the element** — so a subsequent Enter went to `<body>`. Fixed: `el.focus()` before fill/type/click (matches real user/automation behavior).
+
+After the fixes, **43 real-chrome assertions pass** (navigate, a11y snapshot, fill/select/scroll/click via real DOM-event verification, Enter-submit, screenshot PNG, the CDP allowlist holding end-to-end, in-page-fetch SSRF documented as an out-of-scope boundary, download-deny).
+
+**Suite total: 559 tests across 22 files, 0 fail, 2406 expect() calls; src tsc 0; biome 0/0.**
+
+## Still deferred (honest): `browser_tabs` (multi-target CDP — its own slice); download-INTO-jail (currently denied, which is the safe default; allowing+jailing needs CDP download-event plumbing); DNS-rebind connection pinning (CDP cannot cleanly pin a resolved address into the connection); a real-chrome smoke run for `cdp/defaults.ts` (needs a chrome binary in CI).
 
 **Deferred to Phase 2:** `browser_fill`/`select_option`/`scroll`/`press_key`/`drag`/`tabs`/`mouse_click_xy`; download-to-jail (strengthen #4); origin-allowlist layer on top of SSRF; richer collector fields (placeholder/options/level/nth — R1 [11]); DNS-rebind connection pinning; CLI composition-root population of `config.browser` ([9]/[13] operator step).

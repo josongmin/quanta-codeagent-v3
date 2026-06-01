@@ -86,6 +86,14 @@ const respond = (m: SentMsg, s: TxScript, emit: (raw: string) => void): void => 
     )
     return
   }
+  if (m.method === "Target.createTarget") {
+    emit(JSON.stringify({ id: m.id, result: { targetId: "t1" } }))
+    return
+  }
+  if (m.method === "Target.attachToTarget") {
+    emit(JSON.stringify({ id: m.id, result: { sessionId: "s1" } }))
+    return
+  }
   if (m.method === "Page.navigate" && s.navigateError !== undefined) {
     emit(JSON.stringify({ id: m.id, error: { message: s.navigateError } }))
     return

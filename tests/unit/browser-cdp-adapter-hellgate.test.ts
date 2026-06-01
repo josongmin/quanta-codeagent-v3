@@ -83,6 +83,8 @@ const replyFor = (m: SentMsg, script: ScriptOpts): unknown => {
     return { result: { value } }
   }
   if (m.method === "Page.captureScreenshot") return { data: script.screenshot ?? "" }
+  if (m.method === "Target.createTarget") return { targetId: "t1" }
+  if (m.method === "Target.attachToTarget") return { sessionId: "s1" }
   return {}
 }
 

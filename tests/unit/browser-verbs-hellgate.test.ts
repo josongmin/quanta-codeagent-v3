@@ -121,6 +121,36 @@ const evalValueFor = (expr: string): unknown => {
   return true
 }
 
+interface VerbMsg {
+  id: number
+  method: string
+  params: { expression?: string } & Record<string, unknown>
+}
+
+const respondVerb = (m: VerbMsg, emit: (raw: string) => void): void => {
+  if (m.method === "Runtime.evaluate") {
+    emit(
+      JSON.stringify({
+        id: m.id,
+        result: { result: { value: evalValueFor(m.params.expression ?? "") } },
+      }),
+    )
+    return
+  }
+  if (m.method === "Target.createTarget") {
+    emit(JSON.stringify({ id: m.id, result: { targetId: "t1" } }))
+    return
+  }
+  if (m.method === "Target.attachToTarget") {
+    emit(JSON.stringify({ id: m.id, result: { sessionId: "s1" } }))
+    return
+  }
+  emit(JSON.stringify({ id: m.id, result: {} }))
+  if (m.method === "Page.navigate") {
+    setTimeout(() => emit(JSON.stringify({ method: "Page.loadEventFired", params: {} })), 0)
+  }
+}
+
 const adapter = () => {
   const sent: Array<{ method: string; params: Record<string, unknown> }> = []
   const transport: CdpTransport = {
@@ -132,26 +162,9 @@ const adapter = () => {
         },
         close: () => {},
         send: (raw) => {
-          const m = JSON.parse(raw) as {
-            id: number
-            method: string
-            params: { expression?: string } & Record<string, unknown>
-          }
+          const m = JSON.parse(raw) as VerbMsg
           sent.push({ method: m.method, params: m.params })
-          queueMicrotask(() => {
-            if (m.method === "Runtime.evaluate") {
-              const value = evalValueFor(m.params.expression ?? "")
-              emit(JSON.stringify({ id: m.id, result: { result: { value } } }))
-            } else {
-              emit(JSON.stringify({ id: m.id, result: {} }))
-              if (m.method === "Page.navigate") {
-                setTimeout(
-                  () => emit(JSON.stringify({ method: "Page.loadEventFired", params: {} })),
-                  0,
-                )
-              }
-            }
-          })
+          queueMicrotask(() => respondVerb(m, emit))
         },
       }
       return ok(conn)

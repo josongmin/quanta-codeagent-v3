@@ -30,6 +30,11 @@ export interface CdpSession {
     method: string,
     opts?: CdpRequestOpts,
   ): Promise<Result<Readonly<Record<string, unknown>>, BrowserError>>
+  /** Flat-protocol page session: once set, every subsequent `request` carries
+   *  this `sessionId` so the Page / Runtime / Input domains route to the
+   *  attached page target rather than the browser-level connection.
+   *  Browser-level calls (the Target domain) must be made BEFORE this is set. */
+  useSessionId(sessionId: string): void
   dispose(): void
 }
 
@@ -67,6 +72,7 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
   const defaultTimeoutMs = deps.defaultTimeoutMs ?? 30_000
   let seq = 0
   let disposed = false
+  let pageSessionId: string | null = null
   const pending = new Map<number, (r: Result<unknown, BrowserError>) => void>()
   const eventWaiters = new Map<string, EventWaiter[]>()
 
@@ -149,7 +155,9 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
         }
         pending.set(id, armed.settle)
         try {
-          deps.conn.send(JSON.stringify({ id, method, params: params ?? {} }))
+          const envelope: Record<string, unknown> = { id, method, params: params ?? {} }
+          if (pageSessionId !== null) envelope.sessionId = pageSessionId
+          deps.conn.send(JSON.stringify(envelope))
         } catch (e) {
           armed.settle(
             err({ kind: "cdp-error", detail: e instanceof Error ? e.message : String(e) }),
@@ -189,6 +197,10 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
         list.push(waiter)
         eventWaiters.set(method, list)
       })
+    },
+
+    useSessionId(sessionId: string): void {
+      pageSessionId = sessionId
     },
 
     dispose(): void {
