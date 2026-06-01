@@ -155,6 +155,20 @@ export {
   recordRiskSeen,
   recordUserOverride,
 } from "./post-denial"
+export type {
+  ListProfilesOptions,
+  ProfileListEntry,
+  ProfileLoadErrorMode,
+  SelectProfileOptions,
+} from "./profile-list-select"
+export {
+  exceedsCeiling,
+  listPermissionProfiles,
+  ProfileSelectError,
+  ProfileValidationError,
+  parseUserProfile,
+  selectPermissionProfile,
+} from "./profile-list-select"
 export {
   approvalModeToContextMode,
   permissionModeFromProfile,
