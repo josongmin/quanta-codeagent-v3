@@ -11,9 +11,10 @@
  * will, so the allowlist hellgate can prove the contract without a browser.
  */
 
-import { type Result, err, ok } from "@/shared"
+import { err, ok, type Result } from "@/shared"
 import { isCdpMethodAllowed } from "./cdp-allowlist"
-import { type RefMap, buildSnapshot, createRefMap } from "./snapshot"
+import type { BrowserPort } from "./port"
+import { buildSnapshot, createRefMap, type RefMap } from "./snapshot"
 import type {
   BrowserError,
   BrowserHandle,
@@ -22,7 +23,6 @@ import type {
   PageSnapshot,
   TypeOpts,
 } from "./types"
-import type { BrowserPort } from "./port"
 
 export interface HeadlessPage {
   readonly title: string
@@ -55,7 +55,7 @@ export const createHeadlessBrowser = (opts: HeadlessBrowserOpts = {}): BrowserPo
   }
 
   return {
-    availability: (): string => "headless",
+    availability: (): string | null => "headless",
 
     async spawn(_opts?: BrowserStartOpts): Promise<Result<BrowserHandle, BrowserError>> {
       seq += 1
@@ -73,7 +73,8 @@ export const createHeadlessBrowser = (opts: HeadlessBrowserOpts = {}): BrowserPo
       if (!s.ok) return s
       if (signal?.aborted === true) return err({ kind: "cancelled" })
       const page = pages.get(url)
-      if (page === undefined) return err({ kind: "navigation-denied", reason: `unknown url: ${url}` })
+      if (page === undefined)
+        return err({ kind: "navigation-denied", reason: `unknown url: ${url}` })
       s.value.url = url
       return ok({ title: page.title })
     },
@@ -112,16 +113,59 @@ export const createHeadlessBrowser = (opts: HeadlessBrowserOpts = {}): BrowserPo
       return ok(undefined)
     },
 
+    async fill(h, ref): Promise<Result<void, BrowserError>> {
+      const s = live(h)
+      if (!s.ok) return s
+      return s.value.refMap.resolve(ref) === null
+        ? err({ kind: "element-not-found", ref })
+        : ok(undefined)
+    },
+
+    async selectOption(h, ref): Promise<Result<void, BrowserError>> {
+      const s = live(h)
+      if (!s.ok) return s
+      return s.value.refMap.resolve(ref) === null
+        ? err({ kind: "element-not-found", ref })
+        : ok(undefined)
+    },
+
+    async scroll(h, opts): Promise<Result<void, BrowserError>> {
+      const s = live(h)
+      if (!s.ok) return s
+      if (opts.ref !== undefined && s.value.refMap.resolve(opts.ref) === null) {
+        return err({ kind: "element-not-found", ref: opts.ref })
+      }
+      return ok(undefined)
+    },
+
+    async pressKey(h): Promise<Result<void, BrowserError>> {
+      const s = live(h)
+      return s.ok ? ok(undefined) : s
+    },
+
+    async drag(h, sourceRef, target): Promise<Result<void, BrowserError>> {
+      const s = live(h)
+      if (!s.ok) return s
+      if (s.value.refMap.resolve(sourceRef) === null)
+        return err({ kind: "element-not-found", ref: sourceRef })
+      if ("ref" in target && s.value.refMap.resolve(target.ref) === null) {
+        return err({ kind: "element-not-found", ref: target.ref })
+      }
+      return ok(undefined)
+    },
+
+    async mouseClickXY(h): Promise<Result<void, BrowserError>> {
+      const s = live(h)
+      return s.ok ? ok(undefined) : s
+    },
+
     async screenshot(h: BrowserHandle): Promise<Result<Uint8Array, BrowserError>> {
       const s = live(h)
       if (!s.ok) return s
       return ok(PNG_MAGIC.slice())
     },
 
-    async cdp(
-      h: BrowserHandle,
-      method: string,
-    ): Promise<Result<unknown, BrowserError>> {
+    async cdp(h: BrowserHandle, method: string): Promise<Result<unknown, BrowserError>> {
       const s = live(h)
       if (!s.ok) return s
       if (!isCdpMethodAllowed(method)) return err({ kind: "cdp-method-denied", method })

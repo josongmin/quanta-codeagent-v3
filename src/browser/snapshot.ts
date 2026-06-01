@@ -71,8 +71,10 @@ const renderNode = (node: DomNode, depth: number, refMap: RefMap, lines: string[
   const ref = refMap.refOf(node.backendPath) ?? "?"
   const indent = "  ".repeat(depth)
   let line = `${indent}- ${ref} ${node.role} ${JSON.stringify(node.name)}`
+  if (node.level !== undefined) line += ` h${node.level}`
   if (node.states !== undefined && node.states.length > 0) line += ` [${node.states.join(",")}]`
   if (node.value !== undefined) line += ` =${JSON.stringify(node.value)}`
+  if (node.placeholder !== undefined) line += ` ph=${JSON.stringify(node.placeholder)}`
   if (node.url !== undefined) line += ` (${node.url})`
   lines.push(line)
   for (const child of node.children ?? []) renderNode(child, depth + 1, refMap, lines)

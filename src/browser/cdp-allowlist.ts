@@ -14,14 +14,18 @@
  * name, not on the implementation.
  *
  * Adding a method here is a SECURITY DECISION. Keep the list minimal: read-only
- * introspection + evaluate. Never add `Input.*`, `Storage.*`, `Cookies.*`,
- * `Browser.*`, `Target.*`, `Page.setDownloadBehavior`, `Page.navigate`,
- * `System.*`, `Fetch.*`, or `Network.setCookie` — those are reachable through
- * the typed verbs (navigate/click/type) under their own gates, not raw CDP.
+ * introspection ONLY. Never add `Input.*`, `Storage.*`, `Cookies.*`, `Browser.*`,
+ * `Target.*`, `Page.setDownloadBehavior`, `Page.navigate`, `System.*`, `Fetch.*`,
+ * `Network.setCookie` — those are reachable through the typed verbs under their
+ * own gates. ★ `Runtime.evaluate` is DELIBERATELY EXCLUDED (R1 audit [17]):
+ * model-reachable `Runtime.evaluate` is arbitrary in-page JS that can `fetch()`
+ * a private address, defeating the navigate SSRF guard and the read-only framing.
+ * The adapter's OWN snapshot/click/type call `Runtime.evaluate` via
+ * `session.request` directly — they bypass this allowlist by design, so dropping
+ * it from the model surface costs no functionality.
  */
 
 export const CDP_ALLOWED_METHODS = [
-  "Runtime.evaluate",
   "DOM.getDocument",
   "DOM.querySelector",
   "CSS.getComputedStyleForNode",

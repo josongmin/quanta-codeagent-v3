@@ -125,13 +125,13 @@ import {
 } from "./stop-category"
 import { createStreamDispatcher, type TurnTimingAnchors } from "./stream-callbacks"
 import { streamingTurn } from "./streaming-dispatch"
+import { consumeTurnSignals, createToolChoiceTurnState, resolveToolChoice } from "./tool-choice"
+import { buildToolInputSeam } from "./tool-input-streaming"
 import {
   appendPendingToolResults,
   flushTurnObservability,
   stripOrphanToolUse,
 } from "./turn-closeout"
-import { consumeTurnSignals, createToolChoiceTurnState, resolveToolChoice } from "./tool-choice"
-import { buildToolInputSeam } from "./tool-input-streaming"
 import { makeTurnHeader } from "./turn-kind"
 import type { AgentConfig, AgentOutcome, MemoryCitation, StopReason } from "./types"
 import type { TurnWorkMetricsCollector } from "./work-metrics-collector"
@@ -1207,7 +1207,14 @@ const prepareTurnContext = async (
   // T02 M3 — the proactive compaction breaker verdict is surfaced so `runTurn`
   // can route an enforced breaker trip through the same terminal outcome path
   // the reactive site uses, instead of a dead side branch.
-  const breakerVerdict = await maybeCompact(config, staticSystemFor(config), wm, breaker, archive, turn)
+  const breakerVerdict = await maybeCompact(
+    config,
+    staticSystemFor(config),
+    wm,
+    breaker,
+    archive,
+    turn,
+  )
   // Codex absorption — memory L3: snapshot the session WorkingState on every attempt
   // so the per-turn reminder reflects mutations the tool just made earlier in
   // the same turn. Absent ⇒ block omitted, byte-identical.
@@ -2061,6 +2068,12 @@ const cleanupFinishedSession = async (args: {
   } catch (e) {
     const message = errMessage(e)
     args.cfg.stream.emit({ type: "error", message: `subagent cleanup failed: ${message}` })
+  }
+  try {
+    // ADR-0427 — close the headless browser (kill proc + remove temp profile).
+    await args.features.browserDispose?.()
+  } catch (e) {
+    args.cfg.stream.emit({ type: "error", message: `browser dispose failed: ${errMessage(e)}` })
   }
   await saveFollowUpQueueSnapshot(args.cfg)
   await savePlanSnapshot(args.cfg)

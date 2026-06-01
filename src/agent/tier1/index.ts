@@ -16,6 +16,7 @@
 
 export { buildClassifierBlock } from "./auto-classifier"
 export { buildBranchSearchBlock } from "./branch-search"
+export { buildBrowserBlock } from "./browser"
 export { buildBudgetBlock } from "./budget"
 export {
   buildCheckSecretsBlock,

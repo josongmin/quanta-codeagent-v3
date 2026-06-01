@@ -33,11 +33,19 @@ import {
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import { captureSnapshot } from "@/agent/context-change"
 import { buildNetworkDispatchGuard } from "@/agent/dispatch-guard"
-import { CI_BOT_DEFAULT_ALLOWLIST } from "@/runtime/network-allowlist"
 import { buildDefaultMentionResolver } from "@/agent/mention-runner"
 import { autoWirePluginActivation } from "@/agent/plugin-activation-handler"
 import { getGlobalSessionResourceRegistry } from "@/agent/session-resource-registry"
 import { buildCallerOwnedRegistryWithTelemetry } from "@/agent/session-resource-registry/caller-owned-builder"
+import {
+  type BrowserPort,
+  createCdpBrowser,
+  defaultBrowserFs,
+  defaultCdpTransport,
+  defaultProcessSpawner,
+  realClock,
+  realScheduler,
+} from "@/browser"
 import { buildMentionSymbolDeps } from "@/host/runtime/internal/mention-symbol-deps"
 import {
   createInMemorySystemPromptCache,
@@ -50,7 +58,10 @@ import {
   type MetricEmitterPort,
   withCacheMetrics,
 } from "@/observability/codex-r2-metrics"
+import { CI_BOT_DEFAULT_ALLOWLIST } from "@/runtime/network-allowlist"
 import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
+import { resolveJailed } from "@/storage"
+import { type DnsResolver, nodeDnsResolver } from "@/tool/browser"
 
 /** Mode-preset-extra payloads (RFC may-22 Phase 4+). Each field is OPTIONAL
  *  on `AssembleRequest` so legacy callers (the assemble unit test, anything
@@ -219,6 +230,26 @@ const networkDispatchGuardFor = (req: AssembleRequest, policy: ModePolicy) => {
 }
 
 /** Single source of truth for "config for this mode" assembly. */
+/** ADR-0427 — env-gated browser wiring. Mutates `cfg` to add the duck-typed
+ *  `browser` slot when `QUANTA_BROWSER_TOOL=on` and a system chrome is present.
+ *  No-op (byte-identical registry) otherwise. */
+const maybeWireBrowser = (cfg: AgentConfig): void => {
+  if (process.env.QUANTA_BROWSER_TOOL !== "on") return
+  const slot = cfg as AgentConfig & { browser?: { port: BrowserPort; resolver?: DnsResolver } }
+  if (slot.browser !== undefined) return // caller-override-precedence (ADR-0332)
+  const port = createCdpBrowser({
+    spawner: defaultProcessSpawner,
+    transport: defaultCdpTransport,
+    fs: defaultBrowserFs,
+    scheduler: realScheduler,
+    clock: realClock,
+    profileRoot: resolveJailed(".quanta/browser", cfg.cwd),
+  })
+  // availability() double-gate: only wire when a chrome/chromium binary exists,
+  // so the model is never offered tools that would fail with backend-missing.
+  if (port.availability() !== null) slot.browser = { port, resolver: nodeDnsResolver }
+}
+
 export const assembleAgentConfig = (req: AssembleRequest): AgentConfig => {
   const policy: ModePolicy = MODE_PRESETS[req.mode]
   assertModeMatrix(policy)
@@ -264,6 +295,12 @@ export const assembleAgentConfig = (req: AssembleRequest): AgentConfig => {
     const networkGuard = networkDispatchGuardFor(req, policy)
     if (networkGuard !== undefined) cfg.dispatchGuard = networkGuard
   }
+  // ADR-0427 — browser automation (operator-owned activation). When
+  // `QUANTA_BROWSER_TOOL=on` AND a system chrome is on PATH, wire a headless CDP
+  // browser over an fs-jailed temp profile + node DNS resolver. Default-OFF: the
+  // duck-typed slot stays unset otherwise, so `buildBrowserBlock` yields no tools
+  // and the registry is byte-identical.
+  maybeWireBrowser(cfg)
   // ADR-0334 — populate the ADR-0327-family wire slots on the freshly
   // assembled cfg. Idempotent + caller-override-precedence (ADR-0332):
   // any slot the caller already set on `req.base` is preserved verbatim.

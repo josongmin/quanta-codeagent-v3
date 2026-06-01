@@ -17,7 +17,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { type DomModel, buildSnapshot, createHeadlessBrowser, createRefMap } from "@/browser"
+import { buildSnapshot, createHeadlessBrowser, createRefMap, type DomModel } from "@/browser"
 
 const MODEL: DomModel = {
   title: "Login",
@@ -72,6 +72,42 @@ describe("HELLGATE snapshot — pure + deterministic", () => {
     expect(rm.refOf("/0")).toBe("e2") // unchanged
     expect(rm.refOf("/2")).toBe("e4") // unchanged
     expect(rm.refOf("/3")).toBe("e5") // monotonic next
+  })
+
+  test("HELL-SNAP-10: value + url suffixes render (R1 audit [25])", () => {
+    const m: DomModel = {
+      title: "T",
+      root: {
+        backendPath: "/",
+        role: "document",
+        name: "T",
+        children: [
+          { backendPath: "/0", role: "textbox", name: "Email", value: "" },
+          { backendPath: "/1", role: "link", name: "Home", url: "https://x.test/" },
+        ],
+      },
+    }
+    const out = buildSnapshot(m, createRefMap())
+    expect(out).toContain('- e2 textbox "Email" =""') // empty value still rendered
+    expect(out).toContain('- e3 link "Home" (https://x.test/)') // url suffix
+  })
+
+  test("HELL-SNAP-11: placeholder + heading level render (Wave 4)", () => {
+    const m: DomModel = {
+      title: "T",
+      root: {
+        backendPath: "/",
+        role: "document",
+        name: "T",
+        children: [
+          { backendPath: "/0", role: "heading", name: "Welcome", level: 2 },
+          { backendPath: "/1", role: "textbox", name: "Email", placeholder: "you@example.com" },
+        ],
+      },
+    }
+    const out = buildSnapshot(m, createRefMap())
+    expect(out).toContain('- e2 heading "Welcome" h2')
+    expect(out).toContain('ph="you@example.com"')
   })
 
   test("HELL-SNAP-04: vanished node pruned", () => {

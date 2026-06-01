@@ -25,15 +25,21 @@ export interface BrowserHandle {
 export type BrowserError =
   | { readonly kind: "backend-missing" }
   | { readonly kind: "spawn-failed"; readonly detail: string }
+  // Produced by the headless stub (unknown fixture url) and reserved for a
+  // future in-port navigation policy; the production tool layer denies SSRF/
+  // protocol BEFORE calling the port and yields its own permission_denied
+  // result, so the real CDP navigate path does not currently emit this (R2 [19]).
   | { readonly kind: "navigation-denied"; readonly reason: string }
   | { readonly kind: "element-not-found"; readonly ref: string }
   | { readonly kind: "cdp-method-denied"; readonly method: string }
+  | { readonly kind: "cdp-error"; readonly detail: string }
   | { readonly kind: "timeout"; readonly ms: number }
   | { readonly kind: "cancelled" }
   | { readonly kind: "closed" }
 
 export interface BrowserStartOpts {
-  readonly headless?: boolean
+  // The adapter always launches `--headless=new`; a headed mode + its flag are
+  // a Phase-2 concern (R1 audit [2] — no dead `headless` field until honored).
   readonly signal?: AbortSignal
 }
 
@@ -44,9 +50,21 @@ export interface SnapshotOpts {
 
 export interface TypeOpts {
   readonly clear?: boolean
-  readonly submit?: boolean
   readonly signal?: AbortSignal
 }
+
+export type ScrollDirection = "up" | "down" | "left" | "right"
+
+export interface ScrollOpts {
+  /** Scroll a specific element into view (ref from a snapshot); else scroll the page. */
+  readonly ref?: string
+  readonly direction?: ScrollDirection
+  /** Pixels to scroll (default 400). Ignored when `ref` is set. */
+  readonly amount?: number
+}
+
+/** Drag destination — either another snapshot ref or absolute viewport coords. */
+export type DragTarget = { readonly ref: string } | { readonly x: number; readonly y: number }
 
 /** A single accessibility-tree node, already normalized by the in-page
  *  collector (name capped, hidden nodes dropped, iframes excluded). */
@@ -59,6 +77,9 @@ export interface DomNode {
   readonly tag?: string
   readonly states?: readonly string[]
   readonly value?: string
+  readonly placeholder?: string
+  /** Heading level 1-6 for h1..h6 / role=heading. */
+  readonly level?: number
   readonly url?: string
   readonly children?: readonly DomNode[]
 }

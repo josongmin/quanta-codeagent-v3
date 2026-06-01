@@ -56,6 +56,7 @@ import type { TaskRegistry } from "../subagent"
 import type { SkillTurnOverride } from "./loop"
 import {
   buildBranchSearchBlock,
+  buildBrowserBlock,
   buildBudgetBlock,
   buildCheckSecretsBlock,
   buildClassifierBlock,
@@ -101,6 +102,11 @@ export interface SessionFeatures {
    *  and returns immediately). The loop should invoke this at session end
    *  before resolving the outcome. */
   cleanup?: () => Promise<void>
+  /** Browser session teardown (ADR-0427). Closes the lazily-spawned headless
+   *  browser (kills the proc + removes the temp profile). Present only when
+   *  `config.browser.port` is wired; absent ⇒ no browser tools (byte-identical).
+   *  The loop invokes this at session end alongside {@link cleanup}. */
+  browserDispose?: () => Promise<void>
   /** Skill tool-scoping ENFORCEMENT data (ADR-0011): skill name →
    *  author-declared tool allowlist. An explicit empty list means "deny all
    *  ordinary tools" while still allowing the meta-tools (`Skill`,
@@ -208,12 +214,19 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
   const userInputTool = buildUserInputBlock(config)
   if (userInputTool !== undefined) extraTools.push(userInputTool)
 
+  // --- Browser automation tools (ADR-0427) -------------------------------
+  // default-OFF: EMPTY unless `config.browser.port` is wired by the composition
+  // root. The session-teardown `dispose` rides out via `browserDispose`.
+  const browserBlock = buildBrowserBlock(config)
+  extraTools.push(...browserBlock.tools)
+
   return {
     extraTools,
     ...optionalFeatureFields({
       classifier,
       taskRegistry: subagent?.taskRegistry,
       cleanup: subagent?.cleanup,
+      browserDispose: browserBlock.tools.length > 0 ? browserBlock.dispose : undefined,
       skillAllowlists: skill?.allowlists,
       skillOverrides: skill?.overrides,
       // Inventory is present whenever `config.skills` is set — even an empty

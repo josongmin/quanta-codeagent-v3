@@ -1,0 +1,219 @@
+/**
+ * Hellgate — Phase-2 interaction verbs (ADR-0427 Wave 4).
+ *
+ * fill / select_option / scroll / press_key / drag / mouse_click_xy over the
+ * headless port (tool layer) + the real adapter (orchestration over a scripted
+ * transport). Proves ref-resolution, the JS/Input dispatch path, and the
+ * element-not-found / coordinate branches.
+ */
+
+import { describe, expect, test } from "bun:test"
+import { createHeadlessBrowser, type DomModel } from "@/browser"
+import type {
+  BrowserFs,
+  CdpConnection,
+  CdpTransport,
+  Clock,
+  ProcessSpawner,
+  Scheduler,
+} from "@/browser/cdp/ports"
+import { createCdpBrowser } from "@/browser/cdp-adapter"
+import { ok } from "@/shared"
+import type { Tool, ToolResult } from "@/tool"
+import { createBrowserToolset } from "@/tool/browser"
+
+const PAGE: DomModel = {
+  title: "Form",
+  root: {
+    backendPath: "/",
+    role: "document",
+    name: "Form",
+    children: [
+      { backendPath: "/0", role: "textbox", name: "Name" },
+      { backendPath: "/1", role: "combobox", name: "Country" },
+      { backendPath: "/2", role: "button", name: "Submit" },
+    ],
+  },
+}
+const PAGES = new Map([["https://app.test/form", { title: "Form", dom: PAGE }]])
+
+const tool = (tools: Tool[], n: string): Tool => {
+  const t = tools.find((x) => x.name === n)
+  if (!t) throw new Error(n)
+  return t
+}
+const run = async (t: Tool, input: unknown): Promise<ToolResult> => {
+  let r: ToolResult | undefined
+  for await (const ev of t.execute(input, { cwd: "/tmp", signal: new AbortController().signal })) {
+    if (ev.type === "result") r = ev.result
+  }
+  if (!r) throw new Error("no result")
+  return r
+}
+
+describe("HELLGATE verbs — tool layer over headless", () => {
+  const setup = async () => {
+    const ts = createBrowserToolset(createHeadlessBrowser({ pages: PAGES }))
+    await run(tool(ts.tools, "browser_navigate"), { url: "https://app.test/form" })
+    await run(tool(ts.tools, "browser_snapshot"), {}) // refs e1..e4
+    return ts
+  }
+
+  test("fill known ref ⇒ ok; unknown ⇒ not_found", async () => {
+    const ts = await setup()
+    expect((await run(tool(ts.tools, "browser_fill"), { ref: "e2", value: "Ada" })).ok).toBe(true)
+    const bad = await run(tool(ts.tools, "browser_fill"), { ref: "e99", value: "x" })
+    expect(bad.failure?.mode).toBe("not_found")
+  })
+
+  test("select_option known ref ⇒ ok", async () => {
+    const ts = await setup()
+    expect(
+      (await run(tool(ts.tools, "browser_select_option"), { ref: "e3", values: ["US"] })).ok,
+    ).toBe(true)
+  })
+
+  test("scroll page (no ref) ⇒ ok; scroll bad ref ⇒ not_found", async () => {
+    const ts = await setup()
+    expect(
+      (await run(tool(ts.tools, "browser_scroll"), { direction: "down", amount: 200 })).ok,
+    ).toBe(true)
+    const bad = await run(tool(ts.tools, "browser_scroll"), { ref: "e99" })
+    expect(bad.failure?.mode).toBe("not_found")
+  })
+
+  test("press_key ⇒ ok", async () => {
+    const ts = await setup()
+    expect((await run(tool(ts.tools, "browser_press_key"), { key: "Enter" })).ok).toBe(true)
+  })
+
+  test("drag ref→ref ⇒ ok; missing target ⇒ rejected", async () => {
+    const ts = await setup()
+    expect(
+      (await run(tool(ts.tools, "browser_drag"), { sourceRef: "e2", targetRef: "e4" })).ok,
+    ).toBe(true)
+    const noTarget = await run(tool(ts.tools, "browser_drag"), { sourceRef: "e2" })
+    expect(noTarget.failure?.mode).toBe("rejected")
+  })
+
+  test("mouse_click_xy ⇒ ok", async () => {
+    const ts = await setup()
+    expect((await run(tool(ts.tools, "browser_mouse_click_xy"), { x: 10, y: 20 })).ok).toBe(true)
+  })
+})
+
+// --- adapter layer: dispatch reaches the wire ---------------------------------
+
+const DOM = {
+  title: "F",
+  root: {
+    backendPath: "/",
+    role: "document",
+    name: "F",
+    children: [{ backendPath: "/0", role: "textbox", name: "N" }],
+  },
+}
+
+const evalValueFor = (expr: string): unknown => {
+  if (expr.includes("walk(document.body")) return JSON.stringify(DOM)
+  if (expr === "document.title") return "F"
+  if (expr.includes("getBoundingClientRect")) return { x: 5, y: 6 }
+  return true
+}
+
+const adapter = () => {
+  const sent: Array<{ method: string; params: Record<string, unknown> }> = []
+  const transport: CdpTransport = {
+    connect: async () => {
+      let emit: (raw: string) => void = () => {}
+      const conn: CdpConnection = {
+        onMessage: (cb) => {
+          emit = cb
+        },
+        close: () => {},
+        send: (raw) => {
+          const m = JSON.parse(raw) as {
+            id: number
+            method: string
+            params: { expression?: string } & Record<string, unknown>
+          }
+          sent.push({ method: m.method, params: m.params })
+          queueMicrotask(() => {
+            if (m.method === "Runtime.evaluate") {
+              const value = evalValueFor(m.params.expression ?? "")
+              emit(JSON.stringify({ id: m.id, result: { result: { value } } }))
+            } else {
+              emit(JSON.stringify({ id: m.id, result: {} }))
+              if (m.method === "Page.navigate") {
+                setTimeout(
+                  () => emit(JSON.stringify({ method: "Page.loadEventFired", params: {} })),
+                  0,
+                )
+              }
+            }
+          })
+        },
+      }
+      return ok(conn)
+    },
+  }
+  const fs: BrowserFs = {
+    existsSync: () => false,
+    readFile: (p) => (p.endsWith("DevToolsActivePort") ? "9222\n/x" : null),
+    mkdirp: () => {},
+    rmrf: () => {},
+  }
+  const spawner: ProcessSpawner = {
+    which: () => "/usr/bin/google-chrome",
+    spawn: () => ({ pid: 1, kill: () => {}, exited: Promise.resolve(0) }),
+  }
+  const scheduler: Scheduler = { schedule: () => () => {} }
+  const clock: Clock = { now: () => 0 }
+  const b = createCdpBrowser({
+    spawner,
+    transport,
+    fs,
+    scheduler,
+    clock,
+    profileRoot: "/jail/b",
+    endpointTimeoutMs: 1000,
+  })
+  return { b, sent }
+}
+
+describe("HELLGATE verbs — adapter dispatch", () => {
+  test("press_key dispatches Input.dispatchKeyEvent down+up", async () => {
+    const { b, sent } = adapter()
+    const h = await b.spawn()
+    if (!h.ok) return
+    const r = await b.pressKey(h.value, "Enter")
+    expect(r.ok).toBe(true)
+    const keys = sent.filter((s) => s.method === "Input.dispatchKeyEvent")
+    expect(keys.map((k) => k.params.type)).toEqual(["keyDown", "keyUp"])
+  })
+
+  test("mouse_click_xy dispatches pressed+released at coords", async () => {
+    const { b, sent } = adapter()
+    const h = await b.spawn()
+    if (!h.ok) return
+    const r = await b.mouseClickXY(h.value, 11, 22)
+    expect(r.ok).toBe(true)
+    const mice = sent.filter((s) => s.method === "Input.dispatchMouseEvent")
+    expect(mice.map((m) => m.params.type)).toEqual(["mousePressed", "mouseReleased"])
+    expect(mice[0]?.params.x).toBe(11)
+  })
+
+  test("drag ref→coords: pressed at element center, released at target", async () => {
+    const { b, sent } = adapter()
+    const h = await b.spawn()
+    if (!h.ok) return
+    await b.navigate(h.value, "https://x.test/")
+    await b.snapshot(h.value) // refs e1,e2
+    const r = await b.drag(h.value, "e2", { x: 99, y: 88 })
+    expect(r.ok).toBe(true)
+    const mice = sent.filter((s) => s.method === "Input.dispatchMouseEvent")
+    expect(mice.map((m) => m.params.type)).toEqual(["mousePressed", "mouseMoved", "mouseReleased"])
+    expect(mice[0]?.params.x).toBe(5) // element center from getBoundingClientRect stub
+    expect(mice[2]?.params.x).toBe(99) // dropped at target coord
+  })
+})

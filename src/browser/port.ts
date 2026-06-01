@@ -29,7 +29,9 @@ import type {
   BrowserError,
   BrowserHandle,
   BrowserStartOpts,
+  DragTarget,
   PageSnapshot,
+  ScrollOpts,
   SnapshotOpts,
   TypeOpts,
 } from "./types"
@@ -49,6 +51,40 @@ export interface BrowserPort {
     ref: string,
     text: string,
     opts?: TypeOpts,
+  ): Promise<Result<void, BrowserError>>
+  /** Set a form control's value (clear + set), distinct from `type` which appends. */
+  fill(
+    h: BrowserHandle,
+    ref: string,
+    value: string,
+    signal?: AbortSignal,
+  ): Promise<Result<void, BrowserError>>
+  /** Select option(s) on a `<select>` by value. */
+  selectOption(
+    h: BrowserHandle,
+    ref: string,
+    values: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<Result<void, BrowserError>>
+  scroll(
+    h: BrowserHandle,
+    opts: ScrollOpts,
+    signal?: AbortSignal,
+  ): Promise<Result<void, BrowserError>>
+  /** Dispatch a key (Enter / Escape / Tab / ArrowDown / single char). */
+  pressKey(h: BrowserHandle, key: string, signal?: AbortSignal): Promise<Result<void, BrowserError>>
+  drag(
+    h: BrowserHandle,
+    sourceRef: string,
+    target: DragTarget,
+    signal?: AbortSignal,
+  ): Promise<Result<void, BrowserError>>
+  /** Coordinate click — the escape hatch when an element has no stable ref. */
+  mouseClickXY(
+    h: BrowserHandle,
+    x: number,
+    y: number,
+    signal?: AbortSignal,
   ): Promise<Result<void, BrowserError>>
   screenshot(h: BrowserHandle): Promise<Result<Uint8Array, BrowserError>>
   cdp(
