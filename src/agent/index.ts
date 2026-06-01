@@ -127,7 +127,6 @@ export {
   parseAgentlessResponse,
 } from "./issue-hint"
 export { runAgent } from "./loop"
-export { wireOptionalAgentPorts } from "./optional-ports"
 export { lspDiagnosticsTool, lspNavToolList } from "./lsp-bridge"
 export {
   attachLspDiagnosticsHook,
@@ -137,6 +136,7 @@ export {
   type PromptInjectPush,
 } from "./lsp-diagnostics-hook"
 export {
+  type ElicitationPrompterFactory,
   loadMcpTools,
   mcpToolName,
   mcpToolToTool,
@@ -172,6 +172,7 @@ export {
 export { memoryTools } from "./memory-tools"
 export { AgentRecorder, METRIC } from "./metrics"
 export { isMutatingToolBlockedInMode, modeBlockReason, resolveAgentMode } from "./mode"
+export { wireOptionalAgentPorts } from "./optional-ports"
 export { type PersonaKind, resolvePersona } from "./persona"
 export { isMutatingToolBlockedInPlan } from "./plan"
 export type { PlanExitDecision, PlanExitOutcome } from "./plan-exit"

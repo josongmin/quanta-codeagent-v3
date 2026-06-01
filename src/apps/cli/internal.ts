@@ -46,6 +46,7 @@ import { MCPRootSchema, PLUGIN_MCP_FILE } from "@/skill/plugin-manifest"
 import type { AssistantTextPainter, StreamPort } from "@/stream"
 import { gitTools, type Tool } from "@/tool"
 import { createMarkdownPainter } from "./markdown-painter"
+import { buildCliElicitationPrompterFactory } from "./mcp-elicitation-prompter"
 import { isPathLikeToken } from "./resume"
 
 /**
@@ -625,8 +626,16 @@ export const loadFeatures = async (slog: StructuredLogger): Promise<Features> =>
   const state = statePath()
   const resume = resumePath()
   const mcpConfigs = await readMcpConfig(slog)
+  // Track C — interactive MCP elicitation prompter. Built only when an
+  // interactive CLI prompt seam is available (TTY stdin); headless / piped
+  // runs get `undefined` so each McpClient keeps its headlessRejecter default
+  // (byte-identical to the legacy load). The factory binds a per-server lease
+  // (`pool.forContext({ serverId })`) inside `loadMcpTools`.
+  const elicitationPrompterFor = buildCliElicitationPrompterFactory()
   const { tools: mcpTools, clients: mcpClients } =
-    mcpConfigs.length > 0 ? await loadMcpTools(mcpConfigs) : { tools: [], clients: [] }
+    mcpConfigs.length > 0
+      ? await loadMcpTools(mcpConfigs, elicitationPrompterFor)
+      : { tools: [], clients: [] }
   // LSP-backed diagnostics: only when opted in. The tool name matches the
   // no-op one in defaultTools, so appending it lets the registry's last-write
   // -wins map swap in the real provider (same merge path as MCP tools).

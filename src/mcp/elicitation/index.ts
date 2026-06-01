@@ -2,6 +2,7 @@
 
 export { type CliPrompterIO, cliPrompter } from "./default-cli-prompter"
 export { headlessRejecter } from "./headless-rejecter"
+export { ElicitationLeasePool, type LeaseContext } from "./lease"
 export type {
   ElicitationFailureReason,
   ElicitationPrompter,

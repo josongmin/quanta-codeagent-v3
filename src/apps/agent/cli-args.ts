@@ -87,6 +87,14 @@ export interface AgentArgs {
    *  has the same effect and WINS over a missing flag. Default-OFF: absent
    *  ⇒ no watcher, byte-identical to legacy. */
   playbookTrigger?: boolean
+  /** Track A2 — `--permission-profile <default|restricted|trusted>`. When set,
+   *  the composition root resolves the name through the named-profile registry
+   *  (fail-closed: an unknown name is a hard startup error) and applies it via
+   *  `TwoLayerManager.setPermissionProfileByName`. The env knob
+   *  `QUANTA_PERMISSION_PROFILE` has the same effect; an explicit flag WINS over
+   *  the env. Absent (no flag, no env) ⇒ no profile manager, byte-identical to
+   *  legacy. */
+  permissionProfile?: PermissionProfileToken
 }
 
 /** ADR-0236 — closed set of tool-profile names accepted on `--tool-profile`. */
@@ -94,6 +102,11 @@ export type ToolProfileToken = "write" | "ask" | "minimal" | "code-only"
 /** ADR-0236 — closed set of identity modes accepted on `--identity-mode`.
  *  Aligned 1:1 with `ModeVariantKey` (ADR-0211). */
 export type IdentityModeToken = "default" | "plan" | "review" | "audit" | "architect" | "editor"
+/** Track A2 — closed set of named permission profiles accepted on
+ *  `--permission-profile`. Mirror of the resolvable subset of the
+ *  named-profile registry (`default | restricted | trusted`); `custom` is
+ *  intentionally excluded (it denotes a caller-supplied struct, never a name). */
+export type PermissionProfileToken = "default" | "restricted" | "trusted"
 
 /** Parser-level error. `index.ts` catches this and emits usage + exit 64. */
 export class AgentArgsError extends Error {
@@ -136,6 +149,13 @@ const VALID_IDENTITY_MODES = [
   "architect",
   "editor",
 ] as const satisfies readonly IdentityModeToken[]
+
+/** Track A2 — closed set for `--permission-profile`. */
+const VALID_PERMISSION_PROFILES = [
+  "default",
+  "restricted",
+  "trusted",
+] as const satisfies readonly PermissionProfileToken[]
 
 /**
  * Static mapping from CLI dial flag → `BudgetDials` field. All dials are
@@ -186,6 +206,10 @@ const isValidToolProfile = (s: string): s is ToolProfileToken =>
 /** ADR-0236 type guard for `--identity-mode`. */
 const isValidIdentityMode = (s: string): s is IdentityModeToken =>
   (VALID_IDENTITY_MODES as readonly string[]).includes(s)
+
+/** Track A2 type guard for `--permission-profile`. */
+const isValidPermissionProfile = (s: string): s is PermissionProfileToken =>
+  (VALID_PERMISSION_PROFILES as readonly string[]).includes(s)
 
 /** Read `argv[i+1]` and assert it exists + is NOT another flag. */
 const takeValue = (argv: readonly string[], i: number, flag: string): string => {
@@ -290,6 +314,7 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
   let focusChainEvery: number | undefined
   let noAutoBackground = false
   let playbookTrigger = false
+  let permissionProfile: PermissionProfileToken | undefined
   const dials: Partial<BudgetDials> = {}
 
   // Audit R2: duplicate-flag guard. None of our flags are repeatable, so the
@@ -457,6 +482,18 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
       continue
     }
 
+    if (a === "--permission-profile") {
+      const v = takeValue(argv, i, a)
+      if (!isValidPermissionProfile(v)) {
+        throw new AgentArgsError(
+          `--permission-profile must be one of ${VALID_PERMISSION_PROFILES.join("|")}, got '${v}'`,
+        )
+      }
+      permissionProfile = v
+      i += 2
+      continue
+    }
+
     if (isDialFlag(a)) {
       const raw = takeValue(argv, i, a)
       const key = DIAL_FLAG_MAP[a]
@@ -515,6 +552,7 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
   if (focusChainEvery !== undefined) out.focusChainEvery = focusChainEvery
   if (noAutoBackground) out.noAutoBackground = true
   if (playbookTrigger) out.playbookTrigger = true
+  if (permissionProfile !== undefined) out.permissionProfile = permissionProfile
   return out
 }
 
@@ -566,6 +604,8 @@ COMPOSITION-ROOT MEGA-WIRE (ADR-0236 — all default-OFF; absent ⇒ slot omitte
   --no-auto-background    Force auto-background OFF (ADR-0223)
   --playbook-trigger      Opt in to inline-trigger watcher (ADR-0293; or
                           set QUANTA_PLAYBOOK_TRIGGER=on)
+  --permission-profile <p> One of ${VALID_PERMISSION_PROFILES.join("|")} (Track A2;
+                          or set QUANTA_PERMISSION_PROFILE; unknown ⇒ fail-closed)
 
 NOTES
   • Defaults flow from per-mode BUDGET_PRESETS via the assembler — this

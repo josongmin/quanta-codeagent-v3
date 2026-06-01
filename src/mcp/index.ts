@@ -14,9 +14,11 @@ export {
   type CliPrompterIO,
   cliPrompter,
   type ElicitationFailureReason,
+  ElicitationLeasePool,
   type ElicitationPrompter,
   type ElicitationResult,
   headlessRejecter,
+  type LeaseContext,
 } from "./elicitation"
 export {
   DefaultTaskStore,

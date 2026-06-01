@@ -27,6 +27,14 @@ export interface RuntimeAgentConfigAugments {
   sessionEffort?: unknown
   decisionEmitter?: unknown
   granularRegistry?: unknown
+  /** Track A2 — composition-root named-permission-profile wire. When the
+   *  operator selects a profile via `QUANTA_PERMISSION_PROFILE` / the
+   *  `--permission-profile <name>` flag, the composition root constructs a
+   *  `TwoLayerManager`, applies the resolved profile via
+   *  `setPermissionProfileByName(threadId, name)`, and publishes the manager
+   *  here so a future loop consumer can read the per-thread layered policy.
+   *  Absent ⇒ slot omitted (byte-identical legacy). */
+  permissionProfileManager?: unknown
 }
 
 export type RuntimeAgentConfigBase = Omit<AgentConfig, "modePolicy" | "budgetMeter"> &

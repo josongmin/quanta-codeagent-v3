@@ -69,6 +69,7 @@ import {
 } from "@/agent/tool-profile"
 import { type LLMPort, pickProvider, tryCreateLLM } from "@/llm"
 import { type CapabilityNegotiator, defaultNegotiator, fullNegotiator } from "@/mcp"
+import { createTwoLayerManager, isNamedProfileName, type TwoLayerManager } from "@/permission"
 import { type AutomationEngineSlot, assembleAutomation } from "@/scheduler/runtime-wire"
 import { errMessage, logger, runtimeConfig, setTerminalIo } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
@@ -128,6 +129,54 @@ const isRetrievalHybridEnabled = (env: NodeJS.ProcessEnv): boolean =>
  *  swaps to {@link fullNegotiator} which advertises `{tools, sampling,
  *  elicitation, tasks}`. Any other value (including absent) yields the
  *  byte-identical `{}` default. Single canonical knob; no aliases. */
+/** Track A2 — the composition-root session thread key the named permission
+ *  profile is registered under. The unified-agent surface starts ONE logical
+ *  session per process; a single stable key is the right granularity for the
+ *  startup profile (the per-thread `TwoLayerManager` API still lets a future
+ *  multi-thread host register additional profiles under their own keys). */
+export const PERMISSION_PROFILE_SESSION_THREAD = "session" as const
+
+/**
+ * Track A2 — resolve the named permission profile from the composition-root
+ * env/flag view and apply it through the EXISTING
+ * `TwoLayerManager.setPermissionProfileByName` path.
+ *
+ * Precedence: an explicit `--permission-profile <name>` flag (already validated
+ * by the parser) WINS over the `QUANTA_PERMISSION_PROFILE` env knob. When
+ * neither is present, returns `undefined` so the slot is OMITTED and behavior
+ * is byte-identical to today (no manager constructed, no allocation).
+ *
+ * Fail-closed: an env-supplied name that is NOT a resolvable
+ * {@link isNamedProfileName} (a typo, or `custom`) THROWS so startup rejects
+ * loudly rather than silently falling back to a permissive default, matching
+ * the `named-profiles.ts` fail-closed posture. (The flag path cannot reach this
+ * throw because the parser already rejected an invalid flag value with exit 64,
+ * but we re-validate defensively so the single resolver owns the invariant.)
+ *
+ * When a valid name is resolved, a fresh {@link TwoLayerManager} is constructed
+ * and the profile is registered via `setPermissionProfileByName` (which itself
+ * resolves through the registry, throwing on an unknown/`custom` name, so there
+ * is one write site). The manager is returned for the composition root to
+ * publish on the base.
+ */
+const resolvePermissionProfileManager = (
+  flag: import("./cli-args").PermissionProfileToken | undefined,
+  env: NodeJS.ProcessEnv,
+): TwoLayerManager | undefined => {
+  const name = flag ?? env.QUANTA_PERMISSION_PROFILE
+  if (name === undefined || name === "") return undefined
+  if (!isNamedProfileName(name)) {
+    throw new Error(
+      `QUANTA_PERMISSION_PROFILE='${name}' is not a resolvable named permission ` +
+        `profile (one of default|restricted|trusted). Fix the value or unset it; ` +
+        `a bespoke 'custom' profile is supplied as a struct, not by name.`,
+    )
+  }
+  const manager = createTwoLayerManager()
+  manager.setPermissionProfileByName(PERMISSION_PROFILE_SESSION_THREAD, name)
+  return manager
+}
+
 export const pickMcpNegotiator = (env: NodeJS.ProcessEnv): CapabilityNegotiator =>
   env.QUANTA_MCP_CAPS === "full" ? fullNegotiator() : defaultNegotiator
 
@@ -576,6 +625,12 @@ export const buildBaseFromArgs = (
   // owns the `QUANTA_BENCH_HOOKS` bus). One spread keeps `buildBaseFromArgs`
   // under biome's cognitive-complexity cap.
   const observabilitySlots = resolveObservabilitySlots(env)
+  // Track A2 — composition-root named-permission-profile wire. Resolves the
+  // env/flag (flag WINS over QUANTA_PERMISSION_PROFILE), validates fail-closed
+  // (unknown name THROWS at startup), constructs a `TwoLayerManager`, and
+  // applies the profile via `setPermissionProfileByName`. Absent ⇒ `undefined`
+  // ⇒ slot omitted below (byte-identical legacy).
+  const permissionProfileManager = resolvePermissionProfileManager(p.permissionProfile, env)
   // ADR-0236 — `--no-auto-background`: future hosts that wire `autoBackground`
   // by default can call `resolveAutoBackgroundOverride(p.noAutoBackground)` to
   // hard-force the slot OFF. Today no host defaults it on, so the flag has no
@@ -623,6 +678,10 @@ export const buildBaseFromArgs = (
     // the canonical `hooks` bus attribution subscribed to). Default-OFF: `{}`
     // when `QUANTA_OBSERVABILITY !== "on"` ⇒ AgentConfig byte-identical legacy.
     ...observabilitySlots,
+    // Track A2 — publish the named-permission-profile manager so a future loop
+    // consumer can read the per-thread layered policy. Default-OFF: absent ⇒
+    // slot omitted (`exactOptionalPropertyTypes` — no `undefined` literal).
+    ...(permissionProfileManager !== undefined ? { permissionProfileManager } : {}),
   }
 
   attachExecutionPlaneSlots(base, p)
@@ -695,6 +754,11 @@ export interface AssembleRequestPartial {
    *  over flag=false (precedence enforced inside the wire helper). Absent ⇒
    *  slot omitted (default-OFF byte-identical, RFC §1.2). */
   playbookTrigger?: boolean
+  /** Track A2 — named permission profile selected via the
+   *  `--permission-profile` flag. The env knob `QUANTA_PERMISSION_PROFILE` is
+   *  resolved separately inside `buildBaseFromArgs` (flag WINS over env).
+   *  Absent (no flag, no env) ⇒ no profile manager wired (default-OFF). */
+  permissionProfile?: import("./cli-args").PermissionProfileToken
 }
 
 /** ADR-0236 + ADR-0301 — propagate the composition-root mega-wire flags
@@ -709,6 +773,10 @@ const liftMegaWireFields = (args: AgentArgs, out: AssembleRequestPartial): void 
   if (args.identityMode !== undefined) out.identityMode = args.identityMode
   if (args.focusChainEvery !== undefined) out.focusChainEvery = args.focusChainEvery
   if (args.noAutoBackground) out.noAutoBackground = true
+  // Track A2 — echo the parsed `--permission-profile` flag. The env-or-flag
+  // resolution + fail-closed validation happens in `buildBaseFromArgs`; here
+  // we only carry the (already-validated) flag token onto the projection.
+  if (args.permissionProfile !== undefined) out.permissionProfile = args.permissionProfile
   // ADR-0301 — echo the parsed CLI flag onto the lifted projection so any
   // mode-preset host that consumes `AssembleRequestPartial.playbookTrigger`
   // can thread it down to `maybeStartPlaybookTriggerWire({ cliFlag })`.

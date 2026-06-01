@@ -1,5 +1,11 @@
 import { z } from "zod"
-import { McpClient, McpError, type McpServerConfig, type McpToolDef } from "@/mcp"
+import {
+  type ElicitationPrompter,
+  McpClient,
+  McpError,
+  type McpServerConfig,
+  type McpToolDef,
+} from "@/mcp"
 import { errMessage, logger } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 
@@ -72,19 +78,39 @@ export const mcpToolToTool = (client: McpClient, def: McpToolDef, serverName: st
   }
 }
 
+/** Track C — optional per-server elicitation prompter factory. Given the
+ *  server's stable id (`config.name`), returns the {@link ElicitationPrompter}
+ *  the `McpClient` routes inbound `elicitation/create` requests through. The
+ *  factory shape (rather than a single shared prompter) is what lets the CLI
+ *  bind the lease key per server (`leasePool.forContext({ serverId })`) so a
+ *  coalesced prompt is scoped to ONE server. Absent ⇒ the client keeps its
+ *  `headlessRejecter` default (byte-identical to the legacy load path). */
+export type ElicitationPrompterFactory = (serverId: string) => ElicitationPrompter
+
 /**
  * Start every configured MCP server, list its tools, and bridge them all.
  * Returns the bridged tools plus the live clients (the CLI stops them on exit).
  * A server that fails to start/list is logged and skipped — the others still
  * load, the CLI never crashes.
+ *
+ * Track C — `elicitationPrompterFor` is an OPTIONAL per-server prompter
+ * factory. When supplied, each server's `McpClient` is constructed with the
+ * prompter `elicitationPrompterFor(config.name)` returns, so an inbound
+ * `elicitation/create` reaches the user instead of being auto-declined. Absent
+ * ⇒ `new McpClient(config)` keeps its `headlessRejecter` default (the load is
+ * byte-identical to before this param existed).
  */
 export const loadMcpTools = async (
   servers: McpServerConfig[],
+  elicitationPrompterFor?: ElicitationPrompterFactory,
 ): Promise<{ tools: Tool[]; clients: McpClient[] }> => {
   const tools: Tool[] = []
   const clients: McpClient[] = []
   for (const config of servers) {
-    const client = new McpClient(config)
+    const client =
+      elicitationPrompterFor !== undefined
+        ? new McpClient(config, { elicitationPrompter: elicitationPrompterFor(config.name) })
+        : new McpClient(config)
     try {
       await client.start()
       const defs = await client.listTools()
