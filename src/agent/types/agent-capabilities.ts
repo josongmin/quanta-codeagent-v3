@@ -58,19 +58,25 @@ export type SubagentBlock = {
   /** B2 — OPT-IN closed-port clamp on caller-supplied blocking timeouts. When
    *  set, this `{minMs,maxMs,defaultMs}` band is threaded into BOTH the
    *  `task_output(block:true)` tool (this block builds it directly) AND the
-   *  `wait_agent` dispatch path (exposed on the materialized
-   *  {@link import("../tier1/subagent").SubagentBlock} for whatever assembles
-   *  the 6-tool `Subagent6Deps`). Absent ⇒ {@link
+   *  `wait_agent` dispatch path (consumed by the 6-tool `Subagent6Deps` when
+   *  {@link enable6Tools} is `true`). Absent ⇒ {@link
    *  import("../../subagent").DEFAULT_WAIT_TIMEOUT_POLICY} (30s default,
    *  generous 1h ceiling) — byte-identical to today. */
   waitTimeoutPolicy?: import("../../subagent").WaitTimeoutPolicy
   /** B3 — OPT-IN per-session cap on CONCURRENT running subagents, threaded into
-   *  the 6-tool `spawn_agent` path (`Subagent6Deps.maxConcurrent`). Exposed on
-   *  the materialized {@link import("../tier1/subagent").SubagentBlock} for the
-   *  `Subagent6Deps` assembler; the trio `agent` tool has no concurrent gauge
-   *  of its own, so this knob is consumed by the 6-tool dispatch. Absent ⇒
+   *  the 6-tool `spawn_agent` path (`Subagent6Deps.maxConcurrent`). The trio
+   *  `agent` tool has no concurrent gauge of its own, so this knob is consumed
+   *  by the 6-tool dispatch when {@link enable6Tools} is `true`. Absent ⇒
    *  UNLIMITED (byte-identical to today). */
   maxConcurrent?: number
+  /** B3/B2 LIVE assembly opt-in (ADR-0041). Absent/`false` ⇒ ONLY the
+   *  `agent` / `task_output` / `task_stop` trio is registered — byte-identical
+   *  to today. `true` ⇒ the six-tool router (`exec_command` / `write_stdin` /
+   *  `spawn_agent` / `wait_agent` / `close_agent` / `send_input`) is ALSO
+   *  built (COEXIST — both share the one `TaskRegistry`) and the already-
+   *  exposed `maxConcurrent` / `waitTimeoutPolicy` knobs become behavior-live
+   *  through `spawn_agent` / `wait_agent`. The trio is never removed. */
+  enable6Tools?: boolean
 }
 
 /**

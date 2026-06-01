@@ -15,6 +15,7 @@
 import type { Tool } from "@/tool"
 import {
   createAgentTool,
+  createSubagent6Tools,
   createTaskOutputTool,
   createTaskStopTool,
   type TaskOutputTimeoutPolicy,
@@ -29,7 +30,11 @@ import type { AgentConfig } from "../types"
  *  to it, so the loop can observe/inspect background tasks via the same
  *  handle the LLM-facing tools mutate. */
 export interface SubagentBlock {
-  /** `[agent, task_output, task_stop]` — to be merged into the registry. */
+  /** `[agent, task_output, task_stop]` — to be merged into the registry. When
+   *  `config.subagent.enable6Tools === true` the six-tool router
+   *  (`exec_command` / `write_stdin` / `spawn_agent` / `wait_agent` /
+   *  `close_agent` / `send_input`) is APPENDED (COEXIST, ADR-0041), sharing the
+   *  same `taskRegistry`. Absent/false ⇒ trio only (byte-identical). */
   extraTools: Tool[]
   /** The shared `TaskRegistry` instance the three tools were wired against. */
   taskRegistry: TaskRegistry
@@ -110,7 +115,37 @@ export const buildSubagentBlock = (config: AgentConfig): SubagentBlock | undefin
       ? createTaskOutputTool(reg, toTaskOutputPolicy(wtp))
       : createTaskOutputTool(reg)
   const extraTools: Tool[] = [agentTool, taskOutputTool, createTaskStopTool(reg)]
+
+  // ADR-0041 LIVE assembly — when `enable6Tools` is set, build the six-tool
+  // router AND keep the trio (COEXIST — see agent-tools-6.ts header + ADR-0041
+  // "두 surface가 한동안 공존"). The 6-tool set shares the SAME `reg` so
+  // spawn/wait/close observe the same background tasks the trio does, and the
+  // already-exposed `maxConcurrent` / `waitTimeoutPolicy` knobs are threaded
+  // straight into the spawn/wait handlers (making them behavior-live). Absent/
+  // false ⇒ `extraTools` is the trio ONLY (byte-identical) and no PtyTable /
+  // InputChannelRegistry is minted. `subagent6Cleanup` tears down PTY children.
+  let subagent6Cleanup: (() => void) | undefined
+  if (config.subagent.enable6Tools === true) {
+    const set = createSubagent6Tools({
+      runner,
+      registry: reg,
+      ...(config.subagent.maxDepth !== undefined ? { maxDepth: config.subagent.maxDepth } : {}),
+      ...(config.subagent.maxConcurrent !== undefined
+        ? { maxConcurrent: config.subagent.maxConcurrent }
+        : {}),
+      ...(config.subagent.waitTimeoutPolicy !== undefined
+        ? { waitTimeoutPolicy: config.subagent.waitTimeoutPolicy }
+        : {}),
+    })
+    extraTools.push(...set.tools)
+    subagent6Cleanup = set.cleanup
+  }
+
   const cleanup = async (): Promise<void> => {
+    // Tear down any PTY children the 6-tool `exec_command` kept alive FIRST so
+    // a live child can't outlive the registry teardown. No-op when 6-tool is
+    // off (subagent6Cleanup is undefined).
+    subagent6Cleanup?.()
     const ids = reg.pendingIds()
     if (ids.length === 0) return
     // S17: host-side cleanup uses `forceStop` — not the token-gated `stop`.
