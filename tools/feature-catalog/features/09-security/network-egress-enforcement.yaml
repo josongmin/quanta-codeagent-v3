@@ -1,0 +1,65 @@
+id: network-egress-enforcement
+title: Network-egress enforcement wiring (mode → dispatch-guard)
+section: 9
+subsystem: 보안 — 아웃바운드 게이트 배선 (Codex 0.135 [network_proxy] 흡수)
+order: 5
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "security-touched"]
+depends_on: [network-allowlist-host-check, sandbox-policy]
+purpose: |
+  Closes the "defined-but-not-enforced" hole found in the 2026-06-01 gap audit:
+  network-allowlist-host-check shipped a pure host-check, NetworkPolicy/NetworkLever
+  shipped a schema, and default-guard had checkHostAllowlist — but NOTHING wired them,
+  so allowHosts was never read in production (inferNetworkPolicy had 0 callers).
+  This entry is the wiring: assembleAgentConfig derives cfg.dispatchGuard from the
+  active mode's NetworkLever via buildNetworkDispatchGuard(spec). NetworkLever "open"
+  (interactive/headless/ide) ⇒ guard left unset ⇒ BYTE-IDENTICAL to before (natural
+  default-OFF). "allowlist" (ci-bot/daemon) ⇒ guard over the mode's hosts
+  (CI_BOT_DEFAULT_ALLOWLIST + operator extras); off-list egress-bearing tool calls
+  denied. "denied" (batch) ⇒ empty allowlist ⇒ all egress denied. NetworkPolicy
+  perRequestApproval routes an off-list host to the existing `ask` decision (ADR-0229
+  guard-ask) instead of silent allow. A caller-preset req.base.dispatchGuard wins.
+  No GuardDecision union change — only a new option on DefaultDispatchGuardOptions.
+evidence:
+  code:
+    - src/agent/dispatch-guard/network-guard.ts
+    - src/agent/dispatch-guard/default-guard.ts
+    - src/agent/dispatch-guard/index.ts
+    - src/apps/agent/assemble.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/agent/network-egress-wiring-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: ModePolicy.network.kind
+    default: 'open'
+    purpose: '"open" ⇒ no guard (byte-identical); "allowlist"/"denied" ⇒ enforce'
+  - name: NetworkPolicy.perRequestApproval
+    default: 'undefined'
+    purpose: 'off-list host → ask (vs deny) when allow-list mode'
+  - name: AgentConfig.dispatchGuard
+    default: 'undefined'
+    purpose: 'caller-preset guard wins over mode-derived guard'
+deliberate_hold:
+  reason: |
+    Composition wires the guard from the mode lever only; a full per-host MITM
+    proxy (Codex [network_proxy] http_port/socks_port) is NOT implemented — egress
+    is gated at the tool-dispatch layer (URL/host extraction from tool input), not
+    at the socket layer. Bash subprocesses that bypass the tool input shape are not
+    yet covered (sandbox --unshare-net handles the coarse case).
+  promotion_path: |
+    Socket-level proxy / resolved-IP gate would be a sibling (network-allowlist-host-check
+    already notes this), promoting this from dispatch-layer to transport-layer enforcement.
+notes: |
+  Default-OFF is structural: only restrictive NetworkLever modes activate the guard;
+  every interactive/headless/ide turn is unchanged. Wildcard `*.suffix` subdomain-only
+  semantics inherited from network-allowlist-host-check. Follow-up: surface the active
+  egress policy in the status line / a per-request approval prompt UI.

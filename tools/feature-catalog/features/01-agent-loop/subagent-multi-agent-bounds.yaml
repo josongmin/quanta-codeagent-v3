@@ -1,0 +1,64 @@
+id: subagent-multi-agent-bounds
+title: Subagent bounds — tool namespace / wait-timeout clamp / concurrency cap
+section: 1
+subsystem: 에이전트 코어 — subagent 안전장치 (Codex multi_agent_v2 흡수)
+order: 77
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on: [agent, guarded-spawn]
+purpose: |
+  Three opt-in subagent hardenings from Codex's multi_agent_v2, all default-OFF =
+  byte-identical. (B1 tool_namespace) a closed ToolNamespaceStrategy injected into
+  SubagentRunnerOptions: when set, a spawned child's filtered ToolRegistry is rewritten
+  so each tool name is scoped (default prefixToolNamespace keyed by the child's
+  deterministic mailbox label root/0,root/1…), giving concurrent siblings disjoint tool
+  surfaces; dispatch resolves the scoped name straight back to the real tool. Absent ⇒
+  raw names exactly as today. (B2 wait-timeout) a WaitTimeoutPolicy{minMs,maxMs,defaultMs}
+  that CLAMPS (never rejects) the caller-supplied timeout for both wait_agent and
+  task_output(block:true); default {1, 3_600_000, 30_000} preserves the prior 30s default
+  + a generous 1h ceiling so no existing override is affected. Closes the previously
+  unbounded per-call timeout hole. (B3 concurrency cap) an optional maxConcurrent dep on
+  handleSpawnAgent counting running tasks via the registry's pendingIds(); over-cap spawns
+  return a structured {kind:"error", cause:"concurrency_cap"} mirroring the pty_cap pattern.
+  Default = unlimited (opt-in) so every existing spawn path is byte-identical.
+evidence:
+  code:
+    - src/agent/subagent-runner.ts
+    - src/subagent/handlers-6.ts
+    - src/subagent/task-tools.ts
+    - src/subagent/dispatch-6.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/subagent-tool-namespace-hellgate.test.ts
+      - tests/unit/subagent-bounds-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: SubagentRunnerOptions.toolNamespace
+    default: 'undefined'
+    purpose: 'absent ⇒ raw tool names (byte-identical); set ⇒ per-child scoped names'
+  - name: WaitTimeoutPolicy {minMs,maxMs,defaultMs}
+    default: '{1, 3_600_000, 30_000}'
+    purpose: 'clamp wait_agent / task_output timeout into [min,max]; default preserves 30s'
+  - name: handleSpawnAgent maxConcurrent
+    default: 'undefined (unlimited)'
+    purpose: 'per-session concurrent-subagent cap; over-cap ⇒ concurrency_cap error'
+deliberate_hold:
+  reason: |
+    All three are seams plumbed through runner/handlers/dispatch but NOT yet bound to a
+    top-level AgentConfig knob in the composition root (src/agent/features.ts) — they are
+    default-OFF until promoted. Chosen so existing tests are byte-identical.
+  promotion_path: |
+    Expose toolNamespace / waitTimeoutPolicy / maxConcurrent as AgentConfig fields and
+    bind per-mode defaults (e.g. enable namespacing + a cap for parallel-heavy modes).
+notes: |
+  B3 default is unlimited (not a number) on purpose — the foreground spawn path had no
+  cap before, so any finite default would be a behavior change. Namespacing round-trips
+  for free because the registry is keyed by the scoped name.

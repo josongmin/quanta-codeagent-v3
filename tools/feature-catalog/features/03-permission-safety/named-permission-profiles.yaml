@@ -1,0 +1,52 @@
+id: named-permission-profiles
+title: Named permission-profile registry + by-name resolution
+section: 3
+subsystem: 권한 — named profile registry (Codex 0.135 [permissions].default_permissions 흡수)
+order: 7
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "security-touched"]
+depends_on: [sandbox-policy]
+purpose: |
+  The 2026-06-01 gap audit found we had DEFAULT_PERMISSION_PROFILE (a single struct)
+  and a session-envelope enum ["default","trusted","restricted","custom"], but NO
+  registry mapping a name → concrete PermissionProfile, so TwoLayerManager only took
+  a struct directly. This adds the closed NAMED_PROFILES registry (escalating
+  restricted ⊂ default ⊂ trusted) + resolveProfileByName(name) + a by-name setter on
+  TwoLayerManager (struct API kept for backward-compat). The envelope's enum∪struct
+  field resolves to a concrete struct on decode via resolvePermissionProfileField
+  (struct → passthrough, "custom" → locked-down default, unknown name → fail-closed throw).
+  Matches Codex's [permissions] default_permissions = "profile_name" concept.
+evidence:
+  code:
+    - src/permission/named-profiles.ts
+    - src/permission/two-layer-manager.ts
+    - src/permission/index.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/permission/named-profiles-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: TwoLayerManager.setPermissionProfileByName
+    default: 'n-a'
+    purpose: 'resolve a registered name → struct; existing struct setter unchanged'
+deliberate_hold:
+  reason: |
+    Registry is in-code (NAMED_PROFILES); loading [permissions.profiles.<name>] from a
+    settings file (TOML/JSON) is NOT done — names resolve from the built-in registry
+    only. The mcp_server permission axis is also NOT added here — that lives
+    orthogonally in skill/plugin-manifest + admissibility-gate by design.
+  promotion_path: |
+    A settings-file profile loader + a profile-scope precedence resolver
+    (managed > project > user > open) would promote this to operator-authored profiles.
+notes: |
+  fail-closed: unknown profile name throws rather than silently falling back, so a
+  typo can never widen permissions. "custom" maps to the locked-down default until a
+  struct is supplied.

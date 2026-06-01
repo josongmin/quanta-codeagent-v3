@@ -1,0 +1,65 @@
+id: context-usage-breakdown
+title: Segmented context-window usage breakdown + wired /context
+section: 8
+subsystem: 텔레메트리 — 카테고리별 토큰 분해 + 세그먼트 바 (Cursor Canvas UsageBar 흡수)
+order: 55
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: [gen_ai.usage]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "observability-primitive"]
+depends_on: [context-usage-metrics, sectioned-system-prompt]
+purpose: |
+  Extends context-usage-metrics (single total + one-color bar) with the per-category
+  breakdown Cursor's Canvas UsageBar shows. (1) DATA: usage-breakdown.ts computes a
+  ContextUsageBreakdown {segments:{id,tokens,color?}[], total, max} at prompt-assembly
+  time by mapping each PromptSection to a category via SECTION_CONTEXT_CATEGORY (the SSOT:
+  base→System, project_md→Rules, session_ctx+user_append→Conversation) and counting each
+  category's text with the loop's OWN estimateTokens (compaction.ts — Math.ceil(chars/4)),
+  injected as a closed TokenEstimator port. No second heuristic introduced (project rule).
+  All present categories are MEASURED (each is one Message through estimateTokens; total =
+  sum of segments, no apportionment). (2) RENDER: formatSegmentedUsage(breakdown) draws
+  proportional colored segments + "% Full" / "k / k" labels, additive to status-line.ts;
+  the single-bar formatContextUsage is UNCHANGED + remains the default status line.
+  (3) /context slash command (was a Phase-1 placeholder) now renders the breakdown from
+  the latest assembled prompt via a new ctx.contextUsage seam on SlashContext.
+evidence:
+  code:
+    - src/agent/context/usage-breakdown.ts
+    - src/agent/prompt-sections.ts
+    - src/apps/cli/status-line.ts
+    - src/apps/cli/slash-contract.ts
+    - src/apps/cli/slash/registry-surface.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/agent/context-usage-breakdown-hellgate.test.ts
+      - tests/unit/cli/segmented-usage-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: TokenEstimator (injected)
+    default: 'estimateTokens (compaction.ts, chars/4)'
+    purpose: 'reuse the loop''s sole estimator — no new heuristic'
+  - name: SlashContext.contextUsage
+    default: 'undefined'
+    purpose: 'surface populates the breakdown snapshot; absent ⇒ /context graceful fallback'
+deliberate_hold:
+  reason: |
+    Tools / Skills / MCP / Subagents categories exist in the enum but are OMITTED here
+    because the loop's PromptSection model does not thread those into the assembled prompt
+    as sections (not part of fourSectionPreset) — empty categories are dropped from render.
+    The /context seam (host computing a snapshot from the live assembled prompt into
+    SlashContext) is NOT yet wired in the REPL composition root — that's the default-OFF
+    boundary; the breakdown + renderer + slash command are fully implemented and tested.
+  promotion_path: |
+    Feed serialized tool schemas / skills / MCP defs / subagent context through the
+    ExtraContextSource seam (already present) to light up the omitted categories, then wire
+    the REPL to populate SlashContext.contextUsage each turn.
+notes: |
+  Single-bar status line is regression-anchored as byte-identical. The chars/4 underlying
+  number is itself an estimate but it's the codebase's canonical one, reused not invented.
