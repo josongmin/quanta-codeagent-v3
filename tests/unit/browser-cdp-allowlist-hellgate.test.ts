@@ -56,7 +56,7 @@ describe("HELLGATE CDP-allowlist — dangerous methods denied in code", () => {
   // HELL-CDP-03 — partition: list frozen (silent grow fails here)
   test("HELL-CDP-03: allowlist is exactly the 6 read-only methods (no Runtime.evaluate)", () => {
     expect(CDP_ALLOWED_METHODS.length).toBe(6)
-    expect([...CDP_ALLOWED_METHODS].sort()).toEqual(
+    expect(([...CDP_ALLOWED_METHODS] as string[]).sort()).toEqual(
       [
         "CSS.getComputedStyleForNode",
         "DOM.getDocument",

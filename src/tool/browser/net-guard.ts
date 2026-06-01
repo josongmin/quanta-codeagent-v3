@@ -70,29 +70,40 @@ export const guardNavigationUrl = async (
   // A public IP literal is allowed; a DNS name may still resolve to a private IP.
   if (isIpLiteral(url.hostname)) return { ok: true, url }
   if (resolver !== undefined) {
-    // R4 audit [4]: bound the lookup — a hung/slow resolver must not hang
-    // navigate (and the whole turn) indefinitely. Fail-closed on timeout.
-    let addrs: readonly string[]
-    try {
-      addrs = await Promise.race([
-        resolver.lookup(url.hostname),
-        new Promise<never>((_, rej) =>
-          setTimeout(() => rej(new Error("dns-timeout")), timeoutMs),
-        ),
-      ])
-    } catch (e) {
-      const reason =
-        e instanceof Error && e.message === "dns-timeout"
-          ? "dns resolution timed out"
-          : "dns resolution failed"
-      return { ok: false, reason: `${reason} for ${url.hostname}` }
-    }
-    for (const addr of addrs) {
-      const verdict = classifyHost(addr)
-      if (verdict !== null) {
-        return { ok: false, reason: `${url.hostname} resolves to ${addr} — ${verdict}` }
-      }
-    }
+    const dns = await classifyResolvedName(resolver, url.hostname, timeoutMs)
+    if (dns !== null) return { ok: false, reason: dns }
   }
   return { ok: true, url }
+}
+
+/**
+ * Resolve `hostname` and reject if ANY address is private/loopback/link-local.
+ * Returns the deny reason, or `null` when the name resolves only to public
+ * addresses. R4 audit [4]: the lookup is bounded by `timeoutMs` — a hung/slow
+ * resolver must not hang navigate (and the whole turn). Fail-closed on timeout
+ * or resolver error.
+ */
+const classifyResolvedName = async (
+  resolver: DnsResolver,
+  hostname: string,
+  timeoutMs: number,
+): Promise<string | null> => {
+  let addrs: readonly string[]
+  try {
+    addrs = await Promise.race([
+      resolver.lookup(hostname),
+      new Promise<never>((_, rej) => setTimeout(() => rej(new Error("dns-timeout")), timeoutMs)),
+    ])
+  } catch (e) {
+    const reason =
+      e instanceof Error && e.message === "dns-timeout"
+        ? "dns resolution timed out"
+        : "dns resolution failed"
+    return `${reason} for ${hostname}`
+  }
+  for (const addr of addrs) {
+    const verdict = classifyHost(addr)
+    if (verdict !== null) return `${hostname} resolves to ${addr} — ${verdict}`
+  }
+  return null
 }

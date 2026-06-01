@@ -401,7 +401,8 @@ describe("HELLGATE parse EXTREME — prototype pollution", () => {
     expect(r.ok).toBe(true)
     expect(({} as Record<string, unknown>).polluted4).toBeUndefined()
     // the poison own-key must NOT have been copied into the output node
-    if (r.ok) expect((r.value.root as Record<string, unknown>).polluteOwn).toBeUndefined()
+    if (r.ok)
+      expect((r.value.root as unknown as Record<string, unknown>).polluteOwn).toBeUndefined()
   })
 })
 

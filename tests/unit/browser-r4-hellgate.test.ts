@@ -11,7 +11,6 @@
 
 import { describe, expect, test } from "bun:test"
 import { parseDomModel } from "@/browser/cdp/collect"
-import { createCdpBrowser } from "@/browser/cdp-adapter"
 import type {
   BrowserFs,
   CdpConnection,
@@ -20,6 +19,7 @@ import type {
   ProcessSpawner,
   Scheduler,
 } from "@/browser/cdp/ports"
+import { createCdpBrowser } from "@/browser/cdp-adapter"
 import { ok } from "@/shared"
 import { type DnsResolver, guardNavigationUrl } from "@/tool/browser/net-guard"
 
@@ -78,10 +78,14 @@ const baseTransport: CdpTransport = {
       send: (raw) => {
         const m = JSON.parse(raw) as { id: number; method: string; params: { expression?: string } }
         queueMicrotask(() => {
-          if (m.method === "Target.createTarget") emit(JSON.stringify({ id: m.id, result: { targetId: "t1" } }))
-          else if (m.method === "Target.attachToTarget") emit(JSON.stringify({ id: m.id, result: { sessionId: "s1" } }))
+          if (m.method === "Target.createTarget")
+            emit(JSON.stringify({ id: m.id, result: { targetId: "t1" } }))
+          else if (m.method === "Target.attachToTarget")
+            emit(JSON.stringify({ id: m.id, result: { sessionId: "s1" } }))
           else if (m.method === "Runtime.evaluate") {
-            const v = (m.params.expression ?? "").includes("walk(document.body") ? JSON.stringify(DOM) : true
+            const v = (m.params.expression ?? "").includes("walk(document.body")
+              ? JSON.stringify(DOM)
+              : true
             emit(JSON.stringify({ id: m.id, result: { result: { value: v } } }))
           } else emit(JSON.stringify({ id: m.id, result: {} }))
         })
@@ -105,7 +109,14 @@ const clock: Clock = { now: () => 0 }
 
 describe("R4 [2] — abort threads into snapshot/cdp", () => {
   test("pre-aborted signal ⇒ snapshot cancelled (signal reached the CDP request)", async () => {
-    const b = createCdpBrowser({ spawner: okSpawner, transport: baseTransport, fs: okFs(), scheduler: idle, clock, profileRoot: "/jail/b" })
+    const b = createCdpBrowser({
+      spawner: okSpawner,
+      transport: baseTransport,
+      fs: okFs(),
+      scheduler: idle,
+      clock,
+      profileRoot: "/jail/b",
+    })
     const h = await b.spawn()
     expect(h.ok).toBe(true)
     if (!h.ok) return
@@ -126,7 +137,14 @@ describe("R4 [6] — throwing spawner cleans up the profile", () => {
         throw new Error("EMFILE")
       },
     }
-    const b = createCdpBrowser({ spawner: throwing, transport: baseTransport, fs, scheduler: idle, clock, profileRoot: "/jail/b" })
+    const b = createCdpBrowser({
+      spawner: throwing,
+      transport: baseTransport,
+      fs,
+      scheduler: idle,
+      clock,
+      profileRoot: "/jail/b",
+    })
     const r = await b.spawn()
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.error.kind).toBe("spawn-failed")
@@ -139,8 +157,22 @@ describe("R4 [8] — unique profile dir across adapters sharing a profileRoot", 
     const dirsA: string[] = []
     const dirsB: string[] = []
     const fsRec = (sink: string[]): BrowserFs => ({ ...okFs(), mkdirp: (p) => sink.push(p) })
-    const a = createCdpBrowser({ spawner: okSpawner, transport: baseTransport, fs: fsRec(dirsA), scheduler: idle, clock, profileRoot: "/shared" })
-    const b = createCdpBrowser({ spawner: okSpawner, transport: baseTransport, fs: fsRec(dirsB), scheduler: idle, clock, profileRoot: "/shared" })
+    const a = createCdpBrowser({
+      spawner: okSpawner,
+      transport: baseTransport,
+      fs: fsRec(dirsA),
+      scheduler: idle,
+      clock,
+      profileRoot: "/shared",
+    })
+    const b = createCdpBrowser({
+      spawner: okSpawner,
+      transport: baseTransport,
+      fs: fsRec(dirsB),
+      scheduler: idle,
+      clock,
+      profileRoot: "/shared",
+    })
     await a.spawn()
     await b.spawn()
     expect(dirsA[0]).toBeDefined()
