@@ -27,6 +27,7 @@ export type { AgentToolOptions } from "./agent-tool"
 export { createAgentTool } from "./agent-tool"
 export { dispatchSubagent6, isSubagent6Tool, type Subagent6Deps } from "./dispatch-6"
 export {
+  DEFAULT_WAIT_TIMEOUT_POLICY,
   handleCloseAgent,
   handleExecCommand,
   handleSendInput,
@@ -36,10 +37,15 @@ export {
   InputChannelRegistry,
   MAX_PTY,
   PtyTable,
+  type WaitTimeoutPolicy,
 } from "./handlers-6"
 export type { TaskRecord, TaskRegistryOptions, TaskStatus } from "./registry"
 export { TaskRegistry } from "./registry"
-export { createTaskOutputTool, createTaskStopTool } from "./task-tools"
+export {
+  createTaskOutputTool,
+  createTaskStopTool,
+  type TaskOutputTimeoutPolicy,
+} from "./task-tools"
 export {
   SUBAGENT_6_TOOL_CONTRACTS,
   SUBAGENT_6_TOOL_NAMES,

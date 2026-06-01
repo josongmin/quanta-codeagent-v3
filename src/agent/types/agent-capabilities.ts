@@ -47,6 +47,30 @@ export type SubagentBlock = {
    *  the shared instance (host-side cleanup is owned by the loop's cleanup
    *  hook, ADR-0011). */
   taskRegistry?: import("../../subagent").TaskRegistry
+  /** B1 — OPT-IN tool-namespacing strategy threaded into the child
+   *  {@link createSubagentRunner}. When set, a forked child's filtered tool
+   *  registry is rewritten so the model sees SCOPED tool names
+   *  (e.g. `root_0__exec_command`) keyed back to the real tools — preventing
+   *  collisions when concurrent siblings surface their tool sets to a shared
+   *  consumer. Absent ⇒ RAW tool names (byte-identical to today). The host
+   *  may pass the bundled `prefixToolNamespace` strategy or its own. */
+  toolNamespace?: import("../subagent-runner").ToolNamespaceStrategy
+  /** B2 — OPT-IN closed-port clamp on caller-supplied blocking timeouts. When
+   *  set, this `{minMs,maxMs,defaultMs}` band is threaded into BOTH the
+   *  `task_output(block:true)` tool (this block builds it directly) AND the
+   *  `wait_agent` dispatch path (exposed on the materialized
+   *  {@link import("../tier1/subagent").SubagentBlock} for whatever assembles
+   *  the 6-tool `Subagent6Deps`). Absent ⇒ {@link
+   *  import("../../subagent").DEFAULT_WAIT_TIMEOUT_POLICY} (30s default,
+   *  generous 1h ceiling) — byte-identical to today. */
+  waitTimeoutPolicy?: import("../../subagent").WaitTimeoutPolicy
+  /** B3 — OPT-IN per-session cap on CONCURRENT running subagents, threaded into
+   *  the 6-tool `spawn_agent` path (`Subagent6Deps.maxConcurrent`). Exposed on
+   *  the materialized {@link import("../tier1/subagent").SubagentBlock} for the
+   *  `Subagent6Deps` assembler; the trio `agent` tool has no concurrent gauge
+   *  of its own, so this knob is consumed by the 6-tool dispatch. Absent ⇒
+   *  UNLIMITED (byte-identical to today). */
+  maxConcurrent?: number
 }
 
 /**
