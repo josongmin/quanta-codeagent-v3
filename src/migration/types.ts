@@ -7,6 +7,7 @@
  * emits `import_finished` with `{ ok: false, error }`.
  */
 
+import type { Message } from "@/llm"
 import type { Id } from "@/shared"
 
 /** Brand for external-agent session ids surfaced via import. Distinct from
@@ -93,11 +94,62 @@ export type ImportEvent =
       readonly error: string
     }
 
+/** One translated session transcript, ready for the caller to persist into
+ *  the v3 session store. The migration slice CANNOT import `@/session`
+ *  (ADR-0038 slice isolation), so it returns the translated payload and the
+ *  CLI surface adapter owns persistence. `contentHash` is the SHA-256 of the
+ *  source transcript bytes — the dedup key (ADR-0430). */
+export interface TranslatedSession {
+  /** Absolute path of the source `*.jsonl` transcript. */
+  readonly sourcePath: string
+  /** SHA-256 (hex) of the raw source bytes — stable dedup fingerprint. */
+  readonly contentHash: string
+  /** Translated v3 messages (may be empty for a stub-provider transcript). */
+  readonly messages: readonly Message[]
+}
+
+/** A Claude Code MCP server config entry, translated to the kinds quanta has
+ *  an equivalent for (stdio-launched servers). HTTP/SSE servers are reported
+ *  with `transport` so a caller can skip the ones quanta doesn't model. */
+export interface TranslatedMcpServer {
+  readonly name: string
+  readonly transport: "stdio" | "http" | "sse" | "unknown"
+  /** Launch command for stdio servers; undefined for non-stdio transports. */
+  readonly command?: string
+  readonly args?: readonly string[]
+}
+
+/** A translated hook binding. Claude Code stores hooks under
+ *  `settings.json#hooks.<EventName>[]`; we translate event name + the matcher
+ *  + the shell command(s). */
+export interface TranslatedHook {
+  readonly event: string
+  readonly matcher?: string
+  readonly commands: readonly string[]
+}
+
+/** A translated repo-rule document (Claude Code `CLAUDE.md` memory file). */
+export interface TranslatedRule {
+  readonly sourcePath: string
+  readonly contentHash: string
+  readonly text: string
+}
+
 /** Final import result returned by `runImport`. */
 export interface ImportResult {
   readonly provider: ExternalAgentProvider
   readonly sessionsTranslated: number
   readonly skillsCounted: number
+  /** Per-session translated payloads (the data the caller persists). Length
+   *  equals `sessionsTranslated`. */
+  readonly sessions: readonly TranslatedSession[]
+  /** Translated MCP server configs (only kinds quanta models; see
+   *  {@link TranslatedMcpServer}). Empty when the source has no `.mcp.json`. */
+  readonly mcpServers: readonly TranslatedMcpServer[]
+  /** Translated hook bindings from the source `settings.json`. */
+  readonly hooks: readonly TranslatedHook[]
+  /** Translated repo-rule documents (CLAUDE.md memory files). */
+  readonly rules: readonly TranslatedRule[]
   readonly errors: readonly string[]
 }
 
@@ -114,6 +166,13 @@ export interface ImportLogEntry {
   readonly stage: ImportStage
   readonly ok: boolean
   readonly detail: string
+  /** ADR-0430 dedup: SHA-256 of an imported item's source bytes. Present on
+   *  per-item rows written after a successful persist; absent on the summary
+   *  row. Re-import consults these to skip already-imported items. */
+  readonly contentHash?: string
+  /** The kind of item this row fingerprints (`session` | `rule`). Lets the
+   *  dedup query scope the hash lookup. Absent on the summary row. */
+  readonly itemKind?: "session" | "rule"
 }
 
 export interface ImportLog {

@@ -104,9 +104,16 @@ describe("import log persistence (ADR-0038)", () => {
     expect(log.entries).toHaveLength(2)
   })
 
-  test("public migration surface does not export an unsupported dedup query", async () => {
+  test("public migration surface exposes the ADR-0430 content-hash dedup query", async () => {
+    // ADR-0430 reverses the prior deliberate omission: the import log now
+    // carries per-item `{ itemKind, contentHash }` rows, so a real per-item
+    // dedup query is supported and exported.
     const migration = await import("@/migration")
     expect("contentSha256" in migration).toBe(true)
-    expect("wasAlreadyImported" in migration).toBe(false)
+    expect("wasAlreadyImported" in migration).toBe(true)
+    expect(typeof migration.wasAlreadyImported).toBe("function")
+    // N10 credential-read ban surface is also exported.
+    expect("readImportFile" in migration).toBe(true)
+    expect("CredentialReadBannedError" in migration).toBe(true)
   })
 })

@@ -407,7 +407,7 @@ describe("runSessionCommand", () => {
     expect(c.out).toContain("Usage:")
   })
 
-  test("import: reports translation-only semantics and preserves append-only log behavior", async () => {
+  test("import: persists translated sessions into the v3 store (ADR-0430)", async () => {
     const home = mkdtempSync(join(tmpdir(), "cli-import-home-"))
     cleanups.push(home)
     await mkdir(join(home, ".claude/projects/proj-a"), { recursive: true })
@@ -426,17 +426,18 @@ describe("runSessionCommand", () => {
       homeDir: home,
     })
     expect(code).toBe(0)
-    expect(c.out).toContain(
-      "translated claude_code: 1 session transcript(s), 1 skill file(s); no local sessions persisted",
-    )
+    expect(c.out).toContain("imported claude_code: 1 session(s) persisted")
     expect(c.err).toBe("")
-    expect(await listSessions({ includeArchived: true })).toHaveLength(0)
+    // ADR-0430: the translated transcript is now a real, listable v3 session.
+    const sessions = await listSessions({ includeArchived: true })
+    expect(sessions).toHaveLength(1)
 
+    // The import log carries a per-session dedup row + the run-summary row.
     const log = await loadImportLog(home)
-    expect(log.entries).toHaveLength(1)
-    expect(log.entries[0]?.detail).toBe(
-      "translated_sessions=1, counted_skills=1, persisted_sessions=0",
-    )
+    const summary = log.entries.find((e) => e.stage === "import_finished")
+    expect(summary?.detail).toContain("persisted_sessions=1")
+    const dedupRow = log.entries.find((e) => e.itemKind === "session")
+    expect(dedupRow?.contentHash).toBeDefined()
   })
 
   // MEDIUM-9: `session show --json` emits the full SavedSession.

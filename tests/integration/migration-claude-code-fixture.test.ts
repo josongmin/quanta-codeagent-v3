@@ -65,18 +65,18 @@ describe("e2e: claude_code fixture import (ADR-0038)", () => {
     const events: ImportEvent[] = []
     const result = await runImport("claude_code", { homeDir: home }, (e) => events.push(e))
     // Caller is expected to write the log entry; we exercise the wiring.
+    // (Actual persistence happens in the CLI surface adapter — ADR-0430 — which
+    // is covered by the e2e hellgate; here we only prove the append mechanism.)
     await appendImportLog(home, {
       timestamp: "2026-05-21T00:00:00.000Z",
       provider: result.provider,
       stage: "import_finished",
       ok: true,
-      detail: `translated_sessions=${result.sessionsTranslated}, counted_skills=${result.skillsCounted}, persisted_sessions=0`,
+      detail: `translated_sessions=${result.sessionsTranslated}, counted_skills=${result.skillsCounted}`,
     })
     const log = await loadImportLog(home)
     expect(log.entries).toHaveLength(1)
-    expect(log.entries[0]?.detail).toBe(
-      "translated_sessions=2, counted_skills=3, persisted_sessions=0",
-    )
+    expect(log.entries[0]?.detail).toBe("translated_sessions=2, counted_skills=3")
     expect(log.entries[0]?.ok).toBe(true)
   })
 

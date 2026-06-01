@@ -12,9 +12,23 @@ import { errMessage } from "@/shared"
 import { readdir, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { QuantaError } from "@/shared"
+import { contentSha256 } from "./dedup"
 import { detectExternalAgents } from "./detector"
 import { translatorFor } from "./translators"
-import type { ExternalAgentProvider, ImportEventSink, ImportResult } from "./types"
+import {
+  translateHooks,
+  translateMcpServers,
+  translateRules,
+} from "./translators/claude-code-config"
+import type {
+  ExternalAgentProvider,
+  ImportEventSink,
+  ImportResult,
+  TranslatedHook,
+  TranslatedMcpServer,
+  TranslatedRule,
+  TranslatedSession,
+} from "./types"
 
 /** Caller-side options for `runImport`. */
 export interface RunImportOptions {
@@ -160,21 +174,33 @@ const stageSessionCompletion = async (
   provider: Exclude<ExternalAgentProvider, "unknown">,
   includeSkills: boolean,
   emit: ImportEventSink,
-): Promise<{ ok: true; sessionsTranslated: number; skillsCounted: number } | { ok: false }> => {
+): Promise<
+  | {
+      ok: true
+      sessions: TranslatedSession[]
+      skillsCounted: number
+      mcpServers: TranslatedMcpServer[]
+      hooks: TranslatedHook[]
+      rules: TranslatedRule[]
+    }
+  | { ok: false }
+> => {
   try {
     const sessionsDir = provider === "claude_code" ? join(root, "projects") : join(root, "sessions")
     const jsonlPaths = await collectJsonlPaths(sessionsDir)
     const translator = translatorFor(provider)
 
-    let sessionsTranslated = 0
+    const sessions: TranslatedSession[] = []
     for (const path of jsonlPaths) {
       try {
-        // Translation result (Message[]) is intentionally not persisted here —
-        // the importer's contract is to PROVE the transcript translates and
-        // tally it; persistence into v3 sessions is the follow-up. A throw is
-        // a halt-on-error condition.
-        await translator.translateFromFile(path, provider)
-        sessionsTranslated++
+        // Translate the transcript into v3 Messages AND fingerprint its source
+        // bytes (dedup key). The translated payload is carried back so the
+        // caller (CLI surface) can persist it into the v3 session store — the
+        // migration slice itself cannot import @/session (ADR-0038). A throw
+        // is a halt-on-error condition for the whole run.
+        const messages = await translator.translateFromFile(path, provider)
+        const contentHash = await contentSha256(path)
+        sessions.push({ sourcePath: path, contentHash, messages })
       } catch (err) {
         emit({
           stage: "session_completion_finished",
@@ -186,15 +212,23 @@ const stageSessionCompletion = async (
       }
     }
 
+    // ADR-0430: translate non-session artifacts (only the kinds quanta models).
+    // Claude Code carries MCP config / hooks / rules; other providers ship
+    // parallel logic in a follow-up (empty for now).
+    const isClaude = provider === "claude_code"
+    const mcpServers = isClaude ? await translateMcpServers(root) : []
+    const hooks = isClaude ? await translateHooks(root) : []
+    const rules = isClaude ? await translateRules(root) : []
+
     const skillsCounted = await countSkills(root, includeSkills)
     emit({
       stage: "session_completion_finished",
       ok: true,
       provider,
-      sessionsTranslated,
+      sessionsTranslated: sessions.length,
       skillsCounted,
     })
-    return { ok: true, sessionsTranslated, skillsCounted }
+    return { ok: true, sessions, skillsCounted, mcpServers, hooks, rules }
   } catch (err) {
     emit({
       stage: "session_completion_finished",
@@ -217,54 +251,51 @@ export const runImport = async (
 
   const includeSkills = opts.includeSkills !== false
 
+  const failResult = (error: string): ImportResult => ({
+    provider,
+    sessionsTranslated: 0,
+    skillsCounted: 0,
+    sessions: [],
+    mcpServers: [],
+    hooks: [],
+    rules: [],
+    errors: [error],
+  })
+
   const det = await stageDetect(opts.homeDir, provider, emit)
   if (!det.ok) {
-    const r: ImportResult = {
-      provider,
-      sessionsTranslated: 0,
-      skillsCounted: 0,
-      errors: ["detect_finished failed"],
-    }
     emit({ stage: "import_finished", ok: false, error: "detect_finished failed" })
-    return r
+    return failResult("detect_finished failed")
   }
 
   const ps = await stageProvider(det.root, provider, emit)
   if (!ps.ok) {
-    const r: ImportResult = {
-      provider,
-      sessionsTranslated: 0,
-      skillsCounted: 0,
-      errors: ["provider_stage_finished failed"],
-    }
     emit({
       stage: "import_finished",
       ok: false,
       error: "provider_stage_finished failed",
     })
-    return r
+    return failResult("provider_stage_finished failed")
   }
 
   const sc = await stageSessionCompletion(det.root, provider, includeSkills, emit)
   if (!sc.ok) {
-    const r: ImportResult = {
-      provider,
-      sessionsTranslated: 0,
-      skillsCounted: 0,
-      errors: ["session_completion_finished failed"],
-    }
     emit({
       stage: "import_finished",
       ok: false,
       error: "session_completion_finished failed",
     })
-    return r
+    return failResult("session_completion_finished failed")
   }
 
   const result: ImportResult = {
     provider,
-    sessionsTranslated: sc.sessionsTranslated,
+    sessionsTranslated: sc.sessions.length,
     skillsCounted: sc.skillsCounted,
+    sessions: sc.sessions,
+    mcpServers: sc.mcpServers,
+    hooks: sc.hooks,
+    rules: sc.rules,
     errors: [],
   }
   emit({ stage: "import_finished", ok: true, result })

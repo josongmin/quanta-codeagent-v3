@@ -17,8 +17,8 @@
  * empty are dropped — they carry no signal and would pollute the transcript.
  */
 
-import { readFile } from "node:fs/promises"
 import type { ContentBlock, Message, TextBlock, ToolResultBlock, ToolUseBlock } from "@/llm"
+import { readImportFile } from "../dedup"
 import type { SessionTranslator, TranslatableProvider } from "./types"
 
 /** Metadata line types we explicitly recognize and skip (non-exhaustive —
@@ -115,7 +115,7 @@ const translateLine = (parsed: unknown): Message | undefined => {
 /** Claude Code session translator. */
 export const claudeCodeTranslator: SessionTranslator = {
   async translateFromFile(jsonlPath: string, _provider: TranslatableProvider): Promise<Message[]> {
-    const raw = await readFile(jsonlPath, "utf8")
+    const raw = await readImportFile(jsonlPath)
     const messages: Message[] = []
     for (const line of raw.split("\n")) {
       const trimmed = line.trim()

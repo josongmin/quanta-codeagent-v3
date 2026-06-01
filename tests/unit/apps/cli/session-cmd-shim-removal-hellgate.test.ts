@@ -5,7 +5,10 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import type { SessionCommandDeps } from "@/runner/session-ops"
 import { __resetRuntimeConfig } from "@/shared"
-import { createCliImportHandler } from "../../../../src/apps/cli/session-import-handler"
+import {
+  createCliImportHandler,
+  createCliImportHandlerWithRoot,
+} from "../../../../src/apps/cli/session-import-handler"
 import { resolveCliSessionListEnv } from "../../../../src/apps/cli/session-list-env"
 
 /**
@@ -203,9 +206,12 @@ describe("CLI-05: functional — createCliImportHandler()", () => {
     expect(errBuf).toContain("unexpected argument: extra")
   })
 
-  test("HELL-14: handler writes translation summary on success with a fake home dir", async () => {
+  test("HELL-14: handler persists translated sessions on success (ADR-0430)", async () => {
     __resetRuntimeConfig()
     const home = mkdtempSync(join(tmpdir(), "cli-05-import-home-"))
+    // ADR-0430: persistence is now real, so inject a tmp sessions root to keep
+    // the test off the real `~/.quanta/sessions`.
+    const sessionsDir = mkdtempSync(join(tmpdir(), "cli-05-import-sessions-"))
     try {
       await mkdir(join(home, ".claude/projects/proj-x"), { recursive: true })
       await mkdir(join(home, ".claude/skills"), { recursive: true })
@@ -217,7 +223,7 @@ describe("CLI-05: functional — createCliImportHandler()", () => {
       )
       await writeFile(join(home, ".claude/skills/q.md"), "skill body", "utf8")
 
-      const fn = createCliImportHandler()
+      const fn = createCliImportHandlerWithRoot(sessionsDir)
       let outBuf = ""
       let errBuf = ""
       const deps: SessionCommandDeps = {
@@ -232,12 +238,15 @@ describe("CLI-05: functional — createCliImportHandler()", () => {
       }
       const rc = await fn(["claude_code"], deps)
       expect(rc).toBe(0)
-      expect(outBuf).toContain("translated claude_code")
-      expect(outBuf).toContain("1 session transcript(s)")
+      expect(outBuf).toContain("imported claude_code")
+      expect(outBuf).toContain("1 session(s) persisted")
       expect(outBuf).toContain("1 skill file(s)")
       expect(errBuf).toBe("")
+      // The session file actually landed under the injected root.
+      expect(readdirSync(sessionsDir).some((f) => f.endsWith(".json"))).toBe(true)
     } finally {
       rmSync(home, { recursive: true, force: true })
+      rmSync(sessionsDir, { recursive: true, force: true })
     }
   })
 

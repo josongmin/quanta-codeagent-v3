@@ -5,7 +5,14 @@
  * agent` (and the migration slice's own tests) may import from this index.
  */
 
-export { contentSha256 } from "./dedup"
+export {
+  CredentialReadBannedError,
+  contentSha256,
+  contentSha256OfText,
+  isCredentialPath,
+  readImportFile,
+  wasAlreadyImported,
+} from "./dedup"
 export { detectExternalAgents, detectorContracts } from "./detector"
 export { type RunImportOptions, runImport, UnknownProviderRejectedError } from "./importer"
 export {
@@ -23,6 +30,11 @@ export {
   translatorFor,
 } from "./translators"
 export {
+  translateHooks,
+  translateMcpServers,
+  translateRules,
+} from "./translators/claude-code-config"
+export {
   ALL_PROVIDERS,
   type DetectedAgent,
   type ExternalAgentProvider,
@@ -33,4 +45,8 @@ export {
   type ImportLogEntry,
   type ImportResult,
   type ImportStage,
+  type TranslatedHook,
+  type TranslatedMcpServer,
+  type TranslatedRule,
+  type TranslatedSession,
 } from "./types"
