@@ -58,6 +58,11 @@ interface ToolsCallResult {
   isError?: boolean
 }
 
+/** Narrow an unknown value to a plain record (object, not array/null). Used to
+ *  safely walk the `initialize` response's nested `capabilities` slot. */
+const asRecord = (v: unknown): Record<string, unknown> | null =>
+  typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null
+
 const mapTool = (t: RawTool): McpToolDef => ({
   name: t.name,
   description: t.description ?? "",
@@ -128,6 +133,11 @@ export class McpClient {
   private exited = false
   private unsubscribeMessage: (() => void) | null = null
   private unsubscribeExit: (() => void) | null = null
+  /** Server-advertised capability record captured from the `initialize`
+   *  response (ADR-0431). `null` until `start()` completes. Used to gate the
+   *  optional `tasks/*` surface: tools are wired ONLY when a connected server
+   *  advertises `capabilities.tasks` — absent ⇒ byte-identical (no tools). */
+  private serverCapabilities: Record<string, unknown> | null = null
 
   /** `negotiator` is OPTIONAL (ADR-0196): omitting it preserves the
    *  pre-ADR behavior (`capabilities: {}`) — byte-identical for every
@@ -168,12 +178,41 @@ export class McpClient {
     this.unsubscribeExit = this.transport.onExit(() => this.onTransportExit())
     await this.transport.start()
 
-    await this.request("initialize", {
+    const initResult = await this.request("initialize", {
       protocolVersion: PROTOCOL_VERSION,
       clientInfo: CLIENT_INFO,
       capabilities: this.negotiator.compile(),
     })
+    this.serverCapabilities = asRecord(initResult)?.capabilities
+      ? (asRecord(asRecord(initResult)?.capabilities) ?? {})
+      : {}
     this.notify("notifications/initialized", {})
+  }
+
+  /** ADR-0431 — does the connected server advertise the `tasks/*` capability?
+   *  Reads the `capabilities.tasks` slot captured from the `initialize`
+   *  response. Returns `false` before `start()` completes, when the server
+   *  omits the slot, or when the slot is not an object. The composition root
+   *  uses this to gate the optional MCP-tasks tool surface (default-OFF). */
+  serverSupportsTasks(): boolean {
+    const caps = this.serverCapabilities
+    if (caps === null) return false
+    return asRecord(caps.tasks) !== null
+  }
+
+  /** ADR-0431 — dispatch a single outbound JSON-RPC request and return the raw
+   *  `result`. Mirrors the inbound elicitation router but for client→server
+   *  calls: it goes through the same correlated `request`/timeout/pending core
+   *  as `tools/call`. Transport errors (exit, timeout) reject with `McpError`,
+   *  exactly like every other request. Used by `clientTasksPort` to speak
+   *  `tasks/list` / `tasks/getInfo` / `tasks/getResult` / `tasks/cancel`.
+   *
+   *  Kept generic (method + params → result) so the `@/mcp/tasks` adapter owns
+   *  the per-method response codec rather than baking task shapes into the
+   *  transport core. */
+  async requestRaw(method: string, params?: unknown): Promise<unknown> {
+    this.ensureReady()
+    return this.request(method, params ?? {})
   }
 
   async listTools(): Promise<McpToolDef[]> {

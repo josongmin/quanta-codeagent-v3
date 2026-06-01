@@ -1,13 +1,21 @@
 import { z } from "zod"
 import {
+  clientTasksPort,
   type ElicitationPrompter,
   McpClient,
+  type McpClientTransport,
   McpError,
   type McpServerConfig,
   type McpToolDef,
 } from "@/mcp"
 import { errMessage, logger } from "@/shared"
-import type { Tool, ToolContext, ToolEvent } from "@/tool"
+import {
+  mcpTasksTools,
+  type TasksHandle,
+  type Tool,
+  type ToolContext,
+  type ToolEvent,
+} from "@/tool"
 
 /**
  * MCP → Tool bridge (RFC §13 Q5 → DECISION: bridge at the agent layer, Phase-3).
@@ -87,6 +95,24 @@ export const mcpToolToTool = (client: McpClient, def: McpToolDef, serverName: st
  *  `headlessRejecter` default (byte-identical to the legacy load path). */
 export type ElicitationPrompterFactory = (serverId: string) => ElicitationPrompter
 
+/** ADR-0431 — adapt a live `McpClient` into the duck-typed `TasksHandle` the
+ *  `@/tool` mcp_tasks tools consume. The slice fence forbids `@/tool` importing
+ *  `@/mcp`, so the bridge (the assembler) is where the concrete `McpTasksPort`
+ *  becomes the structural mirror. The two shapes are byte-identical by
+ *  construction; any drift is a TYPE error here.
+ *
+ *  Returns the three tools ONLY when the connected server advertised the
+ *  `tasks/*` capability in its `initialize` response (default-OFF). Absent ⇒
+ *  empty array, so a server that does not speak tasks adds NO tools (the load
+ *  is byte-identical to before this binding existed). */
+const tasksToolsFor = (client: McpClient): Tool[] => {
+  if (!client.serverSupportsTasks()) return []
+  // `McpTasksPort` and `TasksHandle` are structurally identical (the mirror is
+  // maintained in lockstep); the assignment proves it at compile time.
+  const handle: TasksHandle = clientTasksPort(client)
+  return mcpTasksTools(handle)
+}
+
 /**
  * Start every configured MCP server, list its tools, and bridge them all.
  * Returns the bridged tools plus the live clients (the CLI stops them on exit).
@@ -99,22 +125,40 @@ export type ElicitationPrompterFactory = (serverId: string) => ElicitationPrompt
  * `elicitation/create` reaches the user instead of being auto-declined. Absent
  * ⇒ `new McpClient(config)` keeps its `headlessRejecter` default (the load is
  * byte-identical to before this param existed).
+ *
+ * `opts.transportFor` (ADR-0431) is an OPTIONAL per-server transport factory —
+ * a test seam mirroring `McpClient`'s `transport` option. Absent ⇒ the client
+ * builds its default carrier (stdio / HTTP-SSE per config), byte-identical to
+ * the legacy load.
  */
+export interface LoadMcpToolsOpts {
+  /** Construct the transport for a server (test double / custom carrier). */
+  transportFor?: (config: McpServerConfig) => McpClientTransport
+}
+
 export const loadMcpTools = async (
   servers: McpServerConfig[],
   elicitationPrompterFor?: ElicitationPrompterFactory,
+  opts?: LoadMcpToolsOpts,
 ): Promise<{ tools: Tool[]; clients: McpClient[] }> => {
   const tools: Tool[] = []
   const clients: McpClient[] = []
   for (const config of servers) {
-    const client =
-      elicitationPrompterFor !== undefined
-        ? new McpClient(config, { elicitationPrompter: elicitationPrompterFor(config.name) })
-        : new McpClient(config)
+    const clientOpts: ConstructorParameters<typeof McpClient>[1] = {}
+    if (elicitationPrompterFor !== undefined) {
+      clientOpts.elicitationPrompter = elicitationPrompterFor(config.name)
+    }
+    if (opts?.transportFor !== undefined) {
+      clientOpts.transport = opts.transportFor(config)
+    }
+    const client = new McpClient(config, clientOpts)
     try {
       await client.start()
       const defs = await client.listTools()
       for (const def of defs) tools.push(mcpToolToTool(client, def, config.name))
+      // ADR-0431 — default-OFF MCP tasks surface: wired iff the server
+      // advertised the `tasks/*` capability. No advertisement ⇒ no tools.
+      for (const t of tasksToolsFor(client)) tools.push(t)
       clients.push(client)
     } catch (e) {
       logger.warn(`mcp: skipping server "${config.name}": ${errMessage(e)}`)

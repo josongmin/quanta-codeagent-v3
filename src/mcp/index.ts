@@ -21,6 +21,7 @@ export {
   type LeaseContext,
 } from "./elicitation"
 export {
+  clientTasksPort,
   DefaultTaskStore,
   defaultTasksPort,
   type McpTaskInfo,

@@ -1,5 +1,6 @@
 /** ADR-0196 — MCP tasks slice. */
 
+export { clientTasksPort } from "./client-port"
 export { DefaultTaskStore, defaultTasksPort } from "./default-store"
 export { pollTask } from "./poller"
 export type { McpTasksPort } from "./port"
