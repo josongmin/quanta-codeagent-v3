@@ -139,6 +139,11 @@ export type ReplSlashCtx = Partial<{
   /** ADR-0291 — `/web` text-inbox singleton. Drained by next-turn
    *  `PromptSource.next()`; absent ⇒ `/web` prints inline. */
   textInbox: TextInbox
+  /** Track D — segmented context-window usage seam. Returns the breakdown for
+   *  the LATEST assembled prompt (per-category token segments) mapped to the
+   *  renderer's structural view, or undefined when no turn has assembled a
+   *  prompt yet. Absent ⇒ `/context` falls back to the legacy placeholder. */
+  contextUsage: () => import("../status-line").SegmentedUsageView | undefined
 }>
 
 export interface BuildReplSlashCtxArgs {
@@ -223,6 +228,11 @@ export interface BuildReplSlashCtxArgs {
   /** ADR-0291 — `/web`: surface-owned text inbox sink. Drained by the
    *  next-turn PromptSource.next(). */
   textInbox?: TextInbox | undefined
+  /** Track D — `/context`: getter over the surface-retained per-turn prompt
+   *  snapshot, returning the segmented usage view (or undefined before the
+   *  first turn). Absent ⇒ the `contextUsage` slot is omitted entirely so
+   *  `/context` keeps its legacy fallback (default-OFF byte-identical). */
+  contextUsage?: (() => import("../status-line").SegmentedUsageView | undefined) | undefined
 }
 
 /** Result of {@link buildNewSlotAdapters} — each field is either the built
@@ -357,6 +367,7 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     inspect,
     replay,
     effort,
+    contextUsage,
   } = args
   const newSlots = buildNewSlotAdapters(args)
   return {
@@ -395,6 +406,9 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     // Session-level reasoning-effort. Closes over the surface's EffortStore
     // (read on `/effort` no-arg) and pill (repainted on `/effort <level>`).
     effort,
+    // Track D — `/context` live segmented usage. Absent upstream getter ⇒ slot
+    // omitted (default-OFF byte-identical; `/context` keeps its fallback).
+    ...(contextUsage !== undefined ? { contextUsage } : {}),
     // ADR-0291 — 8 new slots; each gated by presence so omitting an
     // upstream port produces a byte-identical "not wired" projection.
     ...spreadNewSlots(newSlots),
@@ -418,6 +432,7 @@ const projectLegacySlots = (s: ReplSlashCtx): Record<string, unknown> => ({
   ...(s.inspect !== undefined ? { inspect: s.inspect } : {}),
   ...(s.replay !== undefined ? { replay: s.replay } : {}),
   ...(s.effort !== undefined ? { effort: s.effort } : {}),
+  ...(s.contextUsage !== undefined ? { contextUsage: s.contextUsage } : {}),
 })
 
 /** Project the ADR-0291 slots. 1:1 spread; presence-gated for

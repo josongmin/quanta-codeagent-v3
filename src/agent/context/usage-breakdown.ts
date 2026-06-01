@@ -29,7 +29,7 @@
 
 import { estimateTokens } from "@/agent/compaction"
 import { type PromptSection, SECTION_CONTEXT_CATEGORY } from "@/agent/prompt-sections"
-import type { Message } from "@/llm"
+import type { Message, SystemBlock } from "@/llm"
 
 /**
  * Cursor-style context categories. The full closed enum is kept even though
@@ -182,4 +182,70 @@ export function breakdownPercent(b: ContextUsageBreakdown): number {
  */
 export function buildUsageBreakdownDefault(input: BuildBreakdownInput): ContextUsageBreakdown {
   return buildUsageBreakdown(input, estimateTokens)
+}
+
+// ─── runtime → REPL capture seam (Track D wire) ──────────────────────────────
+//
+// The agent loop assembles its system prompt as a `SystemBlock[]` (the LLM-port
+// shape, which carries only `{type,text,cache}` — the section *name* is dropped
+// in `buildSectionedSystemBlocks`). The segmented breakdown, however, bills each
+// section to a category KEYED BY its `name` (see `SECTION_CONTEXT_CATEGORY`).
+//
+// To reconstruct the names without re-running the prompt assembler, the loop
+// captures a {@link PromptAssembledSnapshot} that pairs the assembled blocks
+// with the `promptPolicy` presence flags (`repoRulesPresent` / `sessionCtxPresent`
+// / `userAppendPresent`) it already computed. `fourSectionPreset` emits sections
+// in a FIXED order — `base`, then `project_md`?, `session_ctx`?, `user_append`? —
+// dropping any whitespace-only optional. The presence flags identify EXACTLY
+// which optionals survived, so the block array maps back to names deterministically.
+
+/** Snapshot of a single turn's assembled system prompt, captured by the loop's
+ *  `onPromptAssembled` seam and retained by the REPL surface for `/context`.
+ *  Carries the LLM-port `SystemBlock[]` plus the layout/presence flags the loop
+ *  already computed (`TurnContext.promptPolicy`) so {@link snapshotToBreakdownInput}
+ *  can recover per-section names. `max` is the active model's context window (0 ⇒
+ *  unknown; the renderer degrades gracefully). */
+export interface PromptAssembledSnapshot {
+  readonly system: readonly SystemBlock[]
+  /** `four_section` ⇒ blocks are named (base + present optionals); `single_block`
+   *  ⇒ exactly one `base` block. */
+  readonly layout: "single_block" | "four_section"
+  readonly repoRulesPresent: boolean
+  readonly sessionCtxPresent: boolean
+  readonly userAppendPresent: boolean
+  /** Active model's context window in tokens (0 ⇒ unknown). */
+  readonly max: number
+  readonly model?: string
+}
+
+/** Reconstruct the per-section `name`s the breakdown needs from a captured
+ *  {@link PromptAssembledSnapshot}. Pure. The order mirrors `fourSectionPreset`
+ *  exactly: `base` first, then `project_md` / `session_ctx` / `user_append` in
+ *  declared order, each present iff its presence flag is set. A `single_block`
+ *  layout (or any block beyond the named prefix) is labelled `base` so it bills
+ *  to "System" via the breakdown's unmapped-name fallback — never lost. */
+export function snapshotToSections(snap: PromptAssembledSnapshot): PromptSection[] {
+  const names: string[] = ["base"]
+  if (snap.layout === "four_section") {
+    if (snap.repoRulesPresent) names.push("project_md")
+    if (snap.sessionCtxPresent) names.push("session_ctx")
+    if (snap.userAppendPresent) names.push("user_append")
+  }
+  return snap.system.map((block, i) => ({
+    // Blocks past the reconstructed name list fall back to "base" (→ "System"),
+    // so an unexpected extra block is still counted, never dropped.
+    name: names[i] ?? "base",
+    text: block.text,
+    cache: block.cache ?? true,
+  }))
+}
+
+/** Map a captured {@link PromptAssembledSnapshot} to a {@link BuildBreakdownInput}
+ *  ready for {@link buildUsageBreakdownDefault}. Pure. */
+export function snapshotToBreakdownInput(snap: PromptAssembledSnapshot): BuildBreakdownInput {
+  return {
+    sections: snapshotToSections(snap),
+    max: snap.max,
+    ...(snap.model !== undefined ? { model: snap.model } : {}),
+  }
 }

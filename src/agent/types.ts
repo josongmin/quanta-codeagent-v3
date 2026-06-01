@@ -1,6 +1,6 @@
 import type { LLMPort, Message, ModelCandidate, ResponsesContinuationStore } from "@/llm"
-import type { RoleModelResolver } from "@/llm/role-model-override"
 import type { LlmProvider } from "@/llm/providers"
+import type { RoleModelResolver } from "@/llm/role-model-override"
 import type { CodeActionPort, FormatPort, RenameApplyPort, SignatureHelpPort } from "@/lsp"
 import type { EmbedderPort, PersistentStorePort } from "@/memory"
 import type { Metrics } from "@/observability"
@@ -873,6 +873,24 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * try/catches around it, matching the OTel sink contract).
    */
   onProgress?: (line: ProgressLine) => void
+  /**
+   * Track D (runtime → REPL context wire) — per-turn prompt-assembly observer.
+   * When set, the loop calls this ONCE per turn, immediately after
+   * `buildTurnContext` assembles the system prompt, with a
+   * {@link import("./context/usage-breakdown").PromptAssembledSnapshot} carrying
+   * the assembled `SystemBlock[]` + the turn's `promptPolicy` presence flags +
+   * the active model id. The REPL surface retains the latest snapshot so the
+   * `/context` slash can render a live segmented context-window breakdown
+   * (computed with the loop's OWN `estimateTokens` — no second heuristic).
+   *
+   * Absent ⇒ the loop performs NO capture (no snapshot constructed, no call),
+   * so the assembly path is byte-identical for every non-REPL caller (RFC §1.2).
+   * Best-effort/observation-only: a throwing callback NEVER crashes the turn
+   * (the call site try/catches, matching the OTel-sink + `onProgress` contract).
+   */
+  onPromptAssembled?: (
+    snapshot: import("./context/usage-breakdown").PromptAssembledSnapshot,
+  ) => void
   /**
    * Codex Submission op envelope (ADR-0072, Spec A3). When set the loop
    * derives the seed user-turn from `submission.op` instead of `messages`

@@ -31,6 +31,7 @@ import { isSlashCommand, runSlashCommand, type SlashContext } from "../slash-com
 import type { StatusBar } from "../status-bar"
 import { createTextInbox, type TextInbox } from "../text-inbox"
 import type { CliFeatureConfig } from "./cli-feature-config"
+import { type ContextUsageHolder, createContextUsageHolder } from "./context-usage-snapshot"
 import { type ConvCheckpointWire, startConvCheckpointWire } from "./conv-checkpoint-wire"
 import { type ComposerHandle, createComposerHandle } from "./ctx-adapters/composer-edit-adapter"
 import { createPerToolSnapshotRecorder } from "./per-tool-snapshot-recorder"
@@ -205,6 +206,15 @@ export interface ReplSurfaceWires {
   readonly setSideConversationStart: (
     fn: ((args: RuntimeSideConversationArgs) => Promise<RuntimeSideConversationResult>) | undefined,
   ) => void
+  /** Track D (runtime → REPL context wire) — the per-turn prompt-assembly sink
+   *  the composition root wires into `AgentConfig.onPromptAssembled`. Each call
+   *  retains the latest snapshot the `/context` slash renders via the
+   *  `contextUsage` slot already wired into `slashCtx`. NOT wired here (the REPL
+   *  surface does not own the AgentConfig — the runtime facade does); the
+   *  integration layer hands this to config. Absent from config ⇒ the loop
+   *  performs no capture (default-OFF byte-identical) and `/context` shows its
+   *  fallback. */
+  readonly promptAssembledSink: ContextUsageHolder["sink"]
 }
 
 /** Project the LEGACY slots (pre-ADR-0291). Extracted so the combined
@@ -226,6 +236,7 @@ const projectLegacy = (c: ReplSlashCtx): Record<string, unknown> => ({
   ...(c.inspect !== undefined ? { inspect: c.inspect } : {}),
   ...(c.replay !== undefined ? { replay: c.replay } : {}),
   ...(c.effort !== undefined ? { effort: c.effort } : {}),
+  ...(c.contextUsage !== undefined ? { contextUsage: c.contextUsage } : {}),
 })
 
 /** Project the ADR-0291 slots. Extracted so the combined projector below
@@ -356,6 +367,11 @@ export const composeSurfaceWires = (
   // ADR-0291 — composer + text inbox: surface-owned mutable holders.
   const composerHandle = createComposerHandle("")
   const textInbox = createTextInbox()
+  // Track D (runtime → REPL context wire) — surface-owned holder for the latest
+  // per-turn prompt snapshot. `view()` backs the `/context` `contextUsage` slot;
+  // `sink` is returned as `promptAssembledSink` for the integration layer to
+  // wire into `AgentConfig.onPromptAssembled`.
+  const contextUsageHolder = createContextUsageHolder()
   // ADR-0293 — playbook-trigger seam: attached by the loop AFTER it constructs
   // its `ExternalPromptQueue`. The seam is empty until then; `current()`
   // returns `null` and downstream stop/detach calls are no-ops.
@@ -440,6 +456,10 @@ export const composeSurfaceWires = (
       ? { focusChain: setup.runtimeContext.focusChain() }
       : {}),
     textInbox,
+    // Track D — `/context` live segmented usage getter over the surface-retained
+    // snapshot. Always wired in the REPL surface; before the first turn the
+    // getter returns undefined ⇒ `/context` shows its fallback.
+    contextUsage: () => contextUsageHolder.view(),
   })
 
   // ADR-0292 — extended slot for `/rewind-conv`. Built when the conv wire
@@ -480,6 +500,7 @@ export const composeSurfaceWires = (
     runtimeFacadeCompose,
     setReplaceMessages,
     setSideConversationStart,
+    promptAssembledSink: contextUsageHolder.sink,
   }
 }
 

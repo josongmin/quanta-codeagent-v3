@@ -1279,7 +1279,44 @@ const prepareTurnContext = async (
   // returned unchanged, byte-identical). ADR-0078 — prepend the redaction-
   // disabled banner when opted out (enabled ⇒ unchanged).
   const finalCtx = injectRedactionBanner(config, await injectIdeContext(config, ctx))
+  // Track D (runtime → REPL context wire) — observation-only capture of the
+  // assembled system prompt. Default-OFF: when `onPromptAssembled` is absent
+  // the entire branch is skipped, so no snapshot is constructed and the
+  // assembly path is byte-identical for every non-REPL caller (RFC §1.2).
+  // Best-effort like `onProgress`: a throwing observer never crashes the turn.
+  emitPromptAssembled(config, finalCtx)
   return { ctx: finalCtx, breakerVerdict }
+}
+
+/** Track D — fire `config.onPromptAssembled` with a snapshot of the assembled
+ *  system prompt. Pure side-effect, observation-only. Absent hook ⇒ early
+ *  return (no allocation, byte-identical). The snapshot pairs the assembled
+ *  `SystemBlock[]` with the turn's `promptPolicy` presence flags so the REPL
+ *  can reconstruct per-section names; `max` is left 0 (the loop has no model→
+ *  context-window table — the surface degrades the bar's denominator). */
+const emitPromptAssembled = (
+  config: AgentConfig,
+  ctx: ReturnType<typeof buildTurnContext>,
+): void => {
+  const hook = config.onPromptAssembled
+  if (hook === undefined) return
+  try {
+    const policy = ctx.promptPolicy
+    hook({
+      system: ctx.system,
+      layout: policy.systemLayout,
+      repoRulesPresent: policy.repoRulesPresent,
+      sessionCtxPresent: policy.sessionCtxPresent,
+      userAppendPresent: policy.userAppendPresent,
+      max: 0,
+      model: configuredModel(config.llm),
+    })
+  } catch (e) {
+    config.stream.emit({
+      type: "error",
+      message: `onPromptAssembled observer threw: ${e instanceof Error ? e.message : String(e)}`,
+    })
+  }
 }
 
 type Step = { done: false } | { done: true; result: TurnResult }
