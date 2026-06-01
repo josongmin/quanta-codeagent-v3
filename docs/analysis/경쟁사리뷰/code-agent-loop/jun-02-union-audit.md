@@ -177,6 +177,25 @@ R2 교차수렴/buried 스윕에서 나온 것 중 quanta가 안 가진 것으�
 - **9 적대적 멀티보터 검증** — branch-search(ADR-0084)는 deterministic N-best(tsc/test/lint 신호 + 단일 llm_judge weight). per-bug N-voter verdict 집계·surface별 auto-gen verifier 스킬은 없으나, **deterministic 신호가 코드엔 LLM 투표보다 오히려 강함** — "여러 후보 검증" 니즈 이미 충족.
 - **10 PermissionProfile List/Select** — 코어 resolve/apply+FS-tier+CLI/env는 jun-02 `96821b77`로 wired. List/Select 발견 verb + 단일콜 network 합성만 남음. **소갭.**
 
+### ✅ SHIPPED (2026-06-02 sprint — 10 슬라이스 전부 main 정착)
+
+ROI 무관 SOTA++ 전량 흡수. 2 웨이브 × 5 worktree-격리 TDD agent + cherry-pick. **typecheck src 0 / 슬라이스 204 hellgate·e2e pass / 0 fail / 회귀 0**. 전부 default-OFF seam(absent ⇒ byte-identical), hexagonal/SOLID. (병행한 사용자 in-flight 커밋 `f264e65a`/`10b0928f`과 무충돌 공존.)
+
+| 슬라이스 | ADR | commit | 테스트 | 상태 |
+|---|---|---|---|---|
+| diff→PR/커밋메시지 저작 (LLMPort-injected `git_compose_commit`/`_pr`) | — | bd1be1b8 | 26 | ✅ seam (composition root에서 `config.composeAuthoring` 바인딩 follow-up) |
+| Advisor 툴 (agent-callable 2nd-opinion consult) | 0429 | 5844d0bc | 17 | ✅ seam (`config.advisor` 바인딩 follow-up) |
+| 레이어드 정책 merge (per-user/repo/team + OverriddenMetadata) | — | 58307da4 | 19 | ✅ pure engine (permission layer 소비 follow-up) |
+| task-budget 소프트 self-moderation (모델 노출) | — | df1293aa | 16 | ✅ buildDynamicContext wired (`config.taskBudget` 바인딩 follow-up) |
+| 네트워크 socket-level MITM 프록시 + 정책 amendment + SSRF | 0428 | 85e5bcdf | 43 | ✅ port+adapter (child-spawn env 주입 follow-up) |
+| 경쟁사 import 실적재 (sessions persist + MCP/hooks/rules + dedup, N10 ban) | 0430 | 17ba6831 | 23 | ✅ wired (CLI `session import` opt-in) |
+| MCP Tasks live binding (`tasks/*` 아웃바운드 + 툴 등록) | 0431 | 4dfeef97 | 12 | ✅ wired (tasks-capable 서버 시 default-on) |
+| 메모리 line-level citation + per-thread mode + write-guard | 0432 | e3761ab0 | 14 | ✅ seam (AgentConfig→tooling 바인딩 follow-up) |
+| 적대적 멀티보터 검증 + VerifierSkillSpec | 0433 | 2583f352 | 20 | ✅ additive branch-search 신호 (caller wire follow-up) |
+| PermissionProfile List/Select + user-defined disk profiles | 0434 | 0eae1d1f | 17 | ✅ wired (`QUANTA_PROFILES_DIR` opt-in) |
+
+**남은 공통 follow-up**: 대부분 seam은 composition-root 바인딩만 남음(default-OFF라 미바인딩=byte-identical 무해). Tier 3 일부(memory line-citation·multi-voter)는 의도적으로 caller-wire 보류.
+
 ### 확정 흡수 우선순위 (jun-01 제외 후)
 
 1. **diff→PR/커밋 저작** (T1#1) — infra 완비, ~1 슬라이스, 최고 빈도. **즉시 착수 1순위.**
