@@ -20,6 +20,12 @@
 > - **Codex `view_image` 도구**(이미지 입력 있음), **원격 telemetry 0**(로컬 JSONL만 — 메모리 OTel은 내부 span).
 > - **Claude advisor tool verbatim 확인**(stronger reviewer model, NO params, full history forward), **CC token 회계 server-side**(클라 미노출), **CC firstChunk timeout 없음**(idle만).
 > - **세션 persistence 4사 실측**: quanta/Codex=JSONL append-only, Claude=per-session JSON, **Cursor=SQLite vscdb**.
+>
+> 🟢 **2026-06-02 ground-truth 재어딧 정정 (실제 `src/`로 검증 — 아래 "quanta 갭"의 다수가 무효화됨)**: 상세 → [jun-02-union-audit.md](jun-02-union-audit.md).
+> - **A8 idle/timeout** = ✅ LANDED — `src/llm/stream-timeout.ts` `withStreamTimeout`(firstChunk 60s+idle 120s) 전 어댑터 호출(ADR-0200/0227). **갭 아님**.
+> - **B8 OS sandbox** = ✅ LANDED·enforcing — `os-sandbox/{seatbelt,landlock,bubblewrap}` + verbatim profile, `runShell` global wrap + bash `mode=read` per-call `sandbox-exec`/Landlock(fail-closed). Darwin VZ만 scaffold. **"★★★ 최대 갭" 무효**.
+> - **F11 vision** ✅(read_image/read_image_url default-on) · **F12 web** ✅(web_fetch always-on, web_search default-OFF) · **A9 bg-subagent** ✅(fork+stuck-detector wired, ADR-0223) · **C2 identity** ✅(static per-mode wired; per-turn reminder만 dead-code) · **B11 hook updated_input** ✅(ADR-0113) · **retrieval 합성루트** ✅(양 surface wired).
+> - **여전히 진짜 갭**: B12 MCP **Tasks**만 stub(Elicitation은 ✅) · diff→PR/커밋메시지 저작 ❌ · co-change 검색신호 🟡 · post-compact 파일복원 ❌ · read_paths 추적 ❌.
 
 ---
 
@@ -248,7 +254,7 @@
 | A5 compaction | 공동 | Claude=파일복원, Cursor=speculative, quanta=breaker |
 | A6 fallback | **quanta**(stream_reset) | Cursor=서버라우팅 |
 | A7 abort | **Cursor**(자식단독) | quanta=signal일관 |
-| A8 idle/timeout | **Claude+Cursor** | ★ quanta 갭 |
+| A8 idle/timeout | 공동 | 🟢 quanta ✅(withStreamTimeout, ADR-0200/0227) — 갭 무효(06-02) |
 | A9 subagent | **quanta+Cursor** | quanta bg-fork 약함 |
 | B1 도구 수 | **Cursor**(44) | |
 | B2 스키마 노출 | **quanta+Claude** | Cursor 불투명 |
@@ -257,13 +263,13 @@
 | B5 reviewer/outcome | **quanta**(형식화 유일) | 8-state outcome+invariant은 유일; reviewer 기능은 Claude(advisor)도 있음 |
 | B6 trust scope | **quanta**(5-tier matrix) | ★정정: 4사 다 trust 있음. Codex=2-state, Claude=dir, Cursor=allowlist |
 | B7 rule DSL | **quanta**(active allow/deny/ask) | |
-| B8 OS sandbox | **Cursor**(Rust)>Codex>Claude | ★★★ quanta 최대 갭 |
+| B8 OS sandbox | 공동(enforcing) | 🟢 quanta ✅ seatbelt/Landlock/bubblewrap wired+fail-closed(ADR-0199/0150). Darwin VZ만 scaffold — "최대 갭" 무효(06-02) |
 | B9 shell 격리 | **Claude**(native disclaim) | quanta=dotfile근사 |
 | B10 fs-jail | **quanta**(branded type) | |
 | B11 hook | **Cursor**(20 event+updated_input) | |
-| B12 MCP | **Claude**(Tasks+Elicitation+OAuth) | ★ quanta 갭 |
+| B12 MCP | **Claude**(Tasks+Elicitation+OAuth) | 🟡 quanta Elicitation ✅ / **Tasks만 stub**(transport+툴등록 미완, 06-02) |
 | C1 정책스택 | **quanta**(L1-L9 코드) | |
-| C2 identity variant | **Codex/Claude/Cursor** | ★ quanta 갭 |
+| C2 identity variant | 공동 | 🟢 quanta ✅ static per-mode wired(ADR-0198); per-turn reminder만 dead-code(06-02) |
 | C3 dynamic context | **quanta**(단일+위조방어) | |
 | C4 prompt cache | **quanta+Claude**(4-section) | |
 | C5 memory | **quanta+Codex**(풀파이프라인) | Claude/Cursor ❌ |
@@ -272,12 +278,21 @@
 | C8 mode | 공동 | Cursor 7종 |
 
 ## quanta 갭 (펼친 우선순위)
-1. **B8 OS sandbox** ★★★ — 3사 전부 OS 강제격리, quanta는 Docker optional. seatbelt+Landlock toggle. **HIGH**.
-2. **A8 idle/stream-hang timeout** ★ — Claude withStreamTimeout + Cursor idle_threshold/max_loops. quanta 없음. **HIGH, 비용 작음**.
-3. **B12 MCP Tasks+Elicitation** — Claude directMcpHost. quanta 표준 client만. **MID, 1주**.
-4. **C2 identity variant** — 실행모드별. quanta 단일. **MID, 작음**.
-5. **A9 background subagent fork** — Cursor force_background_subagent. quanta 약함. **MID**.
-6. ~~**B11 hook updated_input**~~ → **흡수 완료** (2026-05-23, ADR-0113, [hook-args-rewrite-e2e](../../../tests/integration/hook-args-rewrite-e2e.test.ts) deny>updatedInput>pass).
+
+> 🟢 **2026-06-02 ground-truth 재어딧으로 전면 갱신** — 아래 옛 1~5번 중 1·2·4·5는 실코드로 LANDED 확인되어 무효. 실제 남은 델타는 [jun-02-union-audit.md](jun-02-union-audit.md) §2~3. 요약:
+
+**진짜 신규 흡수 (❌ 없음):**
+1. **diff→PR본문/커밋메시지 저작** — `git_commit`은 메시지를 받기만, 저작 스텝 없음. usecase 최대 볼륨 카테고리. **HIGH / 비용↓**.
+2. **compaction 후 워킹셋 파일복원** — Claude 50K/5K cap. 현재 목록 brief만. **MID**.
+3. **read_paths 추적** — Cursor field 18. dedup + closeout R1 백업. **MID·저**.
+4. **실행중 셸 mid-flight bg detach** — Cursor force_background_shell. **저**.
+
+**강화 (🟡 부분):**
+5. **co-change 검색신호** — git_churn/blame_heatmap 툴은 있으나 retrieval feed 없음. Learning+Read-mode 빈도 최상위. **HIGH**.
+6. **MCP Tasks** — Elicitation ✅, Tasks는 transport+툴등록 미완. **MID**.
+7. automation live handler / 시맨틱검색 default / plan-effort+xhigh / identity per-turn reminder — scope 판단 후.
+
+**무효화된 옛 갭** (실코드 LANDED): ~~B8 OS sandbox~~ / ~~A8 idle timeout~~ / ~~C2 identity~~ / ~~A9 bg-subagent~~ / ~~B11 hook updated_input(ADR-0113)~~.
 
 ## 2026-05-23 Tier-S 흡수 결과 (5/7 main 정착)
 비교 결과 흡수가치 최상위 7개 중 5개를 SOTA++ TDD + worktree-isolated 병렬로 main에 정착시킴(45 tests pass / 0 fail / tsc 0 errors).
@@ -523,8 +538,8 @@
 | **F8 에디터 컨텍스트** (selection/open/visible) | ✅ `injectIdeContext`(✅소스확인) — `ideContextProvider.snapshot()` + `renderIdeContext` + redaction banner, loop.ts:848 wire. host가 provider 주입(seam 완성, IDE surface 도착 시 채움) | ❌ (CLI, 에디터 무관) | 🟡 Desktop(openInEditor) | ✅✅✅ SelectedContext 28(files/code_selections/terminals/open_and_recently_viewed/cursor position) + CodeChunk.Intent 9(VISIBLE/SELECTION/RECENTLY_VIEWED/AI_EDITED) | ★ Cursor 압도(IDE 네이티브, 28멤버). quanta=provider seam 구현됨(IDE host 미연결), Codex=없음 |
 | **F9 메모리 recall** | ✅✅ semantic+tag+freshness recall + "routing only" 헤더 | ✅✅ 3-layer(durable+chronicle+ad_hoc) | ❌ | 🟡 `<memories>`(100% 서버) | quanta/Codex=클라 recall / Cursor=서버 / Claude=없음 |
 | **F10 환경** (cwd/env/platform/date) | ✅ buildDynamicContext env 블록(date/cwd) | ✅ RequestContextEnv | ✅ Desktop getSystemInfo + env 블록 | ✅✅ EnvironmentInfo(platform/arch/shell/timezone/cursor_version) + RequestContextEnv(sandbox_enabled/secret_redaction) | Cursor 가장 풍부(arch/timezone/version) |
-| **F11 이미지/스크린** | ❌ (✅소스확인 — computer_use/screenshot/record_screen 도구 없음) | ✅ ✅소스확인 — **`view_image` 도구** + Computer Use.app | ✅ Desktop computer_use(TCC screen capture) + image block | ✅✅ record_screen + computer_use + images(SelectedContext) + browser_element pick | ★ quanta 갭 확정(도구 0). Codex=view_image, Claude/Cursor=computer_use. 3사 다 이미지 입력 |
-| **F12 web** | ❌ (✅소스확인 — src/tool/에 web/fetch/search 도구 없음) | ✅ browser/ 디렉터리 | ✅ WebFetch/WebSearch 도구 | ✅✅ web_search(18)+web_fetch(37)+fetch(24) + 도메인 allowlist | ★ quanta 갭 확정. 3사 web 1급 |
+| **F11 이미지/스크린** | 🟢 ✅ 이미지입력(read_image/read_image_url default-on, ADR-0126/0146) / 스크린·computer_use는 ❌(scope) | ✅ **`view_image`** + Computer Use.app | ✅ Desktop computer_use + image block | ✅✅ record_screen + computer_use + images | 🟢 06-02 정정: 이미지입력 갭 무효. screen/computer-use만 의도적 미보유 |
+| **F12 web** | 🟢 ✅ web_fetch always-on + web_search(provider-gated, ADR-0127/0148) | ✅ browser/ 디렉터리 | ✅ WebFetch/WebSearch 도구 | ✅✅ web_search+web_fetch+fetch + 도메인 allowlist | 🟢 06-02 정정: 갭 무효. web_search만 operator config 필요 |
 | **F13 MCP resources** | 🟡 mcpListResources/mcpReadResource(client) | ✅ MCP | ✅ list/read_mcp_resource | ✅ list_mcp_resources(20)+read_mcp_resource(21) | 다 지원, quanta는 표준 client |
 | **F14 작업 상태** (todos/working-state) | ✅✅ **working-state**(owner/hypothesis/blockers/nextStep/deferred) + TodoWrite | ✅ update_plan + update_todos(corpus) | ✅ TodoWrite | ✅ update_todos(9)+read_todos(10) + ConversationState.todos | quanta working-state가 가장 구조화(5-field L3 메모리) |
 
