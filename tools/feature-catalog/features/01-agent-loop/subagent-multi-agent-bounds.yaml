@@ -27,38 +27,52 @@ purpose: |
   handleSpawnAgent counting running tasks via the registry's pendingIds(); over-cap spawns
   return a structured {kind:"error", cause:"concurrency_cap"} mirroring the pty_cap pattern.
   Default = unlimited (opt-in) so every existing spawn path is byte-identical.
+  2026-06-02 PROMOTION: the three seams are now top-level config.subagent knobs
+  (SubagentBlock.{toolNamespace, waitTimeoutPolicy, maxConcurrent}) threaded by
+  buildSubagentBlock. B1 (toolNamespace) + B2/task_output are fully WIRED end-to-end.
+  B2/wait_agent + B3 are EXPOSED on the materialized block (subagent6Deps) but not yet
+  behavior-live because nothing assembles Subagent6Deps in the loop (see deliberate_hold).
 evidence:
   code:
     - src/agent/subagent-runner.ts
     - src/subagent/handlers-6.ts
     - src/subagent/task-tools.ts
     - src/subagent/dispatch-6.ts
+    - src/agent/types/agent-capabilities.ts
+    - src/agent/tier1/subagent.ts
+    - src/subagent/index.ts
   adrs: []
   tests:
     unit:
       - tests/unit/subagent-tool-namespace-hellgate.test.ts
       - tests/unit/subagent-bounds-hellgate.test.ts
+      - tests/unit/subagent-config-knobs-hellgate.test.ts
     integration: []
     contract: []
 knobs:
-  - name: SubagentRunnerOptions.toolNamespace
+  - name: config.subagent.toolNamespace
     default: 'undefined'
-    purpose: 'absent ⇒ raw tool names (byte-identical); set ⇒ per-child scoped names'
-  - name: WaitTimeoutPolicy {minMs,maxMs,defaultMs}
+    purpose: 'WIRED: absent ⇒ raw tool names (byte-identical); set ⇒ per-child scoped names'
+  - name: config.subagent.waitTimeoutPolicy {minMs,maxMs,defaultMs}
     default: '{1, 3_600_000, 30_000}'
-    purpose: 'clamp wait_agent / task_output timeout into [min,max]; default preserves 30s'
-  - name: handleSpawnAgent maxConcurrent
+    purpose: 'WIRED for task_output (clamp); exposed for wait_agent; default preserves 30s'
+  - name: config.subagent.maxConcurrent
     default: 'undefined (unlimited)'
-    purpose: 'per-session concurrent-subagent cap; over-cap ⇒ concurrency_cap error'
+    purpose: 'EXPOSED on subagent6Deps; over-cap ⇒ concurrency_cap (live once a Subagent6Deps assembler exists)'
 deliberate_hold:
   reason: |
-    All three are seams plumbed through runner/handlers/dispatch but NOT yet bound to a
-    top-level AgentConfig knob in the composition root (src/agent/features.ts) — they are
-    default-OFF until promoted. Chosen so existing tests are byte-identical.
+    Pre-existing structural gap surfaced during the 2026-06-02 promotion: the 6-tool
+    router (Subagent6Deps in src/subagent/dispatch-6.ts) has NO live assembly site in the
+    agent loop — buildSubagentBlock only builds the trio (agent/task_output/task_stop) via
+    createAgentTool/createTaskOutputTool/createTaskStopTool. So B1 + B2/task_output are
+    behavior-live, but B2/wait_agent + B3/maxConcurrent are surfaced on
+    SubagentBlock.subagent6Deps and wait for a consumer rather than being silently dropped.
   promotion_path: |
-    Expose toolNamespace / waitTimeoutPolicy / maxConcurrent as AgentConfig fields and
-    bind per-mode defaults (e.g. enable namespacing + a cap for parallel-heavy modes).
+    Add a Subagent6Deps assembly site (wire dispatchSubagent6 into a runtime tool path) so
+    the exposed waitTimeoutPolicy/maxConcurrent become behavior-live. Independent of the
+    knob plumbing, which is complete.
 notes: |
   B3 default is unlimited (not a number) on purpose — the foreground spawn path had no
   cap before, so any finite default would be a behavior change. Namespacing round-trips
-  for free because the registry is keyed by the scoped name.
+  for free because the registry is keyed by the scoped name. The trio `agent` tool has no
+  concurrency gauge, so maxConcurrent is inherently a 6-tool-router-only knob.

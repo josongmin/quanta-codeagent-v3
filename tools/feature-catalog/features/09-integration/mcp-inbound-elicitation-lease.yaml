@@ -33,30 +33,38 @@ evidence:
     - src/mcp/client.ts
     - src/mcp/elicitation/inbound-router.ts
     - src/mcp/elicitation/lease.ts
+    - src/agent/mcp-bridge.ts
+    - src/apps/cli/mcp-elicitation-prompter.ts
+    - src/apps/cli/internal.ts
   adrs: []
   tests:
     unit:
       - tests/unit/mcp-elicitation-inbound-hellgate.test.ts
+      - tests/unit/apps/cli/mcp-elicitation-cli-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs:
   - name: McpClient elicitationPrompter
     default: 'headlessRejecter'
     purpose: 'inbound elicitation handler; default = proper decline reply (was: silent drop)'
+  - name: loadMcpTools elicitationPrompterFor (per-server factory)
+    default: 'undefined ⇒ headlessRejecter'
+    purpose: 'WIRED: CLI builds a TTY-gated interactive factory; per-server forContext({serverId})'
   - name: ElicitationLeasePool key (serverId, leaseKey)
-    default: 'direct pass-through (no pool)'
+    default: 'one pool per CLI session, bound per-server'
     purpose: 'single-flight: same key ⇒ prompt once, all callers share the outcome'
 deliberate_hold:
   reason: |
-    ElicitationLeasePool is implemented + tested but NOT yet constructed in the
-    composition root — McpClient accepts an elicitationPrompter and a caller can pass
-    pool.forContext({serverId}) as that prompter, but no production code builds the pool
-    yet (same default-OFF posture as the rest of the slice). The elicitation/create
-    requestedSchema mapping covers the single-primitive case; multi-field forms decline
-    rather than guess (the internal elicitation/<method> path handles the full typed surface).
+    2026-06-02: the lease pool + interactive prompter are now CONSTRUCTED in the CLI
+    composition path — loadMcpTools takes a per-server elicitationPrompterFor factory, and
+    src/apps/cli/internal.ts builds a TTY-gated cliPrompter wrapped in one ElicitationLeasePool
+    bound per MCP server. Non-TTY / headless paths keep headlessRejecter (byte-identical).
+    The TTY readline path is exercised structurally (tsc-clean) but not unit-driven through
+    a live terminal — same boundary the REPL's askLine has. The elicitation/create
+    requestedSchema mapping covers the single-primitive case; multi-field forms decline.
   promotion_path: |
-    Construct the lease pool in the MCP composition root + confirm the exact rmcp/MCP
-    requestedSchema shape for multi-field elicitation forms.
+    Confirm the exact rmcp/MCP requestedSchema shape for multi-field elicitation forms;
+    optionally route the prompter through the REPL's askLine for unified prompt UX.
 notes: |
   Strictly more correct than before even at default: a previously-dropped inbound request
   now gets a well-defined {action:"decline"} reply. Notifications (method, no id) stay ignored.

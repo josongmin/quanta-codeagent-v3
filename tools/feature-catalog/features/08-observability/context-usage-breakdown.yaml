@@ -31,35 +31,50 @@ evidence:
   code:
     - src/agent/context/usage-breakdown.ts
     - src/agent/prompt-sections.ts
+    - src/agent/loop.ts
+    - src/agent/types.ts
     - src/apps/cli/status-line.ts
     - src/apps/cli/slash-contract.ts
-    - src/apps/cli/slash/registry-surface.ts
+    - src/apps/cli/repl/context-usage-snapshot.ts
+    - src/apps/cli/repl/slash-surface.ts
+    - src/apps/cli/repl/surface-compose.ts
   adrs: []
   tests:
     unit:
       - tests/unit/agent/context-usage-breakdown-hellgate.test.ts
       - tests/unit/cli/segmented-usage-hellgate.test.ts
+      - tests/unit/agent/prompt-assembled-capture-hellgate.test.ts
+      - tests/unit/agent/context-snapshot-converter-hellgate.test.ts
+      - tests/unit/cli/context-usage-snapshot-hellgate.test.ts
     integration: []
     contract: []
 knobs:
   - name: TokenEstimator (injected)
     default: 'estimateTokens (compaction.ts, chars/4)'
     purpose: 'reuse the loop''s sole estimator — no new heuristic'
+  - name: AgentConfig.onPromptAssembled
+    default: 'undefined'
+    purpose: 'WIRED: absent ⇒ loop byte-identical (early-return, no capture); REPL opts in via this hook'
   - name: SlashContext.contextUsage
     default: 'undefined'
-    purpose: 'surface populates the breakdown snapshot; absent ⇒ /context graceful fallback'
+    purpose: 'REPL holder populates the snapshot each turn; absent ⇒ /context graceful fallback'
 deliberate_hold:
   reason: |
-    Tools / Skills / MCP / Subagents categories exist in the enum but are OMITTED here
-    because the loop's PromptSection model does not thread those into the assembled prompt
-    as sections (not part of fourSectionPreset) — empty categories are dropped from render.
-    The /context seam (host computing a snapshot from the live assembled prompt into
-    SlashContext) is NOT yet wired in the REPL composition root — that's the default-OFF
-    boundary; the breakdown + renderer + slash command are fully implemented and tested.
+    2026-06-02: the runtime→REPL wire is built — loop.ts fires onPromptAssembled (default-OFF
+    early-return when absent), a REPL holder (context-usage-snapshot.ts) retains the snapshot,
+    and buildReplSlashCtx populates contextUsage. ONE plumbing step remains: the REPL surface
+    does not own AgentConfig (built deep in bootstrapSession → host.createSessionHost →
+    runner/assemble/config.ts, a closed shape), so composeSurfaceWires EXPOSES
+    promptAssembledSink ready to attach to config.onPromptAssembled but the final attach is
+    out of the slice's edit boundary. Until that one-line attach lands, holder.view() is
+    undefined ⇒ /context shows the graceful fallback. Also: `max` is passed as 0 (no
+    model→context-window table exists anywhere), so segments render token counts without a
+    percent denominator (honest degrade, never NaN). Tools/Skills/MCP/Subagents categories
+    stay OMITTED (not threaded as PromptSections).
   promotion_path: |
-    Feed serialized tool schemas / skills / MCP defs / subagent context through the
-    ExtraContextSource seam (already present) to light up the omitted categories, then wire
-    the REPL to populate SlashContext.contextUsage each turn.
+    One-line attach of promptAssembledSink → config.onPromptAssembled in the bootstrap/runtime
+    config layer; add a model→context-window-size source for the percent denominator; feed
+    ExtraContextSource to light up the omitted categories.
 notes: |
   Single-bar status line is regression-anchored as byte-identical. The chars/4 underlying
   number is itself an estimate but it's the codebase's canonical one, reused not invented.

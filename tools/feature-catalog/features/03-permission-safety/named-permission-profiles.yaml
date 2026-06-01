@@ -27,25 +27,36 @@ evidence:
     - src/permission/named-profiles.ts
     - src/permission/two-layer-manager.ts
     - src/permission/index.ts
+    - src/apps/agent/cli-args.ts
+    - src/apps/agent/index.ts
+    - src/sdk/runtime/base.ts
   adrs: []
   tests:
     unit:
       - tests/unit/permission/named-profiles-hellgate.test.ts
+      - tests/unit/permission/named-profile-session-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs:
+  - name: QUANTA_PERMISSION_PROFILE env / --permission-profile flag
+    default: 'undefined'
+    purpose: 'session-start profile selection (default|restricted|trusted); flag wins over env; unknown ⇒ fail-closed exit'
   - name: TwoLayerManager.setPermissionProfileByName
     default: 'n-a'
     purpose: 'resolve a registered name → struct; existing struct setter unchanged'
 deliberate_hold:
   reason: |
-    Registry is in-code (NAMED_PROFILES); loading [permissions.profiles.<name>] from a
-    settings file (TOML/JSON) is NOT done — names resolve from the built-in registry
-    only. The mcp_server permission axis is also NOT added here — that lives
-    orthogonally in skill/plugin-manifest + admissibility-gate by design.
+    2026-06-02: the env/flag knob resolves + applies the named profile at session start
+    via setPermissionProfileByName and PUBLISHES it on the RuntimeAgentConfigAugments
+    `permissionProfileManager` slot — but TwoLayerManager has no production loop consumer
+    yet (it is a standalone in-memory facade not read by the agent loop), matching other
+    caller-side slots (e.g. toolProfile) awaiting a Wave-B consumer. Registry is in-code
+    (NAMED_PROFILES); a settings-file [permissions.profiles.<name>] loader is NOT done.
+    The mcp_server permission axis is orthogonal (skill/plugin-manifest + admissibility-gate).
   promotion_path: |
-    A settings-file profile loader + a profile-scope precedence resolver
-    (managed > project > user > open) would promote this to operator-authored profiles.
+    A loop-side consumer that reads config.permissionProfileManager (or the published slot)
+    to gate tool access; then a settings-file profile loader + scope-precedence resolver
+    (managed > project > user > open).
 notes: |
   fail-closed: unknown profile name throws rather than silently falling back, so a
   typo can never widen permissions. "custom" maps to the locked-down default until a
