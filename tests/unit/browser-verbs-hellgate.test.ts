@@ -205,6 +205,69 @@ describe("HELLGATE verbs — adapter dispatch", () => {
     expect(keys.map((k) => k.params.type)).toEqual(["keyDown", "keyUp"])
   })
 
+  // chrome-FREE guard for real-chrome closeout bug #2: a bare `{key}` event does
+  // not trigger Blink's implicit form-submit; the named-key descriptor table
+  // MUST stamp windowsVirtualKeyCode/code (and `text` for text-generating keys).
+  // Mutation killed: keyEventBase named branch → `return { key }`.
+  test("press_key(Enter) carries the full virtual-key descriptor on BOTH down+up", async () => {
+    const { b, sent } = adapter()
+    const h = await b.spawn()
+    if (!h.ok) return
+    expect((await b.pressKey(h.value, "Enter")).ok).toBe(true)
+    const keys = sent.filter((s) => s.method === "Input.dispatchKeyEvent")
+    expect(keys.length).toBe(2)
+    for (const k of keys) {
+      expect(k.params.key).toBe("Enter")
+      expect(k.params.code).toBe("Enter")
+      expect(k.params.windowsVirtualKeyCode).toBe(13)
+      expect(k.params.nativeVirtualKeyCode).toBe(13)
+      expect(k.params.text).toBe("\r") // Enter is text-generating
+    }
+  })
+
+  test("press_key(Tab) stamps the vk/code but NO text (non-text-generating key)", async () => {
+    const { b, sent } = adapter()
+    const h = await b.spawn()
+    if (!h.ok) return
+    expect((await b.pressKey(h.value, "Tab")).ok).toBe(true)
+    const k = sent.find((s) => s.method === "Input.dispatchKeyEvent")
+    expect(k?.params.windowsVirtualKeyCode).toBe(9)
+    expect(k?.params.code).toBe("Tab")
+    expect("text" in (k?.params ?? {})).toBe(false)
+  })
+
+  test("press_key(single char) sends printable text + KeyX code", async () => {
+    const { b, sent } = adapter()
+    const h = await b.spawn()
+    if (!h.ok) return
+    expect((await b.pressKey(h.value, "a")).ok).toBe(true)
+    const k = sent.find((s) => s.method === "Input.dispatchKeyEvent")
+    expect(k?.params.key).toBe("a")
+    expect(k?.params.text).toBe("a")
+    expect(k?.params.code).toBe("KeyA")
+  })
+
+  // chrome-FREE guard for real-chrome closeout bug #3: click/fill/type MUST focus
+  // the element first (else a follow-up Enter goes to <body>). The in-page JS runs
+  // only in a real browser, but the EXPRESSION is observable on the wire here.
+  // Mutation killed: dropping `if (el.focus) el.focus()` from clickJs/fillJs/typeJs.
+  test("click / fill / type emit in-page JS that focuses the element first", async () => {
+    const { b, sent } = adapter()
+    const h = await b.spawn()
+    if (!h.ok) return
+    await b.navigate(h.value, "https://x.test/")
+    await b.snapshot(h.value) // refs e1 (doc), e2 (textbox /0)
+    sent.length = 0
+    expect((await b.click(h.value, "e2")).ok).toBe(true)
+    expect((await b.fill(h.value, "e2", "v")).ok).toBe(true)
+    expect((await b.type(h.value, "e2", "v")).ok).toBe(true)
+    const exprs = sent
+      .filter((s) => s.method === "Runtime.evaluate")
+      .map((s) => String(s.params.expression ?? ""))
+    expect(exprs.length).toBe(3)
+    for (const e of exprs) expect(e).toContain("el.focus()")
+  })
+
   test("mouse_click_xy dispatches pressed+released at coords", async () => {
     const { b, sent } = adapter()
     const h = await b.spawn()

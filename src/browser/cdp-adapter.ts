@@ -463,6 +463,13 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
       const loadedP = s.value.session.waitForEvent("Page.loadEventFired", opts)
       const nav = await s.value.session.request("Page.navigate", { url }, opts)
       if (!nav.ok) return nav
+      // The old document is committed-gone the instant navigation is accepted,
+      // so every pre-navigation ref is now stale: drop them ALL. A click/fill
+      // issued with a ref from the previous page fails closed (element-not-found)
+      // until a fresh snapshot mints refs against the new DOM — even if the load
+      // event below times out. (Structural fix: refs are bound to the snapshot
+      // that minted them, not to prose telling the model to re-snapshot.)
+      s.value.refMap.invalidate()
       const loaded = await loadedP
       if (!loaded.ok) return loaded
       s.value.url = url

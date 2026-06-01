@@ -76,6 +76,10 @@ export const createHeadlessBrowser = (opts: HeadlessBrowserOpts = {}): BrowserPo
       if (page === undefined)
         return err({ kind: "navigation-denied", reason: `unknown url: ${url}` })
       s.value.url = url
+      // Same invariant as the real adapter: a committed navigation invalidates
+      // every prior ref (a denied navigation above does NOT, since the page is
+      // unchanged). Keeps the deterministic stub faithful to the port contract.
+      s.value.refMap.invalidate()
       return ok({ title: page.title })
     },
 

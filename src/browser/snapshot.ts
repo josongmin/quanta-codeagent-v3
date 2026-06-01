@@ -28,6 +28,18 @@ export interface RefMap {
   refOf(backendPath: string): string | null
   /** ref → backendPath, or null (after pruning). */
   resolve(ref: string): string | null
+  /** Drop EVERY current ref↔path binding — used when the whole document is
+   *  gone (a navigation), so every prior `backendPath` is meaningless.
+   *
+   *  The monotonic counter is deliberately NOT reset: a ref minted before an
+   *  `invalidate()` can never be reissued, so a stale cross-navigation ref
+   *  resolves to `null` (→ `element-not-found`, fail-closed) instead of
+   *  silently rebinding to whatever element happens to occupy the same
+   *  child-index path on the new page. The next `reconcile` mints fresh refs
+   *  against the new DOM. This makes "a ref belongs to the snapshot that
+   *  minted it" a CODE invariant, not a prose expectation the model must honor
+   *  — matching the slice's hard-gate-over-prose posture (strengthen #1). */
+  invalidate(): void
 }
 
 export const createRefMap = (): RefMap => {
@@ -64,6 +76,12 @@ export const createRefMap = (): RefMap => {
     },
     refOf: (backendPath: string): string | null => pathToRef.get(backendPath) ?? null,
     resolve: (ref: string): string | null => refToPath.get(ref) ?? null,
+    invalidate(): void {
+      pathToRef.clear()
+      refToPath.clear()
+      // `counter` is intentionally left untouched — monotonic across the whole
+      // session so a post-invalidate page never re-mints a ref a prior page used.
+    },
   }
 }
 
