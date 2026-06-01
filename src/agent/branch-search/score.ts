@@ -22,6 +22,10 @@ export const DEFAULT_WEIGHTS: Readonly<Record<VerifierKind, number>> = Object.fr
   lint: 0.1,
   lsp_diag: 0.2,
   llm_judge: 0.2,
+  // ADR-0433 adversarial multi-voter aggregate. Weight is consulted ONLY when
+  // an `llm_voter_quorum` signal is present (caller-composed); absent that
+  // signal `scoreWith` never reads this entry, so the score is byte-identical.
+  llm_voter_quorum: 0.3,
   patch_size: 0.1,
 })
 

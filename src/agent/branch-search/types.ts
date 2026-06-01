@@ -43,8 +43,19 @@ export interface BranchCandidate {
   readonly delta?: DeltaMeasurement
 }
 
-/** Closed set of verifier kinds — adding one is a compile error at the scorer. */
-export type VerifierKind = "tsc" | "test" | "lint" | "lsp_diag" | "patch_size" | "llm_judge"
+/** Closed set of verifier kinds — adding one is a compile error at the scorer.
+ *  `llm_voter_quorum` (ADR-0433) is the adversarial multi-voter aggregate; it
+ *  is ADDITIVE/orthogonal — a signal of this kind is produced ONLY when a
+ *  caller explicitly composes a multi-voter run in, so absent that wiring the
+ *  scorer never reads its weight and the score is byte-identical. */
+export type VerifierKind =
+  | "tsc"
+  | "test"
+  | "lint"
+  | "lsp_diag"
+  | "patch_size"
+  | "llm_judge"
+  | "llm_voter_quorum"
 
 export interface VerifierSignal {
   readonly kind: VerifierKind
