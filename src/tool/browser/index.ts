@@ -43,6 +43,8 @@ import {
 import { type BrowserSession, createBrowserSession } from "./session-holder"
 
 const CDP_OUTPUT_CAP = 20_000
+/** Raw PNG byte cap before a screenshot is refused (≈ a few MB of base64). */
+const MAX_SCREENSHOT_BYTES = 4_000_000
 
 type Ensured =
   | { readonly ok: true; readonly handle: BrowserHandle }
@@ -187,6 +189,19 @@ const screenshotTool = (port: BrowserPort, session: BrowserSession): Tool =>
       const r = await port.screenshot(ens.handle)
       if (!r.ok) {
         yield { type: "result", result: mapBrowserError(r.error) }
+        return
+      }
+      // Cap the payload — a tall/4K page can produce a multi-MB PNG that would
+      // blow the context if base64'd straight into the message (R3 audit [12]).
+      if (r.value.length > MAX_SCREENSHOT_BYTES) {
+        yield {
+          type: "result",
+          result: {
+            ok: false,
+            output: `screenshot too large (${r.value.length} bytes > ${MAX_SCREENSHOT_BYTES} cap) — scroll/scope the page or read it via browser_snapshot instead`,
+            failure: { mode: "rejected", reason: "screenshot exceeds size cap" },
+          },
+        }
         return
       }
       yield {

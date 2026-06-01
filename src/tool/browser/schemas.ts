@@ -39,7 +39,8 @@ export type FillInput = z.infer<typeof fillSchema>
 
 export const selectOptionSchema = z.object({
   ref: z.string().describe("a <select> element ref from a prior browser_snapshot"),
-  values: z.array(z.string()).describe("option value(s) to select"),
+  // min(1): an empty array would silently deselect every option (R3 audit [11]).
+  values: z.array(z.string()).min(1).describe("option value(s) to select"),
 })
 export type SelectOptionInput = z.infer<typeof selectOptionSchema>
 
@@ -58,13 +59,14 @@ export type PressKeyInput = z.infer<typeof pressKeySchema>
 export const dragSchema = z.object({
   sourceRef: z.string().describe("element ref to drag from"),
   targetRef: z.string().optional().describe("element ref to drop on"),
-  targetX: z.number().optional().describe("viewport x to drop at (when no targetRef)"),
-  targetY: z.number().optional().describe("viewport y to drop at (when no targetRef)"),
+  // .finite(): NaN/Infinity JSON-serialize to null in the CDP envelope (R3 audit [10]).
+  targetX: z.number().finite().optional().describe("viewport x to drop at (when no targetRef)"),
+  targetY: z.number().finite().optional().describe("viewport y to drop at (when no targetRef)"),
 })
 export type DragInput = z.infer<typeof dragSchema>
 
 export const mouseClickXySchema = z.object({
-  x: z.number().describe("viewport x"),
-  y: z.number().describe("viewport y"),
+  x: z.number().finite().describe("viewport x"),
+  y: z.number().finite().describe("viewport y"),
 })
 export type MouseClickXyInput = z.infer<typeof mouseClickXySchema>
