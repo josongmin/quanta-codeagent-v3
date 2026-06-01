@@ -27,17 +27,20 @@ purpose: |
   handleSpawnAgent counting running tasks via the registry's pendingIds(); over-cap spawns
   return a structured {kind:"error", cause:"concurrency_cap"} mirroring the pty_cap pattern.
   Default = unlimited (opt-in) so every existing spawn path is byte-identical.
-  2026-06-02 PROMOTION: the three seams are now top-level config.subagent knobs
-  (SubagentBlock.{toolNamespace, waitTimeoutPolicy, maxConcurrent}) threaded by
-  buildSubagentBlock. B1 (toolNamespace) + B2/task_output are fully WIRED end-to-end.
-  B2/wait_agent + B3 are EXPOSED on the materialized block (subagent6Deps) but not yet
-  behavior-live because nothing assembles Subagent6Deps in the loop (see deliberate_hold).
+  2026-06-02 PROMOTION + GAP-CLOSE: the three seams are top-level config.subagent
+  knobs (SubagentBlock.{toolNamespace, waitTimeoutPolicy, maxConcurrent}) threaded by
+  buildSubagentBlock, AND the 6-tool router now has a LIVE assembly site
+  (createSubagent6Tools, gated by config.subagent.enable6Tools). B1 (toolNamespace)
+  + B2/task_output were already wired; B2/wait_agent + B3/maxConcurrent are NOW
+  behavior-live through the 6-tool spawn_agent/wait_agent handlers when enable6Tools
+  is set (COEXIST with the trio, sharing the one TaskRegistry — ADR-0041).
 evidence:
   code:
     - src/agent/subagent-runner.ts
     - src/subagent/handlers-6.ts
     - src/subagent/task-tools.ts
     - src/subagent/dispatch-6.ts
+    - src/subagent/agent-tools-6.ts
     - src/agent/types/agent-capabilities.ts
     - src/agent/tier1/subagent.ts
     - src/subagent/index.ts
@@ -47,30 +50,35 @@ evidence:
       - tests/unit/subagent-tool-namespace-hellgate.test.ts
       - tests/unit/subagent-bounds-hellgate.test.ts
       - tests/unit/subagent-config-knobs-hellgate.test.ts
+      - tests/unit/subagent6-live-assembly-hellgate.test.ts
     integration: []
     contract: []
 knobs:
   - name: config.subagent.toolNamespace
     default: 'undefined'
     purpose: 'WIRED: absent ⇒ raw tool names (byte-identical); set ⇒ per-child scoped names'
+  - name: config.subagent.enable6Tools
+    default: 'undefined (trio only)'
+    purpose: 'WIRED: true ⇒ 6-tool router (exec_command/write_stdin/spawn_agent/wait_agent/close_agent/send_input) COEXISTS with trio, sharing one TaskRegistry'
   - name: config.subagent.waitTimeoutPolicy {minMs,maxMs,defaultMs}
     default: '{1, 3_600_000, 30_000}'
-    purpose: 'WIRED for task_output (clamp); exposed for wait_agent; default preserves 30s'
+    purpose: 'WIRED: task_output clamp always; wait_agent clamp live when enable6Tools; default preserves 30s'
   - name: config.subagent.maxConcurrent
     default: 'undefined (unlimited)'
-    purpose: 'EXPOSED on subagent6Deps; over-cap ⇒ concurrency_cap (live once a Subagent6Deps assembler exists)'
+    purpose: 'WIRED (when enable6Tools): spawn_agent over-cap ⇒ concurrency_cap error via Tool.execute'
 deliberate_hold:
   reason: |
-    Pre-existing structural gap surfaced during the 2026-06-02 promotion: the 6-tool
-    router (Subagent6Deps in src/subagent/dispatch-6.ts) has NO live assembly site in the
-    agent loop — buildSubagentBlock only builds the trio (agent/task_output/task_stop) via
-    createAgentTool/createTaskOutputTool/createTaskStopTool. So B1 + B2/task_output are
-    behavior-live, but B2/wait_agent + B3/maxConcurrent are surfaced on
-    SubagentBlock.subagent6Deps and wait for a consumer rather than being silently dropped.
+    GAP CLOSED 2026-06-02: createSubagent6Tools (src/subagent/agent-tools-6.ts) is the
+    Subagent6Deps assembly site that was missing — buildSubagentBlock now builds the
+    6-tool router when config.subagent.enable6Tools is set, threading maxConcurrent /
+    waitTimeoutPolicy straight into the spawn_agent / wait_agent handlers (proven
+    behavior-live through Tool.execute by subagent6-live-assembly-hellgate). The only
+    remaining HOLD is the default posture: enable6Tools defaults OFF (trio only) so no
+    existing session changes; flipping it on per-mode is a deliberate operator choice.
   promotion_path: |
-    Add a Subagent6Deps assembly site (wire dispatchSubagent6 into a runtime tool path) so
-    the exposed waitTimeoutPolicy/maxConcurrent become behavior-live. Independent of the
-    knob plumbing, which is complete.
+    Optionally enable6Tools per-mode (e.g. parallel-heavy automation modes) once the
+    6-tool surface has soaked; consider eventually unifying trio + 6-tool into one router
+    (ADR-0041 trajectory) so the COEXIST duplication retires.
 notes: |
   B3 default is unlimited (not a number) on purpose — the foreground spawn path had no
   cap before, so any finite default would be a behavior change. Namespacing round-trips

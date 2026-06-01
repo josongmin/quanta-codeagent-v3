@@ -26,6 +26,7 @@ evidence:
   code:
     - src/permission/named-profiles.ts
     - src/permission/two-layer-manager.ts
+    - src/permission/profile-to-context.ts
     - src/permission/index.ts
     - src/apps/agent/cli-args.ts
     - src/apps/agent/index.ts
@@ -35,28 +36,33 @@ evidence:
     unit:
       - tests/unit/permission/named-profiles-hellgate.test.ts
       - tests/unit/permission/named-profile-session-wire-hellgate.test.ts
+      - tests/unit/permission-profile-to-context-hellgate.test.ts
     integration: []
     contract: []
 knobs:
   - name: QUANTA_PERMISSION_PROFILE env / --permission-profile flag
     default: 'undefined'
     purpose: 'session-start profile selection (default|restricted|trusted); flag wins over env; unknown ⇒ fail-closed exit'
+  - name: profile.approval.mode → PermissionContext.mode (derive)
+    default: 'acceptEdits (absent profile)'
+    purpose: 'GAP-CLOSED: trusted(auto)→auto, default/restricted→default; behavior-LIVE via the loop''s existing permission gate'
   - name: TwoLayerManager.setPermissionProfileByName
     default: 'n-a'
-    purpose: 'resolve a registered name → struct; existing struct setter unchanged'
+    purpose: 'resolve a registered name → struct; forward-compat per-thread slot (fileSystem axis)'
 deliberate_hold:
   reason: |
-    2026-06-02: the env/flag knob resolves + applies the named profile at session start
-    via setPermissionProfileByName and PUBLISHES it on the RuntimeAgentConfigAugments
-    `permissionProfileManager` slot — but TwoLayerManager has no production loop consumer
-    yet (it is a standalone in-memory facade not read by the agent loop), matching other
-    caller-side slots (e.g. toolProfile) awaiting a Wave-B consumer. Registry is in-code
-    (NAMED_PROFILES); a settings-file [permissions.profiles.<name>] loader is NOT done.
-    The mcp_server permission axis is orthogonal (skill/plugin-manifest + admissibility-gate).
+    GAP CLOSED 2026-06-02: the named profile is now behavior-LIVE, not orphaned. The deep
+    map showed PermissionProfile is largely redundant with existing enforcement (network =
+    A1 dispatch-guard, approval = evaluateStack), so the non-duplicating wire is to DERIVE
+    the loop's existing PermissionContext.mode from profile.approval.mode at session start
+    (src/permission/profile-to-context.ts permissionModeFromProfile). The TwoLayerManager
+    is still PUBLISHED as a forward-compat per-thread slot for the ONE unenforced axis
+    (fileSystem — not dispatch-time-enforceable since tool input carries no path). HOLD
+    remaining: fileSystem-axis enforcement + a settings-file [permissions.profiles] loader.
   promotion_path: |
-    A loop-side consumer that reads config.permissionProfileManager (or the published slot)
-    to gate tool access; then a settings-file profile loader + scope-precedence resolver
-    (managed > project > user > open).
+    A runtime-execute-time fileSystem gate (canAccess at tool execution, not dispatch) to
+    light up profile.fileSystem; then a settings-file profile loader + scope-precedence
+    resolver (managed > project > user > open). The approval axis is already live.
 notes: |
   fail-closed: unknown profile name throws rather than silently falling back, so a
   typo can never widen permissions. "custom" maps to the locked-down default until a

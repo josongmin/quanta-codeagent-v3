@@ -55,26 +55,28 @@ knobs:
   - name: AgentConfig.onPromptAssembled
     default: 'undefined'
     purpose: 'WIRED: absent ⇒ loop byte-identical (early-return, no capture); REPL opts in via this hook'
+  - name: RuntimeFacadeComposeOptions.onPromptAssembled
+    default: 'undefined'
+    purpose: 'GAP-CLOSED: granularRegistry-mirror compose option that threads the REPL sink → live AgentConfig.onPromptAssembled'
   - name: SlashContext.contextUsage
     default: 'undefined'
     purpose: 'REPL holder populates the snapshot each turn; absent ⇒ /context graceful fallback'
 deliberate_hold:
   reason: |
-    2026-06-02: the runtime→REPL wire is built — loop.ts fires onPromptAssembled (default-OFF
-    early-return when absent), a REPL holder (context-usage-snapshot.ts) retains the snapshot,
-    and buildReplSlashCtx populates contextUsage. ONE plumbing step remains: the REPL surface
-    does not own AgentConfig (built deep in bootstrapSession → host.createSessionHost →
-    runner/assemble/config.ts, a closed shape), so composeSurfaceWires EXPOSES
-    promptAssembledSink ready to attach to config.onPromptAssembled but the final attach is
-    out of the slice's edit boundary. Until that one-line attach lands, holder.view() is
-    undefined ⇒ /context shows the graceful fallback. Also: `max` is passed as 0 (no
-    model→context-window table exists anywhere), so segments render token counts without a
-    percent denominator (honest degrade, never NaN). Tools/Skills/MCP/Subagents categories
-    stay OMITTED (not threaded as PromptSections).
+    GAP CLOSED 2026-06-02: the runtime→REPL attach is DONE — surface-compose publishes the
+    sink on runtimeFacadeCompose, RuntimeFacadeComposeOptions.onPromptAssembled flows through
+    context-binding (mirroring the granularRegistry idiom) onto the live
+    AgentConfig.onPromptAssembled, and the REPL holder feeds /context via the canonical
+    PromptAssembledSnapshot → snapshotToBreakdownInput converter (the loop's OWN estimateTokens,
+    no second heuristic). /context now renders the live segmented bar. Two honest residuals
+    (not blockers): `max` is 0 (no model→context-window table exists anywhere), so the bar
+    degrades the percent denominator to `?` rather than inventing a constant; and
+    Tools/Skills/MCP/Subagents categories stay OMITTED (not threaded as PromptSections — only
+    System + Conversation populate today).
   promotion_path: |
-    One-line attach of promptAssembledSink → config.onPromptAssembled in the bootstrap/runtime
-    config layer; add a model→context-window-size source for the percent denominator; feed
-    ExtraContextSource to light up the omitted categories.
+    Add a model→context-window-size source for the percent denominator; feed
+    ExtraContextSource (tool schemas / skills / MCP defs / subagent ctx) to light up the
+    omitted categories.
 notes: |
   Single-bar status line is regression-anchored as byte-identical. The chars/4 underlying
   number is itself an estimate but it's the codebase's canonical one, reused not invented.
