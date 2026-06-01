@@ -149,6 +149,36 @@ export const gitCommitInputSchema = z.object({
 })
 export type GitCommitInput = z.infer<typeof gitCommitInputSchema>
 
+// --- git_compose_commit ------------------------------------------------------
+
+/** Diff→prose AUTHORING (Codex `yeet` / Cursor compose absorption). Reads the
+ *  STAGED diff and asks an injected author LLM to write a Conventional Commits
+ *  message. READ-ONLY — does NOT commit (the model feeds the result into
+ *  `git_commit`). */
+export const gitComposeCommitInputSchema = z.object({
+  /** Optional intent hint biasing the author (e.g. "this fixes the race in X"). */
+  hint: z.string().optional().describe("Optional intent hint for the author"),
+  /** Restrict the staged diff to these path(s); appended after `--`. */
+  paths: z.array(z.string()).optional().describe("Restrict staged diff to these paths"),
+})
+export type GitComposeCommitInput = z.infer<typeof gitComposeCommitInputSchema>
+
+// --- git_compose_pr ----------------------------------------------------------
+
+/** Diff→prose AUTHORING for a pull request. Reads the branch-vs-base diff +
+ *  commit log and asks the injected author LLM to write a PR title + body.
+ *  READ-ONLY — does NOT open a PR (the model feeds the result into
+ *  `gh_pr_create`). */
+export const gitComposePrInputSchema = z.object({
+  /** Base revision for the three-dot diff. Default `origin/main`. */
+  base: z.string().optional().describe("Base revision (default origin/main)"),
+  /** Head revision for the three-dot diff. Default `HEAD`. */
+  head: z.string().optional().describe("Head revision (default HEAD)"),
+  /** Optional intent hint biasing the author. */
+  hint: z.string().optional().describe("Optional intent hint for the author"),
+})
+export type GitComposePrInput = z.infer<typeof gitComposePrInputSchema>
+
 // --- git_branch_switch -------------------------------------------------------
 
 /** Branch-name pattern: same alphabet as `safeBranch` in

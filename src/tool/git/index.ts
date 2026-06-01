@@ -13,6 +13,7 @@
  *  deliberately stay on `bash` so the HARD_DENY pattern denylist keeps
  *  governing them. */
 
+import type { LLMPort } from "@/llm"
 import type { GitDirectiveEmitter } from "../../agent/git-directives"
 import type { Tool } from "../types"
 import { gitBlameTool } from "./blame"
@@ -20,6 +21,7 @@ import { gitBlameHeatmapTool } from "./blame-heatmap"
 import { gitBranchSwitchTool } from "./branch-switch"
 import { gitChurnTool } from "./churn"
 import { gitCommitTool } from "./commit"
+import { gitComposeCommitTool, gitComposePrTool } from "./compose"
 import { gitConflictInspectTool } from "./conflict-inspect"
 import { gitDiffTool } from "./diff"
 import { gitLogTool } from "./log"
@@ -36,6 +38,12 @@ import { gitUpstreamCheckTool } from "./upstream"
  *  byte-identical legacy (no rev-parse, no allocation). */
 export interface GitToolsOpts {
   readonly gitDirectiveEmitter?: GitDirectiveEmitter
+  /** Diff→prose AUTHORING seam (Codex `yeet` / Cursor compose). When supplied,
+   *  `git_compose_commit` + `git_compose_pr` are registered, wired to this
+   *  one-shot author LLM (typically a cheap model). Absent ⇒ the two tools are
+   *  NOT constructed and NOT in the registry — byte-identical legacy. The
+   *  composition root sources this from `config.composeAuthoring`. */
+  readonly authorLLM?: LLMPort
 }
 
 // ADR-0105/0107: budget interface + helpers (closed-port; tools opt in).
@@ -45,8 +53,18 @@ export { gitBlameHeatmapTool, rankBlame } from "./blame-heatmap"
 export { type GitBranchSwitchToolOpts, gitBranchSwitchTool } from "./branch-switch"
 export { gitChurnTool, rankChurn } from "./churn"
 export { type GitCommitToolOpts, gitCommitTool } from "./commit"
-export { type GitPushToolOpts, gitPushTool } from "./push"
-export { type GitStageToolOpts, gitStageTool } from "./stage"
+export {
+  buildCommitAuthorPrompt,
+  buildPrAuthorPrompt,
+  COMMIT_AUTHOR_SYSTEM,
+  gitComposeCommitTool,
+  gitComposePrTool,
+  type ParsedCommitMessage,
+  type ParsedPrMessage,
+  PR_AUTHOR_SYSTEM,
+  parseConventionalCommit,
+  parsePrAuthored,
+} from "./compose"
 export {
   type GitConflictInspectInput,
   gitConflictInspectInputSchema,
@@ -59,6 +77,7 @@ export {
   gitMovedCodeInputSchema,
   gitMovedCodeTool,
 } from "./moved-code-tool"
+export { type GitPushToolOpts, gitPushTool } from "./push"
 export {
   type GitReviewDiffInput,
   gitReviewDiffInputSchema,
@@ -67,6 +86,7 @@ export {
   type ReviewReport,
 } from "./review-diff"
 export { buildGitEnv, defaultGitRunner } from "./runner"
+export { type GitStageToolOpts, gitStageTool } from "./stage"
 export { gitStatusTool } from "./status"
 export type {
   GitBlameHeatmapInput,
@@ -74,6 +94,8 @@ export type {
   GitBranchSwitchInput,
   GitChurnInput,
   GitCommitInput,
+  GitComposeCommitInput,
+  GitComposePrInput,
   GitDiffInput,
   GitLogInput,
   GitRunner,
@@ -92,6 +114,16 @@ export { gitUpstreamCheckTool } from "./upstream"
  *  directive kind exists for read-only ops). Absent ⇒ byte-identical. */
 export const gitTools = (runner: GitRunner = defaultGitRunner, opts: GitToolsOpts = {}): Tool[] => [
   gitDiffTool(runner) as Tool,
+  // Diff→prose AUTHORING (Codex `yeet` / Cursor compose). Read-only, tier
+  // "none" — these author a commit message / PR body but never mutate. Default-
+  // OFF: registered ONLY when an author LLM is wired (`opts.authorLLM`). Absent
+  // ⇒ omitted entirely (byte-identical legacy registry).
+  ...(opts.authorLLM !== undefined
+    ? [
+        gitComposeCommitTool(runner, opts.authorLLM) as Tool,
+        gitComposePrTool(runner, opts.authorLLM) as Tool,
+      ]
+    : []),
   gitStatusTool(runner) as Tool,
   gitLogTool(runner) as Tool,
   gitBlameTool(runner) as Tool,
