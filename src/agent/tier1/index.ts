@@ -14,6 +14,11 @@
  * one-way edge means no new cycle is introduced.
  */
 
+export {
+  type AdvisorConsultFromLLMOptions,
+  advisorConsultFromLLM,
+  buildAdvisorBlock,
+} from "./advisor"
 export { buildClassifierBlock } from "./auto-classifier"
 export { buildBranchSearchBlock } from "./branch-search"
 export { buildBrowserBlock } from "./browser"

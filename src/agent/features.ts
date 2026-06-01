@@ -55,6 +55,7 @@ import type { Tool } from "@/tool"
 import type { TaskRegistry } from "../subagent"
 import type { SkillTurnOverride } from "./loop"
 import {
+  buildAdvisorBlock,
   buildBranchSearchBlock,
   buildBrowserBlock,
   buildBudgetBlock,
@@ -175,6 +176,9 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
 
   // ADR-0393 — synchronous delegate tool (default-OFF: empty when delegation absent)
   extraTools.push(...buildDelegateBlock(config))
+
+  // ADR-0257 — advisor consult tool (default-OFF: empty when advisor slot absent)
+  extraTools.push(...buildAdvisorBlock(config))
 
   // ADR-0398 — objective_set / objective_update / objective_get tools
   // (default-OFF: empty array when objective port absent)

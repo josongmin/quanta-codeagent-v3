@@ -1045,6 +1045,42 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   webSearch?: { provider: WebSearchProvider }
   /**
+   * ADR-0257 — agent-callable ADVISOR tool (consult a STRONGER / DIFFERENT
+   * model for a SECOND OPINION mid-loop). When set, `buildAdvisorBlock`
+   * registers the `advisor` tool; absent ⇒ tool NOT registered (default-OFF
+   * byte-identical, RFC §1.2). The slot carries the host-built one-shot
+   * `consult` (the composition root wraps a concrete `LLMPort` + role-model
+   * resolution via the ADR-0256 'advisor' role) plus the `models` allowlist the
+   * tool validates an explicit `model` argument against (empty / absent ⇒ no
+   * explicit model is accepted; the consult always resolves the default).
+   *
+   * Top-level (not nested) and duck-typed: the `@/tool/advisor` slice owns the
+   * `AdvisorConsultRequest` / `AdvisorConsultResult` shapes; this slot mirrors
+   * the consult signature structurally so `@/agent` need not depend on the tool
+   * slice's runtime. Caller-side composition only — the loop never reads it.
+   */
+  advisor?: {
+    readonly consult: (req: {
+      readonly question: string
+      readonly context?: string
+      readonly model?: string
+      readonly signal?: AbortSignal
+    }) => Promise<
+      | { readonly ok: true; readonly analysis: string; readonly modelUsed: string }
+      | {
+          readonly ok: false
+          readonly errorKind:
+            | "model-not-allowlisted"
+            | "advisor-error"
+            | "timeout"
+            | "cancelled"
+            | "empty-analysis"
+          readonly errorMessage: string
+        }
+    >
+    readonly models?: readonly string[]
+  }
+  /**
    * ADR-0133 — typed pending-promptHook collector for subagent lifecycle
    * events. When a `subagent_start` / `subagent_stop` hook returns a
    * `promptHook` response, the subagent runner pushes it here so the
@@ -1767,6 +1803,7 @@ export type FeaturesConfig = Pick<
   | "modelCandidates"
   | "planQueue"
   | "webSearch"
+  | "advisor"
   // ─── P0/P1 wire-audit closeout (new slots reachable from features.ts) ───
   // `budgetLedger` is consumed TODAY (builds `budget_status` tool).
   // The remaining 6 are helper-only slots: their presence on the FeaturesConfig
