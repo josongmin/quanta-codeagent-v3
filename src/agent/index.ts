@@ -171,7 +171,14 @@ export {
   type PersistStats,
   type RecallStats,
 } from "./memory-stats"
-export { memoryTools } from "./memory-tools"
+export {
+  type LineCitation,
+  lineSpanOf,
+  type MemoryToolsDeps,
+  type MemoryWriteGuard,
+  memoryTools,
+  type ThreadMemoryMode,
+} from "./memory-tools"
 export { AgentRecorder, METRIC } from "./metrics"
 export { isMutatingToolBlockedInMode, modeBlockReason, resolveAgentMode } from "./mode"
 export { wireOptionalAgentPorts } from "./optional-ports"

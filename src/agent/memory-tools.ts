@@ -17,9 +17,68 @@ import type { Tool, ToolContext, ToolEvent } from "@/tool"
  * throwing out of the generator (the dispatcher must never see a throw).
  */
 
+/**
+ * Per-thread memory mode (ADR-0432, Codex `codex_memories_extension`):
+ *  - `enabled`   : recall + write both active (DEFAULT — byte-identical).
+ *  - `read-only` : recall active, every write/update returns a typed `ok:false`.
+ *  - `disabled`  : neither recall NOR write touch the store; both are no-ops.
+ * Absent ⇒ treated as `enabled` (no behavior change).
+ */
+export type ThreadMemoryMode = "enabled" | "disabled" | "read-only"
+
+/**
+ * Write-guard (ADR-0432). When configured, a `memory_write` / `memory_update`
+ * is SKIPPED (typed `ok:false`, store untouched) if the run's remaining budget
+ * percentage is strictly below `minRemainingPercent`. Default-OFF: absent ⇒ no
+ * guard, every write proceeds (byte-identical). `remainingPercent` is supplied
+ * by the caller from `BudgetMeter` (ADR-0138) — the memory slice never owns a
+ * meter; it only reads the 0..100 remaining signal at write time.
+ */
+export interface MemoryWriteGuard {
+  /** Skip the write when `remainingPercent() < minRemainingPercent`. */
+  minRemainingPercent: number
+  /** Returns the run's remaining budget as a 0..100 percentage. */
+  remainingPercent: () => number
+}
+
+/**
+ * Line-level source citation (ADR-0432, Codex `MemoryCitationEntry`
+ * `{ lineStart, lineEnd }`). Orthogonal to ADR-0082 `MemoryCitation` (which is
+ * prompt-WINDOW placement provenance, NOT source-line spans). 1-based,
+ * inclusive. Surfaced inline in `memory_search` output so the model can ground
+ * a recalled claim to the exact lines of the stored record.
+ */
+export interface LineCitation {
+  recordId: string
+  lineStart: number
+  lineEnd: number
+}
+
+/** 1-based inclusive line span of a record's text (always L1..N). */
+export const lineSpanOf = (recordId: string, text: string): LineCitation => {
+  // A non-empty record always spans at least line 1. `split("\n").length`
+  // counts lines including a trailing-newline empty segment; a lone empty
+  // string still cites L1-1 so the span is never degenerate.
+  const lines = text.length === 0 ? 1 : text.split("\n").length
+  return { recordId, lineStart: 1, lineEnd: lines }
+}
+
 export interface MemoryToolsDeps {
   store: PersistentStorePort
   embedder?: EmbedderPort
+  /**
+   * Per-thread memory mode (ADR-0432). Absent ⇒ `enabled` (byte-identical).
+   */
+  threadMode?: ThreadMemoryMode
+  /**
+   * Append 1-based source-line spans to `memory_search` output (ADR-0432).
+   * Absent / `false` ⇒ legacy output, byte-identical.
+   */
+  lineCitations?: boolean
+  /**
+   * Budget-aware write-guard (ADR-0432). Absent ⇒ no guard (byte-identical).
+   */
+  writeGuard?: MemoryWriteGuard
   /** Injected clock so replay / unit tests get deterministic
    *  `mem:tool:<base36ts>:<uuid8>` ids AND `createdAt` values that get
    *  PERSISTED into the durable store (which the LLM then reads back in a
@@ -49,6 +108,22 @@ const tryEmbed = async (
 }
 
 const errMsg = (e: unknown): string => errMessage(e)
+
+/** Build the shallow patch for `memory_update` (re-embedding on text change). */
+const buildUpdatePatch = async (
+  input: UpdateInput,
+  embedder: EmbedderPort | undefined,
+): Promise<Partial<MemoryEntry>> => {
+  const patch: Partial<MemoryEntry> = {}
+  if (input.text !== undefined) {
+    patch.text = input.text
+    const embedding = await tryEmbed(embedder, input.text)
+    if (embedding) patch.embedding = embedding
+  }
+  if (input.tags !== undefined) patch.tags = input.tags
+  if (input.importance !== undefined) patch.importance = input.importance
+  return patch
+}
 
 const searchSchema = z.object({
   query: z.string().describe("Free-text query; semantic when an embedder is configured."),
@@ -98,6 +173,23 @@ export const memoryTools = (deps: MemoryToolsDeps): Tool[] => {
   // callers supply deterministic ones via `deps.now` / `deps.uuid`.
   const now = deps.now ?? Date.now
   const uuid = deps.uuid ?? (() => crypto.randomUUID())
+  // ADR-0432 gates. All default-OFF: absent config ⇒ byte-identical legacy
+  // behaviour (recall on, writes on, no line spans).
+  const mode: ThreadMemoryMode = deps.threadMode ?? "enabled"
+  const recallDisabled = mode === "disabled"
+  const writesDisabled = mode === "disabled" || mode === "read-only"
+  /** Returns a typed-block reason iff a write must be refused, else undefined. */
+  const writeBlockReason = (verb: string): string | undefined => {
+    if (writesDisabled) return `${verb} blocked: memory mode is '${mode}' for this thread.`
+    const guard = deps.writeGuard
+    if (guard) {
+      const remaining = guard.remainingPercent()
+      if (Number.isFinite(remaining) && remaining < guard.minRemainingPercent) {
+        return `${verb} skipped: ${remaining.toFixed(0)}% budget remaining < ${guard.minRemainingPercent}% threshold.`
+      }
+    }
+    return undefined
+  }
   const memorySearch: Tool<SearchInput> = {
     name: "memory_search",
     description:
@@ -109,6 +201,14 @@ export const memoryTools = (deps: MemoryToolsDeps): Tool[] => {
     isConcurrencySafe: () => true,
     async *execute(input: SearchInput, _ctx: ToolContext): AsyncIterable<ToolEvent> {
       try {
+        if (recallDisabled) {
+          // ADR-0432: `disabled` mode ⇒ recall is a no-op, store never read.
+          yield {
+            type: "result",
+            result: { ok: true, output: "Memory recall is disabled for this thread." },
+          }
+          return
+        }
         const limit = input.limit ?? 5
         const embedding = await tryEmbed(deps.embedder, input.query)
         const query: MemoryQuery = { text: input.query, limit }
@@ -121,9 +221,14 @@ export const memoryTools = (deps: MemoryToolsDeps): Tool[] => {
           yield { type: "result", result: { ok: true, output: "No matching memories." } }
           return
         }
-        const lines = entries.map(
-          (e) => `#${e.id} (${e.kind}, ${(e.importance ?? 0.5).toFixed(2)}) ${e.text}`,
-        )
+        const lines = entries.map((e) => {
+          const base = `#${e.id} (${e.kind}, ${(e.importance ?? 0.5).toFixed(2)}) ${e.text}`
+          if (!deps.lineCitations) return base
+          // ADR-0432: append a 1-based inclusive source-line span so the model
+          // can ground a recalled claim (`[L1-3]`).
+          const span = lineSpanOf(e.id, e.text)
+          return `${base} [L${span.lineStart}-${span.lineEnd}]`
+        })
         yield { type: "result", result: { ok: true, output: lines.join("\n") } }
       } catch (e) {
         yield {
@@ -143,6 +248,11 @@ export const memoryTools = (deps: MemoryToolsDeps): Tool[] => {
     isConcurrencySafe: () => false,
     async *execute(input: WriteInput, _ctx: ToolContext): AsyncIterable<ToolEvent> {
       try {
+        const blocked = writeBlockReason("memory_write")
+        if (blocked) {
+          yield { type: "result", result: { ok: false, output: blocked } }
+          return
+        }
         const kind: MemoryKind = input.kind ?? "observation"
         const ts = now()
         const id = `mem:tool:${ts.toString(36)}:${uuid().slice(0, 8)}`
@@ -176,6 +286,11 @@ export const memoryTools = (deps: MemoryToolsDeps): Tool[] => {
     isConcurrencySafe: () => false,
     async *execute(input: UpdateInput, _ctx: ToolContext): AsyncIterable<ToolEvent> {
       try {
+        const blocked = writeBlockReason("memory_update")
+        if (blocked) {
+          yield { type: "result", result: { ok: false, output: blocked } }
+          return
+        }
         const existing = await deps.store.get(input.id)
         if (!existing) {
           yield {
@@ -189,14 +304,7 @@ export const memoryTools = (deps: MemoryToolsDeps): Tool[] => {
           yield { type: "result", result: { ok: true, output: `Deleted ${input.id}.` } }
           return
         }
-        const patch: Partial<MemoryEntry> = {}
-        if (input.text !== undefined) {
-          patch.text = input.text
-          const embedding = await tryEmbed(deps.embedder, input.text)
-          if (embedding) patch.embedding = embedding
-        }
-        if (input.tags !== undefined) patch.tags = input.tags
-        if (input.importance !== undefined) patch.importance = input.importance
+        const patch = await buildUpdatePatch(input, deps.embedder)
         await deps.store.update(input.id, patch)
         yield { type: "result", result: { ok: true, output: `Updated ${input.id}.` } }
       } catch (e) {
