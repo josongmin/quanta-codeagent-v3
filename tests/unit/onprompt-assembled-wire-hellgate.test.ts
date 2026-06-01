@@ -17,7 +17,8 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { type AgentConfig, runAgent } from "@/agent"
-import type { LLMPort, Message, StreamEvent, StreamInput, SystemBlock } from "@/llm"
+import type { PromptAssembledSnapshot } from "@/agent/context/usage-breakdown"
+import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
 import { __resetDefaultPermissionStore, type PermissionContext } from "@/permission"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
 import { __resetRuntimeConfig } from "@/shared"
@@ -51,7 +52,11 @@ const textScript = (text: string): StreamEvent[] => [
   { type: "message_stop", stop_reason: "end_turn" },
 ]
 
-type Snapshot = { readonly system: readonly SystemBlock[]; readonly messages: readonly Message[] }
+// The loop's canonical snapshot shape (assembled SystemBlock[] + promptPolicy
+// presence flags + model). Track D's PromptAssembledSnapshot — NOT a raw
+// { system, messages } pair (the loop hands the assembled prompt, and the
+// REPL reconstructs section names from the presence flags).
+type Snapshot = PromptAssembledSnapshot
 
 const baseCfg = (over: Partial<AgentConfig> & Pick<AgentConfig, "llm">): AgentConfig => ({
   registry: new ToolRegistry(defaultTools),
@@ -88,28 +93,28 @@ afterEach(() => {
 })
 
 describe("GAP3 onPromptAssembled — loop firing", () => {
-  test("[A1] fires once per turn with the assembled { system, messages }", async () => {
+  test("[A1] fires once per turn with the assembled system snapshot", async () => {
     const snapshots: Snapshot[] = []
     const llm = new ScriptedLLM([textScript("done")])
     await runAgent(
       baseCfg({
         llm,
         messages: [userText("hello")],
+        system: "test-system-prompt",
         onPromptAssembled: (s) => snapshots.push(s),
       }),
     )
     expect(snapshots.length).toBe(1)
     const snap = snapshots[0]
     expect(snap).toBeDefined()
-    // system blocks are the assembled SystemBlock[]; at least one text block.
+    // system blocks are the assembled SystemBlock[]; at least one text block,
+    // and the configured system prompt text is present in the assembled blocks.
     expect(Array.isArray(snap?.system)).toBe(true)
     expect((snap?.system.length ?? 0) > 0).toBe(true)
-    // messages carry the user turn text.
-    const flatText = (snap?.messages ?? [])
-      .flatMap((m) => m.content)
-      .map((b) => (b.type === "text" ? b.text : ""))
-      .join("\n")
-    expect(flatText).toContain("hello")
+    const sysText = (snap?.system ?? []).map((b) => b.text).join("\n")
+    expect(sysText).toContain("test-system-prompt")
+    // the snapshot carries the layout + presence flags the REPL reconstructs from.
+    expect(snap?.layout === "single_block" || snap?.layout === "four_section").toBe(true)
   })
 
   test("[A2] absent sink ⇒ never called (byte-identical regression anchor)", async () => {
@@ -200,12 +205,13 @@ describe("GAP3 onPromptAssembled — RuntimeFacadeComposeOptions flow", () => {
     try {
       await session.input.append("hello compose")
       await session.turn.run()
+      // The compose option reached the live AgentConfig.onPromptAssembled and
+      // fired at least once with a well-formed assembled snapshot (proving the
+      // RuntimeFacadeComposeOptions → config flow, the unique coverage here).
       expect(snapshots.length > 0).toBe(true)
-      const flat = (snapshots[0]?.messages ?? [])
-        .flatMap((m) => m.content)
-        .map((b) => (b.type === "text" ? b.text : ""))
-        .join("\n")
-      expect(flat).toContain("hello compose")
+      const snap = snapshots[0]
+      expect(Array.isArray(snap?.system)).toBe(true)
+      expect((snap?.system.length ?? 0) > 0).toBe(true)
     } finally {
       await session.close()
       await runtime.close()
