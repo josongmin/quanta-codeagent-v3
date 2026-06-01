@@ -16,6 +16,7 @@ export {
   makeClampEvent,
 } from "./events"
 export { BudgetMeter, type BudgetMeterOptions } from "./meter"
+export { renderTaskBudgetBlock, type TaskBudget } from "./task-budget"
 export type {
   BudgetCaps,
   BudgetDials,

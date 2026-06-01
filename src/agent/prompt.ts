@@ -6,6 +6,7 @@ import type {
   PromptPolicySnapshot,
   PromptSummaryPrefix,
 } from "@/shared"
+import { renderTaskBudgetBlock, type TaskBudget } from "./budget/task-budget"
 import { buildPersistentInjectionMessages } from "./context-change"
 import { renderEnvBlock, type TurnEnvContext } from "./env-context"
 import { type GlobRule, renderGlobRulesBlock, selectGlobRules } from "./glob-rules"
@@ -220,6 +221,15 @@ export interface TurnContextInput {
    *  deterministic). The live probe lives in
    *  `src/agent/env-context.ts#probeTurnEnv` — opt-in, caller-invoked. */
   env?: TurnEnvContext
+
+  /** jun-02 — Soft, MODEL-FACING task budget (Claude `task_budget` mirror).
+   *  When present with `tokens > 0`, buildDynamicContext appends a single
+   *  self-moderation guidance line to the dynamic-context TAIL showing the
+   *  REMAINING task budget (`tokens − spent`). This is ORTHOGONAL to the hard
+   *  `BudgetMeter` enforcement breaker (ADR-0138): it NEVER stops the run,
+   *  never throws, and is explicitly labelled "guidance, not a hard limit".
+   *  Absent / `tokens <= 0` ⇒ ZERO new bytes (byte-identical default-OFF). */
+  taskBudget?: TaskBudget
 }
 
 export interface TurnContext {
@@ -442,6 +452,12 @@ const buildDynamicContext = (
   const memory = input.memoryContext?.trim()
   if (memory) parts.push("", memory)
   appendHookContextDynamicTail(parts, input.hookPromptInjects)
+  // jun-02 — soft task-budget guidance rides at the TAIL (read last by the
+  // model, like hook context) so the self-moderation hint is the freshest
+  // signal. Orthogonal to the hard breaker; absent / non-positive ⇒ no block
+  // (byte-identical default-OFF).
+  const taskBudgetLine = renderTaskBudgetBlock(input.taskBudget)
+  if (taskBudgetLine !== undefined) parts.push("", taskBudgetLine)
   return parts.join("\n")
 }
 

@@ -16,6 +16,8 @@ export {
   type BudgetUsage,
   isBudgetEvent,
   makeClampEvent,
+  renderTaskBudgetBlock,
+  type TaskBudget,
   type TickKind,
 } from "./budget"
 export { compactIfNeeded, estimateTokens, findBoundary } from "./compaction"
