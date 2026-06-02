@@ -95,6 +95,15 @@ export interface PromptUxOpts {
   readonly keybindings?: KeybindingMap
 }
 
+/** Truthy env gate mirroring the project idiom: unset / empty / `0` / `false`
+ *  / `off` / `no` ⇒ false; any other value ⇒ true. Used for the opt-in
+ *  `QUANTA_WORKING_STATE` (`/state`) feature gate. */
+const isEnvTruthy = (raw: string | undefined): boolean => {
+  if (raw === undefined) return false
+  const norm = raw.trim().toLowerCase()
+  return norm !== "" && norm !== "0" && norm !== "false" && norm !== "off" && norm !== "no"
+}
+
 /** RFC-08 / ADR-0443 — build the mode-cycle store + its derived pill/hook when
  *  `QUANTA_MODE_CYCLE=1`. The store is the single source of truth: the pill
  *  meta and the shift+tab `onCycleMode` both project from it, and session-loop
@@ -431,6 +440,9 @@ const buildSurfaceDispatch = (args: {
   /** `/queue` plan-queue store. Surface-owned; always present in the REPL so
    *  inspect/mutate/sendNow resolve (empty until a producer enqueues). */
   readonly planQueue?: PlanQueueStore | undefined
+  /** `/state` working-state snapshot getter. Always wired (returns undefined
+   *  when `QUANTA_WORKING_STATE` is off ⇒ `/state` renders an empty panel). */
+  readonly workingState?: (() => WorkingState | undefined) | undefined
 }): ((input: string) => Promise<boolean>) => {
   return async (input: string): Promise<boolean> => {
     const head = input.split(/\s+/)[0] ?? ""
@@ -468,6 +480,9 @@ const buildSurfaceDispatch = (args: {
       ...(args.memory !== undefined ? { memory: args.memory } : {}),
       // `/queue` plan-queue store: surface-owned, always present in the REPL.
       ...(args.planQueue !== undefined ? { planQueue: args.planQueue } : {}),
+      // `/state` working-state snapshot getter: always wired (empty when the
+      // feature is off ⇒ renders an empty panel instead of "not wired").
+      ...(args.workingState !== undefined ? { workingState: args.workingState } : {}),
     }
     await runSlashCommand(input, ctx)
     return true
@@ -785,6 +800,7 @@ export const composeSurfaceWires = (
     ...(voiceLive !== undefined ? { voiceLive } : {}),
     ...(memorySlot !== undefined ? { memory: memorySlot } : {}),
     planQueue: planQueueStore,
+    workingState: () => workingStateGet?.(),
   })
 
   return {
