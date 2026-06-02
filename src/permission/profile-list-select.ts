@@ -449,7 +449,11 @@ const parseControl = (v: unknown, fail: Fail): PermissionProfile["control"] => {
 /* Safety ceiling                                                             */
 /* ------------------------------------------------------------------------- */
 
-const NETWORK_RANK: Record<NetworkMode, number> = {
+/** Network egress permissiveness rank — LOWER = narrower (safer). Exported so
+ *  the inheritance resolver (`profile-inheritance.ts`) reuses the SAME ordering
+ *  of `deny-all < allow-list < allow-all` instead of duplicating a literal that
+ *  could drift out of sync. */
+export const NETWORK_RANK: Record<NetworkMode, number> = {
   "deny-all": 0,
   "allow-list": 1,
   "allow-all": 2,

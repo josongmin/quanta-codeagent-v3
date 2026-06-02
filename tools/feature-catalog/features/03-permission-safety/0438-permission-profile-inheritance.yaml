@@ -1,0 +1,87 @@
+id: permission-profile-inheritance
+title: Permission-profile inheritance — extends + cycle detection + monotone-narrowing merge + Managed ceiling
+section: 3
+subsystem: 권한 프로파일 합성 — extends 그래프 해소 (ADR-0438)
+order: 438
+maturity: L2
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+telemetry_keys: []
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: partial
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli, security-touched]
+depends_on: [named-permission-profiles, permission-4-pillar]
+config_refs:
+  env: []
+purpose: |
+  ADR-0438 — 3개 고정 named profile(restricted/default/trusted)을 합성 가능한
+  extends 그래프로 확장. 새 leaf `profile-inheritance.ts`의 순수·전역(total)·무 I/O
+  resolver `resolveProfileInheritance(name, registry, opts?)`가 ProfileDefinition
+  (모든 pillar partial + extends + tag)을 base→derived로 **monotone-narrowing**
+  merge한다: derived는 base를 좁히기만(narrow) 가능, 넓히기(widen)는 불가
+  ("trusted인데 network만 deny-all"은 OK, "restricted인데 network allow-all"은 무시).
+
+  Per-axis merge (13축): network.mode=MRW(NETWORK_RANK 재사용)/allowHosts=intersection/
+  perRequestApproval=OR · approval.mode=MRW(auto<once<session<always)/promptUser=OR ·
+  fileSystem.type=MRW(restricted<managed)/entries=intersection(base가 cover한 path만,
+  access 좁히기 포함) · sandbox: osSandbox none<active MRW / readOnly·networkIsolated OR /
+  workspaceWrite AND · control.managedBy=MRW(user<team<admin)/auditRequired=OR.
+  불변식: resolve(child) ⊆ resolve(base) — 13축 전부 (HELL-PI-11 봉인).
+
+  Fail-closed: cycle(A→B→A)/self-extend(A extends A)/unknown-base(extends "ghost") 전부
+  typed ProfileInheritanceError THROW (kind: cycle|self-extend|unknown-base|managed-widen),
+  silent permissive fallback 없음. cache로 diamond/deep-chain O(N).
+
+  Managed ceiling (Codex TaggedPermissionProfile::Managed/::External 흡수): tag=managed
+  base는 derived가 못 넘는 ceiling. fold 비참여(ceiling 전용)라 widen이 감지 가능 —
+  onManagedWiden:"clamp"(기본, fail-safe 좁힘) / "throw"(strict org 거부).
+
+  Default-OFF / byte-identical: built-in 3개는 동일 frozen NAMED_PROFILES 구조체 반환
+  (참조 동일성까지, HELL-PI-14). resolveProfileByName 불변 — 별 진입점·composable layer.
+  profile-layer-merge.ts(소스-precedence 슬롯 합치기)와 직교: 공유 mutable 없음,
+  NETWORK_RANK ordering만 재사용, fold는 독립 구현.
+
+  Config/knob: ProfileDefinition가 extends?(string|string[]) + tag? 구조체 필드로 선언;
+  selection은 호출자가 ProfileDefinitionRegistry 조립 후 resolveProfileInheritance(name,
+  registry) → 완성 struct → 기존 Apply(TwoLayerManager.setPermissionProfile)로 흐름.
+  configurable=partial: 구조체 필드+registry-driven 해소는 갖췄으나 disk partial-parser
+  (parseUserProfileDefinition)와 Apply 자동 wiring은 follow-up (resolver는 config-agnostic).
+evidence:
+  code:
+    - src/permission/profile-inheritance.ts
+    - src/permission/profile-list-select.ts
+    - src/permission/index.ts
+  adrs: [438]
+  tests:
+    unit:
+      - tests/unit/permission/profile-inheritance-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: onManagedWiden
+    where: ResolveInheritanceOpts (resolveProfileInheritance 3번째 인자)
+    default: "clamp"
+    purpose: |
+      Managed ceiling을 derived가 넘을 때: "clamp"(기본, fail-safe하게 ceiling으로 좁힘)
+      vs "throw"(strict org — ProfileInheritanceError kind=managed-widen).
+  - name: builtins
+    where: ResolveInheritanceOpts
+    default: "NAMED_PROFILES"
+    purpose: |
+      registry에 없는 이름의 built-in fallback. 둘 다 없으면 fail-closed THROW.
+deliberate_hold:
+  reason: |
+    resolver는 순수·sealed(17 hellgate)이나 default-OFF — 아직 callsite 미배선.
+    disk partial-parser(parseUserProfileDefinition)와 Apply 경로 자동 해소가 L3 step.
+  promotion_path: |
+    (1) profile-list-select.ts에 parseUserProfileDefinition(partial 허용) 추가 →
+    (2) registry 빌드(composition root: NAMED_PROFILES + user definitions) →
+    (3) TwoLayerManager.setPermissionProfileFromRegistry sugar →
+    (4) envelope permission_profile에 extends/tag optional 배선 → L3/L4.
+notes: |
+  슬라이스 fence: leaf — permission-profile.ts(순수 타입) + named-profiles.ts(NAMED_PROFILES) +
+  profile-list-select.ts(NETWORK_RANK const export)만 의존. store/gate/IO 무의존.
+  entries intersection은 special-path resolver(IO) 미주입 — resolver-free 보수 비교
+  (special kind 동일 OR literal absolute 조상; mixed special/path는 drop = 좁히는 방향이라 안전).
