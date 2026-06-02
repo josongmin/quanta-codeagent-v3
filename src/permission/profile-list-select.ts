@@ -46,6 +46,7 @@
 
 import { readdir, readFile } from "node:fs/promises"
 import { extname, join } from "node:path"
+import { runtimeConfig } from "@/shared/runtime-config"
 import {
   isNamedProfileName,
   NAMED_PROFILE_NAMES,
@@ -123,14 +124,16 @@ export type ProfileLoadErrorMode = "skip" | "throw"
 
 export interface ListProfilesOptions {
   /** Directory of `<name>.json` user profiles. Absent ⇒ env
-   *  `QUANTA_PROFILES_DIR`; absent there too ⇒ built-ins only (no disk IO). */
+   *  `QUANTA_PROFILES_DIR` (via {@link runtimeConfig}); absent there too ⇒
+   *  built-ins only (no disk IO). */
   readonly profilesDir?: string
   /** Per-file error handling. Default `skip`. */
   readonly onError?: ProfileLoadErrorMode
   /** Admit user profiles wider than the `trusted` built-in. Default `false`
    *  (in-ceiling only). See {@link exceedsCeiling}. */
   readonly allowWiden?: boolean
-  /** Test/DI seam — env source. Defaults to `process.env`. */
+  /** Test/DI seam — overrides the `QUANTA_PROFILES_DIR` env read so unit
+   *  tests need not mutate `process.env`. Absent ⇒ {@link runtimeConfig}. */
   readonly env?: Record<string, string | undefined>
 }
 
@@ -140,14 +143,16 @@ export interface SelectProfileOptions {
   readonly env?: Record<string, string | undefined>
 }
 
-/** Resolve the effective profiles dir: explicit option wins, else
- *  `QUANTA_PROFILES_DIR`, else `undefined` (built-ins only — default-OFF). */
+/** Resolve the effective profiles dir: explicit option wins, else the DI
+ *  `env` override (test seam), else `QUANTA_PROFILES_DIR` via
+ *  {@link runtimeConfig} (the slice's single sanctioned env owner), else
+ *  `undefined` (built-ins only — default-OFF). */
 const resolveProfilesDir = (
   explicit: string | undefined,
-  env: Record<string, string | undefined>,
+  env: Record<string, string | undefined> | undefined,
 ): string | undefined => {
   if (explicit !== undefined && explicit.length > 0) return explicit
-  const fromEnv = env.QUANTA_PROFILES_DIR
+  const fromEnv = env !== undefined ? env.QUANTA_PROFILES_DIR : runtimeConfig().profilesDir
   if (fromEnv !== undefined && fromEnv.length > 0) return fromEnv
   return undefined
 }
@@ -177,8 +182,7 @@ const BUILTIN_ENTRIES: ReadonlyArray<ProfileListEntry> = NAMED_PROFILE_NAMES.map
 export const listPermissionProfiles = async (
   opts: ListProfilesOptions = {},
 ): Promise<ReadonlyArray<ProfileListEntry>> => {
-  const env = opts.env ?? process.env
-  const dir = resolveProfilesDir(opts.profilesDir, env)
+  const dir = resolveProfilesDir(opts.profilesDir, opts.env)
   if (dir === undefined) return BUILTIN_ENTRIES
 
   const onError = opts.onError ?? "skip"
@@ -223,8 +227,7 @@ export const selectPermissionProfile = async (
   // Built-in wins — authoritative, no disk IO, byte-identical struct.
   if (isNamedProfileName(name)) return resolveProfileByName(name)
 
-  const env = opts.env ?? process.env
-  const dir = resolveProfilesDir(opts.profilesDir, env)
+  const dir = resolveProfilesDir(opts.profilesDir, opts.env)
   if (dir !== undefined) {
     const match = (await listUserProfileFiles(dir)).find((f) => f.name === name)
     if (match !== undefined) {
@@ -233,8 +236,8 @@ export const selectPermissionProfile = async (
   }
 
   const listOpts: ListProfilesOptions = {
-    env,
     onError: "skip",
+    ...(opts.env !== undefined ? { env: opts.env } : {}),
     ...(dir !== undefined ? { profilesDir: dir } : {}),
     ...(opts.allowWiden !== undefined ? { allowWiden: opts.allowWiden } : {}),
   }

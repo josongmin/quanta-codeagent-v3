@@ -170,6 +170,10 @@ export interface RuntimeConfig {
   /** Permission state-file override (`QUANTA_PERMISSION_STATE`). Absent ⇒
    *  feature site computes `<quantaHome>/permission-state.json`. */
   readonly permissionStateFile: string | undefined
+  /** User-defined permission-profile directory (`QUANTA_PROFILES_DIR`,
+   *  ADR-0434). Absent ⇒ `listPermissionProfiles`/`selectPermissionProfile`
+   *  return only the 3 built-ins (default-OFF, no disk IO). */
+  readonly profilesDir: string | undefined
   /** SSH connection marker (`SSH_CONNECTION`). Used by ADR-0046's
    *  `resolveHostId()` to decide between `<user>@<host>` and `localhost`. */
   readonly sshConnection: string | undefined
@@ -298,6 +302,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     cachePathspecsExtra: parseStringList(env["QUANTA_BENCH_CACHE_PATHSPECS_EXTRA"]),
     dedupEnvPrefixesExtra: parseStringList(env["QUANTA_DEDUP_ENV_PREFIXES_EXTRA"]),
     permissionStateFile: stringOrUndef(env["QUANTA_PERMISSION_STATE"]),
+    profilesDir: stringOrUndef(env["QUANTA_PROFILES_DIR"]),
     sshConnection: stringOrUndef(env["SSH_CONNECTION"]),
     swebenchCacheLevel: parseSwebenchCacheLevel(env["QUANTA_SWEBENCH_CACHE_LEVEL"]),
     swebenchClean: parseBool(env["QUANTA_SWEBENCH_CLEAN"]),

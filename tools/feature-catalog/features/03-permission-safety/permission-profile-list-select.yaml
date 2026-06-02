@@ -1,0 +1,86 @@
+id: permission-profile-list-select
+title: PermissionProfile List + Select + user-defined profiles from disk
+section: 3
+subsystem: named permission-profile registry — List/Select verbs + on-disk user profiles (ADR-0434)
+order: 434
+maturity: L3
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli, tier:leaf, security-touched]
+depends_on: [trust-scope-wire-up]
+config_refs:
+  env: ["QUANTA_PROFILES_DIR"]
+purpose: |
+  Codex `PermissionProfile{List/Select/Apply/Resolve}` absorption. The existing
+  `named-profiles.ts` registry shipped Resolve (`resolveProfileByName`) + Apply
+  (`TwoLayerManager.setPermissionProfileByName`). This leaf adds the two missing
+  verbs PLUS user-defined named profiles loaded from disk:
+
+    - List   — `listPermissionProfiles`: enumerate the 3 built-ins + any
+               `<name>.json` user profiles under a profiles dir.
+    - Select — `selectPermissionProfile`: resolve a name (built-in OR user) to a
+               concrete `PermissionProfile`, composing registry Resolve with
+               disk loading.
+
+  User profiles are validated by a STRICT structural validator
+  (`parseUserProfile`): the struct is rebuilt field-by-field from validated
+  primitives, so malformed JSON / a missing pillar / a bogus enum / unknown keys
+  are REJECTED (typed `ProfileValidationError`, never partial-applied, never
+  crash, no key leak). A safety CEILING (`exceedsCeiling`, baselined to the
+  locked-down `default` built-in) rejects any user profile wider on any
+  security axis (network egress rank, workspace-write, readOnly relaxation,
+  network-isolation removal, prompt suppression) UNLESS the operator passes
+  `allowWiden:true`. A built-in name is authoritative — a user `trusted.json`
+  CANNOT shadow the `trusted` built-in (List de-dupes in favor of the built-in;
+  Select returns the frozen registry struct by reference). An unknown Select
+  name is a typed `ProfileSelectError` (never a permissive fallback). A
+  traversal / `../` / symlink name cannot select a file the dir never listed
+  (`readdir` only yields basenames; an escaped symlink target is still
+  ceiling-checked).
+evidence:
+  code:
+    - src/permission/profile-list-select.ts
+    - src/permission/named-profiles.ts
+    - src/permission/two-layer-manager.ts
+  adrs: ["docs/decisions/0434-permission-profile-list-select.md"]
+  tests:
+    unit:
+      - src/permission/__tests__/profile-list-select.hellgate.test.ts
+      - src/permission/__tests__/profile-list-select-harder.hellgate.test.ts
+      - tests/unit/permission-slice-boundary.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Default-OFF: absent `profilesDir` (and absent `QUANTA_PROFILES_DIR`) ⇒ only
+  the 3 built-ins are returned, byte-identical to a bare `NAMED_PROFILES`
+  enumeration, with NO disk IO attempted.
+
+  `configurable: integrated` — the `QUANTA_PROFILES_DIR` env directory reaches
+  the live behavior end-to-end (List/Select read it via `runtimeConfig()`,
+  the slice's single sanctioned env owner; the `env` option is a test/DI seam
+  that overrides the read without mutating `process.env`, satisfying the
+  `@/permission` slice-boundary no-`process.env` rule). The env var is recorded
+  under `config_refs.env`.
+
+  `knobs: []` — this feature is configured by an env DIRECTORY of profile files,
+  NOT by a discrete tuning matrix knob. There is no boolean/enum/threshold to
+  sweep: the only operator surface is (a) which directory holds the profiles
+  (`QUANTA_PROFILES_DIR`) and (b) the per-call `allowWiden` opt-in. Listing a
+  pseudo-knob would misrepresent the configuration shape, so the array is
+  deliberately empty (mirrors the `otlp-helper` precedent where env knobs reach
+  the underlying surface directly rather than via a catalog knob row).
+
+  Hellgate coverage: 17 original cases (List/Select/ceiling/malformed) + 45
+  HARDER cases — per-axis ceiling breach (each of the 4+ widening axes proven
+  independently rejected), unknown-key stripping, bogus-enum-per-pillar +
+  missing-pillar-per-pillar typed rejects, malicious built-in shadow defeated,
+  unknown-name typed error with available-list, path-traversal/symlink names
+  rejected, and an e2e that selects a user profile off a real temp dir, applies
+  it through `TwoLayerManager`, and asserts the resulting ACCESS DECISION
+  (allow/deny on `getEffectiveAccess`) tracks the profile's allow-list.
