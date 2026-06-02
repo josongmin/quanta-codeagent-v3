@@ -1113,6 +1113,7 @@
         "!tests/unit/cli-summarizer.test.ts",
         "!tests/unit/cli-session-commands.test.ts",
         "!tests/unit/migration-import-persistence-e2e-hellgate.test.ts",
+        "!tests/unit/migration-import-roundtrip-hellgate.test.ts",
         "!tests/unit/cli-resume-heuristic.test.ts",
         "!tests/unit/slash-commands.test.ts",
         "!tests/unit/memory-cmd.test.ts",

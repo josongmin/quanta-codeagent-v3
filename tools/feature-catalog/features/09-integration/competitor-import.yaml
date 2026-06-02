@@ -1,0 +1,90 @@
+id: competitor-import
+title: Competitor session import — real persist + MCP/hooks/rules + dedup (ADR-0430)
+section: 9
+subsystem: External-agent import (ADR-0038 → ADR-0430)
+order: 12
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  cli:
+    - "session import <claude_code|cursor|aider>"
+    - "session import <provider> --no-skills"
+owners: ["@songmin"]
+labels: ["absorbed:claude-code", "absorbed:codex", "surface:integration", "tier:adapter"]
+depends_on: [migration-detector, session-store-save-load]
+purpose: |
+  `session import <provider>` ingests a competitor coding-agent install and makes
+  it a first-class quanta session. ADR-0430 closes the `persisted_sessions=0` gap
+  of the translate-only ADR-0038: each Claude Code transcript
+  (`~/.claude/projects/<slug>/*.jsonl`) is translated to v3 `Message[]` and
+  PERSISTED via `saveSessionById` so the imported session is listable + resumable
+  (`session ls` / `session show` / resume). Beyond sessions it translates the
+  non-session artifacts quanta models — MCP server config (`.mcp.json`), hooks
+  (`settings.json#hooks`), and repo rules (`CLAUDE.md`) — never carrying env/
+  secrets. Re-import is idempotent: a per-item content-hash (`wasAlreadyImported`)
+  recorded in the persisted import log skips already-imported items. N10 HARD
+  invariant: credential files (`auth.json`) are NEVER read — every byte-read
+  routes through `readImportFile`, which throws `CredentialReadBannedError` before
+  any read syscall. Slice geometry: `@/migration` stays pure (`@/shared` + `@/llm`)
+  and returns `TranslatedSession` payloads; the CLI surface adapter
+  (`session-import-handler.ts`, allowed `@/session`) owns persistence.
+evidence:
+  code:
+    - src/migration/index.ts
+    - src/migration/importer.ts
+    - src/migration/dedup.ts
+    - src/migration/types.ts
+    - src/migration/detector.ts
+    - src/migration/persistence.ts
+    - src/migration/translators/claude-code.ts
+    - src/migration/translators/claude-code-config.ts
+    - src/apps/cli/session-import-handler.ts
+    - src/apps/cli/repl.ts
+  adrs: ["docs/decisions/0430-competitor-import-persistence.md"]
+  tests:
+    unit:
+      - tests/unit/migration-import-persistence-e2e-hellgate.test.ts
+      - tests/unit/migration-import-roundtrip-hellgate.test.ts
+      - tests/unit/migration-config-translators.test.ts
+      - tests/unit/migration-persistence.test.ts
+      - tests/unit/migration-stages.test.ts
+      - tests/unit/migration-detector.test.ts
+      - tests/unit/apps/cli/session-cmd-shim-removal-hellgate.test.ts
+      - tests/unit/cli-session-commands.test.ts
+    integration:
+      - tests/integration/migration-claude-code-fixture.test.ts
+      - tests/integration/migration-claude-code-translator.test.ts
+      - tests/integration/external-agent-import-hell-e2e.test.ts
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  configurable=integrated, knobs=[] — INTENTIONAL. Import is an explicit one-shot
+  CLI ACTION (`session import <provider>`), not a per-turn AgentConfig toggle.
+  There is no runtime flag to flip: the surface IS the verb. The only inputs are
+  the positional `<provider>` and the boolean `--no-skills` flag, captured under
+  `config_refs.cli` rather than as `knobs` (knobs model per-turn config/env, which
+  this is not). Absent the verb the import path is never reached ⇒ byte-identical.
+
+  monitoring=integrated — the persisted import log (`appendImportLog` →
+  `~/.quanta/external_agent_session_imports.json`, fsync + stale-lock guarded) IS
+  the audit/observability surface: it records the run-summary row
+  (`persisted_sessions=N, skipped_duplicates=N, mcp_servers=N, hooks=N, rules=N`)
+  plus a per-session dedup row (`{ itemKind:"session", contentHash }`). The dedup
+  query consumes those rows, so the log is both monitoring AND the idempotency
+  ledger.
+
+  modes=[interactive, headless] — reachable from the REPL `session import` verb
+  (interactive) and the non-interactive CLI session-ops path (headless); it is not
+  a daemon/ci-bot/ide-resident feature.
+
+  Deterministic test posture (NO heuristics): the round-trip hellgate loads each
+  persisted session back from the store and asserts EXACT message-content equality
+  (not count>0); re-import asserts the on-disk file SET is identical (0 new); N10
+  is proven at syscall level by spying on `node:fs/promises.readFile` and asserting
+  ZERO calls target the `auth.json` path; malformed-line and partial-source cases
+  assert exact persisted counts. No arbitrary thresholds anywhere.
