@@ -51,13 +51,28 @@ Absent the flag ⇒ `buildModeCycle` returns `{}`, no `onCycleMode`/`meta` reach
 `readLine`, the shift+tab guard early-returns → raw-line-reader + session-loop are
 byte-identical (regression-anchored).
 
-## Honest limitation (deferred)
+## Honest limitations (deferred)
 
-`createSession` runs once per REPL session, so a mid-session shift+tab repaints the
-pill immediately but the NEW `permissionMode` only applies to a freshly-created
-session, not the next turn of the current one. A true per-turn apply needs a
-runtime permission-setter seam on `RuntimeContext` — out of scope for this slice,
-documented at the `createSession` call site and in RFC-08 §2.
+**(1) Session-boundary, not turn-boundary.** `createSession` runs once per REPL
+session, so a mid-session shift+tab repaints the pill immediately but the NEW
+`permissionMode` only applies to a freshly-created session, not the next turn of
+the current one. A true per-turn apply needs a runtime permission-setter seam on
+`RuntimeContext` — out of scope, documented at the `createSession` call site +
+RFC-08 §2.
+
+**(2) The `plan` rung's read-only fence (`agentMode`) is NOT yet applied to the
+runtime.** `RuntimeSessionConfig` (src/host/runtime/types.ts) carries
+`permissionMode` / `identityMode` / `toolProfile` but has NO `agentMode` slot, so
+cycling to `plan` correctly projects `permissionMode:"default"` + paints the
+`[PLAN]` pill on BOTH surfaces (input meta row + bottom status bar via the
+`onPosture` → `pills.update({mode})` sink), but the mutating-tool fence in
+`src/agent/mode.ts` (`isMutatingToolBlockedInMode`) does not engage because the
+chosen `agentMode` never reaches `createSession`. Wiring it requires threading a
+new `agentMode` field through `RuntimeSessionConfig` → context-binding →
+`AgentConfig.mode` — a multi-layer SDK change that overlaps another active work
+stream, so it is split to a follow-up ADR. Until then the `plan` rung is a
+VISUAL posture cue, not an enforced read-only gate. (The `bypass`/`acceptEdits`
+rungs DO apply, since they ride the existing `permissionMode` slot.)
 
 ## Tests
 

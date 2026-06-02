@@ -192,3 +192,23 @@ describe("mode-cycle — raw-line-reader shift+tab (§4.2)", () => {
     expect(await run(false)).toBe("o")
   })
 })
+
+// ── C. dual-surface posture sink (RFC-08 §4.3 — status bar + meta row) ──────
+// Reproduces buildModeCycle's onPosture wiring: every cycle must push the new
+// rung's AgentMode to the status-bar sink so BOTH surfaces agree. (The bottom
+// `formatMode` pill hides "default" and shows plan/review/audit.)
+
+describe("mode-cycle — dual-surface posture sink", () => {
+  test("C1 — cycle pushes each rung's agentMode to the status-bar sink", () => {
+    const store = createModeCycleStore()
+    const seen: string[] = []
+    const onPosture = (m: string): void => {
+      seen.push(m)
+    }
+    onPosture(store.current().agentMode) // initial paint (default)
+    onPosture(store.cycle().agentMode) // → acceptEdits (agentMode default)
+    onPosture(store.cycle().agentMode) // → plan (agentMode plan)
+    onPosture(store.cycle().agentMode) // → bypass (agentMode default)
+    expect(seen).toEqual(["default", "default", "plan", "default"])
+  })
+})
