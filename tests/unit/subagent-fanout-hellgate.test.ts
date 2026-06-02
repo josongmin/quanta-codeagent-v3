@@ -119,13 +119,39 @@ describe("ADR-0298 agent.isConcurrencySafe — declarative flip", () => {
 // ─── Section 2 — streaming-dispatch fanout integration ───────────────────────
 
 describe("ADR-0298 fanout — three sibling agent spawns dispatch concurrently", () => {
-  test("3 agent calls in one turn start before stream end (in-flight Phase 1)", async () => {
+  // The `agent` tool is `isConcurrencySafe:true` but `isReadOnly:false` (its
+  // child owns an unrestricted tool set — see agent-tool.ts). T02 gates
+  // early-start on early-dispatch eligibility; `agent` opts in via
+  // `isEarlyDispatchSafe:()=>true` because its effects land INSIDE an isolated
+  // child loop, not at the parent seam. We mirror the loop's production wiring
+  // here (`registry.isEarlyDispatchSafe` falls back to `isReadOnly`, then opts
+  // `agent` in) so the fan-out invariant is exercised exactly as it ships.
+  const isConcurrencySafe = (name: string): boolean => name === "agent"
+  const isEarlyDispatchSafe = (name: string): boolean => name === "agent"
+
+  test("3 agent calls in one turn ALL start before ANY finishes (in-flight Phase 1)", async () => {
+    // DETERMINISTIC concurrency proof — no wall-clock thresholds. Each dispatch
+    // records its start, then BLOCKS on a shared barrier that only releases once
+    // all three have started. If the engine serialized the siblings, the first
+    // dispatch would block forever waiting for starts #2/#3 that can't happen
+    // until it returns — so a serial regression DEADLOCKS the barrier rather
+    // than passing on a lucky timing margin. The assertion is purely by event
+    // ORDERING (every `start:*` precedes every `end:*`).
     const log: string[] = []
-    const isConcurrencySafe = (name: string): boolean => name === "agent"
+    const EXPECTED = 3
+    let started = 0
+    let releaseAll: () => void = () => undefined
+    const allStarted = new Promise<void>((resolve) => {
+      releaseAll = resolve
+    })
     const dispatch = async (call: StreamingCall): Promise<DispatchOutcome> => {
       log.push(`start:${call.id}`)
-      // Real gap so siblings can overlap.
-      await new Promise((r) => setTimeout(r, 10))
+      started += 1
+      if (started === EXPECTED) releaseAll()
+      // Park here until every sibling has STARTED. With genuine in-flight
+      // concurrency all three reach this point; with serialization this never
+      // resolves (the test would time out — a hard, non-flaky failure).
+      await allStarted
       log.push(`end:${call.id}`)
       return block(call.id, `child-${call.id}`)
     }
@@ -137,44 +163,50 @@ describe("ADR-0298 fanout — three sibling agent spawns dispatch concurrently",
       ...toolUseEvents("c3", "agent", { prompt: "p3", parallel_worker: true }),
       { type: "message_stop", stop_reason: "tool_use" },
     ]
-    const evLog: string[] = []
     async function* tracedGen(): AsyncGenerator<StreamEvent> {
       for (const ev of events) {
         yield ev
-        evLog.push(`ev:${ev.type}`)
         await Promise.resolve()
       }
     }
     const res = await streamingTurn({
       events: tracedGen(),
       isConcurrencySafe,
+      isEarlyDispatchSafe,
       dispatch,
       onToolStart: (call) => log.push(`scheduled:${call.id}`),
     })
     expect(res.kind).toBe("assembled")
-    // All three started BEFORE either finished — i.e. genuinely concurrent.
-    const s1 = log.indexOf("start:c1")
-    const s2 = log.indexOf("start:c2")
-    const s3 = log.indexOf("start:c3")
-    const e1 = log.indexOf("end:c1")
-    expect(s1).toBeGreaterThanOrEqual(0)
-    expect(s2).toBeGreaterThanOrEqual(0)
-    expect(s3).toBeGreaterThanOrEqual(0)
-    expect(s2).toBeLessThan(e1)
-    expect(s3).toBeLessThan(e1)
+    // All three started, and every start strictly precedes every end.
+    const starts = log.filter((l) => l.startsWith("start:"))
+    const firstEnd = log.findIndex((l) => l.startsWith("end:"))
+    expect(starts).toHaveLength(EXPECTED)
+    // No `end:*` appears before all three `start:*` — genuinely concurrent.
+    for (let i = 0; i < EXPECTED; i++) {
+      expect(log.indexOf(`start:c${i + 1}`)).toBeLessThan(firstEnd)
+    }
   })
 
-  test("wall-clock for 3 × 50ms concurrent < 3 × 50ms serial (race tolerance)", async () => {
-    // 50ms per child; with concurrency total should be ≈ 50ms (allowing
-    // scheduler jitter), with serialization ≈ 150ms. We use a 110ms ceiling:
-    // generous enough to absorb jitter on CI while strictly less than the
-    // 150ms serial floor — i.e. concurrency is observably required to pass.
-    const PER_CHILD_MS = 50
-    const SERIAL_FLOOR_MS = 3 * PER_CHILD_MS
-    const CEIL_MS = 110
-
+  test("concurrent fan-out collapses to ONE settle round, not N serial rounds", async () => {
+    // DETERMINISTIC replacement for the old wall-clock race-tolerance assertion.
+    // Instead of measuring milliseconds (machine-load flaky), we count settle
+    // ROUNDS: each dispatch parks on a single shared gate. Under concurrency all
+    // three are parked SIMULTANEOUSLY, so one `release()` settles all three
+    // (peak in-flight === 3). Under serialization only ONE is ever parked at a
+    // time, so peak in-flight would be 1. We assert peak concurrency === 3.
+    let inFlight = 0
+    let peak = 0
+    let release: () => void = () => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
     const dispatch = async (call: StreamingCall): Promise<DispatchOutcome> => {
-      await new Promise((r) => setTimeout(r, PER_CHILD_MS))
+      inFlight += 1
+      peak = Math.max(peak, inFlight)
+      // Once all three are parked together, open the gate so they all drain.
+      if (inFlight === 3) release()
+      await gate
+      inFlight -= 1
       return block(call.id, "x")
     }
     const events: StreamEvent[] = [
@@ -183,15 +215,15 @@ describe("ADR-0298 fanout — three sibling agent spawns dispatch concurrently",
       ...toolUseEvents("c3", "agent", { prompt: "p3" }),
       { type: "message_stop", stop_reason: "tool_use" },
     ]
-    const t0 = Date.now()
     await streamingTurn({
       events: gen(events),
-      isConcurrencySafe: (name) => name === "agent",
+      isConcurrencySafe,
+      isEarlyDispatchSafe,
       dispatch,
     })
-    const elapsed = Date.now() - t0
-    expect(elapsed).toBeLessThan(CEIL_MS)
-    expect(elapsed).toBeLessThan(SERIAL_FLOOR_MS)
+    // Peak in-flight === 3 ⇒ all three overlapped. A serial regression caps
+    // peak at 1 and DEADLOCKS the gate (hard timeout, never a flaky pass).
+    expect(peak).toBe(3)
   })
 
   test("3 spawn results retain model-call order regardless of completion order", async () => {

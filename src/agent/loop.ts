@@ -640,6 +640,13 @@ const streamConsume = async (
       // T02 M1 — early-start is read-only AND concurrency-safe; a mutating
       // concurrency-safe tool is deferred so a refused turn never commits it.
       isReadOnly: (name) => config.registry.isReadOnly(name),
+      // ADR-0298 / T02 reconciliation — early-start eligibility. Defaults to
+      // `isReadOnly` per-tool, but lets a tool whose effects are isolated from
+      // the parent seam (today: `agent`, whose work runs inside a child loop
+      // with its own abort signal) opt into in-flight overlap. Restores sibling
+      // `agent` fan-out concurrency (ADR-0296/0298) without loosening the
+      // parent-seam mutation guard for `session_config`/`automation_update`.
+      isEarlyDispatchSafe: (name) => config.registry.isEarlyDispatchSafe(name),
       // L3 wire (absorb #1, ADR-0060): route streaming `tool_use_*` events to
       // each tool's optional `onInputStart/Delta/Available` callbacks. The
       // seam is a one-`Map.get` fast-path no-op for tools that declare none,

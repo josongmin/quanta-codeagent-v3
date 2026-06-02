@@ -24,6 +24,19 @@ export class ToolRegistry {
     return this.tools.get(name)?.isReadOnly() ?? false
   }
 
+  /** ADR-0298 / T02 — streaming-dispatch early-start eligibility. A tool whose
+   *  side effects are isolated from the PARENT dispatch seam (today: `agent`,
+   *  whose effects run inside an isolated child loop with its own abort signal)
+   *  opts into in-flight overlap via `isEarlyDispatchSafe()`. When the tool does
+   *  NOT implement it we fall back to `isReadOnly()` — byte-identical to T02, so
+   *  parent-mutating concurrency-safe tools (`session_config`,
+   *  `automation_update`) stay deferred and a refused turn never commits them. */
+  isEarlyDispatchSafe(name: string): boolean {
+    const tool = this.tools.get(name)
+    if (!tool) return false
+    return (tool.isEarlyDispatchSafe ?? tool.isReadOnly).call(tool)
+  }
+
   /** Schemas advertised to the model. */
   specs(): ToolSpec[] {
     return [...this.tools.values()].map((t) => ({

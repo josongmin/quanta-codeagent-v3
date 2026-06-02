@@ -933,6 +933,30 @@ export interface ToolSecurityHooks<I = unknown> {
    *  Declaration-based posture: a custom tool that adds a new file/command
    *  surface explicitly opts in by implementing this method. */
   classifySource(input: I): SensitivityClass | null
+  /** ADR-0298 / T02 reconciliation — opt a NON-read-only tool into
+   *  streaming-dispatch EARLY-START (Phase 1 in-flight overlap).
+   *
+   *  T02 (`streaming-dispatch.ts`) restricts early-start to tools that are
+   *  read-only AND concurrency-safe, so a turn that ends in a `refusal` cannot
+   *  have already committed a MUTATING side effect at the PARENT dispatch seam
+   *  (e.g. `session_config` set_effort, `automation_update`). Those tools must
+   *  stay deferred and must NOT implement this method.
+   *
+   *  `agent` is the deliberate exception: it is `isConcurrencySafe:true` but
+   *  `isReadOnly:false` (it spawns a child loop that owns an unrestricted tool
+   *  set). Its effects do NOT land at the parent seam — they happen INSIDE the
+   *  child loop, behind the child's OWN dispatch gates and its OWN
+   *  `AbortController`, with the parent's depth/budget guards already applied.
+   *  Without this opt-in, T02's read-only gate silently serializes sibling
+   *  `agent` fan-out (ADR-0296/0298), defeating the whole parallel-worker
+   *  design. Implementing `isEarlyDispatchSafe: () => true` restores in-flight
+   *  concurrency for agent fan-out WITHOUT loosening the parent-seam mutation
+   *  guard for any other tool.
+   *
+   *  When omitted, the streaming-dispatch gate falls back to `isReadOnly()` —
+   *  byte-identical to the T02 behavior. Returning `true` here means "early
+   *  start is acceptable even though I am not read-only". */
+  isEarlyDispatchSafe(): boolean
 }
 
 /**

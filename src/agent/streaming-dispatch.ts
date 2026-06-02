@@ -106,6 +106,17 @@ export interface StreamingTurnArgs {
    *  post-stream serial phase, which the refusal short-circuit skips. Absent ⇒
    *  treated as NOT read-only (fail-safe: defer rather than early-start). */
   isReadOnly?: (name: string) => boolean
+  /** ADR-0298 / T02 reconciliation — early-start eligibility for a NON-read-only
+   *  tool whose effects are isolated from the parent dispatch seam. When wired
+   *  (== `registry.isEarlyDispatchSafe`, bound by the loop), the early-start
+   *  gate uses THIS predicate; a tool that opts in (today only `agent`, whose
+   *  effects run inside an isolated child loop with its own abort signal) may
+   *  overlap in flight even though it is not read-only, restoring sibling
+   *  `agent` fan-out concurrency (ADR-0296/0298). Tools that do NOT opt in fall
+   *  back to `isReadOnly` — so `session_config`/`automation_update` (mutating at
+   *  the parent seam) stay deferred and a refused turn never commits them.
+   *  Absent ⇒ the gate degrades to `isReadOnly` exactly as the T02 path did. */
+  isEarlyDispatchSafe?: (name: string) => boolean
   /** == `dispatchTool` bound by the loop (gates + execute + hooks). */
   dispatch: StreamingDispatch
   /** Mirror of text deltas (the loop emits `assistant_text`). */
@@ -277,6 +288,7 @@ const scheduleResolvedCall = (
   call: StreamingCall,
   isConcurrencySafe: StreamingTurnArgs["isConcurrencySafe"],
   isReadOnly: StreamingTurnArgs["isReadOnly"],
+  isEarlyDispatchSafe: StreamingTurnArgs["isEarlyDispatchSafe"],
   dispatch: StreamingDispatch,
   onToolStart: StreamingTurnArgs["onToolStart"],
 ): void => {
@@ -308,29 +320,36 @@ const scheduleResolvedCall = (
     return
   }
 
-  // T02 M1 — "concurrency-safe" is ORTHOGONAL to "read-only". A tool can be
-  // `isConcurrencySafe:true` while `isReadOnly:false` (e.g. `session_config`
-  // set_effort, `automation_update` schedule create/cancel). Early-start runs
-  // a call IN FLIGHT before the turn outcome is known; if the turn then ends in
-  // a `refusal` the refusal short-circuit can only skip the DEFERRED dispatch
-  // phase — it cannot un-start an already-fired in-flight call. So a refused
-  // turn would still commit that mutating side effect, breaking the "refusal
-  // executes nothing" invariant (ADR-0076 Gap-5). Restrict early-start to
-  // read-only tools: a non-read-only safe call is deferred (NOT barrier-
-  // engaging — later read-only safe calls may still overlap) so it only runs in
-  // the post-stream serial phase, which the refusal path skips. Fail-safe: an
-  // unwired `isReadOnly` (undefined) or a throwing predicate ⇒ NOT read-only ⇒
-  // defer.
-  let readOnly: boolean
+  // T02 M1 — "concurrency-safe" is ORTHOGONAL to "early-dispatch-safe". A tool
+  // can be `isConcurrencySafe:true` while NOT safe to early-start (e.g.
+  // `session_config` set_effort, `automation_update` schedule create/cancel —
+  // they MUTATE at the PARENT dispatch seam). Early-start runs a call IN FLIGHT
+  // before the turn outcome is known; if the turn then ends in a `refusal` the
+  // refusal short-circuit can only skip the DEFERRED dispatch phase — it cannot
+  // un-start an already-fired in-flight call. So a refused turn would still
+  // commit that mutating side effect, breaking the "refusal executes nothing"
+  // invariant (ADR-0076 Gap-5).
+  //
+  // Eligibility = `isEarlyDispatchSafe(name)` (== `registry.isEarlyDispatchSafe`,
+  // which itself falls back to `isReadOnly()` for tools that don't opt in). This
+  // keeps read-only tools eligible AND admits `agent` (ADR-0298): an `agent`
+  // spawn is NOT read-only, but its effects run inside an ISOLATED child loop
+  // with its own abort signal — not at the parent seam — so early-starting it is
+  // not a parent-seam mutation. Tools that mutate at the parent seam do NOT opt
+  // in and remain deferred (T02 guard intact). When the loop did not wire
+  // `isEarlyDispatchSafe`, fall back to `isReadOnly` so behaviour is identical
+  // to the original T02 path. Fail-safe: an unwired predicate (undefined) or a
+  // throwing predicate ⇒ NOT early-safe ⇒ defer.
+  let earlySafe: boolean
   try {
-    readOnly = isReadOnly?.(call.name) ?? false
+    earlySafe = (isEarlyDispatchSafe ?? isReadOnly)?.(call.name) ?? false
   } catch {
-    readOnly = false
+    earlySafe = false
   }
-  if (!readOnly) return
+  if (!earlySafe) return
 
-  // Read-only AND concurrency-safe AND no barrier yet ⇒ start it now, in
-  // flight, so it overlaps the remaining stream. NOT awaited here.
+  // Early-dispatch-safe AND concurrency-safe AND no barrier yet ⇒ start it now,
+  // in flight, so it overlaps the remaining stream. NOT awaited here.
   onToolStart?.(call)
   slot.promise = dispatch(call)
 }
@@ -421,6 +440,7 @@ const handleToolUseEvent = (state: TurnState, ev: StreamEvent, args: StreamingTu
     call,
     args.isConcurrencySafe,
     args.isReadOnly,
+    args.isEarlyDispatchSafe,
     args.dispatch,
     args.onToolStart,
   )
