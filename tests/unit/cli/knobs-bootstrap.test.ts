@@ -17,13 +17,19 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { allKnobs, knobsForSurface } from "@/runner/knobs"
+import { allKnobs, asAnyKnob, knobsForSurface, registerKnob } from "@/runner/knobs"
+import { advisorKnob } from "@/runner/knobs/knobs/advisor"
 import { bootstrapKnobs, parseCliKnobsFromArgv } from "../../../src/apps/cli/knobs-bootstrap"
 
 let dir = ""
 
 beforeAll(async () => {
   dir = await mkdtemp(join(tmpdir(), "knobs-boot-"))
+  // Re-register advisor if a sibling suite's `__resetRegistry()` wiped the
+  // singleton (cached re-imports do not re-fire registerKnob). Guarded so we
+  // never trigger a collision throw. Keeps the CLI-surface membership
+  // assertion below order-independent.
+  if (!allKnobs().has(advisorKnob.id)) registerKnob(asAnyKnob(advisorKnob))
 })
 
 afterAll(async () => {
@@ -77,20 +83,20 @@ describe("parseCliKnobsFromArgv", () => {
 })
 
 describe("bootstrapKnobs — registry side-effect + closed-port resolve", () => {
-  test("the 12 knob files registered at least once (side-effect import)", () => {
+  test("the knob files registered at least once (side-effect import)", () => {
     // The bootstrap module's static `import "@/runner/knobs/knobs/*"` lines
-    // are what populate the registry. We don't assert a strict count of 12
-    // because other suites may have called `__resetRegistry`; we only assert
-    // that the bootstrap import side-effect populated SOMETHING.
+    // are what populate the registry. We don't assert a strict count because
+    // other suites may have called `__resetRegistry`; we only assert that the
+    // bootstrap import side-effect populated SOMETHING.
     expect(allKnobs().size).toBeGreaterThan(0)
   })
 
-  test("knobsForSurface('cli') includes at least the 4 CLI knobs", () => {
+  test("knobsForSurface('cli') includes at least the CLI knobs (incl. ADR-0429 advisor)", () => {
     const cli = knobsForSurface("cli")
     // CLI surface set per the framework: closeout-guard, hooks, persona,
-    // working-state. (skills / must-pass / lsp exclude cli on purpose.)
-    // We assert membership inclusively — additional cli knobs ok.
-    for (const id of ["closeout-guard", "hooks", "persona", "working-state"]) {
+    // working-state + advisor (ADR-0429). (skills / must-pass / lsp exclude cli
+    // on purpose.) We assert membership inclusively — additional cli knobs ok.
+    for (const id of ["closeout-guard", "hooks", "persona", "working-state", "advisor"]) {
       expect(cli.has(id)).toBe(true)
     }
   })

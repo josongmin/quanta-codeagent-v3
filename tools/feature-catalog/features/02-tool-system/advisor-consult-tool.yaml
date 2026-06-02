@@ -1,0 +1,60 @@
+id: advisor-consult-tool
+title: Advisor consult tool (second opinion from a stronger model)
+section: 2
+subsystem: tier-1 LLM tools (ADR-0429)
+order: 429
+maturity: L3
+status: stable
+ui_surfaces: [cli, api]
+monitoring: n-a
+modes: [interactive, batch]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["absorbed:claude-cc-cli", "surface:tool", "tier:tier1"]
+depends_on: [role-model-override, model-swap-retry]
+purpose: |
+  Agent-callable PURE consult: the model deliberately asks a STRONGER /
+  DIFFERENT model for a SECOND OPINION mid-loop and gets the analysis back
+  in-band. Orthogonal to model-swap-on-retry (ADR-0066, failure-driven,
+  invisible to the model), role-model-override (ADR-0256, a resolver not a
+  tool), and delegate (ADR-0393, picks a MODE + spawns a mutating child). The
+  advisor offers ZERO tools to the consulted model — it cannot edit files, run
+  shells, or call tools (isReadOnly, hitlTier none, no extractShellCommand). An
+  explicit `model` outside the closed allowlist is rejected BEFORE the port is
+  reached; every operational failure (provider error / timeout / cancel / empty)
+  surfaces as a typed ok:false ToolFailure so the loop never throws. The
+  `advisor` knob (env QUANTA_ADVISOR_MODEL) env-flips the tool from absent to
+  live by populating AgentConfig.advisor via advisorConsultFromLLM; absent env ⇒
+  tool NOT registered (byte-identical, RFC §1.2).
+evidence:
+  code:
+    - src/tool/advisor/advisor.ts
+    - src/tool/advisor/port.ts
+    - src/tool/advisor/index.ts
+    - src/agent/tier1/advisor.ts
+    - src/runner/knobs/knobs/advisor.ts
+  adrs: ["docs/decisions/0429-advisor-consult-tool.md"]
+  tests:
+    unit:
+      - tests/unit/advisor-tool-hellgate.test.ts
+      - tests/unit/advisor-knob-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: ["advisor"]
+deliberate_hold: null
+notes: |
+  Default-OFF triple seam: (1) AgentConfig.advisor slot absent ⇒
+  buildAdvisorBlock returns [] ⇒ ToolRegistry byte-identical; (2) the `advisor`
+  knob parse returns undefined for any env value outside the closed
+  ADVISOR_MODEL_ALLOWLIST (no trimming / case-folding / prefixing — no
+  heuristics); (3) the knob's surfaces EXCLUDE bench so SWE-bench measurement
+  stays on the no-advisor trajectory + prefix-cache key.
+
+  The consult mechanism (advisorConsultFromLLM) streams ONE assistant turn with
+  tools:[] so the consulted model is structurally incapable of calling tools —
+  the advisor-knob hellgate asserts the advisor LLMPort was handed zero tools.
+  resolveModel honors an explicit (already allowlist-validated) model and falls
+  back to the env-chosen advisor model.
+
+  configurable: integrated — QUANTA_ADVISOR_MODEL reaches the tool via the knob
+  framework (resolveKnobs → applyKnobs → config.advisor → buildAdvisorBlock).

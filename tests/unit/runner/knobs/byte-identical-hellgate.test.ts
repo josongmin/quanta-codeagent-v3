@@ -13,11 +13,23 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
-import { allKnobs, applyKnobs, knobsForSurface, resolveKnobs } from "@/runner/knobs"
+import {
+  allKnobs,
+  applyKnobs,
+  asAnyKnob,
+  knobsForSurface,
+  registerKnob,
+  resolveKnobs,
+} from "@/runner/knobs"
+import { advisorKnob } from "@/runner/knobs/knobs/advisor"
 
 // Import the side-effect bundle ONCE so the registry is fully populated. This
-// matches the production assembly path.
+// matches the production assembly path. Side-effects register once per process
+// (cached); after a sibling suite's `__resetRegistry()` a cached re-import does
+// NOT re-fire registerKnob, so we ALSO re-register from the imported object,
+// guarded by presence so we never collide.
 beforeAll(async () => {
+  await import("@/runner/knobs/knobs/advisor")
   await import("@/runner/knobs/knobs/branch-search")
   await import("@/runner/knobs/knobs/closeout-guard")
   await import("@/runner/knobs/knobs/hooks")
@@ -30,6 +42,7 @@ beforeAll(async () => {
   await import("@/runner/knobs/knobs/skills")
   await import("@/runner/knobs/knobs/subagent")
   await import("@/runner/knobs/knobs/working-state")
+  if (!allKnobs().has(advisorKnob.id)) registerKnob(asAnyKnob(advisorKnob))
 })
 
 afterAll(() => {
@@ -127,9 +140,10 @@ describe("hellgate / byte-identical — registry import is side-effect-only on c
     expect(allKnobs().size).toBe(before)
   })
 
-  test("Registry has at least the 12 documented knob ids", () => {
+  test("Registry has at least the 13 documented knob ids", () => {
     const r = allKnobs()
     const required = [
+      "advisor",
       "lsp",
       "subagent",
       "skills",

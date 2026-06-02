@@ -13,6 +13,7 @@
  * production import path goes through this barrel.
  */
 
+import "./advisor"
 import "./branch-search"
 import "./closeout-guard"
 import "./hooks"

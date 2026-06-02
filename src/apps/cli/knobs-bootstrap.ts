@@ -33,6 +33,7 @@ import {
 
 // Side-effect registry population — ORDER does not matter (each knob is
 // independent); we keep alphabetical to make adding/removing one a clean diff.
+import "@/runner/knobs/knobs/advisor"
 import "@/runner/knobs/knobs/branch-search"
 import "@/runner/knobs/knobs/closeout-guard"
 import "@/runner/knobs/knobs/hooks"

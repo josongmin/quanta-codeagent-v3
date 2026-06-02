@@ -297,6 +297,11 @@ export {
   type SubmissionOp,
   submissionFromMessages,
 } from "./submission"
+export {
+  type AdvisorConsultFromLLMOptions,
+  advisorConsultFromLLM,
+  buildAdvisorBlock,
+} from "./tier1/advisor"
 export type {
   AgentConfig,
   AgentOutcome,
