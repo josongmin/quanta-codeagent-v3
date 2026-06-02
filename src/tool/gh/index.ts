@@ -28,13 +28,13 @@ import type { Tool, ToolContext, ToolEvent } from "../types"
 import { ghPrBlameTool } from "./pr-blame"
 import { ghPrOpenTool } from "./pr-open"
 import { normalizeRef, refRejected } from "./ref"
-import { DEFAULT_TIMEOUT_MS, type GhRunner, type GhRunResult, defaultGhRunner } from "./runner"
+import { DEFAULT_TIMEOUT_MS, defaultGhRunner, type GhRunner } from "./runner"
 
-// Barrel re-exports — historical import path for outside callers.
-export { defaultGhRunner } from "./runner"
-export type { GhRunner, GhRunResult } from "./runner"
 export { ghPrBlameTool } from "./pr-blame"
 export { ghPrOpenTool } from "./pr-open"
+export type { GhRunner, GhRunResult } from "./runner"
+// Barrel re-exports — historical import path for outside callers.
+export { defaultGhRunner } from "./runner"
 
 // ── Read tools ─────────────────────────────────────────────────────────────
 
@@ -418,7 +418,7 @@ export const ghTools = (runner: GhRunner = defaultGhRunner, opts: GhToolsOpts = 
   ghPrCommentTool(runner) as Tool,
   ghPrCreateTool(runner) as Tool,
   ghPrAutoMergeTool(runner) as Tool,
-  // ADR-0459 `gh_pr_open` (author + open) — OFF unless BOTH an author LLM and a
+  // ADR-0460 `gh_pr_open` (author + open) — OFF unless BOTH an author LLM and a
   // git runner are wired; absent ⇒ no extra tool (byte-identical).
   ...(opts.authorLLM !== undefined && opts.gitRunner !== undefined
     ? [ghPrOpenTool(runner, opts.gitRunner, opts.authorLLM, opts) as Tool]

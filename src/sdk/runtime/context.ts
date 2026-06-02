@@ -64,6 +64,13 @@ export interface RuntimeFacadeComposeOptions {
   /** Per-turn git turn-diff capture. When enabled, the loop builds a
    *  TurnDiffSession and emits `turn_diff_updated` events the CLI renders. */
   readonly gitObservability?: AgentConfig["gitObservability"]
+  /** ADR-0071 mid-turn typed control port. When set, the loop polls it once
+   *  per turn at the top of the body. MUST be paired with `activeTurnRef`
+   *  (the loop errors otherwise). Absent ⇒ loop never polls (byte-identical). */
+  readonly conversationActionPort?: AgentConfig["conversationActionPort"]
+  /** ADR-0071 — the `{ current: ActiveTurnState }` holder the loop overwrites
+   *  each turn boundary. Required companion of `conversationActionPort`. */
+  readonly activeTurnRef?: AgentConfig["activeTurnRef"]
 }
 
 export interface CreateRuntimeFacadeArgs extends InternalCreateRuntimeFacadeArgs {
@@ -201,6 +208,16 @@ const applyRuntimeFacadeComposeOptions = (
   if (compose.gitObservability !== undefined) {
     next = patchRuntimeContextState(next, {
       gitObservability: compose.gitObservability,
+    })
+  }
+  if (compose.conversationActionPort !== undefined) {
+    next = patchRuntimeContextState(next, {
+      conversationActionPort: compose.conversationActionPort,
+    })
+  }
+  if (compose.activeTurnRef !== undefined) {
+    next = patchRuntimeContextState(next, {
+      activeTurnRef: compose.activeTurnRef,
     })
   }
   if (compose.registryToolMapper !== undefined) {

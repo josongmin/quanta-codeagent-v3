@@ -1,5 +1,5 @@
 /**
- * Tier-1 per-subsystem builder: PR-SHIP block (ADR-0459 gh_pr_open seam).
+ * Tier-1 per-subsystem builder: PR-SHIP block (ADR-0460 gh_pr_open seam).
  *
  * Returns the single `gh_pr_open` tool (author a PR title/body from the diff,
  * then `gh pr create` in one step) wired to the host-supplied one-shot author

@@ -229,7 +229,22 @@ const takeAnchor = async (
     policy.recordAnchored({ workspace: req.ctx.cwd, turnId })
   }
   try {
-    await cfg.odb.registerHead(req.ctx.cwd)
+    const sha = await cfg.odb.registerHead(req.ctx.cwd)
+    // ADR-0203 — when the policy is granular (the surface wired a
+    // `GranularCheckpointPolicy`), record the registerHead SHA against the
+    // canonical tag so `/rewind-tool` can resolve+restore it. NON-granular
+    // (default) policies lack these methods ⇒ the branch is skipped ⇒
+    // byte-identical legacy behaviour. NO-THROW preserved (still inside try).
+    const gp = policy as Partial<import("./per-tool-checkpoint").GranularCheckpointPolicy>
+    if (typeof gp.computeTag === "function" && typeof gp.recordAnchorSha === "function") {
+      const anchorCtx = {
+        workspace: req.ctx.cwd,
+        ...(typeof turnId === "string" && turnId.length > 0 ? { turnId } : {}),
+        toolName: req.call.name,
+      }
+      const tag = gp.computeTag(anchorCtx)
+      if (tag !== null && tag !== undefined) gp.recordAnchorSha(tag, sha, anchorCtx)
+    }
   } catch {
     // Swallow — observability instrumentation MUST NOT alter the call
     // outcome. A real observability hook would forward this to a trace

@@ -842,7 +842,16 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    *  | `"per-turn"`); `oracle` overrides the default destructiveness oracle
    *  (which trusts `Tool.isReadOnly()`).
    */
-  shadowCheckpoint?: { mode: CheckpointTriggerMode; oracle?: DestructivenessOracle }
+  shadowCheckpoint?: {
+    mode: CheckpointTriggerMode
+    oracle?: DestructivenessOracle
+    /** ADR-0203 — when set, the dispatch wrap uses THIS granular policy
+     *  instance (instead of building a fresh `defaultCheckpointPolicy`) and
+     *  calls `recordAnchorSha` with the `ShadowOdb.registerHead` SHA so the
+     *  policy's `.registry` accumulates tag→SHA entries for `/rewind-tool`.
+     *  Absent ⇒ byte-identical legacy turn-grain behaviour. */
+    granularPolicy?: import("./per-tool-checkpoint").GranularCheckpointPolicy
+  }
   /**
    * ADR-0400 Shadow Verify port slot (sibling of ADR-0396 wave-1 port). When
    * set, `buildShadowVerifyBlock` registers the `shadow_verify` LLM tool

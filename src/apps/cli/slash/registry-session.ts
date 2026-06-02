@@ -61,6 +61,43 @@ const debugCmd: SlashCommand = {
   },
 }
 
+/** `/cancel` — enqueue a mid-turn cancel of the active turn (ADR-0071). The
+ *  loop drains the action at the next turn-poll; the surface only queues it.
+ *  Absent surface ⇒ "not wired" (boot with QUANTA_CONVERSATION_ACTIONS=on). */
+const cancelCmd: SlashCommand = {
+  name: "/cancel",
+  describe: "Cancel the active turn (mid-turn typed control, ADR-0071)",
+  category: "session",
+  async run(args, ctx) {
+    if (ctx.conversationActions === undefined) {
+      ctx.out("/cancel: not wired in this surface (boot with QUANTA_CONVERSATION_ACTIONS=on)\n")
+      return 0
+    }
+    const reason = args.join(" ").trim() || "user requested cancel"
+    ctx.conversationActions.pushCancel(reason)
+    ctx.out(`/cancel: queued (applies at next turn boundary): ${reason}\n`)
+    return 0
+  },
+}
+
+/** `/summarize-now` — request a mid-turn conversation summarization (ADR-0071). */
+const summarizeNowCmd: SlashCommand = {
+  name: "/summarize-now",
+  describe: "Request a mid-turn conversation summarization (ADR-0071)",
+  category: "session",
+  async run(_args, ctx) {
+    if (ctx.conversationActions === undefined) {
+      ctx.out(
+        "/summarize-now: not wired in this surface (boot with QUANTA_CONVERSATION_ACTIONS=on)\n",
+      )
+      return 0
+    }
+    ctx.conversationActions.pushSummarize()
+    ctx.out("/summarize-now: queued (applies at next turn boundary)\n")
+    return 0
+  },
+}
+
 /** Slot order matches the layered ordering. The historic slot of
  *  `/retry-with` (index 6 in the old BUILTINS) is intentionally NOT
  *  preserved — see ADR-0306 §"Slot ordering" for the rationale. */
@@ -69,4 +106,6 @@ export const SESSION_SLASH_COMMANDS: readonly SlashCommand[] = [
   sideCmd,
   debugCmd,
   whyCmd,
+  cancelCmd,
+  summarizeNowCmd,
 ]

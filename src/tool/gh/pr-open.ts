@@ -1,5 +1,5 @@
 /**
- * `gh_pr_open` — author + open a GitHub PR in ONE step (ADR-0459).
+ * `gh_pr_open` — author + open a GitHub PR in ONE step (ADR-0460).
  *
  * The missing link between `git_compose_pr` (authors title/body, opens nothing)
  * and `gh_pr_create` (opens a PR from a title/body you already have). Competitor
@@ -27,15 +27,18 @@
  */
 import { z } from "zod"
 import type { LLMPort } from "../../llm"
-import { composePrText } from "../git/compose"
 import { publishGitDirective } from "../git/_directive-publish"
+import { composePrText } from "../git/compose"
 import type { GitRunner } from "../git/types"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import type { GhPrCreateToolOpts } from "./index"
-import { DEFAULT_TIMEOUT_MS, type GhRunner, defaultGhRunner } from "./runner"
+import { DEFAULT_TIMEOUT_MS, defaultGhRunner, type GhRunner } from "./runner"
 
 const prOpenSchema = z.object({
-  base: z.string().optional().describe("Base branch (default: main). 'origin/' prefix is stripped."),
+  base: z
+    .string()
+    .optional()
+    .describe("Base branch (default: main). 'origin/' prefix is stripped."),
   head: z.string().optional().describe("Head branch (default: the current branch)"),
   hint: z.string().optional().describe("Optional intent hint for the PR author"),
   draft: z.boolean().optional().describe("Open as a draft PR"),
@@ -50,7 +53,8 @@ type PrOpenInput = z.infer<typeof prOpenSchema>
  *  structural gate; this is a fast, message-friendly guard. */
 const PROTECTED_HEADS = new Set(["main", "master", "develop"])
 
-const stripOriginPrefix = (b: string): string => (b.startsWith("origin/") ? b.slice("origin/".length) : b)
+const stripOriginPrefix = (b: string): string =>
+  b.startsWith("origin/") ? b.slice("origin/".length) : b
 
 /** Resolve the current branch via `git rev-parse --abbrev-ref HEAD`. Returns
  *  undefined on detached HEAD ("HEAD") or any git failure. */
@@ -66,7 +70,11 @@ const currentBranch = async (runner: GitRunner, ctx: ToolContext): Promise<strin
 
 /** Best-effort: does the local repo know an `origin/<head>` ref? A false
  *  negative (pushed but not fetched) is possible — the message says so. */
-const headOnOrigin = async (runner: GitRunner, head: string, ctx: ToolContext): Promise<boolean> => {
+const headOnOrigin = async (
+  runner: GitRunner,
+  head: string,
+  ctx: ToolContext,
+): Promise<boolean> => {
   try {
     const r = await runner.run(
       ["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${head}`],
@@ -80,6 +88,71 @@ const headOnOrigin = async (runner: GitRunner, head: string, ctx: ToolContext): 
 }
 
 const err = (output: string): ToolEvent => ({ type: "result", result: { ok: false, output } })
+
+/** Resolve + validate the gh branch NAMES (distinct from the author's revision
+ *  range). Extracted from `execute` to keep its cognitive complexity in budget. */
+const resolveBranches = async (
+  input: PrOpenInput,
+  gitRunner: GitRunner,
+  ctx: ToolContext,
+): Promise<{ ok: true; base: string; head: string } | { ok: false; output: string }> => {
+  const base = stripOriginPrefix(input.base ?? "main")
+  const head = input.head ?? (await currentBranch(gitRunner, ctx))
+  if (head === undefined) {
+    return {
+      ok: false,
+      output: "could not resolve the current branch (detached HEAD?) — pass {head}",
+    }
+  }
+  if (PROTECTED_HEADS.has(head)) {
+    return {
+      ok: false,
+      output: `head '${head}' is protected — a PR opens FROM a feature branch, not '${head}'`,
+    }
+  }
+  if (head === base) {
+    return { ok: false, output: `head and base are both '${head}' — nothing to open a PR for` }
+  }
+  return { ok: true, base, head }
+}
+
+/** Run `gh pr create` with argv built as DISTINCT items (no shell ⇒ no
+ *  injection). Extracted to keep `execute` within the complexity budget. */
+const runGhCreate = async (
+  ghRunner: GhRunner,
+  a: { title: string; body: string; base: string; head: string; draft: boolean },
+  ctx: ToolContext,
+): Promise<{ ok: true; url: string } | { ok: false; output: string }> => {
+  const argv = [
+    "gh",
+    "pr",
+    "create",
+    "--title",
+    a.title,
+    "--body",
+    a.body,
+    "--base",
+    a.base,
+    "--head",
+    a.head,
+  ]
+  if (a.draft) argv.push("--draft")
+  const r = await ghRunner(argv, ctx.cwd, DEFAULT_TIMEOUT_MS * 2)
+  if (r.code !== 0) return { ok: false, output: `gh pr create failed: ${r.stderr.slice(0, 500)}` }
+  return { ok: true, url: r.stdout.trim() }
+}
+
+/** Success-only publish of the `create-pr` directive (mirrors gh_pr_create,
+ *  ADR-0241). Absent emitter/collector ⇒ no-op (byte-identical). */
+const publishCreatePr = (url: string, isDraft: boolean, opts: GhPrCreateToolOpts): void => {
+  const publishOpts: {
+    emitter?: import("../../agent/git-directives").GitDirectiveEmitter
+    collector?: import("../../git/directive-emit").GitDirectiveCollector
+  } = {}
+  if (opts.gitDirectiveEmitter !== undefined) publishOpts.emitter = opts.gitDirectiveEmitter
+  if (opts.gitDirectiveCollector !== undefined) publishOpts.collector = opts.gitDirectiveCollector
+  publishGitDirective({ kind: "create-pr", url, isDraft }, publishOpts)
+}
 
 export const ghPrOpenTool = (
   ghRunner: GhRunner = defaultGhRunner,
@@ -108,20 +181,12 @@ export const ghPrOpenTool = (
     const { hint, draft, dryRun } = parsed.data
 
     // 1. resolve branch NAMES for gh (distinct from the author's revision range)
-    const baseBranch = stripOriginPrefix(parsed.data.base ?? "main")
-    const headBranch = parsed.data.head ?? (await currentBranch(gitRunner, ctx))
-    if (headBranch === undefined) {
-      yield err("could not resolve the current branch (detached HEAD?) — pass {head}")
+    const branches = await resolveBranches(parsed.data, gitRunner, ctx)
+    if (!branches.ok) {
+      yield err(branches.output)
       return
     }
-    if (PROTECTED_HEADS.has(headBranch)) {
-      yield err(`head '${headBranch}' is protected — a PR opens FROM a feature branch, not '${headBranch}'`)
-      return
-    }
-    if (headBranch === baseBranch) {
-      yield err(`head and base are both '${headBranch}' — nothing to open a PR for`)
-      return
-    }
+    const { base: baseBranch, head: headBranch } = branches
 
     // 2. author the prose from the diff range (gh branch names → git revisions)
     const messages: ToolEvent[] = []
@@ -159,37 +224,25 @@ export const ghPrOpenTool = (
     }
 
     // 5. open the PR
-    const argv = [
-      "gh",
-      "pr",
-      "create",
-      "--title",
-      composed.title,
-      "--body",
-      composed.body,
-      "--base",
-      baseBranch,
-      "--head",
-      headBranch,
-    ]
-    if (draft === true) argv.push("--draft")
     yield { type: "progress", message: `gh pr create ${headBranch} → ${baseBranch}` }
-    const r = await ghRunner(argv, ctx.cwd, DEFAULT_TIMEOUT_MS * 2)
-    if (r.code !== 0) {
-      yield err(`gh pr create failed: ${r.stderr.slice(0, 500)}`)
+    const opened = await runGhCreate(
+      ghRunner,
+      {
+        title: composed.title,
+        body: composed.body,
+        base: baseBranch,
+        head: headBranch,
+        draft: draft === true,
+      },
+      ctx,
+    )
+    if (!opened.ok) {
+      yield err(opened.output)
       return
     }
-    const url = r.stdout.trim()
 
     // 6. success-only directive publish (mirrors gh_pr_create, ADR-0241)
-    const publishOpts: {
-      emitter?: import("../../agent/git-directives").GitDirectiveEmitter
-      collector?: import("../../git/directive-emit").GitDirectiveCollector
-    } = {}
-    if (opts.gitDirectiveEmitter !== undefined) publishOpts.emitter = opts.gitDirectiveEmitter
-    if (opts.gitDirectiveCollector !== undefined) publishOpts.collector = opts.gitDirectiveCollector
-    publishGitDirective({ kind: "create-pr", url, isDraft: draft === true }, publishOpts)
-
-    yield { type: "result", result: { ok: true, output: url } }
+    publishCreatePr(opened.url, draft === true, opts)
+    yield { type: "result", result: { ok: true, output: opened.url } }
   },
 })

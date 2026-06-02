@@ -71,6 +71,8 @@ const EXPECTED_NAMES = new Set<string>([
   "/side",
   "/debug",
   "/why",
+  "/cancel",
+  "/summarize-now",
   // app (env-gated `/rewind`+`/fork`+`/memory` enabled by default)
   "/permission",
   "/mcp",

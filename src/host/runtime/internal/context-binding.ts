@@ -88,6 +88,8 @@ interface RuntimeContextSnapshot {
   readonly onPreCompact?: AgentConfig["onPreCompact"]
   readonly imageSanitizationRetry?: AgentConfig["imageSanitizationRetry"]
   readonly gitObservability?: AgentConfig["gitObservability"]
+  readonly conversationActionPort?: AgentConfig["conversationActionPort"]
+  readonly activeTurnRef?: AgentConfig["activeTurnRef"]
 }
 
 type RuntimeContextPatch = Partial<
@@ -124,6 +126,8 @@ type RuntimeContextPatch = Partial<
     | "onPreCompact"
     | "imageSanitizationRetry"
     | "gitObservability"
+    | "conversationActionPort"
+    | "activeTurnRef"
   >
 >
 
@@ -526,6 +530,8 @@ const buildOptionalSnapshotFields = (
   ...whenDefined("onPreCompact", base.onPreCompact),
   ...whenDefined("imageSanitizationRetry", base.imageSanitizationRetry),
   ...whenDefined("gitObservability", base.gitObservability),
+  ...whenDefined("conversationActionPort", base.conversationActionPort),
+  ...whenDefined("activeTurnRef", base.activeTurnRef),
 })
 
 const buildSnapshot = (base: RuntimeBase): RuntimeContextSnapshot => ({

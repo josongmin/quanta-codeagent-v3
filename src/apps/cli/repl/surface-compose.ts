@@ -71,7 +71,12 @@ import type { VoiceLiveCtx } from "../voice-live-cmd"
 import type { CliFeatureConfig } from "./cli-feature-config"
 import { type ContextUsageHolder, createContextUsageHolder } from "./context-usage-snapshot"
 import { type ConvCheckpointWire, startConvCheckpointWire } from "./conv-checkpoint-wire"
+import {
+  type ConversationActionSurface,
+  createConversationActionSurface,
+} from "./conversation-action-surface"
 import { type ComposerHandle, createComposerHandle } from "./ctx-adapters/composer-edit-adapter"
+import { buildPerToolCheckpointWire } from "./per-tool-checkpoint-wire"
 import { createPerToolSnapshotRecorder } from "./per-tool-snapshot-recorder"
 import {
   createPlaybookTriggerSurfaceSeam,
@@ -497,6 +502,10 @@ const buildSurfaceDispatch = (args: {
    *  Present only when `QUANTA_SHADOW` is on ⇒ otherwise slot omitted and the
    *  slash prints "shadow store not configured". */
   readonly shadowOdb?: ShadowOdb | undefined
+  /** ADR-0071 mid-turn control surface. Present only when
+   *  QUANTA_CONVERSATION_ACTIONS is on; absent ⇒ /cancel + /summarize-now
+   *  print "not wired". */
+  readonly conversationActions?: ConversationActionSurface | undefined
 }): ((input: string) => Promise<boolean>) => {
   return async (input: string): Promise<boolean> => {
     const head = input.split(/\s+/)[0] ?? ""
@@ -545,6 +554,10 @@ const buildSurfaceDispatch = (args: {
       })(),
       // `/snapshot` shadow store: present only when QUANTA_SHADOW is on.
       ...(args.shadowOdb !== undefined ? { shadowOdb: args.shadowOdb } : {}),
+      // `/cancel` + `/summarize-now` mid-turn control surface.
+      ...(args.conversationActions !== undefined
+        ? { conversationActions: args.conversationActions }
+        : {}),
     }
     await runSlashCommand(input, ctx)
     return true
@@ -697,6 +710,21 @@ export const composeSurfaceWires = (
   const shadowOdb: ShadowOdb | undefined = isEnvTruthy(envSource.QUANTA_SHADOW)
     ? defaultShadowOdb()
     : undefined
+  // ADR-0203/0205 — `/rewind-tool` per-tool-checkpoint wire. Gated on
+  // QUANTA_PER_TOOL_CHECKPOINT and requires the shadow ODB (the files leg
+  // rewinds against it). Builds ONE session-scoped granular policy whose
+  // `.registry` is shared between the dispatch producer (threaded into
+  // `shadowCheckpoint.granularPolicy` below) and the `/rewind-tool` consumer
+  // (buildReplSlashCtx perToolRegistry/perToolRestorePort). Absent ⇒ slot
+  // omitted ⇒ `/rewind-tool` prints "not wired" (byte-identical).
+  const perToolCkpt =
+    isEnvTruthy(envSource.QUANTA_PER_TOOL_CHECKPOINT) && shadowOdb !== undefined
+      ? buildPerToolCheckpointWire({
+          shadowOdb,
+          conversationStore: convStore,
+          workspace: process.cwd(),
+        })
+      : undefined
   // Pre-compaction HITL — env-gated `QUANTA_PRECOMPACT_CONFIRM`. When the loop is
   // about to fold history, prompt the user via the SAME interactive approval
   // mechanism tool-confirmations use. Deny ⇒ defer one turn (never fold without
@@ -713,6 +741,12 @@ export const composeSurfaceWires = (
           return decision === "approve" ? "approve" : "defer_one_turn"
         }
       : undefined
+  // ADR-0071 — mid-turn typed control surface (/cancel + /summarize-now). Env-
+  // gated `QUANTA_CONVERSATION_ACTIONS`; absent ⇒ undefined ⇒ neither the port
+  // nor activeTurnRef is wired ⇒ the loop never polls (byte-identical).
+  const conversationActions = isEnvTruthy(envSource.QUANTA_CONVERSATION_ACTIONS)
+    ? createConversationActionSurface()
+    : undefined
   const runtimeFacadeCompose: RuntimeFacadeComposeOptions = {
     granularRegistry,
     onPromptAssembled: promptAssembled.sink,
@@ -737,7 +771,12 @@ export const composeSurfaceWires = (
           shadowOdb,
           // Auto-anchor BEFORE destructive tools so `/snapshot` has restore
           // points without the user manually checkpointing.
-          shadowCheckpoint: { mode: "pre-destructive" as const },
+          shadowCheckpoint: {
+            mode: "pre-destructive" as const,
+            // When /rewind-tool is on, hand the SAME session-scoped granular
+            // policy to the dispatch wrap so its registry accumulates anchors.
+            ...(perToolCkpt !== undefined ? { granularPolicy: perToolCkpt.policy } : {}),
+          },
         }
       : {}),
     ...(onPreCompact !== undefined ? { onPreCompact } : {}),
@@ -752,6 +791,12 @@ export const composeSurfaceWires = (
     // consume it. Env-gated `QUANTA_TURN_DIFF`; per-turn `git diff` spawn cost
     // when on, byte-identical when off.
     ...(isEnvTruthy(envSource.QUANTA_TURN_DIFF) ? { gitObservability: { enabled: true } } : {}),
+    ...(conversationActions !== undefined
+      ? {
+          conversationActionPort: conversationActions.port,
+          activeTurnRef: conversationActions.activeTurnRef,
+        }
+      : {}),
   }
   // ADR-0292 — turn-end record wire. Env-gated: `QUANTA_CHECKPOINT_CONV=on`
   // wires the live wire; anything else leaves the slot `null` so the slash
@@ -858,10 +903,12 @@ export const composeSurfaceWires = (
     // the slot entirely (default-OFF byte-identical).
     composerHandle,
     conversationStore: convStore,
-    // NOTE: `/rewind-tool` (perToolRegistry) is intentionally NOT wired here —
-    // it needs the ADR-0203 per-tool-checkpoint POLICY (a distinct subsystem
-    // from the `granularRegistry` GranularRegistryPort above) wired as a
-    // producer into dispatch first. Tracked as a deeper follow-up.
+    // `/rewind-tool` — the ADR-0203 per-tool-checkpoint registry (lookup-bearing)
+    // + 3-way restore port, sharing the SAME granular policy instance threaded
+    // into the dispatch producer (shadowCheckpoint.granularPolicy above).
+    ...(perToolCkpt !== undefined
+      ? { perToolRegistry: perToolCkpt.registry, perToolRestorePort: perToolCkpt.restore }
+      : {}),
     ...(setup.runtimeContext.toolProfileState() !== undefined
       ? { toolProfileState: setup.runtimeContext.toolProfileState() }
       : {}),
@@ -939,6 +986,7 @@ export const composeSurfaceWires = (
           }
         : undefined,
     ...(shadowOdb !== undefined ? { shadowOdb } : {}),
+    ...(conversationActions !== undefined ? { conversationActions } : {}),
   })
 
   return {

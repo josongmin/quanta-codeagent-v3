@@ -117,6 +117,8 @@ describe("BUILTINS table", () => {
       "/side",
       "/debug",
       "/why",
+      "/cancel",
+      "/summarize-now",
       // ── app layer (./slash/registry-app.ts) ─────────────────────────
       "/permission",
       "/mcp",

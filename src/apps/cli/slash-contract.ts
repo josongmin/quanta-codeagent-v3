@@ -113,6 +113,12 @@ export interface SlashContext {
    *  `/voice-live` declines cleanly (the realtime slice is never touched and
    *  the REPL is byte-identical). Absent slot ⇒ "not wired in this surface". */
   readonly voiceLive?: (() => Promise<VoiceLiveCtx | undefined>) | undefined
+  /** ADR-0071 mid-turn typed control surface. `/cancel` + `/summarize-now`
+   *  push typed actions the loop drains per-turn. Absent ⇒ those commands
+   *  print "not wired in this surface". */
+  readonly conversationActions?:
+    | import("./repl/conversation-action-surface").ConversationActionSurface
+    | undefined
 }
 
 /** Inventory row returned by {@link SlashContext.skills}. Mirrors the host

@@ -330,6 +330,7 @@ export {
   buildAdvisorBlock,
 } from "./tier1/advisor"
 export { buildComposeAuthoringBlock } from "./tier1/compose-authoring"
+export { buildPrShipBlock } from "./tier1/pr-ship"
 export type {
   AgentConfig,
   AgentOutcome,

@@ -67,6 +67,7 @@ import {
   buildObjectiveBlock,
   buildPlanExitBlock,
   buildPlanMutationBlock,
+  buildPrShipBlock,
   buildShadowBlock,
   buildShadowVerifyBlock,
   buildSkillBlock,
@@ -195,7 +196,7 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
   // tools (default-OFF: empty array when composeAuthoring slot absent).
   extraTools.push(...buildComposeAuthoringBlock(config))
 
-  // ADR-0459 (PR-ship seam) — gh_pr_open (author + `gh pr create` in one step).
+  // ADR-0460 (PR-ship seam) — gh_pr_open (author + `gh pr create` in one step).
   // Reuses the SAME composeAuthoring.authorLLM slot but is a WRITE tool, so it
   // rides a SEPARATE builder from the sealed read-only compose block (write
   // safety is enforced by the permission layer + plan-mode dispatch gate).

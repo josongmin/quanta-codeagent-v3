@@ -84,11 +84,18 @@ export const wireCheckpointedEffectChannel = (
   // so omitting it does NOT set `oracle: undefined` (would violate
   // `exactOptionalPropertyTypes`). We mirror that posture here: only spread
   // `oracle` when the caller supplied one.
-  const policy: CheckpointPolicy = defaultCheckpointPolicy({
-    mode: cp.mode,
-    odb,
-    ...(cp.oracle !== undefined ? { oracle: cp.oracle } : {}),
-  })
+  // ADR-0203 — prefer a caller-supplied session-scoped granular policy so its
+  // tag registry SURVIVES across calls (a throwaway default would rebuild an
+  // empty registry per call, never accumulating anchors for `/rewind-tool`).
+  // `GranularCheckpointPolicy extends CheckpointPolicy`, so the assignment is
+  // sound and `withAutoCheckpoint` already takes a plain `CheckpointPolicy`.
+  const policy: CheckpointPolicy =
+    cp.granularPolicy ??
+    defaultCheckpointPolicy({
+      mode: cp.mode,
+      odb,
+      ...(cp.oracle !== undefined ? { oracle: cp.oracle } : {}),
+    })
 
   return withAutoCheckpoint(
     inner,
