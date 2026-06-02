@@ -12,6 +12,7 @@ import type {
 import type { ContentBlock, ImageBlock, Message, ResponsesContinuationStore } from "@/llm"
 import { inferReviewKind, reasonCodeFor, type ToolAction } from "@/permission"
 import type { CapabilityManifest, PendingApprovalView } from "@/protocol/session"
+import { wireInteractiveKnobs } from "@/runner/assemble"
 import type {
   IdentityModeSessionState,
   SystemSource,
@@ -353,6 +354,26 @@ const buildBaseFromBootstrap = (args: {
     summarizerLlm: args.overlay?.summarizerLlm,
   })
 
+  // jun-02 — fold the three INTERACTIVE knobs (advisor / task-budget /
+  // compose-authoring) at the CLI composition root, reusing each knob's own
+  // parse+apply so the env→config semantics match the matrix. Without this the
+  // knobs were DEAD on the live CLI surface (`applyKnobs` is bench-only). The
+  // env view is `process.env` — consistent with `wireRuntimePorts` (which also
+  // defaults to `process.env` at this same composition boundary). Absent env ⇒
+  // base unchanged (byte-identical).
+  return wireInteractiveKnobs(buildBootstrapBaseShape(args, compaction), process.env, "cli")
+}
+
+const buildBootstrapBaseShape = (
+  args: {
+    readonly boot: SessionBootstrapResult
+    readonly stream: AgentConfig["stream"]
+    readonly onConfirm: NonNullable<AgentConfig["onConfirm"]>
+    readonly includeSearchPipeline?: boolean
+    readonly overlay?: RuntimeBootstrapOverlay
+  },
+  compaction: AgentConfig["compaction"] | undefined,
+): RuntimeBase => {
   return ensureSessionId({
     llm: args.boot.llm,
     registry: ensureAutomationRegistry(args.boot.tooling.registry, undefined),
@@ -377,6 +398,11 @@ const buildBaseFromBootstrap = (args: {
     ...whenDefined("skills", args.boot.tooling.skillsConfig),
     ...whenDefined("compactionBreaker", args.boot.tooling.compactionBreakerConfig),
     ...whenDefined("verifyGuard", args.boot.tooling.verifyGuardConfig),
+    // ADR-0432 — set the session budget meter when the operator opted into the
+    // write-guard (bootstrap constructs it ONLY then). The loop's existing tick
+    // sites feed it; the write-guard reads `() => meter.remainingPercent()`
+    // (threaded into buildTooling). Absent ⇒ slot omitted (byte-identical).
+    ...whenDefined("budgetMeter", args.boot.budgetMeter),
     ...whenDefined(
       "searchPipeline",
       args.includeSearchPipeline === true ? args.boot.tooling.searchPipeline : undefined,

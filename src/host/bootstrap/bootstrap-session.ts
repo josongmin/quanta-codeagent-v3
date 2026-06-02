@@ -16,7 +16,7 @@
  * the produced result is identical to today's.
  */
 
-import { buildSystemPrompt, createEffortStore, parseEffort } from "@/agent"
+import { BudgetMeter, buildSystemPrompt, createEffortStore, parseEffort } from "@/agent"
 import { defaultFocusChainTracker, type FocusChainPort } from "@/agent/focus-chain"
 import {
   buildSystemPromptForMode,
@@ -255,6 +255,19 @@ export const bootstrapSession = async (
       followUpQueue: lifecycleFollowUpQueue,
     } = deps.buildLifecycleBundle(featureCfg)
 
+    // ADR-0432 — session budget meter for the self-edit memory write-guard.
+    // Constructed ONLY when the operator opted in via QUANTA_MEMORY_WRITE_GUARD_PCT
+    // (the single activation gate), so the absent-env path constructs NO meter,
+    // sets nothing on the config, and is byte-identical to today. The meter has
+    // NO dials by itself (so the loop's `checkExhausted` never trips — the CLI's
+    // own `maxTurns` remains the sole stop) and serves as the LIVE 0..100
+    // `remainingPercent()` source the write-guard reads; the loop's existing
+    // tick sites (`config.budgetMeter?.tick(...)`) feed it once it is set on the
+    // config in `context-binding.ts`. Without this thread the guard was inert
+    // because the surface never supplied a `budgetRemainingPercent` closure.
+    const writeGuardActive = runtime.env.QUANTA_MEMORY_WRITE_GUARD_PCT !== undefined
+    const budgetMeter = writeGuardActive ? new BudgetMeter() : undefined
+
     const tooling = deps.buildTooling(
       features.mcpTools,
       features.lspTools,
@@ -263,6 +276,7 @@ export const bootstrapSession = async (
       slog,
       lifecycleTaskRegistry,
       features.metrics,
+      budgetMeter !== undefined ? () => budgetMeter.remainingPercent() : undefined,
     )
 
     const mcpSurface = deps.buildMcpSurfaceInfo({
@@ -364,6 +378,7 @@ export const bootstrapSession = async (
       llm: finalLLM,
       features,
       tooling,
+      budgetMeter,
       mcpSurface,
       lifecyclePills,
       lifecycleTaskRegistry,

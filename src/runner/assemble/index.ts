@@ -20,6 +20,7 @@ export {
 } from "./compaction"
 export { compactionDep } from "./config"
 export { parseEnvFlag } from "./env-flag"
+export { wireInteractiveKnobs } from "./interactive-knobs"
 export {
   buildLLMCore,
   type ComposeLlmInput,

@@ -50,10 +50,12 @@ evidence:
     integration:
       - tests/integration/memory-mode-knob-wire-hellgate.test.ts
     contract: []
-knobs:
-  - QUANTA_MEMORY_MODE
-  - QUANTA_MEMORY_WRITE_GUARD_PCT
-  - QUANTA_MEMORY_LINE_CITATIONS
+knobs: ["memory-mode"]
+config_refs:
+  env:
+    - QUANTA_MEMORY_MODE
+    - QUANTA_MEMORY_WRITE_GUARD_PCT
+    - QUANTA_MEMORY_LINE_CITATIONS
 deliberate_hold: null
 notes: |
   All three axes default-OFF: absent config ⇒ recall on, writes on, no spans —

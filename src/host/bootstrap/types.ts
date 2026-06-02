@@ -174,6 +174,13 @@ export type BuildToolingFactory = (
   slog: StructuredLogger,
   taskRegistry: TaskRegistry | undefined,
   metrics?: Metrics,
+  /** ADR-0432 — live 0..100 remaining-budget signal for the self-edit memory
+   *  write-guard. The bootstrap threads `() => meter.remainingPercent()` from
+   *  the session {@link BudgetMeter} so `QUANTA_MEMORY_WRITE_GUARD_PCT` actually
+   *  guards on the live CLI surface (previously the param was omitted, so the
+   *  guard was inert). Absent ⇒ byte-identical (the surface shim leaves the slot
+   *  undefined and `buildMemoryExtras` builds no guard). */
+  budgetRemainingPercent?: () => number,
 ) => Tooling
 
 /** Resolve default-OFF feature flags + bridged MCP/LSP/git tools from the
@@ -359,6 +366,17 @@ export interface SessionBootstrapResult {
   readonly llm: LLMPort
   readonly features: BootstrapFeatures
   readonly tooling: Tooling
+  /** ADR-0432 / ADR-0138 — session budget meter, constructed ONLY when the
+   *  operator opted into the self-edit memory write-guard
+   *  (`QUANTA_MEMORY_WRITE_GUARD_PCT` set). The bootstrap threads
+   *  `() => meter.remainingPercent()` into `buildTooling` so the guard reads a
+   *  LIVE 0..100 signal, and `context-binding.ts` sets it on
+   *  `AgentConfig.budgetMeter` so the loop's existing tick sites feed it.
+   *  Absent ⇒ no meter is set on the config and the loop is byte-identical
+   *  (the guard knob is the single activation gate). Optional so existing
+   *  hermetic-test result constructors that predate this field stay valid;
+   *  the live bootstrap always sets it (`undefined` when the guard is off). */
+  readonly budgetMeter?: AgentConfig["budgetMeter"]
   readonly mcpSurface: BootstrapMcpSurface | undefined
   readonly lifecyclePills: BootstrapLifecyclePills
   readonly lifecycleTaskRegistry: TaskRegistry | undefined

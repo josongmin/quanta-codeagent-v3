@@ -27,7 +27,9 @@ import {
   clearSearchPipelineWireForTests,
   parseEnvFlag,
   type RetrievalStack,
+  wireInteractiveKnobs,
 } from "@/runner/assemble"
+import type { Surface } from "@/runner/knobs"
 import { resolveSandboxProfileFromEnv } from "@/runtime"
 import { loadEnvFiles } from "@/shared/env-files"
 
@@ -451,6 +453,15 @@ const resolveFocusChain = (
   }
 }
 
+/** jun-02 interactive-knob live wire — map the unified-agent run mode to the
+ *  knob `Surface` the three interactive knobs (`advisor` / `task-budget` /
+ *  `compose-authoring`) recognise. Only `batch` corresponds to the bulk
+ *  `agent-batch` surface; every other mode (headless / ide / daemon / ci-bot)
+ *  is the interactive `agent-interactive` surface. Mirrors the matrix surface
+ *  vocabulary so the env→config fold matches the bench/matrix semantics. */
+const knobSurfaceForMode = (mode: AssembleRequest["mode"]): Surface =>
+  mode === "batch" ? "agent-batch" : "agent-interactive"
+
 /** ADR-0236 / ADR-0218 — wire the mode-typed delegation port slot. Caller-
  *  side composition only (loop does NOT read this slot — surfaces opt in
  *  via the Agent tool / future `/delegate` slash). Default-OFF: returns
@@ -804,7 +815,14 @@ export const buildBaseFromArgs = (
   }
 
   attachExecutionPlaneSlots(base, p)
-  return wireOptionalAgentPorts(base, process.env)
+  // jun-02 — fold the three INTERACTIVE knobs (advisor / task-budget /
+  // compose-authoring) directly at the composition root, reusing each knob's
+  // own parse+apply so the env→config semantics match the matrix. Without this
+  // the knobs were DEAD on the live agent surface (`applyKnobs` is bench-only).
+  // Uses the SAME `env` view the rest of `buildBaseFromArgs` reads (so an
+  // explicit `--provider` seed is honoured); absent env ⇒ `base` unchanged.
+  const wired = wireInteractiveKnobs(base, env, knobSurfaceForMode(p.mode))
+  return wireOptionalAgentPorts(wired, process.env)
 }
 
 const applyModeSpecificRequestFields = (out: AssembleRequest, p: AssembleRequestPartial): void => {
