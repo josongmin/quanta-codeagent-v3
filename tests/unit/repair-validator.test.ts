@@ -140,7 +140,7 @@ describe("validate (non-leaking repair validator)", () => {
 // of forbidden tokens, and that they import ONLY from `./types`. One self-
 // protecting test = the no-leak invariant becomes a build gate.
 describe("structural no-leak invariant (build gate)", () => {
-  const ROOT = resolve(__dirname, "../../src/apps/bench/eval/repair")
+  const ROOT = resolve(__dirname, "../../src/runner/batch/eval/repair")
   const FILES = ["validator.ts", "context.ts", "index.ts"] as const
   // Forbidden dataset/grader tokens. These names MUST NOT appear in source
   // text — the validator/context/orchestrator must be structurally incapable
