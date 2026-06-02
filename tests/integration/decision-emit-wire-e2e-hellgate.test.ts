@@ -15,20 +15,18 @@
  *   - `src/agent/loop.ts` (turn epilogue)        → `emitBudgetExhaustedDecision`
  *   - `src/storage/service.ts#emitJailDeny`      → `fsJailDecisionSink`
  *
- * What did NOT ship — the composition-root wire that *populates* the slot.
- * Investigation (2026-05-25, session in this hellgate's header comment):
+ * Composition-root wire status (UPDATED 2026-06-02): the wire that *populates*
+ * the slot HAS since shipped (commit be55d375 "close ADR-0269 Phase 3", later
+ * refactored by 2485e555 from a `SessionDeps` shape to a `RuntimeContext`):
  *
- *   (a) `src/runner/assemble/config.ts#SessionDeps`         has NO `decisionEmitter` field.
- *   (b) `src/runner/assemble/config.ts#assembleConfig`      never sets `AgentConfig.decisionEmitter`.
- *   (c) `src/storage/service.ts#setFsJailDecisionSink`      has ZERO production callers.
- *   (d) Both REPL composition root files (`src/apps/cli/repl.ts`,
- *       `src/apps/cli/repl/session-deps-compose.ts`) build a `DebugTracerHandle`
- *       and a tee but never construct a `DecisionEmitter` from it.
+ *   (a) `assembleConfig` now spreads `SessionDeps.decisionEmitter` onto
+ *       `AgentConfig.decisionEmitter` (CASE-4 green).
+ *   (b) `session-setup.ts` installs the fs-jail sink from
+ *       `runtimeContext.decisionEmitter()` and clears it inside the
+ *       `shutdownMcp` teardown wrapper (CASE-5 green).
  *
- * Net effect: every Phase 3 caller is a no-op in production today —
- * `config.decisionEmitter` is always `undefined` and the fs-jail sink is
- * always `null`. The helpers + caller sites are *wire-ready* but the
- * composition root has not flipped the switch.
+ * Net effect: the Phase 3 callers are live when a host supplies an emitter,
+ * and remain a silent no-op (default-OFF) when it is `undefined`/`null`.
  *
  * Why this hellgate exists
  * ────────────────────────
@@ -51,13 +49,11 @@
  *      refactor that drops the call surfaces here, not at runtime).
  *   3. (FACT-PIN, passing) the helpers' default-OFF contract holds — emitter
  *      undefined ⇒ no-op + no throw — regression-guarding the wire-OFF path.
- *   4. (DEFERRED, .todo) composition root populates `AgentConfig.decisionEmitter`
- *      via SessionDeps. Will turn green when the user wires
- *      `SessionDeps.decisionEmitter?` + the `assembleConfig` spread.
- *   5. (DEFERRED, .todo) REPL session lifecycle calls
- *      `setFsJailDecisionSink(...)` at startup and `clearFsJailDecisionSink()`
- *      at shutdown. Will turn green when the user wires it into
- *      `session-setup.ts`'s lifecycle.
+ *   4. (LIVE) composition root populates `AgentConfig.decisionEmitter`
+ *      via SessionDeps — `assembleConfig` spread is wired.
+ *   5. (LIVE) REPL session lifecycle calls `setFsJailDecisionSink(...)` at
+ *      startup (off `runtimeContext.decisionEmitter()`) and
+ *      `clearFsJailDecisionSink()` inside the `shutdownMcp` teardown.
  *   6. (FACT-PIN, passing) end-to-end propositional check on the WIRED path:
  *      WHEN a caller passes a non-undefined `decisionEmitter` (the post-wire
  *      shape), THEN each of the 3 caller-invocable helpers + sink emits
@@ -139,10 +135,15 @@ describe("ADR-0269 Phase 3 wire — caller-site static invariants", () => {
     const src = await readSrc("src/agent/loop.ts")
     expect(src).toContain('import { emitBudgetExhaustedDecision } from "./decision-emit-phase3"')
     // The exhaustion check + emit must live on the same path so the emit is
-    // co-located with the `budget_exhausted` finish — never split.
+    // co-located with the `budget_exhausted` finish — never split. The turn
+    // epilogue was refactored from a direct `ctx.finish("budget_exhausted",…)`
+    // call into a `TurnLoopResolution` *descriptor* helper that returns
+    // `{ kind:"finish", reason:"budget_exhausted" }`; the emitter is now read
+    // off the helper's `args.cfg` scope (not a bare `cfg`). Pin the post-
+    // refactor literals so a future drop of the call still surfaces here.
     expect(src).toContain("checkExhausted()")
-    expect(src).toContain("emitBudgetExhaustedDecision(cfg.decisionEmitter,")
-    expect(src).toContain('finish("budget_exhausted"')
+    expect(src).toContain("emitBudgetExhaustedDecision(args.cfg.decisionEmitter,")
+    expect(src).toContain('reason: "budget_exhausted"')
   })
 
   test("CASE-2c: storage/service.ts exposes the sink setter + emits before throwing", async () => {
@@ -225,10 +226,14 @@ describe("ADR-0269 Phase 3 wire — REPL fs-jail sink lifecycle", () => {
     // executed) because `setupSession` requires a fully-wired bootstrap +
     // an LLM port to construct; a runtime test would need to stub every
     // collaborator and would be brittle against unrelated boot churn.
-    const src = await Bun.file(
-      "src/apps/cli/repl/session-setup.ts",
-    ).text()
-    expect(src).toContain("setFsJailDecisionSink(sessionDeps.decisionEmitter)")
+    const src = await Bun.file("src/apps/cli/repl/session-setup.ts").text()
+    // The DecisionEmitter source was refactored from `sessionDeps.decisionEmitter`
+    // to the runtime composition root (`composeCliRuntimeContext` → a
+    // `RuntimeContext` whose `decisionEmitter()` accessor yields the same
+    // emitter). The sink is installed off that local, so pin the post-refactor
+    // shape (set off the resolved local + the gate-on-undefined guard).
+    expect(src).toContain("setFsJailDecisionSink(decisionEmitter)")
+    expect(src).toContain("runtimeContext.decisionEmitter()")
     expect(src).toContain("clearFsJailDecisionSink()")
     // The clear MUST live inside the shutdownMcp wrapper (not as a free
     // call) so it fires at session-end, not at setupSession return.
