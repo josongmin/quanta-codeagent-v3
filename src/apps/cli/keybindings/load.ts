@@ -97,7 +97,10 @@ export const mergeOverDefaults = (parsed: unknown): LoadResult => {
       continue
     }
     if (seen.has(result.spec)) {
-      warnings.push(`duplicate keybinding \`${rawKey}\``)
+      // Name BOTH the raw key and the normalized spec it collides on — two raw
+      // forms (e.g. `Ctrl+X` and `ctrl-x`) normalize to one spec, so naming the
+      // spec tells the user WHICH earlier binding this duplicates.
+      warnings.push(`duplicate keybinding \`${rawKey}\` (normalizes to \`${result.spec}\`)`)
       continue
     }
     seen.add(result.spec)

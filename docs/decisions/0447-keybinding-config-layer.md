@@ -63,3 +63,20 @@ machine, never the single-chord remap.
 ## Non-goals
 
 Modal vim state machine, per-surface (Web/Tauri) keymaps, remote dynamic config.
+
+## Adversarial-review notes (2026-06-02)
+
+Review confirmed both CRITICAL paths sound: raw-mode restore is guaranteed via
+`runExternalEdit`'s `finally` (editor-throw / nonzero-exit / spawn-fail /
+ctrl-c-during-edit all verified), and prototype-pollution is blocked (PROTO_KEYS
+skip + `Object.entries`→`Map`). Three clarifications:
+
+- **`meta` folds onto `alt`.** `keyOf` projects node's `key.meta` onto `"alt"`, so
+  a config `"meta+x"` (macOS Cmd / X11 Meta) resolves as `alt+x`. Intentional for
+  v1 (terminal keymaps are alt-centric); OS-specific Cmd binding is a non-goal.
+- **`open-editor` has two intended trigger paths.** The `ctrl+x ctrl+e` chord
+  machine fires it directly (ADR-0446) AND the keymap supports an `"open-editor"`
+  action for a single-key binding. The chord wins for the default combo (runs
+  before the keymap block); a custom single-key routes through the keymap. No conflict.
+- **Duplicate-keybinding warning** now names both the raw key and the normalized
+  spec it collides on (two raw forms can normalize to one spec).
