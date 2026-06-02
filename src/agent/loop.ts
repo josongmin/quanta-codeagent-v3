@@ -103,7 +103,7 @@ import {
 import { decideAction } from "./conversation-action"
 import { threadId as makeThreadId } from "./follow-up-queue"
 import type { HookPromptInject } from "./hooks"
-import { resolveCollaborationMode } from "./mode"
+import { resolveAgentMode, resolveCollaborationMode } from "./mode"
 import { planToStreamMirror } from "./plan/stream-mirror"
 import { applyPlanExitOutcome } from "./plan-exit-lifecycle"
 import { backoffDelayMs } from "./retry"
@@ -484,12 +484,39 @@ type ResolvedTurnOverride = {
   explicitOff: boolean
 }
 
+/** ADR-0461 — read the sticky modelId for the session's ACTIVE mode. Returns
+ *  `undefined` when no sticky store is wired (default-OFF byte-identical path)
+ *  OR when the store has no preference for the active mode. The store's `get`
+ *  is no-throw by port contract (IO errors resolve `undefined`), so this read
+ *  never blocks the loop. Keyed by `resolveAgentMode(mode, planMode)` so the
+ *  SAME mode precedence the prompt/dispatch use drives the sticky lookup, and a
+ *  mid-session mode change is reflected on the next turn's read. */
+const readStickyModelForMode = async (config: AgentConfig): Promise<string | undefined> => {
+  if (config.stickyModelStore === undefined) return undefined
+  return config.stickyModelStore.store.get({
+    mode: resolveAgentMode(config.mode, config.planMode),
+  })
+}
+
 /** Resolve the per-turn LLM port + MANUAL effort result given the active
- *  skill's override (if any). Pure: no clock, no IO. Precedence is skill >
- *  session > default. A `model` override swaps the port to the matching
- *  `config.modelCandidates` entry by id; an unknown id (or no candidate
- *  registry) leaves `config.llm` untouched (advisory degrade — the model id
- *  alone cannot construct a port).
+ *  skill's override (if any) and the active mode's STICKY model (if any).
+ *  Pure: no clock, no IO (the async store read happens in the caller; this
+ *  function only receives the already-resolved sticky `modelId`).
+ *
+ *  MODEL-SWAP PRECEDENCE (ADR-0461): `skill override > sticky > default`.
+ *  Rationale — the skill override is a per-skill DEMAND (a skill declares it
+ *  needs a specific model to do its job) and must win, while the sticky model
+ *  is a session-level DEFAULT (the user said "use gpt-5 for plan mode"). A
+ *  sticky default must never silently override a skill that explicitly asked
+ *  for a different model. Both swap by id against the SAME
+ *  `config.modelCandidates` registry — there is no second LLM factory; an id
+ *  with no matching candidate (or absent registry) is an advisory no-op that
+ *  falls through to the next precedence level (a model id alone cannot
+ *  construct a port). Effort precedence is unchanged (skill > session > default).
+ *
+ *  Default-OFF / byte-identical: `stickyModelId` undefined (the only value a
+ *  non-sticky caller ever passes) ⇒ this function is byte-for-byte identical
+ *  to the pre-ADR-0461 skill-only path.
  *
  *  Important for ADR-0417: the return shape preserves whether the manual
  *  resolution chose an EXPLICIT "off" (`explicitOff:true`) versus simple
@@ -499,11 +526,20 @@ type ResolvedTurnOverride = {
 const resolveSkillTurnOverride = (
   config: AgentConfig,
   override: SkillTurnOverride | undefined,
+  stickyModelId?: string,
 ): ResolvedTurnOverride => {
+  // Reuse the EXACT skill-override id→port resolver (config.modelCandidates by
+  // id). One resolver, one registry — no duplicate LLM factory.
+  const resolvePort = (id: string | undefined): LLMPort | undefined =>
+    id !== undefined ? config.modelCandidates?.find((c) => c.id === id)?.port : undefined
+  // Precedence: a skill that DECLARES a model wins outright — sticky is
+  // consulted ONLY when the skill declared none. This preserves the documented
+  // skill-demand semantics: a skill that asks for an UNKNOWN model degrades to
+  // `config.llm` (default), NOT to the session sticky (the skill's intent was a
+  // specific model, not "whatever the session prefers"). Any side that does not
+  // resolve to a candidate falls through to `config.llm`.
   const swapped =
-    override?.model !== undefined
-      ? config.modelCandidates?.find((c) => c.id === override.model)?.port
-      : undefined
+    override?.model !== undefined ? resolvePort(override.model) : resolvePort(stickyModelId)
   const llm = swapped ?? config.llm
   const overrideEffort = override?.effort
   const skillHasEffortSignal = overrideEffort !== undefined
@@ -606,14 +642,21 @@ const streamConsume = async (
   const samplingSpan: Span = startSpan(SPAN_NAMES.runSamplingRequest, attrs({}))
   let samplingStatus: "ok" | "error" | "aborted" = "ok"
   const stop = recorder?.llmStream()
+  // ADR-0461: read the STICKY model for the ACTIVE mode (if a sticky store is
+  // wired). Re-read every turn against the CURRENT mode so a mid-session mode
+  // change picks up the new mode's sticky on its next turn. Default-OFF: absent
+  // store ⇒ `undefined` ⇒ `resolveSkillTurnOverride` is byte-identical.
+  const stickyModelId = await readStickyModelForMode(config)
   // ADR-0011 §6.2 (L4): apply the ACTIVE skill's model/effort override to THIS
   // turn. The gate armed `activeOverride` when a skill was last invoked, so the
   // override naturally scopes to the turns AFTER activation and is re-read each
   // turn (a sibling skill with no override clears it back to session/default).
   // Absent gate / absent override ⇒ `{ llm: config.llm }` with no `thinking`,
-  // i.e. byte-identical to the pre-feature stream call.
+  // i.e. byte-identical to the pre-feature stream call. The sticky model
+  // (ADR-0461) is consulted by `resolveSkillTurnOverride` with precedence
+  // skill > sticky > default.
   const turnLlm = applyEffortClassifierFloor(
-    resolveSkillTurnOverride(config, skillGate?.activeOverride()),
+    resolveSkillTurnOverride(config, skillGate?.activeOverride(), stickyModelId),
     config.effortClassifier,
   )
   // ADR-0077 Plane-B (L4 wire): timing capture shared with the adapter.
