@@ -1,4 +1,4 @@
-# ADR-0460: Proactive token-refresh scheduler for connectors
+# ADR-0461: Proactive token-refresh scheduler for connectors
 
 **Status:** Accepted (2026-06-03)
 **Type:** New connectors slice (closed-port, default-OFF). Extends ADR-0160

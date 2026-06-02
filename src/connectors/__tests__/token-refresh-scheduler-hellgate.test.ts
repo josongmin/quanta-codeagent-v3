@@ -1,5 +1,5 @@
 /**
- * Proactive token-refresh scheduler HELLGATE (ADR-0460).
+ * Proactive token-refresh scheduler HELLGATE (ADR-0461).
  *
  * Adversarial proof of every invariant in `../token-refresh-scheduler.ts`:
  *

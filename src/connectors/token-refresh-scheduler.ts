@@ -1,5 +1,5 @@
 /**
- * Proactive token-refresh scheduler (ADR-0460).
+ * Proactive token-refresh scheduler (ADR-0461).
  *
  * WHY THIS EXISTS
  * ───────────────
