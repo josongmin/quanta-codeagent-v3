@@ -164,12 +164,28 @@ export type LastTurnOutcome = "success" | "partial" | "uncertain" | "fail"
 export interface ReactorSelfWakeEvent {
   readonly type: "reactor.self_wake"
   readonly outcome: "injected" | "skipped"
-  readonly reason: TriggerReason | "env-off" | "quiet-window" | "prior-outcome"
+  readonly reason: TriggerReason | "env-off" | "quiet-window" | "prior-outcome" | "not-eligible"
   readonly trigger?: {
     readonly reason: TriggerReason
     readonly evidenceKind: TriggerEvidence["kind"]
     readonly evidenceValue: string
   }
+  /** ADR-0453 — when `reason === "not-eligible"`, the closed eligibility
+   *  reason anchor (e.g. `policy-never`) from the injected resolver. Omitted
+   *  for every other reason. */
+  readonly eligibilityReason?: string
   /** ms since epoch — clock-port reading at decision time. */
   readonly at: number
+}
+
+/**
+ * ADR-0453 — Minimal autorun-eligibility verdict the reactor's 4th guard
+ * consults. Structurally compatible with `@/permission`'s `AutorunEligibility`.
+ * Defined locally (not imported) so the reactor slice keeps zero cross-slice
+ * dependency; the composition root maps the permission verdict onto this at the
+ * bind site. */
+export interface AutorunVerdict {
+  readonly eligible: boolean
+  /** Closed eligibility reason anchor (e.g. `policy-never`). */
+  readonly reason: string
 }

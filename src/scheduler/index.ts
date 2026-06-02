@@ -71,6 +71,8 @@ export type {
   Automation,
   AutomationStatus,
   AutomationStorePort,
+  AutorunEligibilityResolverPort,
+  AutorunVerdict,
   ClockPort,
   EnvPort,
   Frequency,

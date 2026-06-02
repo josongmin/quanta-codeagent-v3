@@ -31,6 +31,7 @@ export {
 } from "./trigger-source-pr-comment"
 export type {
   AgentLoopPort,
+  AutorunVerdict,
   ClockPort,
   EnvPort,
   LastTurnOutcome,

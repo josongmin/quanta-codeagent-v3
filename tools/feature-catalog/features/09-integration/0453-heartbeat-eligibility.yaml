@@ -1,0 +1,69 @@
+id: heartbeat-eligibility
+title: ADR-0453 Heartbeat autorun eligibility (per-thread approval gate for scheduler + reactor)
+section: 9
+subsystem: Scheduler / scheduled agent (ADR-0161)
+order: 453
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:cli"]
+depends_on: [scheduler-runtime]
+purpose: |
+  A PURE, TOTAL eligibility evaluator consulted by BOTH background autorun
+  paths before they fire:
+
+    evaluateAutorunEligibility({ approvalPolicy, priorOutcome?,
+      manualApprovalPresent?, mode? }) → { eligible, reason }
+
+  Mapping (structural — no heuristics, no clock, no Date.now/Math.random):
+    - approvalPolicy "always"     ⇒ eligible (policy-always)
+    - approvalPolicy "never"      ⇒ NOT eligible (policy-never)
+    - approvalPolicy "on-failure" ⇒ eligible IFF priorOutcome === "fail"
+                                     (on-failure-failed / on-failure-not-failed)
+    - approvalPolicy "on-request" ⇒ eligible IFF manualApprovalPresent === true
+                                     (on-request-present / on-request-absent)
+  `reason` is a closed enum (not free text); `mode` is an audit anchor only
+  (verdict never branches on it).
+
+  Wiring — both paths take an OPTIONAL injected resolver:
+    - Scheduler: `SchedulerRuntimeOpts.eligibility?` consulted in
+      `processAutomation` AFTER status + RRULE-due, BEFORE persist/dispatch.
+      A NOT-eligible verdict emits `scheduler.skipped / not-eligible`
+      (+ eligibilityReason) and does NOT advance the fire anchor.
+    - Reactor: `SelfWakeOpts.eligibility?` is a 4th guard after the 3 hard
+      guards; a NOT-eligible verdict emits `reactor.self_wake / skipped /
+      not-eligible`.
+
+  The evaluator lives in `@/permission` (pure projection of
+  `ThreadPermission.approvalPolicy`); each consuming slice defines a local
+  minimal `AutorunVerdict` so neither imports `@/permission` in its hot path.
+  The composition root reads the thread policy from the permission store,
+  calls the evaluator, and maps it onto the resolver.
+evidence:
+  code:
+    - src/permission/autorun-eligibility.ts
+    - src/permission/index.ts
+    - src/scheduler/runtime.ts
+    - src/scheduler/types.ts
+    - src/reactor/self-wake.ts
+    - src/reactor/types.ts
+  adrs: ["docs/decisions/0453-heartbeat-eligibility.md", 46, 132, 161]
+  tests:
+    unit:
+      - tests/unit/heartbeat-eligibility-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Default-OFF / byte-identical: with NO resolver injected, scheduler still
+  fires on RRULE and reactor still uses its 3 guards — both paths are
+  byte-identical to pre-ADR-0453. A resolver returning `undefined` ("no
+  opinion") is also pass-through. The gate is additive: it can only BLOCK a
+  fire the existing gate already permitted, never force one. The
+  composition-root bind (reading per-thread policy from the permission store
+  and constructing the resolver) is the L3→L4 step — sibling bootstrap PR.

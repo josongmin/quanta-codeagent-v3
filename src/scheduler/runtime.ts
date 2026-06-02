@@ -28,6 +28,7 @@ import type {
   AgentLoopPort,
   Automation,
   AutomationStorePort,
+  AutorunEligibilityResolverPort,
   ClockPort,
   EnvPort,
   ModelAvailabilityPort,
@@ -50,6 +51,13 @@ export interface SchedulerRuntimeOpts {
   readonly agentLoop: AgentLoopPort
   readonly workspace: string
   readonly sink?: SchedulerSinkPort
+  /** ADR-0453 — OPTIONAL per-thread autorun-eligibility gate. When injected,
+   *  an active+due automation is consulted before dispatch; a NOT-eligible
+   *  verdict skips the fire (emitting `not-eligible`) WITHOUT advancing the
+   *  fire anchor. When ABSENT (default), `tickOnce()` is byte-identical to the
+   *  RRULE-only fire path. The gate is additive: it can only BLOCK a fire the
+   *  RRULE gate already permitted, never force one. */
+  readonly eligibility?: AutorunEligibilityResolverPort
   /** Tick interval. Default {@link DEFAULT_TICK_INTERVAL_MS}. */
   readonly tickIntervalMs?: number
   /** Override `setInterval` (tests inject a fake to avoid wall-clock waits). */
@@ -147,6 +155,25 @@ const processAutomation = async (
   const nextFire = computeNextFire(automation.rule, anchor, automation.fireCount)
   if (nextFire === "never" || nextFire > now) {
     // Not due — silent skip (no event; the sink would be too chatty per minute).
+    return
+  }
+
+  // 2b. ADR-0453 — per-thread autorun-eligibility gate (OPTIONAL, default-OFF).
+  //     Only consulted when an eligibility resolver is injected AND it returns
+  //     a verdict for this automation. A NOT-eligible verdict blocks the fire
+  //     WITHOUT advancing the fire anchor (no persist, no dispatch), so the
+  //     automation remains due and re-evaluates next tick once its thread
+  //     policy / prior outcome changes. `undefined` ⇒ no opinion ⇒ proceed as
+  //     if no resolver were injected (byte-identical RRULE-only behavior).
+  const verdict = opts.eligibility?.resolve(automation)
+  if (verdict !== undefined && !verdict.eligible) {
+    opts.sink?.emit({
+      type: "scheduler.skipped",
+      automationId: automation.id,
+      reason: "not-eligible",
+      eligibilityReason: verdict.reason,
+      at: now,
+    })
     return
   }
 

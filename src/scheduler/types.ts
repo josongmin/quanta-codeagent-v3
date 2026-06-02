@@ -251,9 +251,42 @@ export type SchedulerEvent =
         | "status-error"
         | "store-save-failed"
         | "store-load-failed"
+        | "not-eligible"
+      /** ADR-0453 — when `reason === "not-eligible"`, the closed eligibility
+       *  reason anchor (e.g. `policy-never`, `on-failure-not-failed`) so the
+       *  audit trail records WHY the autorun was blocked. Omitted otherwise. */
+      readonly eligibilityReason?: string
       readonly at: number
     }
 
 export interface SchedulerSinkPort {
   emit(event: SchedulerEvent): void
+}
+
+/**
+ * ADR-0453 — Optional autorun-eligibility resolver. The composition root binds
+ * this by reading the automation's thread approval policy from `@/permission`'s
+ * store and calling `evaluateAutorunEligibility`. The runtime consults it (when
+ * injected) BEFORE dispatch.
+ *
+ * Returning `undefined` means "no per-thread eligibility opinion for this
+ * automation" ⇒ the runtime fires as if no resolver were injected (the policy
+ * gate is purely additive — it can BLOCK a fire, never force one that the RRULE
+ * gate would not have permitted).
+ *
+ * Default-OFF: when no resolver is injected, `tickOnce()` is byte-identical to
+ * the pre-ADR-0453 RRULE-only fire path.
+ */
+export interface AutorunEligibilityResolverPort {
+  resolve(automation: Automation): AutorunVerdict | undefined
+}
+
+/** Minimal verdict shape the runtime needs — structurally compatible with
+ *  `@/permission`'s `AutorunEligibility`. Defined locally (not imported) so the
+ *  scheduler slice keeps zero cross-slice dependency; the composition root maps
+ *  the permission verdict onto this at the bind site. */
+export interface AutorunVerdict {
+  readonly eligible: boolean
+  /** Closed eligibility reason anchor (e.g. `policy-never`). */
+  readonly reason: string
 }

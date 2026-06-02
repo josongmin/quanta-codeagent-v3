@@ -3,6 +3,20 @@ export type { AccessVerdict, CanAccessOpts } from "./access-check"
 export { canAccess } from "./access-check"
 export type { ApprovalRecord, ApprovalReviewer, ApprovalReviewerOpts } from "./auto-approval-review"
 export { createApprovalReviewer } from "./auto-approval-review"
+// ADR-0453 — Heartbeat autorun eligibility (pure verdict consumed by scheduler/reactor).
+export type {
+  AutorunApprovalPolicy,
+  AutorunEligibility,
+  AutorunEligibilityInput,
+  AutorunEligibilityReason,
+  AutorunMode,
+  AutorunPriorOutcome,
+} from "./autorun-eligibility"
+export {
+  ALL_AUTORUN_ELIGIBILITY_REASONS,
+  ALL_AUTORUN_PRIOR_OUTCOMES,
+  evaluateAutorunEligibility,
+} from "./autorun-eligibility"
 export type { BranchOnlyVerdict } from "./branch-only"
 export { DEFAULT_PROTECTED_BRANCHES, decideBranchOnly } from "./branch-only"
 export type {

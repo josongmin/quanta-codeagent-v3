@@ -24,6 +24,7 @@
 
 import type {
   AgentLoopPort,
+  AutorunVerdict,
   ClockPort,
   EnvPort,
   LastTurnOutcome,
@@ -51,6 +52,16 @@ export interface SelfWakeOpts {
    *  auto-wake is allowed only for explicit `"success"` / `"uncertain"`,
    *  so omitted outcome is treated equivalently to `"partial"`. */
   readonly lastTurnOutcome?: LastTurnOutcome
+  /** ADR-0453 — OPTIONAL per-thread autorun-eligibility gate (the 4th guard).
+   *  When injected, it is evaluated AFTER the three hard guards pass; a
+   *  NOT-eligible verdict blocks the wake (emitting `not-eligible`). When
+   *  ABSENT (default), the self-wake path is byte-identical to the
+   *  pre-ADR-0453 3-guard behavior. The composition root binds this by reading
+   *  the thread's approval policy from `@/permission`'s store and calling
+   *  `evaluateAutorunEligibility`. The gate is additive: it can only BLOCK a
+   *  wake the 3 guards already permitted, never force one. Returning
+   *  `undefined` ⇒ no opinion ⇒ proceed (equivalent to no resolver). */
+  readonly eligibility?: () => AutorunVerdict | undefined
   /** Optional audit sink. Called exactly once for each injected or
    *  guard-skipped self-wake decision. Pre-aborted triggers are dropped
    *  silently because the trigger source already owns that audit path. The
@@ -61,8 +72,18 @@ export interface SelfWakeOpts {
 export interface SelfWakeResult {
   readonly injected: boolean
   /** Human-readable reason. `"injected"` on success; one of `"env-off"` /
-   *  `"quiet-window"` / `"prior-outcome"` / `"aborted"` on non-inject. */
-  readonly reason: "injected" | "env-off" | "quiet-window" | "prior-outcome" | "aborted"
+   *  `"quiet-window"` / `"prior-outcome"` / `"not-eligible"` / `"aborted"` on
+   *  non-inject. */
+  readonly reason:
+    | "injected"
+    | "env-off"
+    | "quiet-window"
+    | "prior-outcome"
+    | "not-eligible"
+    | "aborted"
+  /** ADR-0453 — closed eligibility reason anchor when `reason ===
+   *  "not-eligible"`; omitted otherwise. */
+  readonly eligibilityReason?: string
 }
 
 /**
@@ -99,6 +120,26 @@ export const injectSimulatedTurn = async (opts: SelfWakeOpts): Promise<SelfWakeR
   if (prior !== "success" && prior !== "uncertain") {
     emitSkip(opts, "prior-outcome", now)
     return { injected: false, reason: "prior-outcome" }
+  }
+  // Guard 4 — ADR-0453 per-thread autorun-eligibility (OPTIONAL, default-OFF).
+  //   Consulted only when a resolver is injected AND returns a verdict.
+  //   `undefined` ⇒ no opinion ⇒ proceed (byte-identical to no resolver). A
+  //   NOT-eligible verdict blocks the wake and surfaces the closed reason.
+  const verdict = opts.eligibility?.()
+  if (verdict !== undefined && !verdict.eligible) {
+    opts.onEvent?.({
+      type: "reactor.self_wake",
+      outcome: "skipped",
+      reason: "not-eligible",
+      eligibilityReason: verdict.reason,
+      trigger: {
+        reason: opts.trigger.reason,
+        evidenceKind: opts.trigger.evidence.kind,
+        evidenceValue: opts.trigger.evidence.value,
+      },
+      at: now,
+    })
+    return { injected: false, reason: "not-eligible", eligibilityReason: verdict.reason }
   }
 
   const message = buildSimulatedMessage(opts.trigger)
