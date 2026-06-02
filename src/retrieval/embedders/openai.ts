@@ -13,9 +13,9 @@
  * by passing an adapter; tests inject a fake. The slice never imports the
  * `openai` package directly (the assembler/caller does).
  */
-import { errMessage, LLMError } from "@/shared"
+import { LLMError } from "@/shared"
 import type { EmbeddingAdapterOptions, EmbeddingPort } from "../embedding-port"
-import { isAbortError, throwIfAborted } from "./_abort"
+import { isAbortError, safeVendorErrMessage, throwIfAborted } from "./_abort"
 
 const DEFAULT_MODEL = "text-embedding-3-small"
 const DEFAULT_BATCH = 96
@@ -63,7 +63,7 @@ export const createOpenAIEmbedder = (opts: OpenAIRetrievalEmbedderOptions): Embe
           for (const d of res.data) out.push(d.embedding)
         } catch (e) {
           if (isAbortError(e)) throw e
-          throw new LLMError(`OpenAI retrieval embeddings failed: ${errMessage(e)}`, {
+          throw new LLMError(`OpenAI retrieval embeddings failed: ${safeVendorErrMessage(e)}`, {
             cause: e,
           })
         }

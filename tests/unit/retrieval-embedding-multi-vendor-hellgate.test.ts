@@ -330,10 +330,12 @@ describe("multi-vendor embedding hellgate", () => {
 
   test("[E5][adversarial] vendor throws non-Error (string thrown) — wrapped to LLMError without leaking message", async () => {
     // Attack: a vendor SDK throws a string ("auth failed: sk-LEAK").
-    // The catch site coerces (e as Error).message — if e is a string,
-    // .message is undefined → "undefined" interpolated into the wrapper
-    // message. We pin behavior: caller gets an LLMError; secret is NOT
-    // in the wrapped message.
+    // The catch site must NOT interpolate the raw thrown value into the
+    // wrapper message (String(e) would surface the secret). The adapter
+    // routes non-Error throws through safeVendorErrMessage(), which emits
+    // a generic label and keeps the raw value only on `cause`. We pin
+    // behavior: caller gets an LLMError; secret is NOT in the wrapped
+    // message.
     const secret = "sk-LEAKED-VENDOR-STRING-THROW-1234"
     const e = createOpenAIEmbedder({
       apiKey: "k",
@@ -349,9 +351,9 @@ describe("multi-vendor embedding hellgate", () => {
       await e.embed(["x"])
     } catch (err) {
       const msg = (err as Error).message
-      // The string-throw path goes through (e as Error).message which is
-      // undefined — so the wrapper message contains "undefined", NOT the
-      // leaked credential. Pinning that the leak does NOT surface.
+      // The non-Error throw is wrapped with a generic label, so the leaked
+      // credential never appears in the wrapper message. Pinning that the
+      // leak does NOT surface.
       expect(msg.includes(secret)).toBe(false)
     }
   })
