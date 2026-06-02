@@ -1,4 +1,4 @@
-import { EFFORT_LEVELS, effortToTokenBudget } from "@/agent"
+import { type AgentMode, EFFORT_LEVELS, effortToTokenBudget } from "@/agent"
 import {
   defaultGranularRegistry,
   type GranularRegistryPort,
@@ -84,13 +84,23 @@ export interface PromptUxOpts {
  *  `undefined` everywhere ⇒ byte-identical. */
 const buildModeCycle = (
   env: NodeJS.ProcessEnv,
+  onPosture?: (agentMode: AgentMode) => void,
 ): Pick<PromptUxOpts, "modeCycle" | "modeMeta" | "onCycleMode"> => {
   if (!modeCycleEnabled(env)) return {}
   const store = createModeCycleStore()
+  // Paint the bottom status-bar pill at start too, so BOTH surfaces (the
+  // input meta row + the status bar) agree from the first render (RFC-08 §4.3).
+  onPosture?.(store.current().agentMode)
   return {
     modeCycle: store,
     modeMeta: formatPostureMeta(store.current()),
-    onCycleMode: () => ({ meta: formatPostureMeta(store.cycle()) }),
+    onCycleMode: () => {
+      const p = store.cycle()
+      // Mirror the new posture's AgentMode onto the bottom status bar (the
+      // existing `formatMode` pill renders plan/review/audit; default ⇒ hidden).
+      onPosture?.(p.agentMode)
+      return { meta: formatPostureMeta(p) }
+    },
   }
 }
 
@@ -119,6 +129,10 @@ export const buildPromptUx = (
   featureCfg: CliFeatureConfig,
   cwd: string,
   env: NodeJS.ProcessEnv,
+  /** RFC-08 — optional sink the host wires to `pills.update({mode})` so a
+   *  shift+tab posture change also repaints the bottom status-bar pill. Absent
+   *  ⇒ only the input meta-row pill updates (still correct, just one surface). */
+  onPosture?: (agentMode: AgentMode) => void,
 ): PromptUxOpts => {
   const { history, multiline } = featureCfg
   const promptHistoryOpts: Parameters<typeof createPromptHistory>[0] = {
@@ -131,7 +145,7 @@ export const buildPromptUx = (
     ...(promptHistory !== undefined ? { promptHistory } : {}),
     multiline: multiline.enabled,
     ...(atProvider !== undefined ? { atProvider } : {}),
-    ...buildModeCycle(env),
+    ...buildModeCycle(env, onPosture),
   }
 }
 

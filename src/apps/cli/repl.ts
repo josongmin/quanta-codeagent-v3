@@ -277,7 +277,9 @@ export const runRepl = async (): Promise<void> => {
       sinks: composeTurnSinks(setup, surfaceState),
       ...(surfaceState.imageQueue !== undefined ? { imageQueue: surfaceState.imageQueue } : {}),
       textInbox: wires.textInbox,
-      ux: buildPromptUx(featureCfg, setup.cwd, process.env),
+      ux: buildPromptUx(featureCfg, setup.cwd, process.env, (mode) =>
+        setup.pills.update({ mode }),
+      ),
       registerExitTeardown: (cb) => {
         process.once("exit", cb)
       },
