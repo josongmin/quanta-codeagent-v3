@@ -1,0 +1,58 @@
+id: token-refresh-scheduler
+title: Proactive token-refresh scheduler — clock-driven pre-expiry refresh (ADR-0461)
+section: 9
+subsystem: Connectors / token store (ADR-0461, extends ADR-0160 Phase E)
+order: 65
+maturity: L4
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: ["surface:core", "auth", "adr-0461"]
+depends_on: [connector-token-rotation]
+purpose: |
+  `TokenRefreshScheduler` closed-port — turns ADR-0160's purely caller-driven
+  rotation into clock-driven, refresh-BEFORE-expiry. ADR-0160 only refreshes
+  reactively when a caller invokes `rotate()`, which in practice happens AFTER
+  a wire call already ate a 401; a long task hits the expired token mid-flight.
+  Given a `TokenRecord` with `expiresAt`, `schedule(connectorId, record)` arms a
+  timer at `expiresAt - LEAD_MS`; on fire it calls the SAME
+  `TokenRotator.rotate(connectorId, refresh)` path — it does NOT duplicate the
+  rotator's in-flight mutex or atomic persist (single source of truth) — then
+  re-schedules from the new token's expiry. `LEAD_MS = 60_000` is a STRUCTURAL
+  margin not a tunable: firing exactly at `expiresAt` lets the refresh round-trip
+  straddle the boundary so a concurrent call could still see an expired token.
+  Bounded exponential backoff on refresh failure (1s → ×2 → cap 5min) so a
+  flapping IdP never busy-loops. `cancel(id)` clears one connector's timer;
+  `stop()` clears all (clean shutdown — no dangling timers); `pendingCount()`
+  for observability. `ClockPort` + `TimerPort` (injected setTimeout/clearTimeout
+  pair) are both DI seams — tests use a fake clock + a fake timer with
+  `fireNext()`. Default-OFF: a connector that never constructs the scheduler is
+  byte-identical (rotation stays caller-driven).
+evidence:
+  code:
+    - src/connectors/token-refresh-scheduler.ts
+  adrs: ["docs/decisions/0461-proactive-token-refresh-scheduler.md"]
+  tests:
+    unit:
+      - src/connectors/__tests__/token-refresh-scheduler-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: 'LEAD_MS'
+    where: 'token-refresh-scheduler.ts (compile-time const)'
+    purpose: '60s pre-expiry firing margin so the refresh round-trip completes before the old token lapses — a structural boundary guard, not a tunable.'
+deliberate_hold:
+  reason: "No production connector arms the scheduler yet — the rotator (ADR-0160) is the only live token path; this slice ships the seam + hellgate, wiring is per-connector opt-in."
+  promotion_path: "When a long-running connector (e.g. GitHub app, MCP OAuth) lands, construct the scheduler with its rotator + refresh callback at the connector composition root."
+notes: |
+  Hellgate 15 cases: arms at expiresAt-LEAD_MS / reuses rotator mutex (no dup
+  callback) / re-schedules from NEW expiry / cancel clears one / stop clears all
+  (no dangling) / bounded backoff 1s→×2→cap-5min / backoff resets on success /
+  expiresAt absent ⇒ no arm (opaque refresh-only token) / fake-clock+fake-timer
+  determinism. Reuses TokenRotator.rotate() verbatim — zero behavioural change
+  for connectors that don't construct it (default-OFF, byte-identical).
