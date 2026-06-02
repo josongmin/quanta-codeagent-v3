@@ -69,4 +69,47 @@ describe("zodToJsonSchema", () => {
       required: ["outer"],
     })
   })
+
+  // Regression: a tool-input union must FLATTEN to a single top-level object —
+  // never `{ type:"object", oneOf:[…] }`. The OpenAI Responses API rejects ANY
+  // top-level oneOf/anyOf/allOf/enum/not ("schema must have type 'object' and
+  // not have 'oneOf'… at the top level" → 400), which broke every union-schema
+  // tool (session_config, automation_update, gh, objective, …) on the
+  // chatgpt-oauth surface.
+  const FORBIDDEN_TOP_LEVEL = ["oneOf", "anyOf", "allOf", "not", "enum"] as const
+
+  test("discriminated union flattens to one object, merging discriminant enums", () => {
+    const schema = z.discriminatedUnion("op", [
+      z.object({ op: z.literal("get") }),
+      z.object({ op: z.literal("set"), level: z.enum(["low", "high"]) }),
+    ])
+    const json = zodToJsonSchema(schema)
+    expect(json.type).toBe("object")
+    for (const key of FORBIDDEN_TOP_LEVEL) expect(key in json).toBe(false)
+    const props = json.properties as Record<string, unknown>
+    // discriminant carries the union of every branch's literal value
+    expect(props.op).toEqual({ type: "string", enum: ["get", "set"] })
+    expect(props.level).toEqual({ type: "string", enum: ["low", "high"] })
+    // only fields required in EVERY branch stay required (the discriminant);
+    // branch-specific fields become optional.
+    expect(json.required).toEqual(["op"])
+  })
+
+  test("plain object union flattens with required = intersection", () => {
+    const schema = z.union([
+      z.object({ a: z.string(), shared: z.number() }),
+      z.object({ b: z.string(), shared: z.number() }),
+    ])
+    const json = zodToJsonSchema(schema)
+    expect(json.type).toBe("object")
+    for (const key of FORBIDDEN_TOP_LEVEL) expect(key in json).toBe(false)
+    expect(json.required).toEqual(["shared"])
+  })
+
+  test("union with a non-object branch degrades to a permissive object (never oneOf)", () => {
+    const schema = z.union([z.object({ a: z.string() }), z.string()])
+    const json = zodToJsonSchema(schema)
+    expect(json.type).toBe("object")
+    for (const key of FORBIDDEN_TOP_LEVEL) expect(key in json).toBe(false)
+  })
 })

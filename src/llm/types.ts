@@ -186,6 +186,30 @@ export type StreamEvent =
       cacheReadTokens?: number
       model: string
     }
+  /** Live output-token progress for the in-flight response (the rising "·
+   *  N tokens" the CLI spinner shows). Vendor-agnostic: synthesized by the
+   *  {@link LiveUsageLLM} decorator from the normalized `text_delta` /
+   *  `thinking_delta` stream (so every adapter is covered), and UPGRADED to
+   *  provider-authoritative numbers when the adapter streams incremental
+   *  `usage` (Anthropic `message_delta` carries cumulative `output_tokens`).
+   *
+   *  This is transient UI signal, NOT billing usage and NOT content:
+   *    - assemblers IGNORE it (the reconstructed message is byte-identical);
+   *    - the loop forwards it to the surface WITHOUT folding it into the
+   *      recorder / budget meter (those consume the terminal `usage` only),
+   *      so token accounting is never double-counted;
+   *    - the trajectory recorder SKIPS it (high-frequency, non-durable).
+   *  Emitted only when a surface opted the decorator in (default-OFF /
+   *  byte-identical otherwise). */
+  | {
+      type: "output_progress"
+      /** Best-known cumulative output tokens so far in this response. */
+      outputTokens: number
+      /** True ⇒ sourced from a provider-authoritative `usage` event; false ⇒
+       *  locally estimated from streamed content (the chars/4 convention
+       *  `estimateTokens` uses). A UI can render `~N` when `exact` is false. */
+      exact: boolean
+    }
   /** OpenAI Responses continuation-wire observation. Emitted when a Responses
    *  surface decides whether to send a full input, resume from a prior
    *  `previous_response_id`, or self-heal after a resume failure. This is

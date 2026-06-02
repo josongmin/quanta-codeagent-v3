@@ -167,6 +167,16 @@ export type AgentEvent =
       cacheReadTokens?: number
       model: string
     }
+  // Live output-token progress for the in-flight response — the rising
+  // "· N tokens" the CLI spinner renders (Claude-Code parity). Mirrors the
+  // `output_progress` StreamEvent the `LiveUsageLLM` decorator synthesizes
+  // (vendor-agnostic: from normalized text/thinking deltas, upgraded to exact
+  // when an adapter streams incremental usage). Transient UI signal, NOT
+  // billing: the loop forwards it WITHOUT folding into the recorder/budget
+  // (terminal `usage` owns accounting), and the trajectory recorder SKIPS it.
+  // `exact:false` ⇒ locally estimated (UI may render `~N`). NullStream
+  // swallows it, so the default-OFF byte-identical contract holds.
+  | { type: "output_progress"; outputTokens: number; exact: boolean }
   // ADR control-op cluster (L3→L4 promotion 2026-05-23): back-pressure
   // signal. Emitted when the loop encountered a control-op or follow-up
   // dequeue request and DEFERRED it because the thread is paused or the

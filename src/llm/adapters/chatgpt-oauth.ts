@@ -47,11 +47,18 @@ import { type AdapterStreamTimeoutConfig, resolveAdapterStreamTimeouts } from ".
 
 const RESPONSES_PATH = "/responses"
 const MODELS_PATH = "/models"
-/** Minimum client_version any ChatGPT-account model accepts (the
- *  `minimal_client_version` field is `"0.0.1"` for every model in the catalog
- *  as of 2026-05). Sent as a required query param on `/codex/models`; without
- *  it backend returns 400 `Field required`. Probe-verified, not guessed. */
-const MODELS_CLIENT_VERSION = "0.0.1"
+/** Client version advertised to `/codex/models` (required query param —
+ *  without it the backend returns 400 `Field required`).
+ *
+ *  The backend gates each model on its `minimal_client_version` and returns
+ *  ONLY models whose minimum is `<=` the value we send. The earlier "0.0.1"
+ *  assumption (every model's minimum was 0.0.1 as of 2026-05) went stale: by
+ *  2026-06 live models require 0.98.0–0.124.0 (gpt-5.5 needs 0.124.0), so a
+ *  0.0.1 probe filtered the entire catalog out and surfaced as the misleading
+ *  "empty catalog — account may not have model access" error. We pin a current
+ *  Codex CLI release so newly-rolled models stay visible; bump it when the
+ *  backend gates a model behind a higher minimum. Probe-verified 2026-06-02. */
+const MODELS_CLIENT_VERSION = "0.131.0"
 
 /** Cached `/models` catalog (memo). Keyed by `account_id` so multiple
  *  surfaces / accounts in one process keep separate caches. The catalog
