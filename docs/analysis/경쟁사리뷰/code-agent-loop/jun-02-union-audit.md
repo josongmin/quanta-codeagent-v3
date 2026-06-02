@@ -154,6 +154,25 @@ R2 교차수렴/buried 스윕에서 나온 것 중 quanta가 안 가진 것으�
 
 > §7 최신소스 killer 후보 10개를 실제 `src/` + git log로 대조. jun-01 Tier1~2 흡수([[jun-01-tier12-gap-absorption]], commit `2cb147ea`)와 jun-02 `96821b77`가 일부를 이미 먹었음 — 그걸 빼고 **진짜 남은 갭**만 확정.
 
+### ✅✅ 보완 SHIPPED (2026-06-02 2차 sprint — knob/configurable + fc 등록 + 빡센 hellgate/e2e)
+
+10 슬라이스 전부에 (1) knob/configurable wiring + (2) feature-catalog 등록 + (3) 더 빡센 hellgate unit + e2e 추가. 2 웨이브 × 5 worktree-격리 TDD agent + cherry-pick. **휴리스틱 0 (검증신호·결정성만)**.
+
+| 슬라이스 | knob env | fc | 신규 테스트 |
+|---|---|---|---|
+| advisor | `QUANTA_ADVISOR_MODEL` | 02-tool-system | +21 (allowlist bypass/injection/pure-consult/throw) |
+| task-budget | `QUANTA_TASK_BUDGET` | 04-context | +knob+e2e (multi-turn decrement, no-hard-stop) |
+| memory mode/citation/guard | `QUANTA_MEMORY_MODE`/`_WRITE_GUARD_PCT`/`_LINE_CITATIONS` | 05-memory | +36 (spy zero-call, guard boundary, line-span) |
+| multi-voter | `QUANTA_MULTI_VOTER` | 07-resilience | +20 (quorum boundary, byzantine, all-throw fail-closed, e2e winner-flip) |
+| policy-layers | `QUANTA_POLICY_MERGE_STRATEGY` | 03-permission | +16 (property precedence, most-restrictive invariant, TwoLayerManager decision-flip) |
+| compose-authoring | `QUANTA_COMPOSE_AUTHORING` | 02-tool-system | +62 (conventional parse edges, real-git-repo e2e) |
+| network-proxy | `QUANTA_NETWORK_PROXY` | 03-permission | +12 (real spawned-child socket egress block/allow/amend/SSRF) |
+| import | (CLI `session import`) | 09-integration | +5 RT (persist→resumable round-trip, dedup, N10 syscall-spy) |
+| mcp-tasks | (MCP capability-negotiated) | 09-integration | +23 (capability gate, malformed→typed, cancel race) |
+| profile-list | `QUANTA_PROFILES_DIR` | 03-permission | +45 (per-axis ceiling breach, shadow-built-in, path-traversal) + slice-boundary env fix |
+
+**게이트**: typecheck src 0 / fc validate 786 features all-resolved / 신규 ~245 테스트 pass / **회귀 0** (baseline 8845bcd1 = 119 fail → HEAD = 111 fail, *감소*; 잔여 111은 전부 사전존재 = 사용자 in-flight track + global-knob-registry 테스트격리 hazard, 내 슬라이스 이름 0건). knob 17→총 19, `knobs-import-bundle` drift-test를 파일수-파생으로 리팩터(향후 충돌 0). 알려진 사전 hazard: `__resetRegistry` cross-file 오염(임의 다파일 그룹 한정; 자연 CI 그룹 `runner/knobs+cli`=1300/0 clean) — 별도 하네스 리팩터 대상.
+
 ### Tier 1 — 진짜 ❌ 없음 · 高ROI · 低~中비용 (바로 흡수 후보)
 
 | # | killer 기능 | 확정 | 근거 | 비용 |
