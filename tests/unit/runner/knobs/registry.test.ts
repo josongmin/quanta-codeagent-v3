@@ -5,8 +5,31 @@
  * fixtures don't leak across files. Production-mode reset is forbidden — we
  * exercise that guard at the end.
  */
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { __resetRegistry, allKnobs, type Knob, knobsForSurface, registerKnob } from "@/runner/knobs"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test"
+import {
+  __resetRegistry,
+  __restoreRegistry,
+  __snapshotRegistry,
+  type AnyKnob,
+  allKnobs,
+  type Knob,
+  knobsForSurface,
+  registerKnob,
+} from "@/runner/knobs"
+// Side-effect: ensure every real knob is registered at module-load so the
+// beforeAll snapshot below is COMPLETE regardless of file order in the suite.
+import "@/runner/knobs/knobs"
+
+// This suite empties the global registry in afterEach. Without restoring it,
+// the file leaks an EMPTY registry to every sibling test in the single-process
+// run. Snapshot the (populated, in full-suite context) registry before any
+// reset and put it back after — root-cause fix for the knob-registry
+// full-suite contamination class.
+let REGISTRY_SNAPSHOT: ReadonlyMap<string, AnyKnob> = new Map()
+beforeAll(() => {
+  REGISTRY_SNAPSHOT = __snapshotRegistry()
+})
+afterAll(() => __restoreRegistry(REGISTRY_SNAPSHOT))
 
 const noopApply: Knob<boolean>["apply"] = (cfg) => cfg
 const trueOrUndef = (raw: string | undefined): boolean | undefined =>

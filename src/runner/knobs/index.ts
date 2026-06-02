@@ -13,7 +13,14 @@
 export { applyKnobs } from "./apply"
 export { type KnobConfigFile, readKnobConfig, writeKnobConfig } from "./persist"
 export { KNOB_PRESETS } from "./presets"
-export { __resetRegistry, allKnobs, knobsForSurface, registerKnob } from "./registry"
+export {
+  __resetRegistry,
+  __restoreRegistry,
+  __snapshotRegistry,
+  allKnobs,
+  knobsForSurface,
+  registerKnob,
+} from "./registry"
 export { resolveKnobs } from "./resolve"
 export {
   type AnyKnob,

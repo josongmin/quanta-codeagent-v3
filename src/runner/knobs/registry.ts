@@ -47,3 +47,23 @@ export const __resetRegistry = (): void => {
   }
   REGISTRY.clear()
 }
+
+/**
+ * Test-only: capture the current registry contents. Pairs with
+ * {@link __restoreRegistry} so a reset-heavy suite (which empties the global
+ * singleton in `afterEach`) can snapshot the populated registry in `beforeAll`
+ * and put it back in `afterAll` — otherwise it leaks an EMPTY registry to every
+ * sibling test file that runs after it in the single-process suite, and any
+ * reader of `allKnobs()`/`knobsForSurface()` (whose knob modules are already
+ * import-cached and won't re-fire `registerKnob`) sees nothing.
+ */
+export const __snapshotRegistry = (): ReadonlyMap<string, AnyKnob> => new Map(REGISTRY)
+
+/** Test-only: replace the registry with a snapshot (clear + repopulate). */
+export const __restoreRegistry = (snapshot: ReadonlyMap<string, AnyKnob>): void => {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("registry restore forbidden in prod")
+  }
+  REGISTRY.clear()
+  for (const [id, k] of snapshot) REGISTRY.set(id, k)
+}

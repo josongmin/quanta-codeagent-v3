@@ -6,9 +6,11 @@
  * prototype-pollution-shaped knob payloads, partial registry recovery after
  * a throwing register, surface-cast safety, mutation guards, scale).
  */
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test"
 import {
   __resetRegistry,
+  __restoreRegistry,
+  __snapshotRegistry,
   type AnyKnob,
   allKnobs,
   asAnyKnob,
@@ -17,6 +19,17 @@ import {
   registerKnob,
   type Surface,
 } from "@/runner/knobs"
+// Side-effect: register all real knobs at module-load so the beforeAll snapshot
+// is COMPLETE regardless of suite file order.
+import "@/runner/knobs/knobs"
+
+// Restore the global registry after this reset-heavy suite so it doesn't leak an
+// EMPTY registry to sibling files (root-cause fix for full-suite knob contamination).
+let REGISTRY_SNAPSHOT: ReadonlyMap<string, AnyKnob> = new Map()
+beforeAll(() => {
+  REGISTRY_SNAPSHOT = __snapshotRegistry()
+})
+afterAll(() => __restoreRegistry(REGISTRY_SNAPSHOT))
 
 const trueOrUndef = (raw: string | undefined): boolean | undefined =>
   raw === "1" ? true : undefined
