@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { main } from "@/apps/web-daemon"
 import {
   _constantTimeEqualsForTest as constantTimeEquals,
   _extractTokenForTest as extractToken,
+  _serveStaticSpaForTest as serveStaticSpa,
 } from "@/apps/web-daemon/server"
 import type { WebDaemonHandle } from "@/apps/web-daemon/types"
 import { createStubRuntimeFactory } from "./fixture"
@@ -122,5 +126,38 @@ describe("daemon auth gate (HTTP upgrade path)", () => {
     const handle = await boot()
     const res = await fetch(`http://127.0.0.1:${handle.port}/no-such-path`)
     expect(res.status).toBe(404)
+  })
+})
+
+describe("static SPA serve (auth-gate: unknown paths are NOT silently served)", () => {
+  // Regression: the static resolver previously blanket-fell-back to index.html
+  // for ANY unknown path when a built dist was present, so `/no-such-path`,
+  // `/admin`, etc. resolved to HTTP 200 — defeating the daemon's intent that
+  // unknown HTTP paths are rejected. The fix serves only the SPA root and real
+  // built assets; unknown paths return null ⇒ the caller emits 404.
+  test("with a built dist present, an unknown path is rejected (null ⇒ 404)", () => {
+    const distDir = mkdtempSync(join(tmpdir(), "quanta-web-dist-"))
+    writeFileSync(join(distDir, "index.html"), "<!doctype html><title>app</title>")
+    writeFileSync(join(distDir, "app.js"), "console.log('ok')")
+    try {
+      // SPA root and real assets still serve.
+      expect(serveStaticSpa("/", distDir)?.status).toBe(200)
+      expect(serveStaticSpa("/index.html", distDir)?.status).toBe(200)
+      expect(serveStaticSpa("/app.js", distDir)?.status).toBe(200)
+      // Unknown paths are NOT served via index.html fallback — they 404.
+      expect(serveStaticSpa("/no-such-path", distDir)).toBeNull()
+      expect(serveStaticSpa("/admin", distDir)).toBeNull()
+      expect(serveStaticSpa("/missing.js", distDir)).toBeNull()
+      // Path traversal stays rejected.
+      expect(serveStaticSpa("/../etc/passwd", distDir)).toBeNull()
+    } finally {
+      rmSync(distDir, { recursive: true, force: true })
+    }
+  })
+
+  test("no dist configured ⇒ resolver returns null for every path", () => {
+    expect(serveStaticSpa("/", null)).toBeNull()
+    expect(serveStaticSpa("/index.html", null)).toBeNull()
+    expect(serveStaticSpa("/no-such-path", null)).toBeNull()
   })
 })

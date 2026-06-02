@@ -419,31 +419,44 @@ const mimeFor = (path: string): string => {
   return MIME_BY_EXT[path.slice(idx).toLowerCase()] ?? "application/octet-stream"
 }
 
-const serveStaticSpa = (pathname: string): Response | null => {
-  if (RESOLVED_DIST_DIR === null) return null
+const serveStaticSpa = (
+  pathname: string,
+  distDir: string | null = RESOLVED_DIST_DIR,
+): Response | null => {
+  if (distDir === null) return null
   // Canonicalise — strip leading "/" so we can `join` safely; guard against
   // path traversal by rejecting any "..". SPA root → index.html.
   const cleaned = pathname.replace(/^\/+/, "")
   if (cleaned.includes("..")) return null
-  const candidate =
-    cleaned === "" || cleaned === "index.html"
-      ? `${RESOLVED_DIST_DIR}/index.html`
-      : `${RESOLVED_DIST_DIR}/${cleaned}`
-  const file = Bun.file(candidate)
-  if (file.size === 0) {
-    // SPA fallback — unknown route ⇒ index.html so client-side routing wins.
-    const indexFile = Bun.file(`${RESOLVED_DIST_DIR}/index.html`)
+  // Root navigation ⇒ index.html. Any other path is served ONLY if a real
+  // built asset exists there; an unknown path returns null so the caller
+  // emits 404. We deliberately do NOT blanket-fall-back to index.html for
+  // arbitrary unknown paths: that would let any unauthenticated path (e.g.
+  // `/no-such-path`, `/admin`) resolve to 200, defeating the daemon's intent
+  // that unknown HTTP paths are rejected. The bundled frontend has no
+  // client-side router, so deep-link SPA fallback is not required.
+  if (cleaned === "" || cleaned === "index.html") {
+    const indexFile = Bun.file(`${distDir}/index.html`)
     if (indexFile.size === 0) return null
     return new Response(indexFile, {
       status: 200,
       headers: { "content-type": "text/html; charset=utf-8" },
     })
   }
+  const candidate = `${distDir}/${cleaned}`
+  const file = Bun.file(candidate)
+  if (file.size === 0) return null
   return new Response(file, {
     status: 200,
     headers: { "content-type": mimeFor(candidate) },
   })
 }
+
+/** Test-only: exercise the static-SPA resolver against an arbitrary dist dir
+ *  (the production `RESOLVED_DIST_DIR` is frozen at module init). Proves the
+ *  auth-gate invariant — unknown paths return null (⇒ 404) even when a built
+ *  frontend dist is present, while real assets + the SPA root still serve. */
+export const _serveStaticSpaForTest = serveStaticSpa
 
 /** IPv6 literals need brackets in URLs (RFC 3986 §3.2.2). */
 const formatHost = (address: string, family: "IPv4" | "IPv6"): string =>
