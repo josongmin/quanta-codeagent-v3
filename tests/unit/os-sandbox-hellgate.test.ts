@@ -212,12 +212,15 @@ describe("C. defaultOsSandbox.availability — backend detection", () => {
     expect((av.warnings[0] as string).includes("install bubblewrap")).toBe(true)
   })
 
-  test("HELL-C17: win32 → backend=passthrough + unsupported warning", async () => {
+  test("HELL-C17: win32 (no helper) → backend=passthrough + actionable helper warning (ADR-0441)", async () => {
+    // ADR-0441 — win32 is now a recognized platform. Without the
+    // quanta-win-sandbox.exe helper it still degrades to passthrough, but the
+    // warning is actionable (install the helper) rather than "unsupported".
     const sb = defaultOsSandbox({ platform: "win32", which: whichOk })
     const av = await sb.availability()
     expect(av.backend).toBe("passthrough")
     expect(av.warnings.length).toBe(1)
-    expect((av.warnings[0] as string).includes("unsupported")).toBe(true)
+    expect((av.warnings[0] as string).includes("quanta-win-sandbox.exe")).toBe(true)
   })
 })
 

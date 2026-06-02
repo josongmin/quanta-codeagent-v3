@@ -1,0 +1,84 @@
+id: windows-sandbox-backend
+title: ADR-0441 Windows OS-sandbox backend (pure compiler + native boundary)
+section: 3
+subsystem: OS sandbox windows
+order: 441
+maturity: L2
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: partial
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:runtime, tier:adapter, security-touched]
+depends_on: [os-sandbox-port-router, sandbox-policy, landlock-degraded-passthrough]
+purpose: |
+  Closes the Windows surface-parity gap in the OS sandbox. Before ADR-0441,
+  win32 had NO branch and NO type-union arm — agent shells ran fully
+  unsandboxed regardless of profile. Now there is a pure policy compiler
+  + native boundary + selection wire, mirroring Seatbelt (macOS) and
+  landlock-native (Linux).
+
+  L1 (PURE, testable on any OS): `compileWindowsSandboxSpec(policy, workspace)`
+  → `WindowsSandboxSpec` (restrictedToken / low integrity / writePaths /
+  readPaths / denyReadPaths / allowNetwork / memoryMb? / timeoutMs?).
+  `off`/`danger-full-access` → null (caller passthrough, no wrap). Network
+  override + extra-path resolution identical to seatbelt. `seccompMode`
+  ignored (Linux-only). `denyReadPaths` empty in v1 — explicit policy input
+  only, NO secret-dir heuristics. `serializeWindowsSpec` → JSON-over-stdin
+  (sidesteps argv path quoting). Mirrors Codex windows-sandbox-rs broker.
+
+  L2 (native boundary): `windows-native.ts` — `detectNativeWindows` (cheap
+  probe, never-throw) + `nativeWindowsOsSandbox` (binding null ⇒ degraded
+  passthrough; throws ⇒ exit 127 + native-binding-threw). Closed-port DI
+  (cfg.windows.binding / bindingLoader). Selection wire adds win32 branch +
+  `windows-restricted-token` SandboxBackend arm.
+
+  DEFAULT-OFF / byte-identical: the helper exe (L3) is not built, so every
+  win32 user falls to passthrough — same exit/out/err, only an actionable
+  degradeReason (`win32-sandbox-helper-missing`) instead of
+  `unsupported-platform:win32`. Activates automatically once L3 ships, no
+  wire change.
+
+  HONEST: real Win32 isolation (CreateRestrictedToken / SetTokenInformation /
+  CreateProcessAsUser / Job Object) is impossible from pure Node/Bun. The
+  boundary degrades LOUDLY — it never claims isolation without the helper.
+  L3 (cross-compiled helper exe + win32-gated integration) is backlog.
+evidence:
+  code:
+    - src/runtime/os-sandbox/windows.ts
+    - src/runtime/os-sandbox/windows-native.ts
+    - src/runtime/os-sandbox/default.ts
+    - src/runtime/os-sandbox/types.ts
+    - src/runtime/os-sandbox/index.ts
+  adrs: [441]
+  tests:
+    unit:
+      - tests/unit/os-sandbox-windows-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: windows.failClosedOnNetwork
+    default: 'false'
+    purpose: |
+      Opt-in: reject a spawn when the policy demands network-deny but the
+      helper cannot enforce it. Default false = honest warn + proceed
+      (RFC-07 §7). Carried on NativeWindowsConfig.
+deliberate_hold:
+  reason: |
+    L3 — the native helper exe (`quanta-win-sandbox.exe`, a Rust
+    windows-sandbox-rs-style cross-compiled broker) — is held until a
+    Windows-native (non-WSL) usage signal justifies the build cost. Lowest-ROI
+    slice in the jun-2 batch. Real Win32 isolation is impossible from pure
+    Node/Bun, so without the helper the backend degrades loudly to passthrough.
+  promotion_path: |
+    Build the helper exe (separate Rust crate, optional artifact) + publish the
+    `@quanta/windows-sandbox-native` shim. The existing selection wire picks it
+    up automatically via `detectNativeWindows` — no code change. Land the
+    win32-gated integration tests (cluster D) alongside the helper build.
+notes: |
+  Broker-helper model chosen over napi (RFC option A): matches Codex's
+  fs-sandbox-helper broker-process, called via one Bun.spawn, avoids the
+  napi prebuild matrix, isolates main-process crashes. AppContainer
+  deliberately NOT adopted (Codex doesn't either — admin/capability-SID
+  overhead). WSL covered by the Linux landlock backend, not this slice.

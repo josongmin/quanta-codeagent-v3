@@ -1,5 +1,5 @@
 export { compileBubblewrapArgs } from "./bubblewrap"
-export { defaultOsSandbox } from "./default"
+export { type DefaultOsSandboxConfig, defaultOsSandbox } from "./default"
 export {
   isBubblewrapAvailable,
   isLandlockAvailable,
@@ -57,6 +57,20 @@ export type {
   Spawner,
 } from "./types"
 export { OsSandboxError } from "./types"
+// ADR-0441 — Windows broker-helper backend (pure compiler + native boundary).
+export {
+  compileWindowsSandboxSpec,
+  serializeWindowsSpec,
+  type WindowsSandboxSpec,
+} from "./windows"
+export {
+  detectNativeWindows,
+  type NativeWindowsConfig,
+  type NativeWinResult,
+  type NativeWinSpec,
+  nativeWindowsOsSandbox,
+  type WindowsSandboxBinding,
+} from "./windows-native"
 export {
   DEFAULT_SANDBOX_EXEC_PATH,
   type WrappedShellArgv,

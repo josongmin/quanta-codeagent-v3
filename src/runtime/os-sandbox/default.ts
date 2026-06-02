@@ -9,19 +9,55 @@ import {
 import { compileSeatbeltProfile } from "./seatbelt"
 import type {
   OsSandbox,
-  OsSandboxConfig,
   SandboxAvailability,
   SandboxedSpawnResult,
   SandboxedSpawnSpec,
   SandboxPolicy,
   Spawner,
 } from "./types"
+import {
+  detectNativeWindows,
+  type NativeWindowsConfig,
+  nativeWindowsOsSandbox,
+} from "./windows-native"
+
+/**
+ * Combined closed-port DI config for {@link defaultOsSandbox}.
+ *
+ * The Linux native binding lives at the top level (`binding` /
+ * `bindingLoader`) — backward-compatible with every existing caller. The
+ * Windows native binding (ADR-0441) is NAMESPACED under `windows.*` because
+ * its `binding`/`bindingLoader` shapes differ from Landlock's and a flat
+ * intersection would be unsatisfiable. Only the branch matching `cfg.platform`
+ * reads the platform-relevant fields.
+ */
+export interface DefaultOsSandboxConfig extends NativeLandlockConfig {
+  /** Windows broker-helper DI (ADR-0441). Tests inject a fake binding here;
+   *  production leaves it absent and the adapter lazily loads the helper. */
+  readonly windows?: Pick<NativeWindowsConfig, "binding" | "bindingLoader" | "failClosedOnNetwork">
+}
+
+/** Project the combined config down to a standalone {@link NativeWindowsConfig}
+ *  for the win32 branch — carries spawner/platform/which through verbatim and
+ *  lifts the namespaced `windows.*` DI fields to the top level the adapter
+ *  expects. exactOptional: omit absent fields rather than set `undefined`. */
+const toWindowsConfig = (cfg: DefaultOsSandboxConfig): NativeWindowsConfig => ({
+  ...(cfg.spawner !== undefined ? { spawner: cfg.spawner } : {}),
+  ...(cfg.platform !== undefined ? { platform: cfg.platform } : {}),
+  ...(cfg.which !== undefined ? { which: cfg.which } : {}),
+  ...(cfg.windows?.binding !== undefined ? { binding: cfg.windows.binding } : {}),
+  ...(cfg.windows?.bindingLoader !== undefined ? { bindingLoader: cfg.windows.bindingLoader } : {}),
+  ...(cfg.windows?.failClosedOnNetwork !== undefined
+    ? { failClosedOnNetwork: cfg.windows.failClosedOnNetwork }
+    : {}),
+})
+
 /**
  * Default {@link OsSandbox} implementation. Closed-port DI: pass `cfg.spawner`
  * to inject a fake in tests; production wires the real Bun-spawn-compatible
  * default below.
  */
-export const defaultOsSandbox = (cfg: NativeLandlockConfig = {}): OsSandbox => {
+export const defaultOsSandbox = (cfg: DefaultOsSandboxConfig = {}): OsSandbox => {
   const platform: NodeJS.Platform = cfg.platform ?? process.platform
   const spawner: Spawner = cfg.spawner ?? defaultSpawner
   const which = cfg.which ?? defaultWhich
@@ -46,7 +82,7 @@ const spawnImpl = async (args: {
   platform: NodeJS.Platform
   spawner: Spawner
   which: (b: string) => Promise<string | null>
-  nativeCfg: NativeLandlockConfig
+  nativeCfg: DefaultOsSandboxConfig
 }): Promise<SandboxedSpawnResult> => {
   const { spec, policy, platform, spawner, which, nativeCfg } = args
 
@@ -103,7 +139,30 @@ const spawnImpl = async (args: {
     })
   }
 
-  // Other platforms (win32, etc.): passthrough + reason.
+  // Windows (win32) — ADR-0441 broker-helper backend:
+  //   1. nativeWindowsOsSandbox — when the helper exe
+  //      (`quanta-win-sandbox.exe`) is present (probe via detectNativeWindows).
+  //   2. degraded passthrough with a LOUD, actionable install hint.
+  //
+  // HONEST: the helper exe is an L3 backlog artifact (not yet built/installed),
+  // so today this ALWAYS falls to the passthrough branch. That branch is
+  // byte-identical to the legacy behavior (sandboxApplied=false, same
+  // exit/out/err) — the ONLY change is the degradeReason string becomes
+  // actionable instead of `unsupported-platform:win32`.
+  if (platform === "win32") {
+    const winCfg = toWindowsConfig(nativeCfg)
+    const native = await detectNativeWindows(winCfg)
+    if (native !== null) {
+      return nativeWindowsOsSandbox(winCfg).spawn(spec, policy)
+    }
+    return passthrough(spec, spawner, {
+      sandboxApplied: false,
+      degradeReason:
+        "win32-sandbox-helper-missing — install quanta-win-sandbox.exe for isolation (degraded to passthrough)",
+    })
+  }
+
+  // Other platforms (sunos, aix, etc.): passthrough + reason.
   return passthrough(spec, spawner, {
     sandboxApplied: false,
     degradeReason: `unsupported-platform:${platform}`,
@@ -182,7 +241,7 @@ const passthrough = async (
 const availabilityImpl = async (args: {
   platform: NodeJS.Platform
   which: (b: string) => Promise<string | null>
-  nativeCfg: NativeLandlockConfig
+  nativeCfg: DefaultOsSandboxConfig
 }): Promise<SandboxAvailability> => {
   const { platform, which, nativeCfg } = args
   if (platform === "darwin") {
@@ -209,6 +268,21 @@ const availabilityImpl = async (args: {
       backend: "passthrough",
       warnings: [
         "linux: install bubblewrap for sandbox (apt/dnf/pacman) — degraded to passthrough",
+      ],
+    }
+  }
+  if (platform === "win32") {
+    // ADR-0441 — Windows broker helper. Present ⇒ honest
+    // `windows-restricted-token` backend; absent ⇒ passthrough with a LOUD
+    // warning (the default state today, since the helper exe is L3 backlog).
+    const native = await detectNativeWindows(toWindowsConfig(nativeCfg))
+    if (native !== null) {
+      return { backend: "windows-restricted-token", warnings: [] }
+    }
+    return {
+      backend: "passthrough",
+      warnings: [
+        "win32: quanta-win-sandbox.exe not found — degraded to passthrough (no OS isolation)",
       ],
     }
   }

@@ -47,7 +47,8 @@ export interface SandboxPolicy {
   /** Seccomp mode for the native Linux adapter: `"strict"` (default —
    *  Phase 3.2 default-deny allowlist) or `"lax"` (Phase 3.1 wire,
    *  diagnostic / debug only). Other backends ignore this field.
-   *  Defaults to `"strict"` when the adapter sees `undefined`. */
+   *  Defaults to `"strict"` when the adapter sees `undefined`.
+   *  Linux-only — the Windows backend (ADR-0441) IGNORES this field. */
   readonly seccompMode?: "lax" | "strict"
 }
 
@@ -58,7 +59,16 @@ export interface SandboxedSpawnSpec {
   readonly signal?: AbortSignal
 }
 
-export type SandboxBackend = "seatbelt" | "bubblewrap" | "landlock+seccomp" | "passthrough"
+export type SandboxBackend =
+  | "seatbelt"
+  | "bubblewrap"
+  | "landlock+seccomp"
+  // ADR-0441 — Windows broker-helper backend (restricted token + low
+  // integrity + Job Object + deny-read resolver). Reported by `availability()`
+  // only when the native helper (`quanta-win-sandbox.exe`) is present; absent
+  // ⇒ `passthrough`.
+  | "windows-restricted-token"
+  | "passthrough"
 
 export interface SandboxedSpawnResult {
   readonly exitCode: number
