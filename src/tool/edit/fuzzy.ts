@@ -119,16 +119,108 @@ const tryAnchoredTrim = (
 }
 
 /**
+ * Score one candidate window against the needle: the COUNT of lines that match
+ * the needle line at the same position VERBATIM (character-for-character), not
+ * merely after normalization. This is a pure MEASUREMENT — an integer count of
+ * an observable property (how many lines the model typed byte-exactly), with no
+ * tunable threshold, no decay, no ratio cutoff. Every candidate already matches
+ * the needle under the rung's normalization (that is why it is a candidate); the
+ * exact-line count tie-breaks them by literal fidelity to what the model wrote.
+ */
+const exactAnchorScore = (haystack: string[], needle: string[], span: LineSpan): number => {
+  let exact = 0
+  for (let j = 0; j < needle.length; j++) {
+    if ((haystack[span.start + j] ?? "") === needle[j]) exact++
+  }
+  return exact
+}
+
+/**
+ * Strategy (d) — ADR-0451 scored-candidate safety net. Runs ONLY after the
+ * whitespace-flex / anchored-trim rungs have produced an AMBIGUOUS (2+ window)
+ * result that the ladder would otherwise reject outright. We recover the edit
+ * IFF a single candidate is the DECISIVE best:
+ *
+ *   exactly one candidate window has a STRICTLY higher verbatim-exact-line
+ *   count than EVERY other candidate window.
+ *
+ * A tie at the top (two or more candidates share the maximum score) is NOT a
+ * decisive best → we keep failing ambiguous, preserving today's safety. This is
+ * a strict-ordering discriminator, not a fudge threshold: there is no "score >
+ * 0.8" — the rule is "unique strict maximum or fail". The bias is deliberately
+ * toward the false-negative (fail, ask the model to retry) over the false-
+ * positive (apply to the wrong window), which is the cardinal sin.
+ *
+ * `replaceAll` never reaches here: under replaceAll a multi-span match is APPLIED
+ * (not ambiguous) by `applyWindows`, so the ladder never produces the ambiguous
+ * result this rung consumes.
+ */
+const tryScoredCandidate = (
+  source: string,
+  oldString: string,
+  newString: string,
+): StrategyResult => {
+  const haystack = splitLines(source)
+  const needle = splitLines(oldString)
+  // Recompute the candidate set the SAME way the ambiguous rungs did. We union
+  // the whitespace-flex and anchored-trim projections (deduped by start) so the
+  // candidate pool is exactly the windows the ladder already deemed plausible —
+  // we never invent a window a normalizing rung wouldn't have surfaced.
+  const byStart = new Map<number, LineSpan>()
+  for (const project of [normalizeLine, (l: string) => l.trim()]) {
+    for (const span of findLineWindows(haystack, needle, project)) {
+      byStart.set(span.start, span)
+    }
+  }
+  const candidates = [...byStart.values()]
+  // Only a genuinely ambiguous (2+ candidate) situation is in scope; 0 or 1 is
+  // handled (matched/none) by the earlier rungs and must not be touched here.
+  if (candidates.length < 2) return { kind: "none" }
+
+  const scored = candidates.map((span) => ({
+    span,
+    score: exactAnchorScore(haystack, needle, span),
+  }))
+  let best = scored[0] as { span: LineSpan; score: number }
+  let runnerUp: { span: LineSpan; score: number } | undefined
+  for (const c of scored.slice(1)) {
+    if (c.score > best.score) {
+      runnerUp = best
+      best = c
+    } else if (runnerUp === undefined || c.score > runnerUp.score) {
+      runnerUp = c
+    }
+  }
+  // DECISIVE-best rule: the top score must STRICTLY beat the runner-up. A tie at
+  // the maximum (best.score === runnerUp.score) is not decisive → stay ambiguous.
+  if (runnerUp === undefined || best.score <= runnerUp.score) {
+    return { kind: "none" }
+  }
+  const lines = splitLines(source)
+  const next = spliceLines(lines, best.span, newString)
+  return {
+    kind: "matched",
+    outcome: {
+      ok: true,
+      message: `Replaced 1 occurrence(s) via scored-candidate best match (exact-anchor ${best.score} > ${runnerUp.score})`,
+      next: next.join("\n"),
+    },
+  }
+}
+
+/**
  * Fuzzy string replacement with a conservative strategy ladder. The first
  * strategy that yields a confident (unique unless `replaceAll`) match wins:
  *
  *  1. exact            — delegates to {@link applyExactEdit} (no duplication).
  *  2. whitespace-flex  — per-line trim + internal-run collapse.
  *  3. anchored-trim    — per-line end-trim only.
+ *  4. scored-candidate — ADR-0451 safety net: when 2-3 surface as AMBIGUOUS,
+ *                        recover IFF one window is the strict exact-anchor best.
  *
- * Ambiguous (>1) fuzzy matches are never applied unless `replaceAll`. When no
- * strategy is confident the function fails with a helpful message: a wrong
- * edit is worse than no edit.
+ * Ambiguous (>1) fuzzy matches are never applied unless `replaceAll` OR a single
+ * candidate is the decisive scored best. When no strategy is confident the
+ * function fails with a helpful message: a wrong edit is worse than no edit.
  */
 export const applyFuzzyEdit = (
   source: string,
@@ -149,9 +241,19 @@ export const applyFuzzyEdit = (
   for (const attempt of [tryWhitespaceFlexible, tryAnchoredTrim]) {
     const r = attempt(source, oldString, newString, replaceAll)
     if (r.kind === "matched") return r.outcome
-    // An ambiguous match is definitive: a more permissive rung can only be
-    // *more* ambiguous, so stop here with the clearest message.
-    if (r.kind === "ambiguous") return r.outcome
+    // An ambiguous match used to be definitive. ADR-0451: before surfacing the
+    // failure, give the deterministic scored-candidate rung a chance to RECOVER
+    // the edit when exactly one window is the strict exact-anchor best. It only
+    // ever returns `matched` (decisive winner) or `none` (no strict winner →
+    // keep the ambiguous failure). It never runs under `replaceAll` because that
+    // path never produces an ambiguous result (multi-span is applied, not
+    // rejected). Falling through to the ambiguous outcome is byte-identical to
+    // pre-ADR behavior for every tie / near-tie / no-advantage case.
+    if (r.kind === "ambiguous") {
+      const scored = tryScoredCandidate(source, oldString, newString)
+      if (scored.kind === "matched") return scored.outcome
+      return r.outcome
+    }
   }
 
   return {
