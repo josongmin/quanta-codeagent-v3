@@ -1,5 +1,5 @@
 /**
- * Integration hellgate (ADR-0461): the agent loop ENFORCES the per-mode STICKY
+ * Integration hellgate (ADR-0462): the agent loop ENFORCES the per-mode STICKY
  * model when a `stickyModelStore` is wired at the composition root. Before this
  * slice the slot was a DEAD seam — published but never read — so a sticky
  * per-mode selection never swapped the LLM port. These cases prove the consume
@@ -15,7 +15,7 @@
  *  (4) skill override + sticky BOTH set → SKILL wins (sticky never overrides a
  *      skill's explicit model demand);
  *  (5) store ABSENT → byte-identical regression anchor (every input is the base
- *      port, exactly as the pre-ADR-0461 path);
+ *      port, exactly as the pre-ADR-0462 path);
  *  (6) mode change → the sticky for the NEW active mode is read (the store is
  *      keyed by mode and re-read per turn).
  *
@@ -73,7 +73,7 @@ const cfg = (over: Partial<AgentConfig> & Pick<AgentConfig, "llm" | "cwd">): Age
   ...over,
 })
 
-describe("agent loop — sticky-per-mode model enforcement (ADR-0461)", () => {
+describe("agent loop — sticky-per-mode model enforcement (ADR-0462)", () => {
   let dir: string
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "sticky-model-"))

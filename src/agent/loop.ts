@@ -484,7 +484,7 @@ type ResolvedTurnOverride = {
   explicitOff: boolean
 }
 
-/** ADR-0461 — read the sticky modelId for the session's ACTIVE mode. Returns
+/** ADR-0462 — read the sticky modelId for the session's ACTIVE mode. Returns
  *  `undefined` when no sticky store is wired (default-OFF byte-identical path)
  *  OR when the store has no preference for the active mode. The store's `get`
  *  is no-throw by port contract (IO errors resolve `undefined`), so this read
@@ -503,7 +503,7 @@ const readStickyModelForMode = async (config: AgentConfig): Promise<string | und
  *  Pure: no clock, no IO (the async store read happens in the caller; this
  *  function only receives the already-resolved sticky `modelId`).
  *
- *  MODEL-SWAP PRECEDENCE (ADR-0461): `skill override > sticky > default`.
+ *  MODEL-SWAP PRECEDENCE (ADR-0462): `skill override > sticky > default`.
  *  Rationale — the skill override is a per-skill DEMAND (a skill declares it
  *  needs a specific model to do its job) and must win, while the sticky model
  *  is a session-level DEFAULT (the user said "use gpt-5 for plan mode"). A
@@ -516,7 +516,7 @@ const readStickyModelForMode = async (config: AgentConfig): Promise<string | und
  *
  *  Default-OFF / byte-identical: `stickyModelId` undefined (the only value a
  *  non-sticky caller ever passes) ⇒ this function is byte-for-byte identical
- *  to the pre-ADR-0461 skill-only path.
+ *  to the pre-ADR-0462 skill-only path.
  *
  *  Important for ADR-0417: the return shape preserves whether the manual
  *  resolution chose an EXPLICIT "off" (`explicitOff:true`) versus simple
@@ -642,7 +642,7 @@ const streamConsume = async (
   const samplingSpan: Span = startSpan(SPAN_NAMES.runSamplingRequest, attrs({}))
   let samplingStatus: "ok" | "error" | "aborted" = "ok"
   const stop = recorder?.llmStream()
-  // ADR-0461: read the STICKY model for the ACTIVE mode (if a sticky store is
+  // ADR-0462: read the STICKY model for the ACTIVE mode (if a sticky store is
   // wired). Re-read every turn against the CURRENT mode so a mid-session mode
   // change picks up the new mode's sticky on its next turn. Default-OFF: absent
   // store ⇒ `undefined` ⇒ `resolveSkillTurnOverride` is byte-identical.
@@ -653,7 +653,7 @@ const streamConsume = async (
   // turn (a sibling skill with no override clears it back to session/default).
   // Absent gate / absent override ⇒ `{ llm: config.llm }` with no `thinking`,
   // i.e. byte-identical to the pre-feature stream call. The sticky model
-  // (ADR-0461) is consulted by `resolveSkillTurnOverride` with precedence
+  // (ADR-0462) is consulted by `resolveSkillTurnOverride` with precedence
   // skill > sticky > default.
   const turnLlm = applyEffortClassifierFloor(
     resolveSkillTurnOverride(config, skillGate?.activeOverride(), stickyModelId),

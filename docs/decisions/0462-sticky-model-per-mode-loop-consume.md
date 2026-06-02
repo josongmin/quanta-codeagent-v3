@@ -1,4 +1,4 @@
-# ADR-0461 — sticky-model-per-mode: loop consume site (dead-seam → live)
+# ADR-0462 — sticky-model-per-mode: loop consume site (dead-seam → live)
 
 **Status:** Accepted (2026-06-03)
 **Type:** Structural wiring slice (activates an existing dead seam).
