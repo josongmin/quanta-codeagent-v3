@@ -19,17 +19,25 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { allKnobs, asAnyKnob, knobsForSurface, registerKnob } from "@/runner/knobs"
 import { advisorKnob } from "@/runner/knobs/knobs/advisor"
+import { closeoutGuardKnob } from "@/runner/knobs/knobs/closeout-guard"
+import { hooksKnob } from "@/runner/knobs/knobs/hooks"
+import { personaKnob } from "@/runner/knobs/knobs/persona"
+import { workingStateKnob } from "@/runner/knobs/knobs/working-state"
 import { bootstrapKnobs, parseCliKnobsFromArgv } from "../../../src/apps/cli/knobs-bootstrap"
 
 let dir = ""
 
 beforeAll(async () => {
   dir = await mkdtemp(join(tmpdir(), "knobs-boot-"))
-  // Re-register advisor if a sibling suite's `__resetRegistry()` wiped the
-  // singleton (cached re-imports do not re-fire registerKnob). Guarded so we
-  // never trigger a collision throw. Keeps the CLI-surface membership
-  // assertion below order-independent.
-  if (!allKnobs().has(advisorKnob.id)) registerKnob(asAnyKnob(advisorKnob))
+  // Re-register EVERY CLI-surface knob this suite asserts on, in case a sibling
+  // suite's `__resetRegistry()` wiped the singleton (cached re-imports do not
+  // re-fire registerKnob). Guarded per-knob so we never trigger a collision
+  // throw. Keeps the `knobsForSurface('cli')` membership assertion below
+  // order-independent in the full single-process suite run. (Previously only
+  // advisor was guarded → the other four flaked when a reset preceded this file.)
+  for (const k of [closeoutGuardKnob, hooksKnob, personaKnob, workingStateKnob, advisorKnob]) {
+    if (!allKnobs().has(k.id)) registerKnob(asAnyKnob(k))
+  }
 })
 
 afterAll(async () => {
