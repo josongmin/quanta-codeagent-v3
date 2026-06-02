@@ -367,7 +367,7 @@ describe("default-OFF registry seam", () => {
   })
 })
 
-// ── ADR-0451: diff-derived scope inference ──────────────────────────────────
+// ── ADR-0458: diff-derived scope inference ──────────────────────────────────
 
 /** Build a minimal but realistic staged-diff section for one file with `adds`
  *  added + `dels` removed body lines. */

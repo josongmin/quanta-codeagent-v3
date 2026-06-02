@@ -68,7 +68,7 @@ const truncate = (s: string, max: number): { text: string; truncated: boolean } 
 }
 
 // ===========================================================================
-// Scope inference from the staged diff (pure, deterministic) — ADR-0451
+// Scope inference from the staged diff (pure, deterministic) — ADR-0458
 // ===========================================================================
 
 /** Recognized source roots. A path's scope is the FIRST segment UNDER one of
@@ -214,7 +214,7 @@ export interface ParsedCommitMessage {
   subject: string
   body: string
   conventional: boolean
-  /** Soft signal (ADR-0451): present + TRUE iff a non-empty `suggestedScopes`
+  /** Soft signal (ADR-0458): present + TRUE iff a non-empty `suggestedScopes`
    *  was given AND the authored scope is NOT one of them. This is advisory
    *  metadata only — it NEVER changes `message`/`conventional` and NEVER blocks
    *  a commit; a caller may surface it as a nudge toward a consistent scope.
@@ -240,7 +240,7 @@ const stripEnclosingFence = (raw: string): string => {
  *  a non-conventional first line yields `conventional:false` with the raw first
  *  line surfaced as `subject` so the caller still has something usable.
  *
- *  `suggestedScopes` (ADR-0451, optional) is the diff-derived scope hint. When
+ *  `suggestedScopes` (ADR-0458, optional) is the diff-derived scope hint. When
  *  non-empty AND the authored scope is not among them, the result carries a
  *  SOFT `scopeOffSuggestion:true` signal — advisory only, never a rejection. */
 export const parseConventionalCommit = (
@@ -346,7 +346,7 @@ export const buildCommitAuthorPrompt = (
   if (hint !== undefined && hint.length > 0) {
     parts.push("## Intent hint (from the caller)", hint, "")
   }
-  // ADR-0451: bias the author toward a consistent, diff-derived scope. Emitted
+  // ADR-0458: bias the author toward a consistent, diff-derived scope. Emitted
   // ONLY when the diff yielded candidates — absent ⇒ this block does not appear
   // and the prompt is byte-identical to the pre-feature path.
   if (suggestedScopes !== undefined && suggestedScopes.length > 0) {
@@ -536,7 +536,7 @@ export const gitComposeCommitTool = (
     }
 
     const { text: diffText, truncated } = truncate(outcome.body, MAX_DIFF_BYTES)
-    // ADR-0451: derive scope candidates from the FULL diff (not the truncated
+    // ADR-0458: derive scope candidates from the FULL diff (not the truncated
     // copy) so a huge diff still gets correct module votes. Empty ⇒ no hint
     // line + no parse annotation → byte-identical to the pre-feature path.
     const suggestedScopes = diffToScopes(outcome.body)
