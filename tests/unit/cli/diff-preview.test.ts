@@ -364,6 +364,23 @@ describe("renderUnified — hunk-aware path (@@ headers + line-number gutters)",
     expect(out).toMatch(/… \(\d+ more lines?\)/)
   })
 
+  test("clip never leaves an orphan @@ header (no body after the cut)", () => {
+    // Two well-separated hunks. A cut landing right after a header must drop
+    // that orphan header too — a unified-diff header with zero body rows is
+    // malformed (downstream patch parsers reject it). Sweep every maxLines.
+    const arr = lines(20).split("\n")
+    arr[1] = "CHANGED_A" // hunk 1 (around line 2)
+    arr[17] = "CHANGED_B" // hunk 2 (around line 18) — separated by >2*context
+    const before = lines(20)
+    const after = arr.join("\n")
+    for (let mx = 1; mx <= 25; mx += 1) {
+      const out = stripAnsi(renderUnified(before, after, mx, { hunks: true }))
+      const rows = out.split("\n").filter((r) => !r.startsWith("… ("))
+      const last = rows[rows.length - 1] ?? ""
+      expect(last.startsWith("@@")).toBe(false)
+    }
+  })
+
   test("hunk path emits ANSI colour for changed lines", () => {
     const rendered = renderUnified("a\nb", "a\nB", 100, { hunks: true })
     expect(rendered.includes(String.fromCharCode(27))).toBe(true)

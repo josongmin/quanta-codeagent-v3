@@ -413,14 +413,43 @@ const renderHunks = (ops: readonly DiffOp[], maxLines: number, context: number):
   if (hunks.length === 0) return ""
   const w = gutterWidth(numbered, hunks)
   const out: string[] = []
+  // Parallel marker: true iff `out[i]` is a `@@` hunk header. Used so the
+  // maxLines clip never severs a header from its body — a unified diff with a
+  // trailing header and zero body rows is malformed (downstream patch parsers
+  // reject it). See `clipHunks`.
+  const isHeader: boolean[] = []
   for (const h of hunks) {
     out.push(dim(cyan(`@@ -${h.oldStart},${h.oldCount} +${h.newStart},${h.newCount} @@`)))
+    isHeader.push(true)
     for (let i = h.start; i < h.end; i++) {
       const op = numbered[i]
-      if (op !== undefined) out.push(gutterLine(op, w))
+      if (op !== undefined) {
+        out.push(gutterLine(op, w))
+        isHeader.push(false)
+      }
     }
   }
-  return clip(out, maxLines)
+  return clipHunks(out, isHeader, maxLines)
+}
+
+/** Like {@link clip}, but hunk-aware: when the cut lands such that the last
+ *  KEPT line would be a `@@` header (its body rows fall past `maxLines`), drop
+ *  that orphan header too — a header with no body is an invalid unified diff.
+ *  The "… N more lines" tail counts every dropped row INCLUDING the dropped
+ *  header so the total stays honest. */
+const clipHunks = (
+  lines: readonly string[],
+  isHeader: readonly boolean[],
+  maxLines: number,
+): string => {
+  if (lines.length <= maxLines) return lines.join("\n")
+  // Trim back over any trailing header(s) at the cut boundary so the kept
+  // prefix never ends on a header (a header immediately followed by the cut).
+  let keep = maxLines
+  while (keep > 0 && isHeader[keep - 1] === true) keep -= 1
+  if (keep === 0) return "" // the entire budget was a single leading header
+  const more = lines.length - keep
+  return `${lines.slice(0, keep).join("\n")}\n${dim(`… (${more} more line${more === 1 ? "" : "s"})`)}`
 }
 
 /** Gutter column width = digit-count of the widest line number actually
