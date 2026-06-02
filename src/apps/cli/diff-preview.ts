@@ -236,12 +236,51 @@ const applyScriptedReplace = (
 // Unified-diff renderer (line-level LCS, color-wrapped)
 // ───────────────────────────────────────────────────────────────────────
 
+/** Default number of unchanged context lines emitted on each side of a
+ *  changed run, matching `git diff`'s `-U3` / `--unified=3` default
+ *  (see `git diff --help`, "-U<n> / --unified=<n>", default 3). Used only
+ *  by the hunk-aware render path ({@link renderUnified} with
+ *  `{ hunks: true }`); the legacy simple path is unaffected. */
+export const DEFAULT_CONTEXT_LINES = 3
+
+/** Options for {@link renderUnified}. All default to the legacy
+ *  byte-identical simple render (`+`/`-`/space prefixes, no gutters, no
+ *  hunk headers). Setting `hunks: true` lights the richer unified-diff
+ *  path (git-style `@@ -A,B +C,D @@` headers + old/new line-number
+ *  gutters + context collapsing). */
+export interface RenderUnifiedOptions {
+  /** When true, emit git-style hunk headers + line-number gutters and
+   *  collapse large all-unchanged gaps to `context` lines per side.
+   *  Default false → legacy simple render (byte-identical). */
+  readonly hunks?: boolean
+  /** Context lines per side around each changed run (only when
+   *  `hunks: true`). Default {@link DEFAULT_CONTEXT_LINES} (= 3, git's
+   *  default). */
+  readonly context?: number
+}
+
 /** Render a unified-style diff between `before` and `after`. No file
- *  header (caller prints one via {@link header}) — just the +/- body. */
-export const renderUnified = (before: string, after: string, maxLines: number): string => {
+ *  header (caller prints one via {@link header}) — just the +/- body.
+ *
+ *  Default (no opts / `hunks` falsy) is the legacy simple render:
+ *  `  keep` / `- del` / `+ add`, every op on its own coloured line, no
+ *  gutters, no hunk headers — byte-identical to the pre-hunk renderer.
+ *
+ *  With `{ hunks: true }` the richer path runs: consecutive non-`keep`
+ *  ops are grouped into hunks padded with `context` unchanged lines per
+ *  side; each hunk gets a dim-cyan `@@ -oldStart,oldCount +newStart,
+ *  newCount @@` header; every body line is prefixed with right-aligned
+ *  old/new line-number gutters (see {@link renderHunks}). */
+export const renderUnified = (
+  before: string,
+  after: string,
+  maxLines: number,
+  opts: RenderUnifiedOptions = {},
+): string => {
   const a = before === "" ? [] : before.split("\n")
   const b = after === "" ? [] : after.split("\n")
   const ops = diffLines(a, b)
+  if (opts.hunks) return renderHunks(ops, maxLines, opts.context ?? DEFAULT_CONTEXT_LINES)
   const out: string[] = []
   for (const op of ops) {
     if (op.kind === "keep") out.push(`  ${op.line}`)
@@ -249,6 +288,168 @@ export const renderUnified = (before: string, after: string, maxLines: number): 
     else out.push(green(`+ ${op.line}`))
   }
   return clip(out, maxLines)
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// Hunk-aware render path (git-style @@ headers + line-number gutters)
+// ───────────────────────────────────────────────────────────────────────
+
+/** One op annotated with its 1-based old/new line numbers. `del` advances
+ *  only the old side, `add` only the new side, `keep` both. A `0` means
+ *  "no line on that side" (add → no old; del → no new) and renders as a
+ *  blank gutter. */
+interface NumberedOp {
+  readonly kind: DiffOp["kind"]
+  readonly line: string
+  /** 1-based old-file line number, or 0 for `add` (blank old gutter). */
+  readonly oldNo: number
+  /** 1-based new-file line number, or 0 for `del` (blank new gutter). */
+  readonly newNo: number
+}
+
+/** A contiguous hunk: an index range over the numbered-op array plus the
+ *  derived `@@ -oldStart,oldCount +newStart,newCount @@` coordinates. */
+interface Hunk {
+  /** Inclusive start index into the numbered-op array. */
+  readonly start: number
+  /** Exclusive end index into the numbered-op array. */
+  readonly end: number
+  readonly oldStart: number
+  readonly oldCount: number
+  readonly newStart: number
+  readonly newCount: number
+}
+
+/** Walk the ops once, assigning cumulative 1-based old/new line numbers.
+ *  Invariant: after processing op i, `oldNo`/`newNo` carry the line number
+ *  of the line THAT op occupies on its side (or 0 if it has none on that
+ *  side). del→old++, add→new++, keep→both++. */
+const numberOps = (ops: readonly DiffOp[]): NumberedOp[] => {
+  const out: NumberedOp[] = []
+  let oldLine = 0
+  let newLine = 0
+  for (const op of ops) {
+    if (op.kind === "keep") {
+      oldLine++
+      newLine++
+      out.push({ kind: "keep", line: op.line, oldNo: oldLine, newNo: newLine })
+    } else if (op.kind === "del") {
+      oldLine++
+      out.push({ kind: "del", line: op.line, oldNo: oldLine, newNo: 0 })
+    } else {
+      newLine++
+      out.push({ kind: "add", line: op.line, oldNo: 0, newNo: newLine })
+    }
+  }
+  return out
+}
+
+/** Group numbered ops into hunks. A hunk spans the smallest index range
+ *  that contains a changed run plus up to `context` unchanged ops on each
+ *  side. Two changed runs separated by `<= 2*context` unchanged ops merge
+ *  into one hunk (their context windows touch/overlap); a gap `> 2*context`
+ *  splits them. An all-`keep` op list yields zero hunks. */
+const groupHunks = (ops: readonly NumberedOp[], context: number): Hunk[] => {
+  const changed: number[] = []
+  for (let i = 0; i < ops.length; i++) if (ops[i]?.kind !== "keep") changed.push(i)
+  if (changed.length === 0) return []
+
+  // Merge changed indices whose context windows touch: a new hunk starts
+  // when the gap between consecutive changed ops exceeds 2*context (the
+  // count of unchanged ops that would otherwise sit between two separate
+  // context windows). This is git's adjacent-hunk coalescing rule.
+  const ranges: Array<{ first: number; last: number }> = []
+  for (const idx of changed) {
+    const tail = ranges[ranges.length - 1]
+    if (tail !== undefined && idx - tail.last - 1 <= 2 * context) tail.last = idx
+    else ranges.push({ first: idx, last: idx })
+  }
+
+  return ranges.map(({ first, last }) => {
+    const start = Math.max(0, first - context)
+    const end = Math.min(ops.length, last + 1 + context)
+    return { start, end, ...spanCounts(ops, start, end) }
+  })
+}
+
+/** Compute `@@` coordinates for an index span `[start,end)`. Starts are the
+ *  first old/new line number present in the span; counts are how many lines
+ *  the span covers on each side (keep counts both, del only old, add only
+ *  new). Git's convention: a count of 0 pairs with start 0; a single-line
+ *  side still reports its real 1-based start. */
+const spanCounts = (
+  ops: readonly NumberedOp[],
+  start: number,
+  end: number,
+): { oldStart: number; oldCount: number; newStart: number; newCount: number } => {
+  let oldStart = 0
+  let newStart = 0
+  let oldCount = 0
+  let newCount = 0
+  for (let i = start; i < end; i++) {
+    const op = ops[i]
+    if (op === undefined) continue
+    if (op.oldNo > 0) {
+      if (oldStart === 0) oldStart = op.oldNo
+      oldCount++
+    }
+    if (op.newNo > 0) {
+      if (newStart === 0) newStart = op.newNo
+      newCount++
+    }
+  }
+  return { oldStart, oldCount, newStart, newCount }
+}
+
+/** Render the hunk-aware body: a dim-cyan `@@ -A,B +C,D @@` header before
+ *  each hunk, then each body line prefixed with right-aligned old/new
+ *  line-number gutters and the `+`/`-`/space content marker. Gutter width
+ *  is the max line-number digit-count across ALL emitted hunks so columns
+ *  align file-wide. Returns the empty string when there are no hunks
+ *  (all-unchanged diff). */
+const renderHunks = (ops: readonly DiffOp[], maxLines: number, context: number): string => {
+  const numbered = numberOps(ops)
+  const hunks = groupHunks(numbered, context)
+  if (hunks.length === 0) return ""
+  const w = gutterWidth(numbered, hunks)
+  const out: string[] = []
+  for (const h of hunks) {
+    out.push(dim(cyan(`@@ -${h.oldStart},${h.oldCount} +${h.newStart},${h.newCount} @@`)))
+    for (let i = h.start; i < h.end; i++) {
+      const op = numbered[i]
+      if (op !== undefined) out.push(gutterLine(op, w))
+    }
+  }
+  return clip(out, maxLines)
+}
+
+/** Gutter column width = digit-count of the widest line number actually
+ *  rendered across every hunk body, so the old/new columns line up
+ *  file-wide even on >=1000-line files (≥1 so a single-line file still
+ *  reserves one column). */
+const gutterWidth = (numbered: readonly NumberedOp[], hunks: readonly Hunk[]): number => {
+  let maxNo = 1
+  for (const h of hunks)
+    for (let i = h.start; i < h.end; i++) {
+      const op = numbered[i]
+      if (op === undefined) continue
+      if (op.oldNo > maxNo) maxNo = op.oldNo
+      if (op.newNo > maxNo) maxNo = op.newNo
+    }
+  return String(maxNo).length
+}
+
+/** Format one numbered op as `<oldGutter> <newGutter> <marker><line>` with
+ *  the two gutters right-aligned to width `w` (blank when that side has no
+ *  line: add → blank old, del → blank new). Colour matches the simple
+ *  path: del red, add green, keep uncoloured. */
+const gutterLine = (op: NumberedOp, w: number): string => {
+  const oldG = op.oldNo > 0 ? String(op.oldNo).padStart(w) : " ".repeat(w)
+  const newG = op.newNo > 0 ? String(op.newNo).padStart(w) : " ".repeat(w)
+  const gutter = `${oldG} ${newG} `
+  if (op.kind === "keep") return `${gutter}  ${op.line}`
+  if (op.kind === "del") return red(`${gutter}- ${op.line}`)
+  return green(`${gutter}+ ${op.line}`)
 }
 
 /** ADR-0440 — re-export the structured diff API so non-CLI surfaces

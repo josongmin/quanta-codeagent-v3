@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import {
+  DEFAULT_CONTEXT_LINES,
   diffPreviewEnabled,
   renderActionDiff,
   renderUnified,
@@ -211,6 +212,161 @@ describe("renderUnified — direct LCS coverage", () => {
   test("interleaved keep / del / add ordering", () => {
     const out = stripAnsi(renderUnified("a\nb\nc", "a\nB\nc", 100))
     expect(out.split("\n")).toEqual(["  a", "- b", "+ B", "  c"])
+  })
+})
+
+describe("renderUnified — hunk-aware path (@@ headers + line-number gutters)", () => {
+  // Helper: build N old lines.
+  const lines = (n: number, label = "L"): string =>
+    Array.from({ length: n }, (_, i) => `${label}${i + 1}`).join("\n")
+
+  test("option OFF is byte-identical to the simple path (regression anchor)", () => {
+    const before = "a\nb\nc"
+    const after = "a\nB\nc"
+    // No opts, explicit {hunks:false}, and the legacy 3-arg form must all match.
+    const simple = renderUnified(before, after, 100)
+    expect(renderUnified(before, after, 100, {})).toBe(simple)
+    expect(renderUnified(before, after, 100, { hunks: false })).toBe(simple)
+    // And the simple body is the documented +/- form (no gutters, no @@).
+    expect(stripAnsi(simple).split("\n")).toEqual(["  a", "- b", "+ B", "  c"])
+  })
+
+  test("DEFAULT_CONTEXT_LINES is git's 3", () => {
+    expect(DEFAULT_CONTEXT_LINES).toBe(3)
+  })
+
+  test("all-keep diff (no change) renders zero hunks → empty body", () => {
+    const same = lines(20)
+    expect(renderUnified(same, same, 100, { hunks: true })).toBe("")
+  })
+
+  test("single hunk: @@ header counts span change + context", () => {
+    // 10 lines, change line 5. context 3 → hunk spans old lines 2..8 (7 lines).
+    const before = lines(10)
+    const after = before.replace("L5", "X5")
+    const out = stripAnsi(renderUnified(before, after, 200, { hunks: true, context: 3 }))
+    const rows = out.split("\n")
+    // header: lines 2..8 on old = 7, on new the changed line splits to del+add
+    // so old has 7 (2..8), new has 7 (2..8). Both starts = 2.
+    expect(rows[0]).toBe("@@ -2,7 +2,7 @@")
+    // del L5 then add X5; surrounding keeps carry both numbers.
+    expect(out).toContain("- L5")
+    expect(out).toContain("+ X5")
+    // The hunk omits lines 1 and 9,10 (outside context).
+    expect(out).not.toContain("L1")
+    expect(out).not.toContain("L9")
+    expect(out).not.toContain("L10")
+  })
+
+  test("line-number gutters advance: del→old++, add→new++, keep→both++", () => {
+    // before: a b c   after: a B c  → keep a(1,1), del b(old2), add B(new2), keep c(3,3)
+    const out = stripAnsi(renderUnified("a\nb\nc", "a\nB\nc", 100, { hunks: true }))
+    const rows = out.split("\n").slice(1) // drop @@ header
+    // width is 1 (max line no = 3). gutter = "old new  marker line"
+    // gutter = `${oldG} ${newG} ` (w=1) then `${marker} ${line}`.
+    // del → newG is one blank → "2" + " " + " " + " " + "- b" = "2   - b".
+    expect(rows).toEqual([
+      "1 1   a", // keep: old1 new1
+      "2   - b", // del: old2, new blank
+      "  2 + B", // add: old blank, new2
+      "3 3   c", // keep: old3 new3
+    ])
+  })
+
+  test("right-alignment to max width on a >=1000-line file", () => {
+    // 1005 lines; change line 1003. Max line no is 1005 → width 4.
+    const before = lines(1005)
+    const after = before.replace("L1003", "X1003")
+    const out = stripAnsi(renderUnified(before, after, 500, { hunks: true, context: 2 }))
+    const rows = out.split("\n")
+    expect(rows[0]).toMatch(/^@@ -\d+,\d+ \+\d+,\d+ @@$/)
+    // every gutter pair right-aligned to 4: "1001 1001   L1001"
+    const keepRow = rows.find((r) => r.includes("L1001"))
+    expect(keepRow).toBe("1001 1001   L1001")
+    const delRow = rows.find((r) => r.includes("- L1003"))
+    // old gutter "1003" width 4, new gutter blank width 4
+    expect(delRow).toBe("1003      - L1003")
+  })
+
+  test("two changes far apart (gap > 2*context) → TWO separate hunks", () => {
+    // 30 lines, change line 3 and line 27. context 3 → gap (4..26) = 23 > 6.
+    const before = lines(30)
+    const after = before.replace("L3", "X3").replace("L27", "X27")
+    const out = stripAnsi(renderUnified(before, after, 500, { hunks: true, context: 3 }))
+    const headers = out.split("\n").filter((r) => r.startsWith("@@"))
+    expect(headers.length).toBe(2)
+    // First hunk near top, second near bottom; both well-formed.
+    expect(headers[0]).toMatch(/^@@ -\d+,\d+ \+\d+,\d+ @@$/)
+    expect(headers[1]).toMatch(/^@@ -\d+,\d+ \+\d+,\d+ @@$/)
+  })
+
+  test("two changes close together (gap <= 2*context) → ONE merged hunk", () => {
+    // change line 5 and line 10; gap (6..9) = 4 <= 2*3=6 → merge.
+    const before = lines(20)
+    const after = before.replace("L5", "X5").replace("L10", "X10")
+    const out = stripAnsi(renderUnified(before, after, 500, { hunks: true, context: 3 }))
+    const headers = out.split("\n").filter((r) => r.startsWith("@@"))
+    expect(headers.length).toBe(1)
+    // merged hunk must contain BOTH changes and the bridging context lines.
+    expect(out).toContain("- L5")
+    expect(out).toContain("- L10")
+    expect(out).toContain("L7") // bridging context kept
+  })
+
+  test("gap exactly 2*context+1 splits; exactly 2*context merges (boundary)", () => {
+    const ctx = 2
+    // changes at indices i and j; unchanged between = j-i-1.
+    // MERGE boundary: between = 2*ctx = 4.  change line 3 and line 8 → between=4.
+    const mergeBefore = lines(20)
+    const mergeAfter = mergeBefore.replace("L3", "Y3").replace("L8", "Y8")
+    const mergeOut = stripAnsi(
+      renderUnified(mergeBefore, mergeAfter, 500, { hunks: true, context: ctx }),
+    )
+    expect(mergeOut.split("\n").filter((r) => r.startsWith("@@")).length).toBe(1)
+    // SPLIT boundary: between = 2*ctx+1 = 5. change line 3 and line 9 → between=5.
+    const splitBefore = lines(20)
+    const splitAfter = splitBefore.replace("L3", "Y3").replace("L9", "Y9")
+    const splitOut = stripAnsi(
+      renderUnified(splitBefore, splitAfter, 500, { hunks: true, context: ctx }),
+    )
+    expect(splitOut.split("\n").filter((r) => r.startsWith("@@")).length).toBe(2)
+  })
+
+  test("pure addition into empty file: old side count 0, start 0", () => {
+    const out = stripAnsi(renderUnified("", "n1\nn2", 100, { hunks: true }))
+    const rows = out.split("\n")
+    // git renders @@ -0,0 +1,2 @@ for an all-add into empty.
+    expect(rows[0]).toBe("@@ -0,0 +1,2 @@")
+    expect(rows[1]).toContain("+ n1")
+    expect(rows[2]).toContain("+ n2")
+  })
+
+  test("pure deletion to empty file: new side count 0, start 0", () => {
+    const out = stripAnsi(renderUnified("o1\no2", "", 100, { hunks: true }))
+    const rows = out.split("\n")
+    expect(rows[0]).toBe("@@ -1,2 +0,0 @@")
+    expect(rows[1]).toContain("- o1")
+    expect(rows[2]).toContain("- o2")
+  })
+
+  test("single-line file change reports real 1-based starts", () => {
+    const out = stripAnsi(renderUnified("only", "ONLY", 100, { hunks: true }))
+    const rows = out.split("\n")
+    expect(rows[0]).toBe("@@ -1,1 +1,1 @@")
+    expect(out).toContain("- only")
+    expect(out).toContain("+ ONLY")
+  })
+
+  test("hunk body respects maxLines clip", () => {
+    const before = lines(40)
+    const after = Array.from({ length: 40 }, (_, i) => `X${i + 1}`).join("\n")
+    const out = stripAnsi(renderUnified(before, after, 5, { hunks: true }))
+    expect(out).toMatch(/… \(\d+ more lines?\)/)
+  })
+
+  test("hunk path emits ANSI colour for changed lines", () => {
+    const rendered = renderUnified("a\nb", "a\nB", 100, { hunks: true })
+    expect(rendered.includes(String.fromCharCode(27))).toBe(true)
   })
 })
 
