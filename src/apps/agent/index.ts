@@ -424,6 +424,22 @@ const resolveNetworkProxySlot = (
   return networkProxy !== undefined ? { networkProxy } : {}
 }
 
+// ADR-0452 jun-02 wire — composition-root projection of `QUANTA_PREWARM` into
+// `AgentConfig.prewarm`. Extracted (mirrors `resolveNetworkProxySlot`) so the
+// branch lives here, NOT in `buildBaseFromArgs` (keeps that function under
+// biome's cognitive-complexity cap). Default-OFF (`parseEnvFlag(…, false)`):
+// absent ⇒ `undefined` ⇒ slot omitted ⇒ the loop reads no clock, runs no warm,
+// emits no TTFM key (byte-identical legacy). `now` is the REAL clock injected
+// ONLY here at the root (the slice body reads no timer); the stock LLM adapters
+// implement no `prewarm` hook, so warming is a documented no-op while the
+// `quanta.startup.*` TTFM observability is genuinely active.
+const resolvePrewarmSlot = (
+  env: NodeJS.ProcessEnv,
+): { prewarm?: NonNullable<AssembleRequest["base"]["prewarm"]> } =>
+  parseEnvFlag(env.QUANTA_PREWARM, /* defaultOn */ false)
+    ? { prewarm: { enabled: true, now: () => Date.now() } }
+    : {}
+
 const buildBaseRegistry = (args: {
   readonly automationSlot: AutomationEngineSlot | null
   readonly sandboxProfile: ReturnType<typeof resolveSandboxProfileFromEnv>
@@ -880,6 +896,9 @@ export const buildBaseFromArgs = (
   // and threads `proxyEnv` into the bash-tool child spawn. Absent / "0" / empty
   // ⇒ `{}` ⇒ slot omitted ⇒ NO proxy, child env byte-identical (RFC §1.2).
   const networkProxySlot = resolveNetworkProxySlot(env)
+  // ADR-0452 jun-02 wire — `QUANTA_PREWARM` → `AgentConfig.prewarm` slot
+  // (resolved by the extracted `resolvePrewarmSlot` helper; default-OFF).
+  const prewarmSlot = resolvePrewarmSlot(env)
   // ADR-0404 + ADR-0415 — composition-root observability slots. Single helper
   // call: gate ON ⇒ mints the canonical HookBus (the same bus the loop emits
   // `post_tool_use` to), wires attribution onto it, and returns the four ports
@@ -939,6 +958,9 @@ export const buildBaseFromArgs = (
     ...(stickyModelStore !== undefined ? { stickyModelStore } : {}),
     ...(toolProfile !== undefined ? { toolProfile } : {}),
     ...(focusChain !== undefined ? { focusChain } : {}),
+    // ADR-0452 — spread-ready prewarm slot (`{}` when off ⇒ no branch here,
+    // keeps `buildBaseFromArgs` under biome's cognitive-complexity cap).
+    ...prewarmSlot,
     // ADR-0279 — spread the automation slot conditionally (default-OFF;
     // `exactOptionalPropertyTypes` — no `undefined` literal on the config).
     ...(automationSlot !== null ? { automationEngine: automationSlot } : {}),

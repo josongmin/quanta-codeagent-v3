@@ -29,18 +29,20 @@ evidence:
     - src/agent/turn-context.ts
     - src/agent/types.ts
     - src/agent/loop.ts
+    - src/apps/agent/index.ts
   adrs: [452]
   tests:
     unit:
       - tests/unit/agent-startup-prewarm-hellgate.test.ts
       - tests/unit/agent-prewarm-loop-wire-hellgate.test.ts
       - tests/unit/agent-metrics.test.ts
+      - tests/unit/apps/agent/prewarm-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs:
   - name: QUANTA_PREWARM
     default: 'off'
-    purpose: 'composition-root가 `config.prewarm.enabled=true`로 arm; 부재 ⇒ prewarm 호출 0 + TTFM 메트릭 0 (byte-identical)'
+    purpose: 'jun-02 round-2 wire LANDED — `buildBaseFromArgs` reads it via `resolvePrewarmSlot(env)` (`parseEnvFlag(…, false)`) and sets `config.prewarm = { enabled: true, now: () => Date.now() }`; 부재 ⇒ slot omitted ⇒ prewarm 호출 0 + TTFM 메트릭 0 (byte-identical). 이전엔 어떤 composition root도 안 읽어 dead seam이었음.'
   - name: prewarm.now
     default: 'Date.now'
     purpose: 'injected wall-clock(epoch ms) for TTFM determinism; 미주입 시 Date.now'

@@ -1,6 +1,7 @@
 import type { AgentConfig, AgentOutcome } from "@/agent"
 import { startAutomationEngineTicker } from "@/agent/loop-helpers"
 import type { Message } from "@/llm"
+import { type AutorunApprovalPolicy, evaluateAutorunEligibility } from "@/permission"
 import { injectSimulatedTurn, type LastTurnOutcome, REACTOR_ENV_FLAG } from "@/reactor"
 import { assembleAutomation } from "@/scheduler/runtime-wire"
 import type {
@@ -23,6 +24,40 @@ import { normalizeCliPromptInput } from "./prompt-types"
 import type { SessionSetupResult } from "./session-setup"
 import { type SessionState, updateSessionState } from "./session-state"
 import { runOneTurn } from "./turn-runner"
+
+/**
+ * ADR-0453 jun-02 wire — build the reactor's 4th-guard autorun-eligibility
+ * resolver from the closed-enum knob `QUANTA_AUTORUN_POLICY`
+ * (`never|on-request|on-failure|always`).
+ *
+ * Default-OFF / byte-identical: an UNSET or UNRECOGNIZED value ⇒ `undefined`
+ * (no resolver injected ⇒ the reactor's pre-ADR-0453 3-guard path runs
+ * verbatim). The additive gate can only BLOCK a wake the three hard guards
+ * already permitted, never force one.
+ *
+ * NO HEURISTIC: the verdict is the pure {@link evaluateAutorunEligibility}
+ * projection of the closed enums (policy + prior outcome). `priorOutcome` is
+ * read from `getPriorOutcome()` at CALL time (fresh per wake) — `LastTurnOutcome`
+ * is the identical 4-state union as the evaluator's `AutorunPriorOutcome`, so it
+ * passes through without translation. The returned verdict's `reason` is the
+ * closed eligibility-reason anchor (assignable to the reactor's `string`).
+ */
+export const buildReactorAutorunEligibility = (
+  env: Record<string, string | undefined>,
+  getPriorOutcome: () => LastTurnOutcome | undefined,
+): (() => { readonly eligible: boolean; readonly reason: string }) | undefined => {
+  const raw = env.QUANTA_AUTORUN_POLICY
+  const policies: readonly AutorunApprovalPolicy[] = ["never", "on-request", "on-failure", "always"]
+  if (raw === undefined || !policies.includes(raw as AutorunApprovalPolicy)) return undefined
+  const approvalPolicy = raw as AutorunApprovalPolicy
+  return () => {
+    const priorOutcome = getPriorOutcome()
+    return evaluateAutorunEligibility({
+      approvalPolicy,
+      ...(priorOutcome !== undefined ? { priorOutcome } : {}),
+    })
+  }
+}
 
 /** Slice-C: per-turn render + state side-effects the surface owns. Each
  *  callback is injected so the loop module is pure (no metrics / costPanel
@@ -602,6 +637,11 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
       ...buildPromptPipelineNotifyDeps({ notify, notifyCwdBasename, contextWarning }),
     })
 
+    // ADR-0453 jun-02 wire — composition-root binding of the reactor's 4th
+    // guard (per-thread autorun eligibility). The resolver reads
+    // `lastTurnOutcome` at CALL time (fresh per wake) via the getter so the
+    // `on-failure` policy is evaluated against the most recent turn.
+    const autorunEligibility = buildReactorAutorunEligibility(process.env, () => lastTurnOutcome)
     const reactorBridge =
       setup.sessionId !== undefined && process.env[REACTOR_ENV_FLAG] === "1"
         ? await startReactorWatchBridge({
@@ -618,6 +658,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
                 clockPort: { now: () => Date.now() },
                 lastUserInputAt,
                 ...(lastTurnOutcome !== undefined ? { lastTurnOutcome } : {}),
+                ...(autorunEligibility !== undefined ? { eligibility: autorunEligibility } : {}),
               })
             },
             onError: (message) => {
