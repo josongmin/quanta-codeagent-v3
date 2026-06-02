@@ -251,6 +251,20 @@ export interface ToolContext {
     readonly address?: { readonly host: string; readonly port: number }
     readonly noProxy?: readonly string[]
   }
+  /** ADR-0455 — OPTIONAL declared local-environment selection. When the
+   *  composition root loads a `.quanta/environment.toml` and the agent selects
+   *  an env, the dispatch seam surfaces the selected `{ vars, pathPrepend }`
+   *  here. The bash tool forwards it VERBATIM to `runShell` via
+   *  `ShellOptions.localEnv`, which composes it ON TOP of the scrubbed base env
+   *  (allowlist still governs). Absent ⇒ `applyLocalEnv` returns the same base
+   *  env reference and the child is byte-identical (default-OFF). Duck-typed
+   *  (structural mirror of `LocalEnvSelection` in `@/runtime/local-env` — same
+   *  shape `ShellOptions.localEnv` accepts) so `@/tool` stays slice-isolated
+   *  from `@/agent`; the dispatch seam wires it from `AgentConfig.localEnv`. */
+  localEnv?: {
+    readonly vars: Readonly<Record<string, string>>
+    readonly pathPrepend: readonly string[]
+  }
   /** ADR-0440 wire-finish — OPTIONAL tool-diff capture sink. A file-mutating
    *  tool (`write`/`edit`) calls `capture(...)` ONCE after a SUCCESSFUL mutation
    *  with the full pre/post file text it ALREADY has in hand (no recompute, no

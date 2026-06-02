@@ -20,6 +20,7 @@ import type {
 } from "@/permission"
 import type { CommitEmbedder, EmbeddingPort, RerankPort, RerankRegistry } from "@/retrieval"
 import type { RulesStore } from "@/rules"
+import type { LocalEnvSelection } from "@/runtime/local-env"
 import type { NetworkProxyConfig, ProxyEnvInput } from "@/runtime/network-proxy"
 import type { OsSandbox } from "@/runtime/os-sandbox"
 import type { RedactionConfig } from "@/security"
@@ -799,6 +800,20 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * Absent ⇒ no proxy bound ⇒ child env byte-identical (legacy path).
    */
   proxyEnv?: ProxyEnvInput
+  /**
+   * ADR-0455 — the DECLARED local-environment selection for this session, the
+   * runtime materialization of a loaded `.quanta/environment.toml`. A
+   * composition root (`runAgent` / the CLI) calls `loadLocalEnvConfig(cwd, …)`
+   * then `selectEnvironment(config, name?)` and sets the resulting
+   * `{ vars, pathPrepend }` here; the dispatch seam surfaces it on
+   * `ToolContext.localEnv` and the bash tool composes it over the scrubbed
+   * child env (allowlist still governs). To SWITCH environments the operator /
+   * agent re-selects a different declared name and the per-session config clone
+   * carries the new selection. Absent (no config file, or no env selected) ⇒
+   * child env byte-identical to the pre-slice path (default-OFF). Closed shape
+   * `LocalEnvSelection` lives in `@/runtime/local-env`.
+   */
+  localEnv?: LocalEnvSelection
   /**
    * ADR-0116 Shadow git ODB seam (ADR-0108 keystone). When set AND
    * `branchSearch` is also wired, `buildBranchSearchTool` constructs a

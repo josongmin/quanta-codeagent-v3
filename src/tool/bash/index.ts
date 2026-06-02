@@ -428,6 +428,11 @@ async function* bashExecute(input: Input, ctx: ToolContext): AsyncIterable<ToolE
     // OWN sockets are funneled through the loopback proxy. Absent ⇒ omitted ⇒
     // `runShell`'s `withProxyEnv(base, {})` returns the same env (byte-identical).
     ...(ctx.proxyEnv ? { proxyEnv: ctx.proxyEnv } : {}),
+    // ADR-0455 — thread the DECLARED local-env selection so the child shell
+    // gets its vars / PATH-prepends composed over the scrubbed base (allowlist
+    // still governs). Absent ⇒ omitted ⇒ `applyLocalEnv` returns the same base
+    // env (byte-identical legacy).
+    ...(ctx.localEnv ? { localEnv: ctx.localEnv } : {}),
   })
 
   const { status, body } = formatRunBody(r)

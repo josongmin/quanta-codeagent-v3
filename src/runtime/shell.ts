@@ -1,6 +1,7 @@
 import { escalatingKill, withSpawnedChild } from "./guarded-spawn"
+import { applyLocalEnv } from "./local-env"
 import { withProxyEnv } from "./network-proxy"
-import { scrubEnv } from "./sandbox"
+import { DEFAULT_ENV_ALLOWLIST, scrubEnv } from "./sandbox"
 import { getShellSandbox } from "./shell-sandbox-holder"
 import type { RunShellEvent, ShellOptions, ShellResult } from "./types"
 
@@ -103,12 +104,22 @@ export const runShell = async (
   // original env if `env` is omitted and would miss vars set after startup).
   const baseEnv =
     options.inheritEnv === true ? (process.env as Record<string, string | undefined>) : scrubEnv()
+  // ADR-0455 — DECLARED local-environment overlay. Compose the selected env's
+  // vars / PATH-prepends ON TOP of the scrubbed base, GOVERNED BY the same
+  // allowlist that scrubbed it (a declared var whose name is not allowlisted is
+  // dropped; `pathPrepend` is prepended to the surviving PATH). Absent / empty
+  // selection ⇒ `applyLocalEnv` returns the SAME `baseEnv` reference
+  // (byte-identical legacy). Applied BEFORE the proxy injection so an operator
+  // proxy still wins for the proxy keys. NOTE: when `inheritEnv:true` the base
+  // is the FULL parent env; the allowlist still governs which DECLARED names
+  // overlay (the inherit decision is orthogonal to the declared overlay).
+  const localEnvBase = applyLocalEnv(baseEnv, options.localEnv, DEFAULT_ENV_ALLOWLIST)
   // ADR-0428 — socket-level egress proxy. When the caller threads a bound proxy
   // address via `options.proxyEnv`, inject `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`
   // so the child's OWN sockets are funneled through the loopback egress proxy,
   // closing the subprocess egress bypass. Absent (or `address` undefined) ⇒
   // `withProxyEnv` returns the SAME `baseEnv` reference — byte-identical legacy.
-  const env = withProxyEnv(baseEnv, options.proxyEnv ?? {})
+  const env = withProxyEnv(localEnvBase, options.proxyEnv ?? {})
 
   // S1 — OS sandbox wire-up. Default-OFF: when the CLI surface did not
   // install a slot (via `installShellSandbox`), `getShellSandbox()` returns

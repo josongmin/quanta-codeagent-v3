@@ -440,6 +440,11 @@ const buildToolContext = (args: {
     // so shell-class tools inject HTTP(S)_PROXY into the child spawn. ABSENT ⇒
     // omitted ⇒ `withProxyEnv` returns the same base env (byte-identical legacy).
     ...(config.proxyEnv !== undefined ? { proxyEnv: config.proxyEnv } : {}),
+    // ADR-0455 — surface the DECLARED local-environment selection so shell-class
+    // tools compose its vars / PATH-prepends over the scrubbed child env
+    // (allowlist still governs). ABSENT (no config file / no env selected) ⇒
+    // omitted ⇒ `applyLocalEnv` returns the same base env (byte-identical legacy).
+    ...(config.localEnv !== undefined ? { localEnv: config.localEnv } : {}),
     // ADR-0440 wire-finish — surface the tool-diff capture sink + the current
     // call id so a file-mutating tool can feed its before/after to the canvas
     // emitter. ABSENT (gate OFF / non-canvas caller) ⇒ both fields omitted ⇒ no

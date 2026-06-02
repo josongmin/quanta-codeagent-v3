@@ -58,6 +58,19 @@ export interface ShellOptions {
     readonly address?: { readonly host: string; readonly port: number }
     readonly noProxy?: readonly string[]
   }
+  /** ADR-0455 — DECLARED local-environment selection. When set, `runShell`
+   *  composes the selected env's `vars` / `pathPrepend` ON TOP of the scrubbed
+   *  base env (via `applyLocalEnv`), GOVERNED BY the same `envAllowlist` that
+   *  scrubbed the base — a declared var whose name is not allowlisted is
+   *  dropped, and `pathPrepend` fragments are prepended to the surviving PATH.
+   *  Absent (or empty selection) ⇒ `applyLocalEnv` returns the same scrubbed
+   *  env reference (byte-identical legacy). Typed structurally (mirror of
+   *  `LocalEnvSelection` from `@/runtime/local-env`) so this leaf types module
+   *  need not import the slice barrel. */
+  localEnv?: {
+    readonly vars: Readonly<Record<string, string>>
+    readonly pathPrepend: readonly string[]
+  }
 }
 
 /** ADR-0204 wire — minimal structural shape consumed by `runShell`. Matches

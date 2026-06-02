@@ -20,6 +20,19 @@ export {
   SandboxUnavailableError,
   scrubEnv,
 } from "./sandbox"
+export {
+  applyLocalEnv,
+  LOCAL_ENV_CANDIDATES,
+  type LoadLocalEnvResult,
+  type LocalEnvConfig,
+  type LocalEnvParseErrorReason,
+  type LocalEnvParseResult,
+  type LocalEnvSelection,
+  loadLocalEnvConfig,
+  parseLocalEnvConfig,
+  selectEnvironment,
+  type TomlParse,
+} from "./local-env"
 export { runShell } from "./shell"
 export {
   __resetShellSandbox,
