@@ -34,7 +34,7 @@ describe("ADR-0455 wire — local-env loader at the agent composition root", () 
   })
 
   it("HELL-LEW-02: partial.localEnv ⇒ threaded onto base.localEnv (sync base builder)", () => {
-    const base = buildBaseFromArgs({ mode: "interactive", dials: {}, localEnv: SEL }) as {
+    const base = buildBaseFromArgs({ mode: "interactive", dials: {}, localEnv: SEL }) as unknown as {
       localEnv?: typeof SEL
     }
     expect(base.localEnv).toEqual(SEL)

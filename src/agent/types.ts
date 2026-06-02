@@ -1722,6 +1722,13 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
     readonly onTick?: (outcome: import("@/scheduler/automation-engine").TickOutcome) => void
     /** ADR-0239 — injected clock for tests + replay. Default `Date.now`. */
     readonly now?: () => number
+    /** ADR-0453 — OPTIONAL autorun-eligibility gate threaded into
+     *  `tickScheduler` (the scheduler-path 4th guard). Consulted BEFORE the
+     *  claim; a not-eligible verdict skips the fire (no claim, no anchor
+     *  advance). Absent ⇒ ticks byte-identical. Built at the composition root
+     *  over the pure `evaluateAutorunEligibility` (closed `QUANTA_AUTORUN_POLICY`
+     *  knob). */
+    readonly eligibility?: () => import("@/scheduler/automation-engine").TickEligibilityVerdict
   }
   /**
    * ADR-0234 — git-directive emit wire (turn-scoped collector pattern).
