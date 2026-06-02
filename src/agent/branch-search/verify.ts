@@ -11,6 +11,21 @@ import { runShell } from "@/runtime"
 import type { Verifier, VerifierSignal } from "./types"
 
 type Clock = () => number
+
+/**
+ * Injected shell runner (structural type of `@/runtime#runShell`). Same inject
+ * seam as `clock` / `DiagnosePort` below: verifiers delegate to the imported
+ * `runShell` when `opts.runShell` is absent, so production behavior is
+ * byte-identical. Tests inject a fake to assert the command/cwd WITHOUT
+ * `mock.module("@/runtime", …)` — which bun's `mock.restore()` does NOT undo,
+ * so it would leak a fake `runShell` to every sibling test file in the
+ * single-process run (the bash/localize/grep full-suite contamination class).
+ */
+export type ShellRunner = (
+  command: string,
+  options: { cwd: string; timeoutMs?: number },
+) => Promise<{ exitCode: number; timedOut: boolean; stdout: string; stderr: string }>
+
 export const DEFAULT_TSC_VERIFY_CMD = "bun run typecheck"
 // Inject seam (proven pattern: see `agent/streaming-cancellation/default.ts`).
 // Each verifier delegates to `Date.now` when `opts.clock` is absent, so the
@@ -34,12 +49,18 @@ const firstLine = (s: string, cap = 200): string => {
 const countErrors = (s: string): number => (s.match(/error/gi) ?? []).length
 
 export const tscVerifier =
-  (opts?: { tscCmd?: string; timeoutMs?: number; clock?: Clock }): Verifier =>
+  (opts?: {
+    tscCmd?: string
+    timeoutMs?: number
+    clock?: Clock
+    runShell?: ShellRunner
+  }): Verifier =>
   async (cand) => {
     const clock = opts?.clock ?? wallClock
+    const sh = opts?.runShell ?? runShell
     const cmd = opts?.tscCmd ?? DEFAULT_TSC_VERIFY_CMD
     const { value: r, durationMs } = await timed(clock, () =>
-      runShell(cmd, {
+      sh(cmd, {
         cwd: cand.workspace,
         ...(opts?.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
       }),
@@ -60,13 +81,20 @@ export const tscVerifier =
   }
 
 export const testVerifier =
-  (opts?: { testCmd?: string; pattern?: string; timeoutMs?: number; clock?: Clock }): Verifier =>
+  (opts?: {
+    testCmd?: string
+    pattern?: string
+    timeoutMs?: number
+    clock?: Clock
+    runShell?: ShellRunner
+  }): Verifier =>
   async (cand) => {
     const clock = opts?.clock ?? wallClock
+    const sh = opts?.runShell ?? runShell
     const base = opts?.testCmd ?? "bun test"
     const cmd = opts?.pattern ? `${base} ${opts.pattern}` : base
     const { value: r, durationMs } = await timed(clock, () =>
-      runShell(cmd, {
+      sh(cmd, {
         cwd: cand.workspace,
         ...(opts?.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
       }),
@@ -87,13 +115,20 @@ export const testVerifier =
   }
 
 export const lintVerifier =
-  (opts?: { lintCmd?: string; errorScale?: number; timeoutMs?: number; clock?: Clock }): Verifier =>
+  (opts?: {
+    lintCmd?: string
+    errorScale?: number
+    timeoutMs?: number
+    clock?: Clock
+    runShell?: ShellRunner
+  }): Verifier =>
   async (cand) => {
     const clock = opts?.clock ?? wallClock
+    const sh = opts?.runShell ?? runShell
     const cmd = opts?.lintCmd ?? "biome check ."
     const scale = opts?.errorScale ?? 10
     const { value: r, durationMs } = await timed(clock, () =>
-      runShell(cmd, {
+      sh(cmd, {
         cwd: cand.workspace,
         ...(opts?.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
       }),
