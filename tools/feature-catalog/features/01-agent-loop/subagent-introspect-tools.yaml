@@ -1,0 +1,57 @@
+id: subagent-introspect-tools
+title: list_agents + followup_task — subagent introspection (enumerate + deliver-and-trigger)
+section: 1
+subsystem: tier-1 subagent tools (ADR-0437)
+order: 437
+maturity: L3
+status: stable
+ui_surfaces: [cli, api]
+modes: [interactive, batch, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["absorbed:codex", "surface:tool", "tier:tier1"]
+depends_on: []
+purpose: |
+  Two Codex multi_agents_v2 tools absorbed. list_agents — read-only,
+  concurrency-safe enumeration over TaskRegistry.list() (snapshot copy); 4-status
+  registry union narrowed to a 3-bucket view (running/settled/failed); prefix
+  filters by id OR label; includeSettled toggles finished children; limit caps.
+  Depth/label from an OPTIONAL AgentMetaRegistry side-table (option B — the
+  frozen TaskRecord is NOT mutated; spawn_agent writes it when wired, no-op
+  otherwise); absent ⇒ depth=0 + description-derived label. followup_task —
+  deliver-and-trigger to a non-root running child: delivery is SYNTHESIZED over
+  the injected mailbox send (NOT a new store — mailbox keeps quota/escape/NO-THROW),
+  the trigger is a new persistent TurnWakeRegistry (sibling of
+  InputChannelRegistry but persistent + for busy/idle children, not one-shot/paused).
+  Outcome woke (idle→immediate)/queued (mid-turn→next turn)/no-receiver;
+  interrupt:true passes reason "interrupt". Non-root only (root never in
+  registry ⇒ id_unknown), self-target rejected, and HONEST DEGRADATION: no live
+  waker ⇒ cause:no_waker but the mailbox delivery still stands. Wired honesty:
+  list_agents fully reflects real registry+meta (incl. a spawn-through-6-tool
+  integration test); followup delivery is wired, trigger port is functional+tested,
+  the runner registering real per-child wakers into runAgent is the documented
+  follow-up (RFC §11). Default-OFF: buildSubagentIntrospectBlock returns []
+  unless enableIntrospect/enableFollowup gates set (followup also needs
+  mailbox+wake substrate) ⇒ byte-identical.
+evidence:
+  code:
+    - src/subagent/introspect-tools.ts
+    - src/subagent/turn-wake.ts
+    - src/subagent/agent-meta.ts
+    - src/agent/tier1/subagent-introspect.ts
+  adrs: ["docs/decisions/0437-subagent-introspect.md"]
+  tests:
+    unit:
+      - tests/unit/subagent-introspect-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: ["enableIntrospect", "enableFollowup"]
+deliberate_hold: null
+notes: |
+  Reuses TaskRegistry list()/get() (registry mutate 0) + MailboxPort send
+  (followup does NOT replace the mailbox — N1). TurnWakeRegistry is a sibling of
+  InputChannelRegistry; the one-shot/paused vs persistent/busy distinction is
+  intentional. Frozen contracts (registry.ts, tools-6.ts schemas, handlers-6
+  schemas) untouched; new state isolated in side-ports (AgentMetaRegistry,
+  TurnWakeRegistry). agentMeta is an additive optional dep on
+  SpawnAgentDeps/Subagent6Deps — no-op when unwired (byte-identical spawn path).

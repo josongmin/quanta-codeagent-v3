@@ -822,6 +822,23 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   subagentMailbox?: MailboxPort
   /**
+   * RFC-04 / ADR-0437 — host-owned `TurnWakeRegistry`. The subagent runner
+   * registers a per-child waker into THIS instance when a child loop starts;
+   * `followup_task` calls `wake(agentId)` to trigger the child's turn. Absent ⇒
+   * `followup_task` has no trigger substrate and is NOT registered (default-OFF).
+   * Sharing one instance across the runner (writer) and the introspect tools
+   * (reader) is what makes the trigger live.
+   */
+  subagentTurnWake?: import("../subagent").TurnWakeRegistry
+  /**
+   * RFC-04 / ADR-0437 — host-owned `AgentMetaRegistry` side-table. `spawn_agent`
+   * (when wired) records `{depth,label}` here; `list_agents` joins it for
+   * richer rows. Absent ⇒ `list_agents` falls back to `depth=0` + a
+   * description-derived label (byte-identical spawn path; the side-table is
+   * purely additive). OPTIONAL even when introspect is enabled.
+   */
+  subagentAgentMeta?: import("../subagent").AgentMetaRegistry
+  /**
    * ADR-0416 sibling-identity fix (audit H) — STABLE per-agent mailbox label
    * for THIS agent. The subagent runner mints a DETERMINISTIC child id
    * (`parentLabel/seq` — a replay-friendly ordinal counter, never a random

@@ -77,6 +77,29 @@ export type SubagentBlock = {
    *  exposed `maxConcurrent` / `waitTimeoutPolicy` knobs become behavior-live
    *  through `spawn_agent` / `wait_agent`. The trio is never removed. */
   enable6Tools?: boolean
+  /** RFC-02 / ADR-0436 — opt-in `spawn_batch` fan-out tool. Absent/`false` ⇒
+   *  the tool is NOT registered (byte-identical). `true` ⇒ the tier1 adapter
+   *  builds `spawn_batch` against the SAME injected runner the trio/6-tool use,
+   *  with a self-contained worker pool (admission semaphore + per-item timeout
+   *  race + partial-failure isolation). Requires `subagent` to be enabled
+   *  (a runner must exist). */
+  enableBatchSpawn?: boolean
+  /** RFC-02 — explicit hard cap on the number of items a single `spawn_batch`
+   *  call may fan out. Absent ⇒ {@link DEFAULT_MAX_BATCH_ITEMS} (256, aligned
+   *  with the TaskRegistry settled-LRU). Injected constant, not an inlined
+   *  heuristic. */
+  maxBatchItems?: number
+  /** RFC-04 / ADR-0437 — opt-in `list_agents` read-only enumeration tool.
+   *  Absent/`false` ⇒ NOT registered (byte-identical). `true` ⇒ exposed on the
+   *  6-tool builder (needs only the shared `TaskRegistry`; joins the
+   *  `AgentMetaRegistry` side-table for depth/label when wired). */
+  enableIntrospect?: boolean
+  /** RFC-04 / ADR-0437 — opt-in `followup_task` deliver-and-trigger tool.
+   *  Absent/`false` ⇒ NOT registered (byte-identical). `true` ⇒ exposed on the
+   *  6-tool builder; requires `subagentMailbox` (delivery) + a `TurnWakeRegistry`
+   *  (trigger). With no live waker the tool delivers the message and reports
+   *  honest degradation (`cause:"no_waker"`). */
+  enableFollowup?: boolean
 }
 
 /**

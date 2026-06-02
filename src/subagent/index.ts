@@ -23,6 +23,8 @@
  * The host constructs the runner from its own loop and threads maxDepth here.
  */
 
+export type { AgentMeta } from "./agent-meta"
+export { AgentMetaRegistry } from "./agent-meta"
 export type { AgentToolOptions } from "./agent-tool"
 export { createAgentTool } from "./agent-tool"
 export { createSubagent6Tools, type Subagent6ToolSet } from "./agent-tools-6"
@@ -40,6 +42,21 @@ export {
   PtyTable,
   type WaitTimeoutPolicy,
 } from "./handlers-6"
+export {
+  createIntrospectTools,
+  type FollowupTaskInput,
+  FollowupTaskInputSchema,
+  type FollowupTaskOutput,
+  handleFollowupTask,
+  handleListAgents,
+  type IntrospectError,
+  type IntrospectToolsDeps,
+  type ListAgentsInput,
+  ListAgentsInputSchema,
+  type ListAgentsOutput,
+  type ListedAgent,
+  type MailboxSendPort,
+} from "./introspect-tools"
 export type { TaskRecord, TaskRegistryOptions, TaskStatus } from "./registry"
 export { TaskRegistry } from "./registry"
 export {
@@ -52,6 +69,8 @@ export {
   SUBAGENT_6_TOOL_NAMES,
   type Subagent6ToolName,
 } from "./tools-6"
+export type { WakeOutcome, Waker } from "./turn-wake"
+export { TurnWakeRegistry } from "./turn-wake"
 export type {
   SubagentRequest,
   SubagentResult,

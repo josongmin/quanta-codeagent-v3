@@ -136,6 +136,9 @@ export const buildSubagentBlock = (config: AgentConfig): SubagentBlock | undefin
       ...(config.subagent.waitTimeoutPolicy !== undefined
         ? { waitTimeoutPolicy: config.subagent.waitTimeoutPolicy }
         : {}),
+      // RFC-04 — when the host wired an AgentMetaRegistry, thread it so
+      // spawn_agent records depth/label for list_agents. Absent ⇒ no write.
+      ...(config.subagentAgentMeta !== undefined ? { agentMeta: config.subagentAgentMeta } : {}),
     })
     extraTools.push(...set.tools)
     subagent6Cleanup = set.cleanup

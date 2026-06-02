@@ -70,8 +70,10 @@ import {
   buildShadowBlock,
   buildShadowVerifyBlock,
   buildSkillBlock,
+  buildSubagentBatchBlock,
   buildSubagentBgBlock,
   buildSubagentBlock,
+  buildSubagentIntrospectBlock,
   buildSubagentMailboxBlock,
   buildUserInputBlock,
   buildWebSearchBlock,
@@ -171,6 +173,14 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
 
   // ADR-0140 — background-subagent tools (default-OFF: empty when subagentBackground absent)
   extraTools.push(...buildSubagentBgBlock(config))
+
+  // RFC-02 / ADR-0436 — spawn_batch fan-out tool
+  // (default-OFF: empty unless config.subagent.enableBatchSpawn === true)
+  extraTools.push(...buildSubagentBatchBlock(config))
+
+  // RFC-04 / ADR-0437 — list_agents + followup_task introspection tools
+  // (default-OFF: empty unless enableIntrospect/enableFollowup gates are set)
+  extraTools.push(...buildSubagentIntrospectBlock(config))
 
   // ADR-0416 — subagent_send_message tool (default-OFF: empty when subagentMailbox absent)
   extraTools.push(...buildSubagentMailboxBlock(config))

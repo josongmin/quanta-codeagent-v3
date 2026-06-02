@@ -1,0 +1,208 @@
+/**
+ * RFC-02 / ADR-0436 — `spawn_batch` tool.
+ *
+ * A single structured fan-out tool: `items[]` (or `items_path`) +
+ * `prompt_template` + `max_concurrency` ⇒ N templated child runs through the
+ * injected runner, with per-item structured results, partial-failure isolation,
+ * a hard item cap, deterministic templating, and progress streaming.
+ *
+ * Slice fence: imports only `zod`, `@/tool` (Tool/ToolEvent/ToolContext), and
+ * sibling modules. NO `@/agent`.
+ */
+
+import { z } from "zod"
+import type { Tool, ToolContext, ToolEvent } from "@/tool"
+import { loadItems } from "./load-items"
+import type { BatchItemResult, BatchRunResult, SubagentBatchDeps } from "./port"
+import { type RunBatchArgs, runBatch } from "./run-batch"
+import type { BatchItem } from "./template"
+
+const itemSchema = z.union([z.string(), z.record(z.string(), z.unknown())])
+
+export const spawnBatchInputSchema = z
+  .object({
+    items: z
+      .array(itemSchema)
+      .optional()
+      .describe(
+        "Inline list of items. Each item is a string OR an object of {{placeholder}} values. Mutually exclusive with items_path.",
+      ),
+    items_path: z
+      .string()
+      .optional()
+      .describe(
+        "Path to a .csv (header row required), .jsonl, or .json (array) file of items. Mutually exclusive with items.",
+      ),
+    prompt_template: z
+      .string()
+      .min(1)
+      .describe(
+        "Per-item child prompt. Use {{key}} placeholders; for string items use {{item}}. Literal braces: {{{{ }}}}.",
+      ),
+    max_concurrency: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        "Max workers running at once. Defaults to the host scheduler cap; capped by it. Set 1 for sequential.",
+      ),
+    output_schema: z
+      .record(z.string(), z.unknown())
+      .optional()
+      .describe(
+        "Optional JSON object whose top-level keys each item's result must contain (parsed parent-side). Violations mark that item error; others continue.",
+      ),
+    per_item_timeout_ms: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        "Max ms a single worker may run before it is marked timed-out (others continue). Clamped to the host policy band.",
+      ),
+    id_field: z
+      .string()
+      .optional()
+      .describe(
+        "For object items: field to use as the stable item id in results. Default = item index.",
+      ),
+    max_turns: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Per-worker model-turn ceiling (passed to the child budget)."),
+  })
+  .strict()
+
+export type SpawnBatchInput = z.infer<typeof spawnBatchInputSchema>
+
+/** Render a human-readable per-item summary line. */
+const renderItemLine = (r: BatchItemResult): string => {
+  if (r.status === "ok") {
+    const head = (r.output ?? "").split("\n")[0] ?? ""
+    return `  [${r.index}] ${r.id}: ok (${r.turns} turns) ${head.slice(0, 120)}`
+  }
+  return `  [${r.index}] ${r.id}: error — ${r.error ?? "unknown"}`
+}
+
+/** Render the full model-facing output string. */
+const renderOutput = (run: BatchRunResult): string => {
+  const { summary, items } = run
+  const lines = [
+    `batch complete: ${summary.ok}/${summary.total} ok, ${summary.failed} failed` +
+      (summary.cancelled > 0 ? `, ${summary.cancelled} cancelled` : "") +
+      ` (${summary.durationMs}ms)`,
+    ...items.map(renderItemLine),
+  ]
+  return lines.join("\n")
+}
+
+const okResult = (message: string): ToolEvent => ({
+  type: "result",
+  result: { ok: false, output: message },
+})
+
+/** Build the {@link RunBatchArgs} from validated input + loaded items, OMITTING
+ *  absent optional fields (exactOptionalPropertyTypes). Pure. */
+const toRunArgs = (args: SpawnBatchInput, items: readonly BatchItem[]): RunBatchArgs => ({
+  items,
+  promptTemplate: args.prompt_template,
+  ...(args.max_concurrency !== undefined ? { maxConcurrency: args.max_concurrency } : {}),
+  ...(args.per_item_timeout_ms !== undefined ? { perItemTimeoutMs: args.per_item_timeout_ms } : {}),
+  ...(args.id_field !== undefined ? { idField: args.id_field } : {}),
+  ...(args.max_turns !== undefined ? { maxTurns: args.max_turns } : {}),
+  ...(args.output_schema !== undefined ? { outputSchema: args.output_schema } : {}),
+})
+
+/** An empty-list run result (zero spawns). */
+const emptyRun: BatchRunResult = {
+  items: [],
+  summary: { total: 0, ok: 0, failed: 0, cancelled: 0, durationMs: 0 },
+}
+
+/**
+ * Build the `spawn_batch` tool against injected deps. Mirrors the `subagent-bg`
+ * builder posture: a single factory taking the closed deps bundle.
+ */
+export const spawnBatchTool = (deps: SubagentBatchDeps): Tool<SpawnBatchInput> => ({
+  name: "spawn_batch",
+  description:
+    "Fan out one templated child subagent per item over a bounded worker pool. " +
+    "Provide items (inline array) OR items_path (.csv/.jsonl/.json) plus a " +
+    "prompt_template with {{placeholders}}. Returns per-item structured results; " +
+    "one item failing does NOT stop the rest. Use for bulk 'do X for each of these N things'.",
+  inputSchema: spawnBatchInputSchema,
+  // Spawning children is MUTATING (each child owns its own tool set) but the
+  // batch as a whole shares no mutable state with sibling tool calls — mirror
+  // spawn_agent's CONCURRENCY-SAFE classification.
+  isReadOnly: () => false,
+  isConcurrencySafe: () => true,
+  hitlTier: () => "pre-approval-ok",
+
+  async *execute(input: SpawnBatchInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    const parsed = spawnBatchInputSchema.safeParse(input)
+    if (!parsed.success) {
+      yield okResult(`invalid input: ${parsed.error.message}`)
+      return
+    }
+    const args = parsed.data
+
+    // Load items (inline XOR file). NO-THROW.
+    const loaded = await loadItems(
+      {
+        ...(args.items !== undefined ? { items: args.items as BatchItem[] } : {}),
+        ...(args.items_path !== undefined ? { items_path: args.items_path } : {}),
+      },
+      deps.readFile,
+    )
+    if (!loaded.ok) {
+      yield okResult(loaded.error)
+      return
+    }
+
+    // Hard item cap — spawn 0 workers if exceeded.
+    if (loaded.items.length > deps.maxItems) {
+      yield okResult(
+        `batch size ${loaded.items.length} exceeds cap ${deps.maxItems} — refusing to spawn.`,
+      )
+      return
+    }
+
+    // Empty list ⇒ ok:true, total 0, zero spawns.
+    if (loaded.items.length === 0) {
+      yield {
+        type: "result",
+        result: { ok: true, output: renderOutput(emptyRun), structured: emptyRun },
+      }
+      return
+    }
+
+    // Stream progress through a queue the async runBatch fills as items settle.
+    const progressQueue: string[] = []
+    const run = await runBatch(
+      toRunArgs(args, loaded.items),
+      {
+        ...deps,
+        onProgress: (done, total, failed) => {
+          progressQueue.push(`batch ${done}/${total} done (${failed} failed)…`)
+        },
+      },
+      ctx.signal,
+    )
+
+    // Drain progress messages (best-effort; emitted after settle since runBatch
+    // is awaited as a unit — the queue gives the model a per-item trace).
+    for (const msg of progressQueue) {
+      yield { type: "progress", message: msg }
+    }
+
+    // All-failed ⇒ surface ok:false so the model clearly sees total failure.
+    const allFailed = run.summary.total > 0 && run.summary.ok === 0
+    yield {
+      type: "result",
+      result: { ok: !allFailed, output: renderOutput(run), structured: run },
+    }
+  },
+})

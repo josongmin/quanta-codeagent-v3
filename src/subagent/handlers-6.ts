@@ -321,7 +321,9 @@ export const handleExecCommand = async (
       const stderrPump = createStreamPump(proc.stderr as ReadableStream<Uint8Array>)
       const winner = await Promise.race([
         (proc.exited as Promise<number>).then(() => "exited" as const),
-        new Promise<"attach">((resolve) => setTimeout(() => resolve("attach"), PTY_ATTACH_GRACE_MS)),
+        new Promise<"attach">((resolve) =>
+          setTimeout(() => resolve("attach"), PTY_ATTACH_GRACE_MS),
+        ),
       ])
 
       if (winner === "attach" && !timedOut && !aborted) {
@@ -428,6 +430,12 @@ interface SpawnAgentDeps {
   /** Caller's own current recursion depth, used to compute the child's depth
    *  (parent + 1). Defaults to 0 (root). */
   parentDepth?: number
+  /** RFC-04 / ADR-0437 — OPT-IN side-table the spawn path records `{depth,
+   *  label}` into so `list_agents` can show richer rows WITHOUT mutating the
+   *  frozen `TaskRecord` contract. Absent ⇒ no write (byte-identical spawn
+   *  path). Typed structurally (a `set(id,{depth,label})` method) so this slice
+   *  does not depend on the concrete `AgentMetaRegistry` class import shape. */
+  agentMeta?: { set(agentId: string, meta: { depth: number; label: string }): void }
   /** B3 — closed-port per-session cap on CONCURRENT running subagents. When
    *  set, `spawn_agent` counts currently-running TaskRegistry records and
    *  rejects (cause:"concurrency_cap") any spawn that would exceed it. Absent
@@ -476,6 +484,13 @@ export const handleSpawnAgent = async (
     id: taskId,
     description: input.prompt.slice(0, 120),
     ...(input.agentType !== undefined ? { agentType: input.agentType } : {}),
+  })
+
+  // RFC-04 — record depth/label into the optional side-table so list_agents can
+  // show richer rows. No-op when the host didn't wire one (byte-identical).
+  deps.agentMeta?.set(taskId, {
+    depth: childDepth,
+    label: input.agentType ?? input.prompt.slice(0, 40),
   })
 
   const req: SubagentRequest = {

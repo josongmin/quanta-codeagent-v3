@@ -57,6 +57,9 @@ export interface Subagent6Deps {
   waitTimeoutPolicy?: WaitTimeoutPolicy
   /** Forwarded to close_agent ownership-token enforcement. */
   ownerToken?: string
+  /** RFC-04 / ADR-0437 — OPT-IN agent-meta side-table forwarded to spawn_agent
+   *  so list_agents can show depth/label. Absent ⇒ no write (byte-identical). */
+  agentMeta?: { set(agentId: string, meta: { depth: number; label: string }): void }
   /** Forwarded to exec_command timeout/abort plumbing. */
   signal?: AbortSignal
 }
@@ -138,6 +141,7 @@ const routeSpawnAgent: Route = async (input, deps) => {
     ...(deps.maxDepth !== undefined ? { maxDepth: deps.maxDepth } : {}),
     ...(deps.parentDepth !== undefined ? { parentDepth: deps.parentDepth } : {}),
     ...(deps.maxConcurrent !== undefined ? { maxConcurrent: deps.maxConcurrent } : {}),
+    ...(deps.agentMeta !== undefined ? { agentMeta: deps.agentMeta } : {}),
   })
 }
 
