@@ -112,6 +112,13 @@ const buildImageQueue = (featureCfg: CliFeatureConfig): ImageQueue | undefined =
   return createImageQueue({ maxSize: featureCfg.imageQueue.maxSize })
 }
 
+/** RFC-08 — prompt-UX bundle extracted from `runRepl` (host LOC contract); sink repaints the status-bar pill on shift+tab. */
+const buildReplPromptUx = (
+  featureCfg: CliFeatureConfig,
+  setup: Awaited<ReturnType<typeof setupSession>>,
+): ReturnType<typeof buildPromptUx> =>
+  buildPromptUx(featureCfg, setup.cwd, process.env, (m) => setup.pills.update({ mode: m }))
+
 /** Route `quanta session …` to the session subcommand dispatcher. Returns
  *  the exit code; no agent/REPL wiring runs in this branch. */
 export const runSessionMain = async (): Promise<number> => {
@@ -285,9 +292,7 @@ export const runRepl = async (): Promise<void> => {
       ...rfc09,
       ...(surfaceState.imageQueue !== undefined ? { imageQueue: surfaceState.imageQueue } : {}),
       textInbox: wires.textInbox,
-      ux: await buildPromptUx(featureCfg, setup.cwd, process.env, (mode) =>
-        setup.pills.update({ mode }),
-      ),
+      ux: await buildReplPromptUx(featureCfg, setup),
       registerExitTeardown: (cb) => {
         process.once("exit", cb)
       },
