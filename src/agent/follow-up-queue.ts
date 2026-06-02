@@ -176,12 +176,16 @@ const assertFollowUp = (value: unknown): FollowUp => {
     }
     metadata[k] = v
   }
+  // Reconstruct in the SAME field order as `enqueue` (`{ ...partial, id }`,
+  // i.e. id LAST). JSON.stringify emits keys in insertion order, so divergent
+  // construction order here would make `toSnapshot` non-idempotent across a
+  // restore round-trip (id would float to the front). Keep id last.
   return {
-    id: value.id as FollowUpId,
     content: value.content,
     submittedAt: value.submittedAt,
     submittedTurnId: value.submittedTurnId as TurnId | null,
     metadata,
+    id: value.id as FollowUpId,
   }
 }
 
