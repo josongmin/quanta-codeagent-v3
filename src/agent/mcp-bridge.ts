@@ -5,8 +5,10 @@ import {
   McpClient,
   type McpClientTransport,
   McpError,
+  McpReconnectSupervisor,
   type McpServerConfig,
   type McpToolDef,
+  type SupervisorDeps,
 } from "@/mcp"
 import { errMessage, logger } from "@/shared"
 import {
@@ -114,6 +116,56 @@ const tasksToolsFor = (client: McpClient): Tool[] => {
 }
 
 /**
+ * Supervisor-aware variant of {@link mcpToolToTool} (ADR-0435). Instead of
+ * capturing a single (mortal) client instance, it captures the supervisor and
+ * routes every call through `sup.callTool`, which always delegates to the
+ * current live client — surviving auto-restarts behind a stable tool name.
+ *
+ * The execute/yield/error-mapping shape is identical to {@link mcpToolToTool}
+ * so the model sees the same result contract whether or not auto-restart is on.
+ */
+export const mcpToolToToolSupervised = (
+  sup: McpReconnectSupervisor,
+  def: McpToolDef,
+  serverName: string,
+): Tool => {
+  const name = mcpToolName(serverName, def.name)
+  const schema = passthroughSchema(def.inputSchema)
+  return {
+    name,
+    description: def.description,
+    inputSchema: schema,
+    isReadOnly: () => false,
+    isConcurrencySafe: () => false,
+    async *execute(input: unknown, _ctx: ToolContext): AsyncIterable<ToolEvent> {
+      yield { type: "progress", message: `calling ${serverName} tool ${def.name}` }
+      try {
+        const res = await sup.callTool(def.name, input)
+        yield { type: "result", result: { ok: res.ok, output: res.content } }
+      } catch (e) {
+        const message = isMcpError(e) ? e.message : errMessage(e)
+        yield { type: "result", result: { ok: false, output: message } }
+      }
+    },
+  }
+}
+
+/** Opt-in knobs for {@link loadMcpTools}. Omitting all of them is byte-identical
+ *  to the pre-ADR-0435 behavior. */
+export interface LoadMcpToolsOpts {
+  /** Inject auto-restart (ADR-0435). When provided, each server is wrapped in a
+   *  {@link McpReconnectSupervisor} and bridged via {@link mcpToolToToolSupervised}.
+   *  Omitting it keeps today's single-client code path unchanged. */
+  supervisorDepsFor?: (config: McpServerConfig) => SupervisorDeps
+}
+
+/** A handle the CLI can `stop()` on shutdown. Both `McpClient` and
+ *  `McpReconnectSupervisor` satisfy it. */
+export interface McpStoppable {
+  stop(): Promise<void>
+}
+
+/**
  * Start every configured MCP server, list its tools, and bridge them all.
  * Returns the bridged tools plus the live clients (the CLI stops them on exit).
  * A server that fails to start/list is logged and skipped — the others still
@@ -130,20 +182,45 @@ const tasksToolsFor = (client: McpClient): Tool[] => {
  * a test seam mirroring `McpClient`'s `transport` option. Absent ⇒ the client
  * builds its default carrier (stdio / HTTP-SSE per config), byte-identical to
  * the legacy load.
+ *
+ * When `opts.supervisorDepsFor` is injected (ADR-0435), each server is wrapped
+ * in an auto-restart supervisor; the returned `clients` array then holds the
+ * supervisors (which expose a compatible `stop()`). Without it, the original
+ * single-client path runs unchanged.
  */
 export interface LoadMcpToolsOpts {
   /** Construct the transport for a server (test double / custom carrier). */
   transportFor?: (config: McpServerConfig) => McpClientTransport
+  /** ADR-0435 — per-server supervisor deps. When present, the server is wrapped
+   *  in an auto-restart supervisor; absent ⇒ the byte-identical single-client path. */
+  supervisorDepsFor?: (config: McpServerConfig) => SupervisorDeps
 }
 
 export const loadMcpTools = async (
   servers: McpServerConfig[],
   elicitationPrompterFor?: ElicitationPrompterFactory,
   opts?: LoadMcpToolsOpts,
-): Promise<{ tools: Tool[]; clients: McpClient[] }> => {
+): Promise<{ tools: Tool[]; clients: McpStoppable[] }> => {
   const tools: Tool[] = []
-  const clients: McpClient[] = []
+  const clients: McpStoppable[] = []
+  const supervisorDepsFor = opts?.supervisorDepsFor
   for (const config of servers) {
+    if (supervisorDepsFor !== undefined) {
+      // ADR-0435 supervised path. `create` never throws on a failed first start
+      // (it enters backoff), so a flaky server no longer drops the whole load.
+      const sup = await McpReconnectSupervisor.create(config, supervisorDepsFor(config))
+      try {
+        const defs = await sup.listTools()
+        for (const def of defs) tools.push(mcpToolToToolSupervised(sup, def, config.name))
+        clients.push(sup)
+      } catch (e) {
+        logger.warn(`mcp: skipping server "${config.name}": ${errMessage(e)}`)
+        await sup.stop().catch(() => undefined)
+      }
+      continue
+    }
+    // Default (byte-identical) path: a single mortal client per server. Track C
+    // (elicitation prompter) + ADR-0431 (transport seam) apply here.
     const clientOpts: ConstructorParameters<typeof McpClient>[1] = {}
     if (elicitationPrompterFor !== undefined) {
       clientOpts.elicitationPrompter = elicitationPrompterFor(config.name)

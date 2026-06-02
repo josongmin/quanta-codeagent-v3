@@ -3,12 +3,19 @@ import {
   loadMcpTools,
   lspDiagnosticsTool,
   lspNavToolList,
+  type McpStoppable,
   type PersonaKind,
   resolvePersona,
 } from "@/agent"
 import { defaultIdentityProvider, type IdentityMode } from "@/agent/identity"
 import type { LLMPort } from "@/llm"
-import type { McpClient, McpServerConfig } from "@/mcp"
+import {
+  DEFAULT_BACKOFF_POLICY,
+  McpClient,
+  type McpServerConfig,
+  type SupervisableMcpClient,
+  type SupervisorDeps,
+} from "@/mcp"
 import { Metrics, type StructuredLogger } from "@/observability"
 import type { PermissionContext, PermissionMode } from "@/permission"
 import {
@@ -388,6 +395,34 @@ export const lspNavEnabled = (): boolean => process.env.QUANTA_LSP_TOOLS === "fu
  *  default registry byte-identical. Opt-in via `QUANTA_GIT_TOOLS=1`. */
 export const gitToolsEnabled = (): boolean => process.env.QUANTA_GIT_TOOLS === "1"
 
+/** MCP crash-detection + auto-restart (ADR-0435). Default-OFF: when unset,
+ *  `loadMcpTools` runs the single-client path and MCP behavior is
+ *  byte-identical. `QUANTA_MCP_AUTORESTART=1` wraps every server in a
+ *  {@link McpReconnectSupervisor} (2-phase exponential backoff + full-jitter,
+ *  stability reset, storm cap → DEGRADED). */
+export const mcpAutoRestartEnabled = (): boolean =>
+  parseEnvFlag(process.env.QUANTA_MCP_AUTORESTART, false)
+
+/** Build the injected {@link SupervisorDeps} for one MCP server. The real
+ *  clock/timer/RNG are injected ONLY here, at the composition root — the
+ *  supervisor core itself never reaches for a global. The factory picks the
+ *  legacy `McpClient`; the isolated client is selected by its own env knob
+ *  inside `McpClient` construction is out of scope (the isolated path keeps its
+ *  separate wire), so we use the default client here. */
+const mcpSupervisorDepsFor = (slog: StructuredLogger) => {
+  return (_config: McpServerConfig): SupervisorDeps => ({
+    factory: (c): SupervisableMcpClient => new McpClient(c),
+    policy: DEFAULT_BACKOFF_POLICY,
+    now: () => Date.now(),
+    setTimer: (fn, ms) => {
+      const t = setTimeout(fn, ms)
+      return () => clearTimeout(t)
+    },
+    onStateChange: (s) =>
+      slog.info("mcp.supervisor.state", { server: s.serverName, state: s.state }),
+  })
+}
+
 /**
  * ADR-0237 — per-turn shell-snapshot CLI composition.
  *
@@ -603,7 +638,10 @@ export interface Features {
   state: string | undefined
   resume: string | undefined
   mcpTools: Tool[]
-  mcpClients: McpClient[]
+  /** Stoppable handles for every loaded server. Without auto-restart these are
+   *  `McpClient` instances; with `QUANTA_MCP_AUTORESTART=1` (ADR-0435) they are
+   *  `McpReconnectSupervisor` instances — both expose a compatible `stop()`. */
+  mcpClients: McpStoppable[]
   /** Raw configs from `QUANTA_MCP_CONFIG` — the SSOT for the `/mcp` slash
    *  command. `loadMcpTools` drops failed entries from `mcpClients`, so
    *  this is the only place where the surface can see all configured
@@ -632,10 +670,15 @@ export const loadFeatures = async (slog: StructuredLogger): Promise<Features> =>
   // (byte-identical to the legacy load). The factory binds a per-server lease
   // (`pool.forContext({ serverId })`) inside `loadMcpTools`.
   const elicitationPrompterFor = buildCliElicitationPrompterFactory()
+  // ADR-0435: opt-in auto-restart. Unset ⇒ `supervisorDepsFor` is undefined ⇒
+  // `loadMcpTools` takes the original single-client branch (byte-identical).
+  const autoRestart = mcpAutoRestartEnabled()
+  const mcpLoadOpts = autoRestart ? { supervisorDepsFor: mcpSupervisorDepsFor(slog) } : undefined
   const { tools: mcpTools, clients: mcpClients } =
     mcpConfigs.length > 0
-      ? await loadMcpTools(mcpConfigs, elicitationPrompterFor)
-      : { tools: [], clients: [] }
+      ? await loadMcpTools(mcpConfigs, elicitationPrompterFor, mcpLoadOpts)
+      : { tools: [], clients: [] as McpStoppable[] }
+
   // LSP-backed diagnostics: only when opted in. The tool name matches the
   // no-op one in defaultTools, so appending it lets the registry's last-write
   // -wins map swap in the real provider (same merge path as MCP tools).
@@ -649,6 +692,7 @@ export const loadFeatures = async (slog: StructuredLogger): Promise<Features> =>
   if (metrics) slog.info("metrics.on")
   if (state) slog.info("state.persist.on", { path: state })
   if (mcpTools.length > 0) slog.info("mcp.tools.loaded", { count: mcpTools.length })
+  if (autoRestart && mcpClients.length > 0) slog.info("mcp.autorestart.on")
   if (lspTools.length > 0) slog.info("lsp.diagnostics.on")
   if (lspNavTools.length > 0) slog.info("lsp.nav.on", { count: lspNavTools.length })
   if (gitToolList.length > 0) slog.info("git.tools.on", { count: gitToolList.length })

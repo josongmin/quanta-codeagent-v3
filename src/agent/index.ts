@@ -139,9 +139,12 @@ export {
 } from "./lsp-diagnostics-hook"
 export {
   type ElicitationPrompterFactory,
+  type LoadMcpToolsOpts,
   loadMcpTools,
+  type McpStoppable,
   mcpToolName,
   mcpToolToTool,
+  mcpToolToToolSupervised,
 } from "./mcp-bridge"
 export {
   type PersistDeps,

@@ -21,6 +21,18 @@ export {
   type LeaseContext,
 } from "./elicitation"
 export {
+  type BackoffPolicy,
+  backoffDelay,
+  DEFAULT_BACKOFF_POLICY,
+  type McpClientFactory,
+  McpReconnectSupervisor,
+  type PendingPolicy,
+  type SupervisableMcpClient,
+  type SupervisorDeps,
+  type SupervisorSnapshot,
+  type SupervisorState,
+} from "./reconnect"
+export {
   clientTasksPort,
   DefaultTaskStore,
   defaultTasksPort,

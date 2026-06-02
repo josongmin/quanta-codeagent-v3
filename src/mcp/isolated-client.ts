@@ -138,6 +138,11 @@ export class IsolatedMcpClient {
   private host: PluginHost | null = null
   private started = false
   private stopped = false
+  /** External exit subscribers (ADR-0435 auto-restart supervisor). Empty unless
+   *  a supervisor wires one in — no fan-out when empty (byte-identical). */
+  private readonly exitHandlers = new Set<(reason?: string) => void>()
+  /** Guards against a double fan-out (host exit + explicit stop). */
+  private exitNotified = false
 
   constructor(config: McpServerConfig, opts: IsolatedMcpClientOpts = {}) {
     this.config = config
@@ -169,7 +174,17 @@ export class IsolatedMcpClient {
     if (this.config.env !== undefined) Object.assign(spawnOpts, { env: this.config.env })
 
     const proc = await this.spawner.spawn(spawnOpts)
-    this.host = new PluginHost(proc, { defaultCallTimeoutMs: this.requestTimeoutMs })
+    const host = new PluginHost(proc, { defaultCallTimeoutMs: this.requestTimeoutMs })
+    this.host = host
+    // Fan-out the process exit to external subscribers (auto-restart supervisor,
+    // ADR-0435). No subscribers ⇒ no effect; we also skip when the supervisor is
+    // not wired, keeping the default path byte-identical. A `stop()`-driven exit
+    // is suppressed by `stopped`/`exitNotified` so a deliberate teardown is not
+    // mistaken for a crash.
+    void host.exitPromise.then(
+      () => this.notifyExit("process exit"),
+      () => this.notifyExit("process exit"),
+    )
     try {
       await this.host.call("initialize", {
         protocolVersion: PROTOCOL_VERSION,
@@ -238,6 +253,20 @@ export class IsolatedMcpClient {
       ok: res.isError !== true,
       content: capResultText(joinTextBlocks(res.content)),
     }
+  }
+
+  /** Subscribe to a one-shot process-exit notification (ADR-0435). Returns an
+   *  unsubscribe. No-op for the default code path (no subscriber registered). */
+  onExit(handler: (reason?: string) => void): () => void {
+    this.exitHandlers.add(handler)
+    return () => this.exitHandlers.delete(handler)
+  }
+
+  /** Fan-out exit once. A deliberate `stop()` does not count as a crash. */
+  private notifyExit(reason: string): void {
+    if (this.exitNotified || this.stopped) return
+    this.exitNotified = true
+    for (const h of this.exitHandlers) h(reason)
   }
 
   async stop(): Promise<void> {

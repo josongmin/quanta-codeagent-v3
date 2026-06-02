@@ -1,0 +1,69 @@
+id: mcp-auto-restart
+title: ADR-0435 MCP crash-detection + auto-restart (exponential backoff)
+section: 9
+subsystem: MCP (ADR-0007 / ADR-0435)
+order: 435
+maturity: L4
+status: stable
+ui_surfaces: [api]
+monitoring: integrated
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_MCP_AUTORESTART]
+owners: ["@songmin"]
+labels: ["surface:cli"]
+depends_on: [quantamcpconfig]
+purpose: |
+  Detects an MCP server crash (transport/process exit) and auto-restarts it —
+  re-spawn → re-`initialize` → re-`tools/list` — swapping the live client behind
+  a stable `mcp__<server>__<tool>` indirection so bridged tools keep working
+  across restarts. Absorbs Cursor `mcpProcessMain.js`: 2-phase capped-exponential
+  + full-jitter backoff (fast-retry → periodic-retry), a stability threshold that
+  resets attempt counters after a clean run (flapping guard), a restart-storm cap
+  that gives up into a permanent DEGRADED state, and a `restartEpoch` stale-guard
+  (Cursor connectionGeneration) so a late async start after stop() is discarded.
+
+  Closed-port: `now`/`setTimer`/`random`/`factory` are all injected — the
+  supervisor core has NO real timers and NO global RNG/clock. Every timing
+  constant lives in a typed `BackoffPolicy` (`DEFAULT_BACKOFF_POLICY`) with a
+  documented Cursor-traced rationale; there are no magic thresholds.
+
+  Default-OFF / byte-identical: absent `QUANTA_MCP_AUTORESTART`, `loadMcpTools`
+  runs the original single-client path and the client `onExit` fan-out is a
+  zero-subscriber no-op — MCP behavior is unchanged. Pending-call policy is
+  fail-fast by default (same `"…is not running"` error today's callers see),
+  with an opt-in at-most-once `queue` mode.
+evidence:
+  code:
+    - src/mcp/reconnect/policy.ts
+    - src/mcp/reconnect/port.ts
+    - src/mcp/reconnect/supervisor.ts
+    - src/mcp/reconnect/index.ts
+    - src/mcp/client.ts
+    - src/mcp/isolated-client.ts
+    - src/mcp/index.ts
+    - src/agent/mcp-bridge.ts
+    - src/apps/cli/internal.ts
+  adrs: [435]
+  tests:
+    unit:
+      - src/mcp/reconnect/__tests__/policy.hellgate.test.ts
+      - src/mcp/reconnect/__tests__/supervisor.hellgate.test.ts
+      - src/agent/__tests__/mcp-autorestart-default-off.hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_MCP_AUTORESTART
+    default: 'unset (OFF)'
+    purpose: |
+      Set to 1/true/yes to wrap every configured MCP server in a reconnect
+      supervisor. Unset ⇒ byte-identical single-client path (no auto-restart).
+deliberate_hold: null
+notes: |
+  Non-goals (RFC §3, deliberate): Cursor's Electron UtilityProcess process
+  isolation is NOT reimplemented (quanta reuses its own spawn / @/plugin-isolation
+  isolation); remote dynamic config (Statsig) is rejected for static per-server
+  config; active health-probe polling and dynamic tool re-registration are
+  follow-ups. The first-load tool set is fixed at session start — a restart that
+  drops a tool fails that call (server -32601) rather than mutating the registry.

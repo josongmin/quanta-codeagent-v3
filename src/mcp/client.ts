@@ -138,6 +138,10 @@ export class McpClient {
    *  optional `tasks/*` surface: tools are wired ONLY when a connected server
    *  advertises `capabilities.tasks` — absent ⇒ byte-identical (no tools). */
   private serverCapabilities: Record<string, unknown> | null = null
+  /** External exit subscribers (ADR-0435 auto-restart supervisor). Empty unless
+   *  a supervisor wires one in — when empty, `onTransportExit` is byte-identical
+   *  to the pre-ADR behavior (the fan-out loop iterates zero times). */
+  private readonly exitHandlers = new Set<(reason?: string) => void>()
 
   /** `negotiator` is OPTIONAL (ADR-0196): omitting it preserves the
    *  pre-ADR behavior (`capabilities: {}`) — byte-identical for every
@@ -351,9 +355,20 @@ export class McpClient {
     )
   }
 
+  /** Subscribe to a one-shot transport-exit notification (ADR-0435). Returns an
+   *  unsubscribe. No-op for the default code path (no subscriber registered). */
+  onExit(handler: (reason?: string) => void): () => void {
+    this.exitHandlers.add(handler)
+    return () => this.exitHandlers.delete(handler)
+  }
+
   private onTransportExit(): void {
     this.exited = true
     this.failAllPending(new McpError(`mcp server "${this.config.name}" exited`))
+    // Fan-out to external subscribers (auto-restart supervisor). Zero
+    // subscribers ⇒ this loop is a no-op and the side effects above are
+    // byte-identical to the pre-ADR-0435 behavior.
+    for (const h of this.exitHandlers) h("transport exit")
   }
 
   private failAllPending(reason: Error): void {
