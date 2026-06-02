@@ -35,6 +35,8 @@ import {
 } from "../at-autocomplete"
 import { runImageCmd } from "../image-cmd"
 import type { ImageQueue } from "../image-queue"
+import { loadKeybindings } from "../keybindings/load"
+import type { KeybindingMap } from "../keybindings/types"
 import {
   createModeCycleStore,
   formatPostureMeta,
@@ -42,6 +44,7 @@ import {
   modeCycleEnabled,
 } from "../mode-cycle"
 import { createPromptHistory, type PromptHistory } from "../prompt-history"
+import { buildExternalEditor, type ExternalEditorPort } from "../raw-line-reader-editor"
 import type { RewindSlashState } from "../rewind-cmd"
 import type { ConvCheckpointSlashState } from "../rewind-conv-cmd"
 import type { SessionIoState } from "../session-cmd"
@@ -77,6 +80,13 @@ export interface PromptUxOpts {
   readonly modeCycle?: ModeCycleStore
   readonly modeMeta?: string
   readonly onCycleMode?: () => { meta?: string } | undefined
+  /** RFC-11 / ADR-0446 — external `$EDITOR` composition port. Present iff
+   *  `QUANTA_EXTERNAL_EDITOR=1`. Absent ⇒ ctrl-x ctrl-e inert (byte-identical). */
+  readonly openEditor?: ExternalEditorPort
+  /** RFC-11 / ADR-0447 — loaded `~/.quanta/keybindings.json` map (merged over
+   *  defaults). Present iff `QUANTA_KEYBINDINGS=1`. Absent ⇒ hardcoded keys
+   *  (byte-identical). */
+  readonly keybindings?: KeybindingMap
 }
 
 /** RFC-08 / ADR-0443 — build the mode-cycle store + its derived pill/hook when
@@ -127,7 +137,7 @@ const buildAtProvider = (cwd: string, env: NodeJS.ProcessEnv): AtCandidateProvid
  *  typed surface feature record + an INJECTED `cwd`/`env` (no `process.*`
  *  reads survive here — the host passes both). `@`-autocomplete is default-OFF
  *  (its own env knob, read off the injected `env`). */
-export const buildPromptUx = (
+export const buildPromptUx = async (
   featureCfg: CliFeatureConfig,
   cwd: string,
   env: NodeJS.ProcessEnv,
@@ -135,7 +145,7 @@ export const buildPromptUx = (
    *  shift+tab posture change also repaints the bottom status-bar pill. Absent
    *  ⇒ only the input meta-row pill updates (still correct, just one surface). */
   onPosture?: (agentMode: AgentMode) => void,
-): PromptUxOpts => {
+): Promise<PromptUxOpts> => {
   const { history, multiline } = featureCfg
   const promptHistoryOpts: Parameters<typeof createPromptHistory>[0] = {
     maxLines: history.maxLines,
@@ -143,12 +153,37 @@ export const buildPromptUx = (
   }
   const promptHistory = history.enabled ? createPromptHistory(promptHistoryOpts) : undefined
   const atProvider = buildAtProvider(cwd, env)
+  // RFC-11 — external editor (A) + keybindings (B). Both default-OFF; each
+  // gated on its own env knob, read off the injected `env` (no `process.*`).
+  const openEditor = externalEditorEnabled(env)
+    ? buildExternalEditor({ env, onWarn: (line) => process.stderr.write(`${line}\n`) })
+    : undefined
+  const keybindings = await buildKeybindingMap(env)
   return {
     ...(promptHistory !== undefined ? { promptHistory } : {}),
     multiline: multiline.enabled,
     ...(atProvider !== undefined ? { atProvider } : {}),
     ...buildModeCycle(env, onPosture),
+    ...(openEditor !== undefined ? { openEditor } : {}),
+    ...(keybindings !== undefined ? { keybindings } : {}),
   }
+}
+
+/** RFC-11 / ADR-0446 — `QUANTA_EXTERNAL_EDITOR=1` gate. Default OFF; only the
+ *  literal `"1"` enables (mirrors the strict opt-in posture of the new RFC-11
+ *  layers — bad/absent value ⇒ off ⇒ byte-identical). */
+const externalEditorEnabled = (env: NodeJS.ProcessEnv): boolean =>
+  env.QUANTA_EXTERNAL_EDITOR === "1"
+
+/** RFC-11 / ADR-0447 — `QUANTA_KEYBINDINGS=1` gate. When set, load + merge
+ *  `~/.quanta/keybindings.json` over the defaults; any load defect degrades to
+ *  the default map (no-throw) and warnings are echoed to stderr. Absent ⇒
+ *  `undefined` ⇒ the reader runs its hardcoded if-chain (byte-identical). */
+const buildKeybindingMap = async (env: NodeJS.ProcessEnv): Promise<KeybindingMap | undefined> => {
+  if (env.QUANTA_KEYBINDINGS !== "1") return undefined
+  const { map, warnings } = await loadKeybindings()
+  for (const w of warnings) process.stderr.write(`keybindings: ${w}\n`)
+  return map
 }
 
 interface CostPanelDeltaBaseline {

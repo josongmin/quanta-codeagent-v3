@@ -62,6 +62,12 @@ export interface RunSessionLoopDeps {
     readonly modeCycle?: import("../mode-cycle").ModeCycleStore
     readonly modeMeta?: string
     readonly onCycleMode?: () => { meta?: string } | undefined
+    /** RFC-11 / ADR-0446 — external `$EDITOR` composition port (ctrl-x ctrl-e).
+     *  Absent ⇒ byte-identical. */
+    readonly openEditor?: import("../raw-line-reader-editor").ExternalEditorPort
+    /** RFC-11 / ADR-0447 — loaded keybinding map (merged over defaults).
+     *  Absent ⇒ byte-identical. */
+    readonly keybindings?: import("../keybindings/types").KeybindingMap
   }
   /** Optional image queue the prompt pipeline drains per turn. */
   readonly imageQueue?: import("../image-queue").ImageQueue

@@ -48,7 +48,11 @@ import {
   selectNext,
   selectPrev,
 } from "./at-autocomplete"
+import { CANONICAL_KEY_FOR_ACTION } from "./keybindings/defaults"
+import { keyOf } from "./keybindings/normalize"
+import type { KeybindingMap } from "./keybindings/types"
 import type { PromptHistory } from "./prompt-history"
+import type { ExternalEditorPort } from "./raw-line-reader-editor"
 
 export interface CandidateDescriptor {
   readonly value: string
@@ -96,6 +100,20 @@ export interface ReadLineOptions {
    *  touched and the line is NOT submitted. Absent ⇒ `shift+tab` is fully
    *  ignored and every keypress path is byte-identical to the no-hook build. */
   readonly onCycleMode?: () => { meta?: string } | undefined
+  /** RFC-11 / ADR-0446 — external `$EDITOR` composition port. When injected,
+   *  `ctrl+x ctrl+e` (the bash `edit-and-execute-command` chord) suspends raw
+   *  mode, opens the current draft in `$EDITOR`, and folds the edited text back
+   *  into the buffer WITHOUT submitting (the user presses Enter). Absent ⇒ the
+   *  chord is ignored (ctrl-x / ctrl-e are control chars already dropped) and
+   *  EVERY keypress path is byte-identical to the no-editor build. */
+  readonly openEditor?: ExternalEditorPort
+  /** RFC-11 / ADR-0447 — user keybinding map (loaded + merged over defaults
+   *  from `~/.quanta/keybindings.json`). When injected, an incoming key is
+   *  projected to its bound action and REMAPPED to that action's canonical
+   *  default key before the existing if-chain runs — so context logic (menu vs
+   *  history, heredoc, search) is preserved unchanged. Absent ⇒ NO remap, the
+   *  hardcoded if-chain runs verbatim (byte-identical). */
+  readonly keybindings?: KeybindingMap
 }
 
 export class AbortError extends Error {
@@ -111,7 +129,29 @@ interface KeyEvent {
   /** RFC-08 — node `readline.emitKeypressEvents` already populates `key.shift`;
    *  we widen the interface so the shift+tab (mode-cycle) guard can read it. */
   readonly shift?: boolean
+  /** RFC-11 — alt/meta widened so `keyOf` can project meta chords for the
+   *  keybinding remap. */
+  readonly alt?: boolean
+  readonly meta?: boolean
   readonly sequence?: string
+}
+
+/** RFC-11 / ADR-0447 — rebuild a `KeyEvent` from a canonical single-chord
+ *  spec (`"ctrl+r"`, `"up"`). The keybinding remap uses this to dispatch a
+ *  user-bound key AS IF the action's default key was pressed, so the existing
+ *  if-chain's context logic is preserved. Pure; spec is always a valid single
+ *  chord drawn from `CANONICAL_KEY_FOR_ACTION`. */
+const remapKeyEvent = (spec: string): KeyEvent => {
+  const parts = spec.split("+")
+  const name = parts[parts.length - 1] ?? ""
+  const mods = new Set(parts.slice(0, -1))
+  return {
+    name,
+    ...(mods.has("ctrl") ? { ctrl: true } : {}),
+    ...(mods.has("alt") ? { alt: true } : {}),
+    ...(mods.has("shift") ? { shift: true } : {}),
+    ...(mods.has("meta") ? { meta: true } : {}),
+  }
 }
 
 const ESC = "\x1b["
@@ -263,6 +303,10 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
     // pulls the freshest entry first. Default-OFF when `opts.history` absent.
     opts.history?.reset()
     let settled = false
+    // RFC-11 / ADR-0446 — `ctrl+x` chord prefix latch. Set when `ctrl+x` is
+    // seen with `opts.openEditor` wired; a following `ctrl+e` opens the editor.
+    // Any other key clears it. Inert when `opts.openEditor` is absent.
+    let pendingCtrlX = false
 
     if (testIO?.skipKeypressSetup !== true) {
       readline.emitKeypressEvents(stdin as unknown as NodeJS.ReadStream)
@@ -637,13 +681,112 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
       state.searchMatch = ""
     }
 
+    // ── RFC-11 / ADR-0446 — external `$EDITOR` composition ──────────────────
+    // Suspend raw mode + detach our keypress listener, yield the terminal to
+    // `$EDITOR`, fold the edited draft back into `buf`, then RESTORE raw mode
+    // and re-attach — the restore lives in `finally` so a throwing / crashing /
+    // non-zero-exit editor can NEVER strand the terminal out of raw mode (the
+    // #1 risk). `openEditor.openDraft` is itself no-throw, but the `finally`
+    // remains the load-bearing safety net regardless.
+    const runExternalEdit = async (): Promise<void> => {
+      if (settled || opts.openEditor === undefined) return
+      // Yield the terminal: stop receiving keypresses, erase the prompt band,
+      // drop raw mode so the editor owns the TTY.
+      stdin.removeListener("keypress", onKey)
+      releaseBand()
+      stdout.write(CR + ERASE_LINE)
+      const draft = state.buf
+      try {
+        if (stdin.isTTY === true) stdin.setRawMode?.(false)
+        stdin.pause()
+        // `openDraft` is contractually no-throw, but we still swallow a
+        // rejection here so a misbehaving port can never escape as an
+        // unhandled rejection — the `finally` below restores the terminal
+        // regardless of how this resolves.
+        try {
+          const edited = await opts.openEditor.openDraft(draft)
+          if (!settled) {
+            state.buf = edited.text
+            state.cursor = state.buf.length
+          }
+        } catch {
+          /* editor port threw — draft kept; restore happens in finally */
+        }
+      } finally {
+        // Restore the terminal no matter how the editor returned — unless a
+        // ctrl-c settled the read while the editor was open (then `cleanup`
+        // already restored `wasRaw` and we must not fight it).
+        if (!settled) {
+          if (stdin.isTTY === true) stdin.setRawMode?.(true)
+          stdin.resume()
+          if (testIO?.skipKeypressSetup !== true) {
+            readline.emitKeypressEvents(stdin as unknown as NodeJS.ReadStream)
+          }
+          stdin.on("keypress", onKey)
+          refreshCandidates()
+          growBandTo(targetReserved())
+          redraw()
+        }
+      }
+    }
+
     const onKey = (str: string | undefined, key: KeyEvent | undefined): void => {
       if (settled) return
-      const k = key ?? {}
+      // RFC-11 — `k` is reassignable so the keybinding remap can rewrite the
+      // event to its action's canonical default key in place (no downstream
+      // churn). Absent map ⇒ never reassigned (byte-identical).
+      let k = key ?? {}
 
       if (k.ctrl === true && k.name === "c") {
         settleReject(new AbortError())
         return
+      }
+
+      // RFC-11 / ADR-0446 — `ctrl+x ctrl+e` chord ⇒ open the external editor.
+      // The chord state machine runs ONLY when `opts.openEditor` is wired, so
+      // absent ⇒ this whole block is skipped and ctrl-x / ctrl-e stay the
+      // control chars the printable-insert path already drops (byte-identical).
+      // Placed BELOW ctrl-c (abort always wins) and ABOVE search/at routing so a
+      // pending chord cannot be swallowed by another mode. Disjoint from the
+      // RFC-08 backtab guard and the RFC-12 `@` routing (neither uses ctrl+x).
+      if (opts.openEditor !== undefined) {
+        if (pendingCtrlX) {
+          pendingCtrlX = false
+          if (k.ctrl === true && k.name === "e") {
+            void runExternalEdit()
+            return
+          }
+          // Any other key after ctrl-x: abandon the chord and let the key fall
+          // through to its normal handler below.
+        } else if (k.ctrl === true && k.name === "x") {
+          pendingCtrlX = true
+          return
+        }
+      }
+
+      // RFC-11 / ADR-0447 — user keybinding remap. When a map is injected, the
+      // incoming key is projected to its bound action; if that action's
+      // canonical default key differs, the event is REWRITTEN to the default key
+      // so the existing if-chain (with all its context logic) handles it
+      // unchanged. `open-editor` is intercepted directly. Absent map ⇒ no
+      // projection, the original `k` flows on (byte-identical). The default
+      // bindings are an identity remap, so even an injected DEFAULT map is a
+      // no-op for behavior.
+      if (opts.keybindings !== undefined) {
+        const chord = keyOf(k)
+        const action = chord !== null ? opts.keybindings.get(chord) : undefined
+        if (action === "open-editor") {
+          if (opts.openEditor !== undefined) void runExternalEdit()
+          return
+        }
+        if (action !== undefined) {
+          const canonical = CANONICAL_KEY_FOR_ACTION.get(action)
+          // Only single-chord canonical keys are routed here (chord SEQUENCES
+          // like `ctrl+x ctrl+e` are owned by the prefix machine above).
+          if (canonical !== undefined && !canonical.includes(" ") && canonical !== chord) {
+            k = remapKeyEvent(canonical)
+          }
+        }
       }
 
       // RFC-08 — shift+tab (a.k.a. backtab / CSI Z) cycles the permission/agent

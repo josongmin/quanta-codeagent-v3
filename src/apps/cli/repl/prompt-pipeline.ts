@@ -1,9 +1,11 @@
 import type { AtCandidateProvider } from "../at-autocomplete"
 import type { IdleMonitor } from "../idle-monitor"
 import type { ImageQueue } from "../image-queue"
+import type { KeybindingMap } from "../keybindings/types"
 import type { NotificationPort } from "../notify"
 import type { PromptHistory } from "../prompt-history"
 import { AbortError, readLine } from "../raw-line-reader"
+import type { ExternalEditorPort } from "../raw-line-reader-editor"
 import type { RejectCounter } from "../reject-counter"
 import { describeSlashCommand, slashCompleter } from "../slash-commands"
 import type { StatusBar } from "../status-bar"
@@ -32,6 +34,12 @@ export interface PromptPipelineUxOpts {
    *  absent ⇒ no meta row, shift+tab ignored (byte-identical). */
   readonly modeMeta?: string
   readonly onCycleMode?: () => { meta?: string } | undefined
+  /** RFC-11 / ADR-0446 — external `$EDITOR` composition port. When present,
+   *  `ctrl+x ctrl+e` opens the draft in `$EDITOR`. Absent ⇒ byte-identical. */
+  readonly openEditor?: ExternalEditorPort
+  /** RFC-11 / ADR-0447 — loaded keybinding map (merged over defaults). When
+   *  present, keys remap to bound actions. Absent ⇒ byte-identical. */
+  readonly keybindings?: KeybindingMap
 }
 
 type PromptLineReader = (
@@ -113,6 +121,8 @@ const defaultPromptLineReader: PromptLineReader = async (
       ...(ux?.atProvider !== undefined ? { atProvider: ux.atProvider } : {}),
       ...(ux?.modeMeta !== undefined ? { meta: ux.modeMeta } : {}),
       ...(ux?.onCycleMode !== undefined ? { onCycleMode: ux.onCycleMode } : {}),
+      ...(ux?.openEditor !== undefined ? { openEditor: ux.openEditor } : {}),
+      ...(ux?.keybindings !== undefined ? { keybindings: ux.keybindings } : {}),
     })
     return raw.trim()
   } catch (e) {

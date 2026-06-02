@@ -61,6 +61,10 @@ const KEYBINDS: readonly { readonly key: string; readonly describe: string }[] =
   { key: "↑ / ↓", describe: "History (when wired) / completion nav" },
   { key: "Ctrl+C", describe: "Abort current turn (Esc-Esc 2× = exit)" },
   { key: "Ctrl+D", describe: "EOF (exit on empty line)" },
+  {
+    key: "Ctrl+X Ctrl+E",
+    describe: "Edit draft in $EDITOR (when QUANTA_EXTERNAL_EDITOR=1)",
+  },
 ] as const
 
 /** SSOT-routed env-var table: one row per field in `RuntimeConfig`. The

@@ -1,0 +1,46 @@
+/**
+ * RFC-11 / ADR-0447 — closed keybinding action vocabulary + the key→action
+ * map shape consumed by the raw-line reader.
+ *
+ * The action set is a CLOSED enum (Codex `TuiComposerKeymap` /
+ * `TuiEditorKeymap` parity, `_codex-rs-0.135-symbols.txt:47722`): a config
+ * file may only bind one of these actions, anything else is REJECTED with a
+ * warning (the item is dropped, the rest survive — never a crash).
+ *
+ * Every action below corresponds 1:1 to an existing `onKey` branch in
+ * `raw-line-reader.ts` (the hardcoded if-chain that this layer makes
+ * config-driven). No new behavior is introduced by the enum — it only names
+ * the intents that already exist, plus `open-editor` (feature A).
+ *
+ * Slice posture: pure types + a frozen default constant. No `node:*`, no
+ * `@/...`. Imported only inside `@/apps/cli`.
+ */
+
+export const KEY_ACTIONS = [
+  "submit",
+  "abort",
+  "reverse-search",
+  "complete",
+  "menu-close",
+  "history-prev",
+  "history-next",
+  "cursor-left",
+  "cursor-right",
+  "cursor-home",
+  "cursor-end",
+  "delete-back",
+  "delete-forward",
+  "open-editor",
+] as const
+
+export type KeyAction = (typeof KEY_ACTIONS)[number]
+
+export const ACTION_SET: ReadonlySet<string> = new Set<string>(KEY_ACTIONS)
+
+/** A normalized key token: a single chord (`"ctrl+r"`, `"up"`) or a
+ *  space-separated chord sequence (`"ctrl+x ctrl+e"`). Always lower-case,
+ *  modifiers in canonical order. Produced by `normalizeKeySpec`. */
+export type KeySpec = string
+
+/** The resolved key→action map the raw-line reader routes through. */
+export type KeybindingMap = ReadonlyMap<KeySpec, KeyAction>
