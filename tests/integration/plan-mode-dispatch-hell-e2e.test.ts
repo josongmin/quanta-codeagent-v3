@@ -61,6 +61,46 @@ beforeEach(() => {
 // Dynamic registry introspection: build the canonical set the same way the
 // production CLI builds it. If a new tool ships in any of these surfaces the
 // drift detector below will fire and force MUTATING_TOOL_TABLE to be updated.
+// Caller-wire tools: registered ONLY when the relevant AgentConfig slot is
+// wired (ADR-0119/0122 shadow*, ADR-0130 subagent_*/agent, ADR-0136
+// budget_status, ADR-0135 memory_*, ADR-0084 branch_search, gh PR surfaces,
+// Skill/ToolSearch loaders, web_search, search_codebase, request_plan_exit,
+// task_* control). Their MUTATING_TOOL_TABLE entries are PERMANENT so plan-mode
+// dispatch cannot trip `UnknownToolError` on hosts that wire them. They are not
+// enumerable from `defaultTools`/`gitTools`/`lspNavTools` without injecting
+// every host port, so the cross-check includes them by NAME — same allowlist
+// convention as the sibling `tests/unit/mode-mutating-table.test.ts`.
+const CALLER_WIRE_TOOL_NAMES = [
+  "shadow_snapshots",
+  "shadow_rewind",
+  "shadow_restore_partial",
+  "subagent_fork",
+  "subagent_poll",
+  "subagent_await",
+  "budget_status",
+  "gh_pr_view",
+  "gh_pr_list",
+  "gh_pr_blame",
+  "gh_pr_review_diff",
+  "gh_issue_view",
+  "gh_check_status",
+  "gh_pr_comment",
+  "gh_pr_create",
+  "gh_pr_auto_merge",
+  "memory_search",
+  "memory_write",
+  "memory_update",
+  "branch_search",
+  "task_output",
+  "task_stop",
+  "request_plan_exit",
+  "agent",
+  "Skill",
+  "ToolSearch",
+  "web_search",
+  "search_codebase",
+] as const
+
 const ALL_REGISTERED_TOOL_NAMES = (() => {
   const names = new Set<string>()
   for (const t of defaultTools) names.add(t.name)
@@ -73,6 +113,7 @@ const ALL_REGISTERED_TOOL_NAMES = (() => {
   // (any host that wires the port must NOT trip `UnknownToolError`); we
   // include it here so the cross-check stays in sync with that contract.
   names.add(requestUserInputTool().name)
+  for (const n of CALLER_WIRE_TOOL_NAMES) names.add(n)
   return [...names].sort()
 })()
 
