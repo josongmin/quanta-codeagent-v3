@@ -463,14 +463,22 @@ describe("HC-D. adversarial fixtures", () => {
       const blob = Buffer.alloc(4096)
       for (let i = 0; i < blob.length; i++) blob[i] = (i * 7) & 0xff
       writeFileSync(join(inst.repoPath, "data.bin"), blob)
-      // Run with NoopEndLLM (no fix, but we just want the harness to survive
-      // copying + diffing a binary file).
-      const r = await runInstance(inst, { ...DEPS, llm: new NoopEndLLM() })
+      // Drive a REAL text edit so the snapshot `git add -A` + `git diff
+      // --cached` traverses a sandbox containing BOTH a binary blob and an
+      // edited text file. This is the robustness contract under test: the
+      // diff/scan path must process the non-UTF-8 blob without throwing and
+      // still emit a clean unified diff for the text change. (Using a no-op
+      // LLM would instead trip the fail-closed empty-prediction guard in
+      // `verdict.ts`, which sets `error` for ANY empty patch — binary or not —
+      // and so would not exercise the binary-diff path at all.)
+      const llm = new FixingLLM("math.js", "return a-b", "return a+b")
+      const r = await runInstance(inst, { ...DEPS, llm })
       expect(r.id).toBe("binary-file")
       expect(typeof r.patch).toBe("string")
-      // git diff usually emits "Binary files .. differ" for binary changes;
-      // since we didn't change the binary, the patch should be empty OR a
-      // benign no-op — but NEVER a thrown error.
+      // git emits "Binary files .. differ" (or omits unchanged binaries) and
+      // a normal text hunk for math.js — never a thrown read error. The patch
+      // carries the text edit and NO error surfaces (non-empty prediction).
+      expect(r.patch).toContain("return a+b")
       expect(r.error).toBeUndefined()
     },
     RUN_INSTANCE_TIMEOUT_MS,
