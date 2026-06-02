@@ -47,6 +47,7 @@ import type { AgentConfig } from "@/agent/types"
 import { defaultVerifyCheckpointBridge } from "@/agent/verify-checkpoint-bridge"
 import type { LLMPort, Message, ToolUseBlock } from "@/llm"
 import { FoundryProviderAdapter } from "@/llm/providers/foundry-adapter"
+import { ProviderError } from "@/llm/providers/provider-port"
 import { passthroughMcpSandbox } from "@/mcp/skybridge/passthrough"
 import { resolveMcpSandbox } from "@/mcp/skybridge/registry"
 import {
@@ -477,7 +478,12 @@ describe("Plane 3 — Context", () => {
 
   test("P3-15: PlanQueueStore enqueue / drain", () => {
     const store = defaultPlanQueueStore()
-    const id = store.enqueue({
+    // ADR-0167: enqueue returns a typed `EnqueueResult` ({ id, collapsed }),
+    // NOT the bare id string it shipped with at slice-creation. The composition
+    // invariant is unchanged — enqueue assigns a stable id and drain replays it
+    // into the named turn — only the return shape widened so observability can
+    // see dedup collapses. Read `.id`/`.collapsed` off the typed result.
+    const res = store.enqueue({
       threadId: "T1",
       text: "do it",
       source: "user_keystroke",
@@ -486,10 +492,12 @@ describe("Plane 3 — Context", () => {
       urgent: false,
       metadata: {},
     })
-    expect(typeof id).toBe("string")
+    expect(typeof res.id).toBe("string")
+    expect(res.collapsed).toBe(false)
     expect(store.peek("T1").length).toBe(1)
     const drained = store.drain("T1", 4)
     expect(drained.length).toBe(1)
+    expect(drained[0]?.id).toBe(res.id)
     expect(drained[0]?.drainedIntoTurn).toBe(4)
     expect(store.peek("T1").length).toBe(0)
   })
@@ -583,33 +591,40 @@ describe("Plane 4 — Control / Security", () => {
     expect(joined).toContain("/workspace/abc")
   })
 
-  test("P4-23: Foundry adapter throws 'provider-unsupported' when SDK absent", async () => {
-    const provider = new FoundryProviderAdapter({
-      providerId: "foundry",
-      model: "claude-sonnet-4-6",
-      auth: { mode: "Azure AI Foundry" } as never,
-    })
+  test("P4-23: Foundry adapter surfaces a typed ProviderError on an unsatisfiable selection", () => {
+    // ADR-0172 graduated this adapter from a Phase-1 throw-only stub to a real
+    // stream. Two contract shifts the original case predates:
+    //   1. `@anthropic-ai/foundry-sdk@0.2.3` is now published, so the
+    //      "SDK absent → provider-unsupported" arm is GONE (a future uninstall
+    //      collapses to `provider-missing-dependency`, never `unsupported`).
+    //   2. The real impl validates the auth bundle EAGERLY in the constructor —
+    //      a config carrying neither `azureApiKey` nor `azureADTokenProvider`
+    //      is refused at selection time with `provider-misconfigured`, BEFORE
+    //      any stream is opened.
+    // The composition invariant this plane-4 case protects is unchanged: an
+    // unsatisfiable Foundry selection surfaces a TYPED `ProviderError` (the
+    // loop's classifier can route on `.code`), never an untyped throw and never
+    // a silently-yielded stream event. We pin that typed-failure shape against
+    // the exact auth-missing config the original case used.
     let threw: unknown
     try {
-      for await (const _ev of provider.stream({
+      // Construction itself is the selection gate — the adapter validates the
+      // auth bundle eagerly, so the throw lands here (not on a later stream).
+      void new FoundryProviderAdapter({
+        providerId: "foundry",
         model: "claude-sonnet-4-6",
-        messages: [],
-        signal: new AbortController().signal,
-      } as never)) {
-        // Should never reach here — adapter throws BEFORE yielding.
-        expect("yielded-event").toBe("never-reached")
-      }
+        auth: { mode: "Azure AI Foundry" } as never,
+      })
     } catch (e) {
       threw = e
     }
-    expect(threw).toBeDefined()
-    const msg = threw instanceof Error ? threw.message : String(threw)
-    expect(msg.length).toBeGreaterThan(0)
-    // The Phase-1 stub throws ProviderError("provider-unsupported"). The test
-    // asserts a typed provider-selection failure surfaced (not an untyped
-    // throw); the typed-code per-arm split is sealed in the adapter's own
-    // hellgate.
-    expect(/provider|foundry|unsupported/i.test(msg)).toBe(true)
+    expect(threw).toBeInstanceOf(ProviderError)
+    const err = threw as ProviderError
+    expect(err.providerId).toBe("foundry")
+    // Typed code per current contract — auth bundle absent ⇒ misconfigured.
+    expect(err.code).toBe("provider-misconfigured")
+    expect(err.message.length).toBeGreaterThan(0)
+    expect(/provider|foundry/i.test(err.message)).toBe(true)
   })
 })
 
