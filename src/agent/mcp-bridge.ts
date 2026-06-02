@@ -212,6 +212,15 @@ export const loadMcpTools = async (
       try {
         const defs = await sup.listTools()
         for (const def of defs) tools.push(mcpToolToToolSupervised(sup, def, config.name))
+        // KNOWN LIMITATION (ADR-0435 §follow-up): the ADR-0431 `tasks/*` surface
+        // is NOT bridged on the supervised path. `tasksToolsFor` binds a tasks
+        // handle to a CONCRETE `McpClient`; under auto-restart the live client is
+        // swapped, so a once-bound handle would go stale. Wiring a supervisor-aware
+        // tasks handle (re-bound on each restart, mirroring `mcpToolToToolSupervised`)
+        // is a follow-up. Until then, `QUANTA_MCP_AUTORESTART=1` + a tasks-advertising
+        // server ⇒ the `mcp_task_*` tools are absent (a server crash with a live
+        // tasks handle is the exact failure mode this guards against). Plain
+        // (non-supervised) servers keep full tasks support on the default path below.
         clients.push(sup)
       } catch (e) {
         logger.warn(`mcp: skipping server "${config.name}": ${errMessage(e)}`)

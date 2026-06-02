@@ -44,6 +44,18 @@ Default **fail-fast**: when not HEALTHY, `callTool` throws the same `mcp server 
 - The `Features.mcpClients` array widens from `McpClient[]` to `McpStoppable[]` (`{ stop }`); every downstream consumer already used the structural `{ stop }` shape, so this is type-compatible.
 - Non-goals (deliberate, RFC §3): no Electron-style process isolation, no remote dynamic config, no active health-probe polling, no dynamic tool re-registration. The first-load tool set is fixed at session start; a restart that drops a tool fails that call (server `-32601`) rather than mutating the registry.
 
+### Known limitation — ADR-0431 `tasks/*` on the supervised path (follow-up)
+
+The supervised load path (`QUANTA_MCP_AUTORESTART=1`) does NOT bridge the ADR-0431
+`tasks/*` surface. `tasksToolsFor` binds a tasks handle to a concrete `McpClient`;
+under auto-restart the live client is swapped behind the supervisor, so a once-bound
+handle would go stale. A supervisor-aware tasks handle (re-bound on each restart,
+mirroring `mcpToolToToolSupervised`) is the documented follow-up. Until then:
+supervised + a tasks-advertising server ⇒ `mcp_task_*` tools are absent; plain
+(non-supervised) servers keep full tasks support on the default path. Both
+`tasks/*` and auto-restart are independently default-OFF, so no current default
+configuration is affected.
+
 ## Evidence
 
 - Code: `src/mcp/reconnect/{policy,port,supervisor,index}.ts`, `src/mcp/{client,isolated-client,index}.ts`, `src/agent/mcp-bridge.ts`, `src/apps/cli/internal.ts`.
