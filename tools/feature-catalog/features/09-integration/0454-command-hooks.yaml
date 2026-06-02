@@ -1,0 +1,95 @@
+id: command-hooks
+title: Disk-configured command hooks (security-gated shell on HookBus events, ADR-0454)
+section: 9
+subsystem: HookBus shell-command executor
+order: 454
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: partial
+modes: [n-a]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:claude", "security-touched", "default-off", "held-promotion"]
+depends_on:
+  - hookbus
+  - hook-updated-input
+purpose: |
+  Adds the missing executor for Claude Code's settings.json#hooks model: a
+  closed-port CommandHookRunner that, on a matching HookBus event, runs the
+  configured shell command(s) ONE-SHOT through an injected spawn port, passing
+  the hook event payload as JSON on the child's stdin (Claude Code contract),
+  and maps exit code / stdout back to the HookBus deny / updatedInput channels.
+  The migration translator already PARSED these command hooks but only counted
+  them — this slice runs them.
+
+  SECURITY MODEL (security-touched): arbitrary user shell. Default-OFF, gated by
+  a strict funnel — opt-in toggle (enabled===true) + a non-empty acknowledgedRisk
+  string (mirrors redaction-disable ack; enabled without ack THROWS at config
+  time) + at least one binding + a permission decision (CommandHookPermissionPort,
+  consulted once per event). INJECTION-SAFE: the user command is the argv tail
+  verbatim, NEVER concatenated with the payload; the payload reaches the command
+  only as JSON on stdin. Confinement reuses LocalSandbox (scrubEnv env-allowlist,
+  timeout default 30s, output cap default 1MB, dotfile-skipping shell,
+  SIGTERM→SIGKILL escalation). Fail-closed: timeout ⇒ deny; exit≠0 ⇒ deny.
+
+  Reuses the sandbox (one-shot capture) NOT the plugin-isolation spawner — the
+  latter is a persistent READY-sentinel RPC duplex that rejects a one-shot
+  free-form-stdout child. Default-OFF byte-identical: disarmed gate ⇒ zero exec,
+  installCommandHooks registers no handlers.
+evidence:
+  code:
+    - src/agent/command-hooks/types.ts
+    - src/agent/command-hooks/gate.ts
+    - src/agent/command-hooks/settings-loader.ts
+    - src/agent/command-hooks/runner.ts
+    - src/agent/command-hooks/sandbox-exec.ts
+    - src/agent/command-hooks/install.ts
+    - src/agent/command-hooks/index.ts
+  adrs:
+    - docs/decisions/0454-command-hooks.md
+  tests:
+    unit:
+      - tests/unit/command-hooks-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: CommandHookConfig.enabled
+    type: 'boolean?'
+    default: 'false'
+    notes: 'Master opt-in. Strict === true. Default-OFF.'
+  - name: CommandHookConfig.acknowledgedRisk
+    type: 'string?'
+    default: 'unset'
+    notes: 'Required non-empty string when enabled; enabled without it throws CommandHookConfigError at config time.'
+  - name: CommandHookConfig.timeoutMs
+    type: 'number?'
+    default: '30000'
+    notes: 'Per-command wall-clock budget. Timeout ⇒ fail-closed deny.'
+  - name: CommandHookConfig.maxOutputBytes
+    type: 'number?'
+    default: '1048576'
+    notes: 'Per-command combined stdout/stderr byte cap.'
+  - name: CommandHookConfig.envAllowlist
+    type: 'string[]?'
+    default: 'DEFAULT_ENV_ALLOWLIST'
+    notes: 'Env names allowed through to the child (reuses sandbox scrubEnv source of truth).'
+deliberate_hold:
+  reason: |
+    Root wiring (host reads enabled/ack from settings/env and calls
+    installCommandHooks) is intentionally deferred to a composition-root ADR —
+    the slice stays default-OFF until armed, matching the seam-first absorption
+    pattern. Also held: a DockerSandbox-backed CommandHookExecPort for TRUE OS
+    isolation (clean future swap, the port is closed).
+  promotion_path: |
+    Composition-root ADR reads CommandHookConfig from settings.json + an opt-in
+    env knob, calls normalizeCommandHookGate + loadCommandHookBindings, wires a
+    CommandHookPermissionPort to the permission store, and calls
+    installCommandHooks(bus, gate, deps) with createSandboxCommandHookExec().
+    OS-isolation upgrade: swap the exec port to a DockerSandbox-backed adapter.
+notes: |
+  Mirrors src/security/redaction-config.ts acknowledgement pattern, inverted
+  (the dangerous direction here is turning execution ON). Sealed by 25 hellgate
+  cases incl. injection-safety (a $(rm -rf /) payload never enters the command
+  string), permission refusal, opt-in/ack enforcement, and default-OFF
+  byte-identical.

@@ -20,6 +20,29 @@ export {
   type TaskBudget,
   type TickKind,
 } from "./budget"
+export {
+  type CommandHookBinding,
+  type CommandHookConfig,
+  type CommandHookDeps,
+  type CommandHookEvent,
+  type CommandHookExecOpts,
+  type CommandHookExecPort,
+  type CommandHookExecResult,
+  type CommandHookGate,
+  type CommandHookPermissionPort,
+  type CommandHookVerdict,
+  COMMAND_HOOKS_ENABLED_WITHOUT_ACK_MESSAGE,
+  CommandHookConfigError,
+  createSandboxCommandHookExec,
+  DEFAULT_COMMAND_HOOK_MAX_OUTPUT_BYTES,
+  DEFAULT_COMMAND_HOOK_TIMEOUT_MS,
+  installCommandHooks,
+  loadCommandHookBindings,
+  mapClaudeEvent,
+  normalizeCommandHookGate,
+  parseCommandHookBindings,
+  runCommandHooks,
+} from "./command-hooks"
 export { compactIfNeeded, estimateTokens, findBoundary } from "./compaction"
 export {
   type BreakerVerdict,
