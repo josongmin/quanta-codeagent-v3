@@ -71,15 +71,116 @@
  * When none are set the seed is byte-identical to `req.prompt`.
  */
 
-import type { Message } from "@/llm"
+import type { LLMPort, Message } from "@/llm"
+import type { Role } from "@/llm/role-model-override"
 import { isGitRepo, withWorktree } from "@/runtime"
+import { QuantaError } from "@/shared"
 import { SubagentTurnGate, type TurnWakeRegistry } from "@/subagent"
 import { ToolRegistry } from "@/tool"
 import type { SubagentRequest, SubagentResult, SubagentRunner } from "../subagent/types"
+import { type EffortLevel, parseEffort } from "./effort"
 import { runAgent } from "./loop"
 import type { AgentConfig, AgentOutcome } from "./types"
 
 const DEFAULT_MAX_DEPTH = 3
+
+/**
+ * ADR-0451 — raised when a child subagent requested a model id (explicitly via
+ * `req.model`, or indirectly because its `req.role` resolved to a non-parent
+ * model) that has NO matching entry in the parent's `modelCandidates`. This is
+ * the FAIL-CLOSED guard: rather than silently running the child on the wrong
+ * model (the parent's), the spawn aborts so the parent learns its delegation
+ * intent could not be honored. A {@link QuantaError} subclass so the host's
+ * typed-error union holds. The `createSubagentRunner` catch turns this into a
+ * non-ok {@link SubagentResult} (recoverable tool_result), never a crash.
+ */
+export class UnknownSubagentModelError extends QuantaError {
+  constructor(modelId: string, source: "model" | "role") {
+    super(
+      "unknown_subagent_model",
+      source === "model"
+        ? `requested subagent model "${modelId}" is not an enabled candidate (modelCandidates); ` +
+            `cannot honor the model override (fail-closed, no silent fallback)`
+        : `role resolved to model "${modelId}" which is not an enabled candidate (modelCandidates); ` +
+            `cannot honor the role override (fail-closed, no silent fallback)`,
+    )
+  }
+}
+
+/**
+ * ADR-0451 — resolve the child's effective LLM port from the model/role
+ * override on the request. Precedence (highest first):
+ *
+ *   1. explicit `req.model`  — swap to the candidate with that id
+ *   2. `req.role`            — `roleModelResolver.resolve(role, parentModel)`,
+ *                              then swap to the candidate with the resolved id
+ *                              (a role that falls through to the parent model ⇒
+ *                              no swap)
+ *   3. neither               — `parent.llm` verbatim (byte-identical default)
+ *
+ * The swap REUSES the exact id→port mechanism the loop's skill-model-swap uses
+ * (`resolveSkillTurnOverride` in `loop.ts`: `config.modelCandidates.find(c =>
+ * c.id === id).port`). The ONLY behavioural difference from the skill path is
+ * fail-closed: the skill path leaves `config.llm` untouched on an unknown id
+ * (advisory degrade), whereas a subagent override THROWS
+ * {@link UnknownSubagentModelError} — a misrouted delegation must not run on the
+ * wrong model. A role that resolves back to the parent's own model id is NOT an
+ * override (no candidate lookup, no throw): the child stays on `parent.llm`.
+ *
+ * Pure: no clock, no IO. `parent.modelCandidates` absent ⇒ any explicit model /
+ * role-resolved-non-parent model fails closed (no registry to swap through).
+ */
+const resolveChildLlm = (parent: AgentConfig, req: SubagentRequest): LLMPort => {
+  const parentModel = parent.llm.model
+  // Explicit model id wins over role.
+  if (req.model !== undefined && req.model.length > 0) {
+    return swapToCandidate(parent, req.model, "model")
+  }
+  // Role-resolved model. The resolver's port contract takes an arbitrary string
+  // and falls through to `defaultModel` for unknown roles (no throw). We pass
+  // the parent's model id as the default so a role with no override resolves to
+  // it ⇒ no swap.
+  if (req.role !== undefined && req.role.length > 0 && parent.roleModelResolver !== undefined) {
+    // The resolver's port documents that it accepts an arbitrary string at a
+    // type-erased boundary (JSON-RPC / tool input) and falls through for unknown
+    // roles; the `as Role` cast reflects that contract (no runtime narrowing).
+    const resolved = parent.roleModelResolver.resolve(req.role as Role, parentModel ?? "")
+    // Resolved to the parent's own model (or default fell through to "") ⇒ not
+    // an override; keep parent.llm (byte-identical, no candidate lookup).
+    if (resolved.length === 0 || resolved === parentModel) return parent.llm
+    return swapToCandidate(parent, resolved, "role")
+  }
+  return parent.llm
+}
+
+/** Swap to the `modelCandidates` entry whose id matches `modelId`, or fail
+ *  closed via {@link UnknownSubagentModelError}. This is the SAME lookup shape
+ *  as `loop.ts`'s skill-model-swap (`modelCandidates.find(c => c.id === id)`),
+ *  but raises instead of degrading silently. */
+const swapToCandidate = (
+  parent: AgentConfig,
+  modelId: string,
+  source: "model" | "role",
+): LLMPort => {
+  const match = parent.modelCandidates?.find((c) => c.id === modelId)
+  if (match === undefined) throw new UnknownSubagentModelError(modelId, source)
+  return match.port
+}
+
+/** ADR-0451 — derive the child's `sessionEffort` thunk from `req.effort`. Reuses
+ *  the loop's per-turn effort seam (`AgentConfig.sessionEffort`): the child loop
+ *  reads it each turn and `resolveSkillTurnOverride` maps the named tier to a
+ *  thinking budget via `effortToTokenBudget`. Only a RECOGNISED named tier votes
+ *  (`parseEffort` returns `undefined` for anything else) — an unparseable string
+ *  defers to the parent's effort, mirroring `resolveEffort`'s numeric-advisory
+ *  rule. Returns `undefined` (no thunk wired ⇒ child inherits the parent's
+ *  effort source, byte-identical) when no recognised tier is present. */
+const resolveChildEffort = (req: SubagentRequest): (() => EffortLevel | undefined) | undefined => {
+  if (req.effort === undefined) return undefined
+  const level = parseEffort(req.effort)
+  if (level === undefined) return undefined
+  return () => level
+}
 
 /** Internal seam: tests inject a fake `runAgent` / git probes so the runner is
  *  unit-testable without a real LLM or a real git repo. Defaults are the real
@@ -276,11 +377,19 @@ const buildChildConfig = (
     toolNamespace !== undefined
       ? namespaceRegistry(filtered, toolNamespace, mailboxIds.agentId)
       : filtered
+  // ADR-0451 — resolve the child's effective LLM port (explicit model > role >
+  // parent) and optional effort thunk. With NO override on the request these
+  // collapse to `parent.llm` and `undefined` (no sessionEffort wired) — the
+  // exact pre-ADR-0451 child config (byte-identical). A bad model id throws
+  // UnknownSubagentModelError here (fail-closed); the runner's catch turns it
+  // into a non-ok SubagentResult.
+  const childLlm = resolveChildLlm(parent, req)
+  const childEffort = resolveChildEffort(req)
   // Shallow clone, then strip the inheritance-unsafe keys. We rebuild the
   // object explicitly (rather than `delete`) to satisfy
   // exactOptionalPropertyTypes: omit keys entirely, never assign `undefined`.
   const child: AgentConfig = {
-    llm: parent.llm,
+    llm: childLlm,
     registry: childRegistry,
     stream: parent.stream,
     permission: parent.permission,
@@ -316,6 +425,12 @@ const buildChildConfig = (
     // trigger another turn. Absent ⇒ the child finishes immediately on
     // completion (byte-identical legacy / no-followup path).
     ...(turnGate !== undefined ? { subagentTurnGate: turnGate } : {}),
+    // ADR-0451 — the child's effort source. Wired ONLY when `req.effort` named a
+    // recognised tier; the child loop reads this each turn and caps its thinking
+    // budget via `effortToTokenBudget` (the SAME seam as `sessionEffort`/skill
+    // effort). Absent ⇒ omitted, so the child has no session-effort source
+    // exactly as before (byte-identical no-override path).
+    ...(childEffort !== undefined ? { sessionEffort: childEffort } : {}),
     // Kept (safe to share, no parent-state mutation):
     ...(parent.onConfirm ? { onConfirm: parent.onConfirm } : {}),
     ...(parent.embedder ? { embedder: parent.embedder } : {}),

@@ -87,6 +87,37 @@ export interface SubagentRequest {
    *  ⇒ no checkpoint guidance (byte-identical for callers that don't opt
    *  in). */
   checkpointPath?: string
+  /** ADR-0451 (Cursor `SubagentModelOverride`) — EXPLICIT model id the child
+   *  loop should run against. The agent-side runner resolves this by swapping
+   *  the child's LLM port to the matching `AgentConfig.modelCandidates` entry
+   *  (the SAME id→port mechanism the loop's skill-model-swap uses). Highest
+   *  precedence: an explicit `model` beats a `role`-resolved model and the
+   *  parent's model. FAIL-CLOSED — an id with no matching candidate aborts the
+   *  spawn with a typed error (no silent fallback to the wrong model). The
+   *  slice itself does NOT validate the id (it owns no model registry — slice
+   *  isolation: `@/subagent` may only reach `@/tool`/`@/shared`); validation +
+   *  swap happen agent-side. Absent ⇒ child = parent.llm (byte-identical). */
+  model?: string
+  /** ADR-0451 — dispatched ROLE the child should be assigned (Roo Code
+   *  orchestrator per-role model axis, ADR-0256). The agent-side runner feeds
+   *  this string to `AgentConfig.roleModelResolver.resolve(role, parentModel)`
+   *  to derive the effective model id, then swaps the child's LLM port as for
+   *  `model`. Lower precedence than an explicit `model`. A free string (the
+   *  slice owns no `Role` enum — the resolver's port contract accepts arbitrary
+   *  strings and falls through to the parent model for unknown roles). When the
+   *  resolver yields a non-parent model id that is NOT a candidate, the spawn
+   *  fails closed. Absent (or resolves to the parent model) ⇒ child =
+   *  parent.llm (byte-identical). */
+  role?: string
+  /** ADR-0451 — EFFORT tier the child loop should run at. A named tier
+   *  (`"default" | "low" | "medium" | "high" | "max"`) caps the child's
+   *  thinking budget via the SAME `sessionEffort()` seam the parent loop reads
+   *  per turn (`effortToTokenBudget`). The slice keeps the field a `string`
+   *  (it owns no `EffortLevel` enum); the agent-side runner parses it and only
+   *  a recognised named tier votes — an unrecognised string is ignored (defers
+   *  to the parent's effort, mirroring `resolveEffort`'s numeric-advisory
+   *  rule). Absent ⇒ child inherits the parent's effort (byte-identical). */
+  effort?: string
 }
 
 export interface SubagentResult {
