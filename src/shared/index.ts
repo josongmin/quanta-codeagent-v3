@@ -93,3 +93,4 @@ export type {
 } from "./turn-policy-types"
 export type { HITLTier, Id, Result } from "./types"
 export { ALL_HITL_TIERS, err, ok } from "./types"
+export { embedUntrusted, escapeBoundary } from "./untrusted"

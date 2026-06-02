@@ -249,6 +249,26 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
     slice: "runner",
     denyImports: ["@/rules", "@/patch", "@/migration"],
     includeBackupArtifacts: true,
+    // Documented env-resolution boundary (mirror of the `tool` slice's
+    // `runner.ts`/`from-env.ts` precedent). These are the bench-surface
+    // entrypoint + env-knob seams of `@/runner`, each of which resolves
+    // env-driven posture AT CALL TIME by design (so tests can mutate
+    // `process.env` without re-importing):
+    //   • `core.ts` / `driver.ts` — the `agent:batch` / SWE-bench eval
+    //     harness whose `collectBenchKnobsTelemetry` + per-instance knob
+    //     resolution read the `QUANTA_BENCH_*` knob env directly (the
+    //     bench surface IS the composition root for these knobs).
+    //   • `dataset.ts` — the official SWE-bench adapter's `defaultExec`
+    //     passes `env: process.env` straight into `Bun.spawn` (git child
+    //     processes inherit the ambient environment, never a param).
+    //   • `diff-ops.ts` — `resolveEnvCaps()` reads `QUANTA_DIFF_MAX_*` at
+    //     call time so the cap is hot-swappable in tests; the value is the
+    //     documented default, never threaded through every diff call site.
+    //   • `registry.ts` — `NODE_ENV === "production"` is a test-only
+    //     reset/restore guard, not configurable posture.
+    // These four leaf names are unique within the slice, so the carve-out
+    // exempts exactly these files.
+    envAllowFiles: ["core.ts", "driver.ts", "dataset.ts", "diff-ops.ts", "registry.ts"],
     requireSubSliceBarrels: ["assemble/index.ts", "orchestrate/index.ts", "session-ops/index.ts"],
   },
   ipc: {

@@ -6,12 +6,14 @@
  * routes page-derived text through `escapeReminderBoundary` (strengthen #3) so a
  * malicious page cannot forge a `<system-reminder>` boundary in tool output.
  *
- * `escapeBoundary` is imported from the leaf `@/agent/untrusted` (zero imports →
- * no cross-plane cycle).
+ * `escapeBoundary` is imported from the base utility slice `@/shared` (the
+ * primitive is a zero-dependency pure string escaper — it lives in `@/shared`
+ * so both `@/agent` and `@/tool` can consume it without `@/tool` crossing the
+ * slice-boundary fence into `@/agent`).
  */
 
-import { escapeBoundary } from "@/agent/untrusted"
 import type { BrowserError } from "@/browser"
+import { escapeBoundary } from "@/shared"
 import type { ToolResult } from "@/tool"
 
 /** Neutralize any `<system-reminder>` boundary tokens in page-derived text. */
