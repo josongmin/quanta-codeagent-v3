@@ -131,4 +131,17 @@ export interface BranchSearchConfig {
   readonly timeoutPerBranchMs: number
   readonly weights?: Partial<Record<VerifierKind, number>>
   readonly isolation: "worktree" | "tmpdir"
+  /** ADR-0433 adversarial multi-voter — when set, the `branch_search` tool
+   *  builds N refute-biased voters (from the injected base `LLMPort`) and
+   *  appends ONE additive `llm_voter_quorum` signal per candidate. Absent ⇒
+   *  no voter signal is produced, so the scorer never reads the
+   *  `llm_voter_quorum` weight and the candidate score is byte-identical to
+   *  pre-ADR-0433. The `multi-voter` knob (`QUANTA_MULTI_VOTER`) sets this. */
+  readonly voterQuorum?: {
+    /** Number of independent voters to fan out per candidate (≥ 1). */
+    readonly voters: number
+    /** Pass-fraction needed for the aggregate to PASS. Absent ⇒ strict
+     *  majority (refute bias). When set MUST satisfy `0 < quorum ≤ 1`. */
+    readonly quorum?: number
+  }
 }

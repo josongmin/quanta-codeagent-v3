@@ -59,6 +59,14 @@ export interface BranchSearchToolDeps {
    *  registration, no measurement, byte-identical legacy behaviour
    *  (`delta` OMITTED on every emitted `BranchCandidate`). */
   readonly anchor?: BranchSearchAnchor
+  /** ADR-0433 adversarial multi-voter seam — when wired (by the assembly when
+   *  `config.voterQuorum` is set), this factory builds a per-task `Verifier`
+   *  that fans out to N refute-biased voters and appends ONE additive
+   *  `llm_voter_quorum` signal per candidate. INJECTED (not imported here) so
+   *  `branch-search/` never imports `@/agent/multi-voter` — the binder
+   *  (`branch-search-runner.ts`) joins the two slices. Absent ⇒ no voter
+   *  signal, byte-identical scoring (default-OFF). */
+  readonly voterVerifierForTask?: (task: string) => Verifier
 }
 
 const inputSchema = z.object({
@@ -158,6 +166,15 @@ export const branchSearchTool = (deps: BranchSearchToolDeps): Tool<Input> => ({
     // ordering when callers already requested it explicitly.
     const kinds: Array<Exclude<VerifierKind, "llm_judge">> = [...requested]
     if (deps.anchor !== undefined && !kinds.includes("patch_size")) kinds.push("patch_size")
+    // ADR-0433: when the multi-voter seam is wired, compose the per-task voter
+    // verifier ALONGSIDE the kind verifiers so each candidate also gets the
+    // additive `llm_voter_quorum` signal. Absent the seam, `verifier` is the
+    // kind pipeline verbatim (byte-identical scoring).
+    const kindVerifier = buildVerifier(kinds, deps)
+    const verifier: Verifier =
+      deps.voterVerifierForTask !== undefined
+        ? combineVerifiers(kindVerifier, deps.voterVerifierForTask(input.task_description))
+        : kindVerifier
     // Default selector wraps argmax with minimal-change tiebreak: when two or
     // more candidates tie on `score.total`, prefer the smallest `delta`
     // (added+removed). Pure tiebreak — single-winner cases are unchanged.
@@ -169,7 +186,7 @@ export const branchSearchTool = (deps: BranchSearchToolDeps): Tool<Input> => ({
         baseLlm: deps.baseLlm,
         task: input.task_description,
         timeoutPerBranchMs: deps.config.timeoutPerBranchMs,
-        verifier: buildVerifier(kinds, deps),
+        verifier,
         scorer: makeScorer(deps.config.weights),
         selector: minimalChangeSelector(),
         isolator: deps.buildIsolator(),

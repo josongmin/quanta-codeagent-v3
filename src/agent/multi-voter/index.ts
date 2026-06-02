@@ -3,7 +3,7 @@
  * refute-biased voters aggregated by quorum, an additive `llm_voter_quorum`
  * branch-search signal, and a per-surface `VerifierSkillSpec` + generator stub.
  */
-export { voterQuorumSignal } from "./signal"
+export { voterQuorumSignal, voterQuorumVerifier } from "./signal"
 export { generateVerifierSkill, type VerifierSkillSpec, type VerifierSurface } from "./skill-spec"
 export type {
   MultiVoterRequest,

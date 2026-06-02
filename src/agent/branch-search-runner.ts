@@ -20,9 +20,11 @@ import {
   type RunCandidate,
   shadowOdbAnchor,
   tmpdirIsolator,
+  type Verifier,
   worktreeIsolator,
 } from "./branch-search"
 import { runAgent } from "./loop"
+import { voterQuorumVerifier } from "./multi-voter"
 import type { AgentConfig } from "./types"
 
 /** Build a candidate-scoped `runAgent` fork. Each candidate runs in its own
@@ -86,6 +88,26 @@ const buildBranchProgressTrace = (
   }
 }
 
+/** ADR-0433 — when `config.branchSearch.voterQuorum` is set, build the per-task
+ *  factory that produces an adversarial-multi-voter `Verifier` from the session
+ *  base `LLMPort`. Each candidate then gets ONE additive `llm_voter_quorum`
+ *  signal. Returns `undefined` when unset (default-OFF: no voter verifier wired,
+ *  byte-identical scoring). The branch-search slice never imports
+ *  `@/agent/multi-voter`; this binder joins the two slices. */
+const buildVoterVerifierForTask = (
+  config: AgentConfig,
+): ((task: string) => Verifier) | undefined => {
+  const vq = config.branchSearch?.voterQuorum
+  if (vq === undefined) return undefined
+  return (task: string) =>
+    voterQuorumVerifier({
+      llm: config.llm,
+      task,
+      voters: vq.voters,
+      ...(vq.quorum !== undefined ? { quorum: vq.quorum } : {}),
+    })
+}
+
 /** Construct the `branch_search` tool for a session, or `undefined` when
  *  `config.branchSearch` is unset (default-OFF — caller skips registration).
  *  `buildSessionFeatures` pushes the returned tool into `extraTools`. */
@@ -94,6 +116,7 @@ export const buildBranchSearchTool = (config: AgentConfig): Tool | undefined => 
   if (bs === undefined) return undefined
   const anchor = buildBranchSearchAnchor(config)
   const onTrace = buildBranchProgressTrace(config)
+  const voterVerifierForTask = buildVoterVerifierForTask(config)
   return branchSearchTool({
     config: bs,
     runCandidate: bindBranchRunCandidate(config),
@@ -102,5 +125,6 @@ export const buildBranchSearchTool = (config: AgentConfig): Tool | undefined => 
     ...(config.modelCandidates ? { modelCandidates: config.modelCandidates } : {}),
     ...(anchor ? { anchor } : {}),
     ...(onTrace ? { onTrace } : {}),
+    ...(voterVerifierForTask ? { voterVerifierForTask } : {}),
   }) as Tool
 }

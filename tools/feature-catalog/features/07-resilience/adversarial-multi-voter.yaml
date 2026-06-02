@@ -1,0 +1,51 @@
+id: adversarial-multi-voter
+title: Adversarial multi-voter verification (refute-biased quorum)
+section: 7
+subsystem: 적대적 멀티-보터 검증 (ADR-0433, Agentless §4.2 sample-and-vote)
+order: 22
+maturity: L3
+status: new
+ui_surfaces: [cli, api]
+monitoring: n-a
+modes: [batch, interactive, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:resilience", "tier:1", "absorbed:agentless", "absorbed:claude-init-verifiers"]
+depends_on: [speculative-branch-search]
+purpose: |
+  후보 fix/claim을 N개 독립 refute-biased 보터(각자 LLMPort)로 검증 → quorum 규칙으로
+  단일 verdict 집계. 보터는 "반증하라 + 불확실하면 FAIL" 시스템 프롬프트로 편향되고,
+  throw·unparseable 출력은 refute로 카운트해 fail-closed. quorum은 깨끗한 규칙(휴리스틱
+  threshold 아님): absent ⇒ 결정적 strict-majority(passVotes*2 > N, tie fail-closed),
+  explicit ⇒ passVotes/N >= q. 집계 결과는 branch-search 스코어러에 ADDITIVE
+  `llm_voter_quorum` 신호(magnitude=pass-fraction)로 합류. DEFAULT-OFF: 보터 신호가
+  명시적으로 합성되지 않으면 스코어러는 새 weight를 읽지 않아 점수가 byte-identical.
+  per-surface VerifierSkillSpec(cli/api/playwright) + SKILL.md 생성 stub로
+  Claude init-verifiers parity.
+evidence:
+  code:
+    - src/agent/multi-voter/voter.ts
+    - src/agent/multi-voter/signal.ts
+    - src/agent/multi-voter/skill-spec.ts
+    - src/agent/multi-voter/types.ts
+    - src/agent/multi-voter/index.ts
+    - src/agent/branch-search-runner.ts
+    - src/runner/knobs/knobs/multi-voter.ts
+  adrs: ["docs/decisions/0433-adversarial-multi-voter-verify.md"]
+  tests:
+    unit:
+      - tests/unit/multi-voter-hellgate.test.ts
+      - tests/unit/multi-voter-quorum-boundary-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: ["multi-voter"]
+deliberate_hold: null
+notes: |
+  Knob `multi-voter` (env QUANTA_MULTI_VOTER, format `<voters>` or
+  `<voters>:<quorum>`) wires `voterQuorum` into `AgentConfig.branchSearch`;
+  `branch-search-runner` builds the per-task voter Verifier from the session
+  base LLMPort and `branch_search`'s tool composes it ALONGSIDE the tsc/test/
+  lint pipeline. Requires branch-search active (knob `requires: branch-search`).
+
+  Quorum is a quorum RULE, not a tuned threshold — no scaling, no learned cut.
+  Absent env ⇒ no voter signal ⇒ branch-search scoring byte-identical.
