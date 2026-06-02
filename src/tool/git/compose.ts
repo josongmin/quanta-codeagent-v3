@@ -87,17 +87,34 @@ interface ScopeTally {
   lines: number
 }
 
-/** Extract the post-image path from a unified-diff `diff --git a/… b/…` or
- *  `+++ b/…` header. Returns null for `/dev/null` (pure deletion → use the
- *  pre-image instead) and for malformed headers. */
+/** Un-quote a git diff path. git wraps a path with spaces / non-ASCII / control
+ *  chars in double quotes and C-escapes the interior (`\"`, `\\`, octal `\NNN`,
+ *  `\t` …). When quoted, strip the quotes and unescape so `pathToScope` sees the
+ *  real path; a non-quoted path is returned verbatim. */
+const unquoteGitPath = (p: string): string => {
+  if (!(p.startsWith('"') && p.endsWith('"') && p.length >= 2)) return p
+  return p
+    .slice(1, -1)
+    .replace(/\\([0-7]{1,3}|.)/g, (_m, esc: string) =>
+      /^[0-7]{1,3}$/.test(esc) ? String.fromCharCode(Number.parseInt(esc, 8)) : esc,
+    )
+}
+
+/** Extract the post-image path from a unified-diff `+++ b/…` / `--- a/…`
+ *  header. Returns null for `/dev/null` (pure deletion on the `+++` side → the
+ *  caller falls back to the pre-image) and for malformed headers. Git-quoted
+ *  paths are unquoted so scope inference works for spaced/unicode filenames. */
 const pathFromHeader = (line: string): string | null => {
+  // Unquote FIRST (git quotes the whole `"b/path with space"`), THEN strip the
+  // `a/`/`b/` prefix — doing it the other way leaves the quote at index 0 so the
+  // prefix never matches.
   if (line.startsWith("+++ ")) {
-    const p = line.slice(4).trim()
+    const p = unquoteGitPath(line.slice(4).trim())
     if (p === "/dev/null") return null
     return p.startsWith("b/") ? p.slice(2) : p
   }
   if (line.startsWith("--- ")) {
-    const p = line.slice(4).trim()
+    const p = unquoteGitPath(line.slice(4).trim())
     if (p === "/dev/null") return null
     return p.startsWith("a/") ? p.slice(2) : p
   }
@@ -131,18 +148,41 @@ interface ScanState {
   fileLines: Map<string, number>
 }
 
+/** Register `path` as touched (idempotent; count starts at 0). */
+const registerFile = (s: ScanState, path: string): void => {
+  if (!s.fileLines.has(path)) s.fileLines.set(path, 0)
+}
+
+/** Handle the authoritative post-image `+++` header. A valid `b/new` path
+ *  overwrites the cursor + registers (so a rename's `--- a/old` candidate is
+ *  discarded → counted ONCE). `+++ /dev/null` (deletion) keeps + registers the
+ *  prior `--- a/old` cursor so the deleted file's lines still attribute. */
+const scanPostImage = (s: ScanState, raw: string): void => {
+  const p = pathFromHeader(raw)
+  if (p !== null) {
+    s.current = p
+    registerFile(s, p)
+  } else if (s.current !== null) {
+    registerFile(s, s.current)
+  }
+}
+
 /** Advance the scan by one diff line. */
 const scanLine = (s: ScanState, raw: string): void => {
   if (raw.startsWith("diff --git ")) {
     s.current = null // section boundary; the +++ header resolves the real path
     return
   }
-  if (raw.startsWith("--- ") || raw.startsWith("+++ ")) {
+  // `--- a/old` is only a FALLBACK cursor (for a deletion whose `+++` is
+  // `/dev/null`): it sets `current` but does NOT register, so a rename
+  // (`--- a/old` then `+++ b/new`) is never double-counted.
+  if (raw.startsWith("--- ")) {
     const p = pathFromHeader(raw)
-    if (p !== null) {
-      s.current = p
-      if (!s.fileLines.has(p)) s.fileLines.set(p, 0)
-    }
+    if (p !== null) s.current = p
+    return
+  }
+  if (raw.startsWith("+++ ")) {
+    scanPostImage(s, raw)
     return
   }
   if (s.current !== null && isChangedBodyLine(raw)) {

@@ -383,6 +383,56 @@ describe("diffToScopes (pure, deterministic)", () => {
     expect(diffToScopes("")).toEqual([])
   })
 
+  test("git-quoted paths (spaces / unicode) are unquoted → correct scope", () => {
+    // git wraps spaced/non-ASCII paths in double quotes + C-escapes the interior.
+    const spaced = [
+      'diff --git "a/src/auth/log in.ts" "b/src/auth/log in.ts"',
+      '--- "a/src/auth/log in.ts"',
+      '+++ "b/src/auth/log in.ts"',
+      "@@ -1 +1 @@",
+      "+x",
+    ].join("\n")
+    expect(diffToScopes(spaced)).toEqual(["auth"])
+    // octal-escaped unicode segment (e.g. "한글") still resolves the parent scope.
+    const uni = [
+      '--- "a/src/ui/\\355\\225\\234.ts"',
+      '+++ "b/src/ui/\\355\\225\\234.ts"',
+      "@@ -1 +1 @@",
+      "+x",
+    ].join("\n")
+    expect(diffToScopes(uni)).toEqual(["ui"])
+  })
+
+  test("rename is counted ONCE, not double (old + new path)", () => {
+    // A rename within one module must not inflate that module's file count.
+    const rename = [
+      "diff --git a/src/auth/old.ts b/src/auth/new.ts",
+      "similarity index 95%",
+      "rename from src/auth/old.ts",
+      "rename to src/auth/new.ts",
+      "--- a/src/auth/old.ts",
+      "+++ b/src/auth/new.ts",
+      "@@ -1 +1 @@",
+      "+x",
+    ].join("\n")
+    // auth = 1 file (the rename), ui = 1 file → tie on files; auth wins alpha.
+    const diff = [rename, fileSection("src/ui/c.ts")].join("\n")
+    // If the old path were double-counted, auth would show 2 files and rank
+    // ABOVE ui unconditionally; with single-count it's a files-tie → alpha order.
+    expect(diffToScopes(diff)).toEqual(["auth", "ui"])
+  })
+
+  test("pure deletion (+++ /dev/null) still attributes via the --- pre-image", () => {
+    const del = [
+      "diff --git a/src/db/gone.ts b/src/db/gone.ts",
+      "--- a/src/db/gone.ts",
+      "+++ /dev/null",
+      "@@ -1 +0 @@",
+      "-x",
+    ].join("\n")
+    expect(diffToScopes(del)).toEqual(["db"])
+  })
+
   test("src/<seg>, packages/<seg>, apps/<seg> → first segment under the root", () => {
     expect(diffToScopes(fileSection("src/auth/login.ts"))).toEqual(["auth"])
     expect(diffToScopes(fileSection("packages/db/client.ts"))).toEqual(["db"])

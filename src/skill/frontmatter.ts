@@ -106,7 +106,10 @@ const tryNestedMapEntry = (
   const seed = data[pendingKey]
   if (!Array.isArray(seed) || seed.length > 0) return false
   // Indented `child: scalar` (NOT a `- ` list item — that path is handled first).
-  const child = line.match(/^\s+([A-Za-z0-9_-]+)\s*:\s*(.+)$/)
+  // Key regex requires a LEADING LETTER to match the strict schema's key shape
+  // (skill-frontmatter.ts) — keeps lenient discovery + strict validation from
+  // diverging on odd keys like `-foo:` (lenient must not accept what strict rejects).
+  const child = line.match(/^\s+([A-Za-z][A-Za-z0-9_-]*)\s*:\s*(.+)$/)
   if (!child) return false
   const childKey = child[1] ?? ""
   const childVal = (child[2] ?? "").trim()
@@ -135,7 +138,9 @@ const applyFrontmatterLine = (line: string, data: FrontmatterData, state: LineSt
   // ADR-0457: indented `child: scalar` under an empty-value parent ⇒ nested map.
   if (tryNestedMapEntry(line, data, state.pendingKey)) return state
 
-  const kv = line.match(/^([A-Za-z0-9_-]+)\s*:\s*(.*)$/)
+  // Leading-letter key shape, aligned with the strict schema (see child regex
+  // above) so lenient discovery never accepts a key strict validation rejects.
+  const kv = line.match(/^([A-Za-z][A-Za-z0-9_-]*)\s*:\s*(.*)$/)
   if (!kv) return state
   const key = kv[1] ?? ""
   const rawValue = (kv[2] ?? "").trim()

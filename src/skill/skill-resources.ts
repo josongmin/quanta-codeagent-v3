@@ -25,6 +25,7 @@
  */
 import { readdir, readFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { checkSkillSize } from "./skill-size"
 import type { SkillAgentInterface, SkillResources } from "./types"
 
 /** The four codex resource subdirs. `agents` is parsed; the rest are listed. */
@@ -90,10 +91,16 @@ export const parseOpenaiYamlInterface = (text: string): SkillAgentInterface | un
   return Object.keys(out).length > 0 ? (out as SkillAgentInterface) : undefined
 }
 
-/** Read + parse `agents/openai.yaml`'s interface block; undefined on any error. */
+/** Read + parse `agents/openai.yaml`'s interface block; undefined on any error.
+ *  The read is size-bounded by the SAME `checkSkillSize` cap discovery uses for
+ *  SKILL.md — an oversized/garbage `agents/openai.yaml` (e.g. an auto-fetched
+ *  untrusted skill) is skipped, not slurped into the heap (OOM/DoS guard). */
 const readAgentsInterface = async (skillDir: string): Promise<SkillAgentInterface | undefined> => {
   try {
-    const raw = await readFile(join(skillDir, "agents", "openai.yaml"), "utf8")
+    const path = join(skillDir, "agents", "openai.yaml")
+    const sized = await checkSkillSize(path)
+    if (!sized.ok) return undefined // absent, oversized, or unstattable ⇒ skip
+    const raw = await readFile(path, "utf8")
     return parseOpenaiYamlInterface(raw)
   } catch {
     // Missing file is the common case; a malformed/unreadable one is swallowed
