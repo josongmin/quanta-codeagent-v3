@@ -144,9 +144,16 @@ describe("bench env-prep (T4)", () => {
     }
     const llm = new SpyLLM()
     const result = await runInstance(instance, { ...DEPS, llm })
-    expect(result.verdict).toBeUndefined()
-    expect(result.error).toBeUndefined()
+    // The KEY pin for THIS test is that env-prep is a no-op and the agent IS
+    // invoked — i.e. prep did NOT short-circuit with `env_prep_failed`.
+    expect(result.verdict).not.toBe("env_prep_failed")
     expect(llm.invoked).toBe(true) // agent WAS invoked
+    // The SpyLLM produces no diff, so the empty-patch fail-closed guard in
+    // `verify()` owns the final verdict (`error:"empty prediction …"`). That
+    // guard is orthogonal to env-prep and is pinned by
+    // `bench-empty-patch-guard-hellgate.test.ts`; here we only assert it is
+    // NOT the env-prep error path.
+    expect(result.error ?? "").not.toContain("env prep")
   }, 60000)
 
   test("failing setupCmd ⇒ verdict env_prep_failed AND agent NOT invoked", async () => {
@@ -176,16 +183,22 @@ describe("bench env-prep (T4)", () => {
     await writeFile(join(repo, "a.txt"), "hello\n")
     const instance: Instance = {
       id: "good-setup",
-      repoPath: repo,
       problemStatement: "do nothing",
+      repoPath: repo,
       // host-clean: writes only inside the sandbox copy, no global install.
+      // `testCmd` asserts the marker the setupCmd wrote, but note the
+      // SpyLLM emits no diff so `verify()`'s empty-patch fail-closed guard
+      // short-circuits BEFORE testCmd runs (guard pinned in
+      // `bench-empty-patch-guard-hellgate.test.ts`). The pin THIS test owns is
+      // that a *succeeding* setupCmd does NOT trip `env_prep_failed` and the
+      // agent IS reached.
       setupCmd: "echo prepared > .prep-marker",
       testCmd: "test -f .prep-marker",
     }
     const llm = new SpyLLM()
     const result = await runInstance(instance, { ...DEPS, llm })
-    expect(result.verdict).toBeUndefined()
-    expect(result.passed).toBe(true)
-    expect(llm.invoked).toBe(true)
+    expect(result.verdict).not.toBe("env_prep_failed")
+    expect(result.error ?? "").not.toContain("env prep")
+    expect(llm.invoked).toBe(true) // env was prepared, so the agent ran
   }, 60000)
 })

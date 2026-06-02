@@ -30,6 +30,7 @@ import {
   SIDE_CONVERSATION_PROMPT_BASE,
   SIDE_CONVERSATION_PROMPT_DELIMITER,
   SIDE_CONVERSATION_QUANTA_ADDENDUM,
+  SIDE_CONVERSATION_TOOL_EXCLUSIONS,
   SIDE_CONVERSATION_TOOL_NAMES,
   SideConversationAbortedError,
   SideConversationBudgetError,
@@ -141,15 +142,30 @@ describe("side-conversation tool allowlist invariants", () => {
     }
   })
 
-  it("5. allowlist EQUALS planModeMutatingTable read-only set — fails loudly on drift", () => {
+  it("5. allowlist EQUALS planModeMutatingTable read-only set MINUS documented exclusions — fails loudly on drift", () => {
     const table = planModeMutatingTable()
+    const excluded = new Set(SIDE_CONVERSATION_TOOL_EXCLUSIONS)
     const readOnly = Object.keys(table)
-      .filter((k) => table[k] === null)
+      .filter((k) => table[k] === null && !excluded.has(k))
       .sort()
     const allowed = [...SIDE_CONVERSATION_TOOL_NAMES].sort()
     // If a new read-only tool is added to planModeMutatingTable without
-    // updating SIDE_CONVERSATION_TOOL_NAMES, this assertion's diff names it.
+    // updating SIDE_CONVERSATION_TOOL_NAMES (or the exclusion set), this
+    // assertion's diff names it.
     expect(allowed).toEqual(readOnly)
+  })
+
+  it("5b. every documented exclusion is a real plan-mode read-only entry AND stays out of the allowlist", () => {
+    const table = planModeMutatingTable()
+    const allowed = new Set(SIDE_CONVERSATION_TOOL_NAMES)
+    for (const name of SIDE_CONVERSATION_TOOL_EXCLUSIONS) {
+      // Exclusion must reference a real plan-mode-permissive (`null`) entry —
+      // otherwise the exclusion is stale and would mask a future real drift.
+      expect(name in table).toBe(true)
+      expect(table[name]).toBe(null)
+      // And it must genuinely be absent from the side-conv allowlist.
+      expect(allowed.has(name)).toBe(false)
+    }
   })
 })
 

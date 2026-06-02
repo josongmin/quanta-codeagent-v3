@@ -56,11 +56,11 @@ import { SIDE_CONVERSATION_PROMPT } from "./prompt"
  * Two invariants enforced by tests:
  *   1. Every name here MUST appear in `planModeMutatingTable()` as
  *      classification `null` (read-only).
- *   2. EVERY read-only name in `planModeMutatingTable()` MUST appear here
- *      (otherwise the allowlist has silently desynced — a new read-only tool
- *      that should also be available to side-conv has been added but
- *      forgotten). Toggling that invariant requires updating BOTH lists
- *      consciously.
+ *   2. EVERY read-only name in `planModeMutatingTable()`, MINUS the documented
+ *      {@link SIDE_CONVERSATION_TOOL_EXCLUSIONS}, MUST appear here (otherwise
+ *      the allowlist has silently desynced — a new read-only tool that should
+ *      also be available to side-conv has been added but forgotten). Toggling
+ *      that invariant requires updating BOTH lists consciously.
  *
  * No mutating tool may be added here. Any attempt is caught by
  * `tests/unit/side-conversation.test.ts::"allowlist is exactly the read-only complement"`.
@@ -132,6 +132,31 @@ export const SIDE_CONVERSATION_TOOL_NAMES: readonly string[] = Object.freeze([
   // Same posture: `request_plan_exit` is operator-facing and read-only in
   // planModeMutatingTable. Added per the same drift-detector invariant.
   "request_plan_exit",
+])
+
+/**
+ * Tools that `planModeMutatingTable()` classifies `null` (plan-mode-permissive)
+ * but which are DELIBERATELY excluded from the side-conversation allowlist.
+ *
+ * The plan-mode table answers a narrower question than the side-conv contract:
+ * "may this run in plan *collaboration* mode?" A tool can be plan-mode-permissive
+ * yet still be mutating-by-contract at the dispatch seam (the operative runtime
+ * gate keys off the tool's own `isReadOnly()`), which violates the side-conv
+ * contract "non-mutating exploration ... read-only by construction".
+ *
+ *   - `session_config`: classified `null` in `planModeMutatingTable` so that an
+ *     in-plan effort bump mirrors the operator `/effort` slash. But the tool
+ *     itself declares `isReadOnly() === false` and carries `op:set_effort`,
+ *     which mutates the PARENT session's EffortStore. A delegated, isolated
+ *     side-conversation must not be able to mutate the parent session's posture
+ *     (effort / identity / model / provider), so it is excluded here.
+ *
+ * This set is the seam that makes invariant 2 (allowlist == read-only set MINUS
+ * exclusions) fail loudly on genuine drift while permitting this one documented
+ * divergence. Adding a tool here requires the same conscious BOTH-list edit.
+ */
+export const SIDE_CONVERSATION_TOOL_EXCLUSIONS: readonly string[] = Object.freeze([
+  "session_config",
 ])
 
 // ===========================================================================

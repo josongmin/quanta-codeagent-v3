@@ -30,6 +30,7 @@ export {
   estimateSideConversationTokens,
   filterSideConversationTools,
   runSideConversation,
+  SIDE_CONVERSATION_TOOL_EXCLUSIONS,
   SIDE_CONVERSATION_TOOL_NAMES,
   SideConversationAbortedError,
   SideConversationBudgetError,
