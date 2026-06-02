@@ -194,12 +194,14 @@ export type {
 } from "./profile-list-select"
 export {
   APPROVAL_RANK,
+  buildDefinition,
   exceedsCeiling,
   listPermissionProfiles,
   NETWORK_RANK,
   ProfileSelectError,
   ProfileValidationError,
   parseUserProfile,
+  parseUserProfileDefinition,
   selectPermissionProfile,
 } from "./profile-list-select"
 export {

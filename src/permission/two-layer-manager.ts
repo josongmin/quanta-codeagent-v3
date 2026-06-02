@@ -46,6 +46,8 @@ import {
   DEFAULT_FILE_SYSTEM_SANDBOX_POLICY,
   DEFAULT_PERMISSION_PROFILE,
 } from "./permission-profile"
+import type { ProfileDefinitionRegistry, ResolveInheritanceOpts } from "./profile-inheritance"
+import { resolveProfileInheritance } from "./profile-inheritance"
 import type { CachedResolver } from "./special-path-resolver"
 
 /** Verdict + the layer that produced it — surfaces drift to the gate's
@@ -75,6 +77,22 @@ export interface TwoLayerManager {
    *  the struct API for bespoke `custom` profiles). Backward-compat: this is a
    *  thin sugar over {@link setPermissionProfile} — the struct API is unchanged. */
   setPermissionProfileByName(threadId: string, name: string): void
+  /** ADR-0438 — register / replace the profile for `threadId` resolved through
+   *  the inheritance graph: `resolveProfileInheritance(name, registry)` folds the
+   *  `extends` chain (monotone-narrowing + Managed ceiling), then the merged
+   *  concrete {@link PermissionProfile} flows through the SAME single write site
+   *  as {@link setPermissionProfile}. A name with no registry entry resolves to a
+   *  built-in (via `opts.builtins`, default `NAMED_PROFILES`) byte-identically, so
+   *  this is a strict superset of {@link setPermissionProfileByName}. Throws a
+   *  {@link ProfileInheritanceError} on a cycle / self-extend / unknown base /
+   *  managed-widen (when `onManagedWiden:"throw"`) — fail-closed, never a silent
+   *  permissive fallback. */
+  setPermissionProfileFromRegistry(
+    threadId: string,
+    name: string,
+    registry: ProfileDefinitionRegistry,
+    opts?: ResolveInheritanceOpts,
+  ): void
   /** Register / replace the {@link FileSystemSandboxPolicy} for `threadId`. */
   setFileSystemSandboxPolicy(threadId: string, sandbox: FileSystemSandboxPolicy): void
   /** Forget the layered state for `threadId`. After this, the gate abstains. */
@@ -122,6 +140,14 @@ export const createTwoLayerManager = (): TwoLayerManager => {
       // Resolve through the registry (throws on unknown / `custom`), then reuse
       // the struct path so there is ONE write site.
       const profile = resolveProfileByName(name)
+      upsert(threadId, (s) => {
+        s.profile = profile
+      })
+    },
+    setPermissionProfileFromRegistry(threadId, name, registry, opts) {
+      // Resolve the `extends` graph (fail-closed throws on cycle/unknown/widen),
+      // then reuse the struct path so there is ONE write site.
+      const profile = resolveProfileInheritance(name, registry, opts)
       upsert(threadId, (s) => {
         s.profile = profile
       })

@@ -66,6 +66,9 @@ import type {
   SpecialPathKind,
 } from "./permission-profile"
 import { isSpecialPathKind } from "./permission-profile"
+// Type-only import — `profile-inheritance.ts` imports the `NETWORK_RANK` VALUE
+// from this file; a type-only back-reference introduces no runtime cycle.
+import type { ProfileDefinition, ProfileTag } from "./profile-inheritance"
 
 /* ------------------------------------------------------------------------- */
 /* Typed errors                                                               */
@@ -443,6 +446,248 @@ const parseControl = (v: unknown, fail: Fail): PermissionProfile["control"] => {
     out.managedBy = v.managedBy as ControlManagedBy
   }
   return out
+}
+
+/* ------------------------------------------------------------------------- */
+/* ADR-0438 follow-up — PARTIAL definition parser (extends + tag + any subset) */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * Parse JSON text into a {@link ProfileDefinition} — the PARTIAL sibling of the
+ * strict {@link parseUserProfile}. Where `parseUserProfile` demands all five
+ * pillars (a complete {@link PermissionProfile}), this admits a declarative
+ * profile where every pillar is OPTIONAL (the missing parts are inherited from
+ * the `extends` chain) plus the inheritance-only fields `extends` and `tag`.
+ *
+ * Fail-closed / total (mirrors `parseUserProfile`'s posture):
+ *   - malformed JSON / non-object top level ⇒ {@link ProfileValidationError}.
+ *   - any UNKNOWN top-level key ⇒ THROW (a typo'd / unexpected key must never be
+ *     silently dropped — a permissive intent could hide in a misspelled axis).
+ *   - any present pillar is validated by the SAME enum/shape rules as the strict
+ *     parser, but sub-fields within a pillar are individually optional.
+ *   - `extends` must be a string or an array of non-empty strings; `tag` must be
+ *     `"managed" | "external"`.
+ *   - the resolver ({@link resolveProfileInheritance}) enforces monotone-narrowing
+ *     + the managed ceiling, so this parser need not (and must not) widen — it
+ *     only produces the declarative input; safety is the resolver's invariant.
+ *
+ * Returns a fresh object rebuilt field-by-field from validated primitives, so no
+ * unknown keys leak through. Distinct from {@link parseUserProfile}, which is the
+ * complete-struct disk path for {@link selectPermissionProfile}.
+ */
+export const parseUserProfileDefinition = (file: string, raw: string): ProfileDefinition => {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch (err) {
+    throw new ProfileValidationError(file, `not valid JSON: ${(err as Error).message}`)
+  }
+  return buildDefinition(file, parsed)
+}
+
+/** Build a {@link ProfileDefinition} from an already-parsed JSON value. Shared by
+ *  {@link parseUserProfileDefinition} (disk/raw) and the registry builder
+ *  (in-memory object map), so the same fail-closed validation runs on both. */
+export const buildDefinition = (file: string, parsed: unknown): ProfileDefinition => {
+  if (!isObj(parsed)) {
+    throw new ProfileValidationError(file, "top-level value must be a JSON object")
+  }
+  const fail = (detail: string): never => {
+    throw new ProfileValidationError(file, detail)
+  }
+
+  // Reject unknown keys FIRST — fail-closed: a misspelled axis must not be
+  // silently dropped (it could mask a permissive intent the operator believes
+  // is being applied).
+  for (const k of Object.keys(parsed)) {
+    if (!DEFINITION_KEYS.includes(k)) {
+      return fail(`unknown key '${k}' (allowed: ${DEFINITION_KEYS.join(", ")})`)
+    }
+  }
+
+  // Built by assignment so each absent pillar is OMITTED (the key is never set,
+  // not set to `undefined`) — satisfies `exactOptionalPropertyTypes`. A
+  // `Writable<ProfileDefinition>` accumulator keeps the exact optional shape.
+  const out: Writable<ProfileDefinition> = {}
+  if (parsed.extends !== undefined) out.extends = parseExtends(parsed.extends, fail)
+  if (parsed.tag !== undefined) out.tag = parseTag(parsed.tag, fail)
+  if (parsed.fileSystem !== undefined) {
+    out.fileSystem = parsePartialFileSystem(parsed.fileSystem, fail)
+  }
+  if (parsed.approval !== undefined) out.approval = parsePartialApproval(parsed.approval, fail)
+  if (parsed.network !== undefined) out.network = parsePartialNetwork(parsed.network, fail)
+  if (parsed.sandbox !== undefined) out.sandbox = parsePartialSandbox(parsed.sandbox, fail)
+  if (parsed.control !== undefined) out.control = parsePartialControl(parsed.control, fail)
+  return out
+}
+
+/** Strip `readonly` so a definition can be built by assignment then returned as
+ *  the immutable {@link ProfileDefinition}. */
+type Writable<T> = { -readonly [K in keyof T]: T[K] }
+
+/** The closed set of top-level keys a definition may carry. Any other key is a
+ *  fail-closed reject (see {@link buildDefinition}). */
+const DEFINITION_KEYS: ReadonlyArray<string> = [
+  "extends",
+  "tag",
+  "fileSystem",
+  "approval",
+  "network",
+  "sandbox",
+  "control",
+]
+
+const PROFILE_TAGS: ReadonlyArray<ProfileTag> = ["managed", "external"]
+
+const parseExtends = (v: unknown, fail: Fail): string | ReadonlyArray<string> => {
+  const checkName = (n: unknown, where: string): string => {
+    if (typeof n !== "string" || n.length === 0) {
+      return fail(`${where} must be a non-empty string`)
+    }
+    return n
+  }
+  if (Array.isArray(v)) return v.map((n, i) => checkName(n, `extends[${i}]`))
+  return checkName(v, "extends")
+}
+
+const parseTag = (v: unknown, fail: Fail): ProfileTag => {
+  if (typeof v !== "string" || !PROFILE_TAGS.includes(v as ProfileTag)) {
+    return fail(`tag must be one of ${PROFILE_TAGS.join(", ")}`)
+  }
+  return v as ProfileTag
+}
+
+const FS_KEYS: ReadonlyArray<string> = ["type", "entries"]
+const parsePartialFileSystem = (
+  v: unknown,
+  fail: Fail,
+): NonNullable<ProfileDefinition["fileSystem"]> => {
+  if (!isObj(v)) return fail("fileSystem must be an object")
+  rejectUnknown(v, FS_KEYS, "fileSystem", fail)
+  const out: { type?: FileSystemPolicyType; entries?: ReadonlyArray<FileSystemEntry> } = {}
+  if (v.type !== undefined) {
+    if (typeof v.type !== "string" || !FS_POLICY_TYPES.includes(v.type as FileSystemPolicyType)) {
+      return fail(`fileSystem.type must be one of ${FS_POLICY_TYPES.join(", ")}`)
+    }
+    out.type = v.type as FileSystemPolicyType
+  }
+  if (v.entries !== undefined) {
+    if (!Array.isArray(v.entries)) return fail("fileSystem.entries must be an array")
+    out.entries = v.entries.map((e, i) => parseEntry(e, i, fail))
+  }
+  return out
+}
+
+const APPROVAL_KEYS: ReadonlyArray<string> = ["mode", "promptUser"]
+const parsePartialApproval = (
+  v: unknown,
+  fail: Fail,
+): NonNullable<ProfileDefinition["approval"]> => {
+  if (!isObj(v)) return fail("approval must be an object")
+  rejectUnknown(v, APPROVAL_KEYS, "approval", fail)
+  const out: { mode?: ApprovalMode; promptUser?: boolean } = {}
+  if (v.mode !== undefined) {
+    if (typeof v.mode !== "string" || !APPROVAL_MODES.includes(v.mode as ApprovalMode)) {
+      return fail(`approval.mode must be one of ${APPROVAL_MODES.join(", ")}`)
+    }
+    out.mode = v.mode as ApprovalMode
+  }
+  if (v.promptUser !== undefined) {
+    if (typeof v.promptUser !== "boolean") return fail("approval.promptUser must be a boolean")
+    out.promptUser = v.promptUser
+  }
+  return out
+}
+
+const NETWORK_KEYS: ReadonlyArray<string> = ["mode", "allowHosts", "perRequestApproval"]
+const parsePartialNetwork = (v: unknown, fail: Fail): NonNullable<ProfileDefinition["network"]> => {
+  if (!isObj(v)) return fail("network must be an object")
+  rejectUnknown(v, NETWORK_KEYS, "network", fail)
+  const out: { mode?: NetworkMode; allowHosts?: string[]; perRequestApproval?: boolean } = {}
+  if (v.mode !== undefined) {
+    if (typeof v.mode !== "string" || !NETWORK_MODES.includes(v.mode as NetworkMode)) {
+      return fail(`network.mode must be one of ${NETWORK_MODES.join(", ")}`)
+    }
+    out.mode = v.mode as NetworkMode
+  }
+  if (v.allowHosts !== undefined) {
+    if (!Array.isArray(v.allowHosts) || v.allowHosts.some((h) => typeof h !== "string")) {
+      return fail("network.allowHosts must be an array of strings")
+    }
+    out.allowHosts = v.allowHosts as string[]
+  }
+  if (v.perRequestApproval !== undefined) {
+    if (typeof v.perRequestApproval !== "boolean") {
+      return fail("network.perRequestApproval must be a boolean")
+    }
+    out.perRequestApproval = v.perRequestApproval
+  }
+  return out
+}
+
+const SANDBOX_KEYS: ReadonlyArray<string> = [
+  "osSandbox",
+  "readOnly",
+  "workspaceWrite",
+  "networkIsolated",
+]
+const parsePartialSandbox = (v: unknown, fail: Fail): NonNullable<ProfileDefinition["sandbox"]> => {
+  if (!isObj(v)) return fail("sandbox must be an object")
+  rejectUnknown(v, SANDBOX_KEYS, "sandbox", fail)
+  const out: {
+    osSandbox?: OsSandboxKind
+    readOnly?: boolean
+    workspaceWrite?: boolean
+    networkIsolated?: boolean
+  } = {}
+  if (v.osSandbox !== undefined) {
+    if (
+      typeof v.osSandbox !== "string" ||
+      !OS_SANDBOX_KINDS.includes(v.osSandbox as OsSandboxKind)
+    ) {
+      return fail(`sandbox.osSandbox must be one of ${OS_SANDBOX_KINDS.join(", ")}`)
+    }
+    out.osSandbox = v.osSandbox as OsSandboxKind
+  }
+  for (const k of ["readOnly", "workspaceWrite", "networkIsolated"] as const) {
+    if (v[k] !== undefined) {
+      if (typeof v[k] !== "boolean") return fail(`sandbox.${k} must be a boolean`)
+      out[k] = v[k] as boolean
+    }
+  }
+  return out
+}
+
+const CONTROL_KEYS: ReadonlyArray<string> = ["managedBy", "auditRequired"]
+const parsePartialControl = (v: unknown, fail: Fail): NonNullable<ProfileDefinition["control"]> => {
+  if (!isObj(v)) return fail("control must be an object")
+  rejectUnknown(v, CONTROL_KEYS, "control", fail)
+  const out: { managedBy?: ControlManagedBy; auditRequired?: boolean } = {}
+  if (v.managedBy !== undefined) {
+    if (typeof v.managedBy !== "string" || !MANAGED_BY.includes(v.managedBy as ControlManagedBy)) {
+      return fail(`control.managedBy must be one of ${MANAGED_BY.join(", ")}`)
+    }
+    out.managedBy = v.managedBy as ControlManagedBy
+  }
+  if (v.auditRequired !== undefined) {
+    if (typeof v.auditRequired !== "boolean") return fail("control.auditRequired must be a boolean")
+    out.auditRequired = v.auditRequired
+  }
+  return out
+}
+
+/** Reject any key in `v` not in `allowed` (fail-closed). */
+const rejectUnknown = (
+  v: Record<string, unknown>,
+  allowed: ReadonlyArray<string>,
+  where: string,
+  fail: Fail,
+): void => {
+  for (const k of Object.keys(v)) {
+    if (!allowed.includes(k)) {
+      fail(`unknown key '${where}.${k}' (allowed: ${allowed.join(", ")})`)
+    }
+  }
 }
 
 /* ------------------------------------------------------------------------- */

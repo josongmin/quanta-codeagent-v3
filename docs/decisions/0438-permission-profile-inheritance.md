@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-06-02
 - RFC: `docs/plans/jun-2-misc/05-permission-profile-inheritance.md`
-- Slice: `src/permission/profile-inheritance.ts` (new leaf), `src/permission/index.ts` (barrel), `src/permission/profile-list-select.ts` (`NETWORK_RANK` now exported for reuse)
+- Slice: `src/permission/profile-inheritance.ts` (new leaf), `src/permission/index.ts` (barrel), `src/permission/profile-list-select.ts` (`NETWORK_RANK` export + `parseUserProfileDefinition`/`buildDefinition` partial parser — 2026-06-02 wire), `src/permission/two-layer-manager.ts` (`setPermissionProfileFromRegistry` sugar — 2026-06-02 wire), `src/apps/agent/index.ts` (composition-root registry build + resolution routed through inheritance — 2026-06-02 wire)
 - Absorbs: Codex `extends` chain + "permissions profile inheritance cycle detected" + `TaggedPermissionProfile::Managed/::External` (`.extracted_source/codex/_codex-rs-0.135-symbols.txt`)
 
 ## Context
@@ -87,16 +87,29 @@ than silently absorbed by the merge.
 ### Config / knob — how a profile declares + selects `extends`
 
 - **Struct field:** a `ProfileDefinition` declares `extends` (and optional
-  `tag`) alongside any subset of the five pillars. A user-authored definition is
-  a JSON object of the same shape (a future `parseUserProfileDefinition` partial
-  parser, sibling to the strict `parseUserProfile`, would admit these from
-  disk — left as a follow-up; the resolver itself is config-agnostic and
-  consumes an in-memory `ProfileDefinitionRegistry` the caller builds).
-- **Selection:** the caller assembles a `ProfileDefinitionRegistry` (built-in
-  names resolve via `builtins`; definitions add `extends` graphs), then calls
-  `resolveProfileInheritance(name, registry)` to obtain the concrete
-  `PermissionProfile`. The resulting struct flows into the existing Apply path
-  (`TwoLayerManager.setPermissionProfile`) unchanged.
+  `tag`) alongside any subset of the five pillars.
+- **Partial parser (2026-06-02 wire):** `parseUserProfileDefinition(file, raw)`
+  in `profile-list-select.ts` is the partial sibling of the strict
+  `parseUserProfile` — it admits a declarative profile where every pillar is
+  OPTIONAL plus `extends`/`tag`, rebuilding a fresh `ProfileDefinition`
+  field-by-field. Fail-closed/total: malformed JSON, a non-object, an UNKNOWN
+  top-level OR nested key, a bad enum, or a non-string `extends` all throw a
+  `ProfileValidationError` (never a silent drop — a misspelled axis could mask a
+  permissive intent). `buildDefinition` is the shared in-memory validator the
+  registry builder reuses.
+- **Selection (2026-06-02 wire):** the composition root
+  (`src/apps/agent/index.ts`) reads `QUANTA_PERMISSION_PROFILES_JSON` (a JSON
+  object `<name> → ProfileDefinition`), validates each via `buildDefinition`,
+  rejects any key colliding with a built-in name, and assembles a
+  `ProfileDefinitionRegistry` (`buildProfileDefinitionRegistry`). The selected
+  profile (`--permission-profile` flag wins over `QUANTA_PERMISSION_PROFILE`)
+  then resolves through `resolveProfileInheritance(name, registry)` whenever ANY
+  user definition exists; the merged `PermissionProfile` flows into the existing
+  Apply path via the new `TwoLayerManager.setPermissionProfileFromRegistry`
+  sugar AND drives the live `PermissionContext.mode` derive. With NO user
+  definitions the legacy A2 by-name path is kept verbatim, so the three
+  built-ins resolve to the SAME frozen structs (byte-identical). The env READ is
+  the only IO; the resolver stays pure.
 
 ## Alternatives considered
 
@@ -132,3 +145,44 @@ than silently absorbed by the merge.
   unknown-base throws, managed ceiling clamp + throw, the monotone-narrowing
   invariant over all 13 axes × 3 built-in bases, deep chain (N=20), diamond
   determinism, and byte-identical built-in regression.
+
+## Wire close-out (2026-06-02)
+
+The original ADR shipped the resolver as a pure, sealed leaf with NO production
+consumer — `resolveProfileInheritance` was exported but never called outside
+tests, so inheritance never ran live. This round closes that hold:
+
+1. **Partial parser** `parseUserProfileDefinition` + `buildDefinition`
+   (`profile-list-select.ts`) — fail-closed/total, unknown-key reject.
+2. **Registry builder** `buildProfileDefinitionRegistry` (`apps/agent/index.ts`)
+   reads `QUANTA_PERMISSION_PROFILES_JSON`, fail-closed on bad JSON / non-object /
+   built-in-name collision / nested malformation.
+3. **Apply sugar** `TwoLayerManager.setPermissionProfileFromRegistry` — resolves
+   the `extends` graph then writes through the one existing profile write site.
+4. **Composition-root route** — the A2 single-profile resolution
+   (`resolvePermissionProfileManager` + `resolvePermissionModeFromProfile`) now
+   goes THROUGH `resolveProfileInheritance` whenever any user definition exists,
+   so a profile declaring `extends` folds base → derived at session start and the
+   merged struct reaches the live per-thread slot + the live
+   `PermissionContext.mode`.
+
+**User-profile source = env JSON (`QUANTA_PERMISSION_PROFILES_JSON`), not the
+envelope, not disk.** Rationale: (a) it is synchronous at the composition root
+(the A2 wire already runs sync; the disk `QUANTA_PROFILES_DIR` path is async and
+owned by `selectPermissionProfile` for COMPLETE structs — definitions are a
+distinct partial shape), (b) it matches the existing `QUANTA_*` single-env idiom
+the sibling profile knobs use, and (c) it avoids a security-sensitive envelope
+schema migration (`extends`/`tag` on the wire) for a startup-only concern. The
+envelope `permission_profile` field is deliberately UNCHANGED.
+
+Sealed by a 9-case wire hellgate
+(`tests/unit/permission/profile-inheritance-wire-hellgate.test.ts`): live
+`extends: trusted` network intersection through the manager + mode, managed
+ceiling not widenable end-to-end, unknown extends / unknown selected name
+fail-closed, NO-user-defs built-in reference-identity + A2 unchanged, parser +
+registry-builder fail-closed batteries, lone-def-onto-DEFAULT, and a
+user→user→built-in deep chain.
+
+- Status: **`deliberate_hold` CLOSED** — inheritance now runs live at session
+  start. Maturity L2 → L3 (consumed end-to-end; default-OFF until
+  `QUANTA_PERMISSION_PROFILES_JSON` is set).
