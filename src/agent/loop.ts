@@ -68,6 +68,7 @@ import {
   type RecoveryReason,
 } from "./recovery"
 import { buildShellSnapshotSession, type ShellSnapshotSession } from "./shell-snapshot-session"
+import { runSessionPrewarm, type TtfmMarker } from "./startup-prewarm"
 // R2-B P1 — parameter-bundle refactor. `TurnSession` (session-lifetime
 // readonly resources) and `TurnState` (turn-lifetime mutable state) cut
 // `runTurn` from ~20 positional params to 3, `streamConsume` to 4, and
@@ -561,6 +562,11 @@ const streamConsume = async (
   // wire payload is byte-identical to the pre-feature path (the adapter only
   // emits provider `tool_choice` for `any`/`none`).
   const toolChoice = resolveToolChoice(consumeTurnSignals(toolChoiceState))
+  // ADR-0452 — Time-To-First-Message: the first reach of this LLM-request
+  // boundary IS "first-turn LLM dispatch". Once-fire; absent marker (prewarm
+  // off) ⇒ no-op, byte-identical. Placed before `emitLlmRequest` so TTFM
+  // measures up to the moment the model stream is about to open.
+  session.ttfm?.markFirstDispatch()
   // RFC-0002 §5.2/§9/§11 — `llm_request` marker, emitted IMMEDIATELY BEFORE
   // this turn's model stream is opened/consumed (the same point `llm_usage`
   // is later teed from the provider `usage` event). The recorder gives both
@@ -2558,6 +2564,27 @@ const maybeWrapImageSanitizationRetry = (cfg: AgentConfig, wm: WorkingMemory<Mes
   return withImageSanitizationRetry(cfg.llm, port, wrapOpts)
 }
 
+/**
+ * ADR-0452 — gate + run the session-startup prewarm ONCE at session start.
+ * Disabled (`cfg.prewarm?.enabled !== true`) ⇒ `undefined`: no clock read, no
+ * prewarm call, no TTFM marker, byte-identical legacy. Enabled ⇒ best-effort
+ * connection warm + a once-fire `TtfmMarker` for the loop's `session`. Extracted
+ * from `createRunAgentContext` so its cognitive complexity is unchanged.
+ */
+const maybeRunSessionPrewarm = async (
+  cfg: AgentConfig,
+  recorder: AgentRecorder | undefined,
+): Promise<TtfmMarker | undefined> => {
+  if (cfg.prewarm?.enabled !== true) return undefined
+  return await runSessionPrewarm({
+    llm: cfg.llm,
+    recorder,
+    now: cfg.prewarm.now ?? Date.now,
+    ...(cfg.prewarm.warmSignal !== undefined ? { warmSignal: cfg.prewarm.warmSignal } : {}),
+    onError: (m) => logger.warn(m),
+  })
+}
+
 const createRunAgentContext = async (config: AgentConfig): Promise<RunAgentContext> => {
   const features = await buildSessionFeatures(config)
   const baseCfg = buildEffectiveConfig(config, features.extraTools)
@@ -2583,6 +2610,10 @@ const createRunAgentContext = async (config: AgentConfig): Promise<RunAgentConte
   const wm: WorkingMemory<Message> = createWorkingMemory<Message>(buildSeedMessages(cfg))
   cfg.llm = maybeWrapImageSanitizationRetry(cfg, wm)
   const recorder = cfg.metrics ? new AgentRecorder(cfg.metrics) : undefined
+  // ADR-0452 — session-startup prewarm + TTFM. `cfg.llm` is in its final
+  // (wrapped) form here. Gated + extracted in `maybeRunSessionPrewarm`:
+  // disabled ⇒ `undefined` ⇒ no `ttfm` slot, byte-identical.
+  const ttfm = await maybeRunSessionPrewarm(cfg, recorder)
   const sessionId = cfg.sessionId ?? "default"
   const breaker = cfg.compactionBreaker?.disabled
     ? undefined
@@ -2628,6 +2659,7 @@ const createRunAgentContext = async (config: AgentConfig): Promise<RunAgentConte
     ...(skillGate !== undefined ? { skillGate } : {}),
     ...(features.activeSkills !== undefined ? { activeSkills: features.activeSkills } : {}),
     ...(summaryArchive !== undefined ? { archive: summaryArchive } : {}),
+    ...(ttfm !== undefined ? { ttfm } : {}),
     guards: guardChain,
     hookPromptPending,
   }

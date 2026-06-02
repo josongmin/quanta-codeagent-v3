@@ -27,6 +27,10 @@ describe("METRIC name table", () => {
       tokensInput: "gen_ai.usage.input_tokens",
       tokensOutput: "gen_ai.usage.output_tokens",
       cacheRead: "gen_ai.usage.cache_read_input_tokens",
+      // ADR-0452 — session-startup prewarm + TTFM (canonical quanta.startup.*).
+      ttfm: "quanta.startup.time_to_first_message_ms",
+      prewarmDuration: "quanta.startup.prewarm_duration_ms",
+      prewarmOutcome: "quanta.startup.prewarm_outcome",
     })
   })
 })

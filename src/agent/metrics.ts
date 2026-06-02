@@ -1,4 +1,5 @@
-import { GEN_AI_ATTRS, type Metrics } from "@/observability"
+import type { PrewarmOutcome } from "@/llm"
+import { GEN_AI_ATTRS, type Metrics, QUANTA_ATTRS } from "@/observability"
 import type { PersistStats, RecallStats } from "./memory-stats"
 
 /**
@@ -36,6 +37,11 @@ export const METRIC = {
   tokensInput: GEN_AI_ATTRS.usage.inputTokens,
   tokensOutput: GEN_AI_ATTRS.usage.outputTokens,
   cacheRead: GEN_AI_ATTRS.usage.cacheReadInputTokens,
+  // ADR-0452 — session-startup prewarm + TTFM. Canonical `quanta.startup.*`
+  // keys (vocabulary.ts) so any surface reads the same well-known names.
+  ttfm: QUANTA_ATTRS.startup.timeToFirstMessageMs,
+  prewarmDuration: QUANTA_ATTRS.startup.prewarmDurationMs,
+  prewarmOutcome: QUANTA_ATTRS.startup.prewarmOutcome,
 } as const
 
 /** Loop-facing recorder. Wraps a {@link Metrics} instance; every method is a
@@ -101,5 +107,28 @@ export class AgentRecorder {
     this.metrics.counter(METRIC.consolidateSkipped).inc(s.skipped)
     this.metrics.counter(METRIC.evictDecayed).inc(s.decayed)
     this.metrics.counter(METRIC.evictDeleted).inc(s.deleted)
+  }
+
+  /**
+   * ADR-0452 — record the session-startup prewarm outcome (once per session).
+   * `durationMs` is the wall-clock cost of the prewarm step itself (0 when the
+   * port had no prewarm capability). `outcome` is the {@link PrewarmOutcome}.
+   * Uses a gauge for the duration (point-in-time, one value per session) and a
+   * per-outcome counter so dashboards can split warmed / skipped / failed.
+   */
+  prewarm(outcome: PrewarmOutcome, durationMs: number): void {
+    this.metrics.gauge(METRIC.prewarmDuration).set(durationMs)
+    this.metrics.counter(`${METRIC.prewarmOutcome}.${outcome}`).inc()
+  }
+
+  /**
+   * ADR-0452 — record Time-To-First-Message (once per session): wall-clock ms
+   * from session start to the first turn's LLM-stream dispatch. Gauge, since it
+   * is a single per-session point-in-time value (Codex `age_at_first_turn_ms`
+   * parity). The loop computes `ms` from the SAME injected clock used elsewhere
+   * so the value is deterministic under a fake clock.
+   */
+  timeToFirstMessage(ms: number): void {
+    this.metrics.gauge(METRIC.ttfm).set(ms)
   }
 }

@@ -229,6 +229,26 @@ export const QUANTA_ATTRS = {
     /** counter, label: `kind` (5-arm `GitDirectiveKind` from ADR-0205). */
     directive: "quanta.git.directive",
   },
+  /** ADR-0452 — session-startup prewarm (Codex `session_startup_prewarm`
+   *  absorption). Mirrors Codex's `codex.startup_prewarm.*` family. Recorded
+   *  ONCE per session and only when the `prewarm` config block is wired
+   *  (`QUANTA_PREWARM`); absent ⇒ no keys touched (byte-identical). */
+  startup: {
+    /** gauge — Time-To-First-Message: wall-clock ms from session start to the
+     *  first turn's LLM-stream dispatch. The headline latency the user feels
+     *  before the model begins answering. Sourced from the injected clock so
+     *  it is deterministic under test. (Codex `age_at_first_turn_ms` parity.) */
+    timeToFirstMessageMs: "quanta.startup.time_to_first_message_ms",
+    /** gauge — ms the connection-prewarm step itself took (handshake / pool
+     *  warm). 0 when the port had no prewarm capability (skipped). (Codex
+     *  `startup_prewarm.duration_ms` parity.) */
+    prewarmDurationMs: "quanta.startup.prewarm_duration_ms",
+    /** counter, label: `outcome` — one of `skipped | warmed | failed`
+     *  (`PrewarmOutcome` from `@/llm`). Lets a dashboard split sessions whose
+     *  connection was actually pre-opened from those whose adapter had no
+     *  prewarm hook. */
+    prewarmOutcome: "quanta.startup.prewarm_outcome",
+  },
 } as const
 
 // ---------------------------------------------------------------------------

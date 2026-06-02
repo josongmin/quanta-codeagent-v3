@@ -288,6 +288,31 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   metrics?: Metrics
   /**
+   * ADR-0452 — session-startup prewarm + Time-To-First-Message (Codex
+   * `session_startup_prewarm` absorption). Absent ⇒ NO prewarm call and NO
+   * TTFM metric (the loop is byte-identical to the pre-slice path). Present
+   * (set by the `QUANTA_PREWARM` knob at the composition root) ⇒ the loop, at
+   * session start (before the first turn), best-effort warms the LLM
+   * connection via {@link import("@/llm").prewarmLlm} (a no-op unless the
+   * adapter implements the optional `prewarm` capability) and records TTFM on
+   * the first turn's LLM-stream dispatch.
+   *
+   * The capability half of startup prewarm (tools / skills / classifier) is
+   * ALREADY eager in `buildSessionFeatures`; this block only adds the
+   * LLM-connection warm + the observability, both gated together.
+   */
+  prewarm?: {
+    /** Master gate. Only `true` arms the prewarm call + TTFM recording. */
+    readonly enabled: boolean
+    /** Injected wall-clock for TTFM (epoch ms). Inject a fake clock in tests
+     *  for determinism; defaults to `Date.now` when omitted. NO real timer is
+     *  read in the loop body — this is the single source. */
+    readonly now?: () => number
+    /** Optional abort signal for a slow connection warm so it can never delay
+     *  the first turn. Independent of the loop's lifetime `signal`. */
+    readonly warmSignal?: AbortSignal
+  }
+  /**
    * Subagent recursion depth of THIS agent (0 = root user session). Set by
    * the subagent runner for forked children; propagated onto `ToolContext`
    * by the dispatch seam so the `Agent` tool can enforce `maxDepth`. Absent ⇒

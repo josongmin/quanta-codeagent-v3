@@ -140,6 +140,12 @@ export interface TurnSession {
    *  not `readonly` on the array itself even though the slot is. Absent ⇒
    *  no drain, byte-identical legacy. */
   readonly hookPromptPending?: import("./hooks").HookPromptInject[]
+  /** ADR-0452 — once-fire Time-To-First-Message marker. Present ONLY when the
+   *  `prewarm` config block is enabled; the stream dispatcher calls
+   *  `markFirstDispatch()` at the LLM-request boundary and the marker records
+   *  TTFM on the FIRST call (subsequent calls are no-ops). Absent ⇒ no TTFM,
+   *  byte-identical legacy. */
+  readonly ttfm?: { markFirstDispatch(): void }
 }
 
 /**

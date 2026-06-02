@@ -21,6 +21,12 @@ export {
   streamWithModel,
 } from "./model-swap"
 export type { LLMPort } from "./ports"
+export {
+  hasPrewarm,
+  type LlmPrewarmPort,
+  prewarmLlm,
+  type PrewarmOutcome,
+} from "./prewarm"
 export type { RecoveryAction, RecoveryRouter } from "./retry"
 export {
   CodexSpecRouter,
