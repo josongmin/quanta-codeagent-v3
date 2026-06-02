@@ -26,7 +26,7 @@
  */
 
 import type { ProxyEnvInput } from "./env"
-import type { DialTarget } from "./loopback-proxy"
+import type { DialTarget, ResolvePeerHost } from "./loopback-proxy"
 import { LoopbackEgressProxy } from "./loopback-proxy"
 import type { NetworkProxyPort } from "./port"
 import type { NetworkProxyConfig } from "./types"
@@ -37,6 +37,11 @@ export interface EgressProxyDeps {
   /** Hermetic dial-target resolver — tests map routable names to a loopback
    *  origin. Production omits it ⇒ identity dial + active peer SSRF re-check. */
   readonly dial?: DialTarget
+  /** jun-02 SSRF re-audit: peer-classification resolver. The post-connect SSRF
+   *  re-check now ALWAYS runs; this seam picks which address it classifies so a
+   *  hermetic `dial` no longer disables the rebinding defense. Production omits
+   *  it ⇒ the real `sock.remoteAddress` is classified. */
+  readonly resolvePeerHost?: ResolvePeerHost
 }
 
 /** What the body receives: the live proxy (for amendments / decision-log
@@ -72,6 +77,7 @@ export const withEgressProxy = async <T>(
   const proxy = new LoopbackEgressProxy(config, {
     ...(deps.now !== undefined ? { now: deps.now } : {}),
     ...(deps.dial !== undefined ? { dial: deps.dial } : {}),
+    ...(deps.resolvePeerHost !== undefined ? { resolvePeerHost: deps.resolvePeerHost } : {}),
   })
   const address = await proxy.listen()
   try {

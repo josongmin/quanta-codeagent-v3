@@ -20,15 +20,21 @@ config_refs:
     - QUANTA_NETWORK_PROXY
   runtime:
     - AgentConfig.networkProxy
+    - AgentConfig.proxyEnv
+    - ToolContext.proxyEnv
 purpose: |
   Closes the SUBPROCESS egress bypass the dispatch-layer gate (network-egress-enforcement)
   leaves open. The tool-arg guard extracts a host from a tool CALL; a subprocess that opens
   its OWN socket (curl / gh / npm / git) never passes through it. This slice ships a REAL
   loopback HTTP proxy (Node http/net, plain-HTTP forward + CONNECT tunnel) and WIRES it into
-  the child-spawn path: when the `network-proxy` knob activates `AgentConfig.networkProxy`,
-  `withEgressProxy` constructs a `LoopbackEgressProxy` over the active allowlist, `listen()`s on
-  an ephemeral loopback port, and `runShell` injects `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` (via
-  `withProxyEnv`) into the child env — so the child's OWN sockets are funneled through the SAME
+  the child-spawn path: the composition roots (`apps/agent/index.ts`, `apps/cli` via the host
+  overlay) read `QUANTA_NETWORK_PROXY` DIRECTLY (mirroring `resolveMemoryConfigFromEnv`) and set
+  `AgentConfig.networkProxy`. `runAgent` then constructs a `LoopbackEgressProxy` via
+  `withEgressProxy`, `listen()`s on an ephemeral loopback port for the whole session, and injects
+  the bound `proxyEnv` onto the per-session config — which the dispatch seam surfaces on
+  `ToolContext.proxyEnv`, so the bash tool forwards it to `runShell` (and `LocalSandbox.run`),
+  which injects `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` (via `withProxyEnv`) into the child env — so
+  the child's OWN sockets are funneled through the SAME
   `isHostAllowed` decision the dispatch guard uses. Allowed ⇒ dial origin + pipe; off-list ⇒
   403 at the socket; SSRF literals (169.254.169.254 / loopback / private / link-local) are
   categorically blocked BEFORE the allowlist (and re-checked post-connect on the resolved peer,
@@ -46,6 +52,13 @@ evidence:
     - src/runtime/network-proxy/amendment.ts
     - src/runner/knobs/knobs/network-proxy.ts
     - src/runtime/shell.ts
+    - src/runtime/sandbox.ts
+    - src/agent/loop.ts
+    - src/agent/dispatch.ts
+    - src/tool/bash/index.ts
+    - src/apps/agent/index.ts
+    - src/apps/cli/repl/runtime-context-compose.ts
+    - src/host/runtime/internal/context-binding.ts
   adrs: ["docs/decisions/0428-network-egress-proxy.md"]
   tests:
     unit:
@@ -53,6 +66,8 @@ evidence:
     integration:
       - tests/integration/network-proxy-e2e.test.ts
       - tests/integration/network-proxy-subprocess-e2e.test.ts
+      - tests/integration/network-proxy-bash-tool-e2e.test.ts
+      - tests/integration/network-proxy-ssrf-connect-hellgate.test.ts
     contract: []
 knobs:
   - network-proxy
@@ -67,12 +82,26 @@ notes: |
   The allow DECISION is delegated entirely to `isHostAllowed` (the exact predicate the
   dispatch guard uses, so socket- and arg-level agree) + `classifyHost` (canonical structural
   SSRF classifier) — NO heuristics, NO thresholds in this slice. The `DialTarget` DI seam lets
-  hermetic e2e map routable NAMES to a loopback origin without weakening the production peer
-  SSRF re-check (active only under the identity dial). The subprocess e2e spawns a REAL bun
-  child whose injected `HTTP_PROXY` forces its own socket through the proxy, proving the
-  bypass is closed at the SOCKET (allow connects / off-list refused / SSRF blocked / knob
-  absent ⇒ no proxy vars).
+  hermetic e2e map routable NAMES to a loopback origin; a SEPARATE `resolvePeerHost` DI selects
+  which address the post-connect SSRF re-check classifies, so the rebinding defense is now
+  ALWAYS active (jun-02 re-audit — previously an injected dial silently disabled it).
 
-  Follow-up: thread `proxyEnv` through the sandbox (`LocalSandbox.run`) + bash-bg-registry
-  spawn sites and the git tool's child spawns (currently only `runShell` is wired); surface the
-  active egress posture + amendment prompts in the status line.
+  jun-02 LIVE-WIRE + SSRF-CONNECT fix (was: false security — `withEgressProxy` had ZERO
+  production callers, bash never forwarded any proxy env):
+   - BUG1 (dead wire): composition roots now read `QUANTA_NETWORK_PROXY` directly → set
+     `AgentConfig.networkProxy`; `runAgent` constructs+listens the proxy and threads `proxyEnv`
+     through `ToolContext.proxyEnv` → bash tool → `runShell` (+ `LocalSandbox.run`). Proven by
+     `network-proxy-bash-tool-e2e.test.ts` driving the REAL bash tool dispatch path.
+   - BUG2 (SSRF CONNECT asymmetry): the CONNECT authority is now normalized through the URL
+     parser BEFORE classification (mirroring the HTTP path), so obfuscated IPv4
+     (`2130706433`/`0x7f000001`/`127.1`/decimal-metadata `2852039166`) is classified+blocked;
+     the metadata check is structural (canonicalize → compare) not exact-string. Proven by
+     `network-proxy-ssrf-connect-hellgate.test.ts`.
+
+  WIRED spawn sites: `runShell` (bash tool — PRIMARY LLM egress path) + `LocalSandbox.run`.
+  TRACKED GAP (NOT yet wired): `bash-bg-registry.ts` (background detached shells) and the git
+  tool's direct argv spawns do NOT yet thread `proxyEnv` — a background `bash &` or a git
+  subprocess can still open an ungated socket. `DockerSandbox` forwards proxy vars through its
+  `envAllowlist` (HTTP_PROXY/etc. already allowlisted) but is not actively proxy-aware. Follow-up:
+  thread `proxyEnv` into the bg-registry + git spawns; surface the active egress posture +
+  amendment prompts in the status line.

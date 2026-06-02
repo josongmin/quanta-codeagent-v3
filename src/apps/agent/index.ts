@@ -30,6 +30,7 @@ import {
   wireInteractiveKnobs,
 } from "@/runner/assemble"
 import type { Surface } from "@/runner/knobs"
+import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
 import { resolveSandboxProfileFromEnv } from "@/runtime"
 import { loadEnvFiles } from "@/shared/env-files"
 
@@ -296,6 +297,18 @@ const resolvePermissionProfileWiring = (
 
 export const pickMcpNegotiator = (env: NodeJS.ProcessEnv): CapabilityNegotiator =>
   env.QUANTA_MCP_CAPS === "full" ? fullNegotiator() : defaultNegotiator
+
+/** ADR-0428 jun-02 wire — resolve the socket-level egress proxy config from the
+ *  composition-root env view and return a SPREAD-READY slot (`{}` when off) so
+ *  the base literal carries no conditional branch for it (keeps
+ *  `buildBaseFromArgs` under biome's cognitive-complexity cap). Absent / "0" /
+ *  empty / zero-token ⇒ `{}` (default-OFF byte-identical). */
+const resolveNetworkProxySlot = (
+  env: NodeJS.ProcessEnv,
+): { networkProxy?: NonNullable<AssembleRequest["base"]["networkProxy"]> } => {
+  const networkProxy = resolveNetworkProxyFromEnv(env)
+  return networkProxy !== undefined ? { networkProxy } : {}
+}
 
 const buildBaseRegistry = (args: {
   readonly automationSlot: AutomationEngineSlot | null
@@ -744,6 +757,15 @@ export const buildBaseFromArgs = (
   // spawn wrapper; both reads share `resolveSandboxProfileFromEnv` so
   // they agree.
   const sandboxProfile = resolveSandboxProfileFromEnv(env)
+  // ADR-0428 jun-02 wire — DIRECT env read of `QUANTA_NETWORK_PROXY` at the
+  // composition root (mirrors `resolveMemoryConfigFromEnv`; this surface builds
+  // its base WITHOUT `applyKnobs`). The helper returns a SPREAD-READY slot
+  // (`{}` when off) so the base literal carries NO extra branch (keeps
+  // `buildBaseFromArgs` under biome's cognitive-complexity cap). Sets
+  // `base.networkProxy` so `runAgent` constructs the live `LoopbackEgressProxy`
+  // and threads `proxyEnv` into the bash-tool child spawn. Absent / "0" / empty
+  // ⇒ `{}` ⇒ slot omitted ⇒ NO proxy, child env byte-identical (RFC §1.2).
+  const networkProxySlot = resolveNetworkProxySlot(env)
   // ADR-0404 + ADR-0415 — composition-root observability slots. Single helper
   // call: gate ON ⇒ mints the canonical HookBus (the same bus the loop emits
   // `post_tool_use` to), wires attribution onto it, and returns the four ports
@@ -789,6 +811,9 @@ export const buildBaseFromArgs = (
     // hand the surface-built stack to every mode runner via the shared base.
     // Absent ⇒ slot is omitted entirely (`exactOptionalPropertyTypes` → no
     // `undefined` literal on the config) and the loop is byte-identical.
+    // ADR-0428 jun-02 wire — default-OFF socket-level egress proxy. The slot is
+    // `{}` when off (resolved above), so this spread adds no branch here.
+    ...networkProxySlot,
     ...(retrievalStack !== undefined ? { retrievalStack } : {}),
     // ADR-0277/0278 — helper-only search pipeline slot. The loop does not read
     // it directly; surfaces/tooling consume the registered `search_codebase`

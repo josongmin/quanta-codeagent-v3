@@ -164,6 +164,11 @@ type RuntimeBootstrapOverlay = {
   readonly shellSnapshot?: AgentConfig["shellSnapshot"]
   readonly summarizerLlm?: NonNullable<AgentConfig["compaction"]>["summarizerLlm"]
   readonly userInputPort?: AgentConfig["userInputPort"]
+  /** ADR-0428 jun-02 wire — socket-level egress proxy config. When set, the
+   *  base carries `networkProxy` so `runAgent` constructs the live
+   *  `LoopbackEgressProxy` and threads `proxyEnv` into the bash-tool child
+   *  spawn. Absent ⇒ slot omitted (default-OFF, byte-identical). */
+  readonly networkProxy?: AgentConfig["networkProxy"]
 }
 
 interface RuntimeBootstrapHelpers {
@@ -420,6 +425,7 @@ const buildBootstrapBaseShape = (
     ...whenDefined("decisionEmitter", args.overlay?.decisionEmitter),
     ...whenDefined("admissibility", args.overlay?.admissibility),
     ...whenDefined("shellSnapshot", args.overlay?.shellSnapshot),
+    ...whenDefined("networkProxy", args.overlay?.networkProxy),
     ...whenDefined("sessionConfigPort", args.boot.sessionConfigPort),
     sessionEffort: () => args.boot.effortStore.get(),
   })

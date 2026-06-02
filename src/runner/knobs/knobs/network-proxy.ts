@@ -55,6 +55,24 @@ const parseHostList = (raw: string): readonly string[] =>
     .map((h) => h.trim().toLowerCase())
     .filter((h) => h !== "")
 
+/**
+ * Pure env → {@link NetworkProxyConfig} projection (ADR-0428 jun-02 wire). The
+ * composition roots (`apps/cli`, `apps/agent/index.ts`) read `QUANTA_NETWORK_PROXY`
+ * DIRECTLY through this helper — mirroring the `resolveMemoryConfigFromEnv`
+ * pattern — because those surfaces build their `AgentConfig` base WITHOUT routing
+ * through `applyKnobs`. Single source of truth: this delegates to the SAME
+ * {@link parseNetworkProxy} the knob's `apply` uses, so the env→config bytes are
+ * identical whether the framework or the direct read resolves it. Absent / `"0"`
+ * / empty / zero-token ⇒ `undefined` (slot omitted, byte-identical default-OFF).
+ */
+export const resolveNetworkProxyFromEnv = (
+  env: NodeJS.ProcessEnv,
+): { readonly enabled: true; readonly allowlist: readonly string[] } | undefined => {
+  const value = parseNetworkProxy(env.QUANTA_NETWORK_PROXY)
+  if (value === undefined) return undefined
+  return { enabled: true, allowlist: value.allowlist }
+}
+
 const parseNetworkProxy = (raw: string | undefined): NetworkProxyValue | undefined => {
   if (raw === undefined) return undefined
   const s = raw.trim()

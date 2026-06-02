@@ -43,20 +43,45 @@ export interface DecideInput {
   readonly amendments: NetworkPolicyAmendment
 }
 
+/**
+ * Structural cloud-metadata detector (jun-02 SSRF re-audit). Canonicalizes the
+ * host through the WHATWG URL parser (the same normalization the HTTP/CONNECT
+ * paths apply) and compares the dotted result to {@link METADATA_IPV4}. This
+ * replaces a raw `host === "169.254.169.254"` string compare that an obfuscated
+ * form (decimal `2852039166`, hex `0xa9fea9fe`, shorthand) trivially evaded.
+ * Defensive: a parse failure ⇒ fall back to an exact compare on the trimmed
+ * input (still correct for the canonical literal, fails closed otherwise).
+ */
+const isMetadataHost = (host: string): boolean => {
+  const trimmed = host.trim().toLowerCase()
+  if (trimmed === METADATA_IPV4) return true
+  try {
+    return new URL(`http://${trimmed}`).hostname === METADATA_IPV4
+  } catch {
+    return false
+  }
+}
+
 export const decideEgress = (input: DecideInput): EgressDecision => {
   const { host, allowlist, amendments } = input
 
-  // 1. SSRF guard — fail closed on literal internal addresses. The cloud
-  // metadata endpoint gets a dedicated reason (it is the highest-value target);
-  // everything else delegates to the canonical structural classifier.
-  if (host.trim() === METADATA_IPV4) {
-    return {
-      decision: "deny",
-      reason: `SSRF: cloud metadata endpoint (${METADATA_IPV4}) is categorically blocked`,
-    }
-  }
+  // 1. SSRF guard — fail closed on literal internal addresses. The canonical
+  // structural classifier is the SINGLE source of truth (it recognizes
+  // obfuscated IPv4 only AFTER the caller normalized the authority through the
+  // URL parser — see `splitHostPort` / `parseHttpTarget`; jun-02 CONNECT-path
+  // fix). The cloud metadata endpoint gets a DEDICATED reason (highest-value
+  // target) but is detected STRUCTURALLY — `isMetadataHost` normalizes the host
+  // and compares the canonical dotted form to `METADATA_IPV4`, so a decimal
+  // (`2852039166`) / hex / shorthand form that canonicalized to the metadata IP
+  // is caught here too, not by string-equality on the raw input.
   const ssrf = classifyHost(host)
   if (ssrf !== null) {
+    if (isMetadataHost(host)) {
+      return {
+        decision: "deny",
+        reason: `SSRF: cloud metadata endpoint (${METADATA_IPV4}) is categorically blocked`,
+      }
+    }
     return { decision: "deny", reason: `SSRF: ${ssrf} address (${host}) blocked` }
   }
 

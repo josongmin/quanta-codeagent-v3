@@ -424,6 +424,10 @@ async function* bashExecute(input: Input, ctx: ToolContext): AsyncIterable<ToolE
     ...(ctx.onShellEvent ? { onShellEvent: ctx.onShellEvent } : {}),
     ...(ctx.shellSnapshot ? { shellSnapshot: ctx.shellSnapshot } : {}),
     ...(perCallPort !== undefined ? { perCallWrap: buildPerCallWrap(perCallPort) } : {}),
+    // ADR-0428 jun-02 wire — thread the live egress-proxy env so the child's
+    // OWN sockets are funneled through the loopback proxy. Absent ⇒ omitted ⇒
+    // `runShell`'s `withProxyEnv(base, {})` returns the same env (byte-identical).
+    ...(ctx.proxyEnv ? { proxyEnv: ctx.proxyEnv } : {}),
   })
 
   const { status, body } = formatRunBody(r)

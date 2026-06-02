@@ -43,6 +43,24 @@ const DEFAULT_BIND_HOST = "127.0.0.1"
 export type DialTarget = (host: string, port: number) => { host: string; port: number }
 const IDENTITY_DIAL: DialTarget = (host, port) => ({ host, port })
 
+/**
+ * Peer-classification resolver (DI seam, jun-02 SSRF re-audit). Given the
+ * connected upstream socket, returns the address the post-connect SSRF re-check
+ * should CLASSIFY (DNS-rebinding defense). Production omits it ⇒ the resolver
+ * classifies `sock.remoteAddress` (the address the OS actually connected to).
+ *
+ * This is INTENTIONALLY decoupled from {@link DialTarget}: a hermetic test maps
+ * routable NAMES to a loopback origin via `dial`, but the peer it wants the
+ * security guard to JUDGE is the host the name would resolve to in production —
+ * NOT the loopback redirect. Previously the peer re-check was DISABLED whenever
+ * a `dial` DI was present (`peerCheckActive = dial === undefined`), which meant
+ * an injected dial silently turned the rebinding defense OFF. Now the re-check
+ * ALWAYS runs; tests that need a hermetic dial supply `resolvePeerHost` so the
+ * classification still fires on the address they choose (a public hermetic peer
+ * for allow-path tests; an internal literal for the rebinding-block proof).
+ */
+export type ResolvePeerHost = (sock: Socket) => string | undefined
+
 /** Strip a `host:port` (or bracketed IPv6) authority down to the bare host. */
 const bareHost = (authority: string): string => {
   const a = authority.trim().toLowerCase()
@@ -54,9 +72,41 @@ const bareHost = (authority: string): string => {
   return colon === -1 ? a : a.slice(0, colon)
 }
 
-/** Parse `host:port` into a dial target. HTTP default 80, HTTPS CONNECT 443. */
+/**
+ * R-audit (jun-02) SSRF CONNECT-path fix: normalize a raw authority host through
+ * the WHATWG URL parser BEFORE policy classification — EXACTLY as the plain-HTTP
+ * path already does (`new URL(req.url).hostname`). Without this the CONNECT path
+ * decided on the RAW `splitHostPort` host, so obfuscated IPv4 literals
+ * (`2130706433` / `0x7f000001` / `127.1` / decimal-metadata `2852039166`) slipped
+ * past `classifyHost` (which only recognizes DOTTED v4 / v6) and the SSRF guard
+ * was dead on the CONNECT path. `new URL("http://"+host).hostname` canonicalizes
+ * every such form to its dotted equivalent (2130706433 → 127.0.0.1,
+ * 2852039166 → 169.254.169.254), so the SAME `decideEgress` SSRF guard fires.
+ *
+ * Returns the canonical bare hostname (brackets stripped by `bareHost` on the
+ * way in; the URL parser re-adds them for IPv6 so we strip again). On a parse
+ * failure we return the lowercased bare host unchanged — `decideEgress` then
+ * fails closed (an unrecognized form is not on any allowlist).
+ */
+const normalizeHost = (rawBareHost: string): string => {
+  // `bareHost` already stripped IPv6 brackets, so re-bracket a v6 literal for
+  // the URL parser (which requires brackets), else parse the bare form directly.
+  const authority = rawBareHost.includes(":") ? `[${rawBareHost}]` : rawBareHost
+  try {
+    const h = new URL(`http://${authority}`).hostname
+    // IPv6 hostnames come back bracketed from the URL parser; keep the bare form
+    // (classifyHost strips brackets defensively, but the dial wants bare too).
+    return (h.startsWith("[") && h.endsWith("]") ? h.slice(1, -1) : h).toLowerCase()
+  } catch {
+    return rawBareHost.toLowerCase()
+  }
+}
+
+/** Parse `host:port` into a dial target, NORMALIZING the host (URL parser) so the
+ *  CONNECT path classifies obfuscated IPv4 the SAME way the HTTP path does. HTTP
+ *  default 80, HTTPS CONNECT 443. */
 const splitHostPort = (authority: string, defaultPort: number): { host: string; port: number } => {
-  const host = bareHost(authority)
+  const host = normalizeHost(bareHost(authority))
   const a = authority.trim()
   const idx = a.startsWith("[") ? a.indexOf("]:") + 1 : a.lastIndexOf(":")
   const portStr = idx > 0 ? a.slice(idx + 1) : ""
@@ -72,19 +122,24 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
   private readonly now: () => number
 
   private readonly dial: DialTarget
-  /** When a DI dial-override is supplied, the post-connect peer SSRF re-check is
-   *  skipped (the resolver is trusted to map to a hermetic endpoint). Production
-   *  uses the identity dial ⇒ the peer re-check is always ACTIVE. */
-  private readonly peerCheckActive: boolean
+  /** jun-02 SSRF re-audit: the peer SSRF re-check is now ALWAYS active (a DI
+   *  dial no longer disables it). `resolvePeerHost` picks WHICH address gets
+   *  classified — defaults to the real `sock.remoteAddress` in production. */
+  private readonly resolvePeerHost: ResolvePeerHost
 
   constructor(
     private readonly config: NetworkProxyConfig,
-    deps: { now?: () => number; amendments?: NetworkPolicyAmendment; dial?: DialTarget } = {},
+    deps: {
+      now?: () => number
+      amendments?: NetworkPolicyAmendment
+      dial?: DialTarget
+      resolvePeerHost?: ResolvePeerHost
+    } = {},
   ) {
     this.now = deps.now ?? Date.now
     this.amendments = deps.amendments ?? new NetworkPolicyAmendment(this.now)
     this.dial = deps.dial ?? IDENTITY_DIAL
-    this.peerCheckActive = deps.dial === undefined
+    this.resolvePeerHost = deps.resolvePeerHost ?? ((s) => s.remoteAddress)
     this.server = createServer((req, res) => this.onRequest(req, res))
     // The `connect` event types `socket` as `Duplex`; for a TCP CONNECT it is
     // always a `net.Socket`. Narrow it for the tunnel path.
@@ -234,10 +289,13 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
     clientSocket.on("error", drop)
   }
 
-  /** Post-connect: is the resolved peer an SSRF-blocked literal address? */
+  /** Post-connect: is the resolved peer an SSRF-blocked literal address?
+   *  ALWAYS runs (jun-02 re-audit) — `resolvePeerHost` selects the address to
+   *  classify (real `sock.remoteAddress` in production; a test-chosen peer under
+   *  a hermetic dial). A non-IP / empty resolution is treated as "not a literal"
+   *  ⇒ not blocked here (a DNS name was already allowed by the decision layer). */
   private peerIsBlocked(sock: Socket): boolean {
-    if (!this.peerCheckActive) return false // trusted DI dial (tests)
-    const remote = sock.remoteAddress
+    const remote = this.resolvePeerHost(sock)
     if (remote === undefined || remote === "") return false
     if (isIP(remote) === 0) return false
     return classifyHost(remote) !== null

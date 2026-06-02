@@ -11,6 +11,7 @@ import {
   startSpan,
   type TurnTiming,
 } from "@/observability"
+import { withEgressProxy } from "@/runtime/network-proxy"
 import { normalizeRedactionConfig } from "@/security"
 import type { PromptPolicySnapshot, TurnPolicySnapshot } from "@/shared"
 import { abortReasonOf, errMessage, LLMError, logger } from "@/shared"
@@ -2724,7 +2725,7 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
   // the "did we already close in catch?" question.
   let spanStatus: "ok" | "error" | "aborted" = "ok"
   try {
-    const outcome = await runAgentInner(config)
+    const outcome = await runAgentInnerWithEgressProxy(config)
     spanStatus =
       outcome.reason === "aborted" ? "aborted" : outcome.reason === "error" ? "error" : "ok"
     // ADR-0068 Wave D (L4 wire): session-end consolidator hook. Fires ONLY
@@ -2774,6 +2775,28 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
     endSpan(sessionSpan, spanStatus, attrs({}))
   }
 }
+
+/**
+ * ADR-0428 jun-02 wire — the egress-proxy lifecycle keystone. When the
+ * `network-proxy` knob set `config.networkProxy.enabled`, construct + `listen()`
+ * a `LoopbackEgressProxy` (on an ephemeral loopback port) for the WHOLE session,
+ * inject its bound `proxyEnv` onto a per-session config clone, and ALWAYS close
+ * the socket on teardown (normal return OR throw — `withEgressProxy`'s `finally`).
+ * The injected `config.proxyEnv` flows through the dispatch seam onto
+ * `ToolContext.proxyEnv`, so the bash tool threads `HTTP_PROXY`/`HTTPS_PROXY`
+ * into every child spawn — closing the subprocess egress bypass.
+ *
+ * DEFAULT-OFF / byte-identical: knob absent or `enabled !== true` ⇒
+ * `withEgressProxy` constructs NO socket and runs the body with `proxyEnv = {}`,
+ * so `runAgentInner(config)` is called with the UNMODIFIED config reference (no
+ * clone, no `proxyEnv` field) — every interactive turn is unchanged.
+ */
+const runAgentInnerWithEgressProxy = (config: AgentConfig): Promise<AgentOutcome> =>
+  withEgressProxy(config.networkProxy, (ctx) =>
+    runAgentInner(
+      ctx.proxyEnv.address !== undefined ? { ...config, proxyEnv: ctx.proxyEnv } : config,
+    ),
+  )
 
 /** Inner session loop. Identical body to the pre-span path; only the outer
  *  `runAgent` wrapper handles the `session_loop` span. Kept as a separate

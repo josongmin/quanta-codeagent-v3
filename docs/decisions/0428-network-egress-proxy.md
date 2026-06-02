@@ -1,7 +1,7 @@
 # ADR-0428 — Socket-level network egress proxy + runtime policy amendment
 
-**Status:** Accepted (2026-06-02)
-**Type:** New capability slice — closes the subprocess egress bypass. `src/runtime/network-proxy/` (plane-clean leaf, default-OFF). No existing code mutated.
+**Status:** Accepted (2026-06-02); amended jun-02 — LIVE-WIRED into the composition roots + bash/sandbox spawn, and the SSRF CONNECT-path obfuscated-IPv4 hole closed (see "Wiring" + "jun-02 SSRF CONNECT-path fix" below).
+**Type:** New capability slice — closes the subprocess egress bypass. `src/runtime/network-proxy/` leaf + composition-root + bash/sandbox spawn wiring; default-OFF.
 **Absorbs:** Codex `codex_network_proxy` crate (http_proxy / socks5 / mitm) + `NetworkPolicyAmendment`; Cursor in-process proxy with per-connection decision log.
 
 ## Context
@@ -86,14 +86,66 @@ amend→allow→revoke→deny round-trip; SSRF blocked even when allowlisted by 
 - Do **not** let an allowlisted *name* override the SSRF guard — SSRF is checked
   first, categorically.
 - Do **not** bind a routable interface — loopback only (children of THIS host).
+- Do **not** disable the post-connect peer SSRF re-check just because a `dial` DI
+  is injected — the re-check is ALWAYS active; the `ResolvePeerHost` DI only
+  chooses WHICH resolved address to classify (jun-02 re-audit).
+- Do **not** classify the CONNECT authority on the RAW host — normalize through
+  the URL parser first (mirror the HTTP path) so obfuscated IPv4 cannot evade
+  the SSRF guard.
 
-## Wiring (follow-up, for cherry-pick)
+## Wiring (LIVE as of jun-02 — was dead, now enforced)
 
-Default-OFF seam; not yet wired into a composition root. To activate:
-1. Construct `new LoopbackEgressProxy({ enabled, allowlist }, …)` from the active
-   mode's `NetworkLever` allowlist (reuse `buildNetworkDispatchGuard`'s source
-   when `posture === "allowlist"`), `await listen()`.
-2. At every child spawn site (`src/runtime/guarded-spawn.ts` `withSpawnedChild`,
-   shell/git spawns), pass `withProxyEnv(baseEnv, { address: proxy.address() })`
-   as the child env.
-3. Tear down via `proxy.close()` on session end.
+The original slice shipped default-OFF but **was never wired into a composition
+root** — `cfg.networkProxy` was set by the knob, `withEgressProxy` had ZERO
+production callers, and no `runShell` site passed `proxyEnv`. So
+`QUANTA_NETWORK_PROXY=1` enforced **nothing** (false security). The jun-02 wire
+closes that:
+
+1. **Composition roots** read `QUANTA_NETWORK_PROXY` DIRECTLY (mirroring
+   `resolveMemoryConfigFromEnv`) and set `AgentConfig.networkProxy`:
+   - `src/apps/agent/index.ts` `buildBaseFromArgs` → `resolveNetworkProxySlot(env)`.
+   - `src/apps/cli` via the host overlay
+     (`src/apps/cli/repl/runtime-context-compose.ts` →
+     `RuntimeBootstrapOverlay.networkProxy` →
+     `src/host/runtime/internal/context-binding.ts` base build).
+   The single env→config projection lives in
+   `resolveNetworkProxyFromEnv` (`src/runner/knobs/knobs/network-proxy.ts`), reused
+   by both roots so the bytes are identical.
+2. **Lifecycle** is owned by `runAgent` (`src/agent/loop.ts`
+   `runAgentInnerWithEgressProxy`): when `networkProxy.enabled`, `withEgressProxy`
+   constructs + `listen()`s the `LoopbackEgressProxy` for the whole session,
+   injects the bound `proxyEnv` onto the per-session config clone, and ALWAYS
+   `close()`s on teardown (its `finally`).
+3. **Child-spawn injection**: the dispatch seam (`src/agent/dispatch.ts`
+   `buildToolContext`) surfaces `config.proxyEnv` on `ToolContext.proxyEnv`; the
+   bash tool (`src/tool/bash/index.ts`) forwards it to `runShell`
+   (`src/runtime/shell.ts`, which already consumes `options.proxyEnv`). Also wired:
+   `LocalSandbox.run` (`src/runtime/sandbox.ts`) via `SandboxPolicy.proxyEnv`.
+
+**Spawn sites — wired vs tracked gap:**
+
+| spawn site | status |
+|---|---|
+| `runShell` (bash tool — PRIMARY LLM egress) | **WIRED** |
+| `LocalSandbox.run` (`runtime/sandbox.ts`) | **WIRED** (via `SandboxPolicy.proxyEnv`) |
+| `bash-bg-registry.ts` (background detached shells) | **TRACKED GAP** — not threaded; a `timeout_behavior:"background"` shell can still open an ungated socket |
+| git tool direct argv spawns | **TRACKED GAP** — not threaded |
+| `DockerSandbox.run` | forwards `HTTP_PROXY`/etc. through `envAllowlist` (already allowlisted) but is not actively proxy-aware |
+
+Closing the gaps means threading `ctx.proxyEnv` into the bg-registry's
+`register()`/spawn and the git tool's spawn options — a mechanical follow-up; the
+seam (`ProxyEnvInput`) is already the same everywhere.
+
+## jun-02 SSRF CONNECT-path fix (BUG2)
+
+The plain-HTTP path normalized the host via `new URL().hostname` (catching
+`2130706433` / `0x7f000001` / `127.1`), but `onConnect` used a raw `splitHostPort`
+with NO normalization and `classifyHost` returns `null` for non-dotted forms — so
+the SSRF guard was **dead on the CONNECT path** for obfuscated IPv4, and the
+metadata special-case was exact-string `=== "169.254.169.254"` (evaded by decimal
+`2852039166`). Fix: `splitHostPort` now normalizes the authority through
+`new URL("http://"+authority).hostname` BEFORE classification (mirrors the HTTP
+path); the metadata check is **structural** (`isMetadataHost` canonicalizes then
+compares). The post-connect peer SSRF re-check is now **always active** (a separate
+`ResolvePeerHost` DI selects the address to classify; an injected `dial` no longer
+disables the rebinding defense).

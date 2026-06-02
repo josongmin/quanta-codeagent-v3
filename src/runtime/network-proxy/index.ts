@@ -18,7 +18,7 @@ export {
   type EgressProxyDeps,
   withEgressProxy,
 } from "./lifecycle"
-export { type DialTarget, LoopbackEgressProxy } from "./loopback-proxy"
+export { type DialTarget, LoopbackEgressProxy, type ResolvePeerHost } from "./loopback-proxy"
 export type { NetworkProxyPort } from "./port"
 export { METADATA_IPV4 } from "./ssrf"
 export type {

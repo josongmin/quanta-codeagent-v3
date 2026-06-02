@@ -235,6 +235,22 @@ export interface ToolContext {
    *  from `AgentConfig.fastApplyFallback`. ABSENT ⇒ exact pre-ADR behavior
    *  (the V4A error throws immediately, NO fallback attempt, byte-identical). */
   fastApplyFallback?: FastApplyFallbackSeam
+  /** ADR-0428 jun-02 wire — OPTIONAL socket-level egress proxy env. When the
+   *  `network-proxy` knob is active, a composition root / `runAgent` constructs
+   *  + `listen()`s a `LoopbackEgressProxy` and the dispatch seam surfaces the
+   *  bound proxy's `{ address, noProxy }` here. The bash tool forwards it
+   *  VERBATIM to `runShell` via `ShellOptions.proxyEnv` so the spawned child's
+   *  OWN sockets are funneled through the proxy (closing the subprocess egress
+   *  bypass). Absent (or `address` undefined) ⇒ `withProxyEnv` returns the same
+   *  base env reference and the child is byte-identical (legacy). Duck-typed
+   *  (structural mirror of `ProxyEnvInput` in `@/runtime/network-proxy` — same
+   *  shape `ShellOptions.proxyEnv` already accepts) so `@/tool` stays slice-
+   *  isolated from `@/agent`; the dispatch seam wires it from
+   *  `AgentConfig.proxyEnv`. */
+  proxyEnv?: {
+    readonly address?: { readonly host: string; readonly port: number }
+    readonly noProxy?: readonly string[]
+  }
 }
 
 /** ADR-0421 — duck-typed mirror of `FastApplyFallbackPort` from

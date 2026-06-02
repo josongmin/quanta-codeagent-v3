@@ -20,7 +20,7 @@ import type {
 } from "@/permission"
 import type { CommitEmbedder, EmbeddingPort, RerankPort, RerankRegistry } from "@/retrieval"
 import type { RulesStore } from "@/rules"
-import type { NetworkProxyConfig } from "@/runtime/network-proxy"
+import type { NetworkProxyConfig, ProxyEnvInput } from "@/runtime/network-proxy"
 import type { OsSandbox } from "@/runtime/os-sandbox"
 import type { RedactionConfig } from "@/security"
 import type { RunContext } from "@/shared"
@@ -763,6 +763,17 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * `@/runtime/network-proxy`; wired by the `network-proxy` knob.
    */
   networkProxy?: NetworkProxyConfig
+  /**
+   * ADR-0428 jun-02 wire — the LIVE, resolved proxy-env handle produced AFTER a
+   * composition root (or `runAgent`) constructs + `listen()`s the
+   * `LoopbackEgressProxy` from {@link networkProxy}. Carries the bound loopback
+   * `address` (+ `noProxy`); `runAgent` sets it on the per-session config clone
+   * so the dispatch seam can surface it on `ToolContext.proxyEnv` and the bash
+   * tool injects `HTTP_PROXY`/`HTTPS_PROXY` into the child spawn. NOT operator-
+   * set: `networkProxy` is the static config, this is its runtime materialization.
+   * Absent ⇒ no proxy bound ⇒ child env byte-identical (legacy path).
+   */
+  proxyEnv?: ProxyEnvInput
   /**
    * ADR-0116 Shadow git ODB seam (ADR-0108 keystone). When set AND
    * `branchSearch` is also wired, `buildBranchSearchTool` constructs a

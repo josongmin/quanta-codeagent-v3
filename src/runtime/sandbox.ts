@@ -1,5 +1,6 @@
 import { QuantaError } from "@/shared"
 import { escalatingKill, withSpawnedChild } from "./guarded-spawn"
+import { type ProxyEnvInput, withProxyEnv } from "./network-proxy"
 import { disclaimedShellArgv } from "./shell-disclaim"
 import type { ShellResult } from "./types"
 
@@ -36,6 +37,15 @@ export interface SandboxPolicy {
    *  (legacy behavior: `bash -lc` sources `.bashrc`/`.profile`). Tier-0
    *  absorption #0-2. */
   disclaimShell?: boolean
+  /** ADR-0428 jun-02 wire — socket-level egress proxy env. When set with a bound
+   *  `address`, the spawned child gets `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` (via
+   *  {@link withProxyEnv}) so its OWN sockets are funneled through the loopback
+   *  egress proxy — the SAME bypass-closure `runShell` applies. Only
+   *  {@link LocalSandbox} honors this (it spawns in-process). `DockerSandbox`
+   *  forwards proxy vars through its `envAllowlist` (HTTP_PROXY etc. are already
+   *  in {@link DEFAULT_ENV_ALLOWLIST}). Absent / no `address` ⇒ `withProxyEnv`
+   *  returns the same scrubbed env reference (byte-identical legacy). */
+  proxyEnv?: ProxyEnvInput
 }
 
 /** A command runner that applies a {@link SandboxPolicy} before/around the run. */
@@ -177,7 +187,13 @@ const capOutput = (text: string, maxBytes: number | undefined): string => {
  */
 export class LocalSandbox implements Sandbox {
   async run(command: string, policy: SandboxPolicy = {}): Promise<ShellResult> {
-    const env = scrubEnv(policy.envAllowlist ?? DEFAULT_ENV_ALLOWLIST)
+    // ADR-0428 jun-02 wire — inject the egress proxy env over the scrubbed base
+    // so a LocalSandbox child's OWN sockets are gated too (closing the same
+    // bypass `runShell` closes). Absent ⇒ `withProxyEnv` returns the same env.
+    const env = withProxyEnv(
+      scrubEnv(policy.envAllowlist ?? DEFAULT_ENV_ALLOWLIST),
+      policy.proxyEnv ?? {},
+    )
     const cwd = this.resolveCwd(policy.cwdJail)
     const timeoutMs = policy.timeoutMs ?? DEFAULT_TIMEOUT_MS
     let timedOut = false

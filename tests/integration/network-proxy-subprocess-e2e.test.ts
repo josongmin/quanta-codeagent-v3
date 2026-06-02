@@ -30,6 +30,7 @@ import {
   type NetworkPolicyAmendment,
   type NetworkProxyConfig,
   PROXY_ENV_KEYS,
+  type ResolvePeerHost,
   withEgressProxy,
 } from "@/../src/runtime/network-proxy"
 import { runShell } from "@/../src/runtime/shell"
@@ -42,6 +43,13 @@ let originPort: number
  *  test offline while exercising routable NAMES through the real allow/deny
  *  policy + real child sockets. */
 const toOrigin = (): DialTarget => () => ({ host: "127.0.0.1", port: originPort })
+
+/** jun-02 SSRF re-audit: the post-connect peer re-check now ALWAYS runs, so a
+ *  hermetic loopback dial would be classified as loopback and (correctly) block
+ *  the allow path. ALLOW-path tests resolve the peer to a PUBLIC literal (RFC
+ *  5737 TEST-NET-3 ⇒ classifyHost returns null) — the address the routable name
+ *  would resolve to in production. */
+const publicPeer: ResolvePeerHost = () => "203.0.113.10"
 
 beforeAll(async () => {
   origin = createServer((_req, res) => {
@@ -95,7 +103,11 @@ interface ChildVerdict {
 const childThroughProxy = async (
   config: NetworkProxyConfig | undefined,
   targetHost: string,
-  opts: { dial?: DialTarget; amend?: (a: NetworkPolicyAmendment) => void } = {},
+  opts: {
+    dial?: DialTarget
+    resolvePeerHost?: ResolvePeerHost
+    amend?: (a: NetworkPolicyAmendment) => void
+  } = {},
 ): Promise<ChildVerdict> =>
   withEgressProxy(
     config,
@@ -112,7 +124,10 @@ const childThroughProxy = async (
         log: ctx.proxy?.decisionLog() ?? [],
       }
     },
-    opts.dial !== undefined ? { dial: opts.dial } : {},
+    {
+      ...(opts.dial !== undefined ? { dial: opts.dial } : {}),
+      ...(opts.resolvePeerHost !== undefined ? { resolvePeerHost: opts.resolvePeerHost } : {}),
+    },
   )
 
 describe("network-proxy subprocess e2e — real child socket forced through proxy", () => {
@@ -120,7 +135,7 @@ describe("network-proxy subprocess e2e — real child socket forced through prox
     const { line, log } = await childThroughProxy(
       { enabled: true, allowlist: ["allowed.test"] },
       "allowed.test",
-      { dial: toOrigin() },
+      { dial: toOrigin(), resolvePeerHost: publicPeer },
     )
     expect(line).toBe("STATUS=200")
     expect(log.at(-1)?.decision).toBe("allow")
@@ -151,6 +166,7 @@ describe("network-proxy subprocess e2e — runtime amendment allows after approv
     // Second call: amend the host into the LIVE allow-set before the child runs.
     const allowed = await childThroughProxy({ enabled: true, allowlist: [] }, "amend.example.com", {
       dial: toOrigin(),
+      resolvePeerHost: publicPeer,
       amend: (amendments) =>
         amendments.amend({
           host: "amend.example.com",

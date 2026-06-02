@@ -17,6 +17,7 @@ import {
   type DialTarget,
   LoopbackEgressProxy,
   PROXY_ENV_KEYS,
+  type ResolvePeerHost,
   withProxyEnv,
 } from "@/../src/runtime/network-proxy"
 
@@ -28,6 +29,20 @@ let originPort: number
  *  test offline while still exercising routable NAMES (not loopback literals)
  *  through the real allow/deny policy + real sockets. */
 const toOrigin = (): DialTarget => () => ({ host: "127.0.0.1", port: originPort })
+
+/** jun-02 SSRF re-audit: the post-connect peer re-check now ALWAYS runs, so a
+ *  hermetic `dial` to loopback would otherwise be (correctly) classified as
+ *  loopback and BLOCK the allow path. For allow-path tests we resolve the peer
+ *  to a PUBLIC literal (RFC 5737 TEST-NET-3, classified as a public IP ⇒ not
+ *  SSRF) — the host the routable NAME would resolve to in production. */
+const publicPeer: ResolvePeerHost = () => "203.0.113.10"
+
+/** Hermetic DI bundle for ALLOW-path tests: dial to the loopback origin, but
+ *  classify the peer as the public address the name resolves to in production. */
+const hermeticAllow = (): { dial: DialTarget; resolvePeerHost: ResolvePeerHost } => ({
+  dial: toOrigin(),
+  resolvePeerHost: publicPeer,
+})
 
 beforeAll(async () => {
   origin = createServer((_req, res) => {
@@ -94,7 +109,7 @@ describe("network-proxy e2e — plain HTTP forward", () => {
   test("allowlisted host → 200 tunneled, 'allow' logged", async () => {
     const proxy = new LoopbackEgressProxy(
       { enabled: true, allowlist: ["allowed.test"] },
-      { dial: toOrigin() },
+      hermeticAllow(),
     )
     const { port } = await proxy.listen()
     try {
@@ -130,7 +145,7 @@ describe("network-proxy e2e — CONNECT tunnel", () => {
   test("allowlisted authority → 200 Connection Established", async () => {
     const proxy = new LoopbackEgressProxy(
       { enabled: true, allowlist: ["allowed.test"] },
-      { dial: toOrigin() },
+      hermeticAllow(),
     )
     const { port } = await proxy.listen()
     try {
@@ -157,7 +172,7 @@ describe("network-proxy e2e — CONNECT tunnel", () => {
 
 describe("network-proxy e2e — runtime amendment (post-approval)", () => {
   test("denied → amend(host) → allowed + 'amended-allow' logged → revoke → denied", async () => {
-    const proxy = new LoopbackEgressProxy({ enabled: true, allowlist: [] }, { dial: toOrigin() })
+    const proxy = new LoopbackEgressProxy({ enabled: true, allowlist: [] }, hermeticAllow())
     const { port } = await proxy.listen()
     try {
       // 1. off-list (empty allowlist) → denied

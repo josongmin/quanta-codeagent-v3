@@ -6,6 +6,7 @@ import type { SessionBootstrapResult } from "@/host/bootstrap"
 import type { ResponsesContinuationStore } from "@/llm"
 import type { PermissionStore, ToolAction } from "@/permission"
 import type { PendingApprovalView } from "@/protocol/session"
+import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
 import { composeRuntimeBootstrapContext, type RuntimeContext } from "@/sdk/runtime"
 import { decisionEmitterFromStream, type StreamPort } from "@/stream"
 import { diffPreviewEnabled, renderActionDiff } from "../diff-preview"
@@ -87,6 +88,9 @@ const buildBootstrapContextArgs = (args: {
   readonly sandboxProfile: CliReviewerSandboxProfile
   readonly permissionStore: PermissionStore | undefined
   readonly autoReview: ReturnType<typeof createClassifierBackedAutoReview> | undefined
+  /** ADR-0428 jun-02 wire — composition-root env view used for the DIRECT
+   *  `QUANTA_NETWORK_PROXY` read (mirrors `resolveMemoryConfigFromEnv`). */
+  readonly env: Readonly<Record<string, string | undefined>>
 }): Parameters<typeof composeRuntimeBootstrapContext>[0] => {
   const {
     boot,
@@ -99,7 +103,12 @@ const buildBootstrapContextArgs = (args: {
     sandboxProfile,
     permissionStore,
     autoReview,
+    env,
   } = args
+  // ADR-0428 jun-02 wire — DIRECT env read of `QUANTA_NETWORK_PROXY` (this
+  // surface builds its base via the host overlay, not `applyKnobs`). Absent /
+  // "0" / empty ⇒ `undefined` ⇒ overlay slot omitted ⇒ NO proxy, byte-identical.
+  const networkProxy = resolveNetworkProxyFromEnv(env as NodeJS.ProcessEnv)
   const shellSnapshot = buildShellSnapshotConfig()
   return {
     boot,
@@ -122,6 +131,7 @@ const buildBootstrapContextArgs = (args: {
           materializeReviewerAgent: () => materializeReviewerAgent(boot),
         }),
       ...(shellSnapshot !== undefined ? { shellSnapshot } : {}),
+      ...(networkProxy !== undefined ? { networkProxy } : {}),
     },
   }
 }
@@ -206,6 +216,7 @@ export const composeCliRuntimeContext = async (
       sandboxProfile,
       permissionStore,
       autoReview,
+      env: args.envSource ?? process.env,
     }),
     ...(args.convStore !== undefined || args.responsesStore !== undefined
       ? {

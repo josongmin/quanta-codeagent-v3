@@ -435,6 +435,10 @@ const buildToolContext = (args: {
     ...(config.fastApplyFallback !== undefined
       ? { fastApplyFallback: config.fastApplyFallback }
       : {}),
+    // ADR-0428 jun-02 wire — surface the LIVE proxy-env (bound loopback address)
+    // so shell-class tools inject HTTP(S)_PROXY into the child spawn. ABSENT ⇒
+    // omitted ⇒ `withProxyEnv` returns the same base env (byte-identical legacy).
+    ...(config.proxyEnv !== undefined ? { proxyEnv: config.proxyEnv } : {}),
   }
 }
 
