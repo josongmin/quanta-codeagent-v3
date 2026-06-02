@@ -207,12 +207,24 @@ describe("ADR-0299 host-bootstrap-extraction hellgate", () => {
     expect(offenders).toEqual([])
   })
 
-  test("4. src/apps/cli/repl/** does NOT contain a STANDALONE `materializeReviewerAgent(` call", () => {
-    // The standalone caller form would be `materializeReviewerAgent(...)` —
-    // a direct import-and-call. Calling it through the boot result
-    // (`boot.materializeReviewerAgent(...)`) IS allowed; that's the dep
-    // bundle re-exposing the surface-supplied closure.
-    const offenders = grepDir("src/apps/cli/repl", /(^|[^.\w])materializeReviewerAgent\s*\(/m)
+  test("4. src/apps/cli/repl/** does NOT IMPORT the `materializeReviewerAgent` symbol (standalone-caller precursor)", () => {
+    // The forbidden standalone caller form is a direct import-and-call:
+    //   import { materializeReviewerAgent } from "..."
+    //   ... materializeReviewerAgent(...)
+    // The extraction boundary is that the repl never *imports* this symbol;
+    // it must only ever reach it as a surface-supplied closure.
+    //
+    // Calling it through the boot result (`boot.materializeReviewerAgent(...)`)
+    // IS allowed, and so is re-exposing the closure that the SDK-runtime
+    // overlay builder INJECTS as a destructured parameter, e.g.
+    //   admissibilityBuilder: ({ materializeReviewerAgent }) =>
+    //     buildAdmissibility({ materializeReviewerAgent: () => materializeReviewerAgent(boot) })
+    //   ...
+    //   const reviewerAgent = materializeReviewerAgent() // closure from `args`
+    // In both forms the symbol is a parameter, never an import — so scanning
+    // call-sites false-positives. We assert the genuine boundary instead: the
+    // symbol is never pulled in via an `import` statement.
+    const offenders = grepDir("src/apps/cli/repl", /import[^;]*\bmaterializeReviewerAgent\b/m)
     expect(offenders).toEqual([])
   })
 
