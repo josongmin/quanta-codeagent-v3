@@ -618,22 +618,34 @@ describe("HELL-MAT-18: empty injector result ⇒ empty prompt-section string", (
   })
 })
 
-// ─── HELL-MAT-19: env QUANTA_MEMORY_AUTO off ⇒ byte-identical ──────────
+// ─── HELL-MAT-19: env QUANTA_MEMORY_AUTO falsey ⇒ disabled (ADR-0413) ──
 
-describe("HELL-MAT-19: QUANTA_MEMORY_AUTO unset ⇒ assembleMemoryAuto returns null (byte-identical)", () => {
-  test("env absent ⇒ null; env='off' ⇒ null; env='1' ⇒ null (only 'on' enables)", () => {
-    expect(assembleMemoryAuto({})).toBeNull()
+describe("HELL-MAT-19: assembleMemoryAuto is DEFAULT-ON; only falsey QUANTA_MEMORY_AUTO disables (ADR-0413)", () => {
+  // ADR-0413 (Accepted 2026-05-28) flipped memory learning to DEFAULT-ON via
+  // the session factory. The auto-trigger wire now uses `parseEnvFlag(raw,
+  // /*defaultOn*/ true)`, so absent / "1" / "true" / "on" all ENABLE and only
+  // the explicit falsey set ({0,false,off,no}, case-insensitive, trimmed)
+  // returns null. The legacy "only 'on' enables" default-OFF contract is
+  // superseded — this case now locks the inverse truth table.
+  test("falsey set ⇒ null; absent / truthy aliases ⇒ enabled", () => {
+    // Falsey ⇒ disabled (null).
     expect(assembleMemoryAuto({ QUANTA_MEMORY_AUTO: "off" })).toBeNull()
-    expect(assembleMemoryAuto({ QUANTA_MEMORY_AUTO: "1" })).toBeNull()
-    expect(assembleMemoryAuto({ QUANTA_MEMORY_AUTO: "true" })).toBeNull()
-    expect(assembleMemoryAuto({ QUANTA_MEMORY_AUTO: "ON" })).toBeNull()
+    expect(assembleMemoryAuto({ QUANTA_MEMORY_AUTO: "0" })).toBeNull()
+    expect(assembleMemoryAuto({ QUANTA_MEMORY_AUTO: "false" })).toBeNull()
+    expect(assembleMemoryAuto({ QUANTA_MEMORY_AUTO: "no" })).toBeNull()
+    expect(assembleMemoryAuto({ QUANTA_MEMORY_AUTO: "OFF" })).toBeNull()
+    // Absent + truthy aliases ⇒ enabled (default-ON).
+    expect(assembleMemoryAuto({})).not.toBeNull()
+    expect(assembleMemoryAuto({ QUANTA_MEMORY_AUTO: "1" })).not.toBeNull()
+    expect(assembleMemoryAuto({ QUANTA_MEMORY_AUTO: "true" })).not.toBeNull()
+    expect(assembleMemoryAuto({ QUANTA_MEMORY_AUTO: "ON" })).not.toBeNull()
   })
 
-  test("trigger does not invoke phase1 when host omits the slot (control flow)", async () => {
+  test("explicit off-switch returns null so the host skips trigger construction", async () => {
     // When the composition root returns null from assembleMemoryAuto, the
-    // host does NOT construct DefaultMemoryAutoTrigger. Smoke-test the
-    // control flow by asserting that absent-config gives null.
-    const cfg = assembleMemoryAuto({})
+    // host does NOT construct DefaultMemoryAutoTrigger. Under ADR-0413
+    // default-ON, the off-path is reached via the explicit `=off` knob.
+    const cfg = assembleMemoryAuto({ QUANTA_MEMORY_AUTO: "off" })
     expect(cfg).toBeNull()
   })
 })
