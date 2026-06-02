@@ -22,6 +22,8 @@ import { describe, expect, test } from "bun:test"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { gitCommitTool } from "@/tool/git/commit"
 import {
+  buildCommitAuthorPrompt,
+  diffToScopes,
   gitComposeCommitTool,
   gitComposePrTool,
   parseConventionalCommit,
@@ -362,5 +364,175 @@ describe("default-OFF registry seam", () => {
       "git_compose_pr",
     ])
     expect(baseline.every((n) => withAuthor.includes(n))).toBe(true)
+  })
+})
+
+// ── ADR-0451: diff-derived scope inference ──────────────────────────────────
+
+/** Build a minimal but realistic staged-diff section for one file with `adds`
+ *  added + `dels` removed body lines. */
+const fileSection = (path: string, adds = 1, dels = 0): string => {
+  const lines = [`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`, "@@ -1 +1 @@"]
+  for (let i = 0; i < dels; i++) lines.push(`-old${i}`)
+  for (let i = 0; i < adds; i++) lines.push(`+new${i}`)
+  return lines.join("\n")
+}
+
+describe("diffToScopes (pure, deterministic)", () => {
+  test("empty diff → no candidates", () => {
+    expect(diffToScopes("")).toEqual([])
+  })
+
+  test("src/<seg>, packages/<seg>, apps/<seg> → first segment under the root", () => {
+    expect(diffToScopes(fileSection("src/auth/login.ts"))).toEqual(["auth"])
+    expect(diffToScopes(fileSection("packages/db/client.ts"))).toEqual(["db"])
+    expect(diffToScopes(fileSection("apps/web/page.tsx"))).toEqual(["web"])
+  })
+
+  test("nested files under apps/<app>/src/... still vote for the app segment", () => {
+    expect(diffToScopes(fileSection("apps/web/src/components/Btn.tsx"))).toEqual(["web"])
+  })
+
+  test("root-level files → NO candidates (byte-identical regression anchor)", () => {
+    const diff = [fileSection("README.md"), fileSection("package.json")].join("\n")
+    expect(diffToScopes(diff)).toEqual([])
+  })
+
+  test("file directly under a root with no further segment → no scope", () => {
+    expect(diffToScopes(fileSection("src/index.ts"))).toEqual([])
+  })
+
+  test("unrecognized root (e.g. test/, vendor/) → no scope", () => {
+    expect(diffToScopes(fileSection("test/foo/bar.ts"))).toEqual([])
+    expect(diffToScopes(fileSection("vendor/x/y.ts"))).toEqual([])
+  })
+
+  test("multi-module → ordered most-touched (files) first", () => {
+    // auth: 2 files, ui: 1 file → auth ranks first regardless of line counts.
+    const diff = [
+      fileSection("src/auth/a.ts"),
+      fileSection("src/auth/b.ts"),
+      fileSection("src/ui/c.ts", 50),
+    ].join("\n")
+    expect(diffToScopes(diff)).toEqual(["auth", "ui"])
+  })
+
+  test("tie on files broken by lines-changed DESC", () => {
+    // both 1 file; ui has more changed lines → ui first.
+    const diff = [fileSection("src/auth/a.ts", 1), fileSection("src/ui/c.ts", 9, 9)].join("\n")
+    expect(diffToScopes(diff)).toEqual(["ui", "auth"])
+  })
+
+  test("tie on files AND lines broken by scope name ASC (deterministic)", () => {
+    const diff = [fileSection("src/zoo/a.ts", 3), fileSection("src/apple/b.ts", 3)].join("\n")
+    expect(diffToScopes(diff)).toEqual(["apple", "zoo"])
+  })
+
+  test("de-duplicates: many files in one module → single candidate", () => {
+    const diff = [
+      fileSection("src/auth/a.ts"),
+      fileSection("src/auth/b.ts"),
+      fileSection("src/auth/c.ts"),
+    ].join("\n")
+    expect(diffToScopes(diff)).toEqual(["auth"])
+  })
+
+  test("pure deletion (+++ /dev/null) still votes via the pre-image path", () => {
+    const diff = [
+      "diff --git a/src/auth/old.ts b/src/auth/old.ts",
+      "--- a/src/auth/old.ts",
+      "+++ /dev/null",
+      "@@ -1 +0 @@",
+      "-gone",
+    ].join("\n")
+    expect(diffToScopes(diff)).toEqual(["auth"])
+  })
+})
+
+describe("buildCommitAuthorPrompt: scope hint additive + byte-identical", () => {
+  const diff = "diff --git a/x b/x\n+added"
+
+  test("no candidates → prompt byte-identical to the no-hint path", () => {
+    const withEmpty = buildCommitAuthorPrompt(diff, false, undefined, [])
+    const without = buildCommitAuthorPrompt(diff, false, undefined)
+    const withUndef = buildCommitAuthorPrompt(diff, false, undefined, undefined)
+    expect(withEmpty).toBe(without)
+    expect(withUndef).toBe(without)
+    expect(without).not.toContain("Suggested scope")
+  })
+
+  test("candidates present → hint line listing the modules", () => {
+    const p = buildCommitAuthorPrompt(diff, false, undefined, ["auth", "ui"])
+    expect(p).toContain("Suggested scope")
+    expect(p).toContain("auth, ui")
+    expect(p).toContain("If none fit")
+  })
+})
+
+describe("parseConventionalCommit: soft scope-off-suggestion signal", () => {
+  test("authored scope NOT in suggestions → scopeOffSuggestion:true (no rejection)", () => {
+    const p = parseConventionalCommit("feat(authentication): x", ["auth"])
+    expect(p.conventional).toBe(true) // still a valid, usable commit
+    expect(p.scope).toBe("authentication")
+    expect(p.scopeOffSuggestion).toBe(true)
+  })
+
+  test("authored scope IN suggestions → scopeOffSuggestion:false", () => {
+    const p = parseConventionalCommit("feat(auth): x", ["auth", "ui"])
+    expect(p.scopeOffSuggestion).toBe(false)
+  })
+
+  test("no suggestions → field absent (byte-identical structured payload)", () => {
+    const p = parseConventionalCommit("feat(auth): x")
+    expect("scopeOffSuggestion" in p).toBe(false)
+    const pEmpty = parseConventionalCommit("feat(auth): x", [])
+    expect("scopeOffSuggestion" in pEmpty).toBe(false)
+  })
+
+  test("no authored scope but suggestions present → field absent (nothing to flag)", () => {
+    const p = parseConventionalCommit("feat: x", ["auth"])
+    expect(p.scope).toBeUndefined()
+    expect("scopeOffSuggestion" in p).toBe(false)
+  })
+})
+
+describe("git_compose_commit: end-to-end scope hint wiring", () => {
+  test("scoped diff → author prompt carries the suggested scope", async () => {
+    const author = new FakeAuthor(text("feat(auth): add login"))
+    const t = gitComposeCommitTool(
+      fakeRunner(() => hasDiff(fileSection("src/auth/login.ts"))).runner,
+      author,
+    )
+    const res = await drain(t.execute({}, ctx()))
+    expect(res.ok).toBe(true)
+    const sent = author.inputs[0]?.messages[0]?.content[0] as { type: "text"; text: string }
+    expect(sent.text).toContain("Suggested scope")
+    expect(sent.text).toContain("auth")
+    // scope matched the suggestion → soft signal false
+    expect((res.structured as { scopeOffSuggestion?: boolean }).scopeOffSuggestion).toBe(false)
+  })
+
+  test("root-only diff → NO hint line (byte-identical prompt) + no soft signal", async () => {
+    const author = new FakeAuthor(text("docs: update readme"))
+    const t = gitComposeCommitTool(
+      fakeRunner(() => hasDiff(fileSection("README.md"))).runner,
+      author,
+    )
+    const res = await drain(t.execute({}, ctx()))
+    expect(res.ok).toBe(true)
+    const sent = author.inputs[0]?.messages[0]?.content[0] as { type: "text"; text: string }
+    expect(sent.text).not.toContain("Suggested scope")
+    expect("scopeOffSuggestion" in (res.structured as object)).toBe(false)
+  })
+
+  test("author drifts off the suggested scope → soft signal true, commit NOT blocked", async () => {
+    const author = new FakeAuthor(text("feat(authentication): add login"))
+    const t = gitComposeCommitTool(
+      fakeRunner(() => hasDiff(fileSection("src/auth/login.ts"))).runner,
+      author,
+    )
+    const res = await drain(t.execute({}, ctx()))
+    expect(res.ok).toBe(true) // never a rejection
+    expect((res.structured as { scopeOffSuggestion?: boolean }).scopeOffSuggestion).toBe(true)
   })
 })

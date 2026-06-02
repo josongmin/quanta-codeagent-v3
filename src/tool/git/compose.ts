@@ -68,6 +68,136 @@ const truncate = (s: string, max: number): { text: string; truncated: boolean } 
 }
 
 // ===========================================================================
+// Scope inference from the staged diff (pure, deterministic) — ADR-0451
+// ===========================================================================
+
+/** Recognized source roots. A path's scope is the FIRST segment UNDER one of
+ *  these roots (`<root>/<scope>/…`). For `apps/`/`packages/` monorepo layouts
+ *  the scope is the package/app name (the segment right after the root); for a
+ *  flat `src/` layout it is the top-level module under `src/`. This is the
+ *  smallest set that covers the three layouts the task names (src/, packages/,
+ *  apps/) and is the ONLY tunable — it is a structural fact about the repo
+ *  layout, not a magic number. */
+const SCOPE_ROOTS: readonly string[] = ["src", "packages", "apps"]
+
+/** Accumulator for one scope candidate while scanning the diff. */
+interface ScopeTally {
+  scope: string
+  files: number
+  lines: number
+}
+
+/** Extract the post-image path from a unified-diff `diff --git a/… b/…` or
+ *  `+++ b/…` header. Returns null for `/dev/null` (pure deletion → use the
+ *  pre-image instead) and for malformed headers. */
+const pathFromHeader = (line: string): string | null => {
+  if (line.startsWith("+++ ")) {
+    const p = line.slice(4).trim()
+    if (p === "/dev/null") return null
+    return p.startsWith("b/") ? p.slice(2) : p
+  }
+  if (line.startsWith("--- ")) {
+    const p = line.slice(4).trim()
+    if (p === "/dev/null") return null
+    return p.startsWith("a/") ? p.slice(2) : p
+  }
+  return null
+}
+
+/** Map a repo-relative path to its scope candidate, or null when the path has
+ *  no recognized scope. Rule: the scope is the first DIRECTORY segment under a
+ *  {@link SCOPE_ROOTS} root — `src/auth/login.ts` → `auth`,
+ *  `packages/db/x.ts` → `db`, `apps/web/y.ts` → `web`. We require at least
+ *  three segments (`root/scope/leaf`) so that the scope segment is provably a
+ *  directory and not a file. A file DIRECTLY under a root (`src/index.ts`, two
+ *  segments) is a root-level module file with no sub-module scope. Files at the
+ *  repo root, or under an unrecognized root, return null. */
+const pathToScope = (path: string): string | null => {
+  const segs = path.split("/").filter((s) => s.length > 0)
+  if (segs.length < 3) return null
+  const root = segs[0] as string
+  if (!SCOPE_ROOTS.includes(root)) return null
+  return segs[1] as string
+}
+
+/** Is this a changed BODY line (added/removed), not a `+++`/`---` header? */
+const isChangedBodyLine = (raw: string): boolean =>
+  (raw.startsWith("+") && !raw.startsWith("+++")) || (raw.startsWith("-") && !raw.startsWith("---"))
+
+/** Mutable cursor while scanning a diff: the file the current body lines belong
+ *  to, and the running per-file changed-line counts. */
+interface ScanState {
+  current: string | null
+  fileLines: Map<string, number>
+}
+
+/** Advance the scan by one diff line. */
+const scanLine = (s: ScanState, raw: string): void => {
+  if (raw.startsWith("diff --git ")) {
+    s.current = null // section boundary; the +++ header resolves the real path
+    return
+  }
+  if (raw.startsWith("--- ") || raw.startsWith("+++ ")) {
+    const p = pathFromHeader(raw)
+    if (p !== null) {
+      s.current = p
+      if (!s.fileLines.has(p)) s.fileLines.set(p, 0)
+    }
+    return
+  }
+  if (s.current !== null && isChangedBodyLine(raw)) {
+    s.fileLines.set(s.current, (s.fileLines.get(s.current) ?? 0) + 1)
+  }
+}
+
+/** Scan a unified diff into `path → changed-line-count`. A file is registered
+ *  the moment its header is seen (so a pure rename with no body lines still
+ *  votes, with count 0). */
+const tallyFileLines = (lines: readonly string[]): Map<string, number> => {
+  const state: ScanState = { current: null, fileLines: new Map() }
+  for (const raw of lines) scanLine(state, raw)
+  return state.fileLines
+}
+
+/** Fold per-file line counts into per-scope tallies. */
+const tallyScopes = (fileLines: Map<string, number>): Map<string, ScopeTally> => {
+  const tallies = new Map<string, ScopeTally>()
+  for (const [path, lineCount] of fileLines) {
+    const scope = pathToScope(path)
+    if (scope === null) continue
+    const t = tallies.get(scope) ?? { scope, files: 0, lines: 0 }
+    t.files += 1
+    t.lines += lineCount
+    tallies.set(scope, t)
+  }
+  return tallies
+}
+
+/** Derive ordered, de-duplicated conventional-commit SCOPE candidates from a
+ *  unified diff. PURE + deterministic — no LLM, no heuristic threshold.
+ *
+ *  Algorithm (a MEASUREMENT of the diff, not a tunable):
+ *    1. Scan the diff for file-section headers; take the post-image path for
+ *       each touched file (pre-image for pure deletions).
+ *    2. Map each path to its scope (first segment under src/|packages/|apps/);
+ *       paths with no scope (repo-root files, unrecognized roots) are ignored.
+ *    3. Tally per scope: number of files that voted for it AND total added+
+ *       removed lines under it.
+ *    4. Order by files-touched DESC, then lines-changed DESC, then scope name
+ *       ASC. The "most-touched module first" ordering is observed from the
+ *       diff, so it is reproducible and explainable — not a fudge factor.
+ *
+ *  Returns `[]` when the diff touches only root-level / unrecognized files (the
+ *  caller then produces a prompt byte-identical to the no-inference path). */
+export const diffToScopes = (diff: string): string[] => {
+  if (diff.length === 0) return []
+  const tallies = tallyScopes(tallyFileLines(diff.split("\n")))
+  return [...tallies.values()]
+    .sort((a, b) => b.files - a.files || b.lines - a.lines || a.scope.localeCompare(b.scope))
+    .map((t) => t.scope)
+}
+
+// ===========================================================================
 // Conventional Commits parsing (pure)
 // ===========================================================================
 
@@ -84,6 +214,12 @@ export interface ParsedCommitMessage {
   subject: string
   body: string
   conventional: boolean
+  /** Soft signal (ADR-0451): present + TRUE iff a non-empty `suggestedScopes`
+   *  was given AND the authored scope is NOT one of them. This is advisory
+   *  metadata only — it NEVER changes `message`/`conventional` and NEVER blocks
+   *  a commit; a caller may surface it as a nudge toward a consistent scope.
+   *  Absent when no scopes were suggested or no scope was authored. */
+  scopeOffSuggestion?: boolean
 }
 
 /** Conventional Commits header grammar:
@@ -102,8 +238,15 @@ const stripEnclosingFence = (raw: string): string => {
 
 /** Parse a candidate commit message into its structured parts. NEVER throws —
  *  a non-conventional first line yields `conventional:false` with the raw first
- *  line surfaced as `subject` so the caller still has something usable. */
-export const parseConventionalCommit = (raw: string): ParsedCommitMessage => {
+ *  line surfaced as `subject` so the caller still has something usable.
+ *
+ *  `suggestedScopes` (ADR-0451, optional) is the diff-derived scope hint. When
+ *  non-empty AND the authored scope is not among them, the result carries a
+ *  SOFT `scopeOffSuggestion:true` signal — advisory only, never a rejection. */
+export const parseConventionalCommit = (
+  raw: string,
+  suggestedScopes?: readonly string[],
+): ParsedCommitMessage => {
   const cleaned = stripEnclosingFence(raw).trim()
   const lines = cleaned.split("\n")
   const header = (lines[0] ?? "").trim()
@@ -125,7 +268,15 @@ export const parseConventionalCommit = (raw: string): ParsedCommitMessage => {
     body,
     conventional: true,
   }
-  if (scope !== undefined) parsed.scope = scope
+  if (scope !== undefined) {
+    parsed.scope = scope
+    // Soft signal only when there is something to compare against AND a scope
+    // was actually authored. Empty/absent suggestions ⇒ no annotation (the
+    // field stays absent → byte-identical structured payload for that path).
+    if (suggestedScopes !== undefined && suggestedScopes.length > 0) {
+      parsed.scopeOffSuggestion = !suggestedScopes.includes(scope)
+    }
+  }
   return parsed
 }
 
@@ -189,10 +340,23 @@ export const buildCommitAuthorPrompt = (
   diffText: string,
   truncated: boolean,
   hint: string | undefined,
+  suggestedScopes?: readonly string[],
 ): string => {
   const parts: string[] = []
   if (hint !== undefined && hint.length > 0) {
     parts.push("## Intent hint (from the caller)", hint, "")
+  }
+  // ADR-0451: bias the author toward a consistent, diff-derived scope. Emitted
+  // ONLY when the diff yielded candidates — absent ⇒ this block does not appear
+  // and the prompt is byte-identical to the pre-feature path.
+  if (suggestedScopes !== undefined && suggestedScopes.length > 0) {
+    parts.push(
+      "## Suggested scope (from the diff's touched modules)",
+      `The diff touches these modules: ${suggestedScopes.join(", ")}.`,
+      "Prefer one of these as the conventional-commit scope for consistency.",
+      "If none fit the change, choose your own scope (or omit it).",
+      "",
+    )
   }
   parts.push("## Staged diff")
   if (truncated) parts.push("(NOTE: diff truncated — summarize the visible change.)")
@@ -372,14 +536,18 @@ export const gitComposeCommitTool = (
     }
 
     const { text: diffText, truncated } = truncate(outcome.body, MAX_DIFF_BYTES)
-    const prompt = buildCommitAuthorPrompt(diffText, truncated, hint)
+    // ADR-0451: derive scope candidates from the FULL diff (not the truncated
+    // copy) so a huge diff still gets correct module votes. Empty ⇒ no hint
+    // line + no parse annotation → byte-identical to the pre-feature path.
+    const suggestedScopes = diffToScopes(outcome.body)
+    const prompt = buildCommitAuthorPrompt(diffText, truncated, hint, suggestedScopes)
     yield { type: "progress", message: "Authoring commit message…" }
     const authored = await authorOnce(authorLLM, COMMIT_AUTHOR_SYSTEM, prompt, ctx.signal)
     if (!authored.ok) {
       yield { type: "result", result: { ok: false, output: authored.error } }
       return
     }
-    const message = parseConventionalCommit(authored.text)
+    const message = parseConventionalCommit(authored.text, suggestedScopes)
     yield {
       type: "result",
       result: { ok: true, output: message.message, structured: message },
