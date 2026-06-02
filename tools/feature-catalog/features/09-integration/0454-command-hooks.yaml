@@ -3,7 +3,13 @@ title: Disk-configured command hooks (security-gated shell on HookBus events, AD
 section: 9
 subsystem: HookBus shell-command executor
 order: 454
-maturity: L3
+# L2 (seam-only): the slice (gate / runner / sandbox-exec / installer) is
+# complete + sealed by 25 hellgate cases, but NO composition root calls
+# `installCommandHooks` yet — root wiring is the deliberate_hold below (a
+# dedicated security-review ADR, since this arms arbitrary shell exec). Was
+# mislabeled L3; corrected jun-02 R3-audit (same dead-seam class as 0452/0453,
+# but here the hold is intentional, not a bug).
+maturity: L2
 status: stable
 ui_surfaces: [n-a]
 monitoring: partial
