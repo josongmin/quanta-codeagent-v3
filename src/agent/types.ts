@@ -20,6 +20,7 @@ import type {
 } from "@/permission"
 import type { CommitEmbedder, EmbeddingPort, RerankPort, RerankRegistry } from "@/retrieval"
 import type { RulesStore } from "@/rules"
+import type { NetworkProxyConfig } from "@/runtime/network-proxy"
 import type { OsSandbox } from "@/runtime/os-sandbox"
 import type { RedactionConfig } from "@/security"
 import type { RunContext } from "@/shared"
@@ -751,6 +752,17 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * `@/agent/branch-search`. ci-bot leaves it unset (unattended N-best risk).
    */
   branchSearch?: BranchSearchConfig
+  /**
+   * ADR-0428 socket-level egress proxy. When set with `enabled: true`, a
+   * composition root constructs a `LoopbackEgressProxy` over this allowlist and
+   * threads `withProxyEnv(baseEnv, {address})` into every child spawn so a
+   * subprocess's OWN sockets are funneled through the SAME `isHostAllowed`
+   * decision the tool-arg dispatch guard uses — closing the subprocess egress
+   * bypass. Absent / `enabled:false` ⇒ NO proxy constructed, child env
+   * byte-identical to the pre-slice path. Closed `NetworkProxyConfig` lives in
+   * `@/runtime/network-proxy`; wired by the `network-proxy` knob.
+   */
+  networkProxy?: NetworkProxyConfig
   /**
    * ADR-0116 Shadow git ODB seam (ADR-0108 keystone). When set AND
    * `branchSearch` is also wired, `buildBranchSearchTool` constructs a

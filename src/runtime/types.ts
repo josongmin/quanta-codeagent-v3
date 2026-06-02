@@ -46,6 +46,18 @@ export interface ShellOptions {
     readonly sandboxApplied: boolean
     readonly degradeReason?: string
   }>
+  /** ADR-0428 socket-level egress proxy. When set with a bound `address`,
+   *  `runShell` injects `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` into the child env
+   *  (via `withProxyEnv`) so the spawned shell's OWN sockets are funneled
+   *  through the loopback egress proxy — closing the subprocess egress bypass.
+   *  Absent (or `address` undefined) ⇒ the child env is byte-identical to the
+   *  pre-slice path (`withProxyEnv` returns the same reference). Typed
+   *  structurally (mirror of `ProxyEnvInput` from `@/runtime/network-proxy`) so
+   *  this leaf types module need not import the slice barrel. */
+  proxyEnv?: {
+    readonly address?: { readonly host: string; readonly port: number }
+    readonly noProxy?: readonly string[]
+  }
 }
 
 /** ADR-0204 wire — minimal structural shape consumed by `runShell`. Matches

@@ -1,0 +1,78 @@
+id: network-egress-proxy
+title: Socket-level egress proxy — close the subprocess egress bypass
+section: 3
+subsystem: 보안 — 소켓 레이어 아웃바운드 게이트 (ADR-0428, Codex 0.135 [network_proxy] 흡수)
+order: 92
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [interactive, headless, batch, ci-bot, ide]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "security-touched", "absorbed:codex-network-proxy"]
+depends_on:
+  - network-allowlist-host-check
+  - network-egress-enforcement
+  - guarded-spawn
+config_refs:
+  env:
+    - QUANTA_NETWORK_PROXY
+  runtime:
+    - AgentConfig.networkProxy
+purpose: |
+  Closes the SUBPROCESS egress bypass the dispatch-layer gate (network-egress-enforcement)
+  leaves open. The tool-arg guard extracts a host from a tool CALL; a subprocess that opens
+  its OWN socket (curl / gh / npm / git) never passes through it. This slice ships a REAL
+  loopback HTTP proxy (Node http/net, plain-HTTP forward + CONNECT tunnel) and WIRES it into
+  the child-spawn path: when the `network-proxy` knob activates `AgentConfig.networkProxy`,
+  `withEgressProxy` constructs a `LoopbackEgressProxy` over the active allowlist, `listen()`s on
+  an ephemeral loopback port, and `runShell` injects `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` (via
+  `withProxyEnv`) into the child env — so the child's OWN sockets are funneled through the SAME
+  `isHostAllowed` decision the dispatch guard uses. Allowed ⇒ dial origin + pipe; off-list ⇒
+  403 at the socket; SSRF literals (169.254.169.254 / loopback / private / link-local) are
+  categorically blocked BEFORE the allowlist (and re-checked post-connect on the resolved peer,
+  DNS-rebinding defense); a runtime `NetworkPolicyAmendment` permits a host post-approval
+  (amended-allow) and is revocable fail-closed. Default-OFF / byte-identical: knob absent or
+  `enabled:false` ⇒ NO proxy is constructed and `withProxyEnv` returns the SAME base env
+  reference (no proxy vars in the child) — every interactive turn is unchanged.
+evidence:
+  code:
+    - src/runtime/network-proxy/index.ts
+    - src/runtime/network-proxy/loopback-proxy.ts
+    - src/runtime/network-proxy/lifecycle.ts
+    - src/runtime/network-proxy/env.ts
+    - src/runtime/network-proxy/decision.ts
+    - src/runtime/network-proxy/amendment.ts
+    - src/runner/knobs/knobs/network-proxy.ts
+    - src/runtime/shell.ts
+  adrs: ["docs/decisions/0428-network-egress-proxy.md"]
+  tests:
+    unit:
+      - tests/unit/runtime/network-proxy-ssrf.test.ts
+    integration:
+      - tests/integration/network-proxy-e2e.test.ts
+      - tests/integration/network-proxy-subprocess-e2e.test.ts
+    contract: []
+knobs:
+  - network-proxy
+deliberate_hold: null
+notes: |
+  Default-OFF is structural in THREE layers: (1) the `network-proxy` knob is absent unless
+  `QUANTA_NETWORK_PROXY` is set (`1` ⇒ ci-bot default allowlist; `host,host,...` ⇒ explicit
+  allow-set; `0`/empty ⇒ inactive, fall through); (2) `withEgressProxy` constructs no socket
+  when `config.enabled !== true`; (3) `withProxyEnv(base, {})` returns the SAME base reference
+  so the child env is byte-identical when no address is bound.
+
+  The allow DECISION is delegated entirely to `isHostAllowed` (the exact predicate the
+  dispatch guard uses, so socket- and arg-level agree) + `classifyHost` (canonical structural
+  SSRF classifier) — NO heuristics, NO thresholds in this slice. The `DialTarget` DI seam lets
+  hermetic e2e map routable NAMES to a loopback origin without weakening the production peer
+  SSRF re-check (active only under the identity dial). The subprocess e2e spawns a REAL bun
+  child whose injected `HTTP_PROXY` forces its own socket through the proxy, proving the
+  bypass is closed at the SOCKET (allow connects / off-list refused / SSRF blocked / knob
+  absent ⇒ no proxy vars).
+
+  Follow-up: thread `proxyEnv` through the sandbox (`LocalSandbox.run`) + bash-bg-registry
+  spawn sites and the git tool's child spawns (currently only `runShell` is wired); surface the
+  active egress posture + amendment prompts in the status line.

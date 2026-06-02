@@ -1,4 +1,5 @@
 import { escalatingKill, withSpawnedChild } from "./guarded-spawn"
+import { withProxyEnv } from "./network-proxy"
 import { scrubEnv } from "./sandbox"
 import { getShellSandbox } from "./shell-sandbox-holder"
 import type { RunShellEvent, ShellOptions, ShellResult } from "./types"
@@ -100,8 +101,14 @@ export const runShell = async (
   // Scrubbed by default; opt OUT only with an explicit `inheritEnv: true`.
   // When inheriting we pass `process.env` explicitly (Bun.spawn snapshots the
   // original env if `env` is omitted and would miss vars set after startup).
-  const env =
+  const baseEnv =
     options.inheritEnv === true ? (process.env as Record<string, string | undefined>) : scrubEnv()
+  // ADR-0428 — socket-level egress proxy. When the caller threads a bound proxy
+  // address via `options.proxyEnv`, inject `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`
+  // so the child's OWN sockets are funneled through the loopback egress proxy,
+  // closing the subprocess egress bypass. Absent (or `address` undefined) ⇒
+  // `withProxyEnv` returns the SAME `baseEnv` reference — byte-identical legacy.
+  const env = withProxyEnv(baseEnv, options.proxyEnv ?? {})
 
   // S1 — OS sandbox wire-up. Default-OFF: when the CLI surface did not
   // install a slot (via `installShellSandbox`), `getShellSandbox()` returns

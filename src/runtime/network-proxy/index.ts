@@ -13,6 +13,11 @@
 export { type AmendInput, type AmendmentRecord, NetworkPolicyAmendment } from "./amendment"
 export { type DecideInput, decideEgress, type EgressDecision } from "./decision"
 export { PROXY_ENV_KEYS, type ProxyEnvInput, withProxyEnv } from "./env"
+export {
+  type EgressProxyContext,
+  type EgressProxyDeps,
+  withEgressProxy,
+} from "./lifecycle"
 export { type DialTarget, LoopbackEgressProxy } from "./loopback-proxy"
 export type { NetworkProxyPort } from "./port"
 export { METADATA_IPV4 } from "./ssrf"

@@ -32,6 +32,7 @@ import { lspKnob } from "@/runner/knobs/knobs/lsp"
 import { memoryModeKnob } from "@/runner/knobs/knobs/memory-mode"
 import { multiVoterKnob } from "@/runner/knobs/knobs/multi-voter"
 import { mustPassKnob } from "@/runner/knobs/knobs/must-pass"
+import { networkProxyKnob } from "@/runner/knobs/knobs/network-proxy"
 import { personaKnob } from "@/runner/knobs/knobs/persona"
 import { policyMergeKnob } from "@/runner/knobs/knobs/policy-merge"
 import { reproTestKnob } from "@/runner/knobs/knobs/repro-test"
@@ -54,6 +55,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(memoryModeKnob),
   asAnyKnob(multiVoterKnob),
   asAnyKnob(mustPassKnob),
+  asAnyKnob(networkProxyKnob),
   asAnyKnob(personaKnob),
   asAnyKnob(policyMergeKnob),
   asAnyKnob(reproTestKnob),
