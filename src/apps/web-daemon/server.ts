@@ -16,10 +16,12 @@
 
 import { networkInterfaces } from "node:os"
 import type { Server, ServerWebSocket } from "bun"
+import type { ContextUsageBreakdown } from "@/agent/context/usage-breakdown"
 import { type SessionTransport, wrapWebSocketLikeAsSessionTransport } from "@/ipc/session"
-import type { RuntimeFacade, RuntimeSession } from "@/sdk/runtime"
+import type { RuntimeSession } from "@/sdk/runtime"
 import { errMessage, logger } from "@/shared"
 import { handleAuthLoginStart, handleAuthLogout, handleAuthStatus } from "./auth-routes"
+import { type CanvasEmitterHandle, createCanvasEmitter } from "./canvas-emitter"
 import {
   createObservabilityEmitter,
   type ObservabilityEmitterHandle,
@@ -53,6 +55,13 @@ interface WSData {
    * (byte-identical: no sink, no frames).
    */
   observability: ObservabilityEmitterHandle | undefined
+  /**
+   * ADR-0440 — per-connection canvas emitter (gate ON only). `open()` attaches
+   * one bridging this socket to the daemon's canvas data source; `close()`
+   * stops it + unsubscribes. `undefined` ⇒ gate OFF (byte-identical: no sink,
+   * no frames). The detach closure unsubscribes from the shared usage source.
+   */
+  canvas: { handle: CanvasEmitterHandle; detach: () => void } | undefined
 }
 
 /** Minimal `ServerWebSocket`-like surface the observability sink writes to.
@@ -122,6 +131,84 @@ export const attachObservabilitySink = (
     ...(ports.intervalMs !== undefined ? { intervalMs: ports.intervalMs } : {}),
     ...(ports.timer !== undefined ? { timer: ports.timer } : {}),
   })
+}
+
+/**
+ * ADR-0440 — canvas data source the daemon shares across connections.
+ *
+ * The agent loop's `onPromptAssembled` seam already computes the per-category
+ * `ContextUsageBreakdown` (the SAME view the CLI `/context` renders); the
+ * composition root pushes each new view into this source. Every connection
+ * subscribes so its per-connection emitter forwards a `context.usage` frame.
+ * `latest()` lets a fresh connection render the current usage immediately
+ * (snapshot-on-connect) without waiting for the next turn.
+ *
+ * Diff frames (`tool.diff`) ride the SAME per-connection emitter; the live
+ * agent-seam binding that surfaces a tool's before/after text is a documented
+ * deferral (see canvas-emitter.ts / ADR-0440) — the emitter method + protocol
+ * + frontend consumer are fully wired so the channel lights up the moment a
+ * before/after seam exists.
+ */
+export interface CanvasUsageSource {
+  /** Subscribe to subsequent usage views. Returns an unsubscribe closure. */
+  subscribe(handler: (view: ContextUsageBreakdown) => void): () => void
+  /** The most recently computed view, or undefined before the first turn. */
+  latest(): ContextUsageBreakdown | undefined
+}
+
+/**
+ * ADR-0440 — canvas port bundle handed to each connection. All optional: the
+ * `index.ts` composition root only passes what the live facade exposes. Gate
+ * OFF ⇒ `index.ts` never builds this ⇒ no sink, byte-identical.
+ */
+export interface CanvasPorts {
+  readonly usageSource?: CanvasUsageSource
+}
+
+/**
+ * ADR-0440 — bridge a served WebSocket to a per-connection canvas emitter.
+ *
+ * Returns `null` when `ports` is absent (gate OFF ⇒ no sink, byte-identical).
+ * Otherwise mints an emitter whose `ws` sink forwards encoded canvas frames to
+ * `ws.send(...)`, subscribes it to the shared usage source (immediately
+ * forwarding the latest view as a snapshot-on-connect), and returns the handle
+ * plus a `detach` closure that unsubscribes + stops the emitter. The caller
+ * MUST call `detach()` on disconnect so we never emit to a dead socket.
+ *
+ * NO-THROW: a throwing `ws.send` is swallowed inside the emitter; mint never
+ * throws on a hostile socket.
+ */
+export const attachCanvasSink = (
+  ws: ObservabilitySendable,
+  ports: CanvasPorts | undefined,
+): { handle: CanvasEmitterHandle; detach: () => void } | null => {
+  if (ports === undefined) return null
+  const handle = createCanvasEmitter({
+    ws: {
+      send: (frame: string): void => {
+        try {
+          ws.send(frame)
+        } catch {
+          // Dead/throwing socket — swallow (emitter also guards internally).
+        }
+      },
+    },
+  })
+  let unsubscribe: (() => void) | undefined
+  const source = ports.usageSource
+  if (source !== undefined) {
+    // Snapshot-on-connect: render the current usage without waiting a turn.
+    const current = source.latest()
+    if (current !== undefined) handle.feedUsage(current)
+    unsubscribe = source.subscribe((view) => handle.feedUsage(view))
+  }
+  return {
+    handle,
+    detach: () => {
+      unsubscribe?.()
+      handle.stop()
+    },
+  }
 }
 
 const constantTimeEquals = (a: string, b: string): boolean => {
@@ -406,6 +493,12 @@ const buildRegisteredSession = async (
  */
 export interface WebDaemonServerConfig extends WebDaemonConfig {
   readonly observabilityPorts?: ObservabilityPorts
+  /**
+   * ADR-0440 — optional canvas port bundle. Gate OFF ⇒ absent ⇒ the server
+   * attaches no canvas sink (byte-identical). The composition root populates
+   * it only when `QUANTA_WEB_CANVAS=1`.
+   */
+  readonly canvasPorts?: CanvasPorts
 }
 
 export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<WebDaemonHandle> => {
@@ -448,7 +541,7 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
       }
     }
     const upgraded = server.upgrade(req, {
-      data: { adapter: undefined, observability: undefined },
+      data: { adapter: undefined, observability: undefined, canvas: undefined },
     })
     if (!upgraded) return new Response("upgrade failed", { status: 400 })
     // 101 is sent by Bun on successful upgrade — return undefined so Bun
@@ -589,6 +682,11 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
         // emitter's first tick is a snapshot; deltas follow as the live ports
         // change. `close()` stops it so we never emit to a dead socket.
         ws.data.observability = attachObservabilitySink(ws, config.observabilityPorts) ?? undefined
+        // ADR-0440 — bridge this socket to the canvas emitter (gate ON only).
+        // `null` ⇒ gate OFF (byte-identical). Snapshot-on-connect forwards the
+        // current usage view; `close()` detaches so no frame targets a dead
+        // socket.
+        ws.data.canvas = attachCanvasSink(ws, config.canvasPorts) ?? undefined
         try {
           await buildRegisteredSession(registry, ws, adapter, sharedSession)
         } catch (error) {
@@ -612,6 +710,10 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
         // emitter timer stops and no further frames target the dead socket.
         ws.data.observability?.stop()
         ws.data.observability = undefined
+        // ADR-0440 — detach the canvas sink (unsubscribe from the usage source
+        // + stop the emitter) before evicting so no frame targets a dead socket.
+        ws.data.canvas?.detach()
+        ws.data.canvas = undefined
         await registry.evict(ws)
       },
     },

@@ -24,12 +24,10 @@ import { buildInteractiveTurnAssembler as buildSharedInteractiveTurnAssembler } 
 import { pickProvider, tryCreateLLM } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { buildSkillsConfigCore, buildSubagentConfigCore, parseEnvFlag } from "@/runner/assemble"
-import {
-  createRuntimeFromAgentConfigBase,
-  type RuntimeFacade,
-} from "@/sdk/runtime"
+import { createRuntimeFromAgentConfigBase, type RuntimeFacade } from "@/sdk/runtime"
 import { StdoutStream } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
+import { type CanvasUsageSourceHandle, createCanvasUsageSource } from "./canvas-usage-source"
 
 /**
  * ADR-0415 — `RuntimeFacade` widened with the four read-only observability
@@ -45,6 +43,12 @@ export interface ObservableRuntimeFacade extends RuntimeFacade {
   readonly runLedger?: RunLedgerPort
   readonly approvalStateMachine?: ApprovalStateMachinePort
   readonly shadowVerify?: ShadowVerifyPort
+  /**
+   * ADR-0440 — canvas usage source fed by the session's `onPromptAssembled`
+   * seam. Present only when `QUANTA_WEB_CANVAS=1` (gate OFF ⇒ undefined ⇒ the
+   * server attaches no canvas sink, byte-identical).
+   */
+  readonly canvasUsage?: CanvasUsageSourceHandle
 }
 
 /**
@@ -169,6 +173,10 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
     // loop's dispatch emit onto the SAME bus attribution subscribed to, and the
     // approval-gate wire read ONE unified model.
     const observability = wireSessionObservability(env, cwd)
+    // ADR-0440 — canvas usage source. Gate OFF ⇒ undefined ⇒ no
+    // `onPromptAssembled` capture (byte-identical) + no facade port ⇒ the
+    // server attaches no canvas sink.
+    const canvasUsage = env.QUANTA_WEB_CANVAS === "1" ? createCanvasUsageSource() : undefined
     const base: Omit<AgentConfig, "modePolicy" | "budgetMeter"> = {
       llm,
       registry: new ToolRegistry(buildDefaultTools()),
@@ -181,6 +189,7 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       signal: abort.signal,
       ...(subagent !== undefined ? { subagent } : {}),
       ...(skills !== undefined ? { skills } : {}),
+      ...(canvasUsage !== undefined ? { onPromptAssembled: canvasUsage.sink } : {}),
       ...observabilitySlots(observability),
     }
     const turnAssembler = buildInteractiveTurnAssembler()
@@ -194,6 +203,15 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
     })
     // ADR-0415 — expose the wire ports on the facade so the daemon's emitter
     // reads live state. Gate OFF ⇒ getters read undefined ⇒ emitter silent.
-    return attachObservabilityPorts(runtime, observability.handle)
+    const facade = attachObservabilityPorts(runtime, observability.handle)
+    // ADR-0440 — expose the canvas usage source so the daemon's canvas sink
+    // subscribes to live per-turn usage. Gate OFF ⇒ undefined ⇒ no sink.
+    if (canvasUsage !== undefined) {
+      Object.defineProperty(facade, "canvasUsage", {
+        get: () => canvasUsage,
+        enumerable: true,
+      })
+    }
+    return facade
   }
 }

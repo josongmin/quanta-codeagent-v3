@@ -408,3 +408,56 @@ export interface ObservabilityDeltaMessage {
 }
 
 export type ObservabilityMessage = ObservabilitySnapshotMessage | ObservabilityDeltaMessage
+
+/* --- ADR-0440 — Canvas protocol (DiffView + UsageBar) ------------------ */
+
+/**
+ * Canvas web-component WS protocol — mirrors `src/protocol/canvas/messages.ts`
+ * upstream. Same copy-not-import pattern as the observability protocol: the
+ * frontend lives outside the bun tsconfig's `paths`, so the shapes are
+ * re-stated here. Source of truth: `src/protocol/canvas/messages.ts`.
+ *
+ * Default-OFF: these frames only arrive when the daemon's canvas sink is
+ * gated ON (`QUANTA_WEB_CANVAS=1`). Absent that, the components below render
+ * nothing — chat UI unchanged.
+ */
+
+/** Render-side diff line kind (Cursor `DiffLineType`). */
+export type DiffLineType = "added" | "removed" | "unchanged"
+
+/** A single render-side diff line (Cursor `DiffLineData`). The daemon
+ *  produced these from its CLI diff math — the web bundle never runs diff
+ *  math. */
+export interface DiffLineData {
+  readonly type: DiffLineType
+  readonly content: string
+  readonly lineNumber?: number
+}
+
+/** A tool's file diff, ready to render. */
+export interface ToolDiffMessage {
+  readonly kind: "tool.diff"
+  readonly toolCallId: string
+  readonly path?: string
+  readonly language?: string
+  readonly binary?: boolean
+  readonly truncated?: boolean
+  readonly moreLines?: number
+  readonly lines: readonly DiffLineData[]
+  readonly additions: number
+  readonly deletions: number
+  readonly emittedAt: number
+}
+
+/** The latest per-category segmented context usage (mirrors the CLI
+ *  `SegmentedUsageView`). */
+export interface ContextUsageMessage {
+  readonly kind: "context.usage"
+  readonly segments: readonly { readonly id: string; readonly tokens: number }[]
+  readonly total: number
+  readonly max: number
+  readonly model?: string
+  readonly emittedAt: number
+}
+
+export type CanvasMessage = ToolDiffMessage | ContextUsageMessage

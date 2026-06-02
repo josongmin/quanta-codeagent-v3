@@ -1,0 +1,116 @@
+id: canvas-web-components
+title: ADR-0440 Canvas web components (render-side DiffView + segmented UsageBar)
+section: 9
+subsystem: Web/Tauri canvas render-side components (Cursor cursor/canvas prop mirror)
+order: 440
+maturity: L3
+status: new
+ui_surfaces: [web, tauri]
+monitoring: n-a
+modes: [interactive, daemon, ide]
+configurable: partial
+config_refs:
+  env: [QUANTA_WEB_CANVAS]
+owners: ["@songmin"]
+labels: ["surface:web", "default-off"]
+depends_on: [observability-ui-pane, observability-ws-sink, context-usage-metrics]
+purpose: |
+  Render-side React components for the web/Tauri surface mirroring Cursor's
+  cursor/canvas SDK prop shapes (DiffViewProps / UsageBarProps / colorPalette),
+  FED BY quanta's EXISTING computed data — NO recomputation.
+
+  Data reuse (single source of truth):
+  - Diff: the line-level LCS math + caps + binary probe hoisted from
+    src/apps/cli/diff-preview.ts into the surface-agnostic @/runner/diff-ops
+    slice so the CLI ANSI preview AND the daemon canvas emitter share ONE
+    implementation. diff-preview.ts re-exports diffOps/resolveEnvCaps/
+    isBinaryContent (legacy ANSI path byte-identical — diff-preview.test.ts
+    passes unchanged).
+  - Usage: the loop's onPromptAssembled seam → buildUsageBreakdownDefault
+    (bound to the loop's own estimateTokens) → ContextUsageBreakdown — the
+    EXACT computation the CLI /context renders. The usage-adapter copies
+    formatTokens + viewPercent VERBATIM from status-line.ts (no new heuristic).
+
+  Two new default-OFF WS channels (src/protocol/canvas) ride the existing
+  daemon transport, reusing the ADR-0420 per-connection sink pattern:
+  - tool.diff: daemon converts DiffOp[] → DiffLineData[] (lossless
+    diffOpsToLines) + caps + binary placeholder before sending.
+  - context.usage: ContextUsageBreakdown serialized verbatim.
+
+  Components: DiffView (role=table rows + line-number gutter + 3px accent
+  strip + aria-labels, colors ONLY from tokens.ts canvas-tokens light/dark
+  mirror — no hardcoded hex), DiffStats (+N/-N, null on 0/0), UsageBar
+  (proportional segments + remainder + usageColorSequence auto-rotation +
+  topLeft/topRight labels + role=img aria), DiffPanel host card.
+
+  Default-OFF (RFC §1.2): QUANTA_WEB_CANVAS unset ⇒ no facade canvas source,
+  no onPromptAssembled capture, no WS sink attached, components render
+  nothing ⇒ chat UI (MessageBubble/ChatPanel) byte-identical.
+
+  Scope: render-side ONLY — NOT an agent-authored .canvas.tsx code-execution
+  sandbox (Cursor's esbuild→proto→host-webview + useCanvasState/Action RPC),
+  which is an explicit future RFC.
+evidence:
+  code:
+    - src/protocol/canvas/index.ts
+    - src/protocol/canvas/messages.ts
+    - src/runner/diff-ops.ts
+    - src/apps/cli/diff-preview.ts
+    - src/apps/web-daemon/canvas-emitter.ts
+    - src/apps/web-daemon/canvas-usage-source.ts
+    - src/apps/web-daemon/server.ts
+    - src/apps/web-daemon/runtime-factory.ts
+    - src/apps/web-daemon/index.ts
+    - apps/web-frontend/src/components/canvas/DiffView.tsx
+    - apps/web-frontend/src/components/canvas/DiffStats.tsx
+    - apps/web-frontend/src/components/canvas/UsageBar.tsx
+    - apps/web-frontend/src/components/canvas/tokens.ts
+    - apps/web-frontend/src/components/DiffPanel.tsx
+    - apps/web-frontend/src/adapters/diff-adapter.ts
+    - apps/web-frontend/src/adapters/usage-adapter.ts
+    - apps/web-frontend/src/ws/canvas-hooks.ts
+    - apps/web-frontend/src/types/protocol.ts
+  adrs:
+    - docs/decisions/0440-canvas-web-components.md
+    - 408
+    - 420
+  tests:
+    unit:
+      - tests/unit/canvas-web-components-hellgate.test.ts
+      - apps/web-frontend/src/components/canvas/DiffView.test.tsx
+      - apps/web-frontend/src/components/canvas/DiffStats.test.tsx
+      - apps/web-frontend/src/components/canvas/UsageBar.test.tsx
+      - apps/web-frontend/src/adapters/diff-adapter.test.ts
+      - apps/web-frontend/src/adapters/usage-adapter.test.ts
+      - apps/web-frontend/src/ws/canvas-hooks.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_WEB_CANVAS
+    default: 'off'
+    purpose: 'eagerly mint the facade + wire onPromptAssembled → canvas usage source + attach the per-connection canvas WS sink (DiffView/UsageBar render-side data)'
+deliberate_hold:
+  reason: |
+    The context.usage channel is wired LIVE end-to-end (facade source →
+    onPromptAssembled → WS → useContextUsage → UsageBar). The tool.diff
+    channel's protocol + emitter (feedToolDiff) + useToolDiffs hook + DiffPanel
+    are fully wired and tested, but the live agent-seam binding that surfaces a
+    tool's before/after file text does not yet exist, so no tool.diff frame is
+    emitted in production yet.
+  promotion_path: |
+    Add a daemon-reachable seam that delivers a mutating tool's before/after
+    file text (e.g. a post-tool hook carrying pre/post content, or a
+    facade-exposed tool-diff source mirroring canvasUsage). Wire it to
+    CanvasEmitterHandle.feedToolDiff in runtime-factory.ts under the SAME
+    QUANTA_WEB_CANVAS gate; the protocol + frontend consumer need no change.
+notes: |
+  Negative invariants: (a) agent-authored .canvas.tsx code-execution sandbox
+  NOT introduced (future RFC); (b) diff math NEVER duplicated in the web
+  bundle (frontend receives DiffLineData[] only); (c) chat path
+  (MessageBubble/ChatPanel) import-unchanged; (d) no hardcoded hex in
+  components (all colors via tokens.ts); (e) WebDaemonConfig (shared types.ts)
+  untouched — server widens config locally via WebDaemonServerConfig.
+  19 daemon hellgate cases (codec round-trip + reject, diffOpsToLines lossless,
+  binary/truncated/gutter, verbatim usage, gate-OFF byte-identical,
+  snapshot-on-connect, per-push delta, detach-freeze, two-conn independence,
+  NO-THROW hostile send) + 7 frontend test files.

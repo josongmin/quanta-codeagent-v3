@@ -23,7 +23,7 @@
 import type { RuntimeFacade } from "@/sdk/runtime"
 import { errMessage } from "@/shared"
 import type { ObservableRuntimeFacade } from "./runtime-factory"
-import { type ObservabilityPorts, startWebDaemon } from "./server"
+import { type CanvasPorts, type ObservabilityPorts, startWebDaemon } from "./server"
 import type { WebDaemonConfig, WebDaemonHandle } from "./types"
 
 const DEFAULT_PORT = 4096
@@ -62,7 +62,11 @@ const resolveObservableFactory = async (
   readonly runtimeFactory: () => Promise<RuntimeFacade>
   readonly facade: ObservableRuntimeFacade | undefined
 }> => {
-  if (process.env.QUANTA_OBSERVABILITY !== "on") {
+  // ADR-0440 — eagerly mint the facade when EITHER observability OR canvas is
+  // gated ON, so the emitter (observability) / canvas sink shares ONE facade
+  // (= ONE session host) with the served session. Both gates OFF ⇒ the lazy
+  // factory passes through unchanged + facade is undefined (byte-identical).
+  if (process.env.QUANTA_OBSERVABILITY !== "on" && process.env.QUANTA_WEB_CANVAS !== "1") {
     return { runtimeFactory: baseFactory, facade: undefined }
   }
   const facade = (await baseFactory()) as ObservableRuntimeFacade
@@ -102,6 +106,17 @@ const buildObservabilityPorts = (
 }
 
 /**
+ * ADR-0440 — project the live facade's canvas usage source into the
+ * per-connection canvas port bundle. Returns `undefined` when the facade is
+ * absent (gate OFF) or carries no canvas source (`QUANTA_WEB_CANVAS !== "1"`),
+ * so the server attaches no canvas sink (byte-identical).
+ */
+const buildCanvasPorts = (facade: ObservableRuntimeFacade | undefined): CanvasPorts | undefined => {
+  if (facade?.canvasUsage === undefined) return undefined
+  return { usageSource: facade.canvasUsage }
+}
+
+/**
  * Boot the daemon. Accepts an optional override so test code (and a future
  * composition root) can inject a real `runtimeFactory` without parsing env.
  *
@@ -118,7 +133,14 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
   // ⇒ the server attaches no sink (byte-identical legacy).
   const observabilityPorts = buildObservabilityPorts(observableFacade)
 
-  const config: WebDaemonConfig & { observabilityPorts?: ObservabilityPorts } = {
+  // ADR-0440 — per-connection canvas sink bundle. Gate OFF ⇒ undefined ⇒ the
+  // server attaches no canvas sink (byte-identical legacy).
+  const canvasPorts = buildCanvasPorts(observableFacade)
+
+  const config: WebDaemonConfig & {
+    observabilityPorts?: ObservabilityPorts
+    canvasPorts?: CanvasPorts
+  } = {
     port: overrides?.port ?? parsePort(process.env.QUANTA_WEB_PORT),
     bind: overrides?.bind ?? parseBind(process.env.QUANTA_WEB_BIND),
     authToken:
@@ -128,6 +150,7 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
     runtimeFactory,
     sessionConfig: overrides?.sessionConfig ?? {},
     ...(observabilityPorts !== undefined ? { observabilityPorts } : {}),
+    ...(canvasPorts !== undefined ? { canvasPorts } : {}),
   }
 
   // Port-collision fallback: if the requested port is taken (EADDRINUSE
@@ -157,6 +180,11 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
   // is undefined ⇒ `observabilityPorts` is undefined ⇒ no sink (byte-identical).
   if (observabilityPorts !== undefined) {
     process.stderr.write("web-daemon: observability sink live (per-connection WS)\n")
+  }
+  // ADR-0440 — canvas sink (DiffView + UsageBar render-side data). Gate OFF ⇒
+  // `canvasPorts` undefined ⇒ no sink (byte-identical).
+  if (canvasPorts !== undefined) {
+    process.stderr.write("web-daemon: canvas sink live (per-connection WS)\n")
   }
 
   const shutdown = async (sig: NodeJS.Signals): Promise<void> => {
