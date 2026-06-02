@@ -18,10 +18,10 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { BUILTINS } from "../../../../src/apps/cli/slash-commands"
 import { APP_SLASH_COMMANDS } from "../../../../src/apps/cli/slash/registry-app"
-import { SURFACE_SLASH_COMMANDS } from "../../../../src/apps/cli/slash/registry-surface"
 import { SESSION_SLASH_COMMANDS } from "../../../../src/apps/cli/slash/registry-session"
+import { SURFACE_SLASH_COMMANDS } from "../../../../src/apps/cli/slash/registry-surface"
+import { BUILTINS } from "../../../../src/apps/cli/slash-commands"
 
 const repoRoot = join(import.meta.dir, "../../../..")
 const readSrc = (rel: string): string => readFileSync(join(repoRoot, rel), "utf8")

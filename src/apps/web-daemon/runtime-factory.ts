@@ -191,8 +191,7 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
     // ADR-0440 wire-finish — tool-diff source. Gate OFF ⇒ undefined ⇒ no
     // `onToolDiff` wired (no tool captures, byte-identical) + no facade port ⇒
     // the server forwards no `tool.diff` frames.
-    const canvasToolDiff =
-      env.QUANTA_WEB_CANVAS === "1" ? createCanvasToolDiffSource() : undefined
+    const canvasToolDiff = env.QUANTA_WEB_CANVAS === "1" ? createCanvasToolDiffSource() : undefined
     const base: Omit<AgentConfig, "modePolicy" | "budgetMeter"> = {
       llm,
       registry: new ToolRegistry(buildDefaultTools()),

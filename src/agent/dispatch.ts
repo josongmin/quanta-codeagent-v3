@@ -444,9 +444,7 @@ const buildToolContext = (args: {
     // call id so a file-mutating tool can feed its before/after to the canvas
     // emitter. ABSENT (gate OFF / non-canvas caller) ⇒ both fields omitted ⇒ no
     // tool captures anything, byte-identical legacy path.
-    ...(config.onToolDiff !== undefined
-      ? { toolDiff: config.onToolDiff, toolCallId }
-      : {}),
+    ...(config.onToolDiff !== undefined ? { toolDiff: config.onToolDiff, toolCallId } : {}),
   }
 }
 
