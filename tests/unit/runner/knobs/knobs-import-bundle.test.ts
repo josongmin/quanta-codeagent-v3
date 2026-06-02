@@ -24,6 +24,7 @@ import { type AnyKnob, allKnobs, asAnyKnob, registerKnob } from "@/runner/knobs"
 import { advisorKnob } from "@/runner/knobs/knobs/advisor"
 import { branchSearchKnob } from "@/runner/knobs/knobs/branch-search"
 import { closeoutGuardKnob } from "@/runner/knobs/knobs/closeout-guard"
+import { composeAuthoringKnob } from "@/runner/knobs/knobs/compose-authoring"
 import { hooksKnob } from "@/runner/knobs/knobs/hooks"
 import { issueHintKnob } from "@/runner/knobs/knobs/issue-hint"
 import { localizePhaseKnob } from "@/runner/knobs/knobs/localize-phase"
@@ -45,6 +46,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(advisorKnob),
   asAnyKnob(branchSearchKnob),
   asAnyKnob(closeoutGuardKnob),
+  asAnyKnob(composeAuthoringKnob),
   asAnyKnob(hooksKnob),
   asAnyKnob(issueHintKnob),
   asAnyKnob(localizePhaseKnob),

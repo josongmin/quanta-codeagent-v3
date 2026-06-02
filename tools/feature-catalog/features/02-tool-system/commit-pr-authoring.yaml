@@ -1,0 +1,68 @@
+id: commit-pr-authoring
+title: Commit + PR authoring tools (diff→prose, git_compose_commit / git_compose_pr)
+section: 2
+subsystem: tier-1 LLM tools (ADR-0016 compose seam)
+order: 430
+maturity: L3
+status: stable
+ui_surfaces: [cli, api]
+modes: [interactive, batch]
+monitoring: n-a
+configurable: integrated
+owners: ["@songmin"]
+labels: ["absorbed:codex-yeet", "absorbed:cursor-compose", "surface:tool", "tier:tier1"]
+depends_on: [git-read-trio, advisor-consult-tool]
+purpose: |
+  Two READ-ONLY authoring tools that close the diff→prose gap (the Codex `yeet`
+  / Cursor compose pattern). `git_compose_commit` reads the STAGED diff and
+  authors ONE Conventional Commits message; `git_compose_pr` reads the
+  branch-vs-base diff + commit log and authors a PR title + body. Both hand the
+  (bounded / truncated) diff to a ONE-SHOT LLMPort completion and RETURN the
+  authored text — they do NOT commit and do NOT open a PR. The model feeds the
+  result into the existing mutating git_commit (regular mode) / gh_pr_create, so
+  the existing HITL gate still governs the actual mutation. isReadOnly,
+  isConcurrencySafe, hitlTier "none". NO-THROW: empty / no-staged diff →
+  typed ok:false; provider error / empty message → typed ok:false; a
+  non-conventional / free-text reply → typed ok:true with conventional:false
+  (best-effort, raw text surfaced). The diff injected into the author prompt is
+  capped (MAX_DIFF_BYTES 50KB / MAX_LOG_BYTES 10KB) with a visible truncation
+  marker, and the prompt frames the diff as DATA (prompt-injection defence).
+
+  The `compose-authoring` knob (env QUANTA_COMPOSE_AUTHORING=1) env-flips the
+  two tools from absent to live by folding the session's baseline AgentConfig.llm
+  into AgentConfig.composeAuthoring.authorLLM; the tier-1 buildComposeAuthoringBlock
+  reads that slot and registers the tools. Absent / any-other env ⇒ slot unset ⇒
+  builder returns [] ⇒ ToolRegistry byte-identical (RFC §1.2).
+evidence:
+  code:
+    - src/tool/git/compose.ts
+    - src/agent/tier1/compose-authoring.ts
+    - src/runner/knobs/knobs/compose-authoring.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/tool/git-compose.hellgate.test.ts
+      - tests/unit/tool/git-compose-knob.hellgate.test.ts
+    integration:
+      - tests/unit/tool/git-compose-e2e.hellgate.test.ts
+    contract: []
+knobs: ["compose-authoring"]
+deliberate_hold: null
+notes: |
+  Default-OFF triple seam: (1) gitTools(runner) without opts.authorLLM omits
+  both tools entirely (the CLI QUANTA_GIT_TOOLS path); (2) AgentConfig.composeAuthoring
+  absent ⇒ buildComposeAuthoringBlock returns [] ⇒ ToolRegistry byte-identical
+  (the knob-driven agent path); (3) the `compose-authoring` knob parse returns
+  undefined for any env value other than the exact literal "1" (no trimming /
+  case-folding / truthiness coercion — no heuristics), and its surfaces EXCLUDE
+  bench so SWE-bench measurement stays on the no-compose trajectory +
+  prefix-cache key.
+
+  The author LLM is INJECTED via the tool factory (gitComposeCommitTool(runner,
+  authorLLM)), type-only importing @/llm — no agent/subagent coupling. The knob
+  uses the baseline cfg.llm as authorLLM (a cheap model is the usual operator
+  pick, but the already-wired baseline is the safe default).
+
+  configurable: integrated — QUANTA_COMPOSE_AUTHORING reaches the tools via the
+  knob framework (resolveKnobs → applyKnobs → config.composeAuthoring →
+  buildComposeAuthoringBlock).

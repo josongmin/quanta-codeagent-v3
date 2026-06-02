@@ -30,6 +30,7 @@ export {
   type CheckSecretsEnvReader,
   checkSecretsToolEnabled,
 } from "./check-secrets"
+export { buildComposeAuthoringBlock } from "./compose-authoring"
 export { buildDelegateBlock } from "./delegate"
 export { buildForkSessionBlock } from "./fork-session"
 export { buildObjectiveBlock } from "./objective"

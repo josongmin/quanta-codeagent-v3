@@ -302,6 +302,7 @@ export {
   advisorConsultFromLLM,
   buildAdvisorBlock,
 } from "./tier1/advisor"
+export { buildComposeAuthoringBlock } from "./tier1/compose-authoring"
 export type {
   AgentConfig,
   AgentOutcome,

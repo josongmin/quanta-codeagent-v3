@@ -61,6 +61,7 @@ import {
   buildBudgetBlock,
   buildCheckSecretsBlock,
   buildClassifierBlock,
+  buildComposeAuthoringBlock,
   buildDelegateBlock,
   buildForkSessionBlock,
   buildObjectiveBlock,
@@ -179,6 +180,10 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
 
   // ADR-0257 — advisor consult tool (default-OFF: empty when advisor slot absent)
   extraTools.push(...buildAdvisorBlock(config))
+
+  // ADR-0016 (compose seam) — git_compose_commit / git_compose_pr authoring
+  // tools (default-OFF: empty array when composeAuthoring slot absent).
+  extraTools.push(...buildComposeAuthoringBlock(config))
 
   // ADR-0398 — objective_set / objective_update / objective_get tools
   // (default-OFF: empty array when objective port absent)

@@ -1112,6 +1112,25 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
     readonly models?: readonly string[]
   }
   /**
+   * ADR-0016 (compose seam) — diff→prose AUTHORING tools (`git_compose_commit`
+   * + `git_compose_pr`, the Codex `yeet` / Cursor compose pattern). When set,
+   * `buildComposeAuthoringBlock` registers the two READ-ONLY authoring tools
+   * wired to this one-shot author `LLMPort`; absent ⇒ neither tool is
+   * constructed nor registered (default-OFF byte-identical, RFC §1.2 —
+   * proven by the compose hellgate battery). The composition root sources
+   * `authorLLM` from the `compose-authoring` knob, which folds the session's
+   * baseline `cfg.llm` into this slot.
+   *
+   * Top-level (not nested under git) so the slot mirrors the `gitTools(runner,
+   * {authorLLM})` factory option directly and a future surface can read it
+   * without reaching into a git-specific sub-object. Caller-side composition
+   * only — the loop never reads it (it only sees the two extra tools the
+   * builder adds to the registry).
+   */
+  composeAuthoring?: {
+    readonly authorLLM: LLMPort
+  }
+  /**
    * ADR-0133 — typed pending-promptHook collector for subagent lifecycle
    * events. When a `subagent_start` / `subagent_stop` hook returns a
    * `promptHook` response, the subagent runner pushes it here so the

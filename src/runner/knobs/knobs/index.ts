@@ -16,6 +16,7 @@
 import "./advisor"
 import "./branch-search"
 import "./closeout-guard"
+import "./compose-authoring"
 import "./hooks"
 import "./issue-hint"
 import "./localize-phase"

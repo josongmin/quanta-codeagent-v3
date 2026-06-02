@@ -36,6 +36,7 @@ import {
 import "@/runner/knobs/knobs/advisor"
 import "@/runner/knobs/knobs/branch-search"
 import "@/runner/knobs/knobs/closeout-guard"
+import "@/runner/knobs/knobs/compose-authoring"
 import "@/runner/knobs/knobs/hooks"
 import "@/runner/knobs/knobs/issue-hint"
 import "@/runner/knobs/knobs/localize-phase"
