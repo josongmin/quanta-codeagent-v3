@@ -20,6 +20,7 @@ import { TokenCounter } from "./components/TokenCounter"
 import { isHotkeyImagePayload, type PendingImageAttachment } from "./composer/image-attachment"
 import { useImageAttachment } from "./composer/use-image-attachment"
 import type { ConnectionState, SessionEvent, SessionStateView } from "./types/protocol"
+import { type CanvasSource, useContextUsage } from "./ws/canvas-hooks"
 import { SessionClient } from "./ws/client"
 import { type ObservabilitySource, useObservabilityState } from "./ws/observability-hooks"
 import {
@@ -503,6 +504,16 @@ export const App = (): JSX.Element => {
   )
   const observability = useObservabilityState(observabilitySource)
 
+  // ADR-0448 (RFC-10): mount point for the rich context-usage breakdown. The
+  // RFC-06 canvas data port (the client-side `tool.diff`/`context.usage`
+  // dispatch) is not yet wired onto `SessionClient` — so the source is `null`
+  // and `useContextUsage` stays `null`, leaving the panel un-rendered
+  // (default-OFF). The moment RFC-06 exposes canvas frames (e.g.
+  // `client.onCanvas`), swap `null` for that source and the
+  // `UsageBreakdownPanel` lights up with no further change here.
+  const canvasSource: CanvasSource | null = null
+  const contextUsage = useContextUsage(canvasSource)
+
   return (
     <div className="flex h-full min-h-screen flex-col bg-neutral-950 text-neutral-100">
       <SessionChrome
@@ -530,7 +541,7 @@ export const App = (): JSX.Element => {
           sessionStatus={sessionState?.status ?? null}
           slashCommands={slashCommands}
         />
-        <ObservabilityPane state={observability} />
+        <ObservabilityPane state={observability} usage={contextUsage} />
       </div>
       <HotkeyToast />
     </div>

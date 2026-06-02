@@ -450,10 +450,24 @@ export interface ToolDiffMessage {
 }
 
 /** The latest per-category segmented context usage (mirrors the CLI
- *  `SegmentedUsageView`). */
+ *  `SegmentedUsageView`).
+ *
+ *  ADR-0448 (RFC-10) adds the OPTIONAL `chars?` field to each segment — the
+ *  one additive wire field the rich-layer requests (RFC-10 §4.3). It is the
+ *  exact character count `ContextUsageBreakdown.segments[].chars`
+ *  (usage-breakdown.ts:96) the CLI computes but never surfaces; the rich
+ *  `UsageBreakdownPanel` drilldown shows it. Optional ⇒ RFC-06 byte-compatible:
+ *  a daemon that does not serialize it leaves the field `undefined` and the
+ *  panel omits the chars readout gracefully. (`color` is NOT wired — the panel
+ *  derives the hue from the category id via `CATEGORY_TO_HUE`.) */
 export interface ContextUsageMessage {
   readonly kind: "context.usage"
-  readonly segments: readonly { readonly id: string; readonly tokens: number }[]
+  readonly segments: readonly {
+    readonly id: string
+    readonly tokens: number
+    /** ADR-0448 (RFC-10): exact char count for this category. Optional. */
+    readonly chars?: number
+  }[]
   readonly total: number
   readonly max: number
   readonly model?: string

@@ -16,14 +16,21 @@
  */
 
 import { memo, useState } from "react"
-import type { ApprovalRequest, Objective, RunEntry } from "../types/protocol"
+import type { ApprovalRequest, ContextUsageMessage, Objective, RunEntry } from "../types/protocol"
 import { type ObservabilityState, splitRunsByStatus } from "../ws/observability-hooks"
+import { UsageBreakdownPanel } from "./canvas/UsageBreakdownPanel"
 
 export interface ObservabilityPaneProps {
   readonly state: ObservabilityState
   /** Optional retry callback — when present, each Run row in the "Completed"
    *  column shows a "Retry" button. Wiring left to the host. */
   readonly onRetryRun?: (id: string) => void
+  /** ADR-0448 (RFC-10): the latest `context.usage` frame from RFC-06's canvas
+   *  data port (`useContextUsage`). When present + non-null, the rich
+   *  `UsageBreakdownPanel` (UsageBar + Swatch legend + per-category drilldown)
+   *  mounts at the top of the pane. Absent / `null` ⇒ nothing renders
+   *  (default-OFF — the pane is byte-unchanged when the canvas channel is OFF). */
+  readonly usage?: ContextUsageMessage | null
 }
 
 /* ------------------------------------------------------------------ */
@@ -31,7 +38,7 @@ export interface ObservabilityPaneProps {
 /* ------------------------------------------------------------------ */
 
 export const ObservabilityPane = memo(
-  ({ state, onRetryRun }: ObservabilityPaneProps): JSX.Element => {
+  ({ state, onRetryRun, usage }: ObservabilityPaneProps): JSX.Element => {
     const { running, waiting, completed } = splitRunsByStatus(state.runs)
     return (
       <aside
@@ -39,6 +46,7 @@ export const ObservabilityPane = memo(
         data-testid="observability-pane"
         className="flex w-80 flex-shrink-0 flex-col gap-3 overflow-y-auto border-l border-neutral-800 bg-neutral-925 px-3 py-3 text-sm text-neutral-200"
       >
+        <UsageBreakdownPanel usage={usage ?? null} />
         <ObjectiveCard objective={state.objective} />
         <ApprovalsList approvals={state.approvals} />
         <RunColumn title="Running" runs={running} tone="emerald" />

@@ -10,11 +10,20 @@
  * `role="row"` rows, each with an `aria-label` so meaning is not color-only.
  *
  * Default-OFF: empty `lines` ⇒ an empty (non-throwing) container.
+ *
+ * ADR-0448 (RFC-10) ADDS the deferred `mode?: "inline" | "split"` prop. It
+ * defaults to `"inline"`, whose render path is BYTE-IDENTICAL to the original
+ * (every existing caller + test is unchanged). `mode="split"` delegates to the
+ * new `SplitDiffView` (side-by-side 2-column + collapsible hunks).
  */
 
 import { cx } from "../../lib/classnames"
 import type { DiffLineData } from "../../types/protocol"
+import { SplitDiffView } from "./SplitDiffView"
 import { type DiffTheme, diffTokens } from "./tokens"
+
+/** Layout for the rich DiffView (ADR-0448 / RFC-10). */
+export type DiffViewMode = "inline" | "split"
 
 export interface DiffViewProps {
   readonly lines: readonly DiffLineData[]
@@ -33,6 +42,13 @@ export interface DiffViewProps {
   /** When `truncated`, show a trailing "… (N more lines)" affordance. */
   readonly truncated?: boolean
   readonly moreLines?: number
+  /** ADR-0448 (RFC-10): `"inline"` (default; original render) or `"split"`
+   *  (side-by-side 2-column + collapsible hunks via `SplitDiffView`). */
+  readonly mode?: DiffViewMode
+  /** ADR-0448 (RFC-10): unchanged-context lines kept around each change in
+   *  split mode before the rest folds. Forwarded to `SplitDiffView`. Inert in
+   *  inline mode. Default 3 (git default). */
+  readonly contextLines?: number
   readonly className?: string
 }
 
@@ -70,8 +86,58 @@ export const DiffView = ({
   theme = "dark",
   truncated = false,
   moreLines = 0,
+  mode = "inline",
+  contextLines = 3,
   className,
-}: DiffViewProps): JSX.Element => (
+}: DiffViewProps): JSX.Element => {
+  // ADR-0448 (RFC-10): split mode delegates to SplitDiffView. The inline path
+  // below is unchanged from ADR-0440 (byte-identical for existing callers).
+  if (mode === "split") {
+    return (
+      <SplitDiffView
+        lines={lines}
+        theme={theme}
+        showLineNumbers={showLineNumbers}
+        coloredLineNumbers={coloredLineNumbers}
+        contextLines={contextLines}
+        {...(truncated ? { truncated, moreLines } : {})}
+        {...(className !== undefined ? { className } : {})}
+      />
+    )
+  }
+  return inlineDiffTable({
+    lines,
+    showLineNumbers,
+    coloredLineNumbers,
+    showAccentStrip,
+    theme,
+    truncated,
+    moreLines,
+    className,
+  })
+}
+
+interface InlineTableProps {
+  readonly lines: readonly DiffLineData[]
+  readonly showLineNumbers: boolean
+  readonly coloredLineNumbers: boolean
+  readonly showAccentStrip: boolean
+  readonly theme: DiffTheme
+  readonly truncated: boolean
+  readonly moreLines: number
+  readonly className: string | undefined
+}
+
+const inlineDiffTable = ({
+  lines,
+  showLineNumbers,
+  coloredLineNumbers,
+  showAccentStrip,
+  theme,
+  truncated,
+  moreLines,
+  className,
+}: InlineTableProps): JSX.Element => (
   // A real <table> (not role="table") so the semantics are native + biome-clean.
   // The accent strip + colored gutter are aria-hidden; per-line meaning rides
   // each row's aria-label so the diff is not conveyed by color alone (RFC §3.7).

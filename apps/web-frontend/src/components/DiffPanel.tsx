@@ -11,16 +11,24 @@
 import { diffStatsFromMessage } from "../adapters/diff-adapter"
 import type { ToolDiffMessage } from "../types/protocol"
 import { DiffStats } from "./canvas/DiffStats"
-import { DiffView } from "./canvas/DiffView"
+import { DiffView, type DiffViewMode } from "./canvas/DiffView"
 import type { DiffTheme } from "./canvas/tokens"
 
 export interface DiffPanelProps {
   readonly diff: ToolDiffMessage
   readonly theme?: DiffTheme
+  /** ADR-0448 (RFC-10): opt into the rich side-by-side layout. Default
+   *  `"inline"` ⇒ identical to ADR-0440 render (existing callers unchanged). */
+  readonly mode?: DiffViewMode
   readonly className?: string
 }
 
-export const DiffPanel = ({ diff, theme = "dark", className }: DiffPanelProps): JSX.Element => {
+export const DiffPanel = ({
+  diff,
+  theme = "dark",
+  mode = "inline",
+  className,
+}: DiffPanelProps): JSX.Element => {
   const stats = diffStatsFromMessage(diff)
   return (
     <div
@@ -43,6 +51,7 @@ export const DiffPanel = ({ diff, theme = "dark", className }: DiffPanelProps): 
         <DiffView
           lines={diff.lines}
           theme={theme}
+          mode={mode}
           {...(diff.path !== undefined ? { path: diff.path } : {})}
           {...(diff.language !== undefined ? { language: diff.language } : {})}
           {...(diff.truncated === true ? { truncated: true, moreLines: diff.moreLines ?? 0 } : {})}
