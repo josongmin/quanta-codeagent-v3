@@ -32,7 +32,9 @@ const driveAll = async (tool: Tool, input: unknown, signal?: AbortSignal): Promi
   return events
 }
 
-const lastResult = (events: ToolEvent[]): { ok: boolean; output: string; run?: BatchRunResult } => {
+const lastResult = (
+  events: ToolEvent[],
+): { ok: boolean; output: string; run: BatchRunResult | undefined } => {
   const last = events.at(-1)
   if (!last || last.type !== "result") throw new Error("expected terminal result event")
   return {
