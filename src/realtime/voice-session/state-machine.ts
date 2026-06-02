@@ -1,5 +1,5 @@
 /**
- * Realtime voice-session — pure state-machine reducer (ADR-0439, RFC §3.2).
+ * Realtime voice-session — pure state-machine reducer (ADR-0442, RFC §3.2).
  *
  * `(state, action) → state`. No I/O, no time, no randomness — fully unit
  * testable in isolation (HELL-RTV-02). The `default-session` drives real I/O

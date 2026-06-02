@@ -1,4 +1,4 @@
-# ADR-0439 — Realtime bidirectional voice session (`RealtimeVoiceSession`)
+# ADR-0442 — Realtime bidirectional voice session (`RealtimeVoiceSession`)
 
 - Status: Accepted
 - Date: 2026-06-02

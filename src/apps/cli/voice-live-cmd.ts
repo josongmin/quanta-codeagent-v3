@@ -1,5 +1,5 @@
 /**
- * In-REPL `/voice-live` subcommand handler (ADR-0439, RFC-03 §5).
+ * In-REPL `/voice-live` subcommand handler (ADR-0442, RFC-03 §5).
  *
  * Sibling to `voice-cmd.ts` (one-shot dictation). This is LIVE bidirectional
  * spoken dialog: streaming mic-up + streaming transcript/audio-down with a

@@ -1,6 +1,6 @@
 /**
  * Realtime voice-session — pure `session.update` payload builder
- * (ADR-0439, RFC §4.2). Mirrors Codex's `Session` config 1:1.
+ * (ADR-0442, RFC §4.2). Mirrors Codex's `Session` config 1:1.
  *
  * No tuned heuristics: VAD knobs are passed THROUGH from config. When a knob
  * is omitted we DO NOT emit it — the Realtime API applies its documented

@@ -1,5 +1,5 @@
 /**
- * Realtime voice-session — the SINGLE isolated DSP seam (ADR-0439, RFC §3.4).
+ * Realtime voice-session — the SINGLE isolated DSP seam (ADR-0442, RFC §3.4).
  *
  * HONEST BOUNDARY: this is NOT a codec. We do NOT encode/decode opus and we
  * never will here (`src/realtime/audio-codec.ts:1-19` documents that opus

@@ -1,6 +1,6 @@
 /**
  * Realtime voice-session — OpenAI Realtime API transport adapter
- * (ADR-0439, RFC §4.1). A `RealtimePort` variant that sets the
+ * (ADR-0442, RFC §4.1). A `RealtimePort` variant that sets the
  * `Authorization: Bearer <auth>` + `OpenAI-Beta: realtime=v1` headers the
  * Realtime API requires on the WS upgrade.
  *

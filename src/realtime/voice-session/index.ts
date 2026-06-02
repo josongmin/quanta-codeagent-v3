@@ -1,5 +1,5 @@
 /**
- * Realtime voice-session slice barrel (ADR-0439, RFC-03).
+ * Realtime voice-session slice barrel (ADR-0442, RFC-03).
  *
  * Live bidirectional spoken dialog: composes the existing `@/realtime`
  * transport + `@/voice` recorder + a sibling `AudioPlaybackPort`, driven by

@@ -1,5 +1,5 @@
 /**
- * Realtime voice-session slice — `RealtimeVoiceSessionPort` (ADR-0439, RFC-03).
+ * Realtime voice-session slice — `RealtimeVoiceSessionPort` (ADR-0442, RFC-03).
  *
  * A closed-port that COMPOSES the two existing realtime/voice slices into a
  * live spoken dialog driven by the OpenAI Realtime API (server-side

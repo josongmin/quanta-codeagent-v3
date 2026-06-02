@@ -1,6 +1,6 @@
 /**
  * Realtime voice-session — `AudioPlaybackPort` down-channel sink
- * (ADR-0439, RFC §6.4).
+ * (ADR-0442, RFC §6.4).
  *
  * Receives PCM16 audio-delta frames the SERVER already encoded and pipes them
  * to a platform player. It does NO DSP / NO codec — it just hands bytes to a

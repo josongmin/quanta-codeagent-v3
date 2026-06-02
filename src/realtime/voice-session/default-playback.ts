@@ -1,6 +1,6 @@
 /**
  * Realtime voice-session — default `AudioPlaybackPort` adapter
- * (ADR-0439, RFC §5.2/§6.4). Spawns a platform player and pipes the
+ * (ADR-0442, RFC §5.2/§6.4). Spawns a platform player and pipes the
  * server-encoded PCM16 frames to its stdin. NO DSP / NO codec — the bytes are
  * already encoded by the Realtime API; we only hand them to a player process.
  *

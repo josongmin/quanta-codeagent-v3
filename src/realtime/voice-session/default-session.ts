@@ -1,6 +1,6 @@
 /**
  * Realtime voice-session — default `RealtimeVoiceSessionPort` impl
- * (ADR-0439, RFC §3.1/§3.4). COMPOSES the existing transport + recorder +
+ * (ADR-0442, RFC §3.1/§3.4). COMPOSES the existing transport + recorder +
  * sibling playback into a live spoken dialog. NO transport / mic / codec is
  * re-implemented here — everything is an injected port.
  *
