@@ -19,8 +19,7 @@
 import { describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
 import { runAgent } from "@/agent"
-import type { LLMPort, Message, StreamEvent } from "@/llm"
-import type { LlmPrewarmPort } from "@/llm"
+import type { LLMPort, LlmPrewarmPort, Message, StreamEvent } from "@/llm"
 import { Metrics } from "@/observability"
 import type { PermissionContext } from "@/permission"
 import type { AgentEvent, StreamPort } from "@/stream"
@@ -123,10 +122,9 @@ describe("ADR-0452 — prewarm loop wiring", () => {
     })
 
     const snap = m.snapshot()
-    const startupKeys = [
-      ...Object.keys(snap.gauges),
-      ...Object.keys(snap.counters),
-    ].filter((k) => k.startsWith("quanta.startup."))
+    const startupKeys = [...Object.keys(snap.gauges), ...Object.keys(snap.counters)].filter((k) =>
+      k.startsWith("quanta.startup."),
+    )
     expect(startupKeys).toEqual([])
 
     // And the event stream matches a run with no metrics at all.

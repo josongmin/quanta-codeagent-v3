@@ -174,7 +174,9 @@ export const runShell = async (
   // reason is an opaque tag (the wrap's `degradeReason` or the no-sandbox
   // sentinel), never a profile body.
   if (onSandboxStatus !== undefined) {
-    onSandboxStatus(anyWrapLayerRan ? sandboxStatus : { applied: false, reason: "no-sandbox-installed" })
+    onSandboxStatus(
+      anyWrapLayerRan ? sandboxStatus : { applied: false, reason: "no-sandbox-installed" },
+    )
   }
   // ADR-0204 wire — when a snapshot seam is supplied, restore wraps the argv
   // so the spawned shell sources the captured per-turn env. Absent ⇒

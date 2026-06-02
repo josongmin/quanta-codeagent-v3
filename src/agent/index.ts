@@ -21,8 +21,10 @@ export {
   type TickKind,
 } from "./budget"
 export {
+  COMMAND_HOOKS_ENABLED_WITHOUT_ACK_MESSAGE,
   type CommandHookBinding,
   type CommandHookConfig,
+  CommandHookConfigError,
   type CommandHookDeps,
   type CommandHookEvent,
   type CommandHookExecOpts,
@@ -31,8 +33,6 @@ export {
   type CommandHookGate,
   type CommandHookPermissionPort,
   type CommandHookVerdict,
-  COMMAND_HOOKS_ENABLED_WITHOUT_ACK_MESSAGE,
-  CommandHookConfigError,
   createSandboxCommandHookExec,
   DEFAULT_COMMAND_HOOK_MAX_OUTPUT_BYTES,
   DEFAULT_COMMAND_HOOK_TIMEOUT_MS,

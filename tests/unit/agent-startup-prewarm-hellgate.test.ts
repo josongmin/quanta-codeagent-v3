@@ -30,10 +30,10 @@
 import { describe, expect, test } from "bun:test"
 import { AgentRecorder } from "@/agent"
 import { runSessionPrewarm } from "@/agent/startup-prewarm"
-import { type LlmPrewarmPort, prewarmLlm } from "@/llm"
 import type { LLMPort } from "@/llm"
-import { Metrics } from "@/observability"
+import { type LlmPrewarmPort, prewarmLlm } from "@/llm"
 import type { StreamEvent, StreamInput } from "@/llm/types"
+import { Metrics } from "@/observability"
 
 // A bare LLMPort with NO prewarm capability.
 const bareLlm = (): LLMPort => ({

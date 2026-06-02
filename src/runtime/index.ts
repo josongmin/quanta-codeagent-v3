@@ -1,5 +1,18 @@
 export type { EscalatingKill, GuardedSpawnHooks, KillableChild } from "./guarded-spawn"
 export { escalatingKill, KILL_GRACE_MS, withSpawnedChild } from "./guarded-spawn"
+export {
+  applyLocalEnv,
+  LOCAL_ENV_CANDIDATES,
+  type LoadLocalEnvResult,
+  type LocalEnvConfig,
+  type LocalEnvParseErrorReason,
+  type LocalEnvParseResult,
+  type LocalEnvSelection,
+  loadLocalEnvConfig,
+  parseLocalEnvConfig,
+  selectEnvironment,
+  type TomlParse,
+} from "./local-env"
 // S1: re-export from the os-sandbox sub-barrel so the wire surface uses a
 // single @/runtime import (keeps apps/cli/sandbox-wire from reaching past
 // the runtime slice boundary into @/runtime/os-sandbox).
@@ -20,19 +33,6 @@ export {
   SandboxUnavailableError,
   scrubEnv,
 } from "./sandbox"
-export {
-  applyLocalEnv,
-  LOCAL_ENV_CANDIDATES,
-  type LoadLocalEnvResult,
-  type LocalEnvConfig,
-  type LocalEnvParseErrorReason,
-  type LocalEnvParseResult,
-  type LocalEnvSelection,
-  loadLocalEnvConfig,
-  parseLocalEnvConfig,
-  selectEnvironment,
-  type TomlParse,
-} from "./local-env"
 export { runShell } from "./shell"
 export {
   __resetShellSandbox,
