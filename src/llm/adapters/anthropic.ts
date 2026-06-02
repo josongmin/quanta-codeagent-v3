@@ -1,10 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk"
 import { LLMError } from "@/shared/errors"
-import type { LLMPort } from "../ports"
 import { buildAnthropicMessagesRequest } from "../anthropic-messages-codec"
+import type { LLMPort } from "../ports"
 import { withStreamTimeout } from "../stream-timeout"
 import type { StreamEvent, StreamInput } from "../types"
 import { buildUsageEvent, parseToolInputOrThrow, resolveAdapterStreamTimeouts } from "./shared"
+
 export { buildAnthropicMessagesRequest, toAnthropicToolChoice } from "../anthropic-messages-codec"
 
 interface AnthropicConfig {
@@ -203,7 +204,19 @@ function* finishOnMessageDelta(
   usage: UsageAccumulator,
 ): Generator<StreamEvent> {
   if (ev.usage) usage.outputTokens = ev.usage.output_tokens
-  if (!ev.delta.stop_reason) return
+  if (!ev.delta.stop_reason) {
+    // Intermediate `message_delta`: Anthropic streams the CUMULATIVE
+    // `output_tokens` (SDK `MessageDeltaUsage.output_tokens`) before the final
+    // stop. Surface it as a LIVE `output_progress` so the spinner shows an
+    // EXACT rising count, not just the chars/4 estimate. Deliberately NOT a
+    // `usage` event: the loop folds `usage` into the recorder/budget/taskSpend,
+    // and re-emitting a growing cumulative figure would massively over-count.
+    // `output_progress` is UI-only (loop forwards it without accounting).
+    if (ev.usage !== undefined && usage.outputTokens !== undefined) {
+      yield { type: "output_progress", outputTokens: usage.outputTokens, exact: true }
+    }
+    return
+  }
   const usageEvent = buildUsageEvent(usage)
   if (usageEvent) yield usageEvent
   yield { type: "message_stop", stop_reason: ev.delta.stop_reason }

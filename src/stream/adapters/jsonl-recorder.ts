@@ -84,6 +84,12 @@ export class JsonlRecorder implements StreamPort {
 
   emit(event: AgentEvent): void {
     if (event.type === "turn_start") this.turnSpanId = `t${event.turn}`
+    // `output_progress` is a high-frequency, non-durable UI signal (the rising
+    // "· N tokens" live counter). It is deliberately NOT persisted to the
+    // trajectory — recording one line per streamed delta would bloat the jsonl
+    // and add nothing a consumer needs (the terminal `usage` line carries the
+    // authoritative count). Skipping here keeps it out of `KIND_MAP` / `dataOf`.
+    if (event.type === "output_progress") return
     if (this.written >= this.maxLines) {
       this.handleCap()
       return
@@ -243,7 +249,14 @@ export class JsonlRecorder implements StreamPort {
   }
 }
 
-const KIND_MAP: Record<AgentEvent["type"], TrajectoryKind> = {
+// `output_progress` is excluded: it is a transient UI signal that `emit`
+// drops before reaching `kindOf`/`dataOf` (see the early return there), so it
+// has no trajectory kind or payload. Excluding it from the map type keeps that
+// invariant honest rather than mapping it to a kind that is never written.
+type RecordedEventType = Exclude<AgentEvent["type"], "output_progress">
+type RecordedEvent = Extract<AgentEvent, { type: RecordedEventType }>
+
+const KIND_MAP: Record<RecordedEventType, TrajectoryKind> = {
   session_start: "session_start",
   turn_start: "turn_start",
   llm_request: "llm_request",
@@ -311,10 +324,10 @@ const KIND_MAP: Record<AgentEvent["type"], TrajectoryKind> = {
 }
 
 /** AgentEvent.type → TrajectoryEvent.kind (RFC §5.2 mapping). */
-const kindOf = (e: AgentEvent): TrajectoryKind => KIND_MAP[e.type]
+const kindOf = (e: RecordedEvent): TrajectoryKind => KIND_MAP[e.type]
 
 /** Project an AgentEvent onto its kind-specific `data` payload. */
-const dataOf = (e: AgentEvent): Record<string, unknown> => {
+const dataOf = (e: RecordedEvent): Record<string, unknown> => {
   switch (e.type) {
     case "session_start":
       // RFC-0002 §5.2 head marker — minimal payload (no fields mandated).

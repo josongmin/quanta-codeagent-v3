@@ -65,6 +65,11 @@ export interface UsageDelta {
   /** Optional cost in USD (caller computes from model + tokens — we just
    *  render). Absent ⇒ token-only display. */
   costUsd?: number
+  /** Whether `outputTokens` is provider-authoritative (`true`) or locally
+   *  estimated (`false`, from the live-usage decorator's chars/4 fallback). A
+   *  false reading renders with a `~` prefix. Omitted ⇒ treated as exact
+   *  (the terminal `usage` AgentEvent carries no flag and IS authoritative). */
+  exact?: boolean
 }
 
 export interface TurnIndicator {
@@ -189,6 +194,9 @@ interface RenderState {
   firstChunkAt: number | undefined
   inputTokens: number
   outputTokens: number
+  /** True ⇒ `outputTokens` is provider-authoritative; false ⇒ estimated
+   *  (rendered with a `~` prefix). */
+  outputExact: boolean
   costUsd: number | undefined
   frame: number
   /** Trailing ring of output-token readings (max {@link RATE_WINDOW_SAMPLES});
@@ -196,19 +204,33 @@ interface RenderState {
   rateSamples: RateSample[]
 }
 
+/** Render the output-token count with a `~` prefix when the value is a local
+ *  estimate (not yet provider-authoritative). Mirrors Claude Code's rising
+ *  "· N tokens"; the tilde keeps the estimate honest. */
+const formatOutTokens = (n: number, exact: boolean): string =>
+  exact ? formatTokens(n) : `~${formatTokens(n)}`
+
 const renderLine = (state: RenderState, glyphs: readonly string[], nowMs: number): string => {
   const glyph = cyan(glyphs[state.frame % glyphs.length] ?? "·")
   const elapsed = formatElapsed(nowMs - state.startedAt)
 
-  // Pre-first-chunk: short "thinking…" line — no token counts yet.
+  // Pre-first-chunk "thinking…" line. Reasoning models stream `thinking_delta`
+  // here (no visible text yet ⇒ `markFirstChunk` hasn't fired), so the live
+  // output-token count IS already climbing — surface it (Claude-Code parity:
+  // "thinking… · N tokens") instead of a bare clock.
   if (state.firstChunkAt === undefined) {
-    return `${glyph} ${dim("thinking…")} ${cyan(elapsed)}`
+    const base = `${glyph} ${dim("thinking…")} ${cyan(elapsed)}`
+    return state.outputTokens > 0
+      ? `${base} ${SEP} ${green(formatOutTokens(state.outputTokens, state.outputExact))} ${dim("tokens")}`
+      : base
   }
 
   const ttft = formatElapsed(state.firstChunkAt - state.startedAt)
   const parts: string[] = [glyph, dim("streaming"), cyan(elapsed), `${dim("ttft")} ${yellow(ttft)}`]
   if (state.inputTokens > 0) parts.push(`${magenta(formatTokens(state.inputTokens))} ${dim("in")}`)
-  if (state.outputTokens > 0) parts.push(`${green(formatTokens(state.outputTokens))} ${dim("out")}`)
+  if (state.outputTokens > 0) {
+    parts.push(`${green(formatOutTokens(state.outputTokens, state.outputExact))} ${dim("out")}`)
+  }
   // Live output throughput — additive: only appears once the trailing ring
   // holds ≥2 forward-flowing samples (computeRate ⇒ undefined otherwise, so
   // no `0 tok/s` noise / no NaN before flow starts). Repaint cadence does NOT
@@ -253,6 +275,7 @@ export const createTurnIndicator = (opts: TurnIndicatorOptions): TurnIndicator =
         firstChunkAt: undefined,
         inputTokens: 0,
         outputTokens: 0,
+        outputExact: false,
         costUsd: undefined,
         frame: 0,
         rateSamples: [],
@@ -288,6 +311,9 @@ export const createTurnIndicator = (opts: TurnIndicatorOptions): TurnIndicator =
         // tick, so the measured rate is decoupled from repaint cadence.
         pushRateSample(state.rateSamples, delta.outputTokens, now())
         state.outputTokens = delta.outputTokens
+        // Omitted flag ⇒ authoritative (the terminal `usage` AgentEvent). The
+        // live-usage decorator passes an explicit `exact` per progress tick.
+        state.outputExact = delta.exact ?? true
       }
       if (delta.costUsd !== undefined) state.costUsd = delta.costUsd
     },

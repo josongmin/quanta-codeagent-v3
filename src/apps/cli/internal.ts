@@ -55,6 +55,7 @@ import { gitTools, type Tool } from "@/tool"
 import { createMarkdownPainter } from "./markdown-painter"
 import { buildCliElicitationPrompterFactory } from "./mcp-elicitation-prompter"
 import { isPathLikeToken } from "./resume"
+import { isIndicatorEnabled } from "./turn-indicator"
 
 /**
  * ADR-0024 (export-gap closure): CLI `internal.ts` is the home of all
@@ -775,6 +776,10 @@ export const composeLLM = (
     slog,
     fallbackModelIds: fallbackModels(),
     env: process.env,
+    // Live "· N tokens" counter rides the SAME gate as the spinner indicator
+    // (interactive TTY + `QUANTA_SPINNER` not disabled). Non-TTY / piped /
+    // `QUANTA_SPINNER=0` ⇒ byte-identical no-progress stream.
+    liveUsage: isIndicatorEnabled(process.env, process.stdout.isTTY),
   })
 
 // ── Split: `Tooling` lives in `@/runner/assemble/*` (PURE composition, no

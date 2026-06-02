@@ -2,11 +2,12 @@ import { createAutoClassifierPort, RetryingLLM } from "@/agent"
 import {
   createLLM,
   DEFAULT_MODEL,
-  type FallbackMetricSink,
   FallbackLLM,
+  type FallbackMetricSink,
   type Provider as LLMFactoryProvider,
   type LLMPort,
   pickProvider as pickProviderFactory,
+  withLiveUsage,
 } from "@/llm"
 import type { StructuredLogger } from "@/observability"
 import type { PermissionContext, PermissionMode } from "@/permission"
@@ -86,6 +87,16 @@ export interface ComposeLlmInput {
    *  decorator). Structural typing — a `MetricsRegistry` from
    *  `@/observability/metrics` satisfies the shape without coupling. */
   fallbackMetrics?: FallbackMetricSink
+  /** Default-OFF live output-token meter (the rising "· N tokens" spinner
+   *  counter). When `true`, the composed stack is wrapped OUTERMOST with
+   *  {@link withLiveUsage} so it observes the fully-normalized event stream
+   *  (including `stream_reset` from fallback) and emits `output_progress`. The
+   *  surface ties this to its UI being able to render it — the CLI passes
+   *  `true` only when the turn-indicator is enabled (interactive TTY). When
+   *  omitted / `false` the stack is byte-identical. NOTE: applied AFTER the
+   *  `auto` classifier is attached, so the classifier's internal calls use the
+   *  un-wrapped port and never emit progress. */
+  liveUsage?: boolean
 }
 
 /** Compose the LLM stack: bounded retry (inner-most, supplied by caller),
@@ -113,6 +124,13 @@ export const composeLLMCore = (input: ComposeLlmInput): LLMPort => {
   if (input.mode === "auto") {
     input.permission.classify = createAutoClassifierPort({ llm: finalLLM })
     input.slog.info("permission.auto.on")
+  }
+  // Outermost wrap: live output-token meter. Placed AFTER the classifier so
+  // the classifier's internal calls use the un-wrapped port (no stray
+  // `output_progress` from permission classification). Identity when OFF.
+  if (input.liveUsage === true) {
+    finalLLM = withLiveUsage(finalLLM, { enabled: true })
+    input.slog.info("llm.live_usage.on")
   }
   return finalLLM
 }

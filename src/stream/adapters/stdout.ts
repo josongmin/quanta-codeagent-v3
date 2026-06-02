@@ -143,6 +143,11 @@ export class StdoutStream implements StreamPort {
         // statement (keeps `emit`'s cognitive complexity under the budget).
         this.write(renderInProgress(event))
         break
+      case "output_progress":
+        // Live "· N tokens" counter — rendered by the CLI spinner/status-bar
+        // (a transient in-place update), NOT this line-oriented monitor. A
+        // line per streamed delta would flood stdout, so this sink ignores it.
+        break
       case "response_queued":
         this.write(renderResponseQueued(event))
         break

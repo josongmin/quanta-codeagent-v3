@@ -133,6 +133,11 @@ export const assembleFromEvents = (events: StreamEvent[]): AssembledTurn => {
         // must ignore it so the reconstructed message remains stable whether
         // or not the transport opportunistically resumes.
         break
+      case "output_progress":
+        // Live token-count UX signal (rising "· N tokens"). Not content;
+        // assemblers skip it so the reconstructed message is byte-identical
+        // whether or not the live-usage decorator was active.
+        break
       case "message_stop":
         stopReason = ev.stop_reason
         break

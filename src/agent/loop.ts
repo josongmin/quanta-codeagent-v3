@@ -406,6 +406,17 @@ async function* teeUsage(
   for await (const ev of guarded) {
     if (ev.type === "usage") emitUsage(config, ev, recorder, collector, taskSpend)
     if (ev.type === "llm_continuation") emitLlmContinuation(config, ev)
+    // Live "· N tokens" UI signal. Forwarded to the surface stream ONLY — it
+    // must NOT touch the recorder / budget meter / taskSpend (those are owned
+    // by the terminal `usage` above), so the count is never double-charged.
+    // The recorder skips this AgentEvent (see jsonl-recorder.emit).
+    if (ev.type === "output_progress") {
+      config.stream.emit({
+        type: "output_progress",
+        outputTokens: ev.outputTokens,
+        exact: ev.exact,
+      })
+    }
     yield ev
   }
 }

@@ -13,6 +13,8 @@ export {
 } from "./factory"
 export type { FallbackLLMOptions, FallbackMetricSink } from "./fallback"
 export { FALLBACK_METRIC_NAMES, FallbackLLM, isFallbackTrigger } from "./fallback"
+export type { LiveUsageKnobs } from "./live-usage"
+export { estimateTokensFromChars, withLiveUsage } from "./live-usage"
 export type { ModelCandidate, ModelSwapRetryOptions } from "./model-swap"
 export {
   NoAlternateModelError,
