@@ -15,6 +15,7 @@ import {
   createTurnIndicator,
   DEFAULT_GLYPHS,
   isIndicatorEnabled,
+  RATE_WINDOW_SAMPLES,
 } from "../../../src/apps/cli/turn-indicator"
 
 interface CapturedCall {
@@ -77,6 +78,12 @@ const makeFakeTimer = (): {
 
 type TurnIndicatorTimerSet = (cb: () => void, ms: number) => ReturnType<typeof setInterval>
 type TurnIndicatorTimerClear = (h: ReturnType<typeof setInterval>) => void
+
+/** Strip SGR colour escapes (ESC `[` … `m`) so numeric assertions on rendered
+ *  text are colour-agnostic. ESC is char-code 27 (built via fromCharCode to
+ *  avoid a literal control char in the regex source). */
+const stripAnsi = (text: string): string =>
+  text.replaceAll(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g"), "")
 
 const makeClock = (start = 1_000_000): { now: () => number; advance: (ms: number) => void } => {
   let t = start
@@ -423,5 +430,133 @@ describe("createTurnIndicator: transient call sequence", () => {
     for (const p of paints) {
       expect((p.ms ?? 0) > 80).toBe(true)
     }
+  })
+})
+
+// ── live tok/s throughput (windowed slope) ──────────────────────────────
+
+describe("createTurnIndicator: live tok/s rate", () => {
+  /** Drive a fresh indicator, run `body`, then return the last painted text. */
+  const lastPaintOf = (
+    body: (
+      ind: ReturnType<typeof createTurnIndicator>,
+      clock: ReturnType<typeof makeClock>,
+    ) => void,
+  ): string => {
+    const { bar, calls } = makeCapBar()
+    const timer = makeFakeTimer()
+    const clock = makeClock()
+    const ind = createTurnIndicator({
+      statusBar: bar,
+      now: clock.now,
+      setInterval: timer.setIv,
+      clearInterval: timer.clearIv,
+    })
+    ind.start()
+    ind.markFirstChunk()
+    body(ind, clock)
+    clock.advance(1) // ensure a paint after the latest sample
+    timer.tick()
+    ind.stop()
+    return calls.filter((c) => c.kind === "transient").pop()?.text ?? ""
+  }
+
+  test("no rate with a SINGLE sample (no slope ⇒ nothing extra, no 0/NaN)", () => {
+    const text = lastPaintOf((ind) => {
+      ind.updateUsage({ outputTokens: 100 })
+    })
+    expect(text).toMatch(/100 out/)
+    expect(text).not.toMatch(/tok\/s/)
+    expect(text).not.toMatch(/NaN/)
+  })
+
+  test("rate appears after ≥2 forward samples and is the windowed slope", () => {
+    // +1000 tokens over 1000 ms ⇒ 1000 tok/s.
+    const text = lastPaintOf((ind, clock) => {
+      ind.updateUsage({ outputTokens: 0 })
+      clock.advance(1000)
+      ind.updateUsage({ outputTokens: 1000 })
+    })
+    expect(text).toMatch(/tok\/s/)
+    // 1000 tok/s formats compactly via formatTokens ⇒ "1,000".
+    expect(text).toMatch(/1,000 .*tok\/s/)
+  })
+
+  test("trailing window: a burst then a stall shows the DROP, not a flat avg", () => {
+    // Burst then stall. With an 8-sample ring, once the window is full of slow
+    // samples the slope must reflect the recent slow flow, NOT the lifetime mean.
+    const text = lastPaintOf((ind, clock) => {
+      let tokens = 0
+      // Fast burst: +200 tok / 10 ms each = 20,000 tok/s.
+      for (let i = 0; i < 3; i++) {
+        clock.advance(10)
+        tokens += 200
+        ind.updateUsage({ outputTokens: tokens })
+      }
+      // Stall: many slow samples to flush the burst out of the ring.
+      // +1 tok / 1000 ms each = ~1 tok/s.
+      for (let i = 0; i < RATE_WINDOW_SAMPLES; i++) {
+        clock.advance(1000)
+        tokens += 1
+        ind.updateUsage({ outputTokens: tokens })
+      }
+    })
+    expect(text).toMatch(/tok\/s/)
+    // After the ring fully refills with slow samples the rate rounds to ~1.
+    // A session average would be enormous (thousands); assert it's tiny.
+    // Strip ANSI (ESC = char 27) so the numeric assertion is colour-agnostic.
+    const stripped = stripAnsi(text)
+    const m = stripped.match(/([\d.,]+)([kM]?) tok\/s/)
+    expect(m).not.toBeNull()
+    expect(m?.[2] ?? "").toBe("") // no k/M suffix ⇒ a small number, not thousands
+    const value = Number((m?.[1] ?? "0").replace(/,/g, ""))
+    expect(value).toBeLessThan(10) // recent slow flow, not the burst average
+  })
+
+  test("zero elapsed between two samples ⇒ no rate (no divide-by-zero/Infinity)", () => {
+    const text = lastPaintOf((ind) => {
+      ind.updateUsage({ outputTokens: 50 })
+      // Same clock instant (no advance) ⇒ Δtime === 0.
+      ind.updateUsage({ outputTokens: 200 })
+    })
+    expect(text).not.toMatch(/tok\/s/)
+    expect(text).not.toMatch(/Infinity|NaN/)
+  })
+
+  test("non-advancing output emits are ignored ⇒ no zero-Δtoken pollution", () => {
+    // Two emits at the SAME cumulative count over real time ⇒ still 1 sample.
+    const text = lastPaintOf((ind, clock) => {
+      ind.updateUsage({ outputTokens: 500 })
+      clock.advance(1000)
+      ind.updateUsage({ outputTokens: 500 }) // no forward motion ⇒ not sampled
+    })
+    expect(text).not.toMatch(/tok\/s/)
+    expect(text).not.toMatch(/0 .*tok\/s/)
+  })
+
+  test("ring caps at RATE_WINDOW_SAMPLES (window stays bounded, slope is recent)", () => {
+    // Steady 100 tok / 100 ms = 1000 tok/s for far more than the window size;
+    // the rate must remain the steady slope regardless of how many samples flowed.
+    const text = lastPaintOf((ind, clock) => {
+      let tokens = 0
+      for (let i = 0; i < RATE_WINDOW_SAMPLES * 3; i++) {
+        clock.advance(100)
+        tokens += 100
+        ind.updateUsage({ outputTokens: tokens })
+      }
+    })
+    expect(text).toMatch(/1,000 .*tok\/s/)
+  })
+
+  test("cost still renders AFTER the rate (segment order preserved)", () => {
+    const text = lastPaintOf((ind, clock) => {
+      ind.updateUsage({ outputTokens: 0 })
+      clock.advance(1000)
+      ind.updateUsage({ outputTokens: 1000, costUsd: 0.0143 })
+    })
+    const rateIdx = text.indexOf("tok/s")
+    const costIdx = text.indexOf("$0.0143")
+    expect(rateIdx).toBeGreaterThan(-1)
+    expect(costIdx).toBeGreaterThan(rateIdx)
   })
 })

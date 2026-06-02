@@ -40,6 +40,25 @@ const SEP = dim("·")
  *  slow enough to keep the repaint cost negligible. */
 export const DEFAULT_INTERVAL_MS = 80
 
+/** Number of trailing (tokens, timestamp) samples retained for the live
+ *  output-throughput (`tok/s`) measurement.
+ *
+ *  WHY a windowed slope, not a session average: rate = Δtokens / Δtime taken
+ *  over the OLDEST..NEWEST sample currently in the ring. A short trailing
+ *  window means a burst-then-stall visibly drops as the fast samples age out,
+ *  instead of a session-wide mean that flattens stalls into a misleading
+ *  steady number. This is a MEASUREMENT (an exact slope over an explicit set
+ *  of observed points), not a heuristic — there is no decay factor, no
+ *  threshold, no fudge. The single named constant is the window *length*.
+ *
+ *  WHY 8: `usage` events on most providers arrive roughly per-chunk/flush, so
+ *  ~8 samples spans the last fraction of a second to a couple seconds of real
+ *  flow — recent enough to read as "right now", long enough that a single
+ *  jittery inter-arrival gap can't dominate the slope. The ring is decoupled
+ *  from the 80 ms repaint cadence on purpose: repaint frequency must not
+ *  influence the measured rate. */
+export const RATE_WINDOW_SAMPLES = 8
+
 export interface UsageDelta {
   inputTokens?: number
   outputTokens?: number
@@ -121,6 +140,48 @@ const formatCost = (usd: number | undefined): string => {
   return `$${usd.toFixed(2)}`
 }
 
+/** One observed output-token reading at a wall-clock instant (from the
+ *  injected `now`). The ring of these drives the live `tok/s` slope. */
+interface RateSample {
+  tokens: number
+  at: number
+}
+
+/** Compute output throughput (tok/s) from the trailing sample ring, or
+ *  `undefined` when no meaningful rate exists yet.
+ *
+ *  Returns `undefined` (NOT `0`) when:
+ *    - fewer than 2 samples exist (a single point has no slope), OR
+ *    - the oldest and newest samples share a timestamp (Δtime === 0 ⇒ would
+ *      divide by zero / produce Infinity), OR
+ *    - the token delta is non-positive (no forward flow ⇒ nothing to show).
+ *
+ *  Rate is the slope OLDEST→NEWEST across the whole retained window, so it
+ *  reflects the recent trailing window rather than a session-long average. */
+const computeRate = (samples: readonly RateSample[]): number | undefined => {
+  if (samples.length < 2) return undefined
+  const oldest = samples[0]
+  const newest = samples[samples.length - 1]
+  if (oldest === undefined || newest === undefined) return undefined
+  const dt = newest.at - oldest.at
+  if (dt <= 0) return undefined
+  const dTokens = newest.tokens - oldest.tokens
+  if (dTokens <= 0) return undefined
+  return (dTokens / dt) * 1000 // tokens-per-ms → tokens-per-second
+}
+
+/** Append an output-token reading to the trailing ring, mutating `samples` in
+ *  place. Only FORWARD motion is recorded (a repeated/idle `usage` emit that
+ *  doesn't advance the cumulative output count is dropped so it can't pollute
+ *  the slope with a zero-Δtoken point). The ring is capped at
+ *  {@link RATE_WINDOW_SAMPLES}; the oldest sample ages out past the cap. */
+const pushRateSample = (samples: RateSample[], tokens: number, at: number): void => {
+  const prev = samples[samples.length - 1]
+  if (prev !== undefined && tokens <= prev.tokens) return
+  samples.push({ tokens, at })
+  if (samples.length > RATE_WINDOW_SAMPLES) samples.shift()
+}
+
 /** Mutable per-turn render state. Held in one object so each frame is a pure
  *  read; `updateUsage`/`markFirstChunk` just patch fields. */
 interface RenderState {
@@ -130,6 +191,9 @@ interface RenderState {
   outputTokens: number
   costUsd: number | undefined
   frame: number
+  /** Trailing ring of output-token readings (max {@link RATE_WINDOW_SAMPLES});
+   *  oldest first. Only appended when output actually advances. */
+  rateSamples: RateSample[]
 }
 
 const renderLine = (state: RenderState, glyphs: readonly string[], nowMs: number): string => {
@@ -145,6 +209,12 @@ const renderLine = (state: RenderState, glyphs: readonly string[], nowMs: number
   const parts: string[] = [glyph, dim("streaming"), cyan(elapsed), `${dim("ttft")} ${yellow(ttft)}`]
   if (state.inputTokens > 0) parts.push(`${magenta(formatTokens(state.inputTokens))} ${dim("in")}`)
   if (state.outputTokens > 0) parts.push(`${green(formatTokens(state.outputTokens))} ${dim("out")}`)
+  // Live output throughput — additive: only appears once the trailing ring
+  // holds ≥2 forward-flowing samples (computeRate ⇒ undefined otherwise, so
+  // no `0 tok/s` noise / no NaN before flow starts). Repaint cadence does NOT
+  // feed this number; the value is the slope over token-arrival samples.
+  const rate = computeRate(state.rateSamples)
+  if (rate !== undefined) parts.push(`${green(formatTokens(Math.round(rate)))} ${dim("tok/s")}`)
   const cost = formatCost(state.costUsd)
   if (cost !== "") parts.push(gray(cost))
   return parts.join(` ${SEP} `)
@@ -185,6 +255,7 @@ export const createTurnIndicator = (opts: TurnIndicatorOptions): TurnIndicator =
         outputTokens: 0,
         costUsd: undefined,
         frame: 0,
+        rateSamples: [],
       }
       // Paint the first frame synchronously so the user sees motion BEFORE
       // the first tick of the timer fires (which would otherwise delay the
@@ -210,7 +281,14 @@ export const createTurnIndicator = (opts: TurnIndicatorOptions): TurnIndicator =
       // than accumulate. The two `undefined` paths are no-ops so a partial
       // delta (e.g. cost only) doesn't clobber the token half.
       if (delta.inputTokens !== undefined) state.inputTokens = delta.inputTokens
-      if (delta.outputTokens !== undefined) state.outputTokens = delta.outputTokens
+      if (delta.outputTokens !== undefined) {
+        // Sample the OUTPUT cumulative count at the injected clock instant —
+        // the same `now` the spinner already uses (no second wall-clock). We
+        // record on the token-delta boundary (here), NOT on the 80 ms frame
+        // tick, so the measured rate is decoupled from repaint cadence.
+        pushRateSample(state.rateSamples, delta.outputTokens, now())
+        state.outputTokens = delta.outputTokens
+      }
       if (delta.costUsd !== undefined) state.costUsd = delta.costUsd
     },
     markFirstChunk: (): void => {
