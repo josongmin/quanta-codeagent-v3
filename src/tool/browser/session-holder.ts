@@ -11,7 +11,7 @@
  */
 
 import type { BrowserError, BrowserHandle, BrowserPort } from "@/browser"
-import { err, ok, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 
 export interface BrowserSession {
   /** Return the live handle, spawning it on first use. */
@@ -62,7 +62,7 @@ export const createBrowserSession = (port: BrowserPort): BrowserSession => {
         // so a later call retries instead of dead-locking (R1 audit [5]).
         .catch(
           (e): Result<BrowserHandle, BrowserError> =>
-            err({ kind: "spawn-failed", detail: e instanceof Error ? e.message : String(e) }),
+            err({ kind: "spawn-failed", detail: errMessage(e) }),
         )
         .finally(() => {
           spawning = null

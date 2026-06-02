@@ -46,6 +46,7 @@
 
 import { readdir, readFile } from "node:fs/promises"
 import { extname, join } from "node:path"
+import { errMessage } from "@/shared"
 import { runtimeConfig } from "@/shared/runtime-config"
 import {
   isNamedProfileName,
@@ -281,7 +282,7 @@ const loadAndValidate = async (file: string, allowWiden: boolean): Promise<Permi
   try {
     raw = await readFile(file, "utf8")
   } catch (err) {
-    throw new ProfileValidationError(file, `unreadable: ${(err as Error).message}`)
+    throw new ProfileValidationError(file, `unreadable: ${errMessage(err)}`)
   }
   const profile = parseUserProfile(file, raw)
   if (!allowWiden) {
@@ -329,7 +330,7 @@ export const parseUserProfile = (file: string, raw: string): PermissionProfile =
   try {
     parsed = JSON.parse(raw)
   } catch (err) {
-    throw new ProfileValidationError(file, `not valid JSON: ${(err as Error).message}`)
+    throw new ProfileValidationError(file, `not valid JSON: ${errMessage(err)}`)
   }
   if (!isObj(parsed)) {
     throw new ProfileValidationError(file, "top-level value must be a JSON object")
@@ -480,7 +481,7 @@ export const parseUserProfileDefinition = (file: string, raw: string): ProfileDe
   try {
     parsed = JSON.parse(raw)
   } catch (err) {
-    throw new ProfileValidationError(file, `not valid JSON: ${(err as Error).message}`)
+    throw new ProfileValidationError(file, `not valid JSON: ${errMessage(err)}`)
   }
   return buildDefinition(file, parsed)
 }

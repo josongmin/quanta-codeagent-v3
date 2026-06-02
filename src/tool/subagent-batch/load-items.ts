@@ -5,6 +5,7 @@
  * precedent). NO-THROW: every failure returns `{ok:false, error}`, never throws.
  */
 
+import { errMessage } from "@/shared"
 import type { ReadFilePort } from "./port"
 import type { BatchItem } from "./template"
 
@@ -174,7 +175,7 @@ export const loadItems = async (
   try {
     text = await readFile(path)
   } catch (e) {
-    return { ok: false, error: `failed to read items_path: ${(e as Error)?.message ?? String(e)}` }
+    return { ok: false, error: `failed to read items_path: ${errMessage(e)}` }
   }
   if (kind === "csv") return parseCsv(text)
   if (kind === "jsonl") return parseJsonl(text)

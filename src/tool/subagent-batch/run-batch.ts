@@ -12,6 +12,7 @@
  * completion order.
  */
 
+import { errMessage } from "@/shared"
 import type {
   BatchItemResult,
   BatchRunResult,
@@ -153,7 +154,7 @@ const runOneItem = async (
     // otherwise it's a worker failure.
     if (timedOut) return { kind: "timeout" }
     if (batchSignal.aborted) return { kind: "cancelled" }
-    return { kind: "worker-failed", finalText: (e as Error)?.message ?? String(e), turns: 0 }
+    return { kind: "worker-failed", finalText: errMessage(e), turns: 0 }
   } finally {
     if (timer !== undefined) clearTimeout(timer)
     batchSignal.removeEventListener("abort", onAbort)

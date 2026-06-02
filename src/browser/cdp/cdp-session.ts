@@ -11,7 +11,7 @@
  * connection — no real browser, no real timers.
  */
 
-import { err, ok, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 import type { BrowserError } from "../types"
 import type { CdpConnection, Scheduler } from "./ports"
 
@@ -235,9 +235,7 @@ export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
           if (pageSessionId !== null) envelope.sessionId = pageSessionId
           deps.conn.send(JSON.stringify(envelope))
         } catch (e) {
-          armed.settle(
-            err({ kind: "cdp-error", detail: e instanceof Error ? e.message : String(e) }),
-          )
+          armed.settle(err({ kind: "cdp-error", detail: errMessage(e) }))
         }
       })
     },

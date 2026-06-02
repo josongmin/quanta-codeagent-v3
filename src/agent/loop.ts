@@ -1360,7 +1360,7 @@ const emitPromptAssembled = (
   } catch (e) {
     config.stream.emit({
       type: "error",
-      message: `onPromptAssembled observer threw: ${e instanceof Error ? e.message : String(e)}`,
+      message: `onPromptAssembled observer threw: ${errMessage(e)}`,
     })
   }
 }

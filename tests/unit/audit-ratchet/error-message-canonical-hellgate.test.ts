@@ -82,6 +82,13 @@ const ALLOWED_TERNARY_INLINE_SITES = new Set<string>([
   // (`tests/unit/integrations/github/slice-fence-static-hellgate-r3.test.ts`)
   // pins that no `@/shared` import survives.
   "apps/cli/from-pr-cmd.ts",
+  // ADR-0311 / ADR-0313 — the `integrations/github` slice is plane-clean: the
+  // slice-fence hellgate
+  // (`tests/unit/integrations/github/slice-fence-static-hellgate-r3.test.ts`
+  // "every slice file imports only from `@/reactor`, `node:crypto`, or `./*`")
+  // FORBIDS any `@/shared` import, so `errMessage` cannot reach this file. The
+  // inline ternary is the canonical-equivalent form kept by design.
+  "integrations/github/idempotency.ts",
   // R8 audit close-out (ADR-0165 §Plane discipline): the coverage adapter
   // quartet's plane-clean contract was tightened to admit ONE pure-helper
   // import (`errMessage` from `@/shared`, no I/O) so the canonical

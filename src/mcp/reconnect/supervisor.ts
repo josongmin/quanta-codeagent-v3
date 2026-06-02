@@ -15,6 +15,7 @@
  *                                       ↑__________________|  (restart fails, cap not hit)
  *    cap exhausted (maxFastAttempts then maxPeriodicCycles) → degraded (give-up). */
 
+import { errMessage } from "@/shared"
 import { McpError } from "../client"
 import type { McpCallResult, McpServerConfig, McpToolDef } from "../types"
 import { type BackoffPolicy, backoffDelay } from "./policy"
@@ -111,7 +112,7 @@ export class McpReconnectSupervisor {
       await client.start()
       sup.toHealthy()
     } catch (e) {
-      sup.lastDiagnostic = errText(e)
+      sup.lastDiagnostic = errMessage(e)
       // First start failed → treat like a restart failure and schedule backoff.
       sup.onStartFailure()
     }
@@ -242,7 +243,7 @@ export class McpReconnectSupervisor {
       // restart rather than a silent half-up client.
       await fresh.listTools()
     } catch (e) {
-      this.lastDiagnostic = errText(e)
+      this.lastDiagnostic = errMessage(e)
       // If stop() or a newer restart superseded us, discard this orphan client.
       if (this.stopped || this.restartEpoch !== epoch) {
         await fresh.stop().catch(() => undefined)
@@ -345,6 +346,3 @@ export class McpReconnectSupervisor {
     for (const w of snapshot) w()
   }
 }
-
-const errText = (e: unknown): string =>
-  e instanceof Error ? e.message : typeof e === "string" ? e : String(e)

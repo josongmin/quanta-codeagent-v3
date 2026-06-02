@@ -8,7 +8,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs"
-import { err, ok, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 import type {
   BrowserFs,
   CdpConnection,
@@ -118,7 +118,7 @@ export const defaultCdpTransport: CdpTransport = {
       return ok(conn)
     } catch (e) {
       ws.close()
-      return err({ detail: e instanceof Error ? e.message : String(e) })
+      return err({ detail: errMessage(e) })
     }
   },
 }

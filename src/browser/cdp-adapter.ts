@@ -18,7 +18,7 @@
  *   - `close()` is idempotent and always kills the proc + removes the profile.
  */
 
-import { err, ok, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 import { type CdpSession, createCdpSession } from "./cdp/cdp-session"
 import { COLLECT_SCRIPT, parseDomModel } from "./cdp/collect"
 import {
@@ -648,7 +648,7 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
         return ok({ id, backend: "chromium" })
       } catch (e) {
         teardown()
-        return err({ kind: "spawn-failed", detail: e instanceof Error ? e.message : String(e) })
+        return err({ kind: "spawn-failed", detail: errMessage(e) })
       }
     },
 
