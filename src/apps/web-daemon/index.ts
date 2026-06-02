@@ -106,14 +106,23 @@ const buildObservabilityPorts = (
 }
 
 /**
- * ADR-0440 — project the live facade's canvas usage source into the
- * per-connection canvas port bundle. Returns `undefined` when the facade is
+ * ADR-0440 — project the live facade's canvas sources (usage + tool-diff) into
+ * the per-connection canvas port bundle. Returns `undefined` when the facade is
  * absent (gate OFF) or carries no canvas source (`QUANTA_WEB_CANVAS !== "1"`),
- * so the server attaches no canvas sink (byte-identical).
+ * so the server attaches no canvas sink (byte-identical). Both sources are gated
+ * on the same `QUANTA_WEB_CANVAS=1` flag (the runtime-factory mints them as a
+ * pair), but each port is wired independently so the bundle is forward-safe if
+ * either source is ever gated separately.
  */
 const buildCanvasPorts = (facade: ObservableRuntimeFacade | undefined): CanvasPorts | undefined => {
-  if (facade?.canvasUsage === undefined) return undefined
-  return { usageSource: facade.canvasUsage }
+  if (facade === undefined) return undefined
+  if (facade.canvasUsage === undefined && facade.canvasToolDiff === undefined) return undefined
+  return {
+    ...(facade.canvasUsage !== undefined ? { usageSource: facade.canvasUsage } : {}),
+    // ADR-0440 wire-finish — the canvas tool-diff source (subscribe-only). Each
+    // connection's emitter forwards every capture as a `tool.diff` frame.
+    ...(facade.canvasToolDiff !== undefined ? { toolDiffSource: facade.canvasToolDiff } : {}),
+  }
 }
 
 /**

@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { defaultFileSystemPort, type FileSystemPort, FsJailError, sha256Hex } from "@/storage"
 import { gitWriteGuardDeny } from "../git-write-guard-result"
+import { captureToolDiff } from "../tool-diff-capture"
 import type { Tool, ToolContext, ToolEvent, ToolFailure } from "../types"
 import { applyExactEdit } from "./exact"
 import { applyFuzzyEdit } from "./fuzzy"
@@ -94,7 +95,7 @@ const planEdit = async (
   input: Input,
   cwd: string | undefined,
 ): Promise<
-  | { kind: "ready"; next: string; message: string }
+  | { kind: "ready"; before: string; next: string; message: string }
   | { kind: "failure"; result: { ok: false; output: string; failure: ToolFailure } }
 > => {
   const source = await fs.readFile(input.path, cwd)
@@ -108,7 +109,10 @@ const planEdit = async (
   if (!result.ok || result.next === undefined) {
     return { kind: "failure", result: buildMismatchResult(result, input.path) }
   }
-  return { kind: "ready", next: result.next, message: result.message }
+  // Surface the pre-edit `source` so a SUCCESSFUL commit can hand the
+  // before/after to the optional tool-diff sink (ADR-0440) — no recompute,
+  // no second read; this is the read we already did to plan the edit.
+  return { kind: "ready", before: source, next: result.next, message: result.message }
 }
 
 /** ADR-0398 — route the commit through `writeFileAtomic` when the caller
@@ -175,6 +179,12 @@ export const makeEditTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
         return
       }
       await commitEdit(fs, input.path, planned.next, ctx.cwd, input.expected_hash)
+      // ADR-0440 — feed the before/after to the optional tool-diff sink so the
+      // web-daemon emits a `tool.diff` canvas frame. Default-OFF: no-op unless
+      // `ctx.toolDiff` + `ctx.toolCallId` are both wired (gate ON). No recompute
+      // (the daemon runs the diff once); the file is already written, so the
+      // helper swallows any sink throw.
+      captureToolDiff(ctx, planned.before, planned.next, input.path)
       yield { type: "result", result: { ok: true, output: `${input.path}: ${planned.message}` } }
     } catch (e) {
       if (e instanceof FsJailError) {

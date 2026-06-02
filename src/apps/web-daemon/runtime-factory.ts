@@ -27,6 +27,10 @@ import { buildSkillsConfigCore, buildSubagentConfigCore, parseEnvFlag } from "@/
 import { createRuntimeFromAgentConfigBase, type RuntimeFacade } from "@/sdk/runtime"
 import { StdoutStream } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
+import {
+  type CanvasToolDiffSourceHandle,
+  createCanvasToolDiffSource,
+} from "./canvas-tool-diff-source"
 import { type CanvasUsageSourceHandle, createCanvasUsageSource } from "./canvas-usage-source"
 
 /**
@@ -49,6 +53,13 @@ export interface ObservableRuntimeFacade extends RuntimeFacade {
    * server attaches no canvas sink, byte-identical).
    */
   readonly canvasUsage?: CanvasUsageSourceHandle
+  /**
+   * ADR-0440 wire-finish — canvas tool-diff source fed by the session's
+   * `onToolDiff` seam (a file-mutating tool's before/after). Present only when
+   * `QUANTA_WEB_CANVAS=1` (gate OFF ⇒ undefined ⇒ the server forwards no
+   * `tool.diff` frames, byte-identical).
+   */
+  readonly canvasToolDiff?: CanvasToolDiffSourceHandle
 }
 
 /**
@@ -177,6 +188,11 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
     // `onPromptAssembled` capture (byte-identical) + no facade port ⇒ the
     // server attaches no canvas sink.
     const canvasUsage = env.QUANTA_WEB_CANVAS === "1" ? createCanvasUsageSource() : undefined
+    // ADR-0440 wire-finish — tool-diff source. Gate OFF ⇒ undefined ⇒ no
+    // `onToolDiff` wired (no tool captures, byte-identical) + no facade port ⇒
+    // the server forwards no `tool.diff` frames.
+    const canvasToolDiff =
+      env.QUANTA_WEB_CANVAS === "1" ? createCanvasToolDiffSource() : undefined
     const base: Omit<AgentConfig, "modePolicy" | "budgetMeter"> = {
       llm,
       registry: new ToolRegistry(buildDefaultTools()),
@@ -190,6 +206,7 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       ...(subagent !== undefined ? { subagent } : {}),
       ...(skills !== undefined ? { skills } : {}),
       ...(canvasUsage !== undefined ? { onPromptAssembled: canvasUsage.sink } : {}),
+      ...(canvasToolDiff !== undefined ? { onToolDiff: canvasToolDiff.sink } : {}),
       ...observabilitySlots(observability),
     }
     const turnAssembler = buildInteractiveTurnAssembler()
@@ -209,6 +226,14 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
     if (canvasUsage !== undefined) {
       Object.defineProperty(facade, "canvasUsage", {
         get: () => canvasUsage,
+        enumerable: true,
+      })
+    }
+    // ADR-0440 wire-finish — expose the tool-diff source so the daemon's canvas
+    // sink subscribes to live tool mutations. Gate OFF ⇒ undefined ⇒ no source.
+    if (canvasToolDiff !== undefined) {
+      Object.defineProperty(facade, "canvasToolDiff", {
+        get: () => canvasToolDiff,
         enumerable: true,
       })
     }

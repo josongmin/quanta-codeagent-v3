@@ -157,12 +157,42 @@ export interface CanvasUsageSource {
 }
 
 /**
+ * ADR-0440 wire-finish — a captured tool mutation a connection renders as a
+ * `tool.diff` frame. Carries the full pre/post file text the agent's dispatch
+ * seam handed the daemon (no recompute — `feedToolDiff` runs the line-diff
+ * once). Structural mirror of `canvas-tool-diff-source.ts#CapturedToolDiff`.
+ */
+export interface CanvasToolDiff {
+  readonly toolCallId: string
+  readonly before: string
+  readonly after: string
+  readonly path?: string
+}
+
+/**
+ * ADR-0440 wire-finish — canvas tool-diff source. Subscribe-only (unlike the
+ * usage source there is NO `latest()` snapshot-on-connect: a diff is a
+ * point-in-time mutation event, not retained state). Each connection's emitter
+ * forwards every subsequent capture as a `tool.diff` frame.
+ */
+export interface CanvasToolDiffSource {
+  /** Subscribe to subsequent tool mutations. Returns an unsubscribe closure. */
+  subscribe(handler: (diff: CanvasToolDiff) => void): () => void
+}
+
+/**
  * ADR-0440 — canvas port bundle handed to each connection. All optional: the
  * `index.ts` composition root only passes what the live facade exposes. Gate
  * OFF ⇒ `index.ts` never builds this ⇒ no sink, byte-identical.
  */
 export interface CanvasPorts {
   readonly usageSource?: CanvasUsageSource
+  /**
+   * ADR-0440 wire-finish — live tool-diff source (the agent dispatch seam feeds
+   * it via `AgentConfig.onToolDiff`). Present only when `QUANTA_WEB_CANVAS=1`.
+   * Absent ⇒ a connection forwards no `tool.diff` frames (byte-identical).
+   */
+  readonly toolDiffSource?: CanvasToolDiffSource
 }
 
 /**
@@ -202,10 +232,28 @@ export const attachCanvasSink = (
     if (current !== undefined) handle.feedUsage(current)
     unsubscribe = source.subscribe((view) => handle.feedUsage(view))
   }
+  // ADR-0440 wire-finish — subscribe this connection's emitter to the live
+  // tool-diff source so a file-mutating tool's before/after becomes a
+  // `tool.diff` frame. NO snapshot-on-connect (a diff is a point-in-time
+  // mutation, not retained state) — diffs render from the next mutation
+  // forward. `feedToolDiff` runs the line-diff math once + applies the caps.
+  let unsubscribeDiffs: (() => void) | undefined
+  const diffSource = ports.toolDiffSource
+  if (diffSource !== undefined) {
+    unsubscribeDiffs = diffSource.subscribe((diff) =>
+      handle.feedToolDiff({
+        toolCallId: diff.toolCallId,
+        before: diff.before,
+        after: diff.after,
+        ...(diff.path !== undefined ? { path: diff.path } : {}),
+      }),
+    )
+  }
   return {
     handle,
     detach: () => {
       unsubscribe?.()
+      unsubscribeDiffs?.()
       handle.stop()
     },
   }

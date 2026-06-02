@@ -401,8 +401,9 @@ const buildToolContext = (args: {
   config: AgentConfig
   workingState: WorkingStateHandle | undefined
   collabMode: ReturnType<typeof resolveCollaborationMode>
+  toolCallId: string
 }): ToolContext => {
-  const { config, workingState, collabMode } = args
+  const { config, workingState, collabMode, toolCallId } = args
   const requestPlanExit = buildRequestPlanExit(config, collabMode)
   const reviewerAgent = materializeReviewerAgent(config)
   return {
@@ -439,6 +440,13 @@ const buildToolContext = (args: {
     // so shell-class tools inject HTTP(S)_PROXY into the child spawn. ABSENT ⇒
     // omitted ⇒ `withProxyEnv` returns the same base env (byte-identical legacy).
     ...(config.proxyEnv !== undefined ? { proxyEnv: config.proxyEnv } : {}),
+    // ADR-0440 wire-finish — surface the tool-diff capture sink + the current
+    // call id so a file-mutating tool can feed its before/after to the canvas
+    // emitter. ABSENT (gate OFF / non-canvas caller) ⇒ both fields omitted ⇒ no
+    // tool captures anything, byte-identical legacy path.
+    ...(config.onToolDiff !== undefined
+      ? { toolDiff: config.onToolDiff, toolCallId }
+      : {}),
   }
 }
 
@@ -545,7 +553,12 @@ const dispatchToolInner = async (
   // level of the permission config itself, so this is intentional (the model
   // and untrusted content cannot reach it). See hooks.ts `emit` security note.
   const effectiveCall: ToolUseBlock = rewritten ? { ...call, input: rewritten.value } : call
-  const ctx = buildToolContext({ config, workingState, collabMode: collab })
+  const ctx = buildToolContext({
+    config,
+    workingState,
+    collabMode: collab,
+    toolCallId: effectiveCall.id,
+  })
   // ADR-0062 rule #3 — cap-as-instruction enforcement (DEFAULT-OFF).
   // Before executing the tool, check whether the model IGNORED the last
   // nextAction hint for this (toolName, targetPath) pair. When ignored, emit

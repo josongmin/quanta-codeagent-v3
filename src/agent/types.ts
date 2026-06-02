@@ -963,6 +963,25 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
     snapshot: import("./context/usage-breakdown").PromptAssembledSnapshot,
   ) => void
   /**
+   * ADR-0440 wire-finish — OPTIONAL tool-diff capture sink. When set, the
+   * dispatch seam surfaces it (plus the dispatched `ToolUseBlock.id`) onto the
+   * {@link import("@/tool").ToolContext} so a file-mutating tool (`write`/`edit`)
+   * hands its pre/post file text to the sink after a SUCCESSFUL mutation. The
+   * web-daemon composition root adapts its canvas emitter's `feedToolDiff` into
+   * this port ONLY when `QUANTA_WEB_CANVAS=1`; the sink converts the
+   * before/after into a `tool.diff` canvas frame (the line-diff math runs ONCE
+   * inside the daemon, NEVER recomputed agent-side).
+   *
+   * Absent ⇒ the dispatch seam omits the ctx fields, NO tool captures anything,
+   * and the path is byte-identical for every non-canvas caller (RFC §1.2,
+   * default-OFF). Duck-typed (structural mirror of `@/tool`'s `ToolDiffSink`) so
+   * neither slice imports the other's `@/apps/*` surface — the composition root
+   * is the only place that bridges the daemon emitter to this port. Best-effort:
+   * the sink is no-throw by contract and the tool-side helper additionally
+   * try/catches, so a misbehaving sink can never crash a turn.
+   */
+  onToolDiff?: import("@/tool").ToolDiffSink
+  /**
    * Codex Submission op envelope (ADR-0072, Spec A3). When set the loop
    * derives the seed user-turn from `submission.op` instead of `messages`
    * (`user_input` / `user_input_with_turn_context` only — other op variants

@@ -251,6 +251,44 @@ export interface ToolContext {
     readonly address?: { readonly host: string; readonly port: number }
     readonly noProxy?: readonly string[]
   }
+  /** ADR-0440 wire-finish — OPTIONAL tool-diff capture sink. A file-mutating
+   *  tool (`write`/`edit`) calls `capture(...)` ONCE after a SUCCESSFUL mutation
+   *  with the full pre/post file text it ALREADY has in hand (no recompute, no
+   *  extra read on the gate-OFF path). The web-daemon composition root wires the
+   *  concrete sink ONLY when `QUANTA_WEB_CANVAS=1`; the sink converts the
+   *  before/after into a `tool.diff` canvas frame (the diff math runs ONCE inside
+   *  the daemon's `feedToolDiff`, never here). Duck-typed (structural mirror of
+   *  the daemon-side {@link ToolDiffSink} below) so `@/tool` never imports
+   *  `@/apps/web-daemon` (slice fence, RFC §3.1; biome enforces). ABSENT ⇒ no
+   *  capture, no allocation, byte-identical legacy path (default-OFF). The
+   *  `toolCallId` correlates the frame with the dispatched call (surfaced by the
+   *  dispatch seam from the `ToolUseBlock.id`); absent ⇒ no capture (the sink is
+   *  per-call and needs the id). */
+  toolDiff?: ToolDiffSink
+  /** ADR-0440 wire-finish — the dispatched `ToolUseBlock.id` of the CURRENT
+   *  call, surfaced so a mutating tool can correlate its {@link toolDiff} capture
+   *  with the exact tool call. Surfaced by the dispatch seam only when a
+   *  {@link toolDiff} sink is wired (gate ON); absent otherwise (byte-identical
+   *  legacy path). */
+  toolCallId?: string
+}
+
+/** ADR-0440 wire-finish — duck-typed tool-diff capture sink injected via
+ *  {@link ToolContext}. Structural mirror of the daemon-side capture port (the
+ *  web-daemon adapts its `canvas-emitter`'s `feedToolDiff` into this shape at
+ *  the composition root) — kept HERE so `@/tool` stays slice-isolated from
+ *  `@/apps/web-daemon` (RFC §3.1; biome enforces). `capture` is NO-THROW at the
+ *  port boundary by contract (the daemon swallows a dead socket); a mutating
+ *  tool calls it INSIDE a guard so a misbehaving sink can never break the turn.
+ *  The diff math is NOT run here — the caller hands raw before/after strings and
+ *  the daemon computes the line diff exactly ONCE (no recompute). */
+export interface ToolDiffSink {
+  capture(input: {
+    readonly toolCallId: string
+    readonly before: string
+    readonly after: string
+    readonly path?: string
+  }): void
 }
 
 /** ADR-0421 — duck-typed mirror of `FastApplyFallbackPort` from

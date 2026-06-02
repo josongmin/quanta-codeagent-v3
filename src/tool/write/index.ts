@@ -2,6 +2,7 @@ import { z } from "zod"
 import { defaultFileSystemPort, type FileSystemPort, FsJailError } from "@/storage"
 import { defineTool } from "../factory"
 import { gitWriteGuardDeny } from "../git-write-guard-result"
+import { captureToolDiff } from "../tool-diff-capture"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
 const schema = z.object({
@@ -56,7 +57,22 @@ export const makeWriteTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<
       // are written, so a denied path is NEVER a partial write.
       try {
         const existed = await fs.fileExists(input.path, ctx.cwd)
+        // ADR-0440 — capture the pre-write bytes ONLY when the tool-diff sink is
+        // wired AND this call is correlated (gate ON). Gate OFF ⇒ both undefined
+        // ⇒ NO extra read, byte-identical legacy path. A new file's "before" is
+        // the empty string. The read failing must never block the write, so it is
+        // best-effort (a fresh/locked file just yields an empty before).
+        const captureDiff = ctx.toolDiff !== undefined && ctx.toolCallId !== undefined
+        let before = ""
+        if (captureDiff && existed) {
+          try {
+            before = await fs.readFile(input.path, ctx.cwd)
+          } catch {
+            before = ""
+          }
+        }
         await fs.writeFile(input.path, input.content, ctx.cwd)
+        if (captureDiff) captureToolDiff(ctx, before, input.content, input.path)
         const bytes = Buffer.byteLength(input.content, "utf8")
         yield {
           type: "result",

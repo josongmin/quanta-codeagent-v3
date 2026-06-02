@@ -254,6 +254,7 @@ export type {
   ShellSnapshotRestoreSeam,
   Tool,
   ToolContext,
+  ToolDiffSink,
   ToolEvent,
   ToolFailure,
   ToolResult,
