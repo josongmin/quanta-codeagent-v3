@@ -193,6 +193,7 @@ export type {
   SelectProfileOptions,
 } from "./profile-list-select"
 export {
+  APPROVAL_RANK,
   exceedsCeiling,
   listPermissionProfiles,
   NETWORK_RANK,

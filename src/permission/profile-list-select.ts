@@ -459,44 +459,191 @@ export const NETWORK_RANK: Record<NetworkMode, number> = {
   "allow-all": 2,
 }
 
+/** Approval strictness ladder — HIGHER = stricter (asks more often), so LOWER =
+ *  WIDER / more permissive. `auto` is the widest: it maps to the loop's
+ *  classifier-driven AFK / auto-approve `PermissionContext.mode` (see
+ *  `profile-to-context.ts` `approvalModeToContextMode`) REGARDLESS of
+ *  `promptUser`. So a profile that lowers the approval rank below the ceiling
+ *  widens the approval posture even with `promptUser:true` — the AFK bypass the
+ *  ceiling must close. Mirrors `profile-inheritance.ts` APPROVAL_RANK. */
+export const APPROVAL_RANK: Record<ApprovalMode, number> = {
+  auto: 0,
+  once: 1,
+  session: 2,
+  always: 3,
+}
+
+/** OS-sandbox presence strength — any concrete sandbox (1) is stronger than
+ *  `none` (0). The concrete kinds are equal (a host runs exactly one; cross-OS
+ *  ordering is not meaningful). Mirrors `profile-inheritance.ts` osSandboxRank
+ *  and `profile-layer-merge.ts` OS_SANDBOX_SAFETY — same single polarity. */
+const osSandboxRank = (k: OsSandboxKind): number => (k === "none" ? 0 : 1)
+
+/** Stable string key for a {@link FileSystemPath} (special:kind | literal). */
+const fsPathStr = (p: FileSystemPath): string =>
+  p.type === "special" ? `special:${p.kind}` : p.value
+
+/** `write` covers `read`+`write`; `read` covers only `read`. */
+const accessCovered = (request: FileSystemAccess, by: FileSystemAccess): boolean =>
+  by === "write" ? true : request === "read"
+
+/** Literal-path ancestor test, resolver-FREE (pure): `anc` covers `desc` when
+ *  equal or `desc` is under `anc/`. Both must be absolute literals. */
+const literalAncestor = (anc: string, desc: string): boolean => {
+  if (anc === desc) return true
+  const a = anc.endsWith("/") ? anc : `${anc}/`
+  return desc.startsWith(a)
+}
+
+/**
+ * Is `entry` COVERED BY `coverer` — i.e. does picking `entry` grant no MORE than
+ * `coverer` already grants? Resolver-FREE (no special-path expansion = no IO),
+ * conservative (when in doubt, NOT covered ⇒ the entry is treated as a widen).
+ * Identical relation to `profile-inheritance.ts` `entryCoveredBy` (kept local to
+ * avoid a circular import — that module already imports {@link NETWORK_RANK}
+ * from here).
+ *
+ *   - special vs special: same `kind` ⇒ same location. A `root` write is NOT
+ *     covered by a `project` write (distinct allow-list roots), so a whole-FS
+ *     `root` grant can never reach the workspace-scoped ceiling.
+ *   - path vs path: literal equality OR `coverer` is an absolute path-prefix
+ *     ancestor of `entry`.
+ *   - mixed special/path: NOT covered (conservative — drop toward rejection).
+ */
+const entryCoveredBy = (entry: FileSystemEntry, coverer: FileSystemEntry): boolean => {
+  if (!accessCovered(entry.access, coverer.access)) return false
+  const ep = entry.path
+  const cp = coverer.path
+  if (ep.type === "special" && cp.type === "special") return ep.kind === cp.kind
+  if (ep.type === "path" && cp.type === "path") {
+    return cp.value.startsWith("/") && ep.value.startsWith("/")
+      ? literalAncestor(cp.value, ep.value)
+      : ep.value === cp.value
+  }
+  return false
+}
+
+/** The most-permissive SAFE file-system grant a disk profile may declare WITHOUT
+ *  `allowWiden`: the workspace-scoped allow-list the `trusted` built-in itself
+ *  uses (`project:write`). Defining the FS-entries ceiling as `trusted`'s entry
+ *  table (rather than `default`'s empty set) is deliberate — the FS table is a
+ *  scoped allow-list, so a `project`/workspace write is the intended,
+ *  baseline-safe grant, whereas a `root` write or an absolute-literal write that
+ *  ESCAPES the workspace is the genuine layer-1 escalation the ceiling closes.
+ *  Sourced from the registry (no magic literal ⇒ no drift). */
+const FS_ENTRIES_CEILING: ReadonlyArray<FileSystemEntry> = NAMED_PROFILES.trusted.fileSystem.entries
+
+/** First user entry (if any) that grants MORE than the FS-entries ceiling — not
+ *  covered by ANY ceiling entry. Returns it for a precise reason string. */
+const firstUncoveredEntry = (
+  entries: ReadonlyArray<FileSystemEntry>,
+): FileSystemEntry | undefined =>
+  entries.find((e) => !FS_ENTRIES_CEILING.some((c) => entryCoveredBy(e, c)))
+
+/** One monotone axis check — returns a reason if `p` widens past `ceiling` on
+ *  that axis, else undefined. Kept as a list of small total functions so adding
+ *  an axis is additive and the dispatcher stays flat (low complexity). */
+type AxisCheck = (p: PermissionProfile, ceiling: PermissionProfile) => string | undefined
+
+/** approval axis — mode rank (auto<once<session<always, lower=wider) + prompt. */
+const checkApproval: AxisCheck = (p, c) => {
+  if (APPROVAL_RANK[p.approval.mode] < APPROVAL_RANK[c.approval.mode]) {
+    return `approval.mode '${p.approval.mode}' wider than ceiling '${c.approval.mode}'`
+  }
+  if (!p.approval.promptUser && c.approval.promptUser) {
+    return "approval.promptUser=false suppresses prompting beyond ceiling"
+  }
+  return undefined
+}
+
+/** network axis — egress mode rank + allowHosts beyond the ceiling's set. */
+const checkNetwork: AxisCheck = (p, c) => {
+  if (NETWORK_RANK[p.network.mode] > NETWORK_RANK[c.network.mode]) {
+    return `network '${p.network.mode}' wider than ceiling '${c.network.mode}'`
+  }
+  const ceilHosts = new Set(c.network.allowHosts ?? [])
+  const extraHost = (p.network.allowHosts ?? []).find((h) => !ceilHosts.has(h))
+  return extraHost !== undefined
+    ? `network.allowHosts adds '${extraHost}' beyond the ceiling's allow-set`
+    : undefined
+}
+
+/** sandbox axis — readOnly / workspaceWrite / networkIsolated + osSandbox rank. */
+const checkSandbox: AxisCheck = (p, c) => {
+  if (!p.sandbox.readOnly && c.sandbox.readOnly) {
+    return "sandbox.readOnly=false wider than read-only ceiling"
+  }
+  if (p.sandbox.workspaceWrite && !c.sandbox.workspaceWrite) {
+    return "sandbox.workspaceWrite=true wider than ceiling"
+  }
+  if (!p.sandbox.networkIsolated && c.sandbox.networkIsolated) {
+    return "sandbox.networkIsolated=false wider than ceiling"
+  }
+  if (osSandboxRank(p.sandbox.osSandbox) < osSandboxRank(c.sandbox.osSandbox)) {
+    return `sandbox.osSandbox '${p.sandbox.osSandbox}' weaker than ceiling '${c.sandbox.osSandbox}'`
+  }
+  return undefined
+}
+
+/** fileSystem axis — any entry granting beyond the workspace-scoped FS ceiling. */
+const checkFileSystem: AxisCheck = (p) => {
+  const overEntry = firstUncoveredEntry(p.fileSystem.entries)
+  return overEntry !== undefined
+    ? `fileSystem.entries grants '${overEntry.access}' on '${fsPathStr(overEntry.path)}' beyond the workspace ceiling`
+    : undefined
+}
+
+/** control axis — turning OFF audit the ceiling forces on is a widen. */
+const checkControl: AxisCheck = (p, c) =>
+  !p.control.auditRequired && c.control.auditRequired
+    ? "control.auditRequired=false relaxes audit beyond ceiling"
+    : undefined
+
+/** The ordered axis battery. First match wins (conservative — any single
+ *  over-reach rejects). Additive: a new axis is one more entry here. */
+const CEILING_AXES: ReadonlyArray<AxisCheck> = [
+  checkApproval,
+  checkNetwork,
+  checkSandbox,
+  checkFileSystem,
+  checkControl,
+]
+
 /**
  * Returns a human reason string if `p` is MORE permissive than the safety
  * ceiling on any security-relevant axis, else `undefined`. Any single
  * over-reach trips it (conservative — fail toward rejection).
  *
- * The ceiling is the LOCKED-DOWN `default` built-in, NOT `trusted`. Rationale:
- * a user-authored, disk-loaded profile is the lowest-trust source of policy in
- * the system (anyone who can drop a `.json` in `QUANTA_PROFILES_DIR`), so by
- * default it may be at most as permissive as the canonical safe baseline. The
- * permissive `trusted` posture (network allow-all + workspace write + no
- * prompt) must be opted into EXPLICITLY via `allowWiden:true` — it is not
- * something a stray on-disk file can grant itself.
+ * The scalar ceiling is the LOCKED-DOWN `default` built-in, NOT `trusted`.
+ * Rationale: a user-authored, disk-loaded profile is the lowest-trust source of
+ * policy in the system (anyone who can drop a `.json` in `QUANTA_PROFILES_DIR`),
+ * so by default it may be at most as permissive as the canonical safe baseline.
+ * The permissive `trusted` posture (network allow-all + workspace write + no
+ * prompt) must be opted into EXPLICITLY via `allowWiden:true` — not something a
+ * stray on-disk file can grant itself. (The FS-entries axis ceiling is
+ * `trusted`'s workspace-scoped allow-list — see {@link FS_ENTRIES_CEILING}.)
  *
- * Axes (each must be no wider than `default`):
- *   - network egress  (rank deny-all < allow-list < allow-all)
- *   - workspace write / readOnly exposure
- *   - network isolation removal
- *   - prompt suppression (promptUser=false) — `default` prompts the user
- *   - audit relaxation is NOT a widening axis (auditRequired=false is the
- *     default posture; forcing audit ON is a tightening, never trips).
+ * Axes (each a MONOTONE rule — no heuristic; result is no wider than ceiling):
+ *   - approval mode  (rank auto < once < session < always; wider = LOWER) —
+ *                     `auto` flips the loop to AFK auto-approve even with
+ *                     `promptUser:true`, so the mode is checked independently.
+ *   - prompt suppression (promptUser=false) — `default` prompts the user.
+ *   - network egress (rank deny-all < allow-list < allow-all).
+ *   - network allowHosts — a host NOT in the ceiling's allow-set (empty for
+ *                     `default`) widens egress reach.
+ *   - workspace write / readOnly exposure.
+ *   - network isolation removal.
+ *   - OS sandbox removal (a profile with NO sandbox when the ceiling has one).
+ *   - file-system entries — any entry granting beyond {@link FS_ENTRIES_CEILING}
+ *                     (e.g. a `root` write, or an absolute-literal write that
+ *                     escapes the workspace).
+ *   - audit relaxation (auditRequired=false when the ceiling forces it on).
  */
 export const exceedsCeiling = (p: PermissionProfile): string | undefined => {
   const ceiling = NAMED_PROFILES.default
-
-  if (NETWORK_RANK[p.network.mode] > NETWORK_RANK[ceiling.network.mode]) {
-    return `network '${p.network.mode}' wider than ceiling '${ceiling.network.mode}'`
-  }
-  if (!p.sandbox.readOnly && ceiling.sandbox.readOnly) {
-    return "sandbox.readOnly=false wider than read-only ceiling"
-  }
-  if (p.sandbox.workspaceWrite && !ceiling.sandbox.workspaceWrite) {
-    return "sandbox.workspaceWrite=true wider than ceiling"
-  }
-  if (!p.sandbox.networkIsolated && ceiling.sandbox.networkIsolated) {
-    return "sandbox.networkIsolated=false wider than ceiling"
-  }
-  if (!p.approval.promptUser && ceiling.approval.promptUser) {
-    return "approval.promptUser=false suppresses prompting beyond ceiling"
+  for (const axis of CEILING_AXES) {
+    const reason = axis(p, ceiling)
+    if (reason !== undefined) return reason
   }
   return undefined
 }

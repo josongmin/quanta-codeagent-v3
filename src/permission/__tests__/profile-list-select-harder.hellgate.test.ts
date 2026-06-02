@@ -132,6 +132,197 @@ describe("G. Safety ceiling — each widening axis is rejected independently", (
   })
 })
 
+/* ─── M. Ceiling closes the security-relevant axes the original round OMITTED ─ */
+
+// Red-team confirmed: the original `exceedsCeiling` checked only {network mode,
+// readOnly, workspaceWrite, networkIsolated, promptUser}. A disk-dropped profile
+// could bypass the ceiling on approval.mode:"auto" (AFK auto-approve even with
+// promptUser:true), fileSystem write-to-root, osSandbox removal, audit
+// relaxation, and network.allowHosts widening. Each axis below gets an
+// INDEPENDENT breach (REJECTED, typed) + a SAFE control (PASSES), proving the
+// fix is monotone and free of false positives.
+describe("M. Ceiling — newly-covered security axes (breach + safe control)", () => {
+  // (1) approval.mode:"auto" — the AFK bypass. promptUser:true is the red-team's
+  //     specific trick (the old check only looked at promptUser).
+  test("breach: approval.mode 'auto' (promptUser:true) ⇒ ProfileValidationError; allowWiden admits it", async () => {
+    const obj = { ...SAFE_USER_PROFILE, approval: { mode: "auto", promptUser: true } }
+    const reason = exceedsCeiling(parseUserProfileFn("afk.json", JSON.stringify(obj)))
+    expect(reason).toContain("approval.mode")
+    await withDir(async (dir) => {
+      await writeProfile(dir, "afk", obj)
+      await expect(selectPermissionProfile("afk", { profilesDir: dir })).rejects.toBeInstanceOf(
+        ProfileValidationError,
+      )
+      // allowWiden is the explicit operator opt-in.
+      const widened = await selectPermissionProfile("afk", { profilesDir: dir, allowWiden: true })
+      expect(widened.approval.mode).toBe("auto")
+    })
+  })
+
+  test("safe control: approval.mode 'always' (stricter than ceiling 'once') PASSES", () => {
+    const obj = { ...SAFE_USER_PROFILE, approval: { mode: "always", promptUser: true } }
+    expect(exceedsCeiling(parseUserProfileFn("strict.json", JSON.stringify(obj)))).toBeUndefined()
+  })
+
+  // (2) fileSystem write-to-root — a whole-filesystem layer-1 grant.
+  test("breach: fileSystem write-to-root entry ⇒ ProfileValidationError", async () => {
+    const obj = {
+      ...SAFE_USER_PROFILE,
+      fileSystem: {
+        type: "restricted",
+        entries: [{ path: { type: "special", kind: "root" }, access: "write" }],
+      },
+    }
+    const reason = exceedsCeiling(parseUserProfileFn("root.json", JSON.stringify(obj)))
+    expect(reason).toContain("fileSystem.entries")
+    await withDir(async (dir) => {
+      await writeProfile(dir, "rootw", obj)
+      await expect(selectPermissionProfile("rootw", { profilesDir: dir })).rejects.toBeInstanceOf(
+        ProfileValidationError,
+      )
+    })
+  })
+
+  test("breach: fileSystem write to an absolute-literal path that escapes the workspace ⇒ rejected", () => {
+    const obj = {
+      ...SAFE_USER_PROFILE,
+      fileSystem: {
+        type: "restricted",
+        entries: [{ path: { type: "path", value: "/etc" }, access: "write" }],
+      },
+    }
+    expect(exceedsCeiling(parseUserProfileFn("etc.json", JSON.stringify(obj)))).toContain(
+      "fileSystem.entries",
+    )
+  })
+
+  test("safe control: a project-scoped write entry PASSES (the intended workspace grant)", () => {
+    const obj = {
+      ...SAFE_USER_PROFILE,
+      fileSystem: {
+        type: "restricted",
+        entries: [{ path: { type: "special", kind: "project" }, access: "write" }],
+      },
+    }
+    expect(exceedsCeiling(parseUserProfileFn("proj.json", JSON.stringify(obj)))).toBeUndefined()
+  })
+
+  test("safe control: a project-scoped READ entry PASSES (read ⊆ the project write ceiling)", () => {
+    const obj = {
+      ...SAFE_USER_PROFILE,
+      fileSystem: {
+        type: "restricted",
+        entries: [{ path: { type: "special", kind: "project" }, access: "read" }],
+      },
+    }
+    expect(exceedsCeiling(parseUserProfileFn("projr.json", JSON.stringify(obj)))).toBeUndefined()
+  })
+
+  // (3) osSandbox removal — adding a sandbox is a tightening; the rule is
+  //     monotone (a lower sandbox rank than the ceiling trips). The `default`
+  //     ceiling is osSandbox:"none", so removal cannot trip there; prove the safe
+  //     direction (a concrete sandbox is never a false positive).
+  test("safe control: adding a concrete osSandbox is a tightening ⇒ never trips", () => {
+    const withSandbox = {
+      ...SAFE_USER_PROFILE,
+      sandbox: {
+        osSandbox: "seatbelt",
+        readOnly: true,
+        workspaceWrite: false,
+        networkIsolated: true,
+      },
+    }
+    expect(
+      exceedsCeiling(parseUserProfileFn("sb.json", JSON.stringify(withSandbox))),
+    ).toBeUndefined()
+  })
+
+  // (4) control.auditRequired — the `default` ceiling does NOT force audit, so
+  //     relaxation cannot trip against it; forcing audit ON is a tightening.
+  test("safe control: control.auditRequired:true (stricter) PASSES against the default ceiling", () => {
+    const obj = { ...SAFE_USER_PROFILE, control: { managedBy: "user", auditRequired: true } }
+    expect(exceedsCeiling(parseUserProfileFn("audit.json", JSON.stringify(obj)))).toBeUndefined()
+  })
+
+  // (5) network.allowHosts widening — adding a host beyond the ceiling's set.
+  //     The `default` ceiling is deny-all with NO allowHosts, so any host is
+  //     "extra". (mode stays deny-all to isolate the allowHosts axis from the
+  //     mode-rank check.)
+  test("breach: network.allowHosts adds a host beyond the empty ceiling set ⇒ rejected", () => {
+    const obj = {
+      ...SAFE_USER_PROFILE,
+      network: { mode: "deny-all", allowHosts: ["attacker.test"] },
+    }
+    const reason = exceedsCeiling(parseUserProfileFn("hosts.json", JSON.stringify(obj)))
+    expect(reason).toContain("network.allowHosts")
+    expect(reason).toContain("attacker.test")
+  })
+
+  test("safe control: network.allowHosts omitted ⇒ no widen (equal to the empty ceiling set)", () => {
+    const obj = { ...SAFE_USER_PROFILE, network: { mode: "deny-all" } }
+    expect(exceedsCeiling(parseUserProfileFn("nohosts.json", JSON.stringify(obj)))).toBeUndefined()
+  })
+
+  // (6) FULL equality control — a profile EQUAL to the ceiling on every axis
+  //     PASSES (no false positive across the union of old + new axes).
+  test("a profile structurally EQUAL to the `default` ceiling PASSES (no false positive)", () => {
+    const equalToCeiling = {
+      fileSystem: { type: "restricted", entries: [] },
+      approval: { mode: "once", promptUser: true },
+      network: { mode: "deny-all" },
+      sandbox: { osSandbox: "none", readOnly: true, workspaceWrite: false, networkIsolated: true },
+      control: { auditRequired: false },
+    }
+    expect(
+      exceedsCeiling(parseUserProfileFn("eq.json", JSON.stringify(equalToCeiling))),
+    ).toBeUndefined()
+    // And it round-trips identically to the registry default struct.
+    expect(parseUserProfileFn("eq.json", JSON.stringify(equalToCeiling))).toEqual(
+      NAMED_PROFILES.default,
+    )
+  })
+
+  // (7) the ORIGINAL axes still enforced (regression fence — the fix is additive).
+  test("original axes still rejected: allow-all network / workspaceWrite / readOnly-off / netIso-off / promptUser-off", () => {
+    const breaches: ReadonlyArray<unknown> = [
+      { ...SAFE_USER_PROFILE, network: { mode: "allow-all" } },
+      {
+        ...SAFE_USER_PROFILE,
+        sandbox: {
+          osSandbox: "none",
+          readOnly: true,
+          workspaceWrite: true,
+          networkIsolated: true,
+        },
+      },
+      {
+        ...SAFE_USER_PROFILE,
+        sandbox: {
+          osSandbox: "none",
+          readOnly: false,
+          workspaceWrite: false,
+          networkIsolated: true,
+        },
+      },
+      {
+        ...SAFE_USER_PROFILE,
+        sandbox: {
+          osSandbox: "none",
+          readOnly: true,
+          workspaceWrite: false,
+          networkIsolated: false,
+        },
+      },
+      { ...SAFE_USER_PROFILE, approval: { mode: "always", promptUser: false } },
+    ]
+    for (const obj of breaches) {
+      const reason = exceedsCeiling(parseUserProfileFn("orig.json", JSON.stringify(obj)))
+      expect(typeof reason).toBe("string")
+      expect((reason ?? "").length).toBeGreaterThan(0)
+    }
+  })
+})
+
 /* ─── H. Structural rejection + unknown-key stripping ────────────────────── */
 
 describe("H. Structural validator — strict, total, no leak", () => {
