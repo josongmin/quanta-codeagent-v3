@@ -2,6 +2,7 @@ import type { DebugCmdState } from "./debug-cmd"
 import type { IdleMonitor } from "./idle-monitor"
 import type { RetryWithSessionState } from "./retry-with"
 import type { SideCmdSlashState } from "./side-cmd"
+import type { VoiceLiveCtx } from "./voice-live-cmd"
 
 export interface SlashContext {
   readonly out: (s: string) => void
@@ -102,6 +103,16 @@ export interface SlashContext {
         readonly budgetTokens: (level: import("@/agent").EffortLevel) => number | undefined
       }
     | undefined
+  /** ADR-0442 `/voice-live` composition-root wire. An async BUILDER that the
+   *  surface populates only when the opt-in gate (`QUANTA_VOICE_LIVE`) is set:
+   *  it constructs a live `RealtimeVoiceSessionPort` (Bun-WS transport +
+   *  platform mic recorder + playback + injected clock/pump) plus a TTY-only
+   *  raw-mode key reader, with the OpenAI bearer resolved at the composition
+   *  root and threaded in as a value (the realtime slice never reads env/auth).
+   *  Resolves `undefined` when the gate is off OR on a non-TTY host ⇒
+   *  `/voice-live` declines cleanly (the realtime slice is never touched and
+   *  the REPL is byte-identical). Absent slot ⇒ "not wired in this surface". */
+  readonly voiceLive?: (() => Promise<VoiceLiveCtx | undefined>) | undefined
 }
 
 /** Inventory row returned by {@link SlashContext.skills}. Mirrors the host

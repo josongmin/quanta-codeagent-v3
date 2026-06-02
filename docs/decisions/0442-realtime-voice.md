@@ -64,6 +64,17 @@ server-side.
   interrupted / ending / closed / connectionError / microphonePermissionError).
   Default-OFF gate when the session is unwired; headless decline when no key
   reader is present.
+- **`/voice-live` composition wire** (`src/apps/cli/repl/voice-live-wire.ts`,
+  follow-up) — the dep-assembly that makes typing `/voice-live` actually
+  CONSTRUCT a live session at the REPL composition root: transport = OpenAI
+  Realtime adapter, recorder = platform mic cascade, playback = ffplay/paplay
+  cascade, plus a streaming `MicPump` over the recorder stdout, an injected
+  clock, and a raw-mode keypress reader (TTY only). The OpenAI bearer is
+  resolved HERE (composition root) — `OPENAI_API_KEY` first, then the
+  ChatGPT-OAuth access token — and threaded into the session as a value. The
+  slash is registered in the surface registry (`registry-surface.ts`) and the
+  builder is wired in `surface-compose.ts` behind the `QUANTA_VOICE_LIVE`
+  opt-in gate.
 
 ## Honest codec boundary
 
@@ -92,11 +103,28 @@ the RFC pins (barge-in + auto-response), not tuned numbers.
 
 ## Default-OFF / byte-identical
 
-NOTHING in the existing tree imports `@/realtime/voice-session`. The
-`/voice-live` slash is not registered in any dispatcher — it is invoked only by
-a surface that constructs the session and threads it in (same posture as
-`voice-cmd.ts`). Feature absent ⇒ existing CLI / agent / runner paths are
-byte-identical. Pinned by HELL-RTV-11.
+The `@/realtime/voice-session` slice is imported ONLY by the opt-in `/voice-live`
+surface (the slash handler `voice-live-cmd.ts` + its composition-root wire
+`repl/voice-live-wire.ts`). NO agent / loop / tool / runner path imports it —
+that boundary is the invariant HELL-RTV-11 anchors (now an allow-list of exactly
+those two surface files instead of "zero importers").
+
+The `/voice-live` slash IS registered in the REPL surface registry, but the
+session it drives is built only when `QUANTA_VOICE_LIVE` is set AND stdin is a
+TTY: `buildVoiceLiveSlot` returns `undefined` when the knob is unset, so the
+`voiceLive` ctx slot is omitted and the slash prints "not wired" / declines
+(exit 0). Feature off ⇒ no transport / recorder / WS is ever constructed and the
+REPL is byte-identical. Pinned by HELL-RTV-11 + the new
+`tests/unit/cli/voice-live-wire-hellgate.test.ts` battery (11 cases).
+
+### Known-limitation closure (follow-up)
+
+The original ADR shipped the slice + slash as default-OFF with NO importer ("the
+`/voice-live` slash is not registered in any dispatcher"). This follow-up CLOSES
+that limitation: `/voice-live` is now registered + the live session deps are
+assembled at the composition root, so typing `/voice-live` (with the opt-in knob,
+in a terminal) constructs a real `RealtimeVoiceSessionPort`. The network launch
+itself is exercised against a mocked WS in CI — no live API call in tests.
 
 ## Plane discipline
 

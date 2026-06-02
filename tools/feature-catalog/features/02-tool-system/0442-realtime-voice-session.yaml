@@ -3,8 +3,8 @@ title: ADR-0442 Realtime voice session — live bidirectional spoken dialog
 section: 2
 subsystem: Realtime streaming
 order: 442
-maturity: L1
-status: new
+maturity: L2
+status: refined
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
@@ -25,7 +25,14 @@ purpose: |
   local DSP is a pure WAV-strip + linear resample (pcm-bridge, NOT a codec).
   Auth reuses the llm factory/oauth bearer as an injected value (slice never
   imports @/llm). Clock + mic-pump injected (no Date.now/Math.random/real
-  timer in src). /voice-live slash surface.
+  timer in src). /voice-live slash surface — NOW LIVE-WIRED at the REPL
+  composition root (follow-up): registered in registry-surface.ts + the session
+  deps (Bun-WS transport / platform mic recorder / playback / streaming MicPump
+  / injected clock / TTY raw-mode key reader) are assembled in
+  repl/voice-live-wire.ts behind the QUANTA_VOICE_LIVE opt-in gate, with the
+  OpenAI bearer resolved at the root (OPENAI_API_KEY → ChatGPT-OAuth token) and
+  threaded in as a value. Typing /voice-live (opt-in, TTY) constructs a real
+  session; non-TTY declines; knob off ⇒ slot omitted, REPL byte-identical.
 evidence:
   code:
     - src/realtime/voice-session/port.ts
@@ -38,11 +45,16 @@ evidence:
     - src/realtime/voice-session/openai-realtime-adapter.ts
     - src/realtime/voice-session/index.ts
     - src/apps/cli/voice-live-cmd.ts
+    - src/apps/cli/repl/voice-live-wire.ts
+    - src/apps/cli/repl/surface-compose.ts
+    - src/apps/cli/slash/registry-surface.ts
+    - src/apps/cli/slash-contract.ts
   adrs: [442]
   tests:
     unit:
       - tests/unit/realtime/voice-session-hellgate.test.ts
       - tests/unit/cli/voice-live-cmd-hellgate.test.ts
+      - tests/unit/cli/voice-live-wire-hellgate.test.ts
 knobs:
   - name: mode
     description: turn-detection mode — server_vad (default) or push_to_talk
@@ -54,15 +66,8 @@ knobs:
     description: output voice (default alloy; ListVoices follow-up)
   - name: vad.threshold / vad.prefixPaddingMs / vad.silenceDurationMs
     description: server-VAD knobs — passed through; omitted ⇒ API default (no invented tuning)
-deliberate_hold:
-  reason: |
-    Tool-calling over realtime, WebRTC media path, reconnect/backoff, and
-    multi-voice mixing are out of MVP scope. The /voice-live slash is not yet
-    registered in a dispatcher — invoked only when a surface constructs the
-    session + threads it in (default-OFF byte-identical posture).
-  promotion_path: |
-    Wire the session construction into the apps/cli composition root behind the
-    realtime config knob (resolve bearer via llm factory/oauth, build the
-    openai-realtime-adapter + default-recorder + default-playback), register
-    /voice-live, then add ListVoices + reconnect (RFC-01) + tool-calling.
-notes: 'Default-OFF: 트리 어디서도 @/realtime/voice-session import 0. 13 HELL-RTV + slash hellgate + pcm-bridge/session-config 유닛. tsc 0 / biome 0 (our files).'
+  - name: QUANTA_VOICE_LIVE
+    description: opt-in gate (1/on/true) — unset ⇒ /voice-live slot omitted, REPL byte-identical
+  - name: QUANTA_VOICE_LIVE_ENDPOINT / QUANTA_VOICE_LIVE_MODEL / QUANTA_VOICE_LIVE_VOICE
+    description: composition-root overrides for the live session endpoint / model / output voice
+notes: 'Limitation CLOSED (follow-up): /voice-live registered in registry-surface.ts + deps assembled at the REPL composition root (repl/voice-live-wire.ts + surface-compose.ts) behind QUANTA_VOICE_LIVE. @/realtime/voice-session imported ONLY by the 2 opt-in surface files (HELL-RTV-11 now an allow-list). Auth INJECTED (OPENAI_API_KEY → ChatGPT-OAuth) — slice never reads env/@/llm. WS mocked in CI (no live call). 13 HELL-RTV + slash hellgate (13) + wire hellgate (11) + pcm-bridge/session-config 유닛. tsc 0 / biome 0 (our files).'

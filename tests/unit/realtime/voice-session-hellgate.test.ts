@@ -399,14 +399,24 @@ describe("HELL-RTV-10 auth failure", () => {
 // ----------------------------------------------------------------------------
 
 describe("HELL-RTV-11 default-OFF byte-identical", () => {
-  test("no existing src file imports @/realtime/voice-session", async () => {
+  test("only the opt-in `/voice-live` surface imports @/realtime/voice-session", async () => {
     const { Glob } = await import("bun")
     const root = new URL("../../../src", import.meta.url).pathname
     const glob = new Glob("**/*.ts")
+    // ADR-0442 limitation closure: the slice is now WIRED into the REPL, but
+    // ONLY through the opt-in `/voice-live` surface (the slash handler + its
+    // composition-root wire). Both are runtime-gated by `QUANTA_VOICE_LIVE`
+    // (the wire returns `undefined` when the knob is unset / non-TTY), so the
+    // REPL stays byte-identical when the feature is off. NO agent/loop/tool/
+    // runner path imports the slice — that boundary is what this anchors.
+    const allowed = new Set<string>([
+      "apps/cli/voice-live-cmd.ts", // the slash handler (type-only import)
+      "apps/cli/repl/voice-live-wire.ts", // the composition-root dep assembly
+    ])
     const offenders: string[] = []
     for await (const file of glob.scan(root)) {
       if (file.includes("voice-session/")) continue // the slice itself
-      if (file === "apps/cli/voice-live-cmd.ts") continue // the opt-in surface (type-only import)
+      if (allowed.has(file)) continue // the opt-in surface
       const text = await Bun.file(`${root}/${file}`).text()
       if (text.includes("@/realtime/voice-session")) offenders.push(file)
     }

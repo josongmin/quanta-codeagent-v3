@@ -45,6 +45,7 @@ import type { SlashCommand, SlashContext } from "../slash-contract"
 import { snapshotCmd } from "../snapshot-cmd"
 import { statusCmd } from "../status-cmd"
 import { formatSegmentedUsage } from "../status-line"
+import { runVoiceLiveCmd } from "../voice-live-cmd"
 import { webCmd } from "../web-cmd"
 import { renderWorkingStatePanel } from "../working-state-panel"
 import { runSkillsRender } from "./render-helpers"
@@ -417,6 +418,48 @@ const branchesCmd: SlashCommand = {
   },
 }
 
+/** `/voice-live` (ADR-0442) — live bidirectional spoken dialog. The surface
+ *  populates `ctx.voiceLive` ONLY when the opt-in gate (`QUANTA_VOICE_LIVE`)
+ *  is set AND the host is a TTY; that builder constructs the live
+ *  `RealtimeVoiceSessionPort` (Bun-WS transport + platform mic recorder +
+ *  playback + injected clock/pump) with the bearer resolved at the composition
+ *  root and threaded in as a value. The slash itself never reaches into
+ *  `@/realtime` / `@/voice` / `@/auth` — it only sees the constructed
+ *  `VoiceLiveCtx`.
+ *
+ *  Default-OFF (byte-identical when the knob is unset):
+ *    - slot absent ⇒ "realtime voice not wired in this surface" + exit 0,
+ *    - builder resolves `undefined` (gate off / non-TTY) ⇒ same decline,
+ *    - never auto-launches a live mic session without an interactive key
+ *      reader (the cmd's own headless guard handles that). */
+const voiceLiveCmd: SlashCommand = {
+  name: "/voice-live",
+  describe: "Live spoken dialog (mic up + transcript/audio down). Opt-in: QUANTA_VOICE_LIVE=1",
+  category: "other",
+  async run(_args, ctx) {
+    if (ctx.voiceLive === undefined) {
+      ctx.out("/voice-live: realtime voice not wired in this surface\n")
+      return 0
+    }
+    let built: Awaited<ReturnType<NonNullable<SlashContext["voiceLive"]>>>
+    try {
+      built = await ctx.voiceLive()
+    } catch (e) {
+      ctx.err(`/voice-live: failed to construct session: ${errMessage(e)}\n`)
+      return 1
+    }
+    if (built === undefined) {
+      // Gate off (QUANTA_VOICE_LIVE unset) or non-TTY host ⇒ decline cleanly.
+      ctx.out("/voice-live: realtime voice not enabled (set QUANTA_VOICE_LIVE=1 in a terminal)\n")
+      return 0
+    }
+    // Reconstruct the full line so the cmd's own subcommand parser sees the
+    // verb (`status` etc.). `_args` is the post-name token slice.
+    const line = ["/voice-live", ..._args].join(" ")
+    return runVoiceLiveCmd(line, built)
+  },
+}
+
 /** `/help` — unified menu (slash inventory + keybinds + ENV knobs). The
  *  rendered list is whatever `SURFACE_SLASH_COMMANDS` is concatenated with at
  *  composition time — the assembly in `slash-commands.ts` passes the live
@@ -651,6 +694,7 @@ export const buildSurfaceSlashCommands = (
   forkCheckpointCmd,
   queueCmd,
   webCmd,
+  voiceLiveCmd,
   pasteCmd,
   editPlanCmd,
   editMessageCmd,

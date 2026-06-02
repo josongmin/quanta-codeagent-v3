@@ -101,6 +101,7 @@ describe("BUILTINS table", () => {
       "/fork-checkpoint",
       "/queue",
       "/web",
+      "/voice-live",
       "/paste",
       "/edit-plan",
       "/edit-message",

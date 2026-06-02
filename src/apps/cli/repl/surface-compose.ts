@@ -49,6 +49,7 @@ import { isSlashCommand, runSlashCommand, type SlashContext } from "../slash-com
 import type { StatusBar } from "../status-bar"
 import type { SegmentedUsageView } from "../status-line"
 import { createTextInbox, type TextInbox } from "../text-inbox"
+import type { VoiceLiveCtx } from "../voice-live-cmd"
 import type { CliFeatureConfig } from "./cli-feature-config"
 import { type ContextUsageHolder, createContextUsageHolder } from "./context-usage-snapshot"
 import { type ConvCheckpointWire, startConvCheckpointWire } from "./conv-checkpoint-wire"
@@ -62,6 +63,7 @@ import type { SessionLoopSinks } from "./session-loop"
 import type { SessionSetupResult } from "./session-setup"
 import { buildSkillsCallback } from "./skills-surface"
 import { buildReplSlashCtx, type ReplaySlashState, type ReplSlashCtx } from "./slash-surface"
+import { buildVoiceLiveCtx, voiceLiveEnabled } from "./voice-live-wire"
 
 export interface PromptUxOpts {
   readonly promptHistory?: PromptHistory
@@ -362,6 +364,11 @@ const buildSurfaceDispatch = (args: {
    *  (written by the loop's `onPromptAssembled` sink) or `undefined` before
    *  the first turn assembles a prompt. */
   readonly contextUsage?: () => SegmentedUsageView | undefined
+  /** ADR-0442 `/voice-live` builder. Present only when the opt-in gate is set
+   *  (`QUANTA_VOICE_LIVE`); resolves a constructed live `VoiceLiveCtx` (or
+   *  `undefined` on a non-TTY host). Absent ⇒ slot omitted ⇒ the slash prints
+   *  "not wired" (byte-identical default-OFF). */
+  readonly voiceLive?: () => Promise<VoiceLiveCtx | undefined>
 }): ((input: string) => Promise<boolean>) => {
   return async (input: string): Promise<boolean> => {
     const head = input.split(/\s+/)[0] ?? ""
@@ -390,9 +397,46 @@ const buildSurfaceDispatch = (args: {
       // segmented breakdown from the latest assembled prompt instead of the
       // legacy placeholder. Absent ⇒ slot omitted ⇒ legacy fallback.
       ...(args.contextUsage !== undefined ? { contextUsage: args.contextUsage } : {}),
+      // ADR-0442 `/voice-live` builder. Present only when the opt-in gate is
+      // set; absent ⇒ slot omitted ⇒ the slash prints "not wired" (byte-
+      // identical default-OFF).
+      ...(args.voiceLive !== undefined ? { voiceLive: args.voiceLive } : {}),
     }
     await runSlashCommand(input, ctx)
     return true
+  }
+}
+
+/** ADR-0442 — build the `/voice-live` ctx builder when the opt-in gate is set
+ *  (`QUANTA_VOICE_LIVE`). Returns `undefined` (so the slot is omitted, default-
+ *  OFF byte-identical) when the knob is unset. When set, returns a thunk that
+ *  constructs a live `VoiceLiveCtx` on demand — the actual `@/realtime` /
+ *  `@/voice` / `@/auth` composition is owned by `voice-live-wire.ts`; this just
+ *  injects the production clock, the TTY probe, and the raw-mode keypress stdin
+ *  (built lazily inside the wire only on a TTY host). Construction is deferred
+ *  to first `/voice-live` so the boot path never spawns a recorder/transport
+ *  for a user who never types the command. The OpenAI bearer is resolved INSIDE
+ *  the wire (composition root) and threaded into the session as a value — the
+ *  realtime slice never reads env/auth itself. */
+const buildVoiceLiveSlot = (
+  envSource: NodeJS.ProcessEnv,
+): (() => Promise<VoiceLiveCtx | undefined>) | undefined => {
+  if (!voiceLiveEnabled(envSource)) return undefined
+  return () => {
+    // A raw-mode keypress reader requires an interactive STDIN; that is the
+    // relevant TTY probe for live voice (the recorder + the key loop both bind
+    // to stdin). `process.stdin.isTTY` is the injected host signal here — the
+    // surface fence bans `process.stdout/stderr.isTTY` + `process.env`, neither
+    // of which this reads (the env is the injected `envSource` parameter).
+    const isTty = process.stdin.isTTY === true
+    return buildVoiceLiveCtx({
+      env: envSource,
+      isTty,
+      now: () => Date.now(),
+      ...(isTty
+        ? { keypressStdin: process.stdin as unknown as import("./voice-live-wire").KeypressStdin }
+        : {}),
+    })
   }
 }
 
@@ -613,11 +657,17 @@ export const composeSurfaceWires = (
         }
       : undefined
 
+  // ADR-0442 — `/voice-live` builder. Gated on `QUANTA_VOICE_LIVE`; absent ⇒
+  // `undefined` ⇒ the slot is omitted from the dispatched SlashContext and the
+  // slash prints "not wired" (default-OFF byte-identical).
+  const voiceLive = buildVoiceLiveSlot(envSource)
+
   const dispatchSlash = buildSurfaceDispatch({
     slashCtx,
     convCheckpointSlot,
     sessionIo,
     contextUsage: () => promptAssembled.current(),
+    ...(voiceLive !== undefined ? { voiceLive } : {}),
   })
 
   return {

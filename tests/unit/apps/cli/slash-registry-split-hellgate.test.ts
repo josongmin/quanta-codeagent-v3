@@ -55,6 +55,7 @@ const EXPECTED_NAMES = new Set<string>([
   "/fork-checkpoint",
   "/queue",
   "/web",
+  "/voice-live",
   "/paste",
   "/edit-plan",
   "/edit-message",
@@ -78,6 +79,10 @@ const EXPECTED_NAMES = new Set<string>([
   "/rewind-tool",
   "/memory",
   "/rewind-conv",
+  // Pre-existing app-layer commands that the original EXPECTED set omitted
+  // (registered in registry-app.ts but never added here at base 783e6145).
+  "/knobs",
+  "/session-registry",
 ])
 
 describe("ADR-0306 — slash registry split hellgate (CLI-03)", () => {
