@@ -91,9 +91,18 @@ export type {
   SkillSourceInputs,
 } from "./registry"
 export { buildSkillRegistry, defaultSkillSources } from "./registry"
+// ADR-0457 — codex skill ECOSYSTEM bundled resources (agents/openai.yaml +
+// scripts/references/assets presence).
+export {
+  discoverSkillResources,
+  parseOpenaiYamlInterface,
+  SKILL_RESOURCE_DIRS,
+} from "./skill-resources"
 export {
   createSkillTool,
   scopingNote,
+  // ADR-0457 — listing row that surfaces argumentHint + shortDescription.
+  skillCatalogueRow,
   skillEffortOverride,
   skillModelOverride,
   skillToolAllowlist,
@@ -110,8 +119,8 @@ export {
   BLAME_SECTION_SKILL_NAME,
   type BlameSectionTrigger,
   DEBUG_ERROR_SKILL_NAME,
-  type DebugErrorTrigger,
   DEBUG_TRACE_SKILL_NAME,
+  type DebugErrorTrigger,
   type DebugTraceTrigger,
   discoverSystemSkills,
   EXPLAIN_CODE_SKILL_NAME,
@@ -186,8 +195,11 @@ export { createToolSearchTool } from "./tool-search"
 export type {
   ParsedFrontmatter,
   Skill,
+  // ADR-0457 — codex skill ECOSYSTEM types.
+  SkillAgentInterface,
   SkillEffort,
   SkillInstallState,
+  SkillResources,
   SkillScope,
 } from "./types"
 export {

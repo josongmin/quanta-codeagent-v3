@@ -79,9 +79,24 @@ export const scopingNote = (s: Skill): string => {
  * does that, the scope shown in the result and on the {@link Skill} type is
  * informational metadata, not a sandbox guarantee.
  */
+/**
+ * ADR-0457 — one catalogue row for the skill listing. Surfaces the codex
+ * ECOSYSTEM frontmatter additively:
+ *   - `argumentHint` (e.g. `[scope]`) is appended after the name: `rr [scope]`.
+ *   - `shortDescription` (guaranteed-short `metadata.short-description`) is
+ *     preferred over the potentially-long `description` when present.
+ * A skill declaring neither renders byte-identical to the pre-0457 row
+ * (`- name: description`).
+ */
+export const skillCatalogueRow = (s: Skill): string => {
+  const head = s.argumentHint ? `${s.name} ${s.argumentHint}` : s.name
+  const blurb = s.shortDescription ?? s.description
+  return `- ${head}: ${blurb}`
+}
+
 export const createSkillTool = (skills: Skill[]): Tool<Input> => {
   const byName = new Map(skills.map((s) => [s.name, s]))
-  const catalogue = skills.map((s) => `- ${s.name}: ${s.description}`).join("\n")
+  const catalogue = skills.map(skillCatalogueRow).join("\n")
 
   return {
     name: "Skill",

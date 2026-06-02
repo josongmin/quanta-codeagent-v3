@@ -111,6 +111,24 @@ export interface Skill {
   readonly installState?: SkillInstallState
   /** ADR-0134 admin install attribution — only set when scope === "admin". */
   readonly adminInstalledBy?: string | null
+  /**
+   * ADR-0457 — frontmatter `argument-hint` (kebab key), the codex usage hint
+   * shown after the skill name in a listing (e.g. `rr [scope]`). Optional /
+   * additive: a skill without it renders exactly as before.
+   */
+  readonly argumentHint?: string
+  /**
+   * ADR-0457 — frontmatter `metadata.short-description`, a guaranteed-short
+   * UI blurb codex authors declare under the nested `metadata:` block. When
+   * present, a listing prefers it over the (potentially long) `description`.
+   */
+  readonly shortDescription?: string
+  /**
+   * ADR-0457 — bundled-resource inventory (codex skill ECOSYSTEM). Populated by
+   * discovery for directory-form skills that ship `agents/` / `scripts/` /
+   * `references/` / `assets/` subdirs. Absent when none exist.
+   */
+  readonly resources?: SkillResources
 }
 
 /**
@@ -120,6 +138,47 @@ export interface Skill {
  * {@link Skill.scope} at construction.
  */
 export const skillScope = (s: Pick<Skill, "scope">): SkillScope => s.scope ?? "builtIn"
+
+/**
+ * ADR-0457 — parsed `agents/openai.yaml` `interface:` block (codex skill
+ * ECOSYSTEM parity). Every field is optional: the file is product/harness
+ * metadata, not agent-facing, and a malformed file is skipped entirely (never
+ * crashes discovery). Field names mirror codex's snake_case verbatim in the
+ * on-disk shape but are surfaced here in camelCase per quanta convention.
+ */
+export interface SkillAgentInterface {
+  /** Human-facing title shown in a GUI skill list / chip. */
+  readonly displayName?: string
+  /** Short (25–64 char) UI blurb for quick scanning. */
+  readonly shortDescription?: string
+  /** Example starting prompt; mentions the skill as `$skill-name`. */
+  readonly defaultPrompt?: string
+  /** Path (relative to skill dir) to a small icon asset. */
+  readonly iconSmall?: string
+  /** Path (relative to skill dir) to a larger logo asset. */
+  readonly iconLarge?: string
+  /** Hex color used for UI accents. */
+  readonly brandColor?: string
+}
+
+/**
+ * ADR-0457 — bundled-resource inventory for a directory-form skill. Only
+ * PRESENCE + file-name lists are recorded; `references/` / `assets/` /
+ * `scripts/` contents are NOT loaded into context (on-demand only — token
+ * discipline; the skill body reads them via the normal read tool when needed).
+ * `agentsYaml` is the parsed `interface:` block of `agents/openai.yaml`, if the
+ * file exists and parsed cleanly (malformed ⇒ omitted, discovery never crashes).
+ */
+export interface SkillResources {
+  /** Parsed `agents/openai.yaml` `interface:` block, if present + well-formed. */
+  readonly agentsYaml?: SkillAgentInterface
+  /** File names directly inside `scripts/` (executable automation). */
+  readonly scripts?: readonly string[]
+  /** File names directly inside `references/` (on-demand docs). */
+  readonly references?: readonly string[]
+  /** File names directly inside `assets/` (output / icon files). */
+  readonly assets?: readonly string[]
+}
 
 /** Parsed frontmatter + body, before being shaped into a {@link Skill}. */
 export interface ParsedFrontmatter {

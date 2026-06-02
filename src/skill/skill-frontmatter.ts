@@ -74,6 +74,14 @@ export const SkillFrontmatterSchema = z
     scope: SkillScopeSchema.optional(),
     installState: SkillInstallStateSchema.optional(),
     adminInstalledBy: z.string().min(1).optional(),
+    // ADR-0457 — codex skill ECOSYSTEM frontmatter (gaps A+B). Both optional /
+    // additive: a pre-0457 SKILL.md (with neither field) parses byte-identical.
+    // Without these the `.strict()` schema would REJECT a codex SKILL.md that
+    // declares `argument-hint` / `metadata`, so they must be modelled here even
+    // though discovery reads them via the lenient parser. `metadata` is an open
+    // record (codex puts `short-description` under it; future keys allowed).
+    "argument-hint": z.string().min(1).optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
   })
   .strict()
   .superRefine((v, ctx) => {
@@ -116,8 +124,10 @@ export type ParseResult<T> = { ok: true; value: T } | { ok: false; error: Frontm
 
 const FENCE = "---"
 
-/** Recognised scalar types in this restricted YAML subset. */
-type ScalarValue = string | boolean | string[]
+/** Recognised scalar types in this restricted YAML subset. ADR-0457 adds a
+ *  one-level nested string mapping (for codex's `metadata:` block) — still no
+ *  arbitrary nesting, just `key:` followed by indented `child: scalar` lines. */
+type ScalarValue = string | boolean | string[] | Record<string, string>
 
 /** Parse a single right-hand-side value. Supports:
  *   - `true` / `false`              → boolean
@@ -287,16 +297,72 @@ const findClosingFence = (lines: readonly string[]): number => {
   return -1
 }
 
+/**
+ * Carried collect state: `nestedParent` is the key of a top-level `key:` that
+ * had an EMPTY value and is therefore a candidate to receive ADR-0457 indented
+ * `child: scalar` nested-map lines (codex's `metadata:` block). null otherwise.
+ */
+interface CollectState {
+  nestedParent: string | null
+}
+
+/** ADR-0457 — attach an indented `child: scalar` line to the pending nested-map
+ *  parent. Returns true when consumed. Only flat (non-quoted-aware beyond the
+ *  shared scalar parser) `key: value` children are supported — deeper nesting
+ *  or block lists inside the map are rejected by the normal indentation guard.
+ *  Child values reuse {@link parseRhs} but must resolve to a string (the codex
+ *  `metadata` block is string-valued); a non-string child is rejected loudly. */
+const tryNestedChild = (
+  raw: string,
+  lineno: number,
+  data: Record<string, ScalarValue>,
+  parent: string,
+): boolean => {
+  const child = raw.match(/^\s+([A-Za-z][A-Za-z0-9_-]*)\s*:\s*(.*)$/)
+  if (!child) return false
+  const childKey = child[1] ?? ""
+  const rhs = (child[2] ?? "").trim()
+  const value = parseRhs(rhs, lineno)
+  if (typeof value !== "string") {
+    throw new FrontmatterParseError(
+      `nested '${parent}.${childKey}' must be a string scalar`,
+      lineno,
+    )
+  }
+  const cur = data[parent]
+  const map = cur && typeof cur === "object" && !Array.isArray(cur) ? cur : {}
+  if (childKey in map) {
+    throw new FrontmatterParseError(`duplicate key '${parent}.${childKey}'`, lineno)
+  }
+  map[childKey] = value
+  data[parent] = map
+  return true
+}
+
+/** True when `raw` is an indented `child: scalar` mapping line (ADR-0457). */
+const isIndentedChild = (raw: string): boolean => /^\s+[A-Za-z][A-Za-z0-9_-]*\s*:\s*.+$/.test(raw)
+
+/** True when `raw` is blank or a full-line comment (skippable). */
+const isBlankOrComment = (raw: string): boolean => raw.trim() === "" || raw.trim().startsWith("#")
+
 const collectOneFrontmatterLine = (
   raw: string,
   lineno: number,
   data: Record<string, ScalarValue>,
-): void => {
-  if (raw.trim() === "" || raw.trim().startsWith("#")) return
+  state: CollectState,
+): CollectState => {
+  if (isBlankOrComment(raw)) return state
   if (/^\s/.test(raw)) {
+    // ADR-0457: an indented line is allowed ONLY as a nested-map child directly
+    // under a pending empty-value parent. Anything else stays unsupported.
+    if (state.nestedParent !== null && tryNestedChild(raw, lineno, data, state.nestedParent)) {
+      return state
+    }
     throw new FrontmatterParseError("indented continuation lines are not supported", lineno)
   }
-  const m = raw.match(/^([A-Za-z][A-Za-z0-9_]*)\s*:\s*(.*)$/)
+  // ADR-0457: allow kebab-case keys (e.g. `argument-hint`) at top level, in
+  // addition to the original `[A-Za-z][A-Za-z0-9_]*` snake/camel set.
+  const m = raw.match(/^([A-Za-z][A-Za-z0-9_-]*)\s*:\s*(.*)$/)
   if (!m) {
     throw new FrontmatterParseError(`malformed key/value line: "${raw}"`, lineno)
   }
@@ -305,7 +371,44 @@ const collectOneFrontmatterLine = (
   if (key in data) {
     throw new FrontmatterParseError(`duplicate key '${key}'`, lineno)
   }
+  // A top-level empty value reaches parseRhs("") and fails loudly with "empty
+  // value" — identical to pre-0457. (An empty value that opens a nested-map
+  // parent is intercepted by lookahead in `splitAndCollect` and never lands
+  // here.)
   data[key] = parseRhs(rhs, lineno)
+  return { nestedParent: null }
+}
+
+/** Find the next non-blank/comment line index at-or-after `from`, or -1. */
+const nextContentLine = (lines: readonly string[], from: number, end: number): number => {
+  for (let j = from; j < end; j++) {
+    if (!isBlankOrComment(lines[j] ?? "")) return j
+  }
+  return -1
+}
+
+/**
+ * ADR-0457 lookahead: if `line` is a top-level `key:` with an empty value AND
+ * the next content line is an indented child, return that key (opening a
+ * nested-map parent). Returns null when the line is not such a header — the
+ * caller then processes it normally. Throws on a duplicate top-level key.
+ */
+const nestedMapHeaderKey = (
+  line: string,
+  data: Record<string, ScalarValue>,
+  lines: readonly string[],
+  i: number,
+  end: number,
+): string | null => {
+  if (isBlankOrComment(line) || /^\s/.test(line)) return null
+  if (!/^[A-Za-z][A-Za-z0-9_-]*\s*:\s*$/.test(line)) return null
+  const nxt = nextContentLine(lines, i + 1, end)
+  if (nxt === -1 || !isIndentedChild(lines[nxt] ?? "")) return null
+  const key = (line.match(/^([A-Za-z][A-Za-z0-9_-]*)/)?.[1] ?? "").trim()
+  if (key in data) {
+    throw new FrontmatterParseError(`duplicate key '${key}'`, i + 1)
+  }
+  return key
 }
 
 /** Split frontmatter (must start with `---` on line 1) from the markdown body
@@ -321,8 +424,16 @@ const splitAndCollect = (text: string): SplitResult => {
     throw new FrontmatterParseError("unterminated frontmatter (missing closing '---')", 1)
   }
   const data: Record<string, ScalarValue> = {}
+  let state: CollectState = { nestedParent: null }
   for (let i = 1; i < end; i++) {
-    collectOneFrontmatterLine(lines[i] ?? "", i + 1, data)
+    const line = lines[i] ?? ""
+    const header =
+      state.nestedParent === null ? nestedMapHeaderKey(line, data, lines, i, end) : null
+    if (header !== null) {
+      state = { nestedParent: header }
+      continue
+    }
+    state = collectOneFrontmatterLine(line, i + 1, data, state)
   }
   const body = lines
     .slice(end + 1)

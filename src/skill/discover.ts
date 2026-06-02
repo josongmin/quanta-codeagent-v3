@@ -2,6 +2,7 @@ import { readdir, readFile } from "node:fs/promises"
 import { basename, join, sep } from "node:path"
 import { errMessage } from "@/shared"
 import { parseFrontmatter } from "./frontmatter"
+import { discoverSkillResources } from "./skill-resources"
 import { checkSkillSize, MAX_SKILL_SIZE_BYTES } from "./skill-size"
 import {
   isSkillInstallState,
@@ -45,9 +46,7 @@ type DeclaredAllowedTools =
  * element), runtime does NOT silently fall back to `tools:`. That would keep
  * the legacy mirror authoritative and defeat the frontmatter SSOT cutover.
  */
-const declaredAllowedTools = (
-  v: string | string[] | undefined,
-): DeclaredAllowedTools => {
+const declaredAllowedTools = (v: string | string[] | undefined): DeclaredAllowedTools => {
   if (v === undefined) return { kind: "absent" }
   if (!Array.isArray(v)) return { kind: "invalid" }
   const trimmed = v.map((item) => item.trim())
@@ -129,6 +128,11 @@ const toSkill = (name: string, sourcePath: string, raw: string): Skill => {
   const scope = resolveScope(data, sourcePath)
   const installState = resolveInstallState(data, scope)
   const adminInstalledBy = resolveAdminInstalledBy(data, scope)
+  // ADR-0457 — codex skill ECOSYSTEM frontmatter (gaps A+B). Both optional;
+  // `argument-hint` is a kebab key, `metadata.short-description` is captured by
+  // the lenient parser as the dotted key `metadata.short-description`.
+  const argumentHint = asScalar(data["argument-hint"])
+  const shortDescription = asScalar(data["metadata.short-description"])
 
   const skill: Skill = {
     name: asScalar(data.name) ?? name,
@@ -138,6 +142,8 @@ const toSkill = (name: string, sourcePath: string, raw: string): Skill => {
     scope,
     ...(installState !== undefined ? { installState } : {}),
     ...(adminInstalledBy !== undefined ? { adminInstalledBy } : {}),
+    ...(argumentHint !== undefined ? { argumentHint } : {}),
+    ...(shortDescription !== undefined ? { shortDescription } : {}),
   }
   const strictTools = declaredAllowedTools(data.allowedTools)
   if (strictTools.kind === "declared") {
@@ -199,7 +205,12 @@ const readNestedSkill = async (dir: string, name: string): Promise<Skill | null>
   }
   try {
     const raw = await readFile(skillFile, "utf8")
-    return toSkill(name, skillFile, raw)
+    const skill = toSkill(name, skillFile, raw)
+    // ADR-0457 — directory-form skills MAY ship bundled resources (agents/
+    // scripts/ references/ assets/). Fail-safe: a malformed resource omits just
+    // that resource and never aborts the skill (helper swallows all errors).
+    const resources = await discoverSkillResources(skillFile)
+    return resources !== undefined ? { ...skill, resources } : skill
   } catch (e) {
     // `checkSkillSize` already stat-confirmed the file exists & is in range, so
     // reaching here means the read itself failed (permissions / transient IO),

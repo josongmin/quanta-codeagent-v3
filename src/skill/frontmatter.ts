@@ -73,46 +73,87 @@ const findClosingFence = (lines: string[]): number => {
 type FrontmatterData = Record<string, string | string[]>
 
 /**
- * Apply a single frontmatter line to `data`. Returns the list key that a
- * subsequent block-list `- item` should append to (or null), given the
- * `pendingListKey` carried from the previous line.
+ * Carried parse state between lines. `pendingKey` is the most-recent key whose
+ * value was empty (`key:`) — a subsequent `- item` line appends to it as a
+ * block list, OR (ADR-0457) a subsequent INDENTED `child: scalar` line is
+ * captured as a nested-map entry under the dotted key `parent.child`.
  */
-const applyFrontmatterLine = (
+interface LineState {
+  /** Last empty-value key (block-list head or nested-map parent), or null. */
+  pendingKey: string | null
+}
+
+/**
+ * ADR-0457 — nested one-level mapping capture for codex's `metadata:` block:
+ *
+ *   metadata:
+ *     short-description: "..."
+ *
+ * Stored as a flat dotted key `metadata.short-description` so the existing
+ * `Record<string, string | string[]>` data shape is unchanged. Only fires for
+ * an INDENTED `key: scalar` line directly under an empty-value parent that has
+ * NOT yet received a `- ` block-list item (the seed is still the empty `[]`).
+ * Returns true when it consumed the line. Quietly does nothing on deeper / list
+ * shapes (those are out of this tiny parser's scope by design).
+ */
+const tryNestedMapEntry = (
   line: string,
   data: FrontmatterData,
-  pendingListKey: string | null,
-): string | null => {
-  if (line.trim() === "" || line.trim().startsWith("#")) return pendingListKey
+  pendingKey: string | null,
+): boolean => {
+  if (pendingKey === null) return false
+  // Parent must still be the empty-array seed (no `- ` items appended).
+  const seed = data[pendingKey]
+  if (!Array.isArray(seed) || seed.length > 0) return false
+  // Indented `child: scalar` (NOT a `- ` list item — that path is handled first).
+  const child = line.match(/^\s+([A-Za-z0-9_-]+)\s*:\s*(.+)$/)
+  if (!child) return false
+  const childKey = child[1] ?? ""
+  const childVal = (child[2] ?? "").trim()
+  if (childVal === "") return false
+  data[`${pendingKey}.${childKey}`] = unquote(childVal)
+  return true
+}
+
+/**
+ * Apply a single frontmatter line to `data`. Returns the updated {@link
+ * LineState} carried to the next line.
+ */
+const applyFrontmatterLine = (line: string, data: FrontmatterData, state: LineState): LineState => {
+  if (line.trim() === "" || line.trim().startsWith("#")) return state
 
   // Block-list item: `  - value` belonging to the previous key.
   const itemMatch = line.match(/^\s*-\s+(.*)$/)
-  if (itemMatch && pendingListKey) {
-    const cur = data[pendingListKey]
+  if (itemMatch && state.pendingKey) {
+    const cur = data[state.pendingKey]
     const val = unquote(itemMatch[1] ?? "")
     if (Array.isArray(cur)) cur.push(val)
-    else data[pendingListKey] = [val]
-    return pendingListKey
+    else data[state.pendingKey] = [val]
+    return state
   }
 
+  // ADR-0457: indented `child: scalar` under an empty-value parent ⇒ nested map.
+  if (tryNestedMapEntry(line, data, state.pendingKey)) return state
+
   const kv = line.match(/^([A-Za-z0-9_-]+)\s*:\s*(.*)$/)
-  if (!kv) return pendingListKey
+  if (!kv) return state
   const key = kv[1] ?? ""
   const rawValue = (kv[2] ?? "").trim()
 
   if (rawValue === "") {
-    // Either an empty scalar or the header of a block list — assume list,
-    // seed an empty array; it stays [] if no `-` items follow.
+    // Either an empty scalar or the header of a block list / nested map —
+    // assume list, seed an empty array; it stays [] if nothing follows.
     data[key] = []
-    return key
+    return { pendingKey: key }
   }
 
   if (rawValue.startsWith("[") && rawValue.endsWith("]")) {
     data[key] = parseInlineList(rawValue)
-    return null
+    return { pendingKey: null }
   }
 
   data[key] = unquote(rawValue)
-  return null
+  return { pendingKey: null }
 }
 
 /**
@@ -134,9 +175,9 @@ export const parseFrontmatter = (text: string): ParsedFrontmatter => {
   }
 
   const data: FrontmatterData = {}
-  let pendingListKey: string | null = null
+  let state: LineState = { pendingKey: null }
   for (let i = 1; i < end; i++) {
-    pendingListKey = applyFrontmatterLine(lines[i] ?? "", data, pendingListKey)
+    state = applyFrontmatterLine(lines[i] ?? "", data, state)
   }
 
   const body = lines
