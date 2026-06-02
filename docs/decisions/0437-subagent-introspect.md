@@ -4,7 +4,9 @@
 - Date: 2026-06-02
 - RFC: `docs/plans/jun-2-misc/04-subagent-introspect.md`
 - Slice: `src/subagent/introspect-tools.ts`, `src/subagent/turn-wake.ts`,
-  `src/subagent/agent-meta.ts` (new) + `src/agent/tier1/subagent-introspect.ts`
+  `src/subagent/turn-gate.ts` (follow-up), `src/subagent/agent-meta.ts` (new) +
+  `src/agent/tier1/subagent-introspect.ts`, `src/agent/subagent-runner.ts` +
+  `src/agent/loop.ts` (follow-up wiring)
 - Absorbs: Codex `multi_agents_v2/{list_agents, followup_task}` (codex-rs 0.135)
 
 ## Context
@@ -63,11 +65,49 @@ Two new LLM tools in a new `@/subagent` slice, both default-OFF:
   state, including a spawn-through-6-tool integration test.
 - `followup_task` delivery (mailbox) is fully wired. The trigger port
   (`TurnWakeRegistry`) is fully functional and tested (deliver+trigger+queue+
-  interrupt+no-waker), and the composition root shares the instance. The
-  runner registering real per-child wakers INTO its `runAgent` loop (the
-  idle→woke / mid-turn→queued seam) is the documented follow-up per RFC §11 —
-  until then `followup_task` honestly reports `no_waker` and the message is
-  still delivered. No silent no-op.
+  interrupt+no-waker), and the composition root shares the instance.
+- **CLOSED (2026-06-02 follow-up, RFC §11): the runner now registers a real
+  per-child waker into its `runAgent` loop.** See "Turn-wake gate" below. The
+  prior `no_waker` honest-degrade now only fires when the feature is OFF / no
+  wake registry is wired / the target already settled — never as a silent
+  no-op for a live wired child.
+
+### Turn-wake gate (ADR-0437 follow-up — closes the limitation)
+
+The missing piece was that nothing *registered* a per-child waker, so
+`wake()` always returned `no-receiver`. Now:
+
+- `spawn_agent` (`handlers-6.ts`) threads its registry **`taskId`** onto
+  `SubagentRequest` (new optional field) — the same id `followup_task`,
+  `wait_agent`, and `close_agent` target.
+- The runner (`createSubagentRunner`), when BOTH `config.subagentTurnWake` AND
+  `req.taskId` are present, mints a per-child **`SubagentTurnGate`**
+  (`src/subagent/turn-gate.ts`) and registers a `Waker` (bridged to that gate)
+  under `taskId` into the shared `TurnWakeRegistry`. The gate is threaded onto
+  the **child** config (`config.subagentTurnGate`); the disposer (unregister +
+  release) runs in the runner's `finally`, BEFORE the registry settles the
+  task, so a `followup_task` racing completion sees `no-receiver`.
+- The child agent loop (`src/agent/loop.ts` `runAgentTurnLoop`), at its **clean
+  `completed`** finish, PARKS on the gate (`shouldParkOnGate`) instead of
+  exiting. The gate's `wait`:
+  - resolves `woke` when a wake arrives while parked (idle) ⇒ the loop runs
+    another turn;
+  - resolves `resume` when a wake was already pending (the loop was busy when
+    `followup_task` fired) ⇒ the queued turn runs now;
+  - resolves `settle` on the abort signal / dispose ⇒ the loop really finishes.
+  On `woke`/`resume` the loop `continue`s the `for` — and the **next turn's
+  top-of-loop mailbox read** surfaces the delivered followup. This REUSES the
+  existing per-turn injection seam; there is no second turn driver.
+- **idle vs busy** (the `woke`/`queued` distinction) is decided by whether the
+  loop is currently parked on the gate: parked ⇒ `woke` (released now), not
+  parked ⇒ `queued` (a pending flag the next `wait` consumes). PURE: no clock /
+  `Math.random` / real timer — the gate is driven only by `wake`/abort events;
+  child lifetime is bounded by the parent's `task_stop`/cancel (the abort
+  signal), which is the deterministic "stop waiting" event.
+- **Default-OFF / byte-identical**: only `completed` parks (error/refusal/
+  budget/aborted finish exits at once), and only when a gate is wired. Root
+  sessions never carry a gate. No wake registry OR no `taskId` ⇒ no waker, no
+  gate, `followup_task` honest-degrades to `no_waker` exactly as before.
 
 ## Default-OFF
 
@@ -89,6 +129,14 @@ reflectivity/bucketing/prefix/concurrency-safe/depth-label/limit; followup
 deliver+trigger/queue/interrupt/not-found/settled/no-waker/self-target/root)
 + gating/default-OFF + a wired spawn→list integration + TurnWakeRegistry units.
 24 tests.
+
+`tests/unit/subagent-turn-wake-gate-hellgate.test.ts` — the follow-up wiring:
+gate idle→woke / busy→queued(resume) / abort→settle / dispose→settle units;
+runner registers a waker under `req.taskId` (+ no-waker on default-OFF / no
+taskId); and an END-TO-END proof against a real `runAgent` child loop that a
+`followup_task` wake makes the child run ANOTHER observable turn (LLM called
+again), with the no-wake path byte-identical (one turn) + `no_waker` degrade.
+11 tests.
 
 ## Consequences
 

@@ -69,6 +69,8 @@ export {
   SUBAGENT_6_TOOL_NAMES,
   type Subagent6ToolName,
 } from "./tools-6"
+export type { GateWaitResult, GateWakeResult } from "./turn-gate"
+export { SubagentTurnGate } from "./turn-gate"
 export type { WakeOutcome, Waker } from "./turn-wake"
 export { TurnWakeRegistry } from "./turn-wake"
 export type {

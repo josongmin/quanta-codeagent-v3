@@ -28,21 +28,32 @@ purpose: |
   registry ⇒ id_unknown), self-target rejected, and HONEST DEGRADATION: no live
   waker ⇒ cause:no_waker but the mailbox delivery still stands. Wired honesty:
   list_agents fully reflects real registry+meta (incl. a spawn-through-6-tool
-  integration test); followup delivery is wired, trigger port is functional+tested,
-  the runner registering real per-child wakers into runAgent is the documented
-  follow-up (RFC §11). Default-OFF: buildSubagentIntrospectBlock returns []
+  integration test); followup delivery is wired, AND (ADR-0437 follow-up, RFC §11)
+  the runner now registers a real per-child waker into runAgent: spawn_agent
+  threads its registry taskId onto SubagentRequest, the runner mints a per-child
+  SubagentTurnGate + registers a Waker (bridged to that gate) under the SAME id
+  followup_task targets, and the child loop PARKS on the gate at its clean-
+  completion point. So followup_task on an idle child returns woke and the child
+  runs ANOTHER turn (the next turn's mailbox read surfaces the message — existing
+  per-turn injection seam, no parallel driver); a busy child returns queued and
+  the turn runs after the current one; abort/dispose ⇒ settle (loop finishes).
+  Default-OFF: buildSubagentIntrospectBlock returns []
   unless enableIntrospect/enableFollowup gates set (followup also needs
   mailbox+wake substrate) ⇒ byte-identical.
 evidence:
   code:
     - src/subagent/introspect-tools.ts
     - src/subagent/turn-wake.ts
+    - src/subagent/turn-gate.ts
     - src/subagent/agent-meta.ts
+    - src/agent/subagent-runner.ts
+    - src/agent/loop.ts
     - src/agent/tier1/subagent-introspect.ts
   adrs: ["docs/decisions/0437-subagent-introspect.md"]
   tests:
     unit:
       - tests/unit/subagent-introspect-hellgate.test.ts
+      - tests/unit/subagent-turn-wake-gate-hellgate.test.ts
     integration: []
     contract: []
 knobs: ["enableIntrospect", "enableFollowup"]

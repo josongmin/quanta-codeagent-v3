@@ -2700,6 +2700,15 @@ const runAgentTurnLoop = async (ctx: RunAgentContext): Promise<AgentOutcome | un
       hookPromptPending: ctx.hookPromptPending,
     })
     if (resolution.kind === "finish") {
+      // ADR-0437 follow-up — when a `subagentTurnGate` is wired AND this child
+      // loop would CLEANLY complete, PARK on the gate instead of exiting so a
+      // `followup_task` `wake()` can trigger another turn. A `woke`/`resume`
+      // resolution re-enters the `for` (the next turn's mailbox read surfaces
+      // the delivered followup — the existing per-turn injection seam); a
+      // `settle` (abort / disposed / no gate) finishes normally. Only a clean
+      // `completed` parks: an error/refusal/budget/aborted finish exits at once.
+      // Default-OFF: no gate ⇒ `shouldParkOnGate` is false ⇒ byte-identical.
+      if (await shouldParkOnGate(ctx, resolution)) continue
       return ctx.finish(
         resolution.reason,
         resolution.turns,
@@ -2709,6 +2718,29 @@ const runAgentTurnLoop = async (ctx: RunAgentContext): Promise<AgentOutcome | un
     }
   }
   return undefined
+}
+
+/**
+ * ADR-0437 follow-up — decide whether the child loop should PARK on its
+ * {@link import("@/subagent").SubagentTurnGate} rather than finish. Returns
+ * `true` (caller `continue`s the turn loop for another turn) ONLY when:
+ *   - a gate is wired (`ctx.cfg.subagentTurnGate` present), AND
+ *   - the resolution is a CLEAN `completed` finish, AND
+ *   - the gate's `wait` resolved `woke` (a wake arrived while parked) or
+ *     `resume` (a wake was pending — the loop was busy when followup_task
+ *     fired ⇒ the "queued" turn now runs).
+ * A `settle` resolution (abort signal / disposed gate) ⇒ `false` (finish).
+ * Any non-`completed` finish ⇒ `false` (never park on error/refusal/abort/
+ * budget). No gate ⇒ `false` immediately (default-OFF, byte-identical).
+ */
+const shouldParkOnGate = async (
+  ctx: RunAgentContext,
+  resolution: Extract<TurnLoopResolution, { kind: "finish" }>,
+): Promise<boolean> => {
+  const gate = ctx.cfg.subagentTurnGate
+  if (gate === undefined || resolution.reason !== "completed") return false
+  const waited = await gate.wait(ctx.cfg.signal)
+  return waited !== "settle"
 }
 
 export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {

@@ -842,6 +842,19 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   subagentTurnWake?: import("../subagent").TurnWakeRegistry
   /**
+   * RFC-04 §11 / ADR-0437 follow-up — per-CHILD turn gate. The subagent runner
+   * mints ONE gate per forked child loop, threads it onto the CHILD config
+   * here, and registers a {@link import("../subagent").Waker} (bridged to this
+   * gate) into the shared {@link subagentTurnWake} so `followup_task`'s
+   * `wake(childId)` finds a live receiver. The child loop PARKS on the gate at
+   * its clean-completion point so a wake can trigger another turn (idle→`woke`)
+   * or a pending wake runs the next turn (busy→`queued`). The ROOT session
+   * NEVER carries one (root is not in the registry / never a followup_task
+   * target); absent ⇒ the loop finishes immediately on completion
+   * (byte-identical default-OFF, RFC §1.2).
+   */
+  subagentTurnGate?: import("../subagent").SubagentTurnGate
+  /**
    * RFC-04 / ADR-0437 — host-owned `AgentMetaRegistry` side-table. `spawn_agent`
    * (when wired) records `{depth,label}` here; `list_agents` joins it for
    * richer rows. Absent ⇒ `list_agents` falls back to `depth=0` + a

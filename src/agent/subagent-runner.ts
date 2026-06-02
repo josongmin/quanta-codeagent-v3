@@ -73,6 +73,7 @@
 
 import type { Message } from "@/llm"
 import { isGitRepo, withWorktree } from "@/runtime"
+import { SubagentTurnGate, type TurnWakeRegistry } from "@/subagent"
 import { ToolRegistry } from "@/tool"
 import type { SubagentRequest, SubagentResult, SubagentRunner } from "../subagent/types"
 import { runAgent } from "./loop"
@@ -259,6 +260,7 @@ const buildChildConfig = (
   cwd: string,
   mailboxIds: { agentId: string; parentId: string },
   toolNamespace?: ToolNamespaceStrategy,
+  turnGate?: SubagentTurnGate,
 ): AgentConfig => {
   const seed: Message[] = [
     { role: "user", content: [{ type: "text", text: buildSeedPrompt(req) }] },
@@ -308,6 +310,12 @@ const buildChildConfig = (
     // mailbox (parent↔child + sibling↔sibling). The port is an in-process
     // shared-by-reference instance — safe across the worktree-isolation fork.
     ...(parent.subagentMailbox ? { subagentMailbox: parent.subagentMailbox } : {}),
+    // ADR-0437 follow-up — THIS child's own turn gate (never the parent's).
+    // The child loop parks on it at clean-completion so a `followup_task`
+    // wake (registered against this child's task id in the runner below) can
+    // trigger another turn. Absent ⇒ the child finishes immediately on
+    // completion (byte-identical legacy / no-followup path).
+    ...(turnGate !== undefined ? { subagentTurnGate: turnGate } : {}),
     // Kept (safe to share, no parent-state mutation):
     ...(parent.onConfirm ? { onConfirm: parent.onConfirm } : {}),
     ...(parent.embedder ? { embedder: parent.embedder } : {}),
@@ -404,21 +412,79 @@ export const createSubagentRunner = (
       return { ok: false, finalText: startAbort, turns: 0 }
     }
 
-    const childResult: SubagentResult = isolate
-      ? toResult(
-          (
-            await wt(subagentId, parent.cwd, async (worktreePath) => {
-              const child = buildChildConfig(parent, req, worktreePath, mailboxIds, toolNamespace)
-              return run(child)
-            })
-          ).value,
-        )
-      : toResult(await run(buildChildConfig(parent, req, parent.cwd, mailboxIds, toolNamespace)))
+    // ADR-0437 follow-up — mint a per-child turn gate + register a waker into
+    // the host's shared `TurnWakeRegistry` under the SAME registry task id
+    // `followup_task` targets, so `wake(taskId)` finds a live receiver. Absent
+    // wake registry OR absent `req.taskId` ⇒ `gate` undefined + no waker
+    // (byte-identical legacy / foreground path). The disposer runs in
+    // `finally` so a wake on a finished child reports `no-receiver`.
+    const wakerWiring = registerChildWaker(parent.subagentTurnWake, req.taskId)
+    const turnGate = wakerWiring?.gate
 
-    // ADR-0133 — fire `subagent_stop` after the child completes (any reason).
-    await emitSubagentStopHook(parent, { subagentId, result: childResult })
+    try {
+      const childResult: SubagentResult = isolate
+        ? toResult(
+            (
+              await wt(subagentId, parent.cwd, async (worktreePath) => {
+                const child = buildChildConfig(
+                  parent,
+                  req,
+                  worktreePath,
+                  mailboxIds,
+                  toolNamespace,
+                  turnGate,
+                )
+                return run(child)
+              })
+            ).value,
+          )
+        : toResult(
+            await run(
+              buildChildConfig(parent, req, parent.cwd, mailboxIds, toolNamespace, turnGate),
+            ),
+          )
 
-    return childResult
+      // ADR-0133 — fire `subagent_stop` after the child completes (any reason).
+      await emitSubagentStopHook(parent, { subagentId, result: childResult })
+
+      return childResult
+    } finally {
+      // Dispose BEFORE the registry settles the task so a `followup_task` that
+      // races completion sees `no-receiver` (honest degrade) rather than a
+      // wake into a dead loop. The disposer also unregisters the waker.
+      wakerWiring?.dispose()
+    }
+  }
+}
+
+/**
+ * ADR-0437 follow-up — mint a per-child {@link SubagentTurnGate} and register a
+ * {@link import("@/subagent").Waker} bridging the host's shared
+ * {@link TurnWakeRegistry} to that gate, keyed by the child's registry task id.
+ *
+ * Returns `undefined` when there is no wake substrate (`wake` registry absent)
+ * OR no task id to key on — both cases are the byte-identical default-OFF path
+ * (no gate is wired onto the child, so its loop finishes immediately on
+ * completion exactly as before). When wired, the returned `gate` is threaded
+ * onto the child config and the `dispose` MUST be called when the child loop
+ * ends (unregisters the waker AND releases any park).
+ */
+const registerChildWaker = (
+  wake: TurnWakeRegistry | undefined,
+  taskId: string | undefined,
+): { gate: SubagentTurnGate; dispose: () => void } | undefined => {
+  if (wake === undefined || taskId === undefined) return undefined
+  const gate = new SubagentTurnGate()
+  // The waker maps the gate's `woke`/`queued` 1:1 onto the registry's
+  // `WakeOutcome` (the third outcome, `no-receiver`, is produced by the
+  // registry itself when no waker is registered — never by the waker).
+  const unregister = wake.register(taskId, (reason: string) => gate.wake(reason))
+  return {
+    gate,
+    dispose: (): void => {
+      unregister()
+      gate.dispose()
+    },
   }
 }
 

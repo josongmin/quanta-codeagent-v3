@@ -35,6 +35,15 @@ export interface SubagentRequest {
   isolation?: "none" | "worktree"
   /** Recursion depth of this child (parent depth + 1). Root is 0. */
   depth: number
+  /** RFC-04 §11 / ADR-0437 follow-up — the registry TASK ID this child is
+   *  registered under (the id `followup_task`/`wait_agent`/`close_agent` use).
+   *  When set AND the host wired a `TurnWakeRegistry`, the runner registers a
+   *  per-child waker under THIS id so `followup_task(agentId)` can trigger the
+   *  child's turn. Absent ⇒ no waker registered (the foreground/legacy spawn
+   *  path that does not need followup-triggering; byte-identical). The slice
+   *  does not mint this id — the spawn handler (which owns the registry) passes
+   *  its `taskId` here. */
+  taskId?: string
   /** Optional token/turn budget passthrough for the forked loop. */
   budget?: TaskBudget
   /** Per-request abort signal. The runner MUST chain this into the child

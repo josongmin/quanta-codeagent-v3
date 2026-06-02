@@ -497,6 +497,9 @@ export const handleSpawnAgent = async (
     prompt: input.prompt,
     depth: childDepth,
     signal: abort.signal,
+    // ADR-0437 follow-up — thread the registry task id so the runner can
+    // register a per-child turn waker under the SAME id `followup_task` uses.
+    taskId,
     ...(input.agentType !== undefined ? { agentType: input.agentType } : {}),
     ...(input.toolFilter !== undefined ? { toolFilter: input.toolFilter } : {}),
   }
