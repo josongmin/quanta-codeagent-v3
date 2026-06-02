@@ -148,6 +148,32 @@ export class McpReconnectSupervisor {
     return this.client.callTool(name, args)
   }
 
+  /** ADR-0435 follow-up — does the CURRENT live client's server advertise the
+   *  `tasks/*` capability? Read per call (never captured) so a restart that
+   *  swaps the live client re-evaluates against the new one. A client that does
+   *  not expose `serverSupportsTasks` (e.g. the isolated client) ⇒ `false`,
+   *  keeping the tasks surface absent (byte-identical default-OFF). */
+  serverSupportsTasks(): boolean {
+    return this.client.serverSupportsTasks?.() ?? false
+  }
+
+  /** ADR-0435 follow-up — outbound `tasks/*` dispatch. The indirection mirror of
+   *  {@link callTool}: applies the pending-call policy, then dispatches through
+   *  the CURRENT live client. Because it re-resolves `this.client` on every call,
+   *  a `supervisedTasksToolsFor` handle bound to this supervisor never goes stale
+   *  across a restart. Throws if the current client does not support `requestRaw`
+   *  (same `is not running` McpError contract). */
+  async requestRaw(method: string, params?: unknown): Promise<unknown> {
+    if (this.state !== "healthy") {
+      await this.awaitHealthyOrFail()
+    }
+    const fn = this.client.requestRaw
+    if (fn === undefined) {
+      throw new McpError(`mcp server "${this.config.name}" does not support tasks`)
+    }
+    return fn.call(this.client, method, params)
+  }
+
   /** Permanent stop. Cancels any backoff/queue timers, bumps the epoch so a
    *  late restart is discarded, and stops the live client. Idempotent. */
   async stop(): Promise<void> {

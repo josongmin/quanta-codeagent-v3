@@ -22,6 +22,7 @@
 
 import type { McpClient } from "../client"
 import type { McpTasksPort } from "./port"
+import type { TasksRpc } from "./rpc"
 import type {
   McpTaskInfo,
   TaskCancelResult,
@@ -97,11 +98,16 @@ const parseResult = (raw: unknown): TaskResult => {
   return { state: "not-ready" }
 }
 
-/** Build a live `McpTasksPort` bound to a started `McpClient` (ADR-0431). */
-export const clientTasksPort = (client: McpClient): McpTasksPort => ({
+/** Build a live `McpTasksPort` over any outbound-RPC surface (ADR-0431 /
+ *  ADR-0435). The parse-codec is the SAME whether the RPC reaches a mortal
+ *  `McpClient` (default path) or a supervisor that re-resolves its current live
+ *  client per call (auto-restart path) — neither variant captures a transport;
+ *  every method dispatches a fresh `requestRaw`, so the supervisor binding
+ *  survives a restart. */
+export const tasksPortOver = (rpc: TasksRpc): McpTasksPort => ({
   async list(cursor?: string): Promise<TaskListOutcome> {
     const params = cursor === undefined ? {} : { cursor }
-    const raw = await client.requestRaw("tasks/list", params)
+    const raw = await rpc.requestRaw("tasks/list", params)
     const page = parseListPage(raw)
     // A malformed list (server returned garbage, or a stale-cursor error shape
     // we can't read) surfaces as the typed cursor-stale failure → the model
@@ -110,18 +116,18 @@ export const clientTasksPort = (client: McpClient): McpTasksPort => ({
     return { ok: true, page }
   },
   async getInfo(taskId: string): Promise<McpTaskInfo | null> {
-    const raw = await client.requestRaw("tasks/getInfo", { taskId })
+    const raw = await rpc.requestRaw("tasks/getInfo", { taskId })
     // Servers may nest under `task` or return the record directly.
     const rec = asRecord(raw)
     return parseInfo(rec?.task ?? raw)
   },
   async getResult(taskId: string): Promise<TaskResult> {
-    const raw = await client.requestRaw("tasks/getResult", { taskId })
+    const raw = await rpc.requestRaw("tasks/getResult", { taskId })
     const rec = asRecord(raw)
     return parseResult(rec?.result ?? raw)
   },
   async cancel(taskId: string): Promise<TaskCancelResult> {
-    const raw = await client.requestRaw("tasks/cancel", { taskId })
+    const raw = await rpc.requestRaw("tasks/cancel", { taskId })
     const rec = asRecord(raw)
     if (rec === null) return { ok: false, reason: "not-found" }
     // An explicit `{ ok:false, reason }` is honored; anything else (the rmcp
@@ -136,3 +142,7 @@ export const clientTasksPort = (client: McpClient): McpTasksPort => ({
     return { ok: true }
   },
 })
+
+/** Build a live `McpTasksPort` bound to a started `McpClient` (ADR-0431). A
+ *  `McpClient` already satisfies {@link TasksRpc} via its `requestRaw`. */
+export const clientTasksPort = (client: McpClient): McpTasksPort => tasksPortOver(client)

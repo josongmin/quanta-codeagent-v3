@@ -19,6 +19,16 @@ export interface SupervisableMcpClient {
    *  unsubscribe. When no handler is registered the client's exit path is
    *  byte-identical to today (the fan-out loop is a no-op). */
   onExit(handler: (reason?: string) => void): () => void
+  /** ADR-0435 follow-up — OPTIONAL tasks surface. `McpClient` exposes both;
+   *  `IsolatedMcpClient` exposes neither (so it stays a valid supervisable
+   *  client). The supervisor reads these off whatever its CURRENT live client
+   *  is, so the tasks binding is re-resolved per call and survives a restart.
+   *  A client that omits `serverSupportsTasks` ⇒ the supervisor reports no
+   *  tasks capability ⇒ no `mcp_task_*` tools (byte-identical default-OFF). */
+  serverSupportsTasks?(): boolean
+  /** ADR-0435 follow-up — OPTIONAL outbound JSON-RPC dispatch for `tasks/*`.
+   *  Present iff `serverSupportsTasks` is. */
+  requestRaw?(method: string, params?: unknown): Promise<unknown>
 }
 
 /** How the supervisor builds a fresh client instance on each restart. Injected

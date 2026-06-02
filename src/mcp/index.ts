@@ -44,7 +44,9 @@ export {
   type TaskListPage,
   type TaskResult,
   type TaskState,
+  type TasksRpc,
   TERMINAL_TASK_STATES,
+  tasksPortOver,
 } from "./tasks"
 export {
   type HttpFetchFn,

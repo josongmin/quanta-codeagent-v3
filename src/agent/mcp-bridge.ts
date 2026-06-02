@@ -9,6 +9,7 @@ import {
   type McpServerConfig,
   type McpToolDef,
   type SupervisorDeps,
+  tasksPortOver,
 } from "@/mcp"
 import { errMessage, logger } from "@/shared"
 import {
@@ -115,6 +116,27 @@ const tasksToolsFor = (client: McpClient): Tool[] => {
   return mcpTasksTools(handle)
 }
 
+/** ADR-0435 (follow-up) — supervisor-aware sibling of {@link tasksToolsFor}.
+ *
+ *  Instead of binding the tasks handle to a CONCRETE (mortal) `McpClient`, it
+ *  builds the handle over the supervisor, whose `requestRaw`/`serverSupportsTasks`
+ *  always re-resolve the CURRENT live client. So when auto-restart swaps the
+ *  underlying client behind the stable supervisor, the once-built `mcp_task_*`
+ *  tools keep working against the NEW client — no stale capture.
+ *
+ *  Gated exactly like the default path: tools are present ONLY when the current
+ *  server advertises `capabilities.tasks` (`sup.serverSupportsTasks()`). A
+ *  supervised server that does NOT advertise tasks ⇒ empty array (byte-identical
+ *  to the pre-follow-up supervised path, which never bridged tasks at all). */
+export const supervisedTasksToolsFor = (sup: McpReconnectSupervisor): Tool[] => {
+  if (!sup.serverSupportsTasks()) return []
+  // `tasksPortOver` captures the SUPERVISOR (a `TasksRpc`), not a client. Every
+  // method dispatches a fresh `sup.requestRaw(...)`, which delegates to the live
+  // client at call time — the restart-survival invariant.
+  const handle: TasksHandle = tasksPortOver(sup)
+  return mcpTasksTools(handle)
+}
+
 /**
  * Supervisor-aware variant of {@link mcpToolToTool} (ADR-0435). Instead of
  * capturing a single (mortal) client instance, it captures the supervisor and
@@ -196,6 +218,62 @@ export interface LoadMcpToolsOpts {
   supervisorDepsFor?: (config: McpServerConfig) => SupervisorDeps
 }
 
+/** Load one server on the ADR-0435 supervised (auto-restart) path. `create`
+ *  never throws on a failed first start (it enters backoff), so a flaky server
+ *  no longer drops the whole load. Returns the bridged tools + the supervisor
+ *  to push (or `null` when listing failed and the supervisor was stopped). */
+const loadSupervised = async (
+  config: McpServerConfig,
+  deps: SupervisorDeps,
+): Promise<{ tools: Tool[]; client: McpStoppable } | null> => {
+  const sup = await McpReconnectSupervisor.create(config, deps)
+  try {
+    const defs = await sup.listTools()
+    const tools = defs.map((def) => mcpToolToToolSupervised(sup, def, config.name))
+    // ADR-0435 follow-up (limitation CLOSED): bridge the ADR-0431 `tasks/*`
+    // surface on the supervised path too. The handle is built over the
+    // SUPERVISOR (not a concrete client), so it re-resolves the current live
+    // client per call and survives auto-restart. Default-OFF: present only when
+    // the current server advertises `capabilities.tasks`.
+    tools.push(...supervisedTasksToolsFor(sup))
+    return { tools, client: sup }
+  } catch (e) {
+    logger.warn(`mcp: skipping server "${config.name}": ${errMessage(e)}`)
+    await sup.stop().catch(() => undefined)
+    return null
+  }
+}
+
+/** Load one server on the default (byte-identical) single-client path. Track C
+ *  (elicitation prompter) + ADR-0431 (transport seam + tasks surface) apply. */
+const loadSingle = async (
+  config: McpServerConfig,
+  elicitationPrompterFor: ElicitationPrompterFactory | undefined,
+  transportFor: ((config: McpServerConfig) => McpClientTransport) | undefined,
+): Promise<{ tools: Tool[]; client: McpStoppable } | null> => {
+  const clientOpts: ConstructorParameters<typeof McpClient>[1] = {}
+  if (elicitationPrompterFor !== undefined) {
+    clientOpts.elicitationPrompter = elicitationPrompterFor(config.name)
+  }
+  if (transportFor !== undefined) {
+    clientOpts.transport = transportFor(config)
+  }
+  const client = new McpClient(config, clientOpts)
+  try {
+    await client.start()
+    const defs = await client.listTools()
+    const tools = defs.map((def) => mcpToolToTool(client, def, config.name))
+    // ADR-0431 — default-OFF MCP tasks surface: wired iff the server advertised
+    // the `tasks/*` capability. No advertisement ⇒ no tools.
+    tools.push(...tasksToolsFor(client))
+    return { tools, client }
+  } catch (e) {
+    logger.warn(`mcp: skipping server "${config.name}": ${errMessage(e)}`)
+    await client.stop().catch(() => undefined)
+    return null
+  }
+}
+
 export const loadMcpTools = async (
   servers: McpServerConfig[],
   elicitationPrompterFor?: ElicitationPrompterFactory,
@@ -205,51 +283,13 @@ export const loadMcpTools = async (
   const clients: McpStoppable[] = []
   const supervisorDepsFor = opts?.supervisorDepsFor
   for (const config of servers) {
-    if (supervisorDepsFor !== undefined) {
-      // ADR-0435 supervised path. `create` never throws on a failed first start
-      // (it enters backoff), so a flaky server no longer drops the whole load.
-      const sup = await McpReconnectSupervisor.create(config, supervisorDepsFor(config))
-      try {
-        const defs = await sup.listTools()
-        for (const def of defs) tools.push(mcpToolToToolSupervised(sup, def, config.name))
-        // KNOWN LIMITATION (ADR-0435 §follow-up): the ADR-0431 `tasks/*` surface
-        // is NOT bridged on the supervised path. `tasksToolsFor` binds a tasks
-        // handle to a CONCRETE `McpClient`; under auto-restart the live client is
-        // swapped, so a once-bound handle would go stale. Wiring a supervisor-aware
-        // tasks handle (re-bound on each restart, mirroring `mcpToolToToolSupervised`)
-        // is a follow-up. Until then, `QUANTA_MCP_AUTORESTART=1` + a tasks-advertising
-        // server ⇒ the `mcp_task_*` tools are absent (a server crash with a live
-        // tasks handle is the exact failure mode this guards against). Plain
-        // (non-supervised) servers keep full tasks support on the default path below.
-        clients.push(sup)
-      } catch (e) {
-        logger.warn(`mcp: skipping server "${config.name}": ${errMessage(e)}`)
-        await sup.stop().catch(() => undefined)
-      }
-      continue
-    }
-    // Default (byte-identical) path: a single mortal client per server. Track C
-    // (elicitation prompter) + ADR-0431 (transport seam) apply here.
-    const clientOpts: ConstructorParameters<typeof McpClient>[1] = {}
-    if (elicitationPrompterFor !== undefined) {
-      clientOpts.elicitationPrompter = elicitationPrompterFor(config.name)
-    }
-    if (opts?.transportFor !== undefined) {
-      clientOpts.transport = opts.transportFor(config)
-    }
-    const client = new McpClient(config, clientOpts)
-    try {
-      await client.start()
-      const defs = await client.listTools()
-      for (const def of defs) tools.push(mcpToolToTool(client, def, config.name))
-      // ADR-0431 — default-OFF MCP tasks surface: wired iff the server
-      // advertised the `tasks/*` capability. No advertisement ⇒ no tools.
-      for (const t of tasksToolsFor(client)) tools.push(t)
-      clients.push(client)
-    } catch (e) {
-      logger.warn(`mcp: skipping server "${config.name}": ${errMessage(e)}`)
-      await client.stop().catch(() => undefined)
-    }
+    const loaded =
+      supervisorDepsFor !== undefined
+        ? await loadSupervised(config, supervisorDepsFor(config))
+        : await loadSingle(config, elicitationPrompterFor, opts?.transportFor)
+    if (loaded === null) continue
+    tools.push(...loaded.tools)
+    clients.push(loaded.client)
   }
   return { tools, clients }
 }

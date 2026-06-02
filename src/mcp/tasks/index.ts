@@ -1,9 +1,10 @@
 /** ADR-0196 — MCP tasks slice. */
 
-export { clientTasksPort } from "./client-port"
+export { clientTasksPort, tasksPortOver } from "./client-port"
 export { DefaultTaskStore, defaultTasksPort } from "./default-store"
 export { pollTask } from "./poller"
 export type { McpTasksPort } from "./port"
+export type { TasksRpc } from "./rpc"
 export {
   type McpTaskInfo,
   type TaskCancelResult,

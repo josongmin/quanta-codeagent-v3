@@ -44,21 +44,39 @@ Default **fail-fast**: when not HEALTHY, `callTool` throws the same `mcp server 
 - The `Features.mcpClients` array widens from `McpClient[]` to `McpStoppable[]` (`{ stop }`); every downstream consumer already used the structural `{ stop }` shape, so this is type-compatible.
 - Non-goals (deliberate, RFC §3): no Electron-style process isolation, no remote dynamic config, no active health-probe polling, no dynamic tool re-registration. The first-load tool set is fixed at session start; a restart that drops a tool fails that call (server `-32601`) rather than mutating the registry.
 
-### Known limitation — ADR-0431 `tasks/*` on the supervised path (follow-up)
+### CLOSED — ADR-0431 `tasks/*` on the supervised path (follow-up landed)
 
-The supervised load path (`QUANTA_MCP_AUTORESTART=1`) does NOT bridge the ADR-0431
-`tasks/*` surface. `tasksToolsFor` binds a tasks handle to a concrete `McpClient`;
-under auto-restart the live client is swapped behind the supervisor, so a once-bound
-handle would go stale. A supervisor-aware tasks handle (re-bound on each restart,
-mirroring `mcpToolToToolSupervised`) is the documented follow-up. Until then:
-supervised + a tasks-advertising server ⇒ `mcp_task_*` tools are absent; plain
-(non-supervised) servers keep full tasks support on the default path. Both
-`tasks/*` and auto-restart are independently default-OFF, so no current default
-configuration is affected.
+> Previously a known limitation; now closed. The supervised load path
+> (`QUANTA_MCP_AUTORESTART=1`) now bridges the ADR-0431 `tasks/*` surface.
+
+The original limitation was that `tasksToolsFor` bound a tasks handle to a concrete
+`McpClient`; under auto-restart the live client is swapped behind the supervisor, so
+a once-bound handle would go stale. The follow-up closes this with a supervisor-aware
+tasks handle that mirrors `mcpToolToToolSupervised`:
+
+- `SupervisableMcpClient` gains an OPTIONAL tasks surface (`serverSupportsTasks?()` +
+  `requestRaw?()`). `McpClient` already exposes both; `IsolatedMcpClient` exposes
+  neither, so it stays a valid supervisable client (its `serverSupportsTasks` is
+  absent ⇒ the supervisor reports no tasks capability ⇒ no `mcp_task_*` tools).
+- `McpReconnectSupervisor` gains `serverSupportsTasks()` (reads the CURRENT live
+  client) and `requestRaw(method, params?)` (the outbound mirror of `callTool`: applies
+  the pending-call policy, then dispatches through the CURRENT live client). Both
+  re-resolve `this.client` on every call, never capture it.
+- `tasksPortOver(rpc: TasksRpc)` (`src/mcp/tasks/client-port.ts`) is the shared
+  parse-codec backing both `clientTasksPort(client)` (default path) and the supervised
+  path. `supervisedTasksToolsFor(sup)` (`src/agent/mcp-bridge.ts`) builds the handle
+  over the SUPERVISOR, so every `tasks/*` request lands on whatever client is live at
+  call time — surviving an auto-restart with no stale capture.
+
+Gating is unchanged from the default path: the `mcp_task_*` tools are present ONLY when
+the (current) server advertises `capabilities.tasks` (`sup.serverSupportsTasks()`).
+Supervised + a server that does NOT advertise tasks ⇒ no tasks tools (byte-identical to
+the pre-follow-up supervised path, which never bridged tasks at all). Both `tasks/*` and
+auto-restart remain independently default-OFF.
 
 ## Evidence
 
-- Code: `src/mcp/reconnect/{policy,port,supervisor,index}.ts`, `src/mcp/{client,isolated-client,index}.ts`, `src/agent/mcp-bridge.ts`, `src/apps/cli/internal.ts`.
-- Tests (hellgate, fake clock — zero real timers): `src/mcp/reconnect/__tests__/policy.hellgate.test.ts`, `src/mcp/reconnect/__tests__/supervisor.hellgate.test.ts`, `src/agent/__tests__/mcp-autorestart-default-off.hellgate.test.ts`. Cover RFC §9 cases 1–9 including the DEFAULT-OFF byte-identical regression anchor.
+- Code: `src/mcp/reconnect/{policy,port,supervisor,index}.ts`, `src/mcp/{client,isolated-client,index}.ts`, `src/mcp/tasks/{client-port,rpc,index}.ts` (supervised-tasks follow-up), `src/agent/mcp-bridge.ts`, `src/apps/cli/internal.ts`.
+- Tests (hellgate, fake clock — zero real timers): `src/mcp/reconnect/__tests__/policy.hellgate.test.ts`, `src/mcp/reconnect/__tests__/supervisor.hellgate.test.ts`, `src/agent/__tests__/mcp-autorestart-default-off.hellgate.test.ts`, `tests/unit/mcp-supervised-tasks-hellgate.test.ts` (supervised-tasks follow-up: present-when-advertised / routes-to-current / survives-restart-no-stale-handle / absent-without-advertisement / default-path-unchanged). Cover RFC §9 cases 1–9 including the DEFAULT-OFF byte-identical regression anchor.
 - Knob: `QUANTA_MCP_AUTORESTART` (1/true/yes ⇒ on; unset ⇒ byte-identical).
 - Catalog: `tools/feature-catalog/features/09-integration/0435-mcp-auto-restart.yaml`.
