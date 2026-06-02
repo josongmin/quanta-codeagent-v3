@@ -9,13 +9,15 @@
  *   - Surface filter excludes wrong-surface knobs
  *   - Persist roundtrip survives JSON oddities
  */
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { AgentConfig } from "@/agent"
 import {
   __resetRegistry,
+  __restoreRegistry,
+  __snapshotRegistry,
   type AnyKnob,
   applyKnobs,
   asAnyKnob,
@@ -31,6 +33,10 @@ import {
   validateKnobs,
   writeKnobConfig,
 } from "@/runner/knobs"
+// Side-effect: register all real knobs at module-load so the beforeAll snapshot
+// below is COMPLETE regardless of suite file order (otherwise an empty snapshot
+// would be restored in afterAll and wipe the registry for sibling files).
+import "@/runner/knobs/knobs"
 
 const bool = (raw: string | undefined): boolean | undefined =>
   raw === "1" ? true : raw === "0" ? false : undefined
@@ -61,6 +67,18 @@ const km = (...ks: ReadonlyArray<unknown>): ReadonlyMap<string, AnyKnob> => {
   }
   return m
 }
+
+// Snapshot the populated global registry once so the per-test `__resetRegistry()`
+// churn below cannot leak an EMPTY registry to sibling test files that run after
+// this one in the single-process suite (their knob modules are already
+// import-cached and will NOT re-fire `registerKnob`). Restore it in `afterAll`.
+let registrySnapshot: ReturnType<typeof __snapshotRegistry>
+beforeAll(() => {
+  registrySnapshot = __snapshotRegistry()
+})
+afterAll(() => {
+  __restoreRegistry(registrySnapshot)
+})
 
 beforeEach(() => __resetRegistry())
 afterEach(() => __resetRegistry())

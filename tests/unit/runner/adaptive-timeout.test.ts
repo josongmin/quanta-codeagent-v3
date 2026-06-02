@@ -9,7 +9,7 @@
  * No bench, no LLM, no fs — these tests are registry-mutating only when
  * registering test-local knobs (the registry is reset per-test).
  */
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
 import {
   computeAdaptedTimeout,
@@ -18,7 +18,18 @@ import {
 } from "@/runner/batch/eval/adaptive-timeout"
 import type { BenchKnobState } from "@/runner/batch/eval/knobs-bench"
 import { resolveBenchKnobs } from "@/runner/batch/eval/knobs-bench"
-import { __resetRegistry, type Knob, registerKnob, type Surface } from "@/runner/knobs"
+import {
+  __resetRegistry,
+  __restoreRegistry,
+  __snapshotRegistry,
+  type Knob,
+  registerKnob,
+  type Surface,
+} from "@/runner/knobs"
+// Side-effect: register all real knobs at module-load so the beforeAll snapshot
+// below is COMPLETE regardless of suite file order (otherwise an empty snapshot
+// would be restored in afterAll and wipe the registry for sibling files).
+import "@/runner/knobs/knobs"
 
 const BENCH: readonly Surface[] = ["bench"]
 
@@ -58,6 +69,18 @@ const restoreEnv = (m: Map<string, string | undefined>): void => {
     else process.env[k] = v
   }
 }
+
+// Snapshot the populated global registry once so the per-test `__resetRegistry()`
+// churn below cannot leak an EMPTY registry to sibling test files that run after
+// this one in the single-process suite (their knob modules are already
+// import-cached and will NOT re-fire `registerKnob`). Restore it in `afterAll`.
+let registrySnapshot: ReturnType<typeof __snapshotRegistry>
+beforeAll(() => {
+  registrySnapshot = __snapshotRegistry()
+})
+afterAll(() => {
+  __restoreRegistry(registrySnapshot)
+})
 
 beforeEach(() => {
   savedEnv = snapEnv()

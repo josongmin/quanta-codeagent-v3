@@ -21,7 +21,7 @@
  * framework with the bench-only conventions (envVars-only resolution, no cli/
  * session/config-file layers).
  */
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
 import {
   applyBenchKnobs,
@@ -29,7 +29,18 @@ import {
   readKnobValue,
   resolveBenchKnobs,
 } from "@/runner/batch/eval/knobs-bench"
-import { __resetRegistry, type Knob, registerKnob, type Surface } from "@/runner/knobs"
+import {
+  __resetRegistry,
+  __restoreRegistry,
+  __snapshotRegistry,
+  type Knob,
+  registerKnob,
+  type Surface,
+} from "@/runner/knobs"
+// Side-effect: register all real knobs at module-load so the beforeAll snapshot
+// below is COMPLETE regardless of suite file order (otherwise an empty snapshot
+// would be restored in afterAll and wipe the registry for sibling files).
+import "@/runner/knobs/knobs"
 
 const BENCH: readonly Surface[] = ["bench"]
 
@@ -85,6 +96,18 @@ const ENV_KEYS = [
   "QUANTA_BENCH_TEST_ONE",
   "QUANTA_BENCH_TEST_TWO",
 ] as const
+
+// Snapshot the populated global registry once so the per-test `__resetRegistry()`
+// churn below cannot leak an EMPTY registry to sibling test files that run after
+// this one in the single-process suite (their knob modules are already
+// import-cached and will NOT re-fire `registerKnob`). Restore it in `afterAll`.
+let registrySnapshot: ReturnType<typeof __snapshotRegistry>
+beforeAll(() => {
+  registrySnapshot = __snapshotRegistry()
+})
+afterAll(() => {
+  __restoreRegistry(registrySnapshot)
+})
 
 let savedEnv: Map<string, string | undefined>
 

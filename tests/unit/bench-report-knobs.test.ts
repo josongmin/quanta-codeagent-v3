@@ -15,7 +15,7 @@
  * Also pins `collectBenchKnobsTelemetry` (the writeArtifacts seam) — it
  * builds the same shape the report consumes.
  */
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test"
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -23,7 +23,18 @@ import type { AgentConfig } from "@/agent"
 import { collectBenchKnobsTelemetry, writeArtifacts } from "@/runner/batch/core"
 import { type BenchReportKnobs, buildReport } from "@/runner/batch/report"
 import type { InstanceResult } from "@/runner/batch/types"
-import { __resetRegistry, type Knob, registerKnob, type Surface } from "@/runner/knobs"
+import {
+  __resetRegistry,
+  __restoreRegistry,
+  __snapshotRegistry,
+  type Knob,
+  registerKnob,
+  type Surface,
+} from "@/runner/knobs"
+// Side-effect: register all real knobs at module-load so the beforeAll snapshot
+// below is COMPLETE regardless of suite file order (otherwise an empty snapshot
+// would be restored in afterAll and wipe the registry for sibling files).
+import "@/runner/knobs/knobs"
 
 const BENCH: readonly Surface[] = ["bench"]
 const mkResult = (id: string, passed: boolean): InstanceResult => ({
@@ -58,6 +69,18 @@ const mkBoolKnob = (id: string, envKey: string): Knob<true> => ({
   parse: (raw: string | undefined): true | undefined => (raw === "1" ? true : undefined),
   apply: (cfg: AgentConfig): AgentConfig => cfg,
   describe: `test knob ${id}`,
+})
+
+// Snapshot the populated global registry once so the per-test `__resetRegistry()`
+// churn below cannot leak an EMPTY registry to sibling test files that run after
+// this one in the single-process suite (their knob modules are already
+// import-cached and will NOT re-fire `registerKnob`). Restore it in `afterAll`.
+let registrySnapshot: ReturnType<typeof __snapshotRegistry>
+beforeAll(() => {
+  registrySnapshot = __snapshotRegistry()
+})
+afterAll(() => {
+  __restoreRegistry(registrySnapshot)
 })
 
 beforeEach(() => {
