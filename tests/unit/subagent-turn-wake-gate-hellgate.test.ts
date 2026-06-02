@@ -188,7 +188,7 @@ describe("createSubagentRunner — waker registration (ADR-0437)", () => {
       return { reason: "completed", turns: 1, messages: [] } as never
     }) as never
     const runner = createSubagentRunner(parentCfg({ subagentTurnWake: wake }), { run })
-    await runner(baseReq({ taskId: undefined }))
+    await runner(baseReq()) // no taskId ⇒ no waker keyed-on / no gate
     expect(sawGate).toBe(false)
     expect(wake.has("task-1")).toBe(false)
   })
