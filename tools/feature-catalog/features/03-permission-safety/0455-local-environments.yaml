@@ -3,14 +3,14 @@ title: local-environment selection — DECLARED per-project dev env composed ove
 section: 3
 subsystem: 권한·안전 — 선언적 로컬 환경 선택 (Codex .codex/environments 흡수, ADR-0455)
 order: 455
-# L2 (seam-only): parser / select / apply core + the shell→tool apply seam
-# (`applyLocalEnv` in runtime/shell.ts) are landed + proven by the 37-case
-# hellgate, BUT no composition root calls `loadLocalEnvConfig` to read the
-# on-disk `.quanta/environment.toml` and set `AgentConfig.localEnv` — so no
-# operator can actually activate it yet (the apply path is live but nothing
-# feeds it). Root loader bind is the deliberate_hold below. Was mislabeled L3;
-# corrected jun-02 R3-audit (same dead-seam class as 0452/0453).
-maturity: L2
+# L3 (root-wired): the loader bind LANDED jun-02 R3 follow-up — runMain calls
+# `resolveLocalEnvSelection(process.env, cwd)` (loadLocalEnvConfig →
+# selectEnvironment) and threads the result onto `AssembleRequestPartial.localEnv`
+# → `AgentConfig.localEnv` (kept the SYNC `buildBaseFromArgs` sync by loading at
+# the already-async root). shell.ts applies it via the existing `applyLocalEnv`
+# seam. An operator can now activate it end-to-end. (Was briefly L2 in R3-audit
+# before this bind.)
+maturity: L3
 status: stable
 ui_surfaces: [cli]
 monitoring: n-a
@@ -57,26 +57,25 @@ evidence:
     - src/tool/types.ts
     - src/agent/types.ts
     - src/agent/dispatch.ts
+    - src/apps/agent/index.ts
   adrs: [455]
   tests:
     unit:
       - tests/unit/local-environments-hellgate.test.ts
+      - tests/unit/apps/agent/local-env-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs:
+  - name: QUANTA_LOCAL_ENV
+    default: '(unset ⇒ config의 declared default, 없으면 미적용)'
+    purpose: 'jun-02 R3 wire — runMain의 resolveLocalEnvSelection이 읽는 명시 env 선택 이름. 미설정 ⇒ config의 default env(있으면), 둘 다 없으면 selection undefined ⇒ ambient env byte-identical. 미인식 이름 ⇒ undefined(silent default fallback 없음).'
   - name: AgentConfig.localEnv
     default: 'undefined'
-    purpose: 'LocalEnvSelection | undefined — 선언 env의 { vars, pathPrepend } 선택 결과. absent ⇒ applyLocalEnv가 same base reference 반환(default-OFF byte-identical). dispatch seam이 ToolContext.localEnv로 surface → bash가 ShellOptions.localEnv로 forward.'
+    purpose: 'LocalEnvSelection | undefined — 선언 env의 { vars, pathPrepend } 선택 결과. runMain이 AssembleRequestPartial.localEnv로 채워 buildBaseFromArgs가 base에 spread. absent ⇒ applyLocalEnv가 same base reference 반환(default-OFF byte-identical). dispatch seam이 ToolContext.localEnv로 surface → bash가 ShellOptions.localEnv로 forward.'
   - name: '.quanta/environment.toml'
     default: '(absent)'
     purpose: '선언 config 파일. absent ⇒ loadLocalEnvConfig undefined ⇒ ambient env 그대로. Codex-compat fallback: .codex/environments/environment.toml.'
-deliberate_hold:
-  reason: |
-    composition-root binding (loadLocalEnvConfig → AgentConfig.localEnv) is a
-    small follow-up: the CLI / runAgent is the place that reads the on-disk
-    config and sets the per-session selection. The parser / apply / select /
-    load core PLUS the full shell→tool→dispatch wire are landed and proven by
-    the 37-case hellgate; only the operator-facing on-disk read remains.
+deliberate_hold: null
 notes: |
   - 보안: 선언 var는 allowlist를 BYPASS 안 함 — 비-allowlist 이름 DROP. PATH-prepend는
     parse-time 검증(단일 fragment, no ":"/"="/NUL → multi-element/assignment 주입 불가).

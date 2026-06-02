@@ -101,10 +101,20 @@ composes it via `applyLocalEnv(scrubEnv(), localEnv, DEFAULT_ENV_ALLOWLIST)`
 BEFORE the proxy injection. `@/runtime` does not import `@/tool`/`@/agent`; the
 field types are structural mirrors of `LocalEnvSelection`.
 
-The on-disk loader (`loadLocalEnvConfig`) is exported but a composition root
-(CLI / `runAgent`) is the place that reads it and sets `AgentConfig.localEnv`.
-That binding is a small follow-up (the parser/apply/select/load core + the full
-shell→tool→dispatch wire are the substance of this slice).
+### CLOSED — composition-root loader bind (jun-02 R3 follow-up landed)
+
+> Previously the on-disk loader was exported but unwired. Now closed.
+
+`runMain` (the async CLI composition root) calls `resolveLocalEnvSelection(
+process.env, process.cwd())` — `loadLocalEnvConfig(cwd, Bun.TOML.parse)` →
+`selectEnvironment(config, QUANTA_LOCAL_ENV)` — and threads the result onto
+`AssembleRequestPartial.localEnv`. `buildBaseFromArgs` spreads it onto
+`AgentConfig.localEnv` (`localEnvSlotOf`). Loading at the already-async root
+keeps the SYNC `buildBaseFromArgs` and its ~21 callers synchronous (no async
+conversion). A malformed config is fail-closed: not applied + a `logger.warn`
+naming the file (never a silently-wrong env). `QUANTA_LOCAL_ENV` selects the
+named env; unset ⇒ the config's declared default. Default-OFF: no config file
+⇒ `undefined` ⇒ ambient env byte-identical.
 
 ## Consequences
 

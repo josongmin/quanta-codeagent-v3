@@ -31,7 +31,12 @@ import {
 } from "@/runner/assemble"
 import type { Surface } from "@/runner/knobs"
 import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
-import { resolveSandboxProfileFromEnv } from "@/runtime"
+import {
+  type LocalEnvSelection,
+  loadLocalEnvConfig,
+  resolveSandboxProfileFromEnv,
+  selectEnvironment,
+} from "@/runtime"
 import { loadEnvFiles } from "@/shared/env-files"
 
 loadEnvFiles([".env.dev", ".env.local", ".env"])
@@ -439,6 +444,41 @@ const resolvePrewarmSlot = (
   parseEnvFlag(env.QUANTA_PREWARM, /* defaultOn */ false)
     ? { prewarm: { enabled: true, now: () => Date.now() } }
     : {}
+
+// ADR-0455 jun-02 wire — load `.quanta/environment.toml` (Codex `.codex/
+// environments` fallback) from `cwd` up to the repo root and resolve the
+// selected environment. Async (the loader does a directory walk + file read),
+// so it runs at the ALREADY-async composition root (`runMain`) and the result
+// is threaded onto the SYNC `buildBaseFromArgs` via `AssembleRequestPartial.
+// localEnv` — keeping every existing `buildBaseFromArgs` caller synchronous.
+//
+// Default-OFF: no config file ⇒ `loadLocalEnvConfig` returns `undefined` ⇒
+// `undefined` here ⇒ slot omitted ⇒ ambient env byte-identical. A DECLARED-but-
+// malformed config is fail-closed (parse error ⇒ NOT applied) + surfaced via a
+// warn so the operator sees the broken file instead of a silently-wrong env.
+// `name` comes from the closed knob `QUANTA_LOCAL_ENV`; unset ⇒ the config's
+// declared default (or nothing). NO sniffing — only the config is read.
+export const resolveLocalEnvSelection = async (
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+): Promise<LocalEnvSelection | undefined> => {
+  const loaded = await loadLocalEnvConfig(cwd, Bun.TOML.parse)
+  if (loaded === undefined) return undefined
+  if (!loaded.result.ok) {
+    logger.warn(
+      `local-env config at ${loaded.sourcePath} is malformed (${loaded.result.reason}); ` +
+        "not applied. Fix the file or remove it.",
+    )
+    return undefined
+  }
+  return selectEnvironment(loaded.result.config, env.QUANTA_LOCAL_ENV)
+}
+
+// Spread-ready projection of the partial's resolved local-env selection (`{}`
+// when absent ⇒ no branch in `buildBaseFromArgs`, keeps it under biome's
+// cognitive-complexity cap — same pattern as `resolvePrewarmSlot`).
+const localEnvSlotOf = (p: AssembleRequestPartial): { localEnv?: LocalEnvSelection } =>
+  p.localEnv !== undefined ? { localEnv: p.localEnv } : {}
 
 const buildBaseRegistry = (args: {
   readonly automationSlot: AutomationEngineSlot | null
@@ -961,6 +1001,11 @@ export const buildBaseFromArgs = (
     // ADR-0452 — spread-ready prewarm slot (`{}` when off ⇒ no branch here,
     // keeps `buildBaseFromArgs` under biome's cognitive-complexity cap).
     ...prewarmSlot,
+    // ADR-0455 — spread-ready local-env slot resolved at the (async) root and
+    // carried on the partial (`{}` when absent ⇒ ambient env byte-identical;
+    // shell.ts applies it via the existing `applyLocalEnv` seam, allowlist-
+    // governed).
+    ...localEnvSlotOf(p),
     // ADR-0279 — spread the automation slot conditionally (default-OFF;
     // `exactOptionalPropertyTypes` — no `undefined` literal on the config).
     ...(automationSlot !== null ? { automationEngine: automationSlot } : {}),
@@ -1057,6 +1102,13 @@ export interface AssembleRequestPartial {
    *  resolved separately inside `buildBaseFromArgs` (flag WINS over env).
    *  Absent (no flag, no env) ⇒ no profile manager wired (default-OFF). */
   permissionProfile?: import("./cli-args").PermissionProfileToken
+  /** ADR-0455 jun-02 wire — the resolved local-environment selection, loaded
+   *  from `.quanta/environment.toml` at the (async) composition root
+   *  (`runMain`) and threaded onto the SYNC `buildBaseFromArgs` via this field
+   *  (so the loader's async directory-walk never forces the base builder
+   *  async). Absent ⇒ no config found / no env selected ⇒ slot omitted ⇒
+   *  ambient env byte-identical. */
+  localEnv?: LocalEnvSelection
 }
 
 /** ADR-0236 + ADR-0301 — propagate the composition-root mega-wire flags
@@ -1165,6 +1217,11 @@ export const runMain = async (deps: MainDeps = {}): Promise<void> => {
 
   const dispatcher = await loadDispatcher(args.mode)
   const partial = toAssembleRequest(args)
+  // ADR-0455 jun-02 wire — load the local-env config at the async composition
+  // root and thread the resolved selection onto the partial. Default-OFF: no
+  // config / no selection ⇒ field stays absent ⇒ ambient env byte-identical.
+  const localEnvSelection = await resolveLocalEnvSelection(process.env, process.cwd())
+  if (localEnvSelection !== undefined) partial.localEnv = localEnvSelection
 
   // T01 (audit L5 H-2 / M-6): the composition root owns ONE real cancellation
   // controller and wires SIGINT to it exactly once — previously every preset
