@@ -1,0 +1,68 @@
+id: realtime-voice-session
+title: ADR-0439 Realtime voice session — live bidirectional spoken dialog
+section: 2
+subsystem: Realtime streaming
+order: 439
+maturity: L1
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: partial
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:cli]
+depends_on: [realtime-websocket-codex]
+purpose: |
+  RFC-03 live spoken dialog. Composes the existing @/realtime transport
+  (ADR-0230 8-method RealtimePort) + @/voice recorder (ADR-0208) + a new
+  AudioPlaybackPort into a RealtimeVoiceSession driven by the OpenAI Realtime
+  API (server-side VAD/codec/TTS). 5-state machine (idle→connecting→listening→
+  responding→closed, pure reducer). Server-VAD primary + push-to-talk fallback.
+  Mute (drop-before-append), barge-in/interrupt (response.cancel), connection-
+  drop detection, transcript-only fallback when no audio player. Codex
+  ThreadRealtime* + Session config + composer.realtime.* labels absorbed.
+  HONEST codec boundary: base64 PCM16 over the text-WS (NO opus DSP); the only
+  local DSP is a pure WAV-strip + linear resample (pcm-bridge, NOT a codec).
+  Auth reuses the llm factory/oauth bearer as an injected value (slice never
+  imports @/llm). Clock + mic-pump injected (no Date.now/Math.random/real
+  timer in src). /voice-live slash surface.
+evidence:
+  code:
+    - src/realtime/voice-session/port.ts
+    - src/realtime/voice-session/state-machine.ts
+    - src/realtime/voice-session/default-session.ts
+    - src/realtime/voice-session/session-config.ts
+    - src/realtime/voice-session/pcm-bridge.ts
+    - src/realtime/voice-session/playback-port.ts
+    - src/realtime/voice-session/default-playback.ts
+    - src/realtime/voice-session/openai-realtime-adapter.ts
+    - src/realtime/voice-session/index.ts
+    - src/apps/cli/voice-live-cmd.ts
+  adrs: [439]
+  tests:
+    unit:
+      - tests/unit/realtime/voice-session-hellgate.test.ts
+      - tests/unit/cli/voice-live-cmd-hellgate.test.ts
+knobs:
+  - name: mode
+    description: turn-detection mode — server_vad (default) or push_to_talk
+  - name: endpoint
+    description: OpenAI Realtime WS endpoint (model passed via query/config)
+  - name: model
+    description: realtime model id (not hardcoded; from config)
+  - name: voice
+    description: output voice (default alloy; ListVoices follow-up)
+  - name: vad.threshold / vad.prefixPaddingMs / vad.silenceDurationMs
+    description: server-VAD knobs — passed through; omitted ⇒ API default (no invented tuning)
+deliberate_hold:
+  reason: |
+    Tool-calling over realtime, WebRTC media path, reconnect/backoff, and
+    multi-voice mixing are out of MVP scope. The /voice-live slash is not yet
+    registered in a dispatcher — invoked only when a surface constructs the
+    session + threads it in (default-OFF byte-identical posture).
+  promotion_path: |
+    Wire the session construction into the apps/cli composition root behind the
+    realtime config knob (resolve bearer via llm factory/oauth, build the
+    openai-realtime-adapter + default-recorder + default-playback), register
+    /voice-live, then add ListVoices + reconnect (RFC-01) + tool-calling.
+notes: 'Default-OFF: 트리 어디서도 @/realtime/voice-session import 0. 13 HELL-RTV + slash hellgate + pcm-bridge/session-config 유닛. tsc 0 / biome 0 (our files).'
