@@ -63,7 +63,10 @@ knobs:
     purpose: |
       Opt-in: reject a spawn when the policy demands network-deny but the
       helper cannot enforce it. Default false = honest warn + proceed
-      (RFC-07 §7). Carried on NativeWindowsConfig.
+      (RFC-07 §7). Carried on NativeWindowsConfig as a config field; the actual
+      fail-closed enforcement lives in the L3 broker helper (backlog). At L1/L2
+      the field is plumbed but inert — network policy is surfaced as a warning,
+      never silently dropped. Documented gap, not a bug.
 deliberate_hold:
   reason: |
     L3 — the native helper exe (`quanta-win-sandbox.exe`, a Rust

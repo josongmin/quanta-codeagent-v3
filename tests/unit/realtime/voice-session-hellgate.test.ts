@@ -18,7 +18,7 @@ import { err, ok, type Result } from "@/shared"
 import type { AudioRecorderPort } from "@/voice"
 
 /**
- * Hellgate for ADR-0439 realtime voice-session slice (RFC-03). Drives the
+ * Hellgate for ADR-0442 realtime voice-session slice (RFC-03). Drives the
  * full live-dialog composition (transport + recorder + playback + pump +
  * clock) with ZERO real I/O: the headless stub is the transport, the recorder
  * /playback/pump are fakes, the clock is injected. 13 HELL-RTV cases + the

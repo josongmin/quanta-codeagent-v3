@@ -14,7 +14,7 @@ import type {
 import { err, ok, type Result } from "@/shared"
 
 /**
- * Hellgate for the `/voice-live` slash (ADR-0439, RFC §5). Asserts exact REPL
+ * Hellgate for the `/voice-live` slash (ADR-0442, RFC §5). Asserts exact REPL
  * strings for start/listening/mute/interrupt/end + the default-OFF and
  * headless gates. Injected `out`/`err` + a fake session — zero real I/O.
  */

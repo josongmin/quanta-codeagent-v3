@@ -2,7 +2,7 @@ id: realtime-voice-session
 title: ADR-0442 Realtime voice session — live bidirectional spoken dialog
 section: 2
 subsystem: Realtime streaming
-order: 439
+order: 442
 maturity: L1
 status: new
 ui_surfaces: [cli]
@@ -38,7 +38,7 @@ evidence:
     - src/realtime/voice-session/openai-realtime-adapter.ts
     - src/realtime/voice-session/index.ts
     - src/apps/cli/voice-live-cmd.ts
-  adrs: [439]
+  adrs: [442]
   tests:
     unit:
       - tests/unit/realtime/voice-session-hellgate.test.ts
