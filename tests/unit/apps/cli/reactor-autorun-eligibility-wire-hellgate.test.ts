@@ -1,6 +1,6 @@
 /**
  * ADR-0453 jun-02 wire hellgate — the reactor's 4th-guard autorun-eligibility
- * resolver is LIVE at the REPL composition root (`buildReactorAutorunEligibility`),
+ * resolver is LIVE at the REPL composition root (`buildAutorunEligibility`),
  * not merely a pure evaluator + an unwired optional port.
  *
  * Round-2 audit found ADR-0453 claimed `deliberate_hold: null` + L3 "fully
@@ -20,36 +20,34 @@
  *               gate can only BLOCK, never force).
  */
 import { describe, expect, it } from "bun:test"
-import { buildReactorAutorunEligibility } from "@/../src/apps/cli/repl/session-loop"
+import { buildAutorunEligibility } from "@/permission"
 import type { LastTurnOutcome } from "@/reactor"
 
 const never = () => undefined as LastTurnOutcome | undefined
 
 describe("ADR-0453 wire — QUANTA_AUTORUN_POLICY at the reactor composition root", () => {
   it("HELL-AE-01: knob unset ⇒ resolver undefined (default-OFF 3-guard path)", () => {
-    expect(buildReactorAutorunEligibility({}, never)).toBeUndefined()
+    expect(buildAutorunEligibility({}, never)).toBeUndefined()
   })
 
   it("HELL-AE-02: unrecognized value ⇒ undefined (fail toward off, no throw)", () => {
-    expect(
-      buildReactorAutorunEligibility({ QUANTA_AUTORUN_POLICY: "sometimes" }, never),
-    ).toBeUndefined()
+    expect(buildAutorunEligibility({ QUANTA_AUTORUN_POLICY: "sometimes" }, never)).toBeUndefined()
   })
 
   it("HELL-AE-03: never ⇒ NOT eligible (policy-never)", () => {
-    const r = buildReactorAutorunEligibility({ QUANTA_AUTORUN_POLICY: "never" }, never)
+    const r = buildAutorunEligibility({ QUANTA_AUTORUN_POLICY: "never" }, never)
     expect(r).toBeDefined()
     expect(r?.()).toEqual({ eligible: false, reason: "policy-never" })
   })
 
   it("HELL-AE-04: always ⇒ eligible (policy-always)", () => {
-    const r = buildReactorAutorunEligibility({ QUANTA_AUTORUN_POLICY: "always" }, never)
+    const r = buildAutorunEligibility({ QUANTA_AUTORUN_POLICY: "always" }, never)
     expect(r?.()).toEqual({ eligible: true, reason: "policy-always" })
   })
 
   it("HELL-AE-05: on-failure reads prior outcome at CALL time (fresh per wake)", () => {
     let outcome: LastTurnOutcome | undefined
-    const r = buildReactorAutorunEligibility({ QUANTA_AUTORUN_POLICY: "on-failure" }, () => outcome)
+    const r = buildAutorunEligibility({ QUANTA_AUTORUN_POLICY: "on-failure" }, () => outcome)
     expect(r).toBeDefined()
     // First wake: prior turn failed ⇒ eligible.
     outcome = "fail"
@@ -64,7 +62,7 @@ describe("ADR-0453 wire — QUANTA_AUTORUN_POLICY at the reactor composition roo
   })
 
   it("HELL-AE-06: on-request with no standing approval ⇒ blocked", () => {
-    const r = buildReactorAutorunEligibility({ QUANTA_AUTORUN_POLICY: "on-request" }, never)
+    const r = buildAutorunEligibility({ QUANTA_AUTORUN_POLICY: "on-request" }, never)
     expect(r?.()).toEqual({ eligible: false, reason: "on-request-absent" })
   })
 })

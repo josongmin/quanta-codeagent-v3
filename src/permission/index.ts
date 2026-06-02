@@ -17,6 +17,7 @@ export {
   ALL_AUTORUN_PRIOR_OUTCOMES,
   evaluateAutorunEligibility,
 } from "./autorun-eligibility"
+export { buildAutorunEligibility } from "./autorun-eligibility-wire"
 export type { BranchOnlyVerdict } from "./branch-only"
 export { DEFAULT_PROTECTED_BRANCHES, decideBranchOnly } from "./branch-only"
 export type {
