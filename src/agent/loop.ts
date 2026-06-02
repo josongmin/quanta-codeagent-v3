@@ -2598,6 +2598,21 @@ const maybeRunSessionPrewarm = async (
 
 const createRunAgentContext = async (config: AgentConfig): Promise<RunAgentContext> => {
   const features = await buildSessionFeatures(config)
+  // Publish a live working-state snapshot getter to the surface (`/state`).
+  // Pure observation; never throws into the loop. Absent hook ⇒ no-op
+  // (byte-identical). The getter returns `undefined` when the workingState
+  // feature is OFF (no session built).
+  if (config.onWorkingStateReady !== undefined) {
+    try {
+      const ws = features.workingState
+      config.onWorkingStateReady(() => ws?.snapshot())
+    } catch (e) {
+      config.stream.emit({
+        type: "error",
+        message: `onWorkingStateReady observer threw: ${errMessage(e)}`,
+      })
+    }
+  }
   const baseCfg = buildEffectiveConfig(config, features.extraTools)
   // `cfg` is mutated below (onPlanExitOutcome, shellSnapshotSession, llm wrap,
   // attachDedupGate, attachCapEnforcer, attachLocalizePhase, wireHookPromptPending).

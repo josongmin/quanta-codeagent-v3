@@ -113,6 +113,14 @@ export interface SessionSetupResult {
   readonly mcpTools: SessionBootstrapResult["features"]["mcpTools"]
   readonly mcpSurface: McpSurfaceInfo | undefined
   readonly skillsConfig: Tooling["skillsConfig"]
+  /** `/memory` slash store — the SAME {@link PersistentStorePort} the loop
+   *  reads (built once in `tooling`). Absent ⇒ no store (`QUANTA_MEMORY=off`)
+   *  ⇒ the `/memory` slash prints "not wired". Forwarded from
+   *  `boot.tooling.store` so the slash and the agent share ONE store. */
+  readonly memoryStore: Tooling["store"]
+  /** Optional embedder for `/memory search` semantic recall (same instance
+   *  the loop's recall uses). Absent ⇒ lexical-only fallback. */
+  readonly memoryEmbedder: Tooling["embedder"]
   /** L5 M-11 — per-session search-wire teardown (delta-scan interval + indexer)
    *  forwarded from `boot.tooling`. The host threads this into
    *  `runSessionLoop({ searchPipelineDispose })` so session close releases THIS
@@ -275,6 +283,8 @@ export const setupSession = async (
     mcpTools: boot.features.mcpTools,
     mcpSurface: boot.mcpSurface as McpSurfaceInfo | undefined,
     skillsConfig: boot.tooling.skillsConfig,
+    memoryStore: boot.tooling.store,
+    memoryEmbedder: boot.tooling.embedder,
     searchPipelineDispose: boot.tooling.searchPipelineDispose,
     lifecyclePills: boot.lifecyclePills as unknown as LifecyclePills,
     lifecycleTaskRegistry: boot.lifecycleTaskRegistry,

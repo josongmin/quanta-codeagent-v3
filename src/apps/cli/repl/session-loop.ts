@@ -96,6 +96,16 @@ export interface RunSessionLoopDeps {
   readonly registerSideConversationStart?: (
     fn: ((args: RuntimeSideConversationArgs) => Promise<RuntimeSideConversationResult>) | undefined,
   ) => void
+  /** `/queue` `sendNow` target install. The loop wires this to push the
+   *  follow-up text into the live `ExternalPromptQueue` so a "send now" lands
+   *  at the next turn boundary. Absent ⇒ `sendNow` reports "send-not-possible". */
+  readonly registerPlanQueueSendNow?: (
+    fn:
+      | ((inj: {
+          readonly text: string
+        }) => { ok: true } | { ok: false; reason: string })
+      | undefined,
+  ) => void
   /** Constructor-time runtime composition payload threaded into
    *  `runtimeContext.createRuntimeFacade(...)`. Keeps the public SDK surface
    *  immutable after bootstrap while still letting the CLI supply
@@ -241,6 +251,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     convCheckpointWire,
     registerReplaceMessages,
     registerSideConversationStart,
+    registerPlanQueueSendNow,
     runtimeFacadeCompose,
     playbookSeam,
     playbookCliFlag,
@@ -384,6 +395,16 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
   // when the port was never built (notify absent ⇒ byte-identical).
   registerNotifyDispose(closeStack, notify)
   registerSideConversationStart?.((args) => session.side.start(args))
+  // `/queue` sendNow → inject the follow-up text as the next out-of-band
+  // prompt. The store has already removed the entry by the time this fires.
+  registerPlanQueueSendNow?.((inj) => {
+    try {
+      externalPromptQueue.push(inj.text)
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, reason: errMessage(e) }
+    }
+  })
 
   // ADR-0292 — install the `/rewind-conv` swap closure so the slash can mutate
   // the live history binding the loop reads each turn. No-throw on the swap;

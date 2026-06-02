@@ -1003,6 +1003,18 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
     snapshot: import("./context/usage-breakdown").PromptAssembledSnapshot,
   ) => void
   /**
+   * OPTIONAL working-state snapshot publisher. Fired ONCE at session start
+   * (right after {@link buildSessionFeatures}) with a getter over the live
+   * session-scoped {@link import("./working-state").WorkingState} — or a getter
+   * that returns `undefined` when `workingState.enabled !== true`. The surface
+   * (`/state`) retains the getter to render the current posture/blockers panel.
+   * Absent ⇒ no publish (byte-identical). Pure observation; never throws into
+   * the loop (the call site try/catches).
+   */
+  onWorkingStateReady?: (
+    getSnapshot: () => import("./working-state").WorkingState | undefined,
+  ) => void
+  /**
    * ADR-0440 wire-finish — OPTIONAL tool-diff capture sink. When set, the
    * dispatch seam surfaces it (plus the dispatched `ToolUseBlock.id`) onto the
    * {@link import("@/tool").ToolContext} so a file-mutating tool (`write`/`edit`)

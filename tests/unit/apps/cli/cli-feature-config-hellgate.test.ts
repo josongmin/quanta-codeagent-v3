@@ -75,7 +75,7 @@ describe("ADR-0297 readCliFeatureConfig — default-OFF/ON matrix", () => {
     expect(cfg.subagentForPills).toBe(false)
     expect(cfg.costPanel.enabled).toBe(false)
     expect(cfg.branchProgress.enabled).toBe(false)
-    expect(cfg.planStore.enabled).toBe(false)
+    expect(cfg.planStore.enabled).toBe(true) // default-ON (not TTY-gated)
     expect(cfg.workMetricsSinkEnabled).toBe(false)
     expect(cfg.turnSummary.enabled).toBe(false) // non-TTY auto-OFF
     expect(cfg.turnSummary.verbose).toBe(false)
@@ -168,7 +168,7 @@ describe("ADR-0297 readCliFeatureConfig — env-knob sweep", () => {
     expect(cfg.turnIndicator.enabled).toBe(false)
   })
 
-  test("QUANTA_PLAN_STORE=1 enables; empty/0/off/no disables", () => {
+  test("QUANTA_PLAN_STORE default-ON; empty/0/off/no disables", () => {
     expect(readCliFeatureConfig({ QUANTA_PLAN_STORE: "1" }, true, true).planStore.enabled).toBe(
       true,
     )
@@ -181,7 +181,8 @@ describe("ADR-0297 readCliFeatureConfig — env-knob sweep", () => {
     expect(readCliFeatureConfig({ QUANTA_PLAN_STORE: "off" }, true, true).planStore.enabled).toBe(
       false,
     )
-    expect(readCliFeatureConfig({}, true, true).planStore.enabled).toBe(false)
+    // Default-ON: unset ⇒ enabled (so `/edit-plan` + `/plan` work out of box).
+    expect(readCliFeatureConfig({}, true, true).planStore.enabled).toBe(true)
   })
 
   test("QUANTA_TURN_SUMMARY forced-on on a NON-TTY surface still wins (operator override)", () => {

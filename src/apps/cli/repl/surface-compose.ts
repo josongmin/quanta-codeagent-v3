@@ -1,4 +1,4 @@
-import { type AgentMode, EFFORT_LEVELS, effortToTokenBudget } from "@/agent"
+import { type AgentMode, EFFORT_LEVELS, effortToTokenBudget, type WorkingState } from "@/agent"
 import {
   defaultGranularRegistry,
   type GranularRegistryPort,
@@ -13,6 +13,11 @@ import {
   type ConversationCheckpointStore,
   defaultConversationCheckpointStore,
 } from "@/agent/conversation-checkpoint"
+import {
+  defaultPlanQueueStore,
+  type PlanQueueStore,
+  type SendNowInjection,
+} from "@/agent/plan-queue"
 import { buildMentionSymbolDeps } from "@/host/runtime/internal/mention-symbol-deps"
 import type { Message } from "@/llm"
 import { buildCostDashboard, GEN_AI_ATTRS, renderDashboardText } from "@/observability"
@@ -35,6 +40,7 @@ import {
 } from "../at-autocomplete"
 import { runImageCmd } from "../image-cmd"
 import type { ImageQueue } from "../image-queue"
+import type { MemorySlashState } from "../memory-cmd"
 import { loadKeybindings } from "../keybindings/load"
 import type { KeybindingMap } from "../keybindings/types"
 import {
@@ -326,6 +332,16 @@ export interface ReplSurfaceWires {
   readonly setSideConversationStart: (
     fn: ((args: RuntimeSideConversationArgs) => Promise<RuntimeSideConversationResult>) | undefined,
   ) => void
+  /** `/queue` plan-queue store (surface-owned). Producers (playbook/voice/
+   *  mid-turn capture) enqueue into THIS instance; the slash inspects/mutates
+   *  it. Exposed so the loop can also enqueue/drain against the same store. */
+  readonly planQueueStore: PlanQueueStore
+  /** Install the `/queue` `sendNow` injection target once the loop owns its
+   *  `ExternalPromptQueue`. Until installed, `sendNow` returns a typed
+   *  "send-not-possible" (the entry is still removed — see `PlanQueueStore`). */
+  readonly setPlanQueueSendNow: (
+    fn: ((inj: SendNowInjection) => { ok: true } | { ok: false; reason: string }) | undefined,
+  ) => void
   /** Track D (runtime → REPL context wire) — the per-turn prompt-assembly sink
    *  the composition root wires into `AgentConfig.onPromptAssembled`. Each call
    *  retains the latest snapshot the `/context` slash renders via the
@@ -409,6 +425,12 @@ const buildSurfaceDispatch = (args: {
    *  `undefined` on a non-TTY host). Absent ⇒ slot omitted ⇒ the slash prints
    *  "not wired" (byte-identical default-OFF). */
   readonly voiceLive?: () => Promise<VoiceLiveCtx | undefined>
+  /** `/memory` store slot. Present iff a durable store was built (default-ON
+   *  volatile `InMemoryStore`); absent ⇒ the slash prints "not wired". */
+  readonly memory?: MemorySlashState | undefined
+  /** `/queue` plan-queue store. Surface-owned; always present in the REPL so
+   *  inspect/mutate/sendNow resolve (empty until a producer enqueues). */
+  readonly planQueue?: PlanQueueStore | undefined
 }): ((input: string) => Promise<boolean>) => {
   return async (input: string): Promise<boolean> => {
     const head = input.split(/\s+/)[0] ?? ""
@@ -441,6 +463,11 @@ const buildSurfaceDispatch = (args: {
       // set; absent ⇒ slot omitted ⇒ the slash prints "not wired" (byte-
       // identical default-OFF).
       ...(args.voiceLive !== undefined ? { voiceLive: args.voiceLive } : {}),
+      // `/memory` store slot: present iff a durable store was built. Absent ⇒
+      // slot omitted ⇒ the slash prints "memory store not wired".
+      ...(args.memory !== undefined ? { memory: args.memory } : {}),
+      // `/queue` plan-queue store: surface-owned, always present in the REPL.
+      ...(args.planQueue !== undefined ? { planQueue: args.planQueue } : {}),
     }
     await runSlashCommand(input, ctx)
     return true
@@ -570,10 +597,26 @@ export const composeSurfaceWires = (
   // the sink is published on `runtimeFacadeCompose` and threaded into
   // `createRuntimeFacade({ compose })` by the session loop.
   const promptAssembled = createPromptAssembledHolder(setup.model)
+  // `/state` — working-state snapshot getter, installed by the loop's
+  // `onWorkingStateReady` callback once features are built. Env-gated:
+  // `QUANTA_WORKING_STATE` truthy ⇒ the loop builds the WorkingState session
+  // (adds `update_working_state` + the L3 prompt block) AND publishes the
+  // getter here; unset ⇒ feature OFF (config byte-identical) and the getter
+  // stays undefined so `/state` renders an empty panel (NOT "not wired").
+  let workingStateGet: (() => WorkingState | undefined) | undefined
+  const workingStateEnabled = isEnvTruthy(envSource.QUANTA_WORKING_STATE)
   const runtimeFacadeCompose: RuntimeFacadeComposeOptions = {
     granularRegistry,
     onPromptAssembled: promptAssembled.sink,
     ...(registryToolMapper !== undefined ? { registryToolMapper } : {}),
+    ...(workingStateEnabled
+      ? {
+          workingState: { enabled: true },
+          onWorkingStateReady: (get) => {
+            workingStateGet = get
+          },
+        }
+      : {}),
   }
   // ADR-0292 — turn-end record wire. Env-gated: `QUANTA_CHECKPOINT_CONV=on`
   // wires the live wire; anything else leaves the slot `null` so the slash
@@ -611,6 +654,27 @@ export const composeSurfaceWires = (
     fn: ((args: RuntimeSideConversationArgs) => Promise<RuntimeSideConversationResult>) | undefined,
   ): void => {
     sideConversationStart = fn
+  }
+
+  // `/queue` — surface-owned plan-queue store. The `sendNow` target is the
+  // loop-owned `ExternalPromptQueue`, installed via `setPlanQueueSendNow` once
+  // the loop is up; until then `sendNow` reports "send-not-possible" (and the
+  // entry is removed, per the store contract).
+  let planQueueSendNow:
+    | ((inj: SendNowInjection) => { ok: true } | { ok: false; reason: string })
+    | undefined
+  const planQueueStore = defaultPlanQueueStore({
+    sendNowSink: {
+      inject: (inj) =>
+        planQueueSendNow !== undefined
+          ? planQueueSendNow(inj)
+          : { ok: false, reason: "send target not installed yet" },
+    },
+  })
+  const setPlanQueueSendNow = (
+    fn: ((inj: SendNowInjection) => { ok: true } | { ok: false; reason: string }) | undefined,
+  ): void => {
+    planQueueSendNow = fn
   }
 
   // ADR-0294 — sessionIo: always wire from the V2 session store. The slash
@@ -702,12 +766,25 @@ export const composeSurfaceWires = (
   // slash prints "not wired" (default-OFF byte-identical).
   const voiceLive = buildVoiceLiveSlot(envSource)
 
+  // `/memory` — wire the SAME store the loop reads (built once in tooling,
+  // forwarded through setup.memoryStore). Absent store (`QUANTA_MEMORY=off`)
+  // ⇒ slot omitted ⇒ the slash prints "not wired" (byte-identical).
+  const memorySlot: MemorySlashState | undefined =
+    setup.memoryStore !== undefined
+      ? {
+          store: setup.memoryStore,
+          ...(setup.memoryEmbedder !== undefined ? { embedder: setup.memoryEmbedder } : {}),
+        }
+      : undefined
+
   const dispatchSlash = buildSurfaceDispatch({
     slashCtx,
     convCheckpointSlot,
     sessionIo,
     contextUsage: () => promptAssembled.current(),
     ...(voiceLive !== undefined ? { voiceLive } : {}),
+    ...(memorySlot !== undefined ? { memory: memorySlot } : {}),
+    planQueue: planQueueStore,
   })
 
   return {
@@ -723,6 +800,8 @@ export const composeSurfaceWires = (
     runtimeFacadeCompose,
     setReplaceMessages,
     setSideConversationStart,
+    planQueueStore,
+    setPlanQueueSendNow,
     promptAssembledSink: contextUsageHolder.sink,
     // RFC-09 (B) — expose the retained per-turn usage snapshot getter so the
     // host can bind the pre-compaction warning to the SAME token count the

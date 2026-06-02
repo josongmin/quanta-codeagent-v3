@@ -302,6 +302,7 @@ export const runRepl = async (): Promise<void> => {
       convCheckpointWire: wires.convCheckpointWire,
       registerReplaceMessages: wires.setReplaceMessages,
       registerSideConversationStart: wires.setSideConversationStart,
+      registerPlanQueueSendNow: wires.setPlanQueueSendNow,
       runtimeFacadeCompose: wires.runtimeFacadeCompose,
       // ADR-0293 — seam attached by the loop once externalPromptQueue is
       // born (the queue is the sink the trigger dispatches into).

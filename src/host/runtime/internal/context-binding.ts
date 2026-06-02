@@ -80,6 +80,8 @@ interface RuntimeContextSnapshot {
   readonly memoryConsolidator?: AgentConfig["memoryConsolidator"]
   readonly granularRegistry?: AgentConfig["granularRegistry"]
   readonly onPromptAssembled?: AgentConfig["onPromptAssembled"]
+  readonly workingState?: AgentConfig["workingState"]
+  readonly onWorkingStateReady?: AgentConfig["onWorkingStateReady"]
 }
 
 type RuntimeContextPatch = Partial<
@@ -108,6 +110,8 @@ type RuntimeContextPatch = Partial<
     | "memoryConsolidator"
     | "granularRegistry"
     | "onPromptAssembled"
+    | "workingState"
+    | "onWorkingStateReady"
   >
 >
 
@@ -502,6 +506,8 @@ const buildOptionalSnapshotFields = (
   ...whenDefined("memoryConsolidator", base.memoryConsolidator),
   ...whenDefined("granularRegistry", base.granularRegistry),
   ...whenDefined("onPromptAssembled", base.onPromptAssembled),
+  ...whenDefined("workingState", base.workingState),
+  ...whenDefined("onWorkingStateReady", base.onWorkingStateReady),
 })
 
 const buildSnapshot = (base: RuntimeBase): RuntimeContextSnapshot => ({

@@ -39,6 +39,13 @@ export interface RuntimeFacadeComposeOptions {
    *  breakdown). Absent ⇒ slot omitted ⇒ `AgentConfig.onPromptAssembled`
    *  undefined ⇒ loop byte-identical. */
   readonly onPromptAssembled?: AgentConfig["onPromptAssembled"]
+  /** Working-state feature gate (`/state`). When `enabled === true` the loop
+   *  builds the session-scoped WorkingState + registers `update_working_state`.
+   *  Absent ⇒ feature OFF (byte-identical). */
+  readonly workingState?: AgentConfig["workingState"]
+  /** Publisher the loop fires once with a live working-state snapshot getter
+   *  (mirrors `onPromptAssembled`). The surface retains it for `/state`. */
+  readonly onWorkingStateReady?: AgentConfig["onWorkingStateReady"]
 }
 
 export interface CreateRuntimeFacadeArgs extends InternalCreateRuntimeFacadeArgs {
@@ -136,6 +143,16 @@ const applyRuntimeFacadeComposeOptions = (
   if (compose.onPromptAssembled !== undefined) {
     next = patchRuntimeContextState(next, {
       onPromptAssembled: compose.onPromptAssembled,
+    })
+  }
+  if (compose.workingState !== undefined) {
+    next = patchRuntimeContextState(next, {
+      workingState: compose.workingState,
+    })
+  }
+  if (compose.onWorkingStateReady !== undefined) {
+    next = patchRuntimeContextState(next, {
+      onWorkingStateReady: compose.onWorkingStateReady,
     })
   }
   if (compose.registryToolMapper !== undefined) {

@@ -182,7 +182,9 @@ export const readCliFeatureConfig = (
  *  `buildPlanStoreOrUndefined` factory becomes a thin allocator that
  *  consumes a typed boolean instead of re-parsing env. */
 const parsePlanStoreEnv = (raw: string | undefined): boolean => {
-  if (raw === undefined) return false
+  // Default-ON: unset ⇒ enabled so `/edit-plan` + `/plan` work out of the box.
+  // Explicit `0`/`false`/`off`/`no`/empty still disables (opt-out path).
+  if (raw === undefined) return true
   const norm = raw.trim().toLowerCase()
   if (norm === "" || norm === "0" || norm === "false" || norm === "off" || norm === "no") {
     return false
