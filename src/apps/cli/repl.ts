@@ -31,6 +31,7 @@ import {
   buildCostPanelOrUndefined,
   buildDebugTracerAndStream,
   buildLifecycleBundle,
+  buildNotifyAndContextWarning,
   buildPlanStoreOrUndefined,
   buildTimelinePanelAndStream,
   buildTurnIndicatorAndStream,
@@ -271,10 +272,17 @@ export const runRepl = async (): Promise<void> => {
     // `dispatchSlash` closure routes through the FULL augmented
     // SlashContext (legacy + ADR-0291 + ADR-0292 + ADR-0294 slots).
     const wires = composeSurfaceWires(setup, surfaceState, process.env, { convStore })
+    // RFC-09 (A+B) / ADR-0444+0445 — notify port + pre-compaction warning
+    // (factory owns env/TTY reads; all fields undefined ⇒ default-OFF).
+    const rfc09 = buildNotifyAndContextWarning({
+      cwd: setup.cwd,
+      contextUsageView: wires.contextUsageView,
+    })
     await runSessionLoop({
       setup,
       dispatchSlash: wires.dispatchSlash,
       sinks: composeTurnSinks(setup, surfaceState),
+      ...rfc09,
       ...(surfaceState.imageQueue !== undefined ? { imageQueue: surfaceState.imageQueue } : {}),
       textInbox: wires.textInbox,
       ux: buildPromptUx(featureCfg, setup.cwd, process.env, (mode) => setup.pills.update({ mode })),

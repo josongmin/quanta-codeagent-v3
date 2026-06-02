@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from "bun:test"
 import type { IdleMonitor } from "../../../../src/apps/cli/idle-monitor"
 import type { ImageQueue } from "../../../../src/apps/cli/image-queue"
+import type { NotificationPort } from "../../../../src/apps/cli/notify"
 import type { RejectCounter } from "../../../../src/apps/cli/reject-counter"
 import { ExternalPromptQueue } from "../../../../src/apps/cli/repl/external-prompt-queue"
 import { composePromptPipeline } from "../../../../src/apps/cli/repl/prompt-pipeline"
@@ -269,5 +270,130 @@ describe("prompt-pipeline / composePromptPipeline — shape", () => {
     expect(dispatchSlash).toHaveBeenCalledTimes(1)
     expect(dispatchSlash).toHaveBeenCalledWith("typed user input")
     expect(onLocalPromptAccepted).toHaveBeenCalledTimes(1)
+  })
+})
+
+// === RFC-09 wire-level tests (A idle notify + B warning preamble) ============
+
+interface CountingNotify extends NotificationPort {
+  idle: number
+  active: number
+  disposed: number
+}
+
+const stubNotify = (): CountingNotify => {
+  const port: CountingNotify = {
+    idle: 0,
+    active: 0,
+    disposed: 0,
+    onTurnComplete: () => undefined,
+    onIdleAwaitingInput: () => {
+      port.idle++
+    },
+    markActive: () => {
+      port.active++
+    },
+    dispose: () => {
+      port.disposed++
+    },
+  }
+  return port
+}
+
+describe("RFC-09 A — idle-notify wired through composePromptPipeline", () => {
+  test("idle gate fires onIdleAwaitingInput + markActive on accepted prompt", async () => {
+    const notify = stubNotify()
+    const pipe = composePromptPipeline({
+      dispatchSlash: async () => false,
+      idleMonitor: stubIdle({ isIdle: () => true }),
+      rejectCounter: stubRejects(false),
+      statusBar: stubStatusBar(),
+      notify,
+      notifyCwdBasename: "proj",
+      readPromptLine: async () => "typed",
+    })
+    const result = await pipe.next(new AbortController().signal)
+    expect(result).toBe("typed")
+    expect(notify.idle).toBe(1) // idle entry notified
+    expect(notify.active).toBe(1) // accepted prompt reset the latch
+  })
+
+  test("NOT idle ⇒ no idle notify (markActive still fires on accept)", async () => {
+    const notify = stubNotify()
+    const pipe = composePromptPipeline({
+      dispatchSlash: async () => false,
+      idleMonitor: stubIdle({ isIdle: () => false }),
+      rejectCounter: stubRejects(false),
+      statusBar: stubStatusBar(),
+      notify,
+      notifyCwdBasename: "proj",
+      readPromptLine: async () => "typed",
+    })
+    await pipe.next(new AbortController().signal)
+    expect(notify.idle).toBe(0)
+    expect(notify.active).toBe(1)
+  })
+})
+
+describe("RFC-09 B — context warning preamble wired through composePromptPipeline", () => {
+  test("non-empty warning is written as a one-line preamble before the prompt", async () => {
+    const pipe = composePromptPipeline({
+      dispatchSlash: async () => false,
+      idleMonitor: stubIdle(),
+      rejectCounter: stubRejects(false),
+      statusBar: stubStatusBar(),
+      contextWarning: () => "⚠ context 91% of compaction limit — 곧 자동 요약됩니다",
+      readPromptLine: async () => "typed",
+    })
+    const { result, writes } = await withCapturedStderr(() =>
+      pipe.next(new AbortController().signal),
+    )
+    expect(result).toBe("typed")
+    expect(writes.some((w) => w.includes("곧 자동 요약됩니다"))).toBe(true)
+  })
+
+  test("empty warning ⇒ NO preamble write (byte-identical to absent)", async () => {
+    const pipe = composePromptPipeline({
+      dispatchSlash: async () => false,
+      idleMonitor: stubIdle(),
+      rejectCounter: stubRejects(false),
+      statusBar: stubStatusBar(),
+      contextWarning: () => "",
+      readPromptLine: async () => "typed",
+    })
+    const { writes } = await withCapturedStderr(() => pipe.next(new AbortController().signal))
+    expect(writes.some((w) => w.includes("⚠"))).toBe(false)
+  })
+})
+
+describe("RFC-09 — DEFAULT-OFF byte-identical anchor", () => {
+  test("absent notify + absent contextWarning ⇒ same stderr as before the feature", async () => {
+    // Capture the production pipeline output with the RFC-09 deps OMITTED.
+    const pipeBaseline = composePromptPipeline({
+      dispatchSlash: async () => false,
+      idleMonitor: stubIdle({ isIdle: () => true }),
+      rejectCounter: stubRejects(false),
+      statusBar: stubStatusBar(),
+      readPromptLine: async () => "typed",
+    })
+    const baseline = await withCapturedStderr(() => pipeBaseline.next(new AbortController().signal))
+
+    // Same deps but with a notify port + a contextWarning that returns "" —
+    // the empty/no-op path must produce the EXACT same stderr bytes.
+    const notify = stubNotify()
+    const pipeOff = composePromptPipeline({
+      dispatchSlash: async () => false,
+      idleMonitor: stubIdle({ isIdle: () => true }),
+      rejectCounter: stubRejects(false),
+      statusBar: stubStatusBar(),
+      notify,
+      notifyCwdBasename: "proj",
+      contextWarning: () => "",
+      readPromptLine: async () => "typed",
+    })
+    const withOffWires = await withCapturedStderr(() => pipeOff.next(new AbortController().signal))
+
+    expect(withOffWires.result).toBe(baseline.result)
+    expect(withOffWires.writes).toEqual(baseline.writes)
   })
 })

@@ -15,6 +15,8 @@ export { buildCostPanelOrUndefined } from "./cost-panel"
 export { buildDebugTracerAndStream } from "./debug-tracer"
 export { buildLifecycleBundle, deriveMcpPillServers, type LifecycleBundle } from "./lifecycle"
 export { buildWorkMetricsSink } from "./metrics-sink"
+// RFC-09 (A+B) — completion-notify + pre-compaction warning host bundle.
+export { buildNotifyAndContextWarning, type NotifyAndWarningBundle } from "./notify-and-warning"
 export { buildPlanStoreOrUndefined } from "./plan-store"
 export { buildTimelinePanelAndStream } from "./timeline-panel"
 export { buildTurnIndicatorAndStream } from "./turn-indicator"

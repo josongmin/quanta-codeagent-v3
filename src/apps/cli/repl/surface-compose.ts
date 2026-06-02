@@ -300,6 +300,11 @@ export interface ReplSurfaceWires {
    *  performs no capture (default-OFF byte-identical) and `/context` shows its
    *  fallback. */
   readonly promptAssembledSink: ContextUsageHolder["sink"]
+  /** RFC-09 (B) / ADR-0445 — getter over the SAME retained per-turn usage
+   *  snapshot the `/context` slash renders. The host binds the pre-compaction
+   *  warning to this so NO second token heuristic is introduced. Returns
+   *  `undefined` before the first turn. */
+  readonly contextUsageView: ContextUsageHolder["view"]
 }
 
 /** Project the LEGACY slots (pre-ADR-0291). Extracted so the combined
@@ -684,6 +689,11 @@ export const composeSurfaceWires = (
     setReplaceMessages,
     setSideConversationStart,
     promptAssembledSink: contextUsageHolder.sink,
+    // RFC-09 (B) — expose the retained per-turn usage snapshot getter so the
+    // host can bind the pre-compaction warning to the SAME token count the
+    // status-line / `/context` use (no new heuristic). Returns `undefined`
+    // before the first turn.
+    contextUsageView: () => contextUsageHolder.view(),
   }
 }
 

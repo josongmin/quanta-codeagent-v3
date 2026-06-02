@@ -1,6 +1,7 @@
 import type { AtCandidateProvider } from "../at-autocomplete"
 import type { IdleMonitor } from "../idle-monitor"
 import type { ImageQueue } from "../image-queue"
+import type { NotificationPort } from "../notify"
 import type { PromptHistory } from "../prompt-history"
 import { AbortError, readLine } from "../raw-line-reader"
 import type { RejectCounter } from "../reject-counter"
@@ -79,6 +80,19 @@ export interface ComposePromptPipelineDeps {
   /** Narrow test seam for local input classification. Undefined keeps the
    *  raw-line-reader runtime path byte-identical. */
   readonly readPromptLine?: PromptLineReader
+  /** RFC-09 (A) — completion-notify port. When present, the idle gate fires
+   *  `onIdleAwaitingInput` ONCE on idle entry (latched) and `markActive` on
+   *  every accepted prompt (latch reset). Absent ⇒ no notify calls
+   *  (byte-identical). */
+  readonly notify?: NotificationPort
+  /** RFC-09 (A) — short cwd label for the idle-notify title. Only read when
+   *  `notify` is present. */
+  readonly notifyCwdBasename?: string
+  /** RFC-09 (B) — pre-compaction warning provider. Called just BEFORE the
+   *  prompt is painted; a non-empty string is written as a one-line preamble
+   *  (inbox-preamble idiom). Absent / returns `""` ⇒ no preamble
+   *  (byte-identical). */
+  readonly contextWarning?: () => string
 }
 
 /** Read one trimmed line from the raw-mode reader. Returns `null` on
@@ -256,8 +270,11 @@ const wrapPromptSourceWithIdleGate = (args: {
   readonly idle: IdleMonitor
   readonly rejects: RejectCounter
   readonly statusBar: StatusBar
+  readonly notify?: NotificationPort
+  readonly notifyCwdBasename?: string
+  readonly contextWarning?: () => string
 }): CliPromptSource => {
-  const { inner, idle, rejects, statusBar } = args
+  const { inner, idle, rejects, statusBar, notify, notifyCwdBasename, contextWarning } = args
   const paintGateBanners = (): void => {
     if (idle.isSnoozed()) {
       statusBar.transient("⏸ snoozed — type /resume to wake", 4000)
@@ -266,6 +283,10 @@ const wrapPromptSourceWithIdleGate = (args: {
     }
     if (idle.isIdle()) {
       statusBar.transient("[idle 60s — auto-paused. type or /resume]", 3000)
+      // RFC-09 (A) — input-needed notify. The adapter latches so a long idle
+      // wait fires exactly ONCE; `markActive` on the next accepted prompt
+      // resets the latch. Absent ⇒ no-op (byte-identical).
+      notify?.onIdleAwaitingInput({ cwdBasename: notifyCwdBasename ?? "" })
     }
   }
   const readOneGated = async (signal?: AbortSignal): Promise<CliPromptInput | null | undefined> => {
@@ -274,6 +295,10 @@ const wrapPromptSourceWithIdleGate = (args: {
       return null
     }
     paintGateBanners()
+    // RFC-09 (B) — pre-compaction warning preamble. Same "prompt-front
+    // preamble" slot as the inbox preamble; `""` ⇒ no write (byte-identical).
+    const warn = contextWarning?.() ?? ""
+    if (warn !== "") process.stderr.write(`${warn}\n`)
     const next = await inner.next(signal)
     if (next === null) return null
     if (idle.isSnoozed()) {
@@ -281,6 +306,9 @@ const wrapPromptSourceWithIdleGate = (args: {
       return undefined
     }
     idle.markActive()
+    // RFC-09 (A) — a prompt was accepted ⇒ reset the idle notify latch so the
+    // NEXT idle wait notifies again. Absent ⇒ no-op.
+    notify?.markActive()
     return next
   }
   return {
@@ -314,5 +342,8 @@ export const composePromptPipeline = (deps: ComposePromptPipelineDeps): CliPromp
     idle: deps.idleMonitor,
     rejects: deps.rejectCounter,
     statusBar: deps.statusBar,
+    ...(deps.notify !== undefined ? { notify: deps.notify } : {}),
+    ...(deps.notifyCwdBasename !== undefined ? { notifyCwdBasename: deps.notifyCwdBasename } : {}),
+    ...(deps.contextWarning !== undefined ? { contextWarning: deps.contextWarning } : {}),
   })
 }

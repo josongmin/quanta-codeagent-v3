@@ -1,0 +1,118 @@
+/**
+ * RFC-09 (A) — default {@link NotificationPort} adapter: OSC window-title +
+ * optional BEL. The ONLY place in the slice that knows escape sequences.
+ *
+ * Absorbed verbatim from competitors (RFC §1):
+ *   - BEL char `\x07` (Claude Code `_cli-symbols :13717`).
+ *   - OSC title form `ESC ] 0 ; <pt> (BEL | ST)` (Claude OSC parser :190796 —
+ *     same terminator family). We emit `ESC ] 0 ; <pt> BEL`.
+ *   - bell / title_only channel split (Claude `notifChannel`: `terminal_bell`
+ *     vs `iterm2_with_bell`; we collapse to bell-or-not in v1, §non-goal).
+ *
+ * Pure + injectable: `write` (raw sink) and `now` are injected so tests collect
+ * into a buffer with ZERO real terminal I/O. The composition root binds `write`
+ * to a real `process.stdout.write` only when the TTY gate allows it.
+ */
+
+import type { IdleInfo, NotificationPort, TurnCompleteInfo } from "./port"
+
+/** BEL — Claude `_cli-symbols :13717`. Doubles as the OSC string terminator. */
+const BEL = "\x07"
+/** ESC — start of every OSC sequence. */
+const ESC = "\x1b"
+
+/** Strip every C0 control char (0x00–0x1f) and DEL (0x7f) from a title payload.
+ *  This is the title-injection guard: a cwd basename or summary that contains a
+ *  stray BEL/ESC would otherwise terminate the OSC early and let an attacker
+ *  inject arbitrary escape sequences. Char-code filter (no control-char regex
+ *  literal in source). Multi-byte glyphs (✓/✗/…) pass through. Pure. */
+export const sanitizeTitle = (s: string): string => {
+  let out = ""
+  for (const ch of s) {
+    const code = ch.codePointAt(0) ?? 0
+    if (code <= 0x1f || code === 0x7f) continue
+    out += ch
+  }
+  return out
+}
+
+/** Build an `OSC 0 ; <title> BEL` sequence with the title sanitized. */
+const oscTitle = (title: string): string => `${ESC}]0;${sanitizeTitle(title)}${BEL}`
+
+export type NotifyChannel = "bell" | "title_only" | "off"
+
+export interface OscNotifyDeps {
+  /** Raw write sink (real `/dev/tty` / `process.stdout` at the wire point, a
+   *  buffer in tests). The adapter writes nothing else. */
+  readonly write: (s: string) => void
+  /** `"bell"` ⇒ title + BEL; `"title_only"` ⇒ title, no extra BEL; `"off"` ⇒
+   *  the adapter should not be built (the composition root checks this). */
+  readonly channel: NotifyChannel
+  /** "Slow turn only" threshold (ms). A turn shorter than this does NOT notify
+   *  (anti-spam). Default 10_000. */
+  readonly slowTurnThresholdMs?: number
+  /** Optional clock (reserved for future rate-limiting; not used in v1). */
+  readonly now?: () => number
+}
+
+const DEFAULT_SLOW_TURN_MS = 10_000
+
+/**
+ * Build the OSC/BEL-backed {@link NotificationPort}. When `channel === "off"`
+ * the returned port is a pure no-op (defense in depth — the composition root
+ * already avoids building it, but a stray construction stays silent).
+ */
+export const createOscNotificationPort = (deps: OscNotifyDeps): NotificationPort => {
+  const { write, channel } = deps
+  const slowTurnThresholdMs = deps.slowTurnThresholdMs ?? DEFAULT_SLOW_TURN_MS
+
+  if (channel === "off") {
+    return {
+      onTurnComplete: () => undefined,
+      onIdleAwaitingInput: () => undefined,
+      markActive: () => undefined,
+      dispose: () => undefined,
+    }
+  }
+
+  // Latch: notify once per idle ENTRY. Reset by `markActive` (new turn).
+  let idleNotified = false
+  // Idempotency for dispose — restore the title at most once.
+  let disposed = false
+  // Remember the last basename so dispose can restore a NEUTRAL title (cwd
+  // basename, not an empty string — an empty title makes some multiplexers
+  // drop the tab label entirely, §6).
+  let lastBasename = ""
+
+  const bell = (): void => {
+    if (channel === "bell") write(BEL)
+  }
+
+  return {
+    onTurnComplete: (info: TurnCompleteInfo): void => {
+      lastBasename = info.cwdBasename
+      // Anti-spam: fast turns are silent. A non-finite/negative duration is
+      // treated as "not slow" (fail-closed — no notification on bad data).
+      if (!(info.durationMs >= slowTurnThresholdMs)) return
+      write(oscTitle(`${info.ok ? "✓" : "✗"} ${info.cwdBasename} — done`))
+      bell()
+    },
+    onIdleAwaitingInput: (info: IdleInfo): void => {
+      lastBasename = info.cwdBasename
+      if (idleNotified) return
+      idleNotified = true
+      write(oscTitle(`… ${info.cwdBasename} — waiting`))
+      bell()
+    },
+    markActive: (): void => {
+      idleNotified = false
+    },
+    dispose: (): void => {
+      if (disposed) return
+      disposed = true
+      // Restore a neutral title (cwd basename) so the tab does not keep the
+      // "✓ done" / "… waiting" label after the session ends.
+      write(oscTitle(lastBasename))
+    },
+  }
+}

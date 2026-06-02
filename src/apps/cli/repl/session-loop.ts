@@ -109,6 +109,19 @@ export interface RunSessionLoopDeps {
    *  OWN wire). Absent ⇒ no wire was built (kill-switch / lexical-only);
    *  nothing is registered (default-OFF byte-identical). */
   readonly searchPipelineDispose?: () => void
+  /** RFC-09 (A) — completion-notify port (ADR-0444). When present: the loop
+   *  calls `onTurnComplete` after each finished turn (slow-turn gate lives in
+   *  the adapter), threads it into the prompt pipeline for the idle path, and
+   *  registers `dispose` on the close stack so the terminal title is restored
+   *  on teardown. Absent ⇒ no notify calls, no close-stack entry
+   *  (default-OFF byte-identical). */
+  readonly notify?: import("../notify").NotificationPort
+  /** RFC-09 (A) — short cwd label for the notify title. */
+  readonly notifyCwdBasename?: string
+  /** RFC-09 (B) — pre-compaction warning provider. Threaded into the prompt
+   *  pipeline; a non-empty return is painted as a one-line preamble before the
+   *  prompt. Absent ⇒ no preamble (default-OFF byte-identical). */
+  readonly contextWarning?: () => string
 }
 
 /** Default Esc-Esc cancel window (ms). Matches the prior inline constant in
@@ -129,6 +142,54 @@ const registerSearchPipelineDispose = (
   if (dispose === undefined) return
   closeStack.push({ label: "searchPipeline.dispose", dispose: () => dispose() })
 }
+
+/** RFC-09 (A) — register the completion-notify title restore on the close stack
+ *  (LIFO; runs even on abnormal shutdown). Free function so the branch stays
+ *  OUT of `runSessionLoop`'s complexity budget. No-op when the port was never
+ *  built ⇒ default-OFF byte-identical. */
+const registerNotifyDispose = (
+  closeStack: Array<{ label: string; dispose: () => void | Promise<void> }>,
+  notify: import("../notify").NotificationPort | undefined,
+): void => {
+  if (notify === undefined) return
+  closeStack.push({ label: "notify.dispose", dispose: () => notify.dispose() })
+}
+
+/** RFC-09 (A) — fire the turn-completion notify from a finished {@link runOneTurn}
+ *  result. Reuses the runner-measured `durationMs` (no new timing source); the
+ *  adapter's slow-turn gate decides whether to emit. Shared by the one-shot and
+ *  interactive branches. No-op when `notify` is absent ⇒ byte-identical. Free
+ *  function so the call stays out of `runSessionLoop`'s complexity budget. */
+const notifyTurnComplete = (
+  notify: import("../notify").NotificationPort | undefined,
+  out: { readonly durationMs: number; readonly result: unknown; readonly turnAborted: boolean },
+  cwdBasename: string,
+): void => {
+  notify?.onTurnComplete({
+    durationMs: out.durationMs,
+    ok: out.result !== undefined && !out.turnAborted,
+    cwdBasename,
+  })
+}
+
+/** RFC-09 — build the optional prompt-pipeline deps (A idle notify + B warning
+ *  preamble) as an `exactOptionalPropertyTypes`-safe partial. Each field is
+ *  omitted (not `undefined`) when absent so the pipeline stays byte-identical.
+ *  Free function so the 3 presence ternaries live OUT of `runSessionLoop`'s
+ *  complexity budget. */
+const buildPromptPipelineNotifyDeps = (args: {
+  readonly notify: import("../notify").NotificationPort | undefined
+  readonly notifyCwdBasename: string | undefined
+  readonly contextWarning: (() => string) | undefined
+}): {
+  notify?: import("../notify").NotificationPort
+  notifyCwdBasename?: string
+  contextWarning?: () => string
+} => ({
+  ...(args.notify !== undefined ? { notify: args.notify } : {}),
+  ...(args.notifyCwdBasename !== undefined ? { notifyCwdBasename: args.notifyCwdBasename } : {}),
+  ...(args.contextWarning !== undefined ? { contextWarning: args.contextWarning } : {}),
+})
 
 const mapAgentOutcomeToReactorOutcome = (outcome: AgentOutcome): LastTurnOutcome => {
   switch (outcome.reason) {
@@ -177,6 +238,9 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     playbookSeam,
     playbookCliFlag,
     searchPipelineDispose,
+    notify,
+    notifyCwdBasename,
+    contextWarning,
   } = deps
   const {
     abort,
@@ -309,6 +373,9 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
   // (default-OFF byte-identical). Registration lives in the free helper so the
   // branch stays out of `runSessionLoop`'s complexity budget.
   registerSearchPipelineDispose(closeStack, searchPipelineDispose)
+  // RFC-09 (A) — restore the terminal title on teardown. Idempotent + a no-op
+  // when the port was never built (notify absent ⇒ byte-identical).
+  registerNotifyDispose(closeStack, notify)
   registerSideConversationStart?.((args) => session.side.start(args))
 
   // ADR-0292 — install the `/rewind-conv` swap closure so the slash can mutate
@@ -435,7 +502,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
 
   const runOneShotBranch = async (): Promise<void> => {
     try {
-      await runOneTurn<{
+      const out = await runOneTurn<{
         readonly messages: readonly Message[]
         readonly outcomeReason?: AgentOutcome["reason"]
       }>(
@@ -470,6 +537,9 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
           onError: sinks.renderTurnError,
         },
       )
+      // RFC-09 (A) — turn-completion notify (one-shot path). Fires BEFORE the
+      // finally drains the close stack (which restores the title via dispose).
+      notifyTurnComplete(notify, out, notifyCwdBasename ?? "")
     } finally {
       // L5 H-7 — single teardown authority. Drains session.close +
       // runtimeFacade.close + playbookSeam.detach (registered above) LIFO,
@@ -521,6 +591,9 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
       rejectCounter: setup.rejectCounter,
       statusBar,
       ...(ux !== undefined ? { ux } : {}),
+      // RFC-09 (A) idle path + (B) pre-compaction preamble. Each absent ⇒ the
+      // pipeline behaves byte-identically.
+      ...buildPromptPipelineNotifyDeps({ notify, notifyCwdBasename, contextWarning }),
     })
 
     const reactorBridge =
@@ -592,6 +665,8 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
         if (out.turnAborted || out.result === undefined) {
           lastTurnOutcome = "fail"
         }
+        // RFC-09 (A) — turn-completion notify (interactive path).
+        notifyTurnComplete(notify, out, notifyCwdBasename ?? "")
       }
     }
 
