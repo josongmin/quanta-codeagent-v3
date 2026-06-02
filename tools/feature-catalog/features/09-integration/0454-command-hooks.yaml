@@ -3,20 +3,21 @@ title: Disk-configured command hooks (security-gated shell on HookBus events, AD
 section: 9
 subsystem: HookBus shell-command executor
 order: 454
-# L2 (seam-only): the slice (gate / runner / sandbox-exec / installer) is
-# complete + sealed by 25 hellgate cases, but NO composition root calls
-# `installCommandHooks` yet — root wiring is the deliberate_hold below (a
-# dedicated security-review ADR, since this arms arbitrary shell exec). Was
-# mislabeled L3; corrected jun-02 R3-audit (same dead-seam class as 0452/0453,
-# but here the hold is intentional, not a bug).
-maturity: L2
+# L3 (root-wired): the composition-root activation LANDED jun-02 R3 follow-up via
+# the security-reviewed ADR-0459 — `installCommandHooksIntoBase` (src/apps/agent/
+# index.ts) reads QUANTA_COMMAND_HOOKS + QUANTA_COMMAND_HOOKS_ACK + settings.json
+# #hooks (loaded async at runMain, threaded via the partial), normalizes the gate
+# (fail-fast on enabled-without-ack), and calls installCommandHooks on the (minted
+# or reused) HookBus. Default-OFF byte-identical when the knob is unset. (Was
+# briefly L2 in R3-audit before this bind — it was an intentional hold, not a bug.)
+maturity: L3
 status: stable
 ui_surfaces: [n-a]
 monitoring: partial
 modes: [n-a]
 configurable: partial
 owners: ["@songmin"]
-labels: ["surface:core", "absorbed:claude", "security-touched", "default-off", "held-promotion"]
+labels: ["surface:core", "absorbed:claude", "security-touched", "default-off"]
 depends_on:
   - hookbus
   - hook-updated-input
@@ -52,11 +53,14 @@ evidence:
     - src/agent/command-hooks/sandbox-exec.ts
     - src/agent/command-hooks/install.ts
     - src/agent/command-hooks/index.ts
+    - src/apps/agent/index.ts
   adrs:
     - docs/decisions/0454-command-hooks.md
+    - docs/decisions/0459-command-hooks-composition-root-wire.md
   tests:
     unit:
       - tests/unit/command-hooks-hellgate.test.ts
+      - tests/unit/apps/agent/command-hooks-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -80,19 +84,26 @@ knobs:
     type: 'string[]?'
     default: 'DEFAULT_ENV_ALLOWLIST'
     notes: 'Env names allowed through to the child (reuses sandbox scrubEnv source of truth).'
+  - name: QUANTA_COMMAND_HOOKS
+    type: 'env'
+    default: 'unset'
+    notes: 'ADR-0459 root knob. "1" ⇒ arm (read settings.json#hooks + build the gate). Unset ⇒ default-OFF byte-identical (no settings read, no bus minted by this path).'
+  - name: QUANTA_COMMAND_HOOKS_ACK
+    type: 'env'
+    default: 'unset'
+    notes: 'ADR-0459 audit-grade acknowledgement string. Required when QUANTA_COMMAND_HOOKS=1; enabled-without-ack THROWS at startup (fail-fast).'
 deliberate_hold:
   reason: |
-    Root wiring (host reads enabled/ack from settings/env and calls
-    installCommandHooks) is intentionally deferred to a composition-root ADR —
-    the slice stays default-OFF until armed, matching the seam-first absorption
-    pattern. Also held: a DockerSandbox-backed CommandHookExecPort for TRUE OS
-    isolation (clean future swap, the port is closed).
+    Root wiring LANDED (ADR-0459 — `installCommandHooksIntoBase` at the agent
+    composition root, security-reviewed; the triple-gate is the approval, isAllowed
+    returns true, bypass mode recommended, port injectable for a stricter host).
+    The ONLY remaining hold is a DockerSandbox-backed CommandHookExecPort for TRUE
+    OS isolation (a clean future swap of the closed exec port).
   promotion_path: |
-    Composition-root ADR reads CommandHookConfig from settings.json + an opt-in
-    env knob, calls normalizeCommandHookGate + loadCommandHookBindings, wires a
-    CommandHookPermissionPort to the permission store, and calls
-    installCommandHooks(bus, gate, deps) with createSandboxCommandHookExec().
-    OS-isolation upgrade: swap the exec port to a DockerSandbox-backed adapter.
+    OS-isolation upgrade: swap `createSandboxCommandHookExec()` for a
+    DockerSandbox-backed `CommandHookExecPort` adapter (the port is closed; no
+    runner/gate change). A host wanting a stricter permission decision injects its
+    own `CommandHookPermissionPort` (e.g. interactive approval) — no slice change.
 notes: |
   Mirrors src/security/redaction-config.ts acknowledgement pattern, inverted
   (the dangerous direction here is turning execution ON). Sealed by 25 hellgate

@@ -21,6 +21,7 @@
  *   • exit 0 on `--help` (after a usage dump to stdout).
  */
 
+import { join } from "node:path"
 import {
   buildRetrievalStackCore,
   buildSearchPipelineFromEnv,
@@ -42,6 +43,14 @@ import { loadEnvFiles } from "@/shared/env-files"
 loadEnvFiles([".env.dev", ".env.local", ".env"])
 
 import { buildSystemPrompt, HookBus, wireOptionalAgentPorts } from "@/agent"
+import {
+  type CommandHookBinding,
+  type CommandHookConfig,
+  createSandboxCommandHookExec,
+  installCommandHooks,
+  loadCommandHookBindings,
+  normalizeCommandHookGate,
+} from "@/agent/command-hooks"
 import { defaultDelegationRunner } from "@/agent/delegation-runner"
 import { defaultFocusChainTracker, type FocusChainPort } from "@/agent/focus-chain"
 import type { ForkSessionPort } from "@/agent/fork-session"
@@ -78,6 +87,7 @@ import {
 import { type LLMPort, pickProvider, tryCreateLLM } from "@/llm"
 import { type CapabilityNegotiator, defaultNegotiator, fullNegotiator } from "@/mcp"
 import {
+  buildAutorunEligibility,
   buildDefinition,
   createTwoLayerManager,
   isNamedProfileName,
@@ -90,7 +100,6 @@ import {
   type ProfileDefinitionRegistry,
   type ProfileLayerSlots,
   ProfileValidationError,
-  buildAutorunEligibility,
   permissionModeFromProfile,
   resolveProfileByName,
   resolveProfileInheritance,
@@ -480,6 +489,49 @@ export const resolveLocalEnvSelection = async (
 // cognitive-complexity cap — same pattern as `resolvePrewarmSlot`).
 const localEnvSlotOf = (p: AssembleRequestPartial): { localEnv?: LocalEnvSelection } =>
   p.localEnv !== undefined ? { localEnv: p.localEnv } : {}
+
+// ADR-0454 jun-02 wire — install disk-configured command hooks onto the base's
+// HookBus. SECURITY: command hooks run ARBITRARY shell, so the slice is
+// triple-gated INSIDE (enabled + acknowledgedRisk + ≥1 binding) + injection-safe
+// (payload is stdin-JSON, NEVER the command string) + env-allowlist-scrubbed +
+// timeout-bounded. This root wire only SUPPLIES config + ports — it cannot
+// weaken those gates.
+//
+// Default-OFF: `QUANTA_COMMAND_HOOKS !== "1"` ⇒ no config, no throw, no handlers
+// (byte-identical). `enabled` WITHOUT `acknowledgedRisk` ⇒ normalizeCommandHookGate
+// THROWS at startup (fail-fast — never mid-turn). Bindings come ONLY from
+// `settings.json#hooks` (loaded async at runMain, threaded via the partial).
+//
+// Permission port: per the approved design the TRIPLE-GATE IS the approval — the
+// operator explicitly armed (enabled), typed an audit-grade acknowledgement, and
+// authored the bindings on disk — so `isAllowed` returns true; `bypass` mode is
+// the recommended operating posture. The port is an INJECTED seam a host MAY
+// tighten (e.g. route through an interactive approval) without touching the slice.
+export const installCommandHooksIntoBase = (
+  base: AssembleRequest["base"],
+  env: NodeJS.ProcessEnv,
+  bindings: readonly CommandHookBinding[] | undefined,
+): void => {
+  if (env.QUANTA_COMMAND_HOOKS !== "1") return // default-OFF
+  const config: CommandHookConfig = {
+    enabled: true,
+    ...(env.QUANTA_COMMAND_HOOKS_ACK !== undefined
+      ? { acknowledgedRisk: env.QUANTA_COMMAND_HOOKS_ACK }
+      : {}),
+    bindings: bindings ?? [],
+  }
+  const gate = normalizeCommandHookGate(config) // throws on enabled-without-ack (fail-fast)
+  if (!gate.armed) return // ack present but no bindings ⇒ disarmed ⇒ no-op
+  // Command hooks need a bus; reuse the observability bus if present, else mint
+  // one (command hooks are independent of QUANTA_OBSERVABILITY).
+  const bus = base.hooks ?? new HookBus()
+  base.hooks = bus
+  installCommandHooks(bus, gate, {
+    exec: createSandboxCommandHookExec(),
+    permission: { isAllowed: () => true },
+    cwd: base.cwd,
+  })
+}
 
 const buildBaseRegistry = (args: {
   readonly automationSlot: AutomationEngineSlot | null
@@ -1030,6 +1082,9 @@ export const buildBaseFromArgs = (
   }
 
   attachExecutionPlaneSlots(base, p)
+  // ADR-0454 — install disk-configured command hooks onto base.hooks (default-OFF
+  // unless QUANTA_COMMAND_HOOKS=1 + acknowledgedRisk + bindings; see helper).
+  installCommandHooksIntoBase(base, env, p.commandHookBindings)
   // jun-02 — fold the three INTERACTIVE knobs (advisor / task-budget /
   // compose-authoring) directly at the composition root, reusing each knob's
   // own parse+apply so the env→config semantics match the matrix. Without this
@@ -1118,6 +1173,11 @@ export interface AssembleRequestPartial {
    *  async). Absent ⇒ no config found / no env selected ⇒ slot omitted ⇒
    *  ambient env byte-identical. */
   localEnv?: LocalEnvSelection
+  /** ADR-0454 jun-02 wire — command-hook bindings parsed from
+   *  `settings.json#hooks`, loaded async at the (async) root (`runMain`) ONLY
+   *  when `QUANTA_COMMAND_HOOKS=1`, and threaded onto the SYNC
+   *  `buildBaseFromArgs`. Absent ⇒ no command hooks installed (default-OFF). */
+  commandHookBindings?: readonly CommandHookBinding[]
 }
 
 /** ADR-0236 + ADR-0301 — propagate the composition-root mega-wire flags
@@ -1231,6 +1291,15 @@ export const runMain = async (deps: MainDeps = {}): Promise<void> => {
   // config / no selection ⇒ field stays absent ⇒ ambient env byte-identical.
   const localEnvSelection = await resolveLocalEnvSelection(process.env, process.cwd())
   if (localEnvSelection !== undefined) partial.localEnv = localEnvSelection
+  // ADR-0454 jun-02 wire — load command-hook bindings from settings.json#hooks at
+  // the async root, ONLY when opted in, and thread onto the partial. Default-OFF:
+  // knob unset ⇒ not loaded ⇒ no command hooks. The enabled-without-ack fail-fast
+  // throw happens later in buildBaseFromArgs (startup, never mid-turn).
+  if (process.env.QUANTA_COMMAND_HOOKS === "1") {
+    partial.commandHookBindings = await loadCommandHookBindings(
+      join(process.cwd(), "settings.json"),
+    )
+  }
 
   // T01 (audit L5 H-2 / M-6): the composition root owns ONE real cancellation
   // controller and wires SIGINT to it exactly once — previously every preset

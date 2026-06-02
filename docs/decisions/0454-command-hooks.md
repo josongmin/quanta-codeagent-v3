@@ -154,3 +154,10 @@ Sealed by hellgate (default-off / no-spawn / no-handler-registration cases).
   settings/env and calls `installCommandHooks`) is intentionally NOT done in
   this slice — it stays default-OFF until a composition-root ADR arms it,
   matching the project's seam-first absorption pattern.
+  **CLOSED (2026-06-03):** the root wire landed in the security-reviewed
+  **ADR-0459** — `installCommandHooksIntoBase` (`src/apps/agent/index.ts`) reads
+  `QUANTA_COMMAND_HOOKS` + `QUANTA_COMMAND_HOOKS_ACK` + `settings.json#hooks` and
+  arms the gate (fail-fast on enabled-without-ack). The triple-gate is the
+  approval (`isAllowed: () => true`, `bypass` mode recommended; the port is an
+  injectable seam a host may tighten). Only the DockerSandbox exec-port swap
+  remains held.
