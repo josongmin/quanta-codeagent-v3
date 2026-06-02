@@ -92,7 +92,7 @@ export const flushTurnObservability = async (args: {
   readonly gitDirectiveCollector: GitDirectiveCollector | undefined
   readonly workCollector: TurnWorkMetricsCollector | undefined
   readonly workTurnId: string | undefined
-  readonly resultKind: "tools" | "completed" | "aborted" | "error" | "refusal"
+  readonly resultKind: "tools" | "completed" | "aborted" | "interrupted" | "error" | "refusal"
 }): Promise<void> => {
   if (args.turnDiffSession !== undefined) {
     const diffEvent = await args.turnDiffSession.endTurn(args.turn)

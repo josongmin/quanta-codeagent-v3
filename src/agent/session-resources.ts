@@ -162,13 +162,16 @@ export const emitWorkMetrics = (
   cfg: AgentConfig,
   collector: TurnWorkMetricsCollector | undefined,
   turnId: string | undefined,
-  resultKind: "tools" | "completed" | "aborted" | "error" | "refusal",
+  resultKind: "tools" | "completed" | "aborted" | "interrupted" | "error" | "refusal",
 ): void => {
   if (
     cfg.workMetricsSink === undefined ||
     collector === undefined ||
     turnId === undefined ||
-    resultKind === "aborted"
+    // An interrupted turn (ADR-0437 followup_task interrupt) was cut short like
+    // an abort — its metrics snapshot carries no meaningful signal, so suppress.
+    resultKind === "aborted" ||
+    resultKind === "interrupted"
   ) {
     return
   }

@@ -39,7 +39,9 @@ Two new LLM tools in a new `@/subagent` slice, both default-OFF:
   new persistent `TurnWakeRegistry` (sibling of `InputChannelRegistry`, but
   persistent + for busy/idle children, not one-shot/paused). Outcome:
   `woke` (idle → immediate turn), `queued` (mid-turn → next turn), or
-  `no-receiver`. `interrupt:true` passes `reason:"interrupt"` to the waker.
+  `no-receiver`. `interrupt:true` passes `reason:"interrupt"` to the waker,
+  which — on a BUSY child — ABORTS the in-flight turn before delivering (see
+  "Interrupt" below).
 
 ### Wiring
 
@@ -110,6 +112,57 @@ The missing piece was that nothing *registered* a per-child waker, so
   sessions never carry a gate. No wake registry OR no `taskId` ⇒ no waker, no
   gate, `followup_task` honest-degrades to `no_waker` exactly as before.
 
+### Interrupt (ADR-0437 follow-up — `interrupt:true` now ACTUALLY interrupts)
+
+The prior follow-up made `followup_task` *trigger* a turn, but `wake(reason)`
+IGNORED the reason: both `followup` and `interrupt` only triggered a turn, so
+`interrupt:true` on a busy child merely QUEUED the message for AFTER the
+in-flight turn completed its work — it never stopped anything. That gap is now
+**CLOSED**.
+
+- The `SubagentTurnGate` owns a per-turn `AbortController` (`turnAbort`). The
+  child loop (`runTurn`, via `buildTurnSessionView`) calls `gate.armTurn(loopSignal)`
+  at the top of EVERY turn: it mints a FRESH controller and returns the
+  EFFECTIVE turn signal `AbortSignal.any([loopSignal, turnAbort.signal])`. The
+  turn body runs against a per-turn session view whose `config.signal` IS that
+  effective signal — so the in-flight LLM stream (`llm.stream({signal})`), the
+  `streamingTurn` inter-phase abort checks, AND tool dispatch (`ToolContext.signal`)
+  all observe it. This is the SAME AbortController→signal→stream/tool mechanism
+  `task_stop`/`forceStop` already use to unwind in-flight work — **no parallel
+  abort path** was added.
+- `wake("interrupt")` on a BUSY (mid-turn, not parked) child aborts `turnAbort`
+  (the in-flight stream/tool unwinds NOW) AND records a pending wake. The
+  unwound turn returns `{kind:"interrupted"}` (distinct from `aborted`); the
+  loop PARKS on the gate, the pending wake resolves `resume`, and a FRESH turn
+  runs whose top-of-loop mailbox read surfaces the interrupting message. The
+  child is NOT killed — the controller is reset by the next `armTurn`, so a
+  fired interrupt never pre-aborts the next turn.
+- `classifyTurnAbort` distinguishes the two using the ORIGINAL `loopSignal`: a
+  turn-body abort is an INTERRUPT only when `gate.wasInterrupted()` AND the
+  lifetime signal did NOT fire; otherwise it is a genuine lifetime cancel
+  (`task_stop`/parent cancel) that finishes the child. An interrupt can never
+  masquerade as a finish, and a real cancel can never be mistaken for a
+  resumable interrupt.
+- On an IDLE (parked) child there is nothing in flight, so `interrupt` is
+  identical to `followup`: release the park (`woke`). `wake("followup")` NEVER
+  aborts — byte-identical to the queue-only contract.
+
+**What "interrupt" guarantees (turn-level, honestly scoped).** The in-flight
+LLM stream aborts and `streamingTurn` stops dispatching further tool calls
+between phases; an already-running tool observes the effective signal via its
+`ToolContext.signal` (cooperative abort — the SAME cooperative contract
+`task_stop` has today). We do NOT forcibly kill a tool that ignores its abort
+signal mid-syscall. So the guarantee is **turn-level + cooperative-tool-level**:
+the current turn's work unwinds at the next cooperative abort point, then a
+fresh turn handles the message. This is the deepest interrupt reachable through
+the existing AbortController seam without inventing a separate kill channel.
+
+- **Default-OFF / byte-identical**: no gate ⇒ `buildTurnSessionView` returns the
+  SAME session by identity (NO clone, NO `AbortSignal.any`) and `classifyTurnAbort`
+  always returns `aborted` — the turn body is byte-for-byte the pre-feature path.
+  Interrupt machinery only exists for a child whose runner wired a gate (i.e.
+  `subagentTurnWake` + `taskId`).
+
 ## Default-OFF
 
 `buildSubagentIntrospectBlock` returns `[]` unless `enableIntrospect` /
@@ -158,6 +211,18 @@ taskId); and an END-TO-END proof against a real `runAgent` child loop that a
 `followup_task` wake makes the child run ANOTHER observable turn (LLM called
 again), with the no-wake path byte-identical (one turn) + `no_waker` degrade.
 11 tests.
+
+`tests/unit/subagent-turn-interrupt-hellgate.test.ts` — `interrupt:true` ACTUALLY
+interrupts: GATE units (busy interrupt aborts THIS turn's signal + records
+pending→resume; armTurn RESETS the controller; idle interrupt = plain wake;
+followup NEVER aborts; the effective signal fires on a real lifetime abort but
+`wasInterrupted` stays false; interrupt-before-armTurn degrades safely) + an
+END-TO-END proof against a real `runAgent` child whose turn BLOCKS in an
+in-flight LLM stream: `followup_task(interrupt:true)` makes the in-flight
+stream's signal FIRE (the turn unwinds) AND a SECOND turn run; a non-interrupt
+followup does NOT abort the in-flight stream (regression); idle interrupt is a
+plain wake; no-waker honest-degrade unchanged; default-OFF (no gate) byte-
+identical. 11 tests.
 
 `tests/unit/subagent-knobs-wire-hellgate.test.ts` — the composition-root env
 wire: `QUANTA_SUBAGENT_{BATCH,INTROSPECT,FOLLOWUP}=on` ⇒ the corresponding

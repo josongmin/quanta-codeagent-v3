@@ -37,7 +37,21 @@ purpose: |
   runs ANOTHER turn (the next turn's mailbox read surfaces the message — existing
   per-turn injection seam, no parallel driver); a busy child returns queued and
   the turn runs after the current one; abort/dispose ⇒ settle (loop finishes).
-  Default-OFF: buildSubagentIntrospectBlock returns []
+  INTERRUPT (ADR-0437 follow-up — interrupt:true now ACTUALLY interrupts): the
+  gate owns a per-turn AbortController; runTurn (buildTurnSessionView) calls
+  armTurn(loopSignal) each turn to mint a fresh controller and an EFFECTIVE turn
+  signal AbortSignal.any([loopSignal, turnAbort]) threaded into the in-flight LLM
+  stream + streamingTurn phase checks + tool ctx — the SAME AbortController seam
+  task_stop/forceStop use (no parallel abort path). wake("interrupt") on a BUSY
+  child aborts that controller (the in-flight stream/tool unwinds NOW) + records
+  pending ⇒ the turn returns {kind:interrupted}, the loop PARKS, the pending wake
+  resumes a FRESH turn that handles the message; the child is NOT killed
+  (controller reset by next armTurn). classifyTurnAbort distinguishes interrupt
+  from a real lifetime cancel via the ORIGINAL loopSignal. IDLE child interrupt =
+  plain wake (nothing in flight). followup NEVER aborts. Guarantee: turn-level +
+  cooperative-tool-level (an already-running tool sees ToolContext.signal; we do
+  not force-kill a tool ignoring its signal — same cooperative contract as
+  task_stop). Default-OFF: buildSubagentIntrospectBlock returns []
   unless enableIntrospect/enableFollowup gates set (followup also needs
   mailbox+wake substrate) ⇒ byte-identical.
 evidence:
@@ -55,6 +69,7 @@ evidence:
     unit:
       - tests/unit/subagent-introspect-hellgate.test.ts
       - tests/unit/subagent-turn-wake-gate-hellgate.test.ts
+      - tests/unit/subagent-turn-interrupt-hellgate.test.ts
       - tests/unit/subagent-knobs-wire-hellgate.test.ts
     integration: []
     contract: []

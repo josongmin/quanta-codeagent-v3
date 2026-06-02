@@ -32,6 +32,33 @@
  *     `"queued"` (the turn runs after the current one completes).
  * This is the precise `woke`/`queued` contract the RFC documents.
  *
+ * --- interrupt (ADR-0437 follow-up — the limitation CLOSED) ---
+ *
+ * `wake("interrupt")` on a BUSY (mid-turn) child must STOP the in-flight turn
+ * and handle the message immediately — not merely queue it for after the turn.
+ * The gate owns a per-turn {@link AbortController} (`turnAbort`): the child loop
+ * calls {@link armTurn} at the top of every turn to mint a fresh controller and
+ * compose an EFFECTIVE turn signal (`AbortSignal.any([loopSignal, turnAbort])`).
+ * The turn body threads THAT signal into the LLM stream + tool dispatch — the
+ * SAME AbortController→signal→stream/tool mechanism `task_stop`/`forceStop` use
+ * to unwind in-flight work (no parallel abort path). On `wake("interrupt")`
+ * while busy the gate aborts `turnAbort` (the in-flight stream/tool unwinds) AND
+ * records a pending wake — so once the aborted turn unwinds to the gate the
+ * pending wake resolves `resume` and the loop runs a FRESH turn whose
+ * top-of-loop mailbox read surfaces the interrupting message. The controller is
+ * reset per turn by `armTurn`, so a fired interrupt never pre-aborts the NEXT
+ * turn. On an IDLE (parked) child there is nothing in flight, so interrupt
+ * behaves exactly like followup (release the park ⇒ `woke`). `wake("followup")`
+ * NEVER aborts — byte-identical to the pre-interrupt contract.
+ *
+ * Turn-level (not tool-mid-instruction) guarantee: the in-flight LLM stream
+ * aborts and `streamingTurn` stops dispatching further tool calls between
+ * phases; an already-running tool observes the effective signal via its
+ * `ToolContext.signal` (cooperative abort). The loop then unwinds to the gate
+ * and a fresh turn handles the message. We do NOT forcibly kill a tool that
+ * ignores its abort signal — that is the same cooperative contract `task_stop`
+ * has today.
+ *
  * PURE: no `node:`, no clock, no `Math.random`, no real timer. The only async
  * primitive is a `Promise` resolved by `wake`/abort — deterministic and
  * driven entirely by injected events.
@@ -66,6 +93,42 @@ export class SubagentTurnGate {
   /** Set once {@link dispose} runs; a parked `wait` is released with `settle`
    *  and all future `wait`s return `settle` immediately (the loop must finish). */
   private disposed = false
+  /** Per-turn interrupt controller. Reset to a fresh controller by
+   *  {@link armTurn} at the top of every turn; aborted by `wake("interrupt")`
+   *  on a busy child to unwind the in-flight turn. Undefined before the first
+   *  `armTurn` (the loop has not started a turn yet) — `wake("interrupt")` then
+   *  has nothing in flight to abort and degrades to a plain `pending` wake. */
+  private turnAbort: AbortController | undefined
+
+  /**
+   * Arm a FRESH per-turn interrupt controller and return the EFFECTIVE signal
+   * the loop must thread into this turn's stream + tool dispatch. Called at the
+   * top of every turn BEFORE any in-flight work begins.
+   *
+   * The returned signal aborts when EITHER (a) the loop's lifetime signal
+   * (`loopSignal`, i.e. `config.signal` — user/host/`task_stop` cancel) aborts,
+   * OR (b) `wake("interrupt")` aborts THIS turn's controller. Resetting the
+   * controller each turn means a previous interrupt never pre-aborts the next
+   * turn. When `loopSignal` is already aborted, `AbortSignal.any` returns an
+   * already-aborted signal (the turn unwinds at once) — preserving the lifetime
+   * cancel contract.
+   *
+   * @param loopSignal the child loop's lifetime abort signal (`config.signal`).
+   * @returns the per-turn effective {@link AbortSignal}.
+   */
+  armTurn(loopSignal: AbortSignal): AbortSignal {
+    const ac = new AbortController()
+    this.turnAbort = ac
+    return AbortSignal.any([loopSignal, ac.signal])
+  }
+
+  /** True iff the CURRENT turn's interrupt controller has been aborted by
+   *  `wake("interrupt")` (and NOT by the loop's lifetime signal). The loop uses
+   *  this to distinguish an interrupt (park + run a fresh turn) from a real
+   *  lifetime abort (finish). Reset on the next {@link armTurn}. */
+  wasInterrupted(): boolean {
+    return this.turnAbort?.signal.aborted === true
+  }
 
   /**
    * Park until a wake arrives (or resolve immediately if one is pending /
@@ -101,22 +164,32 @@ export class SubagentTurnGate {
     })
   }
 
-  /** Trigger a turn. Parked ⇒ release the park (`woke`); busy ⇒ record a
+  /** Trigger a turn. Parked (IDLE) ⇒ release the park (`woke`); busy ⇒ record a
    *  pending wake the next `wait` consumes (`queued`). Disposed ⇒ `queued` is
    *  a no-op lie, so we return `woke`/`queued` only for a LIVE gate — a
    *  disposed gate is unregistered by the runner's disposer, so `wake` never
-   *  reaches it (the registry reports `no-receiver`). The `reason` arg
-   *  (`followup`/`interrupt`) is accepted for parity with the {@link Waker}
-   *  signature; both reasons trigger a turn identically here (interrupt
-   *  semantics — stopping the current task — are a separate, future concern,
-   *  honestly out of scope for this gate). */
-  wake(_reason: string): GateWakeResult {
+   *  reaches it (the registry reports `no-receiver`).
+   *
+   *  INTERRUPT (`reason === "interrupt"`): on a BUSY child (not parked) we abort
+   *  THIS turn's controller ({@link armTurn}'s `turnAbort`) so the in-flight
+   *  stream/tool unwinds NOW, then record the pending wake so the unwound loop
+   *  resumes into a fresh turn (the outcome is still `queued` — a turn WILL run,
+   *  just after the interrupted one collapses immediately rather than completing
+   *  its work). On an IDLE child there is nothing in flight, so interrupt is
+   *  identical to followup: release the park (`woke`). `reason === "followup"`
+   *  (or any other) NEVER aborts — byte-identical to the prior contract. */
+  wake(reason: string): GateWakeResult {
     if (this.disposed) return "queued"
     const resolve = this.parkResolve
     if (resolve !== undefined) {
+      // IDLE: nothing in flight — interrupt and followup are identical here.
       resolve("woke")
       return "woke"
     }
+    // BUSY: a turn is in flight. An interrupt aborts it via the per-turn
+    // controller (the in-flight stream/tool unwinds); followup leaves it to
+    // complete. Either way a pending wake makes the loop take one more turn.
+    if (reason === "interrupt") this.turnAbort?.abort()
     this.pending = true
     return "queued"
   }

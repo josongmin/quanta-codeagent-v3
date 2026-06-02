@@ -1101,6 +1101,12 @@ type TurnResult =
   | { kind: "tools"; message: AssembledMessage; resultBlocks: AssembledMessage["content"] }
   | { kind: "completed"; message?: AssembledMessage }
   | { kind: "aborted" }
+  // ADR-0437 follow-up — a `followup_task(interrupt:true)` aborted THIS turn's
+  // in-flight work (via the subagent turn-gate's per-turn AbortController) while
+  // the loop lifetime signal is NOT aborted. Distinct from `aborted` (a real
+  // lifetime cancel that finishes the child): the loop PARKS on the gate, the
+  // pending wake resumes it, and a FRESH turn handles the interrupting message.
+  | { kind: "interrupted" }
   | { kind: "error"; reason: string }
   // ADR-0076 Gap-1 SOTA++ — terminal, distinct from `error`. The `rationale`
   // is the visible-text content of the refusing assistant message; the
@@ -1558,6 +1564,45 @@ const resolveTurnAction = (
   return override ?? decideOnAssembled(result.stopReason, result.message, rec)
 }
 
+/**
+ * ADR-0437 follow-up — build the per-turn session view used for interrupt.
+ *
+ * When a subagent turn-gate is wired, arm a FRESH per-turn interrupt controller
+ * and return a session view whose `config.signal` is the EFFECTIVE signal (loop
+ * lifetime OR this turn's interrupt). `followup_task(interrupt:true)` on a busy
+ * child aborts that controller ⇒ the in-flight stream/tool unwinds (the SAME
+ * AbortController→signal→stream/tool mechanism `task_stop` uses — no parallel
+ * abort path). Absent gate ⇒ returns the SAME session by identity (NO clone, NO
+ * `AbortSignal.any`) ⇒ byte-identical default-OFF path.
+ */
+const buildTurnSessionView = (
+  session: TurnSession,
+): {
+  readonly turnSession: TurnSession
+  readonly gate: import("@/subagent").SubagentTurnGate | undefined
+} => {
+  const gate = session.config.subagentTurnGate
+  if (gate === undefined) return { turnSession: session, gate: undefined }
+  const config = { ...session.config, signal: gate.armTurn(session.config.signal) }
+  return { turnSession: { ...session, config }, gate }
+}
+
+/**
+ * ADR-0437 follow-up — classify a turn-body abort. An abort is an INTERRUPT
+ * (`{kind:"interrupted"}` ⇒ park + fresh turn) ONLY when the gate's per-turn
+ * controller fired AND the lifetime signal did NOT; otherwise it is a genuine
+ * lifetime cancel (`{kind:"aborted"}` ⇒ finish). The lifetime check reads the
+ * ORIGINAL `loopSignal` (not the effective one) so an interrupt can never
+ * masquerade as a finish. No gate ⇒ always `aborted` (byte-identical).
+ */
+const classifyTurnAbort = (
+  gate: import("@/subagent").SubagentTurnGate | undefined,
+  loopSignal: AbortSignal,
+): TurnResult =>
+  gate?.wasInterrupted() === true && !loopSignal.aborted
+    ? { kind: "interrupted" }
+    : { kind: "aborted" }
+
 const runTurn = async (
   turn: number,
   session: TurnSession,
@@ -1568,6 +1613,10 @@ const runTurn = async (
   // same `undefined`s — only the call shape changed.
   const { config, recorder, activeSkills, archive, hookPromptPending } = session
   const { wm, rec, breaker, toolHistory, workingState, citations } = state
+  // ADR-0437 follow-up — the per-turn session view (effective interrupt signal).
+  // No gate ⇒ `turnSession === session`, `gate === undefined` (byte-identical).
+  const { turnSession, gate } = buildTurnSessionView(session)
+  const turnConfig = turnSession.config
   // ADR-0133 — snapshot the pending promptHook list ONCE for this turn so a
   // same-turn retry sees the SAME injects (a vanishing block mid-PTL would
   // confuse the model). The session-level array continues to accumulate
@@ -1585,12 +1634,18 @@ const runTurn = async (
   // Bounded: every iteration either returns or strictly consumes a SAME-TURN
   // budget (decideOn* mutate `rec`), so the loop cannot spin forever.
   for (;;) {
-    if (config.signal.aborted) return { kind: "aborted" }
+    // ADR-0437 follow-up — `classifyTurnAbort` distinguishes a real lifetime
+    // cancel (`config.signal`) from a turn-gate interrupt (only the per-turn
+    // controller fired). The lifetime check uses the ORIGINAL `config.signal`
+    // (not the effective one) so an interrupt never masquerades as a finish.
+    if (config.signal.aborted || gate?.wasInterrupted() === true) {
+      return classifyTurnAbort(gate, config.signal)
+    }
 
     // Rebuilt every attempt: ctx.messages = canonical history + one ephemeral
     // reminder tail (the per-turn dynamic context, never persisted).
     const { ctx, breakerVerdict } = await prepareTurnContext(
-      config,
+      turnConfig,
       wm,
       recorder,
       breaker,
@@ -1607,18 +1662,21 @@ const runTurn = async (
     // uses (see `applyNonSuccessRecoveryAction`), not a side branch. The
     // recovery event was already emitted at the `maybeCompact` site.
     if (breakerVerdict.abort) return { kind: "error", reason: breakerVerdict.reason }
-    const result = await streamConsume(session, state, ctx)
-    if ("aborted" in result) return { kind: "aborted" }
+    const result = await streamConsume(turnSession, state, ctx)
+    // An abort is an interrupt (park + fresh turn) when the gate's per-turn
+    // controller fired AND the lifetime signal did not; else a genuine lifetime
+    // cancel (finish). See `classifyTurnAbort`.
+    if ("aborted" in result) return classifyTurnAbort(gate, config.signal)
 
     // ADR-0242 — Cursor 8-arm stop_reason typed router. `resolveTurnAction`
     // consults `config.stopReasonPolicy` first (when wired) and falls through
     // to the legacy `decideOnStreamError` / `decideOnAssembled` FSM otherwise.
     // Absent ⇒ single optional-chain check on undefined, zero allocation,
     // byte-identical to the pre-ADR path.
-    const action = resolveTurnAction(config.stopReasonPolicy, result, rec)
+    const action = resolveTurnAction(turnConfig.stopReasonPolicy, result, rec)
 
     const step = await applyAction(
-      session,
+      turnSession,
       state,
       action,
       result,
@@ -2344,6 +2402,11 @@ const prepareTurnIteration = async (args: {
 
 type TurnLoopResolution =
   | { readonly kind: "continue" }
+  // ADR-0437 follow-up — the turn was INTERRUPTED by a `followup_task(interrupt)`
+  // (the gate's per-turn controller fired, the lifetime signal did not). The
+  // turn loop must PARK on the gate so the pending interrupt-wake resumes the
+  // loop into a fresh turn that handles the interrupting message — NOT finish.
+  | { readonly kind: "park"; readonly turns: number }
   | {
       readonly kind: "finish"
       readonly reason: StopReason
@@ -2398,6 +2461,14 @@ const resolveTurnLoopOutcome = async (args: {
       turns: args.turn - 1,
       stopCategory: interruptedCategory("user"),
     }
+  }
+  // ADR-0437 follow-up — an interrupted turn parks on the gate (it does NOT
+  // finish). `turns: args.turn - 1` because the interrupted turn produced no
+  // completed work — the FRESH turn that handles the interrupting message
+  // re-uses this turn's slot via the gate `resume` (consistent with the
+  // aborted-turn `turn - 1` accounting).
+  if (args.result.kind === "interrupted") {
+    return { kind: "park", turns: args.turn - 1 }
   }
   if (args.result.kind === "error") {
     args.stream.emit({ type: "error", message: args.result.reason })
@@ -2622,7 +2693,7 @@ const executeTurnWithObservability = async (args: {
   // "error" is the conservative classification for an escaping throw (the host
   // re-raises it as an approval placeholder above the loop); the work-metrics
   // gate only suppresses "aborted", so "error" still emits the turn's metrics.
-  let flushKind: "tools" | "completed" | "aborted" | "error" | "refusal" = "error"
+  let flushKind: "tools" | "completed" | "aborted" | "interrupted" | "error" | "refusal" = "error"
   let result: TurnResult
   try {
     if (args.ctx.turnDiffSession !== undefined) {
@@ -2635,8 +2706,15 @@ const executeTurnWithObservability = async (args: {
     }
     result = await runTurn(args.turn, args.ctx.session, state)
     flushKind = result.kind
+    // An `interrupted` turn (ADR-0437 followup_task interrupt) is span-status
+    // "aborted" — the turn's in-flight work was cut short — but the loop does
+    // NOT finish (it parks + resumes). Distinct from `error`.
     turnSpanStatus =
-      result.kind === "aborted" ? "aborted" : result.kind === "error" ? "error" : "ok"
+      result.kind === "aborted" || result.kind === "interrupted"
+        ? "aborted"
+        : result.kind === "error"
+          ? "error"
+          : "ok"
   } catch (e) {
     turnSpanStatus = "error"
     throw e
@@ -2699,6 +2777,18 @@ const runAgentTurnLoop = async (ctx: RunAgentContext): Promise<AgentOutcome | un
       pendingPlanExitRef: ctx.pendingPlanExitRef,
       hookPromptPending: ctx.hookPromptPending,
     })
+    // ADR-0437 follow-up — an INTERRUPTED turn (followup_task interrupt aborted
+    // the in-flight turn) parks on the gate to consume the pending interrupt-
+    // wake. `wait` resolves `resume` (the pending wake fires ⇒ a FRESH turn runs
+    // and its top-of-loop mailbox read surfaces the interrupting message) or
+    // `settle` (the lifetime signal aborted while unwinding / the gate was
+    // disposed ⇒ the loop finishes as a genuine abort). A `park` resolution is
+    // only ever produced when a gate is wired, so the gate is present here.
+    if (resolution.kind === "park") {
+      const gate = ctx.cfg.subagentTurnGate
+      if (gate !== undefined && (await gate.wait(ctx.cfg.signal)) !== "settle") continue
+      return ctx.finish("aborted", resolution.turns, interruptedCategory("user"))
+    }
     if (resolution.kind === "finish") {
       // ADR-0437 follow-up — when a `subagentTurnGate` is wired AND this child
       // loop would CLEANLY complete, PARK on the gate instead of exiting so a
