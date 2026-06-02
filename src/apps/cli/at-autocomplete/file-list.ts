@@ -1,5 +1,5 @@
 /**
- * RFC-12 / ADR-0436 §4.2 — File-path candidate lister.
+ * RFC-12 / ADR-0439 §4.2 — File-path candidate lister.
  *
  * Enumerates workspace files for `@path` completion. This is the LISTING
  * counterpart to `createFileResolver` (`@/agent/plugin-app-resolver`), which

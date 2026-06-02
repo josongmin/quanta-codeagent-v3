@@ -1,4 +1,4 @@
-# ADR-0436 — CLI `@`-mention autocomplete dropdown (input-surface wire)
+# ADR-0439 — CLI `@`-mention autocomplete dropdown (input-surface wire)
 
 **Status:** Accepted (2026-06-02)
 **RFC:** `docs/plans/jun-2-misc/12-at-mention-autocomplete.md`

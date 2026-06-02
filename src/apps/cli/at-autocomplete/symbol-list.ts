@@ -1,5 +1,5 @@
 /**
- * RFC-12 / ADR-0436 §4.2 — Symbol candidate lister.
+ * RFC-12 / ADR-0439 §4.2 — Symbol candidate lister.
  *
  * Reuses the EXISTING `SymbolLookupLspPort` (`@/agent/mention-injection`,
  * built by `createLspSymbolLookup` over the LSP `workspaceSymbol` query) to

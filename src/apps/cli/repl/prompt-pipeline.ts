@@ -22,7 +22,7 @@ export type DispatchSlash = (input: string) => Promise<boolean>
 export interface PromptPipelineUxOpts {
   readonly promptHistory?: PromptHistory
   readonly multiline?: boolean
-  /** RFC-12 / ADR-0436 — optional `@`-mention autocomplete provider. When
+  /** RFC-12 / ADR-0439 — optional `@`-mention autocomplete provider. When
    *  present, the raw-line reader opens an `@`-completion dropdown; absent ⇒
    *  `@` is an ordinary char (byte-identical). */
   readonly atProvider?: AtCandidateProvider

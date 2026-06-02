@@ -1,5 +1,5 @@
 /**
- * RFC-12 / ADR-0436 §4.5 — Deterministic 2-tier candidate ranking.
+ * RFC-12 / ADR-0439 §4.5 — Deterministic 2-tier candidate ranking.
  *
  * NO new fuzzy heuristic (the `no-heuristics-only-validated` rule). This is
  * the SAME prefix-match idiom the slash palette uses

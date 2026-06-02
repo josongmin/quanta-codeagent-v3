@@ -1,5 +1,5 @@
 /**
- * RFC-12 / ADR-0436 — `@`-autocomplete provider + ranking + state-machine
+ * RFC-12 / ADR-0439 — `@`-autocomplete provider + ranking + state-machine
  * hellgate. Covers §7 cases 13-15 (provider unit) PLUS the pure ranking +
  * state-machine primitives the keypress integration relies on.
  *
@@ -230,6 +230,23 @@ describe("createCompositeAtProvider — kind inference + lists (§7-15)", () => 
     }
     const p = createCompositeAtProvider({ fileRoot: root, symbolLookup: port })
     expect(await p.list("Foo")).toEqual([])
+  })
+
+  test("D8 — a SYNCHRONOUSLY-throwing kebab lister must NOT wipe file candidates", async () => {
+    // Regression for the Promise.all bug: `deps.listSkills()` runs synchronously
+    // inside the array literal, so an unguarded throw there rejected the whole
+    // batch and dropped the (safe) file candidates too. Each kebab lister is now
+    // wrapped in `safe`, so the skill failure stays isolated and `alpha.ts`
+    // (matched by the lowercase file probe) still surfaces.
+    const p = createCompositeAtProvider({
+      fileRoot: root,
+      listSkills: () => {
+        throw new Error("boom-sync")
+      },
+    })
+    const out = await p.list("alph")
+    expect(out.some((c) => c.kind === "file")).toBe(true) // files survived
+    expect(out.some((c) => c.kind === "skill")).toBe(false) // skill failure isolated
   })
 })
 

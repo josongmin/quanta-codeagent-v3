@@ -3,7 +3,7 @@
 - **Status**: Draft (implementation-ready)
 - **Author**: architecture
 - **Date**: 2026-06-02
-- **ADR (제안)**: ADR-0436 (`docs/decisions/`의 최신은 `0434-permission-profile-list-select.md` — 다음 free 번호. 0435는 `07-...`과 같은 sprint의 `01-mcp-auto-restart` RFC가 선점)
+- **ADR (제안)**: ADR-0439 (`docs/decisions/`의 최신은 `0434-permission-profile-list-select.md` — 다음 free 번호. 0435는 `07-...`과 같은 sprint의 `01-mcp-auto-restart` RFC가 선점)
 - **Slice**: `@/apps/cli` (신규 leaf `src/apps/cli/at-autocomplete/` + `raw-line-reader.ts` 훅) + 신규 listing 어댑터 (composition root에서 주입)
 - **Default-OFF**: `@`-trigger 미주입 ⇒ 오늘 `readLine` 동작 **byte-identical** (슬래시 팔레트/히스토리/heredoc/멀티바이트 모두 불변)
 - **흡수 출처**: Codex webview `at-mention-list-*.js` / `anchored-autocomplete-overlay-*.js` / `inline-mentions-*.js`, Claude Code CLI `@file:`/`@workspace:`/`src/x.ts:42` 라인 참조 (정확한 file은 §1)

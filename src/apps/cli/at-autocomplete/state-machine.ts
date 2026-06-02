@@ -1,5 +1,5 @@
 /**
- * RFC-12 / ADR-0436 §4.3 — `@`-dropdown keypress state machine (pure).
+ * RFC-12 / ADR-0439 §4.3 — `@`-dropdown keypress state machine (pure).
  *
  * Extracted as a PURE module so the keypress logic is testable without a
  * real TTY (RFC §7) and so `raw-line-reader.ts` stays a thin host: it owns

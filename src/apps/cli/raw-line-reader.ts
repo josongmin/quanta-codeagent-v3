@@ -82,7 +82,7 @@ export interface ReadLineOptions {
    *  fence closes it and submits the joined body (`\n`-separated, fence
    *  rows excluded). Absent / `false` ⇒ byte-identical, no fence detection. */
   readonly multiline?: boolean
-  /** RFC-12 / ADR-0436 — optional `@`-mention autocomplete provider. When
+  /** RFC-12 / ADR-0439 — optional `@`-mention autocomplete provider. When
    *  injected, typing `@` at a valid left-boundary opens a kind-grouped
    *  candidate dropdown (file / symbol / skill / plugin / app); `↑`/`↓`
    *  select, `Tab`/`Enter` accept (splice the mention token), `Esc`
@@ -498,7 +498,7 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
       return true
     }
 
-    // ── RFC-12 / ADR-0436 — `@`-mention autocomplete dropdown ───────────────
+    // ── RFC-12 / ADR-0439 — `@`-mention autocomplete dropdown ───────────────
     // The keypress machine lives in the pure `at-autocomplete/state-machine`;
     // these closures own the impure parts (async `list()` + redraw + buffer
     // splice). All inert when `opts.atProvider` is undefined (default-OFF).
@@ -522,7 +522,15 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
       if (!state.at.active) return // dismissed while awaiting
       state.at.candidates = cands
       state.at.selectedIdx = cands.length > 0 ? 0 : -1
-      redraw()
+      // `runAtList` is an async fn dispatched fire-and-forget (`void runAtList()`),
+      // so a throw from `redraw` (a closed FD / write EPIPE mid-stream) would
+      // surface as an UNHANDLED rejection. State is already consistent here, so
+      // swallow a terminal-write failure — the next keystroke redraws.
+      try {
+        redraw()
+      } catch {
+        /* terminal write failed; state is consistent, next keystroke redraws */
+      }
     }
 
     /** Open the dropdown at `triggerPos` (the index of the just-typed `@`) and

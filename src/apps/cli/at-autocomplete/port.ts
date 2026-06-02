@@ -1,5 +1,5 @@
 /**
- * RFC-12 / ADR-0436 — `@`-mention autocomplete closed ports.
+ * RFC-12 / ADR-0439 — `@`-mention autocomplete closed ports.
  *
  * The existing `MentionResolverPort` (`@/agent/mention-injection`) is a
  * ONE-DIRECTIONAL `target → body` renderer — given `@src/foo.ts` it reads

@@ -1,5 +1,5 @@
 /**
- * RFC-12 / ADR-0436 — `@`-mention autocomplete leaf barrel.
+ * RFC-12 / ADR-0439 — `@`-mention autocomplete leaf barrel.
  *
  * Closed surface for the CLI `@`-completion dropdown. Default-OFF: nothing
  * here runs unless the composition root (gated by `atAutocompleteEnabled`)

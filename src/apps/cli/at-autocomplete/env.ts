@@ -1,5 +1,5 @@
 /**
- * RFC-12 / ADR-0436 §5.3 — Feature gate.
+ * RFC-12 / ADR-0439 §5.3 — Feature gate.
  *
  * Default-OFF: the `@`-autocomplete provider is only constructed + injected
  * when `QUANTA_AT_AUTOCOMPLETE=1`. Absent / any other value ⇒ no provider ⇒

@@ -1,5 +1,5 @@
 /**
- * RFC-12 / ADR-0436 — raw-line-reader `@`-mention dropdown integration
+ * RFC-12 / ADR-0439 — raw-line-reader `@`-mention dropdown integration
  * hellgate. Drives an INJECTED keypress stream + a fake `AtCandidateProvider`
  * through `readLine`'s test-IO seam — NO real TTY, NO fs, NO LSP.
  *

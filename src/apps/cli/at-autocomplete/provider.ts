@@ -1,5 +1,5 @@
 /**
- * RFC-12 / ADR-0436 §4.1-4.2 — Composite `AtCandidateProvider`.
+ * RFC-12 / ADR-0439 §4.1-4.2 — Composite `AtCandidateProvider`.
  *
  * Combines per-kind sub-listers (file / symbol now; skill / plugin / app via
  * OPTIONAL injected list callbacks — see RFC §4.2 design-honesty note: those
@@ -123,13 +123,17 @@ export const createCompositeAtProvider = (deps: CompositeAtProviderDeps): AtCand
       }
       // Lowercase / empty: kebab kinds + a lowercase file probe (covers
       // `@foo.ts`). Run in parallel and concat in deterministic kind order.
+      // EVERY lister is wrapped in `safe` — the kebab `deps.list*()` callbacks
+      // run SYNCHRONOUSLY, so a throw there (or inside `listKebab`) must NOT
+      // reject the whole batch and wipe the file candidates. `safe` keeps each
+      // kind's failure isolated to that kind (NO-THROW contract, RFC §6.1).
       const [files, skills, plugins, apps] = await Promise.all([
         safe(() => fileLister(query, signal)),
-        Promise.resolve(deps.listSkills ? listKebab(deps.listSkills(), query, "skill", max) : []),
-        Promise.resolve(
+        safe(async () => (deps.listSkills ? listKebab(deps.listSkills(), query, "skill", max) : [])),
+        safe(async () =>
           deps.listPlugins ? listKebab(deps.listPlugins(), query, "plugin", max) : [],
         ),
-        Promise.resolve(deps.listApps ? listKebab(deps.listApps(), query, "app", max) : []),
+        safe(async () => (deps.listApps ? listKebab(deps.listApps(), query, "app", max) : [])),
       ])
       return [...skills, ...plugins, ...apps, ...files]
     },

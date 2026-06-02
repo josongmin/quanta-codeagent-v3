@@ -63,7 +63,7 @@ export interface PromptUxOpts {
   readonly atProvider?: AtCandidateProvider
 }
 
-/** RFC-12 / ADR-0436 — build the `@`-mention autocomplete provider when the
+/** RFC-12 / ADR-0439 — build the `@`-mention autocomplete provider when the
  *  feature is enabled (`QUANTA_AT_AUTOCOMPLETE=1`). File listing is live (cwd
  *  jail = the resolver root); symbol listing reuses the SAME lazy union-LSP
  *  port the agent loop's `@symbol` resolver uses (`buildMentionSymbolDeps`),
