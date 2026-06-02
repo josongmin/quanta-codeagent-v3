@@ -9,7 +9,7 @@
  * credential file (`auth.json`) before any read syscall.
  */
 
-import { readFile } from "node:fs/promises"
+import { lstat, readFile } from "node:fs/promises"
 import { basename } from "node:path"
 import { QuantaError } from "@/shared"
 import type { ImportLog } from "./types"
@@ -49,18 +49,34 @@ export class CredentialReadBannedError extends QuantaError {
 export const isCredentialPath = (path: string): boolean =>
   BANNED_CREDENTIAL_BASENAMES.has(basename(path))
 
+/**
+ * N10 symlink hardening: the basename ban (above) is byte-blind, so a
+ * symlinked `projects/x/y.jsonl → ~/.claude/auth.json` would sidestep it. We
+ * therefore `lstat` (no-follow) and REFUSE any symlink on an import read path
+ * — `O_NOFOLLOW` semantics. Import sources are regular files; a symlink is
+ * either an attack or an unsupported layout, and following it could read a
+ * credential file whose innocent basename passes {@link isCredentialPath}.
+ */
+const refuseSymlink = async (path: string): Promise<void> => {
+  const st = await lstat(path)
+  if (st.isSymbolicLink()) throw new CredentialReadBannedError(path)
+}
+
 /** The ONLY byte-reading primitive the migration slice may use. Refuses a
- *  credential file (N10) before any read syscall, then reads UTF-8 text. */
+ *  credential file (N10) before any read syscall, refuses a symlink (no-follow),
+ *  then reads UTF-8 text. */
 export const readImportFile = async (path: string): Promise<string> => {
   if (isCredentialPath(path)) throw new CredentialReadBannedError(path)
+  await refuseSymlink(path)
   return readFile(path, "utf8")
 }
 
 /** SHA-256 (hex) of a file's raw bytes. Real implementation — used to
  *  fingerprint a session transcript for dedup + change detection. N10: a
- *  credential path is refused before any read. */
+ *  credential path / symlink is refused before any read. */
 export const contentSha256 = async (jsonlPath: string): Promise<string> => {
   if (isCredentialPath(jsonlPath)) throw new CredentialReadBannedError(jsonlPath)
+  await refuseSymlink(jsonlPath)
   const bytes = await readFile(jsonlPath)
   const digest = await crypto.subtle.digest("SHA-256", bytes)
   return Array.from(new Uint8Array(digest))

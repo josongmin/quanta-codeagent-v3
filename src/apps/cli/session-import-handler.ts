@@ -11,6 +11,7 @@
  * existing callers.
  */
 import { homedir } from "node:os"
+import type { ContentBlock, Message } from "@/llm"
 import {
   appendImportLog,
   type ExternalAgentProvider,
@@ -22,6 +23,7 @@ import {
   wasAlreadyImported,
 } from "@/migration"
 import type { SessionCommandDeps } from "@/runner/session-ops"
+import { redactSecrets } from "@/security"
 import {
   type SessionMeta,
   type SessionRootProvider,
@@ -43,11 +45,35 @@ type ImportHandlerFn = (args: string[], deps: SessionCommandDeps) => Promise<num
 const importedSessionId = (provider: ExternalAgentProvider, contentHash: string): string =>
   `import-${provider}-${contentHash.slice(0, 16)}`
 
+/**
+ * Secret redaction at the import TRUST BOUNDARY (adversarial-review fix,
+ * ADR-0430). The N10 ban blocks credential *filenames*, but a competitor
+ * transcript routinely carries in-CONTENT secrets (a pasted API key, a
+ * `cat .env` tool_result, an OAuth token). Persisting them verbatim would
+ * leak them into the v3 store. We run every imported text / tool_result
+ * string through the SAME `redactSecrets` the live dispatch layer uses
+ * (secrets-only, `envelope_jsonl` origin) right before persistence. Clean
+ * content is a no-op (byte-identical). Redaction lives HERE, not in the
+ * `@/migration` translator, because the slice fence forbids `@/migration`
+ * from importing `@/security` — redaction is a surface-boundary concern and
+ * `@/apps/cli` is the boundary that owns it. PII is intentionally not applied
+ * (it's an opt-in pass on the live path too). Exported for direct testing.
+ */
+export const redactImportedMessages = (messages: readonly Message[]): Message[] => {
+  const scrub = (text: string): string => redactSecrets(text, { origin: "envelope_jsonl" }).text
+  const block = (b: ContentBlock): ContentBlock => {
+    if (b.type === "text") return { ...b, text: scrub(b.text) }
+    if (b.type === "tool_result") return { ...b, content: scrub(String(b.content)) }
+    return b
+  }
+  return messages.map((m) => ({ ...m, content: m.content.map(block) }))
+}
+
 /** Persist one translated session into the v3 session store. Returns the
  *  minted id. The transcript becomes a resumable quanta session: it lands as
  *  an active `<root>/<id>.json` snapshot + index row, exactly like a
  *  natively-created session, so `session ls` / `session show` / resume all
- *  work on it. */
+ *  work on it. Imported content is secret-redacted at this boundary. */
 const persistTranslatedSession = async (
   provider: ExternalAgentProvider,
   session: TranslatedSession,
@@ -68,7 +94,7 @@ const persistTranslatedSession = async (
     {
       reason: `imported from ${provider} (${session.sourcePath})`,
       turns: 0,
-      messages: [...session.messages],
+      messages: redactImportedMessages(session.messages),
     },
     rootProvider,
   )
