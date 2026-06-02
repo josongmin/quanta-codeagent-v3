@@ -184,4 +184,12 @@ export interface TurnState {
   citations: MemoryCitation[]
   onRedaction: (origin: RedactionOrigin, hits: readonly RedactionHit[]) => void
   onTurnTiming: ((timing: TurnTiming) => void) | undefined
+  /**
+   * jun-02 — SOFT task-budget cumulative spend box. Present ONLY when
+   * `config.taskBudget` is set; the loop increments `tokens` by every observed
+   * `usage` event (input + output) so `prepareTurnContext` can forward a
+   * monotonically-growing `spent` into `buildTurnContext`. Independent of the
+   * enforcement `BudgetMeter` (orthogonality contract). Absent ⇒ no
+   * accumulation, no forward, byte-identical default-OFF. */
+  taskSpend?: { tokens: number }
 }

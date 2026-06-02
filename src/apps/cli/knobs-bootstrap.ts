@@ -2,7 +2,7 @@
  * Knobs bootstrap helper — CLI surface entry assembly for the SOTA++ knob
  * framework (`@/runner/knobs`).
  *
- * Side-effect imports below register the 12 knob records into the module-level
+ * Side-effect imports below register the 13 knob records into the module-level
  * singleton registry. The registry is populated *exactly once per process* —
  * importing this file at CLI startup is what makes `knobsForSurface("cli")`,
  * `resolveKnobs`, and `applyKnobs` actually see knob records. Bench / agent
@@ -45,6 +45,7 @@ import "@/runner/knobs/knobs/persona"
 import "@/runner/knobs/knobs/repro-test"
 import "@/runner/knobs/knobs/skills"
 import "@/runner/knobs/knobs/subagent"
+import "@/runner/knobs/knobs/task-budget"
 import "@/runner/knobs/knobs/working-state"
 
 /** Inputs to {@link bootstrapKnobs}. All env/argv reads happen at the caller

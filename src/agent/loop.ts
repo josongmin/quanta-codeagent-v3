@@ -87,6 +87,7 @@ export {
   type RecoveryState,
 } from "./recovery"
 
+import type { TaskBudget } from "./budget"
 // L4 control-op cluster (2026-05-23): submission interrupt + cancel_subagent
 // + conversation-action behavioral wiring + queued-follow-up popReady.
 import {
@@ -196,6 +197,7 @@ const emitUsage = (
   ev: Extract<StreamEvent, { type: "usage" }>,
   recorder: AgentRecorder | undefined,
   collector: TurnWorkMetricsCollector | undefined,
+  taskSpend: { tokens: number } | undefined,
 ): void => {
   config.stream.emit({
     type: "usage",
@@ -216,6 +218,16 @@ const emitUsage = (
     tokensOutput: ev.outputTokens,
     ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
   })
+  // jun-02 — soft task-budget cumulative spend. Present ONLY when
+  // `config.taskBudget` is set (the box is allocated in runAgent). Accumulates
+  // the SAME input+output token total the meter/recorder see; non-finite /
+  // negative reports are coerced to 0 so the running sum can never go
+  // non-finite (`renderTaskBudgetBlock` also clamps, this is belt-and-braces).
+  if (taskSpend !== undefined) {
+    const inTok = Number.isFinite(ev.inputTokens) && ev.inputTokens > 0 ? ev.inputTokens : 0
+    const outTok = Number.isFinite(ev.outputTokens) && ev.outputTokens > 0 ? ev.outputTokens : 0
+    taskSpend.tokens += inTok + outTok
+  }
 }
 
 /** Pure side-effect emit of a `{type:"recovery"}` AgentEvent at a recovery
@@ -383,13 +395,14 @@ async function* teeUsage(
   src: AsyncIterable<StreamEvent>,
   recorder: AgentRecorder | undefined,
   collector: TurnWorkMetricsCollector | undefined,
+  taskSpend: { tokens: number } | undefined,
 ): AsyncIterable<StreamEvent> {
   const guarded =
     config.streamWatchdog !== undefined && config.streamTimeoutPolicy !== undefined
       ? config.streamWatchdog.wrap(src, config.streamTimeoutPolicy, config.signal)
       : src
   for await (const ev of guarded) {
-    if (ev.type === "usage") emitUsage(config, ev, recorder, collector)
+    if (ev.type === "usage") emitUsage(config, ev, recorder, collector, taskSpend)
     if (ev.type === "llm_continuation") emitLlmContinuation(config, ev)
     yield ev
   }
@@ -538,7 +551,7 @@ const streamConsume = async (
   // off the same `session`/`state` bundles, so they're no longer destructured
   // here — the local references were move-only, with no behavioural change.
   const { config, specs, recorder, skillGate } = session
-  const { collector, toolChoiceState, onTurnTiming } = state
+  const { collector, toolChoiceState, onTurnTiming, taskSpend } = state
   const { messages, system } = ctx
   // ADR-0079 — resolve the pre-call tool_choice from the loop-owned turn state.
   // `consumeTurnSignals` reads + clears the 1-turn-TTL flags armed by the
@@ -620,6 +633,7 @@ const streamConsume = async (
         }),
         recorder,
         collector,
+        taskSpend,
       ),
       isConcurrencySafe: (name, input) => config.registry.isConcurrencySafe(name, input),
       // T02 M1 — early-start is read-only AND concurrency-safe; a mutating
@@ -1178,6 +1192,21 @@ const injectRedactionBanner = (
   return ctx
 }
 
+/** jun-02 — derive the SOFT task-budget object forwarded into
+ *  `buildTurnContext` for this turn. Present ONLY when the operator set
+ *  `config.taskBudget` (via the `task-budget` knob); `spent` is the running
+ *  cumulative token total accumulated in `taskSpend` by `emitUsage` across
+ *  turns (absent box ⇒ 0). ORTHOGONAL to the hard breaker — this NEVER stops
+ *  the run; it only feeds the advisory reminder line. Absent budget ⇒
+ *  `undefined` ⇒ the field is omitted ⇒ byte-identical default-OFF. Pure. */
+const resolveTaskBudgetForTurn = (
+  config: AgentConfig,
+  taskSpend: { tokens: number } | undefined,
+): TaskBudget | undefined =>
+  config.taskBudget !== undefined
+    ? { tokens: config.taskBudget.tokens, spent: taskSpend?.tokens ?? 0 }
+    : undefined
+
 /** Rebuild the per-attempt request context: memory recall, proactive
  *  compaction (mutates `messages` in place), then the buildTurnContext SEAM.
  *
@@ -1199,6 +1228,7 @@ const prepareTurnContext = async (
   turn: number,
   citations: MemoryCitation[],
   hookPromptInjects: readonly import("./hooks").HookPromptInject[] | undefined,
+  taskSpend: { tokens: number } | undefined,
 ): Promise<{
   readonly ctx: ReturnType<typeof buildTurnContext>
   readonly breakerVerdict: BreakerVerdict
@@ -1236,6 +1266,7 @@ const prepareTurnContext = async (
     `t${turn}`,
   )
   const augmentedSkills = augmentActiveSkillsWithPlugin(activeSkills, pluginActivation)
+  const taskBudgetForTurn = resolveTaskBudgetForTurn(config, taskSpend)
   const ctx = buildTurnContext({
     baseMessages: [...wm.snapshot()],
     cwd: config.cwd,
@@ -1274,6 +1305,7 @@ const prepareTurnContext = async (
       : {}),
     ...(contextEvents.length > 0 ? { contextChangeEvents: contextEvents } : {}),
     ...(mentionMessages.length > 0 ? { mentionInjectionMessages: mentionMessages } : {}),
+    ...(taskBudgetForTurn !== undefined ? { taskBudget: taskBudgetForTurn } : {}),
   })
   // ADR-0080 — fold the IDE snapshot into the built context (no provider ⇒
   // returned unchanged, byte-identical). ADR-0078 — prepend the redaction-
@@ -1567,6 +1599,7 @@ const runTurn = async (
       turn,
       citations,
       turnInjects,
+      state.taskSpend,
     )
     // T02 M3 — an ENFORCED proactive compaction breaker trip ends the turn
     // through the same terminal `{kind:"error"}` route the reactive breaker
@@ -2529,6 +2562,11 @@ const createRunAgentContext = async (config: AgentConfig): Promise<RunAgentConte
     citations: memoryCitations,
     onRedaction: recordRedaction,
     onTurnTiming: recordTurnTiming,
+    // jun-02 — soft task-budget cumulative spend box. Allocated ONCE per
+    // session (spread into every turn's TurnState) so `spent` accumulates
+    // across turns. Present ONLY when the operator set a budget; absent ⇒
+    // field omitted ⇒ no accumulation, byte-identical default-OFF.
+    ...(cfg.taskBudget !== undefined ? { taskSpend: { tokens: 0 } } : {}),
   }
 
   const finish: FinishAgentSession = async (reason, turns, stopCategory, refusal) =>

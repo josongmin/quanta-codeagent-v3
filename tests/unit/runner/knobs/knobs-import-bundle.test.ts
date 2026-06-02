@@ -33,7 +33,10 @@ import { personaKnob } from "@/runner/knobs/knobs/persona"
 import { reproTestKnob } from "@/runner/knobs/knobs/repro-test"
 import { skillsKnob } from "@/runner/knobs/knobs/skills"
 import { subagentKnob } from "@/runner/knobs/knobs/subagent"
+import { taskBudgetKnob } from "@/runner/knobs/knobs/task-budget"
 import { workingStateKnob } from "@/runner/knobs/knobs/working-state"
+import { readdir } from "node:fs/promises"
+import { join } from "node:path"
 
 const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(advisorKnob),
@@ -48,8 +51,11 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(reproTestKnob),
   asAnyKnob(skillsKnob),
   asAnyKnob(subagentKnob),
+  asAnyKnob(taskBudgetKnob),
   asAnyKnob(workingStateKnob),
 ]
+
+const PER_KNOB_DIR = join(import.meta.dir, "..", "..", "..", "..", "src", "runner", "knobs", "knobs")
 
 const ALL_KNOB_IDS = ALL_KNOBS.map((k) => k.id)
 
@@ -63,14 +69,23 @@ beforeAll(() => {
 })
 
 describe("per-knob side-effect import bundle", () => {
-  test("all 13 known knobs registered after side-effect imports", () => {
+  test("all known knobs registered after side-effect imports", () => {
     const reg = allKnobs()
     const missing = ALL_KNOB_IDS.filter((id) => !reg.has(id))
     expect(missing).toEqual([])
   })
 
-  test("the framework exposes exactly 13 distinct knob ids", () => {
-    expect(new Set(ALL_KNOB_IDS).size).toBe(13)
+  test("knob ids are distinct (no duplicate registration)", () => {
+    expect(new Set(ALL_KNOB_IDS).size).toBe(ALL_KNOBS.length)
+  })
+
+  // Drift guard: ALL_KNOBS MUST cover every per-knob file. A new knob file that
+  // forgets to add itself here (or to the barrel) trips this — the whole point
+  // of the bundle test. Derived from the filesystem so the count is never stale.
+  test("ALL_KNOBS covers every per-knob file (no forgotten knob)", async () => {
+    const files = await readdir(PER_KNOB_DIR)
+    const knobFileCount = files.filter((f) => f.endsWith(".ts") && f !== "index.ts").length
+    expect(ALL_KNOBS.length).toBe(knobFileCount)
   })
 
   for (const id of ALL_KNOB_IDS) {

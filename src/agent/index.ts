@@ -193,7 +193,7 @@ export {
   planExitStaysInPlan,
 } from "./plan-exit"
 export type { AgentMode, TurnContext, TurnContextInput } from "./prompt"
-export { buildSystemPrompt, buildTurnContext } from "./prompt"
+export { buildSystemPrompt, buildTurnContext, escapeReminderBoundary } from "./prompt"
 export { RECOVERY_CAPS } from "./recovery"
 export {
   loadRepoRules,

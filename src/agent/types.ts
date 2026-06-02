@@ -29,7 +29,7 @@ import type { WebSearchProvider } from "@/tool/web"
 import type { ApprovalStateMachinePort } from "./approval-state-machine"
 import type { AutoBackgroundConfig } from "./auto-background"
 import type { BranchSearchConfig, ProgressLine } from "./branch-search"
-import type { BudgetMeter } from "./budget"
+import type { BudgetMeter, TaskBudget } from "./budget"
 import type { BudgetLedger } from "./budget-ledger"
 import type { CapEnforcer } from "./cap-enforcer"
 import type { GranularRegistryPort } from "./checkpoint/granular-registry"
@@ -954,6 +954,19 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * `ModePolicy.budgetCaps`); the loop only emits ticks.
    */
   budgetMeter?: BudgetMeter
+  /**
+   * jun-02 — SOFT, model-facing task token budget (Claude `task_budget` mirror).
+   *
+   * ORTHOGONAL to {@link budgetMeter}: this is NEVER an enforcement gate and
+   * NEVER stops the run. When present with `tokens > 0`, the loop forwards it
+   * (with `spent` accumulated from this session's observed token usage) into
+   * `buildTurnContext`, which renders ONE advisory guidance line into the
+   * trailing `<system-reminder>` so the model can self-moderate / wrap up.
+   * Absent (or `tokens <= 0`) ⇒ `renderTaskBudgetBlock` returns `undefined` and
+   * the dynamic context is BYTE-IDENTICAL to the pre-slice path (default-OFF).
+   * Set by the `task-budget` knob (`QUANTA_TASK_BUDGET`).
+   */
+  taskBudget?: TaskBudget
   /**
    * L4 wiring — control-op cluster (2026-05-23). Typed mid-turn
    * {@link ConversationActionPort} the loop polls at the TOP of each turn

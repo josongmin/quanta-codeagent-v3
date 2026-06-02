@@ -69,9 +69,11 @@ describe("hellgate / cross-slice — per-knob files do NOT import each other", (
 
   test("the side-effect barrel imports every per-knob file but no other", async () => {
     const txt = await readSrc(join(PER_KNOB_DIR, "index.ts"))
-    // 13 imports of "./<knob>" (12 bench/agent knobs + ADR-0429 advisor).
+    // One `import "./<knob>"` per per-knob file (excluding the barrel itself).
     const sideImports = txt.match(/import\s+["']\.\/[^"']+["']/g) ?? []
-    expect(sideImports.length).toBe(13)
+    const files = await readdir(PER_KNOB_DIR)
+    const knobFileCount = files.filter((f) => f.endsWith(".ts") && f !== "index.ts").length
+    expect(sideImports.length).toBe(knobFileCount)
     // No `from "../"` (would break the barrel contract).
     expect(/from\s+["']\.\.\//.test(txt)).toBe(false)
   })
