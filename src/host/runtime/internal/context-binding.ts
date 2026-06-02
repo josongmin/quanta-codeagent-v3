@@ -82,6 +82,12 @@ interface RuntimeContextSnapshot {
   readonly onPromptAssembled?: AgentConfig["onPromptAssembled"]
   readonly workingState?: AgentConfig["workingState"]
   readonly onWorkingStateReady?: AgentConfig["onWorkingStateReady"]
+  readonly onTurnStreamInput?: AgentConfig["onTurnStreamInput"]
+  readonly shadowOdb?: AgentConfig["shadowOdb"]
+  readonly shadowCheckpoint?: AgentConfig["shadowCheckpoint"]
+  readonly onPreCompact?: AgentConfig["onPreCompact"]
+  readonly imageSanitizationRetry?: AgentConfig["imageSanitizationRetry"]
+  readonly gitObservability?: AgentConfig["gitObservability"]
 }
 
 type RuntimeContextPatch = Partial<
@@ -112,6 +118,12 @@ type RuntimeContextPatch = Partial<
     | "onPromptAssembled"
     | "workingState"
     | "onWorkingStateReady"
+    | "onTurnStreamInput"
+    | "shadowOdb"
+    | "shadowCheckpoint"
+    | "onPreCompact"
+    | "imageSanitizationRetry"
+    | "gitObservability"
   >
 >
 
@@ -508,6 +520,12 @@ const buildOptionalSnapshotFields = (
   ...whenDefined("onPromptAssembled", base.onPromptAssembled),
   ...whenDefined("workingState", base.workingState),
   ...whenDefined("onWorkingStateReady", base.onWorkingStateReady),
+  ...whenDefined("onTurnStreamInput", base.onTurnStreamInput),
+  ...whenDefined("shadowOdb", base.shadowOdb),
+  ...whenDefined("shadowCheckpoint", base.shadowCheckpoint),
+  ...whenDefined("onPreCompact", base.onPreCompact),
+  ...whenDefined("imageSanitizationRetry", base.imageSanitizationRetry),
+  ...whenDefined("gitObservability", base.gitObservability),
 })
 
 const buildSnapshot = (base: RuntimeBase): RuntimeContextSnapshot => ({

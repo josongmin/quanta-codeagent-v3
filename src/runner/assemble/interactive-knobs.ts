@@ -37,7 +37,9 @@
 import type { AgentConfig } from "@/agent"
 import type { AnyKnob, ApplyContext, Surface } from "@/runner/knobs"
 import { advisorKnob } from "@/runner/knobs/knobs/advisor"
+import { closeoutGuardKnob } from "@/runner/knobs/knobs/closeout-guard"
 import { composeAuthoringKnob } from "@/runner/knobs/knobs/compose-authoring"
+import { gitDirectiveKnob } from "@/runner/knobs/knobs/git-directive"
 import { taskBudgetKnob } from "@/runner/knobs/knobs/task-budget"
 
 type EnvLike = Readonly<Record<string, string | undefined>>
@@ -55,6 +57,15 @@ const INTERACTIVE_KNOBS: readonly AnyKnob[] = [
   advisorKnob as AnyKnob,
   composeAuthoringKnob as AnyKnob,
   taskBudgetKnob as AnyKnob,
+  // QUANTA_BENCH_CLOSEOUT — closeout/finish-time claim-verification. The
+  // controlled `cfg.closeoutGuard` is already consumed by the loop
+  // (loop.ts buildCloseoutGuard); this knob just reaches the live cli/agent
+  // surfaces (its own apply() surface-guards to [cli, agent-*]).
+  closeoutGuardKnob as AnyKnob,
+  // QUANTA_GIT_DIRECTIVE_EMIT — Codex ::git-* directive emit. cfg.gitDirectiveEmit
+  // is already consumed by the loop (buildGitDirectiveEmit + per-turn flush);
+  // this knob just reaches the live cli/agent surfaces.
+  gitDirectiveKnob as AnyKnob,
 ]
 
 /** The minimum the three knobs' `apply` read off the config: `advisor` and

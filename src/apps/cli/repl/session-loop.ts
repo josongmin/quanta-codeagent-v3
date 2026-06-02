@@ -101,9 +101,7 @@ export interface RunSessionLoopDeps {
    *  at the next turn boundary. Absent ⇒ `sendNow` reports "send-not-possible". */
   readonly registerPlanQueueSendNow?: (
     fn:
-      | ((inj: {
-          readonly text: string
-        }) => { ok: true } | { ok: false; reason: string })
+      | ((inj: { readonly text: string }) => { ok: true } | { ok: false; reason: string })
       | undefined,
   ) => void
   /** Constructor-time runtime composition payload threaded into

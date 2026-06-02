@@ -1015,6 +1015,15 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
     getSnapshot: () => import("./working-state").WorkingState | undefined,
   ) => void
   /**
+   * OPTIONAL per-turn stream-input capture sink. Fired right before each
+   * provider stream call with the EXACT {@link import("@/llm").StreamInput}
+   * used for that turn (messages / system / tools / thinking / toolChoice).
+   * The surface (`/retry-with`) retains the latest so it can re-stream the
+   * last turn against an alternate model. Absent ⇒ no capture (byte-identical,
+   * no allocation). Pure observation; the call site try/catches.
+   */
+  onTurnStreamInput?: (input: import("@/llm").StreamInput) => void
+  /**
    * ADR-0440 wire-finish — OPTIONAL tool-diff capture sink. When set, the
    * dispatch seam surfaces it (plus the dispatched `ToolUseBlock.id`) onto the
    * {@link import("@/tool").ToolContext} so a file-mutating tool (`write`/`edit`)

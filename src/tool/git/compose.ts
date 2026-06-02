@@ -599,6 +599,71 @@ export const gitComposeCommitTool = (
 // git_compose_pr
 // ===========================================================================
 
+/** Discriminated outcome of {@link composePrText} — the PR-authoring CORE shared
+ *  by `git_compose_pr` (returns the prose) and `gh_pr_open` (feeds the prose
+ *  straight into `gh pr create`). Each `ok:false` carries a `reason` so callers
+ *  can render their OWN message (the two tools name themselves differently) and
+ *  the `empty` variant exposes the range so the message stays specific. */
+export type ComposePrOutcome =
+  | {
+      ok: true
+      title: string
+      body: string
+      base: string
+      head: string
+      parsed: ParsedPrMessage
+    }
+  | { ok: false; reason: "invalid" | "range" | "deny" | "author"; output: string }
+  | { ok: false; reason: "empty"; base: string; head: string }
+
+/** PR-authoring core: resolve the range, read the diff + commit log, and ask the
+ *  one-shot author LLM for a title + body. PURE w.r.t. side effects beyond the
+ *  injected `runner`/`authorLLM` — opens NO PR. `onProgress` mirrors the two
+ *  `progress` events `git_compose_pr` historically yielded, so the tool stays
+ *  byte-identical when it delegates here. The same core powers `gh_pr_open`. */
+export const composePrText = async (
+  runner: GitRunner,
+  authorLLM: LLMPort,
+  input: GitComposePrInput,
+  ctx: ToolContext,
+  onProgress?: (message: string) => void,
+): Promise<ComposePrOutcome> => {
+  const parsed = gitComposePrInputSchema.safeParse(input)
+  if (!parsed.success) {
+    return { ok: false, reason: "invalid", output: `invalid input: ${parsed.error.message}` }
+  }
+  const range = resolveRange(parsed.data)
+  if (!range.ok) return { ok: false, reason: "range", output: range.output }
+  const { base, head } = range
+
+  const diffArgs = ["diff", `${base}...${head}`]
+  onProgress?.(`git ${diffArgs.join(" ")}`)
+  const outcome = await classifyDiff(runner, diffArgs, ctx)
+  if (outcome.kind === "deny") return { ok: false, reason: "deny", output: outcome.output }
+  if (outcome.kind === "empty") return { ok: false, reason: "empty", base, head }
+
+  // Commit log is best-effort context: a failure here must not block
+  // authoring (we still have the diff), so we fall back to an empty log.
+  const logArgs = ["log", "--oneline", "--no-decorate", `${base}..${head}`]
+  const logOut = await classifyDiff(runner, logArgs, ctx)
+  const logText = logOut.kind === "ok" ? truncate(logOut.body, MAX_LOG_BYTES).text : ""
+
+  const { text: diffText, truncated } = truncate(outcome.body, MAX_DIFF_BYTES)
+  const prompt = buildPrAuthorPrompt({
+    diffText,
+    diffTruncated: truncated,
+    logText,
+    base,
+    head,
+    hint: parsed.data.hint,
+  })
+  onProgress?.("Authoring PR title + body…")
+  const authored = await authorOnce(authorLLM, PR_AUTHOR_SYSTEM, prompt, ctx.signal)
+  if (!authored.ok) return { ok: false, reason: "author", output: authored.error }
+  const pr = parsePrAuthored(authored.text)
+  return { ok: true, title: pr.title, body: pr.body, base, head, parsed: pr }
+}
+
 export const gitComposePrTool = (
   runner: GitRunner,
   authorLLM: LLMPort,
@@ -608,69 +673,28 @@ export const gitComposePrTool = (
     "AUTHOR a pull-request title + body from the branch-vs-base diff and commit " +
     "log using a one-shot LLM completion. Returns the title + body — it does NOT " +
     "open a PR. Default range is origin/main...HEAD; pass {base, head} to " +
-    "override. Feed the returned title/body to gh_pr_create.",
+    "override. Feed the returned title/body to gh_pr_create, or use gh_pr_open " +
+    "to author + open the PR in one step.",
   inputSchema: gitComposePrInputSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
   hitlTier: () => "none",
 
   async *execute(input: GitComposePrInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
-    const parsed = gitComposePrInputSchema.safeParse(input)
-    if (!parsed.success) {
-      yield {
-        type: "result",
-        result: { ok: false, output: `invalid input: ${parsed.error.message}` },
-      }
-      return
-    }
-    const range = resolveRange(parsed.data)
-    if (!range.ok) {
-      yield { type: "result", result: { ok: false, output: range.output } }
-      return
-    }
-    const { base, head } = range
-
-    const diffArgs = ["diff", `${base}...${head}`]
-    yield { type: "progress", message: `git ${diffArgs.join(" ")}` }
-    const outcome = await classifyDiff(runner, diffArgs, ctx)
-    if (outcome.kind === "deny") {
-      yield { type: "result", result: { ok: false, output: outcome.output } }
-      return
-    }
-    if (outcome.kind === "empty") {
-      yield {
-        type: "result",
-        result: {
-          ok: false,
-          output: `git_compose_pr: ${base}...${head} is empty — nothing to describe.`,
-        },
-      }
-      return
-    }
-
-    // Commit log is best-effort context: a failure here must not block
-    // authoring (we still have the diff), so we fall back to an empty log.
-    const logArgs = ["log", "--oneline", "--no-decorate", `${base}..${head}`]
-    const logOut = await classifyDiff(runner, logArgs, ctx)
-    const logText = logOut.kind === "ok" ? truncate(logOut.body, MAX_LOG_BYTES).text : ""
-
-    const { text: diffText, truncated } = truncate(outcome.body, MAX_DIFF_BYTES)
-    const prompt = buildPrAuthorPrompt({
-      diffText,
-      diffTruncated: truncated,
-      logText,
-      base,
-      head,
-      hint: parsed.data.hint,
+    const messages: ToolEvent[] = []
+    const out = await composePrText(runner, authorLLM, input, ctx, (message) => {
+      messages.push({ type: "progress", message })
     })
-    yield { type: "progress", message: "Authoring PR title + body…" }
-    const authored = await authorOnce(authorLLM, PR_AUTHOR_SYSTEM, prompt, ctx.signal)
-    if (!authored.ok) {
-      yield { type: "result", result: { ok: false, output: authored.error } }
+    for (const m of messages) yield m
+    if (!out.ok) {
+      const output =
+        out.reason === "empty"
+          ? `git_compose_pr: ${out.base}...${out.head} is empty — nothing to describe.`
+          : out.output
+      yield { type: "result", result: { ok: false, output } }
       return
     }
-    const pr = parsePrAuthored(authored.text)
-    const rendered = [`title: ${pr.title}`, "", pr.body].join("\n")
-    yield { type: "result", result: { ok: true, output: rendered, structured: pr } }
+    const rendered = [`title: ${out.title}`, "", out.body].join("\n")
+    yield { type: "result", result: { ok: true, output: rendered, structured: out.parsed } }
   },
 })

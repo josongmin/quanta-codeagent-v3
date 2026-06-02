@@ -46,6 +46,24 @@ export interface RuntimeFacadeComposeOptions {
   /** Publisher the loop fires once with a live working-state snapshot getter
    *  (mirrors `onPromptAssembled`). The surface retains it for `/state`. */
   readonly onWorkingStateReady?: AgentConfig["onWorkingStateReady"]
+  /** Per-turn stream-input capture sink. The surface retains the latest so
+   *  `/retry-with` can re-stream the last turn against an alternate model. */
+  readonly onTurnStreamInput?: AgentConfig["onTurnStreamInput"]
+  /** Shadow object-DB for `/snapshot` browse/restore/diff + branch-search
+   *  anchors. Absent ⇒ `/snapshot` prints "shadow store not configured". */
+  readonly shadowOdb?: AgentConfig["shadowOdb"]
+  /** Auto-checkpoint policy — anchors workspace snapshots into `shadowOdb`
+   *  around tool calls so `/snapshot` has restore points to browse. */
+  readonly shadowCheckpoint?: AgentConfig["shadowCheckpoint"]
+  /** Pre-compaction HITL hook. When set, the loop awaits this before folding
+   *  history; the CLI maps it to the interactive approval prompt. */
+  readonly onPreCompact?: AgentConfig["onPreCompact"]
+  /** Image-sanitization retry wrapper. When enabled, the loop wraps `llm` to
+   *  retry image-bearing turns with a placeholder if the provider rejects. */
+  readonly imageSanitizationRetry?: AgentConfig["imageSanitizationRetry"]
+  /** Per-turn git turn-diff capture. When enabled, the loop builds a
+   *  TurnDiffSession and emits `turn_diff_updated` events the CLI renders. */
+  readonly gitObservability?: AgentConfig["gitObservability"]
 }
 
 export interface CreateRuntimeFacadeArgs extends InternalCreateRuntimeFacadeArgs {
@@ -153,6 +171,36 @@ const applyRuntimeFacadeComposeOptions = (
   if (compose.onWorkingStateReady !== undefined) {
     next = patchRuntimeContextState(next, {
       onWorkingStateReady: compose.onWorkingStateReady,
+    })
+  }
+  if (compose.onTurnStreamInput !== undefined) {
+    next = patchRuntimeContextState(next, {
+      onTurnStreamInput: compose.onTurnStreamInput,
+    })
+  }
+  if (compose.shadowOdb !== undefined) {
+    next = patchRuntimeContextState(next, {
+      shadowOdb: compose.shadowOdb,
+    })
+  }
+  if (compose.shadowCheckpoint !== undefined) {
+    next = patchRuntimeContextState(next, {
+      shadowCheckpoint: compose.shadowCheckpoint,
+    })
+  }
+  if (compose.onPreCompact !== undefined) {
+    next = patchRuntimeContextState(next, {
+      onPreCompact: compose.onPreCompact,
+    })
+  }
+  if (compose.imageSanitizationRetry !== undefined) {
+    next = patchRuntimeContextState(next, {
+      imageSanitizationRetry: compose.imageSanitizationRetry,
+    })
+  }
+  if (compose.gitObservability !== undefined) {
+    next = patchRuntimeContextState(next, {
+      gitObservability: compose.gitObservability,
     })
   }
   if (compose.registryToolMapper !== undefined) {

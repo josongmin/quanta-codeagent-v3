@@ -629,6 +629,25 @@ const streamConsume = async (
   // SAME `TurnSession`/`TurnState` bundles.
   const anchors: TurnTimingAnchors = { turnTimingCapture }
   const callbacks = createStreamDispatcher(session, state, anchors)
+  // `/retry-with` — capture the EXACT stream input for this turn so the surface
+  // can re-stream it against an alternate model. Gated: absent hook ⇒ no-op
+  // (byte-identical). Pure observation; never throws into the loop.
+  if (config.onTurnStreamInput !== undefined) {
+    try {
+      config.onTurnStreamInput({
+        messages,
+        system,
+        tools: specs,
+        ...(turnLlm.thinking !== undefined ? { thinking: turnLlm.thinking } : {}),
+        ...(toolChoice.kind !== "auto" ? { toolChoice } : {}),
+      })
+    } catch (e) {
+      config.stream.emit({
+        type: "error",
+        message: `onTurnStreamInput observer threw: ${errMessage(e)}`,
+      })
+    }
+  }
   try {
     const outcome = await streamingTurn({
       events: teeUsage(

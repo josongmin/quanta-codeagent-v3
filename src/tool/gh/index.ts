@@ -22,8 +22,11 @@
  *     loop (boundary discipline, not a fallback for missing data).
  */
 import { z } from "zod"
+import type { LLMPort } from "../../llm"
+import type { GitRunner } from "../git/types"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { ghPrBlameTool } from "./pr-blame"
+import { ghPrOpenTool } from "./pr-open"
 import { normalizeRef, refRejected } from "./ref"
 import { DEFAULT_TIMEOUT_MS, type GhRunner, type GhRunResult, defaultGhRunner } from "./runner"
 
@@ -31,6 +34,7 @@ import { DEFAULT_TIMEOUT_MS, type GhRunner, type GhRunResult, defaultGhRunner } 
 export { defaultGhRunner } from "./runner"
 export type { GhRunner, GhRunResult } from "./runner"
 export { ghPrBlameTool } from "./pr-blame"
+export { ghPrOpenTool } from "./pr-open"
 
 // ── Read tools ─────────────────────────────────────────────────────────────
 
@@ -393,7 +397,16 @@ export const ghPrListTool = (runner: GhRunner = defaultGhRunner): Tool<PrListInp
 /** All gh tools (6 RFC may-22 + 3 ADR-0103/0104 = 9). Pass an injected
  *  runner for tests. Order: read-only first (view/issue/checks/list/blame/
  *  review_diff), then mutating (comment/create/auto_merge). */
-export const ghTools = (runner: GhRunner = defaultGhRunner): Tool[] => [
+/** Options for {@link ghTools}. Extends {@link GhPrCreateToolOpts} (directive
+ *  wiring) with the two slots `gh_pr_open` needs: an author LLM and a git
+ *  runner. DEFAULT-OFF — when EITHER is absent `gh_pr_open` is NOT registered,
+ *  so the tool set stays byte-identical for every existing caller (RFC §1.2). */
+export interface GhToolsOpts extends GhPrCreateToolOpts {
+  readonly authorLLM?: LLMPort
+  readonly gitRunner?: GitRunner
+}
+
+export const ghTools = (runner: GhRunner = defaultGhRunner, opts: GhToolsOpts = {}): Tool[] => [
   ghPrViewTool(runner) as Tool,
   ghIssueViewTool(runner) as Tool,
   ghCheckStatusTool(runner) as Tool,
@@ -405,4 +418,9 @@ export const ghTools = (runner: GhRunner = defaultGhRunner): Tool[] => [
   ghPrCommentTool(runner) as Tool,
   ghPrCreateTool(runner) as Tool,
   ghPrAutoMergeTool(runner) as Tool,
+  // ADR-0459 `gh_pr_open` (author + open) — OFF unless BOTH an author LLM and a
+  // git runner are wired; absent ⇒ no extra tool (byte-identical).
+  ...(opts.authorLLM !== undefined && opts.gitRunner !== undefined
+    ? [ghPrOpenTool(runner, opts.gitRunner, opts.authorLLM, opts) as Tool]
+    : []),
 ]

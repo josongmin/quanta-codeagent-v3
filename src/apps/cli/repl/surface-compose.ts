@@ -19,7 +19,14 @@ import {
   type SendNowInjection,
 } from "@/agent/plan-queue"
 import { buildMentionSymbolDeps } from "@/host/runtime/internal/mention-symbol-deps"
-import type { Message } from "@/llm"
+import {
+  type Message,
+  type ModelCandidate,
+  type Provider,
+  type StreamEvent,
+  type StreamInput,
+  tryCreateLLM,
+} from "@/llm"
 import { buildCostDashboard, GEN_AI_ATTRS, renderDashboardText } from "@/observability"
 import type {
   RuntimeFacadeComposeOptions,
@@ -33,6 +40,7 @@ import {
   saveSessionById,
 } from "@/session"
 import { errMessage, logger } from "@/shared"
+import { defaultShadowOdb, type ShadowOdb } from "@/storage"
 import {
   type AtCandidateProvider,
   atAutocompleteEnabled,
@@ -40,9 +48,9 @@ import {
 } from "../at-autocomplete"
 import { runImageCmd } from "../image-cmd"
 import type { ImageQueue } from "../image-queue"
-import type { MemorySlashState } from "../memory-cmd"
 import { loadKeybindings } from "../keybindings/load"
 import type { KeybindingMap } from "../keybindings/types"
+import type { MemorySlashState } from "../memory-cmd"
 import {
   createModeCycleStore,
   formatPostureMeta,
@@ -51,6 +59,7 @@ import {
 } from "../mode-cycle"
 import { createPromptHistory, type PromptHistory } from "../prompt-history"
 import { buildExternalEditor, type ExternalEditorPort } from "../raw-line-reader-editor"
+import type { RetryWithSessionState } from "../retry-with"
 import type { RewindSlashState } from "../rewind-cmd"
 import type { ConvCheckpointSlashState } from "../rewind-conv-cmd"
 import type { SessionIoState } from "../session-cmd"
@@ -102,6 +111,43 @@ const isEnvTruthy = (raw: string | undefined): boolean => {
   if (raw === undefined) return false
   const norm = raw.trim().toLowerCase()
   return norm !== "" && norm !== "0" && norm !== "false" && norm !== "off" && norm !== "no"
+}
+
+/** `/retry-with` — parse `QUANTA_RETRY_MODELS` (comma-separated model ids) into
+ *  {@link ModelCandidate}s for the current provider. The current model is
+ *  prepended so `resolveRetryModel` can escalate past it. Each port is built
+ *  via {@link tryCreateLLM}; a candidate whose provider key is missing is
+ *  dropped (null) rather than crashing the surface. Returns `[]` when the env
+ *  knob is unset/empty ⇒ the slot is omitted ⇒ `/retry-with` prints
+ *  "no model candidates configured" (default-OFF). */
+export const buildRetryCandidates = (
+  env: NodeJS.ProcessEnv,
+  provider: Provider,
+  currentModelId: string,
+): ModelCandidate[] => {
+  const raw = env.QUANTA_RETRY_MODELS
+  if (raw === undefined || raw.trim() === "") return []
+  const ids = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+  if (ids.length === 0) return []
+  // De-dup while keeping the current model first.
+  const ordered = [currentModelId, ...ids.filter((id) => id !== currentModelId)]
+  const out: ModelCandidate[] = []
+  for (const id of ordered) {
+    const port = tryCreateLLM(provider, { model: id }, env)
+    if (port !== null) out.push({ id, port })
+  }
+  return out
+}
+
+/** `/retry-with` onEvent renderer — print the alternate model's streamed text
+ *  to stdout (read-only preview; the live transcript is never mutated). Only
+ *  text deltas surface; control events are ignored. */
+const renderRetryEvent = (ev: StreamEvent): void => {
+  if (ev.type === "text_delta") process.stdout.write(ev.delta)
+  else if (ev.type === "message_stop") process.stdout.write("\n")
 }
 
 /** RFC-08 / ADR-0443 — build the mode-cycle store + its derived pill/hook when
@@ -443,6 +489,14 @@ const buildSurfaceDispatch = (args: {
   /** `/state` working-state snapshot getter. Always wired (returns undefined
    *  when `QUANTA_WORKING_STATE` is off ⇒ `/state` renders an empty panel). */
   readonly workingState?: (() => WorkingState | undefined) | undefined
+  /** `/retry-with` session-state factory. Returns the live re-stream state
+   *  (candidates + last stream input + stdout renderer) or undefined when the
+   *  feature is off or no turn has streamed yet ⇒ slot omitted. */
+  readonly retry?: (() => RetryWithSessionState | undefined) | undefined
+  /** `/snapshot` shadow object-DB (SAME instance the loop checkpoints into).
+   *  Present only when `QUANTA_SHADOW` is on ⇒ otherwise slot omitted and the
+   *  slash prints "shadow store not configured". */
+  readonly shadowOdb?: ShadowOdb | undefined
 }): ((input: string) => Promise<boolean>) => {
   return async (input: string): Promise<boolean> => {
     const head = input.split(/\s+/)[0] ?? ""
@@ -483,6 +537,14 @@ const buildSurfaceDispatch = (args: {
       // `/state` working-state snapshot getter: always wired (empty when the
       // feature is off ⇒ renders an empty panel instead of "not wired").
       ...(args.workingState !== undefined ? { workingState: args.workingState } : {}),
+      // `/retry-with` re-stream state: present only when the feature is on AND a
+      // turn has streamed (so there is a stream input to replay).
+      ...(() => {
+        const retry = args.retry?.()
+        return retry !== undefined ? { retry } : {}
+      })(),
+      // `/snapshot` shadow store: present only when QUANTA_SHADOW is on.
+      ...(args.shadowOdb !== undefined ? { shadowOdb: args.shadowOdb } : {}),
     }
     await runSlashCommand(input, ctx)
     return true
@@ -620,6 +682,37 @@ export const composeSurfaceWires = (
   // stays undefined so `/state` renders an empty panel (NOT "not wired").
   let workingStateGet: (() => WorkingState | undefined) | undefined
   const workingStateEnabled = isEnvTruthy(envSource.QUANTA_WORKING_STATE)
+  // `/retry-with` — model candidates from `QUANTA_RETRY_MODELS` + the latest
+  // per-turn stream input (captured via `onTurnStreamInput` when enabled). Both
+  // default-OFF: empty candidates ⇒ slot omitted ⇒ "no model candidates
+  // configured"; no capture hook installed ⇒ config byte-identical.
+  const retryCandidates = buildRetryCandidates(envSource, setup.provider, setup.model)
+  const retryEnabled = retryCandidates.length > 0
+  let lastStreamInput: StreamInput | undefined
+  // `/snapshot` — shadow object-DB. Env-gated `QUANTA_SHADOW`: builds ONE store
+  // shared by the loop's auto-checkpoint (pre-destructive anchors) AND the
+  // `/snapshot` slash (browse/restore/diff). Per-session cost (a shadow git dir
+  // under ~/.quanta), so default-OFF. Absent ⇒ `/snapshot` prints "not
+  // configured" + no checkpoint wrap (config byte-identical).
+  const shadowOdb: ShadowOdb | undefined = isEnvTruthy(envSource.QUANTA_SHADOW)
+    ? defaultShadowOdb()
+    : undefined
+  // Pre-compaction HITL — env-gated `QUANTA_PRECOMPACT_CONFIRM`. When the loop is
+  // about to fold history, prompt the user via the SAME interactive approval
+  // mechanism tool-confirmations use. Deny ⇒ defer one turn (never fold without
+  // an answer). Absent ⇒ auto-approve (byte-identical legacy).
+  const onPreCompact: NonNullable<RuntimeFacadeComposeOptions["onPreCompact"]> | undefined =
+    isEnvTruthy(envSource.QUANTA_PRECOMPACT_CONFIRM)
+      ? async (query) => {
+          const approxK = Math.round(query.proposedSummaryTokens / 1000)
+          const decision = await setup.approvalPrompt({
+            approvalId: `precompact-${query.turnId}`,
+            reason: `Compact ~${approxK}k tokens of history into a summary? (context ${Math.round(query.currentTokens / 1000)}k/threshold ${Math.round(query.threshold / 1000)}k)`,
+            requestedAt: new Date().toISOString(),
+          })
+          return decision === "approve" ? "approve" : "defer_one_turn"
+        }
+      : undefined
   const runtimeFacadeCompose: RuntimeFacadeComposeOptions = {
     granularRegistry,
     onPromptAssembled: promptAssembled.sink,
@@ -632,6 +725,33 @@ export const composeSurfaceWires = (
           },
         }
       : {}),
+    ...(retryEnabled
+      ? {
+          onTurnStreamInput: (input) => {
+            lastStreamInput = input
+          },
+        }
+      : {}),
+    ...(shadowOdb !== undefined
+      ? {
+          shadowOdb,
+          // Auto-anchor BEFORE destructive tools so `/snapshot` has restore
+          // points without the user manually checkpointing.
+          shadowCheckpoint: { mode: "pre-destructive" as const },
+        }
+      : {}),
+    ...(onPreCompact !== undefined ? { onPreCompact } : {}),
+    // Image-sanitization retry (ADR-0328) — resilience for image-bearing turns:
+    // retry with a placeholder when the provider rejects an image. Env-gated
+    // `QUANTA_IMAGE_SANITIZATION`; absent ⇒ llm unwrapped (byte-identical).
+    ...(isEnvTruthy(envSource.QUANTA_IMAGE_SANITIZATION)
+      ? { imageSanitizationRetry: { enabled: true } }
+      : {}),
+    // Per-turn git turn-diff (ADR-0125) — the loop builds the TurnDiffSession
+    // and emits `turn_diff_updated`; the CLI timeline/debug renderers already
+    // consume it. Env-gated `QUANTA_TURN_DIFF`; per-turn `git diff` spawn cost
+    // when on, byte-identical when off.
+    ...(isEnvTruthy(envSource.QUANTA_TURN_DIFF) ? { gitObservability: { enabled: true } } : {}),
   }
   // ADR-0292 — turn-end record wire. Env-gated: `QUANTA_CHECKPOINT_CONV=on`
   // wires the live wire; anything else leaves the slot `null` so the slash
@@ -738,6 +858,10 @@ export const composeSurfaceWires = (
     // the slot entirely (default-OFF byte-identical).
     composerHandle,
     conversationStore: convStore,
+    // NOTE: `/rewind-tool` (perToolRegistry) is intentionally NOT wired here —
+    // it needs the ADR-0203 per-tool-checkpoint POLICY (a distinct subsystem
+    // from the `granularRegistry` GranularRegistryPort above) wired as a
+    // producer into dispatch first. Tracked as a deeper follow-up.
     ...(setup.runtimeContext.toolProfileState() !== undefined
       ? { toolProfileState: setup.runtimeContext.toolProfileState() }
       : {}),
@@ -801,6 +925,20 @@ export const composeSurfaceWires = (
     ...(memorySlot !== undefined ? { memory: memorySlot } : {}),
     planQueue: planQueueStore,
     workingState: () => workingStateGet?.(),
+    retry: () =>
+      retryEnabled && lastStreamInput !== undefined
+        ? {
+            candidates: retryCandidates,
+            currentModelId: setup.model,
+            // Read-only preview: re-stream against a COPY so the slash's
+            // `dropLastAssistantMessage` never mutates the live transcript.
+            messages: [...state.history],
+            streamInput: lastStreamInput,
+            signal: setup.abort.signal,
+            onEvent: renderRetryEvent,
+          }
+        : undefined,
+    ...(shadowOdb !== undefined ? { shadowOdb } : {}),
   })
 
   return {
