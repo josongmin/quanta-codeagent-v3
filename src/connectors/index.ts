@@ -18,6 +18,16 @@ export {
   registerOAuthClient,
 } from "./oauth-registration"
 export { createRestConnectorRegistry, type RestRegistryConfig } from "./rest-registry"
+export {
+  BACKOFF_BASE_MS,
+  BACKOFF_MAX_MS,
+  createTokenRefreshScheduler,
+  LEAD_MS,
+  type TimerHandle,
+  type TimerPort,
+  type TokenRefreshScheduler,
+  type TokenRefreshSchedulerConfig,
+} from "./token-refresh-scheduler"
 export { createTokenRotator, type TokenRotator, type TokenRotatorConfig } from "./token-rotation"
 export type {
   CacheEntry,
