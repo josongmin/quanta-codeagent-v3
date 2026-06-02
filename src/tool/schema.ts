@@ -36,6 +36,21 @@ const node = (schema: AnyDef): Record<string, unknown> => {
       }
       return { type: "object", properties, required, ...desc }
     }
+    case "ZodLiteral":
+      // A literal pins one constant value. JSON Schema models that as a
+      // single-element `enum`; the JS `typeof` tells the model the primitive
+      // shape. Used by discriminated-union discriminant fields (e.g. `op`).
+      return { type: typeof def.value, enum: [def.value], ...desc }
+    case "ZodDiscriminatedUnion":
+    case "ZodUnion": {
+      // Anthropic tool `input_schema` must be a top-level object schema, so we
+      // emit `type: "object"` and enumerate the branches as `oneOf`. Each
+      // branch of a tool-input union is itself an object schema. Without this
+      // a union-typed tool input would advertise a typeless (open) schema to
+      // the model — a real correctness bug for `session_config`.
+      const options = (def.options as AnyDef[]) ?? []
+      return { type: "object", oneOf: options.map((o) => node(o)), ...desc }
+    }
     case "ZodAny":
     case "ZodUnknown":
       // Intentionally unconstrained: an open schema (no `type`) means "any JSON

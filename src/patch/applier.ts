@@ -91,48 +91,147 @@ export async function applyPatch(
   fs: PatchFileSystemPort,
   observer?: PatchObserver,
 ): Promise<ApplyResult> {
+  const emit = wrapObserver(observer)
+
+  // ── Phase 1: PLAN ────────────────────────────────────────────────────────
+  // Validate every op and compute its concrete mutations (read files, locate
+  // hunks, derive new content) WITHOUT touching disk. Any failure here — a
+  // missing target, an occupied move destination, an unlocatable anchor — is
+  // raised before a single byte is written, so the host filesystem is
+  // guaranteed untouched. Observer events are buffered, never emitted, in this
+  // phase: a plan that later aborts must produce ZERO observations.
   const result: ApplyResult = {
     filesAdded: [],
     filesDeleted: [],
     filesUpdated: [],
     filesMoved: [],
   }
-
-  const emit = wrapObserver(observer)
+  const buffered: PatchObservation[] = []
+  const plans: OpPlan[] = []
   for (const op of patch.ops) {
-    await applyOp(op, fs, result, emit)
+    plans.push(await planOp(op, fs, result, (event) => buffered.push(event)))
   }
 
+  // ── Phase 2: COMMIT ──────────────────────────────────────────────────────
+  // Execute the planned mutations, journaling an inverse action for each
+  // landed step. On ANY failure we replay the journal in reverse to restore
+  // the original on-disk state, then rethrow — so a multi-op patch is
+  // all-or-nothing across the WHOLE call, not merely within a single op. The
+  // rename-edit path uses `fs.renameFile` (the atomic primitive): a partial
+  // rename failure that leaks the destination is undone by the journal.
+  const journal: Array<() => Promise<void>> = []
+  try {
+    for (const plan of plans) await commitPlan(plan, fs, journal)
+  } catch (err) {
+    await rollback(journal)
+    // A commit-phase I/O failure (e.g. a write/rename that the port rejects
+    // mid-flight) surfaces as a typed PatchApplyError so callers keep a single
+    // error contract — UNLESS it is already one of our typed patch errors.
+    if (err instanceof PatchApplyError || err instanceof PatchAnchorNotFoundError) throw err
+    throw new PatchApplyError(`Patch commit failed and was rolled back: ${errMessage(err)}`, "")
+  }
+
+  // Commit succeeded — only now are observations real. Flush in patch order.
+  for (const event of buffered) emit(event)
   return result
 }
 
-/** Dispatch one op. Each branch is responsible for full pre-flight validation. */
-async function applyOp(
-  op: PatchOp,
-  fs: PatchFileSystemPort,
-  result: ApplyResult,
-  emit: PatchObserver,
-): Promise<void> {
-  switch (op.kind) {
-    case "add":
-      await applyAdd(op, fs, result)
-      emit({ op: "add" })
-      return
-    case "delete":
-      await applyDelete(op, fs, result)
-      emit({ op: "delete" })
-      return
-    case "update":
-      await applyUpdate(op, fs, result, emit)
-      return
+/** A fully-validated, side-effect-free description of one op's mutations,
+ *  ready to commit. Derived in phase 1; executed in phase 2. */
+type OpPlan =
+  | { kind: "add"; path: string; content: string }
+  | { kind: "delete"; path: string; original: string }
+  | { kind: "update"; path: string; original: string; next: string }
+  | {
+      kind: "move"
+      path: string
+      moveTo: string
+      original: string
+      next: string
+    }
+
+/** Replay journaled inverse actions newest-first to restore the pre-commit
+ *  on-disk state. Inverse-action failures are swallowed: rollback is
+ *  best-effort and must never mask the original error that triggered it. */
+async function rollback(journal: Array<() => Promise<void>>): Promise<void> {
+  for (let i = journal.length - 1; i >= 0; i--) {
+    const undo = journal[i]
+    if (undo === undefined) continue
+    try {
+      await undo()
+    } catch {
+      // Best-effort: a failed undo must not eclipse the triggering error.
+    }
   }
 }
 
-async function applyAdd(
+/** Validate + plan one op (no disk writes). Buffered observer events for
+ *  landed hunks are recorded here but only flushed by the caller AFTER the
+ *  whole patch commits. Each branch performs full pre-flight validation. */
+async function planOp(
+  op: PatchOp,
+  fs: PatchFileSystemPort,
+  result: ApplyResult,
+  buffer: PatchObserver,
+): Promise<OpPlan> {
+  switch (op.kind) {
+    case "add":
+      return planAdd(op, fs, result, buffer)
+    case "delete":
+      return planDelete(op, fs, result, buffer)
+    case "update":
+      return planUpdate(op, fs, result, buffer)
+  }
+}
+
+/** Execute one planned op, pushing inverse actions onto `journal` as each
+ *  on-disk step lands so a later failure can be rolled back. */
+async function commitPlan(
+  plan: OpPlan,
+  fs: PatchFileSystemPort,
+  journal: Array<() => Promise<void>>,
+): Promise<void> {
+  switch (plan.kind) {
+    case "add": {
+      await fs.writeFile(plan.path, plan.content)
+      journal.push(() => fs.deleteFile(plan.path))
+      return
+    }
+    case "delete": {
+      await fs.deleteFile(plan.path)
+      journal.push(() => fs.writeFile(plan.path, plan.original))
+      return
+    }
+    case "update": {
+      await fs.writeFile(plan.path, plan.next)
+      journal.push(() => fs.writeFile(plan.path, plan.original))
+      return
+    }
+    case "move": {
+      // Apply the edit in place on the source, then atomically rename to the
+      // destination. We journal the rename-undo BEFORE invoking renameFile:
+      // a port whose rename leaks the destination then fails mid-flight (the
+      // write-then-throw hazard) must still have its destination reaped. The
+      // undo deletes the destination if present and restores the source so the
+      // companion write-undo can return it to its original content.
+      await fs.writeFile(plan.path, plan.next)
+      journal.push(() => fs.writeFile(plan.path, plan.original))
+      journal.push(async () => {
+        if (await fs.exists(plan.moveTo)) await fs.deleteFile(plan.moveTo)
+        if (!(await fs.exists(plan.path))) await fs.writeFile(plan.path, plan.next)
+      })
+      await fs.renameFile(plan.path, plan.moveTo)
+      return
+    }
+  }
+}
+
+async function planAdd(
   op: Extract<PatchOp, { kind: "add" }>,
   fs: PatchFileSystemPort,
   result: ApplyResult,
-): Promise<void> {
+  buffer: PatchObserver,
+): Promise<OpPlan> {
   if (await fs.exists(op.path)) {
     throw new PatchApplyError("Add File target already exists", op.path)
   }
@@ -141,28 +240,33 @@ async function applyAdd(
   // being "" would imply it, but parser strips the prefix so an explicit
   // trailing blank line in the add block becomes a real "" entry).
   const content = op.lines.join("\n")
-  await fs.writeFile(op.path, content)
   result.filesAdded.push(op.path)
+  buffer({ op: "add" })
+  return { kind: "add", path: op.path, content }
 }
 
-async function applyDelete(
+async function planDelete(
   op: Extract<PatchOp, { kind: "delete" }>,
   fs: PatchFileSystemPort,
   result: ApplyResult,
-): Promise<void> {
+  buffer: PatchObserver,
+): Promise<OpPlan> {
   if (!(await fs.exists(op.path))) {
     throw new PatchApplyError("Delete File target does not exist", op.path)
   }
-  await fs.deleteFile(op.path)
+  // Capture the original content so the commit phase can journal a restore.
+  const original = await fs.readFile(op.path)
   result.filesDeleted.push(op.path)
+  buffer({ op: "delete" })
+  return { kind: "delete", path: op.path, original }
 }
 
-async function applyUpdate(
+async function planUpdate(
   op: Extract<PatchOp, { kind: "update" }>,
   fs: PatchFileSystemPort,
   result: ApplyResult,
-  emit: PatchObserver,
-): Promise<void> {
+  buffer: PatchObserver,
+): Promise<OpPlan> {
   if (!(await fs.exists(op.path))) {
     throw new PatchApplyError("Update File target does not exist", op.path)
   }
@@ -183,39 +287,19 @@ async function applyUpdate(
     const hunk = op.hunks[hunkIdx]
     if (hunk === undefined) continue
     const tier = applyHunkInPlace(workLines, hunk, op.path, hunkIdx)
-    emit({ op: hunkOp, fuzzyMatchTier: tier })
+    buffer({ op: hunkOp, fuzzyMatchTier: tier })
   }
 
   const next = joinLines(workLines, trailingNewline)
 
-  // Atomic semantics: rename + edit. We write the new content to the FINAL
-  // location and delete the source. Either both succeed or neither (any
-  // throw aborts before mutating disk past the validations above; the
-  // write+delete pair below is the only multi-step section and is documented).
   if (op.moveTo !== undefined) {
-    // Strategy: write new content to destination FIRST, then delete source.
-    // If write fails, source untouched. If delete fails after write, we
-    // surface an error — but in practice the same backing filesystem either
-    // succeeds at both or neither for a renamed file.
-    await fs.writeFile(op.moveTo, next)
-    try {
-      await fs.deleteFile(op.path)
-    } catch (e) {
-      // Best-effort rollback of the destination so we don't leave a duplicate.
-      // We rethrow the original error with full context — NOT swallowed.
-      const detail = errMessage(e)
-      throw new PatchApplyError(
-        `Move-edit partial failure: wrote '${op.moveTo}' but could not delete '${op.path}': ${detail}`,
-        op.path,
-      )
-    }
     result.filesMoved.push([op.path, op.moveTo])
-    emit({ op: "move" })
-  } else {
-    await fs.writeFile(op.path, next)
-    result.filesUpdated.push(op.path)
-    emit({ op: "update" })
+    buffer({ op: "move" })
+    return { kind: "move", path: op.path, moveTo: op.moveTo, original, next }
   }
+  result.filesUpdated.push(op.path)
+  buffer({ op: "update" })
+  return { kind: "update", path: op.path, original, next }
 }
 
 /** Fuzzy-tier label emitted to telemetry when a hunk lands. Mirrors the
