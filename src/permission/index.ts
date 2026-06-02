@@ -146,6 +146,22 @@ export {
   inferSandboxPolicy,
   inferToolTier,
 } from "./policy"
+export type {
+  ConfigLayer,
+  LayerSource,
+  MergeOptions,
+  MergeResult,
+  MergeStrategy,
+  OverriddenMetadata,
+  RestrictivenessSpec,
+} from "./policy-layers"
+export {
+  isLayerSource,
+  LAYER_SOURCE_PRECEDENCE_ASC,
+  layerSourceRank,
+  mergeLayered,
+  resolvePolicyLayers,
+} from "./policy-layers"
 export type { PostDenialAction, PostDenialClock } from "./post-denial"
 export {
   clearDenialRecord,
@@ -155,6 +171,8 @@ export {
   recordRiskSeen,
   recordUserOverride,
 } from "./post-denial"
+export type { ProfileLayerSlots } from "./profile-layer-merge"
+export { mergeProfileLayers, PROFILE_RESTRICTIVENESS } from "./profile-layer-merge"
 export type {
   ListProfilesOptions,
   ProfileListEntry,

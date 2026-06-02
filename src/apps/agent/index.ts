@@ -72,7 +72,11 @@ import { type CapabilityNegotiator, defaultNegotiator, fullNegotiator } from "@/
 import {
   createTwoLayerManager,
   isNamedProfileName,
+  type MergeStrategy,
+  mergeProfileLayers,
   type PermissionMode,
+  type PermissionProfile,
+  type ProfileLayerSlots,
   permissionModeFromProfile,
   resolveProfileByName,
   type TwoLayerManager,
@@ -119,28 +123,80 @@ const resolveIdentityFromEnv = (env: NodeJS.ProcessEnv): readonly string[] | und
   return defaultIdentityProvider().identityFor(raw as IdentityMode)
 }
 
-/** GAP2 — resolve the live `PermissionContext.mode` override from a named
- *  permission profile selected at the composition root. The profile name comes
- *  from `QUANTA_PERMISSION_PROFILE` (or a future `--permission-profile` CLI flag
- *  the surface seeds into the env view). When set, the named profile is resolved
- *  (FAIL-CLOSED: `resolveProfileByName` THROWS on an unknown name — a typo'd
- *  profile must not silently fall back to a permissive mode) and its
- *  `approval.mode` is DERIVED into the loop's `PermissionContext.mode` via the
- *  pure `permissionModeFromProfile` mapper.
+/** Layered-profile merge strategy from the `policy-merge` knob. ABSENT / typo /
+ *  empty ⇒ `"source-precedence"` — the pre-existing precedence (most-
+ *  authoritative present source wins each field). Selecting it preserves
+ *  current behavior byte-identically; `"most-restrictive"` is the only
+ *  behavior-changing value. */
+export const resolvePolicyMergeStrategy = (env: NodeJS.ProcessEnv): MergeStrategy =>
+  env.QUANTA_POLICY_MERGE_STRATEGY === "most-restrictive" ? "most-restrictive" : "source-precedence"
+
+/** Resolve the optional layered named-profile slots from the composition-root
+ *  env view: `QUANTA_PERMISSION_PROFILE_PER_USER` / `_PER_REPO` / `_TEAM_ADMIN`.
+ *  Each is an OPTIONAL named-profile token resolved through the same fail-closed
+ *  registry as `QUANTA_PERMISSION_PROFILE` (a typo / `custom` THROWS). Returns
+ *  `undefined` when NO layered var is set ⇒ the caller falls back to the legacy
+ *  single-profile GAP2 wire (byte-identical). */
+export const resolveLayeredProfileSlots = (
+  env: NodeJS.ProcessEnv,
+): ProfileLayerSlots | undefined => {
+  const slotFor = (raw: string | undefined): PermissionProfile | undefined => {
+    if (raw === undefined || raw === "") return undefined
+    // FAIL-CLOSED — same posture as the single-profile resolver.
+    return resolveProfileByName(raw)
+  }
+  const perUser = slotFor(env.QUANTA_PERMISSION_PROFILE_PER_USER)
+  const perRepo = slotFor(env.QUANTA_PERMISSION_PROFILE_PER_REPO)
+  const teamAdmin = slotFor(env.QUANTA_PERMISSION_PROFILE_TEAM_ADMIN)
+  if (perUser === undefined && perRepo === undefined && teamAdmin === undefined) {
+    return undefined
+  }
+  return {
+    ...(perUser !== undefined ? { perUser } : {}),
+    ...(perRepo !== undefined ? { perRepo } : {}),
+    ...(teamAdmin !== undefined ? { teamAdmin } : {}),
+  }
+}
+
+/** GAP2 + layered-policy-merge — resolve the live `PermissionContext.mode`
+ *  override from the permission profile(s) selected at the composition root.
  *
- *  Returns `undefined` when no profile name is set ⇒ the caller leaves
- *  `base.permission` untouched ⇒ byte-identical legacy (RFC §1.2). We DERIVE the
- *  existing single permission context rather than publishing a second profile
- *  manager: the network axis is already enforced by the A1 dispatch-guard and
- *  the file-system axis is not dispatch-time-enforceable, so the only
- *  non-duplicating wire is the approval→context-mode derive. */
-const resolvePermissionModeFromProfile = (
+ *  Two paths, in precedence order:
+ *   1. LAYERED — when ≥1 of `QUANTA_PERMISSION_PROFILE_{PER_USER,PER_REPO,
+ *      TEAM_ADMIN}` is set, the slots are merged via `mergeProfileLayers` under
+ *      the `policy-merge` strategy (`QUANTA_POLICY_MERGE_STRATEGY`), and the
+ *      mode is derived from the MERGED profile's approval pillar. The strategy
+ *      deterministically changes the winner: under `source-precedence` the
+ *      most-authoritative layer's approval wins; under `most-restrictive` the
+ *      SAFER approval wins regardless of source.
+ *   2. SINGLE (legacy GAP2) — otherwise the single `QUANTA_PERMISSION_PROFILE`
+ *      (or `--permission-profile` flag, which WINS) is resolved and its
+ *      approval pillar derived.
+ *
+ *  FAIL-CLOSED throughout: an unknown / `custom` name THROWS (a typo'd profile
+ *  must not silently fall back to a permissive mode).
+ *
+ *  Returns `undefined` when NO profile (single or layered) is selected ⇒ the
+ *  caller leaves `base.permission` untouched ⇒ byte-identical legacy (RFC §1.2).
+ *  We DERIVE the existing single permission context rather than publishing a
+ *  second profile manager: the network axis is already enforced by the A1
+ *  dispatch-guard and the file-system axis is not dispatch-time-enforceable, so
+ *  the only non-duplicating wire is the approval→context-mode derive. */
+export const resolvePermissionModeFromProfile = (
   flag: import("./cli-args").PermissionProfileToken | undefined,
   env: NodeJS.ProcessEnv,
 ): PermissionMode | undefined => {
-  // Precedence MUST match resolvePermissionProfileManager: an explicit
-  // `--permission-profile` flag WINS over QUANTA_PERMISSION_PROFILE, so the
-  // derived mode and the published manager always describe the SAME profile.
+  // Layered path takes precedence when any layered var is present.
+  const layered = resolveLayeredProfileSlots(env)
+  if (layered !== undefined) {
+    const strategy = resolvePolicyMergeStrategy(env)
+    const { merged } = mergeProfileLayers(layered, strategy)
+    return permissionModeFromProfile(merged)
+  }
+  // Legacy single-profile GAP2 path. Precedence MUST match
+  // resolvePermissionProfileManager: an explicit `--permission-profile` flag
+  // WINS over QUANTA_PERMISSION_PROFILE, so the derived mode and the published
+  // manager always describe the SAME profile.
   const name = flag ?? env.QUANTA_PERMISSION_PROFILE
   if (name === undefined || name === "") return undefined
   // FAIL-CLOSED: throws on an unknown / `custom` name (a struct, not a registry

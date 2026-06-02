@@ -1,0 +1,78 @@
+id: layered-policy-merge
+title: Layered permission-policy merge (per-user / per-repo / team-admin)
+section: 3
+subsystem: permission profile merge — source layers + override metadata
+order: 295
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch]
+configurable: integrated
+telemetry_keys: []
+config_refs:
+  env:
+    - QUANTA_POLICY_MERGE_STRATEGY
+    - QUANTA_PERMISSION_PROFILE_PER_USER
+    - QUANTA_PERMISSION_PROFILE_PER_REPO
+    - QUANTA_PERMISSION_PROFILE_TEAM_ADMIN
+owners: ["@songmin"]
+labels: ["absorbed:codex", "absorbed:cursor", "surface:cli", "security-touched"]
+depends_on: [hitl-4-tier-gate]
+purpose: |
+  Pure layered struct-merge engine + the permission-domain wiring that consumes
+  it. Absorbs Codex `ConfigLayer / ConfigLayerSource / MergeStrategy /
+  OverriddenMetadata` + Cursor `SandboxPolicyMergeSources { per_user, per_repo,
+  team_admin }`: a `LayerSource` precedence (default < per-user < per-repo <
+  team-admin) folded into ONE merged struct with per-field
+  `OverriddenMetadata` (winner + every superseded source, count + identity).
+
+  Two strategies: `source-precedence` (the most-authoritative present source
+  wins each field — the PRE-EXISTING precedence) and `most-restrictive` (the
+  SAFER value wins each field regardless of authority, per an explicitly-declared
+  per-field safety polarity — NO global "false is safer" heuristic).
+
+  WIRING. The `policy-merge` knob (`QUANTA_POLICY_MERGE_STRATEGY`) selects the
+  strategy and folds it onto `AgentConfig.policyMergeStrategy`. At the
+  composition root (`buildBaseFromArgs`), when ≥1 layered profile env var
+  (`QUANTA_PERMISSION_PROFILE_{PER_USER,PER_REPO,TEAM_ADMIN}`) is set, the named
+  profiles are merged via `mergeProfileLayers` and the loop's LIVE
+  `PermissionContext.mode` is derived from the merged profile's approval pillar
+  (extending the GAP2 single-profile derive, commit 10b0928f). The merged
+  profile is also the struct a `TwoLayerManager` resolves access against, so the
+  strategy deterministically changes a real permission decision.
+
+  Default-OFF / byte-identical: absent knob ⇒ composition root treats the
+  strategy as `source-precedence` (the pre-existing precedence); absent layered
+  vars ⇒ the legacy single-profile GAP2 path is unchanged. Fail-closed: a typo'd
+  layered profile name THROWS at startup (no permissive fallback).
+evidence:
+  code:
+    - src/permission/policy-layers/index.ts
+    - src/permission/profile-layer-merge.ts
+    - src/runner/knobs/knobs/policy-merge.ts
+    - src/apps/agent/index.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/permission/policy-layers-hellgate.test.ts
+      - tests/unit/permission/profile-layer-merge-hellgate.test.ts
+      - tests/unit/permission/policy-merge-knob-integration-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: ["policy-merge"]
+deliberate_hold: null
+notes: |
+  Slice fence: `policy-layers/index.ts` is a PURE, domain-agnostic engine
+  (depends on nothing, not even `@/shared`). `profile-layer-merge.ts` supplies
+  the permission-domain safety polarity + the DEFAULT baseline, keeping the
+  engine a leaf. The composition-root wire reuses the EXISTING single permission
+  context (it does NOT publish a second profile manager): the network axis stays
+  enforced by the A1 dispatch-guard and the file-system axis is not
+  dispatch-time enforceable, so the approval→context-mode derive is the only
+  non-duplicating wire.
+
+  `fileSystem` is DELIBERATELY excluded from the most-restrictive safety spec
+  (an allow-list table has no scalar safety ordering) ⇒ it falls back to
+  source-precedence; encoding a "fewer entries = safer" rule would be an
+  arbitrary heuristic.

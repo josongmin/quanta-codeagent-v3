@@ -7,6 +7,7 @@ import type { Metrics } from "@/observability"
 import type {
   DenialMemory,
   LearningSource,
+  MergeStrategy,
   PatternGrantStore,
   PendingPermission,
   PermissionContext,
@@ -523,6 +524,23 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * Absent/false ⇒ dangerous actions ALWAYS go through the reviewer.
    */
   permissionAllowDangerous?: boolean
+  /**
+   * Layered-policy merge strategy (`policy-merge` knob /
+   * `QUANTA_POLICY_MERGE_STRATEGY`). Selects how layered named permission
+   * profiles (per-user / per-repo / team-admin) are folded into the effective
+   * profile at the composition root via `mergeProfileLayers`:
+   *   - `source-precedence` — most-authoritative present source wins each field
+   *     (team-admin > per-repo > per-user > default). This is the CURRENT
+   *     semantics — selecting it is byte-identical to the legacy single-profile
+   *     wire when only one layer is present.
+   *   - `most-restrictive`  — the SAFER value wins each field regardless of
+   *     source authority (per `PROFILE_RESTRICTIVENESS`).
+   *
+   * Absent ⇒ the composition root treats it as `source-precedence` (the
+   * pre-existing precedence), so an unset knob preserves current behavior
+   * byte-identically. Read by `buildBaseFromArgs`; not consumed by the loop.
+   */
+  policyMergeStrategy?: MergeStrategy
   /**
    * Wave-A admissibility bundle (ADR-0029/0031/0046/0061). Groups the
    * optional reviewer / rule-store / injected permission-store knobs under

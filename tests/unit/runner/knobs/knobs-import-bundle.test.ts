@@ -32,6 +32,7 @@ import { memoryModeKnob } from "@/runner/knobs/knobs/memory-mode"
 import { multiVoterKnob } from "@/runner/knobs/knobs/multi-voter"
 import { mustPassKnob } from "@/runner/knobs/knobs/must-pass"
 import { personaKnob } from "@/runner/knobs/knobs/persona"
+import { policyMergeKnob } from "@/runner/knobs/knobs/policy-merge"
 import { reproTestKnob } from "@/runner/knobs/knobs/repro-test"
 import { skillsKnob } from "@/runner/knobs/knobs/skills"
 import { subagentKnob } from "@/runner/knobs/knobs/subagent"
@@ -52,6 +53,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(multiVoterKnob),
   asAnyKnob(mustPassKnob),
   asAnyKnob(personaKnob),
+  asAnyKnob(policyMergeKnob),
   asAnyKnob(reproTestKnob),
   asAnyKnob(skillsKnob),
   asAnyKnob(subagentKnob),
