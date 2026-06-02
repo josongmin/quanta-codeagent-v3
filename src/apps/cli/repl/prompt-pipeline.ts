@@ -26,6 +26,11 @@ export interface PromptPipelineUxOpts {
    *  present, the raw-line reader opens an `@`-completion dropdown; absent ⇒
    *  `@` is an ordinary char (byte-identical). */
   readonly atProvider?: AtCandidateProvider
+  /** RFC-08 / ADR-0443 — initial pill+desc meta line (under the prompt) +
+   *  the shift+tab cycle hook. Built together off one ModeCycleStore; both
+   *  absent ⇒ no meta row, shift+tab ignored (byte-identical). */
+  readonly modeMeta?: string
+  readonly onCycleMode?: () => { meta?: string } | undefined
 }
 
 type PromptLineReader = (
@@ -92,6 +97,8 @@ const defaultPromptLineReader: PromptLineReader = async (
       ...(ux?.promptHistory !== undefined ? { history: ux.promptHistory } : {}),
       ...(ux?.multiline === true ? { multiline: true } : {}),
       ...(ux?.atProvider !== undefined ? { atProvider: ux.atProvider } : {}),
+      ...(ux?.modeMeta !== undefined ? { meta: ux.modeMeta } : {}),
+      ...(ux?.onCycleMode !== undefined ? { onCycleMode: ux.onCycleMode } : {}),
     })
     return raw.trim()
   } catch (e) {

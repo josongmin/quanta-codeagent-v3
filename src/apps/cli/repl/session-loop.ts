@@ -56,6 +56,12 @@ export interface RunSessionLoopDeps {
     readonly promptHistory?: import("../prompt-history").PromptHistory
     readonly multiline?: boolean
     readonly atProvider?: import("../at-autocomplete").AtCandidateProvider
+    /** RFC-08 / ADR-0443 — turn-boundary mode store (drives the next session's
+     *  permissionMode) + the derived pill meta + shift+tab hook. Absent ⇒
+     *  byte-identical (permissionMode stays the runtime default). */
+    readonly modeCycle?: import("../mode-cycle").ModeCycleStore
+    readonly modeMeta?: string
+    readonly onCycleMode?: () => { meta?: string } | undefined
   }
   /** Optional image queue the prompt pipeline drains per turn. */
   readonly imageQueue?: import("../image-queue").ImageQueue
@@ -276,7 +282,15 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     runtimeFacade.createSession({
       cwd: setup.cwd,
       model: setup.model,
-      permissionMode: runtimeContext.permissionMode(),
+      // RFC-08 / ADR-0443 — when the mode-cycle store is wired, its CURRENT
+      // posture seeds the session's permissionMode; otherwise the runtime
+      // default. NOTE (honest limitation): `createSession` runs ONCE per REPL
+      // session (the turn loop reuses the one session), and RuntimeContext
+      // exposes permissionMode as a getter only — so a mid-session shift+tab
+      // repaints the pill instantly but the NEW permission applies only to the
+      // next freshly-created session, not the next turn of THIS one. A true
+      // per-turn apply needs a runtime setter seam (deferred — see RFC-08 §2).
+      permissionMode: ux?.modeCycle?.current().permissionMode ?? runtimeContext.permissionMode(),
       ...(activeIdentityModeState !== undefined
         ? { identityMode: activeIdentityModeState.get() }
         : {}),
@@ -481,105 +495,105 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
   // during any awaited setup step still drains the close stack (no leaked
   // facade / session / watcher / ticker / bridge on partial init).
   try {
-  const automationTicker =
-    liveAutomationSlot !== undefined
-      ? startAutomationEngineTicker({ automationEngine: liveAutomationSlot } as AgentConfig)
-      : undefined
-  if (automationTicker !== undefined) {
-    // L5 H-7 — register before the next awaited init step (reactor bridge) can
-    // throw, so the ticker is stopped even on a partial interactive init.
-    closeStack.push({ label: "automationTicker.stop", dispose: () => automationTicker.stop() })
-  }
+    const automationTicker =
+      liveAutomationSlot !== undefined
+        ? startAutomationEngineTicker({ automationEngine: liveAutomationSlot } as AgentConfig)
+        : undefined
+    if (automationTicker !== undefined) {
+      // L5 H-7 — register before the next awaited init step (reactor bridge) can
+      // throw, so the ticker is stopped even on a partial interactive init.
+      closeStack.push({ label: "automationTicker.stop", dispose: () => automationTicker.stop() })
+    }
 
-  // Initial blank row matches the prior `runReplLoopRaw` header write so
-  // the very first composer row sits one line below the resume log.
-  process.stderr.write("\n")
+    // Initial blank row matches the prior `runReplLoopRaw` header write so
+    // the very first composer row sits one line below the resume log.
+    process.stderr.write("\n")
 
-  const promptSource = composePromptPipeline({
-    dispatchSlash,
-    externalPromptQueue,
-    ...(imageQueue !== undefined ? { imageQueue } : {}),
-    ...(textInbox !== undefined ? { textInbox } : {}),
-    idleMonitor: setup.idleMonitor,
-    onLocalPromptAccepted: () => {
-      lastUserInputAt = Date.now()
-    },
-    rejectCounter: setup.rejectCounter,
-    statusBar,
-    ...(ux !== undefined ? { ux } : {}),
-  })
+    const promptSource = composePromptPipeline({
+      dispatchSlash,
+      externalPromptQueue,
+      ...(imageQueue !== undefined ? { imageQueue } : {}),
+      ...(textInbox !== undefined ? { textInbox } : {}),
+      idleMonitor: setup.idleMonitor,
+      onLocalPromptAccepted: () => {
+        lastUserInputAt = Date.now()
+      },
+      rejectCounter: setup.rejectCounter,
+      statusBar,
+      ...(ux !== undefined ? { ux } : {}),
+    })
 
-  const reactorBridge =
-    setup.sessionId !== undefined && process.env[REACTOR_ENV_FLAG] === "1"
-      ? await startReactorWatchBridge({
-          sessionId: setup.sessionId,
-          onTrigger: async (trigger) => {
-            await injectSimulatedTurn({
-              trigger,
-              agentLoop: {
-                enqueueUserMessage: async (message) => {
-                  externalPromptQueue.push(message)
+    const reactorBridge =
+      setup.sessionId !== undefined && process.env[REACTOR_ENV_FLAG] === "1"
+        ? await startReactorWatchBridge({
+            sessionId: setup.sessionId,
+            onTrigger: async (trigger) => {
+              await injectSimulatedTurn({
+                trigger,
+                agentLoop: {
+                  enqueueUserMessage: async (message) => {
+                    externalPromptQueue.push(message)
+                  },
                 },
-              },
-              envPort: { get: (name) => process.env[name] },
-              clockPort: { now: () => Date.now() },
-              lastUserInputAt,
-              ...(lastTurnOutcome !== undefined ? { lastTurnOutcome } : {}),
-            })
-          },
-          onError: (message) => {
-            process.stderr.write(`${message}\n`)
-          },
-        })
-      : undefined
-  if (reactorBridge !== undefined) {
-    closeStack.push({ label: "reactorBridge.close", dispose: () => reactorBridge.close() })
-  }
+                envPort: { get: (name) => process.env[name] },
+                clockPort: { now: () => Date.now() },
+                lastUserInputAt,
+                ...(lastTurnOutcome !== undefined ? { lastTurnOutcome } : {}),
+              })
+            },
+            onError: (message) => {
+              process.stderr.write(`${message}\n`)
+            },
+          })
+        : undefined
+    if (reactorBridge !== undefined) {
+      closeStack.push({ label: "reactorBridge.close", dispose: () => reactorBridge.close() })
+    }
 
-  const runInteractiveBranch = async (): Promise<void> => {
-    while (abort.signal.aborted !== true) {
-      const next = await promptSource.next(abort.signal)
-      if (next === null) break
-      const prompt = normalizeCliPromptInput(next)
-      const out = await runOneTurn<{
-        readonly messages: readonly Message[]
-        readonly outcomeReason?: AgentOutcome["reason"]
-      }>(
-        {
-          outerAbort: abort,
-          statusBar,
-          turnIndicator,
-          turnSummary,
-          escWindowMs: ESC_WINDOW_MS,
-          body: async (turnSignal) =>
-            await runSessionTurn({
-              text: prompt.text,
-              images: prompt.images,
-              turnSignal,
-            }),
-        },
-        {
-          onAfterResult: (result) => {
-            surfaceState = updateSessionState(surfaceState, { history: result.messages })
-            sinks.renderTurnDashboard()
-            sinks.renderAndResetSummary(result)
-            sinks.flushLifecyclePills()
-            if (result.outcomeReason !== undefined) {
-              lastTurnOutcome = mapAgentOutcomeToReactorOutcome({
-                reason: result.outcomeReason,
-              } as AgentOutcome)
-            }
-            recordTurnSnapshot(result.messages)
+    const runInteractiveBranch = async (): Promise<void> => {
+      while (abort.signal.aborted !== true) {
+        const next = await promptSource.next(abort.signal)
+        if (next === null) break
+        const prompt = normalizeCliPromptInput(next)
+        const out = await runOneTurn<{
+          readonly messages: readonly Message[]
+          readonly outcomeReason?: AgentOutcome["reason"]
+        }>(
+          {
+            outerAbort: abort,
+            statusBar,
+            turnIndicator,
+            turnSummary,
+            escWindowMs: ESC_WINDOW_MS,
+            body: async (turnSignal) =>
+              await runSessionTurn({
+                text: prompt.text,
+                images: prompt.images,
+                turnSignal,
+              }),
           },
-          onError: sinks.renderTurnError,
-        },
-      )
-      process.stderr.write("\n")
-      if (out.turnAborted || out.result === undefined) {
-        lastTurnOutcome = "fail"
+          {
+            onAfterResult: (result) => {
+              surfaceState = updateSessionState(surfaceState, { history: result.messages })
+              sinks.renderTurnDashboard()
+              sinks.renderAndResetSummary(result)
+              sinks.flushLifecyclePills()
+              if (result.outcomeReason !== undefined) {
+                lastTurnOutcome = mapAgentOutcomeToReactorOutcome({
+                  reason: result.outcomeReason,
+                } as AgentOutcome)
+              }
+              recordTurnSnapshot(result.messages)
+            },
+            onError: sinks.renderTurnError,
+          },
+        )
+        process.stderr.write("\n")
+        if (out.turnAborted || out.result === undefined) {
+          lastTurnOutcome = "fail"
+        }
       }
     }
-  }
 
     await runInteractiveBranch()
   } finally {

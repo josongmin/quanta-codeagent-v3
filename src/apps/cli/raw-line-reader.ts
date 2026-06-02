@@ -89,6 +89,13 @@ export interface ReadLineOptions {
    *  dismiss. Absent ⇒ `@` is an ordinary input char and EVERY keypress
    *  path is byte-identical to the no-provider build. */
   readonly atProvider?: AtCandidateProvider
+  /** RFC-08 / ADR-0443 — `shift+tab` mode-cycle hook. A NON-submit key: when
+   *  present, `shift+tab` (a.k.a. backtab / CSI Z) invokes this callback, which
+   *  advances the host's turn-boundary mode store and returns the new `meta`
+   *  line (pill + desc) to repaint under the prompt. The input buffer is NEVER
+   *  touched and the line is NOT submitted. Absent ⇒ `shift+tab` is fully
+   *  ignored and every keypress path is byte-identical to the no-hook build. */
+  readonly onCycleMode?: () => { meta?: string } | undefined
 }
 
 export class AbortError extends Error {
@@ -101,6 +108,9 @@ export class AbortError extends Error {
 interface KeyEvent {
   readonly name?: string
   readonly ctrl?: boolean
+  /** RFC-08 — node `readline.emitKeypressEvents` already populates `key.shift`;
+   *  we widen the interface so the shift+tab (mode-cycle) guard can read it. */
+  readonly shift?: boolean
   readonly sequence?: string
 }
 
@@ -224,7 +234,15 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
     const stdin: ReaderStdin = testIO?.stdin ?? process.stdin
     const stdout: ReaderStdout = testIO?.stdout ?? process.stderr
     const promptCols = stringColumns(stripAnsi(opts.prompt))
-    const META_ROWS = opts.meta !== undefined && opts.meta !== "" ? 1 : 0
+    // RFC-08 — `metaText` is a MUTABLE copy of `opts.meta` so the shift+tab
+    // mode-cycle hook can repaint the pill line in place. `META_ROWS` is fixed
+    // at construction from the INITIAL meta: when a meta line is present (the
+    // production path always passes `provider · model · cwd`), the row is
+    // reserved once and the cycle only swaps its CONTENT — the reserved row
+    // count never changes, so the band geometry stays stable. When no meta was
+    // supplied, the cycle hook leaves the layout untouched (no row to paint).
+    let metaText = opts.meta
+    const META_ROWS = metaText !== undefined && metaText !== "" ? 1 : 0
     const state: State = {
       buf: "",
       cursor: 0,
@@ -368,7 +386,7 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
       for (let i = 0; i < state.reserved; i += 1) {
         out += moveDown(1) + CR + ERASE_LINE
         if (i === 0 && META_ROWS === 1) {
-          out += fillBgRow(`  ${DIM}${opts.meta}${RESET}`)
+          out += fillBgRow(`  ${DIM}${metaText}${RESET}`)
           continue
         }
         const listOffset = META_ROWS === 1 ? 2 : 1
@@ -625,6 +643,20 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
 
       if (k.ctrl === true && k.name === "c") {
         settleReject(new AbortError())
+        return
+      }
+
+      // RFC-08 — shift+tab (a.k.a. backtab / CSI Z) cycles the permission/agent
+      // mode. A NON-submit key: it advances the host's turn-boundary store and
+      // repaints the pill meta line, leaving the input buffer + cursor intact.
+      // Disjoint from plain Tab (which has `shift` falsy) so completion / the
+      // @-autocomplete Tab-accept are never reached by this guard. Absent hook
+      // (default-OFF) ⇒ falls through → byte-identical to the no-hook build.
+      const isBackTab = (k.name === "tab" && k.shift === true) || k.sequence === `${ESC}Z`
+      if (isBackTab && opts.onCycleMode !== undefined) {
+        const res = opts.onCycleMode()
+        if (res && typeof res.meta === "string") metaText = res.meta
+        redraw()
         return
       }
 

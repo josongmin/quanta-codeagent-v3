@@ -35,6 +35,12 @@ import {
 } from "../at-autocomplete"
 import { runImageCmd } from "../image-cmd"
 import type { ImageQueue } from "../image-queue"
+import {
+  createModeCycleStore,
+  formatPostureMeta,
+  type ModeCycleStore,
+  modeCycleEnabled,
+} from "../mode-cycle"
 import { createPromptHistory, type PromptHistory } from "../prompt-history"
 import type { RewindSlashState } from "../rewind-cmd"
 import type { ConvCheckpointSlashState } from "../rewind-conv-cmd"
@@ -61,6 +67,31 @@ export interface PromptUxOpts {
   readonly promptHistory?: PromptHistory
   readonly multiline?: boolean
   readonly atProvider?: AtCandidateProvider
+  /** RFC-08 / ADR-0443 — the turn-boundary mode store, present iff
+   *  `QUANTA_MODE_CYCLE=1`. The host (session-loop) reads `.current()
+   *  .permissionMode` for the next `createSession`; the prompt pipeline reads
+   *  `modeMeta` + `onCycleMode` (derived from the same store) for the pill +
+   *  shift+tab hook. Absent ⇒ no pill, shift+tab ignored (byte-identical). */
+  readonly modeCycle?: ModeCycleStore
+  readonly modeMeta?: string
+  readonly onCycleMode?: () => { meta?: string } | undefined
+}
+
+/** RFC-08 / ADR-0443 — build the mode-cycle store + its derived pill/hook when
+ *  `QUANTA_MODE_CYCLE=1`. The store is the single source of truth: the pill
+ *  meta and the shift+tab `onCycleMode` both project from it, and session-loop
+ *  reads its `.current().permissionMode` for the next session. Absent knob ⇒
+ *  `undefined` everywhere ⇒ byte-identical. */
+const buildModeCycle = (
+  env: NodeJS.ProcessEnv,
+): Pick<PromptUxOpts, "modeCycle" | "modeMeta" | "onCycleMode"> => {
+  if (!modeCycleEnabled(env)) return {}
+  const store = createModeCycleStore()
+  return {
+    modeCycle: store,
+    modeMeta: formatPostureMeta(store.current()),
+    onCycleMode: () => ({ meta: formatPostureMeta(store.cycle()) }),
+  }
 }
 
 /** RFC-12 / ADR-0439 — build the `@`-mention autocomplete provider when the
@@ -100,6 +131,7 @@ export const buildPromptUx = (
     ...(promptHistory !== undefined ? { promptHistory } : {}),
     multiline: multiline.enabled,
     ...(atProvider !== undefined ? { atProvider } : {}),
+    ...buildModeCycle(env),
   }
 }
 
