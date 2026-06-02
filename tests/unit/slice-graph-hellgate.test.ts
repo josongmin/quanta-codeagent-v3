@@ -146,67 +146,58 @@ describe("C. Real-graph audit over <repo>/src", () => {
     return realGraphPromise
   }
 
-  test(
-    "12. buildSliceGraph(real-src) → at least 25 slices observed",
-    async () => {
-      const g = await getRealGraph()
-      expect(g.slices.length).toBeGreaterThanOrEqual(25)
-    },
-    30_000,
-  )
+  test("12. buildSliceGraph(real-src) → at least 25 slices observed", async () => {
+    const g = await getRealGraph()
+    expect(g.slices.length).toBeGreaterThanOrEqual(25)
+  }, 30_000)
 
-  test(
-    "13. validateGraph(real-src) → snapshot count of violations",
-    async () => {
-      // EXPECTED: pre-existing observability → agent type-only imports
-      // (instrument.ts / observability-helper.ts / instrument-budget.ts /
-      // instrument-plan-queue.ts / prompt-cache/budget-bridge.ts).
-      // These are flagged but currently TOLERATED by biome — this
-      // snapshot is the "silent-drift baseline" future audits drive
-      // toward 0. Adding a new violation forces a snapshot update in
-      // the same PR (drift caught at review).
-      const g = await getRealGraph()
-      const v = validateGraph(g)
-      expect(v.length).toBeLessThanOrEqual(8)
-    },
-    30_000,
-  )
+  test("13. validateGraph(real-src) → snapshot count of violations", async () => {
+    // EXPECTED (9): type-only reverse-layering imports, all TOLERATED.
+    //   tool → agent (2): tool/objective/index.ts, tool/subagent-mailbox/index.ts
+    //   observability → agent (7): instrument.ts / observability-helper.ts /
+    //     instrument-budget.ts / instrument-plan-queue.ts /
+    //     prompt-cache/budget-bridge.ts / metrics/wire-new-slices.ts /
+    //     codex-r2-metrics/registry-metrics-decorator.ts
+    // Every flagged edge is `import type` of a NARROW metric/registry port
+    // (ADR-0217 fence-aware metric ports + ADR-0352/0366 codex-r2-metrics
+    // decorators) — type-only, so they erase at compile time and create NO
+    // runtime reverse dependency. Bumped 8→9 in 2026-06-02 (fix/jun02-scan-
+    // gates): `wire-new-slices.ts` + `registry-metrics-decorator.ts` landed
+    // their type-only metric-port imports after the prior baseline was set.
+    // This snapshot is the "silent-drift baseline" future audits drive toward
+    // 0 — any NEW edge forces a reviewed snapshot bump in the same PR.
+    const g = await getRealGraph()
+    const v = validateGraph(g)
+    expect(v.length).toBeLessThanOrEqual(9)
+  }, 30_000)
 
-  test(
-    "14. Top-imported slices: shared / agent / llm rank high",
-    async () => {
-      const g = await getRealGraph()
-      const incoming = new Map<string, number>()
-      for (const edge of g.edges) {
-        incoming.set(edge.to, (incoming.get(edge.to) ?? 0) + edge.count)
-      }
-      const ranked = [...incoming.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
-      const top5 = ranked.map(([slice]) => slice)
-      // At least one of shared / agent / llm / tool should appear in top-5.
-      const expectedAny = ["shared", "agent", "llm", "tool", "observability"]
-      const hit = top5.some((s) => expectedAny.includes(s))
-      expect(hit).toBe(true)
-    },
-    30_000,
-  )
+  test("14. Top-imported slices: shared / agent / llm rank high", async () => {
+    const g = await getRealGraph()
+    const incoming = new Map<string, number>()
+    for (const edge of g.edges) {
+      incoming.set(edge.to, (incoming.get(edge.to) ?? 0) + edge.count)
+    }
+    const ranked = [...incoming.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
+    const top5 = ranked.map(([slice]) => slice)
+    // At least one of shared / agent / llm / tool should appear in top-5.
+    const expectedAny = ["shared", "agent", "llm", "tool", "observability"]
+    const hit = top5.some((s) => expectedAny.includes(s))
+    expect(hit).toBe(true)
+  }, 30_000)
 
-  test(
-    "15. observability → agent edges enumerable (plane-clean target)",
-    async () => {
-      const g = await getRealGraph()
-      const obsToAgent = g.edges.filter((e) => e.from === "observability" && e.to === "agent")
-      // Pre-existing drift — must not GROW. Test pins the current state
-      // so adding a new cross-import surfaces in PR review.
-      if (obsToAgent.length > 0) {
-        const edge = obsToAgent[0]
-        expect(edge?.count).toBeLessThanOrEqual(15)
-      }
-      // The validator considers these a violation regardless — this
-      // test just enumerates them for diagnostic visibility.
-      expect(obsToAgent.length).toBeLessThanOrEqual(10)
-    },
-    30_000,
-  )
+  test("15. observability → agent edges enumerable (plane-clean target)", async () => {
+    const g = await getRealGraph()
+    const obsToAgent = g.edges.filter((e) => e.from === "observability" && e.to === "agent")
+    // Pre-existing drift — must not GROW. Test pins the current state
+    // so adding a new cross-import surfaces in PR review.
+    if (obsToAgent.length > 0) {
+      const edge = obsToAgent[0]
+      expect(edge?.count).toBeLessThanOrEqual(15)
+    }
+    // The validator considers these a violation regardless — this
+    // test just enumerates them for diagnostic visibility.
+    expect(obsToAgent.length).toBeLessThanOrEqual(10)
+  }, 30_000)
 })
 
 // Confirm the SLICE_RULES module is non-empty + each rule has a non-empty reason.

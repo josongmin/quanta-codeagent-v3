@@ -143,6 +143,70 @@ const RULES: readonly Rule[] = [
         "BY NAME — this is the documented env-reader for web-search providers (factory mirrors openai/anthropic adapters' env-key bootstrap).",
       "ui/ui-helpers.ts":
         "Surface presentation read (NO_COLOR / FORCE_COLOR) — same posture as shell-stream-painter.ts and auth-ui.ts.",
+      "shared/env-files.ts":
+        "BY NAME — the tiny dotenv loader itself; writes KEY=VALUE into process.env BEFORE runtimeConfig() reads (same posture as apps/cli/dotenv.ts, which this is the shared implementation of).",
+      "host/runtime/internal/context-binding.ts":
+        "Runtime composition root — binds `process.env` into the bootstrap shape (DEFAULT_RUNTIME_ENV default + wireInteractiveKnobs at boot); downstream modules receive the bound env via AgentConfig. Same posture as apps/cli/internal.ts.",
+      "host/runtime/internal/mention-wire.ts":
+        "Mention-resolver composition wiring — threads `process.env` into buildMentionSymbolDeps/buildDefaultMentionResolver at boot; same posture as context-binding.ts.",
+      "apps/agent/assemble.ts":
+        "Unified-agent assembly composition root — binds env into mention deps + reads launch-time opt-in gates (QUANTA_BROWSER_TOOL / QUANTA_LSP_DIAGNOSTICS_HOOK / QUANTA_SECRET_CHECK_TOOL); same posture as apps/agent/index.ts.",
+      "apps/agent/mode-presets/daemon.ts":
+        "Agent mode-preset composition root — passes process.env into the shared knob wiring; same posture as apps/agent/assemble.ts.",
+      "apps/agent/mode-presets/headless.ts":
+        "Agent mode-preset composition root — same posture as daemon.ts.",
+      "apps/agent/mode-presets/ide.ts":
+        "Agent mode-preset composition root — same posture as daemon.ts.",
+      "apps/cli/at-autocomplete/env.ts":
+        "Surface at-autocomplete gate — DI fallback (`env: NodeJS.ProcessEnv = process.env`) at composition root; tests inject explicit env. Same posture as status-pills.ts.",
+      "apps/cli/from-pr-cmd-adapters.ts":
+        "CLI sub-command adapter — env read at composition boundary (`process.env[name]` helper); same DI posture as from-pr surfaces.",
+      "apps/cli/raw-line-reader-editor.ts":
+        "CLI line-editor surface — `a.env ?? process.env` DI fallback for $EDITOR resolution at composition root; tests inject explicit env. Same posture as login-cmd.ts.",
+      "apps/cli/repl/factories/notify-and-warning.ts":
+        "REPL factory composition root — resolves notify channel from env at boot; same posture as repl.ts.",
+      "apps/cli/repl/runtime-context-compose.ts":
+        "REPL runtime-context composition root — `args.envSource ?? process.env` DI fallback; same posture as repl.ts.",
+      "apps/cli/session-registry-cmd.ts":
+        "CLI sub-command entry — reads session-registry backend paths at composition root; same DI posture as login-cmd.ts.",
+      "apps/cli/slash-commands-knobs.ts":
+        "CLI slash-command knob wiring — passes process.env into the shared knob resolver at composition root; same posture as repl.ts.",
+      "apps/cli/status-bar.ts":
+        "Surface status-bar — `options.env ?? process.env` DI fallback at TTY composition; same posture as status-pills.ts.",
+      "apps/eval/synthetic/runner.ts":
+        "ENV PROPAGATION — synthetic eval runner forwards parent env to child processes; same posture as apps/bench/corpus/dataset.ts.",
+      "apps/eval/trajectory/replay.ts":
+        "ENV PROPAGATION — trajectory replay forwards parent env to child processes; same posture as apps/eval/synthetic/runner.ts.",
+      "apps/web-daemon/index.ts":
+        "Web-daemon composition root — reads QUANTA_WEB_* launch-time config (port/bind/token/strict) at boot; same posture as the other apps/ entry points. Downstream handlers receive typed config.",
+      "apps/web-daemon/server.ts":
+        "Web-daemon composition root — QUANTA_WEB_* server config + a controlled env-mutation seam (set/delete) used by the static-asset/dist resolver at boot; same posture as index.ts.",
+      "apps/web-daemon/auth-routes.ts":
+        "Web-daemon OAuth route composition (ADR-0094) — resolves token/home paths from env at request-boot; same DI posture as apps/cli/login-cmd.ts.",
+      "apps/web-daemon/persistence-sqlite.ts":
+        "Web-daemon persistence composition root — resolves QUANTA_WEB_DB_DIR (with HOME default) at boot; same posture as storage/shadow-odb/default.ts.",
+      "apps/web-daemon/runtime-factory.ts":
+        "Web-daemon runtime factory composition root — binds process.env into the runtime shape; same posture as index.ts.",
+      "mcp/transports/stdio.ts":
+        "ENV PROPAGATION — passes the parent's PATH so the MCP stdio child can find its binary; moved verbatim from mcp/client.ts (already allowlisted with the same rationale).",
+      "retrieval/reranker/registry.ts":
+        "BY NAME — `createRerankerFromEnv` is the documented env-reader factory for reranker providers (DI override `opts.providerOverride ?? process.env`); same posture as tool/web/providers/from-env.ts.",
+      "runner/batch/core.ts":
+        "Extracted batch core — passes process.env into resolveBenchKnobs at the batch composition boundary; same bench-only opt-in posture as runner/batch/eval/driver.ts.",
+      "runner/diff-ops.ts":
+        "Env-driven display caps resolved at call time via the module's own NaN-safe parsePositiveInt (not raw Number()); composition-adjacent read, not a feature flag that flips behavior silently.",
+      "runner/knobs/registry.ts":
+        "NODE_ENV prod-guard inside test-only escape hatches (__resetRegistry/__restoreRegistry) — refuses to run in production; reads NODE_ENV as a safety fence, not a feature flag.",
+      "runtime/os-sandbox/env.ts":
+        "`resolveSandboxProfileFromEnv(env = process.env)` DI fallback that projects QUANTA_SANDBOX onto a closed enum (unknown ⇒ undefined); same DI-fallback posture as the CLI surfaces.",
+      "agent/session-resource-registry/global.ts":
+        "Composition-root lazy-init — reads session-registry backend paths (QUANTA_SESSION_REGISTRY_*) EXACTLY ONCE per process to pick the durable backend; degrades to in-memory on a hosed value. Composition posture, not a per-turn feature read.",
+      "agent/session-resource-registry/caller-owned-builder.ts":
+        "Caller-owned registry builder composition root — same session-registry backend-path reads as global.ts.",
+      "agent/session-resource-registry/auto-sweep.ts":
+        "Auto-sweep composition root — reads session-registry backend/WAL knobs (named *_ENV consts) at boot; same posture as global.ts.",
+      "agent/session-resource-registry/inspector.ts":
+        "Inspector composition root — reads the same session-registry backend env by key; same posture as global.ts.",
     },
   },
   {
@@ -153,6 +217,8 @@ const RULES: readonly Rule[] = [
       "agent/retry.ts": "documented non-security jitter; centralized helper, no cross-use",
       "runner/orchestrate/side-chat.ts":
         "non-security side-chat nonce for in-process turn correlation — not used for collision resistance.",
+      "host/runtime/internal/context-binding.ts":
+        "mintSideConversationSessionId — non-security side-conversation id for in-process turn correlation; identical posture to runner/orchestrate/side-chat.ts, not used for collision resistance.",
     },
   },
   {
@@ -175,6 +241,16 @@ const RULES: readonly Rule[] = [
         "Voice recorder best-effort cleanup of mic capture handle — absence/post-stop is the success state.",
       "media/voice/sox-capture.ts":
         "SoX capture best-effort cleanup of child handle — absence/post-exit is the success state.",
+      "agent/loop.ts":
+        "R4-audit browser teardown on EVERY turn exit (incl. thrown loop): `browserDispose?.().catch(() => {})` is idempotent best-effort — the session is ending, nowhere to surface a dispose error.",
+      "agent/streaming-boomerang/default-streamer.ts":
+        "Terminal-chunk pushes into an already-closing channel (3 sites) — the consumer is gone, there is nowhere to surface a push error; documented best-effort, same posture as stream/adapters/jsonl-recorder.ts.",
+      "apps/cli/repl/voice-live-wire.ts":
+        "Best-effort cancel of the mic stream reader on stop — post-stop is the success state (same posture as voice/default-recorder.ts).",
+      "skill/playbook/trigger/fs-watch-adapter.ts":
+        "Detached debounced scan routed through a catch sink (audit L3 C-14): one throwing/rejecting fire must not crash the watcher process as an unhandled rejection; documented inline.",
+      "tool/browser/session-holder.ts":
+        "Best-effort reap of a dead/superseded browser session handle (2 sites) — post-close is the success state; documented inline.",
     },
   },
   {
@@ -202,6 +278,12 @@ const RULES: readonly Rule[] = [
     // log formatting (most common); this catches the `.includes(` form only.
     pattern: /\b\w*[Mm]essage\.toLowerCase\(\)?\.includes\(|\.\bmessage\.includes\(/,
     why: "Don't route on `e.message.includes(...)` — set `LLMError.kind` at the adapter boundary and branch on the structured field. See `src/shared/errors.ts`.",
+    allowlist: {
+      "retrieval/lexical/ripgrep-impl.ts":
+        "NOT LLM routing — `isENOENT` checks the structured `rec.code === 'ENOENT'` FIRST; the message-substring is only a belt-and-suspenders fallback for spawn errors that omit `.code`. Orthogonal to the LLMError.kind retry/fallback path this rule guards.",
+      "memory/auto-trigger/default-trigger.ts":
+        "NOT LLM routing — `isAbortError` checks the structured `e.name === 'AbortError'` FIRST; the message-substring is the standard DOM-abort fallback for runtimes that don't set `.name`. Orthogonal to the LLMError.kind path.",
+    },
   },
   {
     id: "no-undocumented-magic-timeout",
@@ -223,6 +305,20 @@ const RULES: readonly Rule[] = [
         "Idle minutes→ms conversion (`n * 60_000`) — surface helper, not a wall-clock policy literal.",
       "apps/cli/web-cmd.ts":
         "Web-fetch abort timer default (60s) at CLI sub-command boundary — surface composition root.",
+      "migration/persistence.ts":
+        "FALSE POSITIVE — `DEFAULT_LOCK_STALE_MS = 5 * 60_000` IS a named UPPER_SNAKE_CASE const; the regex's negative-lookbehind only fires when the literal IMMEDIATELY follows `=`, so the arithmetic form trips it. The value is named + documented inline.",
+      "mcp/reconnect/policy.ts":
+        "DEFAULT_BACKOFF_POLICY — every timing value is a field of a single named/frozen policy const with an inline comment tracing it to the Cursor source; same documented-inline posture as plugin-isolation/lifecycle.ts.",
+      "browser/cdp-adapter.ts":
+        "DEFAULT_WAIT_SELECTOR_MS — extracted named const (5s, CDP/Puppeteer selector-wait convention) documented inline.",
+      "browser/cdp/cdp-session.ts":
+        "DEFAULT_CDP_COMMAND_MS — extracted named const (30s CDP request default) documented inline.",
+      "browser/headless-stub.ts":
+        "DEFAULT_WAIT_SELECTOR_MS — extracted named const mirroring the real adapter's default so deterministic-stub fixtures stay byte-identical.",
+      "tool/poll_deferred.ts":
+        "Zod schema UPPER BOUND `.max(60_000)` on the user-supplied `awaitMs` — an input-validation ceiling, not a wall-clock policy literal the harness controls.",
+      "apps/headless/fake-deps.ts":
+        "Headless DEV/test fake-deps fixture (idleMs/snoozeDefaultMs) — fixture values for the fake runtime, not a production wall-clock policy.",
     },
   },
   {
@@ -269,6 +365,18 @@ const RULES: readonly Rule[] = [
         "BURN-DOWN: crypto fallback when randomUUID unavailable — last-resort token, not model-facing",
       "agent/subagent-persistence-store/jsonl-store.ts":
         "BURN-DOWN: JSONL persisted-row cutoff for log GC — replay-stable",
+      "agent/run-ledger/store.ts":
+        "BURN-DOWN: injected clock (`opts?.now ?? Date.now`); the literal `Date.now` is the default-factory + the `safeDateNow` last-resort fallback when the injected clock throws.",
+      "agent/objective/store.ts":
+        "BURN-DOWN: injected clock (`opts?.now ?? Date.now`); the literal `Date.now` is the default fallback inside `clockNow()`'s catch + the empty-cell default factory.",
+      "agent/approval-state-machine/store.ts":
+        "BURN-DOWN: injected clock (`opts?.now ?? Date.now`); the literal `Date.now` is the finite-guard default fallback.",
+      "agent/subagent-mailbox/store.ts":
+        "BURN-DOWN: injected clock; the literal `Date.now` is the finite-guard default + `sentAt` default-factory fallback.",
+      "agent/compaction.ts":
+        "BURN-DOWN: `compactedAt` provenance stamp on the recovery record — telemetry/provenance metadata, not model-facing replay text.",
+      "agent/plugin-skill-extension/extender.ts":
+        "BURN-DOWN: injected `opts?.at`; the literal `Date.now` is the default-factory fallback for the skill-activation timestamp.",
     },
   },
   {
@@ -283,6 +391,8 @@ const RULES: readonly Rule[] = [
       "permission/index.ts": "barrel re-export",
       "agent/admissibility-gate.ts":
         "composition-adjacent layer; transitional fallback when surfaces omit `AgentConfig.admissibility.permissionStore`. Remove once every app wires the nested store explicitly.",
+      "apps/cli/repl.ts":
+        "CLI composition root — `loadPermissionStore` is EXACTLY where the rule says the singleton should be wired (`src/apps/**`); the store is then injected downstream via AgentConfig.",
     },
   },
 ]
@@ -290,13 +400,22 @@ const RULES: readonly Rule[] = [
 const isAllowed = (rule: Rule, relativePath: string): boolean =>
   rule.allowlist !== undefined && Object.hasOwn(rule.allowlist, relativePath)
 
+// Co-located test files live under `src/**/__tests__/` and `*.test.ts`. They
+// exercise the banned patterns ON PURPOSE (e.g. saving/restoring `process.env`,
+// asserting on magic-timeout fixtures) — exactly the same posture as the
+// `tests/` tree the header says the scanner "intentionally does not look at".
+// The contract is a PRODUCTION-code contract; excluding test sources keeps the
+// scan honest without polluting every rule's allowlist with throwaway fixtures.
+const isTestFile = (name: string): boolean => name.endsWith(".test.ts")
+
 const walk = (dir: string): readonly string[] => {
   const out: string[] = []
   for (const name of readdirSync(dir)) {
+    if (name === "__tests__") continue
     const full = join(dir, name)
     const s = statSync(full)
     if (s.isDirectory()) out.push(...walk(full))
-    else if (extname(name) === ".ts") out.push(full)
+    else if (extname(name) === ".ts" && !isTestFile(name)) out.push(full)
   }
   return out
 }

@@ -205,6 +205,10 @@ interface PollDeps {
   readonly clock: Clock
 }
 
+/** Default `waitForSelector` deadline when the caller omits `opts.timeoutMs`.
+ *  5s matches the CDP/Puppeteer convention for a single selector wait. */
+const DEFAULT_WAIT_SELECTOR_MS = 5_000
+
 /** Poll the page for `opts.selector` until present, timeout, or abort. Kept at
  *  module scope (out of the adapter object) so the loop's branching does not
  *  inflate the adapter method's cognitive complexity. */
@@ -215,7 +219,7 @@ const pollForSelector = async (
 ): Promise<Result<void, BrowserError>> => {
   const isAborted = (): boolean => signal?.aborted === true
   if (isAborted()) return err({ kind: "cancelled" })
-  const timeoutMs = opts.timeoutMs ?? 5_000
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_WAIT_SELECTOR_MS
   const pollMs = 100
   const start = d.clock.now()
   const js = selectorPresentJs(opts.selector)

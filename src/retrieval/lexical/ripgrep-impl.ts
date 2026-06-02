@@ -23,7 +23,7 @@
  * `shell-snapshot/bun-spawner.ts`.
  */
 
-import { err, errMessage, ok, type Result } from "@/shared"
+import { byteCompare, err, errMessage, ok, type Result } from "@/shared"
 import type { LexicalDoc, LexicalIndexResult, LexicalQueryOptions, LexicalSearch } from "./port"
 import type { LexicalDegradeReason, LexicalError, LexicalHit } from "./types"
 
@@ -174,7 +174,7 @@ const parseRgJson = (stdout: string): Result<ReadonlyArray<LexicalHit>, LexicalE
       ...(hit.metadata !== undefined ? { metadata: hit.metadata } : {}),
     })
   }
-  hits.sort((a, b) => (b.score !== a.score ? b.score - a.score : a.id.localeCompare(b.id)))
+  hits.sort((a, b) => (b.score !== a.score ? b.score - a.score : byteCompare(a.id, b.id)))
   return ok(hits)
 }
 
@@ -196,7 +196,7 @@ const parseGrepCounts = (stdout: string): Result<ReadonlyArray<LexicalHit>, Lexi
     if (!Number.isFinite(count) || count <= 0) continue
     hits.push({ id: path, score: count, text: "", metadata: { path } })
   }
-  hits.sort((a, b) => (b.score !== a.score ? b.score - a.score : a.id.localeCompare(b.id)))
+  hits.sort((a, b) => (b.score !== a.score ? b.score - a.score : byteCompare(a.id, b.id)))
   return ok(hits)
 }
 

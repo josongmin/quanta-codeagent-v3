@@ -1,6 +1,8 @@
+import { posix } from "node:path"
 import type { GroundingCase } from "./schema"
 
-const FILE_ID_PATTERN = /(?:^|[\s("'`])((?:\/)?(?:[A-Za-z0-9._-]+\/)+[A-Za-z0-9._-]+\.[A-Za-z0-9_-]+)/g
+const FILE_ID_PATTERN =
+  /(?:^|[\s("'`])((?:\/)?(?:[A-Za-z0-9._-]+\/)+[A-Za-z0-9._-]+\.[A-Za-z0-9_-]+)/g
 
 const GENERIC_FILE_CUES = [
   "그 파일",
@@ -23,10 +25,10 @@ const uniqueOrdered = (values: readonly string[]): readonly string[] => [...new 
 const includesAny = (text: string, needles: readonly string[]): boolean =>
   needles.some((needle) => text.includes(needle))
 
-const basename = (value: string): string => {
-  const parts = value.split("/")
-  return parts.at(-1) ?? value
-}
+// Grounding file IDs are always POSIX-style (see FILE_ID_PATTERN /
+// isGroundingFileId), so `posix.basename` is the deterministic, platform-stable
+// choice — it never re-splits on a Windows backslash that can't appear here.
+const basename = (value: string): string => posix.basename(value) || value
 
 const stem = (value: string): string => {
   const base = basename(value)
@@ -48,7 +50,9 @@ export const extractGroundingFileIds = (text: string): readonly string[] => {
 const entryFileCandidates = (groundingCase: GroundingCase): readonly string[] =>
   uniqueOrdered(
     groundingCase.history.flatMap((entry) => [
-      ...(entry.referentId !== undefined && entry.referentId !== null && isGroundingFileId(entry.referentId)
+      ...(entry.referentId !== undefined &&
+      entry.referentId !== null &&
+      isGroundingFileId(entry.referentId)
         ? [entry.referentId]
         : []),
       ...(entry.mentionedFileIds ?? []).filter(isGroundingFileId),
@@ -56,20 +60,30 @@ const entryFileCandidates = (groundingCase: GroundingCase): readonly string[] =>
     ]),
   )
 
-const primaryFileId = (groundingCase: GroundingCase, historyCandidates: readonly string[]): string | null => {
+const primaryFileId = (
+  groundingCase: GroundingCase,
+  historyCandidates: readonly string[],
+): string | null => {
   const fromState = groundingCase.stateContract?.primaryFileId
-  if (fromState !== undefined && fromState !== null && isGroundingFileId(fromState)) return fromState
+  if (fromState !== undefined && fromState !== null && isGroundingFileId(fromState))
+    return fromState
   const fromOwners = groundingCase.workingState?.ownerShortlist[0]?.file
   if (fromOwners !== undefined && isGroundingFileId(fromOwners)) return fromOwners
   const fromHistory = groundingCase.history.find(
-    (entry) => entry.referentId !== undefined && entry.referentId !== null && isGroundingFileId(entry.referentId),
+    (entry) =>
+      entry.referentId !== undefined &&
+      entry.referentId !== null &&
+      isGroundingFileId(entry.referentId),
   )?.referentId
   if (fromHistory !== undefined && fromHistory !== null) return fromHistory
   if (historyCandidates.length === 1) return historyCandidates[0] ?? null
   return null
 }
 
-const candidateFileIds = (groundingCase: GroundingCase, historyCandidates: readonly string[]): readonly string[] =>
+const candidateFileIds = (
+  groundingCase: GroundingCase,
+  historyCandidates: readonly string[],
+): readonly string[] =>
   uniqueOrdered([
     ...(groundingCase.stateContract?.candidateFileIds ?? []).filter(isGroundingFileId),
     ...(groundingCase.stateContract?.primaryFileId !== undefined &&

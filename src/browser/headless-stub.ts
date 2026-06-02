@@ -29,6 +29,10 @@ import type {
   WaitOpts,
 } from "./types"
 
+/** Default `wait` deadline echoed in the stub's `timeout` error — mirrors the
+ *  real adapter's `DEFAULT_WAIT_SELECTOR_MS` so fixtures stay byte-identical. */
+const DEFAULT_WAIT_SELECTOR_MS = 5_000
+
 export interface HeadlessPage {
   readonly title: string
   readonly dom: DomModel
@@ -231,7 +235,7 @@ export const createHeadlessBrowser = (opts: HeadlessBrowserOpts = {}): BrowserPo
       if (signal?.aborted === true) return err({ kind: "cancelled" })
       return presentSelectors.has(wOpts.selector)
         ? ok(undefined)
-        : err({ kind: "timeout", ms: wOpts.timeoutMs ?? 5_000 })
+        : err({ kind: "timeout", ms: wOpts.timeoutMs ?? DEFAULT_WAIT_SELECTOR_MS })
     },
 
     async read(h: BrowserHandle, ref: string, rOpts: ReadOpts) {

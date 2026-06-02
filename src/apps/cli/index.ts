@@ -21,6 +21,16 @@ setTerminalIo({
 
 loadEnvFiles([".env.dev", ".env.local", ".env"])
 
+/** Validated `QUANTA_REMOTE_TIMEOUT_MS` → optional `{ defaultTimeoutMs }`.
+ *  A raw `Number.parseInt` would forward `NaN` on garbage input (silently
+ *  disabling the remote timeout); we only set the field when the value parses
+ *  to a finite positive integer, otherwise the runner's own default stands. */
+const remoteTimeoutOverride = (raw: string | undefined): { defaultTimeoutMs?: number } => {
+  if (raw === undefined) return {}
+  const n = Number.parseInt(raw, 10)
+  return Number.isFinite(n) && n > 0 ? { defaultTimeoutMs: n } : {}
+}
+
 // Phase-3 split (RFC may-22-unified-agent-runtime §3): pure structural
 // refactor with ZERO behavior change for existing CLI users. `index.ts` now
 // owns only the argv-routing short-circuits (`session` subcommand, built-in
@@ -64,12 +74,10 @@ const main = async (): Promise<void> => {
         err: (s) => process.stderr.write(s),
       },
       signal: ac.signal,
-      ...(process.env["QUANTA_REMOTE_DEFAULT_IMAGE"] !== undefined
-        ? { defaultImage: process.env["QUANTA_REMOTE_DEFAULT_IMAGE"] }
+      ...(process.env.QUANTA_REMOTE_DEFAULT_IMAGE !== undefined
+        ? { defaultImage: process.env.QUANTA_REMOTE_DEFAULT_IMAGE }
         : {}),
-      ...(process.env["QUANTA_REMOTE_TIMEOUT_MS"] !== undefined
-        ? { defaultTimeoutMs: Number.parseInt(process.env["QUANTA_REMOTE_TIMEOUT_MS"], 10) }
-        : {}),
+      ...remoteTimeoutOverride(process.env.QUANTA_REMOTE_TIMEOUT_MS),
     })
     process.off("SIGINT", onSig)
     process.off("SIGTERM", onSig)

@@ -80,8 +80,12 @@ const parseMessage = (raw: string): CdpMessage | null => {
   return parsed as CdpMessage
 }
 
+/** Per-command CDP round-trip deadline when the caller omits one. 30s matches
+ *  the Chrome DevTools Protocol default request timeout. */
+const DEFAULT_CDP_COMMAND_MS = 30_000
+
 export const createCdpSession = (deps: CdpSessionDeps): CdpSession => {
-  const defaultTimeoutMs = deps.defaultTimeoutMs ?? 30_000
+  const defaultTimeoutMs = deps.defaultTimeoutMs ?? DEFAULT_CDP_COMMAND_MS
   let seq = 0
   let disposed = false
   let dead = false

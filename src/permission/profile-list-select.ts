@@ -46,7 +46,7 @@
 
 import { readdir, readFile } from "node:fs/promises"
 import { extname, join } from "node:path"
-import { errMessage } from "@/shared"
+import { byteCompare, errMessage } from "@/shared"
 import { runtimeConfig } from "@/shared/runtime-config"
 import {
   isNamedProfileName,
@@ -272,7 +272,7 @@ const listUserProfileFiles = async (dir: string): Promise<ReadonlyArray<UserProf
     .filter((n) => extname(n).toLowerCase() === ".json")
     .map((n) => ({ name: n.slice(0, -".json".length), file: join(dir, n) }))
     .filter((f) => f.name.length > 0)
-    .sort((a, b) => a.name.localeCompare(b.name))
+    .sort((a, b) => byteCompare(a.name, b.name))
 }
 
 /** Read + validate + ceiling-check one user profile file. Throws

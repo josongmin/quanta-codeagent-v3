@@ -329,7 +329,14 @@ export const mergeLayered = <T extends object>(
 
   // Stable field iteration: sort discovered fields by their string key so the
   // overrides array is order-independent w.r.t. layer declaration order.
-  const fields = [...settersByField.keys()].sort((a, b) => String(a).localeCompare(String(b)))
+  // Byte-stable compare (NOT localeCompare) — this slice is `@/shared`-free by
+  // design, and locale-dependent ordering would break the byte-identical
+  // replay invariant the same way `byteCompare` (src/shared/byte-compare.ts)
+  // guards everywhere else.
+  const fields = [...settersByField.keys()].sort((a, b) => {
+    const [sa, sb] = [String(a), String(b)]
+    return sa < sb ? -1 : sa > sb ? 1 : 0
+  })
 
   for (const field of fields) {
     const setters = settersByField.get(field) as LayerSource[]
