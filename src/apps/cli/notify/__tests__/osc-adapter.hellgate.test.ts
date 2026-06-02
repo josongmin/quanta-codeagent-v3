@@ -154,4 +154,13 @@ describe("RFC-09 A — title-injection guard", () => {
     expect(sanitizeTitle("a\x7fb")).toBe("ab")
     expect(sanitizeTitle("✓ proj — done")).toBe("✓ proj — done")
   })
+
+  test("sanitizeTitle drops C1 controls (NEL 0x85) + line/para separators", () => {
+    // C1 0x80-0x9f — NEL () can act as an 8-bit OSC intro / line break.
+    expect(sanitizeTitle("abc")).toBe("abc")
+    // U+2028 LINE SEPARATOR / U+2029 PARAGRAPH SEPARATOR.
+    expect(sanitizeTitle("a b c")).toBe("abc")
+    // a glyph just past the C1 band (U+00A0 NBSP) is preserved.
+    expect(sanitizeTitle("a b")).toBe("a b")
+  })
 })

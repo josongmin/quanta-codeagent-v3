@@ -74,3 +74,20 @@ calls are no-ops, no close-stack entry, OSC 0 bytes. Title restored on teardown
 - OS-level desktop notifications (external binaries).
 - tmux/screen DCS passthrough wrapping — plain OSC 0 only (the multiplexer
   handles it; worst case a pane title changes).
+
+## Adversarial-review notes (2026-06-02)
+
+- **Title persists "✓ done" until the next prompt (interactive).** Intentional —
+  NOT fixed by calling `dispose()` per turn, because `dispose` is idempotent and
+  latches `disposed=true`, so a per-turn call would kill notifications for the
+  rest of the session. The title naturally transitions to "… waiting" on the
+  next `onIdleAwaitingInput`, and is restored at session teardown via the LIFO
+  close-stack. Acceptable: a brief post-turn "done" title is the desired signal.
+- **snooze + idle latch:** `markActive()` is deliberately NOT called while
+  `idle.isSnoozed()` (the input is declined), so the idle latch correctly stays
+  set during snooze — re-notify only resumes after a real `markActive()` on an
+  accepted prompt. Confirmed correct; a dedicated snooze×notify test is the one
+  remaining coverage gap (behavior verified by reading, not yet pinned).
+- **sanitizeTitle hardened** beyond C0+DEL to also strip C1 controls (0x80-0x9f,
+  incl. NEL 0x85) and U+2028/U+2029 line/para separators — all can break or
+  hijack the OSC frame. Covered by an osc-adapter hellgate case.

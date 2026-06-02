@@ -30,7 +30,13 @@ export const sanitizeTitle = (s: string): string => {
   let out = ""
   for (const ch of s) {
     const code = ch.codePointAt(0) ?? 0
+    // C0 controls + DEL (covers BEL 0x07 / ESC 0x1b — the OSC terminators) AND
+    // C1 controls 0x80-0x9f (notably NEL 0x85, which some terminals treat as a
+    // line break / 8-bit OSC intro) AND the Unicode line/paragraph separators
+    // U+2028 / U+2029. All can break or hijack the OSC frame; strip them.
     if (code <= 0x1f || code === 0x7f) continue
+    if (code >= 0x80 && code <= 0x9f) continue
+    if (code === 0x2028 || code === 0x2029) continue
     out += ch
   }
   return out
