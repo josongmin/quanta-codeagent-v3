@@ -103,11 +103,18 @@ const runTool = async (
   return last
 }
 
-/** Resolve a single knob's value via the framework for `surface`, then apply. */
-const flip = (env: NodeJS.ProcessEnv, surface: Surface): AgentConfig => {
+/** Resolve a single knob's value via the framework for `surface`, then apply.
+ *  Accepts an explicit `base` so callers can assert ref-equality of the result
+ *  against the SAME config they passed in (true byte-identical, not just
+ *  `advisor === undefined`). Absent ⇒ a fresh baseline. */
+const flip = (
+  env: NodeJS.ProcessEnv,
+  surface: Surface,
+  base: AgentConfig = baseCfg(),
+): AgentConfig => {
   const knobs = knobsForSurface(surface)
   const values = resolveKnobs({ surface, knobs, envVars: env })
-  return applyKnobs(baseCfg(), knobs, values, { surface })
+  return applyKnobs(base, knobs, values, { surface })
 }
 
 // ─── A. KNOB PARSE (strict closed allowlist) ────────────────────────────────
@@ -147,7 +154,14 @@ describe("advisor knob parse", () => {
 
 describe("advisor knob apply", () => {
   test("absent env ⇒ config.advisor untouched (byte-identical: same ref)", () => {
-    const out = flip({}, "cli")
+    // Thread an EXPLICIT base so we can prove ref-equality: with no env the knob
+    // never resolves, `applyKnobs` skips its loop, and the SAME config object is
+    // returned (`=== base`). This is the real "byte-identical" claim — asserting
+    // only `advisor === undefined` would pass even if apply had cloned the
+    // config or mutated unrelated fields.
+    const base = baseCfg()
+    const out = flip({}, "cli", base)
+    expect(out).toBe(base)
     expect(out.advisor).toBeUndefined()
   })
 

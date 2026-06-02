@@ -45,12 +45,30 @@ const tailText = (input: TurnContextInput): string => {
   return reminderText(messages[messages.length - 1] as Message)
 }
 
+/**
+ * FROZEN GOLDEN of the LEGACY (pre-feature) no-budget reminder tail, captured
+ * with the pinned clock (2026-06-02) + fixed cwd (/repo) + no other dynamic
+ * context. This is the exact byte string `buildTurnContext` produced BEFORE the
+ * soft-budget slice existed. Pinning it (rather than comparing two identical
+ * no-budget renders, which only proves render purity) makes the default-OFF
+ * test able to FAIL: if any change ever emitted a budget block unconditionally
+ * — i.e. on the `taskBudget`-absent path — this string would gain a "Soft
+ * budget" line and the `toBe` below would break. */
+const LEGACY_NO_BUDGET_TAIL =
+  "<system-reminder>\nToday's date is 2026-06-02.\nWorking directory: /repo\n</system-reminder>"
+
 describe("soft task-budget — default-OFF byte-identical", () => {
-  test("dynamic block is byte-identical when taskBudget is absent", () => {
-    const before = tailText(base())
-    const after = tailText(base())
-    expect(after).toBe(before)
-    expect(after.length).toBe(before.length)
+  test("dynamic block is byte-identical to the frozen legacy tail when taskBudget is absent", () => {
+    // Compare the feature-absent render against the frozen pre-feature golden,
+    // mirroring the sibling system-prefix comparison (`withBudget.system` ===
+    // `without.system`): the assertion regresses the instant a budget block
+    // leaks onto the no-budget path.
+    const tail = tailText(base())
+    expect(tail).toBe(LEGACY_NO_BUDGET_TAIL)
+    // The golden carries none of the budget markers (belt-and-braces: this is
+    // what would change if an unconditional block were emitted).
+    expect(tail).not.toContain("Soft budget")
+    expect(tail).not.toContain("token")
   })
 
   test("no 'Soft budget' text leaks when taskBudget is absent", () => {
@@ -287,21 +305,41 @@ describe("renderTaskBudgetBlock — poison coercion (no leak)", () => {
 })
 
 describe("buildTurnContext — over-budget is orthogonal to the hard breaker", () => {
-  test("over-budget ⇒ guidance line only; NO stop signal field on the TurnContext", () => {
-    const ctx = buildTurnContext(base({ taskBudget: { tokens: 100000, spent: 500000 } }))
-    const text = reminderText(ctx.messages[ctx.messages.length - 1] as Message)
+  test("over-budget ⇒ guidance escalates but the build is byte-shape-identical to a normal turn (no stop field added)", () => {
+    // Drive the SAME input twice — once with NO budget (the legacy control
+    // shape) and once wildly over budget — and prove the soft budget changes
+    // ONLY the rendered reminder text, never the structural shape of the
+    // returned TurnContext. The hard breaker (ADR-0138) is the only thing that
+    // stops the loop, and it lives elsewhere; the soft budget must add zero new
+    // control fields.
+    const noBudget = buildTurnContext(base())
+    const overBudget = buildTurnContext(base({ taskBudget: { tokens: 100000, spent: 500000 } }))
+
+    const text = reminderText(overBudget.messages[overBudget.messages.length - 1] as Message)
+    // The over-budget reminder escalates: clamps remaining to 0 + "wrap up",
+    // while keeping the "guidance, not a hard limit" framing (NOT a hard stop).
     expect(text).toContain("~0 tokens")
     expect(text).toContain("wrap up")
     expect(text).toContain("guidance, not a hard limit")
-    // The returned shape is a normal TurnContext — no stop / abort / halt
-    // signal is introduced by the soft budget (orthogonal to ADR-0138).
-    const keys = Object.keys(ctx)
-    expect(keys).not.toContain("stop")
-    expect(keys).not.toContain("abort")
-    expect(keys).not.toContain("halt")
-    expect(keys).not.toContain("terminated")
-    // System + messages are well-formed.
-    expect(ctx.system.length).toBeGreaterThan(0)
-    expect(ctx.messages.length).toBeGreaterThan(0)
+    // The no-budget reminder does NOT escalate (proves the text above is the
+    // budget feature talking, not some ambient phrasing).
+    const noBudgetText = reminderText(noBudget.messages[noBudget.messages.length - 1] as Message)
+    expect(noBudgetText).not.toContain("wrap up")
+    expect(noBudgetText).not.toContain("Soft budget")
+
+    // STRUCTURAL PROOF: the over-budget build exposes EXACTLY the same top-level
+    // keys as both the no-budget build AND the frozen TurnContext contract
+    // (system / messages / promptPolicy). If a future change ever leaked a
+    // stop / abort / halt / terminated control field onto the soft-budget path,
+    // this exact-set comparison would FAIL — unlike a `not.toContain` over the
+    // fixed 3-key interface, which can never fail.
+    const overKeys = Object.keys(overBudget).sort()
+    expect(overKeys).toEqual(Object.keys(noBudget).sort())
+    expect(overKeys).toEqual(["messages", "promptPolicy", "system"])
+    // System + messages are well-formed (same well-formedness as the no-budget
+    // turn — the soft budget appended a reminder, it did not truncate the turn).
+    expect(overBudget.system.length).toBe(noBudget.system.length)
+    expect(overBudget.messages.length).toBe(noBudget.messages.length)
+    expect(overBudget.messages.length).toBeGreaterThan(0)
   })
 })
