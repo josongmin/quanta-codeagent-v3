@@ -13,6 +13,7 @@ import {
   type ConversationCheckpointStore,
   defaultConversationCheckpointStore,
 } from "@/agent/conversation-checkpoint"
+import { buildMentionSymbolDeps } from "@/host/runtime/internal/mention-symbol-deps"
 import type { Message } from "@/llm"
 import { buildCostDashboard, GEN_AI_ATTRS, renderDashboardText } from "@/observability"
 import type {
@@ -27,6 +28,11 @@ import {
   saveSessionById,
 } from "@/session"
 import { errMessage, logger } from "@/shared"
+import {
+  type AtCandidateProvider,
+  atAutocompleteEnabled,
+  createCompositeAtProvider,
+} from "../at-autocomplete"
 import { runImageCmd } from "../image-cmd"
 import type { ImageQueue } from "../image-queue"
 import { createPromptHistory, type PromptHistory } from "../prompt-history"
@@ -54,22 +60,46 @@ import { buildReplSlashCtx, type ReplaySlashState, type ReplSlashCtx } from "./s
 export interface PromptUxOpts {
   readonly promptHistory?: PromptHistory
   readonly multiline?: boolean
+  readonly atProvider?: AtCandidateProvider
 }
 
-/** Slice-C: UX opts (history + multiline) the prompt pipeline consumes.
- *  Default-ON when the env knob is unset; explicit `=0` reverts to the
- *  no-history single-line path. ADR-0297: consumes the typed surface
- *  feature record so no `process.env` reads survive here. */
-export const buildPromptUx = (featureCfg: CliFeatureConfig): PromptUxOpts => {
+/** RFC-12 / ADR-0436 — build the `@`-mention autocomplete provider when the
+ *  feature is enabled (`QUANTA_AT_AUTOCOMPLETE=1`). File listing is live (cwd
+ *  jail = the resolver root); symbol listing reuses the SAME lazy union-LSP
+ *  port the agent loop's `@symbol` resolver uses (`buildMentionSymbolDeps`),
+ *  so an installed language server lights both surfaces with one wire. Absent
+ *  knob ⇒ `undefined` ⇒ `readLine` byte-identical. */
+const buildAtProvider = (cwd: string, env: NodeJS.ProcessEnv): AtCandidateProvider | undefined => {
+  if (!atAutocompleteEnabled(env)) return undefined
+  const symbolDeps = buildMentionSymbolDeps(cwd, env)
+  return createCompositeAtProvider({
+    fileRoot: cwd,
+    ...(symbolDeps.lsp !== undefined ? { symbolLookup: symbolDeps.lsp } : {}),
+  })
+}
+
+/** Slice-C: UX opts (history + multiline + `@`-autocomplete) the prompt
+ *  pipeline consumes. Default-ON history when the env knob is unset; explicit
+ *  `=0` reverts to the no-history single-line path. ADR-0297: consumes the
+ *  typed surface feature record + an INJECTED `cwd`/`env` (no `process.*`
+ *  reads survive here — the host passes both). `@`-autocomplete is default-OFF
+ *  (its own env knob, read off the injected `env`). */
+export const buildPromptUx = (
+  featureCfg: CliFeatureConfig,
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+): PromptUxOpts => {
   const { history, multiline } = featureCfg
   const promptHistoryOpts: Parameters<typeof createPromptHistory>[0] = {
     maxLines: history.maxLines,
     ...(history.filePath !== undefined ? { filePath: history.filePath } : {}),
   }
   const promptHistory = history.enabled ? createPromptHistory(promptHistoryOpts) : undefined
+  const atProvider = buildAtProvider(cwd, env)
   return {
     ...(promptHistory !== undefined ? { promptHistory } : {}),
     multiline: multiline.enabled,
+    ...(atProvider !== undefined ? { atProvider } : {}),
   }
 }
 

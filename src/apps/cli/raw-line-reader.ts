@@ -35,6 +35,19 @@
  */
 
 import * as readline from "node:readline"
+import {
+  type AtCandidate,
+  type AtCandidateProvider,
+  type AtState,
+  acceptSelected,
+  atQuery,
+  classifyBackspace,
+  classifyChar,
+  createAtState,
+  dismiss as dismissAt,
+  selectNext,
+  selectPrev,
+} from "./at-autocomplete"
 import type { PromptHistory } from "./prompt-history"
 
 export interface CandidateDescriptor {
@@ -69,6 +82,13 @@ export interface ReadLineOptions {
    *  fence closes it and submits the joined body (`\n`-separated, fence
    *  rows excluded). Absent / `false` ⇒ byte-identical, no fence detection. */
   readonly multiline?: boolean
+  /** RFC-12 / ADR-0436 — optional `@`-mention autocomplete provider. When
+   *  injected, typing `@` at a valid left-boundary opens a kind-grouped
+   *  candidate dropdown (file / symbol / skill / plugin / app); `↑`/`↓`
+   *  select, `Tab`/`Enter` accept (splice the mention token), `Esc`
+   *  dismiss. Absent ⇒ `@` is an ordinary input char and EVERY keypress
+   *  path is byte-identical to the no-provider build. */
+  readonly atProvider?: AtCandidateProvider
 }
 
 export class AbortError extends Error {
@@ -163,6 +183,9 @@ interface State {
   heredocOpen: boolean
   heredocFence: string
   heredocLines: string[]
+  /** RFC-12 — `@`-mention dropdown sub-state. Dormant (`at.active=false`)
+   *  unless `opts.atProvider` is injected AND the user typed a boundary `@`. */
+  at: AtState
 }
 
 const ghostSuffix = (buf: string, candidates: readonly string[]): string => {
@@ -172,10 +195,34 @@ const ghostSuffix = (buf: string, candidates: readonly string[]): string => {
   return top.slice(buf.length)
 }
 
-export const readLine = (opts: ReadLineOptions): Promise<string> => {
+/** Narrow stdin shape `readLine` actually uses. Lets tests inject a fake
+ *  keypress source without a real TTY (RFC §7). NOT part of the public
+ *  contract — production always passes `process.stdin`. */
+interface ReaderStdin {
+  on(event: "keypress", listener: KeypressListener): unknown
+  removeListener(event: "keypress", listener: KeypressListener): unknown
+  resume(): unknown
+  pause(): unknown
+  readonly isTTY?: boolean
+  readonly isRaw?: boolean
+  setRawMode?(mode: boolean): unknown
+}
+type KeypressListener = (str: string | undefined, key: KeyEvent | undefined) => void
+interface ReaderStdout {
+  write(chunk: string): unknown
+}
+/** Test-only I/O override. Production callers omit this entirely. */
+export interface ReadLineTestIO {
+  readonly stdin: ReaderStdin
+  readonly stdout: ReaderStdout
+  /** Skip `emitKeypressEvents` (the fake stdin emits `keypress` directly). */
+  readonly skipKeypressSetup?: boolean
+}
+
+export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promise<string> => {
   return new Promise<string>((resolve, reject) => {
-    const stdin = process.stdin
-    const stdout = process.stderr
+    const stdin: ReaderStdin = testIO?.stdin ?? process.stdin
+    const stdout: ReaderStdout = testIO?.stdout ?? process.stderr
     const promptCols = stringColumns(stripAnsi(opts.prompt))
     const META_ROWS = opts.meta !== undefined && opts.meta !== "" ? 1 : 0
     const state: State = {
@@ -192,15 +239,18 @@ export const readLine = (opts: ReadLineOptions): Promise<string> => {
       heredocOpen: false,
       heredocFence: "",
       heredocLines: [],
+      at: createAtState(),
     }
     // Reset the history cursor at the start of every readLine so `↑` always
     // pulls the freshest entry first. Default-OFF when `opts.history` absent.
     opts.history?.reset()
     let settled = false
 
-    readline.emitKeypressEvents(stdin)
+    if (testIO?.skipKeypressSetup !== true) {
+      readline.emitKeypressEvents(stdin as unknown as NodeJS.ReadStream)
+    }
     const wasRaw = stdin.isTTY === true ? (stdin.isRaw ?? false) : false
-    if (stdin.isTTY === true) stdin.setRawMode(true)
+    if (stdin.isTTY === true) stdin.setRawMode?.(true)
     stdin.resume()
 
     const refreshCandidates = (): void => {
@@ -220,12 +270,21 @@ export const readLine = (opts: ReadLineOptions): Promise<string> => {
       }
     }
 
+    /** RFC-12 — `@`-dropdown is OPEN iff the sub-machine is active AND has at
+     *  least one candidate. (`active` with zero candidates keeps the machine
+     *  alive for re-query but reserves no rows — RFC §6 "no candidates".) */
+    const atDropdownOpen = (): boolean => state.at.active && state.at.candidates.length > 0
+
     const targetReserved = (): number => {
-      // meta row (if any) + blank row + list rows (if list open)
+      // meta row (if any) + blank row + list rows (slash OR @-dropdown).
+      // The two completion modes are mutually exclusive: `@`-mode only opens
+      // when `buf` does NOT start with `/`, so `state.listOpen` is false.
       const listRows = state.listOpen
         ? Math.min(state.candidates.length, MAX_VISIBLE_CANDIDATES) +
           (state.candidates.length > MAX_VISIBLE_CANDIDATES ? 1 : 0)
-        : 0
+        : atDropdownOpen()
+          ? atListRows().length
+          : 0
       const blankRow = listRows > 0 ? 1 : 0
       return META_ROWS + blankRow + listRows
     }
@@ -263,6 +322,37 @@ export const readLine = (opts: ReadLineOptions): Promise<string> => {
       return rows
     }
 
+    /** RFC-12 §4.4 — render the `@`-dropdown as kind-grouped rows: a dim
+     *  kind-section header followed by indented `label … detail` rows, the
+     *  highlighted row in reverse-cyan. Reuses `stringColumns` for CJK-safe
+     *  alignment. Capped at `MAX_VISIBLE_CANDIDATES` (headers excluded from
+     *  the cap so a group is never orphaned); overflow shows "+N more". */
+    const atListRows = (): string[] => {
+      const cands = state.at.candidates
+      if (cands.length === 0) return []
+      const visible = cands.slice(0, MAX_VISIBLE_CANDIDATES)
+      const extra = cands.length - visible.length
+      const labelW = Math.max(1, ...visible.map((c) => stringColumns(c.label)))
+      const rows: string[] = []
+      let lastKind: AtCandidate["kind"] | null = null
+      visible.forEach((c, i) => {
+        if (c.kind !== lastKind) {
+          rows.push(`${GRAY}${c.kind}${RESET}`)
+          lastKind = c.kind
+        }
+        const labelPadded = c.label + " ".repeat(Math.max(0, labelW - stringColumns(c.label)))
+        const sel = i === state.at.selectedIdx
+        const labelStyled = sel
+          ? `  ${REVERSE}${CYAN}${labelPadded}${RESET}`
+          : `  ${CYAN}${labelPadded}${RESET}`
+        const detail = c.detail ?? ""
+        const detailStyled = detail !== "" ? `  ${GRAY}${detail}${RESET}` : ""
+        rows.push(`${labelStyled}${detailStyled}`)
+      })
+      if (extra > 0) rows.push(`${GRAY}  … +${extra} more${RESET}`)
+      return rows
+    }
+
     const redraw = (): void => {
       const target = targetReserved()
       growBandTo(Math.max(target, state.reserved))
@@ -272,7 +362,9 @@ export const readLine = (opts: ReadLineOptions): Promise<string> => {
       // band, painting each row (or erasing it). Use moveDown — it does
       // NOT scroll the terminal even at the bottom of the screen, so the
       // band is stable once reserved.
-      const listRows = renderListRows()
+      // Slash palette and `@`-dropdown are mutually exclusive; the slash
+      // rows win if (somehow) both were open.
+      const listRows = state.listOpen ? renderListRows() : atDropdownOpen() ? atListRows() : []
       for (let i = 0; i < state.reserved; i += 1) {
         out += moveDown(1) + CR + ERASE_LINE
         if (i === 0 && META_ROWS === 1) {
@@ -336,7 +428,7 @@ export const readLine = (opts: ReadLineOptions): Promise<string> => {
     const cleanup = (): void => {
       stdin.removeListener("keypress", onKey)
       if (signalListener !== null) opts.signal?.removeEventListener("abort", signalListener)
-      if (stdin.isTTY === true) stdin.setRawMode(wasRaw)
+      if (stdin.isTTY === true) stdin.setRawMode?.(wasRaw)
       stdin.pause()
     }
 
@@ -402,6 +494,56 @@ export const readLine = (opts: ReadLineOptions): Promise<string> => {
       if (pick === "") return false
       state.buf = pick
       state.cursor = state.buf.length
+      refreshCandidates()
+      return true
+    }
+
+    // ── RFC-12 / ADR-0436 — `@`-mention autocomplete dropdown ───────────────
+    // The keypress machine lives in the pure `at-autocomplete/state-machine`;
+    // these closures own the impure parts (async `list()` + redraw + buffer
+    // splice). All inert when `opts.atProvider` is undefined (default-OFF).
+
+    /** Re-query the provider for the current `@`-query and reflect the result.
+     *  Race-safe via `at.queryEpoch`: a stale `list()` (a later keystroke bumped
+     *  the epoch) is discarded. NO-THROW: a rejected/thrown provider ⇒ empty. */
+    const runAtList = async (): Promise<void> => {
+      if (opts.atProvider === undefined || !state.at.active) return
+      const query = atQuery(state.at, state.buf, state.cursor)
+      state.at.queryEpoch += 1
+      const myEpoch = state.at.queryEpoch
+      let cands: readonly AtCandidate[]
+      try {
+        cands = await opts.atProvider.list(query, opts.signal)
+      } catch {
+        cands = []
+      }
+      if (settled) return
+      if (myEpoch !== state.at.queryEpoch) return // stale: a newer query superseded
+      if (!state.at.active) return // dismissed while awaiting
+      state.at.candidates = cands
+      state.at.selectedIdx = cands.length > 0 ? 0 : -1
+      redraw()
+    }
+
+    /** Open the dropdown at `triggerPos` (the index of the just-typed `@`) and
+     *  kick off the initial empty-query list. */
+    const openAtDropdown = (triggerPos: number): void => {
+      state.at.active = true
+      state.at.triggerPos = triggerPos
+      state.at.candidates = []
+      state.at.selectedIdx = -1
+      void runAtList()
+    }
+
+    /** Accept the highlighted `@`-candidate: splice its `insertText` over
+     *  `[triggerPos, cursor)` and close the dropdown. Returns false when there
+     *  is no valid selection (caller falls through). */
+    const commitAtSelected = (): boolean => {
+      const edit = acceptSelected(state.at, state.buf, state.cursor)
+      if (edit === null) return false
+      state.buf = edit.nextBuf
+      state.cursor = edit.nextCursor
+      dismissAt(state.at)
       refreshCandidates()
       return true
     }
@@ -519,6 +661,62 @@ export const readLine = (opts: ReadLineOptions): Promise<string> => {
         opts.history.reset()
         redraw()
         return
+      }
+
+      // RFC-12 — `@`-dropdown key routing (priority below search/Ctrl+R, above
+      // the slash/history nav). Only entered when the dropdown is active, which
+      // requires `opts.atProvider` (default-OFF ⇒ this whole block is skipped).
+      if (state.at.active) {
+        const visible = Math.min(state.at.candidates.length, MAX_VISIBLE_CANDIDATES)
+        if (k.name === "escape") {
+          dismissAt(state.at)
+          redraw()
+          return
+        }
+        if (k.name === "return" || k.name === "tab") {
+          // Accept the highlighted candidate; if none, dismiss and (for Enter)
+          // fall through so the raw `@query` submits via the normal path.
+          if (commitAtSelected()) {
+            redraw()
+            return
+          }
+          dismissAt(state.at)
+          if (k.name === "tab") {
+            redraw()
+            return
+          }
+          // Enter with no selection: fall through to the normal submit below.
+        } else if (k.name === "down") {
+          state.at.selectedIdx = selectNext(state.at, visible)
+          redraw()
+          return
+        } else if (k.name === "up") {
+          state.at.selectedIdx = selectPrev(state.at, visible)
+          redraw()
+          return
+        } else if (k.name === "backspace") {
+          const verdict = classifyBackspace(state.at, state.cursor)
+          if (verdict.kind === "dismiss") {
+            // Erase the char then close the dropdown.
+            if (state.cursor > 0) {
+              state.buf = state.buf.slice(0, state.cursor - 1) + state.buf.slice(state.cursor)
+              state.cursor -= 1
+            }
+            dismissAt(state.at)
+            refreshCandidates()
+            redraw()
+            return
+          }
+          if (verdict.kind === "requery") {
+            state.buf = state.buf.slice(0, state.cursor - 1) + state.buf.slice(state.cursor)
+            state.cursor -= 1
+            void runAtList()
+            redraw()
+            return
+          }
+        }
+        // Any other key (printable char, Left/Right/Home/End, Delete) falls
+        // through to the shared handlers below; the char branch re-queries.
       }
 
       if (k.name === "return") {
@@ -676,6 +874,22 @@ export const readLine = (opts: ReadLineOptions): Promise<string> => {
       if (typeof str === "string" && str.length > 0) {
         if (str === "\t" || str === "\r" || str === "\n") return
         if (str.length === 1 && str < " ") return
+        // RFC-12 — classify the inserted char w.r.t. the `@`-dropdown BEFORE
+        // the buffer mutation (the machine needs the pre-insert cursor for the
+        // left-boundary check). A multi-char `str` is a paste ⇒ never opens.
+        const isPaste = str.length > 1
+        const insertAt = state.cursor
+        const verdict =
+          opts.atProvider !== undefined
+            ? classifyChar({
+                state: state.at,
+                buf: state.buf,
+                cursor: insertAt,
+                ch: str,
+                providerPresent: true,
+                isPaste,
+              })
+            : ({ kind: "ignore" } as const)
         state.buf = state.buf.slice(0, state.cursor) + str + state.buf.slice(state.cursor)
         state.cursor += str.length
         // Any direct edit invalidates the history navigation context:
@@ -686,6 +900,13 @@ export const readLine = (opts: ReadLineOptions): Promise<string> => {
           opts.history?.reset()
         }
         refreshCandidates()
+        if (verdict.kind === "open") {
+          openAtDropdown(verdict.triggerPos)
+        } else if (verdict.kind === "requery") {
+          void runAtList()
+        } else if (verdict.kind === "dismiss") {
+          dismissAt(state.at)
+        }
         redraw()
       }
     }

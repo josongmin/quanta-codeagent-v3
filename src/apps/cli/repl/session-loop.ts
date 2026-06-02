@@ -51,10 +51,11 @@ export interface RunSessionLoopDeps {
   readonly dispatchSlash: DispatchSlash
   /** Per-turn renderers + side-effects. */
   readonly sinks: SessionLoopSinks
-  /** Optional UX hooks (history-file / multiline). */
+  /** Optional UX hooks (history-file / multiline / `@`-autocomplete). */
   readonly ux?: {
     readonly promptHistory?: import("../prompt-history").PromptHistory
     readonly multiline?: boolean
+    readonly atProvider?: import("../at-autocomplete").AtCandidateProvider
   }
   /** Optional image queue the prompt pipeline drains per turn. */
   readonly imageQueue?: import("../image-queue").ImageQueue

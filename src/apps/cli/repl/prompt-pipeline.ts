@@ -1,3 +1,4 @@
+import type { AtCandidateProvider } from "../at-autocomplete"
 import type { IdleMonitor } from "../idle-monitor"
 import type { ImageQueue } from "../image-queue"
 import type { PromptHistory } from "../prompt-history"
@@ -21,6 +22,10 @@ export type DispatchSlash = (input: string) => Promise<boolean>
 export interface PromptPipelineUxOpts {
   readonly promptHistory?: PromptHistory
   readonly multiline?: boolean
+  /** RFC-12 / ADR-0436 — optional `@`-mention autocomplete provider. When
+   *  present, the raw-line reader opens an `@`-completion dropdown; absent ⇒
+   *  `@` is an ordinary char (byte-identical). */
+  readonly atProvider?: AtCandidateProvider
 }
 
 type PromptLineReader = (
@@ -86,6 +91,7 @@ const defaultPromptLineReader: PromptLineReader = async (
       ...(signal !== undefined ? { signal } : {}),
       ...(ux?.promptHistory !== undefined ? { history: ux.promptHistory } : {}),
       ...(ux?.multiline === true ? { multiline: true } : {}),
+      ...(ux?.atProvider !== undefined ? { atProvider: ux.atProvider } : {}),
     })
     return raw.trim()
   } catch (e) {
