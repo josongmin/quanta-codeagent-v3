@@ -125,9 +125,49 @@ export interface OverriddenMetadata<T> {
  *
  * A field absent from the spec has no restrictiveness ordering ⇒ it falls back
  * to source-precedence under `most-restrictive`.
+ *
+ * SCALAR-ONLY CONTRACT. A ranker is correct ONLY for a field whose value is a
+ * SCALAR (a single atomic axis — an enum or a boolean). A ranker MUST NOT be
+ * declared for a STRUCT field with ≥2 independent safety axes: picking the
+ * whole struct by a sum-of-bits lets a layer that is safer on MORE axes drag
+ * along an UNSAFE sub-field, silently widening a stricter peer's specific bit
+ * (the "most-restrictive that isn't" leak). For struct fields, declare a
+ * {@link FieldCombiner} instead — it merges PER SUB-FIELD, taking the safest
+ * value of each atomic axis independently.
  */
 export type RestrictivenessSpec<T> = {
   readonly [K in keyof T]?: (value: T[K]) => number
+}
+
+/**
+ * Per-field VALUE COMBINER for `most-restrictive` on STRUCT fields. Unlike a
+ * {@link RestrictivenessSpec} ranker (which picks ONE input value whole), a
+ * combiner FOLDS two set values of the field into a NEW value that is, on EVERY
+ * atomic sub-axis, no-less-safe than either input. The merged result therefore
+ * need not equal ANY single input struct — exactly what closes the
+ * whole-struct-by-sum leak (a higher-sum layer can no longer override a peer's
+ * specific safe bit).
+ *
+ * CONTRACT for soundness + determinism:
+ *   - ASSOCIATIVE & COMMUTATIVE: `combine(a,b)` and `combine(b,a)` must be
+ *     deeply equal, and folding a set of values in any order yields the same
+ *     result (so layer order cannot change the outcome). The canonical
+ *     implementation — take the safest value of each sub-field independently —
+ *     satisfies both because per-axis "safest" is a commutative/associative meet.
+ *   - IDEMPOTENT: `combine(a,a)` deep-equals `a`.
+ *   - MONOTONE: the result is never-less-safe than `a` AND never-less-safe than
+ *     `b` on every atomic axis (the property the hellgate invariant proves).
+ */
+export type FieldCombiner<V> = (a: V, b: V) => V
+
+/**
+ * Per-field combiner table for `most-restrictive`. A field present here is
+ * merged by FOLDING its set values through the combiner (safest sub-field of
+ * each), taking PRIORITY over any {@link RestrictivenessSpec} ranker for the
+ * same field. A field in NEITHER table falls back to source-precedence.
+ */
+export type FieldCombinerSpec<T> = {
+  readonly [K in keyof T]?: FieldCombiner<T[K]>
 }
 
 /** Result of {@link mergeLayered}. */
@@ -145,9 +185,14 @@ export interface MergeOptions<T> {
    *  Required so the result is a complete `T` (not a `Partial<T>`). */
   readonly base: T
   readonly strategy: MergeStrategy
-  /** Required for the `most-restrictive` strategy to have any effect; ignored
-   *  by `source-precedence`. */
+  /** Per-SCALAR-field safety ordering. Required for `most-restrictive` to pick
+   *  the safer of two scalar values; ignored by `source-precedence`. */
   readonly restrictiveness?: RestrictivenessSpec<T>
+  /** Per-STRUCT-field safe combiners. Under `most-restrictive`, a field present
+   *  here is merged PER SUB-FIELD (safest of each atomic axis) via the combiner,
+   *  taking PRIORITY over `restrictiveness` for that field. Ignored by
+   *  `source-precedence`. This is the leak-free path for multi-axis structs. */
+  readonly combiners?: FieldCombinerSpec<T>
 }
 
 /**
@@ -226,6 +271,43 @@ const restrictiveWinner = <T extends object>(
 }
 
 /**
+ * Fold EVERY distinct-source value set for a field through the per-field
+ * {@link FieldCombiner}, producing a value that is no-less-safe than any input
+ * on every atomic sub-axis. Setters are visited most-authoritative → least
+ * (the order {@link collectSettersByField} guarantees); since the combiner is
+ * associative/commutative the seed/order is immaterial to the result. The seed
+ * is the most-authoritative setter's value so a degenerate single-setter field
+ * returns that value unchanged (idempotent).
+ */
+const combineFieldValue = <T extends object>(
+  layers: ReadonlyArray<ConfigLayer<T>>,
+  field: keyof T,
+  setters: ReadonlyArray<LayerSource>,
+  combine: (a: T[keyof T], b: T[keyof T]) => T[keyof T],
+): T[keyof T] => {
+  // De-dupe by source: a source's CONTRIBUTION is its last-set value (matching
+  // lastValueFromSource semantics); the same source appearing twice in `setters`
+  // must not double-count (combiner is idempotent so it is harmless, but we keep
+  // it tidy + order-stable).
+  const seen = new Set<LayerSource>()
+  let acc: T[keyof T] | undefined
+  let seeded = false
+  for (const source of setters) {
+    if (seen.has(source)) continue
+    seen.add(source)
+    const { value } = lastValueFromSource(layers, source, field)
+    const v = value as T[keyof T]
+    if (!seeded) {
+      acc = v
+      seeded = true
+    } else {
+      acc = combine(acc as T[keyof T], v)
+    }
+  }
+  return acc as T[keyof T]
+}
+
+/**
  * Merge a list of {@link ConfigLayer}s into a complete `T` plus per-field
  * {@link OverriddenMetadata}.
  *
@@ -240,7 +322,7 @@ export const mergeLayered = <T extends object>(
   layers: ReadonlyArray<ConfigLayer<T>>,
   options: MergeOptions<T>,
 ): MergeResult<T> => {
-  const { base, strategy, restrictiveness } = options
+  const { base, strategy, restrictiveness, combiners } = options
   const merged: T = { ...base }
   const settersByField = collectSettersByField(layers)
   const overrides: Array<OverriddenMetadata<T>> = []
@@ -251,6 +333,25 @@ export const mergeLayered = <T extends object>(
 
   for (const field of fields) {
     const setters = settersByField.get(field) as LayerSource[]
+    // A per-field COMBINER (struct, per-sub-field safe merge) takes PRIORITY
+    // over a scalar ranker. Both only apply under `most-restrictive`.
+    const combine = strategy === "most-restrictive" ? combiners?.[field] : undefined
+
+    if (combine !== undefined) {
+      // Synthesized value: each atomic sub-axis is the safest across ALL setters
+      // (never the whole struct of a single sum-winner). No single source "wins"
+      // — the most-authoritative setter is recorded as `winner` for audit
+      // display and every OTHER distinct setter is `overrode`.
+      merged[field] = combineFieldValue(
+        layers,
+        field,
+        setters,
+        combine as (a: T[keyof T], b: T[keyof T]) => T[keyof T],
+      )
+      overrides.push(buildCombinedOverride(field, setters))
+      continue
+    }
+
     const rankOf = restrictiveness?.[field]
     const useRestrictive = strategy === "most-restrictive" && rankOf !== undefined
 
@@ -280,6 +381,26 @@ export const mergeLayered = <T extends object>(
   }
 
   return { merged, overrides }
+}
+
+/** Override metadata for a COMBINED field: the synthesized value is attributed
+ *  to no single source, so we record the most-authoritative DISTINCT setter as
+ *  `winner` (audit display) and every OTHER setter occurrence as superseded. */
+const buildCombinedOverride = <T extends object>(
+  field: keyof T,
+  setters: ReadonlyArray<LayerSource>,
+): OverriddenMetadata<T> => {
+  const winner = setters[0] as LayerSource
+  const overrode: LayerSource[] = []
+  let winnerDropped = false
+  for (const s of setters) {
+    if (!winnerDropped && s === winner) {
+      winnerDropped = true
+      continue
+    }
+    overrode.push(s)
+  }
+  return { field, winner, overrode }
 }
 
 /**

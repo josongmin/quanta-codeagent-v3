@@ -148,6 +148,8 @@ export {
 } from "./policy"
 export type {
   ConfigLayer,
+  FieldCombiner,
+  FieldCombinerSpec,
   LayerSource,
   MergeOptions,
   MergeResult,
@@ -179,7 +181,11 @@ export type {
 } from "./profile-inheritance"
 export { ProfileInheritanceError, resolveProfileInheritance } from "./profile-inheritance"
 export type { ProfileLayerSlots } from "./profile-layer-merge"
-export { mergeProfileLayers, PROFILE_RESTRICTIVENESS } from "./profile-layer-merge"
+export {
+  mergeProfileLayers,
+  PROFILE_COMBINERS,
+  PROFILE_RESTRICTIVENESS,
+} from "./profile-layer-merge"
 export type {
   ListProfilesOptions,
   ProfileListEntry,
