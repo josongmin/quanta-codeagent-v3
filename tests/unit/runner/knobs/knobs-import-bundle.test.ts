@@ -28,6 +28,7 @@ import { hooksKnob } from "@/runner/knobs/knobs/hooks"
 import { issueHintKnob } from "@/runner/knobs/knobs/issue-hint"
 import { localizePhaseKnob } from "@/runner/knobs/knobs/localize-phase"
 import { lspKnob } from "@/runner/knobs/knobs/lsp"
+import { memoryModeKnob } from "@/runner/knobs/knobs/memory-mode"
 import { mustPassKnob } from "@/runner/knobs/knobs/must-pass"
 import { personaKnob } from "@/runner/knobs/knobs/persona"
 import { reproTestKnob } from "@/runner/knobs/knobs/repro-test"
@@ -46,6 +47,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(issueHintKnob),
   asAnyKnob(localizePhaseKnob),
   asAnyKnob(lspKnob),
+  asAnyKnob(memoryModeKnob),
   asAnyKnob(mustPassKnob),
   asAnyKnob(personaKnob),
   asAnyKnob(reproTestKnob),

@@ -51,6 +51,31 @@ export type MemoryConfigBlock = {
    * `["semantic"]` recalls only durable distilled knowledge.
    */
   recallTiers?: ("episodic" | "semantic")[]
+  /**
+   * Per-thread memory mode for the self-edit tools (ADR-0432, env
+   * `QUANTA_MEMORY_MODE`). Absent ⇒ `enabled` (byte-identical):
+   *   - `enabled`   : recall + write both active.
+   *   - `read-only` : recall active, every write/update typed `ok:false`.
+   *   - `disabled`  : neither recall nor write touch the store.
+   * Threaded into `memoryTools(deps).threadMode` by `buildToolingCore`.
+   */
+  threadMode?: "enabled" | "disabled" | "read-only"
+  /**
+   * Append 1-based inclusive source-line spans to `memory_search` output
+   * (ADR-0432, env `QUANTA_MEMORY_LINE_CITATIONS=1`). Absent / `false` ⇒
+   * legacy output (byte-identical). Threaded into `memoryTools(deps).lineCitations`.
+   */
+  lineCitations?: boolean
+  /**
+   * Budget-aware write-guard threshold (ADR-0432, env
+   * `QUANTA_MEMORY_WRITE_GUARD_PCT`, 0..100 integer). When set, a
+   * `memory_write` / `memory_update` is SKIPPED (typed `ok:false`, store
+   * untouched) iff the run's remaining budget percent is strictly below this
+   * value. Absent ⇒ no guard (byte-identical). The 0..100 remaining signal is
+   * injected by the assembler from the live `BudgetMeter` (ADR-0138) — the
+   * memory slice never imports the budget module (hexagonal boundary).
+   */
+  writeGuardMinRemainingPercent?: number
 }
 
 /**

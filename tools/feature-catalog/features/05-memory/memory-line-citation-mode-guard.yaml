@@ -1,0 +1,66 @@
+id: memory-line-citation-mode-guard
+title: Self-edit memory line citations + per-thread mode + budget write-guard
+section: 5
+subsystem: long-term memory self-edit tools (ADR-0432)
+order: 432
+maturity: L3
+status: stable
+ui_surfaces: [cli, api]
+monitoring: n-a
+modes: [interactive, headless, batch]
+configurable: partial
+owners: ["@songmin"]
+labels: ["absorbed:codex", "surface:memory", "tier:agent"]
+depends_on: [01-memorysearch-write-update, 0082-memory-citation-surface]
+purpose: |
+  Three INDEPENDENT, default-OFF axes folded into `MemoryToolsDeps` on the
+  `memoryTools(deps)` seam (Codex `codex_memories_extension`):
+    1. Line-level citations — `LineCitation { recordId, lineStart, lineEnd }`
+       (1-based inclusive); when on, `memory_search` appends `[L<s>-<e>]` so the
+       model can ground a recalled claim. Orthogonal to ADR-0082 placement
+       provenance.
+    2. Per-thread mode — `enabled` (default, byte-identical) | `read-only`
+       (recall yes, writes typed ok:false) | `disabled` (recall short-circuits
+       BEFORE any store.recall AND writes/updates typed ok:false; zero store I/O).
+    3. Budget write-guard — skips `memory_write`/`memory_update` (typed ok:false,
+       store untouched) iff the run's remaining-budget % is strictly below a
+       0..100 threshold. The remaining signal is injected as a `() => number`
+       from the live `BudgetMeter` (ADR-0138) — the memory slice never imports
+       the budget module (hexagonal boundary).
+  Wired via the `memory-mode` knob (`QUANTA_MEMORY_MODE` /
+  `QUANTA_MEMORY_WRITE_GUARD_PCT` / `QUANTA_MEMORY_LINE_CITATIONS`) →
+  `resolveMemoryConfigFromEnv` → `AgentConfig.memory` →
+  `buildToolingCore` (`tooling.ts`) → `memoryTools(deps)`. Absent envs ⇒
+  byte-identical (deps undefined).
+evidence:
+  code:
+    - src/agent/memory-tools.ts
+    - src/agent/types/memory-config.ts
+    - src/runner/knobs/knobs/memory-mode.ts
+    - src/runner/knobs/memory-mode-parse.ts
+    - src/runner/assemble/memory-factory.ts
+    - src/runner/assemble/memory.ts
+    - src/runner/assemble/tooling.ts
+    - src/agent/budget/meter.ts
+  adrs: ["docs/decisions/0432-memory-line-citation-mode-guard.md"]
+  tests:
+    unit:
+      - tests/unit/memory-tools-citation-mode-guard-hellgate.test.ts
+      - tests/unit/memory-tools-mode-guard-spy-hellgate.test.ts
+    integration:
+      - tests/integration/memory-mode-knob-wire-hellgate.test.ts
+    contract: []
+knobs:
+  - QUANTA_MEMORY_MODE
+  - QUANTA_MEMORY_WRITE_GUARD_PCT
+  - QUANTA_MEMORY_LINE_CITATIONS
+deliberate_hold: null
+notes: |
+  All three axes default-OFF: absent config ⇒ recall on, writes on, no spans —
+  byte-identical to the pre-ADR surface (proven by hellgate equality + spy
+  zero-store-I/O assertions). `BudgetMeter.remainingPercent()` is pure /
+  propositional (binding smallest-remaining consumable dial; over-consumed
+  clamps to 0; no consumable dial ⇒ 100) — no arbitrary thresholds. Write-guard
+  boundary is INCLUSIVE on the allow side (`remaining == min` ⇒ proceeds; only
+  strictly-below blocks). The CLI `buildTooling` shim threads an optional
+  `budgetRemainingPercent` closure; absent ⇒ guard inert (fail-open).

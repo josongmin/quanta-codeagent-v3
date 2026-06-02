@@ -143,6 +143,41 @@ export class BudgetMeter {
     this.consecutiveFailures = 0
   }
 
+  /**
+   * 0..100 remaining-budget percentage across the *configured* consumable
+   * dials (token + cost dimensions). PURE / propositional — NO heuristics, NO
+   * arbitrary thresholds. For each configured dial the remaining fraction is
+   * `(dial - observed) / dial`; the binding (smallest-remaining) dimension wins
+   * so the signal reflects the dial closest to exhaustion. Each per-dial
+   * fraction is clamped to `[0,1]` (an over-consumed dial reads 0%). When NO
+   * consumable dial is configured the budget is effectively unbounded ⇒ `100`.
+   *
+   * This is the 0..100 signal the ADR-0432 memory write-guard reads via the
+   * injected `() => number` — the memory slice never touches this meter.
+   */
+  remainingPercent(): number {
+    const u = this.snapshot()
+    const d = this.dials
+    const totalTokens = u.inputTokens + u.outputTokens + u.reasoningTokens
+    const fractions: number[] = []
+    const consider = (dial: number | undefined, observed: number): void => {
+      // Only a positive, finite dial defines a consumable budget. A 0 (or
+      // negative) dial is degenerate (already exhausted) and is skipped here so
+      // it cannot poison the min with a divide-by-zero; `checkExhausted` still
+      // governs the hard gate.
+      if (dial === undefined || !Number.isFinite(dial) || dial <= 0) return
+      const frac = (dial - observed) / dial
+      fractions.push(frac < 0 ? 0 : frac > 1 ? 1 : frac)
+    }
+    consider(d.maxInputTokens, u.inputTokens)
+    consider(d.maxOutputTokens, u.outputTokens)
+    consider(d.maxReasoningTokens, u.reasoningTokens)
+    consider(d.maxTotalTokens, totalTokens)
+    consider(d.maxCostUsd, u.costUsd)
+    if (fractions.length === 0) return 100
+    return Math.min(...fractions) * 100
+  }
+
   /** Snapshot of every counter. Stable — every call returns a fresh object. */
   snapshot(): BudgetUsage {
     const wallClockMs = this.clock() - this.startedAtMs

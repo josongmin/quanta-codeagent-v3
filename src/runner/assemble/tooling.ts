@@ -1,4 +1,4 @@
-import { type AgentConfig, memoryTools } from "@/agent"
+import { type AgentConfig, type MemoryToolsDeps, type MemoryWriteGuard, memoryTools } from "@/agent"
 import type { EmbedderPort, PersistentStorePort } from "@/memory"
 import type { StructuredLogger } from "@/observability"
 import type { OsSandboxProfile } from "@/runtime"
@@ -93,6 +93,13 @@ export interface ToolingAssembleInput {
    *  default. CLI shim resolves via `resolveSandboxProfileFromEnv(process.env)`
    *  from `QUANTA_SANDBOX`; non-CLI surfaces pass directly. */
   sandboxProfile?: OsSandboxProfile | undefined
+  /** ADR-0432 — live 0..100 remaining-budget signal for the self-edit memory
+   *  write-guard. ONLY consulted when `memoryConfig.writeGuardMinRemainingPercent`
+   *  is set. The surface supplies the closure over its `BudgetMeter`
+   *  (ADR-0138); this slice never imports the budget module (hexagonal
+   *  boundary). Absent + guard configured ⇒ the guard is inert (no meter ⇒ no
+   *  block) so the write proceeds; absent + no guard ⇒ byte-identical. */
+  budgetRemainingPercent?: (() => number) | undefined
 }
 
 /** Assemble the tool registry and aggregate the per-run config dependencies.
@@ -123,6 +130,37 @@ const buildSearchSlots = (
     : {}),
 })
 
+/** ADR-0432 — project the `AgentConfig.memory` extras (threadMode /
+ *  lineCitations / write-guard threshold) into the matching
+ *  {@link MemoryToolsDeps} slots. Each key is omitted when its config field is
+ *  absent so `memoryTools` sees no literal `undefined` (exactOptionalPropertyTypes)
+ *  AND the absent-config path is byte-identical to the legacy call.
+ *
+ *  The write-guard is only built when BOTH the threshold is set AND a live
+ *  `remainingPercent` closure is supplied — keeping the budget signal injected
+ *  (the memory slice never imports `@/agent/budget`). Threshold set but no
+ *  closure ⇒ guard omitted ⇒ writes proceed (inert, fail-open). */
+const buildMemoryExtras = (
+  memoryConfig: AgentConfig["memory"] | undefined,
+  budgetRemainingPercent: (() => number) | undefined,
+): Pick<MemoryToolsDeps, "threadMode" | "lineCitations" | "writeGuard"> => {
+  if (memoryConfig === undefined) return {}
+  const guard: MemoryWriteGuard | undefined =
+    memoryConfig.writeGuardMinRemainingPercent !== undefined && budgetRemainingPercent !== undefined
+      ? {
+          minRemainingPercent: memoryConfig.writeGuardMinRemainingPercent,
+          remainingPercent: budgetRemainingPercent,
+        }
+      : undefined
+  return {
+    ...(memoryConfig.threadMode !== undefined ? { threadMode: memoryConfig.threadMode } : {}),
+    ...(memoryConfig.lineCitations !== undefined
+      ? { lineCitations: memoryConfig.lineCitations }
+      : {}),
+    ...(guard !== undefined ? { writeGuard: guard } : {}),
+  }
+}
+
 export const buildToolingCore = (input: ToolingAssembleInput): Tooling => {
   if (input.store && input.memoryKindLabel !== undefined && input.onMemoryReady !== undefined) {
     input.onMemoryReady(
@@ -141,6 +179,7 @@ export const buildToolingCore = (input: ToolingAssembleInput): Tooling => {
       ? memoryTools({
           store: input.store,
           ...(input.embedder ? { embedder: input.embedder } : {}),
+          ...buildMemoryExtras(input.memoryConfig, input.budgetRemainingPercent),
         })
       : []
   const registry = new ToolRegistry([

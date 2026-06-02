@@ -755,6 +755,12 @@ export const buildTooling = (
    *  (loop mints internally). */
   subagentTaskRegistry?: import("@/subagent").TaskRegistry,
   metrics?: Metrics,
+  /** ADR-0432 — live 0..100 remaining-budget signal for the self-edit memory
+   *  write-guard. The surface passes `() => meter.remainingPercent()` once a
+   *  `BudgetMeter` (ADR-0138) exists for the run; absent ⇒ the guard is inert
+   *  even when `QUANTA_MEMORY_WRITE_GUARD_PCT` is set (fail-open, byte-identical
+   *  for callers that do not wire a meter). */
+  budgetRemainingPercent?: () => number,
 ): Tooling => {
   const store = buildStore()
   const embedder = buildEmbedder(store)
@@ -806,6 +812,7 @@ export const buildTooling = (
       : {}),
     onMemoryReady: (line) => logger.info(line),
     ...(sandboxProfile !== undefined ? { sandboxProfile } : {}),
+    ...(budgetRemainingPercent !== undefined ? { budgetRemainingPercent } : {}),
   })
 }
 

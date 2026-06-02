@@ -44,6 +44,11 @@
 
 import type { AgentConfig } from "@/agent"
 import type { PersistentStorePort } from "@/memory"
+import {
+  parseMemoryLineCitations,
+  parseMemoryThreadMode,
+  parseMemoryWriteGuardPct,
+} from "@/runner/knobs/memory-mode-parse"
 import { parseEnvFlag } from "./env-flag"
 import { buildMemoryConfigCore, type MemoryConfigAssembleInput, parseRecallTiers } from "./memory"
 import { buildStoreCore } from "./store"
@@ -183,6 +188,13 @@ export const resolveMemoryConfigFromEnv = (
   const distillOff = env.QUANTA_MEMORY_DISTILL === "off"
   const consolidateOff = env.QUANTA_MEMORY_CONSOLIDATE === "off"
   const selfEditOff = env.QUANTA_MEMORY_SELF_EDIT === "off"
+  // ADR-0432 default-OFF extras. Reuse the knob's pure parse helpers so the
+  // env→config projection is identical between the CLI env-read path and the
+  // knob framework surface (single source of truth). Any unresolved axis is
+  // omitted ⇒ that field stays absent ⇒ byte-identical legacy behaviour.
+  const threadMode = parseMemoryThreadMode(env.QUANTA_MEMORY_MODE)
+  const lineCitations = parseMemoryLineCitations(env.QUANTA_MEMORY_LINE_CITATIONS)
+  const writeGuardPct = parseMemoryWriteGuardPct(env.QUANTA_MEMORY_WRITE_GUARD_PCT)
   const input: MemoryConfigAssembleInput = {
     store,
     ...(resolvedLimit !== undefined ? { recallLimit: resolvedLimit } : {}),
@@ -190,6 +202,9 @@ export const resolveMemoryConfigFromEnv = (
     ...(consolidateOff ? { consolidate: false } : {}),
     ...(selfEditOff ? { selfEditTools: false } : {}),
     ...(recallTiers ? { recallTiers } : {}),
+    ...(threadMode !== undefined ? { threadMode } : {}),
+    ...(lineCitations !== undefined ? { lineCitations } : {}),
+    ...(writeGuardPct !== undefined ? { writeGuardMinRemainingPercent: writeGuardPct } : {}),
   }
   return buildMemoryConfigCore(input)
 }

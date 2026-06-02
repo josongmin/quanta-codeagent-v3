@@ -1,5 +1,5 @@
 /**
- * Side-effect bundle import — registers all 13 bench/agent knobs into the
+ * Side-effect bundle import — registers all bench/agent knobs into the
  * registry via their module-level `registerKnob(...)` calls.
  *
  * Surface entries that drive the bench / matrix / CLI MUST import this
@@ -20,6 +20,7 @@ import "./hooks"
 import "./issue-hint"
 import "./localize-phase"
 import "./lsp"
+import "./memory-mode"
 import "./must-pass"
 import "./persona"
 import "./repro-test"

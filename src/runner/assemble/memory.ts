@@ -38,6 +38,12 @@ export interface MemoryConfigAssembleInput {
   selfEditTools?: boolean | undefined
   /** Pre-parsed list from {@link parseRecallTiers}. */
   recallTiers?: ("episodic" | "semantic")[] | undefined
+  /** ADR-0432 — pre-parsed `QUANTA_MEMORY_MODE` (enabled|disabled|read-only). */
+  threadMode?: "enabled" | "disabled" | "read-only" | undefined
+  /** ADR-0432 — pre-parsed `QUANTA_MEMORY_LINE_CITATIONS` (true iff "1"). */
+  lineCitations?: boolean | undefined
+  /** ADR-0432 — pre-parsed `QUANTA_MEMORY_WRITE_GUARD_PCT` (integer 0..100). */
+  writeGuardMinRemainingPercent?: number | undefined
 }
 
 /**
@@ -56,6 +62,13 @@ export const buildMemoryConfigCore = (
     ...(input.consolidate === false ? { consolidate: false } : {}),
     ...(input.selfEditTools === false ? { selfEditTools: false } : {}),
     ...(input.recallTiers ? { recallTiers: input.recallTiers } : {}),
+    // ADR-0432 default-OFF extras: each key is omitted unless explicitly set,
+    // so absent envs ⇒ byte-identical block (no behaviour change).
+    ...(input.threadMode !== undefined ? { threadMode: input.threadMode } : {}),
+    ...(input.lineCitations !== undefined ? { lineCitations: input.lineCitations } : {}),
+    ...(input.writeGuardMinRemainingPercent !== undefined
+      ? { writeGuardMinRemainingPercent: input.writeGuardMinRemainingPercent }
+      : {}),
   }
   if (!input.store && Object.keys(block).length === 0) return undefined
   return block
