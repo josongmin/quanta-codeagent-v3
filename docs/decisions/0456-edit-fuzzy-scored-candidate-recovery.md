@@ -1,4 +1,4 @@
-# ADR-0451 — edit fuzzy ladder: scored-candidate recovery on the ambiguous path
+# ADR-0456 — edit fuzzy ladder: scored-candidate recovery on the ambiguous path
 
 **Status:** Accepted (2026-06-02)
 **Type:** Tool-system robustness slice (edit fuzzy matcher).

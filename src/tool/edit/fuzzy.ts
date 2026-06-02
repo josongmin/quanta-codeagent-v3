@@ -136,7 +136,7 @@ const exactAnchorScore = (haystack: string[], needle: string[], span: LineSpan):
 }
 
 /**
- * Strategy (d) — ADR-0451 scored-candidate safety net. Runs ONLY after the
+ * Strategy (d) — ADR-0456 scored-candidate safety net. Runs ONLY after the
  * whitespace-flex / anchored-trim rungs have produced an AMBIGUOUS (2+ window)
  * result that the ladder would otherwise reject outright. We recover the edit
  * IFF a single candidate is the DECISIVE best:
@@ -215,7 +215,7 @@ const tryScoredCandidate = (
  *  1. exact            — delegates to {@link applyExactEdit} (no duplication).
  *  2. whitespace-flex  — per-line trim + internal-run collapse.
  *  3. anchored-trim    — per-line end-trim only.
- *  4. scored-candidate — ADR-0451 safety net: when 2-3 surface as AMBIGUOUS,
+ *  4. scored-candidate — ADR-0456 safety net: when 2-3 surface as AMBIGUOUS,
  *                        recover IFF one window is the strict exact-anchor best.
  *
  * Ambiguous (>1) fuzzy matches are never applied unless `replaceAll` OR a single
@@ -241,7 +241,7 @@ export const applyFuzzyEdit = (
   for (const attempt of [tryWhitespaceFlexible, tryAnchoredTrim]) {
     const r = attempt(source, oldString, newString, replaceAll)
     if (r.kind === "matched") return r.outcome
-    // An ambiguous match used to be definitive. ADR-0451: before surfacing the
+    // An ambiguous match used to be definitive. ADR-0456: before surfacing the
     // failure, give the deterministic scored-candidate rung a chance to RECOVER
     // the edit when exactly one window is the strict exact-anchor best. It only
     // ever returns `matched` (decisive winner) or `none` (no strict winner →

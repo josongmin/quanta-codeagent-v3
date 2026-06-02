@@ -72,11 +72,11 @@ describe("applyFuzzyEdit", () => {
     expect(applyFuzzyEdit("x", "", "a", false).ok).toBe(false)
   })
 
-  // ADR-0451 — scored-candidate recovery rung. Runs ONLY on the ambiguous path
+  // ADR-0456 — scored-candidate recovery rung. Runs ONLY on the ambiguous path
   // that the 3-rung ladder rejects outright today. Each candidate window is
   // scored by its verbatim-exact line count; recovery happens only when exactly
   // one candidate strictly outscores ALL others (strict-ordering discriminator).
-  describe("scored-candidate recovery (ADR-0451)", () => {
+  describe("scored-candidate recovery (ADR-0456)", () => {
     test("recovers when one ambiguous candidate has strictly more exact-anchor lines", () => {
       // Needle = "  x = 1\n  y = 2". Line 1 ("  y = 2") matches NEITHER window
       // verbatim (both use double internal spaces), so the multi-line needle is
