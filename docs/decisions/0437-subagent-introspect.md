@@ -65,7 +65,8 @@ Two new LLM tools in a new `@/subagent` slice, both default-OFF:
   state, including a spawn-through-6-tool integration test.
 - `followup_task` delivery (mailbox) is fully wired. The trigger port
   (`TurnWakeRegistry`) is fully functional and tested (deliver+trigger+queue+
-  interrupt+no-waker), and the composition root shares the instance.
+  interrupt+no-waker), and the composition root shares the instance via the
+  `QUANTA_SUBAGENT_FOLLOWUP=on` knob (2026-06-02 follow-up — `wireOptionalAgentPorts`).
 - **CLOSED (2026-06-02 follow-up, RFC §11): the runner now registers a real
   per-child waker into its `runAgent` loop.** See "Turn-wake gate" below. The
   prior `no_waker` honest-degrade now only fires when the feature is OFF / no
@@ -117,10 +118,30 @@ mailbox+wake substrate. Gates off ⇒ tools absent ⇒ byte-identical.
 
 ## Knobs
 
-- `config.subagent.enableIntrospect: boolean` → `list_agents`.
-- `config.subagent.enableFollowup: boolean` → `followup_task` (needs
-  `config.subagentMailbox` + `config.subagentTurnWake`).
+- `QUANTA_SUBAGENT_INTROSPECT=on` — composition-root env knob (strict `=on`).
+  Sets `config.subagent.enableIntrospect = true` AND wires a shared
+  `AgentMetaRegistry` (richer `list_agents` rows). → `list_agents`.
+- `QUANTA_SUBAGENT_FOLLOWUP=on` — composition-root env knob. Sets
+  `config.subagent.enableFollowup = true` AND wires BOTH followup dependency
+  ports so the tool is FUNCTIONAL: a shared `TurnWakeRegistry` (the TRIGGER
+  substrate the runner registers per-child wakers into) + a `createSubagentMailbox`
+  (DELIVERY) when not already wired via `QUANTA_SUBAGENT_MAILBOX`. → `followup_task`.
+  All three knobs are resolved in `wireOptionalAgentPorts`
+  (`src/agent/optional-ports.ts`) — the single env→optional-port wire every
+  surface calls (unified-agent mode-presets + CLI via
+  `host/runtime/internal/context-binding.ts`). Mirrors the `QUANTA_SUBAGENT_MAILBOX`
+  knob idiom. Unset / typo ⇒ slots absent ⇒ byte-identical.
+- `config.subagent.enableIntrospect / enableFollowup: boolean` — the underlying gates.
 - `config.subagentAgentMeta?` — optional depth/label side-table.
+
+> **2026-06-02 follow-up — limitation CLOSED.** The runner-level turn-wake gate
+> (below) made `followup_task` *functional*, but NO composition root set
+> `enableIntrospect`/`enableFollowup` or wired the `TurnWakeRegistry`/mailbox
+> from env, so `list_agents`/`followup_task` never reached the registry in a
+> real session (dead seam). With `QUANTA_SUBAGENT_FOLLOWUP=on` the shared
+> `TurnWakeRegistry` is now wired at the composition root, so the runner's
+> per-child waker registration has a live registry to register into — a
+> `followup_task` against a running child reports `triggered` (not `no_waker`).
 
 ## Tests
 
@@ -137,6 +158,14 @@ taskId); and an END-TO-END proof against a real `runAgent` child loop that a
 `followup_task` wake makes the child run ANOTHER observable turn (LLM called
 again), with the no-wake path byte-identical (one turn) + `no_waker` degrade.
 11 tests.
+
+`tests/unit/subagent-knobs-wire-hellgate.test.ts` — the composition-root env
+wire: `QUANTA_SUBAGENT_{BATCH,INTROSPECT,FOLLOWUP}=on` ⇒ the corresponding
+flags + dep ports (`AgentMetaRegistry`/`TurnWakeRegistry`/mailbox) are wired and
+the tier-1 builders register the tools; a `followup_task` against a child with a
+live waker reports `triggered` (NOT `no_waker`); every knob unset ⇒ base
+unchanged + zero tools (byte-identical); strict `=on` (typo ⇒ off);
+caller-override-precedence; env→flag fold pure + total. 12 tests.
 
 ## Consequences
 

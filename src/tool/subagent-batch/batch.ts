@@ -99,7 +99,10 @@ const renderOutput = (run: BatchRunResult): string => {
   return lines.join("\n")
 }
 
-const okResult = (message: string): ToolEvent => ({
+/** Error-result helper — every call site is a pre-flight failure (invalid
+ *  input / items load error), so the event is always `ok:false`. Named
+ *  `errResult` (not `okResult`) so the `ok:false` payload is not misleading. */
+const errResult = (message: string): ToolEvent => ({
   type: "result",
   result: { ok: false, output: message },
 })
@@ -144,7 +147,7 @@ export const spawnBatchTool = (deps: SubagentBatchDeps): Tool<SpawnBatchInput> =
   async *execute(input: SpawnBatchInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const parsed = spawnBatchInputSchema.safeParse(input)
     if (!parsed.success) {
-      yield okResult(`invalid input: ${parsed.error.message}`)
+      yield errResult(`invalid input: ${parsed.error.message}`)
       return
     }
     const args = parsed.data
@@ -158,13 +161,13 @@ export const spawnBatchTool = (deps: SubagentBatchDeps): Tool<SpawnBatchInput> =
       deps.readFile,
     )
     if (!loaded.ok) {
-      yield okResult(loaded.error)
+      yield errResult(loaded.error)
       return
     }
 
     // Hard item cap — spawn 0 workers if exceeded.
     if (loaded.items.length > deps.maxItems) {
-      yield okResult(
+      yield errResult(
         `batch size ${loaded.items.length} exceeds cap ${deps.maxItems} — refusing to spawn.`,
       )
       return

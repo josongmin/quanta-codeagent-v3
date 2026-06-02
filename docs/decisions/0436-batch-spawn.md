@@ -70,16 +70,30 @@ the `ToolRegistry` until wired ⇒ byte-identical to today.
 
 ## Knobs
 
-- `config.subagent.enableBatchSpawn: boolean` — gate.
+- `QUANTA_SUBAGENT_BATCH=on` — composition-root env knob (strict `=on`).
+  Resolved in `wireOptionalAgentPorts` (`src/agent/optional-ports.ts`), the
+  single env→optional-port wire every surface (unified-agent mode-presets, CLI
+  via `host/runtime/internal/context-binding.ts`) calls. Sets
+  `config.subagent.enableBatchSpawn = true` (and ensures the `subagent` runner
+  block exists). Unset / typo ⇒ slot absent ⇒ byte-identical. Mirrors the
+  `QUANTA_SUBAGENT_MAILBOX` / `QUANTA_MCP_AUTORESTART` knob idiom.
+- `config.subagent.enableBatchSpawn: boolean` — the underlying gate.
 - `config.subagent.maxBatchItems?: number` — hard item cap (default 256).
 - Reuses `config.subagent.maxConcurrent` (concurrency ceiling) and
   `config.subagent.waitTimeoutPolicy` (per-item timeout band) when present.
 
+> **2026-06-02 follow-up — limitation CLOSED.** Previously the gate was
+> fully implemented + tested but NO composition root ever set
+> `enableBatchSpawn`, so `spawn_batch` never reached the registry in a real
+> session (dead seam). `QUANTA_SUBAGENT_BATCH=on` now turns it on end-to-end.
+
 ## Tests
 
 `tests/unit/subagent-batch-hellgate.test.ts` (RFC §9's 12 cases + all-failed +
-jsonl/json loaders, all through `Tool.execute`) and
-`tests/unit/subagent-batch-template.test.ts` (renderTemplate units). 23 tests.
+jsonl/json loaders, all through `Tool.execute`),
+`tests/unit/subagent-batch-template.test.ts` (renderTemplate units), and
+`tests/unit/subagent-knobs-wire-hellgate.test.ts` (the env→flag→tool wire:
+knob on ⇒ `spawn_batch` registered; unset ⇒ absent + byte-identical). 35 tests.
 
 ## Consequences
 

@@ -49,14 +49,16 @@ evidence:
     - src/agent/subagent-runner.ts
     - src/agent/loop.ts
     - src/agent/tier1/subagent-introspect.ts
+    - src/agent/optional-ports.ts
   adrs: ["docs/decisions/0437-subagent-introspect.md"]
   tests:
     unit:
       - tests/unit/subagent-introspect-hellgate.test.ts
       - tests/unit/subagent-turn-wake-gate-hellgate.test.ts
+      - tests/unit/subagent-knobs-wire-hellgate.test.ts
     integration: []
     contract: []
-knobs: ["enableIntrospect", "enableFollowup"]
+knobs: ["QUANTA_SUBAGENT_INTROSPECT", "QUANTA_SUBAGENT_FOLLOWUP", "enableIntrospect", "enableFollowup"]
 deliberate_hold: null
 notes: |
   Reuses TaskRegistry list()/get() (registry mutate 0) + MailboxPort send
@@ -66,3 +68,9 @@ notes: |
   schemas) untouched; new state isolated in side-ports (AgentMetaRegistry,
   TurnWakeRegistry). agentMeta is an additive optional dep on
   SpawnAgentDeps/Subagent6Deps — no-op when unwired (byte-identical spawn path).
+  2026-06-02 follow-up — dead-seam CLOSED: QUANTA_SUBAGENT_INTROSPECT=on and
+  QUANTA_SUBAGENT_FOLLOWUP=on now set the gates AND wire the dependency ports
+  (AgentMetaRegistry / shared TurnWakeRegistry / mailbox) at the composition
+  root (wireOptionalAgentPorts). The shared TurnWakeRegistry is what the runner
+  registers per-child wakers into, so followup_task against a running child
+  reports triggered (not no_waker). Default-OFF unchanged.

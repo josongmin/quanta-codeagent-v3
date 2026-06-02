@@ -41,14 +41,16 @@ evidence:
     - src/tool/subagent-batch/batch.ts
     - src/tool/subagent-batch/index.ts
     - src/agent/tier1/subagent-batch.ts
+    - src/agent/optional-ports.ts
   adrs: ["docs/decisions/0436-batch-spawn.md"]
   tests:
     unit:
       - tests/unit/subagent-batch-hellgate.test.ts
       - tests/unit/subagent-batch-template.test.ts
+      - tests/unit/subagent-knobs-wire-hellgate.test.ts
     integration: []
     contract: []
-knobs: ["enableBatchSpawn", "maxBatchItems"]
+knobs: ["QUANTA_SUBAGENT_BATCH", "enableBatchSpawn", "maxBatchItems"]
 deliberate_hold: null
 notes: |
   Reuses the TaskRegistry cap philosophy + NO-THROW + injected-clock patterns
@@ -57,3 +59,6 @@ notes: |
   reporting tool, or implicit output_csv_path disk export. Concurrency ceiling
   reuses config.subagent.maxConcurrent; per-item timeout band reuses
   config.subagent.waitTimeoutPolicy.
+  2026-06-02 follow-up — dead-seam CLOSED: QUANTA_SUBAGENT_BATCH=on now sets
+  enableBatchSpawn at the composition root (wireOptionalAgentPorts), so the
+  tool reaches the registry in a real session. Default-OFF unchanged.
