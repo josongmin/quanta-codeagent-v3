@@ -25,7 +25,8 @@ import { buildSessionFeatures } from "@/agent/features"
 import type { AgentConfig } from "@/agent/types"
 import type { LLMPort, StreamEvent } from "@/llm"
 import type { PermissionContext } from "@/permission"
-import { applyKnobs, knobsForSurface, resolveKnobs, type Surface } from "@/runner/knobs"
+import { type AnyKnob, applyKnobs, asAnyKnob, resolveKnobs, type Surface } from "@/runner/knobs"
+import { composeAuthoringKnob } from "@/runner/knobs/knobs/compose-authoring"
 import type { StreamPort } from "@/stream"
 import {
   defaultGitRunner,
@@ -188,7 +189,11 @@ const baseCfg = (): AgentConfig =>
   }) as AgentConfig
 
 const flip = (env: NodeJS.ProcessEnv, surface: Surface): AgentConfig => {
-  const knobs = knobsForSurface(surface)
+  // Registry-INDEPENDENT (see git-compose-knob.hellgate): own the knob map from
+  // the imported object so a sibling test's `__resetRegistry()` can't wipe it.
+  const knobs: ReadonlyMap<string, AnyKnob> = new Map([
+    [composeAuthoringKnob.id, asAnyKnob(composeAuthoringKnob)],
+  ])
   const values = resolveKnobs({ surface, knobs, envVars: env })
   return applyKnobs(baseCfg(), knobs, values, { surface })
 }

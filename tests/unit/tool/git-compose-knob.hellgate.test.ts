@@ -25,7 +25,7 @@ import { buildComposeAuthoringBlock } from "@/agent"
 import type { AgentConfig } from "@/agent/types"
 import type { LLMPort, StreamEvent } from "@/llm"
 import type { PermissionContext } from "@/permission"
-import { applyKnobs, knobsForSurface, resolveKnobs, type Surface } from "@/runner/knobs"
+import { type AnyKnob, applyKnobs, asAnyKnob, resolveKnobs, type Surface } from "@/runner/knobs"
 import { composeAuthoringKnob } from "@/runner/knobs/knobs/compose-authoring"
 import type { StreamPort } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
@@ -58,7 +58,14 @@ const baseCfg = (over: Partial<AgentConfig> = {}): AgentConfig =>
 
 /** Resolve the knob via the framework for `surface`, then apply over baseCfg. */
 const flip = (env: NodeJS.ProcessEnv, surface: Surface, base = baseCfg()): AgentConfig => {
-  const knobs = knobsForSurface(surface)
+  // Registry-INDEPENDENT: build the knob map from the imported object, not the
+  // global `knobsForSurface(...)`. A sibling test's `__resetRegistry()` can wipe
+  // the global registry (the full-suite contamination class), but this test
+  // owns its knob map so it is order-independent. `applyKnobs` still enforces
+  // `knob.surfaces.includes(surface)`, so the bench-exclusion case holds.
+  const knobs: ReadonlyMap<string, AnyKnob> = new Map([
+    [composeAuthoringKnob.id, asAnyKnob(composeAuthoringKnob)],
+  ])
   const values = resolveKnobs({ surface, knobs, envVars: env })
   return applyKnobs(base, knobs, values, { surface })
 }

@@ -27,7 +27,7 @@ import { buildSessionFeatures } from "@/agent/features"
 import type { AgentConfig } from "@/agent/types"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import type { PermissionContext } from "@/permission"
-import { applyKnobs, knobsForSurface, resolveKnobs, type Surface } from "@/runner/knobs"
+import { type AnyKnob, applyKnobs, asAnyKnob, resolveKnobs, type Surface } from "@/runner/knobs"
 import { ADVISOR_MODEL_ALLOWLIST, advisorKnob } from "@/runner/knobs/knobs/advisor"
 import { LLMError } from "@/shared"
 import type { StreamPort } from "@/stream"
@@ -112,7 +112,11 @@ const flip = (
   surface: Surface,
   base: AgentConfig = baseCfg(),
 ): AgentConfig => {
-  const knobs = knobsForSurface(surface)
+  // Registry-INDEPENDENT: build the knob map from the imported object, not the
+  // global `knobsForSurface(...)`, so a sibling test's `__resetRegistry()`
+  // (the full-suite contamination class) cannot wipe what this test reads.
+  // `applyKnobs` still enforces `knob.surfaces.includes(surface)`.
+  const knobs: ReadonlyMap<string, AnyKnob> = new Map([[advisorKnob.id, asAnyKnob(advisorKnob)]])
   const values = resolveKnobs({ surface, knobs, envVars: env })
   return applyKnobs(base, knobs, values, { surface })
 }
