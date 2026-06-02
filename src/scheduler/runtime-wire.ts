@@ -21,6 +21,7 @@ import {
   type AutomationEnginePort,
   type AutomationHandler,
   inMemoryAutomationEngine,
+  type TickEligibilityVerdict,
   type TickOutcome,
 } from "./automation-engine"
 import type { AgentLoopPort } from "./types"
@@ -47,6 +48,11 @@ export interface AutomationEngineSlot {
   readonly tickIntervalMs: number
   readonly onTick: (outcome: TickOutcome) => void
   readonly now?: () => number
+  /** ADR-0453 — OPTIONAL autorun-eligibility gate threaded into `tickScheduler`
+   *  (the scheduler-path 4th guard). Absent ⇒ ticks are byte-identical to the
+   *  pre-ADR-0453 path. Built at the composition root over the pure
+   *  `evaluateAutorunEligibility` (closed `QUANTA_AUTORUN_POLICY` knob). */
+  readonly eligibility?: () => TickEligibilityVerdict
 }
 
 /** Deps for the helper — pure DI. The composition root injects an
@@ -65,6 +71,9 @@ export interface AssembleAutomationDeps {
    *  Used by the onTick observer to emit `errored` lines without polluting
    *  stdout (banner discipline — see ADR-0280). */
   readonly stderr?: (s: string) => void
+  /** ADR-0453 — OPTIONAL autorun-eligibility gate forwarded onto the slot (and
+   *  thence into `tickScheduler`). Absent ⇒ no gate (byte-identical). */
+  readonly eligibility?: () => TickEligibilityVerdict
 }
 
 /** Minimal env reader port. Matches `EnvPort` in shape but kept local so
@@ -130,6 +139,10 @@ export const assembleAutomation = (
     tickIntervalMs,
     onTick,
     ...(deps.now !== undefined ? { now: deps.now } : {}),
+    // ADR-0453 — forward the optional autorun-eligibility gate onto the slot so
+    // the ticker consults it before each fire. Absent ⇒ slot omits it ⇒ tick
+    // byte-identical.
+    ...(deps.eligibility !== undefined ? { eligibility: deps.eligibility } : {}),
   }
   return slot
 }

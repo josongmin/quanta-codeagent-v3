@@ -90,6 +90,7 @@ import {
   type ProfileDefinitionRegistry,
   type ProfileLayerSlots,
   ProfileValidationError,
+  buildAutorunEligibility,
   permissionModeFromProfile,
   resolveProfileByName,
   resolveProfileInheritance,
@@ -800,9 +801,17 @@ const resolveObservabilitySlots = (
  *  runs + inbox are populated — but the dispatch is a no-op until the
  *  preset replaces the handler. */
 const resolveAutomation = (env: NodeJS.ProcessEnv): AutomationEngineSlot | null => {
+  // ADR-0453 jun-02 wire — the scheduler-path autorun-eligibility gate, built
+  // from the SAME closed knob `QUANTA_AUTORUN_POLICY` the reactor uses. The
+  // automation tick has no per-turn outcome, so `getPriorOutcome` is `()=>undefined`
+  // (⇒ `on-failure` is always not-failed ⇒ blocks; the meaningful scheduler
+  // policies are `always` (run) vs `never`/`on-request` (block)). Knob unset ⇒
+  // resolver `undefined` ⇒ slot omits eligibility ⇒ tick byte-identical.
+  const eligibility = buildAutorunEligibility(env, () => undefined)
   return assembleAutomation(
     { get: (k) => env[k] },
     {
+      ...(eligibility !== undefined ? { eligibility } : {}),
       agentLoop: {
         enqueueUserMessage: async (_message: string): Promise<void> => {
           // Stub — the unified-agent base does not own an agent loop;

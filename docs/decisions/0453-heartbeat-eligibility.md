@@ -63,6 +63,32 @@ The slice never imports `@/permission` in its hot path: each slice defines a loc
 - No new env flag, no new heuristic, no clock in the evaluator — the verdict is a deterministic function of closed enums.
 - Anchor-preservation on a blocked scheduler fire means a thread that flips from `never` to `always` (or whose prior outcome becomes `fail` under `on-failure`) fires on the very next tick with no missed-window or double-fire.
 
+## CLOSED — composition-root binds landed (jun-02 follow-ups)
+
+> Both auto-run paths now have a live composition-root bind via the shared
+> `buildAutorunEligibility` helper (`@/permission`, re-exported from the barrel),
+> built from the closed knob `QUANTA_AUTORUN_POLICY`. Knob unset ⇒ no resolver ⇒
+> both paths byte-identical. The original Decision described the scheduler gate on
+> `SchedulerRuntime.processAutomation`; the **live** scheduler is the
+> automation-engine tick, so the scheduler gate landed THERE (see below).
+
+- **Reactor (R2)**: `src/apps/cli/repl/session-loop.ts` builds the resolver with
+  `() => lastTurnOutcome` (read fresh per wake) and injects it into
+  `injectSimulatedTurn`'s `eligibility` (the 4th guard). Reactor runs only under
+  `QUANTA_PROACTIVE_REACTOR=1`.
+- **Scheduler (R3)**: the `createSchedulerRuntime`/`SchedulerRuntimeOpts.
+  eligibility` path is NOT assembled at any app root — the LIVE scheduler is the
+  automation-engine tick (`assembleAutomation` → `startAutomationEngineTicker` →
+  `tickScheduler`). So the gate landed on `tickScheduler`: a new optional
+  `eligibility` consulted at the TOP of the tick, BEFORE `engine.claim`, so a
+  block takes no claim and advances no anchor (new `{ kind: "skipped", reason }`
+  outcome). `apps/agent/index.ts` `resolveAutomation` builds the resolver with
+  `() => undefined` (the automation tick has no per-turn outcome) and threads it
+  via `AutomationEngineSlot.eligibility`. Scheduler runs only under
+  `QUANTA_AUTOMATION=on`. For the scheduler the meaningful policies are `always`
+  (run) vs `never`/`on-request`/`on-failure` (block) — `on-failure` is always
+  not-failed here, so it conservatively blocks.
+
 ## Trade-offs
 
 - The reactor resolver is a thunk (`() => AutorunVerdict | undefined`) rather than keyed by threadId, because self-wake operates on a single active surface — the composition root closes over the surface's threadId. If a future reactor multiplexes threads, the thunk becomes `(threadId) => …` (additive change).

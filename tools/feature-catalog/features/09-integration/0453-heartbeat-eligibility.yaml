@@ -52,36 +52,31 @@ evidence:
     - src/reactor/self-wake.ts
     - src/reactor/types.ts
     - src/apps/cli/repl/session-loop.ts
+    - src/scheduler/automation-engine/ticker.ts
+    - src/scheduler/runtime-wire.ts
+    - src/agent/loop-helpers.ts
+    - src/apps/agent/index.ts
   adrs: ["docs/decisions/0453-heartbeat-eligibility.md", 46, 132, 161]
   tests:
     unit:
       - tests/unit/heartbeat-eligibility-hellgate.test.ts
       - tests/unit/apps/cli/reactor-autorun-eligibility-wire-hellgate.test.ts
+      - tests/unit/scheduler/automation-eligibility-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs:
   - name: QUANTA_AUTORUN_POLICY
-    default: 'unset (no resolver ⇒ 3-guard reactor byte-identical)'
-    purpose: 'jun-02 round-2 REACTOR wire LANDED — `buildReactorAutorunEligibility(process.env, () => lastTurnOutcome)` (session-loop.ts) reads this closed enum (never|on-request|on-failure|always); unset/unrecognized ⇒ undefined ⇒ no 4th guard (byte-identical). The resolver reads `lastTurnOutcome` at CALL time (fresh per wake) and returns the pure `evaluateAutorunEligibility` verdict. The reactor itself only runs under `QUANTA_PROACTIVE_REACTOR=1`, so this gate is orthogonal/additive.'
-deliberate_hold:
-  reason: |
-    SCHEDULER-path bind only. The reactor self-wake bind LANDED jun-02 round-2
-    (session-loop.ts `buildReactorAutorunEligibility` + `QUANTA_AUTORUN_POLICY`),
-    closing the prior false "fully integrated" claim. The SCHEDULER path
-    (`SchedulerRuntimeOpts.eligibility`) stays a seam: `createSchedulerRuntime`
-    has no app composition-root call site yet (the scheduled-agent runtime is
-    not assembled at the CLI entry), so there is nowhere to inject the resolver
-    until that bootstrap lands. The port + pure evaluator are ready; the bind is
-    a one-call follow-up once the scheduler runtime is wired into an entrypoint.
-  promotion_path: |
-    When `createSchedulerRuntime` is assembled at a composition root, pass
-    `eligibility: { resolve: (automation) => mapVerdict(evaluateAutorunEligibility(
-    { approvalPolicy: <thread policy from store>, priorOutcome, mode })) }` —
-    mirroring the reactor wire. No slice change; reuses the same pure evaluator.
+    default: 'unset (no resolver ⇒ both paths byte-identical)'
+    purpose: 'jun-02 wire LANDED on BOTH paths via the shared `buildAutorunEligibility` (@/permission). REACTOR: session-loop.ts builds it with `() => lastTurnOutcome` (fresh per wake) and injects into self-wake (4th guard). SCHEDULER: apps/agent/index.ts `resolveAutomation` builds it with `() => undefined` (the automation tick has no per-turn outcome) and threads it via the AutomationEngineSlot → `tickScheduler`, which consults it BEFORE claiming a row (block ⇒ `skipped`, no claim, no anchor advance). Closed enum never|on-request|on-failure|always; unset/unrecognized ⇒ undefined ⇒ no gate (byte-identical). Reactor runs only under QUANTA_PROACTIVE_REACTOR=1; scheduler only under QUANTA_AUTOMATION=on.'
+deliberate_hold: null
 notes: |
   Default-OFF / byte-identical: with NO resolver injected, scheduler still
   fires on RRULE and reactor still uses its 3 guards — both paths are
   byte-identical to pre-ADR-0453. A resolver returning `undefined` ("no
   opinion") is also pass-through. The gate is additive: it can only BLOCK a
-  fire the existing gate already permitted, never force one. REACTOR bind
-  landed (see knob); SCHEDULER bind is the remaining deliberate_hold above.
+  fire the existing gate already permitted, never force one. BOTH binds landed
+  jun-02 (reactor R2 + scheduler R3 follow-up). The legacy `createSchedulerRuntime`
+  /`SchedulerRuntimeOpts.eligibility` path stays unused — the LIVE scheduler is
+  the automation-engine tick, which is where the scheduler gate now lives. The
+  automation tick has no per-turn outcome, so for the scheduler the meaningful
+  policies are `always` (run) vs `never`/`on-request`/`on-failure` (block).

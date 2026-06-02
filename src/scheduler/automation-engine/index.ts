@@ -35,5 +35,11 @@ export {
   sqliteAutomationEngine,
 } from "./sqlite"
 
-export type { AutomationHandler, InboxBuilder, TickOpts, TickOutcome } from "./ticker"
+export type {
+  AutomationHandler,
+  InboxBuilder,
+  TickEligibilityVerdict,
+  TickOpts,
+  TickOutcome,
+} from "./ticker"
 export { tickScheduler } from "./ticker"

@@ -367,7 +367,7 @@ export const startAutomationEngineTicker = (
 ): AutomationEngineTickerHandle | undefined => {
   const slot = cfg.automationEngine
   if (slot === undefined) return undefined
-  const { engine, handler, tickIntervalMs, onTick, now } = slot
+  const { engine, handler, tickIntervalMs, onTick, now, eligibility } = slot
   if (handler === undefined) return undefined
   if (tickIntervalMs === undefined || !Number.isFinite(tickIntervalMs) || tickIntervalMs <= 0) {
     return undefined
@@ -379,7 +379,14 @@ export const startAutomationEngineTicker = (
 
   const tick = (): void => {
     if (stopped) return
-    tickScheduler({ engine, now: clock(), handler })
+    tickScheduler({
+      engine,
+      now: clock(),
+      handler,
+      // ADR-0453 — forward the optional autorun-eligibility gate (absent ⇒ no
+      // consult ⇒ byte-identical tick).
+      ...(eligibility !== undefined ? { eligibility } : {}),
+    })
       .then((outcome: TickOutcome) => {
         if (onTick !== undefined) {
           try {

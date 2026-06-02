@@ -44,6 +44,15 @@ const defaultInboxBuilder: InboxBuilder = (a, outcome) => ({
     outcome === "errored" ? `automation '${a.id}' fired with error` : `automation '${a.id}' fired`,
 })
 
+/** ADR-0453 — autorun-eligibility verdict the (optional) gate returns. A
+ *  structural type (NOT imported from `@/permission`) so the scheduler slice
+ *  stays fenced; the composition root injects a resolver built over the pure
+ *  `evaluateAutorunEligibility`. */
+export interface TickEligibilityVerdict {
+  readonly eligible: boolean
+  readonly reason: string
+}
+
 /** Discriminated outcome — every arm is observable for telemetry. */
 export type TickOutcome =
   | { readonly kind: "idle"; readonly at: number }
@@ -59,6 +68,11 @@ export type TickOutcome =
       readonly at: number
       readonly error: EngineErrorResult
     }
+  /** ADR-0453 — the autorun-eligibility gate blocked this tick BEFORE any row
+   *  was claimed: nothing fired, no claim taken, no anchor advanced (the due
+   *  row stays `scheduled` and is re-evaluated next tick). `reason` is the
+   *  closed eligibility-reason anchor (e.g. `policy-never`). */
+  | { readonly kind: "skipped"; readonly at: number; readonly reason: string }
 
 export interface TickOpts {
   readonly engine: AutomationEnginePort
@@ -66,6 +80,14 @@ export interface TickOpts {
   readonly handler: AutomationHandler
   /** Override the inbox surface — default produces `[fired]/[errored]` titles. */
   readonly inbox?: InboxBuilder
+  /** ADR-0453 — OPTIONAL autorun-eligibility gate (the scheduler-path 4th
+   *  guard). Consulted ONCE at the top of the tick, BEFORE `engine.claim`, so a
+   *  block takes no claim and advances no anchor. ABSENT (default) ⇒ the tick
+   *  is byte-identical to the pre-ADR-0453 path (no consult). The gate is
+   *  additive: it can only BLOCK a fire the schedule already permitted. The
+   *  policy is global (the verdict does not depend on the row), so a block
+   *  suppresses ALL fires this tick. */
+  readonly eligibility?: () => TickEligibilityVerdict
 }
 
 /**
@@ -87,6 +109,13 @@ export interface TickOpts {
  */
 export const tickScheduler = async (opts: TickOpts): Promise<TickOutcome> => {
   const { engine, now, handler, inbox = defaultInboxBuilder } = opts
+  // ADR-0453 — autorun-eligibility gate. Consulted BEFORE the claim so a block
+  // takes no claim and advances no anchor (the row stays scheduled). Absent ⇒
+  // no consult ⇒ byte-identical.
+  const verdict = opts.eligibility?.()
+  if (verdict !== undefined && !verdict.eligible) {
+    return { kind: "skipped", at: now, reason: verdict.reason }
+  }
   const claimRes = await engine.claim(now)
   if (!claimRes.ok) {
     return { kind: "engine-error", at: now, error: claimRes }
