@@ -154,6 +154,22 @@ R2 교차수렴/buried 스윕에서 나온 것 중 quanta가 안 가진 것으�
 
 > §7 최신소스 killer 후보 10개를 실제 `src/` + git log로 대조. jun-01 Tier1~2 흡수([[jun-01-tier12-gap-absorption]], commit `2cb147ea`)와 jun-02 `96821b77`가 일부를 이미 먹었음 — 그걸 빼고 **진짜 남은 갭**만 확정.
 
+### 🔴→✅ 적대적 리뷰 + 빵꾸 보완 (2026-06-02 3차 — 5 리뷰어 병렬 적대감사 → 6 fix)
+
+5 적대적 리뷰어(knob-wiring/test-quality/security/semantic/cross-cutting)가 증거로 입증한 hole → 전부 보완:
+
+| 빵꾸 (심각도) | 진단 | 보완 |
+|---|---|---|
+| 🟥 **knob 프레임워크 인터랙티브 surface서 죽음** | `applyKnobs`는 bench matrix만 호출, live CLI/agent는 안 함 → advisor/task-budget/compose env knob이 유저에게 무동작. (코드베이스 실제 패턴=composition-root 직접 env read `resolveMemoryConfigFromEnv`) | `wireInteractiveKnobs` composition-root 직접 env read (cli+agent), per-knob env→behavior e2e 신설(기존 e2e는 config 직접주입해 갭 가렸음). +memory write-guard CLI 인자 누락 수정 |
+| 🟥 **network-proxy 이중 죽음** | `withEgressProxy` 호출처 0 + spawn에 proxyEnv 안 넘김 → 보안통제 무효(false security) | composition-root env read + `withEgressProxy` lifecycle를 runAgent에 + bash tool/sandbox spawn에 proxyEnv 주입. **실 bash-tool e2e**로 자식 egress 차단 증명 |
+| 🟥 **policy most-restrictive coarse merge** | sandbox struct를 sum-of-bits로 통째 선택 → per-user가 team-admin `workspaceWrite:false` 덮어 `true` 누출 | per-sub-field combiner — 각 안전축 독립 safest (workspaceWrite AND / networkIsolated OR / allowHosts intersection). proven-exploit이 passing guard로 |
+| 🟥 **profile ceiling 축 누락** | `exceedsCeiling`이 approval.mode/fileSystem.entries/osSandbox/auditRequired 미검 → 디스크 프로파일로 auto-approve/write-root | 누락 5축 monotone 룰 추가, 각 축 독립 breach 테스트 + SAFE control |
+| 🟡 **network CONNECT SSRF 비대칭** | HTTP는 URL정규화, CONNECT는 raw split → obfuscated-IPv4(`2130706433`)/decimal-metadata 회피 | CONNECT authority도 `new URL` 정규화, metadata는 classifyHost 위임, peer re-check 항상 ON |
+| 🟡 **import 콘텐츠 시크릿 미redaction + symlink 우회** | N10은 파일명만 차단 → 콘텐츠 내 API키 verbatim 적재, symlink로 basename 우회 | trust-boundary(@/apps/cli)서 `redactImportedMessages`(live redactSecrets) + dedup `lstat` O_NOFOLLOW symlink 거부 |
+| 🟡 **테스트 동어반복 3건** | task-budget orthogonality(고정3키 negative=vacuous)/byte-identical(동일입력 비교=circular)/advisor "same ref"(미단언) | 실 over-budget runAgent completed 단언 / frozen golden / `toBe(base)` ref 단언 |
+
+**게이트(보완)**: 6 fix 슬라이스 **159 pass / 0 fail**, typecheck 내 코드 0 errors(잔여 1건은 사용자 in-flight mode-cycle WIP), biome 0, fc validate pass. 방법론: 2웨이브 worktree-격리(rate-limit으로 1건 인라인 복구). **non-hole로 정직 판정**: multi-voter 의미론(quorum 클린룰)·memory mode/guard·advisor pure-consult·compose round-trip은 리뷰서 ⬜ clean 확인 — 과수정 안 함.
+
 ### ✅✅ 보완 SHIPPED (2026-06-02 2차 sprint — knob/configurable + fc 등록 + 빡센 hellgate/e2e)
 
 10 슬라이스 전부에 (1) knob/configurable wiring + (2) feature-catalog 등록 + (3) 더 빡센 hellgate unit + e2e 추가. 2 웨이브 × 5 worktree-격리 TDD agent + cherry-pick. **휴리스틱 0 (검증신호·결정성만)**.
