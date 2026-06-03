@@ -28,5 +28,10 @@
         "tests": 0
       }
     }
+  },
+  "fc": {
+    "empty_stubs_max": 1,
+    "orphan_adrs_grandfathered": [],
+    "updated_at": "2026-06-03T05:00:21.322Z"
   }
 }

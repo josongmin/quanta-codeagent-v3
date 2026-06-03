@@ -62,7 +62,7 @@ evidence:
     - src/skill/system-skills/blame-section/index.ts
     - src/skill/system-skills/index.ts
     - src/skill/index.ts
-  adrs: [176]
+  adrs: [181]
   tests:
     unit:
       - tests/unit/system-skills-new-trio-hellgate.test.ts
