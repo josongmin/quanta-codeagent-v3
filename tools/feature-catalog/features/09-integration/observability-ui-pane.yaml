@@ -40,6 +40,7 @@ evidence:
     - src/protocol/observability/index.ts
     - src/protocol/observability/messages.ts
     - src/apps/web-daemon/observability-emitter.ts
+    - src/observability/delta-stream.ts
     - src/apps/web-daemon/index.ts
     - apps/web-frontend/src/ws/observability-hooks.ts
     - apps/web-frontend/src/components/ObservabilityPane.tsx

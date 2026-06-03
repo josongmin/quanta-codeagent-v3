@@ -47,6 +47,7 @@ purpose: |
 evidence:
   code:
     - src/apps/cli/why-cmd.ts
+    - src/session/why-explainer.ts
     - src/apps/cli/repl.ts
     - src/apps/cli/slash-commands.ts
   adrs: [271]
