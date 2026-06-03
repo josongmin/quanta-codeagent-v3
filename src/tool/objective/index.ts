@@ -41,6 +41,14 @@ const WAITING_ENUM = [
   "network",
   "child_agent",
 ] as const satisfies readonly WaitingOn[]
+// Two-way drift guard: `satisfies` proves array⊆union; these Asserts prove the
+// REVERSE (every union member is in the zod enum). Without them, adding a status
+// or waiting-on kind to the union but forgetting it here means the LLM can never
+// set it via the tool AND a stored objective carrying it fails schema validation.
+type _AssertObj<T extends true> = T
+export type _ObjectiveEnumDriftGuard =
+  | _AssertObj<ObjectiveStatus extends (typeof STATUS_ENUM)[number] ? true : false>
+  | _AssertObj<WaitingOn extends (typeof WAITING_ENUM)[number] ? true : false>
 
 // R3 audit-M2/M3 caps: every free-form string field gets a finite upper bound
 // so an adversarial LLM cannot push the per-thread Objective into a memory-

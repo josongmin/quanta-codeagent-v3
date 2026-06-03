@@ -50,6 +50,13 @@ const KIND_ENUM = [
   "response",
   "broadcast",
 ] as const satisfies readonly MailboxMessageKind[]
+// Two-way drift guard: `satisfies` proves array⊆union; this Assert proves the
+// REVERSE. Add a kind to MailboxMessageKind but forget the zod enum → the
+// subagent can never send that kind. Build error instead of silent gap.
+type _AssertKind<T extends true> = T
+export type _MailboxKindDriftGuard = _AssertKind<
+  MailboxMessageKind extends (typeof KIND_ENUM)[number] ? true : false
+>
 
 // Input caps (R2 audit-H — DoS via 16MB `to`/100MB `correlation_id` → 1024-cell
 // retention × cap = bounded memory; `limit` cap is intent signalling — `collect`

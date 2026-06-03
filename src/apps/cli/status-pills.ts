@@ -49,8 +49,12 @@ const FG_MAGENTA = `${ESC}35m`
 const FG_CYAN = `${ESC}36m`
 const FG_GREEN = `${ESC}32m`
 
-/** Sandbox enum mirrors catalog ADR-0012. `"default"` = no wire yet ⇒ hide. */
-export type SandboxMode = "read-only" | "workspace" | "danger" | "default"
+/** Sandbox enum mirrors catalog ADR-0012. `"default"` = no wire yet ⇒ hide.
+ *  SSOT: the union is DERIVED from this array so the parser
+ *  (`sandbox-mode-parse.ts`) reuses the SAME list instead of hand-copying it —
+ *  one list, drift impossible. */
+export const SANDBOX_MODES = ["read-only", "workspace", "danger", "default"] as const
+export type SandboxMode = (typeof SANDBOX_MODES)[number]
 
 /** Rule-indicator snapshot — `activeCount/totalCount` of `AGENTS.md` /
  *  `CLAUDE.md` / `.quanta/rules/*` / `.cursor/rules/*` files discovered

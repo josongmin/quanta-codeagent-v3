@@ -98,14 +98,21 @@ export type TransitionErrorCode =
   | "no-next-phase"
   | "backward-not-permitted"
 
-/** All transition error codes (exhaustive testing). */
-export const ALL_TRANSITION_ERROR_CODES: ReadonlyArray<TransitionErrorCode> = [
+/** All transition error codes (exhaustive testing). `as const satisfies` so the
+ *  drift guard sees the literal tuple — a plain `ReadonlyArray<Code>` annotation
+ *  widens `[number]` back to the union and makes the reverse Assert trivially
+ *  true (useless). */
+export const ALL_TRANSITION_ERROR_CODES = [
   "unknown-phase",
   "feedback-required",
   "skip-not-allowed",
   "no-next-phase",
   "backward-not-permitted",
-]
+] as const satisfies readonly TransitionErrorCode[]
+type _AssertTxn<T extends true> = T
+export type _TransitionCodesDriftGuard = _AssertTxn<
+  TransitionErrorCode extends (typeof ALL_TRANSITION_ERROR_CODES)[number] ? true : false
+>
 
 /** Typed transition failure. `code` is the closed enum; `detail` is a
  *  human-readable string for logging only (NEVER parsed).
@@ -125,11 +132,16 @@ export class TransitionError extends QuantaError {
 /** Discriminator for {@link FeedbackError} arms. Closed. */
 export type FeedbackErrorCode = "unknown-phase" | "phase-mismatch"
 
-/** All feedback error codes (exhaustive testing). */
-export const ALL_FEEDBACK_ERROR_CODES: ReadonlyArray<FeedbackErrorCode> = [
+/** All feedback error codes (exhaustive testing). `as const satisfies` for the
+ *  drift guard (see ALL_TRANSITION_ERROR_CODES). */
+export const ALL_FEEDBACK_ERROR_CODES = [
   "unknown-phase",
   "phase-mismatch",
-]
+] as const satisfies readonly FeedbackErrorCode[]
+type _AssertFb<T extends true> = T
+export type _FeedbackCodesDriftGuard = _AssertFb<
+  FeedbackErrorCode extends (typeof ALL_FEEDBACK_ERROR_CODES)[number] ? true : false
+>
 
 /** Typed feedback failure. Narrows `QuantaError.code` to {@link FeedbackErrorCode}.
  *  Base stores the string form (`n_phase_feedback_${code}`); override surfaces

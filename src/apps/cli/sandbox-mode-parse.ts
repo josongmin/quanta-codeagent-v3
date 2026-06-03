@@ -8,17 +8,13 @@
  * anything outside the allowed set (including empty / undefined).
  */
 
-import type { SandboxMode } from "./status-pills"
+import { SANDBOX_MODES, type SandboxMode } from "./status-pills"
 
-/** All valid {@link SandboxMode} values — copy of the union in `status-pills`.
- *  Kept in sync via the {@link parseSandboxMode} fallback path: a new variant
- *  must be added HERE before it'll round-trip cleanly. */
-export const VALID_SANDBOX_MODES: ReadonlySet<SandboxMode> = new Set<SandboxMode>([
-  "read-only",
-  "workspace",
-  "danger",
-  "default",
-])
+/** All valid {@link SandboxMode} values — built from the SSOT array
+ *  {@link SANDBOX_MODES} (which the union itself derives from), so this set can
+ *  NEVER drift from the union. Adding a variant in `status-pills` flows here
+ *  automatically. */
+export const VALID_SANDBOX_MODES: ReadonlySet<SandboxMode> = new Set<SandboxMode>(SANDBOX_MODES)
 
 /**
  * Parse a raw env value into a {@link SandboxMode}. Unknown / empty /

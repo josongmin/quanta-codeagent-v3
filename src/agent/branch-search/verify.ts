@@ -46,7 +46,17 @@ const firstLine = (s: string, cap = 200): string => {
   return line.trim().slice(0, cap)
 }
 
-const countErrors = (s: string): number => (s.match(/error/gi) ?? []).length
+// Count errors from the linter's OWN reported total, not by counting every
+// occurrence of the substring "error" (which double-counts "0 errors", file
+// paths, and rule names like `lint/suspicious/...`). biome AND tsc both print a
+// "Found N error(s)." summary — parse that authoritative number. Fallback: count
+// tsc's exact `error TS####` diagnostic markers. This only feeds the ranking
+// `magnitude`; pass/fail is decided by the authoritative exit code regardless.
+const countErrors = (s: string): number => {
+  const summary = s.match(/Found (\d+) error/i)
+  if (summary?.[1] !== undefined) return Number(summary[1])
+  return s.match(/error TS\d+/g)?.length ?? 0
+}
 
 export const tscVerifier =
   (opts?: {
