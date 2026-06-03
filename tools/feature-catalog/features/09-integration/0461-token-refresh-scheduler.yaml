@@ -47,8 +47,26 @@ knobs:
     where: 'token-refresh-scheduler.ts (compile-time const)'
     purpose: '60s pre-expiry firing margin so the refresh round-trip completes before the old token lapses — a structural boundary guard, not a tunable.'
 deliberate_hold:
-  reason: "No production connector arms the scheduler yet — the rotator (ADR-0160) is the only live token path; this slice ships the seam + hellgate, wiring is per-connector opt-in."
-  promotion_path: "When a long-running connector (e.g. GitHub app, MCP OAuth) lands, construct the scheduler with its rotator + refresh callback at the connector composition root."
+  reason: |
+    Wiring is HELD because there is no honest production target today (audited
+    2026-06-03, 6-track scout): (1) the ADR-0160 rotator the scheduler drives is
+    itself never constructed in production — it is test-only, and ADR-0160's own
+    barrel says "wire-up into agent dispatch is a follow-up ADR"; there is no
+    connector composition root, no TokenStorePort adapter. (2) The ONLY live
+    token path, ChatGPT OAuth (src/auth/chatgpt-oauth), already refreshes
+    PRE-CALL at the top of every stream() (ensureFreshToken, 60s skew, with a
+    RefreshCoordinator mutex), so the "401-mid-task" friction this scheduler
+    removes structurally cannot occur there — arming it would be redundant AND
+    risk a double-refresh race against the coordinator. Forcing a wire today
+    would be speculative dead code / regression risk, so the slice ships the
+    seam + 15-case hellgate and stays opt-in.
+  promotion_path: |
+    Wire when a long-running connector that DOES hit reactive 401s lands with a
+    real rotator (e.g. a GitHub-app or MCP-OAuth connector via the ADR-0160
+    composition root): construct the scheduler with that rotator + its refresh
+    callback and call schedule() when a token loads / stop() on shutdown. Do NOT
+    retrofit it onto ChatGPT OAuth — that path's pre-call refresh already covers
+    the case and the coordinator owns the mutex.
 notes: |
   Hellgate 15 cases: arms at expiresAt-LEAD_MS / reuses rotator mutex (no dup
   callback) / re-schedules from NEW expiry / cancel clears one / stop clears all
