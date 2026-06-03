@@ -109,10 +109,16 @@ const RULES: Rule[] = [
     re: /^\s*([^\s:]+\.go):(\d+):\s*(.*)$/gm,
     map: (m) => ({ file: m[1] as string, line: num(m[2]), message: (m[3] ?? "").trim() }),
   },
-  // JS stack frame (jest/vitest/bun/node): `at fn (/path/x.ts:12:34)` or `(/path/x.ts:12:34)`
+  // JS stack frame (jest/vitest/bun/node): `at fn (/path/x.ts:12:34)` or `(/path/x.ts:12:34)`.
+  // The file token is BOUNDARY-ANCHORED (?:^|[\s(]) with a trailing lookahead — same
+  // shape as the `generic` rule below. The old `\(?...` had no leading anchor, so the
+  // greedy negated class was re-attempted at EVERY offset: a single long no-boundary
+  // run ("a.a.a...") backtracked O(n^2), and a few-hundred-KB crafted log pinned the
+  // event loop for tens of seconds (ReDoS). Anchoring fails non-boundary offsets in
+  // O(1), so the scan is linear regardless of input size — no arbitrary input cap.
   {
     framework: "js-stack",
-    re: /\(?([^\s():]+\.(?:[cm]?[jt]sx?)):(\d+):(\d+)\)?/g,
+    re: /(?:^|[\s(])([^\s():]+\.(?:[cm]?[jt]sx?)):(\d+):(\d+)(?=[\s)]|$)/g,
     map: (m) => ({ file: m[1] as string, line: num(m[2]), message: "" }),
   },
   // pytest short form: `path/test_x.py:123: AssertionError` (line:col optional)

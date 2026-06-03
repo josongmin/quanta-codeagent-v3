@@ -1,3 +1,4 @@
+import { isAbsolute, join } from "node:path"
 import { z } from "zod"
 import { FsJailError, resolveJailed } from "@/storage"
 import { defineTool } from "../factory"
@@ -39,9 +40,30 @@ export const globTool = defineTool<Input>({
       }
       throw e
     }
+    // S14 (pattern channel): the `path` base is jailed above, but Bun.Glob would
+    // otherwise honor an ABSOLUTE pattern ("/etc/*") or a "../" pattern and scan
+    // OUTSIDE the jail entirely. Reject an escaping pattern up front (loud, mirrors
+    // the `path` jail) — a model-supplied traversal pattern is invalid input, not a
+    // thing to silently re-scope.
+    if (isAbsolute(input.pattern) || input.pattern.split(/[/\\]/).includes("..")) {
+      yield {
+        type: "result",
+        result: { ok: false, output: `glob pattern escapes the workspace: ${input.pattern}` },
+      }
+      return
+    }
     const glob = new Bun.Glob(input.pattern)
     const hits: string[] = []
     for await (const file of glob.scan({ cwd: base, onlyFiles: true, dot: false })) {
+      // Defense in depth: a `**` cross or a symlink inside the tree could still
+      // yield an out-of-jail path. Re-jail every emitted hit against ctx.cwd and
+      // DROP any that escape (it is out of the tool's read scope by contract).
+      try {
+        resolveJailed(join(base, file), ctx.cwd)
+      } catch (e) {
+        if (e instanceof FsJailError) continue
+        throw e
+      }
       hits.push(file)
       if (hits.length >= MAX + 1) break
     }

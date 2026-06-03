@@ -130,6 +130,12 @@ export interface TurnSession {
   readonly skillGate?: SkillGate
   readonly activeSkills?: { name: string; description: string }[]
   readonly archive?: ConversationSummaryArchive
+  /** ADR-0473 — per-session speculative (background) compaction controller.
+   *  Present only when `QUANTA_BG_COMPACTION=1`; the turn loop borrows a ready
+   *  summary at turn-top and re-arms after compaction. Absent ⇒ byte-identical. */
+  readonly bgCompaction?: import("./compaction/index").BackgroundSummarizationController<
+    import("./compaction").BgSummaryPayload
+  >
   readonly guards: readonly TurnGuard[]
   /** ADR-0133 — session-scoped pending list of hook-emitted promptHook
    *  responses. Pushed by the subagent runner (via

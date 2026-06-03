@@ -1,3 +1,4 @@
+// biome-ignore-all lint/suspicious/noTemplateCurlyInString: these tests embed literal `${...}` inside plain strings ON PURPOSE — it is the parser INPUT (source text containing a template dynamic import), not an unintended template literal.
 /**
  * Hellgate — reachability symbol PARSER (regression pins for the 3-round
  * self-audit). The `fc reachability` verdict is only as trustworthy as the

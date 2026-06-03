@@ -877,6 +877,10 @@ const maybeCompact = async (
   breaker: CompactionBreaker | undefined,
   archive: ConversationSummaryArchive | undefined,
   turn: number,
+  // ADR-0473 — per-session speculative-compaction controller (already minted at
+  // session setup; `undefined` unless QUANTA_BG_COMPACTION=1). Borrowed at
+  // turn-top, re-armed at the end. Absent ⇒ this fn is byte-identical.
+  bgController: BackgroundSummarizationController<BgSummaryPayload> | undefined,
 ): Promise<BreakerVerdict> => {
   if (!config.compaction) return { abort: false }
   // T02 M3 — proactive compaction circuit breaker is now ENFORCED at this
@@ -900,6 +904,21 @@ const maybeCompact = async (
   const onPreCompact = config.onPreCompact
   const snapshot = [...wm.snapshot()]
   const before = estimateTokens(snapshot)
+  // ADR-0473 — the compaction threshold IS the controller's window ceiling (the
+  // synchronous path folds history at exactly this point), so the speculative
+  // "approaching the limit" / "frees enough" math is anchored to the same value.
+  const bgLimitTokens = resolveCompactionLimitTokens(config.compaction?.thresholdTokens)
+  // Borrow a READY speculative summary computed in the background during the
+  // previous turn, instead of blocking on a fresh summarize. `install` ⇒ use it
+  // as the compaction result (skip the LLM call); any discard ⇒ fall through to
+  // the synchronous `compactIfNeeded` (which guarantees compaction correctness).
+  const borrowed =
+    bgController !== undefined
+      ? await bgController.reconcileAtTurnBoundary({
+          usedTokens: before,
+          limitTokens: bgLimitTokens,
+        })
+      : undefined
   // ADR-0075 — build the {from,to}TurnId pair UP FRONT so a successful
   // compaction can stamp the archive without re-deriving identifiers from a
   // mutated `wm`. `toTurnId` is the turn we're entering; `fromTurnId` is the
@@ -951,52 +970,65 @@ const maybeCompact = async (
       }
     : undefined
   try {
-    result = await compactIfNeeded({
-      messages: snapshot,
-      // ADR-0011: optional dedicated summarizer model; absent ⇒ main
-      // llm (byte-identical). Summarization is low-stakes; a cheaper/faster
-      // model spares the main model on every compaction.
-      llm: config.compaction.summarizerLlm ?? config.llm,
-      system,
-      isFirstCompaction,
-      ...(config.compaction.thresholdTokens !== undefined
-        ? { thresholdTokens: config.compaction.thresholdTokens }
-        : {}),
-      ...(config.compaction.keepRecentTurns !== undefined
-        ? { keepRecentTurns: config.compaction.keepRecentTurns }
-        : {}),
-      // ADR-0409 — post_compact event + Objective.setNextActions bridge.
-      // Proactive site ⇒ token_budget_exceeded. threadId = config.sessionId
-      // (the natural per-thread key the Objective port uses).
-      ...(postCompactEmit !== undefined ? { postCompactEmit } : {}),
-      ...(objectiveSetNextActions !== undefined ? { objectiveSetNextActions } : {}),
-      ...(postCompactEmit !== undefined || objectiveSetNextActions !== undefined
-        ? { recoveryReason: "token_budget_exceeded" as const }
-        : {}),
-      ...(config.sessionId !== undefined && config.sessionId.length > 0
-        ? { threadId: config.sessionId }
-        : {}),
-      // ADR-0075 — Cursor HITL hook. Absent `onPreCompact` ⇒ NO preflight
-      // attribute set (compactIfNeeded fast-paths past the await, byte-
-      // identical legacy). When set, the host gets the typed
-      // {@link PreCompactRequestQuery}; the loop maps its
-      // {@link PreCompactDecision} 1-to-1 to the `compactIfNeeded` preflight
-      // protocol. Any exception thrown from the host callback propagates
-      // into the surrounding try/catch and degrades to the existing
-      // proactive-error path (compaction deferred this turn).
-      ...(onPreCompact !== undefined
-        ? {
-            preflight: async (q: {
-              currentTokens: number
-              threshold: number
-              proposedKeep: number
-              proposedSummaryTokens: number
-            }): Promise<"approve" | "defer_one_turn" | "force_now"> =>
-              onPreCompact({ turnId, ...q }),
-          }
-        : {}),
-      ...(preCompactHook !== undefined ? { preCompactHook } : {}),
-    })
+    if (borrowed?.kind === "install") {
+      // The background pass produced the SAME `[synthetic, ...suffix]` payload
+      // the synchronous path would; install it as the compaction result and skip
+      // the (already-done) summarize. `summaryTokens` is the synthetic summary
+      // message's footprint (first element) — used only for the archive stamp.
+      const installed = [...borrowed.summary]
+      result = {
+        compacted: true,
+        messages: installed,
+        summaryTokens: estimateTokens(installed.slice(0, 1)),
+      }
+    } else {
+      result = await compactIfNeeded({
+        messages: snapshot,
+        // ADR-0011: optional dedicated summarizer model; absent ⇒ main
+        // llm (byte-identical). Summarization is low-stakes; a cheaper/faster
+        // model spares the main model on every compaction.
+        llm: config.compaction.summarizerLlm ?? config.llm,
+        system,
+        isFirstCompaction,
+        ...(config.compaction.thresholdTokens !== undefined
+          ? { thresholdTokens: config.compaction.thresholdTokens }
+          : {}),
+        ...(config.compaction.keepRecentTurns !== undefined
+          ? { keepRecentTurns: config.compaction.keepRecentTurns }
+          : {}),
+        // ADR-0409 — post_compact event + Objective.setNextActions bridge.
+        // Proactive site ⇒ token_budget_exceeded. threadId = config.sessionId
+        // (the natural per-thread key the Objective port uses).
+        ...(postCompactEmit !== undefined ? { postCompactEmit } : {}),
+        ...(objectiveSetNextActions !== undefined ? { objectiveSetNextActions } : {}),
+        ...(postCompactEmit !== undefined || objectiveSetNextActions !== undefined
+          ? { recoveryReason: "token_budget_exceeded" as const }
+          : {}),
+        ...(config.sessionId !== undefined && config.sessionId.length > 0
+          ? { threadId: config.sessionId }
+          : {}),
+        // ADR-0075 — Cursor HITL hook. Absent `onPreCompact` ⇒ NO preflight
+        // attribute set (compactIfNeeded fast-paths past the await, byte-
+        // identical legacy). When set, the host gets the typed
+        // {@link PreCompactRequestQuery}; the loop maps its
+        // {@link PreCompactDecision} 1-to-1 to the `compactIfNeeded` preflight
+        // protocol. Any exception thrown from the host callback propagates
+        // into the surrounding try/catch and degrades to the existing
+        // proactive-error path (compaction deferred this turn).
+        ...(onPreCompact !== undefined
+          ? {
+              preflight: async (q: {
+                currentTokens: number
+                threshold: number
+                proposedKeep: number
+                proposedSummaryTokens: number
+              }): Promise<"approve" | "defer_one_turn" | "force_now"> =>
+                onPreCompact({ turnId, ...q }),
+            }
+          : {}),
+        ...(preCompactHook !== undefined ? { preCompactHook } : {}),
+      })
+    }
   } catch (e) {
     const message = errMessage(e)
     config.stream.emit({
@@ -1064,6 +1096,16 @@ const maybeCompact = async (
     // strikes — only this genuine no-progress-under-pressure case is.
     breaker?.recordProactive(before, before)
   }
+  // ADR-0473 — re-arm: begin a speculative summarize for the NEXT turn when the
+  // POST-compaction transcript is approaching the limit. Uses the live (possibly
+  // just-shrunk) usage so we never speculate right after a successful compaction.
+  // No-op when the controller is absent, a pass is already in flight, or we are
+  // not yet approaching the limit. The pass runs in the background DURING the
+  // upcoming turn and is borrowed at the next turn-top.
+  bgController?.maybeStart({
+    usedTokens: estimateTokens([...wm.snapshot()]),
+    limitTokens: bgLimitTokens,
+  })
   return { abort: false }
 }
 
@@ -1342,6 +1384,7 @@ const prepareTurnContext = async (
   citations: MemoryCitation[],
   hookPromptInjects: readonly import("./hooks").HookPromptInject[] | undefined,
   taskSpend: { tokens: number } | undefined,
+  bgController: BackgroundSummarizationController<BgSummaryPayload> | undefined,
 ): Promise<{
   readonly ctx: ReturnType<typeof buildTurnContext>
   readonly breakerVerdict: BreakerVerdict
@@ -1357,6 +1400,7 @@ const prepareTurnContext = async (
     breaker,
     archive,
     turn,
+    bgController,
   )
   // Codex absorption — memory L3: snapshot the session WorkingState on every attempt
   // so the per-turn reminder reflects mutations the tool just made earlier in
@@ -1717,7 +1761,7 @@ const runTurn = async (
   // R2-B P1: destructure to the same local names the original body used so the
   // body below stays byte-identical (config / wm / recorder / …). Same fields,
   // same `undefined`s — only the call shape changed.
-  const { config, recorder, activeSkills, archive, hookPromptPending } = session
+  const { config, recorder, activeSkills, archive, hookPromptPending, bgCompaction } = session
   const { wm, rec, breaker, toolHistory, workingState, citations } = state
   // ADR-0437 follow-up — the per-turn session view (effective interrupt signal).
   // No gate ⇒ `turnSession === session`, `gate === undefined` (byte-identical).
@@ -1745,6 +1789,9 @@ const runTurn = async (
     // controller fired). The lifetime check uses the ORIGINAL `config.signal`
     // (not the effective one) so an interrupt never masquerades as a finish.
     if (config.signal.aborted || gate?.wasInterrupted() === true) {
+      // ADR-0473 — the turn ended early; cancel any in-flight speculative
+      // summarize so it stops spending (idempotent, no-op when none pending).
+      bgCompaction?.cancelIfPending()
       return classifyTurnAbort(gate, config.signal)
     }
 
@@ -1762,6 +1809,7 @@ const runTurn = async (
       citations,
       turnInjects,
       state.taskSpend,
+      bgCompaction,
     )
     // T02 M3 — an ENFORCED proactive compaction breaker trip ends the turn
     // through the same terminal `{kind:"error"}` route the reactive breaker
@@ -2786,6 +2834,9 @@ const createRunAgentContext = async (config: AgentConfig): Promise<RunAgentConte
     ...(features.activeSkills !== undefined ? { activeSkills: features.activeSkills } : {}),
     ...(summaryArchive !== undefined ? { archive: summaryArchive } : {}),
     ...(ttfm !== undefined ? { ttfm } : {}),
+    // ADR-0473 — thread the (already-minted) speculative-compaction controller
+    // into the turn loop so it actually borrows/re-arms. Absent ⇒ omitted.
+    ...(bgCompaction !== undefined ? { bgCompaction } : {}),
     guards: guardChain,
     hookPromptPending,
   }
