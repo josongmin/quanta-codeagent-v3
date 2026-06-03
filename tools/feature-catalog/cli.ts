@@ -28,7 +28,7 @@ import {
 } from "./audit"
 import { parseDiffNameStatus, runCheckChanged } from "./check-changed"
 import { loadFcBaseline, runLint, saveFcBaseline, snapshotBaseline } from "./lint"
-import { computeReachability } from "./reachability"
+import { computeReachability, computeSymbolReachability } from "./reachability"
 import { loadBaseline, loadProse, renderCatalog } from "./render"
 import {
   computeAxisScores,
@@ -74,7 +74,7 @@ function usage(): never {
       "  gates [--strict]            maturity-promotion-gate audit (warn / strict-fail)",
       "  test-audit [--strict] [--max-per-rule N]   12-rule admissibility audit over tests/ (R1-3 + R5 + R8-10 enforced; R4/R6/R7/R11/R12 semantic-only)",
       "  graph [--section N] [--id X] [--depth N]   emit DOT dependency DAG to stdout",
-      "  reachability [--strict]    code-grounded: flag L4+ features unreachable from any entrypoint (real import graph)",
+      "  reachability [--strict] [--symbols]    code-grounded: flag L4+ features unreachable (or --symbols dead-API) via real import graph",
     ].join("\n"),
   )
   process.exit(2)
@@ -1076,28 +1076,42 @@ async function cmdTestAudit(argv: string[]): Promise<void> {
  *
  * `--strict` exits 1 when any are found (CI gate). Features whose evidence.code
  * is tools/- or tests-only are skipped (not app-reachable by design).
+ *
+ * `--symbols` adds the finer symbol-level pass: a feature whose every src file
+ * is EITHER unreachable OR "dead-API" (module loads via a barrel re-export but
+ * no own export is ever named-imported AND it self-registers nothing at load) —
+ * the blind spot module reachability cannot see (e.g. a helper re-exported from
+ * a barrel but never called by any tool). Stricter signal; still spot-verify
+ * before downgrading.
  */
 async function cmdReachability(argv: string[]): Promise<void> {
   const strict = argv.includes("--strict")
-  const [reach, features] = await Promise.all([
+  const symbols = argv.includes("--symbols")
+  const [reach, sym, features] = await Promise.all([
     computeReachability(),
+    symbols ? computeSymbolReachability() : Promise.resolve(null),
     loadFeaturesStrict(FEATURES_DIR),
   ])
-  const offenders: Array<{ id: string; maturity: string; first: string }> = []
+  const isDead = (c: string): boolean => !reach.reached.has(c) || (sym?.deadApi.has(c) ?? false)
+  const offenders: Array<{ id: string; maturity: string; first: string; kind: string }> = []
   for (const { feature } of features) {
     if (feature.maturity !== "L4" && feature.maturity !== "L5") continue
     const src = feature.evidence.code.filter((c) => c.startsWith("src/") && c.endsWith(".ts"))
     if (src.length === 0) continue // tools/tests-only feature — not app-reachable by design
-    if (!src.some((c) => reach.reached.has(c))) {
-      offenders.push({ id: feature.id, maturity: feature.maturity, first: src[0] as string })
+    if (src.every(isDead)) {
+      const kind = src.some((c) => !reach.reached.has(c)) ? "unreachable" : "dead-API"
+      offenders.push({ id: feature.id, maturity: feature.maturity, first: src[0] as string, kind })
     }
   }
   offenders.sort((a, b) => a.id.localeCompare(b.id))
+  const mode = symbols
+    ? "unreachable OR dead-API (symbol-level)"
+    : "UNREACHABLE from any entrypoint"
   console.log(
     `reachability: ${reach.reached.size}/${reach.allFiles.size} src files reached; ` +
-      `${offenders.length} L4+ feature(s) UNREACHABLE from any entrypoint (overclaim):`,
+      `${offenders.length} L4+ feature(s) ${mode} (overclaim):`,
   )
-  for (const o of offenders) console.log(`  ${o.id} [${o.maturity}] ${o.first}`)
+  for (const o of offenders) console.log(`  ${o.id} [${o.maturity}] (${o.kind}) ${o.first}`)
   if (offenders.length === 0) console.log("  (none — every L4+ feature is code-reachable)")
   if (strict && offenders.length > 0) process.exit(1)
 }

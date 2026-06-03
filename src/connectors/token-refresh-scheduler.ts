@@ -149,15 +149,22 @@ export const createTokenRefreshScheduler = (
     }
   }
 
+  /** Clear ONLY the pending timer for an id — no cancel-flag mutation. Used by
+   *  arm() to replace a prior timer; must NOT mark the id user-cancelled (that
+   *  would make every steady-state re-arm look cancelled). */
+  const clearPending = (connectorId: string): void => {
+    const handle = pending.get(connectorId)
+    if (handle === undefined) return
+    config.timerPort.clear(handle)
+    pending.delete(connectorId)
+  }
+
   const cancel = (connectorId: string): void => {
     // Mark cancelled EVEN WHEN no handle is pending: an in-flight refresh for
     // this id must not re-arm after cancel() returns (the fired timer already
     // removed its `pending` entry, so there is nothing to clear yet).
     cancelled.add(connectorId)
-    const handle = pending.get(connectorId)
-    if (handle === undefined) return
-    config.timerPort.clear(handle)
-    pending.delete(connectorId)
+    clearPending(connectorId)
   }
 
   const stop = (): void => {
@@ -175,7 +182,10 @@ export const createTokenRefreshScheduler = (
    */
   const arm = (connectorId: string, delayMs: number, onFire: () => void): void => {
     // Clear any prior pending timer first → exactly one timer per id, no leak.
-    cancel(connectorId)
+    // (clearPending, NOT cancel: replacing a timer must not flag the id as
+    // user-cancelled, else the teardown guard below would suppress every
+    // legitimate steady-state re-arm.)
+    clearPending(connectorId)
     const handle = config.timerPort.set(() => {
       pending.delete(connectorId)
       onFire()
@@ -198,7 +208,12 @@ export const createTokenRefreshScheduler = (
         // SAME rotator path as the caller-driven 401 flow → reuses the in-flight
         // mutex + atomic persist. A concurrent manual rotate() coalesces here.
         const next = await config.rotator.rotate(connectorId, config.refresh)
-        // REVERT-TEST-MARKER
+        // An in-flight refresh that completes AFTER stop()/cancel() must NOT
+        // re-arm: the fired timer already cleared its `pending` slot, so there
+        // was nothing for stop()/cancel() to clear — the teardown FLAGS are the
+        // only thing that can suppress the re-arm. (This is the load-bearing
+        // half of finding #13; the flags alone do nothing without this check.)
+        if (stopped || cancelled.has(connectorId)) return
         if (next.expiresAt !== undefined) {
           // Re-schedule the steady-state proactive refresh from the new expiry.
           scheduleFrom(connectorId, next.expiresAt)
@@ -206,6 +221,9 @@ export const createTokenRefreshScheduler = (
         // No expiry on the fresh token ⇒ nothing more to schedule (no-op).
       } catch (error) {
         reportError(connectorId, error)
+        // Same teardown guard on the failure path: a refresh that fails after
+        // stop()/cancel() must not re-arm a backoff timer that outlives teardown.
+        if (stopped || cancelled.has(connectorId)) return
         // Bounded exponential backoff retry — never tight-loop, never give up
         // silently. Re-arm with a growing delay; success resets the cadence.
         arm(connectorId, backoffDelayMs(attempt), () => fireRefresh(connectorId, attempt + 1))

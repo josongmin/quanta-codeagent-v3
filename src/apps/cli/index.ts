@@ -110,9 +110,11 @@ const main = async (): Promise<void> => {
     const [{ parseAgentArgs }, { buildBaseFromArgs, toAssembleRequest }, { createSubagentRunner }] =
       await Promise.all([import("../agent/cli-args"), import("../agent"), import("@/agent")])
     // A headless parent config is enough to build the row-dispatch SubagentRunner
-    // (batch never enters the parent's own agent loop — each row is a child).
+    // (batch never enters the parent's own agent loop — each row is a child, so
+    // the placeholder `-p` is never consumed; it only satisfies headless arg
+    // validation).
     const base = buildBaseFromArgs(
-      toAssembleRequest(parseAgentArgs(["--mode", "headless"])),
+      toAssembleRequest(parseAgentArgs(["--mode", "headless", "-p", "batch-runner-parent"])),
       ac.signal,
     )
     const runner = createSubagentRunner(base)

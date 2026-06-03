@@ -29,7 +29,7 @@
 import { z } from "zod"
 import type { ImageBlock } from "@/llm"
 import { errMessage } from "@/shared"
-import { fetchWithSsrfGuard, SsrfGuardError, ssrfDeny } from "@/shared/net/ssrf"
+import { fetchWithSsrfGuard, type HostResolver, SsrfGuardError, ssrfDeny } from "@/shared/net/ssrf"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 import { MAX_IMAGE_BYTES, type SupportedMediaType, sniffMediaType } from "./read"
 export const readImageUrlInputSchema = z.object({
@@ -40,6 +40,8 @@ export type ReadImageUrlInput = z.infer<typeof readImageUrlInputSchema>
 export interface ReadImageUrlOpts {
   /** Injected fetcher (test seam). Default = `globalThis.fetch`. */
   readonly fetcher?: typeof fetch
+  /** Test seam for the SSRF DNS-rebinding check. Default = platform DNS. */
+  readonly resolveHost?: HostResolver
 }
 
 /**
@@ -98,9 +100,15 @@ const fetchPhase = async (
   fetcher: typeof fetch,
   url: string,
   signal: AbortSignal,
+  resolveHost?: HostResolver,
 ): Promise<{ kind: "fail"; result: ToolResult } | { kind: "ok"; res: Response }> => {
   try {
-    const res = await fetchWithSsrfGuard(fetcher, url, { signal })
+    const res = await fetchWithSsrfGuard(
+      fetcher,
+      url,
+      { signal },
+      resolveHost !== undefined ? { resolveHost } : {},
+    )
     return { kind: "ok", res }
   } catch (e) {
     if (e instanceof SsrfGuardError) {
@@ -202,7 +210,7 @@ export const readImageUrlTool = (options: ReadImageUrlOpts = {}): Tool<ReadImage
         yield { type: "result", result: pre.result }
         return
       }
-      const fetched = await fetchPhase(fetcher, pre.url.toString(), ctx.signal)
+      const fetched = await fetchPhase(fetcher, pre.url.toString(), ctx.signal, options.resolveHost)
       if (fetched.kind === "fail") {
         yield { type: "result", result: fetched.result }
         return

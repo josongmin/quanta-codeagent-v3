@@ -3,8 +3,8 @@ title: GitBudget — 5-knob wall-time / commit-count / output-size cap (ADR-0107
 section: 2
 subsystem: 도구 — git budget (Cursor captureGitHistory 흡수)
 order: 100
-maturity: L4
-status: stable
+maturity: L2
+status: hold
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
@@ -16,12 +16,15 @@ purpose: |
   an AbortSignal carrying a deadline for long-running git invocations. Five
   knobs mirror the upstream `CaptureBudget` struct verbatim so a future port
   of the gix-snapshot RefStore→Commit→PackTree→PackBlob→Pack stage machine
-  has a 1:1 contract surface: (1) `maxCommits` — enforced via `-n` at call
-  sites (`git_log`, `git_churn`); (2) `maxWallTimeMs` — enforced via a fused
-  AbortSignal that kills the spawned git process when deadline fires;
-  (3) `maxOutputBytes` — enforced via post-spawn output cap; (4)
-  `targetDurationMs` — telemetry-only today (no hard enforcement); (5)
-  `consecutiveOverBudget` — multi-run counter tracked by the caller. The
+  has a 1:1 contract surface: (1) `maxCommits` — INTENDED to be enforced via
+  `-n` at call sites (`git_log`, `git_churn`); (2) `maxWallTimeMs` — INTENDED
+  to fuse an AbortSignal that kills the spawned git process when deadline
+  fires; (3) `maxOutputBytes` — INTENDED post-spawn output cap; (4)
+  `targetDurationMs` — telemetry-only forward slot; (5)
+  `consecutiveOverBudget` — multi-run counter slot. NB (2026-06-03 reachability
+  audit): the helper + type exist but NO git tool currently imports/calls them
+  (re-exported from the barrel only) — enforcement is UNWIRED scaffolding,
+  hence L2/hold, not L4. The
   last two are forward-compat type slots that MUST stay in the interface so
   future wiring does not require a type bump. Tools accept an OPTIONAL
   `budget` arg — absent ⇒ no signal derivation, byte-identical contract
@@ -39,4 +42,4 @@ knobs: []
 deliberate_hold:
   reason: 'targetDurationMs / consecutiveOverBudget enforcement is forward-compat — caller-tracked today, no loop-level breaker.'
   promotion_path: 'Future: wire consecutiveOverBudget into a typed breaker once a multi-run aggregator slice exists.'
-notes: 'Wired across git_log / git_churn / git_blame_heatmap / git_upstream_check.'
+notes: 'Helper (applyBudget / resolveMaxCommits / crossedTarget) + GitBudget type are defined and barrel-re-exported, but NOT called by any git tool yet (git_log / git_churn / git_blame_heatmap / git_upstream_check have zero budget refs — verified 2026-06-03). Promotion to L4 requires wiring the helper into those tools'' call sites.'

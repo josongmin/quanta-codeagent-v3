@@ -288,9 +288,15 @@ const fetchPhase = async (
   fetcher: typeof fetch,
   url: string,
   signal: AbortSignal,
+  resolveHost?: HostResolver,
 ): Promise<{ kind: "fail"; result: ToolResult } | { kind: "ok"; res: Response }> => {
   try {
-    const res = await fetchWithSsrfGuard(fetcher, url, { signal })
+    const res = await fetchWithSsrfGuard(
+      fetcher,
+      url,
+      { signal },
+      resolveHost !== undefined ? { resolveHost } : {},
+    )
     return { kind: "ok", res }
   } catch (e) {
     if (e instanceof SsrfGuardError) {
@@ -410,7 +416,7 @@ export const webFetchTool = (options: WebFetchOptions = {}): Tool<WebFetchInput>
         yield { type: "result", result: pre.result }
         return
       }
-      const fetched = await fetchPhase(fetcher, pre.url.toString(), ctx.signal)
+      const fetched = await fetchPhase(fetcher, pre.url.toString(), ctx.signal, options.resolveHost)
       if (fetched.kind === "fail") {
         yield { type: "result", result: fetched.result }
         return

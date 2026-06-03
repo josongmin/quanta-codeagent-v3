@@ -150,7 +150,9 @@ const RULES: readonly Rule[] = [
       "host/runtime/internal/mention-wire.ts":
         "Mention-resolver composition wiring — threads `process.env` into buildMentionSymbolDeps/buildDefaultMentionResolver at boot; same posture as context-binding.ts.",
       "apps/agent/assemble.ts":
-        "Unified-agent assembly composition root — binds env into mention deps + reads launch-time opt-in gates (QUANTA_BROWSER_TOOL / QUANTA_LSP_DIAGNOSTICS_HOOK / QUANTA_SECRET_CHECK_TOOL); same posture as apps/agent/index.ts.",
+        "Surface shim (ADR-0303) — binds launch-time process.env into the env-pure host assembler core (@/host/runtime/agent-config-assembler); same posture as apps/agent/index.ts.",
+      "apps/agent/interactive-turn-assembler.ts":
+        "Surface shim (ADR-0303) — binds launch-time process.env into the shared host interactive turn-assembler; same posture as apps/agent/assemble.ts.",
       "apps/agent/mode-presets/daemon.ts":
         "Agent mode-preset composition root — passes process.env into the shared knob wiring; same posture as apps/agent/assemble.ts.",
       "apps/agent/mode-presets/headless.ts":
