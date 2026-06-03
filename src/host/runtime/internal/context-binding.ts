@@ -90,6 +90,7 @@ interface RuntimeContextSnapshot {
   readonly gitObservability?: AgentConfig["gitObservability"]
   readonly conversationActionPort?: AgentConfig["conversationActionPort"]
   readonly activeTurnRef?: AgentConfig["activeTurnRef"]
+  readonly shadowVerify?: AgentConfig["shadowVerify"]
 }
 
 type RuntimeContextPatch = Partial<
@@ -128,6 +129,7 @@ type RuntimeContextPatch = Partial<
     | "gitObservability"
     | "conversationActionPort"
     | "activeTurnRef"
+    | "shadowVerify"
   >
 >
 
@@ -532,6 +534,7 @@ const buildOptionalSnapshotFields = (
   ...whenDefined("gitObservability", base.gitObservability),
   ...whenDefined("conversationActionPort", base.conversationActionPort),
   ...whenDefined("activeTurnRef", base.activeTurnRef),
+  ...whenDefined("shadowVerify", base.shadowVerify),
 })
 
 const buildSnapshot = (base: RuntimeBase): RuntimeContextSnapshot => ({

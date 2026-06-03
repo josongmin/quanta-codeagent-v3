@@ -18,6 +18,9 @@ import {
   type PlanQueueStore,
   type SendNowInjection,
 } from "@/agent/plan-queue"
+import { createShadowVerify } from "@/agent/shadow-verify"
+import { createShadowVerifyAdapters } from "@/agent/shadow-verify-adapters"
+import { fsBackedStickyModelStore } from "@/agent/sticky-model"
 import { buildMentionSymbolDeps } from "@/host/runtime/internal/mention-symbol-deps"
 import {
   type Message,
@@ -28,6 +31,7 @@ import {
   tryCreateLLM,
 } from "@/llm"
 import { buildCostDashboard, GEN_AI_ATTRS, renderDashboardText } from "@/observability"
+import { parseEnvFlag } from "@/runner/assemble"
 import type {
   RuntimeFacadeComposeOptions,
   RuntimeSideConversationArgs,
@@ -109,14 +113,12 @@ export interface PromptUxOpts {
   readonly keybindings?: KeybindingMap
 }
 
-/** Truthy env gate mirroring the project idiom: unset / empty / `0` / `false`
- *  / `off` / `no` ⇒ false; any other value ⇒ true. Used for the opt-in
- *  `QUANTA_WORKING_STATE` (`/state`) feature gate. */
-const isEnvTruthy = (raw: string | undefined): boolean => {
-  if (raw === undefined) return false
-  const norm = raw.trim().toLowerCase()
-  return norm !== "" && norm !== "0" && norm !== "false" && norm !== "off" && norm !== "no"
-}
+/** Opt-in env gate for this surface's feature knobs (QUANTA_WORKING_STATE /
+ *  QUANTA_SHADOW / QUANTA_PER_TOOL_CHECKPOINT / etc.). Thin alias over the
+ *  SHARED {@link parseEnvFlag} truth table (default OFF) so this surface no
+ *  longer reimplements the env-flag semantics inline — the prior local copy
+ *  diverged (unknown values were treated as truthy). One source of truth now. */
+const isEnvTruthy = (raw: string | undefined): boolean => parseEnvFlag(raw, false)
 
 /** `/retry-with` — parse `QUANTA_RETRY_MODELS` (comma-separated model ids) into
  *  {@link ModelCandidate}s for the current provider. The current model is
@@ -449,6 +451,7 @@ const projectAdr0291 = (c: ReplSlashCtx): Record<string, unknown> => ({
   ...(c.perToolCheckpoint !== undefined ? { perToolCheckpoint: c.perToolCheckpoint } : {}),
   ...(c.profile !== undefined ? { profile: c.profile } : {}),
   ...(c.identity !== undefined ? { identity: c.identity } : {}),
+  ...(c.stickyModel !== undefined ? { stickyModel: c.stickyModel } : {}),
   ...(c.focusChain !== undefined ? { focusChain: c.focusChain } : {}),
   ...(c.textInbox !== undefined ? { textInbox: c.textInbox } : {}),
 })
@@ -725,6 +728,14 @@ export const composeSurfaceWires = (
           workspace: process.cwd(),
         })
       : undefined
+  // ADR-0400 `shadow_verify` tool — CLI parity with the web surface (which
+  // already wires `shadowVerify`). Env-gated `QUANTA_SHADOW_VERIFY`; builds the
+  // real worktree + V4A + LSP/test adapter triple (no I/O at construction) so
+  // the loop registers the `shadow_verify` LLM tool. Absent ⇒ tool NOT
+  // registered (byte-identical).
+  const shadowVerify = isEnvTruthy(envSource.QUANTA_SHADOW_VERIFY)
+    ? createShadowVerify(createShadowVerifyAdapters(process.cwd()))
+    : undefined
   // Pre-compaction HITL — env-gated `QUANTA_PRECOMPACT_CONFIRM`. When the loop is
   // about to fold history, prompt the user via the SAME interactive approval
   // mechanism tool-confirmations use. Deny ⇒ defer one turn (never fold without
@@ -797,6 +808,7 @@ export const composeSurfaceWires = (
           activeTurnRef: conversationActions.activeTurnRef,
         }
       : {}),
+    ...(shadowVerify !== undefined ? { shadowVerify } : {}),
   }
   // ADR-0292 — turn-end record wire. Env-gated: `QUANTA_CHECKPOINT_CONV=on`
   // wires the live wire; anything else leaves the slot `null` so the slash
@@ -921,6 +933,12 @@ export const composeSurfaceWires = (
     ...(setup.runtimeContext.focusChain() !== undefined
       ? { focusChain: setup.runtimeContext.focusChain() }
       : {}),
+    // ADR-0462 — `/sticky-model` SET surface. The fs-backed store is the
+    // filesystem SSOT (`~/.quanta/sticky-model.json`); the consume side (agent
+    // loop, gated by `--sticky-model`) reads the same file fresh each turn.
+    // Always wired so the user can inspect/seed per-mode prefs cross-session —
+    // construction is lazy (no IO until a verb runs).
+    stickyModelStore: fsBackedStickyModelStore(),
     textInbox,
     // Track D — `/context` live segmented usage getter over the surface-retained
     // snapshot. Always wired in the REPL surface; before the first turn the

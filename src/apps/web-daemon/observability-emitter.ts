@@ -29,6 +29,10 @@
 import type { ApprovalRequest, ApprovalStateMachinePort } from "@/agent/approval-state-machine"
 import type { Objective, ObjectivePort } from "@/agent/objective"
 import type { RunEntry, RunLedgerPort } from "@/agent/run-ledger"
+// Generic id-keyed-map structural-delta reconciler — the diff PROTOCOL lives in
+// core so this push surface only shapes store reads + forwards the computed
+// delta (thin-surface audit).
+import { diffMap, valuesStructurallyEqual } from "@/observability/delta-stream"
 import {
   type ApprovalChange,
   encodeObservabilityFrame,
@@ -37,7 +41,6 @@ import {
   type ObservabilitySnapshotMessage,
   type RunChange,
 } from "@/protocol/observability"
-
 import { errMessage } from "@/shared"
 /** WS-like send sink — every existing daemon transport (Bun.serve socket /
  *  unit test stub) satisfies this. The emitter never reads from the wire. */
@@ -149,48 +152,9 @@ const cloneApprovalsToMap = (list: readonly ApprovalRequest[]): Map<string, Appr
   return out
 }
 
-/** Compute additions + mutations + removals between two id-keyed maps.
- *  Uses STRUCTURAL equality for the value comparison — every store in this
- *  emitter returns a freshly frozen object on every read, so identity
- *  comparison would mark every entry as "changed" on every tick. */
-const diffMap = <T>(
-  prev: Map<string, T>,
-  next: Map<string, T>,
-): Array<{ id: string; entry: T | null }> => {
-  const out: Array<{ id: string; entry: T | null }> = []
-  for (const [id, entry] of next) {
-    const prior = prev.get(id)
-    if (prior === undefined || !valuesStructurallyEqual(prior, entry)) {
-      out.push({ id, entry })
-    }
-  }
-  for (const id of prev.keys()) {
-    if (!next.has(id)) out.push({ id, entry: null })
-  }
-  return out
-}
-
-/** Structural equality via `JSON.stringify` — adequate for the Objective /
- *  RunEntry / ApprovalRequest data shapes (no functions, no cycles, no
- *  symbols; every field is a primitive / array / plain object).
- *
- *  We use this instead of reference equality because the upstream stores
- *  return a FRESHLY frozen copy on every read (`objective.get`,
- *  `runLedger.list`, `approvalSM.pending`). Identity would diff on every
- *  tick and flood the wire with no-op deltas. */
-const stringifyForEq = (value: unknown): string => {
-  try {
-    return JSON.stringify(value)
-  } catch {
-    return ""
-  }
-}
-
-const valuesStructurallyEqual = (a: unknown, b: unknown): boolean => {
-  if (a === b) return true
-  if (a === null || b === null) return false
-  return stringifyForEq(a) === stringifyForEq(b)
-}
+// `diffMap` + `valuesStructurallyEqual` (the generic structural-delta
+// reconciler) now live in `@/observability/delta-stream`; this surface only
+// shapes store reads into maps + forwards the computed delta.
 
 const objectivesEqual = (a: Objective | null, b: Objective | null): boolean => {
   if (a === null && b === null) return true

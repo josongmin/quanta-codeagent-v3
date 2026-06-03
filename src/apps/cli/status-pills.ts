@@ -35,6 +35,7 @@
  */
 
 import type { AgentMode, EffortLevel } from "@/agent"
+import { parseEnvFlag } from "@/runner/assemble"
 import type { StatusBar } from "./status-bar"
 
 // ANSI escapes — kept inline (no fancy color lib) so the module stays import-light.
@@ -84,13 +85,8 @@ export interface StatusPills {
 /** Coerce an env value to a boolean. Treats `"0"`, `"false"`, `"off"` (case-
  *  insensitive, trimmed) as false; everything else (including `undefined` for
  *  the master switch fallback) is true. Caller controls the default. */
-const envFlag = (raw: string | undefined, defaultOn: boolean): boolean => {
-  if (raw === undefined) return defaultOn
-  const v = raw.trim().toLowerCase()
-  if (v === "" || v === "1" || v === "true" || v === "on" || v === "yes") return true
-  if (v === "0" || v === "false" || v === "off" || v === "no") return false
-  return defaultOn
-}
+// env-flag truth table is the shared `parseEnvFlag` from @/runner/assemble
+// (this surface no longer reimplements it — single source of truth).
 
 /** Per-pill ENV inventory — extracted so the test can list/clear them. */
 export const PILL_ENV_VARS = [
@@ -191,14 +187,14 @@ const readFlags = (
       sandbox: false,
       rules: false,
     }
-  const master = enabledOverride ?? envFlag(env.QUANTA_PILLS, true)
+  const master = enabledOverride ?? parseEnvFlag(env.QUANTA_PILLS, true)
   return {
     enabled: master,
-    workspace: envFlag(env.QUANTA_PILL_WORKSPACE, true),
-    mode: envFlag(env.QUANTA_PILL_MODE, true),
-    skills: envFlag(env.QUANTA_PILL_SKILLS, true),
-    sandbox: envFlag(env.QUANTA_PILL_SANDBOX, true),
-    rules: envFlag(env.QUANTA_PILL_RULES, true),
+    workspace: parseEnvFlag(env.QUANTA_PILL_WORKSPACE, true),
+    mode: parseEnvFlag(env.QUANTA_PILL_MODE, true),
+    skills: parseEnvFlag(env.QUANTA_PILL_SKILLS, true),
+    sandbox: parseEnvFlag(env.QUANTA_PILL_SANDBOX, true),
+    rules: parseEnvFlag(env.QUANTA_PILL_RULES, true),
   }
 }
 

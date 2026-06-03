@@ -71,6 +71,9 @@ export interface RuntimeFacadeComposeOptions {
   /** ADR-0071 — the `{ current: ActiveTurnState }` holder the loop overwrites
    *  each turn boundary. Required companion of `conversationActionPort`. */
   readonly activeTurnRef?: AgentConfig["activeTurnRef"]
+  /** ADR-0400 shadow-verify port. When set, the loop registers the
+   *  `shadow_verify` LLM tool (CLI parity with the web surface). */
+  readonly shadowVerify?: AgentConfig["shadowVerify"]
 }
 
 export interface CreateRuntimeFacadeArgs extends InternalCreateRuntimeFacadeArgs {

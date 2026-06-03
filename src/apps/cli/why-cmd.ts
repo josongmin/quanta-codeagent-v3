@@ -55,7 +55,19 @@ import type {
   TurnContextRecord,
 } from "@/session"
 import { findByToolCallId, type InspectGroup } from "@/session/inspect-source"
-import { errMessage, redactValue } from "@/shared"
+// Introspection DOMAIN logic (prompt authoring + reply parsing) lives in core
+// (`@/session/why-explainer`) so any surface can reuse it; this CLI command
+// keeps only session-I/O preflight, the one LLM stream call, and ANSI render.
+import {
+  buildUserPrompt,
+  META_SYSTEM_PROMPT,
+  parseReasoning,
+  type ReasoningPayload,
+  sanitiseString,
+  stripFences,
+  truncForWire,
+} from "@/session/why-explainer"
+import { errMessage } from "@/shared"
 import type { SlashCommand } from "./slash-commands"
 
 /* ─── public surface — pure handler ──────────────────────────────────── */
@@ -80,21 +92,6 @@ export interface WhyCmdResult {
   readonly tokensUsed?: number
 }
 
-/* ─── meta-query prompt ─────────────────────────────────────────────── */
-
-const META_SYSTEM_PROMPT =
-  "You are an introspection assistant. Given a tool-call record from an AI " +
-  "agent's session, explain in JSON why the agent likely made this call. " +
-  'Output schema: {"goal": string, "reasoning": [string], ' +
-  '"alternatives_considered": [string], "confidence": "high"|"medium"|"low"}. ' +
-  "Output JSON only, no prose, no markdown fences."
-
-/** Cap for raw text shipped per snippet (chars). The model already has
- *  the structured tool input + decision rows — the message snippets are
- *  for context flavour, not full transcript fidelity. */
-const SNIPPET_CHAR_CAP = 600
-/** Number of preceding response_item snippets shipped as context. */
-const PRECEDING_SNIPPET_COUNT = 3
 /** Cap for the rendered `goal` field (chars). */
 const GOAL_RENDER_CAP = 500
 
@@ -271,106 +268,6 @@ const customDataId = (data: Record<string, unknown>): string | undefined => {
   return undefined
 }
 
-/** Build the meta-query user prompt: structured record of the tool call,
- *  preceding context (last 3 response_items / user_messages), decisions,
- *  result summary. All payloads pass through `redactValue` BEFORE they
- *  leave the host. */
-const buildUserPrompt = (
-  envelopes: readonly SessionEnvelopeRecord[],
-  group: InspectGroup,
-): string => {
-  const lines: string[] = [
-    group.turnId !== undefined ? `Session turn ${group.turnId}.` : "Session turn (unknown).",
-    "",
-  ]
-  appendPrecedingLines(lines, envelopes, group)
-  appendToolInvokeLines(lines, group)
-  appendDecisionLines(lines, group)
-  appendResultLines(lines, group)
-  lines.push("Why did the agent make this call?")
-  return lines.join("\n")
-}
-
-const appendPrecedingLines = (
-  lines: string[],
-  envelopes: readonly SessionEnvelopeRecord[],
-  group: InspectGroup,
-): void => {
-  const preceding = precedingSnippets(envelopes, group)
-  if (preceding.length === 0) return
-  lines.push("Preceding context (last 3 messages):")
-  for (const snip of preceding) lines.push(`  - ${snip}`)
-  lines.push("")
-}
-
-const appendToolInvokeLines = (lines: string[], group: InspectGroup): void => {
-  if (group.toolInvokes.length === 0) return
-  const inv = group.toolInvokes[0] as Extract<EventMsgRecord, { kind: "tool_invoke" }>
-  lines.push("Tool call:")
-  lines.push(`  tool: ${inv.tool}`)
-  lines.push(`  input: ${truncForWire(safeJson(redactValue(inv.input)), SNIPPET_CHAR_CAP)}`)
-  lines.push("")
-}
-
-const appendDecisionLines = (lines: string[], group: InspectGroup): void => {
-  if (group.decisions.length === 0) return
-  lines.push("Decisions:")
-  for (const d of group.decisions) {
-    const extras: string[] = []
-    if (d.rule_id !== undefined) extras.push(`rule=${d.rule_id}`)
-    if (d.hook_name !== undefined) extras.push(`hook=${d.hook_name}`)
-    const tail = extras.length === 0 ? "" : ` (${extras.join(", ")})`
-    lines.push(`  ${d.gate}=${d.outcome} '${truncForWire(d.decision_reason, 200)}'${tail}`)
-  }
-  lines.push("")
-}
-
-const appendResultLines = (lines: string[], group: InspectGroup): void => {
-  if (group.toolResults.length === 0) return
-  const r = group.toolResults[group.toolResults.length - 1] as Extract<
-    EventMsgRecord,
-    { kind: "tool_result" }
-  >
-  const status = r.ok ? "ok" : "error"
-  const outPreview = truncForWire(r.output.replace(/\n/g, "\\n"), 200)
-  lines.push(`Result: ${status} — ${outPreview}`)
-  lines.push("")
-}
-
-/** Yield up to 3 preceding "snippets" (user_message events or
- *  assistant_text response_items) that appear BEFORE the matched
- *  group's first record. We never include the future — only past
- *  signal. Each snippet is redacted + truncated. */
-const precedingSnippets = (
-  envelopes: readonly SessionEnvelopeRecord[],
-  group: InspectGroup,
-): readonly string[] => {
-  const firstMatchTs = firstTs(group)
-  const out: string[] = []
-  for (const env of envelopes) {
-    if (env.type === "event_msg" && env.kind === "user_message") {
-      if (firstMatchTs !== undefined && env.ts >= firstMatchTs) continue
-      const text = sanitiseString(env.content)
-      out.push(`user: "${truncForWire(text, SNIPPET_CHAR_CAP)}"`)
-    } else if (env.type === "response_item" && env.item_kind === "assistant_text") {
-      // response_item has no `ts` field; ordering by file position is
-      // good enough — if the same turn produced the assistant_text
-      // BEFORE the matched group in file order, it counts.
-      out.push(`assistant: "${truncForWire(sanitiseString(env.content), SNIPPET_CHAR_CAP)}"`)
-    }
-  }
-  // Keep only the last 3 (most recent). The full session is never sent.
-  return out.slice(Math.max(0, out.length - PRECEDING_SNIPPET_COUNT))
-}
-
-const firstTs = (g: InspectGroup): string | undefined => {
-  const m = g.matches[0]?.record
-  if (m && "ts" in (m as Record<string, unknown>)) {
-    return (m as { ts?: string }).ts ?? undefined
-  }
-  return undefined
-}
-
 /** Pull plain text out of an assembled assistant message. */
 const assistantText = (m: Message): string => {
   const parts: string[] = []
@@ -378,96 +275,6 @@ const assistantText = (m: Message): string => {
     if (b.type === "text") parts.push(b.text)
   }
   return parts.join("\n").trim()
-}
-
-/* ─── sanitisation ──────────────────────────────────────────────────── */
-
-/** Run a single string through the shared trajectory redactor (treats
- *  the input as a one-field record so secret-shape values are masked). */
-const sanitiseString = (s: string): string => {
-  const r = redactValue({ v: s }) as { v: unknown }
-  const v = r.v
-  return typeof v === "string" ? v : safeJson(v)
-}
-
-const safeJson = (v: unknown): string => {
-  try {
-    const seen = new WeakSet<object>()
-    return JSON.stringify(v, (_k, val) => {
-      if (typeof val === "object" && val !== null) {
-        if (seen.has(val)) return "[Circular]"
-        seen.add(val)
-      }
-      return val
-    })
-  } catch {
-    return "<unserializable>"
-  }
-}
-
-const truncForWire = (s: string, max: number): string => {
-  if (s.length <= max) return s
-  return `${s.slice(0, max - 1)}…(${s.length - max + 1} more)`
-}
-
-/* ─── JSON parse ─────────────────────────────────────────────────────── */
-
-export interface ReasoningPayload {
-  readonly goal: string
-  readonly reasoning: readonly string[]
-  readonly alternativesConsidered: readonly string[]
-  readonly confidence: "high" | "medium" | "low"
-}
-
-const CONFIDENCE_VALUES: ReadonlySet<string> = new Set(["high", "medium", "low"])
-
-/** Best-effort parse: strip optional markdown fences, parse JSON, coerce
- *  shape, return null on failure. NEVER throws. */
-const parseReasoning = (raw: string): ReasoningPayload | null => {
-  const stripped = stripFences(raw).trim()
-  if (stripped === "") return null
-  let obj: unknown
-  try {
-    obj = JSON.parse(stripped)
-  } catch {
-    return null
-  }
-  if (obj === null || typeof obj !== "object") return null
-  const o = obj as Record<string, unknown>
-  if (typeof o.goal !== "string") return null
-  const reasoning = Array.isArray(o.reasoning)
-    ? o.reasoning.filter((s) => typeof s === "string")
-    : null
-  const alt = Array.isArray(o.alternatives_considered)
-    ? o.alternatives_considered.filter((s) => typeof s === "string")
-    : []
-  if (reasoning === null) return null
-  const conf =
-    typeof o.confidence === "string" && CONFIDENCE_VALUES.has(o.confidence)
-      ? (o.confidence as "high" | "medium" | "low")
-      : "medium"
-  return {
-    goal: o.goal,
-    reasoning: reasoning as readonly string[],
-    alternativesConsidered: alt as readonly string[],
-    confidence: conf,
-  }
-}
-
-/** Strip a leading/trailing ```json … ``` fence (or ``` … ```) if present.
- *  Tolerant — any deviation falls through and the JSON.parse below catches
- *  the rest. */
-const stripFences = (s: string): string => {
-  const trimmed = s.trim()
-  // ```json … ``` or ``` … ```
-  const fenceMatch = /^```(?:json)?\s*\n([\s\S]*?)\n```\s*$/i.exec(trimmed)
-  if (fenceMatch !== null) return fenceMatch[1] ?? ""
-  // Looser: starts with ``` and ends with ``` (newlines optional).
-  if (trimmed.startsWith("```") && trimmed.endsWith("```")) {
-    const inner = trimmed.slice(3, -3)
-    return inner.replace(/^json\s*/i, "").trim()
-  }
-  return trimmed
 }
 
 /* ─── render ─────────────────────────────────────────────────────────── */

@@ -48,6 +48,7 @@ import {
   type RepoRules,
   selectGlobRules,
 } from "@/agent"
+import { parseEnvFlag } from "@/runner/assemble"
 
 /** Provenance of a single rule entry. Closed literal so a typo at the call
  *  site fails to compile.
@@ -126,24 +127,18 @@ export const EMPTY_RULE_INVENTORY: RuleInventory = Object.freeze({
  *  rendered list beyond a single viewport. */
 export const MAX_RULE_SOURCES = 256
 
-const envFlag = (raw: string | undefined, defaultOn: boolean): boolean => {
-  if (raw === undefined) return defaultOn
-  const v = raw.trim().toLowerCase()
-  if (v === "" || v === "1" || v === "true" || v === "on" || v === "yes") return true
-  if (v === "0" || v === "false" || v === "off" || v === "no") return false
-  return defaultOn
-}
+// env-flag truth table is the shared `parseEnvFlag` from @/runner/assemble.
 
 /** True iff the indicator subsystem is enabled (env knob `QUANTA_RULE_INDICATOR`
  *  not set OR not falsy). Surface code checks this before painting the pill. */
 export const isRuleIndicatorEnabled = (env: NodeJS.ProcessEnv = process.env): boolean =>
-  envFlag(env[RULE_INDICATOR_ENV], true)
+  parseEnvFlag(env[RULE_INDICATOR_ENV], true)
 
 /** True iff the rule pill should ride in the status-pill row. The pill is a
  *  subset of the indicator master switch: disabling the pill does NOT disable
  *  the `/rules` slash command. */
 export const isRulePillEnabled = (env: NodeJS.ProcessEnv = process.env): boolean =>
-  isRuleIndicatorEnabled(env) && envFlag(env[RULE_PILL_ENV], true)
+  isRuleIndicatorEnabled(env) && parseEnvFlag(env[RULE_PILL_ENV], true)
 
 /** Compute a best-effort byte size for a source path. ENOENT / EACCES /
  *  EISDIR all fall through to `undefined` — display omits the size hint when
