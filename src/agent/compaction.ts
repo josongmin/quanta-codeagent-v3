@@ -602,7 +602,9 @@ const speculativeSummarizeAdapter = (
   llm: LLMPort,
   getPrefix: () => readonly Message[],
 ): SpeculativeSummarizeFn<BgSummaryPayload> => {
-  return async ({ cancel }): Promise<Result<{ summary: BgSummaryPayload; resultingTokens: number }, SummarizeError>> => {
+  return async ({
+    cancel,
+  }): Promise<Result<{ summary: BgSummaryPayload; resultingTokens: number }, SummarizeError>> => {
     if (cancel.aborted) {
       return { ok: false, error: { kind: "other", detail: "cancelled before start" } }
     }

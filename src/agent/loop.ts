@@ -23,10 +23,7 @@ import {
   reactiveCompact,
   resolveCompactionLimitTokens,
 } from "./compaction"
-import {
-  type BackgroundSummarizationController,
-  BG_COMPACTION_ENV,
-} from "./compaction/index"
+import { type BackgroundSummarizationController, BG_COMPACTION_ENV } from "./compaction/index"
 import { type BreakerVerdict, CompactionBreaker } from "./compaction-breaker"
 import {
   appendSummary,
