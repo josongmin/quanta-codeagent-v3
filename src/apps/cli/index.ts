@@ -35,6 +35,10 @@ for (const gate of [
   "QUANTA_ENABLE_AWAY_SUMMARY",
   "QUANTA_ENABLE_STRUCTURED_PATCH",
   "QUANTA_ENABLE_PROMPT_SUGGESTION",
+  // jun-03 agent-capability slots wired in the SHARED assembler (opt-in there to
+  // keep bench/eval + web-daemon byte-identical). The CLI opts in by default:
+  "QUANTA_OBJECTIVE_TOOLS", // objective_set/get/update (in-memory)
+  "QUANTA_SUBAGENT_MAILBOX", // subagent_send_message/read_messages (in-memory)
 ]) {
   if (process.env[gate] === undefined) process.env[gate] = "1"
 }

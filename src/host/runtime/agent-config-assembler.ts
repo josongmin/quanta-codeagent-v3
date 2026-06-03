@@ -49,9 +49,16 @@ import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import { captureSnapshot } from "@/agent/context-change"
 import { buildNetworkDispatchGuard } from "@/agent/dispatch-guard"
 import { buildDefaultMentionResolver } from "@/agent/mention-runner"
+import { createObjectiveStore, type ObjectivePort } from "@/agent/objective"
 import { autoWirePluginActivation } from "@/agent/plugin-activation-handler"
 import { getGlobalSessionResourceRegistry } from "@/agent/session-resource-registry"
 import { buildCallerOwnedRegistryWithTelemetry } from "@/agent/session-resource-registry/caller-owned-builder"
+import {
+  type BackgroundSubagentScheduler,
+  defaultBackgroundSubagentScheduler,
+} from "@/agent/subagent-background"
+import { createSubagentMailbox, type MailboxPort } from "@/agent/subagent-mailbox"
+import { createSubagentRunner } from "@/agent/subagent-runner"
 import {
   type BrowserPort,
   createCdpBrowser,
@@ -77,6 +84,8 @@ import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
 import type { RuntimeAgentTurnAssembler, RuntimeAgentTurnDeps } from "@/sdk/runtime/base"
 import { resolveJailed } from "@/storage"
 import { type DnsResolver, nodeDnsResolver } from "@/tool/browser"
+import type { WebSearchProvider } from "@/tool/web"
+import { providerFromEnv } from "@/tool/web/providers"
 import { buildMentionSymbolDeps } from "./internal/mention-symbol-deps"
 
 /** Minimal env view this assembler reads. The surface owns the actual
@@ -271,6 +280,70 @@ const maybeWireBrowser = (cfg: AgentConfig, env: AssemblerEnv): void => {
   if (port.availability() !== null) slot.browser = { port, resolver: nodeDnsResolver }
 }
 
+/** ADR-0394 — objective tools (`objective_set`/`objective_update`/`objective_get`).
+ *  Default-ON: an in-memory `ObjectivePort` is wired unless
+ *  `QUANTA_OBJECTIVE_TOOLS="0"`. Lightweight (no I/O / external dep).
+ *  Caller-override-precedence (ADR-0332): a pre-set slot is preserved. */
+const maybeWireObjective = (cfg: AgentConfig, env: AssemblerEnv): void => {
+  // Opt-in (not default-OFF→ON here): this assembler is SHARED by bench/eval +
+  // web-daemon, so a default-ON would change their tool menu (and SWE-bench
+  // reproducibility). The CLI host seeds `QUANTA_OBJECTIVE_TOOLS=1` (index.ts)
+  // to opt in; other surfaces stay byte-identical unless they set it.
+  if (env.QUANTA_OBJECTIVE_TOOLS !== "1") return
+  const slot = cfg as AgentConfig & { objective?: ObjectivePort }
+  if (slot.objective !== undefined) return
+  slot.objective = createObjectiveStore()
+}
+
+/** ADR-0416 — inter-subagent mailbox (`subagent_send_message`/`subagent_read_messages`).
+ *  Default-ON in-memory unless `QUANTA_SUBAGENT_MAILBOX="0"`. Pairs with the
+ *  parallel-worker router so spawned children can exchange messages. */
+const maybeWireMailbox = (cfg: AgentConfig, env: AssemblerEnv): void => {
+  // Opt-in (shared assembler — see maybeWireObjective). CLI seeds it ON.
+  if (env.QUANTA_SUBAGENT_MAILBOX !== "1") return
+  const slot = cfg as AgentConfig & { subagentMailbox?: MailboxPort }
+  if (slot.subagentMailbox !== undefined) return
+  slot.subagentMailbox = createSubagentMailbox()
+}
+
+/** ADR-0142 — `web_search` provider. SELF-GATING: wired ONLY when a provider
+ *  resolves from env (`BRAVE_SEARCH_API_KEY`, or `QUANTA_WEB_SEARCH_DUCKDUCKGO=1`).
+ *  No key ⇒ slot unset ⇒ no `web_search` tool (never a dead "no provider" tool). */
+const maybeWireWebSearch = (cfg: AgentConfig, env: AssemblerEnv): void => {
+  const slot = cfg as AgentConfig & { webSearch?: { provider: WebSearchProvider } }
+  if (slot.webSearch !== undefined) return
+  const provider = providerFromEnv(env)
+  if (provider !== undefined) slot.webSearch = { provider }
+}
+
+/** ADR-0151 — background-subagent scheduler (`subagent_fork`/`subagent_poll`/
+ *  `subagent_await`). OPT-IN (`QUANTA_SUBAGENT_BG="on"`): it OVERLAPS the 6-tool
+ *  `spawn_agent` router (the default parallel-worker surface), so it stays OFF
+ *  by default to avoid handing the model two redundant parallel-spawn APIs. When
+ *  on, children run through the same depth-guarded `SubagentRunner`. */
+const maybeWireBackgroundSubagent = (cfg: AgentConfig, env: AssemblerEnv): void => {
+  if (env.QUANTA_SUBAGENT_BG !== "on") return
+  const slot = cfg as AgentConfig & {
+    subagentBackground?: { scheduler: BackgroundSubagentScheduler }
+  }
+  if (slot.subagentBackground !== undefined) return
+  slot.subagentBackground = {
+    scheduler: defaultBackgroundSubagentScheduler({ runner: createSubagentRunner(cfg) }),
+  }
+}
+
+/** Open the optional agent-capability slots (browser / objective / mailbox /
+ *  web_search / background-subagent) in one call. Keeps `assembleAgentConfig`
+ *  under the cognitive-complexity cap; each helper is independently env-gated,
+ *  caller-override-safe, and a no-op when its gate/resource is absent. */
+const wireOptionalCapabilitySlots = (cfg: AgentConfig, env: AssemblerEnv): void => {
+  maybeWireBrowser(cfg, env)
+  maybeWireObjective(cfg, env)
+  maybeWireMailbox(cfg, env)
+  maybeWireWebSearch(cfg, env)
+  maybeWireBackgroundSubagent(cfg, env)
+}
+
 /** Single source of truth for "config for this mode" assembly. `env` is the
  *  surface-owned env view (see file header) — this module never reads the
  *  `process.env` global. */
@@ -319,12 +392,11 @@ export const assembleAgentConfig = (req: AssembleRequest, env: AssemblerEnv): Ag
     const networkGuard = networkDispatchGuardFor(req, policy)
     if (networkGuard !== undefined) cfg.dispatchGuard = networkGuard
   }
-  // ADR-0427 — browser automation (operator-owned activation). When
-  // `QUANTA_BROWSER_TOOL=on` AND a system chrome is on PATH, wire a headless CDP
-  // browser over an fs-jailed temp profile + node DNS resolver. Default-OFF: the
-  // duck-typed slot stays unset otherwise, so `buildBrowserBlock` yields no tools
-  // and the registry is byte-identical.
-  maybeWireBrowser(cfg, env)
+  // ADR-0427 + jun-03 — open the optional agent-capability slots (browser /
+  // objective / mailbox / web_search / background-subagent). Each is env-gated +
+  // caller-override-safe + byte-identical when its gate/resource is absent (see
+  // the per-helper docs); the single call keeps this fn under the complexity cap.
+  wireOptionalCapabilitySlots(cfg, env)
   // ADR-0334 — populate the ADR-0327-family wire slots on the freshly
   // assembled cfg. Idempotent + caller-override-precedence (ADR-0332):
   // any slot the caller already set on `req.base` is preserved verbatim.
