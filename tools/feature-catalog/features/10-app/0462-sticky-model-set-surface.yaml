@@ -1,0 +1,68 @@
+id: sticky-model-set-surface
+title: "/sticky-model SET surface — per-mode model slash command (ADR-0462)"
+section: 10
+subsystem: CLI surface — sticky model SET (ADR-0462 follow-up, activates ADR-0212 store)
+order: 462
+maturity: L3
+status: new
+ui_surfaces: [cli]
+modes: [interactive]
+monitoring: n-a
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:cline", "absorbed:roo", "adr-0462"]
+depends_on: [sticky-model-per-mode, sticky-model-loop-consume]
+config_refs:
+  cli: ['/sticky-model', '--sticky-model']
+purpose: |
+  The SET half of sticky-model: a `/sticky-model <mode> <modelId>` slash command
+  that writes the per-mode preference the CONSUME side (agent loop, ADR-0462)
+  reads. ADR-0212 shipped the fs-backed store + resolver, and ADR-0462 wired the
+  loop to read it — but there was no way for a user to SET a per-mode model
+  (0212 fc explicitly deferred the wire as "후속 라운드"). This slice closes it.
+  `src/apps/cli/repl/ctx-adapters/sticky-model-adapter.ts` — `buildStickyModelAdapter
+  ({store})` adapts a `StickyModelStore` onto a typed `{modes, list, set}` surface:
+  `set` validates `<mode>` against the 6-value prompt-mode union (STICKY_MODEL_MODES
+  = default|plan|review|audit|architect|editor), rejects empty modelId (the
+  resolver treats "" as no-override → would be a silent no-op), and returns a
+  typed outcome (`ok` | `invalid-mode` | `write-error`) — never throws. The
+  `/sticky-model` command (registry-surface) mirrors `/profile` + `/identity`:
+  no-arg lists current {mode→modelId} + usage; two-arg sets; arity/mode errors
+  exit 1. Default-OFF: absent `ctx.stickyModel` ⇒ "not wired" + exit 0
+  (byte-identical). The SET store and the loop's CONSUME store are independent
+  instances over ONE file (`~/.quanta/sticky-model.json`); `get` reads fresh each
+  turn, so a write is observed next turn — the store's documented "best-effort
+  persistence, last-write-wins on rename" contract. The command is always
+  registered so a user can inspect/seed prefs cross-session; `--sticky-model`
+  (ADR-0236, composition root) is the orthogonal switch that activates READING.
+evidence:
+  code:
+    - src/apps/cli/repl/ctx-adapters/sticky-model-adapter.ts
+    - src/apps/cli/slash-contract.ts
+    - src/apps/cli/slash/registry-surface.ts
+    - src/apps/cli/repl/slash-surface.ts
+    - src/apps/cli/repl/surface-compose.ts
+  adrs: [462, 212]
+  tests:
+    unit:
+      - tests/unit/apps/cli/sticky-model-set-surface-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: '/sticky-model <mode> <modelId>'
+    where: 'registry-surface.ts stickyModelCmd'
+    purpose: 'set/list the per-mode sticky model (interactive)'
+  - name: '--sticky-model'
+    where: 'apps/agent composition root (ADR-0236)'
+    purpose: 'activate the CONSUME side (loop reads the fs store); orthogonal to the SET command'
+deliberate_hold:
+  reason: "Surface-compose wires the store unconditionally (lazy, no IO) so /sticky-model always works; an explicit per-session gate is intentionally NOT added — the fs file is the SSOT and --sticky-model gates only reading."
+  promotion_path: "Tab-completion of mode names + modelId candidates from config.modelCandidates."
+notes: |
+  Hellgate 12 cases: adapter set/list round-trip / invalid-mode typed reject (no
+  write) / empty-modelId reject / store-write-error surfaced (no throw) /
+  STICKY_MODEL_MODES = the 6 prompt modes / command registered / not-wired path /
+  no-arg listing / set confirmation / wrong arity exit 1 / unknown mode exit 1 /
+  two fs instances over one file (SET observed by a fresh reader = the consume
+  contract). The pre-existing name-pin tests (slash-commands, slash-registry-split)
+  updated to include /sticky-model.

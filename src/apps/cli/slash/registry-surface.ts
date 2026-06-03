@@ -533,6 +533,44 @@ const identityCmd: SlashCommand = {
   },
 }
 
+const stickyModelCmd: SlashCommand = {
+  name: "/sticky-model",
+  describe: "Show or set the per-mode sticky model (ADR-0462)",
+  category: "config",
+  async run(args, ctx) {
+    if (ctx.stickyModel === undefined) {
+      ctx.out("/sticky-model: not wired in this surface\n")
+      return 0
+    }
+    if (args.length === 0) {
+      const snapshot = await ctx.stickyModel.list()
+      const entries = Object.entries(snapshot)
+      if (entries.length === 0) ctx.out("/sticky-model: no per-mode models set\n")
+      else for (const [mode, modelId] of entries) ctx.out(`/sticky-model: ${mode} = ${modelId}\n`)
+      ctx.out(`/sticky-model: modes = ${ctx.stickyModel.modes().join(", ")}\n`)
+      ctx.out("/sticky-model: usage = /sticky-model <mode> <modelId>\n")
+      return 0
+    }
+    if (args.length !== 2) {
+      ctx.err(`/sticky-model: usage = /sticky-model <mode> <modelId> (got ${args.length} arg(s))\n`)
+      return 1
+    }
+    const mode = args[0] as string
+    const modelId = args[1] as string
+    const res = await ctx.stickyModel.set(mode, modelId)
+    if (res === "ok") {
+      ctx.out(`/sticky-model: ${mode} → ${modelId}\n`)
+      return 0
+    }
+    if (res.kind === "invalid-mode") {
+      ctx.err(`/sticky-model: unknown mode '${mode}'; known = ${res.known.join(", ")}\n`)
+      return 1
+    }
+    ctx.err(`/sticky-model: write failed — ${res.message}\n`)
+    return 1
+  },
+}
+
 const FOCUS_CHAIN_SUBCMDS = ["show", "reset", "skip"] as const
 type FocusChainSubcmd = (typeof FOCUS_CHAIN_SUBCMDS)[number]
 const isFocusChainSubcmd = (s: string): s is FocusChainSubcmd =>
@@ -700,6 +738,7 @@ export const buildSurfaceSlashCommands = (
   editMessageCmd,
   profileCmd,
   identityCmd,
+  stickyModelCmd,
   focusChainCmd,
   effortCmd,
   inspectCmd,

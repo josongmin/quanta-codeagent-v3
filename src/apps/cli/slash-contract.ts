@@ -71,6 +71,24 @@ export interface SlashContext {
         readonly list: () => readonly string[]
       }
     | undefined
+  /** ADR-0462 — `/sticky-model <mode> <modelId>` SET wire. Adapter over the
+   *  fs-backed `StickyModelStore`. Absent ⇒ `/sticky-model` prints "not wired
+   *  in this surface" (byte-identical). The consume side (agent loop) reads the
+   *  same on-disk file fresh each turn. */
+  readonly stickyModel?:
+    | {
+        readonly modes: () => readonly string[]
+        readonly list: () => Promise<Readonly<Record<string, string>>>
+        readonly set: (
+          mode: string,
+          modelId: string,
+        ) => Promise<
+          | "ok"
+          | { readonly kind: "invalid-mode"; readonly known: readonly string[] }
+          | { readonly kind: "write-error"; readonly message: string }
+        >
+      }
+    | undefined
   /** Focus-chain slash wire. */
   readonly focusChain?:
     | {

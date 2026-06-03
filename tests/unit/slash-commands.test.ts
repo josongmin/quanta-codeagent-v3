@@ -107,6 +107,7 @@ describe("BUILTINS table", () => {
       "/edit-message",
       "/profile",
       "/identity",
+      "/sticky-model",
       "/focus-chain",
       "/effort",
       "/inspect",

@@ -61,6 +61,7 @@ const EXPECTED_NAMES = new Set<string>([
   "/edit-message",
   "/profile",
   "/identity",
+  "/sticky-model",
   "/focus-chain",
   "/effort",
   "/inspect",

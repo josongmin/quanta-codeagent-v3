@@ -2,6 +2,7 @@ import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoin
 import type { FocusChainPort } from "@/agent/focus-chain"
 import type { GranularRegistry, ThreeWayRestorePort } from "@/agent/per-tool-checkpoint"
 import type { PlanStore } from "@/agent/plan/state"
+import type { StickyModelStore } from "@/agent/sticky-model"
 import type { SystemPromptVariantRegistry } from "@/agent/system-prompt"
 import type { ToolProfileName, ToolProfileResolver } from "@/agent/tool-profile"
 import type { LLMPort, Message } from "@/llm"
@@ -34,6 +35,7 @@ import { buildForkSessionAdapter } from "./ctx-adapters/fork-session-adapter"
 import { buildIdentityModeAdapter } from "./ctx-adapters/identity-mode-adapter"
 import { buildPerToolCheckpointAdapter } from "./ctx-adapters/per-tool-checkpoint-adapter"
 import { buildPlanEditAdapter } from "./ctx-adapters/plan-edit-adapter"
+import { buildStickyModelAdapter } from "./ctx-adapters/sticky-model-adapter"
 import { buildToolProfileAdapter } from "./ctx-adapters/tool-profile-adapter"
 import type { DebugTracerHandle } from "./session-setup"
 
@@ -125,6 +127,9 @@ export type ReplSlashCtx = Partial<{
     ) => "ok" | { readonly kind: "unknown"; readonly known: readonly string[] }
     readonly list: () => readonly string[]
   }
+  /** ADR-0462 — `/sticky-model` SET wire. Adapter over a fs-backed
+   *  `StickyModelStore`; the consume side (agent loop) reads the same file. */
+  stickyModel: ReturnType<typeof buildStickyModelAdapter>
   /** ADR-0291 — `/focus-chain` Cline-style todo tracker wire. Adapter
    *  over `AgentConfig.focusChain.tracker` (ADR-0219). */
   focusChain: {
@@ -221,6 +226,9 @@ export interface BuildReplSlashCtxArgs {
     | undefined
   /** ADR-0302 — refresh any derived system source after identity changes. */
   onIdentityModeChange?: (() => void) | undefined
+  /** ADR-0462 — `/sticky-model`: fs-backed per-mode model store. Absent ⇒
+   *  the `/sticky-model` slot is omitted (slash prints "not wired"). */
+  stickyModelStore?: StickyModelStore | undefined
   /** ADR-0291 — `/focus-chain`: authoritative session-owned tracker slot. */
   focusChain?: { readonly tracker: FocusChainPort; readonly reinjectEveryN?: number } | undefined
   /** Back-compat alias for older tests/callers; prefer `focusChain`. */
@@ -245,6 +253,7 @@ interface NewSlotAdapters {
   readonly perToolCheckpoint: PerToolCheckpointSlashState | undefined
   readonly profile: ReturnType<typeof buildToolProfileAdapter> | undefined
   readonly identity: ReturnType<typeof buildIdentityModeAdapter> | undefined
+  readonly stickyModel: ReturnType<typeof buildStickyModelAdapter> | undefined
   readonly focusChain: ReturnType<typeof buildFocusChainAdapter> | undefined
   readonly textInbox: TextInbox | undefined
 }
@@ -309,6 +318,14 @@ const maybeIdentity = (
   })
 }
 
+/** Build the sticky-model adapter when a store is wired; otherwise undefined. */
+const maybeStickyModel = (
+  args: BuildReplSlashCtxArgs,
+): ReturnType<typeof buildStickyModelAdapter> | undefined => {
+  if (args.stickyModelStore === undefined) return undefined
+  return buildStickyModelAdapter({ store: args.stickyModelStore })
+}
+
 /** Build the ADR-0291 adapters. Pure / no side effects; each gate is
  *  presence-only so omitting an upstream port omits the corresponding
  *  ctx slot (default-OFF byte-identical). Extracted from
@@ -322,6 +339,7 @@ const buildNewSlotAdapters = (args: BuildReplSlashCtxArgs): NewSlotAdapters => (
   perToolCheckpoint: maybePerToolCheckpoint(args),
   profile: maybeProfile(args),
   identity: maybeIdentity(args),
+  stickyModel: maybeStickyModel(args),
   focusChain:
     args.focusChain !== undefined
       ? buildFocusChainAdapter(args.focusChain.tracker)
@@ -341,6 +359,7 @@ const spreadNewSlots = (s: NewSlotAdapters): Partial<ReplSlashCtx> => ({
   ...(s.perToolCheckpoint !== undefined ? { perToolCheckpoint: s.perToolCheckpoint } : {}),
   ...(s.profile !== undefined ? { profile: s.profile } : {}),
   ...(s.identity !== undefined ? { identity: s.identity } : {}),
+  ...(s.stickyModel !== undefined ? { stickyModel: s.stickyModel } : {}),
   ...(s.focusChain !== undefined ? { focusChain: s.focusChain } : {}),
   ...(s.textInbox !== undefined ? { textInbox: s.textInbox } : {}),
 })
@@ -444,6 +463,7 @@ const projectAdr0291Slots = (s: ReplSlashCtx): Record<string, unknown> => ({
   ...(s.perToolCheckpoint !== undefined ? { perToolCheckpoint: s.perToolCheckpoint } : {}),
   ...(s.profile !== undefined ? { profile: s.profile } : {}),
   ...(s.identity !== undefined ? { identity: s.identity } : {}),
+  ...(s.stickyModel !== undefined ? { stickyModel: s.stickyModel } : {}),
   ...(s.focusChain !== undefined ? { focusChain: s.focusChain } : {}),
   ...(s.textInbox !== undefined ? { textInbox: s.textInbox } : {}),
 })
