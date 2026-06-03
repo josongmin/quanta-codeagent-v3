@@ -3,7 +3,7 @@ title: OAuth endpoint discovery — RFC 8414 well-known + OIDC fallback (ADR-016
 section: 9
 subsystem: Connectors / OAuth (ADR-0160)
 order: 61
-maturity: L4
+maturity: L2
 status: new
 ui_surfaces: [n-a]
 monitoring: n-a

@@ -108,9 +108,13 @@ describe("ADR-0162 spawner hellgate — A. Validation", () => {
       caught = e as IsolatedSpawnError
     }
     expect(caught).not.toBeNull()
-    // Either Bun throws synchronously on missing entry (spawn-failed) OR the
-    // child exits immediately (spawn-failed via exit-before-first-line).
-    expect(["spawn-failed", "spawn-timeout"]).toContain(caught?.code ?? "")
+    // A missing entry is the DETERMINISTIC synchronous-throw path: `Bun.spawn`
+    // throws `ENOENT` from `posix_spawn` before any watchdog timer is armed, so
+    // the adapter's sync catch surfaces `spawn-failed`. `spawn-timeout` can
+    // NEVER occur here (the spawn never succeeds, so the deadline is never set
+    // running). Pin the exact code — accepting the timeout masked the fact that
+    // the timeout path is unreachable for a non-existent binary.
+    expect(caught?.code).toBe("spawn-failed")
   })
 })
 

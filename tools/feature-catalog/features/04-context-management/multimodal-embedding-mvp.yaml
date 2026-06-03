@@ -3,7 +3,7 @@ title: Multi-modal embedding MVP — image + audio embedding port (ADR-0276)
 section: 4
 subsystem: Retrieval engines — multi-modal embedding seam
 order: 45
-maturity: L4
+maturity: L2
 status: new
 ui_surfaces: [cli]
 monitoring: n-a

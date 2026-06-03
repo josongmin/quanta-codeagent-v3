@@ -26,6 +26,7 @@
  * gitWrite lever (registration is OFF unless an author LLM is wired).
  */
 import { z } from "zod"
+import { errMessage } from "../../shared"
 import type { LLMPort } from "../../llm"
 import { publishGitDirective } from "../git/_directive-publish"
 import { composePrText } from "../git/compose"
@@ -56,34 +57,62 @@ const PROTECTED_HEADS = new Set(["main", "master", "develop"])
 const stripOriginPrefix = (b: string): string =>
   b.startsWith("origin/") ? b.slice("origin/".length) : b
 
-/** Resolve the current branch via `git rev-parse --abbrev-ref HEAD`. Returns
- *  undefined on detached HEAD ("HEAD") or any git failure. */
-const currentBranch = async (runner: GitRunner, ctx: ToolContext): Promise<string | undefined> => {
+/** A git probe distinguishes three outcomes: a positive result, a LEGIT
+ *  negative (the command ran fine and reported the thing isn't there — e.g.
+ *  detached HEAD, ref absent), and an ACTUAL git failure (spawn threw, or the
+ *  command exited >1 i.e. not the documented "false" exit). Collapsing the
+ *  third into the second sends the agent down the wrong remediation. */
+type GitProbe<T> =
+  | { outcome: "ok"; value: T }
+  | { outcome: "negative" }
+  | { outcome: "git-failed"; detail: string }
+
+/** Resolve the current branch via `git rev-parse --abbrev-ref HEAD`.
+ *  exitCode 0 + a real name ⇒ ok; exitCode 0 + "HEAD" ⇒ negative (detached);
+ *  a throw or exitCode>0 (e.g. 128 not-a-repo) ⇒ git-failed. */
+const currentBranch = async (
+  runner: GitRunner,
+  ctx: ToolContext,
+): Promise<GitProbe<string>> => {
   try {
     const r = await runner.run(["rev-parse", "--abbrev-ref", "HEAD"], ctx.cwd, ctx.signal)
+    if (r.exitCode !== 0) {
+      return { outcome: "git-failed", detail: r.stderr.trim().slice(0, 200) }
+    }
     const name = r.stdout.trim()
-    return r.exitCode === 0 && name.length > 0 && name !== "HEAD" ? name : undefined
-  } catch {
-    return undefined
+    // exitCode 0 but "HEAD"/empty is the documented detached-HEAD signal — a
+    // legit negative, NOT a git failure.
+    return name.length > 0 && name !== "HEAD"
+      ? { outcome: "ok", value: name }
+      : { outcome: "negative" }
+  } catch (e) {
+    return { outcome: "git-failed", detail: errMessage(e) }
   }
 }
 
-/** Best-effort: does the local repo know an `origin/<head>` ref? A false
- *  negative (pushed but not fetched) is possible — the message says so. */
+/** Best-effort: does the local repo know an `origin/<head>` ref? `git rev-parse
+ *  --verify --quiet` exits 0 when the ref resolves, 1 when it does not (the
+ *  legit negative — pushed-but-not-fetched is also a false negative the message
+ *  warns about), and >1 (or throws) on an actual git failure. */
 const headOnOrigin = async (
   runner: GitRunner,
   head: string,
   ctx: ToolContext,
-): Promise<boolean> => {
+): Promise<GitProbe<true>> => {
   try {
     const r = await runner.run(
       ["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${head}`],
       ctx.cwd,
       ctx.signal,
     )
-    return r.exitCode === 0
-  } catch {
-    return false
+    if (r.exitCode === 0) return { outcome: "ok", value: true }
+    // `--quiet` makes a missing ref exit exactly 1; anything else is a real
+    // failure (bad repo, broken object store) we must not silently treat as
+    // "ref absent".
+    if (r.exitCode === 1) return { outcome: "negative" }
+    return { outcome: "git-failed", detail: r.stderr.trim().slice(0, 200) }
+  } catch (e) {
+    return { outcome: "git-failed", detail: errMessage(e) }
   }
 }
 
@@ -97,12 +126,19 @@ const resolveBranches = async (
   ctx: ToolContext,
 ): Promise<{ ok: true; base: string; head: string } | { ok: false; output: string }> => {
   const base = stripOriginPrefix(input.base ?? "main")
-  const head = input.head ?? (await currentBranch(gitRunner, ctx))
+  let head = input.head
   if (head === undefined) {
-    return {
-      ok: false,
-      output: "could not resolve the current branch (detached HEAD?) — pass {head}",
+    const probe = await currentBranch(gitRunner, ctx)
+    if (probe.outcome === "git-failed") {
+      return { ok: false, output: `could not run git (${probe.detail}) — pass {head}` }
     }
+    if (probe.outcome === "negative") {
+      return {
+        ok: false,
+        output: "could not resolve the current branch (detached HEAD?) — pass {head}",
+      }
+    }
+    head = probe.value
   }
   if (PROTECTED_HEADS.has(head)) {
     return {
@@ -215,7 +251,12 @@ export const ghPrOpenTool = (
     }
 
     // 4. push precondition (best-effort)
-    if (!(await headOnOrigin(gitRunner, headBranch, ctx))) {
+    const originProbe = await headOnOrigin(gitRunner, headBranch, ctx)
+    if (originProbe.outcome === "git-failed") {
+      yield err(`could not run git (${originProbe.detail}) — could not verify origin/${headBranch}`)
+      return
+    }
+    if (originProbe.outcome === "negative") {
       yield err(
         `head branch '${headBranch}' is not on origin — push it first:\n  git push -u origin ${headBranch}\n` +
           "(if you already pushed, run `git fetch origin` so the local ref exists)",

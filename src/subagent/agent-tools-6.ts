@@ -112,12 +112,19 @@ export const createSubagent6Tools = (deps: Subagent6Deps): Subagent6ToolSet => {
     readOnly: boolean,
     concurrencySafe: boolean,
     renderSuccess: SuccessRender<S>,
+    // S16: when a tool accepts a raw shell command, it exposes it here so the
+    // permission policy applies the HARD_DENY denylist UNIFORMLY (mirrors
+    // `bash`/`test_runner`). The dispatch seam reads `tool.extractShellCommand`
+    // and populates `action.shellCommand`; omitting it (the common case for
+    // non-shell tools) keeps the tool surface byte-identical.
+    extractShellCommand?: (input: I) => string | null,
   ): Tool<I> => ({
     name,
     description,
     inputSchema,
     isReadOnly: () => readOnly,
     isConcurrencySafe: () => concurrencySafe,
+    ...(extractShellCommand !== undefined ? { extractShellCommand } : {}),
     async *execute(input: I, ctx: ToolContext): AsyncIterable<ToolEvent> {
       const out = (await dispatchSubagent6(
         name,
@@ -142,6 +149,14 @@ export const createSubagent6Tools = (deps: Subagent6Deps): Subagent6ToolSet => {
       (s) => {
         const pidLine = s.pid !== undefined ? `\npid: ${s.pid} (PTY retained)` : ""
         return `exit ${s.exitCode}${pidLine}\n--- stdout ---\n${s.stdout}\n--- stderr ---\n${s.stderr}`
+      },
+      // S16: exec_command runs a model-supplied shell line through Bun.spawn,
+      // so it MUST face the SAME HARD_DENY denylist as `bash`. Read `command`
+      // off the raw input (the schema guarantees a string post-parse; the
+      // permission gate runs pre-dispatch on the raw value, hence the guard).
+      (input) => {
+        const command = (input as { command?: unknown }).command
+        return typeof command === "string" ? command : ""
       },
     ) as Tool,
 

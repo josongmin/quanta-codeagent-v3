@@ -107,7 +107,7 @@ export type SnapshotError =
   | { kind: "not-a-repo"; detail: string }
   | { kind: "detached-head"; detail: string }
   | { kind: "no-dirty-changes" }
-  | { kind: "diff-too-large"; bytes: number; cap: number }
+  | { kind: "diff-too-large"; bytes: number; cap: number; reason?: "estimate-unavailable" }
   | { kind: "lock-busy"; lockPath: string }
   | { kind: "git-failed"; stage: SnapshotStage; stderr: string; exitCode: number }
   | { kind: "aborted"; stage: SnapshotStage }
@@ -233,16 +233,28 @@ const runSnapshot = async (opts: ResolvedOpts): Promise<SnapshotResult> => {
     throw new SnapshotErrorThrown({ kind: "no-dirty-changes" })
   }
 
-  // 4. Size pre-check. `git diff HEAD --stat=999999 --shortstat` reports the
-  //    +/- line counts; for unconvertible binaries we use `--numstat` then
-  //    estimate at ~80B per +/- line for safety. We deliberately use a CHEAP
-  //    upper-bound — going over the cap is the failure mode worth catching
-  //    EARLY, not the lower-bound.
-  const sizeBytes = await estimateDirtyBytes(opts)
-  if (sizeBytes > opts.maxDirtyBytes) {
+  // 4. Size pre-check. `git diff HEAD --numstat` reports the +/- line counts;
+  //    for unconvertible binaries we estimate per +/- line for safety. We
+  //    deliberately use a CHEAP upper-bound — going over the cap is the failure
+  //    mode worth catching EARLY. If the probe ITSELF fails we cannot bound the
+  //    tree, so we fail CLOSED (reason: estimate-unavailable) rather than
+  //    assume small and let the cap be defeated.
+  const estimate = await estimateDirtyBytes(opts)
+  // Fail CLOSED: a probe failure means we CANNOT bound the dirty-tree size, so
+  // we must NOT assume it's small (that would defeat the cap for exactly the
+  // pathological trees the cap exists to reject). Treat it as over-cap.
+  if (!estimate.ok) {
     throw new SnapshotErrorThrown({
       kind: "diff-too-large",
-      bytes: sizeBytes,
+      bytes: opts.maxDirtyBytes + 1,
+      cap: opts.maxDirtyBytes,
+      reason: "estimate-unavailable",
+    })
+  }
+  if (estimate.bytes > opts.maxDirtyBytes) {
+    throw new SnapshotErrorThrown({
+      kind: "diff-too-large",
+      bytes: estimate.bytes,
       cap: opts.maxDirtyBytes,
     })
   }
@@ -438,7 +450,9 @@ const findStashIndex = (raw: string, needle: string): number | undefined => {
   return undefined
 }
 
-const estimateDirtyBytes = async (opts: ResolvedOpts): Promise<number> => {
+type DirtyEstimate = { ok: true; bytes: number } | { ok: false; stderr: string }
+
+const estimateDirtyBytes = async (opts: ResolvedOpts): Promise<DirtyEstimate> => {
   // `git diff HEAD --numstat -- .` returns `<added>\t<deleted>\t<path>` per
   // file (`-` for binary). We sum line counts and apply a generous-per-line
   // budget; the cap is an UPPER bound so over-estimation is fine.
@@ -448,9 +462,10 @@ const estimateDirtyBytes = async (opts: ResolvedOpts): Promise<number> => {
     opts.abortSignal,
   )
   if (res.exitCode !== 0) {
-    // Unable to estimate ⇒ assume small (better to let the snapshot proceed
-    // and fail downstream than to block on a probe failure).
-    return 0
+    // Unable to estimate ⇒ signal failure so the caller fails CLOSED. Assuming
+    // small here would let a pathologically large tree slip past the cap and
+    // block the agent loop for push-minutes — the exact failure the cap guards.
+    return { ok: false, stderr: res.stderr.trim() }
   }
   let totalLines = 0
   for (const line of res.stdout.split("\n")) {
@@ -463,7 +478,7 @@ const estimateDirtyBytes = async (opts: ResolvedOpts): Promise<number> => {
     if (Number.isFinite(deleted)) totalLines += deleted
   }
   const BYTES_PER_LINE_UPPER_BOUND = 200
-  return totalLines * BYTES_PER_LINE_UPPER_BOUND
+  return { ok: true, bytes: totalLines * BYTES_PER_LINE_UPPER_BOUND }
 }
 
 /** UTC-stamp branch slugs are stable across timezones. Format

@@ -24,7 +24,13 @@ import { dirname } from "node:path"
 import writeFileAtomic from "write-file-atomic"
 import { createInMemoryCustom3pRegistry } from "./in-memory-registry"
 import type { Custom3pRegistry, HealthProbe } from "./port"
-import { Custom3pError, type LifecycleState, type ProviderId, type ProviderSpec } from "./types"
+import {
+  Custom3pError,
+  type LifecycleState,
+  type ProviderId,
+  type ProviderKind,
+  type ProviderSpec,
+} from "./types"
 
 export interface JsonlRegistryConfig {
   /** Absolute path to the JSONL file. Parent dir is created on demand. */
@@ -45,6 +51,34 @@ interface PersistedRow {
 const isLifecycleState = (x: unknown): x is LifecycleState =>
   x === "draft" || x === "configured" || x === "healthy" || x === "failing"
 
+/** Mirror of `in-memory-registry.ts`'s endpoint-scheme contract (kept in
+ *  lockstep): mcp ⇒ ws://|wss://|stdio:, llm ⇒ http://|https://. Throws
+ *  `Custom3pError("invalid-endpoint")` on mismatch — the SAME guard
+ *  register()/update() enforce, so a hand-edited / poisoned JSONL row cannot
+ *  reintroduce a scheme the live registry would have rejected. Inlined here
+ *  (not imported) because the registry's copy is module-private and this slice
+ *  may not widen its surface for the seed path. */
+const validateEndpoint = (kind: ProviderKind, endpoint: string): void => {
+  if (kind === "mcp") {
+    if (
+      endpoint.startsWith("ws://") ||
+      endpoint.startsWith("wss://") ||
+      endpoint.startsWith("stdio:")
+    ) {
+      return
+    }
+    throw new Custom3pError(
+      "invalid-endpoint",
+      `mcp endpoint must be ws://, wss://, or stdio:; got ${endpoint}`,
+    )
+  }
+  if (endpoint.startsWith("http://") || endpoint.startsWith("https://")) return
+  throw new Custom3pError(
+    "invalid-endpoint",
+    `llm endpoint must be http:// or https://; got ${endpoint}`,
+  )
+}
+
 const parseRow = (line: string): PersistedRow | undefined => {
   try {
     const parsed = JSON.parse(line) as unknown
@@ -58,6 +92,15 @@ const parseRow = (line: string): PersistedRow | undefined => {
     if (spec.kind !== "mcp" && spec.kind !== "llm") return undefined
     if (typeof spec.endpoint !== "string") return undefined
     if (spec.auth !== "oauth" && spec.auth !== "apiKey" && spec.auth !== "none") return undefined
+    // The seed path must enforce the SAME endpoint-scheme contract register()/
+    // update() do — otherwise a row whose endpoint scheme mismatches its kind
+    // (hand-edited file, downgraded format) would silently re-enter the live
+    // registry bypassing the guard. Drop such rows fail-closed.
+    try {
+      validateEndpoint(spec.kind, spec.endpoint)
+    } catch {
+      return undefined
+    }
     return { spec: spec as ProviderSpec, state: row.state }
   } catch {
     return undefined

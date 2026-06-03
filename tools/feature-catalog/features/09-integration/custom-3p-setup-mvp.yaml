@@ -3,7 +3,7 @@ title: Custom 3P Setup MVP — 5 core method + lifecycle (ADR-0245)
 section: 9
 subsystem: Custom 3P Setup (ADR-0245) — closed-port user-declared provider registry
 order: 245
-maturity: L4
+maturity: L2
 status: new
 ui_surfaces: [n-a]
 monitoring: n-a

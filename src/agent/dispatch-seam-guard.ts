@@ -7,9 +7,12 @@
  * surface the rejection to the LLM as a `tool_result` text body without an
  * unhandled exception unwinding the loop.
  *
- * Wiring into the real dispatch site is deferred to a follow-up patch — see
- * ADR-0036 §한계. This module ships standalone-callable so the integration
- * patch is a pure import + call, no new logic.
+ * Wired into the real dispatch site (ADR-0036 L4): `dispatch.ts`'s
+ * `dispatchToolInner` calls {@link checkDispatchAllowed} when
+ * `collab === "plan" && !registry.isReadOnly(call.name)` — a read-only tool
+ * takes the fast path unconditionally; everything else in `plan` posture is
+ * consulted against the mutating-tool table. The guard stays standalone-callable
+ * (no implicit dispatch coupling) so it is unit-testable in isolation.
  */
 
 import {

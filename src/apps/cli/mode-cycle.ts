@@ -10,10 +10,11 @@
  * an EXISTING `AgentMode` value.
  *
  * Pure — no IO, no env, no globals. The TTY hook (raw-line-reader) and the
- * turn-boundary store (surface-compose) consume it; mid-turn `PermissionMode`
- * mutation is NOT supported by the runtime (RuntimeContext.permissionMode() is
- * getter-only, read once at createSession), so the store applies the chosen
- * posture from the NEXT submitted prompt — see RFC-08 §2.
+ * turn-boundary store (surface-compose) consume it. ADR-0303 — the chosen
+ * posture is now AUTHORITATIVE per-turn: `runSessionTurn` syncs this store into
+ * the engine-owned `RuntimeContext.permissionModeState()` before each turn, so
+ * a mid-session shift+tab applies on the very next turn (not only the next
+ * session). This store remains the UI input cell; the engine holds authority.
  */
 
 import type { AgentMode } from "@/agent"

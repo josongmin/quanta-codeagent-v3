@@ -1,11 +1,10 @@
 const ABORT_ERROR_NAME = "AbortError"
-const TIMEOUT_ERROR_NAME = "TimeoutError"
 
-export const isAbortError = (err: unknown): boolean => {
-  if (typeof err !== "object" || err === null) return false
-  const name = (err as { name?: unknown }).name
-  return name === ABORT_ERROR_NAME || name === TIMEOUT_ERROR_NAME
-}
+// Canonical cancellation classifier lives in `@/shared/errors` — re-export it
+// here so the embedder adapters keep their single `./_abort` import surface
+// (`isAbortError` + `safeVendorErrMessage` + `throwIfAborted`) without
+// re-deriving the duck-typed name check (which had drifted across slices).
+export { isAbortError } from "@/shared/errors"
 
 /**
  * Wrap-message helper for vendor embed() failures.

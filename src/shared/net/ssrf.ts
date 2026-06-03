@@ -150,3 +150,152 @@ export const classifyHost = (hostname: string): string | null => {
 
 /** Back-compat alias: the legacy `ssrfDeny(hostname)` signature. */
 export const ssrfDeny = classifyHost
+
+/** Max redirect hops we follow before giving up — matches the WHATWG fetch
+ *  default of 20 only loosely; 5 is the common "enough for legit CDNs, short
+ *  enough to bound a redirect-loop attack" ceiling. */
+export const SSRF_MAX_REDIRECTS = 5
+
+/** Thrown internally when a hop fails the guard. Carries a `reason` so the
+ *  caller can surface a typed deny without re-parsing the message. */
+export class SsrfGuardError extends Error {
+  constructor(
+    message: string,
+    readonly hostname: string,
+    readonly reason: string,
+  ) {
+    super(message)
+    this.name = "SsrfGuardError"
+  }
+}
+
+/** Resolve a hostname to its IP literals. Injected so tests can drive rebinding
+ *  scenarios deterministically; the default uses the platform DNS resolver. */
+export type HostResolver = (hostname: string) => Promise<readonly string[]>
+
+/** Default resolver — node DNS, all A/AAAA records. Lazily imported so the pure
+ *  classifier half of this module carries no node:dns dependency for callers
+ *  that only use {@link classifyHost}. */
+const defaultResolveHost: HostResolver = async (hostname) => {
+  const { lookup } = await import("node:dns/promises")
+  const records = await lookup(hostname, { all: true })
+  return records.map((r) => r.address)
+}
+
+/** Validate a single (post-redirect) URL: https-only + structural SSRF deny +
+ *  (for DNS names) resolved-IP check. Throws {@link SsrfGuardError} on rejection.
+ *  Shared by the initial fetch and every redirect hop so a 30x to an internal
+ *  address cannot bypass the pre-flight host check (the original SSRF-redirect
+ *  bypass). Async because the DNS-rebinding layer resolves the name. */
+const assertUrlSafe = async (url: URL, resolveHost: HostResolver): Promise<void> => {
+  // http→https downgrade and all non-https schemes (file:, data:, gopher:, …)
+  // are rejected — a redirect must not escape TLS.
+  if (url.protocol !== "https:") {
+    throw new SsrfGuardError(
+      `redirect to non-https URL rejected (got ${url.protocol})`,
+      url.hostname,
+      "non_https_redirect",
+    )
+  }
+  const deny = classifyHost(url.hostname)
+  if (deny !== null) {
+    throw new SsrfGuardError(`SSRF denied: ${url.hostname} — ${deny}`, url.hostname, deny)
+  }
+  // DNS-rebinding layer: a public NAME (not an IP literal — those are already
+  // verdicted above) is resolved and EVERY returned address is structurally
+  // re-checked. This catches the realistic attack — an attacker pointing their
+  // domain's A/AAAA record straight at 169.254.169.254 / 127.0.0.1 / RFC1918 —
+  // which the hostname check alone cannot see. (A full TOCTOU rebind that flips
+  // the record between this resolve and fetch's own connect still needs IP
+  // pinning, which Bun's `fetch` cannot express; that residue is documented on
+  // fetchWithSsrfGuard.) Resolver ERRORS fail-OPEN: a transient DNS failure must
+  // not break a legitimate fetch (fetch would fail the same way), and the
+  // literal-host check already ran — we are only ADDING rejections here.
+  if (isIpLiteral(url.hostname)) return
+  let addresses: readonly string[]
+  try {
+    addresses = await resolveHost(url.hostname)
+  } catch {
+    return
+  }
+  for (const addr of addresses) {
+    const ipDeny = classifyHost(addr)
+    if (ipDeny !== null) {
+      throw new SsrfGuardError(
+        `SSRF denied: ${url.hostname} resolves to ${addr} — ${ipDeny}`,
+        url.hostname,
+        `dns_rebind_${ipDeny}`,
+      )
+    }
+  }
+}
+
+/**
+ * Redirect-safe `fetch`: follows up to {@link SSRF_MAX_REDIRECTS} hops with
+ * `redirect:"manual"`, re-running the https-only + structural SSRF host check
+ * on EVERY hop (including the resolved `Location`). This closes the
+ * redirect-bypass where a public URL 30x-redirects to 169.254.169.254 /
+ * 127.0.0.1 / RFC1918 — `redirect:"follow"` would have reached the internal
+ * service before any host check ran.
+ *
+ * The caller is expected to have already validated `initialUrl` via the same
+ * predicate; we re-validate it here too so the helper is safe in isolation.
+ *
+ * On any guard violation throws {@link SsrfGuardError} (caught by the tool's
+ * fetch phase and mapped to a typed `ok:false`). A redirect response with no
+ * `Location` header is treated as a hard failure (malformed).
+ *
+ * DNS-rebinding: each hop now ALSO resolves the hostname and structurally
+ * re-checks every returned A/AAAA address (via the injected {@link HostResolver},
+ * default node DNS), so a name that resolves straight to a private/loopback/
+ * metadata IP is rejected — not just literal-IP redirects. RESIDUAL: a true
+ * TOCTOU rebind that flips the record between this resolve and `fetch`'s own
+ * connect is still possible because Bun's global `fetch` exposes no `lookup`/
+ * dispatcher hook to pin the validated IP at connect time; closing that needs a
+ * custom dispatcher and is tracked as a separate ADR.
+ */
+export const fetchWithSsrfGuard = async (
+  fetcher: typeof fetch,
+  initialUrl: string,
+  init: RequestInit & { signal: AbortSignal },
+  opts: { resolveHost?: HostResolver } = {},
+): Promise<Response> => {
+  const resolveHost = opts.resolveHost ?? defaultResolveHost
+  let current = new URL(initialUrl)
+  await assertUrlSafe(current, resolveHost)
+  for (let hop = 0; hop <= SSRF_MAX_REDIRECTS; hop++) {
+    const res = await fetcher(current.toString(), { ...init, redirect: "manual" })
+    // 3xx with a Location is a redirect under redirect:"manual" — re-guard.
+    // (304 Not Modified / 300 Multiple Choices without Location are NOT
+    // redirects we follow; they fall through to the non-redirect return.)
+    const isRedirect = res.status >= 300 && res.status < 400 && res.headers.has("location")
+    if (!isRedirect) return res
+    if (hop === SSRF_MAX_REDIRECTS) {
+      throw new SsrfGuardError(
+        `too many redirects (> ${SSRF_MAX_REDIRECTS})`,
+        current.hostname,
+        "too_many_redirects",
+      )
+    }
+    const location = res.headers.get("location")
+    if (location === null || location === "") {
+      throw new SsrfGuardError("redirect with no Location", current.hostname, "no_location")
+    }
+    // Resolve relative Location against the CURRENT (post-redirect) URL.
+    let next: URL
+    try {
+      next = new URL(location, current)
+    } catch {
+      throw new SsrfGuardError(
+        `redirect to malformed Location: ${location}`,
+        current.hostname,
+        "malformed_location",
+      )
+    }
+    await assertUrlSafe(next, resolveHost)
+    current = next
+  }
+  // Unreachable: the loop either returns a non-redirect response or throws on
+  // the final hop. Present to satisfy the type checker.
+  throw new SsrfGuardError("redirect handling exhausted", current.hostname, "exhausted")
+}

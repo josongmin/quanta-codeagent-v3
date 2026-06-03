@@ -63,6 +63,7 @@ export class StdioMcpTransport implements McpTransport {
 
   private proc: Subprocess<"pipe", "pipe", "pipe"> | null = null
   private readPump: Promise<void> | null = null
+  private stderrPump: Promise<void> | null = null
   private exitFired = false
 
   constructor(config: McpServerConfig, opts: StdioTransportOpts = {}) {
@@ -80,6 +81,12 @@ export class StdioMcpTransport implements McpTransport {
       stderr: "pipe",
     })
     this.readPump = this.pumpStdout()
+    // Drain stderr to completion so a chatty server (debug logs) can never fill
+    // the OS pipe buffer (~64KB) and block its own next stderr write — which
+    // would stall stdout JSON-RPC and hang every pending request to timeout.
+    // We discard the bytes (no diagnostics surface here); the goal is purely to
+    // keep the pipe empty. Mirrors the stdout pump's stored-promise lifecycle.
+    this.stderrPump = this.drainStderr()
     this.watchExit()
   }
 
@@ -129,6 +136,7 @@ export class StdioMcpTransport implements McpTransport {
     }
     await proc.exited.catch(() => undefined)
     await this.readPump?.catch(() => undefined)
+    await this.stderrPump?.catch(() => undefined)
     this.proc = null
   }
 
@@ -143,6 +151,23 @@ export class StdioMcpTransport implements McpTransport {
       }
     } catch (e) {
       logger.debug("mcp: stdout pump ended", { error: errMessage(e) })
+    }
+  }
+
+  /** Background drain of the child's stderr. Reading to completion keeps the
+   *  OS stderr pipe from filling (which would otherwise block the child's next
+   *  stderr write and stall its stdout JSON-RPC). Bytes are discarded — this is
+   *  a deadlock guard, not a diagnostics sink. Tolerant of a test fakeProc with
+   *  no stderr (same guard as {@link pumpStdout}). */
+  private async drainStderr(): Promise<void> {
+    const stderr = this.proc?.stderr
+    if (!stderr || typeof stderr === "number") return
+    try {
+      for await (const _ of stderr) {
+        // discard — purpose is to keep the pipe empty so the child never blocks
+      }
+    } catch (e) {
+      logger.debug("mcp: stderr drain ended", { error: errMessage(e) })
     }
   }
 

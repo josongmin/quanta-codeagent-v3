@@ -3,7 +3,7 @@ title: Trust-scope registry wire-up (Phase C) — persistent grant memory ask-sk
 section: 3
 subsystem: HITL 게이트 — 그랜트 기억 / ask-skip (ADR-0050)
 order: 50
-maturity: L4
+maturity: L2
 status: stable
 ui_surfaces: [n-a]
 monitoring: n-a

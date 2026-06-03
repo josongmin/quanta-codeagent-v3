@@ -3,7 +3,7 @@ title: Multi-cloud provider router (CLAUDE_CODE_USE_* env mirror + precedence la
 section: 8
 subsystem: LLM provider seam — multi-cloud routing
 order: 1
-maturity: L4
+maturity: L2
 status: stable
 ui_surfaces: [n-a]
 monitoring: n-a

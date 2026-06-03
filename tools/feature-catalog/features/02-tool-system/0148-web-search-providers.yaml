@@ -3,7 +3,7 @@ title: Web search provider impls — Brave primary + DuckDuckGo fallback (ADR-01
 section: 2
 subsystem: 도구 — web search (concrete WebSearchProvider impls)
 order: 134
-maturity: L4
+maturity: L2
 status: new
 ui_surfaces: [cli]
 monitoring: n-a

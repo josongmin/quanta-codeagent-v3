@@ -17,6 +17,21 @@
 import type { BridgeTransport, WireEnvelope } from "../event-bridge"
 import { isWireEnvelope } from "../event-bridge"
 
+/** Hard ceiling on a single un-terminated line's accumulated length. A peer
+ *  that never sends a `\n` (malicious, wedged, or a half-written frame from a
+ *  crashed writer) would otherwise drive `buffer` to grow without bound — a
+ *  memory-exhaustion / stream-wedge DoS on the primary cross-process channel
+ *  (CLI ↔ daemon). When the trailing partial exceeds this cap before a newline
+ *  is seen, the transport tears itself down (`teardown("error", ...)`) and
+ *  drops the buffer rather than buffering forever.
+ *
+ *  This is a SAFETY backstop, not a tuning knob: 32 MiB mirrors the LSP
+ *  reader's `MAX_FRAME_BYTES` (`@/lsp/adapters/jsonrpc`) and is far above any
+ *  legitimate IPC envelope (`WireEnvelope`s are small observation events) while
+ *  still bounding the worst case. The bound is on string length (UTF-16 code
+ *  units), a conservative proxy for byte length for the framing's purpose. */
+const MAX_FRAME_CHARS = 32 * 1024 * 1024
+
 /** Terminal lifecycle events on the read side (audit L9 M18b). A Node
  *  `Readable` emits `'end'` (clean EOF), `'close'` (fd released), and `'error'`
  *  (broken pipe / dead partner). We subscribe to all three so a dead peer is
@@ -115,6 +130,13 @@ export const createStdioTransport = (opts: CreateStdioTransportOpts): BridgeTran
       const envelope = tryDecodeLine(line)
       if (envelope !== undefined) dispatchToHandlers(envelope, handlers)
       nl = buffer.indexOf("\n")
+    }
+    // Frame-size DoS guard: the trailing partial (no newline yet) must never
+    // grow without bound. A peer that wedges mid-frame tears the transport
+    // down instead of exhausting the daemon's heap. Checked AFTER draining
+    // complete lines so a burst of many small valid frames never trips it.
+    if (buffer.length > MAX_FRAME_CHARS) {
+      void teardown("error", new Error("frame too large"))
     }
   }
 

@@ -46,6 +46,7 @@
  *     `metadata`.
  */
 
+import { buildFsJailDecisionEvent } from "@/storage/service"
 import type { DecisionEmitter, DecisionEvent } from "@/stream"
 import { safeEmitDecision } from "@/stream"
 import type { BudgetExhaustion } from "./budget"
@@ -121,15 +122,17 @@ export const emitBudgetExhaustedDecision = (
  *  `path` is the canonicalized OFFENDING absolute path. The user supplied
  *  it (so disclosure is already user-known), AND the path was REJECTED so
  *  this event does NOT expose the file's contents. Reason is categorical:
- *  "path outside workspace" with a short tail. */
+ *  "path outside workspace" with a short tail.
+ *
+ *  SSOT: this builder DELEGATES to `@/storage`'s {@link buildFsJailDecisionEvent}
+ *  — the slice that owns the jail chokepoint (`enforceJail`/`emitJailDeny`) — so
+ *  the emitted shape can never drift between the storage-side emit and this
+ *  agent-side builder. The storage builder returns a structural mirror of the
+ *  `@/stream` `DecisionEvent` (same closed `kind`/`outcome` unions, same field
+ *  names); we re-type it to the real `DecisionEvent` here, in `@/agent`, where
+ *  `@/stream` is a legal dependency. The dependency points the fence-allowed
+ *  direction (`agent → storage`); `@/storage` never imports `@/agent`/`@/stream`. */
 export const buildJailDecisionEvent = (args: {
   readonly path: string
   readonly root: string
-}): DecisionEvent => ({
-  type: "decision",
-  turn: 0,
-  kind: "jail",
-  outcome: "deny",
-  reason: `path outside workspace: ${args.path}`,
-  metadata: { path: args.path, root: args.root },
-})
+}): DecisionEvent => buildFsJailDecisionEvent(args) as DecisionEvent

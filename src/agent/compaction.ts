@@ -232,7 +232,22 @@ export interface CompactInput {
 }
 
 export type CompactResult =
-  | { compacted: false; messages: Message[] }
+  | {
+      compacted: false
+      messages: Message[]
+      /**
+       * Why no compaction happened — lets the loop's breaker distinguish a
+       * benign "we were under budget" no-op (`under_threshold`, no strike) from
+       * an "over budget but the transcript is one indivisible giant turn we
+       * cannot summarize" no-op (`no_boundary`). The latter is genuine
+       * no-progress under pressure: if the breaker did not strike on it the
+       * proactive `maxNoProgressProactive` cap could never trip on a giant-turn
+       * transcript and `compactIfNeeded` would be re-invoked every turn with no
+       * headroom gained. `deferred` covers the HITL/hook skip (the host
+       * explicitly chose to wait one turn — not a failure to make progress).
+       */
+      reason: "under_threshold" | "no_boundary" | "deferred"
+    }
   | { compacted: true; messages: Message[]; summaryTokens: number }
 
 /** Stream one summary turn with an explicit system prompt and return its
@@ -355,6 +370,15 @@ export const reactiveCompact = async (
   // prefix) does not mis-fire. Mirrors CC's rapid_refill_breaker intent.
   const inputTokens = estimateTokens(input.messages)
   const outputTokens = estimateTokens(messages)
+  // Below REACTIVE_MIN_INPUT_TOKENS the prompt is already tiny: a spurious PTL
+  // there can leave the synthetic header a few tokens above a trivial summarized
+  // prefix, so the shrink-ratio bar is deliberately NOT applied here — the
+  // reactive breaker (maxConsecutiveReactive) is the backstop against a genuine
+  // no-shrink spin (see the dedicated GAP-1 rapid_refill_breaker test). An audit
+  // proposed fail-closing below the floor on a zero/negative drop, but that
+  // reverses an intentional, separately-tested tolerance ("tiny input below the
+  // floor is NOT failed even if it grows") and is redundant with the breaker, so
+  // it is deliberately not adopted.
   if (
     inputTokens >= REACTIVE_MIN_INPUT_TOKENS &&
     (inputTokens - outputTokens) / inputTokens < REACTIVE_MIN_DROP_RATIO
@@ -388,12 +412,14 @@ export const compactIfNeeded = async (input: CompactInput): Promise<CompactResul
   const keepTurns = input.keepRecentTurns ?? DEFAULT_KEEP_TURNS
   const currentTokens = estimateTokens(input.messages)
   if (currentTokens <= threshold) {
-    return { compacted: false, messages: input.messages }
+    return { compacted: false, messages: input.messages, reason: "under_threshold" }
   }
   const boundary = findBoundary(input.messages, keepTurns)
   if (boundary <= 0) {
-    // Nothing safely summarizable (one giant turn) — leave untouched.
-    return { compacted: false, messages: input.messages }
+    // Over budget but nothing safely summarizable (one giant indivisible turn)
+    // — leave untouched, but tag the no-op so the loop's breaker can record it
+    // as a no-progress strike (re-firing every turn gains no headroom).
+    return { compacted: false, messages: input.messages, reason: "no_boundary" }
   }
   const prefix = input.messages.slice(0, boundary)
   const suffix = input.messages.slice(boundary)
@@ -410,7 +436,7 @@ export const compactIfNeeded = async (input: CompactInput): Promise<CompactResul
       isFirstCompaction: input.isFirstCompaction === true,
     })
     if (abortReason !== null) {
-      return { compacted: false, messages: input.messages }
+      return { compacted: false, messages: input.messages, reason: "deferred" }
     }
   }
   // ADR-0075 — preflight HITL. Ordered AFTER the cheap threshold + boundary
@@ -427,7 +453,7 @@ export const compactIfNeeded = async (input: CompactInput): Promise<CompactResul
       proposedSummaryTokens: estimateTokens(prefix),
     })
     if (decision === "defer_one_turn") {
-      return { compacted: false, messages: input.messages }
+      return { compacted: false, messages: input.messages, reason: "deferred" }
     }
     // `approve` and `force_now` both fall through to the summarizer — the
     // loop differentiates them only for emit/log purposes.

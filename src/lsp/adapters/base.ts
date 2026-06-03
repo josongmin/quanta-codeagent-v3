@@ -590,6 +590,7 @@ export class LspClient implements LspPort {
    *  matching `didClose` on `stop()`. */
   private readonly opened = new Set<string>()
   private readPump: Promise<void> | null = null
+  private stderrPump: Promise<void> | null = null
   private stopped = false
   private exited = false
   serverInfo: LspServerInfo | null = null
@@ -611,6 +612,12 @@ export class LspClient implements LspPort {
       stderr: "pipe",
     })
     this.readPump = this.pumpStdout()
+    // Drain stderr to completion so a verbose language server (tsserver /
+    // Pyright debug output) can never fill the OS stderr pipe (~64KB) and block
+    // its own next stderr write — which would stall the stdout JSON-RPC channel
+    // and hang every pending request to its `requestTimeoutMs`. Bytes are
+    // discarded; this is purely a deadlock guard. Mirrors the stdout pump.
+    this.stderrPump = this.drainStderr()
     this.watchExit()
 
     const onAbort = () => {
@@ -1057,6 +1064,7 @@ export class LspClient implements LspPort {
       }
       await proc.exited.catch(() => undefined)
       await this.readPump?.catch(() => undefined)
+      await this.stderrPump?.catch(() => undefined)
       this.proc = null
     }
   }
@@ -1236,6 +1244,24 @@ export class LspClient implements LspPort {
       }
     } catch (e) {
       logger.debug("lsp: stdout pump ended", { error: errMessage(e) })
+    }
+  }
+
+  /** Background drain of the server's stderr. A verbose server (tsserver /
+   *  Pyright debug logs) that fills the OS stderr pipe would block on its next
+   *  stderr write, stop answering stdout JSON-RPC, and hang every pending
+   *  request to timeout. Reading to completion keeps the pipe empty; bytes are
+   *  discarded (deadlock guard, not a diagnostics sink). Tolerant of a test
+   *  subclass whose `proc` has no stderr (same guard as {@link pumpStdout}). */
+  private async drainStderr(): Promise<void> {
+    const stderr = this.proc?.stderr
+    if (!stderr || typeof stderr === "number") return
+    try {
+      for await (const _ of stderr) {
+        // discard — purpose is to keep the pipe empty so the server never blocks
+      }
+    } catch (e) {
+      logger.debug("lsp: stderr drain ended", { error: errMessage(e) })
     }
   }
 

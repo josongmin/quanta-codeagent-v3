@@ -1,5 +1,5 @@
 import { type AutoModeClassifier, CLASSIFIER_SYSTEM_PROMPT } from "./classifier"
-import { hostAllowsMutation } from "./per-host-mode"
+import { hostMutationVerdict } from "./per-host-mode"
 import { threadAllowsMutation } from "./per-thread-store"
 import type {
   ControlPolicy,
@@ -391,10 +391,16 @@ export const evaluateStack = (
     )
   }
 
-  // 4. Per-host agent-mode default.
+  // 4. Per-host agent-mode default. Branch on the TYPED verdict — the legacy
+  //    boolean adapter collapses `defer` (custom) into the same `undefined`
+  //    as `unpinned`, which would let a custom-pinned host fall through to
+  //    the global default and be IMPLICITLY ALLOWED under bypass/acceptEdits.
+  //    A `custom`-pinned host is a deliberate "restrict me with a bespoke
+  //    policy" marker: until that bespoke policy is resolved it MUST fail
+  //    CLOSED, never ride the global default's mode-based allow.
   const hostMode = store.getHost(stack.hostId)
-  const hostVerdict = hostAllowsMutation(hostMode)
-  if (hostVerdict === false) {
+  const hostVerdict = hostMutationVerdict(hostMode)
+  if (hostVerdict === "deny") {
     return emit(
       {
         kind: "deny",
@@ -403,11 +409,25 @@ export const evaluateStack = (
       { stackSource: "per-host", ...axes },
     )
   }
-  if (hostVerdict === true) {
+  if (hostVerdict === "defer") {
+    // `custom` — bespoke per-host policy not yet wired into this gate. Fail
+    // CLOSED: deny outright rather than let bypass/acceptEdits implicitly
+    // allow it. When the bespoke-policy resolver lands it replaces THIS
+    // branch (resolve → allow/deny), never the fall-through below.
+    return emit(
+      {
+        kind: "deny",
+        reason: `Per-host mode (custom) on host ${stack.hostId} requires a bespoke policy that has not been resolved — refusing ${action.tool} (fail-closed)`,
+      },
+      { stackSource: "per-host", ...axes },
+    )
+  }
+  if (hostVerdict === "allow") {
     return emit({ kind: "allow" }, { stackSource: "per-host", ...axes })
   }
 
-  // 5. Fall through to the global default (mode-based evaluate). The
+  // 5. `unpinned` — fall through to the global default (mode-based evaluate).
+  //    The
   //    base `evaluate` itself emits with `stackSource: "global-default"`
   //    — DO NOT re-emit here or the counter would double-count.
   return evaluate(action, ctx)

@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { errMessage } from "@/shared"
 import { FsJailError, fileExists, readFile, writeFile } from "@/storage"
+import { gitWriteGuardDeny } from "./git-write-guard-result"
 import type { Tool, ToolContext, ToolEvent, ToolFailure } from "./types"
 
 /**
@@ -262,6 +263,17 @@ export const scriptedReplaceTool: Tool<Input> = {
   hitlTier: (): "pre-approval-ok" => "pre-approval-ok",
 
   async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    // ADR-0091 git-write-protection: a scripted_replace targeting
+    // `.git/{hooks,config,config.worktree,info/attributes}` or `.vscode/**` is a
+    // code-execution / policy-escape vector exactly as for `write`/`edit`.
+    // Static-deny BEFORE any fs read/write, mirroring the FsJailError hard-stop
+    // posture below — never a partial write. Default-OFF: when `ctx.gitWriteGuard`
+    // is unwired the helper returns null and the path is byte-identical.
+    const guardDeny = gitWriteGuardDeny(input.file, ctx)
+    if (guardDeny) {
+      yield guardDeny
+      return
+    }
     try {
       // Pre-check existence so the error message is descriptive rather than
       // surfacing the raw `File not found` from readFile.

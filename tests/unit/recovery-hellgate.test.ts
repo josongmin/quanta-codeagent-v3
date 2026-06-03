@@ -465,6 +465,9 @@ describe("decideOnAssembled", () => {
   })
 
   test("byte-identical: a non-refusal unrecognized stop_reason with content still proceeds", () => {
+    // ADR-0076 open-set tolerance (NI-2): a stop_reason outside the canonical
+    // vocabulary must `proceed`, NOT surface — provider-ERROR detection lives at
+    // the adapter layer (e.g. Responses `response.failed` throws), not here.
     const rec = freshRecovery()
     expect(decideOnAssembled("stop", textMsg("done"), rec).do).toBe("proceed")
   })

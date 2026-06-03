@@ -14,6 +14,7 @@
  * `openai` package directly (the assembler/caller does).
  */
 import { LLMError } from "@/shared"
+import { chunkBatches } from "@/shared/chunk"
 import type { EmbeddingAdapterOptions, EmbeddingPort } from "../embedding-port"
 import { isAbortError, safeVendorErrMessage, throwIfAborted } from "./_abort"
 
@@ -32,13 +33,6 @@ export interface EmbeddingsHttp {
 
 export interface OpenAIRetrievalEmbedderOptions extends EmbeddingAdapterOptions {
   http: EmbeddingsHttp
-}
-
-const chunkBatches = <T>(items: readonly T[], size: number): T[][] => {
-  const n = Math.max(1, Math.floor(size))
-  const out: T[][] = []
-  for (let i = 0; i < items.length; i += n) out.push([...items.slice(i, i + n)])
-  return out
 }
 
 export const createOpenAIEmbedder = (opts: OpenAIRetrievalEmbedderOptions): EmbeddingPort => {

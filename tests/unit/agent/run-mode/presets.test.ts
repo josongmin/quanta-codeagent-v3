@@ -78,12 +78,28 @@ describe("MODE_PRESETS 6×12 matrix", () => {
     expect(p.network.kind).toBe("allowlist")
   })
 
-  test("auto-permission modes carry the policy discriminator", () => {
+  test("auto-permission modes pin their EXACT per-mode policy (drift guard)", () => {
+    // Each auto-permission mode's `policy` is pinned to its ACTUAL value from
+    // MODE_PRESETS — not merely "one of the union arms" (which is a tautology
+    // that no drift could ever fail). Pinning the concrete value turns a
+    // future preset edit into a failing test instead of a silent policy change.
+    const expected: Record<"headless" | "batch" | "ci-bot", "acceptEdits"> = {
+      headless: "acceptEdits",
+      batch: "acceptEdits",
+      "ci-bot": "acceptEdits",
+    }
     for (const mode of ["headless", "batch", "ci-bot"] as const) {
       const perm = MODE_PRESETS[mode].permission
-      if (perm.kind !== "auto") throw new Error("unexpected non-auto perm")
-      expect(["acceptEdits", "denyAll", "askAll"]).toContain(perm.policy)
+      if (perm.kind !== "auto") throw new Error(`expected auto perm for ${mode}`)
+      expect(perm.policy).toBe(expected[mode])
     }
+    // `daemon` is also auto/acceptEdits (no human, allowlisted egress).
+    const daemonPerm = MODE_PRESETS.daemon.permission
+    if (daemonPerm.kind !== "auto") throw new Error("expected auto perm for daemon")
+    expect(daemonPerm.policy).toBe("acceptEdits")
+    // The human-near modes are NOT auto — they are reviewer-backed.
+    expect(MODE_PRESETS.interactive.permission.kind).toBe("reviewer-backed")
+    expect(MODE_PRESETS.ide.permission.kind).toBe("reviewer-backed")
   })
 
   test("BUDGET_PRESETS exists for every mode", () => {

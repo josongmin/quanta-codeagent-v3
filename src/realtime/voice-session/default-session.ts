@@ -295,10 +295,25 @@ export const createDefaultVoiceSession = (deps: DefaultSessionDeps): RealtimeVoi
       const opened = await openTransport(opts)
       if (!opened.ok) return failConnect(opened.error)
 
-      // 3. session.update + audio.start. 4. wire inbound + up-pump.
+      // 2a. Liveness re-check across the connect await (TOCTOU). If close() /
+      //     onConnectionLost ran during the handshake (Ctrl-C / hangup), the
+      //     session is no longer `connecting` — the reducer rejects
+      //     opened-from-{closed,…}. Gate the whole wiring tail on that dispatch
+      //     so we never register a transport subscription or start the mic pump
+      //     as ZOMBIES that no later close() can tear down (state is already
+      //     `closed`, so close()/onConnectionLost early-return). teardown() is
+      //     run defensively (close()'s teardown saw null pump/unsub) and we
+      //     surface a typed illegal-state Err.
+      if (!dispatch({ type: "opened" })) {
+        teardown()
+        return err({ kind: "illegal-state", state, op: "start" })
+      }
+
+      // 3. session.update + audio.start. 4. wire inbound + up-pump. Only
+      //    reachable when the `opened` transition above was legal (connecting →
+      //    listening), i.e. the session survived the connect handshake.
       sendSessionUpdate(opts)
       wireTransport()
-      dispatch({ type: "opened" }) // connecting → listening
       startPump()
       return ok(undefined)
     },

@@ -12,6 +12,7 @@
  * the composer skips the block (byte-identical, RFC §1.2).
  */
 
+import { resolveJailed } from "@/storage"
 import type { Tool } from "@/tool"
 import {
   createAgentTool,
@@ -130,11 +131,26 @@ export const buildSubagentBlock = (config: AgentConfig): SubagentBlock | undefin
       runner,
       registry: reg,
       ...(config.subagent.maxDepth !== undefined ? { maxDepth: config.subagent.maxDepth } : {}),
+      // (f) Thread THIS agent's recursion depth so a nested `spawn_agent`
+      // computes `childDepth = parentDepth + 1` and the recursion guard
+      // accumulates across forks (mirrors `subagent-batch.ts` parentDepth).
+      // Absent ⇒ defaults to 0 (root) in the handler — byte-identical.
+      ...(config.depth !== undefined ? { parentDepth: config.depth } : {}),
       ...(config.subagent.maxConcurrent !== undefined
         ? { maxConcurrent: config.subagent.maxConcurrent }
         : {}),
       ...(config.subagent.waitTimeoutPolicy !== undefined
         ? { waitTimeoutPolicy: config.subagent.waitTimeoutPolicy }
+        : {}),
+      // (c) Path-jail port — confine `exec_command`'s model-supplied `cwd` to
+      // the session workspace (`config.cwd`). The composition root owns the
+      // `@/storage resolveJailed` wiring so the handlers-6 slice stays
+      // storage-import-free. `resolveJailed` throws an `FsJailError` on escape,
+      // which the handler converts to `cause:"cwd_outside_workspace"`. Only
+      // wired when a workspace root is actually known — absent `config.cwd` ⇒
+      // no jail (byte-identical legacy), never a jail against an undefined root.
+      ...(config.cwd !== undefined
+        ? { cwdJail: { resolve: resolveJailed, jailRoot: config.cwd } }
         : {}),
       // RFC-04 — when the host wired an AgentMetaRegistry, thread it so
       // spawn_agent records depth/label for list_agents. Absent ⇒ no write.

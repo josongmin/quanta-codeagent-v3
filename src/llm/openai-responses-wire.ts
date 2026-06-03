@@ -38,6 +38,13 @@ interface ResponsesEvent {
       input_tokens_details?: { cached_tokens?: number }
       output_tokens_details?: { reasoning_tokens?: number }
     }
+    // `response.failed` carries a provider error payload; `response.incomplete`
+    // carries a structured `incomplete_details.reason` (e.g. "max_output_tokens"
+    // / "content_filter"). Both are read at the failure/incomplete arms so a
+    // provider failure surfaces (throw) and an incomplete maps onto the
+    // canonical stop-reason vocabulary instead of a flat "incomplete".
+    error?: unknown
+    incomplete_details?: { reason?: string }
   }
   readonly item_id?: string
 }
@@ -496,25 +503,74 @@ export async function* parseResponsesEvents(
       continue
     }
 
-    if (type === "response.failed" || type === "response.incomplete") {
-      yield {
-        type: "message_stop",
-        stop_reason: type === "response.failed" ? "error" : "incomplete",
-      }
+    // Provider in-band terminal failure. The Responses stream surfaces the
+    // failure as a typed SSE event rather than an HTTP error, so the sibling
+    // adapters (openai.ts / anthropic.ts) throw a structured LLMError on the
+    // equivalent shape. Mirror that here: a failed response is NOT a completed
+    // turn — converting it to `message_stop` silently treated a provider
+    // failure as a finished turn (the root-cause defect). Throw so the loop's
+    // `classifyLLMError` routes it through the stream-error recovery path.
+    if (type === "response.failed") {
+      const errPayload = event.response?.error
+      const detail =
+        errPayload !== undefined ? `: ${JSON.stringify(errPayload)}` : " (no error payload)"
+      throw new LLMError(`${opts.provider} response.failed${detail}`, {
+        kind: "server_error",
+        provider: opts.provider,
+      })
+    }
+
+    // Incomplete response: the turn stopped early for a structured reason. Read
+    // `incomplete_details.reason` and map it onto the canonical stop-reason
+    // vocabulary so recovery can act per-reason instead of flattening every
+    // early-stop into a single opaque `incomplete` (which the FSM could not
+    // classify and would surface/abort indiscriminately). Emit the accumulated
+    // usage event BEFORE the early return so token accounting is never dropped
+    // on an incomplete turn.
+    if (type === "response.incomplete") {
+      const reason = event.response?.incomplete_details?.reason
+      // `max_output_tokens` → max_tokens (recovery issues a continue nudge).
+      // `content_filter` → content_filtered (recovery surfaces it as a
+      // terminal refusal). Anything else is drift → surface via "error".
+      const stopReason =
+        reason === "max_output_tokens"
+          ? "max_tokens"
+          : reason === "content_filter"
+            ? "content_filtered"
+            : "error"
+      yield* emitUsage(usage, opts.fallbackModel)
+      yield { type: "message_stop", stop_reason: stopReason }
       return
     }
   }
 
-  if (usage !== null) {
-    yield {
-      type: "usage",
-      inputTokens: usage.input,
-      outputTokens: usage.output,
-      ...(usage.cached !== undefined ? { cacheReadTokens: usage.cached } : {}),
-      model: usage.model ?? opts.fallbackModel,
-    }
-  }
+  yield* emitUsage(usage, opts.fallbackModel)
   yield { type: "message_stop", stop_reason: "end_turn" }
+}
+
+/** Emit the accumulated usage StreamEvent (if any tokens were observed). Shared
+ *  by the normal terminal path and the `response.incomplete` early-return so an
+ *  early stop never drops token accounting. No-op generator when `usage` is
+ *  null (older models / never-completed) so no zero-usage event is emitted. */
+type AccumulatedUsage = {
+  readonly input: number
+  readonly output: number
+  readonly cached?: number
+  readonly model?: string
+}
+
+function* emitUsage(
+  usage: AccumulatedUsage | null,
+  fallbackModel: string,
+): Generator<StreamEvent> {
+  if (usage === null) return
+  yield {
+    type: "usage",
+    inputTokens: usage.input,
+    outputTokens: usage.output,
+    ...(usage.cached !== undefined ? { cacheReadTokens: usage.cached } : {}),
+    model: usage.model ?? fallbackModel,
+  }
 }
 
 export const emitResponsesCheckpoint = (

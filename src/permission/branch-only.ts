@@ -106,8 +106,26 @@ export const decideBranchOnly = (
 
   // push: scan refspec args
   if (sub === "push") {
+    const pushToks = toks.slice(toks.indexOf(sub) + 1)
+    // Audit fix: `--all` / `--mirror` / `--tags` push REFS WHOLESALE without
+    // any positional refspec, so the positional scan below (which strips all
+    // dash-flags) never sees a protected-branch token and would let them slip.
+    // `--all` pushes every local branch (incl. main), `--mirror` mirrors every
+    // ref (branches+tags+refs/*), `--tags` pushes all tags. Each can clobber a
+    // protected branch from a feature branch — deny before positional checks.
+    // Mirrors the `isDestructive` flag-scan in the reset block below.
+    const isWildcardPush = pushToks.some(
+      (t) => t === "--all" || t === "--mirror" || t === "--tags",
+    )
+    if (isWildcardPush) {
+      return {
+        allowed: false,
+        reason:
+          "git push --all/--mirror/--tags pushes refs wholesale and can clobber a protected branch; denied (gitWrite=branch-only). Push an explicit feature-branch refspec instead.",
+      }
+    }
     // After `git push`, args are `[remote] [refspec...]` or `--all` flags
-    const after = toks.slice(toks.indexOf(sub) + 1).filter((t) => !t.startsWith("-"))
+    const after = pushToks.filter((t) => !t.startsWith("-"))
     // `git push` with no args pushes the current upstream — if HEAD is on a
     // protected branch, that's a violation
     if (after.length <= 1 && currentBranch && protectedBranches.includes(currentBranch)) {

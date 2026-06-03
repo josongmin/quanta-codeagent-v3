@@ -3,7 +3,7 @@ title: Plan-writeback — bidirectional skill ↔ plan sync (ADR-0259)
 section: 1
 subsystem: Plan-writeback closed-port (ADR-0259, Devin Playbook 흡수)
 order: 259
-maturity: L4
+maturity: L2
 status: new
 ui_surfaces: [n-a]
 monitoring: n-a

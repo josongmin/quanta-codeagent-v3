@@ -127,6 +127,17 @@ export const createTokenRefreshScheduler = (
 ): TokenRefreshScheduler => {
   // At most ONE pending timer per connector id — re-scheduling clears the prior.
   const pending = new Map<string, TimerHandle>()
+  // Teardown flags. A refresh already IN FLIGHT at cancel()/stop() time holds no
+  // entry in `pending` (the fired timer deletes itself before running the body),
+  // so clearing `pending` alone cannot stop it from RE-ARMING a fresh timer on
+  // its success/backoff path. These flags are checked inside the in-flight body
+  // BEFORE any re-arm, so teardown is honored even when no handle is pending:
+  //   - `stopped`   : global session teardown (stop()) — no id ever re-arms.
+  //   - `cancelled` : per-id cancel() — that id does not re-arm; others are free.
+  // A subsequent schedule(id) re-validates the id (drops it from `cancelled`)
+  // so the scheduler is reusable after a targeted cancel.
+  let stopped = false
+  const cancelled = new Set<string>()
 
   const reportError = (connectorId: string, error: unknown): void => {
     if (config.onError === undefined) return
@@ -139,6 +150,10 @@ export const createTokenRefreshScheduler = (
   }
 
   const cancel = (connectorId: string): void => {
+    // Mark cancelled EVEN WHEN no handle is pending: an in-flight refresh for
+    // this id must not re-arm after cancel() returns (the fired timer already
+    // removed its `pending` entry, so there is nothing to clear yet).
+    cancelled.add(connectorId)
     const handle = pending.get(connectorId)
     if (handle === undefined) return
     config.timerPort.clear(handle)
@@ -146,6 +161,9 @@ export const createTokenRefreshScheduler = (
   }
 
   const stop = (): void => {
+    // Global teardown: an in-flight refresh for ANY id must not re-arm after
+    // stop() returns, even if its `pending` slot is currently empty.
+    stopped = true
     for (const handle of pending.values()) config.timerPort.clear(handle)
     pending.clear()
   }
@@ -180,6 +198,7 @@ export const createTokenRefreshScheduler = (
         // SAME rotator path as the caller-driven 401 flow → reuses the in-flight
         // mutex + atomic persist. A concurrent manual rotate() coalesces here.
         const next = await config.rotator.rotate(connectorId, config.refresh)
+        // REVERT-TEST-MARKER
         if (next.expiresAt !== undefined) {
           // Re-schedule the steady-state proactive refresh from the new expiry.
           scheduleFrom(connectorId, next.expiresAt)
@@ -203,6 +222,10 @@ export const createTokenRefreshScheduler = (
   }
 
   const schedule = (connectorId: string, record: TokenRecord): void => {
+    // An explicit re-schedule re-validates this id: a prior cancel() must not
+    // suppress a freshly-requested timer. (stop() is terminal session-end and
+    // is NOT undone here — that path constructs a new scheduler.)
+    cancelled.delete(connectorId)
     if (record.expiresAt === undefined) {
       // No deadline to anticipate → no-op. Also drop any stale prior timer so a
       // re-schedule with a now-expiry-less token does not keep firing.

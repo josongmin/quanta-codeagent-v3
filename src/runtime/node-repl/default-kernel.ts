@@ -91,6 +91,9 @@ export const createDefaultNodeReplKernel = (opts: DefaultKernelOptions = {}): No
     if (home !== undefined) removeKernel(id, home)
     else removeKernel(id)
   }
+  const dropKernel = (id: KernelId): void => {
+    kernels.delete(id)
+  }
 
   return {
     async spawn(spawnOpts: NodeReplSpawnOptions): Promise<Result<KernelSpec, KernelError>> {
@@ -182,7 +185,8 @@ export const createDefaultNodeReplKernel = (opts: DefaultKernelOptions = {}): No
         pending: Promise.resolve(),
       })
       writeIfHome(spec)
-      // Reap on process death.
+      // Reap on process death — mark dead, drop the on-disk handle, and
+      // evict from the in-memory Map so dead kernels are not retained.
       void (async () => {
         try {
           await proc.exited
@@ -192,6 +196,7 @@ export const createDefaultNodeReplKernel = (opts: DefaultKernelOptions = {}): No
             k.state = "dead"
           }
           removeIfHome(id)
+          kernels.delete(id)
         }
       })()
 
@@ -205,14 +210,30 @@ export const createDefaultNodeReplKernel = (opts: DefaultKernelOptions = {}): No
     ): Promise<Result<ExecResult, KernelError>> {
       const k = kernels.get(id)
       if (k === undefined || k.state === "dead") return err({ kind: "kernel-dead", id })
+      // Pre-aborted fast path: do NOT kill a kernel that another exec
+      // currently owns. Kernels are addressed by id and reused, so killing
+      // here (before acquiring the lock) could tear a kernel out from under
+      // a concurrent exec. Acquire the lock first so this aborted call can
+      // only act on its own turn — by which point the in-flight exec has
+      // finished and released. (If the signal is *still* aborted after we
+      // own the lock we tear down; otherwise we proceed normally.)
+      const release = await acquireExecLock(k)
+      // Re-validate liveness after waiting on the lock — a concurrent
+      // teardown may have killed the kernel (state → "dead" + Map eviction)
+      // while we were queued behind the in-flight exec.
+      const live = kernels.get(id)
+      if (live === undefined || live.state === "dead") {
+        release()
+        return err({ kind: "kernel-dead", id })
+      }
       if (execOpts?.signal?.aborted === true) {
-        markDeadAndExit(k, id, removeIfHome)
+        markDeadAndExit(k, id, removeIfHome, dropKernel)
+        release()
         return err({ kind: "exec-aborted", id })
       }
-      const release = await acquireExecLock(k)
       const writeRes = writeExec(k, code)
       if (!writeRes.ok) {
-        markDead(k, id, removeIfHome)
+        markDead(k, id, removeIfHome, dropKernel)
         release()
         return err({ kind: "spawn-failed", detail: writeRes.detail })
       }
@@ -224,8 +245,8 @@ export const createDefaultNodeReplKernel = (opts: DefaultKernelOptions = {}): No
       )
       if (!readRes.ok) {
         const aborted = readRes.error === "aborted"
-        if (aborted) markDeadAndExit(k, id, removeIfHome)
-        else markDead(k, id, removeIfHome)
+        if (aborted) markDeadAndExit(k, id, removeIfHome, dropKernel)
+        else markDead(k, id, removeIfHome, dropKernel)
         release()
         return err({ kind: aborted ? "exec-aborted" : "kernel-dead", id })
       }
@@ -247,6 +268,7 @@ export const createDefaultNodeReplKernel = (opts: DefaultKernelOptions = {}): No
       }
       k.state = "dead"
       removeIfHome(id)
+      kernels.delete(id)
     },
 
     list(): ReadonlyArray<KernelListing> {
@@ -274,25 +296,49 @@ const writeStdin = (k: LiveKernel, s: string): { ok: true } | { ok: false; detai
   }
 }
 
-const markDead = (k: LiveKernel, id: KernelId, removeIfHome: (id: KernelId) => void): void => {
+/** Terminate the live child + tear down its handle. Mirrors `kill()`:
+ *  flips state to `dead`, kills the OS process (so the piped stdin/stdout/
+ *  stderr fds are reaped and the `proc.exited` promise resolves), removes
+ *  the on-disk handle, and evicts the entry from the in-memory Map so dead
+ *  kernels are never retained. Without the `k.proc.kill()` the timeout /
+ *  write-failure paths would orphan a live `node -i` child forever (the
+ *  reaper parks on `proc.exited`, which never resolves on its own). */
+const markDead = (
+  k: LiveKernel,
+  id: KernelId,
+  removeIfHome: (id: KernelId) => void,
+  dropKernel: (id: KernelId) => void,
+): void => {
   k.state = "dead"
+  try {
+    k.proc.kill()
+  } catch {
+    /* already dead */
+  }
   removeIfHome(id)
+  dropKernel(id)
 }
 
 /** Sibling to `markDead` — additionally issues `.exit` on stdin so the
- *  spawned REPL terminates promptly when the caller's signal aborted. */
+ *  spawned REPL terminates gracefully when the caller's signal aborted,
+ *  then falls through to the same teardown (kill + handle removal + Map
+ *  eviction). */
 const markDeadAndExit = (
   k: LiveKernel,
   id: KernelId,
   removeIfHome: (id: KernelId) => void,
+  dropKernel: (id: KernelId) => void,
 ): void => {
-  // Best-effort — a dead pipe just no-ops.
+  // Best-effort graceful exit — a dead pipe just no-ops.
   writeStdin(k, ".exit\n")
-  markDead(k, id, removeIfHome)
+  markDead(k, id, removeIfHome, dropKernel)
 }
 
-/** Mutex acquire — sets state to `running` once the prior exec's tail
- *  resolves and returns a release fn the caller invokes on completion. */
+/** Mutex acquire — once the prior exec's tail resolves, transition to
+ *  `running` and return a release fn the caller invokes on completion.
+ *  Fail-closed: if a concurrent teardown killed the kernel while we were
+ *  queued behind the prior exec, do NOT resurrect it to `running` — leave
+ *  it `dead` so the caller's post-lock liveness check returns kernel-dead. */
 const acquireExecLock = async (k: LiveKernel): Promise<() => void> => {
   const prev = k.pending
   let release!: () => void
@@ -301,7 +347,7 @@ const acquireExecLock = async (k: LiveKernel): Promise<() => void> => {
   })
   k.pending = prev.then(() => next)
   await prev
-  k.state = "running"
+  if (k.state !== "dead") k.state = "running"
   return release
 }
 

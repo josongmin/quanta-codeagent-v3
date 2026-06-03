@@ -3,7 +3,7 @@ title: JSON-RPC 2.0 envelope + -timeout 채널 (ADR-0033)
 section: 9
 subsystem: Shared / JSON-RPC
 order: 9
-maturity: L4
+maturity: L2
 status: stable
 ui_surfaces: [api]
 monitoring: n-a

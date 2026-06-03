@@ -479,8 +479,15 @@ const projectAdr0291Slots = (s: ReplSlashCtx): Record<string, unknown> => ({
 /** Map the surface-owned {@link ReplSlashCtx} into the contract shape that
  *  {@link runSlashCommand} expects. Extracted from {@link dispatchReplSlash}
  *  so the dispatcher stays under biome's cognitive-complexity budget —
- *  every adapter is a 1:1 spread, no branching beyond "absent ⇒ omit". */
-const projectSlashCtx = (slashCtx: ReplSlashCtx | undefined): Record<string, unknown> => {
+ *  every adapter is a 1:1 spread, no branching beyond "absent ⇒ omit".
+ *
+ *  SSOT — this is the ONE projector both the test-harness {@link dispatchReplSlash}
+ *  AND the live REPL path (`buildSurfaceDispatch` in `surface-compose.ts`)
+ *  funnel through. `surface-compose.ts` imports this and layers its
+ *  ADR-0292/0294 augmentations (`convCheckpoint`, `sessionIo`, …) on top, so
+ *  the legacy + ADR-0291 slot projection can never drift out of byte-sync
+ *  between the two files. */
+export const projectSlashCtx = (slashCtx: ReplSlashCtx | undefined): Record<string, unknown> => {
   if (slashCtx === undefined) return {}
   return { ...projectLegacySlots(slashCtx), ...projectAdr0291Slots(slashCtx) }
 }

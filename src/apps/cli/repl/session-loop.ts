@@ -1,6 +1,6 @@
 import type { AgentConfig, AgentOutcome } from "@/agent"
 import { startAutomationEngineTicker } from "@/agent/loop-helpers"
-import type { Message } from "@/llm"
+import type { Message, TextBlock } from "@/llm"
 import { buildAutorunEligibility } from "@/permission"
 import { injectSimulatedTurn, type LastTurnOutcome, REACTOR_ENV_FLAG } from "@/reactor"
 import { assembleAutomation } from "@/scheduler/runtime-wire"
@@ -12,14 +12,17 @@ import type {
 import { errMessage, logger } from "@/shared"
 import type { PlaybookPlanQueueSink } from "@/skill/playbook"
 import { startReactorWatchBridge } from "../reactor-watch-bridge"
+import { type AwaySummaryWireHandle, maybeCreateAwaySummaryWire } from "./away-summary-wire"
 import type { ConvCheckpointWire } from "./conv-checkpoint-wire"
 import { ExternalPromptQueue } from "./external-prompt-queue"
+import { maybeCreateNdjsonSinkWire } from "./ndjson-wire"
 import type { PlaybookTriggerSurfaceSeam } from "./playbook-trigger-surface-seam"
 import {
   maybeStartPlaybookTriggerWire,
   type PlaybookTriggerWireHandle,
 } from "./playbook-trigger-wire"
 import { composePromptPipeline, type DispatchSlash } from "./prompt-pipeline"
+import { maybeCreatePromptSuggestionWire } from "./prompt-suggestion-wire"
 import { normalizeCliPromptInput } from "./prompt-types"
 import type { SessionSetupResult } from "./session-setup"
 import { type SessionState, updateSessionState } from "./session-state"
@@ -185,6 +188,34 @@ const notifyTurnComplete = (
     ok: out.result !== undefined && !out.turnAborted,
     cwdBasename,
   })
+}
+
+/** ADR-0465 — when the user returns after an idle gap, render a <40-word recap
+ *  of the transcript-so-far. Free function so the interactive loop stays inside
+ *  its complexity budget. NO-OP (zero LLM) unless `wasIdle` AND the away-summary
+ *  wire is active (env opt-in). NEVER throws — `recap()` is no-throw and only a
+ *  `{kind:"ok"}` outcome renders (every skip stays silent by design). */
+const renderAwayRecapIfReturned = async (
+  awaySummary: AwaySummaryWireHandle,
+  wasIdle: boolean,
+  history: readonly Message[],
+  signal: AbortSignal,
+): Promise<void> => {
+  if (!wasIdle || !awaySummary.isActive()) return
+  const transcript = history
+    .filter(
+      (m): m is Message & { role: "user" | "assistant" } =>
+        m.role === "user" || m.role === "assistant",
+    )
+    .map((m) => ({
+      role: m.role,
+      text: m.content
+        .filter((b): b is TextBlock => b.type === "text")
+        .map((b) => b.text)
+        .join(""),
+    }))
+  const outcome = await awaySummary.recap({ transcript, signal })
+  if (outcome.kind === "ok") process.stderr.write(`\n${outcome.text}\n\n`)
 }
 
 /** RFC-09 — build the optional prompt-pipeline deps (A idle notify + B warning
@@ -364,12 +395,11 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
       model: setup.model,
       // RFC-08 / ADR-0443 — when the mode-cycle store is wired, its CURRENT
       // posture seeds the session's permissionMode; otherwise the runtime
-      // default. NOTE (honest limitation): `createSession` runs ONCE per REPL
-      // session (the turn loop reuses the one session), and RuntimeContext
-      // exposes permissionMode as a getter only — so a mid-session shift+tab
-      // repaints the pill instantly but the NEW permission applies only to the
-      // next freshly-created session, not the next turn of THIS one. A true
-      // per-turn apply needs a runtime setter seam (deferred — see RFC-08 §2).
+      // default. ADR-0303 closed the former "applies only next session" gap:
+      // `permissionModeState` is now an engine-owned cell behind
+      // `permission.mode`'s accessor, and `runSessionTurn` syncs the latest
+      // posture into it BEFORE each turn — so a mid-session shift+tab applies on
+      // the very next turn, read live by the admissibility gate.
       permissionMode: ux?.modeCycle?.current().permissionMode ?? runtimeContext.permissionMode(),
       ...(activeIdentityModeState !== undefined
         ? { identityMode: activeIdentityModeState.get() }
@@ -514,6 +544,15 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
   }> => {
     const { nextState, images } = drainTurnImages(surfaceState, args.images ?? [])
     surfaceState = nextState
+    // ADR-0303 — a mid-session `shift+tab` updates the slash-local mode-cycle
+    // pill instantly; sync its posture into the engine-owned
+    // `permissionModeState` BEFORE this turn so the admissibility gate reads the
+    // new mode LIVE (not only at the next `createSession`). The store is the UI
+    // input; the engine is the authority. No-op (byte-identical) when the cycle
+    // is not wired (`QUANTA_MODE_CYCLE` unset) or the host wired no state.
+    if (ux?.modeCycle !== undefined) {
+      runtimeContext.permissionModeState()?.set(ux.modeCycle.current().permissionMode)
+    }
     await session.input.append(args.text, images.length > 0 ? { images } : undefined, {
       signal: args.turnSignal,
     })
@@ -655,10 +694,26 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
       closeStack.push({ label: "reactorBridge.close", dispose: () => reactorBridge.close() })
     }
 
+    // ADR-0465 — away-summary recap wire. Default-OFF: NOOP handle + zero LLM
+    // unless QUANTA_ENABLE_AWAY_SUMMARY === "1".
+    const awaySummary = maybeCreateAwaySummaryWire({ env: process.env, llm: setup.llm })
+    // ADR-0468 — NDJSON live-introspection sink. Default-OFF: NullNdjsonSink
+    // (no socket/file/alloc) unless QUANTA_NDJSON_INGEST_PORT / _FILE is set.
+    const ndjson = maybeCreateNdjsonSinkWire({ env: process.env, logger })
+    closeStack.push({ label: "ndjson.stop", dispose: () => ndjson.stop() })
+    // ADR-0467 — prompt-suggestion wire. Default-OFF: null (zero LLM, zero
+    // render) unless QUANTA_ENABLE_PROMPT_SUGGESTION === "1".
+    const promptSuggestion = maybeCreatePromptSuggestionWire(process.env, setup.llm, (text) =>
+      process.stderr.write(`\x1b[2m${text}\x1b[0m\n`),
+    )
     const runInteractiveBranch = async (): Promise<void> => {
       while (abort.signal.aborted !== true) {
+        // Read idle state BEFORE next() resolves — the prompt pipeline marks
+        // active inside next(), so this captures "user was away".
+        const wasIdle = setup.idleMonitor.isIdle()
         const next = await promptSource.next(abort.signal)
         if (next === null) break
+        await renderAwayRecapIfReturned(awaySummary, wasIdle, surfaceState.history, abort.signal)
         const prompt = normalizeCliPromptInput(next)
         const out = await runOneTurn<{
           readonly messages: readonly Message[]
@@ -689,6 +744,13 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
                 } as AgentOutcome)
               }
               recordTurnSnapshot(result.messages)
+              // ADR-0468 — mirror the turn boundary to the introspection sink.
+              // No-op (no alloc) when the sink is the default-OFF NullNdjsonSink.
+              ndjson.sink.emit({
+                type: "turn.complete",
+                ts: Date.now(),
+                messageCount: result.messages.length,
+              })
             },
             onError: sinks.renderTurnError,
           },
@@ -699,6 +761,24 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
         }
         // RFC-09 (A) — turn-completion notify (interactive path).
         notifyTurnComplete(notify, out, notifyCwdBasename ?? "")
+        // ADR-0467 — prompt suggestion (pre-next-prompt). No-op when the wire
+        // is null (default-OFF). No-throw: run() always resolves.
+        await promptSuggestion?.run({
+          messages: surfaceState.history,
+          // The suppression-context view is conservative: the CLI session loop
+          // exposes no live plan-mode / rate-limit / elicitation / pending-
+          // permission signal here, so all four are `false`. This only widens
+          // when (not whether) a suggestion shows — the reject-gate (the crown
+          // jewel) still vets every model output fully. Thread real signals here
+          // if the surface starts tracking them.
+          state: {
+            planMode: false,
+            rateLimited: false,
+            elicitationActive: false,
+            pendingPermission: false,
+          },
+          signal: abort.signal,
+        })
       }
     }
 

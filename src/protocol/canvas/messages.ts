@@ -156,6 +156,9 @@ export const decodeCanvasFrame = (raw: unknown): CanvasMessage | null => {
   const rec = parsed as Record<string, unknown>
   if (rec.kind !== "canvas") return null
   if (typeof rec.version !== "string" || rec.version.length === 0) return null
+  // Gate the protocol version we claim to carry: a v2 emitter to a v1 consumer
+  // would otherwise be read with the wrong schema and silently mis-rendered.
+  if (rec.version !== CANVAS_PROTOCOL_VERSION) return null
   if (!isCanvasMessage(rec.payload)) return null
   return rec.payload
 }

@@ -3,7 +3,7 @@ title: Distributed OAuth refresh lock (port + 3 impls + fallback chain)
 section: 8
 subsystem: Authentication — distributed coordination
 order: 7
-maturity: L4
+maturity: L2
 status: stable
 ui_surfaces: [n-a]
 monitoring: n-a

@@ -307,6 +307,8 @@ const RULES: readonly Rule[] = [
         "Web-fetch abort timer default (60s) at CLI sub-command boundary — surface composition root.",
       "migration/persistence.ts":
         "FALSE POSITIVE — `DEFAULT_LOCK_STALE_MS = 5 * 60_000` IS a named UPPER_SNAKE_CASE const; the regex's negative-lookbehind only fires when the literal IMMEDIATELY follows `=`, so the arithmetic form trips it. The value is named + documented inline.",
+      "connectors/token-refresh-scheduler.ts":
+        "FALSE POSITIVE — `BACKOFF_MAX_MS = 5 * 60_000` IS a named UPPER_SNAKE_CASE const with a documented backoff rationale (lines 74-78); identical arithmetic-form false positive as migration/persistence.ts — the lookbehind only fires for a literal IMMEDIATELY after `=`.",
       "mcp/reconnect/policy.ts":
         "DEFAULT_BACKOFF_POLICY — every timing value is a field of a single named/frozen policy const with an inline comment tracing it to the Cursor source; same documented-inline posture as plugin-isolation/lifecycle.ts.",
       "browser/cdp-adapter.ts":

@@ -3,7 +3,7 @@ title: ADR-0132 cloud-agent branch snapshot (force-with-lease only)
 section: 9
 subsystem: Reactor / proactive wake (ADR-0132)
 order: 132
-maturity: L4
+maturity: L2
 status: stable
 ui_surfaces: [n-a]
 monitoring: n-a

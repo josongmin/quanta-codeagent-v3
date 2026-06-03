@@ -3,7 +3,7 @@ title: LLM Provider Phase 2 (Bedrock + Vertex real stream)
 section: 9
 subsystem: LLM provider fork (ADR-0139)
 order: 203
-maturity: L4
+maturity: L2
 status: stable
 ui_surfaces: [n-a]
 monitoring: n-a

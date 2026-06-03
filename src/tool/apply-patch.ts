@@ -28,11 +28,17 @@
 import * as nodeFs from "node:fs/promises"
 import * as path from "node:path"
 import { z } from "zod"
-import { type ApplyResult, applyPatch, type PatchFileSystemPort, parsePatch } from "@/patch"
+import {
+  type ApplyResult,
+  applyPatch,
+  type Patch,
+  type PatchFileSystemPort,
+  parsePatch,
+} from "@/patch"
 import { errMessage } from "@/shared"
 import { FsJailError, resolveJailed } from "@/storage"
 import { classifyFastApplyError, failingTargetPath } from "./apply-patch-fallback-wire"
-import type { FastApplyFallbackSeam, Tool, ToolContext, ToolEvent } from "./types"
+import type { FastApplyFallbackSeam, GitWriteGuard, Tool, ToolContext, ToolEvent } from "./types"
 /**
  * Raised when a `FsJailFileSystemPort` operation resolves to a path outside
  * the jail root. Distinct from `@/storage/FsJailError` so callers can
@@ -176,6 +182,48 @@ const schema = z.object({
 type Input = z.infer<typeof schema>
 
 /**
+ * ADR-0091 git-write-protection for `apply_patch`. A V4A patch is a multi-file
+ * workspace mutation, so EVERY target path the patch would create / overwrite /
+ * delete / move-to is a potential code-execution / policy-escape vector exactly
+ * as for `write`/`edit`/`scripted_replace`. The parser yields a typed op union;
+ * we scan its targets:
+ *
+ *   - `add`    → `op.path`              (file created — `*** Add File:`)
+ *   - `delete` → `op.path`              (file removed — `*** Delete File:`)
+ *   - `update` → `op.path` (+ `moveTo`) (file edited — `*** Update File:`,
+ *                                         and the rename DESTINATION when
+ *                                         `*** Move to:` is present)
+ *
+ * The `moveTo` destination MUST be guarded independently: a patch could update
+ * a benign file and rename it ONTO `.git/hooks/pre-commit`. Returns the FIRST
+ * guarded target's denial `ToolEvent` (deterministic — ops in patch order),
+ * mirroring `gitWriteGuardDeny`'s single source of truth so the model-facing
+ * `output` and typed `permission_denied` failure are byte-identical to the
+ * write/edit/scripted_replace path. Returns `null` when the guard is unwired
+ * (DEFAULT-OFF) or no target is an escape vector — the apply proceeds normally.
+ */
+function guardPatchTargets(patch: Patch, guard: GitWriteGuard | undefined): ToolEvent | null {
+  if (guard === undefined) return null
+  for (const op of patch.ops) {
+    const targets = op.kind === "update" && op.moveTo !== undefined ? [op.path, op.moveTo] : [op.path]
+    for (const target of targets) {
+      const reason = guard(target)
+      if (reason != null) {
+        return {
+          type: "result",
+          result: {
+            ok: false,
+            output: `git-escape-vector denial: cannot apply_patch to ${target} (${reason}); use a different path`,
+            failure: { mode: "permission_denied", path: target },
+          },
+        }
+      }
+    }
+  }
+  return null
+}
+
+/**
  * Format an `ApplyResult` into a deterministic single-string summary the
  * dispatch seam surfaces back to the model. The order is stable:
  * added → updated → moved → deleted. Empty categories are omitted.
@@ -192,23 +240,37 @@ function formatApplyResult(r: ApplyResult): string {
 }
 
 /**
- * Parse + apply a V4A patch text against the port. THROWS the canonical typed
- * errors (`PatchParseError` / `PatchApplyError` / `PatchAnchorNotFoundError` /
- * `FsJailViolationError`) on failure — exactly the pre-ADR-0421 contract. The
- * fallback retry in `execute` wraps this; on the happy path it is the only
- * thing that runs (byte-identical when no fallback port is attached).
+ * Parse + git-write-guard + apply a V4A patch text against the port. THROWS the
+ * canonical typed errors (`PatchParseError` / `PatchApplyError` /
+ * `PatchAnchorNotFoundError` / `FsJailViolationError`) on failure — exactly the
+ * pre-ADR-0421 contract. NO silent catch, NO graceful skip.
+ *
+ * Returns `{ guardDeny }` (a terminal `permission_denied` ToolEvent) when ANY
+ * target path is an ADR-0091 git-escape vector — surfaced verbatim by the
+ * caller, NEVER applied (hard-stop BEFORE `applyPatch`, never a partial mutate).
+ * Otherwise returns `{ result }`. This is the SINGLE chokepoint shared by the
+ * primary patch and the fast-apply fallback re-emit — both are guarded, so a
+ * model cannot re-emit a patch that targets `.git/hooks/**` to slip past.
+ *
+ * No observer argument: the patch slice owns OTel emission on its own
+ * (ADR-0028 `quanta.patch.op` + `quanta.patch.fuzzy_match_tier` are wired
+ * inside `applier.ts`, which keeps `@/tool/apply-patch` free of
+ * `@/observability` and respects the `@/tool/**` slice-isolation fence).
  */
-async function parseAndApply(patchText: string, port: PatchFileSystemPort): Promise<ApplyResult> {
+async function guardedParseAndApply(
+  patchText: string,
+  port: PatchFileSystemPort,
+  guard: GitWriteGuard | undefined,
+): Promise<{ guardDeny: ToolEvent } | { result: ApplyResult }> {
   // parsePatch throws PatchParseError on grammar violation — propagate.
+  const patch = parsePatch(patchText)
+  // Guard EVERY target BEFORE any filesystem mutation (hard-stop posture).
+  const guardDeny = guardPatchTargets(patch, guard)
+  if (guardDeny) return { guardDeny }
   // applyPatch throws PatchApplyError / PatchAnchorNotFoundError on apply
   // failure — propagate. FsJailFileSystemPort throws FsJailViolationError
-  // on boundary breach — propagate. NO silent catch, NO graceful skip.
-  const patch = parsePatch(patchText)
-  // No observer argument: the patch slice owns OTel emission on its own
-  // (ADR-0028 `quanta.patch.op` + `quanta.patch.fuzzy_match_tier` are wired
-  // inside `applier.ts`, which keeps `@/tool/apply-patch` free of
-  // `@/observability` and respects the `@/tool/**` slice-isolation fence).
-  return applyPatch(patch, port)
+  // on boundary breach — propagate.
+  return { result: await applyPatch(patch, port) }
 }
 
 /**
@@ -226,6 +288,7 @@ async function tryFastApplyFallback(
   port: PatchFileSystemPort,
   fallback: FastApplyFallbackSeam,
   signal: AbortSignal,
+  guard: GitWriteGuard | undefined,
 ): Promise<{ result: ApplyResult; modelUsed?: string } | null> {
   const errorKind = classifyFastApplyError(originalError)
   // FsJailViolationError + any non-patch error are not re-emittable — a model
@@ -266,8 +329,13 @@ async function tryFastApplyFallback(
 
   // Re-run the V4A applier ONCE with the re-emitted patch. A retry that also
   // fails surfaces the ORIGINAL error (caller re-throws it), never the retry's.
+  // The re-emitted patch is git-write-guarded the SAME as the primary: a model
+  // MUST NOT be able to slip a `.git/hooks/**` target through the fallback. A
+  // guarded re-emit is treated as a non-rescue (return null ⇒ original error).
   try {
-    const result = await parseAndApply(attempt.newPatch, port)
+    const applied = await guardedParseAndApply(attempt.newPatch, port, guard)
+    if ("guardDeny" in applied) return null
+    const { result } = applied
     return attempt.modelUsed !== undefined ? { result, modelUsed: attempt.modelUsed } : { result }
   } catch {
     return null
@@ -289,14 +357,25 @@ export const applyPatchTool: Tool<Input> = {
 
   async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const port = new FsJailFileSystemPort({ jailRoot: ctx.cwd })
+    // ADR-0091 git-write-protection: guard EVERY target path the patch would
+    // create/overwrite/delete/move-to BEFORE any filesystem mutation. A V4A
+    // patch can target `.git/hooks/**`, `.git/config`, `.vscode/**` etc.
+    // exactly like `write`/`edit`/`scripted_replace`; without this it bypassed
+    // the guard those tools enforce. Default-OFF: `ctx.gitWriteGuard` unwired ⇒
+    // `guardPatchTargets` returns null and the path is byte-identical.
+    const guard = ctx.gitWriteGuard
 
     // Default-OFF fast path: no fallback port attached ⇒ the parse + apply
     // throws its typed error straight to the dispatch seam, byte-identical to
     // the pre-ADR-0421 contract (NO catch, NO fallback attempt).
     const fallback = ctx.fastApplyFallback
     if (fallback === undefined) {
-      const result = await parseAndApply(input.patch, port)
-      yield { type: "result", result: { ok: true, output: formatApplyResult(result) } }
+      const applied = await guardedParseAndApply(input.patch, port, guard)
+      if ("guardDeny" in applied) {
+        yield applied.guardDeny
+        return
+      }
+      yield { type: "result", result: { ok: true, output: formatApplyResult(applied.result) } }
       return
     }
 
@@ -305,10 +384,14 @@ export const applyPatchTool: Tool<Input> = {
     // the ORIGINAL typed error (NOT the retry's) so callers see unchanged
     // failure semantics (ADR-0421).
     try {
-      const result = await parseAndApply(input.patch, port)
-      yield { type: "result", result: { ok: true, output: formatApplyResult(result) } }
+      const applied = await guardedParseAndApply(input.patch, port, guard)
+      if ("guardDeny" in applied) {
+        yield applied.guardDeny
+        return
+      }
+      yield { type: "result", result: { ok: true, output: formatApplyResult(applied.result) } }
     } catch (err) {
-      const rescued = await tryFastApplyFallback(input.patch, err, port, fallback, ctx.signal)
+      const rescued = await tryFastApplyFallback(input.patch, err, port, fallback, ctx.signal, guard)
       if (rescued === null) throw err
       const note =
         rescued.modelUsed !== undefined

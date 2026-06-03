@@ -3,7 +3,7 @@ title: PortableSessionV1 export/import — surface round-trip schema
 section: 9
 subsystem: IPC session round-trip (Claude A11 absorption)
 order: 36
-maturity: L4
+maturity: L2
 status: new
 ui_surfaces: [api]
 monitoring: integrated

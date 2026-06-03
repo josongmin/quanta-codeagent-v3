@@ -393,6 +393,27 @@ export class OpenAIAdapter implements LLMPort {
             ? { prompt_cache_retention: promptCacheRetention }
             : {}),
           ...(toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
+          // ADR-0469 — Structured Outputs passthrough. Present ⇒ spread the
+          // OpenAI `response_format:{type:"json_schema",…}` param; absent ⇒
+          // OMIT the field entirely (byte-identical to the pre-feature wire).
+          // `strict` is conditionally nested so omitting it on the request
+          // omits it on the wire (exactOptionalPropertyTypes honest). The
+          // shape mirrors the SDK 1:1 so no translation layer is needed; the
+          // pure builder + validator live in `../structured-output.ts`.
+          ...(input.responseFormat !== undefined
+            ? {
+                response_format: {
+                  type: "json_schema" as const,
+                  json_schema: {
+                    name: input.responseFormat.name,
+                    schema: input.responseFormat.schema,
+                    ...(input.responseFormat.strict !== undefined
+                      ? { strict: input.responseFormat.strict }
+                      : {}),
+                  },
+                },
+              }
+            : {}),
         },
         // Caller cancellation: the SDK request-options `signal` aborts the
         // underlying fetch — covers the create()/TTFT phase that the stream

@@ -172,15 +172,6 @@ export const mcpToolToToolSupervised = (
   }
 }
 
-/** Opt-in knobs for {@link loadMcpTools}. Omitting all of them is byte-identical
- *  to the pre-ADR-0435 behavior. */
-export interface LoadMcpToolsOpts {
-  /** Inject auto-restart (ADR-0435). When provided, each server is wrapped in a
-   *  {@link McpReconnectSupervisor} and bridged via {@link mcpToolToToolSupervised}.
-   *  Omitting it keeps today's single-client code path unchanged. */
-  supervisorDepsFor?: (config: McpServerConfig) => SupervisorDeps
-}
-
 /** A handle the CLI can `stop()` on shutdown. Both `McpClient` and
  *  `McpReconnectSupervisor` satisfy it. */
 export interface McpStoppable {
@@ -210,11 +201,19 @@ export interface McpStoppable {
  * supervisors (which expose a compatible `stop()`). Without it, the original
  * single-client path runs unchanged.
  */
+/** Opt-in knobs for {@link loadMcpTools}. Omitting all of them is byte-identical
+ *  to the pre-ADR-0435 behavior. */
 export interface LoadMcpToolsOpts {
-  /** Construct the transport for a server (test double / custom carrier). */
+  /** ADR-0431 — construct the transport for a server (test double / custom
+   *  carrier). A test seam mirroring `McpClient`'s `transport` option. Absent ⇒
+   *  the client builds its default carrier (stdio / HTTP-SSE per config),
+   *  byte-identical to the legacy load. */
   transportFor?: (config: McpServerConfig) => McpClientTransport
-  /** ADR-0435 — per-server supervisor deps. When present, the server is wrapped
-   *  in an auto-restart supervisor; absent ⇒ the byte-identical single-client path. */
+  /** ADR-0435 — per-server supervisor deps. When present, each server is
+   *  wrapped in an auto-restart {@link McpReconnectSupervisor} and bridged via
+   *  {@link mcpToolToToolSupervised}; the returned `clients` then hold the
+   *  supervisors (compatible `stop()`). Absent ⇒ the byte-identical
+   *  single-client path. */
   supervisorDepsFor?: (config: McpServerConfig) => SupervisorDeps
 }
 

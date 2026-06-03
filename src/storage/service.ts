@@ -67,6 +67,39 @@ type FsJailDecisionSink = (event: FsJailDecisionEvent) => void
 
 let fsJailDecisionSink: FsJailDecisionSink | null = null
 
+/**
+ * ADR-0269 — SINGLE SOURCE OF TRUTH for the `kind:"jail"` decision-event shape.
+ *
+ * Both this slice's {@link emitJailDeny} (the actual emit chokepoint) AND the
+ * `@/agent` re-export `buildJailDecisionEvent` (for agent-slice consumers that
+ * legally hold a `@/stream` `DecisionEmitter`) produce the jail event through
+ * THIS builder, so the categorical `reason` / `metadata` shape can never drift
+ * between the two construction sites.
+ *
+ * The builder lives HERE (not in `@/agent`) because the slice fence forbids
+ * `@/storage` from importing `@/agent` / `@/stream` (it would create an
+ * `agent → storage` cycle the slice-graph validator rejects). `@/agent` legally
+ * imports `@/storage`, so the dependency points the allowed direction: the
+ * agent builder DELEGATES to this one and re-casts the result to the
+ * structurally-identical `@/stream` `DecisionEvent`.
+ *
+ * `path` is the canonicalized OFFENDING absolute path: the user supplied it
+ * (so disclosure is already user-known) AND it was REJECTED, so the event does
+ * NOT expose the file's contents. `turn` is `0` — the jail chokepoint is a
+ * free function with no turn context; a tracer disambiguates by the categorical
+ * `path` in `metadata`. */
+export const buildFsJailDecisionEvent = (args: {
+  readonly path: string
+  readonly root: string
+}): FsJailDecisionEvent => ({
+  type: "decision",
+  turn: 0,
+  kind: "jail",
+  outcome: "deny",
+  reason: `path outside workspace: ${args.path}`,
+  metadata: { path: args.path, root: args.root },
+})
+
 /** Wire the process-level fs-jail decision sink. The sink fires once per
  *  `enforceJail` rejection (i.e. once per FsJailError throw). The composition
  *  root is responsible for calling {@link clearFsJailDecisionSink} at the
@@ -90,15 +123,9 @@ export const clearFsJailDecisionSink = (): void => {
 const emitJailDeny = (offendingPath: string, jailRoot: string): void => {
   if (fsJailDecisionSink === null) return
   try {
-    const event: FsJailDecisionEvent = {
-      type: "decision",
-      turn: 0,
-      kind: "jail",
-      outcome: "deny",
-      reason: `path outside workspace: ${offendingPath}`,
-      metadata: { path: offendingPath, root: jailRoot },
-    }
-    fsJailDecisionSink(event)
+    // SSOT — construct via the shared builder so the emitted shape can never
+    // drift from the `@/agent` `buildJailDecisionEvent` re-export.
+    fsJailDecisionSink(buildFsJailDecisionEvent({ path: offendingPath, root: jailRoot }))
   } catch {
     // Observational sink — never propagate a consumer failure into the
     // gate. The gate's deny posture MUST stay stable (the throw below is

@@ -35,6 +35,7 @@ import { StructuredLogger } from "@/observability"
 import type { PermissionContext } from "@/permission"
 import {
   createIdentityModeSessionState,
+  createPermissionModeSessionState,
   createSystemSource,
   createToolProfileSessionState,
   type IdentityModeSessionState,
@@ -230,7 +231,23 @@ export const bootstrapSession = async (
 ): Promise<SessionBootstrapResult> => {
   const slog = new StructuredLogger()
   const { idleMonitor, rejectCounter } = deps.buildIdleGuards(runtime)
-  const permission: PermissionContext = { mode: runtime.mode }
+  // ADR-0303 — the permission posture is engine-owned mutable state, not a
+  // slash-local mirror. `permission.mode` is an ACCESSOR over
+  // `permissionModeState`, so when a surface mutates the posture mid-session
+  // (CLI `shift+tab` mode-cycle → `RuntimeContext.permissionModeState().set()`)
+  // the change is read LIVE by the very next turn's admissibility gate — every
+  // existing `permission.mode` reader (snapshot getter, per-turn base spread,
+  // `describe()`) observes the new value with no hot-path change. Seeded from
+  // `runtime.mode` so the default path is byte-identical.
+  const permissionModeState = createPermissionModeSessionState({ defaultMode: runtime.mode })
+  const permission: PermissionContext = {
+    get mode() {
+      return permissionModeState.get()
+    },
+    set mode(next) {
+      permissionModeState.set(next)
+    },
+  }
   const abort = new AbortController()
   const effortStore = createEffortStore(parseEffort(runtime.env.QUANTA_EFFORT) ?? "default")
   let finalLLM: LLMPort
@@ -372,6 +389,7 @@ export const bootstrapSession = async (
       cwd,
       slog,
       permission,
+      permissionModeState,
       idleMonitor,
       rejectCounter,
       effortStore,

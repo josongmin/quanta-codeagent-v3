@@ -84,6 +84,44 @@ const main = async (): Promise<void> => {
     process.exit(code)
   }
 
+  // ADR-0463 — `quanta batch …` CSV row-fan-out subcommand. Default-OFF: inert
+  // unless the `batch` subcommand is explicitly typed (a bare `quanta` run never
+  // reaches this). Assembles a parent AgentConfig via the SAME buildBaseFromArgs
+  // the agent app uses, builds the real SubagentRunner, and runs one child agent
+  // loop per CSV row. Dynamic imports keep the heavy agent-assembly out of the
+  // common startup path.
+  if (process.argv[2] === "batch") {
+    const batchArgv = process.argv.slice(3)
+    const { runBatchCmd } = await import("./batch-cmd")
+    // `--help` renders usage WITHOUT assembling the (API-key-requiring) parent
+    // config: runBatchCmd returns on help before it ever calls the runner, so
+    // the stub is genuinely never invoked.
+    if (batchArgv.includes("--help") || batchArgv.includes("-h")) {
+      process.exit(
+        await runBatchCmd(batchArgv, {
+          runner: () => Promise.reject(new Error("unreachable: batch --help")),
+        }),
+      )
+    }
+    const ac = new AbortController()
+    const onSig = () => ac.abort()
+    process.on("SIGINT", onSig)
+    process.on("SIGTERM", onSig)
+    const [{ parseAgentArgs }, { buildBaseFromArgs, toAssembleRequest }, { createSubagentRunner }] =
+      await Promise.all([import("../agent/cli-args"), import("../agent"), import("@/agent")])
+    // A headless parent config is enough to build the row-dispatch SubagentRunner
+    // (batch never enters the parent's own agent loop — each row is a child).
+    const base = buildBaseFromArgs(
+      toAssembleRequest(parseAgentArgs(["--mode", "headless"])),
+      ac.signal,
+    )
+    const runner = createSubagentRunner(base)
+    const code = await runBatchCmd(batchArgv, { runner })
+    process.off("SIGINT", onSig)
+    process.off("SIGTERM", onSig)
+    process.exit(code)
+  }
+
   // Tier-2 absorption #2-1: built-in slash commands short-circuit BEFORE any
   // LLM / session plumbing. The gate matches only `/<letter>...` so legacy
   // path-mode resume arguments and bare `--flag` invocations still fall

@@ -49,6 +49,14 @@ import type { SubagentRequest, SubagentRunner } from "./types"
  *  error with cause:"pty_cap". */
 export const MAX_PTY = 32
 
+/** (d) Built-in recursion-depth ceiling for `spawn_agent` — applied when
+ *  NEITHER `input.maxDepth` NOR `deps.maxDepth` is supplied, so the fan-out
+ *  path is never fail-open unbounded. Mirrors `subagent-runner`'s
+ *  `DEFAULT_MAX_DEPTH` (kept as a local literal to honor the slice fence —
+ *  handlers-6 imports no `@/agent` code). A child whose depth exceeds this is
+ *  rejected with `cause:"depth_exceeded"`. */
+export const DEFAULT_MAX_DEPTH = 3
+
 /** Soft default for `wait_agent` blocking timeouts. Mirrors `task_output`'s
  *  30s upper bound; callers can override via `timeoutMs`. */
 const DEFAULT_WAIT_AGENT_TIMEOUT_MS = 30_000
@@ -188,8 +196,27 @@ export class PtyTable {
 
 // ─── exec_command ──────────────────────────────────────────────────────────
 
+/** Injected path-jail port so `exec_command`'s model-supplied `cwd` cannot
+ *  escape the session workspace. Structurally the `resolveJailed(requested,
+ *  jailRoot)` contract (`@/storage`): returns the resolved absolute path,
+ *  THROWS on a jail escape. Injected (closed port) so this slice keeps its
+ *  fence — handlers-6 imports no storage code; the composition root wires the
+ *  real `resolveJailed`. Absent ⇒ NO jail (byte-identical legacy path) — the
+ *  port is opt-in so existing callers that never wired a workspace root stay
+ *  unchanged. Present ⇒ a cwd outside `jailRoot` is rejected fail-closed with
+ *  `cause:"cwd_outside_workspace"` BEFORE any process is spawned. */
+interface CwdJailPort {
+  /** Resolve `requested` against `jailRoot`; throw when it escapes the jail. */
+  readonly resolve: (requested: string, jailRoot: string) => string
+  /** The workspace root the child `cwd` is confined to (the session cwd). */
+  readonly jailRoot: string
+}
+
 interface ExecCommandDeps {
   ptyTable?: PtyTable
+  /** Confine `input.cwd` to the session workspace before spawning. Absent ⇒
+   *  no jail (legacy). See {@link CwdJailPort}. */
+  cwdJail?: CwdJailPort
 }
 
 interface StreamPump {
@@ -265,8 +292,34 @@ export const handleExecCommand = async (
   const table = deps.ptyTable
   const wantPty = input.pty === true
 
+  // (e) A `pty:true` request with NO ptyTable wired would otherwise fall
+  // through to the synchronous branch and run an UNTRACKED child — the host
+  // could never `write_stdin` / `close_agent` it, and the cleanup path would
+  // never see it. Fail-closed with a structured error instead of silently
+  // degrading to a non-PTY run.
+  if (wantPty && table === undefined) {
+    return errExec(
+      "exec_command requested pty:true but no PTY table is wired (write_stdin/close_agent would be unreachable).",
+      "pty_unsupported",
+    )
+  }
+
   if (wantPty && table !== undefined && table.size() >= MAX_PTY) {
     return errExec(`PTY cap exceeded: ${MAX_PTY} concurrent ptys already open.`, "pty_cap")
+  }
+
+  // (c) Path jail — confine the model-supplied cwd to the session workspace
+  // BEFORE spawning. When the port is wired, an escaping cwd is rejected
+  // fail-closed (the jail's `resolve` throws). Absent ⇒ no jail (legacy).
+  if (deps.cwdJail !== undefined) {
+    try {
+      deps.cwdJail.resolve(input.cwd, deps.cwdJail.jailRoot)
+    } catch (e: unknown) {
+      return errExec(
+        `Refusing to run in cwd outside the workspace: ${errMessage(e)}`,
+        "cwd_outside_workspace",
+      )
+    }
   }
 
   // Build env: only set when caller supplied an overlay (so the default Bun
@@ -461,8 +514,11 @@ export const handleSpawnAgent = async (
 ): Promise<SpawnAgentOutput & { ownerToken?: TaskOwnerToken }> => {
   const parentDepth = deps.parentDepth ?? 0
   const childDepth = parentDepth + 1
-  const cap = input.maxDepth ?? deps.maxDepth
-  if (cap !== undefined && childDepth > cap) {
+  // (d) Fail-CLOSED depth cap: when neither the per-call nor the dep-level
+  // `maxDepth` is supplied, fall back to the built-in `DEFAULT_MAX_DEPTH`
+  // (mirrors the runner) instead of running unbounded recursion.
+  const cap = input.maxDepth ?? deps.maxDepth ?? DEFAULT_MAX_DEPTH
+  if (childDepth > cap) {
     return errSpawn(
       `Subagent denied: depth ${childDepth} exceeds maxDepth ${cap}`,
       "depth_exceeded",
@@ -471,7 +527,10 @@ export const handleSpawnAgent = async (
 
   // B3 — per-session concurrency cap. Counted BEFORE registering this task so
   // the cap is the number of OTHER running children (a cap of N admits exactly
-  // N concurrent). Mirrors the `pty_cap` structured-error pattern above.
+  // N concurrent). Opt-in: an omitted `maxConcurrent` means unbounded fan-out
+  // (byte-identical default — the codebase pins this as a deliberate
+  // no-regression invariant; a built-in numeric ceiling would be an arbitrary
+  // threshold, so concurrency bounding stays caller-configured).
   if (deps.maxConcurrent !== undefined && countRunning(deps.registry) >= deps.maxConcurrent) {
     return errSpawn(
       `Subagent denied: ${deps.maxConcurrent} concurrent subagents already running (cap reached).`,

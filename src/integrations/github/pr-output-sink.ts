@@ -36,6 +36,24 @@ import type { GhCliPort, GhCliResult } from "@/reactor"
 
 import type { IdempotencyKey, OutputPostResult, RedactPort, ReviewVerdict } from "./types"
 
+/**
+ * `<owner>/<repo>` shape gate (audit L9 H6) — MUST stay byte-identical to the
+ * reactor read-path SoT (`@/reactor` `trigger-source-pr-comment.ts`
+ * `REPO_SLUG_RE` / `isValidRepoSlug`). The slug is interpolated RAW into every
+ * `gh api repos/<slug>/…` WRITE / PATCH / DELETE path; without this gate a
+ * value like `"foo/bar/comments?per_page=1&x="` or one containing `../`
+ * rewrites the REST endpoint (path traversal / query injection at the network
+ * boundary). The reactor slice keeps these helpers module-private (not on the
+ * `@/reactor` barrel), so we cannot import them here without a cross-slice
+ * export change — see result.notes for the follow-up that collapses this to a
+ * single shared SoT.
+ */
+const REPO_SLUG_RE = /^[\w.-]+\/[\w.-]+$/
+const isValidRepoSlug = (slug: string): boolean =>
+  typeof slug === "string" && REPO_SLUG_RE.test(slug)
+const isValidPrNumber = (n: number): boolean =>
+  typeof n === "number" && Number.isInteger(n) && n > 0 && n <= Number.MAX_SAFE_INTEGER
+
 const COMMENT_BODY_MAX_BYTES = 65_000
 const IDEMPOTENCY_MARKER_PREFIX = "<!-- quanta:idempotency="
 const IDEMPOTENCY_MARKER_SUFFIX = " -->"
@@ -99,6 +117,23 @@ export const createPrOutputSink = (opts: PrOutputSinkOpts): PrOutputSink => {
   }
   if (typeof opts.redactPort.redact !== "function") {
     throw new Error("createPrOutputSink: redactPort.redact must be a function")
+  }
+  // Boundary gate (mirrors the reactor read-path, audit L9 H6) — `repoSlug` /
+  // `prNumber` are interpolated RAW into every `gh api repos/<slug>/…` write
+  // and DELETE path. A hostile/misconfigured value like
+  // `"foo/bar/comments?x="` or one with `../` would rewrite the REST endpoint
+  // (path traversal / query injection at the network boundary). We reuse the
+  // reactor slice's validators (single regex SoT) and throw at BOOT so a bad
+  // wire never produces a sink that can inject — never a runtime surprise.
+  if (!isValidRepoSlug(opts.repoSlug)) {
+    throw new Error(
+      `createPrOutputSink: repoSlug must match <owner>/<repo> (got: ${String(opts.repoSlug)})`,
+    )
+  }
+  if (!isValidPrNumber(opts.prNumber)) {
+    throw new Error(
+      `createPrOutputSink: prNumber must be a positive integer (got: ${String(opts.prNumber)})`,
+    )
   }
   const cap = Math.max(256, opts.bodyMaxBytes ?? COMMENT_BODY_MAX_BYTES)
   const prefix = opts.idempotencyMarkerPrefix ?? IDEMPOTENCY_MARKER_PREFIX

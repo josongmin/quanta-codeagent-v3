@@ -3,7 +3,7 @@ title: EventBridge — surface-agnostic pub/sub + closed BridgePayload union
 section: 9
 subsystem: IPC core — typed envelope + transport injection
 order: 34
-maturity: L4
+maturity: L2
 status: new
 ui_surfaces: [api]
 monitoring: integrated

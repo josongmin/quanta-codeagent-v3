@@ -88,6 +88,13 @@ export const testRunnerTool: Tool<Input> = {
   // Without this opt-in, the `inferToolTier` fallback for mutating tools
   // would force confirmation on every `bun test` even in `bypass`.
   hitlTier: (): "pre-approval-ok" => "pre-approval-ok",
+  // S16: expose the resolved shell command so the permission policy applies
+  // the HARD_DENY denylist (rm -rf, force-push, curl|sh) UNIFORMLY — a
+  // model-supplied `command` runs through `runShell` exactly like `bash`, so
+  // it MUST face the same denylist. Auto-detected commands (no explicit
+  // `command`) return "" — they are fixed `bun test`/`npm test`/`pytest`
+  // shapes the model cannot poison, so the gate has nothing to deny there.
+  extractShellCommand: (input: Input): string => input.command ?? "",
 
   async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const resolved = input.command ?? (await detectCommand(ctx.cwd, input.path))

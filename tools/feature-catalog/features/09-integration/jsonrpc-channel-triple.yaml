@@ -3,7 +3,7 @@ title: Channel-triple naming — `{name}-request` / `-response` / `-timeout`
 section: 9
 subsystem: shared/jsonrpc — channel naming convention
 order: 37
-maturity: L4
+maturity: L2
 status: new
 ui_surfaces: [api, cli]
 monitoring: n-a

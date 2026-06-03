@@ -280,6 +280,16 @@ export class ChatGPTOAuthAdapter implements LLMPort {
       const catalog = await this.fetchModelCatalog(baseURL, token, cfg)
       const resolved = this.resolveModelFromCatalog(catalog)
       const effectiveModel = resolved.model
+      // Honor the documented contract: a silent model substitution is NOT
+      // silent — surface which model actually ran so the user/operator can see
+      // their configured model was unavailable in the catalog and a fallback
+      // was chosen on their behalf.
+      if (resolved.swappedFrom !== undefined) {
+        logger.warn(
+          `chatgpt-oauth: configured model "${resolved.swappedFrom}" not in catalog — ` +
+            `running "${effectiveModel}" instead`,
+        )
+      }
       const continuationStore = input.responsesContinuation?.store
 
       const url = `${baseURL}${RESPONSES_PATH}`

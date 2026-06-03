@@ -3,7 +3,7 @@ title: Mid-session GitHub token rotation (lock-protected, vendor-TTL respected)
 section: 8
 subsystem: Authentication — GitHub app token lifecycle
 order: 8
-maturity: L4
+maturity: L2
 status: stable
 ui_surfaces: [n-a]
 monitoring: n-a

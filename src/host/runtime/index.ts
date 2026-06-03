@@ -1,3 +1,16 @@
+export {
+  type AssembleRequest,
+  type AssembleRequestSeams,
+  type AssemblerEnv,
+  assembleAgentConfig,
+  type BatchExtras,
+  buildInteractiveTurnAssembler,
+  type CiBotExtras,
+  type HeadlessExtras,
+  type InteractiveTurnAssemblerRequest,
+  type RunOutcome,
+  resolveRunAgent,
+} from "./agent-config-assembler"
 export { createSingleSessionRuntimeHost } from "./builder"
 export {
   assertCapabilityExpectation,

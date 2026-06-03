@@ -38,6 +38,7 @@
 
 import { z } from "zod"
 import { errMessage } from "@/shared"
+import { fetchWithSsrfGuard, type HostResolver, SsrfGuardError, ssrfDeny } from "@/shared/net/ssrf"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 import { htmlToMarkdown } from "./html-to-markdown"
 
@@ -81,60 +82,12 @@ export const webFetchInputSchema = z.object({
 })
 export type WebFetchInput = z.infer<typeof webFetchInputSchema>
 
-/** SSRF defense — literal-host denylist (no DNS resolution). Matches the
- *  same set Anthropic's `WebFetch` rejects: loopback (localhost / 127.x.x.x /
- *  0.0.0.0), RFC1918 private (10.x / 172.16-31 / 192.168.x), link-local
- *  (169.254.x — also AWS instance-metadata IP 169.254.169.254), IPv6
- *  loopback (::1), and IPv6 ULA (fc00::/7 — `fc00:` and `fd00:`).
- *
- *  This is a STRING-MATCH check on the URL's hostname. It does NOT resolve
- *  DNS — a hostname like `evil.example.com` that resolves to 10.0.0.1 will
- *  pass this gate. A future ADR may add DNS-resolution-aware verification;
- *  today's posture matches `WebFetch`. */
-const SSRF_DENY_PREFIXES = [
-  "localhost",
-  "127.",
-  "0.0.0.0",
-  "10.",
-  "172.16.",
-  "172.17.",
-  "172.18.",
-  "172.19.",
-  "172.20.",
-  "172.21.",
-  "172.22.",
-  "172.23.",
-  "172.24.",
-  "172.25.",
-  "172.26.",
-  "172.27.",
-  "172.28.",
-  "172.29.",
-  "172.30.",
-  "172.31.",
-  "192.168.",
-  "169.254.",
-  "::1",
-  "fc00:",
-  "fd00:",
-] as const
-
-/** Returns the deny reason when `hostname` matches an SSRF-deny prefix; null
- *  when the host is allowed. Hostname is the raw `URL.hostname` (lowercased
- *  + IPv6 brackets stripped — same shape `new URL()` gives us). */
-const ssrfDeny = (hostname: string): string | null => {
-  const h = hostname.toLowerCase()
-  // Strip IPv6 brackets if present (URL.hostname already does; defensive).
-  const bare = h.startsWith("[") && h.endsWith("]") ? h.slice(1, -1) : h
-  if (bare === "localhost") return "localhost denied"
-  for (const prefix of SSRF_DENY_PREFIXES) {
-    if (prefix === "localhost") continue
-    if (bare.startsWith(prefix)) {
-      return `private/loopback address denied (${prefix})`
-    }
-  }
-  return null
-}
+/** SSRF defense lives in the canonical structural classifier
+ *  `@/shared/net/ssrf#ssrfDeny` (imported above), which parses IP literals and
+ *  normalizes IPv4-mapped IPv6 / decimal / hex forms the old prefix-string
+ *  match missed. The same predicate is re-run on every redirect hop by
+ *  `fetchWithSsrfGuard`, so a 30x to an internal address can no longer slip
+ *  past the pre-flight host check. */
 
 /** Build the ok:false result. Carries a typed `failure` when supplied so a
  *  future router can branch without regex on `output`. */
@@ -145,6 +98,8 @@ const errResult = (output: string, failure?: ToolResult["failure"]): ToolResult 
  *  production tool exports `webFetchTool()` which binds `globalThis.fetch`. */
 export interface WebFetchOptions {
   fetcher?: typeof fetch
+  /** Test seam for the SSRF DNS-rebinding check. Default = platform DNS. */
+  resolveHost?: HostResolver
 }
 
 /** Pre-flight (schema + abort + URL parse + protocol + SSRF). Returns an
@@ -325,16 +280,29 @@ const bytesToText = (bytes: Uint8Array, contentType: string): string => {
 }
 
 /** Network fetch phase — returns either an early ToolResult or the Response.
- *  Wraps the fetch call so a network throw never escapes to `execute`. */
+ *  Wraps the fetch call so a network throw never escapes to `execute`.
+ *  Uses `fetchWithSsrfGuard` (redirect:"manual" + per-hop https + SSRF host
+ *  re-check) so a public URL that 30x-redirects to an internal address is
+ *  rejected as an SSRF deny rather than silently followed. */
 const fetchPhase = async (
   fetcher: typeof fetch,
   url: string,
   signal: AbortSignal,
 ): Promise<{ kind: "fail"; result: ToolResult } | { kind: "ok"; res: Response }> => {
   try {
-    const res = await fetcher(url, { signal, redirect: "follow" })
+    const res = await fetchWithSsrfGuard(fetcher, url, { signal })
     return { kind: "ok", res }
   } catch (e) {
+    if (e instanceof SsrfGuardError) {
+      return {
+        kind: "fail",
+        result: errResult(e.message, {
+          mode: "permission_denied",
+          path: e.hostname,
+          isReadonly: true,
+        }),
+      }
+    }
     const msg = errMessage(e)
     return {
       kind: "fail",

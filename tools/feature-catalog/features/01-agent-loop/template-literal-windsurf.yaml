@@ -3,7 +3,7 @@ title: Template-literal `{{ variable }}` expander — Windsurf workflow parity (
 section: 1
 subsystem: 플레이북 — 사용자 작성 task macro / 템플릿 치환 (ADR-0203 형제)
 order: 252
-maturity: L4
+maturity: L2
 status: new
 ui_surfaces: [cli]
 monitoring: n-a

@@ -88,6 +88,15 @@ const sseDataFromBlock = (block: string): string | null => {
   return data.length === 0 ? null : data.join("\n")
 }
 
+/** Pull the JSON-RPC `id` off an outbound payload, if any. A request carries a
+ *  string/number `id` and has a pending entry to reject on failure; a
+ *  notification has none, so returns `undefined`. */
+const extractRequestId = (payload: unknown): number | string | undefined => {
+  if (typeof payload !== "object" || payload === null) return undefined
+  const id = (payload as { id?: unknown }).id
+  return typeof id === "number" || typeof id === "string" ? id : undefined
+}
+
 /** Streamable-HTTP transport. */
 export class HttpSseMcpTransport implements McpTransport {
   private readonly url: string
@@ -142,15 +151,34 @@ export class HttpSseMcpTransport implements McpTransport {
 
   /** POST is async, but the {@link McpTransport.send} contract is sync (returns
    *  an immediate enqueue error or null). We launch the POST in the background
-   *  and surface inbound messages via `onMessage`; a POST-level failure is
-   *  reported by re-routing it through the message pump as a transport-level
-   *  problem (logged) — the client's per-request timeout is the backstop. */
+   *  and surface inbound messages via `onMessage`.
+   *
+   *  A connection-level POST failure (the `fetch` itself rejects — DNS, refused,
+   *  reset) used to drop to a warn log, so a request payload (one carrying an
+   *  `id`) would hang the client's pending entry for the FULL per-request
+   *  timeout before failing. We now correlate the failure back to the request
+   *  `id` and synthesize a JSON-RPC error response routed through the same
+   *  message pump `onMessage` feeds — the client's `dispatch` rejects the
+   *  pending request PROMPTLY instead of waiting out the timeout. A notification
+   *  (no `id`) has no pending entry to reject, so it stays a warn. */
   send(payload: McpTransportPayload): Error | null {
     if (this.closed) {
       return new Error(`mcp server "${this.name}" transport unavailable: closed`)
     }
+    const requestId = extractRequestId(payload)
     void this.post(payload).catch((e) => {
-      logger.warn("mcp: http POST failed", { server: this.name, error: errMessage(e) })
+      const detail = errMessage(e)
+      logger.warn("mcp: http POST failed", { server: this.name, error: detail })
+      // Correlated prompt-fail: a connection-level failure on a REQUEST rejects
+      // its pending entry now, not at timeout. Synthesize the wire error the
+      // server would have returned so the client's existing error path runs.
+      if (requestId !== undefined) {
+        this.emitMessage({
+          jsonrpc: "2.0",
+          id: requestId,
+          error: { code: -32000, message: `transport POST failed: ${detail}` },
+        })
+      }
     })
     return null
   }

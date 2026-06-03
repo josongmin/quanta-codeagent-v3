@@ -131,6 +131,23 @@ export interface CheckpointPolicyConfig {
   readonly odb: ShadowOdb
   /** Override the default oracle (testing or stricter classification). */
   readonly oracle?: DestructivenessOracle
+  /** ADR-0121 follow-up (audit U7-11) — LRU cap, in bytes, enforced AFTER a
+   *  successful auto-anchor. Without this, `registerHead` commits accumulate
+   *  forever and the `ShadowOdb.cleanup(maxBytes)` cap is dead (zero runtime
+   *  call-sites). When set, `withAutoCheckpoint` calls `odb.cleanup(this)` so
+   *  the shadow store stays bounded.
+   *
+   *  Absent ⇒ NO cleanup is ever attempted (byte-identical to the pre-fix
+   *  path; the wrap makes exactly the same calls it always did). To enable
+   *  the documented 1 GiB default the composition root passes
+   *  `DEFAULT_SHADOW_ODB_MAX_BYTES` (from `@/storage`) here.
+   *
+   *  SAFETY: `cleanup`/`evictLru` already treat a non-finite or negative cap
+   *  as a no-op (HELL H9), so a misconfigured value can NEVER be read as
+   *  "evict everything". The sweep is THROTTLED to at most once per
+   *  (workspace, turn) by the wrap so the recursive size walk is not paid on
+   *  every checkpoint. */
+  readonly cleanupMaxBytes?: number
 }
 
 /** Build the LRU dedup key string. Kept private so external callers don't
@@ -213,14 +230,66 @@ const decideAnchorBefore = async (
   }
 }
 
+/** Per-wrap cleanup throttle. The LRU sweep (`odb.cleanup`) walks the whole
+ *  shadow base recursively, so paying it on EVERY anchor would turn a cheap
+ *  checkpoint into an O(store-size) scan. We bound it to at most one sweep per
+ *  (workspace, turn) — the same natural cadence the anchor dedup already uses —
+ *  plus a single-flight guard so two concurrent anchors in the same turn never
+ *  launch two overlapping sweeps. State is closure-local to the wrap (NOT the
+ *  policy, which stays pure) so it resets with the channel lifetime. */
+interface CleanupThrottle {
+  readonly swept: Set<string>
+  inFlight: boolean
+}
+
+/** Cleanup throttle key — reuses the (workspace, turn) composite identity. A
+ *  call without a turnId falls back to the workspace alone so a turn-less loop
+ *  still sweeps at most once per workspace per channel lifetime (rather than on
+ *  every anchor). */
+const cleanupKeyOf = (workspace: string, turnId: string | undefined): string =>
+  typeof turnId === "string" && turnId.length > 0 ? `${workspace}\x1f${turnId}` : workspace
+
+/** Run the LRU cap once per (workspace, turn), single-flight. Fire-and-forget
+ *  by design: the sweep MUST NOT block or fail the tool call, so every error
+ *  is swallowed (same fail-open posture as `takeAnchor`). No-op when
+ *  `cfg.cleanupMaxBytes` is absent (byte-identical to the pre-fix wrap). */
+const maybeCleanup = (
+  cfg: CheckpointPolicyConfig,
+  throttle: CleanupThrottle,
+  req: ToolRequest,
+): void => {
+  const maxBytes = cfg.cleanupMaxBytes
+  if (maxBytes === undefined) return
+  if (throttle.inFlight) return
+  const turnId = req.ctx.turnId
+  const key = cleanupKeyOf(req.ctx.cwd, typeof turnId === "string" ? turnId : undefined)
+  if (throttle.swept.has(key)) return
+  throttle.swept.add(key)
+  throttle.inFlight = true
+  // Detach: the sweep runs to completion in the background; the anchor +
+  // delegated tool call do not await it. `cleanup` itself guards against a
+  // malformed cap (non-finite / negative ⇒ no-op, HELL H9).
+  void cfg.odb
+    .cleanup(maxBytes)
+    .catch(() => {
+      // Swallow — observability instrumentation MUST NOT alter the call
+      // outcome (mirrors `takeAnchor`).
+    })
+    .finally(() => {
+      throttle.inFlight = false
+    })
+}
+
 /** Take the actual anchor: record the dedup key (when turnId is present) and
  *  call `odb.registerHead`, swallowing any I/O failure. Extracted from
- *  `withAutoCheckpoint`'s execute for the same complexity reason. */
+ *  `withAutoCheckpoint`'s execute for the same complexity reason. Returns
+ *  `true` when `registerHead` resolved (so the wrap can gate the LRU sweep on
+ *  an actual new commit), `false` when it rejected. */
 const takeAnchor = async (
   cfg: CheckpointPolicyConfig,
   policy: CheckpointPolicy,
   req: ToolRequest,
-): Promise<void> => {
+): Promise<boolean> => {
   const turnId = req.ctx.turnId
   if (typeof turnId === "string" && turnId.length > 0) {
     // Record FIRST so a concurrent wrap sees the dedup; even if the anchor
@@ -245,11 +314,13 @@ const takeAnchor = async (
       const tag = gp.computeTag(anchorCtx)
       if (tag !== null && tag !== undefined) gp.recordAnchorSha(tag, sha, anchorCtx)
     }
+    return true
   } catch {
     // Swallow — observability instrumentation MUST NOT alter the call
     // outcome. A real observability hook would forward this to a trace
     // event; the wrap stays I/O-free so the contract is "no extra
     // failure modes" by construction.
+    return false
   }
 }
 
@@ -274,20 +345,30 @@ export const withAutoCheckpoint = (
   policy: CheckpointPolicy,
   cfg: CheckpointPolicyConfig,
   resolveTool: ToolResolver,
-): EffectChannel => ({
-  async execute(
-    req: ToolRequest,
-    onProgress?: (message: string) => void,
-  ): Promise<ToolResultEnvelope> {
-    // Default-OFF fast path: when the mode is "off", the wrap is
-    // byte-identical to the underlying channel (the policy already
-    // short-circuits, but skipping the lookup avoids the resolver call).
-    if (cfg.mode === "off") return await inner.execute(req, onProgress)
-    if (await decideAnchorBefore(policy, resolveTool, req)) {
-      await takeAnchor(cfg, policy, req)
-    }
-    // Delegate verbatim. The inner channel's no-throw contract carries us
-    // through executor exceptions; the wrap adds nothing here.
-    return await inner.execute(req, onProgress)
-  },
-})
+): EffectChannel => {
+  // Closure-local LRU-sweep throttle (audit U7-11). Lives here — NOT in the
+  // policy (which stays pure) — so it shares the wrap's lifetime and resets
+  // when the channel is rebuilt.
+  const cleanupThrottle: CleanupThrottle = { swept: new Set<string>(), inFlight: false }
+  return {
+    async execute(
+      req: ToolRequest,
+      onProgress?: (message: string) => void,
+    ): Promise<ToolResultEnvelope> {
+      // Default-OFF fast path: when the mode is "off", the wrap is
+      // byte-identical to the underlying channel (the policy already
+      // short-circuits, but skipping the lookup avoids the resolver call).
+      if (cfg.mode === "off") return await inner.execute(req, onProgress)
+      if (await decideAnchorBefore(policy, resolveTool, req)) {
+        // Only enforce the LRU cap when a NEW commit actually landed — a
+        // failed `registerHead` adds no bytes, so there is nothing to evict.
+        if (await takeAnchor(cfg, policy, req)) {
+          maybeCleanup(cfg, cleanupThrottle, req)
+        }
+      }
+      // Delegate verbatim. The inner channel's no-throw contract carries us
+      // through executor exceptions; the wrap adds nothing here.
+      return await inner.execute(req, onProgress)
+    },
+  }
+}

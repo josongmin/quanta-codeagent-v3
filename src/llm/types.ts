@@ -328,4 +328,22 @@ export interface StreamInput {
    *  one boot-time `LLMPort`. Surfaces without a store omit it; adapters fall
    *  back to their local default. */
   responsesContinuation?: { store: ResponsesContinuationStore }
+  /** ADR-0469 — optional schema-forced response request. When present, the
+   *  OpenAI adapter spreads it onto the request as
+   *  `response_format:{type:"json_schema", json_schema:{name, schema, strict}}`
+   *  (OpenAI Structured Outputs). Anthropic has NO symmetric knob — the
+   *  documented strategy there is a single forced tool-call (see
+   *  `src/llm/structured-output.ts` `toAnthropicForcedTool` +
+   *  `RESPONSE_FORMAT_ANTHROPIC_NOTE`); the Anthropic adapter MAY adopt it at
+   *  integration. The shape is defined in `src/llm/structured-output.ts`
+   *  (`ResponseFormat`); it is re-stated structurally here so `@/llm/types`
+   *  stays import-light. Absent ⇒ adapters emit a byte-identical pre-feature
+   *  wire payload (default-OFF, opt-in per request). Callers confirm the model
+   *  obeyed via `validateAgainstResponseSchema`. */
+  responseFormat?: {
+    readonly type: "json_schema"
+    readonly name: string
+    readonly schema: Record<string, unknown>
+    readonly strict?: boolean
+  }
 }

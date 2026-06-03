@@ -3,7 +3,7 @@ title: trust-scope persistent grant store — cascade + TTL (L3→L4 promotion)
 section: 3
 subsystem: 권한 영속화 — trust-scope (Claude Desktop 흡수)
 order: 94
-maturity: L4
+maturity: L2
 status: stable
 ui_surfaces: [n-a]
 monitoring: n-a

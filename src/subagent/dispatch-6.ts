@@ -44,6 +44,15 @@ export interface Subagent6Deps {
   runner?: SubagentRunner
   /** Required for write_stdin + (optionally) exec_command pty retention. */
   ptyTable?: PtyTable
+  /** (c) Path-jail port confining `exec_command`'s model-supplied `cwd` to the
+   *  session workspace. Forwarded verbatim to the exec_command handler. Absent
+   *  ⇒ no jail (byte-identical legacy). Structurally `{resolve, jailRoot}`
+   *  (mirrors `@/storage resolveJailed`); injected here so this slice imports
+   *  no storage code. */
+  cwdJail?: {
+    readonly resolve: (requested: string, jailRoot: string) => string
+    readonly jailRoot: string
+  }
   /** Required for send_input. */
   inputChannel?: InputChannelRegistry
   /** Forwarded to spawn_agent depth checks. */
@@ -118,7 +127,12 @@ type Route = (parsedInput: unknown, deps: Subagent6Deps) => Promise<AnyToolOutpu
 const routeExecCommand: Route = (input, deps) =>
   handleExecCommand(
     input as Parameters<typeof handleExecCommand>[0],
-    deps.ptyTable !== undefined ? { ptyTable: deps.ptyTable } : {},
+    {
+      ...(deps.ptyTable !== undefined ? { ptyTable: deps.ptyTable } : {}),
+      // (c) Forward the path-jail port so a model-supplied cwd outside the
+      // workspace is rejected fail-closed before spawn. Absent ⇒ no jail.
+      ...(deps.cwdJail !== undefined ? { cwdJail: deps.cwdJail } : {}),
+    },
     deps.signal,
   )
 

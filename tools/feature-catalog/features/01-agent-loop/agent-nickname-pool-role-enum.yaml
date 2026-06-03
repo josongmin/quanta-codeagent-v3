@@ -3,7 +3,7 @@ title: Codex agent nickname pool (39) + agent_role 4-arm enum
 section: 1
 subsystem: 시스템 프롬프트 / 서브에이전트 identity (Codex SOTA 흡수, ADR-0247)
 order: 247
-maturity: L4
+maturity: L2
 status: new
 ui_surfaces: [n-a]
 monitoring: n-a

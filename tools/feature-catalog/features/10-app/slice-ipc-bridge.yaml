@@ -3,7 +3,7 @@ title: '`@/ipc` 슬라이스 — CLI ↔ Web ↔ Tauri EventBridge + portable se
 section: 10
 subsystem: Surface-agnostic Layer-2 (RFC may-22)
 order: 21
-maturity: L4
+maturity: L2
 status: stable
 ui_surfaces: [cli, api]
 monitoring: integrated

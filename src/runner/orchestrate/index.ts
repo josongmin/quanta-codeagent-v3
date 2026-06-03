@@ -20,6 +20,7 @@
  *     concrete files directly.
  */
 
+export { ExternalPromptQueue } from "./external-prompt-queue"
 export type { PersistTurnInput } from "./persist-turn"
 export { persistTurn } from "./persist-turn"
 export type { ResolveResumeInput, ResumeResolution } from "./resume-fsm"

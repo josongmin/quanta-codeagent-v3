@@ -1,4 +1,4 @@
-import { errMessage } from "@/shared"
+import { errMessage, isAbortError } from "@/shared"
 /**
  * ADR-0068 Wave A — Phase 1 per-thread distillation orchestrator.
  *
@@ -28,7 +28,6 @@ import { errMessage } from "@/shared"
  *     and behavior is byte-identical to the legacy code path.
  */
 import type { MemoryTelemetryPort, Phase1OutcomeKind } from "../telemetry-port"
-import { isAbortError } from "./abort"
 import { MIN_TURN_THRESHOLD } from "./constants"
 import {
   Phase1DistillError,

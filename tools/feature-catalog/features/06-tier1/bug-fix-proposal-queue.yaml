@@ -3,7 +3,7 @@ title: Bug-fix proposal queue — debug-trace 자동수정 루프 Phase 1 (ADR-0
 section: 6
 subsystem: 에이전트 — 진단 후속 (debug-trace skill 흡수 자식 슬라이스)
 order: 186
-maturity: L4
+maturity: L3
 status: stable
 ui_surfaces: [n-a]
 monitoring: n-a

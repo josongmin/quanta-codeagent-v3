@@ -1,5 +1,4 @@
-import { errMessage } from "@/shared"
-import { isAbortError } from "./abort"
+import { errMessage, isAbortError } from "@/shared"
 /**
  * ADR-0068 — `Phase2Port` LLM implementation (Wave D).
  *
@@ -100,8 +99,17 @@ const buildUserMessage = (args: {
     parts.push(args.existingMemoryMd.trim())
     parts.push("")
   }
-  if (args.existingRawMemoriesMd !== null && args.mode === "incremental") {
-    parts.push("## Prior raw_memories.md (extend in incremental mode)")
+  if (args.existingRawMemoriesMd !== null) {
+    // ALWAYS surface the prior append-only evidence trail — INIT too.
+    // raw_memories.md is the documented INIT source of truth; if a full
+    // rebuild never shows the LLM the prior trail, the subsequent
+    // writeAtomic would silently overwrite (destroy) it. Branch only the
+    // heading so the LLM knows whether to extend or rebuild-around it.
+    parts.push(
+      args.mode === "incremental"
+        ? "## Prior raw_memories.md (extend in incremental mode)"
+        : "## Prior raw_memories.md (preserve this append-only evidence trail; rebuild around it)",
+    )
     parts.push(args.existingRawMemoriesMd.trim())
     parts.push("")
   }

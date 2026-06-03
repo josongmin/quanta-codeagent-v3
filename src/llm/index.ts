@@ -53,6 +53,24 @@ export {
   splitSseFrames,
 } from "./streaming-events"
 export type {
+  JsonSchema,
+  JsonSchemaType,
+  OpenAIResponseFormatParam,
+  ResponseFormat,
+  ResponseFormatError,
+} from "./structured-output"
+// ADR-0469 — structured output (response_format json_schema) passthrough.
+// Surfaced on the @/llm barrel (mirrors @/patch surfacing applyPatchStructured)
+// so the OpenAI-adapter passthrough + caller-side validation are reachable
+// without a deep subpath import. Inert until a request carries `responseFormat`.
+export {
+  RESPONSE_FORMAT_ANTHROPIC_NOTE,
+  toAnthropicForcedTool,
+  toOpenAIResponseFormat,
+  validateAgainstResponseSchema,
+  validateResponseFormat,
+} from "./structured-output"
+export type {
   LlmCheckpoint,
   LlmSurfaceId,
   LlmTransportId,

@@ -1,0 +1,60 @@
+id: apply-patch-structured-result
+title: applyPatchStructured — per-file outcome + messageForModel (self-correcting edits)
+section: 2
+subsystem: 패치 적용 — 구조화 per-file 결과 (Cursor ApplyAgentDiff 흡수, ADR-0464)
+order: 464
+maturity: L2
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: planned
+owners: ["@songmin"]
+labels: [absorbed:cursor, surface:cli]
+depends_on: [v4a-apply-patch]
+config_refs:
+  env: []
+purpose: |
+  Cursor ApplyAgentDiff 흡수 — 기존 applyPatch는 첫 bad hunk에서 patch 전체를
+  wholesale throw + rollback(전부-or-전무). 이 ADDITIVE/default-OFF seam은 새
+  applyPatchStructured(patch, fs)를 추가: op 단위 PER-FILE ISOLATION으로 한 파일이
+  실패해도 나머지는 적용되고, Result<StructuredApplyOutcome>를 RETURN한다.
+  AppliedChange[] = { path, changeType(created|modified|deleted), movedTo?,
+  beforeContent?, afterContent?, error?, messageForModel? } + allOk 플래그
+  (Cursor proto 필드 verbatim). messageForModel은 각 typed error를 compact한
+  model-facing 힌트로 매핑(anchor drift→"re-read & regenerate hunk", parse→"fix
+  V4A syntax at line N", jail→"outside workspace")해서 모델이 실패한 파일만
+  self-correct 재emit하게 한다. 기존 throwing applyPatch는 byte-identical로 불변 —
+  새 entrypoint를 호출할 때만 동작. @/patch는 pure 유지(@/tool FsJailViolationError는
+  structural duck-type으로 인식, upward import 없음).
+evidence:
+  code:
+    - src/patch/structured.ts
+    - src/patch/structured-types.ts
+    - src/patch/message-for-model.ts
+    - src/patch/index.ts
+  adrs: [464]
+  tests:
+    unit:
+      - tests/unit/patch-structured-apply-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    도구-표면 배선 보류 (slice fence: src/tool/index.ts / src/apps/cli/** 는 이
+    슬라이스 파일 아님). applyPatchStructured는 현재 어떤 호출자도 사용하지 않음
+    (dead seam). default-OFF — 새 entrypoint 호출 시에만 동작.
+  promotion_path: |
+    활성화는 (a) apply_patch 도구의 새 flag 또는 (b) sibling 도구로 노출 + (c) loop가
+    partial-실패 시 messageForModel을 다음 턴 컨텍스트에 피드백하는 와이어링 — 전부
+    ADR-0464 Integration TODOs로 인계.
+notes: |
+  L2 seam (2026-06-03): per-op 적용은 canonical applyPatch({ops:[op]})에 위임 —
+  locator/fuzzy-tier/pre-flight/rollback 로직 중복 0. 각 op는 자기 원자성 유지(실패
+  op의 파일은 prior on-disk content로 intact). 외부 루프만 한 op 실패를 tolerate.
+  cross-op 원자성은 이 path에서 의도적으로 포기(필요한 caller는 applyPatch 계속 사용).
+  hellgate 14 케이스: happy 3-change-type + before/after, move→modified+movedTo,
+  isolation(앞뒤 sibling 둘 다 적용 + prior intact), jail isolated(structural),
+  delete-missing isolated, non-Patch입력 no-throw, throwing port no-throw,
+  messageForModel 전 error-kind + unknown fallback, default-OFF byte-identity 앵커.

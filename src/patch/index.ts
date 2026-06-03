@@ -5,6 +5,11 @@
 
 export { applyPatch } from "./applier"
 export { parsePatch } from "./parser"
+// ADR-0464 — additive, default-OFF structured per-file apply path. The
+// throwing `applyPatch` above is unchanged; callers opt into `applyPatchStructured`
+// to receive a Cursor-faithful per-file outcome instead of a wholesale throw.
+export { applyPatchStructured, messageForModel } from "./structured"
+export type { AppliedChange, ApplyChangeType, StructuredApplyOutcome } from "./structured-types"
 export type {
   ApplyResult,
   Change,

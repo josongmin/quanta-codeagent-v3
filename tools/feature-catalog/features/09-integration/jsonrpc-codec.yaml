@@ -3,7 +3,7 @@ title: JSON-RPC 2.0 codec — encode/decode helpers returning `Result`
 section: 9
 subsystem: shared/jsonrpc — byte shuttle for IPC + MCP + LSP
 order: 36
-maturity: L4
+maturity: L2
 status: new
 ui_surfaces: [api]
 monitoring: n-a

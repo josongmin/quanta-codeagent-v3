@@ -114,6 +114,13 @@ export interface SessionMemoryAutoWires {
   readonly sessionCtx?: string
   readonly stage1OutputsStore: Stage1OutputsStore
   readonly memoryConsolidator: NonNullable<AgentConfig["memoryConsolidator"]>
+  /** Release the per-session resources this wire bundle owns — namely the
+   *  `bun:sqlite` WAL handle backing the Phase-1 Stage1Store (audit U7-10).
+   *  Without this the file descriptor + WAL leak across every session that
+   *  builds a fresh bundle. MUST be called on the session/runtime teardown
+   *  path. Idempotent: closing an already-closed handle is swallowed so a
+   *  double-dispose never throws. */
+  dispose(): void
 }
 
 export interface SessionMemoryAutoWireInput {
@@ -220,6 +227,20 @@ export const buildSessionMemoryAutoWires = async (
     logWarn,
   })
 
+  // U7-10: own the close of the WAL-mode SQLite handle opened above. The
+  // handle is created HERE (not by Stage1Store), so the honest owner of its
+  // teardown is this builder. `Database.close()` flushes + checkpoints the
+  // WAL and releases the fd. We swallow a double-close (bun:sqlite throws on
+  // a second `.close()`) so `dispose()` is idempotent.
+  const dispose = (): void => {
+    try {
+      stage1Db.close()
+    } catch {
+      // Already closed (idempotent dispose) or a benign close error — never
+      // surface from teardown.
+    }
+  }
+
   return {
     ...(start.sessionCtx !== undefined ? { sessionCtx: start.sessionCtx } : {}),
     stage1OutputsStore,
@@ -229,6 +250,7 @@ export const buildSessionMemoryAutoWires = async (
       store: phase1Store,
       threadId: input.sessionId,
     },
+    dispose,
   }
 }
 

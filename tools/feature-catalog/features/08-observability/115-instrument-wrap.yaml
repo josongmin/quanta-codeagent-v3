@@ -3,7 +3,7 @@ title: Metrics instrument wrap helpers + Grafana + alerts + E2E coverage
 section: 8
 subsystem: metrics export (ADR-0144/0158)
 order: 115
-maturity: L4
+maturity: L2
 status: stable
 ui_surfaces: [cli]
 monitoring: n-a

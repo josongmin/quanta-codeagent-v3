@@ -19,6 +19,7 @@ type RuntimeContextPermissionModeView = RuntimeContextSnapshot["permission"]["mo
 type RuntimeContextAutomationEngineView = RuntimeContextSnapshot["automationEngine"]
 type RuntimeContextToolProfileStateView = RuntimeContextSnapshot["toolProfileState"]
 type RuntimeContextIdentityModeStateView = RuntimeContextSnapshot["identityModeState"]
+type RuntimeContextPermissionModeStateView = RuntimeContextSnapshot["permissionModeState"]
 type RuntimeContextFocusChainView = RuntimeContextSnapshot["focusChain"]
 type RuntimeContextStickyModelStoreView = RuntimeContextSnapshot["stickyModelStore"]
 type RuntimeContextDecisionEmitterView = RuntimeContextSnapshot["decisionEmitter"]
@@ -107,6 +108,11 @@ export interface RuntimeContext {
   ): ReturnType<SessionBootstrapResult["materializeReviewerAgent"]>
   registry(): RuntimeContextRegistryView
   permissionMode(): RuntimeContextPermissionModeView
+  /** ADR-0303 — the engine-owned mutable permission posture (when the host
+   *  wired one). A surface mutates it (`.set()`) and the NEXT turn's
+   *  admissibility gate reads the new mode live, unlike `permissionMode()`
+   *  which is the scalar snapshot read once at session creation. */
+  permissionModeState(): RuntimeContextPermissionModeStateView
   automationEngine(): RuntimeContextAutomationEngineView
   toolProfileState(): RuntimeContextToolProfileStateView
   identityModeState(): RuntimeContextIdentityModeStateView
@@ -285,6 +291,7 @@ const createRuntimeContext = (initialState: InternalRuntimeContextState): Runtim
       record.state.materializeReviewerAgent(boot, turnAssembler),
     registry: () => record.state.snapshot.registry,
     permissionMode: () => record.state.snapshot.permission.mode,
+    permissionModeState: () => record.state.snapshot.permissionModeState,
     automationEngine: () => record.state.snapshot.automationEngine,
     toolProfileState: () => record.state.snapshot.toolProfileState,
     identityModeState: () => record.state.snapshot.identityModeState,

@@ -17,6 +17,7 @@ import type { Metrics, StructuredLogger } from "@/observability"
 import type { PermissionContext, PermissionMode, ReviewerPort } from "@/permission"
 import type {
   IdentityModeSessionState,
+  PermissionModeSessionState,
   Provider,
   SystemSource,
   Tooling,
@@ -355,6 +356,10 @@ export interface SessionBootstrapResult {
   readonly cwd: string
   readonly slog: StructuredLogger
   readonly permission: PermissionContext
+  /** ADR-0303 — engine-owned permission posture backing `permission.mode`'s
+   *  accessor. The CLI `shift+tab` mode-cycle mutates THIS via
+   *  `RuntimeContext.permissionModeState().set()`; the next turn reads it live. */
+  readonly permissionModeState: PermissionModeSessionState
   readonly idleMonitor: BootstrapIdleMonitor
   readonly rejectCounter: BootstrapRejectCounter
   /** Session-level reasoning-effort store (Codex `/model`-style UX, effort-

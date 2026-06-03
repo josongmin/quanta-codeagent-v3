@@ -121,8 +121,13 @@ const buildEvent = (raw: unknown, ctx: EventContext): NormalizedGhEvent | undefi
 
 const shouldEmit = (event: NormalizedGhEvent, kind: GhEventKind, deps: PollDeps): boolean => {
   if (deps.deliveryStore.has(event.deliveryId)) return false
+  // Single bot-gate SoT: the mention filter (`filter.evaluate`) is the sole
+  // authority on the bot gate — it rejects `sender.type === "Bot"` unless its
+  // own `allowBots` is set (see `mention-filter.ts`). Re-reading
+  // `opts.allowBots` here would override an INJECTED filter's intent (a caller
+  // that passed `mentionFilter` never set `opts.allowBots`), so we delegate
+  // entirely, mirroring the webhook-server sibling.
   if (!isAccepted(event, kind, deps.filter)) return false
-  if (event.sender.type === "Bot" && deps.opts.allowBots !== true) return false
   return true
 }
 

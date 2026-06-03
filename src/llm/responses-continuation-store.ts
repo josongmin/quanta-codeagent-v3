@@ -43,6 +43,10 @@ export const defaultResponsesContinuationStore = (
       const oldestKey = store.keys().next().value
       if (oldestKey === undefined) break
       store.delete(oldestKey)
+      // The unsupported-resume marker is keyed by the SAME routeKey; evict it
+      // in lockstep so the Set can never outgrow the bounded entry map (it was
+      // previously add-only ⇒ an unbounded leak across long-lived processes).
+      unsupportedResumeRoutes.delete(oldestKey)
     }
   }
 
@@ -74,6 +78,11 @@ export const defaultResponsesContinuationStore = (
 
     clear(routeKey) {
       store.delete(routeKey)
+      // NOTE: the per-route resume marker is intentionally NOT dropped here —
+      // "resume unsupported" is a stable property of the ROUTE, not of a single
+      // cached entry, so it must persist across clear(route) and reset only on
+      // clearAll() (pinned by responses-continuation-wrapping). The unbounded-
+      // growth concern is handled in evictIfOver (lockstep LRU eviction).
     },
 
     clearAll() {

@@ -30,6 +30,7 @@ import {
   tryCreateLLM,
 } from "@/llm"
 import { buildCostDashboard, GEN_AI_ATTRS, renderDashboardText } from "@/observability"
+import { PATCH_SENTINELS } from "@/patch/types"
 import { parseEnvFlag } from "@/runner/assemble"
 import type {
   RuntimeFacadeComposeOptions,
@@ -88,7 +89,12 @@ import {
 import type { SessionLoopSinks } from "./session-loop"
 import type { SessionSetupResult } from "./session-setup"
 import { buildSkillsCallback } from "./skills-surface"
-import { buildReplSlashCtx, type ReplaySlashState, type ReplSlashCtx } from "./slash-surface"
+import {
+  buildReplSlashCtx,
+  projectSlashCtx,
+  type ReplaySlashState,
+  type ReplSlashCtx,
+} from "./slash-surface"
 import { buildVoiceLiveCtx, voiceLiveEnabled } from "./voice-live-wire"
 
 export interface PromptUxOpts {
@@ -419,54 +425,15 @@ export interface ReplSurfaceWires {
   readonly contextUsageView: ContextUsageHolder["view"]
 }
 
-/** Project the LEGACY slots (pre-ADR-0291). Extracted so the combined
- *  projector below stays under biome's cognitive-complexity cap. */
-const projectLegacy = (c: ReplSlashCtx): Record<string, unknown> => ({
-  ...(c.skills !== undefined ? { skills: c.skills } : {}),
-  ...(c.idle !== undefined ? { idle: c.idle } : {}),
-  ...(c.rewindSession !== undefined ? { rewindSession: c.rewindSession } : {}),
-  ...(c.mcp !== undefined ? { mcp: c.mcp } : {}),
-  ...(c.cost !== undefined ? { cost: c.cost } : {}),
-  ...(c.planSnapshot !== undefined ? { planSnapshot: c.planSnapshot } : {}),
-  ...(c.history !== undefined ? { history: c.history } : {}),
-  ...(c.branchSearch !== undefined ? { branchSearch: c.branchSearch } : {}),
-  // `side` is exposed as a factory on ReplSlashCtx; the contract takes the
-  // produced state, so call it here.
-  ...(c.side !== undefined ? { side: c.side() } : {}),
-  ...(c.debug !== undefined ? { debug: c.debug } : {}),
-  ...(c.why !== undefined ? { why: c.why } : {}),
-  ...(c.inspect !== undefined ? { inspect: c.inspect } : {}),
-  ...(c.replay !== undefined ? { replay: c.replay } : {}),
-  ...(c.effort !== undefined ? { effort: c.effort } : {}),
-  ...(c.contextUsage !== undefined ? { contextUsage: c.contextUsage } : {}),
-})
-
-/** Project the ADR-0291 slots. Extracted so the combined projector below
- *  stays under biome's cognitive-complexity cap. */
-const projectAdr0291 = (c: ReplSlashCtx): Record<string, unknown> => ({
-  ...(c.planEdit !== undefined ? { planEdit: c.planEdit } : {}),
-  ...(c.composerEdit !== undefined ? { composerEdit: c.composerEdit } : {}),
-  ...(c.forkSession !== undefined ? { forkSession: c.forkSession } : {}),
-  ...(c.perToolCheckpoint !== undefined ? { perToolCheckpoint: c.perToolCheckpoint } : {}),
-  ...(c.profile !== undefined ? { profile: c.profile } : {}),
-  ...(c.identity !== undefined ? { identity: c.identity } : {}),
-  ...(c.stickyModel !== undefined ? { stickyModel: c.stickyModel } : {}),
-  ...(c.focusChain !== undefined ? { focusChain: c.focusChain } : {}),
-  ...(c.textInbox !== undefined ? { textInbox: c.textInbox } : {}),
-})
-
 /** Project the legacy + ADR-0291 ReplSlashCtx slots onto the
- *  `SlashContext` shape. Mirrors `projectSlashCtx` inside
- *  `slash-surface.ts` byte-for-byte (kept in sync — both files spread by
- *  presence so missing slots stay omitted under exactOptionalPropertyTypes).
- *  Extracted here so this slice can ALSO spread the ADR-0292/0294
- *  augmentations (`convCheckpoint`, `sessionIo`) onto the same payload —
- *  the original projection lives in a sibling file owned by another
- *  ADR-0291 track and is intentionally kept narrow to that track's slots. */
-const projectReplSlashCtxToContract = (c: ReplSlashCtx): Record<string, unknown> => ({
-  ...projectLegacy(c),
-  ...projectAdr0291(c),
-})
+ *  `SlashContext` shape. Delegates to the SSOT {@link projectSlashCtx} in
+ *  `slash-surface.ts` — the SAME projector the test-harness `dispatchReplSlash`
+ *  uses — so the legacy + ADR-0291 slot mapping can never drift out of sync
+ *  between the two files (there is now ONE copy, not two byte-synced ones).
+ *  This slice then layers its ADR-0292/0294 augmentations (`convCheckpoint`,
+ *  `sessionIo`, …) on top in {@link buildSurfaceDispatch}. */
+const projectReplSlashCtxToContract = (c: ReplSlashCtx): Record<string, unknown> =>
+  projectSlashCtx(c)
 
 /** Build the surface's slash dispatch closure: routes `/image` directly to
  *  the image-queue command (same fast-path the legacy `dispatchReplSlash`
@@ -633,6 +600,38 @@ const createPromptAssembledHolder = (model?: string): PromptAssembledHolder => {
   }
 }
 
+/** Extract the file paths a V4A `apply_patch` would touch, by scanning the
+ *  patch text for `*** Add File:` / `*** Update File:` / `*** Delete File:` /
+ *  `*** Move to:` directive headers (the SSOT sentinels from `@/patch/types`).
+ *
+ *  The per-tool snapshot recorder needs a `filesBefore` set so `/rewind-tool`
+ *  can revert a mutation. `apply_patch` input is `{ patch }` (NOT `{ path }`),
+ *  so the conservative `path`-only extractor below would capture NOTHING and
+ *  silently leave apply_patch un-restorable. Both the Update *source* AND the
+ *  `Move to:` *destination* are captured: the source must be snapshotted (its
+ *  prior contents), and the move destination is created — capturing it lets a
+ *  restore delete the moved-in file. Deduped, order-preserving. */
+export const extractApplyPatchPaths = (patch: string): readonly string[] => {
+  const seen = new Set<string>()
+  const out: string[] = []
+  const push = (raw: string): void => {
+    const p = raw.trim()
+    if (p.length > 0 && !seen.has(p)) {
+      seen.add(p)
+      out.push(p)
+    }
+  }
+  for (const line of patch.split("\n")) {
+    if (line.startsWith(PATCH_SENTINELS.addFile)) push(line.slice(PATCH_SENTINELS.addFile.length))
+    else if (line.startsWith(PATCH_SENTINELS.updateFile))
+      push(line.slice(PATCH_SENTINELS.updateFile.length))
+    else if (line.startsWith(PATCH_SENTINELS.deleteFile))
+      push(line.slice(PATCH_SENTINELS.deleteFile.length))
+    else if (line.startsWith(PATCH_SENTINELS.moveTo)) push(line.slice(PATCH_SENTINELS.moveTo.length))
+  }
+  return out
+}
+
 /** Build a fresh per-session wire bundle. Pure — no I/O, no env reads beyond
  *  the explicit `envSource` parameter; all upstream-port presence is gated
  *  on dedicated env knobs (see `resolveReplToolProfile`/`...IdentityMode...`/
@@ -665,18 +664,21 @@ export const composeSurfaceWires = (
       getCurrentMessages: () => state.history,
       getCurrentTurn: () => state.history.length,
       extractPaths: (toolName: string, input: unknown): readonly string[] => {
-        // Conservative extractor — only the common file-mutating tools
-        // declare a `path` (read/write/edit/scripted_replace/apply_patch).
-        // Bash + non-file tools yield empty filesBefore.
-        if (
-          toolName === "read" ||
-          toolName === "write" ||
-          toolName === "edit" ||
-          toolName === "scripted_replace"
-        ) {
+        // Conservative extractor — only the file-MUTATING tools yield a
+        // `filesBefore` set for /rewind-tool restore. `read` is read-only:
+        // it never mutates, so capturing its target over-snapshots without
+        // any restore value (and could thrash the recorder) — excluded.
+        if (toolName === "write" || toolName === "edit" || toolName === "scripted_replace") {
           const p = (input as { path?: unknown } | null)?.path
           return typeof p === "string" ? [p] : []
         }
+        // apply_patch input is `{ patch }`, NOT `{ path }` — parse the V4A
+        // directive headers so the targets a patch touches are snapshotted.
+        if (toolName === "apply_patch") {
+          const patch = (input as { patch?: unknown } | null)?.patch
+          return typeof patch === "string" ? extractApplyPatchPaths(patch) : []
+        }
+        // Bash + non-file tools yield empty filesBefore.
         return []
       },
       logger,

@@ -184,7 +184,7 @@ export const backoffDelayMs = (
 }
 
 const throwIfAborted = (signal: AbortSignal | undefined): void => {
-  if (signal?.aborted) throw new LLMError("aborted")
+  if (signal?.aborted) throw new LLMError("aborted", { kind: "aborted" })
 }
 
 export class RetryingLLM implements LLMPort {

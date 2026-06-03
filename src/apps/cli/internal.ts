@@ -48,10 +48,11 @@ import {
   type ShellSnapshotPort,
 } from "@/runtime/shell-snapshot"
 import type { ShellSnapshotMetric } from "@/runtime/shell-snapshot/metric-port"
-import { logger, type RunContext } from "@/shared"
+import { logger, type RunContext, runtimeConfig } from "@/shared"
 import { MCPRootSchema, PLUGIN_MCP_FILE } from "@/skill/plugin-manifest"
 import type { AssistantTextPainter, StreamPort } from "@/stream"
-import { gitTools, type Tool } from "@/tool"
+import { gitTools, pollDeferredTool, type Tool } from "@/tool"
+import { DefaultDeferredResultRegistry } from "@/tool/deferred/default-registry"
 import { createMarkdownPainter } from "./markdown-painter"
 import { buildCliElicitationPrompterFactory } from "./mcp-elicitation-prompter"
 import { isPathLikeToken } from "./resume"
@@ -787,6 +788,21 @@ export const composeLLM = (
 //    surface without pulling runtime assembly helpers back in.
 export type { Tooling } from "@/runner/assemble/tooling"
 
+/** ADR-0287 — build the `poll_deferred` tool over a freshly-constructed
+ *  {@link DefaultDeferredResultRegistry} when async-tools are enabled. Returns
+ *  `[]` (no tool, no registry allocation) when `runtimeConfig().asyncTools` is
+ *  false — the default-OFF byte-identical path. The cap is the closed env knob
+ *  `QUANTA_DEFERRED_CAP` (resolved once by `runtimeConfig`); absent ⇒ the
+ *  registry's own `DEFAULT_DEFERRED_CAP`. */
+const buildAsyncDeferredTools = (): Tool[] => {
+  const cfg = runtimeConfig()
+  if (!cfg.asyncTools) return []
+  const registry = new DefaultDeferredResultRegistry(
+    cfg.deferredCap !== undefined ? { cap: cfg.deferredCap } : {},
+  )
+  return [pollDeferredTool(registry) as Tool]
+}
+
 /** Build the per-run tooling: resolve every env-driven default-OFF knob, then
  *  delegate the actual registry + config aggregation to the surface-agnostic
  *  `buildToolingCore`. The shim is the CLI-specific envelope (it owns the env
@@ -832,6 +848,19 @@ export const buildTooling = (
   // buildToolingCore so the bash factory's HITL tier closes over it. Unset/
   // unrecognised ⇒ undefined ⇒ conservative `always-confirm` default.
   const sandboxProfile = resolveSandboxProfileFromEnv(process.env)
+  // ADR-0287 — async-tools `poll_deferred`. Default-OFF: built ONLY when
+  // `runtimeConfig().asyncTools` is true (QUANTA_ASYNC_TOOLS); absent ⇒ `[]`
+  // (no registry allocation, registry byte-identical, the LLM never sees the
+  // tool). The `DefaultDeferredResultRegistry` is bounded by
+  // `runtimeConfig().deferredCap` (QUANTA_DEFERRED_CAP); the tool closes over
+  // THIS registry instance — the same one a future `defineToolAsync` caller
+  // would register deferred work into. Merged into `extraTools` alongside the
+  // search wire so the registration is independent of the search pipeline.
+  const asyncDeferredTools = buildAsyncDeferredTools()
+  const extraTools: Tool[] = [
+    ...(searchWire !== null ? [searchWire.tool] : []),
+    ...asyncDeferredTools,
+  ]
   return buildToolingCore({
     store,
     embedder,
@@ -845,9 +874,9 @@ export const buildTooling = (
     lspTools,
     lspNavTools,
     gitToolList,
+    ...(extraTools.length > 0 ? { extraTools } : {}),
     ...(searchWire !== null
       ? {
-          extraTools: [searchWire.tool],
           searchPipeline: searchWire.pipeline,
           // L5 M-11 — thread THIS session's wire teardown (delta-scan interval
           // + indexer) up to the session close stack, per-session (not via the

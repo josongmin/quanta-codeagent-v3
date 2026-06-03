@@ -29,6 +29,7 @@
 import { z } from "zod"
 import type { ImageBlock } from "@/llm"
 import { errMessage } from "@/shared"
+import { fetchWithSsrfGuard, SsrfGuardError, ssrfDeny } from "@/shared/net/ssrf"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 import { MAX_IMAGE_BYTES, type SupportedMediaType, sniffMediaType } from "./read"
 export const readImageUrlInputSchema = z.object({
@@ -42,58 +43,13 @@ export interface ReadImageUrlOpts {
 }
 
 /**
- * SSRF defense — literal-host denylist (no DNS resolution). DUPLICATED from
- * `src/tool/web/fetch.ts` because (a) the predicate is not exported from
- * web_fetch and (b) ADR-0132 forbids modifying sibling tool slices in this
- * round. Drift between these two lists is a documented hazard; a future ADR
- * may consolidate them via a shared `@/security/ssrf` (or equivalent) layer.
- *
- * Covers: loopback (`localhost` / `127.x.x.x` / `0.0.0.0`), RFC1918 private
- * (`10.x` / `172.16-31.x` / `192.168.x`), link-local (`169.254.x` — incl. AWS
- * IMDS 169.254.169.254), IPv6 loopback (`::1`), IPv6 ULA (`fc00:`/`fd00:`).
+ * SSRF defense now delegates to the canonical structural classifier
+ * `@/shared/net/ssrf#ssrfDeny` (imported above) — the previously-duplicated
+ * prefix-string denylist is gone (it missed IPv4-mapped IPv6 / decimal / hex
+ * forms). The same predicate is re-run on every redirect hop via
+ * `fetchWithSsrfGuard`, closing the redirect bypass where a public image URL
+ * 30x-redirects to an internal address.
  */
-const SSRF_DENY_PREFIXES = [
-  "localhost",
-  "127.",
-  "0.0.0.0",
-  "10.",
-  "172.16.",
-  "172.17.",
-  "172.18.",
-  "172.19.",
-  "172.20.",
-  "172.21.",
-  "172.22.",
-  "172.23.",
-  "172.24.",
-  "172.25.",
-  "172.26.",
-  "172.27.",
-  "172.28.",
-  "172.29.",
-  "172.30.",
-  "172.31.",
-  "192.168.",
-  "169.254.",
-  "::1",
-  "fc00:",
-  "fd00:",
-] as const
-
-/** Returns the deny reason when `hostname` matches an SSRF-deny prefix; null
- *  when allowed. Same shape as web_fetch's predicate (string-match, no DNS). */
-const ssrfDeny = (hostname: string): string | null => {
-  const h = hostname.toLowerCase()
-  const bare = h.startsWith("[") && h.endsWith("]") ? h.slice(1, -1) : h
-  if (bare === "localhost") return "localhost denied"
-  for (const prefix of SSRF_DENY_PREFIXES) {
-    if (prefix === "localhost") continue
-    if (bare.startsWith(prefix)) {
-      return `private/loopback address denied (${prefix})`
-    }
-  }
-  return null
-}
 
 /** Build an ok:false ToolResult with an optional typed failure. */
 const errResult = (output: string, failure?: ToolResult["failure"]): ToolResult =>
@@ -135,16 +91,28 @@ const preflight = (
   return { kind: "ok", url }
 }
 
-/** Network fetch — never throws past this boundary. */
+/** Network fetch — never throws past this boundary. Uses `fetchWithSsrfGuard`
+ *  (redirect:"manual" + per-hop https + SSRF host re-check) so a 30x redirect
+ *  to an internal address is rejected rather than silently followed. */
 const fetchPhase = async (
   fetcher: typeof fetch,
   url: string,
   signal: AbortSignal,
 ): Promise<{ kind: "fail"; result: ToolResult } | { kind: "ok"; res: Response }> => {
   try {
-    const res = await fetcher(url, { signal, redirect: "follow" })
+    const res = await fetchWithSsrfGuard(fetcher, url, { signal })
     return { kind: "ok", res }
   } catch (e) {
+    if (e instanceof SsrfGuardError) {
+      return {
+        kind: "fail",
+        result: errResult(e.message, {
+          mode: "permission_denied",
+          path: e.hostname,
+          isReadonly: true,
+        }),
+      }
+    }
     const msg = errMessage(e)
     return {
       kind: "fail",

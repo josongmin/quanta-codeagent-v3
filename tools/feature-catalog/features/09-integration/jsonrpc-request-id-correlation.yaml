@@ -3,7 +3,7 @@ title: JSON-RPC RequestId — branded, deterministic, seedable
 section: 9
 subsystem: shared/jsonrpc — request-id correlation
 order: 38
-maturity: L4
+maturity: L2
 status: new
 ui_surfaces: [api]
 monitoring: n-a

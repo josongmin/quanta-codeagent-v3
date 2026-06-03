@@ -82,9 +82,11 @@ export {
 } from "./search-pipeline"
 export {
   createIdentityModeSessionState,
+  createPermissionModeSessionState,
   createSystemSource,
   createToolProfileSessionState,
   type IdentityModeSessionState,
+  type PermissionModeSessionState,
   type SystemSource,
   type ToolProfileSessionState,
 } from "./session-state"

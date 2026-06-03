@@ -3,7 +3,7 @@ title: agent — ci-bot mode preset policy (branch-only + no-MCP)
 section: 10
 subsystem: Unified Agent Runtime — ci-bot mode
 order: 52
-maturity: L4
+maturity: L2
 status: stable
 ui_surfaces: [cli]
 monitoring: n-a

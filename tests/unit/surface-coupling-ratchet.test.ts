@@ -1,11 +1,24 @@
 import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { dirname, join, relative, resolve } from "node:path"
 import { extractImports, listSliceTsFiles } from "./_arch/slice-boundary-scanner"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..")
 const APPS_DIR = join(REPO_ROOT, "src", "apps")
-const APP_NAMES = new Set(["agent", "bench", "cli", "eval", "probe"])
+
+// EVERY surface tree under src/apps/, DERIVED from the filesystem — never a
+// hand-maintained literal. A surface absent from this set is NOT skipped-as-
+// clean: it is a silent hole, because `collectCrossSurfaceImports` only inspects
+// files whose FROM-surface is a member. `web-daemon` was historically omitted
+// from a hardcoded list, which let `apps/web-daemon/runtime-factory.ts` import
+// `@/apps/agent/...` undetected (the shared assembler now lives in
+// `@/host/runtime`). Deriving the set from `readdirSync` means a NEW surface is
+// covered the moment its directory exists — no one has to remember to add it.
+const APP_NAMES: ReadonlySet<string> = new Set(
+  readdirSync(APPS_DIR, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name),
+)
 
 const ALLOWED_CROSS_SURFACE_IMPORTS = new Set<string>()
 

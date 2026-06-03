@@ -65,27 +65,20 @@ export interface RestRegistryConfig {
 }
 
 /**
- * Parse a cache blob into a connector list. Returns `undefined` on malformed
- * input — caller treats this as a cache miss.
+ * Per-entry shape validation, shared by BOTH the network path
+ * ({@link parseResponse}) and the cache path ({@link parseCached}). A cached
+ * blob is no more trustworthy than a network blob — it can be stale,
+ * hand-edited, or corrupt — so it must clear the SAME bar before being typed as
+ * `Connector[]`. This is the single source of truth for "is this a connector
+ * array"; never `as Connector[]` after only an `Array.isArray` guard.
+ *
+ * Throws on the first malformed entry. The two call sites differ only in how
+ * they react: the network path lets the throw propagate (→ stale-cache
+ * fallback); the cache path catches it and treats a poisoned blob as a miss.
  */
-const parseCached = (raw: string): ReadonlyArray<Connector> | undefined => {
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    if (!Array.isArray(parsed)) return undefined
-    return parsed as ReadonlyArray<Connector>
-  } catch {
-    return undefined
-  }
-}
-
-/**
- * Parse a server response body into a typed connector list. Throws if the
- * shape is wrong — caller catches + falls back to stale cache.
- */
-const parseResponse = (raw: string): ReadonlyArray<Connector> => {
-  const parsed = JSON.parse(raw) as unknown
+const validateConnectorArray = (parsed: unknown): ReadonlyArray<Connector> => {
   if (!Array.isArray(parsed)) throw new Error("connectors response is not an array")
-  // Shallow shape check — REST adapter trusts the registry to publish well-formed entries.
+  // Shallow shape check — mirrors the closed `Connector` union (id/host/auth).
   for (const c of parsed) {
     if (typeof c !== "object" || c === null) throw new Error("connector entry not object")
     const candidate = c as Partial<Connector>
@@ -97,6 +90,27 @@ const parseResponse = (raw: string): ReadonlyArray<Connector> => {
   }
   return parsed as ReadonlyArray<Connector>
 }
+
+/**
+ * Parse a cache blob into a connector list. Returns `undefined` on malformed
+ * input OR on a poisoned entry (stale/hand-edited/corrupt cache) — caller
+ * treats this as a cache miss. Symmetric with {@link parseResponse}: a cache
+ * entry gets the SAME per-entry validation as a network response.
+ */
+const parseCached = (raw: string): ReadonlyArray<Connector> | undefined => {
+  try {
+    return validateConnectorArray(JSON.parse(raw) as unknown)
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Parse a server response body into a typed connector list. Throws if the
+ * shape is wrong — caller catches + falls back to stale cache.
+ */
+const parseResponse = (raw: string): ReadonlyArray<Connector> =>
+  validateConnectorArray(JSON.parse(raw) as unknown)
 
 export const createRestConnectorRegistry = (config: RestRegistryConfig): ConnectorRegistryPort => {
   const ttl = config.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS

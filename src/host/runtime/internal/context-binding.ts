@@ -15,6 +15,7 @@ import type { CapabilityManifest, PendingApprovalView } from "@/protocol/session
 import { wireInteractiveKnobs } from "@/runner/assemble"
 import type {
   IdentityModeSessionState,
+  PermissionModeSessionState,
   SystemSource,
   ToolProfileSessionState,
 } from "@/runner/assemble/session-state"
@@ -39,6 +40,7 @@ type RuntimeBase = RuntimeAgentConfigBase & {
   systemSource?: SystemSource
   toolProfileState?: ToolProfileSessionState
   identityModeState?: IdentityModeSessionState
+  permissionModeState?: PermissionModeSessionState
 }
 
 interface RuntimeConfirmSlot {
@@ -63,6 +65,7 @@ interface RuntimeContextSnapshot {
   readonly automationEngine?: AgentConfig["automationEngine"]
   readonly toolProfileState?: ToolProfileSessionState
   readonly identityModeState?: IdentityModeSessionState
+  readonly permissionModeState?: PermissionModeSessionState
   readonly focusChain?: AgentConfig["focusChain"]
   readonly stickyModelStore?: AgentConfig["stickyModelStore"]
   readonly decisionEmitter?: AgentConfig["decisionEmitter"]
@@ -441,6 +444,7 @@ const buildBootstrapBaseShape = (
     ...whenDefined("userInputPort", args.overlay?.userInputPort),
     ...whenDefined("toolProfileState", args.boot.toolProfileState),
     ...whenDefined("identityModeState", args.boot.identityModeState),
+    ...whenDefined("permissionModeState", args.boot.permissionModeState),
     ...whenDefined("focusChain", args.boot.focusChain),
     ...whenDefined("onShellEvent", args.boot.onShellEvent),
     ...whenDefined("workMetricsSink", args.boot.workMetricsSink),
@@ -509,6 +513,7 @@ const buildOptionalSnapshotFields = (
   ...whenDefined("automationEngine", base.automationEngine),
   ...whenDefined("toolProfileState", base.toolProfileState),
   ...whenDefined("identityModeState", base.identityModeState),
+  ...whenDefined("permissionModeState", base.permissionModeState),
   ...whenDefined("focusChain", base.focusChain),
   ...whenDefined("stickyModelStore", base.stickyModelStore),
   ...whenDefined("decisionEmitter", base.decisionEmitter),

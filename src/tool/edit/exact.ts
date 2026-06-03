@@ -38,8 +38,16 @@ export const applyExactEdit = (
     }
   }
 
-  const next = replaceAll
-    ? source.split(oldString).join(newString)
-    : source.replace(oldString, newString)
+  // Non-replaceAll: `count === 1` is guaranteed here, so splice the single
+  // match literally. `String.prototype.replace` with a string pattern would
+  // interpret `$&`, `$1`, `` $` ``, `$'`, `$$` in `newString` as replacement
+  // specials — silently corrupting inserted code that contains those bytes.
+  let next: string
+  if (replaceAll) {
+    next = source.split(oldString).join(newString)
+  } else {
+    const i = source.indexOf(oldString)
+    next = source.slice(0, i) + newString + source.slice(i + oldString.length)
+  }
   return { ok: true, message: `Replaced ${replaceAll ? count : 1} occurrence(s)`, next }
 }

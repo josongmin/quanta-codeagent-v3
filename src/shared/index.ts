@@ -21,6 +21,7 @@ export { classify } from "./error-classifier"
 export type { LLMErrorKind, LLMProvider } from "./errors"
 export {
   errMessage,
+  isAbortError,
   LLMError,
   PermissionDeniedError,
   QuantaError,
@@ -28,6 +29,7 @@ export {
   ToolInputError,
   toError,
 } from "./errors"
+export { chunkBatches } from "./chunk"
 export type {
   LlmContinuationObservation,
   LlmRequestObservation,

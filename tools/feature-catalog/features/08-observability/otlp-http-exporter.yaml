@@ -3,7 +3,7 @@ title: OTLP/HTTP exporter — `QUANTA_OTEL_ENDPOINT` realtime ship (외부 SDK z
 section: 8
 subsystem: observability — realtime OTLP/JSON span+metric ship (hand-rolled wire)
 order: 268
-maturity: L4
+maturity: L2
 status: stable
 ui_surfaces: [cli]
 monitoring: integrated

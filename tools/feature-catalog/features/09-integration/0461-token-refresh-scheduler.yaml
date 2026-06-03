@@ -3,7 +3,7 @@ title: Proactive token-refresh scheduler — clock-driven pre-expiry refresh (AD
 section: 9
 subsystem: Connectors / token store (ADR-0461, extends ADR-0160 Phase E)
 order: 65
-maturity: L4
+maturity: L2
 status: new
 ui_surfaces: [n-a]
 monitoring: n-a

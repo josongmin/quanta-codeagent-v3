@@ -642,12 +642,18 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
         // = process death (crash/OOM/external kill).
         session.onDead(() => {
           state.closed = true
+          // RESOURCE_LEAK fix: reap the dead session so the Map cannot grow
+          // unbounded across browse→close cycles. live()/isLive() already treat
+          // a missing entry as closed, so dropping it is observationally equal to
+          // the previously-retained closed entry.
+          sessions.delete(id)
         })
         void proc.exited.then(() => {
           if (!state.closed) {
             state.closed = true
             session.dispose()
           }
+          sessions.delete(id)
         })
         return ok({ id, backend: "chromium" })
       } catch (e) {
@@ -869,11 +875,18 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
 
     async close(h: BrowserHandle): Promise<Result<void, BrowserError>> {
       const s = sessions.get(h.id)
-      if (s === undefined || s.closed) return ok(undefined)
-      s.closed = true
-      s.session.dispose()
-      killQuietly(s.proc)
-      deps.fs.rmrf(s.profileDir)
+      if (s === undefined) return ok(undefined)
+      // RESOURCE_LEAK fix: even if a death mode (onDead / proc.exited) already
+      // flipped s.closed, the Map entry was never reaped — repeated browse→close
+      // cycles grew it unbounded, pinning the CdpConnection wiring + console
+      // buffer + proc handle per session. Drop the entry on EVERY terminal path.
+      if (!s.closed) {
+        s.closed = true
+        s.session.dispose()
+        killQuietly(s.proc)
+        deps.fs.rmrf(s.profileDir)
+      }
+      sessions.delete(h.id)
       return ok(undefined)
     },
   }

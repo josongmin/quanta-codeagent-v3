@@ -138,6 +138,10 @@ test("HELL-SB-04 — AbortSignal aborted mid-stream → iterator done + cleanup"
   if (last === undefined) throw new Error("no chunks seen")
   // Allow either terminal arm — the invariant is that the iterator
   // terminates, NOT that a specific final chunk shape is observed.
+  // (An audit proposed forbidding a trailing `progress` here, but the
+  // boomerang contract deliberately does NOT guarantee a terminal-shaped
+  // final frame on abort — only that the iterator completes — so the
+  // looseness is intentional, not theater.)
   expect(["error", "result", "progress"]).toContain(last.kind)
 })
 

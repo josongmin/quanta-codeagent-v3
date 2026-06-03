@@ -38,7 +38,7 @@
 
 import type { LLMPort, Message, StreamEvent } from "@/llm"
 import { assembleFromEvents } from "@/llm"
-import { errMessage } from "@/shared"
+import { byteCompare, errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { safeRun, stderrReason } from "./_shared"
 import {
@@ -233,7 +233,7 @@ export const diffToScopes = (diff: string): string[] => {
   if (diff.length === 0) return []
   const tallies = tallyScopes(tallyFileLines(diff.split("\n")))
   return [...tallies.values()]
-    .sort((a, b) => b.files - a.files || b.lines - a.lines || a.scope.localeCompare(b.scope))
+    .sort((a, b) => b.files - a.files || b.lines - a.lines || byteCompare(a.scope, b.scope))
     .map((t) => t.scope)
 }
 

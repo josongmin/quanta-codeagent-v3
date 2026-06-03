@@ -3,7 +3,7 @@ title: SpecialPathKind 8-kind OS-aware resolver (LRU cached)
 section: 3
 subsystem: 권한 스택 (ADR-0135)
 order: 23
-maturity: L4
+maturity: L2
 status: new
 owners: ["@songmin"]
 labels: [absorbed:codex, surface:cli]

@@ -238,7 +238,7 @@ describe("C. mode='read' + write attempt → typed sandbox_violation failure", (
     // And by construction (wrap rewrote argv), the `rm` was never spawned.
   })
 
-  test("HELL-C4: violation carries `kind: 'write_denied'` discriminant", async () => {
+  test("HELL-C4: write violation carries the EXACT `reason: 'write_denied'` discriminant", async () => {
     const fakePort: PerCallSandboxPort = {
       wrap: () => ({
         argv: ["bash", "-lc", "echo 'Operation not permitted' >&2; exit 1"],
@@ -253,10 +253,38 @@ describe("C. mode='read' + write attempt → typed sandbox_violation failure", (
     )
     expect(result.failure?.mode).toBe("sandbox_violation")
     if (result.failure?.mode === "sandbox_violation") {
-      // Typed: closed enum of reasons.
-      expect(["write_denied", "exec_denied", "network_denied", "unknown"]).toContain(
-        result.failure.reason,
-      )
+      // A file-write denial ("Operation not permitted") maps to the EXACT
+      // `write_denied` reason — NOT the catch-all `unknown`. Pinning the exact
+      // value catches a classifier that silently degrades to `unknown`.
+      expect(result.failure.reason).toBe("write_denied")
+    }
+  })
+
+  test("HELL-C5: network-egress denial maps to the EXACT `reason: 'network_denied'`", async () => {
+    // Seatbelt/Landlock surfaces a net deny with a "network ... denied" /
+    // "network ... not permitted" stderr shape — distinct from a file-write
+    // deny. The classifier MUST map it to `network_denied`, not `write_denied`
+    // and not the `unknown` catch-all.
+    const fakePort: PerCallSandboxPort = {
+      wrap: () => ({
+        argv: [
+          "bash",
+          "-lc",
+          "echo 'sandbox: network outbound connection denied' >&2; exit 1",
+        ],
+        sandboxApplied: true,
+      }),
+      availability: () => ({ supported: true }),
+    }
+    __setBashPerCallSandboxFactory(() => fakePort)
+    const { result } = await collect(
+      { command: "curl https://example.com", mode: "read" },
+      ctx(dir),
+    )
+    expect(result.ok).toBe(false)
+    expect(result.failure?.mode).toBe("sandbox_violation")
+    if (result.failure?.mode === "sandbox_violation") {
+      expect(result.failure.reason).toBe("network_denied")
     }
   })
 })

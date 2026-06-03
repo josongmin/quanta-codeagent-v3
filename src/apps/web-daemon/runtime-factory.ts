@@ -20,7 +20,11 @@ import {
 } from "@/agent/observability-wire"
 import type { RunLedgerPort } from "@/agent/run-ledger"
 import type { ShadowVerifyPort } from "@/agent/shadow-verify"
-import { buildInteractiveTurnAssembler as buildSharedInteractiveTurnAssembler } from "@/apps/agent/interactive-turn-assembler"
+import {
+  type AssemblerEnv,
+  buildInteractiveTurnAssembler as buildSharedInteractiveTurnAssembler,
+  type InteractiveTurnAssemblerRequest,
+} from "@/host/runtime"
 import { pickProvider, tryCreateLLM } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { buildSkillsConfigCore, buildSubagentConfigCore, parseEnvFlag } from "@/runner/assemble"
@@ -119,7 +123,11 @@ const observabilitySlots = (observability: {
   }
 }
 
-export const buildInteractiveTurnAssembler = buildSharedInteractiveTurnAssembler
+/** Surface wrapper over the shared host assembler (ADR-0303 thin-surface):
+ *  binds the web-daemon's own `process.env` into the env-pure host builder so
+ *  callers keep the legacy 0-/1-arg signature. */
+export const buildInteractiveTurnAssembler = (req: InteractiveTurnAssemblerRequest = {}) =>
+  buildSharedInteractiveTurnAssembler(req, process.env as AssemblerEnv)
 
 /**
  * ADR-0404 + ADR-0415 — per-session observability wire for the web-daemon

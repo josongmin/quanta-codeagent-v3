@@ -10,6 +10,7 @@
  * and the slice never imports a vendor SDK.
  */
 import { LLMError } from "@/shared"
+import { chunkBatches } from "@/shared/chunk"
 import type { EmbeddingAdapterOptions, EmbeddingPort } from "../embedding-port"
 import { isAbortError, safeVendorErrMessage, throwIfAborted } from "./_abort"
 
@@ -28,13 +29,6 @@ export interface VoyageHttp {
 
 export interface VoyageEmbedderOptions extends EmbeddingAdapterOptions {
   http: VoyageHttp
-}
-
-const chunkBatches = <T>(items: readonly T[], size: number): T[][] => {
-  const n = Math.max(1, Math.floor(size))
-  const out: T[][] = []
-  for (let i = 0; i < items.length; i += n) out.push([...items.slice(i, i + n)])
-  return out
 }
 
 export const createVoyageEmbedder = (opts: VoyageEmbedderOptions): EmbeddingPort => {

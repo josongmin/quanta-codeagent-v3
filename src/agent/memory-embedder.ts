@@ -1,6 +1,7 @@
 import OpenAI from "openai"
 import type { EmbedderPort } from "@/memory"
 import { errMessage, LLMError } from "@/shared"
+import { chunkBatches } from "@/shared/chunk"
 
 /**
  * Concrete {@link EmbedderPort} implementations (RFC §6.3, long-term memory).
@@ -29,13 +30,11 @@ export interface EmbeddingsClient {
   }
 }
 
-/** Split `items` into contiguous chunks of at most `size` (size ≥ 1). */
-export const chunkBatches = <T>(items: readonly T[], size: number): T[][] => {
-  const n = Math.max(1, Math.floor(size))
-  const out: T[][] = []
-  for (let i = 0; i < items.length; i += n) out.push(items.slice(i, i + n))
-  return out
-}
+/** Re-export of the canonical batch chunker (`@/shared/chunk`). The
+ *  definition was hoisted to `@/shared` to kill three drifted copies; this
+ *  re-export preserves the historical `@/agent/memory-embedder` import surface
+ *  (e.g. `tests/unit/memory-embedder.test.ts`). */
+export { chunkBatches }
 
 const DEFAULT_MODEL = "text-embedding-3-small"
 const DEFAULT_BATCH = 96

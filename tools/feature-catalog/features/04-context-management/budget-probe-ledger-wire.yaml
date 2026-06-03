@@ -3,7 +3,7 @@ title: BudgetProbe — real wire of ADR-0138 ledger into ADR-0265 budget-aware p
 section: 4
 subsystem: Retrieval — budget-probe adapter (ledger-bridged + static), slice-fence-clean
 order: 51
-maturity: L4
+maturity: L2
 status: stable
 ui_surfaces: [cli]
 monitoring: n-a

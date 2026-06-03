@@ -28,6 +28,7 @@ import {
 } from "./audit"
 import { parseDiffNameStatus, runCheckChanged } from "./check-changed"
 import { loadFcBaseline, runLint, saveFcBaseline, snapshotBaseline } from "./lint"
+import { computeReachability } from "./reachability"
 import { loadBaseline, loadProse, renderCatalog } from "./render"
 import {
   computeAxisScores,
@@ -73,6 +74,7 @@ function usage(): never {
       "  gates [--strict]            maturity-promotion-gate audit (warn / strict-fail)",
       "  test-audit [--strict] [--max-per-rule N]   12-rule admissibility audit over tests/ (R1-3 + R5 + R8-10 enforced; R4/R6/R7/R11/R12 semantic-only)",
       "  graph [--section N] [--id X] [--depth N]   emit DOT dependency DAG to stdout",
+      "  reachability [--strict]    code-grounded: flag L4+ features unreachable from any entrypoint (real import graph)",
     ].join("\n"),
   )
   process.exit(2)
@@ -1063,6 +1065,43 @@ async function cmdTestAudit(argv: string[]): Promise<void> {
 
 // --- Entrypoint ------------------------------------------------------------
 
+// --- reachability ----------------------------------------------------------
+/**
+ * Code-grounded overclaim detector: flags L4+ features whose `evidence.code`
+ * src files are NOT reachable from ANY production entrypoint
+ * (`src/apps/<surface>/index.ts`), via the real import/re-export graph
+ * (`./reachability`). This is the ground truth the self-declared `judge` axes
+ * cannot give — no `.js`-mirror / barrel / basename-collision noise. A
+ * maturity ≥ L4 (operational) claim on an UNREACHABLE feature is an overclaim.
+ *
+ * `--strict` exits 1 when any are found (CI gate). Features whose evidence.code
+ * is tools/- or tests-only are skipped (not app-reachable by design).
+ */
+async function cmdReachability(argv: string[]): Promise<void> {
+  const strict = argv.includes("--strict")
+  const [reach, features] = await Promise.all([
+    computeReachability(),
+    loadFeaturesStrict(FEATURES_DIR),
+  ])
+  const offenders: Array<{ id: string; maturity: string; first: string }> = []
+  for (const { feature } of features) {
+    if (feature.maturity !== "L4" && feature.maturity !== "L5") continue
+    const src = feature.evidence.code.filter((c) => c.startsWith("src/") && c.endsWith(".ts"))
+    if (src.length === 0) continue // tools/tests-only feature — not app-reachable by design
+    if (!src.some((c) => reach.reached.has(c))) {
+      offenders.push({ id: feature.id, maturity: feature.maturity, first: src[0] as string })
+    }
+  }
+  offenders.sort((a, b) => a.id.localeCompare(b.id))
+  console.log(
+    `reachability: ${reach.reached.size}/${reach.allFiles.size} src files reached; ` +
+      `${offenders.length} L4+ feature(s) UNREACHABLE from any entrypoint (overclaim):`,
+  )
+  for (const o of offenders) console.log(`  ${o.id} [${o.maturity}] ${o.first}`)
+  if (offenders.length === 0) console.log("  (none — every L4+ feature is code-reachable)")
+  if (strict && offenders.length > 0) process.exit(1)
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2)
   const cmd = argv[0]
@@ -1116,6 +1155,9 @@ async function main(): Promise<void> {
     case "graph":
       await cmdGraph(rest)
       return
+    case "reachability":
+      await cmdReachability(rest)
+      return
     case "test-audit":
       await cmdTestAudit(rest)
       return
@@ -1151,6 +1193,7 @@ export {
   cmdGraph,
   cmdLint,
   cmdList,
+  cmdReachability,
   cmdShow,
   cmdValidate,
   collectAdrs,

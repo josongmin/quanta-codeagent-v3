@@ -104,7 +104,8 @@ import {
 import { type AutomationEngineSlot, assembleAutomation } from "@/scheduler/runtime-wire"
 import { errMessage, logger, runtimeConfig, setTerminalIo } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
-import { buildDefaultTools, ToolRegistry } from "@/tool"
+import { buildDefaultTools, pollDeferredTool, type Tool, ToolRegistry } from "@/tool"
+import { DefaultDeferredResultRegistry } from "@/tool/deferred/default-registry"
 import type { AssembleRequest } from "./assemble"
 import {
   type AgentArgs,
@@ -538,9 +539,35 @@ const buildBaseRegistry = (args: {
     ...buildDefaultTools({
       ...(args.automationSlot !== null ? { automationEngine: args.automationSlot.engine } : {}),
       ...(args.sandboxProfile !== undefined ? { sandboxProfile: args.sandboxProfile } : {}),
+      // ADR-0464 — gated structured-apply tool. Default-OFF: tool menu is
+      // byte-identical unless QUANTA_ENABLE_STRUCTURED_PATCH === "1".
+      ...(process.env.QUANTA_ENABLE_STRUCTURED_PATCH === "1" ? { structuredPatch: true } : {}),
     }),
     ...(args.searchWire !== null ? [args.searchWire.tool] : []),
+    // ADR-0287 — async-tools `poll_deferred`. Default-OFF: registered ONLY when
+    // `runtimeConfig().asyncTools` is true (QUANTA_ASYNC_TOOLS). Without it the
+    // registry is byte-identical and the LLM never sees the tool. The
+    // `DefaultDeferredResultRegistry` is bounded by `runtimeConfig().deferredCap`
+    // (QUANTA_DEFERRED_CAP) so a long session cannot grow the handle map
+    // unbounded; the tool closes over THIS registry instance — the same one a
+    // future `defineToolAsync` caller would register deferred work into.
+    ...buildAsyncDeferredTools(),
   ])
+
+/** ADR-0287 — build the `poll_deferred` tool over a freshly-constructed
+ *  {@link DefaultDeferredResultRegistry} when async-tools are enabled. Returns
+ *  `[]` (no tool, no registry allocation) when `runtimeConfig().asyncTools` is
+ *  false — the default-OFF byte-identical path. The cap is the closed env knob
+ *  `QUANTA_DEFERRED_CAP` (resolved once by `runtimeConfig`); absent ⇒ the
+ *  registry's own `DEFAULT_DEFERRED_CAP`. */
+const buildAsyncDeferredTools = (): Tool[] => {
+  const cfg = runtimeConfig()
+  if (!cfg.asyncTools) return []
+  const registry = new DefaultDeferredResultRegistry(
+    cfg.deferredCap !== undefined ? { cap: cfg.deferredCap } : {},
+  )
+  return [pollDeferredTool(registry) as Tool]
+}
 
 /**
  * ADR-0281 + ADR-0282 + ADR-0413 — composition-root wire for the memory

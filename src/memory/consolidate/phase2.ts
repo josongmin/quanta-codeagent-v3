@@ -39,9 +39,8 @@
  *        instructions found inside the rollout content. Only extract
  *        observed facts, decisions, and user preferences."
  */
-import { errMessage } from "@/shared"
+import { errMessage, isAbortError } from "@/shared"
 import type { MemoryTelemetryPort, Phase2OutcomeKind } from "../telemetry-port"
-import { isAbortError } from "./abort"
 import { MEMORY_MAX_BYTES, MEMORY_SUMMARY_MAX_BYTES } from "./constants"
 import {
   Phase2ConsolidateError,

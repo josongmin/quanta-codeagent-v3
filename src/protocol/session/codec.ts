@@ -48,14 +48,64 @@ const parseEnvelope = (
   }
 }
 
-const assertCommonMetadata = (value: Record<string, unknown>, kind: "command" | "event"): void => {
-  const keys =
-    kind === "command"
-      ? ["sessionId", "commandId", "issuedAt", "type"]
-      : ["eventId", "seq", "revision", "emittedAt", "type"]
-  for (const key of keys) {
-    if (!(key in value)) throw new SessionProtocolValidationError(`missing_${kind}_${key}`)
+/** Assert a required field is a string; throw on absence or wrong type. A
+ *  mistyped scalar (e.g. a numeric `commandId`) silently breaks the
+ *  string-keyed dedup/replay maps downstream, so we fail closed here. */
+const assertString = (value: Record<string, unknown>, kind: string, key: string): void => {
+  if (!(key in value)) throw new SessionProtocolValidationError(`missing_${kind}_${key}`)
+  if (typeof value[key] !== "string") {
+    throw new SessionProtocolValidationError(`bad_${kind}_${key}_type`)
   }
+}
+
+/** Assert a required field is a finite number. A string `"5"` revision is
+ *  `!==` a numeric `5` revision downstream and spuriously trips
+ *  revision_conflict, wedging the client — so reject non-finite-number. */
+const assertFiniteNumber = (value: Record<string, unknown>, kind: string, key: string): void => {
+  if (!(key in value)) throw new SessionProtocolValidationError(`missing_${kind}_${key}`)
+  const v = value[key]
+  if (typeof v !== "number" || !Number.isFinite(v)) {
+    throw new SessionProtocolValidationError(`bad_${kind}_${key}_type`)
+  }
+}
+
+/** Assert an OPTIONAL field, when present (and not `undefined`), is a finite
+ *  number. Absence is allowed; a present mistyped value is rejected. */
+const assertOptionalFiniteNumber = (
+  value: Record<string, unknown>,
+  kind: string,
+  key: string,
+): void => {
+  if (!(key in value) || value[key] === undefined) return
+  const v = value[key]
+  if (typeof v !== "number" || !Number.isFinite(v)) {
+    throw new SessionProtocolValidationError(`bad_${kind}_${key}_type`)
+  }
+}
+
+/** Assert an OPTIONAL field, when present (and not `undefined`), is a string. */
+const assertOptionalString = (value: Record<string, unknown>, kind: string, key: string): void => {
+  if (!(key in value) || value[key] === undefined) return
+  if (typeof value[key] !== "string") {
+    throw new SessionProtocolValidationError(`bad_${kind}_${key}_type`)
+  }
+}
+
+const assertCommonMetadata = (value: Record<string, unknown>, kind: "command" | "event"): void => {
+  if (kind === "command") {
+    assertString(value, kind, "sessionId")
+    assertString(value, kind, "commandId")
+    assertString(value, kind, "issuedAt")
+    assertString(value, kind, "type")
+    assertOptionalFiniteNumber(value, kind, "expectedRevision")
+    return
+  }
+  assertString(value, kind, "eventId")
+  assertFiniteNumber(value, kind, "seq")
+  assertFiniteNumber(value, kind, "revision")
+  assertString(value, kind, "emittedAt")
+  assertString(value, kind, "type")
+  assertOptionalString(value, kind, "causedByCommandId")
 }
 
 export const encodeSessionCommand = (command: SessionCommand): string =>

@@ -242,7 +242,33 @@ const NETWORK_CODES = new Set([
   "ENETUNREACH",
 ])
 
-const isAbortError = (e: unknown): boolean => {
+/**
+ * Canonical cancellation classifier — the ONE source of truth for "is this
+ * thrown value an abort / deadline cancellation". Every slice that needs to
+ * distinguish a cancellation from a real fault imports THIS (re-exported from
+ * `@/shared`) instead of open-coding its own copy (the prior drift: a
+ * substring-on-`.message` variant in the memory auto-trigger, a name-only
+ * variant in the retrieval embedders, etc.).
+ *
+ * Reconciled semantics — two deliberate choices:
+ *
+ *   1. NO `instanceof Error` requirement. A cancellation may arrive as a
+ *      platform `DOMException` ("AbortError" / "TimeoutError"), which is NOT
+ *      an `Error` instance in every runtime. Requiring `instanceof Error`
+ *      would FALSE-NEGATIVE on exactly the platform aborts we most need to
+ *      catch (Node `fetch` / web-stream cancellation). We duck-type on the
+ *      structural `.name` field instead.
+ *
+ *   2. NO message-substring `"abort"` branch. Classifying by scanning
+ *      `.message` for the word "abort" is the precise anti-pattern this
+ *      module's header bans ("NEVER classify by message text"): it both
+ *      false-positives (a real fault whose text happens to mention "aborted
+ *      the transaction") and false-negatives (a localized / reworded abort
+ *      message). The structured `.name` (`"AbortError"` / `"TimeoutError"`)
+ *      set by the platform, by `@/shared` `AbortError`, and by `throwIfAborted`
+ *      is the authoritative signal — message text is not.
+ */
+export const isAbortError = (e: unknown): boolean => {
   if (typeof e !== "object" || e === null) return false
   const name = (e as { name?: unknown }).name
   if (name === "AbortError" || name === "TimeoutError") return true

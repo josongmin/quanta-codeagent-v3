@@ -3,7 +3,7 @@ title: JWKS agent identity — remote JWK fetch + cache + verify (ADR-0248)
 section: 3
 subsystem: Security — hexagonal JWKS verifier slice (verify-only foundation)
 order: 248
-maturity: L4
+maturity: L2
 status: new
 ui_surfaces: []
 monitoring: n-a

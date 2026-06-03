@@ -26,6 +26,7 @@
 import {
   type AxisStep,
   type HITLTier,
+  inferToolTier,
   type InspectToolMeta,
   inspectPermission,
   listHardDenyRuleDescriptors,
@@ -46,24 +47,25 @@ const TIER_ORDER: readonly HITLTier[] = [
   "none",
 ]
 
-/** Resolve the effective HITL tier for a tool, MIRRORING `inferToolTier` in
- *  `@/permission/policy.ts`. Inlined here (single-call, no `input` available
- *  at /permission time) so we don't have to fake an input shape just to read
- *  the tier. The fallback path is byte-identical: read-only ⇒ "none";
- *  mutating with no explicit `hitlTier` ⇒ "always-confirm" (fail-closed). */
+/** Resolve the effective HITL tier for a tool by delegating to the REAL gate
+ *  helper {@link inferToolTier} from `@/permission` — so the `/permission`
+ *  inspector can NEVER drift from the production fail-closed fallback
+ *  (read-only ⇒ "none"; mutating with no explicit `hitlTier` ⇒
+ *  "always-confirm"). We pass `undefined` as input (no concrete `input` is
+ *  available at /permission time): a tool's classifier returns its static
+ *  declaration or mutating default on `undefined`, and unmapped tools take the
+ *  shared fail-closed fallback. A classifier that throws on `undefined` input
+ *  (it needs a concrete shape) degrades to the same fallback rather than
+ *  crashing the slash command. */
 const resolveToolTier = (tool: Tool): HITLTier => {
-  // We pass `undefined` as input — the existing `bash` classifier returns
-  // its mutating-default tier on undefined; other tools return their static
-  // declaration. For unknown tools we hand back the fail-closed fallback.
-  if (typeof tool.hitlTier === "function") {
-    try {
-      return tool.hitlTier(undefined as never)
-    } catch {
-      // A tool whose classifier needs a non-undefined input falls back to
-      // the static inference rule. Never crash the slash command.
-    }
+  try {
+    return inferToolTier(tool, undefined)
+  } catch {
+    // A tool whose classifier requires a non-undefined input falls back to
+    // the static inference rule — identical to `inferToolTier`'s own
+    // fail-closed branch. Never crash the slash command.
+    return tool.isReadOnly() ? "none" : "always-confirm"
   }
-  return tool.isReadOnly() ? "none" : "always-confirm"
 }
 
 interface ToolRow {

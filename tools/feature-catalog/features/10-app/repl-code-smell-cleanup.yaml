@@ -3,7 +3,7 @@ title: REPL code-smell cleanup — STATUS_FLASH config + string drift + silent-c
 section: 10
 subsystem: REPL discipline — env-back constants + telemetry + cast hardening
 order: 27
-maturity: L4
+maturity: L2
 status: new
 ui_surfaces: [cli]
 monitoring: integrated

@@ -3,7 +3,7 @@ title: Per-tool TTL drift detector — config-vs-RECOMMENDED preset divergence a
 section: 8
 subsystem: 텔레메트리 — tool-dedup config drift surface (ADR-0183)
 order: 119
-maturity: L4
+maturity: L2
 status: new
 ui_surfaces: [cli]
 monitoring: integrated

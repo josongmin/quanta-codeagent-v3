@@ -3,7 +3,7 @@ title: ShadowOdb/Tool instrument wraps + AlertManager routing + Grafana provisio
 section: 8
 subsystem: metrics export (ADR-0144/0158/0159)
 order: 116
-maturity: L4
+maturity: L2
 status: stable
 ui_surfaces: [n-a]
 monitoring: n-a

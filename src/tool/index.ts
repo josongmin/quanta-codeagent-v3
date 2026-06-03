@@ -2,6 +2,7 @@ import type { OsSandboxProfile } from "@/runtime"
 import type { AutomationEnginePort } from "@/scheduler/automation-engine"
 import type { FileSystemPort } from "@/storage"
 import { applyPatchTool } from "./apply-patch"
+import { makeApplyPatchStructuredTool } from "./apply-patch-structured-tool"
 import { automationUpdateTool } from "./automation_update"
 import { makeBashTool } from "./bash"
 import { bashAwaitTool } from "./bash/await"
@@ -28,6 +29,7 @@ import { webFetchTool } from "./web"
 import { makeWriteTool, writeTool } from "./write"
 
 export { applyPatchTool, FsJailViolationError } from "./apply-patch"
+export { makeApplyPatchStructuredTool } from "./apply-patch-structured-tool"
 // ADR-0296 — async-shell sibling tools to `bash` (timeout_behavior=background).
 export {
   type BashAwaitInput,
@@ -158,6 +160,16 @@ export {
   parseTestFailure,
   parseTestFailureTool,
 } from "./parse-test-failure"
+// `poll_deferred` tool (ADR-0287). Caller-wired: the composition root builds it
+// over a `DefaultDeferredResultRegistry` ONLY when `runtimeConfig().asyncTools`
+// is true (default-OFF). NOT part of `defaultTools` — same pattern as
+// `mcp_tasks_*` / `shadow_*` / `subagent_*_bg`. The factory + input schema/type
+// are re-exported so a composition root can opt in with one line.
+export {
+  type PollDeferredInput,
+  pollDeferredInputSchema,
+  pollDeferredTool,
+} from "./poll_deferred"
 export {
   buildPlanTools,
   createPlanTool,
@@ -331,6 +343,13 @@ export interface DefaultToolPorts {
    *  tier for ALL commands (intended posture: no sandbox = unknown risk).
    *  Hosts that wire a profile MUST thread it through here. */
   sandboxProfile?: OsSandboxProfile
+  /** ADR-0464 — when true, append `apply_patch_structured` (per-file-isolated
+   *  V4A apply with self-correction `messageForModel` hints). Absent/false ⇒
+   *  tool NOT registered (byte-identical default menu). The composition root
+   *  passes this only when `QUANTA_ENABLE_STRUCTURED_PATCH === "1"` (see
+   *  src/apps/agent/index.ts). No port to inject — the tool builds an
+   *  `FsJailFileSystemPort` from `ctx.cwd` per call, identical to `apply_patch`. */
+  structuredPatch?: boolean
 }
 
 export { automationUpdateTool } from "./automation_update"
@@ -350,6 +369,12 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => {
   // tool). Present ⇒ closure-over-engine tool is appended.
   if (ports.automationEngine !== undefined) {
     base.push(automationUpdateTool(ports.automationEngine) as Tool)
+  }
+  // ADR-0464 — conditional registration of apply_patch_structured. Absent/false
+  // ⇒ default set is byte-identical. Present ⇒ per-file-isolated apply tool is
+  // appended (builds the FsJail port from ctx.cwd per call, like apply_patch).
+  if (ports.structuredPatch === true) {
+    base.push(makeApplyPatchStructuredTool() as Tool)
   }
   return base
 }

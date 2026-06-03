@@ -3,7 +3,7 @@ title: Connectors REST registry — dynamic server-driven catalog (ADR-0160 W7 P
 section: 9
 subsystem: Connectors (ADR-0160)
 order: 60
-maturity: L4
+maturity: L2
 status: new
 ui_surfaces: [n-a]
 monitoring: n-a

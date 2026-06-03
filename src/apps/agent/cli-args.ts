@@ -534,6 +534,22 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
     throw new AgentArgsError(`-p/--prompt is only valid with --mode headless`)
   }
 
+  // The OTHER direction — each mode that REQUIRES its companion flag must
+  // receive it. The one-directional guards above reject a flag on the wrong
+  // mode; without these the mode would start with no work to do (e.g. `--mode
+  // headless` with no prompt, `--mode batch` with no corpus) and either hang
+  // or fault deeper at the runner edge. Throwing AgentArgsError here surfaces
+  // it as exit 64 / EX_USAGE with usage text, same as the guards above.
+  if (mode === "ci-bot" && pr === undefined) {
+    throw new AgentArgsError(`--pr is required with --mode ci-bot`)
+  }
+  if (mode === "batch" && corpus === undefined) {
+    throw new AgentArgsError(`--corpus is required with --mode batch`)
+  }
+  if (mode === "headless" && prompt === undefined) {
+    throw new AgentArgsError(`-p/--prompt is required with --mode headless`)
+  }
+
   const out: AgentArgs = { mode, dials, help: false }
   if (model !== undefined) out.model = model
   if (provider !== undefined) out.provider = provider

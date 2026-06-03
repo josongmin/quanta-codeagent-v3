@@ -1043,6 +1043,18 @@ const maybeCompact = async (
       appendSummary(archive, entry)
       config.stream.emit({ type: "context_compacted", ...entry })
     }
+  } else if (result.reason === "no_boundary") {
+    // Over budget but the transcript is one indivisible giant turn the orphan-
+    // safe boundary cannot split — `compactIfNeeded` no-op'd. Without a strike
+    // here the proactive `maxNoProgressProactive` cap can NEVER trip on a
+    // giant-turn transcript: the over-threshold autocompact silently no-ops
+    // every turn (gaining no headroom) and the breaker, only fed inside the
+    // `compacted` branch above, never advances toward `check()` aborting.
+    // Feed it a zero-progress strike (before == after) so the cap can trip and
+    // route the abort through the same terminal path as the reactive site.
+    // `under_threshold` (benign) and `deferred` (host chose to wait) are NOT
+    // strikes — only this genuine no-progress-under-pressure case is.
+    breaker?.recordProactive(before, before)
   }
   return { abort: false }
 }

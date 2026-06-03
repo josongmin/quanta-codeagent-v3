@@ -14,6 +14,7 @@ import type { RuntimeContext } from "@/sdk/runtime"
 import { clearFsJailDecisionSink, setFsJailDecisionSink } from "@/storage"
 import type { StreamPort } from "@/stream"
 import type { TaskRegistry } from "@/subagent"
+import { maybeRunEnvProbeWire } from "./env-probe-wire"
 import type { BranchProgressTracker } from "../branch-search-progress"
 import type { CostPanel } from "../cost-panel"
 import type { DebugCmdState } from "../debug-cmd"
@@ -260,6 +261,12 @@ export const setupSession = async (
   // pill module switches to reading from the store instead, the call
   // remains a no-op (same value re-applied).
   pills.update({ effort: boot.effortStore.get() })
+
+  // ADR-0466 — one-shot startup environment probe. Default-OFF: a no-op that
+  // builds no exec port and spawns nothing unless QUANTA_ENABLE_ENV_PROBE="1".
+  // Awaited so a degradation notice (missing toolchain / test runner) lands
+  // before the first prompt; no-throw (worst case: empty warnings).
+  await maybeRunEnvProbeWire({ env: runtime.env, logger: boot.slog, stream: turnStream })
 
   // ADR-0292 — narrow the host's opaque ports back to their CLI-surface
   // concrete types at the seam. The host result types them as `unknown`

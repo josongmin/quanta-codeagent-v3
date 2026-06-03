@@ -3,7 +3,7 @@ title: EmbedBatcher — 50ms window + single-flight dedupe + provider batch_size
 section: 4
 subsystem: retrieval slice — embed-batcher (ADR-0264)
 order: 95
-maturity: L4
+maturity: L2
 status: new
 ui_surfaces: [n-a]
 monitoring: n-a
