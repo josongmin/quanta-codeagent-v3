@@ -81,6 +81,7 @@ export {
   redactValue,
   TRAJECTORY_SCHEMA,
 } from "./trajectory"
+export { AGENT_PROMPT_MODES } from "./turn-policy-types"
 export type {
   AgentPromptMode,
   PromptBaseSystem,

@@ -1,6 +1,19 @@
 import type { PromptCacheRetention } from "./llm-route-types"
 
-export type AgentPromptMode = "default" | "plan" | "review" | "audit" | "architect" | "editor"
+/** Single source of truth for the prompt-mode set. The {@link AgentPromptMode}
+ *  union is DERIVED from this array, so any consumer that needs the runtime
+ *  values (e.g. `/sticky-model` arg validation + tab-completion) reuses THIS
+ *  list — there is no second hand-maintained copy that could silently drift
+ *  from the union. */
+export const AGENT_PROMPT_MODES = [
+  "default",
+  "plan",
+  "review",
+  "audit",
+  "architect",
+  "editor",
+] as const
+export type AgentPromptMode = (typeof AGENT_PROMPT_MODES)[number]
 
 export type PromptSystemLayout = "single_block" | "four_section"
 export type PromptBaseSystem = "default" | "caller_provided"

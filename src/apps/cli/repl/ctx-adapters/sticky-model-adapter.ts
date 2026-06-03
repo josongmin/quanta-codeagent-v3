@@ -13,18 +13,14 @@
 
 import type { AgentMode } from "@/agent"
 import type { StickyModelStore } from "@/agent/sticky-model"
+import { AGENT_PROMPT_MODES } from "@/shared"
 
-/** The prompt-mode union `/sticky-model` accepts as its `<mode>` arg. Kept as a
- *  literal array (the `satisfies` pins it to `AgentMode`) so the command can
- *  list + validate without a runtime enum — none exists for this union. */
-export const STICKY_MODEL_MODES = [
-  "default",
-  "plan",
-  "review",
-  "audit",
-  "architect",
-  "editor",
-] as const satisfies readonly AgentMode[]
+/** The prompt modes `/sticky-model` accepts as its `<mode>` arg. REUSES the
+ *  single source of truth ({@link AGENT_PROMPT_MODES}) from which the
+ *  `AgentMode` union is itself derived — so this list can NEVER silently drift
+ *  from the union (a hand-maintained copy with `satisfies` would compile fine
+ *  while missing a newly-added mode; this cannot). */
+export const STICKY_MODEL_MODES: readonly AgentMode[] = AGENT_PROMPT_MODES
 
 export type StickyModelSetOutcome =
   | "ok"
