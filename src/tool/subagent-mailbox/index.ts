@@ -71,11 +71,7 @@ const CORRELATION_ID_MAX = 128
 const READ_LIMIT_MAX = 256
 
 export const subagentSendMessageSchema = z.object({
-  to: z
-    .string()
-    .min(1)
-    .max(TO_MAX)
-    .describe('Target agent id, "*" broadcast, or "parent".'),
+  to: z.string().min(1).max(TO_MAX).describe('Target agent id, "*" broadcast, or "parent".'),
   kind: z.enum(KIND_ENUM),
   body: z.string().min(1).max(8000),
   correlation_id: z.string().max(CORRELATION_ID_MAX).optional(),
