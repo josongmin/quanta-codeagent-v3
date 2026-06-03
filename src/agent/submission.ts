@@ -91,7 +91,7 @@ export type SubmissionOp =
  *  `submission-set-mode-hell.test.ts` exhaustive-coverage assertion fails CI
  *  otherwise. Mirrors `RESPONSE_QUEUED_REASONS` / `ALL_PAUSED_REASONS` in
  *  shape. Frozen so accidental mutation by a consumer is a hard error. */
-export const ALL_SUBMISSION_OP_KINDS: readonly SubmissionOp["kind"][] = Object.freeze([
+export const ALL_SUBMISSION_OP_KINDS = Object.freeze([
   "user_input",
   "user_input_with_turn_context",
   "interrupt",
@@ -99,7 +99,13 @@ export const ALL_SUBMISSION_OP_KINDS: readonly SubmissionOp["kind"][] = Object.f
   "shutdown",
   "reload_user_config",
   "set_mode",
-] as const)
+] as const satisfies readonly SubmissionOp["kind"][])
+// Drift guard: outer annotation removed so `[number]` is the literal tuple;
+// Assert proves every SubmissionOp arm is listed. New arm missing → build error.
+type _AssertSubOp<T extends true> = T
+export type _SubmissionOpKindsDriftGuard = _AssertSubOp<
+  SubmissionOp["kind"] extends (typeof ALL_SUBMISSION_OP_KINDS)[number] ? true : false
+>
 
 /**
  * Typed submission envelope.

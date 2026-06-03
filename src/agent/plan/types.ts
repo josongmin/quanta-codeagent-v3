@@ -44,13 +44,21 @@ export type TodoStatus = "pending" | "in_progress" | "completed" | "cancelled" |
 
 /** All {@link TodoStatus} values as a frozen readonly array. Used by enum-
  *  coverage tests + UI iteration. */
-export const ALL_TODO_STATUSES: readonly TodoStatus[] = Object.freeze([
+export const ALL_TODO_STATUSES = Object.freeze([
   "pending",
   "in_progress",
   "completed",
   "cancelled",
   "blocked",
-] as const)
+] as const satisfies readonly TodoStatus[])
+// Drift guard: `satisfies` = array⊆union; Assert = union⊆array. The outer
+// annotation was removed so `[number]` is the literal tuple (not the widened
+// union, which would make this reverse check trivially true). A new TodoStatus
+// missing from the array → build error.
+type _AssertTodo<T extends true> = T
+export type _TodoStatusesDriftGuard = _AssertTodo<
+  TodoStatus extends (typeof ALL_TODO_STATUSES)[number] ? true : false
+>
 
 /** Terminal statuses (no outgoing transitions). Used by `transitions.ts`. */
 export const TERMINAL_TODO_STATUSES: readonly TodoStatus[] = Object.freeze([
@@ -153,14 +161,18 @@ export type PlanDelta =
   | { readonly kind: "noop"; readonly plan: Plan }
 
 /** All {@link PlanDeltaKind} values for enum-coverage tests. */
-export const ALL_PLAN_DELTA_KINDS: readonly PlanDeltaKind[] = Object.freeze([
+export const ALL_PLAN_DELTA_KINDS = Object.freeze([
   "created",
   "todos_added",
   "todos_updated",
   "todos_removed",
   "phases_reordered",
   "noop",
-] as const)
+] as const satisfies readonly PlanDeltaKind[])
+type _AssertDelta<T extends true> = T
+export type _PlanDeltaKindsDriftGuard = _AssertDelta<
+  PlanDeltaKind extends (typeof ALL_PLAN_DELTA_KINDS)[number] ? true : false
+>
 
 /**
  * Closed mutation-error taxonomy. Every reducer in `mutations.ts` returns
@@ -213,7 +225,7 @@ export type PlanMutationError =
 /** Closed list of {@link PlanMutationError} `kind` values for the enum-
  *  coverage test + tool-layer reason mapping. */
 export type PlanMutationErrorKind = PlanMutationError["kind"]
-export const ALL_PLAN_MUTATION_ERROR_KINDS: readonly PlanMutationErrorKind[] = Object.freeze([
+export const ALL_PLAN_MUTATION_ERROR_KINDS = Object.freeze([
   "version_conflict",
   "todo_not_found",
   "phase_not_found",
@@ -224,7 +236,11 @@ export const ALL_PLAN_MUTATION_ERROR_KINDS: readonly PlanMutationErrorKind[] = O
   "invalid_status_transition",
   "duplicate_id",
   "empty_plan_create",
-] as const)
+] as const satisfies readonly PlanMutationErrorKind[])
+type _AssertPlanErr<T extends true> = T
+export type _PlanMutationErrorKindsDriftGuard = _AssertPlanErr<
+  PlanMutationErrorKind extends (typeof ALL_PLAN_MUTATION_ERROR_KINDS)[number] ? true : false
+>
 
 /**
  * Mutation result envelope. Result-monad over delta + typed error so callers

@@ -86,13 +86,19 @@ export interface ControlExpectation {
 
 /** All action kinds enumerated — mirrors {@link ALL_REJECTION_REASONS}'s
  *  contract for runtime exhaustiveness assertions without `as const`. */
-export const ALL_ACTION_KINDS: ReadonlyArray<ConversationAction["kind"]> = [
+export const ALL_ACTION_KINDS = [
   "user_message",
   "cancel",
   "cancel_subagent",
   "summarize",
   "resume",
-]
+] as const satisfies readonly ConversationAction["kind"][]
+// Drift guard: outer annotation removed so `[number]` is the literal tuple;
+// Assert proves every ConversationAction arm is listed. New arm → build error.
+type _AssertAct<T extends true> = T
+export type _ActionKindsDriftGuard = _AssertAct<
+  ConversationAction["kind"] extends (typeof ALL_ACTION_KINDS)[number] ? true : false
+>
 
 /**
  * Separator inserted between each `prepend[]` line and the `input` for a
@@ -127,11 +133,18 @@ export type ActionRejectionReason =
 
 /** All action rejection reasons enumerated — the steer reasons plus the two
  *  control-specific additions. Mirrors {@link ALL_REJECTION_REASONS}. */
-export const ALL_ACTION_REJECTION_REASONS: ReadonlyArray<ActionRejectionReason> = [
+export const ALL_ACTION_REJECTION_REASONS = [
   ...ALL_REJECTION_REASONS,
   "control_turn_mismatch",
   "not_interrupted",
-]
+] as const satisfies readonly ActionRejectionReason[]
+// Drift guard: ALL_REJECTION_REASONS is now a const tuple so this spread is
+// literal too; Assert proves every ActionRejectionReason (steer reasons + the 2
+// control additions) is listed. New reason → build error.
+type _AssertActRej<T extends true> = T
+export type _ActionRejectionDriftGuard = _AssertActRej<
+  ActionRejectionReason extends (typeof ALL_ACTION_REJECTION_REASONS)[number] ? true : false
+>
 
 /**
  * Discriminated outcome of {@link decideAction}. Three arms:

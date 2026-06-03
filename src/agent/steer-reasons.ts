@@ -28,7 +28,7 @@ export type SteerRejectionReason =
 
 /** All rejection reasons enumerated — used by tests for exhaustive
  *  coverage assertions without `as const` gymnastics. */
-export const ALL_REJECTION_REASONS: ReadonlyArray<SteerRejectionReason> = [
+export const ALL_REJECTION_REASONS = [
   "no_active_turn",
   "expected_turn_mismatch",
   "non_steerable_review",
@@ -37,4 +37,10 @@ export const ALL_REJECTION_REASONS: ReadonlyArray<SteerRejectionReason> = [
   "empty_input",
   "input_too_large",
   "interrupted",
-]
+] as const satisfies readonly SteerRejectionReason[]
+// Drift guard: outer annotation removed so `[number]` is the literal tuple;
+// Assert proves every SteerRejectionReason is listed. New reason → build error.
+type _AssertSteer<T extends true> = T
+export type _SteerReasonsDriftGuard = _AssertSteer<
+  SteerRejectionReason extends (typeof ALL_REJECTION_REASONS)[number] ? true : false
+>

@@ -88,7 +88,19 @@ export class TurnHeaderInvalidError extends Error {
 
 /** Closed set of TurnKind literals — exposed for runtime exhaustiveness
  *  tests without `as const` gymnastics. */
-export const ALL_TURN_KINDS: ReadonlyArray<TurnKind> = ["main", "review", "compact", "standalone"]
+export const ALL_TURN_KINDS = [
+  "main",
+  "review",
+  "compact",
+  "standalone",
+] as const satisfies readonly TurnKind[]
+// Drift guard: `as const satisfies` = array⊆union; Assert = union⊆array. New
+// TurnKind missing from the tuple → build error (was: a widened annotation made
+// any reverse check trivially true).
+type _AssertTurn<T extends true> = T
+export type _TurnKindsDriftGuard = _AssertTurn<
+  TurnKind extends (typeof ALL_TURN_KINDS)[number] ? true : false
+>
 
 const isTurnKindLiteral = (value: string): value is TurnKind =>
   (ALL_TURN_KINDS as ReadonlyArray<string>).includes(value)
