@@ -569,6 +569,25 @@ const stickyModelCmd: SlashCommand = {
     ctx.err(`/sticky-model: write failed — ${res.message}\n`)
     return 1
   },
+  complete: (args, partial, ctx) => {
+    if (ctx.stickyModel === undefined) return []
+    const seed = partial.toLowerCase()
+    // arg 0 = <mode>; arg 1 = <modelId>. `args` excludes the partial token, so
+    // length 0 ⇒ completing the mode, length 1 ⇒ completing the modelId.
+    if (args.length === 0) {
+      return ctx.stickyModel
+        .modes()
+        .filter((m) => m.toLowerCase().startsWith(seed))
+        .map((m) => ({ value: m, kind: "argument" as const }))
+    }
+    if (args.length === 1) {
+      return ctx.stickyModel
+        .candidates()
+        .filter((id) => id.toLowerCase().startsWith(seed))
+        .map((id) => ({ value: id, kind: "argument" as const }))
+    }
+    return []
+  },
 }
 
 const FOCUS_CHAIN_SUBCMDS = ["show", "reset", "skip"] as const

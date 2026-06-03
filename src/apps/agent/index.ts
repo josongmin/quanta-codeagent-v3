@@ -61,11 +61,7 @@ import {
   type ObservabilityWireHandle,
   wireObservability,
 } from "@/agent/observability-wire"
-import {
-  fsBackedStickyModelStore,
-  inMemoryStickyModelStore,
-  type StickyModelStore,
-} from "@/agent/sticky-model"
+import { fsBackedStickyModelStore, type StickyModelStore } from "@/agent/sticky-model"
 import { createSubagentRunner } from "@/agent/subagent-runner"
 import {
   AGENT_MODES,
@@ -652,15 +648,14 @@ const resolveStickyModelStore = (
   stickyModel: boolean | undefined,
 ): { readonly store: StickyModelStore } | undefined => {
   if (stickyModel !== true) return undefined
-  try {
-    return { store: fsBackedStickyModelStore() }
-  } catch (e) {
-    // Defense-in-depth: a corrupted home dir or read-only fs should NOT
-    // crash the agent surface — fall back to in-memory and log. The store
-    // becomes process-scoped (no persistence across runs) but the agent runs.
-    logger.warn(`sticky-model fs store unavailable (${errMessage(e)}); falling back to in-memory.`)
-    return { store: inMemoryStickyModelStore() }
-  }
+  // Construction is IO-free (the store only computes its path; all fs access is
+  // deferred to get/set/load), so it cannot throw here — a try/catch + in-memory
+  // fallback would be dead code. A read-only fs or corrupt home dir surfaces as
+  // a TYPED result at the call site instead: get/load degrade to the global
+  // default, and set returns a `StickyModelWriteError` that `/sticky-model`
+  // renders ("write failed — …"). That is strictly more honest than a silent
+  // in-memory degrade where writes would vanish on exit.
+  return { store: fsBackedStickyModelStore() }
 }
 
 /** ADR-0236 — wire the tool-profile resolver slot when the CLI passes

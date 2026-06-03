@@ -20,7 +20,7 @@
  * retention discipline: never silently destroy user data).
  */
 
-import { mkdir, readFile } from "node:fs/promises"
+import { copyFile, mkdir, readFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import writeFileAtomic from "write-file-atomic"
@@ -137,13 +137,22 @@ export const fsBackedStickyModelStore = (opts?: FsBackedStickyModelStoreOpts): S
       // atomically replace. A torn write is impossible because the lib
       // writes to a sibling tmp file and rename(2)-promotes.
       //
-      // We tolerate `ok:false` on read (corruption / IO error) — the next
-      // write will overwrite the corrupt file with a fresh snapshot
-      // containing JUST the new entry, plus any entries the failed read
-      // could not surface. That is by-design: the store's contract is
-      // "best effort persistence" and the resolver falls back to the
-      // global default on any read failure.
+      // We tolerate `ok:false` on read (corruption / IO error): the write
+      // proceeds with a fresh snapshot containing JUST the new entry (the
+      // unreadable bytes yield no recoverable entries). To honor the file
+      // header's "never silently destroy user data" promise, FIRST copy the
+      // corrupt bytes to a `.corrupt.bak` sidecar so a hand-recoverable file
+      // is preserved for inspection before we overwrite it. Best-effort — a
+      // backup failure (the file may be genuinely gone on an ENOENT-shaped IO
+      // error) must NOT block making progress on a broken store.
       const current = await readSnapshot(path)
+      if (!current.ok) {
+        try {
+          await copyFile(path, `${path}.corrupt.bak`)
+        } catch {
+          // best-effort: nothing to preserve / unreadable — proceed with write
+        }
+      }
       const next: Record<string, string> = { ...current.snapshot, [input.mode]: input.modelId }
       try {
         await mkdir(dirname(path), { recursive: true })

@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, readFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -155,5 +155,61 @@ describe("ADR-0462 follow-up — /sticky-model SET surface hellgate", () => {
     // fresh disk read by an independent instance (mirrors loop.ts per-turn get)
     expect(await consumeSide.get({ mode: "plan" })).toBe("opus")
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ plan: "opus" })
+  })
+
+  // ── tab-completion (A) ────────────────────────────────────────────────────
+  test("CASE-13: complete arg0 suggests modes matching the partial", () => {
+    const store = inMemoryStickyModelStore()
+    const ctx = mkCtx({ stickyModel: buildStickyModelAdapter({ store }) }).ctx
+    const hints = stickyCmd().complete?.([], "a", ctx) ?? []
+    expect(hints.map((h) => h.value)).toEqual(["audit", "architect"])
+    expect(hints.every((h) => h.kind === "argument")).toBe(true)
+  })
+
+  test("CASE-14: complete arg1 suggests candidate modelIds matching the partial", () => {
+    const store = inMemoryStickyModelStore()
+    const adapter = buildStickyModelAdapter({
+      store,
+      candidateIds: ["opus-4", "sonnet-4", "haiku-4"],
+    })
+    const ctx = mkCtx({ stickyModel: adapter }).ctx
+    const hints = stickyCmd().complete?.(["plan"], "s", ctx) ?? []
+    expect(hints.map((h) => h.value)).toEqual(["sonnet-4"])
+  })
+
+  test("CASE-15: complete is inert when not wired / past arg1", () => {
+    const noCtx = mkCtx({}).ctx
+    expect(stickyCmd().complete?.([], "", noCtx) ?? []).toEqual([])
+    const store = inMemoryStickyModelStore()
+    const ctx = mkCtx({ stickyModel: buildStickyModelAdapter({ store }) }).ctx
+    expect(stickyCmd().complete?.(["plan", "opus"], "x", ctx) ?? []).toEqual([])
+  })
+
+  test("CASE-16: candidates() defaults to empty when none wired", () => {
+    const a = buildStickyModelAdapter({ store: inMemoryStickyModelStore() })
+    expect(a.candidates()).toEqual([])
+  })
+
+  // ── corrupt-file backup (B) ───────────────────────────────────────────────
+  test("CASE-17: set on a CORRUPT file preserves the bytes to .corrupt.bak before overwrite", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sticky-corrupt-"))
+    const path = join(dir, "sticky-model.json")
+    writeFileSync(path, "{ this is not json ::::")
+    const a = buildStickyModelAdapter({ store: fsBackedStickyModelStore({ path }) })
+    expect(await a.set("plan", "opus")).toBe("ok")
+    // the new entry landed...
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ plan: "opus" })
+    // ...and the corrupt bytes were preserved, not silently destroyed
+    expect(readFileSync(`${path}.corrupt.bak`, "utf8")).toBe("{ this is not json ::::")
+  })
+
+  test("CASE-18: set on a VALID file does NOT spawn a .corrupt.bak", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sticky-valid-"))
+    const path = join(dir, "sticky-model.json")
+    const a = buildStickyModelAdapter({ store: fsBackedStickyModelStore({ path }) })
+    await a.set("plan", "opus")
+    await a.set("review", "sonnet")
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ plan: "opus", review: "sonnet" })
+    expect(existsSync(`${path}.corrupt.bak`)).toBe(false)
   })
 })

@@ -229,6 +229,9 @@ export interface BuildReplSlashCtxArgs {
   /** ADR-0462 — `/sticky-model`: fs-backed per-mode model store. Absent ⇒
    *  the `/sticky-model` slot is omitted (slash prints "not wired"). */
   stickyModelStore?: StickyModelStore | undefined
+  /** ADR-0462 — known model ids for `<modelId>` tab-completion (current model +
+   *  configured candidates, deduped by the caller). Convenience only. */
+  stickyModelCandidateIds?: readonly string[] | undefined
   /** ADR-0291 — `/focus-chain`: authoritative session-owned tracker slot. */
   focusChain?: { readonly tracker: FocusChainPort; readonly reinjectEveryN?: number } | undefined
   /** Back-compat alias for older tests/callers; prefer `focusChain`. */
@@ -323,7 +326,12 @@ const maybeStickyModel = (
   args: BuildReplSlashCtxArgs,
 ): ReturnType<typeof buildStickyModelAdapter> | undefined => {
   if (args.stickyModelStore === undefined) return undefined
-  return buildStickyModelAdapter({ store: args.stickyModelStore })
+  return buildStickyModelAdapter({
+    store: args.stickyModelStore,
+    ...(args.stickyModelCandidateIds !== undefined
+      ? { candidateIds: args.stickyModelCandidateIds }
+      : {}),
+  })
 }
 
 /** Build the ADR-0291 adapters. Pure / no side effects; each gate is

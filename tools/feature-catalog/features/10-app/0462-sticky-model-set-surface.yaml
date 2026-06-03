@@ -45,6 +45,8 @@ evidence:
     - src/apps/cli/repl/surface-compose.ts
     - src/host/runtime/internal/context-binding.ts
     - src/sdk/runtime/context.ts
+    - src/agent/sticky-model/fs-backed-store.ts
+    - src/apps/agent/index.ts
   adrs: [462, 212]
   tests:
     unit:
@@ -58,14 +60,16 @@ knobs:
   - name: '--sticky-model'
     where: 'apps/agent composition root (ADR-0236)'
     purpose: 'activate the CONSUME side (loop reads the fs store); orthogonal to the SET command'
-deliberate_hold:
-  reason: "Surface-compose wires the store unconditionally (lazy, no IO) so /sticky-model always works; an explicit per-session gate is intentionally NOT added — the fs file is the SSOT and --sticky-model gates only reading."
-  promotion_path: "Tab-completion of mode names + modelId candidates from config.modelCandidates."
+deliberate_hold: null
 notes: |
-  Hellgate 12 cases: adapter set/list round-trip / invalid-mode typed reject (no
-  write) / empty-modelId reject / store-write-error surfaced (no throw) /
-  STICKY_MODEL_MODES = the 6 prompt modes / command registered / not-wired path /
-  no-arg listing / set confirmation / wrong arity exit 1 / unknown mode exit 1 /
-  two fs instances over one file (SET observed by a fresh reader = the consume
-  contract). The pre-existing name-pin tests (slash-commands, slash-registry-split)
-  updated to include /sticky-model.
+  Hellgate 18 cases. SET: adapter set/list round-trip / invalid-mode typed
+  reject (no write) / empty-modelId reject / store-write-error surfaced (no
+  throw) / STICKY_MODEL_MODES = the 6 prompt modes / command registered /
+  not-wired path / no-arg listing / set confirmation / wrong arity exit 1 /
+  unknown mode exit 1 / two fs instances over one file (SET observed by a fresh
+  reader = consume contract). TAB-COMPLETION: complete arg0 = modes by prefix /
+  arg1 = candidate modelIds by prefix / inert when unwired or past arg1 /
+  candidates() defaults empty. CORRUPT-FILE: set on a corrupt file copies the
+  bytes to `<path>.corrupt.bak` before overwrite (no silent data loss) / a valid
+  file spawns no sidecar. The pre-existing name-pin tests (slash-commands,
+  slash-registry-split) updated to include /sticky-model.

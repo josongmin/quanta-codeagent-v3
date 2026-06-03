@@ -78,6 +78,7 @@ export interface SlashContext {
   readonly stickyModel?:
     | {
         readonly modes: () => readonly string[]
+        readonly candidates: () => readonly string[]
         readonly list: () => Promise<Readonly<Record<string, string>>>
         readonly set: (
           mode: string,

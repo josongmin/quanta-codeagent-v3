@@ -34,6 +34,11 @@ export type StickyModelSetOutcome =
 export interface StickyModelAdapter {
   /** Valid mode names, for the `/sticky-model` listing + arg validation. */
   readonly modes: () => readonly string[]
+  /** Known model ids for `<modelId>` tab-completion (current model + any
+   *  configured candidates). A convenience hint set — NOT a validation gate;
+   *  `set` accepts any non-empty id, and an id with no matching candidate is an
+   *  advisory no-op on the consume side. Empty when the surface wired none. */
+  readonly candidates: () => readonly string[]
   /** Current `{mode → modelId}` snapshot (fresh disk read). */
   readonly list: () => Promise<Readonly<Record<string, string>>>
   /** Persist a per-mode sticky model. Typed outcome; never throws. */
@@ -45,8 +50,11 @@ const isStickyMode = (m: string): m is AgentMode =>
 
 export const buildStickyModelAdapter = (args: {
   readonly store: StickyModelStore
+  /** Known model ids for `<modelId>` completion (deduped by the caller). */
+  readonly candidateIds?: readonly string[]
 }): StickyModelAdapter => ({
   modes: (): readonly string[] => STICKY_MODEL_MODES,
+  candidates: (): readonly string[] => args.candidateIds ?? [],
   list: async (): Promise<Readonly<Record<string, string>>> => {
     // load() is no-throw by port contract; on corruption it returns ok:false
     // WITH a (possibly partial) snapshot, which is exactly what we want to show.

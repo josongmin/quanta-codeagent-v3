@@ -939,7 +939,14 @@ export const composeSurfaceWires = (
     // `/sticky-model` prints "not wired" — no silent black hole where a SET
     // succeeds but the loop never reads it.
     ...(setup.runtimeContext.stickyModelStore() !== undefined
-      ? { stickyModelStore: setup.runtimeContext.stickyModelStore()?.store }
+      ? {
+          stickyModelStore: setup.runtimeContext.stickyModelStore()?.store,
+          // `<modelId>` tab-completion source: the resolvable ids in this
+          // surface (current model + retry candidates), deduped. Convenience
+          // only — `/sticky-model` accepts any id (unknown ⇒ consume-side
+          // no-op), so this never gates input.
+          stickyModelCandidateIds: [...new Set([setup.model, ...retryCandidates.map((c) => c.id)])],
+        }
       : {}),
     textInbox,
     // Track D — `/context` live segmented usage getter over the surface-retained
