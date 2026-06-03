@@ -37,6 +37,7 @@ purpose: |
 evidence:
   code:
     - src/git/directive-emit/index.ts
+    - src/runner/knobs/knobs/git-directive.ts
     - src/git/directive-emit/types.ts
     - src/git/directive-emit/port.ts
     - src/git/directive-emit/phase-guard.ts

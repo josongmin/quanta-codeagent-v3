@@ -46,6 +46,7 @@ purpose: |
 evidence:
   code:
     - src/permission/autorun-eligibility.ts
+    - src/permission/autorun-eligibility-wire.ts
     - src/permission/index.ts
     - src/scheduler/runtime.ts
     - src/scheduler/types.ts

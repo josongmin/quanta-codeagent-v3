@@ -33,6 +33,7 @@ evidence:
     - src/tool/advisor/index.ts
     - src/agent/tier1/advisor.ts
     - src/runner/knobs/knobs/advisor.ts
+    - src/runner/assemble/interactive-knobs.ts
   adrs: ["docs/decisions/0429-advisor-consult-tool.md"]
   tests:
     unit:

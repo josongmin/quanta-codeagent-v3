@@ -28,6 +28,7 @@ purpose: |
 evidence:
   code:
     - src/agent/untrusted.ts
+    - src/shared/untrusted.ts
     - src/agent/prompt.ts
   adrs: []
   tests:

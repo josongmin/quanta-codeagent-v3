@@ -45,6 +45,9 @@ purpose: |
 evidence:
   code:
     - src/runtime/network-proxy/index.ts
+    - src/runtime/network-proxy/port.ts
+    - src/runtime/network-proxy/ssrf.ts
+    - src/runtime/network-proxy/types.ts
     - src/runtime/network-proxy/loopback-proxy.ts
     - src/runtime/network-proxy/lifecycle.ts
     - src/runtime/network-proxy/env.ts

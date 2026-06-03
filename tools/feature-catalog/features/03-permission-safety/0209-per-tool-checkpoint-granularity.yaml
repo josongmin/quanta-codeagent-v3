@@ -28,6 +28,7 @@ evidence:
     - src/agent/per-tool-checkpoint/port.ts
     - src/agent/per-tool-checkpoint/granular-policy.ts
     - src/agent/per-tool-checkpoint/index.ts
+    - src/apps/cli/repl/per-tool-checkpoint-wire.ts
   adrs:
     - docs/decisions/0209-per-tool-checkpoint-granularity.md
   tests:
