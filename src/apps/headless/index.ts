@@ -20,6 +20,7 @@
 
 import type { AgentOutcome } from "@/agent"
 import type { Message } from "@/llm"
+import { runSessionTurn as driveSessionTurn } from "@/runner/orchestrate/session-turn-driver"
 import {
   buildFakeBootstrapDeps,
   buildFakeRuntime,
@@ -176,12 +177,19 @@ export const runHeadlessOnce = async (input: HeadlessRunInput): Promise<Headless
         wires: summarizeHeadlessSessionWires(bridge.runtimeContext),
       }
     }
-    await bridge.session.input.append(input.prompt, undefined, { signal: bridge.boot.abort.signal })
-    const turn = await bridge.session.turn.run(undefined, { signal: bridge.boot.abort.signal })
-    if (turn.turn === undefined) {
-      throw new Error("headless SDK session completed without a turn payload")
-    }
-    const outcome = turn.turn.outcome
+    // ADR-0303 — share the runner-owned turn driver so headless gains the
+    // approval-resolution loop the CLI already had (previously headless did a
+    // SINGLE `turn.run` with no approval handling — a divergent re-implementation
+    // of the same primitive). Headless has no operator, so auto-approve to avoid
+    // deadlocking a no-operator run; non-approval turns are byte-identical (one
+    // append + one turn.run).
+    const turnResult = await driveSessionTurn({
+      session: bridge.session,
+      resolveApproval: async () => "approve",
+      text: input.prompt,
+      turnSignal: bridge.boot.abort.signal,
+    })
+    const outcome = turnResult.outcome
     const snapshot = await bridge.session.snapshot()
     return {
       ...buildHeadlessMeta({
@@ -193,7 +201,7 @@ export const runHeadlessOnce = async (input: HeadlessRunInput): Promise<Headless
         sessionId: bridge.boot.sessionId,
       }),
       outcome,
-      messages: turn.turn.messages,
+      messages: turnResult.messages,
       events: stream.events,
       snapshot,
       wires: summarizeHeadlessSessionWires(bridge.runtimeContext),

@@ -83,9 +83,13 @@ describe("mode-cycle permission authority hellgate (ADR-0303)", () => {
 
   test("CLI loop syncs the mode-cycle posture into the engine cell before each turn", () => {
     const loop = read("src/apps/cli/repl/session-loop.ts")
-    // the per-turn sync inside runSessionTurn, BEFORE session.input.append
-    expect(loop).toContain(
-      "runtimeContext.permissionModeState()?.set(ux.modeCycle.current().permissionMode)",
-    )
+    // The per-turn sync runs as the `beforeTurn` host hook handed to the shared
+    // runner-owned driver (ADR-0303 hoist): read the slash-local mode-cycle,
+    // write the engine-owned permissionModeState BEFORE the turn. Assert the
+    // behavior (engine cell set from the cycle's permissionMode), not the exact
+    // local variable name.
+    expect(loop).toContain("runtimeContext.permissionModeState()?.set(")
+    expect(loop).toContain(".current().permissionMode)")
+    expect(loop).toContain("beforeTurn")
   })
 })

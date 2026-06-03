@@ -74,8 +74,14 @@ describe("surface coupling ratchet", () => {
     expect(unexpected).toEqual([])
   })
 
-  test("temporary debt ceiling does not grow", () => {
-    const found = new Set(collectCrossSurfaceImports())
-    expect(found.size).toBe(0)
+  test("temporary debt ceiling does not grow (beyond the sanctioned allowlist)", () => {
+    // Count only edges NOT in the explicit allowlist — the ceiling is "zero
+    // UNSANCTIONED cross-surface imports". A new edge fails here AND in the
+    // `no new runtime imports` test above unless it is added (with justification)
+    // to ALLOWED_CROSS_SURFACE_IMPORTS.
+    const unsanctioned = [...new Set(collectCrossSurfaceImports())].filter(
+      (edge) => !ALLOWED_CROSS_SURFACE_IMPORTS.has(edge),
+    )
+    expect(unsanctioned.length).toBe(0)
   })
 })

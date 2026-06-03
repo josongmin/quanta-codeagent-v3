@@ -1,3 +1,35 @@
+// ADR-0303 thin-surface relocation — the env-READING "argv → AgentConfig base"
+// composition builder + the pure argv parser now live in this host layer (moved
+// DOWN out of `apps/agent`) so any surface — incl. `apps/cli`'s `batch`
+// subcommand — reaches them via `@/host/runtime` rather than sideways into a
+// sibling surface.
+export type { AssembleRequestPartial } from "./agent-arg-builder"
+export {
+  assembleMemoryAuto,
+  buildBaseFromArgs,
+  buildProfileDefinitionRegistry,
+  installCommandHooksIntoBase,
+  PERMISSION_PROFILE_SESSION_THREAD,
+  ProviderKeyMissingError,
+  pickMcpNegotiator,
+  resolveLayeredProfileSlots,
+  resolveLocalEnvSelection,
+  resolveObservabilityWire,
+  resolvePermissionModeFromProfile,
+  resolvePermissionProfileManager,
+  resolvePolicyMergeStrategy,
+  toAssembleRequest,
+} from "./agent-arg-builder"
+export {
+  type AgentArgs,
+  AgentArgsError,
+  formatHelp,
+  type IdentityModeToken,
+  type PermissionProfileToken,
+  type ProviderToken,
+  parseAgentArgs,
+  type ToolProfileToken,
+} from "./agent-args"
 export {
   type AssembleRequest,
   type AssembleRequestSeams,

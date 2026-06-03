@@ -32,6 +32,7 @@
  * this file does not assemble an agent loop itself, so it stays a leaf.
  */
 
+import { randomBytes } from "node:crypto"
 import { readFileSync, writeFileSync } from "node:fs"
 import {
   BatchJobRunner,
@@ -301,7 +302,7 @@ export const buildRowDispatchAdapter = (runner: SubagentRunner): RowDispatchPort
  *  concurrent runs never collide). Used only when the caller injects none. */
 const defaultIdGen = (): (() => string) => {
   let seq = 0
-  const salt = Math.random().toString(36).slice(2, 8)
+  const salt = randomBytes(3).toString("hex")
   return () => `batch-${salt}-${(seq++).toString(36)}`
 }
 

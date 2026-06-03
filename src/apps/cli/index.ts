@@ -136,8 +136,11 @@ const main = async (): Promise<void> => {
     const onSig = () => ac.abort()
     process.on("SIGINT", onSig)
     process.on("SIGTERM", onSig)
-    const [{ parseAgentArgs }, { buildBaseFromArgs, toAssembleRequest }, { createSubagentRunner }] =
-      await Promise.all([import("../agent/cli-args"), import("../agent"), import("@/agent")])
+    // ADR-0303 thin-surface — these moved DOWN into `@/host/runtime`, so the
+    // CLI reaches them by reaching DOWN (allowed) instead of sideways into
+    // `apps/agent` (a cross-surface edge the coupling ratchet forbids).
+    const [{ parseAgentArgs, buildBaseFromArgs, toAssembleRequest }, { createSubagentRunner }] =
+      await Promise.all([import("@/host/runtime"), import("@/agent")])
     // A headless parent config is enough to build the row-dispatch SubagentRunner
     // (batch never enters the parent's own agent loop — each row is a child, so
     // the placeholder `-p` is never consumed; it only satisfies headless arg
@@ -194,5 +197,13 @@ main().catch((e) => {
     process.exit(e.exitCode)
   }
   logger.error(`fatal: ${errMessage(e)}`)
-  process.exit(1)
+  // ADR-0303 — honor a typed launcher error's exit code (e.g. the batch path's
+  // ProviderKeyMissingError ⇒ 2, preserving the prior missing-credentials POSIX
+  // exit that `buildBaseFromArgs` used to `process.exit(2)` directly); generic
+  // errors stay exit 1.
+  const code =
+    typeof (e as { exitCode?: unknown })?.exitCode === "number"
+      ? (e as { exitCode: number }).exitCode
+      : 1
+  process.exit(code)
 })

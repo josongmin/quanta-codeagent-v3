@@ -7,8 +7,10 @@
  *     `result.deferred` — but NO composition root constructed a
  *     `DefaultDeferredResultRegistry` or registered `pollDeferredTool`, so the
  *     tool the model was instructed to call was never in any registry. This
- *     pins that BOTH composition roots (`apps/agent/index.ts buildBaseRegistry`
- *     + `apps/cli/internal.ts buildTooling`) now gate the registration on
+ *     pins that BOTH composition roots (the agent base builder
+ *     `@/host/runtime/agent-arg-builder.ts buildBaseRegistry` — relocated DOWN
+ *     out of `apps/agent/index.ts` per ADR-0303 — + `apps/cli/internal.ts
+ *     buildTooling`) now gate the registration on
  *     `runtimeConfig().asyncTools`, that `pollDeferredTool` is barrel-exported
  *     from `@/tool`, and — the live proof — that the wired tool actually round-
  *     trips against a `DefaultDeferredResultRegistry`.
@@ -58,7 +60,15 @@ import { DefaultDeferredResultRegistry } from "@/tool/deferred/default-registry"
 import type { ToolEvent, ToolResult } from "@/tool/types"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..", "..")
-const AGENT_INDEX = readFileSync(join(REPO_ROOT, "src", "apps", "agent", "index.ts"), "utf8")
+// ADR-0303 thin-surface relocation — the agent composition-root base builder
+// (`buildBaseFromArgs` + its `buildBaseRegistry` / `buildAsyncDeferredTools`
+// async-tools gate) moved DOWN out of `apps/agent/index.ts` into
+// `@/host/runtime/agent-arg-builder.ts`. The gate text now lives there; the
+// `apps/agent` surface entry just re-exports the builder.
+const AGENT_INDEX = readFileSync(
+  join(REPO_ROOT, "src", "host", "runtime", "agent-arg-builder.ts"),
+  "utf8",
+)
 const CLI_INTERNAL = readFileSync(join(REPO_ROOT, "src", "apps", "cli", "internal.ts"), "utf8")
 
 /** Drain a tool's async-iterable `execute` to its terminal `result`. */
@@ -167,9 +177,12 @@ describe("T10 — jail decision event has ONE source of truth (no shape drift)",
     const event = seen[0] as ReturnType<typeof buildFsJailDecisionEvent>
     // The emitted shape MUST match what the SSOT builder produces for the SAME
     // (canonicalized) offending path + root — drift here is the bug this closes.
-    expect(buildFsJailDecisionEvent({ path: event.metadata?.path as string, root: event.metadata?.root as string })).toEqual(
-      event,
-    )
+    expect(
+      buildFsJailDecisionEvent({
+        path: event.metadata?.path as string,
+        root: event.metadata?.root as string,
+      }),
+    ).toEqual(event)
     expect(event.kind).toBe("jail")
     expect(event.outcome).toBe("deny")
     expect(event.reason).toContain("path outside workspace:")

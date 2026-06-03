@@ -297,10 +297,17 @@ describe("T5 approval flow cli", () => {
   test("CLI source routes approval requests through approval.respond and rerun", () => {
     const sessionLoop = read("src/apps/cli/repl/session-loop.ts")
     const sdkTypes = read("src/sdk/runtime/types.ts")
+    // ADR-0303 — the approval-resolution loop was hoisted OUT of the surface
+    // into the shared runner-owned driver. The CLI now ROUTES through it: each
+    // turn funnels through `driveSessionTurn`, handing its operator resolver
+    // (`setup.approvalPrompt`) in. The actual `approval.respond` + deny-throw
+    // live in the driver — assert there, not in the surface.
+    const driver = read("src/runner/orchestrate/session-turn-driver.ts")
 
+    expect(sessionLoop).toContain("driveSessionTurn")
     expect(sessionLoop).toContain("setup.approvalPrompt")
-    expect(sessionLoop).toContain("session.approval.respond")
-    expect(sessionLoop).toContain('if (decision === "deny")')
+    expect(driver).toContain("session.approval.respond")
+    expect(driver).toContain('if (decision === "deny")')
     expect(sdkTypes).toContain("readonly approval:")
     expect(sdkTypes).toContain('decision: "approve" | "deny"')
   })

@@ -3,6 +3,7 @@ import { startAutomationEngineTicker } from "@/agent/loop-helpers"
 import type { Message, TextBlock } from "@/llm"
 import { buildAutorunEligibility } from "@/permission"
 import { injectSimulatedTurn, type LastTurnOutcome, REACTOR_ENV_FLAG } from "@/reactor"
+import { driveSessionTurn } from "@/runner/orchestrate"
 import { assembleAutomation } from "@/scheduler/runtime-wire"
 import type {
   RuntimeFacadeComposeOptions,
@@ -500,40 +501,13 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     closeStack.push({ label: "playbookSeam.detach", dispose: () => playbookSeam.detach() })
   }
 
-  type SessionTurnPayload = NonNullable<Awaited<ReturnType<typeof session.turn.run>>["turn"]>
-
-  const requireTurnPayload = (
-    result: Awaited<ReturnType<typeof session.turn.run>>,
-  ): SessionTurnPayload => {
-    if (result.turn === undefined) {
-      throw new Error("runtime session turn completed without a turn payload")
-    }
-    return result.turn
-  }
-
-  const completeRuntimeTurn = (
-    turn: SessionTurnPayload,
-  ): {
-    readonly messages: readonly Message[]
-    readonly outcomeReason?: AgentOutcome["reason"]
-  } => ({
-    messages: turn.messages,
-    ...(turn.outcome.reason !== undefined ? { outcomeReason: turn.outcome.reason } : {}),
-  })
-
-  const resolvePendingApproval = async (
-    approval: NonNullable<SessionTurnPayload["approvalRequest"]>,
-    turnSignal: AbortSignal,
-  ): Promise<void> => {
-    const decision = await setup.approvalPrompt(approval)
-    await session.approval.respond(approval.approvalId, decision, undefined, {
-      signal: turnSignal,
-    })
-    if (decision === "deny") {
-      throw new Error(`runtime session approval denied (${approval.reason})`)
-    }
-  }
-
+  // ADR-0303 — the `append → turn.run → resolve-approval → loop` turn-completion
+  // primitive lives below the surface in `@/runner/orchestrate` (driveSessionTurn)
+  // so the CLI interactive + one-shot branches AND headless share ONE definition.
+  // This thin adapter keeps the CLI-only concerns in the surface: the per-turn
+  // image drain (mutates surfaceState) and the §3.1 permission-posture sync (read
+  // the slash-local mode-cycle, write the engine-owned permissionModeState cell
+  // BEFORE the turn). Signature is preserved so the call sites are unchanged.
   const runSessionTurn = async (args: {
     readonly text: string
     readonly images?: readonly import("@/llm").ImageBlock[]
@@ -544,25 +518,24 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
   }> => {
     const { nextState, images } = drainTurnImages(surfaceState, args.images ?? [])
     surfaceState = nextState
-    // ADR-0303 — a mid-session `shift+tab` updates the slash-local mode-cycle
-    // pill instantly; sync its posture into the engine-owned
-    // `permissionModeState` BEFORE this turn so the admissibility gate reads the
-    // new mode LIVE (not only at the next `createSession`). The store is the UI
-    // input; the engine is the authority. No-op (byte-identical) when the cycle
-    // is not wired (`QUANTA_MODE_CYCLE` unset) or the host wired no state.
-    if (ux?.modeCycle !== undefined) {
-      runtimeContext.permissionModeState()?.set(ux.modeCycle.current().permissionMode)
-    }
-    await session.input.append(args.text, images.length > 0 ? { images } : undefined, {
-      signal: args.turnSignal,
+    // Capture in a const so the non-undefined narrowing survives into the
+    // beforeTurn closure (a `let`/optional-chain would re-widen to | undefined).
+    const modeCycle = ux?.modeCycle
+    return driveSessionTurn({
+      session,
+      resolveApproval: setup.approvalPrompt,
+      text: args.text,
+      images,
+      turnSignal: args.turnSignal,
+      // host concern — absent cycle ⇒ no hook ⇒ byte-identical.
+      ...(modeCycle !== undefined
+        ? {
+            beforeTurn: () => {
+              runtimeContext.permissionModeState()?.set(modeCycle.current().permissionMode)
+            },
+          }
+        : {}),
     })
-    for (;;) {
-      const turn = requireTurnPayload(
-        await session.turn.run(undefined, { signal: args.turnSignal }),
-      )
-      if (turn.approvalRequest === undefined) return completeRuntimeTurn(turn)
-      await resolvePendingApproval(turn.approvalRequest, args.turnSignal)
-    }
   }
 
   const runOneShotBranch = async (): Promise<void> => {

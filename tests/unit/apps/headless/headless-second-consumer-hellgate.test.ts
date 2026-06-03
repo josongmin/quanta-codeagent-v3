@@ -95,6 +95,11 @@ const ALLOWED_PREFIXES: readonly string[] = [
   "@/runner/assemble/config",
   "@/runner/assemble/tooling",
   "@/runner/orchestrate/resume-fsm",
+  // ADR-0303 — the shared turn-completion driver: headless funnels through the
+  // same `@/runner` primitive as the CLI so the approval-resolution loop is
+  // defined once (this is the ADR-0308 "second consumer drives runner cores"
+  // intent). Concrete module path, NOT the public `@/runner/orchestrate` barrel.
+  "@/runner/orchestrate/session-turn-driver",
   "@/ipc/session",
   "@/sdk/runtime",
   "@/agent",

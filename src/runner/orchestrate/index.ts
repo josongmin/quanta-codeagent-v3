@@ -26,6 +26,12 @@ export { persistTurn } from "./persist-turn"
 export type { ResolveResumeInput, ResumeResolution } from "./resume-fsm"
 export { defaultUntitled, isPathLikeToken, resolveResume } from "./resume-fsm"
 export type {
+  ApprovalResolver,
+  RunSessionTurnArgs,
+  SessionTurnResult,
+} from "./session-turn-driver"
+export { runSessionTurn as driveSessionTurn } from "./session-turn-driver"
+export type {
   SideChatContextInheritance,
   SideChatInput,
   SideChatResult,

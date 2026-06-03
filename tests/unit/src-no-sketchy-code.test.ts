@@ -145,6 +145,8 @@ const RULES: readonly Rule[] = [
         "Surface presentation read (NO_COLOR / FORCE_COLOR) — same posture as shell-stream-painter.ts and auth-ui.ts.",
       "shared/env-files.ts":
         "BY NAME — the tiny dotenv loader itself; writes KEY=VALUE into process.env BEFORE runtimeConfig() reads (same posture as apps/cli/dotenv.ts, which this is the shared implementation of).",
+      "host/runtime/agent-arg-builder.ts":
+        "Host-layer launcher composition builder — argv/env → AgentConfig base; ADR-0303 relocation from apps/agent/index.ts. Reads process.env / process.cwd() / process.exit(2) at the composition root (distinct from the env-PURE agent-config-assembler.ts sibling); same posture as apps/agent/index.ts.",
       "host/runtime/internal/context-binding.ts":
         "Runtime composition root — binds `process.env` into the bootstrap shape (DEFAULT_RUNTIME_ENV default + wireInteractiveKnobs at boot); downstream modules receive the bound env via AgentConfig. Same posture as apps/cli/internal.ts.",
       "host/runtime/internal/mention-wire.ts":
