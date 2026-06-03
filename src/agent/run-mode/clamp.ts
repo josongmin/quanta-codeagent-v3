@@ -35,6 +35,15 @@ const DIAL_FIELDS = [
   "maxConsecutiveFailures",
   "compactionTokenThreshold",
 ] as const satisfies readonly (keyof BudgetDials)[]
+// Drift guard, BOTH directions. `satisfies` proves every DIAL_FIELDS entry is a
+// BudgetDials key; this Assert proves the REVERSE (every key is listed). Without
+// it, adding a dial to BudgetDials but forgetting it here means that dial is
+// NEVER clamped against its cap — a silent budget-bypass (a safety property, not
+// cosmetic). Add a dial, forget the array → build error.
+type _AssertDial<T extends true> = T
+export type _DialFieldsDriftGuard = _AssertDial<
+  keyof BudgetDials extends (typeof DIAL_FIELDS)[number] ? true : false
+>
 
 /** Treat a NaN / ±Infinity / negative value as "not a valid dial". Dials are
  *  all non-negative finite budgets; a non-finite or negative requested/cap is a

@@ -30,6 +30,17 @@ export const EFFORT_LEVELS = [
   "low",
 ] as const satisfies readonly EffortLevel[]
 
+// Compile-time drift guard, BOTH directions. `satisfies` above proves every
+// EFFORT_LEVELS entry is an EffortLevel; this Assert proves the REVERSE (every
+// EffortLevel is listed). `satisfies` alone does NOT catch a tier added to the
+// union but missing from the array — the header comment's "unit test asserts
+// exhaustiveness" is stale (no test references EFFORT_LEVELS), so this is now
+// the real guard. Add a tier to the union, forget the array → build error.
+type _AssertEffort<T extends true> = T
+export type _EffortLevelsDriftGuard = _AssertEffort<
+  EffortLevel extends (typeof EFFORT_LEVELS)[number] ? true : false
+>
+
 export const DEFAULT_EFFORT: EffortLevel = "default"
 
 const EFFORT_LEVEL_SET: ReadonlySet<string> = new Set<string>(EFFORT_LEVELS)

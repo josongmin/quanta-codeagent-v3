@@ -108,9 +108,16 @@ export const LLM_PROVIDERS = [
   "mantle",
 ] as const satisfies readonly LlmProvider[]
 
-/** Compile-time exhaustiveness guard: if a new `LlmProvider` is added to the
- *  union without being added to `LLM_PROVIDERS`, the assignment below fails
- *  to typecheck. This pattern is the same SSOT discipline `pickProvider` uses
- *  in `@/llm/factory` (the `if (explicit in DEFAULT_MODEL)` check). */
-const _exhaustivenessCheck: readonly LlmProvider[] = LLM_PROVIDERS
-void _exhaustivenessCheck
+// ─── Compile-time drift guard, BOTH directions ──────────────────────────────
+// `satisfies readonly LlmProvider[]` above proves every LLM_PROVIDERS entry is a
+// valid LlmProvider. That is ONLY one direction — it does NOT catch a union
+// member missing from the array (a bare `const x: readonly LlmProvider[] =
+// LLM_PROVIDERS` assignment, the prior "guard" here, had the SAME blind spot).
+// The Assert below proves the REVERSE: every LlmProvider is present in
+// LLM_PROVIDERS. Add a vendor to the union but forget the array → build error.
+type _Assert<T extends true> = T
+type _ProvidersExhaustive = _Assert<
+  LlmProvider extends (typeof LLM_PROVIDERS)[number] ? true : false
+>
+// Referenced so `noUnusedLocals` keeps the guard live.
+export type _LlmProvidersDriftGuard = _ProvidersExhaustive

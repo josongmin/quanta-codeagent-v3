@@ -176,3 +176,9 @@ export const ALL_AGENT_MODES = [
   "ide",
   "daemon",
 ] as const satisfies readonly AgentMode[]
+// Drift guard, BOTH directions (mirrors the LeverField guard above). `satisfies`
+// proves array⊆union; this Assert proves union⊆array — `satisfies` alone lets a
+// new AgentMode silently miss ALL_AGENT_MODES, breaking every matrix/iteration
+// consumer. Add a mode to the union, forget the array → build error.
+type _ModesCoverUnion = Assert<AgentMode extends (typeof ALL_AGENT_MODES)[number] ? true : false>
+export type _AgentModesDriftGuard = _ModesCoverUnion
