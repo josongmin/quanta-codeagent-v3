@@ -64,6 +64,7 @@ interface RuntimeContextSnapshot {
   readonly toolProfileState?: ToolProfileSessionState
   readonly identityModeState?: IdentityModeSessionState
   readonly focusChain?: AgentConfig["focusChain"]
+  readonly stickyModelStore?: AgentConfig["stickyModelStore"]
   readonly decisionEmitter?: AgentConfig["decisionEmitter"]
   readonly admissibility?: AgentConfig["admissibility"]
   readonly planExitPort?: AgentConfig["planExitPort"]
@@ -103,6 +104,7 @@ type RuntimeContextPatch = Partial<
     | "toolProfileState"
     | "identityModeState"
     | "focusChain"
+    | "stickyModelStore"
     | "decisionEmitter"
     | "admissibility"
     | "planExitPort"
@@ -508,6 +510,7 @@ const buildOptionalSnapshotFields = (
   ...whenDefined("toolProfileState", base.toolProfileState),
   ...whenDefined("identityModeState", base.identityModeState),
   ...whenDefined("focusChain", base.focusChain),
+  ...whenDefined("stickyModelStore", base.stickyModelStore),
   ...whenDefined("decisionEmitter", base.decisionEmitter),
   ...whenDefined("admissibility", base.admissibility),
   ...whenDefined("planExitPort", base.planExitPort),

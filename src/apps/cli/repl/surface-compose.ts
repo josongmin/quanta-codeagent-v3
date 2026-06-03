@@ -20,7 +20,6 @@ import {
 } from "@/agent/plan-queue"
 import { createShadowVerify } from "@/agent/shadow-verify"
 import { createShadowVerifyAdapters } from "@/agent/shadow-verify-adapters"
-import { fsBackedStickyModelStore } from "@/agent/sticky-model"
 import { buildMentionSymbolDeps } from "@/host/runtime/internal/mention-symbol-deps"
 import {
   type Message,
@@ -933,12 +932,15 @@ export const composeSurfaceWires = (
     ...(setup.runtimeContext.focusChain() !== undefined
       ? { focusChain: setup.runtimeContext.focusChain() }
       : {}),
-    // ADR-0462 — `/sticky-model` SET surface. The fs-backed store is the
-    // filesystem SSOT (`~/.quanta/sticky-model.json`); the consume side (agent
-    // loop, gated by `--sticky-model`) reads the same file fresh each turn.
-    // Always wired so the user can inspect/seed per-mode prefs cross-session —
-    // construction is lazy (no IO until a verb runs).
-    stickyModelStore: fsBackedStickyModelStore(),
+    // ADR-0462 — `/sticky-model` SET surface. REUSE the SAME store the loop's
+    // CONSUME side reads (`config.stickyModelStore`, exposed via runtimeContext),
+    // so a SET is observed by the loop AND the command is present ONLY when the
+    // feature is actually active (`--sticky-model`). Absent ⇒ slot omitted ⇒
+    // `/sticky-model` prints "not wired" — no silent black hole where a SET
+    // succeeds but the loop never reads it.
+    ...(setup.runtimeContext.stickyModelStore() !== undefined
+      ? { stickyModelStore: setup.runtimeContext.stickyModelStore()?.store }
+      : {}),
     textInbox,
     // Track D — `/context` live segmented usage getter over the surface-retained
     // snapshot. Always wired in the REPL surface; before the first turn the

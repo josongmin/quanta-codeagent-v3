@@ -28,13 +28,14 @@ purpose: |
   typed outcome (`ok` | `invalid-mode` | `write-error`) — never throws. The
   `/sticky-model` command (registry-surface) mirrors `/profile` + `/identity`:
   no-arg lists current {mode→modelId} + usage; two-arg sets; arity/mode errors
-  exit 1. Default-OFF: absent `ctx.stickyModel` ⇒ "not wired" + exit 0
-  (byte-identical). The SET store and the loop's CONSUME store are independent
-  instances over ONE file (`~/.quanta/sticky-model.json`); `get` reads fresh each
-  turn, so a write is observed next turn — the store's documented "best-effort
-  persistence, last-write-wins on rename" contract. The command is always
-  registered so a user can inspect/seed prefs cross-session; `--sticky-model`
-  (ADR-0236, composition root) is the orthogonal switch that activates READING.
+  exit 1. The SET surface REUSES the SAME store instance the loop's CONSUME side
+  reads (`config.stickyModelStore`), exposed to the surface via `runtimeContext.
+  stickyModelStore()` (mirrors the focusChain/toolProfileState bridge). So the
+  command is wired ONLY when the feature is active (`--sticky-model`, ADR-0236);
+  with the flag off, `config.stickyModelStore` is undefined ⇒ slot omitted ⇒
+  `/sticky-model` prints "not wired" — closing the day-one black hole where a
+  SET would report success but the loop never read it. Default-OFF: absent slot
+  ⇒ "not wired" + exit 0 (byte-identical).
 evidence:
   code:
     - src/apps/cli/repl/ctx-adapters/sticky-model-adapter.ts
@@ -42,6 +43,8 @@ evidence:
     - src/apps/cli/slash/registry-surface.ts
     - src/apps/cli/repl/slash-surface.ts
     - src/apps/cli/repl/surface-compose.ts
+    - src/host/runtime/internal/context-binding.ts
+    - src/sdk/runtime/context.ts
   adrs: [462, 212]
   tests:
     unit:

@@ -20,6 +20,7 @@ type RuntimeContextAutomationEngineView = RuntimeContextSnapshot["automationEngi
 type RuntimeContextToolProfileStateView = RuntimeContextSnapshot["toolProfileState"]
 type RuntimeContextIdentityModeStateView = RuntimeContextSnapshot["identityModeState"]
 type RuntimeContextFocusChainView = RuntimeContextSnapshot["focusChain"]
+type RuntimeContextStickyModelStoreView = RuntimeContextSnapshot["stickyModelStore"]
 type RuntimeContextDecisionEmitterView = RuntimeContextSnapshot["decisionEmitter"]
 type RuntimeContextAdmissibilityView = RuntimeContextSnapshot["admissibility"]
 type RuntimeContextPlanExitPortView = RuntimeContextSnapshot["planExitPort"]
@@ -110,6 +111,10 @@ export interface RuntimeContext {
   toolProfileState(): RuntimeContextToolProfileStateView
   identityModeState(): RuntimeContextIdentityModeStateView
   focusChain(): RuntimeContextFocusChainView
+  /** ADR-0462 — the per-mode sticky-model store, present iff the host wired one
+   *  (`--sticky-model`). Surfaces reuse THIS instance for the `/sticky-model`
+   *  SET command so SET and the loop's CONSUME read the same store. */
+  stickyModelStore(): RuntimeContextStickyModelStoreView
   decisionEmitter(): RuntimeContextDecisionEmitterView
   admissibility(): RuntimeContextAdmissibilityView
   planExitPort(): RuntimeContextPlanExitPortView
@@ -284,6 +289,7 @@ const createRuntimeContext = (initialState: InternalRuntimeContextState): Runtim
     toolProfileState: () => record.state.snapshot.toolProfileState,
     identityModeState: () => record.state.snapshot.identityModeState,
     focusChain: () => record.state.snapshot.focusChain,
+    stickyModelStore: () => record.state.snapshot.stickyModelStore,
     decisionEmitter: () => record.state.snapshot.decisionEmitter,
     admissibility: () => record.state.snapshot.admissibility,
     planExitPort: () => record.state.snapshot.planExitPort,
