@@ -202,7 +202,13 @@ describe("profile-layer-merge — identity + determinism", () => {
   })
 
   test("HELL-PLM-07 single slot ⇒ that source wins every field, overrode []", () => {
-    const { merged, overrides } = mergeProfileLayers({ perRepo: trusted }, "source-precedence")
+    // ADR-0470 — uses the guard-NEUTRAL `perUser` source. (Previously `perRepo`,
+    // but the provenance guard now drops a repo-controllable source's grant-capable
+    // WIDENS under source-precedence, so a single per-repo slot no longer "wins
+    // every field" by design — that secure behavior is sealed in
+    // config-provenance-gate-hellgate.test.ts. The identity/determinism invariant
+    // this test guards is source-agnostic, so per-user proves it cleanly.)
+    const { merged, overrides } = mergeProfileLayers({ perUser: trusted }, "source-precedence")
     const fields = Object.keys(deflt) as Array<keyof PermissionProfile>
     for (const f of fields) expect(merged[f]).toEqual(trusted[f])
     for (const o of overrides) expect(o.overrode).toEqual([])

@@ -1,0 +1,70 @@
+id: skill-mcp-deps
+title: skill-mcp-deps — skill-declared MCP servers auto-attached on activation (ADR-0476)
+section: 9
+subsystem: 통합 — skill→MCP 의존성 링크 (skill이 필요한 MCP 서버를 선언하면 활성 시 자동 attach)
+order: 476
+maturity: L2
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:core", "tier:integration", "default-off", "absorbed:agent-config"]
+depends_on: [skill]
+purpose: |
+  A skill declares the MCP servers it needs; when the skill is active and the
+  gate is ON, the harness auto-attaches the deduped set. Today
+  @/skill/skill-frontmatter parses only userInvocable/allowedTools — there is NO
+  skill→MCP link. The leaf slice (src/skill/skill-mcp-deps, imports @/shared
+  ONLY) owns: (1) parseSkillMcpDeps(rawDependencies) — validate a frontmatter
+  `dependencies.tools[]` block (type:mcp, value, transport ∈
+  {stdio|streamable_http|sse}, command|url, optional args) into a closed
+  SkillMcpDep[] + typed McpDepError[]; a malformed dep is a typed err and is
+  SKIPPED, the rest still parse, the skill keeps working (NO-THROW; hostile
+  getter caught). (2) resolveMcpDeps(activeSkills, env) — fold the ACTIVE skills'
+  deps into a deduped McpServerSpec[] to attach; dedupe by named depIdentity
+  (stdio ⇒ serviceName; HTTP ⇒ transport+serviceName+url) so a server is NEVER
+  attached twice; first declaration wins. (3) AttachMcpPort — the inverted seam
+  the composition root calls on skill activation (port inversion, mirrors
+  @/permission ClassifierPort; the slice does NOT import
+  @/agent/plugin-mcp-launcher — the launcher attach is injected). DESIGN CHOICE:
+  the declaration is read from SKILL.md FRONTMATTER (intrinsic to the skill,
+  single self-describing file), but the validator is source-agnostic so a vendor
+  sidecar can be mapped onto the same parser. DEFAULT-OFF: skillMcpDepsEnabled
+  reads injected env QUANTA_SKILL_MCP_DEPS === "1" (never process.env); unset ⇒
+  resolveMcpDeps returns [] BEFORE inspecting any skill ⇒ no resolution, no
+  attach, byte-identical to today. NO arbitrary heuristics: transport is a
+  closed enum; dedupe key is a named documented identity.
+evidence:
+  code:
+    - src/skill/skill-mcp-deps/types.ts
+    - src/skill/skill-mcp-deps/parser.ts
+    - src/skill/skill-mcp-deps/resolve.ts
+    - src/skill/skill-mcp-deps/index.ts
+  adrs: [476]
+  tests:
+    unit:
+      - tests/unit/skill-mcp-deps-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_SKILL_MCP_DEPS
+    default: 'unset (OFF)'
+    purpose: 'exactly "1" opts a deployment in; any other value (incl "0"/"true"/"on") keeps it OFF. Unset ⇒ resolveMcpDeps returns [] before inspecting any skill (no resolution, no attach). Reads INJECTED env, never process.env.'
+deliberate_hold:
+  reason: |
+    Activation is held for the human at integration (shared files this slice is
+    fenced from): (1) src/skill/skill-frontmatter.ts — carry the optional
+    `dependencies` block through discovery so each skill record has its raw deps;
+    (2) composition root (skill activation / `/skill` invoke) — call
+    resolveMcpDeps(activeSkills, env) then attachPort.attach(specs), where
+    attachPort is an AttachMcpPort wrapping @/agent/plugin-mcp-launcher
+    launchPluginMcpServers; on deactivation shut down servers no active skill
+    still needs. Listed verbatim in ADR-0476 integration TODOs.
+notes: |
+  Port inversion is the crux: @/skill could not legally import the launcher from
+  a leaf, so the attach is injected as AttachMcpPort. depIdentity is named +
+  documented (NOT an ad-hoc key): a service exposed over both sse and
+  streamable_http is two distinct attachments (different wire protocol = different
+  connection), proven by the hellgate.

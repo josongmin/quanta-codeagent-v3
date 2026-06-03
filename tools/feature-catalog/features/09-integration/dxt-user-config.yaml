@@ -1,0 +1,69 @@
+id: dxt-user-config
+title: DXT user_config — typed fields + template substitution + keychain secrets
+section: 9
+subsystem: 통합 — DXT 매니페스트 user_config (Claude Desktop 흡수)
+order: 475
+maturity: L2
+status: new
+ui_surfaces: [cli, web]
+monitoring: n-a
+modes: [interactive]
+configurable: partial
+owners: ["@songmin"]
+labels: ["absorbed:claude", "surface:cli", "tier:integration", "default-off"]
+depends_on: [plugin-isolation]
+purpose: |
+  Extend the DXT plugin manifest with Claude-Desktop-parity user configuration:
+  typed user_config fields + `${...}` template substitution + OS-keychain
+  secrets. Today src/plugin-isolation/dxt-loader.ts DxtManifestSchema accepts a
+  minimal strict subset (name/version/entry/serviceName/args/env). This NEW pure
+  leaf slice (src/plugin-isolation/dxt-user-config.ts, imports @/shared ONLY)
+  owns: (1) the add-only zod sub-schema — UserConfigFieldSchema (type
+  string|number|boolean|directory|file + required/multiple/sensitive/min/max/
+  default), UserConfigBlockSchema, PlatformOverridesSchema, manifest_version —
+  exposed as DxtUserConfigExtension for the host to .extend().strict() onto the
+  existing schema; (2) pure interpolateLaunchSpec replacing ${user_config.X},
+  ${__dirname}, ${pathSeparator}, ${/}, and injected system-dir tokens (${HOME}
+  …) across command/args/env, with a per-string token budget (DoS bound) and
+  unknown tokens preserved verbatim; a REQUIRED field with no value AND no
+  default ⇒ typed {kind:"skip-launch", reason:"required-field-empty", field}
+  Result (never spawns); (3) platform_overrides merged per INJECTED platform
+  string (no process.platform read in-slice) before substitution. SENSITIVE
+  fields resolve through the injected SecretStorePort (port inversion, mirrors
+  @/permission ClassifierPort) to a NON-SECRET reference — plaintext never enters
+  the spawn argv/env. The composition root wires the real safeStorage adapter +
+  the InterpolationContext (all ambient process.*/fs reads live there). NO-THROW
+  throughout (Result from @/shared). DEFAULT-OFF: add-only — a manifest with NO
+  user_config and a spec with no ${...} tokens is byte-identical to today, and
+  the existing minimal DxtManifestSchema still parses unchanged.
+evidence:
+  code:
+    - src/plugin-isolation/dxt-user-config.ts
+  adrs: [475]
+  tests:
+    unit:
+      - tests/unit/dxt-user-config-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: user_config (manifest block)
+    default: 'absent (OFF)'
+    purpose: 'A DXT manifest that declares NO user_config / platform_overrides parses byte-identically to today and interpolateLaunchSpec returns the spec unchanged. The feature activates only when an author opts in by adding the add-only block; host wiring (schema compose + interpolate-at-spawn + safeStorage SecretStorePort) is held for integration.'
+deliberate_hold:
+  reason: |
+    Activation is held for the human at integration (files this slice is fenced
+    from): (1) compose DxtUserConfigExtension onto DxtManifestSchema in
+    dxt-loader.ts via .extend().strict(); (2) call resolveFields +
+    interpolateLaunchSpec in launchDxt between validate and spawn, mapping
+    kind:"launch" → spawnOpts and kind:"skip-launch" → typed error; (3) re-export
+    the new surface from index.ts; (4) implement + inject the safeStorage-backed
+    SecretStorePort and the InterpolationContext (platform/systemDirs) at the
+    composition root. Listed verbatim in ADR-0475 integration TODOs.
+notes: |
+  Port inversion is the security crux: sensitive values must never land in the
+  spawn spec, but the slice cannot import the host keychain, so SecretStorePort
+  is injected (mirrors @/permission ClassifierPort) keeping the module @/shared-
+  only and unit-testable with a spy double. All bounds are named/justified
+  constants (MAX_USER_CONFIG_FIELDS / _KEY_LEN / _VALUE_LEN / _MULTIPLE /
+  MAX_TOKENS_PER_STRING) — no magic numbers. The slice reads NO ambient state;
+  platform + system dirs are injected, proven by the hellgate.

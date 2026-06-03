@@ -1,0 +1,76 @@
+id: config-provenance-gate
+title: Config-provenance gate — repo-controllable config may only NARROW, never widen
+section: 3
+subsystem: 권한 머지 — 공급망/권한상승 차단 (ADR-0470)
+order: 470
+maturity: L2
+status: new
+ui_surfaces: [n-a]
+monitoring: integrated
+telemetry_keys: ["quanta.permission.provenance_drop"]
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:cli", "tier:core", "security-touched", "default-on"]
+depends_on: [agent]
+purpose: |
+  SECURITY 🔴. The layered config merge (src/permission/policy-layers/index.ts)
+  ranks team-admin > per-repo > per-user > default and, under source-precedence,
+  the most-authoritative source that SETS a field wins it. That is correct for
+  ADMIN policy but a PRIVILEGE-ESCALATION / SUPPLY-CHAIN hole for
+  REPO-controllable sources: a checked-in .quanta/.cursor policy OR an agent
+  frontmatter block is `per-repo`, which out-ranks the USER's own per-user config
+  on a grant-capable field — so cloning a hostile repo could silently grant
+  itself approval.mode:"auto" (AFK auto-approve), widen the network egress /
+  allow-list, or strip the OS sandbox. A repo may make the posture MORE
+  restrictive (defense-in-depth is safe) but must NEVER widen it.
+
+  This slice (src/permission/policy-layers/provenance-guard.ts, sibling-only deps
+  inside @/permission) adds a PURE pre-merge filter guardProvenance that runs
+  BEFORE mergeLayered. For each repo-controllable layer (closed set:
+  per-repo / frontmatter) it DROPS any contribution to a grant-capable pillar
+  (closed GRANT_CAPABLE_FIELDS = approval / network / sandbox) that WIDENS that
+  axis relative to the trusted baseline (the widest value any per-user /
+  team-admin / default sets; absent any trusted setter, the narrowest-possible
+  value — a repo cannot bootstrap a grant from nothing). Repo contributions that
+  match or NARROW are KEPT. "What is a widen" reuses the SSOT polarities
+  NETWORK_RANK / APPROVAL_RANK (+ osSandbox presence) from profile-list-select.ts
+  (no magic literal): approval.mode:"auto" is the AFK auto-approve (widest);
+  promptUser:false is an INDEPENDENT loosening axis; network allowHosts
+  set-append is a separate allow-list-widen the scalar rank can't see; sandbox
+  widen = any protective bit removed. Emits one typed ProvenanceDropRecord
+  {kind, field, source, detail} per dropped contribution — RETURNED, never
+  emitted (composition root owns the sink, port inversion). NO-THROW, pure,
+  deterministic.
+
+  SECURITY DEFAULTS ON (NOT env-gated): a security control that ships OFF
+  protects nobody, and an env var is itself attacker-settable. The ONLY disable
+  path is an EXPLICIT typed acknowledgedRisk:true opt-out (mirrors ADR-0078
+  redaction opt-out). With the guard ON and no widens present, the output layer
+  list is the SAME array reference as the input ⇒ the downstream merge is
+  byte-identical to today.
+evidence:
+  code:
+    - src/permission/policy-layers/provenance-guard.ts
+  adrs: [470]
+  tests:
+    unit:
+      - tests/unit/config-provenance-gate-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: acknowledgedRisk
+    default: 'absent/false (guard ON)'
+    purpose: 'Typed call-site opt-out (GuardOptions.acknowledgedRisk). Exactly true disables the guard — input layers pass through unchanged, zero drops, the dangerous widen survives because an operator EXPLICITLY acknowledged the risk. Not an env var (a hostile repo could set env); a deliberate composition-root override only. Mirrors ADR-0078 redaction opt-out.'
+deliberate_hold:
+  reason: |
+    Activation is held for the human at the merge seam (fenced file
+    src/permission/policy-layers/index.ts): call guardProvenance on the layer
+    list BEFORE mergeLayered and wire the ProvenanceDropRecord sink to the
+    telemetry registry. Listed verbatim in ADR-0470 integrationTodos.
+notes: |
+  Default-ON is deliberate (security, not a feature seam) but the OFF-equivalent
+  path is preserved: nothing-to-drop returns the SAME array reference so a merge
+  is byte-identical. The drop polarity reuses the existing NETWORK_RANK /
+  APPROVAL_RANK SSOT rather than re-declaring a literal that could drift.
+  Telemetry is returned (port inversion), never emitted from the pure slice.

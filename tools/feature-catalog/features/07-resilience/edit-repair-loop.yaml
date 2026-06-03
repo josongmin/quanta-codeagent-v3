@@ -1,0 +1,77 @@
+id: edit-repair-loop
+title: Edit-repair-loop — lint-delta + bounded fast-model repair to green
+section: 7
+subsystem: 회복탄력성 — 편집 후 도입된 진단(lint-delta) 부착 + 빠른 모델 반복 수리(Cursor/Codex 흡수)
+order: 472
+maturity: L2
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch]
+configurable: partial
+owners: ["@songmin"]
+labels: ["absorbed:cursor", "absorbed:codex", "surface:cli", "tier:resilience", "default-off"]
+depends_on: [agent, shared]
+purpose: |
+  After a model edit (edit/write/apply_patch), compute the diagnostics the edit
+  INTRODUCED (post − pre, never the file's pre-existing lint debt) and attach
+  them to the edit tool's toModelOutput; then, when gated ON, re-drive a fast
+  edit model until the check is green (lints/named tests/command exit 0), bounded
+  by a REQUIRED maxIters, feeding each failure back with per-loop custom
+  instructions. Faithful to the repair loop Cursor/Codex run before handing a
+  still-broken file back to the main turn. The slice (src/agent/edit-repair-loop,
+  imports @/shared ONLY) owns: (1) the pure lint-delta computer computeLintDelta
+  (preDiags, postDiags) → introducedDiags as a count-aware MULTISET difference,
+  identity = (file,line,code,message) tuple via diagnosticKey EXCLUDING
+  column/severity so a benign column shift never counts as new + renderLintDelta
+  for toModelOutput; (2) the strict gate editRepairLoopEnabled (env
+  QUANTA_EDIT_REPAIR_LOOP === "1", reads INJECTED env never process.env);
+  (3) runRepairLoop(cfg, deps, signal) over two PORT-INVERTED collaborators
+  (mirrors @/permission ClassifierPort + away-summary SummarizeFn) — RepairCheck
+  (current RepairFailure | null-when-green) and RepairReactorPort (the fast edit
+  model: failure + customInstructions → one applied/declined attempt). maxIters
+  is a REQUIRED config field (integer ≥ 1, no magic). Every exit is a structured
+  RepairLoopReport over a closed RepairStopReason union (green / exhausted /
+  model-declined / check-error / aborted / invalid-config). check ∈ closed
+  CheckKind {lints|tests|command}. The composition root adapts the real LSP
+  diagnostics + the fast-apply-fallback side-conversation + parse-test-failure
+  signal sources onto the ports — the slice imports NONE of them directly (slice
+  fence; inverted as port TYPES). NO-THROW: a check throw ⇒ check-error, a
+  reactor throw ⇒ model-declined; abort honoured before every port call.
+  DEFAULT-OFF: flag unset ⇒ gate false ⇒ the integration site skips the loop and
+  never constructs the ports ⇒ byte-identical to today.
+evidence:
+  code:
+    - src/agent/edit-repair-loop/types.ts
+    - src/agent/edit-repair-loop/lint-delta.ts
+    - src/agent/edit-repair-loop/runner.ts
+    - src/agent/edit-repair-loop/index.ts
+  adrs: [472]
+  tests:
+    unit:
+      - tests/unit/edit-repair-loop-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_EDIT_REPAIR_LOOP
+    default: 'unset (OFF)'
+    purpose: 'exactly "1" opts a deployment in; any other value (incl "0"/"on"/"true") keeps it OFF. Unset ⇒ the integration site skips runRepairLoop and never constructs the ports (no extra LLM/check calls). The pure lint-delta computer is usable independently to enrich edit output.'
+deliberate_hold:
+  reason: |
+    Activation is held for the human at integration (shared files this slice is
+    fenced from): (1) the edit/write/apply-patch toModelOutput hook that appends
+    renderLintDelta(computeLintDelta(pre,post)) (src/tool/edit|write|apply-patch);
+    (2) the post-edit loop call site in the dispatch/loop seam
+    (src/agent/dispatch.ts); (3) the composition-root wiring of the real LSP
+    diagnostics onto RepairCheck (lints ⇒ computeLintDelta) + the
+    fast-apply-fallback side-conversation + parse-test-failure onto
+    RepairReactorPort, with maxIters from a named config field. Listed verbatim in
+    ADR-0472 integration TODOs.
+notes: |
+  Port inversion is the design crux: @/agent could legally import @/llm, but the
+  repair slice is a leaf, so the fast model + the check are injected as
+  RepairReactorPort / RepairCheck (mirrors @/permission ClassifierPort), keeping
+  the slice @/shared-only and unit-testable with spy doubles. The lint-delta uses
+  a count-aware multiset diff keyed on (file,line,code,message) — NOT a magic
+  threshold — so pre-existing debt is never blamed and duplicates are matched
+  1-for-1. maxIters is the only bound and it is REQUIRED.

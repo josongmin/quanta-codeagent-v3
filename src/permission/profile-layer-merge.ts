@@ -83,6 +83,7 @@ import type {
   RestrictivenessSpec,
 } from "./policy-layers"
 import { mergeLayered } from "./policy-layers"
+import { guardProvenance, type ProvenancedLayer } from "./policy-layers/provenance-guard"
 
 /** Approval safety rank — HIGHER = more confirmation = safer. */
 const APPROVAL_SAFETY: Readonly<Record<ApprovalMode, number>> = Object.freeze({
@@ -258,7 +259,20 @@ export const mergeProfileLayers = (
   if (slots.perUser !== undefined) layers.push({ source: "per-user", value: slots.perUser })
   if (slots.perRepo !== undefined) layers.push({ source: "per-repo", value: slots.perRepo })
   if (slots.teamAdmin !== undefined) layers.push({ source: "team-admin", value: slots.teamAdmin })
-  return mergeLayered(layers, {
+  // ADR-0470 — SECURITY: under `source-precedence`, a higher-ranked per-repo /
+  // frontmatter layer would otherwise WIN (and thus WIDEN) a grant-capable pillar
+  // (approval / network / sandbox), letting a checked-in `.quanta` policy grant
+  // autonomy. Drop those repo-controllable widens BEFORE the merge so per-repo can
+  // only ever narrow. Scoped to `source-precedence` ONLY: the `most-restrictive`
+  // strategy already merges the SAFEST value per sub-field (PROFILE_COMBINERS), so
+  // per-repo cannot widen there and applying the guard would wrongly drop a SAFE
+  // per-repo value (less safe — HELL-SUB-05). Default-ON; nothing-to-drop returns
+  // the SAME array ref ⇒ byte-identical. (`dropped` records ready for telemetry.)
+  const guarded =
+    strategy === "source-precedence"
+      ? guardProvenance(layers as ReadonlyArray<ProvenancedLayer>)
+      : { layers }
+  return mergeLayered(guarded.layers as ReadonlyArray<ConfigLayer<PermissionProfile>>, {
     base: DEFAULT_PERMISSION_PROFILE,
     strategy,
     // Combiners (per-sub-field safe) drive struct pillars under most-restrictive;

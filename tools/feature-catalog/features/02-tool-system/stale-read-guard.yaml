@@ -1,0 +1,75 @@
+id: stale-read-guard
+title: Stale-read guard — block clobbering edits + post-bash re-read reminder
+section: 2
+subsystem: 도구 시스템 — read-after-write 안전장치 (Claude/Codex stale-read 흡수)
+order: 474
+maturity: L2
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: partial
+owners: ["@songmin"]
+labels: ["absorbed:claude", "absorbed:codex", "surface:cli", "tier:core", "default-off"]
+depends_on: [tool, storage]
+purpose: |
+  When the agent reads a file then the file is changed on disk by something
+  outside the agent (a concurrent process, a git checkout, a formatter the agent
+  itself ran via bash), a later write/edit against the agent's remembered
+  contents silently CLOBBERS the external change. This slice (src/tool/stale-read-guard,
+  imports @/shared ONLY) closes that with two behaviors: (1) BLOCK a write/edit
+  whose target was externally modified since the read, with a verbatim "re-read
+  first" message (STALE_WRITE_MESSAGE) — the tool yields ok:false and does NOT
+  write; (2) after a bash command whose leading token is a KNOWN file-mutating
+  marker (WRITE_COMMAND_MARKERS — package managers/build systems/formatters/
+  codegen, a CLOSED documented set, NOT guessed), inject a <system-reminder>
+  listing the previously-read files whose mtime advanced so the model re-reads
+  before editing. The slice owns: ReadFileState (Map<path,mtimeMs> + record /
+  checkFresh → fresh|stale|unread), the pure guardWrite (Result<void,StaleReadError>),
+  the pure staleAfterBash(state, command, changed[]) → stale path list (requires
+  BOTH a marker match AND a forward mtime move — a read-only command like
+  `git status` never warns), the strict gate staleReadGuardEnabled (env
+  QUANTA_STALE_READ_GUARD === "1", reads INJECTED env), and renderStaleReminder
+  (embedUntrusted-defanged, "" for empty list). The real mtime is INJECTED by the
+  host as a plain number (port inversion — FileSystemPort at integration; the
+  slice never imports @/storage), so it is unit-testable with hand-fed mtimes.
+  Closed signals only: forward mtime move = stale, backward = restore/skew (fresh),
+  unread = no baseline (allowed); strict > comparison, no tolerance window.
+  NO-THROW throughout. DEFAULT-OFF: flag unset ⇒ the host records no read mtimes,
+  runs no write-time check, runs no post-bash detector ⇒ byte-identical to today.
+evidence:
+  code:
+    - src/tool/stale-read-guard/types.ts
+    - src/tool/stale-read-guard/markers.ts
+    - src/tool/stale-read-guard/state.ts
+    - src/tool/stale-read-guard/gate.ts
+    - src/tool/stale-read-guard/reminder.ts
+    - src/tool/stale-read-guard/index.ts
+  adrs: [474]
+  tests:
+    unit:
+      - tests/unit/stale-read-guard-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_STALE_READ_GUARD
+    default: 'unset (OFF)'
+    purpose: 'exactly "1" opts a deployment in; any other value (incl "0"/"on"/"true") keeps it OFF. Unset ⇒ host records no read mtimes, runs no write-time guardWrite check, runs no post-bash staleAfterBash detector (byte-identical to today). Reads INJECTED env, never process.env.'
+deliberate_hold:
+  reason: |
+    Activation is held for the human at integration (shared files this slice is
+    fenced from): (1) ToolContext.readFileState optional duck-typed field
+    (mirror gitWriteGuard) + dispatch seam building one per-run instance when the
+    gate is on; (2) FileInfo.mtimeMs surfaced from storage statFile; (3) read
+    tool records info.mtimeMs after stat; (4) write/edit tools call guardWrite
+    before writing and yield a stale_read ok:false on stale; (5) bash post-hook
+    re-stats recorded read paths, calls staleAfterBash, injects renderStaleReminder.
+    Listed verbatim in ADR-0474 integration TODOs.
+notes: |
+  Port inversion is the crux: @/tool could reach @/storage, but the guard is a
+  leaf, so the real mtime is injected as a plain number (mirrors @/permission
+  ClassifierPort) keeping the slice @/shared-only and unit-testable with hand-fed
+  mtimes. WRITE_COMMAND_MARKERS is a CLOSED set ([[no-heuristics-only-validated]]):
+  each entry mutates the tree by documented contract; additions need an ADR
+  amendment. The reminder is defanged via embedUntrusted so a path carrying a
+  forged </system-reminder> cannot break out. 52 hellgate cases pin every arm.
