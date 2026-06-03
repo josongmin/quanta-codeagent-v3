@@ -287,7 +287,7 @@ export const writeFile = async (path: string, content: string, baseDir?: string)
 export const statFile = async (path: string, baseDir?: string): Promise<FileInfo> => {
   const abs = resolvePath(path, baseDir)
   const s = await stat(abs)
-  return { path: abs, size: s.size, isDirectory: s.isDirectory() }
+  return { path: abs, size: s.size, isDirectory: s.isDirectory(), mtimeMs: s.mtimeMs }
 }
 
 export const fileExists = async (path: string, baseDir?: string): Promise<boolean> =>

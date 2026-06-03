@@ -244,7 +244,16 @@ const processAutomation = async (
     })
   } catch (e) {
     const msg = `enqueue failed: ${stringifyError(e)}`
-    const persisted = await persistError(automation, msg, opts)
+    // T10 M7 — the fire anchor was ALREADY advanced AND persisted at step 4
+    // (fireCount + 1, lastFiredAt = now). Record the error on the ADVANCED
+    // record (`fired`), NOT the original `automation`: `markError({...fired})`
+    // keeps the anchor advanced so the occurrence is never re-dispatched.
+    // Passing `automation` here would roll the anchor BACK on disk, and an
+    // operator resume (error → active) would re-arm a DUPLICATE mutating
+    // dispatch — the exact at-least-once hazard M7 closes. Persist-before-
+    // dispatch is honored: the dispatch was attempted after the anchor landed,
+    // so a failed dispatch must not undo the anchor.
+    const persisted = await persistError(fired, msg, opts)
     opts.sink?.emit({
       type: "scheduler.error",
       automationId: automation.id,

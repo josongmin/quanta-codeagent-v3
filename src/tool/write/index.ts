@@ -2,8 +2,31 @@ import { z } from "zod"
 import { defaultFileSystemPort, type FileSystemPort, FsJailError } from "@/storage"
 import { defineTool } from "../factory"
 import { gitWriteGuardDeny } from "../git-write-guard-result"
+import { guardWrite } from "../stale-read-guard"
 import { captureToolDiff } from "../tool-diff-capture"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+
+/** ADR-0474 — stale-read-guard check for the write tool. Returns a failure
+ *  `ToolResult` when the (existing) target was READ this session and externally
+ *  modified since (mtime advanced), else `null`. No-op (null) when the guard is
+ *  unwired (`ctx.readFileState` absent) or the file is new (no read baseline).
+ *  Extracted to keep `execute` under the cognitive-complexity cap. */
+const staleWriteGuard = async (
+  fs: FileSystemPort,
+  ctx: ToolContext,
+  path: string,
+  existed: boolean,
+): Promise<ToolResult | null> => {
+  if (ctx.readFileState === undefined || !existed) return null
+  const cur = await fs.statFile(path, ctx.cwd)
+  const guard = guardWrite(ctx.readFileState, cur.path, cur.mtimeMs)
+  if (guard.ok) return null
+  return {
+    ok: false,
+    output: guard.error.message,
+    failure: { mode: "rejected", reason: "stale_read" },
+  }
+}
 
 const schema = z.object({
   path: z.string().describe("File path (absolute or relative to cwd)"),
@@ -57,6 +80,13 @@ export const makeWriteTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<
       // are written, so a denied path is NEVER a partial write.
       try {
         const existed = await fs.fileExists(input.path, ctx.cwd)
+        // ADR-0474 — block overwriting a file read earlier this session that was
+        // externally modified since ("re-read first"). No-op when guard unwired.
+        const stale = await staleWriteGuard(fs, ctx, input.path, existed)
+        if (stale) {
+          yield { type: "result", result: stale }
+          return
+        }
         // ADR-0440 — capture the pre-write bytes ONLY when the tool-diff sink is
         // wired AND this call is correlated (gate ON). Gate OFF ⇒ both undefined
         // ⇒ NO extra read, byte-identical legacy path. A new file's "before" is

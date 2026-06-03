@@ -12,9 +12,13 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { reconcileSkillMcpForTurn } from "@/agent/loop-activation-hook"
+import { liftRawDependenciesBlock } from "@/skill/skill-frontmatter"
 import {
   type ActiveSkillDeps,
   type AttachMcpPort,
+  createSkillMcpSession,
+  type DetachMcpPort,
   depIdentity,
   type McpAttachOutcome,
   type McpServerSpec,
@@ -265,5 +269,269 @@ describe("AttachMcpPort — injected seam (port inversion)", () => {
     expect(specs).toEqual([])
     await port.attach(specs)
     expect(invokedWith).toBe(0)
+  })
+})
+
+// --------------------------------------------------------------------------
+// ADR-0476 WIRING — frontmatter lift + per-session attach coordinator + the
+// loop-activation-hook glue. These prove the slice is WIRED into the live
+// activation seam end-to-end, with the hard PERFORMANCE invariant asserted.
+// --------------------------------------------------------------------------
+
+describe("liftRawDependenciesBlock — SKILL.md frontmatter (ADR-0476)", () => {
+  const SKILL_WITH_DEPS = `---
+name: my-skill
+description: does a thing
+userInvocable: true
+allowedTools: ["Read"]
+category: skill
+stability: stable
+dependencies:
+  tools:
+    - type: mcp
+      value: my-server
+      transport: stdio
+      command: my-mcp-binary
+      args: ["--flag"]
+    - type: mcp
+      value: remote-svc
+      transport: streamable_http
+      url: "https://mcp.example.com/v1"
+---
+body text
+`
+
+  test("lifts dependencies.tools[] into resolver-ready raw block", () => {
+    const raw = liftRawDependenciesBlock(SKILL_WITH_DEPS)
+    expect(raw).not.toBeUndefined()
+    // Feed straight into the validator — proves the SHAPE contract end-to-end.
+    const parsed = parseSkillMcpDeps(raw)
+    expect(parsed.errors).toEqual([])
+    expect(parsed.deps.map((d) => d.serviceName)).toEqual(["my-server", "remote-svc"])
+    const stdio = parsed.deps.find((d) => d.transport === "stdio")
+    expect(stdio?.command).toBe("my-mcp-binary")
+    expect(stdio?.args).toEqual(["--flag"])
+    const http = parsed.deps.find((d) => d.transport === "streamable_http")
+    expect(http?.url).toBe("https://mcp.example.com/v1")
+  })
+
+  test("absent dependencies block ⇒ undefined (byte-identical no-op)", () => {
+    const noDeps = `---
+name: x
+description: y
+userInvocable: false
+allowedTools: []
+category: skill
+stability: stable
+---
+body
+`
+    expect(liftRawDependenciesBlock(noDeps)).toBeUndefined()
+    // undefined flows to the resolver as a no-op skill.
+    expect(resolveMcpDeps([{ skillId: "x", rawDependencies: undefined }], ON)).toEqual([])
+  })
+
+  test("malformed content never throws", () => {
+    expect(() => liftRawDependenciesBlock("not frontmatter at all")).not.toThrow()
+    expect(liftRawDependenciesBlock("not frontmatter at all")).toBeUndefined()
+    expect(() => liftRawDependenciesBlock("---\nname: a\n")).not.toThrow() // no closing fence
+  })
+
+  test("dependencies block with no tools key ⇒ empty tools (legal)", () => {
+    const onlyDepHeader = `---
+name: a
+description: b
+userInvocable: false
+allowedTools: []
+category: skill
+stability: stable
+dependencies:
+  other: 1
+---
+`
+    expect(liftRawDependenciesBlock(onlyDepHeader)).toEqual({ tools: [] })
+  })
+})
+
+/** Build an instrumented attach/detach port pair that records call shapes so
+ *  the PERFORMANCE invariant can be asserted on real call counts. */
+const makeInstrumentedPorts = () => {
+  const attachCalls: McpServerSpec[][] = []
+  const detachCalls: McpServerSpec[][] = []
+  const live = new Set<string>()
+  const attach: AttachMcpPort = {
+    attach: async (specs) => {
+      attachCalls.push([...specs])
+      const out: McpAttachOutcome[] = []
+      for (const s of specs) {
+        const id = depIdentity(s)
+        const already = live.has(id)
+        live.add(id)
+        out.push({ serviceName: s.serviceName, attached: !already })
+      }
+      return out
+    },
+  }
+  const detach: DetachMcpPort = {
+    detach: async (specs) => {
+      detachCalls.push([...specs])
+      for (const s of specs) live.delete(depIdentity(s))
+    },
+  }
+  return { attach, detach, attachCalls, detachCalls, live }
+}
+
+describe("createSkillMcpSession — e2e attach/dedupe/shutdown (ADR-0476)", () => {
+  test("gate ON: active skill with a dep ⇒ launcher asked to attach exactly that server", async () => {
+    const p = makeInstrumentedPorts()
+    const session = createSkillMcpSession({ attach: p.attach, detach: p.detach }, ON)
+
+    const r = await session.reconcile([skill("a", [stdioTool("svc-a")])])
+    expect(r.attached).toEqual([depIdentity({ serviceName: "svc-a", transport: "stdio" })])
+    // launcher saw exactly one attach call carrying exactly that one server.
+    expect(p.attachCalls.length).toBe(1)
+    expect(p.attachCalls[0]?.map((s) => s.serviceName)).toEqual(["svc-a"])
+    expect([...p.live]).toEqual([depIdentity({ serviceName: "svc-a", transport: "stdio" })])
+  })
+
+  test("SECOND skill with the SAME dep ⇒ attached ONCE across reconciles", async () => {
+    const p = makeInstrumentedPorts()
+    const session = createSkillMcpSession({ attach: p.attach, detach: p.detach }, ON)
+
+    await session.reconcile([skill("a", [stdioTool("shared")])])
+    // Second skill ALSO needs `shared`; both now active.
+    const r2 = await session.reconcile([
+      skill("a", [stdioTool("shared")]),
+      skill("b", [stdioTool("shared")]),
+    ])
+    // Nothing NEW to attach — already live; the dedupe survived the reconcile.
+    expect(r2.attached).toEqual([])
+    expect(r2.detached).toEqual([])
+    // Total distinct servers attached = 1, NOT once-per-skill.
+    expect(session.attachedIdentities().length).toBe(1)
+  })
+
+  test("deactivation ⇒ orphaned server is detached", async () => {
+    const p = makeInstrumentedPorts()
+    const session = createSkillMcpSession({ attach: p.attach, detach: p.detach }, ON)
+
+    await session.reconcile([skill("a", [stdioTool("svc-a")]), skill("b", [stdioTool("svc-b")])])
+    expect(session.attachedIdentities().length).toBe(2)
+    // Skill b deactivates (only a remains active).
+    const r = await session.reconcile([skill("a", [stdioTool("svc-a")])])
+    expect(r.detached).toEqual([depIdentity({ serviceName: "svc-b", transport: "stdio" })])
+    expect(session.attachedIdentities()).toEqual([
+      depIdentity({ serviceName: "svc-a", transport: "stdio" }),
+    ])
+    expect([...p.live]).toEqual([depIdentity({ serviceName: "svc-a", transport: "stdio" })])
+  })
+
+  test("shutdownAll ⇒ everything detached + tracking cleared", async () => {
+    const p = makeInstrumentedPorts()
+    const session = createSkillMcpSession({ attach: p.attach, detach: p.detach }, ON)
+    await session.reconcile([skill("a", [stdioTool("svc-a")]), skill("b", [stdioTool("svc-b")])])
+    await session.shutdownAll()
+    expect(session.attachedIdentities()).toEqual([])
+    expect(p.live.size).toBe(0)
+  })
+
+  test("gate OFF ⇒ ZERO attach calls (byte-identical no-op)", async () => {
+    const p = makeInstrumentedPorts()
+    const session = createSkillMcpSession({ attach: p.attach, detach: p.detach }, OFF)
+    const r = await session.reconcile([
+      skill("a", [stdioTool("svc-a")]),
+      skill("b", [stdioTool("svc-b")]),
+    ])
+    expect(r.attached).toEqual([])
+    expect(p.attachCalls.length).toBe(0)
+    expect(session.attachedIdentities()).toEqual([])
+  })
+
+  test("NO-THROW: a throwing attach port leaves the identity untracked for retry", async () => {
+    let throwOnce = true
+    const attachCalls: McpServerSpec[][] = []
+    const port: AttachMcpPort = {
+      attach: async (specs) => {
+        attachCalls.push([...specs])
+        if (throwOnce) {
+          throwOnce = false
+          throw new Error("spawn failed")
+        }
+        return specs.map((s) => ({ serviceName: s.serviceName, attached: true }))
+      },
+    }
+    const session = createSkillMcpSession({ attach: port }, ON)
+    // First reconcile: port throws ⇒ swallowed, nothing tracked.
+    const r1 = await session.reconcile([skill("a", [stdioTool("svc")])])
+    expect(r1.attached).toEqual([depIdentity({ serviceName: "svc", transport: "stdio" })]) // intent
+    expect(session.attachedIdentities()).toEqual([]) // but NOT committed
+    // Second reconcile retries (still desired, still untracked).
+    await session.reconcile([skill("a", [stdioTool("svc")])])
+    expect(session.attachedIdentities().length).toBe(1)
+    expect(attachCalls.length).toBe(2)
+  })
+})
+
+describe("createSkillMcpSession — PERFORMANCE invariant (ADR-0476)", () => {
+  test("attach call count == distinct servers, NOT == skills", async () => {
+    const p = makeInstrumentedPorts()
+    const session = createSkillMcpSession({ attach: p.attach, detach: p.detach }, ON)
+
+    // 5 skills, but only 2 DISTINCT servers (shared + per-skill duplicate).
+    const skills = [
+      skill("s1", [stdioTool("alpha")]),
+      skill("s2", [stdioTool("alpha")]),
+      skill("s3", [stdioTool("beta")]),
+      skill("s4", [stdioTool("alpha")]),
+      skill("s5", [stdioTool("beta")]),
+    ]
+    await session.reconcile(skills)
+
+    // HARD assertion: total servers handed to attach across ALL calls equals
+    // the number of DISTINCT servers (2), never the skill count (5).
+    const totalServersAttached = p.attachCalls.reduce((n, c) => n + c.length, 0)
+    expect(totalServersAttached).toBe(2)
+    expect(session.attachedIdentities().length).toBe(2)
+  })
+
+  test("reconcile with no NEW server ⇒ ZERO attach calls (turn not blocked by redundant launches)", async () => {
+    const p = makeInstrumentedPorts()
+    const session = createSkillMcpSession({ attach: p.attach, detach: p.detach }, ON)
+    await session.reconcile([skill("a", [stdioTool("svc")])])
+    const before = p.attachCalls.length
+    // Re-activate the identical set 3 more times.
+    for (let i = 0; i < 3; i++) await session.reconcile([skill("a", [stdioTool("svc")])])
+    // HARD assertion: NO additional attach call — idempotent reconcile.
+    expect(p.attachCalls.length).toBe(before)
+    expect(before).toBe(1)
+  })
+})
+
+describe("reconcileSkillMcpForTurn — loop-activation-hook glue (ADR-0476)", () => {
+  test("absent session ⇒ no-op (byte-identical)", async () => {
+    const r = await reconcileSkillMcpForTurn({}, [skill("a", [stdioTool("svc")])])
+    expect(r).toEqual({ attached: [], detached: [] })
+  })
+
+  test("present session ⇒ delegates reconcile (gate ON, attaches)", async () => {
+    const p = makeInstrumentedPorts()
+    const session = createSkillMcpSession({ attach: p.attach, detach: p.detach }, ON)
+    const r = await reconcileSkillMcpForTurn({ skillMcpSession: session }, [
+      skill("a", [stdioTool("svc")]),
+    ])
+    expect(r.attached.length).toBe(1)
+    expect(p.attachCalls.length).toBe(1)
+  })
+
+  test("hostile session that throws ⇒ swallowed, turn not broken", async () => {
+    const hostile = {
+      reconcile: async () => {
+        throw new Error("boom")
+      },
+      shutdownAll: async () => {},
+      attachedIdentities: () => [],
+    }
+    const r = await reconcileSkillMcpForTurn({ skillMcpSession: hostile }, [])
+    expect(r).toEqual({ attached: [], detached: [] })
   })
 })

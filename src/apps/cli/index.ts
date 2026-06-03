@@ -38,6 +38,9 @@ const CLI_FEATURE_GATES = [
   "QUANTA_ENABLE_ENV_PROBE",
   "QUANTA_ENABLE_AWAY_SUMMARY",
   "QUANTA_ENABLE_PROMPT_SUGGESTION",
+  // ADR-0474 — stale-read-guard: block write/edit of a file externally modified
+  // since the agent read it ("re-read first"). Protective correctness guard.
+  "QUANTA_STALE_READ_GUARD",
 ]
 // The LLM TOOL gates the CLI opts in by default are DERIVED from the tool-
 // surface SSOT (`seedEnvVarsForSurface`) — the single source of truth. Adding a

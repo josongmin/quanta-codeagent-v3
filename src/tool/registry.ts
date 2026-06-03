@@ -1,6 +1,7 @@
 import { join } from "node:path"
 import { runtimeConfig, ToolExecutionError, ToolInputError } from "@/shared"
 import { enforceOutputSchema } from "./factory"
+import type { ToolOrigin } from "./origin"
 import { capToolOutput, DEFAULT_SPILL_KEEP, DEFAULT_TOOL_OUTPUT_MAX } from "./output-spill"
 import { zodToJsonSchema } from "./schema"
 import type { Tool, ToolContext, ToolResult, ToolSpec } from "./types"
@@ -8,8 +9,23 @@ import type { Tool, ToolContext, ToolResult, ToolSpec } from "./types"
 export class ToolRegistry {
   private readonly tools = new Map<string, Tool>()
 
-  constructor(tools: Tool[]) {
+  /** Per-tool ORIGIN tag (ADR-0471 Substrate-B): WHICH source array registered
+   *  a tool. Absent (legacy ctor) ⇒ every tool reads as `builtin`, so the
+   *  origin surface is byte-identical to a registry that never carried a map. A
+   *  consumer (dispatch #2) maps origin → provenance via `deriveProvenance`,
+   *  deriving trust ACCURATELY from the call site rather than guessing by name. */
+  private readonly origin: ReadonlyMap<string, ToolOrigin> | undefined
+
+  constructor(tools: Tool[], origin?: ReadonlyMap<string, ToolOrigin>) {
     for (const t of tools) this.tools.set(t.name, t as Tool)
+    this.origin = origin
+  }
+
+  /** The ORIGIN tag for a tool. No map supplied, or a name absent from the
+   *  map, ⇒ `builtin` (the conservative, byte-identical default). O(1) map
+   *  lookup — never scans the tool list. */
+  originOf(name: string): ToolOrigin {
+    return this.origin?.get(name) ?? "builtin"
   }
 
   has(name: string): boolean {

@@ -140,6 +140,10 @@ export const makeReadTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
         yield { type: "result", result: classified }
         return
       }
+      // ADR-0474 — record the read-time mtime (keyed by the RESOLVED absolute
+      // path so a later write/edit, which stats the same abs path, matches).
+      // No-op when the guard is off (ctx.readFileState absent).
+      ctx.readFileState?.record(info.path, info.mtimeMs)
       yield {
         type: "result",
         result: {

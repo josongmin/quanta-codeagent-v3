@@ -84,6 +84,7 @@ import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
 import type { RuntimeAgentTurnAssembler, RuntimeAgentTurnDeps } from "@/sdk/runtime/base"
 import { resolveJailed } from "@/storage"
 import { type DnsResolver, nodeDnsResolver } from "@/tool/browser"
+import { ReadFileState, staleReadGuardEnabled } from "@/tool/stale-read-guard"
 import type { WebSearchProvider } from "@/tool/web"
 import { providerFromEnv } from "@/tool/web/providers"
 import { buildMentionSymbolDeps } from "./internal/mention-symbol-deps"
@@ -342,6 +343,17 @@ const wireOptionalCapabilitySlots = (cfg: AgentConfig, env: AssemblerEnv): void 
   maybeWireMailbox(cfg, env)
   maybeWireWebSearch(cfg, env)
   maybeWireBackgroundSubagent(cfg, env)
+  maybeWireReadFileState(cfg, env)
+}
+
+/** ADR-0474 — mint ONE per-session `ReadFileState` when the stale-read-guard is
+ *  opted in (`QUANTA_STALE_READ_GUARD=1`), so `read` records mtimes that
+ *  `write`/`edit` of the same session consult. Caller-override-safe; absent gate
+ *  ⇒ slot stays unset ⇒ no tracking, no guard (byte-identical default-OFF). */
+const maybeWireReadFileState = (cfg: AgentConfig, env: AssemblerEnv): void => {
+  if (!staleReadGuardEnabled(env)) return
+  if (cfg.readFileState !== undefined) return
+  cfg.readFileState = new ReadFileState()
 }
 
 /** Single source of truth for "config for this mode" assembly. `env` is the

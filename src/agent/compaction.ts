@@ -1,7 +1,16 @@
 import type { ContentBlock, LLMPort, Message, SystemPromptInput } from "@/llm"
 import { assembleFromEvents } from "@/llm"
-import { errMessage, logger, runtimeConfig } from "@/shared"
+import { errMessage, logger, type Result, runtimeConfig } from "@/shared"
+import {
+  BackgroundSummarizationController,
+  type BgCompactionConfig,
+  bgCompactionEnabled,
+  type CancelToken,
+  type SpeculativeSummarizeFn,
+  type SummarizeError,
+} from "./compaction/index"
 import type { RecoveryProvenance, RecoveryReason } from "./recovery-reason"
+import { isPromptTooLong } from "./retry"
 
 /**
  * Single-tier conversation compaction (RFC §8 Phase 2 / §1.2: one tier, no
@@ -92,6 +101,19 @@ const resolveThreshold = (explicit?: number): number => {
   const env = runtimeConfig().compactTokens
   return env !== undefined ? env : DEFAULT_THRESHOLD
 }
+
+/**
+ * ADR-0473 — the working token CEILING used as `UsageSnapshot.limitTokens` for
+ * the background controller. The compaction threshold IS the meaningful ceiling
+ * (it is the point at which the synchronous proactive path folds history), so
+ * the speculative "approaching the limit" / "frees enough" math is anchored to
+ * the SAME number the synchronous path uses. Resolves the explicit per-config
+ * override first, then the env override, then the module default — identical
+ * precedence to {@link resolveThreshold}, exported so the loop never re-derives
+ * it (no literals at the call site).
+ */
+export const resolveCompactionLimitTokens = (explicit?: number): number =>
+  resolveThreshold(explicit)
 
 /** tool_use ids referenced by tool_result blocks in `m` (if any). */
 const toolResultRefs = (m: Message): string[] =>
@@ -509,3 +531,145 @@ const emitPostCompactIfWired = async (
     }
   }
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// ADR-0473 — background (speculative) compaction wiring.
+//
+// The pure controller lives in `./compaction/background.ts`. This factory is the
+// COMPOSITION seam: it adapts the EXISTING in-module summarize primitives
+// (`findBoundary` / `summarizeWith` / `CONTINUATION_SYSTEM` / `estimateTokens` /
+// `REACTIVE_KEEP_TURNS`) into the injected {@link SpeculativeSummarizeFn} the
+// controller drives, and derives the controller's {@link BgCompactionConfig}
+// from NAMED constants (no literals at the call site). DEFAULT-OFF: returns
+// `undefined` unless the gate (`QUANTA_BG_COMPACTION === "1"`) is on, so the
+// loop's existing synchronous proactive/reactive paths stay byte-identical.
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * Fraction of the working ceiling at which a speculative summarize begins
+ * (relative start floor). At 15% free headroom we start eagerly — the persist
+ * gate (below) is the conservative side, so an early start only costs a
+ * cancellable background pass, never a bad install.
+ */
+const BG_START_AT_UNUSED_PERCENT = 0.15
+/**
+ * Absolute start floor (tokens). Mirrors the reactive squeeze precondition
+ * (`REACTIVE_MIN_INPUT_TOKENS`): below a few thousand tokens of free headroom
+ * there is meaningful pressure regardless of the percent floor. Begin a
+ * speculative pass once free headroom drops to/below this.
+ */
+const BG_START_AT_UNUSED_TOKENS = REACTIVE_MIN_INPUT_TOKENS
+/**
+ * Minimum fraction of the working ceiling a completed summary must FREE to be
+ * worth installing (relative persist floor). Mirrors the reactive path's
+ * `REACTIVE_MIN_DROP_RATIO` intent — a summary that frees less than this is not
+ * worth swapping live history for.
+ */
+const BG_PERSIST_UNUSED_PERCENT = REACTIVE_MIN_DROP_RATIO
+/**
+ * Minimum absolute tokens a completed summary must free to be worth installing
+ * (absolute persist floor). Same magnitude as the reactive squeeze precondition
+ * — a sub-`REACTIVE_MIN_INPUT_TOKENS` saving is noise.
+ */
+const BG_PERSIST_UNUSED_TOKENS = REACTIVE_MIN_INPUT_TOKENS
+
+/** Build the named {@link BgCompactionConfig} from the constants above. Kept as
+ *  a pure helper so a test can assert the derivation and the loop never inlines
+ *  literals. */
+export const bgCompactionConfig = (): BgCompactionConfig => ({
+  startAtUnusedTokens: BG_START_AT_UNUSED_TOKENS,
+  startAtUnusedPercent: BG_START_AT_UNUSED_PERCENT,
+  persistUnusedTokens: BG_PERSIST_UNUSED_TOKENS,
+  persistUnusedPercent: BG_PERSIST_UNUSED_PERCENT,
+})
+
+/**
+ * The installed-summary payload for the loop wire: the rebuilt transcript
+ * (`[synthetic, ...suffix]`) the host installs via `wm.replace(...)`.
+ */
+export type BgSummaryPayload = Message[]
+
+/**
+ * Adapt the EXISTING summarize primitives into the injected speculative port.
+ * Honors the {@link CancelToken} (checks before+after the summarize stream so a
+ * turn that ends early stops spending) and returns a typed {@link
+ * SummarizeError} (never throws — the controller additionally wraps this, but we
+ * keep the no-throw contract local too). Uses the orphan-safe `findBoundary` and
+ * the continuation summary prompt (same as `reactiveCompact`), so a speculative
+ * install never splits a tool_use/tool_result pair.
+ */
+const speculativeSummarizeAdapter = (
+  llm: LLMPort,
+  getPrefix: () => readonly Message[],
+): SpeculativeSummarizeFn<BgSummaryPayload> => {
+  return async ({ cancel }): Promise<Result<{ summary: BgSummaryPayload; resultingTokens: number }, SummarizeError>> => {
+    if (cancel.aborted) {
+      return { ok: false, error: { kind: "other", detail: "cancelled before start" } }
+    }
+    const messages = [...getPrefix()]
+    const boundary = findBoundary(messages, REACTIVE_KEEP_TURNS)
+    if (boundary <= 0) {
+      return {
+        ok: false,
+        error: { kind: "other", detail: "no summarizable boundary (one indivisible giant turn)" },
+      }
+    }
+    const prefix = messages.slice(0, boundary)
+    const suffix = messages.slice(boundary)
+    let summaryText: string
+    try {
+      summaryText = await summarizeWith(llm, CONTINUATION_SYSTEM, prefix)
+    } catch (e) {
+      // Map a prompt-too-long while summarizing to the dedicated discard reason
+      // (the controller turns `input-limit` into `input-limit-failure`); every
+      // other failure is a generic summarizer error. NEVER throw.
+      const kind = isPromptTooLong(e) ? "input-limit" : "other"
+      return { ok: false, error: { kind, detail: errMessage(e) } }
+    }
+    if (cancel.aborted) {
+      return { ok: false, error: { kind: "other", detail: "cancelled after summarize" } }
+    }
+    if (summaryText.trim() === "") {
+      return { ok: false, error: { kind: "other", detail: "continuation summary came back empty" } }
+    }
+    const synthetic: Message = {
+      role: "user",
+      content: [{ type: "text", text: `<continuation summary>\n${summaryText}` }],
+    }
+    const summary: BgSummaryPayload = [synthetic, ...suffix]
+    return { ok: true, value: { summary, resultingTokens: estimateTokens(summary) } }
+  }
+}
+
+/**
+ * ADR-0473 — construct the background-compaction controller IFF the gate is on.
+ *
+ * `env`     — the injected env record (gate read via `bgCompactionEnabled`).
+ * `llm`     — the summarizer LLM (the loop passes the dedicated summarizer model
+ *             when configured, else the main model — same choice the synchronous
+ *             path makes).
+ * `getPrefix` — a thunk returning the LIVE transcript snapshot at start time
+ *             (the loop wires `() => wm.snapshot()`).
+ * `clock`   — injected wall clock (the loop passes the real one; tests a fake).
+ * `cfg`     — optional config override (defaults to {@link bgCompactionConfig}).
+ *
+ * Returns `undefined` when the gate is OFF — the loop then never references the
+ * controller and the existing synchronous flow is byte-identical.
+ */
+export const makeBgCompactionController = (
+  env: Readonly<Record<string, string | undefined>>,
+  llm: LLMPort,
+  getPrefix: () => readonly Message[],
+  clock: () => number,
+  cfg: BgCompactionConfig = bgCompactionConfig(),
+): BackgroundSummarizationController<BgSummaryPayload> | undefined => {
+  if (!bgCompactionEnabled(env)) return undefined
+  return new BackgroundSummarizationController<BgSummaryPayload>(
+    speculativeSummarizeAdapter(llm, getPrefix),
+    clock,
+    cfg,
+  )
+}
+
+/** Re-export the cancel-token type for the loop's e2e test convenience. */
+export type { CancelToken }

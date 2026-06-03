@@ -94,6 +94,8 @@ const writeSessionFile = async (path: string, body: string): Promise<void> => {
 //   - ThinkingBlock.redacted    (encrypted reasoning preservation)
 //   - ImageBlock                (ADR-0083 multimodal input)
 //   - DocumentBlock             (ADR-0137 native-PDF document input)
+//   - ToolResultBlock.contentBlocks (ADR-0126/0137 structured tool-result
+//                                payload: text + ImageBlock + DocumentBlock)
 const textBlockSchema = z.object({
   type: z.literal("text"),
   text: z.string(),
@@ -105,18 +107,6 @@ const toolUseBlockSchema = z.object({
   name: z.string(),
   input: z.unknown(),
 })
-const toolResultBlockSchema = z.object({
-  type: z.literal("tool_result"),
-  tool_use_id: z.string(),
-  content: z.string(),
-  is_error: z.boolean().optional(),
-})
-const thinkingBlockSchema = z.object({
-  type: z.literal("thinking"),
-  thinking: z.string(),
-  signature: z.string().optional(),
-  redacted: z.literal(true).optional(),
-})
 const imageBlockSchema = z.object({
   type: z.literal("image"),
   data: z.string(),
@@ -126,6 +116,34 @@ const documentBlockSchema = z.object({
   type: z.literal("document"),
   data: z.string(),
   mediaType: z.string(),
+})
+const toolResultBlockSchema = z.object({
+  type: z.literal("tool_result"),
+  tool_use_id: z.string(),
+  content: z.string(),
+  // ADR-0126 / ADR-0137 — OPTIONAL structured content mirroring
+  // `ToolResultBlock.contentBlocks` (@/llm types.ts). Produced live by
+  // dispatch's `composeToolResultContent` as `[{type:"text",text},
+  // ...ImageBlock, ...DocumentBlock]` when a tool emits images/documents
+  // (read_image, web_fetch). Omitting it here would make zod strip the visual
+  // payload on resume/fork/export — a lossy round-trip. Reuse the same
+  // image/document element schemas defined above (do NOT invent new shapes).
+  contentBlocks: z
+    .array(
+      z.discriminatedUnion("type", [
+        z.object({ type: z.literal("text"), text: z.string() }),
+        imageBlockSchema,
+        documentBlockSchema,
+      ]),
+    )
+    .optional(),
+  is_error: z.boolean().optional(),
+})
+const thinkingBlockSchema = z.object({
+  type: z.literal("thinking"),
+  thinking: z.string(),
+  signature: z.string().optional(),
+  redacted: z.literal(true).optional(),
 })
 const contentBlockSchema = z.discriminatedUnion("type", [
   textBlockSchema,

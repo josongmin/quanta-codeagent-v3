@@ -442,6 +442,132 @@ const splitAndCollect = (text: string): SplitResult => {
   return { rawData: data, body }
 }
 
+/**
+ * ADR-0476 — lift a skill's raw `dependencies` block out of SKILL.md.
+ *
+ * The strict frontmatter contract above (`parseSkillMarkdown`) deliberately
+ * REJECTS block-list-of-maps syntax (an indented `- type: mcp` line trips the
+ * "indented continuation lines are not supported" guard), so the skill→MCP
+ * `dependencies.tools[]` declaration cannot ride the main schema without
+ * widening that loud-failure contract. Instead this helper scans the raw
+ * frontmatter region INDEPENDENTLY for a single top-level `dependencies:`
+ * block and parses ONLY that sub-tree into the
+ * `{ tools: [ {type,value,transport,command?,args?,url?}, ... ] }` shape that
+ * `@/skill/skill-mcp-deps` `parseSkillMcpDeps` validates.
+ *
+ * It NEVER throws and NEVER touches `parseSkillMarkdown`'s behaviour:
+ *   - no `dependencies:` block  ⇒ returns `undefined` (byte-identical: the
+ *     caller passes `undefined` to the resolver, which is a no-op skill).
+ *   - malformed sub-tree        ⇒ best-effort partial / `undefined`; the
+ *     downstream validator is the loud-failure authority for MCP deps.
+ *
+ * Scope of the mini block-parser (intentionally narrow — NOT a YAML engine):
+ *   dependencies:
+ *     tools:
+ *       - type: mcp
+ *         value: my-server
+ *         transport: stdio
+ *         command: my-mcp-binary
+ *         args: ["--flag"]
+ * Each `- ` opens a new tool map; subsequent deeper-indented `key: value`
+ * lines attach to it. Values reuse {@link parseRhs} (bareword / quoted /
+ * flow-list). Anything outside this shape is ignored (validator decides).
+ */
+const indentOf = (raw: string): number => raw.length - raw.trimStart().length
+
+const KV_RE = /^([A-Za-z][A-Za-z0-9_-]*)\s*:\s*(.*)$/
+
+/** Best-effort set a `key: value` field on a tool map; malformed values are
+ *  skipped (the downstream validator is the loud-failure authority). */
+const setToolField = (
+  target: Record<string, unknown>,
+  kv: RegExpMatchArray,
+  lineno: number,
+): void => {
+  try {
+    target[kv[1] ?? ""] = parseRhs((kv[2] ?? "").trim(), lineno)
+  } catch {
+    /* skip malformed field; validator surfaces it */
+  }
+}
+
+/** Apply one already-significant (non-blank, in-block) tool-list line. Opens a
+ *  new tool map on a `- ` dash line (pushing it onto `tools`) and returns it as
+ *  the new `current`; otherwise sets a `key: value` field on `current`. */
+const applyToolLine = (
+  trimmed: string,
+  tools: Record<string, unknown>[],
+  current: Record<string, unknown> | null,
+  lineno: number,
+): Record<string, unknown> | null => {
+  if (trimmed.startsWith("- ")) {
+    const next: Record<string, unknown> = {}
+    tools.push(next)
+    const inline = trimmed.slice(2).trim().match(KV_RE) // `- key: value`
+    if (inline) setToolField(next, inline, lineno)
+    return next
+  }
+  if (current !== null) {
+    const kv = trimmed.match(KV_RE)
+    if (kv) setToolField(current, kv, lineno)
+  }
+  return current
+}
+
+/** Parse the `tools:` block-list under `dependencies:` into raw tool records.
+ *  `start` is the index of the `tools:` line; `baseIndent` its indentation. */
+const collectToolList = (
+  lines: readonly string[],
+  start: number,
+  end: number,
+  baseIndent: number,
+): Record<string, unknown>[] => {
+  const tools: Record<string, unknown>[] = []
+  let current: Record<string, unknown> | null = null
+  for (let i = start + 1; i < end; i++) {
+    const raw = lines[i] ?? ""
+    if (isBlankOrComment(raw)) continue
+    if (indentOf(raw) <= baseIndent) break // dedented out of the tools block
+    current = applyToolLine(raw.trim(), tools, current, i + 1)
+  }
+  return tools
+}
+
+/** Find the top-level `dependencies:` line index in the frontmatter region,
+ *  or -1. */
+const findDependenciesLine = (lines: readonly string[], end: number): number => {
+  for (let i = 1; i < end; i++) {
+    const raw = lines[i] ?? ""
+    if (indentOf(raw) === 0 && /^dependencies\s*:\s*$/.test(raw)) return i
+  }
+  return -1
+}
+
+export const liftRawDependenciesBlock = (content: string): { tools: unknown[] } | undefined => {
+  try {
+    const lines = content.replace(/\r\n/g, "\n").split("\n")
+    if (lines[0]?.trim() !== FENCE) return undefined
+    const end = findClosingFence(lines)
+    if (end === -1) return undefined
+    const depIdx = findDependenciesLine(lines, end)
+    if (depIdx === -1) return undefined
+    // Find the `tools:` line nested under `dependencies:`.
+    const depIndent = indentOf(lines[depIdx] ?? "")
+    for (let i = depIdx + 1; i < end; i++) {
+      const raw = lines[i] ?? ""
+      if (isBlankOrComment(raw)) continue
+      const ind = indentOf(raw)
+      if (ind <= depIndent) break // dedented out of dependencies block
+      if (/^tools\s*:\s*$/.test(raw.trim())) return { tools: collectToolList(lines, i, end, ind) }
+    }
+    // A `dependencies:` block with no `tools:` ⇒ legal, no MCP deps.
+    return { tools: [] }
+  } catch {
+    // NO-THROW: any scan failure ⇒ treat as no declared deps.
+    return undefined
+  }
+}
+
 /** Public entry point. Returns a discriminated union so callers can plug the
  *  error line into tool output without try/catch. */
 export const parseSkillMarkdown = (

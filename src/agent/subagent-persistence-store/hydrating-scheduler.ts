@@ -194,22 +194,52 @@ export const persistentBackgroundSubagentScheduler = async (
   }
 
   /* ---- 2. Save-on-event helpers ---- */
-  const saveLiveHandle = async (id: SubagentHandleId): Promise<void> => {
+  /** Per-handle write serializer. The fork-time "running" snapshot and the
+   *  completion/cancel terminal snapshot are BOTH scheduled fire-and-forget;
+   *  with the append-only / last-line-wins store, a runner that settles
+   *  synchronously (cached/sync-resolved, or a cancel that flips the inner to
+   *  terminal in-line) could otherwise let the terminal `store.save` land
+   *  BEFORE the running `store.save`, persisting a FINISHED handle as
+   *  `status:"running"` — a zombie on the next hydrate.
+   *
+   *  We establish a happens-before edge per id by chaining each write onto the
+   *  previous one (`lastWrite = lastWrite.then(...)`). The PROJECTION is
+   *  captured SYNCHRONOUSLY at enqueue time (so the running snapshot reflects
+   *  the live state at enqueue, not whatever the inner has progressed to by the
+   *  time the chain drains), while only the `store.save` I/O is serialized.
+   *  A rejected link MUST NOT wedge the chain: every link catches its own
+   *  error so the next save still runs. */
+  const lastWriteById = new Map<SubagentHandleId, Promise<void>>()
+
+  const saveLiveHandle = (id: SubagentHandleId): Promise<void> => {
+    // Capture the snapshot NOW so ordering is decided by enqueue order, not by
+    // when the serialized chain happens to drain.
     const liveList = inner.list()
     const entry = liveList.find((e) => e.id === id)
-    if (entry === undefined) return
-    const handle = liveToPersisted(id, entry.spec, entry.result, hostPidFn(), workspace)
-    try {
-      await store.save(handle)
-    } catch {
-      // intentional swallow on save-on-event — losing one snapshot must not
-      // crash the live loop. The next transition (or shutdown snapshot) will
-      // retry, AND the contract on `PersistenceError("io-failed")` is the
-      // SURFACE owner's call to log/alert. Phase 1 keeps the hot path quiet.
+    if (entry === undefined) {
+      // Nothing live to persist for this id (already pruned/unknown). Return
+      // the existing tail so callers can still await a stable point.
+      return lastWriteById.get(id) ?? Promise.resolve()
     }
-    // Once persisted to disk, also remove from the wrapper's hydrated cache
-    // so list() doesn't show the stale snapshot beside the fresh inner view.
-    hydratedById.delete(id)
+    const handle = liveToPersisted(id, entry.spec, entry.result, hostPidFn(), workspace)
+
+    const prev = lastWriteById.get(id) ?? Promise.resolve()
+    const next = prev.then(async () => {
+      try {
+        await store.save(handle)
+      } catch {
+        // intentional swallow on save-on-event — losing one snapshot must not
+        // crash the live loop NOR wedge later writes on this id. The next
+        // transition (or shutdown snapshot) will retry, AND the contract on
+        // `PersistenceError("io-failed")` is the SURFACE owner's call to
+        // log/alert. Phase 1 keeps the hot path quiet.
+      }
+      // Once persisted to disk, also remove from the wrapper's hydrated cache
+      // so list() doesn't show the stale snapshot beside the fresh inner view.
+      hydratedById.delete(id)
+    })
+    lastWriteById.set(id, next)
+    return next
   }
 
   /** Schedule a save-on-runner-completion poll. Called after fork(): we

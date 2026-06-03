@@ -41,9 +41,13 @@
  *           returns null. The caller's next `transition()` may now proceed
  *           past the feedback gate.
  *       (d) `positive: false` AND currentIdx > 0 ⇒ ROLLBACK: cursor moves to
- *           currentIdx - 1, the (now-previous) phase's ledger entry is
- *           cleared (so a rollback into a requiresFeedback phase forces fresh
- *           feedback before advancing again). Returns the {@link
+ *           currentIdx - 1, and BOTH endpoints' ledger entries are cleared —
+ *           the now-current (rolled-into) phase AND the phase rolled back FROM.
+ *           Clearing the rolled-into phase forces fresh feedback before
+ *           advancing again; clearing the rolled-from phase mirrors the
+ *           forward-transition consume semantics (a phase you LEAVE requires
+ *           fresh feedback on re-entry — otherwise a stale positive entry would
+ *           silently satisfy its requiresFeedback gate). Returns the {@link
  *           PhaseTransition} (direction "rollback").
  *       (e) `positive: false` AND currentIdx === 0 ⇒ no rollback possible,
  *           returns null (semantically a no-op — caller decides to abort).
@@ -211,9 +215,16 @@ export const createDefaultNPhaseDriver = (specs: ReadonlyArray<PhaseSpec>): NPha
     const fromId = currentSpec.id
     cursor -= 1
     const toId = current().id
-    // Clear the (now-current) phase's ledger entry — a rollback into a
-    // requiresFeedback phase forces fresh feedback before advancing again.
+    // Clear BOTH endpoints of the rollback:
+    //   - `toId` (the now-current phase) — a rollback into a requiresFeedback
+    //     phase forces fresh feedback before advancing again.
+    //   - `fromId` (the phase we rolled back FROM) — identical to the
+    //     forward-transition consume semantics (line ~175): a phase you LEAVE
+    //     must require fresh feedback on re-entry. Without this, a stale
+    //     positive entry on `fromId` would silently satisfy the requiresFeedback
+    //     gate when the cursor later advances back into it.
     ledger.delete(toId)
+    ledger.delete(fromId)
     return { from: fromId, to: toId, direction: "rollback" }
   }
 

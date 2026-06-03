@@ -88,6 +88,43 @@ const toObjective = (cell: Cell): Objective =>
     updatedAt: cell.updatedAt,
   })
 
+/**
+ * SERDE fix — persist INTENT, not derivation.
+ *
+ * The public `Objective.status` is a DERIVED value (blockers/criteria win over
+ * the caller's explicit intent). A snapshot that stored only that derived
+ * `status` and restored `explicitStatus` from it would conflate auto-derived
+ * completion ("all criteria met") with an explicit `updateStatus("completed")`.
+ * After such a round-trip, unmarking a criterion would NOT revert to "active"
+ * because the restored explicit intent had been silently upgraded to
+ * "completed" — breaking the re-derivation invariant pinned by
+ * objective-hellgate.test.ts:185.
+ *
+ * The cure is to serialize the underlying `explicitStatus` alongside the
+ * derived view. `Objective` is a structural interface, so a snapshot entry that
+ * carries one extra `explicitStatus` field is still assignable to it; the field
+ * is read back verbatim on restore (never inferred from `status`). This keeps
+ * the persist LOSSLESS — intent survives the round-trip — and keeps status
+ * derivation a pure function of `explicitStatus + criteria + blockers`. */
+interface SnapshotObjective extends Objective {
+  /** The caller's last EXPLICIT intent — the ONLY status source on restore. */
+  readonly explicitStatus: "active" | "completed"
+}
+
+const toSnapshotObjective = (cell: Cell): SnapshotObjective =>
+  Object.freeze({
+    threadId: cell.threadId,
+    goal: cell.goal,
+    successCriteria: Object.freeze(cell.criteria.map((c) => Object.freeze({ ...c }))),
+    status: deriveStatus(cell),
+    explicitStatus: cell.explicitStatus,
+    budget: buildBudget(cell),
+    blockers: Object.freeze(cell.blockers.map((b) => Object.freeze({ ...b }))),
+    nextActions: Object.freeze([...cell.nextActions]),
+    createdAt: cell.createdAt,
+    updatedAt: cell.updatedAt,
+  })
+
 /** Audit R2 (F3) defensive caps. The agent populates its own threads, so the
  *  exploit surface is "agent misbehaves and floods its own state" — but a
  *  bounded cap is cheap and mirrors the mailbox/run-ledger/approval-LRU
@@ -280,7 +317,7 @@ export const createObjectiveStore = (opts?: { now?: () => number }): ObjectivePo
     toSnapshot(): ObjectiveSnapshot {
       try {
         return Object.freeze({
-          objectives: Object.freeze([...cells.values()].map(toObjective)),
+          objectives: Object.freeze([...cells.values()].map(toSnapshotObjective)),
         })
       } catch {
         return Object.freeze({ objectives: Object.freeze([]) })
@@ -363,10 +400,26 @@ const rebuildBlockers = (raw: unknown): Blocker[] => {
   return out
 }
 
-/** Reconstruct a mutable cell from a (possibly hostile) public Objective. */
+/**
+ * Recover the persisted EXPLICIT intent from a snapshot entry.
+ *
+ * SERDE fix: read ONLY the dedicated `explicitStatus` field — NEVER the derived
+ * `status`. If the explicit field is absent (legacy snapshot written before the
+ * field existed, or a hostile payload), we cannot know whether a `completed`
+ * status was explicit intent or auto-derived from met criteria; the safe,
+ * non-fabricating answer is `active`. Defaulting to `active` is correct rather
+ * than a silent fallback: the public `status` is RE-DERIVED from criteria after
+ * restore, so a genuinely-complete objective (all criteria met) still reports
+ * `completed`, and only the explicit-vs-derived distinction is reset — exactly
+ * the field whose legacy value is unknowable. This never UPGRADES a derived
+ * completion to explicit intent (the bug), it only ever stays/declines. */
+const explicitFromSnapshot = (rec: { explicitStatus?: unknown }): "active" | "completed" =>
+  rec.explicitStatus === "completed" ? "completed" : "active"
+
+/** Reconstruct a mutable cell from a (possibly hostile) snapshot entry. */
 function cellFromObjective(o: unknown): Cell | null {
   if (o === null || typeof o !== "object") return null
-  const rec = o as Partial<Objective>
+  const rec = o as Partial<SnapshotObjective>
   if (!isNonEmptyString(rec.threadId)) return null
   const budget = (rec.budget ?? {}) as Partial<ObjectiveBudget>
   const maxTokens = finiteNonNegInt(budget.maxTokens)
@@ -379,7 +432,7 @@ function cellFromObjective(o: unknown): Cell | null {
     nextActions: Array.isArray(rec.nextActions)
       ? rec.nextActions.filter((a): a is string => typeof a === "string")
       : [],
-    explicitStatus: rec.status === "completed" ? "completed" : "active",
+    explicitStatus: explicitFromSnapshot(rec),
     ...(maxTokens !== undefined ? { maxTokens } : {}),
     tokensUsed: finiteNonNegInt(budget.tokensUsed) ?? 0,
     ...(maxTurns !== undefined ? { maxTurns } : {}),

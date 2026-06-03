@@ -32,8 +32,28 @@ import { dirname, isAbsolute, normalize, resolve } from "node:path"
 import isPathInside from "is-path-inside"
 import { z } from "zod"
 import { errMessage, QuantaError } from "@/shared"
+import {
+  DxtUserConfigExtension,
+  type InterpolationContext,
+  interpolateLaunchSpec,
+  type LaunchSpec,
+  resolveFields,
+  type SecretStorePort,
+} from "./dxt-user-config"
 import { PluginHost } from "./plugin-host"
 import type { IsolatedProcessSpawnerPort } from "./types"
+
+/** ADR-0475 — host-supplied inputs for `user_config` interpolation. Optional on
+ *  {@link launchDxt}: a manifest with NO `user_config` ignores this entirely
+ *  (byte-identical). The composition root owns every ambient read (keychain via
+ *  {@link SecretStorePort}, `${HOME}`/`pathSeparator`/`platform` via {@link
+ *  InterpolationContext}) so this slice stays `process.*`/fs-free. */
+export interface DxtUserConfigInputs {
+  readonly userValues: Readonly<Record<string, unknown>>
+  readonly secrets: SecretStorePort
+  readonly ctx: Omit<InterpolationContext, "dirname">
+  readonly platform: string
+}
 
 /** Hard upper bound on manifest size. Anything larger is rejected before
  *  JSON parse to bound memory on a hostile / runaway file. 1MB matches the
@@ -65,6 +85,10 @@ export const DxtManifestSchema = z
     allowLoadingUnsignedLibraries: z.boolean().optional(),
     args: z.array(z.string().max(2048)).max(64).optional(),
     env: z.record(z.string(), z.string().max(4096)).optional(),
+    // ADR-0475 — optional typed user_config + platform_overrides + manifest_version.
+    // Spread in so a manifest WITHOUT these keys is byte-identical (all optional);
+    // `.strict()` now ACCEPTS them instead of rejecting as unknown keys.
+    ...DxtUserConfigExtension,
   })
   .strict()
 
@@ -78,6 +102,9 @@ export type DxtErrorKind =
   | "schema-mismatch"
   | "entry-escape"
   | "entry-missing"
+  /** ADR-0475 — `user_config` present but the host supplied no interpolation
+   *  inputs, OR a field/secret/skip-launch outcome blocked the spawn. */
+  | "user-config"
 
 export class DxtError extends QuantaError {
   readonly kind: DxtErrorKind
@@ -176,11 +203,59 @@ const resolveEntrySafe = (manifestDir: string, entry: string, manifestPath: stri
   return absolute
 }
 
+/** ADR-0475 — resolve + interpolate a manifest's `user_config` into a concrete
+ *  {@link LaunchSpec}. Throws a typed `DxtError("user-config")` on missing host
+ *  inputs / field error / secret-store failure / required-empty skip. Extracted
+ *  from {@link launchDxt} to keep that function under the complexity cap. */
+const applyUserConfig = async (
+  manifest: DxtManifest,
+  dir: string,
+  absoluteEntry: string,
+  userConfig: DxtUserConfigInputs | undefined,
+  manifestPath: string,
+): Promise<LaunchSpec> => {
+  const block = manifest.user_config
+  if (block === undefined)
+    return { command: absoluteEntry, args: manifest.args ?? [], env: manifest.env ?? {} }
+  if (userConfig === undefined) {
+    throw new DxtError(
+      "user-config",
+      "manifest declares user_config but no interpolation inputs were supplied to launchDxt",
+      manifestPath,
+    )
+  }
+  const base: LaunchSpec = {
+    command: absoluteEntry,
+    args: manifest.args ?? [],
+    env: manifest.env ?? {},
+  }
+  const resolved = await resolveFields(block, userConfig.userValues, userConfig.secrets)
+  if (!resolved.ok) throw new DxtError("user-config", resolved.error.message, manifestPath)
+  const interp = interpolateLaunchSpec(
+    base,
+    block,
+    manifest.platform_overrides,
+    userConfig.platform,
+    resolved.value,
+    { dirname: dir, ...userConfig.ctx },
+  )
+  if (!interp.ok) throw new DxtError("user-config", interp.error.message, manifestPath)
+  if (interp.value.kind === "skip-launch") {
+    throw new DxtError(
+      "user-config",
+      `launch skipped: required user_config field '${interp.value.field}' has no value`,
+      manifestPath,
+    )
+  }
+  return interp.value.spec
+}
+
 /** Launch a DXT-packaged plugin through the injected spawner port. Returns
  *  a {@link PluginHost} ready for `call` / `notify` / `onNotification`. */
 export const launchDxt = async (
   manifestPath: string,
   spawner: IsolatedProcessSpawnerPort,
+  userConfig?: DxtUserConfigInputs,
 ): Promise<PluginHost> => {
   const { manifest, dir } = await validateDxt(manifestPath)
   const absoluteEntry = resolveEntrySafe(dir, manifest.entry, manifestPath)
@@ -202,6 +277,13 @@ export const launchDxt = async (
   }
   if (manifest.args !== undefined) Object.assign(spawnOpts, { args: manifest.args })
   if (manifest.env !== undefined) Object.assign(spawnOpts, { env: manifest.env })
+  // ADR-0475 — when the manifest declares `user_config`, resolve + interpolate
+  // `${user_config.X}` / `${__dirname}` / `${HOME}` … into entry/args/env. A
+  // manifest WITHOUT `user_config` skips this entirely (byte-identical).
+  if (manifest.user_config !== undefined) {
+    const spec = await applyUserConfig(manifest, dir, absoluteEntry, userConfig, manifestPath)
+    Object.assign(spawnOpts, { entry: spec.command, args: spec.args, env: spec.env })
+  }
   if (manifest.allowLoadingUnsignedLibraries === true)
     Object.assign(spawnOpts, { allowLoadingUnsignedLibraries: true })
   const proc = await spawner.spawn(spawnOpts)

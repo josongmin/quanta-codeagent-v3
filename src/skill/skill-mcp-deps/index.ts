@@ -17,6 +17,13 @@
 export { parseSkillMcpDeps } from "./parser"
 export { resolveMcpDeps } from "./resolve"
 export {
+  createSkillMcpSession,
+  type DetachMcpPort,
+  type ReconcileResult,
+  type SkillMcpPorts,
+  type SkillMcpSession,
+} from "./session"
+export {
   type ActiveSkillDeps,
   type AttachMcpPort,
   depIdentity,

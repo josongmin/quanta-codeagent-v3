@@ -4,7 +4,7 @@
  * Round-trip identity: `fromSnapshot(toSnapshot(p))` returns a plan
  * structurally equal to `p`. Schema-versioned (`"plan-v1"`) so future
  * additive fields can be migrated forward without breaking existing
- * snapshots. Defensive parse rejects 9 corruption classes with typed errors.
+ * snapshots. Defensive parse rejects 10 corruption classes with typed errors.
  */
 
 import { validateDag } from "./dag"
@@ -57,6 +57,23 @@ export type PlanSnapshotParseError =
       readonly expected: string
       readonly actual: string
     }
+  | {
+      /** Corruption class 10: a `todo.phaseId` references a phase whose
+       *  `todoIds` does NOT contain that todo id, OR a todo id is claimed by
+       *  two phases. The bidirectional invariant `todo.phaseId ↔ phase.todoIds`
+       *  (enforced atomically by every mutation reducer via
+       *  `syncPhaseMembership`) is broken. Distinct from `phase_not_found`,
+       *  which fires when the referenced phase does not exist at all. */
+      readonly kind: "phase_membership_asymmetry"
+      /** The todo whose phase membership is inconsistent. */
+      readonly todoId: string
+      /** The phase the todo claims via `todo.phaseId`. */
+      readonly phaseId: string
+      /** Disambiguates the two asymmetry shapes:
+       *   - `missing_in_phase`: `phase.todoIds` omits this todo id.
+       *   - `claimed_by_two_phases`: id appears in another phase's `todoIds`. */
+      readonly detail: "missing_in_phase" | "claimed_by_two_phases"
+    }
 
 const isObj = (x: unknown): x is Record<string, unknown> =>
   typeof x === "object" && x !== null && !Array.isArray(x)
@@ -76,18 +93,26 @@ const isStatus = (x: unknown): x is TodoStatus =>
 
 /**
  * Parse an unknown into a `Plan`. Rejects with the FIRST validation failure
- * encountered. The 9 covered corruption classes:
+ * encountered. The 10 covered corruption classes:
  *
- *   1. schema_mismatch    — `schema !== "plan-v1"` or absent.
- *   2. missing fields     — required Plan/Todo/Phase fields absent or wrong type.
- *   3. status_invalid     — TodoItem.status not in `VALID_STATUSES`.
- *   4. negative version   — `Plan.version < 0` or non-finite.
- *   5. dangling deps      — TodoItem.dependencies references an unknown id.
- *   6. non-monotonic ts   — createdAt > updatedAt for a TodoItem.
- *   7. duplicate todo id  — same id keyed twice (impossible in a Record but
+ *    1. schema_mismatch    — `schema !== "plan-v1"` or absent.
+ *    2. missing fields     — required Plan/Todo/Phase fields absent or wrong type.
+ *    3. status_invalid     — TodoItem.status not in `VALID_STATUSES`.
+ *    4. negative version   — `Plan.version < 0` or non-finite.
+ *    5. dangling deps      — TodoItem.dependencies references an unknown id.
+ *    6. non-monotonic ts   — createdAt > updatedAt for a TodoItem.
+ *    7. duplicate todo id  — same id keyed twice (impossible in a Record but
  *                            checked via array deserialization path if any).
- *   8. duplicate phase id — two phases share `id`.
- *   9. phase ref unknown  — phase.todoIds[*] references an id not in todos.
+ *    8. duplicate phase id — two phases share `id`.
+ *    9. phase ref unknown  — phase.todoIds[*] references an id not in todos.
+ *   10. phase membership   — todo.phaseId → phases direction of the bidirectional
+ *                            invariant: a `todo.phaseId` points at a phase that
+ *                            does not exist (`phase_not_found`), or exists but
+ *                            whose `todoIds` omits the todo, or the todo id is
+ *                            claimed by two phases (`phase_membership_asymmetry`).
+ *                            Class 9 covers only the phase→todo direction; this
+ *                            closes the reverse direction that every mutation
+ *                            reducer guarantees via `syncPhaseMembership`.
  */
 export const fromSnapshot = (raw: unknown): PlanResult<Plan> => {
   if (!isObj(raw)) {
@@ -226,6 +251,59 @@ export const fromSnapshot = (raw: unknown): PlanResult<Plan> => {
       todoIds.push(tid)
     }
     phases.push({ id: ph.id, name: ph.name, todoIds, order: ph.order })
+  }
+
+  // ── Cross-check the todo.phaseId → phase direction of the bidirectional
+  // membership invariant (corruption class 10). The phase loop above already
+  // validated phase.todoIds → todos (class 9, the phase→todo direction). Phases
+  // are now fully parsed, so we can assert the reverse direction that every
+  // mutation reducer guarantees via `syncPhaseMembership`:
+  //   (a) every set todo.phaseId is a parsed phase id (else `phase_not_found`);
+  //   (b) that phase's todoIds contains the todo id (else asymmetry); and
+  //   (c) no todo id appears in two phases' todoIds (else asymmetry).
+  // FAIL-CLOSED: a violation is rejected, never silently dropped or re-derived
+  // (re-deriving would hide the corruption from the caller).
+  const phaseById = new Map<string, Phase>()
+  for (const ph of phases) phaseById.set(ph.id, ph)
+  // (c) ownership: which phase claims each todo id (phase→todo direction, but
+  // also detects a todo id listed in two phases).
+  const ownerPhaseOf = new Map<string, string>()
+  for (const ph of phases) {
+    for (const tid of ph.todoIds) {
+      const prior = ownerPhaseOf.get(tid)
+      if (prior !== undefined && prior !== ph.id) {
+        return {
+          ok: false,
+          error: {
+            kind: "phase_membership_asymmetry",
+            todoId: tid,
+            phaseId: ph.id,
+            detail: "claimed_by_two_phases",
+          } as PlanSnapshotParseError as PlanMutationError,
+        }
+      }
+      ownerPhaseOf.set(tid, ph.id)
+    }
+  }
+  for (const id of Object.keys(todos)) {
+    const todo = todos[id]
+    if (todo === undefined || todo.phaseId === undefined) continue
+    // (a) referenced phase must exist.
+    if (!phaseById.has(todo.phaseId)) {
+      return { ok: false, error: { kind: "phase_not_found", id: todo.phaseId } }
+    }
+    // (b) referenced phase must list this todo id.
+    if (ownerPhaseOf.get(id) !== todo.phaseId) {
+      return {
+        ok: false,
+        error: {
+          kind: "phase_membership_asymmetry",
+          todoId: id,
+          phaseId: todo.phaseId,
+          detail: "missing_in_phase",
+        } as PlanSnapshotParseError as PlanMutationError,
+      }
+    }
   }
 
   // DAG validation last (catches dangling + cycles).

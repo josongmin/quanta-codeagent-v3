@@ -7,7 +7,8 @@
  *
  *   - `user` / `assistant`  → carry `message: { role, content }`; content is
  *                             either a plain string or an array of content
- *                             blocks (`text` / `tool_use` / `tool_result`).
+ *                             blocks (`text` / `thinking` / `redacted_thinking`
+ *                             / `tool_use` / `tool_result`).
  *   - everything else       → bookkeeping (`queue-operation`, `attachment`,
  *                             `file-history-snapshot`, `ai-title`, `summary`,
  *                             …) and is skipped.
@@ -17,7 +18,14 @@
  * empty are dropped — they carry no signal and would pollute the transcript.
  */
 
-import type { ContentBlock, Message, TextBlock, ToolResultBlock, ToolUseBlock } from "@/llm"
+import type {
+  ContentBlock,
+  Message,
+  TextBlock,
+  ThinkingBlock,
+  ToolResultBlock,
+  ToolUseBlock,
+} from "@/llm"
 import { readImportFile } from "../dedup"
 import type { SessionTranslator, TranslatableProvider } from "./types"
 
@@ -47,8 +55,38 @@ const translateBlock = (raw: unknown): ContentBlock | undefined => {
     const t: TextBlock = { type: "text", text: block.text }
     return t
   }
+  if (type === "thinking") {
+    // Plaintext extended-thinking block. The reasoning text lives in
+    // `.thinking`; the cryptographic signature (REQUIRED back verbatim on the
+    // input side of a multi-turn thinking carry-over, else the API 400s) lives
+    // in `.signature`. Preserve both so the reasoning trail round-trips.
+    if (typeof block.thinking !== "string") return undefined
+    const t: ThinkingBlock = {
+      type: "thinking",
+      thinking: block.thinking,
+      ...(typeof block.signature === "string" ? { signature: block.signature } : {}),
+    }
+    return t
+  }
+  if (type === "redacted_thinking") {
+    // Encrypted reasoning block: the opaque ciphertext lives in `.data`. v3
+    // models this as a ThinkingBlock with `redacted: true`, the ciphertext
+    // carried verbatim in `.thinking` so it round-trips back unmodified.
+    if (typeof block.data !== "string") return undefined
+    const t: ThinkingBlock = { type: "thinking", thinking: block.data, redacted: true }
+    return t
+  }
   if (type === "tool_use") {
     if (typeof block.id !== "string" || typeof block.name !== "string") return undefined
+    // The Anthropic Messages API REQUIRES `tool_use.input` to be a JSON object
+    // — a missing or non-object input is an API-invalid block that 400s on the
+    // first turn after resume. NO FALLBACK: we must NOT fabricate `input ?? {}`
+    // (that invents arguments the model never emitted). A row whose input is
+    // not an object is malformed at the source; surface it as unmappable by
+    // skipping it (same posture as every other malformed block here), so the
+    // corruption is visible rather than papered over with a default. An array
+    // is a JS object but NOT a valid Messages-API tool input — reject it too.
+    if (asObject(block.input) === undefined || Array.isArray(block.input)) return undefined
     const t: ToolUseBlock = { type: "tool_use", id: block.id, name: block.name, input: block.input }
     return t
   }

@@ -66,18 +66,51 @@ const isObject = (v: unknown): v is Record<string, unknown> =>
 const isTextPhase = (v: unknown): v is "commentary" | "final_answer" =>
   v === "commentary" || v === "final_answer"
 
+/** A base64 media block (`ImageBlock` / `DocumentBlock`) is valid IFF it carries
+ *  both `data` and `mediaType` as strings — the SAME pair the standalone
+ *  image/document cases enforce. Centralized so nested (tool_result) and
+ *  standalone validation stay symmetric. */
+const isMediaPayload = (v: Record<string, unknown>): boolean =>
+  isString(v.data) && isString(v.mediaType)
+
+/** Validate one element of `tool_result.contentBlocks`:
+ *  `{type:"text",text:string}` | a base64 image | a base64 document.
+ *  Anything else (unknown type, malformed media payload missing data/mediaType)
+ *  is rejected so a corrupt nested block cannot ride in on the outer shape. */
+const isPortableToolResultBlock = (value: unknown): boolean => {
+  if (!isObject(value) || !isString(value.type)) return false
+  switch (value.type) {
+    case "text":
+      return isString(value.text)
+    case "image":
+    case "document":
+      return isMediaPayload(value)
+    default:
+      return false
+  }
+}
+
 const isPortableContentBlock = (value: unknown): boolean => {
   if (!isObject(value) || !isString(value.type)) return false
   switch (value.type) {
     case "text":
       return isString(value.text) && (value.phase === undefined || isTextPhase(value.phase))
     case "tool_use":
-      return isString(value.id) && isString(value.name)
+      // `input: unknown` is a REQUIRED field on the exporter side; it is always
+      // present (objects on the wire). Reject a tool_use whose input is missing
+      // or not an object so the import is symmetric with the export shape.
+      return isString(value.id) && isString(value.name) && isObject(value.input)
     case "tool_result":
       return (
         isString(value.tool_use_id) &&
         isString(value.content) &&
-        (value.is_error === undefined || isBool(value.is_error))
+        (value.is_error === undefined || isBool(value.is_error)) &&
+        // Optional structured mirror — when present it MUST be an array whose
+        // every element is a well-formed text / image / document block. A
+        // malformed nested image (missing data/mediaType) rejects the import.
+        (value.contentBlocks === undefined ||
+          (Array.isArray(value.contentBlocks) &&
+            value.contentBlocks.every(isPortableToolResultBlock)))
       )
     case "thinking":
       return (
@@ -87,7 +120,7 @@ const isPortableContentBlock = (value: unknown): boolean => {
       )
     case "image":
     case "document":
-      return isString(value.data) && isString(value.mediaType)
+      return isMediaPayload(value)
     default:
       return false
   }

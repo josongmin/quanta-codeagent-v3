@@ -3,6 +3,7 @@ import type { DocumentBlock, ImageBlock } from "@/llm"
 import type { SensitivityClass } from "@/security"
 import type { HITLTier } from "@/shared"
 import type { ShellExecObserver } from "./shell-exec-types"
+import type { ReadFileState } from "./stale-read-guard"
 
 /**
  * Execution context handed to every `Tool.execute(input, ctx)` call.
@@ -222,6 +223,13 @@ export interface ToolContext {
    *  `SessionConfigSeam` in `./session_config`) so the `@/tool` slice never
    *  imports `@/agent`. */
   sessionConfig?: SessionConfigSeam
+  /** ADR-0474 — OPTIONAL stale-read-guard state. When present (host opted in via
+   *  `staleReadGuardEnabled`), the `read` tool records the read-time mtime here
+   *  and `write`/`edit` consult it (`guardWrite`) to block a mutation whose
+   *  target was externally modified since the read. Absent ⇒ no tracking, no
+   *  guard (byte-identical default-OFF). Wired from `AgentConfig.readFileState`
+   *  in `buildToolContext`. */
+  readFileState?: ReadFileState
   /** ADR-0421 — OPTIONAL fast-apply fallback port (ADR-0417 apply-wire). The
    *  `apply_patch` tool calls this ONCE when a V4A patch FAILS to apply
    *  (anchor drift / generic apply error / parse error): it hands the failing

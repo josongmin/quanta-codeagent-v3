@@ -2,7 +2,7 @@ import { type AgentConfig, type MemoryToolsDeps, type MemoryWriteGuard, memoryTo
 import type { EmbedderPort, PersistentStorePort } from "@/memory"
 import type { StructuredLogger } from "@/observability"
 import type { OsSandboxProfile } from "@/runtime"
-import { buildDefaultTools, type Tool, ToolRegistry } from "@/tool"
+import { buildDefaultTools, type Tool, type ToolOrigin, ToolRegistry } from "@/tool"
 
 /**
  * Surface-agnostic tooling assembly. The pre-split `internal.ts#buildTooling`
@@ -166,6 +166,22 @@ const buildMemoryExtras = (
   }
 }
 
+/** ADR-0471 Substrate-B — tag each tool by the SOURCE ARRAY it came from so a
+ *  consumer (dispatch #2) derives provenance from the call site, not the name.
+ *  Built ONCE here at assembly: `originOf` then does an O(1) read. Built-in +
+ *  memory + subagent tools stay `builtin` (the registry default), so they are
+ *  intentionally OMITTED from the map — the registry treats an absent name as
+ *  `builtin`, keeping the OFF / no-opt-in path byte-identical. */
+const buildOriginMap = (
+  groups: ReadonlyArray<readonly [Tool[], ToolOrigin]>,
+): ReadonlyMap<string, ToolOrigin> => {
+  const map = new Map<string, ToolOrigin>()
+  for (const [tools, origin] of groups) {
+    for (const t of tools) map.set(t.name, origin)
+  }
+  return map
+}
+
 export const buildToolingCore = (input: ToolingAssembleInput): Tooling => {
   if (input.store && input.memoryKindLabel !== undefined && input.onMemoryReady !== undefined) {
     input.onMemoryReady(
@@ -187,18 +203,31 @@ export const buildToolingCore = (input: ToolingAssembleInput): Tooling => {
           ...buildMemoryExtras(input.memoryConfig, input.budgetRemainingPercent),
         })
       : []
-  const registry = new ToolRegistry([
-    ...buildDefaultTools({
-      ...(input.sandboxProfile !== undefined ? { sandboxProfile: input.sandboxProfile } : {}),
-      ...(input.structuredPatch === true ? { structuredPatch: true } : {}),
-    }),
-    ...input.mcpTools,
-    ...memTools,
-    ...input.lspTools,
-    ...input.lspNavTools,
-    ...input.gitToolList,
-    ...(input.extraTools ?? []),
+  // Origin map tags only the non-builtin source arrays (mcp / lsp / git).
+  // base + memory + subagent tools are `builtin` by the registry default — they
+  // are deliberately not listed, so the map is empty when no opt-in group is
+  // supplied and the origin surface is byte-identical to the legacy registry.
+  const originMap = buildOriginMap([
+    [input.mcpTools, "mcp"],
+    [input.lspTools, "lsp"],
+    [input.lspNavTools, "lsp"],
+    [input.gitToolList, "git"],
   ])
+  const registry = new ToolRegistry(
+    [
+      ...buildDefaultTools({
+        ...(input.sandboxProfile !== undefined ? { sandboxProfile: input.sandboxProfile } : {}),
+        ...(input.structuredPatch === true ? { structuredPatch: true } : {}),
+      }),
+      ...input.mcpTools,
+      ...memTools,
+      ...input.lspTools,
+      ...input.lspNavTools,
+      ...input.gitToolList,
+      ...(input.extraTools ?? []),
+    ],
+    originMap,
+  )
   return {
     store: input.store,
     embedder: input.embedder,

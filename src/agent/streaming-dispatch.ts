@@ -252,6 +252,26 @@ const resetForTombstone = (state: TurnState): void => {
   state.firstChunkSeen = false
 }
 
+/** Abandon every in-flight (early-started) dispatch on an ABORT short-circuit.
+ *  When `streamingTurn` returns `{kind:"aborted"}` it walks away from any slot
+ *  whose `dispatch(call)` was already fired in flight (a concurrency-safe
+ *  read-only overlap call, OR an early-dispatch-safe `agent` spawn per
+ *  ADR-0298 — isolated child loop, not read-only). The abort has DECIDED to
+ *  discard those results, so nobody awaits them anymore. If such a promise
+ *  later rejects (the spawned child throws on its own abort; a tool rejects
+ *  post-abort) with no handler attached, Bun/Node raises an
+ *  `unhandledRejection`. We attach a noop `.catch` to each STARTED slot so that
+ *  late rejection is suppressed — this mirrors {@link resetForTombstone} and
+ *  suppresses ONLY promises the abort already discarded; it never swallows an
+ *  error a consumer still awaits (the abort path returns before Phase 2/4 ever
+ *  read these). Idempotent: re-attaching `.catch` to an already-handled promise
+ *  is harmless. */
+const abandonInFlight = (state: TurnState): void => {
+  for (const slot of state.slots) {
+    if (slot.promise) slot.promise.catch(() => undefined)
+  }
+}
+
 /** Synthesize a structurally-valid `tool_result` block for the very rare case
  *  where an injected `dispatch(call)` rejects instead of resolving with an
  *  error outcome (its documented contract: dispatch wraps every error into an
@@ -529,11 +549,17 @@ export const streamingTurn = async (args: StreamingTurnArgs): Promise<StreamingT
   }
 
   for await (const ev of events) {
-    if (isAborted(signal)) return { kind: "aborted" }
+    if (isAborted(signal)) {
+      abandonInFlight(state)
+      return { kind: "aborted" }
+    }
     handleStreamEvent(state, ev, args)
   }
 
-  if (isAborted(signal)) return { kind: "aborted" }
+  if (isAborted(signal)) {
+    abandonInFlight(state)
+    return { kind: "aborted" }
+  }
 
   const { message, stopReason } = assembleFromEvents(state.rawEvents)
 
@@ -552,7 +578,10 @@ export const streamingTurn = async (args: StreamingTurnArgs): Promise<StreamingT
   )
   if (pendingApproval?.status === "rejected") throw pendingApproval.reason
 
-  if (isAborted(signal)) return { kind: "aborted" }
+  if (isAborted(signal)) {
+    abandonInFlight(state)
+    return { kind: "aborted" }
+  }
 
   // ADR-0076 Gap-5 — refusal in-stream short-circuit. When the provider stops
   // with `stop_reason: "refusal"`, ANY tool calls that were queued mid-stream
@@ -566,9 +595,13 @@ export const streamingTurn = async (args: StreamingTurnArgs): Promise<StreamingT
   // tool_use blocks in `message.content` never carry to the next turn.
   if (stopReason !== "refusal") {
     if (!(await drainDeferredSlots(state.slots, dispatch, onToolStart, signal))) {
+      abandonInFlight(state)
       return { kind: "aborted" }
     }
-    if (isAborted(signal)) return { kind: "aborted" }
+    if (isAborted(signal)) {
+      abandonInFlight(state)
+      return { kind: "aborted" }
+    }
   }
 
   // Phase 4: collect ONLY slots that actually dispatched. On the normal path

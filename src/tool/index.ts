@@ -153,6 +153,16 @@ export {
   type TasksTaskResult,
   type TasksTaskState,
 } from "./mcp_tasks"
+// ADR-0471 Substrate-B — tool-origin provenance substrate. The closed origin
+// enum + pure `deriveProvenance` (call-site truth, NOT name-guessing). The
+// `Provenance` union is string-identical to `@/agent/untrusted-envelope`'s
+// `UntrustedSource`; dispatch #2 maps it with the identity (keeps @/tool a leaf).
+export {
+  deriveProvenance,
+  type Provenance,
+  TOOL_ORIGINS,
+  type ToolOrigin,
+} from "./origin"
 export {
   classifyFrame,
   type FailureFrame,

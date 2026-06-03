@@ -51,6 +51,7 @@ import type { ParsedMention } from "@/agent/mention-injection"
 import type { AggregatedActivation } from "@/agent/plugin-activation-handler"
 import { type ActiveSkillDescriptor, unionActiveSkills } from "@/agent/plugin-skill-extension"
 import type { MetricEmitterPort } from "@/observability/codex-r2-metrics"
+import type { ActiveSkillDeps, SkillMcpSession } from "@/skill/skill-mcp-deps"
 
 /**
  * Narrow subset of `AgentConfig` that the hook reads. Kept structural so
@@ -156,6 +157,55 @@ const safeEmit = (
  *  every platform Bun targets so latency math is safe even if the
  *  wall clock jumps. */
 const monotonicNow = (): number => performance.now()
+
+/**
+ * ADR-0476 — skill→MCP auto-attach reconcile hook.
+ *
+ * Narrow side-channel the composition root sets on `AgentConfig`:
+ * `(cfg as { skillMcpSession?: SkillMcpSession }).skillMcpSession`. ONE
+ * coordinator per session (created at session start by the composition root,
+ * wired to `@/agent/plugin-mcp-launcher` via the attach/detach ports). When
+ * present, {@link reconcileSkillMcpForTurn} reconciles the desired MCP set over
+ * the CURRENT active skills every turn so that:
+ *   - a skill with an MCP dep going active ⇒ its server is attached ONCE,
+ *   - a second skill declaring the SAME server ⇒ attached only once (the
+ *     session's dedupe survives across turns),
+ *   - a skill going inactive ⇒ its now-orphaned server is detached.
+ *
+ * DEFAULT-OFF + byte-identical: the coordinator's `resolveMcpDeps` is gate-
+ * aware (`QUANTA_SKILL_MCP_DEPS !== "1"` ⇒ empty desired set ⇒ zero attach),
+ * AND when `skillMcpSession` is absent this hook is a pure no-op (no
+ * allocation, returns immediately).
+ */
+export interface SkillMcpReconcileConfigLike {
+  readonly skillMcpSession?: SkillMcpSession
+}
+
+/**
+ * Reconcile the session's MCP attach set over the active skills. NO-THROW:
+ * the coordinator itself never throws, but we wrap defensively so a hostile
+ * custom session can never break a turn. Absent session ⇒ immediate no-op.
+ *
+ * @param config       — narrow view; only `skillMcpSession?` is read.
+ * @param activeSkills — the CURRENT active skill deps (each with its raw
+ *                       `dependencies` block, lifted via
+ *                       `@/skill/skill-frontmatter` `liftRawDependenciesBlock`).
+ * @returns the identities attached/detached this turn (empty when no-op).
+ */
+export const reconcileSkillMcpForTurn = async (
+  config: SkillMcpReconcileConfigLike,
+  activeSkills: readonly ActiveSkillDeps[],
+): Promise<{ attached: readonly string[]; detached: readonly string[] }> => {
+  const session = config.skillMcpSession
+  if (session === undefined) return { attached: [], detached: [] }
+  try {
+    return await session.reconcile(activeSkills)
+  } catch {
+    // The coordinator is contractually NO-THROW; this is belt-and-suspenders
+    // so a non-conforming session injection can never break the turn.
+    return { attached: [], detached: [] }
+  }
+}
 
 export const resolvePluginActivationForTurn = async (
   config: ActivationHookConfigLike,

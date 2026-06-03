@@ -127,33 +127,40 @@ export const createPrCommentTriggerSource = (opts: PrCommentTriggerOpts): Trigge
 
       // Filter rows STRICTLY newer than the watermark. GH's `since` is
       // inclusive, so without this filter we'd re-fire the watermark comment
-      // every poll.
-      const fresh: GhCommentRow[] = []
-      let maxStamp = watermark
+      // every poll. We keep each fresh row paired with its (validated) stamp so
+      // the watermark math below operates on the SAME stamp that gated the row.
+      const fresh: { readonly row: GhCommentRow; readonly stamp: string }[] = []
       for (const row of rows) {
         const stamp = row.updated_at ?? row.created_at
         if (typeof stamp !== "string" || stamp.length === 0) continue
         if (stamp <= watermark) continue
-        fresh.push(row)
-        if (stamp > maxStamp) maxStamp = stamp
+        fresh.push({ row, stamp })
       }
       if (fresh.length === 0) return []
       if (signal !== undefined && signal.aborted) return []
 
-      // Advance the watermark BEFORE returning so a consumer that drops the
-      // trigger doesn't see the same comment again on the next poll. (If the
-      // consumer crashes before processing, the comment is lost — same
-      // tradeoff as the CI source's in-memory dedup. The cron watcher SHOULD
-      // pass a durable store and accept this at-most-once semantics.)
-      if (
-        !(await safeSaveWatermark(opts.watermarkStore, opts.watermarkKey, maxStamp, opts.onError))
-      )
-        return []
-
+      // Build triggers FIRST, tracking two stamps that drive an idempotency-safe
+      // watermark:
+      //   • maxEmittedStamp  — the latest comment we actually surfaced.
+      //   • minDroppedStamp  — the earliest comment we could NOT surface (no
+      //                        html_url evidence anchor).
+      // A dropped row is a hole the single monotonic cursor cannot skip over: if
+      // the watermark moved past it, that comment would be lost FOREVER (the
+      // reactor never revisits stamps ≤ watermark). That is NOT the documented
+      // at-most-once-on-crash tradeoff — the comment was received cleanly. So we
+      // cap the watermark strictly BELOW the earliest hole.
       const triggers: ProactiveTrigger[] = []
-      for (const row of fresh) {
+      let maxEmittedStamp: string | undefined
+      let minDroppedStamp: string | undefined
+      for (const { row, stamp } of fresh) {
         const url = row.html_url
-        if (typeof url !== "string" || url.length === 0) continue
+        if (typeof url !== "string" || url.length === 0) {
+          // Hole: leave the watermark behind this row so the next poll re-fetches
+          // it (the comment may gain an html_url, or the misconfiguration is at
+          // least re-observed) instead of silently skipping it forever.
+          if (minDroppedStamp === undefined || stamp < minDroppedStamp) minDroppedStamp = stamp
+          continue
+        }
         const author = row.user?.login ?? "unknown"
         const bodySnippet = clampSnippet(row.body ?? "")
         triggers.push(
@@ -164,6 +171,46 @@ export const createPrCommentTriggerSource = (opts: PrCommentTriggerOpts): Trigge
             abortSignal: new AbortController().signal,
           }),
         )
+        if (maxEmittedStamp === undefined || stamp > maxEmittedStamp) maxEmittedStamp = stamp
+      }
+
+      // Watermark = the latest EMITTED stamp that is still strictly before the
+      // earliest hole. Everything at-or-before this stamp is acked; the hole and
+      // anything after it stays unacked so the next poll reconsiders it. With no
+      // hole this is simply the max emitted stamp (the common case). With no
+      // emitted row before the hole, the watermark does not move at all.
+      let nextWatermark: string | undefined
+      if (maxEmittedStamp !== undefined) {
+        if (minDroppedStamp === undefined || maxEmittedStamp < minDroppedStamp) {
+          nextWatermark = maxEmittedStamp
+        } else {
+          // Earliest hole precedes our latest emit — advance only as far as the
+          // newest emitted stamp that is strictly before the hole.
+          for (const { row, stamp } of fresh) {
+            const url = row.html_url
+            if (typeof url !== "string" || url.length === 0) continue
+            if (stamp >= minDroppedStamp) continue
+            if (nextWatermark === undefined || stamp > nextWatermark) nextWatermark = stamp
+          }
+        }
+      }
+
+      // Advance the watermark BEFORE returning so a consumer that drops an
+      // EMITTED trigger doesn't see the same comment again on the next poll. (If
+      // the consumer crashes before processing an emitted trigger, that comment
+      // is lost — the documented at-most-once tradeoff; the cron watcher SHOULD
+      // pass a durable store and accept it.) A row we never emitted (the hole)
+      // is explicitly excluded from this advance above.
+      if (nextWatermark !== undefined && nextWatermark > watermark) {
+        if (
+          !(await safeSaveWatermark(
+            opts.watermarkStore,
+            opts.watermarkKey,
+            nextWatermark,
+            opts.onError,
+          ))
+        )
+          return []
       }
       return triggers
     },

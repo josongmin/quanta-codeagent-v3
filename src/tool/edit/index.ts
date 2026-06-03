@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { defaultFileSystemPort, type FileSystemPort, FsJailError, sha256Hex } from "@/storage"
 import { gitWriteGuardDeny } from "../git-write-guard-result"
+import { guardWrite } from "../stale-read-guard"
 import { captureToolDiff } from "../tool-diff-capture"
 import type { Tool, ToolContext, ToolEvent, ToolFailure } from "../types"
 import { applyExactEdit } from "./exact"
@@ -177,6 +178,25 @@ export const makeEditTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
       if (planned.kind === "failure") {
         yield { type: "result", result: planned.result }
         return
+      }
+      // ADR-0474 — stale-read-guard: block editing a file that was READ earlier
+      // this session and externally modified since (mtime advanced), telling the
+      // model to re-read. No-op when the guard is unwired (ctx.readFileState
+      // absent) or the path was never read (guardWrite returns ok for `unread`).
+      if (ctx.readFileState !== undefined) {
+        const cur = await fs.statFile(input.path, ctx.cwd)
+        const guard = guardWrite(ctx.readFileState, cur.path, cur.mtimeMs)
+        if (!guard.ok) {
+          yield {
+            type: "result",
+            result: {
+              ok: false,
+              output: guard.error.message,
+              failure: { mode: "rejected", reason: "stale_read" },
+            },
+          }
+          return
+        }
       }
       await commitEdit(fs, input.path, planned.next, ctx.cwd, input.expected_hash)
       // ADR-0440 — feed the before/after to the optional tool-diff sink so the

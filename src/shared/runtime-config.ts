@@ -116,6 +116,11 @@ export interface RuntimeConfig {
   /** Compaction threshold override (tokens). Absent ⇒ use the per-config
    *  default in `agent/compaction.ts`. NEVER silently flipped by env. */
   readonly compactTokens: number | undefined
+  /** ADR-0473 background (speculative) compaction gate (`QUANTA_BG_COMPACTION`).
+   *  Strict opt-in: `true` ONLY when the value is exactly `"1"` (mirrors the
+   *  `bgCompactionEnabled` slice gate). Default false ⇒ the loop's existing
+   *  synchronous proactive/reactive compaction paths are byte-identical. */
+  readonly bgCompaction: boolean
   /** FS jail disable flag (`QUANTA_FS_JAIL=off`). Default false (jail ON). */
   readonly fsJailDisabled: boolean
   /** ADR-0062 cap-as-instruction dispatch enforcement (`QUANTA_CAP_ENFORCE=1`).
@@ -278,6 +283,10 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
   return Object.freeze({
     logLevel: parseLogLevel(env["QUANTA_LOG_LEVEL"]),
     compactTokens: parsePositiveInt(env["QUANTA_COMPACT_TOKENS"], "QUANTA_COMPACT_TOKENS"),
+    // ADR-0473 — strict `=== "1"` opt-in (matches the `bgCompactionEnabled`
+    // slice gate; `parseBool` also accepts true/on but the slice gate is the
+    // SSOT, so keep it strict here too).
+    bgCompaction: env["QUANTA_BG_COMPACTION"] === "1",
     fsJailDisabled: parseBool(env["QUANTA_FS_JAIL"] === "off" ? "1" : undefined),
     capEnforce: parseBool(env["QUANTA_CAP_ENFORCE"]),
     gitSha: stringOrUndef(env["QUANTA_GIT_SHA"]),

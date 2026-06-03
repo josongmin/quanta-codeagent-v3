@@ -104,6 +104,60 @@ const specifiers = (src: string): string[] => {
   return out
 }
 
+// template dynamic import:  import(`<static-prefix>/${expr}`)  — the runtime
+// target is data-dependent, so we conservatively treat EVERY module directly
+// under <static-prefix>/ as reachable (e.g. `import(`./mode-presets/${mode}`)`
+// in apps/agent/index.ts loads any mode-presets/<name>.ts). Without this the
+// tool falsely marks dynamically-dispatched modules UNREACHABLE — the dangerous
+// (false-positive overclaim) direction.
+const TEMPLATE_SPEC_RE = /import\(\s*`([^`$]*)\/\$\{/g
+
+/** Static prefixes of template dynamic imports (`import(`<prefix>/${x}`)`).
+ *  Pure (no fs) so it is unit-testable in isolation — pins the R2 self-audit
+ *  fix (literal-only specifier regex missed `./mode-presets/${mode}`). */
+export const templatePrefixes = (raw: string): string[] => {
+  const s = stripComments(raw)
+  const out: string[] = []
+  TEMPLATE_SPEC_RE.lastIndex = 0
+  let m = TEMPLATE_SPEC_RE.exec(s)
+  while (m !== null) {
+    out.push(m[1] as string)
+    m = TEMPLATE_SPEC_RE.exec(s)
+  }
+  return out
+}
+
+const templateImportTargets = async (raw: string, fromFile: string): Promise<string[]> => {
+  const out: string[] = []
+  for (const prefix of templatePrefixes(raw)) {
+    let dir: string | null = null
+    if (prefix.startsWith("@/")) dir = join(SRC, prefix.slice(2))
+    else if (prefix.startsWith("./") || prefix.startsWith("../"))
+      dir = resolve(dirname(fromFile), prefix)
+    if (!dir) continue
+    let names: string[]
+    try {
+      names = await readdir(dir)
+    } catch {
+      continue
+    }
+    for (const name of names) {
+      const full = join(dir, name)
+      try {
+        const st = await stat(full)
+        if (st.isFile() && !isSkipped(name)) out.push(full)
+        else if (st.isDirectory()) {
+          const idx = join(full, "index.ts")
+          if ((await stat(idx)).isFile()) out.push(idx)
+        }
+      } catch {
+        /* skip */
+      }
+    }
+  }
+  return out
+}
+
 /** Resolve a specifier (from `fromFile`) to an absolute src .ts file, or null
  *  (node:/bare module, or unresolvable). Tries `<p>.ts` then `<p>/index.ts`. */
 const resolveSpec = async (spec: string, fromFile: string): Promise<string | null> => {
@@ -139,6 +193,7 @@ export const computeReachability = async (): Promise<ReachResult> => {
       const t = await resolveSpec(spec, f)
       if (t !== null) targets.push(rel(t))
     }
+    for (const t of await templateImportTargets(content, f)) targets.push(rel(t))
     adj.set(rel(f), targets)
   }
   // BFS from auto-discovered entrypoints.
@@ -177,7 +232,7 @@ export const computeReachability = async (): Promise<ReachResult> => {
 // guards lean conservative — a missed guard under-flags (safe), never over-flags.
 // ---------------------------------------------------------------------------
 
-interface ParsedSymbols {
+export interface ParsedSymbols {
   readonly ownExports: Set<string>
   readonly reexports: Array<{ exposed: string; srcName: string; spec: string }>
   readonly starSpecs: string[]
@@ -212,7 +267,7 @@ const SIDE_EFFECT_KEYWORDS = new Set([
   "yield",
 ])
 
-const parseSymbols = (raw: string): ParsedSymbols => {
+export const parseSymbols = (raw: string): ParsedSymbols => {
   const s = stripComments(raw)
   const ownExports = new Set<string>()
   const reexports: Array<{ exposed: string; srcName: string; spec: string }> = []
@@ -240,8 +295,8 @@ const parseSymbols = (raw: string): ParsedSymbols => {
       wildcardSpecs.push(m[2] as string)
     } else starSpecs.push(m[2] as string)
   })
-  // export { a, b as c } [from "spec"]
-  exec(/export\s*\{([^}]*)\}\s*(?:from\s*["']([^"']+)["'])?/g, (m) => {
+  // export [type] { a, b as c } [from "spec"]  (incl. type-only re-export block)
+  exec(/export\s*(?:type\s+)?\{([^}]*)\}\s*(?:from\s*["']([^"']+)["'])?/g, (m) => {
     const spec = m[2]
     for (const piece of (m[1] as string).split(",")) {
       const t = piece.trim()
@@ -258,7 +313,7 @@ const parseSymbols = (raw: string): ParsedSymbols => {
   exec(/import\s*(?:type\s+)?\{([^}]*)\}\s*from\s*["']([^"']+)["']/g, (m) => {
     const spec = m[2] as string
     for (const piece of (m[1] as string).split(",")) {
-      const t = piece.replace(/^type\s+/, "").trim()
+      const t = piece.trim().replace(/^type\s+/, "") // trim FIRST — inline `{ type X }`
       if (!t) continue
       const name = (t.split(/\s+as\s+/)[0] as string).trim()
       if (name) namedImports.push({ name, spec })

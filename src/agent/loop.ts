@@ -14,8 +14,19 @@ import {
 import { withEgressProxy } from "@/runtime/network-proxy"
 import { normalizeRedactionConfig } from "@/security"
 import type { PromptPolicySnapshot, TurnPolicySnapshot } from "@/shared"
-import { abortReasonOf, errMessage, LLMError, logger } from "@/shared"
-import { compactIfNeeded, estimateTokens, reactiveCompact } from "./compaction"
+import { abortReasonOf, errMessage, LLMError, logger, runtimeConfig } from "@/shared"
+import {
+  type BgSummaryPayload,
+  compactIfNeeded,
+  estimateTokens,
+  makeBgCompactionController,
+  reactiveCompact,
+  resolveCompactionLimitTokens,
+} from "./compaction"
+import {
+  type BackgroundSummarizationController,
+  BG_COMPACTION_ENV,
+} from "./compaction/index"
 import { type BreakerVerdict, CompactionBreaker } from "./compaction-breaker"
 import {
   appendSummary,
@@ -2539,6 +2550,10 @@ interface RunAgentContext {
   readonly session: TurnSession
   readonly turnStateSeed: RunAgentTurnStateSeed
   readonly finish: FinishAgentSession
+  /** ADR-0473 — background (speculative) compaction controller. Present ONLY
+   *  when the gate (`QUANTA_BG_COMPACTION=1`) is on; `undefined` otherwise so the
+   *  loop never references it (byte-identical default-OFF). */
+  readonly bgCompaction: BackgroundSummarizationController<BgSummaryPayload> | undefined
 }
 
 const resolveTurnLoopOutcome = async (args: {
@@ -2741,6 +2756,20 @@ const createRunAgentContext = async (config: AgentConfig): Promise<RunAgentConte
   }
   const turnDiffSession = buildTurnDiffSession(cfg)
   const gitDirectiveCollector = buildGitDirectiveEmit(cfg)
+  // ADR-0473 — background (speculative) compaction. `undefined` unless the gate
+  // (`QUANTA_BG_COMPACTION=1`) is on (default-OFF, byte-identical loop). The gate
+  // is resolved via `runtimeConfig()` (the ONE env reader allowed in @/agent —
+  // this slice never touches `process.env`); we hand the factory a synthesized
+  // env record so the env-free slice gate (`bgCompactionEnabled`) stays the SSOT.
+  // Wraps the SAME summarizer model choice the synchronous proactive path uses
+  // (dedicated summarizer ?? main llm); `getPrefix` reads the LIVE transcript at
+  // start time. Real wall clock here; the e2e test injects a fake controller.
+  const bgCompaction = makeBgCompactionController(
+    { [BG_COMPACTION_ENV]: runtimeConfig().bgCompaction ? "1" : "0" },
+    cfg.compaction?.summarizerLlm ?? cfg.llm,
+    () => wm.snapshot(),
+    () => Date.now(),
+  )
   const shellSnapshotSession: ShellSnapshotSession | undefined = buildShellSnapshotSession(
     cfg,
     (message) => cfg.stream.emit({ type: "error", message }),
@@ -2815,6 +2844,7 @@ const createRunAgentContext = async (config: AgentConfig): Promise<RunAgentConte
     session,
     turnStateSeed,
     finish,
+    bgCompaction,
   }
 }
 

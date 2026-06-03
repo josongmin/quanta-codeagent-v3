@@ -6,6 +6,7 @@
 #
 #   validate        — every evidence file/ADR/test exists                   FAIL
 #   check-changed   — new src/*.ts must be referenced by a feature YAML     FAIL
+#   reachability    — no L4+ feature is unreachable OR dead-API (real graph) FAIL
 #   lint            — empty-stub count + orphan Accepted ADRs do not grow   FAIL
 #   gates           — maturity-promotion-gate audit                         WARN
 #
@@ -46,6 +47,9 @@ jobs:
       - name: fc check-changed (PR only — added src must be catalog'd)
         if: github.event_name == 'pull_request'
         run: bun fc check-changed origin/${{ github.event.pull_request.base.ref }}
+
+      - name: fc reachability (no L4+ feature unreachable or dead-API — real import graph)
+        run: bun fc reachability --strict --symbols
 
       - name: fc gates (advisory — warn-only, surfaced in step summary)
         run: |

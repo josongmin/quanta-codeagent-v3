@@ -752,6 +752,12 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * `@/tool/types`.
    */
   sessionConfigPort?: import("@/tool").SessionConfigSeam
+  /** ADR-0474 — OPTIONAL stale-read-guard state, threaded into every tool's
+   *  `ToolContext.readFileState` by `buildToolContext`. Present ⇒ the host opted
+   *  in (`staleReadGuardEnabled`); the composition root mints ONE `ReadFileState`
+   *  per session so reads recorded by `read` are visible to `write`/`edit` of the
+   *  same session. Absent ⇒ no tracking, no guard (byte-identical default-OFF). */
+  readFileState?: import("@/tool/stale-read-guard").ReadFileState
   /**
    * ADR-0081 shell output delta streaming — opt-in observer for the typed
    * `ShellExecEvent` stream. The dispatch seam forwards this to
