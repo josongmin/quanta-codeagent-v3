@@ -1,0 +1,110 @@
+// Hellgate — tool-surface SSOT two-way drift guard (jun-03).
+//
+// The manifest (`src/tool/surface/manifest.ts`) is the single managed catalog
+// of the LLM tool-access axis. These tests PIN it against the REAL registry +
+// the gated tool factories so it cannot silently rot:
+//   - BASE: buildDefaultTools() (no ports) === BASE_TOOL_NAMES (exact, sorted).
+//   - GATED: each gated factory's produced names === the manifest group for it
+//     (two-way: a factory adding/removing a tool without a manifest edit fails).
+//   - No duplicate names; the orphan `apply_patch_structured` (which was missing
+//     from fc) is now accounted for AND only appears when its port is wired.
+//   - The CLI default-ON tool-gate seed is derived from the SSOT, not a parallel
+//     list — assert the resolved set.
+
+import { describe, expect, test } from "bun:test"
+import { createObjectiveStore } from "@/agent/objective"
+import { createSubagentMailbox } from "@/agent/subagent-mailbox"
+import { createIntrospectTools, createSubagent6Tools, TaskRegistry } from "@/subagent"
+import {
+  ALL_MANIFEST_TOOL_NAMES,
+  BASE_TOOL_NAMES,
+  buildDefaultTools,
+  entryToolNames,
+  GATED_TOOLS,
+  seedEnvVarsForSurface,
+  type Tool,
+} from "@/tool"
+import { objectiveTools } from "@/tool/objective"
+import { subagentMailboxTools } from "@/tool/subagent-mailbox"
+
+const names = (tools: readonly Tool[]): string[] => tools.map((t) => t.name).sort()
+const groupNames = (rep: string): string[] => {
+  const entry = GATED_TOOLS.find((e) => e.name === rep)
+  if (entry === undefined) throw new Error(`manifest has no entry for "${rep}"`)
+  return [...entryToolNames(entry)].sort()
+}
+
+describe("tool-surface manifest — BASE drift guard", () => {
+  test("buildDefaultTools() (no ports) === BASE_TOOL_NAMES exactly", () => {
+    expect(names(buildDefaultTools())).toEqual([...BASE_TOOL_NAMES].sort())
+  })
+
+  test("every BASE name is unique and accounted for in the manifest", () => {
+    const set = new Set(BASE_TOOL_NAMES)
+    expect(set.size).toBe(BASE_TOOL_NAMES.length)
+    for (const n of BASE_TOOL_NAMES) expect(ALL_MANIFEST_TOOL_NAMES).toContain(n)
+  })
+})
+
+describe("tool-surface manifest — no orphans / no dups", () => {
+  test("ALL_MANIFEST_TOOL_NAMES has no duplicates", () => {
+    const set = new Set(ALL_MANIFEST_TOOL_NAMES)
+    expect(set.size).toBe(ALL_MANIFEST_TOOL_NAMES.length)
+  })
+
+  test("apply_patch_structured is catalogued (the fc-orphan this SSOT fixes)", () => {
+    expect(ALL_MANIFEST_TOOL_NAMES).toContain("apply_patch_structured")
+  })
+
+  test("apply_patch_structured registers ONLY when its port is set (byte-identical off)", () => {
+    expect(names(buildDefaultTools())).not.toContain("apply_patch_structured")
+    expect(names(buildDefaultTools({ structuredPatch: true }))).toContain("apply_patch_structured")
+  })
+})
+
+describe("tool-surface manifest — GATED factories match the manifest two-way", () => {
+  test("6-tool router names === manifest spawn_agent group", () => {
+    const set = createSubagent6Tools({
+      runner: async () => ({ ok: true, text: "", messages: [] }),
+      registry: new TaskRegistry(),
+    })
+    expect(names(set.tools)).toEqual(groupNames("spawn_agent"))
+  })
+
+  test("objective tools === manifest objective_set group", () => {
+    expect(names(objectiveTools(createObjectiveStore()))).toEqual(groupNames("objective_set"))
+  })
+
+  test("mailbox tools === manifest subagent_send_message group", () => {
+    expect(names(subagentMailboxTools(createSubagentMailbox()))).toEqual(
+      groupNames("subagent_send_message"),
+    )
+  })
+
+  test("introspect (enableIntrospect) produces list_agents — in the manifest", () => {
+    const tools = createIntrospectTools({ registry: new TaskRegistry(), enableIntrospect: true })
+    for (const t of tools) expect(ALL_MANIFEST_TOOL_NAMES).toContain(t.name)
+    expect(tools.map((t) => t.name)).toContain("list_agents")
+  })
+})
+
+describe("tool-surface manifest — CLI default-ON seed derives from the SSOT", () => {
+  test("seedEnvVarsForSurface('cli') is exactly the CLI-default-ON tool gates", () => {
+    expect([...seedEnvVarsForSurface("cli")].sort()).toEqual(
+      [
+        "QUANTA_ENABLE_STRUCTURED_PATCH",
+        "QUANTA_OBJECTIVE_TOOLS",
+        "QUANTA_SUBAGENT",
+        "QUANTA_SUBAGENT_6TOOLS",
+        "QUANTA_SUBAGENT_BATCH",
+        "QUANTA_SUBAGENT_INTROSPECT",
+        "QUANTA_SUBAGENT_MAILBOX",
+      ].sort(),
+    )
+  })
+
+  test("bench surface seeds NOTHING (shared-assembler byte-identity)", () => {
+    // objective/mailbox are opt-in on bench; nothing should auto-seed there.
+    expect(seedEnvVarsForSurface("bench")).toEqual([])
+  })
+})

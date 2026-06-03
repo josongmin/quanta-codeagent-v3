@@ -1,6 +1,7 @@
 import { SessionBootstrapError } from "@/host/bootstrap"
 import { selectRemoteRunner } from "@/remote"
 import { errMessage, logger, setTerminalIo } from "@/shared"
+import { seedEnvVarsForSurface } from "@/tool"
 import { loadEnvFiles } from "./dotenv"
 import { runRemoteCmd } from "./remote-cmd"
 import { runRepl, runSessionMain, runSlashMain, topLevelUsage } from "./repl"
@@ -30,16 +31,19 @@ loadEnvFiles([".env.dev", ".env.local", ".env"])
 // a real shell export is never clobbered. NOTE: prompt-suggestion costs one
 // extra (tools-denied, single-shot) LLM call per turn — disable with
 // `QUANTA_ENABLE_PROMPT_SUGGESTION=0` if that latency/spend is unwanted.
-for (const gate of [
+// CLI surface FEATURE gates — these are CLI surface behaviors, NOT LLM tools
+// (env-probe/away-summary/prompt-suggestion), so they are NOT in the tool-
+// surface manifest and stay listed explicitly here.
+const CLI_FEATURE_GATES = [
   "QUANTA_ENABLE_ENV_PROBE",
   "QUANTA_ENABLE_AWAY_SUMMARY",
-  "QUANTA_ENABLE_STRUCTURED_PATCH",
   "QUANTA_ENABLE_PROMPT_SUGGESTION",
-  // jun-03 agent-capability slots wired in the SHARED assembler (opt-in there to
-  // keep bench/eval + web-daemon byte-identical). The CLI opts in by default:
-  "QUANTA_OBJECTIVE_TOOLS", // objective_set/get/update (in-memory)
-  "QUANTA_SUBAGENT_MAILBOX", // subagent_send_message/read_messages (in-memory)
-]) {
+]
+// The LLM TOOL gates the CLI opts in by default are DERIVED from the tool-
+// surface SSOT (`seedEnvVarsForSurface`) — the single source of truth. Adding a
+// CLI-default-ON tool to the manifest auto-seeds its gate here; no parallel list
+// to drift. `QUANTA_X=0` (any value ≠ "1") still wins (we only seed when unset).
+for (const gate of [...CLI_FEATURE_GATES, ...seedEnvVarsForSurface("cli")]) {
   if (process.env[gate] === undefined) process.env[gate] = "1"
 }
 

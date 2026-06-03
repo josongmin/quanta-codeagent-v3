@@ -160,6 +160,15 @@ export {
   parseTestFailure,
   parseTestFailureTool,
 } from "./parse-test-failure"
+export {
+  buildPlanTools,
+  createPlanTool,
+  currentPlanTool,
+  removeTodosTool,
+  updatePlanTool,
+  updateTodosTool,
+} from "./plan"
+export { planErrorMessage, planFailure } from "./plan/error-mapping"
 // `poll_deferred` tool (ADR-0287). Caller-wired: the composition root builds it
 // over a `DefaultDeferredResultRegistry` ONLY when `runtimeConfig().asyncTools`
 // is true (default-OFF). NOT part of `defaultTools` — same pattern as
@@ -170,15 +179,6 @@ export {
   pollDeferredInputSchema,
   pollDeferredTool,
 } from "./poll_deferred"
-export {
-  buildPlanTools,
-  createPlanTool,
-  currentPlanTool,
-  removeTodosTool,
-  updatePlanTool,
-  updateTodosTool,
-} from "./plan"
-export { planErrorMessage, planFailure } from "./plan/error-mapping"
 export { ToolRegistry } from "./registry"
 export { requestPlanExitTool } from "./request-plan-exit"
 export { requestUserInputTool } from "./request-user-input"
@@ -449,3 +449,22 @@ const buildBaseDefaultTools = (ports: DefaultToolPorts): Tool[] => [
  * `defaultTools` are unchanged. Equivalent to `buildDefaultTools()`.
  */
 export const defaultTools: Tool[] = buildDefaultTools()
+
+// jun-03 — tool-surface SSOT (managed catalog of the LLM tool-access axis:
+// gate + per-surface default). Companion to the feature catalog; pinned by
+// tests/unit/tool-surface-manifest-hellgate.test.ts (two-way drift guard).
+export {
+  ALL_MANIFEST_TOOL_NAMES,
+  BASE_TOOL_NAMES,
+  entryToolNames,
+  GATED_TOOLS,
+  seedEnvVarsForSurface,
+  shouldSeedOn,
+  surfaceDefaultFor,
+  TOOL_SURFACES,
+  type ToolDefault,
+  type ToolGate,
+  type ToolRisk,
+  type ToolSurface,
+  type ToolSurfaceEntry,
+} from "./surface/manifest"
