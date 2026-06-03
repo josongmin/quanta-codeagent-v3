@@ -12,6 +12,7 @@
 //     list — assert the resolved set.
 
 import { describe, expect, test } from "bun:test"
+import { execSync } from "node:child_process"
 import { createObjectiveStore } from "@/agent/objective"
 import { createSubagentMailbox } from "@/agent/subagent-mailbox"
 import { createIntrospectTools, createSubagent6Tools, TaskRegistry } from "@/subagent"
@@ -106,5 +107,40 @@ describe("tool-surface manifest — CLI default-ON seed derives from the SSOT", 
   test("bench surface seeds NOTHING (shared-assembler byte-identity)", () => {
     // objective/mailbox are opt-in on bench; nothing should auto-seed there.
     expect(seedEnvVarsForSurface("bench")).toEqual([])
+  })
+})
+
+describe("tool-surface manifest — FULL-universe completeness (the guard that was missing)", () => {
+  // The original drift guard only checked SPECIFIC factories, so 17 registered
+  // tools (advisor/delegate/plan/mcp-tasks/... + 3 ORPHANS) sat uncatalogued.
+  // This source-scan pins EVERY `name: "x"` in the tool-defining slices against
+  // the manifest, so a new tool — or a new orphan — can never silently escape.
+  const scanRegisteredToolNames = (): Set<string> => {
+    const out = execSync(
+      "grep -rhoE 'name: \"[a-z_]+\"' src/tool src/subagent src/agent/tier1",
+    ).toString()
+    const re = /name: "([a-z_]+)"/g
+    const found = new Set<string>()
+    for (let m = re.exec(out); m !== null; m = re.exec(out)) found.add(m[1] as string)
+    return found
+  }
+
+  test("every registered tool name is catalogued in the manifest (no uncatalogued tool)", () => {
+    const manifest = new Set(ALL_MANIFEST_TOOL_NAMES)
+    const uncatalogued = [...scanRegisteredToolNames()].filter((n) => !manifest.has(n)).sort()
+    expect(uncatalogued).toEqual([])
+  })
+
+  test("every manifest name is a real registered tool (no stale rows)", () => {
+    const found = scanRegisteredToolNames()
+    const stale = [...new Set(ALL_MANIFEST_TOOL_NAMES)].filter((n) => !found.has(n)).sort()
+    expect(stale).toEqual([])
+  })
+
+  test("the 3 known orphans are catalogued as unwired (visible, not hidden)", () => {
+    for (const name of ["ai_attribution", "coverage_check", "prompt_cache_status"]) {
+      const entry = GATED_TOOLS.find((e) => e.name === name)
+      expect(entry?.gate.kind).toBe("unwired")
+    }
   })
 })

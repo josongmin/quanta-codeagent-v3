@@ -68,6 +68,10 @@ export type ToolGate =
   /** Self-gates on an external resource being present (a binary on PATH, an API
    *  key). Wired automatically when the resource resolves; never forced. */
   | { readonly kind: "resource"; readonly resource: string; readonly env?: string }
+  /** ORPHAN — the tool factory exists but is wired into NO assembly path, so no
+   *  agent on any surface can call it today. Catalogued (not hidden) so the
+   *  orphan is VISIBLE + the drift guard tracks it; `reason` says why it's parked. */
+  | { readonly kind: "unwired"; readonly reason: string }
 
 /** Per-surface default availability. `on` = wired by default; `opt-in` = needs an
  *  explicit gate; `resource` = wired iff the external resource is present. */
@@ -124,8 +128,6 @@ export const BASE_TOOL_NAMES: readonly string[] = [
   "xlsx_read",
   "session_config",
 ]
-
-const ON_CLI: Partial<Record<ToolSurface, ToolDefault>> = { cli: "on" }
 
 /** The GATED tools — the scattered-gate axis this SSOT exists to centralize. */
 export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
@@ -384,6 +386,117 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     adr: "0121",
     note: "Opt-in (QUANTA_SHADOW) — checkpoint/rewind over the shadow ODB.",
   },
+  {
+    name: "create_plan",
+    group: ["update_plan", "current_plan", "update_todos", "remove_todos"],
+    origin: "@/agent/tier1/plan-mutation (buildPlanMutationBlock)",
+    gate: { kind: "config-slot", slot: "planStore" },
+    default: { cli: "opt-in" },
+    risk: "meta",
+    adr: "0207",
+    note: "Plan/todo authoring. Wired when config.planStore is set (surface owns the store).",
+  },
+  {
+    name: "request_plan_exit",
+    origin: "@/agent/tier1/plan-exit (buildPlanExitBlock)",
+    gate: { kind: "config-slot", slot: "planExitPort" },
+    default: { cli: "opt-in" },
+    risk: "meta",
+    adr: "0088",
+    note: "Agent-requested plan-mode exit. Wired when config.planExitPort is set.",
+  },
+  {
+    name: "update_working_state",
+    origin: "@/agent/tier1/working-state (buildWorkingStateBlock)",
+    gate: { kind: "config-slot", slot: "workingState" },
+    default: { cli: "opt-in" },
+    risk: "meta",
+    adr: "0135",
+    note: "Agent scratch working-state. Wired when config.workingState is set.",
+  },
+  {
+    name: "fork_session",
+    origin: "@/agent/tier1/fork-session (buildForkSessionBlock)",
+    gate: { kind: "config-slot", slot: "fork" },
+    default: { cli: "opt-in" },
+    risk: "meta",
+    adr: "0201",
+    note: "Fork the session into a child branch. Wired when config.fork.forker is set.",
+  },
+  {
+    name: "delegate",
+    origin: "@/agent/tier1/delegate (buildDelegateBlock)",
+    gate: { kind: "config-slot", slot: "delegation" },
+    default: { cli: "opt-in" },
+    risk: "spawns-subagent",
+    adr: "0218",
+    note: "Mode-typed delegation. Wired when config.delegation is set (--delegate / QUANTA_DELEGATE).",
+  },
+  {
+    name: "advisor",
+    origin: "@/agent/tier1/advisor (buildAdvisorBlock)",
+    gate: { kind: "config-slot", slot: "advisor", env: "QUANTA_ADVISOR_MODEL" },
+    default: { cli: "opt-in" },
+    risk: "network",
+    note: "Second-opinion advisor LLM. Wired when config.advisor.consult is set.",
+  },
+  {
+    name: "followup_task",
+    origin: "@/agent/tier1/subagent-introspect (enableFollowup)",
+    gate: { kind: "config-slot", slot: "subagent.enableFollowup" },
+    default: { cli: "opt-in" },
+    risk: "spawns-subagent",
+    adr: "0041",
+    note: "Queue a follow-up task. Opt-in — pairs with the mailbox/wake registry (not auto-on; left off until those are default-wired).",
+  },
+  {
+    name: "list_mcp_tasks",
+    group: ["get_mcp_task", "cancel_mcp_task"],
+    origin: "@/tool/mcp_tasks (mcpTasksTools)",
+    gate: { kind: "config-slot", slot: "TasksHandle (apps MCP wire)" },
+    default: { cli: "opt-in" },
+    risk: "meta",
+    adr: "0196",
+    note: "MCP long-running task control. Wired only when an MCP server advertises Tasks + the apps layer wires a TasksHandle.",
+  },
+  {
+    name: "ai_attribution",
+    origin: "@/tool/ai_attribution",
+    gate: {
+      kind: "unwired",
+      reason:
+        "tool factory exists (aiAttributionTool) but is registered in NO assembly path (features.ts / buildDefaultTools / apps) — no agent can call it today.",
+    },
+    default: {},
+    risk: "meta",
+    note: "ORPHAN — built, never wired. Decide: wire it (add to a tier1 block / buildDefaultTools) or delete the factory.",
+  },
+  {
+    name: "coverage_check",
+    origin: "@/tool/coverage (coverageCheckTool)",
+    gate: {
+      kind: "unwired",
+      reason:
+        "tool factory exists but is registered in NO assembly path — unreachable by any agent.",
+    },
+    default: {},
+    risk: "read-only",
+    adr: "0165",
+    note: "ORPHAN — built, never wired. Candidate to wire behind a QUANTA_COVERAGE_TOOL gate (it runs coverage; useful for self-verifying agents).",
+  },
+  {
+    name: "prompt_cache_status",
+    origin: "@/tool (promptCacheStatusTool)",
+    gate: {
+      kind: "unwired",
+      reason:
+        "tool factory exists but is registered in NO assembly path — unreachable by any agent.",
+    },
+    default: {},
+    risk: "read-only",
+    adr: "0182",
+    note: "ORPHAN — built, never wired. Read-only cache hit/miss introspection; low-risk to wire into the default set if wanted.",
+  },
 ]
 
 /** Resolve a single tool/group's availability on a surface given a default-state
@@ -408,6 +521,7 @@ export const shouldSeedOn = (entry: ToolSurfaceEntry, surface: ToolSurface): boo
       return g.env !== undefined
     case "resource":
     case "always":
+    case "unwired":
       return false
     default:
       return assertNever(g)
