@@ -424,14 +424,37 @@ const readUntil = async (
   const decoder = new TextDecoder()
   let buf = ""
   const start = Date.now()
+  const TIMED_OUT = Symbol("read-timeout")
   while (true) {
-    if (timeoutMs > 0 && Date.now() - start > timeoutMs) {
+    const remainingMs = timeoutMs > 0 ? timeoutMs - (Date.now() - start) : -1
+    if (timeoutMs > 0 && remainingMs <= 0) {
       return { ok: false, error: `read timeout after ${timeoutMs}ms` }
     }
     let done: boolean
     let value: Uint8Array | undefined
     try {
-      const chunk = await reader.read()
+      // A bare `await reader.read()` blocks FOREVER on a silent runaway child
+      // (one that emits no stdout — exactly what `timeoutMs` exists to bound),
+      // so the top-of-loop deadline check would never run again. Race the read
+      // against the remaining budget so the timeout actually fires; the
+      // abandoned read() settles later when the caller kills the child.
+      let chunk: { done: boolean; value?: Uint8Array }
+      if (timeoutMs > 0) {
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const raced = await Promise.race([
+          reader.read(),
+          new Promise<typeof TIMED_OUT>((r) => {
+            timer = setTimeout(() => r(TIMED_OUT), remainingMs)
+          }),
+        ])
+        if (timer !== undefined) clearTimeout(timer)
+        if (raced === TIMED_OUT) {
+          return { ok: false, error: `read timeout after ${timeoutMs}ms` }
+        }
+        chunk = raced
+      } else {
+        chunk = await reader.read()
+      }
       done = chunk.done
       value = chunk.value
     } catch (e) {

@@ -21,6 +21,24 @@ setTerminalIo({
 
 loadEnvFiles([".env.dev", ".env.local", ".env"])
 
+// jun-03 — CLI-host default-ON for the absorbed feature gates. The SLICES stay
+// default-OFF by construction (their `=== "1"` gates + hellgate tests are
+// unchanged, so off=byte-identical holds for every non-CLI embedding); the CLI
+// host simply OPTS IN by default by seeding each gate to "1" when the operator
+// has not set it. An explicit `QUANTA_ENABLE_X=0` (any value ≠ "1") still wins,
+// so the off escape hatch is intact. Set AFTER dotenv load so a `.env*` value or
+// a real shell export is never clobbered. NOTE: prompt-suggestion costs one
+// extra (tools-denied, single-shot) LLM call per turn — disable with
+// `QUANTA_ENABLE_PROMPT_SUGGESTION=0` if that latency/spend is unwanted.
+for (const gate of [
+  "QUANTA_ENABLE_ENV_PROBE",
+  "QUANTA_ENABLE_AWAY_SUMMARY",
+  "QUANTA_ENABLE_STRUCTURED_PATCH",
+  "QUANTA_ENABLE_PROMPT_SUGGESTION",
+]) {
+  if (process.env[gate] === undefined) process.env[gate] = "1"
+}
+
 /** Validated `QUANTA_REMOTE_TIMEOUT_MS` → optional `{ defaultTimeoutMs }`.
  *  A raw `Number.parseInt` would forward `NaN` on garbage input (silently
  *  disabling the remote timeout); we only set the field when the value parses

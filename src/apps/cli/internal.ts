@@ -222,10 +222,29 @@ export const buildSubagentConfig = (
   const enabled = parseEnvFlag(process.env.QUANTA_SUBAGENT, true)
   const rawDepth = process.env.QUANTA_SUBAGENT_MAX_DEPTH
   const depth = rawDepth !== undefined ? Number.parseInt(rawDepth, 10) : Number.NaN
+  // ADR-0041 — parallel-worker (6-tool) router. CLI default-ON is seeded by the
+  // gate block in index.ts (QUANTA_SUBAGENT_6TOOLS), so the agent can fan out
+  // background `spawn_agent`/`wait_agent` workers. `QUANTA_SUBAGENT_6TOOLS=0`
+  // (or QUANTA_SUBAGENT=0) disables. exec_command's model-supplied cwd is jailed
+  // to the workspace by the loop assembly; dangerous commands still pass the
+  // permission/HITL gate.
+  const enable6Tools = enabled && parseEnvFlag(process.env.QUANTA_SUBAGENT_6TOOLS, true)
+  const rawConc = process.env.QUANTA_SUBAGENT_MAX_CONCURRENT
+  const conc = rawConc !== undefined ? Number.parseInt(rawConc, 10) : Number.NaN
+  // Companions to the parallel-worker router: `spawn_batch` (fan a prompt list
+  // out in one call) + `list_agents` (see the spawned workers). Default-ON under
+  // QUANTA_SUBAGENT; `QUANTA_SUBAGENT_BATCH=0` / `QUANTA_SUBAGENT_INTROSPECT=0`
+  // disable individually. Zero-adapter: both ride the existing runner/registry.
+  const enableBatchSpawn = enabled && parseEnvFlag(process.env.QUANTA_SUBAGENT_BATCH, true)
+  const enableIntrospect = enabled && parseEnvFlag(process.env.QUANTA_SUBAGENT_INTROSPECT, true)
   return buildSubagentConfigCore({
     enabled,
     ...(Number.isFinite(depth) ? { maxDepth: depth } : {}),
     ...(taskRegistry !== undefined ? { taskRegistry } : {}),
+    ...(enable6Tools ? { enable6Tools: true } : {}),
+    ...(Number.isFinite(conc) ? { maxConcurrent: conc } : {}),
+    ...(enableBatchSpawn ? { enableBatchSpawn: true } : {}),
+    ...(enableIntrospect ? { enableIntrospect: true } : {}),
   })
 }
 
@@ -890,6 +909,9 @@ export const buildTooling = (
       : {}),
     onMemoryReady: (line) => logger.info(line),
     ...(sandboxProfile !== undefined ? { sandboxProfile } : {}),
+    // ADR-0464 — CLI surface owns the env read; default-ON in the CLI is seeded
+    // by the gate-default block in index.ts (so unset ⇒ "1" ⇒ tool registered).
+    ...(process.env.QUANTA_ENABLE_STRUCTURED_PATCH === "1" ? { structuredPatch: true } : {}),
     ...(budgetRemainingPercent !== undefined ? { budgetRemainingPercent } : {}),
   })
 }

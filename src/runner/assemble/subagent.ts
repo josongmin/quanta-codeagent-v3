@@ -22,6 +22,25 @@ export interface SubagentConfigAssembleInput {
    *  into `buildSessionFeatures`. Unset ⇒ the loop mints a fresh one and
    *  behavior is byte-identical to today. */
   taskRegistry?: TaskRegistry | undefined
+  /** ADR-0041 — when true, the six-tool parallel-worker router
+   *  (`spawn_agent` / `wait_agent` / `close_agent` / `exec_command` /
+   *  `write_stdin` / `send_input`) is assembled ALONGSIDE the trio (they share
+   *  one TaskRegistry). This is what lets the agent fan out BACKGROUND parallel
+   *  workers (vs the trio's foreground task). The surface owns the env read.
+   *  Absent/false ⇒ trio only (byte-identical). */
+  enable6Tools?: boolean | undefined
+  /** Max concurrent `spawn_agent` background workers in flight. Only meaningful
+   *  with {@link enable6Tools}. Non-finite/undefined ⇒ the dispatch default. */
+  maxConcurrent?: number | undefined
+  /** ADR-0145 — when true, the `spawn_batch` tool (fan a list of prompts out
+   *  over parallel children in ONE call) is registered. Pairs with the parallel
+   *  worker router. Absent/false ⇒ not registered. */
+  enableBatchSpawn?: boolean | undefined
+  /** ADR-0041/RFC-04 — when true, the `list_agents` introspection tool is
+   *  registered so the agent can SEE the background workers it spawned (lists
+   *  from the shared TaskRegistry; empty when none). The natural companion to
+   *  {@link enable6Tools}. Absent/false ⇒ not registered. */
+  enableIntrospect?: boolean | undefined
 }
 
 export const buildSubagentConfigCore = (
@@ -34,6 +53,18 @@ export const buildSubagentConfigCore = (
   }
   if (input.taskRegistry !== undefined) {
     out.taskRegistry = input.taskRegistry
+  }
+  if (input.enable6Tools === true) {
+    out.enable6Tools = true
+  }
+  if (input.maxConcurrent !== undefined && Number.isFinite(input.maxConcurrent)) {
+    out.maxConcurrent = input.maxConcurrent
+  }
+  if (input.enableBatchSpawn === true) {
+    out.enableBatchSpawn = true
+  }
+  if (input.enableIntrospect === true) {
+    out.enableIntrospect = true
   }
   return out
 }

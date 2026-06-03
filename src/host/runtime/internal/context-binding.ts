@@ -41,6 +41,11 @@ type RuntimeBase = RuntimeAgentConfigBase & {
   toolProfileState?: ToolProfileSessionState
   identityModeState?: IdentityModeSessionState
   permissionModeState?: PermissionModeSessionState
+  /** Session-scoped teardown for the memory-auto wires (audit U7-10): closes
+   *  the bun:sqlite WAL handle opened by buildSessionMemoryAutoWires. Idempotent.
+   *  Invoked once from the session host's close(); undefined when memory-auto is
+   *  off. Per-SESSION, never per-turn (the handle is reused across turns). */
+  memoryAutoDispose?: () => void
 }
 
 interface RuntimeConfirmSlot {
@@ -503,6 +508,10 @@ const extendBaseWithMemoryAuto = async (
     ...(auto.sessionCtx !== undefined ? { sessionCtx: auto.sessionCtx } : {}),
     stage1OutputsStore: auto.stage1OutputsStore,
     memoryConsolidator: auto.memoryConsolidator,
+    // U7-10: carry the WAL-handle teardown onto the base so the session host's
+    // close() releases the fd. Previously `auto.dispose` was dropped here, so
+    // every memory-auto session leaked its sqlite handle for the host lifetime.
+    memoryAutoDispose: auto.dispose,
   }
 }
 
@@ -668,7 +677,7 @@ const createUsageTallyStream = (
 const mintSideConversationSessionId = (mainSessionId: string): string =>
   `side:${mainSessionId}:${Math.random().toString(36).slice(2, 10)}`
 
-class RuntimeApprovalRequiredError extends Error {
+export class RuntimeApprovalRequiredError extends Error {
   readonly approval: PendingApprovalView
 
   constructor(approval: PendingApprovalView) {
@@ -723,7 +732,7 @@ const approvalPlaceholderOutcome = (messages: readonly Message[]): AgentOutcome 
   messages: [...messages],
 })
 
-const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
+export const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
   const pending = new Map<string, PendingRuntimeApprovalRecord>()
   // T03 — leases keyed by opaque approvalId (NOT a broad actionKey). Single-use
   // and turn-scoped: a lease that enters a `runWithProtocol` scope without being
@@ -777,11 +786,24 @@ const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
       // at scope exit were NOT consumed by this turn run and are stale — clear
       // them so an approval is good for exactly one turn (audit L5 H-1).
       const armedAtEntry = new Set(leases.keys())
+      // Abandoned-approval drain (audit U2/#12): an approval that was ALREADY
+      // pending when this scope began carries over the full turn. If it is STILL
+      // pending at scope exit it was never resolved before the turn moved on —
+      // the surface that held its `approvalId` is gone, so it can never be
+      // matched and would otherwise leak in `pending` for the host's lifetime.
+      // Snapshot at entry and drop the survivors in `finally`. The approval THIS
+      // scope itself creates (when `onConfirm` throws) is added AFTER this
+      // snapshot, so it gets a one-turn grace: it survives to its resolution, or
+      // is drained by the NEXT scope if still unresolved. Mirrors the lease
+      // drain above; no arbitrary cap, nesting-safe (each scope drains only what
+      // it carried in).
+      const pendingAtEntry = new Set(pending.keys())
       try {
         return await work()
       } finally {
         slot.current = previous
         for (const approvalId of armedAtEntry) leases.delete(approvalId)
+        for (const approvalId of pendingAtEntry) pending.delete(approvalId)
       }
     },
     resolveApproval: (approvalId: string, decision: "approve" | "deny"): void => {
@@ -795,6 +817,9 @@ const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
     /** Test seam — never call in production. Exposes the live lease ledger so
      *  hellgates can assert turn-scoping without reaching into the closure. */
     onConfirm,
+    /** Test seam — never call in production. Live size of the pending-approval
+     *  map, so a hellgate can assert the abandoned-approval drain bounds it. */
+    __pendingSize: (): number => pending.size,
   }
 }
 
@@ -1094,6 +1119,14 @@ const createRuntimeSessionHost = (args: {
   const close = async (): Promise<void> => {
     if (shutdownComplete) return
     shutdownComplete = true
+    // U7-10: release the memory-auto bun:sqlite WAL handle for this session
+    // BEFORE the broader shutdown. Idempotent + best-effort: a dispose throw
+    // must not block session teardown.
+    try {
+      base.memoryAutoDispose?.()
+    } catch {
+      // swallow — teardown must complete regardless.
+    }
     await args.options.shutdown()
     closed = true
   }

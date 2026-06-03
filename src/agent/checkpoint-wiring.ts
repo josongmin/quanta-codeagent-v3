@@ -40,6 +40,7 @@
  *    a dispatch-seam mutation.
  */
 
+import { DEFAULT_SHADOW_ODB_MAX_BYTES } from "@/storage"
 import {
   type CheckpointPolicy,
   defaultCheckpointPolicy,
@@ -104,6 +105,13 @@ export const wireCheckpointedEffectChannel = (
       mode: cp.mode,
       odb,
       ...(cp.oracle !== undefined ? { oracle: cp.oracle } : {}),
+      // U7-11: turn the shadow-ODB LRU cap ON at the real composition root. The
+      // cap mechanism (odb.cleanup / evictLru) previously had ZERO runtime
+      // call-sites, so per-workspace shadow stores grew monotonically. We reuse
+      // the codebase's documented default cap (1 GiB) — not an invented number —
+      // and the wrap calls cleanup THROTTLED (see checkpoint-policy) so it is not
+      // an every-checkpoint sweep.
+      cleanupMaxBytes: DEFAULT_SHADOW_ODB_MAX_BYTES,
     },
     resolveTool,
   )

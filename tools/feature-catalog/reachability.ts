@@ -14,14 +14,12 @@
  * Edges include BOTH `import` AND `export … from` (barrel) specifiers, so a
  * file re-exported by a reached barrel counts as reached. That makes the
  * "UNREACHABLE" verdict a STRONG signal (not even barrel-reachable) — safe to
- * act on (downgrade) without false-downgrading a wired feature. The known
- * residual blind spot is the inverse: a file barrel-re-exported but whose
- * symbols are never used will read as reached (false-negative for overclaim).
- * Catching that needs symbol-level resolution (a future increment); module
- * reachability is the SOTA baseline + the safe direction.
+ * act on (downgrade) without false-downgrading a wired feature. The inverse
+ * blind spot (a file barrel-re-exported but whose symbols are never used reads
+ * as reached) is covered by {@link computeSymbolReachability} below.
  *
  * Plane-clean: imports ONLY node built-ins (mirrors slice-graph tooling). Bun-
- * runnable: `bun tools/feature-catalog/reachability.ts [--unreached] [--check <file>]`.
+ * runnable: `bun tools/feature-catalog/reachability.ts [--unreached] [--check <file>] [--symbols]`.
  */
 
 import { readdir, readFile, stat } from "node:fs/promises"

@@ -93,6 +93,11 @@ export interface ToolingAssembleInput {
    *  default. CLI shim resolves via `resolveSandboxProfileFromEnv(process.env)`
    *  from `QUANTA_SANDBOX`; non-CLI surfaces pass directly. */
   sandboxProfile?: OsSandboxProfile | undefined
+  /** ADR-0464 — when true, the structured per-file `apply_patch_structured`
+   *  tool (self-correcting V4A apply) is appended to the default set. The
+   *  SURFACE owns the env read (`QUANTA_ENABLE_STRUCTURED_PATCH`); this slice
+   *  never touches `process.env`. Absent/false ⇒ byte-identical tool menu. */
+  structuredPatch?: boolean | undefined
   /** ADR-0432 — live 0..100 remaining-budget signal for the self-edit memory
    *  write-guard. ONLY consulted when `memoryConfig.writeGuardMinRemainingPercent`
    *  is set. The surface supplies the closure over its `BudgetMeter`
@@ -183,9 +188,10 @@ export const buildToolingCore = (input: ToolingAssembleInput): Tooling => {
         })
       : []
   const registry = new ToolRegistry([
-    ...buildDefaultTools(
-      input.sandboxProfile !== undefined ? { sandboxProfile: input.sandboxProfile } : {},
-    ),
+    ...buildDefaultTools({
+      ...(input.sandboxProfile !== undefined ? { sandboxProfile: input.sandboxProfile } : {}),
+      ...(input.structuredPatch === true ? { structuredPatch: true } : {}),
+    }),
     ...input.mcpTools,
     ...memTools,
     ...input.lspTools,
