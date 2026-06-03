@@ -71,3 +71,15 @@ export const ALL_STOP_ACTION_KINDS = [
   "abort",
   "hitl",
 ] as const satisfies ReadonlyArray<StopAction["kind"]>
+
+// Two-way drift guards: `satisfies` proves array⊆union; these prove the REVERSE
+// (every union arm is listed), which `satisfies` alone does NOT — so a new
+// StopReasonKind/StopAction arm missing from the tuple is a build error, not a
+// silently non-exhaustive test iterator.
+type _AssertStop<T extends true> = T
+export type _StopReasonDriftGuard = _AssertStop<
+  StopReasonKind extends (typeof ALL_STOP_REASON_KINDS)[number] ? true : false
+>
+export type _StopActionDriftGuard = _AssertStop<
+  StopAction["kind"] extends (typeof ALL_STOP_ACTION_KINDS)[number] ? true : false
+>

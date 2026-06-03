@@ -62,4 +62,10 @@ export const ALL_FORK_ERROR_CODES = [
   "aborted",
   "invalid-branch-name",
   "shadow-odb-failed",
-] as const
+] as const satisfies readonly ForkError["code"][]
+// Two-way drift guard (satisfies = array⊆union; Assert = union⊆array). A new
+// ForkError arm missing from this tuple is a build error.
+type _AssertFork<T extends true> = T
+export type _ForkErrorCodesDriftGuard = _AssertFork<
+  ForkError["code"] extends (typeof ALL_FORK_ERROR_CODES)[number] ? true : false
+>

@@ -39,7 +39,18 @@ export interface LaneError {
 }
 
 /** Canonical literal tuple for runtime guards + tests. */
-export const ALL_LANE_ERROR_KINDS = ["spawn-failed", "timeout", "aborted", "concurrency-exceeded"] as const
+export const ALL_LANE_ERROR_KINDS = [
+  "spawn-failed",
+  "timeout",
+  "aborted",
+  "concurrency-exceeded",
+] as const satisfies readonly LaneErrorKind[]
+// Two-way drift guard (satisfies = array⊆union; Assert = union⊆array). A new
+// LaneErrorKind missing from this tuple is a build error.
+type _AssertLane<T extends true> = T
+export type _LaneErrorKindsDriftGuard = _AssertLane<
+  LaneErrorKind extends (typeof ALL_LANE_ERROR_KINDS)[number] ? true : false
+>
 
 /** Default `maxConcurrency` cap. Overridable via `QUANTA_LANE_MAX_CONCURRENCY`
  *  at the composition root or via the `defaultLaneManager({ maxConcurrency })`

@@ -60,3 +60,14 @@ export const NICKNAME_TABLE = Object.freeze([
 /** Pool size — derived from the table so adding/removing an entry is a
  *  single-source change. The hellgate asserts this is exactly 39. */
 export const POOL_SIZE: number = NICKNAME_TABLE.length
+
+// Drift guard: `satisfies` proves table⊆union; this Assert proves the REVERSE
+// for every REAL nickname — i.e. every AgentNickname EXCEPT the `"__none__"`
+// sentinel (which is deliberately not a pool entry) must be in the table. The
+// header's "hellgate asserts exactly 39" is unanchored (no test references
+// NICKNAME_TABLE), so this is the real guard: add a nickname to the union,
+// forget the table → build error; the sentinel stays correctly excluded.
+type _AssertNick<T extends true> = T
+export type _NicknameTableDriftGuard = _AssertNick<
+  Exclude<AgentNickname, "__none__"> extends (typeof NICKNAME_TABLE)[number] ? true : false
+>

@@ -57,7 +57,13 @@ export const ALL_RUNNER_ERROR_KINDS = [
   "child-threw",
   "depth-exceeded",
   "aborted",
-] as const
+] as const satisfies readonly RunnerErrorKind[]
+// Two-way drift guard (satisfies = array⊆union; Assert = union⊆array). A new
+// RunnerErrorKind missing from this tuple is a build error.
+type _AssertRunner<T extends true> = T
+export type _RunnerErrorKindsDriftGuard = _AssertRunner<
+  RunnerErrorKind extends (typeof ALL_RUNNER_ERROR_KINDS)[number] ? true : false
+>
 
 /** Hard cap on delegation depth. A child that delegates again sees `depth=1`
  *  on its spec; the third level (`depth=2`) is the LAST allowed — `depth=3`

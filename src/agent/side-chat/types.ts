@@ -36,7 +36,10 @@ export type SideChatState = "active" | "stopped"
 
 /** Canonical literal tuple — feeds runtime guards and tests so the union
  *  does not silently drift from the type. */
-export const ALL_SIDE_CHAT_STATES = ["active", "stopped"] as const
+export const ALL_SIDE_CHAT_STATES = [
+  "active",
+  "stopped",
+] as const satisfies readonly SideChatState[]
 
 /** Closed 6-arm error union. Adding a code requires updating every
  *  consumer's switch (compile error on the missing arm). */
@@ -57,4 +60,13 @@ export const ALL_SIDE_CHAT_ERROR_CODES = [
   "invalid-prompt",
   "invalid-parent",
   "capacity-exceeded",
-] as const
+] as const satisfies readonly SideChatError["code"][]
+// Two-way drift guards (satisfies = array⊆union; Assert = union⊆array). A new
+// SideChatState/SideChatError arm missing from its tuple is a build error.
+type _AssertSide<T extends true> = T
+export type _SideChatStateDriftGuard = _AssertSide<
+  SideChatState extends (typeof ALL_SIDE_CHAT_STATES)[number] ? true : false
+>
+export type _SideChatErrorDriftGuard = _AssertSide<
+  SideChatError["code"] extends (typeof ALL_SIDE_CHAT_ERROR_CODES)[number] ? true : false
+>
