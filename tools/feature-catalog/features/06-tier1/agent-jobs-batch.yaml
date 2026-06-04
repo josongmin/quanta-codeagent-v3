@@ -36,10 +36,12 @@ evidence:
     - src/agent/batch-jobs/schema.ts
     - src/agent/batch-jobs/runner.ts
     - src/agent/batch-jobs/index.ts
+    - src/apps/cli/batch-cmd.ts
   adrs: [463]
   tests:
     unit:
       - tests/unit/agent-batch-jobs-hellgate.test.ts
+      - tests/unit/batch-cmd-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs:

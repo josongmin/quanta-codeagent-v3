@@ -34,10 +34,12 @@ evidence:
     - src/observability/ndjson/ring-buffer.ts
     - src/observability/ndjson/sinks.ts
     - src/observability/ndjson/index.ts
+    - src/apps/cli/repl/ndjson-wire.ts
   adrs: [468]
   tests:
     unit:
       - tests/unit/observability-ndjson-introspection-hellgate.test.ts
+      - tests/unit/ndjson-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs:

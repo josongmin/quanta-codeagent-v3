@@ -172,12 +172,39 @@ export const canonicalizeArgs = (args: unknown): string => {
   }
 }
 
-/** Read the bash `command` field from a tool input shape. Returns `undefined`
- *  for non-bash tools or malformed inputs (treat as general). */
-const bashCommandOf = (name: string, args: unknown): string | undefined => {
-  if (name !== "bash") return undefined
-  if (typeof args !== "object" || args === null) return undefined
+/** Resolve a shell command string from a tool call. Mirrors the canonical
+ *  `ToolRegistry.extractShellCommand(name, input)` surface (S16 / HARD_DENY):
+ *  returns the command for ANY shell-equivalent tool (`bash`, `shell`, `exec`,
+ *  MCP `run`, …) and `null` otherwise. The dedup gate is a pure standalone
+ *  state machine with no registry handle, so the caller threads the registry's
+ *  extractor in via `record(..., shellOf)`; absent that, we fall back to the
+ *  built-in `command`-field probe below (a strict superset for `bash`). */
+export type ShellCommandExtractor = (name: string, args: unknown) => string | null
+
+/** Built-in fallback shell-command probe, used only when the caller does not
+ *  supply the registry-backed extractor. It reads the `command` field from any
+ *  tool input — this is what `bash` carries. It does NOT hardcode `name ===
+ *  "bash"`: a sibling shell tool that carries a `command` field is still routed
+ *  to the env regime, so the env brake is not silently sidestepped by a tool
+ *  named `shell`/`exec`. Returns `null` (not a brake) for inputs with no
+ *  string `command` — those are genuinely non-shell and belong in the general
+ *  regime. */
+const builtinShellProbe: ShellCommandExtractor = (_name, args) => {
+  if (typeof args !== "object" || args === null) return null
   const cmd = (args as { command?: unknown }).command
+  return typeof cmd === "string" ? cmd : null
+}
+
+/** Read a shell command for a tool call, preferring the caller-supplied
+ *  registry extractor and falling back to the built-in `command`-field probe.
+ *  Returns `undefined` (rather than `null`) so callers can treat it like the
+ *  prior `bashCommandOf` shape — `undefined` ⇒ not a shell-equivalent call. */
+const shellCommandOf = (
+  name: string,
+  args: unknown,
+  shellOf: ShellCommandExtractor | undefined,
+): string | undefined => {
+  const cmd = (shellOf ?? builtinShellProbe)(name, args)
   return typeof cmd === "string" ? cmd : undefined
 }
 
@@ -205,9 +232,10 @@ const editFileOf = (name: string, args: unknown): string | undefined => {
 const bucketOf = (
   name: string,
   args: unknown,
+  shellOf: ShellCommandExtractor | undefined,
 ): { regime: "general" | "env" | "edit"; key: string } => {
-  const bashCmd = bashCommandOf(name, args)
-  if (bashCmd !== undefined && isEnvBashCommand(bashCmd)) {
+  const shellCmd = shellCommandOf(name, args, shellOf)
+  if (shellCmd !== undefined && isEnvBashCommand(shellCmd)) {
     return { regime: "env", key: "__env__" }
   }
   const editFile = editFileOf(name, args)
@@ -236,13 +264,26 @@ export class DedupGate {
    *  `{blocked:true, observation, ...}` to short-circuit with the synthetic
    *  observation message.
    *
-   *  Even when BLOCKED the call is recorded — so a 4th identical attempt is
-   *  blocked the same as the 3rd (the model gets the same observation until
-   *  it changes tactic, which is the intended UX). This also keeps the state
-   *  trivially testable: the count returned matches the number of identical
-   *  calls observed including the current one. */
-  record(name: string, args: unknown, turn: number): DedupVerdict {
-    const { regime, key } = bucketOf(name, args)
+   *  `shellOf` — optional registry-backed shell-command extractor, mirroring
+   *  `ToolRegistry.extractShellCommand(name, input)`. When supplied, the env
+   *  regime fires for ANY shell-equivalent tool (`bash`/`shell`/`exec`/MCP
+   *  `run`), not just a tool literally named `bash`. Absent it, a built-in
+   *  `command`-field probe is used (strict superset for `bash`).
+   *
+   *  Cross-turn counting (the certain spin signal): the brake counts DISTINCT
+   *  turns within the window, never raw call multiplicity. Same-turn PARALLEL
+   *  fan-out (N identical tool calls the loop dispatches together in one turn)
+   *  collapses to a single in-window entry, so legitimate parallel reads/edits
+   *  are NOT false-blocked as if they were a multi-turn spin. A spin only
+   *  accrues when the SAME bucket recurs across SEPARATE turns. The turn
+   *  boundary is the signal — no heuristic on per-turn multiplicity.
+   *
+   *  Even when BLOCKED the call is recorded — so a later identical attempt on a
+   *  NEW turn is blocked the same as the one that tripped the brake (the model
+   *  gets the same observation until it changes tactic). The returned `count`
+   *  is the number of distinct in-window turns including the current one. */
+  record(name: string, args: unknown, turn: number, shellOf?: ShellCommandExtractor): DedupVerdict {
+    const { regime, key } = bucketOf(name, args, shellOf)
     const window =
       regime === "env"
         ? this.caps.envWindow
@@ -264,7 +305,12 @@ export class DedupGate {
     for (const t of prior) {
       if (turn - t < window && turn - t >= 0) kept.push(t)
     }
-    kept.push(turn)
+    // Distinct-turn append: the history list holds ONE entry per turn. A second
+    // (or Nth) record for the SAME bucket on the SAME turn is parallel fan-out,
+    // not a repetition — it must not inflate the cross-turn count. `kept` is
+    // ordered oldest-first within the window, so the current turn (if already
+    // present) can only be the last element.
+    if (kept[kept.length - 1] !== turn) kept.push(turn)
     this.history.set(key, kept)
 
     if (kept.length < threshold) return { blocked: false }

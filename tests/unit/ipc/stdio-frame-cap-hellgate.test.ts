@@ -145,7 +145,7 @@ describe("U5 session stdio transport: unbounded-frame DoS guard", () => {
     const pair = makeStreamPair()
     const t = createSessionStdioTransport({ reader: pair.reader, writer: pair.writer })
     const seen: SessionTransportMessage[] = []
-    t.onMessage((m) => seen.push(m))
+    t.onMessage((m) => { seen.push(m) })
 
     expect(pair.attached).toBe(true)
     pair.push(overCapChunk)
@@ -167,7 +167,7 @@ describe("U5 session stdio transport: unbounded-frame DoS guard", () => {
     const pair = makeStreamPair()
     const t = createSessionStdioTransport({ reader: pair.reader, writer: pair.writer })
     const seen: SessionTransportMessage[] = []
-    t.onMessage((m) => seen.push(m))
+    t.onMessage((m) => { seen.push(m) })
 
     const message: SessionTransportMessage = { kind: "connect", sessionId: "session-1" }
     const wire = `${encodeSessionTransportMessage(message)}\n`

@@ -33,10 +33,12 @@ evidence:
     - src/patch/structured-types.ts
     - src/patch/message-for-model.ts
     - src/patch/index.ts
+    - src/tool/apply-patch-structured-tool.ts
   adrs: [464]
   tests:
     unit:
       - tests/unit/patch-structured-apply-hellgate.test.ts
+      - tests/unit/apply-patch-structured-tool-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

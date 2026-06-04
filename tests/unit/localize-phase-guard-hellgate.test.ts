@@ -240,13 +240,29 @@ describe("localize-phase-guard hellgate (25+ adversarial cases)", () => {
   test("G-7a: closed mutating set — adding a new mutating tool requires explicit update", () => {
     // This invariant fails when someone adds e.g. `multi_edit` to the codebase
     // without explicitly adding it here. Future-tooling regression net.
-    expect([...MUTATING_TOOL_NAMES].sort()).toEqual(["edit", "scripted_replace", "write"])
+    // `apply_patch` was added (it is a registered write_filesystem tool that
+    // previously ESCAPED the Phase-1 block — audit #10); the set stays the
+    // explicit fail-closed fallback consulted when no capability is threaded.
+    expect([...MUTATING_TOOL_NAMES].sort()).toEqual([
+      "apply_patch",
+      "edit",
+      "scripted_replace",
+      "write",
+    ])
   })
 
-  test("G-7b: 'patch' / 'apply_patch' / 'replace_in_file' / 'multi_edit' all PASS today (must add to set if registered)", () => {
+  test("G-7b: apply_patch is BLOCKED (registered write tool, now in the set); unregistered patch/replace_in_file/multi_edit still PASS", () => {
     const state = { turn: 0 }
     const cfg = { phase1Turns: 3 }
-    for (const name of ["patch", "apply_patch", "replace_in_file", "multi_edit"]) {
+    // apply_patch is a real registered mutating-FS tool — it must NOT escape the
+    // Phase-1 localization block (the audited bug, #10). Blocked via the explicit
+    // closed name set.
+    expect(decideLocalizePhase({ toolName: "apply_patch", state, cfg }).block).toBe(true)
+    // Not-(yet-)registered edit-tool names stay PASS until explicitly added to
+    // the closed set (the deliberate closed-set design — additions are auditable,
+    // NOT inferred from a broad capability like isReadOnly which would wrongly
+    // gate `bash`).
+    for (const name of ["patch", "replace_in_file", "multi_edit"]) {
       expect(decideLocalizePhase({ toolName: name, state, cfg }).block).toBe(false)
     }
   })
@@ -431,11 +447,14 @@ describe("decideLocalizePhase — pure policy", () => {
     expect(d.block).toBe(false)
   })
 
-  test("MUTATING_TOOL_NAMES contains exactly {edit, write, scripted_replace}", () => {
-    expect(MUTATING_TOOL_NAMES.size).toBe(3)
+  test("MUTATING_TOOL_NAMES contains exactly {edit, write, scripted_replace, apply_patch}", () => {
+    expect(MUTATING_TOOL_NAMES.size).toBe(4)
     expect(MUTATING_TOOL_NAMES.has("edit")).toBe(true)
     expect(MUTATING_TOOL_NAMES.has("write")).toBe(true)
     expect(MUTATING_TOOL_NAMES.has("scripted_replace")).toBe(true)
+    // apply_patch added (audit #10): a registered write_filesystem tool must not
+    // escape the Phase-1 localization block.
+    expect(MUTATING_TOOL_NAMES.has("apply_patch")).toBe(true)
     // Negative invariants — pinned so a future absent-minded add must update
     // the policy ADR.
     expect(MUTATING_TOOL_NAMES.has("bash")).toBe(false)

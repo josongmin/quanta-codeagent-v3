@@ -137,7 +137,14 @@ export const createRestConnectorRegistry = (config: RestRegistryConfig): Connect
 
   const isFresh = (writtenAt: number | undefined): boolean => {
     if (writtenAt === undefined) return false
-    return config.clockPort.now() - writtenAt < ttl
+    // Fail-closed on a backward clock step (NTP correction / manual set): the
+    // only concrete ClockPort adapter returns the WALL clock, so `now` can be
+    // < `writtenAt`, making `now - writtenAt` negative and `< ttl` always true —
+    // freezing a stale catalog as "fresh" indefinitely until the clock catches
+    // back up. Treat a negative age as STALE so a clock that ran backward forces
+    // a refresh rather than serving a stale catalog past its TTL.
+    const age = config.clockPort.now() - writtenAt
+    return age >= 0 && age < ttl
   }
 
   const doFetch = async (): Promise<RefreshOutcome> => {

@@ -17,7 +17,7 @@
  */
 
 import { parse } from "csv-parse/sync"
-import { err, ok, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 import type { BatchJobError, JobRow } from "./types"
 
 export interface ParsedCsv {
@@ -68,7 +68,7 @@ export const parseRowsFromCsv = (source: string): Result<ParsedCsv, BatchJobErro
   } catch (e) {
     return err<BatchJobError>({
       kind: "invalid-spec",
-      reason: `malformed CSV: ${e instanceof Error ? e.message : String(e)}`,
+      reason: `malformed CSV: ${errMessage(e)}`,
     })
   }
 }

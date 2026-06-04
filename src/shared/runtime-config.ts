@@ -121,6 +121,15 @@ export interface RuntimeConfig {
    *  `bgCompactionEnabled` slice gate). Default false ⇒ the loop's existing
    *  synchronous proactive/reactive compaction paths are byte-identical. */
   readonly bgCompaction: boolean
+  /** ADR-0471 untrusted-source envelope gate (`QUANTA_UNTRUSTED_ENVELOPE`).
+   *  Strict opt-in: `true` ONLY when the value is exactly `"1"` (mirrors the
+   *  `untrustedEnvelopeEnabled` slice gate). Default false ⇒ tool-result text
+   *  is NOT wrapped at the dispatch seam (byte-identical). */
+  readonly untrustedEnvelope: boolean
+  /** ADR-0472 edit-repair-loop gate (`QUANTA_EDIT_REPAIR_LOOP`). Strict opt-in
+   *  (`=== "1"`). Default false ⇒ the dispatch seam attaches no lint-delta to
+   *  edit results (byte-identical). */
+  readonly editRepairLoop: boolean
   /** FS jail disable flag (`QUANTA_FS_JAIL=off`). Default false (jail ON). */
   readonly fsJailDisabled: boolean
   /** ADR-0062 cap-as-instruction dispatch enforcement (`QUANTA_CAP_ENFORCE=1`).
@@ -287,6 +296,12 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // slice gate; `parseBool` also accepts true/on but the slice gate is the
     // SSOT, so keep it strict here too).
     bgCompaction: env["QUANTA_BG_COMPACTION"] === "1",
+    // ADR-0471 — strict `=== "1"` opt-in (matches the `untrustedEnvelopeEnabled`
+    // slice gate, which is the SSOT). Default false ⇒ dispatch wraps nothing.
+    untrustedEnvelope: env["QUANTA_UNTRUSTED_ENVELOPE"] === "1",
+    // ADR-0472 — strict `=== "1"` opt-in (matches the `editRepairLoopEnabled`
+    // slice gate, the SSOT). Default false ⇒ no lint-delta attached.
+    editRepairLoop: env["QUANTA_EDIT_REPAIR_LOOP"] === "1",
     fsJailDisabled: parseBool(env["QUANTA_FS_JAIL"] === "off" ? "1" : undefined),
     capEnforce: parseBool(env["QUANTA_CAP_ENFORCE"]),
     gitSha: stringOrUndef(env["QUANTA_GIT_SHA"]),

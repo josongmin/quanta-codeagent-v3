@@ -302,9 +302,15 @@ const isRetrievalHybridEnabled = (env: NodeJS.ProcessEnv): boolean =>
   env.QUANTA_RETRIEVAL_HYBRID === "1"
 
 /** ADR-0196 — pick the MCP capability negotiator from env. `QUANTA_MCP_CAPS=full`
- *  swaps to {@link fullNegotiator} which advertises `{tools, sampling,
- *  elicitation, tasks}`. Any other value (including absent) yields the
- *  byte-identical `{}` default. Single canonical knob; no aliases. */
+ *  swaps to {@link fullNegotiator} which advertises `{tools, elicitation, tasks}`.
+ *  Any other value (including absent) yields the byte-identical `{}` default.
+ *  Single canonical knob; no aliases.
+ *
+ *  B1 (jun-04) — `sampling` is advertised ONLY when a real `SamplingHandlerPort`
+ *  is wired (`fullNegotiator({ sampling: true })`): never advertise a capability
+ *  `handleInboundRequest` would answer with `-32601`. To enable it, build an
+ *  `@/llm`-backed handler (with a HITL consent gate), pass it to the `McpClient`
+ *  as `samplingHandler`, and switch this call to `fullNegotiator({ sampling: true })`. */
 /** Track A2 — the composition-root session thread key the named permission
  *  profile is registered under. The unified-agent surface starts ONE logical
  *  session per process; a single stable key is the right granularity for the

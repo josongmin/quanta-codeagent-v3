@@ -35,11 +35,13 @@ evidence:
     - src/runtime/env-probe/checks.ts
     - src/runtime/env-probe/probe.ts
     - src/runtime/env-probe/index.ts
+    - src/apps/cli/repl/env-probe-wire.ts
   adrs:
     - docs/decisions/0466-env-probe.md
   tests:
     unit:
       - tests/unit/env-probe-hellgate.test.ts
+      - tests/unit/env-probe-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs:

@@ -427,9 +427,16 @@ export const evaluateStack = (
   }
 
   // 5. `unpinned` — fall through to the global default (mode-based evaluate).
-  //    The
-  //    base `evaluate` itself emits with `stackSource: "global-default"`
-  //    — DO NOT re-emit here or the counter would double-count.
+  //
+  //    EMIT-ONCE INVARIANT (P3 OTel double-count guard): `evaluate` already
+  //    emits the decision through the same recorder seam with
+  //    `stackSource: "global-default"`. The fall-through therefore returns its
+  //    verdict VERBATIM — it MUST NOT wrap the call in another `emit(...)` /
+  //    `emitTrust(...)`, nor add a second `emitPermissionDecision` afterward,
+  //    or a dashboard over `quanta.permission.decision` would over-count every
+  //    global-default allow/ask/deny by 2x whenever the stack feature is
+  //    enabled. The bare `return evaluate(...)` is load-bearing; see
+  //    permission-otel-global-default-emit-once-hellgate.test.ts.
   return evaluate(action, ctx)
 }
 

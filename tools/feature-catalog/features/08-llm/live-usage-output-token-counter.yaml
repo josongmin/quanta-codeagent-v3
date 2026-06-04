@@ -1,0 +1,66 @@
+id: live-usage-output-token-counter
+title: Live "· N tokens" output-token counter — vendor-agnostic stream decorator (Claude-Code parity)
+section: 8
+subsystem: LLM stream observability — live output-token meter
+order: 235
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+config_refs:
+  knobs:
+    - liveUsage (default false / OFF)
+owners: ["@songmin"]
+labels: [absorbed:claude-code, surface:core, tier:core]
+depends_on: []
+purpose: |
+  Claude-Code의 streaming 중 climbing "· N tokens" spinner counter를 구조적으로 흡수.
+  commit 9dcea445 "feat(llm/cli): live · N tokens output counter". 핵심은 ONE
+  vendor-agnostic decorator `withLiveUsage`(`src/llm/live-usage/index.ts`): adapter들이
+  이미 normalize한 동일 `StreamEvent` vocabulary(`text_delta`/`thinking_delta`/
+  `tool_use_delta`/`usage`)만 관찰하므로 vendor에 blind — composeLLM의 OUTERMOST에서
+  한 번 감싸면 모든 어댑터(현재/미래)를 자동 커버. 표시 카운트 = max(authoritative, estimate),
+  여기서 estimate = chars(streamed text+thinking+tool-call JSON)/4 (`@/agent/compaction.
+  estimateTokens`와 동일 chars/4 convention — `@/llm`이 `@/agent`를 import하지 않도록 divisor만
+  local const로 복제). authoritative = 어댑터가 emit한 latest `usage.outputTokens`(provider
+  truth; Anthropic은 intermediate `message_delta`로 상승). monotonic — 절대 regress 안 함.
+  `exact` = authoritative >= estimate (UI는 false면 `~N`로 렌더 가능). Emission contract:
+  inner event는 전부 unchanged passthrough(transparent tee), displayed count 또는 exactness가
+  바뀐 tick에만 ONE `output_progress` emit(작은 delta burst flood 방지), zero 읽기는 skip.
+  `stream_reset`(FallbackLLM provider switch)은 accumulator zero. `output_progress`는
+  transient UI signal — loop가 recorder/budget 안 건드리고 forward(terminal `usage`가 accounting
+  소유), trajectory recorder는 skip ⇒ usage로 emit하면 이중과금 함정 회피.
+  Default-OFF: `knobs.enabled !== true` ⇒ inner port VERBATIM 반환(identity, zero alloc,
+  byte-identical stream). Surface가 opt-in — CLI는 turn-indicator(interactive TTY)에 묶어 enable.
+evidence:
+  code:
+    - src/llm/live-usage/index.ts
+    - src/llm/types.ts
+    - src/llm/index.ts
+    - src/runner/assemble/llm.ts
+    - src/apps/cli/internal.ts
+    - src/apps/cli/repl/factories/turn-indicator.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/llm/live-usage.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: liveUsage
+    default: false
+    purpose: |
+      composeLLM(`src/runner/assemble/llm.ts`)의 OUTERMOST wrap 게이트. `true`일 때만
+      `withLiveUsage(finalLLM, { enabled: true })`로 감싸 `output_progress` stream을 켠다.
+      classifier 이후에 배치돼 permission classification의 내부 호출은 un-wrapped port를 쓴다
+      (stray `output_progress` 방지). OFF면 identity — byte-identical.
+deliberate_hold: null
+notes: |
+  No-ADR (commit 9dcea445). API는 streaming 중 정확 토큰을 uniform하게 안 줌 →
+  로컬 chars/4 카운트가 본질이고 authoritative `usage`가 도착하면 upgrade. `estimateTokensFromChars`
+  는 `estimateTokens`(`Math.ceil(chars/4)`)와의 parity를 hellgate가 pin하도록 export.
+  CLI 소비: `turn-indicator.ts`가 `output_progress` ⇒ `updateUsage`(live cumulative output)로
+  status-bar 갱신. Sibling은 ADR-0227 spinner-stall(동일 default-OFF llm-stream decorator
+  패밀리). memory `live-token-counter-output-progress` 참조.

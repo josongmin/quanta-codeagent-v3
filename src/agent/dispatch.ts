@@ -7,8 +7,15 @@ import {
 } from "@/permission"
 import { type RedactionHit, redactSecrets, type SensitivityClass } from "@/security"
 import { compositePiiScanner } from "@/security/pii-redaction"
-import { QuantaError, toError } from "@/shared"
-import type { ToolContext, ToolResult, WorkingStateHandle } from "@/tool"
+import { err, errMessage, ok, QuantaError, runtimeConfig, toError } from "@/shared"
+import { writeFile } from "@/storage"
+import {
+  type DiagnosticItem,
+  deriveProvenance,
+  type ToolContext,
+  type ToolResult,
+  type WorkingStateHandle,
+} from "@/tool"
 import { composeToolResultContent } from "@/tool/image/compose"
 import { runAdmissibilityGate } from "./admissibility-gate"
 import { wireCheckpointedEffectChannel } from "./checkpoint-wiring"
@@ -17,6 +24,13 @@ import { DedupGate } from "./dispatch-dedup"
 import { deny, resultBlock } from "./dispatch-helpers"
 import { checkDispatchAllowed } from "./dispatch-seam-guard"
 import type { DispatchResult } from "./dispatch-types"
+import {
+  computeLintDelta,
+  type Diagnostic,
+  renderLintDelta,
+  runRepairLoop,
+} from "./edit-repair-loop"
+import { buildRepairReactor, lintRepairCheck } from "./edit-repair-wire"
 import { LocalEffectChannel } from "./effect-channel"
 import { decideLocalizePhase } from "./localize-phase-guard"
 import { resolveCollaborationMode } from "./mode"
@@ -24,6 +38,7 @@ import { planStoreToMutator } from "./plan/mutator-adapter"
 import { runPlanExitFlow } from "./plan-exit-flow"
 import { materializeReviewerAgent } from "./tier1/reviewer-subagent"
 import type { AgentConfig } from "./types"
+import { wrapToolResult } from "./untrusted-envelope"
 
 export type { DispatchResult } from "./dispatch-types"
 
@@ -228,6 +243,119 @@ const isSessionApprovalRequiredError = (error: unknown): boolean => {
  *  is the second seam so future tools (or callers that don't capture via
  *  closure) can read the same handle.
  */
+/** ADR-0472 — repair-loop attempt cap. NOT a tunable heuristic: ≥2 so the model
+ *  sees its OWN first failure fed back at least once before the loop gives up;
+ *  bounded small so a stuck repair can never spin the dispatch hot path. */
+const REPAIR_MAX_ITERS = 2
+
+/** ADR-0472 — extract the single target path of a path-bearing EDIT tool
+ *  (`edit`/`write`), or `null` for anything else (apply_patch is multi-file —
+ *  deferred; non-edit tools have no lint-delta). Pure, no-throw. */
+const extractEditPath = (call: ToolUseBlock): string | null => {
+  if (call.name !== "edit" && call.name !== "write") return null
+  const input = call.input as Record<string, unknown> | null | undefined
+  if (input === null || typeof input !== "object") return null
+  for (const key of ["path", "file_path", "file"] as const) {
+    const v = input[key]
+    if (typeof v === "string" && v.length > 0) return v
+  }
+  return null
+}
+
+/** Map a `@/tool` `DiagnosticItem` (LSP-shaped, 0-based, severity incl.
+ *  information/hint) to the edit-repair `Diagnostic` (1-based-agnostic, severity
+ *  error|warning|info). Pure. */
+const toDiag = (item: DiagnosticItem, file: string): Diagnostic => ({
+  file,
+  line: item.range.start.line,
+  column: item.range.start.character,
+  code: item.code ?? "",
+  message: item.message,
+  severity: item.severity === "error" ? "error" : item.severity === "warning" ? "warning" : "info",
+})
+
+/** ADR-0472 — open a lint-delta bracket around a path-bearing edit. Returns a
+ *  `finish(output)` that appends the INTRODUCED-lint delta (post − pre), or
+ *  `null` when the feature is off / no provider / non-edit / no session
+ *  (graceful degradation — byte-identical output). The provider session is
+ *  opened BEFORE the edit (pre-snapshot) and queried after (post-snapshot).
+ *  NO-THROW: any provider error degrades to a null bracket. */
+const openLintBracket = async (
+  call: ToolUseBlock,
+  config: AgentConfig,
+): Promise<{ finish: (output: string) => Promise<string> } | null> => {
+  if (!runtimeConfig().editRepairLoop) return null
+  const provider = config.diagnosticsProvider
+  if (provider === undefined) return null
+  const filePath = extractEditPath(call)
+  if (filePath === null) return null
+  try {
+    const session = await provider.open(filePath, config.cwd)
+    if (session === null) return null
+    const pre = await session.diagnostics(filePath)
+    return {
+      finish: async (output: string): Promise<string> => {
+        try {
+          const post = await session.diagnostics(filePath)
+          const introduced = computeLintDelta(
+            pre.map((d) => toDiag(d, filePath)),
+            post.map((d) => toDiag(d, filePath)),
+          )
+          if (introduced.length === 0) {
+            await session.stop()
+            return output
+          }
+          // ADR-0472 active repair — when the edit introduced lints AND a model is
+          // wired, drive a bounded fast-model loop to CLEAR them (re-edit → re-check
+          // until green / maxIters). No model ⇒ fall back to the passive lint-delta
+          // annotation (the model self-corrects next turn). NO-THROW throughout.
+          const llm = config.llm
+          if (llm === undefined) {
+            await session.stop()
+            return `${output}\n\n${renderLintDelta(introduced)}`
+          }
+          const reactor = buildRepairReactor(llm, {
+            apply: async (file, content) => {
+              try {
+                await writeFile(file, content, config.cwd)
+                return ok(undefined)
+              } catch (e) {
+                return err(errMessage(e))
+              }
+            },
+          })
+          // `lintRepairCheck` works in 1-based line space (matching the wire's
+          // `toLoopDiagnostic`); `toDiag` keeps the LSP 0-based line, so +1 the
+          // pre-snapshot here or the delta would read as all-introduced.
+          const pre1Based: Diagnostic[] = pre.map((d) => ({
+            ...toDiag(d, filePath),
+            line: d.range.start.line + 1,
+          }))
+          const check = lintRepairCheck(provider, filePath, config.cwd, pre1Based)
+          const report = await runRepairLoop(
+            {
+              file: filePath,
+              checkKind: "lints",
+              maxIters: REPAIR_MAX_ITERS,
+              customInstructions: "",
+            },
+            { check, reactor },
+            config.signal,
+          )
+          await session.stop()
+          return report.green
+            ? `${output}\n\n[edit-repair] cleared the edit's introduced lints in ${report.attempts} attempt(s).`
+            : `${output}\n\n${renderLintDelta(introduced)}\n[edit-repair] could not auto-clear (${report.stop}); please fix the above.`
+        } catch {
+          return output // NO-THROW: any snapshot/loop failure leaves output unchanged.
+        }
+      },
+    }
+  } catch {
+    return null // NO-THROW: a pre-snapshot/open failure ⇒ no bracket.
+  }
+}
+
 export const dispatchTool = async (
   call: ToolUseBlock,
   config: AgentConfig,
@@ -693,8 +821,13 @@ const deriveSourceClass = (
   // Label derivation: prefer the tool's declared shell-command extractor
   // (already used by HARD_DENY); fall back to a `path` field on the input
   // for filesystem tools. A tool exposing neither still gets Layer-1 by
-  // class but a generic label.
-  const shellCmd = tool.extractShellCommand?.(call.input) ?? null
+  // class but a generic label. Go through `registry.extractShellCommand`
+  // (NOT `tool.extractShellCommand` directly) so the tool's method receives
+  // its SCHEMA-VALIDATED input — the registry safeParses first (registry.ts:80),
+  // exactly the contract HARD_DENY relies on. Calling the tool method with the
+  // RAW `call.input` here would hand it the uncoerced/maybe-invalid shape the
+  // schema would have rejected/normalized.
+  const shellCmd = config.registry.extractShellCommand(call.name, call.input)
   const inputPath =
     call.input !== null && typeof call.input === "object" && "path" in call.input
       ? (call.input as { path: unknown }).path
@@ -739,6 +872,10 @@ const execute = async (
   const channel = wireCheckpointedEffectChannel(localChannel, config, (name) =>
     config.registry.get(name),
   )
+  // ADR-0472 — open the lint-delta bracket BEFORE the edit so the pre-snapshot
+  // reflects the file's diagnostics prior to the mutation. `null` ⇒ feature off /
+  // non-edit / no provider (byte-identical).
+  const lintBracket = await openLintBracket(call, config)
   const { result, durationMs } = await channel.execute({ call, ctx }, onProgress)
   // The channel collapses BOTH "tool returned ok:false" and "executor threw"
   // into the same `{ok:false, output:<msg>}` envelope shape — the throw path
@@ -747,14 +884,29 @@ const execute = async (
   // `evidenceOf({})` is empty and the typed-failure spread is conditional, so
   // a normalized-throw result yields exactly the same fields as the old catch.
   const { output: redacted, hits } = applyRedaction(result.output, call, config)
+  // ADR-0471 — untrusted-source envelope. Redact FIRST (above), then wrap the
+  // already-redacted text so the model treats EXTERNAL output (mcp / web_fetch /
+  // file content / plugin / bash) as DATA, not instructions. Provenance is
+  // DERIVED from the CALL SITE (registry origin + tool name) via `deriveProvenance`
+  // — never name-guessing. Default-OFF: `enabled:false` ⇒ `wrapToolResult` returns
+  // the input unchanged ⇒ byte-identical. Trusted/internal output is never wrapped.
+  const enveloped = wrapToolResult(
+    redacted,
+    deriveProvenance(call.name, config.registry.originOf(call.name)),
+    { enabled: runtimeConfig().untrustedEnvelope },
+  )
   // ADR-0287 — async-tool deferred-handle wire. When the tool's terminal
   // result carries a `deferred` marker (set by `defineToolAsync`), prepend
   // a stable `<deferred handle="..."/>` envelope so the LLM can branch on
-  // the format. Absent ⇒ byte-identical (default-OFF).
-  const output =
+  // the format. Absent ⇒ byte-identical (default-OFF). The deferred marker stays
+  // OUTSIDE the untrusted envelope (it is a harness control token, not data).
+  const outputBase =
     result.deferred !== undefined
-      ? `<deferred handle="${result.deferred.id}"/>\n${redacted}`
-      : redacted
+      ? `<deferred handle="${result.deferred.id}"/>\n${enveloped}`
+      : enveloped
+  // ADR-0472 — append the INTRODUCED-lint delta (post − pre) so the model sees
+  // exactly what THIS edit broke. No bracket ⇒ outputBase unchanged.
+  const output = lintBracket !== null ? await lintBracket.finish(outputBase) : outputBase
   // ADR-0062 rule #3 — record the nextAction hint in the session tracker so
   // a subsequent call to the same (tool, path) can be checked. DEFAULT-OFF:
   // absent enforcer ⇒ optional-chain is a no-op, byte-identical.

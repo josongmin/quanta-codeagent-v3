@@ -1,6 +1,6 @@
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
-import type { LlmSurfaceId, LlmTransportId } from "@/shared/llm-route-types"
 import { LLMError } from "@/shared"
+import type { LlmSurfaceId, LlmTransportId } from "@/shared/llm-route-types"
 import type { ErrorClassifier, RetryRouter } from "./error-routing"
 
 /**
@@ -42,8 +42,41 @@ export interface RetryingLLMOptions {
 
 const DEFAULT_MAX_RETRIES = 4
 const DEFAULT_BASE_DELAY_MS = 500
-/** Backoff ceiling (~15s) regardless of attempt count. */
+/** Backoff ceiling (~15s) regardless of attempt count. Applies ONLY to the
+ *  blind-exponential arm (no server header) — see {@link MAX_SERVER_DELAY_MS}
+ *  for the separate ceiling on a server-instructed delay. */
 const MAX_DELAY_MS = 15_000
+
+/** Ceiling for a SERVER-instructed `retry-after` delay (ADR-0208). Deliberately
+ *  higher than {@link MAX_DELAY_MS}: when the server explicitly says "retry in N
+ *  seconds" it knows when capacity returns, so honoring a value past the blind
+ *  15s exponential cap is correct (clamping a real 30s `retry-after` to 15s just
+ *  guarantees a second 429). The cap is NOT an arbitrary magic delay — it is the
+ *  largest delay a real provider asks for in practice and matches Claude
+ *  Desktop's documented "60s when no parsable delay" reference value; it exists
+ *  only to bound a hostile / buggy header (e.g. a year-ahead HTTP-date) so a
+ *  single attempt can never sleep unboundedly. A header beyond this is clamped
+ *  to 60s, not discarded — the server still gets a long backoff, just a sane
+ *  one. */
+const MAX_SERVER_DELAY_MS = 60_000
+
+/** Resolve the wait before retry attempt `n`. When the classified error carries
+ *  a server-instructed `retryAfterMs` (parsed at the `LLMError.fromSdkError`
+ *  boundary from `retry-after` / `retry-after-ms` / `x-ratelimit-reset`), the
+ *  SERVER'S instruction wins — clamped to {@link MAX_SERVER_DELAY_MS}. Otherwise
+ *  the existing full-jitter exponential backoff is used BYTE-IDENTICALLY to the
+ *  header-absent behavior (same {@link backoffDelayMs} call, same args). */
+const resolveDelayMs = (
+  e: unknown,
+  attempt: number,
+  baseDelayMs: number,
+  random: () => number,
+): number => {
+  if (e instanceof LLMError && e.retryAfterMs !== undefined && Number.isFinite(e.retryAfterMs)) {
+    return Math.min(Math.max(0, e.retryAfterMs), MAX_SERVER_DELAY_MS)
+  }
+  return backoffDelayMs(attempt, baseDelayMs, random)
+}
 
 /** Substrings (lowercased) marking a transient, safe-to-retry failure. */
 const RETRYABLE_MARKERS = [
@@ -229,9 +262,11 @@ export class RetryingLLM implements LLMPort {
     this.errorRouting = opts.errorRouting
   }
 
-  /** Full-jitter exponential backoff for retry attempt `n` (0-based). */
-  private backoffFor(n: number): number {
-    return backoffDelayMs(n, this.baseDelayMs, this.random)
+  /** Delay before retry attempt `n` (0-based). Prefers a server-instructed
+   *  `retry-after` carried on the error (ADR-0208); falls back to full-jitter
+   *  exponential backoff byte-identically when none is present. */
+  private delayFor(e: unknown, n: number): number {
+    return resolveDelayMs(e, n, this.baseDelayMs, this.random)
   }
 
   /** ADR-0203 wire — when `errorRouting` is set, an `abort`/`hitl` decision
@@ -264,7 +299,7 @@ export class RetryingLLM implements LLMPort {
         if (this.routerForbidsRetry(e)) throw e
         if (attempt >= this.maxRetries || !isRetryable(e)) throw e
         throwIfAborted(this.signal)
-        await this.sleep(this.backoffFor(attempt))
+        await this.sleep(this.delayFor(e, attempt))
         throwIfAborted(this.signal)
       }
     }

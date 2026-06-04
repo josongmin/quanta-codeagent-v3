@@ -912,6 +912,9 @@ export const buildTooling = (
     // ADR-0464 — CLI surface owns the env read; default-ON in the CLI is seeded
     // by the gate-default block in index.ts (so unset ⇒ "1" ⇒ tool registered).
     ...(process.env.QUANTA_ENABLE_STRUCTURED_PATCH === "1" ? { structuredPatch: true } : {}),
+    // ADR-0165 — same posture as structuredPatch: CLI owns the env read,
+    // default-ON via the SSOT-derived gate-default seed in index.ts.
+    ...(process.env.QUANTA_COVERAGE_TOOL === "1" ? { coverageCheck: true } : {}),
     ...(budgetRemainingPercent !== undefined ? { budgetRemainingPercent } : {}),
   })
 }

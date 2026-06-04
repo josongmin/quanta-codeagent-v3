@@ -67,6 +67,7 @@ import {
   buildObjectiveBlock,
   buildPlanExitBlock,
   buildPlanMutationBlock,
+  buildPromptCacheBlock,
   buildPrShipBlock,
   buildShadowBlock,
   buildShadowVerifyBlock,
@@ -216,6 +217,11 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
   // ADR-0127 (Part 3) / ADR-0148 — web_search tool (default-OFF: empty when
   // `webSearch.provider` absent; concrete provider is operator-owned).
   extraTools.push(...buildWebSearchBlock(config))
+
+  // ADR-0182 — prompt_cache_status tool (default-OFF: empty when no
+  // `promptCacheObserver` is wired). The SAME observer instance is fed by the
+  // loop's `emitUsage`, so the tool snapshots real per-session cache buckets.
+  extraTools.push(...buildPromptCacheBlock(config))
 
   // --- Skill block (ADR-0011) ---------------------------------------------
   const skill = await buildSkillBlock(config)

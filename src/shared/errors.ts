@@ -167,6 +167,14 @@ export class LLMError extends QuantaError {
   readonly statusCode?: number
   readonly providerCode?: string
   readonly provider?: LLMProvider
+  /** ADR-0208: server-instructed delay (ms) parsed from the response's
+   *  `retry-after` / `retry-after-ms` / `x-ratelimit-reset` headers at THIS
+   *  boundary. When present and the error is retry-eligible, the agent's
+   *  backoff (`src/agent/retry.ts`) honors it over blind exponential backoff
+   *  — a 429 already told us when capacity returns, so guessing a smaller
+   *  delay just guarantees a second 429 and burns the limited retry budget.
+   *  Absent ⇒ no parsable header ⇒ exponential fallback is used unchanged. */
+  readonly retryAfterMs?: number
 
   constructor(
     message: string,
@@ -176,6 +184,7 @@ export class LLMError extends QuantaError {
       statusCode?: number
       providerCode?: string
       provider?: LLMProvider
+      retryAfterMs?: number
     },
   ) {
     super("llm", message, options?.cause !== undefined ? { cause: options.cause } : undefined)
@@ -183,6 +192,7 @@ export class LLMError extends QuantaError {
     if (options?.statusCode !== undefined) this.statusCode = options.statusCode
     if (options?.providerCode !== undefined) this.providerCode = options.providerCode
     if (options?.provider !== undefined) this.provider = options.provider
+    if (options?.retryAfterMs !== undefined) this.retryAfterMs = options.retryAfterMs
   }
 
   /** Classify an arbitrary SDK-thrown error into a typed LLMError. This is
@@ -195,6 +205,12 @@ export class LLMError extends QuantaError {
     const statusCode = extractStatus(e)
     const providerCode = extractProviderCode(e)
     const kind = classify(statusCode, e, message)
+    // ADR-0208: parse the server's "when to retry" instruction once, here at
+    // the boundary (the SDK error still carries the response headers; once it
+    // is wrapped in an LLMError that shape is gone). Only meaningful for the
+    // retry-eligible arms, but parsing unconditionally is cheap + harmless
+    // (the agent only consults it on a retry-eligible error).
+    const retryAfterMs = parseRetryAfterMs(extractHeaders(e))
     const head = prefix ?? `${provider} request failed`
     return new LLMError(`${head}: ${message}`, {
       cause: e,
@@ -202,8 +218,138 @@ export class LLMError extends QuantaError {
       ...(statusCode !== undefined ? { statusCode } : {}),
       ...(providerCode !== undefined ? { providerCode } : {}),
       provider,
+      ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
     })
   }
+}
+
+/** Header bag in the two shapes the Anthropic / OpenAI SDKs surface on their
+ *  `APIError.headers`: a plain lowercased-key record
+ *  (`Record<string, string | null | undefined>` — Anthropic) OR a WHATWG
+ *  `Headers`-like with a `.get()` accessor (some OpenAI builds / raw `fetch`
+ *  responses). {@link extractHeaders} normalizes both into a single
+ *  case-insensitive lookup so {@link parseRetryAfterMs} stays shape-agnostic. */
+export type HeaderLookup = (name: string) => string | null
+
+/** Pull a case-insensitive header accessor out of an arbitrary thrown SDK
+ *  error. Returns `null` accessor results when no header bag is present, so
+ *  the caller never has to special-case "no headers". No-throw: a hostile
+ *  getter on `.headers` degrades to "header absent". */
+const extractHeaders = (e: unknown): HeaderLookup => {
+  if (typeof e !== "object" || e === null) return () => null
+  // SDK errors attach the response headers under `.headers`; some shapes nest
+  // them under `.response.headers` (matching `extractStatus`'s nesting probe).
+  const bag =
+    (e as { headers?: unknown }).headers ??
+    (e as { response?: { headers?: unknown } }).response?.headers
+  if (bag === null || bag === undefined) return () => null
+  // WHATWG Headers-like (`.get()`): OpenAI builds / raw fetch responses.
+  const getter = (bag as { get?: unknown }).get
+  if (typeof getter === "function") {
+    return (name) => {
+      try {
+        const v = (getter as (n: string) => unknown).call(bag, name)
+        return typeof v === "string" ? v : null
+      } catch {
+        return null
+      }
+    }
+  }
+  // Plain record (Anthropic `Record<string, string | null | undefined>`).
+  // HTTP header names are case-insensitive; the SDK lowercases keys, but probe
+  // case-insensitively to be robust against a record that did not.
+  if (typeof bag === "object") {
+    const rec = bag as Record<string, unknown>
+    return (name) => {
+      const direct = rec[name]
+      if (typeof direct === "string") return direct
+      const lower = name.toLowerCase()
+      for (const k of Object.keys(rec)) {
+        if (k.toLowerCase() === lower) {
+          const v = rec[k]
+          return typeof v === "string" ? v : null
+        }
+      }
+      return null
+    }
+  }
+  return () => null
+}
+
+/**
+ * ADR-0208: parse a server-instructed retry delay (ms) from rate-limit /
+ * overload response headers. Pure + reusable — given a case-insensitive
+ * {@link HeaderLookup}, returns the delay in ms or `undefined` when no header
+ * gives a finite, non-negative value.
+ *
+ * Precedence (most-precise first):
+ *   1. `retry-after-ms`        — explicit millisecond delta (OpenAI / some
+ *                                proxies). Integer ms, used verbatim.
+ *   2. `retry-after`           — RFC 9110 §10.2.3: EITHER delta-seconds
+ *                                (non-negative integer) OR an HTTP-date. Both
+ *                                forms parsed; HTTP-date is converted to a
+ *                                delta against the parse `now`.
+ *   3. `x-ratelimit-reset`     — provider rate-limit reset hint. Ambiguous in
+ *                                the wild: either an absolute UNIX epoch
+ *                                (seconds) OR a relative delta-seconds. We
+ *                                disambiguate by magnitude — a value far in the
+ *                                future of the current epoch is absolute and is
+ *                                converted to a delta; a small value is a
+ *                                relative delta-seconds.
+ *
+ * No magic delay constants: every returned value derives from what the server
+ * sent. A negative / NaN / past value yields `undefined` (fall back to the
+ * caller's own backoff). `now` is injectable for deterministic tests.
+ */
+export const parseRetryAfterMs = (
+  get: HeaderLookup,
+  now: () => number = Date.now,
+): number | undefined => {
+  // Precedence, most-precise first. Each helper returns `undefined` when its
+  // header is absent or unparsable, so the chain falls through cleanly.
+  const fromMs = parseRetryAfterMsHeader(get("retry-after-ms"))
+  if (fromMs !== undefined) return fromMs
+  const fromRa = parseRetryAfterHeader(get("retry-after"), now)
+  if (fromRa !== undefined) return fromRa
+  return parseRateLimitResetHeader(get("x-ratelimit-reset"), now)
+}
+
+/** `retry-after-ms`: explicit millisecond delta (OpenAI / some proxies). */
+const parseRetryAfterMsHeader = (raw: string | null): number | undefined => {
+  if (raw === null) return undefined
+  const ms = Number(raw)
+  return Number.isFinite(ms) && ms >= 0 ? Math.round(ms) : undefined
+}
+
+/** `retry-after`: RFC 9110 §10.2.3 — delta-seconds integer OR HTTP-date. */
+const parseRetryAfterHeader = (raw: string | null, now: () => number): number | undefined => {
+  if (raw === null) return undefined
+  const trimmed = raw.trim()
+  if (trimmed === "") return undefined
+  // delta-seconds: a bare non-negative number (integer per RFC, but accept
+  // fractional defensively — never a date).
+  const secs = Number(trimmed)
+  if (Number.isFinite(secs) && secs >= 0) return Math.round(secs * 1000)
+  // HTTP-date form (e.g. "Wed, 21 Oct 2026 07:28:00 GMT").
+  const at = Date.parse(trimmed)
+  if (!Number.isFinite(at)) return undefined
+  const delta = at - now()
+  return delta >= 0 ? delta : undefined
+}
+
+/** `x-ratelimit-reset`: ambiguous — absolute UNIX epoch (seconds) OR relative
+ *  delta-seconds. Disambiguate by magnitude: a UNIX epoch in seconds for any
+ *  near-future moment is ≳ 1.7e9 (year 2023+), far larger than any plausible
+ *  relative delta-seconds a server would ask us to wait. */
+const parseRateLimitResetHeader = (raw: string | null, now: () => number): number | undefined => {
+  if (raw === null) return undefined
+  const n = Number(raw.trim())
+  if (!Number.isFinite(n) || n < 0) return undefined
+  const nowMs = now()
+  const asAbsoluteDelta = n * 1000 - nowMs
+  if (n >= 1_000_000_000 && asAbsoluteDelta >= 0) return asAbsoluteDelta
+  // Otherwise treat as relative delta-seconds.
+  return Math.round(n * 1000)
 }
 
 const extractStatus = (e: unknown): number | undefined => {

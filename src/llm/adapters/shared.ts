@@ -69,14 +69,16 @@ export interface UsageCounts {
   inputTokens?: number
   outputTokens?: number
   cacheReadTokens?: number
+  cacheCreationTokens?: number
   model?: string
 }
 
 /** Build the additive `usage` StreamEvent from accumulated counts. Returns
  *  `null` when neither side reported tokens (absent usage is valid — never emit
- *  zeros). `cacheReadTokens` is included only when a cache hit was reported
- *  (exactOptionalPropertyTypes: conditional spread, not undefined). Shared by
- *  both adapters; the per-provider raw→counts fold stays provider-side. */
+ *  zeros). `cacheReadTokens` / `cacheCreationTokens` are included only when the
+ *  provider reported that bucket (exactOptionalPropertyTypes: conditional
+ *  spread, not undefined). Shared by both adapters; the per-provider raw→counts
+ *  fold stays provider-side. */
 export const buildUsageEvent = (counts: UsageCounts): StreamEvent | null => {
   if (counts.inputTokens === undefined && counts.outputTokens === undefined) return null
   return {
@@ -85,5 +87,8 @@ export const buildUsageEvent = (counts: UsageCounts): StreamEvent | null => {
     outputTokens: counts.outputTokens ?? 0,
     model: counts.model ?? "",
     ...(counts.cacheReadTokens !== undefined ? { cacheReadTokens: counts.cacheReadTokens } : {}),
+    ...(counts.cacheCreationTokens !== undefined
+      ? { cacheCreationTokens: counts.cacheCreationTokens }
+      : {}),
   }
 }

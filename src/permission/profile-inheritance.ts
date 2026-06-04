@@ -173,16 +173,34 @@ const osSandboxRank = (k: OsSandboxKind): number => (k === "none" ? 0 : 1)
 /* Per-axis merge — base ⊓ derived (result NEVER wider than base)             */
 /* ------------------------------------------------------------------------- */
 
-/** allowHosts merge for a result that is `allow-list` — intersection (derived
- *  may only DROP hosts, never add). If only one side names hosts, that side
- *  wins (the other was allow-all with no list, so the named list is the narrow).
- *  Returns undefined when neither side names hosts. */
+/** The host CONSTRAINT the BASE (a complete, resolved profile) imposes on an
+ *  `allow-list` result:
+ *    - base `allow-list` mode ⇒ the EXACT permitted set; an ABSENT/empty
+ *      `allowHosts` means ZERO hosts (the empty set ∅ — an allow-list with no
+ *      entries permits nothing), NOT "no constraint".
+ *    - base `allow-all` ⇒ `undefined` = NO constraint on the host axis (every host
+ *      permitted; the result became allow-list only because the derived narrowed).
+ *  Returning ∅ (vs undefined) for a host-less allow-list base is the fix for the
+ *  zero-host widen: the intersection is forced to ∅ so a derived can never
+ *  INTRODUCE hosts the base did not already permit. (`deny-all` never reaches the
+ *  host axis — the mode narrowing keeps the result `deny-all`.) */
+const baseHostConstraint = (base: NetworkPolicy): ReadonlyArray<string> | undefined =>
+  base.mode === "allow-list" ? (base.allowHosts ?? []) : undefined
+
+/** allowHosts merge for a result that is `allow-list` — the INTERSECTION of the
+ *  base's host constraint and the derived's EXPLICIT host list. A derived that
+ *  OMITS `allowHosts` INHERITS the base (no new constraint, no narrowing); a
+ *  derived that NAMES hosts may only narrow the base via intersection. Because a
+ *  host-less `allow-list` base contributes the EMPTY set, a derived can NOT widen
+ *  it — adding hosts to a zero-host base yields ∅, never the derived's list.
+ *  Returns undefined only when the base is NOT allow-list and the derived names no
+ *  hosts (no host axis on either side). */
 const mergeAllowHosts = (
   base: NetworkPolicy,
   d: Partial<NetworkPolicy>,
 ): ReadonlyArray<string> | undefined => {
-  const bh = base.mode === "allow-list" ? base.allowHosts : undefined
-  const dh = d.allowHosts
+  const bh = baseHostConstraint(base)
+  const dh = d.allowHosts // explicit-only: absent ⇒ inherit base, never narrow.
   if (bh !== undefined && dh !== undefined) {
     const ds = new Set(dh)
     return bh.filter((h) => ds.has(h))
@@ -354,6 +372,16 @@ const asDefinition = (p: PermissionProfile): ProfileDefinition => ({
  *  merge. Returns the first breached axis name, else undefined. */
 const widerAxis = (result: PermissionProfile, ceiling: PermissionProfile): string | undefined => {
   if (NETWORK_RANK[result.network.mode] > NETWORK_RANK[ceiling.network.mode]) return "network.mode"
+  // allowHosts widening: when the ceiling is an allow-list it permits EXACTLY its
+  // host set (absent ⇒ ∅). A result that is allow-list with ANY host outside that
+  // set widens the ceiling's egress — even at the SAME mode rank. (A ceiling that
+  // is allow-all imposes no host constraint; a deny-all ceiling already tripped
+  // the mode check above for any non-deny-all result.)
+  if (ceiling.network.mode === "allow-list" && result.network.mode === "allow-list") {
+    const permitted = new Set(ceiling.network.allowHosts ?? [])
+    const resultHosts = result.network.allowHosts ?? []
+    if (resultHosts.some((h) => !permitted.has(h))) return "network.allowHosts"
+  }
   if (APPROVAL_RANK[result.approval.mode] < APPROVAL_RANK[ceiling.approval.mode])
     return "approval.mode"
   if (result.approval.promptUser === false && ceiling.approval.promptUser === true) {

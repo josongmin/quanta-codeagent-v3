@@ -8,6 +8,9 @@ import {
 } from "./elicitation/inbound-router"
 import type { ElicitationPrompter } from "./elicitation/port"
 import { isResponse, type JsonRpcMessage } from "./jsonrpc"
+import { headlessSamplingRejecter } from "./sampling"
+import { isSamplingMethod, routeSampling, type SamplingResponse } from "./sampling/inbound-router"
+import type { SamplingHandlerPort } from "./sampling/port"
 import { HttpSseMcpTransport } from "./transports/http-sse"
 import type { McpTransport } from "./transports/port"
 import { StdioMcpTransport } from "./transports/stdio"
@@ -125,6 +128,11 @@ export class McpClient {
   private readonly negotiator: CapabilityNegotiator
   private readonly transport: McpTransport
   private readonly elicitationPrompter: ElicitationPrompter
+  /** ADR-0470 — inbound `sampling/createMessage` handler. Defaults to
+   *  {@link headlessSamplingRejecter} (declines) when none is injected, which
+   *  is the advertise-iff-able default: an unwired client does NOT advertise
+   *  `sampling` and a server that asks anyway gets a well-defined decline. */
+  private readonly samplingHandler: SamplingHandlerPort
 
   private nextId = 1
   private readonly pending = new Map<number, PendingRequest>()
@@ -157,6 +165,7 @@ export class McpClient {
       negotiator?: CapabilityNegotiator
       transport?: McpClientTransport
       elicitationPrompter?: ElicitationPrompter
+      samplingHandler?: SamplingHandlerPort
     },
   ) {
     this.config = config
@@ -170,6 +179,10 @@ export class McpClient {
     // `{action:"decline"}` response instead of being silently dropped — well-
     // defined and byte-identical-safe (no double prompts in tests).
     this.elicitationPrompter = opts?.elicitationPrompter ?? headlessRejecter
+    // ADR-0470: when no sampling handler is injected, default to the headless
+    // rejecter. The composition root injects an `@/llm`-backed handler (and a
+    // `fullNegotiator({ sampling: true })`) together — advertise-iff-able.
+    this.samplingHandler = opts?.samplingHandler ?? headlessSamplingRejecter
   }
 
   async start(): Promise<void> {
@@ -329,12 +342,22 @@ export class McpClient {
     }
   }
 
-  /** Service an inbound server→client JSON-RPC request. Today only elicitation
-   *  is handled; any other inbound method gets a `-32601 method not found`
-   *  JSON-RPC error so the server is never left hanging on a dropped request.
-   *  Never throws (the prompter contract is no-throw, and any unexpected
-   *  failure is mapped to a `decline` response). */
+  /** Service an inbound server→client JSON-RPC request. Two inbound methods are
+   *  handled — `elicitation/*` (routes to the prompter) and `sampling/
+   *  createMessage` (ADR-0470, routes to the sampling handler). Any other
+   *  inbound method gets a `-32601 method not found` JSON-RPC error so the
+   *  server is never left hanging on a dropped request. Never throws (both port
+   *  contracts are no-throw, and any unexpected failure is mapped to a typed
+   *  decline response). */
   private handleInboundRequest(id: number | string, method: string, params: unknown): void {
+    // ADR-0470 — sampling/createMessage routes to the injected handler. With no
+    // handler wired the default rejecter declines (and the client does not
+    // advertise `sampling`, so a well-behaved server never reaches here). A
+    // decline is shaped as a JSON-RPC *error*, not a dropped request.
+    if (isSamplingMethod(method)) {
+      this.handleInboundSampling(id, method, params)
+      return
+    }
     if (!isElicitationMethod(method)) {
       this.send({
         jsonrpc: "2.0",
@@ -351,6 +374,37 @@ export class McpClient {
       // rejects we still must answer rather than drop the request.
       () => {
         this.send({ jsonrpc: "2.0", id, result: { action: "decline" } })
+      },
+    )
+  }
+
+  /** ADR-0470 — route an inbound `sampling/createMessage` request to the
+   *  injected {@link SamplingHandlerPort} and reply. A fulfilled completion is
+   *  sent as the JSON-RPC `result`; a typed decline (the default-OFF case is
+   *  `no-handler`) is sent as a JSON-RPC `error` so the server learns the
+   *  client refused rather than being left hanging. Never throws — the router
+   *  contract is total and a rejecting custom handler is mapped to a decline. */
+  private handleInboundSampling(id: number | string, method: string, params: unknown): void {
+    void routeSampling(this.samplingHandler, method, params).then(
+      (response: SamplingResponse) => {
+        if (response.kind === "result") {
+          this.send({ jsonrpc: "2.0", id, result: response.result })
+        } else {
+          this.send({
+            jsonrpc: "2.0",
+            id,
+            error: { code: response.code, message: response.message },
+          })
+        }
+      },
+      // Defensive: routeSampling is no-throw, but if it ever rejects we still
+      // answer rather than drop the request.
+      () => {
+        this.send({
+          jsonrpc: "2.0",
+          id,
+          error: { code: -32000, message: "sampling: internal error" },
+        })
       },
     )
   }

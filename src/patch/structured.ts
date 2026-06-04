@@ -25,7 +25,7 @@
 // failure (that op's `AppliedChange` carries the error) and does NOT abort the
 // other ops; it never propagates past the boundary.
 
-import { err, ok, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 import { applyPatch } from "./applier"
 import { messageForModel } from "./message-for-model"
 import type { AppliedChange, ApplyChangeType, StructuredApplyOutcome } from "./structured-types"
@@ -136,7 +136,7 @@ function buildFailure(
   beforeContent: string | undefined,
   error: unknown,
 ): AppliedChange {
-  const message = error instanceof Error ? error.message : String(error)
+  const message = errMessage(error)
   return {
     path,
     changeType,

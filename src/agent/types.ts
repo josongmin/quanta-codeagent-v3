@@ -758,6 +758,24 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    *  per session so reads recorded by `read` are visible to `write`/`edit` of the
    *  same session. Absent ⇒ no tracking, no guard (byte-identical default-OFF). */
   readFileState?: import("@/tool/stale-read-guard").ReadFileState
+  /** ADR-0182 — OPTIONAL prompt-cache observer. When the host wires one (gate
+   *  `QUANTA_PROMPT_CACHE_STATUS`), `emitUsage` records each completion's
+   *  cache-read / cache-creation token buckets into it, and the SAME instance
+   *  backs the `prompt_cache_status` tool so the agent can answer "is prompt
+   *  caching actually working?". The composition root mints ONE observer per
+   *  session and passes it BOTH here (loop feed) and to
+   *  `DefaultToolPorts.promptCacheObserver` (tool). Absent ⇒ no record call, no
+   *  tool — byte-identical default-OFF. */
+  promptCacheObserver?: import("@/observability/prompt-cache").PromptCacheObserver
+  /** ADR-0472 — OPTIONAL diagnostics provider for the edit-repair lint-delta.
+   *  When present (host wired an LSP diagnostics source) AND
+   *  `runtimeConfig().editRepairLoop` is on, the dispatch seam brackets a
+   *  path-bearing edit (`edit`/`write`) with a pre/post diagnostics snapshot and
+   *  appends the INTRODUCED-lint delta to the tool's model-facing output, so the
+   *  model sees exactly what its edit broke. Absent ⇒ no bracket (byte-identical
+   *  default-OFF). Duck-typed via inline import so this slice's type surface does
+   *  not grow a new top-of-file dependency. */
+  diagnosticsProvider?: import("@/tool").DiagnosticsProvider
   /**
    * ADR-0081 shell output delta streaming — opt-in observer for the typed
    * `ShellExecEvent` stream. The dispatch seam forwards this to

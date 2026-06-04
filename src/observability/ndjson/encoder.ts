@@ -22,7 +22,7 @@
  * Plane-clean: imports ONLY `@/shared`. Pure — no clock, no IO, no randomness.
  */
 
-import { err, ok, type Result } from "@/shared"
+import { err, errMessage, ok, type Result } from "@/shared"
 import type { NdjsonEncoder, NdjsonEvent, NdjsonSinkError } from "./types"
 
 /** Recursively rebuild `value` with object keys sorted, so `JSON.stringify`
@@ -142,8 +142,7 @@ export const defaultNdjsonEncoder: NdjsonEncoder = {
       }
       return ok(line)
     } catch (e) {
-      const reason =
-        e instanceof EncodeReject ? e.detail : e instanceof Error ? e.message : String(e)
+      const reason = e instanceof EncodeReject ? e.detail : errMessage(e)
       return err({ kind: "encode-failed", reason })
     }
   },

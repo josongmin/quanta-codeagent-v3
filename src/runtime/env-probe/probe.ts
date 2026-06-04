@@ -18,7 +18,7 @@
  *     returns the warnings accumulated so far (no throw).
  */
 
-import type { Result } from "@/shared"
+import { errMessage, type Result } from "@/shared"
 import { CORE_CHECKS, degradationHint, testRunnerChecks } from "./checks"
 import type {
   ProbeCheck,
@@ -54,7 +54,7 @@ const safeExec = async (
   } catch (e) {
     return {
       ok: false,
-      error: { kind: "io-error", detail: e instanceof Error ? e.message : String(e) },
+      error: { kind: "io-error", detail: errMessage(e) },
     }
   }
 }

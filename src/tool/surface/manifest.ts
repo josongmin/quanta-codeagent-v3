@@ -460,42 +460,30 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     note: "MCP long-running task control. Wired only when an MCP server advertises Tasks + the apps layer wires a TasksHandle.",
   },
   {
-    name: "ai_attribution",
-    origin: "@/tool/ai_attribution",
-    gate: {
-      kind: "unwired",
-      reason:
-        "tool factory exists (aiAttributionTool) but is registered in NO assembly path (features.ts / buildDefaultTools / apps) — no agent can call it today.",
-    },
-    default: {},
-    risk: "meta",
-    note: "ORPHAN — built, never wired. Decide: wire it (add to a tier1 block / buildDefaultTools) or delete the factory.",
-  },
-  {
     name: "coverage_check",
-    origin: "@/tool/coverage (coverageCheckTool)",
+    origin: "@/tool (coverageCheckTool, via DefaultToolPorts.coverageCheck)",
     gate: {
-      kind: "unwired",
-      reason:
-        "tool factory exists but is registered in NO assembly path — unreachable by any agent.",
+      kind: "config-slot",
+      slot: "DefaultToolPorts.coverageCheck",
+      env: "QUANTA_COVERAGE_TOOL",
     },
-    default: {},
+    default: { cli: "on" },
     risk: "read-only",
     adr: "0165",
-    note: "ORPHAN — built, never wired. Candidate to wire behind a QUANTA_COVERAGE_TOOL gate (it runs coverage; useful for self-verifying agents).",
+    note: "Read-only V8-coverage reporter + optional threshold gate (self-verifying agents). CLI default-ON; bench/web opt-in (tool-menu reproducibility). Self-contained — builds its own coverage source; jailed path resolve like read/csv_read.",
   },
   {
     name: "prompt_cache_status",
-    origin: "@/tool (promptCacheStatusTool)",
+    origin: "@/tool (promptCacheStatusTool, via tier1 buildPromptCacheBlock)",
     gate: {
-      kind: "unwired",
-      reason:
-        "tool factory exists but is registered in NO assembly path — unreachable by any agent.",
+      kind: "config-slot",
+      slot: "AgentConfig.promptCacheObserver",
+      env: "QUANTA_PROMPT_CACHE_STATUS",
     },
-    default: {},
+    default: { cli: "on" },
     risk: "read-only",
     adr: "0182",
-    note: "ORPHAN — built, never wired. Read-only cache hit/miss introspection; low-risk to wire into the default set if wanted.",
+    note: "Read-only cache hit-rate / savings introspection. The host mints ONE PromptCacheObserver per session (maybeWirePromptCacheObserver); the SAME instance is fed by the loop's emitUsage (cache_read + cache_creation buckets, threaded adapter→StreamEvent→loop) and read by this tool. CLI default-ON; bench/web opt-in (tool-menu reproducibility).",
   },
 ]
 

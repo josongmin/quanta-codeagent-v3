@@ -41,6 +41,7 @@ evidence:
     - src/skill/skill-mcp-deps/types.ts
     - src/skill/skill-mcp-deps/parser.ts
     - src/skill/skill-mcp-deps/resolve.ts
+    - src/skill/skill-mcp-deps/session.ts
     - src/skill/skill-mcp-deps/index.ts
   adrs: [476]
   tests:

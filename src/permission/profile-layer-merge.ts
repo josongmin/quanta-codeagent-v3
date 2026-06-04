@@ -161,10 +161,24 @@ const combineSandbox = (a: SandboxPolicy, b: SandboxPolicy): SandboxPolicy => ({
   networkIsolated: a.networkIsolated || b.networkIsolated,
 })
 
-/** network allowHosts intersection — a wider list cannot widen a narrower one.
- *  Both sides naming hosts ⇒ intersection; one side naming ⇒ that (narrower)
- *  list; neither ⇒ undefined. Order-independent (set intersection is
- *  commutative); output order follows `a` for determinism. */
+/** The host CONSTRAINT a single layer imposes on an `allow-list` result:
+ *    - `allow-list` mode ⇒ the EXACT permitted set; an ABSENT/empty `allowHosts`
+ *      means ZERO hosts (∅ — an allow-list with no entries permits nothing), NOT
+ *      "no constraint". This is the fix for the zero-host widen: a host-less
+ *      allow-list layer must FORCE the intersection to ∅, so a co-layer can never
+ *      INTRODUCE hosts it did not already permit.
+ *    - `allow-all` ⇒ `undefined` = NO constraint (every host permitted; the merged
+ *      mode became allow-list only because a co-layer was the narrower one).
+ *    - `deny-all` ⇒ `undefined` too: it never reaches the host axis (the narrower
+ *      deny-all mode wins, so the merged result is deny-all, not allow-list). */
+const layerHostConstraint = (n: NetworkPolicy): ReadonlyArray<string> | undefined =>
+  n.mode === "allow-list" ? (n.allowHosts ?? []) : undefined
+
+/** network allowHosts intersection — a wider list cannot widen a narrower one,
+ *  and a host-less allow-list layer (∅) cannot be widened by a co-layer adding
+ *  hosts. Both sides constraining ⇒ intersection; one side constraining ⇒ that
+ *  (narrower) set; neither (both allow-all/deny-all) ⇒ undefined. Order-independent
+ *  (set intersection is commutative); output order follows `a` for determinism. */
 const intersectAllowHosts = (
   a: ReadonlyArray<string> | undefined,
   b: ReadonlyArray<string> | undefined,
@@ -189,7 +203,10 @@ const combineNetwork = (a: NetworkPolicy, b: NetworkPolicy): NetworkPolicy => {
   // allowHosts only meaningful when the merged mode is allow-list. Intersect the
   // host lists each side WOULD have used (each side's own allowHosts).
   if (mode === "allow-list") {
-    const hosts = intersectAllowHosts(a.allowHosts, b.allowHosts)
+    // Pass each side's host CONSTRAINT (allow-list ⇒ exact set, absent ⇒ ∅;
+    // allow-all/deny-all ⇒ no constraint) so a host-less allow-list layer forces
+    // the intersection to ∅ and cannot be widened by a co-layer adding hosts.
+    const hosts = intersectAllowHosts(layerHostConstraint(a), layerHostConstraint(b))
     if (hosts !== undefined) out.allowHosts = hosts
   }
   if ((a.perRequestApproval ?? false) || (b.perRequestApproval ?? false)) {

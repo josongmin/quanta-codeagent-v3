@@ -19,6 +19,7 @@
  * returns a silent default / partial config.
  */
 
+import { errMessage } from "@/shared"
 import type {
   DeclaredEnvironment,
   LocalEnvConfig,
@@ -127,7 +128,7 @@ export const parseLocalEnvConfig = (body: string, toml: TomlParse): LocalEnvPars
   try {
     parsed = toml(body)
   } catch (err) {
-    return fail("toml_syntax", err instanceof Error ? err.message : String(err))
+    return fail("toml_syntax", errMessage(err))
   }
 
   if (!isPlainObject(parsed)) {

@@ -73,6 +73,13 @@ export const MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
   "edit",
   "write",
   "scripted_replace",
+  // apply_patch (V4A multi-file patch, isReadOnly:()=>false) is a REGISTERED
+  // mutating-FS edit tool that previously ESCAPED this Phase-1 block (audit #10),
+  // letting the model edit the wrong file before the fault was localized. Added
+  // EXPLICITLY here (the closed-set design) — NOT via raw isReadOnly, which would
+  // also wrongly gate `bash` (a deliberately-exempt tool: isReadOnly===false but
+  // not a file-edit tool).
+  "apply_patch",
 ])
 
 /** The forcing nudge injected when a mutating tool is attempted in Phase 1.

@@ -39,7 +39,7 @@ const sequencedGhPort = (payloads: ReadonlyArray<GhCliResult>): GhCliPort => {
   let i = 0
   return {
     run: async () => {
-      const r = payloads[Math.min(i, payloads.length - 1)]
+      const r = payloads[Math.min(i, payloads.length - 1)] as GhCliResult
       i += 1
       return r
     },

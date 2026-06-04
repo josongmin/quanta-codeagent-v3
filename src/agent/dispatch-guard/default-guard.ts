@@ -111,6 +111,45 @@ const checkBranchOnly = (
   }
 }
 
+/**
+ * Egress-class refusal for the DENY-ALL network posture.
+ *
+ * When the operator wired an EMPTY `networkAllowlist` (`[]`), every host is
+ * off-list — the posture is "deny every egress-bearing tool call" (the
+ * `denied` mode lever, and the strictest reading of an empty `allowlist`
+ * lever). `checkHostAllowlist` already refuses URL-bearing tools, but a
+ * shell-equivalent call (`bash`/`shell`/`exec`/MCP-`run`) is the single most
+ * common egress vector (`curl`/`wget`/`nc`) and ships NO inspectable host
+ * field — so it would otherwise slip the host filter entirely.
+ *
+ * Mirror the HARD_DENY shell-equivalence signal (`extractShellCommand !== null`,
+ * i.e. the tool exposes a shell command) rather than an allowlist of tool
+ * names: ANY shell-class tool is treated as egress-bearing and DENIED
+ * fail-closed under the deny-all posture. A pure non-egress tool (no shell
+ * command, no URL) carries no contribution and still runs.
+ *
+ * Scope is intentionally the EMPTY allowlist only. Under a NON-empty allowlist
+ * we cannot inspect which host a shell command will reach, so we defer to the
+ * downstream gates (preserving the documented "harmless `ls` allows under a
+ * configured allowlist" behavior, HELL-DG-05). The deny-all posture has no
+ * such ambiguity: NO host is reachable, therefore no shell egress is.
+ */
+const checkShellEgressUnderDenyAll = (
+  input: unknown,
+  opts: DefaultDispatchGuardOptions,
+): GuardDecision | null => {
+  if (opts.networkAllowlist === undefined || opts.networkAllowlist.length > 0) return null
+  const command = extractShellCommand(input)
+  if (command === null) return null
+  return {
+    kind: "deny",
+    reason: `shell-equivalent command blocked under deny-all network posture (no egress permitted): '${command}'`,
+    // hardDeny: a deny-all egress posture is a security boundary a retry of the
+    // same shell call cannot satisfy.
+    hardDeny: true,
+  }
+}
+
 const checkHostAllowlist = (
   input: unknown,
   opts: DefaultDispatchGuardOptions,
@@ -159,6 +198,10 @@ export const defaultDispatchGuard = (opts: DefaultDispatchGuardOptions = {}): Di
   check(_tool, input): GuardDecision {
     return composeContributions([
       checkGitWrite(input),
+      // Egress-class refusal for the deny-all posture is checked BEFORE the
+      // (soft, recoverable) branch-only contribution so a shell call under a
+      // fully-denied network surfaces the hard egress deny, not a softer one.
+      checkShellEgressUnderDenyAll(input, opts),
       checkBranchOnly(input, opts),
       checkHostAllowlist(input, opts),
     ])

@@ -15,6 +15,7 @@
 // NO-THROW contract: `messageForModel(err)` never throws for ANY input
 // (including null/undefined/non-Error). It returns a string, always.
 
+import { errMessage } from "@/shared"
 import { PatchAnchorNotFoundError, PatchApplyError, PatchParseError } from "./types"
 
 /** Structural shape of a jail-boundary breach. `@/tool`'s `FsJailViolationError`
@@ -106,13 +107,9 @@ function stripPrefix(message: string): string {
   return message
 }
 
-/** Extract a message from an arbitrary thrown value without ever throwing. */
+/** Extract a message from an arbitrary thrown value without ever throwing.
+ *  Delegates to the canonical {@link errMessage} (R5 audit-H: one extractor,
+ *  hostile-stringifier-safe) instead of a local clone. */
 function safeMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  if (typeof error === "string") return error
-  try {
-    return String(error)
-  } catch {
-    return "unknown error"
-  }
+  return errMessage(error)
 }

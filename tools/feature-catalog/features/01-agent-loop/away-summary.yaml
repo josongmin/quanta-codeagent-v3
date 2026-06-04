@@ -40,10 +40,12 @@ evidence:
     - src/agent/away-summary/port.ts
     - src/agent/away-summary/runner.ts
     - src/agent/away-summary/index.ts
+    - src/apps/cli/repl/away-summary-wire.ts
   adrs: [465]
   tests:
     unit:
       - tests/unit/away-summary-hellgate.test.ts
+      - tests/unit/cli/away-summary-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs:

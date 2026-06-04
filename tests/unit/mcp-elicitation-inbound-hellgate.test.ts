@@ -143,13 +143,16 @@ describe("inbound elicitation wiring (Track C, GOAL 1)", () => {
     await client.stop()
   })
 
-  it("non-elicitation inbound request → JSON-RPC -32601, not dropped", async () => {
+  it("genuinely-unknown inbound request → JSON-RPC -32601, not dropped", async () => {
+    // NB: `sampling/createMessage` is now a RECOGNIZED inbound method (ADR-0470)
+    // — it routes to the sampling handler and declines (-32000), not -32601. So
+    // this -32601 case uses a method neither elicitation nor sampling handles.
     const transport = new ScriptedTransport()
     const client = new McpClient({ name: "t", command: ["x"] }, { transport })
     await startReady(client, transport)
     const before = transport.sent.length
 
-    transport.emit({ jsonrpc: "2.0", id: 5, method: "sampling/createMessage", params: {} })
+    transport.emit({ jsonrpc: "2.0", id: 5, method: "roots/list", params: {} })
     await flush()
 
     expect(transport.sent.length).toBe(before + 1)

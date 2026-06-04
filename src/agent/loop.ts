@@ -238,6 +238,23 @@ const emitUsage = (
     const outTok = Number.isFinite(ev.outputTokens) && ev.outputTokens > 0 ? ev.outputTokens : 0
     taskSpend.tokens += inTok + outTok
   }
+  // ADR-0182 — feed the prompt-cache observer the per-completion cache buckets
+  // so the `prompt_cache_status` tool (backed by the SAME instance) can report
+  // hit-rate + savings. Present ONLY when the host wired an observer
+  // (`QUANTA_PROMPT_CACHE_STATUS`); absent ⇒ no record call (byte-identical).
+  // The observer keys its rollup by model + sessionId; `turnIndex` is a
+  // drill-down field the rollup math does not consult (recorded as 0 — this
+  // seam has no turn index in scope and the observer never invents one).
+  config.promptCacheObserver?.record({
+    model: ev.model,
+    sessionId: config.sessionId ?? "",
+    turnIndex: 0,
+    atMs: Date.now(),
+    inputTokens: ev.inputTokens,
+    cacheCreationTokens: ev.cacheCreationTokens ?? 0,
+    cacheReadTokens: ev.cacheReadTokens ?? 0,
+    outputTokens: ev.outputTokens,
+  })
 }
 
 /** Pure side-effect emit of a `{type:"recovery"}` AgentEvent at a recovery

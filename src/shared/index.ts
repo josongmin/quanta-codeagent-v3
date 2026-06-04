@@ -17,19 +17,20 @@ export {
 } from "./abortable"
 export { assertNever } from "./assert-never"
 export { byteCompare } from "./byte-compare"
+export { chunkBatches } from "./chunk"
 export { classify } from "./error-classifier"
-export type { LLMErrorKind, LLMProvider } from "./errors"
+export type { HeaderLookup, LLMErrorKind, LLMProvider } from "./errors"
 export {
   errMessage,
   isAbortError,
   LLMError,
   PermissionDeniedError,
+  parseRetryAfterMs,
   QuantaError,
   ToolExecutionError,
   ToolInputError,
   toError,
 } from "./errors"
-export { chunkBatches } from "./chunk"
 export type {
   LlmContinuationObservation,
   LlmRequestObservation,
@@ -83,7 +84,6 @@ export {
   redactValue,
   TRAJECTORY_SCHEMA,
 } from "./trajectory"
-export { AGENT_PROMPT_MODES } from "./turn-policy-types"
 export type {
   AgentPromptMode,
   PromptBaseSystem,
@@ -94,6 +94,7 @@ export type {
   TurnPolicySnapshot,
   TurnPolicyToolChoiceKind,
 } from "./turn-policy-types"
+export { AGENT_PROMPT_MODES } from "./turn-policy-types"
 export type { HITLTier, Id, Result } from "./types"
 export { ALL_HITL_TIERS, err, ok } from "./types"
 export { embedUntrusted, escapeBoundary } from "./untrusted"

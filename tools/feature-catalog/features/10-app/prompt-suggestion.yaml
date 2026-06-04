@@ -51,10 +51,12 @@ evidence:
     - src/agent/prompt-suggestion/suppression.ts
     - src/agent/prompt-suggestion/orchestrator.ts
     - src/agent/prompt-suggestion/index.ts
+    - src/apps/cli/repl/prompt-suggestion-wire.ts
   adrs: [467]
   tests:
     unit:
       - tests/unit/prompt-suggestion-hellgate.test.ts
+      - tests/unit/prompt-suggestion-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs:

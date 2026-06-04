@@ -1,5 +1,10 @@
 # jun-03 흡수/보완 백로그 (경쟁사 6라운드 어딧 종합)
 
+
+## $000000. 필독
+이거 본 AI들은 실제 구현과 문서를 항상 업데이트 시켜놓기. 문서가 보통 stale되니까 코드 보고 업데이트해놔.
+
+
 > 출처: Claude Code 2.1.150 / Codex Desktop 3390(codex-rs 0.135) / Cursor 3.5.33 코드 기준 6라운드 병렬 어딧.
 > **이 문서는 "이미 구현됨"을 전수 재검증(quanta src grep)해서 걸러낸 뒤, 실제 구축·강화·보완이 필요한 것만** 모은 것.
 > 각 항목: 기능 / 목적 / 레퍼런스(경쟁사가 어떻게) / 얻는 시나리오 / 설득(왜 quanta에 가치) / ROI / 코드 들어갈 곳.
@@ -17,11 +22,20 @@
 
 ## §1. 🐛 검증된 결함 (흡수 아님 — 그냥 버그, 최우선)
 
+> **✅ jun-04 5개 병렬 수정 완료 (B1·B3·B4·B5 신규 fix + B2는 이미 fix돼 있던 것 확인).** 신규 hellgate 66/0, 광역 회귀 5281/0+1458/0, tsc 0, biome 에러 0. 상세:
+> - **B1 ✅ FIXED** — advertise-iff-able DI seam. `SamplingHandlerPort`(`src/mcp/sampling/`) 신설, `fullNegotiator({sampling})` 핸들러 있을 때만 광고(default omit), `handleInboundRequest`에 `sampling/createMessage` 라우팅(미배선시 -32000 graceful decline). `tasks.listChanged`는 false 유지(정직 — 우리가 안 emit). **follow-up**: composition root에서 @/llm-backed 핸들러+HITL 동의 배선해야 실제 sampling 활성(피처, 버그 아님).
+> - **B2 ✅ ALREADY FIXED** — 백로그가 stale이었음. `guardProvenance`(ADR-0470, `provenance-guard.ts`)가 `mergeProfileLayers`(line 290, source-precedence default-ON)를 거쳐 라이브 `agent-arg-builder.ts:257 resolvePermissionModeFromProfile`에서 호출 중. per-repo의 grant-capable(approval/network/sandbox) widen은 merge 전에 drop. 이번엔 end-to-end 테스트(`permission-provenance-hellgate.test.ts`)만 강화.
+> - **B3 ✅ FIXED** — `parseRetryAfterMs`(`src/shared/errors.ts`, retry-after delta/HTTP-date + retry-after-ms + x-ratelimit-reset 파싱) → `LLMError.retryAfterMs` → `retry.ts`가 백오프 대신 서버delay 우선(60s ceiling). 헤더 없으면 byte-identical 지수백오프.
+> - **B4 ✅ FIXED (resume-read 경로)** — `reconcileToolPairing`(`src/memory/history-sanitization/`) orphan tool_use→placeholder result / orphan result→drop, `resume-fsm.ts resolveResume`에 배선(path/id 모드 둘 다). **follow-up**: `store.ts` rewindToMessage/forkSession **write-path**(orphan을 만드는 쪽) 미배선 — resume-read가 이미 다음 진입때 정리하므로 primary 벡터는 막힘. @/session→@/memory가 신규 슬라이스 엣지라 fence 해소(공유 leaf로 추출 등) 필요해서 보류.
+> - **B5 ✅ FIXED** — `FileInfo`에 isFIFO/isCharacterDevice/isBlockDevice + `readFileBytes`(bounded) 추가. read 도구가 device→`device_file` reject(hang 차단), 첫 8KiB NUL 스니프→`binary_file` reject. 텍스트 read byte-identical.
+
+(아래 원본 항목은 기록 보존)
+
 - **B1. MCP `sampling` capability 거짓광고 → -32601로 죽음**
   - 기능/목적: 광고한 MCP capability를 실제 처리하거나, 처리 못 할 거면 광고하지 말 것(프로토콜 준수).
   - 레퍼런스: rmcp 0.15는 `sampling/createMessage`(서버→클라 추론 위임)를 핸들한다. codex는 SDK 차원 지원.
   - 시나리오: 호환 MCP 서버가 quanta에 붙어 `sampling/createMessage`를 보내면 현재 `-32601 method not found`로 실패 → 서버 연동이 깨진다.
-  - 설득: 우리가 `src/mcp/capabilities/full-negotiator.ts:17`에서 `sampling: {}`를 **광고**하는데 `src/mcp/client.ts:338`은 elicitation만 라우팅. 이건 "있다고 해놓고 없는" 명백한 위반.
+  - 설득: 우리가 `src/mcp/capabilities/full-negotiator.ts:17`에서 `sampling: {}`(+`tasks.listChanged`)를 **광고**하는데 `src/mcp/client.ts`의 `handleInboundRequest`는 `isElicitationMethod` 아니면 전부 `-32601 method not found`로 응답. 이건 "있다고 해놓고 없는" 명백한 위반. (jun-04 재검증.)
   - ROI: 고(상호운용성/정확성). 비용: 저(광고 제거) ~ 중(핸들러 구현+HITL 게이트).
   - 코드: `src/mcp/client.ts`(`handleInboundRequest`에 sampling 분기 추가 → `@/llm` 포트로 라우팅 + 사용자 동의 게이트) 또는 `src/mcp/capabilities/full-negotiator.ts`(미구현이면 플래그 제거). `tasks.listChanged`도 동일 점검.
 
@@ -61,14 +75,17 @@
 
 ## §2. 🔌 구현됨, 배선만 하면 됨 (가장 싼 win — 하드파트 완료)
 
-- **W1. stale-read-guard 배선 (ADR-0474, 이미 구현)**
+> **✅ jun-04 W1·W2 둘 다 배선 완료** (write/edit/read/bash/dispatch + loop). 아래는 기록 보존.
+> **✅ jun-04 추가: tool-surface orphan 3종 해소** — ai_attribution 삭제 / coverage_check + prompt_cache_status 배선(prompt_cache는 cacheCreationTokens 소스 충실도까지 adapter→StreamEvent→loop 풀 체인). SSOT 카탈로그 unwired 0. (이 백로그 §1~§5엔 없던 별도 트랙.)
+
+- **W1. stale-read-guard 배선 (ADR-0474, 이미 구현)** — ✅ **DONE (jun-04)**
   - 기능/목적: read한 파일이 외부수정(linter/사용자/빌드)되면 write/edit 차단("재읽어라") + bash가 파일 mtime 바꾸면 post-bash 리마인더.
   - 시나리오: 에이전트가 read→(npm/포매터가 파일 재작성)→stale 카피로 edit→linter/사용자 변경 덮어쓰기. 이 클래스 제거.
   - 설득: 슬라이스(`src/tool/stale-read-guard/`)+ADR 완성인데 `loop/write/edit/bash` 어디에도 **미배선**(grep 0). 하드파트 끝, 배선만.
   - ROI: 고. 비용: 저.
   - 코드: `src/tool/write/`·`src/tool/edit/` 실행 경로 + bash post-exec(`src/runtime/bash-bg-registry`/dispatch) + read 시 mtime 기록. host에서 `staleReadGuardEnabled` 게이트.
 
-- **W2. 백그라운드/투기적 컴팩션 배선 (`BackgroundSummarizationController`, 이미 구현)**
+- **W2. 백그라운드/투기적 컴팩션 배선 (`BackgroundSummarizationController`, 이미 구현)** — ✅ **DONE (jun-04)**
   - 기능/목적: 컴팩션(수초짜리 LLM 호출)을 턴 진행 중 백그라운드로 미리 돌리고, 임계 도달 시 "빌려" 쓰며 완료+유효할 때만 persist, 취소가능.
   - 시나리오: 긴 세션에서 컨텍스트 찰 때마다 멈추던 지연을 모델 사고시간 뒤로 숨김.
   - 설득: `src/agent/compaction/background.ts`에 컨트롤러 구현 존재인데 `loop.ts`에 **미배선**(grep 0). Cursor `BackgroundAndPersistIfCompleted` 모드와 동치.
@@ -238,7 +255,7 @@
 ---
 
 ### 진입 추천 순서
-1. **결함 §1 (B1-B5)** — 흡수 아니라 수정.
-2. **§2 배선 (W1, W2)** — 하드파트 완료, 싼 win.
-3. **§3 저비용 고ROI (H2, H6, H12, H1)** → **카테고리 갭 (H14)** → 나머지 H ROI순.
+1. ~~**§2 배선 (W1, W2)**~~ — ✅ **DONE (jun-04)**. orphan 도구 3종도 해소.
+2. ~~**결함 §1 (B1-B5)**~~ — ✅ **DONE (jun-04)**. B1·B3·B4·B5 신규 fix + B2 이미 fix 확인. (follow-up 2건: B1 sampling 핸들러 배선 / B4 rewind·fork write-path.)
+3. **§3 저비용 고ROI (H2, H6, H12, H1)** → **카테고리 갭 (H14)** → 나머지 H ROI순. **← 다음 진입점.**
 4. **§4** 선택, **§5** 기록만.

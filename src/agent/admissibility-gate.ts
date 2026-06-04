@@ -78,6 +78,22 @@ export interface AdmissibilityAction {
   input: unknown
   isReadOnly: boolean
   /**
+   * S16 (audit A1 #3) — shell-equivalent command string when the tool's input
+   * represents one, derived from `ToolRegistry.extractShellCommand(tool,input)`.
+   * The dispatch seam may populate it, but the gate NEVER trusts the caller to
+   * have done so: {@link withResolvedShellCommand} re-derives it from the
+   * registry at the top of {@link runAdmissibilityGate} so EVERY downstream
+   * HARD_DENY check (`hardDenyReason` in the HITL branch, `evaluate` /
+   * `evaluateAuto` in mode-policy, `evaluateStack` in the per-thread stack)
+   * applies the denylist uniformly to ANY shell-equivalent tool — not just one
+   * named "bash". A non-bash shell/exec/MCP-run tool can therefore never
+   * sidestep HARD_DENY by reaching mode-policy / the permission stack with the
+   * command stripped off the action.
+   *
+   * `null` / absent ⇒ the tool does not represent a shell command (no gate).
+   */
+  shellCommand?: string | null
+  /**
    * ADR-0061 (absorb #2) — patterns the action declares it would be satisfied
    * by, e.g. `["bash:git status", "read:src/**"]`. When `config.
    * permissionPatternStore` is wired AND every pattern is already granted in
@@ -253,6 +269,37 @@ const isSessionApprovalRequiredError = (error: unknown): boolean => {
     "reason" in approval &&
     "requestedAt" in approval
   )
+}
+
+/**
+ * S16 (audit A1 #3) — canonical, registry-driven shell-command enrichment.
+ *
+ * Re-derives `action.shellCommand` from `ToolRegistry.extractShellCommand`
+ * regardless of what the caller passed, so every downstream HARD_DENY consumer
+ * (`hardDenyReason`, `evaluate`/`evaluateAuto`, `evaluateStack`) sees the SAME
+ * command string. This is the SSOT that closes the bypass where a shell-
+ * equivalent (non-bash) tool reached mode-policy / the permission stack with
+ * the command stripped off the action, so `hardDeny()` inside `evaluate*` /
+ * `evaluateStack` fell back to the bash-only legacy probe and never fired.
+ *
+ * Returns the action unchanged (same reference) when the registry reports no
+ * shell command — `shellCommand` stays absent so genuine non-shell tools keep
+ * their byte-identical fall-through (no HARD_DENY gate applied).
+ */
+const withResolvedShellCommand = (
+  config: AdmissibilityGateConfig,
+  action: AdmissibilityAction,
+): AdmissibilityAction => {
+  const shellCommand = config.registry.extractShellCommand(action.tool, action.input)
+  if (shellCommand === null) {
+    // Strip any caller-supplied shellCommand so a fabricated value can never
+    // out-vote the registry's authoritative null (a non-shell tool stays
+    // ungated; HARD_DENY only fires on a registry-confirmed command).
+    if (action.shellCommand === undefined) return action
+    const { shellCommand: _dropped, ...rest } = action
+    return rest
+  }
+  return { ...action, shellCommand }
 }
 
 const reviewActionKeyOf = (
@@ -661,12 +708,32 @@ const runAlwaysConfirmBranch = async (
   return null
 }
 
+/** HARD_DENY-as-handoff terminal deny. Shared between the HITL branch and any
+ *  other allow-capable path (tool-profile confirm) that could otherwise admit
+ *  a denylisted command. Returns `null` when the action carries no HARD_DENY
+ *  hit (the registry-derived `shellCommand` doesn't match the denylist), so
+ *  callers `??`-chain it ahead of their approval. Mirrors policy.ts:203 —
+ *  HARD_DENY ALWAYS wins, no confirm/approval can route around it. */
+const hardDenyHandoff = (
+  call: ToolUseBlock,
+  config: AdmissibilityGateConfig,
+  action: AdmissibilityAction,
+  now: () => number = Date.now,
+): DispatchResult | null => {
+  const denyReason = hardDenyReason(action)
+  if (denyReason === null) return null
+  const handoffMessage = `Action requires human handoff: ${denyReason}${HANDOFF_SUFFIX}`
+  emitHandoffEvent(config, call, handoffMessage, `hard-deny:${denyReason}`, now)
+  return deny(call.id, handoffMessage, "handoff")
+}
+
 /** Tool-profile gate (ADR-0213 closeout). The active profile is re-read per
  *  call via `config.toolProfile.activeName()` when present, otherwise the
  *  static `defaultName` remains authoritative. The profile may only tighten
  *  admissibility:
  *    - `allow`   ⇒ fall through to the existing gates
- *    - `confirm` ⇒ reuse the explicit confirmation branch
+ *    - `confirm` ⇒ HARD_DENY-checked, then explicit confirmation, then the
+ *                  pre_tool_use hook (parity with every other allow path)
  *    - `deny`    ⇒ terminal deny
  *
  * Absent slot / absent active name ⇒ byte-identical fallthrough. */
@@ -698,7 +765,24 @@ const runToolProfileGate = async (
   if (policy.kind === "deny") {
     return deny(call.id, `Permission denied: ${policy.reason}`, "tool-profile-denied")
   }
-  return runAlwaysConfirmBranch(call, config, action, opts)
+  // policy.kind === "confirm".
+  // AUDIT A1 #5 — HARD_DENY beats a tool-profile confirm-approval. A profile
+  // `confirm` is an allow-CAPABLE outcome (the user can approve); it MUST NOT
+  // be able to route a denylisted command around the security boundary. This
+  // mirrors policy.ts:203 ("HARD_DENY ALWAYS wins") and the B3 invariant, and
+  // matters here because `earlyHardDeny` only fires when an allow-capable
+  // bypass (rulesStore/reviewerPort/permissionPatternStore) is wired — a
+  // profile-only deployment skips it, so the check has to live on this path.
+  const hardDeny = hardDenyHandoff(call, config, action, opts.decidedAt ?? Date.now)
+  if (hardDeny !== null) return hardDeny
+  const confirmResult = await runAlwaysConfirmBranch(call, config, action, opts)
+  // AUDIT A1 #9 — a profile confirm-APPROVAL (null) must still pass through the
+  // pre_tool_use hook so a repo-local hook can veto last, exactly like the HITL
+  // always-confirm path (which routes its approval through the hook via the
+  // caller) and every other allow path in this gate. Without this the profile
+  // confirm path was asymmetric — the only allow that skipped the hook.
+  if (confirmResult !== null) return confirmResult
+  return runPreToolUseHook(call, config, opts)
 }
 
 const denyIfModeBlocked = (
@@ -784,12 +868,8 @@ const runHitlGate = async (
   const now = opts.decidedAt ?? Date.now
   // HARD_DENY hits ARE the hand-off-required tier (security boundary crossing
   // — no mode authorizes them). Phrase as a handoff demand.
-  const denyReason = hardDenyReason(action)
-  if (denyReason !== null) {
-    const handoffMessage = `Action requires human handoff: ${denyReason}${HANDOFF_SUFFIX}`
-    emitHandoffEvent(config, call, handoffMessage, `hard-deny:${denyReason}`, now)
-    return deny(call.id, handoffMessage, "handoff")
-  }
+  const hardDeny = hardDenyHandoff(call, config, action, now)
+  if (hardDeny !== null) return hardDeny
 
   const { tier, matched } = resolveHitlTier(config, call, action)
   // ADR-0047 vocabulary activation: emit the resolved tier + the registry-
@@ -846,6 +926,12 @@ const runPermissionStack = (
       tool: action.tool,
       input: action.input,
       isReadOnly: action.isReadOnly,
+      // S16 (audit A1 #3) — carry the registry-derived shell command so the
+      // stack's own HARD_DENY (precedence level 1) fires for ANY shell-
+      // equivalent tool, not just bash. Without this the stack dropped it and
+      // `hardDeny()` fell back to the bash-only legacy probe → a non-bash
+      // shell tool with a denylisted command was admitted by the stack/mode.
+      ...(action.shellCommand !== undefined ? { shellCommand: action.shellCommand } : {}),
     },
     permission,
     { threadId, hostId, actionSignature, workdir: config.cwd },
@@ -1197,10 +1283,19 @@ export const runAdmissibilityGate = async (
   // place — every internal helper in this file takes the same narrow type.
   config: AdmissibilityGateConfig,
   permission: PermissionContext,
-  action: AdmissibilityAction,
+  rawAction: AdmissibilityAction,
   autoClassifier?: AutoModeClassifier,
   opts: AdmissibilityWaveAOptions = {},
 ): Promise<DispatchResult | null> => {
+  // S16 (audit A1 #3) — enrich the action with the registry-derived
+  // `shellCommand` ONCE, up front, and use the enriched value for every
+  // downstream gate. This is the SSOT that makes HARD_DENY fire uniformly for
+  // ANY shell-equivalent tool inside `evaluate`/`evaluateAuto`/`evaluateStack`
+  // and `runHitlGate`'s `hardDenyReason` — closing the bypass where a non-bash
+  // shell tool reached mode-policy / the permission stack with the command
+  // stripped off (so `hardDeny()` fell back to the bash-only legacy probe).
+  const action = withResolvedShellCommand(config, rawAction)
+
   // 1. Mode-posture block (plan/review/audit) — fires BEFORE any HITL or
   //    permission work so a blocked mutating tool never reaches the classifier
   //    or the confirm prompt. Read-only tools always pass through.

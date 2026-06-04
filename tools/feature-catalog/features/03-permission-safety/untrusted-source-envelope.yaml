@@ -40,10 +40,12 @@ evidence:
     - src/agent/untrusted-envelope/rule.ts
     - src/agent/untrusted-envelope/gate.ts
     - src/agent/untrusted-envelope/index.ts
+    - src/tool/origin.ts
   adrs: [471]
   tests:
     unit:
       - tests/unit/untrusted-source-envelope-hellgate.test.ts
+      - tests/unit/tool-origin-substrate-hellgate.test.ts
     integration: []
     contract: []
 knobs:

@@ -621,11 +621,44 @@ const createDenialLedger = (
  * the full existing suite passing unchanged.)
  * ------------------------------------------------------------------------- */
 
+/** Override-sequence progress of ONE denial record, ranked so the merge can
+ *  pick the more-advanced side WITHOUT cross-contaminating fields. The override
+ *  pair (`seenRiskAt`, `userOverrideAt`) is only ever advanced as an ATOMIC
+ *  unit by a single complete state machine (`recordDenial` → `recordRiskSeen`
+ *  → `recordUserOverride`), so the merge must treat it as an indivisible pair
+ *  belonging to ONE writer — never assemble a sequence from halves of two.
+ *
+ *  Ranks (higher = more advanced, but ONLY among COHERENT progress):
+ *    2 — complete + coherent: deniedAt ≤ seenRiskAt ≤ userOverrideAt.
+ *    1 — risk-seen + coherent: seenRiskAt present (≥ deniedAt), no override.
+ *    0 — no coherent progress: empty, OR any incoherent shape (override
+ *        without a seen step, seenRiskAt < deniedAt, override < seenRiskAt).
+ *
+ *  An incoherent record (rank 0) MUST NOT contribute its half-fields to the
+ *  fold — that is exactly the fabricated-override bypass we are closing. */
+const overrideProgressRank = (rec: DenialRecord): 0 | 1 | 2 => {
+  const { deniedAt, seenRiskAt, userOverrideAt } = rec
+  if (userOverrideAt !== undefined) {
+    // A user-override step is only real when it sits atop a coherent seen step.
+    if (seenRiskAt === undefined) return 0
+    if (seenRiskAt < deniedAt) return 0
+    if (userOverrideAt < seenRiskAt) return 0
+    return 2
+  }
+  if (seenRiskAt !== undefined) {
+    if (seenRiskAt < deniedAt) return 0
+    return 1
+  }
+  return 0
+}
+
 /** Pick the more-advanced denial record for a key present on BOTH sides. A
  *  newer `deniedAt` supersedes (the reset semantics of `recordDenial`); when
- *  the two denials are the same generation (equal `deniedAt`) we take the max
- *  of each override timestamp so neither side's progress is lost. A stale
- *  peer's override timestamps are dropped when our `deniedAt` is newer. */
+ *  the two denials are the same generation (equal `deniedAt`) we adopt the
+ *  override pair from whichever single side holds the most-advanced COHERENT
+ *  progress — never combining one side's `seenRiskAt` with the other side's
+ *  `userOverrideAt`. A stale peer's override timestamps are dropped when our
+ *  `deniedAt` is newer. */
 const mergeDenialRecord = (a: DenialRecord, b: DenialRecord): DenialRecord => {
   // The record with the strictly-later denial wins its base fields; its
   // override timestamps belong to that generation.
@@ -635,24 +668,32 @@ const mergeDenialRecord = (a: DenialRecord, b: DenialRecord): DenialRecord => {
     // newer denial reset the sequence). Keep ONLY the newer record's fields.
     return newer
   }
-  // Same generation (equal deniedAt): fold override progress from both sides,
-  // taking the max so neither in-flight override step is dropped.
-  const maxOpt = (x: number | undefined, y: number | undefined): number | undefined => {
-    if (x === undefined) return y
-    if (y === undefined) return x
-    return Math.max(x, y)
-  }
-  const seenRiskAt = maxOpt(a.seenRiskAt, b.seenRiskAt)
-  const userOverrideAt = maxOpt(a.userOverrideAt, b.userOverrideAt)
+  // Same generation (equal deniedAt): carry the override pair as an ATOMIC unit
+  // from the single side with the most-advanced COHERENT progress. Folding the
+  // two pairs independently (max of each field) would fabricate a complete
+  // sequence that NEITHER process actually completed — fail-closed: a partial
+  // or incoherent fold must NOT yield hasPostDenialOverride=true.
+  const rankA = overrideProgressRank(a)
+  const rankB = overrideProgressRank(b)
+  // Tie on rank ⇒ prefer `a` (the live-side record on the caller's tie
+  // convention) so the choice is deterministic. Both coherent records of the
+  // same rank are equivalently safe; we never blend them.
+  const winner = rankB > rankA ? b : a
   const merged: DenialRecord = {
     threadId: newer.threadId,
     actionSignature: newer.actionSignature,
     deniedAt: newer.deniedAt,
     // deniedReason is informational; prefer the newer record's (a's on tie).
     deniedReason: newer.deniedReason,
-    // Re-attach override timestamps only when present (exactOptionalProperty).
-    ...(seenRiskAt !== undefined ? { seenRiskAt } : {}),
-    ...(userOverrideAt !== undefined ? { userOverrideAt } : {}),
+    // Carry the override timestamps ONLY from the winning side, ONLY when its
+    // progress is coherent (rank > 0). A rank-0 record contributes nothing —
+    // the merged record stays at the bare-denial state (no override).
+    ...(rankA === 0 && rankB === 0
+      ? {}
+      : {
+          ...(winner.seenRiskAt !== undefined ? { seenRiskAt: winner.seenRiskAt } : {}),
+          ...(winner.userOverrideAt !== undefined ? { userOverrideAt: winner.userOverrideAt } : {}),
+        }),
   }
   return merged
 }

@@ -316,8 +316,14 @@ describe("parseRecallTiers — comma-separated tier list", () => {
 })
 
 describe("buildSubagentConfig — QUANTA_SUBAGENT + max-depth", () => {
-  test("unset → {} (default-ON; QUANTA_SUBAGENT absent ⇒ enabled)", () => {
-    expect(buildSubagentConfig()).toEqual({})
+  // jun-03 — the parallel-worker companions (6-tool router / spawn_batch /
+  // list_agents) are default-ON under QUANTA_SUBAGENT (each disable-able via its
+  // own `=0` knob). With QUANTA_SUBAGENT enabled and those knobs unset, the
+  // block carries the three default-on flags.
+  const ON = { enable6Tools: true, enableBatchSpawn: true, enableIntrospect: true }
+
+  test("unset → default-ON block (QUANTA_SUBAGENT absent ⇒ enabled + companions)", () => {
+    expect(buildSubagentConfig()).toEqual(ON)
   })
 
   test("QUANTA_SUBAGENT=0 → undefined (explicit opt-out, byte-identical loop)", () => {
@@ -325,21 +331,21 @@ describe("buildSubagentConfig — QUANTA_SUBAGENT + max-depth", () => {
     expect(buildSubagentConfig()).toBeUndefined()
   })
 
-  test("set to any value + no max-depth → empty block (uses runner default)", () => {
+  test("set to any value + no max-depth → default-ON block (uses runner default depth)", () => {
     process.env.QUANTA_SUBAGENT = "1"
-    expect(buildSubagentConfig()).toEqual({})
+    expect(buildSubagentConfig()).toEqual(ON)
   })
 
   test("max-depth integer → block includes maxDepth", () => {
     process.env.QUANTA_SUBAGENT = "1"
     process.env.QUANTA_SUBAGENT_MAX_DEPTH = "3"
-    expect(buildSubagentConfig()).toEqual({ maxDepth: 3 })
+    expect(buildSubagentConfig()).toEqual({ maxDepth: 3, ...ON })
   })
 
-  test("max-depth non-integer → ignored, falls back to empty block", () => {
+  test("max-depth non-integer → ignored, falls back to default-ON block", () => {
     process.env.QUANTA_SUBAGENT = "1"
     process.env.QUANTA_SUBAGENT_MAX_DEPTH = "many"
-    expect(buildSubagentConfig()).toEqual({})
+    expect(buildSubagentConfig()).toEqual(ON)
   })
 })
 

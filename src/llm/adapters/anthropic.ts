@@ -41,10 +41,12 @@ export type RawEvent =
   | { type: "ping" }
 
 /** `message_start` carries the prompt-side token counts and the resolved model.
- *  `cache_read_input_tokens` is present only when prompt caching hit. */
+ *  `cache_read_input_tokens` is present only when prompt caching hit;
+ *  `cache_creation_input_tokens` only when this turn WROTE new cache entries. */
 export interface RawStartUsage {
   input_tokens: number
   cache_read_input_tokens?: number
+  cache_creation_input_tokens?: number
 }
 
 export interface RawMessageStart {
@@ -64,6 +66,7 @@ export interface UsageAccumulator {
   inputTokens?: number
   outputTokens?: number
   cacheReadTokens?: number
+  cacheCreationTokens?: number
   model?: string
 }
 
@@ -194,6 +197,9 @@ const absorbMessageStart = (m: RawMessageStart | undefined, usage: UsageAccumula
   usage.inputTokens = m.usage.input_tokens
   if (m.usage.cache_read_input_tokens !== undefined) {
     usage.cacheReadTokens = m.usage.cache_read_input_tokens
+  }
+  if (m.usage.cache_creation_input_tokens !== undefined) {
+    usage.cacheCreationTokens = m.usage.cache_creation_input_tokens
   }
 }
 

@@ -35,6 +35,7 @@ import {
   type PermissionInspection,
   type PermissionMode,
 } from "@/permission"
+import { resolveHitlAnnotation } from "@/agent"
 import { defaultTools, type Tool } from "@/tool"
 import { bold, cyan, dim, renderBox } from "@/ui/ui-helpers"
 import type { SlashCommand, SlashContext } from "./slash-commands"
@@ -47,25 +48,45 @@ const TIER_ORDER: readonly HITLTier[] = [
   "none",
 ]
 
-/** Resolve the effective HITL tier for a tool by delegating to the REAL gate
- *  helper {@link inferToolTier} from `@/permission` — so the `/permission`
- *  inspector can NEVER drift from the production fail-closed fallback
- *  (read-only ⇒ "none"; mutating with no explicit `hitlTier` ⇒
- *  "always-confirm"). We pass `undefined` as input (no concrete `input` is
- *  available at /permission time): a tool's classifier returns its static
- *  declaration or mutating default on `undefined`, and unmapped tools take the
- *  shared fail-closed fallback. A classifier that throws on `undefined` input
- *  (it needs a concrete shape) degrades to the same fallback rather than
- *  crashing the slash command. */
+/** Resolve the *effective* HITL tier for a tool exactly as the runtime gate
+ *  does — mirroring `admissibility-gate.ts#resolveHitlTier` (ADR-0047). Two
+ *  composed layers:
+ *
+ *   1. baseline = `inferToolTier(tool, undefined)` — the per-tool classifier /
+ *      fail-closed fallback (read-only ⇒ "none"; mutating with no explicit
+ *      `hitlTier` ⇒ "always-confirm").
+ *   2. `resolveHitlAnnotation(name, undefined, baseline)` — the agent-side
+ *      annotation registry (built-in + **operator overrides** from
+ *      `~/.quanta/hitl-overrides.json`). The registry applies the one-way
+ *      ratchet, so it can only ESCALATE the displayed tier, never relax it.
+ *
+ *  Layer 2 is the bug fix: the inspector previously reported the *baseline*
+ *  only, so an operator override that made a tool STRICTER was invisible here
+ *  while the live gate enforced it — the inspector UNDER-reported strictness
+ *  (finding #20). Consuming the same resolver the gate uses guarantees the
+ *  displayed tier can never be looser than what gates.
+ *
+ *  Input is `undefined` because no concrete tool input exists at /permission
+ *  time: command-prefix overrides correctly stay silent (they are
+ *  command-specific), while tool-only overrides — which fire on every
+ *  invocation — are reflected, matching the worst case the gate would apply.
+ *
+ *  A classifier that throws on `undefined` input degrades to the static
+ *  inference rule and then still passes through the override registry, so the
+ *  fail-closed branch can never under-report relative to the gate. */
 const resolveToolTier = (tool: Tool): HITLTier => {
+  let baseline: HITLTier
   try {
-    return inferToolTier(tool, undefined)
+    baseline = inferToolTier(tool, undefined)
   } catch {
     // A tool whose classifier requires a non-undefined input falls back to
     // the static inference rule — identical to `inferToolTier`'s own
     // fail-closed branch. Never crash the slash command.
-    return tool.isReadOnly() ? "none" : "always-confirm"
+    baseline = tool.isReadOnly() ? "none" : "always-confirm"
   }
+  // Layer the operator-override registry on top so the displayed tier matches
+  // the ENFORCED tier (escalate-only; never under-reports).
+  return resolveHitlAnnotation(tool.name, undefined, baseline).tier
 }
 
 interface ToolRow {

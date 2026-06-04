@@ -2,6 +2,13 @@ import { z } from "zod"
 import { type OsSandboxProfile, runShell } from "@/runtime"
 import { type BashBgRegistry, getBashBgRegistry } from "@/runtime/bash-bg-registry"
 import { classifyCommandShape } from "@/security"
+import { statFile } from "@/storage"
+import {
+  isWriteCommand,
+  type MtimeObservation,
+  renderStaleReminder,
+  staleAfterBash,
+} from "../stale-read-guard"
 import type {
   HITLTier,
   SandboxViolationReason,
@@ -123,6 +130,34 @@ const tierForProfile = (profile: OsSandboxProfile | undefined): HITLTier => {
     case undefined:
       return "always-confirm"
   }
+}
+
+/** ADR-0474 — post-bash stale-read reminder. After a write-class command
+ *  (`bun`/`make`/`prettier`/…), re-stat the files the agent has READ this run
+ *  and, for any whose mtime advanced (the command rewrote a file the agent is
+ *  relying on), append a model-facing reminder listing them so the model
+ *  re-reads before editing. Returns `null` (no append) when the guard is unwired
+ *  (`ctx.readFileState` absent) or the command is not a write-marker. NO-THROW:
+ *  a file that vanished/became unreadable mid-run is skipped, never thrown. */
+const buildPostBashStaleReminder = async (
+  ctx: ToolContext,
+  command: string,
+): Promise<string | null> => {
+  const state = ctx.readFileState
+  if (state === undefined || !isWriteCommand(command)) return null
+  const observations: MtimeObservation[] = []
+  for (const path of state.paths()) {
+    try {
+      const info = await statFile(path, ctx.cwd)
+      observations.push({ path, currentMtimeMs: info.mtimeMs })
+    } catch {
+      // File deleted / unreadable since it was read — drop the baseline so it
+      // cannot resurface as a phantom stale entry, and skip it here.
+      state.forget(path)
+    }
+  }
+  const stale = staleAfterBash(state, command, observations)
+  return stale.length > 0 ? renderStaleReminder(stale) : null
 }
 
 /** Derive a TYPED {@link ToolFailure} from the existing `ShellResult` shape
@@ -448,11 +483,16 @@ async function* bashExecute(input: Input, ctx: ToolContext): AsyncIterable<ToolE
   // a plain `permission_denied`. The OS is the enforcer.
   const failure = deriveSandboxViolation(mode, r) ?? deriveBashFailure(r, input.timeout_ms)
 
+  // ADR-0474 — append a stale-read reminder when this (write-class) command
+  // rewrote a file the agent had READ, so it re-reads before editing. No-op when
+  // the guard is unwired (byte-identical output).
+  const staleReminder = await buildPostBashStaleReminder(ctx, cmd)
+
   yield {
     type: "result",
     result: {
       ok: r.exitCode === 0 && !r.timedOut,
-      output: `[${status}]\n${body || "(no output)"}`,
+      output: `[${status}]\n${body || "(no output)"}${staleReminder ? `\n${staleReminder}` : ""}`,
       evidence,
       ...(failure ? { failure } : {}),
     },

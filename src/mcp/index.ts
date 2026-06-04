@@ -6,6 +6,7 @@
 export {
   type CapabilityNegotiator,
   defaultNegotiator,
+  type FullNegotiatorOptions,
   fullNegotiator,
   type McpCapabilityRecord,
 } from "./capabilities"
@@ -32,6 +33,20 @@ export {
   type SupervisorSnapshot,
   type SupervisorState,
 } from "./reconnect"
+export {
+  type CreateMessageRequest,
+  type CreateMessageResult,
+  headlessSamplingRejecter,
+  isSamplingMethod,
+  MCP_SAMPLING_METHOD,
+  routeSampling,
+  SAMPLING_DECLINED_CODE,
+  type SamplingDeclineReason,
+  type SamplingHandlerPort,
+  type SamplingMessage,
+  type SamplingOutcome,
+  type SamplingResponse,
+} from "./sampling"
 export {
   clientTasksPort,
   DefaultTaskStore,

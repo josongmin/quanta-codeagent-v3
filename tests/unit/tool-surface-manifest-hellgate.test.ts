@@ -93,8 +93,10 @@ describe("tool-surface manifest — CLI default-ON seed derives from the SSOT", 
   test("seedEnvVarsForSurface('cli') is exactly the CLI-default-ON tool gates", () => {
     expect([...seedEnvVarsForSurface("cli")].sort()).toEqual(
       [
+        "QUANTA_COVERAGE_TOOL",
         "QUANTA_ENABLE_STRUCTURED_PATCH",
         "QUANTA_OBJECTIVE_TOOLS",
+        "QUANTA_PROMPT_CACHE_STATUS",
         "QUANTA_SUBAGENT",
         "QUANTA_SUBAGENT_6TOOLS",
         "QUANTA_SUBAGENT_BATCH",
@@ -137,10 +139,34 @@ describe("tool-surface manifest — FULL-universe completeness (the guard that w
     expect(stale).toEqual([])
   })
 
-  test("the 3 known orphans are catalogued as unwired (visible, not hidden)", () => {
-    for (const name of ["ai_attribution", "coverage_check", "prompt_cache_status"]) {
-      const entry = GATED_TOOLS.find((e) => e.name === name)
-      expect(entry?.gate.kind).toBe("unwired")
+  test("jun-04 orphan resolution: all 3 former orphans are wired-or-deleted (zero unwired left)", () => {
+    // The catalog opened jun-03 with 3 pure orphans (built, never wired). jun-04
+    // resolved every one:
+    //   - ai_attribution     → DELETED (no backend; only a no-op stub existed).
+    //   - coverage_check      → WIRED (config-slot, QUANTA_COVERAGE_TOOL).
+    //   - prompt_cache_status → WIRED (config-slot, QUANTA_PROMPT_CACHE_STATUS);
+    //       the adapter→StreamEvent→loop cache-bucket feed was also wired so the
+    //       observer the tool reads is actually populated.
+    expect(ALL_MANIFEST_TOOL_NAMES).not.toContain("ai_attribution")
+    expect(scanRegisteredToolNames().has("ai_attribution")).toBe(false)
+    expect(GATED_TOOLS.find((e) => e.name === "coverage_check")?.gate.kind).toBe("config-slot")
+    expect(GATED_TOOLS.find((e) => e.name === "prompt_cache_status")?.gate.kind).toBe("config-slot")
+    expect(GATED_TOOLS.filter((e) => e.gate.kind === "unwired")).toEqual([])
+  })
+
+  test("the unwired-orphan catalog mechanism stays available (any future unwired entry must carry a reason)", () => {
+    // `unwired` is still a valid catalogued state for a NEW orphan — it keeps the
+    // orphan VISIBLE rather than silently dropped. Whenever one exists it must
+    // document why it is parked (wire-or-delete decision pending).
+    for (const e of GATED_TOOLS) {
+      if (e.gate.kind === "unwired") expect(e.gate.reason.length).toBeGreaterThan(0)
     }
+  })
+
+  test("coverage_check registers ONLY when DefaultToolPorts.coverageCheck is true (default-OFF)", () => {
+    const off = buildDefaultTools().map((t) => t.name)
+    expect(off).not.toContain("coverage_check")
+    const on = buildDefaultTools({ coverageCheck: true }).map((t) => t.name)
+    expect(on).toContain("coverage_check")
   })
 })

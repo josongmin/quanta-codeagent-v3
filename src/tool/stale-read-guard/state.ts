@@ -69,6 +69,13 @@ export class ReadFileState {
     this.mtimes.delete(path)
   }
 
+  /** Every path with a recorded read-time baseline this run. Used by the
+   *  post-bash detector to re-stat the files the agent has read and find the
+   *  ones a build/format command just rewrote. NO-THROW. */
+  paths(): readonly string[] {
+    return [...this.mtimes.keys()]
+  }
+
   /**
    * Compare the current on-disk mtime against the recorded read-time mtime.
    *   - never read           → `{kind:"unread"}` (no baseline; caller allows)

@@ -13,6 +13,7 @@ export {
   fileExists,
   parentDir,
   readFile,
+  readFileBytes,
   renameFile,
   resolveJailed,
   resolvePath,

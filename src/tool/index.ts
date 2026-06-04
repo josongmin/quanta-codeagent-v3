@@ -7,6 +7,7 @@ import { automationUpdateTool } from "./automation_update"
 import { makeBashTool } from "./bash"
 import { bashAwaitTool } from "./bash/await"
 import { bashKillTool } from "./bash/kill"
+import { coverageCheckTool } from "./coverage_check"
 import { type DiagnosticsProvider, diagnosticsTool, nullDiagnosticsProvider } from "./diagnostics"
 // ADR-0142: register document/structured-data read tools into the default
 // fence (the 5 tools were barrel-exported but not in `buildDefaultTools` —
@@ -43,6 +44,14 @@ export {
   bashKillTool,
   makeBashKillTool,
 } from "./bash/kill"
+// `coverage_check` tool (ADR-0165). Caller-wired via `DefaultToolPorts.coverageCheck`
+// (default-OFF; the CLI passes it when `QUANTA_COVERAGE_TOOL === "1"`). Read-only +
+// concurrency-safe — reports per-file/total V8 coverage and optionally gates a threshold.
+export {
+  type CoverageCheckInput,
+  coverageCheckInputSchema,
+  coverageCheckTool,
+} from "./coverage_check"
 export { DeferredResultRegistry, UnknownDeferredHandleError } from "./deferred"
 export {
   type DiagnosticItem,
@@ -360,6 +369,13 @@ export interface DefaultToolPorts {
    *  src/apps/agent/index.ts). No port to inject — the tool builds an
    *  `FsJailFileSystemPort` from `ctx.cwd` per call, identical to `apply_patch`. */
   structuredPatch?: boolean
+  /** ADR-0165 — when true, append `coverage_check` (read-only V8-coverage
+   *  reporter + optional threshold gate). Absent/false ⇒ tool NOT registered
+   *  (byte-identical default menu). The composition root passes this only when
+   *  `QUANTA_COVERAGE_TOOL === "1"` (see src/apps/cli/internal.ts). No port to
+   *  inject — the tool builds its own `defaultV8CoverageSource()` per call and
+   *  resolves the coverage JSON through the same FS-jail chokepoint `read` uses. */
+  coverageCheck?: boolean
 }
 
 export { automationUpdateTool } from "./automation_update"
@@ -385,6 +401,12 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => {
   // appended (builds the FsJail port from ctx.cwd per call, like apply_patch).
   if (ports.structuredPatch === true) {
     base.push(makeApplyPatchStructuredTool() as Tool)
+  }
+  // ADR-0165 — conditional registration of coverage_check. Absent/false ⇒
+  // default set is byte-identical. Present ⇒ read-only V8-coverage reporter
+  // is appended (self-contained: builds its own coverage source per call).
+  if (ports.coverageCheck === true) {
+    base.push(coverageCheckTool as Tool)
   }
   return base
 }

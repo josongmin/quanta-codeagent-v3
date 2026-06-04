@@ -43,6 +43,7 @@
  *     touching the port (true no-op).
  */
 
+import { errMessage } from "@/shared"
 import type { LLMPort } from "./ports"
 
 /**
@@ -98,5 +99,4 @@ export const prewarmLlm = async (
   }
 }
 
-const errText = (e: unknown): string =>
-  e instanceof Error ? e.message : typeof e === "string" ? e : String(e)
+const errText = (e: unknown): string => errMessage(e)

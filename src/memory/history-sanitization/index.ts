@@ -9,6 +9,7 @@
  */
 
 export type { HistorySanitizationPort, SanitizationMessageLike } from "./port"
+export { RECONCILE_PLACEHOLDER_TEXT, reconcileToolPairing } from "./reconcile-tool-pairing"
 export type { SanitizationReason, SanitizationResult } from "./types"
 export { SANITIZATION_REASONS } from "./types"
 export { createWorkingMemoryHistorySanitization } from "./working-memory-adapter"

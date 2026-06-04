@@ -287,7 +287,43 @@ export const writeFile = async (path: string, content: string, baseDir?: string)
 export const statFile = async (path: string, baseDir?: string): Promise<FileInfo> => {
   const abs = resolvePath(path, baseDir)
   const s = await stat(abs)
-  return { path: abs, size: s.size, isDirectory: s.isDirectory(), mtimeMs: s.mtimeMs }
+  return {
+    path: abs,
+    size: s.size,
+    isDirectory: s.isDirectory(),
+    mtimeMs: s.mtimeMs,
+    // B5 device guard — surface the device-type flags Node's `fs.Stats`
+    // already computes so the `read` tool can reject FIFOs / device files
+    // BEFORE opening them (a `read()` on a FIFO blocks the loop forever).
+    isFIFO: s.isFIFO(),
+    isCharacterDevice: s.isCharacterDevice(),
+    isBlockDevice: s.isBlockDevice(),
+  }
+}
+
+/**
+ * B5 binary guard — read a BOUNDED leading window of a file as raw bytes
+ * (jailed identically to {@link readFile}). The `read` tool sniffs the
+ * returned bytes for a NUL (`0x00`): its presence is the standard text/binary
+ * discriminator git and editors use (a UTF-8 / UTF-16-LE-without-BOM text file
+ * never contains a NUL in normal content). Reading only a bounded prefix means
+ * a multi-gigabyte binary is NOT slurped into memory just to classify it.
+ *
+ * `maxBytes` is the caller-supplied window. Returns the actual bytes read
+ * (`<= maxBytes`; shorter for a small file). Routes through {@link resolvePath}
+ * so the FS jail applies exactly as it does for `readFile`/`statFile`.
+ */
+export const readFileBytes = async (
+  path: string,
+  maxBytes: number,
+  baseDir?: string,
+): Promise<Uint8Array> => {
+  const file = Bun.file(resolvePath(path, baseDir))
+  if (!(await file.exists())) throw new Error(`File not found: ${path}`)
+  // `Bun.file().slice(0, n)` is a lazy view; `.bytes()` materializes ONLY the
+  // bounded prefix — no full-file read for the binary sniff.
+  const slice = file.slice(0, maxBytes)
+  return slice.bytes()
 }
 
 export const fileExists = async (path: string, baseDir?: string): Promise<boolean> =>
@@ -334,6 +370,14 @@ export interface FileSystemPort {
   readFile(path: string, baseDir?: string): Promise<string>
   writeFile(path: string, content: string, baseDir?: string): Promise<void>
   statFile(path: string, baseDir?: string): Promise<FileInfo>
+  /** B5 binary guard — OPTIONAL bounded raw-byte read. The `read` tool calls
+   *  this with a small leading window and rejects the file if the bytes contain
+   *  a NUL (`0x00`) — the text/binary discriminator. OPTIONAL so existing
+   *  in-memory test fakes (which do not implement it) stay valid; the `read`
+   *  tool treats absence as "binary sniff unavailable ⇒ skip the binary check"
+   *  (byte-identical legacy behavior for ports that predate this method). The
+   *  default port implements it via {@link readFileBytes}. */
+  readFileBytes?(path: string, maxBytes: number, baseDir?: string): Promise<Uint8Array>
   fileExists(path: string, baseDir?: string): Promise<boolean>
   /** ADR-0398 — OPTIONAL 2-phase temp+rename commit. When present, callers
    *  with a precondition (e.g. `edit`'s `expected_hash`) MAY route their
@@ -363,4 +407,5 @@ export const defaultFileSystemPort: FileSystemPort = {
   statFile,
   fileExists,
   writeFileAtomic: defaultWriteFileAtomic,
+  readFileBytes,
 }

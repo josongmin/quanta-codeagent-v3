@@ -1,5 +1,6 @@
 import { loadSession } from "@/agent"
 import type { Message } from "@/llm"
+import { reconcileToolPairing } from "@/memory/history-sanitization"
 import type { StructuredLogger } from "@/observability"
 import { loadSessionById, type SessionMeta, saveSessionById } from "@/session"
 
@@ -68,6 +69,19 @@ export interface ResumeResolution {
 export const defaultUntitled = (now: number): string =>
   `Untitled ${new Date(now).toISOString().slice(0, 16).replace("T", " ")}`
 
+/** B4 (jun-04) — reconcile dangling `tool_use`↔`tool_result` pairs in a
+ *  transcript freshly loaded from disk BEFORE it is handed back as `history`
+ *  (and thus before the agent re-sends it to the provider). A resume/fork can
+ *  carry a dangling pair the live-turn closeout never sealed; re-sending it is
+ *  an Anthropic/OpenAI 400. The repair logic lives in the history-sanitization
+ *  slice; this is the single wiring call. Always materializes a mutable
+ *  `Message[]` (the `ResumeResolution.history` field is mutable — the turn
+ *  loop appends to it). */
+const reconcileLoadedHistory = (messages: readonly Message[]): Message[] => {
+  const reconciled = reconcileToolPairing(messages)
+  return reconciled === messages ? [...messages] : (reconciled as Message[])
+}
+
 /** Resolve `--resume` / `--new-session` startup state. Extracted out of
  *  `main()` to keep that function's cognitive complexity bounded. PURE w.r.t.
  *  argv/env — all inputs are explicit, so testable in isolation if needed.
@@ -99,7 +113,7 @@ export const resolveResume = async (input: ResolveResumeInput): Promise<ResumeRe
       if (prior !== null) {
         slog.info("state.resumed", { path: resume, messages: prior.messages.length })
         return {
-          history: prior.messages,
+          history: reconcileLoadedHistory(prior.messages),
           sessionId: prior.sessionId,
           idMeta: undefined,
           inIdMode: false,
@@ -135,7 +149,7 @@ export const resolveResume = async (input: ResolveResumeInput): Promise<ResumeRe
       archived: saved.meta.archived,
     })
     return {
-      history: saved.messages,
+      history: reconcileLoadedHistory(saved.messages),
       sessionId: saved.meta.id,
       idMeta: saved.meta,
       inIdMode: true,

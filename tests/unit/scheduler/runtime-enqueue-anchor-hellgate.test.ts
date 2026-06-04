@@ -114,6 +114,7 @@ describe("T10 M7 — enqueue failure keeps the fire anchor advanced", () => {
     // LAST persisted row is the error row — it MUST carry the advanced anchor.
     expect(saved.length).toBe(2)
     const errorRow = saved[saved.length - 1]
+    if (errorRow === undefined) throw new Error("expected a persisted error row")
     expect(errorRow.status).toBe("error")
     // The crux: the anchor SURVIVES the failed dispatch. fireCount advanced
     // (0 → 1) and lastFiredAt is the fire instant — NOT rolled back.

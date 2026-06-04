@@ -94,7 +94,7 @@ describe("fromSnapshot — todo.phaseId → phase membership (corruption class 1
     const r = fromSnapshot(raw)
     expect(r.ok).toBe(false)
     if (!r.ok) {
-      expect(r.error.kind).toBe("phase_membership_asymmetry")
+      expect((r.error as { kind: string }).kind).toBe("phase_membership_asymmetry")
       // biome-ignore lint/suspicious/noExplicitAny: snapshot-only error shape narrowing.
       const e = r.error as any
       expect(e.todoId).toBe("t1")
@@ -111,7 +111,7 @@ describe("fromSnapshot — todo.phaseId → phase membership (corruption class 1
     const r = fromSnapshot(raw)
     expect(r.ok).toBe(false)
     if (!r.ok) {
-      expect(r.error.kind).toBe("phase_membership_asymmetry")
+      expect((r.error as { kind: string }).kind).toBe("phase_membership_asymmetry")
       // biome-ignore lint/suspicious/noExplicitAny: snapshot-only error shape narrowing.
       const e = r.error as any
       expect(e.todoId).toBe("t1")
@@ -127,6 +127,6 @@ describe("fromSnapshot — todo.phaseId → phase membership (corruption class 1
     raw.plan.todos.t2.phaseId = "p1" // claim p1, but p1.todoIds=[t1] only
     const r = fromSnapshot(raw)
     expect(r.ok).toBe(false)
-    if (!r.ok) expect(r.error.kind).toBe("phase_membership_asymmetry")
+    if (!r.ok) expect((r.error as { kind: string }).kind).toBe("phase_membership_asymmetry")
   })
 })

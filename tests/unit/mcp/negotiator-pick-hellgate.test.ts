@@ -18,12 +18,15 @@ describe("pickMcpNegotiator", () => {
     expect(JSON.stringify(pickMcpNegotiator(env()).compile())).toBe("{}")
   })
 
-  test("QUANTA_MCP_CAPS=full → full negotiator (4 caps emitted)", () => {
+  test("QUANTA_MCP_CAPS=full → full negotiator (fulfillable caps; sampling omitted, ADR-0470)", () => {
     const c = pickMcpNegotiator(env("full")).compile()
     expect(c.tools).toEqual({})
-    expect(c.sampling).toEqual({})
     expect(c.elicitation).toEqual({})
     expect(c.tasks).toEqual({ listChanged: false })
+    // `pickMcpNegotiator` does not wire a sampling handler, so it must not
+    // advertise sampling (advertise-iff-able). Wiring is a composition-root
+    // follow-up (inject a SamplingHandlerPort + fullNegotiator({sampling:true})).
+    expect(c.sampling).toBeUndefined()
   })
 
   test("non-canonical values (Full / FULL / typo) fall through to default", () => {

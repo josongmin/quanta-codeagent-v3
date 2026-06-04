@@ -39,6 +39,19 @@
  * The `snapshotMessages` member is additive — it does not replace, shadow,
  * or alter either of the original two methods, and the mutation channel is
  * unaffected. Consumer wiring lives in ADR-0337.
+ *
+ * # Sibling: `reconcileToolPairing` (resume-boundary tool-pair reconciliation)
+ *
+ * The dangling-`tool_use`↔`tool_result` repair (jun-04 B4) lives in this slice
+ * as a PURE array→array sibling export (`./reconcile-tool-pairing.ts`), NOT as a
+ * method on this port. Rationale: this port is a *stateful* mutation channel
+ * bound to a live `WorkingMemory<Message>` (the in-session buffer). The B4
+ * repair runs on a transcript freshly LOADED from disk on resume/fork/rewind —
+ * a plain `readonly Message[]`, before any `WorkingMemory` exists. Forcing it
+ * through the wm-bound interface would be the wrong contract shape. It shares
+ * the slice's posture (pure, no-throw, slice-fence-clean, byte-identical when
+ * already valid) but stands alone. See its module header for the algorithm +
+ * the orphan-`tool_use` synthesize-vs-drop decision.
  */
 
 import type { SanitizationReason, SanitizationResult } from "./types"

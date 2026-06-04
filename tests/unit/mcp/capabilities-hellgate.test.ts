@@ -23,10 +23,23 @@ describe("CapabilityNegotiator (HELL-C)", () => {
     expect(defaultNegotiator.compile()).toBe(defaultNegotiator.compile())
   })
 
-  test("HELL-C-02: fullNegotiator emits the 4 rmcp flags", () => {
+  test("HELL-C-02: fullNegotiator emits the fulfillable flags, sampling OMITTED by default (ADR-0470)", () => {
+    // Advertise-iff-able: with no sampling handler wired, `sampling` is NOT
+    // advertised (advertising it would be a false promise — the server would
+    // then send `sampling/createMessage` and pre-fix get `-32601`).
     const c = fullNegotiator().compile()
     expect(c.tools).toEqual({})
+    expect(c.elicitation).toEqual({})
+    expect(c.tasks).toEqual({ listChanged: false })
+    expect(c.sampling).toBeUndefined()
+    expect("sampling" in c).toBe(false)
+  })
+
+  test("HELL-C-02b: fullNegotiator({sampling:true}) advertises sampling (ADR-0470)", () => {
+    const c = fullNegotiator({ sampling: true }).compile()
     expect(c.sampling).toEqual({})
+    // The other fulfillable flags are unchanged.
+    expect(c.tools).toEqual({})
     expect(c.elicitation).toEqual({})
     expect(c.tasks).toEqual({ listChanged: false })
   })
@@ -51,7 +64,14 @@ describe("CapabilityNegotiator (HELL-C)", () => {
     const a = JSON.stringify(fullNegotiator().compile())
     const b = JSON.stringify(fullNegotiator().compile())
     expect(a).toBe(b)
-    // The canonical order is alphabetical: elicitation, sampling, tasks, tools.
-    expect(a).toBe('{"elicitation":{},"sampling":{},"tasks":{"listChanged":false},"tools":{}}')
+    // Default (no sampling handler) — canonical order without sampling:
+    // elicitation, tasks, tools.
+    expect(a).toBe('{"elicitation":{},"tasks":{"listChanged":false},"tools":{}}')
+    // With sampling wired, the key slots in alphabetically between elicitation
+    // and tasks, preserving the canonical sorted-key order.
+    const withSampling = JSON.stringify(fullNegotiator({ sampling: true }).compile())
+    expect(withSampling).toBe(
+      '{"elicitation":{},"sampling":{},"tasks":{"listChanged":false},"tools":{}}',
+    )
   })
 })

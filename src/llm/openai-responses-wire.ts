@@ -385,14 +385,18 @@ export async function* parseResponsesEvents(
   opts: ParseResponsesEventsOptions,
 ): AsyncGenerator<StreamEvent> {
   const toolCalls = new Map<string, { name: string; args: string }>()
-  let usage:
-    | {
-        input: number
-        output: number
-        cached?: number
-        model?: string
-      }
-    | null = null
+  // OpenAI Responses streams a function call's arguments via
+  // `response.function_call_arguments.delta`, which is keyed by the output
+  // ITEM id (`event.item_id`, the `fc_…` id) — NOT the `call_id` that
+  // `output_item.added`/`output_item.done` and every downstream consumer
+  // (tool_use_start/_delta/_end → buildToolInputSeam idToName) are keyed by.
+  // Capture the item_id → call_id correlation at `added` so a delta resolves
+  // to the SAME id the slot was created with: deltas accumulate into the
+  // correct slot and the emitted `tool_use_delta.id` stays consistent with
+  // start/end. Without this the lookup misses, `slot.args` never accumulates,
+  // and per-tool `onInputDelta` never fires for live OpenAI streaming.
+  const itemIdToCallId = new Map<string, string>()
+  let usage: AccumulatedUsage | null = null
 
   for await (const frame of frames) {
     if (frame.data === "[DONE]") break
@@ -429,14 +433,26 @@ export async function* parseResponsesEvents(
       const name = event.item.name ?? ""
       if (id !== "" && name !== "") {
         toolCalls.set(id, { name, args: "" })
+        // Map the output ITEM id (`fc_…`) to the canonical call id so a later
+        // `function_call_arguments.delta` (keyed by item_id) resolves to this
+        // same slot. The item id can equal the call id on some payloads; the
+        // mapping is harmless (identity) in that case.
+        if (typeof event.item.id === "string" && event.item.id !== "") {
+          itemIdToCallId.set(event.item.id, id)
+        }
         yield { type: "tool_use_start", id, name }
       }
       continue
     }
 
     if (type === "response.function_call_arguments.delta") {
-      const id = event.item_id ?? ""
+      const rawId = event.item_id ?? ""
       const delta = event.delta ?? ""
+      // Resolve the item-scoped delta id back to the canonical call id used at
+      // start/end. Fall back to the raw id only when no correlation exists
+      // (e.g. a delta with no preceding `added`) so a still-keyed slot is not
+      // silently dropped.
+      const id = itemIdToCallId.get(rawId) ?? rawId
       if (id !== "" && delta !== "") {
         const slot = toolCalls.get(id)
         if (slot !== undefined) slot.args += delta
@@ -450,7 +466,14 @@ export async function* parseResponsesEvents(
       if (rawType === "function_call") {
         const id = event.item?.call_id ?? event.item?.id ?? ""
         const slot = toolCalls.get(id)
-        const raw = event.item?.arguments ?? slot?.args ?? "{}"
+        // Prefer the streamed-delta accumulation (`slot.args`) when present so
+        // we do NOT depend on `output_item.done` always carrying `arguments`
+        // (it may be omitted for pure-streamed calls). Only fall back to the
+        // done-carried `arguments` when no deltas accumulated, then to "{}".
+        const raw =
+          slot?.args !== undefined && slot.args !== ""
+            ? slot.args
+            : (event.item?.arguments ?? "{}")
         const input = parseToolInputOrThrow(
           typeof raw === "string" ? raw : JSON.stringify(raw),
           id,
@@ -459,6 +482,7 @@ export async function* parseResponsesEvents(
         )
         yield { type: "tool_use_end", id, input }
         toolCalls.delete(id)
+        if (typeof event.item?.id === "string") itemIdToCallId.delete(event.item.id)
       }
       if (rawType === "reasoning") dispatchNoThrow(opts.onReasoning)
       dispatchNoThrow(opts.onOutputItemDone, {
@@ -469,27 +493,19 @@ export async function* parseResponsesEvents(
     }
 
     if (type === "response.completed") {
-      const rawUsage = event.response?.usage
-      if (rawUsage !== undefined) {
-        const cached = rawUsage.cached_input_tokens ?? rawUsage.input_tokens_details?.cached_tokens
-        usage = {
-          input: rawUsage.input_tokens ?? 0,
-          output: rawUsage.output_tokens ?? 0,
-          ...(typeof cached === "number" ? { cached } : {}),
-          ...(typeof event.response?.model === "string" ? { model: event.response.model } : {}),
-        }
+      const extracted = extractResponsesUsage(event.response)
+      if (extracted !== null) {
+        usage = extracted
         dispatchNoThrow(opts.onCompleted, {
           ...(typeof event.response?.id === "string" && event.response.id !== ""
             ? { responseId: event.response.id }
             : {}),
           ...(typeof event.response?.model === "string" ? { model: event.response.model } : {}),
           usage: {
-            input: rawUsage.input_tokens ?? 0,
-            output: rawUsage.output_tokens ?? 0,
-            ...(typeof cached === "number" ? { cached } : {}),
-            ...(typeof rawUsage.output_tokens_details?.reasoning_tokens === "number"
-              ? { reasoning: rawUsage.output_tokens_details.reasoning_tokens }
-              : {}),
+            input: extracted.input,
+            output: extracted.output,
+            ...(extracted.cached !== undefined ? { cached: extracted.cached } : {}),
+            ...(extracted.reasoning !== undefined ? { reasoning: extracted.reasoning } : {}),
           },
         })
       } else {
@@ -538,7 +554,16 @@ export async function* parseResponsesEvents(
           : reason === "content_filter"
             ? "content_filtered"
             : "error"
-      yield* emitUsage(usage, opts.fallbackModel)
+      // A real incomplete-only stream (hit max_output_tokens / content_filter)
+      // terminates with `response.incomplete` and NO preceding
+      // `response.completed`, so the accumulator is still null. The incomplete
+      // event carries its OWN counts on `event.response.usage` — and these are
+      // the most expensive turns (output capped at the ceiling). Fold the
+      // incomplete-carried usage into the canonical shape and emit THAT so the
+      // turn is never undercounted to zero. Fall back to the (possibly null)
+      // accumulator when the incomplete event omits usage.
+      const incompleteUsage = extractResponsesUsage(event.response)
+      yield* emitUsage(incompleteUsage ?? usage, opts.fallbackModel)
       yield { type: "message_stop", stop_reason: stopReason }
       return
     }
@@ -556,7 +581,31 @@ type AccumulatedUsage = {
   readonly input: number
   readonly output: number
   readonly cached?: number
+  readonly reasoning?: number
   readonly model?: string
+}
+
+/** Single source of truth for folding a Responses `response.usage` payload into
+ *  the canonical {@link AccumulatedUsage} shape — shared by the
+ *  `response.completed` and `response.incomplete` arms so an incomplete-only
+ *  stream (which carries its own counts) is accounted identically to a
+ *  completed one. Returns null when no usage payload is present so the caller
+ *  can fall back to the prior accumulator (and `emitUsage` stays a no-op for a
+ *  truly usage-less stream rather than emitting a fabricated zero). */
+const extractResponsesUsage = (
+  response: ResponsesEvent["response"],
+): AccumulatedUsage | null => {
+  const rawUsage = response?.usage
+  if (rawUsage === undefined) return null
+  const cached = rawUsage.cached_input_tokens ?? rawUsage.input_tokens_details?.cached_tokens
+  const reasoning = rawUsage.output_tokens_details?.reasoning_tokens
+  return {
+    input: rawUsage.input_tokens ?? 0,
+    output: rawUsage.output_tokens ?? 0,
+    ...(typeof cached === "number" ? { cached } : {}),
+    ...(typeof reasoning === "number" ? { reasoning } : {}),
+    ...(typeof response?.model === "string" ? { model: response.model } : {}),
+  }
 }
 
 function* emitUsage(

@@ -48,6 +48,8 @@ import {
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import { captureSnapshot } from "@/agent/context-change"
 import { buildNetworkDispatchGuard } from "@/agent/dispatch-guard"
+import { editRepairLoopEnabled } from "@/agent/edit-repair-loop"
+import { lspDiagnosticsProvider } from "@/agent/lsp-bridge"
 import { buildDefaultMentionResolver } from "@/agent/mention-runner"
 import { createObjectiveStore, type ObjectivePort } from "@/agent/objective"
 import { autoWirePluginActivation } from "@/agent/plugin-activation-handler"
@@ -79,6 +81,7 @@ import {
   type MetricEmitterPort,
   withCacheMetrics,
 } from "@/observability/codex-r2-metrics"
+import { defaultPromptCacheObserver } from "@/observability/prompt-cache"
 import { CI_BOT_DEFAULT_ALLOWLIST } from "@/runtime/network-allowlist"
 import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
 import type { RuntimeAgentTurnAssembler, RuntimeAgentTurnDeps } from "@/sdk/runtime/base"
@@ -344,6 +347,20 @@ const wireOptionalCapabilitySlots = (cfg: AgentConfig, env: AssemblerEnv): void 
   maybeWireWebSearch(cfg, env)
   maybeWireBackgroundSubagent(cfg, env)
   maybeWireReadFileState(cfg, env)
+  maybeWireDiagnostics(cfg, env)
+  maybeWirePromptCacheObserver(cfg, env)
+}
+
+/** ADR-0182 — mint ONE per-session `PromptCacheObserver` when the prompt-cache
+ *  status tool is opted in (`QUANTA_PROMPT_CACHE_STATUS=1`). The SAME instance
+ *  is read by `buildPromptCacheBlock` (the `prompt_cache_status` tool) and by
+ *  the loop's `emitUsage` feed, so the snapshot reflects the session's real
+ *  cache buckets. Caller-override-safe; absent gate ⇒ slot unset ⇒ no feed, no
+ *  tool (byte-identical default-OFF). */
+const maybeWirePromptCacheObserver = (cfg: AgentConfig, env: AssemblerEnv): void => {
+  if (env.QUANTA_PROMPT_CACHE_STATUS !== "1") return
+  if (cfg.promptCacheObserver !== undefined) return
+  cfg.promptCacheObserver = defaultPromptCacheObserver()
 }
 
 /** ADR-0474 — mint ONE per-session `ReadFileState` when the stale-read-guard is
@@ -354,6 +371,19 @@ const maybeWireReadFileState = (cfg: AgentConfig, env: AssemblerEnv): void => {
   if (!staleReadGuardEnabled(env)) return
   if (cfg.readFileState !== undefined) return
   cfg.readFileState = new ReadFileState()
+}
+
+/** ADR-0472 — populate `cfg.diagnosticsProvider` with the REAL LSP provider when
+ *  the edit-repair-loop is opted in (`QUANTA_EDIT_REPAIR_LOOP=1`), so dispatch's
+ *  post-edit `openLintBracket` can snapshot pre/post diagnostics and (when an LLM
+ *  is present) drive the active repair loop. Reuses the SAME `lspDiagnosticsProvider`
+ *  the ADR-0405 post-edit hook uses — one provider shape, two consumers.
+ *  Caller-override-safe; absent gate ⇒ slot stays unset ⇒ dispatch is
+ *  byte-identical (no bracketing, no provider call). */
+const maybeWireDiagnostics = (cfg: AgentConfig, env: AssemblerEnv): void => {
+  if (!editRepairLoopEnabled(env)) return
+  if (cfg.diagnosticsProvider !== undefined) return
+  cfg.diagnosticsProvider = lspDiagnosticsProvider()
 }
 
 /** Single source of truth for "config for this mode" assembly. `env` is the

@@ -184,6 +184,7 @@ export type StreamEvent =
       inputTokens: number
       outputTokens: number
       cacheReadTokens?: number
+      cacheCreationTokens?: number
       model: string
     }
   /** Live output-token progress for the in-flight response (the rising "·
