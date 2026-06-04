@@ -126,6 +126,7 @@ export const BASE_TOOL_NAMES: readonly string[] = [
   "yaml_read",
   "pdf_read",
   "xlsx_read",
+  "docx_read",
   "session_config",
 ]
 

@@ -1,44 +1,45 @@
 id: xlsx-read-stub
-title: xlsx_read — typed stub awaiting deps decision (ADR-0137)
+title: xlsx_read + docx_read — real pure-TS OOXML readers (ADR-0137 / ADR-0138)
 section: 2
-subsystem: 도구 — document (XLSX surface placeholder; impl deferred)
+subsystem: 도구 — document (XLSX + DOCX read; pure-TS, no deps)
 order: 137
-maturity: L2
-status: hold
+maturity: L4
+status: stable
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
-configurable: planned
+configurable: integrated
 owners: ["@songmin"]
-labels: [surface:cli, held-promotion]
+labels: [surface:cli]
 depends_on: [document-image-fsjail-unify, document-tools-csv-ndjson, pdf-read-tool, cross-slice-mirror, deferred-tool-registry]
 purpose: |
-  Tool-surface seal for `xlsx_read` so callers can depend on the name,
-  inputSchema, and READ-ONLY metadata even though `execute()` currently
-  returns a typed `"xlsx_read not yet implemented — deps decision deferred"`
-  envelope. The decision-blocker is SheetJS (~10 MB native binding); the
-  next round can swap the implementation behind this same surface in a
-  byte-identical fashion. Stub exists to prevent callers from inventing
-  ad-hoc surfaces while the dep tradeoff is being weighed.
+  REAL `xlsx_read` + `docx_read` document readers. jun-04 resolved the ADR-0138
+  deps blocker WITHOUT a dependency: `node:zlib.inflateRawSync` (via the H14b
+  authoring slice's `unzip`) handles DEFLATE entries, and a focused OOXML parser
+  resolves cells / paragraph text. Reads BOTH STORED (quanta's own xlsx_write /
+  docx_write output) AND DEFLATE (real-world Excel/Word) containers — closing the
+  H14b round-trip: `xlsx_write` → disk → `xlsx_read` returns the cells (and the
+  DOCX equivalent). Pure `parseXlsx`/`parseDocx` cores (no FS) + FS-jailed tool
+  wrappers (resolveJailedDoc chokepoint + symlink reject + size cap, no-throw).
+  Both are BASE read-only tools (always registered, like csv/yaml/pdf/ndjson);
+  only the mutating xlsx_write/docx_write are gated by QUANTA_OFFICE_AUTHORING.
 evidence:
   code:
     - src/tool/document/xlsx-read.ts
+    - src/tool/document/docx-read.ts
     - src/tool/document/index.ts
-  adrs: [137]
+    - src/tool/document/authoring/zip-store.ts
+  adrs: [137, 138]
   tests:
     unit:
       - tests/unit/tool/xlsx-read-hellgate.test.ts
-    integration: []
+      - tests/unit/xlsx-docx-read-hellgate.test.ts
+    integration:
+      - tests/unit/xlsx-docx-read-roundtrip-e2e-hellgate.test.ts
     contract: []
 knobs: []
-deliberate_hold:
-  reason: |
-    Deps decision pending: SheetJS (~10 MB native binding) vs alternative
-    pure-TS xlsx parsers. Surface frozen now so the impl can be swapped
-    without breaking callers.
-  promotion_path: |
-    Land the deps decision, wire the parser behind the same surface, swap
-    the typed stub envelope for real output, lift maturity to L4.
 notes: |
-  Maturity is L2 (typed shell only, no execution path). Promoted to L4 once
-  the deps decision lands and the parser is wired.
+  L4: real execution path, STORED + DEFLATE, true byte-level round-trip proven
+  through quanta's own tools (xlsx_write → xlsx_read). The earlier ADR-0138
+  "SheetJS vs deps" blocker is moot — the pure-TS reader needs no dependency.
+  Deferred polish: cell styles / number-format rendering, pptx_read, docx tables.

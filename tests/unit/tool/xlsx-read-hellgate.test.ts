@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { xlsxReadTool } from "@/tool/document/xlsx-read"
 import type { ToolContext } from "@/tool"
+import { xlsxReadTool } from "@/tool/document/xlsx-read"
 
 const tool = xlsxReadTool
 
@@ -14,22 +14,24 @@ const exec = async (input: unknown): Promise<{ ok: boolean; output: string }> =>
   return last ?? { ok: false, output: "no result" }
 }
 
-describe("xlsx_read — stub (ADR-0137 Part 3; deps deferred to ADR-0138)", () => {
+// jun-04 — the stub (ADR-0138 deferral) is RESOLVED; xlsx_read is a real pure-TS
+// OOXML reader. Full round-trip/adversarial coverage lives in
+// `tests/unit/xlsx-docx-read-hellgate.test.ts`; this file pins the tool surface.
+describe("xlsx_read — real reader (tool surface)", () => {
   test("HELL-1: metadata — name + read-only + concurrency-safe", () => {
     expect(tool.name).toBe("xlsx_read")
     expect(tool.isReadOnly?.()).toBe(true)
     expect(tool.isConcurrencySafe?.({ path: "x.xlsx" } as never)).toBe(true)
   })
 
-  test("HELL-2: input validation rejects bad shape BEFORE deferral", async () => {
+  test("HELL-2: input validation rejects bad shape", async () => {
     const r = await exec({})
     expect(r.ok).toBe(false)
   })
 
-  test("HELL-3: execute on valid input returns typed deferral message", async () => {
-    const r = await exec({ path: "file.xlsx" })
+  test("HELL-3: a nonexistent file yields a typed not-found (no throw, no deferral)", async () => {
+    const r = await exec({ path: "definitely-not-here.xlsx" })
     expect(r.ok).toBe(false)
-    expect(r.output).toContain("not yet implemented")
-    expect(r.output).toContain("ADR-0138")
+    expect(r.output.toLowerCase()).toContain("not found")
   })
 })

@@ -13,7 +13,14 @@ import { type DiagnosticsProvider, diagnosticsTool, nullDiagnosticsProvider } fr
 // fence (the 5 tools were barrel-exported but not in `buildDefaultTools` —
 // the missing leg is the MUTATING_TOOL_TABLE classification, added in the
 // same change). All five are read-only + concurrency-safe.
-import { csvReadTool, ndjsonReadTool, pdfReadTool, xlsxReadTool, yamlReadTool } from "./document"
+import {
+  csvReadTool,
+  docxReadTool,
+  ndjsonReadTool,
+  pdfReadTool,
+  xlsxReadTool,
+  yamlReadTool,
+} from "./document"
 // H14b — Office document AUTHORING tools (generate real .xlsx / .docx). Pure-TS
 // STORED-ZIP + OOXML; conditionally registered via DefaultToolPorts.officeAuthoring.
 import { docxWriteTool, xlsxWriteTool } from "./document/authoring"
@@ -546,6 +553,9 @@ const buildBaseDefaultTools = (ports: DefaultToolPorts): Tool[] => [
   yamlReadTool as Tool,
   pdfReadTool as Tool,
   xlsxReadTool as Tool,
+  // jun-04 — `docx_read` (real WordprocessingML reader, sibling to the now-real
+  // xlsx_read). Read-only + concurrency-safe; pure unzip + XML parse.
+  docxReadTool as Tool,
   // `session_config` — agent self-inspection / self-mutation over its own
   // SDK posture (effort tier, identity mode, tool profile, model, provider).
   // Always registered: when the composition root has not wired the seam,

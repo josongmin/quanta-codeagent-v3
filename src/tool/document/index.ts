@@ -28,6 +28,13 @@ export {
   csvReadTool,
 } from "./csv-read"
 export {
+  type DocxReadInput,
+  docxReadInputSchema,
+  docxReadTool,
+  type ParseDocxResult,
+  parseDocx,
+} from "./docx-read"
+export {
   type NdjsonLine,
   type NdjsonParseResult,
   NdjsonParserInputError,
@@ -51,8 +58,10 @@ export {
   sniffPdfMagic,
 } from "./pdf-read"
 export {
-  XLSX_READ_DEFERRAL_MESSAGE,
+  type ParseXlsxResult,
+  parseXlsx,
   type XlsxReadInput,
+  type XlsxSheet,
   xlsxReadInputSchema,
   xlsxReadTool,
 } from "./xlsx-read"

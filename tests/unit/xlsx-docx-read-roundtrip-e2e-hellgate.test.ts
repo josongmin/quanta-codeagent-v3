@@ -48,7 +48,12 @@ const toolByName = (tools: Tool[], name: string): Tool => {
 // DEFLATE (method 8) zip builder — proves non-STORED real-world support.
 const buildDeflateZip = (entries: readonly ZipEntry[]): Uint8Array => {
   const u16 = (n: number): number[] => [n & 0xff, (n >>> 8) & 0xff]
-  const u32 = (n: number): number[] => [n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff]
+  const u32 = (n: number): number[] => [
+    n & 0xff,
+    (n >>> 8) & 0xff,
+    (n >>> 16) & 0xff,
+    (n >>> 24) & 0xff,
+  ]
   const table = new Uint32Array(256)
   for (let n = 0; n < 256; n++) {
     let c = n
@@ -57,7 +62,8 @@ const buildDeflateZip = (entries: readonly ZipEntry[]): Uint8Array => {
   }
   const crc32 = (b: Uint8Array): number => {
     let crc = 0xffffffff
-    for (let i = 0; i < b.length; i++) crc = (table[(crc ^ (b[i] as number)) & 0xff] as number) ^ (crc >>> 8)
+    for (let i = 0; i < b.length; i++)
+      crc = (table[(crc ^ (b[i] as number)) & 0xff] as number) ^ (crc >>> 8)
     return (crc ^ 0xffffffff) >>> 0
   }
   const out: number[] = []
@@ -70,14 +76,39 @@ const buildDeflateZip = (entries: readonly ZipEntry[]): Uint8Array => {
     const comp = new Uint8Array(deflateRawSync(Buffer.from(e.data)))
     const crc = crc32(e.data)
     const local = [
-      ...u32(0x04034b50), ...u16(20), ...u16(0x0800), ...u16(8), ...u16(0), ...u16(0),
-      ...u32(crc), ...u32(comp.length), ...u32(e.data.length), ...u16(name.length), ...u16(0),
-      ...name, ...comp,
+      ...u32(0x04034b50),
+      ...u16(20),
+      ...u16(0x0800),
+      ...u16(8),
+      ...u16(0),
+      ...u16(0),
+      ...u32(crc),
+      ...u32(comp.length),
+      ...u32(e.data.length),
+      ...u16(name.length),
+      ...u16(0),
+      ...name,
+      ...comp,
     ]
     central.push(
-      ...u32(0x02014b50), ...u16(20), ...u16(20), ...u16(0x0800), ...u16(8), ...u16(0), ...u16(0),
-      ...u32(crc), ...u32(comp.length), ...u32(e.data.length), ...u16(name.length), ...u16(0),
-      ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(offset), ...name,
+      ...u32(0x02014b50),
+      ...u16(20),
+      ...u16(20),
+      ...u16(0x0800),
+      ...u16(8),
+      ...u16(0),
+      ...u16(0),
+      ...u32(crc),
+      ...u32(comp.length),
+      ...u32(e.data.length),
+      ...u16(name.length),
+      ...u16(0),
+      ...u16(0),
+      ...u16(0),
+      ...u16(0),
+      ...u32(0),
+      ...u32(offset),
+      ...name,
     )
     out.push(...local)
     offset += local.length
@@ -86,20 +117,32 @@ const buildDeflateZip = (entries: readonly ZipEntry[]): Uint8Array => {
   const centralStart = offset
   out.push(...central)
   out.push(
-    ...u32(0x06054b50), ...u16(0), ...u16(0), ...u16(count), ...u16(count),
-    ...u32(central.length), ...u32(centralStart), ...u16(0),
+    ...u32(0x06054b50),
+    ...u16(0),
+    ...u16(0),
+    ...u16(count),
+    ...u16(count),
+    ...u32(central.length),
+    ...u32(centralStart),
+    ...u16(0),
   )
   return new Uint8Array(out)
 }
 
-describe("xlsx/docx read e2e — readers wired by officeAuthoring knob", () => {
-  test("knob ON registers xlsx_read + docx_read; OFF keeps docx_read absent", () => {
+describe("xlsx/docx read e2e — readers are base tools (always on)", () => {
+  test("xlsx_read + docx_read are BASE readers (present with or without officeAuthoring)", () => {
+    // jun-04 — readers are pure/read-only, so (like csv/yaml/pdf/ndjson + the
+    // now-real xlsx_read) they live in the BASE set, NOT gated by the WRITER
+    // knob `officeAuthoring`. Only the mutating xlsx_write/docx_write are gated.
     const on = buildDefaultTools({ officeAuthoring: true }).map((t) => t.name)
     expect(on).toContain("xlsx_read")
     expect(on).toContain("docx_read")
     const off = buildDefaultTools().map((t) => t.name)
-    expect(off).toContain("xlsx_read") // base-set reader stays on
-    expect(off).not.toContain("docx_read") // companion reader gated with writers
+    expect(off).toContain("xlsx_read")
+    expect(off).toContain("docx_read")
+    // The mutating writers stay gated by the knob.
+    expect(off).not.toContain("xlsx_write")
+    expect(on).toContain("xlsx_write")
   })
 })
 
@@ -115,12 +158,18 @@ describe("xlsx_write → xlsx_read TRUE round-trip", () => {
           {
             name: "Sales",
             rows: [
-              ["Region", "Rev", 'Note <x>&"\''],
+              ["Region", "Rev", "Note <x>&\"'"],
               ["North", 1200, "ok"],
               ["South", 980.5, "watch"],
             ],
           },
-          { name: "Meta", rows: [["key", "val"], ["env", "prod"]] },
+          {
+            name: "Meta",
+            rows: [
+              ["key", "val"],
+              ["env", "prod"],
+            ],
+          },
         ],
       },
       ctx(dir),
@@ -132,7 +181,7 @@ describe("xlsx_write → xlsx_read TRUE round-trip", () => {
     // Real cells come back through the tool output (not a deferral).
     expect(readRes.output).not.toContain("not yet implemented")
     expect(readRes.output).toContain("Region")
-    expect(readRes.output).toContain('Note <x>&"\'') // XML-special un-escaped
+    expect(readRes.output).toContain("Note <x>&\"'") // XML-special un-escaped
     expect(readRes.output).toContain("1200")
     expect(readRes.output).toContain("980.5")
     expect(readRes.output).toContain("Sales")
@@ -145,7 +194,13 @@ describe("xlsx_write → xlsx_read TRUE round-trip", () => {
     const dir = mkdtempSync(join(tmpdir(), "xlsx-rt2-"))
     await run(
       toolByName(tools, "xlsx_write"),
-      { path: "two.xlsx", sheets: [{ name: "A", rows: [["one"]] }, { name: "B", rows: [["two"]] }] },
+      {
+        path: "two.xlsx",
+        sheets: [
+          { name: "A", rows: [["one"]] },
+          { name: "B", rows: [["two"]] },
+        ],
+      },
       ctx(dir),
     )
     const r = await run(toolByName(tools, "xlsx_read"), { path: "two.xlsx", sheet: "B" }, ctx(dir))
