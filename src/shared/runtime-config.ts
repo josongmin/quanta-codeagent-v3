@@ -164,6 +164,44 @@ export interface RuntimeConfig {
    *  spot of `src/git/directive-emit/` (which only reads quanta's own
    *  `::git-*` lines). */
   readonly passiveVcs: boolean
+  /** H14a image_gen tool gate (`QUANTA_IMAGE_GEN`). Strict opt-in (`=== "1"`).
+   *  Default false ⇒ the composition root wires NO `DefaultToolPorts.imageGen`
+   *  port, so the `image_gen` tool is NOT registered (byte-identical default
+   *  menu). When true AND a provider key resolves, the host passes a key-bound
+   *  `openAiImagePort({ apiKey })` and the model gains text→image generation +
+   *  edit (writes a versioned-sibling artifact through the FS jail). A missing
+   *  key surfaces as a typed `no_key` failure, never a crash. */
+  readonly imageGen: boolean
+  /** H14b Office document AUTHORING gate (`QUANTA_OFFICE_AUTHORING`). Strict
+   *  opt-in (`=== "1"`). Default false ⇒ the composition root wires NO
+   *  `DefaultToolPorts.officeAuthoring`, so `xlsx_write` / `docx_write` are NOT
+   *  registered (byte-identical default menu). When true the agent can generate
+   *  real `.xlsx` / `.docx` files (pure-TS STORED-ZIP + OOXML, no office
+   *  dependency) to jailed, versioned-sibling paths (never silent overwrite). */
+  readonly officeAuthoring: boolean
+  /** H15 (jun-3-misc §3) reasoning carry-over gate (`QUANTA_REASONING_CARRYOVER`).
+   *  OpenAI-Responses / o-series ONLY (the ChatGPT-OAuth subscription path).
+   *  Strict opt-in (`=== "1"`). Default false ⇒ the responses-wire path is
+   *  BYTE-IDENTICAL to today: each reasoning item's `encrypted_content` is
+   *  DROPPED (non-resumable), no `include` field is added, and no prior reasoning
+   *  is re-emitted on the next turn's input. When true the wire captures each
+   *  reasoning output item's opaque `encrypted_content` (ZDR — never decoded
+   *  locally), the host persists it per-turn, and the NEXT turn's Responses input
+   *  re-emits those reasoning items at its head with `store:false` +
+   *  `include:["reasoning.encrypted_content"]` so multi-step chain-of-thought
+   *  survives across turns/tool-calls. NEVER affects the Anthropic adapter or the
+   *  chat-completions path (provider-scoped to the Responses surface). */
+  readonly reasoningCarryover: boolean
+  /** H13 external-agent-config migration gate (`QUANTA_MIGRATE_CONFIG`). Strict
+   *  opt-in (`=== "1"`). Default false ⇒ startup runs NO detect of competitor
+   *  (Claude Code / Cursor) config, surfaces no migration prompt, and writes no
+   *  throttle ledger — byte-identical startup. When true the CLI startup seam
+   *  runs `runConfigMigration({ enabled: true, homeDir, projectDir })`, which
+   *  detects `~/.claude` + project `.claude`/`CLAUDE.md`/`.mcp.json`/subagents
+   *  + Cursor `.cursor/rules`, converts each into the quanta shape, throttles a
+   *  re-offer via `~/.quanta/external_config_migration.json`, and surfaces a
+   *  one-line stderr notice. Import is opt-in (notice only). */
+  readonly migrateConfig: boolean
   /** FS jail disable flag (`QUANTA_FS_JAIL=off`). Default false (jail ON). */
   readonly fsJailDisabled: boolean
   /** ADR-0062 cap-as-instruction dispatch enforcement (`QUANTA_CAP_ENFORCE=1`).
@@ -350,6 +388,17 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // H6 — strict `=== "1"` opt-in. Default false ⇒ the bash post-exec hook
     // classifies nothing and touches no sink (byte-identical).
     passiveVcs: env["QUANTA_PASSIVE_VCS"] === "1",
+    // H14a — strict `=== "1"` opt-in. Default false ⇒ no image_gen port wired,
+    // tool not registered (byte-identical default menu).
+    imageGen: env["QUANTA_IMAGE_GEN"] === "1",
+    // H14b — strict `=== "1"` opt-in. Default false ⇒ no office authoring tools.
+    officeAuthoring: env["QUANTA_OFFICE_AUTHORING"] === "1",
+    // H15 — strict `=== "1"` opt-in. Default false ⇒ responses-wire byte-identical
+    // (encrypted reasoning dropped, no include, no re-emit). OpenAI-Responses only.
+    reasoningCarryover: env["QUANTA_REASONING_CARRYOVER"] === "1",
+    // H13 — strict `=== "1"` opt-in. Default false ⇒ no config-migration detect,
+    // no prompt, no ledger (byte-identical startup).
+    migrateConfig: env["QUANTA_MIGRATE_CONFIG"] === "1",
     fsJailDisabled: parseBool(env["QUANTA_FS_JAIL"] === "off" ? "1" : undefined),
     capEnforce: parseBool(env["QUANTA_CAP_ENFORCE"]),
     gitSha: stringOrUndef(env["QUANTA_GIT_SHA"]),

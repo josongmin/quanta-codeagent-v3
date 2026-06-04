@@ -14,11 +14,15 @@ import { type DiagnosticsProvider, diagnosticsTool, nullDiagnosticsProvider } fr
 // the missing leg is the MUTATING_TOOL_TABLE classification, added in the
 // same change). All five are read-only + concurrency-safe.
 import { csvReadTool, ndjsonReadTool, pdfReadTool, xlsxReadTool, yamlReadTool } from "./document"
+// H14b — Office document AUTHORING tools (generate real .xlsx / .docx). Pure-TS
+// STORED-ZIP + OOXML; conditionally registered via DefaultToolPorts.officeAuthoring.
+import { docxWriteTool, xlsxWriteTool } from "./document/authoring"
 import { editTool, makeEditTool } from "./edit"
 import { fileTreeSummaryTool } from "./file-tree-summary"
 import { globTool } from "./glob"
 import { grepTool } from "./grep"
 import { readImageTool, readImageUrlTool } from "./image"
+import { type ImageGenPort, imageGenTool } from "./image-gen"
 import { localizeTool } from "./localize"
 import { parseTestFailureTool } from "./parse-test-failure"
 import { makeReadTool, readTool } from "./read"
@@ -61,6 +65,27 @@ export {
   formatDiagnostics,
   nullDiagnosticsProvider,
 } from "./diagnostics"
+// Office document AUTHORING cluster (H14b) — generate real `.xlsx` / `.docx`
+// files via pure-TS STORED-ZIP + OOXML (NO office dependency). A NEW category
+// alongside `image_gen`. Caller-wired + default-OFF: `xlsx_write` + `docx_write`
+// are registered only when `DefaultToolPorts.officeAuthoring` is true (the
+// composition root passes it when `QUANTA_OFFICE_AUTHORING` is on). PPTX is a
+// scoped follow-up — the STORED-ZIP + OOXML core here is its shared substrate.
+export {
+  buildDocx,
+  buildStoredZip,
+  buildXlsx,
+  crc32,
+  type DocxSpec,
+  type DocxWriteInput,
+  docxWriteInputSchema,
+  docxWriteTool,
+  parseStoredZip,
+  type XlsxSpec,
+  type XlsxWriteInput,
+  xlsxWriteInputSchema,
+  xlsxWriteTool,
+} from "./document/authoring"
 export type { DefineToolSpec, StreamingInputStep } from "./factory"
 export {
   defineTool,
@@ -118,6 +143,28 @@ export {
   sniffMediaType,
   type ToolResultContent,
 } from "./image"
+// `image_gen` cluster (H14a) — text→image generation + edit. The FIRST
+// binary-artifact-GENERATION tool (a NEW category; `read_image*` is read-only).
+// Caller-wired + default-OFF: registered only when `DefaultToolPorts.imageGen`
+// is set (the composition root passes a key-bound provider port when
+// `QUANTA_IMAGE_GEN` is on). NOT part of `defaultTools` — mirrors the
+// `coverage_check` / `web_search` caller-wired pattern.
+export {
+  defaultImageWritePort,
+  type GeneratedImage,
+  IMAGE_GEN_MAX_BYTES,
+  IMAGE_GEN_MAX_N,
+  type ImageGenFormat,
+  type ImageGenInput,
+  type ImageGenOutcome,
+  type ImageGenPort,
+  type ImageGenRequest,
+  type ImageGenToolOptions,
+  type ImageWritePort,
+  imageGenInputSchema,
+  imageGenTool,
+  openAiImagePort,
+} from "./image-gen"
 export type {
   LspNavProvider,
   LspNavSession,
@@ -376,6 +423,23 @@ export interface DefaultToolPorts {
    *  inject — the tool builds its own `defaultV8CoverageSource()` per call and
    *  resolves the coverage JSON through the same FS-jail chokepoint `read` uses. */
   coverageCheck?: boolean
+  /** H14a — when set, append `image_gen` (text→image generation + edit; the
+   *  FIRST binary-artifact-GENERATION tool). Absent ⇒ tool NOT registered
+   *  (byte-identical default menu). The composition root passes a KEY-BOUND
+   *  provider port here only when `QUANTA_IMAGE_GEN` is on AND a provider key
+   *  resolves (via `openAiImagePort({ apiKey })`, the key sourced from the same
+   *  runtime-config `OPENAI_API_KEY` the LLM factory uses — never hardcoded).
+   *  The port itself is closed-DI: a key-less port yields a typed `no_key`
+   *  failure rather than crashing, so wiring it is always safe. */
+  imageGen?: ImageGenPort
+  /** H14b — when true, append the Office document AUTHORING tools (`xlsx_write`
+   *  + `docx_write`): generate real `.xlsx` / `.docx` files via pure-TS
+   *  STORED-ZIP + OOXML (NO office dependency). Absent/false ⇒ tools NOT
+   *  registered (byte-identical default menu). The composition root passes this
+   *  only when `QUANTA_OFFICE_AUTHORING` is on. No port to inject — each tool
+   *  serializes in-memory and writes through the same FS-jail chokepoint the
+   *  readers use; an existing target is written to a versioned `-vN` sibling. */
+  officeAuthoring?: boolean
 }
 
 export { automationUpdateTool } from "./automation_update"
@@ -407,6 +471,21 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => {
   // is appended (self-contained: builds its own coverage source per call).
   if (ports.coverageCheck === true) {
     base.push(coverageCheckTool as Tool)
+  }
+  // H14a — conditional registration of image_gen. Absent port ⇒ default set is
+  // byte-identical (the model never sees the tool). Present ⇒ a tool bound to
+  // the host's key-resolved provider port is appended (mutating; writes a
+  // versioned-sibling artifact through the FS jail).
+  if (ports.imageGen !== undefined) {
+    base.push(imageGenTool({ port: ports.imageGen }) as Tool)
+  }
+  // H14b — conditional registration of the Office authoring tools. Absent/false
+  // ⇒ default set is byte-identical. Present ⇒ `xlsx_write` + `docx_write` are
+  // appended (mutating; pure-TS OOXML serialize + FS-jail write, versioned
+  // sibling on an existing target).
+  if (ports.officeAuthoring === true) {
+    base.push(xlsxWriteTool as Tool)
+    base.push(docxWriteTool as Tool)
   }
   return base
 }

@@ -89,12 +89,29 @@ export interface ModeChangeEvent {
  * signature; OpenAI Responses `reasoning.encrypted_content`). Stored
  * REDACTED by default — `signature` is opaque, `redacted` records
  * whether the producer stripped the body before append.
+ *
+ * H15 — for the OpenAI-Responses carry-over path the `signature` holds the
+ * opaque `encrypted_content` ciphertext (ZDR — never decoded), and the
+ * OPTIONAL `carryover` field holds the full re-emittable Responses input
+ * reasoning item so the next turn can re-feed it verbatim. `carryover` stays
+ * `undefined` for the Anthropic thinking-signature producer (which re-submits
+ * via its own channel) and whenever carry-over is off — keeping this variant
+ * byte-identical for every existing producer. The item shape is intentionally
+ * opaque (`Record<string, unknown>`) so this slice does NOT depend on
+ * `@/llm` (slice fence).
  */
 export interface ReasoningEchoEvent {
   readonly kind: "reasoning_echo"
   readonly signature: string
   readonly redacted: boolean
   readonly tokenCount?: number
+  /**
+   * H15 — opaque, re-emittable Responses input reasoning item
+   * (`{ type: "reasoning", id?, encrypted_content, summary? }`). Present ONLY
+   * for the OpenAI-Responses carry-over producer; absent otherwise. The
+   * consumer re-feeds it verbatim onto the next turn's Responses input.
+   */
+  readonly carryover?: Readonly<Record<string, unknown>>
   readonly at: number
   readonly turnId?: string
 }

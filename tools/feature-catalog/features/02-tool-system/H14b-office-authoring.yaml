@@ -1,0 +1,87 @@
+id: office-authoring
+title: xlsx_write / docx_write tools — generate real .xlsx / .docx (NEW Office-authoring category)
+section: 2
+subsystem: Binary-artifact generation (H14b, jun-3-misc §3)
+order: 601
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:cli, category:generation, default-off]
+depends_on: [image-gen, tool-surface-manifest]
+config_refs:
+  env: ["QUANTA_OFFICE_AUTHORING"]
+  runtime: ["officeAuthoring"]
+purpose: |
+  Opens a NEW tool category alongside H14a image_gen: GENERATING real binary
+  Office files. Until now `src/tool/document/` was `*-read.ts` only (csv/yaml/
+  ndjson/pdf/xlsx read; the xlsx reader is itself a stub) — there was ZERO
+  binary-document authoring. `xlsx_write` builds a valid Excel workbook from
+  sheet rows/cells + sheet names; `docx_write` builds a valid Word document from
+  paragraphs (headings + body paragraphs of formatted runs).
+
+  HARD CONSTRAINT — NO dependencies (installs blocked, no exceljs/docx/xlsx/
+  jszip). The whole stack is pure-TS: `.xlsx`/`.docx`/`.pptx` are ZIP containers
+  of OOXML (XML) parts, so we built a STORED (uncompressed, method 0) ZIP writer
+  by hand — local file headers + raw bytes + central directory + end-of-central-
+  directory, with the standard table-driven CRC-32 (polynomial 0xEDB88320). No
+  compression library needed; STORED is dependency-free AND byte-deterministic
+  (no zlib-version drift), which the hellgate's byte-level + CRC re-derivation
+  assertions rely on. On top sit the minimal-but-VALID OOXML parts per format
+  (xlsx: [Content_Types].xml, _rels/.rels, xl/workbook.xml, xl/_rels/
+  workbook.xml.rels, xl/worksheets/sheetN.xml, xl/sharedStrings.xml; docx:
+  [Content_Types].xml, _rels/.rels, word/document.xml, word/_rels/
+  document.xml.rels). Every user string is XML-escaped (the five predefined
+  entities + XML-1.0-illegal-control stripping) — no injection.
+
+  Posture mirrors image_gen: mutating (isReadOnly()=false); no-throw (every
+  failure → typed ok:false ToolResult); writes through the SAME FS-jail
+  chokepoint (resolveJailed) the readers use, to a VERSIONED-sibling path
+  (report.xlsx → report-v2.xlsx; never a silent overwrite). Self-contained — no
+  port to inject; serializers are pure `buildXlsx(spec)=>Uint8Array` /
+  `buildDocx(spec)=>Uint8Array`. Default-OFF: registered only when
+  DefaultToolPorts.officeAuthoring is true (composition root passes it when
+  QUANTA_OFFICE_AUTHORING is on), so the default tool menu is byte-identical.
+evidence:
+  code:
+    - src/tool/document/authoring/zip-store.ts
+    - src/tool/document/authoring/ooxml.ts
+    - src/tool/document/authoring/xlsx.ts
+    - src/tool/document/authoring/docx.ts
+    - src/tool/document/authoring/jailed-write.ts
+    - src/tool/document/authoring/xlsx-write.ts
+    - src/tool/document/authoring/docx-write.ts
+    - src/tool/document/authoring/index.ts
+    - src/tool/index.ts
+    - src/tool/surface/manifest.ts
+    - src/shared/runtime-config.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/office-authoring-hellgate.test.ts
+      - tests/unit/office-authoring-e2e-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_OFFICE_AUTHORING
+    where: src/shared/runtime-config.ts
+    default: false
+    purpose: |
+      Strict `=== "1"` opt-in. Default-OFF ⇒ no DefaultToolPorts.officeAuthoring
+      ⇒ xlsx_write / docx_write NOT registered ⇒ byte-identical default tool menu.
+deliberate_hold: null
+notes: |
+  Default-OFF / opt-in on EVERY surface in the tool-surface SSOT manifest (it
+  writes files, so it never auto-seeds — CLI tool-menu reproducibility). SCOPED
+  FOLLOW-UP — PPTX (pptx_write, PresentationML): the STORED-ZIP + OOXML core
+  here (zip-store.ts + ooxml.ts) is the shared substrate a future presentation
+  serializer reuses; only a PresentationML body serializer + a few extra parts
+  (presentation.xml, slide parts, slideLayout/slideMaster) remain. Deliberately
+  NOT half-baked in this slice (quality over breadth — xlsx + docx are the two
+  highest-value deliverables: data/tracker workbooks + reports). Also deferred:
+  cell formatting / styles part (number formats, fonts, column widths), native
+  charts, and docx tables/images — the current serializers are content-complete
+  (the file opens and round-trips cell/paragraph DATA) but visually plain.

@@ -188,6 +188,18 @@ describe("H1 LoopOnCommand — byte-identical default-OFF", () => {
     expect(readFileSync(file, "utf8")).toBe("OK\n")
   })
 
+  test("empty / whitespace command string ⇒ treated as no-command (never shells out)", async () => {
+    process.env.QUANTA_EDIT_REPAIR_LOOP = "1"
+    __resetRuntimeConfig()
+    const file = seed("ws.txt", "BROKEN\n")
+    const { exec, calls } = scriptedExec([1, 0])
+    const cfg = config({ llm: fakeLlm("FIXED\n"), editRepair: { command: "   ", exec } })
+    const res = await dispatchTool(editCall(file, "BROKEN", "OK"), cfg, perm)
+    expect(res.ok).toBe(true)
+    expect(calls.length).toBe(0) // blank command never ran
+    expect(readFileSync(file, "utf8")).toBe("OK\n")
+  })
+
   test("non-edit tool ⇒ command loop never runs", async () => {
     process.env.QUANTA_EDIT_REPAIR_LOOP = "1"
     __resetRuntimeConfig()
@@ -197,5 +209,22 @@ describe("H1 LoopOnCommand — byte-identical default-OFF", () => {
     const badCall: ToolUseBlock = { type: "tool_use", id: "r1", name: "edit", input: { not_a_path: 1 } }
     await dispatchTool(badCall, cfg, perm).catch(() => undefined)
     expect(calls.length).toBe(0)
+  })
+
+  test("FAILED edit (old_string not found) ⇒ command loop must NOT run (no phantom repair)", async () => {
+    // Regression for the result.ok gate: a failed edit changed nothing, so
+    // running the command + letting the fast model rewrite the file would repair
+    // a phantom edit and could clobber the file over an unrelated failure.
+    process.env.QUANTA_EDIT_REPAIR_LOOP = "1"
+    __resetRuntimeConfig()
+    const file = seed("f.txt", "ORIGINAL\n")
+    const { exec, calls } = scriptedExec([1, 0])
+    const cfg = config({ llm: fakeLlm("FIXED\n"), editRepair: { command: "t", exec, maxIters: 3 } })
+    // old_string is absent ⇒ the edit fails (result.ok === false).
+    const res = await dispatchTool(editCall(file, "NOT-PRESENT", "X"), cfg, perm)
+    expect(res.ok).toBe(false)
+    expect(calls.length).toBe(0) // command never ran
+    expect(readFileSync(file, "utf8")).toBe("ORIGINAL\n") // file untouched
+    expect(content(res.block as ToolResultBlock)).not.toContain("[edit-repair]")
   })
 })

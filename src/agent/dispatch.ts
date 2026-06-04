@@ -397,7 +397,17 @@ const runEditCommandRepair = async (
   const command = config.editRepair?.command
   const exec = config.editRepair?.exec
   const llm = config.llm
-  if (command === undefined || exec === undefined || llm === undefined) return output
+  // An empty / whitespace-only command means "no command wired" (a host that set
+  // the field to "" is opting OUT), NOT "run the empty string" — guard it so we
+  // never shell out to a blank command.
+  if (
+    command === undefined ||
+    command.trim().length === 0 ||
+    exec === undefined ||
+    llm === undefined
+  ) {
+    return output
+  }
   const filePath = extractEditPath(call)
   if (filePath === null) return output
   try {
@@ -982,9 +992,14 @@ const execute = async (
   // exactly what THIS edit broke. No bracket ⇒ outputBase unchanged.
   let output = lintBracket !== null ? await lintBracket.finish(outputBase) : outputBase
   // ADR-0472 / H1 — LoopOnCommand: run the configured test/build/lint command
-  // after a path-bearing edit and auto-repair until green. Returns `output`
-  // unchanged when unconfigured / non-edit (byte-identical default-OFF).
-  output = await runEditCommandRepair(call, config, output)
+  // after a SUCCESSFUL path-bearing edit and auto-repair until green. Returns
+  // `output` unchanged when unconfigured / non-edit (byte-identical default-OFF).
+  // GATED on `result.ok`: a FAILED edit (old_string not found, jail-denied, …)
+  // changed nothing, so running the command + letting the fast model rewrite the
+  // file would be repairing a phantom edit (and could clobber the file over an
+  // unrelated command failure). The lint loop is self-gating here (empty delta on
+  // a no-op edit), but the command loop is NOT — so the guard lives at the seam.
+  if (result.ok) output = await runEditCommandRepair(call, config, output)
   // ADR-0062 rule #3 — record the nextAction hint in the session tracker so
   // a subsequent call to the same (tool, path) can be checked. DEFAULT-OFF:
   // absent enforcer ⇒ optional-chain is a no-op, byte-identical.

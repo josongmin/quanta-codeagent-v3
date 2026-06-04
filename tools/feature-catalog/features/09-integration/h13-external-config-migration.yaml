@@ -1,0 +1,83 @@
+id: h13-external-config-migration
+title: External-agent config migration — detect + import Claude/Cursor config into quanta format (H13)
+section: 9
+subsystem: migration — external-config detect/import (jun-3-misc §3 H13)
+order: 480
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:cli", "tier:1"]
+depends_on: []
+purpose: |
+  Startup detect-and-import of competitor (Claude Code / Cursor) CONFIG
+  artifacts into quanta's format. Mirrors Codex's `external_agent_config.rs`
+  three-part model: a DETECT pass walks the known external config locations
+  (no heuristics — a fixed `(scope, relative-path, item-type)` probe table),
+  an IMPORT pass runs a per-item-type converter into the quanta shape, and a
+  throttle LEDGER records "offered/imported/declined" per source so the
+  migration prompt is NOT re-offered every launch. Two scopes: `home`
+  (`~/.claude/*`) applies to every project; `project` (`<cwd>/.claude/*`,
+  `CLAUDE.md`, `.mcp.json`, `.cursor/rules/*`) is repo-local.
+
+  Six item types ↔ converters:
+    - agents_md    (CLAUDE.md / AGENTS.md)   → repo-rules
+    - settings     (.claude/settings.json)   → permission allow/deny/ask + mode
+    - hooks        (settings#hooks/hooks.json)→ quanta hook config
+    - mcp          (.mcp.json)               → MCP server config (env dropped)
+    - subagents    (.claude/agents/*.md)     → subagent spec (frontmatter+body)
+    - cursor_rules (.cursor/rules/*.mdc)     → glob-rules
+
+  The converters are SHORT because quanta already READS these formats at
+  runtime: agents_md REUSES `@/agent/repo-rules#loadRepoRules` and cursor_rules
+  REUSES `@/agent/glob-rules#loadGlobRules` (no duplicated parsing). All byte
+  reads route through the parent slice's credential-safe `readImportFile`
+  (N10 credential-ban + no-follow-symlink). Detect + every converter are
+  NO-THROW: a malformed competitor file becomes a typed `MigrationWarning`
+  (`skipped_malformed`), never a crash.
+
+  Default-OFF behind `QUANTA_MIGRATE_CONFIG`: unset ⇒ no detect, no prompt,
+  no ledger write — byte-identical startup. When on, the CLI startup seam
+  (`emitConfigMigrationNotice`, post-setup in the REPL) runs the flow and
+  surfaces a one-line stderr notice; import is opt-in (the notice does not
+  mutate quanta config). The throttle marker
+  (`~/.quanta/external_config_migration.json`) makes a second launch a no-op.
+evidence:
+  code:
+    - src/migration/external-config/index.ts
+    - src/migration/external-config/types.ts
+    - src/migration/external-config/detect.ts
+    - src/migration/external-config/convert.ts
+    - src/migration/external-config/ledger.ts
+    - src/migration/external-config/run.ts
+    - src/apps/cli/config-migration-notice.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/external-config-migration-hellgate.test.ts
+      - tests/unit/external-config-migration-e2e-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_MIGRATE_CONFIG
+    where: src/shared/runtime-config.ts (migrateConfig)
+    default: false
+    purpose: |
+      Strict `=== "1"` opt-in. Default false ⇒ no detect, no prompt, no ledger
+      (byte-identical startup). On ⇒ the REPL startup seam detects + converts
+      competitor config under ~ + cwd, throttles a re-offer, and emits a
+      one-line stderr notice.
+deliberate_hold: null
+notes: |
+  Distinct from the parent `@/migration` slice (ADR-0038/0430), which imports
+  SESSION TRANSCRIPTS. This sub-slice imports CONFIG. Scope partitioning: home
+  and project throttle INDEPENDENTLY (a project's disposition must not suppress
+  a different project). `.cursorrules` (single-file legacy form) is detected
+  but the SOTA path is the `.cursor/rules/*.mdc` directory form (the one Cursor
+  itself migrated to) — `loadGlobRules` parses the directory. Import wiring of
+  the converted outputs into live quanta permission/hook/MCP/subagent stores is
+  the surface's responsibility (the slice stays isolated: no @/permission,
+  @/mcp, @/subagent imports) — the notice seam is the current opt-in surface.

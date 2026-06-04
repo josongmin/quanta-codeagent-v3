@@ -7,9 +7,9 @@ import {
   fingerprintResponsesBody,
   parseResponsesEvents,
   parseResponsesSSEFrames,
-  strictExtensionTail,
   type ResponsesCompletionMeta,
   type ResponsesInputItem,
+  strictExtensionTail,
 } from "./openai-responses-wire"
 import type { ResponsesContinuationStore } from "./responses-continuation-store"
 import { withStreamTimeout } from "./stream-timeout"
@@ -17,6 +17,53 @@ import type { LlmTransportId } from "./target-metadata"
 import type { StreamEvent, StreamInput } from "./types"
 
 export type ResponsesFetchLike = (url: string, init?: RequestInit) => Promise<Response>
+
+/**
+ * H15 — per-route reasoning carry-over store (OpenAI-Responses ONLY).
+ *
+ * Sibling to {@link ResponsesContinuationStore}, keyed by the SAME `routeKey`
+ * (the prompt-cache key). Holds the opaque, re-emittable reasoning INPUT items
+ * captured from prior turns so the NEXT turn's Responses input can lead with
+ * them (chain-of-thought continuity). The bodies are ZDR ciphertext — this
+ * store never decodes them.
+ *
+ * Default-OFF byte-identity: a host that does not wire a store (the default)
+ * gets exactly today's behavior. The store is only consulted/written when
+ * carry-over is on AND a store instance is threaded through.
+ *
+ * Closed, append-and-replace-per-route contract:
+ *  - `get` returns the prior turn's captured items (`[]` when none).
+ *  - `put` REPLACES the route's items with the new capture (the latest turn's
+ *    reasoning supersedes — Codex re-feeds the most recent reasoning, not the
+ *    full transcript, so the input never grows unbounded).
+ *  - `clear` drops one route; `clearAll` resets (session boundary).
+ */
+export interface ResponsesReasoningCarryoverStore {
+  get(routeKey: string): readonly ResponsesInputItem[]
+  put(routeKey: string, items: readonly ResponsesInputItem[]): void
+  clear(routeKey: string): void
+  clearAll(): void
+}
+
+/** Default in-memory {@link ResponsesReasoningCarryoverStore}. Pure container —
+ *  no clock, no I/O. The host owns the instance and re-feeds it across turns. */
+export const defaultResponsesReasoningCarryoverStore = (): ResponsesReasoningCarryoverStore => {
+  const store = new Map<string, readonly ResponsesInputItem[]>()
+  return {
+    get(routeKey) {
+      return store.get(routeKey) ?? []
+    },
+    put(routeKey, items) {
+      store.set(routeKey, Object.freeze(items.slice()))
+    },
+    clear(routeKey) {
+      store.delete(routeKey)
+    },
+    clearAll() {
+      store.clear()
+    },
+  }
+}
 
 export interface ResponsesPreparedRequest {
   readonly body: Record<string, unknown>
@@ -41,6 +88,14 @@ export interface PrepareResponsesContinuationRequestArgs {
   /** Reasoning effort — env-derived (`QUANTA_REASONING_EFFORT`) at the
    *  composition root, threaded through as plain config. Omitted ⇒ default. */
   readonly reasoningEffort?: string
+  /** H15 reasoning carry-over gate (`QUANTA_REASONING_CARRYOVER`). Default-OFF
+   *  / omitted ⇒ byte-identical: no re-emit, no `include`, nothing read from
+   *  {@link reasoningCarryoverStore}. OpenAI-Responses ONLY. */
+  readonly reasoningCarryover?: boolean
+  /** H15 — the per-route reasoning carry-over store. Only consulted when
+   *  {@link reasoningCarryover} is `true`. Omitted ⇒ no re-emit (the gate alone
+   *  does nothing without a store). */
+  readonly reasoningCarryoverStore?: ResponsesReasoningCarryoverStore
 }
 
 export interface ResponsesStreamConfig {
@@ -59,6 +114,12 @@ export interface ResponsesStreamConfig {
   readonly continuationStore?: ResponsesContinuationStore
   readonly retryableResumeStatuses?: ReadonlySet<number>
   readonly disableResumeOnStatuses?: ReadonlySet<number>
+  /** H15 reasoning carry-over gate. Default-OFF / omitted ⇒ byte-identical
+   *  (no capture, no persist). OpenAI-Responses ONLY. */
+  readonly reasoningCarryover?: boolean
+  /** H15 — per-route carry-over store. Only written when {@link reasoningCarryover}
+   *  is `true` AND a `routeKey` is resolvable. */
+  readonly reasoningCarryoverStore?: ResponsesReasoningCarryoverStore
 }
 
 const DEFAULT_RETRYABLE_RESUME_STATUSES = new Set([400, 404, 409, 422])
@@ -121,10 +182,7 @@ const readBodyTextOrLog = async (res: Response, provider: LLMProvider): Promise<
   }
 }
 
-export const buildResponsesFirstChunkTimeoutError = (
-  ms: number,
-  provider: LLMProvider,
-): LLMError =>
+export const buildResponsesFirstChunkTimeoutError = (ms: number, provider: LLMProvider): LLMError =>
   new LLMError(`LLM stream first-chunk timeout after ${ms}ms (provider sent no data; timed out)`, {
     kind: "stream_corrupt",
     provider,
@@ -157,18 +215,31 @@ export const prepareResponsesContinuationRequest = (
 ): ResponsesPreparedRequest => {
   const routeKey = normalizeRouteKey(args.input.promptCacheKey)
   const fullInputItems = buildResponsesInputItems(args.input.messages)
+  // H15 — resolve the prior turns' captured reasoning items for THIS route.
+  // Default-OFF byte-identity: when carry-over is off, no store, or no routeKey,
+  // `priorReasoning` stays empty and the carry-over opts collapse to `{}` — so
+  // every `buildResponsesBody` call below is byte-identical to today. OpenAI-
+  // Responses only (this prepare path is the Responses surface).
+  const priorReasoning =
+    args.reasoningCarryover === true &&
+    args.reasoningCarryoverStore !== undefined &&
+    routeKey !== undefined
+      ? args.reasoningCarryoverStore.get(routeKey)
+      : []
+  const carryoverOpts =
+    priorReasoning.length > 0
+      ? { reasoningCarryover: true as const, priorReasoningItems: priorReasoning }
+      : {}
   const fullBody = buildResponsesBody(args.input, args.model, {
     inputItems: fullInputItems,
     ...(args.maxOutputTokens !== undefined ? { maxOutputTokens: args.maxOutputTokens } : {}),
     ...(args.serviceTier !== undefined ? { serviceTier: args.serviceTier } : {}),
     ...(args.reasoningEffort !== undefined ? { reasoningEffort: args.reasoningEffort } : {}),
+    ...carryoverOpts,
     store: false,
   })
   const requestFingerprint = fingerprintResponsesBody(fullBody)
-  if (
-    routeKey === undefined ||
-    args.continuationStore === undefined
-  ) {
+  if (routeKey === undefined || args.continuationStore === undefined) {
     return {
       body: fullBody,
       fullBody,
@@ -200,10 +271,7 @@ export const prepareResponsesContinuationRequest = (
   }
 
   const previous = args.continuationStore.get(routeKey)
-  if (
-    previous === null ||
-    previous.responseId === ""
-  ) {
+  if (previous === null || previous.responseId === "") {
     return {
       body: fullBody,
       fullBody,
@@ -343,10 +411,7 @@ export async function* streamResponsesSurface(
       try {
         firstChunkTimer = setTimeout(() => {
           request.controller.abort(
-            buildResponsesFirstChunkTimeoutError(
-              config.timeoutMs.firstChunkMs,
-              config.provider,
-            ),
+            buildResponsesFirstChunkTimeoutError(config.timeoutMs.firstChunkMs, config.provider),
           )
         }, config.timeoutMs.firstChunkMs)
 
@@ -436,6 +501,10 @@ export async function* streamResponsesSurface(
     }
 
     const outputItems: ResponsesInputItem[] = []
+    // H15 — captured re-emittable reasoning items for THIS turn. Stays empty
+    // unless carry-over is on AND the wire surfaces `item.reasoningItem` (which
+    // it only does when on). Order-preserving (append in stream order).
+    const capturedReasoning: ResponsesInputItem[] = []
     let resumable = true
     let completed: ResponsesCompletionMeta | null = null
     const rawFrames = parseResponsesSSEFrames(res.body) as AsyncIterable<{
@@ -457,6 +526,10 @@ export async function* streamResponsesSurface(
       yield* parseResponsesEvents(guardedFrames, {
         provider: config.provider,
         fallbackModel: config.model,
+        // H15 — pass the capture gate THROUGH to the wire. Default-OFF ⇒ omitted
+        // (the wire's `onOutputItemDone` payload is the legacy 2-field shape and
+        // `reasoningItem` is never surfaced ⇒ byte-identical).
+        ...(config.reasoningCarryover === true ? { reasoningCarryover: true } : {}),
         onCompleted: (meta) => {
           completed = meta
           if ((meta.usage?.reasoning ?? 0) > 0) resumable = false
@@ -470,6 +543,11 @@ export async function* streamResponsesSurface(
           }
         },
         onOutputItemDone: (item) => {
+          // H15 — capture the re-emittable reasoning item (present ONLY when
+          // carry-over is on and the item carried usable `encrypted_content`).
+          // This is ORTHOGONAL to the resume/baseline path below: a reasoning
+          // item still has `normalized === null`, so resumability is unchanged.
+          if (item.reasoningItem !== undefined) capturedReasoning.push(item.reasoningItem)
           if (item.normalized === null) {
             resumable = false
             return
@@ -485,6 +563,23 @@ export async function* streamResponsesSurface(
         config.continuationStore.clear(prepared.routeKey)
       }
       throw error
+    }
+
+    // H15 — persist this turn's captured reasoning for the NEXT turn's re-emit.
+    // Independent of the continuation (prompt-cache resume) store: carry-over
+    // works on the full-body path too. Default-OFF byte-identity: this whole
+    // block is skipped unless carry-over is on, a store is wired, AND a routeKey
+    // resolved. `put` REPLACES the route's items (latest reasoning supersedes),
+    // and an empty capture CLEARS the route so a turn that produced no reasoning
+    // does not re-feed a stale chain.
+    const carryoverStore = config.reasoningCarryoverStore
+    if (
+      config.reasoningCarryover === true &&
+      carryoverStore !== undefined &&
+      prepared.routeKey !== undefined
+    ) {
+      if (capturedReasoning.length > 0) carryoverStore.put(prepared.routeKey, capturedReasoning)
+      else carryoverStore.clear(prepared.routeKey)
     }
 
     const continuationStore = config.continuationStore

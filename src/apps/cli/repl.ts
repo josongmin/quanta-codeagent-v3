@@ -10,6 +10,7 @@ import { buildShellOtelObserver } from "@/observability"
 import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
 import { runSessionCommand as runSessionCommandInner } from "@/runner/session-ops"
 import { composeShellObservers, type ShellExecObserver } from "@/tool"
+import { emitConfigMigrationNotice } from "./config-migration-notice"
 import { createIdleMonitor } from "./idle-monitor"
 import { loadImageBlock } from "./image-loader"
 import { createImageQueue, type ImageQueue } from "./image-queue"
@@ -271,6 +272,12 @@ export const runRepl = async (): Promise<void> => {
     history: setup.history,
   })
   try {
+    // H13 — gated external-config migration notice (default-OFF behind
+    // QUANTA_MIGRATE_CONFIG). Detects competitor (Claude Code / Cursor) config
+    // under ~ + cwd, converts it to the quanta shape, throttles a re-offer, and
+    // surfaces a one-line stderr notice. Knob off ⇒ no detect / no disk touch /
+    // byte-identical. Awaited (cheap: a handful of stat probes) but no-throw.
+    await emitConfigMigrationNotice(setup.cwd)
     // ADR-0299 — surface composition wire. Builds the slash ctx PLUS the
     // wire bundle (conv-checkpoint, playbook-trigger seam, composer +
     // textInbox handles). Each upstream knob (env / CLI flag) gates the

@@ -1,0 +1,70 @@
+id: image-gen
+title: image_gen tool — text→image generation + edit (NEW binary-generation category)
+section: 2
+subsystem: Binary-artifact generation (H14a, jun-3-misc §3)
+order: 600
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:cli, category:generation, default-off]
+depends_on: [read-image, web-search-providers, llm-factory]
+config_refs:
+  env: ["QUANTA_IMAGE_GEN", "OPENAI_API_KEY"]
+  runtime: ["imageGen"]
+purpose: |
+  The FIRST binary-artifact-GENERATION tool in quanta — opens a NEW category.
+  Until now `src/tool/image/` was read-only (read_image / read_image_url) and
+  `src/tool/document/` was `*-read.ts` only; there was ZERO image/asset
+  generation. image_gen calls an injected provider port (default = the OpenAI
+  images endpoint `/v1/images/generations` + `/v1/images/edits`, model
+  gpt-image-1), decodes the base64 result, and writes it through the SAME
+  FS-jail chokepoint write/edit use, to a VERSIONED-sibling path (never silently
+  overwrites — Codex `imagegen` save-path policy: hero.png → hero-v2.png).
+
+  Closed-port DI (mirrors webSearchTool(provider) / readImageUrlTool({fetcher})):
+  an ImageGenPort interface with a default OpenAI adapter that BINDS
+  globalThis.fetch and takes the API key as a param (resolved by the
+  composition root from the same OPENAI_API_KEY runtime-config the LLM factory
+  uses — never hardcoded, never read from process.env in-slice). A key-less
+  port yields a typed no_key failure rather than crashing. Mutating
+  (isReadOnly()=false); no-throw (every failure → typed ok:false ToolResult).
+  Supports mode:generate (default) and mode:edit (referenceImagePath, read
+  through the jail). 8 MB per-image decoded cap; n (1-10) variants of one prompt;
+  optional inlinePreview via the existing ToolResult.images channel.
+evidence:
+  code:
+    - src/tool/image-gen/port.ts
+    - src/tool/image-gen/tool.ts
+    - src/tool/image-gen/store.ts
+    - src/tool/image-gen/index.ts
+    - src/tool/index.ts
+    - src/tool/surface/manifest.ts
+    - src/shared/runtime-config.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/image-gen-hellgate.test.ts
+      - tests/unit/image-gen-e2e-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_IMAGE_GEN
+    where: src/shared/runtime-config.ts
+    default: false
+    purpose: |
+      Strict `=== "1"` opt-in. Default-OFF ⇒ no DefaultToolPorts.imageGen port
+      wired ⇒ image_gen NOT registered ⇒ byte-identical default tool menu.
+deliberate_hold: null
+notes: |
+  Default-OFF / opt-in on EVERY surface in the tool-surface SSOT manifest
+  (it spends provider quota AND writes files, so it never auto-seeds). The
+  provider port is provider-agnostic; only the default adapter is OpenAI-
+  shaped. DEFERRED: CLI generate-batch (the skill issues one built-in call per
+  asset; n covers same-prompt variants), true model-native transparent
+  background (gpt-image-2/1.5 path — the doc's chroma-key + local-removal
+  workflow is a follow-up), and Office (docx/xlsx/pptx) authoring (the other
+  half of H14, separate slice).

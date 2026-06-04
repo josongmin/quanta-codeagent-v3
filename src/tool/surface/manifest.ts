@@ -473,6 +473,33 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     note: "Read-only V8-coverage reporter + optional threshold gate (self-verifying agents). CLI default-ON; bench/web opt-in (tool-menu reproducibility). Self-contained — builds its own coverage source; jailed path resolve like read/csv_read.",
   },
   {
+    name: "image_gen",
+    origin: "@/tool (imageGenTool, via DefaultToolPorts.imageGen)",
+    gate: {
+      kind: "config-slot",
+      slot: "DefaultToolPorts.imageGen",
+      env: "QUANTA_IMAGE_GEN",
+    },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "mutating",
+    adr: "H14a",
+    note: "NEW CATEGORY — the first binary-artifact-GENERATION tool (text→image + edit; existing read_image* is read-only). Opt-in EVERYWHERE (QUANTA_IMAGE_GEN): spends provider quota AND writes files, so it never auto-seeds. The composition root wires a key-bound provider port; a key-less port yields a typed no_key failure (never a dead 'no provider' tool, never a crash). Output goes to a versioned-sibling jailed path (never silent overwrite, Codex imagegen save-path policy). Classed `mutating` (writes the artifact); also network-backed.",
+  },
+  {
+    name: "xlsx_write",
+    group: ["docx_write"],
+    origin: "@/tool/document/authoring (via DefaultToolPorts.officeAuthoring)",
+    gate: {
+      kind: "config-slot",
+      slot: "DefaultToolPorts.officeAuthoring",
+      env: "QUANTA_OFFICE_AUTHORING",
+    },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "mutating",
+    adr: "H14b",
+    note: "NEW CATEGORY — Office document AUTHORING (generate real .xlsx / .docx) alongside image_gen. Pure-TS STORED-ZIP (CRC-32) + minimal-valid OOXML; NO office dependency (installs blocked). Opt-in EVERYWHERE (QUANTA_OFFICE_AUTHORING): writes files, so it never auto-seeds (CLI tool-menu reproducibility). Mutating — serialize in-memory then write through the same FS-jail chokepoint the readers use; an existing target lands at a versioned -vN sibling (never silent overwrite). No port to inject (self-contained). PPTX authoring is a scoped follow-up reusing this STORED-ZIP + OOXML core.",
+  },
+  {
     name: "prompt_cache_status",
     origin: "@/tool (promptCacheStatusTool, via tier1 buildPromptCacheBlock)",
     gate: {

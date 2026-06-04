@@ -3,7 +3,14 @@ import { dispatchNoThrow, LLMError } from "@/shared"
 import type { LLMProvider } from "@/shared/errors"
 import { parseToolInputOrThrow } from "./adapters/shared"
 import type { LlmCheckpoint, PromptCacheRetention, ResponsesCheckpoint } from "./target-metadata"
-import type { Message, StreamEvent, StreamInput, SystemPromptInput, ToolChoice, ToolSchema } from "./types"
+import type {
+  Message,
+  StreamEvent,
+  StreamInput,
+  SystemPromptInput,
+  ToolChoice,
+  ToolSchema,
+} from "./types"
 
 export interface ResponsesInputItem {
   readonly type: string
@@ -63,6 +70,16 @@ export interface ResponsesCompletionMeta {
 export interface ResponsesOutputItemDone {
   readonly rawType: string
   readonly normalized: ResponsesInputItem | null
+  /**
+   * H15 — the captured, re-emittable reasoning INPUT item for a reasoning
+   * output item carrying `encrypted_content`. Present ONLY when
+   * {@link ParseResponsesEventsOptions.reasoningCarryover} is on AND the item
+   * normalized to a non-null reasoning shape. Absent (undefined) on every
+   * non-reasoning item, when carry-over is off, or when the reasoning item
+   * carried no usable `encrypted_content` (safe-skip). The host persists this
+   * verbatim and re-feeds it on the next turn's input.
+   */
+  readonly reasoningItem?: ResponsesInputItem
 }
 
 export interface ParseResponsesEventsOptions {
@@ -72,6 +89,25 @@ export interface ParseResponsesEventsOptions {
   readonly onCompleted?: (meta: ResponsesCompletionMeta) => void
   readonly onOutputItemDone?: (item: ResponsesOutputItemDone) => void
   readonly onReasoning?: () => void
+  /**
+   * H15 reasoning carry-over capture gate (`QUANTA_REASONING_CARRYOVER`,
+   * OpenAI-Responses ONLY). Resolved at the composition root — this wire only
+   * reads the plain boolean it is handed (slice-boundary invariant: no
+   * process.env read).
+   *
+   * Default-OFF semantics (BYTE-IDENTICAL): when `false`/omitted the
+   * `response.output_item.done` reasoning arm behaves EXACTLY as today — it
+   * fires `onReasoning` (resumable ⇒ false) and `normalizeResponsesOutputItem`
+   * returns `null` for a reasoning item (dropped). NO `encrypted_content` is
+   * captured, NO new callback fires.
+   *
+   * When `true`: a reasoning output item that carries `encrypted_content` is
+   * normalized into a re-emittable input reasoning item and surfaced on
+   * {@link ResponsesOutputItemDone.reasoningItem} so the host can persist it
+   * for the next turn (ZDR-compatible: the body is opaque, never decoded
+   * locally).
+   */
+  readonly reasoningCarryover?: boolean
 }
 
 export interface BuildResponsesBodyOptions {
@@ -88,6 +124,28 @@ export interface BuildResponsesBodyOptions {
    *  (`QUANTA_REASONING_EFFORT`) but resolved at the composition root and passed
    *  in. Omitted ⇒ no `reasoning` field (default). */
   readonly reasoningEffort?: string
+  /**
+   * H15 reasoning carry-over re-emit gate (`QUANTA_REASONING_CARRYOVER`,
+   * OpenAI-Responses ONLY). Resolved at the composition root and threaded in as
+   * a plain boolean. Default-OFF ⇒ BYTE-IDENTICAL: NO `include` field is added,
+   * NO prior reasoning items are prepended (today's body verbatim).
+   *
+   * When `true` AND {@link priorReasoningItems} is non-empty: the prior
+   * reasoning input items are PREPENDED to `input` (Codex order: reasoning
+   * items lead the turn they precede) and `include: ["reasoning.encrypted_content"]`
+   * is added so the API echoes encrypted reasoning back on the response.
+   * `store` stays `false` (ZDR round-trip — the encrypted body is opaque).
+   */
+  readonly reasoningCarryover?: boolean
+  /**
+   * H15 — prior turns' captured reasoning INPUT items, to re-emit at the head
+   * of this turn's `input`. Only consulted when {@link reasoningCarryover} is
+   * `true`. Empty/omitted ⇒ no re-emit (and no `include`, so the body is
+   * byte-identical to off even with the gate on — the gate alone adds nothing
+   * without captured items). Each entry is the opaque shape produced by
+   * {@link normalizeResponsesReasoningItem}.
+   */
+  readonly priorReasoningItems?: readonly ResponsesInputItem[]
 }
 
 const DEFAULT_INSTRUCTIONS = "You are a helpful assistant."
@@ -236,7 +294,21 @@ export const buildResponsesBody = (
   model: string,
   options: BuildResponsesBodyOptions = {},
 ): Record<string, unknown> => {
-  const items = [...(options.inputItems ?? buildResponsesInputItems(input.messages))]
+  // H15 re-emit: PREPEND prior captured reasoning items to the turn's input so
+  // the model resumes its chain of thought (Codex order — reasoning items lead
+  // the turn). Gated AND non-empty-guarded: when carry-over is off OR there are
+  // no captured items, `priorReasoning` is empty and `items` is byte-identical
+  // to today (the spread of an empty array prepends nothing).
+  const priorReasoning =
+    options.reasoningCarryover === true &&
+    options.priorReasoningItems !== undefined &&
+    options.priorReasoningItems.length > 0
+      ? options.priorReasoningItems
+      : []
+  const items = [
+    ...priorReasoning,
+    ...(options.inputItems ?? buildResponsesInputItems(input.messages)),
+  ]
   const instructions = (() => {
     const flattened = flattenResponsesSystem(input.system)
     return flattened !== "" ? flattened : DEFAULT_INSTRUCTIONS
@@ -269,6 +341,13 @@ export const buildResponsesBody = (
       : {}),
     ...(serviceTier !== undefined ? { service_tier: serviceTier } : {}),
     ...(reasoningEffort !== undefined ? { reasoning: { effort: reasoningEffort } } : {}),
+    // H15 — request encrypted reasoning back ONLY when we are actually
+    // re-emitting prior reasoning items (carry-over on + non-empty). The
+    // `include` field is the body-level SSOT for "echo reasoning.encrypted_content"
+    // (the `x-reasoning-included` transport header is the adapter-side seam,
+    // documented but not set here — this wire owns no headers). Off / empty ⇒
+    // no `include` key (byte-identical).
+    ...(priorReasoning.length > 0 ? { include: ["reasoning.encrypted_content"] } : {}),
   }
 }
 
@@ -327,6 +406,33 @@ const normalizeFunctionCallOutputItem = (
   }
 }
 
+/**
+ * H15 — normalize a Responses `reasoning` OUTPUT item into a re-emittable
+ * INPUT reasoning item (the shape Codex re-feeds: `type: "reasoning"` carrying
+ * the opaque `encrypted_content`, plus `id`/`summary` when present).
+ *
+ * Returns `null` (safe-skip) when there is no usable `encrypted_content`:
+ *   - missing / non-string / empty `encrypted_content` ⇒ nothing to carry over.
+ * A null here means the host captures nothing for this item and the turn stays
+ * non-resumable exactly as before — never a crash on a malformed reasoning
+ * payload (mirrors Codex's "contained no … encrypted_content" reducer skip).
+ *
+ * The `summary` is preserved verbatim ONLY when it is an array (the Responses
+ * reasoning-summary shape); anything else is dropped. The body is NEVER decoded
+ * locally (ZDR — `encrypted_content` is opaque ciphertext).
+ */
+export const normalizeResponsesReasoningItem = (item: unknown): ResponsesInputItem | null => {
+  if (!isObject(item) || item.type !== "reasoning") return null
+  const encrypted = item.encrypted_content
+  if (typeof encrypted !== "string" || encrypted === "") return null
+  return {
+    type: "reasoning",
+    ...(typeof item.id === "string" && item.id !== "" ? { id: item.id } : {}),
+    encrypted_content: encrypted,
+    ...(Array.isArray(item.summary) ? { summary: item.summary } : {}),
+  }
+}
+
 export const normalizeResponsesOutputItem = (item: unknown): ResponsesInputItem | null => {
   if (!isObject(item) || typeof item.type !== "string") return null
   switch (item.type) {
@@ -348,7 +454,9 @@ export const parseResponsesSSEEvent = (raw: string): SSEEvent | null => {
     else if (line.startsWith("data:")) dataParts.push(line.slice(5).replace(/^ /, ""))
   }
   if (dataParts.length === 0) return null
-  return event !== undefined ? { event, data: dataParts.join("\n") } : { data: dataParts.join("\n") }
+  return event !== undefined
+    ? { event, data: dataParts.join("\n") }
+    : { data: dataParts.join("\n") }
 }
 
 export async function* parseResponsesSSEFrames(
@@ -471,9 +579,7 @@ export async function* parseResponsesEvents(
         // (it may be omitted for pure-streamed calls). Only fall back to the
         // done-carried `arguments` when no deltas accumulated, then to "{}".
         const raw =
-          slot?.args !== undefined && slot.args !== ""
-            ? slot.args
-            : (event.item?.arguments ?? "{}")
+          slot?.args !== undefined && slot.args !== "" ? slot.args : (event.item?.arguments ?? "{}")
         const input = parseToolInputOrThrow(
           typeof raw === "string" ? raw : JSON.stringify(raw),
           id,
@@ -485,9 +591,21 @@ export async function* parseResponsesEvents(
         if (typeof event.item?.id === "string") itemIdToCallId.delete(event.item.id)
       }
       if (rawType === "reasoning") dispatchNoThrow(opts.onReasoning)
+      // H15 default-OFF byte-identity: when carry-over is off the captured
+      // `reasoningItem` key is NEVER added (the payload is the legacy 2-field
+      // shape). When on AND the item is a reasoning item carrying usable
+      // `encrypted_content`, surface the re-emittable input item so the host
+      // can persist it. A reasoning item still normalizes to `null` for the
+      // resume/baseline path (`normalizeResponsesOutputItem` is unchanged), so
+      // the continuation-store semantics are untouched.
+      const reasoningItem =
+        opts.reasoningCarryover === true && rawType === "reasoning"
+          ? normalizeResponsesReasoningItem(event.item)
+          : null
       dispatchNoThrow(opts.onOutputItemDone, {
         rawType,
         normalized: normalizeResponsesOutputItem(event.item),
+        ...(reasoningItem !== null ? { reasoningItem } : {}),
       })
       continue
     }
@@ -592,9 +710,7 @@ type AccumulatedUsage = {
  *  completed one. Returns null when no usage payload is present so the caller
  *  can fall back to the prior accumulator (and `emitUsage` stays a no-op for a
  *  truly usage-less stream rather than emitting a fabricated zero). */
-const extractResponsesUsage = (
-  response: ResponsesEvent["response"],
-): AccumulatedUsage | null => {
+const extractResponsesUsage = (response: ResponsesEvent["response"]): AccumulatedUsage | null => {
   const rawUsage = response?.usage
   if (rawUsage === undefined) return null
   const cached = rawUsage.cached_input_tokens ?? rawUsage.input_tokens_details?.cached_tokens
@@ -608,10 +724,7 @@ const extractResponsesUsage = (
   }
 }
 
-function* emitUsage(
-  usage: AccumulatedUsage | null,
-  fallbackModel: string,
-): Generator<StreamEvent> {
+function* emitUsage(usage: AccumulatedUsage | null, fallbackModel: string): Generator<StreamEvent> {
   if (usage === null) return
   yield {
     type: "usage",

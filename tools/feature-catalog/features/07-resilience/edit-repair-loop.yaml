@@ -55,6 +55,8 @@ evidence:
       - tests/unit/edit-repair-loop-hellgate.test.ts
       - tests/unit/edit-repair-wire-hellgate.test.ts
       - tests/unit/edit-repair-command-loop-hellgate.test.ts
+      - tests/unit/dispatch-lint-delta-hellgate.test.ts
+      - tests/unit/edit-reactor-e2e-hellgate.test.ts
     integration: []
     contract: []
 knobs:

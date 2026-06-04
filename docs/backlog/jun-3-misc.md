@@ -102,7 +102,12 @@
 > - **H9 ✅** (read `file_unchanged` dedup) — `ReadFileState`에 range-dedup sibling map(freshness와 분리). 동일 path+offset+limit 재read+mtime 동일→sentinel. `QUANTA_READ_DEDUP`(default-OFF, CLI 기본-ON). dispatch.ts 안 건드림(기존 ctx.readFileState 재사용). B5 device/binary 가드 뒤에 실행=무회귀. hellgate 16 + e2e.
 > - **H12 ✅** (line-range-scoped edit) — `line_ranges:[{start,end}]`(1-based inclusive) optional 스키마, exact/fuzzy ladder **앞** 결정론적 prefilter(스코어링 불변). ambiguous 실패에 파일 줄수 첨부(retry 힌트). knob 없음(omit=byte-identical). hellgate 25 + e2e. 기존 edit 177/0 무회귀.
 > - **잔재 정리**: jun-04 ai_attribution 삭제의 catalog YAML + ADR-0257(→Superseded) orphan 해소. fc lint ok.
-> - **wave-2 예정**: H1(edit-reactor, dispatch에서 H2와 결합 필요) / H14(생성축 image_gen+Office, 카테고리 갭=대형).
+> **✅ jun-04 wave-2 (3 병렬, 경쟁사 .extracted_source 정독 후 SOTA++) 완료: H1·H14a·H14b.** 신규 72/0, 광역 2174/0, tsc 0, biome 0, catalog 841 all-resolved.
+> - **H1 ✅ (edit-reactor/자가수정)** — 실은 ADR-0472 `edit-repair-loop` 슬라이스로 **이미 랜딩**(또 backlog stale): `computeLintDelta`(count-aware multiset diff, key=(file,line,code,message), pre-existing 제외=Cursor `new_linter_errors`/`should_attach_linter_errors` 패턴) + `runRepairLoop`(maxIters bound, no-throw) + dispatch bracket + `QUANTA_EDIT_REPAIR_LOOP`. wave에서 **수렴 e2e 7개**(기존 테스트는 라우팅만 증명, 수렴/maxIters bound/LoopOnCommand 미증명) 추가. Cursor 소스=protobuf wire contract(델타는 server-side).
+> - **H14a ✅ (image_gen — NEW 카테고리)** — 새 슬라이스 `src/tool/image-gen/`. `ImageGenPort`(closed-port DI, OpenAI images `/v1/images/generations` `gpt-image-1` adapter, `fetch` 바인딩, 키는 composition root가 주입=슬라이스 env-free). text→image + edit + n>1, base64→FS-jail 버전드-sibling write(never overwrite=Codex save-policy), SSRF/size cap, no-key/error=typed ok:false. `DefaultToolPorts.imageGen` + `QUANTA_IMAGE_GEN` default-OFF + manifest + catalog. hellgate+e2e(fake fetcher→실제 PNG magic-byte). deferred: native transparency.
+> - **H14b ✅ (Office authoring xlsx/docx — NEW 카테고리)** — 설치차단+office lib 0 제약 → **순수-TS STORED-ZIP(CRC-32 표준 poly) + minimal-valid OOXML 코어 직접 구축**(신규 dep 0). `buildXlsx`/`buildDocx` pure serializer(shared-string pool, XML 5-entity escape+control strip), `xlsx_write`/`docx_write` 도구, FS-jail 버전드-sibling write. `DefaultToolPorts.officeAuthoring`+`QUANTA_OFFICE_AUTHORING` default-OFF + manifest + catalog. **TRUE 바이트 라운드트립 e2e**(xlsx_write→자체 parseStoredZip→셀 일치, 모든 part CRC 재검증). **⚠️ 한계**: 기존 `xlsx_read`가 **stub**(ADR-0138 미구현)이라 라운드트립을 자체 reader로만 증명 — 생성물은 실제 valid .xlsx(드롭인 fixture). **PPTX는 scoped follow-up**(코어 재사용, PresentationML body만 남음).
+
+
 
 
 
