@@ -19,13 +19,34 @@
 
 /** Lifecycle of an objective. `completed` may be auto-derived (see port doc).
  *
- * H17 budget enforcement adds `budget_limited`: a DERIVED status (like
- * `blocked` / `completed`, never an explicit caller intent) that the store
- * surfaces ONLY when constructed with `enforceBudget: true` AND the cell's
- * accumulated usage has reached a configured cap (`tokensUsed >= maxTokens`
- * or `turnsUsed >= maxTurns`). With the default (informational) store the
- * status NEVER takes this value — byte-identical to ADR-0394. */
-export type ObjectiveStatus = "active" | "blocked" | "completed" | "budget_limited"
+ * H17 (Codex `core/src/goals.rs`) makes this the SIX-state goal machine:
+ *
+ *   active | paused | usage_limited | budget_limited | completed | blocked
+ *
+ * Two values are EXPLICIT caller intents: `active` (default) and `paused`
+ * (manually suspended — does NOT auto-resume on idle). The other four are
+ * DERIVED (never set directly):
+ *   - `blocked`        — derived from a non-empty blocker list (highest).
+ *   - `usage_limited`  — H17 transient, AUTO-RESETTING external usage/rate
+ *                        window. While `now < usageLimitedUntil` (and the store
+ *                        enforces) the status is `usage_limited`; once the clock
+ *                        passes the window it re-derives back to the explicit
+ *                        value — no sticky flag. Distinct from `budget_limited`
+ *                        (the goal's own hard cap).
+ *   - `budget_limited` — the goal's own token/turn cap reached (`tokensUsed >=
+ *                        maxTokens` or `turnsUsed >= maxTurns`); a HARD stop.
+ *   - `completed`      — all (>=1) success criteria met.
+ *
+ * `usage_limited` / `budget_limited` surface ONLY when the store is constructed
+ * with `enforceBudget: true`. With the default (informational) store the status
+ * NEVER takes either derived limit value — byte-identical to ADR-0394. */
+export type ObjectiveStatus =
+  | "active"
+  | "paused"
+  | "usage_limited"
+  | "budget_limited"
+  | "completed"
+  | "blocked"
 
 /** What a blocker is waiting on. Closed enum — drives later HITL/resume logic. */
 export type WaitingOn = "user" | "tool" | "network" | "child_agent"
@@ -104,6 +125,13 @@ export interface ObjectivePort {
   setNextActions(threadId: string, actions: readonly string[]): Objective | null
   markCriterion(threadId: string, criterionId: string, met: boolean): Objective | null
   recordUsage(threadId: string, used: { tokens?: number; turns?: number }): Objective | null
+  /** H17 — mark a transient, AUTO-RESETTING external usage/rate limit on this
+   *  goal until `untilEpochMs` (clock-derived). While `now < untilEpochMs` the
+   *  derived status is `usage_limited` (when the store enforces); once the clock
+   *  passes the window the status re-derives back to the explicit value — no
+   *  sticky flag. A no-op under the informational store. Passing a non-finite
+   *  or past `untilEpochMs` clears any window. */
+  markUsageLimited(threadId: string, untilEpochMs: number): Objective | null
   list(): readonly Objective[]
   toSnapshot(): ObjectiveSnapshot
   fromSnapshot(snap: ObjectiveSnapshot): void

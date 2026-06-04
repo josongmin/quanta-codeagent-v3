@@ -40,7 +40,11 @@ interface Cell {
   criteria: SuccessCriterion[]
   blockers: Blocker[]
   nextActions: string[]
-  explicitStatus: "active" | "completed"
+  explicitStatus: "active" | "paused" | "completed"
+  /** H17 — epoch-ms until which a transient external usage/rate limit applies.
+   *  `undefined` ⇒ no window. Derives `usage_limited` while `now < this` AND the
+   *  store enforces; auto-clears (re-derives) once the clock passes it. */
+  usageLimitedUntil?: number
   maxTokens?: number
   tokensUsed: number
   maxTurns?: number
