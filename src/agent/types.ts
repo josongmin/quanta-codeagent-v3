@@ -777,6 +777,16 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    *  not grow a new top-of-file dependency. */
   diagnosticsProvider?: import("@/tool").DiagnosticsProvider
   /**
+   * ADR-0476 skill→MCP auto-attach session. ONE per-session coordinator the
+   * composition root mints (assembler `maybeWireSkillMcp`) when
+   * `QUANTA_SKILL_MCP_DEPS=1`, wired to `@/agent/plugin-mcp-launcher` (stdio) +
+   * `@/mcp` HTTP-SSE (ADR-0391) via the dual-transport attach adapter. The loop
+   * calls `reconcileSkillMcpForTurn` per turn over the active skills and
+   * `shutdownAll()` at session end. Absent ⇒ both are pure no-ops (byte-
+   * identical default-OFF). Duck-typed via inline import (slice surface stays
+   * lean; the loop reaches it through the `SkillMcpReconcileConfigLike` view). */
+  skillMcpSession?: import("@/skill/skill-mcp-deps").SkillMcpSession
+  /**
    * ADR-0081 shell output delta streaming — opt-in observer for the typed
    * `ShellExecEvent` stream. The dispatch seam forwards this to
    * `ToolContext.onShellEvent` so the `bash` tool (and any future shell-

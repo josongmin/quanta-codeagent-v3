@@ -105,12 +105,21 @@ const EMPTY: ResolvedPluginActivation = Object.freeze({
  * loop's cognitive complexity inside the biome ceiling.
  */
 export const augmentActiveSkillsWithPlugin = (
-  callerActiveSkills: { name: string; description: string }[] | undefined,
+  callerActiveSkills:
+    | { name: string; description: string; rawDependencies?: unknown }[]
+    | undefined,
   pluginActivation: ResolvedPluginActivation,
-): { name: string; description: string }[] | undefined => {
+): { name: string; description: string; rawDependencies?: unknown }[] | undefined => {
   if (pluginActivation.resolvedSkills.length === 0) return callerActiveSkills
   const merged = unionActiveSkills(callerActiveSkills, pluginActivation.resolvedSkills)
-  return merged.map((s) => ({ name: s.name, description: s.description }))
+  // ADR-0476 — preserve each skill's lifted `dependencies` block through the
+  // union projection so the per-turn MCP reconcile can still see it (the field
+  // rides with its skill; absent for skills with no deps block).
+  return merged.map((s) => ({
+    name: s.name,
+    description: s.description,
+    ...(s.rawDependencies !== undefined ? { rawDependencies: s.rawDependencies } : {}),
+  }))
 }
 
 /**
@@ -205,6 +214,26 @@ export const reconcileSkillMcpForTurn = async (
     // so a non-conforming session injection can never break the turn.
     return { attached: [], detached: [] }
   }
+}
+
+/**
+ * ADR-0476 — map the loop's active-skill channel (`{name, rawDependencies?}`)
+ * onto `ActiveSkillDeps` and reconcile the session's MCP attach set for the
+ * turn. Extracted from `prepareTurnContext` so that hot function stays under the
+ * cognitive-complexity cap. Pure no-op (immediate return, NO allocation) when no
+ * `skillMcpSession` is wired — the common path — so it is byte-identical and
+ * zero-cost by default. NO-THROW (delegates to {@link reconcileSkillMcpForTurn}).
+ */
+export const reconcileSkillMcpDepsForTurn = async (
+  config: SkillMcpReconcileConfigLike,
+  activeSkills: readonly { name: string; rawDependencies?: unknown }[] | undefined,
+): Promise<void> => {
+  if (config.skillMcpSession === undefined) return
+  const deps: ActiveSkillDeps[] = (activeSkills ?? []).map((s) => ({
+    skillId: s.name,
+    ...(s.rawDependencies !== undefined ? { rawDependencies: s.rawDependencies } : {}),
+  }))
+  await reconcileSkillMcpForTurn(config, deps)
 }
 
 export const resolvePluginActivationForTurn = async (

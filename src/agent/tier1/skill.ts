@@ -14,6 +14,7 @@
  * (byte-identical, RFC §1.2).
  */
 
+import { runtimeConfig } from "@/shared"
 import type { Tool } from "@/tool"
 import type { Skill } from "../../skill"
 import {
@@ -42,8 +43,11 @@ export interface SkillBlock {
   /** Skill name → author-declared `{model?, effort?}` override, for skills
    *  that declared at least one. Absent when no skill declared either. */
   overrides: Map<string, SkillTurnOverride> | undefined
-  /** Per-turn suggestion inventory (filtered by `changedPaths` when set). */
-  inventory: { name: string; description: string }[]
+  /** Per-turn suggestion inventory (filtered by `changedPaths` when set).
+   *  `rawDependencies` (ADR-0476) is propagated ONLY when the
+   *  `QUANTA_SKILL_MCP_DEPS` gate is on AND the skill declared a deps block;
+   *  the prompt renderer ignores it, so the field is byte-identical otherwise. */
+  inventory: { name: string; description: string; rawDependencies?: unknown }[]
 }
 
 /** ADR-0011 §6.2 → L4: the per-skill model/effort override entry, or
@@ -127,7 +131,15 @@ export const buildSkillBlock = async (config: AgentConfig): Promise<SkillBlock |
           ...skillsActivatedFor(skills, changedPaths),
         ]
       : skills
-  const inventory = activated.map((s) => ({ name: s.name, description: s.description }))
+  // ADR-0476 — propagate each skill's lifted `dependencies` block onto the
+  // active-skill channel ONLY when the gate is on, so the per-turn reconcile can
+  // resolve declared MCP servers. Gate off ⇒ field omitted ⇒ byte-identical.
+  const wantDeps = runtimeConfig().skillMcpDeps
+  const inventory = activated.map((s) =>
+    wantDeps && s.rawDependencies !== undefined
+      ? { name: s.name, description: s.description, rawDependencies: s.rawDependencies }
+      : { name: s.name, description: s.description },
+  )
   return {
     tools,
     allowlists: al.size > 0 ? al : undefined,

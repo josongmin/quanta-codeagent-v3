@@ -68,4 +68,12 @@ export interface PluginSkillExtensionConfig {
 export interface ActiveSkillDescriptor {
   readonly name: string
   readonly description: string
+  /** ADR-0476 — the skill's raw `dependencies` block (lifted once at session
+   *  start via `liftRawDependenciesBlock`), carried alongside the skill so the
+   *  per-turn MCP reconcile resolves its declared servers WITHOUT re-reading
+   *  SKILL.md. Absent for skills with no `dependencies` block AND whenever the
+   *  `QUANTA_SKILL_MCP_DEPS` gate is off (lifting is skipped) ⇒ byte-identical
+   *  default. The active-skills prompt renderer reads only name/description, so
+   *  this extra field never changes the rendered prompt. */
+  readonly rawDependencies?: unknown
 }

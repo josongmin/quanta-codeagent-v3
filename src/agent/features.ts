@@ -133,7 +133,7 @@ export interface SessionFeatures {
    *  re-discovering on every turn (Codex anti-reread). The skill BODY stays
    *  lazy (progressive disclosure); only metadata rides here. Present only
    *  when `config.skills` is set; absent ⇒ no block (byte-identical). */
-  activeSkills?: { name: string; description: string }[]
+  activeSkills?: { name: string; description: string; rawDependencies?: unknown }[]
   /** Session-scoped WorkingState (Codex memory L3 absorption). Present only
    *  when `config.workingState?.enabled === true`; absent ⇒ the
    *  `update_working_state` tool is NOT in `extraTools` and the loop renders

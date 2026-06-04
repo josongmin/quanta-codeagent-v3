@@ -1,6 +1,7 @@
 import { homedir } from "node:os"
 import { z } from "zod"
 import { classifyPath } from "@/security"
+import { runtimeConfig } from "@/shared"
 import { defaultFileSystemPort, type FileSystemPort, FsJailError } from "@/storage"
 import { defineTool } from "../factory"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
@@ -199,6 +200,41 @@ const resolveReadOutcome = async (
   return { kind: "ok", text: read.value, info }
 }
 
+/** H9 — the compact `file_unchanged` sentinel rendered in place of full content
+ *  when an identical-range re-read finds an unchanged mtime. It is UNAMBIGUOUS
+ *  (names the path + the exact range + the reason) and ACTIONABLE: the model is
+ *  told the content is byte-identical to its prior read and should re-use that,
+ *  so it never needs the bytes re-sent. Deterministic (pure function of its
+ *  inputs — no clock, no randomness). */
+const renderFileUnchanged = (path: string, offset: number, limit: number): string =>
+  `file_unchanged: ${path} (offset ${offset}, limit ${limit}) — ` +
+  "content identical to your prior read of this exact range; re-using it."
+
+/** H9 — try the read-side dedup short-circuit. Returns the `file_unchanged`
+ *  ToolResult when (and ONLY when) the H9 knob is ON, the dedup state is wired,
+ *  and the EXACT (path, offset, limit) range was already read this run with a
+ *  mtime that still === the current on-disk mtime. Returns `null` (⇒ caller
+ *  renders + records full content) on ANY difference: knob off, no state, never
+ *  read, different range, or an advanced/regressed mtime. NO-THROW, pure aside
+ *  from the injected state read. Keeps `execute` under the lint complexity gate. */
+const tryReadDedup = (
+  ctx: ToolContext,
+  path: string,
+  offset: number,
+  limit: number,
+  currentMtimeMs: number,
+): ToolResult | null => {
+  if (!runtimeConfig().readDedup) return null
+  const state = ctx.readFileState
+  if (state === undefined) return null
+  const recorded = state.recordedRangeMtime(path, offset, limit)
+  // Strict equality is the closed dedup signal: a mtime that ADVANCED (external
+  // write) OR regressed (restore/skew) is NOT identical, so we fall through to a
+  // full content re-read AND re-record below — never a stale short-circuit.
+  if (recorded === undefined || recorded !== currentMtimeMs) return null
+  return { ok: true, output: renderFileUnchanged(path, offset, limit) }
+}
+
 const schema = z.object({
   path: z.string().describe("File path (absolute or relative to cwd)"),
   // `offset` is a 1-based line index: it must be a non-negative integer.
@@ -248,13 +284,44 @@ export const makeReadTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
       }
       // ADR-0474 — record the read-time mtime (keyed by the RESOLVED absolute
       // path so a later write/edit, which stats the same abs path, matches).
-      // No-op when the guard is off (ctx.readFileState absent).
+      // No-op when the guard is off (ctx.readFileState absent). UNCHANGED by H9.
       ctx.readFileState?.record(outcome.info.path, outcome.info.mtimeMs)
+
+      // H9 read-side dedup — the EFFECTIVE range is the resolved (offset, limit)
+      // pair `renderReadOk` actually slices on, so an implicit `limit` dedups
+      // against an explicit one that resolves to the same window. Keyed by the
+      // RESOLVED absolute path (`outcome.info.path`) — the SAME identity the
+      // mtime record uses — so the dedup map and the freshness map agree on
+      // which file a re-read refers to.
+      const effOffset = input.offset ?? 1
+      const effLimit = input.limit ?? DEFAULT_LIMIT
+      const deduped = tryReadDedup(
+        ctx,
+        outcome.info.path,
+        effOffset,
+        effLimit,
+        outcome.info.mtimeMs,
+      )
+      if (deduped !== null) {
+        yield { type: "result", result: deduped }
+        return
+      }
+      // Full content path — (re)record this range's mtime so the NEXT identical
+      // re-read with an unchanged mtime short-circuits. No-op (no allocation)
+      // when the H9 knob is off OR the dedup state is absent.
+      if (runtimeConfig().readDedup) {
+        ctx.readFileState?.recordReadRange(
+          outcome.info.path,
+          effOffset,
+          effLimit,
+          outcome.info.mtimeMs,
+        )
+      }
       yield {
         type: "result",
         result: {
           ok: true,
-          output: renderReadOk(outcome.text, input.offset, input.limit ?? DEFAULT_LIMIT),
+          output: renderReadOk(outcome.text, input.offset, effLimit),
         },
       }
     },

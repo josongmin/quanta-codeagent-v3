@@ -6,6 +6,7 @@ import { captureToolDiff } from "../tool-diff-capture"
 import type { Tool, ToolContext, ToolEvent, ToolFailure } from "../types"
 import { applyExactEdit } from "./exact"
 import { applyFuzzyEdit } from "./fuzzy"
+import { type LineRange, lineCount, validateLineRanges } from "./line-range"
 import { classifyMismatch, formatEditMismatchMarker, formatStrategyHint } from "./strategy-hint"
 
 const schema = z.object({
@@ -18,6 +19,22 @@ const schema = z.object({
     .optional()
     .describe(
       "If exact match fails, retry with whitespace-tolerant fuzzy matching (default false)",
+    ),
+  /** H12 — OPTIONAL 1-indexed inclusive line ranges constraining WHERE
+   *  old_string is matched. Use it to disambiguate a repeated anchor without
+   *  adding surrounding context: "the occurrence on lines 40-60". Absent ⇒
+   *  whole-file search (byte-identical legacy). */
+  line_ranges: z
+    .array(
+      z.object({
+        start: z.number().describe("First line of the span (1-indexed, inclusive)"),
+        end: z.number().describe("Last line of the span (1-indexed, inclusive)"),
+      }),
+    )
+    .optional()
+    .describe(
+      "Restrict matching to these 1-indexed inclusive line ranges. Disambiguates a " +
+        "repeated old_string by scope instead of extra context. Absent ⇒ whole file.",
     ),
   /** ADR-0398 — OPTIONAL sha256 hex precondition. When supplied, the tool
    *  computes the sha256 of the file's CURRENT bytes and refuses the write if
@@ -44,16 +61,22 @@ const buildMismatchResult = (
     kind?: Parameters<typeof formatEditMismatchMarker>[0]
   },
   path: string,
+  fileLineCount?: number,
 ): { ok: false; output: string; failure: ToolFailure } => {
   const next = classifyMismatch(result.kind !== undefined ? { kind: result.kind } : result.message)
   const hint = formatStrategyHint(next)
   const marker = result.kind !== undefined ? ` ${formatEditMismatchMarker(result.kind)}` : ""
+  // H12 — append the file's total line count (when the caller passed it) so the
+  // model can pick a VALID `line_ranges` span on retry instead of guessing. The
+  // caller only supplies it for the AMBIGUOUS / already-scoped failure classes,
+  // so other failures' output stays byte-identical.
+  const lineNote = fileLineCount !== undefined ? `\n(the file has ${fileLineCount} lines)` : ""
   // The old_string did not match: the target text was not found in the file.
   // Typed as `not_found` so the model branches to re-read / fuzzy instead of
   // regex-sniffing the hint text. `output` is unchanged (byte-identical).
   return {
     ok: false,
-    output: `${result.message}${marker}\n\n${hint}`,
+    output: `${result.message}${marker}\n\n${hint}${lineNote}`,
     failure: { mode: "not_found", path },
   }
 }
@@ -102,13 +125,41 @@ const planEdit = async (
   const source = await fs.readFile(input.path, cwd)
   const preconditionFailure = checkHashPrecondition(source, input.path, input.expected_hash)
   if (preconditionFailure !== null) return { kind: "failure", result: preconditionFailure }
+  // H12 — validate caller-supplied line ranges BEFORE matching. A malformed
+  // range is a model error, surfaced as `rejected` so it fixes the span rather
+  // than wondering why the edit "found nothing". Absent ⇒ undefined (whole-file
+  // search, byte-identical legacy path).
+  const lineRanges: readonly LineRange[] | undefined =
+    input.line_ranges !== undefined && input.line_ranges.length > 0 ? input.line_ranges : undefined
+  if (lineRanges !== undefined) {
+    const verdict = validateLineRanges(lineRanges)
+    if (!verdict.ok) {
+      return {
+        kind: "failure",
+        result: {
+          ok: false,
+          output: verdict.message,
+          failure: { mode: "rejected", reason: verdict.message },
+        },
+      }
+    }
+  }
   const replaceAll = input.replace_all ?? false
-  let result = applyExactEdit(source, input.old_string, input.new_string, replaceAll)
+  let result = applyExactEdit(source, input.old_string, input.new_string, replaceAll, lineRanges)
   if ((!result.ok || result.next === undefined) && input.fuzzy) {
-    result = applyFuzzyEdit(source, input.old_string, input.new_string, replaceAll)
+    result = applyFuzzyEdit(source, input.old_string, input.new_string, replaceAll, lineRanges)
   }
   if (!result.ok || result.next === undefined) {
-    return { kind: "failure", result: buildMismatchResult(result, input.path) }
+    // H12 paired improvement — annotate AMBIGUOUS failures (the anchor matched
+    // multiple spots) with the file's total line count so the model can pick a
+    // `line_ranges` value on retry to disambiguate by scope, instead of a blind
+    // re-guess. Scoped failures (line_ranges already supplied, but still no/2+
+    // in-range match) also get it so the model can widen/narrow the span. Other
+    // failure classes (not-found / fuzzy-no-confident) keep their byte-identical
+    // legacy output — a line count doesn't help re-find missing text.
+    const wantsLineCount = result.kind === "ambiguous" || lineRanges !== undefined
+    const fileLineCount = wantsLineCount ? lineCount(source) : undefined
+    return { kind: "failure", result: buildMismatchResult(result, input.path, fileLineCount) }
   }
   // Surface the pre-edit `source` so a SUCCESSFUL commit can hand the
   // before/after to the optional tool-diff sink (ADR-0440) — no recompute,

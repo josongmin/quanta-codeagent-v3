@@ -55,6 +55,7 @@ import { createObjectiveStore, type ObjectivePort } from "@/agent/objective"
 import { autoWirePluginActivation } from "@/agent/plugin-activation-handler"
 import { getGlobalSessionResourceRegistry } from "@/agent/session-resource-registry"
 import { buildCallerOwnedRegistryWithTelemetry } from "@/agent/session-resource-registry/caller-owned-builder"
+import { buildSkillMcpSession } from "@/agent/skill-mcp-wire"
 import {
   type BackgroundSubagentScheduler,
   defaultBackgroundSubagentScheduler,
@@ -348,6 +349,7 @@ const wireOptionalCapabilitySlots = (cfg: AgentConfig, env: AssemblerEnv): void 
   maybeWireBackgroundSubagent(cfg, env)
   maybeWireReadFileState(cfg, env)
   maybeWireDiagnostics(cfg, env)
+  maybeWireSkillMcp(cfg, env)
   maybeWirePromptCacheObserver(cfg, env)
 }
 
@@ -384,6 +386,18 @@ const maybeWireDiagnostics = (cfg: AgentConfig, env: AssemblerEnv): void => {
   if (!editRepairLoopEnabled(env)) return
   if (cfg.diagnosticsProvider !== undefined) return
   cfg.diagnosticsProvider = lspDiagnosticsProvider()
+}
+
+/** ADR-0476 — mint ONE per-session skill→MCP coordinator when opted in
+ *  (`QUANTA_SKILL_MCP_DEPS=1`), bound to the REAL stdio launcher + HTTP-SSE
+ *  connect port (dual-transport, via `buildSkillMcpSession`). The loop then
+ *  reconciles it per turn over the active skills' lifted `dependencies` blocks
+ *  and tears it down at session end. Caller-override-safe; absent gate ⇒ slot
+ *  stays unset ⇒ reconcile + shutdown are pure no-ops (byte-identical). */
+const maybeWireSkillMcp = (cfg: AgentConfig, env: AssemblerEnv): void => {
+  if (env.QUANTA_SKILL_MCP_DEPS !== "1") return
+  if (cfg.skillMcpSession !== undefined) return
+  cfg.skillMcpSession = buildSkillMcpSession(env)
 }
 
 /** Single source of truth for "config for this mode" assembly. `env` is the

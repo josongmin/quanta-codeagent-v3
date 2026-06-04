@@ -26,6 +26,7 @@ import {
 } from "./prompt-sections"
 import { type RepoRules, renderRepoRulesBlock } from "./repo-rules"
 import { embedUntrusted, escapeBoundary } from "./untrusted"
+import { UNTRUSTED_ENVELOPE_RULE } from "./untrusted-envelope"
 import { renderWorkingStateBlock, type WorkingState } from "./working-state"
 
 /**
@@ -230,6 +231,19 @@ export interface TurnContextInput {
    *  never throws, and is explicitly labelled "guidance, not a hard limit".
    *  Absent / `tokens <= 0` ⇒ ZERO new bytes (byte-identical default-OFF). */
   taskBudget?: TaskBudget
+
+  /** ADR-0471 — untrusted-source-envelope system rule gate. When true, the
+   *  `UNTRUSTED_ENVELOPE_RULE` is appended to the STATIC base prompt section so
+   *  the model is taught to read `<untrusted-source name="...">` envelopes as
+   *  DATA, never instructions. This MUST track the SAME
+   *  `runtimeConfig().untrustedEnvelope` gate the dispatch wrap site
+   *  (`src/agent/dispatch.ts`) reads: resolving BOTH from the loop (the one env
+   *  reader allowed in @/agent) guarantees the rule and the result-wrapping
+   *  engage together — the model never sees a wrapped tool result without the
+   *  rule that explains the envelope. Absent / false ⇒ no append, byte-identical
+   *  default-OFF; the rule rides the `base` cache breakpoint so the
+   *  4-breakpoint budget is untouched. */
+  untrustedEnvelope?: boolean
 }
 
 export interface TurnContext {
@@ -501,6 +515,14 @@ export const buildTurnContext = (input: TurnContextInput): TurnContext => {
   // caller that already memoizes its own static prefix isn't shadowed.
   const basePrompt =
     input.system ?? resolveCachedSystemPrompt(input.systemPromptCache, input.systemPromptCacheKey)
+  // ADR-0471 — append the untrusted-source trust rule to the STATIC base
+  // section when the gate is on (the loop resolves it from
+  // `runtimeConfig().untrustedEnvelope`, the SAME frozen gate the dispatch wrap
+  // site reads, so rule + wrapping engage together). It rides the `base` cache
+  // breakpoint — no new section, the 4-breakpoint budget is untouched — and is
+  // byte-identical when off (no append).
+  const staticBase =
+    input.untrustedEnvelope === true ? `${basePrompt}\n${UNTRUSTED_ENVELOPE_RULE}` : basePrompt
   // 4-section preset (Claude Desktop 1.7196 `systemPromptSectionCache` mirror)
   // activates only when the caller supplies repo-local rules text OR a static
   // user-append; otherwise we stay byte-identical to the legacy single-block
@@ -518,7 +540,7 @@ export const buildTurnContext = (input: TurnContextInput): TurnContext => {
   const system: SystemBlock[] = useSectioned
     ? (() => {
         const sections = fourSectionPreset({
-          base: basePrompt,
+          base: staticBase,
           ...(projectMd !== undefined ? { projectMd } : {}),
           ...(input.sessionCtx !== undefined ? { sessionCtx: input.sessionCtx } : {}),
           ...(input.userAppend !== undefined ? { userAppend: input.userAppend } : {}),
@@ -530,7 +552,7 @@ export const buildTurnContext = (input: TurnContextInput): TurnContext => {
         validateSectionsCacheBudget(sections)
         return buildSectionedSystemBlocks(sections)
       })()
-    : [{ type: "text", text: basePrompt, cache: true }]
+    : [{ type: "text", text: staticBase, cache: true }]
   const dynamic = buildDynamicContext(input, effectiveMode, selectedGlobRules)
   const messages: Message[] = [...input.baseMessages]
   appendHookContextMessage(messages, input.hookPromptInjects)

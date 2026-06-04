@@ -1,9 +1,22 @@
 import { applyExactEdit, type EditOutcome } from "./exact"
+import { inAnyRange, type LineRange } from "./line-range"
 
 /** Per-line span [start,end) of a contiguous line window inside `lines`. */
 interface LineSpan {
   start: number
   end: number
+}
+
+/** H12 — keep only spans whose window STARTS inside a caller-supplied line
+ *  range. `span.start` is 0-indexed; ranges are 1-indexed inclusive, so the
+ *  membership test is `span.start + 1`. `undefined` / empty ranges ⇒ the spans
+ *  are returned unchanged (byte-identical to the unscoped path). */
+const filterSpansByRange = (
+  spans: LineSpan[],
+  ranges: readonly LineRange[] | undefined,
+): LineSpan[] => {
+  if (ranges === undefined || ranges.length === 0) return spans
+  return spans.filter((s) => inAnyRange(s.start + 1, ranges))
 }
 
 /** Collapse internal whitespace runs to a single space and trim the ends. */
@@ -100,8 +113,12 @@ const tryWhitespaceFlexible = (
   oldString: string,
   newString: string,
   replaceAll: boolean,
+  ranges: readonly LineRange[] | undefined,
 ): StrategyResult => {
-  const spans = findLineWindows(splitLines(source), splitLines(oldString), normalizeLine)
+  const spans = filterSpansByRange(
+    findLineWindows(splitLines(source), splitLines(oldString), normalizeLine),
+    ranges,
+  )
   return applyWindows(source, spans, newString, replaceAll, "whitespace-flexible")
 }
 
@@ -112,9 +129,13 @@ const tryAnchoredTrim = (
   oldString: string,
   newString: string,
   replaceAll: boolean,
+  ranges: readonly LineRange[] | undefined,
 ): StrategyResult => {
   const trim = (line: string): string => line.trim()
-  const spans = findLineWindows(splitLines(source), splitLines(oldString), trim)
+  const spans = filterSpansByRange(
+    findLineWindows(splitLines(source), splitLines(oldString), trim),
+    ranges,
+  )
   return applyWindows(source, spans, newString, replaceAll, "anchored-trim")
 }
 
@@ -159,6 +180,7 @@ const tryScoredCandidate = (
   source: string,
   oldString: string,
   newString: string,
+  ranges: readonly LineRange[] | undefined,
 ): StrategyResult => {
   const haystack = splitLines(source)
   const needle = splitLines(oldString)
@@ -168,7 +190,7 @@ const tryScoredCandidate = (
   // we never invent a window a normalizing rung wouldn't have surfaced.
   const byStart = new Map<number, LineSpan>()
   for (const project of [normalizeLine, (l: string) => l.trim()]) {
-    for (const span of findLineWindows(haystack, needle, project)) {
+    for (const span of filterSpansByRange(findLineWindows(haystack, needle, project), ranges)) {
       byStart.set(span.start, span)
     }
   }
@@ -227,6 +249,7 @@ export const applyFuzzyEdit = (
   oldString: string,
   newString: string,
   replaceAll: boolean,
+  lineRanges?: readonly LineRange[],
 ): EditOutcome => {
   if (oldString === newString) {
     return { ok: false, message: "old_string and new_string are identical" }
@@ -235,11 +258,12 @@ export const applyFuzzyEdit = (
     return { ok: false, message: "old_string must not be empty" }
   }
 
-  const exact = applyExactEdit(source, oldString, newString, replaceAll)
+  const ranges = lineRanges !== undefined && lineRanges.length > 0 ? lineRanges : undefined
+  const exact = applyExactEdit(source, oldString, newString, replaceAll, ranges)
   if (exact.ok) return { ...exact, message: `${exact.message} via exact match` }
 
   for (const attempt of [tryWhitespaceFlexible, tryAnchoredTrim]) {
-    const r = attempt(source, oldString, newString, replaceAll)
+    const r = attempt(source, oldString, newString, replaceAll, ranges)
     if (r.kind === "matched") return r.outcome
     // An ambiguous match used to be definitive. ADR-0456: before surfacing the
     // failure, give the deterministic scored-candidate rung a chance to RECOVER
@@ -250,7 +274,7 @@ export const applyFuzzyEdit = (
     // rejected). Falling through to the ambiguous outcome is byte-identical to
     // pre-ADR behavior for every tie / near-tie / no-advantage case.
     if (r.kind === "ambiguous") {
-      const scored = tryScoredCandidate(source, oldString, newString)
+      const scored = tryScoredCandidate(source, oldString, newString, ranges)
       if (scored.kind === "matched") return scored.outcome
       return r.outcome
     }

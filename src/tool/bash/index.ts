@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { maybeEmitPassiveVcs, type PassiveVcsHookCtx } from "@/git/passive-classify"
 import { type OsSandboxProfile, runShell } from "@/runtime"
 import { type BashBgRegistry, getBashBgRegistry } from "@/runtime/bash-bg-registry"
 import { classifyCommandShape } from "@/security"
@@ -487,6 +488,18 @@ async function* bashExecute(input: Input, ctx: ToolContext): AsyncIterable<ToolE
   // rewrote a file the agent had READ, so it re-reads before editing. No-op when
   // the guard is unwired (byte-identical output).
   const staleReminder = await buildPostBashStaleReminder(ctx, cmd)
+
+  // H6 (jun-3-misc §3) — passive git/gh VCS classification. A SEPARATE,
+  // additive post-exec hook (default-OFF: returns immediately when
+  // `QUANTA_PASSIVE_VCS` is unset OR no `vcsEventSink` is wired). When ON it
+  // classifies a completed git/gh command's stdout into a structured VCS event
+  // and routes it onto the EXISTING turn-diff bus via the wired sink. The hook
+  // is NO-THROW and does NOT alter the tool's `output` — pure observability, so
+  // the result yielded below is byte-identical regardless of the hook outcome.
+  // We pass the combined `body` (stdout+stderr) so the single regex sweep sees
+  // both git's progress (stderr) and its `[branch sha]` / `Pull request #N`
+  // (stdout) lines.
+  maybeEmitPassiveVcs(cmd, body, r.exitCode, ctx as ToolContext & PassiveVcsHookCtx)
 
   yield {
     type: "result",

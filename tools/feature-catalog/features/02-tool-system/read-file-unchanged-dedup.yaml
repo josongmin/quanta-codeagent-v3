@@ -1,0 +1,78 @@
+id: read-file-unchanged-dedup
+title: read file_unchanged dedup short-circuit (H9) — skip re-sending identical content
+section: 2
+subsystem: 도구 시스템 — read-side 토큰 디둡 (Claude tengu_file_read_dedup 흡수)
+order: 475
+maturity: L2
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: partial
+owners: ["@songmin"]
+labels: ["absorbed:claude", "surface:cli", "tier:core", "default-off", "token-savings"]
+depends_on: [tool, shared, storage]
+config_refs:
+  env: [QUANTA_READ_DEDUP]
+  runtime: [readDedup]
+  cli: [QUANTA_READ_DEDUP]
+purpose: |
+  In an iterative agent loop the model frequently re-reads the SAME file at the
+  SAME window (e.g. re-checking a function after an unrelated edit elsewhere).
+  Pre-H9 the `read` tool re-sent the FULL content every time — pure wasted
+  tokens. H9 closes that: BEFORE rendering full content the read tool checks
+  whether this EXACT (canonical resolved path, resolved offset, resolved limit)
+  range was already read THIS run AND the file's current on-disk mtime still
+  equals the mtime recorded at that prior read. If so it returns a compact,
+  UNAMBIGUOUS `file_unchanged: <path> (offset N, limit M) — content identical to
+  your prior read of this exact range; re-using it.` sentinel (an ok:true
+  ToolResult) instead of the bytes — large token savings. On ANY difference
+  (mtime advanced/regressed, a DIFFERENT offset/limit, or a range never read)
+  the tool renders full content as before and (re)records the range+mtime so the
+  NEXT identical re-read can short-circuit. Mirror of Claude Code's
+  `if (… cWH(D) === X.timestamp) return {type:"file_unchanged"}` + the
+  `tengu_file_read_dedup` counter. ORTHOGONAL to the stale-read-guard
+  (ADR-0474): that slice keys on path ALONE for WRITE-blocking freshness; H9
+  keys on the RANGE for READ-side dedup and NEVER affects guardWrite. The dedup
+  state is an ADDITIVE, lazily-allocated `rangeMtimes` map on the SAME
+  ReadFileState already threaded through ctx.readFileState (no new ToolContext
+  field, no dispatch change). DEFAULT-OFF: with QUANTA_READ_DEDUP unset the read
+  tool ALWAYS renders full content, never allocates the dedup map, and is
+  byte-identical to the pre-H9 path; the CLI host opts in by default (the slice
+  gate stays off so every non-CLI embedding is byte-identical). Deterministic,
+  NO-THROW.
+evidence:
+  code:
+    - src/tool/read/index.ts
+    - src/tool/stale-read-guard/state.ts
+    - src/shared/runtime-config.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/read-file-unchanged-dedup-hellgate.test.ts
+      - tests/unit/read-file-unchanged-dedup-e2e-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_READ_DEDUP
+    default: 'unset (OFF); CLI host seeds "1" when operator leaves it unset'
+    purpose: 'exactly "1" opts a deployment into read-side dedup; any other value (incl "0"/"on"/"true") keeps it OFF. Unset ⇒ the read tool renders full content on every call and allocates NO per-range dedup state (byte-identical to pre-H9). Read via runtimeConfig().readDedup, never process.env directly.'
+notes: |
+  Range identity is the crux that keeps H9 distinct from the stale-read-guard:
+  the freshness map (`mtimes`, path→mtime) blocks a write/edit of a file whose
+  ANY part changed; the dedup map (`rangeMtimes`, "path\0offset\0limit"→mtime)
+  only short-circuits a re-read of the IDENTICAL window. They are kept as two
+  separate maps on ReadFileState so neither's semantics leak into the other —
+  `record`/`checkFresh`/`paths`/`guardWrite` are byte-identical to pre-H9, and a
+  re-read of a DIFFERENT offset/limit is correctly NOT deduped. Strict mtime
+  equality is the closed signal: an advanced (external write) OR regressed
+  (restore/skew) mtime both fall through to a full re-read + re-record — never a
+  stale short-circuit. The dedup map is allocated lazily (undefined until the
+  first recordReadRange) so an unset deployment pays zero alloc. Effective
+  (offset, limit) are the RESOLVED values (offset ?? 1, limit ?? 2000) the
+  renderer slices on, so an implicit limit dedups against an explicit one that
+  resolves to the same window. Sentinel is UNAMBIGUOUS + ACTIONABLE (names path
+  + exact range + "re-use it") so the model never needs the bytes re-sent.
+  hellgate + e2e-hellgate pin every arm (identical-range hit, different-range
+  miss, advanced-mtime miss, first-read miss, knob-off byte-identical,
+  cross-file non-contamination).

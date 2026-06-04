@@ -46,6 +46,7 @@ import { renderIdeContext } from "./ide-context"
 // identical pass-through).
 import {
   augmentActiveSkillsWithPlugin,
+  reconcileSkillMcpDepsForTurn,
   resolvePluginActivationForTurn,
 } from "./loop-activation-hook"
 import {
@@ -1150,6 +1151,9 @@ const staticSystemFor = (config: AgentConfig): SystemPromptInput =>
     cwd: config.cwd,
     planMode: config.planMode ?? false,
     system: config.system,
+    // ADR-0471 — keep the summarizer's grounded system prompt consistent with
+    // the live turn: same untrusted-envelope gate (one env reader = the loop).
+    untrustedEnvelope: runtimeConfig().untrustedEnvelope,
   }).system
 
 /** ADR-0324 — fire the optional compaction-event emitter with NO-THROW.
@@ -1394,7 +1398,7 @@ const prepareTurnContext = async (
   wm: WorkingMemory<Message>,
   recorder: AgentRecorder | undefined,
   breaker: CompactionBreaker | undefined,
-  activeSkills: { name: string; description: string }[] | undefined,
+  activeSkills: { name: string; description: string; rawDependencies?: unknown }[] | undefined,
   workingState: WorkingStateSession | undefined,
   archive: ConversationSummaryArchive | undefined,
   turn: number,
@@ -1440,6 +1444,11 @@ const prepareTurnContext = async (
     `t${turn}`,
   )
   const augmentedSkills = augmentActiveSkillsWithPlugin(activeSkills, pluginActivation)
+  // ADR-0476 — reconcile skill-declared MCP servers over the CURRENT active set
+  // (attach newly-active, detach now-orphaned, dedupe across turns). Pure no-op
+  // unless the composition root wired `config.skillMcpSession` (gate
+  // `QUANTA_SKILL_MCP_DEPS`). Extracted helper keeps this fn under the cap.
+  await reconcileSkillMcpDepsForTurn(config, augmentedSkills)
   const taskBudgetForTurn = resolveTaskBudgetForTurn(config, taskSpend)
   const ctx = buildTurnContext({
     baseMessages: [...wm.snapshot()],
@@ -1480,6 +1489,11 @@ const prepareTurnContext = async (
     ...(contextEvents.length > 0 ? { contextChangeEvents: contextEvents } : {}),
     ...(mentionMessages.length > 0 ? { mentionInjectionMessages: mentionMessages } : {}),
     ...(taskBudgetForTurn !== undefined ? { taskBudget: taskBudgetForTurn } : {}),
+    // ADR-0471 — untrusted-source-envelope rule gate, resolved here (the one env
+    // reader in @/agent) from the SAME `runtimeConfig().untrustedEnvelope` the
+    // dispatch wrap site reads, so the rule and the result-wrapping engage
+    // together. `false` ⇒ no append ⇒ byte-identical default-OFF.
+    untrustedEnvelope: runtimeConfig().untrustedEnvelope,
   })
   // ADR-0080 — fold the IDE snapshot into the built context (no provider ⇒
   // returned unchanged, byte-identical). ADR-0078 — prepend the redaction-
@@ -2374,6 +2388,16 @@ const cleanupFinishedSession = async (args: {
     await args.features.browserDispose?.()
   } catch (e) {
     args.cfg.stream.emit({ type: "error", message: `browser dispose failed: ${errMessage(e)}` })
+  }
+  try {
+    // ADR-0476 — tear down every skill-attached MCP carrier (stdio procs + HTTP
+    // connections) at session end. Absent session ⇒ no-op (byte-identical).
+    await args.cfg.skillMcpSession?.shutdownAll()
+  } catch (e) {
+    args.cfg.stream.emit({
+      type: "error",
+      message: `skill-mcp shutdown failed: ${errMessage(e)}`,
+    })
   }
   await saveFollowUpQueueSnapshot(args.cfg)
   await savePlanSnapshot(args.cfg)

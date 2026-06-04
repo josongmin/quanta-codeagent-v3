@@ -130,6 +130,31 @@ export interface RuntimeConfig {
    *  (`=== "1"`). Default false ⇒ the dispatch seam attaches no lint-delta to
    *  edit results (byte-identical). */
   readonly editRepairLoop: boolean
+  /** ADR-0476 skill→MCP auto-attach gate (`QUANTA_SKILL_MCP_DEPS`). Strict
+   *  opt-in (`=== "1"`). Default false ⇒ skill `dependencies.tools[]` blocks are
+   *  NOT lifted onto the active-skill channel and no MCP server is auto-attached
+   *  (byte-identical). Also read by the slice's own `skillMcpDepsEnabled`. */
+  readonly skillMcpDeps: boolean
+  /** H9 read `file_unchanged` dedup gate (`QUANTA_READ_DEDUP`). Strict opt-in
+   *  (`=== "1"`). When ON, the `read` tool short-circuits a re-read of the SAME
+   *  (canonical path, offset, limit) whose on-disk mtime equals the recorded
+   *  read-time mtime for that range, returning a compact `file_unchanged`
+   *  sentinel instead of re-sending the full content (large token savings in
+   *  iterative loops). Default false ⇒ the read tool ALWAYS renders full content
+   *  and allocates NO per-range dedup state (byte-identical to the pre-H9 path).
+   *  ORTHOGONAL to the stale-read-guard (ADR-0474, write-blocking freshness): H9
+   *  is the READ-SIDE dedup, keyed by RANGE, and never affects guardWrite. */
+  readonly readDedup: boolean
+  /** H6 (jun-3-misc §3) passive git/gh VCS classification gate
+   *  (`QUANTA_PASSIVE_VCS`). Strict opt-in (`=== "1"`). Default false ⇒ the
+   *  bash post-exec hook returns immediately (no stdout classification, no
+   *  sink touch, byte-identical). When true AND a host wired a `vcsEventSink`,
+   *  a completed git/gh command's stdout is classified into a structured VCS
+   *  event (`{commit:{sha,kind}, push, branch:{action}, pr:{number}}`) and
+   *  forwarded onto the EXISTING turn-diff bus. Closes the raw-stdout blind
+   *  spot of `src/git/directive-emit/` (which only reads quanta's own
+   *  `::git-*` lines). */
+  readonly passiveVcs: boolean
   /** FS jail disable flag (`QUANTA_FS_JAIL=off`). Default false (jail ON). */
   readonly fsJailDisabled: boolean
   /** ADR-0062 cap-as-instruction dispatch enforcement (`QUANTA_CAP_ENFORCE=1`).
@@ -302,6 +327,15 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // ADR-0472 — strict `=== "1"` opt-in (matches the `editRepairLoopEnabled`
     // slice gate, the SSOT). Default false ⇒ no lint-delta attached.
     editRepairLoop: env["QUANTA_EDIT_REPAIR_LOOP"] === "1",
+    // ADR-0476 — strict `=== "1"` opt-in (matches the `skillMcpDepsEnabled`
+    // slice gate). Default false ⇒ no deps lifted, no auto-attach.
+    skillMcpDeps: env["QUANTA_SKILL_MCP_DEPS"] === "1",
+    // H9 — strict `=== "1"` opt-in. Default false ⇒ the read tool renders full
+    // content on every call and allocates no per-range dedup state.
+    readDedup: env["QUANTA_READ_DEDUP"] === "1",
+    // H6 — strict `=== "1"` opt-in. Default false ⇒ the bash post-exec hook
+    // classifies nothing and touches no sink (byte-identical).
+    passiveVcs: env["QUANTA_PASSIVE_VCS"] === "1",
     fsJailDisabled: parseBool(env["QUANTA_FS_JAIL"] === "off" ? "1" : undefined),
     capEnforce: parseBool(env["QUANTA_CAP_ENFORCE"]),
     gitSha: stringOrUndef(env["QUANTA_GIT_SHA"]),

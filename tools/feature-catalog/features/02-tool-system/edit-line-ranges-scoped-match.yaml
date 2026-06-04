@@ -1,0 +1,63 @@
+id: edit-line-ranges-scoped-match
+title: "Edit line_ranges — scope a repeated anchor by 1-indexed line window (H12)"
+section: 2
+subsystem: 도구 — edit string-replacement matching (Cursor edit_file.line_ranges 흡수)
+order: 0
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: n-a
+owners: ["@songmin"]
+labels: [absorbed:cursor, surface:cli]
+depends_on: [edit, edit-fuzzy-ladder, edit-fuzzy-scored-recovery, typed-tool-failure-modes]
+purpose: |
+  Optional `line_ranges: [{start, end}]` field on the `edit` tool input —
+  1-indexed, inclusive on BOTH ends (Cursor `LineRange{start_line_number,
+  end_line_number_inclusive}` semantic). When present it PREFILTERS the
+  candidate match windows to only those whose match lands inside ANY supplied
+  range, applied BEFORE the existing exact→whitespace→anchored→scored ladder
+  runs (a deterministic structural narrowing of the candidate set — it does NOT
+  alter the exact/fuzzy scoring). A repeated anchor that today fails `ambiguous`
+  outright (`exact.ts` returns `kind: "ambiguous"` on count > 1) becomes
+  deterministically addressable — "the occurrence on lines 40-60" — with no
+  extra LLM round-trip. A multi-line `old_string` is scoped by the line its
+  FIRST character lands on. Decisions: zero in-range matches → clean typed
+  failure distinguishing "absent from file" vs "present but outside your range"
+  (never a wrong-location edit); >1 in-range match (without replace_all) → still
+  `ambiguous` (fail clean — a wrong edit is worse than no edit), but now the
+  range can be narrowed; malformed range (non-integer / start < 1 / end < start)
+  → `rejected` failure with a fix-it message, no-throw. ABSENT line_ranges ⇒
+  whole-file search, byte-identical to the pre-H12 path (always-accept-optional
+  posture, so no knob is needed — the field defaults to omitted).
+  Paired improvement: an `ambiguous` failure (scoped or unscoped) now appends
+  the file's total line count to the model-facing message so the model can pick
+  a valid `line_ranges` span on retry instead of re-guessing.
+evidence:
+  code:
+    - src/tool/edit/line-range.ts
+    - src/tool/edit/exact.ts
+    - src/tool/edit/fuzzy.ts
+    - src/tool/edit/index.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/edit-line-ranges-hellgate.test.ts
+      - tests/unit/edit-line-ranges-e2e-hellgate.test.ts
+      - tests/unit/edit.test.ts
+      - tests/unit/fuzzy.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  No knob: the optional field is ALWAYS accepted and omitting it is
+  byte-identical to legacy, so gating exposure behind an env var would only
+  trim the tool description for lean surfaces — not worth the branch. The
+  prefilter hooks in two places, both BEFORE the ladder's scoring: exact path
+  via `inRangeMatchOffsets` (byte-offset → line membership) in
+  `applyExactEditInRange`; fuzzy rungs via `filterSpansByRange`
+  (window-start line membership) feeding `applyWindows` / the scored-candidate
+  pool. The bias is preserved end-to-end: a non-unique in-range match without
+  `replace_all` still fails `ambiguous` rather than guessing.

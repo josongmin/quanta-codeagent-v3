@@ -1,6 +1,13 @@
 # ADR-0257: AI-attribution tool — training-data attribution search MVP
 
-- **Status**: Accepted
+- **Status**: Superseded (2026-06-04) — the `ai_attribution` tool was REMOVED.
+  It was a pure orphan: built (factory + closed port + types) but registered in
+  NO assembly path, with only a no-op `headlessStub` backend (no real
+  `AIAttributionSearch` implementation), and a niche use case. The tool slice
+  (`src/tool/ai_attribution.ts`, `src/tool/ai-attribution/`), its hellgate test,
+  the tool-surface manifest row, and the feature-catalog entry were all deleted
+  on 2026-06-04. Retained as historical record; the decision is reverted. See
+  the `tool-surface-ssot` memory (jun-04 orphan resolution).
 - **Date**: 2026-05-25
 - **Related**: ADR-0127 (`web_*` cluster — caller-wired closed-port sibling),
   ADR-0130 (subagent-bg — caller-wired tools-trio pattern this slice mirrors),

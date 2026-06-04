@@ -129,6 +129,15 @@ export interface Skill {
    * `references/` / `assets/` subdirs. Absent when none exist.
    */
   readonly resources?: SkillResources
+  /**
+   * ADR-0476 — the skill's raw frontmatter `dependencies` block (the
+   * `{ tools: unknown[] }` shape `liftRawDependenciesBlock` returns), captured
+   * at discovery from the full SKILL.md content. Absent when the skill declares
+   * no `dependencies:` block. The skill→MCP reconcile (`parseSkillMcpDeps`)
+   * consumes this raw block; the gate (`QUANTA_SKILL_MCP_DEPS`) governs whether
+   * it is acted on. Additive: a skill without a deps block is byte-identical.
+   */
+  readonly rawDependencies?: unknown
 }
 
 /**

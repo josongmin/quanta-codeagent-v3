@@ -2,6 +2,7 @@ import { readdir, readFile } from "node:fs/promises"
 import { basename, join, sep } from "node:path"
 import { errMessage } from "@/shared"
 import { parseFrontmatter } from "./frontmatter"
+import { liftRawDependenciesBlock } from "./skill-frontmatter"
 import { discoverSkillResources } from "./skill-resources"
 import { checkSkillSize, MAX_SKILL_SIZE_BYTES } from "./skill-size"
 import {
@@ -133,6 +134,11 @@ const toSkill = (name: string, sourcePath: string, raw: string): Skill => {
   // the lenient parser as the dotted key `metadata.short-description`.
   const argumentHint = asScalar(data["argument-hint"])
   const shortDescription = asScalar(data["metadata.short-description"])
+  // ADR-0476 — lift the raw `dependencies` block here, where the FULL SKILL.md
+  // content (`raw`, incl. frontmatter) is in hand. `skill.body` is post-
+  // frontmatter, so the block would be invisible if lifted later. NO-THROW:
+  // returns undefined when no `dependencies:` block exists ⇒ field absent.
+  const rawDependencies = liftRawDependenciesBlock(raw)
 
   const skill: Skill = {
     name: asScalar(data.name) ?? name,
@@ -144,6 +150,7 @@ const toSkill = (name: string, sourcePath: string, raw: string): Skill => {
     ...(adminInstalledBy !== undefined ? { adminInstalledBy } : {}),
     ...(argumentHint !== undefined ? { argumentHint } : {}),
     ...(shortDescription !== undefined ? { shortDescription } : {}),
+    ...(rawDependencies !== undefined ? { rawDependencies } : {}),
   }
   const strictTools = declaredAllowedTools(data.allowedTools)
   if (strictTools.kind === "declared") {

@@ -41,6 +41,22 @@ const CLI_FEATURE_GATES = [
   // ADR-0474 — stale-read-guard: block write/edit of a file externally modified
   // since the agent read it ("re-read first"). Protective correctness guard.
   "QUANTA_STALE_READ_GUARD",
+  // ADR-0471 (H2) — untrusted-source envelope: wrap external tool output
+  // (web_fetch/mcp/plugin/bash/file-content) in a `<untrusted-source name="...">`
+  // envelope + teach the model (one standing system rule) to read it as DATA,
+  // never instructions, and FLAG suspected prompt-injection. Structural
+  // prompt-injection defense — low cost, high ROI, so the CLI opts in by default.
+  // Default-OFF at the runtime-config layer keeps non-CLI surfaces (web-daemon/
+  // headless) byte-identical; `QUANTA_UNTRUSTED_ENVELOPE=0` still wins here (we
+  // only seed when unset).
+  "QUANTA_UNTRUSTED_ENVELOPE",
+  // H9 — read `file_unchanged` dedup: a re-read of the SAME (path, offset, limit)
+  // whose mtime is unchanged returns a compact `file_unchanged` sentinel instead
+  // of re-sending the full content (large token savings in iterative loops). Pure
+  // token/correctness win, so the CLI opts in by default. Default-OFF at the
+  // runtime-config layer keeps non-CLI surfaces byte-identical; `QUANTA_READ_DEDUP=0`
+  // (any value ≠ "1") still wins here (we only seed when unset).
+  "QUANTA_READ_DEDUP",
 ]
 // The LLM TOOL gates the CLI opts in by default are DERIVED from the tool-
 // surface SSOT (`seedEnvVarsForSurface`) — the single source of truth. Adding a
