@@ -1,4 +1,5 @@
 import type { ToolUseBlock } from "@/llm"
+import type { LLMPort } from "@/llm/ports"
 import { attrs, endSpan, QUANTA_ATTRS, SPAN_NAMES, type Span, startSpan } from "@/observability"
 import {
   type AutoModeClassifier,
@@ -27,10 +28,11 @@ import type { DispatchResult } from "./dispatch-types"
 import {
   computeLintDelta,
   type Diagnostic,
+  type RepairReactorPort,
   renderLintDelta,
   runRepairLoop,
 } from "./edit-repair-loop"
-import { buildRepairReactor, lintRepairCheck } from "./edit-repair-wire"
+import { buildRepairReactor, commandRepairCheck, lintRepairCheck } from "./edit-repair-wire"
 import { LocalEffectChannel } from "./effect-channel"
 import { decideLocalizePhase } from "./localize-phase-guard"
 import { resolveCollaborationMode } from "./mode"
@@ -243,10 +245,39 @@ const isSessionApprovalRequiredError = (error: unknown): boolean => {
  *  is the second seam so future tools (or callers that don't capture via
  *  closure) can read the same handle.
  */
-/** ADR-0472 — repair-loop attempt cap. NOT a tunable heuristic: ≥2 so the model
- *  sees its OWN first failure fed back at least once before the loop gives up;
- *  bounded small so a stuck repair can never spin the dispatch hot path. */
+/** ADR-0472 — repair-loop attempt cap DEFAULT. NOT a tunable heuristic: ≥2 so the
+ *  model sees its OWN first failure fed back at least once before the loop gives
+ *  up; bounded small so a stuck repair can never spin the dispatch hot path. A
+ *  host may override via `config.editRepair.maxIters` (Cursor `maxIters` parity).
+ */
 const REPAIR_MAX_ITERS = 2
+
+/** H1 — resolve the repair iteration cap: the host's `config.editRepair.maxIters`
+ *  when it is a valid integer ≥ 1, else {@link REPAIR_MAX_ITERS}. Keeps the magic
+ *  number in ONE place and rejects a malformed override (0 / negative / NaN /
+ *  fractional) rather than letting it weaken the bound. Pure. */
+const resolveRepairMaxIters = (config: AgentConfig): number => {
+  const n = config.editRepair?.maxIters
+  return typeof n === "number" && Number.isInteger(n) && n >= 1 ? n : REPAIR_MAX_ITERS
+}
+
+/** H1 — the shared fast-model repair reactor for a path-bearing edit: writes the
+ *  model's corrected file content back through the storage port. The LINT loop
+ *  and the COMMAND loop drive the SAME apply (a repaired edit is a repaired edit
+ *  regardless of which check flagged it), so the apply closure lives in ONE
+ *  place. NO-THROW: a write failure collapses to `err(msg)`, which the runner
+ *  treats as a declined attempt (loop ends, output unchanged). */
+const buildEditApplyReactor = (llm: LLMPort, cwd: string | undefined): RepairReactorPort =>
+  buildRepairReactor(llm, {
+    apply: async (file, content) => {
+      try {
+        await writeFile(file, content, cwd)
+        return ok(undefined)
+      } catch (e) {
+        return err(errMessage(e))
+      }
+    },
+  })
 
 /** ADR-0472 — extract the single target path of a path-bearing EDIT tool
  *  (`edit`/`write`), or `null` for anything else (apply_patch is multi-file —
@@ -314,16 +345,7 @@ const openLintBracket = async (
             await session.stop()
             return `${output}\n\n${renderLintDelta(introduced)}`
           }
-          const reactor = buildRepairReactor(llm, {
-            apply: async (file, content) => {
-              try {
-                await writeFile(file, content, config.cwd)
-                return ok(undefined)
-              } catch (e) {
-                return err(errMessage(e))
-              }
-            },
-          })
+          const reactor = buildEditApplyReactor(llm, config.cwd)
           // `lintRepairCheck` works in 1-based line space (matching the wire's
           // `toLoopDiagnostic`); `toDiag` keeps the LSP 0-based line, so +1 the
           // pre-snapshot here or the delta would read as all-introduced.
@@ -336,8 +358,8 @@ const openLintBracket = async (
             {
               file: filePath,
               checkKind: "lints",
-              maxIters: REPAIR_MAX_ITERS,
-              customInstructions: "",
+              maxIters: resolveRepairMaxIters(config),
+              customInstructions: config.editRepair?.customInstructions ?? "",
             },
             { check, reactor },
             config.signal,
@@ -353,6 +375,50 @@ const openLintBracket = async (
     }
   } catch {
     return null // NO-THROW: a pre-snapshot/open failure ⇒ no bracket.
+  }
+}
+
+/** ADR-0472 / H1 — LoopOnCommand / LoopOnTests. After a path-bearing edit
+ *  (`edit`/`write`), when the host wired `config.editRepair.{command,exec}` AND
+ *  the repair loop is on AND a fast `llm` is available, run the configured
+ *  command (a test / build / lint script) and, on non-zero exit, drive a bounded
+ *  `checkKind:"command"` repair loop that re-edits the file until the command
+ *  goes green or `maxIters`. INDEPENDENT of the diagnostics provider — a host can
+ *  enable LoopOnCommand without any LSP. Returns `output` UNCHANGED when the
+ *  feature is off / the tool is not an edit / command|exec|llm is unwired, so the
+ *  default path is byte-identical. NO-THROW: any loop/apply failure leaves the
+ *  output untouched (pure observability augmentation, never breaks the turn). */
+const runEditCommandRepair = async (
+  call: ToolUseBlock,
+  config: AgentConfig,
+  output: string,
+): Promise<string> => {
+  if (!runtimeConfig().editRepairLoop) return output
+  const command = config.editRepair?.command
+  const exec = config.editRepair?.exec
+  const llm = config.llm
+  if (command === undefined || exec === undefined || llm === undefined) return output
+  const filePath = extractEditPath(call)
+  if (filePath === null) return output
+  try {
+    const report = await runRepairLoop(
+      {
+        file: filePath,
+        checkKind: "command",
+        maxIters: resolveRepairMaxIters(config),
+        customInstructions: config.editRepair?.customInstructions ?? "",
+      },
+      { check: commandRepairCheck(exec, command), reactor: buildEditApplyReactor(llm, config.cwd) },
+      config.signal,
+    )
+    // Already-green (0 attempts) ⇒ no annotation: the command passed on the
+    // first try, so the edit output stays byte-identical (no noise).
+    if (report.green && report.attempts === 0) return output
+    return report.green
+      ? `${output}\n\n[edit-repair] \`${command}\` passed after ${report.attempts} repair attempt(s).`
+      : `${output}\n\n[edit-repair] \`${command}\` still failing (${report.stop.kind}) after ${report.attempts} attempt(s); please fix.`
+  } catch {
+    return output // NO-THROW.
   }
 }
 
@@ -582,6 +648,14 @@ const buildToolContext = (args: {
     // emitter. ABSENT (gate OFF / non-canvas caller) ⇒ both fields omitted ⇒ no
     // tool captures anything, byte-identical legacy path.
     ...(config.onToolDiff !== undefined ? { toolDiff: config.onToolDiff, toolCallId } : {}),
+    // H6 (jun-3-misc §3) — surface the passive-VCS event sink so the bash tool's
+    // post-exec hook (`maybeEmitPassiveVcs`, gated by QUANTA_PASSIVE_VCS) can
+    // forward a classified `VcsEvent` onto the host adapter (which emits a
+    // `recovery` AgentEvent on the existing stream). ABSENT (knob off / non-
+    // wiring host) ⇒ omitted ⇒ the hook resolves its noop and the bash post-exec
+    // path is byte-identical (default-OFF). The producer `PassiveVcsEventSink` is
+    // structurally assignable to the ctx-side `VcsEventSink` mirror.
+    ...(config.vcsEventSink !== undefined ? { vcsEventSink: config.vcsEventSink } : {}),
   }
 }
 
@@ -906,7 +980,11 @@ const execute = async (
       : enveloped
   // ADR-0472 — append the INTRODUCED-lint delta (post − pre) so the model sees
   // exactly what THIS edit broke. No bracket ⇒ outputBase unchanged.
-  const output = lintBracket !== null ? await lintBracket.finish(outputBase) : outputBase
+  let output = lintBracket !== null ? await lintBracket.finish(outputBase) : outputBase
+  // ADR-0472 / H1 — LoopOnCommand: run the configured test/build/lint command
+  // after a path-bearing edit and auto-repair until green. Returns `output`
+  // unchanged when unconfigured / non-edit (byte-identical default-OFF).
+  output = await runEditCommandRepair(call, config, output)
   // ADR-0062 rule #3 — record the nextAction hint in the session tracker so
   // a subsequent call to the same (tool, path) can be checked. DEFAULT-OFF:
   // absent enforcer ⇒ optional-chain is a no-op, byte-identical.

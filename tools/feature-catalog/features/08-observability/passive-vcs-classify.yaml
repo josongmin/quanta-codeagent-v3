@@ -35,13 +35,22 @@ purpose: |
   `[branch sha]` / `[main (root-commit) sha]` / `[detached HEAD sha]` /
   `HEAD is now at sha`.
 
-  Wiring: the `bash` tool calls `maybeEmitPassiveVcs(command, body, exitCode,
-  ctx)` in its foreground post-exec path (a SEPARATE additive hook, next to the
-  ADR-0474 stale-read reminder). The hook is gated by `QUANTA_PASSIVE_VCS` and
-  forwards classified events to a duck-typed `vcsEventSink` the host wires; the
-  host adapts that sink onto the EXISTING turn-diff `AgentEvent` bus (no second
-  bus invented). Pure observability — the tool's `output` is byte-identical
-  regardless of the hook outcome.
+  Wiring (COMPLETE end to end): the `bash` tool calls
+  `maybeEmitPassiveVcs(command, body, exitCode, ctx)` in its foreground post-exec
+  path (a SEPARATE additive hook, next to the ADR-0474 stale-read reminder). The
+  hook is gated by `QUANTA_PASSIVE_VCS` and forwards classified events to a
+  duck-typed `vcsEventSink` read off `ToolContext`. The canonical
+  `ToolContext.vcsEventSink` field + `AgentConfig.vcsEventSink` slot are declared;
+  the dispatch seam (`buildToolContext`) threads `config.vcsEventSink` onto the
+  ToolContext (conditional spread — absent ⇒ omitted ⇒ byte-identical); and the
+  host composition root (`agent-config-assembler#maybeWireVcsEventSink`, gated by
+  `QUANTA_PASSIVE_VCS=1`) wires `createPassiveVcsStreamSink(cfg.stream)`, the
+  adapter that emits the classified `VcsEvent` onto the EXISTING `AgentEvent`
+  stream as a `recovery` event tagged `reason:"vcs_event"` (the documented
+  catch-all family every stream adapter already renders/records — same posture as
+  `plan_*` / `turn_diff_updated` / `response_queued`; NO new AgentEvent variant,
+  NO exhaustiveness break in the stream adapters). Pure observability — the
+  tool's `output` is byte-identical regardless of the hook outcome.
 evidence:
   code:
     - src/git/passive-classify/index.ts
@@ -50,12 +59,18 @@ evidence:
     - src/git/passive-classify/sink.ts
     - src/git/passive-classify/bash-hook.ts
     - src/tool/bash/index.ts
+    - src/tool/types.ts
+    - src/agent/types.ts
+    - src/agent/dispatch.ts
+    - src/host/runtime/agent-config-assembler.ts
     - src/shared/runtime-config.ts
   adrs: []
   tests:
     unit:
       - tests/unit/passive-vcs-classify-hellgate.test.ts
       - tests/unit/passive-vcs-classify-e2e-hellgate.test.ts
+      - tests/unit/passive-vcs-bus-wire-hellgate.test.ts
+      - tests/unit/passive-vcs-bus-wire-e2e-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -64,24 +79,38 @@ knobs:
     default: false
     purpose: "Strict `=== \"1\"` opt-in. OFF ⇒ the bash post-exec hook returns immediately (no classification, no sink touch, byte-identical). ON + wired sink ⇒ classify + emit."
   - name: vcsEventSink
-    where: ToolContext (duck-typed seam read by the bash hook)
-    default: "noopVcsEventSink (absent)"
-    purpose: "Host-wired sink the classified VcsEvent is forwarded to; the host adapts it onto the turn-diff AgentEvent bus. Absent ⇒ byte-identical even with the knob on."
+    where: "AgentConfig.vcsEventSink → ToolContext.vcsEventSink (threaded by buildToolContext); host adapter createPassiveVcsStreamSink in agent-config-assembler"
+    default: "absent (noopVcsEventSink resolved by the bash hook)"
+    purpose: "Host-wired sink the classified VcsEvent is forwarded to; the host adapter emits it onto the EXISTING AgentEvent stream as a recovery event (reason:\"vcs_event\"). Wired only when QUANTA_PASSIVE_VCS=1; caller-override-safe. Absent ⇒ byte-identical even with the knob on."
 notes: |
   Slice isolation: `src/git/passive-classify/` imports only `@/shared`
   (runtime knob). It does NOT import `@/tool` / `@/agent` / `@/llm`; the bash
   hook reads its sink off `ToolContext` via a duck-typed `PassiveVcsHookCtx`
-  view, mirroring the existing `ToolDiffSink` / `vcsEventSink`-style structural
-  seams so `@/git` never gains a `@/tool` back-edge. NO-THROW end to end: the
-  classifier is total over its input domain and the sink call is guarded.
+  view. The canonical `ToolContext.vcsEventSink` is typed via an in-slice
+  structural `VcsEventSink` mirror (with a `VcsEventMirror` shape) declared in
+  `@/tool/types.ts`, so `@/tool` stays a leaf and gains NO `@/git` import —
+  same discipline as `ToolDiffSink` / `ShellExecObserver`. `AgentConfig`
+  references the producer `PassiveVcsEventSink` directly (`@/agent` already
+  imports `@/git`); the dispatch seam threads it through the structural mirror
+  (method-bivariant assignment). The host adapter lives in
+  `@/host/runtime/agent-config-assembler.ts` (the composition layer that may
+  import BOTH `@/git` and `@/stream`) — `@/git` itself can only reach `@/shared`,
+  so the adapter could not live there. NO-THROW end to end: the classifier is
+  total over its input domain, the bash hook guards the sink call, and the host
+  adapter additionally try/catches the `stream.emit`.
 
-  Deferred wiring: the dispatch/loop composition root has NOT yet been amended
-  to (a) declare `vcsEventSink` on the canonical `ToolContext` and (b) adapt
-  the sink onto the `turn_diff_updated` / a sibling `AgentEvent` variant. Those
-  files are owned by other tracks this wave (`src/agent/dispatch.ts`,
-  `src/tool/types.ts`). The classifier + bash hook + knob are landed and proven
-  end-to-end against a duck-typed sink (e2e hellgate); the host-side adapter is
-  a 1-call follow-up.
+  Bus-wire COMPLETE (this wave): the canonical `ToolContext.vcsEventSink` field +
+  `AgentConfig.vcsEventSink` slot are declared, `buildToolContext` threads the
+  config slot onto the ctx (conditional spread, byte-identical when absent), and
+  `agent-config-assembler#maybeWireVcsEventSink` wires the
+  `createPassiveVcsStreamSink` adapter behind `QUANTA_PASSIVE_VCS=1`. AgentEvent
+  decision: REUSE the existing `recovery` variant (`reason:"vcs_event"`, facets
+  serialized into `detail`) rather than add a new `vcs_event` variant — the
+  `recovery` family is the documented catch-all every stream adapter already
+  renders/records (jsonl-recorder maps it to the `recovery` trajectory kind), so
+  the wire avoids editing the non-owned `src/stream/**` adapters and their
+  `never`-exhaustiveness guards. Proven end-to-end through the REAL dispatch +
+  REAL bash + REAL git in `passive-vcs-bus-wire-e2e-hellgate.test.ts`.
 
   Distinct from `git-directive-emit-protocol` (ADR-0221): that slice serializes
   quanta's OWN tool mutations into `::git-*` wire lines; THIS slice INFERS the

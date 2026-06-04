@@ -47,6 +47,7 @@ export {
 export type { NoThrowErrorSink } from "./no-throw-dispatch"
 export { dispatchNoThrow, dispatchNoThrowWith, notifyAllNoThrow } from "./no-throw-dispatch"
 export { omitUndef } from "./optional"
+export { RECONCILE_PLACEHOLDER_TEXT, reconcileToolPairing } from "./reconcile-tool-pairing"
 export type { RunContext } from "./run-context"
 export type { RuntimeConfig, SwebenchCacheLevel } from "./runtime-config"
 export {

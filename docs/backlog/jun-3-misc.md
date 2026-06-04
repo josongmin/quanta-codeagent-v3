@@ -23,10 +23,10 @@
 ## §1. 🐛 검증된 결함 (흡수 아님 — 그냥 버그, 최우선)
 
 > **✅ jun-04 5개 병렬 수정 완료 (B1·B3·B4·B5 신규 fix + B2는 이미 fix돼 있던 것 확인).** 신규 hellgate 66/0, 광역 회귀 5281/0+1458/0, tsc 0, biome 에러 0. 상세:
-> - **B1 ✅ FIXED** — advertise-iff-able DI seam. `SamplingHandlerPort`(`src/mcp/sampling/`) 신설, `fullNegotiator({sampling})` 핸들러 있을 때만 광고(default omit), `handleInboundRequest`에 `sampling/createMessage` 라우팅(미배선시 -32000 graceful decline). `tasks.listChanged`는 false 유지(정직 — 우리가 안 emit). **follow-up**: composition root에서 @/llm-backed 핸들러+HITL 동의 배선해야 실제 sampling 활성(피처, 버그 아님).
+> - **B1 ✅ FIXED (+follow-up seam ✅)** — advertise-iff-able DI seam. `SamplingHandlerPort`(`src/mcp/sampling/`) 신설, `fullNegotiator({sampling})` 핸들러 있을 때만 광고(default omit), `handleInboundRequest`에 `sampling/createMessage` 라우팅(미배선시 -32000 graceful decline). `tasks.listChanged`는 false 유지. **follow-up(jun-04)**: host에 `src/host/runtime/mcp-sampling-handler.ts`(@/llm 위임 + `ElicitationPrompter.promptBoolean` 동의 게이트 + headless-deny-default) + `buildSamplingWiring`(advertise+handler 한 분기에서 같이 움직임) + `pickMcpNegotiator(opts)` + `QUANTA_MCP_SAMPLING` knob. e2e로 production McpClient 통한 풀 경로 증명. **잔여(비자명, 별도)**: `loadFeatures(slog)`가 LLMPort를 스코프에 안 가져서 `mcp-bridge.ts loadMcpTools`로 llm을 plumbing해야 라이브 활성 — features/llm-assembly 경계 넘는 작업이라 hot bootstrap 위험, seam은 완성/증명됨.
 > - **B2 ✅ ALREADY FIXED** — 백로그가 stale이었음. `guardProvenance`(ADR-0470, `provenance-guard.ts`)가 `mergeProfileLayers`(line 290, source-precedence default-ON)를 거쳐 라이브 `agent-arg-builder.ts:257 resolvePermissionModeFromProfile`에서 호출 중. per-repo의 grant-capable(approval/network/sandbox) widen은 merge 전에 drop. 이번엔 end-to-end 테스트(`permission-provenance-hellgate.test.ts`)만 강화.
 > - **B3 ✅ FIXED** — `parseRetryAfterMs`(`src/shared/errors.ts`, retry-after delta/HTTP-date + retry-after-ms + x-ratelimit-reset 파싱) → `LLMError.retryAfterMs` → `retry.ts`가 백오프 대신 서버delay 우선(60s ceiling). 헤더 없으면 byte-identical 지수백오프.
-> - **B4 ✅ FIXED (resume-read 경로)** — `reconcileToolPairing`(`src/memory/history-sanitization/`) orphan tool_use→placeholder result / orphan result→drop, `resume-fsm.ts resolveResume`에 배선(path/id 모드 둘 다). **follow-up**: `store.ts` rewindToMessage/forkSession **write-path**(orphan을 만드는 쪽) 미배선 — resume-read가 이미 다음 진입때 정리하므로 primary 벡터는 막힘. @/session→@/memory가 신규 슬라이스 엣지라 fence 해소(공유 leaf로 추출 등) 필요해서 보류.
+> - **B4 ✅ FIXED (resume-read + write-path 둘 다 ✅)** — `reconcileToolPairing` orphan tool_use→placeholder result / orphan result→drop, `resume-fsm.ts resolveResume`에 배선. **follow-up 완료(jun-04)**: `@/session→@/memory`가 biome fence 금지 확인 → pure 로직을 `@/shared/reconcile-tool-pairing.ts` **leaf로 추출**(@/memory는 thin 재export로 @/runner 불변), `store.ts` rewindToMessage(orphan 만드는 쪽)+forkSession write-path 배선 → 디스크 파일이 즉시 model-valid. e2e 증명. +12 test. (부수: 기존 contentBlocks-forkSession 테스트 fixture가 invalid transcript(orphan tool_result)였어서 valid로 보정 — reconcile가 올바르게 drop하던 것.)
 > - **B5 ✅ FIXED** — `FileInfo`에 isFIFO/isCharacterDevice/isBlockDevice + `readFileBytes`(bounded) 추가. read 도구가 device→`device_file` reject(hang 차단), 첫 8KiB NUL 스니프→`binary_file` reject. 텍스트 read byte-identical.
 
 (아래 원본 항목은 기록 보존)
@@ -95,6 +95,16 @@
 ---
 
 ## §3. 🥇 신규 구축 — 고ROI
+
+> **✅ jun-04 wave-1 (4 병렬, 저비용 클러스터) 완료: H2·H6·H9·H12.** 각 feature-catalog YAML + knob(default-OFF) + hellgate + e2e. 신규 105/0, 광역 회귀 5874/0, tsc 0, biome 에러 0(prompt.ts complexity 추출로 무회귀; bash 16/17은 W1 사전존재). 상세:
+> - **H2 ✅** (source-tag 인젝션방어) — 실은 ADR-0471 untrusted-envelope 디스패치 wrap+prompt rule이 **이미 랜딩**돼 있었음. wave에서 `QUANTA_UNTRUSTED_ENVELOPE` CLI 기본-ON 시드 + feature-catalog 진실화 + hellgate 14 + e2e 5. `deriveProvenance` call-site truth(renamed MCP도 name="mcp" 유지). knob default-OFF.
+> - **H6 ✅ (+follow-up ✅)** (passive git/gh stdout 분류) — 새 슬라이스 `src/git/passive-classify/`(@/shared만 임포트, duck-typed sink). bash post-exec 훅(`QUANTA_PASSIVE_VCS` default-OFF). merged/rebased/amended/cherry-pick/push/pr + sha 추출 + exitCode≠0/non-git false-positive 컷. hellgate 37 + e2e 8. **follow-up 완료(jun-04)**: 캐노니컬 `ToolContext.vcsEventSink`(구조적 mirror, @/tool leaf) + `AgentConfig.vcsEventSink` + dispatch buildToolContext thread + assembler `maybeWireVcsEventSink` 어댑터(VcsEvent→`recovery` AgentEvent variant 재사용 — 새 variant는 stream exhaustiveness 가드 깸). e2e로 실제 버스 도달 증명. +21 test.
+> - **H9 ✅** (read `file_unchanged` dedup) — `ReadFileState`에 range-dedup sibling map(freshness와 분리). 동일 path+offset+limit 재read+mtime 동일→sentinel. `QUANTA_READ_DEDUP`(default-OFF, CLI 기본-ON). dispatch.ts 안 건드림(기존 ctx.readFileState 재사용). B5 device/binary 가드 뒤에 실행=무회귀. hellgate 16 + e2e.
+> - **H12 ✅** (line-range-scoped edit) — `line_ranges:[{start,end}]`(1-based inclusive) optional 스키마, exact/fuzzy ladder **앞** 결정론적 prefilter(스코어링 불변). ambiguous 실패에 파일 줄수 첨부(retry 힌트). knob 없음(omit=byte-identical). hellgate 25 + e2e. 기존 edit 177/0 무회귀.
+> - **잔재 정리**: jun-04 ai_attribution 삭제의 catalog YAML + ADR-0257(→Superseded) orphan 해소. fc lint ok.
+> - **wave-2 예정**: H1(edit-reactor, dispatch에서 H2와 결합 필요) / H14(생성축 image_gen+Office, 카테고리 갭=대형).
+
+
 
 - **H1. loop-on-lints/tests/command 자가수정 + 편집결과에 도입-lint delta 자동첨부**
   - 기능/목적: 편집 후 **도입된** lint만(델타) 모델에 자동 첨부 + lint/test/명령이 green 될 때까지 fast 모델로 재편집(maxIters, 커스텀지시).
@@ -257,5 +267,5 @@
 ### 진입 추천 순서
 1. ~~**§2 배선 (W1, W2)**~~ — ✅ **DONE (jun-04)**. orphan 도구 3종도 해소.
 2. ~~**결함 §1 (B1-B5)**~~ — ✅ **DONE (jun-04)**. B1·B3·B4·B5 신규 fix + B2 이미 fix 확인. (follow-up 2건: B1 sampling 핸들러 배선 / B4 rewind·fork write-path.)
-3. **§3 저비용 고ROI (H2, H6, H12, H1)** → **카테고리 갭 (H14)** → 나머지 H ROI순. **← 다음 진입점.**
+3. **§3 저비용 고ROI** — ✅ wave-1 (H2·H6·H9·H12) **DONE (jun-04)**. **다음: H1(edit-reactor) + H14(생성축 카테고리 갭)** → 나머지 H ROI순. **← 다음 진입점.**
 4. **§4** 선택, **§5** 기록만.

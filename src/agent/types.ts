@@ -776,6 +776,26 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    *  default-OFF). Duck-typed via inline import so this slice's type surface does
    *  not grow a new top-of-file dependency. */
   diagnosticsProvider?: import("@/tool").DiagnosticsProvider
+  /** ADR-0472 / H1 — OPTIONAL edit-repair tuning + LoopOnCommand wiring (Cursor
+   *  `ComposerCapabilityRequest.{LoopOnLints,LoopOnTests,LoopOnCommand}` parity).
+   *  All fields default-OFF / byte-identical when absent:
+   *   - `maxIters`           — repair iteration cap (default 2 when absent / < 1).
+   *   - `customInstructions` — appended to every repair prompt (e.g. "keep the
+   *                            public signature"). Absent ⇒ "".
+   *   - `command` + `exec`   — when BOTH set AND `editRepairLoop` is on AND a
+   *                            fast `llm` is wired, a path-bearing edit (`edit`/
+   *                            `write`) is followed by a bounded `checkKind:
+   *                            "command"` repair loop that runs `command` (a test
+   *                            / build / lint script) and re-drives the fast model
+   *                            until exit 0 or `maxIters`. Independent of the
+   *                            diagnostics provider (LoopOnCommand needs no LSP).
+   *                            Absent `command`/`exec` ⇒ no command loop. */
+  editRepair?: {
+    readonly maxIters?: number
+    readonly customInstructions?: string
+    readonly command?: string
+    readonly exec?: import("./edit-repair-wire").ExecRunner
+  }
   /**
    * ADR-0476 skill→MCP auto-attach session. ONE per-session coordinator the
    * composition root mints (assembler `maybeWireSkillMcp`) when
@@ -1085,6 +1105,28 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * try/catches, so a misbehaving sink can never crash a turn.
    */
   onToolDiff?: import("@/tool").ToolDiffSink
+  /**
+   * H6 (jun-3-misc §3) — OPTIONAL passive-VCS event sink. When set, the dispatch
+   * seam surfaces it onto {@link import("@/tool").ToolContext}'s `vcsEventSink`
+   * so the `bash` tool's post-exec hook (`maybeEmitPassiveVcs`) — gated by
+   * `QUANTA_PASSIVE_VCS` — can forward a classified `VcsEvent` (raw git/gh stdout
+   * → structured commit/push/branch/pr facets) to it. The composition root
+   * (`agent-config-assembler#maybeWireVcsEventSink`) wires a sink that ADAPTS the
+   * event onto the EXISTING `AgentEvent` stream (a `recovery` event tagged
+   * `reason:"vcs_event"` carrying the serialized facets) — it does NOT invent a
+   * second bus. ONLY wired when the knob is on; the loop/replay never depends on
+   * it.
+   *
+   * Absent ⇒ the dispatch seam omits the ctx field, the hook resolves its noop,
+   * and the bash post-exec path is byte-identical for every legacy caller (RFC
+   * §1.2, default-OFF). Typed as the producer `PassiveVcsEventSink` (the `@/agent`
+   * slice already imports `@/git/directive-emit`, so reaching the sibling
+   * `@/git/passive-classify` is in-fence); the dispatch seam threads it through
+   * the `@/tool` structural `VcsEventSink` mirror so `@/tool` stays a leaf.
+   * Best-effort: the sink is no-throw by contract and the hook additionally
+   * try/catches, so a misbehaving sink can never crash a turn.
+   */
+  vcsEventSink?: import("@/git/passive-classify").PassiveVcsEventSink
   /**
    * Codex Submission op envelope (ADR-0072, Spec A3). When set the loop
    * derives the seed user-turn from `submission.op` instead of `messages`

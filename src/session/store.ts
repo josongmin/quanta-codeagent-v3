@@ -2,7 +2,7 @@ import { rename, unlink } from "node:fs/promises"
 import { join } from "node:path"
 import { z } from "zod"
 import type { Message } from "@/llm"
-import { errMessage, logger } from "@/shared"
+import { errMessage, logger, reconcileToolPairing } from "@/shared"
 import { fileExists, readFile, writeFile } from "@/storage"
 import type { SessionEnvelopeRecord } from "./envelope"
 import { appendSessionLine, encodeSessionLine } from "./envelope-encoder"
@@ -34,6 +34,32 @@ const resolveArchivedFilePath = (
   provider: SessionRootProvider | undefined,
 ): Promise<string> | string =>
   provider === undefined ? archivedFilePath(id) : archivedFilePathAsync(id, provider)
+
+/**
+ * B4 follow-up (jun-04) — reconcile dangling `tool_use`↔`tool_result` pairs in
+ * a `Message[]` BEFORE it is persisted to disk by `rewindToMessage` (whose
+ * truncation can SPLIT a pair) or `forkSession` (which can PROPAGATE a dangling
+ * pair from the source tail). Re-sending such a transcript is an Anthropic /
+ * OpenAI 400, so repairing it on the WRITE path means the stored file is
+ * model-valid the instant it is written (defense in depth — the resume-READ
+ * path also cleans on the way out via `@/runner/orchestrate/resume-fsm.ts`).
+ *
+ * The repair logic is the pure, deterministic `reconcileToolPairing` pass that
+ * lives in the `@/shared` leaf (shared by the read-path through the
+ * `@/memory/history-sanitization` re-export). The `@/session` slice may not
+ * import `@/memory` (biome `noRestrictedImports`), so the shared home is the
+ * leaf both slices reach.
+ *
+ * Returns a mutable `Message[]`: `reconcileToolPairing` returns the SAME array
+ * reference when nothing was reconciled (the common case — byte-identical), and
+ * that input is already a `Message[]` here, so no extra allocation occurs on
+ * the happy path. When a repair happened it returns a fresh `Message[]`. The
+ * structural `MsgLike` shape it operates on is satisfied by `Message` (`role` +
+ * `content[]` with `tool_use` / `tool_result` blocks); the cast is the same
+ * minimal structural cast the resume-fsm wiring uses.
+ */
+const reconcileMessages = (messages: Message[]): Message[] =>
+  reconcileToolPairing(messages) as Message[]
 
 /**
  * Id-addressable session store — the per-file half. Each id maps to exactly
@@ -413,12 +439,17 @@ export const forkSession = async (
   // Bun supports structuredClone natively and it's faster + safer than the old
   // JSON.parse(JSON.stringify(...)) round-trip (no Date/Map loss surprises).
   const messagesCopy = structuredClone(source.messages)
+  // B4 follow-up (jun-04): a fork propagates whatever dangling pair the source
+  // tail already carries (the live-turn closeout never sealed it, or a prior
+  // rewind split it). Reconcile the cloned messages before writing so the
+  // forked file is model-valid on disk immediately — same defense-in-depth
+  // rationale as `rewindToMessage`. Byte-identical when nothing to reconcile.
   const saved: SavedSession = {
     version: SESSION_VERSION,
     meta: newMeta,
     reason: source.reason,
     turns: source.turns,
-    messages: messagesCopy,
+    messages: reconcileMessages(messagesCopy),
   }
   await writeSessionFile(await resolveSessionFilePath(newId, provider), JSON.stringify(saved))
   await commitMetaAfterSnapshot(newMeta, provider)
@@ -507,11 +538,21 @@ export const rewindToMessage = async (
   const removed = existing.messages.length - (idx + 1)
   if (removed === 0) return { removed: 0 }
   const truncated = existing.messages.slice(0, idx + 1)
+  // B4 follow-up (jun-04): truncating at `idx+1` can SPLIT a `tool_use`↔
+  // `tool_result` pair — if the message at `idx` is an assistant turn whose
+  // `tool_result` lived in a now-removed later message, the persisted file
+  // would carry a dangling `tool_use` → an Anthropic/OpenAI 400 on the next
+  // send. Reconcile so the ON-DISK snapshot is already model-valid (defense in
+  // depth: the resume-read path cleans on the way out too, but repairing here
+  // means the stored file is valid the instant rewind writes it — and the
+  // truncation point is EXACTLY where pairs get split). Byte-identical when
+  // there is nothing to reconcile (same array reference returned).
+  const reconciled = reconcileMessages(truncated)
   const nextMeta: SessionMeta = { ...existing.meta, lastTouched: Date.now() }
   const updated: SavedSession = {
     ...existing,
     meta: nextMeta,
-    messages: truncated,
+    messages: reconciled,
   }
   const path = nextMeta.archived
     ? await resolveArchivedFilePath(sessionId, provider)

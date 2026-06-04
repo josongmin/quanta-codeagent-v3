@@ -37,7 +37,19 @@ const mkMeta = (overrides: Partial<SessionMeta> = {}): SessionMeta => ({
 // contentBlocks payload: text + image + document — exactly the shape
 // composeToolResultContent emits at dispatch.ts.
 const messagesWithContentBlocks = (): Message[] => [
-  { role: "assistant", content: [{ type: "text", text: "calling read_image" }] },
+  {
+    role: "assistant",
+    content: [
+      { type: "text", text: "calling read_image" },
+      // The matching `tool_use` for `call-1` MUST be present so the transcript
+      // is model-valid (every `tool_result` needs a preceding `tool_use`).
+      // forkSession/rewindToMessage now run `reconcileToolPairing` (B4 jun-04),
+      // which DROPS orphan tool_results; a valid pair is a no-op (same ref), so
+      // the lossless-contentBlocks assertion still holds AND this fixture now
+      // also proves the reconcile pass never corrupts a well-formed fork.
+      { type: "tool_use", id: "call-1", name: "read_image", input: {} },
+    ],
+  },
   {
     role: "user",
     content: [

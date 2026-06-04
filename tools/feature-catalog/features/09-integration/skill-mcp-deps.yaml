@@ -3,14 +3,14 @@ title: skill-mcp-deps — skill-declared MCP servers auto-attached on activation
 section: 9
 subsystem: 통합 — skill→MCP 의존성 링크 (skill이 필요한 MCP 서버를 선언하면 활성 시 자동 attach)
 order: 476
-maturity: L2
-status: new
+maturity: L3
+status: refined
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive, headless]
 configurable: partial
 owners: ["@songmin"]
-labels: ["surface:core", "tier:integration", "default-off", "absorbed:agent-config"]
+labels: ["surface:core", "tier:integration", "default-off", "absorbed:agent-config", "wired"]
 depends_on: [skill]
 purpose: |
   A skill declares the MCP servers it needs; when the skill is active and the
@@ -43,29 +43,49 @@ evidence:
     - src/skill/skill-mcp-deps/resolve.ts
     - src/skill/skill-mcp-deps/session.ts
     - src/skill/skill-mcp-deps/index.ts
+    # WIRED (jun-04): full composition chain, default-OFF
+    - src/skill/discover.ts            # lift dependencies block at discovery → Skill.rawDependencies
+    - src/agent/tier1/skill.ts         # gated propagation onto the active-skill inventory
+    - src/agent/loop-activation-hook.ts # reconcileSkillMcpDepsForTurn (descriptor → ActiveSkillDeps)
+    - src/agent/loop.ts                # per-turn reconcile + session-end shutdownAll
+    - src/agent/skill-mcp-attach-adapter.ts # dual-transport (stdio launcher / HTTP-SSE) AttachMcpPort
+    - src/agent/skill-mcp-wire.ts      # composition wire: real launcher + HTTP connect port
+    - src/host/runtime/agent-config-assembler.ts # maybeWireSkillMcp (QUANTA_SKILL_MCP_DEPS gate)
   adrs: [476]
   tests:
     unit:
       - tests/unit/skill-mcp-deps-hellgate.test.ts
-    integration: []
+      - tests/unit/skill-mcp-attach-adapter-hellgate.test.ts
+      - tests/unit/skill-mcp-substrate-hellgate.test.ts
+    integration:
+      - tests/unit/skill-mcp-e2e-hellgate.test.ts
     contract: []
 knobs:
   - name: QUANTA_SKILL_MCP_DEPS
     default: 'unset (OFF)'
     purpose: 'exactly "1" opts a deployment in; any other value (incl "0"/"true"/"on") keeps it OFF. Unset ⇒ resolveMcpDeps returns [] before inspecting any skill (no resolution, no attach). Reads INJECTED env, never process.env.'
-deliberate_hold:
-  reason: |
-    Activation is held for the human at integration (shared files this slice is
-    fenced from): (1) src/skill/skill-frontmatter.ts — carry the optional
-    `dependencies` block through discovery so each skill record has its raw deps;
-    (2) composition root (skill activation / `/skill` invoke) — call
-    resolveMcpDeps(activeSkills, env) then attachPort.attach(specs), where
-    attachPort is an AttachMcpPort wrapping @/agent/plugin-mcp-launcher
-    launchPluginMcpServers; on deactivation shut down servers no active skill
-    still needs. Listed verbatim in ADR-0476 integration TODOs.
 notes: |
+  WIRED (jun-04) — the previously-held integration is DONE end-to-end (default-OFF):
+  (1) DISCOVERY: src/skill/discover.ts lifts the raw `dependencies` block from
+  the FULL SKILL.md (frontmatter, not the post-frontmatter body) onto
+  Skill.rawDependencies. (2) CHANNEL: src/agent/tier1/skill.ts propagates it onto
+  the per-turn active-skill inventory ONLY when QUANTA_SKILL_MCP_DEPS=1 (the
+  prompt renderer reads only name/description ⇒ byte-identical when off); it
+  survives the plugin-union projection (augmentActiveSkillsWithPlugin). (3)
+  RECONCILE: loop.ts calls reconcileSkillMcpDepsForTurn(config, activeSkills)
+  every turn (extracted helper keeps prepareTurnContext under the complexity cap),
+  mapping each descriptor → ActiveSkillDeps; pure no-op when no session is wired.
+  (4) TEARDOWN: cleanupFinishedSession calls config.skillMcpSession.shutdownAll()
+  at session end. (5) COMPOSITION: assembler maybeWireSkillMcp mints ONE session
+  bound to the REAL stdio launcher (createIsolatedMcpLauncherPort) + HTTP-SSE
+  connect port (src/agent/skill-mcp-wire.ts), gated on QUANTA_SKILL_MCP_DEPS=1,
+  caller-override-safe. Proven by an e2e hellgate driving the production reconcile
+  path: attach → cross-skill dedupe → detach → shutdownAll, plus gate-OFF no-op.
+
   Port inversion is the crux: @/skill could not legally import the launcher from
   a leaf, so the attach is injected as AttachMcpPort. depIdentity is named +
   documented (NOT an ad-hoc key): a service exposed over both sse and
   streamable_http is two distinct attachments (different wire protocol = different
-  connection), proven by the hellgate.
+  connection), proven by the hellgate. The deps block rides WITH its skill on the
+  active-skill channel (locality, no name-keyed side index) — an optional field
+  that is absent unless the gate is on AND the skill declared a block.

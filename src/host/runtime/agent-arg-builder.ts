@@ -306,11 +306,16 @@ const isRetrievalHybridEnabled = (env: NodeJS.ProcessEnv): boolean =>
  *  Any other value (including absent) yields the byte-identical `{}` default.
  *  Single canonical knob; no aliases.
  *
- *  B1 (jun-04) — `sampling` is advertised ONLY when a real `SamplingHandlerPort`
- *  is wired (`fullNegotiator({ sampling: true })`): never advertise a capability
- *  `handleInboundRequest` would answer with `-32601`. To enable it, build an
- *  `@/llm`-backed handler (with a HITL consent gate), pass it to the `McpClient`
- *  as `samplingHandler`, and switch this call to `fullNegotiator({ sampling: true })`. */
+ *  B1 follow-up (jun-04, WIRED) — `sampling` is advertised IFF a real
+ *  `SamplingHandlerPort` is wired, which the caller signals via
+ *  `opts.sampling`. The advertisement and the handler MUST move together: the
+ *  composition root computes BOTH from one gate
+ *  ({@link buildSamplingWiring}) — `QUANTA_MCP_SAMPLING=1` AND an LLM AND a
+ *  consent prompter must all be present. The caller passes that gate's
+ *  `advertise` flag here AND the matching `handler` to the `McpClient` as
+ *  `samplingHandler`, so we never advertise a capability `handleInboundRequest`
+ *  would answer with `-32601`. `opts.sampling` defaults to `false` ⇒
+ *  byte-identical to every existing call (`{}` or full-without-sampling). */
 /** Track A2 — the composition-root session thread key the named permission
  *  profile is registered under. The unified-agent surface starts ONE logical
  *  session per process; a single stable key is the right granularity for the
@@ -401,8 +406,13 @@ const resolvePermissionProfileWiring = (
   }
 }
 
-export const pickMcpNegotiator = (env: NodeJS.ProcessEnv): CapabilityNegotiator =>
-  env.QUANTA_MCP_CAPS === "full" ? fullNegotiator() : defaultNegotiator
+export const pickMcpNegotiator = (
+  env: NodeJS.ProcessEnv,
+  opts: { sampling?: boolean } = {},
+): CapabilityNegotiator =>
+  env.QUANTA_MCP_CAPS === "full"
+    ? fullNegotiator(opts.sampling === true ? { sampling: true } : {})
+    : defaultNegotiator
 
 /** ADR-0428 jun-02 wire — resolve the socket-level egress proxy config from the
  *  composition-root env view and return a SPREAD-READY slot (`{}` when off) so

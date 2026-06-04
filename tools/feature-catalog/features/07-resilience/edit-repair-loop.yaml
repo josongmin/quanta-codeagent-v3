@@ -3,12 +3,12 @@ title: Edit-repair-loop — lint-delta + bounded fast-model repair to green
 section: 7
 subsystem: 회복탄력성 — 편집 후 도입된 진단(lint-delta) 부착 + 빠른 모델 반복 수리(Cursor/Codex 흡수)
 order: 472
-maturity: L2
-status: new
+maturity: L3
+status: refined
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive, headless, batch]
-configurable: partial
+configurable: integrated
 owners: ["@songmin"]
 labels: ["absorbed:cursor", "absorbed:codex", "surface:cli", "tier:resilience", "default-off"]
 depends_on: [agent, shared]
@@ -46,28 +46,39 @@ evidence:
     - src/agent/edit-repair-loop/lint-delta.ts
     - src/agent/edit-repair-loop/runner.ts
     - src/agent/edit-repair-loop/index.ts
+    - src/agent/edit-repair-wire.ts
+    - src/agent/dispatch.ts
+    - src/agent/types.ts
   adrs: [472]
   tests:
     unit:
       - tests/unit/edit-repair-loop-hellgate.test.ts
+      - tests/unit/edit-repair-wire-hellgate.test.ts
+      - tests/unit/edit-repair-command-loop-hellgate.test.ts
     integration: []
     contract: []
 knobs:
   - name: QUANTA_EDIT_REPAIR_LOOP
     default: 'unset (OFF)'
-    purpose: 'exactly "1" opts a deployment in; any other value (incl "0"/"on"/"true") keeps it OFF. Unset ⇒ the integration site skips runRepairLoop and never constructs the ports (no extra LLM/check calls). The pure lint-delta computer is usable independently to enrich edit output.'
-deliberate_hold:
-  reason: |
-    Activation is held for the human at integration (shared files this slice is
-    fenced from): (1) the edit/write/apply-patch toModelOutput hook that appends
-    renderLintDelta(computeLintDelta(pre,post)) (src/tool/edit|write|apply-patch);
-    (2) the post-edit loop call site in the dispatch/loop seam
-    (src/agent/dispatch.ts); (3) the composition-root wiring of the real LSP
-    diagnostics onto RepairCheck (lints ⇒ computeLintDelta) + the
-    fast-apply-fallback side-conversation + parse-test-failure onto
-    RepairReactorPort, with maxIters from a named config field. Listed verbatim in
-    ADR-0472 integration TODOs.
+    purpose: 'exactly "1" opts a deployment in; any other value (incl "0"/"on"/"true") keeps it OFF. Unset ⇒ the dispatch seam skips both the lint repair loop and the command repair loop and never constructs the ports (no extra LLM/check calls). The pure lint-delta computer is usable independently to enrich edit output.'
+  - name: AgentConfig.editRepair
+    default: 'unset (defaults)'
+    purpose: 'H1 named config surface (NOT an env knob — host-injected). {maxIters?: int≥1 (default 2 via resolveRepairMaxIters; invalid falls back), customInstructions?: appended to every repair prompt, command?+exec?: when BOTH set the dispatch seam runs LoopOnCommand — runs the test/build/lint command after a path-bearing edit and re-drives the fast model until exit 0 or maxIters, INDEPENDENT of the diagnostics provider}. Absent ⇒ byte-identical defaults.'
 notes: |
+  WIRED (H1, jun-04): the ADR-0472 integration TODOs landed. (1) lint-delta is
+  appended to edit/write toModelOutput via the dispatch openLintBracket
+  (src/agent/dispatch.ts), gated on QUANTA_EDIT_REPAIR_LOOP + config.diagnosticsProvider;
+  (2) the post-edit loop call sites live in dispatch — the LINT loop inside the
+  bracket (checkKind:"lints") AND a separate provider-independent runEditCommandRepair
+  (checkKind:"command", LoopOnCommand/LoopOnTests parity); (3) maxIters +
+  customInstructions are sourced from the named AgentConfig.editRepair field
+  (resolveRepairMaxIters validates int≥1), and the command check is wired via
+  commandRepairCheck(exec, command) from edit-repair-wire.ts. The composition root
+  still injects the real fast LLM (config.llm), LSP diagnostics (config.diagnosticsProvider)
+  and the command exec (config.editRepair.exec) — those are DEPLOYMENT wiring, not
+  code holds. Remaining scope: apply_patch coverage (extractEditPath is edit/write
+  only — multi-file patch deferred per ADR-0472).
+
   Port inversion is the design crux: @/agent could legally import @/llm, but the
   repair slice is a leaf, so the fast model + the check are injected as
   RepairReactorPort / RepairCheck (mirrors @/permission ClassifierPort), keeping

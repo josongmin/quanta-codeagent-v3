@@ -509,20 +509,22 @@ const resolveSummaryPrefix = (messages: readonly Message[]): PromptSummaryPrefix
  * `<system-reminder>` user message, so the cached prefix is preserved and only
  * the tail varies.
  */
+/** ADR-0471 — append the untrusted-source trust rule to the STATIC base section
+ *  when the gate is on (the loop resolves it from `runtimeConfig().untrustedEnvelope`,
+ *  the SAME frozen gate the dispatch wrap site reads, so rule + wrapping engage
+ *  together). It rides the `base` cache breakpoint — no new section, the
+ *  4-breakpoint budget is untouched — and is byte-identical when off (no append).
+ *  Extracted so `buildTurnContext` stays under biome's cognitive-complexity gate. */
+const resolveStaticBase = (basePrompt: string, untrustedEnvelope: boolean | undefined): string =>
+  untrustedEnvelope === true ? `${basePrompt}\n${UNTRUSTED_ENVELOPE_RULE}` : basePrompt
+
 export const buildTurnContext = (input: TurnContextInput): TurnContext => {
   // ADR-0326 wire — cache the default `buildSystemPrompt()` result per
   // session-key. `input.system` (caller-provided) bypasses the cache so a
   // caller that already memoizes its own static prefix isn't shadowed.
   const basePrompt =
     input.system ?? resolveCachedSystemPrompt(input.systemPromptCache, input.systemPromptCacheKey)
-  // ADR-0471 — append the untrusted-source trust rule to the STATIC base
-  // section when the gate is on (the loop resolves it from
-  // `runtimeConfig().untrustedEnvelope`, the SAME frozen gate the dispatch wrap
-  // site reads, so rule + wrapping engage together). It rides the `base` cache
-  // breakpoint — no new section, the 4-breakpoint budget is untouched — and is
-  // byte-identical when off (no append).
-  const staticBase =
-    input.untrustedEnvelope === true ? `${basePrompt}\n${UNTRUSTED_ENVELOPE_RULE}` : basePrompt
+  const staticBase = resolveStaticBase(basePrompt, input.untrustedEnvelope)
   // 4-section preset (Claude Desktop 1.7196 `systemPromptSectionCache` mirror)
   // activates only when the caller supplies repo-local rules text OR a static
   // user-append; otherwise we stay byte-identical to the legacy single-block

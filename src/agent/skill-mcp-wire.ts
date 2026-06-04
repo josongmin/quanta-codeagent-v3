@@ -51,6 +51,13 @@ import {
 export const buildSkillMcpHttpConnect = (): HttpMcpConnectPort => ({
   connect: async (spec: McpServerSpec, id: string): Promise<HttpMcpConnection> => {
     const url = spec.url ?? ""
+    if (url.trim().length === 0) {
+      // Defensive: an HTTP-carrier spec ALWAYS carries a url (parseSkillMcpDeps
+      // rejects an http dep with no url as malformed before it ever reaches a
+      // spec). Reject rather than open a client against "" so a contract
+      // violation upstream degrades to attached:false, never a half-open client.
+      throw new Error(`skill-mcp http connect: empty url for ${spec.serviceName}`)
+    }
     const transport = new HttpSseMcpTransport({ url, name: spec.serviceName })
     const client = new McpClient({ name: spec.serviceName, command: [], url }, { transport })
     try {

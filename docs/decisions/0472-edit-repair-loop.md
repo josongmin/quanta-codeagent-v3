@@ -90,3 +90,30 @@ ONLY — Result/ok/err, errMessage):
    LSP/diagnostics source onto `RepairCheck` (lints ⇒ `computeLintDelta`) and the
    `fast-apply-fallback` side-conversation + `parse-test-failure` onto
    `RepairReactorPort`. Source `maxIters` from a named config field (no literal).
+
+## Integration status — LANDED (H1, jun-04)
+
+TODOs 1 and 2 plus the config-field half of TODO 3 are now wired in
+`src/agent/dispatch.ts` (gated on `QUANTA_EDIT_REPAIR_LOOP`):
+
+- **TODO 1 (lint-delta attach)** — `openLintBracket` snapshots `DiagnosticsProvider`
+  diagnostics pre/post a path-bearing `edit`/`write` and appends
+  `renderLintDelta(computeLintDelta(pre, post))` to the tool output.
+- **TODO 2 (loop call site)** — the LINT repair loop runs inside the bracket
+  (`checkKind:"lints"`), and a separate, provider-INDEPENDENT
+  `runEditCommandRepair` runs the COMMAND loop (`checkKind:"command"`,
+  LoopOnCommand / LoopOnTests parity) after the edit.
+- **TODO 3 (named config field)** — `maxIters` + `customInstructions` are sourced
+  from the new `AgentConfig.editRepair` field (`resolveRepairMaxIters` validates
+  `int ≥ 1`, else the `REPAIR_MAX_ITERS=2` default); the command check is wired via
+  `commandRepairCheck(exec, command)`. Both loops share `buildEditApplyReactor`.
+
+Tests: `tests/unit/edit-repair-command-loop-hellgate.test.ts` proves the command
+loop end-to-end through the real `dispatchTool` + `editTool` (fail → re-edit →
+green; maxIters bound; byte-identical default-OFF).
+
+Remaining (deployment / scope, NOT a code hold): the composition root injects the
+real fast `LLMPort` (`config.llm`), LSP `DiagnosticsProvider`
+(`config.diagnosticsProvider`) and command `ExecRunner` (`config.editRepair.exec`);
+and `apply_patch` coverage stays deferred (`extractEditPath` is `edit`/`write`
+only — multi-file patch is out of scope here).

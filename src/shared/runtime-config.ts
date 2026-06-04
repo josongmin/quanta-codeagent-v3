@@ -135,6 +135,15 @@ export interface RuntimeConfig {
    *  NOT lifted onto the active-skill channel and no MCP server is auto-attached
    *  (byte-identical). Also read by the slice's own `skillMcpDepsEnabled`. */
   readonly skillMcpDeps: boolean
+  /** ADR-0470 B1 follow-up inbound MCP sampling gate (`QUANTA_MCP_SAMPLING`).
+   *  Strict opt-in (`=== "1"`). When ON *and* an LLM + a consent prompter are
+   *  assembled at the composition root, the MCP client advertises `sampling`
+   *  AND is wired with an `@/llm`-backed handler (HITL consent on every request;
+   *  see `host/runtime/mcp-sampling-handler.ts` `buildSamplingWiring`).
+   *  Default false ⇒ sampling is NOT advertised and the headless rejecter
+   *  declines (`no-handler`) — byte-identical. The advertisement and the handler
+   *  always move together (advertise-iff-able). */
+  readonly mcpSampling: boolean
   /** H9 read `file_unchanged` dedup gate (`QUANTA_READ_DEDUP`). Strict opt-in
    *  (`=== "1"`). When ON, the `read` tool short-circuits a re-read of the SAME
    *  (canonical path, offset, limit) whose on-disk mtime equals the recorded
@@ -330,6 +339,11 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // ADR-0476 — strict `=== "1"` opt-in (matches the `skillMcpDepsEnabled`
     // slice gate). Default false ⇒ no deps lifted, no auto-attach.
     skillMcpDeps: env["QUANTA_SKILL_MCP_DEPS"] === "1",
+    // ADR-0470 B1 follow-up — strict `=== "1"` opt-in. Default false ⇒ MCP
+    // `sampling` is NOT advertised and the headless rejecter declines
+    // (`no-handler`). The composition root only wires a handler (and advertises)
+    // when this is on AND an LLM + consent prompter are present.
+    mcpSampling: env["QUANTA_MCP_SAMPLING"] === "1",
     // H9 — strict `=== "1"` opt-in. Default false ⇒ the read tool renders full
     // content on every call and allocates no per-range dedup state.
     readDedup: env["QUANTA_READ_DEDUP"] === "1",

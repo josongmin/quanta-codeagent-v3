@@ -71,6 +71,7 @@ import {
   realClock,
   realScheduler,
 } from "@/browser"
+import type { PassiveVcsEventSink, VcsEvent } from "@/git/passive-classify"
 import {
   createInMemorySystemPromptCache,
   type SystemPromptCachePort,
@@ -87,6 +88,7 @@ import { CI_BOT_DEFAULT_ALLOWLIST } from "@/runtime/network-allowlist"
 import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
 import type { RuntimeAgentTurnAssembler, RuntimeAgentTurnDeps } from "@/sdk/runtime/base"
 import { resolveJailed } from "@/storage"
+import type { AgentEvent, StreamPort } from "@/stream"
 import { type DnsResolver, nodeDnsResolver } from "@/tool/browser"
 import { ReadFileState, staleReadGuardEnabled } from "@/tool/stale-read-guard"
 import type { WebSearchProvider } from "@/tool/web"
@@ -351,6 +353,7 @@ const wireOptionalCapabilitySlots = (cfg: AgentConfig, env: AssemblerEnv): void 
   maybeWireDiagnostics(cfg, env)
   maybeWireSkillMcp(cfg, env)
   maybeWirePromptCacheObserver(cfg, env)
+  maybeWireVcsEventSink(cfg, env)
 }
 
 /** ADR-0182 — mint ONE per-session `PromptCacheObserver` when the prompt-cache
@@ -386,6 +389,85 @@ const maybeWireDiagnostics = (cfg: AgentConfig, env: AssemblerEnv): void => {
   if (!editRepairLoopEnabled(env)) return
   if (cfg.diagnosticsProvider !== undefined) return
   cfg.diagnosticsProvider = lspDiagnosticsProvider()
+}
+
+/**
+ * H6 (jun-3-misc §3) — serialize a classified {@link VcsEvent}'s present facets
+ * into a compact, DETERMINISTIC `detail` string for the `recovery` AgentEvent.
+ *
+ * Order is fixed (commit → push → branch → pr) and only present facets appear,
+ * so the same `VcsEvent` always yields the same string (drives a hellgate matrix
+ * directly). Pure — no I/O, no `Date.now`/`Math.random`. NOT a billing/secret
+ * surface: a git/gh stdout classification carries only shas / ref names / PR
+ * numbers, all already model-visible in the bash output.
+ */
+const serializeVcsEvent = (event: VcsEvent): string => {
+  const parts: string[] = []
+  if (event.commit !== undefined) {
+    parts.push(
+      event.commit.sha !== undefined
+        ? `commit:${event.commit.kind}@${event.commit.sha}`
+        : `commit:${event.commit.kind}`,
+    )
+  }
+  if (event.push !== undefined) {
+    const local = event.push.localRef ?? "?"
+    const remote = event.push.remoteRef ?? "?"
+    parts.push(`push:${local}->${remote}`)
+  }
+  if (event.branch !== undefined) parts.push(`branch:${event.branch.action}`)
+  if (event.pr !== undefined) {
+    parts.push(
+      event.pr.url !== undefined
+        ? `pr:#${event.pr.number}:${event.pr.url}`
+        : `pr:#${event.pr.number}`,
+    )
+  }
+  return parts.join(" ")
+}
+
+/**
+ * H6 (jun-3-misc §3) — build the host adapter that turns a classified
+ * {@link VcsEvent} into an {@link AgentEvent} on the EXISTING stream (NOT a
+ * second bus). The event is emitted as a `recovery` variant tagged
+ * `reason:"vcs_event"` with the serialized facets as `detail` — the documented
+ * catch-all family every adapter (stdout / jsonl-recorder / sse) already
+ * renders + records (same posture as `plan_*` / `turn_diff_updated` /
+ * `response_queued`), so no new AgentEvent variant + no exhaustiveness break in
+ * the stream adapters (which this slice does not own). `emit` is NO-THROW: a
+ * dead stream can never poison a bash turn (the hook also guards). Exported so a
+ * hellgate test can assert the VcsEvent→AgentEvent mapping directly.
+ */
+export const createPassiveVcsStreamSink = (stream: StreamPort): PassiveVcsEventSink => ({
+  emit(event: VcsEvent): void {
+    const ev: AgentEvent = {
+      type: "recovery",
+      reason: "vcs_event",
+      detail: serializeVcsEvent(event),
+    }
+    try {
+      stream.emit(ev)
+    } catch {
+      // NO-THROW boundary: best-effort observability, a broken stream must never
+      // break the bash turn that produced the event.
+    }
+  },
+})
+
+/** H6 (jun-3-misc §3) — wire the passive-VCS event sink onto `cfg` so the bash
+ *  tool's post-exec hook (gated by `QUANTA_PASSIVE_VCS`) forwards classified
+ *  git/gh stdout events onto the existing AgentEvent stream. OPT-IN
+ *  (`QUANTA_PASSIVE_VCS=1`): off by default for every surface (this assembler is
+ *  shared by bench/eval + web-daemon, so a default-ON would change their event
+ *  stream + SWE-bench reproducibility). Caller-override-safe (ADR-0332): a
+ *  pre-set slot is preserved. Absent gate ⇒ slot stays unset ⇒ the dispatch seam
+ *  omits the ctx field, the hook resolves its noop, and the bash post-exec path
+ *  is byte-identical (default-OFF). The sink emits onto `cfg.stream` — the SAME
+ *  stream the loop's other AgentEvents ride. */
+const maybeWireVcsEventSink = (cfg: AgentConfig, env: AssemblerEnv): void => {
+  if (env.QUANTA_PASSIVE_VCS !== "1") return
+  if (cfg.vcsEventSink !== undefined) return
+  cfg.vcsEventSink = createPassiveVcsStreamSink(cfg.stream)
 }
 
 /** ADR-0476 — mint ONE per-session skill→MCP coordinator when opted in

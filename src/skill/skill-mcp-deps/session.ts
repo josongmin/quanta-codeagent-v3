@@ -41,6 +41,7 @@ import {
   type ActiveSkillDeps,
   type AttachMcpPort,
   depIdentity,
+  type McpAttachOutcome,
   type McpServerSpec,
   type SkillMcpDepsEnv,
 } from "./types"
@@ -111,14 +112,27 @@ export const createSkillMcpSession = (
 
   const safeAttach = async (specs: readonly McpServerSpec[]): Promise<void> => {
     if (specs.length === 0) return
+    let outcomes: readonly McpAttachOutcome[]
     try {
-      await ports.attach.attach(specs)
+      outcomes = await ports.attach.attach(specs)
     } catch {
       // NO-THROW: a throwing attach leaves these identities UNTRACKED so a
       // later reconcile retries them. State below is only committed on success.
       return
     }
-    for (const s of specs) attachedByIdentity.set(depIdentity(s), s)
+    // Commit ONLY the specs the port reports as actually attached. A per-spec
+    // failure (`attached:false` — e.g. a launcher that returned `ready:false`
+    // or an HTTP connect that rejected) is left UNCOMMITTED so a LATER reconcile
+    // RE-tries it, honoring the attach port's untracked-on-failure contract.
+    // Without this, the session would mark a never-started server "attached"
+    // and (a) never retry it within the session AND (b) diverge from the
+    // adapter's registry. Outcomes are returned in input order; zip by INDEX
+    // because `serviceName` is NOT unique across HTTP deps (same name, different
+    // transport/url is a distinct identity). A short/missing outcome ⇒ not
+    // committed (defensive against a non-conforming port).
+    specs.forEach((s, i) => {
+      if (outcomes[i]?.attached === true) attachedByIdentity.set(depIdentity(s), s)
+    })
   }
 
   const safeDetach = async (specs: readonly McpServerSpec[]): Promise<void> => {

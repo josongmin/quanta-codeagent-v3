@@ -222,18 +222,42 @@ export const reconcileSkillMcpForTurn = async (
  * turn. Extracted from `prepareTurnContext` so that hot function stays under the
  * cognitive-complexity cap. Pure no-op (immediate return, NO allocation) when no
  * `skillMcpSession` is wired — the common path — so it is byte-identical and
- * zero-cost by default. NO-THROW (delegates to {@link reconcileSkillMcpForTurn}).
+ * zero-cost by default.
+ *
+ * NO-THROW (HARD contract): the loop `await`s this UNGUARDED, so it MUST NOT
+ * throw for ANY input. The `.map()` is inside the try because `activeSkills`
+ * MAY carry a hostile element (e.g. a plugin activator returning an object with
+ * a throwing `name` getter) — a thrown projection must NOT break the turn. A
+ * per-element guard also drops any single malformed entry rather than failing
+ * the whole reconcile.
  */
 export const reconcileSkillMcpDepsForTurn = async (
   config: SkillMcpReconcileConfigLike,
   activeSkills: readonly { name: string; rawDependencies?: unknown }[] | undefined,
 ): Promise<void> => {
   if (config.skillMcpSession === undefined) return
-  const deps: ActiveSkillDeps[] = (activeSkills ?? []).map((s) => ({
-    skillId: s.name,
-    ...(s.rawDependencies !== undefined ? { rawDependencies: s.rawDependencies } : {}),
-  }))
-  await reconcileSkillMcpForTurn(config, deps)
+  try {
+    const deps: ActiveSkillDeps[] = []
+    for (const s of activeSkills ?? []) {
+      try {
+        // A non-string `name` cannot be a skillId — skip it (defensive: the
+        // channel is typed but a hostile activator can violate the type).
+        if (typeof s?.name !== "string") continue
+        deps.push(
+          s.rawDependencies !== undefined
+            ? { skillId: s.name, rawDependencies: s.rawDependencies }
+            : { skillId: s.name },
+        )
+      } catch {
+        // Hostile getter on this entry — drop it, keep the rest.
+      }
+    }
+    await reconcileSkillMcpForTurn(config, deps)
+  } catch {
+    // Belt-and-suspenders: nothing above should throw (the inner reconcile is
+    // itself NO-THROW), but a hostile `activeSkills` iterator must never break
+    // the turn. Swallow → the turn proceeds with no reconcile this round.
+  }
 }
 
 export const resolvePluginActivationForTurn = async (

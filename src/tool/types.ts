@@ -293,6 +293,51 @@ export interface ToolContext {
    *  {@link toolDiff} sink is wired (gate ON); absent otherwise (byte-identical
    *  legacy path). */
   toolCallId?: string
+  /** H6 (jun-3-misc §3) — OPTIONAL passive-VCS event sink. The `bash` tool's
+   *  post-exec hook (`maybeEmitPassiveVcs`) reads this through its duck-typed
+   *  `PassiveVcsHookCtx` view: when `QUANTA_PASSIVE_VCS` is on AND a sink is
+   *  wired, it classifies a completed git/gh command's stdout into a structured
+   *  VCS event and forwards it here. The host (composition root) wires a sink
+   *  that adapts the event onto the EXISTING `AgentEvent` stream (NOT a second
+   *  bus). Surfaced by the dispatch seam from `AgentConfig.vcsEventSink`. ABSENT
+   *  (gate OFF / non-wiring host) ⇒ omitted ⇒ the hook resolves its noop and the
+   *  bash post-exec path is byte-identical (default-OFF). Typed via the in-slice
+   *  {@link VcsEventSink} structural mirror so `@/tool` stays a leaf and never
+   *  imports `@/git` (same discipline as {@link ToolDiffSink} /
+   *  {@link ShellExecObserver}). */
+  vcsEventSink?: VcsEventSink
+}
+
+/** H6 (jun-3-misc §3) — structural mirror of `VcsEvent` from
+ *  `@/git/passive-classify` (kept HERE so `@/tool` stays a slice leaf and never
+ *  imports `@/git`). Every facet is OPTIONAL (a single command can surface
+ *  several at once); the shapes match the producer's discriminated unions field-
+ *  for-field. The closed `kind` / `action` literals mirror the producer's
+ *  `VcsCommitKind` / `VcsBranchAction` — adding a value requires updating BOTH
+ *  the producer AND this mirror (same convention as `GitWriteProtectReason`). */
+export interface VcsEventMirror {
+  readonly commit?: {
+    readonly kind: "commit" | "amend" | "cherry-pick" | "merge"
+    readonly sha?: string
+  }
+  readonly push?: { readonly localRef?: string; readonly remoteRef?: string }
+  readonly branch?: { readonly action: "merged" | "rebased" | "amended" }
+  readonly pr?: { readonly number: number; readonly url?: string }
+}
+
+/** H6 (jun-3-misc §3) — duck-typed passive-VCS event sink injected via
+ *  {@link ToolContext}. Structural mirror of `PassiveVcsEventSink` from
+ *  `@/git/passive-classify` (kept HERE so `@/tool` stays a slice leaf and never
+ *  imports `@/git` — mirroring the `ToolDiffSink` discipline). `emit` is
+ *  NO-THROW at the port boundary by contract; the bash hook additionally guards
+ *  the call so a misbehaving custom sink can never break a bash turn. The
+ *  payload is the {@link VcsEventMirror} structural shape; the producer's
+ *  concrete `VcsEvent` is structurally assignable to it, and the host adapter
+ *  (the only consumer that reads the facets) narrows back to the producer type
+ *  at wire time. */
+export interface VcsEventSink {
+  /** Forward a classified VCS event. NO-THROW by contract. */
+  emit(event: VcsEventMirror): void
 }
 
 /** ADR-0440 wire-finish — duck-typed tool-diff capture sink injected via

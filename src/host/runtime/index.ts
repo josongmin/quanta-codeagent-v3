@@ -49,6 +49,12 @@ export {
   buildCapabilityManifest,
   deriveCapabilityManifest,
 } from "./capabilities"
+export {
+  buildSamplingWiring,
+  createLlmSamplingHandler,
+  type SamplingHandlerDeps,
+  type SamplingWiring,
+} from "./mcp-sampling-handler"
 export type { OperatorReviewAdapter } from "./operator-review"
 export { createInMemorySessionPersistence } from "./persistence"
 export { hasExecutableTools } from "./tool-executor"
