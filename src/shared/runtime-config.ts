@@ -258,6 +258,28 @@ export interface RuntimeConfig {
    *  auto-resume). Raising/resetting the budget un-limits (the status is a pure
    *  function of the current cell, no sticky flag). */
   readonly objectiveBudgetEnforce: boolean
+  /** H17 idle goal-CONTINUATION gate (`QUANTA_GOAL_ENFORCE`). Strict opt-in
+   *  (`=== "1"`). Default false ⇒ NO idle goal-continuation is ever launched —
+   *  byte-identical to today's informational objective (the orchestrator's
+   *  `enabled` is false, so `runIdleContinuation` returns `disabled` before
+   *  touching any port or resume sink). When true the host wires the
+   *  idle-monitor / reactor seam to `runIdleContinuation`: an IDLE thread with
+   *  an `active` goal auto-resumes, GUARDED by the Codex guards (plan-mode /
+   *  turn-active / queued-input / mailbox-input / no-goal / ephemeral /
+   *  goal-changed) and serialized by a single-permit semaphore. Independent of
+   *  `QUANTA_OBJECTIVE_BUDGET_ENFORCE` (that gate controls budget→status; this
+   *  one controls whether the idle resume fires at all). */
+  readonly goalContinuationEnforce: boolean
+  /** Capability A — multi-agent task dependency DAG gate (`QUANTA_TEAM_DAG`).
+   *  Strict opt-in (`=== "1"`). Default false ⇒ `spawn_batch` fan-out is the
+   *  EXISTING flat parallel pool (no dependency ordering) — byte-identical. When
+   *  ON *and* a batch carries dependency edges, the tier1 builder wraps the
+   *  child runner with a DAG gate (`@/subagent/coordination`) so each child
+   *  dispatches only once its `dependsOn` are completed, releasing dependents as
+   *  children finish (bounded by the existing worker ceiling). A cyclic/dangling
+   *  graph is rejected before dispatch; a failed/cancelled dep surfaces its
+   *  dependents as a typed dead branch (never an indefinite hang). */
+  readonly teamDag: boolean
   /** FS jail disable flag (`QUANTA_FS_JAIL=off`). Default false (jail ON). */
   readonly fsJailDisabled: boolean
   /** ADR-0062 cap-as-instruction dispatch enforcement (`QUANTA_CAP_ENFORCE=1`).
@@ -519,12 +541,18 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // H15 — strict `=== "1"` opt-in. Default false ⇒ responses-wire byte-identical
     // (encrypted reasoning dropped, no include, no re-emit). OpenAI-Responses only.
     reasoningCarryover: env["QUANTA_REASONING_CARRYOVER"] === "1",
+    // H17 — idle goal-continuation + budget enforcement. Strict `=== "1"` opt-in;
+    // default false ⇒ objective stays informational-only (byte-identical).
+    goalContinuationEnforce: env["QUANTA_GOAL_ENFORCE"] === "1",
     // H13 — strict `=== "1"` opt-in. Default false ⇒ no config-migration detect,
     // no prompt, no ledger (byte-identical startup).
     migrateConfig: env["QUANTA_MIGRATE_CONFIG"] === "1",
     // H17 — strict `=== "1"` opt-in. Default false ⇒ objective budget stays
     // informational (status never flips, idle-continuation byte-identical).
     objectiveBudgetEnforce: env["QUANTA_OBJECTIVE_BUDGET_ENFORCE"] === "1",
+    // Capability A — strict `=== "1"` opt-in. Default false ⇒ batch fan-out is
+    // the existing flat parallel pool (byte-identical, no DAG ordering).
+    teamDag: env["QUANTA_TEAM_DAG"] === "1",
     fsJailDisabled: parseBool(env["QUANTA_FS_JAIL"] === "off" ? "1" : undefined),
     capEnforce: parseBool(env["QUANTA_CAP_ENFORCE"]),
     gitSha: stringOrUndef(env["QUANTA_GIT_SHA"]),

@@ -47,6 +47,13 @@ export {
   sqliteAutomationEngine,
   tickScheduler,
 } from "./automation-engine"
+// H8 — heartbeat creation-boundary invariants (pure).
+export {
+  activeHeartbeatForThread,
+  type HeartbeatRejectReason,
+  type HeartbeatValidation,
+  validateHeartbeatCandidate,
+} from "./heartbeat"
 export type { ChooseModelOpts, ChooseModelResult, ModelRerouteReason } from "./model-reroute"
 // Model reroute
 export { chooseModel } from "./model-reroute"
@@ -69,6 +76,7 @@ export { defaultJsonlAutomationStore } from "./store-jsonl"
 export type {
   AgentLoopPort,
   Automation,
+  AutomationKind,
   AutomationStatus,
   AutomationStorePort,
   AutorunEligibilityResolverPort,
@@ -76,6 +84,7 @@ export type {
   ClockPort,
   EnvPort,
   Frequency,
+  HeartbeatPolicySnapshot,
   ModelAvailabilityPort,
   RRule,
   RRuleParseError,
@@ -86,6 +95,7 @@ export type {
   WeekdayDay,
 } from "./types"
 export {
+  ALL_AUTOMATION_KINDS,
   ALL_AUTOMATION_STATUSES,
   ALL_FREQUENCIES,
   ALL_WEEKDAYS,

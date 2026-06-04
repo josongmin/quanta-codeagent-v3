@@ -38,6 +38,7 @@ import {
   type AutomationStatus,
   AutomationStoreError,
   type AutomationStorePort,
+  type HeartbeatPolicySnapshot,
   type RRule,
   type Weekday,
 } from "./types"
@@ -194,6 +195,40 @@ const parseAutomation = (raw: unknown): Automation | undefined => {
     ...base,
     ...(typeof r.lastFiredAt === "number" ? { lastFiredAt: r.lastFiredAt } : {}),
     ...(typeof r.lastErrorMessage === "string" ? { lastErrorMessage: r.lastErrorMessage } : {}),
+    ...heartbeatFields(r),
+  }
+}
+
+/** H8 — reconstruct the heartbeat fields (kind/targetThreadId/inheritedPolicy)
+ *  preserving exactOptional. Absent ⇒ `{}` ⇒ legacy cron byte-identical.
+ *  Extracted so `parseAutomation` stays under the cognitive-complexity gate. */
+const heartbeatFields = (
+  r: Partial<Automation>,
+): Partial<Pick<Automation, "kind" | "targetThreadId" | "inheritedPolicy">> => {
+  const policy = parseInheritedPolicy(r.inheritedPolicy)
+  return {
+    ...(r.kind === "heartbeat" || r.kind === "cron" ? { kind: r.kind } : {}),
+    ...(typeof r.targetThreadId === "string" ? { targetThreadId: r.targetThreadId } : {}),
+    ...(policy !== undefined ? { inheritedPolicy: policy } : {}),
+  }
+}
+
+/** Parse the H8 heartbeat posture snapshot — all three fields must be strings,
+ *  else the whole snapshot is dropped (a partial posture is never inherited). */
+const parseInheritedPolicy = (raw: unknown): HeartbeatPolicySnapshot | undefined => {
+  if (typeof raw !== "object" || raw === null) return undefined
+  const p = raw as Partial<HeartbeatPolicySnapshot>
+  if (
+    typeof p.approvalPolicy !== "string" ||
+    typeof p.sandboxPolicy !== "string" ||
+    typeof p.collaborationMode !== "string"
+  ) {
+    return undefined
+  }
+  return {
+    approvalPolicy: p.approvalPolicy,
+    sandboxPolicy: p.sandboxPolicy,
+    collaborationMode: p.collaborationMode,
   }
 }
 
@@ -249,8 +284,10 @@ export const defaultJsonlAutomationStore = (
   const baseDir = resolveBaseDir(opts)
   const hasher = opts?.workspaceHasher ?? defaultWorkspaceHash
   const readImpl = opts?.reader ?? ((file: string) => readFile(file, "utf8"))
-  const appendImpl = opts?.appender ?? ((file: string, line: string) => appendFile(file, line, "utf8"))
-  const mkdirImpl = opts?.mkdirer ?? (async (dir: string) => void (await mkdir(dir, { recursive: true })))
+  const appendImpl =
+    opts?.appender ?? ((file: string, line: string) => appendFile(file, line, "utf8"))
+  const mkdirImpl =
+    opts?.mkdirer ?? (async (dir: string) => void (await mkdir(dir, { recursive: true })))
 
   const ensureDir = async (workspace: string): Promise<string> => {
     const dir = workspaceDir(baseDir, hasher, workspace)

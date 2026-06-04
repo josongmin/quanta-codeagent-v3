@@ -159,7 +159,7 @@
   - ROI: 고(엔터프라이즈), 비용: 저-중.
   - 코드: 신규 `CredentialSource` 포트(셸아웃+TTL캐시) → `src/llm/providers/bedrock-adapter.ts`·`vertex-adapter.ts`에 주입; trust-scope 재사용.
 
-- **H8. Heartbeat automation (thread-attached + 권한/collab 스냅샷 상속)** — ❌ **ABSENT 재확인 (어딧)**: `scheduler/types.ts Automation`은 RRule-cron 전용, `kind`/`targetThreadId`/권한스냅샷 필드 0.
+- **H8. Heartbeat automation (thread-attached + 권한/collab 스냅샷 상속)** — ✅ **DONE (jun-04)**: `AutomationKind=cron|heartbeat`(absent=cron byte-identical) + `targetThreadId?`/`inheritedPolicy?`(approval/sandbox/collab) + `AgentLoopPort` opts 라우팅 + `heartbeat.ts validateHeartbeatCandidate`(thread당 1 ACTIVE, target+policy 필수, pure) + store-jsonl round-trip. runtime이 heartbeat fire를 targetThreadId+policy로 enqueue(cron byte-identical). 13 hellgate/e2e. **잔여**: host가 enqueue opts를 실제 thread resume+posture에 바인딩.
   - 기능/목적: 기존 대화 thread(`targetThreadId`)에 붙어 그 thread의 `{approvalPolicy, sandboxPolicy, collaborationMode}`를 상속하며 반복 실행하는 자동화(cron=fresh worktree와 별개).
   - 레퍼런스: Codex automation `kind: cron|heartbeat`, heartbeat는 `targetThreadId` + 권한 스냅샷(`heartbeat-automation-permissions-*.js`), thread당 1 ACTIVE.
   - 시나리오: "이 작업 thread를 같은 승인 posture로 계속 watch하며 진행" 류 반복 에이전트.
@@ -279,6 +279,35 @@
 - unified-diff apply grammar · streaming patch parse · fast-apply diff-vs-rewrite · 3-way dirty checkout(stash/commit/discard)+branch pre-warm — apply/git 엔진, 중. **[어딧: unified-diff/V4A patch grammar는 ✅ 이미 구현 — `apply-patch-structured-tool` + `@/patch/parser`(Begin/End Patch, Add/Update/Delete/Move), 도구 배선됨.]**
 - GrindMode 3-phase 자율루프 · Reflect 자가비판 주입 · agent-notes 스크래치패드 · 샌드박스 deny-log→모델 · per-role 잠긴 effort/tier · per-automation 실행환경(local/worktree/cwds) · push-based BackgroundTaskCompletion(TASK_PROGRESS) · multi-account 전환 · plugin marketplace+정책게이팅 · allow_implicit_invocation · agents/<vendor>.yaml 사이드카 · DXT user_config+keychain.
 - **프롬프트-레벨 묶음(저비용, prompt-body.ts/prompt-sections.ts 텍스트)**: autonomous-loop preamble(무인 틱 행동지침) · 대용량파일 read-completeness 강제 · text-output/progress-narration 규율 · memory-drift verify-before-trust · thinking-frequency 자기조절 · anti-platitude voice · 병렬 tool-call 넛지.
+
+---
+
+## §7. 🆕 추가 후보 (jun-04 경쟁사 .extracted_source 재스캔 — 3사 병렬)
+
+> 백로그 §1~§6에 **없던** 신규 후보만. 각 항목 `이름 — 무엇 — 근거 — ROI/비용 — 주의/겹침`. 텔레메트리-only(`tengu_*` 마커) + 이미구현 + surface-gated 중복은 걸러냄. **착수 전 absence 재확인 필수**(어딧 에이전트도 휴리스틱 함정 가능).
+
+### 고ROI
+- **C1. Canvas / 아티팩트 영속 스토어** (Cursor `agent.v1.Canvas{Register,GetUrl,Destroy}`) — 비-코드 산출물(디자인/리포트/이미지/생성앱)을 transcript와 분리해 등록·조회·파기 + 미리보기 URL. **생성축(H14 image_gen/office)과 직결** — 만든 바이너리를 어디 두고 어떻게 참조하나의 답. ROI 고/비용 중-고(아티팩트 스토어+lifecycle). 코드: 신규 `src/artifact/`.
+- **N1. 백그라운드 사이드-에이전트** (Claude `tengu_bg_agent_action` 24 occ — 최고신호) — 메인루프 안 막고 모니터링/정리/tee 돌리는 **백그라운드 데몬 에이전트**(subagent-bg=foreground-dispatch와 별개 축). ROI 고/비용 중. 코드: `src/scheduler/` + subagent. 주의: subagent-bg(ADR-0130)와 의미 구분 명확히.
+- **N2. MCP connector 디스커버리/레지스트리** (Codex `imported-connector-apps`/`connector-logo`) — `.mcp.json` 수동관리 대신 MCP 서버 **발견·설치·관리 surface**. **H18 MCP-OAuth와 짝**(OAuth는 인증, 이건 발견/카탈로그). ROI 중-고/비용 중-고. 코드: `src/connectors/` + `src/mcp/`.
+
+### 중ROI
+- **C2. CommunicateUpdate / 구조화 진행보고 도구** (Cursor `agent.v1.CommunicateUpdateArgs{current_step,final_summary,completed_subtitle}`) — 턴 중단 없이 진행상황을 구조화해 사용자에 보고(긴 작업 UX). quanta는 자유텍스트 출력만. ROI 중/비용 저-중(~200LOC 도구+dispatch). 주의: §3 H1 progress-narration(prose)과 직교 — 이건 도구.
+- **N3. MCP resource/prompt **도구화**** (Cursor `ListMcpResources`/`ReadMcpResource` exec tools) — H19의 client 메서드를 **에이전트-호출 도구**로 노출(tool-surface 레이어). **H19(미완) 위에 얹는 것** — H19 먼저. ROI 중/비용 저-중(래퍼 ~150LOC).
+- **N4. skill/plugin authoring 도구** (Codex `.system/{plugin-creator,skill-creator,skill-installer}` SKILL.md) — 에이전트가 새 스킬/플러그인을 **스캐폴드+검증+설치**. quanta는 skill/plugin 인프라는 있으나 저작도구 미노출. ROI 중/비용 중. 코드: 신규 system skill + `src/skill/`.
+- **N5. file_history_rewind / 세션 파일-히스토리 되돌리기** (Claude `tengu_file_history_rewind_*` 8 occ) — 세션 중 특정 파일을 이전 버전으로 복원(타임스탬프 스냅샷). ROI 중/비용 중. **⚠️ 겹침 확인**: shadow-ODB `restorePartial`(ADR-0122)/`rewindToMessage`와 중복일 수 있음 — 파일-단위 undo가 진짜 없는지 검증 후 착수.
+- **N6. PTY/tmux session attach** (Cursor `AttachPtyRequest`/`AttachTmuxSessionRequest`) — 기존 PTY/tmux 세션에 attach(bash spawn 너머), 장수명 REPL 연속성. **§5 PTY-서버 항목의 구체화**. ROI 중/비용 중(~300LOC PTY plumbing). 주의: subagent write_stdin과 구분.
+- **C3. brief_mode / 간결 렌더 모드** (Claude `tengu_brief_mode_toggled` 7 occ) — 긴 세션에서 풀 출력 대신 요약 렌더(컴팩션과 직교, 토큰절약). ROI 중/비용 저-중. 코드: `src/agent/prompt-body` + 렌더 토글.
+
+### 저ROI / 싼 것
+- **C4. EditPrLabels / gh PR 라벨 쓰기 도구** (Cursor `agent.v1.EditPrLabelsArgs{pr_url,add_labels,remove_labels}`) — quanta `src/tool/gh`는 라벨 read만, write 없음. CI/자동화 흔한 패턴. ROI 저/비용 저(~100LOC, gh 바이너리 재사용).
+- **C5. ForceBackground (shell/subagent) 즉시실행** (Cursor `ForceBackgroundShellArgs`/`ForceBackgroundSubagentArgs`) — 턴경계 기다리는 bg task를 지금 강제실행(선점). ROI 저/비용 저(~80LOC, 기존 bg 스케줄러 재사용).
+- **C6. permission deny-reason 표면화** (Claude `permission_mode_feedback`/`tengu_permission_request_escape`) — "왜 거부됐나(network=off by policy)"를 모델/사용자에 명시(현재는 단순 denied). 디버깅 UX. ROI 저/비용 저.
+
+### 카테고리 갭 (대형·surface-gated — 기록만)
+- **G1. appgen/appshot 생성앱 surface** (Codex/Claude `appgen-page/share-dialog/access-mode` + `appshot-window`) — 스펙→공유가능 웹앱 생성 + 스크린샷 검증루프. **생성축(H14)의 데스크톱 확장** — UI+백엔드+공유, 데스크톱/고비용. ROI 고/비용 고.
+- **G2. team_member_sync / 멀티유저 협업** (Claude `tengu_team_mem_sync_started`) — 실시간 팀 상태/커서/편집 동기화. 엔터프라이즈. **멀티에이전트(§4)와 다른 축**(인간-팀). ROI 고/비용 매우고(sync 프로토콜+충돌해소).
+- **G3. computer-use 네이티브 데스크톱** (Codex Swift `SkyComputerUse` AX+ScreenCaptureKit / Cursor `ComputerUseArgs`) — **§5에 이미 니치로 기록됨**(Tauri 전용·고비용). 재확인만.
 
 ---
 

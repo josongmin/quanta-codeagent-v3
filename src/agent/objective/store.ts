@@ -69,15 +69,31 @@ const budgetExhausted = (cell: Cell): boolean =>
   (cell.maxTokens !== undefined && cell.tokensUsed >= cell.maxTokens) ||
   (cell.maxTurns !== undefined && cell.turnsUsed >= cell.maxTurns)
 
-/** Derive the public status from the immutable rule. blockers win, then (when
- *  enforcement is enabled) a budget-exhausted cell limits, then a fully-met
- *  (non-empty) criteria set completes, else the explicit value.
+/** H17 — is a transient usage/rate window currently active? True only when a
+ *  finite `usageLimitedUntil` is set AND the injected clock has NOT yet passed
+ *  it (`now < until`). Equality (`now === until`) is the RESET instant: the
+ *  window has elapsed and the status re-derives back to the explicit value — no
+ *  sticky flag. Pure function of the cell + the clock reading. */
+const usageWindowActive = (cell: Cell, now: number): boolean =>
+  cell.usageLimitedUntil !== undefined && now < cell.usageLimitedUntil
+
+/** Derive the public status from the immutable SIX-state rule (Codex
+ *  `core/src/goals.rs`). Priority-ordered, TOTAL over the cell + injected clock:
+ *
+ *    1. blockers.length > 0                  ⇒ blocked        (highest)
+ *    2. enforce ∧ usage window active        ⇒ usage_limited  (auto-resets)
+ *    3. enforce ∧ budget exhausted (>= cap)  ⇒ budget_limited (hard stop)
+ *    4. all criteria met (>=1)               ⇒ completed
+ *    5. else                                 ⇒ explicit (active | paused)
  *
  *  `enforce` is the store-level H17 gate (default false). When false this is
- *  byte-identical to the ADR-0394 derivation (budget stays informational —
- *  `budget_limited` is never produced). Total function over the cell. */
-const deriveStatus = (cell: Cell, enforce: boolean): ObjectiveStatus => {
+ *  byte-identical to the ADR-0394 derivation (neither `usage_limited` nor
+ *  `budget_limited` is ever produced — budget stays informational and any usage
+ *  window is inert). `now` is the injected clock reading so the usage window
+ *  resets deterministically. */
+const deriveStatus = (cell: Cell, enforce: boolean, now: number): ObjectiveStatus => {
   if (cell.blockers.length > 0) return "blocked"
+  if (enforce && usageWindowActive(cell, now)) return "usage_limited"
   if (enforce && budgetExhausted(cell)) return "budget_limited"
   if (cell.criteria.length > 0 && cell.criteria.every((c) => c.met)) return "completed"
   return cell.explicitStatus
@@ -92,14 +108,15 @@ const buildBudget = (cell: Cell): ObjectiveBudget => {
   })
 }
 
-/** Project a cell to the frozen public `Objective`. Derives status here so no
- *  read can ever observe a status that contradicts blockers/criteria/budget. */
-const toObjective = (cell: Cell, enforce: boolean): Objective =>
+/** Project a cell to the frozen public `Objective`. Derives status here (with
+ *  the injected clock reading `now`, for the usage-window reset) so no read can
+ *  ever observe a status that contradicts blockers/criteria/budget/usage. */
+const toObjective = (cell: Cell, enforce: boolean, now: number): Objective =>
   Object.freeze({
     threadId: cell.threadId,
     goal: cell.goal,
     successCriteria: Object.freeze(cell.criteria.map((c) => Object.freeze({ ...c }))),
-    status: deriveStatus(cell, enforce),
+    status: deriveStatus(cell, enforce, now),
     budget: buildBudget(cell),
     blockers: Object.freeze(cell.blockers.map((b) => Object.freeze({ ...b }))),
     nextActions: Object.freeze([...cell.nextActions]),
@@ -127,16 +144,23 @@ const toObjective = (cell: Cell, enforce: boolean): Objective =>
  * derivation a pure function of `explicitStatus + criteria + blockers`. */
 interface SnapshotObjective extends Objective {
   /** The caller's last EXPLICIT intent — the ONLY status source on restore. */
-  readonly explicitStatus: "active" | "completed"
+  readonly explicitStatus: "active" | "paused" | "completed"
+  /** H17 — the transient usage window expiry (epoch ms), persisted so a
+   *  usage_limited goal stays limited across a snapshot round-trip until its
+   *  window naturally elapses. Omitted when no window is set. */
+  readonly usageLimitedUntil?: number
 }
 
-const toSnapshotObjective = (cell: Cell, enforce: boolean): SnapshotObjective =>
+const toSnapshotObjective = (cell: Cell, enforce: boolean, now: number): SnapshotObjective =>
   Object.freeze({
     threadId: cell.threadId,
     goal: cell.goal,
     successCriteria: Object.freeze(cell.criteria.map((c) => Object.freeze({ ...c }))),
-    status: deriveStatus(cell, enforce),
+    status: deriveStatus(cell, enforce, now),
     explicitStatus: cell.explicitStatus,
+    ...(cell.usageLimitedUntil !== undefined
+      ? { usageLimitedUntil: cell.usageLimitedUntil }
+      : {}),
     budget: buildBudget(cell),
     blockers: Object.freeze(cell.blockers.map((b) => Object.freeze({ ...b }))),
     nextActions: Object.freeze([...cell.nextActions]),
@@ -237,8 +261,9 @@ export const createObjectiveStore = (opts?: {
       const cell = cells.get(threadId)
       if (cell === undefined) return null
       fn(cell)
-      cell.updatedAt = clockNow()
-      return toObjective(cell, enforce)
+      const t = clockNow()
+      cell.updatedAt = t
+      return toObjective(cell, enforce, t)
     } catch {
       return null
     }
@@ -250,13 +275,16 @@ export const createObjectiveStore = (opts?: {
         // Malformed input still returns a non-null Objective (port contract):
         // degrade to a synthetic empty cell rather than throwing.
         if (!isNonEmptyString(threadId) || init === null || typeof init !== "object") {
-          return toObjective(emptyCell(threadId, clockNow()), enforce)
+          const t = clockNow()
+          return toObjective(emptyCell(threadId, t), enforce, t)
         }
-        const cell = cellFromInit(threadId, init, clockNow())
+        const t = clockNow()
+        const cell = cellFromInit(threadId, init, t)
         cells.set(threadId, cell)
-        return toObjective(cell, enforce)
+        return toObjective(cell, enforce, t)
       } catch {
-        return toObjective(emptyCell(threadId, Date.now()), enforce)
+        const t = Date.now()
+        return toObjective(emptyCell(threadId, t), enforce, t)
       }
     },
 
@@ -264,7 +292,7 @@ export const createObjectiveStore = (opts?: {
       try {
         if (!isNonEmptyString(threadId)) return null
         const cell = cells.get(threadId)
-        return cell === undefined ? null : toObjective(cell, enforce)
+        return cell === undefined ? null : toObjective(cell, enforce, clockNow())
       } catch {
         return null
       }
@@ -272,10 +300,26 @@ export const createObjectiveStore = (opts?: {
 
     updateStatus(threadId, status): Objective | null {
       return mutate(threadId, (cell) => {
-        // Only "active"/"completed" are explicit intents; "blocked" is derived
-        // exclusively from the blocker list and cannot be set directly.
-        if (status === "active" || status === "completed") {
+        // Only "active" / "paused" / "completed" are explicit intents. The other
+        // three values (`blocked` / `usage_limited` / `budget_limited`) are
+        // DERIVED (from blockers / usage window / budget) and cannot be set
+        // directly — passing one is a silent no-op (the port is NO-THROW).
+        if (status === "active" || status === "paused" || status === "completed") {
           cell.explicitStatus = status
+        }
+      })
+    },
+
+    markUsageLimited(threadId, untilEpochMs): Objective | null {
+      return mutate(threadId, (cell) => {
+        // A finite, future-or-equal epoch sets the window; anything else (NaN /
+        // Infinity / negative / non-number) CLEARS it. The derive uses the
+        // injected clock so the window auto-resets — no sticky flag here.
+        // exactOptionalPropertyTypes: set or DELETE (never assign `undefined`).
+        if (typeof untilEpochMs === "number" && Number.isFinite(untilEpochMs) && untilEpochMs > 0) {
+          cell.usageLimitedUntil = untilEpochMs
+        } else {
+          delete cell.usageLimitedUntil
         }
       })
     },
@@ -336,7 +380,8 @@ export const createObjectiveStore = (opts?: {
 
     list(): readonly Objective[] {
       try {
-        return Object.freeze([...cells.values()].map((c) => toObjective(c, enforce)))
+        const t = clockNow()
+        return Object.freeze([...cells.values()].map((c) => toObjective(c, enforce, t)))
       } catch {
         return Object.freeze([])
       }
@@ -344,9 +389,10 @@ export const createObjectiveStore = (opts?: {
 
     toSnapshot(): ObjectiveSnapshot {
       try {
+        const t = clockNow()
         return Object.freeze({
           objectives: Object.freeze(
-            [...cells.values()].map((c) => toSnapshotObjective(c, enforce)),
+            [...cells.values()].map((c) => toSnapshotObjective(c, enforce, t)),
           ),
         })
       } catch {
@@ -443,8 +489,13 @@ const rebuildBlockers = (raw: unknown): Blocker[] => {
  * `completed`, and only the explicit-vs-derived distinction is reset — exactly
  * the field whose legacy value is unknowable. This never UPGRADES a derived
  * completion to explicit intent (the bug), it only ever stays/declines. */
-const explicitFromSnapshot = (rec: { explicitStatus?: unknown }): "active" | "completed" =>
-  rec.explicitStatus === "completed" ? "completed" : "active"
+const explicitFromSnapshot = (rec: {
+  explicitStatus?: unknown
+}): "active" | "paused" | "completed" => {
+  if (rec.explicitStatus === "completed") return "completed"
+  if (rec.explicitStatus === "paused") return "paused"
+  return "active"
+}
 
 /** Reconstruct a mutable cell from a (possibly hostile) snapshot entry. */
 function cellFromObjective(o: unknown): Cell | null {
@@ -463,6 +514,11 @@ function cellFromObjective(o: unknown): Cell | null {
       ? rec.nextActions.filter((a): a is string => typeof a === "string")
       : [],
     explicitStatus: explicitFromSnapshot(rec),
+    ...(typeof rec.usageLimitedUntil === "number" &&
+    Number.isFinite(rec.usageLimitedUntil) &&
+    rec.usageLimitedUntil > 0
+      ? { usageLimitedUntil: rec.usageLimitedUntil }
+      : {}),
     ...(maxTokens !== undefined ? { maxTokens } : {}),
     tokensUsed: finiteNonNegInt(budget.tokensUsed) ?? 0,
     ...(maxTurns !== undefined ? { maxTurns } : {}),

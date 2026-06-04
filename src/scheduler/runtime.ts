@@ -238,9 +238,21 @@ const processAutomation = async (
 
   // 5. Enqueue the prompt onto the agent loop. The reactor uses the same
   //    port for `manual_resume` — we reuse the exact seam, not a new trigger.
+  //    H8 — a `heartbeat` automation routes onto its target thread + re-applies
+  //    the inherited posture; `cron` (absent kind) stays byte-identical (fresh).
+  const heartbeat =
+    automation.kind === "heartbeat" && automation.targetThreadId !== undefined
+      ? {
+          targetThreadId: automation.targetThreadId,
+          ...(automation.inheritedPolicy !== undefined
+            ? { inheritedPolicy: automation.inheritedPolicy }
+            : {}),
+        }
+      : {}
   try {
     await opts.agentLoop.enqueueUserMessage(automation.prompt, {
       modelOverride: chosen.chosen,
+      ...heartbeat,
     })
   } catch (e) {
     const msg = `enqueue failed: ${stringifyError(e)}`

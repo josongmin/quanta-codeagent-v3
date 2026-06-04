@@ -114,6 +114,34 @@ export const ALL_AUTOMATION_STATUSES: ReadonlyArray<AutomationStatus> = [
 ]
 
 /**
+ * H8 — automation KIND (Codex `cron` vs `heartbeat`).
+ *   - `cron` (default when absent): the historical behavior — each fire enqueues
+ *     the prompt onto a FRESH agent loop (thread-detached). Byte-identical to the
+ *     pre-H8 automation.
+ *   - `heartbeat`: the fire is routed to an EXISTING conversation thread
+ *     ({@link Automation.targetThreadId}) and inherits that thread's permission /
+ *     sandbox / collaboration posture ({@link Automation.inheritedPolicy}) — a
+ *     repeating agent that keeps working one thread under a fixed approval stance.
+ */
+export type AutomationKind = "cron" | "heartbeat"
+
+/** All kind arms — closed array for exhaustiveness. */
+export const ALL_AUTOMATION_KINDS: ReadonlyArray<AutomationKind> = ["cron", "heartbeat"]
+
+/**
+ * H8 — the permission/sandbox/collaboration posture a heartbeat automation
+ * INHERITS from its target thread, captured at creation time so each fire
+ * re-applies the SAME stance (it never silently escalates). All fields are
+ * opaque strings (the host owns the closed vocabularies); the scheduler only
+ * stores + forwards them verbatim.
+ */
+export interface HeartbeatPolicySnapshot {
+  readonly approvalPolicy: string
+  readonly sandboxPolicy: string
+  readonly collaborationMode: string
+}
+
+/**
  * A single user-defined automation. Persisted in JSONL store
  * (`<baseDir>/<workspaceHash>/automations.jsonl`, last-line-per-id wins).
  *
@@ -135,6 +163,15 @@ export interface Automation {
   readonly lastFiredAt?: number
   readonly lastErrorMessage?: string
   readonly fireCount: number
+  /** H8 — automation kind. ABSENT ⇒ `"cron"` (byte-identical legacy: fresh
+   *  thread-detached fire). `"heartbeat"` routes to {@link targetThreadId}. */
+  readonly kind?: AutomationKind
+  /** H8 — for `kind:"heartbeat"`, the conversation thread this automation is
+   *  attached to. The fire is enqueued onto THIS thread, not a fresh one. */
+  readonly targetThreadId?: string
+  /** H8 — for `kind:"heartbeat"`, the posture snapshot inherited from the
+   *  target thread at creation time, re-applied on every fire. */
+  readonly inheritedPolicy?: HeartbeatPolicySnapshot
 }
 
 // ============================================================================
@@ -182,7 +219,15 @@ export interface ModelAvailabilityPort {
 export interface AgentLoopPort {
   enqueueUserMessage(
     message: string,
-    opts?: { signal?: AbortSignal; modelOverride?: string },
+    opts?: {
+      signal?: AbortSignal
+      modelOverride?: string
+      /** H8 — heartbeat routing. When present, the host enqueues onto THIS
+       *  existing thread (instead of a fresh one) and re-applies
+       *  {@link inheritedPolicy}. Absent ⇒ fresh thread-detached fire (cron). */
+      targetThreadId?: string
+      inheritedPolicy?: HeartbeatPolicySnapshot
+    },
   ): Promise<void>
 }
 

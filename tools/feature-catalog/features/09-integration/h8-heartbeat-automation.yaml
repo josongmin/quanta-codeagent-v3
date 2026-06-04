@@ -1,0 +1,53 @@
+id: heartbeat-automation
+title: Heartbeat automation — thread-attached repeating agent (kind cron|heartbeat)
+section: 9
+subsystem: Scheduler / scheduled agent (H8, Codex automation kind 흡수)
+order: 162
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [daemon, headless, interactive]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex"]
+depends_on: [scheduler-automation-lifecycle, scheduler-runtime, scheduler-model-reroute]
+purpose: |
+  Codex automation `kind: cron | heartbeat` 흡수. 기존 automation은 cron(thread-
+  detached, fresh fire)뿐이었음. heartbeat는 기존 대화 THREAD에 붙어 매 fire를 그
+  thread로 라우팅하고 그 thread의 권한/샌드박스/collab posture를 상속(escalate 안 함).
+
+  데이터모델 (types.ts):
+    - `AutomationKind = "cron" | "heartbeat"`, `Automation.kind?`(ABSENT ⇒ cron,
+      byte-identical legacy).
+    - `Automation.targetThreadId?` + `inheritedPolicy?: HeartbeatPolicySnapshot`
+      (approvalPolicy/sandboxPolicy/collaborationMode — 생성시 thread에서 캡처).
+    - `AgentLoopPort.enqueueUserMessage` opts에 `targetThreadId?`/`inheritedPolicy?`
+      추가(host가 실제 thread 라우팅 바인딩).
+
+  fire 라우팅 (runtime.ts step 5): heartbeat + targetThreadId면 enqueue opts에
+  targetThreadId + inheritedPolicy 포함; cron(absent kind)은 byte-identical(modelOverride만).
+
+  생성-경계 불변식 (heartbeat.ts, PURE): `validateHeartbeatCandidate(candidate,
+  existing)` — heartbeat는 targetThreadId+policy 필수, thread당 1 ACTIVE heartbeat
+  (같은 id=update는 허용). `activeHeartbeatForThread` 헬퍼.
+
+  JSONL round-trip: 신규 필드는 store-jsonl `parseAutomation`이 보존(부분 policy는
+  drop=never half-inherited); cron 행엔 kind 키 없음(byte-identical).
+evidence:
+  code:
+    - src/scheduler/types.ts
+    - src/scheduler/heartbeat.ts
+    - src/scheduler/runtime.ts
+    - src/scheduler/store-jsonl.ts
+  tests:
+    unit:
+      - tests/unit/scheduler/heartbeat-automation-hellgate.test.ts
+    integration:
+      - tests/unit/scheduler/heartbeat-fire-routing-e2e-hellgate.test.ts
+    contract: []
+knobs: []
+notes: |
+  L4: 데이터모델 + fire 라우팅 + 직렬화 + 생성 불변식 다 wired, default cron이라
+  기존 automation byte-identical. 실제 "target thread를 그 posture로 resume" 실행은
+  host가 AgentLoopPort.enqueueUserMessage(targetThreadId/inheritedPolicy)에 바인딩.

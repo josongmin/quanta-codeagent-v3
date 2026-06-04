@@ -90,6 +90,18 @@ const unsupported = <T>(capability: string, serverName: string): McpResult<T> =>
   message: `mcp server "${serverName}" does not advertise the "${capability}" capability`,
 })
 
+/** H18 — does `err` represent an HTTP 401 (Unauthorized) surfaced through the
+ *  request core? The HTTP-SSE carrier rejects a non-2xx POST with a JSON-RPC
+ *  `-32000` error whose message carries the status (`... HTTP 401`), which the
+ *  client's `dispatch` re-wraps as `mcp error -32000: ... HTTP 401`. We match
+ *  the textual `401`/`Unauthorized` signal (no structured status survives the
+ *  JSON-RPC envelope) to drive a single bearer re-auth + retry. Conservative:
+ *  matches ONLY the 401 marker so a 403/500/etc. is never treated as auth-stale. */
+const isUnauthorizedError = (err: unknown): boolean => {
+  const msg = err instanceof Error ? err.message : String(err)
+  return /\b401\b/.test(msg) || /\bunauthorized\b/i.test(msg)
+}
+
 /** Narrow an unknown value to a plain record (object, not array/null). Used to
  *  safely walk the `initialize` response's nested `capabilities` slot. */
 const asRecord = (v: unknown): Record<string, unknown> | null =>
@@ -195,6 +207,10 @@ export class McpClient {
   private exited = false
   private unsubscribeMessage: (() => void) | null = null
   private unsubscribeExit: (() => void) | null = null
+  /** H18 — a shared in-flight mid-session re-auth (invalidate → fresh bearer →
+   *  carrier rebuild). `null` when idle; set while a re-auth runs so concurrent
+   *  401s coalesce into a single rebuild rather than racing the carrier swap. */
+  private reauthInFlight: Promise<boolean> | null = null
   /** Server-advertised capability record captured from the `initialize`
    *  response (ADR-0431). `null` until `start()` completes. Used to gate the
    *  optional `tasks/*` surface: tools are wired ONLY when a connected server
@@ -507,7 +523,30 @@ export class McpClient {
     }
   }
 
-  private request(method: string, params: unknown): Promise<unknown> {
+  /** Issue an MCP request, transparently re-authenticating + retrying ONCE on a
+   *  mid-session 401 when OAuth is active for this server. On every other path
+   *  this is byte-identical to a single {@link requestRpc} call: a non-401 error
+   *  propagates unchanged, and a non-OAuth client never enters the re-auth
+   *  branch (so a 401 there surfaces as the ordinary transport error it always
+   *  was). The retry is bounded to a single attempt — a second 401 (e.g. the
+   *  refreshed token is ALSO rejected) propagates, never looping. */
+  private async request(method: string, params: unknown): Promise<unknown> {
+    try {
+      return await this.requestRpc(method, params)
+    } catch (err) {
+      // H18 — a mid-session 401 (the server revoked the bearer after we
+      // connected) is the single error we recover from, and ONLY when OAuth is
+      // active. We forget the stale token, rebuild the carrier with a freshly
+      // resolved bearer, and retry the SAME request once. Any other error — or a
+      // 401 on a non-OAuth client — propagates exactly as before.
+      if (!this.oauthActive || !isUnauthorizedError(err)) throw err
+      const reauthed = await this.reauthorize()
+      if (!reauthed) throw err // no fresh token obtained ⇒ surface the original 401
+      return this.requestRpc(method, params)
+    }
+  }
+
+  private requestRpc(method: string, params: unknown): Promise<unknown> {
     const id = this.nextId++
     return new Promise<unknown>((resolve, reject) => {
       if (this.stopped || this.exited) {
@@ -558,6 +597,54 @@ export class McpClient {
       ...config,
       headers: { ...(config.headers ?? {}), Authorization: `Bearer ${token}` },
     }
+  }
+
+  /** H18 — recover from a mid-session 401: forget the (now-revoked) bearer, ask
+   *  the provider for a fresh one, and rebuild the carrier so the new
+   *  `Authorization` header reaches the wire (the HTTP transport reads static
+   *  headers at construction, so a header swap requires a fresh carrier).
+   *
+   *  Returns `true` IFF a fresh, DIFFERENT bearer was obtained and the carrier
+   *  was rebuilt; `false` when no token can be re-resolved (declined/failed
+   *  refresh+re-auth) — the caller then surfaces the original 401 rather than
+   *  retrying with the same (or no) credential. Only invoked on the OAuth-active
+   *  path. Never throws (the provider port is total; rebuild failures degrade to
+   *  `false`). Guarded against a rebuild with no factory (explicit-instance
+   *  transport) — there is no carrier to rebuild, so re-auth is a no-op `false`.
+   *
+   *  Reentrancy: a single in-flight re-auth is shared so concurrent 401s on
+   *  parallel requests rebuild the carrier exactly once. */
+  private reauthorize(): Promise<boolean> {
+    this.reauthInFlight ??= this.doReauthorize().finally(() => {
+      this.reauthInFlight = null
+    })
+    return this.reauthInFlight
+  }
+
+  private async doReauthorize(): Promise<boolean> {
+    if (this.stopped || this.exited) return false
+    if (this.transportFactory === null) return false // explicit-instance carrier
+    // Forget the revoked token so the next `tokenFor` refreshes/re-authorizes,
+    // then resolve a fresh bearer. The port is total (no throw, `undefined` on
+    // decline). The bearer is never logged.
+    await this.oauthProvider.invalidate(this.config.name)
+    const token = await this.oauthProvider.tokenFor(this.config.name)
+    if (token === undefined) return false
+    // Tear down the old carrier's subscriptions + connection, then rebuild with
+    // the bearer-merged config and re-wire the pumps. Pending requests stay
+    // queued (their ids are still valid) and resolve on the rebuilt carrier.
+    this.unsubscribeMessage?.()
+    this.unsubscribeExit?.()
+    const old = this.transport
+    const next = this.transportFactory(this.withBearer(this.config, token))
+    this.transport = next
+    this.unsubscribeMessage = next.onMessage((msg) => this.dispatch(msg))
+    this.unsubscribeExit = next.onExit(() => this.onTransportExit())
+    await next.start()
+    // Close the stale carrier last so a close-time error never blocks the rebuilt
+    // path; failures here are non-fatal (the connection is already replaced).
+    await old?.close().catch(() => {})
+    return true
   }
 
   private dispatch(msg: JsonRpcMessage): void {
