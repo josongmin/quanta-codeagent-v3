@@ -29,6 +29,22 @@ describe("pickMcpNegotiator", () => {
     expect(c.sampling).toBeUndefined()
   })
 
+  test("H19 — roots advertised IFF opts.roots, under full caps, byte-canonical order", () => {
+    // Without the opt, roots is omitted (advertise-iff-provider).
+    expect(pickMcpNegotiator(env("full")).compile().roots).toBeUndefined()
+    // With it, roots is present with the honest `listChanged:false`.
+    const c = pickMcpNegotiator(env("full"), { roots: true }).compile()
+    expect(c.roots).toEqual({ listChanged: false })
+    // sampling + roots together stay in canonical (alphabetical) key order so the
+    // on-wire bytes are deterministic: elicitation < roots < sampling < tasks < tools.
+    const both = pickMcpNegotiator(env("full"), { sampling: true, roots: true }).compile()
+    expect(Object.keys(both)).toEqual(["elicitation", "roots", "sampling", "tasks", "tools"])
+  })
+
+  test("H19 — roots opt is IGNORED without full caps (no base-caps ⇒ default `{}`)", () => {
+    expect(JSON.stringify(pickMcpNegotiator(env(), { roots: true }).compile())).toBe("{}")
+  })
+
   test("non-canonical values (Full / FULL / typo) fall through to default", () => {
     for (const bad of ["Full", "FULL", "true", "1", "fulll"]) {
       expect(JSON.stringify(pickMcpNegotiator(env(bad)).compile())).toBe("{}")

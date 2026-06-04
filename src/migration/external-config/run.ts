@@ -19,6 +19,7 @@
  * CONVERTS, and THROTTLES (slice isolation — no `@/permission`, `@/mcp`, etc).
  */
 
+import { join } from "node:path"
 import {
   convertAgentsMd,
   convertCursorRules,
@@ -29,12 +30,14 @@ import {
 } from "./convert"
 import { detectExternalConfigs } from "./detect"
 import { isThrottled, loadMigrationLedger, recordDisposition, sourceKeyOf } from "./ledger"
+import { type PersistConvertedResult, persistConvertedItems } from "./persist"
 import type {
   ConfigInventory,
   ConvertedItem,
   DetectedConfigItem,
   MigrationItemType,
   MigrationScope,
+  MigrationWarning,
 } from "./types"
 
 /** Inputs to the orchestration. Every path injected (no env / homedir reads in
@@ -161,4 +164,132 @@ export const runConfigMigration = async (
   // else the home key.
   const sourceKey = projectRun.sourceKey !== "" ? projectRun.sourceKey : homeRun.sourceKey
   return { ran: true, throttled, inventory, converted, sourceKey }
+}
+
+/** Result of the opt-in IMPORT flow (detect → convert → PERSIST). */
+export interface ImportExternalConfigResult {
+  /** False ⇒ the knob was off; nothing ran (byte-identical no-op). */
+  readonly ran: boolean
+  /** True ⇒ every detected source was already imported ⇒ suppressed. */
+  readonly throttled: boolean
+  /** The detect inventory (empty when knob off / nothing planted). */
+  readonly inventory: ConfigInventory
+  /** Per-item converter outputs (the items that were eligible to persist). */
+  readonly converted: readonly ConvertedItem[]
+  /** True ⇒ at least one converted item was written to a quanta config dest. */
+  readonly persisted: boolean
+  /** Per-item non-fatal persist warnings (a single failed write never throws). */
+  readonly persistWarnings: PersistConvertedResult["warnings"]
+}
+
+/**
+ * The opt-in IMPORT flow: detect + convert + PERSIST each converted item into
+ * quanta's live config locations (`./persist`). This is a SEPARATE, confirmed
+ * step from the startup notice — the notice only records `offered` (and runs
+ * via {@link runConfigMigration}); calling THIS actually writes the quanta
+ * config and records `imported` so a 2nd run is throttled.
+ *
+ * The import deliberately does NOT consult the `offered` throttle (which would
+ * block an import the user just confirmed); the PERSIST layer's own per-source
+ * `imported` ledger row is the import throttle — so re-running the import on an
+ * already-imported source is a no-op (never re-clobbering a hand-edited file).
+ *
+ * Default-OFF: `enabled:false` ⇒ byte-identical no-op (no detect, no persist).
+ * NEVER throws — detect/convert are no-throw by contract and persist degrades
+ * each item's failure to a typed warning.
+ */
+export const importExternalConfig = async (
+  input: RunConfigMigrationInput,
+): Promise<ImportExternalConfigResult> => {
+  if (!input.enabled) {
+    return {
+      ran: false,
+      throttled: false,
+      inventory: EMPTY_INVENTORY,
+      converted: [],
+      persisted: false,
+      persistWarnings: [],
+    }
+  }
+  let inventory: ConfigInventory
+  try {
+    inventory = await detectExternalConfigs({
+      homeDir: input.homeDir,
+      projectDir: input.projectDir,
+    })
+  } catch {
+    return {
+      ran: true,
+      throttled: false,
+      inventory: EMPTY_INVENTORY,
+      converted: [],
+      persisted: false,
+      persistWarnings: [],
+    }
+  }
+  if (inventory.items.length === 0) {
+    return {
+      ran: true,
+      throttled: false,
+      inventory,
+      converted: [],
+      persisted: false,
+      persistWarnings: [],
+    }
+  }
+
+  // The importer writes quanta-NATIVE files (`<project>/AGENTS.md`,
+  // `<project>/settings.json`) that the project detect probes would otherwise
+  // pick up on the NEXT run as if they were competitor sources — changing the
+  // detected source SET and so the throttle key, defeating the no-re-import
+  // guarantee. Those native destinations are NEVER competitor sources, so we
+  // exclude them from the import inventory. (Root `.mcp.json` is a legitimate
+  // competitor source that also happens to be our destination — source==dest is
+  // handled by the scrub-and-no-clobber merge, and its presence is stable, so
+  // it stays.)
+  const nativeDestinations = new Set<string>([
+    join(input.projectDir, "AGENTS.md"),
+    join(input.projectDir, "settings.json"),
+  ])
+  const importable = inventory.items.filter((i) => !nativeDestinations.has(i.path))
+  const homeItems = importable.filter((i) => i.scope === "home")
+  const projectItems = importable.filter((i) => i.scope === "project")
+  let persisted = false
+  const allConverted: ConvertedItem[] = []
+  const persistWarnings: MigrationWarning[] = []
+  const throttledFlags: boolean[] = []
+
+  for (const [scope, items] of [
+    ["home", homeItems],
+    ["project", projectItems],
+  ] as const) {
+    if (items.length === 0) continue
+    const sourceKey = sourceKeyOf(scope as MigrationScope, items)
+    const converted: ConvertedItem[] = []
+    for (const item of items) {
+      converted.push(await convertItem(item, input.projectDir, input.homeDir))
+    }
+    allConverted.push(...converted)
+    const persist = await persistConvertedItems({
+      enabled: true,
+      homeDir: input.homeDir,
+      projectDir: input.projectDir,
+      converted,
+      sourceKey,
+    })
+    persisted = persisted || persist.persisted
+    persistWarnings.push(...persist.warnings)
+    throttledFlags.push(persist.throttled)
+  }
+
+  // "throttled" iff every non-empty scope was throttled (nothing new persisted).
+  const throttled = throttledFlags.length > 0 && throttledFlags.every((t) => t)
+  return {
+    ran: true,
+    throttled,
+    inventory,
+    converted: allConverted,
+    persisted,
+    persistWarnings,
+  }
 }

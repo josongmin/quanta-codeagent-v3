@@ -161,6 +161,7 @@ export {
   type PromptInjectPush,
 } from "./lsp-diagnostics-hook"
 export {
+  applyMcpClientWiring,
   type ElicitationPrompterFactory,
   type LoadMcpToolsOpts,
   loadMcpTools,
@@ -168,6 +169,7 @@ export {
   mcpToolName,
   mcpToolToTool,
   mcpToolToToolSupervised,
+  type SamplingWiringInput,
 } from "./mcp-bridge"
 export {
   type PersistDeps,

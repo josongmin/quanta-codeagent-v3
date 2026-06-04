@@ -1,6 +1,7 @@
-import type { ElicitationPrompterFactory } from "@/agent"
+import type { ElicitationPrompterFactory, SamplingWiringInput } from "@/agent"
 import {
   type AgentConfig,
+  applyMcpClientWiring,
   loadMcpTools,
   lspDiagnosticsTool,
   lspNavToolList,
@@ -9,7 +10,7 @@ import {
   resolvePersona,
 } from "@/agent"
 import { defaultIdentityProvider, type IdentityMode } from "@/agent/identity"
-import { buildSamplingWiring, pickMcpNegotiator } from "@/host/runtime"
+import { buildRootsWiring, buildSamplingWiring, pickMcpNegotiator } from "@/host/runtime"
 import type { LLMPort } from "@/llm"
 import {
   type CapabilityNegotiator,
@@ -18,6 +19,7 @@ import {
   McpClient,
   type McpClientTransport,
   type McpServerConfig,
+  type RootsProviderPort,
   type SamplingHandlerPort,
   type SupervisableMcpClient,
   type SupervisorDeps,
@@ -435,10 +437,31 @@ export const mcpAutoRestartEnabled = (): boolean =>
  *  supervisor core itself never reaches for a global. The factory picks the
  *  legacy `McpClient`; the isolated client is selected by its own env knob
  *  inside `McpClient` construction is out of scope (the isolated path keeps its
- *  separate wire), so we use the default client here. */
-const mcpSupervisorDepsFor = (slog: StructuredLogger) => {
+ *  separate wire), so we use the default client here.
+ *
+ *  B1 + H19 — the inbound-capability wiring bundle (`{ negotiator, handler?,
+ *  rootsProvider? }`) is BAKED into the restart factory via the SAME
+ *  `applyMcpClientWiring` helper the single-client path uses, so the supervisor —
+ *  which owns the lifecycle, not the policy — re-applies it to EVERY (re)connected
+ *  client. A reconnected client therefore re-advertises `sampling`/`roots` and
+ *  re-handles inbound `sampling/createMessage` + `roots/list`. Absent ⇒ a vanilla
+ *  `new McpClient(c)` (byte-identical to the pre-wire supervised path).
+ *
+ *  `transportFor` is the optional test seam (mirrors the single-client path) so a
+ *  supervised client can be driven by a scripted transport without a real spawn;
+ *  production omits it (the client builds its default carrier). */
+const mcpSupervisorDepsFor = (
+  slog: StructuredLogger,
+  wiring: SamplingWiringInput | undefined,
+  transportFor: ((config: McpServerConfig) => McpClientTransport) | undefined,
+) => {
   return (_config: McpServerConfig): SupervisorDeps => ({
-    factory: (c): SupervisableMcpClient => new McpClient(c),
+    factory: (c): SupervisableMcpClient => {
+      const clientOpts: NonNullable<ConstructorParameters<typeof McpClient>[1]> = {}
+      if (transportFor !== undefined) clientOpts.transport = transportFor(c)
+      applyMcpClientWiring(clientOpts, wiring)
+      return new McpClient(c, clientOpts)
+    },
     policy: DEFAULT_BACKOFF_POLICY,
     now: () => Date.now(),
     setTimer: (fn, ms) => {
@@ -724,34 +747,79 @@ export interface LoadFeaturesOpts {
  *  SAME `promptBoolean` an inbound `elicitation/create` routes through), bound to
  *  a dedicated {@link SAMPLING_CONSENT_CONTEXT} lease so it never coalesces with
  *  a real server's prompt. */
-const resolveSamplingWiring = (
+/** B1 + H19 (jun-04) — the unified MCP inbound-capability wiring bundle the
+ *  surface hands DOWN to `loadMcpTools` (consumed IDENTICALLY by the
+ *  single-client and the supervised path). Mirrors `@/agent`'s
+ *  `SamplingWiringInput`: ONE negotiator reflecting BOTH sampling AND roots, plus
+ *  the answering ports — each present IFF its capability is advertised. */
+type McpInboundWiring = {
+  negotiator: CapabilityNegotiator
+  handler?: SamplingHandlerPort
+  rootsProvider?: RootsProviderPort
+}
+
+/** B1 + H19 (jun-04) — compute the advertise-iff-able inbound-capability wiring
+ *  for the CLI MCP load, unifying sampling (B1) and roots (H19) into ONE bundle.
+ *  The DECISION lives HERE (the surface), not in `@/agent/mcp-bridge` (which
+ *  stays a pure consumer and never imports `@/host`): only the surface has the
+ *  assembled `LLMPort`, the interactive consent prompter, AND the workspace cwd.
+ *
+ *  Two INDEPENDENT advertise-iff-able gates, each returning its `advertise` flag
+ *  and the answering port from the SAME branch so they can never drift:
+ *   - sampling (`buildSamplingWiring`): ON iff `QUANTA_MCP_SAMPLING=1` AND an LLM
+ *     AND an interactive consent prompter (a remote server must never silently
+ *     spend inference unattended);
+ *   - roots (`buildRootsWiring`): ON iff `QUANTA_MCP_ROOTS=1` (the provider is the
+ *     workspace cwd — always available, no extra dep).
+ *
+ *  The negotiator is computed ONCE from BOTH advertise flags, then VERIFIED
+ *  against its compiled record so we NEVER advertise a capability we would
+ *  answer with `-32601` (the base `QUANTA_MCP_CAPS=full` must be on for ANY
+ *  inbound capability — `pickMcpNegotiator` returns the `{}` default otherwise,
+ *  in which case both flags collapse to OFF). Returns `undefined` (⇒ the load is
+ *  byte-identical) when NEITHER capability ends up advertised. */
+const resolveMcpInboundWiring = (
   llm: LLMPort | undefined,
   elicitationPrompterFor: ElicitationPrompterFactory | undefined,
-): { negotiator: CapabilityNegotiator; handler: SamplingHandlerPort } | undefined => {
-  const enabled = runtimeConfig().mcpSampling
-  // Both deps must be present for `buildSamplingWiring` to advertise. No LLM ⇒
-  // nothing to delegate to; no interactive prompter ⇒ no consent gate (headless
-  // is denied by construction), so we keep sampling OFF rather than wire a
-  // handler that would always decline.
+): McpInboundWiring | undefined => {
+  // --- sampling gate (B1) ---
   const consent: ElicitationPrompter | undefined =
     elicitationPrompterFor !== undefined
       ? elicitationPrompterFor(SAMPLING_CONSENT_CONTEXT)
       : undefined
-  const deps = llm !== undefined && consent !== undefined ? { llm, consent } : undefined
-  const wiring = buildSamplingWiring(enabled, deps)
-  if (!wiring.advertise || wiring.handler === undefined) return undefined
-  // Advertise + handler MOVE TOGETHER: build the negotiator the wiring's flag
-  // implies, then VERIFY it actually advertises `sampling` before handing the
-  // handler down. `pickMcpNegotiator` only advertises sampling under
-  // `QUANTA_MCP_CAPS=full` (the base capability set must be on for ANY inbound
-  // capability) — so `QUANTA_MCP_SAMPLING=1` WITHOUT `QUANTA_MCP_CAPS=full`
-  // yields a negotiator that would NOT advertise sampling. Wiring the handler
-  // there would be a silent handler-without-advertisement (the inverse drift).
-  // Gate on the compiled record so we NEVER wire a handler the negotiator will
-  // not advertise: absent ⇒ `undefined` ⇒ byte-identical load.
-  const negotiator = pickMcpNegotiator(process.env, { sampling: true })
-  if (negotiator.compile().sampling === undefined) return undefined
-  return { negotiator, handler: wiring.handler }
+  const samplingDeps = llm !== undefined && consent !== undefined ? { llm, consent } : undefined
+  const sampling = buildSamplingWiring(runtimeConfig().mcpSampling, samplingDeps)
+
+  // --- roots gate (H19) — provider is the session workspace cwd ---
+  const roots = buildRootsWiring(runtimeConfig().mcpRoots, process.cwd())
+
+  // The negotiator reflects BOTH capabilities, computed ONCE. `pickMcpNegotiator`
+  // only advertises either under `QUANTA_MCP_CAPS=full`; absent ⇒ the `{}`
+  // default ⇒ neither is advertised (both flags collapse to OFF below).
+  const negotiator = pickMcpNegotiator(process.env, {
+    ...(sampling.advertise ? { sampling: true } : {}),
+    ...(roots.advertise ? { roots: true } : {}),
+  })
+  const compiled = negotiator.compile()
+  // VERIFY each handler/provider against the compiled record so a handler/
+  // provider is wired IFF the negotiator will actually advertise it (guards the
+  // inverse drift: `QUANTA_MCP_SAMPLING=1` / `QUANTA_MCP_ROOTS=1` WITHOUT
+  // `QUANTA_MCP_CAPS=full` ⇒ the capability is NOT advertised ⇒ no port wired).
+  const handler =
+    sampling.advertise && sampling.handler !== undefined && compiled.sampling !== undefined
+      ? sampling.handler
+      : undefined
+  const rootsProvider =
+    roots.advertise && roots.provider !== undefined && compiled.roots !== undefined
+      ? roots.provider
+      : undefined
+  // Nothing advertised ⇒ omit the bundle entirely (byte-identical load).
+  if (handler === undefined && rootsProvider === undefined) return undefined
+  return {
+    negotiator,
+    ...(handler !== undefined ? { handler } : {}),
+    ...(rootsProvider !== undefined ? { rootsProvider } : {}),
+  }
 }
 
 /** Assemble the optional `loadMcpTools` opts bag from the resolved feature
@@ -763,12 +831,26 @@ const buildMcpLoadOpts = (
   slog: StructuredLogger,
   args: {
     readonly autoRestart: boolean
-    readonly samplingWiring: ReturnType<typeof resolveSamplingWiring>
+    readonly inboundWiring: ReturnType<typeof resolveMcpInboundWiring>
     readonly opts: LoadFeaturesOpts
   },
 ): Parameters<typeof loadMcpTools>[2] => ({
-  ...(args.autoRestart ? { supervisorDepsFor: mcpSupervisorDepsFor(slog) } : {}),
-  ...(args.samplingWiring !== undefined ? { samplingWiring: args.samplingWiring } : {}),
+  // B1 + H19 — the SAME unified `{ negotiator, handler?, rootsProvider? }` bundle
+  // feeds BOTH paths. On the supervised path it is BAKED into the restart factory
+  // (so a reconnected client re-advertises); on the single-client path it is the
+  // `samplingWiring` opt the bridge applies to the one client. The transport seam
+  // (test-only) is threaded into the supervisor factory too so a supervised
+  // client can be driven by a scripted transport.
+  ...(args.autoRestart
+    ? {
+        supervisorDepsFor: mcpSupervisorDepsFor(
+          slog,
+          args.inboundWiring,
+          args.opts.mcpTransportFor,
+        ),
+      }
+    : {}),
+  ...(args.inboundWiring !== undefined ? { samplingWiring: args.inboundWiring } : {}),
   ...(args.opts.mcpTransportFor !== undefined ? { transportFor: args.opts.mcpTransportFor } : {}),
 })
 
@@ -799,15 +881,16 @@ export const loadFeatures = async (
   // ADR-0435: opt-in auto-restart. Unset ⇒ `supervisorDepsFor` is undefined ⇒
   // `loadMcpTools` takes the original single-client branch (byte-identical).
   const autoRestart = mcpAutoRestartEnabled()
-  // B1 (jun-04) — advertise-iff-able inbound-sampling wiring. The surface owns
-  // this decision (the only layer with BOTH the LLM and the consent prompter)
-  // and hands the already-built `{ negotiator, handler }` DOWN to the bridge,
-  // which stays a pure consumer. Undefined ⇒ byte-identical (no advertisement,
-  // headless rejecter). Sampling and auto-restart are independent: the
-  // supervised path does not carry inbound sampling, so the wiring only takes
-  // effect on the single-client branch.
-  const samplingWiring = resolveSamplingWiring(opts.llm, elicitationPrompterFor)
-  const mcpLoadOpts = buildMcpLoadOpts(slog, { autoRestart, samplingWiring, opts })
+  // B1 + H19 (jun-04) — advertise-iff-able inbound-capability wiring (sampling +
+  // roots, unified into ONE bundle). The surface owns this decision (the only
+  // layer with the LLM, the consent prompter, AND the workspace cwd) and hands
+  // the already-built `{ negotiator, handler?, rootsProvider? }` DOWN to the
+  // bridge, which stays a pure consumer. Undefined ⇒ byte-identical (no
+  // advertisement, headless rejecter, empty roots). The SAME bundle reaches BOTH
+  // the single-client AND the supervised path (threaded into the restart
+  // factory), so a reconnected client re-advertises sampling+roots.
+  const inboundWiring = resolveMcpInboundWiring(opts.llm, elicitationPrompterFor)
+  const mcpLoadOpts = buildMcpLoadOpts(slog, { autoRestart, inboundWiring, opts })
   const { tools: mcpTools, clients: mcpClients } =
     mcpConfigs.length > 0
       ? await loadMcpTools(mcpConfigs, elicitationPrompterFor, mcpLoadOpts)

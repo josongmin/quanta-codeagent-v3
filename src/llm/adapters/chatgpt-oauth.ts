@@ -38,7 +38,9 @@ import { errMessage, LLMError, logger } from "@/shared"
 import { buildResponsesBody } from "../openai-responses-wire"
 import type { LLMPort } from "../ports"
 import {
+  defaultResponsesReasoningCarryoverStore,
   prepareResponsesContinuationRequest,
+  type ResponsesReasoningCarryoverStore,
   responsesStatusToKind,
   streamResponsesSurface,
 } from "../responses-stream"
@@ -92,6 +94,9 @@ export interface ChatGPTOAuthConfig extends AdapterStreamTimeoutConfig {
   readonly serviceTier?: string
   /** Reasoning effort — env-derived at the composition root and passed in. */
   readonly reasoningEffort?: string
+  /** H15 — o-series reasoning carry-over (`QUANTA_REASONING_CARRYOVER`). Absent/
+   *  false ⇒ byte-identical (thinking dropped, no re-emit). */
+  readonly reasoningCarryover?: boolean
   /** When true, the prepared request body is logged (truncating long data:
    *  URLs) via the shared logger at debug level. Env-derived
    *  (`QUANTA_DEBUG_OAUTH`) at the composition root — the slice itself takes a
@@ -121,6 +126,10 @@ export class ChatGPTOAuthAdapter implements LLMPort {
   private readonly streamTimeoutMs: { firstChunkMs: number; idleMs: number }
   private readonly serviceTier: string | undefined
   private readonly reasoningEffort: string | undefined
+  /** H15 — per-session reasoning carry-over: flag + ONE store for the adapter's
+   *  lifetime (off ⇒ undefined ⇒ byte-identical). */
+  private readonly reasoningCarryover: boolean
+  private readonly reasoningCarryoverStore: ResponsesReasoningCarryoverStore | undefined
   private readonly debugOAuth: boolean
 
   constructor(config: ChatGPTOAuthConfig) {
@@ -132,6 +141,10 @@ export class ChatGPTOAuthAdapter implements LLMPort {
     this.streamTimeoutMs = resolveAdapterStreamTimeouts(config)
     this.serviceTier = config.serviceTier
     this.reasoningEffort = config.reasoningEffort
+    this.reasoningCarryover = config.reasoningCarryover === true
+    this.reasoningCarryoverStore = this.reasoningCarryover
+      ? defaultResponsesReasoningCarryoverStore()
+      : undefined
     this.debugOAuth = config.debugOAuth ?? false
   }
 
@@ -271,6 +284,17 @@ export class ChatGPTOAuthAdapter implements LLMPort {
     return error.statusCode === 401
   }
 
+  /** H15 — the carry-over flag+store fragment, present ONLY when the gate is on
+   *  (off ⇒ `{}` ⇒ byte-identical). Extracted so `stream` stays under the
+   *  cognitive-complexity gate. */
+  private carryoverOpts():
+    | { reasoningCarryover: true; reasoningCarryoverStore: ResponsesReasoningCarryoverStore }
+    | Record<string, never> {
+    return this.reasoningCarryover && this.reasoningCarryoverStore !== undefined
+      ? { reasoningCarryover: true, reasoningCarryoverStore: this.reasoningCarryoverStore }
+      : {}
+  }
+
   async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
     try {
       const token = await this.ensureFreshToken()
@@ -304,6 +328,8 @@ export class ChatGPTOAuthAdapter implements LLMPort {
         headers["chatgpt-account-id"] = token.account_id
       }
 
+      // H15 — carry-over flag+store only when the gate is on (off ⇒ byte-identical).
+      const carryover = this.carryoverOpts()
       const prepared = prepareResponsesContinuationRequest({
         input,
         model: effectiveModel,
@@ -312,6 +338,7 @@ export class ChatGPTOAuthAdapter implements LLMPort {
         ...(this.serviceTier !== undefined ? { serviceTier: this.serviceTier } : {}),
         ...(this.reasoningEffort !== undefined ? { reasoningEffort: this.reasoningEffort } : {}),
         ...(continuationStore !== undefined ? { continuationStore } : {}),
+        ...carryover,
       })
 
       if (this.debugOAuth) {
@@ -335,6 +362,7 @@ export class ChatGPTOAuthAdapter implements LLMPort {
         headers,
         timeoutMs: this.streamTimeoutMs,
         ...(continuationStore !== undefined ? { continuationStore } : {}),
+        ...carryover,
         disableResumeOnStatuses: new Set([400, 422]),
       })
     } catch (error) {

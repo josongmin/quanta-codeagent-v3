@@ -209,9 +209,11 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     // Two fetches: catalog GET first, then responses POST.
     expect(captured.length).toBe(2)
     // `client_version` query param is REQUIRED by the backend (probe-verified
-    // 400 otherwise) — assert it's present on the URL.
+    // 400 otherwise) — assert it's present on the URL. The value tracks the
+    // shipped `MODELS_CLIENT_VERSION` (bumped 0.0.1 → 0.131.0; stale 0.0.1
+    // returned an empty catalog — see chatgpt-oauth client-version gating).
     expect(captured[0]?.url).toBe(
-      "https://chatgpt.com/backend-api/codex/models?client_version=0.0.1",
+      "https://chatgpt.com/backend-api/codex/models?client_version=0.131.0",
     )
     expect(captured[0]?.init.method).toBe("GET")
     expect(captured[1]?.url).toBe("https://chatgpt.com/backend-api/codex/responses")

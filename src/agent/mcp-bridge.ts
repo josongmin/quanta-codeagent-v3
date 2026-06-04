@@ -9,6 +9,7 @@ import {
   McpReconnectSupervisor,
   type McpServerConfig,
   type McpToolDef,
+  type RootsProviderPort,
   type SamplingHandlerPort,
   type SupervisorDeps,
   tasksPortOver,
@@ -203,25 +204,61 @@ export interface McpStoppable {
  * supervisors (which expose a compatible `stop()`). Without it, the original
  * single-client path runs unchanged.
  */
-/** B1 (jun-04) — the already-DECIDED inbound-sampling wiring, threaded DOWN from
- *  the composition root. `@/agent/mcp-bridge` is a PURE consumer here: it never
- *  imports `@/host` (the `buildSamplingWiring` + `pickMcpNegotiator` decision
- *  lives in the surface, where the `LLMPort` + consent prompter are assembled),
- *  it only forwards these two artifacts into the `McpClient` it constructs.
+/** B1 + H19 (jun-04) — the already-DECIDED MCP inbound-capability wiring bundle,
+ *  threaded DOWN from the composition root. `@/agent/mcp-bridge` is a PURE
+ *  consumer here: it never imports `@/host` (the `buildSamplingWiring` +
+ *  `buildRootsWiring` + `pickMcpNegotiator` decision lives in the surface, where
+ *  the `LLMPort` + consent prompter + workspace cwd are assembled), it only
+ *  forwards these artifacts into every `McpClient` it constructs — on BOTH the
+ *  single-client and the supervised (auto-restart) path.
  *
- *  The two fields are bundled into ONE object precisely so they cannot drift:
- *  the negotiator (which already advertises `sampling: {}`) and the handler that
- *  answers it MOVE TOGETHER. Supply BOTH or NEITHER. When the bundle is absent,
- *  the load is byte-identical to before this field existed (no negotiator
- *  override ⇒ `defaultNegotiator` caps `{}`, no handler ⇒ the client's headless
- *  rejecter — the advertise-iff-able default). */
+ *  The fields are bundled into ONE object precisely so they cannot drift: the
+ *  negotiator (which advertises `sampling`/`roots` IFF the matching port is
+ *  wired) and the ports that answer those advertisements MOVE TOGETHER.
+ *
+ *  Advertise-iff-able is enforced at the SOURCE (the surface): the negotiator is
+ *  computed from the SAME gates that produce `samplingHandler`/`rootsProvider`,
+ *  so a present field ⇒ the negotiator advertises it, and an absent field ⇒ it
+ *  does not. When the whole bundle is absent the load is byte-identical to before
+ *  this field existed (no negotiator override ⇒ `defaultNegotiator` caps `{}`, no
+ *  handler ⇒ the client's headless rejecter, no roots provider ⇒ an inbound
+ *  `roots/list` answered with an empty list — every advertise-iff-able default). */
 export interface SamplingWiringInput {
-  /** The pre-built capability negotiator — advertises `sampling: {}` IFF a real
-   *  handler is wired (the caller computes this from `buildSamplingWiring`'s
-   *  `advertise` flag via `pickMcpNegotiator`). */
+  /** The pre-built capability negotiator — advertises `sampling`/`roots` IFF the
+   *  matching port is wired (the caller computes this from the `advertise` flags
+   *  of `buildSamplingWiring` / `buildRootsWiring` via `pickMcpNegotiator`). */
   readonly negotiator: CapabilityNegotiator
-  /** The LLM-backed handler an inbound `sampling/createMessage` routes to. */
-  readonly handler: SamplingHandlerPort
+  /** The LLM-backed handler an inbound `sampling/createMessage` routes to.
+   *  Optional: a deployment may wire `roots` WITHOUT `sampling` (or vice-versa);
+   *  absent ⇒ the client keeps its headless sampling rejecter. */
+  readonly handler?: SamplingHandlerPort
+  /** H19 — the workspace roots source an inbound `roots/list` answers from.
+   *  Optional + advertise-iff-able: present ⇒ the negotiator advertises `roots`
+   *  AND the client answers `roots/list` from it; absent ⇒ no `roots`
+   *  advertisement, `roots/list` answered with an empty list. */
+  readonly rootsProvider?: RootsProviderPort
+}
+
+/** Apply a {@link SamplingWiringInput} bundle to the `McpClient` constructor
+ *  opts in ONE place so the single-client path and the supervised factory wire
+ *  IDENTICALLY (the unification point — no field can be applied on one path and
+ *  forgotten on the other). Mutates + returns `opts` for call-site brevity.
+ *
+ *  Honesty rule: the negotiator is ALWAYS set whenever the bundle is present
+ *  (it is the advertise-iff-able record computed at the source), and the
+ *  `samplingHandler` / `rootsProvider` ports are set ONLY when present — so a
+ *  capability is advertised IFF its answering port is wired. */
+export const applyMcpClientWiring = (
+  opts: NonNullable<ConstructorParameters<typeof McpClient>[1]>,
+  wiring: SamplingWiringInput | undefined,
+): NonNullable<ConstructorParameters<typeof McpClient>[1]> => {
+  if (wiring === undefined) return opts
+  // The negotiator reflects BOTH sampling AND roots (computed together at the
+  // source); set it whenever ANY inbound capability is wired.
+  opts.negotiator = wiring.negotiator
+  if (wiring.handler !== undefined) opts.samplingHandler = wiring.handler
+  if (wiring.rootsProvider !== undefined) opts.rootsProvider = wiring.rootsProvider
+  return opts
 }
 
 /** Opt-in knobs for {@link loadMcpTools}. Omitting all of them is byte-identical
@@ -238,18 +275,29 @@ export interface LoadMcpToolsOpts {
    *  supervisors (compatible `stop()`). Absent ⇒ the byte-identical
    *  single-client path. */
   supervisorDepsFor?: (config: McpServerConfig) => SupervisorDeps
-  /** B1 (jun-04) — the advertise-iff-able inbound-sampling wiring decided at the
-   *  composition root (see {@link SamplingWiringInput}). Present ⇒ each
-   *  single-client server advertises `sampling` AND routes inbound
-   *  `sampling/createMessage` to the supplied LLM-backed handler. Absent ⇒
-   *  byte-identical (no advertisement, headless rejecter). */
+  /** B1 + H19 (jun-04) — the advertise-iff-able inbound-capability wiring bundle
+   *  decided at the composition root (see {@link SamplingWiringInput}). Present ⇒
+   *  each server (on BOTH the single-client AND the supervised path) advertises
+   *  `sampling`/`roots` IFF the matching port is wired, routes inbound
+   *  `sampling/createMessage` to the supplied LLM-backed handler, and answers
+   *  inbound `roots/list` from the supplied workspace roots provider. On the
+   *  supervised path the bundle is threaded into the restart factory, so a
+   *  reconnected client RE-advertises + re-handles. Absent ⇒ byte-identical (no
+   *  advertisement, headless rejecter, empty roots). */
   samplingWiring?: SamplingWiringInput
 }
 
 /** Load one server on the ADR-0435 supervised (auto-restart) path. `create`
  *  never throws on a failed first start (it enters backoff), so a flaky server
  *  no longer drops the whole load. Returns the bridged tools + the supervisor
- *  to push (or `null` when listing failed and the supervisor was stopped). */
+ *  to push (or `null` when listing failed and the supervisor was stopped).
+ *
+ *  B1 + H19 — the inbound-capability wiring bundle is threaded via the injected
+ *  `SupervisorDeps.factory` (the composition root bakes it in with
+ *  {@link applyMcpClientWiring}), so the supervisor — which owns the LIFECYCLE,
+ *  not the policy — re-applies the SAME `{ negotiator, samplingHandler,
+ *  rootsProvider }` to every (re)connected client. The bridge passes the deps
+ *  straight through (pure pass-through). */
 const loadSupervised = async (
   config: McpServerConfig,
   deps: SupervisorDeps,
@@ -287,15 +335,13 @@ const loadSingle = async (
   if (transportFor !== undefined) {
     clientOpts.transport = transportFor(config)
   }
-  // B1 — advertise + handler MOVE TOGETHER: the negotiator (which already
-  // advertises `sampling: {}`) and the handler that answers it are set as one
-  // unit from the same bundle, so the client can never advertise a capability it
-  // would answer with `-32601`. Absent ⇒ no override (defaultNegotiator + the
-  // client's headless rejecter), byte-identical to the legacy single-client load.
-  if (samplingWiring !== undefined) {
-    clientOpts.negotiator = samplingWiring.negotiator
-    clientOpts.samplingHandler = samplingWiring.handler
-  }
+  // B1 + H19 — advertise + answering-port MOVE TOGETHER via the SAME shared
+  // helper the supervised factory uses: the negotiator (computed at the source to
+  // advertise `sampling`/`roots` IFF wired) and the ports that answer them are
+  // set as one unit, so the client can never advertise a capability it would
+  // answer with `-32601`. Absent ⇒ no override (defaultNegotiator + the client's
+  // headless rejecter + empty roots), byte-identical to the legacy load.
+  applyMcpClientWiring(clientOpts, samplingWiring)
   const client = new McpClient(config, clientOpts)
   try {
     await client.start()

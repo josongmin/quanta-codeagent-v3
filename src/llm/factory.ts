@@ -122,6 +122,7 @@ const ADAPTER_REGISTRY: Record<
       ...shared,
       ...(serviceTier !== undefined ? { serviceTier } : {}),
       ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+      ...(resolveReasoningCarryover(env) ? { reasoningCarryover: true } : {}),
     })
   },
   anthropic: (apiKey, model, opts, _env) =>
@@ -149,6 +150,7 @@ const ADAPTER_REGISTRY: Record<
       debugOAuth: resolveDebugOAuth(_opts, env),
       ...(serviceTier !== undefined ? { serviceTier } : {}),
       ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+      ...(resolveReasoningCarryover(env) ? { reasoningCarryover: true } : {}),
       ...(_opts.maxTokens !== undefined ? { maxTokens: _opts.maxTokens } : {}),
       ...(_opts.streamFirstChunkMs !== undefined
         ? { streamFirstChunkMs: _opts.streamFirstChunkMs }
@@ -183,6 +185,12 @@ const resolveServiceTier = (opts: CreateLLMOptions, env: EnvLikeDecl): string | 
  *  closed value set — here we just forward the raw string. */
 const resolveReasoningEffort = (opts: CreateLLMOptions, env: EnvLikeDecl): string | undefined =>
   opts.reasoningEffort ?? env.QUANTA_REASONING_EFFORT
+
+/** H15 — composition-root resolution of o-series reasoning carry-over
+ *  (`QUANTA_REASONING_CARRYOVER`). Default-OFF: unset ⇒ false ⇒ the Responses
+ *  adapters drop thinking + emit no `include` (byte-identical). */
+const resolveReasoningCarryover = (env: EnvLikeDecl): boolean =>
+  env.QUANTA_REASONING_CARRYOVER === "1"
 
 /** Composition-root resolution of the ChatGPT-OAuth body-debug flag. Explicit
  *  option wins; otherwise `QUANTA_DEBUG_OAUTH === "1"`. */

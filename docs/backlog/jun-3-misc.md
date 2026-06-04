@@ -122,6 +122,11 @@
 > - **B1 sampling LIVE 배선 ✅**: seam→실가동. fence-correct(wiring은 `internal.ts`, `mcp-bridge`는 pure consumer). LLMPort를 `bootstrap-session`→`loadFeatures(slog,llm)`로 threading. advertise+handler 동시+negotiator-compile 검증. default-OFF byte-identical 증명. 9/0. 잔여: supervised-reconnect path(@/mcp).
 > - **🐛 MUTATING_TOOL_TABLE 체계갭 수정**: jun-04 신규 8도구(coverage_check/prompt_cache_status/image_gen/xlsx_write/docx_write/pptx_write/docx_read/pptx_read)가 **전부 `src/agent/mode.ts` 분류 누락**=plan-mode dispatch시 UnknownToolError 잠재크래시(docx/pptx_read 테스트 RED). 8개 전부 분류(reader=null/writer=write_filesystem)+크로스체크 갱신. **교훈: 신규 도구는 mode.ts도 반드시.**
 
+> **✅ jun-04 wave-5 (남은 follow-up 전부) 완료.** tsc 0, 신규 34/0, 광역 4101/0, catalog 851, biome 0.
+> - **H19 host roots provider + MCP supervised 통합 ✅**: `workspaceRootsProvider`(cwd→`file://` root) + `buildRootsWiring`(advertise-iff-provider) + `pickMcpNegotiator({roots})`. **통합 번들** `{negotiator,handler?,rootsProvider?}` + `applyMcpClientWiring`(single+supervised 양 경로 단일 consumer) → **supervised reconnect 후에도 sampling+roots 재광고/재핸들**(fake-clock 증명). `QUANTA_MCP_ROOTS`+`QUANTA_MCP_CAPS=full`. 117/0.
+> - **H15 reasoning carry-over LIVE ✅ (이미 완성 확인)**: seam뿐 아니라 store+capture+replay+adapter(openai-responses/chatgpt-oauth 각 per-session store)+factory(`resolveReasoningCarryover`) 전부 이미 라이브 배선돼 있었음(또 already-done). 라이브 경로 e2e 2파일(실 adapter 2턴 outbound bytes + multi-session 격리 + default-OFF byte-identical) 추가. 234/0.
+> - **H13 migration persist ✅**: `persist.ts`(settings.json#permissions / .mcp.json#mcpServers(env scrub) / AGENTS.md / .quanta/{agents,rules}/*.md) + `importExternalConfig`(detect→convert→persist) + `emitConfigMigrationImport`(repl.ts). idempotent merge(JSON union)/sibling(.imported.md), ledger `imported` 2nd-run no-op, **credential-drop 증명**, 이중knob(`QUANTA_MIGRATE_CONFIG`+`QUANTA_MIGRATE_CONFIG_IMPORT`). native dest를 detect inventory에서 제외(throttle 안정). 66/0.
+
 - **H1. loop-on-lints/tests/command 자가수정 + 편집결과에 도입-lint delta 자동첨부** — ✅ **DONE (jun-04)** (ADR-0472 edit-repair-loop + 수렴 e2e)
   - 기능/목적: 편집 후 **도입된** lint만(델타) 모델에 자동 첨부 + lint/test/명령이 green 될 때까지 fast 모델로 재편집(maxIters, 커스텀지시).
   - 레퍼런스: Cursor `ComposerCapabilityRequest.{LoopOnLints,LoopOnTests,LoopOnCommand}` + `new_linter_errors`/`should_attach_linter_errors`(main.js:33272/34023/35871).
@@ -194,7 +199,7 @@
   - ROI: 고(디자인/리포트 워크플로우), 비용: 중(image: provider 이미지API 어댑터 / office: python-docx/openpyxl/pptx + 렌더검증).
   - 코드: 신규 `src/tool/image-gen/`(provider 어댑터, default-OFF gated 도구) + 신규 `src/tool/document/authoring/`(docx/xlsx/pptx write + render-verify). 둘 다 manifest(SSOT) 등록.
 
-- **H15. 추론 carry-over (`encrypted_content`) — OpenAI Responses/o-series** — ✅ **DONE (jun-04, seam)** (capture→store→re-emit; adapter 라이브 thread 잔여)
+- **H15. 추론 carry-over (`encrypted_content`) — OpenAI Responses/o-series** — ✅ **DONE (jun-04, 라이브 배선완료)** — `factory.ts resolveReasoningCarryover(env)` → openai-responses + chatgpt-oauth adapter가 per-session store 보유 + prepare/stream에 전달, `QUANTA_REASONING_CARRYOVER` default-OFF byte-identical. (stale client_version 테스트 0.0.1→0.131.0 보정.)
   - 기능/목적: 각 reasoning 아이템의 `encrypted_content`를 보존해 다음턴 Responses input에 재투입(ZDR 호환), 턴/툴콜 간 사고연속.
   - 레퍼런스: Codex `encrypted_content` in `ResponseItem` + reducer normalize + `x-reasoning-included` 헤더.
   - 시나리오: 멀티스텝 작업에서 추론 연속 → 일관성↑ + 재유도 토큰↓. ChatGPT-OAuth 경로 직격.

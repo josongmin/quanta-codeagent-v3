@@ -59,6 +59,11 @@ export {
   type RunMcpBrowserFlow,
 } from "./mcp-oauth-provider"
 export {
+  buildRootsWiring,
+  type RootsWiring,
+  workspaceRootsProvider,
+} from "./mcp-roots-provider"
+export {
   buildSamplingWiring,
   createLlmSamplingHandler,
   type SamplingHandlerDeps,

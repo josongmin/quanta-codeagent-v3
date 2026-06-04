@@ -28,6 +28,13 @@ export {
   sourceKeyOf,
 } from "./ledger"
 export {
+  type PersistConvertedInput,
+  type PersistConvertedResult,
+  persistConvertedItems,
+} from "./persist"
+export {
+  type ImportExternalConfigResult,
+  importExternalConfig,
   type RunConfigMigrationInput,
   type RunConfigMigrationResult,
   runConfigMigration,

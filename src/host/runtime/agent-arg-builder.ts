@@ -408,10 +408,17 @@ const resolvePermissionProfileWiring = (
 
 export const pickMcpNegotiator = (
   env: NodeJS.ProcessEnv,
-  opts: { sampling?: boolean } = {},
+  opts: { sampling?: boolean; roots?: boolean } = {},
 ): CapabilityNegotiator =>
   env.QUANTA_MCP_CAPS === "full"
-    ? fullNegotiator(opts.sampling === true ? { sampling: true } : {})
+    ? fullNegotiator({
+        ...(opts.sampling === true ? { sampling: true } : {}),
+        // H19 — advertise `roots` IFF a `RootsProviderPort` is wired (the caller
+        // passes the `buildRootsWiring().advertise` flag here AND the matching
+        // provider to the `McpClient`), so we never advertise a capability the
+        // client cannot honestly answer. Absent ⇒ omitted (byte-identical).
+        ...(opts.roots === true ? { roots: true } : {}),
+      })
     : defaultNegotiator
 
 /** ADR-0428 jun-02 wire — resolve the socket-level egress proxy config from the

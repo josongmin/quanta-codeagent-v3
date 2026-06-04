@@ -19,6 +19,7 @@
 import { homedir } from "node:os"
 import {
   type ConvertedItem,
+  importExternalConfig,
   type MigrationItemType,
   runConfigMigration,
 } from "@/migration/external-config"
@@ -98,5 +99,71 @@ export const emitConfigMigrationNotice = async (
   err: (s: string) => void = (s) => process.stderr.write(s),
 ): Promise<void> => {
   const notice = await buildConfigMigrationNotice(cwd)
+  if (notice !== undefined) err(notice)
+}
+
+/** Summarize a persist outcome into a one-line stderr notice, or undefined
+ *  when nothing was written. */
+const summarizeImport = (writtenTypes: readonly MigrationItemType[]): string | undefined => {
+  const present = new Set(writtenTypes)
+  const parts = TYPE_ORDER.filter((t) => present.has(t)).map((t) => LABEL[t])
+  if (parts.length === 0) return undefined
+  return `[quanta] imported Claude/Cursor config into your quanta config: ${parts.join(", ")}.\n`
+}
+
+/**
+ * Run the gated, CONFIRMED config-migration IMPORT — detect+convert+PERSIST.
+ *
+ * This is the SEPARATE opt-in step the startup notice points to: the notice
+ * only records `offered`; this actually WRITES the converted config into
+ * quanta's live locations (`settings.json` permissions/hooks, `.mcp.json`,
+ * `.quanta/agents`, `AGENTS.md`, `.quanta/rules`) and records `imported` so a
+ * re-run is a no-op.
+ *
+ * Gated by BOTH `QUANTA_MIGRATE_CONFIG=1` (the feature) AND a CONFIRMED step
+ * `QUANTA_MIGRATE_CONFIG_IMPORT=1` (the user opting in to actually write). With
+ * either unset ⇒ no detect, no persist, byte-identical (default-OFF). NEVER
+ * throws — an import must not derail startup. Returns a one-line stderr notice
+ * describing what was written, or undefined when nothing was imported.
+ */
+export const runConfigMigrationImport = async (
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string | undefined> => {
+  let migrateConfig: boolean
+  try {
+    migrateConfig = runtimeConfig().migrateConfig
+  } catch {
+    return undefined
+  }
+  // The persist is a SEPARATE confirmed opt-in beyond the feature gate.
+  if (!migrateConfig || env.QUANTA_MIGRATE_CONFIG_IMPORT !== "1") return undefined
+  try {
+    const result = await importExternalConfig({
+      enabled: true,
+      homeDir: homedir(),
+      projectDir: cwd,
+    })
+    if (!result.ran || result.throttled || !result.persisted) return undefined
+    const writtenTypes = new Set<MigrationItemType>()
+    for (const c of result.converted) {
+      if (c.ok) writtenTypes.add(c.type)
+    }
+    return summarizeImport([...writtenTypes])
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Fire-and-forget the CONFIRMED import + write a one-line notice to stderr.
+ * Swallows everything. Default-OFF: with `QUANTA_MIGRATE_CONFIG_IMPORT` unset
+ * this is a no-op (no detect, no disk touch).
+ */
+export const emitConfigMigrationImport = async (
+  cwd: string,
+  err: (s: string) => void = (s) => process.stderr.write(s),
+): Promise<void> => {
+  const notice = await runConfigMigrationImport(cwd)
   if (notice !== undefined) err(notice)
 }

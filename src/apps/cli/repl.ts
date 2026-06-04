@@ -10,7 +10,7 @@ import { buildShellOtelObserver } from "@/observability"
 import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
 import { runSessionCommand as runSessionCommandInner } from "@/runner/session-ops"
 import { composeShellObservers, type ShellExecObserver } from "@/tool"
-import { emitConfigMigrationNotice } from "./config-migration-notice"
+import { emitConfigMigrationImport, emitConfigMigrationNotice } from "./config-migration-notice"
 import { createIdleMonitor } from "./idle-monitor"
 import { loadImageBlock } from "./image-loader"
 import { createImageQueue, type ImageQueue } from "./image-queue"
@@ -282,6 +282,15 @@ export const runRepl = async (): Promise<void> => {
     // surfaces a one-line stderr notice. Knob off ⇒ no detect / no disk touch /
     // byte-identical. Awaited (cheap: a handful of stat probes) but no-throw.
     await emitConfigMigrationNotice(setup.cwd)
+    // H13 PERSIST — the CONFIRMED, opt-in import step. Gated by BOTH
+    // QUANTA_MIGRATE_CONFIG=1 (feature) AND QUANTA_MIGRATE_CONFIG_IMPORT=1
+    // (the user opting in to actually WRITE). The notice above only records
+    // `offered`; this writes the converted config into quanta's live locations
+    // (settings.json permissions/hooks, .mcp.json, .quanta/agents, AGENTS.md,
+    // .quanta/rules), records `imported` (so re-runs are no-ops), and surfaces a
+    // one-line stderr summary. Either knob unset ⇒ no detect / no persist /
+    // byte-identical. No-throw.
+    await emitConfigMigrationImport(setup.cwd)
     // ADR-0299 — surface composition wire. Builds the slash ctx PLUS the
     // wire bundle (conv-checkpoint, playbook-trigger seam, composer +
     // textInbox handles). Each upstream knob (env / CLI flag) gates the
