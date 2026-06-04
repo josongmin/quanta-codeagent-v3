@@ -8,6 +8,10 @@
 #   check-changed   — new src/*.ts must be referenced by a feature YAML     FAIL
 #   reachability    — no L4+ feature is unreachable OR dead-API (real graph) FAIL
 #   lint            — empty-stub count + orphan Accepted ADRs do not grow   FAIL
+#   dod-ratchet     — new/touched feature meets the Definition of Done      FAIL
+#                     (catalog + TDD + e2e hellgate). Baseline-aware: only
+#                     NET-NEW holes block; grandfathered debt shrinks
+#                     monotonically. See tools/pm/README.md.
 #   gates           — maturity-promotion-gate audit                         WARN
 #
 # Why gates is warn-only: 2 doc-only violations (deliberate_hold) currently
@@ -19,7 +23,9 @@ on:
   pull_request:
     paths:
       - "tools/feature-catalog/**"
+      - "tools/pm/**"
       - "src/**"
+      - "tests/**"
       - "docs/decisions/**"
   push:
     branches: [main]
@@ -29,7 +35,7 @@ permissions:
 
 jobs:
   fc-gate:
-    name: fc-gate (validate + check-changed + gates audit)
+    name: fc-gate (validate + check-changed + dod-ratchet + gates audit)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -63,3 +69,10 @@ jobs:
 
       - name: fc lint (empty-stub + orphan-ADR ratchet)
         run: bun fc lint
+
+      - name: Definition-of-Done ratchet (new/touched feature ⇒ catalog + TDD + e2e hellgate)
+        # tools/pm — baseline-aware: a feature failing the DoD that is NOT
+        # grandfathered in tools/pm/baseline.json fails the gate, and a
+        # baselined feature that now passes must be removed (monotonic shrink).
+        # Run `bun run pm <id>` locally for the per-axis breakdown.
+        run: bun run pm:gate

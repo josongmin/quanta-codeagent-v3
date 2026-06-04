@@ -46,6 +46,7 @@
     "pm": "bun run tools/pm/check.ts",
     "pm:all": "bun run tools/pm/check.ts --all",
     "pm:all:strict": "bun run tools/pm/check.ts --all --strict",
+    "pm:gate": "bun test tests/unit/pm-dod-ratchet.test.ts",
     "eval": "bun run src/apps/eval/index.ts",
     "eval:audit": "bun run src/apps/eval/index.ts audit",
     "eval:synthetic": "bun run src/apps/eval/index.ts synthetic",
