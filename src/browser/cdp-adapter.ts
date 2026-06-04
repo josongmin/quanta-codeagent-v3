@@ -641,17 +641,30 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
         // wedging on a dead session. onDead = CDP-event/socket death; proc.exited
         // = process death (crash/OOM/external kill).
         session.onDead(() => {
-          state.closed = true
-          // RESOURCE_LEAK fix: reap the dead session so the Map cannot grow
-          // unbounded across browse→close cycles. live()/isLive() already treat
-          // a missing entry as closed, so dropping it is observationally equal to
-          // the previously-retained closed entry.
+          // OVER_CORRECTION fix: reaping the Map entry here removed what close()
+          // relied on to kill the proc + rmrf the temp profile — so on the death
+          // path the on-disk profile leaked unbounded. Run the FULL teardown
+          // (the proc is still alive on a socket/CDP death) BEFORE dropping the
+          // entry. killQuietly swallows ESRCH/EPERM; rmrf is best-effort.
+          if (!state.closed) {
+            state.closed = true
+            killQuietly(state.proc)
+            deps.fs.rmrf(state.profileDir)
+          }
+          // Reap the (bounded) Map entry only after teardown. live()/isLive()
+          // already treat a missing entry as closed, so dropping it is
+          // observationally equal to the previously-retained closed entry.
           sessions.delete(id)
         })
         void proc.exited.then(() => {
+          // OVER_CORRECTION fix: the process is already gone, so DON'T kill it
+          // again — but the temp profile it left on disk must still be removed,
+          // and the session wiring disposed. close() can no longer do this once
+          // the Map entry is reaped, so do it here.
           if (!state.closed) {
             state.closed = true
             session.dispose()
+            deps.fs.rmrf(state.profileDir)
           }
           sessions.delete(id)
         })

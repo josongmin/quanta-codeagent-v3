@@ -2,11 +2,14 @@ import { describe, expect, test } from "bun:test"
 import {
   decodeSessionCommand,
   decodeSessionEvent,
+  decodeSessionSnapshot,
   encodeSessionCommand,
   encodeSessionEvent,
+  encodeSessionSnapshot,
   SESSION_PROTOCOL_VERSION,
   SessionProtocolValidationError,
 } from "@/protocol/session"
+import type { SessionSnapshotLite } from "@/protocol/session"
 
 describe("@/protocol/session codec", () => {
   test("round-trips commands with envelope metadata", () => {
@@ -220,5 +223,100 @@ describe("@/protocol/session codec", () => {
       },
     })
     expect(() => decodeSessionEvent(raw)).toThrow(SessionProtocolValidationError)
+  })
+
+  const validSnapshot = (): SessionSnapshotLite => ({
+    sessionId: "s1",
+    revision: 4,
+    seq: 2,
+    state: {
+      status: "idle",
+      draftInput: "",
+      permissionMode: "default",
+      messageCount: 0,
+    },
+    capabilities: {
+      approvals: "none",
+      tools: true,
+      memory: true,
+      artifacts: true,
+      subagents: false,
+      automation: false,
+      shellSnapshot: false,
+      transport: "inproc",
+    },
+    pendingApproval: null,
+    openArtifacts: [],
+  })
+
+  test("round-trips snapshots with nullable pendingApproval", () => {
+    const raw = encodeSessionSnapshot(validSnapshot())
+    expect(decodeSessionSnapshot(raw)).toEqual(validSnapshot())
+  })
+
+  // HELLGATE H8: decodeSessionSnapshot must route revision/seq through the same
+  // assertFiniteNumber as the event path AND guard every required field. The
+  // pre-fix bare `typeof === "number"` test let NaN/Infinity through, and
+  // state/capabilities/pendingApproval/openArtifacts were unchecked entirely.
+  const corruptSnapshot = (
+    mutate: (s: Record<string, unknown>) => void,
+  ): string => {
+    const payload: Record<string, unknown> = { ...validSnapshot() }
+    mutate(payload)
+    return JSON.stringify({
+      version: SESSION_PROTOCOL_VERSION,
+      kind: "snapshot",
+      payload,
+    })
+  }
+
+  test("rejects snapshot with non-finite (Infinity) revision/seq over the wire", () => {
+    // `1e999` is VALID JSON and JSON.parse yields Infinity, so this is a real
+    // reachable path through the public decoder. The pre-fix bare
+    // `typeof === "number"` test accepted it (Infinity is a number), wedging
+    // revision_conflict downstream. assertFiniteNumber now rejects it.
+    const infRevision = corruptSnapshot((s) => {
+      s.revision = 0
+    }).replace('"revision":0', '"revision":1e999')
+    expect(JSON.parse(infRevision).payload.revision).toBe(Number.POSITIVE_INFINITY)
+    expect(() => decodeSessionSnapshot(infRevision)).toThrow(SessionProtocolValidationError)
+
+    const infSeq = corruptSnapshot((s) => {
+      s.seq = 0
+    }).replace('"seq":0', '"seq":1e999')
+    expect(() => decodeSessionSnapshot(infSeq)).toThrow(SessionProtocolValidationError)
+  })
+
+  test("rejects snapshot missing required object fields", () => {
+    for (const key of ["state", "capabilities", "pendingApproval", "openArtifacts"]) {
+      const raw = corruptSnapshot((s) => {
+        delete s[key]
+      })
+      expect(() => decodeSessionSnapshot(raw)).toThrow(SessionProtocolValidationError)
+    }
+  })
+
+  test("rejects snapshot with mistyped required fields", () => {
+    expect(() =>
+      decodeSessionSnapshot(corruptSnapshot((s) => (s.state = "running"))),
+    ).toThrow(SessionProtocolValidationError)
+    expect(() =>
+      decodeSessionSnapshot(corruptSnapshot((s) => (s.capabilities = []))),
+    ).toThrow(SessionProtocolValidationError)
+    // openArtifacts must be an array, not an object.
+    expect(() =>
+      decodeSessionSnapshot(corruptSnapshot((s) => (s.openArtifacts = {}))),
+    ).toThrow(SessionProtocolValidationError)
+    // pendingApproval scalar is rejected, but null stays accepted (no over-correction).
+    expect(() =>
+      decodeSessionSnapshot(corruptSnapshot((s) => (s.pendingApproval = "pending"))),
+    ).toThrow(SessionProtocolValidationError)
+  })
+
+  test("does NOT over-correct: null pendingApproval is accepted", () => {
+    const raw = corruptSnapshot((s) => {
+      s.pendingApproval = null
+    })
+    expect(() => decodeSessionSnapshot(raw)).not.toThrow()
   })
 })

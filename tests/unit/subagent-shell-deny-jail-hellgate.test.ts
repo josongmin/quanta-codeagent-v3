@@ -16,6 +16,9 @@
  *   (e) exec_command(pty:true) with NO ptyTable returns cause:"pty_unsupported"
  *       instead of silently running an untracked PTY.
  */
+import { mkdtempSync, mkdirSync, realpathSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
 import { resolveJailed } from "@/storage"
 import {
@@ -129,6 +132,70 @@ describe("HELLGATE (c) — exec_command path jail", () => {
   })
 })
 
+// ─── (c2) exec_command — spawn runs in the JAILED path, not the raw cwd ──────
+//
+// Hole: the jail validated `resolve(input.cwd, jailRoot)` but `Bun.spawn` ran
+// with the RAW `input.cwd`. A RELATIVE cwd is resolved by the jail against
+// jailRoot (→ inside the workspace), but Bun.spawn resolves a relative cwd
+// against `process.cwd()`. When `process.cwd() != jailRoot` the validated path
+// and the executed path DIVERGE — a relative cwd that passed the jail check
+// would still run OUTSIDE the workspace (or escape via "../"). The fix binds
+// the spawn cwd to the jailed absolute path. These cases run with a temp
+// jailRoot DISTINCT from process.cwd() so the divergence is observable.
+describe("HELLGATE (c2) — exec_command spawns in the jailed path (not raw cwd)", () => {
+  test("a RELATIVE cwd executes INSIDE jailRoot, not under process.cwd()", async () => {
+    const jailRoot = realpathSync(mkdtempSync(join(tmpdir(), "quanta-jail-")))
+    mkdirSync(join(jailRoot, "sub"))
+    try {
+      // Relative cwd "sub" passes the jail (resolves to <jailRoot>/sub). Before
+      // the fix, Bun.spawn would resolve "sub" against process.cwd() (the repo
+      // root) — running OUTSIDE the temp workspace. `pwd -P` must report a path
+      // under jailRoot, NOT under process.cwd().
+      const r = await handleExecCommand(
+        { command: "pwd -P", cwd: "sub", timeoutMs: 5000 },
+        { cwdJail: cwdJail(jailRoot) },
+      )
+      expect(r.kind).toBe("success")
+      if (r.kind === "success") {
+        const out = r.stdout.trim()
+        expect(out.startsWith(jailRoot)).toBe(true)
+        // Anti-regression: must NOT have run under the process cwd (the repo).
+        expect(out.startsWith(realpathSync(process.cwd()))).toBe(false)
+      }
+    } finally {
+      rmSync(jailRoot, { recursive: true, force: true })
+    }
+  })
+
+  test("a RELATIVE climb-out cwd ('../escape') is rejected fail-closed", async () => {
+    const jailRoot = realpathSync(mkdtempSync(join(tmpdir(), "quanta-jail-")))
+    try {
+      const r = await handleExecCommand(
+        { command: "pwd -P", cwd: "../escape", timeoutMs: 5000 },
+        { cwdJail: cwdJail(jailRoot) },
+      )
+      expect(r.kind).toBe("error")
+      if (r.kind === "error") expect(r.cause).toBe("cwd_outside_workspace")
+    } finally {
+      rmSync(jailRoot, { recursive: true, force: true })
+    }
+  })
+
+  test("an ABSOLUTE outside cwd is still rejected even with a temp jailRoot", async () => {
+    const jailRoot = realpathSync(mkdtempSync(join(tmpdir(), "quanta-jail-")))
+    try {
+      const r = await handleExecCommand(
+        { command: "pwd -P", cwd: "/etc", timeoutMs: 5000 },
+        { cwdJail: cwdJail(jailRoot) },
+      )
+      expect(r.kind).toBe("error")
+      if (r.kind === "error") expect(r.cause).toBe("cwd_outside_workspace")
+    } finally {
+      rmSync(jailRoot, { recursive: true, force: true })
+    }
+  })
+})
+
 // ─── (d) spawn_agent — fail-CLOSED caps ─────────────────────────────────────
 
 describe("HELLGATE (d) — spawn_agent caps are fail-closed when knobs omitted", () => {
@@ -152,6 +219,32 @@ describe("HELLGATE (d) — spawn_agent caps are fail-closed when knobs omitted",
       { runner: neverRunner, registry, parentDepth: DEFAULT_MAX_DEPTH - 1 },
     )
     expect(r.kind).toBe("success")
+  })
+
+  test("model input.maxDepth may only TIGHTEN — it cannot raise the host cap", async () => {
+    // Hole: `input.maxDepth ?? deps.maxDepth ?? DEFAULT` let a hostile/
+    // hallucinated model raise the ceiling. Host cap=3, parentDepth=3 ⇒ child
+    // depth=4. A model passing maxDepth=99 must STILL be denied at the host's 3.
+    const registry = new TaskRegistry()
+    const r = await handleSpawnAgent(
+      { prompt: "fan out deep", maxDepth: 99 },
+      { runner: neverRunner, registry, maxDepth: 3, parentDepth: 3 },
+    )
+    expect(r.kind).toBe("error")
+    if (r.kind === "error") expect(r.cause).toBe("depth_exceeded")
+    expect(registry.pendingIds().length).toBe(0)
+  })
+
+  test("model input.maxDepth CAN tighten below the host cap", async () => {
+    // The min() must still let the model shrink its own budget: host cap=5,
+    // model maxDepth=1, parentDepth=1 ⇒ child depth=2 > model's 1 ⇒ denied.
+    const registry = new TaskRegistry()
+    const r = await handleSpawnAgent(
+      { prompt: "self-limit", maxDepth: 1 },
+      { runner: neverRunner, registry, maxDepth: 5, parentDepth: 1 },
+    )
+    expect(r.kind).toBe("error")
+    if (r.kind === "error") expect(r.cause).toBe("depth_exceeded")
   })
 
   test("concurrency is OPT-IN: absent maxConcurrent ⇒ unbounded (byte-identical default)", async () => {

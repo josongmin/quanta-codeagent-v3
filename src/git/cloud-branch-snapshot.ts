@@ -71,6 +71,25 @@ export interface FileLockPort {
 }
 
 /**
+ * Byte-sizing port for UNTRACKED files. The snapshot stashes with `-u`
+ * (untracked included), so the dirty-tree size cap MUST size untracked content
+ * too — sizing only the tracked diff lets a huge untracked tree defeat the cap
+ * (the exact push-minutes block the cap exists to prevent).
+ *
+ * Contract: `sizeOf(absPath)` returns the file's byte length, or `null` if the
+ * path cannot be sized (missing / not a regular file / permission). A `null` is
+ * a PROBE GAP — the caller fails CLOSED (cannot bound ⇒ treat as over-cap),
+ * never assumes zero. Production binds a `Bun.file(p).size` impl; tests pass a
+ * Map.
+ *
+ * When `opts.fileStatPort` is omitted AND the tree has untracked rows, the
+ * size cannot be bounded for those rows, so the caller ALSO fails closed.
+ */
+export interface FileStatPort {
+  sizeOf(absPath: string): Promise<number | null>
+}
+
+/**
  * Inject a clock for branch-name minting determinism. Mirrors
  * `agent/admissibility-gate.ts` style: `(opts.now ?? Date.now)()`. The clock
  * value flows into the branch slug — tests pin a known value to assert the
@@ -84,6 +103,9 @@ export interface SnapshotOpts {
   readonly gitPort: GitProcessPort
   readonly clockPort: SnapshotClock
   readonly fileLockPort: FileLockPort
+  /** Sizes UNTRACKED files for the dirty-tree cap. Omitting it while the tree
+   *  has untracked (`??`) rows is a probe gap ⇒ the size cap fails CLOSED. */
+  readonly fileStatPort?: FileStatPort
   readonly repoCwd: string
   readonly branchPrefix?: string
   readonly pushRemote?: string
@@ -233,13 +255,17 @@ const runSnapshot = async (opts: ResolvedOpts): Promise<SnapshotResult> => {
     throw new SnapshotErrorThrown({ kind: "no-dirty-changes" })
   }
 
-  // 4. Size pre-check. `git diff HEAD --numstat` reports the +/- line counts;
-  //    for unconvertible binaries we estimate per +/- line for safety. We
-  //    deliberately use a CHEAP upper-bound — going over the cap is the failure
-  //    mode worth catching EARLY. If the probe ITSELF fails we cannot bound the
-  //    tree, so we fail CLOSED (reason: estimate-unavailable) rather than
-  //    assume small and let the cap be defeated.
-  const estimate = await estimateDirtyBytes(opts)
+  // 4. Size pre-check. `git diff HEAD --numstat` reports the +/- line counts
+  //    for TRACKED changes; we estimate per +/- line for safety. But the
+  //    snapshot stashes with `-u`, so UNTRACKED files are pushed too — we MUST
+  //    size them as well (the `??` rows of the porcelain status already fetched
+  //    above) or a huge untracked tree defeats the cap. We deliberately use a
+  //    CHEAP upper-bound — going over the cap is the failure mode worth catching
+  //    EARLY. If EITHER probe cannot bound the tree (tracked-diff error, or an
+  //    untracked file that cannot be stat'd / no stat port), we fail CLOSED
+  //    (reason: estimate-unavailable) rather than assume small and let the cap
+  //    be defeated.
+  const estimate = await estimateDirtyBytes(opts, status.stdout)
   // Fail CLOSED: a probe failure means we CANNOT bound the dirty-tree size, so
   // we must NOT assume it's small (that would defeat the cap for exactly the
   // pathological trees the cap exists to reject). Treat it as over-cap.
@@ -452,10 +478,16 @@ const findStashIndex = (raw: string, needle: string): number | undefined => {
 
 type DirtyEstimate = { ok: true; bytes: number } | { ok: false; stderr: string }
 
-const estimateDirtyBytes = async (opts: ResolvedOpts): Promise<DirtyEstimate> => {
-  // `git diff HEAD --numstat -- .` returns `<added>\t<deleted>\t<path>` per
-  // file (`-` for binary). We sum line counts and apply a generous-per-line
-  // budget; the cap is an UPPER bound so over-estimation is fine.
+const BYTES_PER_LINE_UPPER_BOUND = 200
+
+const estimateDirtyBytes = async (
+  opts: ResolvedOpts,
+  porcelainStatus: string,
+): Promise<DirtyEstimate> => {
+  // (a) TRACKED diff. `git diff HEAD --numstat -- .` returns
+  // `<added>\t<deleted>\t<path>` per file (`-` for binary). We sum line counts
+  // and apply a generous-per-line budget; the cap is an UPPER bound so
+  // over-estimation is fine.
   const res = await opts.gitPort.run(
     ["diff", "HEAD", "--numstat", "--", "."],
     opts.repoCwd,
@@ -477,8 +509,88 @@ const estimateDirtyBytes = async (opts: ResolvedOpts): Promise<DirtyEstimate> =>
     if (Number.isFinite(added)) totalLines += added
     if (Number.isFinite(deleted)) totalLines += deleted
   }
-  const BYTES_PER_LINE_UPPER_BOUND = 200
-  return { ok: true, bytes: totalLines * BYTES_PER_LINE_UPPER_BOUND }
+  const trackedBytes = totalLines * BYTES_PER_LINE_UPPER_BOUND
+
+  // (b) UNTRACKED files. `stash -u` pushes these too, but `git diff HEAD` never
+  // reports them — sizing only the tracked diff is the hole. We size each `??`
+  // row of the porcelain status (already fetched, no extra git call) via the
+  // stat port. ANY untracked row we cannot bound (no stat port, quoted path we
+  // refuse to unescape, or a null stat) is a probe gap ⇒ fail CLOSED.
+  const untracked = await estimateUntrackedBytes(opts, porcelainStatus)
+  if (!untracked.ok) return untracked
+
+  return { ok: true, bytes: trackedBytes + untracked.bytes }
+}
+
+/**
+ * Sum the byte size of untracked (`??`) entries from porcelain v1 status.
+ * Fail CLOSED whenever a row cannot be bounded so the cap can't be defeated by
+ * an untracked tree.
+ */
+const estimateUntrackedBytes = async (
+  opts: ResolvedOpts,
+  porcelainStatus: string,
+): Promise<DirtyEstimate> => {
+  const paths = parseUntrackedPaths(porcelainStatus)
+  if (paths.length === 0) return { ok: true, bytes: 0 }
+
+  // There ARE untracked rows to size but no port to size them ⇒ probe gap.
+  if (opts.fileStatPort === undefined) {
+    return {
+      ok: false,
+      stderr: "untracked files present but no fileStatPort to bound their size",
+    }
+  }
+
+  let bytes = 0
+  for (const p of paths) {
+    if (p.quoted) {
+      // Porcelain quotes paths containing special bytes with C-style escapes.
+      // We refuse to mis-unescape (a wrong path would stat the wrong/no file
+      // and silently under-count) ⇒ fail closed for this tree.
+      return { ok: false, stderr: `untracked path is quoted, cannot safely size: ${p.path}` }
+    }
+    checkAbort(opts.abortSignal, "status")
+    const abs = joinRepoPath(opts.repoCwd, p.path)
+    const size = await opts.fileStatPort.sizeOf(abs)
+    if (size === null || !Number.isFinite(size) || size < 0) {
+      return { ok: false, stderr: `cannot size untracked file: ${p.path}` }
+    }
+    bytes += size
+  }
+  return { ok: true, bytes }
+}
+
+type UntrackedPath = { path: string; quoted: boolean }
+
+/**
+ * Extract untracked paths from porcelain v1 status. Untracked rows are
+ * `?? <path>` (a directory of untracked files collapses to `?? dir/`, which a
+ * stat of the directory must reject as non-regular ⇒ fail closed). A path may
+ * be double-quoted when it contains special bytes; we flag those rather than
+ * risk a wrong unescape.
+ */
+const parseUntrackedPaths = (porcelainStatus: string): UntrackedPath[] => {
+  const out: UntrackedPath[] = []
+  for (const line of porcelainStatus.split("\n")) {
+    if (!line.startsWith("?? ")) continue
+    const rest = line.slice(3)
+    if (rest.length === 0) continue
+    if (rest.startsWith('"')) {
+      out.push({ path: rest, quoted: true })
+    } else {
+      out.push({ path: rest, quoted: false })
+    }
+  }
+  return out
+}
+
+/** Join a relative porcelain path onto the repo cwd with a single separator.
+ *  Slice-local (no node:path import in this pure lib slice's hot path needed). */
+const joinRepoPath = (cwd: string, rel: string): string => {
+  const base = cwd.endsWith("/") ? cwd.slice(0, -1) : cwd
+  const leaf = rel.startsWith("/") ? rel.slice(1) : rel
+  return `${base}/${leaf}`
 }
 
 /** UTC-stamp branch slugs are stable across timezones. Format
@@ -493,6 +605,15 @@ const formatTimestamp = (ms: number): string => {
   const ss = d.getUTCSeconds().toString().padStart(2, "0")
   return `${yyyy}${mm}${dd}${hh}${mi}${ss}`
 }
+
+/** In-memory file-stat impl — for tests. Maps absolute path ⇒ byte size; an
+ *  unmapped path returns `null` (probe gap ⇒ caller fails closed). */
+export const createInMemoryFileStat = (sizes: ReadonlyMap<string, number>): FileStatPort => ({
+  sizeOf: async (absPath) => {
+    const v = sizes.get(absPath)
+    return v === undefined ? null : v
+  },
+})
 
 /** In-memory file-lock impl — for tests and ephemeral process use cases. */
 export const createInMemoryFileLock = (): FileLockPort => {

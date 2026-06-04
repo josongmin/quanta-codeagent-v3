@@ -61,7 +61,21 @@ export const defaultResponsesContinuationStore = (
     },
 
     markResumeUnsupported(routeKey) {
+      // Re-insert at the tail so insertion order tracks recency (a Set preserves
+      // insertion order; deleting + re-adding moves an existing key to the end).
+      if (unsupportedResumeRoutes.has(routeKey)) unsupportedResumeRoutes.delete(routeKey)
       unsupportedResumeRoutes.add(routeKey)
+      // Bound the marker Set INDEPENDENTLY of store membership. The store-side
+      // lockstep eviction (evictIfOver) only trims markers whose routeKey is
+      // also evicted from `store` — but a route can be marked unsupported while
+      // never put() into the store (or cleared right after), so without this cap
+      // the Set grows without bound on long-lived processes. Trim the oldest
+      // (insertion-order head) markers using the SAME maxEntries cap as `store`.
+      while (unsupportedResumeRoutes.size > maxEntries) {
+        const oldestMarker = unsupportedResumeRoutes.values().next().value
+        if (oldestMarker === undefined) break
+        unsupportedResumeRoutes.delete(oldestMarker)
+      }
     },
 
     put(entry) {

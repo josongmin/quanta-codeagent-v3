@@ -166,18 +166,14 @@ export class HttpSseMcpTransport implements McpTransport {
       return new Error(`mcp server "${this.name}" transport unavailable: closed`)
     }
     const requestId = extractRequestId(payload)
-    void this.post(payload).catch((e) => {
+    void this.post(payload, requestId).catch((e) => {
       const detail = errMessage(e)
       logger.warn("mcp: http POST failed", { server: this.name, error: detail })
       // Correlated prompt-fail: a connection-level failure on a REQUEST rejects
       // its pending entry now, not at timeout. Synthesize the wire error the
       // server would have returned so the client's existing error path runs.
       if (requestId !== undefined) {
-        this.emitMessage({
-          jsonrpc: "2.0",
-          id: requestId,
-          error: { code: -32000, message: `transport POST failed: ${detail}` },
-        })
+        this.rejectPending(requestId, `transport POST failed: ${detail}`)
       }
     })
     return null
@@ -219,7 +215,23 @@ export class HttpSseMcpTransport implements McpTransport {
     return headers
   }
 
-  private async post(payload: McpTransportPayload): Promise<void> {
+  /** Synthesize the JSON-RPC error envelope the server would have returned and
+   *  route it through the same pump `onMessage` feeds, so the client's pending
+   *  entry for `requestId` rejects PROMPTLY (not at per-request timeout). Both
+   *  the connection-level POST failure and the HTTP non-2xx path use this so the
+   *  two siblings emit an identical wire shape (id + code -32000). */
+  private rejectPending(requestId: number | string, message: string): void {
+    this.emitMessage({
+      jsonrpc: "2.0",
+      id: requestId,
+      error: { code: -32000, message },
+    })
+  }
+
+  private async post(
+    payload: McpTransportPayload,
+    requestId?: number | string,
+  ): Promise<void> {
     // T01 (audit L9 H12): each POST gets a tracked AbortController so `close()`
     // can sever the request + any SSE body it is draining. The signal is wired
     // into both the fetch AND `consumeSseBody`'s reader.
@@ -244,6 +256,19 @@ export class HttpSseMcpTransport implements McpTransport {
 
       if (!res.ok) {
         logger.warn("mcp: http POST non-2xx", { server: this.name, status: res.status })
+        // Sibling of the connection-level fast-fail: a server HTTP non-2xx
+        // (e.g. 500) to a REQUEST-bearing POST has no response body to deliver
+        // the awaited reply, so the pending entry would otherwise wait the FULL
+        // per-request timeout. Synthesize the SAME JSON-RPC error envelope the
+        // send() .catch() builds (id + code -32000, message incl the HTTP
+        // status) so the client's existing error path rejects it PROMPTLY. A
+        // notification (no id) has no pending entry, so it stays a warn.
+        if (requestId !== undefined) {
+          this.rejectPending(requestId, `transport POST failed: HTTP ${res.status}`)
+        }
+        // Drain/discard the body so the socket can be released rather than left
+        // half-read behind an error response.
+        await this.drainBody(res.body)
         return
       }
 
@@ -313,6 +338,18 @@ export class HttpSseMcpTransport implements McpTransport {
       return
     }
     await this.consumeSseBody(res.body, abort.signal)
+  }
+
+  /** Discard a response body (error path) so the underlying socket is released
+   *  rather than left half-read. Best-effort: cancelling the stream is enough to
+   *  free it; any cancel error is irrelevant on an already-failed exchange. */
+  private async drainBody(body: ReadableStream<Uint8Array> | null): Promise<void> {
+    if (body === null) return
+    try {
+      await body.cancel()
+    } catch {
+      // The exchange already failed; a cancel error changes nothing.
+    }
   }
 
   /** Read an SSE byte stream, splitting on blank-line event boundaries and

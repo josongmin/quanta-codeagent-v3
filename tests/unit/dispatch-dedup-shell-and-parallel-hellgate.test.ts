@@ -27,7 +27,14 @@
  *     FAILS.
  */
 import { describe, expect, test } from "bun:test"
+import { z } from "zod"
+import type { AgentConfig } from "@/agent"
+import { dispatchTool } from "@/agent/dispatch"
 import { DedupGate, type ShellCommandExtractor } from "@/agent/dispatch-dedup"
+import type { ToolUseBlock } from "@/llm"
+import type { PermissionContext } from "@/permission"
+import type { Tool, ToolEvent } from "@/tool"
+import { ToolRegistry } from "@/tool"
 
 /** Canonical registry-style extractor: resolves a `command` field for the
  *  shell-equivalent tools and `null` for everything else — exactly the shape
@@ -83,6 +90,143 @@ describe("dedup #15 — env brake follows registry.extractShellCommand, not the 
     const v = g.record("shell", { command: "pip install c" }, 3)
     expect(v.blocked).toBe(true)
     if (v.blocked) expect(v.regime).toBe("env")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #15-wire — the PRODUCTION dispatch seam must thread the registry's
+// `extractShellCommand` into `gate.record(...)`. The unit tests above prove
+// `DedupGate.record` HONORS a supplied extractor, but they hand it in directly
+// and therefore say NOTHING about whether `consultDedupGate` in `dispatch.ts`
+// actually passes it. The original incomplete fix left the seam calling
+// `gate.record(call.name, call.input, turn)` with NO extractor — so in
+// production a non-`bash` shell tool fell back to the built-in `command`-field
+// probe, and a shell tool that carries its command under a DIFFERENT field name
+// (the registry's `extractShellCommand` knows it; the built-in probe does not)
+// silently sidestepped the env brake.
+//
+// This closes that hole at the real seam. The `shell` tool below declares
+// `extractShellCommand` reading a NON-`command` field (`script`), so:
+//   - With the wire (fixed): the registry extractor resolves the command ⇒
+//     env regime ⇒ braked at the 3rd distinct turn ⇒ preview "dedup-gate-env".
+//   - Without the wire (holed): the gate falls back to the built-in probe,
+//     which only reads `command` and returns null for `{script}` ⇒ general
+//     regime, exact-args keyed ⇒ THREE DIFFERENT spellings are three distinct
+//     buckets ⇒ NONE reaches threshold ⇒ no block. The `toBe(false)` on the
+//     "is wired" assertion FAILS against the holed code — ANTI-THEATER proven.
+// ---------------------------------------------------------------------------
+const wireShellTool: Tool = {
+  name: "shell",
+  description: "shell-equivalent tool whose command lives under `script`",
+  // The command field is `script`, NOT `command` — so the built-in fallback
+  // probe (which only reads `command`) cannot resolve it. Only the registry's
+  // `extractShellCommand` can, which is exactly the production wire under test.
+  inputSchema: z.object({ script: z.string() }) as z.ZodType<unknown>,
+  isReadOnly: () => false,
+  isConcurrencySafe: () => false,
+  extractShellCommand: (input) => (input as { script: string }).script,
+  execute: async function* (): AsyncIterable<ToolEvent> {
+    yield { type: "result", result: { ok: true, output: "shell-ran" } } satisfies ToolEvent
+  },
+}
+
+const wireCall = (script: string, id: string): ToolUseBlock => ({
+  type: "tool_use",
+  id,
+  name: "shell",
+  input: { script },
+})
+
+const wirePerm: PermissionContext = { mode: "acceptEdits" }
+
+const wireCfg = (gate: DedupGate, turn: number): AgentConfig =>
+  ({
+    registry: new ToolRegistry([wireShellTool]),
+    cwd: "/tmp",
+    signal: new AbortController().signal,
+    permission: { mode: "acceptEdits" } as PermissionContext,
+    dedupGate: gate,
+    run: { runId: "wire-test", turn },
+  }) as AgentConfig
+
+describe("dedup #15-wire — production dispatch seam threads registry.extractShellCommand", () => {
+  test("a non-bash shell tool (command under `script`) hits the env brake via dispatchTool", async () => {
+    // ONE gate across the run; the loop bumps `run.turn` each turn.
+    const gate = new DedupGate()
+    // Turn 1 + 2: env regime, below threshold ⇒ executes.
+    const r1 = await dispatchTool(
+      wireCall("pip install setuptools", "w1"),
+      wireCfg(gate, 1),
+      wirePerm,
+    )
+    const r2 = await dispatchTool(
+      wireCall("apt-get install python3-distutils", "w2"),
+      wireCfg(gate, 2),
+      wirePerm,
+    )
+    expect(r1.ok).toBe(true)
+    expect(r1.preview).toBe("shell-ran")
+    expect(r2.ok).toBe(true)
+    expect(r2.preview).toBe("shell-ran")
+
+    // Turn 3: THREE distinct env spellings (all DIFFERENT exact args) now reach
+    // the env single-bucket threshold (3). The brake fires ONLY because the
+    // wire routed the `script` field through the registry extractor into the env
+    // regime — the built-in fallback would have returned null and kept these in
+    // the general regime as three distinct (never-blocked) buckets.
+    const r3 = await dispatchTool(
+      wireCall("brew install python@3", "w3"),
+      wireCfg(gate, 3),
+      wirePerm,
+    )
+    // `consultDedupGate` short-circuits with a synthetic NON-ERROR tool_result;
+    // the preview tag is `dedup-gate-<regime>`. Env regime is the proof the wire
+    // fired (general would be `dedup-gate-general`, which the holed code could
+    // never even reach here because the three buckets stay distinct).
+    expect(r3.ok).toBe(true)
+    expect(r3.preview).toBe("dedup-gate-env")
+    expect(r3.block.content).toContain("environment-modifying commands")
+  })
+
+  test("a genuinely non-shell tool stays in the general regime through the seam (no over-block)", async () => {
+    // NO-OVER-CORRECTION: the wire must not turn every tool into env regime. A
+    // `read`-shaped tool (no `extractShellCommand`) repeated across turns is the
+    // GENERAL regime (exact-args keyed, threshold 3) — env brake never applies.
+    const readTool: Tool = {
+      name: "read",
+      description: "read tool",
+      inputSchema: z.object({ path: z.string() }) as z.ZodType<unknown>,
+      isReadOnly: () => true,
+      isConcurrencySafe: () => true,
+      execute: async function* (): AsyncIterable<ToolEvent> {
+        yield { type: "result", result: { ok: true, output: "data" } } satisfies ToolEvent
+      },
+    }
+    const gate = new DedupGate()
+    const cfg = (turn: number): AgentConfig =>
+      ({
+        registry: new ToolRegistry([readTool]),
+        cwd: "/tmp",
+        signal: new AbortController().signal,
+        permission: { mode: "acceptEdits" } as PermissionContext,
+        dedupGate: gate,
+        run: { runId: "wire-test", turn },
+      }) as AgentConfig
+    const mk = (id: string): ToolUseBlock => ({
+      type: "tool_use",
+      id,
+      name: "read",
+      input: { path: "/x.py" },
+    })
+    const a = await dispatchTool(mk("r1"), cfg(1), wirePerm)
+    const b = await dispatchTool(mk("r2"), cfg(2), wirePerm)
+    const c = await dispatchTool(mk("r3"), cfg(3), wirePerm)
+    expect(a.ok).toBe(true)
+    expect(b.ok).toBe(true)
+    // EXACT-same args three distinct turns ⇒ general threshold 3 ⇒ braked, but
+    // as GENERAL (not env) — proving the wire did not mis-route a non-shell tool.
+    expect(c.ok).toBe(true)
+    expect(c.preview).toBe("dedup-gate-general")
   })
 })
 

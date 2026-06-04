@@ -24,13 +24,21 @@
  * permission types. No CLI, no apps wiring.
  */
 
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { z } from "zod"
 import type { AgentConfig } from "@/agent"
 import { HookBus } from "@/agent"
 import { type AdmissibilityAction, runAdmissibilityGate } from "@/agent/admissibility-gate"
 import type { ToolUseBlock } from "@/llm"
-import type { HITLTier, PermissionContext } from "@/permission"
+import {
+  createPermissionStore,
+  type HITLTier,
+  type PermissionContext,
+  type PermissionStore,
+} from "@/permission"
 import { RulesStore } from "@/rules"
 import type { DecisionEmitter, DecisionEvent } from "@/stream"
 import type { Tool, ToolEvent } from "@/tool"
@@ -589,5 +597,140 @@ describe("ADR-0267 invariants", () => {
     })
     const ev = cap.events().find((e) => e.kind === "rule")
     expect(ev?.turn).toBe(7)
+  })
+})
+
+// ── H12 — emit-once at the permission-stack fall-through seam ──────────────
+//
+// HOLE (INCOMPLETE): the policy.ts `evaluateStack` emit-once fix is defeated
+// ONE LAYER UP at the gate seam. When `config.permissionStack.enabled` is on
+// AND the stack has no opinion (brand-new store, never-pinned host, no per-
+// thread record), `evaluateStack` returns `ask` → `runPermissionStack` USED to
+// emit a `kind:"permission"` "stack ask → fall through" DecisionEvent AND then
+// the gate fell through to `runModePolicy`, which emits the SAME global-default
+// verdict AGAIN. Result: ONE logical global-default decision → TWO
+// `decisionEmitter` increments (2x over-count on a dashboard, exactly the P3
+// double-count defect the policy.ts fix closed at the lower layer).
+//
+// FIX: the `ask`/fall-through arm of `runPermissionStack` emits NOTHING; only
+// the terminal `allow`/`deny` arms (where the stack itself is the authority)
+// emit. The single canonical emit then comes from `runModePolicy`.
+//
+// ANTI-THEATER: against the still-holed code (an `emitGateDecision` on the
+// `ask` arm) the `permEvents.length` assertion below sees 2 and FAILS. Verified
+// by temporarily re-adding the fall-through emit during development — the count
+// jumps to 2 and the `outcome === "ask"` / `reason` of the spurious row trips
+// the assertion. The VALUE is unchanged in both branches (still an `ask`
+// global-default verdict), so this guards COUNT, not decision.
+describe("H12 emit-once: permission-stack global-default fall-through", () => {
+  let tmp: string
+  let store: PermissionStore
+
+  beforeEach(async () => {
+    tmp = await mkdtemp(join(tmpdir(), "quanta-h12-emit-once-"))
+    store = createPermissionStore({ filePath: join(tmp, "state.json"), debounceMs: 0 })
+    await store.load()
+  })
+
+  afterEach(async () => {
+    await store.flush()
+    await rm(tmp, { recursive: true, force: true })
+  })
+
+  test("stack enabled + global-default fall-through ⇒ EXACTLY ONE permission emit", async () => {
+    const write = makeTool("write")
+    const cap = collector()
+    const c = cfg({
+      registry: new ToolRegistry([write]),
+      // mutating tool under `default` mode + no onConfirm ⇒ the global-default
+      // verdict is `ask` (declined for lack of a handler). The stack is enabled
+      // but the store is brand-new + the host never pinned + no per-thread
+      // record, so `evaluateStack` returns `ask` and the gate falls through.
+      permission: { mode: "default" },
+      sessionId: "thread-h12",
+      permissionStack: { enabled: true, hostId: "host-never-pinned-h12" },
+      decisionEmitter: cap.emitter,
+    })
+    const u = call("write", { path: "a.txt" }, "tc_h12_once")
+    const res = await runAdmissibilityGate(u, c, c.permission, actionOf(write), undefined, {
+      permissionStore: store,
+    })
+    // Value unchanged: a mutating write under `default` with no onConfirm is
+    // still declined (the global-default ASK with no handler → deny envelope).
+    expect(res).not.toBe(null)
+    const permEvents = cap.events().filter((e) => e.kind === "permission")
+    // EXACTLY ONE — the holed code emitted the stack `ask` line AND the mode-
+    // policy `ask` line (length 2). With the fix only the canonical mode-policy
+    // emit fires.
+    expect(permEvents.length).toBe(1)
+    expect(permEvents[0]?.outcome).toBe("ask")
+    expect(permEvents[0]?.toolCallId).toBe("tc_h12_once")
+    // No spurious "stack ask → fall through" row leaked through.
+    expect(permEvents.some((e) => e.reason === "stack ask → fall through")).toBe(false)
+  })
+
+  test("aggregate: N stack-fall-through calls ⇒ exactly N permission emits (no 2x inflation)", async () => {
+    const write = makeTool("write")
+    const cap = collector()
+    const N = 4
+    for (let i = 0; i < N; i++) {
+      const c = cfg({
+        registry: new ToolRegistry([write]),
+        permission: { mode: "default" },
+        sessionId: `thread-h12-${i}`,
+        permissionStack: { enabled: true, hostId: `host-unpinned-h12-${i}` },
+        decisionEmitter: cap.emitter,
+      })
+      await runAdmissibilityGate(
+        call("write", { path: `f${i}.txt` }, `tc_h12_agg_${i}`),
+        c,
+        c.permission,
+        actionOf(write, { path: `f${i}.txt` }),
+        undefined,
+        { permissionStore: store },
+      )
+    }
+    const permEvents = cap.events().filter((e) => e.kind === "permission")
+    // The holed code yields 2N; the invariant is exactly N.
+    expect(permEvents.length).toBe(N)
+    expect(permEvents.every((e) => e.outcome === "ask")).toBe(true)
+  })
+
+  test("terminal stack DENY still emits its ONE canonical permission row (regression fence)", async () => {
+    // The fix must NOT silence the terminal arms. A per-thread read-only record
+    // makes the stack DENY a mutating call (it short-circuits — no fall-through,
+    // no mode-policy emit), so exactly ONE permission deny row is expected.
+    const { setThreadPermission } = await import("@/permission")
+    const write = makeTool("write")
+    setThreadPermission(
+      "thread-h12-deny",
+      {
+        approvalPolicy: "never",
+        approvalsReviewer: "agent",
+        sandboxPolicy: { type: "read-only" },
+      },
+      store,
+    )
+    const cap = collector()
+    const c = cfg({
+      registry: new ToolRegistry([write]),
+      permission: { mode: "bypass" },
+      sessionId: "thread-h12-deny",
+      permissionStack: { enabled: true, hostId: "host-h12-deny" },
+      decisionEmitter: cap.emitter,
+    })
+    const res = await runAdmissibilityGate(
+      call("write", { path: "x.txt" }, "tc_h12_deny"),
+      c,
+      c.permission,
+      actionOf(write, { path: "x.txt" }),
+      undefined,
+      { permissionStore: store },
+    )
+    expect(res).not.toBe(null)
+    const permEvents = cap.events().filter((e) => e.kind === "permission")
+    expect(permEvents.length).toBe(1)
+    expect(permEvents[0]?.outcome).toBe("deny")
+    expect(permEvents[0]?.toolCallId).toBe("tc_h12_deny")
   })
 })

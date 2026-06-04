@@ -311,9 +311,18 @@ export const handleExecCommand = async (
   // (c) Path jail — confine the model-supplied cwd to the session workspace
   // BEFORE spawning. When the port is wired, an escaping cwd is rejected
   // fail-closed (the jail's `resolve` throws). Absent ⇒ no jail (legacy).
+  //
+  // Hole-fix: the jail must determine the cwd the child ACTUALLY runs in, not
+  // merely validate-then-discard. A RELATIVE `input.cwd` (e.g. "../escape")
+  // resolves against the jailRoot here, but Bun.spawn resolves a relative cwd
+  // against `process.cwd()` — so when process.cwd() != jailRoot the raw value
+  // would execute OUTSIDE the workspace even after passing the check. We bind
+  // the spawn `cwd` to the JAILED absolute path so the validated path is the
+  // executed path. No jail wired ⇒ raw `input.cwd` (byte-identical legacy).
+  let spawnCwd: string = input.cwd
   if (deps.cwdJail !== undefined) {
     try {
-      deps.cwdJail.resolve(input.cwd, deps.cwdJail.jailRoot)
+      spawnCwd = deps.cwdJail.resolve(input.cwd, deps.cwdJail.jailRoot)
     } catch (e: unknown) {
       return errExec(
         `Refusing to run in cwd outside the workspace: ${errMessage(e)}`,
@@ -336,7 +345,7 @@ export const handleExecCommand = async (
   let proc: Subprocess<"pipe", "pipe", "pipe">
   try {
     proc = Bun.spawn(["bash", "-lc", input.command], {
-      cwd: input.cwd,
+      cwd: spawnCwd,
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
@@ -517,7 +526,16 @@ export const handleSpawnAgent = async (
   // (d) Fail-CLOSED depth cap: when neither the per-call nor the dep-level
   // `maxDepth` is supplied, fall back to the built-in `DEFAULT_MAX_DEPTH`
   // (mirrors the runner) instead of running unbounded recursion.
-  const cap = input.maxDepth ?? deps.maxDepth ?? DEFAULT_MAX_DEPTH
+  //
+  // Hole-fix: the model-supplied `input.maxDepth` may only TIGHTEN the host
+  // ceiling, never RAISE it. The prior `??` chain let a hostile/hallucinated
+  // `input.maxDepth:99` override a host `deps.maxDepth:3`, fanning out 33x
+  // deeper than the host allowed. We `Math.min` the model request against the
+  // host cap (`deps.maxDepth ?? DEFAULT_MAX_DEPTH`) so the effective cap is the
+  // STRICTER of the two — the model can shrink its own budget but the host
+  // ceiling is binding.
+  const hostCap = deps.maxDepth ?? DEFAULT_MAX_DEPTH
+  const cap = Math.min(input.maxDepth ?? Number.POSITIVE_INFINITY, hostCap)
   if (childDepth > cap) {
     return errSpawn(
       `Subagent denied: depth ${childDepth} exceeds maxDepth ${cap}`,

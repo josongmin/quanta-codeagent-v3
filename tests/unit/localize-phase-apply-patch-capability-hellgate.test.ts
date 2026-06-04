@@ -37,6 +37,28 @@ describe("localize-phase apply_patch escape (finding #10)", () => {
     expect(MUTATING_TOOL_NAMES.has("apply_patch")).toBe(true)
   })
 
+  // SIBLING-PATH HOLE (audit #10 follow-up): the original fix added only
+  // "apply_patch" and missed apply_patch_structured (src/tool/apply-patch-
+  // structured-tool.ts, name "apply_patch_structured", isReadOnly:()=>false) —
+  // the registered structured-op variant that mutates the FS the same way. It
+  // escaped Phase-1 localization. ANTI-THEATER: against the still-holed set
+  // (apply_patch_structured absent) this returns {block:false} and FAILS.
+  test("apply_patch_structured is BLOCKED during Phase 1 (sibling escape)", () => {
+    expect(
+      decideLocalizePhase({ toolName: "apply_patch_structured", state: PHASE1_STATE, cfg: CFG }).block,
+    ).toBe(true)
+  })
+
+  test("apply_patch_structured is in the closed MUTATING_TOOL_NAMES set", () => {
+    expect(MUTATING_TOOL_NAMES.has("apply_patch_structured")).toBe(true)
+  })
+
+  test("apply_patch_structured passes in Phase 2 (block is phase-scoped, not a blanket ban)", () => {
+    expect(
+      decideLocalizePhase({ toolName: "apply_patch_structured", state: PHASE2_STATE, cfg: CFG }).block,
+    ).toBe(false)
+  })
+
   test("the other registered edit tools stay blocked (no regression)", () => {
     for (const name of ["edit", "write", "scripted_replace"]) {
       expect(decideLocalizePhase({ toolName: name, state: PHASE1_STATE, cfg: CFG }).block).toBe(true)

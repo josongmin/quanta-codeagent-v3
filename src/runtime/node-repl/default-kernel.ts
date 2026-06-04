@@ -415,8 +415,13 @@ interface ReadFail {
 
 /** Read from `reader` until `sentinel` appears in the accumulated text.
  *  Returns the body *before* the sentinel. A timeout returns
- *  `{ ok: false, error }`. */
-const readUntil = async (
+ *  `{ ok: false, error }`.
+ *
+ *  Exported for the timeout-race hellgate: the timer-cleanup-on-reject path
+ *  cannot be driven through a real `node -i` child (its stdout reader does not
+ *  reject mid-wait on demand), so the test injects a `ChunkReader` whose
+ *  `read()` rejects and asserts the bounded race timer is still cleared. */
+export const readUntil = async (
   reader: ChunkReader,
   sentinel: string,
   timeoutMs: number,
@@ -440,18 +445,26 @@ const readUntil = async (
       // abandoned read() settles later when the caller kills the child.
       let chunk: { done: boolean; value?: Uint8Array }
       if (timeoutMs > 0) {
+        // Capture the timer OUTSIDE the try so the `finally` can always cancel
+        // it — including the path where `reader.read()` REJECTS. Clearing only
+        // on the resolve branch would leak the bounded self-expiring timer (a
+        // dangling handle that keeps the loop's event-loop tick alive) every
+        // time the underlying read rejects mid-wait.
         let timer: ReturnType<typeof setTimeout> | undefined
-        const raced = await Promise.race([
-          reader.read(),
-          new Promise<typeof TIMED_OUT>((r) => {
-            timer = setTimeout(() => r(TIMED_OUT), remainingMs)
-          }),
-        ])
-        if (timer !== undefined) clearTimeout(timer)
-        if (raced === TIMED_OUT) {
-          return { ok: false, error: `read timeout after ${timeoutMs}ms` }
+        try {
+          const raced = await Promise.race([
+            reader.read(),
+            new Promise<typeof TIMED_OUT>((r) => {
+              timer = setTimeout(() => r(TIMED_OUT), remainingMs)
+            }),
+          ])
+          if (raced === TIMED_OUT) {
+            return { ok: false, error: `read timeout after ${timeoutMs}ms` }
+          }
+          chunk = raced
+        } finally {
+          if (timer !== undefined) clearTimeout(timer)
         }
-        chunk = raced
       } else {
         chunk = await reader.read()
       }

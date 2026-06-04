@@ -390,6 +390,21 @@ const widerAxis = (result: PermissionProfile, ceiling: PermissionProfile): strin
   if (FS_TYPE_RANK[result.fileSystem.type] < FS_TYPE_RANK[ceiling.fileSystem.type]) {
     return "fileSystem.type"
   }
+  // fileSystem.entries widening: both `restricted` and `managed` FS types are
+  // allow-lists — the ceiling permits EXACTLY the paths/access its entries cover
+  // (absent ⇒ ∅). A result holding ANY entry NOT covered by SOME ceiling entry
+  // grants FS reach the ceiling never permitted, even at the SAME type rank.
+  // Reuse `entryCoveredBy` in the result-entry-must-be-covered direction (same
+  // semantics the merge uses for base→derived intersection). This is the
+  // sibling of the network.allowHosts check above; without it `throw` mode
+  // leaks a wider FS grant and `clamp` mode silently skips clampTo.
+  if (
+    result.fileSystem.entries.some(
+      (re) => !ceiling.fileSystem.entries.some((ce) => entryCoveredBy(re, ce)),
+    )
+  ) {
+    return "fileSystem.entries"
+  }
   if (osSandboxRank(result.sandbox.osSandbox) < osSandboxRank(ceiling.sandbox.osSandbox)) {
     return "sandbox.osSandbox"
   }

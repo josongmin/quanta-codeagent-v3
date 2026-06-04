@@ -245,6 +245,7 @@ describe("localize-phase-guard hellgate (25+ adversarial cases)", () => {
     // explicit fail-closed fallback consulted when no capability is threaded.
     expect([...MUTATING_TOOL_NAMES].sort()).toEqual([
       "apply_patch",
+      "apply_patch_structured",
       "edit",
       "scripted_replace",
       "write",
@@ -447,14 +448,15 @@ describe("decideLocalizePhase — pure policy", () => {
     expect(d.block).toBe(false)
   })
 
-  test("MUTATING_TOOL_NAMES contains exactly {edit, write, scripted_replace, apply_patch}", () => {
-    expect(MUTATING_TOOL_NAMES.size).toBe(4)
+  test("MUTATING_TOOL_NAMES contains exactly {edit, write, scripted_replace, apply_patch, apply_patch_structured}", () => {
+    expect(MUTATING_TOOL_NAMES.size).toBe(5)
     expect(MUTATING_TOOL_NAMES.has("edit")).toBe(true)
     expect(MUTATING_TOOL_NAMES.has("write")).toBe(true)
     expect(MUTATING_TOOL_NAMES.has("scripted_replace")).toBe(true)
-    // apply_patch added (audit #10): a registered write_filesystem tool must not
-    // escape the Phase-1 localization block.
+    // apply_patch + apply_patch_structured added (audit #10 + self-audit H9): the
+    // registered write_filesystem patch tools must not escape the Phase-1 block.
     expect(MUTATING_TOOL_NAMES.has("apply_patch")).toBe(true)
+    expect(MUTATING_TOOL_NAMES.has("apply_patch_structured")).toBe(true)
     // Negative invariants — pinned so a future absent-minded add must update
     // the policy ADR.
     expect(MUTATING_TOOL_NAMES.has("bash")).toBe(false)

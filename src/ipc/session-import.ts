@@ -96,10 +96,15 @@ const isPortableContentBlock = (value: unknown): boolean => {
     case "text":
       return isString(value.text) && (value.phase === undefined || isTextPhase(value.phase))
     case "tool_use":
-      // `input: unknown` is a REQUIRED field on the exporter side; it is always
-      // present (objects on the wire). Reject a tool_use whose input is missing
-      // or not an object so the import is symmetric with the export shape.
-      return isString(value.id) && isString(value.name) && isObject(value.input)
+      // `input` is `z.unknown()` in the canonical store schema (`@/session#store`,
+      // `toolUseBlockSchema.input`) and the exporter passes it through verbatim.
+      // The ONLY invariant the store enforces is presence of the key — its value
+      // may legitimately be a non-object (string / number / null / array) that the
+      // store accepts and round-trips. We must NOT demand an object here, or a
+      // session the store permits would fail re-import (asymmetric the wrong way).
+      // We DO reject a tool_use whose `input` is absent/undefined: the exporter
+      // always emits it, so an absent input signals a malformed / truncated blob.
+      return isString(value.id) && isString(value.name) && value.input !== undefined
     case "tool_result":
       return (
         isString(value.tool_use_id) &&

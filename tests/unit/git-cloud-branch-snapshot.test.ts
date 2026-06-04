@@ -10,6 +10,8 @@
 import { describe, expect, test } from "bun:test"
 import {
   createInMemoryFileLock,
+  createInMemoryFileStat,
+  type FileStatPort,
   type GitProcessPort,
   type GitProcessResult,
   type SnapshotClock,
@@ -154,6 +156,7 @@ describe("ADR-0132 Phase B — happy path", () => {
       gitPort: git.port,
       clockPort: clockAt(0),
       fileLockPort: lock,
+      fileStatPort: createInMemoryFileStat(new Map([["/tmp/repo/new.ts", 42]])),
       repoCwd: "/tmp/repo",
       branchPrefix: "myteam/snap-",
       pushRemote: "fork",
@@ -468,6 +471,183 @@ describe("ADR-0132 Phase B — guards + error paths", () => {
       repoCwd: "/tmp/repo",
     })
     expect(res.branch).toMatch(/^quanta\/cloud-agent-20270105090807-[0-9a-f]{6}$/)
+  })
+
+  // ── HELLGATE: H4 untracked size-cap bypass ──────────────────────────────
+  //
+  // The snapshot stashes with `-u`, so untracked files ARE pushed. The size
+  // cap measured only `git diff HEAD --numstat` (TRACKED only). A huge
+  // UNTRACKED tree therefore slipped past the cap and blocked the loop for
+  // push-minutes — the exact failure the cap exists to prevent. These cases
+  // FAIL against the pre-fix code (which would silently push) and PASS once
+  // untracked content is sized into the total before the cap check.
+
+  test("HELLGATE: untracked bytes alone exceed cap ⇒ diff-too-large (not pushed)", async () => {
+    const statPort: FileStatPort = createInMemoryFileStat(
+      // 600MB single untracked file — TRACKED diff is empty, so ONLY untracked
+      // sizing can catch this. Pre-fix: tracked=0 ⇒ under cap ⇒ pushed.
+      new Map([["/tmp/repo/huge.bin", 600 * 1024 * 1024]]),
+    )
+    const git = fakeGit([
+      { match: (a) => a[0] === "rev-parse" && a[1] === "--git-dir", result: ok(".git") },
+      { match: (a) => a[0] === "symbolic-ref", result: ok("refs/heads/main") },
+      { match: (a) => a[0] === "status", result: ok("?? huge.bin") },
+      // Tracked diff is EMPTY — the hole was that this alone passed the cap.
+      { match: (a) => a[0] === "diff" && a.includes("--numstat"), result: ok("") },
+    ])
+    const lock = createInMemoryFileLock()
+    try {
+      await snapshotDirtyToCloudBranch({
+        gitPort: git.port,
+        clockPort: clockAt(0),
+        fileLockPort: lock,
+        fileStatPort: statPort,
+        repoCwd: "/tmp/repo",
+      })
+      throw new Error("should have thrown diff-too-large")
+    } catch (e) {
+      expect(e).toBeInstanceOf(SnapshotErrorThrown)
+      expect((e as SnapshotErrorThrown).kind).toBe("diff-too-large")
+    }
+    // The cap fired BEFORE any mutation — no branch/stash/push happened.
+    expect(git.calls.find((c) => c.args[0] === "branch" && c.args[1] !== "-D")).toBeUndefined()
+    expect(git.calls.find((c) => c.args[0] === "stash")).toBeUndefined()
+    expect(git.calls.find((c) => c.args[0] === "push")).toBeUndefined()
+  })
+
+  test("HELLGATE: tracked diff under cap but tracked+untracked over cap ⇒ rejected", async () => {
+    // Tracked diff = 100 lines * 200B = 20_000B (under a 25_000B cap). Untracked
+    // adds 10_000B ⇒ total 30_000B > cap. Pre-fix would have pushed.
+    const statPort = createInMemoryFileStat(new Map([["/tmp/repo/extra.dat", 10_000]]))
+    const git = fakeGit([
+      { match: (a) => a[0] === "rev-parse" && a[1] === "--git-dir", result: ok(".git") },
+      { match: (a) => a[0] === "symbolic-ref", result: ok("refs/heads/main") },
+      { match: (a) => a[0] === "status", result: ok(" M tracked.ts\n?? extra.dat") },
+      { match: (a) => a[0] === "diff" && a.includes("--numstat"), result: ok("100\t0\ttracked.ts") },
+    ])
+    const lock = createInMemoryFileLock()
+    try {
+      await snapshotDirtyToCloudBranch({
+        gitPort: git.port,
+        clockPort: clockAt(0),
+        fileLockPort: lock,
+        fileStatPort: statPort,
+        repoCwd: "/tmp/repo",
+        maxDirtyBytes: 25_000,
+      })
+      throw new Error("should have thrown diff-too-large")
+    } catch (e) {
+      expect((e as SnapshotErrorThrown).kind).toBe("diff-too-large")
+    }
+  })
+
+  test("HELLGATE: untracked rows present but NO fileStatPort ⇒ fail CLOSED (estimate-unavailable)", async () => {
+    const git = fakeGit([
+      { match: (a) => a[0] === "rev-parse" && a[1] === "--git-dir", result: ok(".git") },
+      { match: (a) => a[0] === "symbolic-ref", result: ok("refs/heads/main") },
+      { match: (a) => a[0] === "status", result: ok("?? mystery.bin") },
+      { match: (a) => a[0] === "diff" && a.includes("--numstat"), result: ok("") },
+    ])
+    const lock = createInMemoryFileLock()
+    try {
+      await snapshotDirtyToCloudBranch({
+        gitPort: git.port,
+        clockPort: clockAt(0),
+        fileLockPort: lock,
+        repoCwd: "/tmp/repo",
+        // no fileStatPort — untracked size cannot be bounded
+      })
+      throw new Error("should have thrown")
+    } catch (e) {
+      const err = e as SnapshotErrorThrown
+      expect(err.kind).toBe("diff-too-large")
+      if (err.detail.kind === "diff-too-large") {
+        expect(err.detail.reason).toBe("estimate-unavailable")
+      }
+    }
+    expect(git.calls.find((c) => c.args[0] === "push")).toBeUndefined()
+  })
+
+  test("HELLGATE: untracked file the stat port cannot size (null) ⇒ fail CLOSED", async () => {
+    // Empty map ⇒ sizeOf returns null for the path ⇒ probe gap ⇒ fail closed.
+    const statPort = createInMemoryFileStat(new Map())
+    const git = fakeGit([
+      { match: (a) => a[0] === "rev-parse" && a[1] === "--git-dir", result: ok(".git") },
+      { match: (a) => a[0] === "symbolic-ref", result: ok("refs/heads/main") },
+      { match: (a) => a[0] === "status", result: ok("?? vanished.dat") },
+      { match: (a) => a[0] === "diff" && a.includes("--numstat"), result: ok("") },
+    ])
+    const lock = createInMemoryFileLock()
+    try {
+      await snapshotDirtyToCloudBranch({
+        gitPort: git.port,
+        clockPort: clockAt(0),
+        fileLockPort: lock,
+        fileStatPort: statPort,
+        repoCwd: "/tmp/repo",
+      })
+      throw new Error("should have thrown")
+    } catch (e) {
+      const err = e as SnapshotErrorThrown
+      expect(err.kind).toBe("diff-too-large")
+      if (err.detail.kind === "diff-too-large") {
+        expect(err.detail.reason).toBe("estimate-unavailable")
+      }
+    }
+  })
+
+  test("HELLGATE: quoted untracked path ⇒ fail CLOSED (refuse unsafe unescape)", async () => {
+    const statPort = createInMemoryFileStat(new Map([['/tmp/repo/"weird name"', 5]]))
+    const git = fakeGit([
+      { match: (a) => a[0] === "rev-parse" && a[1] === "--git-dir", result: ok(".git") },
+      { match: (a) => a[0] === "symbolic-ref", result: ok("refs/heads/main") },
+      { match: (a) => a[0] === "status", result: ok('?? "weird\\tname.ts"') },
+      { match: (a) => a[0] === "diff" && a.includes("--numstat"), result: ok("") },
+    ])
+    const lock = createInMemoryFileLock()
+    try {
+      await snapshotDirtyToCloudBranch({
+        gitPort: git.port,
+        clockPort: clockAt(0),
+        fileLockPort: lock,
+        fileStatPort: statPort,
+        repoCwd: "/tmp/repo",
+      })
+      throw new Error("should have thrown")
+    } catch (e) {
+      expect((e as SnapshotErrorThrown).kind).toBe("diff-too-large")
+    }
+  })
+
+  test("HELLGATE: small untracked file under cap ⇒ snapshot still succeeds", async () => {
+    // Counterproof: the fix must NOT over-correct — a small untracked tree
+    // still snapshots. 1KB untracked + tiny tracked diff < default cap.
+    const statPort = createInMemoryFileStat(new Map([["/tmp/repo/small.ts", 1024]]))
+    const git = fakeGit([
+      { match: (a) => a[0] === "rev-parse" && a[1] === "--git-dir", result: ok(".git") },
+      { match: (a) => a[0] === "symbolic-ref", result: ok("refs/heads/main") },
+      { match: (a) => a[0] === "status", result: ok(" M file.ts\n?? small.ts") },
+      { match: (a) => a[0] === "diff" && a.includes("--numstat"), result: ok("1\t2\tfile.ts") },
+      { match: (a) => a[0] === "branch" && a[1] !== "-D", result: ok() },
+      { match: (a) => a[0] === "stash" && a[1] === "push", result: ok() },
+      { match: (a) => a[0] === "checkout" && a[1] !== "--force" && a[1] !== "main", result: ok() },
+      { match: (a) => a[0] === "stash" && a[1] === "pop", result: ok() },
+      { match: (a) => a[0] === "add", result: ok() },
+      { match: (a) => a[0] === "commit", result: ok() },
+      { match: (a) => a[0] === "push", result: ok() },
+      { match: (a) => a[0] === "rev-parse" && a[1] === "HEAD", result: ok("feedface") },
+      { match: (a) => a[0] === "checkout" && a[1] === "main", result: ok() },
+    ])
+    const lock = createInMemoryFileLock()
+    const res = await snapshotDirtyToCloudBranch({
+      gitPort: git.port,
+      clockPort: clockAt(0),
+      fileLockPort: lock,
+      fileStatPort: statPort,
+      repoCwd: "/tmp/repo",
+    })
+    expect(res.sha).toBe("feedface")
+    expect(git.calls.find((c) => c.args[0] === "push")).toBeDefined()
   })
 
   test("HARD_DENY invariant — no argv ever contains `--force` (lease-only)", async () => {

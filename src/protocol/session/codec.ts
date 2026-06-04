@@ -91,6 +91,44 @@ const assertOptionalString = (value: Record<string, unknown>, kind: string, key:
   }
 }
 
+/** Assert a required field is a plain object (non-null, non-array). The
+ *  snapshot's `state`/`capabilities` carry the entire session view; a scalar
+ *  or array there silently corrupts every downstream consumer that reads
+ *  nested keys, so fail closed. */
+const assertObjectField = (value: Record<string, unknown>, kind: string, key: string): void => {
+  if (!(key in value)) throw new SessionProtocolValidationError(`missing_${kind}_${key}`)
+  const v = value[key]
+  if (v === null || typeof v !== "object" || Array.isArray(v)) {
+    throw new SessionProtocolValidationError(`bad_${kind}_${key}_type`)
+  }
+}
+
+/** Assert a required field is a plain object OR `null`. `pendingApproval` is
+ *  canonically nullable (`PendingApprovalView | null`); over-correcting to
+ *  reject `null` would break legitimate "no pending approval" snapshots, so we
+ *  permit `null` but reject scalars/arrays/absence. */
+const assertNullableObjectField = (
+  value: Record<string, unknown>,
+  kind: string,
+  key: string,
+): void => {
+  if (!(key in value)) throw new SessionProtocolValidationError(`missing_${kind}_${key}`)
+  const v = value[key]
+  if (v === null) return
+  if (typeof v !== "object" || Array.isArray(v)) {
+    throw new SessionProtocolValidationError(`bad_${kind}_${key}_type`)
+  }
+}
+
+/** Assert a required field is an array. `openArtifacts` is a `readonly
+ *  ArtifactRef[]`; an object/scalar there breaks iteration downstream. */
+const assertArrayField = (value: Record<string, unknown>, kind: string, key: string): void => {
+  if (!(key in value)) throw new SessionProtocolValidationError(`missing_${kind}_${key}`)
+  if (!Array.isArray(value[key])) {
+    throw new SessionProtocolValidationError(`bad_${kind}_${key}_type`)
+  }
+}
+
 const assertCommonMetadata = (value: Record<string, unknown>, kind: "command" | "event"): void => {
   if (kind === "command") {
     assertString(value, kind, "sessionId")
@@ -149,12 +187,20 @@ export const encodeSessionSnapshot = (snapshot: SessionSnapshotLite): string =>
 
 export const decodeSessionSnapshot = (raw: string): SessionSnapshotLite => {
   const envelope = parseEnvelope(raw, "snapshot")
-  if (
-    typeof envelope.payload.sessionId !== "string" ||
-    typeof envelope.payload.revision !== "number" ||
-    typeof envelope.payload.seq !== "number"
-  ) {
-    throw new SessionProtocolValidationError("bad_snapshot_shape")
-  }
-  return envelope.payload as unknown as SessionSnapshotLite
+  const payload = envelope.payload
+  // Route the ordering scalars through the SAME finite-number guard the event
+  // path uses (fix #6): an Infinity revision|seq otherwise survives the bare
+  // `typeof === "number"` test and wedges revision_conflict downstream.
+  assertString(payload, "snapshot", "sessionId")
+  assertFiniteNumber(payload, "snapshot", "revision")
+  assertFiniteNumber(payload, "snapshot", "seq")
+  // The remaining required SessionSnapshotLite fields were previously
+  // unchecked — presence/type guard each, mirroring the event path. Match the
+  // canonical contract exactly: `pendingApproval` is nullable, `openArtifacts`
+  // is an array, `state`/`capabilities` are objects.
+  assertObjectField(payload, "snapshot", "state")
+  assertObjectField(payload, "snapshot", "capabilities")
+  assertNullableObjectField(payload, "snapshot", "pendingApproval")
+  assertArrayField(payload, "snapshot", "openArtifacts")
+  return payload as unknown as SessionSnapshotLite
 }

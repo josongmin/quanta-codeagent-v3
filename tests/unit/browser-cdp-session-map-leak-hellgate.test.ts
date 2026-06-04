@@ -153,43 +153,68 @@ describe("HELLGATE cdp-adapter — session Map leak reaping", () => {
     if (fresh.ok) expect(b.isLive(fresh.value)).toBe(true)
   })
 
-  test("LEAK-02: proc.exited (crash) reaps the session; handle closed; re-open works", async () => {
-    const { b, exiters } = makeBrowser()
+  test("LEAK-02: proc.exited (crash) reaps the session; profile rmrf'd; handle closed; re-open works", async () => {
+    const { b, exiters, rmrf } = makeBrowser()
     const h = await b.spawn()
     expect(h.ok).toBe(true)
     if (!h.ok) return
     expect(b.isLive(h.value)).toBe(true)
-    // Process dies with NO CDP event (crash/OOM/external kill).
+    const profileDir = `/jail/.quanta/browser/${h.value.id}`
+    // No teardown has happened yet on the still-live session.
+    expect(rmrf).toHaveLength(0)
+    // Process dies with NO CDP event (crash/OOM/external kill) — and NO close().
     exiters[0]?.(137)
     await Promise.resolve() // let the proc.exited.then() handler run
     await Promise.resolve()
     expect(b.isLive(h.value)).toBe(false)
+    // OVER_CORRECTION proof: the death path itself must remove the temp profile
+    // (proc already gone, so we do NOT also kill it — close() can no longer run
+    // teardown once the Map entry is reaped).
+    expect(rmrf).toContain(profileDir)
+    expect(rmrf).toHaveLength(1)
     // The reaped handle fails closed on use (not a stale-but-present entry).
     const nav = await b.navigate(h.value, "https://app.test/")
     expect(nav.ok).toBe(false)
     if (!nav.ok) expect(nav.error.kind).toBe("closed")
-    // close() on the already-reaped handle is a no-op ok.
+    // close() on the already-reaped handle is a no-op ok — and does NOT rmrf again.
     const c = await b.close(h.value)
     expect(c.ok).toBe(true)
+    expect(rmrf).toHaveLength(1)
     // Re-open works.
     const again = await b.spawn()
     expect(again.ok).toBe(true)
     if (again.ok) expect(b.isLive(again.value)).toBe(true)
   })
 
-  test("LEAK-03: onDead (socket death) reaps the session; handle closed; re-open works", async () => {
-    const { b, closeCbs } = makeBrowser()
+  test("LEAK-03: onDead (socket death) kills proc + rmrf's profile; handle closed; re-open works", async () => {
+    const { b, closeCbs, kills, rmrf } = makeBrowser()
     const h = await b.spawn()
     expect(h.ok).toBe(true)
     if (!h.ok) return
     expect(b.isLive(h.value)).toBe(true)
-    // Socket dies → cdp-session markDead → adapter onDead fires.
+    const profileDir = `/jail/.quanta/browser/${h.value.id}`
+    // Nothing torn down while the session is live.
+    expect(kills[0]).toBe(0)
+    expect(rmrf).toHaveLength(0)
+    // Socket dies → cdp-session markDead → adapter onDead fires. NO close() is
+    // ever called — the death path alone must perform the full teardown.
     closeCbs[0]?.()
     await Promise.resolve()
     expect(b.isLive(h.value)).toBe(false)
+    // OVER_CORRECTION proof: the proc is still alive on a socket death, so the
+    // death path must KILL it AND rmrf the temp profile (the round-1 fix dropped
+    // the Map entry first, which made close() a no-op and leaked both).
+    expect(kills[0]).toBe(1)
+    expect(rmrf).toContain(profileDir)
+    expect(rmrf).toHaveLength(1)
     const nav = await b.navigate(h.value, "https://app.test/")
     expect(nav.ok).toBe(false)
     if (!nav.ok) expect(nav.error.kind).toBe("closed")
+    // A later close() on the reaped handle is a safe no-op — no double teardown.
+    const c = await b.close(h.value)
+    expect(c.ok).toBe(true)
+    expect(kills[0]).toBe(1)
+    expect(rmrf).toHaveLength(1)
     const again = await b.spawn()
     expect(again.ok).toBe(true)
     if (again.ok) expect(b.isLive(again.value)).toBe(true)

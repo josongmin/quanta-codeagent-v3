@@ -126,6 +126,23 @@ export const decideBranchOnly = (
     }
     // After `git push`, args are `[remote] [refspec...]` or `--all` flags
     const after = pushToks.filter((t) => !t.startsWith("-"))
+    // Audit H3 fix: a WILDCARD/glob refspec (`refs/heads/*:refs/heads/*`,
+    // `*:*`, `refs/heads/*`) pushes EVERY matching local branch — incl.
+    // main/master — exactly like `--all`, but as a POSITIONAL refspec the
+    // `--all` flag-scan above never sees it and `targetsProtectedBranch`
+    // (which compares against an explicit branch name) cannot match `*`.
+    // An unresolvable glob destination cannot be PROVEN to spare a protected
+    // branch, so under branch-only it must fail closed — deny any refspec
+    // token containing `*` on EITHER side (src or dest). Mirrors the `--all`
+    // denial: wholesale push that can clobber a protected branch.
+    for (const ref of after.slice(1)) {
+      if (ref.includes("*")) {
+        return {
+          allowed: false,
+          reason: `git push with wildcard refspec '${ref}' pushes refs wholesale and cannot be proven to spare a protected branch; denied (gitWrite=branch-only). Push an explicit feature-branch refspec instead.`,
+        }
+      }
+    }
     // `git push` with no args pushes the current upstream — if HEAD is on a
     // protected branch, that's a violation
     if (after.length <= 1 && currentBranch && protectedBranches.includes(currentBranch)) {

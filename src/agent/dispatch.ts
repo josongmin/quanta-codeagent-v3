@@ -96,7 +96,21 @@ const consultDedupGate = (call: ToolUseBlock, config: AgentConfig): DispatchResu
   // depending on call ordering across unrelated turns.
   const turn = config.run?.turn
   if (typeof turn !== "number") return null
-  const verdict = gate.record(call.name, call.input, turn)
+  // S16 wire — thread the registry's canonical shell-command extractor into the
+  // gate so the env-regime brake fires for ANY shell-equivalent tool the
+  // registry recognizes (`bash`/`shell`/`exec`/MCP `run`), NOT just a tool
+  // literally named `bash`. The extractor mirrors `ShellCommandExtractor`
+  // exactly (`(name, input) => string | null`): it safeParses the input and
+  // returns the declared command, or `null` for non-shell tools / invalid
+  // input — the gate routes `null` to the general regime. Absent this arg the
+  // gate falls back to a built-in `command`-field probe (a strict superset for
+  // `bash`), so the wire only ever WIDENS coverage, never narrows it. The
+  // method's bound `this` is preserved by the arrow wrapper. Any throw from a
+  // third-party tool's `extractShellCommand` is normalized by the outer
+  // `dispatchTool` catch into an error tool_result (no-throw contract).
+  const verdict = gate.record(call.name, call.input, turn, (n, i) =>
+    config.registry.extractShellCommand(n, i),
+  )
   if (!verdict.blocked) return null
   return {
     block: DedupGate.syntheticResult(call.id, verdict.observation),

@@ -311,6 +311,91 @@ describe("(d) http-sse correlates a connection-level POST failure to the request
     expect(received.length).toBe(0)
     await t.close()
   })
+
+  // Sibling of the connection-level fast-fail above. A server HTTP non-2xx
+  // (here 500) to a REQUEST-bearing POST carries no response body delivering the
+  // awaited reply, so before the fix the pending entry waited the FULL
+  // per-request timeout. The fix synthesizes the SAME -32000 error envelope for
+  // the request id so the client rejects PROMPTLY. WITHOUT the fix the old code
+  // just `logger.warn(...); return`, so no id-7 message is ever emitted and this
+  // assertion (errResp defined within 5ms) FAILS.
+  test("HTTP 500 on a request payload ⇒ a JSON-RPC error response for that id is emitted promptly (not at timeout)", async () => {
+    const received: JsonRpcMessage[] = []
+    let bodyCancelled = false
+    const errBody = new ReadableStream<Uint8Array>({
+      cancel() {
+        bodyCancelled = true
+      },
+    })
+    const fetchFn = (_url: string, init: { method: string }): Promise<unknown> => {
+      if (init.method === "POST") {
+        return Promise.resolve({
+          ok: false,
+          status: 500,
+          headers: { get: (_n: string) => null },
+          text: () => Promise.resolve("internal error"),
+          body: errBody,
+        })
+      }
+      // standalone GET / DELETE — never resolve to anything useful here.
+      return new Promise<never>(() => {})
+    }
+    const t = new HttpSseMcpTransport({
+      url: "https://mcp.example",
+      name: "t13-d3",
+      openServerStream: false,
+      // biome-ignore lint/suspicious/noExplicitAny: test fetch seam shape match
+      fetch: fetchFn as any,
+    })
+    t.onMessage((m) => received.push(m))
+    await t.start()
+    const enqueueErr = t.send({ jsonrpc: "2.0", id: 7, method: "tools/call", params: {} })
+    expect(enqueueErr).toBeNull()
+    // Surfaced on the next microtask(s), NOT after a 30s timeout.
+    await new Promise((r) => setTimeout(r, 5))
+    const errResp = received.find(
+      (m) => "id" in m && (m as { id?: unknown }).id === 7,
+    ) as { id: number; error?: { code: number; message: string } } | undefined
+    expect(errResp).toBeDefined()
+    // Identical wire shape to the connection-level sibling: code -32000, message
+    // carries the HTTP status so the caller can tell the two failure modes apart.
+    expect(errResp?.error?.code).toBe(-32000)
+    expect(errResp?.error?.message).toContain("500")
+    // The error body is drained/discarded, not left half-read behind the socket.
+    expect(bodyCancelled).toBe(true)
+    await t.close()
+  })
+
+  // A non-2xx with NO id (notification POST) must NOT mint a synthetic response —
+  // there is no pending entry to reject, and a fabricated id would mis-correlate.
+  test("HTTP 500 on a NOTIFICATION (no id) emits nothing — no synthetic response", async () => {
+    const received: JsonRpcMessage[] = []
+    const fetchFn = (_url: string, init: { method: string }): Promise<unknown> => {
+      if (init.method === "POST") {
+        return Promise.resolve({
+          ok: false,
+          status: 500,
+          headers: { get: (_n: string) => null },
+          text: () => Promise.resolve(""),
+          body: null,
+        })
+      }
+      return new Promise<never>(() => {})
+    }
+    const t = new HttpSseMcpTransport({
+      url: "https://mcp.example",
+      name: "t13-d4",
+      openServerStream: false,
+      // biome-ignore lint/suspicious/noExplicitAny: test fetch seam shape match
+      fetch: fetchFn as any,
+    })
+    t.onMessage((m) => received.push(m))
+    await t.start()
+    t.send({ jsonrpc: "2.0", method: "notifications/initialized" })
+    await new Promise((r) => setTimeout(r, 5))
+    expect(received.length).toBe(0)
+    await t.close()
+  })
 })
 
 // ── (e) responses-continuation-store — bound the unsupported-resume Set ───────

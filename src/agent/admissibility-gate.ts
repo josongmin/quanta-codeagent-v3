@@ -945,26 +945,42 @@ const runPermissionStack = (
   // ADR-0267 Phase 2 — emit the per-thread/per-host/post-denial stack verdict
   // BEFORE acting on it. `decision.reason` (deny path only) is the policy's
   // own message (mentions the per-thread sandbox type + workdir, never tool
-  // input). The `ask` arm has no `reason` field — emit a synthesized
-  // "stack: ask → fall through" line so the tracer pairing stays complete.
-  emitGateDecision(config, {
-    kind: "permission",
-    outcome: decision.kind,
-    reason:
-      decision.kind === "allow"
-        ? "stack allow"
-        : decision.kind === "deny"
-          ? decision.reason
-          : "stack ask → fall through",
-    toolCallId: call.id,
-    tool: action.tool,
-  })
-  if (decision.kind === "allow") return "allow"
+  // input).
+  //
+  // H12 emit-once fix (gate seam): the `ask` arm is a FALL-THROUGH — the stack
+  // has no opinion and the canonical decision is emitted downstream by
+  // `runModePolicy` (which, when the host is unpinned, surfaces the SAME
+  // global-default verdict). Emitting here on the `ask` arm too would double-
+  // count that one logical global-default decision on the `decisionEmitter`
+  // channel. So we emit ONLY on the terminal arms (`allow` / `deny`) where the
+  // stack itself is the decision authority; the fall-through arm stays silent
+  // and lets the single canonical mode-policy emit fire. This mirrors, at the
+  // gate-decision-event seam, the policy.ts emit-once contract proven by
+  // `permission-otel-global-default-emit-once-hellgate.test.ts`.
+  if (decision.kind === "allow") {
+    emitGateDecision(config, {
+      kind: "permission",
+      outcome: "allow",
+      reason: "stack allow",
+      toolCallId: call.id,
+      tool: action.tool,
+    })
+    return "allow"
+  }
   if (decision.kind === "deny") {
+    emitGateDecision(config, {
+      kind: "permission",
+      outcome: "deny",
+      reason: decision.reason,
+      toolCallId: call.id,
+      tool: action.tool,
+    })
     return deny(call.id, `Permission denied: ${decision.reason}`, "denied")
   }
   // `ask` ⇒ no opinion from the stack; fall through to the legacy mode policy
-  // (which is the canonical place for the `ask → onConfirm` handshake).
+  // (which is the canonical place for the `ask → onConfirm` handshake AND the
+  // single canonical emit site for the resulting global-default verdict). No
+  // emit here — emitting would double-count the one downstream decision.
   return null
 }
 

@@ -290,6 +290,87 @@ describe("profile-inheritance hellgate", () => {
     }
   })
 
+  test("HELL-PI-10b managed ceiling can't be widened via fileSystem.entries", () => {
+    // Sibling of HELL-PI-10 (which only covers FS TYPE widen). Here a NON-managed
+    // base grants a broad FS write entry; a SEPARATE managed ceiling permits ∅.
+    // The folded result carries the wide grant, so it widens the ceiling's FS
+    // reach at the SAME type rank. throw mode MUST reject; clamp MUST narrow it out.
+    // `trusted` grants special:project WRITE — a real, non-empty FS grant that
+    // survives the accumulator fold (so the result genuinely carries a grant the
+    // ceiling does not cover).
+    const wideEntry = {
+      path: { type: "special", kind: "project" },
+      access: "write",
+    } as const
+    const reg: ProfileDefinitionRegistry = {
+      // non-managed base granting project write (establishes the accumulator).
+      // Narrow EVERY non-FS axis back to the locked-down DEFAULT so the ONLY
+      // axis on which the result can exceed the ceiling is fileSystem.entries —
+      // isolating the hole under test (otherwise network.mode trips first).
+      wide: {
+        extends: "trusted",
+        network: { mode: "deny-all" },
+        approval: { mode: "once", promptUser: true },
+        sandbox: {
+          osSandbox: "none",
+          readOnly: true,
+          workspaceWrite: false,
+          networkIsolated: true,
+        },
+      },
+      // managed ceiling: restricted FS with ZERO entries ⇒ permits nothing.
+      // (All other axes default to the locked-down DEFAULT, matching `wide`.)
+      org: {
+        tag: "managed",
+        fileSystem: { type: "restricted", entries: [] },
+      },
+      // child inherits the wide grant; the managed ceiling must veto it.
+      child: { extends: ["wide", "org"] },
+    }
+
+    // clamp mode (default): the un-covered entry is narrowed OUT (∅ ⊆ ceiling).
+    const clamped = resolveProfileInheritance("child", reg)
+    expect(clamped.fileSystem.entries).toEqual([])
+
+    // throw mode: reject the FS-entries widen outright with the precise axis.
+    let thrown: unknown
+    try {
+      resolveProfileInheritance("child", reg, { onManagedWiden: "throw" })
+    } catch (e) {
+      thrown = e
+    }
+    expect(thrown).toBeInstanceOf(ProfileInheritanceError)
+    expect((thrown as ProfileInheritanceError).kind).toBe("managed-widen")
+    expect((thrown as ProfileInheritanceError).message).toContain("fileSystem.entries")
+
+    // A child whose grant IS within a non-empty ceiling is NOT a widen (covered).
+    // Both `wide` and the managed ceiling extend `trusted` (so the ceiling's FS
+    // grant genuinely survives its own fold) and pin every non-FS axis to DEFAULT.
+    const lockNonFs = {
+      network: { mode: "deny-all" },
+      approval: { mode: "once", promptUser: true },
+      sandbox: {
+        osSandbox: "none",
+        readOnly: true,
+        workspaceWrite: false,
+        networkIsolated: true,
+      },
+    } as const
+    const okReg: ProfileDefinitionRegistry = {
+      wide: { extends: "trusted", ...lockNonFs },
+      orgScoped: {
+        // ceiling permits project write ⇒ the result's project write is covered.
+        tag: "managed",
+        extends: "trusted",
+        ...lockNonFs,
+      },
+      child: { extends: ["wide", "orgScoped"] },
+    }
+    expect(
+      resolveProfileInheritance("child", okReg, { onManagedWiden: "throw" }).fileSystem.entries,
+    ).toEqual([wideEntry])
+  })
+
   test("HELL-PI-11 monotone-narrowing invariant across all axes", () => {
     // For every built-in base × a battery of partial derived defs, resolve(child)
     // must be no wider than resolve(base) on each of the 13 axes.

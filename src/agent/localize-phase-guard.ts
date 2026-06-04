@@ -80,6 +80,13 @@ export const MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
   // also wrongly gate `bash` (a deliberately-exempt tool: isReadOnly===false but
   // not a file-edit tool).
   "apply_patch",
+  // apply_patch_structured (src/tool/apply-patch-structured-tool.ts, name
+  // "apply_patch_structured", isReadOnly:()=>false) is the SIBLING registered
+  // structured-op variant of apply_patch — same audit #10 mutating-FS class. The
+  // original fix added only the string-patch "apply_patch" and missed this sibling,
+  // so the model could apply_patch_structured the WRONG file before localization.
+  // Added EXPLICITLY (closed-set design).
+  "apply_patch_structured",
 ])
 
 /** The forcing nudge injected when a mutating tool is attempted in Phase 1.

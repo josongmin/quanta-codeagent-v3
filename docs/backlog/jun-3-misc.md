@@ -111,6 +111,12 @@
 
 
 
+> **✅ jun-04 wave-3 (TDD + 경쟁사 정독, follow-up·검증보완) 부분완료.** tsc 0, 종합 회귀 3035/0, catalog 843 all-resolved, biome 신규파일 0.
+> - **xlsx_read + docx_read REAL ✅ (검증보완 — H14b 라운드트립 완성)**: ADR-0138 deps 보류를 **node:zlib.inflateRawSync + 순수-TS OOXML 파서**로 해소(신규 dep 0). STORED+DEFLATE 둘 다. pure `parseXlsx`/`parseDocx` 코어 + FS-jail 도구. **TRUE 라운드트립**: `xlsx_write`→디스크→`xlsx_read`로 셀 복귀(자체 reader 통과). 둘 다 BASE reader(항상-on). 죽은 에이전트가 `unzip`+테스트는 완성, 부모가 파서+도구+배선 마무리. xlsx_read stub catalog→L4 stable.
+> - **H15 추론 carry-over ✅ (seam)**: `openai-responses-wire` capture(`encrypted_content`)→store→다음턴 input 재emit(`include`), `QUANTA_REASONING_CARRYOVER` default-OFF byte-identical, OpenAI-Responses 한정. **잔여**: adapter store 생성+threading 라이브배선 + `x-reasoning-included` 헤더.
+> - **H13 external-config 마이그레이션 ✅ (seam)**: `src/migration/external-config/`(detect walker + 6 converter reuse repo-rules/glob-rules/frontmatter + throttle ledger), `QUANTA_MIGRATE_CONFIG` default-OFF, repl 시작 notice. **잔여**: converted item을 live permission/hook/mcp/subagent store에 persist(슬라이스 격리 위해 surface adapter 필요).
+> - **H19 MCP resources/prompts/roots ⏸ (overload로 미완)**: 에이전트가 TDD 테스트만 쓰고 API Overloaded로 죽음 → `@/mcp/resources` 모듈 미구현. orphan 테스트 삭제, **재시도 대기**(토대 없어 인라인 완성 부적합).
+
 - **H1. loop-on-lints/tests/command 자가수정 + 편집결과에 도입-lint delta 자동첨부**
   - 기능/목적: 편집 후 **도입된** lint만(델타) 모델에 자동 첨부 + lint/test/명령이 green 될 때까지 fast 모델로 재편집(maxIters, 커스텀지시).
   - 레퍼런스: Cursor `ComposerCapabilityRequest.{LoopOnLints,LoopOnTests,LoopOnCommand}` + `new_linter_errors`/`should_attach_linter_errors`(main.js:33272/34023/35871).

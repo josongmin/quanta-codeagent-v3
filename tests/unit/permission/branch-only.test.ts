@@ -42,6 +42,59 @@ describe("decideBranchOnly — git push", () => {
   })
 })
 
+describe("decideBranchOnly — HELLGATE: wildcard refspec push (H3)", () => {
+  // HOLE: the --all/--mirror/--tags fix only scanned dash-FLAGS. A WILDCARD
+  // POSITIONAL refspec (`refs/heads/*:refs/heads/*`, `*:*`) pushes EVERY local
+  // branch incl. main/master — same wholesale clobber — but the positional
+  // loop used targetsProtectedBranch which never matches a literal `*`, so it
+  // fell open. These assertions FAIL against the pre-fix code (allowed=true).
+  test("push 'refs/heads/*:refs/heads/*' from feature branch is DENIED", () => {
+    const v = decideBranchOnly(
+      "git push origin refs/heads/*:refs/heads/*",
+      DEFAULT_PROTECTED_BRANCHES,
+      "feature/x",
+    )
+    expect(v.allowed).toBe(false)
+    if (!v.allowed) expect(v.reason).toContain("wildcard")
+  })
+
+  test("push '*:*' from feature branch is DENIED", () => {
+    const v = decideBranchOnly(
+      "git push origin *:*",
+      DEFAULT_PROTECTED_BRANCHES,
+      "feature/x",
+    )
+    expect(v.allowed).toBe(false)
+  })
+
+  test("push wildcard SOURCE side only ('refs/heads/*') is DENIED", () => {
+    const v = decideBranchOnly(
+      "git push origin refs/heads/*",
+      DEFAULT_PROTECTED_BRANCHES,
+      "feature/x",
+    )
+    expect(v.allowed).toBe(false)
+  })
+
+  test("forced wildcard ('+refs/heads/*:refs/heads/*') is DENIED", () => {
+    const v = decideBranchOnly(
+      "git push origin +refs/heads/*:refs/heads/*",
+      DEFAULT_PROTECTED_BRANCHES,
+      "feature/x",
+    )
+    expect(v.allowed).toBe(false)
+  })
+
+  test("NO over-correction: a normal single-branch refspec is still ALLOWED", () => {
+    const v = decideBranchOnly(
+      "git push origin feature/x:feature/x",
+      DEFAULT_PROTECTED_BRANCHES,
+      "feature/x",
+    )
+    expect(v.allowed).toBe(true)
+  })
+})
+
 describe("decideBranchOnly — git commit / merge / rebase on protected branch", () => {
   test("commit on main denied", () => {
     const v = decideBranchOnly("git commit -m 'x'", DEFAULT_PROTECTED_BRANCHES, "main")
