@@ -87,6 +87,7 @@ import { defaultPromptCacheObserver } from "@/observability/prompt-cache"
 import { CI_BOT_DEFAULT_ALLOWLIST } from "@/runtime/network-allowlist"
 import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
 import type { RuntimeAgentTurnAssembler, RuntimeAgentTurnDeps } from "@/sdk/runtime/base"
+import { skillMcpDepsEnabled } from "@/skill/skill-mcp-deps"
 import { resolveJailed } from "@/storage"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { type DnsResolver, nodeDnsResolver } from "@/tool/browser"
@@ -477,7 +478,7 @@ const maybeWireVcsEventSink = (cfg: AgentConfig, env: AssemblerEnv): void => {
  *  and tears it down at session end. Caller-override-safe; absent gate ⇒ slot
  *  stays unset ⇒ reconcile + shutdown are pure no-ops (byte-identical). */
 const maybeWireSkillMcp = (cfg: AgentConfig, env: AssemblerEnv): void => {
-  if (env.QUANTA_SKILL_MCP_DEPS !== "1") return
+  if (!skillMcpDepsEnabled(env)) return
   if (cfg.skillMcpSession !== undefined) return
   cfg.skillMcpSession = buildSkillMcpSession(env)
 }

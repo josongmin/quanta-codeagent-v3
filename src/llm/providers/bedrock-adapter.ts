@@ -27,6 +27,7 @@ import {
   type RawEvent,
 } from "../adapters/anthropic"
 import { resolveAdapterStreamTimeouts } from "../adapters/shared"
+import type { CredentialSource } from "../credential-helper"
 import { withStreamTimeout } from "../stream-timeout"
 import type { StreamEvent, StreamInput } from "../types"
 import type { LlmProvider, ProviderConfig, ProviderId } from "./provider-port"
@@ -68,6 +69,13 @@ export interface BedrockAdapterOptions {
   /** Test-only DI seam. When supplied, the lazy SDK import is bypassed and the
    *  given factory is invoked instead. Production callers omit this. */
   clientFactory?: BedrockClientFactory
+  /** H7 — OPTIONAL pre-call credential refresh hook. When supplied, the adapter
+   *  awaits `credentialSource.refreshCloudCreds("aws")` BEFORE building/using
+   *  the SDK client on each `stream()`, so the AWS default credential chain
+   *  picks up freshly-rotated SSO/STS creds (the refresh is TTL-throttled inside
+   *  the source — a hot loop does not re-shell every call). ABSENT ⇒ the adapter
+   *  path is byte-identical to the pre-H7 SDK-default-chain behavior. */
+  credentialSource?: CredentialSource
 }
 
 export class BedrockProviderAdapter implements LlmProvider {
@@ -81,6 +89,7 @@ export class BedrockProviderAdapter implements LlmProvider {
   private readonly maxTokens: number
   private readonly streamTimeoutMs: { firstChunkMs: number; idleMs: number }
   private readonly clientFactory: BedrockClientFactory | undefined
+  private readonly credentialSource: CredentialSource | undefined
 
   constructor(config: ProviderConfig, options: BedrockAdapterOptions = {}) {
     if (config.providerId !== "bedrock") {
@@ -111,6 +120,7 @@ export class BedrockProviderAdapter implements LlmProvider {
     if (config.auth.awsRegion !== undefined) opts.awsRegion = config.auth.awsRegion
     this.clientOptions = opts
     if (options.clientFactory !== undefined) this.clientFactory = options.clientFactory
+    if (options.credentialSource !== undefined) this.credentialSource = options.credentialSource
   }
 
   /** Lazy SDK resolve. Dynamic import keeps the package OPTIONAL — the main
@@ -180,6 +190,14 @@ export class BedrockProviderAdapter implements LlmProvider {
   }
 
   async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
+    // H7 — pre-call credential refresh. Absent source ⇒ this awaits nothing and
+    // the client-resolve path is byte-identical to the pre-H7 default chain.
+    // The refresh is TTL-throttled inside the source; a failing (trust-gated /
+    // helper-failed) refresh surfaces as a typed CredentialHelperError before
+    // any wire call, which the loop classifier treats like any pre-stream error.
+    if (this.credentialSource !== undefined) {
+      await this.credentialSource.refreshCloudCreds("aws")
+    }
     const client = await this.resolveClient()
     const raw = await this.openRawStream(client, input)
     const guarded = withStreamTimeout(raw, {

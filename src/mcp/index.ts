@@ -21,6 +21,7 @@ export {
   headlessRejecter,
   type LeaseContext,
 } from "./elicitation"
+export { headlessOAuthRejecter, type McpOAuthProviderPort } from "./oauth"
 export {
   type BackoffPolicy,
   backoffDelay,

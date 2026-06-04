@@ -56,10 +56,25 @@ const finiteNonNegInt = (v: unknown): number | undefined => {
   return Math.floor(v)
 }
 
-/** Derive the public status from the immutable rule. blockers win, then a
- *  fully-met (non-empty) criteria set completes, else the explicit value. */
-const deriveStatus = (cell: Cell): ObjectiveStatus => {
+/** H17 — exact (NOT heuristic) budget-exhaustion predicate. The objective has
+ *  exceeded its envelope when a CONFIGURED cap is met by accumulated usage:
+ *  `tokensUsed >= maxTokens` OR `turnsUsed >= maxTurns`. Comparison is `>=`
+ *  (reaching the cap is exhaustion). A cap that is `undefined` never triggers;
+ *  no caps at all ⇒ never exhausted. Pure function of the cell. */
+const budgetExhausted = (cell: Cell): boolean =>
+  (cell.maxTokens !== undefined && cell.tokensUsed >= cell.maxTokens) ||
+  (cell.maxTurns !== undefined && cell.turnsUsed >= cell.maxTurns)
+
+/** Derive the public status from the immutable rule. blockers win, then (when
+ *  enforcement is enabled) a budget-exhausted cell limits, then a fully-met
+ *  (non-empty) criteria set completes, else the explicit value.
+ *
+ *  `enforce` is the store-level H17 gate (default false). When false this is
+ *  byte-identical to the ADR-0394 derivation (budget stays informational —
+ *  `budget_limited` is never produced). Total function over the cell. */
+const deriveStatus = (cell: Cell, enforce: boolean): ObjectiveStatus => {
   if (cell.blockers.length > 0) return "blocked"
+  if (enforce && budgetExhausted(cell)) return "budget_limited"
   if (cell.criteria.length > 0 && cell.criteria.every((c) => c.met)) return "completed"
   return cell.explicitStatus
 }
@@ -74,13 +89,13 @@ const buildBudget = (cell: Cell): ObjectiveBudget => {
 }
 
 /** Project a cell to the frozen public `Objective`. Derives status here so no
- *  read can ever observe a status that contradicts blockers/criteria. */
-const toObjective = (cell: Cell): Objective =>
+ *  read can ever observe a status that contradicts blockers/criteria/budget. */
+const toObjective = (cell: Cell, enforce: boolean): Objective =>
   Object.freeze({
     threadId: cell.threadId,
     goal: cell.goal,
     successCriteria: Object.freeze(cell.criteria.map((c) => Object.freeze({ ...c }))),
-    status: deriveStatus(cell),
+    status: deriveStatus(cell, enforce),
     budget: buildBudget(cell),
     blockers: Object.freeze(cell.blockers.map((b) => Object.freeze({ ...b }))),
     nextActions: Object.freeze([...cell.nextActions]),
@@ -111,12 +126,12 @@ interface SnapshotObjective extends Objective {
   readonly explicitStatus: "active" | "completed"
 }
 
-const toSnapshotObjective = (cell: Cell): SnapshotObjective =>
+const toSnapshotObjective = (cell: Cell, enforce: boolean): SnapshotObjective =>
   Object.freeze({
     threadId: cell.threadId,
     goal: cell.goal,
     successCriteria: Object.freeze(cell.criteria.map((c) => Object.freeze({ ...c }))),
-    status: deriveStatus(cell),
+    status: deriveStatus(cell, enforce),
     explicitStatus: cell.explicitStatus,
     budget: buildBudget(cell),
     blockers: Object.freeze(cell.blockers.map((b) => Object.freeze({ ...b }))),
@@ -188,8 +203,17 @@ const cellFromInit = (
   }
 }
 
-export const createObjectiveStore = (opts?: { now?: () => number }): ObjectivePort => {
+export const createObjectiveStore = (opts?: {
+  now?: () => number
+  /** H17 — when true the public `status` derives `"budget_limited"` once a
+   *  configured cap is reached (see `deriveStatus`/`budgetExhausted`). Default
+   *  false ⇒ budget is purely informational and the status is byte-identical
+   *  to ADR-0394 (this flag is the SSOT for whether the store enforces; the
+   *  host wires it from `QUANTA_OBJECTIVE_BUDGET_ENFORCE`). */
+  enforceBudget?: boolean
+}): ObjectivePort => {
   const now = opts?.now ?? Date.now
+  const enforce = opts?.enforceBudget === true
   const cells = new Map<string, Cell>()
 
   const clockNow = (): number => {
@@ -210,7 +234,7 @@ export const createObjectiveStore = (opts?: { now?: () => number }): ObjectivePo
       if (cell === undefined) return null
       fn(cell)
       cell.updatedAt = clockNow()
-      return toObjective(cell)
+      return toObjective(cell, enforce)
     } catch {
       return null
     }
@@ -222,13 +246,13 @@ export const createObjectiveStore = (opts?: { now?: () => number }): ObjectivePo
         // Malformed input still returns a non-null Objective (port contract):
         // degrade to a synthetic empty cell rather than throwing.
         if (!isNonEmptyString(threadId) || init === null || typeof init !== "object") {
-          return toObjective(emptyCell(threadId, clockNow()))
+          return toObjective(emptyCell(threadId, clockNow()), enforce)
         }
         const cell = cellFromInit(threadId, init, clockNow())
         cells.set(threadId, cell)
-        return toObjective(cell)
+        return toObjective(cell, enforce)
       } catch {
-        return toObjective(emptyCell(threadId, Date.now()))
+        return toObjective(emptyCell(threadId, Date.now()), enforce)
       }
     },
 
@@ -236,7 +260,7 @@ export const createObjectiveStore = (opts?: { now?: () => number }): ObjectivePo
       try {
         if (!isNonEmptyString(threadId)) return null
         const cell = cells.get(threadId)
-        return cell === undefined ? null : toObjective(cell)
+        return cell === undefined ? null : toObjective(cell, enforce)
       } catch {
         return null
       }
@@ -308,7 +332,7 @@ export const createObjectiveStore = (opts?: { now?: () => number }): ObjectivePo
 
     list(): readonly Objective[] {
       try {
-        return Object.freeze([...cells.values()].map(toObjective))
+        return Object.freeze([...cells.values()].map((c) => toObjective(c, enforce)))
       } catch {
         return Object.freeze([])
       }
@@ -317,7 +341,9 @@ export const createObjectiveStore = (opts?: { now?: () => number }): ObjectivePo
     toSnapshot(): ObjectiveSnapshot {
       try {
         return Object.freeze({
-          objectives: Object.freeze([...cells.values()].map(toSnapshotObjective)),
+          objectives: Object.freeze(
+            [...cells.values()].map((c) => toSnapshotObjective(c, enforce)),
+          ),
         })
       } catch {
         return Object.freeze({ objectives: Object.freeze([]) })

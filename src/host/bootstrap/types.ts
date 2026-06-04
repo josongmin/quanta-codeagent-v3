@@ -185,8 +185,18 @@ export type BuildToolingFactory = (
 ) => Tooling
 
 /** Resolve default-OFF feature flags + bridged MCP/LSP/git tools from the
- *  surface env. */
-export type LoadFeaturesFactory = (slog: StructuredLogger) => Promise<BootstrapFeatures>
+ *  surface env.
+ *
+ *  B1 (jun-04) — `llm` is the assembled `LLMPort` the bootstrap builds just
+ *  before this call. It is threaded so an inbound MCP `sampling/createMessage`
+ *  can be fulfilled by the loaded `McpClient`s (advertise-iff-able, gated on
+ *  `QUANTA_MCP_SAMPLING` + `QUANTA_MCP_CAPS=full` + user consent). Optional so a
+ *  surface that does not opt into inbound sampling (or has no LLM at this point)
+ *  stays byte-identical; the CLI surface passes its `finalLLM`. */
+export type LoadFeaturesFactory = (
+  slog: StructuredLogger,
+  llm?: LLMPort,
+) => Promise<BootstrapFeatures>
 
 /** Load one image at `path` synchronously — terminal-host helper. */
 export type LoadImageBlockFactory = (path: string) => ImageBlock

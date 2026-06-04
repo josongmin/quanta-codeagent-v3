@@ -61,6 +61,18 @@ describe("mode mutating-table cross-check (ADR-0036)", () => {
     "web_search",
     "search_codebase",
     "read_image_url",
+    // jun-04 caller-wire tools — coverage_check (DefaultToolPorts.coverageCheck),
+    // prompt_cache_status (wired observer), image_gen (DefaultToolPorts.imageGen),
+    // and the Office authoring writers (DefaultToolPorts.officeAuthoring). Their
+    // MUTATING_TOOL_TABLE entries are PERMANENT (plan-mode dispatch must never
+    // throw UnknownToolError when a host injects them), but the factories aren't
+    // enumerable here without forcing every gate on.
+    "coverage_check",
+    "prompt_cache_status",
+    "image_gen",
+    "xlsx_write",
+    "docx_write",
+    "pptx_write",
   ]
   const allTools = [
     ...defaultTools.map((t) => t.name),

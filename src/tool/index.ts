@@ -18,12 +18,13 @@ import {
   docxReadTool,
   ndjsonReadTool,
   pdfReadTool,
+  pptxReadTool,
   xlsxReadTool,
   yamlReadTool,
 } from "./document"
-// H14b — Office document AUTHORING tools (generate real .xlsx / .docx). Pure-TS
-// STORED-ZIP + OOXML; conditionally registered via DefaultToolPorts.officeAuthoring.
-import { docxWriteTool, xlsxWriteTool } from "./document/authoring"
+// H14b — Office document AUTHORING tools (generate real .xlsx / .docx / .pptx).
+// Pure-TS STORED-ZIP + OOXML; conditionally registered via DefaultToolPorts.officeAuthoring.
+import { docxWriteTool, pptxWriteTool, xlsxWriteTool } from "./document/authoring"
 import { editTool, makeEditTool } from "./edit"
 import { fileTreeSummaryTool } from "./file-tree-summary"
 import { globTool } from "./glob"
@@ -80,6 +81,7 @@ export {
 // scoped follow-up — the STORED-ZIP + OOXML core here is its shared substrate.
 export {
   buildDocx,
+  buildPptx,
   buildStoredZip,
   buildXlsx,
   crc32,
@@ -88,6 +90,10 @@ export {
   docxWriteInputSchema,
   docxWriteTool,
   parseStoredZip,
+  type PptxSpec,
+  type PptxWriteInput,
+  pptxWriteInputSchema,
+  pptxWriteTool,
   type XlsxSpec,
   type XlsxWriteInput,
   xlsxWriteInputSchema,
@@ -440,8 +446,8 @@ export interface DefaultToolPorts {
    *  failure rather than crashing, so wiring it is always safe. */
   imageGen?: ImageGenPort
   /** H14b — when true, append the Office document AUTHORING tools (`xlsx_write`
-   *  + `docx_write`): generate real `.xlsx` / `.docx` files via pure-TS
-   *  STORED-ZIP + OOXML (NO office dependency). Absent/false ⇒ tools NOT
+   *  + `docx_write` + `pptx_write`): generate real `.xlsx` / `.docx` / `.pptx`
+   *  files via pure-TS STORED-ZIP + OOXML (NO office dependency). Absent/false ⇒ tools NOT
    *  registered (byte-identical default menu). The composition root passes this
    *  only when `QUANTA_OFFICE_AUTHORING` is on. No port to inject — each tool
    *  serializes in-memory and writes through the same FS-jail chokepoint the
@@ -493,6 +499,8 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => {
   if (ports.officeAuthoring === true) {
     base.push(xlsxWriteTool as Tool)
     base.push(docxWriteTool as Tool)
+    // H14 PPTX follow-up — same gate: generate real .pptx (PresentationML).
+    base.push(pptxWriteTool as Tool)
   }
   return base
 }
@@ -556,6 +564,10 @@ const buildBaseDefaultTools = (ports: DefaultToolPorts): Tool[] => [
   // jun-04 — `docx_read` (real WordprocessingML reader, sibling to the now-real
   // xlsx_read). Read-only + concurrency-safe; pure unzip + XML parse.
   docxReadTool as Tool,
+  // H14 PPTX follow-up — `pptx_read` (real PresentationML reader, sibling to
+  // xlsx_read / docx_read). Read-only + concurrency-safe; pure unzip + XML parse.
+  // BASE (always-on) — only the AUTHORING tool (`pptx_write`) is knob-gated.
+  pptxReadTool as Tool,
   // `session_config` — agent self-inspection / self-mutation over its own
   // SDK posture (effort tier, identity mode, tool profile, model, provider).
   // Always registered: when the composition root has not wired the seam,

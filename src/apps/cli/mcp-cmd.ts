@@ -88,6 +88,25 @@ export interface McpSurfaceInfo {
   readonly configPath?: string
   /** `Date.now`-equivalent — injected for test determinism. */
   readonly now?: () => number
+  /** H18 — trigger the OAuth login flow for `serverName` and return the outcome.
+   *  Wired by the REPL over the connectors-backed `McpOAuthProviderPort`
+   *  (`tokenFor` runs discovery → DCR → PKCE browser flow → token-store). Absent
+   *  ⇒ `/mcp login` reports "OAuth not enabled" and exits 0 (default-OFF: a
+   *  surface that never wired OAuth — `QUANTA_MCP_OAUTH≠1` — looks identical).
+   *  Returns `{ ok, expiresAt? }`; NEVER returns the token itself (it goes
+   *  straight into the store, never to the renderer — no secret leak). */
+  readonly login?: (serverName: string) => Promise<McpLoginOutcome>
+}
+
+/** Outcome of a `/mcp login` — success/failure plus an optional expiry for the
+ *  UX. The bearer token itself is NEVER carried here (it is persisted by the
+ *  provider's token store and never rendered). */
+export interface McpLoginOutcome {
+  readonly ok: boolean
+  /** Wall-clock ms when the obtained token expires, if known. */
+  readonly expiresAt?: number
+  /** Failure detail (never contains a token). */
+  readonly error?: string
 }
 
 declare module "./slash-commands" {
@@ -339,11 +358,75 @@ const runMcpConfig = async (ctx: SlashContext): Promise<number> => {
   return 0
 }
 
+/* ------------------------------------------------------------------ */
+/* /mcp login <server>  (H18 — OAuth)                                   */
+/* ------------------------------------------------------------------ */
+
+/** Run the OAuth login flow for one server. Reuses the connectors-backed
+ *  provider wired onto `ctx.mcp.login` (discovery → DCR → PKCE browser flow →
+ *  token store). The token is NEVER rendered — only success + expiry. */
+const runMcpLogin = async (ctx: SlashContext, rest: readonly string[]): Promise<number> => {
+  if (rest.length !== 1) {
+    ctx.err("/mcp login: usage: /mcp login <server>\n")
+    return 1
+  }
+  const serverName = rest[0] as string
+  const login = ctx.mcp?.login
+  if (login === undefined) {
+    ctx.out(
+      `${renderBox(
+        [
+          dim("(OAuth not enabled)"),
+          "",
+          `${dim("Set ")}${cyan("QUANTA_MCP_OAUTH=1")}${dim(" and mark the server ")}${cyan('"oauth": true')}`,
+          `${dim("in its MCP config to enable HTTP-server OAuth login.")}`,
+        ],
+        { title: "MCP login", titleStyle: bold },
+      )}\n`,
+    )
+    return 0
+  }
+  ctx.out(`${dim(`→ starting OAuth login for '${serverName}'…`)}\n`)
+  let outcome: McpLoginOutcome
+  try {
+    outcome = await login(serverName)
+  } catch (e) {
+    ctx.err(
+      `${renderBox([`${red("✗")} ${bold("Login failed")}`, "", dim(errMessage(e))], {
+        title: "MCP login",
+        titleStyle: bold,
+      })}\n`,
+    )
+    return 1
+  }
+  if (!outcome.ok) {
+    ctx.err(
+      `${renderBox(
+        [
+          `${red("✗")} ${bold(`Login failed for '${serverName}'`)}`,
+          "",
+          dim(outcome.error ?? "no token obtained"),
+        ],
+        { title: "MCP login", titleStyle: bold },
+      )}\n`,
+    )
+    return 1
+  }
+  const lines: string[] = [`${green("✓")} ${bold(`Signed in to '${serverName}'`)}`]
+  if (outcome.expiresAt !== undefined) {
+    lines.push("", `${dim("expires:")} ${new Date(outcome.expiresAt).toISOString()}`)
+  }
+  lines.push("", dim("Token stored securely (0600). It is never displayed or logged."))
+  ctx.out(`${renderBox(lines, { title: "MCP login", titleStyle: bold })}\n`)
+  return 0
+}
+
 export const runMcpRender = async (args: readonly string[], ctx: SlashContext): Promise<number> => {
   if (args.length === 0) return runMcpList(ctx)
   const sub = args[0] as string
   const rest = args.slice(1)
   if (sub === "tools") return runMcpTools(ctx, rest)
+  if (sub === "login") return runMcpLogin(ctx, rest)
   if (sub === "config") {
     if (rest.length > 0) {
       ctx.err("/mcp config: takes no arguments\n")
@@ -351,13 +434,14 @@ export const runMcpRender = async (args: readonly string[], ctx: SlashContext): 
     }
     return runMcpConfig(ctx)
   }
-  ctx.err(`/mcp: unknown sub-command '${sub}' (valid: tools | config)\n`)
+  ctx.err(`/mcp: unknown sub-command '${sub}' (valid: tools | login | config)\n`)
   return 1
 }
 
 export const mcpCmd: SlashCommand = {
   name: "/mcp",
-  describe: "Inspect MCP servers: /mcp | /mcp tools [server] | /mcp config",
+  describe:
+    "Inspect/auth MCP servers: /mcp | /mcp tools [server] | /mcp login <server> | /mcp config",
   category: "config",
   run: runMcpRender,
 }

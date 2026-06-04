@@ -113,6 +113,7 @@ const RULES: readonly Rule[] = [
         "CLI sub-command entry — same DI fallback posture as login-cmd.ts.",
       "apps/cli/idle-monitor.ts":
         "Surface idle-monitor reads idle-window envs at composition root; same posture as status-pills.ts.",
+      "apps/cli/dream-cmd.ts": "CLI sub-command entry — same DI fallback posture as memory-cmd.ts.",
       "apps/cli/mcp-cmd.ts": "CLI sub-command entry — same DI fallback posture as login-cmd.ts.",
       "apps/cli/memory-cmd.ts": "CLI sub-command entry — same DI fallback posture as login-cmd.ts.",
       "apps/cli/repl.ts":

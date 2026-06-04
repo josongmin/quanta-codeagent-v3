@@ -127,6 +127,7 @@ describe("BUILTINS table", () => {
       "/fork",
       "/rewind-tool",
       "/memory",
+      "/dream",
       "/rewind-conv",
       "/knobs",
       "/session-registry",

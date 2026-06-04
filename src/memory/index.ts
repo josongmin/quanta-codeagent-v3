@@ -38,6 +38,33 @@ export {
   type DupeThresholds,
   findNearDuplicates,
 } from "./dedup"
+/** H16 — CROSS-SESSION memory consolidation ("auto-dream"). Default-OFF glue
+ *  on top of the existing consolidate pipeline. The composition root builds
+ *  `CrossSessionDreamTrigger` only when `QUANTA_AUTO_DREAM=1`. */
+export {
+  assembleDreamPolicy,
+  CrossSessionDreamTrigger,
+  type CrossSessionDreamTriggerOpts,
+  DEFAULT_DREAM_POLICY,
+  DREAM_LOCK_KEY,
+  DREAM_LOCK_TTL_MS,
+  type DreamConfigView,
+  type DreamConsolidatePort,
+  type DreamConsolidateResult,
+  DreamError,
+  type DreamLockPort,
+  type DreamOutcome,
+  type DreamPolicy,
+  type DreamSlot,
+  type DreamState,
+  type DreamStatePort,
+  type DreamTelemetryPort,
+  type DreamWriteTargetPort,
+  FileDreamWriteTarget,
+  InMemoryDreamState,
+  noopDreamTelemetry,
+  resolveDreamTeamPath,
+} from "./dream"
 export {
   DEFAULT_EVICTION_CAPS,
   EVICTION_DECAY,

@@ -1,0 +1,107 @@
+id: objective-budget-enforce
+title: Thread-goal budget ENFORCEMENT — budget_limited status + idle-continuation hard gate (H17)
+section: 9
+subsystem: Objective substrate (ADR-0394)
+order: 96
+maturity: L3
+status: new
+ui_surfaces: [cli, ide]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on: [objective-first-class, objective-tools]
+purpose: |
+  Makes the ADR-0394 `ObjectiveBudget` (maxTokens / maxTurns) a HARD GATE
+  instead of stored-but-never-read informational state. Before H17 the budget
+  round-tripped through the store and the `objective_get` render, but NO
+  enforcement site ever read it: a goal could run unbounded past its declared
+  envelope and the loop kept re-issuing idle-continuation.
+
+  This wave wires three things:
+
+  1. STATE MACHINE — `ObjectiveStatus` gains a 4th DERIVED value
+     `"budget_limited"` (alongside `blocked` / `completed`; never an explicit
+     caller intent). `createObjectiveStore({ enforceBudget })` gates it. The
+     derive is a TOTAL function over the cell, priority-ordered:
+       blockers>0 ⇒ blocked  (highest)
+       enforce ∧ exhausted ⇒ budget_limited
+       all criteria met (>=1) ⇒ completed
+       else ⇒ explicit (default active)
+     "exhausted" = (maxTokens set ∧ tokensUsed >= maxTokens) ∨ (maxTurns set ∧
+     turnsUsed >= maxTurns). Comparison is EXACT `>=` (no heuristic threshold);
+     no caps ⇒ never exhausted. No sticky flag — raising/resetting the budget
+     re-derives to active (the status is a pure function of the current cell).
+
+  2. LOOP HARD GATE — at the TWO objective idle-continuation sites (proactive
+     compaction `objectiveSetNextActions` callback + reactive PTL-recovery
+     inline `setNextActions`), a budget-exhausted objective does NOT get its
+     continuation re-issued: `objectiveBudgetExhausted(config, threadId)` reads
+     the knob, then `config.objective.get(tid)?.status === "budget_limited"`
+     (NO-THROW). A budget-exhausted goal does not auto-resume.
+
+  3. SURFACE — `objective_get` / `objective_set` / `objective_update` render
+     the budget as a ratio (`tokens=<used>/<max>`) when a cap is set and append
+     `budget_limited: objective budget exhausted — continuation suppressed`
+     when the status is limited, so the model/user understand the gate.
+
+  Reuses the SAME token signal the loop already accumulates: usage flows into
+  the objective via the existing `objective_update { kind:"recordUsage" }`
+  path / host wiring (NO new counter invented). The store is the SSOT for
+  whether a cell is exhausted; the loop merely reads the derived status.
+
+  Default-OFF byte-identical (RFC §1.2): `QUANTA_OBJECTIVE_BUDGET_ENFORCE`
+  unset/≠"1" ⇒ the host builds the store WITHOUT `enforceBudget`, the derived
+  status NEVER takes `budget_limited`, and `objectiveBudgetExhausted` returns
+  false after a single boolean read (no port call) ⇒ the idle-continuation
+  re-issues exactly as ADR-0394. Proven by the OFF arm of both hellgates.
+
+  Slice fence: `src/agent/objective/**` (store + types — the enforce option +
+  derive), `src/agent/loop.ts` (additive gate at the two existing continuation
+  sites only — loop NOT restructured), `src/shared/runtime-config.ts`
+  (additive knob), `src/tool/objective/` (additive render + STATUS_ENUM drift
+  guard membership). No `@/mcp` / `@/llm` / `@/session` / `@/scheduler`.
+evidence:
+  code:
+    - src/agent/objective/store.ts
+    - src/agent/objective/types.ts
+    - src/agent/loop.ts
+    - src/shared/runtime-config.ts
+    - src/tool/objective/index.ts
+  adrs: [394, 402]
+  tests:
+    unit:
+      - tests/unit/objective-budget-enforce-hellgate.test.ts
+      - tests/unit/objective-budget-enforce-e2e-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_OBJECTIVE_BUDGET_ENFORCE
+    where: src/shared/runtime-config.ts
+    default: 'unset (false)'
+    purpose: |
+      Strict `=== "1"` opt-in. OFF ⇒ budget stays informational (status never
+      flips, idle-continuation byte-identical to ADR-0394). ON ⇒ the host
+      constructs the objective store with enforceBudget:true so a goal whose
+      tokensUsed>=maxTokens (or turnsUsed>=maxTurns) derives budget_limited and
+      the loop stops re-issuing its continuation (a budget-exhausted goal does
+      not auto-resume).
+  - name: enforceBudget
+    where: src/agent/objective/store.ts
+    default: 'false'
+    purpose: |
+      Construction-time store option (the SSOT for whether the store enforces).
+      The slice never reads env; the host wires this from the knob above. False
+      ⇒ deriveStatus is byte-identical to ADR-0394 (budget_limited never
+      produced).
+notes: |
+  11 hellgate cases + 3 e2e cases pin: exact-boundary (>=) flip on tokens AND
+  turns independently; no-budget ⇒ never limited; knob OFF ⇒ informational
+  (status never flips, OFF sequence byte-identical); raising the cap un-limits;
+  blockers outrank budget_limited; budget_limited outranks completed; snapshot
+  round-trip re-derives under enforcement (and stays informational without it);
+  end-to-end the reactive-compaction idle-continuation is suppressed for an
+  exhausted objective (knob ON) and fires for under-cap / knob-OFF runs. The
+  e2e drives the REAL runAgent loop via the canonical reactive-compaction
+  scripted-LLM harness. Sibling-shaped to objective-tools (ADR-0402).

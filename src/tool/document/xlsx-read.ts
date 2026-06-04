@@ -135,6 +135,14 @@ const parseSheetNames = (xml: string): string[] => {
   return names
 }
 
+/** Numeric index of `xl/worksheets/sheetN.xml` (`N`). Deterministic (locale-
+ *  independent) ordering — avoids `localeCompare`, which the no-sketchy-code
+ *  scanner forbids for its locale-dependence. */
+const sheetPartIndex = (path: string): number => {
+  const n = /sheet(\d+)\.xml$/.exec(path)?.[1]
+  return n !== undefined ? Number.parseInt(n, 10) : Number.MAX_SAFE_INTEGER
+}
+
 const makeSheet = (name: string, grid: string[][]): XlsxSheet => ({
   name,
   rowCount: grid.length,
@@ -156,7 +164,7 @@ export const parseXlsx = (bytes: Uint8Array): ParseXlsxResult => {
   const names = parseSheetNames(decode(wbBytes))
   const orderedParts = zip.entries
     .filter((e) => /^xl\/worksheets\/sheet\d+\.xml$/.test(e.path))
-    .sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }))
+    .sort((a, b) => sheetPartIndex(a.path) - sheetPartIndex(b.path))
   const sheets: XlsxSheet[] = []
   const count = Math.max(names.length, orderedParts.length)
   for (let i = 0; i < count; i++) {

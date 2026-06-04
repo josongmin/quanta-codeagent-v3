@@ -75,13 +75,10 @@ knobs:
 deliberate_hold: null
 notes: |
   Default-OFF / opt-in on EVERY surface in the tool-surface SSOT manifest (it
-  writes files, so it never auto-seeds — CLI tool-menu reproducibility). SCOPED
-  FOLLOW-UP — PPTX (pptx_write, PresentationML): the STORED-ZIP + OOXML core
-  here (zip-store.ts + ooxml.ts) is the shared substrate a future presentation
-  serializer reuses; only a PresentationML body serializer + a few extra parts
-  (presentation.xml, slide parts, slideLayout/slideMaster) remain. Deliberately
-  NOT half-baked in this slice (quality over breadth — xlsx + docx are the two
-  highest-value deliverables: data/tracker workbooks + reports). Also deferred:
+  writes files, so it never auto-seeds — CLI tool-menu reproducibility). The
+  scoped PPTX follow-up is now LANDED as a sibling entry (pptx-authoring): the
+  STORED-ZIP + OOXML core here (zip-store.ts + ooxml.ts) is the shared substrate
+  the PresentationML serializer reuses. Also deferred:
   cell formatting / styles part (number formats, fonts, column widths), native
   charts, and docx tables/images — the current serializers are content-complete
   (the file opens and round-trips cell/paragraph DATA) but visually plain.

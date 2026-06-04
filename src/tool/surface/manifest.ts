@@ -127,6 +127,7 @@ export const BASE_TOOL_NAMES: readonly string[] = [
   "pdf_read",
   "xlsx_read",
   "docx_read",
+  "pptx_read",
   "session_config",
 ]
 
@@ -488,7 +489,7 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
   },
   {
     name: "xlsx_write",
-    group: ["docx_write"],
+    group: ["docx_write", "pptx_write"],
     origin: "@/tool/document/authoring (via DefaultToolPorts.officeAuthoring)",
     gate: {
       kind: "config-slot",
@@ -498,7 +499,7 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
     risk: "mutating",
     adr: "H14b",
-    note: "NEW CATEGORY — Office document AUTHORING (generate real .xlsx / .docx) alongside image_gen. Pure-TS STORED-ZIP (CRC-32) + minimal-valid OOXML; NO office dependency (installs blocked). Opt-in EVERYWHERE (QUANTA_OFFICE_AUTHORING): writes files, so it never auto-seeds (CLI tool-menu reproducibility). Mutating — serialize in-memory then write through the same FS-jail chokepoint the readers use; an existing target lands at a versioned -vN sibling (never silent overwrite). No port to inject (self-contained). PPTX authoring is a scoped follow-up reusing this STORED-ZIP + OOXML core.",
+    note: "NEW CATEGORY — Office document AUTHORING (generate real .xlsx / .docx) alongside image_gen. Pure-TS STORED-ZIP (CRC-32) + minimal-valid OOXML; NO office dependency (installs blocked). Opt-in EVERYWHERE (QUANTA_OFFICE_AUTHORING): writes files, so it never auto-seeds (CLI tool-menu reproducibility). Mutating — serialize in-memory then write through the same FS-jail chokepoint the readers use; an existing target lands at a versioned -vN sibling (never silent overwrite). No port to inject (self-contained). H14 PPTX follow-up added `pptx_write` (PresentationML) reusing this same STORED-ZIP + OOXML core; the matching `pptx_read` reader is BASE (always-on) alongside xlsx_read/docx_read.",
   },
   {
     name: "prompt_cache_status",

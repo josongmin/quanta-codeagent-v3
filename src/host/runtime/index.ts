@@ -50,6 +50,15 @@ export {
   deriveCapabilityManifest,
 } from "./capabilities"
 export {
+  buildMcpOAuthWiring,
+  type ConnectorsMcpOAuthConfig,
+  createConnectorsMcpOAuthProvider,
+  type McpBrowserFlowResult,
+  type McpOAuthDeps,
+  type McpOAuthWiring,
+  type RunMcpBrowserFlow,
+} from "./mcp-oauth-provider"
+export {
   buildSamplingWiring,
   createLlmSamplingHandler,
   type SamplingHandlerDeps,

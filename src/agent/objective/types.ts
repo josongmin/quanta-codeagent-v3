@@ -17,8 +17,15 @@
  * exactOptional: optional fields are OMITTED when absent (never `: undefined`).
  */
 
-/** Lifecycle of an objective. `completed` may be auto-derived (see port doc). */
-export type ObjectiveStatus = "active" | "blocked" | "completed"
+/** Lifecycle of an objective. `completed` may be auto-derived (see port doc).
+ *
+ * H17 budget enforcement adds `budget_limited`: a DERIVED status (like
+ * `blocked` / `completed`, never an explicit caller intent) that the store
+ * surfaces ONLY when constructed with `enforceBudget: true` AND the cell's
+ * accumulated usage has reached a configured cap (`tokensUsed >= maxTokens`
+ * or `turnsUsed >= maxTurns`). With the default (informational) store the
+ * status NEVER takes this value — byte-identical to ADR-0394. */
+export type ObjectiveStatus = "active" | "blocked" | "completed" | "budget_limited"
 
 /** What a blocker is waiting on. Closed enum — drives later HITL/resume logic. */
 export type WaitingOn = "user" | "tool" | "network" | "child_agent"

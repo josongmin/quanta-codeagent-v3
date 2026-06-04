@@ -326,7 +326,7 @@ describe("/mcp — unknown sub-command", () => {
     const code = await runMcpRender(["wat"], cap.ctx)
     expect(code).toBe(1)
     expect(cap.err).toContain("unknown sub-command")
-    expect(cap.err).toContain("tools | config")
+    expect(cap.err).toContain("tools | login | config")
   })
 })
 

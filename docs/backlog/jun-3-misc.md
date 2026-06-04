@@ -115,7 +115,12 @@
 > - **xlsx_read + docx_read REAL ✅ (검증보완 — H14b 라운드트립 완성)**: ADR-0138 deps 보류를 **node:zlib.inflateRawSync + 순수-TS OOXML 파서**로 해소(신규 dep 0). STORED+DEFLATE 둘 다. pure `parseXlsx`/`parseDocx` 코어 + FS-jail 도구. **TRUE 라운드트립**: `xlsx_write`→디스크→`xlsx_read`로 셀 복귀(자체 reader 통과). 둘 다 BASE reader(항상-on). 죽은 에이전트가 `unzip`+테스트는 완성, 부모가 파서+도구+배선 마무리. xlsx_read stub catalog→L4 stable.
 > - **H15 추론 carry-over ✅ (seam)**: `openai-responses-wire` capture(`encrypted_content`)→store→다음턴 input 재emit(`include`), `QUANTA_REASONING_CARRYOVER` default-OFF byte-identical, OpenAI-Responses 한정. **잔여**: adapter store 생성+threading 라이브배선 + `x-reasoning-included` 헤더.
 > - **H13 external-config 마이그레이션 ✅ (seam)**: `src/migration/external-config/`(detect walker + 6 converter reuse repo-rules/glob-rules/frontmatter + throttle ledger), `QUANTA_MIGRATE_CONFIG` default-OFF, repl 시작 notice. **잔여**: converted item을 live permission/hook/mcp/subagent store에 persist(슬라이스 격리 위해 surface adapter 필요).
-> - **H19 MCP resources/prompts/roots ⏸ (overload로 미완)**: 에이전트가 TDD 테스트만 쓰고 API Overloaded로 죽음 → `@/mcp/resources` 모듈 미구현. orphan 테스트 삭제, **재시도 대기**(토대 없어 인라인 완성 부적합).
+> - **H19 MCP resources/prompts/roots ✅ (wave-4 재시도 완료)**: `src/mcp/resources/` + typed client 메서드(listResources/readResource/subscribe/listPrompts/getPrompt) + inbound `roots/list` + `notifications/resources/updated` 라우팅 + honest roots 광고 + `QUANTA_MCP_ROOTS`. raw -32601 금지(capability 없으면 typed error). 12/0. 잔여: host roots provider 배선.
+
+> **✅ jun-04 wave-4 (강화·보완) 완료.** tsc 0, 신규 59/0, 광역 3513/0, catalog 851, biome 0.
+> - **H14 PPTX ✅**: `pptx_write`(officeAuthoring 게이트)+`pptx_read`(BASE) — H14b STORED-ZIP+OOXML 코어 재사용, PresentationML. 슬라이드 title+body 라운드트립. Office triad(xlsx/docx/pptx) 완성. 17/0.
+> - **B1 sampling LIVE 배선 ✅**: seam→실가동. fence-correct(wiring은 `internal.ts`, `mcp-bridge`는 pure consumer). LLMPort를 `bootstrap-session`→`loadFeatures(slog,llm)`로 threading. advertise+handler 동시+negotiator-compile 검증. default-OFF byte-identical 증명. 9/0. 잔여: supervised-reconnect path(@/mcp).
+> - **🐛 MUTATING_TOOL_TABLE 체계갭 수정**: jun-04 신규 8도구(coverage_check/prompt_cache_status/image_gen/xlsx_write/docx_write/pptx_write/docx_read/pptx_read)가 **전부 `src/agent/mode.ts` 분류 누락**=plan-mode dispatch시 UnknownToolError 잠재크래시(docx/pptx_read 테스트 RED). 8개 전부 분류(reader=null/writer=write_filesystem)+크로스체크 갱신. **교훈: 신규 도구는 mode.ts도 반드시.**
 
 - **H1. loop-on-lints/tests/command 자가수정 + 편집결과에 도입-lint delta 자동첨부** — ✅ **DONE (jun-04)** (ADR-0472 edit-repair-loop + 수렴 e2e)
   - 기능/목적: 편집 후 **도입된** lint만(델타) 모델에 자동 첨부 + lint/test/명령이 green 될 때까지 fast 모델로 재편집(maxIters, 커스텀지시).
@@ -141,7 +146,7 @@
   - ROI: 고, 비용: 저(~40LOC).
   - 코드: bash 도구 post-exec(`src/git/directive-emit/` 옆) — stdout 분류기 + 기존 turn-diff 이벤트 버스로.
 
-- **H7. apiKeyHelper + aws/gcpAuthRefresh (회전 클라우드 크레덴셜)** — ⚠️ **PARTIAL (어딧)**: `ProviderCredentialSource` 타입 seam + `oidc-federation.ts`(GitHub OIDC 교환) + `connectors/token-refresh-scheduler` 존재하나 — apiKeyHelper(셸-mint) 0, bedrock/vertex adapter는 SDK 기본체인 위임만(pre-call refresh 훅 없음). 남은 일: CredentialSource를 adapter pre-call에 배선 + apiKeyHelper.
+- **H7. apiKeyHelper + aws/gcpAuthRefresh (회전 클라우드 크레덴셜)** — ✅ **DONE (jun-04, seam+adapter)**: `src/llm/credential-helper.ts`(executable CredentialSource — apiKeyHelper 셸-mint+TTL캐시, aws/gcpAuthRefresh pre-call, trust-gate, no-leak) + bedrock/vertex adapter pre-call 훅 배선, 4 knob(default-UNSET=byte-identical). 14 hellgate/e2e. **잔여**: composition-root가 knob 읽어 trust-gated source 생성+adapter 주입(작은 wire).
   - 기능/목적: API 키를 mint하는 사용자지정 셸 명령(TTL 캐시) + Bedrock/Vertex 호출 전 SSO/STS 단기크레덴셜 refresh 명령. trust-게이트.
   - 레퍼런스: Claude `apiKeyHelper`/`awsAuthRefresh`/`gcpAuthRefresh` 설정 + `CLAUDE_CODE_API_KEY_HELPER_TTL_MS` + 워크스페이스 trust 전 차단.
   - 시나리오: 회전크레덴셜(corp SSO/STS, 키볼트) 사용자가 긴 Bedrock/Vertex 세션을 돌릴 수 있게 됨(현재 불가).
@@ -197,7 +202,7 @@
   - ROI: 고(Responses/o-series·구독경로), 비용: 중(output 아이템에서 encrypted_content 캡처→턴별 저장→input reasoning 아이템 재emit, store:false 라운드트립).
   - 코드: `src/llm/openai-responses-wire.ts` + `src/llm/responses-stream.ts` + `src/memory/typed-event`.
 
-- **H16. auto-dream — 세션간 메모리 통합 (in-turn distill과 별개)** — ⚠️ **PARTIAL (어딧)**: `memory/cross-session/`(ADR-0282) + `memory/auto-trigger/`(ADR-0281, 세션END 트리거 Stage-1→promotion) 존재하나 — 세션間 스케줄러/`sessions_since`·`hours_since`/dream-lock/`team/` 공유디렉토리 0. 남은 일: 세션간 elapsed-trigger 스케줄러 + team write target.
+- **H16. auto-dream — 세션간 메모리 통합 (in-turn distill과 별개)** — ✅ **DONE (jun-04, seam)**: `src/memory/dream/`(CrossSessionDreamTrigger=persisted sessions/hours 카운터+클럭주입, dream-lock, team write target=`~/.quanta/memory/team/cross-session.md` MEMORY.md 안건드림, 기존 `runPhase2` 재사용), `/dream`+`/dream status`, `QUANTA_AUTO_DREAM`+thresholds default-OFF. 16+2+7 test. **잔여**: composition-root가 trigger 생성+session-end 훅 주입.
   - 기능/목적: 세션들 **사이** 백그라운드 통합 패스(sessions-since/hours-since 카운트 + 전용 lock + 포크된 `auto_dream` 쿼리), `team/` 공유 디렉토리 기록(MEMORY.md는 안 건드림).
   - 레퍼런스: Claude `tengu_auto_dream_{fired,completed,skipped}`(hours_since/sessions_since) + `team/` 기록 + `DreamTask`.
   - 시나리오: 멀티세션 사용자의 지식이 라이브 턴 버짓 안 태우고 누적.
@@ -205,7 +210,7 @@
   - ROI: 고(멀티세션), 비용: 중(세션간 스케줄러 훅 + lock + 별도 write target).
   - 코드: `src/scheduler/`(세션간 트리거) + `src/memory/consolidate/`(team/ 컨벤션).
 
-- **H17. thread-goals 예산강제 + idle 지속 (objective 위에)** — ⚠️ **PARTIAL (어딧)**: idle-continuation은 **배선됨**(`loop.ts`가 `objective.setNextActions` 호출). 단 예산은 **informational-only**(`ObjectiveBudget.maxTokens/maxTurns` 저장되나 enforce 사이트 0, status는 active/blocked/completed뿐 — budget_limited/usage_limited 없음). 남은 일: 예산 enforce 상태머신.
+- **H17. thread-goals 예산강제 + idle 지속 (objective 위에)** — ✅ **DONE (jun-04 배선완료)**: `ObjectiveStatus`에 `budget_limited` 추가, `loop.ts`의 2개 objective continuation 사이트에 hard-gate(예산초과시 setNextActions 중단), 기존 token signal 재사용, `QUANTA_OBJECTIVE_BUDGET_ENFORCE` default-OFF byte-identical, objective 도구 출력에 `tokens=used/max` 표시. 14 hellgate/e2e.
   - 기능/목적: per-thread 목표에 `token_budget`/`time_used` **강제** 상태머신(active|paused|usage_limited|budget_limited|completed|blocked) + thread가 idle이면 목표 자동재개(plan-mode/active-turn/queue 가드 + 세마포어).
   - 레퍼런스: Codex `core/src/goals.rs` — budget_limited 자동전이 + goal-continuation 루프 + 가드.
   - 시나리오: 방금 연 objective 도구를 진짜 자율성으로 — idle 시 목표 작업 재개, 예산 도달 시 하드정지.
@@ -213,7 +218,7 @@
   - ROI: 고, 비용: 중(데이터모델은 있고, 예산강제 + idle-continuation 게이팅이 신규 제어흐름).
   - 코드: `src/tool/objective/` + `src/agent/objective/store.ts` + idle 훅(idle-monitor/reactor 연동).
 
-- **H18. MCP server OAuth 로그인 + keyring + 재연결 재인증** — ⚠️ **PARTIAL (어딧)**: OAuth-discovery 전체 스위트가 `src/connectors/`에 **이미 있음**(`oauth-discovery.ts` RFC8414 + DCR + token-rotation + PKCE browser-flow) — 단 `src/mcp/`가 **임포트 0**(미연결). keyring은 DXT용만 있음(MCP OAuth용 아님). 남은 일: connectors OAuth를 mcp client connect/reconnect에 배선 + keyring 어댑터.
+- **H18. MCP server OAuth 로그인 + keyring + 재연결 재인증** — ✅ **DONE (jun-04 배선완료)**: `src/mcp/oauth/` 포트 seam(@/mcp leaf 유지) + `src/host/runtime/mcp-oauth-provider.ts`(connectors discover→DCR→PKCE browser→exchange→rotation, advertise-iff-able), `McpClient.oauthProvider` opt + start()에서 bearer resolve, per-server `oauth?` config, `/mcp login <server>`, `QUANTA_MCP_OAUTH` default-OFF, token no-leak. 29 test. **잔여**: 실 OS keyring 바인딩(파일스토어 0600은 됨), 401-mid-session re-auth(reconnect는 됨).
   - 기능/목적: HTTP MCP 서버 OAuth(.well-known 디스커버리→브라우저 authorize→loopback callback→OS keyring 저장→만료시 auto-refresh).
   - 레퍼런스: Codex `rmcp-client/src/oauth.rs` + app-server `mcpServer/oauthLogin`(+completed 알림) + `mcp_oauth_credentials_store_mode`.
   - 시나리오: OAuth 요구하는 hosted MCP(GitHub/Linear 등)를 quanta가 사용.
@@ -236,7 +241,7 @@
 > **✅ jun-04 코드 대조 어딧 (3 병렬):** stale 2건이 **이미 구현됨**으로 확정 → ✅ 마킹. PARTIAL(seam/미배선) 2건. 나머지는 ABSENT 재확인.
 > - ✅ **2-phase 컴팩션 = 이미 구현**(jun-04 BackgroundSummarizationController가 success-gated 2-phase, loop 배선됨).
 > - ✅ **백그라운드 출력 spill-to-disk = 이미 구현**(`src/tool/output-spill.ts capToolOutput`, registry 전체 배선).
-> - ⚠️ **transcript retention sweep = PARTIAL**(`jsonl-retention.ts applyRetention` 구현됐으나 **호출처 0** = session envelope rail에 미배선 dead-code).
+> - ✅ **transcript retention sweep = DONE (jun-04 배선)**(`applyRetention`을 `sessionsRoot()`에 `sweepSessionTranscripts`로 배선 + `/session-registry cleanup --transcripts` + knob).
 > - ⚠️ **멀티에이전트 코디네이션 = PARTIAL**(mailbox request/response/broadcast는 있으나 DAG/리더-브로커/idle-beacon ABSENT).
 
 - **멀티에이전트 코디네이션 (Claude `--agent-teams`)** — ⚠️ **PARTIAL** (mailbox transport만 있음; DAG/리더-브로커/idle-beacon 없음) — 리더-중재 권한 에스컬레이션(워커가 mailbox로 권한요청→리더 브로커) / 태스크 의존성 DAG(`blocks`/`blockedBy`, 현 `src/mcp/tasks/types.ts`는 flat) / idle-notification 비콘 + team-idle 배리어. 코드: `src/subagent/`·`src/mcp/tasks/` 위. 비용: 중.
@@ -254,7 +259,7 @@
 - **/doctor 시작 자가진단** (Codex) — auth/터미널/MCP/config/state-DB 헬스리포트. "왜 안 되지" 서포트 churn↓. 코드: 신규 `/doctor` 스킬. 비용: 저-중.
 - **PR-review-thread resolve loop** (Claude) — `gh_pr_resolve_thread`(GraphQL mutation) + concurrent-push→rebase. quanta는 thread read만(`src/tool/gh/pr-blame.ts`). 비용: 저-중.
 - **forked_from_id 디스크 영속** (Codex) — `src/session/envelope.ts` SessionMeta에 fork 계보 없음(인메모리만). 스키마 1필드. 비용: 초저.
-- **세션 transcript retention sweep** (둘 다) — ⚠️ **PARTIAL (구현됐으나 미배선)**: `jsonl-retention.ts applyRetention` 완성인데 **호출처 0**; `/session-registry cleanup`는 resource-registry(handle)만 쓸고 `.jsonl` envelope rail은 안 건드림 → envelope 무한증가. **남은 일: `sessionsRoot()`에 1콜 배선.** 비용: 저.
+- **세션 transcript retention sweep** (둘 다) — ✅ **DONE (jun-04 배선완료)**: `sweepSessionTranscripts`(host/CLI layer, fence-clean)가 `applyRetention`을 `sessionsRoot()` `.jsonl` envelope에 배선, `/session-registry cleanup --transcripts`(+`--dry-run`), `QUANTA_SESSION_TRANSCRIPT_MAX_BYTES`(default-OFF=무한). 9+5 hellgate/e2e.
 - **백그라운드 출력 spill-to-disk** (Claude) — ✅ **이미 구현**: `src/tool/output-spill.ts capToolOutput`이 풀 출력을 `.quanta/tool-output/<uuid>.txt`에 spill + "The full output is at: path" 마커 + 재read 안내, `registry.ts:149`에서 모든 도구결과 배선(bash 완료 본문도 위임). 비용: 0(완료).
 - **AI 세션타이틀 자동생성** (Claude) — `src/runner/session-ops`는 manual rename만. 첫 턴 싼 LLM 호출로 title. 비용: 저.
 

@@ -8,6 +8,8 @@ import {
 } from "./elicitation/inbound-router"
 import type { ElicitationPrompter } from "./elicitation/port"
 import { isResponse, type JsonRpcMessage } from "./jsonrpc"
+import { headlessOAuthRejecter } from "./oauth"
+import type { McpOAuthProviderPort } from "./oauth/port"
 import type { McpPrompt } from "./resources"
 import {
   isResourceNotificationMethod,
@@ -153,7 +155,23 @@ export class McpClient {
   private readonly config: McpServerConfig
   private readonly requestTimeoutMs: number
   private readonly negotiator: CapabilityNegotiator
-  private readonly transport: McpTransport
+  /** The carrier. Constructed eagerly when an explicit transport was supplied
+   *  (or no OAuth resolution is needed); otherwise built lazily in `start()`
+   *  AFTER the OAuth bearer is resolved so it can be merged into the static
+   *  headers the HTTP transport reads at construction (H18). */
+  private transport: McpTransport | null
+  /** H18 — how to (re)build the carrier once the bearer is known. Set only when
+   *  transport construction is deferred (OAuth active + a factory/default
+   *  carrier). `null` once `transport` is materialized. */
+  private readonly transportFactory: ((config: McpServerConfig) => McpTransport) | null
+  /** H18 — the wired OAuth provider. Defaults to {@link headlessOAuthRejecter}
+   *  (obtains no token), so a client with no provider — or a server that did NOT
+   *  opt in (`config.oauth !== true`) — is byte-identical to the pre-H18 path:
+   *  no discovery, no flow, no `Authorization` header. */
+  private readonly oauthProvider: McpOAuthProviderPort
+  /** H18 — true IFF this server opted into OAuth (`config.oauth === true`) AND a
+   *  real provider is wired. The single gate for every OAuth side effect. */
+  private readonly oauthActive: boolean
   private readonly elicitationPrompter: ElicitationPrompter
   /** ADR-0470 — inbound `sampling/createMessage` handler. Defaults to
    *  {@link headlessSamplingRejecter} (declines) when none is injected, which
@@ -204,14 +222,40 @@ export class McpClient {
       samplingHandler?: SamplingHandlerPort
       rootsProvider?: RootsProviderPort
       resourceObserver?: McpResourceObserver
+      oauthProvider?: McpOAuthProviderPort
     },
   ) {
     this.config = config
     this.requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS
     this.negotiator = opts?.negotiator ?? defaultNegotiator
+    // H18 — OAuth is active only when this server opted in AND a real provider
+    // is wired. The default rejecter obtains no token, so an unwired client (or
+    // a non-opted-in server) is byte-identical: no deferral, no header.
+    this.oauthProvider = opts?.oauthProvider ?? headlessOAuthRejecter
+    this.oauthActive = config.oauth === true && opts?.oauthProvider !== undefined
     const t = opts?.transport
-    this.transport =
-      t === undefined ? defaultTransportFor(config) : typeof t === "function" ? t(config) : t
+    // When OAuth is active we MUST resolve the bearer before constructing the
+    // carrier (the HTTP transport reads static headers at construction time), so
+    // we defer to `start()` — UNLESS an explicit transport INSTANCE was supplied
+    // (a test double / already-built carrier), which we use verbatim. A factory
+    // (or the default) is captured and invoked in `start()` with the
+    // bearer-merged config.
+    if (t !== undefined && typeof t !== "function") {
+      // Explicit instance: use as-is (byte-identical to the legacy path).
+      this.transport = t
+      this.transportFactory = null
+    } else {
+      const factory = t ?? defaultTransportFor
+      if (this.oauthActive) {
+        // Defer construction until the bearer is known.
+        this.transport = null
+        this.transportFactory = factory
+      } else {
+        // No OAuth: construct eagerly, exactly as before (byte-identical).
+        this.transport = factory(config)
+        this.transportFactory = null
+      }
+    }
     // Track C: when no prompter is injected, default to the headless rejecter.
     // This makes inbound `elicitation/create` requests resolve to a proper
     // `{action:"decline"}` response instead of being silently dropped — well-
@@ -234,9 +278,21 @@ export class McpClient {
     if (this.config.command.length === 0 && (this.config.url ?? "") === "") {
       throw new McpError(`mcp server "${this.config.name}" has empty command`)
     }
-    this.unsubscribeMessage = this.transport.onMessage((msg) => this.dispatch(msg))
-    this.unsubscribeExit = this.transport.onExit(() => this.onTransportExit())
-    await this.transport.start()
+    // H18 — when OAuth is active the transport was deferred so the bearer can be
+    // resolved and merged into the static headers the HTTP carrier reads at
+    // construction. `tokenFor` is total (resolves `undefined` on a declined/
+    // failed login), in which case we proceed unauthenticated (the server
+    // answers 401, surfaced like any other error) rather than crashing the load.
+    if (this.transport === null) {
+      const token = await this.oauthProvider.tokenFor(this.config.name)
+      this.transport = (this.transportFactory ?? defaultTransportFor)(
+        this.withBearer(this.config, token),
+      )
+    }
+    const transport = this.transport
+    this.unsubscribeMessage = transport.onMessage((msg) => this.dispatch(msg))
+    this.unsubscribeExit = transport.onExit(() => this.onTransportExit())
+    await transport.start()
 
     const initResult = await this.request("initialize", {
       protocolVersion: PROTOCOL_VERSION,
@@ -436,7 +492,9 @@ export class McpClient {
     this.failAllPending(new McpError(`mcp server "${this.config.name}" stopped`))
     this.unsubscribeMessage?.()
     this.unsubscribeMessage = null
-    await this.transport.close()
+    // `transport` is null only if `stop()` runs before `start()` materialized
+    // the deferred OAuth carrier — nothing to close in that case.
+    await this.transport?.close()
     this.unsubscribeExit?.()
     this.unsubscribeExit = null
   }
@@ -478,9 +536,28 @@ export class McpClient {
    *  wrapped as an {@link McpError} so callers branch on a stable type; the
    *  transport never throws here (it returns the error). */
   private send(payload: unknown): Error | null {
+    if (this.transport === null) {
+      // Unreachable on the happy path: `send` is only called after `start()`
+      // materializes the carrier. Guarded so a pre-start send fails as a typed
+      // error rather than a null deref.
+      return new McpError(`mcp server "${this.config.name}" transport not started`)
+    }
     const err = this.transport.send(payload)
     if (err === null) return null
     return err instanceof McpError ? err : new McpError(err.message, { cause: err })
+  }
+
+  /** H18 — return a copy of `config` with `Authorization: Bearer <token>` merged
+   *  into its static headers. When `token` is `undefined` (no token obtained)
+   *  the config is returned UNCHANGED, so an unauthenticated load is
+   *  byte-identical (no empty/blank header injected). The bearer is never logged
+   *  — it flows only into the transport's header map. */
+  private withBearer(config: McpServerConfig, token: string | undefined): McpServerConfig {
+    if (token === undefined) return config
+    return {
+      ...config,
+      headers: { ...(config.headers ?? {}), Authorization: `Bearer ${token}` },
+    }
   }
 
   private dispatch(msg: JsonRpcMessage): void {

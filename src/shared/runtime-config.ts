@@ -76,6 +76,21 @@ const parseBool = (raw: string | undefined): boolean => {
   return raw === "1" || raw.toLowerCase() === "true" || raw.toLowerCase() === "on"
 }
 
+/** Parse a strictly-positive finite number (fractional allowed). Used for the
+ *  auto-dream HOURS threshold where a sub-hour cadence (`0.5`) is legal.
+ *  Rejects `NaN`, `Infinity`, zero, negatives, and non-numeric strings —
+ *  invalid ⇒ `undefined` (the caller falls back to a documented default). */
+const parsePositiveNumber = (raw: string | undefined, varName: string): number | undefined => {
+  if (raw === undefined) return undefined
+  const trimmed = raw.trim()
+  const n = Number(trimmed)
+  if (trimmed.length === 0 || !Number.isFinite(n) || n <= 0) {
+    stderrWarn(`ignoring invalid ${varName}="${raw}" — must be a positive number`)
+    return undefined
+  }
+  return n
+}
+
 /** Parse a delimiter-separated list (`,` `:` `;` `\n`). Trims, drops empties.
  *  Returns a frozen array (length 0 ⇒ caller treats as "no extras"). Used for
  *  list-shaped env vars that EXTEND a code-side default (operator merge, not
@@ -136,13 +151,19 @@ export interface RuntimeConfig {
    *  (byte-identical). Also read by the slice's own `skillMcpDepsEnabled`. */
   readonly skillMcpDeps: boolean
   /** ADR-0470 B1 follow-up inbound MCP sampling gate (`QUANTA_MCP_SAMPLING`).
-   *  Strict opt-in (`=== "1"`). When ON *and* an LLM + a consent prompter are
-   *  assembled at the composition root, the MCP client advertises `sampling`
-   *  AND is wired with an `@/llm`-backed handler (HITL consent on every request;
-   *  see `host/runtime/mcp-sampling-handler.ts` `buildSamplingWiring`).
+   *  Strict opt-in (`=== "1"`). SEAM (validated, not yet composed at the root):
+   *  the handler builder (`host/runtime/mcp-sampling-handler.ts`
+   *  `buildSamplingWiring`) and the `McpClient` `samplingHandler` acceptance slot
+   *  both exist and are unit-tested, but NO production code reads this field to
+   *  pass `opts.sampling` + a `samplingHandler` to the client yet. Until that
+   *  composition lands, this field has zero production consumers and is a no-op.
+   *  Intended end state (advertise-iff-able): when ON *and* an LLM + a consent
+   *  prompter are assembled at the composition root, the MCP client advertises
+   *  `sampling` AND is wired with an `@/llm`-backed handler (HITL consent on
+   *  every request); the advertisement and the handler always move together.
    *  Default false ⇒ sampling is NOT advertised and the headless rejecter
-   *  declines (`no-handler`) — byte-identical. The advertisement and the handler
-   *  always move together (advertise-iff-able). */
+   *  declines (`no-handler`) — byte-identical (and currently byte-identical even
+   *  when ON, because the field is unread). */
   readonly mcpSampling: boolean
   /** H19 (jun-3-misc §3) inbound MCP `roots/list` gate (`QUANTA_MCP_ROOTS`).
    *  Strict opt-in (`=== "1"`). When ON *and* the composition root wires a
@@ -155,6 +176,17 @@ export interface RuntimeConfig {
    *  this knob — they only act when the connected server advertises the
    *  matching capability, so they are always safe to expose. */
   readonly mcpRoots: boolean
+  /** H18 (jun-04) MCP HTTP-server OAuth gate (`QUANTA_MCP_OAUTH`). Strict opt-in
+   *  (`=== "1"`). When ON *and* the composition root wires a connectors-backed
+   *  `McpOAuthProviderPort` (RFC 8414 discovery → DCR → PKCE browser flow →
+   *  token, RFC 6749 §6 refresh) AND a server config sets `oauth: true`, the
+   *  `McpClient` resolves a bearer and attaches `Authorization: Bearer <token>`
+   *  to that server's HTTP requests. Default false ⇒ no provider is wired, the
+   *  client falls back to the headless rejecter (obtains no token), and every
+   *  MCP load is byte-identical to the pre-H18 path (no discovery, no flow, no
+   *  header). The provider and the per-server `oauth` opt-in must BOTH be present
+   *  for any OAuth side effect (advertise-iff-able). */
+  readonly mcpOAuth: boolean
   /** H9 read `file_unchanged` dedup gate (`QUANTA_READ_DEDUP`). Strict opt-in
    *  (`=== "1"`). When ON, the `read` tool short-circuits a re-read of the SAME
    *  (canonical path, offset, limit) whose on-disk mtime equals the recorded
@@ -213,6 +245,19 @@ export interface RuntimeConfig {
    *  re-offer via `~/.quanta/external_config_migration.json`, and surfaces a
    *  one-line stderr notice. Import is opt-in (notice only). */
   readonly migrateConfig: boolean
+  /** H17 thread-goal budget ENFORCEMENT gate (`QUANTA_OBJECTIVE_BUDGET_ENFORCE`).
+   *  Strict opt-in (`=== "1"`). Default false ⇒ the `ObjectiveBudget`
+   *  (maxTokens/maxTurns) stays purely INFORMATIONAL — the objective store's
+   *  derived `status` never takes `"budget_limited"` and the loop's
+   *  idle-continuation re-issues `setNextActions` exactly as today
+   *  (byte-identical to ADR-0394). When true the host constructs the objective
+   *  store with `enforceBudget: true`, so once accumulated `tokensUsed >=
+   *  maxTokens` (or `turnsUsed >= maxTurns`) the status flips to
+   *  `"budget_limited"` and the loop STOPS re-issuing continuation for that
+   *  exhausted objective (a hard gate — a budget-exhausted goal does not
+   *  auto-resume). Raising/resetting the budget un-limits (the status is a pure
+   *  function of the current cell, no sticky flag). */
+  readonly objectiveBudgetEnforce: boolean
   /** FS jail disable flag (`QUANTA_FS_JAIL=off`). Default false (jail ON). */
   readonly fsJailDisabled: boolean
   /** ADR-0062 cap-as-instruction dispatch enforcement (`QUANTA_CAP_ENFORCE=1`).
@@ -227,6 +272,18 @@ export interface RuntimeConfig {
   /** Sessions root override (`QUANTA_SESSIONS_DIR`). Absent ⇒ session/paths
    *  computes `~/.quanta/sessions`. */
   readonly sessionsDir: string | undefined
+  /** Per-session transcript retention cap in cumulative utf-8 BYTES
+   *  (`QUANTA_SESSION_TRANSCRIPT_MAX_BYTES`). Feeds the host-layer transcript
+   *  sweep (`@/apps/cli/session-transcript-retention`) which applies the
+   *  `@/stream` `applyRetention` sliding window to each `<id>.jsonl` envelope
+   *  under `sessionsRoot()`.
+   *
+   *  Default ABSENT ⇒ retention is OFF (unbounded — today's behavior). This is
+   *  the SAFE default: the sweep is a no-op until an operator opts in, and even
+   *  when ON it NEVER deletes a whole session — it only trims the OLDEST rows of
+   *  a single transcript once that transcript alone crosses the cap, keeping the
+   *  newest events. So recent/active sessions are inherently preserved. */
+  readonly sessionTranscriptMaxBytes: number | undefined
   /** HITL overrides JSON path (`QUANTA_HITL_OVERRIDES`). Absent ⇒
    *  `agent/hitl-tier-registry` defaults to `~/.quanta/hitl-overrides.json`. */
   readonly hitlOverridesPath: string | undefined
@@ -358,6 +415,25 @@ export interface RuntimeConfig {
    *  eviction; pending/running entries are never evicted (see
    *  `default-registry.ts` invariant #3). */
   readonly deferredCap: number | undefined
+  /** H16 cross-session memory consolidation ("auto-dream") gate
+   *  (`QUANTA_AUTO_DREAM`). Default false ⇒ the cross-session dream trigger
+   *  is NOT constructed: its persisted counter never advances, no state is
+   *  read/written, and the consolidate pass never fires from elapsed
+   *  sessions/hours (byte-identical to the pre-H16 path). The composition
+   *  root builds + wires `CrossSessionDreamTrigger` with a `DreamPolicy` ONLY
+   *  when this is on. */
+  readonly autoDream: boolean
+  /** H16 sessions-since-last-dream threshold (`QUANTA_AUTO_DREAM_SESSIONS`).
+   *  Absent ⇒ `DEFAULT_DREAM_POLICY.sessionsThreshold` (5). Drives the OR
+   *  semantics — a dream fires after this many session-ends OR after the
+   *  hours threshold, whichever crosses first. Positive integer; invalid ⇒
+   *  fall back to default. Only consulted when `autoDream` is on. */
+  readonly autoDreamSessions: number | undefined
+  /** H16 hours-since-last-dream threshold (`QUANTA_AUTO_DREAM_HOURS`).
+   *  Absent ⇒ `DEFAULT_DREAM_POLICY.hoursThreshold` (24). Positive number
+   *  (fractional allowed, e.g. `0.5` for a 30-minute cadence in tests);
+   *  invalid ⇒ fall back to default. Only consulted when `autoDream` is on. */
+  readonly autoDreamHours: number | undefined
   /** R4 audit-H — disable the logger label-keyed leaky-bucket rate limiter
    *  (`QUANTA_LOG_RATE_LIMIT=off`). Default false (rate limit ON). Set to
    *  `off` to restore unbounded `logger.{info,warn,error,debug}` semantics —
@@ -366,6 +442,31 @@ export interface RuntimeConfig {
    *  surface where a hostile catch in a hot loop could emit millions of
    *  `logger.warn` lines and stall stderr backpressure. */
   readonly logRateLimitDisabled: boolean
+  /** H7 rotating cloud credentials — apiKeyHelper shell command
+   *  (`QUANTA_API_KEY_HELPER`). Absent ⇒ no helper is wired; the credential
+   *  source's `mintApiKey()` is a no-op (byte-identical to BYOK/env-key today).
+   *  When set, the composition root builds a trust-gated `CredentialSource` that
+   *  runs this command to mint an API key, TTL-cached. Mirrors Claude Code's
+   *  `apiKeyHelper`. SENSITIVE — arbitrary command execution; the source gates
+   *  it behind the workspace trust check before ever shelling out. */
+  readonly apiKeyHelper: string | undefined
+  /** H7 — apiKeyHelper / refresh TTL in ms (`QUANTA_API_KEY_HELPER_TTL_MS`).
+   *  Absent ⇒ `credential-helper.ts` `DEFAULT_HELPER_TTL_MS` (5 min, mirroring
+   *  Claude's `CLAUDE_CODE_API_KEY_HELPER_TTL_MS`). Bounds both the minted-key
+   *  cache window AND the pre-call cloud-refresh throttle. */
+  readonly apiKeyHelperTtlMs: number | undefined
+  /** H7 — AWS pre-call refresh command (`QUANTA_AWS_AUTH_REFRESH`). Absent ⇒ the
+   *  Bedrock adapter does NOT run a pre-call refresh (byte-identical SDK default
+   *  chain). When set, `refreshCloudCreds("aws")` runs this command (e.g.
+   *  `aws sso login`) before each Bedrock call, TTL-throttled. SENSITIVE —
+   *  trust-gated. */
+  readonly awsAuthRefresh: string | undefined
+  /** H7 — GCP pre-call refresh command (`QUANTA_GCP_AUTH_REFRESH`). Absent ⇒ the
+   *  Vertex adapter does NOT run a pre-call refresh (byte-identical ADC path).
+   *  When set, `refreshCloudCreds("gcp")` runs this command (e.g.
+   *  `gcloud auth application-default login`) before each Vertex call,
+   *  TTL-throttled. SENSITIVE — trust-gated. */
+  readonly gcpAuthRefresh: string | undefined
 }
 
 const stringOrUndef = (raw: string | undefined): string | undefined =>
@@ -388,16 +489,22 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // ADR-0476 — strict `=== "1"` opt-in (matches the `skillMcpDepsEnabled`
     // slice gate). Default false ⇒ no deps lifted, no auto-attach.
     skillMcpDeps: env["QUANTA_SKILL_MCP_DEPS"] === "1",
-    // ADR-0470 B1 follow-up — strict `=== "1"` opt-in. Default false ⇒ MCP
-    // `sampling` is NOT advertised and the headless rejecter declines
-    // (`no-handler`). The composition root only wires a handler (and advertises)
-    // when this is on AND an LLM + consent prompter are present.
+    // ADR-0470 B1 follow-up — strict `=== "1"` opt-in. SEAM (validated, not yet
+    // composed at the root): no production code reads this field, so it is a
+    // no-op today (byte-identical ON or OFF). Default false ⇒ MCP `sampling` is
+    // NOT advertised and the headless rejecter declines (`no-handler`). Intended
+    // end state: the composition root wires a handler (and advertises) only when
+    // this is on AND an LLM + consent prompter are present.
     mcpSampling: env["QUANTA_MCP_SAMPLING"] === "1",
     // H19 — strict `=== "1"` opt-in. Default false ⇒ MCP `roots` is NOT
     // advertised and inbound `roots/list` answers an empty list (byte-identical).
     // The composition root advertises + wires the RootsProviderPort together
     // only when this is on AND a workspace roots source is available.
     mcpRoots: env["QUANTA_MCP_ROOTS"] === "1",
+    // H18 — strict `=== "1"` opt-in. Default false ⇒ no OAuth provider is wired,
+    // the McpClient falls back to the headless rejecter (no token), every MCP
+    // load is byte-identical (no discovery, no flow, no Authorization header).
+    mcpOAuth: env["QUANTA_MCP_OAUTH"] === "1",
     // H9 — strict `=== "1"` opt-in. Default false ⇒ the read tool renders full
     // content on every call and allocates no per-range dedup state.
     readDedup: env["QUANTA_READ_DEDUP"] === "1",
@@ -415,11 +522,18 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // H13 — strict `=== "1"` opt-in. Default false ⇒ no config-migration detect,
     // no prompt, no ledger (byte-identical startup).
     migrateConfig: env["QUANTA_MIGRATE_CONFIG"] === "1",
+    // H17 — strict `=== "1"` opt-in. Default false ⇒ objective budget stays
+    // informational (status never flips, idle-continuation byte-identical).
+    objectiveBudgetEnforce: env["QUANTA_OBJECTIVE_BUDGET_ENFORCE"] === "1",
     fsJailDisabled: parseBool(env["QUANTA_FS_JAIL"] === "off" ? "1" : undefined),
     capEnforce: parseBool(env["QUANTA_CAP_ENFORCE"]),
     gitSha: stringOrUndef(env["QUANTA_GIT_SHA"]),
     pricingVersion: stringOrUndef(env["QUANTA_PRICING_VERSION"]),
     sessionsDir: stringOrUndef(env["QUANTA_SESSIONS_DIR"]),
+    sessionTranscriptMaxBytes: parsePositiveInt(
+      env["QUANTA_SESSION_TRANSCRIPT_MAX_BYTES"],
+      "QUANTA_SESSION_TRANSCRIPT_MAX_BYTES",
+    ),
     hitlOverridesPath: stringOrUndef(env["QUANTA_HITL_OVERRIDES"]),
     toolOutputMaxChars: parsePositiveInt(env["QUANTA_TOOL_OUTPUT_MAX"], "QUANTA_TOOL_OUTPUT_MAX"),
     toolOutputSpillKeep: parsePositiveInt(
@@ -466,7 +580,24 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     ),
     asyncTools: parseBool(env["QUANTA_ASYNC_TOOLS"]),
     deferredCap: parsePositiveInt(env["QUANTA_DEFERRED_CAP"], "QUANTA_DEFERRED_CAP"),
+    // H16 — strict `=== "1"` opt-in (matches the slice gate; default-OFF).
+    // OFF ⇒ no CrossSessionDreamTrigger constructed, byte-identical.
+    autoDream: env["QUANTA_AUTO_DREAM"] === "1",
+    autoDreamSessions: parsePositiveInt(
+      env["QUANTA_AUTO_DREAM_SESSIONS"],
+      "QUANTA_AUTO_DREAM_SESSIONS",
+    ),
+    autoDreamHours: parsePositiveNumber(env["QUANTA_AUTO_DREAM_HOURS"], "QUANTA_AUTO_DREAM_HOURS"),
     logRateLimitDisabled: env["QUANTA_LOG_RATE_LIMIT"] === "off",
+    // H7 — rotating cloud credentials. All default-UNSET ⇒ no helper, no
+    // pre-call refresh, byte-identical provider paths.
+    apiKeyHelper: stringOrUndef(env["QUANTA_API_KEY_HELPER"]),
+    apiKeyHelperTtlMs: parsePositiveInt(
+      env["QUANTA_API_KEY_HELPER_TTL_MS"],
+      "QUANTA_API_KEY_HELPER_TTL_MS",
+    ),
+    awsAuthRefresh: stringOrUndef(env["QUANTA_AWS_AUTH_REFRESH"]),
+    gcpAuthRefresh: stringOrUndef(env["QUANTA_GCP_AUTH_REFRESH"]),
   })
 }
 

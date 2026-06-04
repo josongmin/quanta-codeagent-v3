@@ -198,6 +198,24 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   yaml_read: null,
   pdf_read: null,
   xlsx_read: null,
+  // jun-04 document READERS (pure unzip + OOXML parse; read-only, plan-safe).
+  docx_read: null,
+  pptx_read: null,
+  // jun-04 read-only observability tools (pure in-memory / disk-read; plan-safe).
+  // Caller-wire-time (coverage_check gated on DefaultToolPorts.coverageCheck;
+  // prompt_cache_status gated on a wired observer) — entries are PERMANENT so
+  // plan-mode dispatch never trips UnknownToolError when a host registers them.
+  coverage_check: null,
+  prompt_cache_status: null,
+  // jun-04 Office AUTHORING writers (H14b/H14 — gated on DefaultToolPorts.
+  // officeAuthoring) + image_gen (H14a — gated on DefaultToolPorts.imageGen).
+  // All WRITE generated artifacts to the filesystem ⇒ block in plan mode.
+  // PERMANENT entries (caller-wire tools): a host that injects them MUST NOT
+  // crash plan-mode dispatch.
+  xlsx_write: "write_filesystem",
+  docx_write: "write_filesystem",
+  pptx_write: "write_filesystem",
+  image_gen: "write_filesystem",
   // Mutating built-ins
   write: "write_filesystem",
   edit: "write_filesystem",

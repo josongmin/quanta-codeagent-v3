@@ -1,0 +1,97 @@
+id: auto-dream-cross-session
+title: auto-dream — cross-session memory consolidation trigger (H16)
+section: 5
+subsystem: 크로스-세션 메모리 통합 트리거 ("auto-dream", Claude tengu_auto_dream parity)
+order: 12
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: partial
+modes: [interactive, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:claude", "default-off"]
+depends_on: [codex-2-phase-consolidator, memory-auto-trigger, memory-cross-session-inject]
+telemetry_keys:
+  - auto_dream.fired
+  - auto_dream.completed
+  - auto_dream.skipped
+purpose: |
+  Cross-SESSION memory consolidation glue ("auto-dream"). Sits ON TOP of the
+  existing session-end consolidate pipeline (ADR-0068 `runPhase2`, ADR-0281
+  auto-trigger) — it does NOT reimplement consolidation. A small PERSISTED
+  counter/clock (`DreamState`: sessions-since-last-dream + lastDreamAtMs)
+  fires the EXISTING consolidator when EITHER threshold crosses: N session-ends
+  OR H wall-clock hours since the last dream (OR semantics, mirroring Claude's
+  `tengu_auto_dream_{fired,completed,skipped}` keyed on sessions_since /
+  hours_since). The pass is guarded by a dedicated DREAM-LOCK (reuses the
+  codebase `OAuthRefreshLockPort` in-memory / file-based impls via a local
+  structural `DreamLockPort` seam so `@/memory` stays plane-clean) — a second
+  concurrent process observes `would-wait` and skips. Consolidated cross-
+  session knowledge is written to a SEPARATE `team/`-style target
+  (`~/.quanta/memory/team/cross-session.md`), NEVER the user's live MEMORY.md
+  (the `FileDreamWriteTarget` refuses to write any path named MEMORY.md).
+  Default-OFF: with no `DreamPolicy` (i.e. `QUANTA_AUTO_DREAM` unset) the
+  trigger never advances its counter, reads/writes no state, and fires no
+  consolidate — byte-identical to the pre-H16 path. Determinism: the clock is
+  INJECTED (no `Date.now()` in the slice); the hours-since math uses the
+  injected clock only. No-throw: every side effect is wrapped; the slice never
+  throws out of `onSessionEnd`/`dream` (an AbortError from the injected
+  consolidate port propagates, mirroring the auto-trigger contract). The
+  `/dream` slash command triggers a pass manually (bypasses the threshold but
+  honors the lock + flag) and `/dream status` shows sessions/hours-since, last
+  outcome, and the team target path. Config is SSOT in
+  `src/shared/runtime-config.ts`; the env→policy projection is
+  `assembleDreamPolicy`.
+evidence:
+  code:
+    - src/memory/dream/types.ts
+    - src/memory/dream/port.ts
+    - src/memory/dream/cross-session-trigger.ts
+    - src/memory/dream/team-write-target.ts
+    - src/memory/dream/in-memory-state.ts
+    - src/memory/dream/wire.ts
+    - src/memory/dream/index.ts
+    - src/apps/cli/dream-cmd.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/auto-dream-hellgate.test.ts
+      - tests/unit/auto-dream-e2e-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_AUTO_DREAM
+    where: src/shared/runtime-config.ts
+    default: false
+    purpose: |
+      Master gate. Strict `=== "1"` opt-in. Default-OFF ⇒ no
+      CrossSessionDreamTrigger constructed; no counter, no state I/O, no fire.
+  - name: QUANTA_AUTO_DREAM_SESSIONS
+    where: src/shared/runtime-config.ts
+    default: 5
+    purpose: |
+      Sessions-since-last-dream threshold (positive int). OR-combined with the
+      hours threshold. Only consulted when QUANTA_AUTO_DREAM is on.
+  - name: QUANTA_AUTO_DREAM_HOURS
+    where: src/shared/runtime-config.ts
+    default: 24
+    purpose: |
+      Hours-since-last-dream threshold (positive number, fractional allowed).
+      OR-combined with the sessions threshold. Only consulted when on.
+  - name: QUANTA_DREAM_SLASH
+    where: src/apps/cli/dream-cmd.ts
+    default: true
+    purpose: |
+      Registers the `/dream` slash command. Default `"1"`. `"0"` removes it
+      from BUILTINS at load time (the command is inert anyway unless the
+      surface injects a DreamSlashState, which only happens when AUTO_DREAM=on).
+deliberate_hold: null
+notes: |
+  Glue, not a new consolidator: the production `DreamConsolidatePort` is a thin
+  adapter over `runPhase2` (proven in the e2e hellgate which wires the REAL
+  pipeline). Distinct from `memory-auto-trigger` (ADR-0281, SESSION-END Stage1
+  promotion) and `memory-cross-session-inject` (ADR-0282, prompt-inject read
+  surface) — this is the elapsed-sessions/hours SCHEDULER + dream-lock +
+  team-write target those two lacked. Claude reference: never mutates MEMORY.md
+  live; writes to a team/ dir.

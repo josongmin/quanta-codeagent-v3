@@ -17,6 +17,7 @@
  *   ...APP_SLASH_COMMANDS]` into the historic `BUILTINS`.
  */
 
+import { dreamCmd, isDreamSlashEnabled } from "../dream-cmd"
 import { mcpCmd } from "../mcp-cmd"
 import { isMemorySlashEnabled, memoryCmd } from "../memory-cmd"
 import { permissionCmd } from "../permission-explain"
@@ -36,6 +37,12 @@ const REWIND_COMMANDS: readonly SlashCommand[] = isRewindEnabled() ? rewindComma
 // from the registry at load time. Default `"1"` (registered).
 const MEMORY_COMMANDS: readonly SlashCommand[] = isMemorySlashEnabled() ? [memoryCmd] : []
 
+// `/dream` (H16 cross-session auto-dream) — env-gated: `QUANTA_DREAM_SLASH=0`
+// removes it at load time. Default `"1"` (registered). The command itself is
+// inert (prints "not wired") unless the surface injects a `DreamSlashState`,
+// which only happens when `QUANTA_AUTO_DREAM=1`.
+const DREAM_COMMANDS: readonly SlashCommand[] = isDreamSlashEnabled() ? [dreamCmd] : []
+
 /** Slot order for the app layer. Tail-appended to the assembled BUILTINS
  *  after the surface + session layers, so historic test pins that asserted
  *  global slots are intentionally re-anchored — see the BUILTINS sweep test
@@ -46,6 +53,7 @@ export const APP_SLASH_COMMANDS: readonly SlashCommand[] = [
   ...REWIND_COMMANDS,
   rewindToolCmd,
   ...MEMORY_COMMANDS,
+  ...DREAM_COMMANDS,
   rewindConvCmd,
   knobsCmd,
   // ADR-0370 — operator visibility for the session-resource-registry slice.

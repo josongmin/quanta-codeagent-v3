@@ -27,6 +27,13 @@ export interface McpServerConfig {
   /** Static headers merged into every HTTP request (e.g. `Authorization`).
    *  HTTP carrier only. */
   headers?: Record<string, string>
+  /** H18 — per-server OAuth opt-in. When `true` AND an `oauthProvider` is wired
+   *  into the `McpClient`, the client resolves a bearer token (RFC 8414
+   *  discovery → DCR → PKCE browser flow → token, with RFC 6749 §6 refresh) and
+   *  attaches `Authorization: Bearer <token>` to every HTTP request to this
+   *  server. Omitted/false ⇒ byte-identical to the pre-H18 client: no discovery,
+   *  no flow, no header. HTTP carrier only (a `url` must be set). */
+  oauth?: boolean
 }
 
 /** A tool advertised by the server's `tools/list`. */

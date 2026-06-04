@@ -31,6 +31,14 @@ export {
   resolveVersionedJailedTarget,
   writeJailedBytes,
 } from "./jailed-write"
+export { buildPptx, type PptxSlide, type PptxSpec } from "./pptx"
+export {
+  PPTX_WRITE_MAX_BODY_LINES,
+  PPTX_WRITE_MAX_SLIDES,
+  type PptxWriteInput,
+  pptxWriteInputSchema,
+  pptxWriteTool,
+} from "./pptx-write"
 export {
   buildContentTypesXml,
   buildRelsXml,

@@ -1,3 +1,4 @@
+import type { ElicitationPrompterFactory } from "@/agent"
 import {
   type AgentConfig,
   loadMcpTools,
@@ -8,11 +9,16 @@ import {
   resolvePersona,
 } from "@/agent"
 import { defaultIdentityProvider, type IdentityMode } from "@/agent/identity"
+import { buildSamplingWiring, pickMcpNegotiator } from "@/host/runtime"
 import type { LLMPort } from "@/llm"
 import {
+  type CapabilityNegotiator,
   DEFAULT_BACKOFF_POLICY,
+  type ElicitationPrompter,
   McpClient,
+  type McpClientTransport,
   type McpServerConfig,
+  type SamplingHandlerPort,
   type SupervisableMcpClient,
   type SupervisorDeps,
 } from "@/mcp"
@@ -677,9 +683,108 @@ export interface Features {
   gitToolList: Tool[]
 }
 
+/** B1 (jun-04) — the stable elicitation-lease context id the inbound-sampling
+ *  consent prompt binds to. Distinct from any real MCP `serverId` so a sampling
+ *  consent prompt never coalesces with a server's own `elicitation/create`
+ *  prompt. (The `__` prefix is not a legal MCP server name, so no collision.) */
+const SAMPLING_CONSENT_CONTEXT = "__sampling_consent__"
+
+/** B1 (jun-04) — build the OPTIONAL injectable seams for {@link loadFeatures}. */
+export interface LoadFeaturesOpts {
+  /** The assembled `LLMPort` an inbound `sampling/createMessage` delegates to.
+   *  Threaded from the host bootstrap (`finalLLM`), which builds it just before
+   *  it calls `loadFeatures`. Absent ⇒ inbound sampling is impossible regardless
+   *  of the knob (no LLM to spend ⇒ `buildSamplingWiring` returns OFF). */
+  readonly llm?: LLMPort
+  /** Test seam — inject a per-server transport factory (mirrors `McpClient`'s
+   *  `transport` option) so the e2e can drive the constructed client's inbound
+   *  path without spawning a real process. Production omits it. */
+  readonly mcpTransportFor?: (config: McpServerConfig) => McpClientTransport
+  /** Test seam — force the elicitation prompter factory interactive (mirrors
+   *  {@link buildCliElicitationPrompterFactory}'s `interactive` override) so the
+   *  consent prompter + sampling wiring are exercised without a real TTY.
+   *  Production omits it (the factory reads `process.stdin.isTTY`). */
+  readonly elicitationPrompterFor?: ElicitationPrompterFactory
+}
+
+/** B1 (jun-04) — compute the advertise-iff-able inbound-sampling wiring for the
+ *  CLI MCP load. The DECISION lives HERE (the surface), not in `@/agent/mcp-bridge`
+ *  (which stays a pure consumer and never imports `@/host`): only the surface
+ *  has both the assembled `LLMPort` AND the interactive consent prompter.
+ *
+ *  ONE gate ({@link buildSamplingWiring}) yields BOTH the advertise flag (fed to
+ *  {@link pickMcpNegotiator}) and the handler (fed to the `McpClient`), so the
+ *  capability advertisement and the handler can never drift. Returns `undefined`
+ *  (⇒ the load is byte-identical) whenever ANY of the three preconditions is
+ *  absent: the knob is off (`runtimeConfig().mcpSampling`), no LLM was threaded,
+ *  or no interactive consent prompter is available (headless / piped run — a
+ *  remote server must never silently spend inference unattended).
+ *
+ *  The consent prompter REUSES the existing CLI elicitation prompter seam (the
+ *  SAME `promptBoolean` an inbound `elicitation/create` routes through), bound to
+ *  a dedicated {@link SAMPLING_CONSENT_CONTEXT} lease so it never coalesces with
+ *  a real server's prompt. */
+const resolveSamplingWiring = (
+  llm: LLMPort | undefined,
+  elicitationPrompterFor: ElicitationPrompterFactory | undefined,
+): { negotiator: CapabilityNegotiator; handler: SamplingHandlerPort } | undefined => {
+  const enabled = runtimeConfig().mcpSampling
+  // Both deps must be present for `buildSamplingWiring` to advertise. No LLM ⇒
+  // nothing to delegate to; no interactive prompter ⇒ no consent gate (headless
+  // is denied by construction), so we keep sampling OFF rather than wire a
+  // handler that would always decline.
+  const consent: ElicitationPrompter | undefined =
+    elicitationPrompterFor !== undefined
+      ? elicitationPrompterFor(SAMPLING_CONSENT_CONTEXT)
+      : undefined
+  const deps = llm !== undefined && consent !== undefined ? { llm, consent } : undefined
+  const wiring = buildSamplingWiring(enabled, deps)
+  if (!wiring.advertise || wiring.handler === undefined) return undefined
+  // Advertise + handler MOVE TOGETHER: build the negotiator the wiring's flag
+  // implies, then VERIFY it actually advertises `sampling` before handing the
+  // handler down. `pickMcpNegotiator` only advertises sampling under
+  // `QUANTA_MCP_CAPS=full` (the base capability set must be on for ANY inbound
+  // capability) — so `QUANTA_MCP_SAMPLING=1` WITHOUT `QUANTA_MCP_CAPS=full`
+  // yields a negotiator that would NOT advertise sampling. Wiring the handler
+  // there would be a silent handler-without-advertisement (the inverse drift).
+  // Gate on the compiled record so we NEVER wire a handler the negotiator will
+  // not advertise: absent ⇒ `undefined` ⇒ byte-identical load.
+  const negotiator = pickMcpNegotiator(process.env, { sampling: true })
+  if (negotiator.compile().sampling === undefined) return undefined
+  return { negotiator, handler: wiring.handler }
+}
+
+/** Assemble the optional `loadMcpTools` opts bag from the resolved feature
+ *  gates. Extracted from {@link loadFeatures} so the spread branches do not push
+ *  that function over biome's cognitive-complexity cap. Every field is
+ *  presence-only: an empty bag is byte-identical to passing `undefined` (every
+ *  field is read via `opts?.x` in the bridge). */
+const buildMcpLoadOpts = (
+  slog: StructuredLogger,
+  args: {
+    readonly autoRestart: boolean
+    readonly samplingWiring: ReturnType<typeof resolveSamplingWiring>
+    readonly opts: LoadFeaturesOpts
+  },
+): Parameters<typeof loadMcpTools>[2] => ({
+  ...(args.autoRestart ? { supervisorDepsFor: mcpSupervisorDepsFor(slog) } : {}),
+  ...(args.samplingWiring !== undefined ? { samplingWiring: args.samplingWiring } : {}),
+  ...(args.opts.mcpTransportFor !== undefined ? { transportFor: args.opts.mcpTransportFor } : {}),
+})
+
 /** Resolve all default-OFF feature flags from env/argv and start MCP servers.
- *  Logs each enabled feature via the structured logger (minimal). */
-export const loadFeatures = async (slog: StructuredLogger): Promise<Features> => {
+ *  Logs each enabled feature via the structured logger (minimal).
+ *
+ *  B1 (jun-04) — `opts.llm` threads the assembled `LLMPort` so an inbound MCP
+ *  `sampling/createMessage` can be fulfilled. With the knob
+ *  (`QUANTA_MCP_SAMPLING`) on, an LLM threaded, AND an interactive consent
+ *  prompter available, the constructed `McpClient`s advertise `sampling` and
+ *  route inbound requests through the LLM-backed handler (gated on user consent).
+ *  Any precondition absent ⇒ byte-identical to the legacy load. */
+export const loadFeatures = async (
+  slog: StructuredLogger,
+  opts: LoadFeaturesOpts = {},
+): Promise<Features> => {
   const planMode = planEnabled()
   const metrics = process.env.QUANTA_METRICS === "1" ? new Metrics() : undefined
   const state = statePath()
@@ -690,11 +795,19 @@ export const loadFeatures = async (slog: StructuredLogger): Promise<Features> =>
   // runs get `undefined` so each McpClient keeps its headlessRejecter default
   // (byte-identical to the legacy load). The factory binds a per-server lease
   // (`pool.forContext({ serverId })`) inside `loadMcpTools`.
-  const elicitationPrompterFor = buildCliElicitationPrompterFactory()
+  const elicitationPrompterFor = opts.elicitationPrompterFor ?? buildCliElicitationPrompterFactory()
   // ADR-0435: opt-in auto-restart. Unset ⇒ `supervisorDepsFor` is undefined ⇒
   // `loadMcpTools` takes the original single-client branch (byte-identical).
   const autoRestart = mcpAutoRestartEnabled()
-  const mcpLoadOpts = autoRestart ? { supervisorDepsFor: mcpSupervisorDepsFor(slog) } : undefined
+  // B1 (jun-04) — advertise-iff-able inbound-sampling wiring. The surface owns
+  // this decision (the only layer with BOTH the LLM and the consent prompter)
+  // and hands the already-built `{ negotiator, handler }` DOWN to the bridge,
+  // which stays a pure consumer. Undefined ⇒ byte-identical (no advertisement,
+  // headless rejecter). Sampling and auto-restart are independent: the
+  // supervised path does not carry inbound sampling, so the wiring only takes
+  // effect on the single-client branch.
+  const samplingWiring = resolveSamplingWiring(opts.llm, elicitationPrompterFor)
+  const mcpLoadOpts = buildMcpLoadOpts(slog, { autoRestart, samplingWiring, opts })
   const { tools: mcpTools, clients: mcpClients } =
     mcpConfigs.length > 0
       ? await loadMcpTools(mcpConfigs, elicitationPrompterFor, mcpLoadOpts)

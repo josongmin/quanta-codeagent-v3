@@ -1,0 +1,80 @@
+id: mcp-http-oauth
+title: H18 MCP HTTP-Server OAuth (RFC 8414 discovery + PKCE + refresh, port-injected)
+section: 9
+subsystem: MCP HTTP transport authentication
+order: 478
+maturity: L2
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: [absorbed:cursor, absorbed:codex, surface:core, security]
+depends_on: [mcp-sampling-handler, connectors-oauth-discovery]
+config_refs:
+  env: [QUANTA_MCP_OAUTH]
+  runtime: [mcpOAuth]
+purpose: |
+  Wire the EXISTING `@/connectors` OAuth-discovery suite (RFC 8414
+  `.well-known/oauth-authorization-server` + OIDC fallback, RFC 7591 dynamic
+  client registration, RFC 6749 §6 refresh, token rotation) plus the
+  `@/auth/chatgpt-oauth` loopback + PKCE browser flow into the MCP client, so an
+  HTTP MCP server that requires OAuth can be authenticated. Before H18 `src/mcp/`
+  imported NONE of those modules — an HTTP MCP server needing OAuth simply could
+  not auth.
+
+  Structurally this is a PORT seam (the cleanest option, mirroring how
+  `samplingHandler`/`elicitationPrompter` are injected): `@/mcp` MUST NOT import
+  `@/connectors`/`@/auth` (slice isolation, RFC §3.1 — `@/mcp` depends on
+  `@/shared` only), so the slice ships only `McpOAuthProviderPort`
+  (`src/mcp/oauth/`) + a safe default (`headlessOAuthRejecter`, obtains no
+  token). The connectors-backed implementation
+  (`createConnectorsMcpOAuthProvider`) lives in the host layer
+  (`src/host/runtime/mcp-oauth-provider.ts`) — the only layer allowed to reach
+  both `@/mcp` and `@/connectors` — and runs discovery → (DCR if no static
+  client id) → PKCE browser flow → authorization-code exchange → token store →
+  reuse/refresh/re-auth. The `McpClient` consults the port ONLY when a server
+  config opts in (`oauth: true`) AND a provider is wired; it resolves the bearer
+  BEFORE constructing the HTTP carrier (which reads static headers at
+  construction) and attaches `Authorization: Bearer <token>` to every request.
+  Tokens persist via the connectors `TokenStorePort` (a file store with 0600 is
+  acceptable; a keyring can bind the same port later) and are NEVER logged.
+
+  Opt-in is double-gated (advertise-iff-able): `buildMcpOAuthWiring(enabled,
+  deps)` returns a provider ONLY when `QUANTA_MCP_OAUTH=1` AND deps are present;
+  the per-server `oauth: true` flag is the second gate. Default-OFF is
+  byte-identical: no provider wired ⇒ the client falls back to the headless
+  rejecter, the transport is built eagerly exactly as before, and no discovery /
+  flow / header occurs. A failed/declined login degrades to an unauthenticated
+  request (the server answers 401, surfaced like any other error) — `tokenFor`
+  is TOTAL (resolves `undefined`, never throws into the MCP load).
+
+  CLI: `/mcp login <server>` triggers the flow over the wired provider and
+  reports success + expiry (never the token). `/mcp` (no provider wired) reports
+  "OAuth not enabled".
+evidence:
+  code:
+    - src/mcp/oauth/port.ts
+    - src/mcp/oauth/headless-rejecter.ts
+    - src/mcp/oauth/index.ts
+    - src/mcp/client.ts
+    - src/mcp/types.ts
+    - src/mcp/index.ts
+    - src/host/runtime/mcp-oauth-provider.ts
+    - src/host/runtime/index.ts
+    - src/apps/cli/mcp-cmd.ts
+    - src/shared/runtime-config.ts
+    - src/connectors/oauth-discovery.ts
+    - src/connectors/oauth-registration.ts
+    - src/connectors/token-rotation.ts
+  adrs: [160]
+  tests:
+    unit:
+      - tests/unit/mcp-oauth-hellgate.test.ts
+      - tests/unit/mcp-oauth-e2e-hellgate.test.ts
+knobs:
+  - name: QUANTA_MCP_OAUTH
+    default: 'undefined'
+    purpose: 'Strict =="1" opt-in. ON (+ a connectors-backed provider wired + a server config oauth:true) ⇒ the McpClient resolves a bearer (RFC 8414 discovery → DCR → PKCE browser flow → token, RFC 6749 §6 refresh) and attaches Authorization: Bearer to that server. OFF ⇒ no provider, headless rejecter, byte-identical (no discovery/flow/header).'
+notes: 'PORT seam: @/mcp gains NO @/connectors/@/auth import — the connectors-backed McpOAuthProviderPort lives in @/host/runtime and is injected. Per-server oauth:true is the second gate. Tokens stored via connectors TokenStorePort (0600 file; keyring bindable later), never logged. Deferred: real OS keyring binding; plugin-format (mcpServers{}) oauth passthrough (legacy {servers:[]} format already carries it).'

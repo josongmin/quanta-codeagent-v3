@@ -283,6 +283,34 @@ const configuredModel = (llm: AgentConfig["llm"]): string => {
   return m !== undefined && m !== "" ? m : "unknown"
 }
 
+/**
+ * H17 budget-enforcement gate for the objective idle-continuation.
+ *
+ * The two compaction-recovery sites re-issue `config.objective.setNextActions`
+ * to nudge the model back onto its goal after a summarize/PTL recovery. When
+ * budget enforcement is enabled (`QUANTA_OBJECTIVE_BUDGET_ENFORCE=1`) AND the
+ * active objective has run out of its `ObjectiveBudget` envelope (the store
+ * derives `status === "budget_limited"`), re-issuing continuation would
+ * auto-resume a budget-exhausted goal — exactly what the enforcement forbids.
+ * This predicate is the HARD GATE: it returns `true` only when continuation
+ * MUST be suppressed.
+ *
+ * Default-OFF byte-identity: when the knob is off this returns `false` after a
+ * single boolean read and NO port call (the host also built the store
+ * informational, so the status can never be `"budget_limited"` anyway — this
+ * is belt-and-braces). The objective read is wrapped NO-THROW so a hostile /
+ * throwing port can never abort compaction recovery. */
+const objectiveBudgetExhausted = (config: AgentConfig, threadId: string): boolean => {
+  if (!runtimeConfig().objectiveBudgetEnforce) return false
+  if (config.objective === undefined || threadId.length === 0) return false
+  try {
+    return config.objective.get(threadId)?.status === "budget_limited"
+  } catch (e) {
+    logger.warn(`loop.objectiveBudgetExhausted: ${errMessage(e)}`)
+    return false
+  }
+}
+
 const isSessionApprovalRequiredError = (error: unknown): boolean => {
   if (typeof error !== "object" || error === null || !("approval" in error)) return false
   const approval = (error as { approval?: unknown }).approval
@@ -980,6 +1008,10 @@ const maybeCompact = async (
   const objectiveSetNextActions = config.objective
     ? (tid: string, actions: readonly string[]): void => {
         try {
+          // H17 HARD GATE: a budget-exhausted objective does NOT get its
+          // idle-continuation re-issued (don't auto-resume an exhausted goal).
+          // Knob OFF ⇒ never exhausted ⇒ this is byte-identical to before.
+          if (objectiveBudgetExhausted(config, tid)) return
           config.objective?.setNextActions(tid, actions)
         } catch (e) {
           // NO-THROW: objective wire failure must not perturb compaction — log + swallow.
@@ -1631,7 +1663,13 @@ const applyNonSuccessRecoveryAction = async (
     }
     const threadId = config.sessionId ?? ""
     await config.hooks?.emit({ type: "post_compact", threadId, provenance })
-    if (config.objective !== undefined && threadId.length > 0) {
+    if (
+      config.objective !== undefined &&
+      threadId.length > 0 &&
+      // H17 HARD GATE: skip the resume nudge for a budget-exhausted objective.
+      // Knob OFF ⇒ never exhausted ⇒ byte-identical to before.
+      !objectiveBudgetExhausted(config, threadId)
+    ) {
       config.objective.setNextActions(threadId, [
         "Resuming after mid-turn compaction (PTL recovery)",
       ])

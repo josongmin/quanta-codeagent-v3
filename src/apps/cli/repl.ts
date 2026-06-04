@@ -234,7 +234,11 @@ const sessionSetupDeps: Parameters<typeof setupSession>[0] = {
   buildLlm: cliBuildLlm,
   buildStreaming,
   buildTooling,
-  loadFeatures,
+  // B1 (jun-04) — adapt the host's `(slog, llm?)` factory shape to the CLI
+  // surface's `(slog, opts)` loader: the threaded LLM becomes the `llm` opt so
+  // an inbound MCP `sampling/createMessage` can be fulfilled. Omitted ⇒ `{}` ⇒
+  // byte-identical (no sampling wiring).
+  loadFeatures: (slog, llm) => loadFeatures(slog, llm !== undefined ? { llm } : {}),
   loadImageBlock,
   pickIdentity,
   pickPersona,

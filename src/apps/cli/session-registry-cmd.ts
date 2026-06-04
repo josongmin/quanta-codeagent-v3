@@ -68,6 +68,7 @@ import {
 } from "@/agent/session-resource-registry/inspector"
 import { countSqliteRegistryCleanupCandidates } from "@/agent/session-resource-registry/sqlite-adapter/gc"
 import { errMessage } from "@/shared"
+import { sweepSessionTranscripts, type TranscriptSweepResult } from "./session-transcript-retention"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 
 /**
@@ -88,6 +89,8 @@ const HELP_LINES: readonly string[] = [
   "                          (`*` and `?` only; max 100 matches; ADR-0386)",
   "  cleanup                 Run an immediate retention sweep + post-sweep stats (ADR-0379)",
   "  cleanup --dry-run       Preview sweep candidates WITHOUT committing (ADR-0387)",
+  "  cleanup --transcripts   ALSO sweep per-session .jsonl transcript envelopes",
+  "                          (cumulative-bytes window; needs QUANTA_SESSION_TRANSCRIPT_MAX_BYTES)",
   "  help                    Show this menu",
   "",
   "Backend detect priority (first match wins):",
@@ -98,6 +101,10 @@ const HELP_LINES: readonly string[] = [
   "WAL checkpoint knobs (sqlite adapter, both optional):",
   "  QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES  — escalate beyond PASSIVE when WAL > N (ADR-0375/0390)",
   '  QUANTA_SESSION_REGISTRY_WAL_CHECKPOINT_MODE  — "RESTART" (default) | "TRUNCATE" (ADR-0385/0390)',
+  "",
+  "Transcript retention knob (cleanup --transcripts, optional):",
+  "  QUANTA_SESSION_TRANSCRIPT_MAX_BYTES          — per-session .jsonl cumulative-bytes cap",
+  "                                                 (unset ⇒ OFF / unbounded; trims oldest rows only)",
 ]
 
 /**
@@ -320,10 +327,12 @@ export const sessionRegistryCmd: SlashCommand = {
     }
     if (sub === "cleanup") {
       const subArgs = args.slice(1)
+      const dryRun = subArgs.includes("--dry-run")
+      const transcripts = subArgs.includes("--transcripts")
       // ADR-0387 — `--dry-run` flag preview mode. Any position in the
       // sub-args list counts; extra unrelated flags are ignored.
-      if (subArgs.includes("--dry-run")) return renderCleanupDryRun(ctx)
-      return renderCleanup(ctx)
+      if (dryRun) return renderCleanupDryRun(ctx, transcripts)
+      return renderCleanup(ctx, transcripts)
     }
     return renderStats(ctx)
   },
@@ -343,7 +352,7 @@ export const sessionRegistryCmd: SlashCommand = {
  * NO-THROW: any failure short-circuits to "cleanup failed" + exit 1
  * (operator explicitly requested the mutation; surface the failure).
  */
-const renderCleanup = async (ctx: SlashContext): Promise<number> => {
+const renderCleanup = async (ctx: SlashContext, transcripts: boolean): Promise<number> => {
   let handle: ReturnType<typeof startAutoSweep> | undefined
   try {
     handle = startAutoSweep()
@@ -351,6 +360,11 @@ const renderCleanup = async (ctx: SlashContext): Promise<number> => {
     // Render post-sweep stats so the operator sees what changed.
     const stats = await inspectGlobalRegistry()
     ctx.out(`${formatRegistryStats(stats)}\nSweep complete.\n`)
+    // ADR-0379 transcript rail (opt-in): ALSO sweep the per-session `.jsonl`
+    // transcript envelopes when `--transcripts` is passed. This is a DIFFERENT
+    // rail than the resource registry above — it trims the oldest rows of an
+    // over-cap transcript via the `@/stream` cumulative-bytes window.
+    if (transcripts) ctx.out(await renderTranscriptSweep(false))
     return 0
   } catch (e) {
     ctx.err(`/session-registry: cleanup failed: ${errMessage(e)}\n`)
@@ -382,14 +396,14 @@ const renderCleanup = async (ctx: SlashContext): Promise<number> => {
  * On failure, exit 1 + render the error on stderr (operator explicitly
  * requested the preview).
  */
-const renderCleanupDryRun = async (ctx: SlashContext): Promise<number> => {
+const renderCleanupDryRun = async (ctx: SlashContext, transcripts: boolean): Promise<number> => {
   try {
     const diskDir = process.env.QUANTA_SESSION_REGISTRY_DISK_DIR
     const sqlitePath = process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH
 
     const lines: string[] = ["## Session Registry — Dry-run", ""]
 
-    if (diskDir === undefined && sqlitePath === undefined) {
+    if (diskDir === undefined && sqlitePath === undefined && !transcripts) {
       lines.push("Dry-run: no on-disk backend configured (in-memory only — nothing to preview).")
       ctx.out(`${lines.join("\n")}\n`)
       return 0
@@ -418,6 +432,10 @@ const renderCleanupDryRun = async (ctx: SlashContext): Promise<number> => {
       )
     }
 
+    // ADR-0379 transcript rail (opt-in dry-run): preview the `.jsonl`
+    // transcript sweep WITHOUT committing it.
+    if (transcripts) lines.push((await renderTranscriptSweep(true)).trimEnd(), "")
+
     lines.push("(no commit — re-run without --dry-run to apply)")
     ctx.out(`${lines.join("\n")}\n`)
     return 0
@@ -425,4 +443,44 @@ const renderCleanupDryRun = async (ctx: SlashContext): Promise<number> => {
     ctx.err(`/session-registry: cleanup --dry-run failed: ${errMessage(e)}\n`)
     return 1
   }
+}
+
+/**
+ * ADR-0379 transcript rail — render the per-session `.jsonl` transcript sweep.
+ *
+ * Calls the host-layer `sweepSessionTranscripts` (which connects `@/session`'s
+ * `sessionsRoot()` to `@/stream`'s `applyRetention`). When the
+ * `QUANTA_SESSION_TRANSCRIPT_MAX_BYTES` knob is UNSET, the sweep is OFF and
+ * reports a one-line "disabled" notice (no mutation). Otherwise reports the
+ * scanned/trimmed file count, total rows dropped, and bytes freed.
+ *
+ * `dryRun` flows through to `applyRetention.dryRun` so the preview path computes
+ * the same numbers WITHOUT rewriting any file. NO-THROW: `sweepSessionTranscripts`
+ * captures per-file failures in `errors[]`, which are surfaced as a trailing
+ * count so the operator knows some envelopes were skipped (e.g. a busy `.tmp`).
+ *
+ * Returns a newline-terminated block (for `ctx.out`).
+ */
+const renderTranscriptSweep = async (dryRun: boolean): Promise<string> => {
+  const res = await sweepSessionTranscripts({ dryRun })
+  if ("skipped" in res) {
+    return "Transcripts: retention OFF (set QUANTA_SESSION_TRANSCRIPT_MAX_BYTES to enable).\n"
+  }
+  return formatTranscriptSweep(res, dryRun)
+}
+
+/** Format a {@link TranscriptSweepResult} into an operator-facing block. */
+const formatTranscriptSweep = (res: TranscriptSweepResult, dryRun: boolean): string => {
+  const verb = dryRun ? "would trim" : "trimmed"
+  const lines = [
+    `Transcripts${dryRun ? " (dry-run)" : ""}:`,
+    `  scanned envelopes:   ${res.filesScanned}`,
+    `  ${verb}:            ${res.filesRewritten}`,
+    `  rows dropped:        ${res.droppedRows}`,
+    `  bytes freed:         ${res.bytesFreed}`,
+  ]
+  if (res.errors.length > 0) {
+    lines.push(`  skipped (errors):    ${res.errors.length}`)
+  }
+  return `${lines.join("\n")}\n`
 }

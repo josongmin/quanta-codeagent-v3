@@ -264,7 +264,11 @@ export const bootstrapSession = async (
     return failSessionBootstrap("llm_build_failed", errMessage(e), e)
   }
 
-  const features = await deps.loadFeatures(slog)
+  // B1 (jun-04) — thread the freshly-built LLM so an inbound MCP
+  // `sampling/createMessage` can be fulfilled by the loaded clients (the surface
+  // gates advertisement on its knobs + consent; passing the LLM here is what
+  // makes the wiring possible at all).
+  const features = await deps.loadFeatures(slog, finalLLM)
   try {
     const {
       pills: lifecyclePills,

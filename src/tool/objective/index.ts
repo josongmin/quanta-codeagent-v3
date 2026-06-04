@@ -34,7 +34,17 @@ import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 // SCHEMAS
 // ─────────────────────────────────────────────────────────────────────────────
 
-const STATUS_ENUM = ["active", "blocked", "completed"] as const satisfies readonly ObjectiveStatus[]
+// `budget_limited` (like `blocked`) is a DERIVED status — it is listed here so
+// the two-way drift guard below stays exhaustive over `ObjectiveStatus`, but
+// `updateStatus` treats it (like `blocked`) as a no-op: only "active"/
+// "completed" are explicit caller intents. A stored objective carrying the
+// derived value must still pass schema validation, which this membership grants.
+const STATUS_ENUM = [
+  "active",
+  "blocked",
+  "completed",
+  "budget_limited",
+] as const satisfies readonly ObjectiveStatus[]
 const WAITING_ENUM = [
   "user",
   "tool",
@@ -147,12 +157,23 @@ const renderObjective = (o: Objective): string => {
     for (const a of o.nextActions) lines.push(`  - ${a}`)
   }
   const b = o.budget
+  // H17 — surface budget as a ratio (used/max) when a cap is set so the user
+  // sees how close the objective is to exhaustion; bare `*_used` otherwise.
   const tokParts: string[] = []
-  if (b.maxTokens !== undefined) tokParts.push(`max_tokens=${b.maxTokens}`)
-  if (b.maxTurns !== undefined) tokParts.push(`max_turns=${b.maxTurns}`)
-  tokParts.push(`tokens_used=${b.tokensUsed}`)
-  tokParts.push(`turns_used=${b.turnsUsed}`)
+  tokParts.push(
+    b.maxTokens !== undefined
+      ? `tokens=${b.tokensUsed}/${b.maxTokens}`
+      : `tokens_used=${b.tokensUsed}`,
+  )
+  tokParts.push(
+    b.maxTurns !== undefined ? `turns=${b.turnsUsed}/${b.maxTurns}` : `turns_used=${b.turnsUsed}`,
+  )
   lines.push(`budget: ${tokParts.join(" ")}`)
+  // H17 — when enforcement flips the status to budget_limited, make the gate
+  // explicit so the model/user understands the goal will NOT auto-resume.
+  if (o.status === "budget_limited") {
+    lines.push("budget_limited: objective budget exhausted — continuation suppressed")
+  }
   return lines.join("\n")
 }
 

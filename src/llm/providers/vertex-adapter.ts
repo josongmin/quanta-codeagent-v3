@@ -32,6 +32,7 @@ import {
   type RawEvent,
 } from "../adapters/anthropic"
 import { resolveAdapterStreamTimeouts } from "../adapters/shared"
+import type { CredentialSource } from "../credential-helper"
 import { withStreamTimeout } from "../stream-timeout"
 import type { StreamEvent, StreamInput } from "../types"
 import type { LlmProvider, ProviderConfig, ProviderId } from "./provider-port"
@@ -66,6 +67,12 @@ export type VertexClientFactory = (options: VertexClientOptions) => VertexClient
 
 export interface VertexAdapterOptions {
   clientFactory?: VertexClientFactory
+  /** H7 — OPTIONAL pre-call credential refresh hook. When supplied, the adapter
+   *  awaits `credentialSource.refreshCloudCreds("gcp")` BEFORE building/using the
+   *  SDK client on each `stream()`, so ADC picks up freshly-rotated GCP creds
+   *  (TTL-throttled inside the source). ABSENT ⇒ byte-identical to the pre-H7
+   *  ADC path. */
+  credentialSource?: CredentialSource
 }
 
 export class VertexProviderAdapter implements LlmProvider {
@@ -79,6 +86,7 @@ export class VertexProviderAdapter implements LlmProvider {
   private readonly maxTokens: number
   private readonly streamTimeoutMs: { firstChunkMs: number; idleMs: number }
   private readonly clientFactory: VertexClientFactory | undefined
+  private readonly credentialSource: CredentialSource | undefined
 
   constructor(config: ProviderConfig, options: VertexAdapterOptions = {}) {
     if (config.providerId !== "vertex") {
@@ -120,6 +128,7 @@ export class VertexProviderAdapter implements LlmProvider {
     if (config.auth.gcpAccessToken !== undefined) opts.accessToken = config.auth.gcpAccessToken
     this.clientOptions = opts
     if (options.clientFactory !== undefined) this.clientFactory = options.clientFactory
+    if (options.credentialSource !== undefined) this.credentialSource = options.credentialSource
   }
 
   /** Lazy SDK resolve — same discipline as `BedrockProviderAdapter`. */
@@ -174,6 +183,12 @@ export class VertexProviderAdapter implements LlmProvider {
   }
 
   async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
+    // H7 — pre-call credential refresh (gcp). Absent source ⇒ byte-identical to
+    // the pre-H7 ADC path. TTL-throttled inside the source; a failing refresh
+    // surfaces as a typed CredentialHelperError before the wire call.
+    if (this.credentialSource !== undefined) {
+      await this.credentialSource.refreshCloudCreds("gcp")
+    }
     const client = await this.resolveClient()
     const raw = await this.openRawStream(client, input)
     const guarded = withStreamTimeout(raw, {

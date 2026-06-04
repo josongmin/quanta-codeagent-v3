@@ -49,7 +49,7 @@ evidence:
 knobs:
   - name: user_config (manifest block)
     default: 'absent (OFF)'
-    purpose: 'A DXT manifest that declares NO user_config / platform_overrides parses byte-identically to today and interpolateLaunchSpec returns the spec unchanged. The feature activates only when an author opts in by adding the add-only block; host wiring (schema compose + interpolate-at-spawn + safeStorage SecretStorePort) is held for integration.'
+    purpose: 'A DXT manifest that declares NO user_config / platform_overrides parses byte-identically to today and interpolateLaunchSpec returns the spec unchanged. The feature activates only when an author opts in by adding the add-only block; host wiring (schema compose + interpolate-at-spawn + safeStorage SecretStorePort) is LANDED in dxt-loader.ts (DxtUserConfigExtension spread :91, resolveFields :232, interpolateLaunchSpec :234, skip-launch :243).'
 deliberate_hold: null
 notes: |
   LANDED: the integration is wired into src/plugin-isolation/dxt-loader.ts —

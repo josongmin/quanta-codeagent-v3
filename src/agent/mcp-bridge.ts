@@ -1,5 +1,6 @@
 import { z } from "zod"
 import {
+  type CapabilityNegotiator,
   clientTasksPort,
   type ElicitationPrompter,
   McpClient,
@@ -8,6 +9,7 @@ import {
   McpReconnectSupervisor,
   type McpServerConfig,
   type McpToolDef,
+  type SamplingHandlerPort,
   type SupervisorDeps,
   tasksPortOver,
 } from "@/mcp"
@@ -201,6 +203,27 @@ export interface McpStoppable {
  * supervisors (which expose a compatible `stop()`). Without it, the original
  * single-client path runs unchanged.
  */
+/** B1 (jun-04) — the already-DECIDED inbound-sampling wiring, threaded DOWN from
+ *  the composition root. `@/agent/mcp-bridge` is a PURE consumer here: it never
+ *  imports `@/host` (the `buildSamplingWiring` + `pickMcpNegotiator` decision
+ *  lives in the surface, where the `LLMPort` + consent prompter are assembled),
+ *  it only forwards these two artifacts into the `McpClient` it constructs.
+ *
+ *  The two fields are bundled into ONE object precisely so they cannot drift:
+ *  the negotiator (which already advertises `sampling: {}`) and the handler that
+ *  answers it MOVE TOGETHER. Supply BOTH or NEITHER. When the bundle is absent,
+ *  the load is byte-identical to before this field existed (no negotiator
+ *  override ⇒ `defaultNegotiator` caps `{}`, no handler ⇒ the client's headless
+ *  rejecter — the advertise-iff-able default). */
+export interface SamplingWiringInput {
+  /** The pre-built capability negotiator — advertises `sampling: {}` IFF a real
+   *  handler is wired (the caller computes this from `buildSamplingWiring`'s
+   *  `advertise` flag via `pickMcpNegotiator`). */
+  readonly negotiator: CapabilityNegotiator
+  /** The LLM-backed handler an inbound `sampling/createMessage` routes to. */
+  readonly handler: SamplingHandlerPort
+}
+
 /** Opt-in knobs for {@link loadMcpTools}. Omitting all of them is byte-identical
  *  to the pre-ADR-0435 behavior. */
 export interface LoadMcpToolsOpts {
@@ -215,6 +238,12 @@ export interface LoadMcpToolsOpts {
    *  supervisors (compatible `stop()`). Absent ⇒ the byte-identical
    *  single-client path. */
   supervisorDepsFor?: (config: McpServerConfig) => SupervisorDeps
+  /** B1 (jun-04) — the advertise-iff-able inbound-sampling wiring decided at the
+   *  composition root (see {@link SamplingWiringInput}). Present ⇒ each
+   *  single-client server advertises `sampling` AND routes inbound
+   *  `sampling/createMessage` to the supplied LLM-backed handler. Absent ⇒
+   *  byte-identical (no advertisement, headless rejecter). */
+  samplingWiring?: SamplingWiringInput
 }
 
 /** Load one server on the ADR-0435 supervised (auto-restart) path. `create`
@@ -249,6 +278,7 @@ const loadSingle = async (
   config: McpServerConfig,
   elicitationPrompterFor: ElicitationPrompterFactory | undefined,
   transportFor: ((config: McpServerConfig) => McpClientTransport) | undefined,
+  samplingWiring: SamplingWiringInput | undefined,
 ): Promise<{ tools: Tool[]; client: McpStoppable } | null> => {
   const clientOpts: ConstructorParameters<typeof McpClient>[1] = {}
   if (elicitationPrompterFor !== undefined) {
@@ -256,6 +286,15 @@ const loadSingle = async (
   }
   if (transportFor !== undefined) {
     clientOpts.transport = transportFor(config)
+  }
+  // B1 — advertise + handler MOVE TOGETHER: the negotiator (which already
+  // advertises `sampling: {}`) and the handler that answers it are set as one
+  // unit from the same bundle, so the client can never advertise a capability it
+  // would answer with `-32601`. Absent ⇒ no override (defaultNegotiator + the
+  // client's headless rejecter), byte-identical to the legacy single-client load.
+  if (samplingWiring !== undefined) {
+    clientOpts.negotiator = samplingWiring.negotiator
+    clientOpts.samplingHandler = samplingWiring.handler
   }
   const client = new McpClient(config, clientOpts)
   try {
@@ -285,7 +324,7 @@ export const loadMcpTools = async (
     const loaded =
       supervisorDepsFor !== undefined
         ? await loadSupervised(config, supervisorDepsFor(config))
-        : await loadSingle(config, elicitationPrompterFor, opts?.transportFor)
+        : await loadSingle(config, elicitationPrompterFor, opts?.transportFor, opts?.samplingWiring)
     if (loaded === null) continue
     tools.push(...loaded.tools)
     clients.push(loaded.client)
