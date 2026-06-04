@@ -4,9 +4,11 @@
  * The import validator MUST be symmetric with the export shape for the two
  * nested surfaces the original validator skipped:
  *
- *   - `tool_use.input` is a REQUIRED field on the exporter side (`input: unknown`,
- *     always an object on the wire). A `tool_use` missing `input`, or whose
- *     `input` is not an object, is REJECTED.
+ *   - `tool_use.input` is a REQUIRED field on the exporter side (`input: unknown`).
+ *     A `tool_use` MISSING `input` is REJECTED. A present-but-non-object `input`
+ *     is ACCEPTED — the store types it `z.unknown`, so the importer must be
+ *     SYMMETRIC and re-import whatever the store/exporter legitimately persisted
+ *     (self-audit H13: demanding an object here failed valid round-trips).
  *   - `tool_result.contentBlocks` (optional) mirrors the Anthropic Messages API
  *     `tool_result.content`: when present it is an array whose every element is
  *     `{type:"text",text:string}` | a base64 image (`data`+`mediaType`) | a
@@ -143,22 +145,34 @@ describe("@/ipc import — nested content-block symmetry hellgate", () => {
     )
   })
 
-  test("HELL-NEST-8: tool_use whose input is NOT an object is REJECTED", () => {
-    expectMessagesInvalid(
-      blobWithContent([{ type: "tool_use", id: "tu-1", name: "bash", input: "ls -la" }]),
-    )
+  // HELL-NEST-8/9/10 (self-audit H13): the importer is SYMMETRIC with the
+  // exporter + store, which type tool_use.input as `unknown` (z.unknown). A
+  // present-but-non-object input the store legitimately persisted MUST re-import
+  // — rejecting it broke valid round-trips. Only an ABSENT input is rejected
+  // (HELL-NEST-7). API-shape strictness is the adapter's concern, not this
+  // portable-import validator's.
+  test("HELL-NEST-8: tool_use whose input is a non-object (string) is ACCEPTED (store z.unknown symmetry)", () => {
+    expect(() =>
+      parsePortableSession(
+        blobWithContent([{ type: "tool_use", id: "tu-1", name: "bash", input: "ls -la" }]),
+      ),
+    ).not.toThrow()
   })
 
-  test("HELL-NEST-9: tool_use with a null input is REJECTED", () => {
-    expectMessagesInvalid(
-      blobWithContent([{ type: "tool_use", id: "tu-1", name: "bash", input: null }]),
-    )
+  test("HELL-NEST-9: tool_use with a null input is ACCEPTED (present, not absent)", () => {
+    expect(() =>
+      parsePortableSession(
+        blobWithContent([{ type: "tool_use", id: "tu-1", name: "bash", input: null }]),
+      ),
+    ).not.toThrow()
   })
 
-  test("HELL-NEST-10: tool_use with an array input is REJECTED (arrays are not objects)", () => {
-    expectMessagesInvalid(
-      blobWithContent([{ type: "tool_use", id: "tu-1", name: "bash", input: ["ls"] }]),
-    )
+  test("HELL-NEST-10: tool_use with an array input is ACCEPTED (z.unknown permits it)", () => {
+    expect(() =>
+      parsePortableSession(
+        blobWithContent([{ type: "tool_use", id: "tu-1", name: "bash", input: ["ls"] }]),
+      ),
+    ).not.toThrow()
   })
 
   /* ------------------------ valid: accepted ---------------------- */

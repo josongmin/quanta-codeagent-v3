@@ -1,0 +1,72 @@
+id: mcp-resources-prompts-roots
+title: H19 MCP resources/prompts/roots typed client methods
+section: 9
+subsystem: MCP client resources/prompts/roots method families
+order: 477
+maturity: L2
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: [absorbed:codex, surface:core]
+depends_on: [mcp-sampling-handler, mcp-tasks-capability]
+config_refs:
+  env: [QUANTA_MCP_ROOTS, QUANTA_MCP_CAPS]
+  runtime: [mcpRoots]
+purpose: |
+  H19 (jun-3-misc §3) — TYPED MCP client methods for the `resources/*`,
+  `prompts/*`, and `roots/*` method families so the model can use server-exposed
+  resources + prompt templates, and so quanta can honestly advertise `roots`.
+  Before this the client spoke only `initialize` / `tools/list` / `tools/call`
+  (+ a `requestRaw` escape hatch). Added (mirrors Codex's rmcp-client surface:
+  `resources/list`, `resources/read`, `resources/subscribe|unsubscribe`,
+  `prompts/list`, `prompts/get`, `roots/list`):
+  OUTBOUND (client→server, no-throw `McpResult<T>`): `listResources()` /
+  `readResource(uri)` (text+blob contents) / `subscribeResource` /
+  `unsubscribeResource` / `listPrompts()` / `getPrompt(name, args?)`. Each is
+  CAPABILITY-GATED on the server's advertised `initialize` caps — a method whose
+  capability the server did not advertise fails with a typed `unsupported`
+  failure and emits NO request (never a raw `-32601` surprise); a malformed
+  server response → typed `malformed`; a transport/server error → `transport`.
+  INBOUND (server→client): `roots/list` is handled in `handleInboundRequest`
+  (mirrors the elicitation/sampling inbound-router pattern), answering from a
+  wired `RootsProviderPort`; with no provider it returns an empty list (we
+  recognize the method, so never `-32601`). Change NOTIFICATIONS
+  (`notifications/resources/updated|list_changed`, `notifications/prompts/list_changed`)
+  route to an OPTIONAL `McpResourceObserver`; absent ⇒ ignored gracefully.
+  Honest advertisement (same rule as B1 sampling): the negotiator advertises
+  `roots` (with `listChanged:false` — we never emit it) IFF a real
+  `RootsProviderPort` is wired. Default-OFF (`QUANTA_MCP_ROOTS=1` opt-in):
+  `roots` is NOT advertised and inbound `roots/list` answers empty —
+  byte-identical negotiation. The outbound resource/prompt methods are NOT
+  knob-gated (they only act when the server supports the matching capability).
+evidence:
+  code:
+    - src/mcp/resources/port.ts
+    - src/mcp/resources/inbound-router.ts
+    - src/mcp/resources/notifications.ts
+    - src/mcp/resources/codec.ts
+    - src/mcp/resources/index.ts
+    - src/mcp/client.ts
+    - src/mcp/capabilities/full-negotiator.ts
+    - src/mcp/capabilities/port.ts
+    - src/shared/runtime-config.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/mcp-resources-prompts-roots-hellgate.test.ts
+      - tests/unit/mcp-resources-prompts-roots-e2e-hellgate.test.ts
+knobs:
+  - name: QUANTA_MCP_ROOTS
+    default: 'undefined'
+    purpose: 'Strict =="1" opt-in. ON (+ a wired RootsProviderPort) ⇒ advertise roots AND answer inbound roots/list from the workspace; OFF ⇒ no advertisement, empty roots/list (byte-identical).'
+  - name: QUANTA_MCP_CAPS
+    default: 'undefined'
+    purpose: 'Must be "full" for any capability (incl. roots) to be advertised at all.'
+notes: |
+  Advertise-iff-able (advertisement + RootsProviderPort move together). Outbound
+  resources/prompts methods are capability-gated per-server (no raw -32601) and
+  no-throw (typed McpResult<T>). @/mcp gains NO host import — the roots source +
+  observer arrive through the constructor DI seam, wired at the composition root.

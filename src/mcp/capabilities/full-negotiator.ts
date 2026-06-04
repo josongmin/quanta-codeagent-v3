@@ -25,6 +25,11 @@ export interface FullNegotiatorOptions {
    *  the composition root. Defaults to `false` (omitted) so an unwired
    *  deployment never falsely advertises a capability it would decline. */
   sampling?: boolean
+  /** Advertise `roots` ONLY when a real `RootsProviderPort` is wired (H19). The
+   *  client can answer inbound `roots/list` IFF it has a roots source; with no
+   *  source advertising `roots` would promise an answer we can't honestly
+   *  produce. Defaults to `false` (omitted) — byte-identical negotiation. */
+  roots?: boolean
 }
 
 /** Build a fresh, canonically-ordered record. The shape is rebuilt every call
@@ -34,10 +39,15 @@ export interface FullNegotiatorOptions {
  *  produce identical bytes. */
 const compile = (opts: FullNegotiatorOptions): McpCapabilityRecord => ({
   elicitation: {},
+  // roots is advertise-iff-able (H19): present only when a `RootsProviderPort`
+  // is wired. `listChanged:false` is the honest advertisement — we never emit
+  // `notifications/roots/list_changed`. Inserting it conditionally keeps the
+  // canonical alphabetical order (elicitation < roots < sampling < tasks <
+  // tools) for both the present and absent serializations.
+  ...(opts.roots === true ? { roots: { listChanged: false } } : {}),
   // sampling is advertise-iff-able (ADR-0470): present only when a handler is
   // wired. Inserting it conditionally keeps the canonical alphabetical order
-  // (elicitation < sampling < tasks < tools) for both the present and absent
-  // serializations.
+  // for both the present and absent serializations.
   ...(opts.sampling === true ? { sampling: {} as Record<string, never> } : {}),
   tasks: { listChanged: false },
   tools: {},

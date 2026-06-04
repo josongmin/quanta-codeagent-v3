@@ -3,8 +3,8 @@ title: DXT user_config — typed fields + template substitution + keychain secre
 section: 9
 subsystem: 통합 — DXT 매니페스트 user_config (Claude Desktop 흡수)
 order: 475
-maturity: L2
-status: new
+maturity: L3
+status: refined
 ui_surfaces: [cli, web]
 monitoring: n-a
 modes: [interactive]
@@ -39,6 +39,7 @@ purpose: |
 evidence:
   code:
     - src/plugin-isolation/dxt-user-config.ts
+    - src/plugin-isolation/dxt-loader.ts
   adrs: [475]
   tests:
     unit:
@@ -49,17 +50,13 @@ knobs:
   - name: user_config (manifest block)
     default: 'absent (OFF)'
     purpose: 'A DXT manifest that declares NO user_config / platform_overrides parses byte-identically to today and interpolateLaunchSpec returns the spec unchanged. The feature activates only when an author opts in by adding the add-only block; host wiring (schema compose + interpolate-at-spawn + safeStorage SecretStorePort) is held for integration.'
-deliberate_hold:
-  reason: |
-    Activation is held for the human at integration (files this slice is fenced
-    from): (1) compose DxtUserConfigExtension onto DxtManifestSchema in
-    dxt-loader.ts via .extend().strict(); (2) call resolveFields +
-    interpolateLaunchSpec in launchDxt between validate and spawn, mapping
-    kind:"launch" → spawnOpts and kind:"skip-launch" → typed error; (3) re-export
-    the new surface from index.ts; (4) implement + inject the safeStorage-backed
-    SecretStorePort and the InterpolationContext (platform/systemDirs) at the
-    composition root. Listed verbatim in ADR-0475 integration TODOs.
+deliberate_hold: null
 notes: |
+  LANDED: the integration is wired into src/plugin-isolation/dxt-loader.ts —
+  it spreads ...DxtUserConfigExtension onto the manifest schema (:91), injects the
+  SecretStorePort (:53), calls resolveFields(block, userValues, secrets) (:232)
+  and interpolateLaunchSpec(...) (:234) between validate and spawn, and handles
+  the kind:"skip-launch" outcome (:243).
   Port inversion is the security crux: sensitive values must never land in the
   spawn spec, but the slice cannot import the host keychain, so SecretStorePort
   is injected (mirrors @/permission ClassifierPort) keeping the module @/shared-

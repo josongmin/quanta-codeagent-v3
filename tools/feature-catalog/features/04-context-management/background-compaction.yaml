@@ -3,8 +3,8 @@ title: Background (speculative) compaction — cancellable summarize + 2-phase i
 section: 4
 subsystem: 컨텍스트 관리 — 한도 근접 시 백그라운드 summarize 선점 (Claude/Codex 흡수)
 order: 473
-maturity: L2
-status: new
+maturity: L3
+status: refined
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive]
@@ -45,6 +45,8 @@ evidence:
     - src/agent/compaction/types.ts
     - src/agent/compaction/background.ts
     - src/agent/compaction/index.ts
+    - src/agent/compaction.ts
+    - src/agent/loop.ts
   adrs: [473]
   tests:
     unit:
@@ -55,19 +57,15 @@ knobs:
   - name: QUANTA_BG_COMPACTION
     default: 'unset (OFF)'
     purpose: 'exactly "1" opts a deployment in; any other value (incl "0"/"on"/"true") keeps it OFF. Unset ⇒ the controller is never constructed and the existing synchronous compaction path runs unchanged (byte-identical), no speculative summarize is ever started.'
-deliberate_hold:
-  reason: |
-    Activation is held for the human at integration (shared files this slice is
-    fenced from): (1) the SpeculativeSummarizeFn adapter over the existing
-    summarize/compactIfNeeded primitive (honour cancel.aborted via a real
-    AbortController on llm.stream; return {summary, resultingTokens} via
-    estimateTokens; map prompt-too-long → {kind:"input-limit"}) + Clock=Date.now
-    in compaction.ts; (2) controller.maybeStart(usage) at the approaching-limit
-    check in compaction.ts; (3) controller.reconcileAtTurnBoundary at the turn
-    boundary in loop.ts (install via wm.replace on kind:"install", else leave
-    history) + controller.cancelIfPending() on early turn end. Listed verbatim in
-    ADR-0473 integration TODOs.
+deliberate_hold: null
 notes: |
+  LANDED: the controller is constructed and driven on the live loop.
+  src/agent/compaction.ts builds the BackgroundSummarizationController gated on
+  bgCompactionEnabled(env) (returns undefined when OFF, byte-identical backstop).
+  src/agent/loop.ts wires all three integration points: bgController.maybeStart(...)
+  at the approaching-limit check, await bgController.reconcileAtTurnBoundary(...)
+  at the turn boundary (install via wm.replace on kind:"install", else leave
+  history), and bgCompaction.cancelIfPending() on early turn end.
   Port inversion is the design crux: @/agent could legally import @/llm, but this
   is a leaf, so the summarize primitive is injected as SpeculativeSummarizeFn and
   the clock as Clock (mirrors @/permission ClassifierPort), keeping the slice

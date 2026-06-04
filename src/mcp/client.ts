@@ -8,6 +8,23 @@ import {
 } from "./elicitation/inbound-router"
 import type { ElicitationPrompter } from "./elicitation/port"
 import { isResponse, type JsonRpcMessage } from "./jsonrpc"
+import type { McpPrompt } from "./resources"
+import {
+  isResourceNotificationMethod,
+  isRootsMethod,
+  type McpPromptResult,
+  type McpResource,
+  type McpResourceContent,
+  type McpResourceObserver,
+  type McpResult,
+  parsePromptGet,
+  parsePromptList,
+  parseResourceList,
+  parseResourceRead,
+  type RootsProviderPort,
+  routeResourceNotification,
+  routeRootsList,
+} from "./resources"
 import { headlessSamplingRejecter } from "./sampling"
 import { isSamplingMethod, routeSampling, type SamplingResponse } from "./sampling/inbound-router"
 import type { SamplingHandlerPort } from "./sampling/port"
@@ -60,6 +77,16 @@ interface ToolsCallResult {
   content?: ContentBlock[]
   isError?: boolean
 }
+
+/** H19 — build the typed `unsupported` failure for a method whose required
+ *  server capability was not advertised. Refusing locally (instead of emitting
+ *  the request and surfacing the server's raw `-32601`) gives the caller a
+ *  stable, branchable reason. */
+const unsupported = <T>(capability: string, serverName: string): McpResult<T> => ({
+  ok: false,
+  reason: "unsupported",
+  message: `mcp server "${serverName}" does not advertise the "${capability}" capability`,
+})
 
 /** Narrow an unknown value to a plain record (object, not array/null). Used to
  *  safely walk the `initialize` response's nested `capabilities` slot. */
@@ -133,6 +160,15 @@ export class McpClient {
    *  is the advertise-iff-able default: an unwired client does NOT advertise
    *  `sampling` and a server that asks anyway gets a well-defined decline. */
   private readonly samplingHandler: SamplingHandlerPort
+  /** H19 — source for inbound `roots/list`. `undefined` (the default) means no
+   *  roots source is wired: the client does NOT advertise `roots` and answers an
+   *  unsolicited `roots/list` with an empty list (well-defined, never dropped).
+   *  Wiring this is the single signal that authorizes advertising `roots`. */
+  private readonly rootsProvider: RootsProviderPort | undefined
+  /** H19 — optional sink for inbound `notifications/resources/updated` etc.
+   *  `undefined` ⇒ notifications are ignored gracefully (byte-identical to the
+   *  pre-H19 client which dropped all inbound notifications). */
+  private readonly resourceObserver: McpResourceObserver | undefined
 
   private nextId = 1
   private readonly pending = new Map<number, PendingRequest>()
@@ -166,6 +202,8 @@ export class McpClient {
       transport?: McpClientTransport
       elicitationPrompter?: ElicitationPrompter
       samplingHandler?: SamplingHandlerPort
+      rootsProvider?: RootsProviderPort
+      resourceObserver?: McpResourceObserver
     },
   ) {
     this.config = config
@@ -183,6 +221,11 @@ export class McpClient {
     // rejecter. The composition root injects an `@/llm`-backed handler (and a
     // `fullNegotiator({ sampling: true })`) together — advertise-iff-able.
     this.samplingHandler = opts?.samplingHandler ?? headlessSamplingRejecter
+    // H19 — both default to undefined (advertise-iff-able / observer-absent),
+    // preserving byte-identical negotiation + inbound handling for every
+    // existing caller. The composition root wires these from the workspace.
+    this.rootsProvider = opts?.rootsProvider
+    this.resourceObserver = opts?.resourceObserver
   }
 
   async start(): Promise<void> {
@@ -215,6 +258,28 @@ export class McpClient {
     const caps = this.serverCapabilities
     if (caps === null) return false
     return asRecord(caps.tasks) !== null
+  }
+
+  /** H19 — does the connected server advertise `resources`? Reads the
+   *  `capabilities.resources` slot from the `initialize` response. */
+  serverSupportsResources(): boolean {
+    const caps = this.serverCapabilities
+    return caps !== null && asRecord(caps.resources) !== null
+  }
+
+  /** H19 — does the server advertise `resources.subscribe`? A subscribe call is
+   *  refused (typed `unsupported`) unless this is true, so we never emit a
+   *  `resources/subscribe` the server answers with a raw `-32601`. */
+  serverSupportsResourceSubscribe(): boolean {
+    const caps = this.serverCapabilities
+    if (caps === null) return false
+    return asRecord(caps.resources)?.subscribe === true
+  }
+
+  /** H19 — does the connected server advertise `prompts`? */
+  serverSupportsPrompts(): boolean {
+    const caps = this.serverCapabilities
+    return caps !== null && asRecord(caps.prompts) !== null
   }
 
   /** ADR-0431 — dispatch a single outbound JSON-RPC request and return the raw
@@ -266,6 +331,103 @@ export class McpClient {
       ok: res.isError !== true,
       content: capResultText(joinTextBlocks(res.content)),
     }
+  }
+
+  // --- H19: resources / prompts (outbound, no-throw) -----------------------
+
+  /** `resources/list` → typed `McpResource[]`. Refuses locally with a typed
+   *  `unsupported` failure when the server didn't advertise `resources` (no raw
+   *  `-32601` round-trip). A malformed response → `malformed`; a transport/server
+   *  error → `transport`. Never throws. */
+  async listResources(): Promise<McpResult<McpResource[]>> {
+    if (!this.serverSupportsResources()) {
+      return unsupported("resources", this.config.name)
+    }
+    return this.typedRequest("resources/list", {}, parseResourceList)
+  }
+
+  /** `resources/read` → typed `McpResourceContent[]` (text and/or blob blocks).
+   *  Same no-throw / capability-gate contract as {@link listResources}. */
+  async readResource(uri: string): Promise<McpResult<McpResourceContent[]>> {
+    if (!this.serverSupportsResources()) {
+      return unsupported("resources", this.config.name)
+    }
+    return this.typedRequest("resources/read", { uri }, parseResourceRead)
+  }
+
+  /** `resources/subscribe` → register interest in change notifications for
+   *  `uri`. Refused with `unsupported` unless the server advertises
+   *  `resources.subscribe`. The empty `{}` result maps to `value: undefined`. */
+  async subscribeResource(uri: string): Promise<McpResult<undefined>> {
+    if (!this.serverSupportsResourceSubscribe()) {
+      return unsupported("resources.subscribe", this.config.name)
+    }
+    return this.typedRequest("resources/subscribe", { uri }, () => undefined)
+  }
+
+  /** `resources/unsubscribe` — counterpart to {@link subscribeResource}. */
+  async unsubscribeResource(uri: string): Promise<McpResult<undefined>> {
+    if (!this.serverSupportsResourceSubscribe()) {
+      return unsupported("resources.subscribe", this.config.name)
+    }
+    return this.typedRequest("resources/unsubscribe", { uri }, () => undefined)
+  }
+
+  /** `prompts/list` → typed `McpPrompt[]`. Capability-gated on `prompts`. */
+  async listPrompts(): Promise<McpResult<McpPrompt[]>> {
+    if (!this.serverSupportsPrompts()) {
+      return unsupported("prompts", this.config.name)
+    }
+    return this.typedRequest("prompts/list", {}, parsePromptList)
+  }
+
+  /** `prompts/get` → typed `McpPromptResult` (rendered messages). `args` are
+   *  forwarded as the spec `arguments` map (omitted when undefined). */
+  async getPrompt(
+    name: string,
+    args?: Record<string, unknown>,
+  ): Promise<McpResult<McpPromptResult>> {
+    if (!this.serverSupportsPrompts()) {
+      return unsupported("prompts", this.config.name)
+    }
+    const params = args === undefined ? { name } : { name, arguments: args }
+    return this.typedRequest("prompts/get", params, parsePromptGet)
+  }
+
+  /** Shared no-throw request+parse core for the typed resource/prompt methods.
+   *  A server/transport error rejects the underlying request → `transport`; a
+   *  parser returning `null` → `malformed`. Never throws. */
+  private async typedRequest<T>(
+    method: string,
+    params: unknown,
+    parse: (result: unknown) => T | null,
+  ): Promise<McpResult<T>> {
+    if (!this.started || this.stopped || this.exited) {
+      return {
+        ok: false,
+        reason: "transport",
+        message: `mcp server "${this.config.name}" is not running`,
+      }
+    }
+    let raw: unknown
+    try {
+      raw = await this.request(method, params)
+    } catch (err) {
+      return {
+        ok: false,
+        reason: "transport",
+        message: err instanceof Error ? err.message : String(err),
+      }
+    }
+    const parsed = parse(raw)
+    if (parsed === null) {
+      return {
+        ok: false,
+        reason: "malformed",
+        message: `mcp server "${this.config.name}" ${method} returned a malformed response`,
+      }
+    }
+    return { ok: true, value: parsed }
   }
 
   async stop(): Promise<void> {
@@ -339,6 +501,17 @@ export class McpClient {
     // are ignored — byte-identical to the pre-Track-C behavior.
     if ("method" in msg && "id" in msg) {
       this.handleInboundRequest(msg.id, msg.method, "params" in msg ? msg.params : undefined)
+      return
+    }
+    // H19 — an inbound NOTIFICATION (a `method` WITHOUT an `id`) carries no reply
+    // obligation. Resource/prompt change notifications route to the optional
+    // observer; any other notification is ignored (byte-identical to pre-H19).
+    if ("method" in msg && isResourceNotificationMethod(msg.method)) {
+      routeResourceNotification(
+        this.resourceObserver,
+        msg.method,
+        "params" in msg ? msg.params : undefined,
+      )
     }
   }
 
@@ -350,6 +523,16 @@ export class McpClient {
    *  contracts are no-throw, and any unexpected failure is mapped to a typed
    *  decline response). */
   private handleInboundRequest(id: number | string, method: string, params: unknown): void {
+    // H19 — inbound `roots/list` (server → client). We answer from the wired
+    // `RootsProviderPort`; with none wired the provider defaults to an empty
+    // list (we recognize the method, so we never reply `-32601` — a server that
+    // asks gets a well-defined empty result rather than a dropped request).
+    if (isRootsMethod(method)) {
+      const provider = this.rootsProvider ?? { listRoots: () => [] }
+      const result = routeRootsList(provider, method)
+      this.send({ jsonrpc: "2.0", id, result })
+      return
+    }
     // ADR-0470 — sampling/createMessage routes to the injected handler. With no
     // handler wired the default rejecter declines (and the client does not
     // advertise `sampling`, so a well-behaved server never reaches here). A

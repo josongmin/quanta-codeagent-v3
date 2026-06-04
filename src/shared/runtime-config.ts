@@ -144,6 +144,17 @@ export interface RuntimeConfig {
    *  declines (`no-handler`) — byte-identical. The advertisement and the handler
    *  always move together (advertise-iff-able). */
   readonly mcpSampling: boolean
+  /** H19 (jun-3-misc §3) inbound MCP `roots/list` gate (`QUANTA_MCP_ROOTS`).
+   *  Strict opt-in (`=== "1"`). When ON *and* the composition root wires a
+   *  `RootsProviderPort` (from the active workspace), the MCP client advertises
+   *  `roots` AND answers inbound `roots/list` from that source
+   *  (advertise-iff-able — the advertisement and the source always move
+   *  together). Default false ⇒ `roots` is NOT advertised and an unsolicited
+   *  `roots/list` is answered with an empty list (byte-identical negotiation).
+   *  The typed OUTBOUND `resources/*` + `prompts/*` methods are NOT gated by
+   *  this knob — they only act when the connected server advertises the
+   *  matching capability, so they are always safe to expose. */
+  readonly mcpRoots: boolean
   /** H9 read `file_unchanged` dedup gate (`QUANTA_READ_DEDUP`). Strict opt-in
    *  (`=== "1"`). When ON, the `read` tool short-circuits a re-read of the SAME
    *  (canonical path, offset, limit) whose on-disk mtime equals the recorded
@@ -382,6 +393,11 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // (`no-handler`). The composition root only wires a handler (and advertises)
     // when this is on AND an LLM + consent prompter are present.
     mcpSampling: env["QUANTA_MCP_SAMPLING"] === "1",
+    // H19 — strict `=== "1"` opt-in. Default false ⇒ MCP `roots` is NOT
+    // advertised and inbound `roots/list` answers an empty list (byte-identical).
+    // The composition root advertises + wires the RootsProviderPort together
+    // only when this is on AND a workspace roots source is available.
+    mcpRoots: env["QUANTA_MCP_ROOTS"] === "1",
     // H9 — strict `=== "1"` opt-in. Default false ⇒ the read tool renders full
     // content on every call and allocates no per-range dedup state.
     readDedup: env["QUANTA_READ_DEDUP"] === "1",

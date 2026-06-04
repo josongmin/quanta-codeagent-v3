@@ -3,8 +3,8 @@ title: Stale-read guard — block clobbering edits + post-bash re-read reminder
 section: 2
 subsystem: 도구 시스템 — read-after-write 안전장치 (Claude/Codex stale-read 흡수)
 order: 474
-maturity: L2
-status: new
+maturity: L3
+status: refined
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive, headless]
@@ -45,6 +45,12 @@ evidence:
     - src/tool/stale-read-guard/gate.ts
     - src/tool/stale-read-guard/reminder.ts
     - src/tool/stale-read-guard/index.ts
+    - src/host/runtime/agent-config-assembler.ts
+    - src/agent/dispatch.ts
+    - src/tool/read/index.ts
+    - src/tool/write/index.ts
+    - src/tool/edit/index.ts
+    - src/tool/bash/index.ts
   adrs: [474]
   tests:
     unit:
@@ -55,17 +61,14 @@ knobs:
   - name: QUANTA_STALE_READ_GUARD
     default: 'unset (OFF)'
     purpose: 'exactly "1" opts a deployment in; any other value (incl "0"/"on"/"true") keeps it OFF. Unset ⇒ host records no read mtimes, runs no write-time guardWrite check, runs no post-bash staleAfterBash detector (byte-identical to today). Reads INJECTED env, never process.env.'
-deliberate_hold:
-  reason: |
-    Activation is held for the human at integration (shared files this slice is
-    fenced from): (1) ToolContext.readFileState optional duck-typed field
-    (mirror gitWriteGuard) + dispatch seam building one per-run instance when the
-    gate is on; (2) FileInfo.mtimeMs surfaced from storage statFile; (3) read
-    tool records info.mtimeMs after stat; (4) write/edit tools call guardWrite
-    before writing and yield a stale_read ok:false on stale; (5) bash post-hook
-    re-stats recorded read paths, calls staleAfterBash, injects renderStaleReminder.
-    Listed verbatim in ADR-0474 integration TODOs.
+deliberate_hold: null
 notes: |
+  LANDED: all five integration points are wired. The assembler mints the
+  ReadFileState gated on staleReadGuardEnabled (agent-config-assembler.ts) and
+  dispatch.ts forwards it into ToolContext; the read tool records info.mtimeMs
+  after stat (read/index.ts); write and edit call guardWrite before writing and
+  yield a stale ok:false on stale (write/index.ts, edit/index.ts); the bash
+  post-hook calls staleAfterBash + renderStaleReminder (bash/index.ts).
   Port inversion is the crux: @/tool could reach @/storage, but the guard is a
   leaf, so the real mtime is injected as a plain number (mirrors @/permission
   ClassifierPort) keeping the slice @/shared-only and unit-testable with hand-fed

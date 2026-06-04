@@ -190,6 +190,29 @@ const ENV_TABLE: readonly EnvRow[] = [
     defaultLabel: "10",
     describe: "Rich session-list cap",
   },
+  // ADR-0470..0476 R3 default-OFF gates routed through `RuntimeConfig` (strict
+  // `=== "1"` opt-in). Default false ⇒ byte-identical; surfaced here per the
+  // file's "one row per RuntimeConfig field" contract.
+  {
+    key: "QUANTA_SKILL_MCP_DEPS",
+    defaultLabel: "off",
+    describe: "ADR-0476 skill→MCP auto-attach gate ('1' to enable)",
+  },
+  {
+    key: "QUANTA_BG_COMPACTION",
+    defaultLabel: "off",
+    describe: "ADR-0473 background (speculative) compaction gate ('1' to enable)",
+  },
+  {
+    key: "QUANTA_EDIT_REPAIR_LOOP",
+    defaultLabel: "off",
+    describe: "ADR-0472 edit-repair lint-delta gate ('1' to enable)",
+  },
+  {
+    key: "QUANTA_UNTRUSTED_ENVELOPE",
+    defaultLabel: "off",
+    describe: "ADR-0471 untrusted-source envelope gate ('1' to enable)",
+  },
 ] as const
 
 /** Column width for the slash-name column. Wide enough for `/reload-skills`

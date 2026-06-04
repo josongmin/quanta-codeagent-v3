@@ -24,6 +24,12 @@ export interface McpCapabilityRecord {
   /** Presence advertises tasks/* support (ADR-0196). `listChanged` tells the
    *  server whether the client subscribes to `notifications/tasks/listChanged`. */
   tasks?: { listChanged: boolean }
+  /** Presence advertises that the client can answer inbound `roots/list`
+   *  (H19). Advertised IFF a real `RootsProviderPort` is wired
+   *  (advertise-iff-able). `listChanged` stays `false` — we do not emit
+   *  `notifications/roots/list_changed`, so claiming `true` would be a false
+   *  promise. */
+  roots?: { listChanged: boolean }
 }
 
 /** Closed-port: the only thing the MCP client cares about is the canonical

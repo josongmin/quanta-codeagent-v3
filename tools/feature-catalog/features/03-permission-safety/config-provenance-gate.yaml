@@ -3,8 +3,8 @@ title: Config-provenance gate — repo-controllable config may only NARROW, neve
 section: 3
 subsystem: 권한 머지 — 공급망/권한상승 차단 (ADR-0470)
 order: 470
-maturity: L2
-status: new
+maturity: L3
+status: refined
 ui_surfaces: [n-a]
 monitoring: integrated
 telemetry_keys: ["quanta.permission.provenance_drop"]
@@ -52,6 +52,7 @@ purpose: |
 evidence:
   code:
     - src/permission/policy-layers/provenance-guard.ts
+    - src/permission/profile-layer-merge.ts
   adrs: [470]
   tests:
     unit:
@@ -62,13 +63,13 @@ knobs:
   - name: acknowledgedRisk
     default: 'absent/false (guard ON)'
     purpose: 'Typed call-site opt-out (GuardOptions.acknowledgedRisk). Exactly true disables the guard — input layers pass through unchanged, zero drops, the dangerous widen survives because an operator EXPLICITLY acknowledged the risk. Not an env var (a hostile repo could set env); a deliberate composition-root override only. Mirrors ADR-0078 redaction opt-out.'
-deliberate_hold:
-  reason: |
-    Activation is held for the human at the merge seam (fenced file
-    src/permission/policy-layers/index.ts): call guardProvenance on the layer
-    list BEFORE mergeLayered and wire the ProvenanceDropRecord sink to the
-    telemetry registry. Listed verbatim in ADR-0470 integrationTodos.
+deliberate_hold: null
 notes: |
+  LANDED: the merge seam is wired in src/permission/profile-layer-merge.ts —
+  it imports guardProvenance (:86) and calls
+  guardProvenance(layers as ReadonlyArray<ProvenancedLayer>) (:290) on the layer
+  list BEFORE mergeLayered, so repo-controllable widens are dropped on the live
+  merge path (NOT the policy-layers/index.ts file the old hold reason named).
   Default-ON is deliberate (security, not a feature seam) but the OFF-equivalent
   path is preserved: nothing-to-drop returns the SAME array reference so a merge
   is byte-identical. The drop polarity reuses the existing NETWORK_RANK /

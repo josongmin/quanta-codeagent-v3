@@ -288,12 +288,14 @@ describe("ADR-0470 regression guards (elicitation + unknown methods)", () => {
   })
 
   it("(f) a genuinely-unknown inbound method still gets -32601", async () => {
+    // NB: `roots/list` is now a RECOGNIZED inbound method (H19) — it answers
+    // from the roots provider, not -32601. Use a method no handler recognizes.
     const transport = new ScriptedTransport()
     const client = new McpClient({ name: "t", command: ["x"] }, { transport })
     await startReady(client, transport)
     const before = transport.sent.length
 
-    transport.emit({ jsonrpc: "2.0", id: 5, method: "roots/list", params: {} })
+    transport.emit({ jsonrpc: "2.0", id: 5, method: "totally/unknown", params: {} })
     await flush()
 
     expect(transport.sent.length).toBe(before + 1)
