@@ -121,6 +121,15 @@ export class CrossSessionDreamTrigger {
   private readonly holderId: string
   private readonly telemetry: DreamTelemetryPort | undefined
   private readonly logWarn: (msg: string) => void
+  /** In-process single-flight guard. The cross-process dream-lock keys on the
+   *  per-PROCESS `holderId`, so two DISTINCT logical passes in the SAME process
+   *  (the auto `onSessionEnd` racing a manual `/dream` — both backed by THIS
+   *  instance with the SAME holderId) would BOTH re-acquire the re-entrant lock
+   *  and double-run the consolidate pipeline. This boolean serializes the two
+   *  entry points within the process: a second `fire()` while one is in flight
+   *  short-circuits to `locked` (telemetry: skipped) BEFORE touching the lock or
+   *  the consolidate pipeline. */
+  private firing = false
 
   constructor(opts: CrossSessionDreamTriggerOpts) {
     this.state = opts.state
@@ -227,6 +236,29 @@ export class CrossSessionDreamTrigger {
   /** Acquire the lock, run the consolidate + team write, reset the counter on
    *  success. Releases the lock in a `finally`. */
   private async fire(
+    state: DreamState,
+    hoursSince: number | null,
+    signal: AbortSignal | undefined,
+  ): Promise<DreamOutcome> {
+    // In-process serialization (see `firing`): a manual `/dream` racing the auto
+    // session-end pass on THIS shared instance would otherwise BOTH re-acquire
+    // the re-entrant (same-holderId) lock and double-run consolidate. The second
+    // pass short-circuits to `locked` here, before the lock + the pipeline.
+    if (this.firing) {
+      this.telemetry?.recordSkipped({ reason: "locked" })
+      return { kind: "locked" }
+    }
+    this.firing = true
+    try {
+      return await this.fireLocked(state, hoursSince, signal)
+    } finally {
+      this.firing = false
+    }
+  }
+
+  /** The lock-acquire + consolidate + team-write body. Wrapped by {@link fire}'s
+   *  in-process single-flight guard. */
+  private async fireLocked(
     state: DreamState,
     hoursSince: number | null,
     signal: AbortSignal | undefined,

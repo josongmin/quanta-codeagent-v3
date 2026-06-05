@@ -554,6 +554,27 @@ export interface RuntimeConfig {
    *  `gcloud auth application-default login`) before each Vertex call,
    *  TTL-throttled. SENSITIVE — trust-gated. */
   readonly gcpAuthRefresh: string | undefined
+  /** H7 / ADR-0139 — EXPLICIT cloud-transport selection for the MAIN agent LLM
+   *  (`QUANTA_LLM_TRANSPORT`). Empty/absent ⇒ the surface falls through to the
+   *  registry env precedence ladder (`ANTHROPIC_{BEDROCK,VERTEX,FOUNDRY}_BASE_URL`
+   *  / `ANTHROPIC_FOUNDRY_RESOURCE` / `QUANTA_USE_FOUNDRY`). Set to
+   *  `default` | `bedrock` | `vertex` | `foundry` | `mantle` to route the main
+   *  agent LLM through `createMulticloudLLM` (the H7 rotating-credential path).
+   *  Default-OFF: unset AND no cloud env signal ⇒ the legacy `createLLM` path
+   *  builds the four vendor providers BYTE-IDENTICALLY. This is the END-USER
+   *  selection knob that was previously missing — it makes the proven multicloud
+   *  + rotation seam reachable by config rather than only by an explicit
+   *  `buildMulticloudLLMCore` call. */
+  readonly llmTransport: string | undefined
+  /** H7 — explicit workspace-trust attestation for the credential-helper shell
+   *  (`QUANTA_LLM_CREDENTIAL_TRUSTED`). A credential helper / `*AuthRefresh` is
+   *  ARBITRARY COMMAND EXECUTION, so the composition root's `isTrusted` predicate
+   *  FAILS CLOSED: only the literal `1` here authorizes the shell to run. Unset /
+   *  any other value ⇒ the source surfaces a typed `untrusted` decline and NEVER
+   *  shells out (mirrors Claude Code's explicit-trust posture for `apiKeyHelper`).
+   *  Default-OFF and orthogonal to the four H7 command knobs — setting a refresh
+   *  command WITHOUT this attestation is a fail-closed no-run, not a silent run. */
+  readonly llmCredentialTrusted: boolean
 }
 
 const stringOrUndef = (raw: string | undefined): string | undefined =>
@@ -711,6 +732,14 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     ),
     awsAuthRefresh: stringOrUndef(env["QUANTA_AWS_AUTH_REFRESH"]),
     gcpAuthRefresh: stringOrUndef(env["QUANTA_GCP_AUTH_REFRESH"]),
+    // H7 / ADR-0139 — explicit main-agent cloud-transport selector. Absent ⇒
+    // the surface uses the registry env precedence ladder; the legacy vendor
+    // path stays byte-identical when neither this nor a cloud env signal is set.
+    llmTransport: stringOrUndef(env["QUANTA_LLM_TRANSPORT"]),
+    // H7 — explicit fail-closed trust attestation for the credential-helper
+    // shell. Strict `=== "1"`: only an explicit opt-in authorizes arbitrary
+    // command execution; unset / anything else ⇒ untrusted (no shell).
+    llmCredentialTrusted: env["QUANTA_LLM_CREDENTIAL_TRUSTED"] === "1",
   })
 }
 

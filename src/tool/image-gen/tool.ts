@@ -291,7 +291,14 @@ const writeImages = async (
   cwd: string,
   writePort: ImageWritePort,
 ): Promise<
-  | { kind: "ok"; paths: string[]; first?: { bytes: Uint8Array; mediaType: string } }
+  | {
+      kind: "ok"
+      paths: string[]
+      /** Per-path provider mediaType (parallel to `paths`), so artifact
+       *  registration labels EACH image with its own format in a mixed batch. */
+      mediaTypes: string[]
+      first?: { bytes: Uint8Array; mediaType: string }
+    }
   | {
       kind: "fail"
       result: ToolResult
@@ -299,6 +306,7 @@ const writeImages = async (
 > => {
   const total = images.length
   const paths: string[] = []
+  const mediaTypes: string[] = []
   let first: { bytes: Uint8Array; mediaType: string } | undefined
   for (let i = 0; i < total; i++) {
     const img = images[i] as GeneratedImage
@@ -341,9 +349,12 @@ const writeImages = async (
       }
     }
     paths.push(target)
+    mediaTypes.push(img.mediaType)
     if (i === 0) first = { bytes: decoded.bytes, mediaType: img.mediaType }
   }
-  return first !== undefined ? { kind: "ok", paths, first } : { kind: "ok", paths }
+  return first !== undefined
+    ? { kind: "ok", paths, mediaTypes, first }
+    : { kind: "ok", paths, mediaTypes }
 }
 
 /** Map a non-ok provider outcome to a typed ToolResult. */
@@ -396,16 +407,22 @@ const callProvider = async (
 /** C1 — best-effort register every written image into the session artifact
  *  registry. Returns an additive output line listing the minted ids, or `""`
  *  when no registry is wired OR every register call failed (best-effort — a
- *  throwing registry NEVER breaks the primary write). The mediaType is the
- *  image's own (`image/png` etc.). */
+ *  throwing registry NEVER breaks the primary write). Each image is labelled
+ *  with ITS OWN provider mediaType (parallel `mediaTypes` array) so a mixed
+ *  batch is not flattened; `fallbackMediaType` covers a short array. */
 const registerImages = (
   registry: ArtifactRegistryPort | undefined,
   paths: readonly string[],
-  mediaType: string,
+  mediaTypes: readonly string[],
+  fallbackMediaType: string,
 ): string => {
   if (registry === undefined || paths.length === 0) return ""
   const ids: string[] = []
-  for (const path of paths) {
+  for (let i = 0; i < paths.length; i++) {
+    const path = paths[i] as string
+    // Each image carries its OWN provider mediaType; never flatten a mixed
+    // batch to image[0]'s format. Fall back only if the array is short.
+    const mediaType = mediaTypes[i] ?? fallbackMediaType
     try {
       ids.push(registry.register({ kind: "image", path, mediaType }).id)
     } catch {
@@ -474,6 +491,7 @@ const runImageGen = async (
   const registered = registerImages(
     artifactRegistry,
     written.paths,
+    written.mediaTypes,
     written.first?.mediaType ?? formatMediaType(formatFromPath(data.outputPath)),
   )
   return successResult(written.paths, data.inlinePreview === true, written.first, registered)

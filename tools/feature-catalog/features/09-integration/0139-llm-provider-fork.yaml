@@ -10,7 +10,14 @@ monitoring: n-a
 modes: [n-a]
 configurable: integrated
 config_refs:
-  env: []
+  env:
+    - QUANTA_LLM_TRANSPORT
+    - ANTHROPIC_BEDROCK_BASE_URL
+    - ANTHROPIC_VERTEX_BASE_URL
+    - ANTHROPIC_FOUNDRY_BASE_URL
+    - ANTHROPIC_FOUNDRY_RESOURCE
+    - QUANTA_USE_FOUNDRY
+    - CLAUDE_CODE_USE_FOUNDRY
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [llm-adapter-bedrock, llm-adapter-foundry, llm-adapter-mantle, llm-adapter-vertex, llm-stream-timeout]
@@ -27,9 +34,13 @@ purpose: |
   FACTORY WIRE NOW LIVE (H7): createMulticloudLLM in src/llm/factory.ts
   consults this registry's precedence ladder to select the transport AND
   injects the H7 CredentialSource into the Bedrock/Vertex adapters, so the
-  slice is no longer unwired from the main factory. First OSS implementation
-  to make Anthropic transport-selection typed; Claude Code keeps it
-  closed via env-only, Codex/Cursor/v0.dev don't separate transport.
+  slice is no longer unwired from the main factory. END-USER REACHABILITY
+  NOW LIVE: selectLlmTransport + buildMainLLMCore (src/runner/assemble/llm.ts)
+  route the MAIN agent LLM (CLI buildLLM) through createMulticloudLLM when
+  QUANTA_LLM_TRANSPORT or a cloud env signal selects a non-default transport;
+  default-OFF byte-identical otherwise. First OSS implementation to make
+  Anthropic transport-selection typed; Claude Code keeps it closed via
+  env-only, Codex/Cursor/v0.dev don't separate transport.
 evidence:
   code:
     - src/llm/providers/provider-port.ts
@@ -40,6 +51,8 @@ evidence:
     - src/llm/providers/registry.ts
     - src/llm/providers/index.ts
     - src/llm/factory.ts
+    - src/runner/assemble/llm.ts
+    - src/apps/cli/internal.ts
   adrs: [139]
   tests:
     unit:
@@ -49,12 +62,13 @@ evidence:
       - tests/unit/llm-providers/bedrock-adapter-hellgate.test.ts
       - tests/unit/llm-providers/vertex-adapter-hellgate.test.ts
       - tests/unit/h7-multicloud-rotation-wire-hellgate.test.ts
+      - tests/unit/h7-main-llm-transport-routing-hellgate.test.ts
     integration: []
     contract: []
 knobs:
-  - name: QUANTA_ANTHROPIC_PROVIDER
+  - name: QUANTA_LLM_TRANSPORT
     default: 'undefined'
-    purpose: 'default | bedrock | vertex | foundry (explicit override)'
+    purpose: 'Explicit MAIN-agent transport selector — default | bedrock | vertex | foundry | mantle. Unset ⇒ the registry env precedence ladder (ANTHROPIC_{BEDROCK,VERTEX,FOUNDRY}_BASE_URL / _RESOURCE / _USE_*) decides; neither set ⇒ legacy vendor path (byte-identical).'
 deliberate_hold: null
 notes: |
   Wire is opt-in: legacy AnthropicAdapter still default. Foundry adapter

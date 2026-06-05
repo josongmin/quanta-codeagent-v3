@@ -147,6 +147,18 @@ export const createCredentialSource = (opts: CredentialSourceOptions): Credentia
   // Per-cloud last-refresh timestamps for the throttle.
   const refreshAt = new Map<CloudKind, number>()
 
+  // COALESCING (single-flight) — N concurrent callers that all observe a cache
+  // MISS / throttle-elapsed must NOT each spawn a redundant shell. Without this,
+  // a fallback stack or parallel adapters that share ONE source would fire
+  // `aws sso login` / the mint helper once PER caller (arbitrary command
+  // execution × N + cloud-auth-endpoint rate-limiting). We pin the in-flight
+  // promise keyed by the helper command; concurrent callers AWAIT the same
+  // promise and the shell runs exactly once. The entry is cleared in a `finally`
+  // so a later (post-TTL) call re-shells, and a FAILED attempt is NOT pinned
+  // (the next caller retries rather than inheriting a thrown rejection forever).
+  const mintInflight = new Map<string, Promise<string>>()
+  const refreshInflight = new Map<CloudKind, Promise<void>>()
+
   /** Run a helper command through the injected shell, gated by trust and with
    *  full no-throw / no-leak handling. Returns trimmed stdout on success. */
   const runHelper = async (command: string, capability: string): Promise<string> => {
@@ -194,22 +206,36 @@ export const createCredentialSource = (opts: CredentialSourceOptions): Credentia
       if (cached !== undefined && now() - cached.mintedAt < ttlMs) {
         return cached.value
       }
-      const value = await runHelper(command, "api-key")
-      if (value.length === 0) {
-        // A helper that exits 0 yet prints nothing (or only whitespace) did NOT
-        // mint a key. Caching/returning "" would pin a broken credential for the
-        // whole TTL window AND let a `mint ?? envKey` consumer silently override
-        // a working env key with an empty string. Treat as a typed failure — we
-        // throw BEFORE writing the cache, so the empty value is never pinned.
-        // NO-LEAK preserved (no stdout interpolated).
-        throw new CredentialHelperError(
-          "helper-failed",
-          "api-key",
-          `credential helper for "api-key" produced no output (empty key)`,
-        )
+      // Single-flight: a concurrent mint for the same command shares ONE shell.
+      const inflight = mintInflight.get(command)
+      if (inflight !== undefined) return inflight
+
+      const run = (async (): Promise<string> => {
+        const value = await runHelper(command, "api-key")
+        if (value.length === 0) {
+          // A helper that exits 0 yet prints nothing (or only whitespace) did NOT
+          // mint a key. Caching/returning "" would pin a broken credential for the
+          // whole TTL window AND let a `mint ?? envKey` consumer silently override
+          // a working env key with an empty string. Treat as a typed failure — we
+          // throw BEFORE writing the cache, so the empty value is never pinned.
+          // NO-LEAK preserved (no stdout interpolated).
+          throw new CredentialHelperError(
+            "helper-failed",
+            "api-key",
+            `credential helper for "api-key" produced no output (empty key)`,
+          )
+        }
+        keyCache.set(command, { value, mintedAt: now() })
+        return value
+      })()
+      mintInflight.set(command, run)
+      try {
+        return await run
+      } finally {
+        // Clear so the NEXT (post-TTL) mint re-runs, and a failed attempt is not
+        // pinned (a later caller retries instead of inheriting the rejection).
+        mintInflight.delete(command)
       }
-      keyCache.set(command, { value, mintedAt: now() })
-      return value
     },
 
     async refreshCloudCreds(cloud: CloudKind): Promise<void> {
@@ -221,11 +247,23 @@ export const createCredentialSource = (opts: CredentialSourceOptions): Credentia
         // Throttled — a refresh already ran within this window.
         return
       }
-      // Run (trust-gated). On success, stamp the throttle. The minted stdout of
-      // a refresh command is irrelevant (the SDK re-reads its own cred files);
-      // we only care that it ran without error.
-      await runHelper(command, cloud)
-      refreshAt.set(cloud, now())
+      // Single-flight: concurrent refreshes for the same cloud share ONE shell.
+      const inflight = refreshInflight.get(cloud)
+      if (inflight !== undefined) return inflight
+
+      const run = (async (): Promise<void> => {
+        // Run (trust-gated). On success, stamp the throttle. The minted stdout of
+        // a refresh command is irrelevant (the SDK re-reads its own cred files);
+        // we only care that it ran without error.
+        await runHelper(command, cloud)
+        refreshAt.set(cloud, now())
+      })()
+      refreshInflight.set(cloud, run)
+      try {
+        await run
+      } finally {
+        refreshInflight.delete(cloud)
+      }
     },
   }
 }

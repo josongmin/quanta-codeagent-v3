@@ -24,6 +24,7 @@ export { wireInteractiveKnobs } from "./interactive-knobs"
 export {
   buildCredentialSource,
   buildLLMCore,
+  buildMainLLMCore,
   buildMulticloudLLMCore,
   type ComposeLlmInput,
   type CredentialSourceInput,
@@ -31,11 +32,15 @@ export {
   DEFAULT_MODEL,
   type EnvLike,
   type LlmAssembleInput,
+  type LlmTransportSelection,
+  type MainLlmAssembleInput,
   type MulticloudAssembleInput,
   type PickProviderInput,
   type Provider,
   parseFallbackModels,
   pickProviderCore,
+  type SelectTransportInput,
+  selectLlmTransport,
 } from "./llm"
 export {
   buildMemoryConfigCore,

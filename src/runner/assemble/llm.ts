@@ -10,7 +10,9 @@ import {
   type FallbackMetricSink,
   type Provider as LLMFactoryProvider,
   type LLMPort,
+  type ProviderEnv,
   pickProvider as pickProviderFactory,
+  resolveProvider,
   type ShellExecResult,
   withLiveUsage,
 } from "@/llm"
@@ -253,11 +255,12 @@ export interface MulticloudAssembleInput {
  *  credential source injected when configured. The single composition-root
  *  entry that makes the proven injection seam live end-to-end.
  *
- *  HONESTY (see report): selecting a multicloud transport is NOT yet routed by
- *  the main `buildLLMCore` provider ladder — `buildLLMCore` resolves only the
- *  four legacy `Provider`s. This entry is the tested seam a surface calls when
- *  it has decided (via a future provider-selection knob) to use a cloud
- *  transport; the H7 credential source is fully live on THIS path. */
+ *  REACHABILITY: this entry is now ROUTED by the main agent via
+ *  {@link buildMainLLMCore} + {@link selectLlmTransport} — `buildLLMCore` still
+ *  resolves only the four legacy `Provider`s, but the surface picks between the
+ *  two paths based on the `QUANTA_LLM_TRANSPORT` knob / registry env signals, so
+ *  a cloud transport (and the H7 credential source on it) is reachable by config
+ *  rather than only by an explicit `buildMulticloudLLMCore` call. */
 export const buildMulticloudLLMCore = (input: MulticloudAssembleInput): LLMPort => {
   const credentialSource = buildCredentialSource(input.credential)
   const opts: CreateMulticloudOptions = {
@@ -265,6 +268,122 @@ export const buildMulticloudLLMCore = (input: MulticloudAssembleInput): LLMPort 
     ...(credentialSource !== undefined ? { credentialSource } : {}),
   }
   return createMulticloudLLM(opts, input.env)
+}
+
+// ─────────────── H7 / ADR-0139 — MAIN-AGENT transport SELECTION + ROUTING ────
+//
+// THE PREVIOUSLY-MISSING LAYER. Until now `createMulticloudLLM` (and the H7
+// rotating-credential injection it carries) was a fully-tested seam that NOTHING
+// in the main agent path reached: the CLI's `buildLLM` resolved only the four
+// legacy vendor `Provider`s, so the entire bedrock/vertex/foundry + rotation
+// path was LIVE-BUT-UNREACHABLE by config. These two helpers are the
+// surface-agnostic SELECTION/ROUTING layer that closes that gap:
+//
+//   - {@link selectLlmTransport} reuses the PROVEN registry precedence ladder
+//     (`resolveProvider`) — explicit `QUANTA_LLM_TRANSPORT` knob wins, else the
+//     `ANTHROPIC_{BEDROCK,VERTEX,FOUNDRY}_BASE_URL` / `*_RESOURCE` / `*_USE_*`
+//     env signals decide. NO parallel selection mechanism is invented; this is
+//     the single source of truth the `createMulticloudLLM` path already uses.
+//   - {@link buildMainLLMCore} routes: a `default` resolution builds the legacy
+//     vendor adapter BYTE-IDENTICALLY (`buildLLMCore`); a cloud resolution
+//     routes through `buildMulticloudLLMCore` with the H7 credential input.
+//
+// DEFAULT-OFF BYTE-IDENTITY: when `transport` is unset AND no cloud env signal
+// is present, {@link selectLlmTransport} returns `{ kind: "legacy" }` and
+// {@link buildMainLLMCore} calls `buildLLMCore` verbatim — the four vendor
+// providers and their adapter ctor args are untouched.
+
+/** The transport SELECTION decision. `legacy` ⇒ the four vendor providers via
+ *  `createLLM` (byte-identical). `multicloud` ⇒ a cloud transport via
+ *  `createMulticloudLLM` (the H7 rotating-credential path), carrying the
+ *  resolved transport id for the multicloud factory. */
+export type LlmTransportSelection =
+  | { readonly kind: "legacy" }
+  | { readonly kind: "multicloud"; readonly providerId: string }
+
+/** Inputs to {@link selectLlmTransport}. The surface passes the explicit
+ *  selector knob (`QUANTA_LLM_TRANSPORT`, already mirrored off `runtimeConfig()`)
+ *  and the env record the registry ladder consults — keeping `@/runner` free of
+ *  a direct `process.env` read. */
+export interface SelectTransportInput {
+  /** `QUANTA_LLM_TRANSPORT` — explicit `default|bedrock|vertex|foundry|mantle`.
+   *  Empty/undefined ⇒ fall through to the env precedence ladder. */
+  transport: string | undefined
+  /** Env record forwarded to `resolveProvider` for the env precedence ladder
+   *  (`ANTHROPIC_{BEDROCK,VERTEX,FOUNDRY}_BASE_URL` / `*_RESOURCE` / `*_USE_*`). */
+  env: ProviderEnv
+}
+
+/** Decide whether the MAIN agent LLM uses a cloud transport. Reuses the
+ *  registry's deterministic precedence ladder (explicit knob wins, else env
+ *  signals) so there is ONE selection mechanism. A `default` resolution ⇒
+ *  `legacy` (byte-identical vendor path); any other resolved id ⇒ `multicloud`.
+ *
+ *  NOTE: an UNKNOWN explicit id (e.g. `QUANTA_LLM_TRANSPORT=typo`) resolves to a
+ *  non-`default` id whose multicloud factory lazy-throws `provider-unsupported`
+ *  at first stream — the operator's typo surfaces loudly rather than silently
+ *  falling back to the vendor path (matching the registry's documented
+ *  unknown-id contract). */
+export const selectLlmTransport = (input: SelectTransportInput): LlmTransportSelection => {
+  const resolved = resolveProvider(input.transport, input.env)
+  if (resolved.id === "default") return { kind: "legacy" }
+  return { kind: "multicloud", providerId: resolved.id }
+}
+
+/** Inputs to {@link buildMainLLMCore} — the single composition-root entry the
+ *  surface calls to build the MAIN agent LLM with transport selection + H7
+ *  rotation routed end-to-end. A superset of {@link LlmAssembleInput} (the
+ *  legacy path) plus the transport selector + the H7 credential input (consulted
+ *  only on the multicloud path). */
+export interface MainLlmAssembleInput {
+  /** Legacy vendor provider (`pickProviderCore` result). Used ONLY on the
+   *  `legacy` branch — the multicloud branch derives its model from the
+   *  transport's default unless `model` is pinned. */
+  provider: Provider
+  /** Model id (CLI `QUANTA_MODEL`). On the multicloud branch a transport-pinned
+   *  model wins; an empty string ⇒ the transport default is used. */
+  model: string
+  /** Env-record forwarded to BOTH the legacy `createLLM` (api-key / baseURL) and
+   *  the multicloud auth / transport resolution. */
+  env: EnvLike
+  /** The transport SELECTION (from {@link selectLlmTransport}). Surface decides;
+   *  `legacy` ⇒ byte-identical vendor path. */
+  selection: LlmTransportSelection
+  /** H7 credential input — consulted ONLY on the multicloud branch. When all
+   *  four H7 knobs are unset, NO source is built and the cloud adapter shells
+   *  ZERO times (byte-identical to the SDK default credential chain). */
+  credential: CredentialSourceInput
+  /** Test-only DI seams — forwarded verbatim to {@link buildMulticloudLLMCore}
+   *  on the multicloud branch so a hellgate can drive `.stream()` over a faked
+   *  cloud client (bypassing the lazy cloud-SDK import). Production omits. */
+  multicloudOpts?: Pick<
+    CreateMulticloudOptions,
+    "auth" | "bedrockClientFactory" | "vertexClientFactory"
+  >
+}
+
+/** Build the MAIN agent LLM, routing to the multicloud + H7 path when a cloud
+ *  transport is selected, else the byte-identical legacy vendor path. THE entry
+ *  that makes the multicloud + rotation seam reachable by config.
+ *
+ *  legacy ⇒ {@link buildLLMCore} (four vendor providers, untouched).
+ *  multicloud ⇒ {@link buildMulticloudLLMCore} with `providerId` pinned to the
+ *  resolved transport + the H7 credential input. A non-empty `model` overrides
+ *  the transport default (CLI `QUANTA_MODEL`); an empty `model` lets the
+ *  multicloud factory pick the transport-appropriate default slug. */
+export const buildMainLLMCore = (input: MainLlmAssembleInput): LLMPort => {
+  if (input.selection.kind === "legacy") {
+    return buildLLMCore({ provider: input.provider, model: input.model, env: input.env })
+  }
+  return buildMulticloudLLMCore({
+    opts: {
+      providerId: input.selection.providerId,
+      ...(input.model.length > 0 ? { model: input.model } : {}),
+      ...(input.multicloudOpts ?? {}),
+    },
+    env: input.env,
+    credential: input.credential,
+  })
 }
 
 /** Parse `QUANTA_MODEL_FALLBACK`-style raw string → dedup'd model ids.

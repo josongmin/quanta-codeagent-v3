@@ -219,6 +219,41 @@ describe("H16 — /dream MANUAL trigger (REPL composer ctx injection)", () => {
     expect(trigger.targetPath).toBe(join(r, "team", "cross-session.md"))
   })
 
+  test("(a') manual /dream OVERRIDES a NOT-due cadence (high threshold, 0 sessions) yet leaves auto state consistent", async () => {
+    // Adversarial: the cadence gate is FAR from crossing (threshold 999, 0
+    // sessions elapsed, 0 hours). The AUTO path would report below_threshold and
+    // NOT fire. The MANUAL /dream MUST still consolidate (true bypass), and MUST
+    // reset the persisted counter the auto path subsequently reads — so a manual
+    // dream cannot leave the cadence state corrupt for the next session-end.
+    const r = newRoot()
+    const trigger = buildCrossSessionDreamTrigger({
+      env: { QUANTA_AUTO_DREAM: "1", QUANTA_AUTO_DREAM_SESSIONS: "999" },
+      memoryRoot: r,
+      stage1OutputsStore: fakeStage1Store(["- decision: override the gate"]),
+      summarizer: fakeSummarizer("## Team knowledge\n- override"),
+      now: fixedClock(1_000_000),
+      logWarn: () => undefined,
+    })
+    if (trigger === undefined) throw new Error("expected a trigger")
+    const { cap, ctx } = mkCtx(trigger)
+
+    const code = await dreamCmd.run([], ctx)
+    expect(code).toBe(0)
+    // Manual fired despite the cadence being nowhere near due.
+    expect(cap.out).toContain("done")
+
+    // The persisted state the AUTO path reads next is consistent (counter reset,
+    // completed stamp) — NOT corrupted by the out-of-band manual override.
+    const persisted = JSON.parse(readFileSync(join(r, "dream-state.json"), "utf8"))
+    expect(persisted.sessionsSinceLastDream).toBe(0)
+    expect(persisted.lastOutcome).toBe("completed")
+
+    // And the auto path, reading that SAME state, now honestly reports below
+    // threshold (1 session since the manual reset, threshold 999) — no double-fire.
+    const auto = await trigger.onSessionEnd()
+    expect(auto.kind).toBe("below_threshold")
+  })
+
   test("not-wired surface (no ctx.dream) ⇒ inert 'not wired' (default-OFF byte-identical)", async () => {
     const { cap, ctx } = mkCtx() // no dream slot — the pre-wire production state
     const code = await dreamCmd.run([], ctx)

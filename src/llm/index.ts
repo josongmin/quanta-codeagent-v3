@@ -57,6 +57,8 @@ export {
   type PrewarmOutcome,
   prewarmLlm,
 } from "./prewarm"
+export type { ProviderEnv, ProviderId, ResolvedProvider } from "./providers"
+export { PROVIDER_ENV_KEYS, resolveProvider } from "./providers"
 export type {
   ResponsesContinuationEntry,
   ResponsesContinuationStore,

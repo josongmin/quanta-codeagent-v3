@@ -186,6 +186,27 @@ describe("C1 auto-register — image_gen", () => {
     expect(registry.registered).toHaveLength(2)
     expect(registry.registered.every((s) => s.kind === "image")).toBe(true)
   })
+
+  test("heterogeneous batch registers EACH image with ITS OWN provider mediaType", async () => {
+    // A provider may legitimately return mixed formats in one batch. The artifact
+    // mediaType MUST reflect the per-image bytes, not be flattened to image[0]'s.
+    const jpegImage: GeneratedImage = {
+      b64: Buffer.from(PNG_1x1).toString("base64"),
+      mediaType: "image/jpeg",
+    }
+    const registry = new RecordingRegistry()
+    const writePort = new MemWritePort()
+    const tool = imageGenTool({
+      port: okPort([pngImage, jpegImage]),
+      writePort,
+      artifactRegistry: registry,
+    })
+    const res = await runTool(tool, { prompt: "x", outputPath: "m.png", n: 2 }, ctx(tmp()))
+    expect(res.ok).toBe(true)
+    expect(registry.registered).toHaveLength(2)
+    expect(registry.registered[0]?.mediaType).toBe("image/png")
+    expect(registry.registered[1]?.mediaType).toBe("image/jpeg")
+  })
 })
 
 /* ------------------------------------------------------------------ */

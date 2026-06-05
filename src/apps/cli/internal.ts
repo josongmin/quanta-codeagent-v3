@@ -29,7 +29,7 @@ import type { PermissionContext, PermissionMode } from "@/permission"
 import {
   buildCompactionBreakerConfigCore,
   buildEmbedderCore,
-  buildLLMCore,
+  buildMainLLMCore,
   buildMemoryForSession,
   buildSearchPipelineFromEnv,
   buildSkillsConfigCore,
@@ -47,6 +47,7 @@ import {
   pickProviderCore,
   type Provider as RunnerProvider,
   resolveMemoryConfigFromEnv,
+  selectLlmTransport,
 } from "@/runner/assemble"
 import type { Tooling } from "@/runner/assemble/tooling"
 import { resolveSandboxProfileFromEnv } from "@/runtime"
@@ -124,12 +125,43 @@ export const pickIdentity = (): readonly string[] | undefined => {
   return defaultIdentityProvider().identityFor(raw as IdentityMode)
 }
 
-/** Build the main LLM adapter via the surface-agnostic core. Preserves the
- *  prior contract byte-for-byte: a missing provider key throws (the cli aborts
- *  loudly), the factory resolves the api key + `OPENAI_BASE_URL` from the env
- *  we pass. */
-export const buildLLM = (provider: Provider, model: string): LLMPort =>
-  buildLLMCore({ provider, model, env: process.env })
+/** Build the main LLM adapter via the surface-agnostic core, with H7 / ADR-0139
+ *  CLOUD-TRANSPORT SELECTION + ROTATION routed end-to-end.
+ *
+ *  DEFAULT-OFF BYTE-IDENTITY: when neither `QUANTA_LLM_TRANSPORT` nor a cloud
+ *  env signal (`ANTHROPIC_{BEDROCK,VERTEX,FOUNDRY}_BASE_URL` / `*_RESOURCE` /
+ *  `*_USE_*`) is set, {@link selectLlmTransport} resolves to `legacy` and this
+ *  builds the four vendor providers via the UNCHANGED `buildLLMCore` path — a
+ *  missing provider key still throws (the cli aborts loudly), the factory still
+ *  resolves the api key + `OPENAI_BASE_URL` from `process.env`.
+ *
+ *  When a cloud transport IS selected, the LLM is built through
+ *  `createMulticloudLLM` with the H7 rotating-credential source — making the
+ *  previously-unreachable multicloud + rotation seam reachable BY CONFIG. The
+ *  credential shell is gated behind the FAIL-CLOSED `QUANTA_LLM_CREDENTIAL_TRUSTED`
+ *  attestation: unset ⇒ a typed `untrusted` decline, never a silent command run.
+ *  The four H7 command knobs are mirrored off `runtimeConfig()` (the SSOT that
+ *  owns the `process.env` read). */
+export const buildLLM = (provider: Provider, model: string): LLMPort => {
+  const cfg = runtimeConfig()
+  const selection = selectLlmTransport({ transport: cfg.llmTransport, env: process.env })
+  return buildMainLLMCore({
+    provider,
+    model,
+    env: process.env,
+    selection,
+    credential: {
+      apiKeyHelper: cfg.apiKeyHelper,
+      apiKeyHelperTtlMs: cfg.apiKeyHelperTtlMs,
+      awsAuthRefresh: cfg.awsAuthRefresh,
+      gcpAuthRefresh: cfg.gcpAuthRefresh,
+      // FAIL-CLOSED: arbitrary command execution requires an explicit operator
+      // trust attestation. Unset ⇒ the source declines (typed `untrusted`),
+      // shelling ZERO times.
+      isTrusted: () => cfg.llmCredentialTrusted,
+    },
+  })
+}
 
 /** Default model id per provider — re-exported from the runner barrel (the
  *  single source of truth the three app entry points used to each duplicate). */
