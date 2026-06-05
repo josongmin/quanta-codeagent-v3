@@ -1140,6 +1140,7 @@
         "!tests/unit/build-memory-config-delegation-hellgate.test.ts",
         "!tests/unit/mcp-sampling-live-wire-e2e-hellgate.test.ts",
         "!tests/unit/mcp-roots-supervised-wire-e2e-hellgate.test.ts",
+        "!tests/unit/h7-transport-e2e-hellgate.test.ts",
         "!tests/integration/session-ux-e2e.test.ts",
         "!tests/integration/session-chaos-and-attack.test.ts",
         "!tests/integration/session-stress-and-concurrent.test.ts",

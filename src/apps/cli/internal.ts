@@ -41,6 +41,7 @@ import {
   buildVerifyGuardConfigCore,
   composeLLMCore,
   DEFAULT_MODEL,
+  type MainLlmAssembleInput,
   parseEnvFlag,
   parseFallbackModels,
   parseRecallTiers,
@@ -142,7 +143,35 @@ export const pickIdentity = (): readonly string[] | undefined => {
  *  attestation: unset ⇒ a typed `untrusted` decline, never a silent command run.
  *  The four H7 command knobs are mirrored off `runtimeConfig()` (the SSOT that
  *  owns the `process.env` read). */
-export const buildLLM = (provider: Provider, model: string): LLMPort => {
+/** Test-only DI seams for {@link buildLLM}. The CLI `buildLLM` seam reads
+ *  `runtimeConfig()` + `process.env` (the REAL config→selection→credential→stream
+ *  chain a user exercises by setting `QUANTA_LLM_TRANSPORT` etc.), but the cloud
+ *  transports lazy-import an optional cloud SDK and the credential refresh runs
+ *  the real `runShell`. So an end-to-end test that drives THIS entry point can
+ *  only do so over FAKE leaves (a synthetic cloud client + a synthetic shell).
+ *  These optional seams thread those fakes DOWN to the proven `buildMainLLMCore`
+ *  seams (`multicloudOpts.{bedrock,vertex}ClientFactory` + `credential.shellExec`).
+ *  PRODUCTION OMITS THIS ARGUMENT ⇒ byte-identical: the real lazy SDK import +
+ *  the real `runShell`-backed `realShellExec` are used (no behavior change, no
+ *  new field consulted on the legacy path). */
+export interface BuildLlmTestSeams {
+  /** Injected shell-exec for the H7 credential helper (mirrors
+   *  `CredentialSourceInput.shellExec`). Absent ⇒ the real `runShell`. */
+  readonly shellExec?: (command: string) => Promise<import("@/llm").ShellExecResult>
+  /** Injected cloud-client factories (mirrors `MainLlmAssembleInput.multicloudOpts`)
+   *  so a faked Bedrock/Vertex client bypasses the lazy SDK import. Absent ⇒ the
+   *  real lazy SDK import is the live path. */
+  readonly multicloudOpts?: MainLlmAssembleInput["multicloudOpts"]
+  /** Injected clock for the credential TTL cache (no bare `Date.now()` in tests).
+   *  Absent ⇒ the credential helper's `Date.now` default. */
+  readonly now?: () => number
+}
+
+export const buildLLM = (
+  provider: Provider,
+  model: string,
+  seams: BuildLlmTestSeams = {},
+): LLMPort => {
   const cfg = runtimeConfig()
   const selection = selectLlmTransport({ transport: cfg.llmTransport, env: process.env })
   return buildMainLLMCore({
@@ -159,7 +188,13 @@ export const buildLLM = (provider: Provider, model: string): LLMPort => {
       // trust attestation. Unset ⇒ the source declines (typed `untrusted`),
       // shelling ZERO times.
       isTrusted: () => cfg.llmCredentialTrusted,
+      // Test-only DI seams (production omits `seams` ⇒ both undefined ⇒ the real
+      // `realShellExec`/`Date.now` are used inside `buildCredentialSource`).
+      ...(seams.shellExec !== undefined ? { shellExec: seams.shellExec } : {}),
+      ...(seams.now !== undefined ? { now: seams.now } : {}),
     },
+    // Test-only cloud-client DI (production omits ⇒ the lazy SDK import is live).
+    ...(seams.multicloudOpts !== undefined ? { multicloudOpts: seams.multicloudOpts } : {}),
   })
 }
 
