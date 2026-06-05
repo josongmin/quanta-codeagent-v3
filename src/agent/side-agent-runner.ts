@@ -67,7 +67,9 @@ export const subagentRunnerToSidePass = (
   opts: { readonly toolFilter?: readonly string[] } = {},
 ): SideAgentRunnerPort => ({
   run: async ({ task, maxTurns, signal }) => {
-    const result = await runner.run({
+    // SubagentRunner is a bare callable `(req) => Promise<result>`, not an
+    // object — invoke it directly (was `runner.run(...)`, a type error).
+    const result = await runner({
       prompt: task,
       depth: 1,
       toolFilter: [...(opts.toolFilter ?? SIDE_AGENT_READONLY_TOOLS)],

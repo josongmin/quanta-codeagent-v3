@@ -334,6 +334,34 @@ export type AgentEvent =
       preset: string | null
       costMultiplier: number
     }
+  // C2 (jun-4-communicate-update.md): structured progress report. Emitted when
+  // the model calls the `communicate_update` tool MID-TURN to surface a typed
+  // progress triple — absorbed from Cursor 3.5.33's `agent.v1.CommunicateUpdateArgs`.
+  // The tool forwards a `ProgressUpdateMirror` to a host-wired `ProgressSink`
+  // (duck-typed on `ToolContext`); the host adapts it onto THIS stream as
+  // `progress_update`. RENDER-ONLY — carries no loop-control authority (the loop
+  // never inspects it). Default-OFF: the sink is wired ONLY when
+  // `AgentConfig.progressSink` is set; absent ⇒ no event, byte-identical (and
+  // NullStream swallows it regardless). Distinct from `output_progress` (token
+  // counter, transient, un-recorded) and `tool_progress` (free-text, keyed by a
+  // tool-call id): this carries the typed `{currentStep, finalSummary?,
+  // completedSubtitle?}` triple and IS recorded (durable agent intent).
+  //
+  // camelCase here matches the wire-internal AgentEvent convention (`fromSha`,
+  // `outputTokens`); the tool's snake_case input is the model-facing contract,
+  // transformed at the adapter boundary.
+  | {
+      type: "progress_update"
+      /** Live "what step am I on" line — updated whenever the subtask changes. */
+      currentStep: string
+      /** Set-once-per-turn executive summary (optional until the turn ends). */
+      finalSummary?: string
+      /** Set-once 4-6-word past-tense agent subtitle (optional). */
+      completedSubtitle?: string
+      /** Turn index for ordering / UI anchoring (mirrors Cursor's `message_index`
+       *  intent — lets a surface anchor / coalesce updates within a turn). */
+      turn?: number
+    }
   | { type: "done"; reason: string; turns: number }
 
 /**

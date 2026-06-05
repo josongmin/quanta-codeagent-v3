@@ -306,6 +306,41 @@ export interface ToolContext {
    *  imports `@/git` (same discipline as {@link ToolDiffSink} /
    *  {@link ShellExecObserver}). */
   vcsEventSink?: VcsEventSink
+  /** C2 (jun-4-communicate-update.md) — OPTIONAL structured-progress sink. The
+   *  `communicate_update` tool forwards its typed `{current_step, final_summary?,
+   *  completed_subtitle?}` payload here; the host (composition root) adapts it
+   *  onto the EXISTING `AgentEvent` stream as a render-only `progress_update`
+   *  event. Surfaced by the dispatch seam from `AgentConfig.progressSink`. ABSENT
+   *  (knob off / non-wiring host) ⇒ omitted ⇒ the tool's `?.emit` is a no-op and
+   *  the run is byte-identical (default-OFF). Typed via the in-slice
+   *  {@link ProgressSink} structural mirror so `@/tool` stays a leaf and never
+   *  imports `@/stream` / `@/agent` (same discipline as {@link VcsEventSink} /
+   *  {@link ToolDiffSink}). */
+  progressSink?: ProgressSink
+}
+
+/** C2 (jun-4-communicate-update.md) — read-only structured-progress payload
+ *  mirror. Carried to the host, which adapts it onto the EXISTING `AgentEvent`
+ *  stream as a `progress_update` event. The snake_case field names match the
+ *  model-facing `communicate_update` tool input (the host transforms them to the
+ *  camelCase AgentEvent shape at the adapter boundary, exactly like the
+ *  proto↔zod split in Cursor's `CommunicateUpdateArgs`). Optional fields stay
+ *  ABSENT when the model omitted them (set-once-per-turn terminal fields). */
+export interface ProgressUpdateMirror {
+  readonly current_step: string
+  readonly final_summary?: string
+  readonly completed_subtitle?: string
+}
+
+/** C2 (jun-4-communicate-update.md) — duck-typed structured-progress event sink
+ *  injected via {@link ToolContext}. Kept HERE so `@/tool` stays a slice leaf
+ *  and never imports `@/stream` / `@/agent` (mirroring the `VcsEventSink` /
+ *  `ToolDiffSink` discipline). `emit` is NO-THROW at the port boundary by
+ *  contract; the host adapter swallows a dead consumer so a misbehaving sink can
+ *  never break a turn. */
+export interface ProgressSink {
+  /** Forward a structured progress update. NO-THROW by contract. */
+  emit(update: ProgressUpdateMirror): void
 }
 
 /** H6 (jun-3-misc §3) — structural mirror of `VcsEvent` from

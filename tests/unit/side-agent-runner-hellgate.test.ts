@@ -32,12 +32,13 @@ const mkRunner = (
   fn: (req: SubagentRequest) => SubagentResult,
 ): { runner: SubagentRunner; reqs: SubagentRequest[] } => {
   const reqs: SubagentRequest[] = []
-  const runner = {
-    run: async (req: SubagentRequest): Promise<SubagentResult> => {
-      reqs.push(req)
-      return fn(req)
-    },
-  } as unknown as SubagentRunner
+  // SubagentRunner is a bare callable `(req) => Promise<result>` — the fake must
+  // BE that function, not an `{run}` object force-cast (the old `as unknown as`
+  // hid a type mismatch that broke once the adapter invoked the runner directly).
+  const runner: SubagentRunner = async (req: SubagentRequest): Promise<SubagentResult> => {
+    reqs.push(req)
+    return fn(req)
+  }
   return { runner, reqs }
 }
 

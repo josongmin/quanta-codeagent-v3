@@ -247,7 +247,7 @@
 > - ✅ **2-phase 컴팩션 = 이미 구현**(jun-04 BackgroundSummarizationController가 success-gated 2-phase, loop 배선됨).
 > - ✅ **백그라운드 출력 spill-to-disk = 이미 구현**(`src/tool/output-spill.ts capToolOutput`, registry 전체 배선).
 > - ✅ **transcript retention sweep = DONE (jun-04 배선)**(`applyRetention`을 `sessionsRoot()`에 `sweepSessionTranscripts`로 배선 + `/session-registry cleanup --transcripts` + knob).
-> - ⚠️ **멀티에이전트 코디네이션 = PARTIAL**(mailbox request/response/broadcast는 있으나 DAG/리더-브로커/idle-beacon ABSENT).
+> - ✅ **멀티에이전트 코디네이션 = 구현 DONE(어딧 오판 정정)**: jun-04 이전 세션이 `src/subagent/coordination/`(dag/dag-gate/broker/idle-barrier)에 3 capability 다 구현+76테스트. (전 어딧 배너가 "ABSENT"로 오판—coordination 슬라이스 놓침.) A(DAG)는 subagent-batch에 라이브 배선, B/C는 구현+knob(`QUANTA_TEAM_BROKER`/`QUANTA_TEAM_IDLE`)만=host-바인딩 잔여. 상세는 아래 §4 항목 참조.
 
 - **멀티에이전트 코디네이션 (Claude `--agent-teams`)** — ✅ **DONE (jun-04, 3 capability, plan: `docs/plans/multiagent-coordination.md`)**: 새 슬라이스 `src/subagent/coordination/`(pure core+port, fence-clean, default-OFF). **A 태스크 DAG**(`dag.ts` detectCycle/readyTasks/blockedTasks/onComplete + `dag-gate.ts` + `composeDagBatchRunner` batch seam, `QUANTA_TEAM_DAG`). **B 리더-브로커**(`broker.ts` escalation envelope + brokerStep/Loop + applyDecisionResponse, **worker-cannot-self-grant 보안 불변식 봉인**, mailbox+permission DI, `QUANTA_TEAM_BROKER`). **C team-idle 배리어**(`idle-barrier.ts` teamIdle/idleSince/upsert/clear + createIdleBarrier 주입클럭, `QUANTA_TEAM_IDLE`). 76 hellgate/e2e. **잔여(host 바인딩)**: A=spawn_batch 스키마 `depends_on` 필드 / B=denied-tool→escalate + 리더 brokerLoop tick / C=turn-end beacon emit + 리더 fan-in await.
 - **per-tool `interruptBehavior(cancel|block)`** (Claude) — atomic write 중 esc → 반쯤 적용 방지. quanta 인터럽트는 균일 턴레벨. 코드: `Tool` 타입에 `interruptBehavior?()` + abort 경로 + StatusBar 이벤트. 비용: 저-중.
@@ -327,3 +327,22 @@
 3. **§3 고ROI** — ✅ **DONE (jun-04)**: H1·H2·H6·H9·H12·H13·H14·H15 (+ xlsx_read/docx_read 실구현). **남은 §3: H7·H8·H16·H17·H18 + H19(재시도)**. **← 다음 진입점.**
 4. **§4** 선택, **§5** 기록만.
 5. **라이브배선 follow-up**(seam은 완성, hot-path 배선만): B1 sampling thread / H15 adapter thread / H13 store persist / H14 PPTX.
+
+---
+
+## §9. 🔌 HOST-BINDING CLOSEOUT (seam 전부 완성·tested — composition/loop 배선만 남음)
+
+> jun-05 기준 모든 §1~§4+§7 feature가 **tested seam(또는 live)**. 남은 건 host가 seam을
+> live로 잇는 배선뿐. 각 항목 `정확한 호출 — 소비 seam — 추가 테스트`. 전부 default-OFF
+> gate라 미배선이어도 byte-identical. **전제: composition 파일 안정(동시편집 아님) + 검증 가능.**
+
+- **N1 side-agent assembler 와이어** — `agent-config-assembler maybeWireSideAgent`: `QUANTA_SIDE_AGENT`면 `cfg.sideAgentDaemons = wireSideAgentDaemons({runner,mailbox,mainRecipient,setInterval,clearInterval,now})` (bridge `src/agent/side-agent-runner.ts` 존재). 테스트: assembler e2e(knob ON→4도구). *(사용자 Phase-2 완료, 이 1콜만)*
+- **N2 `.mcp.json` writer + discovery port** — 신규 writer(McpServerConfigShape→`.mcp.json` mcpServers merge, atomic) + agent-arg-builder가 `QUANTA_MCP_CONNECTORS`면 `DefaultToolPorts.mcpConnectors={list,install: id→toMcpServerConfig→write}`. 테스트: tmp `.mcp.json` write→readMcpConfig 재확인. 번들 카탈로그 결정 필요.
+- **C1 생성도구 auto-register** — image_gen/office write가 write 후 `registry.register({kind,path,mediaType})`(office const→factory 또는 ctx seam). 같은 registry를 DefaultToolPorts+생성팩토리 양쪽. 테스트: image_gen e2e→artifact_list 자동등장.
+- **B broker loop** — denied tool→escalation request emit + leader 턴당 `brokerLoop` tick(decide=@/permission). gate `QUANTA_TEAM_BROKER`. 테스트: blocked→approve→proceed e2e. 보안: worker self-grant 불가 유지.
+- **C idle-barrier loop** — subagent 턴종료 `barrier.beacon` + leader fan-in `teamIdle` await. gate `QUANTA_TEAM_IDLE`. 테스트: 순차 beacon→flip e2e.
+- **A DAG depends_on** — spawn_batch item에 optional id+depends_on→TaskNode[]→execute서 per-call `composeDagBatchRunner`. gate `QUANTA_TEAM_DAG`. 테스트: 의존순 디스패치 e2e.
+- **H16 dream session-end 훅** — assembler가 `CrossSessionDreamTrigger`(runtimeConfig+team-target+lock) 생성 + session-end 연결. gate `QUANTA_AUTO_DREAM`. 테스트: 세션종료 N회→fire.
+- **H7 회전 크레덴셜** — **선행**: Bedrock/Vertex adapter가 `factory.ts`에 live-wire 안 됨 → 먼저 factory 등록 → 그다음 credential-helper 주입.
+- **B1 sampling live-thread** — loadFeatures/mcp-bridge에 LLMPort 스레드 + buildSamplingWiring→McpClient. *(사용자 진행중)*
+- **H13 converted-config persist** — external-config 변환결과를 live store에 쓰는 surface adapter.
