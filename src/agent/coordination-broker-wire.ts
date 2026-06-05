@@ -41,7 +41,14 @@ export type LeaderEscalationDecider = (
 ) => EscalationDecision | Promise<EscalationDecision>
 
 /** The minimal mailbox surface the wire uses for the audit/transport trail.
- *  A structural subset of the real `MailboxPort.send`. */
+ *  A structural subset of the real `MailboxPort` (`send` + optional `ack`). The
+ *  escalation decision is made IN-PROCESS by `leaderDecide`; these two rows are
+ *  a pure audit trail that nobody reads. `send` returns the stored message so
+ *  the wire can {@link BrokerWireMailbox.ack} it: an un-acked (undelivered) row
+ *  lingers in the bounded shared mailbox and — because eviction prefers
+ *  DELIVERED rows — can crowd out legitimate sibling↔sibling mail under
+ *  sustained soft-denials. Acking marks the audit rows delivered so they evict
+ *  FIRST, keeping the mailbox budget for real traffic. */
 export interface BrokerWireMailbox {
   send(init: {
     from: string
@@ -49,7 +56,10 @@ export interface BrokerWireMailbox {
     kind: "request" | "response" | "broadcast"
     body: string
     correlationId?: string
-  }): unknown
+  }): { readonly id?: string } | undefined
+  /** Mark an audit row delivered (so it is evicted before real mail). Optional —
+   *  a fake mailbox may omit it; the wire only acks when both `ack` + an id exist. */
+  ack?(messageId: string): unknown
 }
 
 export interface LeaderHitlBrokerDeps {
@@ -76,8 +86,22 @@ export const buildLeaderHitlBroker = (deps: LeaderHitlBrokerDeps): GateEscalatio
   async escalate(req) {
     const correlationId = deps.nextCorrelationId()
 
+    // Emit an audit row + immediately ack it (mark delivered) so the bounded
+    // shared mailbox evicts these dead audit cells before any real sibling mail.
+    const auditSend = (init: {
+      from: string
+      to: string
+      kind: "request" | "response"
+      body: string
+      correlationId: string
+    }): void => {
+      const sent = deps.mailbox?.send(init)
+      const id = (sent as { readonly id?: string } | undefined)?.id
+      if (id !== undefined && deps.mailbox?.ack) deps.mailbox.ack(id)
+    }
+
     // 1. worker → leader request (audit/transport).
-    deps.mailbox?.send({
+    auditSend({
       from: deps.workerId,
       to: deps.leaderId,
       kind: "request",
@@ -93,7 +117,7 @@ export const buildLeaderHitlBroker = (deps: LeaderHitlBrokerDeps): GateEscalatio
       { from: deps.workerId, to: deps.leaderId, kind: "request", body: "", correlationId },
       decision,
     )
-    deps.mailbox?.send({
+    auditSend({
       from: deps.leaderId,
       to: deps.workerId,
       kind: "response",

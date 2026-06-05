@@ -16,7 +16,13 @@ import {
 } from "@/mcp"
 import { errMessage, logger } from "@/shared"
 import {
+  type ResourcesHandleResult as HandleResult,
   mcpTasksTools,
+  type PromptEntry,
+  type PromptResult,
+  type ResourceBlock,
+  type ResourceEntry,
+  type ResourcesHandle,
   type TasksHandle,
   type Tool,
   type ToolContext,
@@ -181,6 +187,124 @@ export interface McpStoppable {
   stop(): Promise<void>
 }
 
+// ── N3 — MCP resources/prompts aggregate ───────────────────────────────────
+
+/** The subset of a live `McpClient` the resources aggregate consumes. The four
+ *  methods' result shapes (`McpResult<McpResource[]>` …) are STRING-IDENTICAL
+ *  mirrors of the `@/tool` `HandleResult<ResourceEntry[]>` … types, so the
+ *  concrete `McpClient` satisfies this WITHOUT a per-method adapter — the slice
+ *  fence (which forbids `@/tool` importing `@/mcp`) is honored because THIS
+ *  bridge layer imports both and is where the structural identity is asserted at
+ *  compile time. Any drift in either declaration is a TYPE error at
+ *  {@link aggregateResourcesHandle}. */
+export interface McpResourcesClient {
+  listResources(): Promise<HandleResult<ResourceEntry[]>>
+  readResource(uri: string): Promise<HandleResult<ResourceBlock[]>>
+  listPrompts(): Promise<HandleResult<PromptEntry[]>>
+  getPrompt(name: string, args?: Record<string, unknown>): Promise<HandleResult<PromptResult>>
+}
+
+/** A failure is `unsupported` IFF the server never advertised the capability —
+ *  the aggregate treats such a client as "absent" for the operation (skipped in
+ *  lists, transparent in routing) rather than letting one capability-less server
+ *  shadow the others. */
+const isUnsupported = (r: HandleResult<unknown>): boolean =>
+  r.ok === false && r.reason === "unsupported"
+
+/** Aggregate one-or-more live MCP clients behind a SINGLE duck-typed
+ *  `ResourcesHandle` (the four N3 tools' host port). NO-THROW end to end (every
+ *  member returns a typed `HandleResult`, exactly as each underlying `McpClient`
+ *  method does).
+ *
+ *  Semantics:
+ *   - `listResources` / `listPrompts` — CONCAT across all clients; a client whose
+ *     server didn't advertise the capability (`unsupported`) is SKIPPED, and a
+ *     client that errors (transport / malformed) is skipped too (best-effort, the
+ *     other servers' entries still surface). Always `ok:true` (possibly empty).
+ *   - `readResource(uri)` / `getPrompt(name)` — ROUTE: try clients IN ORDER,
+ *     return the FIRST result that is not `unsupported` (an `ok:true` hit, or the
+ *     first real failure from a capable server). When every client is
+ *     `unsupported` (or the client list is empty), return a typed `unsupported`
+ *     failure — never a throw.
+ *
+ *  Empty client list ⇒ lists are `ok:true` empty, reads are `unsupported`. The
+ *  surface only wires this handle when at least one client supports the surface
+ *  (see {@link resourcesHandleFor}), so the empty-handle path is defensive. */
+export const aggregateResourcesHandle = (clients: McpResourcesClient[]): ResourcesHandle => {
+  const concat = async <T>(
+    call: (c: McpResourcesClient) => Promise<HandleResult<T[]>>,
+  ): Promise<HandleResult<T[]>> => {
+    const acc: T[] = []
+    for (const c of clients) {
+      const r = await call(c)
+      if (r.ok) acc.push(...r.value)
+      // unsupported + any transport/malformed failure ⇒ skip this client; the
+      // other servers' entries still aggregate (no-throw, best-effort).
+    }
+    return { ok: true, value: acc }
+  }
+  const route = async <T>(
+    call: (c: McpResourcesClient) => Promise<HandleResult<T>>,
+  ): Promise<HandleResult<T>> => {
+    // A resource uri / prompt name is owned by exactly one server, but the
+    // aggregate does not know which — so it tries EVERY capable client and an
+    // `ok:true` hit wins regardless of position. A non-`unsupported` failure
+    // (transport / malformed / not-found) from a non-owning capable server must
+    // NOT shadow a hit further down, so it is remembered but only returned when
+    // no client produced a hit. `unsupported` clients (never advertised the
+    // capability) are skipped entirely.
+    let firstRealFailure: HandleResult<T> | undefined
+    for (const c of clients) {
+      const r = await call(c)
+      if (r.ok) return r
+      if (!isUnsupported(r) && firstRealFailure === undefined) firstRealFailure = r
+    }
+    return (
+      firstRealFailure ?? {
+        ok: false,
+        reason: "unsupported",
+        message: "no connected MCP server advertised the requested capability",
+      }
+    )
+  }
+  return {
+    listResources: () => concat((c) => c.listResources()),
+    readResource: (uri) => route((c) => c.readResource(uri)),
+    listPrompts: () => concat((c) => c.listPrompts()),
+    getPrompt: (name, args) => route((c) => c.getPrompt(name, args)),
+  }
+}
+
+/** Build the N3 aggregate `ResourcesHandle` over the resources-capable clients,
+ *  or `undefined` when NONE qualify (so the surface leaves
+ *  `DefaultToolPorts.mcpResources` unset ⇒ the four tools stay absent +
+ *  byte-identical).
+ *
+ *  A client qualifies IFF its server advertised `resources` OR `prompts` — a
+ *  server that speaks neither contributes nothing, so including it would only add
+ *  an always-`unsupported` arm. SUPERVISED clients (the auto-restart path) are
+ *  EXCLUDED: `McpReconnectSupervisor` does not expose the resources/prompts
+ *  methods, so the bridge does not fake them — those servers are honestly absent
+ *  from the resources surface (documented limitation, NOT a silent drop of
+ *  successfully-listed entries). */
+export const resourcesHandleFor = (
+  clients: ReadonlyArray<ResourcesCapableClient>,
+): ResourcesHandle | undefined => {
+  const capable = clients.filter((c) => c.serverSupportsResources() || c.serverSupportsPrompts())
+  if (capable.length === 0) return undefined
+  return aggregateResourcesHandle(capable)
+}
+
+/** A live client that BOTH satisfies the resources method-set AND can report
+ *  whether its server advertised the capability (so {@link resourcesHandleFor}
+ *  can drop the always-`unsupported` arms). The concrete `McpClient` satisfies
+ *  it; `McpReconnectSupervisor` does NOT (no resources methods) and is excluded
+ *  upstream. */
+export interface ResourcesCapableClient extends McpResourcesClient {
+  serverSupportsResources(): boolean
+  serverSupportsPrompts(): boolean
+}
+
 /**
  * Start every configured MCP server, list its tools, and bridge them all.
  * Returns the bridged tools plus the live clients (the CLI stops them on exit).
@@ -301,7 +425,7 @@ export interface LoadMcpToolsOpts {
 const loadSupervised = async (
   config: McpServerConfig,
   deps: SupervisorDeps,
-): Promise<{ tools: Tool[]; client: McpStoppable } | null> => {
+): Promise<{ tools: Tool[]; client: McpStoppable; resources?: ResourcesCapableClient } | null> => {
   const sup = await McpReconnectSupervisor.create(config, deps)
   try {
     const defs = await sup.listTools()
@@ -327,7 +451,7 @@ const loadSingle = async (
   elicitationPrompterFor: ElicitationPrompterFactory | undefined,
   transportFor: ((config: McpServerConfig) => McpClientTransport) | undefined,
   samplingWiring: SamplingWiringInput | undefined,
-): Promise<{ tools: Tool[]; client: McpStoppable } | null> => {
+): Promise<{ tools: Tool[]; client: McpStoppable; resources?: ResourcesCapableClient } | null> => {
   const clientOpts: ConstructorParameters<typeof McpClient>[1] = {}
   if (elicitationPrompterFor !== undefined) {
     clientOpts.elicitationPrompter = elicitationPrompterFor(config.name)
@@ -350,7 +474,11 @@ const loadSingle = async (
     // ADR-0431 — default-OFF MCP tasks surface: wired iff the server advertised
     // the `tasks/*` capability. No advertisement ⇒ no tools.
     tools.push(...tasksToolsFor(client))
-    return { tools, client }
+    // N3 — surface the CONCRETE client (which exposes the resources/prompts
+    // methods, unlike the `McpStoppable` narrowing) so `loadMcpTools` can build
+    // the aggregate `ResourcesHandle`. The `McpClient` structurally satisfies
+    // `ResourcesCapableClient`; the assignment proves it at compile time.
+    return { tools, client, resources: client }
   } catch (e) {
     logger.warn(`mcp: skipping server "${config.name}": ${errMessage(e)}`)
     await client.stop().catch(() => undefined)
@@ -362,9 +490,13 @@ export const loadMcpTools = async (
   servers: McpServerConfig[],
   elicitationPrompterFor?: ElicitationPrompterFactory,
   opts?: LoadMcpToolsOpts,
-): Promise<{ tools: Tool[]; clients: McpStoppable[] }> => {
+): Promise<{ tools: Tool[]; clients: McpStoppable[]; resources?: ResourcesHandle }> => {
   const tools: Tool[] = []
   const clients: McpStoppable[] = []
+  // N3 — the resources-capable clients (single-client path only; supervised
+  // clients are excluded — see `resourcesHandleFor`). Collected so the bridge can
+  // build ONE aggregate `ResourcesHandle` across all servers.
+  const resourcesClients: ResourcesCapableClient[] = []
   const supervisorDepsFor = opts?.supervisorDepsFor
   for (const config of servers) {
     const loaded =
@@ -374,6 +506,11 @@ export const loadMcpTools = async (
     if (loaded === null) continue
     tools.push(...loaded.tools)
     clients.push(loaded.client)
+    if (loaded.resources !== undefined) resourcesClients.push(loaded.resources)
   }
-  return { tools, clients }
+  // N3 — `undefined` when NO connected server advertised resources/prompts (or
+  // all were supervised) ⇒ the surface leaves `DefaultToolPorts.mcpResources`
+  // unset ⇒ the four tools stay absent + byte-identical.
+  const resources = resourcesHandleFor(resourcesClients)
+  return { tools, clients, ...(resources !== undefined ? { resources } : {}) }
 }

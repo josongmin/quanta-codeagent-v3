@@ -83,6 +83,13 @@ describe("HELLGATE B wiring — coordinationBroker injected only when armed", ()
     __resetRuntimeConfig()
     const child = await childOf(parentConfig({ onConfirm: async () => true }))
     expect(child.admissibility?.coordinationBroker).toBeDefined()
+    // INVARIANT (robustness): the child's admissibility bundle carries ONLY the
+    // broker — the wire must never clobber/leak other admissibility axes
+    // (reviewerPort / rulesStore / permissionStore) into a worker. If a future
+    // change makes the child inherit the parent's admissibility, this fails
+    // loudly so the merge is made conscious rather than silently dropping the
+    // broker or widening the worker's gate surface.
+    expect(Object.keys(child.admissibility ?? {})).toEqual(["coordinationBroker"])
   })
 
   test("knob OFF ⇒ child has NO coordinationBroker (byte-identical legacy)", async () => {

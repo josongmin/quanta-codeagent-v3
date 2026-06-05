@@ -148,6 +148,54 @@ describe("side-agent-runner — runner adapter (one read-biased pass)", () => {
     })
     expect(out).toEqual({ summary: "HEADLINE", detail: text })
   })
+
+  // Surrogate-safety: a JS string is UTF-16, so a naive `slice` at the cap index
+  // can cut an astral char (emoji / CJK-ext) in HALF, emitting a LONE surrogate
+  // into the findings ring-buffer / mailbox body — which re-encodes to a U+FFFD
+  // replacement char / malformed token. The cap MUST snap off a surrogate
+  // boundary. We straddle the cut: lay down emoji ("💥" = a surrogate PAIR) so
+  // one PAIR spans the `DETAIL_MAX - marker.length` index. Naive slice ⇒ lone
+  // low surrogate at the tail ⇒ `isWellFormed() === false`.
+  test("astral char straddling the cap → capped detail is well-formed (no split surrogate)", async () => {
+    const DETAIL_MAX = 8_000
+    const MARKER = "\n…[side-agent finding truncated]"
+    // First line is a short HEADLINE so the result carries a detail (multi-line).
+    // A body of dense emoji (each "💥" is a surrogate PAIR, 2 code units) packed
+    // far past the cap GUARANTEES a pair straddles the `DETAIL_MAX - marker`
+    // index — the odd-length HEADLINE prefix offsets the pair grid so the cut
+    // never lands cleanly between two whole emoji. Naive slice ⇒ lone surrogate.
+    const headline = "HEADLINE\n" // 9 code units (odd) → shifts the astral grid
+    const fill = "💥".repeat(20_000) // far over cap, dense astral chars
+    const huge = headline + fill
+    const pass = subagentRunnerToSidePass(mkRunner(() => okResult(huge)).runner)
+    const out = await pass.run({
+      task: "t",
+      wake: 1,
+      maxTurns: 1,
+      signal: new AbortController().signal,
+    })
+    const detail = out?.detail
+    expect(detail).toBeDefined()
+    // (1) well-formed — no lone surrogate emitted by the cut.
+    expect(detail?.isWellFormed()).toBe(true)
+    // (2) still ≤ the cap (the boundary snap may drop one extra unit, never add).
+    expect((detail?.length ?? Number.POSITIVE_INFINITY) <= DETAIL_MAX).toBe(true)
+    // (3) marker semantics preserved.
+    expect(detail?.endsWith(MARKER)).toBe(true)
+  })
+
+  test("small detail containing astral chars is byte-identical (untouched under cap)", async () => {
+    const text = "HEADLINE\n💥 boom 🎉 done"
+    const pass = subagentRunnerToSidePass(mkRunner(() => okResult(text)).runner)
+    const out = await pass.run({
+      task: "t",
+      wake: 1,
+      maxTurns: 1,
+      signal: new AbortController().signal,
+    })
+    expect(out).toEqual({ summary: "HEADLINE", detail: text })
+    expect(out?.detail?.isWellFormed()).toBe(true)
+  })
 })
 
 // ── full wire (registry over the real adapters) ───────────────────────────────

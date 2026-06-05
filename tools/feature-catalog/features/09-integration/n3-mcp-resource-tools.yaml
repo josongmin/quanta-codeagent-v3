@@ -39,12 +39,19 @@ purpose: |
     - `index.ts` — `mcpResourcesTools(port): Tool[]` (stable order:
       list_resources → read_resource → list_prompts → get_prompt).
 
-  배선/보안: `DefaultToolPorts.mcpResources` + `QUANTA_MCP_RESOURCES` default-OFF
+  배선/보안 (jun-06 HOST-WIRE 완료): `QUANTA_MCP_RESOURCES` default-OFF
   (없으면 미등록=byte-identical, N2 `mcpConnectors` 미러). 도구 출력은 `mcp`-origin ⇒
   `deriveProvenance(name,"mcp")==="mcp"` ⇒ H2/ADR-0471 `<untrusted-source>` envelope가
   dispatch seam에서 출력을 wrap+defang. 별도 보안 배선 불필요 — `mcp`-origin array로
   등록되는 것 자체가 invariant(hellgate가 origin=mcp + defang 둘 다 핀).
+  **선택된 배선 경로**: `DefaultToolPorts.mcpResources`(=builtin origin)가 아니라
+  `loadFeatures` → `mcpTools`(=mcp origin) 배열로 등록. builtin origin으로 가면
+  H2 envelope를 잃으므로(보안 회귀) mcpTools 경로가 정답. `@/agent/mcp-bridge`가
+  live McpClient들 위에 ONE aggregate `ResourcesHandle`(`aggregateResourcesHandle`/
+  `resourcesHandleFor`)을 mint해 `loadMcpTools` 반환에 `{resources?}`로 실어 보내고,
+  `loadFeatures`가 knob+handle 게이팅으로 `mcpResourcesTools(handle)`을 mcpTools에 append.
 evidence:
+  adrs: [485]
   code:
     - src/tool/mcp_resources/port.ts
     - src/tool/mcp_resources/render.ts
@@ -54,12 +61,25 @@ evidence:
     - src/tool/mcp_resources/get_prompt.ts
     - src/tool/mcp_resources/index.ts
     - src/tool/index.ts
+    - src/agent/mcp-bridge.ts
+    - src/apps/cli/internal.ts
+    - src/shared/runtime-config.ts
   tests:
     unit:
       - tests/unit/mcp-resource-tools-hellgate.test.ts
+      - tests/unit/mcp-resources-host-wire-e2e-hellgate.test.ts
+      - tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts
+      - tests/unit/session-knobs-default-off-byte-identity-hellgate.test.ts
     integration: []
     contract: []
-knobs: []
+knobs:
+  - name: QUANTA_MCP_RESOURCES
+    where: src/shared/runtime-config.ts
+    default: "off (strict === \"1\")"
+    purpose: |
+      ON + ≥1 connected MCP server advertising resources/prompts ⇒ the four
+      mcp_* resource/prompt tools register (mcp origin). Unset/any-other-value ⇒
+      tools absent + registry byte-identical.
 notes: |
   L3: duck-typed port mirror + 4 tool factory + PURE render(cap/blob-guard/
   non-text-placeholder) + DefaultToolPorts wiring + knob + manifest row 완비,
@@ -67,14 +87,28 @@ notes: |
   empty) + typed-failure×4×4도구 + malformed-args + abort×4 + DoS(cap/blob/
   non-text) + **THE invariant(deriveProvenance=mcp + hostile-text defang 봉인)** +
   default-OFF 등록.
-  **잔여(host, @/mcp + @/agent owned, N3 슬라이스 밖)**:
-    (1) `src/mcp/resources/client-port.ts` — `clientResourcesPort`/`resourcesPortOver`
-        (H19가 raw McpClient 메서드까지만 랜딩, tasks와 달리 port-over-client 어댑터 미존재).
-        순수 pass-through, `tasks/client-port.ts` 미러.
-    (2) `src/agent/mcp-bridge.ts` — `resourcesToolsFor(client)`: serverSupportsResources()/
-        serverSupportsPrompts() 게이팅으로 subset 배선 + loadSingle/loadSupervised push,
-        그래야 input.mcpTools로 들어가 origin=mcp 자동 태깅.
-        (N3는 `DefaultToolPorts.mcpResources` 경로로 대체 배선 제공 — 호스트가 ResourcesHandle을
-        mint해 채우면 즉시 라이브. bridge 경로는 같은 도구를 MCP 협상 결과에 게이팅하는 sugar.)
-  Phase-2 deferred: prompt-template materialization(get_prompt 결과를 context로 직접
-  주입) + resources/subscribe notification-stream 표면화.
+  **HOST-WIRE DONE (jun-06)**: 어댑터를 별도 `@/mcp/resources/client-port.ts`로
+  만들 필요 없었음 — McpClient의 4 메서드 result shape이 `ResourcesHandle` 타입의
+  string-identical 미러라 concrete McpClient가 `McpResourcesClient`를 구조적으로
+  만족(per-method 어댑터 불필요, drift=`aggregateResourcesHandle` 사이트 TYPE error).
+    (1) `src/agent/mcp-bridge.ts` — N3 aggregate:
+        - `McpResourcesClient`/`ResourcesCapableClient` 구조 인터페이스(McpClient 충족).
+        - `aggregateResourcesHandle(clients)`: list*=concat(unsupported/error 클라 skip),
+          read/get=route(순서대로 시도, ok:true hit 우선, 아니면 first real failure,
+          전부 unsupported면 typed unsupported). NO-THROW end-to-end.
+        - `resourcesHandleFor(clients)`: resources OR prompts 광고한 클라만 모아 aggregate,
+          0개면 undefined. SUPERVISED 클라(McpReconnectSupervisor)는 resources 메서드
+          미노출이라 EXCLUDE(fake 안 함 — 정직한 한계).
+        - `loadSingle`이 concrete client를 `resources`로 surface, `loadMcpTools`가
+          `{tools, clients, resources?}` 반환.
+    (2) `src/apps/cli/internal.ts` `loadFeatures` — knob+handle 게이팅으로
+        `mcpResourcesTools(handle)`을 mcpTools에 append(origin=mcp ⇒ H2 envelope 자동).
+        zero servers/지원 안 함 ⇒ handle undefined ⇒ tools absent + byte-identical.
+  r3 핀 갱신: `agent-arg-builder.ts` BASELINE root는 MCP 서버를 로드 안 하므로 live
+  client가 없어 QUANTA_MCP_RESOURCES=1이어도 도구 미등록 — 이 핀 유지(여기 배선하면
+  builtin origin 오태깅 = 회귀, test-visible). 실제 활성화는 loadFeatures 경로,
+  `mcp-resources-host-wire-e2e-hellgate.test.ts`가 e2e로 핀(live single + multi-client
+  concat/route + knob-off byte-identical + zero-clients + origin=mcp).
+  Phase-2 deferred: SUPERVISED(auto-restart) 클라 resources 표면화(supervisor에
+  resources 메서드 노출 필요) + prompt-template materialization + resources/subscribe
+  notification-stream.

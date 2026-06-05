@@ -42,6 +42,7 @@ evidence:
     integration:
       - tests/unit/artifact-store-e2e-hellgate.test.ts
     contract: []
+  adrs: [477]
 knobs: []
 notes: |
   L3: pure registry 코어 + 4 도구 + manifest + 세션 wiring 완비, default-OFF

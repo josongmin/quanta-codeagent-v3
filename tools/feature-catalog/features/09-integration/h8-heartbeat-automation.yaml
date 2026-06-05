@@ -35,6 +35,7 @@ purpose: |
   JSONL round-trip: 신규 필드는 store-jsonl `parseAutomation`이 보존(부분 policy는
   drop=never half-inherited); cron 행엔 kind 키 없음(byte-identical).
 evidence:
+  adrs: [481, 453]
   code:
     - src/scheduler/types.ts
     - src/scheduler/heartbeat.ts

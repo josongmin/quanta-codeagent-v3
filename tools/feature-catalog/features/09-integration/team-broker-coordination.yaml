@@ -76,7 +76,7 @@ evidence:
     - src/agent/coordination-broker-wire.ts
     - src/agent/subagent-runner.ts
     - src/shared/runtime-config.ts
-  adrs: []
+  adrs: [480]
   tests:
     unit:
       - tests/unit/coordination/team-broker-hellgate.test.ts
@@ -91,12 +91,15 @@ knobs:
     default: 'false'
     purpose: |
       Strict `=== "1"` opt-in. Default false ⇒ a worker that hits a denied tool
-      fails hard (today — no escalation path, byte-identical). When ON, the
-      spawning agent (the leader) runs a `brokerLoop` that reads pending
-      escalation requests from the subagent mailbox, runs each through the host's
-      permission decide/HITL, and sends a leader-authored response. The worker
-      applies ONLY a leader-authored response matching its outstanding
-      correlationId — it can never self-grant.
+      fails hard (byte-identical, no broker injected). When ON, the composition
+      root injects a `GateEscalationBroker` onto each worker subagent; on a SOFT
+      mode-policy denial the gate escalates IN-PROCESS to the LEADER's HITL
+      authority (the parent agent's `onConfirm`, wrapped by `buildLeaderHitlBroker`
+      as `leaderDecide`), validating the round-trip via `applyDecisionResponse`
+      with `leaderId` pinned (a worker can never self-grant; the two mailbox rows
+      are an acked audit trail, NOT the `brokerLoop` drain path). HARD_DENY is
+      structurally never escalatable. On approval the gate admits (still through
+      the pre_tool_use hook); on denial/throw the worker stays blocked.
 notes: |
   LIVE end-to-end (Capability B). 21 core + 5 mailbox-e2e + 8 gate-escalation + 5
   composition-wire hellgate cases pin: the SECURITY boundary (HARD_DENY rm -rf /

@@ -59,7 +59,13 @@ import type { ShellSnapshotMetric } from "@/runtime/shell-snapshot/metric-port"
 import { logger, type RunContext, runtimeConfig } from "@/shared"
 import { MCPRootSchema, PLUGIN_MCP_FILE } from "@/skill/plugin-manifest"
 import type { AssistantTextPainter, StreamPort } from "@/stream"
-import { gitTools, pollDeferredTool, type Tool } from "@/tool"
+import {
+  gitTools,
+  mcpResourcesTools,
+  pollDeferredTool,
+  type ResourcesHandle,
+  type Tool,
+} from "@/tool"
 import { DefaultDeferredResultRegistry } from "@/tool/deferred/default-registry"
 import { createMarkdownPainter } from "./markdown-painter"
 import { buildCliElicitationPrompterFactory } from "./mcp-elicitation-prompter"
@@ -854,6 +860,32 @@ const buildMcpLoadOpts = (
   ...(args.opts.mcpTransportFor !== undefined ? { transportFor: args.opts.mcpTransportFor } : {}),
 })
 
+/** Start the configured MCP servers (or short-circuit to an empty bundle when
+ *  none are configured), returning the same `{ tools, clients, resources? }`
+ *  shape `loadMcpTools` produces. Extracted so {@link loadFeatures} carries no
+ *  inline ternary branch over the load (keeps it under biome's cognitive-
+ *  complexity cap). Zero configs ⇒ no client started (byte-identical). */
+const loadMcpToolsOrEmpty = async (
+  mcpConfigs: McpServerConfig[],
+  elicitationPrompterFor: ElicitationPrompterFactory | undefined,
+  mcpLoadOpts: Parameters<typeof loadMcpTools>[2],
+): Promise<{ tools: Tool[]; clients: McpStoppable[]; resources?: ResourcesHandle }> => {
+  if (mcpConfigs.length === 0) return { tools: [], clients: [] }
+  return loadMcpTools(mcpConfigs, elicitationPrompterFor, mcpLoadOpts)
+}
+
+/** N3 (QUANTA_MCP_RESOURCES) — build the four `mcp_*` resource/prompt tools when
+ *  the knob is ON AND the bridge produced an aggregate `ResourcesHandle` (i.e. at
+ *  least one connected server advertised `resources`/`prompts`). They register
+ *  through the mcp-origin `mcpTools` array (NOT `DefaultToolPorts`) so the
+ *  registry tags them `mcp` ⇒ `deriveProvenance(name,"mcp")` ⇒ the H2/ADR-0471
+ *  `<untrusted-source>` envelope wraps their output at dispatch (the documented
+ *  security invariant for these tools). Knob off OR no capable server ⇒ `[]` ⇒
+ *  the tools are absent + the registry is byte-identical. Extracted so
+ *  {@link loadFeatures} stays under biome's cognitive-complexity cap. */
+const buildMcpResourceTools = (resources: ResourcesHandle | undefined): Tool[] =>
+  runtimeConfig().mcpResources && resources !== undefined ? mcpResourcesTools(resources) : []
+
 /** Resolve all default-OFF feature flags from env/argv and start MCP servers.
  *  Logs each enabled feature via the structured logger (minimal).
  *
@@ -891,10 +923,15 @@ export const loadFeatures = async (
   // factory), so a reconnected client re-advertises sampling+roots.
   const inboundWiring = resolveMcpInboundWiring(opts.llm, elicitationPrompterFor)
   const mcpLoadOpts = buildMcpLoadOpts(slog, { autoRestart, inboundWiring, opts })
-  const { tools: mcpTools, clients: mcpClients } =
-    mcpConfigs.length > 0
-      ? await loadMcpTools(mcpConfigs, elicitationPrompterFor, mcpLoadOpts)
-      : { tools: [], clients: [] as McpStoppable[] }
+  const {
+    tools: mcpBridgedTools,
+    clients: mcpClients,
+    resources: mcpResources,
+  } = await loadMcpToolsOrEmpty(mcpConfigs, elicitationPrompterFor, mcpLoadOpts)
+  // N3 (QUANTA_MCP_RESOURCES) — the four `mcp_*` resource/prompt tools, gated on
+  // the knob AND a live aggregate handle (see {@link buildMcpResourceTools}).
+  const mcpResourceTools = buildMcpResourceTools(mcpResources)
+  const mcpTools: Tool[] = [...mcpBridgedTools, ...mcpResourceTools]
 
   // LSP-backed diagnostics: only when opted in. The tool name matches the
   // no-op one in defaultTools, so appending it lets the registry's last-write
@@ -909,6 +946,7 @@ export const loadFeatures = async (
   if (metrics) slog.info("metrics.on")
   if (state) slog.info("state.persist.on", { path: state })
   if (mcpTools.length > 0) slog.info("mcp.tools.loaded", { count: mcpTools.length })
+  if (mcpResourceTools.length > 0) slog.info("mcp.resources.on", { count: mcpResourceTools.length })
   if (autoRestart && mcpClients.length > 0) slog.info("mcp.autorestart.on")
   if (lspTools.length > 0) slog.info("lsp.diagnostics.on")
   if (lspNavTools.length > 0) slog.info("lsp.nav.on", { count: lspNavTools.length })

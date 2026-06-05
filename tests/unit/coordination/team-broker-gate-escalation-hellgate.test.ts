@@ -18,6 +18,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { z } from "zod"
 import type { AgentConfig } from "@/agent"
+import { HookBus } from "@/agent"
 import {
   type AdmissibilityAction,
   type GateEscalationBroker,
@@ -202,18 +203,54 @@ describe("HELLGATE B — a SOFT policy denial escalates to the leader broker", (
   })
 })
 
+// ── escalation is NOT a backdoor: the hook is still the irrevocable last gate ──
+
+describe("HELLGATE B — broker-escalated admit STILL passes the pre_tool_use hook", () => {
+  test("broker APPROVES a soft-deny, but the pre_tool_use hook vetoes LAST ⇒ final DENY", async () => {
+    const { broker } = spyBroker({ approved: true })
+    const hooks = new HookBus()
+    let hookCount = 0
+    hooks.on("pre_tool_use", () => {
+      hookCount += 1
+      return { deny: "exfil policy" }
+    })
+    const c = cfg({ registry: new ToolRegistry([write]), permission: { mode: "auto" }, hooks })
+    const res = await runAdmissibilityGate(
+      call("write", {}),
+      c,
+      { mode: "auto" },
+      actionOf(write, {}),
+      denyClassifier("classifier blocked"),
+      { coordinationBroker: broker },
+    )
+    // The leader approved → the gate admitted the mode-policy arm (returned null)
+    // → but the admit path routes through the pre_tool_use hook, which vetoed.
+    // A leader override can NEVER skip the repo-local hook's last word.
+    expect(hookCount).toBe(1)
+    expect(res).not.toBeNull()
+    expect(res?.preview).toBe("hook-denied")
+    expect(res?.block.content).toContain("exfil policy")
+  })
+})
+
 // ── WIRE — buildLeaderHitlBroker round-trip (real broker security model) ──────
 
 describe("HELLGATE B — buildLeaderHitlBroker: leader authority drives the verdict", () => {
   const req = { tool: "shell", scope: "git push --force", reason: "needs force-push" }
 
   test("leader APPROVES ⇒ approved; mailbox sees request(from=worker) + response(from=leader)", async () => {
-    const sent: { from: string; to: string; kind: string; correlationId?: string }[] = []
+    const sent: { from: string; to: string; kind: string; body: string; correlationId?: string }[] =
+      []
     const broker = buildLeaderHitlBroker({
       workerId: "root/0",
       leaderId: "root",
       leaderDecide: () => ({ approved: true }),
-      mailbox: { send: (m) => sent.push(m) },
+      mailbox: {
+        send: (m) => {
+          sent.push(m)
+          return undefined
+        },
+      },
       nextCorrelationId: () => "cid-1",
     })
     const verdict = await broker.escalate(req)
@@ -257,5 +294,25 @@ describe("HELLGATE B — buildLeaderHitlBroker: leader authority drives the verd
       nextCorrelationId: () => "cid-3",
     })
     expect((await broker.escalate(req)).approved).toBe(true)
+  })
+
+  test("audit rows are ACKed (mailbox hygiene) — both request + response are marked delivered", async () => {
+    // Audit #5 regression: the 2 audit rows must be ack'd so they evict before
+    // real sibling mail in the bounded shared mailbox. send returns a stored
+    // message with an id; the wire must ack each.
+    let seq = 0
+    const acked: string[] = []
+    const broker = buildLeaderHitlBroker({
+      workerId: "w",
+      leaderId: "L",
+      leaderDecide: () => ({ approved: true }),
+      mailbox: {
+        send: () => ({ id: `m${seq++}` }),
+        ack: (id) => acked.push(id),
+      },
+      nextCorrelationId: () => "cid-ack",
+    })
+    await broker.escalate(req)
+    expect(acked).toEqual(["m0", "m1"]) // request row + response row, both delivered
   })
 })

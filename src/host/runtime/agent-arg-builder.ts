@@ -98,9 +98,17 @@ import {
 import { type AutomationEngineSlot, assembleAutomation } from "@/scheduler/runtime-wire"
 import { errMessage, logger, runtimeConfig } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
-import { buildDefaultTools, pollDeferredTool, type Tool, ToolRegistry } from "@/tool"
+import {
+  buildDefaultTools,
+  type DefaultToolPorts,
+  openAiImagePort,
+  pollDeferredTool,
+  type Tool,
+  ToolRegistry,
+} from "@/tool"
 import { DefaultDeferredResultRegistry } from "@/tool/deferred/default-registry"
 import { buildMcpConnectorDiscoveryPort } from "./mcp-connector-wire"
+import { buildTmuxPtyBackend } from "./pty-backend"
 
 /** ADR-0303 — thrown by {@link buildBaseFromArgs} when no API key resolves for
  *  the selected provider. The host launcher composition layer must NOT own
@@ -530,7 +538,93 @@ export const installCommandHooksIntoBase = (
   })
 }
 
+/**
+ * Round-3 composition-root activation — resolve the gated `DefaultToolPorts`
+ * slots whose tool(s) round-2 found are deferred behind a `QUANTA_*` knob. Each
+ * spread is `{}` when its gate is OFF, so the assembled tool menu is
+ * byte-identical to today's default-OFF path; present ⇒ the conditional
+ * registration inside `buildDefaultTools` appends exactly that gate's tool(s).
+ *
+ * The `env` view (already provider-overlaid by `buildBaseFromArgs`) is the ONLY
+ * place an env value is read here; the boolean knobs route through the frozen
+ * `runtimeConfig()` (single env touchpoint), and `imageGen`'s key comes from the
+ * SAME `OPENAI_API_KEY` source the LLM factory uses (never hardcoded; absent key
+ * ⇒ the port returns a typed `no_key`, never a crash). Extracted from
+ * `buildBaseRegistry` so that function stays under biome's cognitive-complexity
+ * cap. Construction of every adapter is IO-free — no spawn/fetch happens until a
+ * tool actually dispatches.
+ */
+const buildGatedToolPorts = (env: NodeJS.ProcessEnv): DefaultToolPorts => {
+  const cfg = runtimeConfig()
+  return {
+    // ADR-0464 — gated structured-apply tool. Default-OFF: tool menu is
+    // byte-identical unless QUANTA_ENABLE_STRUCTURED_PATCH === "1".
+    ...(process.env.QUANTA_ENABLE_STRUCTURED_PATCH === "1" ? { structuredPatch: true } : {}),
+    // ADR-0165 — gated coverage_check tool. Default-OFF: tool menu is
+    // byte-identical unless QUANTA_COVERAGE_TOOL === "1".
+    ...(process.env.QUANTA_COVERAGE_TOOL === "1" ? { coverageCheck: true } : {}),
+    // C1 — gated artifact (Canvas) tools. Default-OFF: tool menu byte-identical
+    // unless QUANTA_ARTIFACT_STORE === "1". Mints ONE per-session registry
+    // (real clock + monotonic id factory) shared by the artifact_* tools.
+    ...(process.env.QUANTA_ARTIFACT_STORE === "1"
+      ? {
+          artifactRegistry: createArtifactRegistry({
+            now: () => Date.now(),
+            idFactory: monotonicIdFactory(),
+          }),
+        }
+      : {}),
+    // N2 — gated MCP connector discovery tools (mcp_connector_list/_install).
+    // Default-OFF: tool menu byte-identical unless QUANTA_MCP_CONNECTORS === "1".
+    // The port lists the bundled reference catalog and installs a chosen server
+    // into the project `.mcp.json` (QUANTA_MCP_CONFIG override, else cwd) via the
+    // atomic merge writer — the same file `readMcpConfig` ingests next launch.
+    ...(cfg.mcpConnectors
+      ? {
+          mcpConnectors: buildMcpConnectorDiscoveryPort({
+            configPath:
+              process.env.QUANTA_MCP_CONFIG?.trim() || joinPath(process.cwd(), ".mcp.json"),
+          }),
+        }
+      : {}),
+    // H14a — gated image_gen tool. Default-OFF: tool menu byte-identical unless
+    // QUANTA_IMAGE_GEN === "1". The provider port is KEY-BOUND from the same
+    // `OPENAI_API_KEY` the LLM factory reads (NEVER hardcoded); a key-less port
+    // yields a typed `no_key` outcome rather than crashing, so wiring is always
+    // safe. The OpenAI base-url / model knobs the factory honors are honored too.
+    ...(cfg.imageGen
+      ? {
+          imageGen: openAiImagePort({
+            ...(env.OPENAI_API_KEY !== undefined && env.OPENAI_API_KEY !== ""
+              ? { apiKey: env.OPENAI_API_KEY }
+              : {}),
+            ...(env.OPENAI_BASE_URL !== undefined && env.OPENAI_BASE_URL !== ""
+              ? { baseUrl: env.OPENAI_BASE_URL }
+              : {}),
+          }),
+        }
+      : {}),
+    // H14b — gated Office authoring tools (xlsx_write/docx_write/pptx_write).
+    // Default-OFF: tool menu byte-identical unless QUANTA_OFFICE_AUTHORING === "1".
+    // Boolean port — the tools serialize pure-TS OOXML + write through the same
+    // FS-jail chokepoint the readers use; no adapter to construct.
+    ...(cfg.officeAuthoring ? { officeAuthoring: true } : {}),
+    // C2 — gated communicate_update tool. Default-OFF: tool menu byte-identical
+    // unless QUANTA_PROGRESS_UPDATE === "1". Boolean port — the tool reads its
+    // `ProgressSink` from `ctx.progressSink` (surfaced by the dispatch seam from
+    // `AgentConfig.progressSink`); absent sink ⇒ a no-op + ok:true.
+    ...(cfg.progressUpdate ? { progressUpdate: true } : {}),
+    // N6 — gated pty_* tools (attach/list/write/read/resize/kill). Default-OFF:
+    // tool menu byte-identical unless QUANTA_PTY_ATTACH === "1". The tmux backend
+    // (`Bun.spawn(["tmux", …])`, argv-array, no shell) is constructed at the
+    // composition layer (`pty-backend.ts`) and injected as the `PtySessionPort`;
+    // construction is IO-free (no spawn until a pty tool dispatches).
+    ...(cfg.ptyAttach ? { ptySession: buildTmuxPtyBackend() } : {}),
+  }
+}
+
 const buildBaseRegistry = (args: {
+  readonly env: NodeJS.ProcessEnv
   readonly automationSlot: AutomationEngineSlot | null
   readonly sandboxProfile: ReturnType<typeof resolveSandboxProfileFromEnv>
   readonly searchWire: ReturnType<typeof buildSearchPipelineFromEnv>
@@ -539,36 +633,7 @@ const buildBaseRegistry = (args: {
     ...buildDefaultTools({
       ...(args.automationSlot !== null ? { automationEngine: args.automationSlot.engine } : {}),
       ...(args.sandboxProfile !== undefined ? { sandboxProfile: args.sandboxProfile } : {}),
-      // ADR-0464 — gated structured-apply tool. Default-OFF: tool menu is
-      // byte-identical unless QUANTA_ENABLE_STRUCTURED_PATCH === "1".
-      ...(process.env.QUANTA_ENABLE_STRUCTURED_PATCH === "1" ? { structuredPatch: true } : {}),
-      // ADR-0165 — gated coverage_check tool. Default-OFF: tool menu is
-      // byte-identical unless QUANTA_COVERAGE_TOOL === "1".
-      ...(process.env.QUANTA_COVERAGE_TOOL === "1" ? { coverageCheck: true } : {}),
-      // C1 — gated artifact (Canvas) tools. Default-OFF: tool menu byte-identical
-      // unless QUANTA_ARTIFACT_STORE === "1". Mints ONE per-session registry
-      // (real clock + monotonic id factory) shared by the artifact_* tools.
-      ...(process.env.QUANTA_ARTIFACT_STORE === "1"
-        ? {
-            artifactRegistry: createArtifactRegistry({
-              now: () => Date.now(),
-              idFactory: monotonicIdFactory(),
-            }),
-          }
-        : {}),
-      // N2 — gated MCP connector discovery tools (mcp_connector_list/_install).
-      // Default-OFF: tool menu byte-identical unless QUANTA_MCP_CONNECTORS === "1".
-      // The port lists the bundled reference catalog and installs a chosen server
-      // into the project `.mcp.json` (QUANTA_MCP_CONFIG override, else cwd) via the
-      // atomic merge writer — the same file `readMcpConfig` ingests next launch.
-      ...(process.env.QUANTA_MCP_CONNECTORS === "1"
-        ? {
-            mcpConnectors: buildMcpConnectorDiscoveryPort({
-              configPath:
-                process.env.QUANTA_MCP_CONFIG?.trim() || joinPath(process.cwd(), ".mcp.json"),
-            }),
-          }
-        : {}),
+      ...buildGatedToolPorts(args.env),
     }),
     ...(args.searchWire !== null ? [args.searchWire.tool] : []),
     // ADR-0287 — async-tools `poll_deferred`. Default-OFF: registered ONLY when
@@ -1078,7 +1143,7 @@ export const buildBaseFromArgs = (
     // DIP: route through the factory (no app-specific ports at this baseline
     // entry — modes/CLI wire their own fs/diagnostics ports). Behavior is
     // byte-identical to the `defaultTools` singleton.
-    registry: buildBaseRegistry({ automationSlot, sandboxProfile, searchWire }),
+    registry: buildBaseRegistry({ env, automationSlot, sandboxProfile, searchWire }),
     stream,
     // GAP2 — when a named permission profile is selected the live permission
     // mode is DERIVED from its approval pillar; absent ⇒ the historical

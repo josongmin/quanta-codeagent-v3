@@ -159,6 +159,29 @@ describe("DAG batch e2e — knob ON (gated runner)", () => {
       expect(made.cycle.length).toBeGreaterThan(0)
     }
   })
+
+  // Audit #7 (gate contract completeness): a DIRECT markFailed(X) on a node that
+  // has its OWN pending waiter must resolve that waiter "blocked" — `blockedTasks`
+  // only returns PENDING nodes, so without the directly-dead check in `flush`
+  // this waiter would hang forever. (Not reachable in the live consumers, which
+  // always resolve awaitReady(id) BEFORE marking that same id — a contract lock.)
+  test("gate: direct markFailed(X) resolves X's OWN pending waiter as blocked (no hang)", async () => {
+    const made = createDagGate([node("dep"), node("x", ["dep"])])
+    expect(made.ok).toBe(true)
+    if (!made.ok) return
+    // x is pending with an incomplete dep ⇒ not ready, not blocked ⇒ waiter parks.
+    const waiting = made.gate.awaitReady("x")
+    made.gate.markFailed("x") // fail x ITSELF (not its dep)
+    expect(await waiting).toBe("blocked")
+  })
+
+  test("gate: direct markFailed(X, 'cancelled') also resolves X's own waiter blocked", async () => {
+    const made = createDagGate([node("dep"), node("x", ["dep"])])
+    if (!made.ok) throw new Error("gate construction failed")
+    const waiting = made.gate.awaitReady("x")
+    made.gate.markFailed("x", "cancelled")
+    expect(await waiting).toBe("blocked")
+  })
 })
 
 describe("DAG batch e2e — knob OFF (plain runner = byte-identical flat fan-out)", () => {

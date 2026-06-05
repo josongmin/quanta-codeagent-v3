@@ -42,6 +42,7 @@ purpose: |
   쿼리 — 리더가 폴링 대신 "전 데몬 quiescent" O(1) 판정. knob OFF ⇒ teamIdle() false,
   byte-identical.
 evidence:
+  adrs: [482]
   code:
     - src/subagent/coordination/idle-barrier.ts
     - src/subagent/coordination/index.ts

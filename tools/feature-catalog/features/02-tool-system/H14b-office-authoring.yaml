@@ -58,11 +58,13 @@ evidence:
     - src/tool/index.ts
     - src/tool/surface/manifest.ts
     - src/shared/runtime-config.ts
+    - src/host/runtime/agent-arg-builder.ts
   adrs: []
   tests:
     unit:
       - tests/unit/office-authoring-hellgate.test.ts
       - tests/unit/office-authoring-e2e-hellgate.test.ts
+      - tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -74,6 +76,11 @@ knobs:
       ⇒ xlsx_write / docx_write NOT registered ⇒ byte-identical default tool menu.
 deliberate_hold: null
 notes: |
+  DONE (jun-05): the composition root (`agent-arg-builder.ts`
+  `buildGatedToolPorts`) now wires `DefaultToolPorts.officeAuthoring=true` from
+  `runtimeConfig().officeAuthoring`, so xlsx/docx/pptx_write register on the knob.
+  Knob-on registration + knob-off byte-identity + a real .xlsx write through
+  dispatch pinned by the composition-root r3 hellgate.
   Default-OFF / opt-in on EVERY surface in the tool-surface SSOT manifest (it
   writes files, so it never auto-seeds — CLI tool-menu reproducibility). The
   scoped PPTX follow-up is now LANDED as a sibling entry (pptx-authoring): the

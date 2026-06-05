@@ -43,6 +43,7 @@ evidence:
       - tests/unit/mcp-connector-tools-e2e-hellgate.test.ts
       - tests/unit/mcp-connector-wire-e2e-hellgate.test.ts
     contract: []
+  adrs: [484]
 knobs:
   - name: QUANTA_MCP_CONNECTORS
     default: 'undefined'

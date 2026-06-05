@@ -52,16 +52,23 @@ evidence:
     - src/tool/index.ts
     - src/tool/surface/manifest.ts
     - src/shared/runtime-config.ts
+    - src/host/runtime/pty-backend.ts
+    - src/host/runtime/agent-arg-builder.ts
   tests:
     unit:
       - tests/unit/pty-attach-hellgate.test.ts
+      - tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts
     integration: []
     contract: []
+  adrs: [486]
 knobs: []
 notes: |
   L3: the slice + 6 tools + tmux backend are wired (DefaultToolPorts.ptySession)
   + manifest + knob; 15 hellgate cases over a Fake backend + a fake TmuxExec
   (resumable-read cursor, resize bounds, write cap, allow-prefix jail, send-keys
-  literal, capture-pane diff). Deferred: the host composition-root that mints a
-  real tmux/Bun `PtySessionPort` from `runtimeConfig().ptyAttach`; the Bun-native
-  `bun-pty-adapter` (Phase-1b); a live `which tmux`-gated e2e.
+  literal, capture-pane diff). DONE (jun-05): the composition root
+  (`agent-arg-builder.ts` `buildGatedToolPorts`) now mints a real tmux-backed
+  `PtySessionPort` from `runtimeConfig().ptyAttach` via `pty-backend.ts`
+  (`Bun.spawn(["tmux", …])`, argv-array/no-shell, NO-THROW). Knob-on/-off +
+  dispatch-activation pinned by the composition-root r3 hellgate. Deferred: the
+  Bun-native `bun-pty-adapter` (Phase-1b); a live `which tmux`-gated e2e.

@@ -66,7 +66,7 @@ evidence:
     - src/tool/subagent-batch/port.ts
     - src/agent/tier1/subagent-batch.ts
     - src/shared/runtime-config.ts
-  adrs: []
+  adrs: [479]
   tests:
     unit:
       - tests/unit/coordination/team-dag-hellgate.test.ts

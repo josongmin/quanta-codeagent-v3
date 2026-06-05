@@ -44,11 +44,21 @@ const DETAIL_MAX = 8_000
 const DETAIL_TRUNC_MARKER = "\n…[side-agent finding truncated]"
 
 /** Clamp an over-cap detail to `DETAIL_MAX`, leaving room for the truncation
- *  marker so the returned string never exceeds the cap. */
-const capDetail = (detail: string): string =>
-  detail.length <= DETAIL_MAX
-    ? detail
-    : detail.slice(0, DETAIL_MAX - DETAIL_TRUNC_MARKER.length) + DETAIL_TRUNC_MARKER
+ *  marker so the returned string never exceeds the cap. Surrogate-safe: a JS
+ *  string is UTF-16, and a naive `slice` at the cap index can cut an astral char
+ *  (emoji / CJK-ext) in HALF, emitting a LONE surrogate into the findings
+ *  ring-buffer / mailbox body — which re-encodes to a U+FFFD replacement char /
+ *  malformed token. If the unit just before the cut is a HIGH surrogate, its LOW
+ *  half sits at the cut and would be dropped alone; back the cut off by one so
+ *  the whole pair is dropped together (same boundary-snap idiom as
+ *  `sliceHeadWhole` in `@/tool/pty`). An under-cap detail is returned untouched. */
+const capDetail = (detail: string): string => {
+  if (detail.length <= DETAIL_MAX) return detail
+  const cut = DETAIL_MAX - DETAIL_TRUNC_MARKER.length
+  const prev = detail.charCodeAt(cut - 1)
+  const end = prev >= 0xd800 && prev <= 0xdbff ? cut - 1 : cut
+  return detail.slice(0, end) + DETAIL_TRUNC_MARKER
+}
 
 /** Read-biased default tool surface for a side-agent pass (RFC §4.6). A daemon
  *  observes/monitors; it does NOT get the mutating tools by default. A charter

@@ -349,6 +349,47 @@ const reviewActionKeyOf = (
   return shellCommand !== null ? `${action.tool}|${shellCommand}` : action.tool
 }
 
+/**
+ * ROUND-4 concurrency fix — coalesce concurrent reviewer escalations per
+ * `actionKey` so the reviewer is prompted AT MOST ONCE per key under a single
+ * run.
+ *
+ * The bug: `reviewAndDecide` does a check-then-act on `opts.allowlistEscalated`
+ * across the `await gate.open(...)` (reviewer prompt) boundary —
+ *   miss `has(actionKey)`  →  await reviewer  →  `add(actionKey)`
+ * Two structurally-equivalent calls with the SAME `actionKey` dispatched
+ * concurrently (a concurrency-safe tool that escalates via a rule-ask /
+ * always-confirm tier early-dispatches in-flight, see `streaming-dispatch.ts`)
+ * BOTH pass the `has` miss before either reaches `add`, so BOTH pop a reviewer
+ * prompt — defeating the dedup the Set is meant to provide.
+ *
+ * Fix (Approach A — pending-promise map): the FIRST caller for an `actionKey`
+ * creates+stores the `reviewAction` promise BEFORE awaiting; concurrent callers
+ * for the same key await the SAME promise (no second prompt). The entry is
+ * cleared when it settles, so a LATER (post-settle) call behaves exactly as
+ * today. The shared promise rejects if the reviewer throws — propagating the
+ * throw (incl. abort/`SessionApprovalRequiredError`) to ALL waiters identically.
+ *
+ * Run scoping for free: the map is keyed in a `WeakMap` on the caller-owned
+ * per-run `allowlistEscalated` Set — the same run-scoped handle whose dedup is
+ * being defeated. When `allowlistEscalated` is ABSENT the gate has no dedup
+ * intent (every reviewer round is meant to run as legacy), so coalescing is
+ * skipped and the path is byte-identical. The map auto-GCs with the Set.
+ */
+type ReviewDecision = Awaited<ReturnType<typeof reviewAction>>
+const pendingReviewsByRun = new WeakMap<Set<string>, Map<string, Promise<ReviewDecision>>>()
+
+const pendingReviewMapFor = (
+  allowlistEscalated: Set<string>,
+): Map<string, Promise<ReviewDecision>> => {
+  let m = pendingReviewsByRun.get(allowlistEscalated)
+  if (m === undefined) {
+    m = new Map()
+    pendingReviewsByRun.set(allowlistEscalated, m)
+  }
+  return m
+}
+
 const buildReviewContext = (
   config: AdmissibilityGateConfig,
   action: AdmissibilityAction,
@@ -461,20 +502,53 @@ const reviewAndDecide = async (
     opts.approvalStateMachine !== undefined ? { approvalSM: opts.approvalStateMachine } : {},
   )
   const reviewerPort = opts.reviewerPort
-  let dec!: Awaited<ReturnType<typeof reviewAction>>
-  await gate.open(
-    {
-      threadId: config.sessionId ?? "",
-      kind: origin === "rule" ? "permission" : "escalation",
-      reason: `${origin}-escalation:${action.tool}`,
-      proposedAction: actionKey,
-      resumeStep: `dispatch:${call.id}`,
-    },
-    async () => {
-      dec = await reviewAction(keyed, ctx, reviewerPort)
-      return isAllowed(dec.outcome) ? "approve" : "deny"
-    },
-  )
+  // The reviewer prompt itself (`gate.open` → `reviewAction`). Captured as a
+  // promise so concurrent callers for the SAME actionKey can share it without
+  // re-prompting. `dec` is closed over and assigned inside, so every awaiter
+  // (the originator and any coalesced sibling) reads the SAME decision.
+  let dec!: ReviewDecision
+  const runReview = async (): Promise<ReviewDecision> => {
+    await gate.open(
+      {
+        threadId: config.sessionId ?? "",
+        kind: origin === "rule" ? "permission" : "escalation",
+        reason: `${origin}-escalation:${action.tool}`,
+        proposedAction: actionKey,
+        resumeStep: `dispatch:${call.id}`,
+      },
+      async () => {
+        dec = await reviewAction(keyed, ctx, reviewerPort)
+        return isAllowed(dec.outcome) ? "approve" : "deny"
+      },
+    )
+    return dec
+  }
+
+  // ROUND-4 coalesce: when a per-run `allowlistEscalated` Set is wired (dedup
+  // intended), prompt the reviewer AT MOST ONCE per actionKey across concurrent
+  // in-flight callers. The first caller stores the promise BEFORE awaiting;
+  // siblings await the SAME promise. The entry clears on settle (success OR
+  // throw), so a later post-settle call re-prompts exactly as before. Absent
+  // `allowlistEscalated` ⇒ byte-identical legacy path (no coalescing).
+  if (opts.allowlistEscalated !== undefined) {
+    const pending = pendingReviewMapFor(opts.allowlistEscalated)
+    const inFlight = pending.get(actionKey)
+    if (inFlight !== undefined) {
+      dec = await inFlight
+    } else {
+      const p = runReview()
+      pending.set(actionKey, p)
+      try {
+        dec = await p
+      } finally {
+        // Only the originator clears its own entry, and only if it is still the
+        // current one (a later distinct acquisition cannot be clobbered).
+        if (pending.get(actionKey) === p) pending.delete(actionKey)
+      }
+    }
+  } else {
+    dec = await runReview()
+  }
 
   // ADR-0070 — validate the OPTIONAL richer verb against the reviewKind.
   // A port that returns a verb illegal for the kind (e.g. `allowlist_commands`

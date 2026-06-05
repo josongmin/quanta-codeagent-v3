@@ -250,10 +250,15 @@ export const createSideAgentDaemonRegistry = (
         inFlight: false,
       }
       daemons.set(id, d)
-      armTrigger(d)
-      // Capability C — a freshly-spawned daemon is idle (awaiting its trigger);
-      // beacon it so the team is not reported busy merely because it exists.
+      // Capability C — beacon the fresh-idle daemon BEFORE arming its trigger.
+      // Ordering is load-bearing: an EVENT trigger whose source fires
+      // SYNCHRONOUSLY during `subscribe` would otherwise run `wake` (which
+      // `reactivate`s = clears the beacon) BEFORE this beacon line, leaving the
+      // beacon set AFTER the daemon is already in flight — falsely reporting a
+      // busy daemon as idle. Beacon-then-arm makes a synchronous first wake's
+      // `reactivate` correctly clear the just-set beacon.
       opts.idleBarrier?.beacon(id)
+      armTrigger(d)
       pruneTerminal()
       return id
     },

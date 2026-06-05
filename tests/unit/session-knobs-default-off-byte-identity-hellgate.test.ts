@@ -61,6 +61,7 @@ const STRICT_ONE_KNOBS: ReadonlyArray<{
   { env: "QUANTA_ARTIFACT_STORE", read: (c) => c.artifactStore },
   { env: "QUANTA_SIDE_AGENT", read: (c) => c.sideAgent },
   { env: "QUANTA_MCP_CONNECTORS", read: (c) => c.mcpConnectors },
+  { env: "QUANTA_MCP_RESOURCES", read: (c) => c.mcpResources },
   { env: "QUANTA_PROGRESS_UPDATE", read: (c) => c.progressUpdate },
   { env: "QUANTA_PTY_ATTACH", read: (c) => c.ptyAttach },
 ]

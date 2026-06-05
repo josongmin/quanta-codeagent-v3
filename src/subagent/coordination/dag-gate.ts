@@ -74,21 +74,32 @@ export const createDagGate = (initial: readonly TaskNode[]): CreateGateResult =>
 
   const idSet = (list: readonly TaskNode[]): Set<string> => new Set(list.map((n) => n.id))
 
-  /** After a state change, resolve any waiters whose node is now ready/blocked. */
+  /** After a state change, resolve any waiters whose node is now ready/blocked.
+   *  A waiter resolves `"blocked"` when its node is transitively dead
+   *  (`blockedTasks`), DIRECTLY terminal-failure (the node ITSELF is
+   *  `failed`/`cancelled` — `blockedTasks` only returns PENDING nodes, so a
+   *  direct `markFailed(id)` on a node that has its own waiter would otherwise
+   *  never resolve), or absent from the graph. */
   const flush = (): void => {
     if (waiters.length === 0) return
     const readyIds = idSet(readyTasks(nodes))
     const blockedIds = idSet(blockedTasks(nodes))
+    const byId = new Map(nodes.map((n) => [n.id, n]))
+    /** The settled outcome for a waiter, or null when it must keep waiting. */
+    const outcomeFor = (id: string): GateOutcome | null => {
+      if (readyIds.has(id)) return "ready"
+      const node = byId.get(id)
+      const dead = node !== undefined && (node.state === "failed" || node.state === "cancelled")
+      return blockedIds.has(id) || dead || node === undefined ? "blocked" : null
+    }
     // Drain in a stable pass; keep pending waiters.
     for (let i = waiters.length - 1; i >= 0; i--) {
       const w = waiters[i]
       if (w === undefined) continue
-      if (readyIds.has(w.id)) {
+      const outcome = outcomeFor(w.id)
+      if (outcome !== null) {
         waiters.splice(i, 1)
-        w.resolve("ready")
-      } else if (blockedIds.has(w.id) || !nodes.some((n) => n.id === w.id)) {
-        waiters.splice(i, 1)
-        w.resolve("blocked")
+        w.resolve(outcome)
       }
     }
   }

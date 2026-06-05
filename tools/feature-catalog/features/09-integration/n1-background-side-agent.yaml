@@ -34,6 +34,7 @@ evidence:
     - src/tool/side-agent/index.ts
     - src/agent/tier1/side-agent.ts
     - src/agent/side-agent-runner.ts
+  adrs: [483]
   tests:
     unit:
       - tests/unit/side-agent-hellgate.test.ts

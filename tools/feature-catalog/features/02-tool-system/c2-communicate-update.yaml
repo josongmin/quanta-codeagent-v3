@@ -50,12 +50,15 @@ evidence:
     - src/stream/adapters/stdout.ts
     - src/stream/adapters/jsonl-recorder.ts
     - src/tool/index.ts
+    - src/host/runtime/agent-arg-builder.ts
   tests:
     unit:
       - tests/unit/communicate-update-hellgate.test.ts
+      - tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts
     integration:
       - tests/unit/communicate-update-e2e-hellgate.test.ts
     contract: []
+  adrs: [478]
 knobs:
   - name: QUANTA_PROGRESS_UPDATE
     where: src/shared/runtime-config.ts
@@ -66,7 +69,11 @@ knobs:
 notes: |
   L3: 도구 + AgentEvent variant + 2 mandatory adapter case + ToolContext mirror +
   dispatch seam + DefaultToolPorts wiring + knob + manifest 완비, default-OFF
-  byte-identical. **잔여(additive follow-up)**: (P1) CLI runtime-context가 실제
+  byte-identical. DONE (jun-05): composition root(`agent-arg-builder.ts`
+  `buildGatedToolPorts`)가 `runtimeConfig().progressUpdate`로
+  `DefaultToolPorts.progressUpdate=true`를 배선 → 도구가 knob에 등록됨;
+  knob-on 등록 + knob-off byte-identity + dispatch가 wired progressSink로 emit하는
+  것까지 composition-root r3 hellgate로 핀. **잔여(additive follow-up)**: (P1) CLI runtime-context가 실제
   progressSink 어댑터(mirror→stream.emit)를 mint해 라이브화; (P2) prompt-body 모델대면
   WHEN-to-call 가이던스(현 describe-string이 set-once 가이드 운반); (P3) Tauri surface
   status pill + agent subtitle + summary panel 렌더.

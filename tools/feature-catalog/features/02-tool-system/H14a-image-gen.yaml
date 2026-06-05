@@ -44,11 +44,13 @@ evidence:
     - src/tool/index.ts
     - src/tool/surface/manifest.ts
     - src/shared/runtime-config.ts
+    - src/host/runtime/agent-arg-builder.ts
   adrs: []
   tests:
     unit:
       - tests/unit/image-gen-hellgate.test.ts
       - tests/unit/image-gen-e2e-hellgate.test.ts
+      - tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -60,6 +62,12 @@ knobs:
       wired ⇒ image_gen NOT registered ⇒ byte-identical default tool menu.
 deliberate_hold: null
 notes: |
+  DONE (jun-05): the composition root (`agent-arg-builder.ts`
+  `buildGatedToolPorts`) now wires `DefaultToolPorts.imageGen` from
+  `runtimeConfig().imageGen`, key-bound via `openAiImagePort({ apiKey:
+  env.OPENAI_API_KEY })` (the SAME source the LLM factory reads). Knob-on
+  registration + knob-off byte-identity + dispatch-activation (typed no_key with
+  no key) pinned by the composition-root r3 hellgate.
   Default-OFF / opt-in on EVERY surface in the tool-surface SSOT manifest
   (it spends provider quota AND writes files, so it never auto-seeds). The
   provider port is provider-agnostic; only the default adapter is OpenAI-
