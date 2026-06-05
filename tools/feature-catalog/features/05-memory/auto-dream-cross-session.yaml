@@ -57,6 +57,10 @@ evidence:
     # trigger over the real memory substrate + the session host fires it at end.
     - src/runner/session-memory-auto.ts
     - src/host/runtime/internal/context-binding.ts
+    # jun-06 manual /dream ctx injection: the surface composer wires the SAME
+    # trigger instance via the new RuntimeContext.dreamTrigger() accessor.
+    - src/sdk/runtime/context.ts
+    - src/apps/cli/repl/surface-compose.ts
   adrs: []
   tests:
     unit:
@@ -64,6 +68,8 @@ evidence:
       - tests/unit/auto-dream-e2e-hellgate.test.ts
       - tests/unit/dream-trigger-wire-e2e-hellgate.test.ts
       - tests/unit/dream-trigger-adversarial-r2-hellgate.test.ts
+      - tests/unit/cli/dream-cmd.test.ts
+      - tests/unit/cli/dream-cmd-manual-trigger-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -113,9 +119,24 @@ notes: |
   shutdown). So the AUTO session-end fire is LIVE under `QUANTA_AUTO_DREAM=1`.
   Production consolidate note: the adapter reuses the cross-session injector +
   Phase-2 summarizer (not a direct `runPhase2` call) — same no-reimplementation
-  guarantee. REMAINING (small): the manual `/dream` slash needs the REPL
-  composer to inject `ctx.dream.trigger`; until then `/dream` is inert while the
-  auto session-end pass runs. Adversarial coverage:
+  guarantee.
+
+  jun-06 manual-trigger (LIVE, DONE): the manual `/dream` slash is now wired —
+  the REPL surface composer (`src/apps/cli/repl/surface-compose.ts`) injects
+  `ctx.dream.trigger` from `runtimeContext.dreamTrigger()`, which exposes the
+  EXACT `CrossSessionDreamTrigger` instance the session-end auto path fires
+  (carried through `context-binding.ts` onto the runtime snapshot, accessed via
+  the new `RuntimeContext.dreamTrigger()` accessor in `src/sdk/runtime/context.ts`).
+  So `/dream` and the auto session-end pass share ONE consolidation core (one
+  state file, one team write target, one consolidate adapter) — no duplicated
+  logic. `/dream` drives `trigger.dream()` (cadence-gate override; lock + flag
+  still honored) and reports the team-target path + bytes written; a failed
+  consolidate surfaces a clean typed `DreamError` (exit 1, no crash). Default-OFF
+  byte-identical: absent trigger (no `QUANTA_AUTO_DREAM=1`) ⇒ slot omitted ⇒
+  `/dream` prints "not wired". Adversarial coverage:
   `dream-trigger-adversarial-r2-hellgate` (consolidate-throw→error+no-reset,
   abort-propagation, hours-only OR-fire, whitespace→no_op, corrupt-state
-  degrade, completed-resets-cadence).
+  degrade, completed-resets-cadence) +
+  `cli/dream-cmd-manual-trigger-hellgate` (manual-runs-consolidation,
+  team-target-not-MEMORY.md + refusal-holds, path+summary report,
+  throwing-port→clean-typed-error no-throw, same-core-reuse, not-wired-inert).

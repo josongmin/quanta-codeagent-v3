@@ -51,6 +51,7 @@ evidence:
       - tests/unit/image-gen-hellgate.test.ts
       - tests/unit/image-gen-e2e-hellgate.test.ts
       - tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts
+      - tests/unit/artifact-auto-register-c1-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -62,6 +63,14 @@ knobs:
       wired ⇒ image_gen NOT registered ⇒ byte-identical default tool menu.
 deliberate_hold: null
 notes: |
+  AUTO-REGISTER (jun-06, C1 loop): `imageGenTool({ port, artifactRegistry })`
+  takes an OPTIONAL artifact-registry port. After a successful write, it
+  best-effort `register({kind:"image", path, mediaType})`s each generated image
+  and appends the minted id (`quanta-artifact://<id>`) to the output so the model
+  can reference it. `buildDefaultTools` passes `ports.artifactRegistry` only when
+  it is ALSO wired (QUANTA_ARTIFACT_STORE on); absent ⇒ no register call + output
+  byte-identical (sacred); a throwing registry never breaks the write.
+
   DONE (jun-05): the composition root (`agent-arg-builder.ts`
   `buildGatedToolPorts`) now wires `DefaultToolPorts.imageGen` from
   `runtimeConfig().imageGen`, key-bound via `openAiImagePort({ apiKey:

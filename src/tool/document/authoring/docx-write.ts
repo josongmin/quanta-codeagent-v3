@@ -15,7 +15,9 @@
 
 import { z } from "zod"
 import { errMessage } from "@/shared"
+import type { ArtifactRegistryPort } from "../../artifact"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../../types"
+import { OOXML_MEDIA_TYPES, registerArtifactBestEffort } from "./artifact-register"
 import { buildDocx, type DocxParagraph, type DocxSpec } from "./docx"
 import { resolveVersionedJailedTarget, writeJailedBytes } from "./jailed-write"
 
@@ -75,7 +77,17 @@ const toSpec = (input: DocxWriteInput): DocxSpec => ({
   ),
 })
 
-export const docxWriteTool: Tool<DocxWriteInput> = {
+/** Options for {@link makeDocxWriteTool}. */
+export interface DocxWriteToolOptions {
+  /** C1 — when wired (default-OFF, gated on `QUANTA_ARTIFACT_STORE`), the tool
+   *  best-effort registers each written document into the session artifact
+   *  registry and appends its id to the output. Absent ⇒ byte-identical. */
+  readonly artifactRegistry?: ArtifactRegistryPort
+}
+
+/** Build the `docx_write` tool. With no options this is byte-identical to the
+ *  historical const export (no artifact register, no extra output). */
+export const makeDocxWriteTool = (options: DocxWriteToolOptions = {}): Tool<DocxWriteInput> => ({
   name: "docx_write",
   description:
     "Generate a real .docx (Word) document from paragraphs (headings + body paragraphs of " +
@@ -139,14 +151,24 @@ export const docxWriteTool: Tool<DocxWriteInput> = {
     const note = target.bumped
       ? ` (target existed — wrote versioned sibling "${target.finalRelative}")`
       : ""
+    // C1 — best-effort artifact registration AFTER a successful write. A throwing
+    // registry never breaks the write; absent registry ⇒ no extra output.
+    const registered = registerArtifactBestEffort(options.artifactRegistry, {
+      kind: "document",
+      path: target.abs,
+      mediaType: OOXML_MEDIA_TYPES.docx,
+    })
     yield {
       type: "result",
       result: {
         ok: true,
         output:
           `Wrote .docx (${bytes.length} bytes, ${paraCount} paragraph${paraCount === 1 ? "" : "s"}) ` +
-          `to ${target.finalRelative}${note}`,
+          `to ${target.finalRelative}${note}${registered}`,
       },
     }
   },
-}
+})
+
+/** Const export — byte-identical to the historical tool (no artifact registry). */
+export const docxWriteTool: Tool<DocxWriteInput> = makeDocxWriteTool()

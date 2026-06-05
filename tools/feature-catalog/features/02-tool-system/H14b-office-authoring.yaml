@@ -52,6 +52,7 @@ evidence:
     - src/tool/document/authoring/xlsx.ts
     - src/tool/document/authoring/docx.ts
     - src/tool/document/authoring/jailed-write.ts
+    - src/tool/document/authoring/artifact-register.ts
     - src/tool/document/authoring/xlsx-write.ts
     - src/tool/document/authoring/docx-write.ts
     - src/tool/document/authoring/index.ts
@@ -65,6 +66,7 @@ evidence:
       - tests/unit/office-authoring-hellgate.test.ts
       - tests/unit/office-authoring-e2e-hellgate.test.ts
       - tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts
+      - tests/unit/artifact-auto-register-c1-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -76,6 +78,16 @@ knobs:
       ⇒ xlsx_write / docx_write NOT registered ⇒ byte-identical default tool menu.
 deliberate_hold: null
 notes: |
+  AUTO-REGISTER (jun-06, C1 loop): each authoring tool now has a
+  `make{Xlsx,Docx,Pptx}WriteTool({ artifactRegistry })` factory (the const
+  `*_write` exports === the no-arg factory, byte-identical). After a successful
+  write, it best-effort `register()`s the file with the OOXML package media type
+  (spreadsheetml.sheet / wordprocessingml.document / presentationml.presentation)
+  and kind (spreadsheet / document / presentation), appending the minted artifact
+  id to the output. `buildDefaultTools` injects `ports.artifactRegistry` only when
+  it is ALSO wired; absent ⇒ no register + byte-identical output; throw ⇒ write
+  unaffected (side-channel). Shared helper: `authoring/artifact-register.ts`.
+
   DONE (jun-05): the composition root (`agent-arg-builder.ts`
   `buildGatedToolPorts`) now wires `DefaultToolPorts.officeAuthoring=true` from
   `runtimeConfig().officeAuthoring`, so xlsx/docx/pptx_write register on the knob.

@@ -26,6 +26,7 @@ type RuntimeContextDecisionEmitterView = RuntimeContextSnapshot["decisionEmitter
 type RuntimeContextAdmissibilityView = RuntimeContextSnapshot["admissibility"]
 type RuntimeContextPlanExitPortView = RuntimeContextSnapshot["planExitPort"]
 type RuntimeContextUserInputPortView = RuntimeContextSnapshot["userInputPort"]
+type RuntimeContextDreamTriggerView = RuntimeContextSnapshot["dreamTrigger"]
 type InternalCreateRuntimeFacadeArgs = Parameters<RuntimeContextBinding["createRuntimeHost"]>[0]
 type RuntimeContextPatch = Parameters<RuntimeContextBinding["patch"]>[0]
 type InternalBootstrapContextArgs = Parameters<typeof createRuntimeContextBindingFromBootstrap>[0]
@@ -125,6 +126,11 @@ export interface RuntimeContext {
   admissibility(): RuntimeContextAdmissibilityView
   planExitPort(): RuntimeContextPlanExitPortView
   userInputPort(): RuntimeContextUserInputPortView
+  /** H16 — the live cross-session dream trigger (the SAME instance the session-
+   *  end auto path fires), present iff the host wired one (`QUANTA_AUTO_DREAM=1`).
+   *  The REPL surface reuses THIS instance for the `/dream` manual trigger so the
+   *  manual + auto paths share one consolidation core (no duplication). */
+  dreamTrigger(): RuntimeContextDreamTriggerView
 }
 
 interface RuntimeContextRecord extends RuntimeContext {
@@ -301,6 +307,7 @@ const createRuntimeContext = (initialState: InternalRuntimeContextState): Runtim
     admissibility: () => record.state.snapshot.admissibility,
     planExitPort: () => record.state.snapshot.planExitPort,
     userInputPort: () => record.state.snapshot.userInputPort,
+    dreamTrigger: () => record.state.snapshot.dreamTrigger,
   }
   return record
 }

@@ -21,7 +21,9 @@
 
 import { z } from "zod"
 import { errMessage } from "@/shared"
+import type { ArtifactRegistryPort } from "../../artifact"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../../types"
+import { OOXML_MEDIA_TYPES, registerArtifactBestEffort } from "./artifact-register"
 import { resolveVersionedJailedTarget, writeJailedBytes } from "./jailed-write"
 import { buildXlsx, type XlsxCellValue, type XlsxSpec } from "./xlsx"
 
@@ -63,7 +65,17 @@ const toSpec = (input: XlsxWriteInput): XlsxSpec => ({
   })),
 })
 
-export const xlsxWriteTool: Tool<XlsxWriteInput> = {
+/** Options for {@link makeXlsxWriteTool}. */
+export interface XlsxWriteToolOptions {
+  /** C1 — when wired (default-OFF, gated on `QUANTA_ARTIFACT_STORE`), the tool
+   *  best-effort registers each written workbook into the session artifact
+   *  registry and appends its id to the output. Absent ⇒ byte-identical. */
+  readonly artifactRegistry?: ArtifactRegistryPort
+}
+
+/** Build the `xlsx_write` tool. With no options this is byte-identical to the
+ *  historical const export (no artifact register, no extra output). */
+export const makeXlsxWriteTool = (options: XlsxWriteToolOptions = {}): Tool<XlsxWriteInput> => ({
   name: "xlsx_write",
   description:
     "Generate a real .xlsx (Excel) workbook from sheet data (rows of cells + sheet names) " +
@@ -127,14 +139,24 @@ export const xlsxWriteTool: Tool<XlsxWriteInput> = {
     const note = target.bumped
       ? ` (target existed — wrote versioned sibling "${target.finalRelative}")`
       : ""
+    // C1 — best-effort artifact registration AFTER a successful write. A throwing
+    // registry never breaks the write; absent registry ⇒ no extra output.
+    const registered = registerArtifactBestEffort(options.artifactRegistry, {
+      kind: "spreadsheet",
+      path: target.abs,
+      mediaType: OOXML_MEDIA_TYPES.xlsx,
+    })
     yield {
       type: "result",
       result: {
         ok: true,
         output:
           `Wrote .xlsx (${bytes.length} bytes, ${sheetCount} sheet${sheetCount === 1 ? "" : "s"}) ` +
-          `to ${target.finalRelative}${note}`,
+          `to ${target.finalRelative}${note}${registered}`,
       },
     }
   },
-}
+})
+
+/** Const export — byte-identical to the historical tool (no artifact registry). */
+export const xlsxWriteTool: Tool<XlsxWriteInput> = makeXlsxWriteTool()

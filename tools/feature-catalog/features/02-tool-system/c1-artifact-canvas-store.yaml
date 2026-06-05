@@ -31,14 +31,25 @@ purpose: |
   `artifact_destroy`. `DefaultToolPorts.artifactRegistry`로 caller-wired,
   `QUANTA_ARTIFACT_STORE` default-OFF(없으면 미등록=byte-identical). 호스트가 세션당
   registry 1개 mint(`agent-arg-builder buildBaseRegistry`).
+
+  AUTO-REGISTER 루프 (jun-06 LANDED): 생성축(image_gen / xlsx_write / docx_write /
+  pptx_write)이 성공적 write 직후 `register({kind,path,mediaType})`를 BEST-EFFORT 호출
+  → 모델이 명시 `artifact_register` 없이도 `artifact_list`/`artifact_get`로 생성물 조회.
+  port가 없으면(default-OFF) register 미호출 + 출력 byte-identical(sacred). register가
+  throw해도 primary write는 ok:true(side-channel). 성공 시에만 artifact id를 출력에 추가.
+  registry는 `buildDefaultTools`가 생성도구 팩토리에 `ports.artifactRegistry`를 함께
+  주입(image_gen+office 둘 다 wired일 때만 등록 발생).
 evidence:
   code:
     - src/artifact/registry.ts
     - src/tool/artifact/index.ts
     - src/tool/index.ts
+    - src/tool/document/authoring/artifact-register.ts
+    - src/tool/image-gen/tool.ts
   tests:
     unit:
       - tests/unit/artifact-registry-hellgate.test.ts
+      - tests/unit/artifact-auto-register-c1-hellgate.test.ts
     integration:
       - tests/unit/artifact-store-e2e-hellgate.test.ts
     contract: []
@@ -46,5 +57,6 @@ evidence:
 knobs: []
 notes: |
   L3: pure registry 코어 + 4 도구 + manifest + 세션 wiring 완비, default-OFF
-  byte-identical. 잔여(additive follow-up): 생성도구(image_gen/office)가 출력을
-  자동 register(현재는 모델이 artifact_register로 명시 등록=self-contained 사용가능).
+  byte-identical. AUTO-REGISTER 루프 CLOSED (jun-06): 생성도구(image_gen/xlsx/docx/
+  pptx_write)가 성공 write 후 best-effort `register()` → 모델이 명시 호출 없이도 생성물
+  조회. port absent ⇒ byte-identical, throw ⇒ write 무영향(side-channel).

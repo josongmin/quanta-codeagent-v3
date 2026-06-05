@@ -22,8 +22,12 @@ purpose: |
   provider-missing-dependency) + 5-tier resolveProvider(explicit?, env?)
   precedence. Default-OFF — legacy
   adapter path untouched (byte-identical when ProviderId resolves to
-  "default"). Bedrock/Vertex are Phase 1 (missing-dep typed-throw on
-  client lib import); Foundry is Phase 2 stub. First OSS implementation
+  "default"). Bedrock/Vertex are Phase 2 (real stream via optional cloud
+  sub-SDK, missing-dep typed-throw when absent); Foundry is Phase 2 stub.
+  FACTORY WIRE NOW LIVE (H7): createMulticloudLLM in src/llm/factory.ts
+  consults this registry's precedence ladder to select the transport AND
+  injects the H7 CredentialSource into the Bedrock/Vertex adapters, so the
+  slice is no longer unwired from the main factory. First OSS implementation
   to make Anthropic transport-selection typed; Claude Code keeps it
   closed via env-only, Codex/Cursor/v0.dev don't separate transport.
 evidence:
@@ -35,6 +39,7 @@ evidence:
     - src/llm/providers/foundry-adapter.ts
     - src/llm/providers/registry.ts
     - src/llm/providers/index.ts
+    - src/llm/factory.ts
   adrs: [139]
   tests:
     unit:
@@ -43,6 +48,7 @@ evidence:
       - tests/unit/llm-providers/default-adapter-hellgate.test.ts
       - tests/unit/llm-providers/bedrock-adapter-hellgate.test.ts
       - tests/unit/llm-providers/vertex-adapter-hellgate.test.ts
+      - tests/unit/h7-multicloud-rotation-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs:

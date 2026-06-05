@@ -18,27 +18,25 @@
  * serializer remains). Deliberately not half-baked in this slice.
  */
 
+export {
+  OOXML_MEDIA_TYPES,
+  registerArtifactBestEffort,
+} from "./artifact-register"
 export { buildDocx, type DocxParagraph, type DocxRun, type DocxSpec } from "./docx"
 export {
   DOCX_WRITE_MAX_PARAGRAPHS,
   DOCX_WRITE_MAX_RUNS_PER_PARAGRAPH,
   type DocxWriteInput,
+  type DocxWriteToolOptions,
   docxWriteInputSchema,
   docxWriteTool,
+  makeDocxWriteTool,
 } from "./docx-write"
 export {
   type JailedTargetResult,
   resolveVersionedJailedTarget,
   writeJailedBytes,
 } from "./jailed-write"
-export { buildPptx, type PptxSlide, type PptxSpec } from "./pptx"
-export {
-  PPTX_WRITE_MAX_BODY_LINES,
-  PPTX_WRITE_MAX_SLIDES,
-  type PptxWriteInput,
-  pptxWriteInputSchema,
-  pptxWriteTool,
-} from "./pptx-write"
 export {
   buildContentTypesXml,
   buildRelsXml,
@@ -50,6 +48,16 @@ export {
   XML_DECL,
   xmlText,
 } from "./ooxml"
+export { buildPptx, type PptxSlide, type PptxSpec } from "./pptx"
+export {
+  makePptxWriteTool,
+  PPTX_WRITE_MAX_BODY_LINES,
+  PPTX_WRITE_MAX_SLIDES,
+  type PptxWriteInput,
+  type PptxWriteToolOptions,
+  pptxWriteInputSchema,
+  pptxWriteTool,
+} from "./pptx-write"
 export {
   buildXlsx,
   columnLetter,
@@ -59,10 +67,12 @@ export {
   type XlsxSpec,
 } from "./xlsx"
 export {
+  makeXlsxWriteTool,
   XLSX_WRITE_MAX_COLS_PER_ROW,
   XLSX_WRITE_MAX_ROWS_PER_SHEET,
   XLSX_WRITE_MAX_SHEETS,
   type XlsxWriteInput,
+  type XlsxWriteToolOptions,
   xlsxWriteInputSchema,
   xlsxWriteTool,
 } from "./xlsx-write"

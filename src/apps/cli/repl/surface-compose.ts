@@ -50,6 +50,7 @@ import {
   atAutocompleteEnabled,
   createCompositeAtProvider,
 } from "../at-autocomplete"
+import type { DreamSlashState } from "../dream-cmd"
 import { runImageCmd } from "../image-cmd"
 import type { ImageQueue } from "../image-queue"
 import { loadKeybindings } from "../keybindings/load"
@@ -457,6 +458,11 @@ const buildSurfaceDispatch = (args: {
   /** `/memory` store slot. Present iff a durable store was built (default-ON
    *  volatile `InMemoryStore`); absent ⇒ the slash prints "not wired". */
   readonly memory?: MemorySlashState | undefined
+  /** `/dream` (H16) manual-trigger slot. Present iff the host wired the live
+   *  cross-session dream trigger (`QUANTA_AUTO_DREAM=1`); REUSES the SAME trigger
+   *  instance the session-end auto path fires (no duplicated consolidation
+   *  logic). Absent ⇒ the slash prints "not wired" (default-OFF byte-identical). */
+  readonly dream?: DreamSlashState | undefined
   /** `/queue` plan-queue store. Surface-owned; always present in the REPL so
    *  inspect/mutate/sendNow resolve (empty until a producer enqueues). */
   readonly planQueue?: PlanQueueStore | undefined
@@ -510,6 +516,10 @@ const buildSurfaceDispatch = (args: {
       // `/memory` store slot: present iff a durable store was built. Absent ⇒
       // slot omitted ⇒ the slash prints "memory store not wired".
       ...(args.memory !== undefined ? { memory: args.memory } : {}),
+      // `/dream` (H16) manual-trigger slot: present iff the host wired the live
+      // cross-session dream trigger. Absent ⇒ slot omitted ⇒ the slash prints
+      // "auto-dream not wired in this surface" (default-OFF byte-identical).
+      ...(args.dream !== undefined ? { dream: args.dream } : {}),
       // `/queue` plan-queue store: surface-owned, always present in the REPL.
       ...(args.planQueue !== undefined ? { planQueue: args.planQueue } : {}),
       // `/state` working-state snapshot getter: always wired (empty when the
@@ -627,7 +637,8 @@ export const extractApplyPatchPaths = (patch: string): readonly string[] => {
       push(line.slice(PATCH_SENTINELS.updateFile.length))
     else if (line.startsWith(PATCH_SENTINELS.deleteFile))
       push(line.slice(PATCH_SENTINELS.deleteFile.length))
-    else if (line.startsWith(PATCH_SENTINELS.moveTo)) push(line.slice(PATCH_SENTINELS.moveTo.length))
+    else if (line.startsWith(PATCH_SENTINELS.moveTo))
+      push(line.slice(PATCH_SENTINELS.moveTo.length))
   }
   return out
 }
@@ -992,6 +1003,16 @@ export const composeSurfaceWires = (
         }
       : undefined
 
+  // `/dream` (H16) — REUSE the SAME `CrossSessionDreamTrigger` the session-end
+  // auto path fires (exposed via runtimeContext). Present only when the host
+  // built one (`QUANTA_AUTO_DREAM=1`); absent ⇒ slot omitted ⇒ `/dream` prints
+  // "not wired". The manual `/dream` then drives `trigger.dream()` (cadence-gate
+  // override, lock + flag honored), sharing one consolidation core — no
+  // duplicated consolidate/state/write-target.
+  const dreamTrigger = setup.runtimeContext.dreamTrigger()
+  const dreamSlot: DreamSlashState | undefined =
+    dreamTrigger !== undefined ? { trigger: dreamTrigger } : undefined
+
   const dispatchSlash = buildSurfaceDispatch({
     slashCtx,
     convCheckpointSlot,
@@ -999,6 +1020,7 @@ export const composeSurfaceWires = (
     contextUsage: () => promptAssembled.current(),
     ...(voiceLive !== undefined ? { voiceLive } : {}),
     ...(memorySlot !== undefined ? { memory: memorySlot } : {}),
+    ...(dreamSlot !== undefined ? { dream: dreamSlot } : {}),
     planQueue: planQueueStore,
     workingState: () => workingStateGet?.(),
     retry: () =>

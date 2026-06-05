@@ -59,6 +59,7 @@ evidence:
     unit:
       - tests/unit/pptx-authoring-hellgate.test.ts
       - tests/unit/pptx-roundtrip-e2e-hellgate.test.ts
+      - tests/unit/artifact-auto-register-c1-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -71,6 +72,12 @@ knobs:
       default tool menu. (pptx_read is BASE — unaffected by the knob.)
 deliberate_hold: null
 notes: |
+  AUTO-REGISTER (jun-06, C1 loop): `makePptxWriteTool({ artifactRegistry })`
+  best-effort registers the written deck (kind:presentation, media type
+  presentationml.presentation) after a successful write; the const `pptxWriteTool`
+  === the no-arg factory (byte-identical). port absent ⇒ no register; throw ⇒
+  write unaffected. See office-authoring (H14b) + artifact-canvas-store (C1).
+
   pptx_write is default-OFF / opt-in on EVERY surface in the tool-surface SSOT
   (grouped under the xlsx_write officeAuthoring entry); pptx_read is BASE
   (BASE_TOOL_NAMES). Title-vs-body split on read: the title placeholder

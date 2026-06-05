@@ -10,6 +10,7 @@ import type {
   SessionHostTurnEvent,
 } from "@/kernel/session"
 import type { ContentBlock, ImageBlock, Message, ResponsesContinuationStore } from "@/llm"
+import type { CrossSessionDreamTrigger } from "@/memory"
 import { inferReviewKind, reasonCodeFor, type ToolAction } from "@/permission"
 import type { CapabilityManifest, PendingApprovalView } from "@/protocol/session"
 import { wireInteractiveKnobs } from "@/runner/assemble"
@@ -51,6 +52,13 @@ type RuntimeBase = RuntimeAgentConfigBase & {
    *  session host's close() AFTER the WAL dispose. Best-effort + bounded by the
    *  trigger's own dream-lock; undefined ⇒ no dream (byte-identical default). */
   dreamOnSessionEnd?: () => Promise<void>
+  /** H16 — the SAME cross-session dream trigger instance backing
+   *  `dreamOnSessionEnd`, exposed so the REPL surface can wire `/dream` to it
+   *  (manual override of the cadence gate) reusing the auto path's consolidation
+   *  core — no duplicated consolidate/state/write-target. Present only when
+   *  `QUANTA_AUTO_DREAM=1` produced a trigger; undefined ⇒ `/dream` prints
+   *  "not wired" (byte-identical default-OFF). */
+  dreamTrigger?: CrossSessionDreamTrigger
 }
 
 interface RuntimeConfirmSlot {
@@ -105,6 +113,10 @@ interface RuntimeContextSnapshot {
   readonly conversationActionPort?: AgentConfig["conversationActionPort"]
   readonly activeTurnRef?: AgentConfig["activeTurnRef"]
   readonly shadowVerify?: AgentConfig["shadowVerify"]
+  /** H16 — the live cross-session dream trigger (auto path's SAME instance),
+   *  surfaced so the REPL can wire `/dream`. Present only when
+   *  `QUANTA_AUTO_DREAM=1` produced a trigger. */
+  readonly dreamTrigger?: CrossSessionDreamTrigger
 }
 
 type RuntimeContextPatch = Partial<
@@ -520,8 +532,13 @@ const extendBaseWithMemoryAuto = async (
     memoryAutoDispose: auto.dispose,
     // H16 — carry the session-end auto-dream hook (default-OFF: absent unless
     // QUANTA_AUTO_DREAM=1 produced a trigger). The host fires it once at close().
+    // Also carry the SAME trigger instance so the REPL surface can wire `/dream`
+    // (manual override) over the auto path's consolidation core — no duplication.
     ...(dreamTrigger !== undefined
-      ? { dreamOnSessionEnd: () => dreamTrigger.onSessionEnd().then(() => undefined) }
+      ? {
+          dreamOnSessionEnd: () => dreamTrigger.onSessionEnd().then(() => undefined),
+          dreamTrigger,
+        }
       : {}),
   }
 }
@@ -563,6 +580,7 @@ const buildOptionalSnapshotFields = (
   ...whenDefined("conversationActionPort", base.conversationActionPort),
   ...whenDefined("activeTurnRef", base.activeTurnRef),
   ...whenDefined("shadowVerify", base.shadowVerify),
+  ...whenDefined("dreamTrigger", base.dreamTrigger),
 })
 
 const buildSnapshot = (base: RuntimeBase): RuntimeContextSnapshot => ({

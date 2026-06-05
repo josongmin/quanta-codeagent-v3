@@ -26,7 +26,7 @@ import {
 } from "./document"
 // H14b — Office document AUTHORING tools (generate real .xlsx / .docx / .pptx).
 // Pure-TS STORED-ZIP + OOXML; conditionally registered via DefaultToolPorts.officeAuthoring.
-import { docxWriteTool, pptxWriteTool, xlsxWriteTool } from "./document/authoring"
+import { makeDocxWriteTool, makePptxWriteTool, makeXlsxWriteTool } from "./document/authoring"
 import { editTool, makeEditTool } from "./edit"
 import { fileTreeSummaryTool } from "./file-tree-summary"
 import { globTool } from "./glob"
@@ -119,15 +119,22 @@ export {
   crc32,
   type DocxSpec,
   type DocxWriteInput,
+  type DocxWriteToolOptions,
   docxWriteInputSchema,
   docxWriteTool,
+  makeDocxWriteTool,
+  makePptxWriteTool,
+  makeXlsxWriteTool,
+  OOXML_MEDIA_TYPES,
   type PptxSpec,
   type PptxWriteInput,
+  type PptxWriteToolOptions,
   parseStoredZip,
   pptxWriteInputSchema,
   pptxWriteTool,
   type XlsxSpec,
   type XlsxWriteInput,
+  type XlsxWriteToolOptions,
   xlsxWriteInputSchema,
   xlsxWriteTool,
 } from "./document/authoring"
@@ -631,17 +638,31 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => {
   // the host's key-resolved provider port is appended (mutating; writes a
   // versioned-sibling artifact through the FS jail).
   if (ports.imageGen !== undefined) {
-    base.push(imageGenTool({ port: ports.imageGen }) as Tool)
+    // C1 — when the artifact registry is ALSO wired, the generated image is
+    // best-effort registered (default-OFF ⇒ port absent ⇒ byte-identical).
+    base.push(
+      imageGenTool({
+        port: ports.imageGen,
+        ...(ports.artifactRegistry !== undefined
+          ? { artifactRegistry: ports.artifactRegistry }
+          : {}),
+      }) as Tool,
+    )
   }
   // H14b — conditional registration of the Office authoring tools. Absent/false
   // ⇒ default set is byte-identical. Present ⇒ `xlsx_write` + `docx_write` are
   // appended (mutating; pure-TS OOXML serialize + FS-jail write, versioned
   // sibling on an existing target).
   if (ports.officeAuthoring === true) {
-    base.push(xlsxWriteTool as Tool)
-    base.push(docxWriteTool as Tool)
+    // C1 — when the artifact registry is ALSO wired, each authored file is
+    // best-effort registered (default-OFF ⇒ port absent ⇒ byte-identical: the
+    // `make*WriteTool()` factory with no registry === the historical const tool).
+    const authoringOpts =
+      ports.artifactRegistry !== undefined ? { artifactRegistry: ports.artifactRegistry } : {}
+    base.push(makeXlsxWriteTool(authoringOpts) as Tool)
+    base.push(makeDocxWriteTool(authoringOpts) as Tool)
     // H14 PPTX follow-up — same gate: generate real .pptx (PresentationML).
-    base.push(pptxWriteTool as Tool)
+    base.push(makePptxWriteTool(authoringOpts) as Tool)
   }
   // C1 — conditional registration of the artifact (Canvas) read/manage tools.
   // Absent registry ⇒ default set is byte-identical (the model never sees them).

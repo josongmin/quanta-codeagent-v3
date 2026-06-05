@@ -27,6 +27,7 @@ import { z } from "zod"
 import type { ImageBlock } from "@/llm"
 import { errMessage } from "@/shared"
 import { FsJailError, resolveJailed } from "@/storage"
+import type { ArtifactRegistryPort } from "../artifact"
 import { defineTool } from "../factory"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 import {
@@ -106,6 +107,10 @@ export interface ImageGenToolOptions {
   readonly port?: ImageGenPort
   /** Injected write seam (test double). Default = `@/storage`-backed bytes write. */
   readonly writePort?: ImageWritePort
+  /** C1 — when wired (default-OFF, gated on `QUANTA_ARTIFACT_STORE`), the tool
+   *  best-effort registers each generated image into the session artifact
+   *  registry and appends its id to the output. Absent ⇒ byte-identical. */
+  readonly artifactRegistry?: ArtifactRegistryPort
 }
 
 /** Build an ok:false ToolResult with an optional typed failure. */
@@ -190,6 +195,11 @@ const buildRequest = (
   background: input.background ?? "auto",
   referenceImages,
 })
+
+/** Map an {@link ImageGenFormat} to its MIME type (defensive fallback for the
+ *  artifact mediaType when the provider omits a per-image mediaType). */
+const formatMediaType = (format: ImageGenFormat): string =>
+  format === "jpeg" ? "image/jpeg" : format === "webp" ? "image/webp" : "image/png"
 
 /** Infer the output format from the requested file extension (png default). */
 const formatFromPath = (path: string): ImageGenFormat => {
@@ -383,23 +393,51 @@ const callProvider = async (
   return { kind: "ok", images: outcome.images }
 }
 
-/** Build the success ToolResult (summary + optional inline preview). */
+/** C1 — best-effort register every written image into the session artifact
+ *  registry. Returns an additive output line listing the minted ids, or `""`
+ *  when no registry is wired OR every register call failed (best-effort — a
+ *  throwing registry NEVER breaks the primary write). The mediaType is the
+ *  image's own (`image/png` etc.). */
+const registerImages = (
+  registry: ArtifactRegistryPort | undefined,
+  paths: readonly string[],
+  mediaType: string,
+): string => {
+  if (registry === undefined || paths.length === 0) return ""
+  const ids: string[] = []
+  for (const path of paths) {
+    try {
+      ids.push(registry.register({ kind: "image", path, mediaType }).id)
+    } catch {
+      // Registration is a side-channel; swallow so the write result is intact.
+    }
+  }
+  if (ids.length === 0) return ""
+  return `\nRegistered artifact${ids.length === 1 ? "" : "s"} ${ids
+    .map((id) => `${id} (quanta-artifact://${id})`)
+    .join(", ")}`
+}
+
+/** Build the success ToolResult (summary + optional inline preview + optional
+ *  artifact-registration line). */
 const successResult = (
   paths: readonly string[],
   inlinePreview: boolean,
   first: { bytes: Uint8Array; mediaType: string } | undefined,
+  registered: string,
 ): ToolResult => {
   const summary =
     paths.length === 1
       ? `Wrote image to ${paths[0]}`
       : `Wrote ${paths.length} images:\n${paths.map((p) => `  ${p}`).join("\n")}`
-  if (!inlinePreview || first === undefined) return { ok: true, output: summary }
+  const output = `${summary}${registered}`
+  if (!inlinePreview || first === undefined) return { ok: true, output }
   const image: ImageBlock = {
     type: "image",
     data: Buffer.from(first.bytes).toString("base64"),
     mediaType: first.mediaType,
   }
-  return { ok: true, output: summary, images: [image] }
+  return { ok: true, output, images: [image] }
 }
 
 /** Whole image-gen flow as ONE typed ToolResult (no generator branching). */
@@ -408,6 +446,7 @@ const runImageGen = async (
   ctx: ToolContext,
   port: ImageGenPort,
   writePort: ImageWritePort,
+  artifactRegistry: ArtifactRegistryPort | undefined,
 ): Promise<ToolResult> => {
   const parsed = imageGenInputSchema.safeParse(input)
   if (!parsed.success) return errResult(`invalid input: ${parsed.error.message}`)
@@ -429,13 +468,22 @@ const runImageGen = async (
 
   const written = await writeImages(provided.images, data.outputPath, ctx.cwd, writePort)
   if (written.kind === "fail") return written.result
-  return successResult(written.paths, data.inlinePreview === true, written.first)
+  // C1 — best-effort artifact registration AFTER a successful write. Uses the
+  // first image's mediaType (`image/png` etc.); a throwing registry never breaks
+  // the write; absent registry ⇒ no extra output (byte-identical).
+  const registered = registerImages(
+    artifactRegistry,
+    written.paths,
+    written.first?.mediaType ?? formatMediaType(formatFromPath(data.outputPath)),
+  )
+  return successResult(written.paths, data.inlinePreview === true, written.first, registered)
 }
 
 /** Build the `image_gen` tool against an injected provider + write port. */
 export const imageGenTool = (options: ImageGenToolOptions = {}): Tool<ImageGenInput> => {
   const port = options.port ?? openAiImagePort()
   const writePort = options.writePort ?? defaultImageWritePort
+  const artifactRegistry = options.artifactRegistry
 
   return defineTool<ImageGenInput>({
     name: "image_gen",
@@ -455,7 +503,10 @@ export const imageGenTool = (options: ImageGenToolOptions = {}): Tool<ImageGenIn
     hitlTier: (): "pre-approval-ok" => "pre-approval-ok",
 
     async *execute(input: ImageGenInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
-      yield { type: "result", result: await runImageGen(input, ctx, port, writePort) }
+      yield {
+        type: "result",
+        result: await runImageGen(input, ctx, port, writePort, artifactRegistry),
+      }
     },
   })
 }

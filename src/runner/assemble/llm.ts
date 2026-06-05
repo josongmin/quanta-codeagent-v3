@@ -1,16 +1,22 @@
 import { createAutoClassifierPort, RetryingLLM } from "@/agent"
 import {
+  type CreateMulticloudOptions,
+  type CredentialSource,
+  createCredentialSource,
   createLLM,
+  createMulticloudLLM,
   DEFAULT_MODEL,
   FallbackLLM,
   type FallbackMetricSink,
   type Provider as LLMFactoryProvider,
   type LLMPort,
   pickProvider as pickProviderFactory,
+  type ShellExecResult,
   withLiveUsage,
 } from "@/llm"
 import type { StructuredLogger } from "@/observability"
 import type { PermissionContext, PermissionMode } from "@/permission"
+import { runShell } from "@/runtime"
 
 /**
  * Surface-agnostic LLM assembly. The CLI / Web / Tauri surfaces parse their
@@ -133,6 +139,132 @@ export const composeLLMCore = (input: ComposeLlmInput): LLMPort => {
     input.slog.info("llm.live_usage.on")
   }
   return finalLLM
+}
+
+// ─────────────────── H7 — rotating cloud credentials (knob-read) ────────────
+//
+// The FINAL composition-root step that makes the proven `createMulticloudLLM`
+// credentialSource INJECTION SEAM live end-to-end. The `@/llm` slice is
+// closed-port (imports only `@/shared`), so the executable shell + the trust
+// predicate are dependency-injected HERE — `@/runner` is allowed to reach
+// `@/runtime` (`runShell`) and `@/permission`, so this is the correct seam to
+// wire the real ports the helper expects.
+//
+// SECURITY — a credential helper / `*AuthRefresh` is ARBITRARY COMMAND
+// EXECUTION, so the source is built ONLY when (a) at least one H7 knob is set
+// AND (b) the workspace is trusted (the injected `isTrusted` predicate). The
+// predicate FAILS CLOSED: an unconfigured / untrusted environment yields a
+// source whose `isTrusted()` is `false`, so the helper module refuses to shell
+// out and surfaces a typed `untrusted` decline — it never silently runs an
+// operator-supplied command in an untrusted workspace.
+//
+// DEFAULT-OFF BYTE-IDENTITY — when no H7 knob is set, {@link buildCredentialSource}
+// returns `undefined`, {@link buildMulticloudLLMCore} passes NO `credentialSource`,
+// and the Bedrock/Vertex adapters shell ZERO times (byte-identical to the
+// pre-H7 SDK default credential chain). The four legacy providers are never
+// routed here at all.
+
+/** The four H7 knobs the composition root reads off `runtimeConfig()` and the
+ *  trust signal. A SUBSET of `RuntimeConfig` (the surface passes only the H7
+ *  fields) plus the injected trust predicate + clock — this keeps `@/runner`
+ *  free of a direct `process.env` read (the surface owns that via
+ *  `runtimeConfig()`) and free of a bare `Date.now()` in the cred path. */
+export interface CredentialSourceInput {
+  /** `QUANTA_API_KEY_HELPER` — mint command. Absent ⇒ no mint capability. */
+  apiKeyHelper: string | undefined
+  /** `QUANTA_API_KEY_HELPER_TTL_MS` — TTL for mint cache + refresh throttle. */
+  apiKeyHelperTtlMs: number | undefined
+  /** `QUANTA_AWS_AUTH_REFRESH` — Bedrock pre-call refresh command. */
+  awsAuthRefresh: string | undefined
+  /** `QUANTA_GCP_AUTH_REFRESH` — Vertex pre-call refresh command. */
+  gcpAuthRefresh: string | undefined
+  /** Injected workspace-trust predicate. A shell-command credential helper is
+   *  arbitrary code execution, so the source refuses to shell out unless this
+   *  returns `true`. MUST fail closed: an unconfigured surface passes a
+   *  predicate that returns `false` ⇒ typed `untrusted` decline, never a run.
+   *  The surface wires the real trust check (`@/permission`). */
+  isTrusted: () => boolean
+  /** Injected clock for the TTL cache (no bare `Date.now()` in the cred path).
+   *  Absent ⇒ `Date.now` (the composition root owns wall-clock policy). */
+  now?: () => number
+  /** Injected shell-exec port — TEST SEAM. Production omits ⇒ the real
+   *  `runShell(command, { inheritEnv: true })` is used (the helper needs the
+   *  parent env to find `aws`/`gcloud` + their cred files; this is the
+   *  operator's explicit, trust-gated opt-in). */
+  shellExec?: (command: string) => Promise<ShellExecResult>
+}
+
+/** The real shell closure handed to the credential helper. `inheritEnv: true`
+ *  is REQUIRED so the helper finds `aws`/`gcloud` and their on-disk credential
+ *  files — this is the operator's explicit, trust-gated opt-in (the source only
+ *  reaches this after `isTrusted()` returns true). Maps `ShellResult` →
+ *  `ShellExecResult` (structural subset; drops `timedOut`). */
+const realShellExec = async (command: string): Promise<ShellExecResult> => {
+  const r = await runShell(command, { inheritEnv: true })
+  return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode }
+}
+
+/** Build a trust-gated {@link CredentialSource} from the H7 knobs, or
+ *  `undefined` when NONE of the four knobs is set (default-OFF ⇒ no source ⇒
+ *  byte-identical). When ANY knob IS set the source is always built — the trust
+ *  gate lives INSIDE the source (`isTrusted` is consulted at shell time, so an
+ *  untrusted workspace produces a typed `untrusted` decline rather than a
+ *  silent no-op that would hide a misconfiguration). */
+export const buildCredentialSource = (
+  input: CredentialSourceInput,
+): CredentialSource | undefined => {
+  const configured =
+    input.apiKeyHelper !== undefined ||
+    input.awsAuthRefresh !== undefined ||
+    input.gcpAuthRefresh !== undefined
+  if (!configured) return undefined
+  return createCredentialSource({
+    ...(input.apiKeyHelper !== undefined ? { apiKeyHelper: input.apiKeyHelper } : {}),
+    ...(input.apiKeyHelperTtlMs !== undefined
+      ? { apiKeyHelperTtlMs: input.apiKeyHelperTtlMs }
+      : {}),
+    ...(input.awsAuthRefresh !== undefined ? { awsAuthRefresh: input.awsAuthRefresh } : {}),
+    ...(input.gcpAuthRefresh !== undefined ? { gcpAuthRefresh: input.gcpAuthRefresh } : {}),
+    shellExec: input.shellExec ?? realShellExec,
+    isTrusted: input.isTrusted,
+    ...(input.now !== undefined ? { now: input.now } : {}),
+  })
+}
+
+/** Inputs to {@link buildMulticloudLLMCore}. A superset of the multicloud
+ *  factory options the surface already owns (transport id / model / auth /
+ *  stream guards) plus the H7 credential input. The surface maps its ENV / HTTP
+ *  / IPC payload into this once. */
+export interface MulticloudAssembleInput {
+  /** Forwarded verbatim to {@link createMulticloudLLM} (transport id, model,
+   *  auth, beta, stream guards, test client factories). The `credentialSource`
+   *  field is OVERWRITTEN by the H7 builder below — callers set it via
+   *  `credential`, not here. */
+  opts: Omit<CreateMulticloudOptions, "credentialSource">
+  /** Env source for transport selection / auth resolution (the factory reads
+   *  only the cloud-SDK cred-chain env keys from it). */
+  env: EnvLike
+  /** H7 credential input. When the four knobs are all unset, NO source is
+   *  built and the multicloud adapter shells ZERO times (byte-identical). */
+  credential: CredentialSourceInput
+}
+
+/** Build a cloud-transport (Bedrock/Vertex/…) LLM with the H7 rotating
+ *  credential source injected when configured. The single composition-root
+ *  entry that makes the proven injection seam live end-to-end.
+ *
+ *  HONESTY (see report): selecting a multicloud transport is NOT yet routed by
+ *  the main `buildLLMCore` provider ladder — `buildLLMCore` resolves only the
+ *  four legacy `Provider`s. This entry is the tested seam a surface calls when
+ *  it has decided (via a future provider-selection knob) to use a cloud
+ *  transport; the H7 credential source is fully live on THIS path. */
+export const buildMulticloudLLMCore = (input: MulticloudAssembleInput): LLMPort => {
+  const credentialSource = buildCredentialSource(input.credential)
+  const opts: CreateMulticloudOptions = {
+    ...input.opts,
+    ...(credentialSource !== undefined ? { credentialSource } : {}),
+  }
+  return createMulticloudLLM(opts, input.env)
 }
 
 /** Parse `QUANTA_MODEL_FALLBACK`-style raw string → dedup'd model ids.

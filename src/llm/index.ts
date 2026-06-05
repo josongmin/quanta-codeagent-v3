@@ -3,11 +3,39 @@ export { OpenAIAdapter } from "./adapters/openai"
 export { OpenAIResponsesAdapter } from "./adapters/openai-responses"
 export type { AssembledTurn } from "./assemble"
 export { assembleFromEvents, determinePhases, hasToolUse } from "./assemble"
-export type { CreateLLMOptions, EnvLike, Provider } from "./factory"
+export type {
+  CloudKind,
+  CredentialHelperErrorCode,
+  CredentialSource,
+  CredentialSourceOptions,
+  ShellExecFn,
+  ShellExecResult,
+} from "./credential-helper"
+// H7 — rotating cloud credentials. The executable CredentialSource port +
+// its closed failure taxonomy are surfaced on the barrel so the composition
+// root (`@/runner/assemble/llm.ts`) can build a trust-gated source from the
+// H7 runtime-config knobs and inject it into `createMulticloudLLM`. The slice
+// itself never imports `@/runtime` / `@/permission` — those (shell + trust)
+// are dependency-injected by the composition root.
+export {
+  CredentialHelperError,
+  createCredentialSource,
+  DEFAULT_HELPER_TTL_MS,
+} from "./credential-helper"
+export type {
+  CreateLLMOptions,
+  CreateMulticloudOptions,
+  EnvLike,
+  MulticloudProviderId,
+  Provider,
+} from "./factory"
 export {
   createLLM,
+  createMulticloudLLM,
   DEFAULT_MODEL,
   MissingApiKeyError,
+  MULTICLOUD_AUTH_ENV_KEYS,
+  MULTICLOUD_DEFAULT_MODEL,
   pickProvider,
   tryCreateLLM,
 } from "./factory"

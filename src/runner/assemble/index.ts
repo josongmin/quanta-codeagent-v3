@@ -22,12 +22,16 @@ export { compactionDep } from "./config"
 export { parseEnvFlag } from "./env-flag"
 export { wireInteractiveKnobs } from "./interactive-knobs"
 export {
+  buildCredentialSource,
   buildLLMCore,
+  buildMulticloudLLMCore,
   type ComposeLlmInput,
+  type CredentialSourceInput,
   composeLLMCore,
   DEFAULT_MODEL,
   type EnvLike,
   type LlmAssembleInput,
+  type MulticloudAssembleInput,
   type PickProviderInput,
   type Provider,
   parseFallbackModels,

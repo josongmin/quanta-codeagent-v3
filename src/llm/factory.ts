@@ -4,7 +4,17 @@ import { AnthropicAdapter } from "./adapters/anthropic"
 import { ChatGPTOAuthAdapter } from "./adapters/chatgpt-oauth"
 import { OpenAIAdapter } from "./adapters/openai"
 import { OpenAIResponsesAdapter } from "./adapters/openai-responses"
+import type { CredentialSource } from "./credential-helper"
 import type { LLMPort } from "./ports"
+import { type BedrockAdapterOptions, BedrockProviderAdapter } from "./providers/bedrock-adapter"
+import type {
+  LlmProvider,
+  ProviderAuth,
+  ProviderConfig,
+  ProviderId,
+} from "./providers/provider-port"
+import { resolveProvider } from "./providers/registry"
+import { type VertexAdapterOptions, VertexProviderAdapter } from "./providers/vertex-adapter"
 
 /** Canonical provider identifier. Re-exports the `LLMProvider` union already
  *  defined in `@/shared/errors` (single source of truth — the error layer and
@@ -301,4 +311,214 @@ export const tryCreateLLM = (
   if (provider === "chatgpt-oauth") return createLLM(provider, opts, env)
   if (resolveApiKey(provider, opts, env) === undefined) return null
   return createLLM(provider, opts, env)
+}
+
+// ───────────────────────── Multicloud transport wiring (ADR-0139 + H7) ──────
+//
+// The four providers above ({anthropic, openai, chatgpt-oauth}) are the legacy
+// VENDOR×SURFACE axis — selecting one of them runs the byte-identical path that
+// the three composition roots have always used. The `src/llm/providers/` slice
+// (ADR-0139 provider port) is a SEPARATE TRANSPORT axis: same Anthropic Messages
+// grammar, different billing/residency/IAM boundary (AWS Bedrock, GCP Vertex,
+// Azure Foundry, Mantle). Until now that slice was UNWIRED — `resolveProvider`
+// existed but no factory consulted it, so H7's rotating-credential helper had no
+// live cloud provider to attach to.
+//
+// `createMulticloudLLM` closes that gap: it is the single composition-root entry
+// that (a) reuses the registry's deterministic transport-selection precedence,
+// (b) builds the `ProviderConfig` from the same `EnvLike` the legacy factory
+// owns, and (c) INJECTS the H7 `CredentialSource` into the Bedrock/Vertex
+// adapters so a rotating/expiring cloud credential is refreshed before each
+// wire call. It is opt-in: callers that never invoke it get the byte-identical
+// legacy `createLLM` path. The legacy `ADAPTER_REGISTRY` and the four providers
+// above are untouched.
+
+/** Transport id selectable through {@link createMulticloudLLM}. Re-exports the
+ *  registry's {@link ProviderId} union so the multicloud entry stays in lockstep
+ *  with the registry (adding a transport is a typed change in ONE place — the
+ *  registry — not an if-chain here). Kept SEPARATE from {@link Provider} (the
+ *  vendor×surface axis) on purpose: fusing the two unions would ripple `bedrock`
+ *  / `vertex` into every `Record<LLMProvider, …>` (pricing tables, the error
+ *  classifier, embedder maps) that has nothing to say about transport. */
+export type MulticloudProviderId = ProviderId
+
+/** Default Anthropic model id per cloud transport. The cloud catalogs expose
+ *  region-/vendor-prefixed model slugs distinct from the public-API slug, so a
+ *  caller that does not pin `model` gets a transport-appropriate default rather
+ *  than a 400 from a public-API slug the cloud catalog does not list. Callers
+ *  override with `opts.model` (CLI `QUANTA_MODEL`). `default` mirrors the public
+ *  Anthropic path so a `default`-resolved transport matches `DEFAULT_MODEL`. */
+export const MULTICLOUD_DEFAULT_MODEL: Record<MulticloudProviderId, string> = {
+  default: "claude-sonnet-4-6",
+  bedrock: "anthropic.claude-sonnet-4-6-v1:0",
+  vertex: "claude-sonnet-4-6@20250101",
+  foundry: "claude-sonnet-4-6",
+  mantle: "claude-sonnet-4-6",
+}
+
+/** Env keys the multicloud config builder reads to populate {@link ProviderAuth}.
+ *  Mirrors the cloud-SDK default-credential-chain spellings; ALL optional — an
+ *  absent field lets the SDK's own default chain (env / IMDS / IRSA / SSO / ADC)
+ *  resolve. Exposed so a CLI `--help` can surface the canonical names. */
+export const MULTICLOUD_AUTH_ENV_KEYS = {
+  awsAccessKeyId: "AWS_ACCESS_KEY_ID",
+  awsSecretAccessKey: "AWS_SECRET_ACCESS_KEY",
+  awsSessionToken: "AWS_SESSION_TOKEN",
+  awsRegion: "AWS_REGION",
+  gcpProjectId: "ANTHROPIC_VERTEX_PROJECT_ID",
+  gcpLocation: "CLOUD_ML_REGION",
+  azureResource: "ANTHROPIC_FOUNDRY_RESOURCE",
+  azureEndpoint: "ANTHROPIC_FOUNDRY_BASE_URL",
+  azureApiKey: "ANTHROPIC_FOUNDRY_API_KEY",
+} as const
+
+/** Options accepted by {@link createMulticloudLLM}. A superset of the per-
+ *  transport adapter knobs the factory already owns (model / maxTokens / stream
+ *  guards / beta) plus the H7 injection seam. Everything optional. */
+export interface CreateMulticloudOptions {
+  /** Explicit transport id (caller wins over env). Empty/omitted ⇒ the env
+   *  precedence ladder in {@link resolveProvider} decides. */
+  providerId?: string
+  /** Model slug. Defaults to {@link MULTICLOUD_DEFAULT_MODEL}[resolved id]. */
+  model?: string
+  /** Explicit auth bundle. Fields supplied here win over the env-derived
+   *  defaults; omitted fields fall through to {@link MULTICLOUD_AUTH_ENV_KEYS}. */
+  auth?: ProviderAuth
+  /** Anthropic beta channels — forwarded to the `default` transport only. */
+  betaHeaders?: readonly string[]
+  maxTokens?: number
+  streamFirstChunkMs?: number
+  streamIdleMs?: number
+  /** H7 — injected rotating-credential source. When present AND the resolved
+   *  transport is `bedrock` / `vertex`, the adapter awaits
+   *  `refreshCloudCreds(...)` before each `stream()`. ABSENT ⇒ no rotation;
+   *  the adapter uses the SDK default credential chain (byte-identical to the
+   *  pre-H7 path). The composition root builds this from the H7 runtime-config
+   *  knobs (`QUANTA_AWS_AUTH_REFRESH` / `QUANTA_GCP_AUTH_REFRESH` / …) via
+   *  `createCredentialSource` — this slice never spawns a shell itself. */
+  credentialSource?: CredentialSource
+  /** Test-only DI seams — bypass the lazy cloud-SDK import. Production omits. */
+  bedrockClientFactory?: BedrockAdapterOptions["clientFactory"]
+  vertexClientFactory?: VertexAdapterOptions["clientFactory"]
+}
+
+/** Build the {@link ProviderAuth} bundle from explicit opts (winning) layered
+ *  over the env-derived cloud-SDK defaults. Only sets a field when a value is
+ *  present so `exactOptionalPropertyTypes` stays honest and the adapter sees a
+ *  field ONLY when the operator actually supplied one (absent ⇒ SDK default
+ *  chain). */
+const resolveMulticloudAuth = (opts: CreateMulticloudOptions, env: EnvLike): ProviderAuth => {
+  const e = MULTICLOUD_AUTH_ENV_KEYS
+  const pick = (explicit: string | undefined, key: string): string | undefined => {
+    if (explicit !== undefined) return explicit
+    const v = env[key]
+    return v !== undefined && v.length > 0 ? v : undefined
+  }
+  const a = opts.auth ?? {}
+  const out: { -readonly [K in keyof ProviderAuth]?: ProviderAuth[K] } = {}
+  const awsAccessKeyId = pick(a.awsAccessKeyId, e.awsAccessKeyId)
+  if (awsAccessKeyId !== undefined) out.awsAccessKeyId = awsAccessKeyId
+  const awsSecretAccessKey = pick(a.awsSecretAccessKey, e.awsSecretAccessKey)
+  if (awsSecretAccessKey !== undefined) out.awsSecretAccessKey = awsSecretAccessKey
+  const awsSessionToken = pick(a.awsSessionToken, e.awsSessionToken)
+  if (awsSessionToken !== undefined) out.awsSessionToken = awsSessionToken
+  const awsRegion = pick(a.awsRegion, e.awsRegion)
+  if (awsRegion !== undefined) out.awsRegion = awsRegion
+  const gcpProjectId = pick(a.gcpProjectId, e.gcpProjectId)
+  if (gcpProjectId !== undefined) out.gcpProjectId = gcpProjectId
+  const gcpLocation = pick(a.gcpLocation, e.gcpLocation)
+  if (gcpLocation !== undefined) out.gcpLocation = gcpLocation
+  if (a.gcpAccessToken !== undefined) out.gcpAccessToken = a.gcpAccessToken
+  const azureResource = pick(a.azureResource, e.azureResource)
+  if (azureResource !== undefined) out.azureResource = azureResource
+  const azureEndpoint = pick(a.azureEndpoint, e.azureEndpoint)
+  if (azureEndpoint !== undefined) out.azureEndpoint = azureEndpoint
+  const azureApiKey = pick(a.azureApiKey, e.azureApiKey)
+  if (azureApiKey !== undefined) out.azureApiKey = azureApiKey
+  // `apiKey` (default transport) flows through from explicit opts.auth only —
+  // the legacy `ANTHROPIC_API_KEY` env path is owned by `createLLM`, not here.
+  if (a.apiKey !== undefined) out.apiKey = a.apiKey
+  if (a.azureADTokenProvider !== undefined) out.azureADTokenProvider = a.azureADTokenProvider
+  return out
+}
+
+/**
+ * Construct a cloud-transport LLM provider (ADR-0139) with H7 rotating-credential
+ * injection. The single composition-root seam that connects the `providers/`
+ * slice to a live provider.
+ *
+ *   1. {@link resolveProvider} picks the transport (explicit id wins, else the
+ *      `ANTHROPIC_{BEDROCK,VERTEX,FOUNDRY}_*` env precedence ladder).
+ *   2. A {@link ProviderConfig} is assembled from opts + env (model default,
+ *      auth bundle, stream guards, beta).
+ *   3. For `bedrock` / `vertex` the adapter is constructed DIRECTLY so the H7
+ *      `credentialSource` (and the test-only client factory) can be injected —
+ *      the registry's `factory(config)` arm cannot carry those. For
+ *      `default` / `foundry` / `mantle` (which do not consume a `CredentialSource`)
+ *      the registry factory is used verbatim, preserving its lazy-unsupported
+ *      contract for unknown ids.
+ *
+ * Returns an {@link LLMPort} — `LlmProvider extends LLMPort`, so the result is
+ * plug-compatible everywhere the loop expects an `LLMPort`.
+ *
+ * @param env env source (required) — passed by the composition root so this
+ *            slice never reads `process.env` (the `runtimeConfig()` SSOT).
+ */
+export const createMulticloudLLM = (opts: CreateMulticloudOptions, env: EnvLike): LLMPort => {
+  const resolved = resolveProvider(opts.providerId, env)
+  // The resolved id is `ProviderId | string`; a string-only id is an UNKNOWN
+  // transport whose registry factory lazy-throws `provider-unsupported`. Use
+  // the known-id default model when we have one, else fall through to the
+  // public-Anthropic slug (the unsupported factory throws before it is read).
+  const id = resolved.id
+  const knownId: MulticloudProviderId =
+    (id as MulticloudProviderId) in MULTICLOUD_DEFAULT_MODEL
+      ? (id as MulticloudProviderId)
+      : "default"
+  const model = opts.model ?? MULTICLOUD_DEFAULT_MODEL[knownId]
+  const config: ProviderConfig = {
+    // The registry already validated `id`; for an unknown id the factory
+    // lazy-throws, so `providerId` here only needs to satisfy the type — the
+    // adapter constructor re-checks `config.providerId === <its id>`.
+    providerId: knownId,
+    model,
+    auth: resolveMulticloudAuth(opts, env),
+    ...(opts.betaHeaders !== undefined ? { betaHeaders: opts.betaHeaders } : {}),
+    ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
+    ...(opts.streamFirstChunkMs !== undefined
+      ? { streamFirstChunkMs: opts.streamFirstChunkMs }
+      : {}),
+    ...(opts.streamIdleMs !== undefined ? { streamIdleMs: opts.streamIdleMs } : {}),
+  }
+
+  // Bedrock / Vertex: construct directly so the H7 credentialSource + the
+  // test-only client factory can be injected (the registry `factory(config)`
+  // arm has no slot for adapter options).
+  if (id === "bedrock") return buildBedrock(config, opts)
+  if (id === "vertex") return buildVertex(config, opts)
+
+  // default / foundry / mantle / unknown — no CredentialSource slot; use the
+  // registry factory verbatim (preserves the lazy-unsupported contract for
+  // unknown ids).
+  const provider: LlmProvider = resolved.factory(config)
+  return provider
+}
+
+/** Construct the Bedrock adapter with the H7 credential source + test client
+ *  factory injected only when supplied (exactOptional honest). Extracted from
+ *  {@link createMulticloudLLM} so the entry stays under the cognitive-complexity
+ *  cap and the injection shape lives in one place per transport. */
+const buildBedrock = (config: ProviderConfig, opts: CreateMulticloudOptions): LLMPort => {
+  const adapterOpts: BedrockAdapterOptions = {}
+  if (opts.credentialSource !== undefined) adapterOpts.credentialSource = opts.credentialSource
+  if (opts.bedrockClientFactory !== undefined) adapterOpts.clientFactory = opts.bedrockClientFactory
+  return new BedrockProviderAdapter(config, adapterOpts)
+}
+
+/** Vertex sibling of {@link buildBedrock}. */
+const buildVertex = (config: ProviderConfig, opts: CreateMulticloudOptions): LLMPort => {
+  const adapterOpts: VertexAdapterOptions = {}
+  if (opts.credentialSource !== undefined) adapterOpts.credentialSource = opts.credentialSource
+  if (opts.vertexClientFactory !== undefined) adapterOpts.clientFactory = opts.vertexClientFactory
+  return new VertexProviderAdapter(config, adapterOpts)
 }

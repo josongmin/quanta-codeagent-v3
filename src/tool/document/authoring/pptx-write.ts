@@ -19,7 +19,9 @@
 
 import { z } from "zod"
 import { errMessage } from "@/shared"
+import type { ArtifactRegistryPort } from "../../artifact"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../../types"
+import { OOXML_MEDIA_TYPES, registerArtifactBestEffort } from "./artifact-register"
 import { resolveVersionedJailedTarget, writeJailedBytes } from "./jailed-write"
 import { buildPptx, type PptxSlide, type PptxSpec } from "./pptx"
 
@@ -61,7 +63,17 @@ const toSpec = (input: PptxWriteInput): PptxSpec => ({
   }),
 })
 
-export const pptxWriteTool: Tool<PptxWriteInput> = {
+/** Options for {@link makePptxWriteTool}. */
+export interface PptxWriteToolOptions {
+  /** C1 — when wired (default-OFF, gated on `QUANTA_ARTIFACT_STORE`), the tool
+   *  best-effort registers each written deck into the session artifact registry
+   *  and appends its id to the output. Absent ⇒ byte-identical. */
+  readonly artifactRegistry?: ArtifactRegistryPort
+}
+
+/** Build the `pptx_write` tool. With no options this is byte-identical to the
+ *  historical const export (no artifact register, no extra output). */
+export const makePptxWriteTool = (options: PptxWriteToolOptions = {}): Tool<PptxWriteInput> => ({
   name: "pptx_write",
   description:
     "Generate a real .pptx (PowerPoint) deck from slide data (per-slide title + body bullet " +
@@ -125,14 +137,24 @@ export const pptxWriteTool: Tool<PptxWriteInput> = {
     const note = target.bumped
       ? ` (target existed — wrote versioned sibling "${target.finalRelative}")`
       : ""
+    // C1 — best-effort artifact registration AFTER a successful write. A throwing
+    // registry never breaks the write; absent registry ⇒ no extra output.
+    const registered = registerArtifactBestEffort(options.artifactRegistry, {
+      kind: "presentation",
+      path: target.abs,
+      mediaType: OOXML_MEDIA_TYPES.pptx,
+    })
     yield {
       type: "result",
       result: {
         ok: true,
         output:
           `Wrote .pptx (${bytes.length} bytes, ${slideCount} slide${slideCount === 1 ? "" : "s"}) ` +
-          `to ${target.finalRelative}${note}`,
+          `to ${target.finalRelative}${note}${registered}`,
       },
     }
   },
-}
+})
+
+/** Const export — byte-identical to the historical tool (no artifact registry). */
+export const pptxWriteTool: Tool<PptxWriteInput> = makePptxWriteTool()
