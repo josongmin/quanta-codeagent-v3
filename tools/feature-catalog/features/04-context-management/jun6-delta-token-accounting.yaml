@@ -1,0 +1,48 @@
+id: delta-token-accounting
+title: Delta token accounting — O(1) incremental estimateTokens memoization
+section: 4
+subsystem: Token estimator — 증분 카운터 (full-scan 회피)
+order: 23
+maturity: L3
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+config_refs:
+  env: [QUANTA_DELTA_TOKEN_COUNT]
+owners: ["@songmin"]
+labels: [surface:core]
+depends_on: [token-estimator-chars-quarter]
+purpose: |
+  루프가 압축 threshold 게이트 입력으로 working-memory 전체를 `estimateTokens` 로 매 턴
+  여러 번 재스캔(O(n))하던 것을, append-mostly 트랜스크립트의 tail 변화만 증분 반영하는
+  O(1) 메모이제이션으로 대체(RFC jun-6-delta-token-accounting §4). 추가 메시지 char 비용을
+  더하고 제거분을 빼며 `total()` 을 O(1) 로 읽음.
+
+  BYTE-IDENTITY(불변식, RFC §4.1·§8): `estimateTokens` 는 TOTAL char에 `Math.ceil` 을 한 번만
+  적용(ceil-of-sum ≠ sum-of-ceils)하므로 naive `+= estimateTokens(added)` 는 ≤1 token 드리프트.
+  본 카운터는 PRE-CEIL char total(`charsOf`, estimateTokens 에서 추출한 순수 합)을 추적하고
+  `total()` 에서만 `ceil(chars/4)` 적용 → `charsOf(A)+charsOf(B) === charsOf(A++B)` 가 정확히
+  성립해 매 스텝 full-scan 과 PROVABLY 동일. 순수 산술 누산기(no clock/random/env/IO).
+  knob 은 composition-root 에서 CONSTRUCTION/perf 만 게이트 — 산출 숫자는 ON/OFF 동일.
+evidence:
+  code:
+    - src/agent/token-delta/counter.ts
+    - src/shared/runtime-config.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/delta-token-identity-hellgate.test.ts
+      - tests/unit/delta-token-knob-off-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_DELTA_TOKEN_COUNT
+    default: 'undefined'
+    purpose: Strict opt-in (`=== "1"`). ON 이면 루프가 증분 카운터를 mint(perf 경로). 산출 토큰 수는 OFF 와 byte-identical — 동작 변화 없음, 재스캔 비용만 절감.
+deliberate_hold: null
+notes: |
+  설계/증명: RFC `docs/plans/jun-6-delta-token-accounting.md`. ADR 미발행이라 L3 유지(테스트·배선·
+  byte-identity 증명 완비). `delta-token-identity-hellgate` 가 증분합 ≡ full-scan 을, `delta-token-knob-off-hellgate`
+  가 OFF byte-identity 를 봉인. `charsOf` 는 `estimateTokens` 와 공유(중복 휴리스틱 방지).

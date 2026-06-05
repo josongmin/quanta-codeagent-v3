@@ -3,9 +3,9 @@ title: Plan-queue — mid-turn user input capture/replay (Codex absorption)
 section: 1
 subsystem: 큐드 follow-ups (ADR-0128)
 order: 94
-maturity: L3
-status: hold
-ui_surfaces: [n-a]
+maturity: L4
+status: stable
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
 configurable: n-a
@@ -33,7 +33,4 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold:
-  reason: 'No consumer is wired today — mid-turn keystroke capture in the CLI / typed-while-running editor is a follow-up.'
-  promotion_path: 'Wire the CLI key handler to call `enqueue` on Enter mid-turn; the loop calls `drain` at turn close.'
-notes: 'Voice-matches ADR-0123 / ADR-0124 — helper-only, deferred-wire posture. `pausedReason` slot supported on the FollowUp envelope (Codex parity for the future "I will respond after current task" path).'
+notes: 'LIVE (jun-06 catalog truth-up — prior "No consumer wired" hold is STALE). `defaultPlanQueueStore({sendNowSink})` is built in `repl/surface-compose.ts:870`; `/queue` is a registered SlashCommand (`queue-cmd.ts` + `slash/registry-surface.ts`); also consumed by `edit-plan-cmd` / `voice-cmd` / playbook auto-dispatch (via `adaptPlanQueueStoreToSink`). Remaining follow-up is ONLY the mid-turn keystroke-capture UX (typed-while-running editor calling `enqueue` on Enter), NOT the queue itself. `pausedReason` slot supported on the FollowUp envelope (Codex parity).'

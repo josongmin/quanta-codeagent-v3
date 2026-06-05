@@ -3,7 +3,7 @@ title: Prometheus recording rules — SLO burn-rate pre-computation
 section: 10
 subsystem: SLO observability — recording rules
 order: 85
-maturity: L3
+maturity: L2
 status: stable
 ui_surfaces: [api]
 monitoring: integrated
@@ -35,6 +35,9 @@ evidence:
 knobs: []
 deliberate_hold: null
 notes: |
-  Documentation/config artifact — no TS source. SLO catalog lives in one
-  place per rule so metric renames need updating only at the recording
-  level, not every alert/panel.
+  L2: documentation/config artifact (a single PromQL recording-rules.yaml)
+  — no TS source and no unit/integration test harness; the rules are
+  validated by Prometheus at load time, not by our test suite. Demoted
+  from L3 (overclaim — L3 requires tests>=1, which a config doc cannot
+  carry). SLO catalog lives in one place per rule so metric renames need
+  updating only at the recording level, not every alert/panel.

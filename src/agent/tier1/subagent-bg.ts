@@ -16,6 +16,7 @@
  * `AgentConfig`, this cast becomes a direct member access.
  */
 
+import { runtimeConfig } from "@/shared"
 import type { Tool } from "@/tool"
 import { subagentBgTools } from "@/tool/subagent-bg"
 import type { BackgroundSubagentScheduler } from "../subagent-background"
@@ -34,5 +35,9 @@ export const buildSubagentBgBlock = (config: AgentConfig): Tool[] => {
   const bag = config as AgentConfig & SubagentBackgroundConfigSlot
   const scheduler = bag.subagentBackground?.scheduler
   if (scheduler === undefined) return []
-  return subagentBgTools(scheduler)
+  // ADR-0487 — append `subagent_force_background` ONLY when QUANTA_FORCE_BACKGROUND
+  // is on (the admission-queue promote tool). Absent ⇒ the 3-tool surface is
+  // byte-identical, so a host that never enabled the queue never sees the tool.
+  const forceBackground = runtimeConfig().forceBackground
+  return subagentBgTools(scheduler, ...(forceBackground ? [{ forceBackground: true }] : []))
 }

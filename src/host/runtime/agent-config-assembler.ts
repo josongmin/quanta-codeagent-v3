@@ -86,6 +86,7 @@ import {
 } from "@/observability/codex-r2-metrics"
 import { defaultPromptCacheObserver } from "@/observability/prompt-cache"
 import { CI_BOT_DEFAULT_ALLOWLIST } from "@/runtime/network-allowlist"
+import { runtimeConfig } from "@/shared"
 import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
 import type { RuntimeAgentTurnAssembler, RuntimeAgentTurnDeps } from "@/sdk/runtime/base"
 import { skillMcpDepsEnabled } from "@/skill/skill-mcp-deps"
@@ -337,9 +338,29 @@ const maybeWireBackgroundSubagent = (cfg: AgentConfig, env: AssemblerEnv): void 
     subagentBackground?: { scheduler: BackgroundSubagentScheduler }
   }
   if (slot.subagentBackground !== undefined) return
+  // ADR-0487 — opt into the admission wait-queue when QUANTA_SUBAGENT_QUEUE is
+  // on; absent ⇒ the scheduler throws-at-cap (byte-identical pre-queue behavior).
+  // `maxQueued` (QUANTA_BG_MAX_QUEUED) is honored ONLY when the queue is on;
+  // absent ⇒ the scheduler's built-in DEFAULT_MAX_QUEUED (64). Default-OFF path
+  // is byte-identical.
+  const subagentQueue = runtimeConfig().subagentQueue
+  const maxQueued = parseAssemblerPositiveInt(env.QUANTA_BG_MAX_QUEUED)
   slot.subagentBackground = {
-    scheduler: defaultBackgroundSubagentScheduler({ runner: createSubagentRunner(cfg) }),
+    scheduler: defaultBackgroundSubagentScheduler({
+      runner: createSubagentRunner(cfg),
+      ...(subagentQueue ? { admissionQueue: true } : {}),
+      ...(subagentQueue && maxQueued !== undefined ? { maxQueued } : {}),
+    }),
   }
+}
+
+/** Parse a strictly-positive integer env value (used for the admission-queue
+ *  `maxQueued` cap). A non-numeric / non-positive value yields `undefined` so
+ *  the scheduler falls back to its built-in default. */
+const parseAssemblerPositiveInt = (raw: string | undefined): number | undefined => {
+  if (raw === undefined) return undefined
+  const n = Number(raw)
+  return Number.isInteger(n) && n > 0 ? n : undefined
 }
 
 /** Open the optional agent-capability slots (browser / objective / mailbox /

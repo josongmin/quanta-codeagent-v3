@@ -3,7 +3,7 @@ title: Windows flock strategy — Node `wx` retained (ADR-0365 negative)
 section: 9
 subsystem: per-session lockfile portability note for Windows targets
 order: 104
-maturity: L3
+maturity: L2
 status: stable
 ui_surfaces: [n-a]
 monitoring: none
@@ -37,7 +37,12 @@ evidence:
 knobs: []
 deliberate_hold: null
 notes: |
-  Negative decision — code change: zero. Inline reference added to
-  `file-lock.ts` module header pointing to ADR-0365 so the next time
-  someone asks "should we switch to LockFileEx?" the answer is one
-  link away.
+  L2: doc-only negative decision — code change: zero. There is no test of
+  the Windows `wx`→CreateFileW(CREATE_NEW) portability claim (no Windows
+  CI here), and the existing POSIX flock test of `file-lock.ts`
+  (caller-owned-registry-builder-hellgate) does NOT exercise the Windows
+  path, so it cannot honestly back this entry. Demoted from L3 (overclaim
+  — L3 requires tests>=1 and none cover this claim) to L2; code reference
+  + ADR-0365 remain. Inline reference added to `file-lock.ts` module
+  header pointing to ADR-0365 so the next time someone asks "should we
+  switch to LockFileEx?" the answer is one link away.

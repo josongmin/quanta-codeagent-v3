@@ -3,8 +3,8 @@ title: Apply-patch fast-apply fallback (focused re-emit on failure)
 section: 9
 subsystem: Apply-patch recovery (ADR-0417 gap A2)
 order: 4171
-maturity: L2
-status: new
+maturity: L4
+status: stable
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive, headless]
@@ -52,21 +52,14 @@ knobs:
     purpose: 'model used when the role resolver has no executor override'
 config_refs:
   env: []
-deliberate_hold:
-  reason: |
-    PORTS ONLY this wave. The `AgentConfig.fastApplyFallback` slot is present
-    but inert — no consumer triggers it. `src/tool/apply-patch.ts` is
-    deliberately NOT modified (keeps blast-radius small + avoids collision
-    with sibling worktrees + user in-flight). Default-OFF: absent slot ⇒
-    byte-identical to the pre-ADR path (RFC §1.2).
-  promotion_path: |
-    A follow-up ADR (1) builds the composition-root adapter mapping the real
-    `RoleModelResolver` + `dispatchSideConversation` onto `RoleResolverLike` /
-    `SideConversationLike`, and (2) wires `apply-patch.ts` to call
-    `attempt({ failure, sourceFile, sourceContent })` on a typed apply failure
-    BEFORE surfacing the error to the loop, re-attempting `apply_patch` with
-    `newPatch` when `ok:true`.
 notes: |
+  LIVE (jun-06 catalog truth-up — the prior "PORTS ONLY / apply-patch.ts NOT
+  modified" hold reason is STALE). The promotion path is DONE (ADR-0421
+  wire-finish): `wireOptionalAgentPorts` builds the fallback under
+  `QUANTA_FAST_APPLY=on` (`optional-ports.ts`), `dispatch.ts` threads it into
+  `ToolContext`, and `src/tool/apply-patch.ts:315` actually calls
+  `fallback.attempt(...)` on a typed apply failure (reads `ctx.fastApplyFallback`
+  at :371). Default-OFF still byte-identical (absent slot ⇒ pre-ADR path).
   ADR-0417 absorption gap A2. The patch-block extraction is a concrete
   substring scan (`indexOf` Begin/End) — no fuzzy parsing, no heuristic
   repair (per [[no-heuristics-only-validated]]). One attempt only; no retry

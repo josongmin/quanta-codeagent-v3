@@ -71,7 +71,9 @@ export {
   createConnectorsMcpOAuthProvider,
   type McpBrowserFlowResult,
   type McpOAuthDeps,
+  type McpOAuthKeyringOption,
   type McpOAuthWiring,
+  resolveMcpOAuthKeyringOption,
   type RunMcpBrowserFlow,
 } from "./mcp-oauth-provider"
 export {

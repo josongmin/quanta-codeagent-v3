@@ -3,7 +3,7 @@ title: REPL CLI heuristics inventory — DOC/ENV/ARBITRARY audit
 section: 10
 subsystem: CLI architecture audit
 order: 200
-maturity: L4
+maturity: L2
 status: new
 ui_surfaces: [n-a]
 monitoring: n-a
@@ -287,9 +287,10 @@ deliberate_hold:
     silent-catch telemetry") was already converging into a STATUS_FLASH
     config). The promotion is staged on the runRepl-split PR (ADR-0173):
     extracting the per-turn helpers also extracts the transient durations
-    onto named consts. Auditing as L4 captures the inventory; promotion
-    to L3 happens when the split PR lands and the arbitrary count drops
-    to ≤ 1 (the ESC_WINDOW_MS const, already named).
+    onto named consts. Cataloguing as L2 captures the inventory;
+    promotion to L3 happens when the split PR lands, a test covers the
+    extracted consts, and the arbitrary count drops to ≤ 1 (the
+    ESC_WINDOW_MS const, already named).
   promotion_path: |
     1. Land ADR-0173 split. The turn-cancel-install.ts and turn-runner.ts
        modules will own ESC_WINDOW_MS, STATUS_FLASH durations, and the
@@ -300,6 +301,14 @@ deliberate_hold:
     4. Promote to L3 once arbitrary == 0 OR all remaining are named
        consts with a citation comment.
 notes: |
+  L2: this is a static numeric-literal inventory/audit artifact, not a
+  shipped runtime feature — it has no unit/integration test of its own
+  (an audit table cannot be unit-tested) so it fails the L3 gate, and
+  therefore could never honestly sit at L4 (L4 requires L3). Demoted from
+  L4 (overclaim) to L2; the entry's own deliberate_hold.promotion_path
+  already targets "promote to L3 once arbitrary == 0", confirming it was
+  always below L3. Code + ADR-0173 + this inventory remain referenced.
+
   Search command for re-audit:
 
       rg -n --no-heading '[^a-zA-Z0-9_/."`-]([0-9]{3,})\b' \

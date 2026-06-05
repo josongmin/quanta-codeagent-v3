@@ -37,7 +37,8 @@ evidence:
   adrs:
     - docs/decisions/0193-linux-sandbox-native-impl.md
   tests:
-    unit: []
+    unit:
+      - tests/unit/os-sandbox-landlock-native-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
@@ -49,6 +50,10 @@ deliberate_hold:
   promotion_path: |
     Phase 3.2 ADR closing seccomp strict filter + CI matrix + publish.
 notes: |
-  Resolver v2 + `cfg(target_os = "linux")` deps gated. Phase 3.1
-  hellgate is the parent ADR-0175's 20-case fake-binding suite; real
-  binding hellgate lands in Phase 3.2.
+  Resolver v2 + `cfg(target_os = "linux")` deps gated. L3 evidence is
+  the TS adapter (`landlock-native.ts`) hellgate
+  (`tests/unit/os-sandbox-landlock-native-hellgate.test.ts`, 20 hermetic
+  closed-port cases exercising detectNativeLandlock / mapPolicyToNapi /
+  nativeLandlockOsSandbox dispatch + fallback chain). The Rust bodies
+  (policy.rs / seccomp.rs) themselves have NO test here — real napi
+  binding hellgate + cargo build verify land in Phase 3.2.

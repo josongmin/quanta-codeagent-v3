@@ -3,7 +3,7 @@ title: Real-API smoke eval for retrieval — drift detection (ADR-0275)
 section: 4
 subsystem: Eval-tier retrieval drift battery (non-blocking)
 order: 65
-maturity: L3
+maturity: L2
 status: new
 ui_surfaces: [cli]
 monitoring: n-a
@@ -66,6 +66,14 @@ deliberate_hold:
   reason: 'Nightly CI cron 통합은 의도적 보류 — 현재는 local manual only (`bun test tests/eval/retrieval`). 기본 `bun test` (unit+integration) 에는 sweep 안 됨; package.json 의 test:eval script 는 기존 bench harness 그대로 유지.'
   promotion_path: '(1) GitHub Actions nightly workflow 추가, secrets 로 API key 주입, (2) failure 시 score-drift baseline 비교 + Slack/email 알림, (3) eval pass-rate trend 를 7-day rolling 으로 추적 (ADR-0003 의 eval 후속과 동일 baseline 파일 공유 가능).'
 notes: |
+  - L2: eval-tier only. The 6 real-API smoke suites live under
+    evidence.tests.eval (real files, verified present) but the L3 gate
+    counts only tests.unit / tests.integration. By design these are
+    non-blocking eval tests (ADR-0003) that polite-skip without API keys
+    and never run in the default `bun test` — so they cannot satisfy L3.
+    Demoted from L3 (overclaim) to honest L2; the eval evidence remains
+    referenced. Promotion to L3 would require a deterministic
+    unit/integration test of the smoke harness wiring itself.
   - tests/eval/ 디렉토리는 ADR-0003 의 eval 티어 자리 — non-blocking,
     retry-until-green 금지, 비결정 실패는 *점수 하락* 으로만 관측.
   - polite-skip = `describe.skip` 사용 → bun:test runner 가 "skipped" count

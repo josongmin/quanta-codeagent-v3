@@ -156,10 +156,19 @@ export const buildSharedExecutionPlaneRuntimeAugments = async (
   )
   const maxConcurrent = parsePositiveInt(args.envSource.QUANTA_BG_MAX_CONCURRENT)
   const maxRetained = parsePositiveInt(args.envSource.QUANTA_BG_MAX_RETAINED)
+  // ADR-0487 — opt into the admission wait-queue when QUANTA_SUBAGENT_QUEUE is
+  // on; absent ⇒ over-cap fork throws-at-cap (byte-identical pre-queue behavior).
+  // `maxQueued` (QUANTA_BG_MAX_QUEUED) is consulted ONLY when the queue is on;
+  // absent ⇒ the scheduler's built-in DEFAULT_MAX_QUEUED (64) — no behavior shift
+  // on the default-OFF path.
+  const admissionQueue = args.envSource.QUANTA_SUBAGENT_QUEUE === "1"
+  const maxQueued = parsePositiveInt(args.envSource.QUANTA_BG_MAX_QUEUED)
   const inner = defaultBackgroundSubagentScheduler({
     runner: childRunner,
     ...(maxConcurrent !== undefined ? { maxConcurrent } : {}),
     ...(maxRetained !== undefined ? { maxRetained } : {}),
+    ...(admissionQueue ? { admissionQueue: true } : {}),
+    ...(admissionQueue && maxQueued !== undefined ? { maxQueued } : {}),
   })
   const persistent = await persistentBackgroundSubagentScheduler({
     inner,

@@ -27,10 +27,15 @@ purpose: |
   idempotent migration moves a file-only token into the keyring on first read and
   deletes the file copy; delete spans BOTH stores so a logout leaves no residue.
 
-  NO-THROW throughout: a locked/denied keychain or a missing session bus is
-  swallowed and treated as "secret absent", so the H18 provider's TOTAL
-  `tokenFor` re-runs the OAuth flow rather than crashing the MCP load — the worst
-  case is "log in again", never a crash. The secret NEVER appears on argv: macOS
+  Failure contract: reads/probes/deletes are NO-THROW — a locked/denied keychain
+  or a missing session bus is swallowed and treated as "secret absent", so the
+  H18 provider's TOTAL `tokenFor` re-runs the OAuth flow rather than crashing the
+  MCP load (worst case "log in again", never a crash). WRITE is the deliberate
+  exception: a `set` whose OS CLI exits non-zero (write did NOT persist) THROWS a
+  SECRET-FREE error so `composeTokenStore.write` falls back to the 0600 file store
+  — without this the token would be SILENTLY DROPPED (the caller would believe it
+  persisted; a later read returns nothing ⇒ surprise re-auth + a lost in-memory
+  record). The secret NEVER appears on argv: macOS
   uses `security add-generic-password -w` with NO value (reads the password from
   the input stream) and libsecret `secret-tool store` reads STDIN by design, so
   the token is never visible to `ps` / `/proc/<pid>/cmdline`; it is never logged.
@@ -62,4 +67,4 @@ knobs:
   - name: QUANTA_MCP_OAUTH_KEYRING
     default: 'undefined'
     purpose: 'Strict =="1" opt-in. ON (+ QUANTA_MCP_OAUTH=1 + the OS keyring available()) ⇒ the composition root injects composeTokenStore(realKeyring, fileStore) for the H18 MCP OAuth TokenStorePort: tokens persist in the OS Keychain/libsecret, an existing 0600 file token is migrated in on first read, delete spans both stores. OFF / no keyring ⇒ the 0600 file store is injected unchanged (byte-identical).'
-notes: 'Closed-port: the OS CLI runs through an injected KeyringExec (Bun.spawn argv-array, no shell) — secrets travel ONLY via stdin, never argv (no ps-visible token). NO-THROW: keyring outage degrades to re-login via the H18 TOTAL tokenFor, never crashes the load. Windows Credential Manager is a follow-up (null keyring keeps it correct meanwhile). Phase 3 (RFC §7): generalize the same KeyringPort to back chatgpt-oauth + trust-scope stores (self-documented follow-ups).'
+notes: 'Closed-port: the OS CLI runs through an injected KeyringExec (Bun.spawn argv-array, no shell) — secrets travel ONLY via stdin, never argv (no ps-visible token). Read/probe/delete are NO-THROW so a keyring outage degrades to re-login via the H18 TOTAL tokenFor; set() THROWS on a non-zero exit (write did not persist) so compose engages the 0600 file fallback instead of silently dropping the token. Windows Credential Manager is a follow-up (null keyring keeps it correct meanwhile). Phase 3 (RFC §7): generalize the same KeyringPort to back chatgpt-oauth + trust-scope stores (self-documented follow-ups).'

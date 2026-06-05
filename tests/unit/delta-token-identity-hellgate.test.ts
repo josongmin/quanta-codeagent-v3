@@ -222,3 +222,121 @@ describe("delta-token empty / single edges", () => {
     expect(counter.total()).toBe(estimateTokens([m]))
   })
 })
+
+// --- ADVERSARIAL HARDENING (jun-06 audit) ---------------------------------
+// The fuzz above proves additivity for the SIX known block variants. These cases
+// attack the remaining surfaces a byte-identity break could hide in: a
+// forward-compat (unknown) block, integer-magnitude content, surrogate-pair
+// unicode (.length counts UTF-16 units, both paths must agree), null/undefined
+// tool_use input (`JSON.stringify(input ?? {})`), and bogus interleaved removes.
+describe("delta-token adversarial — byte-identity under attack", () => {
+  test("forward-compat unknown ContentBlock: memo and full-scan share the SAME fallback", () => {
+    // A block `charsOf`'s switch does not handle falls into the `default` arm:
+    // `JSON.stringify(_exhaustive ?? {}).length`. The counter does NOT have its
+    // own per-block code — it calls `charsOf` — so both use that identical
+    // fallback. If the counter had drifted to a separate formula, this breaks.
+    const future = {
+      type: "future_variant",
+      payload: "x".repeat(37),
+      meta: { n: 1 },
+      // biome-ignore lint/suspicious/noExplicitAny: deliberately constructing a block outside the closed union
+    } as any as Message["content"][number]
+    const wmsg: Message = { role: "user", content: [future] }
+    const counter = createTokenDeltaCounter([])
+    counter.onAppend([wmsg])
+    expect(counter.total()).toBe(estimateTokens([wmsg]))
+    // and additively with a normal block after it
+    const t: Message = { role: "assistant", content: [{ type: "text", text: "tail" }] }
+    counter.onAppend([t])
+    expect(counter.total()).toBe(estimateTokens([wmsg, t]))
+  })
+
+  test("integer-magnitude content (5 × 50M chars): no overflow / precision drift", () => {
+    // charsOf sums plain JS numbers; 5×50e6 = 250e6 is well under 2^53. The
+    // running pre-ceil sum must stay an exact integer equal to the full scan.
+    const huge: Message = {
+      role: "user",
+      content: [{ type: "text", text: "x".repeat(50_000_000) }],
+    }
+    const counter = createTokenDeltaCounter([])
+    const acc: Message[] = []
+    for (let i = 0; i < 5; i++) {
+      acc.push(huge)
+      counter.onAppend([huge])
+      expect(counter.total()).toBe(estimateTokens(acc))
+      expect(Number.isInteger(counter.total())).toBe(true)
+    }
+  })
+
+  test("surrogate-pair unicode + empty-content message: UTF-16-unit length agrees", () => {
+    const uni: Message = { role: "user", content: [{ type: "text", text: "😀🎉𝕏 héllo" }] }
+    const empty: Message = { role: "assistant", content: [] }
+    const counter = createTokenDeltaCounter([])
+    counter.onAppend([uni, empty])
+    expect(counter.total()).toBe(estimateTokens([uni, empty]))
+  })
+
+  test("tool_use with null / undefined input: `input ?? {}` stringification agrees", () => {
+    const u1: Message = {
+      role: "assistant",
+      content: [{ type: "tool_use", id: "a", name: "f", input: undefined }],
+    }
+    const u2: Message = {
+      role: "assistant",
+      content: [{ type: "tool_use", id: "b", name: "g", input: null }],
+    }
+    const counter = createTokenDeltaCounter([])
+    counter.onAppend([u1])
+    expect(counter.total()).toBe(estimateTokens([u1]))
+    counter.onAppend([u2])
+    expect(counter.total()).toBe(estimateTokens([u1, u2]))
+  })
+
+  test("bogus remove (never-added) drifts BELOW truth but never NaN/negative; reseed heals", () => {
+    const a: Message = { role: "user", content: [{ type: "text", text: "present" }] }
+    const counter = createTokenDeltaCounter([a])
+    const never: Message = {
+      role: "user",
+      content: [{ type: "text", text: "n".repeat(123) }],
+    }
+    counter.onRemove([never]) // subtracts chars that were never added
+    expect(Number.isFinite(counter.total())).toBe(true)
+    expect(counter.total()).toBeGreaterThanOrEqual(0)
+    // reseed is the documented self-heal — restores exact ground truth.
+    counter.reseed([a])
+    expect(counter.total()).toBe(estimateTokens([a]))
+  })
+
+  test("interleaved add/remove/reseed with magnitude swings stays exact at every step", () => {
+    const counter = createTokenDeltaCounter([])
+    const cur: Message[] = []
+    const big = (n: number): Message => ({
+      role: "user",
+      content: [{ type: "text", text: "b".repeat(n) }],
+    })
+    const ops: Array<() => void> = [
+      () => {
+        const m = [big(7), big(13)]
+        cur.push(...m)
+        counter.onAppend(m)
+      },
+      () => {
+        const removed = cur.splice(0, 1)
+        counter.onRemove(removed)
+      },
+      () => {
+        cur.push(big(1_000_001))
+        counter.onAppend([cur[cur.length - 1] as Message])
+      },
+      () => counter.reseed(cur),
+      () => {
+        const removed = cur.splice(0, cur.length)
+        counter.onRemove(removed)
+      },
+    ]
+    for (const op of ops) {
+      op()
+      expect(counter.total()).toBe(estimateTokens(cur))
+    }
+  })
+})

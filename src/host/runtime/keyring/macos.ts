@@ -12,11 +12,14 @@
  *  The account/service NAMESPACE keys (`-s`, `-a`) are non-secret and stay on
  *  argv.
  *
- *  ## NO-THROW
+ *  ## Failure contract
  *
- *  Every method maps a non-zero exit / spawn error onto the empty result
- *  (`undefined` / `false` / void). A locked/denied keychain therefore degrades
- *  to "secret absent", never throws into the MCP load.
+ *  `get`/`available`/`delete` map a non-zero exit / spawn error onto the empty
+ *  result (`undefined` / `false` / void) — a locked/denied keychain degrades to
+ *  "secret absent", never throwing into the MCP load. `set` is the exception: a
+ *  non-zero exit (write did NOT persist) THROWS a SECRET-FREE error so
+ *  `composeTokenStore` falls back to the 0600 file store rather than silently
+ *  dropping the token.
  */
 
 import type { KeyringExec, KeyringPort } from "./port"
@@ -46,11 +49,17 @@ export const createMacosKeyring = (exec: KeyringExec): KeyringPort => ({
   async set(service, account, secret) {
     // `-U` updates in place if the item exists. `-w` with NO value ⇒ read the
     // password from STDIN (the secret NEVER appears on argv).
-    await exec({
+    const res = await exec({
       bin: BIN,
       args: ["add-generic-password", "-U", "-s", service, "-a", account, "-w"],
       stdin: secret,
     })
+    // A locked/denied keychain exits NON-ZERO. If we swallowed that, the caller
+    // (composeTokenStore.write) would treat the write as success and never fall
+    // back to the 0600 file store — the token would be SILENTLY DROPPED. Throw a
+    // SECRET-FREE error so the file fallback engages. (set is the ONE op that
+    // signals failure by throwing; get/delete/available stay empty-on-failure.)
+    if (!res.ok) throw new Error("keyring: macOS Keychain write failed (non-zero exit)")
   },
 
   async delete(service, account) {

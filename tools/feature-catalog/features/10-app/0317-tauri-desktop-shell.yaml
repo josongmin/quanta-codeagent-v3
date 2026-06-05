@@ -3,7 +3,7 @@ title: Tauri macOS desktop shell — bun-daemon + screen-OCR sidecars + opt-in g
 section: 10
 subsystem: 데스크톱 surface (multi-surface 확장)
 order: 317
-maturity: L3
+maturity: L2
 status: new
 ui_surfaces: [tauri]
 monitoring: planned
@@ -63,19 +63,26 @@ knobs:
       reference so the env-driver path lands when the probe is wired.
 deliberate_hold:
   reason: |
-    L3 scaffold: source + manifests + ACL + ADR landed without `cargo
+    L2 scaffold: source + manifests + ACL + ADR landed without `cargo
     build` (network-blocked agent cannot fetch crates). Operator-side
     smoke + tauri-driver e2e are explicitly deferred to a follow-up.
     Production signing/notarization, auto-update plugin, Linux/Windows
     bundles, libc::kill SIGKILL escalation, and the window-picker UI are
     out of v1 scope (each requires its own ADR).
   promotion_path: |
-    L4 promotion: (1) operator runs `cargo tauri build` per README and
+    L3 promotion: (1) operator runs `cargo tauri build` per README and
     confirms the bundle launches + daemon auto-starts + hotkey captures;
-    (2) follow-up ADR adds `tauri-driver` headless e2e in CI;
+    (2) follow-up ADR adds `tauri-driver` headless e2e in CI (this is the
+    test>=1 evidence L3 requires);
     (3) Developer ID + notarization pipeline lands so app-sandbox can be
     re-enabled.
 notes: |
+  L2: Rust/Tauri scaffold — source + manifests + ACL + ADR landed but the
+  crate was never `cargo build`-verified (network-blocked) and has zero
+  unit/integration/e2e tests. Demoted from L3 (overclaim — L3 requires
+  tests>=1, and even the build is unverified); promotion to L3 is gated on
+  the tauri-driver e2e in deliberate_hold.promotion_path.
+
   Slice MUST NOT mutate anything outside `apps/tauri-shell/`. The two
   sidecars are dropped into `binaries/` by upstream workers B (bun
   `--compile` of `src/apps/web-daemon/`) and E (Swift release build of

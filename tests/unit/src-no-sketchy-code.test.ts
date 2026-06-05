@@ -216,6 +216,8 @@ const RULES: readonly Rule[] = [
         "Auto-sweep composition root — reads session-registry backend/WAL knobs (named *_ENV consts) at boot; same posture as global.ts.",
       "agent/session-resource-registry/inspector.ts":
         "Inspector composition root — reads the same session-registry backend env by key; same posture as global.ts.",
+      "host/runtime/pty-backend.ts":
+        "ENV PROPAGATION — the Bun-native PTY factory forwards the parent env (merged with the caller's `env`) into `Bun.spawn({ terminal })` so the spawned PTY child inherits PATH/HOME; same pass-through posture as runtime/shell.ts and subagent/handlers-6.ts — not a feature-flag read.",
     },
   },
   {

@@ -10,11 +10,13 @@
  *  secret to stdout; `clear` removes it; all non-secret attribute keys
  *  (`service`, `account`) stay on argv.
  *
- *  ## NO-THROW
+ *  ## Failure contract
  *
  *  A non-zero exit / spawn error (no `secret-tool`, no D-Bus session bus on a
- *  headless box) maps onto the empty result — `available()===false` there, so
- *  the caller falls back to the file store with no regression for CI/servers.
+ *  headless box) maps onto the empty result for `get`/`available`/`delete` —
+ *  `available()===false` there, so the caller falls back to the file store with
+ *  no regression for CI/servers. `set` is the exception: a failed store THROWS a
+ *  SECRET-FREE error so the file fallback engages (no silent drop).
  */
 
 import type { KeyringExec, KeyringPort } from "./port"
@@ -48,11 +50,16 @@ export const createLibsecretKeyring = (exec: KeyringExec): KeyringPort => ({
 
   async set(service, account, secret) {
     // `store` reads the secret from STDIN (never argv). A label is required.
-    await exec({
+    const res = await exec({
       bin: BIN,
       args: ["store", "--label", `${service}:${account}`, "service", service, "account", account],
       stdin: secret,
     })
+    // A dead D-Bus session bus / denied prompt exits NON-ZERO. If we swallowed
+    // that, composeTokenStore.write would treat it as success and skip the 0600
+    // file fallback — SILENTLY DROPPING the token. Throw a SECRET-FREE error so
+    // the file fallback engages.
+    if (!res.ok) throw new Error("keyring: libsecret store failed (non-zero exit)")
   },
 
   async delete(service, account) {

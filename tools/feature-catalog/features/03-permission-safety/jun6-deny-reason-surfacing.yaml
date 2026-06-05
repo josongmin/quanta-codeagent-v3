@@ -1,0 +1,49 @@
+id: deny-reason-surfacing
+title: C6 — structured deny-reason surfacing (layer/pillar, sanitized-by-construction)
+section: 3
+subsystem: Permission — typed deny classification for the model
+order: 472
+maturity: L3
+status: new
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+config_refs:
+  env: [QUANTA_DENY_REASON]
+owners: ["@songmin"]
+labels: [surface:core, security]
+depends_on: [fsjailerror]
+purpose: |
+  권한 거부가 모델에 free-form prose(`"Permission denied: <prose>"`)로만 도달해 모델이
+  영어 string-match 로 분류해야 했던 retry-thrash 실패모드를 제거(RFC jun-6-deny-reason-surfacing C6).
+  타입드 `StructuredDenyReason` 을 surface 해 모델/디버거가 결정 `layer`(어느 정책 레이어)·
+  `pillar`(어느 보안 기둥)로 분기 가능.
+
+  NO-LEAK 경계(핵심 설계제약, by construction): 구조화 reason 은 OTel/recorder 경로가
+  이미 노출하는 것 외 아무것도 안 실음. `safeReason` 은 raw input 으로 새로 만든 문자열이 아니라
+  caller 가 이미 `emitGateDecision({reason})`(recorder)에 넘기는 동일 sanitized 한 줄 —
+  regex 소스·`action.input`·파일/env 값·매치된 HARD_DENY 룰명이 scrub 된 것(recorder/policy/
+  admissibility-gate 계약 보장)을 재사용. 새 누수 채널 0.
+evidence:
+  code:
+    - src/permission/deny-reason.ts
+    - src/permission/index.ts
+    - src/agent/admissibility-gate.ts
+    - src/shared/runtime-config.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/deny-reason-structure-hellgate.test.ts
+      - tests/unit/deny-reason-noleak-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_DENY_REASON
+    default: 'undefined'
+    purpose: Strict opt-in (`=== "1"`). OFF 면 `denyReason` 를 omit → 모델-facing deny content 는 기존과 byte-identical(새 필드 없음). ON 이면 타입드 layer/pillar/safeReason 첨부.
+deliberate_hold: null
+notes: |
+  설계/증명: RFC `docs/plans/jun-6-deny-reason-surfacing.md`. ADR 미발행이라 L3(테스트·배선 완비).
+  `deny-reason-structure-hellgate` 가 layer/pillar 분류를, `deny-reason-noleak-hellgate` 가
+  sanitized-by-construction(recorder 가 이미 노출하는 것 외 0)을 봉인. default-OFF byte-identical.

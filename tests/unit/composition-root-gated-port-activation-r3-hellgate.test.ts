@@ -44,7 +44,7 @@ import { buildBaseFromArgs } from "@/host/runtime/agent-arg-builder"
 import type { ToolUseBlock } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { __resetRuntimeConfig } from "@/shared/runtime-config"
-import type { ToolRegistry } from "@/tool"
+import type { AppshotPort, ToolRegistry } from "@/tool"
 
 const BYPASS: PermissionContext = { mode: "bypass" }
 
@@ -56,6 +56,9 @@ const DRIVEN = [
   "QUANTA_OFFICE_AUTHORING",
   "QUANTA_PROGRESS_UPDATE",
   "QUANTA_PTY_ATTACH",
+  "QUANTA_PTY_BACKEND",
+  "QUANTA_APPSHOT",
+  "QUANTA_ARTIFACT_STORE",
   "QUANTA_MCP_RESOURCES",
   "QUANTA_PROVIDER",
   "OPENAI_API_KEY",
@@ -301,5 +304,109 @@ describe("composition-root mcpResources — wired at the MCP-load layer, NOT age
     ]) {
       expect(toolNamed(on, n)).toBe(false)
     }
+  })
+})
+
+// ─────────────────────────── appshot (G1) ──────────────────────────────────
+//
+// At THIS pre-assembler layer no `BrowserPort` is reachable (the CDP browser is
+// wired later in agent-config-assembler only when a system Chrome exists). So the
+// composition root mints the appshot slot ONLY when a complete `AppshotPort` is
+// injected via `seams.appshotPort` (a host/e2e seam) — proving the REAL
+// `buildGatedToolPorts` registration path activates the tool. Without the seam
+// (production today) the knob alone yields a byte-identical menu — the remaining
+// adapter-assembly step is to build the BrowserPort+LLM-judge port where the
+// BrowserPort lives.
+
+/** Minimal in-memory `AppshotPort` — scripted verdict, no Chrome/network. */
+const fakeAppshotPort = (): AppshotPort => ({
+  async scaffold(_spec, outDir) {
+    return { entryUrl: `file:///${outDir}/index.html`, entryPath: "/x/index.html", mediaType: "text/html" }
+  },
+  async render() {},
+  async screenshot() {
+    return new Uint8Array([1, 2, 3])
+  },
+  async verify() {
+    return { pass: true, notes: "ok" }
+  },
+})
+
+describe("composition-root appshot — QUANTA_APPSHOT", () => {
+  test("OFF ⇒ appshot_verify ABSENT + byte-identical to baseline", () => {
+    const baseline = baselineNames()
+    expect(toolNamed(baseline, "appshot_verify")).toBe(false)
+  })
+
+  test("ON but NO injected port ⇒ slot stays empty ⇒ byte-identical (BrowserPort unreachable at this layer)", () => {
+    const baseline = baselineNames()
+    process.env.QUANTA_APPSHOT = "1"
+    const on = registryNamesFromRoot()
+    // No seam ⇒ no BrowserPort here ⇒ the slot is omitted; the menu is unchanged.
+    expect(toolNamed(on, "appshot_verify")).toBe(false)
+    expect(on).toEqual(baseline)
+  })
+
+  test("ON + injected AppshotPort seam ⇒ appshot_verify REGISTERED via the real composition root", () => {
+    const baseline = baselineNames()
+    process.env.QUANTA_APPSHOT = "1"
+    __resetRuntimeConfig()
+    const base = buildBaseFromArgs(partial(), undefined, undefined, {
+      appshotPort: fakeAppshotPort(),
+    })
+    const names = base.registry
+      .all()
+      .map((t) => t.name)
+      .sort()
+    expect(toolNamed(names, "appshot_verify")).toBe(true)
+    // Only appshot_verify is added over the baseline (no cross-bleed).
+    expect(names.filter((n) => !baseline.includes(n))).toEqual(["appshot_verify"])
+  })
+
+  test("seam injected but knob OFF ⇒ appshot_verify ABSENT (knob gates the slot, not the seam)", () => {
+    // The seam is consulted ONLY when the knob already gated the slot; an injected
+    // port can never WIDEN the menu past what QUANTA_APPSHOT enabled.
+    __resetRuntimeConfig()
+    const base = buildBaseFromArgs(partial(), undefined, undefined, {
+      appshotPort: fakeAppshotPort(),
+    })
+    const names = base.registry.all().map((t) => t.name)
+    expect(names.includes("appshot_verify")).toBe(false)
+  })
+})
+
+// ──────────────── pty backend selection (N6 / QUANTA_PTY_BACKEND) ───────────
+//
+// The 6 pty_* tools are gated by QUANTA_PTY_ATTACH (above); QUANTA_PTY_BACKEND
+// selects WHICH backend the wired `PtySessionPort` is (tmux/bun/both). On a Bun
+// runtime without native `Bun.Terminal`, `bun`/`both` gracefully fall back to the
+// tmux adapter — so the tool SET is identical regardless of backend (the menu is
+// a function of the attach knob alone, not the backend dial).
+
+describe("composition-root pty backend — QUANTA_PTY_BACKEND", () => {
+  test("default backend (tmux) registers the same 6 pty tools as an explicit bun selection", () => {
+    process.env.QUANTA_PTY_ATTACH = "1"
+    // default (no QUANTA_PTY_BACKEND ⇒ tmux)
+    const tmuxNames = registryNamesFromRoot()
+    process.env.QUANTA_PTY_BACKEND = "bun"
+    const bunNames = registryNamesFromRoot()
+    const ptyNames = (ns: string[]) => ns.filter((n) => n.startsWith("pty_")).sort()
+    expect(ptyNames(tmuxNames)).toEqual([
+      "pty_attach",
+      "pty_kill",
+      "pty_list",
+      "pty_read",
+      "pty_resize",
+      "pty_write",
+    ])
+    // Backend dial does NOT change the tool surface (bun falls back to tmux when
+    // Bun.Terminal is unavailable; either way the 6 tools register).
+    expect(ptyNames(bunNames)).toEqual(ptyNames(tmuxNames))
+  })
+
+  test("backend dial with the attach knob OFF ⇒ still NO pty tools (backend never widens the menu)", () => {
+    process.env.QUANTA_PTY_BACKEND = "both"
+    const names = registryNamesFromRoot()
+    expect(names.some((n) => n.startsWith("pty_"))).toBe(false)
   })
 })

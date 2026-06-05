@@ -16,13 +16,14 @@ config_refs:
   env:
     - CLAUDE_CODE_USE_MANTLE
 purpose: |
-  `MantleProviderAdapter` is a typed Phase-1 stub. Anthropic Mantle is an
-  internal/enterprise endpoint name surfaced via the Claude CLI env switch
-  `CLAUDE_CODE_USE_MANTLE` and internal documentation only — no public SDK or
-  wire spec as of 2026-05-24. The adapter constructs cleanly, exposes the right
-  `providerId="mantle"` for telemetry parity, and `stream()` immediately throws
-  `provider-unsupported`. Construction is intentionally permissive so the slot is
-  wireable in advance; Phase 2 swap is a single-file change. Why a separate
+  `MantleProviderAdapter` is a REAL stream skeleton (ADR-0172 superseded the
+  ADR-0163 typed-stub): same 4-part shipped-adapter structure as Bedrock/Vertex/
+  Foundry — client DI, real `messages.create`, `mapRawEvent` decode. The ONLY
+  thing missing is the lazy-import target `@anthropic-ai/mantle-sdk`, which is
+  NOT yet published on npm; until it ships, selecting `mantle` throws a typed
+  `provider-missing-dependency` (handled by the fallback chain) — strictly better
+  than the old `provider-unsupported`. So the feature is HELD not because the code
+  is a stub but because its external SDK dependency does not yet exist. Why a separate
   adapter rather than reusing `FoundryProviderAdapter`? Telemetry: dashboards
   must distinguish Mantle traffic from Foundry traffic (different billing units,
   different residency boundaries). Two Phase-1 stubs ship cheaply; Phase 2
@@ -41,11 +42,12 @@ evidence:
     contract: []
 knobs: []
 deliberate_hold:
-  scope: phase-2-wire-implementation
+  scope: blocked-on-unpublished-sdk
   reason: |
-    Mantle has no public spec as of 2026-05-24. Phase 2 swap when Anthropic
-    publishes the wire grammar; the `ProviderAuth` interface will gain
-    `mantleToken?: string` + `mantleEndpoint?: string` at that point.
+    Code is a REAL stream skeleton (ADR-0172), NOT a stub. The hold is purely
+    external: `@anthropic-ai/mantle-sdk` is not yet on npm, so the lazy import
+    throws `provider-missing-dependency`. Unblocks the instant the SDK publishes
+    (zero code change — install-to-enable, like Foundry before its SDK shipped).
 notes: |
   L2: 12-test hellgate covers construction, mismatched providerId, throw-on-stream,
   registry routing, provider-error telemetry payload. ProviderId union grew from

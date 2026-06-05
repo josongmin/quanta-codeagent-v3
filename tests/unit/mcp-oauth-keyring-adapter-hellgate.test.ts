@@ -87,6 +87,38 @@ describe("keyring adapters — secret NEVER on argv", () => {
   })
 })
 
+// ── (A.2) flag-injection / shell-metachar names ─────────────────────────────
+
+describe("keyring adapters — name injection is inert (argv array, no shell)", () => {
+  it("a `-`-prefixed / metachar service+account stays a positional value (no flag injection)", async () => {
+    // Each name immediately follows its flag (`-s`/`-a`) or attribute keyword,
+    // so getopt/secret-tool consume it as the option-argument — never a new flag.
+    // And the exec is an argv ARRAY (no shell) so `;`/`$()`/backticks are inert.
+    const evilSvc = "-rf; rm -rf / $(whoami) `id`"
+    const evilAcc = "--delete-keychain"
+    const recorded: KeyringExecInput[] = []
+    const exec: KeyringExec = async (input) => {
+      recorded.push(input)
+      return { ok: true, stdout: input.args.includes("-w") ? `${SECRET}\n` : SECRET }
+    }
+    for (const k of [createMacosKeyring(exec), createLibsecretKeyring(exec)]) {
+      await k.get(evilSvc, evilAcc)
+      await k.delete(evilSvc, evilAcc)
+      await k.set(evilSvc, evilAcc, SECRET)
+    }
+    // The evil strings appear verbatim as standalone argv ELEMENTS (never split,
+    // never concatenated into a flag) — argv-array execution makes them inert.
+    for (const c of recorded) {
+      expect(c.args).toContain(evilSvc)
+      expect(c.args).toContain(evilAcc)
+      // every evil name is preceded by a flag/keyword that consumes it
+      const i = c.args.indexOf(evilSvc)
+      expect(i).toBeGreaterThan(0)
+      expect(["-s", "service"]).toContain(c.args[i - 1])
+    }
+  })
+})
+
 // ── (B) round-trip / (C) NO-THROW ───────────────────────────────────────────
 
 describe("keyring adapters — round-trip + NO-THROW", () => {
@@ -109,14 +141,52 @@ describe("keyring adapters — round-trip + NO-THROW", () => {
     expect(await createLibsecretKeyring(missing.exec).get("svc", "srv")).toBeUndefined()
   })
 
-  it("a spawn-error exec (ok:false) never throws across every op", async () => {
+  it("a spawn-error exec (ok:false) never throws across get/delete/available", async () => {
     const fail = makeExec(() => ({ ok: false, stdout: "" }))
     for (const k of [createMacosKeyring(fail.exec), createLibsecretKeyring(fail.exec)]) {
       expect(await k.available()).toBe(false)
       expect(await k.get("svc", "srv")).toBeUndefined()
-      await k.set("svc", "srv", SECRET) // no throw
-      await k.delete("svc", "srv") // no throw
+      await k.delete("svc", "srv") // no throw (idempotent — absent ⇒ non-zero ⇒ ignored)
     }
+  })
+
+  // ── SILENT-DROP-WRITE guard ───────────────────────────────────────────────
+  // A locked/denied keychain makes `security add-generic-password` exit
+  // NON-ZERO. If set() swallowed that, compose's write() try/catch would treat
+  // the write as SUCCESS and never fall through to the 0600 file store — the
+  // token would be SILENTLY DROPPED (caller believes it persisted; a later read
+  // returns nothing ⇒ surprise re-auth + in-memory record lost). set() MUST
+  // throw on a non-zero exit so compose engages the file fallback.
+  it("macOS set() THROWS on a non-zero exit (no silent drop)", async () => {
+    const denied = makeExec(() => ({ ok: false, stdout: "" }))
+    await expect(createMacosKeyring(denied.exec).set("svc", "srv", SECRET)).rejects.toThrow()
+  })
+
+  it("libsecret set() THROWS on a non-zero exit (no silent drop)", async () => {
+    const denied = makeExec(() => ({ ok: false, stdout: "" }))
+    await expect(createLibsecretKeyring(denied.exec).set("svc", "srv", SECRET)).rejects.toThrow()
+  })
+
+  it("set() does NOT throw the SECRET in its error (no secret-in-exception leak)", async () => {
+    const denied = makeExec(() => ({ ok: false, stdout: "" }))
+    for (const k of [createMacosKeyring(denied.exec), createLibsecretKeyring(denied.exec)]) {
+      let msg = ""
+      try {
+        await k.set("svc", "srv", SECRET)
+      } catch (e) {
+        msg = e instanceof Error ? `${e.message}\n${e.stack ?? ""}` : String(e)
+      }
+      expect(msg.length).toBeGreaterThan(0) // it threw
+      expect(msg).not.toContain(REC.accessToken)
+      expect(msg).not.toContain(REC.refreshToken)
+      expect(msg).not.toContain(SECRET)
+    }
+  })
+
+  it("set() resolves (no throw) on a 0 exit", async () => {
+    const ok = makeExec(() => ({ ok: true, stdout: "" }))
+    await createMacosKeyring(ok.exec).set("svc", "srv", SECRET) // no throw
+    await createLibsecretKeyring(ok.exec).set("svc", "srv", SECRET) // no throw
   })
 })
 
@@ -180,6 +250,28 @@ describe("serialize — parseRecord is TOTAL", () => {
     expect(parseRecord(JSON.stringify({ accessToken: "" }))).toBeUndefined() // empty
     expect(parseRecord(JSON.stringify({ accessToken: "a" }))).toBeUndefined() // no tokenType
   })
+  it("round-trips secrets with newline / quote / unicode / NUL / very-long field values EXACTLY", () => {
+    const nasty: TokenRecord = {
+      accessToken: 'line1\nline2\t"q"\\ \u{1F510}π—' + "x".repeat(8192),
+      refreshToken: "ref\r\nwith nul and 日本語",
+      expiresAt: 1_700_000_000_000,
+      tokenType: 'Bea"rer\n',
+    }
+    const blob = serializeRecord(nasty)
+    // JSON escapes control chars, so the serialized blob has NO raw newline/NUL
+    // that the get() trailing-\n strip or a CLI could mangle.
+    expect(blob).not.toContain("\n")
+    expect(blob).not.toContain(" ")
+    expect(parseRecord(blob)).toEqual(nasty) // exact round-trip
+  })
+
+  it("a secret field ending in a literal newline survives (JSON-escaped, get-strip-safe)", () => {
+    const rec: TokenRecord = { accessToken: "tok\n", tokenType: "Bearer\n" }
+    const blob = serializeRecord(rec)
+    expect(blob.endsWith("\n")).toBe(false) // blob never ends in a raw newline
+    expect(parseRecord(blob)).toEqual(rec)
+  })
+
   it("drops non-conforming optional fields", () => {
     const blob = JSON.stringify({
       accessToken: "a",

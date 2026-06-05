@@ -535,3 +535,51 @@ describe("reconcileSkillMcpForTurn — loop-activation-hook glue (ADR-0476)", ()
     expect(r).toEqual({ attached: [], detached: [] })
   })
 })
+
+describe("hellgate: service-name whitespace must NOT diverge dedup identity", () => {
+  // REAL BUG (jun-06 adversarial audit): `reqString` validated `v.trim()` but
+  // returned the RAW `v`. A skill declaring `value: " svc "` and another
+  // declaring `value: "svc"` resolved to DIFFERENT `depIdentity` keys, so the
+  // SAME logical server was attached TWICE — violating the slice's core
+  // "never double-attach" invariant — and surrounding whitespace was threaded
+  // into the launcher serverId. Fix: trim the returned value.
+  test("leading/trailing whitespace is stripped from the parsed service name", () => {
+    const { deps, errors } = parseSkillMcpDeps({
+      tools: [{ type: "mcp", value: "  spaced-svc  ", transport: "stdio", command: "bin" }],
+    })
+    expect(errors).toEqual([])
+    expect(deps.length).toBe(1)
+    expect(deps[0]?.serviceName).toBe("spaced-svc")
+  })
+
+  test("whitespace-padded command/url are also trimmed", () => {
+    const { deps } = parseSkillMcpDeps({
+      tools: [
+        { type: "mcp", value: "a", transport: "stdio", command: "  my-bin  " },
+        { type: "mcp", value: "b", transport: "streamable_http", url: "  https://x.example/v1  " },
+      ],
+    })
+    expect(deps[0]?.command).toBe("my-bin")
+    expect(deps[1]?.url).toBe("https://x.example/v1")
+  })
+
+  test("two skills naming the same server with/without padding dedupe to ONE attach", async () => {
+    const attachCalls: McpServerSpec[][] = []
+    const attach: AttachMcpPort = {
+      attach: async (specs) => {
+        attachCalls.push([...specs])
+        return specs.map((s) => ({ serviceName: s.serviceName, attached: true }))
+      },
+    }
+    const session = createSkillMcpSession({ attach }, ON)
+    const r = await session.reconcile([
+      skill("a", [stdioTool("svc")]),
+      skill("b", [stdioTool(" svc ")]),
+    ])
+    // Pre-fix: identities `stdio::svc` vs `stdio:: svc ` → TWO attaches.
+    expect(r.attached).toEqual([depIdentity({ serviceName: "svc", transport: "stdio" })])
+    expect(session.attachedIdentities()).toEqual(["stdio::svc"])
+    const totalSpecs = attachCalls.reduce((n, c) => n + c.length, 0)
+    expect(totalSpecs).toBe(1)
+  })
+})

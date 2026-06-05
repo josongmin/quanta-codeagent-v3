@@ -1,31 +1,30 @@
 id: llm-adapter-foundry
-title: Azure AI Foundry LLM adapter (Phase 1 stub — no public SDK)
+title: Azure AI Foundry LLM adapter (REAL stream, ADR-0172)
 section: 8
 subsystem: LLM provider seam — cloud transport
 order: 4
-maturity: L2
-status: hold
+maturity: L4
+status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
 modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
-labels: ["surface:core", "multi-cloud", "azure", "adr-0139", "adr-0163", "phase-1-stub"]
+labels: ["surface:core", "multi-cloud", "azure", "adr-0139", "adr-0163", "adr-0172"]
 depends_on: [llm-multicloud-provider-router]
 config_refs:
   env:
     - CLAUDE_CODE_USE_FOUNDRY
     - ANTHROPIC_FOUNDRY_BASE_URL
 purpose: |
-  `FoundryProviderAdapter` is a typed Phase-1 stub. Azure AI Foundry has no
-  first-party `@anthropic-ai/foundry-sdk` shipping as of 2026-05-24; rather than
-  fake it with raw `fetch` (which would silently lock us into a wire shape that
-  may shift before the official SDK lands), the adapter constructs cleanly,
-  exposes the right `providerId` for telemetry, and `stream()` immediately throws
-  `provider-unsupported`. Constructor is intentionally permissive — accept the
-  config so callers can wire the slot in advance (Phase 2 swap is a pure adapter
-  fork with zero call-site churn). Auth fields (`azureEndpoint`, `azureApiKey`)
-  are already typed in `ProviderAuth` so Phase 2 wiring is a pure adapter swap.
+  `FoundryProviderAdapter` is a REAL streaming adapter (ADR-0172 superseded the
+  ADR-0163 typed-stub once Anthropic published `@anthropic-ai/foundry-sdk@0.2.3`,
+  2025-11-18). `stream()` lazy-imports the SDK and does a real `messages.create`
+  against Azure AI Foundry; when the SDK is not installed it throws a typed
+  `provider-missing-dependency`, and on bad config `provider-misconfigured` (NOT
+  the old `provider-unsupported`). Wired into `FACTORIES.foundry`; the multicloud
+  router resolves `CLAUDE_CODE_USE_FOUNDRY` / `ANTHROPIC_FOUNDRY_BASE_URL`. Auth
+  fields (`azureEndpoint`, `azureApiKey`) typed in `ProviderAuth`.
 evidence:
   code:
     - src/llm/providers/foundry-adapter.ts
@@ -34,19 +33,16 @@ evidence:
   adrs:
     - 0139
     - docs/decisions/0163-foundry-future-ready.md
+    - 0172
   tests:
     unit:
       - tests/unit/llm-providers/registry-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
-deliberate_hold:
-  scope: phase-2-wire-implementation
-  reason: |
-    Azure AI Foundry's wire spec is not publicly documented as of 2026-05-24.
-    Stub-throw at stream() until the official SDK or stable wire spec lands.
-    Construction succeeds (telemetry-shaped) so the slot is wireable in advance.
 notes: |
-  L2: typed stub — construction works, stream throws. Wired into `FACTORIES.foundry`
-  and the router resolves `CLAUDE_CODE_USE_FOUNDRY`. Real wire impl deferred to
-  Phase 2 (separate cherry once Anthropic ships the Foundry SDK).
+  L4/stable (jun-06 catalog truth-up): graduated stub→REAL via ADR-0172 +
+  `@anthropic-ai/foundry-sdk@0.2.3`. `stream()` lazy-imports the SDK and calls
+  `messages.create`; SDK-absent ⇒ typed `provider-missing-dependency` (loud,
+  install-to-enable), not a silent stub. Reachable via `QUANTA_LLM_TRANSPORT` /
+  `CLAUDE_CODE_USE_FOUNDRY` through the multicloud router.

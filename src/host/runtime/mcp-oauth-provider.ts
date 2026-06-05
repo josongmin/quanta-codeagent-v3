@@ -48,10 +48,10 @@ import {
   type TokenStorePort,
 } from "@/connectors"
 import type { McpOAuthProviderPort } from "@/mcp"
-import { errMessage, logger } from "@/shared"
+import { errMessage, logger, runtimeConfig } from "@/shared"
 import { composeTokenStore } from "./keyring/compose"
 import type { KeyringExec, KeyringPlatform } from "./keyring/port"
-import { selectKeyring } from "./keyring/select"
+import { bunKeyringExec, selectKeyring } from "./keyring/select"
 
 /** Result of the injected browser flow — the redeemable authorization code plus
  *  the PKCE verifier + redirect_uri needed to exchange it. Structurally mirrors
@@ -361,3 +361,22 @@ export const buildMcpOAuthWiring = (
       : deps.tokenStore
   return { provider: createConnectorsMcpOAuthProvider({ ...deps, tokenStore }) }
 }
+
+/** Composition-root resolver for the keyring option (jun-06). This is the ONLY
+ *  place that reads `process.platform` for the keyring decision (the keyring
+ *  slice + `buildMcpOAuthWiring` stay pure — `platform`/`exec` are INJECTED).
+ *  Returns the option shaped for `buildMcpOAuthWiring`'s 3rd argument:
+ *    - `enabled` from `runtimeConfig().mcpOAuthKeyring` (QUANTA_MCP_OAUTH_KEYRING),
+ *    - `platform` from the live `process.platform`,
+ *    - `exec` from the real `Bun.spawn`-backed {@link bunKeyringExec}.
+ *  When the knob is OFF (default) `enabled` is false ⇒ `buildMcpOAuthWiring`
+ *  uses the plain file store (byte-identical to the pre-keyring H18 default).
+ *  A host that wires the MCP OAuth provider passes the result straight through:
+ *  `buildMcpOAuthWiring(enabled, deps, resolveMcpOAuthKeyringOption())`. */
+export const resolveMcpOAuthKeyringOption = (
+  platform: KeyringPlatform = process.platform,
+): McpOAuthKeyringOption => ({
+  enabled: runtimeConfig().mcpOAuthKeyring,
+  platform,
+  exec: bunKeyringExec(),
+})

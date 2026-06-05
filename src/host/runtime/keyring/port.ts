@@ -8,13 +8,15 @@
  *  platform is supplied (never `process.platform`). Tests inject a fake exec; no
  *  real keychain, no `process.env`, no `Date.now`/`Math.random` in the adapter.
  *
- *  ## NO-THROW
+ *  ## Failure contract
  *
- *  Every method is TOTAL: a locked keychain, a denied prompt, a missing session
- *  bus, or a spawn error (binary absent) resolves to `false`/`undefined`/void —
- *  it NEVER throws. `composeTokenStore` (see `./compose`) treats a thrown or
- *  empty result as "secret absent" and falls back to the 0600 file store, so a
- *  keyring outage degrades to "log in again", never a crashed MCP load.
+ *  Reads/probes/deletes are TOTAL: a locked keychain, a denied prompt, a missing
+ *  session bus, or a spawn error (binary absent) resolves to `false`/`undefined`/
+ *  void — they NEVER throw. `set` is the ONE exception: a write that did not
+ *  persist THROWS (see {@link KeyringPort.set}) so the failure is observable.
+ *  `composeTokenStore` (see `./compose`) treats a thrown `set` (or a thrown/empty
+ *  read) as "use the 0600 file store", so a keyring outage degrades to the file
+ *  fallback / "log in again" — never a crashed MCP load AND never a silent drop.
  */
 
 export interface KeyringPort {
@@ -26,7 +28,14 @@ export interface KeyringPort {
    *  unreadable. NO-THROW. */
   get(service: string, account: string): Promise<string | undefined>
   /** Store (overwrite) the secret for `(service, account)`. The secret is passed
-   *  to the OS CLI over STDIN / a secure prompt — NEVER on argv. NO-THROW. */
+   *  to the OS CLI over STDIN / a secure prompt — NEVER on argv.
+   *
+   *  THROWS on a failed write (locked/denied keychain ⇒ non-zero exit, or a spawn
+   *  error). This is DELIBERATE and the ONE exception to the empty-on-failure
+   *  contract: a write that did not persist MUST be observable so the caller
+   *  (`composeTokenStore`) falls back to the 0600 file store instead of SILENTLY
+   *  DROPPING the token (which would surface later as a surprise re-auth + a lost
+   *  in-memory record). The thrown error NEVER contains the secret. */
   set(service: string, account: string, secret: string): Promise<void>
   /** Remove the secret for `(service, account)`. Idempotent (absent is fine).
    *  NO-THROW. */

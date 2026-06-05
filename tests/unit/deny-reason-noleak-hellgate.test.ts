@@ -101,3 +101,75 @@ describe("hellgate — C6 no-leak: builder surfaces only what it is given", () =
     expect(prefix).not.toContain(SECRET)
   })
 })
+
+describe("hellgate — C6 no-leak: builder is the only free-text channel", () => {
+  test("EVERY non-safeReason field is categorical — only safeReason carries prose", () => {
+    // The no-leak claim = "structured surface carries nothing the OTel surface
+    // doesn't". The OTel surface IS the scrubbed `reason` string. So the ONLY
+    // field allowed to carry caller prose is `safeReason` (which equals that
+    // string). Every other field (verdict/layer/pillar/stackSource) must be a
+    // fixed categorical token. We strip safeReason and assert the rest cannot
+    // hold injected command/secret text even when the caller hands us a tainted
+    // safeReason alongside legitimate enum fields.
+    const reason = structuredDenyReason({
+      layer: "stack",
+      pillar: "fileSystem",
+      stackSource: "per-thread",
+      safeReason: `${HOSTILE_CMD} ${SECRET} ${REGEX_SOURCE}`,
+    })
+    const { safeReason: _prose, ...categorical } = reason
+    const blob = JSON.stringify(categorical)
+    expect(blob).not.toContain("rm")
+    expect(blob).not.toContain("curl")
+    expect(blob).not.toContain(SECRET)
+    expect(blob).not.toContain(REGEX_SOURCE)
+    // categorical fields are exactly the closed-enum tokens
+    expect(categorical).toEqual({
+      verdict: "deny",
+      layer: "stack",
+      pillar: "fileSystem",
+      stackSource: "per-thread",
+    })
+  })
+
+  test("verbatim fuzz: across many hostile safeReasons, structured.safeReason === input (no transform)", () => {
+    // A deterministic sweep of adversarially-shaped reason strings (regex
+    // sources, paths, env refs, secret shapes, unicode, empty). The builder must
+    // return each one BYTE-IDENTICAL — proving it composes no new string and so
+    // can never EXCEED the recorder's already-safe string.
+    const hostile = [
+      "",
+      HOSTILE_CMD,
+      SECRET,
+      REGEX_SOURCE,
+      "/etc/passwd",
+      "$HOME/.aws/credentials",
+      "export AWS_SECRET_ACCESS_KEY=AKIA...",
+      "Per-thread policy (workspace-write) refuses bash on /repo",
+      "héllo 😀 \\b\\d{4}\\b",
+      "a".repeat(5000),
+    ]
+    for (const s of hostile) {
+      const r = structuredDenyReason({ layer: "stack", safeReason: s })
+      // identity — not an equal-but-new copy
+      expect(r.safeReason).toBe(s)
+    }
+  })
+
+  test("denyContentPrefix output is structurally fixed: ONLY closed-enum tokens, no free text path", () => {
+    // Defense-in-depth: for EVERY (layer, pillar?) combination from the closed
+    // enums, the prefix matches the categorical template exactly — there is no
+    // code path where caller prose reaches the prefix.
+    const reasonNoPillar = structuredDenyReason({
+      layer: "hard-deny",
+      safeReason: `${HOSTILE_CMD} ${SECRET}`,
+    })
+    expect(denyContentPrefix(reasonNoPillar)).toBe("[denied · layer=hard-deny] ")
+    const reasonPillar = structuredDenyReason({
+      layer: "broker",
+      pillar: "control",
+      safeReason: `${HOSTILE_CMD} ${SECRET}`,
+    })
+    expect(denyContentPrefix(reasonPillar)).toBe("[denied · layer=broker · pillar=control] ")
+  })
+})

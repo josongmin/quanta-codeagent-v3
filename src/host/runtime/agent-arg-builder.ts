@@ -99,6 +99,7 @@ import { type AutomationEngineSlot, assembleAutomation } from "@/scheduler/runti
 import { errMessage, logger, type PtyBackend, runtimeConfig } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import {
+  type AppshotPort,
   buildDefaultTools,
   createTmuxAdapter,
   type DefaultToolPorts,
@@ -127,6 +128,15 @@ export interface CompositionSeams {
    *  (allow-prefix jail + `--` flag-injection guard) wraps it, so an e2e drives
    *  the entire composition + dispatch + permission path against a fake tmux. */
   ptyExec?: TmuxExec
+  /** G1 — inject a complete {@link AppshotPort} (scaffold/render/screenshot/
+   *  verify) at the appshot slot. Consulted ONLY when `QUANTA_APPSHOT=1` already
+   *  gated the tool. In production the real port (BrowserPort render/screenshot +
+   *  LLM-judge verify) is assembled in `agent-config-assembler` (where the
+   *  BrowserPort actually lives); at THIS pre-assembler layer no BrowserPort is
+   *  reachable, so the slot is minted ONLY when a host/e2e injects the port here.
+   *  This drives the REAL `buildGatedToolPorts` registration + dispatch path
+   *  against a deterministic fake — no Chrome, no network. */
+  appshotPort?: AppshotPort
 }
 
 /** ADR-0303 — thrown by {@link buildBaseFromArgs} when no API key resolves for
@@ -600,6 +610,15 @@ const buildGatedToolPorts = (
   seams?: CompositionSeams,
 ): DefaultToolPorts => {
   const cfg = runtimeConfig()
+  // C1 — ONE per-session artifact registry when the Canvas store is enabled.
+  // Computed up front (not inline) so the appshot slot below can reuse the SAME
+  // instance as its artifact sink (the loop registers the final scaffold into the
+  // very registry the artifact_* tools read). Absent ⇒ `undefined` ⇒ both the
+  // `artifactRegistry` slot AND the appshot sink stay omitted (byte-identical).
+  const artifactRegistry =
+    process.env.QUANTA_ARTIFACT_STORE === "1"
+      ? createArtifactRegistry({ now: () => Date.now(), idFactory: monotonicIdFactory() })
+      : undefined
   return {
     // ADR-0464 — gated structured-apply tool. Default-OFF: tool menu is
     // byte-identical unless QUANTA_ENABLE_STRUCTURED_PATCH === "1".
@@ -610,14 +629,7 @@ const buildGatedToolPorts = (
     // C1 — gated artifact (Canvas) tools. Default-OFF: tool menu byte-identical
     // unless QUANTA_ARTIFACT_STORE === "1". Mints ONE per-session registry
     // (real clock + monotonic id factory) shared by the artifact_* tools.
-    ...(process.env.QUANTA_ARTIFACT_STORE === "1"
-      ? {
-          artifactRegistry: createArtifactRegistry({
-            now: () => Date.now(),
-            idFactory: monotonicIdFactory(),
-          }),
-        }
-      : {}),
+    ...(artifactRegistry !== undefined ? { artifactRegistry } : {}),
     // N2 — gated MCP connector discovery tools (mcp_connector_list/_install).
     // Default-OFF: tool menu byte-identical unless QUANTA_MCP_CONNECTORS === "1".
     // The port lists the bundled reference catalog and installs a chosen server
@@ -665,6 +677,43 @@ const buildGatedToolPorts = (
     // construction is IO-free (no spawn until a pty tool dispatches). Resolved by
     // the extracted helper so the (knob × seam) choice adds no complexity here.
     ...resolvePtySessionSlot(cfg.ptyAttach, cfg.ptyBackend, seams),
+    // G1 (RFC jun-6-appgen-appshot) — gated `appshot_verify` slot. Default-OFF:
+    // tool menu byte-identical unless QUANTA_APPSHOT === "1". The slice's render/
+    // screenshot arrows ride a real `BrowserPort`, which at THIS pre-assembler
+    // layer is NOT reachable (the CDP browser is wired later in
+    // `agent-config-assembler` only when a system Chrome exists). So the slot is
+    // minted ONLY when a host/e2e injects a complete `seams.appshotPort` here;
+    // production assembly of the BrowserPort+LLM-judge-backed port is the
+    // remaining adapter-assembly step (REPORTED). When minted, the injected clock
+    // is the real `Date.now` and — when the artifact store is ALSO on — the SAME
+    // registry is the artifact sink (final scaffold registered as a Canvas item).
+    ...resolveAppshotSlot(cfg.appshot, seams, artifactRegistry),
+  }
+}
+
+/** G1 — resolve the spread-ready `appshot` slot (`{}` when the knob is OFF or no
+ *  port is injectable, so the tool menu stays byte-identical). When ON AND a
+ *  complete {@link AppshotPort} is injected (`seams.appshotPort`), mint the slot
+ *  with the real `Date.now` clock and — when the Canvas registry is present — the
+ *  SAME registry as the artifact sink. Extracted so the (knob × seam × registry)
+ *  choice adds no complexity to `buildGatedToolPorts`. */
+const resolveAppshotSlot = (
+  appshot: boolean,
+  seams: CompositionSeams | undefined,
+  artifactRegistry: ReturnType<typeof createArtifactRegistry> | undefined,
+): { appshot: NonNullable<DefaultToolPorts["appshot"]> } | Record<string, never> => {
+  if (!appshot) return {}
+  const port = seams?.appshotPort
+  // No BrowserPort+judge-backed port is reachable at this layer in production; a
+  // host/e2e may inject one. Absent ⇒ slot omitted (byte-identical) — the
+  // remaining step is to assemble the real port where the BrowserPort lives.
+  if (port === undefined) return {}
+  return {
+    appshot: {
+      port,
+      now: () => Date.now(),
+      ...(artifactRegistry !== undefined ? { artifactSink: artifactRegistry } : {}),
+    },
   }
 }
 

@@ -46,10 +46,17 @@ import {
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v)
 
-/** Read a required non-empty string field, or null. */
+/** Read a required non-empty string field, TRIMMED, or null. The trim is
+ *  load-bearing: the returned value feeds {@link depIdentity} (dedupe key) and
+ *  the launcher's serverId. Returning the raw value would let `value: " svc "`
+ *  and `value: "svc"` resolve to DIFFERENT identities — double-attaching the
+ *  same logical server (violates the slice's "never double-attach" invariant)
+ *  and threading surrounding whitespace into the launcher serverId. */
 const reqString = (rec: Record<string, unknown>, key: string): string | null => {
   const v = rec[key]
-  return typeof v === "string" && v.trim().length > 0 ? v : null
+  if (typeof v !== "string") return null
+  const trimmed = v.trim()
+  return trimmed.length > 0 ? trimmed : null
 }
 
 /** Validate the optional `args` field into a string[]. Absent ⇒ []. A present

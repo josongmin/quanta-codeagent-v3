@@ -286,3 +286,53 @@ describe("doctor self-check — /doctor command", () => {
     expect(cmd.describe.length).toBeGreaterThan(0)
   })
 })
+
+describe("doctor self-check — secret-leak + injection defense (jun-06 audit)", () => {
+  const SECRET = "sk-LEAKED-DOCTOR-SECRET-0123456789"
+
+  test("9. a probe carrying secret-looking detail still never surfaces a key value", async () => {
+    // The AuthProbeResult shape structurally CANNOT carry a key value
+    // (provider + booleans only). Prove the leaf surface never echoes a secret
+    // even when a hostile probe stuffs one into a free-text field elsewhere.
+    const probes = healthyProbes({
+      // config warning is the only free-text leaf channel; a buggy probe that
+      // accidentally interpolated an env value would surface here.
+      config: () => ({ loaded: true, warnings: [`QUANTA_X set (value redacted)`] }),
+      mcp: async () => [
+        { name: "remote", connected: false, error: "connect refused (status 502)" },
+      ],
+    })
+    const results = await runDoctor(probes)
+    const human = renderDoctorReport(results)
+    const json = renderDoctorJson(results)
+    expect(human).not.toContain(SECRET)
+    expect(json).not.toContain(SECRET)
+    // provider name only — never a key value — on the auth line.
+    expect(human).toContain("openai")
+  })
+
+  test("10. --json is valid JSON even when probe detail contains quotes/newlines/control chars", async () => {
+    const nasty = `evil "quote" \n newline \t tab ${String.fromCharCode(27)}[31m ansi \\ backslash`
+    const probes = healthyProbes({
+      config: () => ({ loaded: false, warnings: [], error: nasty }),
+    })
+    const json = renderDoctorJson(await runDoctor(probes))
+    // Must round-trip — JSON.stringify escaped every metacharacter.
+    const parsed = JSON.parse(json) as { checks: { id: string; detail: string }[] }
+    const cfg = parsed.checks.find((c) => c.id === "config")
+    expect(cfg?.detail).toContain("evil")
+    expect(cfg?.detail).toContain(nasty.slice(-9)) // backslash tail survived round-trip
+    // JSON mode carries NO raw ANSI SGR (machine-readable contract). Fresh
+    // non-global matcher so the shared /g regex's lastIndex can't make this
+    // assertion order-dependent.
+    expect(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`).test(json)).toBe(false)
+  })
+
+  test("11. an unbounded probe detail does not crash render (no truncation contract, but no throw)", async () => {
+    const huge = "x".repeat(200_000)
+    const probes = healthyProbes({ config: () => ({ loaded: false, warnings: [], error: huge }) })
+    const results = await runDoctor(probes)
+    expect(() => renderDoctorReport(results)).not.toThrow()
+    expect(() => renderDoctorJson(results)).not.toThrow()
+  })
+})
