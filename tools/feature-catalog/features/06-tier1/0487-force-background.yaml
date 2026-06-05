@@ -1,0 +1,67 @@
+id: force-background
+title: force_background — promote a queued background subagent
+section: 6
+subsystem: Subagent background admission queue + promoter (ADR-0487)
+order: 487
+maturity: L3
+status: new
+ui_surfaces: [none]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: planned
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:cursor", "default-off"]
+depends_on: [background-subagent, subagent-bg-tools-trio]
+config_refs:
+  env: [QUANTA_SUBAGENT_QUEUE, QUANTA_FORCE_BACKGROUND]
+purpose: |
+  Two-part absorption of Cursor's force_background_subagent "run this queued
+  task now" affordance. (1) An opt-in admission wait-queue: when fork() would
+  exceed maxConcurrent, instead of throwing cap-exceeded the spec is parked as
+  a 5th `queued` status (bounded by maxQueued) and FIFO auto-drains on each
+  slot-free at the existing finally→evictIfOver hook. (2) A force_background
+  control-op + subagent_force_background meta tool that promotes a queued
+  handle to run-now (free slot, or +1 burst under explicit allowBurst — never
+  +2) or to the FIFO head. Default-OFF: absent the knob, fork() throws on cap
+  exactly as before (byte-identical), no queued entry can exist, and
+  force_background returns queue_disabled.
+evidence:
+  code:
+    - src/agent/subagent-background.ts
+    - src/agent/control-op-handler.ts
+    - src/tool/subagent-bg/force-background.ts
+    - src/tool/subagent-bg/index.ts
+    - src/tool/subagent-bg/port.ts
+  adrs: [487]
+  tests:
+    unit:
+      - tests/unit/force-background-queue-hellgate.test.ts
+      - tests/unit/force-background-promote-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: admissionQueue
+    where: BackgroundSubagentSchedulerOpts (QUANTA_SUBAGENT_QUEUE)
+    default: false
+    purpose: Opt into the queued admission state; default-OFF ⇒ throw-on-cap byte-identical.
+  - name: maxQueued
+    where: BackgroundSubagentSchedulerOpts
+    default: 64
+    purpose: Hard ceiling on parked queued entries — bounds the wait-queue (DoS).
+deliberate_hold:
+  reason: |
+    Control-op + tool are shipped behind QUANTA_SUBAGENT_QUEUE / QUANTA_FORCE_BACKGROUND
+    (default-OFF). The submission-op union arm + composition-root wiring of the env
+    knob and the manifest/MUTATING_TOOL_TABLE rows are the host-side caller wave
+    (owned outside this slice) and land separately.
+  promotion_path: |
+    Wire QUANTA_SUBAGENT_QUEUE at the apps/agent bootstrap where
+    defaultBackgroundSubagentScheduler is constructed (admissionQueue: true) and
+    pass { forceBackground: true } to subagentBgTools; add the force_background
+    submission-op arm + AgentEvent.
+notes: |
+  ROI LOW (RFC §8 R1): the common case is covered by Phase-1 FIFO auto-drain;
+  the promoter earns its keep only at-cap when the parked task matters more
+  than the running ones. Burst is fail-closed at +1 (R2). A queued entry has no
+  in-flight promise so it reborn as failed "lost across restart" on hydrate
+  (R5) — never silently re-run.

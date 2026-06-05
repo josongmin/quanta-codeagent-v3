@@ -66,6 +66,7 @@ evidence:
   code:
     - src/agent/objective/store.ts
     - src/agent/objective/types.ts
+    - src/agent/objective/continuation.ts
     - src/agent/loop.ts
     - src/shared/runtime-config.ts
     - src/tool/objective/index.ts
@@ -74,6 +75,8 @@ evidence:
     unit:
       - tests/unit/objective-budget-enforce-hellgate.test.ts
       - tests/unit/objective-budget-enforce-e2e-hellgate.test.ts
+      - tests/unit/thread-goals-enforce-hellgate.test.ts
+      - tests/unit/thread-goals-enforce-e2e-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -105,3 +108,16 @@ notes: |
   exhausted objective (knob ON) and fires for under-cap / knob-OFF runs. The
   e2e drives the REAL runAgent loop via the canonical reactive-compaction
   scripted-LLM harness. Sibling-shaped to objective-tools (ADR-0402).
+
+  `src/agent/objective/continuation.ts` is the PURE idle goal-continuation
+  machine (Codex `core/src/goals.rs` parity) the budget gate hooks into:
+  `evaluateContinuation` is a total no-I/O decision over a snapshot that
+  launches only when every guard in a fixed order passes (one of the
+  closed-set `ContinuationSkipReason`s — including `goal-not-active` /
+  `goal-changed`, which is how the derived `budget_limited` status suppresses a
+  resume); `ContinuationSemaphore` is the single-permit, idempotent-release
+  guard so ≤1 continuation is ever in flight; `runIdleContinuation` is the
+  thin NO-THROW orchestrator over injected ports (objective/clock/idle-turn-
+  queue-mailbox-plan-ephemeral probes + a `resume` sink) that re-reads goal
+  status at launch. Default-OFF: `enabled:false` ⇒ `disabled` skip, no port
+  read, no resume.

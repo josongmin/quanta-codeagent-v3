@@ -49,6 +49,9 @@ import {
 } from "@/connectors"
 import type { McpOAuthProviderPort } from "@/mcp"
 import { errMessage, logger } from "@/shared"
+import { composeTokenStore } from "./keyring/compose"
+import type { KeyringExec, KeyringPlatform } from "./keyring/port"
+import { selectKeyring } from "./keyring/select"
 
 /** Result of the injected browser flow — the redeemable authorization code plus
  *  the PKCE verifier + redirect_uri needed to exchange it. Structurally mirrors
@@ -323,16 +326,38 @@ export interface McpOAuthWiring {
   readonly provider: McpOAuthProviderPort | undefined
 }
 
+/** Optional OS-keyring decorator for the OAuth `TokenStorePort` (jun-06,
+ *  QUANTA_MCP_OAUTH_KEYRING). When `enabled`, the file-backed `deps.tokenStore`
+ *  is wrapped with `composeTokenStore(selectKeyring(platform, exec), fileStore)`
+ *  so tokens live in Keychain / libsecret (file-fallback + migration, NO-THROW).
+ *  OFF / unsupported platform ⇒ the file store is used unchanged (byte-identical).
+ *  The platform + exec are INJECTED (the function stays pure — no
+ *  `process.platform` read inside). */
+export interface McpOAuthKeyringOption {
+  readonly enabled: boolean
+  readonly platform: KeyringPlatform
+  readonly exec: KeyringExec
+}
+
 /** The single decision point for the opt-in invariant. Returns a provider ONLY
  *  when the knob is ON AND deps are present; otherwise `{ provider: undefined }`
  *  (byte-identical to the unwired default — no discovery, no flow, no header).
  *
  *  Because the provider is returned from the SAME gate, a caller cannot wire a
- *  provider while the knob is off, or leave the knob on with no provider. */
+ *  provider while the knob is off, or leave the knob on with no provider.
+ *
+ *  When `keyring?.enabled` is true, the provider's token store is the
+ *  keyring-composed store (Keychain/libsecret over the file store); OFF/absent ⇒
+ *  the plain file store (byte-identical to pre-keyring H18). */
 export const buildMcpOAuthWiring = (
   enabled: boolean,
   deps: McpOAuthDeps | undefined,
+  keyring?: McpOAuthKeyringOption,
 ): McpOAuthWiring => {
   if (!enabled || deps === undefined) return { provider: undefined }
-  return { provider: createConnectorsMcpOAuthProvider(deps) }
+  const tokenStore =
+    keyring?.enabled === true
+      ? composeTokenStore(selectKeyring(keyring.platform, keyring.exec), deps.tokenStore)
+      : deps.tokenStore
+  return { provider: createConnectorsMcpOAuthProvider({ ...deps, tokenStore }) }
 }

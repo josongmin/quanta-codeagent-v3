@@ -1,0 +1,75 @@
+id: resume-tool-pairing-reconcile
+title: Resume-boundary tool_use/tool_result reconciliation (B4 — ADR-0323 extension)
+section: 7
+subsystem: loaded-transcript repair — avoid Anthropic/OpenAI 400 on dangling tool pairs
+order: 101
+maturity: L4
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "production-wired"]
+depends_on: [find-boundary-orphan-safe, session-rewind-fork, runner-resume-fsm]
+purpose: |
+  `reconcileToolPairing(messages)` repairs dangling `tool_use`↔`tool_result`
+  pairs in a transcript RE-LOADED from disk (session resume, fork, checkpoint
+  rewind, subagent resume) so the array is model-valid for BOTH Anthropic
+  Messages and OpenAI (chat + Responses), which each 400 on an unmatched
+  `tool_use` or an orphan `tool_result`. The live-turn path already seals at
+  turn boundaries (`turn-closeout#stripOrphanToolUse`), but a reload — or a
+  rewind that truncates mid-pair — can surface a pair that was never sealed.
+  Codex repairs the same class in `context_manager/normalize.rs`; this is the
+  quanta analog collapsed to the two structural cases our wire shape produces.
+
+  Two repairs:
+    1. Orphan `tool_use` (no matching result anywhere after it) ⇒ SYNTHESIZE a
+       placeholder `tool_result` stub (`is_error:true`, portable `content`
+       string both wire shapes carry), spliced as a `{role:"user"}` message
+       immediately after the orphaning assistant message. SYNTHESIZE over DROP
+       so surrounding text/thinking blocks in the same assistant content[] are
+       not silently rewritten and turn order is preserved.
+    2. Orphan `tool_result` (references an id with no preceding `tool_use`) ⇒
+       DROP the block; if that empties a message's content[], drop the message
+       (an empty-content message is itself a 400).
+
+  Invariants: PURE (no I/O / clock / RNG / telemetry, deterministic),
+  NO-THROW (malformed input passed through, never crashes the load path),
+  BYTE-IDENTICAL when already valid (same top-level array reference, every
+  message identity preserved — zero allocation on the happy path), and
+  ORDER-PRESERVING.
+
+  Slice-fence: the implementation lives at the leaf `@/shared/
+  reconcile-tool-pairing` (imports nothing; `Message`/`ContentBlock` read
+  structurally) so BOTH the write-path (`@/session/store.ts` rewind/fork) and
+  the read-path (`@/runner/orchestrate/resume-fsm.ts`, via the thin
+  `@/memory/history-sanitization` re-export) share one implementation without
+  forging a forbidden `@/session → @/memory` slice edge.
+evidence:
+  code:
+    - src/shared/reconcile-tool-pairing.ts
+    - src/memory/history-sanitization/reconcile-tool-pairing.ts
+    - src/session/store.ts
+    - src/runner/orchestrate/resume-fsm.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/history-tool-pairing-reconcile-hellgate.test.ts
+      - tests/unit/session-rewind-reconcile-hellgate.test.ts
+      - tests/unit/session-rewind-reconcile-e2e-hellgate.test.ts
+      - tests/unit/session-tool-result-content-blocks-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Always-on (no knob): a dangling pair is unconditionally a provider 400, so
+  the repair has no OFF arm — but it is byte-identical (same array reference)
+  for the common already-valid case. Production-wired at two sites: the
+  session-store write-path (`rewindToMessage` / `forkSession`) and the
+  resume-fsm read-path. Sibling of codex-r2-image-history-sanitization (same
+  "repair the transcript before re-sending to the provider" family); that one
+  handles invalid IMAGES, this one handles dangling TOOL pairs. No dedicated
+  ADR — it is a B4 follow-up extension of ADR-0323's history-sanitization
+  surface (the file header tags it "ADR-0323 (extension)").

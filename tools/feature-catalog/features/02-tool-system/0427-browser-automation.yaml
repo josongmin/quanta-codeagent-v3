@@ -42,6 +42,7 @@ evidence:
     - src/tool/browser/result-map.ts
     - src/tool/browser/schemas.ts
     - src/tool/browser/session-holder.ts
+    - src/shared/net/ssrf.ts
   adrs: [427]
   tests:
     unit:

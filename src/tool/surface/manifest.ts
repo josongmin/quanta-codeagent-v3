@@ -598,6 +598,32 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     adr: "N6",
     note: "Attach to a long-lived PTY / named tmux session — resize + live stdin/stdout (resumable `pty_read` cursor) across turns (§7, RFC jun-4-pty-attach). Distinct from the one-shot bash + 6-tool pipe paths: this attaches to sessions quanta did NOT necessarily spawn. Two zero-dep backends behind one PtySessionPort: tmux shell-out (createTmuxAdapter — attach to existing named sessions) and Bun native PTY (Bun.Terminal — real tty/resize). pty_list/pty_read are read-only; attach/write/resize/kill are exec-risk. SECURITY: only tmux sessions matching the allow-prefix (default `quanta-`) are attachable; a foreign session is fail-closed `foreign-denied` unless pty.allowForeignTmux + HITL; dangerous pty_write content flows through the host's existing command HITL; 64 KiB write cap, 1..1000 resize bounds, MAX_ATTACHED cap. Opt-in EVERYWHERE (QUANTA_PTY_ATTACH) — exec risk, touches sessions outside the spawn jail; never auto-seeds. Closed-port DI keeps @/tool/pty fence-clean (injected exec/backend).",
   },
+  {
+    name: "subagent_force_background",
+    origin: "@/tool/subagent-bg",
+    gate: {
+      kind: "config-slot",
+      slot: "subagent.bgQueue",
+      env: "QUANTA_SUBAGENT_QUEUE",
+    },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "meta",
+    adr: "0487",
+    note: "ADR-0487 — promote/reorder a queued background subagent within its OWN admission pool (move-to-front / burst-run). Reorders work the agent already requested, so it is plan-safe (no NEW mutation of the workspace) like subagent_poll. Minted by subagentBgTools ONLY when opts.forceBackground (QUANTA_FORCE_BACKGROUND) AND the admission queue is enabled (QUANTA_SUBAGENT_QUEUE); off ⇒ the 4th tool is absent and the scheduler throws-at-cap (byte-identical). Opt-in EVERYWHERE.",
+  },
+  {
+    name: "appshot_verify",
+    origin: "@/tool (appshotVerifyTool, via DefaultToolPorts.appshot)",
+    gate: {
+      kind: "config-slot",
+      slot: "DefaultToolPorts.appshot",
+      env: "QUANTA_APPSHOT",
+    },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "mutating",
+    adr: "G1",
+    note: "G1 — visual appshot-and-verify loop: scaffold/render a UI, screenshot it (BrowserPort), then judge the screenshot against an intent with a verify LLM; writes the scaffold + screenshot through the jailed FS scaffold and registers the artifact. Mutating (jailed-write) + browser-backed. Minted only when DefaultToolPorts.appshot is wired (QUANTA_APPSHOT on AND a BrowserPort + judge LLM are reachable); off ⇒ tool absent, byte-identical default menu. Opt-in EVERYWHERE.",
+  },
 ]
 
 /** Resolve a single tool/group's availability on a surface given a default-state

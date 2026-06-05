@@ -19,7 +19,17 @@
 
 export type SubagentBgHandleId = string
 
-export type SubagentBgStatus = "running" | "completed" | "failed" | "cancelled"
+export type SubagentBgStatus = "queued" | "running" | "completed" | "failed" | "cancelled"
+
+/** Closed outcome of `forceBackground` (ADR-0487) — mirror of the producer's
+ *  `ForceBackgroundOutcome`. No-throw; the tool maps each arm to a stable
+ *  ToolResult line. */
+export type SubagentBgForceOutcome =
+  | "promoted_now"
+  | "moved_to_front"
+  | "already_running"
+  | "not_found"
+  | "queue_disabled"
 
 export interface SubagentBgResult {
   readonly status: SubagentBgStatus
@@ -39,10 +49,17 @@ export interface SubagentBgSpec {
   readonly metadata?: Readonly<Record<string, string>>
 }
 
-/** Narrow scheduler port the 3 shipped tools consume. The producer-side
- *  `BackgroundSubagentScheduler` is a strict superset. */
+/** Narrow scheduler port the shipped tools consume. The producer-side
+ *  `BackgroundSubagentScheduler` is a strict superset.
+ *
+ *  MIRROR INVARIANT — `forceBackground` (ADR-0487) is added because the
+ *  `subagent_force_background` tool surfaces it; `cancel`/`list`/`prune`/
+ *  persistence remain unmirrored (no tool needs them yet). */
 export interface BackgroundSubagentSchedulerPort {
   fork(spec: SubagentBgSpec): SubagentBgHandleId
   poll(id: SubagentBgHandleId): SubagentBgResult | null
   await(id: SubagentBgHandleId, opts?: { signal?: AbortSignal }): Promise<SubagentBgResult | null>
+  /** Promote a queued handle to run NOW (or the FIFO head). No-throw; returns
+   *  a closed {@link SubagentBgForceOutcome}. ADR-0487. */
+  forceBackground(id: SubagentBgHandleId, opts?: { allowBurst?: boolean }): SubagentBgForceOutcome
 }

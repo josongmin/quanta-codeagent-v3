@@ -1,0 +1,76 @@
+id: tool-interrupt-block
+title: 'block-interrupt critical section — defer ESC across a tool''s atomic FS-mutating window (jun-6)'
+section: 2
+subsystem: 도구 시스템 — tool-interrupt-behavior (RFC jun-6, dispatch abort-router)
+order: 602
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: [QUANTA_TOOL_INTERRUPT_BLOCK, QUANTA_CRITICAL_SECTION_MAX_MS]
+  runtime: [toolInterruptBlock, criticalSectionMaxMs]
+owners: ["@songmin"]
+labels: [surface:cli, tier:core, default-off]
+depends_on: [read-write-edit, runtime-config-ssot]
+purpose: |
+  A tool that declares `interruptBehavior(): "block"` (write / edit) runs its
+  atomic FS-mutating window (rename / flush) over a SUPPRESSIBLE derived abort
+  signal so an upstream cancel (ESC) is WITHHELD until the window closes, then
+  force-delivered — `block` can DEFER a cancel across one bounded window, it can
+  NEVER swallow it. The pure per-call state machine `makeInterruptRouter`
+  (src/tool/critical-section.ts) is a `@/tool` LEAF: injected `source` signal +
+  suppressible `derived` controller + injected clock + injected one-shot
+  scheduler (no Date.now / setTimeout in-slice). `begin()` opens a withhold
+  window; `end()` closes it and synchronously re-delivers any captured abort so
+  the tool's next `signal.aborted` check (post-rename) sees true; a WATCHDOG cap
+  (`criticalSectionMaxMs`) force-delivers a withheld abort even if `end()` is
+  never called. The dispatch abort-router (src/agent/dispatch.ts) threads
+  `derived.signal` into `ctx.signal` and `router.seam` into `ctx.criticalSection`
+  only when `interruptBehavior(toolName) === "block"`. DEFAULT-OFF: gated on the
+  strict `=== "1"` knob QUANTA_TOOL_INTERRUPT_BLOCK; off ⇒ the router is never
+  built and ctx carries no `criticalSection` ⇒ a `block` tool behaves
+  byte-identically to `cancel` (uniform abort path).
+evidence:
+  code:
+    - src/tool/critical-section.ts
+    - src/agent/dispatch.ts
+    - src/tool/types.ts
+    - src/tool/registry.ts
+    - src/shared/runtime-config.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/tool-interrupt-behavior-core-hellgate.test.ts
+      - tests/unit/tool-interrupt-behavior-tools-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_TOOL_INTERRUPT_BLOCK
+    where: src/shared/runtime-config.ts
+    default: false
+    purpose: |
+      Strict `=== "1"` opt-in. Default-OFF ⇒ dispatch never builds the interrupt
+      router and ToolContext carries no `criticalSection`, so a `block` tool
+      behaves exactly like `cancel` (byte-identical uniform abort path).
+  - name: QUANTA_CRITICAL_SECTION_MAX_MS
+    where: src/shared/runtime-config.ts
+    default: 'default cap (criticalSectionMaxMs)'
+    purpose: |
+      Watchdog cap (ms) bounding how long a `block` tool may withhold a captured
+      abort before it is force-delivered — guarantees a deferred cancel is never
+      held indefinitely.
+deliberate_hold: null
+notes: |
+  jun-6 RFC tool-interrupt-behavior. The slice's defining leaf is
+  src/tool/critical-section.ts (pure, fully injected, deterministic under a fake
+  clock+scheduler). The other evidence paths are the wiring touch-points the
+  router needs: dispatch.ts builds/threads the router, types.ts declares
+  `interruptBehavior` + `CriticalSectionSeam` on ToolContext, registry.ts exposes
+  `interruptBehavior(toolName)`, runtime-config.ts holds both knobs. write/edit
+  are the `block`-declaring consumers (their per-tool evidence lives in the
+  read-write-edit umbrella). Two hellgate batteries pin the invariants: never
+  swallow an abort, watchdog force-delivery, idempotent end(), nested-begin
+  collapse, and byte-identical knob-off behavior.

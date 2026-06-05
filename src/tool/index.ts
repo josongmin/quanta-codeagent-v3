@@ -1,6 +1,11 @@
 import type { OsSandboxProfile } from "@/runtime"
 import type { AutomationEnginePort } from "@/scheduler/automation-engine"
 import type { FileSystemPort } from "@/storage"
+import {
+  type AppshotArtifactSink,
+  type AppshotPort,
+  appshotVerifyTool,
+} from "./appshot"
 import { applyPatchTool } from "./apply-patch"
 import { makeApplyPatchStructuredTool } from "./apply-patch-structured-tool"
 import { type ArtifactRegistryPort, artifactTools } from "./artifact"
@@ -227,6 +232,34 @@ export {
   imageGenTool,
   openAiImagePort,
 } from "./image-gen"
+// `appshot` cluster (G1, RFC jun-6) — the CLOSED generation→verification loop
+// (`appshot_verify`): spec → scaffold → render → screenshot → LLM-judge →
+// iterate (bounded). Composes the existing browser_* + jailed-write +
+// artifact-store ends, all effects injected via `AppshotPort`. Caller-wired +
+// default-OFF: registered only when `DefaultToolPorts.appshot` is set (the
+// composition root passes a port wired to the real BrowserPort + LLM-judge +
+// jailed scaffold when `QUANTA_APPSHOT` is on).
+export {
+  APPSHOT_MAX_ITER,
+  APPSHOT_MAX_SCREENSHOT_BYTES,
+  APPSHOT_MIN_ITER,
+  type AppshotArtifactSink,
+  type AppshotPort,
+  type AppshotRequest,
+  type AppshotResult,
+  type AppshotToolOptions,
+  type AppshotVerifyInput,
+  type AppSpec,
+  appshotVerifyInputSchema,
+  appshotVerifyTool,
+  clampIter as appshotClampIter,
+  makeJailedScaffold,
+  renderScaffoldHtml,
+  runAppshotLoop,
+  type ScaffoldResult,
+  type ScaffoldWritePort,
+  type VerifyVerdict,
+} from "./appshot"
 export type {
   LspNavProvider,
   LspNavSession,
@@ -603,6 +636,25 @@ export interface DefaultToolPorts {
    *  composition root wires the port (tmux/Bun backend) only when
    *  `QUANTA_PTY_ATTACH === "1"`. */
   ptySession?: PtySessionPort
+  /** G1 (RFC jun-6-appgen-appshot, Phase 1) — when set, append `appshot_verify`
+   *  (the closed spec→scaffold→render→screenshot→LLM-judge verify loop). Absent
+   *  ⇒ tool NOT registered (byte-identical default menu). The composition root
+   *  passes a port wired to the real `BrowserPort` (render/screenshot) + an
+   *  LLM-judge (verify) + the jailed scaffold writer, plus an injected clock
+   *  (`now`), only when `QUANTA_APPSHOT` is on. ALL effects ride the injected
+   *  port; the slice imports no `@/browser`/`@/agent`/`@/llm`. */
+  appshot?: AppshotSlot
+}
+
+/** Host-wired appshot slot (G1) — the verify-loop port + injected clock + an
+ *  OPTIONAL artifact sink. The composition root builds this; tests inject fakes. */
+export interface AppshotSlot {
+  readonly port: AppshotPort
+  /** Injected clock — the ONLY time source (no `Date.now()` in-slice). */
+  readonly now: () => number
+  /** Optional artifact sink — when the artifact store is ALSO wired, the final
+   *  scaffold is registered. Absent ⇒ no registration (byte-identical). */
+  readonly artifactSink?: AppshotArtifactSink
 }
 
 export { automationUpdateTool } from "./automation_update"
@@ -611,9 +663,15 @@ export { automationUpdateTool } from "./automation_update"
 // backend when `QUANTA_PTY_ATTACH === "1"`). `createTmuxAdapter` is the MVP-A
 // zero-dep tmux backend; the slice's port is fence-clean (injected exec).
 export {
+  type BunPtyAdapter,
+  type BunPtySpawnOpts,
+  createBunPtyAdapter,
   createTmuxAdapter,
+  type PtyChildHandle,
+  type PtyFactoryPort,
   type PtyHandleInfo,
   type PtySessionPort,
+  type PtyTerminalHandle,
   ptyTools,
   type TmuxExec,
 } from "./pty"
@@ -709,6 +767,21 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => {
   // the host's PTY/tmux backend are appended (exec-risk; foreign-tmux gated).
   if (ports.ptySession !== undefined) {
     base.push(...ptyTools(ports.ptySession))
+  }
+  // G1 (RFC jun-6) — conditional registration of appshot_verify. Absent slot ⇒
+  // default set byte-identical (the model never sees the tool). Present ⇒ a tool
+  // bound to the host's verify-loop port + injected clock (+ optional artifact
+  // sink) is appended (mutating; scaffolds files + drives a browser session).
+  if (ports.appshot !== undefined) {
+    base.push(
+      appshotVerifyTool({
+        port: ports.appshot.port,
+        now: ports.appshot.now,
+        ...(ports.appshot.artifactSink !== undefined
+          ? { artifactSink: ports.appshot.artifactSink }
+          : {}),
+      }) as Tool,
+    )
   }
   return base
 }

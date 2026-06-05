@@ -4,20 +4,26 @@
  * only when the host wires a backend behind `QUANTA_PTY_ATTACH`).
  */
 
+export { createBunPtyAdapter } from "./bun-pty-adapter"
 export {
   type AttachResult,
+  type BunPtyAdapter,
+  type BunPtySpawnOpts,
   PTY_MAX_ATTACHED,
   PTY_MAX_DIM,
   PTY_MAX_WRITE_BYTES,
   PTY_MIN_DIM,
   PTY_RING_BYTES,
   type PtyBackendKind,
+  type PtyChildHandle,
   type PtyChunk,
   type PtyErrorCode,
+  type PtyFactoryPort,
   type PtyHandle,
   type PtyHandleInfo,
   type PtyResult,
   type PtySessionPort,
+  type PtyTerminalHandle,
   type PtyWriteOpts,
   type ReadResult,
 } from "./port"

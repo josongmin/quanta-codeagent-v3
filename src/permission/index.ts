@@ -36,6 +36,19 @@ export {
   STAGE2_THINKING_TAIL,
 } from "./classifier"
 export type {
+  DenyLayer,
+  DenyPillar,
+  StructuredDenyReason,
+  StructuredDenyReasonInput,
+} from "./deny-reason"
+export {
+  DENY_LAYERS,
+  DENY_PILLARS,
+  denyContentPrefix,
+  hardDenySafeReason,
+  structuredDenyReason,
+} from "./deny-reason"
+export type {
   AutoPassInput,
   AutoPassOptions,
   AutoPassResult,

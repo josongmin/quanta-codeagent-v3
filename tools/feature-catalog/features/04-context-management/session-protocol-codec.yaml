@@ -1,0 +1,73 @@
+id: session-protocol-codec
+title: '`@/protocol/session` — surface-agnostic session protocol (command/event/snapshot codec)'
+section: 4
+subsystem: Session protocol wire — versioned command/event/snapshot envelopes + non-throwing codec
+order: 474
+maturity: L3
+status: stable
+ui_surfaces: [api]
+monitoring: n-a
+modes: [daemon, ide]
+configurable: n-a
+config_refs:
+  env: []
+owners: ["@songmin"]
+labels: [surface:core, tier:core]
+depends_on: []
+purpose: |
+  `src/protocol/session/` — the canonical, surface-agnostic wire protocol that
+  the IPC session transport and the web-daemon WS surface speak (one JSON
+  envelope per frame). Three message families, each a versioned envelope
+  (`{ version, kind, payload }`) pinned to `SESSION_PROTOCOL_VERSION =
+  "session.v1"`:
+    - COMMANDS (client → runtime, `commands.ts`): input.append / turn.run /
+      turn.cancel / session.identity.set / session.tool-profile.set /
+      session.transcript.replace / approval.respond — closed `SESSION_COMMAND_TYPES`
+      set with an `isSessionCommandType` guard.
+    - EVENTS (runtime → client, `events.ts`): session.created / .state.updated /
+      .closed, turn.started / .output.delta / .completed / .failed,
+      turn.llm.request / .continuation, tool.invoked / .completed,
+      approval.requested / .resolved, artifact.ready — closed
+      `SESSION_EVENT_TYPES` set with `isSessionEventType`.
+    - SNAPSHOT (`snapshot.ts`): `SessionSnapshotLite` (SessionStateView +
+      PendingApprovalView + ArtifactRef) for state hydration.
+  `codec.ts` is the load-bearing piece: `encodeSession{Command,Event,Snapshot}`
+  serialize to a JSON envelope; `decodeSession{Command,Event,Snapshot}` validate
+  the envelope (version match, kind match, payload-is-object, per-field type
+  assertions: required string / finite number / optional string / object /
+  nullable object / array) and throw a TYPED `SessionProtocolValidationError`
+  (errors.ts) with a discriminating issue code (invalid_json / envelope_not_object
+  / bad_version / expected_<kind>_envelope / <kind>_payload_not_object / field
+  failures) on any malformed input — never an opaque crash. `capabilities.ts`
+  carries a `CapabilityManifest` + `normalizeCapabilityManifest` for the
+  surface's negotiated feature set; `version.ts` pins the single protocol version
+  with an `isSessionProtocolVersion` guard.
+evidence:
+  code:
+    - src/protocol/session/index.ts
+    - src/protocol/session/codec.ts
+    - src/protocol/session/commands.ts
+    - src/protocol/session/events.ts
+    - src/protocol/session/snapshot.ts
+    - src/protocol/session/capabilities.ts
+    - src/protocol/session/errors.ts
+    - src/protocol/session/version.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/protocol/session-codec.test.ts
+      - tests/unit/protocol/protocol-validate-typesafe-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  Distinct from `session-envelope-encoder` (section 4), which owns the on-DISK
+  per-line JSONL rail (`src/session/`). This row owns the LIVE wire protocol for
+  the multi-surface transport (`src/protocol/session/`) — consumed by
+  `slice-ipc-bridge` / `web-daemon-surface` / `web-frontend-surface` (the
+  frontend carries a narrow LOCAL COPY in `apps/web-frontend/src/types/
+  protocol.ts` to stay decoupled from the bun tsconfig paths). Decode never
+  throws an untyped error: every malformed-input path surfaces a
+  `SessionProtocolValidationError` with a discriminating issue code, so the
+  transport decides drop / log / reject per frame.

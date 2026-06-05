@@ -35,16 +35,25 @@ import { isPromptTooLong } from "./retry"
 const DEFAULT_THRESHOLD = 120_000
 const DEFAULT_KEEP_TURNS = 6
 
-/** chars/4 token heuristic over a message list. */
-export const estimateTokens = (messages: Message[]): number => {
+/** Pre-ceil character total of a message list — the SUM that `estimateTokens`
+ *  divides + ceils ONCE at the end. Extracted so the delta token counter
+ *  (`token-delta/counter.ts`) can track the same pre-ceil sum and apply
+ *  `Math.ceil` exactly once, making an incremental total byte-identical to a
+ *  full `estimateTokens` re-scan (ceil-of-sum ≠ sum-of-ceils — RFC §4.1). */
+export const charsOf = (messages: readonly Message[]): number => {
   let chars = 0
   for (const m of messages) {
     for (const b of m.content) {
       chars += blockChars(b)
     }
   }
-  return Math.ceil(chars / 4)
+  return chars
 }
+
+/** chars/4 token heuristic over a message list. Byte-identical to the prior
+ *  inline loop: the SUM is identical (`charsOf`) and the single end-`Math.ceil`
+ *  is preserved (applied once over the total, NOT per message). */
+export const estimateTokens = (messages: Message[]): number => Math.ceil(charsOf(messages) / 4)
 
 /** Rough context-token footprint of an image, in chars (ADR-0083). The base64
  *  length is NOT a faithful proxy (a 1 MB image is ~1.3 M base64 chars but only

@@ -1,0 +1,88 @@
+id: ratelimit-snapshot
+title: Account rate-limit snapshot — proactive empty-bucket backoff from *-ratelimit-* headers
+section: 7
+subsystem: LLM resilience — proactive rate-limit (complements B3 retry-after)
+order: 21
+maturity: L2
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: planned
+config_refs:
+  env:
+    - QUANTA_RATELIMIT_PROACTIVE
+owners: ["@songmin"]
+labels: ["resilience", "absorbed:anthropic", "surface:core"]
+depends_on: [retry-error-classification]
+purpose: |
+  Today quanta is purely REACTIVE to rate limits: B3 (`parseRetryAfterMs`,
+  `src/shared/errors.ts`) parses the `retry-after` family ONLY at the error
+  boundary and waits the server-instructed delay AFTER a 429 has already burned a
+  request. It never reads the `*-ratelimit-*-remaining` / `*-reset` headers that
+  providers return on EVERY response (success or failure), which advertise the
+  live quota meter. This slice adds the PROACTIVE half: a pure snapshot parser
+  that reads the remaining/reset headers, a per-route last-write-wins store, a
+  SERVER-ANCHORED empty-bucket policy, and a no-leak notify event.
+
+  Pure parser `src/llm/ratelimit-snapshot/parse.ts` (`parseRateLimitSnapshot`)
+  reads a CLOSED allowlist of BOTH vendor spellings —
+  `anthropic-ratelimit-{requests,tokens}-{remaining,reset}` and the OpenAI mirror
+  `x-ratelimit-{remaining,reset}-{requests,tokens}`. The `*-reset` parse reuses
+  B3's magnitude-band + HTTP-date discipline (epoch-ms ≥1e12 / epoch-s ≥1e9 /
+  relative-s, past ⇒ undefined) via a parity-locked duplicate
+  (`parseRateLimitResetMs`) — the original `parseRateLimitResetHeader` is private
+  to the error boundary, which is out of scope to edit, so a differential-parity
+  test pins the duplicate to it. Garbage ⇒ field absent (NEVER coerced to 0/NaN);
+  a hostile getter ⇒ no snapshot (no-throw); no recognized header ⇒ `undefined`
+  ⇒ the store keeps its last value ⇒ byte-identical to today's reactive path.
+
+  The policy `proactiveDelayMs` (`policy.ts`) backs off ONLY when a provider
+  window reports `remaining <= 0`, then waits the provider's OWN reset of the
+  empty window(s) (tightest binding window wins), clamped to the SAME 60s ceiling
+  B3 uses. This is NOT a quanta-invented percentage/margin threshold — it is the
+  same measured signal B3 honors after a 429, consulted BEFORE the request (no
+  invented heuristic; the soft-margin case is deferred to an opt-in Phase 2). The
+  store (`store.ts`) is a pure last-write-wins container (undefined update =
+  no-op). The notify (`notice.ts`, `snapshotToNotice`) carries numbers + the
+  constant `ratelimit_snapshot` type tag ONLY — never a header VALUE string (no
+  org-id leak) — and is NON-accounting (transient UI, like `output_progress`).
+evidence:
+  code:
+    - src/llm/ratelimit-snapshot/parse.ts
+    - src/llm/ratelimit-snapshot/store.ts
+    - src/llm/ratelimit-snapshot/policy.ts
+    - src/llm/ratelimit-snapshot/notice.ts
+    - src/llm/ratelimit-snapshot/index.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/account-ratelimit-parse-hellgate.test.ts
+      - tests/unit/account-ratelimit-policy-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - QUANTA_RATELIMIT_PROACTIVE
+deliberate_hold:
+  reason: |
+    Phase 1 ships the pure slice (parser + store + policy + notice) only. The
+    composition-root wiring — the optional `onResponseHeaders` success-path hook
+    on the adapters, the gated pre-request `proactiveDelayMs` site in the loop,
+    and the `QUANTA_RATELIMIT_PROACTIVE` knob — is the NEXT step (touches the LLM
+    error/usage boundary + runtime-config + host, deliberately not edited here).
+    Phase 2 (opt-in operator-set soft margin) and Phase 3 (cross-window) are
+    deferred per the no-arbitrary-heuristic rule.
+  promotion_path: |
+    Wire `QUANTA_RATELIMIT_PROACTIVE` in runtime-config; thread the optional
+    `onResponseHeaders` hook through the adapters and call
+    `parseRateLimitSnapshot` → store on success; apply `proactiveDelayMs` at the
+    gated pre-stream site in the loop and forward `snapshotToNotice` to the
+    surface — then promote status new → refined and configurable planned →
+    integrated.
+notes: |
+  No invented threshold: the policy triggers ONLY on the provider's own
+  `remaining <= 0` and waits the provider's own reset. No Date.now / Math.random
+  in the slice (the clock is injected as `now`). Default-OFF / byte-identical when
+  `QUANTA_RATELIMIT_PROACTIVE` is unset — the header hook is never wired, the store
+  never constructed, the policy never called, no event emitted; the reactive B3
+  429 path is untouched either way.

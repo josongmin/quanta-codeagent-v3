@@ -37,6 +37,7 @@ evidence:
     - src/apps/cli/repl/factories/timeline-panel.ts
     - src/apps/cli/repl/factories/turn-indicator.ts
     - src/apps/cli/repl/factories/turn-summary.ts
+    - src/apps/cli/repl/session-loop-options.ts
   adrs:
     - docs/decisions/0307-repl-host-slim-down.md
   tests:

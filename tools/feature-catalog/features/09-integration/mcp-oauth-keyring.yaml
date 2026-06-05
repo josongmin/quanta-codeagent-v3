@@ -1,0 +1,65 @@
+id: mcp-oauth-keyring
+title: MCP OAuth token storage in the OS keyring (Keychain / libsecret), file-fallback + migration
+section: 9
+subsystem: MCP HTTP transport authentication
+order: 479
+maturity: L2
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: [security, secret-at-rest]
+depends_on: [mcp-http-oauth]
+config_refs:
+  env: [QUANTA_MCP_OAUTH_KEYRING]
+  runtime: [mcpOAuthKeyring]
+purpose: |
+  Harden H18 (`mcp-http-oauth`) credential STORAGE: an OPTIONAL `KeyringPort`
+  (closed-port, injected exec — NOT a hard-coded `child_process`) so MCP OAuth
+  tokens live in the OS secret store — macOS Keychain (`security`) / Linux
+  libsecret (`secret-tool`, Secret Service) — instead of a 0600 plaintext file
+  readable by anyone with the user's UID. `composeTokenStore(keyring, file)` is a
+  drop-in `TokenStorePort` DECORATOR: read prefers the keyring, write goes to the
+  keyring, with the existing 0600 file store as the FALLBACK when no keyring is
+  available (headless Linux without a session keyring, etc.). A one-directional,
+  idempotent migration moves a file-only token into the keyring on first read and
+  deletes the file copy; delete spans BOTH stores so a logout leaves no residue.
+
+  NO-THROW throughout: a locked/denied keychain or a missing session bus is
+  swallowed and treated as "secret absent", so the H18 provider's TOTAL
+  `tokenFor` re-runs the OAuth flow rather than crashing the MCP load — the worst
+  case is "log in again", never a crash. The secret NEVER appears on argv: macOS
+  uses `security add-generic-password -w` with NO value (reads the password from
+  the input stream) and libsecret `secret-tool store` reads STDIN by design, so
+  the token is never visible to `ps` / `/proc/<pid>/cmdline`; it is never logged.
+
+  Default-OFF, byte-identical: gated by `QUANTA_MCP_OAUTH_KEYRING=1` AND
+  `QUANTA_MCP_OAUTH=1` AND the OS keyring `available()`. Unset ⇒ the composition
+  root injects the file store exactly as today; no keyring constructed, no
+  migration, no behavior change. This is a storage backend, not an agent-callable
+  surface — no tool / manifest change.
+evidence:
+  code:
+    - src/host/runtime/keyring/port.ts
+    - src/host/runtime/keyring/macos.ts
+    - src/host/runtime/keyring/libsecret.ts
+    - src/host/runtime/keyring/null.ts
+    - src/host/runtime/keyring/compose.ts
+    - src/host/runtime/keyring/serialize.ts
+    - src/host/runtime/keyring/select.ts
+    - src/host/runtime/keyring/index.ts
+    - src/host/runtime/index.ts
+    - src/host/runtime/mcp-oauth-provider.ts
+    - src/shared/runtime-config.ts
+  adrs: [160]
+  tests:
+    unit:
+      - tests/unit/mcp-oauth-keyring-compose-hellgate.test.ts
+      - tests/unit/mcp-oauth-keyring-adapter-hellgate.test.ts
+knobs:
+  - name: QUANTA_MCP_OAUTH_KEYRING
+    default: 'undefined'
+    purpose: 'Strict =="1" opt-in. ON (+ QUANTA_MCP_OAUTH=1 + the OS keyring available()) ⇒ the composition root injects composeTokenStore(realKeyring, fileStore) for the H18 MCP OAuth TokenStorePort: tokens persist in the OS Keychain/libsecret, an existing 0600 file token is migrated in on first read, delete spans both stores. OFF / no keyring ⇒ the 0600 file store is injected unchanged (byte-identical).'
+notes: 'Closed-port: the OS CLI runs through an injected KeyringExec (Bun.spawn argv-array, no shell) — secrets travel ONLY via stdin, never argv (no ps-visible token). NO-THROW: keyring outage degrades to re-login via the H18 TOTAL tokenFor, never crashes the load. Windows Credential Manager is a follow-up (null keyring keeps it correct meanwhile). Phase 3 (RFC §7): generalize the same KeyringPort to back chatgpt-oauth + trust-scope stores (self-documented follow-ups).'

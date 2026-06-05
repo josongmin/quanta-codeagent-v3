@@ -181,6 +181,8 @@ export const buildSharedExecutionPlaneRuntimeAugments = async (
       return result === null ? null : normalizeBgResult(result)
     },
     cancel: (id) => persistent.cancel(id),
+    // ADR-0487 — passthrough the admission-queue promoter (no-throw).
+    forceBackground: (id, forceOpts) => persistent.forceBackground(id, forceOpts),
     list: () =>
       persistent.list().map((entry) => ({
         ...entry,

@@ -16,17 +16,24 @@
 
 import type { Tool } from "../types"
 import { subagentAwaitTool } from "./await"
+import { subagentForceBackgroundTool } from "./force-background"
 import { subagentForkTool } from "./fork"
 import { subagentPollTool } from "./poll"
 
 export type { SubagentAwaitInput } from "./await"
 export { subagentAwaitInputSchema, subagentAwaitTool } from "./await"
+export type { SubagentForceBackgroundInput } from "./force-background"
+export {
+  subagentForceBackgroundInputSchema,
+  subagentForceBackgroundTool,
+} from "./force-background"
 export type { SubagentForkInput } from "./fork"
 export { subagentForkInputSchema, subagentForkTool } from "./fork"
 export type { SubagentPollInput } from "./poll"
 export { subagentPollInputSchema, subagentPollTool } from "./poll"
 export type {
   BackgroundSubagentSchedulerPort,
+  SubagentBgForceOutcome,
   SubagentBgHandleId,
   SubagentBgResult,
   SubagentBgSpec,
@@ -35,11 +42,25 @@ export type {
 
 import type { BackgroundSubagentSchedulerPort } from "./port"
 
-/** Build the 3 background subagent tools wired to a scheduler port. Order:
+/** Build the background subagent tools wired to a scheduler port. Order:
  *  fork first (the primary mutator), then read-only poll, then read-only
- *  blocking await. Mirrors `shadowTools` convention of grouping by behavior. */
-export const subagentBgTools = (scheduler: BackgroundSubagentSchedulerPort): Tool[] => [
-  subagentForkTool(scheduler) as Tool,
-  subagentPollTool(scheduler) as Tool,
-  subagentAwaitTool(scheduler) as Tool,
-]
+ *  blocking await. Mirrors `shadowTools` convention of grouping by behavior.
+ *
+ *  ADR-0487 — `subagent_force_background` is appended ONLY when
+ *  `opts.forceBackground` is true (the host's `QUANTA_SUBAGENT_QUEUE` opt-in).
+ *  Default-OFF: absent the flag the 3-tool surface is byte-identical, so a
+ *  host that never enabled the admission queue never sees a promote tool. */
+export const subagentBgTools = (
+  scheduler: BackgroundSubagentSchedulerPort,
+  opts?: { forceBackground?: boolean },
+): Tool[] => {
+  const tools: Tool[] = [
+    subagentForkTool(scheduler) as Tool,
+    subagentPollTool(scheduler) as Tool,
+    subagentAwaitTool(scheduler) as Tool,
+  ]
+  if (opts?.forceBackground === true) {
+    tools.push(subagentForceBackgroundTool(scheduler) as Tool)
+  }
+  return tools
+}

@@ -44,7 +44,7 @@ export {
   parseCommandHookBindings,
   runCommandHooks,
 } from "./command-hooks"
-export { compactIfNeeded, estimateTokens, findBoundary } from "./compaction"
+export { charsOf, compactIfNeeded, estimateTokens, findBoundary } from "./compaction"
 export {
   type BreakerVerdict,
   CompactionBreaker,
@@ -340,6 +340,7 @@ export {
 } from "./tier1/advisor"
 export { buildComposeAuthoringBlock } from "./tier1/compose-authoring"
 export { buildPrShipBlock } from "./tier1/pr-ship"
+export { createTokenDeltaCounter, type TokenDeltaCounter } from "./token-delta/counter"
 export type {
   AgentConfig,
   AgentOutcome,

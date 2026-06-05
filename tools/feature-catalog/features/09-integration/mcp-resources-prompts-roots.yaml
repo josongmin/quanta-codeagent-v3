@@ -52,12 +52,15 @@ evidence:
     - src/mcp/client.ts
     - src/mcp/capabilities/full-negotiator.ts
     - src/mcp/capabilities/port.ts
+    - src/host/runtime/mcp-roots-provider.ts
     - src/shared/runtime-config.ts
   adrs: []
   tests:
     unit:
       - tests/unit/mcp-resources-prompts-roots-hellgate.test.ts
       - tests/unit/mcp-resources-prompts-roots-e2e-hellgate.test.ts
+      - tests/unit/mcp-roots-supervised-wire-hellgate.test.ts
+      - tests/unit/mcp-roots-supervised-wire-e2e-hellgate.test.ts
 knobs:
   - name: QUANTA_MCP_ROOTS
     default: 'undefined'
@@ -70,3 +73,8 @@ notes: |
   resources/prompts methods are capability-gated per-server (no raw -32601) and
   no-throw (typed McpResult<T>). @/mcp gains NO host import — the roots source +
   observer arrive through the constructor DI seam, wired at the composition root.
+  The concrete provider lives host-side in `src/host/runtime/mcp-roots-provider.ts`
+  (`buildRootsWiring` returns provider+advertise from the SAME branch — knob off ⇒
+  provider undefined AND advertise false, so they can never drift; `toFileUri`
+  maps the session cwd to a `file://` URI), mirroring buildSamplingWiring /
+  buildMcpOAuthWiring. Supervised-wire hellgates lock the advertise-iff-able pairing.

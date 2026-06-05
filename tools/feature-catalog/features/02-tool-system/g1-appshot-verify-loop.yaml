@@ -1,0 +1,106 @@
+id: appshot-verify-loop
+title: appshot_verify — closed spec→scaffold→render→screenshot→judge verify loop (G1, Phase 1)
+section: 2
+subsystem: Binary-artifact generation / verify-loop (G1, RFC jun-6-appgen-appshot)
+order: 610
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:cli, category:generation, category:verify-loop, default-off]
+depends_on: [image-gen, c1-artifact-canvas-store, browser-automation]
+config_refs:
+  env: ["QUANTA_APPSHOT"]
+  runtime: ["appshot"]
+purpose: |
+  G1 Phase 1 — the CLOSED generation→verification cycle quanta never had. quanta
+  already owned both ends in SEPARATE slices that were never joined: a binary-
+  artifact GENERATION axis (image_gen / Office authoring / the artifact store)
+  and a render+observe half (browser_navigate + browser_screenshot over CDP,
+  PNG→vision). appshot binds them into a closed feedback loop:
+
+    spec → scaffold(jailed index.html) → render(browser) → screenshot(PNG)
+         → LLM-judge(does the render satisfy the spec?) → iterate (bounded N)
+         → stop early on pass | fail-closed at the cap.
+
+  The "render-and-look-back" step is the load-bearing novelty (v0.dev / Claude
+  Artifacts / Cursor preview-pane pattern): code that "looks right" as TEXT
+  frequently renders broken; the loop verifies on PIXELS, threading each failing
+  verdict's notes back as the next iteration's scaffold feedback (the edit arrow).
+
+  CLOSED-port DI (RFC §4.2): one injected `AppshotPort`
+  (scaffold/render/screenshot/verify) keeps the loop core fence-clean — it imports
+  ONLY its own ./port (no @/browser, @/agent, @/llm). The composition root wires
+  render/screenshot → the real BrowserPort, verify → an LLM-judge, scaffold → the
+  FS-jail chokepoint (makeJailedScaffold, mirrors authoring/jailed-write.ts);
+  hellgate injects a FakeAppshotPort (scripted renders + deterministic verdicts)
+  so the loop runs with NO Chrome, NO network, CI-safe.
+
+  BOUNDED + NO-THROW (RFC §6, §8): the iteration count is hard-clamped to
+  [APPSHOT_MIN_ITER=1, APPSHOT_MAX_ITER=8] (a huge / zero / non-finite request can
+  never produce an unbounded or empty loop); every injected effect is caught at
+  the loop boundary, so a Chrome-launch failure / transport drop / LLM throw / jail
+  escape maps to a typed `failed` outcome rather than a crash ("a render that can't
+  bring up Chrome degrades to verify-skipped, not a crash"). An oversize screenshot
+  (> 4 MB, the browser_screenshot MAX_SCREENSHOT_BYTES invariant) is REFUSED before
+  the judge. The injected clock is the ONLY time source (no Date.now in-slice).
+
+  Output = an artifact: the final scaffolded index.html is best-effort registered
+  into the session artifact store (kind `other`) → a stable quanta-artifact://<id>
+  URL, when the store is ALSO wired (a throwing sink never breaks the loop).
+  Mutating (isReadOnly()=false — scaffolds files + drives a browser session +
+  spends judge tokens); pre-approval HITL tier (mirrors write / image_gen).
+evidence:
+  code:
+    - src/tool/appshot/port.ts
+    - src/tool/appshot/loop.ts
+    - src/tool/appshot/scaffold.ts
+    - src/tool/appshot/tool.ts
+    - src/tool/appshot/index.ts
+    - src/tool/index.ts
+    - src/tool/surface/manifest.ts
+    - src/shared/runtime-config.ts
+    - src/host/runtime/agent-arg-builder.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/appshot-loop-hellgate.test.ts
+      - tests/unit/appshot-tool-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_APPSHOT
+    where: src/shared/runtime-config.ts
+    default: false
+    purpose: |
+      Strict `=== "1"` opt-in. Default-OFF ⇒ the composition root wires NO
+      `DefaultToolPorts.appshot` slot ⇒ `appshot_verify` NOT registered ⇒
+      byte-identical default tool menu. Opt-in EVERYWHERE: the loop composes
+      browser_* (which need Chrome) + spends LLM-judge tokens + writes files, so
+      it never auto-seeds on any surface (mirrors image_gen's posture).
+deliberate_hold: null
+notes: |
+  DEFERRED to Phase 2/3 (RFC §7, §8 — the high-cost, desktop-gated parts):
+    - richer scaffold targets (a static SPA / bundler behind a local static
+      server for same-origin apps) — Phase 1 is single-file index.html only.
+    - the SHARE surface (a Tauri/desktop webview live-preview pane + a real
+      shareable link / bundle export). Until a Web-Tauri host ships a webview,
+      a scaffolded app is reachable only via quanta-artifact://<id> + a manual
+      file:// open — acceptable for the loop, insufficient for "share". Per
+      [[surface-model]] the verify loop's ROI is NOT gated on the desktop
+      surface; only the share pane is Tauri-bound.
+
+  COMPOSITION-ROOT WIRING (G1 Phase 1): the `appshot` slot is wired by the host
+  (agent-arg-builder buildGatedToolPorts) only when `QUANTA_APPSHOT` is on AND a
+  BrowserPort is available — it builds the real AppshotPort (render/screenshot →
+  BrowserPort, verify → LLM-judge, scaffold → makeJailedScaffold(ctx.cwd)), an
+  injected clock (() => Date.now()), and passes ports.artifactRegistry as the
+  artifact sink when the store is ALSO on (QUANTA_ARTIFACT_STORE). Absent ⇒ no
+  slot ⇒ byte-identical menu.
+
+  SCAFFOLD is Phase-1 deterministic (renderScaffoldHtml: spec prompt + feedback
+  escaped into a single-file page through the FS-jail). A model-authored codegen
+  body that still writes through makeJailedScaffold is a Phase-2 follow-up.

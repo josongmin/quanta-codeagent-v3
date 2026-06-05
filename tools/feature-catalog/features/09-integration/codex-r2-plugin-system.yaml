@@ -46,6 +46,7 @@ evidence:
     - src/agent/plugin-mcp-launcher/registry.ts
     - src/agent/plugin-mcp-launcher/isolated-launcher-port.ts
     - src/agent/plugin-skill-extension/extender.ts
+    - src/agent/plugin-skill-extension/types.ts
   adrs:
     - docs/decisions/0336-plugin-app-resolver.md
     - docs/decisions/0338-plugin-mcp-launcher.md

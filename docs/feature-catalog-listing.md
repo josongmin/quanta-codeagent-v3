@@ -1,0 +1,916 @@
+# Feature Catalog — 타입별 전체 리스팅 (jun-06 자동생성)
+
+총 **871 feature** / 13 카테고리. status: stable 547 · new 294 · refined 22 · hold 8. maturity: L5 41 · L4 490 · L3 226 · L2 108 · L1 6.
+범례: 🆕 new · ⏸ hold · ✨ refined · (공백) stable
+
+
+## 01-agent-loop  (78 features, 🆕25)
+
+- · `L4` 4-section system prompt + per-section cache_control breakpoints
+- · `L5` ConversationAction — typed mid-turn user action oneof (5-arm)
+- · `L5` Agent-loop branch hardening — refusal / thinking carry-over / deny-and-steer
+- · `L4` Phase marker + TTFT + readonly deny-steer trio
+- · `L4` tool_choice forcing as an orthogonal control gate (pre-call plane)
+- · `L4` IDE context provider seam (ADR-0080)
+- · `L5` EffectChannel — relocatable effect boundary (ADR-0093 M1 keystone)
+- · `L4` System-prompt git posture (default fail-closed)
+- · `L4` cfg.fourRule:true
+- · `L4` Plan-mode dispatch-seam mutating block
+- · `L4` Per-thread queued follow-ups with PausedReason
+- · `L3` safe 도구 스트림 중 즉시 디스패치
+- · `L3` transient backoff / PTL→compact / max_tokens / malformed / empty
+- · `L4` 'verifyGuard: {}'
+- · `L3` while
+- · `L4` Refusal stop_reason typed surface
+- 🆕 `L3` Plan-queue — typed mid-turn follow-up primitive
+- · `L3` maxTurns
+- · `L5` Precedence rule (R3-P1)
+- · `L3` stream_reset
+- · `L5` test_runner
+- 🆕 `L4` System-prompt mode-variant registry — 6-mode identity table + builder seam
+- 🆕 `L2` Devin playbook spec → bun:test fixture auto-generation
+- · `L3` completed|max_turns|aborted|error
+- · `L5` decideVerifyGuard
+- · `L3` nudge/completed 전 디스패치된 read-only 결과 폐기
+- · `L4` src/agent/closeout-guard.ts
+- · `L4` QUANTA_VERIFY_GUARD
+- 🆕 `L4` bash/edit/write describe steering + when-not-to-use + 2 few-shot examples (ADR-0410)
+- 🆕 `L4` Per-subagent model / role / effort override
+- · `L4` Mid-turn steering + NonSteerableTurnKind + 8 closed rejection reasons
+- ✨ `L4` Plan 모드 3-way exit (approve / reject / request-changes)
+- · `L4` Submission op envelope (6-variant) + legacy messages→Submission adapter
+- · `L5` StopCategory matrix (3-layer kind/reasonCode/hint) + AgentOutcome.stopCategory
+- · `L4` Tool-failure ladder + multi-step exploration prompt rules
+- · `L4` Prompt template SOTA++ — 4 strengthening sections (Codex/Claude parity)
+- · `L5` Persona slot — Codex {{ personality }} Handlebars absorption
+- · `L4` TurnSession / TurnState parameter bundles (R2-B P1, 20→3 args)
+- · `L5` GuardChain — verify + closeout turn-exit guards unified pipeline
+- · `L4` createStreamDispatcher factory (P3, byte-identical extraction)
+- 🆕 `L5` dispatch core — tool-call seam (admissibility + result shaping)
+- 🆕 `L4` checkDispatchAllowed — pure dispatch-seam mutating-tool guard (ADR-0036)
+- 🆕 `L4` Tier-1 builders → per-subsystem composer (9 builders SRP split)
+- 🆕 `L2` Codex agent nickname pool (39) + agent_role 4-arm enum
+- 🆕 `L4` types.ts cohesion split (4 sub-modules, byte-identical)
+- 🆕 `L2` AFK away-summary — <40-word recap on user return
+- · `L4` AWF 2-matcher PreToolUse hook
+- · `L4` Branch-search Shadow-ODB anchor + pure progress formatter (ADR-0116)
+- ✨ `L4` Cap-as-instruction enforcer — 3rd-channel NextAction adherence
+- ⏸ `L2` CLI REPL GodClass → SOLID split (abandoned in-place; orphan tree pruned)
+- 🆕 `L4` CLI turn-indicator — spinner + elapsed + live token counter
+- · `L4` Compaction circuit breaker — rapid-refill + consecutive-failure guard
+- · `L3` Cross-subagent todo readback (Roo bidirectional extension)
+- · `L5` Pre-flight dispatch dedup gate (T3 SOTA++ verify-loop stuck fix)
+- 🆕 `L2` ADR-0229 DispatchGuard — 3-detector pre-flight composer (gitWriteProtect/branchOnly/hostAllowed)
+- · `L4` Effort 5-tier session dimension
+- 🆕 `L2` ADR-0217 Typed error enum 16-variant + 5-action retry router (Codex)
+- · `L2` ADR-0198 Identity slot — per-mode system prompt identity lines
+- 🆕 `L4` idle-monitor — 60s suppress + 5min snooze + 20-deny auto-exit (Cursor 3.2)
+- 🆕 `L3` Inline-trigger watcher — Aider-style source-comment dispatch primitive
+- 🆕 `L3` N-phase HITL state machine (plan-exit-flow 일반화)
+- · `L4` Plan-exit flow orchestrator (ADR-0062 wire-up)
+- ⏸ `L3` Plan-queue — mid-turn user input capture/replay (Codex absorption)
+- 🆕 `L2` Plan-writeback — bidirectional skill ↔ plan sync (ADR-0259)
+- 🆕 `L4` Playbook nesting — bounded recursive call chain with cycle detection — ADR-0258
+- 🆕 `L4` prompt history + reverse-i-search + heredoc multiline
+- · `L3` Prompt-rules per-mode pack registry + mode dispatch
+- 🆕 `L2` ADR-0242 stop_reason 8-arm typed router (Cursor 3.2.16) — surface/abort/hitl/continue
+- · `L4` response.in_progress streaming event
+- · `L4` dispatchSideConversation — external request/response router seam
+- · `L4` Side-conversation prompt — Codex base + delimiter + quanta addendum
+- · `L4` Side-conversation read-only sub-thread seam
+- · `L3` spawn_batch — structured subagent fan-out (one templated child per item)
+- 🆕 `L3` streaming-boomerang — Roo Boomerang async-iterator progressive consumption (ADR-0251)
+- · `L3` list_agents + followup_task — subagent introspection (enumerate + deliver-and-trigger)
+- 🆕 `L3` Subagent bounds — tool namespace / wait-timeout clamp / concurrency cap
+- 🆕 `L2` Template-literal `{{ variable }}` expander — Windsurf workflow parity (sibling to ADR-0203 !macro)
+- 🆕 `L2` ADR-0206 Per-thread dynamic tools + defer_loading
+
+## 02-tool-system  (105 features, 🆕37)
+
+- · `L4` Prefix-rule matcher — longest-prefix-match + ASCII-space word boundary
+- · `L4` git_commit + git_branch_switch — 1급 mutating git tools with WIP checkpoint
+- · `L4` defineTool — output-schema + toModelOutput + deferred + streaming-input
+- · `L4` shell_output_delta — typed event stream for long-running shell exec
+- · `L4` Multi-modal 이미지 입력 (dual-provider)
+- · `L4` CODE_MOD_CLOSEOUT_REMINDER
+- · `L4` edit
+- · `L5` 'evidence?: ToolResultEvidence'
+- · `L4` git_diff
+- · `L3` isConcurrencySafe
+- · `L4` isRegex:true
+- · `L3` <persisted-output>
+- · `L5` Promise.race
+- · `L5` read/write/edit (primitive tool family umbrella)
+- · `L3` gh_pr_blame — PR review-thread blame
+- · `L4` gh_pr_review_diff / gh_pr_auto_merge / gh_pr_create.draft
+- · `L4` read_image tool + ToolResult.images field + composer helper
+- 🆕 `L4` pdf_read — native Anthropic document-block attachment (ADR-0137)
+- · `L4` xlsx_read + docx_read — real pure-TS OOXML readers (ADR-0137 / ADR-0138)
+- 🆕 `L4` yaml_read — pure-TS YAML document reader (ADR-0137)
+- 🆕 `L4` LSP 4-tool expansion — code-action / rename-apply / format / signature-help
+- 🆕 `L4` Wire finalization — web-search env factory + document-tools default registration (ADR-0142)
+- 🆕 `L4` LSP default-adapter real wire — code-action / format / signature-help / applyWorkspaceEdit (ADR-0143)
+- 🆕 `L4` csv_read + ndjson_read — text-format structured-data tools (ADR-0133)
+- 🆕 `L2` Web search provider impls — Brave primary + DuckDuckGo fallback (ADR-0133)
+- · `L4` CR2 + FU3 exhaustiveness gate
+- · `L4` git init
+- · `L3` QUANTA_TOOL_OUTPUT_MAX
+- · `L3` zod 입력검증 → 회복가능 tool_result
+- 🆕 `L3` /voice slash — handle-based recorder + multi-vendor transcriber ports
+- · `L3` Shell-snapshot — production Bun spawner + size-budget prune + CLI opt-in
+- 🆕 `L4` Production DeferredResultRegistry — registry-managed deferred work (ADR-0286)
+- 🆕 `L4` Async tool kind + poll_deferred — defineToolAsync + LLM probe (ADR-0287)
+- · `L3` bash — timeout_behavior=background + bash_await + bash_kill (ADR-0296)
+- · `L3` Spill → `evidence.fullLogPath` 라우팅 (Round 5)
+- · `L3` ToolContext.depth
+- 🆕 `L4` storage atomic write + edit expected_hash stale-precondition (ADR-0398)
+- · `L4` apply_patch V4A 그래머 + deterministic 2-tier fuzzy
+- 🆕 `L4` bash head-only 30K truncation 제거 → registry capToolOutput head+tail 위임 (ADR-0411)
+- 🆕 `L2` Browser automation tools (headless CDP, ADR-0427)
+- ✨ `L2` ADR-0442 Realtime voice session — live bidirectional spoken dialog
+- 🆕 `L4` read renders .ipynb cell-by-cell, base64 image outputs stripped (ADR-0481)
+- ⏸ `L2` GitBudget — 5-knob wall-time / commit-count / output-size cap (ADR-0107)
+- 🆕 `L4` gh — 6-tool GitHub CLI slice (ci-bot mode + PR/issue read & write)
+- 🆕 `L4` web_fetch + web_search — HTTPS read-only + provider-gated search (ADR-0127)
+- 🆕 `L4` request_user_input — model-driven HITL question with typed outcome (ADR-0097)
+- · `L4` request_plan_exit — model-driven plan-mode exit with 3-way outcome (ADR-0086)
+- · `L4` scripted_replace — duplicated / bulk substitution sibling of edit
+- · `L4` ToolRegistry — schema + isReadOnly + output-schema + spill capping
+- · `L4` grep — jailed ripgrep search with 200-row cap + narrow/broaden hint
+- · `L4` glob — Bun.Glob file enumeration with jailed base + 300-cap
+- · `L4` bash — sandbox-driven HITL (ADR-0297, command-string heuristic removed)
+- · `L4` applyFuzzyEdit — 3-rung exact→whitespace-flexible→anchored-trim ladder
+- · `L4` git runner — AbortSignal propagation kills spawned git on cancel
+- · `L4` gh tools — `normalizeRef` leading-dash defense (positional PR/issue ID)
+- · `L4` test_runner — bun→npm→pytest auto-detect + heuristic verdict
+- · `L4` diagnostics — provider-injected LSP front + graceful null degrade
+- · `L4` git `_shared.ts` — safeRun / mutate discriminated outcome boundary
+- · `L4` git_branch_switch — `BRANCH_NAME_RE` schema-level alphabet guard
+- · `L4` lsp_nav — 8 navigation tools (def/refs/hover/type-def/impl/symbols/rename-preview)
+- · `L4` localize — Stage-2 ranked fault-localization with FrameTier + JS-sibling penalty
+- · `L4` file_tree_summary — Stage-1 fault-localization (repo 구조)
+- · `L4` parse_test_failure — Stage-3 fault-localization (로그 파싱)
+- · `L4` git_churn — 파일 변경빈도 핫스팟 (fault-localization 신호)
+- · `L4` git_blame_heatmap — per-author 라인 소유권 분포
+- · `L4` git_log — US-separator (\x1f) format + textconv determinism
+- · `L4` update_working_state — per-task 스크래치패드 메타도구 (Codex memory L3)
+- 🆕 `L4` ToolSearch — deferred-tool catalog ranked search + select:<name> lookup
+- · `L4` McpClient — line-framed JSON-RPC 2.0 + typed McpError + output cap
+- · `L4` git_upstream_check — upstream 분기 감지 (read-only)
+- · `L5` ToolFailure discriminated union — 6-mode typed per-failure-mode results
+- 🆕 `L4` shadow_{snapshots,rewind,restore_partial} — first-class shadow-ODB tools
+- 🆕 `L4` git_conflict_inspect — structured merge-conflict surface tool
+- · `L4` git_review_diff — isolated reviewer-subagent over base...head diff
+- 🆕 `L4` subagent_{fork,poll,await} — background subagent tool trio (ADR-0130)
+- 🆕 `L4` git_moved_code — classifier surface (rename / move / split / merge)
+- 🆕 `L4` DeferredResultRegistry — typed deferred-tool-result seam
+- · `L4` git runner — env-allowlist + deterministic overrides + bounded wall-clock
+- 🆕 `L3` pptx_write / pptx_read tools — generate + read real .pptx (PresentationML, H14 follow-up)
+- 🆕 `L3` image_gen tool — text→image generation + edit (NEW binary-generation category)
+- 🆕 `L3` xlsx_write / docx_write tools — generate real .xlsx / .docx (NEW Office-authoring category)
+- · `L3` Advisor consult tool (second opinion from a stronger model)
+- 🆕 `L2` applyPatchStructured — per-file outcome + messageForModel (self-correcting edits)
+- 🆕 `L3` Canvas / artifact persistence store (C1 — non-code generation outputs)
+- 🆕 `L3` CommunicateUpdate — structured mid-turn progress report (C2)
+- · `L3` Commit + PR authoring tools (diff→prose, git_compose_commit / git_compose_pr)
+- · `L4` parseConflicts — pure git merge-conflict parser library (ADR-0111)
+- 🆕 `L4` document/image readers — unified FsJail chokepoint via resolveJailedDoc
+- · `L3` "Edit fuzzy matcher: scored-candidate recovery on ambiguity"
+- · `L4` "Edit line_ranges — scope a repeated anchor by 1-indexed line window (H12)"
+- · `L4` "gh_pr_edit_labels — add / remove PR labels"
+- · `L3` "gh_pr_open — author + open a PR in one step"
+- · `L4` "gh_pr_resolve_thread — resolve review threads + concurrent-push rebase"
+- · `L3` "Diff-derived Conventional Commits scope inference"
+- · `L4` git_blame / git_diff / git_status — read-only git tools
+- · `L4` read_image + read_image_url + compose helper — vision pipeline
+- 🆕 `L4` LSP call hierarchy — lsp_incoming_calls / lsp_outgoing_calls (RFC jun-6)
+- 🆕 `L2` Node REPL persistent kernel — Jupyter-style per-session node process
+- · `L4` PatchFileSystemPort — apply_patch FS abstraction (pure applier)
+- 🆕 `L1` ADR-0231 Radar Cards — background proposal queue MVP (Claude CoworkRadar)
+- 🆕 `L2` read file_unchanged dedup short-circuit (H9) — skip re-sending identical content
+- 🆕 `L1` ADR-0230 Realtime WebSocket — 8-method port (Codex streaming)
+- 🆕 `L4` ShadowOdb closed port + LRU eviction utility (ADR-0108)
+- ✨ `L3` Stale-read guard — block clobbering edits + post-bash re-read reminder
+- 🆕 `L3` Tool-surface manifest — SSOT for the LLM tool-access axis (gate + per-surface default)
+
+## 03-permission-safety  (76 features, 🆕21)
+
+- · `L2` Trust-scope registry wire-up (Phase C) — persistent grant memory ask-skip
+- ⏸ `L3` rememberPatterns — 권한 패턴 학습 + cascade 자동해소
+- · `L4` ConfirmDecision deny_and_steer verb — typed third option with steer injection
+- · `L4` Readonly deny-steer note — admissibility isReadonly flag appended to steer message
+- · `L4` git-write-protection 정적 deny (.git/{hooks,config} + .vscode)
+- · `L3` default|acceptEdits|bypass|auto
+- · `L4` e2e
+- · `L4` FsJailError
+- · `L3` git -c
+- · `L4` HITLTier = hand-off-required | always-confirm | pre-approval-ok | none
+- · `L4` LocalSandbox
+- · `L5` mode-posture → HITL 4-tier → permission policy (HARD_DENY redundant guard) → pre
+- · `L3` verbatim 위협프롬프트
+- · `L3` Secret-detection scanner — pattern + entropy + composite
+- · `L3` PII-redaction scanner — port + pattern + Luhn + composite
+- · `L4` 단언 단위 + 183 통합 safety net 그대로 green
+- · `L5` CR3 rule-catalog SSOT + FU1 rule-per-concern invert
+- · `L4` DockerSandbox
+- · `L3` HARD_DENY 선행 / readonly short-circuit
+- · `L5` '`inferToolTier` secure-by-default fallback'
+- 🆕 `L3` Per-tool / per-skill checkpoint granularity (ADR-0209)
+- 🆕 `L3` 3-way restore — Files Only / Task Only / Both (ADR-0210)
+- 🆕 `L4` Tool profile preset — 4 named bundles (write/ask/minimal/code-only) + UP-nudge composition
+- 🆕 `L3` Shell-snapshot runShell wire — opt-in source-fold (ADR-0235)
+- 🆕 `L3` bash `mode` + per-call OS sandbox wrap (ADR-0295)
+- · `L4` Prefix-rule allowlist DSL + 3-layer (project > user > system) + default-deny opt-in
+- · `L4` Reviewer 3-tier (user/auto_review/guardian_subagent) + 8-state outcome
+- ✨ `L3` Permission-profile inheritance — extends + cycle detection + monotone-narrowing merge + Managed ceiling
+- · `L2` ADR-0441 Windows OS-sandbox backend (pure compiler + native boundary)
+- · `L3` local-environment selection — DECLARED per-project dev env composed over the allowlist
+- · `L4` ReviewKind × isExecutionBlocking × reason_code matrix + scoped-allowlist verbs
+- · `L4` permission policy — HARD_DENY engine + tier inference + reviewer composition
+- · `L4` permission state store — atomic JSON-state-file persistence engine (ADR-0046)
+- · `L4` Destructive git HARD_DENY rules (workflow + push mass-delete)
+- · `L2` trust-scope persistent grant store — cascade + TTL (L3→L4 promotion)
+- · `L4` branch-only git-write guard — ci-bot mode protected-branch propositional check
+- · `L4` pattern-grant auto-pass — admissibility-gate cascade (ADR-0061 wire-up)
+- · `L2` ADR-0044 negative invariants — single doc SSOT for 12 deliberately-not-absorbed patterns
+- · `L4` External-agent importer — N10 credential-read ban (auth.json never opened)
+- · `L2` Permission recorder — observability fail-open invariant (verdict cannot be flipped by emitter throw)
+- · `L3` Linux Landlock Phase 2 (bubblewrap)
+- 🆕 `L4` AutoApprovalReview (periodic "are these auto-grants still OK?" prompt)
+- 🆕 `L4` LLM-backed permission auto-mode 2-stage ClassifierPort
+- · `L3` Bridge Attestation — remote permission preflight + STS token (ADR-0246)
+- ✨ `L3` Config-provenance gate — repo-controllable config may only NARROW, never widen
+- · `L4` `decision` event emit Phase 2 — admissibility-gate (permission/rule/hook) wire (ADR-0267)
+- · `L4` `decision` event emit Phase 3 — cap / jail / budget 게이트 wire (ADR-0269)
+- · `L4` Disclaimer shell wrapper
+- ✨ `L4` errMessage infinite-recursion fix + guard comment (regression-pinned)
+- · `L4` ReDoS-hardened glob DP matcher (skill activation + Cursor rule paths)
+- · `L4` RAII child-process lifecycle guard (runShell / sandbox 공통)
+- · `L5` HITL 4-tier gate registry + handoff event seam (ADR-0047)
+- 🆕 `L2` JWKS agent identity — remote JWK fetch + cache + verify (ADR-0248)
+- 🆕 `L3` Layered permission-policy merge (per-user / per-repo / team-admin)
+- 🆕 `L4` LLMErrorKind.not_implemented (chatgpt-oauth Phase-1 fallback-eligible)
+- · `L4` Localize-phase guard — Agentless "localize-first" dispatch gate
+- · `L4` MUTATING_TOOL_TABLE drift closeout (12 caller-wire tools + agent.isReadOnly fix)
+- 🆕 `L3` Named permission-profile registry + by-name resolution
+- 🆕 `L3` Socket-level egress proxy — close the subprocess egress bypass
+- 🆕 `L4` OS Sandbox wire-up — bash spawn wrapped by Seatbelt/Landlock policy
+- · `L4` 호스트별 기본 agent-mode (agent-mode-by-host-id 동등물)
+- · `L4` 스레드별 권한 (heartbeat-thread-permissions-by-id 동등물)
+- 🆕 `L4` 4-pillar Permission (approval / network / sandbox / control)
+- · `L4` Permission stack × pre_tool_use hook ordering lock (13-step canonical pipeline)
+- 🆕 `L4` 5-axis permission inspector (stateless, slash-facade)
+- 🆕 `L4` Permission stack inspector (ADR-0046 follow-up)
+- 🆕 `L4` PermissionProfile + file_system_sandbox_policy 2-layer (AND condition)
+- · `L3` PermissionProfile List + Select + user-defined profiles from disk
+- 🆕 `L4` PermissionScope 4-tier (managed > project > user > open)
+- · `L4` post-denial 사용자 override (guardian-post-denial-precedence 동등물)
+- · `L4` AGENTS.md / repo-rules tree — deeper-wins layered rule ingestion (ADR-0098)
+- · `L2` ADR-0199 macOS Seatbelt verbatim profile + 4 strict knobs
+- 🆕 `L2` Per-turn shell environment snapshot (hermetic shell)
+- 🆕 `L2` SpecialPathKind 8-kind OS-aware resolver (LRU cached)
+- 🆕 `L4` Untrusted content tag-boundary defang — 단일 강제 path (embedUntrusted)
+- ✨ `L3` Untrusted-source result envelope — wrap external tool output as DATA (H2)
+
+## 04-context-management  (71 features, 🆕19)
+
+- · `L4` Message-id rewind — transcript truncate-to-message UX
+- · `L3` cache:true
+- · `L3` compaction.summarizerLlm
+- · `L3` CompactionBreaker
+- · `L4` loadRepoRules(cwd)
+- · `L4` mode → repo-rules → active-skills → working-state → memory-hints
+- · `L3` proactive
+- · `L5` source/runtime > tests > docs/memory
+- · `L4` TurnContextInput.{mode, repoRules, workingState, activeSkills}
+- · `L3` PlanQueue enqueue collapse metric — EnqueueResult + dedicated counter
+- · `L3` Mid-turn user interruption — capture facade over PlanQueueStore + 3-arm mode + InterruptionPolicy port
+- · `L3` (CLI 순수헬퍼 직접 유닛테스트 불가 — main() 톱레벨; 루프 e
+- · `L3` reactive fail-fast
+- · `L3` 강화 "Trust and inputs"
+- 🆕 `L4` ConvCheckpointWire — surface-side per-turn auto-record + /rewind-conv (ADR-0292)
+- 🆕 `L3` /session export+import slash — round-trip via ADR-0157 primitive (ADR-0294)
+- · `L3` Cargo prune (Round 5 CR1)
+- · `L3` QUANTA_COMPACT_TOKENS
+- 🆕 `L3` Per-tool granular checkpoint registry — in-memory ToolSnapshot store (ADR-0300)
+- 🆕 `L3` env/build 동적 컨텍스트 — platform/shell/git-status/pkg-mgr (ADR-0397)
+- · `L4` Session JSONL envelope (5 top-level + 17+2 turn_context) (ADR-0034)
+- · `L3` 압축 프롬프트 verified-vs-assumed 강화
+- · `L3` Async mention resolver + @file / @symbol mention kinds (ADR-0418)
+- · `L5` Codex anti-signal 7개 흡수
+- · `L4` PreCompactRequestQuery (HITL)
+- · `L4` renderActiveSkillsBlock — catalogue + trigger-rule footer (progressive disclosure)
+- ✨ `L3` Background (speculative) compaction — cancellable summarize + 2-phase install
+- · `L2` BudgetProbe — real wire of ADR-0138 ledger into ADR-0265 budget-aware preset (ADR-0274)
+- · `L5` buildTurnContext — system + per-turn dynamic assembly
+- 🆕 `L4` CLI action diff-preview — write/edit/apply_patch/scripted_replace 통합 unified diff
+- 🆕 `L4` CLI markdown painter — assistant stream inline highlight (line-buffer FSM)
+- · `L4` Codebase indexer slice (ADR-0277)
+- · `L3` Compaction event emit (proactive + reactive) — ADR-0324 / 0331
+- · `L3` Context-change persistent injection + buildTurnContext seam (ADR-0321 / 0327 / 0329)
+- · `L3` Loop hook for plugin activation + auto-wire (ADR-0346 / 0350)
+- · `L3` Mention-injection pipeline + skill resolver + plugin activation trigger (ADR-0325 / 0330 / 0340)
+- · `L3` Typed history event store (ADR-0320 + ADR-0335)
+- 🆕 `L4` ConversationCheckpointStore — pure in-memory messages snapshot/restore (ADR-0124)
+- · `L4` ConversationSummaryArchive — sliding-window per-compaction summary log
+- · `L3` "Unified-diff hunk headers + line-number gutters (CLI diff preview)"
+- 🆕 `L2` EmbedBatcher — 50ms window + single-flight dedupe + provider batch_size
+- 🆕 `L4` EmbedCache — idempotent content-hash + model-tag embedding cache
+- · `L4` findBoundary — orphan-safe tool_use/tool_result pair boundary
+- 🆕 `L3` ForkSessionPort — branch-name + signal + shadow-tag fork (ADR-0226)
+- · `L4` fourSectionPreset + buildSectionedSystemBlocks — pure renderer (collapse-empty)
+- · `L4` Glob-matched + always-applied auto-injected rules (Cursor .mdc parity)
+- · `L4` extractExpectedActual — opt-in inline E/A phrase extractor
+- · `L4` Issue-hint extraction — Agentless-style structured signal scan
+- 🆕 `L3` LexicalSearch — BM25 + ripgrep pluggable retrieval engine (ADR-0260)
+- · `L4` memory_summary.md → session_ctx breakpoint coalesce (ADR-0068)
+- · `L4` PLAN/REVIEW/AUDIT mode notice — per-turn reminder injection
+- 🆕 `L3` ModelTag invalidator auto-hook — EmbedCache + VectorStore registrar (ADR-0273)
+- 🆕 `L3` ModelTag versioning + invalidator + canonical codec (ADR-0266)
+- · `L3` Multi-source rules vendor-detector (5-vendor convergence, ADR-0205)
+- 🆕 `L2` Multi-modal embedding MVP — image + audio embedding port (ADR-0276)
+- · `L4` onSessionMinted callback port — resume-fsm surface decoupling (DIP)
+- · `L4` Pipeline composition-root wire — assemblePipeline(env) + search_codebase tool (ADR-0272)
+- 🆕 `L4` Pluggable Embedder + VectorStore provider registry (ADR-0261)
+- · `L4` PromptSource / PromptPayload type widening (string | {text, images?})
+- · `L4` reactiveCompact — PTL-recovery aggressive squeeze + continuation summary
+- 🆕 `L3` Real-API smoke eval for retrieval — drift detection (ADR-0275)
+- 🆕 `L3` Reranker port — Cohere/Voyage REST adapters + identity default (ADR-0262)
+- · `L4` SearchPipeline composer + 5 pre-built presets (ADR-0265)
+- 🆕 `L2` Semantic-search port — embedding-based retrieval seam (Cline-style)
+- · `L4` Session envelope encoder/decoder — deterministic key-sorted JSONL
+- · `L4` Session git fingerprint capture (sha + branch + origin URL)
+- · `L4` Session id sanitizer — filesystem-safe path component validator
+- 🆕 `L3` SideChatManager — auxiliary conversation lifecycle with parent isolation (ADR-0244)
+- · `L3` Soft task-budget (model self-moderation)
+- · `L4` todayDateLine — injected clock port for byte-identical replay (ADR-0078)
+- · `L4` estimateTokens — chars/4 heuristic with image fixed-budget
+
+## 05-memory  (45 features, 🆕9)
+
+- · `L4` memory_citation provenance surface (ADR-0082)
+- · `L4` 시스템 프롬프트에 "Durable state belongs in workspace files" 단락
+- · `L2` L3 WorkingState
+- · `L4` 세션종료 LLM distill
+- · `L4` memory_search/write/update
+- · `L4` 동적 reminder의 memory recall 블록에 "routing hints only
+- · `L4` src/agent/working-state.ts
+- · `L4` tier
+- · `L4` QUANTA_MEMORY[_PATH/_EMBED/_EMBED_MODEL/_RECALL_LIMIT/_DISTILL/_CONSOLIDATE/_SEL
+- · `L5` '`snapshot()` deep-copy'
+- 🆕 `L3` Stage1 → Phase 2 consume wire + vendor-rule glob wire (ADR-0233)
+- ✨ `L5` Per-string 캡 + empty-patch refine
+- 🆕 `L3` semantic index 실 embedder + pluggable vector-store backend (ADR-0392, ADR-0424)
+- · `L4` Codex 2-phase memory consolidator — per-thread distill + cross-session synthesizer
+- · `L4` Memory learning default-ON via session factory (ADR-0413)
+- · `L3` ADR-0216 Stage1StorePortV2 (agent-side, no-throw, 4-verb persist seam)
+- 🆕 `L3` auto-dream — cross-session memory consolidation trigger (H16)
+- · `L4` Session-end consolidator hook — runMemoryConsolidatorHook (no-throw L4 wire)
+- · `L4` Consolidator distill-input redaction port — abstracted seam for Phase 1 LLM
+- · `L4` EmbedderPort — pluggable embedding provider seam (OpenAI / Null / Caching)
+- · `L3` ADR-0281 — Memory auto-trigger (session-end → phase1 → phase2 promote)
+- · `L3` ADR-0282 — Cross-session memory inject (selectForInject → prompt section)
+- · `L4` Pure near-duplicate detection — pre-save merge/supersede candidates
+- · `L4` Memory distill input fence — redactSecrets before LLM sees transcript
+- · `L4` Pure eviction planner — per-tier caps + supersede prune + ancient decay
+- · `L4` @/memory → @/llm slice fence cleanup — dead REMOVE-ME stub deleted
+- · `L3` Self-edit memory line citations + per-thread mode + budget write-guard
+- · `L4` MEMORY.md 3-file atomic writer + git-tracked commit (ADR-0068 Wave B)
+- · `L4` 4-state memory outcome enum (partial / success / uncertain / fail)
+- 🆕 `L4` Memory recall citation surface in turn-summary (user-visible provenance)
+- · `L4` memory_search / memory_write / memory_update — self-edit tools (RFC §6.3)
+- · `L4` MemoryTelemetryPort — inverted-dependency seam for phase1/phase2/recall metrics
+- · `L4` Memory vector math — pure cosine / dot / normalize + Float32 serde
+- · `L4` Stage1Store — per-thread distill rows + consolidate_watermark (ADR-0068 Wave A)
+- · `L4` Phase 2 session-start auto-trigger — runMemoryPhase2AutoTrigger (non-blocking)
+- · `L4` Stage1 → Phase2 promotion gate (10% sample rate, fail-excluded, score-ranked)
+- · `L4` Preference phrase grammar — literal quote + count-based confidence + evidence anchor
+- 🆕 `L4` Token-bucket re-chunker — 4 buckets × 10% sliding-window overlap
+- 🆕 `L4` Commit embedding — git-aware recall over recent commit messages with LRU cache
+- · `L4` Retrieval-stack composition-root wire — buildRetrievalStackCore + memory/localize bridges + AgentConfig slot (ADR-0159 wire)
+- 🆕 `L4` Hybrid query 3-stage funnel — keywords / embeddings / hybrid with optional final rerank
+- 🆕 `L4` Multi-vendor embedding port — 8 vendors (2 runtime + 6 type-level stub)
+- 🆕 `L4` Reranker port + registry — 4 built-in strategies (identity / bm25-secondary / tier-aware / score-fusion-rrf)
+- · `L4` SQLite PersistentStorePort — long-term memory disk-backed adapter
+- · `L4` WorkingMemory — in-session message buffer (RFC §6.3 L1)
+
+## 06-tier1  (84 features, 🆕32)
+
+- · `L5` Eval 스키마 additive 필드 (keyed metrics / token·cost / run status·params)
+- · `L3` agent
+- · `L5` "`MUTATING_MODES = Set<AgentMode>([\"default\"])` 인버스"
+- · `L3` QUANTA_SKILLS_DIR
+- · `L4` Localize tool — BM25-lite + FrameTier + def-boost + recall@1 polish
+- · `L4` Branch-search minimal-change bias + progress surface
+- 🆕 `L4` BudgetLedger + budget_status — cross-run typed BudgetBreach primitive (ADR-0138)
+- · `L4` Background-subagent caller wire — ADR-0130 helper exposed to loop
+- · `L4` Background subagent scheduler
+- 🆕 `L4` Engineering-task skill bundle — debug-error / add-tests / explain-code / extract-function (ADR-0134)
+- · `L4` 매트릭스 보강 (2026-05-21)
+- · `L3` bounded 다단계 재귀
+- · `L4` tool-scoping 강제
+- 🆕 `L4` User-authored playbook frontmatter (procedure / success-criteria / forbidden-actions / macros / inline-trigger) — ADR-0203
+- · `L3` Mode-typed delegation (parent → child mode-typed handoff)
+- · `L3` Focus Chain (automatic N-turn todo-list re-injection)
+- · `L3` Auto-background after 2 s — stuck-detector + propose-handler observer
+- · `L3` Queued follow-up per-msg mutators (retry / edit / delete / sendNow)
+- · `L2` Playbook inline-trigger CLI auto-bind opt-in
+- 🆕 `L4` Subagent fanout parallelization — `agent.isConcurrencySafe = true` + `parallel_worker` flag (ADR-0298)
+- ✨ `L4` Lexical refine (2026-05-21)
+- · `L4` Plan-mode 구조화 메타도구 + state-machine (SOTA++ ADR-0095 draft)
+- · `L3` QUANTA_SUBAGENT[_MAX_DEPTH]
+- 🆕 `L3` --playbook-trigger CLI flag echo through to wire (close ADR-0293 last-mile)
+- 🆕 `L3` 동기 delegate 도구 — mode-typed in-band boomerang (ADR-0393)
+- ⏸ `L1` Activation-timing phase 분리
+- · `L3` Safety-posture 전파 (Round 2 fix)
+- · `L4` 읽기 seam 노출
+- 🆕 `L4` LSP textDocument/rename RPC + 2-phase atomic WorkspaceEdit 적용 (ADR-0404)
+- 🆕 `L3` Edit-후 LSP diagnostics 자동 주입 hook (ADR-0405)
+- · `L4` 루프 wiring 추가
+- · `L2` agent_role enum (explorer/worker/none) + maestro nickname pool
+- · `L4` 플러그인 매니페스트 (.quanta-plugin/plugin.json + .mcp.json + skills/)
+- 🆕 `L4` Skill 7-scope tiering (ADR-0134, builtIn / system / admin / team / repo / user / personal)
+- 🆕 `L4` Skill admin enforcement — org-policy.json + install decision (ADR-0134 §3)
+- · `L4` Skill 트리거 규칙 (ADR-0022)
+- 🆕 `L4` Skill install audit log — append-only JSONL (ADR-0134 §3)
+- · `L4` SKILL.md 6-필드 frontmatter + Skills vs Extensions 분류
+- 🆕 `L4` Skill registry — 7-source discovery + precedence resolver (ADR-0134 §1)
+- · `L4` Subagent 6-tool 표준 (exec_command / write_stdin / spawn_agent / wait_agent / close_agent / send_input)
+- · `L5` Tool routing matrix (ADR-0022)
+- · `L4` Background subagent persistence (cross-restart)
+- · `L3` Loop trio integration (auto-bg accept + automation tick + identity per-turn reminder)
+- · `L3` Playbook auto-dispatch + Git directive 5-kind completion
+- 🆕 `L4` classify() + allowed-tool whitelist gate (Skill vs Extension)
+- · `L4` discoverSkills — frontmatter + size-cap-guarded skill enumeration
+- · `L4` loadPluginManifest + discoverPlugins — `.quanta-plugin/plugin.json` loader
+- · `L4` TaskRegistry — background subagent registry + capability tokens + LRU
+- 🆕 `L4` Agent tool input shape — task_kind / result_shape / owned_surfaces / forbidden_surfaces / continue_from / checkpoint
+- ✨ `L4` branch_search — N-best verifier-prover (speculative branch search)
+- 🆕 `L2` CSV batch-job runner (`agent_jobs`) — row-indexed fan-out over subagents (ADR-0463)
+- 🆕 `L3` createAutoTitlePort + generateSessionTitle — opt-in cheap-model first-turn session titler
+- 🆕 `L4` buildCompactionBreakerConfigCore + buildSummarizerLlmCore — compaction guards + dedicated summarizer
+- 🆕 `L4` buildLLMCore + composeLLMCore + parseFallbackModels — surface-agnostic LLM stack
+- 🆕 `L4` buildMemoryConfigCore + parseRecallTiers — memory tuning block composer
+- 🆕 `L4` buildStoreCore + buildEmbedderCore — surface-agnostic memory store/embedder factories
+- 🆕 `L4` buildStreamingCore — StdoutStream + observe-dir JsonlRecorder TeeStream
+- 🆕 `L4` buildToolingCore — surface-agnostic ToolRegistry composition + per-config gate logs
+- · `L4` tmpdir/worktree isolators — node_modules symlink-safe cleanup
+- · `L4` Branch-search pure scorer — DEFAULT_WEIGHTS + argmax/minimal-change selectors
+- · `L2` buildSeeds — Agentless temperature diversification + mixed-model voting
+- · `L4` Branch-search verifier suite — tsc / test / lint / lsp_diag + combineVerifiers
+- · `L3` Bug-fix proposal queue — debug-trace 자동수정 루프 Phase 1 (ADR-0186)
+- · `L4` CTK git-task skill bundle — babysit / fix-merge-conflicts / get-pr-comments / loop-on-ci / make-pr-easy-to-review / new-branch-and-pr / pr-review-canvas / review-and-ship (ADR-0102)
+- · `L4` debug/blame 시스템 스킬 트리오 — debug-trace / explain-stack-trace / blame-section (ADR-0176)
+- 🆕 `L4` subagent + skills default-ON 전환 — surface-agnostic env-off-switch
+- · `L4` git-log-search 시스템 스킬 — pickaxe/regex/author/since 검색 (ADR-0172)
+- · `L4` Plan DAG validator — self/dangling/cycle + 100-node perf gate
+- · `L4` PlanStore → PlanMutator adapter — slice-boundary translation
+- · `L4` planToStreamMirror — single slice-boundary by-value projector
+- · `L4` TodoStatus 5×5 transition matrix — pure predicate + frozen table
+- · `L4` progress-audit 시스템 스킬 (ADR-0045)
+- · `L4` rewind 시스템 스킬 — shadow-snapshot 복원 워크플로 (ADR-0122)
+- 🆕 `L4` runner/assemble — surface-agnostic per-collaborator builder family
+- 🆕 `L4` multimodal image input queue (/image add/list/clear)
+- 🆕 `L4` persistTurn — per-turn save plumbing (path-mode + id-mode)
+- 🆕 `L4` resolveResume — surface-agnostic session-resume state machine
+- 🆕 `L4` Legacy runInteractive cutover — prompt-pipeline + turn-runner REPL driver
+- 🆕 `L2` runOnce — surface-agnostic one-shot turn orchestration
+- · `L4` side-chat — isolated agent loop without history pollution (Claude A9)
+- 🆕 `L4` session rewind + fork (Claude Code A1 pattern)
+- · `L3` "Skill ecosystem: argument-hint + metadata + bundled resources"
+- 🆕 `L4` buildSkillBlock — skill discovery + tool registration + override maps + paths-filtered inventory
+- 🆕 `L4` buildSubagentBlock — shared TaskRegistry trio + force-stop cleanup
+
+## 07-resilience  (38 features, 🆕7)
+
+- · `L3` FallbackLLM
+- · `L3` RetryingLLM
+- · `L3` QUANTA_MODEL_FALLBACK
+- · `L5` QUANTA_PROVIDER
+- · `L5` RECOVERY_CAPS — bounded per-turn same-turn recovery budgets
+- · `L5` RetryingLLM string-marker + LLMErrorKind taxonomy (RETRYABLE / FATAL / PTL)
+- · `L4` FALLBACK_KINDS — structured provider-swap trigger set
+- · `L4` escalatingKill — SIGTERM → SIGKILL 2s-grace
+- · `L4` CapEnforcer — ADR-0062 3rd-channel NextAction enforcement
+- · `L4` SandboxPolicy — declarative per-command confinement
+- · `L4` bash 도구 — timeout_ms (default 120s) + output cap + stderr-tail
+- · `L4` Patch applier — observer + OTel emitter fail-open (telemetry bugs MUST NOT abort apply)
+- 🆕 `L4` ShadowOdb auto-checkpoint policy (ADR-0121)
+- · `L4` ConversationCheckpoint — message-level resume + restore
+- · `L4` chatgpt-oauth token-store — atomic write + 0o600 perm guard
+- · `L4` Side-chat isolation 5-invariant — Claude Code A9 absorption
+- · `L4` REPL turn-cancel — Ctrl+C hard / Esc-Esc soft 2-tier
+- ✨ `L4` 모델 교체 retry (SubmitRetryBotMessage)
+- · `L4` AbortSignal.any compose + chainedSignal — framework-level dual-signal hierarchy
+- 🆕 `L3` Adversarial multi-voter verification (refute-biased quorum)
+- · `L4` batch.computeExitCode — corpus aggregator (any !passed | degraded | env_prep_failed → 1)
+- · `L4` import.meta.main CLI-entry guard (test-import safety)
+- · `L2` BudgetDials / BudgetCaps / BudgetExhaustionPolicy pure types
+- · `L4` BudgetEvent closed union — tick / exhausted / clamp
+- 🆕 `L4` BudgetMeter — pure cumulative per-run quantitative tracking
+- · `L4` Image-history sanitization pipeline (ADR-0323 / 0328 / 0333 / 0337)
+- ✨ `L3` Edit-repair-loop — lint-delta + bounded fast-model repair to green
+- 🆕 `L2` startup environment probe + graceful-degradation warnings
+- · `L2` hellgate test pattern — 적대적 회귀 봉인 (`tests/unit/*-hellgate.test.ts`)
+- · `L4` interactive runMode AbortError / ABORT_ERR → exit 130 boundary
+- ✨ `L4` LLMError 16-kind taxonomy + fromSdkError boundary classifier + classify(e) router-boundary classifier
+- · `L4` exitCodeForOutcome — AgentOutcome → POSIX exit code mapping + SIGINT lifecycle wrapper
+- 🆕 `L3` RecoveryRouter port + CodexSpecRouter — 16-kind × 6-action routing table
+- · `L4` Resume-boundary tool_use/tool_result reconciliation (B4 — ADR-0323 extension)
+- · `L4` switchToSessionCwd — fail-loud SessionStartupError on missing worktree on resume
+- 🆕 `L2` SWE-bench Verified 6-pick smoke baseline (recorded tier-0 regression gate)
+- 🆕 `L2` SWE-bench smoke recordings — 6-pick recorded patches + offline-cert path
+- · `L4` process.on(unhandledRejection) defense-in-depth — log, never exit
+
+## 08-llm  (21 features, 🆕12)
+
+- · `L2` Multi-cloud provider router (CLAUDE_CODE_USE_* env mirror + precedence ladder)
+- · `L4` AWS Bedrock LLM adapter (Anthropic Messages grammar via SigV4-signed Bedrock endpoint)
+- 🆕 `L4` Sticky model-per-mode — fs-backed {mode → modelId} store + precedence resolver
+- 🆕 `L3` Spinner stall detection — soft-signal port for mid-stream silence (Claude `tengu_spinner_stalled_ui` absorption, ADR-0227)
+- · `L3` LLM error 16-kind close-out — layer-owned arms wire (too-many-failed / thread-rollback / sandbox)
+- 🆕 `L4` Role-based model override — {role → modelId} resolver (Roo orchestrator)
+- · `L4` GCP Vertex AI LLM adapter (Anthropic Messages via projects/loc URL)
+- ⏸ `L2` Azure AI Foundry LLM adapter (Phase 1 stub — no public SDK)
+- 🆕 `L3` Sticky model-per-mode — loop consume site (dead-seam → live, ADR-0462)
+- ⏸ `L2` Anthropic Mantle LLM adapter (Phase 1 stub — internal enterprise endpoint)
+- · `L4` OIDC federation token exchange (ANTHROPIC_IDENTITY_TOKEN_FILE → access token)
+- · `L2` Distributed OAuth refresh lock (port + 3 impls + fallback chain)
+- · `L2` Mid-session GitHub token rotation (lock-protected, vendor-TTL respected)
+- 🆕 `L4` Session effort wire — `/effort` slash + `EffortStore` precedence fold-in (Codex `/model`-style)
+- 🆕 `L2` Reasoning carry-over via `encrypted_content` — OpenAI Responses / o-series (H15, Codex `ResponseItem` absorption)
+- 🆕 `L3` BYOK apiKeyHelper mint for the LEGACY vendor key path (anthropic/openai)
+- 🆕 `L4` Rotating cloud credentials (apiKeyHelper mint + aws/gcp pre-call refresh)
+- 🆕 `L4` Brief mode — condensed output posture (`/brief` slash + `set_brief` op + `QUANTA_BRIEF` seed)
+- 🆕 `L3` Live "· N tokens" output-token counter — vendor-agnostic stream decorator (Claude-Code parity)
+- 🆕 `L2` 1-hour prompt-cache TTL — Anthropic `cache_control: { ttl: "1h" }` (cost optimization)
+- 🆕 `L2` Structured output mode — response_format json_schema passthrough (ADR-0469)
+
+## 08-observability  (65 features, 🆕17)
+
+- · `L4` Context-usage metrics fan-out + surface-agnostic status line
+- · `L4` OTel span tree (Codex 10-step) — core 4-stage SDK-free wrap
+- · `L4` Cost & cache 대시보드
+- · `L3` AgentEvent
+- · `L3` AgentRecorder
+- · `L4` src/shared/logger.ts
+- 🆕 `L4` turn_diff_updated stream event + emitter
+- 🆕 `L4` Git observability composite — session fingerprint + turn-diff emit helpers
+- · `L3` JsonlRecorder
+- 🆕 `L4` "Git `::git-*` 5-directive emit protocol — phase-guarded behavioral layer + turn-collector wire"
+- · `L4` Observability stack audit (3-round, adversarial) findings + structural ratchets (ADR-0425)
+- 🆕 `L3` Session-startup LLM prewarm + Time-To-First-Message (TTFM)
+- · `L4` JsonlRecorder cumulative-bytes sliding-window retention
+- · `L4` OTel canonical attribute vocabulary (quanta.* 12 namespaces + gen_ai.* semconv)
+- · `L4` OTel MeterProvider-backed metric sink
+- · `L3` OTLP HTTP + Prometheus exporter helpers
+- · `L2` Metrics instrument wrap helpers + Grafana + alerts + E2E coverage
+- · `L2` ShadowOdb/Tool instrument wraps + AlertManager routing + Grafana provisioning
+- · `L2` PlanQueue/Budget/LSP wraps + withFullObservability + SLO doc
+- · `L4` observability.wired.total{slice} gauge — machine-readable wiring health
+- 🆕 `L3` Git `::git-*` directive emit — wire/serdes leaf (ADR-0220)
+- · `L4` workMetrics — turn별 비용·작업 투명성
+- · `L5` costUsd — null-prototype TABLE로 prototype-pollution NaN 차단
+- · `L4` '`assertNever` — compile-time + runtime exhaustiveness guard'
+- · `L4` '`byteCompare` — locale-independent string ordering'
+- · `L3` Composition-root metrics wire + activation telemetry (ADR-0358 / 0360)
+- · `L3` Cache + registry observability metric decorators (ADR-0352)
+- · `L3` System-prompt cache + drift detector + cache-control audit (ADR-0322 / 0326)
+- 🆕 `L3` Segmented context-window usage breakdown + wired /context
+- · `L2` contract-tier gate — REQUIRE_CONTRACT skip-vs-fail switch (Docker / LSP probes)
+- · `L4` 게이트 결정 trace surface — `AgentEvent.decision` variant + stderr debug-tracer + `/debug` + `QUANTA_DEBUG` (ADR-0239)
+- · `L4` `decision` AgentEvent → MetricsRegistry counter sink (`quanta.gate.{kind}.{outcome}.total`) (ADR-0270)
+- · `L3` Flock acquire/timeout/fail/stale_reclaim telemetry (ADR-0364)
+- · `L3` Health snapshot watcher — periodic re-emit + SIGHUP hot-reload (3-channel drift defense)
+- 🆕 `L4` HITL outcome-site OTel emit — tier_resolved / registry_escalated / handoff_emitted
+- 🆕 `L4` JsonlRecorder span correlation — deterministic turn / tool / llm span ids
+- 🆕 `L4` LLM tokens + cost_usd OTel emit at turn-record sink
+- · `L2` localize 도구 calibration — recall@K / MRR 측정 코퍼스 (regression CI 아님)
+- · `L4` lsp-nav test fixtures — ctx/run/findTool primitives for 9-tool per-suite split
+- · `L4` MemoryTelemetry → MetricsRegistry adapter (phase1 / phase2 / recall OTel emission)
+- · `L4` In-process Metrics registry — counters + gauges + timers (nearest-rank p50/p95)
+- 🆕 `L4` Metrics typed-port slice — counter / histogram / gauge + sinks (ADR-0144)
+- 🆕 `L2` NDJSON live-event introspection sink (Cursor cursor-ndjson-ingest)
+- 🆕 `L2` ADR-0222 OTel emit unified across 4 new slices (fence-aware narrow ports)
+- · `L2` OTLP/HTTP exporter — `QUANTA_OTEL_ENDPOINT` realtime ship (외부 SDK zero) (ADR-0268)
+- 🆕 `L3` "Passive git/gh stdout → structured VCS events (H6) — turn-diff observability for raw git/gh"
+- 🆕 `L4` V4A apply_patch OTel emit — patch.op + fuzzy_match_tier per hunk
+- 🆕 `L4` Permission decision-site OTel emit — slice-local recorder seam
+- · `L4` permission-rules fixture corpus — authorship-separated mustBlock/mustAllow catalog
+- · `L4` Pricing table — versioned static prices + provider cache-read semantics
+- · `L4` RunContext — run/instance/attempt/turn/toolUseId correlation primitive
+- · `L4` Frozen runtime-config SSOT — the only place that touches process.env
+- 🆕 `L3` Session transcript retention sweep
+- · `L2` shared test harness — ScriptedLLM / FakeLLM / RecordingStream / cfg / findEvent SSOT
+- · `L2` Shell-exec OTel observer — typed event stream → counter registry
+- · `L5` smoke fixture system — single/medium/tikitaka 15-scenario battery + LLM replay
+- · `L3` "Live tokens/sec rate in the streaming spinner"
+- · `L4` StdoutStream adapter — assistant-text painter hook with boundary flush
+- · `L4` TeeStream — fan-out StreamPort with degraded-record tracking
+- · `L4` Structured JSON-per-line logger — machine-consumable observability
+- · `L4` Test Artifact Purge Hellgate
+- 🆕 `L2` Per-tool TTL drift detector — config-vs-RECOMMENDED preset divergence as typed signal
+- · `L4` Trajectory v1 schema SSOT — kind taxonomy + envelope + redaction policy id
+- · `L2` TurnDiffSession — per-turn anchor → endTurn state machine
+- · `L4` Turn-timing wall-clock anchors — request/firstToken/streamEnd (ADR-0077)
+
+## 09-integration  (132 features, 🆕60)
+
+- 🆕 `L4` ChatGPT-OAuth provider — BYOK 없이 구독계정으로 모델 호출 (ADR-0094 Phase 1)
+- · `L4` diagnostics
+- ✨ `L4` HookBus + Cursor `updated_input` 흡수 (pre_tool_use 인자 rewrite) + ADR-0133 bidirectional RPC
+- · `L4` LspPort
+- · `L4` QUANTA_MCP_CONFIG
+- · `L4` pre_tool_use hook updatedInput rewrite channel
+- · `L2` ADR-0132 cloud-agent branch snapshot (force-with-lease only)
+- · `L4` ADR-0132 self-wake (3 hard guards + audit suffix)
+- · `L4` ADR-0132 reactor TriggerSourcePort (CI + PR-comment adapters)
+- · `L4` LLM provider fork — Anthropic 4-transport closed port (default/bedrock/vertex/foundry)
+- · `L3` LSP applyWorkspaceEdit Phase 2 — EXDEV cross-FS fallback (copy + unlink)
+- · `L4` lsp_definition
+- · `L3` ADR-0279 Automation engine composition-root wire
+- · `L3` ADR-0280 automation_update tool + REPL inbox banner
+- · `L4` unit + 46 nav-tool unit + 12 formatter unit
+- 🆕 `L3` GitHub Actions Tier 0 PR webhook adapter
+- 🆕 `L2` from-pr CLI sub-command (Tier 0 PR webhook bot entry)
+- 🆕 `L1` GitHub App webhook host — Tier 1 port-only scaffold
+- 🆕 `L3` PR output sink with mandatory redaction
+- 🆕 `L3` Mention filter with trust-scope + code-block exclusion
+- 🆕 `L2` Screen OCR native sidecar — Swift CLI (ScreenCaptureKit + Vision) for Tauri shell
+- 🆕 `L4` MCP transport port + stdio 분리 + Streamable-HTTP/SSE 카리어 (ADR-0391)
+- · `L4` ADR-0435 MCP crash-detection + auto-restart (exponential backoff)
+- ✨ `L3` ADR-0440 Canvas web components (render-side DiffView + segmented UsageBar)
+- · `L3` ADR-0453 Heartbeat autorun eligibility (per-thread approval gate for scheduler + reactor)
+- · `L3` Disk-configured command hooks (security-gated shell on HookBus events, ADR-0454)
+- 🆕 `L2` Proactive token-refresh scheduler — clock-driven pre-expiry refresh (ADR-0461)
+- · `L4` External-agent 4-stage import lifecycle
+- · `L2` JSON-RPC 2.0 envelope + -timeout 채널 (ADR-0033)
+- · `L4` MCP 클라이언트 + tool 브리지 (임의 MCP 도구 passthrough)
+- 🆕 `L2` Connector availability probe — DNS + HEAD + LRU (ADR-0160 W7 Phase D)
+- 🆕 `L2` Per-connector token rotation — in-flight mutex (ADR-0160 W7 Phase E)
+- 🆕 `L2` Connectors REST registry — dynamic server-driven catalog (ADR-0160 W7 Phase B)
+- 🆕 `L2` OAuth endpoint discovery — RFC 8414 well-known + OIDC fallback (ADR-0160 W7 Phase C)
+- 🆕 `L2` OAuth dynamic client registration — RFC 7591 (ADR-0160 W7 Phase C)
+- · `L4` ADR-0161 Automation 4-arm lifecycle + JSONL store
+- · `L4` ADR-0161 Model reroute (preference + fallback chain)
+- · `L4` ADR-0161 RRULE parser (RFC 5545 strict subset)
+- · `L4` ADR-0161 SchedulerRuntime (tickOnce + reactor seam reuse)
+- · `L4` ADR-0161 Weekday nth-occurrence DSL (+1MO … -5FR)
+- · `L4` IsolatedMcpClient — opt-in MCP backed by plugin-isolation (ADR-0162)
+- · `L4` DXT manifest loader + launchDxt (ADR-0162)
+- · `L4` PluginHost — typed JSON-RPC 2.0 wrapper for isolated plugins (ADR-0162)
+- · `L4` Plugin isolated process spawner — IsolatedProcessSpawnerPort + Bun adapter (ADR-0162)
+- · `L4` PluginLifecycleManager — auto-restart + heartbeat (ADR-0162)
+- · `L2` LLM Provider Phase 2 (Bedrock + Vertex real stream)
+- · `L4` LSP applyWorkspaceEdit 2-phase atomicity (+ EXDEV fallback)
+- · `L3` ADR-0215 AutomationEnginePort (Codex 3-table schema + pure tickScheduler)
+- · `L4` createLLM provider factory + DEFAULT_MODEL registry (OCP)
+- 🆕 `L4` LLM stream first-chunk + inter-chunk idle timeout decorator
+- · `L4` Provider streaming event decoders (SSE + WS) — Responses API v2
+- · `L4` assembleFromEvents — stream → Message + ADR-0076 thinking accumulation
+- 🆕 `L2` EventBridge — surface-agnostic pub/sub + closed BridgePayload union
+- 🆕 `L2` IPC transports — in-memory / stdio / uds / websocket
+- 🆕 `L2` PortableSessionV1 export/import — surface round-trip schema
+- · `L4` Anthropic beta channels + 30 MB skill cap
+- 🆕 `L3` Approval-gate wire — attribute HITL reviewer escalations to Objective+RunLedger via approval-SM (ADR-0407)
+- 🆕 `L2` Approval state machine (ADR-0403 port + store)
+- 🆕 `L4` ChatGPT-OAuth Responses-API adapter (subscription path)
+- · `L4` Claude Code session translator (~/.claude/projects/*.jsonl → Message[])
+- · `L3` Composition-root install helper + session-keyed resource registry (ADR-0332 / 0334 / 0345)
+- · `L3` Disk-persistent session registry + env-var swap + cross-machine negative (ADR-0348 / 0351 / 0355)
+- · `L3` Multi-process lockfile for jsonl disk-adapter (ADR-0356)
+- ⏸ `L1` Negative decisions — per-turn image retry rebuild + provider wm-live reads (ADR-0343 / 0344)
+- · `L3` Plugin discovery + MCP launcher + skill set extension + app catalog + manifest unification (ADR-0336 / 0338 / 0339 / 0341 / 0342)
+- · `L3` Session registry cleanup --dry-run (preview without commit) ADR-0387
+- · `L4` Session registry R13 — caller-owned wire + sweep telemetry + WAL RESTART + evict/help + path norm (ADR-0372/0373/0374/0375/0376/0377)
+- · `L3` Session registry R14 partial — WAL telemetry + cleanup slash + unified API (ADR-0378 / 0379 / 0383)
+- · `L3` Session registry R15 closeout — TRUNCATE mode + bulk pattern + dry-run + listSessionIds + 2 process ADRs (ADR-0384..0389)
+- · `L4` Session registry retention sweep + inspector slash (ADR-0367 / 0369 / 0370)
+- · `L3` SQLite-backed session registry (Codex logs_2.sqlite parity) (ADR-0361)
+- 🆕 `L4` Compaction visibility — RecoveryReason + microcompact + post_compact (ADR-0409)
+- 🆕 `L4` Competitor session import — real persist + MCP/hooks/rules + dedup (ADR-0430)
+- 🆕 `L2` Custom 3P Setup MVP — 5 core method + lifecycle (ADR-0245)
+- ✨ `L3` DXT user_config — typed fields + template substitution + keychain secrets
+- 🆕 `L2` Prompt-keyword + tool-failure effort escalation classifier
+- 🆕 `L2` Apply-patch fast-apply fallback (focused re-emit on failure)
+- 🆕 `L2` Apply-patch fast-apply fallback WIRE (retry on V4A failure)
+- 🆕 `L4` External-agent config migration — detect + import Claude/Cursor config into quanta format (H13)
+- · `L5` Heartbeat automation — thread-attached repeating agent (kind cron|heartbeat)
+- · `L4` Hook DoS caps — handlers-per-event + payload bytes (S5 hardening)
+- · `L4` Hook new events — user_prompt_submit + pre_compact + subagent_stop (S5)
+- · `L4` Hook per-handler timeout (S5 hardening)
+- 🆕 `L2` Channel-triple naming — `{name}-request` / `-response` / `-timeout`
+- 🆕 `L2` JSON-RPC 2.0 codec — encode/decode helpers returning `Result`
+- 🆕 `L2` JSON-RPC RequestId — branded, deterministic, seedable
+- 🆕 `L2` Landlock sandbox — phase-1 typed-degrade passthrough
+- 🆕 `L4` LLM adapter shared helpers — stream-timeout / tool-input throw / usage spread
+- · `L4` Agent↔LSP bridge — typescript + pyright adapter routing (ADR-0015)
+- · `L4` LspClient base — stdio handshake + 8 nav RPCs + LspRequestError typed
+- · `L4` LSP JSON-RPC 2.0 codec — Content-Length framed (MessageReader / encodeMessage)
+- · `L4` PyrightAdapter — pyright-langserver stdio adapter (Python)
+- · `L4` TypescriptAdapter — typescript-language-server stdio adapter + JS/TS/JSX/TSX languageId map
+- 🆕 `L2` ADR-0197 MCP Elicitation 7-schema (rmcp 0.15)
+- 🆕 `L2` H18 MCP HTTP-Server OAuth (RFC 8414 discovery + PKCE + refresh, port-injected)
+- 🆕 `L3` MCP inbound elicitation wiring + single-flight lease
+- 🆕 `L2` H19 MCP resources/prompts/roots typed client methods
+- 🆕 `L2` ADR-0470 B1 MCP Sampling Handler (@/llm-backed, HITL-gated)
+- 🆕 `L2` ADR-0196 MCP Tasks Capability (rmcp 0.15 standard)
+- · `L3` MCP tasks live binding (outbound tasks/* dispatch)
+- 🆕 `L2` Migration content-dedup fingerprint — SHA-256 of source bytes
+- 🆕 `L4` Import-log persistence — sidecar lock + busy-error
+- 🆕 `L3` Background side-agent daemon — resident monitor/cleanup (N1)
+- 🆕 `L3` MCP connector discovery / catalog (N2 — discover + install MCP servers)
+- 🆕 `L3` MCP resource/prompt tools (N3 — list/read resources + list/get prompts)
+- 🆕 `L3` "PTY / tmux session attach (N6) — attach + resize + live stdio across turns"
+- 🆕 `L4` OAuth callback provider port — CLI loopback / Tauri deep-link / Web origin
+- 🆕 `L3` Thread-goal budget ENFORCEMENT — budget_limited status + idle-continuation hard gate (H17)
+- 🆕 `L2` Objective as a first-class per-thread object (ADR-0394, MODEL ONLY wave)
+- 🆕 `L3` Objective LLM tools — objective_set / objective_update / objective_get (ADR-0402)
+- · `L3` ADR-0415 Observability live-wire (HookBus auto-subscribe + RuntimeFacade port exposure)
+- 🆕 `L3` Observability UI pane (Running / Waiting / Completed + Objective + Approvals)
+- · `L3` ADR-0406 Composition-root observability wire (Objective + RunLedger + ApprovalSM + ShadowVerify)
+- · `L4` ADR-0420 Observability served-WebSocket sink (closes ADR-0415 emitter-port-only deferral)
+- 🆕 `L4` OsSandbox port — platform-aware backend router with typed-degrade
+- 🆕 `L2` Revoke OAuth tokens on logout (RFC 7009, best-effort, NO-THROW, default-OFF)
+- · `L3` ADR-0401 Run-ledger attribution via hook bus (bash/subagent/mcp observer)
+- 🆕 `L3` ADR-0395 unified long-running-work state model (Run Ledger)
+- 🆕 `L2` Seatbelt (SBPL) profile compiler — macOS sandbox-exec text
+- 🆕 `L4` Shadow-ODB workspace path → 16-hex directory hash
+- 🆕 `L3` ADR-0400 Shadow Verify — real adapters (worktree/V4A/LSP) + shadow_verify LLM tool (Wave 2)
+- 🆕 `L2` ADR-0396 Shadow Verify — apply-before-show in a scratch overlay (Wave 1 port + runner)
+- ✨ `L3` skill-mcp-deps — skill-declared MCP servers auto-attached on activation (ADR-0476)
+- 🆕 `L4` 10-architecture-invariant slice-boundary runtime guards (16 slices)
+- · `L4` SseStream — spec-correct SSE serializer with redaction + injectable clock
+- 🆕 `L3` Managed-subagent mailbox — subagent_send_message between agents (ADR-0416)
+- 🆕 `L3` Subagent read-inbox — subagent_read_messages poll (ADR-0419)
+- ✨ `L3` Multi-agent coordination B — leader-mediated permission escalation (broker)
+- ✨ `L3` Multi-agent coordination A — task dependency DAG (Claude --agent-teams parity)
+- ✨ `L3` Multi-agent team-idle barrier + idle beacon (Capability C)
+- · `L4` `/why <toolCallId|last>` — 기록된 tool-call에 대한 meta-LLM reasoning chain (ADR-0271)
+- · `L3` Windows flock strategy — Node `wx` retained (ADR-0365 negative)
+
+## 09-security  (7 features, 🆕3)
+
+- · `L4` Secret redaction as content-plane invariant (ADR-0078)
+- 🆕 `L3` PII redaction을 dispatch.applyRedaction에 wire (ADR-0399)
+- 🆕 `L3` check_secrets LLM-facing tool over async secret-detection (ADR-0412)
+- · `L4` sensitivity classifier — Layer 1 of secret-redaction (ADR-0078)
+- · `L4` redaction opt-out gate — startup-fail when disabled without ack (ADR-0078)
+- · `L4` Network allowlist — propositional outbound host check (ci-bot mode)
+- 🆕 `L3` Network-egress enforcement wiring (mode → dispatch-guard)
+
+## 10-app-persist-policy  (1 features, 🆕0)
+
+- · `L4` Session import / export primitive
+
+## 10-app  (149 features, 🆕52)
+
+- · `L3` Biome 슬라이스격리
+- · `L3` bun run dev|start
+- · `L4` 읽기 전용, NON-authoritative inspector
+- · `L4` Python harness e2e 폐쇄 (2026-05-21, L3→L4)
+- · `L4` QUANTA_STATE_PATH
+- · `L5` tests/integration/sota-codex-full.test.ts
+- · `L4` Shadow ODB rewindToLast — destructive restore + auto safety net
+- 🆕 `L3` Verify-checkpoint bridge — opt-in markVerified caller seam
+- · `L3` Code coverage observability — V8-coverage port + MetricSink emission
+- · `L3` Prometheus recording rules — SLO burn-rate pre-computation
+- · `L3` AST-precise branch counter — astCoverageSource() behind ADR-0165 port
+- · `L3` Prompt cache observability — typed observer + budget bridge + tool surface
+- · `L3` Per-tool TTL drift detector — config-vs-preset divergence as typed signal
+- 🆕 `L3` Darwin VZ native scaffold — napi-rs binding to Virtualization.framework
+- · `L3` Architecture generator — tools/arch-gen walks ADRs + slices → ARCHITECTURE.generated.md
+- · `L3` Linux sandbox native impl — Phase 3.1 Rust bodies + cargo build verify
+- · `L4` CLI 헬퍼 export 폐쇄 (2026-05-21, L2→L3)
+- · `L5` Cross-slice 타입-레벨 mirror 단언
+- · `L4` tests/integration/probe.test.ts
+- · `L4` withGitSnapshot
+- 🆕 `L3` REPL slash-surface ctx mega-wire (8 slash slots)
+- 🆕 `L3` CLI runtime feature-config unification (CLI-04)
+- 🆕 `L3` CLI bootstrap host extraction (CLI-01)
+- · `L3` runRepairRounds
+- 🆕 `L2` ADR-0302 — /identity mid-session system-prompt rebuild (closes ADR-0291 last-mile)
+- 🆕 `L3` Thin-surface invariant + headless-core ratchet
+- 🆕 `L3` SideConversationPort — CLI engine-internal leak closure (CLI-02)
+- 🆕 `L3` CLI session-commands shim removal (CLI-05)
+- 🆕 `L3` Slash registry split — surface / session / app (CLI-03)
+- 🆕 `L3` REPL host slim-down — lift 10 surface-adapter factories (CLI-06)
+- 🆕 `L3` Headless second-consumer proof (ARCH-07)
+- 🆕 `L2` ADR-0309 — Surface-Wire R2 (identity onChange + granular registry + per-tool auto-record)
+- 🆕 `L3` Surface composition wire — ADR-0291/0292/0293/0294 end-to-end
+- 🆕 `L3` '`@/apps/web-daemon` — Bun.serve WS daemon publishing RuntimeSession'
+- 🆕 `L2` ADR-0316 — Web frontend surface (Vite + React + Tailwind SPA)
+- 🆕 `L3` Tauri macOS desktop shell — bun-daemon + screen-OCR sidecars + opt-in global hotkey (ADR-0317)
+- · `L3` LLM 호출 0
+- 🆕 `L3` "/sticky-model SET surface — per-mode model slash command (ADR-0462)"
+- · `L2` QUANTA_BENCH_TIMEOUT_MS
+- · `L4` Run-mode expansion — ide + daemon (C1, ADR-0092)
+- · `L4` eval 앱 — 6-tier 검증 스택 (audit/synthetic/grounding/public/trajectory/compare)
+- · `L4` eval Tier-1 — synthetic scenario runner + LLM judge
+- · `L4` eval Tier-2 — context grounding structured probe + live gate
+- · `L4` eval Tier-4 — trajectory replay / classify / freeze (real-session corpus)
+- · `L4` eval Tier-5 — A/B pairwise compare across CLI adapters (quanta/cursor/claude/aider)
+- · `L4` QUANTA_HOME — cross-cutting app-home root override
+- · `L4` agent — pure argv parser (mode-discriminated, env-free)
+- · `L4` agent — unified AgentConfig assembler (12-lever wiring point)
+- · `L2` agent SCC guard — Tarjan + module-top-level usage 차단 (deadlock 봉합)
+- 🆕 `L4` 슬라이스 architecture invariants — biome (정적) + test (런타임) 이중 강제
+- · `L5` assembleConfig — per-turn AgentConfig composer (surface-agnostic)
+- · `L3` "@-mention autocomplete dropdown (CLI input)"
+- · `L4` bench — Best-of-N sampler (N trajectories × patchVote)
+- · `L4` Bench cache-shaped pathspec SSOT — patch-sanitizer prune-at-source
+- · `L4` Bench corpus loader — real SWE-bench vs synthetic layout detection
+- · `L4` bench — single-instance eval driver (sandbox + agent + verdict + diff)
+- · `L4` bench — per-instance env pre-preparation (fail-fast on setupCmd)
+- · `L2` bench — decisive 2-axis failure classifier (termination × signals[])
+- · `L4` bench — host-architecture detection + Docker image inventory
+- · `L4` bench — non-agent evidence emitter (sandbox / patch_generated / verify)
+- · `L4` bench — official Python SWE-bench harness verifier (real grader)
+- · `L4` Bench repair-round context — seed message + cumulative-diff truncation
+- · `L4` Built-in slash commands (10)
+- · `L3` "Canvas rich DiffView (split + collapsible) + UsageBar legend (web)"
+- · `L2` agent — ci-bot mode preset policy (branch-only + no-MCP)
+- 🆕 `L4` CLI `/help` discovery — category grouping + env-var SSOT + virtual /image
+- 🆕 `L4` CLI lifecycle pills — subagent/follow-up/MCP 3-pill (conditional)
+- · `L4` /logout — destroy on-disk ChatGPT-OAuth token bundle
+- · `L4` CLI `--resume` state machine — path-mode vs id-mode (ADR-0024 split)
+- · `L4` /retry-with — session-time model-swap slash command (ADR-0065 wire-up)
+- · `L3` bun build --compile → dist/agent single binary
+- 🆕 `L4` CLI `/help` unified menu — dynamic BUILTINS + keybinds + ENV knobs
+- 🆕 `L2` CLI status-bar — DECSTBM scroll-region pinned bottom row
+- 🆕 `L4` CLI status-pills chrome — Mode/Workspace/Sandbox/Skills/Rules (5-pill)
+- 🆕 `L4` CLI turn-summary box — tools/verify-guard/compaction/memory/recovery
+- 🆕 `L4` ColorPolicyResolver (per-surface ANSI color cache)
+- · `L3` "Turn-completion terminal notification (OSC title + bell)"
+- · `L3` Composition-root mega-wire — 11 subsystems, default-OFF (ADR-0236)
+- · `L3` "Pre-compaction context-usage warning banner"
+- · `L2` clampDials — propositional dial clamping with operator log
+- 🆕 `L3` /doctor startup self-diagnostic — pure check-registry over injected probes
+- · `L5` .env loader — first-wins, no-override, `export ` strip, no-deps
+- · `L4` eval Tier 4 — pairwise judge with bias-swap double pass
+- · `L2` eval Tier 3 — public bench bridge (SWE-bench Verified report → PublicPayload)
+- · `L4` eval storage — JSONL append-only ResultStore (per-runId serialisation)
+- · `L4` eval Tier 1 — LLM-driven synthetic scenario generator (strict validation)
+- · `L4` eval Tier 1 — LLM-as-judge (per-rubric pass/fail + weighted score)
+- · `L4` eval Tier 1 — Scenario JSON schema + tolerant loader/parser
+- · `L4` eval taxonomy classifier — query → UseCaseId (LLM, JSON-block tolerant)
+- · `L1` eval taxonomy doc-sync — code → markdown one-way renderer
+- · `L4` eval taxonomy — 12 major / ~120 leaf use-case tree (single source of truth)
+- · `L4` eval Tier 0 — static grep-mapper + curated rules + (major × CoverageLevel) matrix
+- · `L4` eval Tier 3 — structural projection diff (LCS over event kinds)
+- · `L4` eval Tier 3 — meta sidecar + JSONL session loader (no-heuristic policy)
+- · `L3` "External $EDITOR draft composition (ctrl-x ctrl-e)"
+- · `L5` fc baseline ratchet — empty-stub / orphan-ADR 캡 + tsc/biome/test 측정 스냅
+- · `L5` fc check-changed — PR-time gate (new src/*.ts 는 fc evidence 등록 필수)
+- · `L4` fc prose bundles — intro + non-absorption 정책 MD 가 catalog 빌드 시 blend
+- · `L5` feature-catalog tool — `bun fc` CLI (build / validate / list / audit / lint)
+- · `L4` ImageQueue — single-shot per-turn multi-modal image attachment
+- · `L3` `/inspect <toolCallId>` — 세션 JSONL projection + 확장 패널 (input/decision/result/recovery) (ADR-0239 Track I)
+- · `L3` "User-customizable keybinding config layer"
+- · `L3` "shift+tab permission/agent mode-cycle + input pill"
+- · `L4` narrowMode + assertModeMatrix — 48-cell defense-in-depth
+- · `L5` tools/pm — executable Definition of Done (catalog + TDD + e2e-hellgate gate)
+- · `L4` probe — NON-authoritative failure triage (ordered rule-table hypothesis)
+- · `L4` probe — fault-localization 3-stage funnel adherence checker
+- · `L4` probe — plain-text renderers (`--failed` / `--slow` / `--cost` / `--json`)
+- · `L4` probe — trajectory JSONL + run-dir loader (forward-compat, never throws)
+- 🆕 `L2` Prompt-suggestion + quality reject-gate (ADR-0467)
+- · `L4` `quanta session` subcommand suite — 10 lifecycle operations
+- 🆕 `L4` RefreshCoordinator (ChatGPT-OAuth thundering-herd guard)
+- 🆕 `L2` REPL code-smell cleanup — STATUS_FLASH config + string drift + silent-catch telemetry
+- 🆕 `L4` REPL CLI heuristics inventory — DOC/ENV/ARBITRARY audit
+- 🆕 `L4` Interactive REPL (continuous conversation + in-REPL slash routing)
+- · `L4` REPL `/mcp` surface translator (live CLI state → structural snapshot)
+- · `L4` CLI repl/ orphan modules — Slice B truth-up & prune
+- · `L4` REPL `PromptSource` adapter — slash short-circuit + raw-line reader
+- · `L3` `/replay <session-id> [--at N] [--from tc_x]` — 세션 JSONL 시간순 재생 (ADR-0239 Track R)
+- · `L4` Repro-test pipeline — Agentless §3.3.1 generate / execute / select
+- 🆕 `L4` runner/session-ops — surface-agnostic `quanta session …` dispatcher
+- · `L4` Session `index.jsonl` directory — atomic upsert + in-process mutex
+- · `L4` SessionRootProvider port — multi-tenant session-root abstraction
+- · `L4` Shadow-ODB per-workspace LRU eviction (best-effort, scope-fenced)
+- 🆕 `L4` /branches — speculative N-best branch-search progress
+- 🆕 `L4` /cost — cumulative session cost panel
+- 🆕 `L4` /history — recent turns + tool-call breadcrumb
+- 🆕 `L4` /mcp — MCP server + bridged-tool explorer
+- 🆕 `L4` /memory — browse / recall / search / delete durable memory
+- 🆕 `L4` /permission — Codex 5-axis permission stack inspector
+- 🆕 `L4` /plan — read-only plan-store visualization
+- 🆕 `L4` /queue per-msg manage (ADR-0228 — Codex composer parity)
+- 🆕 `L4` /rules + rule-pill — repo-local rule inventory indicator
+- 🆕 `L4` /snapshot — Shadow-ODB snapshot list / rewind / partial restore
+- 🆕 `L4` /web + /paste + /edit-plan + /edit-message (ADR-0224/0225)
+- 🆕 `L4` /state — WorkingState L3 scratchpad visualization
+- 🆕 `L4` SlashContext R10 ports — 5 default-OFF surface seams
+- 🆕 `L4` SlashContext 6-port wire-up (S3 deferred-wire closeout)
+- 🆕 `L4` '`@/auth/chatgpt-oauth` 슬라이스 — PKCE + JWT + token-store + refresh + callback port'
+- · `L2` '`@/ipc` 슬라이스 — CLI ↔ Web ↔ Tauri EventBridge + portable session'
+- 🆕 `L4` '`@/runner` 슬라이스 — surface-agnostic Layer-2 오케스트레이션'
+- 🆕 `L4` '`@/ui` 슬라이스 — surface-agnostic ANSI/box helpers (former auth-ui)'
+- 🆕 `L4` /snapshot — shadow-store snapshot/restore/diff slash command (ADR-0122)
+- · `L4` SWE-bench A/B matrix runner — 3-axis 2^3 condition sweep (LSP × subagent × skills)
+- · `L4` tools/bin/swebench-python — uvx ephemeral python shim
+- 🆕 `L3` Thin-surface increment — turn-driver hoist + cli→agent launcher relocation
+- · `L3` split-screen live AgentEvent timeline panel (`QUANTA_TIMELINE=N`) (ADR-0239 Track T)
+- · `L4` withWorktree — throwaway git worktree HOF + transient-lock retry
+- · `L4` Persistent worktree primitive — createPersistentWorktree / removeWorktree

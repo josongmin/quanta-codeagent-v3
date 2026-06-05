@@ -139,6 +139,12 @@ const CALLER_WIRE_TOOL_NAMES = [
   "side_agent_list",
   "side_agent_stop",
   "side_agent_findings",
+  // jun-06 wave-3 caller-wire tools — ADR-0487 force-background (subagentBgTools
+  // behind QUANTA_FORCE_BACKGROUND + admission queue) and G1 appshot_verify
+  // (DefaultToolPorts.appshot behind QUANTA_APPSHOT). Both register only when the
+  // host wires the slot, so they are not in `defaultTools`.
+  "subagent_force_background",
+  "appshot_verify",
 ] as const
 
 const ALL_REGISTERED_TOOL_NAMES = (() => {

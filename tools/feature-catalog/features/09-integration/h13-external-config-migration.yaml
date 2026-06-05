@@ -53,12 +53,15 @@ evidence:
     - src/migration/external-config/convert.ts
     - src/migration/external-config/ledger.ts
     - src/migration/external-config/run.ts
+    - src/migration/external-config/persist.ts
     - src/apps/cli/config-migration-notice.ts
   adrs: []
   tests:
     unit:
       - tests/unit/external-config-migration-hellgate.test.ts
       - tests/unit/external-config-migration-e2e-hellgate.test.ts
+      - tests/unit/config-migration-persist-hellgate.test.ts
+      - tests/unit/config-migration-persist-e2e-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -78,6 +81,13 @@ notes: |
   a different project). `.cursorrules` (single-file legacy form) is detected
   but the SOTA path is the `.cursor/rules/*.mdc` directory form (the one Cursor
   itself migrated to) — `loadGlobRules` parses the directory. Import wiring of
-  the converted outputs into live quanta permission/hook/MCP/subagent stores is
-  the surface's responsibility (the slice stays isolated: no @/permission,
-  @/mcp, @/subagent imports) — the notice seam is the current opt-in surface.
+  the converted outputs into live quanta config is done by `persist.ts`
+  (`persistConvertedItems`): it WRITES each `ConvertedItem` to the on-disk
+  location quanta's own readers consume — settings.json#permissions/#hooks,
+  .mcp.json#mcpServers (env/secrets scrubbed), .quanta/agents/<name>.md,
+  AGENTS.md, .quanta/rules/<name>.md — rather than importing @/permission /
+  @/mcp / @/subagent (the slice stays isolated). Discipline: default-OFF
+  (enabled:false ⇒ byte-identical no-op), idempotent/no-clobber (JSON merged,
+  markdown written as a `.imported.md` sibling when native exists), ledger-
+  throttled per sourceKey, and NO-THROW (a single item's failure is a typed
+  MigrationWarning). The host resolves the knob + paths and calls in.

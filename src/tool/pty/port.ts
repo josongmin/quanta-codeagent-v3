@@ -89,3 +89,107 @@ export const PTY_MAX_ATTACHED = 32
 export const PTY_RING_BYTES = 256 * 1024
 export const PTY_MIN_DIM = 1
 export const PTY_MAX_DIM = 1000
+
+/* ─────────────────────────── Phase-1b: owned (Bun-native) PTY ──────────────────
+ * The Bun-native adapter (`createBunPtyAdapter`) is a SECOND `PtySessionPort`
+ * implementation for OWNED PTYs — sessions quanta itself spawns under a real tty
+ * (`Bun.Terminal` + `Bun.spawn({ terminal })`). The port contract above is
+ * UNCHANGED (same 7 methods, same NO-THROW envelope, same caps); the only
+ * additive surface is the spawn entry point (how an owned `pty:<seq>` handle is
+ * BORN), which is NOT a `PtySessionPort` method (handles are minted here, then
+ * attached/written/read via the port like any other).
+ *
+ * Security inversion (RFC §4.1): owned ⇒ NO foreign-jail (quanta spawned it under
+ * its own cwd/argv — there is no "attach to someone else's privileged terminal"
+ * risk, so `foreign-denied` simply does not apply). The only trust boundary is the
+ * cwd-jail at spawn time, enforced by the injected {@link PtyFactoryPort.jailCwd}.
+ *
+ * Closed-port DI (RFC §4.4): the slice never touches `Bun.spawn` / `new
+ * Bun.Terminal` — those are INJECTED behind {@link PtyFactoryPort}, exactly as
+ * `createTmuxAdapter` takes an injected `TmuxExec`. So the adapter is fully
+ * testable over a `FakePtyFactory` with no real process / no Bun global. */
+
+/** A live owned terminal handle (one Bun.Terminal). The factory hands one back
+ *  from {@link PtyFactoryPort.open}; the adapter drives it through these ops and
+ *  never sees the concrete `Bun.Terminal`. */
+export interface PtyTerminalHandle {
+  /** Feed bytes to the child's stdin. Returns the number of bytes written. */
+  write(data: string): number
+  /** Resize the tty `(cols, rows)` — Bun's `Terminal.resize(cols, rows)` order. */
+  resize(cols: number, rows: number): void
+  /** Toggle raw mode (input passed through unprocessed). */
+  setRawMode(enabled: boolean): void
+  /** Close the terminal (idempotent). */
+  close(): void
+}
+
+/** A spawned owned child process. */
+export interface PtyChildHandle {
+  /** The OS process id (best-effort; 0 when the fake has none). */
+  readonly pid: number
+  /** Terminate the child (idempotent). */
+  kill(): void
+}
+
+/**
+ * INJECTED factory for the owned (Bun-native) backend. The real impl
+ * (`new Bun.Terminal(...)` + `Bun.spawn(argv, { terminal })`) lives in the
+ * composition layer (`src/host/runtime/pty-backend.ts`) next to `bunTmuxExec`,
+ * so the `@/tool/pty` slice stays fence-clean (imports only `zod` + this slice)
+ * and process-free in tests. NONE of these methods runs inside the slice's hot
+ * path without going through the adapter's NO-THROW wrapper.
+ */
+export interface PtyFactoryPort {
+  /** Allocate a real tty. `onData` streams child output (the adapter drains it
+   *  into a bounded ring); `onExit` fires once when the child exits. */
+  open(opts: {
+    readonly cols: number
+    readonly rows: number
+    readonly onData: (bytes: Uint8Array) => void
+    readonly onExit: (code: number) => void
+  }): PtyTerminalHandle
+  /** Spawn `argv` under `terminal` with `cwd`/`env`. `terminal` is the opaque
+   *  object the factory's `open` is backed by (the real impl passes the
+   *  `Bun.Terminal` to `Bun.spawn({ terminal })`); the slice treats it as a
+   *  token it merely round-trips. */
+  spawn(
+    argv: readonly string[],
+    cwd: string,
+    env: Readonly<Record<string, string>>,
+    terminal: PtyTerminalHandle,
+  ): PtyChildHandle
+  /** cwd-jail — validates/normalizes the spawn cwd (closed port, same chokepoint
+   *  as the 6-tool `bash` jail). A cwd escaping the workspace ⇒ `{ ok:false }`. */
+  jailCwd(cwd: string):
+    | { readonly ok: true; readonly cwd: string }
+    | {
+        readonly ok: false
+        readonly reason: string
+      }
+}
+
+/** Options for {@link BunPtyAdapter.spawn}. */
+export interface BunPtySpawnOpts {
+  /** Working dir — the cwd-jail (`PtyFactoryPort.jailCwd`) resolves/validates it. */
+  readonly cwd: string
+  readonly env?: Readonly<Record<string, string>>
+  /** Default 80 (Bun TerminalOptions default). */
+  readonly cols?: number
+  /** Default 24. */
+  readonly rows?: number
+}
+
+/** The concrete owned-PTY adapter type — a SUPERSET of {@link PtySessionPort}
+ *  (the 7 port methods are identical) plus the spawn entry point (handles are
+ *  minted here, then attached via the port). */
+export interface BunPtyAdapter extends PtySessionPort {
+  /** Spawn an OWNED process under a real tty. Returns its `pty:<seq>` handle +
+   *  the resumable output cursor. NO-THROW: a jail/spawn/open failure ⇒ a typed
+   *  `PtyResult` err (never an exception at the boundary). NOT a
+   *  `PtySessionPort` method. */
+  spawn(argv: readonly string[], opts: BunPtySpawnOpts): Promise<PtyResult<AttachResult>>
+  /** Reap every owned child + close every terminal (idempotent). The composition
+   *  layer calls this at session shutdown (the "tear down PTY children FIRST"
+   *  teardown invariant). */
+  closeAll(): Promise<void>
+}

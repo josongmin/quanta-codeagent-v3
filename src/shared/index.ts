@@ -49,7 +49,7 @@ export { dispatchNoThrow, dispatchNoThrowWith, notifyAllNoThrow } from "./no-thr
 export { omitUndef } from "./optional"
 export { RECONCILE_PLACEHOLDER_TEXT, reconcileToolPairing } from "./reconcile-tool-pairing"
 export type { RunContext } from "./run-context"
-export type { RuntimeConfig, SwebenchCacheLevel } from "./runtime-config"
+export type { PtyBackend, RuntimeConfig, SwebenchCacheLevel } from "./runtime-config"
 export {
   __resetRuntimeConfig,
   LOG_LEVELS,

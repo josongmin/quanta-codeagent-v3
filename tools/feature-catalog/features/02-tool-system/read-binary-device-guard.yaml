@@ -1,0 +1,48 @@
+id: read-binary-device-guard
+title: read B5 device + binary guard — reject FIFO / device files + NUL-byte binaries before reading
+section: 2
+subsystem: 도구 시스템 — read tool 안전장치 (B5 device/binary guard)
+order: 478
+maturity: L4
+status: stable
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:cli, security-touched, tier:core]
+depends_on: [read-write-edit, fsjailerror]
+purpose: |
+  The `read` tool rejects targets that would hang the loop or dump unbounded
+  output BEFORE opening them (B5 guard). A named pipe (FIFO) BLOCKS forever when
+  no writer is attached; a character device (`/dev/random`, `/dev/zero`,
+  `/dev/tty`) streams infinitely; a block device (`/dev/disk0`) dumps gigabytes
+  of raw storage — each is the canonical "tool hangs / floods the loop" DoS. The
+  guard classifies the already-`stat()`ed target via the additive `FileInfo`
+  flags `isFIFO` / `isCharacterDevice` / `isBlockDevice` (src/storage/types.ts,
+  populated from `stat().isFIFO()` / `.isCharacterDevice()` / `.isBlockDevice()`)
+  and returns a typed `ok:false` (`failure.mode:"rejected", reason:"device_file"`)
+  WITHOUT reading. ORDER MATTERS: the device check runs BEFORE any byte read so a
+  blocking device never opens. A second pass sniffs a bounded leading byte window
+  (8 KiB) for a NUL (`0x00`) and rejects binary files the same way. Unconditional
+  / secure-by-default — no knob; a device or binary target is never a legitimate
+  text read.
+evidence:
+  code:
+    - src/tool/read/index.ts
+    - src/storage/types.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/read-binary-device-guard-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null
+notes: |
+  B5 (jun-04 bug-fix sprint). The device check is a pure classifier over the
+  FileInfo flags fetched by the existing stat, so it adds no extra syscall on the
+  happy path. `storage/types.ts` is the data layer: the same `FileInfo` also
+  carries `mtimeMs` for the stale-read-guard (ADR-0474) — these are additive
+  sibling fields. The dedicated hellgate pins FIFO / char-device / block-device
+  rejection + the NUL-byte binary sniff + device-check-before-read ordering.

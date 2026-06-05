@@ -149,6 +149,14 @@ export const instrumentSubagentScheduler = (
       }
       return result
     },
+    forceBackground(id, forceOpts) {
+      // ADR-0487 — instrument the promote outcome (closed union as a label).
+      const outcome = scheduler.forceBackground(id, forceOpts)
+      safe(metrics, () =>
+        metrics.increment(`${prefix}.force_background.total`, 1, { outcome }),
+      )
+      return outcome
+    },
     list: scheduler.list.bind(scheduler),
     prune: scheduler.prune.bind(scheduler),
     serialize: scheduler.serialize.bind(scheduler),

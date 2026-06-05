@@ -126,6 +126,72 @@ export const cancelSubagent = (
   return stopped ? "stopped" : "not_found"
 }
 
+/**
+ * Closed outcome of routing a `force_background` control-op (ADR-0487) through
+ * the session's background-subagent scheduler. Mirrors
+ * {@link CancelSubagentOutcome}'s no-throw posture — every input collapses to a
+ * closed arm, NEVER a thrown error, so the parent turn keeps running. Adding a
+ * new arm MUST extend this union AND the matching `force_background` AgentEvent
+ * in `@/stream/types`.
+ *
+ *   - `promoted_now`    — a slot was free (or `allowBurst` granted a +1 burst);
+ *                          the queued subagent started running immediately.
+ *   - `moved_to_front`  — no free slot / no burst; re-ordered to the FIFO head
+ *                          (runs next).
+ *   - `already_running` — the handle was already running OR terminal (no-op).
+ *   - `not_found`       — unknown handle id.
+ *   - `queue_disabled`  — the scheduler has no admission queue (default path).
+ *   - `scheduler_absent`— the session never opted into a background scheduler
+ *                          at all. Observation only; the parent turn continues.
+ */
+export type ForceBackgroundControlOutcome =
+  | "promoted_now"
+  | "moved_to_front"
+  | "already_running"
+  | "not_found"
+  | "queue_disabled"
+  | "scheduler_absent"
+
+/** Narrow shape of the scheduler slice this module needs (mirrors
+ *  `BackgroundSubagentScheduler.forceBackground`'s signature). Taking the
+ *  narrow type keeps the module unit-testable with a fake and documents the
+ *  exact surface used — the same discipline as {@link SubagentRegistrySlice}.
+ *  The 5 producer outcomes are a SUBSET of
+ *  {@link ForceBackgroundControlOutcome} (which adds `scheduler_absent`). */
+export interface BackgroundSchedulerSlice {
+  /** Promote a queued handle to run NOW (or the FIFO head). No-throw; returns
+   *  a closed 5-way outcome. */
+  forceBackground(
+    id: string,
+    opts?: { allowBurst?: boolean },
+  ): "promoted_now" | "moved_to_front" | "already_running" | "not_found" | "queue_disabled"
+}
+
+/**
+ * Route a `force_background` op (from a submission envelope OR the model-facing
+ * `subagent_force_background` tool) to the session's background scheduler.
+ *
+ * Pure except for the scheduler mutation:
+ *   - scheduler undefined  → `scheduler_absent` (no allocation, no consult).
+ *   - scheduler present     → returns its closed `forceBackground` outcome.
+ *
+ * NEVER throws — even on a malformed `handleId` OR a buggy host-supplied stub
+ * the loop's parent turn must keep running. A throw collapses to `not_found`
+ * (same shape as "no record"), mirroring {@link cancelSubagent}.
+ */
+export const forceBackground = (
+  scheduler: BackgroundSchedulerSlice | undefined,
+  handleId: string,
+  opts?: { allowBurst?: boolean },
+): ForceBackgroundControlOutcome => {
+  if (scheduler === undefined) return "scheduler_absent"
+  try {
+    return scheduler.forceBackground(handleId, opts)
+  } catch {
+    return "not_found"
+  }
+}
+
 /** Type guard: this submission envelope carries the `interrupt` op. */
 export const isInterruptOp = (
   sub: Submission,

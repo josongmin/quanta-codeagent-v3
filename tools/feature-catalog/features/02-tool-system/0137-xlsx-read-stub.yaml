@@ -29,6 +29,7 @@ evidence:
     - src/tool/document/docx-read.ts
     - src/tool/document/index.ts
     - src/tool/document/authoring/zip-store.ts
+    - src/tool/document/authoring/ooxml-read.ts
   adrs: [137, 138]
   tests:
     unit:

@@ -125,6 +125,21 @@ const parseSessionListFormat = (raw: string | undefined): "rich" | "plain" | und
   return undefined
 }
 
+/** PTY backend selector (`QUANTA_PTY_BACKEND`). `tmux` (default, byte-identical
+ *  to the pre-slice path) | `bun` (Bun-native terminal) | `both` (try bun, fall
+ *  back to tmux). Unknown ⇒ warn once + default `tmux`. */
+const PTY_BACKENDS = ["tmux", "bun", "both"] as const
+export type PtyBackend = (typeof PTY_BACKENDS)[number]
+const PTY_BACKEND_SET = new Set<string>(PTY_BACKENDS)
+const parsePtyBackend = (raw: string | undefined): PtyBackend => {
+  if (raw === undefined) return "tmux"
+  if (PTY_BACKEND_SET.has(raw)) return raw as PtyBackend
+  stderrWarn(
+    `ignoring unknown QUANTA_PTY_BACKEND="${raw}" — valid: ${PTY_BACKENDS.join("|")} — defaulting to "tmux"`,
+  )
+  return "tmux"
+}
+
 const parseSwebenchCacheLevel = (raw: string | undefined): SwebenchCacheLevel => {
   if (raw === undefined) return "env"
   if (SWEBENCH_CACHE_LEVEL_SET.has(raw)) return raw as SwebenchCacheLevel
@@ -175,6 +190,16 @@ export interface RuntimeConfig {
    *  declines (`no-handler`) — byte-identical (and currently byte-identical even
    *  when ON, because the field is unread). */
   readonly mcpSampling: boolean
+  /** delta-token-accounting (RFC jun-6) incremental context-estimate gate
+   *  (`QUANTA_DELTA_TOKEN_COUNT`). Strict opt-in (`=== "1"`). When ON, the loop
+   *  may construct a `TokenDeltaCounter` and read its O(1) running `total()` at
+   *  the `estimateTokens` re-scan sites instead of re-walking the whole
+   *  transcript. The counter tracks the PRE-CEIL char sum (`charsOf`) and applies
+   *  the single end-`Math.ceil` only in `total()`, so the produced numbers are
+   *  byte-identical to a full re-scan (the knob guards CONSTRUCTION/perf, NOT
+   *  arithmetic). Default false ⇒ the counter is never constructed and every site
+   *  calls `estimateTokens(...)` directly — byte-identical, zero new allocation. */
+  readonly deltaTokenCount: boolean
   /** H19 (jun-3-misc §3) inbound MCP `roots/list` gate (`QUANTA_MCP_ROOTS`).
    *  Strict opt-in (`=== "1"`). When ON *and* the composition root wires a
    *  `RootsProviderPort` (from the active workspace), the MCP client advertises
@@ -314,6 +339,58 @@ export interface RuntimeConfig {
    *  `DefaultToolPorts.artifactRegistry` (the generation tools register their
    *  outputs; the model lists/inspects/destroys via `artifact_*`). */
   readonly artifactStore: boolean
+  /** C6 — structured deny-reason surfacing (`QUANTA_DENY_REASON`). Strict opt-in
+   *  (`=== "1"`). Default false ⇒ the `ToolFailure.permission_denied` envelope
+   *  omits `denyReason`, the model-facing deny `content` carries no
+   *  `[layer/pillar]` prefix, and the `DecisionEvent` carries only its current
+   *  fields — byte-identical to today. When ON, each deny site attaches a
+   *  {@link import("@/permission").StructuredDenyReason} (whose `safeReason`
+   *  REUSES the already-sanitized recorder one-liner — no new exposure) so the
+   *  model can self-correct on the deciding `layer` / `pillar` instead of
+   *  retry-thrashing, and a human debugging a deny sees provenance. The
+   *  structured reason is computed lazily ONLY when this is on (zero allocation
+   *  otherwise). */
+  readonly surfaceDenyReason: boolean
+  /** account-ratelimit (RFC jun-6) proactive pre-request delay gate
+   *  (`QUANTA_RATELIMIT_PROACTIVE`). Strict opt-in (`=== "1"`). Default false ⇒
+   *  the LLM adapters never capture `.withResponse()` ratelimit headers into the
+   *  snapshot store and the loop never inserts a `proactiveDelayMs` sleep before a
+   *  request (byte-identical to today). When ON, the adapter response-header hook
+   *  feeds an `account-ratelimit` snapshot store and the loop pauses by the
+   *  derived pre-request delay to avoid tripping the account limit. */
+  readonly proactiveRateLimit: boolean
+  /** N6 PTY backend selector (`QUANTA_PTY_BACKEND`). `tmux` (default,
+   *  byte-identical) | `bun` (Bun-native terminal) | `both` (bun w/ tmux
+   *  fallback). Only consulted when `ptyAttach` is on (else no PTY tools are
+   *  registered at all). */
+  readonly ptyBackend: PtyBackend
+  /** H18/keyring — OS-keyring-backed MCP OAuth token store
+   *  (`QUANTA_MCP_OAUTH_KEYRING`). Strict opt-in (`=== "1"`). Default false ⇒ the
+   *  MCP OAuth provider uses the plain 0600 file `TokenStorePort` (byte-identical).
+   *  When ON *and* the OS keyring binary is reachable, the composition root wraps
+   *  the file store with `composeTokenStore(selectKeyring(...), fileStore)`
+   *  (Keychain / libsecret, file-fallback + migration, NO-THROW). */
+  readonly mcpOAuthKeyring: boolean
+  /** ADR-0487 subagent background admission queue (`QUANTA_SUBAGENT_QUEUE`).
+   *  Strict opt-in (`=== "1"`). Default false ⇒ `defaultBackgroundSubagentScheduler`
+   *  is constructed WITHOUT `admissionQueue`, so an over-cap spawn throws-at-cap
+   *  (today's behavior) and the 4th `subagent_force_background` tool is NOT
+   *  registered (byte-identical). When ON, the scheduler admits over-cap spawns
+   *  onto a FIFO queue and `forceBackground` can promote/reorder. */
+  readonly subagentQueue: boolean
+  /** ADR-0487 force-background tool exposure (`QUANTA_FORCE_BACKGROUND`). Strict
+   *  opt-in (`=== "1"`). Default false ⇒ `subagentBgTools` does NOT mint the
+   *  `subagent_force_background` tool (byte-identical). When ON *and* the queue is
+   *  enabled, the tool is exposed so the model can promote a queued spawn to the
+   *  front / burst-run it. */
+  readonly forceBackground: boolean
+  /** G1 appshot visual-verify loop (`QUANTA_APPSHOT`). Strict opt-in (`=== "1"`).
+   *  Default false ⇒ the composition root mints NO `DefaultToolPorts.appshot`
+   *  slot, so `appshot_verify` is NOT registered (byte-identical default menu).
+   *  When ON *and* a BrowserPort + judge LLM are reachable, the root assembles the
+   *  `AppshotPort` (render/screenshot→BrowserPort, verify→LLM-judge,
+   *  scaffold→jailed scaffold, artifactSink→artifact registry). */
+  readonly appshot: boolean
   /** N1 — background side-agent daemons (`QUANTA_SIDE_AGENT`). Strict opt-in
    *  (`=== "1"`). Default false ⇒ no daemon registry, the `side_agent_*` tools
    *  are NOT registered (byte-identical). When ON, the assembler mints a
@@ -692,6 +769,11 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // end state: the composition root wires a handler (and advertises) only when
     // this is on AND an LLM + consent prompter are present.
     mcpSampling: env["QUANTA_MCP_SAMPLING"] === "1",
+    // delta-token-accounting (RFC jun-6) — strict `=== "1"` opt-in. Default
+    // false ⇒ the loop never constructs the counter and calls `estimateTokens`
+    // directly at every site (byte-identical). ON guards CONSTRUCTION/perf only;
+    // the counter's numbers are byte-identical to a full re-scan by §4.1.
+    deltaTokenCount: env["QUANTA_DELTA_TOKEN_COUNT"] === "1",
     // H19 — strict `=== "1"` opt-in. Default false ⇒ MCP `roots` is NOT
     // advertised and inbound `roots/list` answers an empty list (byte-identical).
     // The composition root advertises + wires the RootsProviderPort together
@@ -736,6 +818,27 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // C1 — strict `=== "1"` opt-in. Default false ⇒ no artifact registry / tools
     // (byte-identical).
     artifactStore: env["QUANTA_ARTIFACT_STORE"] === "1",
+    // C6 — strict `=== "1"` opt-in. Default false ⇒ no structured deny reason
+    // attached / no content prefix / DecisionEvent unchanged (byte-identical).
+    surfaceDenyReason: env["QUANTA_DENY_REASON"] === "1",
+    // account-ratelimit — strict `=== "1"` opt-in. Default false ⇒ adapters
+    // capture no ratelimit headers and the loop inserts no pre-request delay
+    // (byte-identical).
+    proactiveRateLimit: env["QUANTA_RATELIMIT_PROACTIVE"] === "1",
+    // N6 PTY backend selector. Default "tmux" ⇒ byte-identical to pre-slice path.
+    ptyBackend: parsePtyBackend(env["QUANTA_PTY_BACKEND"]),
+    // H18/keyring — strict `=== "1"` opt-in. Default false ⇒ MCP OAuth uses the
+    // plain 0600 file token store (byte-identical, no keyring wrap).
+    mcpOAuthKeyring: env["QUANTA_MCP_OAUTH_KEYRING"] === "1",
+    // ADR-0487 — strict `=== "1"` opt-in. Default false ⇒ scheduler built without
+    // admissionQueue (throw-at-cap) and no 4th tool (byte-identical).
+    subagentQueue: env["QUANTA_SUBAGENT_QUEUE"] === "1",
+    // ADR-0487 — strict `=== "1"` opt-in. Default false ⇒ subagentBgTools mints no
+    // subagent_force_background tool (byte-identical).
+    forceBackground: env["QUANTA_FORCE_BACKGROUND"] === "1",
+    // G1 — strict `=== "1"` opt-in. Default false ⇒ no DefaultToolPorts.appshot
+    // slot, appshot_verify not registered (byte-identical default menu).
+    appshot: env["QUANTA_APPSHOT"] === "1",
     // N1 — strict `=== "1"` opt-in. Default false ⇒ no side-agent daemons/tools.
     sideAgent: env["QUANTA_SIDE_AGENT"] === "1",
     // N2 — strict `=== "1"` opt-in. Default false ⇒ no MCP connector tools.

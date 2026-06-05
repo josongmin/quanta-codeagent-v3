@@ -1,0 +1,84 @@
+id: openai-responses-adapter
+title: OpenAI Responses API adapter + continuation/resume store
+section: 8
+subsystem: LLM adapter — OpenAI `/v1/responses` streaming surface + previous_response_id resume
+order: 471
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: []
+  runtime:
+    - serviceTier
+    - reasoningEffort
+owners: ["@songmin"]
+labels: [surface:core, tier:core, provider:openai-responses]
+depends_on: [reasoning-carryover, structured-output-mode]
+purpose: |
+  `OpenAIResponsesAdapter` (`src/llm/adapters/openai-responses.ts`) — the
+  `LLMPort` implementation for OpenAI's `/v1/responses` streaming surface
+  (`surfaceId: "openai-responses"`, `transportId: "public"`, BYOK auth). It
+  composes the shared responses-stream machinery: `prepareResponsesContinuation
+  Request` builds the request body, `streamResponsesSurface` drives the SSE
+  stream, and `resolveAdapterStreamTimeouts` pins first-chunk/idle deadlines.
+  The adapter NEVER reads `process.env` — `serviceTier` (OpenAI `service_tier`),
+  `reasoningEffort`, and the H15 `reasoningCarryover` flag are env-derived at the
+  composition root and passed in as plain config; each is spread CONDITIONALLY so
+  an unset deployment is byte-identical (the key is absent from the wire).
+
+  `ResponsesContinuationStore` (`src/llm/responses-continuation-store.ts`) — the
+  resume seam for OpenAI's `previous_response_id` mechanic. A bounded
+  (`maxEntries`, default 100, LRU-evicting) Map keyed by `routeKey` holding
+  `ResponsesContinuationEntry` (responseId / requestFingerprint / frozen input +
+  output items / `resumable` / `updatedAt`). `defaultResponsesContinuationStore`
+  exposes get / canResume / markResumeUnsupported / put / clear / clearAll; a
+  separate `unsupportedResumeRoutes` Set records routes the server reported as
+  non-resumable so the adapter stops attempting `previous_response_id` on them.
+  The adapter holds one store for its lifetime but a per-request
+  `input.responsesContinuation?.store` override wins, so a caller can inject a
+  fresh store. Frozen item arrays keep the stored snapshot immutable.
+
+  This is the OpenAI-Responses-direct adapter the `response-in-progress` and
+  `reasoning-carryover` slices reference as the composition-root wiring point —
+  it is the call site that threads `serviceTier` / `reasoningEffort` / H15
+  carry-over into the shared responses-stream layer.
+evidence:
+  code:
+    - src/llm/adapters/openai-responses.ts
+    - src/llm/responses-continuation-store.ts
+    - src/llm/adapters/shared.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/llm/openai-responses-adapter.test.ts
+      - tests/unit/llm/responses-continuation-store.test.ts
+      - tests/unit/llm/responses-continuation-wrapping.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: serviceTier
+    where: src/llm/adapters/openai-responses.ts (config.serviceTier, env-derived at root)
+    default: 'undefined'
+    purpose: |
+      OpenAI `service_tier` request field. Conditionally spread — undefined ⇒ key
+      absent from the wire (byte-identical). The adapter never reads process.env;
+      the value is resolved at the composition root.
+  - name: reasoningEffort
+    where: src/llm/adapters/openai-responses.ts (config.reasoningEffort, env-derived at root)
+    default: 'undefined'
+    purpose: |
+      Reasoning effort hint passed through to the responses request. Conditionally
+      spread (undefined ⇒ omitted). Composition-root resolved.
+deliberate_hold: null
+notes: |
+  Adapter is a thin LLMPort over the shared responses-stream layer — the wire
+  body builder (`prepareResponsesContinuationRequest`) and SSE driver
+  (`streamResponsesSurface`) live in `src/llm/responses-stream.ts` and are owned
+  by the reasoning-carryover / responses-wire slices. This row owns the adapter
+  class + the continuation/resume store. The H15 `reasoningCarryover` flag is
+  honored here: when on, the adapter allocates ONE per-session
+  `ResponsesReasoningCarryoverStore` and threads it through; when off, no store is
+  allocated and no `include`/reasoning items are emitted (byte-identical).

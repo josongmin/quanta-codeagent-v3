@@ -96,7 +96,7 @@ import {
   selectEnvironment,
 } from "@/runtime"
 import { type AutomationEngineSlot, assembleAutomation } from "@/scheduler/runtime-wire"
-import { errMessage, logger, runtimeConfig } from "@/shared"
+import { errMessage, logger, type PtyBackend, runtimeConfig } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import {
   buildDefaultTools,
@@ -110,7 +110,7 @@ import {
 } from "@/tool"
 import { DefaultDeferredResultRegistry } from "@/tool/deferred/default-registry"
 import { buildMcpConnectorDiscoveryPort } from "./mcp-connector-wire"
-import { buildTmuxPtyBackend } from "./pty-backend"
+import { buildPtyBackend } from "./pty-backend"
 
 /** Hermetic test seams for the composition root (mirrors the H7 `seams?`
  *  precedent on {@link AssembleRequest}). Absent ⇒ every wire uses its REAL
@@ -566,11 +566,17 @@ export const installCommandHooksIntoBase = (
  *  cognitive complexity. */
 const resolvePtySessionSlot = (
   ptyAttach: boolean,
+  ptyBackend: PtyBackend,
   seams: CompositionSeams | undefined,
 ): { ptySession: NonNullable<DefaultToolPorts["ptySession"]> } | Record<string, never> => {
   if (!ptyAttach) return {}
   const exec = seams?.ptyExec
-  return { ptySession: exec !== undefined ? createTmuxAdapter({ exec }) : buildTmuxPtyBackend() }
+  // A hermetic e2e seam ALWAYS drives the real tmux adapter against a fake tmux
+  // (backend selection is irrelevant to that path). Otherwise route through the
+  // QUANTA_PTY_BACKEND selector (tmux/bun/both — bun falls back to tmux when
+  // Bun.Terminal is unavailable). The jail root is the workspace cwd.
+  if (exec !== undefined) return { ptySession: createTmuxAdapter({ exec }) }
+  return { ptySession: buildPtyBackend(ptyBackend, process.cwd()) }
 }
 
 /**
@@ -658,7 +664,7 @@ const buildGatedToolPorts = (
     // composition layer (`pty-backend.ts`) and injected as the `PtySessionPort`;
     // construction is IO-free (no spawn until a pty tool dispatches). Resolved by
     // the extracted helper so the (knob × seam) choice adds no complexity here.
-    ...resolvePtySessionSlot(cfg.ptyAttach, seams),
+    ...resolvePtySessionSlot(cfg.ptyAttach, cfg.ptyBackend, seams),
   }
 }
 

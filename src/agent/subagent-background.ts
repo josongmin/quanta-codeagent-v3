@@ -57,8 +57,35 @@ import type {
 /** Opaque handle id — `bg-<16hex>`. Stable for the scheduler's lifetime. */
 export type SubagentHandleId = string
 
-/** 4-arm lifecycle status. `running` is the only NON-terminal state. */
-export type SubagentStatus = "running" | "completed" | "failed" | "cancelled"
+/** 5-arm lifecycle status (ADR-0487 force_background). `running` and `queued`
+ *  are the two NON-terminal states; `completed | failed | cancelled` terminal.
+ *
+ *  `queued` ONLY exists when the scheduler was constructed with
+ *  `admissionQueue: true` (default-OFF). With the queue off, `fork()` throws
+ *  `cap-exceeded` at the cap exactly as before and no `queued` entry can ever
+ *  be created — the 4-arm behavior is byte-identical for every existing
+ *  caller. */
+export type SubagentStatus = "queued" | "running" | "completed" | "failed" | "cancelled"
+
+/** Closed outcome of {@link BackgroundSubagentScheduler.forceBackground} —
+ *  mirrors `CancelSubagentOutcome`'s no-throw 3-way posture. Adding a new arm
+ *  MUST extend this union AND the matching control-op / AgentEvent surface.
+ *
+ *   - `promoted_now`    — a slot was free (or `allowBurst` granted a +1 burst);
+ *                          the queued entry started running immediately.
+ *   - `moved_to_front`  — no free slot and no burst granted; the queued entry
+ *                          was re-ordered to the FIFO head and runs the instant
+ *                          the next slot frees (ahead of all other waiters).
+ *   - `already_running` — the handle was already running OR terminal — no-op.
+ *   - `not_found`       — unknown handle id.
+ *   - `queue_disabled`  — the scheduler has no admission queue (default path);
+ *                          nothing can be queued, so nothing to promote. */
+export type ForceBackgroundOutcome =
+  | "promoted_now"
+  | "moved_to_front"
+  | "already_running"
+  | "not_found"
+  | "queue_disabled"
 
 /** Snapshot of a single background subagent's state. Returned by `poll` /
  *  `await` / `list`. All fields readonly — mutating the snapshot does not
@@ -133,6 +160,20 @@ export interface BackgroundSubagentScheduler {
    *  hydrate time, and running entries whose `startedAt` is older than
    *  `maxAgeMs`. Returns {restored, pruned}. NO-THROW on garbage input. */
   hydrateWithPrune(json: string, maxAgeMs: number): { restored: number; pruned: number }
+  /** ADR-0487 — promote a `queued` handle to run NOW (or to the FIFO head).
+   *  NO-THROW: every input (unknown / running / terminal / queue-disabled)
+   *  maps to a closed {@link ForceBackgroundOutcome}, never an exception, so
+   *  the parent turn keeps running (sibling of `cancel_subagent`).
+   *
+   *   - queue disabled              → `queue_disabled`
+   *   - unknown id                  → `not_found`
+   *   - running or terminal handle  → `already_running`
+   *   - queued + free slot          → start now → `promoted_now`
+   *   - queued + no slot + burst     → start now (transiently +1 over the cap,
+   *                                    NEVER +2) → `promoted_now`
+   *   - queued + no slot + no burst  → re-order to FIFO head → `moved_to_front`
+   */
+  forceBackground(id: SubagentHandleId, opts?: { allowBurst?: boolean }): ForceBackgroundOutcome
 }
 
 export interface BackgroundSubagentSchedulerOpts {
@@ -155,13 +196,25 @@ export interface BackgroundSubagentSchedulerOpts {
   /** When auto-hydrating, drop entries older than this (ms). Triggers
    *  `hydrateWithPrune` instead of `hydrate`. Absent ⇒ no auto-prune. */
   readonly hydrateMaxAgeMs?: number
+  /** ADR-0487 — opt into the admission wait-queue (default-OFF). When FALSE
+   *  (the default), `fork()` throws `cap-exceeded` at `maxConcurrent` exactly
+   *  as before and no `queued` entry can ever exist — byte-identical to the
+   *  pre-queue behavior for every existing caller. When TRUE, an over-cap
+   *  `fork()` parks the spec as a `queued` handle (FIFO) instead of throwing;
+   *  the queue auto-drains on each slot-free. */
+  readonly admissionQueue?: boolean
+  /** ADR-0487 — hard ceiling on the number of `queued` (parked) entries. The
+   *  queue MUST be bounded so a runaway producer cannot grow it without limit
+   *  (DoS). When the queue is full, an over-cap `fork()` throws `queue-full`
+   *  (typed). Only consulted when `admissionQueue` is on. Default 64. */
+  readonly maxQueued?: number
 }
 
 /** Typed error class — exposes a closed `code` union the caller can branch
  *  on deterministically (no prose parsing). */
 export class SubagentBackgroundError extends Error {
   constructor(
-    public readonly code: "cap-exceeded" | "unknown-handle",
+    public readonly code: "cap-exceeded" | "unknown-handle" | "queue-full",
     message: string,
   ) {
     super(message)
@@ -171,6 +224,9 @@ export class SubagentBackgroundError extends Error {
 
 const DEFAULT_MAX_CONCURRENT = 3
 const DEFAULT_MAX_RETAINED = 32
+/** Default hard ceiling on parked `queued` entries (ADR-0487). Bounded so a
+ *  runaway producer cannot grow the wait-queue without limit. */
+const DEFAULT_MAX_QUEUED = 64
 
 const ONE_LINE_LIMIT = 200
 
@@ -225,7 +281,11 @@ const snapshotResult = (r: Entry["result"]): SubagentResult => {
   }
 }
 
-const isTerminal = (s: SubagentStatus): boolean => s !== "running"
+/** `running` and `queued` are the two NON-terminal states; everything else
+ *  (completed | failed | cancelled) is terminal. A `queued` entry has NOT
+ *  started its runner yet, so — like `running` — it must NEVER be LRU-evicted
+ *  or pruned-as-stale-terminal. */
+const isTerminal = (s: SubagentStatus): boolean => s !== "running" && s !== "queued"
 
 /** Build the {@link SubagentRequest} the runner consumes from a caller-side
  *  {@link SubagentSpec}. The two surfaces are intentionally distinct:
@@ -298,9 +358,10 @@ const serializeResult = (r: Entry["result"]): SerializedHandle["result"] => {
   }
 }
 
-/** Narrow one of the 4 valid status arms; `undefined` on miss. */
+/** Narrow one of the 5 valid status arms; `undefined` on miss. */
 const parseStatus = (s: unknown): SubagentStatus | undefined => {
-  if (s === "running" || s === "completed" || s === "failed" || s === "cancelled") return s
+  if (s === "queued" || s === "running" || s === "completed" || s === "failed" || s === "cancelled")
+    return s
   return undefined
 }
 
@@ -368,6 +429,11 @@ export const defaultBackgroundSubagentScheduler = (
   const maxRetained = Math.max(1, Math.floor(opts.maxRetained ?? DEFAULT_MAX_RETAINED))
   const now = opts.now ?? Date.now
   const idGen = opts.idGen ?? ((): string => randomBytes(8).toString("hex"))
+  // ADR-0487 — admission queue. Default-OFF: when `admissionQueue` is absent
+  // the queue is unreachable (no `queued` entry can be created) and the
+  // scheduler is byte-identical to its pre-queue self.
+  const admissionQueue = opts.admissionQueue === true
+  const maxQueued = Math.max(1, Math.floor(opts.maxQueued ?? DEFAULT_MAX_QUEUED))
 
   // Insertion-order Map — preserves a stable LRU order. Newest-end =
   // latest fork; oldest-front = first eviction candidate.
@@ -443,6 +509,63 @@ export const defaultBackgroundSubagentScheduler = (
     entry.result.endedAt = now()
   }
 
+  /** Count `queued` (parked, not-yet-started) entries — only these count
+   *  against `maxQueued`. */
+  const countQueued = (): number => {
+    let n = 0
+    for (const e of store.values()) if (e.result.status === "queued") n += 1
+    return n
+  }
+
+  /** Find the FIRST (insertion-order = FIFO) `queued` entry, or undefined.
+   *  `force_background`'s `moved_to_front` re-orders an entry to the head of
+   *  this FIFO so it is the one this returns next. */
+  const firstQueuedEntry = (): Entry | undefined => {
+    for (const e of store.values()) if (e.result.status === "queued") return e
+    return undefined
+  }
+
+  /** Promote a `queued` entry into a `running` one — the deferred half of
+   *  `fork`'s body. Flips status, wires the real runner promise in place of
+   *  the placeholder, and re-stamps `startedAt` to the actual start time.
+   *  Cancellation/eviction/serialize already handle a running entry, so no
+   *  new lifecycle paths. Idempotent-safe: callers only invoke on a `queued`
+   *  entry. */
+  const promote = (entry: Entry): void => {
+    entry.result.status = "running"
+    entry.result.startedAt = now()
+    const realPromise = startRun(entry)
+    ;(entry as { promise: Promise<void> }).promise = realPromise
+  }
+
+  /** Auto-drain the FIFO when a slot frees: while there is a free slot and a
+   *  `queued` entry, promote the OLDEST queued entry. Runs from `startRun`'s
+   *  `finally` after `evictIfOver` — the EXACT point a slot frees. No new
+   *  pump loop. When the queue is off this is a no-op (nothing is queued). */
+  const drainQueue = (): void => {
+    while (countRunning() < maxConcurrent) {
+      const next = firstQueuedEntry()
+      if (next === undefined) break
+      promote(next)
+    }
+  }
+
+  /** Move a `queued` entry to the FIFO HEAD (it becomes `firstQueuedEntry`).
+   *  Re-inserts at the front by rebuilding the Map preserving order with the
+   *  target first. Strictly last-forcer-wins-the-head (LIFO at head) so a
+   *  `moved_to_front` storm cannot livelock (R4). */
+  const moveToFront = (targetId: SubagentHandleId): void => {
+    const target = store.get(targetId)
+    if (target === undefined) return
+    const rest: Array<[SubagentHandleId, Entry]> = []
+    for (const [k, e] of store.entries()) {
+      if (k !== targetId) rest.push([k, e])
+    }
+    store.clear()
+    store.set(targetId, target)
+    for (const [k, e] of rest) store.set(k, e)
+  }
+
   /** Start the actual run via the injected runner. Resolves the entry's
    *  promise once the runner settles OR the abort fires. Never rejects:
    *  every failure path mutates `entry.result` and resolves cleanly. */
@@ -456,6 +579,9 @@ export const defaultBackgroundSubagentScheduler = (
         applyRunnerFailure(entry, e)
       } finally {
         evictIfOver()
+        // ADR-0487 — a slot just freed; pull the next FIFO waiter (if any).
+        // No-op when the admission queue is off (nothing is ever `queued`).
+        drainQueue()
       }
     })()
   }
@@ -471,17 +597,29 @@ export const defaultBackgroundSubagentScheduler = (
 
   return {
     fork(spec) {
-      if (countRunning() >= maxConcurrent) {
+      const atCap = countRunning() >= maxConcurrent
+      if (atCap && !admissionQueue) {
+        // DEFAULT PATH (queue off) — byte-identical to the pre-queue behavior:
+        // over-cap fork is REJECTED, not parked.
         throw new SubagentBackgroundError(
           "cap-exceeded",
           `cap-exceeded: ${countRunning()} running >= maxConcurrent ${maxConcurrent}`,
         )
       }
+      if (atCap && countQueued() >= maxQueued) {
+        // Queue ON but BOUNDED — a runaway producer cannot grow it forever.
+        throw new SubagentBackgroundError(
+          "queue-full",
+          `queue-full: ${countQueued()} queued >= maxQueued ${maxQueued}`,
+        )
+      }
       const id = `bg-${idGen()}` as SubagentHandleId
       const abortCtrl = new AbortController()
+      // When at cap (queue on), PARK as `queued` — the runner is NOT started.
+      const queued = atCap
       const result: Entry["result"] = {
-        status: "running",
-        outputSummary: "(running)",
+        status: queued ? "queued" : "running",
+        outputSummary: queued ? "(queued)" : "(running)",
         startedAt: now(),
         turns: 0,
       }
@@ -493,15 +631,19 @@ export const defaultBackgroundSubagentScheduler = (
         promise: Promise.resolve(),
         result,
       }
-      // Replace `promise` with the real one — kicks off the runner. The
-      // ASYNC body in `startRun` reads `entry.result` and `entry.abortCtrl`
-      // through this same closure-captured reference.
-      const realPromise = startRun(entry)
-      ;(entry as { promise: Promise<void> }).promise = realPromise
+      if (!queued) {
+        // Replace `promise` with the real one — kicks off the runner. The
+        // ASYNC body in `startRun` reads `entry.result` and `entry.abortCtrl`
+        // through this same closure-captured reference.
+        const realPromise = startRun(entry)
+        ;(entry as { promise: Promise<void> }).promise = realPromise
+      }
+      // A `queued` entry keeps the placeholder `Promise.resolve()` until
+      // `promote()` (auto-drain or force_background) wires the real one.
       store.set(id, entry)
       // Note: not calling evictIfOver here — only terminal entries count
-      // against maxRetained, and a newly-running entry adds zero to that
-      // count. evictIfOver runs after each terminal transition (inside
+      // against maxRetained, and a newly-running/queued entry adds zero to
+      // that count. evictIfOver runs after each terminal transition (inside
       // startRun's finally).
       return id
     },
@@ -519,7 +661,20 @@ export const defaultBackgroundSubagentScheduler = (
       if (isTerminal(entry.result.status)) return snapshotResult(entry.result)
       const signal = opts?.signal
       if (signal === undefined) {
-        await entry.promise
+        // Loop until terminal. A `queued` entry's `promise` is a placeholder
+        // (`Promise.resolve()`) that settles immediately WITHOUT running;
+        // `promote()` swaps in the real runner promise. Re-read `entry.promise`
+        // after each settle so we follow the queued → running → terminal
+        // transition rather than returning early on the placeholder. A
+        // microtask yield between iterations prevents a busy-spin while still
+        // queued.
+        while (!isTerminal(entry.result.status)) {
+          await entry.promise
+          if (isTerminal(entry.result.status)) break
+          // Still non-terminal (queued, or just-promoted to running on a fresh
+          // promise) — yield to the event loop and re-check the live promise.
+          await Promise.resolve()
+        }
         return snapshotResult(entry.result)
       }
       // Race entry.promise vs the signal. We do NOT cancel the subagent
@@ -585,9 +740,14 @@ export const defaultBackgroundSubagentScheduler = (
       const threshold = now() - Math.max(0, maxAgeMs)
       let removed = 0
       for (const [id, e] of store.entries()) {
-        if (!isTerminal(e.result.status)) continue
-        const endedAt = e.result.endedAt ?? e.result.startedAt
-        if (endedAt < threshold) {
+        // RUNNING entries are NEVER pruned — they have an in-flight promise a
+        // caller may still await. TERMINAL entries age by `endedAt`. QUEUED
+        // entries (ADR-0487) age by `startedAt` — a parked task abandoned past
+        // `maxAgeMs` is almost certainly stale (RFC §8 R4); dropping it never
+        // double-executes since the runner never started.
+        if (e.result.status === "running") continue
+        const ageRef = e.result.endedAt ?? e.result.startedAt
+        if (ageRef < threshold) {
           store.delete(id)
           removed += 1
         }
@@ -625,6 +785,37 @@ export const defaultBackgroundSubagentScheduler = (
       const pruned = Math.max(0, totalValid - restored)
       return { restored, pruned }
     },
+
+    forceBackground(id, forceOpts) {
+      // Queue OFF ⇒ nothing can be queued ⇒ nothing to promote. Default path.
+      if (!admissionQueue) return "queue_disabled"
+      const entry = store.get(id)
+      if (entry === undefined) return "not_found"
+      // Running or terminal ⇒ no-op (no-throw sibling of cancel_subagent).
+      if (entry.result.status !== "queued") return "already_running"
+
+      const slotFree = countRunning() < maxConcurrent
+      if (slotFree) {
+        // A real slot is free — promote immediately, cap untouched.
+        promote(entry)
+        return "promoted_now"
+      }
+
+      const allowBurst = forceOpts?.allowBurst === true
+      // R2 fail-closed: burst is a ONE-SLOT courtesy, never a bypass. We allow
+      // a transient +1 over `maxConcurrent` but NEVER +2 — a second burst
+      // while already over-cap degrades to `moved_to_front`.
+      if (allowBurst && countRunning() <= maxConcurrent) {
+        promote(entry)
+        return "promoted_now"
+      }
+
+      // No slot, no (admissible) burst ⇒ re-order to the FIFO head so this
+      // entry runs the instant the next slot frees, ahead of all other
+      // waiters.
+      moveToFront(id)
+      return "moved_to_front"
+    },
   }
 }
 
@@ -632,8 +823,11 @@ export const defaultBackgroundSubagentScheduler = (
  *  true when the handle PASSES the age filter (= should be restored). */
 const passesAgeFilter = (h: SerializedHandle, threshold: number | undefined): boolean => {
   if (threshold === undefined) return true
-  const cutoffRef =
-    h.result.status === "running" ? h.result.startedAt : (h.result.endedAt ?? h.result.startedAt)
+  // Non-terminal entries (running | queued) have no `endedAt` — age them by
+  // `startedAt` (a queued task abandoned past `maxAgeMs` is almost certainly
+  // irrelevant, RFC §8 R4).
+  const nonTerminal = h.result.status === "running" || h.result.status === "queued"
+  const cutoffRef = nonTerminal ? h.result.startedAt : (h.result.endedAt ?? h.result.startedAt)
   return cutoffRef >= threshold
 }
 
@@ -641,7 +835,11 @@ const passesAgeFilter = (h: SerializedHandle, threshold: number | undefined): bo
  *  `failed` + `errorMessage="lost across restart"` (Promise object cannot
  *  be reconstructed across a process restart). */
 const resurrectResult = (h: SerializedHandle, tNow: number): Entry["result"] => {
-  if (h.result.status === "running") {
+  // A `queued` entry (ADR-0487) has NO in-flight promise and never started its
+  // runner; like a `running` entry it cannot resume across a process restart.
+  // Reborn as `failed` "lost across restart" so a side-effecting task is NEVER
+  // silently re-run (hellgate 9 / RFC §8 R5).
+  if (h.result.status === "running" || h.result.status === "queued") {
     return {
       status: "failed",
       outputSummary: "(failed) lost across restart",

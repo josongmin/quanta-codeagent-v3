@@ -28,6 +28,12 @@ purpose: |
   `prompt_cache_status` tool surfaces hit-rate / cost-savings to the
   agent. Default pricing table (`default-pricing.ts`) covers Claude
   family; cache hit = 10% of input rate (90% discount).
+  Tier-1 builder `buildPromptCacheBlock` (`src/agent/tier1/prompt-cache.ts`)
+  surfaces `prompt_cache_status` into the agent's tool set ONLY when the host
+  wired a `PromptCacheObserver` (gate `QUANTA_PROMPT_CACHE_STATUS`); otherwise
+  returns `[]` (DEFAULT-OFF, byte-identical). The SAME observer instance backs
+  both this tool and the loop's usage feed so the rendered snapshot reflects the
+  buckets observed this session.
 evidence:
   code:
     - src/observability/prompt-cache/types.ts
@@ -36,12 +42,14 @@ evidence:
     - src/observability/prompt-cache/budget-bridge.ts
     - src/observability/prompt-cache/index.ts
     - src/tool/prompt_cache_status.ts
+    - src/agent/tier1/prompt-cache.ts
   adrs:
     - docs/decisions/0182-prompt-cache-observability.md
   tests:
     unit:
       - tests/unit/prompt-cache-observability-hellgate.test.ts
       - tests/unit/prompt-cache-tracker-hellgate.test.ts
+      - tests/unit/tier1-prompt-cache-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

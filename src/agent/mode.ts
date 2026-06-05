@@ -429,6 +429,19 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   artifact_get: null,
   artifact_register: "working_state_write",
   artifact_destroy: "working_state_write",
+  // ADR-0487 — subagent_force_background: promote/reorder a QUEUED background
+  // subagent within its own admission pool (move-to-front / burst-run). It only
+  // reorders work the agent already requested — no NEW workspace mutation — so
+  // it is plan-safe, the same posture as `subagent_poll`. Caller-wire (minted by
+  // subagentBgTools only when QUANTA_FORCE_BACKGROUND + the admission queue are
+  // both on); PERMANENT entry so plan-mode dispatch never trips UnknownToolError.
+  subagent_force_background: null,
+  // G1 — appshot_verify: scaffold/render a UI, screenshot it (BrowserPort), and
+  // judge the screenshot with a verify LLM. It WRITES the scaffold + screenshot
+  // through the jailed FS scaffold, so `write_filesystem` is the right kind (plan
+  // PROPOSES a UI build; it does not commit jailed artifacts mid-turn). Caller-wire
+  // (DefaultToolPorts.appshot, QUANTA_APPSHOT); PERMANENT entry.
+  appshot_verify: "write_filesystem",
 })
 
 /** Thrown by {@link isMutatingTool} / {@link assertNotMutatingInPlanMode}

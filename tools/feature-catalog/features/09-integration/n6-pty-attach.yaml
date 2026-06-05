@@ -33,6 +33,17 @@ purpose: |
   the MVP-A attach-to-existing backend), and Bun 1.3.14 ships a native PTY
   (`Bun.Terminal`) for the Phase-1b real-tty backend. node-pty is avoided.
 
+  Phase-1b LANDED (jun-06): `createBunPtyAdapter` (src/tool/pty/bun-pty-adapter.ts)
+  is the SECOND `PtySessionPort` impl — for OWNED PTYs quanta itself spawns under a
+  REAL controlling terminal (isTTY=true, real resize) via an injected
+  `PtyFactoryPort` (the real `Bun.Terminal`/`Bun.spawn({terminal})` lives in the
+  composition layer). It mirrors the port contract EXACTLY (same 7 NO-THROW
+  methods + the same caps) and adds a `spawn`/`closeAll` entry point. Security
+  inversion: owned ⇒ NO foreign-jail (no "attach to someone else's terminal"
+  risk); the ONLY trust boundary is the cwd-jail at spawn. Output is drained from
+  Bun's `data` callback into a bounded (256 KiB) ring with a monotone seq + an
+  explicit gap marker on overflow (byte-exact, no silent drop).
+
   SECURITY (fail-closed): only tmux sessions matching the allow-prefix (default
   `quanta-`) are attachable; a foreign session is `foreign-denied` unless
   `pty.allowForeignTmux` + per-attach HITL; dangerous `pty_write` content flows
@@ -48,6 +59,7 @@ evidence:
     - src/tool/pty/port.ts
     - src/tool/pty/tools.ts
     - src/tool/pty/tmux-adapter.ts
+    - src/tool/pty/bun-pty-adapter.ts
     - src/tool/pty/index.ts
     - src/tool/index.ts
     - src/tool/surface/manifest.ts
@@ -57,6 +69,8 @@ evidence:
   tests:
     unit:
       - tests/unit/pty-attach-hellgate.test.ts
+      - tests/unit/pty-bun-native-adapter-hellgate.test.ts
+      - tests/unit/pty-bun-native-parity-hellgate.test.ts
       - tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts
     integration: []
     contract: []

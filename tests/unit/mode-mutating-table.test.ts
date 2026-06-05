@@ -108,6 +108,11 @@ describe("mode mutating-table cross-check (ADR-0036)", () => {
     "side_agent_list",
     "side_agent_stop",
     "side_agent_findings",
+    // jun-06 wave-3 caller-wire tools — ADR-0487 subagent_force_background
+    // (QUANTA_FORCE_BACKGROUND + admission queue) + G1 appshot_verify
+    // (DefaultToolPorts.appshot, QUANTA_APPSHOT).
+    "subagent_force_background",
+    "appshot_verify",
   ]
   const allTools = [
     ...defaultTools.map((t) => t.name),

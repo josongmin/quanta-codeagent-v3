@@ -303,6 +303,18 @@ export const persistentBackgroundSubagentScheduler = async (
       return false
     },
 
+    forceBackground(id, forceOpts) {
+      // ADR-0487 — delegate to the inner scheduler's admission-queue promoter.
+      // A promotion flips a `queued` handle to `running`; persist the fresh
+      // live snapshot so a crash after promotion still leaves a discoverable
+      // handle (mirrors `cancel`'s save-on-success). No-throw passthrough.
+      const outcome = inner.forceBackground(id, forceOpts)
+      if (outcome === "promoted_now" || outcome === "moved_to_front") {
+        void saveLiveHandle(id)
+      }
+      return outcome
+    },
+
     list(): ReadonlyArray<{
       id: SubagentHandleId
       result: HydratedSubagentResult

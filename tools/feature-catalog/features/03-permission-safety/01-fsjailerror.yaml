@@ -18,6 +18,7 @@ purpose: FsJailError — assertPathInWorkspace/assertPathInsideBaseDir로 baseDi
 evidence:
   code:
     - src/storage/service.ts
+    - src/storage/fs-jail-lib.ts
     - src/storage/index.ts
     - src/tool/_shared/resolve-jailed-doc.ts
     - src/tool/read/index.ts

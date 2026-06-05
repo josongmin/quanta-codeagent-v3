@@ -61,10 +61,6 @@ import { errMessage, runtimeConfig, writeStderr } from "@/shared"
 import { safeEmitDecision } from "@/stream"
 import { createApprovalGate } from "./approval-gate-wire"
 import {
-  type HookPermissionDecision,
-  routePermissionHookVerdict,
-} from "./hooks"
-import {
   buildDenySteerMessage,
   type ConfirmDecision,
   isAllowed as isConfirmAllowed,
@@ -74,6 +70,7 @@ import { deny, HANDOFF_SUFFIX } from "./dispatch-helpers"
 import type { DispatchResult } from "./dispatch-types"
 import type { HandoffRequiredEvent, HitlTier } from "./hitl-tier"
 import { type HitlAnnotation, resolveHitlAnnotation } from "./hitl-tier-registry"
+import { type HookPermissionDecision, routePermissionHookVerdict } from "./hooks"
 import { isMutatingToolBlockedInMode, modeBlockReason, resolveAgentMode } from "./mode"
 import type { AdmissibilityGateConfig } from "./types"
 

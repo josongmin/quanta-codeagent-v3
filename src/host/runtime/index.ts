@@ -50,6 +50,22 @@ export {
   deriveCapabilityManifest,
 } from "./capabilities"
 export {
+  bunKeyringExec,
+  composeTokenStore,
+  createLibsecretKeyring,
+  createMacosKeyring,
+  createNullKeyring,
+  DEFAULT_KEYRING_SERVICE,
+  type KeyringExec,
+  type KeyringExecInput,
+  type KeyringExecResult,
+  type KeyringPlatform,
+  type KeyringPort,
+  parseRecord as parseKeyringTokenRecord,
+  selectKeyring,
+  serializeRecord as serializeKeyringTokenRecord,
+} from "./keyring"
+export {
   buildMcpOAuthWiring,
   type ConnectorsMcpOAuthConfig,
   createConnectorsMcpOAuthProvider,
