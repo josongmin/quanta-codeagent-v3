@@ -5,7 +5,7 @@
 import { z } from "zod"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import type { ResourcesHandle } from "./port"
-import { renderFailure, renderPromptList } from "./render"
+import { callPort, renderFailure, renderPromptList } from "./render"
 
 export const listPromptsInputSchema = z.object({})
 export type ListPromptsInput = z.infer<typeof listPromptsInputSchema>
@@ -32,7 +32,7 @@ export const mcpListPromptsTool = (port: ResourcesHandle): Tool<ListPromptsInput
       yield { type: "result", result: { ok: false, output: "aborted before start" } }
       return
     }
-    const r = await port.listPrompts()
+    const r = await callPort(() => port.listPrompts())
     if (!r.ok) {
       const { output, failure } = renderFailure(r)
       yield { type: "result", result: { ok: false, output, failure } }

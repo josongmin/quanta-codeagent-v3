@@ -99,6 +99,41 @@ const CALLER_WIRE_TOOL_NAMES = [
   "ToolSearch",
   "web_search",
   "search_codebase",
+  // R3 e2e-integration audit closeout — the jun-04/jun-05 caller-wire tools whose
+  // MUTATING_TOOL_TABLE entries were added in src/agent/mode.ts behind their
+  // DefaultToolPorts slots (structuredPatch, artifactRegistry, coverageCheck,
+  // imageGen, officeAuthoring, ptySession, mcpResources, mcpConnector,
+  // progressUpdate, sideAgent). They register only when the host wires the port,
+  // so they are not enumerable from `defaultTools` — included here by name so the
+  // orphan-direction drift check stays exact (mirrors tests/unit/mode-mutating-table.test.ts).
+  "apply_patch_structured",
+  "artifact_list",
+  "artifact_get",
+  "artifact_register",
+  "artifact_destroy",
+  "coverage_check",
+  "prompt_cache_status",
+  "image_gen",
+  "xlsx_write",
+  "docx_write",
+  "pptx_write",
+  "pty_list",
+  "pty_attach",
+  "pty_write",
+  "pty_read",
+  "pty_resize",
+  "pty_kill",
+  "mcp_list_resources",
+  "mcp_read_resource",
+  "mcp_list_prompts",
+  "mcp_get_prompt",
+  "mcp_connector_list",
+  "mcp_connector_install",
+  "communicate_update",
+  "side_agent_spawn",
+  "side_agent_list",
+  "side_agent_stop",
+  "side_agent_findings",
 ] as const
 
 const ALL_REGISTERED_TOOL_NAMES = (() => {

@@ -128,6 +128,23 @@ export interface SideAgentDaemonOpts {
    *  memory for a long session that spawns many short-lived daemons. Running
    *  daemons are NEVER pruned. */
   readonly maxRetained?: number
+  /** Capability C (multi-agent coordination) — team-idle barrier. When injected
+   *  (the host wires `createIdleBarrier` only under `QUANTA_TEAM_IDLE`), the
+   *  registry beacons a daemon idle at spawn + after each completed pass, and
+   *  clears the beacon while a pass is in flight — so a leader can fan IN by
+   *  awaiting `teamIdle()` instead of polling `list()`. Absent ⇒ `teamIdle()`
+   *  returns false / `idleSince()` undefined (byte-identical legacy). */
+  readonly idleBarrier?: SideAgentIdleBarrierPort
+}
+
+/** Duck-typed mirror of `@/subagent/coordination#IdleBarrierPort` — kept LOCAL
+ *  so the `src/side-agent/**` slice does not hard-import the coordination slice.
+ *  The host adapts the real barrier behind this shape. */
+export interface SideAgentIdleBarrierPort {
+  beacon(agentId: string): void
+  reactivate(agentId: string): void
+  teamIdle(members: readonly string[]): boolean
+  idleSince(members: readonly string[]): number | undefined
 }
 
 export interface SideAgentDaemonRegistry {
@@ -142,4 +159,11 @@ export interface SideAgentDaemonRegistry {
   stop(id: string): boolean
   /** Stop every running daemon (session shutdown). Returns count stopped. */
   stopAll(): number
+  /** Capability C — true iff EVERY running daemon is quiescent (no pass in
+   *  flight) per the injected team-idle barrier. No barrier wired ⇒ false
+   *  (the team-idle signal is opt-in via `QUANTA_TEAM_IDLE`). NO-THROW. */
+  teamIdle(): boolean
+  /** Capability C — the instant the team last became fully idle (MAX beacon
+   *  across running daemons), or undefined when not all idle / no barrier. */
+  idleSince(): number | undefined
 }

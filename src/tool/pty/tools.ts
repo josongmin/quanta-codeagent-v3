@@ -7,6 +7,7 @@
  */
 
 import { z } from "zod"
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 import {
   PTY_MAX_DIM,
@@ -76,6 +77,23 @@ const one = (result: ToolResult): AsyncIterable<ToolEvent> => ({
   },
 })
 
+/** NO-THROW boundary (contract §2): run an async producer and map ANY thrown
+ *  rejection to a single typed `error` ToolResult, so the port-backed iterators
+ *  can never reject the dispatch loop even if a misbehaving backend throws
+ *  instead of returning a typed `PtyResult`. */
+const fromPort = (produce: () => Promise<ToolResult>): AsyncIterable<ToolEvent> => ({
+  async *[Symbol.asyncIterator]() {
+    let result: ToolResult
+    try {
+      result = await produce()
+    } catch (e) {
+      const msg = errMessage(e)
+      result = fail(`pty: backend-error: ${msg}`, { mode: "error", modelVisibleError: msg })
+    }
+    yield { type: "result", result }
+  },
+})
+
 /** Parse + abort gate shared by every tool. */
 const guard = <S extends z.ZodTypeAny>(
   schema: S,
@@ -99,21 +117,19 @@ export const ptyTools = (port: PtySessionPort): Tool[] => {
     execute(input, ctx) {
       const g = guard(listSchema, input, ctx)
       if (!g.ok) return one(g.result)
-      return {
-        async *[Symbol.asyncIterator]() {
-          const infos = await port.list()
-          const lines =
-            infos.length === 0
-              ? "(no attachable sessions)"
-              : infos
-                  .map(
-                    (i) =>
-                      `  ${i.handle} [${i.kind}${i.owned ? ",owned" : ""}]${i.title ? ` ${i.title}` : ""}${i.cwd ? ` (${i.cwd})` : ""}`,
-                  )
-                  .join("\n")
-          yield { type: "result", result: { ok: true, output: `PTY sessions:\n${lines}` } }
-        },
-      }
+      return fromPort(async () => {
+        const infos = await port.list()
+        const lines =
+          infos.length === 0
+            ? "(no attachable sessions)"
+            : infos
+                .map(
+                  (i) =>
+                    `  ${i.handle} [${i.kind}${i.owned ? ",owned" : ""}]${i.title ? ` ${i.title}` : ""}${i.cwd ? ` (${i.cwd})` : ""}`,
+                )
+                .join("\n")
+        return { ok: true, output: `PTY sessions:\n${lines}` }
+      })
     },
   }
 
@@ -127,17 +143,12 @@ export const ptyTools = (port: PtySessionPort): Tool[] => {
     execute(input, ctx) {
       const g = guard(attachSchema, input, ctx)
       if (!g.ok) return one(g.result)
-      return {
-        async *[Symbol.asyncIterator]() {
-          const r = await port.attach(g.data.handle)
-          yield {
-            type: "result",
-            result: r.ok
-              ? { ok: true, output: `attached ${r.value.handle} (cursor=${r.value.cursor})` }
-              : failFromPty(r),
-          }
-        },
-      }
+      return fromPort(async () => {
+        const r = await port.attach(g.data.handle)
+        return r.ok
+          ? { ok: true, output: `attached ${r.value.handle} (cursor=${r.value.cursor})` }
+          : failFromPty(r)
+      })
     },
   }
 
@@ -159,16 +170,14 @@ export const ptyTools = (port: PtySessionPort): Tool[] => {
           }),
         )
       }
-      return {
-        async *[Symbol.asyncIterator]() {
-          const r = await port.write(
-            g.data.handle,
-            g.data.data,
-            g.data.appendNewline !== undefined ? { appendNewline: g.data.appendNewline } : {},
-          )
-          yield { type: "result", result: r.ok ? { ok: true, output: "ok" } : failFromPty(r) }
-        },
-      }
+      return fromPort(async () => {
+        const r = await port.write(
+          g.data.handle,
+          g.data.data,
+          g.data.appendNewline !== undefined ? { appendNewline: g.data.appendNewline } : {},
+        )
+        return r.ok ? { ok: true, output: "ok" } : failFromPty(r)
+      })
     },
   }
 
@@ -182,20 +191,12 @@ export const ptyTools = (port: PtySessionPort): Tool[] => {
     execute(input, ctx) {
       const g = guard(readSchema, input, ctx)
       if (!g.ok) return one(g.result)
-      return {
-        async *[Symbol.asyncIterator]() {
-          const r = await port.read(g.data.handle, g.data.sinceSeq ?? 0)
-          if (!r.ok) {
-            yield { type: "result", result: failFromPty(r) }
-            return
-          }
-          const body = capOutput(r.value.chunks.map((c) => c.data).join(""))
-          yield {
-            type: "result",
-            result: { ok: true, output: `${body}\n[nextSeq=${r.value.nextSeq}]` },
-          }
-        },
-      }
+      return fromPort(async () => {
+        const r = await port.read(g.data.handle, g.data.sinceSeq ?? 0)
+        if (!r.ok) return failFromPty(r)
+        const body = capOutput(r.value.chunks.map((c) => c.data).join(""))
+        return { ok: true, output: `${body}\n[nextSeq=${r.value.nextSeq}]` }
+      })
     },
   }
 
@@ -208,17 +209,12 @@ export const ptyTools = (port: PtySessionPort): Tool[] => {
     execute(input, ctx) {
       const g = guard(resizeSchema, input, ctx)
       if (!g.ok) return one(g.result)
-      return {
-        async *[Symbol.asyncIterator]() {
-          const r = await port.resize(g.data.handle, g.data.cols, g.data.rows)
-          yield {
-            type: "result",
-            result: r.ok
-              ? { ok: true, output: `resized to ${g.data.cols}x${g.data.rows}` }
-              : failFromPty(r),
-          }
-        },
-      }
+      return fromPort(async () => {
+        const r = await port.resize(g.data.handle, g.data.cols, g.data.rows)
+        return r.ok
+          ? { ok: true, output: `resized to ${g.data.cols}x${g.data.rows}` }
+          : failFromPty(r)
+      })
     },
   }
 
@@ -231,15 +227,10 @@ export const ptyTools = (port: PtySessionPort): Tool[] => {
     execute(input, ctx) {
       const g = guard(killSchema, input, ctx)
       if (!g.ok) return one(g.result)
-      return {
-        async *[Symbol.asyncIterator]() {
-          const r = await port.kill(g.data.handle)
-          yield {
-            type: "result",
-            result: r.ok ? { ok: true, output: `killed ${g.data.handle}` } : failFromPty(r),
-          }
-        },
-      }
+      return fromPort(async () => {
+        const r = await port.kill(g.data.handle)
+        return r.ok ? { ok: true, output: `killed ${g.data.handle}` } : failFromPty(r)
+      })
     },
   }
 

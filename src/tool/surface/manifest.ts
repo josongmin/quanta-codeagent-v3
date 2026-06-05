@@ -564,9 +564,9 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
       env: "QUANTA_MCP_CONNECTORS",
     },
     default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
-    risk: "meta",
+    risk: "mutating",
     adr: "N2",
-    note: "MCP connector discovery/catalog (§7, Codex imported-connector-apps) — discover installable MCP servers + install one into .mcp.json (vs hand-editing). Pairs with H18 (OAuth=auth, this=discovery). The model lists/installs; the HOST owns the catalog source + toMcpServerConfig transform (@/connectors mcp-connector-catalog) + the real .mcp.json write. Opt-in EVERYWHERE (QUANTA_MCP_CONNECTORS): install mutates config, never auto-seeds. Duck-typed port keeps @/tool fence-clean.",
+    note: "MCP connector discovery/catalog (§7, Codex imported-connector-apps) — discover installable MCP servers + install one into .mcp.json (vs hand-editing). Pairs with H18 (OAuth=auth, this=discovery). The model lists/installs; the HOST owns the catalog source + toMcpServerConfig transform (@/connectors mcp-connector-catalog) + the real .mcp.json write. Group risk = the max-risk member: mcp_connector_list is read-only but mcp_connector_install is config-WRITE — it writes a .mcp.json server entry the host SPAWNS as code next launch, so the row is `mutating` (NOT `meta`/no-side-effect). Fail-closed: install REFUSES a divergent same-name server (name-conflict) and an unreadable/wrong-shaped existing .mcp.json (config-unreadable) rather than clobber a user-pinned/audited entry. Opt-in EVERYWHERE (QUANTA_MCP_CONNECTORS): install mutates config, never auto-seeds. Duck-typed port keeps @/tool fence-clean.",
   },
   {
     name: "mcp_list_resources",

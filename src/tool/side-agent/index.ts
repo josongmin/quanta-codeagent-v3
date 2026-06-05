@@ -144,7 +144,7 @@ const makeSpawnTool = (registry: SideAgentDaemonPort): Tool<SideAgentSpawnInput>
   inputSchema: sideAgentSpawnInputSchema,
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
-  async *execute(input: SideAgentSpawnInput, _ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: SideAgentSpawnInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const parsed = sideAgentSpawnInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {
@@ -153,6 +153,13 @@ const makeSpawnTool = (registry: SideAgentDaemonPort): Tool<SideAgentSpawnInput>
           mode: "rejected",
           reason: "bad_input",
         }),
+      }
+      return
+    }
+    if (ctx.signal.aborted) {
+      yield {
+        type: "result",
+        result: err("aborted before start", { mode: "rejected", reason: "aborted" }),
       }
       return
     }
@@ -178,8 +185,27 @@ const makeListTool = (registry: SideAgentDaemonPort): Tool<SideAgentListInput> =
   inputSchema: sideAgentListInputSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(_input: SideAgentListInput, _ctx: ToolContext): AsyncIterable<ToolEvent> {
-    const all = registry.list()
+  async *execute(_input: SideAgentListInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    if (ctx.signal.aborted) {
+      yield {
+        type: "result",
+        result: err("aborted before start", { mode: "rejected", reason: "aborted" }),
+      }
+      return
+    }
+    // NO-THROW boundary (Tool contract §2): a misbehaving registry must surface
+    // a typed result, never reject the iterator.
+    let all: ReadonlyArray<SideAgentSnapshotView>
+    try {
+      all = registry.list()
+    } catch (e) {
+      const msg = errMessage(e)
+      yield {
+        type: "result",
+        result: err(`cannot list side-agents: ${msg}`, { mode: "error", modelVisibleError: msg }),
+      }
+      return
+    }
     if (all.length === 0) {
       yield { type: "result", result: ok("No background side-agents.") }
       return
@@ -197,7 +223,7 @@ const makeStopTool = (registry: SideAgentDaemonPort): Tool<SideAgentStopInput> =
   inputSchema: sideAgentStopInputSchema,
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
-  async *execute(input: SideAgentStopInput, _ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: SideAgentStopInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const parsed = sideAgentStopInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {
@@ -209,7 +235,24 @@ const makeStopTool = (registry: SideAgentDaemonPort): Tool<SideAgentStopInput> =
       }
       return
     }
-    const stopped = registry.stop(parsed.data.id)
+    if (ctx.signal.aborted) {
+      yield {
+        type: "result",
+        result: err("aborted before start", { mode: "rejected", reason: "aborted" }),
+      }
+      return
+    }
+    let stopped: boolean
+    try {
+      stopped = registry.stop(parsed.data.id)
+    } catch (e) {
+      const msg = errMessage(e)
+      yield {
+        type: "result",
+        result: err(`cannot stop side-agent: ${msg}`, { mode: "error", modelVisibleError: msg }),
+      }
+      return
+    }
     if (!stopped) {
       yield {
         type: "result",
@@ -229,7 +272,7 @@ const makeFindingsTool = (registry: SideAgentDaemonPort): Tool<SideAgentFindings
   inputSchema: sideAgentFindingsInputSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(input: SideAgentFindingsInput, _ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: SideAgentFindingsInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const parsed = sideAgentFindingsInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {
@@ -241,9 +284,24 @@ const makeFindingsTool = (registry: SideAgentDaemonPort): Tool<SideAgentFindings
       }
       return
     }
-    const found = registry.findings(
-      parsed.data.since !== undefined ? { since: parsed.data.since } : {},
-    )
+    if (ctx.signal.aborted) {
+      yield {
+        type: "result",
+        result: err("aborted before start", { mode: "rejected", reason: "aborted" }),
+      }
+      return
+    }
+    let found: ReadonlyArray<SideAgentFindingView>
+    try {
+      found = registry.findings(parsed.data.since !== undefined ? { since: parsed.data.since } : {})
+    } catch (e) {
+      const msg = errMessage(e)
+      yield {
+        type: "result",
+        result: err(`cannot drain findings: ${msg}`, { mode: "error", modelVisibleError: msg }),
+      }
+      return
+    }
     if (found.length === 0) {
       yield { type: "result", result: ok("No new findings.") }
       return

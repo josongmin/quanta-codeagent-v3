@@ -3,8 +3,8 @@ title: Multi-agent coordination B — leader-mediated permission escalation (bro
 section: 9
 subsystem: Subagent coordination (multi-agent broker)
 order: 98
-maturity: L2
-status: new
+maturity: L3
+status: refined
 ui_surfaces: [cli, ide]
 monitoring: n-a
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
@@ -50,24 +50,39 @@ purpose: |
   flow from the higher-authority source only (mirrors the H2/B2 provenance
   posture).
 
-  WIRING: knob-gated `QUANTA_TEAM_BROKER` — OFF (unset) ⇒ a denied worker tool
-  stays a hard failure (today's behavior, byte-identical; no broker loop, no
-  escalation envelope on the wire). The pure cores + the `brokerLoop` driver +
-  the worker applier are complete and proven end-to-end against the REAL
-  `createSubagentMailbox()`. The live HOST binding (the leader's per-turn
-  brokerLoop tick + the worker's denied-tool → escalation-request emit) is a
-  deliberately-separate wave (the dispatch seam that injects the host's
-  `@/permission` decider is not owned this wave).
+  WIRING (LIVE): knob-gated `QUANTA_TEAM_BROKER` — OFF (unset) ⇒ a denied worker
+  tool stays a hard failure (byte-identical; no broker, no envelope on the wire).
+  ON ⇒ the composition root (`src/agent/subagent-runner.ts#maybeWireCoordinationBroker`)
+  injects a `GateEscalationBroker` onto each worker subagent's
+  `admissibility.coordinationBroker`, built by
+  `src/agent/coordination-broker-wire.ts#buildLeaderHitlBroker` over the LEADER's
+  `onConfirm` authority + the shared mailbox + a deterministic correlation-id
+  source. When a worker's tool hits the mode-policy SOFT-deny arm
+  (`src/agent/admissibility-gate.ts#runModePolicy`), the gate — after re-verifying
+  `hardDenyReason(action) === null` — calls `broker.escalate({tool,scope,reason})`.
+  That runs the REAL round-trip: emit a `request` (audit), `leaderDecide` (wraps
+  the leader's HITL/onConfirm), `buildDecisionResponse` (from=leaderId), then
+  `applyDecisionResponse(..., {leaderId})`. On approval the gate ADMITS (routing
+  through the pre_tool_use hook); on denial/throw the worker stays blocked
+  (fail-closed). SECURITY: HARD_DENY is STRUCTURALLY never escalatable (it returns
+  at `earlyHardDeny` / inside the HITL branch before mode-policy, and the gate
+  re-checks); the grant authority is the injected leader `onConfirm` (a worker
+  cannot self-grant; `applyDecisionResponse` pins `leaderId`).
 evidence:
   code:
     - src/subagent/coordination/broker.ts
     - src/subagent/coordination/index.ts
+    - src/agent/admissibility-gate.ts
+    - src/agent/coordination-broker-wire.ts
+    - src/agent/subagent-runner.ts
     - src/shared/runtime-config.ts
   adrs: []
   tests:
     unit:
       - tests/unit/coordination/team-broker-hellgate.test.ts
       - tests/unit/coordination/team-broker-e2e-hellgate.test.ts
+      - tests/unit/coordination/team-broker-gate-escalation-hellgate.test.ts
+      - tests/unit/coordination/team-broker-composition-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -82,29 +97,15 @@ knobs:
       permission decide/HITL, and sends a leader-authored response. The worker
       applies ONLY a leader-authored response matching its outstanding
       correlationId — it can never self-grant.
-deliberate_hold:
-  reason: |
-    The escalation envelope + pure helpers (`parseEscalationRequest` /
-    `buildDecisionResponse` / `brokerStep`), the worker applier
-    (`applyDecisionResponse`), the injected `EscalationDeciderPort`, and the thin
-    `brokerLoop` driver are complete and proven end-to-end against the real
-    `createSubagentMailbox()`. What is NOT yet live: the host binding that (a)
-    emits an escalation `request` when a worker's tool is DENIED, and (b) ticks
-    the leader's `brokerLoop` per turn with a real `@/permission`-backed decider.
-    That dispatch-seam wiring is a separate wave; until then the knob ON is a
-    no-op at the live tool surface even though the protocol is fully wired+tested.
-  promotion_path: |
-    Promote to L3 when the dispatch seam (a) on a denied subagent tool, sends the
-    `{tool,scope,reason}` envelope as a mailbox `request` to the leader with a
-    fresh correlationId, then awaits the matching response via
-    `applyDecisionResponse`, and (b) ticks `brokerLoop` on the leader with an
-    `EscalationDeciderPort` that wraps the host `@/permission` decide / HITL
-    prompter — both gated on `QUANTA_TEAM_BROKER`. Sibling waves A (task DAG,
-    `QUANTA_TEAM_DAG`) and C (team-idle barrier, `QUANTA_TEAM_IDLE`) land
-    alongside.
 notes: |
-  21 core hellgate cases + 5 e2e hellgate cases (25 tests / 50 expects across
-  the two files) pin: envelope parse (well-formed / non-request kind / malformed
+  LIVE end-to-end (Capability B). 21 core + 5 mailbox-e2e + 8 gate-escalation + 5
+  composition-wire hellgate cases pin: the SECURITY boundary (HARD_DENY rm -rf /
+  is NEVER escalatable even by an approve-all broker; broker structurally
+  bypassed); a SOFT policy denial escalates → leader approves ⇒ ADMITTED, leader
+  denies / broker throws ⇒ fail-closed DENY, no broker ⇒ byte-identical legacy
+  deny; the composition root injects the broker ONLY under the knob + a leader
+  onConfirm; the wire drives the leader's onConfirm end-to-end. Plus the core:
+  envelope parse (well-formed / non-request kind / malformed
   JSON / missing-or-non-string fields / wholly-hostile message ⇒ undefined, no
   crash); correlationId round-trip on approve AND deny; `brokerStep` maps each
   parseable request → one response, skips non-request + malformed, is idempotent

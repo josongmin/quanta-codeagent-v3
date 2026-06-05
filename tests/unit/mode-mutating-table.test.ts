@@ -73,6 +73,39 @@ describe("mode mutating-table cross-check (ADR-0036)", () => {
     "xlsx_write",
     "docx_write",
     "pptx_write",
+    // R3 e2e-integration audit closeout — caller-wire tools previously absent
+    // from BOTH the table and this allowlist (so the cross-check never enforced
+    // their classification): apply_patch_structured (DefaultToolPorts.
+    // structuredPatch) + the 4 artifact/Canvas tools (DefaultToolPorts.
+    // artifactRegistry). list/get are read-only; register/destroy mutate the
+    // in-session canvas registry (working_state_write).
+    "apply_patch_structured",
+    "artifact_list",
+    "artifact_get",
+    "artifact_register",
+    "artifact_destroy",
+    // jun-05 §7/§9 host-binding session tools (N6 PTY / N3 MCP resources /
+    // N2 MCP connector / C2 progress / N1 side-agent). All caller-wire behind
+    // DefaultToolPorts / AgentConfig slots — not enumerable here without
+    // forcing every host port. PERMANENT table entries so plan-mode dispatch
+    // never mis-handles them when a host injects them.
+    "pty_list",
+    "pty_attach",
+    "pty_write",
+    "pty_read",
+    "pty_resize",
+    "pty_kill",
+    "mcp_list_resources",
+    "mcp_read_resource",
+    "mcp_list_prompts",
+    "mcp_get_prompt",
+    "mcp_connector_list",
+    "mcp_connector_install",
+    "communicate_update",
+    "side_agent_spawn",
+    "side_agent_list",
+    "side_agent_stop",
+    "side_agent_findings",
   ]
   const allTools = [
     ...defaultTools.map((t) => t.name),

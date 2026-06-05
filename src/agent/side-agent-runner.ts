@@ -18,6 +18,7 @@
  * bridge for ADR-0130. The slice itself (`@/side-agent`) stays a pure leaf.
  */
 
+import { runtimeConfig } from "@/shared"
 import {
   createSideAgentDaemonRegistry,
   type SideAgentDaemonRegistry,
@@ -25,10 +26,29 @@ import {
   type SideAgentRunnerPort,
 } from "@/side-agent"
 import type { SubagentRunner } from "@/subagent"
+import { createIdleBarrier } from "@/subagent/coordination"
 import type { MailboxPort } from "./subagent-mailbox"
 
 /** One-line summary cap for the status-bar finding. */
 const SUMMARY_MAX = 200
+
+/** Cap on the full-text `detail` of a finding. A side-agent CHILD can return an
+ *  arbitrarily large `finalText`; without a ceiling, that raw text flows
+ *  unbounded into the registry findings ring-buffer (up to `maxFindings`
+ *  entries) AND the mailbox broadcast body — a memory/transcript-explosion DoS
+ *  identical to the one C2's per-field caps (`communicate-update.ts`) guard
+ *  against. Generous (a real finding's context fits well under this) but bounded;
+ *  an over-cap detail is truncated with a marker so the loss is visible rather
+ *  than silent. */
+const DETAIL_MAX = 8_000
+const DETAIL_TRUNC_MARKER = "\n…[side-agent finding truncated]"
+
+/** Clamp an over-cap detail to `DETAIL_MAX`, leaving room for the truncation
+ *  marker so the returned string never exceeds the cap. */
+const capDetail = (detail: string): string =>
+  detail.length <= DETAIL_MAX
+    ? detail
+    : detail.slice(0, DETAIL_MAX - DETAIL_TRUNC_MARKER.length) + DETAIL_TRUNC_MARKER
 
 /** Read-biased default tool surface for a side-agent pass (RFC §4.6). A daemon
  *  observes/monitors; it does NOT get the mutating tools by default. A charter
@@ -81,7 +101,10 @@ export const subagentRunnerToSidePass = (
     if (text.length === 0) return null
     const firstLine = text.split("\n", 1)[0] ?? text
     const summary = firstLine.slice(0, SUMMARY_MAX)
-    return text === summary ? { summary } : { summary, detail: text }
+    // `text === summary` ⇒ the whole finding is the (short, single-line) summary
+    // ⇒ no detail. Otherwise carry the full text as detail, but CAPPED so a
+    // chatty child cannot balloon the findings log / mailbox body.
+    return text === summary ? { summary } : { summary, detail: capDetail(text) }
   },
 })
 
@@ -122,4 +145,9 @@ export const wireSideAgentDaemons = (deps: SideAgentWireDeps): SideAgentDaemonRe
     ...(deps.maxConcurrent !== undefined ? { maxConcurrent: deps.maxConcurrent } : {}),
     ...(deps.maxFindings !== undefined ? { maxFindings: deps.maxFindings } : {}),
     ...(deps.maxRetained !== undefined ? { maxRetained: deps.maxRetained } : {}),
+    // Capability C — team-idle barrier. Wired ONLY under `QUANTA_TEAM_IDLE`, so a
+    // leader can fan IN over the resident daemons by awaiting `teamIdle()` instead
+    // of polling. Reuses the injected real clock (`deps.now`) — no `Date.now()`
+    // here. Absent knob ⇒ no barrier (byte-identical legacy registry).
+    ...(runtimeConfig().teamIdle ? { idleBarrier: createIdleBarrier({ now: deps.now }) } : {}),
   })

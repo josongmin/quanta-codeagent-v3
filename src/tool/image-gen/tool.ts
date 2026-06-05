@@ -231,7 +231,21 @@ const loadReference = async (
       }),
     }
   }
-  const bytes = new Uint8Array(await file.arrayBuffer())
+  // NO-THROW boundary (Tool contract §2): the file can vanish or become
+  // unreadable between the exists() probe and the read (TOCTOU / permissions);
+  // map a read throw to a typed result instead of rejecting the iterator.
+  let bytes: Uint8Array
+  try {
+    bytes = new Uint8Array(await file.arrayBuffer())
+  } catch (e) {
+    return {
+      kind: "fail",
+      result: errResult(`reference read failed: ${errMessage(e)}`, {
+        mode: "error",
+        modelVisibleError: errMessage(e),
+      }),
+    }
+  }
   if (bytes.length > IMAGE_GEN_MAX_BYTES) {
     return {
       kind: "fail",

@@ -592,6 +592,14 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
     }) => void
     allowlistEscalated?: Set<string>
     reviewKindOverride?: ReviewKind
+    /**
+     * Capability B (multi-agent coordination) — leader-mediated escalation port.
+     * Injected by the composition root ONLY for a worker subagent when
+     * `QUANTA_TEAM_BROKER` is on. A SOFT-denied tool escalates to the leader's
+     * HITL authority; HARD_DENY is structurally never escalatable. Absent ⇒
+     * byte-identical legacy deny. See `coordination-broker-wire.ts`.
+     */
+    coordinationBroker?: import("./admissibility-gate").GateEscalationBroker
   }
   /**
    * Plan-exit port (ADR-0062). Host-supplied I/O seam that surfaces a plan

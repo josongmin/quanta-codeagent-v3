@@ -43,6 +43,9 @@ export interface McpConnectorDiscoveryPort {
 const ok = (output: string): ToolResult => ({ ok: true, output })
 const err = (output: string, failure: ToolFailure): ToolResult => ({ ok: false, output, failure })
 
+const errMsg = (e: unknown): string =>
+  e instanceof Error ? e.message : typeof e === "string" ? e : "unknown error"
+
 export const mcpConnectorListInputSchema = z.object({
   transport: z
     .enum(["stdio", "http"])
@@ -64,6 +67,28 @@ const renderEntry = (e: McpConnectorEntryView): string => {
   return `  ${e.id} — ${e.name} (${e.transport}${oauth}): ${e.description}`
 }
 
+/** Run the host install action and map every outcome (throw / typed failure /
+ *  success) to ONE typed `ToolResult`. NO-THROW boundary (Tool contract §2):
+ *  the host writer may reject — collapse it to a typed `error` result rather
+ *  than reject the tool's iterator. */
+const runInstall = async (port: McpConnectorDiscoveryPort, id: string): Promise<ToolResult> => {
+  let outcome: McpInstallOutcome
+  try {
+    outcome = await port.install(id)
+  } catch (e) {
+    const msg = errMsg(e)
+    return err(`install failed for "${id}": ${msg}`, { mode: "error", modelVisibleError: msg })
+  }
+  if (!outcome.ok) {
+    return err(`cannot install "${id}": ${outcome.error}`, {
+      mode: outcome.error === "unknown-id" ? "not_found" : "rejected",
+      ...(outcome.error === "unknown-id" ? {} : { reason: outcome.error }),
+    } as ToolFailure)
+  }
+  const note = outcome.alreadyPresent === true ? " (already present — updated)" : ""
+  return ok(`Installed MCP connector "${outcome.name}"${note}.`)
+}
+
 const makeListTool = (port: McpConnectorDiscoveryPort): Tool<McpConnectorListInput> => ({
   name: "mcp_connector_list",
   description:
@@ -72,7 +97,7 @@ const makeListTool = (port: McpConnectorDiscoveryPort): Tool<McpConnectorListInp
   inputSchema: mcpConnectorListInputSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(input: McpConnectorListInput, _ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: McpConnectorListInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const parsed = mcpConnectorListInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {
@@ -84,7 +109,26 @@ const makeListTool = (port: McpConnectorDiscoveryPort): Tool<McpConnectorListInp
       }
       return
     }
-    const all = port.list()
+    if (ctx.signal.aborted) {
+      yield {
+        type: "result",
+        result: err("aborted before start", { mode: "rejected", reason: "aborted" }),
+      }
+      return
+    }
+    // NO-THROW boundary (Tool contract §2): a misbehaving host catalog source
+    // that throws must surface as a typed result, not reject the iterator.
+    let all: readonly McpConnectorEntryView[]
+    try {
+      all = port.list()
+    } catch (e) {
+      const msg = errMsg(e)
+      yield {
+        type: "result",
+        result: err(`catalog listing failed: ${msg}`, { mode: "error", modelVisibleError: msg }),
+      }
+      return
+    }
     const items =
       parsed.data.transport !== undefined
         ? all.filter((e) => e.transport === parsed.data.transport)
@@ -109,7 +153,7 @@ const makeInstallTool = (port: McpConnectorDiscoveryPort): Tool<McpConnectorInst
   inputSchema: mcpConnectorInstallInputSchema,
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
-  async *execute(input: McpConnectorInstallInput, _ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: McpConnectorInstallInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const parsed = mcpConnectorInstallInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {
@@ -121,19 +165,14 @@ const makeInstallTool = (port: McpConnectorDiscoveryPort): Tool<McpConnectorInst
       }
       return
     }
-    const outcome = await port.install(parsed.data.id)
-    if (!outcome.ok) {
+    if (ctx.signal.aborted) {
       yield {
         type: "result",
-        result: err(`cannot install "${parsed.data.id}": ${outcome.error}`, {
-          mode: outcome.error === "unknown-id" ? "not_found" : "rejected",
-          ...(outcome.error === "unknown-id" ? {} : { reason: outcome.error }),
-        } as ToolFailure),
+        result: err("aborted before start", { mode: "rejected", reason: "aborted" }),
       }
       return
     }
-    const note = outcome.alreadyPresent === true ? " (already present — updated)" : ""
-    yield { type: "result", result: ok(`Installed MCP connector "${outcome.name}"${note}.`) }
+    yield { type: "result", result: await runInstall(port, parsed.data.id) }
   },
 })
 

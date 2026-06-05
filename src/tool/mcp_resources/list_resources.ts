@@ -5,7 +5,7 @@
 import { z } from "zod"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import type { ResourcesHandle } from "./port"
-import { renderFailure, renderResourceList } from "./render"
+import { callPort, renderFailure, renderResourceList } from "./render"
 
 export const listResourcesInputSchema = z.object({})
 export type ListResourcesInput = z.infer<typeof listResourcesInputSchema>
@@ -31,7 +31,7 @@ export const mcpListResourcesTool = (port: ResourcesHandle): Tool<ListResourcesI
       yield { type: "result", result: { ok: false, output: "aborted before start" } }
       return
     }
-    const r = await port.listResources()
+    const r = await callPort(() => port.listResources())
     if (!r.ok) {
       const { output, failure } = renderFailure(r)
       yield { type: "result", result: { ok: false, output, failure } }

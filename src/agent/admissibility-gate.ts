@@ -205,6 +205,45 @@ export interface AdmissibilityWaveAOptions {
    * NO-THROW: SM failure cannot perturb the reviewer's decision.
    */
   approvalStateMachine?: import("@/agent/approval-state-machine").ApprovalStateMachinePort
+  /**
+   * Capability B (multi-agent coordination — leader-mediated escalation). When a
+   * WORKER subagent's tool hits a SOFT permission denial (the mode-policy
+   * `evaluate()` deny arm), this injected broker escalates the request to the
+   * worker's spawning LEADER's authority (its HITL/onConfirm). On approval the
+   * gate ADMITS the call (routing through the pre_tool_use hook, parity with
+   * every other allow path); on denial the worker stays blocked.
+   *
+   * SECURITY (load-bearing): this is consulted ONLY on the SOFT mode-policy deny
+   * arm, and ONLY after re-verifying `hardDenyReason(action) === null` — a
+   * HARD_DENY / denylisted command is structurally never escalatable (it returns
+   * at step 2 `earlyHardDeny` / inside the HITL branch BEFORE mode-policy, and
+   * the re-check catches the policy-internal HARD_DENY that surfaces here when no
+   * allow-capable bypass was active). The grant authority is the injected
+   * leader port — a worker can NEVER self-grant (the decision is one it does not
+   * author; the wire pins `leaderId` through `applyDecisionResponse`). A throw is
+   * fail-closed (treated as denied).
+   *
+   * Default-OFF: absent ⇒ byte-identical legacy deny (the composition root only
+   * injects this for a subagent when `QUANTA_TEAM_BROKER` is on AND a leader
+   * authority + mailbox are present). The gate itself reads no knob — "present ⇒
+   * armed".
+   */
+  coordinationBroker?: GateEscalationBroker
+}
+
+/**
+ * Duck-typed escalation port (Capability B). Kept LOCAL to the gate so the
+ * security SSOT does not import `@/subagent/coordination` — the composition root
+ * (`coordination-broker-wire.ts`) adapts the real broker (mailbox round-trip +
+ * `applyDecisionResponse` with a pinned `leaderId`) behind this one async
+ * method. NO-THROW expected; the gate fail-closes on a throw regardless.
+ */
+export interface GateEscalationBroker {
+  escalate(req: {
+    readonly tool: string
+    readonly scope: string
+    readonly reason: string
+  }): Promise<{ readonly approved: boolean; readonly reason?: string }>
 }
 
 /* ------------------------------------------------------------------------- *
@@ -1096,6 +1135,31 @@ const resolveAskBranch = async (
   return null
 }
 
+/**
+ * Capability B — consult the injected leader broker for a SOFT-denied action.
+ * Fail-closed: any throw from the port is treated as "denied" (a worker can
+ * never widen its own permission by crashing the decider). The HARD_DENY
+ * exclusion + knob-gating are the CALLER's responsibility (see the deny arm of
+ * {@link runModePolicy}); this helper only adapts the port call + fail-close.
+ */
+const runBrokerEscalation = async (
+  broker: GateEscalationBroker,
+  action: AdmissibilityAction,
+  reason: string,
+): Promise<"approved" | "denied"> => {
+  try {
+    const verdict = await broker.escalate({
+      tool: action.tool,
+      scope: action.shellCommand ?? action.tool,
+      reason,
+    })
+    return verdict.approved ? "approved" : "denied"
+  } catch (e) {
+    writeStderr(`[quanta] team-broker: escalate threw (fail-closed deny): ${errMessage(e)}\n`)
+    return "denied"
+  }
+}
+
 /** Mode-based permission decision (legacy path). Tier 1 capability (ADR-0011):
  *  "auto" mode routes to the session-scoped LLM classifier; all other modes
  *  use the synchronous policy verbatim. */
@@ -1132,6 +1196,27 @@ const runModePolicy = async (
     tool: action.tool,
   })
   if (decision.kind === "deny") {
+    // Capability B — leader-mediated escalation of a SOFT policy denial. SECURITY:
+    // re-verify the action is NOT a HARD_DENY before escalating (the policy-
+    // internal HARD_DENY surfaces here as a `deny` when no allow-capable bypass
+    // ran step-2 `earlyHardDeny`). A denylisted command is NEVER escalatable.
+    if (opts.coordinationBroker !== undefined && hardDenyReason(action) === null) {
+      const verdict = await runBrokerEscalation(opts.coordinationBroker, action, decision.reason)
+      if (verdict === "approved") {
+        // Corrective emit: the policy denied but the leader overrode → ADMIT.
+        // Two events (deny then broker-allow) tell the true story to a tracer.
+        emitGateDecision(config, {
+          kind: "permission",
+          outcome: "allow",
+          reason: "broker-escalated (leader-approved)",
+          toolCallId: call.id,
+          tool: action.tool,
+        })
+        // null ⇒ runAdmissibilityGate proceeds to the pre_tool_use hook (so a
+        // repo-local hook can still veto last — parity with every allow path).
+        return null
+      }
+    }
     // When the HITL gate is enabled the HARD_DENY branch is already handled
     // upstream; any remaining policy denial keeps the legacy "Permission
     // denied" wording (e.g. classifier "deny" verdict in auto mode).

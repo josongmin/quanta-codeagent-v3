@@ -98,6 +98,14 @@ export const createSideAgentDaemonRegistry = (
     return n
   }
 
+  /** Capability C — the ids of currently-running daemons (the barrier's
+   *  "members": the team a leader fans IN over). */
+  const runningIds = (): string[] => {
+    const ids: string[] = []
+    for (const d of daemons.values()) if (d.status === "running") ids.push(d.id)
+    return ids
+  }
+
   /** Tear a daemon down to a terminal status. Idempotent. */
   const finish = (id: string, status: SideAgentStatus): boolean => {
     const d = daemons.get(id)
@@ -110,6 +118,10 @@ export const createSideAgentDaemonRegistry = (
     if (d.unsubscribe !== undefined) d.unsubscribe()
     d.timerHandle = undefined
     d.unsubscribe = undefined
+    // Capability C — a terminal daemon leaves the team; drop its beacon so it
+    // does not linger in the barrier (the query filters by running members, but
+    // clearing bounds the barrier's beacon set over a long session).
+    opts.idleBarrier?.reactivate(id)
     return true
   }
 
@@ -175,6 +187,8 @@ export const createSideAgentDaemonRegistry = (
       return
     }
     d.inFlight = true
+    // Capability C — a pass is in flight ⇒ this daemon is NO LONGER idle.
+    opts.idleBarrier?.reactivate(id)
     d.wakesDone += 1
     const wakeIndex = d.wakesDone
     try {
@@ -191,7 +205,11 @@ export const createSideAgentDaemonRegistry = (
       return
     }
     d.inFlight = false
+    // Capability C — pass complete ⇒ idle again as of now (beacon the release ts).
+    // Skipped once `finish` made it terminal (a stopped daemon is not a team
+    // member; `applyPostPassBounds` may have just reaped it).
     applyPostPassBounds(d)
+    if (d.status === "running") opts.idleBarrier?.beacon(id)
     pruneTerminal()
   }
 
@@ -233,6 +251,9 @@ export const createSideAgentDaemonRegistry = (
       }
       daemons.set(id, d)
       armTrigger(d)
+      // Capability C — a freshly-spawned daemon is idle (awaiting its trigger);
+      // beacon it so the team is not reported busy merely because it exists.
+      opts.idleBarrier?.beacon(id)
       pruneTerminal()
       return id
     },
@@ -274,6 +295,17 @@ export const createSideAgentDaemonRegistry = (
       }
       pruneTerminal()
       return n
+    },
+
+    teamIdle(): boolean {
+      // The members are the RUNNING daemons. No barrier wired ⇒ false (team-idle
+      // is opt-in). Empty team ⇒ the barrier's own `teamIdle` returns false
+      // (never report a vacuous team as done).
+      return opts.idleBarrier?.teamIdle(runningIds()) ?? false
+    },
+
+    idleSince(): number | undefined {
+      return opts.idleBarrier?.idleSince(runningIds())
     },
   }
 }

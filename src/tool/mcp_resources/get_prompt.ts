@@ -6,7 +6,7 @@
 import { z } from "zod"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import type { ResourcesHandle } from "./port"
-import { renderFailure, renderPromptResult } from "./render"
+import { callPort, renderFailure, renderPromptResult } from "./render"
 
 export const getPromptInputSchema = z.object({
   name: z.string().min(1, "name is required"),
@@ -40,7 +40,7 @@ export const mcpGetPromptTool = (port: ResourcesHandle): Tool<GetPromptInput> =>
       return
     }
     const { name, arguments: args } = parsed.data
-    const r = await port.getPrompt(name, args)
+    const r = await callPort(() => port.getPrompt(name, args))
     if (!r.ok) {
       const { output, failure } = renderFailure(r)
       yield { type: "result", result: { ok: false, output, failure } }

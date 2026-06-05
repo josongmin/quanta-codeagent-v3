@@ -74,10 +74,12 @@
 import type { LLMPort, Message } from "@/llm"
 import type { Role } from "@/llm/role-model-override"
 import { isGitRepo, withWorktree } from "@/runtime"
-import { QuantaError } from "@/shared"
+import { QuantaError, runtimeConfig } from "@/shared"
 import { SubagentTurnGate, type TurnWakeRegistry } from "@/subagent"
 import { ToolRegistry } from "@/tool"
 import type { SubagentRequest, SubagentResult, SubagentRunner } from "../subagent/types"
+import { isAllowed as isConfirmAllowed, normalizeConfirm } from "./confirm-decision"
+import { buildLeaderHitlBroker, type LeaderEscalationDecider } from "./coordination-broker-wire"
 import { type EffortLevel, parseEffort } from "./effort"
 import { runAgent } from "./loop"
 import type { AgentConfig, AgentOutcome } from "./types"
@@ -346,6 +348,50 @@ const buildSeedPrompt = (req: SubagentRequest): string => {
   return parts.join("\n\n")
 }
 
+/**
+ * Capability B (multi-agent coordination) — wire the leader-mediated escalation
+ * broker onto the CHILD's admissibility bundle. DEFAULT-OFF: returns `{}` (no
+ * `admissibility` slot ⇒ byte-identical legacy child) UNLESS `QUANTA_TEAM_BROKER`
+ * is on AND the parent has an `onConfirm` authority (the leader's HITL) AND the
+ * child has stable worker/leader mailbox ids. The decider wraps the LEADER's
+ * `onConfirm` — a worker's SOFT-denied tool escalates to the leader's
+ * confirmation; HARD_DENY is structurally never escalatable (enforced in the
+ * gate). The correlation-id source is a deterministic per-child counter (NOT a
+ * clock / random) so a recorded session re-mints identical ids.
+ */
+const maybeWireCoordinationBroker = (
+  parent: AgentConfig,
+  mailboxIds: { agentId: string; parentId: string },
+): Pick<AgentConfig, "admissibility"> | Record<string, never> => {
+  if (!runtimeConfig().teamBroker) return {}
+  const onConfirm = parent.onConfirm
+  if (onConfirm === undefined) return {} // no leader authority ⇒ nothing to escalate to
+  const workerId = mailboxIds.agentId
+  const leaderId = mailboxIds.parentId
+  if (workerId.length === 0 || leaderId.length === 0) return {}
+
+  const leaderDecide: LeaderEscalationDecider = async (req) => {
+    const verdict = normalizeConfirm(
+      await onConfirm({
+        tool: req.tool,
+        input: { scope: req.scope, reason: req.reason },
+        isReadOnly: false,
+      }),
+    )
+    return isConfirmAllowed(verdict) ? { approved: true } : { approved: false, reason: req.reason }
+  }
+
+  let esc = 0
+  const broker = buildLeaderHitlBroker({
+    workerId,
+    leaderId,
+    leaderDecide,
+    ...(parent.subagentMailbox ? { mailbox: parent.subagentMailbox } : {}),
+    nextCorrelationId: () => `${workerId}#esc${esc++}`,
+  })
+  return { admissibility: { coordinationBroker: broker } }
+}
+
 /** Construct the CHILD {@link AgentConfig} by shallow-cloning `parent` and
  *  applying the subagent overrides (see the override table in the report).
  *  `store`/`hooks`/`metrics`/`run`/`sessionId`/`memory` are DROPPED so a child
@@ -451,6 +497,10 @@ const buildChildConfig = (
     // deny guard (now the real, exercised bound, not belt-and-braces). Skills
     // are intentionally NOT propagated (a subagent gets a clean tool surface).
     ...(parent.subagent ? { subagent: parent.subagent } : {}),
+    // Capability B — leader-mediated escalation broker on the child's
+    // admissibility bundle. Default-OFF (empty spread) unless QUANTA_TEAM_BROKER
+    // is on + the parent has an onConfirm authority. See the helper above.
+    ...maybeWireCoordinationBroker(parent, mailboxIds),
     // DROPPED on purpose: store, sessionId, memory, hooks, metrics, run,
     // repoRules, globRules, workingState. A subagent must not write into the
     // parent's durable memory, emit into the parent's hook bus / metrics, or

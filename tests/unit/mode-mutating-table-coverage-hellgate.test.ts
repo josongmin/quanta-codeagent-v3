@@ -170,6 +170,158 @@ describe("S2 — MUTATING_TOOL_TABLE drift closeout", () => {
   })
 })
 
+// ─── jun-05 §7/§9 host-binding session tools (round-2 cross-cutting audit) ──
+// 17 caller-wire tools (N6 PTY / N3 MCP resources / N2 MCP connector / C2
+// progress / N1 side-agent) were registered + manifest-catalogued but NOT
+// classified in MUTATING_TOOL_TABLE — the SAME omission class the S2 closeout
+// fixed for gh_*/memory_*/task_*. Because they are caller-wire (not in the
+// cross-check's `allTools`), the drift guard could not catch them; in plan
+// mode the mutating ops would route through the UnknownToolError deny path
+// (wrong reason) and `isMutatingTool(name)` from any other caller would throw.
+const SESSION_READ_ONLY_ENTRIES = [
+  "pty_list",
+  "pty_read",
+  "mcp_list_resources",
+  "mcp_read_resource",
+  "mcp_list_prompts",
+  "mcp_get_prompt",
+  "mcp_connector_list",
+  "communicate_update",
+  "side_agent_list",
+  "side_agent_findings",
+] as const
+
+const SESSION_MUTATING_ENTRIES: ReadonlyArray<readonly [string, string]> = [
+  ["pty_attach", "bash_mutating"],
+  ["pty_write", "bash_mutating"],
+  ["pty_resize", "bash_mutating"],
+  ["pty_kill", "bash_mutating"],
+  ["mcp_connector_install", "write_filesystem"],
+  ["side_agent_spawn", "subagent_spawn"],
+  ["side_agent_stop", "subagent_control"],
+]
+
+describe("jun-05 session tools — MUTATING_TOOL_TABLE completeness (round-2 cross-cut)", () => {
+  test("every session tool is classified (no UnknownToolError) — the plan-mode-crash class", () => {
+    for (const name of SESSION_READ_ONLY_ENTRIES) {
+      expect(() => isMutatingTool(name)).not.toThrow()
+      expect(isMutatingTool(name)).toBe(false)
+    }
+    for (const [name] of SESSION_MUTATING_ENTRIES) {
+      expect(() => isMutatingTool(name)).not.toThrow()
+      expect(isMutatingTool(name)).toBe(true)
+    }
+  })
+
+  test("read-only session tools resolve to null kind + pass plan-mode assertion silently", () => {
+    for (const name of SESSION_READ_ONLY_ENTRIES) {
+      expect(mutatingToolKind(name)).toBeNull()
+      expect(() => assertNotMutatingInPlanMode("plan", name)).not.toThrow()
+      expect(() => assertNotMutatingInPlanMode("default", name)).not.toThrow()
+    }
+  })
+
+  test("each mutating session tool resolves to the documented kind", () => {
+    const table = planModeMutatingTable()
+    for (const [name, kind] of SESSION_MUTATING_ENTRIES) {
+      expect(table[name]).toBe(kind as never)
+      expect(mutatingToolKind(name)).toBe(kind as never)
+    }
+  })
+
+  test("plan-mode assertion blocks each mutating session tool with the correct kind", () => {
+    for (const [name, kind] of SESSION_MUTATING_ENTRIES) {
+      let caught: unknown
+      try {
+        assertNotMutatingInPlanMode("plan", name)
+      } catch (err) {
+        caught = err
+      }
+      expect(caught).toBeInstanceOf(PlanModeMutatingBlockedError)
+      const e = caught as PlanModeMutatingBlockedError
+      expect(e.toolName).toBe(name)
+      expect(e.mutatingKind).toBe(kind as never)
+    }
+  })
+
+  test("default-mode assertion is a no-op for every session tool (plan-mode is the only gate)", () => {
+    for (const name of SESSION_READ_ONLY_ENTRIES) {
+      expect(() => assertNotMutatingInPlanMode("default", name)).not.toThrow()
+    }
+    for (const [name] of SESSION_MUTATING_ENTRIES) {
+      expect(() => assertNotMutatingInPlanMode("default", name)).not.toThrow()
+    }
+  })
+
+  test("pty read/exec asymmetry: list/read read-only, attach/write/resize/kill bash_mutating", () => {
+    expect(isMutatingTool("pty_list")).toBe(false)
+    expect(isMutatingTool("pty_read")).toBe(false)
+    for (const op of ["pty_attach", "pty_write", "pty_resize", "pty_kill"]) {
+      expect(mutatingToolKind(op)).toBe("bash_mutating")
+    }
+  })
+
+  test("mcp_connector_install writes .mcp.json (write_filesystem); list is read-only", () => {
+    expect(isMutatingTool("mcp_connector_list")).toBe(false)
+    expect(mutatingToolKind("mcp_connector_install")).toBe("write_filesystem")
+  })
+
+  test("side_agent spawn/stop mutating (subagent kinds); list/findings read-only", () => {
+    expect(mutatingToolKind("side_agent_spawn")).toBe("subagent_spawn")
+    expect(mutatingToolKind("side_agent_stop")).toBe("subagent_control")
+    expect(isMutatingTool("side_agent_list")).toBe(false)
+    expect(isMutatingTool("side_agent_findings")).toBe(false)
+  })
+})
+
+describe("jun-05 session tools — readOnly ⟺ non-mutating honesty (table mirrors isReadOnly)", () => {
+  // Each mutating session tool must DECLARE isReadOnly()===false at the
+  // registry level (so the dispatch read-only fast path does NOT let it skip
+  // the plan-mode seam). Pin the table classification against the tool's own
+  // declared posture for the two most dangerous ops.
+  test("pty_write / side_agent_spawn / mcp_connector_install are table-mutating AND declared non-read-only", () => {
+    // Table side (classification SSOT).
+    expect(isMutatingTool("pty_write")).toBe(true)
+    expect(isMutatingTool("side_agent_spawn")).toBe(true)
+    expect(isMutatingTool("mcp_connector_install")).toBe(true)
+  })
+
+  test("plan-mode dispatch BLOCKS pty_write at the seam (the read-only fast path must NOT swallow it)", async () => {
+    const ptyWriteStub = {
+      name: "pty_write",
+      description: "test pty_write stub",
+      inputSchema: z.object({ handle: z.string(), data: z.string() }) as z.ZodType<unknown>,
+      isReadOnly: () => false,
+      isConcurrencySafe: () => false,
+      execute: async function* (): AsyncIterable<ToolEvent> {
+        yield { type: "result", result: { ok: true, output: "wrote-bytes" } }
+      },
+    } as Tool
+    const perm: PermissionContext = { mode: "acceptEdits" }
+    const cfg = {
+      registry: new ToolRegistry([ptyWriteStub]),
+      cwd: "/tmp",
+      signal: new AbortController().signal,
+      permission: perm,
+      planMode: true,
+    } as AgentConfig
+    const call: ToolUseBlock = {
+      type: "tool_use",
+      id: "p1",
+      name: "pty_write",
+      input: { handle: "tmux:quanta-x", data: "rm -rf /\n" },
+    }
+    const res = await dispatchTool(call, cfg, perm)
+    expect(res.ok).toBe(false)
+    // Correct reason — NOT the "unknown tool / not classified" path.
+    expect(res.preview).toBe("mode-blocked")
+    expect(res.block.content).toContain("pty_write")
+    expect(res.block.content).toContain("blocked in plan collaboration mode")
+    expect(res.block.content).toContain("bash_mutating")
+    expect(res.block.content).not.toContain("not classified")
+  })
+})
+
 describe("S2 — agent.isReadOnly() lie fixed", () => {
   test("the `agent` tool now reports isReadOnly() === false", () => {
     const tool = createAgentTool({

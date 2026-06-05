@@ -333,6 +333,57 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   // Pure HTTP GET + multimodal-block emit; no FS write, no shell. Safe in
   // plan mode.
   read_image_url: null,
+  // ─── jun-05 §7/§9 host-binding session tools (N1/N2/N3/N6/C2) ─────────────
+  // All caller-wire (registered only when the relevant DefaultToolPort /
+  // AgentConfig slot is wired, gated default-OFF). Their MUTATING_TOOL_TABLE
+  // entries are PERMANENT so plan-mode dispatch never mis-handles them when a
+  // host injects them (a missing entry routes the mutating ops through the
+  // UnknownToolError deny path with a confusing "not classified" reason instead
+  // of the correct PlanModeMutatingBlockedError, and `isMutatingTool`/
+  // `mutatingToolKind` called from any other code path would throw). The
+  // mode-mutating-table cross-check tolerates these via the caller-wire
+  // allowlist convention (their factories require host ports to enumerate).
+  //
+  // N6 — PTY/tmux attach (RFC §5.2). `pty_list`/`pty_read` are read-only
+  // (enumerate / read a cursor). `pty_attach`/`pty_write`/`pty_resize`/
+  // `pty_kill` touch a LIVE shell session — `bash_mutating` is the right kind:
+  // the seam cannot introspect what a stdin write executes, and kill is
+  // irreversible (same rationale as `bash`/`bash_kill`). Plan mode forbids.
+  pty_list: null,
+  pty_read: null,
+  pty_attach: "bash_mutating",
+  pty_write: "bash_mutating",
+  pty_resize: "bash_mutating",
+  pty_kill: "bash_mutating",
+  // N3 — MCP resource/prompt read surface (RFC jun-4-mcp-resource-tools). All
+  // four are read-only enumerations/reads over a connected MCP server (the
+  // output is mcp-origin untrusted DATA wrapped by the H2 envelope, but the
+  // call performs no local state mutation). Safe in plan mode.
+  mcp_list_resources: null,
+  mcp_read_resource: null,
+  mcp_list_prompts: null,
+  mcp_get_prompt: null,
+  // N2 — MCP connector discovery. `mcp_connector_list` is a read-only catalog
+  // enumeration; `mcp_connector_install` WRITES the server entry into
+  // `.mcp.json` (`write_filesystem` — plan PROPOSES config changes, does not
+  // commit them).
+  mcp_connector_list: null,
+  mcp_connector_install: "write_filesystem",
+  // C2 — structured mid-turn progress report. Read-only by construction: the
+  // ONLY effect is emitting a render-only `progress_update` observability event
+  // onto a host sink (no FS / shell / git / session-state mutation). Safe in
+  // plan mode (matches its own `isReadOnly: () => true` + `pre-approval-ok`).
+  communicate_update: null,
+  // N1 — background side-agent daemons. `side_agent_list`/`side_agent_findings`
+  // are read-only (snapshot / drain). `side_agent_spawn` starts a persistent
+  // background daemon that runs its OWN unrestricted passes (`subagent_spawn` —
+  // same "cannot introspect the child's side effects" rationale as `agent`);
+  // `side_agent_stop` cancels a running daemon (`subagent_control`, same as
+  // `task_stop`). Plan mode forbids both mutating ops.
+  side_agent_spawn: "subagent_spawn",
+  side_agent_list: null,
+  side_agent_stop: "subagent_control",
+  side_agent_findings: null,
   // `session_config` — agent self-inspection / self-mutation over its own
   // SDK posture (effort tier, identity mode, tool profile, model, provider).
   // Although `op:set_effort` mutates the session EffortStore, the mutation
@@ -344,6 +395,30 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   // visible tool call in the trace). The unit + hellgate tests assert this
   // classification stays read-only-permissive.
   session_config: null,
+  // ─── R3 e2e-integration audit closeout — caller-wire tools that slipped past
+  // the `mode-mutating-table.test.ts` cross-check (it enumerates `defaultTools`,
+  // which excludes these conditionally-registered tools, and TOLERATES — does
+  // not REQUIRE — caller-wire entries). Each ships behind a DefaultToolPort and
+  // is reachable through `buildDefaultTools` when its slot is wired, so a
+  // plan-mode dispatch (or any direct `isMutatingTool`/`mutatingToolKind` call)
+  // would trip `UnknownToolError` — the MUTATING ones then deny with a confusing
+  // "not classified" reason instead of the correct PlanModeMutatingBlockedError.
+  // Entries are PERMANENT (the caller-wire allowlist convention).
+  //
+  // ADR-0464 — apply_patch_structured: per-file-isolated V4A apply, same write
+  // posture as apply_patch (plan PROPOSES, does not commit).
+  apply_patch_structured: "write_filesystem",
+  // C1 — artifact (Canvas) read/manage tools. list/get are read-only enumerations
+  // over the in-memory session registry (plan-safe). register/destroy MUTATE that
+  // session-canvas registry — no FS/shell/git side effect, purely in-session
+  // durable state, so `working_state_write` is the right kind (plan PROPOSES
+  // canvas changes; it does not commit them mid-turn). The dispatch seam's
+  // read-only fast-path already let list/get through, but their absence here
+  // still threw on any direct table lookup — classify them explicitly.
+  artifact_list: null,
+  artifact_get: null,
+  artifact_register: "working_state_write",
+  artifact_destroy: "working_state_write",
 })
 
 /** Thrown by {@link isMutatingTool} / {@link assertNotMutatingInPlanMode}

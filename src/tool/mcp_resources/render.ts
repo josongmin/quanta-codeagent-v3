@@ -72,6 +72,24 @@ export const renderFailure = <T>(
   r: Extract<HandleResult<T>, { ok: false }>,
 ): { output: string; failure: ToolFailure } => mapFailure(r.reason, r.message)
 
+/** NO-THROW boundary (Tool contract §2). The `ResourcesHandle` port is
+ *  documented NO-THROW (every method returns a typed `HandleResult`), but a
+ *  misbehaving host adapter that THROWS instead of returning a typed failure
+ *  must NOT reject the tool's async iterator (which would hang/corrupt the
+ *  dispatch loop). We run the port call here and collapse any thrown rejection
+ *  to a typed `transport` failure (`mode:"error"` — a system fault, not the
+ *  model's), exactly as if the port had returned `{ok:false, reason:"transport"}`. */
+export const callPort = async <T>(
+  produce: () => Promise<HandleResult<T>>,
+): Promise<HandleResult<T>> => {
+  try {
+    return await produce()
+  } catch (e) {
+    const message = e instanceof Error ? e.message : typeof e === "string" ? e : "unknown error"
+    return { ok: false, reason: "transport", message }
+  }
+}
+
 // --- resources -------------------------------------------------------------
 
 export const renderResourceList = (entries: ReadonlyArray<ResourceEntry>): string => {

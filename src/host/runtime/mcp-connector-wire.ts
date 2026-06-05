@@ -14,8 +14,12 @@
  *
  * Atomicity: the merge is read-modify-write through `writeFileAtomic` (temp +
  * fsync + rename) so a crash can never leave a torn `.mcp.json`. A pre-existing
- * server under the same id is OVERWRITTEN (re-install = update), reported via
- * `alreadyPresent`.
+ * server under the same id whose spec is BYTE-IDENTICAL to ours is an idempotent
+ * re-install (`alreadyPresent`); one whose spec DIFFERS is a `name-conflict` —
+ * we FAIL CLOSED rather than silently clobber a user's (possibly audited /
+ * trusted) same-name server with the catalog's command. Overwriting a divergent
+ * entry would let `mcp_connector_install <bundled-id>` swap out a hand-pinned
+ * server the host then SPAWNS, so the divergent case is never auto-written.
  *
  * Schema note: the plugin `MCPServerSpec` is `.strict()` and carries no `oauth` /
  * `cwd` keys, so those are dropped on write — `url` presence is what opts an http
@@ -68,21 +72,60 @@ const toPluginSpec = (c: McpServerConfigShape): PluginMcpServerSpec => ({
   ...(c.headers !== undefined ? { headers: { ...c.headers } } : {}),
 })
 
-/** Read the existing `.mcp.json` and return its `mcpServers` map (empty when the
- *  file is absent / unparseable / wrong-shaped — a fresh map). NO-THROW. */
+/** Order-independent structural equality of two server specs (the existing
+ *  on-disk entry vs the one we'd write). A canonical JSON with sorted keys is
+ *  enough — specs are flat records of strings / string-arrays. Used to keep a
+ *  re-install idempotent while treating a DIVERGENT same-name entry as a
+ *  conflict (never silently overwritten). */
+const canonical = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`
+  if (value !== null && typeof value === "object") {
+    const rec = value as Record<string, unknown>
+    return `{${Object.keys(rec)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonical(rec[k])}`)
+      .join(",")}}`
+  }
+  return JSON.stringify(value)
+}
+const sameSpec = (a: unknown, b: unknown): boolean => canonical(a) === canonical(b)
+
+/**
+ * Read the existing `.mcp.json` `mcpServers` map. NO-THROW, three outcomes:
+ *  - `{ servers }` — file absent (fresh map) OR a well-formed object map;
+ *  - `{ corrupt: true }` — the file EXISTS but is unparseable / wrong-shaped
+ *    (`mcpServers` not a plain object, or non-JSON). The caller fails the
+ *    install instead of CLOBBERING the whole file with a single-server doc —
+ *    a transient half-write or a config with a stray edit must not erase the
+ *    user's other servers.
+ */
 const readExistingServers = async (
   configPath: string,
-): Promise<Record<string, PluginMcpServerSpec>> => {
+): Promise<
+  { readonly servers: Record<string, PluginMcpServerSpec> } | { readonly corrupt: true }
+> => {
+  const file = Bun.file(configPath)
+  if (!(await file.exists())) return { servers: {} }
+  let parsed: unknown
   try {
-    const raw = await Bun.file(configPath).text()
-    const parsed = JSON.parse(raw) as Partial<PluginMcpRoot>
-    if (parsed.mcpServers !== null && typeof parsed.mcpServers === "object") {
-      return { ...(parsed.mcpServers as Record<string, PluginMcpServerSpec>) }
-    }
+    parsed = JSON.parse(await file.text())
   } catch {
-    // absent / unreadable / malformed ⇒ start fresh (never throw)
+    return { corrupt: true } // present but not JSON ⇒ never clobber
   }
-  return {}
+  // The doc must be a plain JSON object. A non-object top level (array, string,
+  // number) is wrong-shaped ⇒ refuse rather than clobber.
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { corrupt: true }
+  }
+  const mcpServers = (parsed as { mcpServers?: unknown }).mcpServers
+  // Absent `mcpServers` ⇒ a fresh map to merge into (a legitimately empty doc).
+  if (mcpServers === undefined) return { servers: {} }
+  // Present but not a plain object map (array / null / scalar) would spread to
+  // numeric index keys / explode the shape ⇒ refuse rather than corrupt.
+  if (mcpServers === null || typeof mcpServers !== "object" || Array.isArray(mcpServers)) {
+    return { corrupt: true }
+  }
+  return { servers: { ...(mcpServers as Record<string, PluginMcpServerSpec>) } }
 }
 
 /**
@@ -105,9 +148,24 @@ export const buildMcpConnectorDiscoveryPort = (args: {
       if (entry === undefined) return { ok: false, error: "unknown-id" }
       const result = toMcpServerConfig(entry)
       if (!result.ok) return { ok: false, error: result.error }
-      const servers = await readExistingServers(args.configPath)
-      const alreadyPresent = Object.hasOwn(servers, result.config.name)
-      servers[result.config.name] = toPluginSpec(result.config)
+      const read = await readExistingServers(args.configPath)
+      if ("corrupt" in read) {
+        // Existing `.mcp.json` is present but unparseable/wrong-shaped — refuse
+        // rather than overwrite the user's whole config with one server.
+        return { ok: false, error: "config-unreadable" }
+      }
+      const servers = read.servers
+      const spec = toPluginSpec(result.config)
+      const existing = Object.hasOwn(servers, result.config.name)
+        ? servers[result.config.name]
+        : undefined
+      if (existing !== undefined && !sameSpec(existing, spec)) {
+        // A same-name server already exists with a DIFFERENT spec — refuse to
+        // clobber it (it may be a user-pinned/audited command the host spawns).
+        return { ok: false, error: "name-conflict" }
+      }
+      const alreadyPresent = existing !== undefined
+      servers[result.config.name] = spec
       const root: PluginMcpRoot = { mcpServers: servers }
       await writeFileAtomic(args.configPath, `${JSON.stringify(root, null, 2)}\n`)
       return { ok: true, name: result.config.name, alreadyPresent }

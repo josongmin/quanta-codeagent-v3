@@ -35,15 +35,28 @@ evidence:
     - src/connectors/mcp-connector-catalog.ts
     - src/tool/mcp-connector/index.ts
     - src/tool/index.ts
+    - src/host/runtime/mcp-connector-wire.ts
   tests:
     unit:
       - tests/unit/mcp-connector-catalog-hellgate.test.ts
     integration:
       - tests/unit/mcp-connector-tools-e2e-hellgate.test.ts
+      - tests/unit/mcp-connector-wire-e2e-hellgate.test.ts
     contract: []
-knobs: []
+knobs:
+  - name: QUANTA_MCP_CONNECTORS
+    default: 'undefined'
+    purpose: 'Strict opt-in (=="1") for the mcp_connector_list/_install tools; absent ⇒ tools unregistered ⇒ byte-identical.'
+  - name: QUANTA_MCP_CONFIG
+    default: 'undefined'
+    purpose: 'Override .mcp.json install target path; absent ⇒ cwd/.mcp.json. Host-resolved (NOT model-supplied).'
 notes: |
   L3: pure 카탈로그 코어 + transform + 2 도구 + DefaultToolPorts wiring + knob +
-  manifest 완비, default-OFF byte-identical. **잔여(host)**: composition root가
-  discovery port를 catalog source(bundled/remote) + toMcpServerConfig + 실제
-  .mcp.json writer로 mint해 `DefaultToolPorts.mcpConnectors` 채우기 → 도구 라이브.
+  manifest 완비, default-OFF byte-identical. **host 배선 완료**: arg-builder가
+  `QUANTA_MCP_CONNECTORS=1`일 때 `buildMcpConnectorDiscoveryPort`(@/host/runtime
+  mcp-connector-wire)로 discovery port를 mint해 `DefaultToolPorts.mcpConnectors`를
+  채움 → 도구 라이브. writer는 atomic merge(writeFileAtomic) + fail-closed:
+  divergent same-name 서버는 `name-conflict`로 거부(사용자 audited 엔트리 clobber
+  방지), 손상/오형(present-but-unparseable) .mcp.json은 `config-unreadable`로 거부
+  (단일-서버 doc로 통째 덮어쓰기 방지). command는 catalog(신뢰 소스)에서만 옴 —
+  모델은 id만 공급(임의 command 주입 불가).

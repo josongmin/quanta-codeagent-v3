@@ -62,7 +62,13 @@ describe("side-agent-runner — mailbox adapter (finding → broadcast)", () => 
   test("finding with detail → body encodes summary + detail", () => {
     const mb = mkMailbox()
     const sidebox = mailboxToSideAgentMailbox(mb.port)
-    sidebox.send({ from: "sa-1", to: "main", kind: "finding", summary: "2 failures", detail: "specA\nspecB" })
+    sidebox.send({
+      from: "sa-1",
+      to: "main",
+      kind: "finding",
+      summary: "2 failures",
+      detail: "specA\nspecB",
+    })
     expect(mb.sends[0]?.body).toBe("2 failures\n\nspecA\nspecB")
     expect(mb.sends[0]?.kind).toBe("broadcast")
   })
@@ -111,6 +117,37 @@ describe("side-agent-runner — runner adapter (one read-biased pass)", () => {
     await pass.run({ task: "t", wake: 1, maxTurns: 1, signal: new AbortController().signal })
     expect(reqs[0]?.toolFilter).toEqual(["read", "write"])
   })
+
+  // DoS — a chatty child can return a multi-MB finalText. Unbounded `detail`
+  // would balloon the registry findings ring-buffer (up to 1000 entries) AND
+  // the mailbox broadcast body, mirroring the very explosion C2's per-field caps
+  // guard against. The summary is line-1-capped; the detail MUST be capped too.
+  test("huge multi-line finalText → detail is CAPPED (no unbounded payload)", async () => {
+    const huge = `HEADLINE\n${"y".repeat(50_000)}`
+    const pass = subagentRunnerToSidePass(mkRunner(() => okResult(huge)).runner)
+    const out = await pass.run({
+      task: "t",
+      wake: 1,
+      maxTurns: 1,
+      signal: new AbortController().signal,
+    })
+    expect(out?.summary).toBe("HEADLINE")
+    // detail present (multi-line) but bounded well below the raw 50k payload.
+    expect(out?.detail).toBeDefined()
+    expect(out?.detail?.length ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(8_000)
+  })
+
+  test("small multi-line finalText → detail still the FULL text (cap is a ceiling, not a chop)", async () => {
+    const text = "HEADLINE\nline two\nline three"
+    const pass = subagentRunnerToSidePass(mkRunner(() => okResult(text)).runner)
+    const out = await pass.run({
+      task: "t",
+      wake: 1,
+      maxTurns: 1,
+      signal: new AbortController().signal,
+    })
+    expect(out).toEqual({ summary: "HEADLINE", detail: text })
+  })
 })
 
 // ── full wire (registry over the real adapters) ───────────────────────────────
@@ -146,9 +183,7 @@ describe("side-agent-runner — wireSideAgentDaemons (end-to-end over fakes)", (
     timerHandler?.() // tick → one bounded read-biased pass → finding
     await new Promise((r) => setTimeout(r, 0))
     // The finding reached the mailbox as a broadcast to main.
-    expect(mb.sends).toEqual([
-      { from: id, to: "main", kind: "broadcast", body: "disk 92% full" },
-    ])
+    expect(mb.sends).toEqual([{ from: id, to: "main", kind: "broadcast", body: "disk 92% full" }])
     // findings() also surfaces it; maxWakes=1 auto-stopped + cleared the timer.
     expect(reg.findings().map((f) => f.summary)).toEqual(["disk 92% full"])
     expect(reg.list()[0]?.status).toBe("stopped")

@@ -116,7 +116,14 @@ const cellValue = (cellInner: string, attrs: string, shared: string[]): string =
 /** Parse one `<row>` body into its (positionally-placed) cell values. */
 const parseRowCells = (body: string, shared: string[]): string[] => {
   const cells: string[] = []
-  const cellRe = /<c\b([^>]*)>([\s\S]*?)<\/c>|<c\b([^>]*)\/>/g
+  // The open-tag alternative's `(?<!\/)>` is LOAD-BEARING: a self-closing empty
+  // cell `<c r="A1" s="1"/>` (Excel emits these for styled-but-empty cells)
+  // would otherwise be SWALLOWED by the greedy `[^>]*` of the first alternative,
+  // which anchors on the NEXT cell's `>` — placing the following value cell's
+  // content at the WRONG column (silent one-column left-shift of the whole row).
+  // The negative lookbehind forbids the paired-tag alternative from matching a
+  // `/>`, forcing the self-closing alternative to claim it instead.
+  const cellRe = /<c\b([^>]*)(?<!\/)>([\s\S]*?)<\/c>|<c\b([^>]*)\/>/g
   for (let cm = cellRe.exec(body); cm !== null; cm = cellRe.exec(body)) {
     const attrs = cm[1] ?? cm[3] ?? ""
     const inner = cm[2] ?? ""

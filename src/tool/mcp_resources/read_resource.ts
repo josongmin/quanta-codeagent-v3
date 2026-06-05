@@ -5,7 +5,7 @@
 import { z } from "zod"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import type { ResourcesHandle } from "./port"
-import { renderFailure, renderResourceContent } from "./render"
+import { callPort, renderFailure, renderResourceContent } from "./render"
 
 export const readResourceInputSchema = z.object({
   uri: z.string().min(1, "uri is required"),
@@ -35,7 +35,7 @@ export const mcpReadResourceTool = (port: ResourcesHandle): Tool<ReadResourceInp
       return
     }
     const uri = parsed.data.uri
-    const r = await port.readResource(uri)
+    const r = await callPort(() => port.readResource(uri))
     if (!r.ok) {
       const { output, failure } = renderFailure(r)
       yield { type: "result", result: { ok: false, output, failure } }

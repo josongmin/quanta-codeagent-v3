@@ -1133,6 +1133,7 @@
         "!tests/unit/session-registry-slash.test.ts",
         "!tests/unit/session-transcript-retention-hellgate.test.ts",
         "!tests/unit/session-transcript-retention-e2e-hellgate.test.ts",
+        "!tests/unit/session-knobs-default-off-byte-identity-hellgate.test.ts",
         "!tests/unit/auth/auth-ui.test.ts",
         "!tests/unit/dotenv.test.ts",
         "!tests/unit/env-knob-branches.test.ts",

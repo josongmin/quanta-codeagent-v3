@@ -33,17 +33,23 @@ evidence:
     - src/side-agent/types.ts
     - src/tool/side-agent/index.ts
     - src/agent/tier1/side-agent.ts
+    - src/agent/side-agent-runner.ts
   tests:
     unit:
       - tests/unit/side-agent-hellgate.test.ts
       - tests/unit/side-agent-tools-hellgate.test.ts
+      - tests/unit/side-agent-runner-hellgate.test.ts
     integration:
       - tests/unit/side-agent-block-e2e-hellgate.test.ts
     contract: []
 knobs: []
 notes: |
-  L3: pure 데몬 registry 코어(기존) + 4 도구 + tier1 블록 + AgentConfig slot + knob
-  완비, default-OFF byte-identical. **잔여(Phase-2, types.ts 명시)**: assembler가
-  `QUANTA_SIDE_AGENT`에 registry를 real subagent runner(per-wake bounded pass) +
-  mailbox + setInterval/clearInterval/Date.now로 mint해 `config.sideAgentDaemons`
-  채우기 — 그래야 도구가 라이브.
+  L3: pure 데몬 registry 코어 + 4 도구 + tier1 블록 + AgentConfig slot + knob +
+  **Phase-2 host runner adaptation 완료** (`src/agent/side-agent-runner.ts`):
+  `subagentRunnerToSidePass`(read-biased SIDE_AGENT_READONLY_TOOLS toolFilter +
+  bounded maxTurns, finalText→finding; summary=line-1 cap 200 / detail cap 8KB —
+  chatty child의 unbounded payload가 findings ring-buffer/mailbox를 부풀리지 못하게
+  C2와 동일 DoS 규율), `mailboxToSideAgentMailbox`(finding→broadcast),
+  `wireSideAgentDaemons`(injected setInterval/clearInterval/now로 registry mint).
+  `QUANTA_SIDE_AGENT` default-OFF byte-identical. privilege: side-agent의 toolFilter는
+  ALLOWLIST(축소만)이고 모든 write는 부모 permission gate 재진입 — self-grant 불가.

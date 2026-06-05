@@ -238,11 +238,14 @@ describe("N3 — typed failures map to ok:false (no throw)", () => {
         throw new Error("boom")
       },
     }
-    // The port contract is no-throw; a buggy port that throws surfaces as a
-    // rejected generator. We assert the tool itself yields no `ok:true` for a
-    // throwing port (the throw propagates, not a false success).
+    // The port contract is no-throw; a buggy port that THROWS anyway must NOT
+    // reject the tool's iterator (which would hang/corrupt the dispatch loop).
+    // Tool contract §2: the `callPort` boundary collapses the throw to a single
+    // typed `ok:false` result (transport failure), never a false success.
     const t = byName(mcpResourcesTools(throwing), "mcp_list_resources")
-    await expect(run(t, {})).rejects.toThrow("boom")
+    const r = await run(t, {})
+    expect(r.ok).toBe(false)
+    expect(r.output).toContain("transport")
   })
 })
 

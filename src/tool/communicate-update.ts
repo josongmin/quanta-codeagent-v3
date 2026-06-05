@@ -121,11 +121,19 @@ export const createCommunicateUpdateTool = (): Tool<CommunicateUpdateInput> => (
  *  The sink contract is NO-THROW; the absent-sink case is a no-op. */
 const emitProgress = (sink: ProgressSink | undefined, input: CommunicateUpdateInput): void => {
   if (sink === undefined) return
-  sink.emit({
-    current_step: input.current_step,
-    ...(input.final_summary !== undefined ? { final_summary: input.final_summary } : {}),
-    ...(input.completed_subtitle !== undefined
-      ? { completed_subtitle: input.completed_subtitle }
-      : {}),
-  })
+  // NO-THROW boundary (Tool contract §2): the sink is NO-THROW BY CONTRACT, but
+  // a misbehaving host adapter that throws must never reject this tool's async
+  // iterator — a progress report is best-effort observability and degrades to a
+  // silent success, never a hung/corrupted turn.
+  try {
+    sink.emit({
+      current_step: input.current_step,
+      ...(input.final_summary !== undefined ? { final_summary: input.final_summary } : {}),
+      ...(input.completed_subtitle !== undefined
+        ? { completed_subtitle: input.completed_subtitle }
+        : {}),
+    })
+  } catch {
+    // swallow — render-only event; the model still gets ok:true
+  }
 }

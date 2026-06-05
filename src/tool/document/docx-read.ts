@@ -61,7 +61,15 @@ export const parseDocx = (bytes: Uint8Array): ParseDocxResult => {
   if (doc === undefined) return { ok: false, error: "docx: missing word/document.xml" }
   const xml = decode(doc.data)
   const paragraphs: string[] = []
-  const re = /<w:p\b[^>]*>([\s\S]*?)<\/w:p>|<w:p\b[^>]*\/>/g
+  // `(?<!\/)>` on the paired-tag alternative is LOAD-BEARING: an empty
+  // self-closing paragraph `<w:p/>` (Word emits these for blank lines) would
+  // otherwise be SWALLOWED by the greedy `[^>]*` of the first alternative,
+  // which anchors on the NEXT paragraph's `>` — dropping the blank paragraph
+  // and SHIFTING every later paragraph's index (the docstring promises blank
+  // paragraphs are preserved positionally). The lookbehind forbids the
+  // paired-tag alternative from matching a `/>`, so the self-closing
+  // alternative claims `<w:p/>` as its own (empty) paragraph.
+  const re = /<w:p\b[^>]*(?<!\/)>([\s\S]*?)<\/w:p>|<w:p\b[^>]*\/>/g
   for (let m = re.exec(xml); m !== null; m = re.exec(xml)) {
     paragraphs.push(paragraphText(m[1] ?? ""))
   }
