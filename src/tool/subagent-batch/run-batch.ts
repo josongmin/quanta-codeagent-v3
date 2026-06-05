@@ -244,12 +244,20 @@ export const runBatch = async (
     args.dependencies !== undefined && Object.values(args.dependencies).some((d) => d.length > 0)
   let gate: BatchDagGate | undefined
   if (deps.dagGateFactory !== undefined && hasEdges) {
+    // A dependency KEY that is not an item id is a modeling typo whose intended
+    // ordering constraint would silently vanish — reject it, SYMMETRIC with the
+    // dangling-VALUE rejection the gate factory performs (audit finding #5).
+    const idSet = new Set(ids)
+    const unknownKey = Object.keys(args.dependencies ?? {}).find((k) => !idSet.has(k))
     const nodes: BatchDagNode[] = ids.map((id) => ({
       id,
       dependsOn: args.dependencies?.[id] ?? [],
       state: "pending",
     }))
-    const built = deps.dagGateFactory(nodes)
+    const built =
+      unknownKey !== undefined
+        ? ({ ok: false, reason: `unknown dependency key "${unknownKey}"` } as const)
+        : deps.dagGateFactory(nodes)
     if (!built.ok) {
       const items = ids.map(
         (id, index): BatchItemResult => ({

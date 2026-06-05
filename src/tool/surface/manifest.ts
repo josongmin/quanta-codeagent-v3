@@ -582,6 +582,20 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     adr: "N3",
     note: "MCP resource/prompt read surface (§7, RFC jun-4-mcp-resource-tools) over the H19-landed McpClient resources/* + prompts/* methods. The model enumerates + reads a connected MCP server's resources and prompt templates. Wired only when an MCP server advertises resources/prompts + the apps layer wires a ResourcesHandle (the duck-typed mirror of @/mcp/resources McpResourcesPort, adapted over a live McpClient). risk:network because each call is an outbound RPC and resource READ exfiltrates server data into the transcript. Output is mcp-origin ⇒ deriveProvenance→mcp ⇒ the H2/ADR-0471 <untrusted-source> envelope wraps it at dispatch (third-party content is adversary-controllable DATA). BLOB blocks are never inlined (placeholder); text is capped. Opt-in EVERYWHERE (QUANTA_MCP_RESOURCES). Duck-typed port keeps @/tool fence-clean.",
   },
+  {
+    name: "pty_attach",
+    group: ["pty_list", "pty_write", "pty_read", "pty_resize", "pty_kill"],
+    origin: "@/tool/pty (ptyTools, via DefaultToolPorts.ptySession)",
+    gate: {
+      kind: "config-slot",
+      slot: "DefaultToolPorts.ptySession",
+      env: "QUANTA_PTY_ATTACH",
+    },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "exec",
+    adr: "N6",
+    note: "Attach to a long-lived PTY / named tmux session — resize + live stdin/stdout (resumable `pty_read` cursor) across turns (§7, RFC jun-4-pty-attach). Distinct from the one-shot bash + 6-tool pipe paths: this attaches to sessions quanta did NOT necessarily spawn. Two zero-dep backends behind one PtySessionPort: tmux shell-out (createTmuxAdapter — attach to existing named sessions) and Bun native PTY (Bun.Terminal — real tty/resize). pty_list/pty_read are read-only; attach/write/resize/kill are exec-risk. SECURITY: only tmux sessions matching the allow-prefix (default `quanta-`) are attachable; a foreign session is fail-closed `foreign-denied` unless pty.allowForeignTmux + HITL; dangerous pty_write content flows through the host's existing command HITL; 64 KiB write cap, 1..1000 resize bounds, MAX_ATTACHED cap. Opt-in EVERYWHERE (QUANTA_PTY_ATTACH) — exec risk, touches sessions outside the spawn jail; never auto-seeds. Closed-port DI keeps @/tool/pty fence-clean (injected exec/backend).",
+  },
 ]
 
 /** Resolve a single tool/group's availability on a surface given a default-state

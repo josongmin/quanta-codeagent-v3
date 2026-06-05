@@ -55,6 +55,7 @@ import { createObjectiveStore, type ObjectivePort } from "@/agent/objective"
 import { autoWirePluginActivation } from "@/agent/plugin-activation-handler"
 import { getGlobalSessionResourceRegistry } from "@/agent/session-resource-registry"
 import { buildCallerOwnedRegistryWithTelemetry } from "@/agent/session-resource-registry/caller-owned-builder"
+import { wireSideAgentDaemons } from "@/agent/side-agent-runner"
 import { buildSkillMcpSession } from "@/agent/skill-mcp-wire"
 import {
   type BackgroundSubagentScheduler,
@@ -355,6 +356,36 @@ const wireOptionalCapabilitySlots = (cfg: AgentConfig, env: AssemblerEnv): void 
   maybeWireSkillMcp(cfg, env)
   maybeWirePromptCacheObserver(cfg, env)
   maybeWireVcsEventSink(cfg, env)
+  maybeWireSideAgent(cfg, env)
+}
+
+/** N1 — mint the live side-agent daemon registry when opted in
+ *  (`QUANTA_SIDE_AGENT=1`). Bridges the pure `@/side-agent` supervise loop to the
+ *  real substrate via `wireSideAgentDaemons` (`@/agent/side-agent-runner`): the
+ *  ADR-0130 subagent runner (one bounded read-biased pass per wake) + the
+ *  ADR-0416 mailbox (findings push) + real timers/clock. The returned registry
+ *  structurally satisfies `AgentConfig.sideAgentDaemons`, so `buildSideAgentBlock`
+ *  exposes `side_agent_*` over it. Runs AFTER `maybeWireMailbox` so it reuses the
+ *  session mailbox when present. Caller-override-safe; absent gate ⇒ slot unset ⇒
+ *  no daemons, no tools (byte-identical default-OFF).
+ *
+ *  Budget note: this mints a DEDICATED subagent runner for daemon passes; sharing
+ *  the foreground subagent block's runner (one budget) is a follow-up — functionally
+ *  the dedicated runner still honors the per-pass `maxTurns` + the registry's
+ *  `maxConcurrent` guard. */
+const maybeWireSideAgent = (cfg: AgentConfig, env: AssemblerEnv): void => {
+  if (env.QUANTA_SIDE_AGENT !== "1") return
+  const slot = cfg as AgentConfig & { sideAgentDaemons?: unknown }
+  if (slot.sideAgentDaemons !== undefined) return
+  const mailbox = (cfg as AgentConfig & { subagentMailbox?: MailboxPort }).subagentMailbox
+  cfg.sideAgentDaemons = wireSideAgentDaemons({
+    runner: createSubagentRunner(cfg),
+    mailbox: mailbox ?? createSubagentMailbox(),
+    mainRecipient: cfg.mailboxAgentId ?? "main",
+    setInterval: (handler, ms) => setInterval(handler, ms),
+    clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
+    now: () => Date.now(),
+  })
 }
 
 /** ADR-0182 — mint ONE per-session `PromptCacheObserver` when the prompt-cache

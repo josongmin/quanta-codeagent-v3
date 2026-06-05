@@ -130,6 +130,18 @@ describe("Capability A LIVE — DAG gate drives spawn_batch dispatch", () => {
     expect(run.items[0]?.error).toContain("dag rejected")
   })
 
+  test("unknown dependency KEY (not an item id) ⇒ refused (symmetric w/ dangling value)", async () => {
+    const { runner, order } = mkRunner()
+    // `Z` is NOT an item — its constraint would silently vanish; reject instead.
+    const run = await runBatch(
+      args(["A", "B"], { Z: ["A"], B: ["A"] }),
+      baseDeps(runner, liveFactory),
+      never,
+    )
+    expect(order).toEqual([])
+    expect(run.items.every((i) => i.error?.includes("unknown dependency key"))).toBe(true)
+  })
+
   test("no `dependencies` ⇒ flat fan-out (gate never engaged), all run", async () => {
     const { runner, order } = mkRunner()
     const run = await runBatch(args(["A", "B", "C"]), baseDeps(runner, liveFactory), never)
