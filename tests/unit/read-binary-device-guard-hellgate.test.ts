@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import { execFileSync } from "node:child_process"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ToolContext, ToolResult } from "@/tool"
@@ -108,6 +108,27 @@ describe("read binary/device guard (B5)", () => {
     expect(r.ok).toBe(true)
     expect(r.output).toBe("1\t")
   })
+
+  test("a SYMLINK to a character device (/dev/random) is REFUSED and does NOT hang", async () => {
+    // Repo-controllable DoS vector: a checked-in symlink pointing at an infinite
+    // device. `statFile` FOLLOWS the link (it uses `stat`, not `lstat`), so the
+    // device-type flags reflect the TARGET. Whichever guard fires FIRST, the read
+    // MUST refuse WITHOUT ever issuing the blocking read() on the device:
+    //   - jail ON (default): the symlink escapes the cwd jail to /dev →
+    //     `permission_denied` (the resolvePath chokepoint rejects the escape).
+    //   - jail OFF: the device-type flag trips → `rejected` reason `device_file`.
+    // Both are safe refusals; the load-bearing invariant is REFUSED + NO HANG
+    // (the 5s per-test timeout is the hang tripwire). A device read must never
+    // be reachable through a symlink indirection.
+    const link = join(dir, "rand.link")
+    symlinkSync("/dev/random", link)
+    const r = await run({ path: link })
+    expect(r.ok).toBe(false)
+    const refused =
+      r.failure?.mode === "permission_denied" ||
+      (r.failure?.mode === "rejected" && r.failure.reason === "device_file")
+    expect(refused).toBe(true)
+  }, 5000)
 
   test("device guard takes precedence — FIFO rejected even though it would also pass binary sniff", async () => {
     // Ordering invariant: the device check runs BEFORE the binary byte-read, so

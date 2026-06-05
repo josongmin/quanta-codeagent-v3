@@ -46,6 +46,11 @@ type RuntimeBase = RuntimeAgentConfigBase & {
    *  Invoked once from the session host's close(); undefined when memory-auto is
    *  off. Per-SESSION, never per-turn (the handle is reused across turns). */
   memoryAutoDispose?: () => void
+  /** H16 — session-end cross-session auto-dream hook. Present only when
+   *  `QUANTA_AUTO_DREAM=1` produced a trigger; invoked once (awaited) from the
+   *  session host's close() AFTER the WAL dispose. Best-effort + bounded by the
+   *  trigger's own dream-lock; undefined ⇒ no dream (byte-identical default). */
+  dreamOnSessionEnd?: () => Promise<void>
 }
 
 interface RuntimeConfirmSlot {
@@ -503,6 +508,7 @@ const extendBaseWithMemoryAuto = async (
     ...(args.logWarn !== undefined ? { logWarn: args.logWarn } : {}),
   })
   if (auto === undefined) return args.base
+  const dreamTrigger = auto.dreamTrigger
   return {
     ...args.base,
     ...(auto.sessionCtx !== undefined ? { sessionCtx: auto.sessionCtx } : {}),
@@ -512,6 +518,11 @@ const extendBaseWithMemoryAuto = async (
     // close() releases the fd. Previously `auto.dispose` was dropped here, so
     // every memory-auto session leaked its sqlite handle for the host lifetime.
     memoryAutoDispose: auto.dispose,
+    // H16 — carry the session-end auto-dream hook (default-OFF: absent unless
+    // QUANTA_AUTO_DREAM=1 produced a trigger). The host fires it once at close().
+    ...(dreamTrigger !== undefined
+      ? { dreamOnSessionEnd: () => dreamTrigger.onSessionEnd().then(() => undefined) }
+      : {}),
   }
 }
 
@@ -1124,6 +1135,15 @@ const createRuntimeSessionHost = (args: {
     // must not block session teardown.
     try {
       base.memoryAutoDispose?.()
+    } catch {
+      // swallow — teardown must complete regardless.
+    }
+    // H16 — fire the cross-session auto-dream pass at session end (default-OFF:
+    // no-op unless QUANTA_AUTO_DREAM=1 wired a trigger). Best-effort + the
+    // trigger itself swallows its own failures; we additionally guard here so a
+    // dream error never blocks the broader shutdown.
+    try {
+      await base.dreamOnSessionEnd?.()
     } catch {
       // swallow — teardown must complete regardless.
     }

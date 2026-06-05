@@ -123,9 +123,12 @@ export const createTmuxAdapter = (opts: TmuxAdapterOpts): PtySessionPort => {
     async write(handle: PtyHandle, data: string, wopts?: PtyWriteOpts): Promise<PtyResult<void>> {
       const g = gate(handle)
       if (!g.ok) return g
-      // `-l` = literal (no key-name interpretation), defusing `send-keys` parsing
-      // of the model's data. A submit is a separate explicit `Enter` key.
-      const w = await opts.exec.run(["send-keys", "-t", g.value, "-l", data])
+      // `-l` = literal (no key-name interpretation); the `--` separator stops
+      // tmux from parsing model `data` that begins with `-` as an OPTION
+      // (arg-injection into tmux — args are an array so there is no SHELL
+      // injection, but tmux still flag-parses its own argv). A submit is a
+      // separate explicit `Enter` key.
+      const w = await opts.exec.run(["send-keys", "-t", g.value, "-l", "--", data])
       if (!w.ok) return errR("backend-error", "tmux send-keys failed")
       if (wopts?.appendNewline === true) {
         const e = await opts.exec.run(["send-keys", "-t", g.value, "Enter"])

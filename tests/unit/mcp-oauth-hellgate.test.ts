@@ -202,6 +202,47 @@ describe("mcp-oauth provider — expiry → refresh, refresh-fail → re-auth", 
   })
 })
 
+describe("mcp-oauth — concurrent acquisition coalesces (no double browser flow)", () => {
+  it("two concurrent first tokenFor calls share ONE browser flow + one code redemption", async () => {
+    // A browser flow that yields cooperatively so both concurrent `tokenFor`
+    // calls are genuinely in-flight at once. Without coalescing each would pop
+    // its own window and replay the single-use auth code.
+    const idp = fakeIdp(ISSUER)
+    const store = fakeStore()
+    const clock = fakeClock()
+    let runs = 0
+    const provider = createConnectorsMcpOAuthProvider({
+      fetchPort: idp.fetchPort,
+      tokenStore: store.port,
+      clockPort: clock,
+      runBrowserFlow: async () => {
+        runs += 1
+        await new Promise((r) => setTimeout(r, 5))
+        return { code: "AUTH-CODE", verifier: "VERIFIER", redirectUri: "http://localhost:1455/cb" }
+      },
+      clientId: "client-abc",
+      issuerFor: () => ISSUER,
+    })
+    const [a, b] = await Promise.all([provider.tokenFor("srv"), provider.tokenFor("srv")])
+    expect(a).toBe("ACCESS-FIRST")
+    expect(b).toBe("ACCESS-FIRST")
+    expect(runs).toBe(1) // coalesced — exactly one interactive flow
+    // exactly one auth-code token exchange POST (not two replays of the code).
+    const tokenPosts = idp
+      .calls()
+      .filter((c) => c.url.endsWith("/token") && c.body?.includes("authorization_code"))
+    expect(tokenPosts).toHaveLength(1)
+  })
+
+  it("a fresh tokenFor after the first resolves is independent (in-flight cleared)", async () => {
+    const { provider, browser } = buildProvider()
+    await provider.tokenFor("srv") // resolves; in-flight entry cleared
+    const second = await provider.tokenFor("srv") // unexpired ⇒ reused, no flow
+    expect(second).toBe("ACCESS-FIRST")
+    expect(browser.runs()).toBe(1)
+  })
+})
+
 describe("mcp-oauth — tokens never leak", () => {
   it("provider toString / JSON never exposes the access token", async () => {
     const { provider } = buildProvider()

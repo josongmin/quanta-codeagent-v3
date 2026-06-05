@@ -79,12 +79,26 @@ const parseSharedStrings = (xml: string | undefined): string[] => {
   return pool
 }
 
-/** A1 cell ref → 0-based column index (`A`→0, `AA`→26). */
+/** Excel's hard column ceiling is XFD = column 16384 (0-based 16383). A cell ref
+ *  with MORE letters than that is invalid SpreadsheetML; a hostile workbook can
+ *  smuggle e.g. `r="ZZZZZZ1"` (column ~321 million) in a few bytes, which — when
+ *  used to size a positional row array — forces an unbounded `push` loop (OOM /
+ *  multi-second hang from one tiny cell). We cap the resolved index so an
+ *  out-of-range ref can never drive an allocation past Excel's own grid. */
+export const XLSX_MAX_COL_INDEX = 16383
+
+/** A1 cell ref → 0-based column index (`A`→0, `AA`→26). Letters beyond Excel's
+ *  XFD ceiling are clamped to {@link XLSX_MAX_COL_INDEX} so a malicious mega-ref
+ *  cannot drive an unbounded allocation (resource-DoS guard). */
 const colIndexOf = (ref: string): number => {
   const letters = ref.replace(/[0-9]+$/, "")
+  // Beyond 3 letters the column already exceeds XFD; clamp early WITHOUT
+  // accumulating the (potentially astronomical) value to avoid the work itself.
+  if (letters.length > 3) return XLSX_MAX_COL_INDEX
   let n = 0
   for (const ch of letters) n = n * 26 + (ch.charCodeAt(0) - 64)
-  return n - 1
+  const idx = n - 1
+  return idx > XLSX_MAX_COL_INDEX ? XLSX_MAX_COL_INDEX : idx
 }
 
 const rawV = (cellInner: string): string => /<v>([\s\S]*?)<\/v>/.exec(cellInner)?.[1] ?? ""

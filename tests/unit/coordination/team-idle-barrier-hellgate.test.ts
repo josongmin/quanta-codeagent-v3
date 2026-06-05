@@ -52,6 +52,20 @@ describe("team-idle barrier — teamIdle predicate", () => {
     expect(teamIdle([beacon("solo", 7)], ["solo"])).toBe(true)
     expect(idleSince([beacon("solo", 7)], ["solo"])).toBe(7)
   })
+
+  // Audit #5 regression: a non-finite member idleSince (NaN/±Infinity — a
+  // malformed beacon) makes the release instant UNKNOWABLE. idleSince must NOT
+  // silently drop it and release on a partial MAX; it returns undefined.
+  it("a NaN member idleSince ⇒ team still idle, but idleSince is undefined", () => {
+    const beacons = [beacon("a", Number.NaN), beacon("b", 200)]
+    expect(teamIdle(beacons, ["a", "b"])).toBe(true) // beacon present ⇒ idle
+    expect(idleSince(beacons, ["a", "b"])).toBeUndefined() // but instant unknowable
+  })
+
+  it("an +Infinity member idleSince ⇒ idleSince undefined (not Infinity)", () => {
+    const beacons = [beacon("a", Number.POSITIVE_INFINITY), beacon("b", 5)]
+    expect(idleSince(beacons, ["a", "b"])).toBeUndefined()
+  })
 })
 
 describe("team-idle barrier — empty members (documented choice = false)", () => {

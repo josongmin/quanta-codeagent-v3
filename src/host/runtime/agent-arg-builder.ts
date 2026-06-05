@@ -18,8 +18,8 @@
  * process.env" invariant stays true.
  */
 
+import { join as joinPath } from "node:path"
 import { buildSystemPrompt, HookBus, wireOptionalAgentPorts } from "@/agent"
-import { createArtifactRegistry, monotonicIdFactory } from "@/artifact"
 import {
   type CommandHookBinding,
   type CommandHookConfig,
@@ -56,6 +56,7 @@ import {
   type ToolProfileName,
   type ToolProfileResolver,
 } from "@/agent/tool-profile"
+import { createArtifactRegistry, monotonicIdFactory } from "@/artifact"
 import type { AgentArgs, IdentityModeToken, ToolProfileToken } from "@/host/runtime/agent-args"
 import type { AssembleRequest } from "@/host/runtime/agent-config-assembler"
 import { type LLMPort, pickProvider, tryCreateLLM } from "@/llm"
@@ -99,6 +100,7 @@ import { errMessage, logger, runtimeConfig } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { buildDefaultTools, pollDeferredTool, type Tool, ToolRegistry } from "@/tool"
 import { DefaultDeferredResultRegistry } from "@/tool/deferred/default-registry"
+import { buildMcpConnectorDiscoveryPort } from "./mcp-connector-wire"
 
 /** ADR-0303 — thrown by {@link buildBaseFromArgs} when no API key resolves for
  *  the selected provider. The host launcher composition layer must NOT own
@@ -551,6 +553,19 @@ const buildBaseRegistry = (args: {
             artifactRegistry: createArtifactRegistry({
               now: () => Date.now(),
               idFactory: monotonicIdFactory(),
+            }),
+          }
+        : {}),
+      // N2 — gated MCP connector discovery tools (mcp_connector_list/_install).
+      // Default-OFF: tool menu byte-identical unless QUANTA_MCP_CONNECTORS === "1".
+      // The port lists the bundled reference catalog and installs a chosen server
+      // into the project `.mcp.json` (QUANTA_MCP_CONFIG override, else cwd) via the
+      // atomic merge writer — the same file `readMcpConfig` ingests next launch.
+      ...(process.env.QUANTA_MCP_CONNECTORS === "1"
+        ? {
+            mcpConnectors: buildMcpConnectorDiscoveryPort({
+              configPath:
+                process.env.QUANTA_MCP_CONFIG?.trim() || joinPath(process.cwd(), ".mcp.json"),
             }),
           }
         : {}),

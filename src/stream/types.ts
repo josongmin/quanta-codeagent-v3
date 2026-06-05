@@ -165,6 +165,11 @@ export type AgentEvent =
       inputTokens: number
       outputTokens: number
       cacheReadTokens?: number
+      // ADR-0182 — cache_creation (cache-WRITE) bucket, forwarded from the
+      // adapter `usage` StreamEvent when the provider reported it. OPTIONAL
+      // (exactOptionalPropertyTypes): OMITTED for non-caching providers so the
+      // default-OFF byte-identical contract holds (OpenAI never sets it).
+      cacheCreationTokens?: number
       model: string
     }
   // Live output-token progress for the in-flight response — the rising

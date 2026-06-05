@@ -217,6 +217,28 @@ describe("read file_unchanged dedup (H9) — knob ON", () => {
     expect(h2.output).not.toContain("/g.txt")
   })
 
+  test("a dedup HIT still refreshes the W1 freshness baseline (does NOT blind the stale-guard)", async () => {
+    // Correctness-critical interaction: the read tool records the freshness
+    // baseline (path→mtime, ADR-0474) BEFORE the H9 short-circuit, so even when a
+    // re-read returns `file_unchanged` the write/edit stale-guard still has a
+    // current baseline to compare against. Prove the dedup path never leaves the
+    // freshness map stale: read twice (2nd is a dedup hit) → freshness baseline
+    // equals the current on-disk mtime.
+    setKnob(true)
+    const files = new Map<string, FakeEntry>([["/fresh.txt", { content: "v", mtimeMs: 333 }]])
+    const tool = makeReadTool(makePort(files))
+    const state = new ReadFileState()
+    const ctx = ctxWith(state)
+    await run(tool, { path: "/fresh.txt" }, ctx)
+    const hit = await run(tool, { path: "/fresh.txt" }, ctx)
+    expect(hit.output).toContain(SENTINEL_MARK) // confirm it WAS a dedup hit
+    // The freshness baseline is present and current — a later edit can be gated.
+    expect(state.recordedMtime("/fresh.txt")).toBe(333)
+    expect(state.checkFresh("/fresh.txt", 333)).toEqual({ kind: "fresh" })
+    // And an external advance past it is correctly seen as stale.
+    expect(state.checkFresh("/fresh.txt", 999).kind).toBe("stale")
+  })
+
   test("no readFileState wired → full content (dedup needs the state thread)", async () => {
     setKnob(true)
     const files = new Map<string, FakeEntry>([["/i.txt", { content: "no-state", mtimeMs: 5 }]])

@@ -53,7 +53,10 @@ export const teamIdle = (beacons: readonly IdleBeacon[], members: readonly strin
 /**
  * The barrier-release timestamp — the MAX `idleSince` across MEMBER beacons —
  * once the whole team is idle; `undefined` when not all members are idle (or
- * `members` is empty). Stray beacons never contribute.
+ * `members` is empty). Stray beacons never contribute. A non-finite member
+ * `idleSince` (NaN/±Infinity — a malformed beacon) makes the release instant
+ * UNKNOWABLE, so the barrier conservatively returns `undefined` rather than
+ * silently dropping that member and releasing on a partial MAX.
  */
 export const idleSince = (
   beacons: readonly IdleBeacon[],
@@ -62,6 +65,7 @@ export const idleSince = (
   if (!teamIdle(beacons, members)) return undefined
   let max = Number.NEGATIVE_INFINITY
   for (const b of memberBeacons(beacons, members)) {
+    if (!Number.isFinite(b.idleSince)) return undefined
     if (b.idleSince > max) max = b.idleSince
   }
   return max

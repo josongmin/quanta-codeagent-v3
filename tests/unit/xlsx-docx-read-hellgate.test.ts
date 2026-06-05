@@ -322,6 +322,32 @@ describe("xlsx_read hellgate — adversarial / no-throw", () => {
     if (!r.ok) return
     expect(r.sheets[0]?.cellAt(0, 0)).toBe("a & b <c>")
   })
+
+  test("HELL-9b: hostile mega-column ref (`ZZZZZZ1`) does NOT drive unbounded allocation", () => {
+    // A cell whose `r=` ref has many letters resolves to an astronomical column
+    // index (`ZZZZZZ` ≈ 321 million). Before the fix, the reader sized a row
+    // array up to that index (`while (cells.length <= col) push("")`), turning a
+    // few-byte cell into a multi-second hang / OOM. The clamp to Excel's XFD
+    // ceiling keeps this fast + bounded. We assert it completes well under a
+    // second (it would take >10s unclamped) and returns a typed ok result.
+    const wb =
+      '<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+      '<sheets><sheet name="S1" sheetId="1" r:id="rId1"/></sheets></workbook>'
+    const sheetXml =
+      '<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+      '<sheetData><row r="1"><c r="ZZZZZZ1" t="s"><v>0</v></c></row></sheetData></worksheet>'
+    const zip = buildStoredZip([
+      textEntry("xl/workbook.xml", wb),
+      textEntry("xl/worksheets/sheet1.xml", sheetXml),
+    ])
+    const started = performance.now()
+    const r = parseXlsx(zip)
+    const elapsedMs = performance.now() - started
+    expect(r.ok).toBe(true)
+    // Bound: the clamp makes this a few ms; the unclamped allocation took ~13s.
+    // A 2s ceiling is a wide margin that still fails hard on the regression.
+    expect(elapsedMs).toBeLessThan(2000)
+  })
 })
 
 describe("xlsx_read hellgate — tool surface", () => {

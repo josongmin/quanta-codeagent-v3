@@ -31,11 +31,18 @@ export const truncate = (s: string): string =>
 
 /** Map a typed `HandleResult` failure onto a model-visible string + a typed
  *  `ToolFailure`. `unsupported` ⇒ the server never advertised the capability
- *  (honest, cheap); the rest are operational failures the loop survives. */
+ *  (honest, cheap); the rest are operational failures the loop survives.
+ *
+ *  The `message` field is host-adapter-supplied (today a bounded template), but
+ *  a `transport` failure can carry an upstream `errMessage(err)` that a hostile
+ *  server can make arbitrarily long. We cap it here so the failure-output path
+ *  has the SAME bound as the success-content path (`renderResourceContent` etc.)
+ *  — a server cannot blow up the transcript through a giant error string. */
 export const mapFailure = (
   reason: ResourcesFailureReason,
   message: string,
 ): { output: string; failure: ToolFailure } => {
+  const detail = truncate(message)
   switch (reason) {
     case "unsupported":
       return {
@@ -44,17 +51,17 @@ export const mapFailure = (
       }
     case "too-large":
       return {
-        output: `too-large: the server returned content exceeding the size cap (${message})`,
+        output: `too-large: the server returned content exceeding the size cap (${detail})`,
         failure: { mode: "rejected", reason: "too-large" },
       }
     case "malformed":
       return {
-        output: `malformed: the server returned an unparseable response (${message})`,
+        output: `malformed: the server returned an unparseable response (${detail})`,
         failure: { mode: "error", modelVisibleError: "malformed-mcp-response" },
       }
     case "transport":
       return {
-        output: `transport: the MCP request failed (${message})`,
+        output: `transport: the MCP request failed (${detail})`,
         failure: { mode: "error", modelVisibleError: "mcp-transport-error" },
       }
   }

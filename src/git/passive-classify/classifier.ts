@@ -186,7 +186,36 @@ const deriveBranch = (input: PassiveVcsInput): VcsBranch | undefined => {
   return undefined
 }
 
+/** `git push --dry-run` / `-n` exits 0 and prints a ref-update line
+ *  BYTE-IDENTICAL to a real push (`<old>..<new>  <local> -> <remote>`) even
+ *  though NOTHING was pushed. The exitCode guard cannot catch it (a dry-run
+ *  succeeds). The only signal that no state changed is the COMMAND flag, so we
+ *  suppress the push facet on a dry-run — same command-shape discipline the
+ *  `--amend` path uses. `-n` is git-push's documented short alias of
+ *  `--dry-run`. We scope the flag scan to the git PUSH simple-command segment
+ *  (the segment whose first non-flag token after `git` is `push`) so a chained
+ *  `git commit -n && git push origin main` (where `-n` is commit's
+ *  `--no-verify`) does NOT falsely suppress the REAL push in the next segment. */
+const PUSH_SUBCOMMAND =
+  /^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:\S*\/)?git\s+(?:-\S+\s+)*push(?:\s|$)/
+const PUSH_DRY_RUN_FLAG = /(?:^|\s)(?:--dry-run|-n)(?:\s|$)/
+
+/** True when a `git push` invocation in `command` carries `--dry-run`/`-n`. The
+ *  flag is matched only WITHIN the push segment so an unrelated `-n` elsewhere
+ *  in a pipeline cannot suppress a real push. */
+const isDryRunPush = (command: string): boolean => {
+  for (const raw of splitSimpleCommands(command)) {
+    const seg = raw.trimStart()
+    if (!PUSH_SUBCOMMAND.test(seg)) continue
+    if (PUSH_DRY_RUN_FLAG.test(seg)) return true
+  }
+  return false
+}
+
 const derivePush = (input: PassiveVcsInput): VcsPush | undefined => {
+  // A dry-run pushed nothing — its ref-line is indistinguishable from a real
+  // push in stdout, so we gate on the command flag (scoped to the push segment).
+  if (isDryRunPush(input.command)) return undefined
   const m = PUSH_REFLINE.exec(input.stdout)
   if (!m) return undefined
   const localRef = m[1]

@@ -185,46 +185,45 @@ export const readyTasks = (nodes: readonly TaskNode[]): TaskNode[] => {
  * dependency is `failed`/`cancelled` — DIRECTLY or TRANSITIVELY. PURE.
  * Deterministic `byteCompare` order. This is the dead-branch surface: the
  * leader sees these instead of waiting forever (plan §5 liveness invariant).
+ *
+ * Computed by a MONOTONE fixpoint over the dead set (seed = the directly
+ * failed/cancelled nodes; a node joins once ANY dep is dead, until no change).
+ * This is CYCLE-SAFE by construction — the dead set only grows and is bounded
+ * by the node count, so it converges even on a graph that was NOT cycle-checked
+ * (a recursive memo would otherwise poison a `false` for a node whose only dead
+ * path ran through a still-visiting cycle member). No recursion ⇒ stack-safe.
  */
 export const blockedTasks = (nodes: readonly TaskNode[]): TaskNode[] => {
-  const byId = new Map<string, TaskNode>()
-  for (const n of nodes) byId.set(n.id, n)
+  // Seed: nodes that are themselves terminal-FAILURE.
+  const dead = new Set<string>()
+  for (const n of nodes) if (isDeadDep(n.state)) dead.add(n.id)
 
-  // Memoised "is this id on a dead branch?" with cycle-safe visitation.
-  const dead = new Map<string, boolean>()
-  const visiting = new Set<string>()
-  const isDead = (id: string): boolean => {
-    const cached = dead.get(id)
-    if (cached !== undefined) return cached
-    if (visiting.has(id)) return false // cycle guard (rejected elsewhere)
-    const n = byId.get(id)
-    if (n === undefined) return false
-    if (isDeadDep(n.state)) {
-      dead.set(id, true)
-      return true
-    }
-    visiting.add(id)
-    let result = false
-    for (const dep of n.dependsOn) {
-      if (isDead(dep)) {
-        result = true
-        break
+  // Propagate: a node is dead once ANY dependency is dead. Monotone — each pass
+  // either adds ≥1 node or stops; at most `nodes.length` passes to a fixpoint.
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const n of nodes) {
+      if (dead.has(n.id)) continue
+      if (n.dependsOn.some((dep) => dead.has(dep))) {
+        dead.add(n.id)
+        changed = true
       }
     }
-    visiting.delete(id)
-    dead.set(id, result)
-    return result
   }
 
-  const blocked = nodes.filter((n) => n.state === "pending" && isDead(n.id))
+  const blocked = nodes.filter((n) => n.state === "pending" && dead.has(n.id))
   return sortById(blocked)
 }
 
 /**
  * Mark `id` as `completed` and return the new node set plus the nodes it just
- * unblocked (became ready). PURE / NO-THROW. Completing an unknown id, or a node
- * that is NOT currently `in_progress`/`pending`, releases nothing new (idempotent
- * — re-completing an already-completed node is a no-op for `newlyReady`).
+ * unblocked (became ready). PURE / NO-THROW. Only a `pending`/`in_progress` node
+ * may transition: completing an unknown id, an already-`completed` node, or a
+ * TERMINAL-FAILURE node (`failed`/`cancelled`) releases nothing new. The
+ * failure case is load-bearing — a dead branch must STAY dead; `onComplete`
+ * must never resurrect a `failed`/`cancelled` node into `completed` (which would
+ * silently re-arm its dependents). Idempotent on re-completion.
  *
  * `newlyReady` = nodes ready AFTER the transition that were NOT ready before —
  * exactly the set the completion unblocked.
@@ -234,8 +233,9 @@ export const onComplete = (
   id: string,
 ): { nodes: TaskNode[]; newlyReady: TaskNode[] } => {
   const target = nodes.find((n) => n.id === id)
-  // Unknown id, or already terminal-completed ⇒ no transition, nothing new.
-  if (target === undefined || target.state === "completed") {
+  // Only a pending/in_progress node transitions. Unknown id, already-completed,
+  // or terminal-FAILURE (failed/cancelled — must stay dead) ⇒ no-op.
+  if (target === undefined || (target.state !== "pending" && target.state !== "in_progress")) {
     return { nodes: [...nodes], newlyReady: [] }
   }
 

@@ -216,6 +216,14 @@ const emitUsage = (
     outputTokens: ev.outputTokens,
     model: ev.model,
     ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
+    // ADR-0182 — re-emit the cache_creation bucket too when the adapter
+    // reported it, so a downstream stream listener (Tauri sidebar / cancel
+    // salvage) sees the SAME usage shape the adapter produced. Conditional
+    // spread (exactOptionalPropertyTypes): OMITTED when absent ⇒ byte-identical
+    // for non-caching providers (OpenAI never sets it).
+    ...(ev.cacheCreationTokens !== undefined
+      ? { cacheCreationTokens: ev.cacheCreationTokens }
+      : {}),
   })
   recorder?.tokensUsed(ev.inputTokens, ev.outputTokens, ev.cacheReadTokens)
   // RFC may-22 Phase 1: BudgetMeter ticks for token accounting. Optional

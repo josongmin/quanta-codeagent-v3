@@ -154,7 +154,13 @@ export class CrossSessionDreamTrigger {
   /** Hours elapsed since the last completed dream per the injected clock, or
    *  `null` when no dream has ever run. */
   hoursSinceLastDream(state: DreamState = this.readState()): number | null {
-    if (state.lastDreamAtMs === null) return null
+    // A corrupt / legacy persisted record may carry a NON-finite `lastDreamAtMs`
+    // (NaN from a bad parse, ±Infinity). Treat anything that is not a finite
+    // number as "never dreamed" (null) — the safe interpretation. Without this,
+    // `now - (-Infinity) = +Infinity` would make the hours threshold ALWAYS
+    // cross and fire a dream every single session forever, and a NaN would leak
+    // into the outcome / telemetry.
+    if (state.lastDreamAtMs === null || !Number.isFinite(state.lastDreamAtMs)) return null
     const delta = this.now() - state.lastDreamAtMs
     return delta < 0 ? 0 : delta / MS_PER_HOUR
   }

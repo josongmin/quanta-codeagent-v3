@@ -183,6 +183,32 @@ describe("H7 credential-helper — failure + trust gate (no-throw, no-leak)", ()
     expect(shell.calls.length).toBe(0)
   })
 
+  test("helper exits 0 but emits EMPTY/whitespace stdout → typed error, NOT a cached empty key", async () => {
+    // A misconfigured helper that succeeds (exit 0) yet prints nothing (or only
+    // whitespace) cannot have "minted" a key. Returning "" would (a) cache a
+    // broken credential for the full TTL and (b) let a `mint ?? envKey`
+    // consumer override a WORKING env key with "". It must be a typed failure.
+    let calls = 0
+    const shell: ShellExecFn = async () => {
+      calls += 1
+      return ok("   \n\t  ") // exit 0, whitespace-only stdout
+    }
+    const clock = makeClock()
+    const src = createCredentialSource({
+      apiKeyHelper: "blank-mint",
+      apiKeyHelperTtlMs: 60_000,
+      shellExec: shell,
+      isTrusted: () => true,
+      now: clock.now,
+    })
+    await expect(src.mintApiKey()).rejects.toBeInstanceOf(CredentialHelperError)
+    // The empty result must NOT have been cached — a second call re-runs the
+    // shell (it is not pinned to a bogus "" for the TTL window).
+    clock.advance(1)
+    await expect(src.mintApiKey()).rejects.toBeInstanceOf(CredentialHelperError)
+    expect(calls).toBe(2)
+  })
+
   test("the minted key value NEVER appears in the typed error message", async () => {
     // helper exits non-zero but somehow echoes a secret on stdout — the error
     // must not carry that value.

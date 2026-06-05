@@ -178,6 +178,10 @@ export const createCredentialSource = (opts: CredentialSourceOptions): Credentia
         `credential helper for "${capability}" exited with code ${result.exitCode}`,
       )
     }
+    // NOTE: empty/whitespace stdout is NOT rejected here — a `*AuthRefresh`
+    // command (`aws sso login`) legitimately prints nothing and the adapters
+    // only care that it ran without error. The MINT path enforces non-empty at
+    // its own call site (where stdout IS the key).
     return result.stdout.trim()
   }
 
@@ -191,6 +195,19 @@ export const createCredentialSource = (opts: CredentialSourceOptions): Credentia
         return cached.value
       }
       const value = await runHelper(command, "api-key")
+      if (value.length === 0) {
+        // A helper that exits 0 yet prints nothing (or only whitespace) did NOT
+        // mint a key. Caching/returning "" would pin a broken credential for the
+        // whole TTL window AND let a `mint ?? envKey` consumer silently override
+        // a working env key with an empty string. Treat as a typed failure — we
+        // throw BEFORE writing the cache, so the empty value is never pinned.
+        // NO-LEAK preserved (no stdout interpolated).
+        throw new CredentialHelperError(
+          "helper-failed",
+          "api-key",
+          `credential helper for "api-key" produced no output (empty key)`,
+        )
+      }
       keyCache.set(command, { value, mintedAt: now() })
       return value
     },

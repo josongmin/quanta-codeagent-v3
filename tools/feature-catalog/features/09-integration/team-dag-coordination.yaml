@@ -3,8 +3,8 @@ title: Multi-agent coordination A — task dependency DAG (Claude --agent-teams 
 section: 9
 subsystem: Subagent coordination (multi-agent DAG)
 order: 97
-maturity: L2
-status: new
+maturity: L3
+status: refined
 ui_surfaces: [cli, ide]
 monitoring: n-a
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
@@ -37,28 +37,33 @@ purpose: |
   node completed and returns EXACTLY the newly-unblocked set.
 
   EFFECTFUL GATE (`src/subagent/coordination/dag-gate.ts`): `createDagGate`
-  validates the graph (rejects cyclic/dangling before any dispatch) then drives
-  the pure core over the existing parallel pool. `wrapRunnerWithDagGate` wraps
-  the forked child runner so each child BLOCKS until its node is ready and
-  RELEASES dependents (via `onComplete`) as children finish — net effect:
-  dispatch order respects `dependsOn` while reusing the sealed
-  `@/tool/subagent-batch` worker semaphore (no slice edit). A failed child marks
-  its node failed ⇒ dependents resolve `blocked` and return a typed
-  `DAG_BLOCKED_TEXT` result rather than hanging.
+  validates the graph (rejects cyclic/dangling/duplicate before any dispatch)
+  then exposes a per-batch `BatchDagGate` (`awaitReady`/`markComplete`/
+  `markFailed`). A failed dep marks its node failed ⇒ dependents resolve
+  `blocked` and surface a typed `dependency failed` dead-branch result rather
+  than hanging.
 
-  WIRING: `src/agent/tier1/subagent-batch.ts#composeDagBatchRunner` is the
-  composition seam — knob-gated AND node-set-gated: `QUANTA_TEAM_DAG` OFF (unset)
-  OR an empty node set ⇒ the RAW runner is returned unchanged (byte-identical
-  flat fan-out = today). The builder threads the runner through it; the live
-  per-batch dependency-edge source is a deliberately-separate wave (the sealed
-  `spawn_batch` schema carries no `dependsOn` field yet), so today's builder
-  passes an empty node set ⇒ OFF posture preserved. The composition is proven
-  end-to-end against the REAL `runBatch` by the e2e hellgate.
+  WIRING (LIVE): the `spawn_batch` input schema carries an optional
+  `dependencies: Record<itemId, itemId[]>` field (`src/tool/subagent-batch/
+  batch.ts`). When present, `run-batch.ts` derives the `BatchDagNode[]` (id =
+  `id_field` value or index) and consults `deps.dagGateFactory` — injected ONLY
+  when `QUANTA_TEAM_DAG` is on (`src/agent/tier1/subagent-batch.ts`, the
+  composition root, adapts the real `createDagGate` behind the duck-typed
+  factory so the `@/tool` slice never imports `@/subagent`). Each item
+  `await gate.awaitReady(id)` BEFORE acquiring a worker semaphore slot
+  (deadlock-free — the wait is OUTSIDE the slot), and `settle()` marks the gate
+  exactly once per item on EVERY terminal path (ok/fail/timeout/cancel), so a
+  dead branch always releases its transitive dependents. A cyclic / dangling /
+  duplicate / unknown-key graph is a typed refusal ⇒ the whole batch is rejected
+  (zero dispatch). Knob OFF (or no `dependencies`) ⇒ flat fan-out, byte-identical.
 evidence:
   code:
     - src/subagent/coordination/dag.ts
     - src/subagent/coordination/dag-gate.ts
     - src/subagent/coordination/index.ts
+    - src/tool/subagent-batch/run-batch.ts
+    - src/tool/subagent-batch/batch.ts
+    - src/tool/subagent-batch/port.ts
     - src/agent/tier1/subagent-batch.ts
     - src/shared/runtime-config.ts
   adrs: []
@@ -66,6 +71,7 @@ evidence:
     unit:
       - tests/unit/coordination/team-dag-hellgate.test.ts
       - tests/unit/coordination/team-dag-batch-e2e-hellgate.test.ts
+      - tests/unit/coordination/team-dag-spawn-batch-live-e2e-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -74,40 +80,29 @@ knobs:
     default: 'false'
     purpose: |
       Strict `=== "1"` opt-in. Default false ⇒ `spawn_batch` fan-out is the
-      existing flat parallel pool (no dependency ordering) — byte-identical. When
-      ON *and* a batch carries dependency edges, the tier1 builder wraps the
-      child runner with the DAG gate so children dispatch in dependency order
-      (cyclic/dangling graph rejected before dispatch; failed/cancelled dep
-      surfaces a typed dead branch, never a hang).
-deliberate_hold:
-  reason: |
-    The pure DAG core + effectful gate + the `composeDagBatchRunner` composition
-    seam are complete and proven end-to-end against the real `runBatch`. What is
-    NOT yet live: a per-`spawn_batch`-call dependency-edge SOURCE. The sealed
-    `@/tool/subagent-batch` input schema carries no `dependsOn` field and is not
-    owned this wave, so the builder passes an empty node set (⇒ raw runner, OFF
-    posture). Until the slice schema gains a `dependsOn` shape, the knob ON is a
-    no-op at the live tool surface even though the composition is fully wired and
-    tested.
-  promotion_path: |
-    Promote to L3 when the `spawn_batch` schema gains an optional per-item
-    `depends_on` (id → string[]) field: the builder then derives the `TaskNode[]`
-    from the loaded items and calls `composeDagBatchRunner` with that node set +
-    an `idOf` keyed off the rendered item id, engaging the gate transparently
-    when `QUANTA_TEAM_DAG` is on. Sibling waves B (leader-broker,
-    `QUANTA_TEAM_BROKER`) and C (team-idle barrier, `QUANTA_TEAM_IDLE`) land
-    alongside.
+      existing flat parallel pool (no dependency ordering) — byte-identical, the
+      `dependencies` field is ignored. When ON *and* a batch carries a
+      `dependencies` map, the tier1 composition root injects the `dagGateFactory`
+      so `run-batch.ts` dispatches each item in dependency order (cyclic /
+      dangling / duplicate / unknown-key graph rejected before any dispatch;
+      failed/cancelled dep surfaces a typed dead branch, never a hang).
 notes: |
-  29 core hellgate cases + 5 e2e hellgate cases (34 total / 65 expects) pin:
-  cycle (self / 2-node / 3-node) rejected; unknown-dep + duplicate-id rejected;
-  linear chain release order; diamond fan-in (D waits for BOTH B and C); failed
-  AND cancelled dep ⇒ dependent blocked not ready (no hang), transitive dead
-  branch; empty + single-node; onComplete newly-ready EXACT set + idempotent
-  re-complete + unknown-id no-op; deterministic byteCompare order for ready /
-  blocked / newlyReady; e2e over the REAL runBatch — linear order, diamond order,
-  failed-dep dead-branch settles (no hang), cyclic rejected at gate construction,
-  and knob-OFF flat fan-out (byte-identical). Absorption: Claude Code
-  --agent-teams (task dependency DAG arm). What this is NOT: no leader-broker
-  (wave B) / no team-idle barrier (wave C) / no live spawn_batch dependsOn schema
-  field yet (deliberate hold). Slice fence: src/subagent/coordination imports
-  only @/shared + siblings (no @/mcp, no @/agent).
+  LIVE end-to-end (Capability A). 31 core hellgate cases + 5 gate-level e2e + 8
+  spawn_batch LIVE e2e (REAL createDagGate driving REAL runBatch) pin: cycle
+  (self / 2-node / 3-node) rejected; unknown-dep-value + unknown-dep-KEY +
+  duplicate-id rejected; linear chain release order; diamond fan-in (D waits for
+  BOTH B and C); failed AND cancelled dep ⇒ dependent blocked not ready (no
+  hang), TRANSITIVE dead branch (incl. on a graph carrying a cycle — monotone
+  fixpoint, memo-poison regression); onComplete newly-ready EXACT set + idempotent
+  re-complete + unknown-id no-op + NO-resurrect of a failed/cancelled node;
+  deterministic byteCompare order for ready / blocked / newlyReady; live e2e over
+  the REAL runBatch — deps-first order, diamond order, failed-dep dead-branch
+  settles (no hang, deadlock-free: awaitReady is OUTSIDE the worker semaphore),
+  cyclic/dangling/unknown-key rejected at gate construction (zero dispatch), and
+  knob-OFF / no-dependencies flat fan-out (byte-identical). Absorption: Claude
+  Code --agent-teams (task dependency DAG arm). What this is NOT: no leader-broker
+  (wave B, `QUANTA_TEAM_BROKER` — pure core sealed, host trigger NOT wired) / no
+  team-idle barrier (wave C, `QUANTA_TEAM_IDLE` — pure core sealed, host beacon
+  NOT wired). Slice fence: src/subagent/coordination imports only @/shared +
+  siblings (no @/mcp, no @/agent); @/tool/subagent-batch never imports @/subagent
+  (the gate is injected via the duck-typed BatchDagGateFactory).

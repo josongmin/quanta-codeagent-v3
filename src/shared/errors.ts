@@ -337,17 +337,39 @@ const parseRetryAfterHeader = (raw: string | null, now: () => number): number | 
   return delta >= 0 ? delta : undefined
 }
 
-/** `x-ratelimit-reset`: ambiguous — absolute UNIX epoch (seconds) OR relative
- *  delta-seconds. Disambiguate by magnitude: a UNIX epoch in seconds for any
- *  near-future moment is ≳ 1.7e9 (year 2023+), far larger than any plausible
- *  relative delta-seconds a server would ask us to wait. */
+/** `x-ratelimit-reset`: ambiguous in the wild — three encodings a provider may
+ *  send. Disambiguate by MAGNITUDE (UNIX epochs and plausible relative deltas
+ *  live in non-overlapping bands), most-absolute first:
+ *
+ *    - `n ≥ 1e12`  absolute epoch-MILLISECONDS. Current ms-epoch ≈ 1.7e12; a
+ *                  seconds-epoch never reaches 1e12 until the year ~33658, and
+ *                  a relative delta-seconds of 1e12 (≈ 31700 years) is absurd.
+ *                  Delta = `n − nowMs` (NO ×1000 — it is already ms). Treating
+ *                  this as seconds (the prior bug) multiplied by 1000 AND scaled
+ *                  the epoch, yielding a ~53000-year delay that silently pinned
+ *                  every such provider to the downstream 60s clamp.
+ *    - `n ≥ 1e9`   absolute epoch-SECONDS. Near-future epoch-seconds is ≳ 1.7e9
+ *                  (year 2023+), far above any plausible relative wait. Delta =
+ *                  `n×1000 − nowMs`.
+ *    - otherwise   relative delta-seconds (`Retry-After`-style). `n×1000`.
+ *
+ *  Each absolute band requires the computed delta to be non-negative (a reset
+ *  in the past ⇒ `undefined`, caller falls back to its own backoff). */
 const parseRateLimitResetHeader = (raw: string | null, now: () => number): number | undefined => {
   if (raw === null) return undefined
   const n = Number(raw.trim())
   if (!Number.isFinite(n) || n < 0) return undefined
   const nowMs = now()
-  const asAbsoluteDelta = n * 1000 - nowMs
-  if (n >= 1_000_000_000 && asAbsoluteDelta >= 0) return asAbsoluteDelta
+  // Absolute epoch-milliseconds: already ms, do NOT scale by 1000.
+  if (n >= 1_000_000_000_000) {
+    const delta = n - nowMs
+    return delta >= 0 ? Math.round(delta) : undefined
+  }
+  // Absolute epoch-seconds: scale to ms then subtract now.
+  if (n >= 1_000_000_000) {
+    const delta = n * 1000 - nowMs
+    return delta >= 0 ? delta : undefined
+  }
   // Otherwise treat as relative delta-seconds.
   return Math.round(n * 1000)
 }

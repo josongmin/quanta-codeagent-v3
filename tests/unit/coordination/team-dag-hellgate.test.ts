@@ -216,4 +216,57 @@ describe("DAG core — onComplete (release dependents)", () => {
     const r = onComplete(nodes, "a")
     expect(r.newlyReady.map((n) => n.id)).toEqual(["b", "m", "z"])
   })
+
+  // Audit #2 regression: a dead branch must STAY dead. onComplete must NEVER
+  // resurrect a terminal-FAILURE node into `completed` (which would silently
+  // re-arm its dependents). The gate calls markComplete only on pending workers,
+  // but markComplete(id) is a public method callable on ANY id.
+  test("does NOT resurrect a `failed` node (no transition, no newlyReady)", () => {
+    const nodes = [node("a", [], "failed"), node("b", ["a"])]
+    const r = onComplete(nodes, "a")
+    expect(r.nodes.find((n) => n.id === "a")?.state).toBe("failed") // stays dead
+    expect(r.newlyReady).toEqual([]) // b NOT released
+    // b is still on the dead branch.
+    expect(blockedTasks(r.nodes).map((n) => n.id)).toEqual(["b"])
+  })
+
+  test("does NOT resurrect a `cancelled` node", () => {
+    const nodes = [node("a", [], "cancelled"), node("b", ["a"])]
+    const r = onComplete(nodes, "a")
+    expect(r.nodes.find((n) => n.id === "a")?.state).toBe("cancelled")
+    expect(r.newlyReady).toEqual([])
+  })
+})
+
+// Audit #1 regression: blockedTasks must give the CORRECT dead set even on a
+// graph carrying a cycle (the function's own contract says it may be called on a
+// graph that was NOT cycle-checked). The old recursive memo poisoned a `false`
+// for a node whose only dead path ran through a still-`visiting` cycle member.
+// The monotone-fixpoint implementation is cycle-safe by construction.
+describe("DAG core — blockedTasks on a CYCLIC graph (memo-poison regression)", () => {
+  test("X↔Y cycle where Y also depends on a cancelled node ⇒ X, Y, Z all blocked", () => {
+    // Dead(cancelled); X→[Y]; Y→[X, Dead]; Z→[X]. Ground truth: all of X,Y,Z are
+    // transitively dead (Y via Dead; X via Y; Z via X). The old code returned
+    // only ["Y"] — X and Z were wrongly reported not-blocked.
+    const nodes = [
+      node("Y", ["X", "Dead"]),
+      node("X", ["Y"]),
+      node("Z", ["X"]),
+      node("Dead", [], "cancelled"),
+    ]
+    expect(blockedTasks(nodes).map((n) => n.id)).toEqual(["X", "Y", "Z"])
+  })
+
+  test("a pure cycle with NO dead member blocks nothing (terminates, no false-dead)", () => {
+    const nodes = [node("a", ["b"]), node("b", ["a"])]
+    expect(blockedTasks(nodes)).toEqual([])
+  })
+
+  test("a long chain does not overflow the stack (fixpoint is iterative)", () => {
+    const N = 5000
+    const nodes: TaskNode[] = [node("n0", [], "failed")]
+    for (let i = 1; i < N; i++) nodes.push(node(`n${i}`, [`n${i - 1}`]))
+    // Every node after the failed root is transitively blocked.
+    expect(blockedTasks(nodes).length).toBe(N - 1)
+  })
 })

@@ -236,9 +236,19 @@ export const createConnectorsMcpOAuthProvider = (
     return record
   }
 
-  const tokenFor = async (serverName: string): Promise<string | undefined> => {
-    const issuer = cfg.issuerFor(serverName)
-    if (issuer === undefined) return undefined
+  // Coalesce concurrent `tokenFor` calls for the SAME server: the rotator only
+  // coalesces the refresh GRANT, but the FRESH-authorization path (RFC 6749
+  // §4.1, interactive browser flow) is NOT a rotator op — without this guard two
+  // concurrent first-token requests would each pop a browser window and each
+  // POST the auth-code, double-spending the single-use code. One in-flight
+  // resolution per server fixes that; the entry is cleared in `finally` so the
+  // NEXT (post-expiry) acquisition starts fresh.
+  const inFlightToken = new Map<string, Promise<string | undefined>>()
+
+  const resolveTokenFor = async (
+    serverName: string,
+    issuer: string,
+  ): Promise<string | undefined> => {
     try {
       const existing = await rotator.read(serverName)
       // 1. A stored, unexpired token → reuse (no flow, no refresh).
@@ -269,6 +279,20 @@ export const createConnectorsMcpOAuthProvider = (
       })
       return undefined
     }
+  }
+
+  const tokenFor = async (serverName: string): Promise<string | undefined> => {
+    const issuer = cfg.issuerFor(serverName)
+    if (issuer === undefined) return undefined
+    // Share one in-flight acquisition per server so concurrent callers cannot
+    // each launch the interactive browser flow / replay a single-use auth code.
+    const existing = inFlightToken.get(serverName)
+    if (existing !== undefined) return existing
+    const p = resolveTokenFor(serverName, issuer).finally(() => {
+      inFlightToken.delete(serverName)
+    })
+    inFlightToken.set(serverName, p)
+    return p
   }
 
   const invalidate = async (serverName: string): Promise<void> => {

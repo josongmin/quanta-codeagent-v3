@@ -16,6 +16,18 @@ import {
   type PtySessionPort,
 } from "./port"
 
+/** Hard cap on a single `pty_read` model-facing payload (a huge scrolled pane
+ *  must not explode the transcript). head+tail truncation keeps the most-recent
+ *  output (where a prompt / result lives) plus the start for context. */
+const PTY_MAX_READ_OUTPUT = 32 * 1024
+
+const capOutput = (s: string): string => {
+  if (s.length <= PTY_MAX_READ_OUTPUT) return s
+  const keep = Math.floor(PTY_MAX_READ_OUTPUT / 2)
+  const dropped = s.length - keep * 2
+  return `${s.slice(0, keep)}\n… [${dropped} chars truncated] …\n${s.slice(s.length - keep)}`
+}
+
 const handleSchema = z.string().min(1).describe("Opaque session handle (tmux:<name> or pty:<seq>)")
 
 const listSchema = z.object({}).describe("Enumerate attachable PTY / tmux session handles")
@@ -177,7 +189,7 @@ export const ptyTools = (port: PtySessionPort): Tool[] => {
             yield { type: "result", result: failFromPty(r) }
             return
           }
-          const body = r.value.chunks.map((c) => c.data).join("")
+          const body = capOutput(r.value.chunks.map((c) => c.data).join(""))
           yield {
             type: "result",
             result: { ok: true, output: `${body}\n[nextSeq=${r.value.nextSeq}]` },

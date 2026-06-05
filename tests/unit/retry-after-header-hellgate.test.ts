@@ -95,6 +95,48 @@ describe("ADR-0208 parseRetryAfterMs (pure)", () => {
     expect(parseRetryAfterMs(lookup({ "x-ratelimit-reset": "12" }))).toBe(12_000)
   })
 
+  // ── B3 hellgate: epoch-MILLISECONDS magnitude band ─────────────────────────
+  // REGRESSION: a provider that reports `x-ratelimit-reset` as an absolute UNIX
+  // epoch in MILLISECONDS (current ms-epoch ≈ 1.7e12) was misread as
+  // epoch-SECONDS and multiplied by 1000, yielding `n*1000 - now` ≈ 1.7e15 ms
+  // (~53000 years) instead of the true ~20s. Downstream that silently pinned
+  // every such provider to the 60s clamp, defeating the precise-honor purpose.
+  test("HELL-B3-epoch-ms: x-ratelimit-reset as absolute epoch-MILLISECONDS → correct small delta", () => {
+    const now = 1_700_000_000_000 // ms
+    const resetEpochMs = now + 20_000 // 20s in the future, in MS
+    expect(
+      parseRetryAfterMs(lookup({ "x-ratelimit-reset": String(resetEpochMs) }), () => now),
+    ).toBe(20_000)
+  })
+
+  test("HELL-B3-epoch-ms-past: epoch-MILLISECONDS reset in the past → undefined (not a giant delay)", () => {
+    const now = 1_700_000_000_000
+    const past = now - 5_000
+    expect(
+      parseRetryAfterMs(lookup({ "x-ratelimit-reset": String(past) }), () => now),
+    ).toBeUndefined()
+  })
+
+  test("HELL-B3-epoch-s-past: epoch-SECONDS reset in the past → undefined", () => {
+    const now = 1_700_000_000_000
+    const pastSecs = 1_699_999_990 // 10s before now
+    expect(
+      parseRetryAfterMs(lookup({ "x-ratelimit-reset": String(pastSecs) }), () => now),
+    ).toBeUndefined()
+  })
+
+  test("HELL-B3-bands-disjoint: seconds vs ms vs relative never collide", () => {
+    const now = 1_700_000_000_000
+    // relative 60s
+    expect(parseRetryAfterMs(lookup({ "x-ratelimit-reset": "60" }), () => now)).toBe(60_000)
+    // epoch-seconds 30s future
+    expect(parseRetryAfterMs(lookup({ "x-ratelimit-reset": "1700000030" }), () => now)).toBe(30_000)
+    // epoch-ms 30s future
+    expect(parseRetryAfterMs(lookup({ "x-ratelimit-reset": "1700000030000" }), () => now)).toBe(
+      30_000,
+    )
+  })
+
   test("malformed retry-after → undefined (caller falls back)", () => {
     expect(parseRetryAfterMs(lookup({ "retry-after": "soon" }))).toBeUndefined()
     expect(parseRetryAfterMs(lookup({ "retry-after": "-5" }))).toBeUndefined()

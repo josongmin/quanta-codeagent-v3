@@ -400,6 +400,37 @@ describe("auto-dream / cross-session trigger — hellgate", () => {
     expect(fresh.hoursSinceLastDream()).toBeNull()
   })
 
+  test("12b. corrupt persisted lastDreamAtMs (non-finite) ⇒ treated as never-dreamed, no NaN/Infinity cadence corruption", async () => {
+    // A corrupted/legacy persisted record could carry a non-finite
+    // `lastDreamAtMs` (NaN from a bad parse, or ±Infinity). The hours math must
+    // NOT let that fire a dream every session: `now - (-Infinity) = +Infinity`
+    // would make `hoursCrossed` ALWAYS true. Treat non-finite as never-dreamed.
+    const clock = mkClock()
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      const calls = { n: 0 }
+      const state = new InMemoryDreamState({
+        // sessions well BELOW threshold so ONLY a bogus hours-cross could fire
+        sessionsSinceLastDream: 0,
+        lastDreamAtMs: bad as unknown as number,
+        lastOutcome: "completed",
+      })
+      const t = mkTrigger({
+        state,
+        now: clock.now,
+        policy: POLICY,
+        consolidate: mkConsolidate({ kind: "consolidated", content: "x" }, { calls }),
+      })
+      // hoursSinceLastDream must be null (never-dreamed), NOT NaN/Infinity.
+      expect(t.hoursSinceLastDream()).toBeNull()
+      const o = await t.onSessionEnd() // counter → 1 < 3, hours unknown ⇒ skip
+      expect(o.kind).toBe("below_threshold")
+      if (o.kind === "below_threshold") {
+        expect(o.hoursSinceLastDream).toBeNull() // no NaN leak into telemetry
+      }
+      expect(calls.n).toBe(0) // did NOT fire a dream off a corrupt record
+    }
+  })
+
   test("13. assembleDreamPolicy — OFF gate ⇒ null (default-OFF)", () => {
     expect(
       assembleDreamPolicy({

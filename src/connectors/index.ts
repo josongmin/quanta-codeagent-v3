@@ -14,6 +14,7 @@ export { createInMemoryConnectorRegistry } from "./in-memory-registry"
 // N2 — MCP connector discovery / catalog (§7). Pure catalog model + the
 // `toMcpServerConfig` install transform; the catalog SOURCE is injected.
 export {
+  BUNDLED_MCP_CONNECTORS,
   createMcpConnectorCatalog,
   type McpConnectorCatalogPort,
   type McpConnectorEntry,

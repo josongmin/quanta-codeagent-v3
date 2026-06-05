@@ -106,6 +106,46 @@ export const toMcpServerConfig = (entry: McpConnectorEntry): McpInstallResult =>
   }
 }
 
+/**
+ * Bundled default catalog — a small curated set of well-known reference MCP
+ * servers (the `@modelcontextprotocol/server-*` family + a representative http
+ * connector). This is the DEFAULT source `createMcpConnectorCatalog` is seeded
+ * with when the host opts in (`QUANTA_MCP_CONNECTORS=1`) and supplies no override
+ * list. Pure DATA — the entries are launch templates; whether a given package is
+ * installed on the box is resolved at spawn time by the MCP launcher, not here.
+ * The host may replace this with a remote catalog / REST registry adapter.
+ */
+export const BUNDLED_MCP_CONNECTORS: readonly McpConnectorEntry[] = [
+  {
+    id: "filesystem",
+    name: "Filesystem",
+    description: "Read/write files under an allowed root (reference server).",
+    transport: "stdio",
+    command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "."],
+  },
+  {
+    id: "github",
+    name: "GitHub",
+    description: "Repos, issues, and PRs via the GitHub API (needs GITHUB_TOKEN).",
+    transport: "stdio",
+    command: ["npx", "-y", "@modelcontextprotocol/server-github"],
+  },
+  {
+    id: "memory",
+    name: "Knowledge-graph memory",
+    description: "Persistent knowledge-graph memory across sessions.",
+    transport: "stdio",
+    command: ["npx", "-y", "@modelcontextprotocol/server-memory"],
+  },
+  {
+    id: "sequential-thinking",
+    name: "Sequential thinking",
+    description: "Structured step-by-step reasoning scratchpad.",
+    transport: "stdio",
+    command: ["npx", "-y", "@modelcontextprotocol/server-sequential-thinking"],
+  },
+] as const
+
 /** In-memory catalog over a fixed entry list — the default `McpConnectorCatalogPort`.
  *  `list()` is a deterministic (by id, byteCompare) immutable snapshot. The host
  *  supplies the entries (bundled file / remote fetch / REST registry adapter). */

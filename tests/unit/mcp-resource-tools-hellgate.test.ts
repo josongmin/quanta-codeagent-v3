@@ -318,6 +318,24 @@ describe("N3 — DoS / size guards", () => {
     expect(r.output).not.toContain(b64)
   })
 
+  test("a giant failure message (hostile transport error) is capped, not emitted whole", async () => {
+    // A `transport` failure carries an upstream `errMessage(err)`; a hostile
+    // server can make that arbitrarily long. The failure-output path must share
+    // the same cap as the content path.
+    const huge = "E".repeat(MAX_OUTPUT + 200_000)
+    const t = byName(
+      tools({ resources: fail<ResourceEntry[]>("transport", huge) }),
+      "mcp_list_resources",
+    )
+    const r = await run(t, {})
+    expect(r.ok).toBe(false)
+    expect(r.output).toContain("transport")
+    // capped: prefix ("transport: the MCP request failed (") + MAX_OUTPUT + suffix.
+    expect(r.output.length).toBeLessThanOrEqual(MAX_OUTPUT + 128)
+    expect(r.output).not.toContain(huge)
+    expect(r.output).toContain("truncated")
+  })
+
   test("mcp_get_prompt non-text message content ⇒ typed placeholder, no throw", async () => {
     const t = byName(
       tools({

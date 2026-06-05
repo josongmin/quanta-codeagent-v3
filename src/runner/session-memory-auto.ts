@@ -1,12 +1,21 @@
 import { Database } from "bun:sqlite"
+import { readFileSync, writeFileSync } from "node:fs"
 import * as fsp from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import type { AgentConfig } from "@/agent"
 import { runMemoryPhase2AutoTrigger } from "@/agent/memory-consolidator-hook"
 import { distillSession, finalAssistantText } from "@/agent/memory-distill"
+import { InMemoryLock } from "@/auth/lock-in-memory"
 import { assembleFromEvents, type LLMPort, type Message, type StreamEvent } from "@/llm"
 import {
+  assembleDreamPolicy,
+  CrossSessionDreamTrigger,
+  type DreamConfigView,
+  type DreamConsolidatePort,
+  type DreamState,
+  type DreamStatePort,
+  FileDreamWriteTarget,
   MemoryWriter as FileMemoryWriter,
   type MemoryWriter,
   type Phase1Port,
@@ -25,6 +34,7 @@ import {
   DefaultCrossSessionInjector,
   renderMemorySection,
 } from "@/memory/cross-session"
+import { INITIAL_DREAM_STATE } from "@/memory/dream/types"
 import { JsonlFileStage1Store, type Stage1OutputsStore } from "@/memory/stage1-store"
 import { errMessage, throwIfAborted } from "@/shared"
 
@@ -43,6 +53,67 @@ const nodeFsPort: NodeFsLike = {
 const asPhase1Messages = (
   rolloutMessages: ReadonlyArray<{ role: string; content: unknown }>,
 ): Message[] => rolloutMessages as Message[]
+
+// ── H16 — cross-session "auto-dream" composition (default-OFF) ──────────────
+
+/** System prompt for the dream consolidation pass — synthesize the accumulated
+ *  cross-session memory entries into ONE durable, deduplicated team-knowledge
+ *  note. No new facts; only consolidate + dedupe what is already promoted. */
+const DREAM_CONSOLIDATE_SYSTEM =
+  "You are consolidating cross-session memory. Given a list of durable memory " +
+  "entries accumulated across prior sessions, produce ONE concise, deduplicated " +
+  "markdown note capturing the stable, reusable knowledge. Merge duplicates, drop " +
+  "ephemera, keep only what stays true across sessions. Output markdown only — no " +
+  "preamble. Invent nothing beyond the provided entries."
+
+/** Parse a strict-positive integer env value; undefined when absent/invalid so
+ *  {@link assembleDreamPolicy} falls back to the documented default. */
+const parsePositiveIntOrUndefined = (raw: string | undefined): number | undefined => {
+  if (raw === undefined) return undefined
+  const n = Number.parseInt(raw.trim(), 10)
+  return Number.isInteger(n) && n > 0 ? n : undefined
+}
+const parsePositiveNumberOrUndefined = (raw: string | undefined): number | undefined => {
+  if (raw === undefined) return undefined
+  const n = Number.parseFloat(raw.trim())
+  return Number.isFinite(n) && n > 0 ? n : undefined
+}
+
+/** JSON-file {@link DreamStatePort} — persists the tiny dream counter/clock at
+ *  `<memoryRoot>/dream-state.json` so the sessions/hours cadence survives across
+ *  CLI runs. Sync (the port contract); NO-THROW — a missing or corrupt file
+ *  degrades to {@link INITIAL_DREAM_STATE} rather than crashing the dream pass. */
+class JsonFileDreamState implements DreamStatePort {
+  private readonly filePath: string
+  constructor(filePath: string) {
+    this.filePath = filePath
+  }
+  read(): DreamState {
+    try {
+      const obj = JSON.parse(readFileSync(this.filePath, "utf8")) as Partial<DreamState>
+      if (
+        typeof obj.sessionsSinceLastDream === "number" &&
+        (obj.lastDreamAtMs === null || typeof obj.lastDreamAtMs === "number")
+      ) {
+        return {
+          sessionsSinceLastDream: obj.sessionsSinceLastDream,
+          lastDreamAtMs: obj.lastDreamAtMs,
+          lastOutcome: obj.lastOutcome ?? null,
+        }
+      }
+    } catch {
+      // absent / unreadable / corrupt ⇒ initial state (never throw)
+    }
+    return INITIAL_DREAM_STATE
+  }
+  write(state: DreamState): void {
+    try {
+      writeFileSync(this.filePath, JSON.stringify(state), "utf8")
+    } catch {
+      // best-effort: a disk hiccup must not crash session teardown
+    }
+  }
+}
 
 export const buildPhase1PortFromLlm = (llm: LLMPort): Phase1Port => ({
   async distill(args) {
@@ -121,6 +192,11 @@ export interface SessionMemoryAutoWires {
    *  path. Idempotent: closing an already-closed handle is swallowed so a
    *  double-dispose never throws. */
   dispose(): void
+  /** H16 — the cross-session auto-dream trigger, present ONLY when
+   *  `QUANTA_AUTO_DREAM=1` (and memory-auto produced a cross-session store to
+   *  dream over). The session host calls `onSessionEnd()` once at teardown;
+   *  absent ⇒ no dream pass (byte-identical default-OFF). */
+  dreamTrigger?: CrossSessionDreamTrigger
 }
 
 export interface SessionMemoryAutoWireInput {
@@ -210,9 +286,20 @@ export const buildSessionMemoryAutoWires = async (
     now,
     onWarn: logWarn,
   })
-  const phase2Port: Phase2Port = new LlmPhase2Port(
-    buildPhase2SummarizerFromLlm(input.summarizerLlm ?? input.llm),
-  )
+  const summarizer = buildPhase2SummarizerFromLlm(input.summarizerLlm ?? input.llm)
+  const phase2Port: Phase2Port = new LlmPhase2Port(summarizer)
+
+  // H16 — cross-session auto-dream trigger (default-OFF; reuses the stage1
+  // store + summarizer + memory root just minted). The session host fires
+  // `onSessionEnd()` once at teardown.
+  const dreamTrigger = buildCrossSessionDreamTrigger({
+    env: input.env,
+    memoryRoot: paths.root,
+    stage1OutputsStore,
+    summarizer,
+    now,
+    logWarn,
+  })
 
   const start = await prepareSessionStartMemory({
     env: input.env,
@@ -251,7 +338,66 @@ export const buildSessionMemoryAutoWires = async (
       threadId: input.sessionId,
     },
     dispose,
+    ...(dreamTrigger !== undefined ? { dreamTrigger } : {}),
   }
+}
+
+/**
+ * H16 — build the cross-session `CrossSessionDreamTrigger` from the resolved
+ * env view + the SAME memory substrate buildSessionMemoryAutoWires already
+ * minted (the JSONL stage1 store + the LLM summarizer + the memory root). The
+ * consolidate adapter REUSES the existing cross-session injector + Phase-2
+ * summarizer (it does NOT reimplement consolidation); the team write target is
+ * `<root>/team/cross-session.md` (NEVER the live MEMORY.md). Returns undefined
+ * when `QUANTA_AUTO_DREAM` is off (byte-identical default-OFF).
+ *
+ * Lock: per-process `InMemoryLock` — sufficient for the session-end use (one
+ * dream per process); cross-process exclusion (two CLIs ending at once) is an
+ * accepted degradation (both dream, last write wins) pending a file-based lock.
+ */
+export const buildCrossSessionDreamTrigger = (deps: {
+  readonly env: Readonly<Record<string, string | undefined>>
+  readonly memoryRoot: string
+  readonly stage1OutputsStore: Stage1OutputsStore
+  readonly summarizer: Phase2Summarizer
+  readonly now: () => number
+  readonly logWarn: (msg: string) => void
+}): CrossSessionDreamTrigger | undefined => {
+  const view: DreamConfigView = {
+    autoDream: deps.env.QUANTA_AUTO_DREAM === "1",
+    autoDreamSessions: parsePositiveIntOrUndefined(deps.env.QUANTA_AUTO_DREAM_SESSIONS),
+    autoDreamHours: parsePositiveNumberOrUndefined(deps.env.QUANTA_AUTO_DREAM_HOURS),
+  }
+  const slot = assembleDreamPolicy(view)
+  if (slot === null) return undefined
+
+  const consolidate: DreamConsolidatePort = {
+    async consolidate({ signal }) {
+      const entries = new DefaultCrossSessionInjector({
+        stage1Store: deps.stage1OutputsStore,
+      }).selectForInject({ maxBytes: DEFAULT_INJECT_MAX_BYTES })
+      const section = renderMemorySection(entries).text.trim()
+      if (section.length === 0) return { kind: "no_op" }
+      const { text } = await deps.summarizer({
+        system: DREAM_CONSOLIDATE_SYSTEM,
+        userText: section,
+        ...(signal !== undefined ? { signal } : {}),
+      })
+      const content = text.trim()
+      return content.length > 0 ? { kind: "consolidated", content } : { kind: "no_op" }
+    },
+  }
+
+  return new CrossSessionDreamTrigger({
+    state: new JsonFileDreamState(join(deps.memoryRoot, "dream-state.json")),
+    consolidate,
+    writeTarget: new FileDreamWriteTarget({ memoryRoot: deps.memoryRoot, fs: nodeFsPort }),
+    lock: new InMemoryLock({ now: deps.now }),
+    now: deps.now,
+    policy: slot.policy,
+    holderId: `auto-dream-${process.pid}`,
+    logWarn: deps.logWarn,
+  })
 }
 
 export const prepareSessionStartMemory = async (

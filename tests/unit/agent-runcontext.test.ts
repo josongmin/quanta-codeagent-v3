@@ -80,6 +80,56 @@ describe("runAgent RunContext + usage bridge (RFC-0002 W-C)", () => {
     }
   })
 
+  // ADR-0182 hellgate — the loop's emitUsage re-emits the cache_creation
+  // (cache-WRITE) bucket on the forwarded AgentEvent usage, so a downstream
+  // stream listener sees the SAME shape the adapter produced. Conditional
+  // spread: present when the adapter reported it, OMITTED otherwise.
+  test("(a2) cacheCreationTokens carried on re-emit when the adapter reported it", async () => {
+    const script: StreamEvent[] = [
+      { type: "text_delta", delta: "answer" },
+      {
+        type: "usage",
+        inputTokens: 42,
+        outputTokens: 7,
+        cacheReadTokens: 5,
+        cacheCreationTokens: 64,
+        model: "fake-1",
+      },
+      { type: "message_stop", stop_reason: "end_turn" },
+    ]
+    const stream = new RecordingStream()
+    await runAgent({
+      ...baseConfig(new FakeLLM([script]), new ToolRegistry(defaultTools), stream, {
+        mode: "acceptEdits",
+      }),
+      run: { runId: "r1" },
+    })
+    const usage = stream.events.find((e) => e.type === "usage")
+    expect(usage).toBeDefined()
+    if (usage?.type === "usage") {
+      expect(usage.cacheReadTokens).toBe(5)
+      expect(usage.cacheCreationTokens).toBe(64)
+    }
+  })
+
+  test("(a3) cacheCreationTokens OMITTED on re-emit when adapter did not report it (non-caching byte-identity)", async () => {
+    // usageTextScript() has cacheReadTokens but NO cacheCreationTokens — the
+    // OpenAI / non-caching shape. The forwarded usage event must NOT inject a
+    // cacheCreationTokens key (never a zero, never undefined).
+    const stream = new RecordingStream()
+    await runAgent({
+      ...baseConfig(new FakeLLM([usageTextScript()]), new ToolRegistry(defaultTools), stream, {
+        mode: "acceptEdits",
+      }),
+      run: { runId: "r1" },
+    })
+    const usage = stream.events.find((e) => e.type === "usage")
+    expect(usage).toBeDefined()
+    if (usage?.type === "usage") {
+      expect("cacheCreationTokens" in usage).toBe(false)
+    }
+  })
+
   test("(b) caller's config.run object is NOT mutated (turn stays undefined)", async () => {
     const llm = new FakeLLM([usageTextScript()])
     const stream = new RecordingStream()

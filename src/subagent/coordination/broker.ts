@@ -69,6 +69,11 @@ export interface BrokerMessage {
   readonly kind: "request" | "response" | "broadcast"
   readonly body: string
   readonly correlationId?: string
+  /** Transport envelope fields the real `MailboxMessage` carries but the broker
+   *  does NOT read — declared optional so the mirror accepts a full on-the-wire
+   *  message without a cast (the broker's authority checks never depend on them). */
+  readonly id?: string
+  readonly sentAt?: number
 }
 
 /** A response the broker emits — the SAME `correlationId` round-trips so the

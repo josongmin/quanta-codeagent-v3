@@ -205,6 +205,17 @@ describe("pty tools — bounds + jail (adversarial)", () => {
     expect((await run(byName(tools, "pty_write"), { handle: "pty:1" })).ok).toBe(false)
     expect((await run(byName(tools, "pty_resize"), { handle: "pty:1", cols: 80 })).ok).toBe(false)
   })
+
+  test("pty_read caps a huge pane (no token explosion) with a truncation marker", async () => {
+    const fake = mkFake()
+    const tools = ptyTools(fake.port)
+    fake.feed("tmux:quanta-a", "S".repeat(200 * 1024)) // a giant scrolled pane
+    const r = await run(byName(tools, "pty_read"), { handle: "tmux:quanta-a", sinceSeq: 0 })
+    expect(r.ok).toBe(true)
+    expect(r.output).toContain("chars truncated")
+    // Bounded well under the raw 200 KiB (cap 32 KiB head+tail + markers).
+    expect(r.output.length).toBeLessThan(80 * 1024)
+  })
 })
 
 describe("pty tools — lifecycle", () => {
@@ -271,12 +282,22 @@ describe("pty tmux-adapter — allow-prefix jail (security)", () => {
 })
 
 describe("pty tmux-adapter — send-keys / resize / capture", () => {
-  test("write uses `-l` literal; appendNewline sends a separate Enter", async () => {
+  test("write uses `-l` literal + `--`; appendNewline sends a separate Enter", async () => {
     const t = mkTmuxExec()
     const adapter = createTmuxAdapter({ exec: t.exec })
     await adapter.write("tmux:quanta-a", "rm -rf x", { appendNewline: true })
-    expect(t.calls[0]).toEqual(["send-keys", "-t", "quanta-a", "-l", "rm -rf x"])
+    expect(t.calls[0]).toEqual(["send-keys", "-t", "quanta-a", "-l", "--", "rm -rf x"])
     expect(t.calls[1]).toEqual(["send-keys", "-t", "quanta-a", "Enter"])
+  })
+
+  test("write data beginning with '-' is NOT flag-parsed by tmux (the `--` guard)", async () => {
+    const t = mkTmuxExec()
+    const adapter = createTmuxAdapter({ exec: t.exec })
+    // "-X" would be a tmux flag without the `--` separator → arg-injection.
+    await adapter.write("tmux:quanta-a", "-X --kill")
+    expect(t.calls[0]).toEqual(["send-keys", "-t", "quanta-a", "-l", "--", "-X --kill"])
+    // The data lands AFTER `--`, so tmux treats it as literal keys, not options.
+    expect(t.calls[0]?.indexOf("--")).toBeLessThan(t.calls[0]?.indexOf("-X --kill") ?? -1)
   })
 
   test("resize maps to resize-window -x cols -y rows; bounds rejected pre-exec", async () => {

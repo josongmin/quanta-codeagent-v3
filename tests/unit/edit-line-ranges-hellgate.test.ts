@@ -123,6 +123,36 @@ describe("H12 applyExactEdit — range scoping picks exactly one of N identical"
     expect((r.next as string).split("\ntarget").length - 1).toBe(3) // the 3 out-of-range survive
   })
 
+  test("multi-line old_string is scoped by its FIRST-char line only (boundary invariant)", () => {
+    // A 2-line anchor "FOO\nBAR" with FOO on line 3 and BAR on line 4. The match
+    // is in-scope IFF the FIRST character's line (3) is in range — NOT line 4.
+    // This pins the documented "scoped by the line its FIRST character lands on"
+    // rule so a future refactor can't silently start scoping by the END line.
+    const src = ["x0", "x1", "FOO\nBAR", "x4"].join("\n")
+    // Range covering only the END line (4) → the first char (line 3) is OUT →
+    // clean not-found, never a wrong edit.
+    const endOnly = applyExactEdit(src, "FOO\nBAR", "Z", false, [{ start: 4, end: 4 }])
+    expect(endOnly.ok).toBe(false)
+    expect(endOnly.kind).toBe("not-found")
+    // Range covering the START line (3) → in-scope → applied.
+    const startOnly = applyExactEdit(src, "FOO\nBAR", "Z", false, [{ start: 3, end: 3 }])
+    expect(startOnly.ok).toBe(true)
+    expect(startOnly.next).toBe("x0\nx1\nZ\nx4")
+  })
+
+  test("in-range non-overlapping count matches whole-file count (ambiguous parity)", () => {
+    // Overlapping-needle parity: "aa" in "aaaa" is TWO non-overlapping matches by
+    // the engine's `split` semantics. The in-range offset count must agree so the
+    // ambiguous/replace_all bias is identical scoped vs unscoped — a divergence
+    // here would let a scoped replace_all clobber a different set than the model
+    // expects from the unscoped count.
+    const scoped = applyExactEdit("aaaa", "aa", "X", true, [{ start: 1, end: 1 }])
+    const whole = applyExactEdit("aaaa", "aa", "X", true)
+    expect(scoped.ok).toBe(true)
+    expect(scoped.next).toBe(whole.next)
+    expect(scoped.next).toBe("XX")
+  })
+
   test("MULTIPLE line_ranges union: two windows each holding one anchor → 2 with replace_all", () => {
     const src = buildRepeated()
     const r = applyExactEdit(src, "target", "X", true, [

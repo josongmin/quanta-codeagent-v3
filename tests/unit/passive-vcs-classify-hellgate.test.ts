@@ -158,6 +158,38 @@ describe("E. push — ref-update line", () => {
     expect(ev?.push?.localRef).toBe("HEAD")
     expect(ev?.push?.remoteRef).toBe("refs/for/main")
   })
+
+  // ── REGRESSION: `git push --dry-run` exits 0 and prints a ref-update line
+  //    BYTE-IDENTICAL to a real push, but NOTHING was pushed. The exitCode guard
+  //    cannot catch it → a phantom push event. We suppress on the command flag.
+  test("HELL-E5: `git push --dry-run` ref-line → NO push facet (nothing pushed)", () => {
+    const out = "To github.com:owner/repo.git\n   a1b2c3d..e4f5a6b  main -> main"
+    expect(ok0("git push --dry-run origin main", out)).toBeNull()
+  })
+
+  test("HELL-E6: `git push -n` (short dry-run alias) → NO push facet", () => {
+    const out = " * [new branch]      feature -> feature"
+    expect(ok0("git push -n -u origin feature", out)).toBeNull()
+  })
+
+  test("HELL-E7: env-prefixed dry-run push → NO push facet", () => {
+    const out = "   a1b2c3d..e4f5a6b  main -> main"
+    expect(ok0("GIT_SSH_COMMAND=ssh git push --dry-run origin main", out)).toBeNull()
+  })
+
+  test("HELL-E8: chained `git commit -n && git push` → push NOT suppressed (the -n is commit's --no-verify, NOT a push dry-run)", () => {
+    const out = "   a1b2c3d..e4f5a6b  main -> main"
+    const ev = ok0("git commit -n -m wip && git push origin main", out)
+    expect(ev?.push).toEqual({ localRef: "main", remoteRef: "main" })
+  })
+
+  test("HELL-E9: real push (no dry-run flag) still classifies", () => {
+    const out = "   a1b2c3d..e4f5a6b  main -> main"
+    expect(ok0("git push origin main", out)?.push).toEqual({
+      localRef: "main",
+      remoteRef: "main",
+    })
+  })
 })
 
 /* ================================================================== */
