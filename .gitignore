@@ -34,8 +34,8 @@ evals/runs/**/*.meta.json
 bench-report*.json
 bench-*.json
 predictions*.jsonl
-gpt-5.*.json
-gold.*.json
+gpt-5*.json
+gold*.json
 
 # Environment (keep examples tracked)
 .env
