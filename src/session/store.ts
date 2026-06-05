@@ -199,6 +199,10 @@ const sessionMetaSchema = z.object({
   gitSha: z.string().min(1).optional(),
   gitBranch: z.string().min(1).optional(),
   gitOriginUrl: z.string().min(1).optional(),
+  // Fork lineage (jun-06): the source session id, set by `forkSession`. Optional
+  // + `.min(1)` mirrors the git-fingerprint optionals' NonEmptyString discipline.
+  // Non-strict schema ⇒ absent on legacy/non-fork files is valid (no migration).
+  forkedFromId: z.string().min(1).optional(),
 })
 const savedSessionSchema = z.object({
   version: z.literal(SESSION_VERSION),
@@ -433,6 +437,11 @@ export const forkSession = async (
     createdAt: now,
     lastTouched: now,
     archived: false,
+    // Fork lineage (jun-06): `id` is the source session id (this function's first
+    // param), in scope right here — previously discarded, now persisted so the
+    // `/fork` chain survives rename/reload. Each link records only its immediate
+    // parent (a chain, not a flattened root).
+    forkedFromId: id,
   }
   // Deep-copy messages via structuredClone — defensive against later mutation
   // by the caller, and keeps the source untouched (fork MUST NOT mutate source).

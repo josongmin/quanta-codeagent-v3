@@ -9,8 +9,8 @@
 - ✅ **호스트 배선 LIVE**: N1 side-agent assembler · N2 `.mcp.json` writer · N3/H19 mcp-resources(mcp-bridge aggregate) · H16 auto-dream + `/dream` 수동 · C1 아티팩트 auto-register · 5 SEAM-ONLY 포트(pty/office/imageGen/communicate/mcpResources) · H7 multicloud+rotation+transport-selection(`QUANTA_LLM_TRANSPORT`) · 멀티에이전트 코디네이션 A/B/C.
 - ✅ **적대 어딧 5라운드 + 3-angle**: ~25 실버그 + 시스템갭 2 수정, ~150 신규 hellgate. 최대어=pty_write HARD_DENY 우회·H7 reachability·OOXML surrogate 손상.
 
-**남은 작업** (전부 옵션/니치/저ROI 또는 user 트랙):
-1. **user 트랙(미터치)**: 멀티에이전트 B/C broker·idle loop 미세배선(`coordination-broker-wire.ts` active) — 끝나면 side-agent-runner capDetail surrogate fix 1줄 적용.
+**남은 작업** (전부 옵션/니치/저ROI):
+1. ~~user 트랙~~ ✅ **DONE (jun-06)**: 멀티에이전트 B/C/A 코디네이션 = 코어+host 배선+e2e 전부 완성 확인(180 테스트), capDetail surrogate fix 이미 적용됨. **2-angle 적대 어딧(보안+데드락 / 동시성+자원) 완료 — 전 불변식 공격에 HELD, 소스버그 0, +21 hellgate 봉인**(HARD_DENY non-escalatable 4모드·self-grant forgery 거부·DAG cap=1 self-deadlock·idle-flip race·daemon-map 동시성·10k churn bound). 메인루프 turn-end beacon(C)은 batch가 Promise.all fan-in이라 의도적 미배선.
 2. **저ROI 잔여(소)**: H7 BYOK `apiKeyHelper`→legacy createLLM 키주입 / Foundry·Mantle 어댑터 구현(현재 stub, 라우팅만) / mcpResources supervised-client 집계 / pty bun-native(non-tmux) adapter+실 tmux e2e / H18 OS keyring+401-mid-session re-auth / H8 heartbeat host enqueue 바인딩 / C2 live progress 렌더러.
 3. **신규 미착수(§4 중ROI 후보)**: 1h prompt-cache TTL · LSP call-hierarchy · PermissionRequest 훅이벤트 · token-revoke-on-logout(보안) · .ipynb cell-aware read · account rate-limit 스냅샷 · per-tool interruptBehavior · forked_from_id 영속 · AI 세션타이틀 · /doctor · delta 토큰회계 · paste-burst placeholder · PR-review-thread resolve.
 4. **신규 미착수(§7)**: N4 skill-authoring 도구 · N5 file-history-rewind(shadow-ODB와 중복확인 필요) · C4 EditPrLabels · C5 ForceBackground · C6 deny-reason 표면화 · G1/G2/G3(데스크톱·협업·computer-use=고비용 니치).

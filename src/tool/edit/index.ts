@@ -169,19 +169,29 @@ const planEdit = async (
 
 /** ADR-0398 — route the commit through `writeFileAtomic` when the caller
  *  threaded `expected_hash` AND the port supports it; otherwise legacy
- *  `writeFile`. Extracted to keep `execute` flat. */
+ *  `writeFile`. jun-6 tool-interrupt-behavior — the commit runs inside the
+ *  OPTIONAL critical section (`ctx.criticalSection`) so an in-flight ESC cannot
+ *  tear a half-written file; `begin?.()` is undefined when the seam is unwired
+ *  (the three OFF gates) ⇒ byte-identical legacy path. The withheld abort (if
+ *  any) is re-delivered at `end()` so the next phase boundary still aborts the
+ *  turn. Extracted to keep `execute` flat. */
 const commitEdit = async (
   fs: FileSystemPort,
+  ctx: ToolContext,
   path: string,
   next: string,
-  cwd: string | undefined,
   expectedHash: string | undefined,
 ): Promise<void> => {
-  if (expectedHash !== undefined && fs.writeFileAtomic !== undefined) {
-    await fs.writeFileAtomic(path, next, cwd)
-    return
+  const cs = ctx.criticalSection?.begin()
+  try {
+    if (expectedHash !== undefined && fs.writeFileAtomic !== undefined) {
+      await fs.writeFileAtomic(path, next, ctx.cwd)
+      return
+    }
+    await fs.writeFile(path, next, ctx.cwd)
+  } finally {
+    cs?.end()
   }
-  await fs.writeFile(path, next, cwd)
 }
 
 /** Build the `edit` tool against an injected {@link FileSystemPort} (#13).
@@ -209,6 +219,13 @@ export const makeEditTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
   // explicit opt-in since the fallback for mutating tools is now
   // `always-confirm`.
   hitlTier: (): "pre-approval-ok" => "pre-approval-ok",
+  // jun-6 tool-interrupt-behavior — `edit` is an ATOMIC-intent applier (its
+  // in-place strategies are not all rename-atomic): an ESC mid-commit can leave
+  // a half-written file. Declare `"block"` so the dispatch abort-router withholds
+  // the turn abort ONLY while the commit window below is open. Default-OFF /
+  // byte-identical unless the host wired `ctx.criticalSection` AND the
+  // `QUANTA_TOOL_INTERRUPT_BLOCK` knob is on (see ToolInterruptPolicy).
+  interruptBehavior: (): "block" => "block",
 
   async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
     // ADR-0091 git-write-protection: an edit targeting `.git/{hooks,config,
@@ -249,7 +266,10 @@ export const makeEditTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
           return
         }
       }
-      await commitEdit(fs, input.path, planned.next, ctx.cwd, input.expected_hash)
+      // jun-6 tool-interrupt-behavior — the commit runs inside the OPTIONAL
+      // critical section (inside `commitEdit`) so an in-flight ESC cannot tear a
+      // half-written file (no-op when the seam is unwired; byte-identical).
+      await commitEdit(fs, ctx, input.path, planned.next, input.expected_hash)
       // ADR-0440 — feed the before/after to the optional tool-diff sink so the
       // web-daemon emits a `tool.diff` canvas frame. Default-OFF: no-op unless
       // `ctx.toolDiff` + `ctx.toolCallId` are both wired (gate ON). No recompute

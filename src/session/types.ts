@@ -29,6 +29,14 @@ export interface SessionMeta {
   gitSha?: string
   gitBranch?: string
   gitOriginUrl?: string
+  /** Session id this transcript was forked from (`forkSession`). Absent on
+   *  non-fork sessions AND on legacy transcripts minted before this field —
+   *  absent means "no known parent", never lossy stripping (same discipline as
+   *  the git-fingerprint fields above). Persisted so a `/fork` lineage chain
+   *  survives rename + reload (the `" (fork)"` title suffix is cosmetic and
+   *  mutable). The parent may later be deleted — this is provenance metadata,
+   *  not a live pointer, so a dangling reference is acceptable. */
+  forkedFromId?: string
 }
 
 export interface SavedSession {

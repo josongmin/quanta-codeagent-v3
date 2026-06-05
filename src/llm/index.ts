@@ -33,10 +33,12 @@ export {
   createLLM,
   createMulticloudLLM,
   DEFAULT_MODEL,
+  MINTABLE_PROVIDERS,
   MissingApiKeyError,
   MULTICLOUD_AUTH_ENV_KEYS,
   MULTICLOUD_DEFAULT_MODEL,
   pickProvider,
+  resolveVendorApiKey,
   tryCreateLLM,
 } from "./factory"
 export type { FallbackLLMOptions, FallbackMetricSink } from "./fallback"

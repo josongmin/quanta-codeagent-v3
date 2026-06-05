@@ -51,14 +51,17 @@ evidence:
     - src/stream/adapters/jsonl-recorder.ts
     - src/tool/index.ts
     - src/host/runtime/agent-arg-builder.ts
+    - src/host/runtime/progress-sink-wire.ts
+    - src/host/runtime/agent-config-assembler.ts
   tests:
     unit:
       - tests/unit/communicate-update-hellgate.test.ts
       - tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts
+      - tests/unit/progress-sink-wire-hellgate.test.ts
     integration:
       - tests/unit/communicate-update-e2e-hellgate.test.ts
     contract: []
-  adrs: [478]
+  adrs: [478, 481]
 knobs:
   - name: QUANTA_PROGRESS_UPDATE
     where: src/shared/runtime-config.ts
@@ -73,7 +76,13 @@ notes: |
   `buildGatedToolPorts`)가 `runtimeConfig().progressUpdate`로
   `DefaultToolPorts.progressUpdate=true`를 배선 → 도구가 knob에 등록됨;
   knob-on 등록 + knob-off byte-identity + dispatch가 wired progressSink로 emit하는
-  것까지 composition-root r3 hellgate로 핀. **잔여(additive follow-up)**: (P1) CLI runtime-context가 실제
-  progressSink 어댑터(mirror→stream.emit)를 mint해 라이브화; (P2) prompt-body 모델대면
+  것까지 composition-root r3 hellgate로 핀. **(P1) live progress 렌더러 — WIRED (jun-06)**:
+  `src/host/runtime/progress-sink-wire.ts`가 `createProgressStreamSink(stream)`
+  (snake→camel mirror→`progress_update` AgentEvent, NO-THROW) + `maybeWireProgressSink(cfg,env)`
+  (`QUANTA_PROGRESS_UPDATE=1` gate, caller-override-safe) 제공 — `maybeWireVcsEventSink`의
+  byte-for-byte 클론. 이로써 producer→stdout `renderProgressUpdate`/jsonl 체인 완결
+  (지금까지 producer 부재로 렌더러가 dead-code였음). 호스트 배선은
+  `wireOptionalCapabilitySlots`에 `maybeWireProgressSink(cfg, env)` 한 줄 추가로 완성
+  (assembler call-site). **잔여(additive follow-up)**: (P2) prompt-body 모델대면
   WHEN-to-call 가이던스(현 describe-string이 set-once 가이드 운반); (P3) Tauri surface
-  status pill + agent subtitle + summary panel 렌더.
+  status pill + agent subtitle + summary panel 렌더 + 코얼레싱 live pill.

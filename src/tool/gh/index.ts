@@ -26,12 +26,16 @@ import type { LLMPort } from "../../llm"
 import type { GitRunner } from "../git/types"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { ghPrBlameTool } from "./pr-blame"
+import { ghPrEditLabelsTool } from "./pr-edit-labels"
 import { ghPrOpenTool } from "./pr-open"
+import { ghPrResolveThreadTool } from "./pr-resolve-thread"
 import { normalizeRef, refRejected } from "./ref"
 import { DEFAULT_TIMEOUT_MS, defaultGhRunner, type GhRunner } from "./runner"
 
 export { ghPrBlameTool } from "./pr-blame"
+export { ghPrEditLabelsTool } from "./pr-edit-labels"
 export { ghPrOpenTool } from "./pr-open"
+export { ghPrResolveThreadTool } from "./pr-resolve-thread"
 export type { GhRunner, GhRunResult } from "./runner"
 // Barrel re-exports — historical import path for outside callers.
 export { defaultGhRunner } from "./runner"
@@ -418,9 +422,14 @@ export const ghTools = (runner: GhRunner = defaultGhRunner, opts: GhToolsOpts = 
   ghPrCommentTool(runner) as Tool,
   ghPrCreateTool(runner) as Tool,
   ghPrAutoMergeTool(runner) as Tool,
+  // RFC jun-6 C4 — label add/remove (thin `gh pr edit` wrapper, no extra dep).
+  ghPrEditLabelsTool(runner) as Tool,
   // ADR-0460 `gh_pr_open` (author + open) — OFF unless BOTH an author LLM and a
   // git runner are wired; absent ⇒ no extra tool (byte-identical).
   ...(opts.authorLLM !== undefined && opts.gitRunner !== undefined
     ? [ghPrOpenTool(runner, opts.gitRunner, opts.authorLLM, opts) as Tool]
     : []),
+  // RFC jun-6 — `gh_pr_resolve_thread` (GraphQL resolve + bounded rebase). OFF
+  // unless a git runner is wired (the rebase boundary); absent ⇒ no extra tool.
+  ...(opts.gitRunner !== undefined ? [ghPrResolveThreadTool(runner, opts.gitRunner) as Tool] : []),
 ]

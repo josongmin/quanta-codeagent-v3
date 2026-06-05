@@ -17,6 +17,7 @@
  *   ...APP_SLASH_COMMANDS]` into the historic `BUILTINS`.
  */
 
+import { doctorCmd } from "../doctor"
 import { dreamCmd, isDreamSlashEnabled } from "../dream-cmd"
 import { mcpCmd } from "../mcp-cmd"
 import { isMemorySlashEnabled, memoryCmd } from "../memory-cmd"
@@ -58,4 +59,6 @@ export const APP_SLASH_COMMANDS: readonly SlashCommand[] = [
   knobsCmd,
   // ADR-0370 — operator visibility for the session-resource-registry slice.
   sessionRegistryCmd,
+  // jun-6 (RFC jun-6-doctor-selfcheck) — `/doctor` environment self-check.
+  doctorCmd,
 ]

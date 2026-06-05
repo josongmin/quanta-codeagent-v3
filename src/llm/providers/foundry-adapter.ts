@@ -47,7 +47,7 @@ import {
 } from "../adapters/anthropic"
 import { resolveAdapterStreamTimeouts } from "../adapters/shared"
 import { withStreamTimeout } from "../stream-timeout"
-import type { StreamEvent, StreamInput } from "../types"
+import type { CacheTtl, StreamEvent, StreamInput } from "../types"
 import type { LlmProvider, ProviderConfig, ProviderId } from "./provider-port"
 import { ProviderError } from "./provider-port"
 
@@ -218,6 +218,7 @@ export class FoundryProviderAdapter implements LlmProvider {
   readonly endpoint: string
   private readonly clientOptions: FoundryClientOptions
   private readonly maxTokens: number
+  private readonly cacheTtl: CacheTtl
   private readonly streamTimeoutMs: { firstChunkMs: number; idleMs: number }
   private readonly clientFactory: FoundryClientFactory | undefined
 
@@ -225,6 +226,7 @@ export class FoundryProviderAdapter implements LlmProvider {
     validateConfig(config)
     this.model = config.model
     this.maxTokens = config.maxTokens ?? 8192
+    this.cacheTtl = config.cacheTtl ?? "5m"
     this.streamTimeoutMs = resolveAdapterStreamTimeouts({
       ...(config.streamFirstChunkMs !== undefined
         ? { streamFirstChunkMs: config.streamFirstChunkMs }
@@ -295,10 +297,12 @@ export class FoundryProviderAdapter implements LlmProvider {
   ): Promise<AsyncIterable<RawEvent>> {
     try {
       return await client.messages.create(
-        buildAnthropicMessagesRequest(this.model, this.maxTokens, input) as unknown as Record<
-          string,
-          unknown
-        >,
+        buildAnthropicMessagesRequest(
+          this.model,
+          this.maxTokens,
+          input,
+          this.cacheTtl,
+        ) as unknown as Record<string, unknown>,
         input.signal ? { signal: input.signal } : undefined,
       )
     } catch (e) {

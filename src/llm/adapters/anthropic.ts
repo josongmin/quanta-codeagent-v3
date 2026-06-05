@@ -3,7 +3,7 @@ import { LLMError } from "@/shared/errors"
 import { buildAnthropicMessagesRequest } from "../anthropic-messages-codec"
 import type { LLMPort } from "../ports"
 import { withStreamTimeout } from "../stream-timeout"
-import type { StreamEvent, StreamInput } from "../types"
+import type { CacheTtl, StreamEvent, StreamInput } from "../types"
 import { buildUsageEvent, parseToolInputOrThrow, resolveAdapterStreamTimeouts } from "./shared"
 
 export { buildAnthropicMessagesRequest, toAnthropicToolChoice } from "../anthropic-messages-codec"
@@ -27,6 +27,10 @@ interface AnthropicConfig {
    *  ONCE at construction — no per-call re-read. */
   streamFirstChunkMs?: number
   streamIdleMs?: number
+  /** Prompt-cache TTL forwarded to the codec's 4th arg. Absent ⇒ `"5m"`
+   *  (byte-identical to the prior fixed-5m cache_control). The factory gates
+   *  `"1h"` behind a model allowlist before constructing this adapter. */
+  cacheTtl?: CacheTtl
 }
 
 /** Minimal structural views of the raw SSE events we consume. The SDK's own
@@ -95,6 +99,7 @@ export class AnthropicAdapter implements LLMPort {
   readonly transportId = "public"
   readonly authMode = "Anthropic BYOK"
   private readonly maxTokens: number
+  private readonly cacheTtl: CacheTtl
   readonly betaHeaders: readonly string[]
   /** T1 stream-hang guard: pinned at construction (env knobs + optional
    *  caller overrides resolved ONCE) and applied to every `stream()` call
@@ -121,12 +126,13 @@ export class AnthropicAdapter implements LLMPort {
         : new Anthropic(base)
     this.model = config.model
     this.maxTokens = config.maxTokens ?? 8192
+    this.cacheTtl = config.cacheTtl ?? "5m"
   }
 
   private async openRawStream(input: StreamInput): Promise<AsyncIterable<RawEvent>> {
     try {
       return (await this.client.messages.create(
-        buildAnthropicMessagesRequest(this.model, this.maxTokens, input),
+        buildAnthropicMessagesRequest(this.model, this.maxTokens, input, this.cacheTtl),
         // Caller cancellation: the SDK request-options `signal` aborts the
         // underlying fetch — covers the create()/TTFT phase that the stream
         // wrapper cannot see (it only decorates the AsyncIterable returned

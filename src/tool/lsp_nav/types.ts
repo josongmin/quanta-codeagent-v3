@@ -79,6 +79,21 @@ export interface NavRenamePreview {
   placeholder: string
 }
 
+/** One edge of a call hierarchy (RFC jun-6). Slice-local mirror of `@/lsp`'s
+ *  `CallHierarchyEntry` — structurally compatible, declared here so this slice
+ *  stays import-free against `@/lsp` (same convention as `NavLocation`). For an
+ *  incoming query this is a CALLER; for outgoing, a CALLEE. `fromRanges` are the
+ *  exact call-site ranges (callers: inside `name`; callees: inside the queried
+ *  symbol). */
+export interface NavCallHierarchyEntry {
+  name: string
+  kind: NavSymbolKind
+  uri: string
+  range: NavRange
+  selectionRange: NavRange
+  fromRanges: NavRange[]
+}
+
 /**
  * Long-lived navigation session for a single language server connection. The
  * concrete provider picks the server by the FILE that opened the session;
@@ -96,16 +111,8 @@ export interface LspNavSession {
     signal?: AbortSignal,
   ): Promise<NavLocation[] | null>
   hover(filePath: string, pos: NavPos, signal?: AbortSignal): Promise<NavHover | null>
-  typeDefinition(
-    filePath: string,
-    pos: NavPos,
-    signal?: AbortSignal,
-  ): Promise<NavLocation[] | null>
-  implementation(
-    filePath: string,
-    pos: NavPos,
-    signal?: AbortSignal,
-  ): Promise<NavLocation[] | null>
+  typeDefinition(filePath: string, pos: NavPos, signal?: AbortSignal): Promise<NavLocation[] | null>
+  implementation(filePath: string, pos: NavPos, signal?: AbortSignal): Promise<NavLocation[] | null>
   documentSymbol(filePath: string, signal?: AbortSignal): Promise<NavSymbolInfo[] | null>
   workspaceSymbol(query: string, signal?: AbortSignal): Promise<NavSymbolInfo[] | null>
   prepareRename(
@@ -113,6 +120,16 @@ export interface LspNavSession {
     pos: NavPos,
     signal?: AbortSignal,
   ): Promise<NavRenamePreview | null>
+  incomingCalls(
+    filePath: string,
+    pos: NavPos,
+    signal?: AbortSignal,
+  ): Promise<NavCallHierarchyEntry[] | null>
+  outgoingCalls(
+    filePath: string,
+    pos: NavPos,
+    signal?: AbortSignal,
+  ): Promise<NavCallHierarchyEntry[] | null>
   stop(): Promise<void>
 }
 

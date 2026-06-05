@@ -105,6 +105,28 @@ export interface Diagnostic {
   code?: string
 }
 
+/** One edge of an LSP call hierarchy (RFC jun-6).
+ *
+ *  For an `incomingCalls` query, `name`/`uri`/`range`/`selectionRange` describe
+ *  a CALLER of the queried symbol and `fromRanges` are the exact spots inside
+ *  that caller where the call appears. For `outgoingCalls`, they describe a
+ *  CALLEE and `fromRanges` are the call sites inside the queried symbol. The
+ *  normalized shape hides the two-hop `prepareCallHierarchy` → incoming/outgoing
+ *  protocol behind a single result. */
+export interface CallHierarchyEntry {
+  /** The other end of the edge: caller (incoming) or callee (outgoing). */
+  name: string
+  kind: SymbolKind
+  /** Owning file URI of that function. */
+  uri: string
+  /** The callable's full range (declaration + body). */
+  range: Range
+  /** Identifier-only range, used for navigate-to. */
+  selectionRange: Range
+  /** The exact call-site ranges (LSP `fromRanges`). */
+  fromRanges: Range[]
+}
+
 /** Identifying metadata reported by a language server during `initialize`. */
 export interface LspServerInfo {
   name: string

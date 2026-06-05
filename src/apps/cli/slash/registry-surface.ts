@@ -24,7 +24,7 @@ import { existsSync } from "node:fs"
 import { access, mkdir, readFile, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
-import { errMessage, runtimeConfig } from "@/shared"
+import { errMessage, logger, runtimeConfig } from "@/shared"
 import { formatBranchesPanel } from "../branch-search-progress"
 import { editMessageCmd } from "../edit-message-cmd"
 import { editPlanCmd } from "../edit-plan-cmd"
@@ -34,7 +34,7 @@ import { historyCmd } from "../history-cmd"
 import { parseSnoozeDuration } from "../idle-monitor"
 import { inspectCmd } from "../inspect-cmd"
 import { loginCmd } from "../login-cmd"
-import { logoutCmd } from "../logout-cmd"
+import { buildLogoutCmd } from "../logout-cmd"
 import { pasteCmd } from "../paste-cmd"
 import { PLAN_PANEL_NOT_WIRED, writePlanPanel } from "../plan-panel"
 import { queueCmd } from "../queue-cmd"
@@ -782,7 +782,16 @@ export const buildSurfaceSlashCommands = (
   skillsCmd,
   reloadSkillsCmd,
   loginCmd,
-  logoutCmd,
+  // jun-6 RFC — thread the `QUANTA_OAUTH_REVOKE_ON_LOGOUT` knob + a real
+  // fetchPort + logger into the logout command deps. Default-OFF ⇒
+  // `revokeOnLogout` false ⇒ byte-identical local-delete-only logout (no
+  // revoke endpoint constructed, no network call). When ON, logout best-effort
+  // revokes the refresh token (RFC 7009) before the local delete (NO-THROW).
+  buildLogoutCmd({
+    revokeOnLogout: runtimeConfig().oauthRevokeOnLogout,
+    fetchPort: (input, init) => fetch(input, init),
+    logger: { warn: (msg, ctx) => logger.warn(msg, ctx) },
+  }),
   statusCmd,
   snoozeCmd,
   resumeCmd,

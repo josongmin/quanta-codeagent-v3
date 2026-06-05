@@ -3,15 +3,15 @@ title: Heartbeat automation — thread-attached repeating agent (kind cron|heart
 section: 9
 subsystem: Scheduler / scheduled agent (H8, Codex automation kind 흡수)
 order: 162
-maturity: L4
-status: new
+maturity: L5
+status: stable
 ui_surfaces: [cli]
 monitoring: integrated
 modes: [daemon, headless, interactive]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex"]
-depends_on: [scheduler-automation-lifecycle, scheduler-runtime, scheduler-model-reroute]
+depends_on: [scheduler-automation-lifecycle, scheduler-runtime, scheduler-model-reroute, per-thread-permissions]
 purpose: |
   Codex automation `kind: cron | heartbeat` 흡수. 기존 automation은 cron(thread-
   detached, fresh fire)뿐이었음. heartbeat는 기존 대화 THREAD에 붙어 매 fire를 그
@@ -35,20 +35,33 @@ purpose: |
   JSONL round-trip: 신규 필드는 store-jsonl `parseAutomation`이 보존(부분 policy는
   drop=never half-inherited); cron 행엔 kind 키 없음(byte-identical).
 evidence:
-  adrs: [481, 453]
+  adrs: [481, 480, 453]
   code:
     - src/scheduler/types.ts
     - src/scheduler/heartbeat.ts
     - src/scheduler/runtime.ts
     - src/scheduler/store-jsonl.ts
+    - src/apps/cli/repl/heartbeat-binder.ts
   tests:
     unit:
       - tests/unit/scheduler/heartbeat-automation-hellgate.test.ts
+      - tests/unit/heartbeat-binder-resume-hellgate.test.ts
     integration:
       - tests/unit/scheduler/heartbeat-fire-routing-e2e-hellgate.test.ts
+      - tests/unit/heartbeat-binder-e2e-hellgate.test.ts
     contract: []
 knobs: []
 notes: |
-  L4: 데이터모델 + fire 라우팅 + 직렬화 + 생성 불변식 다 wired, default cron이라
-  기존 automation byte-identical. 실제 "target thread를 그 posture로 resume" 실행은
-  host가 AgentLoopPort.enqueueUserMessage(targetThreadId/inheritedPolicy)에 바인딩.
+  L5 (ADR-0480 host bind LANDED): 데이터모델 + fire 라우팅 + 직렬화 + 생성 불변식 +
+  HOST enqueue 바인딩까지 전부 wired. 이전 L4 잔여였던 "host enqueue 바인딩"(매 host
+  AgentLoopPort impl이 opts를 drop)이 닫힘 — `src/apps/cli/repl/heartbeat-binder.ts`의
+  closed-port `HeartbeatThreadBinder` + `heartbeatEnqueueHandler`가 cron-vs-heartbeat
+  분기를 한다: targetThreadId 없으면 byte-identical 직접 push(cron), 있으면 binder.resume이
+  same-thread 면 inherited posture를 per-turn permission cell(per-thread-permissions)에
+  CLAMP 후 재적용하고 prompt를 그 thread 큐에 push. cross-thread/missing ⇒ loud
+  typed `thread-not-found`(오라우팅 금지). SECURITY: posture clamp = 절대 escalate 금지
+  — forged/unknown approvalPolicy ⇒ most-restrictive(default) fail-closed, snapshot은
+  current cell과의 most-restrictive meet으로 clamp(둘 중 더 안전한 쪽). NO-THROW(push
+  fault ⇒ enqueue-failed). default cron이라 기존 automation byte-identical.
+  잔여: cross-thread(web-daemon/background host)용 foreign-thread loading binder는 같은
+  port의 future impl(P2, 스코프 밖).

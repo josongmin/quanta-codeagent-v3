@@ -96,6 +96,7 @@ import { ReadFileState, staleReadGuardEnabled } from "@/tool/stale-read-guard"
 import type { WebSearchProvider } from "@/tool/web"
 import { providerFromEnv } from "@/tool/web/providers"
 import { buildMentionSymbolDeps } from "./internal/mention-symbol-deps"
+import { maybeWireProgressSink } from "./progress-sink-wire"
 
 /** Minimal env view this assembler reads. The surface owns the actual
  *  `process.env` global read (allowed in `src/apps/**`) and threads this view
@@ -356,6 +357,7 @@ const wireOptionalCapabilitySlots = (cfg: AgentConfig, env: AssemblerEnv): void 
   maybeWireSkillMcp(cfg, env)
   maybeWirePromptCacheObserver(cfg, env)
   maybeWireVcsEventSink(cfg, env)
+  maybeWireProgressSink(cfg, env)
   maybeWireSideAgent(cfg, env)
 }
 

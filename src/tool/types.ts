@@ -317,6 +317,53 @@ export interface ToolContext {
    *  imports `@/stream` / `@/agent` (same discipline as {@link VcsEventSink} /
    *  {@link ToolDiffSink}). */
   progressSink?: ProgressSink
+  /** jun-6 tool-interrupt-behavior — OPTIONAL critical-section seam. A tool that
+   *  declares `interruptBehavior(): "block"` (see {@link ToolInterruptPolicy})
+   *  wraps its ATOMIC FS-mutating window (the rename/flush) in
+   *  `ctx.criticalSection?.begin()` … `.end()`. While the section is open the
+   *  dispatch abort-router WITHHOLDS the turn abort from `ctx.signal` so an ESC
+   *  cannot tear a half-applied file; on `end()` (or on a bounded watchdog
+   *  expiry) the withheld abort is force-delivered immediately, so the tool's
+   *  very next `signal.aborted` check post-rename sees it. The scope is the
+   *  rename/flush window ONLY — `block` defers a cancel across a bounded section,
+   *  it can NEVER veto or swallow it.
+   *
+   *  Default-OFF / byte-identical via THREE independent gates: (1) the host did
+   *  not wire the seam (this field absent) ⇒ `begin?.()` is undefined ⇒ the tool
+   *  behaves exactly as `"cancel"`; (2) the tool omits `interruptBehavior` ⇒ the
+   *  dispatch router threads the raw `config.signal` and never opens a section;
+   *  (3) the `QUANTA_TOOL_INTERRUPT_BLOCK` knob is unset ⇒ dispatch ignores the
+   *  predicate entirely. Duck-typed (structural mirror of the dispatch-side
+   *  impl) so `@/tool` never imports `@/agent`; the composition root in `@/agent`
+   *  builds the concrete per-call section over a suppressible derived signal +
+   *  the watchdog clock. */
+  criticalSection?: CriticalSectionSeam
+}
+
+/** jun-6 tool-interrupt-behavior — duck-typed critical-section seam injected via
+ *  {@link ToolContext}. Structural mirror of the dispatch-side per-call impl
+ *  (kept HERE so `@/tool` stays a slice leaf and never imports `@/agent` — same
+ *  discipline as {@link ProgressSink} / {@link ToolDiffSink}). `begin()` opens
+ *  the abort-withhold window and returns a disposable; the caller MUST `end()`
+ *  it in a `finally` so a throwing FS op cannot leak an open section. Calling
+ *  `end()` twice is a no-op (idempotent) by contract; the dispatch impl
+ *  synchronously re-checks `config.signal` on the FIRST `end()` and force-aborts
+ *  the derived signal if the turn aborted while withheld. NO-THROW at the port
+ *  boundary. Absent seam ⇒ `block` degrades to `"cancel"` (byte-identical). */
+export interface CriticalSectionSeam {
+  /** Enter the atomic window: the abort router withholds the turn abort from
+   *  `ctx.signal` until the returned handle's `end()` (or the watchdog cap).
+   *  Returns a disposable whose `end()` is idempotent. */
+  begin(): CriticalSectionHandle
+}
+
+/** jun-6 tool-interrupt-behavior — the disposable returned by
+ *  {@link CriticalSectionSeam#begin}. `end()` closes the withhold window and is
+ *  idempotent (second call is a no-op). */
+export interface CriticalSectionHandle {
+  /** Exit the atomic window — re-deliver any abort that arrived while withheld.
+   *  Idempotent + NO-THROW. */
+  end(): void
 }
 
 /** C2 (jun-4-communicate-update.md) — read-only structured-progress payload
@@ -959,8 +1006,10 @@ export type { HITLTier }
  *                                    deferred-results opt-in).
  *   4. {@link ToolStreamingInput}  — optional streaming-input callbacks
  *                                    mirroring LLM `tool_use_*` events.
+ *   5. {@link ToolInterruptPolicy} — optional per-tool interrupt policy
+ *                                    (jun-6) read by the dispatch abort-router.
  *
- * Every member of groups 2–4 is OPTIONAL on `Tool` (the `Partial<…>`s below
+ * Every member of groups 2–5 is OPTIONAL on `Tool` (the `Partial<…>`s below
  * preserve the previous flat shape), so all existing readers — `registry.run`,
  * `registry.extractShellCommand`, `factory.enforceOutputSchema` /
  * `renderToolOutput` / `driveStreamingInput`, the permission gate's
@@ -972,7 +1021,8 @@ export type { HITLTier }
 export type Tool<I = unknown, O = unknown> = ToolCore<I> &
   Partial<ToolSecurityHooks<I>> &
   Partial<ToolResultShape<O>> &
-  Partial<ToolStreamingInput<I>>
+  Partial<ToolStreamingInput<I>> &
+  Partial<ToolInterruptPolicy>
 
 /**
  * Required surface every tool implements. The dispatch/registry seams call
@@ -1059,6 +1109,34 @@ export interface ToolSecurityHooks<I = unknown> {
    *  byte-identical to the T02 behavior. Returning `true` here means "early
    *  start is acceptable even though I am not read-only". */
   isEarlyDispatchSafe(): boolean
+}
+
+/**
+ * jun-6 tool-interrupt-behavior — OPTIONAL per-tool interrupt policy. A THIRD
+ * member of the per-tool-predicate family alongside `isReadOnly()` /
+ * `isConcurrencySafe()` on {@link ToolCore}: a tool self-describes a property
+ * the SCHEDULER (here, the abort-router in `@/agent`) consumes. Kept as its own
+ * optional `Partial` arm (not a required `ToolCore` member) so the default is
+ * absence-by-construction — exactly the {@link ToolSecurityHooks} shape.
+ *
+ * The dispatch abort-router reads it as `tool.interruptBehavior?.() ?? "cancel"`:
+ *   - ABSENT / `"cancel"` ⇒ the raw `config.signal` is threaded into
+ *     `ctx.signal` (legacy uniform turn-level cancel, BYTE-IDENTICAL). Every
+ *     existing tool (`read`/`grep`/`glob`/`ls`/`bash`/…) is on this path.
+ *   - `"block"` ⇒ the router threads a SUPPRESSIBLE derived signal and wires the
+ *     {@link CriticalSectionSeam} so the tool can withhold the abort across its
+ *     bounded atomic FS-mutating window only (see `ctx.criticalSection`).
+ *     `write`/`edit` (and future atomic appliers) opt in here.
+ *
+ * `block` defers a cancel across ONE bounded window (a watchdog cap, RFC §4.3);
+ * it can never veto an interrupt forever. The whole feature is additionally
+ * gated OFF by the `QUANTA_TOOL_INTERRUPT_BLOCK` knob, so a tool returning
+ * `"block"` while the knob is unset is byte-identical to `"cancel"`.
+ */
+export interface ToolInterruptPolicy {
+  /** How an in-flight interrupt is handled while THIS tool's `execute` runs.
+   *  Absent ⇒ `"cancel"` (legacy uniform behavior, byte-identical). */
+  interruptBehavior(): "cancel" | "block"
 }
 
 /**

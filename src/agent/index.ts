@@ -110,6 +110,7 @@ export {
   resolveHitlAnnotation,
 } from "./hitl-tier-registry"
 export {
+  DEFAULT_HOOK_DENY_REASON,
   type HookAbort,
   HookBus,
   type HookDeny,
@@ -117,10 +118,15 @@ export {
   type HookEvent,
   type HookEventType,
   type HookHandler,
+  type HookPermissionDecision,
+  type HookPermissionResponse,
   type HookPromptInject,
   type HookToolOverride,
   type HookUpdatedInput,
+  normalizePermissionDecision,
+  type PermissionHookRouting,
   PROMPT_HOOK_MAX_CHARS,
+  routePermissionHookVerdict,
   TOOL_FAILURE_RETRY_MAX,
 } from "./hooks"
 export {

@@ -48,6 +48,8 @@ describe("mode mutating-table cross-check (ADR-0036)", () => {
     "gh_pr_comment",
     "gh_pr_create",
     "gh_pr_auto_merge",
+    "gh_pr_edit_labels",
+    "gh_pr_resolve_thread",
     "memory_search",
     "memory_write",
     "memory_update",

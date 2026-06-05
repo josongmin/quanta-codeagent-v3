@@ -16,6 +16,7 @@ import { startReactorWatchBridge } from "../reactor-watch-bridge"
 import { type AwaySummaryWireHandle, maybeCreateAwaySummaryWire } from "./away-summary-wire"
 import type { ConvCheckpointWire } from "./conv-checkpoint-wire"
 import { ExternalPromptQueue } from "./external-prompt-queue"
+import { createHeartbeatBinder, heartbeatEnqueueHandler } from "./heartbeat-binder"
 import { maybeCreateNdjsonSinkWire } from "./ndjson-wire"
 import type { PlaybookTriggerSurfaceSeam } from "./playbook-trigger-surface-seam"
 import {
@@ -312,6 +313,23 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     history,
   }
   const externalPromptQueue = new ExternalPromptQueue()
+  // H8 last-mile (ADR-0480) — the heartbeat thread-resume binder. A heartbeat
+  // fire (scheduler `enqueueUserMessage(message, { targetThreadId, ... })`)
+  // routes through the binder so the TARGET thread is resumed under its
+  // inherited (clamped) posture; a bare CRON push (`targetThreadId` absent) is
+  // byte-identical to `externalPromptQueue.push(message)`. The getter closures
+  // resolve the LIVE session id + per-turn permission cell at fire time (not a
+  // stale snapshot): `surfaceState` is a reassigned `let`, so reading
+  // `surfaceState.sessionId` inside the closure sees the current thread id.
+  const heartbeatBinder = createHeartbeatBinder({
+    liveThreadId: () => surfaceState.sessionId,
+    permissionCell: () => runtimeContext.permissionModeState(),
+    pushPrompt: (prompt) => externalPromptQueue.push(prompt),
+  })
+  const enqueueWithHeartbeat = heartbeatEnqueueHandler({
+    binder: heartbeatBinder,
+    pushPrompt: (prompt) => externalPromptQueue.push(prompt),
+  })
   let lastUserInputAt = 0
   let lastTurnOutcome: LastTurnOutcome | undefined
   const liveAutomationSlot =
@@ -320,9 +338,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
       { get: (name) => process.env[name] },
       {
         agentLoop: {
-          enqueueUserMessage: async (message) => {
-            externalPromptQueue.push(message)
-          },
+          enqueueUserMessage: enqueueWithHeartbeat,
         },
       },
     ) ??
@@ -647,9 +663,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
               await injectSimulatedTurn({
                 trigger,
                 agentLoop: {
-                  enqueueUserMessage: async (message) => {
-                    externalPromptQueue.push(message)
-                  },
+                  enqueueUserMessage: enqueueWithHeartbeat,
                 },
                 envPort: { get: (name) => process.env[name] },
                 clockPort: { now: () => Date.now() },

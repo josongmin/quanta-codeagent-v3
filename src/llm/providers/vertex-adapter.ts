@@ -34,7 +34,7 @@ import {
 import { resolveAdapterStreamTimeouts } from "../adapters/shared"
 import type { CredentialSource } from "../credential-helper"
 import { withStreamTimeout } from "../stream-timeout"
-import type { StreamEvent, StreamInput } from "../types"
+import type { CacheTtl, StreamEvent, StreamInput } from "../types"
 import type { LlmProvider, ProviderConfig, ProviderId } from "./provider-port"
 import { ProviderError } from "./provider-port"
 
@@ -73,6 +73,16 @@ export interface VertexAdapterOptions {
    *  (TTL-throttled inside the source). ABSENT ⇒ byte-identical to the pre-H7
    *  ADC path. */
   credentialSource?: CredentialSource
+  /** jun-6 per-model region routing — OPTIONAL `modelSlug → region` map. When a
+   *  supplied map has an EXACT entry for `config.model`, that region replaces
+   *  the single `auth.gcpLocation` for this adapter; otherwise the mandatory
+   *  `gcpLocation` fallback is used (and the construction guard requiring
+   *  `gcpLocation` is NOT weakened — the map is an override, never a substitute
+   *  for the fallback). Lookup is by exact key against the wire model slug; the
+   *  composition root owns env derivation (`VERTEX_REGION_<MODEL>`) and any slug
+   *  normalization, so the adapter never reads `process.env`. ABSENT / empty ⇒
+   *  byte-identical single-region behavior. */
+  vertexRegionByModel?: Readonly<Record<string, string>>
 }
 
 export class VertexProviderAdapter implements LlmProvider {
@@ -84,6 +94,7 @@ export class VertexProviderAdapter implements LlmProvider {
   readonly model: string
   private readonly clientOptions: VertexClientOptions
   private readonly maxTokens: number
+  private readonly cacheTtl: CacheTtl
   private readonly streamTimeoutMs: { firstChunkMs: number; idleMs: number }
   private readonly clientFactory: VertexClientFactory | undefined
   private readonly credentialSource: CredentialSource | undefined
@@ -118,13 +129,19 @@ export class VertexProviderAdapter implements LlmProvider {
     }
     this.model = config.model
     this.maxTokens = config.maxTokens ?? 8192
+    this.cacheTtl = config.cacheTtl ?? "5m"
     this.streamTimeoutMs = resolveAdapterStreamTimeouts({
       ...(config.streamFirstChunkMs !== undefined
         ? { streamFirstChunkMs: config.streamFirstChunkMs }
         : {}),
       ...(config.streamIdleMs !== undefined ? { streamIdleMs: config.streamIdleMs } : {}),
     })
-    const opts: VertexClientOptions = { projectId, region: location }
+    // jun-6 per-model region routing: an EXACT map entry for this model wins
+    // over the single `gcpLocation`; absent/empty ⇒ `location` (byte-identical
+    // to the single-region path). `location` is guaranteed non-empty by the
+    // guard above, so the `??` fallback is always a valid region.
+    const region = options.vertexRegionByModel?.[config.model] ?? location
+    const opts: VertexClientOptions = { projectId, region }
     if (config.auth.gcpAccessToken !== undefined) opts.accessToken = config.auth.gcpAccessToken
     this.clientOptions = opts
     if (options.clientFactory !== undefined) this.clientFactory = options.clientFactory
@@ -170,10 +187,12 @@ export class VertexProviderAdapter implements LlmProvider {
   ): Promise<AsyncIterable<RawEvent>> {
     try {
       return await client.messages.create(
-        buildAnthropicMessagesRequest(this.model, this.maxTokens, input) as unknown as Record<
-          string,
-          unknown
-        >,
+        buildAnthropicMessagesRequest(
+          this.model,
+          this.maxTokens,
+          input,
+          this.cacheTtl,
+        ) as unknown as Record<string, unknown>,
         input.signal ? { signal: input.signal } : undefined,
       )
     } catch (e) {

@@ -38,12 +38,15 @@ const runOnce = async <I>(
 }
 
 describe("ghTools registry", () => {
-  test("ghTools() returns 9 tools", () => {
+  test("ghTools() returns 10 tools (no git runner wired)", () => {
     // ADR-0103 (gh_pr_blame) + ADR-0104 (gh_pr_review_diff, gh_pr_auto_merge)
-    // expanded the registry from the original 6 to 9 typed tools. Read tools
-    // come first, then mutating tools (matches index.ts order).
+    // expanded the registry from the original 6 to 9; RFC jun-6 adds
+    // gh_pr_edit_labels (a thin `gh pr edit` wrapper, registered
+    // unconditionally) → 10. gh_pr_resolve_thread is OFF unless a git runner is
+    // wired (the rebase boundary). Read tools come first, then mutating tools
+    // (matches index.ts order).
     const tools = ghTools()
-    expect(tools.length).toBe(9)
+    expect(tools.length).toBe(10)
     const names = tools.map((t) => t.name)
     expect(names).toEqual([
       "gh_pr_view",
@@ -55,7 +58,16 @@ describe("ghTools registry", () => {
       "gh_pr_comment",
       "gh_pr_create",
       "gh_pr_auto_merge",
+      "gh_pr_edit_labels",
     ])
+  })
+
+  test("gh_pr_resolve_thread registers only when a git runner is wired", () => {
+    const withoutGit = ghTools().map((t) => t.name)
+    expect(withoutGit).not.toContain("gh_pr_resolve_thread")
+    const fakeGit = { run: async () => ({ stdout: "", stderr: "", exitCode: 0 }) }
+    const withGit = ghTools(undefined, { gitRunner: fakeGit }).map((t) => t.name)
+    expect(withGit).toContain("gh_pr_resolve_thread")
   })
 
   test("read tools are readOnly + concurrencySafe", () => {

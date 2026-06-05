@@ -15,6 +15,7 @@ import type { FormatRange, TextEdit as FormatTextEdit } from "../ports/format-po
 import type { RenameWorkspaceEdit } from "../ports/rename-apply-port"
 import type { SignatureInfo } from "../ports/signature-help-port"
 import type {
+  CallHierarchyEntry,
   Diagnostic,
   DiagnosticSeverity,
   Hover,
@@ -92,6 +93,25 @@ interface RawLocationLink {
   targetSelectionRange?: RawRange
 }
 type RawDefinitionResult = RawLocation | RawLocation[] | RawLocationLink[] | null
+/** LSP `CallHierarchyItem` — the resolved callable returned by
+ *  `prepareCallHierarchy` and embedded as `from`/`to` in the incoming/outgoing
+ *  responses. We narrow only the fields we map. */
+interface RawCallHierarchyItem {
+  name: string
+  kind: number
+  uri: string
+  range: RawRange
+  selectionRange: RawRange
+}
+interface RawIncomingCall {
+  from: RawCallHierarchyItem
+  fromRanges?: RawRange[]
+}
+interface RawOutgoingCall {
+  to: RawCallHierarchyItem
+  fromRanges?: RawRange[]
+}
+type RawCallHierarchyResult = RawIncomingCall[] | RawOutgoingCall[] | null
 interface RawMarkupContent {
   kind: "plaintext" | "markdown"
   value: string
@@ -284,6 +304,22 @@ const toLocationOrLink = (l: RawLocation | RawLocationLink): Location => {
   if ("uri" in l) return toLocation(l)
   return { uri: l.targetUri, range: toRange(l.targetSelectionRange ?? l.targetRange) }
 }
+
+/** Map a resolved `CallHierarchyItem` + its `fromRanges` to our normalized
+ *  {@link CallHierarchyEntry}. Pure — reuses the shared `toRange` + `SYMBOL_KIND`
+ *  primitives. Missing `fromRanges` collapses to `[]` (some servers omit it for
+ *  a 0-call-site edge). */
+const toCallEntry = (
+  item: RawCallHierarchyItem,
+  fromRanges: RawRange[] | undefined,
+): CallHierarchyEntry => ({
+  name: item.name,
+  kind: toSymbolKind(item.kind),
+  uri: item.uri,
+  range: toRange(item.range),
+  selectionRange: toRange(item.selectionRange),
+  fromRanges: (fromRanges ?? []).map(toRange),
+})
 
 /** Closed set of `CodeActionKind` strings we surface. Anything off-list is
  *  collapsed to `"other"` (same posture as `SymbolKind`'s `"unknown"`). */
@@ -635,6 +671,10 @@ export class LspClient implements LspPort {
             textDocument: {
               publishDiagnostics: { relatedInformation: false },
               synchronization: { didSave: false, dynamicRegistration: false },
+              // Advertise call-hierarchy support so spec-strict servers offer the
+              // `callHierarchyProvider` (RFC jun-6). Purely additive — no behavior
+              // change for diagnostics / the other nav methods.
+              callHierarchy: { dynamicRegistration: false },
             },
           },
         },
@@ -785,6 +825,27 @@ export class LspClient implements LspPort {
     if (raw.defaultBehavior === true) return null
     if (raw.range === undefined) return null
     return { range: toRange(raw.range), placeholder: raw.placeholder ?? "" }
+  }
+
+  /** Callers of the symbol at `pos` (RFC jun-6). Two-hop:
+   *  `prepareCallHierarchy` resolves the position to callable item(s), then
+   *  `callHierarchyItem/incomingCalls` per item. `from` is the caller. */
+  async incomingCalls(
+    filePath: string,
+    pos: Pos,
+    signal?: AbortSignal,
+  ): Promise<CallHierarchyEntry[] | null> {
+    return this.callHierarchy(filePath, "callHierarchy/incomingCalls", pos, signal)
+  }
+
+  /** Callees invoked by the symbol at `pos`. Same two-hop as
+   *  {@link incomingCalls}; `to` is the callee. */
+  async outgoingCalls(
+    filePath: string,
+    pos: Pos,
+    signal?: AbortSignal,
+  ): Promise<CallHierarchyEntry[] | null> {
+    return this.callHierarchy(filePath, "callHierarchy/outgoingCalls", pos, signal)
   }
 
   /** ADR-0404 (S2) — `textDocument/rename`. Sibling of {@link prepareRename}:
@@ -1214,6 +1275,49 @@ export class LspClient implements LspPort {
       return raw.map(toLocationOrLink)
     }
     return [toLocation(raw)]
+  }
+
+  /** Shared two-hop body for `incomingCalls` / `outgoingCalls`. First resolves
+   *  the position to call-hierarchy item(s) via `textDocument/prepareCallHierarchy`,
+   *  then issues `method` (`callHierarchy/incomingCalls|outgoingCalls`) for each
+   *  resolved item and flattens.
+   *
+   *  Result contract (mirrors the nav RPCs):
+   *    - prepare returns `null` (server lacks `callHierarchyProvider`) ⇒ `null`.
+   *    - prepare returns `[]` (no callable at this position) ⇒ `[]` — we DID
+   *      resolve, there was just nothing to query.
+   *    - every prepared item is resolved (handles overloads / ambiguity); a
+   *      per-item `null` (unsupported resolve) contributes nothing; results are
+   *      flattened in item order. */
+  private async callHierarchy(
+    filePath: string,
+    method: "callHierarchy/incomingCalls" | "callHierarchy/outgoingCalls",
+    pos: Pos,
+    signal?: AbortSignal,
+  ): Promise<CallHierarchyEntry[] | null> {
+    const uri = await this.ensureOpen(filePath, signal)
+    const items = (await this.callOrNullOnUnsupported(
+      "textDocument/prepareCallHierarchy",
+      {
+        textDocument: { uri },
+        position: pos,
+      },
+      signal,
+    )) as RawCallHierarchyItem[] | null | undefined
+    if (items === null || items === undefined) return null
+    if (!Array.isArray(items) || items.length === 0) return []
+    const out: CallHierarchyEntry[] = []
+    for (const item of items) {
+      const raw = (await this.callOrNullOnUnsupported(method, { item }, signal)) as
+        | RawCallHierarchyResult
+        | undefined
+      if (raw === null || raw === undefined || !Array.isArray(raw)) continue
+      for (const edge of raw) {
+        const target = "from" in edge ? edge.from : edge.to
+        out.push(toCallEntry(target, edge.fromRanges))
+      }
+    }
+    return out
   }
 
   private send(payload: unknown): Error | null {

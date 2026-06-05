@@ -5,6 +5,7 @@ import { runtimeConfig } from "@/shared"
 import { defaultFileSystemPort, type FileSystemPort, FsJailError } from "@/storage"
 import { defineTool } from "../factory"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+import { isNotebook, renderNotebook } from "./ipynb"
 
 /** Recognise the two file-missing shapes the injected {@link FileSystemPort}
  *  raises: (a) the OS `ENOENT` (errno -2) from `stat()` via `@/storage`'s
@@ -197,7 +198,24 @@ const resolveReadOutcome = async (
   // a permission_denied. Same classifier so the typed mapping holds on TOCTOU.
   const read = await runFsStep(() => fs.readFile(input.path, ctx.cwd), input.path)
   if (read.kind === "failure") return read
-  return { kind: "ok", text: read.value, info }
+  return { kind: "ok", text: maybeRenderNotebook(input.path, read.value), info }
+}
+
+/** jun-6 (ADR-0481) — cell-aware `.ipynb` render, applied AFTER the text read.
+ *  EXTENSION-GATED: `isNotebook` is false for every non-`.ipynb` path, so this
+ *  returns the raw `text` UNCHANGED — every other read is byte-identical. For a
+ *  `.ipynb`, `renderNotebook` returns the cell-numbered, base64-stripped view,
+ *  or `null` on a corrupt/non-nbformat notebook ⇒ we fall back to the raw text
+ *  (still readable as JSON). NEVER throws. `offset`/`limit` then page the
+ *  RENDERED text in `renderReadOk` exactly as for a raw file, and the H9
+ *  dedup/mtime record (keyed by path+mtime, unchanged) is unaffected. */
+const maybeRenderNotebook = (path: string, text: string): string => {
+  if (!isNotebook(path)) return text
+  const rendered = renderNotebook(text, {
+    includeOutputs: runtimeConfig().ipynbIncludeOutputs,
+    maxOutputChars: 2000,
+  })
+  return rendered ?? text
 }
 
 /** H9 — the compact `file_unchanged` sentinel rendered in place of full content

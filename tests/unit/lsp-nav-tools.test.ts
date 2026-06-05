@@ -4,7 +4,7 @@ import { lspNavTools, nullLspNavProvider } from "@/tool/lsp_nav"
 import { emptyTrace, fakeProvider, findTool, run, TOOL_NAMES } from "./lsp-nav-fixtures"
 
 describe("lspNavTools registration", () => {
-  test("exposes all 8 tools, read-only, not concurrency-safe", () => {
+  test("exposes all 10 tools, read-only, not concurrency-safe", () => {
     const tools = lspNavTools(nullLspNavProvider)
     expect(tools.map((t) => t.name).sort()).toEqual([...TOOL_NAMES].sort())
     for (const t of tools) {

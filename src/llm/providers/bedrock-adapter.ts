@@ -29,7 +29,7 @@ import {
 import { resolveAdapterStreamTimeouts } from "../adapters/shared"
 import type { CredentialSource } from "../credential-helper"
 import { withStreamTimeout } from "../stream-timeout"
-import type { StreamEvent, StreamInput } from "../types"
+import type { CacheTtl, StreamEvent, StreamInput } from "../types"
 import type { LlmProvider, ProviderConfig, ProviderId } from "./provider-port"
 import { ProviderError } from "./provider-port"
 
@@ -87,6 +87,7 @@ export class BedrockProviderAdapter implements LlmProvider {
   readonly model: string
   private readonly clientOptions: BedrockClientOptions
   private readonly maxTokens: number
+  private readonly cacheTtl: CacheTtl
   private readonly streamTimeoutMs: { firstChunkMs: number; idleMs: number }
   private readonly clientFactory: BedrockClientFactory | undefined
   private readonly credentialSource: CredentialSource | undefined
@@ -101,6 +102,7 @@ export class BedrockProviderAdapter implements LlmProvider {
     }
     this.model = config.model
     this.maxTokens = config.maxTokens ?? 8192
+    this.cacheTtl = config.cacheTtl ?? "5m"
     this.streamTimeoutMs = resolveAdapterStreamTimeouts({
       ...(config.streamFirstChunkMs !== undefined
         ? { streamFirstChunkMs: config.streamFirstChunkMs }
@@ -174,10 +176,12 @@ export class BedrockProviderAdapter implements LlmProvider {
   ): Promise<AsyncIterable<RawEvent>> {
     try {
       return await client.messages.create(
-        buildAnthropicMessagesRequest(this.model, this.maxTokens, input) as unknown as Record<
-          string,
-          unknown
-        >,
+        buildAnthropicMessagesRequest(
+          this.model,
+          this.maxTokens,
+          input,
+          this.cacheTtl,
+        ) as unknown as Record<string, unknown>,
         input.signal ? { signal: input.signal } : undefined,
       )
     } catch (e) {

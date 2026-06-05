@@ -1,0 +1,68 @@
+id: ipynb-cell-read
+title: read renders .ipynb cell-by-cell, base64 image outputs stripped (ADR-0481)
+section: 2
+subsystem: 도구 — read (notebook-aware cell render)
+order: 481
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:cli]
+depends_on: [read-write-edit]
+config_refs:
+  env: ["QUANTA_IPYNB_OUTPUTS"]
+purpose: |
+  `read` treats a `.ipynb` as opaque UTF-8 today: it line-numbers the raw
+  nbformat JSON — array-of-strings `source`, `execution_count`/`id`/`metadata`
+  machinery, and (the expensive part) `outputs[]` carrying base64-encoded
+  PNG/JPEG image payloads. A notebook with a few plots is tens of thousands of
+  tokens of base64 noise the model never wants.
+
+  This makes `read` notebook-aware: when the resolved path is `.ipynb` it routes
+  the already-read text through a PURE `renderNotebook` (no new port) that parses
+  `cells[]` and emits each cell's source line-numbered (`<n>\t<line>`, same
+  convention as a raw read), tagged with a stable cell index + type
+  (`[cell 3 · code]`). Textual outputs (stream / text/plain / error traceback)
+  are appended capped at 2000 chars/output; every `image/*` output is replaced
+  by a `«image output: image/png, N bytes elided»` placeholder — the base64 is
+  NEVER emitted (byte length is ESTIMATED, never decoded ⇒ O(1), DoS-safe).
+
+  Auto-applies for `.ipynb` ONLY. The `isNotebook(path)` extension gate is the
+  sole diverter: every other extension short-circuits and returns the raw text
+  UNCHANGED, so all non-notebook reads are byte-identical to the pre-ADR path.
+  A malformed / truncated / non-nbformat `.ipynb` ⇒ `renderNotebook` returns
+  `null` and `read` falls back to the raw text (still readable as JSON) — NO
+  throw. Matches Claude Code / Cursor / Codex notebook readers.
+evidence:
+  code:
+    - src/tool/read/ipynb.ts
+    - src/tool/read/index.ts
+    - src/shared/runtime-config.ts
+  adrs: [481]
+  tests:
+    unit:
+      - tests/unit/ipynb-cell-read-render-hellgate.test.ts
+      - tests/unit/ipynb-cell-read-pipeline-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_IPYNB_OUTPUTS
+    where: src/shared/runtime-config.ts
+    default: "on"
+    purpose: |
+      DEFAULT-ON (the only default-true knob). Toggles ONLY whether a code
+      cell's TEXTUAL outputs are appended. Set to 0/false/off to render cell
+      SOURCE only. Cell-source rendering and base64 image-blob stripping are
+      UNCONDITIONAL (never a knob). Has NO effect on non-`.ipynb` reads.
+deliberate_hold: null
+notes: |
+  Default-ON is justified: a `.ipynb` read is currently BROKEN/wasteful (raw
+  base64-laden JSON), so the safe default is the fixed render, not the broken
+  one. The change is scoped to one extension via the `isNotebook` gate ⇒
+  byte-identity preserved for everything else. `read` stays a single BASE tool
+  (no manifest row, no new tool, no surface-drift). Phase 2 (deferred): a
+  `cell:<n>` selector to pair with the deferred `NotebookEdit` tool's cell
+  addressing — the index-tagged render already makes a cell addressable by eye.

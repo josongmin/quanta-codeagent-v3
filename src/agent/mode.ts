@@ -167,6 +167,10 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   lsp_document_symbol: null,
   lsp_workspace_symbol: null,
   lsp_rename_preview: null,
+  // jun-6 wave-2 — call-hierarchy navigation. Read-only LSP queries (no edit),
+  // so plan-mode safe (null).
+  lsp_incoming_calls: null,
+  lsp_outgoing_calls: null,
   git_status: null,
   git_log: null,
   git_diff: null,
@@ -291,6 +295,12 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   gh_pr_comment: "git_mutating",
   gh_pr_create: "git_mutating",
   gh_pr_auto_merge: "git_mutating",
+  // jun-6 wave-2 gh write surfaces — `gh_pr_edit_labels` mutates PR labels via
+  // `gh`; `gh_pr_resolve_thread` resolves a review thread via the GraphQL API
+  // (gitRunner-gated). Both are remote VCS writes ⇒ same `git_mutating`
+  // category, plan-mode blocked by intent.
+  gh_pr_edit_labels: "git_mutating",
+  gh_pr_resolve_thread: "git_mutating",
   // Memory layer (ADR-0135). `memory_search` is a read-only retrieval over the
   // durable store; `memory_write` / `memory_update` mutate it. Plan-mode
   // forbids writes — plan PROPOSES recall facts; it does not commit them.

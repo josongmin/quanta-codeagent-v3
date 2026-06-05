@@ -100,15 +100,34 @@ import { errMessage, logger, runtimeConfig } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import {
   buildDefaultTools,
+  createTmuxAdapter,
   type DefaultToolPorts,
   openAiImagePort,
   pollDeferredTool,
+  type TmuxExec,
   type Tool,
   ToolRegistry,
 } from "@/tool"
 import { DefaultDeferredResultRegistry } from "@/tool/deferred/default-registry"
 import { buildMcpConnectorDiscoveryPort } from "./mcp-connector-wire"
 import { buildTmuxPtyBackend } from "./pty-backend"
+
+/** Hermetic test seams for the composition root (mirrors the H7 `seams?`
+ *  precedent on {@link AssembleRequest}). Absent ⇒ every wire uses its REAL
+ *  composition-layer backend, so a caller that passes no seams (production +
+ *  every existing test) gets a byte-identical `AgentConfig.base`. The shape is
+ *  presence-only; the builders only ever consult a field when its gate is ALSO
+ *  on, so an injected seam can never WIDEN the tool menu past what the knob
+ *  already enabled — it only swaps the leaf effect (e.g. the `tmux` subprocess)
+ *  for a deterministic fake. */
+export interface CompositionSeams {
+  /** N6 — replace the real `tmux` subprocess runner ({@link bunTmuxExec}) at the
+   *  LEAF of the pty backend. Consulted ONLY when `QUANTA_PTY_ATTACH=1` already
+   *  registered the 6 `pty_*` tools; the SAME production `createTmuxAdapter`
+   *  (allow-prefix jail + `--` flag-injection guard) wraps it, so an e2e drives
+   *  the entire composition + dispatch + permission path against a fake tmux. */
+  ptyExec?: TmuxExec
+}
 
 /** ADR-0303 — thrown by {@link buildBaseFromArgs} when no API key resolves for
  *  the selected provider. The host launcher composition layer must NOT own
@@ -538,6 +557,22 @@ export const installCommandHooksIntoBase = (
   })
 }
 
+/** N6 — resolve the spread-ready `ptySession` slot (`{}` when the knob is OFF
+ *  so the tool menu stays byte-identical). When ON, the leaf `tmux` runner is
+ *  the real `bunTmuxExec` UNLESS a hermetic `seams.ptyExec` is injected, in
+ *  which case the SAME production `createTmuxAdapter` (allow-prefix jail + `--`
+ *  flag guard) wraps the fake — so an e2e drives the real adapter against a fake
+ *  tmux. Extracted so the nested choice does NOT add to `buildGatedToolPorts`'s
+ *  cognitive complexity. */
+const resolvePtySessionSlot = (
+  ptyAttach: boolean,
+  seams: CompositionSeams | undefined,
+): { ptySession: NonNullable<DefaultToolPorts["ptySession"]> } | Record<string, never> => {
+  if (!ptyAttach) return {}
+  const exec = seams?.ptyExec
+  return { ptySession: exec !== undefined ? createTmuxAdapter({ exec }) : buildTmuxPtyBackend() }
+}
+
 /**
  * Round-3 composition-root activation — resolve the gated `DefaultToolPorts`
  * slots whose tool(s) round-2 found are deferred behind a `QUANTA_*` knob. Each
@@ -554,7 +589,10 @@ export const installCommandHooksIntoBase = (
  * cap. Construction of every adapter is IO-free — no spawn/fetch happens until a
  * tool actually dispatches.
  */
-const buildGatedToolPorts = (env: NodeJS.ProcessEnv): DefaultToolPorts => {
+const buildGatedToolPorts = (
+  env: NodeJS.ProcessEnv,
+  seams?: CompositionSeams,
+): DefaultToolPorts => {
   const cfg = runtimeConfig()
   return {
     // ADR-0464 — gated structured-apply tool. Default-OFF: tool menu is
@@ -618,8 +656,9 @@ const buildGatedToolPorts = (env: NodeJS.ProcessEnv): DefaultToolPorts => {
     // tool menu byte-identical unless QUANTA_PTY_ATTACH === "1". The tmux backend
     // (`Bun.spawn(["tmux", …])`, argv-array, no shell) is constructed at the
     // composition layer (`pty-backend.ts`) and injected as the `PtySessionPort`;
-    // construction is IO-free (no spawn until a pty tool dispatches).
-    ...(cfg.ptyAttach ? { ptySession: buildTmuxPtyBackend() } : {}),
+    // construction is IO-free (no spawn until a pty tool dispatches). Resolved by
+    // the extracted helper so the (knob × seam) choice adds no complexity here.
+    ...resolvePtySessionSlot(cfg.ptyAttach, seams),
   }
 }
 
@@ -628,12 +667,15 @@ const buildBaseRegistry = (args: {
   readonly automationSlot: AutomationEngineSlot | null
   readonly sandboxProfile: ReturnType<typeof resolveSandboxProfileFromEnv>
   readonly searchWire: ReturnType<typeof buildSearchPipelineFromEnv>
+  /** Required key, value MAY be `undefined` (no conditional spread at the call
+   *  site ⇒ no added branch). Absent ⇒ every gated port uses its real backend. */
+  readonly seams: CompositionSeams | undefined
 }): ToolRegistry =>
   new ToolRegistry([
     ...buildDefaultTools({
       ...(args.automationSlot !== null ? { automationEngine: args.automationSlot.engine } : {}),
       ...(args.sandboxProfile !== undefined ? { sandboxProfile: args.sandboxProfile } : {}),
-      ...buildGatedToolPorts(args.env),
+      ...buildGatedToolPorts(args.env, args.seams),
     }),
     ...(args.searchWire !== null ? [args.searchWire.tool] : []),
     // ADR-0287 — async-tools `poll_deferred`. Default-OFF: registered ONLY when
@@ -1035,6 +1077,12 @@ export const buildBaseFromArgs = (
    *  threaded per-process instead of via the module singleton. Absent (older
    *  SDK seams / tests) ⇒ no disposer collected (behavior unchanged). */
   disposers?: Array<() => void>,
+  /** Hermetic test seams (mirrors the H7 `seams?` precedent). Absent in
+   *  production ⇒ every wire uses its REAL composition-layer backend, so the
+   *  returned `base` is byte-identical for every existing caller. A test passes
+   *  e.g. `{ ptyExec }` to drive the real pty composition + dispatch + permission
+   *  path against a fake tmux at the leaf. */
+  seams?: CompositionSeams,
 ): AssembleRequest["base"] => {
   // QUANTA_PROVIDER drives the factory pick; an explicit `--provider` flag must
   // still win, so seed it into the env view the factory reads.
@@ -1143,7 +1191,7 @@ export const buildBaseFromArgs = (
     // DIP: route through the factory (no app-specific ports at this baseline
     // entry — modes/CLI wire their own fs/diagnostics ports). Behavior is
     // byte-identical to the `defaultTools` singleton.
-    registry: buildBaseRegistry({ env, automationSlot, sandboxProfile, searchWire }),
+    registry: buildBaseRegistry({ env, automationSlot, sandboxProfile, searchWire, seams }),
     stream,
     // GAP2 — when a named permission profile is selected the live permission
     // mode is DERIVED from its approval pillar; absent ⇒ the historical

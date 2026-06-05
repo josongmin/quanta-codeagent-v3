@@ -2001,6 +2001,17 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
     mentions: readonly import("@/agent/mention-injection").ParsedMention[],
     opts?: { readonly turnId?: string },
   ) => Promise<import("@/agent/plugin-activation-handler").AggregatedActivation>
+  /** jun-6 (RFC jun-6-ai-session-title) — fire-and-forget AI session titler.
+   *  Duck-typed (NO `@/runner` import) so `@/agent` stays free of the
+   *  composition root. When set (the root built it because
+   *  `QUANTA_SESSION_AUTO_TITLE` is on AND `QUANTA_SESSION_TITLE_MODEL` resolved
+   *  a cheap `LLMPort`), `runSessionStartSequence` calls
+   *  `maybeTitle(sessionId, firstPrompt)` ONCE on the first turn AFTER the
+   *  `session_start` emit, when the first prompt is non-empty. The call returns
+   *  IMMEDIATELY (the work runs on a detached promise the turn never awaits; all
+   *  failures swallowed; a human rename is never clobbered). Absent ⇒ the branch
+   *  is dead (byte-identical default-OFF, RFC §1.2). */
+  autoTitlePort?: { maybeTitle(sessionId: string, firstPrompt: string): void }
 }
 
 // ─────────────────────────────────────────────────────────────────────────

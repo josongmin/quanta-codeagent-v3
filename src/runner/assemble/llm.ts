@@ -1,5 +1,6 @@
 import { createAutoClassifierPort, RetryingLLM } from "@/agent"
 import {
+  type CreateLLMOptions,
   type CreateMulticloudOptions,
   type CredentialSource,
   createCredentialSource,
@@ -13,6 +14,7 @@ import {
   type ProviderEnv,
   pickProvider as pickProviderFactory,
   resolveProvider,
+  resolveVendorApiKey,
   type ShellExecResult,
   withLiveUsage,
 } from "@/llm"
@@ -69,6 +71,24 @@ export interface LlmAssembleInput {
  *  provider key throws (the surface aborts loudly). */
 export const buildLLMCore = (input: LlmAssembleInput): LLMPort =>
   createLLM(input.provider, { model: input.model }, input.env)
+
+/** jun-6 (RFC jun-6-byok-apikey-helper) — async BYOK variant of
+ *  {@link buildLLMCore}. The factory stays SYNCHRONOUS; this seam `await`s the
+ *  single async pre-resolution step (`resolveVendorApiKey`) that may replace the
+ *  vendor env key with an H7 `apiKeyHelper` mint, then calls the sync
+ *  `createLLM` with the (possibly key-augmented) opts.
+ *
+ *  Default-OFF / byte-identity: `source === undefined` (the composition root
+ *  passes it only when `runtimeConfig().apiKeyHelperLegacyVendor` is on AND an
+ *  H7 `CredentialSource` was built) ⇒ `resolveVendorApiKey` returns the same
+ *  opts ⇒ this is byte-identical to {@link buildLLMCore}. */
+export const buildLLMWithByokCore = async (
+  input: LlmAssembleInput & { source?: CredentialSource },
+): Promise<LLMPort> => {
+  const baseOpts: CreateLLMOptions = { model: input.model }
+  const opts = await resolveVendorApiKey(input.provider, baseOpts, input.source)
+  return createLLM(input.provider, opts, input.env)
+}
 
 /** Inputs to {@link composeLLMCore}. */
 export interface ComposeLlmInput {

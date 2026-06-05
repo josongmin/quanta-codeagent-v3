@@ -182,6 +182,45 @@ describe("DAG batch e2e — knob ON (gated runner)", () => {
     made.gate.markFailed("x", "cancelled")
     expect(await waiting).toBe("blocked")
   })
+
+  // ADV deadlock (liveness §5): a deep chain where the ROOT fails must resolve
+  // EVERY transitively-dependent waiter "blocked" in ONE flush — none may hang.
+  // This is the "all-blocked" adversarial graph: B→A, C→B, D→C, with A failing.
+  // A regression in the `blockedTasks` fixpoint (e.g. a single-hop-only check)
+  // would leave C/D parked forever while their pool slot is freed but never
+  // settled — a silent batch hang.
+  test("gate: a deep chain whose ROOT fails resolves ALL transitive waiters blocked (no hang)", async () => {
+    const made = createDagGate([node("A"), node("B", ["A"]), node("C", ["B"]), node("D", ["C"])])
+    expect(made.ok).toBe(true)
+    if (!made.ok) return
+    const g = made.gate
+    const waiters = Promise.all([g.awaitReady("B"), g.awaitReady("C"), g.awaitReady("D")])
+    g.markFailed("A") // root dies — the whole branch is dead
+    expect(await waiters).toEqual(["blocked", "blocked", "blocked"])
+  })
+
+  // ADV deadlock: a fan-in node whose deps complete OUT OF ORDER and where one
+  // dep is touched LATE must only resolve "ready" once EVERY dep is completed —
+  // never a premature ready (which would dispatch a child before its input).
+  test("gate: fan-in waiter resolves ready ONLY after the LAST dep completes (no premature dispatch)", async () => {
+    const made = createDagGate([
+      { id: "A", dependsOn: [], state: "completed" }, // already done at init
+      node("B"),
+      node("D", ["A", "B"]),
+    ])
+    expect(made.ok).toBe(true)
+    if (!made.ok) return
+    const g = made.gate
+    let outcome: string | undefined
+    void g.awaitReady("D").then((o) => {
+      outcome = o
+    })
+    await tick()
+    expect(outcome).toBeUndefined() // B not done ⇒ D must keep waiting
+    g.markComplete("B")
+    await tick()
+    expect(outcome).toBe("ready") // now BOTH deps complete ⇒ D releases
+  })
 })
 
 describe("DAG batch e2e — knob OFF (plain runner = byte-identical flat fan-out)", () => {

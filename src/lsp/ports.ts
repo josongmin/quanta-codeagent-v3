@@ -1,4 +1,12 @@
-import type { Diagnostic, Hover, Location, Pos, RenamePreview, SymbolInfo } from "./types"
+import type {
+  CallHierarchyEntry,
+  Diagnostic,
+  Hover,
+  Location,
+  Pos,
+  RenamePreview,
+  SymbolInfo,
+} from "./types"
 
 /** Provider-agnostic contract for a language-server client.
  *
@@ -36,5 +44,21 @@ export interface LspPort {
   /** Probe whether the symbol at `pos` is renameable; returns the suggested
    *  placeholder and selection range, or `null` when the server refuses. */
   prepareRename(filePath: string, pos: Pos): Promise<RenamePreview | null>
+  /** Callers of the symbol at `pos` (LSP `callHierarchy/incomingCalls`). Each
+   *  entry is one calling function plus the exact call-site ranges inside it.
+   *  `null` = server has no `callHierarchyProvider` / returned null. `[]` = no
+   *  callers (the symbol resolved but nothing calls it). */
+  incomingCalls(
+    filePath: string,
+    pos: Pos,
+    signal?: AbortSignal,
+  ): Promise<CallHierarchyEntry[] | null>
+  /** Callees invoked by the symbol at `pos` (`callHierarchy/outgoingCalls`).
+   *  `null` / `[]` carry the same meaning as {@link incomingCalls}. */
+  outgoingCalls(
+    filePath: string,
+    pos: Pos,
+    signal?: AbortSignal,
+  ): Promise<CallHierarchyEntry[] | null>
   stop(): Promise<void>
 }

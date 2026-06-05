@@ -116,6 +116,8 @@ const RULES: readonly Rule[] = [
       "apps/cli/idle-monitor.ts":
         "Surface idle-monitor reads idle-window envs at composition root; same posture as status-pills.ts.",
       "apps/cli/dream-cmd.ts": "CLI sub-command entry — same DI fallback posture as memory-cmd.ts.",
+      "apps/cli/doctor/default-probes.ts":
+        "Surface adapter (RFC jun-6-doctor-selfcheck §5) — the `/doctor` probe wiring legitimately reads `process.env` to REPORT environment health (BYOK key presence, dead-knob conditions); the pure check-registry leaf (registry.ts/render.ts) stays env-free and sees only the injected probe shape. Same surface-ambient posture as status-pills.ts.",
       "apps/cli/mcp-cmd.ts": "CLI sub-command entry — same DI fallback posture as login-cmd.ts.",
       "apps/cli/memory-cmd.ts": "CLI sub-command entry — same DI fallback posture as login-cmd.ts.",
       "apps/cli/repl.ts":

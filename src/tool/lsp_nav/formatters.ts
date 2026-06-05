@@ -1,5 +1,11 @@
 import { fileURLToPath } from "node:url"
-import type { NavHover, NavLocation, NavRenamePreview, NavSymbolInfo } from "./types"
+import type {
+  NavCallHierarchyEntry,
+  NavHover,
+  NavLocation,
+  NavRenamePreview,
+  NavSymbolInfo,
+} from "./types"
 
 /** Convert a `file://` URI to its OS path; non-`file:` URIs pass through. */
 const uriToPath = (uri: string): string => {
@@ -86,4 +92,35 @@ export const formatRenamePreview = (
   const start = oneBased(preview.range.start.line, preview.range.start.character)
   const end = oneBased(preview.range.end.line, preview.range.end.character)
   return `Renameable identifier '${preview.placeholder}' at ${path}:${line}:${col} (range ${start.line}:${start.col}..${end.line}:${end.col})`
+}
+
+/**
+ * Call hierarchy rendering (RFC jun-6). `direction` is `"incoming"` (callers)
+ * or `"outgoing"` (callees). Conventions match {@link formatLocations}:
+ *  - `null`  ⇒ server has no `callHierarchyProvider` ⇒ "not supported here".
+ *  - `[]`    ⇒ resolved cleanly, zero edges ⇒ "no callers"/"no callees".
+ *  - non-empty ⇒ header + one line per edge:
+ *      `<kind> <name> <path>:<line>:<col> · N call site(s) [l:c, …]`
+ *    where the call sites are the entry's `fromRanges` (the exact spots that
+ *    call — the "what breaks where" payload), rendered 1-based in order.
+ */
+export const formatCallHierarchy = (
+  direction: "incoming" | "outgoing",
+  entries: NavCallHierarchyEntry[] | null,
+): string => {
+  const label = direction === "incoming" ? "incoming calls" : "outgoing calls"
+  if (entries === null) return `${label}: not supported here`
+  const empty = direction === "incoming" ? "no callers" : "no callees"
+  if (entries.length === 0) return `${label}: ${empty}`
+  const header = `${label}: ${entries.length} result(s)`
+  const rows = entries.map((e) => {
+    const { line, col } = oneBased(e.selectionRange.start.line, e.selectionRange.start.character)
+    const sites = e.fromRanges.map((r) => {
+      const p = oneBased(r.start.line, r.start.character)
+      return `${p.line}:${p.col}`
+    })
+    const siteText = `${sites.length} call site(s)${sites.length > 0 ? ` [${sites.join(", ")}]` : ""}`
+    return `${e.kind} ${e.name} ${uriToPath(e.uri)}:${line}:${col} · ${siteText}`
+  })
+  return [header, ...rows].join("\n")
 }

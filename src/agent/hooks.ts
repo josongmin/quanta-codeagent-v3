@@ -1,5 +1,5 @@
 import type { StructuredLogger } from "@/observability"
-import { errMessage, runtimeConfig } from "@/shared"
+import { errMessage, type HITLTier, runtimeConfig } from "@/shared"
 import type { RecoveryProvenance } from "./recovery-reason"
 import { matchTool, type ToolMatcher } from "./tool-matchers"
 
@@ -179,6 +179,38 @@ export type HookEvent =
       subagentId: string
       result: { ok: boolean; finalText: string; turns: number }
     }
+  // jun-6 — NEW. Fired by the admissibility gate IMMEDIATELY BEFORE it consults
+  // the built-in policy stack (the new dispatch "step 3b", BEFORE step 4
+  // mode-posture / step 5 earlyHardDeny — see dispatch.ts ordering). Unlike
+  // `pre_tool_use` (step 11, the LAST gate, AFTER the decision, which rewrites
+  // INPUT and denies), this event lets an operator-authored handler
+  // PROGRAMMATICALLY SUPPLY the allow/deny/ask decision the policy stack would
+  // otherwise compute. `input` is READ-ONLY here (NOT rewritten — that is
+  // `pre_tool_use`'s job). `tier` is the HITL tier the gate has already inferred
+  // (so a handler can reason "only gate always-confirm calls"); `cwd` is for
+  // path-scoped policies.
+  //
+  // A handler may return `{ permission: "allow" | "deny" | "ask" }` (or a
+  // `{ permission: { outcome, reason? } }` shape) to feed the gate's existing
+  // admit / terminal-deny / reviewer arms. Returning NOTHING ⇒ no decision ⇒
+  // the gate falls through to the existing stack (byte-identical). FIRST
+  // decision wins (registration order), mirroring `pre_tool_use`'s
+  // first-deny-wins.
+  //
+  // SECURITY (the HARD_DENY floor): a hook `allow` MUST NOT route around the
+  // denylist. The gate adds this event to the SAME `earlyHardDeny`-pull-ahead
+  // trigger as rules/reviewer/patternStore — when a handler is registered,
+  // HARD_DENY is evaluated FIRST and a HARD_DENY call is terminal BEFORE the
+  // hook's `allow` is consulted. The hook can only TIGHTEN (deny/ask), never
+  // escalate beyond policy. A throwing / invalid handler is fail-closed (no
+  // decision ⇒ fall through to the stack — the hook never weakens the gate).
+  | {
+      type: "permission_request"
+      name: string
+      input: unknown
+      tier: HITLTier
+      cwd: string
+    }
   | { type: "turn_start"; turn: number }
   // S5 hook hardening — NEW. Fired by `loop.ts` ONCE per run, immediately
   // after `session_start`, when there is a trailing user-prompt message to
@@ -224,6 +256,31 @@ export interface HookUpdatedInput {
  *  (intentional) clear; consumer treats it as the new prompt text. */
 export interface HookUpdatedPrompt {
   updatedPrompt: string
+}
+
+/** jun-6 — the three-valued decision a `permission_request` handler may supply
+ *  to the admissibility gate BEFORE the policy stack runs. Mirrors the existing
+ *  `PermissionInspectionOutcome` vocabulary (`@/permission` inspector:
+ *  `"allow" | "deny" | "ask"`) so the gate routes it into its EXISTING arms:
+ *  `allow` ⇒ short-circuit admit (subject to the HARD_DENY floor — see the
+ *  `permission_request` event doc), `deny` ⇒ the gate's terminal `deny()`
+ *  helper, `ask` ⇒ the reviewer / `onConfirm` path. `reason` is carried ONLY on
+ *  `deny` (a short human-readable one-liner — MUST NOT include tool input). */
+export type HookPermissionDecision =
+  | { outcome: "allow" }
+  | { outcome: "deny"; reason: string }
+  | { outcome: "ask" }
+
+/** jun-6 — the raw response shape a `permission_request` handler returns. The
+ *  handler may return the terse `{ permission: "allow" | "deny" | "ask" }`
+ *  string form (with an optional sibling `reason` for `deny`), OR the explicit
+ *  `{ permission: { outcome, reason? } }` object form. Both normalize to a
+ *  {@link HookPermissionDecision} via {@link normalizePermissionDecision}. */
+export interface HookPermissionResponse {
+  permission: "allow" | "deny" | "ask" | HookPermissionDecision
+  /** Optional deny reason for the terse string form (`{ permission: "deny",
+   *  reason: "…" }`). Ignored for the object form (which carries its own). */
+  reason?: string
 }
 
 /** ADR-0133 — text a handler asks the loop to fold into the NEXT LLM turn's
@@ -305,6 +362,13 @@ export interface HookEmitResult {
    *  when no handler timed out; field is OMITTED in the no-timeout case so
    *  the legacy `{deny, updatedInput?}` shape is byte-identical. */
   timeoutCount?: number
+  /** jun-6 — present (key included) ONLY when a `permission_request` handler
+   *  supplied a decision. The FIRST decision wins (registration order); later
+   *  handlers do not override it. OMITTED when no handler set it
+   *  (presence-not-truthiness, same discipline as `promptHook` / `abort`) so a
+   *  result with no decision is byte-identical to today and the gate falls
+   *  through to the policy stack. */
+  permissionDecision?: HookPermissionDecision
 }
 
 const isDeny = (v: unknown): v is HookDeny =>
@@ -318,6 +382,122 @@ const isUpdatedPrompt = (v: unknown): v is HookUpdatedPrompt =>
   v !== null &&
   "updatedPrompt" in v &&
   typeof (v as { updatedPrompt: unknown }).updatedPrompt === "string"
+
+/** jun-6 — normalize a raw `permission_request` handler return into a typed
+ *  {@link HookPermissionDecision}, or `null` when the return is not a valid
+ *  decision (a no-op handler, garbage, or an out-of-vocabulary outcome). This
+ *  is the FAIL-CLOSED boundary: anything we cannot recognize as a clean
+ *  `allow`/`deny`/`ask` is treated as "no decision" ⇒ the gate falls through to
+ *  the policy stack rather than honoring a malformed (potentially privilege-
+ *  escalating) response. Pure — no I/O, no clock, no env.
+ *
+ *  Accepts BOTH the terse string form `{ permission: "allow" }` (with optional
+ *  sibling `reason` for deny) and the object form
+ *  `{ permission: { outcome, reason? } }`. A `deny` with no reason gets a
+ *  stable default reason (never an empty string — a downstream audit row must
+ *  always carry SOME reason). */
+export const normalizePermissionDecision = (v: unknown): HookPermissionDecision | null => {
+  if (typeof v !== "object" || v === null || !("permission" in v)) return null
+  const raw = (v as { permission: unknown }).permission
+  // Object form: { permission: { outcome, reason? } } — the reason rides inside.
+  if (typeof raw === "object" && raw !== null) {
+    return decisionFromOutcome((raw as { outcome?: unknown }).outcome, raw)
+  }
+  // Terse string form: { permission: "allow" | "deny" | "ask", reason? } — the
+  // deny reason (if any) is a SIBLING of `permission` on the outer object.
+  return decisionFromOutcome(raw, v)
+}
+
+/** jun-6 — shared tail of {@link normalizePermissionDecision}: map an `outcome`
+ *  literal to a typed decision, pulling a `deny` reason from `reasonHost`
+ *  (`.reason`). Unknown outcomes ⇒ `null` (fail-closed). Pure. */
+const decisionFromOutcome = (
+  outcome: unknown,
+  reasonHost: object,
+): HookPermissionDecision | null => {
+  if (outcome === "allow") return { outcome: "allow" }
+  if (outcome === "ask") return { outcome: "ask" }
+  if (outcome === "deny") {
+    const r = (reasonHost as { reason?: unknown }).reason
+    return {
+      outcome: "deny",
+      reason: typeof r === "string" && r.length > 0 ? r : DEFAULT_HOOK_DENY_REASON,
+    }
+  }
+  return null
+}
+
+/** jun-6 — default reason attached to a `permission_request` `deny` decision
+ *  when the handler supplied none. A deny must always carry SOME reason for the
+ *  audit trail / the model's recovery context. */
+export const DEFAULT_HOOK_DENY_REASON = "denied by permission_request hook"
+
+/** jun-6 — the routing instruction the admissibility gate (dispatch step 3b)
+ *  derives from a `permission_request` hook decision. PURE: the gate calls
+ *  {@link routePermissionHookVerdict} with the (already-emitted) decision + the
+ *  HARD_DENY fact, and acts on the returned arm. This keeps the hot-path edit
+ *  to a single switch and isolates the SECURITY-critical HARD_DENY-precedence
+ *  logic in one tested place.
+ *
+ *  - `"fallthrough"` ⇒ no decision (or a HARD_DENY `allow` that was overruled —
+ *    see below): the gate proceeds to the existing policy stack exactly as
+ *    today (byte-identical).
+ *  - `"admit"` ⇒ short-circuit admit: the gate skips steps 4–10. (Only reachable
+ *    when NOT HARD_DENY — the helper downgrades a HARD_DENY `allow` to a
+ *    `"deny"` arm so the denylist always wins.)
+ *  - `"deny"` ⇒ terminal deny via the gate's `deny()` helper, carrying `reason`.
+ *  - `"ask"` ⇒ force the reviewer / `onConfirm` path regardless of policy. */
+export type PermissionHookRouting =
+  | { arm: "fallthrough" }
+  | { arm: "admit" }
+  | { arm: "deny"; reason: string }
+  | { arm: "ask" }
+
+/** jun-6 — map a `permission_request` decision onto a gate arm, enforcing the
+ *  HARD_DENY security floor. PURE — no I/O / clock / env.
+ *
+ *  SECURITY (the §4.4 floor): a hook `allow` MUST NOT route around HARD_DENY.
+ *  When `isHardDeny` is true, an `allow` decision is REFUSED — it does NOT admit.
+ *  We return `"deny"` (with the HARD_DENY reason) so the denylist wins
+ *  fail-closed even if, somehow, the gate reached this helper without the
+ *  `earlyHardDeny` pull-ahead having already terminated the call. This is
+ *  belt-and-braces: the gate ALSO pulls `earlyHardDeny` ahead when a handler is
+ *  registered (so HARD_DENY is normally terminal BEFORE this helper runs), but
+ *  the helper independently refuses to admit a HARD_DENY call so the floor holds
+ *  even under a wiring mistake. `deny`/`ask` are TIGHTENING — they are honored
+ *  regardless of HARD_DENY (they never weaken the gate). No decision ⇒
+ *  `"fallthrough"`. */
+export const routePermissionHookVerdict = (
+  decision: HookPermissionDecision | null | undefined,
+  isHardDeny: boolean,
+  hardDenyReason?: string,
+): PermissionHookRouting => {
+  if (decision === null || decision === undefined) return { arm: "fallthrough" }
+  switch (decision.outcome) {
+    case "allow":
+      // The security floor: an `allow` can never override HARD_DENY. A
+      // HARD_DENY call is forced into a terminal deny; only a non-HARD_DENY
+      // call is admitted.
+      if (isHardDeny) {
+        return {
+          arm: "deny",
+          reason:
+            hardDenyReason !== undefined && hardDenyReason.length > 0
+              ? hardDenyReason
+              : "HARD_DENY: hook allow cannot override the denylist",
+        }
+      }
+      return { arm: "admit" }
+    case "deny":
+      // Tightening — honored even on a HARD_DENY call (still a deny).
+      return { arm: "deny", reason: decision.reason }
+    case "ask":
+      // Tightening — force the human/reviewer path. On a HARD_DENY call this is
+      // moot (earlyHardDeny already terminated it); honoring `ask` here never
+      // weakens the gate.
+      return { arm: "ask" }
+  }
+}
 
 const isAbort = (v: unknown): v is HookAbort => {
   if (typeof v !== "object" || v === null) return false
@@ -498,6 +678,8 @@ export class HookBus {
     if (effectiveEvent.type === "pre_tool_use") return this.emitPreToolUse(effectiveEvent, list)
     if (effectiveEvent.type === "user_prompt_submit")
       return this.emitUserPromptSubmit(effectiveEvent, list)
+    if (effectiveEvent.type === "permission_request")
+      return this.emitPermissionRequest(effectiveEvent, list)
     return this.emitGeneric(effectiveEvent, list)
   }
 
@@ -593,6 +775,47 @@ export class HookBus {
     }
     const out: HookEmitResult = { deny: denied }
     if (mutated) out.updatedPrompt = currentPrompt
+    this.materializeAccumulator(out, acc)
+    if (timeoutTracker.count > 0) out.timeoutCount = timeoutTracker.count
+    return out
+  }
+
+  /** jun-6 — composition loop for `permission_request`. Mirrors
+   *  {@link emitPreToolUse}'s first-wins discipline: iterate matched handlers
+   *  (the event carries a `name`, so a registered `matcher` gates dispatch the
+   *  same way it does for `pre_tool_use`), and the FIRST handler that returns a
+   *  valid `{ permission }` decision wins — later handlers do NOT override it.
+   *  A handler that returns nothing (or a malformed / out-of-vocabulary
+   *  response) supplies NO decision and the loop continues; if NO handler
+   *  decides, `permissionDecision` is OMITTED ⇒ the gate falls through to the
+   *  policy stack (byte-identical, fail-closed). `input` is read-only here (NOT
+   *  rewritten). `abort` / `promptHook` / `toolOverride` / per-handler timeout /
+   *  caps apply identically (reuse the same accumulator + `runHandler`). */
+  private async emitPermissionRequest(
+    event: HookEventOf<"permission_request">,
+    list: StoredHandler[],
+  ): Promise<HookEmitResult> {
+    let decision: HookPermissionDecision | null = null
+    const acc = this.makeAccumulator()
+    const timeoutTracker = { count: 0 }
+    for (const stored of list) {
+      if (!matchTool(stored.matcher, event.name)) continue
+      const result = await this.runHandler(stored, event, timeoutTracker)
+      // First valid decision wins; a malformed / no-op result is fail-closed
+      // (normalizePermissionDecision returns null ⇒ keep falling through).
+      if (decision === null) {
+        const d = normalizePermissionDecision(result)
+        if (d !== null) decision = d
+      }
+      if (isAbort(result) && acc.abort === undefined) {
+        acc.abort = { reason: result.abort.reason }
+      }
+      this.accumulatePromptHook(acc, result, event.type)
+      this.accumulateToolOverride(acc, result)
+      if (acc.abort !== undefined) break
+    }
+    const out: HookEmitResult = { deny: null }
+    if (decision !== null) out.permissionDecision = decision
     this.materializeAccumulator(out, acc)
     if (timeoutTracker.count > 0) out.timeoutCount = timeoutTracker.count
     return out

@@ -13,6 +13,8 @@ import { writeFile } from "@/storage"
 import {
   type DiagnosticItem,
   deriveProvenance,
+  type InterruptRouter,
+  makeInterruptRouter,
   type ToolContext,
   type ToolResult,
   type WorkingStateHandle,
@@ -588,6 +590,35 @@ const executeWithStuckTracking = async (
   }
 }
 
+/** jun-6 (RFC jun-6-tool-interrupt-behavior) — build the per-call interrupt
+ *  router for a `block` tool when the knob is ON. Returns `undefined` when the
+ *  knob is off OR the tool's declared `interruptBehavior()` is `"cancel"` (the
+ *  common case) ⇒ the caller threads the raw signal + no seam (byte-identical).
+ *  The watchdog scheduler is the real `setTimeout`/`clearTimeout` and the clock
+ *  is `Date.now` (the composition root for the production seam); the cap comes
+ *  from `runtimeConfig().criticalSectionMaxMs`. */
+const maybeBuildInterruptRouter = (
+  config: AgentConfig,
+  toolName: string,
+): { router: InterruptRouter; signal: AbortSignal } | undefined => {
+  if (!runtimeConfig().toolInterruptBlock) return undefined
+  if (config.registry.interruptBehavior(toolName) !== "block") return undefined
+  const derived = new AbortController()
+  const router = makeInterruptRouter({
+    source: config.signal,
+    derived,
+    now: Date.now,
+    maxMs: runtimeConfig().criticalSectionMaxMs,
+    scheduler: {
+      schedule(ms, cb) {
+        const id = setTimeout(cb, ms)
+        return () => clearTimeout(id)
+      },
+    },
+  })
+  return { router, signal: derived.signal }
+}
+
 const buildRequestPlanExit = (
   config: AgentConfig,
   collabMode: ReturnType<typeof resolveCollaborationMode>,
@@ -620,13 +651,25 @@ const buildToolContext = (args: {
   workingState: WorkingStateHandle | undefined
   collabMode: ReturnType<typeof resolveCollaborationMode>
   toolCallId: string
+  /** jun-6 tool-interrupt — when the dispatch seam built an interrupt router for
+   *  a `block` tool (knob ON), it threads the derived suppressible signal + the
+   *  critical-section seam here. ABSENT ⇒ the ctx uses the raw `config.signal`
+   *  and carries NO `criticalSection` (byte-identical: a `block` tool behaves
+   *  like `cancel`). */
+  interrupt?: { signal: AbortSignal; criticalSection: ToolContext["criticalSection"] }
 }): ToolContext => {
-  const { config, workingState, collabMode, toolCallId } = args
+  const { config, workingState, collabMode, toolCallId, interrupt } = args
   const requestPlanExit = buildRequestPlanExit(config, collabMode)
   const reviewerAgent = materializeReviewerAgent(config)
   return {
     cwd: config.cwd,
-    signal: config.signal,
+    // jun-6 — a `block` tool (knob ON) runs over the DERIVED suppressible signal
+    // so its critical section can withhold an in-flight ESC; otherwise the raw
+    // upstream signal (byte-identical legacy).
+    signal: interrupt?.signal ?? config.signal,
+    ...(interrupt?.criticalSection !== undefined
+      ? { criticalSection: interrupt.criticalSection }
+      : {}),
     gitWriteGuard: gitWriteProtectReason,
     ...(config.depth !== undefined ? { depth: config.depth } : {}),
     // ADR-0416 sibling-identity fix — surface the STABLE per-agent mailbox
@@ -794,11 +837,26 @@ const dispatchToolInner = async (
   // level of the permission config itself, so this is intentional (the model
   // and untrusted content cannot reach it). See hooks.ts `emit` security note.
   const effectiveCall: ToolUseBlock = rewritten ? { ...call, input: rewritten.value } : call
+  // jun-6 (RFC jun-6-tool-interrupt-behavior) — for a `block` tool with the knob
+  // ON, run over a derived suppressible signal + a critical-section seam so the
+  // tool's atomic FS-write window finishes whole before a withheld ESC lands.
+  // ABSENT (knob off / `cancel` tool) ⇒ ctx threads the raw signal, no seam
+  // (byte-identical). The router is disposed in the `finally` below so the
+  // upstream listener + any armed watchdog are always released.
+  const interruptHandle = maybeBuildInterruptRouter(config, effectiveCall.name)
   const ctx = buildToolContext({
     config,
     workingState,
     collabMode: collab,
     toolCallId: effectiveCall.id,
+    ...(interruptHandle !== undefined
+      ? {
+          interrupt: {
+            signal: interruptHandle.signal,
+            criticalSection: interruptHandle.router.seam,
+          },
+        }
+      : {}),
   })
   // ADR-0062 rule #3 — cap-as-instruction enforcement (DEFAULT-OFF).
   // Before executing the tool, check whether the model IGNORED the last
@@ -814,7 +872,14 @@ const dispatchToolInner = async (
   // when `config.autoBackground?.detector` is absent (optional chain short-
   // circuits before allocation; finally runs unconditionally so a throwing
   // `execute()` cannot leak a tracker entry).
-  const out = await executeWithStuckTracking(effectiveCall, config, ctx, onProgress)
+  let out: DispatchResult
+  try {
+    out = await executeWithStuckTracking(effectiveCall, config, ctx, onProgress)
+  } finally {
+    // Always release the interrupt router's upstream listener + watchdog,
+    // whether execute settled or threw. Idempotent + no-op when absent.
+    interruptHandle?.router.dispose()
+  }
   observeEffortClassifierToolFailure(config.effortClassifier, effectiveCall.name, out)
   // When a reminder was generated, prepend it as a `<system-reminder>` block
   // in the tool result output so the model reads the enforcement hint alongside

@@ -2533,6 +2533,16 @@ const runSessionStartSequence = async (args: {
   args.cfg.stream.emit({ type: "session_start" })
   if (args.cfg.hooks)
     await args.cfg.hooks.emit({ type: "session_start", sessionId: args.sessionId })
+  // jun-6 (RFC jun-6-ai-session-title) — fire-and-forget AI title on the FIRST
+  // turn. Detached by contract (`maybeTitle` returns void; the titler swallows
+  // all failures and never clobbers a human rename). Only fires when the first
+  // user prompt is non-empty; absent port ⇒ dead branch (byte-identical).
+  if (args.cfg.autoTitlePort !== undefined) {
+    const firstPrompt = latestUserTextFromWm(args.wm)
+    if (firstPrompt !== undefined && firstPrompt.trim() !== "") {
+      args.cfg.autoTitlePort.maybeTitle(args.sessionId, firstPrompt)
+    }
+  }
   if (args.cfg.hooks !== undefined) {
     const denied = await emitUserPromptSubmitHook(args.cfg, args.wm, args.sessionId)
     if (denied !== null) return "aborted"

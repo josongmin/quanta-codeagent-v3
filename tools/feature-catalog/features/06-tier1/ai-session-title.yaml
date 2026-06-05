@@ -1,0 +1,75 @@
+id: ai-session-title
+title: createAutoTitlePort + generateSessionTitle — opt-in cheap-model first-turn session titler
+section: 6
+subsystem: runner/session-ops — auto-title
+order: 466
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: ["QUANTA_SESSION_AUTO_TITLE", "QUANTA_SESSION_TITLE_MODEL"]
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "default-off"]
+depends_on: []
+purpose: |
+  Opt-in, cheap-model, fire-and-forget session titler (RFC
+  `docs/plans/jun-6-ai-session-title.md`). On the FIRST turn only, an opted-in
+  composition root kicks `createAutoTitlePort(...).maybeTitle(sessionId,
+  firstPrompt)` off WITHOUT awaiting it. A cheap injected `LLMPort` (pinned to
+  `QUANTA_SESSION_TITLE_MODEL`, mirroring the `QUANTA_COMPACT_MODEL` precedent)
+  summarizes the first user prompt into a ≤6-word title, sanitized (whitespace
+  collapsed, wrapping quotes dropped, clamped to maxWords + MAX_TITLE_CHARS),
+  and written to `SessionMeta.title` via the injected `rename` adapter over
+  `renameSession`.
+
+  Three hard invariants, locked by the hellgate battery:
+  (1) Default-OFF — the port is built ONLY when `QUANTA_SESSION_AUTO_TITLE` is
+      set AND a cheap `QUANTA_SESSION_TITLE_MODEL` port exists; absent ⇒ the
+      loop branch is dead ⇒ byte-identical, no extra LLM call, no title write.
+  (2) Never blocks — `maybeTitle` returns `void` synchronously; the real work
+      runs on a DETACHED promise the turn never awaits. A slow / hung call is
+      abandoned via the injected-clock `timeoutMs`; every failure (LLM throw,
+      timeout, rename throw, read throw) is caught and swallowed.
+  (3) Don't-clobber — before writing, the titler RE-READS the current title via
+      the injected `currentTitle` reader; if a human renamed the session (the
+      title is no longer a placeholder per the injected `isPlaceholder`
+      predicate) the write is SKIPPED — manual rename always wins.
+
+  Closed-port: the leaf imports ONLY `@/llm` types (`LLMPort`, `StreamEvent`,
+  `assembleFromEvents`) and consumes everything else (rename writer, title
+  reader, placeholder predicate, clock, debug sink) as injected ports — it does
+  NOT import `@/session` store internals or `@/agent` loop internals. The
+  composition root wires the real `renameSession` / `loadSessionById` adapters.
+evidence:
+  code:
+    - src/runner/session-ops/auto-title.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/ai-session-title-core-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_SESSION_AUTO_TITLE
+    where: src/shared/runtime-config.ts
+    default: false
+    purpose: |
+      Boolean gate. Default unset/false ⇒ feature inert (port never built,
+      byte-identical loop). Set ⇒ the composition root builds the auto-title
+      port and the loop fires it once on turn 1.
+  - name: QUANTA_SESSION_TITLE_MODEL
+    where: src/shared/runtime-config.ts
+    purpose: |
+      Cheap model id for the title call (mirrors `QUANTA_COMPACT_MODEL`).
+      Unset ⇒ feature inert (NEVER falls back to the expensive main model —
+      the cost gate). Set ⇒ `createLLM` builds the cheap `LLMPort` injected
+      into the titler.
+deliberate_hold: null
+notes: |
+  L3 (slice + hellgate present; the loop kick-off + composition-root wiring of
+  the cheap LLMPort / renameSession adapter / loadSessionById title-reader are
+  the L4 promotion step). The leaf is fully closed-port and default-OFF, so it
+  is dead code until a root builds and injects the port. RFC §7 Phase-1 scope.

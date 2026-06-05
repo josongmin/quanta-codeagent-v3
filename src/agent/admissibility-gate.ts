@@ -57,9 +57,13 @@ import {
   type ToolActionKeyed,
 } from "@/permission"
 import type { RulesStore } from "@/rules"
-import { errMessage, writeStderr } from "@/shared"
+import { errMessage, runtimeConfig, writeStderr } from "@/shared"
 import { safeEmitDecision } from "@/stream"
 import { createApprovalGate } from "./approval-gate-wire"
+import {
+  type HookPermissionDecision,
+  routePermissionHookVerdict,
+} from "./hooks"
 import {
   buildDenySteerMessage,
   type ConfirmDecision,
@@ -1331,7 +1335,11 @@ const earlyHardDeny = (
   const bypassActive =
     opts.rulesStore !== undefined ||
     opts.reviewerPort !== undefined ||
-    config.permissionPatternStore !== undefined
+    config.permissionPatternStore !== undefined ||
+    // jun-6 — the `permission_request` hook is allow-CAPABLE (step 3b). When the
+    // kill-switch is on AND a HookBus is wired, pull HARD_DENY ahead so a hook
+    // `allow` can never route around the denylist (the §4.4 floor, layer (a)).
+    (runtimeConfig().permissionHook && config.hooks !== undefined)
   if (!bypassActive) return null
   const hardDenyCommand = config.registry.extractShellCommand(action.tool, action.input)
   const hardDeny = hardDenyReason({
@@ -1342,6 +1350,72 @@ const earlyHardDeny = (
   })
   if (hardDeny === null) return null
   return deny(call.id, `Action requires human handoff: ${hardDeny}${HANDOFF_SUFFIX}`, "handoff")
+}
+
+/**
+ * jun-6 (RFC jun-6-permission-request-hook) — dispatch "step 3b": consult the
+ * `permission_request` hook BEFORE the policy stack. PURE control flow over
+ * three injected ports (the bus, the registry-derived HARD_DENY fact, the
+ * `routePermissionHookVerdict` helper). Returns:
+ *   - a terminal {@link DispatchResult} when the hook decided deny/ask/admit,
+ *   - `"fallthrough"` when there is no hook, the kill-switch is off, the hook
+ *     supplied no decision, OR the decision was a HARD_DENY `allow` that the
+ *     helper downgraded (the gate then proceeds to the existing stack, which —
+ *     because `earlyHardDeny` was pulled ahead — has already terminated a
+ *     HARD_DENY call, so this fall-through is byte-identical fail-closed).
+ *
+ * SECURITY (the §4.4 floor): the HARD_DENY precedence is enforced on BOTH
+ * layers — (a) `earlyHardDeny`'s `bypassActive` trigger now includes
+ * `config.hooks !== undefined`, so a HARD_DENY call is terminated BEFORE this
+ * step runs; (b) `routePermissionHookVerdict` independently downgrades an
+ * `allow`-on-HARD_DENY to a `deny` arm, so even a wiring mistake cannot let a
+ * hook `allow` route around the denylist.
+ *
+ * Default-OFF: `runtimeConfig().permissionHook !== true` OR no `HookBus` ⇒
+ * `"fallthrough"` with NO emit, NO allocation (byte-identical to today).
+ */
+const runPermissionRequestHook = async (
+  call: ToolUseBlock,
+  config: AdmissibilityGateConfig,
+  action: AdmissibilityAction,
+  opts: AdmissibilityWaveAOptions,
+): Promise<DispatchResult | null | "fallthrough"> => {
+  if (!runtimeConfig().permissionHook) return "fallthrough"
+  if (config.hooks === undefined) return "fallthrough"
+  const { tier } = resolveHitlTier(config, call, action)
+  const result = await config.hooks.emit({
+    type: "permission_request",
+    name: call.name,
+    input: call.input,
+    tier,
+    cwd: config.cwd,
+  })
+  const decision: HookPermissionDecision | undefined = result.permissionDecision
+  // The HARD_DENY fact for the §4.4 floor — re-derive from the registry so the
+  // helper can refuse an `allow`-on-HARD_DENY even if (impossibly) earlyHardDeny
+  // did not pull it ahead.
+  const hardDeny = hardDenyReason(action)
+  const routing = routePermissionHookVerdict(decision, hardDeny !== null, hardDeny ?? undefined)
+  switch (routing.arm) {
+    case "fallthrough":
+      return "fallthrough"
+    case "admit":
+      // Short-circuit admit — but still pass through the pre_tool_use hook so a
+      // repo-local hook can veto last (parity with every other allow path).
+      return runPreToolUseHook(call, config, opts)
+    case "deny":
+      emitGateDecision(config, {
+        kind: "hook",
+        outcome: "deny",
+        reason: `permission_request: ${routing.reason}`,
+        toolCallId: call.id,
+        hookName: "permission_request",
+        tool: call.name,
+      })
+      return deny(call.id, `Permission denied: ${routing.reason}`, "hook-denied")
+    case "ask":
+      return resolveAskBranch(call, config, action, `permission_request hook (${call.name})`, opts)
+  }
 }
 
 /**
@@ -1484,6 +1558,15 @@ export const runAdmissibilityGate = async (
   //    that added permissionPatternStore to the trigger to close a fail-open).
   const earlyDeny = earlyHardDeny(call, config, action, opts)
   if (earlyDeny) return earlyDeny
+
+  // 3b. permission_request hook (jun-6). Consults an operator-authored handler
+  //     that may PROGRAMMATICALLY supply the allow/deny/ask decision BEFORE the
+  //     policy stack. Gated on `runtimeConfig().permissionHook` + a wired
+  //     HookBus. HARD_DENY precedence is enforced on both layers (earlyHardDeny
+  //     pull-ahead above + the helper's allow-downgrade). Default-OFF ⇒
+  //     "fallthrough", byte-identical.
+  const permissionHookResult = await runPermissionRequestHook(call, config, action, opts)
+  if (permissionHookResult !== "fallthrough") return permissionHookResult
 
   // 2.25. Tool-profile strictness overlay. `/profile` mutates the active
   //       profile in-place through the shared session state, and the gate

@@ -283,10 +283,12 @@ export const aggregateResourcesHandle = (clients: McpResourcesClient[]): Resourc
  *  A client qualifies IFF its server advertised `resources` OR `prompts` — a
  *  server that speaks neither contributes nothing, so including it would only add
  *  an always-`unsupported` arm. SUPERVISED clients (the auto-restart path) are
- *  EXCLUDED: `McpReconnectSupervisor` does not expose the resources/prompts
- *  methods, so the bridge does not fake them — those servers are honestly absent
- *  from the resources surface (documented limitation, NOT a silent drop of
- *  successfully-listed entries). */
+ *  now INCLUDED (jun-06 RFC, limitation CLOSED): `McpReconnectSupervisor` exposes
+ *  the six `resources/*`+`prompts/*` methods, re-resolving the CURRENT live client
+ *  per call, so it structurally satisfies `ResourcesCapableClient` and folds into
+ *  the SAME aggregate. During a reconnect gap a supervised member returns a typed
+ *  `transport` failure (no throw), so it simply drops out of that one call and
+ *  rejoins on recovery. */
 export const resourcesHandleFor = (
   clients: ReadonlyArray<ResourcesCapableClient>,
 ): ResourcesHandle | undefined => {
@@ -298,8 +300,9 @@ export const resourcesHandleFor = (
 /** A live client that BOTH satisfies the resources method-set AND can report
  *  whether its server advertised the capability (so {@link resourcesHandleFor}
  *  can drop the always-`unsupported` arms). The concrete `McpClient` satisfies
- *  it; `McpReconnectSupervisor` does NOT (no resources methods) and is excluded
- *  upstream. */
+ *  it; `McpReconnectSupervisor` ALSO satisfies it (jun-06 RFC) — it now exposes
+ *  the six resources/prompts methods, re-resolving the live client per call — so
+ *  it is admitted into the aggregate on the supervised path. */
 export interface ResourcesCapableClient extends McpResourcesClient {
   serverSupportsResources(): boolean
   serverSupportsPrompts(): boolean
@@ -436,7 +439,16 @@ const loadSupervised = async (
     // client per call and survives auto-restart. Default-OFF: present only when
     // the current server advertises `capabilities.tasks`.
     tools.push(...supervisedTasksToolsFor(sup))
-    return { tools, client: sup }
+    // jun-06 RFC (limitation CLOSED): admit the supervisor into the N3 resources
+    // aggregate too. The supervisor now exposes the six `resources/*`+`prompts/*`
+    // methods (each re-resolving the CURRENT live client per call), so it
+    // structurally satisfies `ResourcesCapableClient` WITHOUT a wrapper. Surface
+    // it ONLY when the current server advertises resources OR prompts, so a
+    // supervised server that speaks neither stays byte-identical (no `resources`
+    // field, zero new tools). Read per-call inside the supervisor so a restart
+    // that changes capability re-evaluates.
+    const resources = sup.serverSupportsResources() || sup.serverSupportsPrompts() ? sup : undefined
+    return { tools, client: sup, ...(resources !== undefined ? { resources } : {}) }
   } catch (e) {
     logger.warn(`mcp: skipping server "${config.name}": ${errMessage(e)}`)
     await sup.stop().catch(() => undefined)
@@ -493,9 +505,11 @@ export const loadMcpTools = async (
 ): Promise<{ tools: Tool[]; clients: McpStoppable[]; resources?: ResourcesHandle }> => {
   const tools: Tool[] = []
   const clients: McpStoppable[] = []
-  // N3 — the resources-capable clients (single-client path only; supervised
-  // clients are excluded — see `resourcesHandleFor`). Collected so the bridge can
-  // build ONE aggregate `ResourcesHandle` across all servers.
+  // N3 + jun-06 RFC — the resources-capable clients across BOTH paths: the
+  // single-client path surfaces the concrete `McpClient`, and the supervised
+  // (auto-restart) path now surfaces the SUPERVISOR (which re-resolves the live
+  // client per call). Collected so the bridge builds ONE aggregate
+  // `ResourcesHandle` over every server, supervised or not.
   const resourcesClients: ResourcesCapableClient[] = []
   const supervisorDepsFor = opts?.supervisorDepsFor
   for (const config of servers) {
@@ -508,8 +522,8 @@ export const loadMcpTools = async (
     clients.push(loaded.client)
     if (loaded.resources !== undefined) resourcesClients.push(loaded.resources)
   }
-  // N3 — `undefined` when NO connected server advertised resources/prompts (or
-  // all were supervised) ⇒ the surface leaves `DefaultToolPorts.mcpResources`
+  // N3 + jun-06 RFC — `undefined` when NO connected server (single OR supervised)
+  // advertised resources/prompts ⇒ the surface leaves `DefaultToolPorts.mcpResources`
   // unset ⇒ the four tools stay absent + byte-identical.
   const resources = resourcesHandleFor(resourcesClients)
   return { tools, clients, ...(resources !== undefined ? { resources } : {}) }

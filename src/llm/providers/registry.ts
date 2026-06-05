@@ -64,6 +64,7 @@ export const PROVIDER_ENV_KEYS = {
   bedrock: "ANTHROPIC_BEDROCK_BASE_URL",
   vertex: "ANTHROPIC_VERTEX_BASE_URL",
   foundry: "ANTHROPIC_FOUNDRY_BASE_URL",
+  mantle: "ANTHROPIC_MANTLE_BASE_URL",
 } as const
 
 /** Additional env signals that select `foundry` (ADR-0172). Any of these,
@@ -78,6 +79,18 @@ export const FOUNDRY_EXTRA_ENV_KEYS = {
   quantaUse: "QUANTA_USE_FOUNDRY",
   /** Claude-CLI mirror — Refugee path; same value space ("1" / "true" / "yes"). */
   claudeUse: "CLAUDE_CODE_USE_FOUNDRY",
+} as const
+
+/** Additional env signals that select `mantle` (ADR-0172 W12). Mirrors the
+ *  Foundry expansion: a non-empty `ANTHROPIC_MANTLE_BASE_URL` (the canonical
+ *  key, in {@link PROVIDER_ENV_KEYS}) OR a truthy `CLAUDE_CODE_USE_MANTLE` /
+ *  `QUANTA_USE_MANTLE` switch routes to Mantle. Lowest of the env layers so a
+ *  more-specific transport (bedrock/vertex/foundry) still wins. */
+export const MANTLE_EXTRA_ENV_KEYS = {
+  /** quanta-native boolean switch. */
+  quantaUse: "QUANTA_USE_MANTLE",
+  /** Claude-CLI mirror — same value space ("1" / "true" / "yes"). */
+  claudeUse: "CLAUDE_CODE_USE_MANTLE",
 } as const
 
 /** Resolution result. The `factory` is always callable (unknown id ⇒ lazy-throw
@@ -156,6 +169,22 @@ export const resolveProvider = (explicit?: string, env: ProviderEnv = {}): Resol
     isTruthyEnv(foundryClaudeUse)
   ) {
     return { id: "foundry", factory: FACTORIES.foundry }
+  }
+
+  // Mantle signal (ADR-0172 W12) — mirrors the Foundry expansion. Any of:
+  //   - `ANTHROPIC_MANTLE_BASE_URL`  non-empty  (canonical key)
+  //   - `QUANTA_USE_MANTLE`          truthy     (quanta-native switch)
+  //   - `CLAUDE_CODE_USE_MANTLE`     truthy     (Claude-CLI mirror)
+  // routes to Mantle. Placed AFTER foundry so a more-specific transport wins.
+  const mantleUrl = env[PROVIDER_ENV_KEYS.mantle]
+  const mantleQuantaUse = env[MANTLE_EXTRA_ENV_KEYS.quantaUse]
+  const mantleClaudeUse = env[MANTLE_EXTRA_ENV_KEYS.claudeUse]
+  if (
+    (mantleUrl !== undefined && mantleUrl.length > 0) ||
+    isTruthyEnv(mantleQuantaUse) ||
+    isTruthyEnv(mantleClaudeUse)
+  ) {
+    return { id: "mantle", factory: FACTORIES.mantle }
   }
 
   // Layer 5 — fallback to the public api.anthropic.com path.

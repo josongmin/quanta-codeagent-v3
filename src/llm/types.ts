@@ -152,6 +152,18 @@ export interface SystemBlock {
  *  significant and stable so the cached prefix never shifts. */
 export type SystemPromptInput = string | SystemBlock[]
 
+/** Anthropic prompt-cache retention for an `ephemeral` `cache_control`
+ *  breakpoint — a CLOSED union matching Anthropic's two supported TTLs.
+ *  `"5m"` is the implicit default (emitted as `{ type: "ephemeral" }` with NO
+ *  `ttl` key — byte-identical to the pre-feature wire); `"1h"` adds
+ *  `ttl: "1h"` to hold the cached prefix warm across gaps > 5 min.
+ *
+ *  This is the Anthropic `cache_control.ttl` axis ONLY. It is DELIBERATELY
+ *  distinct from {@link PromptCacheRetention} (`"in-memory" | "24h"`), which is
+ *  the OpenAI Responses `prompt_cache` retention — a different vendor, field,
+ *  and value set. Do not conflate the two. */
+export type CacheTtl = "5m" | "1h"
+
 export type StreamEvent =
   /** Tombstone: every event yielded so far in this turn belongs to a now-dead
    *  partial (e.g. a provider died mid-stream and {@link FallbackLLM} switched

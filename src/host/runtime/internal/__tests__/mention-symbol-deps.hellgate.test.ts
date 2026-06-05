@@ -56,6 +56,8 @@ const fakeLspProvider = (
     documentSymbol: notImpl,
     workspaceSymbol: async (q) => payload(q),
     prepareRename: notImpl,
+    incomingCalls: notImpl,
+    outgoingCalls: notImpl,
     stop: async () => undefined,
   }
   return {

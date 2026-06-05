@@ -28,6 +28,26 @@ const staleWriteGuard = async (
   }
 }
 
+/** jun-6 tool-interrupt-behavior — commit the bytes inside the OPTIONAL critical
+ *  section so an in-flight ESC cannot tear a half-written file. `begin?.()` is
+ *  undefined when the seam is unwired (the three OFF gates) ⇒ this is the same
+ *  `fs.writeFile` call, byte-identical. The withheld abort (if any) is
+ *  re-delivered at `end()` so the next phase boundary still aborts the turn.
+ *  Extracted to keep `execute` under the biome cognitive-complexity cap. */
+const commitWrite = async (
+  fs: FileSystemPort,
+  ctx: ToolContext,
+  path: string,
+  content: string,
+): Promise<void> => {
+  const cs = ctx.criticalSection?.begin()
+  try {
+    await fs.writeFile(path, content, ctx.cwd)
+  } finally {
+    cs?.end()
+  }
+}
+
 const schema = z.object({
   path: z.string().describe("File path (absolute or relative to cwd)"),
   content: z.string().describe("Full file content to write"),
@@ -62,6 +82,13 @@ export const makeWriteTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<
     // `always-confirm`, so omitting this opt-in would suddenly demand
     // per-write confirmation even in `bypass` mode.
     hitlTier: (): "pre-approval-ok" => "pre-approval-ok",
+    // jun-6 tool-interrupt-behavior — `write` is an ATOMIC-intent applier: an
+    // ESC that lands inside the FS-write window can leave a half-written file.
+    // Declare `"block"` so the dispatch abort-router withholds the turn abort
+    // ONLY while the rename/flush window below is open (`ctx.criticalSection`).
+    // Default-OFF / byte-identical: inert unless the host wired the seam AND the
+    // `QUANTA_TOOL_INTERRUPT_BLOCK` knob is on (see ToolInterruptPolicy).
+    interruptBehavior: (): "block" => "block",
 
     async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
       // ADR-0091 git-write-protection: a write to `.git/{hooks,config,config.
@@ -101,7 +128,10 @@ export const makeWriteTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<
             before = ""
           }
         }
-        await fs.writeFile(input.path, input.content, ctx.cwd)
+        // jun-6 tool-interrupt-behavior — commit inside the OPTIONAL critical
+        // section so an in-flight ESC cannot tear a half-written file (no-op
+        // when the seam is unwired; byte-identical legacy path).
+        await commitWrite(fs, ctx, input.path, input.content)
         if (captureDiff) captureToolDiff(ctx, before, input.content, input.path)
         const bytes = Buffer.byteLength(input.content, "utf8")
         yield {

@@ -106,6 +106,18 @@ export const fakeProvider = (overrides: Partial<LspNavSession>, trace: Trace): L
         trace.signal = signal
         return null
       },
+      incomingCalls: async (fp, p, signal) => {
+        trace.filePath = fp
+        trace.pos = p
+        trace.signal = signal
+        return []
+      },
+      outgoingCalls: async (fp, p, signal) => {
+        trace.filePath = fp
+        trace.pos = p
+        trace.signal = signal
+        return []
+      },
       stop: async () => {
         trace.stopped = true
       },
@@ -126,4 +138,6 @@ export const TOOL_NAMES = [
   "lsp_document_symbol",
   "lsp_workspace_symbol",
   "lsp_rename_preview",
+  "lsp_incoming_calls",
+  "lsp_outgoing_calls",
 ] as const

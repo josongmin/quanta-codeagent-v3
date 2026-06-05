@@ -19,7 +19,7 @@
  */
 
 import type { LLMPort } from "../ports"
-import type { StreamEvent, StreamInput } from "../types"
+import type { CacheTtl, StreamEvent, StreamInput } from "../types"
 
 // Re-export StreamEvent / StreamInput so adapter files in this slice can
 // import the wire types from `@/llm/providers/provider-port` without reaching
@@ -80,6 +80,11 @@ export interface ProviderAuth {
   readonly azureApiKey?: string
   readonly azureResource?: string
   readonly azureADTokenProvider?: () => Promise<string>
+  /** `mantle` transport — explicit bearer token for the ADR-0163 W12 Mantle
+   *  proxy. Resolved from `ANTHROPIC_MANTLE_TOKEN` by the env ladder. */
+  readonly mantleToken?: string
+  /** `mantle` transport — proxy base URL (`ANTHROPIC_MANTLE_BASE_URL`). */
+  readonly mantleEndpoint?: string
 }
 
 /**
@@ -107,6 +112,10 @@ export interface ProviderConfig {
   /** T1 stream-hang guard overrides (caller wins over env wins over default). */
   readonly streamFirstChunkMs?: number
   readonly streamIdleMs?: number
+  /** Prompt-cache TTL forwarded to the codec's 4th arg. Absent ⇒ the adapter
+   *  defaults to `"5m"` (byte-identical to the prior fixed-5m cache_control).
+   *  Already gated by the factory's model allowlist (`resolveCacheTtl`). */
+  readonly cacheTtl?: CacheTtl
 }
 
 /**

@@ -40,6 +40,16 @@ export class ToolRegistry {
     return this.tools.get(name)?.isReadOnly() ?? false
   }
 
+  /** jun-6 (RFC jun-6-tool-interrupt-behavior) — the tool's declared interrupt
+   *  policy. A tool that does NOT implement `interruptBehavior` (the common
+   *  case) reads as `"cancel"` (today's uniform behavior). The dispatch seam
+   *  consults this (gated on `runtimeConfig().toolInterruptBlock`) to decide
+   *  whether to thread a derived suppressible signal + `criticalSection` seam
+   *  onto the `ToolContext`. Mirrors {@link isReadOnly}. */
+  interruptBehavior(name: string): "cancel" | "block" {
+    return this.tools.get(name)?.interruptBehavior?.() ?? "cancel"
+  }
+
   /** ADR-0298 / T02 — streaming-dispatch early-start eligibility. A tool whose
    *  side effects are isolated from the PARENT dispatch seam (today: `agent`,
    *  whose effects run inside an isolated child loop with its own abort signal)

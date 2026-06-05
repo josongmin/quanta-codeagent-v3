@@ -2,10 +2,17 @@ import { z } from "zod"
 import { errMessage } from "@/shared"
 import { FsJailError, type JailedPath, resolveJailed } from "@/storage"
 import type { Tool, ToolContext, ToolEvent } from "../types"
-import { formatHover, formatLocations, formatRenamePreview, formatSymbols } from "./formatters"
+import {
+  formatCallHierarchy,
+  formatHover,
+  formatLocations,
+  formatRenamePreview,
+  formatSymbols,
+} from "./formatters"
 import type {
   LspNavProvider,
   LspNavSession,
+  NavCallHierarchyEntry,
   NavHover,
   NavLocation,
   NavPos,
@@ -54,6 +61,7 @@ export {
   lspFormatTool,
 } from "./format"
 export {
+  formatCallHierarchy,
   formatHover,
   formatLocations,
   formatRenamePreview,
@@ -81,6 +89,7 @@ export {
 export type {
   LspNavProvider,
   LspNavSession,
+  NavCallHierarchyEntry,
   NavHover,
   NavLocation,
   NavPos,
@@ -421,6 +430,42 @@ export const lspNavTools = (provider: LspNavProvider): Tool[] => {
     provider,
   )
 
+  // RFC jun-6 — call hierarchy. Both ride the same positionTool factory as
+  // `implementation` (bare PATH:LINE:CHARACTER, read-only, never-fail-the-turn);
+  // we override the generic description with a task-anchored one.
+  const incomingCalls: Tool<PositionInput> = {
+    ...positionTool<PositionInput>(
+      "lsp_incoming_calls",
+      positionSchema,
+      (s, fp, pos, _input, signal) => s.incomingCalls(fp, pos, signal),
+      (_input, _abs, entries: NavCallHierarchyEntry[] | null) =>
+        formatCallHierarchy("incoming", entries),
+      provider,
+    ),
+    description:
+      "PREFER over grep when answering 'if I change this function, what breaks?'. " +
+      "Given PATH:LINE:CHARACTER (1-based) on a function/method, returns every " +
+      "CALLER plus the exact call-site lines inside each. Semantic — follows " +
+      "imports/aliases, no name-shadow false positives. Returns a clean message " +
+      "when no language server is available — never fails the turn.",
+  }
+
+  const outgoingCalls: Tool<PositionInput> = {
+    ...positionTool<PositionInput>(
+      "lsp_outgoing_calls",
+      positionSchema,
+      (s, fp, pos, _input, signal) => s.outgoingCalls(fp, pos, signal),
+      (_input, _abs, entries: NavCallHierarchyEntry[] | null) =>
+        formatCallHierarchy("outgoing", entries),
+      provider,
+    ),
+    description:
+      "What does this function call? Given PATH:LINE:CHARACTER (1-based) on a " +
+      "function/method, returns each CALLEE plus the call-site line inside this " +
+      "function. Semantic. Returns a clean message when no language server is " +
+      "available — never fails the turn.",
+  }
+
   return [
     definition as Tool,
     references as Tool,
@@ -430,5 +475,7 @@ export const lspNavTools = (provider: LspNavProvider): Tool[] => {
     documentSymbol as Tool,
     workspaceSymbol as Tool,
     renamePreview as Tool,
+    incomingCalls as Tool,
+    outgoingCalls as Tool,
   ]
 }

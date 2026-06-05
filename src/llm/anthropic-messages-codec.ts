@@ -1,6 +1,7 @@
-import Anthropic from "@anthropic-ai/sdk"
+import type Anthropic from "@anthropic-ai/sdk"
 import { LLMError } from "@/shared/errors"
 import type {
+  CacheTtl,
   ContentBlock,
   Message,
   StreamInput,
@@ -8,13 +9,30 @@ import type {
   ToolChoice,
 } from "./types"
 
+/** Build the `cache_control` object for a prompt-cache breakpoint.
+ *
+ *  Anthropic's prompt cache supports exactly two retentions on an `ephemeral`
+ *  breakpoint: the implicit 5-minute default (`{ type: "ephemeral" }`, NO `ttl`
+ *  key) and an explicit 1-hour hold (`{ type: "ephemeral", ttl: "1h" }`). This
+ *  is the single literal-construction site for both codec breakpoints
+ *  ({@link toAnthropicSystem} and {@link cacheConversationPrefix}).
+ *
+ *  Default-OFF byte-identity (the sacred guarantee): `"5m"` (the default) MUST
+ *  emit `{ type: "ephemeral" }` with NO `ttl` key — byte-identical to the
+ *  pre-feature inline literal. `"1h"` adds `ttl: "1h"` and nothing else; it
+ *  does NOT add a breakpoint, change which block is cached, or touch the
+ *  4-breakpoint cap / prefix layout. It is purely a retention extension on the
+ *  marker the codec already places. */
+export const ttlControl = (ttl: CacheTtl = "5m"): { type: "ephemeral"; ttl?: "1h" } =>
+  ttl === "1h" ? { type: "ephemeral", ttl: "1h" } : { type: "ephemeral" }
+
 const toAnthropicContent = (block: ContentBlock): Anthropic.ContentBlockParam | null => {
   switch (block.type) {
     case "text":
       return { type: "text", text: block.text }
     case "tool_use":
       return { type: "tool_use", id: block.id, name: block.name, input: block.input }
-    case "tool_result":
+    case "tool_result": {
       const structuredContent: Array<Anthropic.TextBlockParam | Anthropic.ImageBlockParam> = []
       for (const p of block.contentBlocks ?? []) {
         if (p.type === "text") {
@@ -38,6 +56,7 @@ const toAnthropicContent = (block: ContentBlock): Anthropic.ContentBlockParam | 
         content: structuredContent.length > 0 ? structuredContent : block.content,
         ...(block.is_error ? { is_error: true } : {}),
       }
+    }
     case "thinking":
       if (block.redacted) {
         return {
@@ -78,17 +97,19 @@ const toAnthropicContent = (block: ContentBlock): Anthropic.ContentBlockParam | 
 
 export const toAnthropicSystem = (
   system: SystemPromptInput,
+  cacheTtl: CacheTtl = "5m",
 ): string | Anthropic.TextBlockParam[] => {
   if (typeof system === "string") return system
   return system.map((b) => ({
     type: "text",
     text: b.text,
-    ...(b.cache ? { cache_control: { type: "ephemeral" as const } } : {}),
+    ...(b.cache ? { cache_control: ttlControl(cacheTtl) } : {}),
   }))
 }
 
 export const cacheConversationPrefix = (
   messages: Anthropic.MessageParam[],
+  cacheTtl: CacheTtl = "5m",
 ): Anthropic.MessageParam[] => {
   if (messages.length === 0) return messages
   const lastIdx = messages.length - 1
@@ -103,9 +124,14 @@ export const cacheConversationPrefix = (
     }
   }
   if (textIdx === -1) return messages
+  // Idempotent: if the chosen text block already carries a cache_control, do
+  // not re-stamp it (re-stamping could silently flip a caller-set ttl).
+  if ((blocks[textIdx] as Anthropic.TextBlockParam).cache_control !== undefined) {
+    return messages
+  }
   blocks[textIdx] = {
     ...(blocks[textIdx] as Anthropic.TextBlockParam),
-    cache_control: { type: "ephemeral" },
+    cache_control: ttlControl(cacheTtl),
   } as Anthropic.TextBlockParam
   const out = [...messages]
   out[lastIdx] = { ...last, content: blocks }
@@ -151,6 +177,7 @@ export const buildAnthropicMessagesRequest = (
   model: string,
   maxTokens: number,
   input: StreamInput,
+  cacheTtl: CacheTtl = "5m",
 ): Anthropic.MessageCreateParamsStreaming => {
   const toolNames = input.tools.map((t) => t.name)
   const toolChoice = toAnthropicToolChoice(input.toolChoice, toolNames)
@@ -158,9 +185,9 @@ export const buildAnthropicMessagesRequest = (
     model,
     max_tokens: maxTokens,
     stream: true,
-    ...(input.system ? { system: toAnthropicSystem(input.system) } : {}),
+    ...(input.system ? { system: toAnthropicSystem(input.system, cacheTtl) } : {}),
     ...(input.thinking ? { thinking: input.thinking } : {}),
-    messages: cacheConversationPrefix(toAnthropicMessages(input.messages)),
+    messages: cacheConversationPrefix(toAnthropicMessages(input.messages), cacheTtl),
     tools: input.tools.map((t) => ({
       name: t.name,
       description: t.description,

@@ -76,6 +76,16 @@ const parseBool = (raw: string | undefined): boolean => {
   return raw === "1" || raw.toLowerCase() === "true" || raw.toLowerCase() === "on"
 }
 
+/** Boolean knob that DEFAULTS to true: absent ⇒ true; an explicit off-vocabulary
+ *  value (`0`/`false`/`off`, case-insensitive) ⇒ false; anything else ⇒ true.
+ *  Used by the single default-ON knob (`QUANTA_IPYNB_OUTPUTS`) — see the field
+ *  doc for why default-true is the safe posture there. */
+const parseBoolDefaultTrue = (raw: string | undefined): boolean => {
+  if (raw === undefined) return true
+  const lc = raw.toLowerCase()
+  return !(raw === "0" || lc === "false" || lc === "off")
+}
+
 /** Parse a strictly-positive finite number (fractional allowed). Used for the
  *  auto-dream HOURS threshold where a sub-hour cadence (`0.5`) is legal.
  *  Rejects `NaN`, `Infinity`, zero, negatives, and non-numeric strings —
@@ -575,7 +585,85 @@ export interface RuntimeConfig {
    *  Default-OFF and orthogonal to the four H7 command knobs — setting a refresh
    *  command WITHOUT this attestation is a fail-closed no-run, not a silent run. */
   readonly llmCredentialTrusted: boolean
+  /** Prompt-cache TTL selector (`QUANTA_PROMPT_CACHE_TTL`). `"5m"` (default) or
+   *  `"1h"`. Only the literal `"1h"` opts into the extended cache-control TTL;
+   *  any other value (including absent) ⇒ `"5m"`, byte-identical to the prior
+   *  fixed-5m cache_control. The factory further gates `"1h"` behind an
+   *  allowlist of models that actually support it (`resolveCacheTtl`), so even
+   *  ON it is a no-op for non-allowlisted models. */
+  readonly cacheTtl: "5m" | "1h"
+  /** OAuth token revoke-on-logout gate (`QUANTA_OAUTH_REVOKE_ON_LOGOUT`). Strict
+   *  opt-in (`=== "1"`). Default false ⇒ logout only clears local credential
+   *  state (byte-identical). When true, the logout command additionally calls
+   *  the provider's RFC 7009 token revocation endpoint before clearing. */
+  readonly oauthRevokeOnLogout: boolean
+  /** jun-6 (ADR-0481) cell-aware `.ipynb` render — append textual outputs
+   *  (`QUANTA_IPYNB_OUTPUTS`). DEFAULT **ON** (the ONLY knob in this codebase
+   *  that is default-true, justified: a `.ipynb` read is BROKEN today — it dumps
+   *  raw nbformat JSON with base64 image blobs — so the safe default is the
+   *  fixed render, not the broken one; matches Claude/Cursor/Codex). This knob
+   *  ONLY toggles whether each code cell's TEXTUAL outputs (stream / text-plain /
+   *  error traceback) are appended after its source. Set to `off`/`0`/`false`
+   *  to render cell SOURCE only. Two things are UNCONDITIONAL (never a knob):
+   *  (1) cell-source rendering for any `.ipynb`, and (2) base64 image-blob
+   *  stripping (emitting a base64 PNG is never wanted). Has ZERO effect on any
+   *  non-`.ipynb` read — the extension gate short-circuits, so every other file
+   *  is byte-identical to the pre-ADR raw render. */
+  readonly ipynbIncludeOutputs: boolean
+  /** jun-6 (RFC jun-6-byok-api-key-helper) — legacy per-vendor apiKeyHelper
+   *  resolution gate (`QUANTA_API_KEY_HELPER_LEGACY_VENDOR`). Strict opt-in
+   *  (`=== "1"`). Default false ⇒ the legacy LLM-build seam passes
+   *  `source: undefined` to `resolveVendorApiKey`, so key resolution is
+   *  byte-identical to the pre-slice BYOK/env path. When ON, the composition
+   *  root resolves the per-vendor key through the apiKeyHelper credential
+   *  source before building the provider. */
+  readonly apiKeyHelperLegacyVendor: boolean
+  /** jun-6 (RFC jun-6-ai-session-title) — AI session auto-title gate
+   *  (`QUANTA_SESSION_AUTO_TITLE`). Standard boolean knob vocabulary
+   *  (`1`/`true`/`on`). Default false ⇒ the composition root builds NO
+   *  `autoTitlePort` and the loop's first-turn title branch is dead
+   *  (byte-identical). When ON *and* `sessionTitleModel` resolves a cheap
+   *  `LLMPort`, the loop fire-and-forgets a ≤6-word title for the first user
+   *  prompt (never awaited, never clobbers a human rename). */
+  readonly sessionAutoTitle: boolean
+  /** jun-6 — cheap model id for the auto-title call (`QUANTA_SESSION_TITLE_MODEL`,
+   *  mirrors `QUANTA_COMPACT_MODEL`). Absent ⇒ no port is built even when
+   *  `sessionAutoTitle` is on (both must be present — advertise-iff-able). */
+  readonly sessionTitleModel: string | undefined
+  /** jun-6 (RFC jun-6-tool-interrupt-behavior) — `block`-interrupt critical-
+   *  section gate (`QUANTA_TOOL_INTERRUPT_BLOCK`). Strict opt-in (`=== "1"`).
+   *  Default false ⇒ the dispatch seam threads the raw `config.signal` and NO
+   *  `criticalSection` onto `ToolContext` (byte-identical: a `block` tool
+   *  behaves exactly like `cancel`). When ON, a tool whose
+   *  `interruptBehavior() === "block"` runs over a derived suppressible signal so
+   *  its atomic FS-write window (rename/flush) finishes whole before a withheld
+   *  ESC is delivered — bounded by {@link criticalSectionMaxMs}. */
+  readonly toolInterruptBlock: boolean
+  /** jun-6 — watchdog cap (ms) bounding how long a critical section may withhold
+   *  an in-flight abort before it is force-delivered
+   *  (`QUANTA_CRITICAL_SECTION_MAX_MS`). Absent ⇒ {@link DEFAULT_CRITICAL_SECTION_MAX_MS}
+   *  (5000). The critical-section slice (`@/tool/critical-section`) takes this by
+   *  injection; there is NO magic constant inside it, so the default lives here.
+   *  5s is generous for a single rename/flush yet guarantees `block` can DEFER a
+   *  cancel across one bounded window, never SWALLOW it. */
+  readonly criticalSectionMaxMs: number
+  /** jun-6 (RFC jun-6-permission-request-hook) — `permission_request` hook
+   *  kill-switch (`QUANTA_PERMISSION_HOOK`). Strict opt-in (`=== "1"`). Default
+   *  false ⇒ the admissibility gate does NOT emit the pre-decision
+   *  `permission_request` event (byte-identical, the gate falls through to the
+   *  policy stack). When ON *and* a `HookBus` is wired, the gate emits the event
+   *  before the policy stack and routes the verdict via
+   *  `routePermissionHookVerdict` (HARD_DENY floor enforced — a hook `allow`
+   *  never overrides the denylist). Extra guard atop hook presence. */
+  readonly permissionHook: boolean
 }
+
+/** jun-6 — default watchdog cap (ms) for a `block`-tool critical section. The
+ *  critical-section slice has NO embedded magic number (it takes `maxMs` by
+ *  injection), so this measured one-rename budget is the SSOT default. 5s is
+ *  generous for a single atomic FS-write window yet bounds a withheld abort so
+ *  `block` can never permanently swallow a cancel. */
+export const DEFAULT_CRITICAL_SECTION_MAX_MS = 5_000
 
 const stringOrUndef = (raw: string | undefined): string | undefined =>
   typeof raw === "string" && raw.length > 0 ? raw : undefined
@@ -740,6 +828,37 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // shell. Strict `=== "1"`: only an explicit opt-in authorizes arbitrary
     // command execution; unset / anything else ⇒ untrusted (no shell).
     llmCredentialTrusted: env["QUANTA_LLM_CREDENTIAL_TRUSTED"] === "1",
+    // Prompt-cache 1h TTL — only the literal "1h" opts in; any other value
+    // (incl. absent) ⇒ "5m" (byte-identical fixed-5m cache_control). The
+    // factory additionally gates "1h" behind a model allowlist.
+    cacheTtl: env["QUANTA_PROMPT_CACHE_TTL"] === "1h" ? "1h" : "5m",
+    // OAuth revoke-on-logout — strict `=== "1"` opt-in. Default false ⇒ logout
+    // only clears local state (byte-identical, no network revoke call).
+    oauthRevokeOnLogout: env["QUANTA_OAUTH_REVOKE_ON_LOGOUT"] === "1",
+    // jun-6 (ADR-0481) — DEFAULT-ON (the only default-true knob). Toggles only
+    // whether `.ipynb` TEXTUAL outputs are appended; cell-source render + base64
+    // stripping are unconditional. NO effect on non-`.ipynb` reads (extension
+    // gate). Off only when explicitly set to 0/false/off.
+    ipynbIncludeOutputs: parseBoolDefaultTrue(env["QUANTA_IPYNB_OUTPUTS"]),
+    // jun-6 BYOK — strict `=== "1"` opt-in. Default false ⇒ the legacy LLM-build
+    // seam passes `source: undefined` (byte-identical key resolution).
+    apiKeyHelperLegacyVendor: env["QUANTA_API_KEY_HELPER_LEGACY_VENDOR"] === "1",
+    // jun-6 AI session title — boolean knob vocabulary (1/true/on). Default false
+    // ⇒ no autoTitlePort built, loop branch dead (byte-identical). Both this and
+    // sessionTitleModel must be present for the feature to arm.
+    sessionAutoTitle: parseBool(env["QUANTA_SESSION_AUTO_TITLE"]),
+    sessionTitleModel: stringOrUndef(env["QUANTA_SESSION_TITLE_MODEL"]),
+    // jun-6 tool-interrupt — strict `=== "1"` opt-in. Default false ⇒ dispatch
+    // threads the raw signal, no criticalSection (block behaves like cancel).
+    toolInterruptBlock: env["QUANTA_TOOL_INTERRUPT_BLOCK"] === "1",
+    // jun-6 — watchdog cap (ms). Absent / invalid ⇒ DEFAULT_CRITICAL_SECTION_MAX_MS.
+    criticalSectionMaxMs:
+      parsePositiveInt(env["QUANTA_CRITICAL_SECTION_MAX_MS"], "QUANTA_CRITICAL_SECTION_MAX_MS") ??
+      DEFAULT_CRITICAL_SECTION_MAX_MS,
+    // jun-6 permission_request hook — strict `=== "1"` opt-in kill-switch.
+    // Default false ⇒ the gate does NOT emit permission_request (byte-identical;
+    // falls through to the policy stack). Extra guard atop HookBus presence.
+    permissionHook: env["QUANTA_PERMISSION_HOOK"] === "1",
   })
 }
 

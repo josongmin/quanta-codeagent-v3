@@ -243,6 +243,8 @@ const adaptToNavSession = (client: LspClient): LspNavSession => ({
   documentSymbol: (file) => client.documentSymbol(file),
   workspaceSymbol: (query) => client.workspaceSymbol(query),
   prepareRename: (file, pos) => client.prepareRename(file, pos),
+  incomingCalls: (file, pos, signal) => client.incomingCalls(file, pos, signal),
+  outgoingCalls: (file, pos, signal) => client.outgoingCalls(file, pos, signal),
   stop: () => client.stop(),
 })
 

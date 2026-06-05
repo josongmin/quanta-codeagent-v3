@@ -17,6 +17,13 @@
 
 import { errMessage } from "@/shared"
 import { McpError } from "../client"
+import type {
+  McpPrompt,
+  McpPromptResult,
+  McpResource,
+  McpResourceContent,
+  McpResult,
+} from "../resources/port"
 import type { McpCallResult, McpServerConfig, McpToolDef } from "../types"
 import { type BackoffPolicy, backoffDelay } from "./policy"
 import type { McpClientFactory, SupervisableMcpClient } from "./port"
@@ -173,6 +180,106 @@ export class McpReconnectSupervisor {
       throw new McpError(`mcp server "${this.config.name}" does not support tasks`)
     }
     return fn.call(this.client, method, params)
+  }
+
+  // --- jun-06 RFC: resources/prompts over the supervised path --------------
+
+  /** Does the CURRENT live client's server advertise `resources/*`? Read per call
+   *  (never captured) so a restart swap re-evaluates against the new client.
+   *  Mirrors {@link serverSupportsTasks}: a client lacking the method ⇒ `false`
+   *  (byte-identical default-OFF). */
+  serverSupportsResources(): boolean {
+    return this.client.serverSupportsResources?.() ?? false
+  }
+
+  /** Does the CURRENT live client's server advertise `prompts/*`? Read per call,
+   *  mirroring {@link serverSupportsResources}. */
+  serverSupportsPrompts(): boolean {
+    return this.client.serverSupportsPrompts?.() ?? false
+  }
+
+  /** Proxy `resources/list` through the current live client. NO-THROW: during the
+   *  reconnect gap (`backing-off`/`restarting`/`degraded`) the pending-call policy
+   *  yields a typed `transport` failure instead of a bare throw, so the N3
+   *  aggregate keeps its no-throw contract. Mirrors {@link callTool}/{@link requestRaw}. */
+  async listResources(): Promise<McpResult<McpResource[]>> {
+    return this.proxyResources((c) =>
+      c.listResources
+        ? () => (c.listResources as () => Promise<McpResult<McpResource[]>>)()
+        : undefined,
+    )
+  }
+
+  /** Proxy `resources/read` through the current live client. See {@link listResources}. */
+  async readResource(uri: string): Promise<McpResult<McpResourceContent[]>> {
+    return this.proxyResources((c) =>
+      c.readResource
+        ? () => (c.readResource as (u: string) => Promise<McpResult<McpResourceContent[]>>)(uri)
+        : undefined,
+    )
+  }
+
+  /** Proxy `prompts/list` through the current live client. See {@link listResources}. */
+  async listPrompts(): Promise<McpResult<McpPrompt[]>> {
+    return this.proxyResources((c) =>
+      c.listPrompts ? () => (c.listPrompts as () => Promise<McpResult<McpPrompt[]>>)() : undefined,
+    )
+  }
+
+  /** Proxy `prompts/get` through the current live client. See {@link listResources}. */
+  async getPrompt(
+    name: string,
+    args?: Record<string, unknown>,
+  ): Promise<McpResult<McpPromptResult>> {
+    return this.proxyResources((c) =>
+      c.getPrompt
+        ? () =>
+            (
+              c.getPrompt as (
+                n: string,
+                a?: Record<string, unknown>,
+              ) => Promise<McpResult<McpPromptResult>>
+            )(name, args)
+        : undefined,
+    )
+  }
+
+  /** The load-bearing reconnect-gap contract for every resources/prompts proxy.
+   *  Three windows, all TYPED-FAILURE, NEVER-THROW:
+   *   - `healthy` ⇒ delegate to the live client; its own no-throw `McpResult`
+   *     is returned verbatim.
+   *   - not-`healthy` ⇒ `awaitHealthyOrFail` applies the pending policy
+   *     (fail-fast default throws `McpError`; queue parks up to `queueWaitMaxMs`);
+   *     a throw is CAUGHT and mapped to a typed `transport` failure so the N3
+   *     aggregate (no-throw by contract) never sees an exception.
+   *   - the live client lacks the method ⇒ typed `unsupported` (mirrors
+   *     `serverSupportsTasks` ⇒ false), never a null-deref.
+   *  A `select` returning `undefined` means the method is absent on this client.
+   *  The final delegate is also try/caught so a non-conforming client that throws
+   *  can never leak into the aggregate. */
+  private async proxyResources<T>(
+    select: (c: SupervisableMcpClient) => (() => Promise<McpResult<T>>) | undefined,
+  ): Promise<McpResult<T>> {
+    if (this.state !== "healthy") {
+      try {
+        await this.awaitHealthyOrFail()
+      } catch (e) {
+        return { ok: false, reason: "transport", message: errMessage(e) }
+      }
+    }
+    const fn = select(this.client)
+    if (fn === undefined) {
+      return {
+        ok: false,
+        reason: "unsupported",
+        message: `mcp server "${this.config.name}" does not support resources/prompts`,
+      }
+    }
+    try {
+      return await fn()
+    } catch (e) {
+      return { ok: false, reason: "transport", message: errMessage(e) }
+    }
   }
 
   /** Permanent stop. Cancels any backoff/queue timers, bumps the epoch so a

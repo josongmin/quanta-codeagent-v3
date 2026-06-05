@@ -87,6 +87,11 @@ const CALLER_WIRE_TOOL_NAMES = [
   "gh_pr_comment",
   "gh_pr_create",
   "gh_pr_auto_merge",
+  // jun-6 wave-2 gh write surfaces — caller-wire (gitTools / gitRunner-gated),
+  // not enumerable from `defaultTools`. Included by name so the orphan-direction
+  // drift check stays exact.
+  "gh_pr_edit_labels",
+  "gh_pr_resolve_thread",
   "memory_search",
   "memory_write",
   "memory_update",

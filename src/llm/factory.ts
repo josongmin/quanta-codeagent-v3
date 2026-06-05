@@ -1,5 +1,6 @@
 import { hasUsableChatgptToken } from "@/auth/chatgpt-oauth"
 import type { LLMProvider } from "@/shared/errors"
+import { runtimeConfig } from "@/shared/runtime-config"
 import { AnthropicAdapter } from "./adapters/anthropic"
 import { ChatGPTOAuthAdapter } from "./adapters/chatgpt-oauth"
 import { OpenAIAdapter } from "./adapters/openai"
@@ -15,6 +16,7 @@ import type {
 } from "./providers/provider-port"
 import { resolveProvider } from "./providers/registry"
 import { type VertexAdapterOptions, VertexProviderAdapter } from "./providers/vertex-adapter"
+import type { CacheTtl } from "./types"
 
 /** Canonical provider identifier. Re-exports the `LLMProvider` union already
  *  defined in `@/shared/errors` (single source of truth — the error layer and
@@ -145,6 +147,9 @@ const ADAPTER_REGISTRY: Record<
         ? { streamFirstChunkMs: opts.streamFirstChunkMs }
         : {}),
       ...(opts.streamIdleMs !== undefined ? { streamIdleMs: opts.streamIdleMs } : {}),
+      // Prompt-cache 1h TTL: only granted when the knob is "1h" AND the model
+      // is allowlisted; otherwise "5m" (byte-identical fixed-5m cache_control).
+      cacheTtl: resolveCacheTtl(model, runtimeConfig()),
     }),
   // ChatGPT-OAuth provider (ADR-0094 Phase 2). The api-key argument is unused
   // — the credential is the on-disk token bundle written by `/login`. `env`
@@ -201,6 +206,41 @@ const resolveReasoningEffort = (opts: CreateLLMOptions, env: EnvLikeDecl): strin
  *  adapters drop thinking + emit no `include` (byte-identical). */
 const resolveReasoningCarryover = (env: EnvLikeDecl): boolean =>
   env.QUANTA_REASONING_CARRYOVER === "1"
+
+/** Models whose Anthropic cache_control supports the extended `ttl:"1h"`
+ *  breakpoint. Keyed by NORMALIZED model FAMILY (vendor prefix + date suffix
+ *  stripped) so a cloud slug (`anthropic.claude-opus-4-8-v1:0`,
+ *  `claude-opus-4-8@20250101`) maps to the same family as the public slug. A
+ *  model NOT in this set NEVER receives `ttl:"1h"` even when the knob is on —
+ *  the codec stays byte-identical (5m) for it. */
+const CACHE_1H_ALLOWLIST: ReadonlySet<string> = new Set([
+  "claude-opus-4-8",
+  "claude-opus-4-7",
+  "claude-opus-4-6",
+  "claude-sonnet-4-6",
+  "claude-haiku-4-5",
+])
+
+/** Normalize a (possibly cloud-prefixed / date-suffixed) model slug to its
+ *  canonical Anthropic family so the allowlist match is transport-agnostic.
+ *  Strips a leading `anthropic.` vendor prefix (Bedrock), a trailing
+ *  `-v<N>:<N>` Bedrock version, a trailing `@<date>` Vertex pin, and a trailing
+ *  `-<8-digit-date>` public-API date suffix. Lowercased for case tolerance. */
+const normalizeModelFamily = (model: string): string => {
+  let m = model.toLowerCase().trim()
+  if (m.startsWith("anthropic.")) m = m.slice("anthropic.".length)
+  m = m.replace(/-v\d+:\d+$/, "") // Bedrock version suffix
+  m = m.replace(/@\d{6,}$/, "") // Vertex @date pin
+  m = m.replace(/-\d{8}$/, "") // public-API -YYYYMMDD suffix
+  return m
+}
+
+/** Resolve the effective prompt-cache TTL for `model`. `"1h"` is granted ONLY
+ *  when the knob selected `"1h"` AND the model's family is on the
+ *  {@link CACHE_1H_ALLOWLIST}; otherwise `"5m"` (byte-identical fixed-5m
+ *  cache_control). Pure — `cfg` is the frozen runtime config. */
+const resolveCacheTtl = (model: string, cfg: { readonly cacheTtl: CacheTtl }): CacheTtl =>
+  cfg.cacheTtl === "1h" && CACHE_1H_ALLOWLIST.has(normalizeModelFamily(model)) ? "1h" : "5m"
 
 /** Composition-root resolution of the ChatGPT-OAuth body-debug flag. Explicit
  *  option wins; otherwise `QUANTA_DEBUG_OAUTH === "1"`. */
@@ -296,6 +336,77 @@ export const createLLM = (provider: Provider, opts: CreateLLMOptions, env: EnvLi
   return ADAPTER_REGISTRY[provider](apiKey, model, merged, env)
 }
 
+// ─────────── H7-BYOK — apiKeyHelper mint for the LEGACY vendor key path ──────
+//
+// RFC docs/plans/jun-6-byok-apikey-helper.md. H7 shipped a fully-hardened
+// executable `CredentialSource` whose `mintApiKey()` runs an operator-configured
+// shell command that prints a freshly-minted API key (TTL-cached, single-flight,
+// empty-stdout-guarded, trust-gated, no-leak — `credential-helper.ts`). Until now
+// only its sibling `refreshCloudCreds(...)` had a live consumer (Bedrock/Vertex);
+// the `mintApiKey()` path was dead for the LEGACY `anthropic`/`openai` vendor key
+// that `createLLM` resolves from `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`.
+//
+// {@link resolveVendorApiKey} closes that gap WITHOUT making the factory async:
+// the composition root (`@/runner/assemble/llm`, which already builds the H7
+// `CredentialSource`) `await`s this pre-resolution step and passes the minted key
+// in as `opts.apiKey` — which `resolveApiKey` already lets win over env. The
+// sync `createLLM` is then called with the resolved opts. The mint feeds ONLY the
+// two legacy vendor providers; `chatgpt-oauth` (on-disk token) and the multicloud
+// transports (`refreshCloudCreds`, a different H7 capability) are guarded out.
+
+/** The ONLY providers whose env-var key may be replaced by an `apiKeyHelper`
+ *  mint. `chatgpt-oauth` has no env key (on-disk token); `bedrock`/`vertex` use
+ *  the OTHER H7 capability (`refreshCloudCreds`). Pinning the set here keeps the
+ *  guard a typed, exhaustive membership check rather than an if-chain. */
+export const MINTABLE_PROVIDERS: ReadonlySet<Provider> = new Set<Provider>(["anthropic", "openai"])
+
+/** Pre-resolve `opts.apiKey` from the H7 `apiKeyHelper` mint for a LEGACY vendor
+ *  provider, at the composition root, BEFORE the synchronous {@link createLLM}.
+ *
+ *  This is the ONLY async step in the vendor-key path; the factory itself stays
+ *  synchronous (RFC §3.3) — the root `await`s this, then calls `createLLM` with
+ *  the returned (possibly key-augmented) opts.
+ *
+ *  Precedence (RFC §4.3), first wins:
+ *    1. `opts.apiKey` — an explicit caller key hard-pins; the mint is NOT even
+ *       consulted (no shell spawned).
+ *    2. `apiKeyHelper` mint — when a `source` is present AND the provider is
+ *       mintable AND the helper is configured/trusted/non-empty.
+ *    3. `env[API_KEY_ENV[provider]]` — resolved later, INSIDE `createLLM`.
+ *
+ *  Default-OFF / byte-identity:
+ *    - `source === undefined` (no H7 knob set, or the legacy-vendor gate is off)
+ *      ⇒ returns the SAME `opts` reference (no `apiKey` added) ⇒ `createLLM`
+ *      resolves from env exactly as today.
+ *    - `mintApiKey()` returns `undefined` (no `apiKeyHelper` configured) ⇒ same.
+ *    - A non-mintable provider (`chatgpt-oauth`/cloud transport) ⇒ same, mint
+ *      never called.
+ *
+ *  Failure: a CONFIGURED-but-broken helper (non-zero exit / empty stdout /
+ *  untrusted) makes `mintApiKey()` THROW a typed `CredentialHelperError`, which
+ *  this function propagates to the root (symmetric with how a failing
+ *  `refreshCloudCreds` surfaces before a cloud wire call). The H7 empty-stdout
+ *  guard is what makes "mint above env" safe — a broken helper throws rather than
+ *  shadowing a working env key with `""`.
+ *
+ *  NO-LEAK: the minted value flows only into the returned `opts.apiKey`; it is
+ *  never logged here, and the H7 error taxonomy already drops helper output.
+ *
+ *  @param source the H7 {@link CredentialSource} the composition root already
+ *                built, or `undefined` when the BYOK-mint gate is off / no H7
+ *                knob is set (default-OFF fast path). */
+export const resolveVendorApiKey = async (
+  provider: Provider,
+  opts: CreateLLMOptions,
+  source: CredentialSource | undefined,
+): Promise<CreateLLMOptions> => {
+  if (source === undefined) return opts // default-OFF / gate-off fast path
+  if (!MINTABLE_PROVIDERS.has(provider)) return opts // oauth / cloud transports skip
+  if (opts.apiKey !== undefined) return opts // explicit caller key wins over mint
+  const minted = await source.mintApiKey() // undefined when apiKeyHelper unset; throws on broken
+  return minted === undefined ? opts : { ...opts, apiKey: minted }
+}
+
 /** Null-on-missing-key variant of {@link createLLM} for callers (bench, eval)
  *  that legitimately skip a step when the provider key is absent rather than
  *  aborting. Any OTHER error still throws. */
@@ -370,6 +481,8 @@ export const MULTICLOUD_AUTH_ENV_KEYS = {
   azureResource: "ANTHROPIC_FOUNDRY_RESOURCE",
   azureEndpoint: "ANTHROPIC_FOUNDRY_BASE_URL",
   azureApiKey: "ANTHROPIC_FOUNDRY_API_KEY",
+  mantleToken: "ANTHROPIC_MANTLE_TOKEN",
+  mantleEndpoint: "ANTHROPIC_MANTLE_BASE_URL",
 } as const
 
 /** Options accepted by {@link createMulticloudLLM}. A superset of the per-
@@ -435,6 +548,10 @@ const resolveMulticloudAuth = (opts: CreateMulticloudOptions, env: EnvLike): Pro
   if (azureEndpoint !== undefined) out.azureEndpoint = azureEndpoint
   const azureApiKey = pick(a.azureApiKey, e.azureApiKey)
   if (azureApiKey !== undefined) out.azureApiKey = azureApiKey
+  const mantleToken = pick(a.mantleToken, e.mantleToken)
+  if (mantleToken !== undefined) out.mantleToken = mantleToken
+  const mantleEndpoint = pick(a.mantleEndpoint, e.mantleEndpoint)
+  if (mantleEndpoint !== undefined) out.mantleEndpoint = mantleEndpoint
   // `apiKey` (default transport) flows through from explicit opts.auth only —
   // the legacy `ANTHROPIC_API_KEY` env path is owned by `createLLM`, not here.
   if (a.apiKey !== undefined) out.apiKey = a.apiKey
@@ -489,13 +606,17 @@ export const createMulticloudLLM = (opts: CreateMulticloudOptions, env: EnvLike)
       ? { streamFirstChunkMs: opts.streamFirstChunkMs }
       : {}),
     ...(opts.streamIdleMs !== undefined ? { streamIdleMs: opts.streamIdleMs } : {}),
+    // Prompt-cache 1h TTL — gated by the same allowlist as the legacy path.
+    // The cloud adapters share the Anthropic Messages codec, so the 4th-arg
+    // ttl reaches their request builder identically (5m default = byte-id).
+    cacheTtl: resolveCacheTtl(model, runtimeConfig()),
   }
 
   // Bedrock / Vertex: construct directly so the H7 credentialSource + the
   // test-only client factory can be injected (the registry `factory(config)`
   // arm has no slot for adapter options).
   if (id === "bedrock") return buildBedrock(config, opts)
-  if (id === "vertex") return buildVertex(config, opts)
+  if (id === "vertex") return buildVertex(config, opts, env)
 
   // default / foundry / mantle / unknown — no CredentialSource slot; use the
   // registry factory verbatim (preserves the lazy-unsupported contract for
@@ -515,10 +636,42 @@ const buildBedrock = (config: ProviderConfig, opts: CreateMulticloudOptions): LL
   return new BedrockProviderAdapter(config, adapterOpts)
 }
 
-/** Vertex sibling of {@link buildBedrock}. */
-const buildVertex = (config: ProviderConfig, opts: CreateMulticloudOptions): LLMPort => {
+/** Vertex sibling of {@link buildBedrock}. Additionally derives the per-model
+ *  region map from `VERTEX_REGION_<MODEL>` env (same injected `env` the auth
+ *  ladder reads for `CLOUD_ML_REGION`) and threads it into the adapter opts.
+ *  Empty/absent ⇒ no map (byte-identical single-region path). */
+const buildVertex = (
+  config: ProviderConfig,
+  opts: CreateMulticloudOptions,
+  env: EnvLike,
+): LLMPort => {
   const adapterOpts: VertexAdapterOptions = {}
   if (opts.credentialSource !== undefined) adapterOpts.credentialSource = opts.credentialSource
   if (opts.vertexClientFactory !== undefined) adapterOpts.clientFactory = opts.vertexClientFactory
+  const regionMap = resolveVertexRegionMap(env)
+  if (regionMap !== undefined) adapterOpts.vertexRegionByModel = regionMap
   return new VertexProviderAdapter(config, adapterOpts)
+}
+
+/** Derive the per-model Vertex region map from `VERTEX_REGION_<MODEL>` env
+ *  vars. The suffix after `VERTEX_REGION_` is the model slug with `-`/`.`/`@`
+ *  separators rendered as `_` (the only chars an env var name admits); we
+ *  re-render it to the canonical dashed-lowercase wire slug used as the
+ *  adapter map KEY (`VertexProviderAdapter` does an EXACT match against
+ *  `config.model`). Returns `undefined` when no such var is set, so the adapter
+ *  sees no map at all (byte-identical single-region path). Reads ONLY the
+ *  injected `env` (never `process.env`). */
+const resolveVertexRegionMap = (env: EnvLike): Readonly<Record<string, string>> | undefined => {
+  const PREFIX = "VERTEX_REGION_"
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(env)) {
+    if (!key.startsWith(PREFIX)) continue
+    if (value === undefined || value.length === 0) continue
+    // Env names cannot contain `-`; operators spell the slug with `_`. Render
+    // it back to the dashed-lowercase wire slug the adapter matches on.
+    const slug = key.slice(PREFIX.length).toLowerCase().replaceAll("_", "-")
+    if (slug.length === 0) continue
+    out[slug] = value
+  }
+  return Object.keys(out).length > 0 ? Object.freeze(out) : undefined
 }

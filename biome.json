@@ -1154,7 +1154,10 @@
         "!tests/unit/integrations/github/cli-real-adapters-hellgate-r3.test.ts",
         "!tests/unit/integrations/github/composer-redact-defence-in-depth-hellgate-r3.test.ts",
         "!tests/unit/integrations/github/composer-fold-hellgate-r5.test.ts",
-        "!tests/integration/integrations/github/end-to-end-real-adapter-r3.test.ts"
+        "!tests/integration/integrations/github/end-to-end-real-adapter-r3.test.ts",
+        "!tests/unit/heartbeat-binder-resume-hellgate.test.ts",
+        "!tests/unit/heartbeat-binder-e2e-hellgate.test.ts",
+        "!tests/unit/doctor-selfcheck-hellgate.test.ts"
       ],
       "linter": {
         "rules": {

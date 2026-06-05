@@ -51,6 +51,8 @@ const fakeSession = (
     documentSymbol: notImpl,
     workspaceSymbol: (q) => workspaceSymbol(q),
     prepareRename: notImpl,
+    incomingCalls: notImpl,
+    outgoingCalls: notImpl,
     stop: async () => {
       stops += 1
     },

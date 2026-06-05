@@ -41,6 +41,8 @@ export interface DefineToolSpec<I, O> {
   hitlTier?: Tool<I, O>["hitlTier"]
   extractShellCommand?: Tool<I, O>["extractShellCommand"]
   classifySource?: Tool<I, O>["classifySource"]
+  // jun-6 tool-interrupt-behavior — per-tool interrupt policy passthrough.
+  interruptBehavior?: Tool<I, O>["interruptBehavior"]
   // --- absorb #1 optional capabilities ---
   outputSchema?: z.ZodType<O>
   toModelOutput?(result: ToolResult): string
@@ -64,6 +66,7 @@ export const defineTool = <I, O = unknown>(spec: DefineToolSpec<I, O>): Tool<I, 
   if (spec.hitlTier !== undefined) tool.hitlTier = spec.hitlTier
   if (spec.extractShellCommand !== undefined) tool.extractShellCommand = spec.extractShellCommand
   if (spec.classifySource !== undefined) tool.classifySource = spec.classifySource
+  if (spec.interruptBehavior !== undefined) tool.interruptBehavior = spec.interruptBehavior
   if (spec.outputSchema !== undefined) tool.outputSchema = spec.outputSchema
   if (spec.toModelOutput !== undefined) tool.toModelOutput = spec.toModelOutput
   if (spec.supportsDeferredResults !== undefined) {

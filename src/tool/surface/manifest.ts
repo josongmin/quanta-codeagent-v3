@@ -294,6 +294,8 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
       "gh_pr_blame",
       "gh_pr_review_diff",
       "gh_pr_auto_merge",
+      "gh_pr_edit_labels",
+      "gh_pr_resolve_thread",
       "gh_check_status",
       "gh_issue_view",
     ],

@@ -6,6 +6,13 @@
  *  `onExit` to each so they satisfy {@link SupervisableMcpClient} without the
  *  supervisor reaching across to a concrete type. */
 
+import type {
+  McpPrompt,
+  McpPromptResult,
+  McpResource,
+  McpResourceContent,
+  McpResult,
+} from "../resources/port"
 import type { McpCallResult, McpServerConfig, McpToolDef } from "../types"
 
 /** Structural surface that both `McpClient` and `IsolatedMcpClient` satisfy.
@@ -29,6 +36,22 @@ export interface SupervisableMcpClient {
   /** ADR-0435 follow-up — OPTIONAL outbound JSON-RPC dispatch for `tasks/*`.
    *  Present iff `serverSupportsTasks` is. */
   requestRaw?(method: string, params?: unknown): Promise<unknown>
+  /** jun-06 RFC — OPTIONAL `resources/*` + `prompts/*` capability probes +
+   *  no-throw methods. `McpClient` exposes all six; `IsolatedMcpClient` (and any
+   *  test double that does not speak resources) exposes none, so the supervisor's
+   *  `serverSupportsResources`/`serverSupportsPrompts` default to `false` and the
+   *  resources surface stays absent (byte-identical default-OFF). Read per call
+   *  off the CURRENT live client so a restart re-evaluates capability.
+   *
+   *  Each method is NO-THROW (returns a typed {@link McpResult}); the supervisor's
+   *  `proxyResources` still guards so a non-conforming client can never throw into
+   *  the N3 aggregate. */
+  serverSupportsResources?(): boolean
+  serverSupportsPrompts?(): boolean
+  listResources?(): Promise<McpResult<McpResource[]>>
+  readResource?(uri: string): Promise<McpResult<McpResourceContent[]>>
+  listPrompts?(): Promise<McpResult<McpPrompt[]>>
+  getPrompt?(name: string, args?: Record<string, unknown>): Promise<McpResult<McpPromptResult>>
 }
 
 /** How the supervisor builds a fresh client instance on each restart. Injected

@@ -96,6 +96,16 @@ export {
   coverageCheckInputSchema,
   coverageCheckTool,
 } from "./coverage_check"
+// jun-6 tool-interrupt-behavior — PURE per-call interrupt-routing helper wrapped
+// by the dispatch abort-router for `"block"` tools (clock + scheduler injected;
+// no ambient state). The composition root in `@/agent` constructs one per call.
+export {
+  type CriticalSectionScheduler,
+  type InterruptRouter,
+  type InterruptRouterObserver,
+  type MakeInterruptRouterArgs,
+  makeInterruptRouter,
+} from "./critical-section"
 export { DeferredResultRegistry, UnknownDeferredHandleError } from "./deferred"
 export {
   type DiagnosticItem,
@@ -423,6 +433,8 @@ export {
 } from "./subagent-bg"
 export type {
   BlockerSurface,
+  CriticalSectionHandle,
+  CriticalSectionSeam,
   DeferredHandle,
   DeferredToolResult,
   GitWriteGuard,
@@ -448,6 +460,7 @@ export type {
   ToolDiffSink,
   ToolEvent,
   ToolFailure,
+  ToolInterruptPolicy,
   ToolResult,
   ToolResultEvidence,
   ToolSpec,
