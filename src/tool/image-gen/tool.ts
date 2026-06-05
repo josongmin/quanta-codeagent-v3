@@ -207,6 +207,17 @@ const loadReference = async (
 ): Promise<{ kind: "ok"; image: GeneratedImage } | { kind: "fail"; result: ToolResult }> => {
   let jailed: string
   try {
+    // R5 hardening — a NUL byte makes Bun.file/exists THROW at the syscall
+    // boundary (below), which would escape this helper and reject the tool
+    // iterator (NO-THROW contract §2 violation). `resolveJailed` itself does
+    // not screen NUL (that pre-check lives in the `resolveJailedDoc` /
+    // `resolveVersionedJailedTarget` wrappers the OTHER path-tools use). Match
+    // that discipline here so a hostile edit-ref path yields a typed
+    // `permission_denied`, never an iterator rejection. No escape was ever
+    // possible — Bun rejects the NUL — but the contract gap is real.
+    if (refPath.includes("\0")) {
+      throw new FsJailError("image: NUL byte in reference path is not allowed")
+    }
     jailed = resolveJailed(refPath, cwd) as string
   } catch (e) {
     if (e instanceof FsJailError) {

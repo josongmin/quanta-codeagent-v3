@@ -20,6 +20,7 @@
  */
 
 import { z } from "zod"
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent, ToolFailure, ToolResult } from "../types"
 
 /** Duck-typed mirror of `@/side-agent`'s `SideAgentTrigger`. */
@@ -69,9 +70,6 @@ export interface SideAgentDaemonPort {
 
 const ok = (output: string): ToolResult => ({ ok: true, output })
 const err = (output: string, failure: ToolFailure): ToolResult => ({ ok: false, output, failure })
-
-const errMessage = (e: unknown): string =>
-  e instanceof Error ? e.message : typeof e === "string" ? e : "unknown error"
 
 const triggerSchema = z.discriminatedUnion("kind", [
   z.object({

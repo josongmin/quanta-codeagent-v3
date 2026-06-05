@@ -22,11 +22,45 @@ import {
  *  output (where a prompt / result lives) plus the start for context. */
 const PTY_MAX_READ_OUTPUT = 32 * 1024
 
+/** Pull `keep` UTF-16 code units off the FRONT of `s` without splitting a
+ *  surrogate pair. If index `keep` lands on the LOW half of a pair (the
+ *  preceding unit at `keep-1` is a HIGH surrogate), back off by one so the
+ *  high half is dropped with its low half instead of being emitted alone. */
+const sliceHeadWhole = (s: string, keep: number): string => {
+  const c = s.charCodeAt(keep - 1)
+  const end = c >= 0xd800 && c <= 0xdbff ? keep - 1 : keep
+  return s.slice(0, end)
+}
+
+/** Pull `keep` UTF-16 code units off the END of `s` without splitting a
+ *  surrogate pair. If the first kept unit (at `start`) is a LOW surrogate, its
+ *  HIGH half was just dropped — advance by one so we never lead with a lone low
+ *  half. */
+const sliceTailWhole = (s: string, keep: number): string => {
+  const start = s.length - keep
+  const c = s.charCodeAt(start)
+  return s.slice(c >= 0xdc00 && c <= 0xdfff ? start + 1 : start)
+}
+
+/**
+ * head+tail truncate to {@link PTY_MAX_READ_OUTPUT}. Surrogate-safe: a JS string
+ * is UTF-16, and a naive `slice` at an arbitrary index can cut a surrogate PAIR
+ * (an astral char — emoji, CJK-ext, box-drawing in some fonts) in half, emitting
+ * a LONE surrogate. That re-encodes to a U+FFFD replacement char (or a malformed
+ * token) when the transcript is serialized to the model — a real corruption, not
+ * cosmetic. Competitor precedent: Codex decodes child PTY bytes via Rust
+ * `String::from_utf8_lossy`, which can never produce a lone surrogate (a Rust
+ * `String` is well-formed UTF-8 by construction). We mirror that guarantee by
+ * snapping both cut points off a surrogate boundary so the model only ever sees
+ * a well-formed string.
+ */
 const capOutput = (s: string): string => {
   if (s.length <= PTY_MAX_READ_OUTPUT) return s
   const keep = Math.floor(PTY_MAX_READ_OUTPUT / 2)
-  const dropped = s.length - keep * 2
-  return `${s.slice(0, keep)}\n… [${dropped} chars truncated] …\n${s.slice(s.length - keep)}`
+  const head = sliceHeadWhole(s, keep)
+  const tail = sliceTailWhole(s, keep)
+  const dropped = s.length - head.length - tail.length
+  return `${head}\n… [${dropped} chars truncated] …\n${tail}`
 }
 
 const handleSchema = z.string().min(1).describe("Opaque session handle (tmux:<name> or pty:<seq>)")
@@ -159,6 +193,16 @@ export const ptyTools = (port: PtySessionPort): Tool[] => {
     inputSchema: writeSchema,
     isReadOnly: () => false,
     isConcurrencySafe: () => false,
+    // SECURITY (R5 privilege-boundary): `pty_write` feeds bytes straight into a
+    // LIVE shell's stdin — it is a shell-input channel equivalent to `bash`'s
+    // `command`. Surfacing `data` here lets the dispatch seam populate
+    // `ToolAction.shellCommand`, so the policy's HARD_DENY corpus (rm -rf /,
+    // curl|sh, fork-bombs, …) screens the typed bytes through the SAME denylist
+    // as `bash` — including in bypass mode, where HARD_DENY still wins. Without
+    // this, an attached terminal was a denylist-evading exec channel. The
+    // submit newline (`appendNewline`) is irrelevant to the verdict: the payload
+    // is what runs.
+    extractShellCommand: (input: PtyWriteInput): string => input.data,
     execute(input, ctx) {
       const g = guard(writeSchema, input, ctx)
       if (!g.ok) return one(g.result)

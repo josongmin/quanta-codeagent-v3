@@ -42,13 +42,12 @@ import {
 } from "./repl/factories"
 import { buildMcpSurfaceInfo } from "./repl/mcp-surface-wire"
 import { runSessionLoop } from "./repl/session-loop"
+import { buildSessionLoopOptions } from "./repl/session-loop-options"
 import { setupSession } from "./repl/session-setup"
 import { buildSkillsCallback, installPills } from "./repl/skills-surface"
 import {
-  buildPromptUx,
   composeSurfaceSlashCtx,
   composeSurfaceWires,
-  composeTurnSinks,
   createSurfaceState,
 } from "./repl/surface-compose"
 import type { RewindSlashState } from "./rewind-cmd"
@@ -112,13 +111,6 @@ const buildImageQueue = (featureCfg: CliFeatureConfig): ImageQueue | undefined =
   if (!featureCfg.imageQueue.enabled) return undefined
   return createImageQueue({ maxSize: featureCfg.imageQueue.maxSize })
 }
-
-/** RFC-08 — prompt-UX bundle extracted from `runRepl` (host LOC contract); sink repaints the status-bar pill on shift+tab. */
-const buildReplPromptUx = (
-  featureCfg: CliFeatureConfig,
-  setup: Awaited<ReturnType<typeof setupSession>>,
-): ReturnType<typeof buildPromptUx> =>
-  buildPromptUx(featureCfg, setup.cwd, process.env, (m) => setup.pills.update({ mode: m }))
 
 /** Route `quanta session …` to the session subcommand dispatcher. Returns
  *  the exit code; no agent/REPL wiring runs in this branch. */
@@ -305,38 +297,19 @@ export const runRepl = async (): Promise<void> => {
       cwd: setup.cwd,
       contextUsageView: wires.contextUsageView,
     })
-    await runSessionLoop({
-      setup,
-      dispatchSlash: wires.dispatchSlash,
-      sinks: composeTurnSinks(setup, surfaceState),
-      ...rfc09,
-      ...(surfaceState.imageQueue !== undefined ? { imageQueue: surfaceState.imageQueue } : {}),
-      textInbox: wires.textInbox,
-      ux: await buildReplPromptUx(featureCfg, setup),
-      registerExitTeardown: (cb) => {
-        process.once("exit", cb)
-      },
-      // ADR-0292 — turn-end record + restore swap. The wire may be null
-      // (default-OFF byte-identical when QUANTA_CHECKPOINT_CONV !== "on")
-      // — the loop short-circuits on null.
-      convCheckpointWire: wires.convCheckpointWire,
-      registerReplaceMessages: wires.setReplaceMessages,
-      registerSideConversationStart: wires.setSideConversationStart,
-      registerPlanQueueSendNow: wires.setPlanQueueSendNow,
-      runtimeFacadeCompose: wires.runtimeFacadeCompose,
-      // ADR-0293 — seam attached by the loop once externalPromptQueue is
-      // born (the queue is the sink the trigger dispatches into).
-      playbookSeam: wires.playbookSeam,
-      // ADR-0301 — `--playbook-trigger` CLI flag echo. Spread conditionally
-      // so `exactOptionalPropertyTypes` doesn't see a literal `undefined`.
-      ...(setup.playbookCliFlag !== undefined ? { playbookCliFlag: setup.playbookCliFlag } : {}),
-      // L5 M-11 — per-session search-wire teardown threaded onto the loop's
-      // close stack (replaces the module-singleton dispose). Absent ⇒ no wire
-      // built; slot omitted (`exactOptionalPropertyTypes`-friendly).
-      ...(setup.searchPipelineDispose !== undefined
-        ? { searchPipelineDispose: setup.searchPipelineDispose }
-        : {}),
-    })
+    // CLI-06 (ADR-0307) — the per-turn loop wiring is assembled in
+    // `repl/session-loop-options.ts` (same host-slimming pattern as
+    // `repl/factories/`); the host owns only entry routing + compose.
+    await runSessionLoop(
+      await buildSessionLoopOptions({
+        setup,
+        surfaceState,
+        wires,
+        rfc09,
+        featureCfg,
+        env: process.env,
+      }),
+    )
   } finally {
     // Track T — tear down ring-buffer panel BEFORE other chrome dispose so
     // any DECSTBM reset lands first. Idempotent + no-op when not allocated.

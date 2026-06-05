@@ -86,6 +86,10 @@ const EXPECTED_NAMES = new Set<string>([
   // (registered in registry-app.ts but never added here at base 783e6145).
   "/knobs",
   "/session-registry",
+  // jun-05 wave2 additions — intentional new builtins (the sweep tracks the
+  // registered set; these are real commands, not accidental drift).
+  "/brief", // registry-surface.ts — turn brief/summary
+  "/dream", // dream-cmd.ts — cross-session memory consolidation (auto-dream)
 ])
 
 describe("ADR-0306 — slash registry split hellgate (CLI-03)", () => {

@@ -42,7 +42,13 @@ evidence:
     integration:
       - tests/unit/side-agent-block-e2e-hellgate.test.ts
     contract: []
-knobs: []
+knobs:
+  - name: QUANTA_SIDE_AGENT
+    default: 'undefined'
+    purpose: 'Strict opt-in (=="1") that mints the live daemon registry (maybeWireSideAgent) so the side_agent_* tools register; absent ⇒ slot unset ⇒ tools unregistered ⇒ byte-identical.'
+  - name: QUANTA_TEAM_IDLE
+    default: 'undefined'
+    purpose: 'Optional — when set, wireSideAgentDaemons composes an idle-barrier (Capability C) so a leader can await teamIdle() over the resident daemons instead of polling; absent ⇒ legacy registry (byte-identical).'
 notes: |
   L3: pure 데몬 registry 코어 + 4 도구 + tier1 블록 + AgentConfig slot + knob +
   **Phase-2 host runner adaptation 완료** (`src/agent/side-agent-runner.ts`):

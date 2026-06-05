@@ -322,6 +322,27 @@ describe("image_gen — edit mode", () => {
     expect(res.ok).toBe(false)
     expect(res.failure?.mode).toBe("permission_denied")
   })
+
+  // R5 privilege-boundary hellgate — a NUL byte in the edit-reference path made
+  // `Bun.file().exists()` THROW at the syscall boundary, which (before the fix)
+  // escaped `loadReference` and REJECTED the tool iterator (NO-THROW contract
+  // §2 violation). No jail escape was ever possible (Bun rejects the NUL), but
+  // a hostile/buggy ref path must surface a TYPED `permission_denied`, never
+  // crash the dispatch loop. The path-truncation form (`ref.png\0/etc/passwd`)
+  // is the classic NUL attack — it is denied wholesale.
+  test("edit reference with a NUL byte → typed permission_denied (no iterator reject)", async () => {
+    const res = await run(
+      { port: fakePort({ kind: "ok", images: [pngImage] }), writePort: new MemWritePort() },
+      {
+        prompt: "a",
+        outputPath: "x.png",
+        mode: "edit",
+        referenceImagePath: "ref.png\0/etc/passwd",
+      },
+    )
+    expect(res.ok).toBe(false)
+    expect(res.failure?.mode).toBe("permission_denied")
+  })
 })
 
 /* ------------------------------------------------------------------ */

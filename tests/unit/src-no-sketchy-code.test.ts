@@ -63,6 +63,8 @@ const RULES: readonly Rule[] = [
         "unified agent CLI entry — same bootstrap posture as apps/cli/index.ts: loadEnvFiles() runs before the API-key reads in buildLLM/resolveProvider (provider selection is a launch-time decision, not a feature read).",
       "apps/cli/internal.ts":
         "CLI feature-flag bootstrap — threads typed values via AgentConfig; downstream modules never read env directly. TODO(S5): migrate to runtimeConfig progressively.",
+      "apps/cli/config-migration-notice.ts":
+        "Injection-first by design (the file is explicitly env-free/homedir-free — every path injected): `process.env` is ONLY the default for the injected `env` param so the CLI entry works without threading, while tests inject a fake env. The action flag is read off that injected param, not a module-level process.env — same CLI-bootstrap posture as apps/cli/internal.ts. TODO(S5): migrate the flag to runtimeConfig progressively.",
       "apps/bench/index.ts": "bench CLI has its own dotenv shim; same bootstrap posture as the CLI",
       "apps/bench/eval/driver.ts":
         "LSP-nav opt-in probe (`QUANTA_LSP_TOOLS=full`) — same gate as CLI; tools register harmlessly without a server. Same posture as the bench CLI's env reads.",
@@ -256,6 +258,8 @@ const RULES: readonly Rule[] = [
         "Detached debounced scan routed through a catch sink (audit L3 C-14): one throwing/rejecting fire must not crash the watcher process as an unhandled rejection; documented inline.",
       "tool/browser/session-holder.ts":
         "Best-effort reap of a dead/superseded browser session handle (2 sites) — post-close is the success state; documented inline.",
+      "mcp/client.ts":
+        "Reconnect closes the STALE carrier LAST (`old?.close().catch(() => {})`) — a close-time error is non-fatal because the transport is already replaced; surfacing it would block the rebuilt path. Documented inline at the call site (same posture as stream/adapters/jsonl-recorder.ts).",
     },
   },
   {

@@ -116,10 +116,15 @@ describe("HELLGATE ssrf-edge — link-local fe80::/10 DENY with fence controls",
       expect(classifyHost(h)).not.toBeNull()
     })
   }
-  // CONTROL: fec0:: (deprecated site-local) and fe00:: are OUTSIDE fe80::/10.
-  test("ALLOW just-above fe80::/10 — fec0::1 public", () => {
-    expect(classifyHost("fec0::1")).toBeNull()
+  // fec0::/10 (deprecated site-local, RFC 3879) is DENIED, not public: it is
+  // distinct from link-local fe80::/10 but the SSRF guard blocks it anyway
+  // because it STILL routes internally on some networks (ssrf.ts hardening —
+  // deny-more is the safe SSRF posture for an internal-ish deprecated range).
+  test("DENY deprecated site-local — fec0::1 (RFC 3879, routes internally)", () => {
+    expect(classifyHost("fec0::1")).not.toBeNull()
   })
+  // CONTROL: fe00:: is just BELOW fe80::/10 and is NOT a special internal range —
+  // it stays public (the guard does not over-block the boundary).
   test("ALLOW just-below fe80::/10 — fe00::1 public", () => {
     expect(classifyHost("fe00::1")).toBeNull()
   })

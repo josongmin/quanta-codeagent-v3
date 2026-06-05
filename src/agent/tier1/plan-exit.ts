@@ -12,7 +12,13 @@
  * `undefined` (byte-identical, RFC §1.2).
  */
 
-import { requestPlanExitTool, type Tool } from "@/tool"
+import type { Tool } from "@/tool"
+// Direct tool import (matches every other tier1 builder: check_secrets / browser /
+// advisor / shadow / delegate import their tool from `@/tool/<name>`, only `type
+// Tool` rides the barrel). This also gives the fc-reachability analyzer a direct
+// edge from this (reached) builder to request-plan-exit.ts, so the L4 feature is
+// correctly seen as reachable instead of a barrel-re-export blind spot.
+import { requestPlanExitTool } from "@/tool/request-plan-exit"
 import type { AgentConfig } from "../types"
 
 /** Build the plan-exit tool from `config.planExitPort`. Returns `undefined`

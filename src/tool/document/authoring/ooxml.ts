@@ -41,20 +41,47 @@ export const escapeXml = (s: string): string =>
  * gets a valid file (those bytes were never representable in XML anyway).
  * Applied by the serializers BEFORE {@link escapeXml}.
  *
+ * UNPAIRED SURROGATES: a JS string is UTF-16 and may carry a LONE surrogate
+ * (a high D800–DBFF with no following low, or a stray low DC00–DFFF) — e.g. when
+ * a caller slices through an astral char (a botched emoji substring). Such a
+ * unit is NOT a valid Unicode scalar value: UTF-8 encoding it yields an INVALID
+ * byte sequence, so the resulting `.docx`/`.xlsx`/`.pptx` part is malformed and
+ * a conforming reader (PowerPoint/Word/LibreOffice) REFUSES to open the file.
+ * We drop lone surrogates here while PRESERVING valid pairs (real astral chars
+ * like emoji survive intact). This is the single sanitization chokepoint for all
+ * three OOXML serializers, so the fix covers every user-text path at once.
+ *
  * Implemented char-by-char (not a regex with control-char class literals) so
  * the SOURCE itself contains no raw control bytes.
  */
+const isHighSurrogate = (c: number): boolean => c >= 0xd800 && c <= 0xdbff
+const isLowSurrogate = (c: number): boolean => c >= 0xdc00 && c <= 0xdfff
+
+/** True when a BMP code unit (non-surrogate) is a legal standalone XML 1.0
+ *  char: tab/LF/CR, or 0x20+ excluding the U+FFFE/U+FFFF non-characters. */
+const isLegalBmpXmlChar = (c: number): boolean => {
+  if (c === 0x09 || c === 0x0a || c === 0x0d) return true
+  if (c < 0x20) return false
+  return c !== 0xfffe && c !== 0xffff
+}
+
 export const stripIllegalXmlChars = (s: string): string => {
   let out = ""
   for (let i = 0; i < s.length; i++) {
     const c = s.charCodeAt(i)
-    if (c === 0x09 || c === 0x0a || c === 0x0d) {
-      out += s[i]
-    } else if (c < 0x20 || c === 0xfffe || c === 0xffff) {
-      // skip — illegal in XML 1.0 even when entity-escaped
-    } else {
-      out += s[i]
+    if (isHighSurrogate(c)) {
+      // Keep the PAIR only when a low surrogate follows (a valid astral char,
+      // e.g. an emoji). A lone high surrogate UTF-8-encodes to an invalid byte
+      // sequence ⇒ drop it (emit nothing).
+      if (isLowSurrogate(s.charCodeAt(i + 1))) {
+        out += s.slice(i, i + 2)
+        i++
+      }
+      continue
     }
+    // A lone low surrogate (any valid pair was consumed above) ⇒ drop.
+    if (isLowSurrogate(c)) continue
+    if (isLegalBmpXmlChar(c)) out += s[i]
   }
   return out
 }
