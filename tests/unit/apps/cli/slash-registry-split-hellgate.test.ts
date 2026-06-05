@@ -90,6 +90,7 @@ const EXPECTED_NAMES = new Set<string>([
   // registered set; these are real commands, not accidental drift).
   "/brief", // registry-surface.ts — turn brief/summary
   "/dream", // dream-cmd.ts — cross-session memory consolidation (auto-dream)
+  "/doctor", // doctor/ — jun-6 environment self-check
 ])
 
 describe("ADR-0306 — slash registry split hellgate (CLI-03)", () => {

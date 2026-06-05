@@ -132,6 +132,7 @@ describe("BUILTINS table", () => {
       "/rewind-conv",
       "/knobs",
       "/session-registry",
+      "/doctor",
     ])
   })
 })

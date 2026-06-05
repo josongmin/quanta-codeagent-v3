@@ -200,9 +200,7 @@ export const createAutoTitlePort = (ports: AutoTitlePorts): AutoTitlePort => ({
     try {
       void generateSessionTitle(sessionId, firstPrompt, ports)
     } catch (err) {
-      ports.debug?.(
-        `auto-title: kick-off swallowed ${err instanceof Error ? err.message : String(err)}`,
-      )
+      ports.debug?.(`auto-title: kick-off swallowed ${errMessage(err)}`)
     }
   },
 })

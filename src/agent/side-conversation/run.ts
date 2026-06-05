@@ -104,6 +104,10 @@ export const SIDE_CONVERSATION_TOOL_NAMES: readonly string[] = Object.freeze([
   "lsp_document_symbol",
   "lsp_workspace_symbol",
   "lsp_rename_preview",
+  // jun-6 wave-2 — call-hierarchy navigation. Pure read-only LSP queries (no FS
+  // write, no shell, no network), so side-conversation-safe.
+  "lsp_incoming_calls",
+  "lsp_outgoing_calls",
   "git_status",
   "git_log",
   "git_diff",

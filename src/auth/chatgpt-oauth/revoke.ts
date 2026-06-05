@@ -12,6 +12,7 @@
  *  injected too. No global `fetch`, no `process.env`, no `Date.now` here.
  */
 
+import { errMessage } from "@/shared"
 import type { FetchLike } from "./refresh"
 
 /** Re-exported under a revoke-specific name so callers read intent at the seam.
@@ -47,12 +48,6 @@ export type RevokeFailureReason = "no-token" | "network" | "non-2xx"
 export type RevokeOutcome =
   | { readonly ok: true }
   | { readonly ok: false; readonly reason: RevokeFailureReason }
-
-/** Local copy of the shared `errMessage` contract so this leaf does not import
- *  the `@/shared` barrel for one helper. Stringifies any thrown value WITHOUT
- *  leaking surrounding context (the token is never part of an Error here). */
-const errMessage = (e: unknown): string =>
-  e instanceof Error ? e.message : typeof e === "string" ? e : "unknown error"
 
 /** RFC 7009 best-effort revoke of a refresh token. NEVER throws: every failure
  *  resolves to a typed {@link RevokeOutcome} so the caller can log + proceed to
