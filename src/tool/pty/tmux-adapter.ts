@@ -14,6 +14,7 @@
 
 import {
   type AttachResult,
+  PTY_MAX_ATTACHED,
   PTY_MAX_DIM,
   PTY_MIN_DIM,
   type PtyChunk,
@@ -37,6 +38,13 @@ export interface TmuxAdapterOpts {
   readonly allowPrefix?: string
   /** When true, foreign (non-prefixed) sessions are allowed (host gates w/ HITL). */
   readonly allowForeign?: boolean
+  /** Max number of distinct handles whose last-capture snapshot is retained at
+   *  once (default {@link PTY_MAX_ATTACHED}). Bounds the per-handle `lastCapture`
+   *  map so a long session that reads from many distinct tmux handles cannot grow
+   *  it without limit. A `read` that would admit a NEW handle past this cap is
+   *  rejected with `cap-exceeded` (detach/kill free a slot). Injectable so a test
+   *  can drive the eviction/rejection path with a tiny bound. */
+  readonly maxAttached?: number
 }
 
 const TMUX_PREFIX = "tmux:"
@@ -66,8 +74,16 @@ const diffCapture = (
 export const createTmuxAdapter = (opts: TmuxAdapterOpts): PtySessionPort => {
   const allowPrefix = opts.allowPrefix ?? "quanta-"
   const allowForeign = opts.allowForeign ?? false
+  // Bound the per-handle last-capture map (default PTY_MAX_ATTACHED). A
+  // non-positive override is clamped to 1 so a just-read handle always fits.
+  const maxAttached =
+    opts.maxAttached !== undefined && opts.maxAttached >= 1
+      ? Math.floor(opts.maxAttached)
+      : PTY_MAX_ATTACHED
   // Per-handle last-capture, so `read` can diff snapshots into a monotone seq
-  // (tmux has no event stream — capture-pane is poll-based).
+  // (tmux has no event stream — capture-pane is poll-based). BOUNDED at
+  // `maxAttached`: `read` refuses to admit a NEW handle past the cap so this map
+  // cannot grow without limit over a long-running session; detach/kill evict.
   const lastCapture = new Map<PtyHandle, { text: string; seq: number }>()
 
   const gate = (handle: PtyHandle): PtyResult<string> => {
@@ -140,6 +156,15 @@ export const createTmuxAdapter = (opts: TmuxAdapterOpts): PtySessionPort => {
     async read(handle: PtyHandle, sinceSeq: number): Promise<PtyResult<ReadResult>> {
       const g = gate(handle)
       if (!g.ok) return g
+      // Cap the tracked-handle set: a read of a NEW handle past the cap is
+      // rejected so `lastCapture` stays bounded (re-reading an already-tracked
+      // handle never grows the map and is always allowed). detach/kill free slots.
+      if (!lastCapture.has(handle) && lastCapture.size >= maxAttached) {
+        return errR(
+          "cap-exceeded",
+          `attached-handle cap ${maxAttached} reached (detach a session before reading another)`,
+        )
+      }
       const r = await opts.exec.run(["capture-pane", "-t", g.value, "-p"])
       if (!r.ok) return errR("backend-error", "tmux capture-pane failed")
       const { chunk, seq } = diffCapture(lastCapture.get(handle), r.stdout)

@@ -17,7 +17,13 @@
 export { STALE_READ_GUARD_ENV, staleReadGuardEnabled } from "./gate"
 export { isWriteCommand, WRITE_COMMAND_MARKERS } from "./markers"
 export { renderStaleReminder } from "./reminder"
-export { guardWrite, type MtimeObservation, ReadFileState, staleAfterBash } from "./state"
+export {
+  DEFAULT_RANGE_DEDUP_CAP,
+  guardWrite,
+  type MtimeObservation,
+  ReadFileState,
+  staleAfterBash,
+} from "./state"
 export {
   type Freshness,
   type FreshnessKind,

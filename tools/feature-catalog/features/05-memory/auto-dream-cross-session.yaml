@@ -53,11 +53,17 @@ evidence:
     - src/memory/dream/wire.ts
     - src/memory/dream/index.ts
     - src/apps/cli/dream-cmd.ts
+    # H16 host-binding (jun-05): the slice is now LIVE — the runner builds the
+    # trigger over the real memory substrate + the session host fires it at end.
+    - src/runner/session-memory-auto.ts
+    - src/host/runtime/internal/context-binding.ts
   adrs: []
   tests:
     unit:
       - tests/unit/auto-dream-hellgate.test.ts
       - tests/unit/auto-dream-e2e-hellgate.test.ts
+      - tests/unit/dream-trigger-wire-e2e-hellgate.test.ts
+      - tests/unit/dream-trigger-adversarial-r2-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -95,3 +101,21 @@ notes: |
   surface) — this is the elapsed-sessions/hours SCHEDULER + dream-lock +
   team-write target those two lacked. Claude reference: never mutates MEMORY.md
   live; writes to a team/ dir.
+
+  jun-05 host-binding (LIVE): `buildCrossSessionDreamTrigger` (in
+  `src/runner/session-memory-auto.ts`) assembles the trigger over the SAME
+  memory substrate `buildSessionMemoryAutoWires` mints — a JSON-FILE state
+  adapter (`<root>/dream-state.json`, sessions/hours cadence PERSISTS across CLI
+  runs), the cross-session injector + Phase-2 summarizer as the consolidate
+  adapter, a per-process `InMemoryLock`, and the `FileDreamWriteTarget`. The
+  session host (`context-binding.ts` `close()`) AWAITS `onSessionEnd()` once at
+  teardown (after the WAL dispose, best-effort — a dream error never blocks
+  shutdown). So the AUTO session-end fire is LIVE under `QUANTA_AUTO_DREAM=1`.
+  Production consolidate note: the adapter reuses the cross-session injector +
+  Phase-2 summarizer (not a direct `runPhase2` call) — same no-reimplementation
+  guarantee. REMAINING (small): the manual `/dream` slash needs the REPL
+  composer to inject `ctx.dream.trigger`; until then `/dream` is inert while the
+  auto session-end pass runs. Adversarial coverage:
+  `dream-trigger-adversarial-r2-hellgate` (consolidate-throw→error+no-reset,
+  abort-propagation, hours-only OR-fire, whitespace→no_op, corrupt-state
+  degrade, completed-resets-cadence).
