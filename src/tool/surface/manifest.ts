@@ -528,6 +528,34 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     adr: "C1",
     note: "Canvas / artifact persistence store (§7). Session registry for NON-code generation outputs (image_gen PNGs, xlsx/docx/pptx files) — list/get/destroy by id + a stable `quanta-artifact://<id>` preview URL, so artifacts live OUTSIDE the transcript. `register` is host-side (the generation tools register their outputs); the model only reads/manages. Opt-in EVERYWHERE (QUANTA_ARTIFACT_STORE): a new capability whose registry must be wired, so it never auto-seeds. Pure in-memory registry (@/artifact, injected clock + id-factory); duck-typed port keeps @/tool fence-clean.",
   },
+  {
+    name: "side_agent_spawn",
+    group: ["side_agent_list", "side_agent_stop", "side_agent_findings"],
+    origin: "@/tool/side-agent (via tier1 buildSideAgentBlock on AgentConfig.sideAgentDaemons)",
+    gate: {
+      kind: "config-slot",
+      slot: "AgentConfig.sideAgentDaemons",
+      env: "QUANTA_SIDE_AGENT",
+    },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "spawns-subagent",
+    adr: "N1",
+    note: "Background side-agent daemons (§7, RFC jun-4-background-side-agent) — a PERSISTENT daemon that wakes on interval/event, runs one bounded pass per wake, and PUSHES findings via mailbox WITHOUT blocking the main loop (distinct from one-shot subagent_*_bg and the scheduler). The model spawns/lists/stops/drains; the registry core (@/side-agent, pure leaf with injected runner/mailbox/timers) is host-supervised. Opt-in EVERYWHERE (QUANTA_SIDE_AGENT): spawns work, so it never auto-seeds. Duck-typed port keeps @/tool fence-clean. Phase-2 host runner adaptation wires the real subagent pass.",
+  },
+  {
+    name: "mcp_connector_list",
+    group: ["mcp_connector_install"],
+    origin: "@/tool/mcp-connector (via DefaultToolPorts.mcpConnectors)",
+    gate: {
+      kind: "config-slot",
+      slot: "DefaultToolPorts.mcpConnectors",
+      env: "QUANTA_MCP_CONNECTORS",
+    },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "meta",
+    adr: "N2",
+    note: "MCP connector discovery/catalog (§7, Codex imported-connector-apps) — discover installable MCP servers + install one into .mcp.json (vs hand-editing). Pairs with H18 (OAuth=auth, this=discovery). The model lists/installs; the HOST owns the catalog source + toMcpServerConfig transform (@/connectors mcp-connector-catalog) + the real .mcp.json write. Opt-in EVERYWHERE (QUANTA_MCP_CONNECTORS): install mutates config, never auto-seeds. Duck-typed port keeps @/tool fence-clean.",
+  },
 ]
 
 /** Resolve a single tool/group's availability on a surface given a default-state

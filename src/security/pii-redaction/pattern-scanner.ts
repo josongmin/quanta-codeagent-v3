@@ -63,7 +63,13 @@ const PATTERNS: ReadonlyArray<Pattern> = [
   {
     kind: "phone-us",
     // (xxx) xxx-xxxx | xxx-xxx-xxxx | xxx.xxx.xxxx
-    regex: /\b(?:\(\d{3}\)\s?|\d{3}[\s.-])\d{3}[\s.-]\d{4}\b/g,
+    // NOTE: the leading `\b` applies ONLY to the bare-digit alternative. A
+    // word boundary cannot match immediately before a `(` (it needs a word
+    // char on the inside), so a leading `\b` on the whole group silently
+    // killed the documented `(415) 555-1234` paren form. Anchor the boundary
+    // inside the bare-digit alternative instead, leaving the paren alternative
+    // to match its own distinctive `(\d{3})` prefix.
+    regex: /(?:\(\d{3}\)\s?|\b\d{3}[\s.-])\d{3}[\s.-]\d{4}\b/g,
     confidence: "high",
   },
   {

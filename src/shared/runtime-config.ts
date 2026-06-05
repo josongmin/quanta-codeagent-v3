@@ -304,6 +304,17 @@ export interface RuntimeConfig {
    *  `DefaultToolPorts.artifactRegistry` (the generation tools register their
    *  outputs; the model lists/inspects/destroys via `artifact_*`). */
   readonly artifactStore: boolean
+  /** N1 — background side-agent daemons (`QUANTA_SIDE_AGENT`). Strict opt-in
+   *  (`=== "1"`). Default false ⇒ no daemon registry, the `side_agent_*` tools
+   *  are NOT registered (byte-identical). When ON, the assembler mints a
+   *  `@/side-agent` registry (Phase-2: with the real subagent runner / mailbox /
+   *  timers) and the tier1 block exposes the management tools over it. */
+  readonly sideAgent: boolean
+  /** N2 — MCP connector discovery (`QUANTA_MCP_CONNECTORS`). Strict opt-in
+   *  (`=== "1"`). Default false ⇒ no discovery port, the `mcp_connector_*` tools
+   *  are NOT registered (byte-identical). When ON, the composition root wires a
+   *  discovery port (catalog source + `.mcp.json` writer). */
+  readonly mcpConnectors: boolean
   /** FS jail disable flag (`QUANTA_FS_JAIL=off`). Default false (jail ON). */
   readonly fsJailDisabled: boolean
   /** ADR-0062 cap-as-instruction dispatch enforcement (`QUANTA_CAP_ENFORCE=1`).
@@ -586,6 +597,10 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // C1 — strict `=== "1"` opt-in. Default false ⇒ no artifact registry / tools
     // (byte-identical).
     artifactStore: env["QUANTA_ARTIFACT_STORE"] === "1",
+    // N1 — strict `=== "1"` opt-in. Default false ⇒ no side-agent daemons/tools.
+    sideAgent: env["QUANTA_SIDE_AGENT"] === "1",
+    // N2 — strict `=== "1"` opt-in. Default false ⇒ no MCP connector tools.
+    mcpConnectors: env["QUANTA_MCP_CONNECTORS"] === "1",
     fsJailDisabled: parseBool(env["QUANTA_FS_JAIL"] === "off" ? "1" : undefined),
     capEnforce: parseBool(env["QUANTA_CAP_ENFORCE"]),
     gitSha: stringOrUndef(env["QUANTA_GIT_SHA"]),

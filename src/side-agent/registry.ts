@@ -15,6 +15,54 @@ import {
 } from "./types"
 
 const DEFAULT_MAX_CONCURRENT = 2
+const DEFAULT_MAX_FINDINGS = 1000
+const DEFAULT_MAX_RETAINED = 100
+
+const isPositiveInt = (n: unknown): boolean =>
+  typeof n === "number" && Number.isInteger(n) && n >= 1
+
+/**
+ * Reject a malformed spec BEFORE it is spawned. Without this, three real
+ * footguns slip through (found in self-audit): an `interval` with `everyMs<=0`
+ * spins the CPU; an `event` trigger with NO injected event source spawns a
+ * zombie that holds a concurrency slot forever; and a non-positive
+ * `maxWakes`/`maxTurnsPerWake` either no-ops or runs unbounded. NO-THROW
+ * elsewhere — this is a programming-error throw (`invalid-spec`), distinct from
+ * the runtime `cap-exceeded`.
+ */
+const bad = (msg: string): never => {
+  throw new SideAgentError("invalid-spec", msg)
+}
+
+const validateTrigger = (trig: SideAgentSpec["trigger"], hasEventSource: boolean): void => {
+  if (trig.kind === "interval") {
+    if (!(typeof trig.everyMs === "number" && trig.everyMs > 0)) {
+      bad("interval trigger requires everyMs > 0")
+    }
+    return
+  }
+  if (typeof trig.topic !== "string" || trig.topic.length === 0) {
+    bad("event trigger requires a non-empty topic")
+  }
+  // No event source ⇒ the daemon could never wake → refuse rather than leak a
+  // concurrency slot on a permanently-asleep zombie.
+  if (!hasEventSource) bad("event trigger requires an injected event source (opts.events)")
+}
+
+const validateSpec = (spec: SideAgentSpec, hasEventSource: boolean): void => {
+  if (typeof spec.task !== "string" || spec.task.trim().length === 0) {
+    bad("spec.task must be a non-empty string")
+  }
+  if (!isPositiveInt(spec.maxWakes)) bad("spec.maxWakes must be an integer ≥ 1")
+  if (!isPositiveInt(spec.maxTurnsPerWake)) bad("spec.maxTurnsPerWake must be an integer ≥ 1")
+  if (
+    spec.idleReapMs !== undefined &&
+    !(typeof spec.idleReapMs === "number" && spec.idleReapMs > 0)
+  ) {
+    bad("spec.idleReapMs, when set, must be > 0")
+  }
+  validateTrigger(spec.trigger, hasEventSource)
+}
 
 interface DaemonState {
   readonly id: string
@@ -37,6 +85,8 @@ export const createSideAgentDaemonRegistry = (
   opts: SideAgentDaemonOpts,
 ): SideAgentDaemonRegistry => {
   const maxConcurrent = opts.maxConcurrent ?? DEFAULT_MAX_CONCURRENT
+  const maxFindings = opts.maxFindings ?? DEFAULT_MAX_FINDINGS
+  const maxRetained = opts.maxRetained ?? DEFAULT_MAX_RETAINED
   const daemons = new Map<string, DaemonState>()
   const findingsLog: SideAgentFinding[] = []
   let idCounter = 0
@@ -63,6 +113,20 @@ export const createSideAgentDaemonRegistry = (
     return true
   }
 
+  /** Bound the daemon map: prune the OLDEST terminal daemons past `maxRetained`.
+   *  Called at the END of public methods (never mid-iteration of `daemons`, so
+   *  it can never invalidate `stopAll`'s loop).
+   *  Running daemons are never pruned (their slot is live). Insertion order in
+   *  the Map is oldest-first, so we evict the earliest terminal entries. */
+  const pruneTerminal = (): void => {
+    const terminal: string[] = []
+    for (const d of daemons.values()) if (d.status !== "running") terminal.push(d.id)
+    let over = terminal.length - maxRetained
+    for (let i = 0; over > 0 && i < terminal.length; i++, over--) {
+      daemons.delete(terminal[i] as string)
+    }
+  }
+
   /** Publish a non-null pass result to the mailbox + log + optional sink. */
   const publish = (
     d: DaemonState,
@@ -77,6 +141,7 @@ export const createSideAgentDaemonRegistry = (
       ...(result.detail !== undefined ? { detail: result.detail } : {}),
     }
     findingsLog.push(finding)
+    if (findingsLog.length > maxFindings) findingsLog.shift() // ring-buffer cap
     opts.mailbox.send({
       from: d.id,
       to: opts.mainRecipient,
@@ -127,6 +192,7 @@ export const createSideAgentDaemonRegistry = (
     }
     d.inFlight = false
     applyPostPassBounds(d)
+    pruneTerminal()
   }
 
   const armTrigger = (d: DaemonState): void => {
@@ -144,6 +210,7 @@ export const createSideAgentDaemonRegistry = (
 
   return {
     spawn(spec: SideAgentSpec): string {
+      validateSpec(spec, opts.events !== undefined)
       if (runningCount() >= maxConcurrent) {
         throw new SideAgentError(
           "cap-exceeded",
@@ -166,6 +233,7 @@ export const createSideAgentDaemonRegistry = (
       }
       daemons.set(id, d)
       armTrigger(d)
+      pruneTerminal()
       return id
     },
 
@@ -192,6 +260,7 @@ export const createSideAgentDaemonRegistry = (
     stop(id: string): boolean {
       if (!daemons.has(id)) return false
       finish(id, "stopped")
+      pruneTerminal()
       return true
     },
 
@@ -203,6 +272,7 @@ export const createSideAgentDaemonRegistry = (
           n++
         }
       }
+      pruneTerminal()
       return n
     },
   }

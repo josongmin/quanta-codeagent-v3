@@ -9,6 +9,7 @@ import { bashAwaitTool } from "./bash/await"
 import { bashKillTool } from "./bash/kill"
 import { type ArtifactRegistryPort, artifactTools } from "./artifact"
 import { coverageCheckTool } from "./coverage_check"
+import { type McpConnectorDiscoveryPort, mcpConnectorTools } from "./mcp-connector"
 import { type DiagnosticsProvider, diagnosticsTool, nullDiagnosticsProvider } from "./diagnostics"
 // ADR-0142: register document/structured-data read tools into the default
 // fence (the 5 tools were barrel-exported but not in `buildDefaultTools` —
@@ -60,6 +61,36 @@ export {
   artifactTools,
   type ArtifactView,
 } from "./artifact"
+// N1 — background side-agent management tools. Caller-wired via tier1
+// `buildSideAgentBlock` on `AgentConfig.sideAgentDaemons` (default-OFF;
+// `QUANTA_SIDE_AGENT`). Duck-typed `SideAgentDaemonPort` keeps `@/tool`
+// fence-clean (no `@/side-agent` import).
+export {
+  type SideAgentDaemonPort,
+  type SideAgentFindingsInput,
+  sideAgentFindingsInputSchema,
+  type SideAgentListInput,
+  sideAgentListInputSchema,
+  type SideAgentSnapshotView,
+  type SideAgentSpawnInput,
+  sideAgentSpawnInputSchema,
+  type SideAgentStopInput,
+  sideAgentStopInputSchema,
+  sideAgentTools,
+} from "./side-agent"
+// N2 — MCP connector discovery tools. Caller-wired via
+// `DefaultToolPorts.mcpConnectors` (default-OFF; `QUANTA_MCP_CONNECTORS`). The
+// duck-typed `McpConnectorDiscoveryPort` keeps `@/tool` fence-clean.
+export {
+  type McpConnectorDiscoveryPort,
+  type McpConnectorEntryView,
+  type McpConnectorInstallInput,
+  mcpConnectorInstallInputSchema,
+  type McpConnectorListInput,
+  mcpConnectorListInputSchema,
+  mcpConnectorTools,
+  type McpInstallOutcome,
+} from "./mcp-connector"
 export { applyPatchTool, FsJailViolationError } from "./apply-patch"
 export { makeApplyPatchStructuredTool } from "./apply-patch-structured-tool"
 // ADR-0296 — async-shell sibling tools to `bash` (timeout_behavior=background).
@@ -480,6 +511,12 @@ export interface DefaultToolPorts {
    *  when `QUANTA_ARTIFACT_STORE` is on. `register` is host-side (the generation
    *  tools register their outputs); the model only lists/inspects/destroys. */
   artifactRegistry?: ArtifactRegistryPort
+  /** N2 — when set, append the MCP connector discovery tools
+   *  (`mcp_connector_list` / `mcp_connector_install`). Absent ⇒ tools NOT
+   *  registered (byte-identical). The composition root wires a discovery port
+   *  (catalog source + `toMcpServerConfig` transform + `.mcp.json` writer) only
+   *  when `QUANTA_MCP_CONNECTORS` is on. */
+  mcpConnectors?: McpConnectorDiscoveryPort
 }
 
 export { automationUpdateTool } from "./automation_update"
@@ -535,6 +572,12 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => {
   // host's session registry are appended.
   if (ports.artifactRegistry !== undefined) {
     base.push(...artifactTools(ports.artifactRegistry))
+  }
+  // N2 — conditional registration of the MCP connector discovery tools. Absent
+  // port ⇒ default set byte-identical. Present ⇒ `mcp_connector_list` /
+  // `mcp_connector_install` bound to the host's catalog+installer are appended.
+  if (ports.mcpConnectors !== undefined) {
+    base.push(...mcpConnectorTools(ports.mcpConnectors))
   }
   return base
 }

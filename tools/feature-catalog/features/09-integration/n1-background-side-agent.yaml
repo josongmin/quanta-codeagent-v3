@@ -1,0 +1,49 @@
+id: background-side-agent
+title: Background side-agent daemon — resident monitor/cleanup (N1)
+section: 9
+subsystem: Side-agent (§7, Claude tengu_bg_agent 흡수)
+order: 167
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [daemon, headless, interactive]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:claude"]
+depends_on: [0145-background-subagent, subagent-mailbox-transport]
+purpose: |
+  Claude `tengu_bg_agent_action`(24 occ, 최고신호) 흡수 — 메인루프 안 막고 모니터링/
+  정리/주기점검 돌리는 PERSISTENT 백그라운드 데몬 에이전트. one-shot subagent-bg(ADR-0130)
+  /scheduler(메인루프 구동, ADR-0161)와 별개 축: 데몬은 resident, interval/event로 스스로
+  깨고, 깰 때마다 ONE bounded pass 돌리고, 결과를 mailbox로 PUSH(블로킹 X).
+
+  코어 (`src/side-agent/`, PURE leaf, 모든 effect 주입 포트 — runner/mailbox/sink/
+  events/timers/clock, Date.now/setInterval/RNG 없음): `SideAgentDaemonRegistry`
+  spawn/findings/list/stop/stopAll, `SideAgentSpec{task,trigger(interval|event),
+  maxWakes,maxTurnsPerWake,idleReapMs?}`, runaway guard(maxConcurrent default 2).
+
+  도구 (`src/tool/side-agent/`, duck-typed `SideAgentDaemonPort`=@/tool fence clean):
+  `side_agent_spawn`/`_list`/`_stop`/`_findings`. tier1 `buildSideAgentBlock`이
+  `AgentConfig.sideAgentDaemons` 있을 때 노출, `QUANTA_SIDE_AGENT` default-OFF(없으면
+  미등록=byte-identical).
+evidence:
+  code:
+    - src/side-agent/registry.ts
+    - src/side-agent/types.ts
+    - src/tool/side-agent/index.ts
+    - src/agent/tier1/side-agent.ts
+  tests:
+    unit:
+      - tests/unit/side-agent-hellgate.test.ts
+      - tests/unit/side-agent-tools-hellgate.test.ts
+    integration:
+      - tests/unit/side-agent-block-e2e-hellgate.test.ts
+    contract: []
+knobs: []
+notes: |
+  L3: pure 데몬 registry 코어(기존) + 4 도구 + tier1 블록 + AgentConfig slot + knob
+  완비, default-OFF byte-identical. **잔여(Phase-2, types.ts 명시)**: assembler가
+  `QUANTA_SIDE_AGENT`에 registry를 real subagent runner(per-wake bounded pass) +
+  mailbox + setInterval/clearInterval/Date.now로 mint해 `config.sideAgentDaemons`
+  채우기 — 그래야 도구가 라이브.

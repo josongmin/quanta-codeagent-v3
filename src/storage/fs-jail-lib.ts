@@ -1,5 +1,5 @@
-import { realpathSync } from "node:fs"
-import { resolve } from "node:path"
+import { lstatSync, readlinkSync } from "node:fs"
+import { isAbsolute, resolve } from "node:path"
 import isPathInside from "is-path-inside"
 import { FsJailError } from "./service"
 
@@ -26,19 +26,42 @@ const lexicalNormalize = (abs: string): string => {
   return `/${out.join("/")}`
 }
 
+const MAX_SYMLINK_HOPS = 40
+
+/** Symlink-aware canonicalization — see `service.ts#realResolve` for the full
+ *  security rationale. Walks segment-by-segment from the root, expanding any
+ *  symlink component (via `lstat`+`readlink`) EVEN WHEN ITS TARGET DOES NOT
+ *  EXIST, so a dangling symlink to an out-of-jail location is surfaced to the
+ *  containment check instead of being silently treated as a plain directory
+ *  (the create-then-escape vector). Bounded by {@link MAX_SYMLINK_HOPS}. */
 const realResolve = (abs: string): string => {
-  const segs = abs.split("/").filter(Boolean)
-  for (let i = segs.length; i >= 0; i--) {
-    const candidate = `/${segs.slice(0, i).join("/")}`
-    try {
-      const real = realpathSync(candidate || "/")
-      const tail = segs.slice(i)
-      return tail.length > 0 ? lexicalNormalize(`${real}/${tail.join("/")}`) : real
-    } catch {
-      // climb until an ancestor resolves
+  let pending = abs.split("/").filter(Boolean)
+  const resolved: string[] = []
+  let hops = 0
+  while (pending.length > 0) {
+    const seg = pending.shift() as string
+    if (seg === ".") continue
+    if (seg === "..") {
+      resolved.pop()
+      continue
     }
+    const current = `/${[...resolved, seg].join("/")}`
+    let link: string | undefined
+    try {
+      if (lstatSync(current).isSymbolicLink()) link = readlinkSync(current)
+    } catch {
+      // Not-yet-created component — cannot be a symlink; append literally.
+    }
+    if (link === undefined) {
+      resolved.push(seg)
+      continue
+    }
+    if (++hops > MAX_SYMLINK_HOPS) return lexicalNormalize(abs)
+    const prefix = isAbsolute(link) ? link : `/${[...resolved, link].join("/")}`
+    resolved.length = 0
+    pending = [...prefix.split("/").filter(Boolean), ...pending]
   }
-  return lexicalNormalize(abs)
+  return `/${resolved.join("/")}`
 }
 
 const canonicalize = (path: string, resolveSymlinks: boolean): string => {

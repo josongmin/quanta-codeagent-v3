@@ -72,24 +72,59 @@ const expandV6 = (host: string): number[] | null => {
   return single !== null && single.length === 8 ? single : null
 }
 
-const mappedV4 = (hx: readonly number[]): string | null => {
-  const a = (hx[6] ?? 0) >> 8
-  const b = (hx[6] ?? 0) & 0xff
-  const c = (hx[7] ?? 0) >> 8
-  const d = (hx[7] ?? 0) & 0xff
-  return classifyV4([a, b, c, d])
-}
+/** Decode the IPv4 embedded in two consecutive hextets (high:low) and run the
+ *  v4 classifier. Used by every IPv6→IPv4 transition form (mapped/compat/
+ *  translated/NAT64/6to4) so the SAME private/loopback/link-local verdict
+ *  applies no matter which transition wrapper carried the address. */
+const v4VerdictFromHextets = (hi: number, lo: number): string | null =>
+  classifyV4([hi >> 8, hi & 0xff, lo >> 8, lo & 0xff])
 
-// IPv4-mapped (`::ffff:a.b.c.d`) / -compat (`::a.b.c.d`) embedded-address verdict.
+/** Does the hextet array start with the given exact-value prefix? */
+const hasPrefix = (hx: readonly number[], prefix: readonly number[]): boolean =>
+  prefix.every((v, i) => hx[i] === v)
+
+/** IPv6→IPv4 transition wrappers that embed a literal IPv4 address. Each MUST be
+ *  classified by its embedded v4 octets — a string-prefix denylist (or even the
+ *  mapped-only check) misses these, letting `[64:ff9b::7f00:1]` (NAT64 →
+ *  loopback) and `[2002:a9fe:a9fe::]` (6to4 → 169.254.169.254 metadata) reach an
+ *  internal service on a NAT64/6to4-enabled host (R6 audit — embedded-IPv4 SSRF
+ *  bypass). `prefix` pins the wrapper's fixed hextets; `[hi,lo]` are the indices
+ *  of the two hextets carrying the embedded v4 address. */
+const EMBEDDED_V4_WRAPPERS: ReadonlyArray<{
+  readonly label: string
+  readonly prefix: readonly number[]
+  readonly hi: number
+  readonly lo: number
+}> = [
+  // ::ffff:a.b.c.d  (IPv4-mapped, ::ffff:0:0/96)
+  { label: "IPv4-mapped", prefix: [0, 0, 0, 0, 0, 0xffff], hi: 6, lo: 7 },
+  // ::ffff:0:a.b.c.d  (IPv4-translated, ::ffff:0:0/96 with the extra 0 group)
+  { label: "IPv4-translated", prefix: [0, 0, 0, 0, 0xffff, 0], hi: 6, lo: 7 },
+  // 64:ff9b::a.b.c.d  (NAT64 well-known prefix, 64:ff9b::/96)
+  { label: "NAT64-embedded", prefix: [0x0064, 0xff9b, 0, 0, 0, 0], hi: 6, lo: 7 },
+  // 2002:a.b.c.d::/16  (6to4)
+  { label: "6to4-embedded", prefix: [0x2002], hi: 1, lo: 2 },
+]
+
+const mappedV4 = (hx: readonly number[]): string | null =>
+  v4VerdictFromHextets(hx[6] ?? 0, hx[7] ?? 0)
+
 const embeddedV4Verdict = (hx: readonly number[]): string | null => {
-  if (!hx.slice(0, 5).every((x) => x === 0)) return null
-  if (hx[5] === 0xffff) {
-    const r = mappedV4(hx)
-    return r !== null ? `IPv4-mapped ${r}` : null
-  }
-  if (hx[5] === 0 && ((hx[6] ?? 0) !== 0 || (hx[7] ?? 0) !== 0)) {
+  // ::a.b.c.d (IPv4-compat) — first 5 hextets 0, group 6 == 0, address non-zero.
+  // Handled separately because its "prefix" is the ABSENCE of 0xffff and it must
+  // not swallow the all-zero (::) / loopback (::1) cases already verdicted above.
+  if (
+    hx.slice(0, 5).every((x) => x === 0) &&
+    hx[5] === 0 &&
+    ((hx[6] ?? 0) !== 0 || (hx[7] ?? 0) !== 0)
+  ) {
     const r = mappedV4(hx)
     if (r !== null) return `IPv4-compat ${r}`
+  }
+  for (const w of EMBEDDED_V4_WRAPPERS) {
+    if (!hasPrefix(hx, w.prefix)) continue
+    const r = v4VerdictFromHextets(hx[w.hi] ?? 0, hx[w.lo] ?? 0)
+    if (r !== null) return `${w.label} ${r}`
   }
   return null
 }
@@ -103,6 +138,9 @@ const classifyV6 = (host: string): string | null => {
   if (embedded !== null) return embedded
   const first = hx[0] ?? 0
   if ((first & 0xffc0) === 0xfe80) return "link-local (fe80::/10)"
+  // Deprecated site-local fec0::/10 (RFC 3879) — still routes internally on
+  // legacy stacks; deny defensively alongside fe80::/10 link-local.
+  if ((first & 0xffc0) === 0xfec0) return "site-local (fec0::/10)"
   if ((first & 0xfe00) === 0xfc00) return "ULA (fc00::/7)"
   return null
 }

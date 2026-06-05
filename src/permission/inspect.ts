@@ -28,7 +28,7 @@
  */
 
 import { hardDenyReason } from "./policy"
-import { HARD_DENY_RULES } from "./policy-rules"
+import { HARD_DENY_RULES, normalizeShellForDeny } from "./policy-rules"
 import type {
   HITLTier,
   PermissionContext,
@@ -136,9 +136,13 @@ export interface InspectToolMeta {
  *  enumerate the exact catch patterns. */
 const matchHardDenyRules = (command: string | undefined): readonly MatchedHardDenyRule[] => {
   if (command === undefined || command.length === 0) return []
+  // R7 — same shell-normalization as the runtime `hardDenyReason` gate so the
+  // inspector surface reports the rules that WILL fire (not a stale view that
+  // misses empty-quote / backslash command-name obfuscation).
+  const probe = normalizeShellForDeny(command)
   const out: MatchedHardDenyRule[] = []
   for (const rule of HARD_DENY_RULES) {
-    if (rule.pattern.test(command)) {
+    if (rule.pattern.test(probe)) {
       out.push({ name: rule.name, description: rule.description })
     }
   }

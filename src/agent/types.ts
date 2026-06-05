@@ -767,6 +767,14 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    *  `DefaultToolPorts.promptCacheObserver` (tool). Absent ⇒ no record call, no
    *  tool — byte-identical default-OFF. */
   promptCacheObserver?: import("@/observability/prompt-cache").PromptCacheObserver
+  /** N1 — OPTIONAL background side-agent daemon registry. When the host wires one
+   *  (gate `QUANTA_SIDE_AGENT`, constructed in the assembler with the real
+   *  subagent runner / mailbox / timers per the `@/side-agent` Phase-2 note), the
+   *  tier1 `buildSideAgentBlock` exposes the `side_agent_*` tools over it.
+   *  Absent ⇒ no tools (byte-identical default-OFF). Duck-typed
+   *  (`@/tool/side-agent` `SideAgentDaemonPort`) so `@/agent` need not import
+   *  `@/side-agent` concretely. */
+  sideAgentDaemons?: import("@/tool/side-agent").SideAgentDaemonPort
   /** ADR-0472 — OPTIONAL diagnostics provider for the edit-repair lint-delta.
    *  When present (host wired an LSP diagnostics source) AND
    *  `runtimeConfig().editRepairLoop` is on, the dispatch seam brackets a

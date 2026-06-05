@@ -27,6 +27,7 @@ export type RedactionKind =
   | "aws_secret_access_key_assignment"
   | "github_pat_classic"
   | "github_pat_fine_grained"
+  | "gitlab_pat"
   | "google_api_key"
   | "gcp_service_account_key"
   | "openai_api_key"
@@ -130,6 +131,14 @@ const patterns: ReadonlyArray<Pattern> = [
     kind: "github_pat_fine_grained",
     regex: /github_pat_[A-Za-z0-9_]{20,}\b/g,
   },
+  // GitLab personal/project/group access token — `glpat-` + 20+ url-safe chars.
+  // R7 follow-up: the stream `redactValue` redactor caught this but the
+  // model-facing dispatch slice did not — closing the leak gap. Distinctive
+  // prefix, negligible false-positive risk.
+  {
+    kind: "gitlab_pat",
+    regex: /glpat-[A-Za-z0-9_-]{20,}\b/g,
+  },
   // Google API key — `AIza` + 35 url-safe base64 chars. Distinctive prefix.
   {
     kind: "google_api_key",
@@ -155,12 +164,21 @@ const patterns: ReadonlyArray<Pattern> = [
     kind: "openai_api_key",
     regex: /sk-proj-[A-Za-z0-9_-]{20,}\b/g,
   },
+  // OpenAI service-account key (2024+) — `sk-svcacct-` followed by a long
+  // mixed-class body containing `_` / `-`. Same shape family as `sk-proj-`;
+  // the classic `sk-[A-Za-z0-9]{32,}` branch below CANNOT span it (the `-`
+  // after `svcacct` truncates the char class), so it needs its own branch.
+  // Matched BEFORE the classic shape so it is not sliced at the first `-`.
+  {
+    kind: "openai_api_key",
+    regex: /sk-svcacct-[A-Za-z0-9_-]{20,}\b/g,
+  },
   // OpenAI classic API key — `sk-` followed by ≥32 alphanumeric (avoid clash
   // with anthropic above by negative-lookahead on `ant-`; avoid stripe by
   // ruling out `live_`/`test_`).
   {
     kind: "openai_api_key",
-    regex: /\bsk-(?!ant-)(?!proj-)(?!live_)(?!test_)[A-Za-z0-9]{32,}\b/g,
+    regex: /\bsk-(?!ant-)(?!proj-)(?!svcacct-)(?!live_)(?!test_)[A-Za-z0-9]{32,}\b/g,
   },
   // Authorization Bearer header.
   {
@@ -316,6 +334,7 @@ export const assertKindWired = (k: RedactionKind): string => {
     case "aws_secret_access_key_assignment":
     case "github_pat_classic":
     case "github_pat_fine_grained":
+    case "gitlab_pat":
     case "google_api_key":
     case "gcp_service_account_key":
     case "openai_api_key":

@@ -379,3 +379,89 @@ describe("side-agent — teardown", () => {
     expect(unsubscribed).toBe(true)
   })
 })
+
+// ── self-audit remediation (R1/R2): spec validation + bounded memory ──────────
+
+describe("side-agent — spec validation (no zombies / no CPU spin)", () => {
+  test("event trigger with NO event source injected → invalid-spec (no zombie slot)", () => {
+    const reg = createSideAgentDaemonRegistry(baseOpts()) // no `events`
+    expect(() => reg.spawn(intervalSpec({ trigger: { kind: "event", topic: "x" } }))).toThrow(
+      SideAgentError,
+    )
+    try {
+      reg.spawn(intervalSpec({ trigger: { kind: "event", topic: "x" } }))
+    } catch (e) {
+      expect((e as SideAgentError).code).toBe("invalid-spec")
+    }
+    // Crucially: the rejected spawn occupied NO slot.
+    expect(reg.list()).toEqual([])
+  })
+
+  test("interval everyMs<=0 → invalid-spec (no setInterval(_,0) spin)", () => {
+    const reg = createSideAgentDaemonRegistry(baseOpts())
+    expect(() => reg.spawn(intervalSpec({ trigger: { kind: "interval", everyMs: 0 } }))).toThrow(
+      SideAgentError,
+    )
+    expect(() => reg.spawn(intervalSpec({ trigger: { kind: "interval", everyMs: -5 } }))).toThrow(
+      SideAgentError,
+    )
+  })
+
+  test("maxWakes<1 / maxTurnsPerWake<1 / empty task / idleReapMs<=0 → invalid-spec", () => {
+    const reg = createSideAgentDaemonRegistry(baseOpts())
+    expect(() => reg.spawn(intervalSpec({ maxWakes: 0 }))).toThrow(SideAgentError)
+    expect(() => reg.spawn(intervalSpec({ maxTurnsPerWake: 0 }))).toThrow(SideAgentError)
+    expect(() => reg.spawn(intervalSpec({ task: "   " }))).toThrow(SideAgentError)
+    expect(() => reg.spawn(intervalSpec({ idleReapMs: 0 }))).toThrow(SideAgentError)
+    // A valid spec still spawns.
+    expect(() => reg.spawn(intervalSpec())).not.toThrow()
+  })
+})
+
+describe("side-agent — bounded memory (no unbounded growth)", () => {
+  test("findingsLog is ring-buffer capped at maxFindings (oldest evicted)", async () => {
+    const timers = mkTimers()
+    const clock = mkClock()
+    const outcomes = Array.from({ length: 6 }, (_, i) => ({ summary: `f${i + 1}` }))
+    const reg = createSideAgentDaemonRegistry(
+      baseOpts({
+        setInterval: timers.setInterval,
+        clearInterval: timers.clearInterval,
+        now: clock.now,
+        maxFindings: 3,
+        runner: mkRunner(outcomes).port,
+      }),
+    )
+    reg.spawn(intervalSpec({ maxWakes: 6 }))
+    for (let i = 0; i < 6; i++) {
+      clock.advance(10)
+      timers.fireLatest()
+      await flush()
+    }
+    const all = reg.findings()
+    expect(all.length).toBe(3) // capped
+    expect(all.map((f) => f.summary)).toEqual(["f4", "f5", "f6"]) // oldest evicted
+  })
+
+  test("terminal daemons are pruned past maxRetained; running are NEVER pruned", () => {
+    const reg = createSideAgentDaemonRegistry(baseOpts({ maxConcurrent: 100, maxRetained: 2 }))
+    // Spawn + immediately stop 5 daemons → 5 terminal, capped to the newest 2.
+    const ids: string[] = []
+    for (let i = 0; i < 5; i++) {
+      const id = reg.spawn(intervalSpec())
+      ids.push(id)
+      reg.stop(id)
+    }
+    const list = reg.list()
+    expect(list.length).toBe(2) // only the 2 newest terminal retained
+    expect(list.every((d) => d.status === "stopped")).toBe(true)
+    // Now spawn 3 LIVE daemons + 1 terminal — the running ones are never pruned.
+    const live = [reg.spawn(intervalSpec()), reg.spawn(intervalSpec()), reg.spawn(intervalSpec())]
+    const t = reg.spawn(intervalSpec())
+    reg.stop(t)
+    const after = reg.list()
+    const running = after.filter((d) => d.status === "running").map((d) => d.id)
+    expect(running.sort()).toEqual([...live].sort()) // all 3 live retained
+    expect(after.filter((d) => d.status !== "running").length).toBeLessThanOrEqual(2)
+  })
+})

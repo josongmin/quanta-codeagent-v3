@@ -71,6 +71,7 @@ import {
   buildPrShipBlock,
   buildShadowBlock,
   buildShadowVerifyBlock,
+  buildSideAgentBlock,
   buildSkillBlock,
   buildSubagentBatchBlock,
   buildSubagentBgBlock,
@@ -222,6 +223,11 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
   // `promptCacheObserver` is wired). The SAME observer instance is fed by the
   // loop's `emitUsage`, so the tool snapshots real per-session cache buckets.
   extraTools.push(...buildPromptCacheBlock(config))
+
+  // N1 — background side-agent management tools (default-OFF: empty when no
+  // `sideAgentDaemons` registry is wired). The tools manage the SAME resident
+  // daemon registry the host's supervise loop runs.
+  extraTools.push(...buildSideAgentBlock(config))
 
   // --- Skill block (ADR-0011) ---------------------------------------------
   const skill = await buildSkillBlock(config)

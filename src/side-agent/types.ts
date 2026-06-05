@@ -55,7 +55,7 @@ export interface SideAgentSnapshot {
   readonly stoppedAt?: number
 }
 
-export type SideAgentErrorCode = "cap-exceeded"
+export type SideAgentErrorCode = "cap-exceeded" | "invalid-spec"
 
 export class SideAgentError extends Error {
   constructor(
@@ -120,6 +120,14 @@ export interface SideAgentDaemonOpts {
   readonly now: () => number
   /** Optional id generator (default: a deterministic monotonic `sa-<n>`). */
   readonly idGen?: () => string
+  /** Ring-buffer cap on the in-memory findings log (default 1000). Oldest are
+   *  evicted past this — bounds memory for a long-lived chatty daemon. */
+  readonly maxFindings?: number
+  /** Cap on retained TERMINAL daemons (stopped/failed/idle-reaped). Past this,
+   *  the oldest terminal daemons are pruned from `list()` (default 100) — bounds
+   *  memory for a long session that spawns many short-lived daemons. Running
+   *  daemons are NEVER pruned. */
+  readonly maxRetained?: number
 }
 
 export interface SideAgentDaemonRegistry {

@@ -9,7 +9,12 @@ import type {
   SandboxPolicy as PermissionSandboxPolicy,
 } from "./permission-profile"
 import type { PermissionReader } from "./permission-store"
-import { HARD_DENY, HARD_DENY_RULES, type HardDenyRule } from "./policy-rules"
+import {
+  HARD_DENY,
+  HARD_DENY_RULES,
+  type HardDenyRule,
+  normalizeShellForDeny,
+} from "./policy-rules"
 import {
   emitPermissionDecision,
   type PermissionOutcomeLabel,
@@ -52,8 +57,13 @@ export const hardDenyReason = (action: ToolAction): string | null => {
   const cmd =
     typeof action.shellCommand === "string" ? action.shellCommand : legacyBashCommand(action)
   if (cmd === null || cmd.length === 0) return null
+  // R7 fix — match against the shell-normalized form so empty-quote
+  // (`r""m`) / mid-token-backslash (`c\url`) command-name splitting cannot
+  // slide a dangerous binary past the word-boundary anchors. See
+  // `normalizeShellForDeny` for why this is deny-widening-only and safe.
+  const probe = normalizeShellForDeny(cmd)
   for (const pat of HARD_DENY) {
-    if (pat.test(cmd)) return `Blocked dangerous command: ${cmd}`
+    if (pat.test(probe)) return `Blocked dangerous command: ${cmd}`
   }
   return null
 }

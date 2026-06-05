@@ -11,6 +11,18 @@
 export type { AvailabilityCheckerPort, AvailabilityVerdict } from "./availability"
 export { createAvailabilityProber } from "./availability-prober"
 export { createInMemoryConnectorRegistry } from "./in-memory-registry"
+// N2 — MCP connector discovery / catalog (§7). Pure catalog model + the
+// `toMcpServerConfig` install transform; the catalog SOURCE is injected.
+export {
+  createMcpConnectorCatalog,
+  type McpConnectorCatalogPort,
+  type McpConnectorEntry,
+  type McpConnectorTransport,
+  type McpInstallError,
+  type McpInstallResult,
+  type McpServerConfigShape,
+  toMcpServerConfig,
+} from "./mcp-connector-catalog"
 export { discoverOAuthEndpoints, type OAuthEndpoints } from "./oauth-discovery"
 export {
   type OAuthClientMetadata,
