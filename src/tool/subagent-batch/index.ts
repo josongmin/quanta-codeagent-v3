@@ -14,6 +14,9 @@ export type { LoadResult } from "./load-items"
 export { loadItems } from "./load-items"
 export type {
   BatchClock,
+  BatchDagGate,
+  BatchDagGateFactory,
+  BatchDagNode,
   BatchItemResult,
   BatchRunResult,
   BatchSubagentRequest,

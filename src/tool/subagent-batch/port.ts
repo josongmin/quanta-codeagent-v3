@@ -95,11 +95,46 @@ export interface BatchTimeoutPolicy {
   readonly defaultMs: number
 }
 
+/** Capability A (multi-agent DAG) — a node the batch derives from one item +
+ *  its declared `dependencies`. `state` starts `pending` for every item; the
+ *  dispatch loop transitions it to `completed`/`failed` as workers settle. The
+ *  shape MIRRORS `@/subagent/coordination#TaskNode` (the fence forbids `@/tool`
+ *  → `@/subagent`, so the host adapts the real gate behind {@link BatchDagGateFactory}). */
+export interface BatchDagNode {
+  readonly id: string
+  readonly dependsOn: readonly string[]
+  readonly state: "pending" | "in_progress" | "completed" | "failed" | "cancelled"
+}
+
+/** The per-batch DAG gate the dispatch loop consults. `awaitReady` blocks an
+ *  item until ALL its deps completed (`"ready"`) or a dep failed/cancelled
+ *  (`"blocked"` — a dead branch, NOT dispatched). `markComplete`/`markFailed`
+ *  release the item's dependents. NO-THROW. */
+export interface BatchDagGate {
+  awaitReady(id: string): Promise<"ready" | "blocked">
+  markComplete(id: string): void
+  markFailed(id: string): void
+}
+
+/** Injected factory the composition root wires to `@/subagent/coordination`.
+ *  Given the per-call node set it returns a live gate, OR a typed rejection for
+ *  a cyclic / dangling / duplicate graph (the tool then refuses the batch rather
+ *  than dispatching a bad graph). Absent ⇒ no DAG ordering (byte-identical flat
+ *  fan-out — Capability A is host-gated by `QUANTA_TEAM_DAG`). */
+export type BatchDagGateFactory = (
+  nodes: readonly BatchDagNode[],
+) =>
+  | { readonly ok: true; readonly gate: BatchDagGate }
+  | { readonly ok: false; readonly reason: string }
+
 /**
  * Deps assembled by the composition root and threaded into `spawnBatchTool`.
  * ALL non-deterministic sources are injected.
  */
 export interface SubagentBatchDeps {
+  /** Capability A — when present AND the items declare `dependencies`, the
+   *  dispatch loop orders fan-out by the DAG (deps-first). Absent ⇒ flat. */
+  readonly dagGateFactory?: BatchDagGateFactory
   /** The forked-agent-loop bridge. */
   readonly runner: BatchSubagentRunner
   /** Injected file reader for `items_path`. Absent ⇒ `items_path` is rejected

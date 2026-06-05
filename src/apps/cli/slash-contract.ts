@@ -122,6 +122,17 @@ export interface SlashContext {
         readonly budgetTokens: (level: import("@/agent").EffortLevel) => number | undefined
       }
     | undefined
+  /** C3 (jun-4-brief-mode RFC) — brief-mode session-posture wire. `get` returns
+   *  the current brief state; `set` mutates the surface-owned brief store AND
+   *  repaints any chrome (status pills). ORTHOGONAL to {@link effort} — both can
+   *  be set. Absent ⇒ `/brief` prints "not wired in this surface" (parity with
+   *  the rest of the surface-only commands). */
+  readonly brief?:
+    | {
+        readonly get: () => boolean
+        readonly set: (on: boolean) => void
+      }
+    | undefined
   /** ADR-0442 `/voice-live` composition-root wire. An async BUILDER that the
    *  surface populates only when the opt-in gate (`QUANTA_VOICE_LIVE`) is set:
    *  it constructs a live `RealtimeVoiceSessionPort` (Bun-WS transport +

@@ -1,5 +1,6 @@
 export { createAutoClassifierPort } from "./auto-classifier"
 export type { BranchSearchConfig } from "./branch-search"
+export { type BriefStore, createBriefStore, parseBoolKnob } from "./brief"
 // RFC may-22-unified-agent-runtime — run-mode + budget slices.
 export {
   asDials,

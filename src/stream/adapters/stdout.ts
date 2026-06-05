@@ -203,6 +203,16 @@ export class StdoutStream implements StreamPort {
           `${DIM}• decision (${event.kind} → ${event.outcome}): ${oneLine(redactStr(event.reason))}${RESET}\n`,
         )
         break
+      case "progress_update":
+        // C2 (jun-4-communicate-update.md): structured progress report. Render a
+        // dim one-line status for the live `currentStep`, and when present a
+        // terminal subtitle line for `completedSubtitle`. All model-derived text
+        // routes through `redactStr` (defence-in-depth, same as the `decision`
+        // case). The full triple is recorded by jsonl-recorder; stdout is a
+        // monitor, so the executive `finalSummary` lives in the trajectory, not
+        // a flooded terminal line.
+        this.write(renderProgressUpdate(event))
+        break
       case "knobs_applied":
         // Knob telemetry (2026-05-26): per-run resolved knob posture. Render
         // a single dim-status line summarising the surface + active count +
@@ -326,6 +336,20 @@ const renderKnobsApplied = (event: Extract<AgentEvent, { type: "knobs_applied" }
   const activeCount = Object.keys(event.knobs).length
   const presetSegment = event.preset !== null ? ` preset=${event.preset}` : ""
   return `${DIM}⚙ knobs_applied (${event.surface}): ${activeCount} active${presetSegment}, ~${event.costMultiplier}× cost${RESET}\n`
+}
+
+/** C2 (jun-4-communicate-update.md): structured-progress one-liner. The
+ *  `progress_update` discriminant token is greppable. `currentStep` renders as a
+ *  dim step line; when `completedSubtitle` is present a terminal `✓` subtitle is
+ *  appended (the set-once turn-end headline). Both are redacted as
+ *  defence-in-depth. Extracted from `emit` so the switch case stays a single
+ *  statement (keeps `emit`'s cognitive complexity under the budget). */
+const renderProgressUpdate = (event: Extract<AgentEvent, { type: "progress_update" }>): string => {
+  const step = `${DIM}— step: ${oneLine(redactStr(event.currentStep))} —${RESET}\n`
+  if (event.completedSubtitle !== undefined && event.completedSubtitle !== "") {
+    return `${step}${GREEN}✓ ${oneLine(redactStr(event.completedSubtitle))}${RESET}\n`
+  }
+  return step
 }
 
 /** Mask secrets in a free-text string via the single-source @/shared scrub.

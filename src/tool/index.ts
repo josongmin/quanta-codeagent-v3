@@ -3,13 +3,13 @@ import type { AutomationEnginePort } from "@/scheduler/automation-engine"
 import type { FileSystemPort } from "@/storage"
 import { applyPatchTool } from "./apply-patch"
 import { makeApplyPatchStructuredTool } from "./apply-patch-structured-tool"
+import { type ArtifactRegistryPort, artifactTools } from "./artifact"
 import { automationUpdateTool } from "./automation_update"
 import { makeBashTool } from "./bash"
 import { bashAwaitTool } from "./bash/await"
 import { bashKillTool } from "./bash/kill"
-import { type ArtifactRegistryPort, artifactTools } from "./artifact"
+import { createCommunicateUpdateTool } from "./communicate-update"
 import { coverageCheckTool } from "./coverage_check"
-import { type McpConnectorDiscoveryPort, mcpConnectorTools } from "./mcp-connector"
 import { type DiagnosticsProvider, diagnosticsTool, nullDiagnosticsProvider } from "./diagnostics"
 // ADR-0142: register document/structured-data read tools into the default
 // fence (the 5 tools were barrel-exported but not in `buildDefaultTools` —
@@ -34,7 +34,10 @@ import { grepTool } from "./grep"
 import { readImageTool, readImageUrlTool } from "./image"
 import { type ImageGenPort, imageGenTool } from "./image-gen"
 import { localizeTool } from "./localize"
+import { mcpResourcesTools, type ResourcesHandle } from "./mcp_resources"
+import { type McpConnectorDiscoveryPort, mcpConnectorTools } from "./mcp-connector"
 import { parseTestFailureTool } from "./parse-test-failure"
+import { type PtySessionPort, ptyTools } from "./pty"
 import { makeReadTool, readTool } from "./read"
 import { scriptedReplaceTool } from "./scripted-replace"
 import { sessionConfigTool } from "./session_config"
@@ -43,56 +46,26 @@ import type { Tool } from "./types"
 import { webFetchTool } from "./web"
 import { makeWriteTool, writeTool } from "./write"
 
+export { applyPatchTool, FsJailViolationError } from "./apply-patch"
+export { makeApplyPatchStructuredTool } from "./apply-patch-structured-tool"
 // C1 — artifact (Canvas) read/manage tools. Caller-wired via
 // `DefaultToolPorts.artifactRegistry` (default-OFF; the host passes a session
 // registry when `QUANTA_ARTIFACT_STORE` is on). The duck-typed port keeps
 // `@/tool` fence-clean (no `@/artifact` import).
 export {
   type ArtifactDestroyInput,
-  artifactDestroyInputSchema,
   type ArtifactGetInput,
-  artifactGetInputSchema,
   type ArtifactListInput,
-  artifactListInputSchema,
   type ArtifactRegisterInput,
-  artifactRegisterInputSchema,
   type ArtifactRegistryPort,
   type ArtifactSpecInput,
-  artifactTools,
   type ArtifactView,
+  artifactDestroyInputSchema,
+  artifactGetInputSchema,
+  artifactListInputSchema,
+  artifactRegisterInputSchema,
+  artifactTools,
 } from "./artifact"
-// N1 — background side-agent management tools. Caller-wired via tier1
-// `buildSideAgentBlock` on `AgentConfig.sideAgentDaemons` (default-OFF;
-// `QUANTA_SIDE_AGENT`). Duck-typed `SideAgentDaemonPort` keeps `@/tool`
-// fence-clean (no `@/side-agent` import).
-export {
-  type SideAgentDaemonPort,
-  type SideAgentFindingsInput,
-  sideAgentFindingsInputSchema,
-  type SideAgentListInput,
-  sideAgentListInputSchema,
-  type SideAgentSnapshotView,
-  type SideAgentSpawnInput,
-  sideAgentSpawnInputSchema,
-  type SideAgentStopInput,
-  sideAgentStopInputSchema,
-  sideAgentTools,
-} from "./side-agent"
-// N2 — MCP connector discovery tools. Caller-wired via
-// `DefaultToolPorts.mcpConnectors` (default-OFF; `QUANTA_MCP_CONNECTORS`). The
-// duck-typed `McpConnectorDiscoveryPort` keeps `@/tool` fence-clean.
-export {
-  type McpConnectorDiscoveryPort,
-  type McpConnectorEntryView,
-  type McpConnectorInstallInput,
-  mcpConnectorInstallInputSchema,
-  type McpConnectorListInput,
-  mcpConnectorListInputSchema,
-  mcpConnectorTools,
-  type McpInstallOutcome,
-} from "./mcp-connector"
-export { applyPatchTool, FsJailViolationError } from "./apply-patch"
-export { makeApplyPatchStructuredTool } from "./apply-patch-structured-tool"
 // ADR-0296 — async-shell sibling tools to `bash` (timeout_behavior=background).
 export {
   type BashAwaitInput,
@@ -106,6 +79,15 @@ export {
   bashKillTool,
   makeBashKillTool,
 } from "./bash/kill"
+// C2 (jun-4-communicate-update.md) — structured mid-turn progress-report tool.
+// Caller-wired + default-OFF: registered only when `DefaultToolPorts.progressUpdate`
+// is true (the composition root passes it when `QUANTA_PROGRESS_UPDATE === "1"`).
+// Read-only — emits a render-only `progress_update` event via `ctx.progressSink`.
+export {
+  type CommunicateUpdateInput,
+  communicateUpdateInputSchema,
+  createCommunicateUpdateTool,
+} from "./communicate-update"
 // `coverage_check` tool (ADR-0165). Caller-wired via `DefaultToolPorts.coverageCheck`
 // (default-OFF; the CLI passes it when `QUANTA_COVERAGE_TOOL === "1"`). Read-only +
 // concurrency-safe — reports per-file/total V8 coverage and optionally gates a threshold.
@@ -139,9 +121,9 @@ export {
   type DocxWriteInput,
   docxWriteInputSchema,
   docxWriteTool,
-  parseStoredZip,
   type PptxSpec,
   type PptxWriteInput,
+  parseStoredZip,
   pptxWriteInputSchema,
   pptxWriteTool,
   type XlsxSpec,
@@ -250,6 +232,35 @@ export {
   lspRenameApplyTool,
   nullLspNavProvider,
 } from "./lsp_nav"
+// N3 — MCP resource/prompt tools (`mcp_list_resources` / `mcp_read_resource` /
+// `mcp_list_prompts` / `mcp_get_prompt`). Caller-wired + default-OFF: registered
+// only when `DefaultToolPorts.mcpResources` is wired (the duck-typed
+// `ResourcesHandle` keeps `@/tool` fence-clean; the host adapts a live McpClient
+// over the H19-landed `resources/*` + `prompts/*` methods). Output is mcp-origin
+// ⇒ the H2 untrusted-source envelope wraps it at dispatch.
+export {
+  type GetPromptInput,
+  getPromptInputSchema,
+  type HandleResult as ResourcesHandleResult,
+  type ListPromptsInput,
+  type ListResourcesInput,
+  listPromptsInputSchema,
+  listResourcesInputSchema,
+  mcpGetPromptTool,
+  mcpListPromptsTool,
+  mcpListResourcesTool,
+  mcpReadResourceTool,
+  mcpResourcesTools,
+  type PromptEntry,
+  type PromptMessage,
+  type PromptResult,
+  type ReadResourceInput,
+  type ResourceBlock,
+  type ResourceEntry,
+  type ResourcesFailureReason,
+  type ResourcesHandle,
+  readResourceInputSchema,
+} from "./mcp_resources"
 // MCP tasks tools (ADR-0196). Caller-wired: registered only when the apps
 // layer wires a `TasksHandle`; not part of `defaultTools`. Mirrors the
 // `shadow*` / `branch_search` pattern — default-OFF + byte-identical.
@@ -272,6 +283,19 @@ export {
   type TasksTaskResult,
   type TasksTaskState,
 } from "./mcp_tasks"
+// N2 — MCP connector discovery tools. Caller-wired via
+// `DefaultToolPorts.mcpConnectors` (default-OFF; `QUANTA_MCP_CONNECTORS`). The
+// duck-typed `McpConnectorDiscoveryPort` keeps `@/tool` fence-clean.
+export {
+  type McpConnectorDiscoveryPort,
+  type McpConnectorEntryView,
+  type McpConnectorInstallInput,
+  type McpConnectorListInput,
+  type McpInstallOutcome,
+  mcpConnectorInstallInputSchema,
+  mcpConnectorListInputSchema,
+  mcpConnectorTools,
+} from "./mcp-connector"
 // ADR-0471 Substrate-B — tool-origin provenance substrate. The closed origin
 // enum + pure `deriveProvenance` (call-site truth, NOT name-guessing). The
 // `Provenance` union is string-identical to `@/agent/untrusted-envelope`'s
@@ -349,6 +373,23 @@ export {
 } from "./shadow"
 export { composeShellObservers, noopShellObserver } from "./shell-exec-observers"
 export type { ShellExecEvent, ShellExecObserver } from "./shell-exec-types"
+// N1 — background side-agent management tools. Caller-wired via tier1
+// `buildSideAgentBlock` on `AgentConfig.sideAgentDaemons` (default-OFF;
+// `QUANTA_SIDE_AGENT`). Duck-typed `SideAgentDaemonPort` keeps `@/tool`
+// fence-clean (no `@/side-agent` import).
+export {
+  type SideAgentDaemonPort,
+  type SideAgentFindingsInput,
+  type SideAgentListInput,
+  type SideAgentSnapshotView,
+  type SideAgentSpawnInput,
+  type SideAgentStopInput,
+  sideAgentFindingsInputSchema,
+  sideAgentListInputSchema,
+  sideAgentSpawnInputSchema,
+  sideAgentStopInputSchema,
+  sideAgentTools,
+} from "./side-agent"
 // Background subagent tools (ADR-0130). Caller-wire: registered only when
 // `AgentConfig.subagentBackground` is set; not part of `defaultTools`. The
 // `subagentBgTools(scheduler)` factory + per-tool exports + duck-typed port
@@ -390,6 +431,8 @@ export type {
   PlanMutatorNewTodo,
   PlanMutatorTodoPatch,
   PlanReadonlyView,
+  ProgressSink,
+  ProgressUpdateMirror,
   SandboxViolationReason,
   SessionConfigSeam,
   ShellSnapshotRestoreSeam,
@@ -517,9 +560,43 @@ export interface DefaultToolPorts {
    *  (catalog source + `toMcpServerConfig` transform + `.mcp.json` writer) only
    *  when `QUANTA_MCP_CONNECTORS` is on. */
   mcpConnectors?: McpConnectorDiscoveryPort
+  /** N3 — when set, append the MCP resource/prompt tools (`mcp_list_resources` /
+   *  `mcp_read_resource` / `mcp_list_prompts` / `mcp_get_prompt`). Absent ⇒ tools
+   *  NOT registered (byte-identical). The composition root wires a `ResourcesHandle`
+   *  (the duck-typed mirror of `@/mcp/resources` `McpResourcesPort`, adapted over a
+   *  live `McpClient` via the H19-landed `resources/*` + `prompts/*` methods) only
+   *  when `QUANTA_MCP_RESOURCES` is on AND a connected server advertises
+   *  resources/prompts. Output is mcp-origin ⇒ the H2 untrusted-source envelope
+   *  wraps it at dispatch. */
+  mcpResources?: ResourcesHandle
+  /** C2 (jun-4-communicate-update.md) — when true, append `communicate_update`
+   *  (read-only structured mid-turn progress report). Absent/false ⇒ tool NOT
+   *  registered (byte-identical default menu). The composition root passes this
+   *  only when `QUANTA_PROGRESS_UPDATE === "1"`. No port to inject here — the
+   *  tool reads its `ProgressSink` from `ToolContext.progressSink` (surfaced by
+   *  the dispatch seam from `AgentConfig.progressSink`); absent sink ⇒ the emit
+   *  is a no-op and the model still gets `ok:true` (best-effort observability). */
+  progressUpdate?: boolean
+  /** N6 (jun-4-pty-attach.md) — when a `PtySessionPort` is wired, append the 6
+   *  `pty_*` tools (attach/list/write/read/resize/kill to a long-lived PTY or
+   *  named tmux session). Absent ⇒ tools NOT registered (byte-identical). The
+   *  composition root wires the port (tmux/Bun backend) only when
+   *  `QUANTA_PTY_ATTACH === "1"`. */
+  ptySession?: PtySessionPort
 }
 
 export { automationUpdateTool } from "./automation_update"
+// N6 (jun-4-pty-attach.md) — PTY/tmux session attach tools + the tmux backend.
+// Caller-wired via `DefaultToolPorts.ptySession` (default-OFF; host wires a
+// backend when `QUANTA_PTY_ATTACH === "1"`). `createTmuxAdapter` is the MVP-A
+// zero-dep tmux backend; the slice's port is fence-clean (injected exec).
+export {
+  createTmuxAdapter,
+  type PtyHandleInfo,
+  type PtySessionPort,
+  ptyTools,
+  type TmuxExec,
+} from "./pty"
 
 /**
  * Build the built-in tool set: Phase 1 six + Phase 2 localize / test_runner +
@@ -578,6 +655,26 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => {
   // `mcp_connector_install` bound to the host's catalog+installer are appended.
   if (ports.mcpConnectors !== undefined) {
     base.push(...mcpConnectorTools(ports.mcpConnectors))
+  }
+  // N3 — conditional registration of the MCP resource/prompt tools. Absent port
+  // ⇒ default set byte-identical. Present ⇒ `mcp_list_resources` /
+  // `mcp_read_resource` / `mcp_list_prompts` / `mcp_get_prompt` bound to the
+  // host's `ResourcesHandle` are appended (mcp-origin ⇒ H2 envelope at dispatch).
+  if (ports.mcpResources !== undefined) {
+    base.push(...mcpResourcesTools(ports.mcpResources))
+  }
+  // C2 — conditional registration of communicate_update. Absent/false ⇒ default
+  // set is byte-identical (the model never sees the tool). Present ⇒ the
+  // read-only structured progress-report tool is appended (it reads its sink
+  // from ctx.progressSink; absent sink degrades to a no-op + ok:true).
+  if (ports.progressUpdate === true) {
+    base.push(createCommunicateUpdateTool() as Tool)
+  }
+  // N6 — conditional registration of the 6 pty_* tools. Absent port ⇒ default
+  // set byte-identical. Present ⇒ attach/list/write/read/resize/kill bound to
+  // the host's PTY/tmux backend are appended (exec-risk; foreign-tmux gated).
+  if (ports.ptySession !== undefined) {
+    base.push(...ptyTools(ports.ptySession))
   }
   return base
 }

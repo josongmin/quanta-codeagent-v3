@@ -1136,6 +1136,23 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   vcsEventSink?: import("@/git/passive-classify").PassiveVcsEventSink
   /**
+   * C2 (jun-4-communicate-update.md) — OPTIONAL structured-progress sink. When
+   * set, the dispatch seam surfaces it onto {@link import("@/tool").ToolContext}'s
+   * `progressSink` so the `communicate_update` tool can forward its typed
+   * `{current_step, final_summary?, completed_subtitle?}` payload to it. The
+   * composition root wires a sink that ADAPTS the mirror onto the EXISTING
+   * `AgentEvent` stream as a render-only `progress_update` event — it does NOT
+   * invent a second bus, and the loop never inspects the event (no control
+   * authority).
+   *
+   * Absent ⇒ the dispatch seam omits the ctx field, the tool's `?.emit` is a
+   * no-op, and the run is byte-identical for every legacy caller (RFC §1.2,
+   * default-OFF). Typed via the `@/tool` structural {@link import("@/tool").ProgressSink}
+   * mirror so `@/tool` stays a leaf (same discipline as `vcsEventSink` /
+   * `onToolDiff`). Best-effort: the sink is no-throw by contract.
+   */
+  progressSink?: import("@/tool").ProgressSink
+  /**
    * Codex Submission op envelope (ADR-0072, Spec A3). When set the loop
    * derives the seed user-turn from `submission.op` instead of `messages`
    * (`user_input` / `user_input_with_turn_context` only — other op variants

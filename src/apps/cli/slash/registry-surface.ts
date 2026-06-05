@@ -715,6 +715,52 @@ const effortCmd: SlashCommand = {
   },
 }
 
+/** `/brief` — toggle the brief-mode session posture (C3, jun-4-brief-mode RFC).
+ *  No args ⇒ flip the current state; an explicit `on`/`off` arg sets it. When
+ *  ON, the model condenses its FINAL prose (correctness reporting is exempt).
+ *  ORTHOGONAL to `/effort` — both can be set ("think deeply, answer tersely").
+ *  Mirrors Claude's `"Brief-only mode enabled"` echo; the NEXT turn's
+ *  `buildTurnContext({ brief })` reads the store and emits the directive. */
+const BRIEF_ON_ARGS: ReadonlySet<string> = new Set(["on", "true", "1", "yes"])
+const BRIEF_OFF_ARGS: ReadonlySet<string> = new Set(["off", "false", "0", "no"])
+const briefCmd: SlashCommand = {
+  name: "/brief",
+  describe: "Show or toggle brief mode (condensed final prose; correctness reporting kept)",
+  category: "config",
+  async run(args, ctx) {
+    if (ctx.brief === undefined) {
+      ctx.out("/brief: not wired in this surface\n")
+      return 0
+    }
+    const { get, set } = ctx.brief
+    if (args.length === 0) {
+      set(!get())
+      ctx.out(`📝 brief mode ${get() ? "on" : "off"}\n`)
+      return 0
+    }
+    if (args.length > 1) {
+      ctx.err(`/brief: takes at most one argument; got ${args.length}\n`)
+      return 1
+    }
+    const arg = (args[0] as string).trim().toLowerCase()
+    if (BRIEF_ON_ARGS.has(arg)) set(true)
+    else if (BRIEF_OFF_ARGS.has(arg)) set(false)
+    else {
+      ctx.err(`/brief: unknown arg '${arg}'; use on|off (or no arg to toggle)\n`)
+      return 1
+    }
+    ctx.out(`📝 brief mode ${get() ? "on" : "off"}\n`)
+    return 0
+  },
+  complete: (args, partial, ctx) => {
+    if (ctx.brief === undefined || args.length >= 1) return []
+    const seed = partial.toLowerCase()
+    return ["on", "off"]
+      .filter((v) => v.startsWith(seed))
+      .map((v) => ({ value: v, kind: "argument" as const }))
+  },
+}
+
 /** Build the surface-layer registry. `helpRegistryLookup` is supplied by
  *  `slash-commands.ts` so `/help` reflects the LIVE concatenated registry
  *  (all three layers + any later spreads). The function form keeps the
@@ -760,6 +806,7 @@ export const buildSurfaceSlashCommands = (
   stickyModelCmd,
   focusChainCmd,
   effortCmd,
+  briefCmd,
   inspectCmd,
   replayCmd,
   sessionCmd,

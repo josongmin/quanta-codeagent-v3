@@ -110,6 +110,7 @@ describe("BUILTINS table", () => {
       "/sticky-model",
       "/focus-chain",
       "/effort",
+      "/brief",
       "/inspect",
       "/replay",
       "/session",

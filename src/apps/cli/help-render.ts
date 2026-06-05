@@ -128,6 +128,12 @@ const ENV_TABLE: readonly EnvRow[] = [
     defaultLabel: "default",
     describe: "Session reasoning effort (default|low|medium|high|max) — switch with /effort",
   },
+  {
+    key: "QUANTA_BRIEF",
+    defaultLabel: "off",
+    describe:
+      "Brief mode — condensed final prose (correctness reporting kept) — toggle with /brief",
+  },
   { key: "QUANTA_BENCH_HOME", defaultLabel: "(auto)", describe: "Bench artifacts root" },
   {
     key: "QUANTA_BENCH_CACHE_PATHSPECS_EXTRA",

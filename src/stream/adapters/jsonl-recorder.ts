@@ -318,6 +318,14 @@ const KIND_MAP: Record<RecordedEventType, TrajectoryKind> = {
   // `reason:"knobs_applied"` keeps the line greppable apart from other
   // recovery-kind events.
   knobs_applied: "recovery",
+  // C2 (jun-4-communicate-update.md): structured progress report. Rides the
+  // existing `recovery` family for the same rationale as `decision` / `plan_*`
+  // / `turn_diff_updated` — a same-turn observation point, no new TrajectoryKind
+  // rippling through redaction / probe / consumer code paths. Unlike
+  // `output_progress` (a transient token tick the recorder SKIPS), this event
+  // IS recorded: it is durable agent intent. `reason:"progress_update"` keeps
+  // the line greppable apart from other recovery-kind events.
+  progress_update: "recovery",
   error: "error",
   usage: "llm_usage",
   done: "session_end",
@@ -434,6 +442,19 @@ const dataOf = (e: RecordedEvent): Record<string, unknown> => {
       return decisionData(e)
     case "knobs_applied":
       return knobsAppliedData(e)
+    case "progress_update":
+      // C2 (jun-4-communicate-update.md): structured-progress payload. Optional
+      // terminal fields are CONDITIONALLY spread so the recorded JSON is
+      // byte-exact (no `undefined` fields). `reason:"progress_update"` keeps the
+      // recovery-kind line greppable. Recorded (durable agent intent), unlike
+      // the transient `output_progress` token tick the recorder skips.
+      return {
+        reason: "progress_update",
+        currentStep: e.currentStep,
+        ...(e.finalSummary !== undefined ? { finalSummary: e.finalSummary } : {}),
+        ...(e.completedSubtitle !== undefined ? { completedSubtitle: e.completedSubtitle } : {}),
+        ...(e.turn !== undefined ? { turn: e.turn } : {}),
+      }
     case "done":
       return { reason: e.reason, turns: e.turns }
     default:

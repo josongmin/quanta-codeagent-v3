@@ -75,14 +75,19 @@ export const renderResourceList = (entries: ReadonlyArray<ResourceEntry>): strin
     const desc = e.description !== undefined ? `: ${e.description}` : ""
     return `  - ${e.uri}${name}${mime}${desc}`
   })
-  return truncate([`${entries.length} resource${entries.length === 1 ? "" : "s"}:`, ...lines].join("\n"))
+  return truncate(
+    [`${entries.length} resource${entries.length === 1 ? "" : "s"}:`, ...lines].join("\n"),
+  )
 }
 
 /** Render `resources/read` content blocks. Text blocks are concatenated with a
  *  source header; BLOB blocks are NEVER inlined (a placeholder is emitted so the
  *  model knows binary content exists without flooding the transcript with
  *  base64). Output is capped. */
-export const renderResourceContent = (uri: string, blocks: ReadonlyArray<ResourceBlock>): string => {
+export const renderResourceContent = (
+  uri: string,
+  blocks: ReadonlyArray<ResourceBlock>,
+): string => {
   if (blocks.length === 0) return `# ${uri}\n(empty resource — no content blocks)`
   const parts: string[] = []
   for (const b of blocks) {
@@ -112,7 +117,9 @@ export const renderPromptList = (entries: ReadonlyArray<PromptEntry>): string =>
         : ""
     return `  - ${e.name}${desc}${args}`
   })
-  return truncate([`${entries.length} prompt${entries.length === 1 ? "" : "s"}:`, ...lines].join("\n"))
+  return truncate(
+    [`${entries.length} prompt${entries.length === 1 ? "" : "s"}:`, ...lines].join("\n"),
+  )
 }
 
 /** Render one prompt message. Text content (string, or a `{type:"text",text}`
@@ -131,7 +138,8 @@ const renderMessageContent = (content: unknown): string => {
 }
 
 export const renderPromptResult = (name: string, result: PromptResult): string => {
-  const header = result.description !== undefined ? `# ${name} — ${result.description}` : `# ${name}`
+  const header =
+    result.description !== undefined ? `# ${name} — ${result.description}` : `# ${name}`
   const lines = (result.messages as ReadonlyArray<PromptMessage>).map(
     (m) => `${m.role}: ${renderMessageContent(m.content)}`,
   )

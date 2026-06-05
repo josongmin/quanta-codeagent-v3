@@ -1,0 +1,80 @@
+id: mcp-resource-tools
+title: MCP resource/prompt tools (N3 — list/read resources + list/get prompts)
+section: 9
+subsystem: MCP / resources (§7, H19 resources/* + prompts/* client methods 위에 얹은 도구층)
+order: 169
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, ide]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "absorbed:cursor"]
+depends_on: [mcp-connector-discovery]
+purpose: |
+  H19(LANDED)이 준 `McpClient`의 typed no-throw `listResources`/`readResource`/
+  `listPrompts`/`getPrompt` (resources/* + prompts/* method 패밀리) 위에 얹는
+  **agent-callable 도구층**. H19 메서드는 INTERNAL — 에이전트 루프가 못 부름. N3가
+  네 개의 caller-wired default-OFF 도구를 노출: `mcp_list_resources` /
+  `mcp_read_resource` / `mcp_list_prompts` / `mcp_get_prompt` — 모델이 연결된 MCP
+  서버의 resources + prompt template을 열거·읽기.
+
+  레퍼런스: Cursor `listMcpResources`/`readMcpResource` exec-args(per-server scoping +
+  NotFound/Error/Rejected 닫힌 union) + Codex `rmcp-client` 5-method 패밀리
+  (resources/{list,read,subscribe} + prompts/{list,get}). N3는 list/read + list/get
+  표면화; subscribe는 notification-stream이라 도구 아님(Phase-2 deferred).
+
+  슬라이스 (`src/tool/mcp_resources/`, `@/tool` leaf, NO `@/mcp` 임포트):
+    - `port.ts` — duck-typed `ResourcesHandle` (=@/mcp/resources/port `McpResult<T>`
+      + `Mcp*` shape의 string-identical mirror; 호스트가 live McpClient를 이 shape으로
+      어댑트, drift=어댑터 사이트 TYPE error).
+    - 4 tool factory `(port: ResourcesHandle) => Tool` — 모두 read-only +
+      concurrency-safe, 각 execute가 zod 재파싱 → signal.aborted 체크 → handle 1회 호출
+      → 단일 `{type:"result"}`. typed failure(`unsupported`/`malformed`/`transport`/
+      `too-large`)는 throw 없이 `ok:false`.
+    - `render.ts` — PURE 렌더 + failure 매핑. **untrusted-content 안전**: BLOB은 절대
+      inline 안 함(placeholder만), text는 MAX_OUTPUT(50k, list_tasks와 동일값)로 cap,
+      non-text prompt content는 typed placeholder(파싱 시도 안 함).
+    - `index.ts` — `mcpResourcesTools(port): Tool[]` (stable order:
+      list_resources → read_resource → list_prompts → get_prompt).
+
+  배선/보안: `DefaultToolPorts.mcpResources` + `QUANTA_MCP_RESOURCES` default-OFF
+  (없으면 미등록=byte-identical, N2 `mcpConnectors` 미러). 도구 출력은 `mcp`-origin ⇒
+  `deriveProvenance(name,"mcp")==="mcp"` ⇒ H2/ADR-0471 `<untrusted-source>` envelope가
+  dispatch seam에서 출력을 wrap+defang. 별도 보안 배선 불필요 — `mcp`-origin array로
+  등록되는 것 자체가 invariant(hellgate가 origin=mcp + defang 둘 다 핀).
+evidence:
+  code:
+    - src/tool/mcp_resources/port.ts
+    - src/tool/mcp_resources/render.ts
+    - src/tool/mcp_resources/list_resources.ts
+    - src/tool/mcp_resources/read_resource.ts
+    - src/tool/mcp_resources/list_prompts.ts
+    - src/tool/mcp_resources/get_prompt.ts
+    - src/tool/mcp_resources/index.ts
+    - src/tool/index.ts
+  tests:
+    unit:
+      - tests/unit/mcp-resource-tools-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+notes: |
+  L3: duck-typed port mirror + 4 tool factory + PURE render(cap/blob-guard/
+  non-text-placeholder) + DefaultToolPorts wiring + knob + manifest row 완비,
+  default-OFF byte-identical. hellgate 39: happy(list/read/get/forward-args/
+  empty) + typed-failure×4×4도구 + malformed-args + abort×4 + DoS(cap/blob/
+  non-text) + **THE invariant(deriveProvenance=mcp + hostile-text defang 봉인)** +
+  default-OFF 등록.
+  **잔여(host, @/mcp + @/agent owned, N3 슬라이스 밖)**:
+    (1) `src/mcp/resources/client-port.ts` — `clientResourcesPort`/`resourcesPortOver`
+        (H19가 raw McpClient 메서드까지만 랜딩, tasks와 달리 port-over-client 어댑터 미존재).
+        순수 pass-through, `tasks/client-port.ts` 미러.
+    (2) `src/agent/mcp-bridge.ts` — `resourcesToolsFor(client)`: serverSupportsResources()/
+        serverSupportsPrompts() 게이팅으로 subset 배선 + loadSingle/loadSupervised push,
+        그래야 input.mcpTools로 들어가 origin=mcp 자동 태깅.
+        (N3는 `DefaultToolPorts.mcpResources` 경로로 대체 배선 제공 — 호스트가 ResourcesHandle을
+        mint해 채우면 즉시 라이브. bridge 경로는 같은 도구를 MCP 협상 결과에 게이팅하는 sugar.)
+  Phase-2 deferred: prompt-template materialization(get_prompt 결과를 context로 직접
+  주입) + resources/subscribe notification-stream 표면화.

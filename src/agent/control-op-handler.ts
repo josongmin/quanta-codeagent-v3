@@ -27,6 +27,7 @@
  * `RESPONSE_QUEUED_REASONS` closed taxonomy for the back-pressure event.
  */
 
+import type { BriefStore } from "./brief"
 import { ALL_PAUSED_REASONS, type PausedReason } from "./follow-up-queue"
 import type { Submission } from "./submission"
 
@@ -144,3 +145,22 @@ export const isSetModeOp = (
 ): sub is Submission & {
   op: { kind: "set_mode"; mode: "default" | "plan"; reason?: string }
 } => sub.op.kind === "set_mode"
+
+/** Type guard: this submission envelope carries the `set_brief` op (C3,
+ *  jun-4-brief-mode RFC). Mirrors {@link isSetModeOp}; the loop routes the op
+ *  through {@link applyBriefTransition}. */
+export const isSetBriefOp = (
+  sub: Submission,
+): sub is Submission & {
+  op: { kind: "set_brief"; on: boolean; reason?: string }
+} => sub.op.kind === "set_brief"
+
+/** C3 — apply a `set_brief` op to the session's brief-mode store. Pure except
+ *  for the store mutation; NEVER throws (a malformed op must not crash the
+ *  parent loop). Returns the resolved boolean that was written so the caller
+ *  can echo a confirmation / emit a posture-changed event. The NEXT turn's
+ *  `buildTurnContext({ brief })` observes the new value. */
+export const applyBriefTransition = (store: BriefStore, on: boolean): boolean => {
+  store.set(on)
+  return store.get()
+}

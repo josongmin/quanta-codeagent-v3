@@ -108,9 +108,6 @@ export const createCommunicateUpdateTool = (): Tool<CommunicateUpdateInput> => (
   // as `update_working_state`'s explicit tier).
   hitlTier: (): "pre-approval-ok" => "pre-approval-ok",
 
-  // biome-ignore lint/correctness/useYield: single terminal `result` yield; the
-  // emit is a synchronous fire-and-continue side effect with no intermediate
-  // progress events.
   async *execute(input: CommunicateUpdateInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
     emitProgress(ctx.progressSink, input)
     yield { type: "result", result: { ok: true, output: "progress reported" } }

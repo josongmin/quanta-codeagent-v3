@@ -14,6 +14,8 @@
 
 import { errMessage } from "@/shared"
 import type {
+  BatchDagGate,
+  BatchDagNode,
   BatchItemResult,
   BatchRunResult,
   BatchSubagentRunner,
@@ -35,6 +37,10 @@ export interface RunBatchArgs {
    *  parsed as JSON and shallow-checked to be an object whose top-level keys
    *  cover every key declared here; violations mark JUST that item error. */
   readonly outputSchema?: Record<string, unknown>
+  /** Capability A — per-item dependency edges: `itemId → [depId, …]`. An item
+   *  is dispatched only after EVERY dep id has completed; a dep that fails marks
+   *  the item a dead branch (not dispatched). Absent / empty ⇒ flat fan-out. */
+  readonly dependencies?: Record<string, readonly string[]>
 }
 
 export interface RunBatchDeps extends SubagentBatchDeps {
@@ -230,41 +236,93 @@ export const runBatch = async (
   let failed = 0
   const reportProgress = () => deps.onProgress?.(done, total, failed)
 
+  // Capability A — build the DAG gate from the items' declared dependencies.
+  // Absent factory OR no declared edges ⇒ `undefined` (flat fan-out, byte-
+  // identical). A cyclic/dangling/duplicate graph is REFUSED whole (no dispatch).
+  const ids = args.items.map((item, index) => deriveId(item, index, args.idField))
+  const hasEdges =
+    args.dependencies !== undefined && Object.values(args.dependencies).some((d) => d.length > 0)
+  let gate: BatchDagGate | undefined
+  if (deps.dagGateFactory !== undefined && hasEdges) {
+    const nodes: BatchDagNode[] = ids.map((id) => ({
+      id,
+      dependsOn: args.dependencies?.[id] ?? [],
+      state: "pending",
+    }))
+    const built = deps.dagGateFactory(nodes)
+    if (!built.ok) {
+      const items = ids.map(
+        (id, index): BatchItemResult => ({
+          index,
+          id,
+          status: "error",
+          error: `dag rejected: ${built.reason}`,
+          turns: 0,
+        }),
+      )
+      return {
+        items,
+        summary: { total, ok: 0, failed: total, cancelled: 0, durationMs: deps.clock() - start },
+      }
+    }
+    gate = built.gate
+  }
+
+  /** Record one item's terminal result, advance counters, and — when gated —
+   *  release its dependents via the DAG gate. EXACTLY ONE gate mark per gated
+   *  item (complete on ok, fail otherwise), so a template-broken / cancelled /
+   *  blocked item still unblocks its dependents (no fan-in deadlock). */
+  const settle = (index: number, id: string, itemResult: BatchItemResult): void => {
+    results[index] = itemResult
+    done++
+    if (itemResult.status === "error") failed++
+    reportProgress()
+    if (gate !== undefined) {
+      if (itemResult.status === "ok") gate.markComplete(id)
+      else gate.markFailed(id)
+    }
+  }
+
   const tasks = args.items.map(async (item, index) => {
-    const id = deriveId(item, index, args.idField)
+    const id = ids[index] as string
     // 1) Template render (cheap, no slot needed). Missing placeholder ⇒ item
-    //    error WITHOUT spawning a worker.
+    //    error WITHOUT spawning a worker (and release any dependents).
     const rendered = renderTemplate(args.promptTemplate, item)
     if (!rendered.ok) {
-      results[index] = {
+      settle(index, id, {
         index,
         id,
         status: "error",
         error: `template missing placeholder(s): ${rendered.missing.join(", ")}`,
         turns: 0,
-      }
-      done++
-      failed++
-      reportProgress()
+      })
       return
     }
-    // 2) Admission. If the batch is already cancelled, short-circuit before
-    //    taking a slot ("cancelled before start").
+    // 2) Cancelled before start ⇒ short-circuit (release dependents).
     if (signal.aborted) {
-      results[index] = { index, id, status: "error", error: "cancelled before start", turns: 0 }
-      done++
-      failed++
-      reportProgress()
+      settle(index, id, { index, id, status: "error", error: "cancelled before start", turns: 0 })
       return
     }
+    // 3) Capability A — wait for deps OUTSIDE the semaphore so a blocked item
+    //    never holds a worker slot (deadlock-free). A dead branch is NOT run.
+    if (gate !== undefined) {
+      const outcome = await gate.awaitReady(id)
+      if (outcome === "blocked") {
+        settle(index, id, {
+          index,
+          id,
+          status: "error",
+          error: "dependency failed — task blocked, not dispatched",
+          turns: 0,
+        })
+        return
+      }
+    }
+    // 4) Admission.
     await sem.acquire()
     try {
-      // Re-check after waiting for a slot — cancellation may have arrived.
       if (signal.aborted) {
-        results[index] = { index, id, status: "error", error: "cancelled before start", turns: 0 }
-        done++
-        failed++
-        reportProgress()
+        settle(index, id, { index, id, status: "error", error: "cancelled before start", turns: 0 })
         return
       }
       const outcome = await runOneItem(
@@ -275,11 +333,7 @@ export const runBatch = async (
         timeoutMs,
         signal,
       )
-      const itemResult = toItemResult(index, id, outcome, args.outputSchema)
-      results[index] = itemResult
-      done++
-      if (itemResult.status === "error") failed++
-      reportProgress()
+      settle(index, id, toItemResult(index, id, outcome, args.outputSchema))
     } finally {
       sem.release()
     }

@@ -13,7 +13,12 @@ import { type GlobRule, renderGlobRulesBlock, selectGlobRules } from "./glob-rul
 import { assertValidIdentityLines } from "./identity"
 import { resolveAgentMode } from "./mode"
 import { type PersonaKind, personaLines } from "./persona"
-import { BODY_AFTER_PERSONA, BODY_AFTER_PROMPT_PACK, INTRO_LINES } from "./prompt-body"
+import {
+  BODY_AFTER_PERSONA,
+  BODY_AFTER_PROMPT_PACK,
+  BRIEF_NOTICE,
+  INTRO_LINES,
+} from "./prompt-body"
 import {
   type AgentMode as PromptPackMode,
   renderPackByMode,
@@ -244,6 +249,17 @@ export interface TurnContextInput {
    *  default-OFF; the rule rides the `base` cache breakpoint so the
    *  4-breakpoint budget is untouched. */
   untrustedEnvelope?: boolean
+
+  /** C3 (jun-4-brief-mode RFC) — brief-mode session posture. When `true`,
+   *  `buildDynamicContext` splices `BRIEF_NOTICE` into the per-turn DYNAMIC
+   *  `<system-reminder>` slot (NOT the static cached prefix), instructing the
+   *  model to condense its FINAL explanatory prose while EXEMPTING correctness
+   *  reporting (verification block, errors, file:line evidence, the honesty
+   *  ladder). ORTHOGONAL to {@link mode} and to the `effort` token ceiling —
+   *  both can be set and compose. The loop reads the session `brief` store once
+   *  per turn and threads it here. Absent / `false` ⇒ no notice, byte-identical
+   *  to the pre-feature dynamic tail (the primary safety invariant). */
+  brief?: boolean
 }
 
 export interface TurnContext {
@@ -439,6 +455,13 @@ const buildDynamicContext = (
   // so the per-turn notice and the dispatch admissibility gate never disagree.
   const notice = modeNotice(effectiveMode)
   if (notice) parts.push("", notice)
+  // C3 (jun-4-brief-mode RFC) — brief-mode directive rides the per-turn DYNAMIC
+  // slot AFTER the mode notice (a mode notice may itself constrain output, so it
+  // reads first) and BEFORE repo-rules. Absent / false ⇒ nothing pushed, the
+  // dynamic tail is byte-identical to the pre-feature output (primary invariant).
+  // It tightens prose verbosity ONLY; the static correctness rails
+  // (BODY_AFTER_PROMPT_PACK) are untouched and authoritative above it.
+  if (input.brief === true) parts.push("", BRIEF_NOTICE)
   // ADR-0397 env block — sits ABOVE repo-rules because env/build context is
   // host-static authority (the platform/shell/pkg-mgr don't change mid-turn
   // and the git snapshot is taken at turn boundary). Absent / empty env ⇒

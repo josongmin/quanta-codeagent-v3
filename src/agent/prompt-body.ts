@@ -378,3 +378,33 @@ export const BODY_AFTER_PROMPT_PACK: readonly string[] = [
   "was verified. If you genuinely cannot verify, say so explicitly and explain",
   "why rather than implying success.",
 ]
+
+/**
+ * C3 (jun-4-brief-mode RFC) — brief-mode session-posture directive.
+ *
+ * This is NOT part of the static cached prefix above. It is spliced into the
+ * per-turn DYNAMIC `<system-reminder>` slot by `buildDynamicContext`
+ * (`./prompt.ts`) ONLY when the session's `brief` posture is ON, so flipping
+ * the toggle mid-session never perturbs the provider cache prefix and the
+ * default-OFF path is byte-identical (the notice is simply absent).
+ *
+ * The contract (load-bearing): brevity applies to EXPLANATORY prose ONLY. The
+ * directive explicitly EXEMPTS correctness reporting — the Verification report,
+ * error/failure reporting, file:line evidence, and the honesty/claim ladder —
+ * so brief-mode can never be an excuse to drop a verification the model ran or
+ * a failure it saw. It is layered BELOW those correctness rails in authority
+ * (RFC §4.2 / §8 R1). Rendered as a single newline-joined string, like the mode
+ * notices in `prompt.ts`; carries no `<system-reminder>` tokens so it survives
+ * the outer `embedUntrusted` wrap unchanged.
+ */
+export const BRIEF_NOTICE: string = [
+  "BRIEF MODE is active. Condense your FINAL prose: answer first, no preamble,",
+  "no recap of what the user already knows, no restating the request. Prefer a",
+  "short paragraph or a tight list over an essay. Drop hedging and filler.",
+  "This applies to EXPLANATORY prose ONLY. It does NOT change correctness",
+  "reporting: still emit the Verification report (command + verdict + exit),",
+  "still report errors and failures in full, still cite file:line evidence for",
+  "concrete claims, still honor the claim/honesty ladder (FACT/INFERENCE/UNKNOWN).",
+  "Brevity is never an excuse to omit a verification you ran, a failure you saw,",
+  "or a gap you must name.",
+].join("\n")

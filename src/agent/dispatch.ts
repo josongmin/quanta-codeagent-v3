@@ -680,6 +680,14 @@ const buildToolContext = (args: {
     // path is byte-identical (default-OFF). The producer `PassiveVcsEventSink` is
     // structurally assignable to the ctx-side `VcsEventSink` mirror.
     ...(config.vcsEventSink !== undefined ? { vcsEventSink: config.vcsEventSink } : {}),
+    // C2 (jun-4-communicate-update.md) — surface the structured-progress sink so
+    // the `communicate_update` tool can forward its typed mirror to the host
+    // adapter (which emits a render-only `progress_update` AgentEvent on the
+    // existing stream). ABSENT (knob off / non-wiring host) ⇒ omitted ⇒ the
+    // tool's `?.emit` is a no-op and the dispatch path is byte-identical
+    // (default-OFF). The `@/agent` config-side `ProgressSink` is the same
+    // structural `@/tool` mirror.
+    ...(config.progressSink !== undefined ? { progressSink: config.progressSink } : {}),
   }
 }
 

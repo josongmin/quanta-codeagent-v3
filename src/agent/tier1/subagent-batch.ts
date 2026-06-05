@@ -25,6 +25,7 @@ import {
 } from "@/subagent/coordination"
 import type { Tool } from "@/tool"
 import {
+  type BatchDagGateFactory,
   type BatchSubagentRunner,
   DEFAULT_BATCH_TIMEOUT_POLICY,
   DEFAULT_MAX_BATCH_ITEMS,
@@ -92,13 +93,22 @@ export const buildSubagentBatchBlock = (config: AgentConfig): Tool[] => {
   // BYTE-IDENTICAL. The gate becomes live the moment a node-set source exists
   // (a slice-schema extension is a deliberately separate wave); the composition
   // itself is proven end-to-end by `team-dag-batch-e2e-hellgate`.
-  const composed = composeDagBatchRunner(runner, [], (req) => req.prompt)
-  // `composed.ok` is always true here (empty node set never rejects); the
-  // returned runner is the raw runner unless a node set engages the gate.
-  const effectiveRunner: BatchSubagentRunner = composed.ok ? composed.runner : runner
+  // Capability A — multi-agent task DAG. The dependency edges arrive PER
+  // `spawn_batch` call (the input's `dependencies` map), NOT at build time — so
+  // we inject a per-call gate FACTORY over the pure `createDagGate` core instead
+  // of wrapping the runner once with an empty node set. The factory is provided
+  // ONLY when `QUANTA_TEAM_DAG` is on; absent ⇒ the batch slice fans out flat
+  // (byte-identical). A cyclic/dangling/duplicate graph becomes a typed rejection
+  // → the tool refuses the batch rather than dispatching a bad graph.
+  const dagGateFactory: BatchDagGateFactory = (nodes) => {
+    const made = createDagGate(nodes as readonly TaskNode[])
+    if (!made.ok) return { ok: false, reason: `${made.reason}: ${made.cycle.join(" → ")}` }
+    return { ok: true, gate: made.gate }
+  }
 
   return subagentBatchTools({
-    runner: effectiveRunner,
+    runner,
+    ...(runtimeConfig().teamDag ? { dagGateFactory } : {}),
     readFile: (path: string) => fsReadFile(path, "utf8"),
     clock: Date.now,
     maxItems: sub.maxBatchItems ?? DEFAULT_MAX_BATCH_ITEMS,

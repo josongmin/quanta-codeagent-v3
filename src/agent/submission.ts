@@ -85,6 +85,13 @@ export type SubmissionOp =
    *  {@link applyDeveloperModeTransition} and emit the matching
    *  `mode_changed` AgentEvent. */
   | { kind: "set_mode"; mode: "default" | "plan"; reason?: string }
+  /** C3 (jun-4-brief-mode RFC): brief-mode session-posture transition. Mirrors
+   *  {@link set_mode} — a third member of the host/model self-mutation posture
+   *  family (`mode`/`effort`/`brief`). `on` is the new brief state; `reason` is
+   *  OPTIONAL free-form text (analytics/UI hint, never used for control flow).
+   *  The loop writes the session brief store and the NEXT turn's
+   *  `buildTurnContext({ brief })` observes it. No-throw surface. */
+  | { kind: "set_brief"; on: boolean; reason?: string }
 
 /** Closed enumeration of {@link SubmissionOp} discriminants. Adding a new
  *  variant to the union MUST also extend this array — the matching
@@ -99,6 +106,7 @@ export const ALL_SUBMISSION_OP_KINDS = Object.freeze([
   "shutdown",
   "reload_user_config",
   "set_mode",
+  "set_brief",
 ] as const satisfies readonly SubmissionOp["kind"][])
 // Drift guard: outer annotation removed so `[number]` is the literal tuple;
 // Assert proves every SubmissionOp arm is listed. New arm missing → build error.

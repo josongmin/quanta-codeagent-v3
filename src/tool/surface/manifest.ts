@@ -379,6 +379,18 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     note: "Wired by the CLI runtime-context (interactive surface owns the ask channel).",
   },
   {
+    name: "communicate_update",
+    origin: "@/tool/communicate-update",
+    gate: {
+      kind: "config-slot",
+      slot: "DefaultToolPorts.progressUpdate",
+      env: "QUANTA_PROGRESS_UPDATE",
+    },
+    default: { cli: "opt-in" },
+    risk: "read-only",
+    note: "C2 — structured mid-turn progress report (current_step / final_summary / completed_subtitle → render-only progress_update event). Opt-in (QUANTA_PROGRESS_UPDATE=1); absent ⇒ tool not registered, byte-identical.",
+  },
+  {
     name: "shadow_rewind",
     group: ["shadow_snapshots", "shadow_verify", "shadow_restore_partial"],
     origin: "@/agent/tier1/shadow",
@@ -555,6 +567,20 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     risk: "meta",
     adr: "N2",
     note: "MCP connector discovery/catalog (§7, Codex imported-connector-apps) — discover installable MCP servers + install one into .mcp.json (vs hand-editing). Pairs with H18 (OAuth=auth, this=discovery). The model lists/installs; the HOST owns the catalog source + toMcpServerConfig transform (@/connectors mcp-connector-catalog) + the real .mcp.json write. Opt-in EVERYWHERE (QUANTA_MCP_CONNECTORS): install mutates config, never auto-seeds. Duck-typed port keeps @/tool fence-clean.",
+  },
+  {
+    name: "mcp_list_resources",
+    group: ["mcp_read_resource", "mcp_list_prompts", "mcp_get_prompt"],
+    origin: "@/tool/mcp_resources (mcpResourcesTools, via DefaultToolPorts.mcpResources)",
+    gate: {
+      kind: "config-slot",
+      slot: "DefaultToolPorts.mcpResources",
+      env: "QUANTA_MCP_RESOURCES",
+    },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "network",
+    adr: "N3",
+    note: "MCP resource/prompt read surface (§7, RFC jun-4-mcp-resource-tools) over the H19-landed McpClient resources/* + prompts/* methods. The model enumerates + reads a connected MCP server's resources and prompt templates. Wired only when an MCP server advertises resources/prompts + the apps layer wires a ResourcesHandle (the duck-typed mirror of @/mcp/resources McpResourcesPort, adapted over a live McpClient). risk:network because each call is an outbound RPC and resource READ exfiltrates server data into the transcript. Output is mcp-origin ⇒ deriveProvenance→mcp ⇒ the H2/ADR-0471 <untrusted-source> envelope wraps it at dispatch (third-party content is adversary-controllable DATA). BLOB blocks are never inlined (placeholder); text is capped. Opt-in EVERYWHERE (QUANTA_MCP_RESOURCES). Duck-typed port keeps @/tool fence-clean.",
   },
 ]
 

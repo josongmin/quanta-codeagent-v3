@@ -73,6 +73,15 @@ export const spawnBatchInputSchema = z
       .positive()
       .optional()
       .describe("Per-worker model-turn ceiling (passed to the child budget)."),
+    dependencies: z
+      .record(z.string(), z.array(z.string()))
+      .optional()
+      .describe(
+        "Capability A (task DAG): map of item id → [dep item ids]. An item runs " +
+          "only AFTER every dep completes; a failed dep marks the item a dead branch " +
+          "(not dispatched). Item ids come from id_field (object items) or the index. " +
+          "A cyclic/dangling graph is refused. Omit for flat parallel fan-out.",
+      ),
   })
   .strict()
 
@@ -117,6 +126,7 @@ const toRunArgs = (args: SpawnBatchInput, items: readonly BatchItem[]): RunBatch
   ...(args.id_field !== undefined ? { idField: args.id_field } : {}),
   ...(args.max_turns !== undefined ? { maxTurns: args.max_turns } : {}),
   ...(args.output_schema !== undefined ? { outputSchema: args.output_schema } : {}),
+  ...(args.dependencies !== undefined ? { dependencies: args.dependencies } : {}),
 })
 
 /** An empty-list run result (zero spawns). */

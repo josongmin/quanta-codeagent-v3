@@ -315,6 +315,26 @@ export interface RuntimeConfig {
    *  are NOT registered (byte-identical). When ON, the composition root wires a
    *  discovery port (catalog source + `.mcp.json` writer). */
   readonly mcpConnectors: boolean
+  /** C2 — structured mid-turn progress report (`QUANTA_PROGRESS_UPDATE`). Strict
+   *  opt-in (`=== "1"`). Default false ⇒ the `communicate_update` tool is NOT
+   *  registered (byte-identical). When ON, the composition root passes
+   *  `DefaultToolPorts.progressUpdate=true` AND wires `AgentConfig.progressSink`
+   *  (the host adapter that turns the tool's mirror into a render-only
+   *  `progress_update` AgentEvent). */
+  readonly progressUpdate: boolean
+  /** N6 — PTY/tmux session attach (`QUANTA_PTY_ATTACH`). Strict opt-in
+   *  (`=== "1"`). Default false ⇒ the 6 `pty_*` tools are NOT registered
+   *  (byte-identical, exec-risk). When ON, the composition root wires a
+   *  `DefaultToolPorts.ptySession` backend (tmux/Bun). */
+  readonly ptyAttach: boolean
+  /** C3 — brief-mode session-posture knob SEED (`QUANTA_BRIEF`). Accepts the
+   *  standard boolean knob vocabulary (`1`/`true`/`on`, case-insensitive) ⇒
+   *  true; absent / any other value ⇒ false (default-OFF, byte-identical). This
+   *  is ONLY the initial seed for the per-session brief store (`createBriefStore`);
+   *  the live posture is then flipped by `/brief` or a `set_brief` control-op.
+   *  When false at seed AND never toggled, `buildDynamicContext` emits no
+   *  `BRIEF_NOTICE` and the per-turn dynamic tail is byte-identical. */
+  readonly brief: boolean
   /** FS jail disable flag (`QUANTA_FS_JAIL=off`). Default false (jail ON). */
   readonly fsJailDisabled: boolean
   /** ADR-0062 cap-as-instruction dispatch enforcement (`QUANTA_CAP_ENFORCE=1`).
@@ -601,6 +621,11 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     sideAgent: env["QUANTA_SIDE_AGENT"] === "1",
     // N2 — strict `=== "1"` opt-in. Default false ⇒ no MCP connector tools.
     mcpConnectors: env["QUANTA_MCP_CONNECTORS"] === "1",
+    progressUpdate: env["QUANTA_PROGRESS_UPDATE"] === "1",
+    ptyAttach: env["QUANTA_PTY_ATTACH"] === "1",
+    // C3 — brief-mode SEED. Uses the standard boolean knob vocabulary (1/true/on)
+    // so it reads like the `effort` env seed; default-OFF ⇒ byte-identical.
+    brief: parseBool(env["QUANTA_BRIEF"]),
     fsJailDisabled: parseBool(env["QUANTA_FS_JAIL"] === "off" ? "1" : undefined),
     capEnforce: parseBool(env["QUANTA_CAP_ENFORCE"]),
     gitSha: stringOrUndef(env["QUANTA_GIT_SHA"]),

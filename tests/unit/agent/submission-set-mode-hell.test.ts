@@ -179,7 +179,7 @@ describe("ALL_SUBMISSION_OP_KINDS taxonomy includes set_mode + every union arm",
   test("includes set_mode", () => {
     expect(ALL_SUBMISSION_OP_KINDS.includes("set_mode")).toBe(true)
   })
-  test("equals the documented 7-arm closed enum, in order", () => {
+  test("equals the documented 8-arm closed enum, in order", () => {
     expect([...ALL_SUBMISSION_OP_KINDS]).toEqual([
       "user_input",
       "user_input_with_turn_context",
@@ -188,6 +188,7 @@ describe("ALL_SUBMISSION_OP_KINDS taxonomy includes set_mode + every union arm",
       "shutdown",
       "reload_user_config",
       "set_mode",
+      "set_brief",
     ])
   })
   test("no duplicates", () => {
@@ -217,6 +218,8 @@ describe("ALL_SUBMISSION_OP_KINDS taxonomy includes set_mode + every union arm",
           return "reload_user_config"
         case "set_mode":
           return "set_mode"
+        case "set_brief":
+          return "set_brief"
         default: {
           const _exhaustive: never = op
           return _exhaustive
@@ -236,6 +239,7 @@ describe("ALL_SUBMISSION_OP_KINDS taxonomy includes set_mode + every union arm",
       { kind: "shutdown" },
       { kind: "reload_user_config" },
       { kind: "set_mode", mode: "plan" },
+      { kind: "set_brief", on: true },
     ]
     expect(samples.map((s) => s.kind)).toEqual([...ALL_SUBMISSION_OP_KINDS])
     for (const s of samples) expect(witness(s).length).toBeGreaterThan(0)
