@@ -475,4 +475,72 @@ describe("auto-dream / cross-session trigger — hellgate", () => {
     })
     await expect(t.onSessionEnd()).rejects.toThrow("aborted")
   })
+
+  // ── CLOCK SKEW (backward / boundary / future — PERMANENT-LOCKOUT vector) ──────
+  test("17. clock went BACKWARDS (now < lastDreamAtMs) ⇒ hoursSince clamps to 0, no spurious hours-fire", async () => {
+    const clock = mkClock(1_700_000_000_000)
+    // Last dream stamped 1ms in the FUTURE relative to the (now-corrected) clock.
+    const calls = { n: 0 }
+    const state = new InMemoryDreamState({
+      sessionsSinceLastDream: 0, // sessions well below threshold so ONLY a bogus hours-cross could fire
+      lastDreamAtMs: clock.now() + 5_000_000, // future stamp → now - last is NEGATIVE
+      lastOutcome: "completed",
+    })
+    const t = mkTrigger({
+      state,
+      now: clock.now,
+      policy: POLICY,
+      consolidate: mkConsolidate({ kind: "consolidated", content: "x" }, { calls }),
+    })
+    // Negative delta must clamp to 0 hours, NOT a huge/negative number.
+    expect(t.hoursSinceLastDream()).toBe(0)
+    const o = await t.onSessionEnd() // 1 session < 3, hours=0 < 24 ⇒ skip
+    expect(o.kind).toBe("below_threshold")
+    expect(calls.n).toBe(0) // backward clock did NOT spuriously fire
+  })
+
+  test("18. now EXACTLY equals lastDreamAtMs (boundary) ⇒ hoursSince === 0 (not negative, not NaN)", () => {
+    const clock = mkClock(1_700_000_000_000)
+    const t = mkTrigger({
+      state: new InMemoryDreamState({
+        sessionsSinceLastDream: 0,
+        lastDreamAtMs: clock.now(), // identical
+        lastOutcome: "completed",
+      }),
+      now: clock.now,
+      policy: POLICY,
+    })
+    expect(t.hoursSinceLastDream()).toBe(0)
+  })
+
+  test("19. FUTURE lastDreamAtMs poison ⇒ sessions OR-threshold RESCUES (no permanent lockout) + re-stamp clears poison", async () => {
+    // PERMANENT-LOCKOUT vector: a prior dream stamped a FAR-FUTURE lastDreamAtMs
+    // (forward clock skew at stamp time). The clock is later corrected to a much
+    // smaller value, so the hours threshold can NEVER cross until wall-clock
+    // catches the future stamp (years away). Auto-dream must NOT be locked out
+    // forever — the sessions OR-threshold must still fire, AND a completed dream
+    // must RE-STAMP with the corrected clock, clearing the poison permanently.
+    const clock = mkClock(1_700_000_000_000)
+    const futureStamp = clock.now() + 5_000_000_000_000 // year ~2255
+    const calls = { n: 0 }
+    const state = new InMemoryDreamState({
+      sessionsSinceLastDream: POLICY.sessionsThreshold - 1, // one more session crosses
+      lastDreamAtMs: futureStamp,
+      lastOutcome: "completed",
+    })
+    const t = mkTrigger({
+      state,
+      now: clock.now,
+      policy: POLICY,
+      consolidate: mkConsolidate({ kind: "consolidated", content: "rescued" }, { calls }),
+    })
+    // hours can never cross (clamped 0), but sessions OR-rescue must fire.
+    expect(t.hoursSinceLastDream()).toBe(0)
+    const o = await t.onSessionEnd()
+    expect(o.kind).toBe("completed") // NOT below_threshold — not locked out
+    expect(calls.n).toBe(1)
+    // The future-stamp poison is GONE: re-stamped with the corrected clock.
+    expect(state.read().lastDreamAtMs).toBe(clock.now())
+    expect(state.read().lastDreamAtMs).toBeLessThan(futureStamp)
+  })
 })

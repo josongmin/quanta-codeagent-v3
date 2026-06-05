@@ -167,6 +167,27 @@ export const SIDE_CONVERSATION_TOOL_EXCLUSIONS: readonly string[] = Object.freez
   // side conversation; excluded so the allowlist stays a CONSCIOUS subset.
   "coverage_check",
   "prompt_cache_status",
+  // jun-05 — read-only SURFACES from the recent absorption waves (C1 canvas /
+  // C2 communicate / N1 side-agent / N3 mcp-resources / N6 pty). Each is
+  // `null` (plan-mode-permissive) in `planModeMutatingTable`, but none belongs
+  // in a lightweight patch-re-emit side-conversation: they are operator-/host-
+  // axis introspection or inter-agent channels (artifact store, progress
+  // emitter, MCP resource/prompt browsing, PTY observation, side-agent daemon
+  // status), not the minimal exploration surface a delegated side-conversation
+  // needs. Excluded so the allowlist stays a CONSCIOUS subset (drift detector
+  // at tests/unit/side-conversation.test.ts enforces both directions).
+  "artifact_get",
+  "artifact_list",
+  "communicate_update",
+  "mcp_connector_list",
+  "mcp_get_prompt",
+  "mcp_list_prompts",
+  "mcp_list_resources",
+  "mcp_read_resource",
+  "pty_list",
+  "pty_read",
+  "side_agent_findings",
+  "side_agent_list",
 ])
 
 // ===========================================================================

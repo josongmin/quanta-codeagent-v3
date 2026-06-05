@@ -60,6 +60,13 @@ export interface ApplyRetentionOpts {
    * dashboards without mutating state.
    */
   dryRun?: boolean
+  /**
+   * TEST-ONLY interleaving seam. Invoked exactly once, right AFTER the snapshot
+   * read and BEFORE the rewrite, so a test can drive a concurrent append into
+   * the read→rename window and prove the lost-update guard. Never set in
+   * production. NO-OP when absent.
+   */
+  _afterReadForTest?: () => Promise<void>
 }
 
 export interface ApplyRetentionResult {
@@ -95,11 +102,14 @@ export async function applyRetention(
     throw new JsonlRecorderRetentionBusyError(tmpPath)
   }
 
-  const allRows = await readJsonlRows(filePath)
-  if (allRows === undefined) {
+  const before = await readJsonlRowsWithSize(filePath)
+  if (before === undefined) {
     // Missing file → no-op (not an error).
     return { keptRows: 0, droppedRows: 0, droppedBytes: 0 }
   }
+  const allRows = before.rows
+
+  if (opts._afterReadForTest !== undefined) await opts._afterReadForTest()
 
   const split = splitByCap(allRows, opts.maxCumulativeBytes)
   const result: ApplyRetentionResult = {
@@ -111,8 +121,45 @@ export async function applyRetention(
   if (opts.dryRun === true) return result
   if (split.dropped.length === 0) return result
 
-  await atomicRewrite(filePath, tmpPath, split.kept)
+  // LOST-UPDATE GUARD: a live writer may have O_APPEND-ed fresh rows to the file
+  // AFTER our snapshot read but BEFORE this rewrite. Those bytes live past
+  // `before.bytes`. Re-read the tail that grew since the snapshot and carry it
+  // forward, so the rename never drops a concurrently-appended (newest) row.
+  // The append is atomic per POSIX O_APPEND, so the grown tail is always a
+  // sequence of WHOLE rows; we re-split it on newline and append to `kept`.
+  const appendedRows = await readAppendedTail(filePath, before.bytes)
+  const keptWithAppends = appendedRows.length === 0 ? split.kept : [...split.kept, ...appendedRows]
+
+  await atomicRewrite(filePath, tmpPath, keptWithAppends)
   return result
+}
+
+/** Read whole rows that were appended to `filePath` AFTER byte offset `fromByte`
+ *  (the size at snapshot time). Returns `[]` when the file did not grow. The
+ *  trailing newline of the last appended row is stripped (row arrays are
+ *  newline-joined on write). NO-THROW for a vanished file (treated as no
+ *  growth). */
+async function readAppendedTail(filePath: string, fromByte: number): Promise<string[]> {
+  let st: import("node:fs").Stats
+  try {
+    st = await stat(filePath)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return []
+    throw err
+  }
+  if (st.size <= fromByte) return []
+  const handle = await open(filePath, "r")
+  try {
+    const len = st.size - fromByte
+    const buf = Buffer.alloc(len)
+    await handle.read(buf, 0, len, fromByte)
+    let tail = buf.toString("utf8")
+    if (tail.endsWith("\n")) tail = tail.slice(0, -1)
+    if (tail.length === 0) return []
+    return tail.split("\n")
+  } finally {
+    await handle.close()
+  }
 }
 
 /**
@@ -120,19 +167,25 @@ export async function applyRetention(
  * fragment from the final newline). Returns `undefined` if the file does
  * not exist (caller decides what to do).
  */
-async function readJsonlRows(filePath: string): Promise<string[] | undefined> {
-  let raw: string
+async function readJsonlRowsWithSize(
+  filePath: string,
+): Promise<{ rows: string[]; bytes: number } | undefined> {
+  let raw: Buffer
   try {
-    raw = await readFile(filePath, "utf8")
+    raw = await readFile(filePath)
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined
     throw err
   }
-  const allRows = raw.split("\n")
+  // `bytes` is the EXACT on-disk size at snapshot time — the offset from which a
+  // concurrent O_APPEND writes. Must be the byte length (not the utf-8 string
+  // length) so multibyte rows do not shift the appended-tail offset.
+  const bytes = raw.byteLength
+  const allRows = raw.toString("utf8").split("\n")
   if (allRows.length > 0 && allRows[allRows.length - 1] === "") {
     allRows.pop()
   }
-  return allRows
+  return { rows: allRows, bytes }
 }
 
 interface SplitResult {

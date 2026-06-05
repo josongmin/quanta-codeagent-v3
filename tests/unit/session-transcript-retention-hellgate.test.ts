@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -214,5 +214,57 @@ describe("session transcript retention — hellgate", () => {
     const res = (await sweepSessionTranscripts({ root: tmpRoot })) as TranscriptSweepResult
     expect(res.droppedRows).toBe(1)
     expect(await readFile(p, "utf8")).toBe(jsonl([rows[1] as string]))
+  })
+
+  // ── CLOCK / TIME-INVARIANT (data-loss vector) ────────────────────────────────
+  // The retention mechanism is purely CUMULATIVE-BYTES (keep the newest rows up
+  // to a cap). It reads NO mtime/atime/ctime and applies NO age cutoff — so a
+  // file's wall-clock timestamp can NEVER cause it to be deleted or trimmed. This
+  // seals the highest-value clock attack ("a future-mtime file gets reaped as
+  // expired") as structurally impossible AND guards against anyone later bolting
+  // an age-based cutoff onto this rail without revisiting the data-loss surface.
+  test("[CLOCK] a FUTURE-mtime under-cap transcript is NEVER deleted or trimmed (no age cutoff)", async () => {
+    const rows = [ROW("c-old"), ROW("c-new")]
+    const p = join(tmpRoot, "sess-future.jsonl")
+    const body = jsonl(rows)
+    await writeFile(p, body)
+    // Stamp the file's mtime/atime far in the FUTURE (year ~2255) — the exact
+    // skew that an age-based reaper would misread as "impossibly old/expired".
+    const future = new Date(9_000_000_000_000)
+    await utimes(p, future, future)
+    // A generous cap that keeps everything: if any timestamp logic existed, a
+    // future mtime is where it would either over-trim or wrongly skip.
+    const generousCap = Buffer.byteLength(body, "utf8") * 10
+
+    const res = (await sweepSessionTranscripts({
+      root: tmpRoot,
+      maxCumulativeBytes: generousCap,
+    })) as TranscriptSweepResult
+    expect(res.filesScanned).toBe(1)
+    expect(res.droppedRows).toBe(0) // nothing trimmed
+    expect(res.filesRewritten).toBe(0)
+    expect(res.errors).toEqual([])
+    // Byte-identical: the future mtime did NOT trigger a delete or a rewrite.
+    expect(await readFile(p, "utf8")).toBe(body)
+  })
+
+  test("[CLOCK] a FUTURE-mtime OVER-cap transcript trims by ROW COUNT, not by timestamp", async () => {
+    // Even an over-cap file with a future mtime must be trimmed by the SAME
+    // newest-rows-win byte rule — the timestamp must not over-delete (whole-file)
+    // nor protect the oldest rows from the cap.
+    const rows = [ROW("f-oldest"), ROW("f-mid"), ROW("f-newest")]
+    const p = join(tmpRoot, "sess-future-over.jsonl")
+    await writeFile(p, jsonl(rows))
+    const future = new Date(9_000_000_000_000)
+    await utimes(p, future, future)
+    const rowBytes = Buffer.byteLength(rows[2] as string, "utf8") + 1
+    const cap = rowBytes * 2 // keep exactly the two NEWEST rows
+
+    const res = (await sweepSessionTranscripts({
+      root: tmpRoot,
+      maxCumulativeBytes: cap,
+    })) as TranscriptSweepResult
+    expect(res.droppedRows).toBe(1) // exactly the oldest row, regardless of mtime
+    expect(await readFile(p, "utf8")).toBe(jsonl([rows[1] as string, rows[2] as string]))
   })
 })

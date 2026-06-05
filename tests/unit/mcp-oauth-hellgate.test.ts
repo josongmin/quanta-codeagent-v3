@@ -243,6 +243,78 @@ describe("mcp-oauth — concurrent acquisition coalesces (no double browser flow
   })
 })
 
+describe("mcp-oauth — clock skew (born-expired / boundary / refresh-loop)", () => {
+  /** Build a provider whose IdP mints tokens with a configurable `expires_in`
+   *  (so we can mint a token that is born-expired relative to the clock). Counts
+   *  refresh-grant POSTs so a refresh LOOP would be observable. */
+  const buildWithExpiresIn = (expiresIn: number) => {
+    let refreshCount = 0
+    const store = fakeStore()
+    const clock = fakeClock()
+    const browser = fakeBrowser()
+    const fetchPort: FetchPort = async (url, init) => {
+      if (url === `${ISSUER}/.well-known/oauth-authorization-server`) {
+        return jsonResponse(200, {
+          authorization_endpoint: `${ISSUER}/authorize`,
+          token_endpoint: `${ISSUER}/token`,
+        })
+      }
+      if (url === `${ISSUER}/token`) {
+        const isRefresh = (init?.body ?? "").includes("refresh_token")
+        if (isRefresh) refreshCount += 1
+        return jsonResponse(200, {
+          access_token: isRefresh ? "ACCESS-REFRESHED" : "ACCESS-FIRST",
+          refresh_token: "REFRESH-1",
+          token_type: "Bearer",
+          expires_in: expiresIn,
+        })
+      }
+      return jsonResponse(404, {})
+    }
+    const provider = createConnectorsMcpOAuthProvider({
+      fetchPort,
+      tokenStore: store.port,
+      clockPort: clock,
+      runBrowserFlow: browser.run,
+      clientId: "client-abc",
+      issuerFor: () => ISSUER,
+    })
+    return { provider, store, clock, browser, refreshCount: () => refreshCount }
+  }
+
+  it("expires_in=0 (token BORN expired) ⇒ next tokenFor refreshes EXACTLY once (no infinite loop)", async () => {
+    const { provider, store, refreshCount } = buildWithExpiresIn(0)
+    const first = await provider.tokenFor("srv") // browser flow → born-expired token
+    expect(first).toBe("ACCESS-FIRST")
+    // Stored with expiresAt === now (born expired).
+    expect(store.peek("srv")?.expiresAt).toBeDefined()
+    const second = await provider.tokenFor("srv") // expired → ONE refresh, not a loop
+    expect(second).toBe("ACCESS-REFRESHED")
+    expect(refreshCount()).toBe(1) // exactly one refresh GRANT per call — NO loop
+  })
+
+  it("negative expires_in (server clock skew) ⇒ stored expiresAt in the PAST, single refresh, no crash", async () => {
+    const { provider, store, clock, refreshCount } = buildWithExpiresIn(-100)
+    await provider.tokenFor("srv")
+    const exp = store.peek("srv")?.expiresAt
+    expect(exp).toBeDefined()
+    expect(exp as number).toBeLessThan(clock.now()) // born in the past
+    const second = await provider.tokenFor("srv")
+    expect(second).toBe("ACCESS-REFRESHED")
+    expect(refreshCount()).toBe(1)
+  })
+
+  it("token expiring EXACTLY at now (>= boundary) ⇒ treated as expired, refreshes", async () => {
+    const { provider, store, clock, refreshCount } = buildWithExpiresIn(3600)
+    await provider.tokenFor("srv")
+    const exp = store.peek("srv")?.expiresAt as number
+    clock.advance(exp - clock.now()) // now === expiresAt exactly
+    const at = await provider.tokenFor("srv")
+    expect(at).toBe("ACCESS-REFRESHED") // `now >= expiresAt` ⇒ expired at the boundary
+    expect(refreshCount()).toBe(1)
+  })
+})
+
 describe("mcp-oauth — tokens never leak", () => {
   it("provider toString / JSON never exposes the access token", async () => {
     const { provider } = buildProvider()

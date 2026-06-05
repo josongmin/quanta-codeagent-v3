@@ -314,11 +314,26 @@ export const parseRetryAfterMs = (
   return parseRateLimitResetHeader(get("x-ratelimit-reset"), now)
 }
 
+/**
+ * Final guard on every parsed delay: a delay MUST be a FINITE, non-negative ms
+ * number or `undefined`. `Number("1e308")` is finite but `1e308 * 1000`
+ * overflows to `Infinity`; without this guard the parser leaked `Infinity` (and
+ * `Math.round(-0)` returns `-0`). Either escaping into the agent's backoff is a
+ * contract break (the docstring promises "a finite, non-negative value or
+ * `undefined`"): a non-finite delay would propagate into `setTimeout` / the
+ * clamp as a garbage value. We normalize `-0`→`0` and map any non-finite result
+ * back to `undefined` (caller falls back to its own exponential backoff). No
+ * magic CAP constant — the downstream clamp owns the maximum; our only duty is
+ * "never emit a non-finite value".
+ */
+const finiteMs = (ms: number): number | undefined =>
+  Number.isFinite(ms) && ms >= 0 ? ms + 0 : undefined
+
 /** `retry-after-ms`: explicit millisecond delta (OpenAI / some proxies). */
 const parseRetryAfterMsHeader = (raw: string | null): number | undefined => {
   if (raw === null) return undefined
   const ms = Number(raw)
-  return Number.isFinite(ms) && ms >= 0 ? Math.round(ms) : undefined
+  return Number.isFinite(ms) && ms >= 0 ? finiteMs(Math.round(ms)) : undefined
 }
 
 /** `retry-after`: RFC 9110 §10.2.3 — delta-seconds integer OR HTTP-date. */
@@ -329,12 +344,14 @@ const parseRetryAfterHeader = (raw: string | null, now: () => number): number | 
   // delta-seconds: a bare non-negative number (integer per RFC, but accept
   // fractional defensively — never a date).
   const secs = Number(trimmed)
-  if (Number.isFinite(secs) && secs >= 0) return Math.round(secs * 1000)
+  // `Math.round(secs * 1000)` can overflow a finite-but-huge `secs` to
+  // `Infinity` (e.g. "1e308"); `finiteMs` maps that back to `undefined`.
+  if (Number.isFinite(secs) && secs >= 0) return finiteMs(Math.round(secs * 1000))
   // HTTP-date form (e.g. "Wed, 21 Oct 2026 07:28:00 GMT").
   const at = Date.parse(trimmed)
   if (!Number.isFinite(at)) return undefined
   const delta = at - now()
-  return delta >= 0 ? delta : undefined
+  return delta >= 0 ? finiteMs(delta) : undefined
 }
 
 /** `x-ratelimit-reset`: ambiguous in the wild — three encodings a provider may
@@ -363,15 +380,17 @@ const parseRateLimitResetHeader = (raw: string | null, now: () => number): numbe
   // Absolute epoch-milliseconds: already ms, do NOT scale by 1000.
   if (n >= 1_000_000_000_000) {
     const delta = n - nowMs
-    return delta >= 0 ? Math.round(delta) : undefined
+    return delta >= 0 ? finiteMs(Math.round(delta)) : undefined
   }
-  // Absolute epoch-seconds: scale to ms then subtract now.
+  // Absolute epoch-seconds: scale to ms then subtract now. `n*1000` can overflow
+  // to `Infinity` for a finite-but-huge `n` (the 1e9..1e12 band stays finite in
+  // practice, but `finiteMs` is the uniform guard).
   if (n >= 1_000_000_000) {
     const delta = n * 1000 - nowMs
-    return delta >= 0 ? delta : undefined
+    return delta >= 0 ? finiteMs(delta) : undefined
   }
   // Otherwise treat as relative delta-seconds.
-  return Math.round(n * 1000)
+  return finiteMs(Math.round(n * 1000))
 }
 
 const extractStatus = (e: unknown): number | undefined => {

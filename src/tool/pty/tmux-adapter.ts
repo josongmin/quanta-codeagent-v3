@@ -74,12 +74,11 @@ const diffCapture = (
 export const createTmuxAdapter = (opts: TmuxAdapterOpts): PtySessionPort => {
   const allowPrefix = opts.allowPrefix ?? "quanta-"
   const allowForeign = opts.allowForeign ?? false
-  // Bound the per-handle last-capture map (default PTY_MAX_ATTACHED). A
-  // non-positive override is clamped to 1 so a just-read handle always fits.
+  // Bound the per-handle last-capture map (default PTY_MAX_ATTACHED). An omitted
+  // override uses the default; an explicit non-positive override is clamped to 1
+  // so a just-read handle always fits (the bound can never be 0).
   const maxAttached =
-    opts.maxAttached !== undefined && opts.maxAttached >= 1
-      ? Math.floor(opts.maxAttached)
-      : PTY_MAX_ATTACHED
+    opts.maxAttached === undefined ? PTY_MAX_ATTACHED : Math.max(1, Math.floor(opts.maxAttached))
   // Per-handle last-capture, so `read` can diff snapshots into a monotone seq
   // (tmux has no event stream — capture-pane is poll-based). BOUNDED at
   // `maxAttached`: `read` refuses to admit a NEW handle past the cap so this map
@@ -167,7 +166,20 @@ export const createTmuxAdapter = (opts: TmuxAdapterOpts): PtySessionPort => {
       }
       const r = await opts.exec.run(["capture-pane", "-t", g.value, "-p"])
       if (!r.ok) return errR("backend-error", "tmux capture-pane failed")
-      const { chunk, seq } = diffCapture(lastCapture.get(handle), r.stdout)
+      // CONCURRENCY: two `read`s both `await` capture-pane and can RESOLVE OUT OF
+      // ORDER — a slow capture started earlier may land AFTER a fast capture
+      // started later, carrying STALE (older/shorter) pane text. The state read
+      // below runs AFTER the await, so it observes whatever the other read
+      // already committed. If this capture is NOT a forward move past the stored
+      // snapshot (equal text, or the stored text already extends ours), advancing
+      // `lastCapture` would REWIND the text + re-emit already-consumed output and
+      // corrupt the monotone cursor. Treat a non-advancing capture as a no-op:
+      // keep the stored (at-least-as-new) snapshot, emit nothing.
+      const prev = lastCapture.get(handle)
+      if (prev !== undefined && (r.stdout === prev.text || prev.text.startsWith(r.stdout))) {
+        return okR({ chunks: [], nextSeq: prev.seq })
+      }
+      const { chunk, seq } = diffCapture(prev, r.stdout)
       lastCapture.set(handle, { text: r.stdout, seq })
       const fresh = chunk !== undefined && chunk.seq > sinceSeq ? [chunk] : []
       return okR({ chunks: fresh, nextSeq: seq })

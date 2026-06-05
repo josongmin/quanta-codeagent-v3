@@ -23,10 +23,9 @@
 import { describe, expect, test } from "bun:test"
 import { classifyPassiveVcs } from "@/git/passive-classify"
 import { parseRetryAfterMs } from "@/shared"
-import { buildStoredZip, unzip, type ZipEntry } from "@/tool/document/authoring/zip-store"
-import { buildXlsx, type XlsxSpec } from "@/tool/document/authoring/xlsx"
-import { sanitizeSheetName } from "@/tool/document/authoring/xlsx"
 import { stripIllegalXmlChars } from "@/tool/document/authoring/ooxml"
+import { buildXlsx, sanitizeSheetName, type XlsxSpec } from "@/tool/document/authoring/xlsx"
+import { buildStoredZip, unzip, type ZipEntry } from "@/tool/document/authoring/zip-store"
 import { parseXlsx } from "@/tool/document/xlsx-read"
 
 /* ===================================================== seeded PRNG (xorshift32) */
@@ -104,37 +103,49 @@ describe("FUZZ r4: zip-store STORED round-trip identity", () => {
     return true
   }
 
+  // Compare ONE recovered entry against its original — violation label or "".
+  type Recovered = { readonly path: string; readonly data: Uint8Array } | undefined
+  const entryViolation = (i: number, orig: ZipEntry, got: Recovered): string => {
+    if (got === undefined) return `missing entry ${i}`
+    if (got.path !== orig.path) return `path drift "${orig.path}" -> "${got.path}"`
+    if (!bytesEqual(got.data, orig.data)) return `data corruption on entry ${i} ("${orig.path}")`
+    return ""
+  }
+
+  // Assert one round-trip — returns a violation label or undefined. Extracted so
+  // the fuzz loop body stays under the biome cognitive-complexity cap.
+  const roundTripViolation = (entries: readonly ZipEntry[]): string | undefined => {
+    const result = unzip(buildStoredZip(entries))
+    if (!result.ok) return `unzip failed: ${result.error}`
+    if (result.entries.length !== entries.length) {
+      return `entry-count drift ${entries.length} -> ${result.entries.length}`
+    }
+    for (let i = 0; i < entries.length; i++) {
+      const v = entryViolation(i, entries[i] as ZipEntry, result.entries[i])
+      if (v !== "") return v
+    }
+    return undefined
+  }
+
+  // Generate one random entry-set: 0..5 entries with heavily-varied sizes
+  // (empty / tiny / a few KB) and unicode paths. Extracted from the test body.
+  const genEntries = (rng: Rng): ZipEntry[] => {
+    const count = rng.int(6) // 0..5 entries (incl. empty archive)
+    const entries: ZipEntry[] = []
+    for (let i = 0; i < count; i++) {
+      const roll = rng.int(4)
+      const len = roll === 0 ? 0 : roll === 1 ? 1 + rng.int(8) : rng.int(3000)
+      entries.push({ path: randomPath(rng, i), data: randomBytes(rng, len) })
+    }
+    return entries
+  }
+
   test("≥200 random entry-sets round-trip byte-for-byte (STORED)", () => {
     const ITERS = 240
     for (let iter = 0; iter < ITERS; iter++) {
       const rng = new Rng(0x5a17 + iter * 2654435761)
-      const count = rng.int(6) // 0..5 entries (incl. empty archive)
-      const entries: ZipEntry[] = []
-      for (let i = 0; i < count; i++) {
-        // Heavily vary sizes: empty, tiny, near a few KB.
-        const roll = rng.int(4)
-        const len = roll === 0 ? 0 : roll === 1 ? 1 + rng.int(8) : rng.int(3000)
-        entries.push({ path: randomPath(rng, i), data: randomBytes(rng, len) })
-      }
-
-      const zip = buildStoredZip(entries)
-      const result = unzip(zip)
-      expect(result.ok).toBe(true)
-      if (!result.ok) {
-        throw new Error(`iter ${iter}: unzip failed: ${result.error}`)
-      }
-      expect(result.entries.length).toBe(entries.length)
-      for (let i = 0; i < entries.length; i++) {
-        const orig = entries[i] as ZipEntry
-        const got = result.entries[i]
-        if (got === undefined) throw new Error(`iter ${iter}: missing entry ${i}`)
-        if (got.path !== orig.path) {
-          throw new Error(`iter ${iter}: path drift "${orig.path}" -> "${got.path}"`)
-        }
-        if (!bytesEqual(got.data, orig.data)) {
-          throw new Error(`iter ${iter}: data corruption on entry ${i} ("${orig.path}")`)
-        }
-      }
+      const bad = roundTripViolation(genEntries(rng))
+      if (bad !== undefined) throw new Error(`iter ${iter}: ${bad}`)
     }
   })
 
@@ -183,6 +194,12 @@ describe("FUZZ r4: xlsx OOXML write→read value round-trip", () => {
     "&lt;",
     "&#65;",
     "&#x41;",
+    "&amp;lt;", // partial / nested entity lookalike
+    "</t></si><si><t>", // shared-string tag-injection lookalike
+    '</v></c><c r="Z9"><v>', // worksheet tag-injection lookalike
+    "\n",
+    "\r\n",
+    "  ", // leading/trailing whitespace (xml:space="preserve")
     "\t",
     "é",
     "你",
@@ -199,73 +216,77 @@ describe("FUZZ r4: xlsx OOXML write→read value round-trip", () => {
     return s
   }
 
-  // The value the READER should recover for a written string cell: the writer
-  // applies stripIllegalXmlChars then escapes; the reader unescapes. So the
-  // round-trip fixed point is `stripIllegalXmlChars(original)`. (Empty / stripped-
-  // to-empty cells are OMITTED on write → recovered as "".)
-  const expectedRecovered = (original: string): string => stripIllegalXmlChars(original)
+  // Generate ONE random cell + the value the READER should recover for it. The
+  // writer applies stripIllegalXmlChars then escapes; the reader unescapes — so
+  // the string round-trip fixed point is `stripIllegalXmlChars(original)`, and an
+  // empty/stripped-to-empty/null cell is OMITTED on write → recovered as "".
+  // Extracted to a helper so the grid test body stays under the complexity cap.
+  type Cell = string | number | boolean | null
+  const genCell = (rng: Rng): { value: Cell; expected: string } => {
+    const kind = rng.int(6)
+    if (kind === 0) return { value: null, expected: "" } // empty cell — omitted
+    if (kind === 1) return { value: "", expected: "" } // empty string — omitted
+    if (kind === 2) {
+      const num = (rng.int(20000) - 10000) / (rng.bool() ? 1 : 7)
+      return { value: num, expected: String(num) }
+    }
+    if (kind === 3) {
+      const b = rng.bool()
+      return { value: b, expected: b ? "TRUE" : "FALSE" }
+    }
+    const s = randomString(rng)
+    return { value: s, expected: stripIllegalXmlChars(s) }
+  }
+
+  // Build one random grid + its expected read-back. Extracted from the test body.
+  const genGrid = (rng: Rng): { grid: Cell[][]; expected: string[][] } => {
+    const nRows = 1 + rng.int(5)
+    const nCols = 1 + rng.int(5)
+    const grid: Cell[][] = []
+    const expected: string[][] = []
+    for (let r = 0; r < nRows; r++) {
+      const row: Cell[] = []
+      const exp: string[] = []
+      for (let c = 0; c < nCols; c++) {
+        const cell = genCell(rng)
+        row.push(cell.value)
+        exp.push(cell.expected)
+      }
+      grid.push(row)
+      expected.push(exp)
+    }
+    return { grid, expected }
+  }
+
+  // Verify a parsed sheet against the expected grid — returns a violation label
+  // or undefined. Extracted so the fuzz loop body stays under the complexity cap.
+  const gridViolation = (grid: Cell[][], expected: string[][]): string | undefined => {
+    const parsed = parseXlsx(buildXlsx({ sheets: [{ name: "S", rows: grid }] }))
+    if (!parsed.ok) return `parse failed: ${parsed.error}`
+    const sheet = parsed.sheets[0]
+    if (sheet === undefined) return "no sheet"
+    for (let r = 0; r < expected.length; r++) {
+      const erow = expected[r] ?? []
+      for (let c = 0; c < erow.length; c++) {
+        const want = erow[c] ?? ""
+        const got = sheet.cellAt(r, c)
+        if (got !== want) {
+          return `cell (${r},${c}) — wrote ${JSON.stringify(grid[r]?.[c])}, want ${JSON.stringify(
+            want,
+          )}, got ${JSON.stringify(got)}`
+        }
+      }
+    }
+    return undefined
+  }
 
   test("≥200 random cell grids: parseXlsx(buildXlsx) recovers stripped value", () => {
     const ITERS = 240
     for (let iter = 0; iter < ITERS; iter++) {
       const rng = new Rng(0xc0ffee + iter * 40503)
-      const nRows = 1 + rng.int(5)
-      const nCols = 1 + rng.int(5)
-      const grid: (string | number | boolean | null)[][] = []
-      // Track what we expect to read back at each (r,c).
-      const expected: string[][] = []
-      for (let r = 0; r < nRows; r++) {
-        const row: (string | number | boolean | null)[] = []
-        const exp: string[] = []
-        for (let c = 0; c < nCols; c++) {
-          const kind = rng.int(6)
-          if (kind === 0) {
-            // empty cell (null) — omitted on write, read back as ""
-            row.push(null)
-            exp.push("")
-          } else if (kind === 1) {
-            row.push("")
-            exp.push("")
-          } else if (kind === 2) {
-            const num = (rng.int(20000) - 10000) / (rng.bool() ? 1 : 7)
-            row.push(num)
-            exp.push(String(num))
-          } else if (kind === 3) {
-            const b = rng.bool()
-            row.push(b)
-            exp.push(b ? "TRUE" : "FALSE")
-          } else {
-            const s = randomString(rng)
-            row.push(s)
-            // A string that strips to "" is ALSO omitted on write → "".
-            exp.push(expectedRecovered(s))
-          }
-        }
-        grid.push(row)
-        expected.push(exp)
-      }
-
-      const spec: XlsxSpec = { sheets: [{ name: "S", rows: grid }] }
-      const bytes = buildXlsx(spec)
-      const parsed = parseXlsx(bytes)
-      expect(parsed.ok).toBe(true)
-      if (!parsed.ok) throw new Error(`iter ${iter}: parse failed: ${parsed.error}`)
-      const sheet = parsed.sheets[0]
-      if (sheet === undefined) throw new Error(`iter ${iter}: no sheet`)
-
-      for (let r = 0; r < nRows; r++) {
-        for (let c = 0; c < nCols; c++) {
-          const want = expected[r]?.[c] ?? ""
-          const got = sheet.cellAt(r, c)
-          if (got !== want) {
-            throw new Error(
-              `iter ${iter}: cell (${r},${c}) mismatch — wrote ${JSON.stringify(
-                grid[r]?.[c],
-              )}, expected ${JSON.stringify(want)}, got ${JSON.stringify(got)}`,
-            )
-          }
-        }
-      }
+      const { grid, expected } = genGrid(rng)
+      const bad = gridViolation(grid, expected)
+      if (bad !== undefined) throw new Error(`iter ${iter}: ${bad}`)
     }
   })
 
@@ -322,6 +343,45 @@ describe("FUZZ r4: xlsx OOXML write→read value round-trip", () => {
 
 /* ===================================================== 3. RETRY-AFTER PARSER == */
 
+// Value-shape grab-bag for the retry-after fuzz: delta-secs, ms, epoch-s,
+// epoch-ms, negative, huge, garbage, empty, whitespace, fractional, HTTP-date,
+// sign-prefixed, NaN-text, ms-band float, the OVERFLOW band (1e306..9e308:
+// finite per `Number()` but `×1000` overflows to `Infinity` — the r4
+// counterexample), `-0`, and near-MAX_VALUE. Extracted to a top-level helper so
+// the test body stays under the biome cognitive-complexity cap.
+const RETRY_VALUE_SHAPES: ReadonlyArray<(rng: Rng) => string> = [
+  (r) => String(r.int(3600)), // small delta-seconds
+  (r) => String(r.int(600000)), // ms-ish
+  (r) => String(1_700_000_000 + r.int(100000)), // epoch-seconds
+  (r) => String(1_700_000_000_000 + r.int(100000)), // epoch-ms
+  (r) => String(-(r.int(100000) + 1)), // negative
+  (r) => String(r.next() * r.next()), // huge
+  (r) => `garbage-${r.int(99)}`,
+  () => "",
+  () => "   ",
+  (r) => `${r.int(1000)}.${r.int(1000)}`, // fractional
+  () => "Wed, 21 Oct 2026 07:28:00 GMT", // HTTP-date
+  (r) => `+${r.int(1000)}`, // sign-prefixed
+  () => String(Number.NaN), // "NaN"
+  (r) => String(r.float() * 1e18), // float in the ms-epoch band
+  (r) => `${1 + r.int(9)}e30${r.int(9)}`, // OVERFLOW: ×1000 = Infinity
+  () => "-0", // signed zero
+  (r) => `1.${r.int(9999)}e308`, // near Number.MAX_VALUE
+]
+
+// The retry-delay contract: a returned value MUST be a finite, non-negative ms
+// number that is not `-0`. Returns the violated-invariant label, or `undefined`
+// when the value is `undefined` (no header) or a valid delay. Extracted so the
+// fuzz loop body stays under the biome cognitive-complexity cap.
+const retryDelayViolation = (out: number | undefined): string | undefined => {
+  if (out === undefined) return undefined
+  if (Number.isNaN(out)) return "NaN"
+  if (!Number.isFinite(out)) return "non-finite — Infinity leak"
+  if (out < 0) return "negative"
+  if (Object.is(out, -0)) return "signed-zero leak"
+  return undefined
+}
+
 describe("FUZZ r4: parseRetryAfterMs invariants (never NaN/negative)", () => {
   const mkGet =
     (header: string, value: string | null) =>
@@ -335,70 +395,42 @@ describe("FUZZ r4: parseRetryAfterMs invariants (never NaN/negative)", () => {
     for (let iter = 0; iter < ITERS; iter++) {
       const rng = new Rng(0xd00d + iter * 362437)
       const header = HEADERS[rng.int(HEADERS.length)] as string
-      // Value-shape grab-bag: delta-secs, ms, epoch-s, epoch-ms, negative, huge,
-      // garbage, empty, whitespace, fractional, HTTP-date, sign-prefixed.
-      const shape = rng.int(14)
-      let value: string
-      switch (shape) {
-        case 0:
-          value = String(rng.int(3600))
-          break // small delta-seconds
-        case 1:
-          value = String(rng.int(600000))
-          break // ms-ish
-        case 2:
-          value = String(1_700_000_000 + rng.int(100000))
-          break // epoch-seconds
-        case 3:
-          value = String(1_700_000_000_000 + rng.int(100000))
-          break // epoch-ms
-        case 4:
-          value = String(-(rng.int(100000) + 1))
-          break // negative
-        case 5:
-          value = String(rng.next() * rng.next())
-          break // huge
-        case 6:
-          value = "garbage-" + rng.int(99)
-          break
-        case 7:
-          value = ""
-          break
-        case 8:
-          value = "   "
-          break
-        case 9:
-          value = `${rng.int(1000)}.${rng.int(1000)}`
-          break // fractional
-        case 10:
-          value = "Wed, 21 Oct 2026 07:28:00 GMT"
-          break // HTTP-date
-        case 11:
-          value = `+${rng.int(1000)}`
-          break // sign-prefixed
-        case 12:
-          value = String(Number.NaN)
-          break // "NaN"
-        case 13:
-          value = String(rng.float() * 1e18)
-          break // float in the ms-epoch band
-        default:
-          value = "0"
-      }
+      const shape = RETRY_VALUE_SHAPES[rng.int(RETRY_VALUE_SHAPES.length)] as (r: Rng) => string
+      const value = shape(rng)
 
       const out = parseRetryAfterMs(mkGet(header, value), () => NOW)
-      if (out !== undefined) {
-        if (Number.isNaN(out)) {
-          throw new Error(`iter ${iter}: ${header}="${value}" -> NaN`)
-        }
-        if (!Number.isFinite(out)) {
-          throw new Error(`iter ${iter}: ${header}="${value}" -> ${out} (non-finite)`)
-        }
-        if (out < 0) {
-          throw new Error(`iter ${iter}: ${header}="${value}" -> ${out} (negative)`)
-        }
+      const bad = retryDelayViolation(out)
+      if (bad !== undefined) {
+        throw new Error(`iter ${iter}: ${header}="${value}" -> ${out} (${bad})`)
       }
     }
+  })
+
+  // Minimized r4 counterexample (RED before the `finiteMs` guard, GREEN after):
+  //   retry-after="1e308" -> delta-seconds band `Math.round(1e308 * 1000)` === Infinity,
+  //   which leaked straight out of the parser into the agent's backoff /
+  //   setTimeout. The fix maps any non-finite result back to `undefined` (the
+  //   caller falls back to its own exponential backoff). The `x-ratelimit-reset`
+  //   header CANNOT overflow (its relative band is < 1e9 so ×1000 < 1e12, and
+  //   its absolute bands subtract `now` from an already-finite magnitude), so it
+  //   is asserted finite, not `undefined`, here.
+  test("crafted: overflow + signed-zero inputs never leak Infinity / -0", () => {
+    const NOW = 1_700_000_000_000
+    const at = (h: string, v: string) => parseRetryAfterMs(mkGet(h, v), () => NOW)
+    // retry-after delta-seconds overflow → Infinity pre-fix → undefined post-fix.
+    expect(at("retry-after", "1e308")).toBeUndefined()
+    expect(at("retry-after", "1e306")).toBeUndefined()
+    // x-ratelimit-reset never overflows, but whatever it returns must be finite.
+    const xr = at("x-ratelimit-reset", "9e307")
+    expect(xr === undefined || Number.isFinite(xr)).toBe(true)
+    // -0 must normalize to +0 (a real, harmless delay), never surface as -0.
+    const z = at("retry-after-ms", "-0")
+    expect(z === undefined || Object.is(z, 0)).toBe(true)
+    const z2 = at("x-ratelimit-reset", "-0")
+    expect(z2 === undefined || Object.is(z2, 0)).toBe(true)
+    // A normal value still parses (no over-correction).
+    expect(at("retry-after-ms", "1500")).toBe(1500)
+    expect(at("retry-after", "30")).toBe(30000)
   })
 
   // Monotonicity within the absolute-epoch bands: a LATER reset time must yield
