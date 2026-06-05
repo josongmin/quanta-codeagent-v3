@@ -280,6 +280,30 @@ export interface RuntimeConfig {
    *  graph is rejected before dispatch; a failed/cancelled dep surfaces its
    *  dependents as a typed dead branch (never an indefinite hang). */
   readonly teamDag: boolean
+  /** Capability B — leader-mediated permission escalation broker
+   *  (`QUANTA_TEAM_BROKER`). Strict opt-in (`=== "1"`). Default false ⇒ a worker
+   *  that hits a denied tool fails hard (today's behavior — no escalation path).
+   *  When ON, the spawning agent (the leader) runs a `brokerLoop`
+   *  (`@/subagent/coordination`) that reads pending escalation `request`s from
+   *  the subagent mailbox, runs each through the host's permission decide/HITL,
+   *  and sends a leader-authored `response` back. The worker applies ONLY a
+   *  leader-authored response matching its outstanding correlationId — it can
+   *  NEVER self-grant (load-bearing security invariant, plan §5). */
+  readonly teamBroker: boolean
+  /** Capability C — team-idle barrier (`QUANTA_TEAM_IDLE`). Strict opt-in
+   *  (`=== "1"`). Default false ⇒ the leader polls / no fan-in barrier (today).
+   *  When ON, each subagent emits an idle beacon at turn-end and the leader
+   *  awaits `teamIdle` (`@/subagent/coordination`) — every member idle — before
+   *  fanning in (next phase / handoff / shutdown). Pure predicate + injected
+   *  clock; absent ⇒ no beacons, byte-identical. */
+  readonly teamIdle: boolean
+  /** C1 — Canvas / artifact persistence store (`QUANTA_ARTIFACT_STORE`). Strict
+   *  opt-in (`=== "1"`). Default false ⇒ no registry, the artifact tools are NOT
+   *  registered (byte-identical). When ON, the composition root mints ONE
+   *  per-session `@/artifact` registry and passes it to
+   *  `DefaultToolPorts.artifactRegistry` (the generation tools register their
+   *  outputs; the model lists/inspects/destroys via `artifact_*`). */
+  readonly artifactStore: boolean
   /** FS jail disable flag (`QUANTA_FS_JAIL=off`). Default false (jail ON). */
   readonly fsJailDisabled: boolean
   /** ADR-0062 cap-as-instruction dispatch enforcement (`QUANTA_CAP_ENFORCE=1`).
@@ -553,6 +577,15 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // Capability A — strict `=== "1"` opt-in. Default false ⇒ batch fan-out is
     // the existing flat parallel pool (byte-identical, no DAG ordering).
     teamDag: env["QUANTA_TEAM_DAG"] === "1",
+    // Capability B — strict `=== "1"` opt-in. Default false ⇒ a denied worker
+    // tool stays a hard failure (no escalation broker, byte-identical).
+    teamBroker: env["QUANTA_TEAM_BROKER"] === "1",
+    // Capability C — strict `=== "1"` opt-in. Default false ⇒ no idle beacons /
+    // no fan-in barrier (the leader polls, byte-identical).
+    teamIdle: env["QUANTA_TEAM_IDLE"] === "1",
+    // C1 — strict `=== "1"` opt-in. Default false ⇒ no artifact registry / tools
+    // (byte-identical).
+    artifactStore: env["QUANTA_ARTIFACT_STORE"] === "1",
     fsJailDisabled: parseBool(env["QUANTA_FS_JAIL"] === "off" ? "1" : undefined),
     capEnforce: parseBool(env["QUANTA_CAP_ENFORCE"]),
     gitSha: stringOrUndef(env["QUANTA_GIT_SHA"]),

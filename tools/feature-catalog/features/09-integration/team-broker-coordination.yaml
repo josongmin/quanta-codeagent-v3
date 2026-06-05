@@ -1,0 +1,124 @@
+id: team-broker-coordination
+title: Multi-agent coordination B — leader-mediated permission escalation (broker)
+section: 9
+subsystem: Subagent coordination (multi-agent broker)
+order: 98
+maturity: L2
+status: new
+ui_surfaces: [cli, ide]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on: [subagent-mailbox]
+config_refs:
+  env: [QUANTA_TEAM_BROKER]
+purpose: |
+  Capability B of multi-agent coordination (plan docs/plans/
+  multiagent-coordination.md §2.B) — a leader-mediated permission escalation
+  broker so a subagent that hits a denied tool can ESCALATE to the spawning
+  agent (the leader) instead of failing hard. Claude Code `--agent-teams`
+  parity (leader-broker arm; the task-dependency DAG + team-idle barrier are
+  sibling waves A/C). Rides the EXISTING transport (subagent mailbox) and the
+  host's EXISTING permission decide path — minimal new infrastructure.
+
+  FLOW: a blocked worker sends a mailbox `request` whose `body` is an escalation
+  envelope `{tool, scope, reason}` (JSON), addressed to the leader, carrying a
+  `correlationId`. The leader's `brokerLoop` reads its pending requests, runs
+  each through the injected `EscalationDeciderPort` (the host wraps `@/permission`
+  decide / HITL), and sends a `response` back with the SAME `correlationId`. The
+  worker matches by correlationId and applies the decision it did NOT author.
+
+  PURE CORES (`src/subagent/coordination/broker.ts`, no I/O, NO-THROW):
+  `parseEscalationRequest(msg)` typed-parses a `request` envelope (rejects a
+  non-request kind / malformed JSON / missing string fields — undefined, never
+  thrown); `buildDecisionResponse(req, decision)` round-trips the SAME
+  `correlationId`; `brokerStep(pending, decide)` is the pure loop body (maps each
+  parseable request → one decision response; skips malformed; survives a throwing
+  decider). `EscalationDeciderPort` is the injected, DUCK-TYPED decision seam (the
+  leader owns it; the worker never sees it) so the `src/subagent/**` biome fence
+  holds without a hard `@/permission` import. `brokerLoop` is the thin effectful
+  leader-side driver over the injected (duck-typed) `BrokerMailbox`.
+
+  SECURITY (load-bearing, plan §5): the broker is a GRANT path. The worker-side
+  `applyDecisionResponse(msg, expectedCorrelationId, {leaderId})` honors a
+  decision ONLY when the message is a `response`, its `correlationId` matches the
+  worker's OUTSTANDING request, AND (when `leaderId` is pinned) it was authored
+  by the LEADER. A worker can NEVER self-grant: a self-authored `request`/
+  `broadcast`, or even a `response` the worker forged itself, is rejected. Grants
+  flow from the higher-authority source only (mirrors the H2/B2 provenance
+  posture).
+
+  WIRING: knob-gated `QUANTA_TEAM_BROKER` — OFF (unset) ⇒ a denied worker tool
+  stays a hard failure (today's behavior, byte-identical; no broker loop, no
+  escalation envelope on the wire). The pure cores + the `brokerLoop` driver +
+  the worker applier are complete and proven end-to-end against the REAL
+  `createSubagentMailbox()`. The live HOST binding (the leader's per-turn
+  brokerLoop tick + the worker's denied-tool → escalation-request emit) is a
+  deliberately-separate wave (the dispatch seam that injects the host's
+  `@/permission` decider is not owned this wave).
+evidence:
+  code:
+    - src/subagent/coordination/broker.ts
+    - src/subagent/coordination/index.ts
+    - src/shared/runtime-config.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/coordination/team-broker-hellgate.test.ts
+      - tests/unit/coordination/team-broker-e2e-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_TEAM_BROKER
+    where: src/shared/runtime-config.ts
+    default: 'false'
+    purpose: |
+      Strict `=== "1"` opt-in. Default false ⇒ a worker that hits a denied tool
+      fails hard (today — no escalation path, byte-identical). When ON, the
+      spawning agent (the leader) runs a `brokerLoop` that reads pending
+      escalation requests from the subagent mailbox, runs each through the host's
+      permission decide/HITL, and sends a leader-authored response. The worker
+      applies ONLY a leader-authored response matching its outstanding
+      correlationId — it can never self-grant.
+deliberate_hold:
+  reason: |
+    The escalation envelope + pure helpers (`parseEscalationRequest` /
+    `buildDecisionResponse` / `brokerStep`), the worker applier
+    (`applyDecisionResponse`), the injected `EscalationDeciderPort`, and the thin
+    `brokerLoop` driver are complete and proven end-to-end against the real
+    `createSubagentMailbox()`. What is NOT yet live: the host binding that (a)
+    emits an escalation `request` when a worker's tool is DENIED, and (b) ticks
+    the leader's `brokerLoop` per turn with a real `@/permission`-backed decider.
+    That dispatch-seam wiring is a separate wave; until then the knob ON is a
+    no-op at the live tool surface even though the protocol is fully wired+tested.
+  promotion_path: |
+    Promote to L3 when the dispatch seam (a) on a denied subagent tool, sends the
+    `{tool,scope,reason}` envelope as a mailbox `request` to the leader with a
+    fresh correlationId, then awaits the matching response via
+    `applyDecisionResponse`, and (b) ticks `brokerLoop` on the leader with an
+    `EscalationDeciderPort` that wraps the host `@/permission` decide / HITL
+    prompter — both gated on `QUANTA_TEAM_BROKER`. Sibling waves A (task DAG,
+    `QUANTA_TEAM_DAG`) and C (team-idle barrier, `QUANTA_TEAM_IDLE`) land
+    alongside.
+notes: |
+  21 core hellgate cases + 5 e2e hellgate cases (25 tests / 50 expects across
+  the two files) pin: envelope parse (well-formed / non-request kind / malformed
+  JSON / missing-or-non-string fields / wholly-hostile message ⇒ undefined, no
+  crash); correlationId round-trip on approve AND deny; `brokerStep` maps each
+  parseable request → one response, skips non-request + malformed, is idempotent
+  on re-read (same pending ⇒ same responses, no double-grant), and survives a
+  throwing decider; worker applier honors approve/deny by matching correlationId
+  and rejects a mismatched / malformed / missing-correlationId response; SECURITY
+  (load-bearing) — a worker-authored request/broadcast that LOOKS like an
+  approval is NOT honored, a `response` the worker forged itself (from===worker)
+  is NOT honored when leaderId is pinned, only a leader-authored response widens
+  permission; e2e over the REAL mailbox — blocked worker escalates → leader
+  approves → worker proceeds, deny path stays blocked, empty inbox sends nothing,
+  forged self-response not honored, idempotent re-broker grants nothing more.
+  Absorption: Claude Code --agent-teams (leader-broker arm). What this is NOT: no
+  task DAG (wave A) / no team-idle barrier (wave C) / no live denied-tool →
+  escalation host binding yet (deliberate hold). Slice fence:
+  src/subagent/coordination imports only @/shared + siblings (mailbox + permission
+  decider are injected duck-typed ports — no @/mcp, no @/agent).

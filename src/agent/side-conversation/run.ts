@@ -92,6 +92,10 @@ export const SIDE_CONVERSATION_TOOL_NAMES: readonly string[] = Object.freeze([
   "yaml_read",
   "pdf_read",
   "xlsx_read",
+  // jun-04 — `docx_read` / `pptx_read` are pure OOXML readers (sibling to
+  // `xlsx_read`); read-only + side-conv-safe (no FS write, no shell, no network).
+  "docx_read",
+  "pptx_read",
   "lsp_definition",
   "lsp_references",
   "lsp_hover",
@@ -157,6 +161,12 @@ export const SIDE_CONVERSATION_TOOL_NAMES: readonly string[] = Object.freeze([
  */
 export const SIDE_CONVERSATION_TOOL_EXCLUSIONS: readonly string[] = Object.freeze([
   "session_config",
+  // jun-04 — gated meta/observability read tools. `coverage_check` (V8
+  // coverage report) + `prompt_cache_status` (cache-hit snapshot) are read-only
+  // but are operator-axis introspection tools, not relevant to a lightweight
+  // side conversation; excluded so the allowlist stays a CONSCIOUS subset.
+  "coverage_check",
+  "prompt_cache_status",
 ])
 
 // ===========================================================================

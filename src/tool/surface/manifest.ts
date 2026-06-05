@@ -514,6 +514,20 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     adr: "0182",
     note: "Read-only cache hit-rate / savings introspection. The host mints ONE PromptCacheObserver per session (maybeWirePromptCacheObserver); the SAME instance is fed by the loop's emitUsage (cache_read + cache_creation buckets, threaded adapter→StreamEvent→loop) and read by this tool. CLI default-ON; bench/web opt-in (tool-menu reproducibility).",
   },
+  {
+    name: "artifact_list",
+    group: ["artifact_register", "artifact_get", "artifact_destroy"],
+    origin: "@/tool/artifact (via DefaultToolPorts.artifactRegistry)",
+    gate: {
+      kind: "config-slot",
+      slot: "DefaultToolPorts.artifactRegistry",
+      env: "QUANTA_ARTIFACT_STORE",
+    },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "meta",
+    adr: "C1",
+    note: "Canvas / artifact persistence store (§7). Session registry for NON-code generation outputs (image_gen PNGs, xlsx/docx/pptx files) — list/get/destroy by id + a stable `quanta-artifact://<id>` preview URL, so artifacts live OUTSIDE the transcript. `register` is host-side (the generation tools register their outputs); the model only reads/manages. Opt-in EVERYWHERE (QUANTA_ARTIFACT_STORE): a new capability whose registry must be wired, so it never auto-seeds. Pure in-memory registry (@/artifact, injected clock + id-factory); duck-typed port keeps @/tool fence-clean.",
+  },
 ]
 
 /** Resolve a single tool/group's availability on a surface given a default-state

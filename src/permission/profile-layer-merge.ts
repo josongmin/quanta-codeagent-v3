@@ -83,7 +83,13 @@ import type {
   RestrictivenessSpec,
 } from "./policy-layers"
 import { mergeLayered } from "./policy-layers"
-import { guardProvenance, type ProvenancedLayer } from "./policy-layers/provenance-guard"
+import {
+  GRANT_CAPABLE_FIELDS,
+  guardProvenance,
+  guardRepoFileSystem,
+  isRepoControllable,
+  type ProvenancedLayer,
+} from "./policy-layers/provenance-guard"
 
 /** Approval safety rank — HIGHER = more confirmation = safer. */
 const APPROVAL_SAFETY: Readonly<Record<ApprovalMode, number>> = Object.freeze({
@@ -255,6 +261,58 @@ export interface ProfileLayerSlots {
 }
 
 /**
+ * R2 B3 fix — under `most-restrictive`, seed the locked-down `default` base as an
+ * explicit safe FLOOR layer for any grant-capable field whose ONLY setters are
+ * repo-controllable (`per-repo`/`frontmatter`).
+ *
+ * WHY. The per-sub-field combiners ({@link PROFILE_COMBINERS}) fold over the
+ * layers that SET a field — NOT the merge `base`. So a LONE repo setter of a
+ * grant-capable pillar (e.g. a hostile `per-repo: trusted` that is the ONLY
+ * `approval` setter) passes its widen (`approval.mode:"auto"`) through unchanged
+ * — the base's safe `once` never participates. Seeding the base value as a
+ * synthetic `default`-source layer makes the combiner fold `min(base, repo)` PER
+ * SUB-AXIS, so the repo can only NARROW each axis (never widen) while every SAFE
+ * sub-bit it carries is preserved (unlike the whole-pillar `guardProvenance`,
+ * which would discard the whole pillar and could LOSE a safe sub-axis — the
+ * HELL-SUB-05 trap that scopes that guard to source-precedence).
+ *
+ * SCOPE — only when EVERY setter of the field is repo-controllable. When a
+ * trusted layer (`per-user`/`team-admin`) also sets it, that trusted value is
+ * already a legitimate grant authority AND a combiner participant, so no base
+ * floor is needed (and injecting one would not change the result — the base is
+ * never less safe than the default, and the combiner already takes the safest).
+ * Returns the SAME array reference when nothing is repo-only ⇒ byte-identical.
+ */
+const seedBaseFloorForRepoOnlyFields = (
+  layers: ReadonlyArray<ConfigLayer<PermissionProfile>>,
+): ReadonlyArray<ConfigLayer<PermissionProfile>> => {
+  const floor: Partial<PermissionProfile> = {}
+  let needsFloor = false
+  for (const field of GRANT_CAPABLE_FIELDS) {
+    let anySetter = false
+    let anyTrustedSetter = false
+    for (const layer of layers) {
+      if (!(field in layer.value)) continue
+      anySetter = true
+      if (!isRepoControllable(layer.source as ProvenancedLayer["source"])) anyTrustedSetter = true
+    }
+    // Repo-ONLY setter(s) for this grant-capable field ⇒ seed the base floor.
+    if (anySetter && !anyTrustedSetter) {
+      ;(floor as Record<string, unknown>)[field] = (
+        DEFAULT_PERMISSION_PROFILE as unknown as Record<string, unknown>
+      )[field]
+      needsFloor = true
+    }
+  }
+  if (!needsFloor) return layers
+  // Prepend as the LEAST-authoritative `default`-source layer so the combiner
+  // folds it in (source rank only affects audit `winner` display; the per-axis
+  // SAFE value is what the combiner picks). It is NOT repo-controllable, so it is
+  // never dropped, and it can only ever make the result SAFER.
+  return [{ source: "default", value: floor as PermissionProfile }, ...layers]
+}
+
+/**
  * Merge layered named profiles into ONE effective {@link PermissionProfile} plus
  * the per-field {@link MergeResult.overrides} audit trail.
  *
@@ -276,19 +334,43 @@ export const mergeProfileLayers = (
   if (slots.perUser !== undefined) layers.push({ source: "per-user", value: slots.perUser })
   if (slots.perRepo !== undefined) layers.push({ source: "per-repo", value: slots.perRepo })
   if (slots.teamAdmin !== undefined) layers.push({ source: "team-admin", value: slots.teamAdmin })
-  // ADR-0470 — SECURITY: under `source-precedence`, a higher-ranked per-repo /
-  // frontmatter layer would otherwise WIN (and thus WIDEN) a grant-capable pillar
-  // (approval / network / sandbox), letting a checked-in `.quanta` policy grant
-  // autonomy. Drop those repo-controllable widens BEFORE the merge so per-repo can
-  // only ever narrow. Scoped to `source-precedence` ONLY: the `most-restrictive`
-  // strategy already merges the SAFEST value per sub-field (PROFILE_COMBINERS), so
-  // per-repo cannot widen there and applying the guard would wrongly drop a SAFE
-  // per-repo value (less safe — HELL-SUB-05). Default-ON; nothing-to-drop returns
-  // the SAME array ref ⇒ byte-identical. (`dropped` records ready for telemetry.)
+  // ADR-0470 — SECURITY: a checked-in `.quanta` / frontmatter (`per-repo`) layer
+  // must never WIDEN a grant-capable pillar (approval / network / sandbox),
+  // letting a hostile repo grant autonomy (AFK auto-approve, network egress,
+  // sandbox strip). Drop those repo-controllable widens BEFORE the merge so
+  // per-repo can only ever NARROW.
+  //
+  // Scoping by strategy is DELIBERATE and load-bearing:
+  //  - `source-precedence` — the most-authoritative SETTER wins each field
+  //    WHOLE; a `per-repo` widen would win outright, so `guardProvenance`
+  //    (whole-pillar drop) runs here.
+  //  - `most-restrictive` — the per-sub-field combiners ({@link PROFILE_COMBINERS})
+  //    already take the SAFEST atomic axis across the SETTERS, so the whole-pillar
+  //    guard must NOT run (it would discard a per-repo pillar that is SAFE on some
+  //    sub-axis while only unsafe on another — making the result LESS safe than
+  //    the per-sub-field merge would, violating HELL-SUB-05). The ONE residual
+  //    hole the combiners miss is a LONE setter (the base is not a combiner fold
+  //    participant) — handled by seeding the base as an explicit safe floor layer
+  //    below, NOT by the whole-pillar guard.
+  //
+  // R3 — fileSystem is the LAYER-1 (user-granted) access grant, NOT in the
+  // grant-capable scalar/struct set (`approval`/`network`/`sandbox`), and it has
+  // NO safe combiner — so under source-precedence a repo's wide table WINS and
+  // under most-restrictive it falls through unguarded (the entry-coverage ceiling
+  // in `profile-list-select.ts` only runs at PROFILE-LOAD time, not in the merge).
+  // `guardRepoFileSystem` drops a repo-controllable fileSystem widen under BOTH
+  // strategies (a repo may only narrow the trusted baseline's allow-list), closing
+  // the layer-1 escalation the grant-capable guards above never see. It is
+  // narrow-only: no grant-capable struct is touched, so HELL-SUB-05 + R2 hold.
+  const fsGuarded = guardRepoFileSystem(layers as ReadonlyArray<ProvenancedLayer>).layers
   const guarded =
     strategy === "source-precedence"
-      ? guardProvenance(layers as ReadonlyArray<ProvenancedLayer>)
-      : { layers }
+      ? guardProvenance(fsGuarded)
+      : {
+          layers: seedBaseFloorForRepoOnlyFields(
+            fsGuarded as ReadonlyArray<ConfigLayer<PermissionProfile>>,
+          ),
+        }
   return mergeLayered(guarded.layers as ReadonlyArray<ConfigLayer<PermissionProfile>>, {
     base: DEFAULT_PERMISSION_PROFILE,
     strategy,

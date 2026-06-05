@@ -1,0 +1,46 @@
+id: team-idle-barrier-coordination
+title: Multi-agent team-idle barrier + idle beacon (Capability C)
+section: 9
+subsystem: Multi-agent coordination (§4, Claude --agent-teams 흡수)
+order: 165
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [headless, daemon, interactive]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:claude"]
+depends_on: [team-dag-coordination, team-broker-coordination]
+purpose: |
+  Claude --agent-teams의 team-idle 배리어 흡수. 리더가 "전원 끝났나"를 폴링하는 대신
+  fan-in 배리어로 await. 각 멤버가 turn-end에 idle beacon emit, 리더는 teamIdle(전원
+  beacon) 감지 시 다음 phase/handoff/종료.
+
+  PURE 코어 (`src/subagent/coordination/idle-barrier.ts`, @/shared만, no Date.now):
+    - `IdleBeacon { agentId, idleSince }`.
+    - `teamIdle(beacons, members)` — 모든 member id가 beacon 보유 시 true. empty
+      members ⇒ false(문서화 선택: 팀 없음 ⇒ 배리어 release 없음). stray beacon(members
+      밖)은 무시 — 배리어 안 뒤집음.
+    - `idleSince(beacons, members)` — 전원 idle일 때만 member 중 MAX idleSince
+      (= 마지막 멤버가 idle된 순간 = release ts), 아니면 undefined.
+    - `upsertBeacon`(agent당 1개 latest 교체) / `clearBeacon`(재활성=drop), 둘 다 pure.
+
+  포트 (`createIdleBarrier({now})`): 주입 클럭 위 in-memory `beacon`/`reactivate`/
+  `teamIdle`/`idleSince`. `QUANTA_TEAM_IDLE` default-OFF (beacon 0 ⇒ 배리어 없음,
+  byte-identical 폴링).
+evidence:
+  code:
+    - src/subagent/coordination/idle-barrier.ts
+    - src/subagent/coordination/index.ts
+  tests:
+    unit:
+      - tests/unit/coordination/team-idle-barrier-hellgate.test.ts
+    integration:
+      - tests/unit/coordination/team-idle-barrier-e2e-hellgate.test.ts
+    contract: []
+knobs: []
+notes: |
+  L3: pure 코어 + 주입-클럭 포트 + e2e 완비, default-OFF byte-identical. 잔여(host
+  바인딩, 별도): 각 subagent turn-end에 `barrier.beacon(id)` emit + 리더가 멤버 set으로
+  `teamIdle`를 fan-in 지점에 await. 프로토콜/코어는 완료·증명됨.

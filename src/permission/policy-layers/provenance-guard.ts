@@ -51,6 +51,9 @@
 
 import type {
   ApprovalMode,
+  FileSystemAccess,
+  FileSystemEntry,
+  FileSystemPath,
   NetworkMode,
   OsSandboxKind,
   PermissionProfile,
@@ -200,6 +203,26 @@ const allowListWidens = (
 }
 
 /**
+ * R4 — network per-request-approval widen (an INDEPENDENT loosening the scalar
+ * {@link networkWidenRank} cannot see, the exact analogue of approval's
+ * `promptUser` suppress-bonus). `perRequestApproval:true` forces user
+ * confirmation on EVERY outbound call even within the allow-list; a repo layer
+ * that keeps the same `mode` + same `allowHosts` (so neither the scalar mode
+ * rank nor {@link allowListWidens} fires) but flips `perRequestApproval` to
+ * `false`/absent REMOVES that per-call confirmation gate — a real egress widen.
+ *
+ * Precise (no over-drop, mirrors {@link allowListWidens}): a widen ONLY when the
+ * trusted baseline EXPLICITLY required per-request approval (`=== true`) and the
+ * candidate does not. A baseline that never required it (deny-all default /
+ * undefined) means there is no protection to remove, so a repo `false`/absent is
+ * kept (it loosens nothing).
+ */
+const perRequestApprovalWidens = (
+  candidate: PermissionProfile["network"],
+  baseline: PermissionProfile["network"] | undefined,
+): boolean => baseline?.perRequestApproval === true && candidate.perRequestApproval !== true
+
+/**
  * Per-AXIS sandbox widen (the multi-axis analogue of {@link allowListWidens}).
  * `sandbox` is a STRUCT with FOUR INDEPENDENT safety axes (readOnly /
  * workspaceWrite / networkIsolated / osSandbox presence). The scalar
@@ -240,6 +263,74 @@ const sandboxAxisWidens = (
 }
 
 /* ------------------------------------------------------------------------- */
+/* fileSystem allow-list widen (R3 — the layer-1 grant axis)                 */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * R3 closure. The `fileSystem` allow-list table is the LAYER-1 (user-granted)
+ * access authority — a wider table grants the agent read/write reach over more
+ * of the disk. It is NOT a scalar (an entry SET, like network `allowHosts`), so
+ * the scalar {@link widenRankOf} cannot see it, and it is DELIBERATELY absent
+ * from {@link GRANT_CAPABLE_FIELDS} (which the scalar/struct widen logic keys
+ * off). The disk-load `exceedsCeiling` ceiling (profile-list-select.ts) DOES
+ * police it, but that runs at PROFILE-LOAD time, NOT inside the layer merge — so
+ * a repo-controllable layer feeding `mergeProfileLayers` a wide `fileSystem`
+ * table (e.g. `root:write`) would otherwise WIN it (source-precedence) or fall
+ * through unguarded (most-restrictive has no combiner for it). This set-axis
+ * guard closes that hole: a repo `fileSystem` entry not COVERED BY the trusted
+ * baseline's table is a widen ⇒ the whole repo `fileSystem` contribution drops
+ * (mirroring the all-or-nothing `allow-list-widen` drop for network hosts).
+ *
+ * The coverage relation is the SAME pure, resolver-free `entryCoveredBy` the
+ * inheritance resolver + the ceiling use (kept local here to avoid a circular
+ * import — `profile-list-select.ts` already exports the rank polarities INTO
+ * this guard, so a value back-import would cycle).
+ */
+const fsPathStr = (p: FileSystemPath): string =>
+  p.type === "special" ? `special:${p.kind}` : p.value
+
+const accessCovered = (request: FileSystemAccess, by: FileSystemAccess): boolean =>
+  by === "write" ? true : request === "read"
+
+const literalAncestor = (anc: string, desc: string): boolean => {
+  if (anc === desc) return true
+  const a = anc.endsWith("/") ? anc : `${anc}/`
+  return desc.startsWith(a)
+}
+
+/** Pure entry-coverage: does `entry` grant no MORE than `coverer`? Same relation
+ *  as `profile-inheritance.ts` / `profile-list-select.ts` `entryCoveredBy`
+ *  (conservative — mixed special/path ⇒ not covered). */
+const fsEntryCoveredBy = (entry: FileSystemEntry, coverer: FileSystemEntry): boolean => {
+  if (!accessCovered(entry.access, coverer.access)) return false
+  const ep = entry.path
+  const cp = coverer.path
+  if (ep.type === "special" && cp.type === "special") return ep.kind === cp.kind
+  if (ep.type === "path" && cp.type === "path") {
+    return cp.value.startsWith("/") && ep.value.startsWith("/")
+      ? literalAncestor(cp.value, ep.value)
+      : ep.value === cp.value
+  }
+  return false
+}
+
+/**
+ * Does the candidate `fileSystem` table add an entry NOT covered by the trusted
+ * baseline's entry set? The baseline is the WIDEST trusted (`per-user` /
+ * `team-admin` / `default`) table; when NO trusted layer sets fileSystem the
+ * floor is the EMPTY set (default's locked-down table) so a repo cannot
+ * bootstrap ANY grant from nothing — every repo entry is then a widen. Returns
+ * the first uncovered entry (for a precise telemetry reason) or undefined.
+ */
+const firstFileSystemWiden = (
+  candidate: PermissionProfile["fileSystem"],
+  baseline: PermissionProfile["fileSystem"] | undefined,
+): FileSystemEntry | undefined => {
+  const baseEntries = baseline?.entries ?? []
+  return candidate.entries.find((e) => !baseEntries.some((b) => fsEntryCoveredBy(e, b)))
+}
+
+/* ------------------------------------------------------------------------- */
 /* Telemetry                                                                  */
 /* ------------------------------------------------------------------------- */
 
@@ -247,7 +338,9 @@ const sandboxAxisWidens = (
 export type ProvenanceDropKind =
   | "scalar-widen" // pillar value strictly wider than the trusted baseline
   | "allow-list-widen" // network allow-list adds a host beyond the baseline set
+  | "network-approval-widen" // network removes per-request approval the baseline required (R4)
   | "sandbox-axis-widen" // sandbox loosens ONE protective sub-axis (sum may still be ≤ baseline)
+  | "filesystem-entry-widen" // fileSystem table adds an entry beyond the trusted baseline set
 
 /**
  * One typed telemetry record per DROPPED repo-controllable contribution. The
@@ -378,6 +471,16 @@ const dropReasonForField = (
         detail: `dropped ${source} network contribution: allow-list adds a host beyond the trusted baseline`,
       }
     }
+    // R4 — per-request-approval removal (same mode + same hosts, but drops the
+    // per-call confirmation gate). The scalar/allow-list checks above miss it.
+    if (perRequestApprovalWidens(candidate as PermissionProfile["network"], baseNet)) {
+      return {
+        kind: "network-approval-widen",
+        field,
+        source,
+        detail: `dropped ${source} network contribution: removes per-request approval the trusted baseline required`,
+      }
+    }
   }
 
   // Sandbox is a 4-axis struct: the scalar sum compare above can be fooled by a
@@ -474,4 +577,106 @@ export const guardProvenance = (
   // byte-identical to today.
   if (!mutated) return { layers, dropped: [] }
   return { layers: out, dropped: allDropped }
+}
+
+/* ------------------------------------------------------------------------- */
+/* fileSystem guard (R3 — runs under BOTH strategies)                        */
+/* ------------------------------------------------------------------------- */
+
+/** One dropped repo-controllable `fileSystem` contribution. Distinct from
+ *  {@link ProvenanceDropRecord} (whose `field` is a {@link GrantCapableField})
+ *  because fileSystem is policed by a SET-coverage axis, not the scalar/struct
+ *  widen machinery — kept separate so {@link GRANT_CAPABLE_FIELDS} stays the
+ *  closed set the scalar polarity table is keyed off. */
+export interface FileSystemDropRecord {
+  readonly kind: "filesystem-entry-widen"
+  readonly field: "fileSystem"
+  readonly source: ProvenanceSource
+  readonly detail: string
+}
+
+export interface FileSystemGuardResult {
+  readonly layers: ReadonlyArray<ProvenancedLayer>
+  readonly dropped: ReadonlyArray<FileSystemDropRecord>
+}
+
+/**
+ * The WIDEST trusted (`per-user` / `team-admin` / `default`) `fileSystem` table
+ * — the entry set a repo contribution is compared against. "Widest" = the union
+ * of every trusted layer's entries, so a repo entry covered by ANY trusted entry
+ * is kept (defense-in-depth narrowing is always safe). When NO trusted layer
+ * sets fileSystem the result is `undefined` ⇒ the empty floor (a repo may grant
+ * NOTHING from nothing).
+ */
+const trustedFileSystemBaseline = (
+  layers: ReadonlyArray<ProvenancedLayer>,
+): PermissionProfile["fileSystem"] | undefined => {
+  const entries: FileSystemEntry[] = []
+  let present = false
+  for (const layer of layers) {
+    if (isRepoControllable(layer.source)) continue
+    const fs = (layer.value as Partial<PermissionProfile>).fileSystem
+    if (fs === undefined) continue
+    present = true
+    entries.push(...fs.entries)
+  }
+  return present ? { type: "restricted", entries } : undefined
+}
+
+/**
+ * R3 — drop every repo-controllable `fileSystem` contribution that WIDENS the
+ * layer-1 access grant beyond the trusted baseline's entry set. Runs under BOTH
+ * merge strategies (a repo fileSystem table has no safe combiner — it would
+ * otherwise WIN under source-precedence and fall through unguarded under
+ * most-restrictive). A repo table whose entries are ALL covered by the baseline
+ * (or empty) is KEPT — narrowing from a repo is always safe. NON-repo layers and
+ * NON-fileSystem keys pass through untouched.
+ *
+ * All-or-nothing per layer (mirrors the network `allow-list-widen` drop): a
+ * single uncovered entry drops the whole repo `fileSystem` key, so the merge
+ * then resolves fileSystem from the trusted layers / locked-down default.
+ *
+ * Determinism + byte-identical: when nothing is dropped the SAME array reference
+ * is returned (no repo fileSystem widen present ⇒ downstream merge unchanged).
+ * The opt-out flag mirrors {@link guardProvenance} (typed operator override).
+ */
+export const guardRepoFileSystem = (
+  layers: ReadonlyArray<ProvenancedLayer>,
+  options: GuardOptions = {},
+): FileSystemGuardResult => {
+  if (options.acknowledgedRisk === true) return { layers, dropped: [] }
+
+  const baseline = trustedFileSystemBaseline(layers)
+  const dropped: FileSystemDropRecord[] = []
+  let mutated = false
+  const out: ProvenancedLayer[] = []
+
+  for (const layer of layers) {
+    const fs = (layer.value as Partial<PermissionProfile>).fileSystem
+    if (!isRepoControllable(layer.source) || fs === undefined) {
+      out.push(layer)
+      continue
+    }
+    const widen = firstFileSystemWiden(fs, baseline)
+    if (widen === undefined) {
+      out.push(layer)
+      continue
+    }
+    // Drop the whole fileSystem key (lazy copy keeps every other key intact).
+    const nextValue = { ...(layer.value as Record<string, unknown>) }
+    delete nextValue.fileSystem
+    out.push({ source: layer.source, value: nextValue as Partial<PermissionProfile> })
+    dropped.push({
+      kind: "filesystem-entry-widen",
+      field: "fileSystem",
+      source: layer.source,
+      detail:
+        `dropped ${layer.source} fileSystem contribution: grants '${widen.access}' on ` +
+        `'${fsPathStr(widen.path)}' beyond the trusted baseline allow-list`,
+    })
+    mutated = true
+  }
+
+  if (!mutated) return { layers, dropped: [] }
+  return { layers: out, dropped: dropped }
 }

@@ -100,8 +100,12 @@ export interface RootsProviderPort {
  *     a raw `-32601`);
  *   - `malformed` — the server's response did not match the expected shape;
  *   - `transport` — the underlying request failed (timeout, server error,
- *     transport exit). */
-export type McpResourceFailure = "unsupported" | "malformed" | "transport"
+ *     transport exit);
+ *   - `too-large` — the server returned `text`/`blob` content whose cumulative
+ *     size exceeds the defensive byte cap (R2 #3). Refused with a typed failure
+ *     rather than letting an arbitrarily large payload flow unbounded into
+ *     memory, mirroring the zip reader's per-entry/total cap discipline. */
+export type McpResourceFailure = "unsupported" | "malformed" | "transport" | "too-large"
 
 /** No-throw result for every outbound typed method: a fulfilled value or a
  *  typed failure. Mirrors {@link import("../sampling/port").SamplingOutcome}. */

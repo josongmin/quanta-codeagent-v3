@@ -71,6 +71,47 @@ export const parseResourceRead = (result: unknown): McpResourceContent[] | null 
   return out
 }
 
+/** R2 #3 — defensive cap on the CUMULATIVE size (in UTF-16 code units, the JS
+ *  `string.length`) of the `text` + `blob` content a single `resources/read`
+ *  may return. A malicious/buggy server could otherwise stream an arbitrarily
+ *  large `blob`/`text` that flows unbounded into memory and the model prompt
+ *  (DOS / OOM). 96 MiB sits comfortably above the zip reader's 64 MiB total cap
+ *  (`zip-store.ts` `ZIP_MAX_TOTAL_BYTES`) so legitimately large multi-part
+ *  resources still pass, while a hostile hundreds-of-MB payload is refused as a
+ *  typed `too-large` failure. Mirrors the zip reader's cap discipline; kept as a
+ *  local constant because `@/mcp` does not import `@/tool` (slice isolation). */
+export const RESOURCE_READ_MAX_CONTENT_CHARS = 96 * 1024 * 1024
+
+/** The cumulative `text.length + blob.length` across all parsed content blocks.
+ *  Pure, no allocation — used to enforce {@link RESOURCE_READ_MAX_CONTENT_CHARS}
+ *  WITHOUT retaining/serializing the (potentially huge) payload first. */
+export const resourceContentChars = (contents: readonly McpResourceContent[]): number => {
+  let total = 0
+  for (const c of contents) total += (c.text?.length ?? 0) + (c.blob?.length ?? 0)
+  return total
+}
+
+/** Discriminated outcome of a capped `resources/read` parse:
+ *   - `{ kind: "ok" }` — well-formed AND within the byte cap;
+ *   - `{ kind: "malformed" }` — `contents` was not a `{contents:[...]}` array;
+ *   - `{ kind: "too-large" }` — well-formed but the cumulative content exceeds
+ *     {@link RESOURCE_READ_MAX_CONTENT_CHARS}. */
+export type CappedResourceRead =
+  | { readonly kind: "ok"; readonly contents: McpResourceContent[] }
+  | { readonly kind: "malformed" }
+  | { readonly kind: "too-large"; readonly chars: number }
+
+/** Parse + size-gate a `resources/read` result. Reuses {@link parseResourceRead}
+ *  for the shape narrowing, then refuses an over-cap payload with a typed
+ *  `too-large` outcome (no unbounded allocation downstream). */
+export const parseResourceReadCapped = (result: unknown): CappedResourceRead => {
+  const parsed = parseResourceRead(result)
+  if (parsed === null) return { kind: "malformed" }
+  const chars = resourceContentChars(parsed)
+  if (chars > RESOURCE_READ_MAX_CONTENT_CHARS) return { kind: "too-large", chars }
+  return { kind: "ok", contents: parsed }
+}
+
 const parsePromptArgs = (raw: unknown): McpPromptArgument[] | undefined => {
   if (!Array.isArray(raw)) return undefined
   const out: McpPromptArgument[] = []

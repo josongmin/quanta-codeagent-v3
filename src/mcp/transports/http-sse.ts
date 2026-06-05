@@ -219,19 +219,28 @@ export class HttpSseMcpTransport implements McpTransport {
    *  route it through the same pump `onMessage` feeds, so the client's pending
    *  entry for `requestId` rejects PROMPTLY (not at per-request timeout). Both
    *  the connection-level POST failure and the HTTP non-2xx path use this so the
-   *  two siblings emit an identical wire shape (id + code -32000). */
-  private rejectPending(requestId: number | string, message: string): void {
+   *  two siblings emit an identical wire shape (id + code -32000).
+   *
+   *  R4 (structured-401) — on the HTTP non-2xx path the REAL numeric status is
+   *  known, so we attach it to `error.data.httpStatus`. The client's `dispatch`
+   *  copies that onto the typed `McpError.httpStatus`, letting auth-staleness key
+   *  off a STRUCTURED signal instead of substring-matching the message. The
+   *  message text is UNCHANGED (the `HTTP <status>` marker is still present), so
+   *  the legacy substring fallback — and every existing assertion on the message
+   *  — is byte-identical. Connection-level failures (no HTTP status) omit it. */
+  private rejectPending(requestId: number | string, message: string, httpStatus?: number): void {
     this.emitMessage({
       jsonrpc: "2.0",
       id: requestId,
-      error: { code: -32000, message },
+      error: {
+        code: -32000,
+        message,
+        ...(httpStatus !== undefined ? { data: { httpStatus } } : {}),
+      },
     })
   }
 
-  private async post(
-    payload: McpTransportPayload,
-    requestId?: number | string,
-  ): Promise<void> {
+  private async post(payload: McpTransportPayload, requestId?: number | string): Promise<void> {
     // T01 (audit L9 H12): each POST gets a tracked AbortController so `close()`
     // can sever the request + any SSE body it is draining. The signal is wired
     // into both the fetch AND `consumeSseBody`'s reader.
@@ -264,7 +273,9 @@ export class HttpSseMcpTransport implements McpTransport {
         // status) so the client's existing error path rejects it PROMPTLY. A
         // notification (no id) has no pending entry, so it stays a warn.
         if (requestId !== undefined) {
-          this.rejectPending(requestId, `transport POST failed: HTTP ${res.status}`)
+          // R4 — carry the REAL status structurally so the client keys off the
+          // number, not the message text. The message marker is unchanged.
+          this.rejectPending(requestId, `transport POST failed: HTTP ${res.status}`, res.status)
         }
         // Drain/discard the body so the socket can be released rather than left
         // half-read behind an error response.
@@ -313,9 +324,13 @@ export class HttpSseMcpTransport implements McpTransport {
             reject(new Error("standalone GET aborted"))
             return
           }
-          abort.signal.addEventListener("abort", () => reject(new Error("standalone GET aborted")), {
-            once: true,
-          })
+          abort.signal.addEventListener(
+            "abort",
+            () => reject(new Error("standalone GET aborted")),
+            {
+              once: true,
+            },
+          )
         }),
       ])
     } catch (e) {

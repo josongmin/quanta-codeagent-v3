@@ -1,10 +1,14 @@
 /** H19 (jun-3-misc §3) — MCP resources / prompts / roots slice barrel. */
 
 export {
+  type CappedResourceRead,
   parsePromptGet,
   parsePromptList,
   parseResourceList,
   parseResourceRead,
+  parseResourceReadCapped,
+  RESOURCE_READ_MAX_CONTENT_CHARS,
+  resourceContentChars,
 } from "./codec"
 export {
   isRootsMethod,

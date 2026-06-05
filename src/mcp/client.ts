@@ -1,4 +1,4 @@
-import { QuantaError } from "@/shared"
+import { errMessage, QuantaError } from "@/shared"
 import { type CapabilityNegotiator, defaultNegotiator } from "./capabilities"
 import { headlessRejecter } from "./elicitation"
 import {
@@ -22,7 +22,8 @@ import {
   parsePromptGet,
   parsePromptList,
   parseResourceList,
-  parseResourceRead,
+  parseResourceReadCapped,
+  RESOURCE_READ_MAX_CONTENT_CHARS,
   type RootsProviderPort,
   routeResourceNotification,
   routeRootsList,
@@ -48,10 +49,22 @@ const MAX_TOOLS_LIST_PAGES = 256
  *  (slice isolation, RFC §3.1). Sub-cap results are returned byte-identical. */
 const MAX_RESULT_CHARS = 200_000
 
-/** Typed MCP failure. Stable code lets callers branch without string matching. */
+/** Typed MCP failure. Stable code lets callers branch without string matching.
+ *
+ *  R4 (structured-401) — when a failure originated from an HTTP transport
+ *  non-2xx, the carrier surfaces the REAL numeric status through the JSON-RPC
+ *  error's `data.httpStatus` slot; `dispatch` copies it onto `httpStatus` here
+ *  so auth-staleness can key off a STRUCTURED signal rather than substring-
+ *  matching the message text (the conservative legacy fallback is kept for
+ *  transports/servers that carry no structured status). `undefined` for every
+ *  non-HTTP error (stdio, timeout, local refusal). */
 export class McpError extends QuantaError {
-  constructor(message: string, options?: { cause?: unknown }) {
+  /** R4 — the HTTP status this error carried, when the transport surfaced one
+   *  structurally (`error.data.httpStatus`). `undefined` otherwise. */
+  readonly httpStatus?: number
+  constructor(message: string, options?: { cause?: unknown; httpStatus?: number }) {
     super("mcp", message, options)
+    if (options?.httpStatus !== undefined) this.httpStatus = options.httpStatus
   }
 }
 
@@ -90,16 +103,48 @@ const unsupported = <T>(capability: string, serverName: string): McpResult<T> =>
   message: `mcp server "${serverName}" does not advertise the "${capability}" capability`,
 })
 
-/** H18 — does `err` represent an HTTP 401 (Unauthorized) surfaced through the
- *  request core? The HTTP-SSE carrier rejects a non-2xx POST with a JSON-RPC
- *  `-32000` error whose message carries the status (`... HTTP 401`), which the
- *  client's `dispatch` re-wraps as `mcp error -32000: ... HTTP 401`. We match
- *  the textual `401`/`Unauthorized` signal (no structured status survives the
- *  JSON-RPC envelope) to drive a single bearer re-auth + retry. Conservative:
- *  matches ONLY the 401 marker so a 403/500/etc. is never treated as auth-stale. */
+/** H18 / R2 #1 / R4 — does `err` represent a GENUINE HTTP 401 (Unauthorized)
+ *  surfaced through the request core, as opposed to an arbitrary error whose
+ *  text merely mentions "401" or "unauthorized"?
+ *
+ *  R4 (structured-401) — PREFER the STRUCTURED signal: an {@link McpError} that
+ *  carries `httpStatus` (copied by `dispatch` from the transport's
+ *  `error.data.httpStatus`) is auth-stale IFF that number is exactly `401`.
+ *  This is immune to message-text spoofing entirely — a server whose 500-body
+ *  text contains "HTTP 401" cannot trigger a re-auth because the structured
+ *  status it carries is 500, not 401. A non-401 structured status (403/500/…)
+ *  is DEFINITIVELY not auth-stale and short-circuits without consulting text.
+ *
+ *  FALLBACK (only when NO structured status is present — stdio carriers, or a
+ *  transport that did not surface one): the conservative legacy substring match
+ *  on the transport's own `HTTP 401` status marker. The ONLY non-structured way
+ *  a real auth failure reaches here is the HTTP-SSE carrier's synthesized
+ *  `transport POST failed: HTTP 401` message. We key off that token — NOT a bare
+ *  `401` (which would spuriously fire on, e.g., `access-401.txt`, a line number,
+ *  or a version string) and NOT a bare `unauthorized` (which would fire on any
+ *  application-level authorization error a tool/server happens to phrase that
+ *  way). Matching is bounded to the literal `HTTP 401` token (case-insensitive
+ *  on `HTTP`, word-bounded on `401` so `HTTP 4012` / `HTTP 401x` never match). */
 const isUnauthorizedError = (err: unknown): boolean => {
-  const msg = err instanceof Error ? err.message : String(err)
-  return /\b401\b/.test(msg) || /\bunauthorized\b/i.test(msg)
+  // Structured signal wins when present: it is unforgeable by message text.
+  if (err instanceof McpError && err.httpStatus !== undefined) {
+    return err.httpStatus === 401
+  }
+  const msg = errMessage(err)
+  return /\bHTTP\s+401\b/i.test(msg)
+}
+
+/** R4 (structured-401) — extract a numeric `httpStatus` from a JSON-RPC error's
+ *  `data` slot when the transport attached one. Only a finite integer in the
+ *  HTTP status range is accepted; anything else (absent, non-object, non-number,
+ *  NaN, out-of-range) yields `undefined` so the conservative substring fallback
+ *  applies. A hostile server cannot smuggle a non-401 into a 401 because we read
+ *  the EXACT number, not its string form. */
+const httpStatusOf = (data: unknown): number | undefined => {
+  if (typeof data !== "object" || data === null || Array.isArray(data)) return undefined
+  const raw = (data as Record<string, unknown>).httpStatus
+  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 100 || raw > 599) return undefined
+  return raw
 }
 
 /** Narrow an unknown value to a plain record (object, not array/null). Used to
@@ -419,12 +464,50 @@ export class McpClient {
   }
 
   /** `resources/read` → typed `McpResourceContent[]` (text and/or blob blocks).
-   *  Same no-throw / capability-gate contract as {@link listResources}. */
+   *  Same no-throw / capability-gate contract as {@link listResources}.
+   *
+   *  R2 #3 — the response is size-gated by {@link parseResourceReadCapped}: a
+   *  server returning `text`/`blob` content whose cumulative size exceeds
+   *  `RESOURCE_READ_MAX_CONTENT_CHARS` is refused with a typed `too-large`
+   *  failure (no unbounded allocation), rather than flowing an arbitrarily large
+   *  payload into memory and the model prompt. */
   async readResource(uri: string): Promise<McpResult<McpResourceContent[]>> {
     if (!this.serverSupportsResources()) {
       return unsupported("resources", this.config.name)
     }
-    return this.typedRequest("resources/read", { uri }, parseResourceRead)
+    if (!this.started || this.stopped || this.exited) {
+      return {
+        ok: false,
+        reason: "transport",
+        message: `mcp server "${this.config.name}" is not running`,
+      }
+    }
+    let raw: unknown
+    try {
+      raw = await this.request("resources/read", { uri })
+    } catch (err) {
+      return {
+        ok: false,
+        reason: "transport",
+        message: errMessage(err),
+      }
+    }
+    const parsed = parseResourceReadCapped(raw)
+    if (parsed.kind === "malformed") {
+      return {
+        ok: false,
+        reason: "malformed",
+        message: `mcp server "${this.config.name}" resources/read returned a malformed response`,
+      }
+    }
+    if (parsed.kind === "too-large") {
+      return {
+        ok: false,
+        reason: "too-large",
+        message: `mcp server "${this.config.name}" resources/read content (${parsed.chars} chars) exceeds the ${RESOURCE_READ_MAX_CONTENT_CHARS}-char cap`,
+      }
+    }
+    return { ok: true, value: parsed.contents }
   }
 
   /** `resources/subscribe` → register interest in change notifications for
@@ -488,7 +571,7 @@ export class McpClient {
       return {
         ok: false,
         reason: "transport",
-        message: err instanceof Error ? err.message : String(err),
+        message: errMessage(err),
       }
     }
     const parsed = parse(raw)
@@ -653,7 +736,18 @@ export class McpClient {
       const entry = this.takePending(id)
       if (!entry) return
       if (msg.error) {
-        entry.reject(new McpError(`mcp error ${msg.error.code}: ${msg.error.message}`))
+        // R4 (structured-401) — when the carrier surfaced a real HTTP status
+        // through `error.data.httpStatus`, copy it onto the typed error so
+        // `isUnauthorizedError` keys off the STRUCTURED number (unforgeable by
+        // message text) rather than a substring. Absent ⇒ undefined (the legacy
+        // substring fallback applies), byte-identical to the pre-R4 error.
+        const httpStatus = httpStatusOf(msg.error.data)
+        entry.reject(
+          new McpError(
+            `mcp error ${msg.error.code}: ${msg.error.message}`,
+            httpStatus !== undefined ? { httpStatus } : undefined,
+          ),
+        )
       } else {
         entry.resolve(msg.result)
       }

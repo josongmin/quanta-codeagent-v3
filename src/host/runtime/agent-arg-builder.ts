@@ -19,6 +19,7 @@
  */
 
 import { buildSystemPrompt, HookBus, wireOptionalAgentPorts } from "@/agent"
+import { createArtifactRegistry, monotonicIdFactory } from "@/artifact"
 import {
   type CommandHookBinding,
   type CommandHookConfig,
@@ -542,6 +543,17 @@ const buildBaseRegistry = (args: {
       // ADR-0165 — gated coverage_check tool. Default-OFF: tool menu is
       // byte-identical unless QUANTA_COVERAGE_TOOL === "1".
       ...(process.env.QUANTA_COVERAGE_TOOL === "1" ? { coverageCheck: true } : {}),
+      // C1 — gated artifact (Canvas) tools. Default-OFF: tool menu byte-identical
+      // unless QUANTA_ARTIFACT_STORE === "1". Mints ONE per-session registry
+      // (real clock + monotonic id factory) shared by the artifact_* tools.
+      ...(process.env.QUANTA_ARTIFACT_STORE === "1"
+        ? {
+            artifactRegistry: createArtifactRegistry({
+              now: () => Date.now(),
+              idFactory: monotonicIdFactory(),
+            }),
+          }
+        : {}),
     }),
     ...(args.searchWire !== null ? [args.searchWire.tool] : []),
     // ADR-0287 — async-tools `poll_deferred`. Default-OFF: registered ONLY when

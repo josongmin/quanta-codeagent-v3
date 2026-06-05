@@ -44,6 +44,35 @@ const GIT_GH_TOKEN = /^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:\S*\/)?(git|gh)(?:\s
 const splitSimpleCommands = (command: string): string[] =>
   command.split(/\s*(?:&&|\|\||[;&|\n])\s*/).filter((s) => s.length > 0)
 
+/** A HELP invocation (`git merge --help` / `git merge -h` / `git help merge`)
+ *  changes NO VCS state but its stdout (the man page / usage dump) can contain a
+ *  line-anchored `Fast-forward` (the FAST-FORWARD man-page section term),
+ *  `Successfully rebased`, a `[branch sha]`-shaped example, or a `/pull/<N>`
+ *  example URL — every one a false-positive trigger. The exitCode guard does NOT
+ *  catch this (a help dump exits 0). We treat ANY git/gh segment carrying a help
+ *  flag (or the `help` subcommand) as non-classifiable: it is purely
+ *  documentation output, never a state change. Matches `--help` / `-h` /
+ *  `--help=…` and a bare `help` subcommand token; scoped to the git/gh segment so
+ *  it cannot be fooled by a `--help` elsewhere in an unrelated pipeline member. */
+const HELP_FLAG = /(?:^|\s)(?:--help(?:=\S*)?|-h)(?:\s|$)/
+const HELP_SUBCOMMAND = /^(?:git|gh)\s+help(?:\s|$)/
+
+/** True when the git/gh-invoking segment is a HELP/usage request (no state
+ *  change, documentation output only). Scanned over the SAME simple-command
+ *  segments as {@link invokesGitOrGh} so only the actual git/gh segment is
+ *  inspected. */
+const isHelpInvocation = (command: string): boolean => {
+  for (const raw of splitSimpleCommands(command)) {
+    const seg = raw.trimStart()
+    // Only inspect the actual git/gh segment (`.exec` returns null on no match —
+    // NOT undefined — so a `null` check would let a `--help` on a NON-git segment
+    // like `echo --help` falsely suppress a real git op in a later segment).
+    if (GIT_GH_TOKEN.exec(seg) === null) continue
+    if (HELP_SUBCOMMAND.test(seg) || HELP_FLAG.test(seg)) return true
+  }
+  return false
+}
+
 /** True when at least one simple-command segment invokes git or gh. */
 const invokesGitOrGh = (command: string): "git" | "gh" | undefined => {
   for (const seg of splitSimpleCommands(command)) {
@@ -203,6 +232,14 @@ export const classifyPassiveVcs = (input: PassiveVcsInput): VcsEvent | null => {
   // (command word `echo`) is rejected here even though its stdout contains a
   // push ref-line.
   if (invokesGitOrGh(input.command) === undefined) return null
+
+  // Guard 3: a HELP/usage invocation (`git merge --help`, `git merge -h`,
+  // `git help merge`) exits 0 but changes NO state — its man-page/usage stdout
+  // can contain a line-anchored `Fast-forward` / `Successfully rebased` / a
+  // `[branch sha]` example / a `/pull/N` example URL, each a false-positive
+  // trigger the exitCode guard cannot catch. Documentation output never
+  // classifies.
+  if (isHelpInvocation(input.command)) return null
 
   const commit = deriveCommit(input)
   const branch = deriveBranch(input)

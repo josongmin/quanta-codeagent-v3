@@ -40,6 +40,7 @@
 
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { errMessage } from "@/shared"
 import { isThrottled, loadMigrationLedger, recordDisposition } from "./ledger"
 import type {
   ConvertedGlobRule,
@@ -405,10 +406,7 @@ export const persistConvertedItems = async (
       await persistOne(item, input.projectDir)
       writtenTypes.push(item.type)
     } catch (err) {
-      const detail =
-        (err as { code?: string; message?: string }).code ??
-        (err as Error).message ??
-        "write failed"
+      const detail = (err as { code?: string }).code ?? errMessage(err)
       warnings.push(writeWarning(destLabel(input.projectDir, item.type), detail))
     }
   }

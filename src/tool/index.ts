@@ -7,6 +7,7 @@ import { automationUpdateTool } from "./automation_update"
 import { makeBashTool } from "./bash"
 import { bashAwaitTool } from "./bash/await"
 import { bashKillTool } from "./bash/kill"
+import { type ArtifactRegistryPort, artifactTools } from "./artifact"
 import { coverageCheckTool } from "./coverage_check"
 import { type DiagnosticsProvider, diagnosticsTool, nullDiagnosticsProvider } from "./diagnostics"
 // ADR-0142: register document/structured-data read tools into the default
@@ -41,6 +42,24 @@ import type { Tool } from "./types"
 import { webFetchTool } from "./web"
 import { makeWriteTool, writeTool } from "./write"
 
+// C1 — artifact (Canvas) read/manage tools. Caller-wired via
+// `DefaultToolPorts.artifactRegistry` (default-OFF; the host passes a session
+// registry when `QUANTA_ARTIFACT_STORE` is on). The duck-typed port keeps
+// `@/tool` fence-clean (no `@/artifact` import).
+export {
+  type ArtifactDestroyInput,
+  artifactDestroyInputSchema,
+  type ArtifactGetInput,
+  artifactGetInputSchema,
+  type ArtifactListInput,
+  artifactListInputSchema,
+  type ArtifactRegisterInput,
+  artifactRegisterInputSchema,
+  type ArtifactRegistryPort,
+  type ArtifactSpecInput,
+  artifactTools,
+  type ArtifactView,
+} from "./artifact"
 export { applyPatchTool, FsJailViolationError } from "./apply-patch"
 export { makeApplyPatchStructuredTool } from "./apply-patch-structured-tool"
 // ADR-0296 — async-shell sibling tools to `bash` (timeout_behavior=background).
@@ -453,6 +472,14 @@ export interface DefaultToolPorts {
    *  serializes in-memory and writes through the same FS-jail chokepoint the
    *  readers use; an existing target is written to a versioned `-vN` sibling. */
   officeAuthoring?: boolean
+  /** C1 — when set, append the artifact (Canvas) read/manage tools
+   *  (`artifact_list` / `artifact_get` / `artifact_destroy`) bound to the
+   *  session artifact registry. Absent ⇒ tools NOT registered (byte-identical).
+   *  The composition root passes a `createArtifactRegistry()` (from `@/artifact`,
+   *  structurally compatible with the duck-typed `ArtifactRegistryPort`) only
+   *  when `QUANTA_ARTIFACT_STORE` is on. `register` is host-side (the generation
+   *  tools register their outputs); the model only lists/inspects/destroys. */
+  artifactRegistry?: ArtifactRegistryPort
 }
 
 export { automationUpdateTool } from "./automation_update"
@@ -501,6 +528,13 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => {
     base.push(docxWriteTool as Tool)
     // H14 PPTX follow-up — same gate: generate real .pptx (PresentationML).
     base.push(pptxWriteTool as Tool)
+  }
+  // C1 — conditional registration of the artifact (Canvas) read/manage tools.
+  // Absent registry ⇒ default set is byte-identical (the model never sees them).
+  // Present ⇒ `artifact_list` / `artifact_get` / `artifact_destroy` bound to the
+  // host's session registry are appended.
+  if (ports.artifactRegistry !== undefined) {
+    base.push(...artifactTools(ports.artifactRegistry))
   }
   return base
 }
