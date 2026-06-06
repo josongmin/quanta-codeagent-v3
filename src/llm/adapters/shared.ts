@@ -1,6 +1,7 @@
 import type { LLMProvider } from "@/shared/errors"
-import { LLMError } from "@/shared/errors"
+import { errMessage, LLMError } from "@/shared/errors"
 import { runtimeConfig } from "@/shared/runtime-config"
+import { ProviderError, type ProviderId } from "../providers/provider-port"
 import { resolveStreamTimeoutMs } from "../stream-timeout"
 import type { StreamEvent } from "../types"
 
@@ -61,6 +62,48 @@ export const parseToolInputOrThrow = (
       ...(causePolicy === "with-cause" ? { cause: e } : {}),
     })
   }
+}
+
+/** Anthropic-transport SDK auth-failure signatures. The Foundry / Mantle SDKs
+ *  re-export their error classes WITHOUT a stable nominal name, so an auth
+ *  failure is recognised by message prefix. Shared so the two Azure/Mantle
+ *  adapters classify identically — a regex that drifts in one and not the other
+ *  is exactly the divergence this single owner prevents. */
+const ANTHROPIC_TRANSPORT_AUTH_RE = /AccessDenied|Unauthorized|InvalidAuthentication/i
+
+/**
+ * Classify a stream-open throw from an Anthropic-grammar enterprise transport
+ * (Foundry / Mantle). Returns the typed error the adapter should THROW — both
+ * adapters wrap `client.messages.create` and need the SAME triage:
+ *   - a `ProviderError` (a DI factory surfacing missing-dependency eagerly, or
+ *     the SDK throwing an enterprise AccessDenied) passes through UNTOUCHED so
+ *     the loop's classifier can branch on `.code`;
+ *   - an auth-shaped wire error (AccessDenied / Unauthorized /
+ *     InvalidAuthentication) maps to a typed `provider-misconfigured`
+ *     `ProviderError` tagged `${label} stream auth failed: <msg>`;
+ *   - everything else maps to `LLMError.fromSdkError("anthropic", e)`.
+ *
+ * Returns (does not throw) so the call site keeps an explicit `throw`, which TS
+ * control-flow recognises as terminal inside the `catch`. `label` is the human
+ * transport name ("Foundry" / "Mantle") so the message + telemetry stay
+ * distinguishable; `providerId` is the typed provider tag carried on the
+ * `ProviderError`. Behaviour is byte-identical to the inline ladders each adapter
+ * previously carried.
+ */
+export const classifyAnthropicTransportStreamError = (
+  e: unknown,
+  label: string,
+  providerId: ProviderId,
+): ProviderError | LLMError => {
+  if (e instanceof ProviderError) return e
+  const msg = errMessage(e)
+  if (ANTHROPIC_TRANSPORT_AUTH_RE.test(msg)) {
+    return new ProviderError("provider-misconfigured", `${label} stream auth failed: ${msg}`, {
+      cause: e,
+      providerId,
+    })
+  }
+  return LLMError.fromSdkError("anthropic", e)
 }
 
 /** Token counts gathered from a stream, provider-agnostic. Adapters fold their

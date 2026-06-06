@@ -2,19 +2,19 @@
  * `/doctor` check-registry (RFC jun-6-doctor-selfcheck §4.3, §4.5) — PURE.
  *
  * `DOCTOR_CHECKS` is a frozen, ordered, total registry: adding a check = one
- * array entry + one `Check` fn. `runDoctor` runs every check ISOLATED — a
- * check (or its probe) that throws yields its OWN `fail` result and never
- * aborts the sweep (the per-check `.catch(failResult)`).
+ * `{ id, run }` entry. `runDoctor` runs every check ISOLATED — a check (or its
+ * probe) that throws yields its OWN `fail` result (attributed to the entry's
+ * bound `id`) and never aborts the sweep (the per-check `.catch(failResult)`).
  */
 
 import { errMessage } from "@/shared"
-import type { Check, CheckResult, DoctorProbes } from "./types"
+import type { Check, CheckFn, CheckResult, DoctorProbes } from "./types"
 import { MIN_TERMINAL_COLUMNS } from "./types"
 
 /** Near-expiry window: a token valid but inside this window ⇒ `warn`.
  *  Surfaced by the probe (`tokenExpiringSoon`); the constant documents intent. */
 
-const authCheck: Check = async (probes) => {
+const authCheck: CheckFn = async (probes) => {
   const a = await probes.auth()
   // A token is "present" iff the probe reported an expiry verdict (expired or
   // not) or the near-expiry flag — `tokenExpired === undefined` means no token.
@@ -46,7 +46,7 @@ const authCheck: Check = async (probes) => {
   return { id: "auth", status: "ok", detail: a.provider }
 }
 
-const terminalCheck: Check = async (probes) => {
+const terminalCheck: CheckFn = async (probes) => {
   const t = probes.terminal()
   if (t.isTTY && !t.rawModeAvailable) {
     return {
@@ -75,7 +75,7 @@ const terminalCheck: Check = async (probes) => {
   return { id: "terminal", status: "ok", detail: `TTY · ${t.columns} cols` }
 }
 
-const mcpCheck: Check = async (probes) => {
+const mcpCheck: CheckFn = async (probes) => {
   const servers = await probes.mcp()
   if (servers.length === 0) {
     return { id: "mcp", status: "ok", detail: "no MCP servers configured" }
@@ -99,7 +99,7 @@ const mcpCheck: Check = async (probes) => {
   }
 }
 
-const configCheck: Check = async (probes) => {
+const configCheck: CheckFn = async (probes) => {
   const c = probes.config()
   if (!c.loaded) {
     return {
@@ -121,7 +121,7 @@ const configCheck: Check = async (probes) => {
   return { id: "config", status: "ok", detail: "runtimeConfig() validated" }
 }
 
-const stateDbCheck: Check = async (probes) => {
+const stateDbCheck: CheckFn = async (probes) => {
   const s = await probes.stateDb()
   if (!s.sessionsReadable || !s.indexValid) {
     const what = !s.sessionsReadable ? "session store" : "session index"
@@ -144,23 +144,15 @@ const stateDbCheck: Check = async (probes) => {
   return { id: "state-db", status: "ok", detail: "sessions + index readable" }
 }
 
-/** Frozen, ordered registry. Order is part of the contract (stable report). */
+/** Frozen, ordered registry. Order is part of the contract (stable report).
+ *  Each entry binds its `id` to the fn so the throw-before-result attribution
+ *  can never drift from the fn's own self-reported id (no parallel id array). */
 export const DOCTOR_CHECKS: readonly Check[] = Object.freeze([
-  authCheck,
-  terminalCheck,
-  mcpCheck,
-  configCheck,
-  stateDbCheck,
-])
-
-/** Stable id sequence, aligned with {@link DOCTOR_CHECKS} order — used to
- *  attribute a `fail` when a check throws before producing a result. */
-const CHECK_IDS: readonly string[] = Object.freeze([
-  "auth",
-  "terminal",
-  "mcp",
-  "config",
-  "state-db",
+  { id: "auth", run: authCheck },
+  { id: "terminal", run: terminalCheck },
+  { id: "mcp", run: mcpCheck },
+  { id: "config", run: configCheck },
+  { id: "state-db", run: stateDbCheck },
 ])
 
 const failResult = (id: string, err: unknown): CheckResult => ({
@@ -172,13 +164,12 @@ const failResult = (id: string, err: unknown): CheckResult => ({
 
 /**
  * Run every check, isolated. A check that throws (or whose probe throws)
- * becomes its own `fail` result; the remaining checks still run + render.
+ * becomes its own `fail` result (attributed to the entry's own `id`); the
+ * remaining checks still run + render.
  */
 export async function runDoctor(probes: DoctorProbes): Promise<readonly CheckResult[]> {
   return Promise.all(
-    DOCTOR_CHECKS.map((check, i) =>
-      check(probes).catch((e) => failResult(CHECK_IDS[i] ?? `check-${i}`, e)),
-    ),
+    DOCTOR_CHECKS.map((check) => check.run(probes).catch((e) => failResult(check.id, e))),
   )
 }
 

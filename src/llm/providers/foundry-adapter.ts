@@ -45,7 +45,10 @@ import {
   type OpenSlots,
   type RawEvent,
 } from "../adapters/anthropic"
-import { resolveAdapterStreamTimeouts } from "../adapters/shared"
+import {
+  classifyAnthropicTransportStreamError,
+  resolveAdapterStreamTimeouts,
+} from "../adapters/shared"
 import { withStreamTimeout } from "../stream-timeout"
 import type { CacheTtl, StreamEvent, StreamInput } from "../types"
 import type { LlmProvider, ProviderConfig, ProviderId } from "./provider-port"
@@ -306,23 +309,11 @@ export class FoundryProviderAdapter implements LlmProvider {
         input.signal ? { signal: input.signal } : undefined,
       )
     } catch (e) {
-      // ProviderError (from a DI factory that wants to surface
-      // missing-dependency eagerly, or from the SDK throwing an Azure
-      // AccessDenied) MUST pass through untouched so the loop's classifier
-      // can branch on `.code`. Everything else is a wire error.
-      if (e instanceof ProviderError) throw e
-      // Detect Azure auth failures — the SDK throws an
-      // `Anthropic.APIError`-like with name/code that we map to typed
-      // `auth-failed`. We pin on the message prefix because the SDK
-      // re-exports its error classes without a stable nominal name.
-      const msg = errMessage(e)
-      if (/AccessDenied|Unauthorized|InvalidAuthentication/i.test(msg)) {
-        throw new ProviderError("provider-misconfigured", `Foundry stream auth failed: ${msg}`, {
-          cause: e,
-          providerId: "foundry",
-        })
-      }
-      throw LLMError.fromSdkError("anthropic", e)
+      // Shared triage (see `classifyAnthropicTransportStreamError`): ProviderError
+      // passes through untouched so the loop classifier can branch on `.code`; an
+      // Azure auth-shaped wire error (AccessDenied / Unauthorized / …) maps to
+      // typed `provider-misconfigured`; everything else is an Anthropic wire error.
+      throw classifyAnthropicTransportStreamError(e, "Foundry", "foundry")
     }
   }
 

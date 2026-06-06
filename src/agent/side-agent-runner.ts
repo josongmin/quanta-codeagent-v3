@@ -18,7 +18,7 @@
  * bridge for ADR-0130. The slice itself (`@/side-agent`) stays a pure leaf.
  */
 
-import { runtimeConfig } from "@/shared"
+import { runtimeConfig, sliceWholeChars } from "@/shared"
 import {
   createSideAgentDaemonRegistry,
   type SideAgentDaemonRegistry,
@@ -48,16 +48,13 @@ const DETAIL_TRUNC_MARKER = "\n…[side-agent finding truncated]"
  *  string is UTF-16, and a naive `slice` at the cap index can cut an astral char
  *  (emoji / CJK-ext) in HALF, emitting a LONE surrogate into the findings
  *  ring-buffer / mailbox body — which re-encodes to a U+FFFD replacement char /
- *  malformed token. If the unit just before the cut is a HIGH surrogate, its LOW
- *  half sits at the cut and would be dropped alone; back the cut off by one so
- *  the whole pair is dropped together (same boundary-snap idiom as
- *  `sliceHeadWhole` in `@/tool/pty`). An under-cap detail is returned untouched. */
+ *  malformed token. The shared `sliceWholeChars` helper snaps the cut off a
+ *  surrogate boundary (dropping a straddling pair whole) before the marker is
+ *  appended. An under-cap detail is returned untouched. */
 const capDetail = (detail: string): string => {
   if (detail.length <= DETAIL_MAX) return detail
   const cut = DETAIL_MAX - DETAIL_TRUNC_MARKER.length
-  const prev = detail.charCodeAt(cut - 1)
-  const end = prev >= 0xd800 && prev <= 0xdbff ? cut - 1 : cut
-  return detail.slice(0, end) + DETAIL_TRUNC_MARKER
+  return sliceWholeChars(detail, cut) + DETAIL_TRUNC_MARKER
 }
 
 /** Read-biased default tool surface for a side-agent pass (RFC §4.6). A daemon

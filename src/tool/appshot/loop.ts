@@ -23,6 +23,7 @@
  * can't bring up Chrome degrades to verify-skipped, not a crash").
  */
 
+import { errMessage } from "@/shared/errors"
 import type { AppSpec, AppshotArtifactSink, AppshotPort, VerifyVerdict } from "./port"
 
 /** Hard floor/ceiling on the iteration cap so a caller can never request an
@@ -113,9 +114,11 @@ export const clampIter = (requested: number): number => {
   return n
 }
 
-/** Safe error-message extraction (no `@/shared` import to keep the leaf pure). */
-const message = (e: unknown): string =>
-  e instanceof Error ? e.message : typeof e === "string" ? e : "unknown error"
+/** Safe error-message extraction via the canonical shared leaf (`@/shared/errors`
+ *  is a zero-import pure module, so this preserves the leaf's purity). Also
+ *  survives a hostile throw whose stringifier itself throws — this loop must
+ *  never reject. Identical output for the Error / string cases. */
+const message = errMessage
 
 /** Best-effort register the final scaffold into the artifact sink. Returns the
  *  minted id, or undefined when no sink is wired OR the register threw (the loop

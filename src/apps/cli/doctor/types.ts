@@ -20,8 +20,16 @@ export interface CheckResult {
   readonly remedy?: string
 }
 
-/** A single check — pure given its probes, deterministic + unit-testable. */
-export type Check = (probes: DoctorProbes) => Promise<CheckResult>
+/** A single check fn — pure given its probes, deterministic + unit-testable. */
+export type CheckFn = (probes: DoctorProbes) => Promise<CheckResult>
+
+/** A registry entry: the check fn bound to its stable `id`. Keeping the id ON
+ *  the entry (vs a parallel id array) means a reorder can never mis-attribute a
+ *  throw-before-result `fail` — the id travels with the fn. */
+export interface Check {
+  readonly id: string
+  readonly run: CheckFn
+}
 
 /** Auth probe shape (redacted — presence/expiry only, never the key value). */
 export interface AuthProbeResult {

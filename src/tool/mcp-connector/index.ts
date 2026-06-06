@@ -16,6 +16,7 @@
  */
 
 import { z } from "zod"
+import { errMessage } from "@/shared/errors"
 import type { Tool, ToolContext, ToolEvent, ToolFailure, ToolResult } from "../types"
 
 /** One catalog entry as the model sees it (duck-typed view). */
@@ -43,8 +44,10 @@ export interface McpConnectorDiscoveryPort {
 const ok = (output: string): ToolResult => ({ ok: true, output })
 const err = (output: string, failure: ToolFailure): ToolResult => ({ ok: false, output, failure })
 
-const errMsg = (e: unknown): string =>
-  e instanceof Error ? e.message : typeof e === "string" ? e : "unknown error"
+/** Canonical shared extractor — also survives a hostile throw whose stringifier
+ *  itself throws (this NO-THROW boundary must not re-throw while building its
+ *  own error string). Identical output for the Error / string cases. */
+const errMsg = errMessage
 
 export const mcpConnectorListInputSchema = z.object({
   transport: z

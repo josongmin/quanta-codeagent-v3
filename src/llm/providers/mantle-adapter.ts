@@ -53,7 +53,10 @@ import {
   type OpenSlots,
   type RawEvent,
 } from "../adapters/anthropic"
-import { resolveAdapterStreamTimeouts } from "../adapters/shared"
+import {
+  classifyAnthropicTransportStreamError,
+  resolveAdapterStreamTimeouts,
+} from "../adapters/shared"
 import { withStreamTimeout } from "../stream-timeout"
 import type { CacheTtl, StreamEvent, StreamInput } from "../types"
 import type { LlmProvider, ProviderConfig, ProviderId } from "./provider-port"
@@ -294,23 +297,11 @@ export class MantleProviderAdapter implements LlmProvider {
         input.signal ? { signal: input.signal } : undefined,
       )
     } catch (e) {
-      // ProviderError (from a DI factory that wants to surface
-      // missing-dependency eagerly, or from the SDK throwing a Mantle
-      // AccessDenied) MUST pass through untouched so the loop's classifier
-      // can branch on `.code`. Everything else is a wire error.
-      if (e instanceof ProviderError) throw e
-      // Detect Mantle auth failures — the SDK throws an `Anthropic.APIError`-
-      // like with name/code that we map to typed `auth-failed`. We pin on the
-      // message prefix because the SDK re-exports its error classes without a
-      // stable nominal name.
-      const msg = errMessage(e)
-      if (/AccessDenied|Unauthorized|InvalidAuthentication/i.test(msg)) {
-        throw new ProviderError("provider-misconfigured", `Mantle stream auth failed: ${msg}`, {
-          cause: e,
-          providerId: "mantle",
-        })
-      }
-      throw LLMError.fromSdkError("anthropic", e)
+      // Shared triage (see `classifyAnthropicTransportStreamError`): ProviderError
+      // passes through untouched so the loop classifier can branch on `.code`; a
+      // Mantle auth-shaped wire error (AccessDenied / Unauthorized / …) maps to
+      // typed `provider-misconfigured`; everything else is an Anthropic wire error.
+      throw classifyAnthropicTransportStreamError(e, "Mantle", "mantle")
     }
   }
 

@@ -9,6 +9,7 @@
  *  the dispatch seam because the tool is registered through the `mcp`-origin
  *  array — these helpers do not (and must not) re-implement that. */
 
+import { errMessage } from "@/shared/errors"
 import type { ToolFailure } from "../types"
 import type {
   HandleResult,
@@ -85,8 +86,11 @@ export const callPort = async <T>(
   try {
     return await produce()
   } catch (e) {
-    const message = e instanceof Error ? e.message : typeof e === "string" ? e : "unknown error"
-    return { ok: false, reason: "transport", message }
+    // Canonical `errMessage` over an open-coded `instanceof Error` ladder: it
+    // additionally survives a hostile object whose `.toString` / `@@toPrimitive`
+    // THROWS (a NO-THROW boundary must not re-throw while building its own error
+    // string). Identical output for the Error / string cases the port can raise.
+    return { ok: false, reason: "transport", message: errMessage(e) }
   }
 }
 

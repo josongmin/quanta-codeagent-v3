@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { sliceWholeChars } from "@/shared/slice-whole-chars"
+import { sliceTailWholeChars, sliceWholeChars } from "@/shared/slice-whole-chars"
 
 // A 4-byte astral char: 😀 (U+1F600) = high D83D + low DE00 (2 UTF-16 units).
 const EMOJI = "😀"
@@ -82,5 +82,110 @@ describe("sliceWholeChars — surrogate safety", () => {
     const out = sliceWholeChars(s, 4) // keeps x,HIGH,y,LOW → still has lone halves
     expect(out.length).toBeLessThanOrEqual(4)
     // (it may contain lone surrogates that pre-existed; that's by design)
+  })
+})
+
+describe("sliceTailWholeChars — surrogate safety (FRONT of result)", () => {
+  it("never leads with a lone LOW surrogate straddling the cut at EVERY offset", () => {
+    for (let suffix = 0; suffix <= 8; suffix++) {
+      const s = `${"a".repeat(8)}${EMOJI}${"b".repeat(suffix)}`
+      for (let keep = 0; keep <= s.length + 2; keep++) {
+        const out = sliceTailWholeChars(s, keep)
+        expect(out.length).toBeLessThanOrEqual(keep)
+        expect(hasLoneSurrogate(out)).toBe(false)
+        expect(out.isWellFormed()).toBe(true)
+        // the tail is always a suffix of the input (we only drop from the FRONT).
+        expect(s.endsWith(out)).toBe(true)
+      }
+    }
+  })
+
+  it("advances exactly one unit when the cut lands inside a pair", () => {
+    // "😀cd": units = HIGH,LOW,c,d. keep=3 would start at LOW (lone) → advance to "cd".
+    const s = `${EMOJI}cd`
+    expect(sliceTailWholeChars(s, 3)).toBe("cd")
+    // keep=4 keeps the whole pair.
+    expect(sliceTailWholeChars(s, 4)).toBe(s)
+  })
+
+  it("leaves under-cap inputs byte-identical and handles empty / non-positive keep", () => {
+    const s = `hello ${EMOJI} world`
+    expect(sliceTailWholeChars(s, s.length)).toBe(s)
+    expect(sliceTailWholeChars(s, s.length + 100)).toBe(s)
+    expect(sliceTailWholeChars("", 5)).toBe("")
+    expect(sliceTailWholeChars("abc", 0)).toBe("")
+    expect(sliceTailWholeChars("abc", -1)).toBe("")
+  })
+
+  it("is byte-identical to slice when no pair straddles the cut", () => {
+    const s = "plain ascii text here"
+    for (let keep = 0; keep <= s.length; keep++) {
+      expect(sliceTailWholeChars(s, keep)).toBe(keep === 0 ? "" : s.slice(s.length - keep))
+    }
+  })
+
+  it("all-astral tail is always even-length (no half emoji at the front)", () => {
+    const s = EMOJI.repeat(10) // 20 UTF-16 units
+    for (let keep = 0; keep <= 20; keep++) {
+      const out = sliceTailWholeChars(s, keep)
+      expect(out.isWellFormed()).toBe(true)
+      expect(out.length % 2).toBe(0)
+    }
+  })
+})
+
+// ── DRIFT-LOCK ───────────────────────────────────────────────────────────────
+// The PTY read-cap (`src/tool/pty/tools.ts capOutput`) and the side-agent finding
+// clamp (`src/agent/side-agent-runner.ts capDetail`) were each open-coded copies
+// of the surrogate boundary-snap. They now route through these shared helpers.
+// This block re-derives the OLD inline implementations verbatim and asserts the
+// shared helpers stay byte-identical to them across a brutal offset/astral matrix
+// — so a future "optimization" of either helper can never silently regress a
+// truncation site back into emitting a lone surrogate.
+describe("DRIFT-LOCK — shared helpers match the retired inline truncators", () => {
+  // Verbatim copy of the OLD pty `sliceHeadWhole` (assumed keep <= s.length).
+  const oldHead = (s: string, keep: number): string => {
+    const c = s.charCodeAt(keep - 1)
+    const end = c >= 0xd800 && c <= 0xdbff ? keep - 1 : keep
+    return s.slice(0, end)
+  }
+  // Verbatim copy of the OLD pty `sliceTailWhole` (assumed keep <= s.length).
+  const oldTail = (s: string, keep: number): string => {
+    const start = s.length - keep
+    const c = s.charCodeAt(start)
+    return s.slice(c >= 0xdc00 && c <= 0xdfff ? start + 1 : start)
+  }
+
+  it("sliceWholeChars ≡ old pty sliceHeadWhole on the over-cap band", () => {
+    for (let prefix = 0; prefix <= 8; prefix++) {
+      const s = `${"a".repeat(prefix)}${EMOJI}${"b".repeat(8)}`
+      // The old helper was only ever called with 1 <= keep < s.length.
+      for (let keep = 1; keep < s.length; keep++) {
+        expect(sliceWholeChars(s, keep)).toBe(oldHead(s, keep))
+      }
+    }
+  })
+
+  it("sliceTailWholeChars ≡ old pty sliceTailWhole on the over-cap band", () => {
+    for (let suffix = 0; suffix <= 8; suffix++) {
+      const s = `${"a".repeat(8)}${EMOJI}${"b".repeat(suffix)}`
+      for (let keep = 1; keep < s.length; keep++) {
+        expect(sliceTailWholeChars(s, keep)).toBe(oldTail(s, keep))
+      }
+    }
+  })
+
+  it("side-agent capDetail idiom: sliceWholeChars(detail, cut) ≡ old back-off", () => {
+    const oldCapCut = (detail: string, cut: number): string => {
+      const prev = detail.charCodeAt(cut - 1)
+      const end = prev >= 0xd800 && prev <= 0xdbff ? cut - 1 : cut
+      return detail.slice(0, end)
+    }
+    for (let prefix = 0; prefix <= 8; prefix++) {
+      const detail = `${"a".repeat(prefix)}${EMOJI}${"b".repeat(20)}`
+      for (let cut = 1; cut < detail.length; cut++) {
+        expect(sliceWholeChars(detail, cut)).toBe(oldCapCut(detail, cut))
+      }
+    }
   })
 })

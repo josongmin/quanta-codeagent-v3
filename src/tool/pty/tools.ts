@@ -7,7 +7,7 @@
  */
 
 import { z } from "zod"
-import { errMessage } from "@/shared"
+import { errMessage, sliceTailWholeChars, sliceWholeChars } from "@/shared"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 import {
   PTY_MAX_DIM,
@@ -22,26 +22,6 @@ import {
  *  output (where a prompt / result lives) plus the start for context. */
 const PTY_MAX_READ_OUTPUT = 32 * 1024
 
-/** Pull `keep` UTF-16 code units off the FRONT of `s` without splitting a
- *  surrogate pair. If index `keep` lands on the LOW half of a pair (the
- *  preceding unit at `keep-1` is a HIGH surrogate), back off by one so the
- *  high half is dropped with its low half instead of being emitted alone. */
-const sliceHeadWhole = (s: string, keep: number): string => {
-  const c = s.charCodeAt(keep - 1)
-  const end = c >= 0xd800 && c <= 0xdbff ? keep - 1 : keep
-  return s.slice(0, end)
-}
-
-/** Pull `keep` UTF-16 code units off the END of `s` without splitting a
- *  surrogate pair. If the first kept unit (at `start`) is a LOW surrogate, its
- *  HIGH half was just dropped — advance by one so we never lead with a lone low
- *  half. */
-const sliceTailWhole = (s: string, keep: number): string => {
-  const start = s.length - keep
-  const c = s.charCodeAt(start)
-  return s.slice(c >= 0xdc00 && c <= 0xdfff ? start + 1 : start)
-}
-
 /**
  * head+tail truncate to {@link PTY_MAX_READ_OUTPUT}. Surrogate-safe: a JS string
  * is UTF-16, and a naive `slice` at an arbitrary index can cut a surrogate PAIR
@@ -50,15 +30,16 @@ const sliceTailWhole = (s: string, keep: number): string => {
  * token) when the transcript is serialized to the model — a real corruption, not
  * cosmetic. Competitor precedent: Codex decodes child PTY bytes via Rust
  * `String::from_utf8_lossy`, which can never produce a lone surrogate (a Rust
- * `String` is well-formed UTF-8 by construction). We mirror that guarantee by
- * snapping both cut points off a surrogate boundary so the model only ever sees
- * a well-formed string.
+ * `String` is well-formed UTF-8 by construction). We mirror that guarantee via
+ * the shared `sliceWholeChars` / `sliceTailWholeChars` helpers, which snap both
+ * cut points off a surrogate boundary so the model only ever sees a well-formed
+ * string.
  */
 const capOutput = (s: string): string => {
   if (s.length <= PTY_MAX_READ_OUTPUT) return s
   const keep = Math.floor(PTY_MAX_READ_OUTPUT / 2)
-  const head = sliceHeadWhole(s, keep)
-  const tail = sliceTailWhole(s, keep)
+  const head = sliceWholeChars(s, keep)
+  const tail = sliceTailWholeChars(s, keep)
   const dropped = s.length - head.length - tail.length
   return `${head}\n… [${dropped} chars truncated] …\n${tail}`
 }
