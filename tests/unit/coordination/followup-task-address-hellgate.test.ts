@@ -88,4 +88,33 @@ describe("handleFollowupTask — delivers to the resolved mailbox label (BUG#4)"
     expect(mailbox.read(childLabel).map((m) => m.body)).toEqual([])
     expect(mailbox.read(taskId).map((m) => m.body)).toEqual(["do X"])
   })
+
+  test("self-target guard — a child cannot followup_task its OWN task id (ownAgentId)", () => {
+    const { registry, mailbox, wake, taskId, childLabel } = setup()
+    const out = handleFollowupTask(
+      { agentId: taskId, message: "wake myself" },
+      {
+        registry,
+        mailbox,
+        wake,
+        callerLabel: childLabel,
+        resolveLabel: (id) => wake.labelOf(id),
+        ownAgentId: taskId, // the caller IS this task
+      },
+    )
+    expect(out.kind).toBe("error")
+    if (out.kind === "error") expect(out.cause).toBe("self_target")
+    // No message was delivered (the guard short-circuits before send).
+    expect(mailbox.read(childLabel).map((m) => m.body)).toEqual([])
+  })
+
+  test("self-target guard absent (ownAgentId unset) ⇒ no guard, delivery proceeds", () => {
+    const { registry, mailbox, wake, taskId, childLabel } = setup()
+    const out = handleFollowupTask(
+      { agentId: taskId, message: "hi" },
+      { registry, mailbox, wake, callerLabel: "root", resolveLabel: (id) => wake.labelOf(id) },
+    )
+    expect(out.kind).toBe("success")
+    expect(mailbox.read(childLabel).map((m) => m.body)).toEqual(["hi"])
+  })
 })

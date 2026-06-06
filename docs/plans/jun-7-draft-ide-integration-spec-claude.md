@@ -2,321 +2,575 @@
 
 **Status:** DRAFT / reference. Reverse-engineered from the shipping extension, not official docs.
 **Subject:** How the Claude Code CLI connects to and drives a VS Code / Cursor / Windsurf editor.
-**Sources (verbatim, line-anchored):**
+**Rev:** 3 (2026-06-07) — rev2 + PART 4: channel/session model, terminal integration, OAuth/credentials,
+checkpoint/rewind/fork/storage, browser/remote-control/teleport/SSH/deeplinks, elicitation &
+plugin/marketplace flow. Control-request shapes verified. Most PART 4 claims are extension-source [V].
+
+**Sources (line-anchored):**
 - Extension host: `.extracted_source/claude-code-ide/extension.beautified.js` (Anthropic.claude-code **2.1.167**)
 - Webview UI: `.extracted_source/claude-code-ide/webview/index.beautified.js`
+- Manifest + schema: `.extracted_source/claude-code-ide/package.json`, `claude-code-settings.schema.json`
 - CLI side (strings): `.extracted_source/claude-code-cli/_cli-symbols.txt` (`@anthropic-ai/claude-code` 2.1.167)
 - quanta target seam: [src/apps/agent/mode-presets/ide.ts](../../src/apps/agent/mode-presets/ide.ts) (ADR-0092)
 
-Every claim below is tagged **[V]** = verified verbatim in source at the cited line, or **[I]** = inferred
-(plausible from surrounding code but not a literal quote). Don't promote an [I] to fact without re-reading.
+**Tagging:** **[V]** = quoted verbatim from the cited file:line. **[I]** = inferred (consistent with code but
+not a literal quote — re-read before trusting). Strings-dump (CLI-side) claims are inherently lower
+confidence than extension-source claims; treated as [V] only when the literal string is present.
 
 ---
 
-## 0. TL;DR topology
+## 0. TL;DR — there are TWO connection topologies (don't conflate them)
+
+The earlier draft said "the IDE link is WebSocket, not stdio." That was wrong. **Both exist**, for two
+different entry points:
+
+### Topology A — Extension-driven (the chat panel). **stdio + Agent SDK.**
+The extension imports `@anthropic-ai/claude-agent-sdk` **0.3.167** **[V]** (`extension.js:42760, 62932`)
+and **spawns the native CLI binary** as a subprocess with
+`--output-format stream-json --verbose --input-format stream-json` over **stdio** **[V]** (`42454`).
+The agent's editor-awareness in this mode is delivered via **in-process hook closures** (diagnostics)
+and **`canUseTool`** (permission) — see §3-5. This is what the in-editor chat panel uses.
+
+### Topology B — Terminal-driven (`claude` in the integrated terminal). **WebSocket + MCP.**
+A `claude` started in a terminal discovers the IDE through `~/.claude/ide/<port>.lock`, dials a loopback
+**WebSocket MCP server** the extension hosts, and gets 12 `mcp__ide__*` tools plus push notifications
+(selection/diagnostics). See §6.
+
+### Plus: an SDK-injected MCP server (debugger + Jupyter)
+In Topology A the extension also injects an in-process SDK MCP server named **`claude-vscode-extension`**
+(`Tde`, `extension.js:81263, 85188`) carrying debugger/Jupyter state into the spawned CLI. See §7.
 
 ```
-┌────────────────────────┐         WebSocket (loopback)          ┌──────────────────────────┐
-│   IDE extension host    │  ◄───  MCP-over-WS, IDE = SERVER  ──► │   Claude Code CLI         │
-│  (extension.js, in the  │                                       │  (native-binary `claude`, │
-│   VS Code/Cursor proc)   │  ─ notifications ─►                   │   the MCP client)         │
-│                         │    selection_changed                  │                           │
-│  • hosts an MCP server  │    at_mentioned                       │  • discovers the IDE via  │
-│    advertising 12 tools │    diagnostics_changed                │    ~/.claude/ide/*.lock   │
-│  • writes lockfile      │  ◄─ tool calls ─                      │  • connects WS, calls     │
-│  • spawns the CLI       │    openDiff / getDiagnostics / ...    │    mcp__ide__* tools      │
-└────────────────────────┘                                       └──────────────────────────┘
-        ▲  postMessage (webview protocol)
-        ▼
-┌────────────────────────┐
-│  Webview panel (React)  │  the in-editor chat UI (separate from the WS/MCP path)
-└────────────────────────┘
+TOPOLOGY A (chat panel)                          TOPOLOGY B (terminal claude)
+┌────────────────────┐                           ┌────────────────────┐
+│ extension host      │  spawn (stdio            │ extension host      │  ~/.claude/ide/<port>.lock
+│  + claude-agent-sdk │  stream-json) ──────────►│  + WS MCP server    │◄── discover + WS dial
+│                     │  ◄── stream events       │  (12 tools)         │     (terminal `claude`)
+│  hooks: diagnostics │                          │                     │ ──► selection_changed
+│  canUseTool: perms  │  ◄── control_request ──► │                     │     diagnostics_changed
+│  +SDK MCP (dbg/jup) │                          └────────────────────┘
+└──────────┬─────────┘
+           │ postMessage  (webview UI protocol — §10)
+           ▼
+┌────────────────────┐
+│ webview panel (React)│
+└────────────────────┘
 ```
-
-Two **independent** channels exist; don't conflate them:
-
-1. **MCP-over-WebSocket** — the extension is the *server*, the CLI is the *client*. This is how the
-   *agent* reads/acts on editor state (selection, diagnostics, open a diff, run a Jupyter cell). **[V]**
-2. **Webview postMessage** — the extension ↔ the React chat panel. This is the *UI* path (render stream,
-   accept/reject buttons, input box). It never touches the CLI directly; the extension bridges. **[V]**
-
-> Correction to a common misread: for the IDE integration the transport is **WebSocket**, not stdio.
-> stdio (`--input-format stream-json`) is the *separate* path used when the SDK spawns the CLI headless.
-> The lockfile explicitly declares `transport: "ws"`. **[V]** (`extension.js:88657`)
 
 ---
 
-## 1. Discovery & handshake
+# PART 1 — TOPOLOGY A (extension-driven, SDK over stdio)
 
-### 1.1 Lockfile  **[V]** (`extension.js:88644-88663`)
+## 1. CLI spawn  **[V]** (`extension.js:42389-42541`)
 
-The extension creates `~/.claude/ide/` (`mode 0700`) and writes `<port>.lock` (`mode 0600`):
+Base argv **[V]** (`42454`):
+```
+--output-format stream-json --verbose --input-format stream-json
+```
+Then conditionally pushed **[V/I]** (`42455-42531`): `--thinking <adaptive|enabled|disabled>`,
+`--max-thinking-tokens`, `--effort`, `--max-turns`, `--max-budget-usd`, `--task-budget`, `--model`,
+`--agent`, `--betas`, `--json-schema`, `--permission-prompt-tool stdio` (when a `canUseTool` cb is set),
+`--permission-mode <default|acceptEdits|plan|bypassPermissions>`, `--allow-dangerously-skip-permissions`,
+`--fallback-model`, `--continue`, `--resume <id>`, `--allowedTools`, `--disallowedTools`, `--tools`,
+`--mcp-config <json>`, `--setting-sources user,project,local`, `--strict-mcp-config`,
+`--include-hook-events`, `--include-partial-messages`, `--session-mirror`, `--add-dir`, `--plugin-dir`,
+`--fork-session`, `--resume-session-at`, `--session-id`, `--no-session-persistence`, `--managed-settings`.
 
-```jsonc
-// ~/.claude/ide/<wsPort>.lock
-{
-  "pid": <process.ppid>,            // the editor's parent pid
-  "workspaceFolders": ["/abs/path", ...],
-  "ideName": "<vscode.env.appName>", // "Visual Studio Code" | "Cursor" | "Windsurf" | ...
-  "transport": "ws",
-  "runningInWindows": <bool>,
-  "authToken": "<uuid>"              // == the WS auth secret, see 2.1
+Binary resolution **[V]** (`42534`): `GRe(path)` decides standalone-exe vs node/bun-wrapped script.
+stdio **[V]** (`42391`): `["pipe","pipe", DEBUG?"pipe":"ignore"]`, `windowsHide:true`.
+Env **[V]** (`42424, 62932`): inherits `process.env`; sets `CLAUDE_CODE_ENTRYPOINT="sdk-ts"`,
+`CLAUDE_AGENT_SDK_VERSION="0.3.167"`, deletes `NODE_OPTIONS`; injects OTel `TRACEPARENT/TRACESTATE`.
+
+> Net: the extension is an **SDK host**, not a thin wrapper. quanta's `ide.ts` already models this exact
+> shape ("the HOST drives the conversation… seeds `req.base.{messages,stream,onConfirm}`").
+
+## 2. Control-request protocol (runtime control of the running CLI)
+
+Sent as `{ type:"control_request", request_id, request:{ subtype, ... } }` over stdin; replies matched by
+`request_id` **[I]** (`extension.js:43287-43309`). Subtypes found **[I]** (`43223-43465`):
+
+| subtype | params | purpose |
+|---|---|---|
+| `interrupt` | — | abort current turn |
+| `set_permission_mode` | `mode` | switch default/acceptEdits/plan/bypass mid-session |
+| `set_model` | `model` | swap model |
+| `set_max_thinking_tokens` | `max_thinking_tokens` | retune thinking budget |
+| `apply_flag_settings` / `get_settings` | `settings` / — | push/read runtime settings |
+| `rewind_files` | `user_message_id, dry_run` | /rewind checkpoint restore |
+| `cancel_async_message` | `message_uuid` | cancel a queued async message |
+| `seed_read_state` | `path, mtime` | prime the read-dedup cache from the IDE |
+| `remote_control` | `enabled, name?` | claude.ai/code bridge |
+| `generate_session_title` | `description, persist?` | auto-title |
+| `side_question` | `question` | ask a side question mid-turn |
+| `ultrareview_launch` | `args, confirm?` | cloud reviewer |
+| `message_rated` / `submit_feedback` | rating/feedback | telemetry |
+| `mcp_status` / `mcp_reconnect` / `mcp_toggle` / `mcp_authenticate` / `mcp_clear_auth` / `mcp_oauth_callback_url` / `mcp_set_servers` / `mcp_message` | server name + payload | full MCP lifecycle control |
+| `claude_authenticate` / `claude_oauth_callback` / `claude_oauth_wait_for_completion` | OAuth | login |
+| `get_context_usage` | — | token-usage snapshot |
+| `read_file` | `path, max_bytes?, encoding?` | host-mediated read |
+| `reload_plugins` / `reload_skills` | — | hot-reload |
+| `hook_callback` | `callback_id, input, tool_use_id` | invoke a registered hook (see §3) |
+
+CLI→extension control requests **[V]** (`43140-43171`) with verified shapes:
+- `can_use_tool` → `{behavior:"allow"|"deny"|"ask", updatedInput?, message?}` (§4).
+- `oauth_token_refresh {signal?}` → `{accessToken: string|null}` (`43166`).
+- `host_auth_token_refresh {signal?}` → `{authToken: string|null}` (`43169`).
+- `elicitation {mcp_server_name,message,mode:"url"|"form",url,elicitation_id,requested_schema,title,…}`
+  → `{action:"accept"|"decline"|"cancel", content?}` (default `decline`) (`43140-43157`).
+- `request_user_dialog {dialog_kind,payload,tool_use_id}` → `{behavior:"cancelled"|…}` (default `cancelled`) (`43158-43164`).
+
+Selected request→response shapes (extension→CLI) verified: `rewind_files {user_message_id,dry_run}` →
+`{canRewind,filesChanged,insertions,deletions}` (§17); `remote_control {enabled,name?}` →
+`{session_url,connect_url}` (§18).
+
+> This subtype table is the **runtime control surface** quanta's IDE host would mirror. quanta has 0 hits
+> for this protocol; it's the concrete "host drives a live agent" vocabulary.
+
+## 3. Hook bridge (how editor hooks run as in-process closures)
+
+The SDK registers hooks as **JS closures**, serializes them to opaque ids, and the CLI calls back:
+
+**[V]** (`extension.js:85360-85366`):
+```js
+hooks: {
+  PreToolUse: [
+    { matcher: "Edit|Write|MultiEdit", hooks: [(w) => l.captureBaseline(w)] },
+    { matcher: "Edit|Write|Read",      hooks: [(w) => this.saveFileIfNeeded(w)] },
+  ],
+  PostToolUse: [{ matcher: "Edit|Write|MultiEdit", hooks: [(w) => l.findDiagnosticsProblems(w)] }],
 }
 ```
+Serialization → `initialize` **[I]** (`43181-43219`): each closure gets `hook_${n}`; the CLI receives
+`{ subtype:"initialize", hooks:{ PreToolUse:[{matcher, hookCallbackIds, timeout}], ... } }`.
+Invocation **[I]** (`43433-43436`): CLI sends `{subtype:"hook_callback", callback_id, input, tool_use_id}`;
+extension runs `hookCallbacks.get(id)(input, tool_use_id, {signal})`; closure returns
+`{ continue:bool, hookSpecificOutput?:{ hookEventName, additionalContext } }`.
 
-The CLI scans `~/.claude/ide/*.lock`, picks one matching the cwd's workspace folder, reads the port +
-authToken, and dials the WebSocket. **[I]** (CLI side is compiled; the lockfile contract is the
-verified half. CLI references `~/.claude/ide` discovery via the symbols dump.)
+> Key: in Topology A the IDE doesn't run hooks "via settings.json" — it passes **live functions** and the
+> CLI RPCs back. This is the mechanism that makes §5 (diagnostics) work.
 
-Lifecycle: lockfile is rewritten when workspace folders change (`extension.js:88661`), deleted on
-teardown (`lme`, `extension.js:88665`). **[V]**
+## 4. Permission flow (`canUseTool`)
 
-### 1.2 Port selection  **[V]** (`extension.js:88641-88692`)
-- Random port in **[10000, 65535]** (`Jit`: `Math.floor(random()*55536)+1e4`).
-- Probes up to **50** candidates with a throwaway `http.createServer().listen()` until one binds free.
+Spawn sets `--permission-prompt-tool stdio` when a `canUseTool` cb exists **[I]** (`42484`). On a gated
+tool the CLI sends `{subtype:"can_use_tool", tool_name, input, permission_suggestions, blocked_path,
+decision_reason, title, display_name, description, tool_use_id, agent_id}` **[I]** (`43113-43127`);
+the extension forwards to the webview as `tool_permission_request` and returns
+`{ behavior:"allow"|"deny"|"ask", updatedInput?, message? }` **[V]** (`68264-68269`, webview `142002`).
+Chrome-MCP tools auto-allow when the chrome channel is connected **[V]** (`68265`).
 
-### 1.3 Terminal env handoff  **[V]** (`extension.js:88693-88698`)
-The extension injects env into the integrated-terminal collection (so `claude` launched from the
-editor terminal auto-finds the IDE). Secret-looking keys (`KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL`) are
-redacted in logs. (CLI reads a port/enable env var — exact name lives compiled-in.)
+## 5. ⭐ Diagnostics feedback loop (the high-value, IDE-specific mechanism)
 
----
+Class `R2` **[V]** (`extension.js:80949-81051`), wired as the §3 hooks.
 
-## 2. Transport: MCP over WebSocket
+1. **`captureBaseline`** (PreToolUse, Edit|MultiEdit|Write) → `baselineDiagnostics[file] = f_(file)` **[V]** (`80955`).
+2. **`findDiagnosticsProblems`** (PostToolUse) **[V]** (`80969`):
+   - visible editor → poll **`[750, 750]`** ms; hidden → **`[1000]`** ms (`80977`).
+   - each tick: `findNewDiagnostics(baseline, f_(file))`; first non-empty wins.
+   - returns `{ continue:true, hookSpecificOutput:{ hookEventName:"PostToolUse",
+     additionalContext:"<ide_diagnostics>"+JSON+"</ide_diagnostics>" } }` (`80989-80992`); baseline deleted.
 
-### 2.1 Auth  **[V]** (`extension.js:88916-88926`)
-- The extension stands up a `ws` server and a per-session `randomUUID()` secret (`f`).
-- On connect it checks header `x-claude-code-ide-authorization === <secret>`; mismatch → `close(1008, "Unauthorized")`.
-- The same secret is the `authToken` in the lockfile, so only a process that can read the user's
-  `~/.claude/ide/` can connect. Single active client: a new connection evicts the previous one.
+**`f_(path)`** **[V]** (`80875`) → `[{ uri, linesInFile, diagnostics:[{message, severity, range{start,end},
+source, code}] }]`; severity is the VS Code enum **name** (`"Error"|"Warning"|"Information"|"Hint"`) **[V]** (`80866`).
 
-### 2.2 Framing  **[V]** (`extension.js:88699-88763`, class `U4`)
-- Newline/whole-message JSON over WS; each message parsed and validated against a JSON-RPC schema (`P$.parse`).
-- Standard JSON-RPC 2.0 envelopes: `{ jsonrpc: "2.0", method, params }` for notifications,
-  request/response with `id` for tool calls.
+**`findNewDiagnostics`** "new" key = 8-tuple equality **[V]** (`81011-81039`): `message` ∧ `severity` ∧
+`source` ∧ `code` ∧ start/end **line within tolerance** (tolerance = `abs(Δ linesInFile)`, absorbs shifts
+from the edit) ∧ start/end **character exact**. A diagnostic is new iff no baseline entry matches all 8.
 
-### 2.3 MCP server identity  **[V]** (`extension.js:88765-88782`, `Yit`)
-Server name is per-host: `"Claude Code VSCode MCP"` / `"Claude Code Cursor MCP"` /
-`"Claude Code Windsurf MCP"` / `"Claude Code <appName> MCP"`.
+**`formatDiagnosticsSummary`** **[V]** (`81040`) → `JSON.stringify` of
+`[{ filePath, line(1-indexed), column(1-indexed), message, code, severity }]`. (So the payload inside
+`<ide_diagnostics>` is **JSON**, not prose — corrects rev 1.)
 
----
+`extractFilePath` handles Edit|MultiEdit|Write via `tool_input.file_path` **[V]** (`81004`).
 
-## 3. The IDE MCP tool surface (server → exposed to the agent)
-
-12 tools, registered at `extension.js:88790-88915`. The CLI calls these as `mcp__ide__<name>`
-(the dump explicitly references `mcp__ide__getDiagnostics` and `mcp__ide__executeCode`). **[V]**
-
-| Tool | Purpose | Input schema (verbatim) |
-|---|---|---|
-| `openDiff` | Open a git diff for a file (blocking accept/reject) | `old_file_path, new_file_path, new_file_contents, tab_name` (all strings) |
-| `getDiagnostics` | Get language diagnostics from VS Code | `uri?` (optional; omit → all files) |
-| `close_tab` | Close a tab by name | `tab_name` |
-| `closeAllDiffTabs` | Close all diff tabs | `{}` → `CLOSED_<n>_DIFF_TABS` |
-| `openFile` | Open file + optionally select a text range | `filePath, preview=false, startText, endText, selectToEndOfLine=false, makeFrontmost=true` (`readOnlyHint`) |
-| `getOpenEditors` | List currently open editors | `{}` |
-| `getWorkspaceFolders` | List workspace folders | `{}` |
-| `getCurrentSelection` | Current selection in active editor | `{}` |
-| `checkDocumentDirty` | Has unsaved changes? | `filePath` |
-| `saveDocument` | Save a dirty document | `filePath` |
-| `getLatestSelection` | Most recent selection even if editor inactive | `{}` |
-| `executeCode` | Run Python in the current notebook's Jupyter kernel (persists across calls) | `code` |
-
-Note `openDiff` is the **edit-application primitive**: the agent proposes new contents, the IDE shows a
-native diff, the user accepts/rejects, and the call resolves accordingly (see §5). `executeCode` +
-Jupyter and `getDiagnostics` are the two the CLI binary names directly.
+### Quanta mapping (unchanged conclusion, now precise)
+- 0 hits for `ide_diagnostics`/`diagnosticsDelta` in `src`; quanta's `ide.ts` exposes LSP tools but has no
+  auto delta-injection.
+- Wireable as a PreToolUse/PostToolUse hook pair (quanta already has both). New dep = a diagnostics
+  source: IDE LSP (Topology A/B) or, on CLI surface, a scoped `tsc --noEmit`/eslint runner.
+- Copy verbatim: timing `[750,750]`/`[1000]`, the **8-tuple "new" key** with line-shift tolerance, the
+  1-indexed JSON shape, the `<ide_diagnostics>` envelope via hook `additionalContext`.
 
 ---
 
-## 4. Notifications (server → client; extension pushes editor state to the agent)
+# PART 2 — TOPOLOGY B (terminal `claude`, WebSocket MCP)
 
-Three notifications, all `{ jsonrpc:"2.0", method, params }`:
-
-### 4.1 `selection_changed`  **[V]** (`extension.js:88562-88625`)
-Debounced **300ms** on `onDidChangeTextEditorSelection`; skips `comment`/`output` schemes; only fires
-when the selection actually changed. Params:
+## 6.1 Lockfile  **[V]** (`extension.js:88644-88663`)
+`~/.claude/ide/` (`0700`); file `<wsPort>.lock` (`0600`):
 ```jsonc
-{ "text": "<selected text>", "filePath": "/abs", "fileUrl": "file://...",
-  "selection": { "start": {"line","character"}, "end": {"line","character"}, "isEmpty": bool } }
+{ "pid": <ppid>, "workspaceFolders": ["/abs", ...], "ideName": "<appName>",
+  "transport": "ws", "runningInWindows": <bool>, "authToken": "<uuid>" }
 ```
-On (re)connect the extension replays the last selection after a 500ms settle. **[V]** (`88950-88956`)
+Rewritten on workspace change, deleted on teardown (`88661, 88665`).
 
-### 4.2 `at_mentioned`  **[V]** (`extension.js:88571-88635`)
-Fired when the user runs the "add to Claude" command on a file/range. Params:
-`{ filePath, lineStart?, lineEnd? }`. The webview-facing form is the `@path#Lx-Ly` string (§6).
+## 6.2 Port + WS server  **[V]** (`88641-88692, 88916-88926`)
+Random port **[10000,65535]**, up to 50 probes. WS server checks header
+`x-claude-code-ide-authorization === <session uuid>`; mismatch → `close(1008,"Unauthorized")`. Single
+active client (new connection evicts previous). Server name per host (`88765`): `"Claude Code VSCode MCP"`
+/ `"… Cursor MCP"` / `"… Windsurf MCP"`.
 
-### 4.3 `diagnostics_changed`  **[V]** (`extension.js:88943-88947`)
-A diagnostics client registered on connect fires `{ uris: string[] }` whenever VS Code diagnostics
-change for any file. This is the *push* signal; the *pull* is the `getDiagnostics` tool.
+## 6.3 CLI-side discovery & transport  **[V from strings]** (`_cli-symbols.txt`)
+- Scans lockfiles; "Failed to read IDE lockfile", "Failed to remove stale IDE lockfile" (`~126537-126548`);
+  WSL-aware path detection (`126545`). Picks the lock whose `workspaceFolders` matches cwd **[I]**.
+- Env vars: `CLAUDE_CODE_SSE_PORT` (`111130`), `CLAUDE_CODE_IDE_HOST_OVERRIDE` (`111179`),
+  `CLAUDE_CODE_IDE_SKIP_VALID_CHECK` (`110935`), `CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL` (`110936`).
+- Transports referenced: "Initializing WebSocket transport", "Setting up SSE-IDE transport", HTTP
+  (`241159-241162`); auth header `X-Claude-Code-Ide-Authorization` (`241232`). **Note:** the VS Code
+  extension advertises `transport:"ws"` in its lockfile; the CLI *also* supports an **SSE** IDE transport
+  (likely JetBrains/other hosts). Ordering of "primary vs fallback" is **[I]/uncertain** — don't quote it.
+- Reconnect: auto on disconnect, capped attempts, scheduled retries, stale-lock cleanup
+  (`147271-147284, 130200`). Telemetry: `ide_connect`, `ide_connect_timeout`, `ide_disconnect`,
+  `ide_detect`, `ide_connected`, `tengu_ext_installed` (`146842-146854, 126550-126560`).
+- IDE tools the binary names directly: `mcp__ide__getDiagnostics`, `mcp__ide__executeCode`
+  (`141161, 241140`). Model-callable, not auto-invoked **[I]**.
 
----
+## 6.4 IDE MCP tool surface (12 tools) + return shapes  **[V]** (`extension.js:88790-88915` + handlers)
 
-## 5. Diff / accept-reject flow  **[V]** (`extension.js:28910-29054`, invoked by `openDiff`→`Vfe`)
+The MCP server class `O4.tool(name, desc?, schema?, annotations?, handler)` supports a
+`{readOnlyHint:true}` annotation (used on `openFile`) **[V]** (`87953, 88870`). Inputs validated via Zod;
+all returns are MCP `{content:[{type:"text"|"image", text?|data?, mimeType?}]}`.
 
-1. Extension materializes original + proposed contents behind temp-file URI providers.
-2. `vscode.commands.executeCommand("vscode.diff", left, right, "✻ [Claude Code] <a> → <b>", {preview:false, preserveFocus:true})`.
-3. It then races three promises: an `acceptOrRejectDiffs` event (buttons), a document save (when
-   `files.autoSave === "off"`), and a tab-close (dismiss). The tab is identified by its `✻ [Claude Code]` label.
-4. Commands `claude-code.acceptProposedDiff` / `claude-code.rejectProposedDiff` fire the event; the tool
-   call resolves with the accepted contents or a rejection. **[V]** (`29043-29054`, `87109-87118`)
-
-Why it matters: edit application is **user-gated inside the native diff editor**, not a blind write.
-The agent never touches the filesystem for IDE edits — it asks the IDE to apply, with human consent.
-
----
-
-## 6. @-mention / "add to context"  **[V]** (`extension.js:87127-87143`)
-
-Command `claude-code.insertAtMentioned`:
-- empty selection → `@<relPath>`
-- single line → `@<relPath>#L<n>`
-- range → `@<relPath>#L<start>-<end>` (1-indexed)
-
-Inserted into the webview input via a native callback, or, if absent, routed as the `at_mentioned`
-notification (§4.2). One keystroke turns the current focus into a precise file reference.
-
----
-
-## 7. ⭐ Diagnostics feedback loop (#2 — the high-value, IDE-specific mechanism)
-
-**[V]** (`extension.js:80949-81048`, class `R2`, wired as Pre/PostToolUse **hooks** into the CLI)
-
-This is the auto-injection loop that makes the agent *see compile/lint fallout of its own edits*:
-
-1. **`PreToolUse`** on `Edit | MultiEdit | Write` → `captureBaseline(filePath)`: snapshot current
-   diagnostics for that file into `baselineDiagnostics[path]`.
-2. **`PostToolUse`** on the same → `findDiagnosticsProblems`:
-   - If the file is in a **visible** editor → poll twice with waits **`[750, 750]`** ms (≤1.5s total).
-   - If **hidden** → single wait **`[1000]`** ms.
-   - On each tick, diff current vs baseline via `findNewDiagnostics` → keep **only NEW** problems.
-   - First non-empty result returns:
-     ```jsonc
-     { "continue": true,
-       "hookSpecificOutput": { "hookEventName": "PostToolUse",
-         "additionalContext": "<ide_diagnostics>...formatted...</ide_diagnostics>" } }
-     ```
-   - Baseline is deleted after read (one-shot).
-
-Key noteworthy details: the poll timing exists to let async linters/LSP catch up; the **baseline-diff
-("only new")** prevents drowning the agent in pre-existing problems; delivery is via the **hook
-`additionalContext`** channel, so it lands as turn context, not a tool result.
-
-### Quanta mapping
-- quanta's [ide.ts](../../src/apps/agent/mode-presets/ide.ts) declares "full LSP tools" available to the
-  host but has **no** auto post-edit diagnostic-delta injection (verified: 0 hits for
-  `ide_diagnostics` / `diagnosticsDelta` in `src`).
-- quanta already has PreToolUse/PostToolUse hooks and an Edit/Write tool table → the loop is wireable as
-  a hook pair without new core surgery. A diagnostics source is the only new dependency:
-  - **IDE surface:** consume the host's LSP (mirror `getDiagnostics`).
-  - **CLI surface:** substitute a `tsc --noEmit` / eslint runner scoped to the touched file. quanta's
-    turn-level verify/closeout already covers correctness coarsely; this adds **per-edit** tightness.
-- Reusable constants to copy: visible `[750,750]`, hidden `[1000]`, only-new diff, `<ide_diagnostics>` envelope.
-
----
-
-## 8. ⭐ thinClientDispatch routing (#3 — multi-surface command correctness)
-
-**[V]** Each slash-command definition in the CLI carries an optional `thinClientDispatch` tag telling a
-**thin client** (IDE/web host that isn't a full TTY) *how* to run that command. Verified values
-(`_cli-symbols.txt`): only **two** appear literally —
-
-| value | meaning (from usage) | example commands |
+| Tool | Handler | Return (success) |
 |---|---|---|
-| `"control-request"` | host issues a control RPC; result rendered by the host UI | `usage` (aliases `cost`/`stats`) |
-| `"post-text"` | host posts text into the conversation stream | `toggle-memory`, `reload-skills`, `goal` |
+| `openDiff` | `Vfe` (`88082`) | **accept:** `[{text:"FILE_SAVED"},{text:<modified contents>}]` · **reject/close:** `[{text:"DIFF_REJECTED"},{text:<tab_name>}]` (Promise.race of accept-event / tab-close / save) |
+| `getDiagnostics` | `Xfe`→`f_` (`88319`) | `[{text: JSON([{uri,linesInFile,diagnostics[]}]) }]` |
+| `openFile` | `Yfe` (`88327`) | text msg ("Opened file and selected text from X to Y") or JSON `{success,filePath,fileUrl,languageId,lineCount,isDirty,…}`; startText/endText drive range select |
+| `getOpenEditors` | `Qfe` (`88385`) | `[{text: JSON({tabs:[{uri,isActive,isPinned,isPreview,isDirty,label,groupIndex,viewColumn,fileName?,languageId?,lineCount?,selection?}]}) }]` |
+| `getWorkspaceFolders` | `tme` (`88462`) | `[{text: JSON({success,folders:[{name,uri,path,index}],rootPath,workspaceFile}) }]` |
+| `getCurrentSelection` | `eme` (`88426`) | `[{text: JSON({success,text,filePath,fileUrl,selection{start,end,isEmpty}}) }]` or `{success:false,message:"No active editor found"}` |
+| `checkDocumentDirty` | `rme` (`88491`) | `[{text: JSON({success,filePath,isDirty,isUntitled}) }]` or `{success:false,message:"Document not open"}` |
+| `saveDocument` | `nme` (`88523`) | `[{text: JSON({success,filePath,saved,message}) }]` |
+| `getLatestSelection` | inline (`88888`) | `[{text: JSON(lastSelection or {success:false}) }]` |
+| `close_tab` | `Zfe` (`88827`) | `[{text:"TAB_CLOSED"}]` |
+| `closeAllDiffTabs` | `yC` (`88836`) | `[{text:"CLOSED_<n>_DIFF_TABS"}]` |
+| `executeCode` | `Jfe` (`88251`) | Jupyter outputs as mixed `{type:"text"}` / `{type:"image",data:<b64>,mimeType}`; requires active notebook + python kernel + user confirm |
 
-Commands **without** the field default to normal/local execution. **[I]** The Explore pass also guessed
-`local-then-rpc` / `unavailable`, but those were **not** found as `thinClientDispatch:` values — treat
-as unconfirmed.
+## 6.5 Notifications (server→client)  **[V]**
+- `selection_changed` — debounce **300ms**, skips comment/output schemes, fires only on real change;
+  params `{text,filePath,fileUrl,selection{start,end,isEmpty}}` (`88562-88625`). Replayed 500ms post-connect.
+- `at_mentioned` — `{filePath, lineStart?, lineEnd?}` (`88571-88635`).
+- `diagnostics_changed` — `{uris:[...]}`, pushed by the diagnostic client registry (`88943`).
+- `log_event` — `{eventName, eventData}`, telemetry passthrough; queued in `j4[]` pre-connect, flushed on
+  connect via `gme()` (`89023-89030, 88953`).
 
-### Quanta mapping
-- 0 hits for `thinClientDispatch` in `src` — the vocabulary is absent.
-- quanta is multi-surface (CLI / Web-Tauri / embedded) and the `ide` preset has the **host driving the
-  conversation**, so this is the missing "define a command once → it runs correctly on a thin host"
-  descriptor. Without it, a command that assumes an interactive TTY breaks under the IDE/web host.
-- Cheap shape: add an optional `thinClientDispatch?: "control-request" | "post-text"` field to quanta's
-  command descriptor; the IDE/web adapter reads it to decide RPC vs stream-post; CLI ignores it.
-- Slightly preemptive — full value lands when quanta ships a thin IDE/web client.
+## 6.6 Diagnostic client registry  **[V]** (`extension.js:80892-80947`)
+Singleton `gd` (`DiagnosticStreamManager`); `registerClient(cb)→"client_N"`, `unregisterClient(id)`.
+`startStreaming` subscribes `languages.onDidChangeDiagnostics(e => notify(e.uris))`; **no debounce/coalescing**
+— direct fan-out to all clients; `stopStreaming` when last client leaves. The WS connection registers a
+client whose cb sends `diagnostics_changed` (§6.5).
 
----
+## 7. SDK-injected MCP server: debugger + Jupyter  **[V]** (`81263, 85188, 86178-86211`)
+`Tde` → server `claude-vscode-extension` (v2.1.167) with `debuggerController` + `jupyterController`. Starts
+tool-less; tools registered when debugger/Jupyter activate. Added to the **running** CLI via
+`query.setMcpServers({...mcpServers, "claude-vscode-extension": createServerConfig()})` when a debug
+session is active, removed when not (`86188, 86211`). Type `"sdk"` → instance stays in-process (not sent
+over `--mcp-config`).
 
-## 9. Webview ↔ extension protocol (the UI path)
+## 8. Diff / accept-reject internals  **[V]** (`Vfe@88082`, cmds `87109-87143`)
+Opens `vscode.diff(left, right, "✻ [Claude Code] …", {preview:false, preserveFocus:true})`; if the doc is
+dirty it diffs against on-disk contents via a temp file. Races: accept/reject event, tab-close (→reject),
+and (when `files.autoSave==="off"`) save (→accept). Returns the §6.4 shapes. Commands
+`claude(-code|-vscode).{accept,reject}ProposedDiff` fire the event; tab identified by the `✻ [Claude Code]`
+label.
 
-**[V]** (`extension.js:85271, 86534`; `webview/index.beautified.js:141500-142650`)
-postMessage, request/response matched by `requestId`. Not on the agent's critical path but defines the
-panel UX.
-
-Webview → extension: `launch_claude {channelId,resume,cwd,permissionMode,thinkingLevel}`, `io_message`,
-`interrupt_claude`, `request`/`response`/`cancel_request`, `start/stop_speech_to_text`, `close_channel`.
-Extension → webview: `io_message` (stream events), `request`/`response`, `speech_to_text_message`,
-`speech_audio_level`, `file_updated {filePath,oldContent,newContent}`, `plan_comment`, `close_channel`.
-
-Streaming model **[V]** (`webview index.js:142320-142410`, class `TCe`): SDK stream events
-(`message_start` → `content_block_start/delta/stop` → `message_stop`) are reassembled into content-block
-objects with `.updated()` / `.complete()` callbacks for incremental render. `thinking_delta` carries
-`estimated_tokens` (cumulative) for a live thinking-token meter. Permission requests come over the same
-RPC with a `suggestions[]` array (fast "always allow this tool"). Multiple user inputs queue FIFO in the
-extension (`Hu`, `extension.js:68022`) so the user can type ahead mid-turn.
-
-quanta likely already has equivalents (streaming, permission RPC, follow-up queue) — listed here for
-completeness, not as a gap.
-
----
-
-## 10. Auth / login  **[V]** (`extension.js:27495-27623, 88659`)
-OAuth 2.0 with env-aware endpoints (prod `platform.claude.com`, local `localhost:3000`, custom via
-`CLAUDE_CODE_CUSTOM_OAUTH_URL` allowlist). Credentials in OS keychain (macOS `security` CLI / Windows
-secure storage). The lockfile `authToken` lets the spawned CLI validate the IDE session without
-re-auth. Workspace-scoped via `workspaceFolders`.
-
-(quanta already has ChatGPT-OAuth + provider seam — reference only.)
+## 9. @-mention  **[V]** (`87127-87143`)
+`insertAtMentioned`: empty→`@rel`, line→`@rel#Ln`, range→`@rel#Lstart-end` (1-indexed); inserted via native
+callback or routed as `at_mentioned`. Keybindings: `Alt+K` (`insertAtMention`) / `Cmd|Ctrl+Alt+K`
+(`insertAtMentioned`).
 
 ---
 
-## 11. Registered commands  **[V]** (`extension.js:87091-89268`)
-`editor.open`, `primaryEditor.open`, `editor.openLast`, `newConversation`, `reopenClosedSession`,
-`toggleDictation`, `sidebar.open`, `window.open`, `logout`, `showLogs`, `openWalkthrough`,
-`terminal.open`, `acceptProposedDiff`, `rejectProposedDiff`, `insertAtMentioned`.
-URI handlers: `claude://install-plugin?plugin=&marketplace=`, `claude://open?session=&prompt=`.
+# PART 3 — UI + MANIFEST + SETTINGS
+
+## 10. Webview ↔ extension protocol (the chat-panel UI path)
+
+postMessage with request/response matched by `requestId`; extension→webview wrapped as
+`{type:"from-extension", message}` **[V]** (`webview 141801`, `extension 85269`).
+
+**Webview→extension top-level** **[V/I]**: `launch_claude {channelId,cwd?,resume?,permissionMode,
+thinkingLevel}`, `io_message {channelId,message,done}`, `interrupt_claude`, `start/stop_speech_to_text`,
+`request {channelId,requestId,request}`, `response`, `cancel_request {targetRequestId}`.
+
+**Extension→webview direct** **[I]**: `io_message` (stream), `file_updated {filePath,oldContent,newContent}`,
+`plan_comment`, `speech_to_text_message`, `speech_audio_level`, `close_channel {error?}`, `cancel_request`.
+
+**RPC `request.type` catalog (~60)** — the agent enumerated the full set (`extension 68747-69031`,
+`webview 141645-142021`); highlights grouped:
+- *lifecycle/config:* `init`, `get_claude_state`, `set_permission_mode {mode,userInitiated}`,
+  `set_model {model}`, `set_thinking_level`, `apply_settings {settings,flagsOnly?}`.
+- *files/editor:* `open_file {filePath,location?}`, `open_diff {originalFilePath,newFilePath,edits[],
+  supportMultiEdits?}`→`{newEdits}`, `open_file_diffs {fileDiffs[]}`, `open_content {content,fileName,
+  editable}`, `open_markdown_preview {channelId,content,title,enableComments}`, `get_current_selection`,
+  `exec {command,params}`, `list_files_request {pattern}`, `get_terminal_contents {terminalName}`.
+- *sessions:* `list_sessions_request`, `get_session_request {sessionId}`, `fork_conversation
+  {forkedFromSession,resumeSessionAt}`→`{sessionId}`, `rewind_code {userMessageId,dryRun?}`,
+  `generate_session_title`, `rename_session`, `delete_session`, `open_in_editor {sessionId}`,
+  `list_remote_sessions`, `teleport_session`.
+- *git:* `checkout_branch {branch}`, `check_git_status`, `create_worktree {name}`, `update_skipped_branch`.
+- *auth:* `login {method}`→`{auth}`, `submit_oauth_code {code}`, `auth_url {url,method}`.
+- *MCP:* `get_mcp_servers`, `set_mcp_server_enabled`, `reconnect_mcp_server`, `authenticate_mcp_server`,
+  `clear_mcp_server_auth`, `submit_mcp_oauth_callback_url`, `ensure_chrome_mcp_enabled`/`disable_chrome_mcp`,
+  `ask_debugger_help`, `enable_jupyter_mcp`/`disable_jupyter_mcp`, `toggle_remote_control`,
+  `create_new_browser_tab`.
+- *plugins:* `list_plugins`, `list_marketplaces`, `install_plugin {pluginId,scope}`, `uninstall_plugin`,
+  `set_plugin_enabled`, `add/remove/refresh_marketplace`.
+- *tabs/UI:* `new_conversation_tab {initialPrompt?,sessionId?}`, `rename_tab {title,hasPendingPermissions,
+  hasUnseenCompletion}`, `show_notification {message,severity,buttons?,onlyIfNotVisible}`→`{buttonValue}`,
+  `open_url`, `open_terminal {executable,args[],cwd,location}`, `open_claude_in_terminal {prompt,args[],
+  location}`, `open_config(_file)`, `open_help`, `open_output_panel`, `open_folder(_in_new_window)`,
+  banners/onboarding dismissals, `log_event`, `request_usage_update`, `get_asset_uris`.
+- *plan preview:* `get_plan_comments`, `remove_plan_comment {commentId}`, `close_plan_preview`.
+
+### 10.1 Permission rendering  **[V]** (`webview 141404-142021`)
+`tool_permission_request {toolName,inputs,suggestions[]}` → `wY` object with `accept(updatedInput,
+updatedPermissions)` / `reject(message, interrupt)` → reply `tool_permission_response {result:{behavior,
+updatedInput?,message?,interrupt?}}`. `suggestions[]` powers the "always allow this tool" fast-path.
+
+### 10.2 Plan / markdown-preview webview  **[V/I]** (`extension 83784-83810`)
+Separate webview. ext→view: `updateContent {html}`, `setCommentsEnabled {enabled}`, `removeComment
+{commentId}`. view→ext: `ready`, `comment {id,selectedText,sectionHeading?,comment}`. Enables async review
+comments on a plan, distinct from chat.
+
+### 10.3 Streaming render  **[V]** (`webview 142341-142402`, class `TCe`)
+SDK events `message_start → content_block_start/delta/stop → message_stop` reassembled into `Yp` content
+blocks with `partial/startTime/endTime/lastModifiedTime/durationMillis` and `.complete()`. `thinking_delta`
+carries cumulative `estimated_tokens` → live thinking meter (`142381`). `usage_update {utilization,error}`
+carries `input/output/cache_creation/cache_read` tokens + `fiveHour/sevenDay` utilization (`143809`).
+Session sync: `session_states_update {sessions:[{sessionId,state,title}],activeSessionId}` broadcast to all
+webviews (`86655`).
+
+### 10.4 Not found / out of scope
+No protocol-level todo/checklist panel, image-paste message, or slash-command RPC — those are handled as
+plain message content or webview-local UI **[I]**.
+
+## 11. Manifest surface (`package.json` `contributes`)  **[V]**
+
+- **Commands (22):** open variants (`editor.open`, `primaryEditor.open`, `sidebar.open`, `window.open`,
+  `editor.openLast`), `newConversation`, `reopenClosedSession`, `createWorktree`, `update`, `installPlugin`,
+  `focus`/`blur`, `logout`, `terminal.open`, `accept/rejectProposedDiff` (×2 namespaces),
+  `insertAtMention`/`insertAtMentioned`, `showLogs`, `openWalkthrough`, `toggleDictation`.
+- **Keybindings (8):** `Alt+K` insertAtMention; `Cmd/Ctrl+Esc` focus/blur (gated on `!useTerminal`);
+  `Cmd/Ctrl+Shift+Esc` open new tab; terminal-mode toggle when `useTerminal`; `Cmd/Ctrl+Alt+K`
+  insertAtMentioned; `Cmd/Ctrl+N` newConversation (gated); `Cmd/Ctrl+Shift+T` reopenClosedSession (gated).
+- **Menus:** `editor/title` accept/reject diff (when `viewingProposedDiff`) + openLast/terminal;
+  `commandPalette` gated entries.
+- **Views:** activitybar `claude-sidebar` + `claude-sessions-sidebar`, secondary-sidebar
+  `claude-sidebar-secondary`; webview views switch on `claude-code:doesNotSupportSecondarySidebar`.
+- **Walkthrough:** 4 steps (welcome / open / chat / sessions).
+- **Activation:** `onStartupFinished`, `onWebviewPanel:claudeVSCodePanel`. **Untrusted workspaces: not
+  supported.**
+
+### 11.1 Extension config (`claudeCode.*`, 14 keys)  **[V]**
+`environmentVariables[]`, `useTerminal`(false), `allowDangerouslySkipPermissions`, `claudeProcessWrapper`,
+`respectGitIgnore`(true), `initialPermissionMode`(default|acceptEdits|plan|bypassPermissions),
+`disableLoginPrompt`(false), `autosave`(true), `useCtrlEnterToSend`(false), `preferredLocation`
+(sidebar|panel=panel), `enableNewConversationShortcut`(false), `enableReopenClosedSessionShortcut`(true),
+`hideOnboarding`(false), `usePythonEnvironment`(true).
+
+## 12. Settings schema (`claude-code-settings.schema.json`) — host-relevant keys  **[I]**
+
+Validated for `**/.claude/settings.json`, `settings.local.json`, `**/{ClaudeCode,claude-code}/managed-settings.json` **[V]**.
+
+- **permissions:** `allow[]`, `deny[]`, `ask[]`, `defaultMode`, `disableBypassPermissionsMode`,
+  `additionalDirectories`, `allowManagedPermissionRulesOnly`.
+- **sandbox:** `enabled`, `network{allowedDomains,deniedDomains,httpProxyPort,socksProxyPort,…}`,
+  `filesystem{allowWrite,denyWrite,denyRead,allowRead}`, `failIfUnavailable`, `excludedCommands`,
+  bwrap/socat paths (Linux/WSL).
+- **hooks:** map of **event → handlers**; 5 handler **types** = `command | prompt | agent | http | mcp_tool`;
+  controls `disableAllHooks`, `allowManagedHooksOnly`, `allowedHttpHookUrls`, `httpHookAllowedEnvVars`.
+- **hook events enum (30+):** PreToolUse, PostToolUse, PostToolUseFailure, PostToolBatch, Notification,
+  UserPromptSubmit, UserPromptExpansion, SessionStart, SessionEnd, Stop, StopFailure, SubagentStart,
+  SubagentStop, PreCompact, PostCompact, PermissionRequest, PermissionDenied, Setup, TeammateIdle,
+  TaskCreated, TaskCompleted, Elicitation, ElicitationResult, ConfigChange, WorktreeCreate, WorktreeRemove,
+  InstructionsLoaded, CwdChanged, FileChanged, MessageDisplay.
+- **model:** `model`, `fallbackModel[]`, `availableModels[]`, `modelOverrides`, `advisorModel`, `agent`.
+- **mcp/plugins:** `enableAllProjectMcpServers`, `enabled/disabledMcpjsonServers`,
+  `allowed/deniedMcpServers`, `enabledPlugins`, `skillOverrides`, marketplace allow/block lists.
+- **worktree:** `symlinkDirectories`, `sparsePaths`, `baseRef`, `bgIsolation`.
+- **memory/compaction:** `autoCompactWindow`(100K–1M), `autoCompactEnabled`, `cleanupPeriodDays`(30),
+  `autoMemoryEnabled`, `autoMemoryDirectory`, `autoDreamEnabled`.
+- **misc host gates:** `disableAgentView`, `disableRemoteControl`, `disableWorkflows`, `effortLevel`,
+  `ultracode`, `fileCheckpointingEnabled`(for /rewind), `todoFeatureEnabled`, `statusLine`, `sshConfigs[]`.
+
+> Many of these are already separate quanta features (permissions, sandbox, mcp gating, worktree, compaction,
+> memory). The schema is a useful **completeness checklist** for quanta's settings vocabulary, not a gap list.
 
 ---
 
-## 12. ⭐ #4 — quanta IDE host-adapter blueprint
+# PART 4 — Peripheral subsystems
 
-quanta's [ide.ts](../../src/apps/agent/mode-presets/ide.ts) explicitly says the editor adapter "lives
-outside this repo" and must seed `req.base.{messages,stream,onConfirm,permission}`. This extension is a
-**working reference** for that out-of-repo adapter. To build quanta's own VS Code/Cursor extension,
-mirror:
+## 13. Channel / session / multi-window model  **[V]** (`extension.js`)
 
-1. **Discovery:** write `~/.<app>/ide/<port>.lock` with the §1.1 schema (rename namespace for quanta).
-2. **Transport:** loopback WS server, per-session UUID in `x-...-ide-authorization`, single active client.
-3. **MCP server:** advertise the §3 tool set (start with `openDiff`, `getDiagnostics`, `openFile`,
-   `getCurrentSelection`, `getWorkspaceFolders`) so quanta's agent can act on editor state.
-   → feeds `req.base.stream` (events) + `onConfirm` (the diff accept/reject becomes the reviewer modal).
-4. **Notifications:** `selection_changed` (300ms debounce) + `diagnostics_changed` → drive §7.
-5. **Diff flow:** `vscode.diff` + tab-label poll for accept/reject = quanta's `onConfirm` reviewer lever.
-6. **Dispatch:** read `thinClientDispatch` (§8) to route slash commands on the thin host.
+The foundational abstraction. **A channel = one spawned CLI + its SDK `query` + comms/MCP state**;
+`channelId` == `sessionId` (synonymous here).
 
-This is a **build-when-roadmap'd** item (own extension = large), but the protocol no longer needs
-0-from-scratch design — it's specified above.
+- **Channel object** (`68171-68183`): `{ in:Hu, query, pid, vscodeMcpServer, mcpServers:{},
+  chromeMcpState:{status:"disconnected"}, debuggerMcpState, jupyterMcpState,
+  remoteControlState:{status:"disconnected"} }`, stored in `channels: Map` (`68019`).
+- **Input queue `Hu`** (`66729-66779`): single-consumer async-iterable FIFO; `enqueue` wakes a pending
+  `next()` or pushes; `done()` ends. The SDK loop `for await (… of query)` drains it. Webview `io_message`
+  → `transportMessage` → `Hu.enqueue` (`68350`).
+- **Session states** (`86460`): `Map<sessionId,{sessionId,state,title}>`; `updateSessionState` →
+  `broadcastSessionStates()` pushes `{sessions,activeSessionId}` to **all** comms (`allComms:Set`,
+  `86457, 86653`). Observed states: `waiting_input`, `running`, `idle` **[I]** (`86660`).
+- **Tab binding**: `sessionPanels: Map<sessionId,panel>`; panel `onDidDispose` → delete state +
+  `pushRecentlyClosedSession` (`86766-86775`).
+- **Teardown** `closeChannel` (`68328-68348`): `in.done()` → `query.return()` (kills subprocess/generator)
+  → `channels.delete`; drains pending ops.
+- **Reopen** (`86585-86609`): `recentlyClosedSessions` stack (dedup + cap `Uit`); pop → `createPanel`;
+  sets context key `claude-vscode.lastClosedWasSession` for the keybinding.
+
+> quanta parallel: the `ide` preset's `req.base.{stream,messages}` is the channel; this is the missing
+> **multi-channel manager** (concurrent conversations, FIFO input, broadcast sync) for a host UI.
+
+## 14. Terminal integration  **[V]** (`extension.js`)
+
+- **`useTerminal` mode** (`claudeCode.useTerminal`): chat runs in a terminal instead of the webview;
+  `open_claude_in_terminal` → command `claude-vscode.terminal.open` (`68955, 85634, 87091`).
+- **createTerminal** (`85646, 87046`): `{name:"Claude Code"|$CLAUDE_CODE_TERMINAL_TITLE,
+  iconPath, location(Beside|One), isTransient:true, env:{...process.env}, strictEnv:true}`.
+- **Shell-integration exec (the key pattern)** (`85659-85673, 87061-87075`): subscribe
+  `onDidChangeTerminalShellIntegration` → `shellIntegration.executeCommand(vf(argv))`; **3000ms** timeout
+  fallback to `terminal.sendText(vf(argv))`; guard flag prevents double-run; completion via
+  `onDidEndTerminalShellExecution` (auto-dispose when the `claude ` command ends).
+- **Shell escaping `vf`** (`63425-63433`): `""`→`''`; `[A-Za-z0-9_./:=@+,-]+`→unquoted; else single-quote
+  wrap with `'"'"'` for embedded quotes.
+- **Env handoff `dme`** (`88693-88698, 89005`): `environmentVariableCollection.replace`; injects
+  `CLAUDE_CODE_SSE_PORT` so a terminal `claude` discovers the IDE WS server; redacts
+  `KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL` in logs.
+- **`get_terminal_contents`** (`86132-86152`): show → selectAll → copySelection → read clipboard → keep
+  **last 100 lines** → restore clipboard (clipboard round-trip, not a buffer API).
+- **`Io()`** (`87021`): focus active terminal; called after diff accept/reject and notification replay.
+
+## 15. Auth / OAuth  **[V]** (`extension.js`)
+
+- **Endpoints + client ids** (`27499-27574`): **prod** `platform.claude.com/oauth/authorize`,
+  token `…/v1/oauth/token`, CLIENT_ID `9d1c250a-e61b-44d9-88ed-5944d1962f5e`; **local** (`CLAUDE_LOCAL_OAUTH_*`)
+  CLIENT_ID `22422756-60c9-4084-8eb7-27705fd5cf9a`; **custom** via `CLAUDE_CODE_CUSTOM_OAUTH_URL` restricted
+  to a 3-domain allowlist (`beacon.claude-ai.staging.ant.dev`, `claude.fedstart.com`,
+  `claude-staging.fedstart.com`) else throws; client id override `CLAUDE_CODE_OAUTH_CLIENT_ID`.
+- **Login flow** (`68368-68400`): `login{method}` → SDK `claude_authenticate{loginWithClaudeAi}` →
+  `{manualUrl,automaticUrl}` → webview `auth_url{url,method}` + `openURL(automaticUrl)` → user →
+  `submit_oauth_code{code}` (supports `code#state`) → `claude_oauth_callback{authorizationCode,state}` →
+  `claude_oauth_wait_for_completion`.
+- **Credential storage** (`27617-27635, 27735-27825, 8029-8079`): macOS keychain via `security`
+  (`add/find/delete-generic-password`), service `Claude Code${OAUTH_FILE_SUFFIX}-credentials${hash}`,
+  account `$USER`|`claude-code-user`; payload `{type:"oauth_token", access_token, refresh_token,
+  expires_at, scopes[], subscriptionType, rateLimitTier}`; 30s cache.
+- **Refresh** (`28232-28267, 43165-43170, 63018`): local `grant_type:refresh_token` to token URL; OR CLI
+  asks host via `oauth_token_refresh`/`host_auth_token_refresh` control requests (advertised by env flags
+  `CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH`/`_HOST_AUTH_REFRESH`).
+- **Token handoff to CLI**: lockfile `authToken` is the **WS** secret (not OAuth); the model token reaches
+  the CLI via the SDK `getOAuthToken` callback or env `CLAUDE_CODE_OAUTH_TOKEN`/`ANTHROPIC_API_KEY` (`62878`).
+- **Gates**: `disableLoginPrompt`, `forceLoginMethod (claudeai|console|gateway)`, `forceLoginOrgUUID`,
+  `forceLoginGatewayUrl`; logout = `claude auth logout` (`68402`).
+
+## 17. Checkpoint / rewind / fork / session storage  **[V]**
+
+- **/rewind** (`43245, 68999-69011`): `rewind_files{user_message_id, dry_run}` →
+  `{canRewind, filesChanged, insertions, deletions}`. Gated by `fileCheckpointingEnabled` +
+  `CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING` (`62429, 63017`).
+- **File snapshots** (`67088, 67473-67499`): `file-history-snapshot` records reference backups at
+  `~/.claude/file-history/{sessionId}/{backupFileName}`; copied between sessions via **hard-link** (fallback
+  `copyFile`). `snapshot.trackedFileBackups` = file→backup map. `--rewind-files` requires `--resume`.
+- **Fork** (`67359-67449, 68992`): `fork_conversation{forkedFromSession, resumeSessionAt}` → new `sessionId`.
+  Algorithm: load source, optional truncate at `resumeSessionAt`, mint new UUIDs for every message, rewalk
+  `parentUuid` (skipping `progress`), remap, copy file-history snapshots (new messageId + hard-link
+  backups), write new `<sessionId>.jsonl`. Telemetry `tengu_conversation_forked`.
+- **Storage** (`28135, 67082-67240`): root `~/.claude` (`CLAUDE_CONFIG_DIR`); sessions at
+  `~/.claude/projects/<sanitized-cwd-key>/<sessionId>.jsonl`. Record types: `user`, `assistant`,
+  `progress`, `summary{leafUuid,summary}`, `custom-title`, `ai-title`, `teleported-from`,
+  `teleport-skipped-branch`, `file-history-snapshot`.
+- **Resume/continue** (CLI strings, [I]): `--resume <id>`, `--continue`, `--resume-session-at <msg>`,
+  `--fork-session` (new id from resumed), `--no-session-persistence`, `--session-mirror`. Retention default
+  **30 days**. Titles via `generate_session_title` (`ai-title` vs user `custom-title`).
+
+## 18. Browser / remote-control / teleport / SSH / deep links  **[V]**
+
+- **Chrome MCP** (`68178, 68265, 68626-68678, 85417`): per-channel `chromeMcpState`; `ensure_chrome_mcp_enabled`
+  / `disable_chrome_mcp` / `create_new_browser_tab`; server config `claude --claude-in-chrome-mcp` (stdio);
+  **auto-allow** when `tool.startsWith("mcp__claude-in-chrome__")` and chrome connected. Tools (CLI strings):
+  `gif_creator`, `read_console_messages`, `javascript_tool`, `tabs_context_mcp`, `tabs_create_mcp`, etc.
+- **Remote Control bridge (claude.ai/code)** (`43254, 68705-68729, 68207`): `toggle_remote_control{enable}`
+  → SDK `remote_control{enabled,name?}` → `{session_url, connect_url}`; live `system/bridge_state` events
+  flip `remoteControlState`. Settings `remoteControlAtStartup`, `disableRemoteControl`.
+- **Teleport** (`69119-69168`): `list_remote_sessions` + `teleport_session{sessionId}` — fetch a remote
+  session's messages/branch and **import as a new local session** (UUID-remapped), enabling local checkout.
+- **SSH** (`62244, 62354-62377`): `sshConfigs[{id,name,sshHost,sshPort,sshIdentityFile,startDirectory}]`,
+  `remote.defaultEnvironmentId` — enterprise-preset remote environments; `claude ssh <config> [dir]`.
+- **Deep links** (`89244-89268, 61297`): URI handler `claude-cli://` (or `claude://`) →
+  `/install-plugin?plugin=&marketplace=` (default `anthropics/claude-plugins-official`),
+  `/open?session=&prompt=`; `disableDeepLinkRegistration` opts out.
+- **Push/notif** (`60054, 62413-62466`): `inputNeededNotifEnabled`, `agentPushNotifEnabled`,
+  `preferredNotifChannel (auto|iterm2|iterm2_with_bell|terminal_bell|kitty|ghostty|notifications_disabled)`.
+
+## 19. Elicitation, dialogs & plugin/marketplace flow  **[V]**
+
+- **Elicitation / user dialog**: §2 shapes. Notably these are **host callbacks**, not built-in rendering —
+  the host decides modal/quickpick/webview. quanta's `onConfirm` reviewer is the analogous single seam;
+  elicitation generalizes it to arbitrary MCP-driven prompts.
+- **MCP-server OAuth** (`43335-43342, 68563-68625`): `authenticate_mcp_server` → SDK `mcp_authenticate
+  {serverName,redirectUri}` → `{authUrl,requiresUserAction}` → `openURL` → `submit_mcp_oauth_callback_url
+  {serverName,callbackUrl}` → `mcp_oauth_callback_url`; `clear_mcp_server_auth` (sse/http only).
+- **Plugins** (`66887-66929, 69017-69032`): `install_plugin{pluginId,scope}` / `uninstall_plugin` /
+  `set_plugin_enabled` all shell out to `claude plugin {install|uninstall|enable|disable}` and return
+  `needsRestart:true`. Marketplaces: `list/add/remove/refresh_marketplace`; source types
+  `github|git|url|directory|file|npm|inline` (`66869-66885`).
+- **`show_notification`** (`85308-85325`): `{message,severity:error|warning|info,buttons?,onlyIfNotVisible?}`
+  → `{buttonValue?}` via native `show{Error|Warning|Information}Message`. The host notification primitive.
+- **Debugger/Jupyter toggle** (`86230-86274`): `enable_jupyter_mcp`/`disable_jupyter_mcp`/`ask_debugger_help`
+  add/remove the `claude-vscode-extension` SDK MCP server (§7) via `query.setMcpServers` at runtime.
+- **Settings write** (`68915, 69329-69359, 85499-85538`): `apply_settings{settings,flagsOnly?}` writes
+  `~/.claude/settings.json` + `query.applyFlagSettings`; `open_config_file{mcp-local|mcp-user|mcp-project}`
+  opens `.claude.json`/`.mcp.json`; `open_config{searchString?}` opens the VS Code settings UI.
+
+## 20. The three agent-facing surfaces (summary)
+
+| Surface | Topology | Transport | Carries |
+|---|---|---|---|
+| Hooks (diagnostics, file-save) | A | stdio control_request `hook_callback` | post-edit `<ide_diagnostics>`, autosave |
+| `canUseTool` | A | stdio control_request `can_use_tool` | permission prompts |
+| SDK MCP `claude-vscode-extension` | A | in-process (`setMcpServers`) | debugger + Jupyter tools |
+| WS MCP `Claude Code <IDE> MCP` (12 tools) | B | WebSocket | editor read/act tools + selection/diagnostics notifications |
 
 ---
 
-## 13. Gap summary vs quanta (verified)
+## 21. Quanta mapping & gap table (verified)
 
-| Item | In Claude Code | In quanta today | Action |
+| Item | Claude Code | quanta today | Action |
 |---|---|---|---|
 | Compaction security-constraint verbatim preserve | yes | **added 2026-06-07** (SUMMARY_SYSTEM + CONTINUATION_SYSTEM) | ✅ done |
-| Diagnostics Pre/Post-edit delta inject (§7) | yes | no (LSP tools exposed only) | wire as hook pair; pick diagnostics source |
-| `thinClientDispatch` routing (§8) | yes (2 values) | no (0 hits) | add optional descriptor field; adapter reads it |
-| IDE host adapter (§1-6, §12) | yes (this ext) | designed seam only (ide.ts, "out of repo") | build when own-extension roadmap'd; use this as spec |
-| advisor / loop / schedule / hooks / MCP / multi-scope memory / streaming / permission RPC / follow-up queue | yes | **already present** | none (not gaps) |
+| Diagnostics Pre/Post-edit delta inject (§5) | yes (hook pair, 8-tuple "new" key, JSON, 750/1000ms) | no | wire hook pair; pick diagnostics source |
+| Control-request runtime protocol (§2) | yes (~30 subtypes) | 0 hits | define host↔agent control vocab for the `ide` preset |
+| `thinClientDispatch` routing (slash cmds on thin hosts) | yes (`control-request`, `post-text`) | 0 hits | add optional descriptor; adapter routes |
+| Hook bridge as live closures (§3) | yes (SDK) | quanta hooks are config-based | consider closure/RPC hooks for host-driven mode |
+| IDE host adapter (lockfile+WS MCP / SDK spawn) (§1,6,7) | yes (this ext) | designed seam only (`ide.ts`, "out of repo") | build when own-extension roadmap'd; use this as spec |
+| 12 IDE MCP tools + return shapes (§6.4) | yes | n/a | blueprint for quanta's editor tool surface |
+| Debugger/Jupyter MCP (§7,§19) | yes | no | optional; high effort |
+| Multi-channel manager (FIFO input, broadcast sync) (§13) | yes | `ide` preset = single channel | needed for concurrent host conversations |
+| File checkpoint + /rewind (hard-link snapshots) (§17) | yes | quanta has Shadow ODB (ADR-0108) — verify it covers /rewind UX | reconcile with existing shadow-ODB |
+| Conversation fork (UUID-remap + snapshot copy) (§17) | yes | check session fork support | absorb fork algorithm if absent |
+| Terminal shell-integration exec (3s fallback) + env handoff (§14) | yes | n/a (quanta is the CLI) | reference for quanta's own terminal launcher |
+| Remote-control bridge / teleport / SSH (§18) | yes | partial (remote runner exists) | compare to quanta remote/headless |
+| Elicitation as host callback (§19) | yes | `onConfirm` only (binary) | generalize reviewer seam to MCP-driven prompts |
+| advisor / loop / schedule / hooks-engine / MCP / multi-scope memory / streaming / permission RPC / follow-up queue / worktree / sandbox / compaction / chatgpt-oauth | yes | **already present** | none (not gaps) |
+
+**Build order recommendation:** (1) diagnostics hook pair [done-able now, CLI+IDE], (2) control-request +
+thinClientDispatch vocab [unlocks the `ide` preset host contract], (3) full IDE adapter [own-extension
+roadmap], with §6/§7 as the copy-from spec.
 
 ---
 
-## 14. Source anchors (re-read before trusting any [I])
-- Lockfile/port/WS/auth/tools/notifications: `extension.beautified.js:88560-89000`
-- Diagnostics loop: `extension.beautified.js:80949-81048`
-- Diff flow: `extension.beautified.js:28910-29054`, `87109-87143`
-- Commands: `extension.beautified.js:87091-89268`
-- Webview/streaming: `webview/index.beautified.js:141500-142650`
-- thinClientDispatch values + mcp__ide__ tools: `claude-code-cli/_cli-symbols.txt` (grep `thinClientDispatch:"`, `mcp__ide__`)
+## 22. Source anchors & confidence
+- **High confidence (extension source, [V]):** §1 spawn (42389-42541), §3 hooks (85360), §5 diagnostics
+  (80875-81051), §6 lockfile/WS/tools (88082-88965), §7 Tde (81263-86211), §8 diff (Vfe@88082), §9 @-mention
+  (87127), §11 manifest (package.json), §10.1/10.3 webview core. **PART 4:** §13 channel/Hu
+  (66729-68348, 86457-86660), §14 terminal (63425, 85646-86152, 88693), §15 OAuth (27499-27825, 43165, 8029),
+  §17 rewind/fork/storage (43245, 67082-67499, 68999), §18 chrome/remote/teleport/ssh/deeplink
+  (68265-68729, 69119, 62354, 89244), §19 elicitation/plugins/notify (43140, 66869-66929, 85308, 86230).
+- **Medium ([I], cross-agent synthesis):** §2 control subtypes, §4 can_use_tool shape, §10 full RPC catalog
+  (some line refs unverified), §12 schema groupings.
+- **Lower (strings dump only):** §6.3 CLI-side discovery/transport/reconnect/env — line refs in the 110k-,
+  126k-, 146k-, 241k-line ranges of `_cli-symbols.txt`; the **SSE-vs-WS ordering is uncertain** — verify
+  against a live `claude --debug` IDE connect before relying on it.
+- Re-grep anchors: `thinClientDispatch:"`, `mcp__ide__`, `x-claude-code-ide-authorization`,
+  `findDiagnosticsProblems`, `claude-vscode-extension`, `"--input-format"`.

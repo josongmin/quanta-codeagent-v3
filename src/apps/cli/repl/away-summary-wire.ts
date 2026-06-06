@@ -40,7 +40,7 @@ import {
   type SummarizeFn,
 } from "@/agent/away-summary"
 import { assembleFromEvents, type LLMPort, type StreamEvent, type TextBlock } from "@/llm"
-import { logger as defaultLogger, err, errMessage, type Logger, ok } from "@/shared"
+import { logger as defaultLogger, err, errMessage, gateOnStrict, type Logger, ok } from "@/shared"
 
 /** Callable handle returned by {@link maybeCreateAwaySummaryWire}. `recap()`
  *  is the on-idle-return hook the session calls; it is no-throw and returns
@@ -162,7 +162,7 @@ export interface AwaySummaryWireOptions {
 export const maybeCreateAwaySummaryWire = (opts: AwaySummaryWireOptions): AwaySummaryWireHandle => {
   // Gate read mirrors the slice's strict `=== "1"` semantics. OFF ⇒ the
   // shared NOOP singleton, so default-OFF allocates nothing.
-  if (opts.env[AWAY_SUMMARY_GATE_ENV] !== "1") return NOOP_HANDLE
+  if (!gateOnStrict(opts.env, AWAY_SUMMARY_GATE_ENV)) return NOOP_HANDLE
 
   const log = opts.logger ?? defaultLogger
   const summarize = buildSummarizeFn(opts.llm, log)

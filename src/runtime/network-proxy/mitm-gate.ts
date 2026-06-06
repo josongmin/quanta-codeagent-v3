@@ -18,6 +18,8 @@
  * NO-THROW: total over the input record. Reads injected env only (memory rule).
  */
 
+import { gateOnStrict } from "@/shared"
+
 /** Master switch (must be exactly "1"). */
 export const TLS_MITM_ENV = "QUANTA_TLS_MITM"
 /** Explicit acknowledgement var — must equal {@link TLS_MITM_ACK_PHRASE}. */
@@ -37,4 +39,4 @@ export const TLS_MITM_ACK_PHRASE = "i-understand-mitm-mints-a-trust-anchor"
  * throws.
  */
 export const tlsMitmAuthorized = (env: Readonly<Record<string, string | undefined>>): boolean =>
-  env[TLS_MITM_ENV] === "1" && env[TLS_MITM_ACK_ENV] === TLS_MITM_ACK_PHRASE
+  gateOnStrict(env, TLS_MITM_ENV) && env[TLS_MITM_ACK_ENV] === TLS_MITM_ACK_PHRASE

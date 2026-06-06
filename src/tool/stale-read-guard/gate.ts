@@ -12,12 +12,14 @@
  * (never `process.env` directly) — mirrors `awaySummaryEnabled` (ADR-0465).
  */
 
+import { gateOnStrict } from "@/shared"
+
 /** The env var that opts a deployment into the stale-read guard. Value MUST be
  *  exactly `"1"`; any other value (incl. `"0"` / `"on"` / `"true"` / unset)
  *  keeps the guard OFF. */
 export const STALE_READ_GUARD_ENV = "QUANTA_STALE_READ_GUARD"
 
-/** Pure gate check. Strict `=== "1"` so an accidental `"0"` / `"true"` keeps the
- *  feature OFF — single documented opt-in value. */
+/** Pure gate check via the canonical strict SSOT (`@/shared#gateOnStrict`) — only
+ *  the exact `"1"` enables; `"0"`/`"true"`/`"on"` keep it OFF. */
 export const staleReadGuardEnabled = (env: Readonly<Record<string, string | undefined>>): boolean =>
-  env[STALE_READ_GUARD_ENV] === "1"
+  gateOnStrict(env, STALE_READ_GUARD_ENV)

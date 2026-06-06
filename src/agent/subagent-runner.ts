@@ -544,6 +544,20 @@ const recordChildNickname = (
  *  buildSeedPrompt(req) }] }]` — see {@link buildSeedPrompt} for the
  *  five-field (priorAttempt / ownedSurfaces / forbiddenSurfaces /
  *  checkpointPath / resultShape) augmentation rules. */
+
+/** The child's mailbox-identity fields: its UNIQUE mailbox label, its parent's
+ *  label, and (when spawned with a registry task) its OWN task id for the
+ *  `followup_task` self-target guard (BUG#4). Extracted so `buildChildConfig`
+ *  stays under the cognitive-complexity cap. */
+const childMailboxIdentity = (
+  mailboxIds: { agentId: string; parentId: string },
+  req: SubagentRequest,
+): { mailboxAgentId: string; mailboxParentId: string; subagentTaskId?: string } => ({
+  mailboxAgentId: mailboxIds.agentId,
+  mailboxParentId: mailboxIds.parentId,
+  ...(req.taskId !== undefined ? { subagentTaskId: req.taskId } : {}),
+})
+
 const buildChildConfig = (
   parent: AgentConfig,
   rawReq: SubagentRequest,
@@ -613,12 +627,10 @@ const buildChildConfig = (
     // subagent-mailbox tools address each sibling UNIQUELY (audit H). The
     // mailbox PORT itself is propagated below so the child shares the parent's
     // single in-memory mailbox instance (a child fork can both send and read).
-    mailboxAgentId: mailboxIds.agentId,
-    mailboxParentId: mailboxIds.parentId,
-    // ADR-0437 follow-up (BUG#4) — the child's OWN registry task id, so its
-    // `followup_task` can reject a self-target (`input.agentId === ownAgentId`).
-    // Absent `req.taskId` (foreground/legacy) ⇒ omitted (byte-identical).
-    ...(req.taskId !== undefined ? { subagentTaskId: req.taskId } : {}),
+    // ADR-0416 sibling identity + ADR-0437 self-target id (BUG#4). See
+    // {@link childMailboxIdentity}. `req.taskId` absent ⇒ `subagentTaskId`
+    // omitted (byte-identical foreground/legacy path).
+    ...childMailboxIdentity(mailboxIds, req),
     // Propagated so a forked child can participate in the SAME inter-agent
     // mailbox (parent↔child + sibling↔sibling). The port is an in-process
     // shared-by-reference instance — safe across the worktree-isolation fork.

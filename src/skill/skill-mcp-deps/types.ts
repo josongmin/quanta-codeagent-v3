@@ -35,6 +35,8 @@
  * enum; dedupe is by an explicit, documented identity key.
  */
 
+import { gateOnStrict } from "@/shared"
+
 /** Transport carriers a skill may declare for an MCP dependency. Closed set —
  *  matches the standard `.mcp.json` carriers (stdio spawn vs. the two HTTP
  *  carriers). Widening requires an ADR (a new carrier silently broadens the
@@ -132,7 +134,7 @@ export const SKILL_MCP_DEPS_FLAG = "QUANTA_SKILL_MCP_DEPS"
 
 /** DEFAULT-OFF gate. True iff the injected env sets the flag to exactly "1". */
 export const skillMcpDepsEnabled = (env: SkillMcpDepsEnv): boolean =>
-  env[SKILL_MCP_DEPS_FLAG] === "1"
+  gateOnStrict(env, SKILL_MCP_DEPS_FLAG)
 
 /**
  * Stable dedupe identity for a server. Two declarations attach the SAME

@@ -14,16 +14,15 @@
  * byte-identity (mirrors `untrustedEnvelopeEnabled`).
  */
 
+import { gateOnStrict } from "@/shared"
+
 /** The env var name (QUANTA_<FEATURE> convention). */
 export const GLOB_WRITE_GUARD_ENV = "QUANTA_GLOB_WRITE_GUARD"
 
-/** The EXACT opt-in token — strict equality (mirrors the other strict gates). */
-const OPT_IN_TOKEN = "1"
-
 /**
  * Resolve the gate from an injected env bag. `true` IFF
- * `env[QUANTA_GLOB_WRITE_GUARD] === "1"`. Every other shape (undefined, "",
- * "0", "true", arbitrary) ⇒ `false` (OFF). Never throws.
+ * `env[QUANTA_GLOB_WRITE_GUARD] === "1"` (canonical strict gate via
+ * `@/shared#gateOnStrict` — "0"/"true"/"on" do NOT enable it). Never throws.
  */
 export const globWriteGuardEnabled = (env: Readonly<Record<string, string | undefined>>): boolean =>
-  env[GLOB_WRITE_GUARD_ENV] === OPT_IN_TOKEN
+  gateOnStrict(env, GLOB_WRITE_GUARD_ENV)

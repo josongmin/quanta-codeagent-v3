@@ -28,7 +28,7 @@
  * flow.
  */
 
-import { errMessage, logger, type Result } from "@/shared"
+import { errMessage, gateOnStrict, logger, type Result } from "@/shared"
 import {
   BG_COMPACTION_ENV,
   type BgCompactionConfig,
@@ -45,7 +45,7 @@ import {
  *  deployment. Reads ONLY the injected env record (never `process.env` — slice
  *  boundary). Strict `=== "1"`. */
 export const bgCompactionEnabled = (env: Readonly<Record<string, string | undefined>>): boolean =>
-  env[BG_COMPACTION_ENV] === "1"
+  gateOnStrict(env, BG_COMPACTION_ENV)
 
 /**
  * "Approaching the limit" predicate. We begin a speculative summarize when free

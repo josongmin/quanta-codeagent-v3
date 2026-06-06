@@ -11,18 +11,16 @@
  * DEFAULT-OFF: unset / any value other than the exact opt-in token ⇒ false.
  */
 
+import { gateOnStrict } from "@/shared"
+
 /** The env var name. Mirrors the project convention (QUANTA_<FEATURE>). */
 export const UNTRUSTED_ENVELOPE_ENV = "QUANTA_UNTRUSTED_ENVELOPE"
 
-/** The EXACT opt-in token. Strict equality so "0"/"false"/"on"/"true" do NOT
- *  enable it — only the canonical "1" does (mirrors away-summary's gate). */
-const OPT_IN_TOKEN = "1"
-
 /**
  * Resolve the gate from an injected env bag. `true` IFF
- * `env[QUANTA_UNTRUSTED_ENVELOPE] === "1"`. Every other shape (undefined, "",
- * "0", "true", arbitrary) ⇒ `false` (OFF). Never throws.
+ * `env[QUANTA_UNTRUSTED_ENVELOPE] === "1"` (canonical strict gate via
+ * `@/shared#gateOnStrict` — "0"/"false"/"on"/"true" do NOT enable it). Never throws.
  */
 export const untrustedEnvelopeEnabled = (
   env: Readonly<Record<string, string | undefined>>,
-): boolean => env[UNTRUSTED_ENVELOPE_ENV] === OPT_IN_TOKEN
+): boolean => gateOnStrict(env, UNTRUSTED_ENVELOPE_ENV)

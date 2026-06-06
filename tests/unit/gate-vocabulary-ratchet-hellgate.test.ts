@@ -24,8 +24,14 @@ import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
 import { gateDisabled, gateDisabledStrict, gateOn, gateOnStrict } from "@/shared"
 
-/** Raw legacy gate comparison: `QUANTA_NAME"]? (===|!==) "1"|"on"|"off"`. */
-const RAW_GATE = /QUANTA_[A-Z0-9_]+"?\]?\s*(?:===|!==)\s*"(?:1|on|off)"/
+/** Raw legacy gate comparison — caught in TWO forms so a const-keyed gate can't
+ *  slip the burn-down (the jun-7 adversarial audit found `env[SOME_CONST] === "1"`
+ *  evading the literal-only matcher, splitting brain with the gateOn'd field):
+ *    (a) literal env name:   `QUANTA_NAME"]? (===|!==) "1|on|off"`
+ *    (b) const/dot-keyed:    `env[IDENT] (===|!==) "1|on|off"` / `env.IDENT === …`
+ *  Both must route through `@/shared#gateOn(Strict)` / `gateDisabled(Strict)`. */
+const RAW_GATE =
+  /(?:QUANTA_[A-Z0-9_]+"?\]?|\benv\s*\[\s*[A-Za-z_$][\w$]*\s*\])\s*(?:===|!==)\s*"(?:1|on|off)"/
 
 const isCommentLine = (line: string): boolean => {
   const t = line.trimStart()
@@ -121,5 +127,28 @@ describe("gate-vocabulary ratchet — raw comparisons only ever decrease", () =>
     // biome-ignore lint/suspicious/noConsole: ratchet visibility for reviewers
     console.log(`[gate-ratchet] ${total}/${RAW_GATE_CEILING} raw gate comparisons remain (burn-down)`)
     expect(total).toBeLessThanOrEqual(RAW_GATE_CEILING)
+  })
+
+  // RED-ON-INJECTION: prove the matcher actually CATCHES a raw gate (both the
+  // literal and the const/dot-keyed forms) and does NOT false-positive on the
+  // SSOT calls — otherwise the ceiling-of-0 above is a vacuous "0 because the
+  // regex sees nothing".
+  test("matcher catches injected raw gates (literal + const-keyed) but not SSOT calls", () => {
+    const caught = [
+      `if (env["QUANTA_NEW_X"] === "1") {}`,
+      `const f = env.QUANTA_Y !== "on"`,
+      `return env[SOME_CONST] === "1"`,
+      `x = env[FLAG] === "off"`,
+    ]
+    for (const line of caught) expect(RAW_GATE.test(line)).toBe(true)
+
+    const clean = [
+      `return gateOn(env, "QUANTA_Z")`,
+      `gateDisabledStrict(env, SOME_CONST)`,
+      `const n = items.length === 1`,
+      `if (status === "on") {}`, // not an env accessor
+      `if (process.env.FORCE_COLOR === "1") {}`, // standard dot-access env, NOT a QUANTA gate
+    ]
+    for (const line of clean) expect(RAW_GATE.test(line)).toBe(false)
   })
 })

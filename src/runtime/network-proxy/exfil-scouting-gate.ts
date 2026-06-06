@@ -15,16 +15,15 @@
  * (a classification hint, never a hard auto-deny) — see RFC §7 (c).
  */
 
+import { gateOnStrict } from "@/shared"
+
 /** The env var name (QUANTA_<FEATURE> convention). */
 export const EXFIL_SCOUTING_ENV = "QUANTA_EXFIL_SCOUTING"
 
-/** The EXACT opt-in token — strict equality (mirrors the other strict gates). */
-const OPT_IN_TOKEN = "1"
-
 /**
  * Resolve the gate from an injected env bag. `true` IFF
- * `env[QUANTA_EXFIL_SCOUTING] === "1"`. Every other shape (undefined, "", "0",
- * "true", arbitrary) ⇒ `false` (OFF). Never throws.
+ * `env[QUANTA_EXFIL_SCOUTING] === "1"` (canonical strict gate via
+ * `@/shared#gateOnStrict` — "0"/"true"/"on" do NOT enable it). Never throws.
  */
 export const exfilScoutingEnabled = (env: Readonly<Record<string, string | undefined>>): boolean =>
-  env[EXFIL_SCOUTING_ENV] === OPT_IN_TOKEN
+  gateOnStrict(env, EXFIL_SCOUTING_ENV)

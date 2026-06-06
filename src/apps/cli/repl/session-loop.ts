@@ -10,7 +10,7 @@ import type {
   RuntimeSideConversationArgs,
   RuntimeSideConversationResult,
 } from "@/sdk/runtime"
-import { errMessage, logger, runtimeConfig } from "@/shared"
+import { errMessage, gateOnStrict, logger, runtimeConfig } from "@/shared"
 import type { PlaybookPlanQueueSink } from "@/skill/playbook"
 import { startReactorWatchBridge } from "../reactor-watch-bridge"
 import { type AwaySummaryWireHandle, maybeCreateAwaySummaryWire } from "./away-summary-wire"
@@ -729,7 +729,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     // `on-failure` policy is evaluated against the most recent turn.
     const autorunEligibility = buildAutorunEligibility(process.env, () => lastTurnOutcome)
     const reactorBridge =
-      setup.sessionId !== undefined && process.env[REACTOR_ENV_FLAG] === "1"
+      setup.sessionId !== undefined && gateOnStrict(process.env, REACTOR_ENV_FLAG)
         ? await startReactorWatchBridge({
             sessionId: setup.sessionId,
             onTrigger: async (trigger) => {

@@ -80,37 +80,37 @@ describe("mailbox — broadcast delivery is per-recipient (BUG#1)", () => {
 })
 
 describe("mailbox — eviction keeps broadcasts still PENDING for a known reader", () => {
-  test("under maxRetained pressure a fully-delivered broadcast is reclaimed BEFORE one still pending for a known sibling", () => {
+  test("an OLDER broadcast still pending for a known reader survives eviction of a NEWER fully-delivered one", () => {
     let t = 0
-    const mb = createSubagentMailbox({ now: () => ++t, maxRetained: 1 })
-    // A and B both become KNOWN readers by draining once.
-    mb.send({ from: "S", to: "*", kind: "broadcast", body: "warmup" })
+    const mb = createSubagentMailbox({ now: () => ++t, maxRetained: 2 })
+    // A and B are KNOWN readers (an empty read registers the id, mints no cell).
     mb.read("A")
     mb.read("B")
 
-    // Y (older) is read by A only ⇒ still PENDING for known reader B.
-    mb.send({ from: "S", to: "*", kind: "broadcast", body: "Y" })
-    mb.read("A") // A drains: gets warmup-already-seen? no — gets Y
-    // X (newer) is read by BOTH ⇒ fully delivered.
-    mb.send({ from: "S", to: "*", kind: "broadcast", body: "X" })
-    mb.read("A")
-    mb.read("B")
+    const y = mb.send({ from: "S", to: "*", kind: "broadcast", body: "Y" }) // older
+    mb.send({ from: "S", to: "*", kind: "broadcast", body: "X" }) // newer
+    mb.read("A") // A drains both Y and X
+    // B reads ONLY X via `since` (skips the older Y) ⇒ X fully delivered, while
+    // Y stays PENDING for known reader B even though Y is the OLDER cell.
+    mb.read("B", { since: y.sentAt })
 
-    // The buffer is over capacity; eviction must drop the FULLY-delivered X, not
-    // the pending-for-B Y. So B can still receive Y.
+    // Pressure: a third unread broadcast forces exactly one eviction. The rank
+    // must reclaim the fully-delivered X — NOT the older-but-pending Y. (The prior
+    // any-reader rank would evict Y as the oldest "delivered" cell, losing it.)
+    mb.send({ from: "S", to: "*", kind: "broadcast", body: "Z" })
     expect(mb.read("B").map((m) => m.body)).toContain("Y")
   })
 
-  test("a broadcast read by ALL known readers is evictable (does not pin the buffer)", () => {
+  test("a broadcast read by ALL known readers does NOT pin the buffer (stays evictable)", () => {
     let t = 0
     const mb = createSubagentMailbox({ now: () => ++t, maxRetained: 1 })
+    mb.read("A") // A is the only known reader
     mb.send({ from: "S", to: "*", kind: "broadcast", body: "first" })
-    mb.read("A") // only A is ever a known reader
+    mb.read("A") // 'first' fully delivered to the only known reader
     mb.send({ from: "S", to: "*", kind: "broadcast", body: "second" })
-    mb.read("A")
-    // 'first' is fully delivered to the only known reader (A) ⇒ reclaimable; the
-    // buffer did not overflow past maxRetained.
-    expect(mb.read("A").map((m) => m.body)).toEqual([]) // A is fully drained
+    // 'first' was reclaimable (fully delivered) so the buffer stayed within cap
+    // and 'second' is intact.
+    expect(mb.read("A").map((m) => m.body)).toEqual(["second"])
   })
 })
 

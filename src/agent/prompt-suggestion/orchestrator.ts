@@ -30,7 +30,7 @@
  *   byte-identical to today.
  */
 
-import { ok, type Result } from "@/shared"
+import { gateOnStrict, ok, type Result } from "@/shared"
 import { rejectGate } from "./reject-gate"
 import { sanitizeSuggestion } from "./sanitize"
 import { suppressionReason } from "./suppression"
@@ -46,7 +46,7 @@ export const PROMPT_SUGGESTION_ENV = "QUANTA_ENABLE_PROMPT_SUGGESTION"
  */
 export const promptSuggestionEnabled = (
   env: Readonly<Record<string, string | undefined>>,
-): boolean => env[PROMPT_SUGGESTION_ENV] === "1"
+): boolean => gateOnStrict(env, PROMPT_SUGGESTION_ENV)
 
 /**
  * The "SUGGESTION MODE" system prompt the injected {@link SuggestFn}'s real

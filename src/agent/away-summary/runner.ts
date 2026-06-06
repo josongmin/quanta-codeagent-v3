@@ -17,6 +17,7 @@
  * as typed skip reasons.
  */
 
+import { gateOnStrict } from "@/shared"
 import { AWAY_SUMMARY_SYSTEM_PROMPT, type SummarizeFn } from "./port"
 import type { AwaySummaryOutcome, AwaySummaryRequest, RecapTurn } from "./types"
 
@@ -41,7 +42,7 @@ const wordCount = (text: string): number => (text.length === 0 ? 0 : text.split(
  * single documented opt-in value matches Claude's flag semantics.
  */
 export const awaySummaryEnabled = (env: Readonly<Record<string, string | undefined>>): boolean =>
-  env[AWAY_SUMMARY_ENV] === "1"
+  gateOnStrict(env, AWAY_SUMMARY_ENV)
 
 /**
  * Pure activity guard. A recap is only worth showing AFTER real work has

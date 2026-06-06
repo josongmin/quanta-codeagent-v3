@@ -11,7 +11,7 @@
  * Slices imported: `@/shared` ONLY (errMessage). No `@/llm`, no sibling slice.
  */
 
-import { errMessage } from "@/shared"
+import { errMessage, gateOnStrict } from "@/shared"
 import type {
   RepairAttempt,
   RepairFailure,
@@ -29,7 +29,7 @@ import { EDIT_REPAIR_LOOP_ENV } from "./types"
  * Strict `=== "1"` so an accidental `"0"`/`"true"`/`"on"` keeps it OFF.
  */
 export const editRepairLoopEnabled = (env: Readonly<Record<string, string | undefined>>): boolean =>
-  env[EDIT_REPAIR_LOOP_ENV] === "1"
+  gateOnStrict(env, EDIT_REPAIR_LOOP_ENV)
 
 /** Build the terminal report. Centralised so every exit path is consistent. */
 const report = (
