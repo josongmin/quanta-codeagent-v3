@@ -92,6 +92,28 @@ export const latestUserTextFromWm = (wm: WorkingMemory<Message>): string | undef
   return undefined
 }
 
+/** The first user message's text ONLY when this is the OPENING turn — i.e. the
+ *  working memory holds EXACTLY ONE user message. A resumed/continued transcript
+ *  (≥2 user messages) returns `undefined` so auto-title fires once per session,
+ *  never per-turn (the title is the session's first prompt, set once). */
+export const openingTurnUserText = (wm: WorkingMemory<Message>): string | undefined => {
+  const snap = wm.snapshot()
+  let firstUserText: string | undefined
+  let userCount = 0
+  for (const msg of snap) {
+    if (msg === undefined || msg.role !== "user") continue
+    userCount++
+    if (userCount > 1) return undefined // not the opening turn
+    for (const block of msg.content) {
+      if (block.type === "text") {
+        firstUserText = block.text
+        break
+      }
+    }
+  }
+  return userCount === 1 ? firstUserText : undefined
+}
+
 export const observeEffortClassifierPrompt = (
   classifier: AgentConfig["effortClassifier"],
   text: string | undefined,

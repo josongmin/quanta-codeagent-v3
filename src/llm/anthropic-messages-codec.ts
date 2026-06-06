@@ -186,7 +186,14 @@ export const buildAnthropicMessagesRequest = (
     max_tokens: maxTokens,
     stream: true,
     ...(input.system ? { system: toAnthropicSystem(input.system, cacheTtl) } : {}),
-    ...(input.thinking ? { thinking: input.thinking } : {}),
+    // The `thinking` object is already the correct wire JSON for every arm
+    // (`enabled` / `adaptive` / `disabled`). The installed `@anthropic-ai/sdk`
+    // @0.40.1 types `thinking` as `enabled | disabled` only — it has NO
+    // `ThinkingConfigAdaptive` arm (the wire `{"type":"adaptive"}` is correct
+    // regardless; only the compile-time type lags the API). Scoped cast to
+    // satisfy the pinned SDK type until a bump adds the adaptive arm. Same
+    // in-house style as the raw-SSE `as unknown as` narrow in `anthropic.ts`.
+    ...(input.thinking ? { thinking: input.thinking as Anthropic.ThinkingConfigParam } : {}),
     messages: cacheConversationPrefix(toAnthropicMessages(input.messages), cacheTtl),
     tools: input.tools.map((t) => ({
       name: t.name,

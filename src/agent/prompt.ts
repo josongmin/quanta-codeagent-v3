@@ -469,6 +469,8 @@ const resolveDirectiveConfig = (): DirectiveConfig => {
     directiveThinkFreq: c.directiveThinkFreq,
     directiveAntiPlatitude: c.directiveAntiPlatitude,
     directiveParallelTools: c.directiveParallelTools,
+    // RFC jun-6 §5.2 — advisor timing rail (QUANTA_ADVISOR_RAIL). Additive.
+    directiveAdvisorRail: c.directiveAdvisorRail,
   }
 }
 
@@ -480,6 +482,29 @@ const resolveDirectiveConfig = (): DirectiveConfig => {
 const appendActiveDirectives = (parts: string[], input: TurnContextInput): void => {
   const directives = selectActiveDirectives(input.directiveConfig ?? resolveDirectiveConfig())
   if (directives.length > 0) parts.push("", directives)
+}
+
+/** Append the per-turn selection blocks (glob-rules / active-skills / working-state)
+ *  in their fixed order. Each renders to a block that may be empty ⇒ skipped.
+ *  Extracted from buildDynamicContext to stay under the cognitive-complexity cap;
+ *  byte-identical to the inline sequence it replaced. */
+const appendSelectionBlocks = (
+  parts: string[],
+  input: TurnContextInput,
+  selectedGlobRules: readonly GlobRule[],
+): void => {
+  if (selectedGlobRules.length > 0) {
+    const block = renderGlobRulesBlock([...selectedGlobRules])
+    if (block) parts.push("", block)
+  }
+  if (input.activeSkills && input.activeSkills.length > 0) {
+    const block = renderActiveSkillsBlock(input.activeSkills)
+    if (block) parts.push("", block)
+  }
+  if (input.workingState) {
+    const block = renderWorkingStateBlock(input.workingState)
+    if (block) parts.push("", block)
+  }
 }
 
 const buildDynamicContext = (
@@ -515,18 +540,7 @@ const buildDynamicContext = (
   // File-scoped rules (Cursor `.cursor/rules` parity) ride right after the
   // top-level repo contract — both are repo authority, but these are selected
   // per-turn by the files in play. Absent / no selection ⇒ no block.
-  if (selectedGlobRules.length > 0) {
-    const block = renderGlobRulesBlock([...selectedGlobRules])
-    if (block) parts.push("", block)
-  }
-  if (input.activeSkills && input.activeSkills.length > 0) {
-    const block = renderActiveSkillsBlock(input.activeSkills)
-    if (block) parts.push("", block)
-  }
-  if (input.workingState) {
-    const block = renderWorkingStateBlock(input.workingState)
-    if (block) parts.push("", block)
-  }
+  appendSelectionBlocks(parts, input, selectedGlobRules)
   // Memory recall body already carries the trust-ladder H2 header inside
   // `formatBlock` (src/agent/memory.ts) — append as-is, no double-label.
   const memory = input.memoryContext?.trim()

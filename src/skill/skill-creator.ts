@@ -35,6 +35,7 @@
  */
 
 import { z } from "zod"
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 import {
   SkillCategorySchema,
@@ -243,7 +244,7 @@ export const createSkillCreatorTool = (writer: SkillWriterPort): Tool<Input> => 
             failure: {
               mode: "error",
               modelVisibleError: "skill_create failed: the writer port threw.",
-              clientVisibleError: e instanceof Error ? e.message : String(e),
+              clientVisibleError: errMessage(e),
             },
           },
         }

@@ -37,6 +37,12 @@ const withOptionalStrings = <K extends string>(
 
 /** Parse a `resources/list` result → `McpResource[]`, or null if `resources`
  *  is not an array. Entries without a string `uri` are dropped. */
+/** DoS bound — maximum entries retained from a `resources/list` / `prompts/list`
+ *  result. A hostile/buggy server can return millions of entries; the parsers
+ *  stop pushing at this cap so the flood is never fully retained (no OOM). 4096
+ *  is far above any realistic catalog while bounding the worst case. */
+export const PARSE_MAX_LIST_ENTRIES = 4096
+
 export const parseResourceList = (result: unknown): McpResource[] | null => {
   const rec = asRecord(result)
   if (rec === null) return null
@@ -44,6 +50,7 @@ export const parseResourceList = (result: unknown): McpResource[] | null => {
   if (!Array.isArray(raw)) return null
   const out: McpResource[] = []
   for (const item of raw) {
+    if (out.length >= PARSE_MAX_LIST_ENTRIES) break // DoS bound — stop retaining
     const r = asRecord(item)
     if (r === null) continue
     const uri = str(r.uri)
@@ -138,6 +145,7 @@ export const parsePromptList = (result: unknown): McpPrompt[] | null => {
   if (!Array.isArray(raw)) return null
   const out: McpPrompt[] = []
   for (const item of raw) {
+    if (out.length >= PARSE_MAX_LIST_ENTRIES) break // DoS bound — stop retaining
     const p = asRecord(item)
     if (p === null) continue
     const name = str(p.name)

@@ -1195,6 +1195,21 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   fileHistory?: import("@/tool").FileHistorySink
   /**
+   * jun-6 exfil-rail (a) — OPTIONAL per-turn write/edit budget. When set, the
+   * dispatch seam binds the CURRENT turn ordinal (`run?.turn ?? 0`) and surfaces
+   * a turn-bound {@link import("@/tool").WriteBudgetPort} onto `ToolContext` so
+   * the `write`/`edit` tools tally each mutation against the per-turn counter and
+   * deny once the configured cap is exceeded IN AN UNTRUSTED-INPUT TURN. The
+   * composition root mints ONE session-long `SessionWriteBudget` (when
+   * `QUANTA_WRITE_BUDGET=1` AND `QUANTA_WRITE_BUDGET_MAX` is set) with
+   * `untrustedContext` resolved from the untrusted-envelope gate
+   * (`QUANTA_UNTRUSTED_ENVELOPE`); the counter resets per turn because dispatch
+   * re-binds the current turn. Absent (knob off / no cap / non-wiring host) ⇒ the
+   * dispatch seam omits the ctx field and the mutating path is byte-identical
+   * (default-OFF). Duck-typed via the `@/tool/_shared/write-budget`
+   * `SessionWriteBudget` so `@/tool` stays a leaf. */
+  writeBudget?: import("@/tool/_shared/write-budget").SessionWriteBudget
+  /**
    * Codex Submission op envelope (ADR-0072, Spec A3). When set the loop
    * derives the seed user-turn from `submission.op` instead of `messages`
    * (`user_input` / `user_input_with_turn_context` only — other op variants
@@ -1271,6 +1286,20 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   taskBudget?: TaskBudget
   /**
+   * RFC jun-6 §4 — bounded repo-map turn-0 injection. When present, the loop
+   * calls `probeRepoMap` ON TURN 1 ONLY (caller-held latch) and merges its
+   * bounded tree string into `TurnContextInput.env.repoMap`; on later turns the
+   * field is absent ⇒ `renderEnvBlock` is byte-identical to the no-map path.
+   * Carries the three caps (depth / file-count / char-backstop). Absent ⇒ the
+   * probe never runs and the env block is byte-identical (default-OFF). Set by
+   * the `repo-map` knob (`QUANTA_REPO_MAP`). Caller-side composition only — the
+   * renderer never reads this slot, only the pre-rendered `env.repoMap`. */
+  repoMap?: {
+    readonly maxDepth: number
+    readonly maxFiles: number
+    readonly maxChars: number
+  }
+  /**
    * L4 wiring — control-op cluster (2026-05-23). Typed mid-turn
    * {@link ConversationActionPort} the loop polls at the TOP of each turn
    * (before `cfg.steerBarrier`, before the LLM stream opens). Absent ⇒ no
@@ -1301,6 +1330,23 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * boundaries.
    */
   followUpQueue?: FollowUpQueue
+  /**
+   * Peer teammate messaging (RFC jun-6, DELTA #1) — auto-delivery drain. When
+   * set, `syncQueuedTurnInputs` calls `peerInbox.drainFor(mailboxAgentId ??
+   * "root")` at the turn-top seam (right after the follow-up drain) and appends
+   * the rendered peer mail as a `role:"user"` message — so a teammate's message
+   * auto-arrives in this agent's NEXT turn WITHOUT a manual
+   * `subagent_read_messages` poll (and a wake'd idle teammate auto-receives).
+   * The drain marks delivered (shares the SAME per-recipient cursor as the
+   * manual poll ⇒ delivered exactly once across push+pull) and redacts each
+   * body (untrusted-as-DATA). INFORMATION-only — it NEVER invokes the
+   * permission decider (the peer bus is a comms channel, never a grant channel).
+   *
+   * Absent ⇒ `pollPeerInbox` returns null, no append, the turn loop is
+   * byte-identical (default-OFF). Wired by the composition root only when
+   * `QUANTA_TEAM_PEER_MSG` is on.
+   */
+  peerInbox?: import("./loop/control-poll").PeerInboxDrain
   /**
    * L4 wiring — control-op cluster (2026-05-23). Per-thread paused-reason
    * inspector (ADR-0037). When set, the loop calls this BEFORE each
@@ -1379,6 +1425,7 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
     readonly consult: (req: {
       readonly question: string
       readonly context?: string
+      readonly forwardHistory?: boolean
       readonly model?: string
       readonly signal?: AbortSignal
     }) => Promise<

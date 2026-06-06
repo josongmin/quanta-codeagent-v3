@@ -104,6 +104,13 @@ const fromLLMError = (e: LLMError): TypedError => {
       return { kind: "threadRollbackFailed", message }
     case "sandbox_error":
       return { kind: "sandboxError", message }
+    case "sandbox_blocked":
+      // RFC jun-6 — an OS-sandbox syscall BLOCK. Like `sandbox_error`, the
+      // outer typed policy is a hand-off (`sandboxError`): the escalation-retry
+      // loop is offered at the bash-tool seam BEFORE the error reaches this
+      // router, so by the time a `sandbox_blocked` escapes here the consistent
+      // policy is the same host-review hand-off (NEVER an auto unsandboxed run).
+      return { kind: "sandboxError", message }
     case "invalid_image":
       // ADR-0328 — `invalid_image` is recovered by the
       // `withImageSanitizationRetry` LLM wrap (ADR-0323 sanitization +

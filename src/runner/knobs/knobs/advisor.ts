@@ -30,6 +30,7 @@
 
 import type { AgentConfig } from "@/agent"
 import { advisorConsultFromLLM } from "@/agent"
+import { runtimeConfig } from "@/shared"
 import { registerKnob } from "../registry"
 import type { Knob, Surface } from "../types"
 
@@ -82,9 +83,16 @@ const applyAdvisor = (
   ctx: { surface: Surface },
 ): AgentConfig => {
   if (!SURFACES.includes(ctx.surface)) return cfg
+  // RFC jun-6 §5.1 — wire the redacted live-transcript source ONLY when the
+  // `QUANTA_ADVISOR_FORWARD_HISTORY` knob is on (fail-closed: off ⇒ no source ⇒
+  // a `forwardHistory:true` request is a no-op, byte-identical to today). The
+  // source closes over the live `cfg.messages` reference so the advisor sees the
+  // history present at consult time; `advisorConsultFromLLM` redacts it.
+  const forwardOn = runtimeConfig().advisorForwardHistory
   const consult = advisorConsultFromLLM({
     llm: cfg.llm,
     resolveModel: (requested?: string) => requested ?? value.model,
+    ...(forwardOn ? { transcriptSource: () => cfg.messages } : {}),
   })
   return { ...cfg, advisor: { consult, models: value.models } }
 }

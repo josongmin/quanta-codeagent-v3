@@ -208,6 +208,12 @@ export interface BackgroundSubagentSchedulerOpts {
    *  (DoS). When the queue is full, an over-cap `fork()` throws `queue-full`
    *  (typed). Only consulted when `admissionQueue` is on. Default 64. */
   readonly maxQueued?: number
+  /** Injected MACROTASK yield used by `await()` while an entry is still
+   *  `queued` (its placeholder promise settles synchronously). It MUST schedule
+   *  on the macrotask queue (default `setTimeout(resolve, 0)`) — a microtask
+   *  yield (`Promise.resolve()`) would starve timers/IO, hanging the loop while
+   *  a queued-forever entry is awaited. Injectable so tests can drive it. */
+  readonly yieldMacrotask?: () => Promise<void>
 }
 
 /** Typed error class — exposes a closed `code` union the caller can branch
@@ -429,6 +435,14 @@ export const defaultBackgroundSubagentScheduler = (
   const maxRetained = Math.max(1, Math.floor(opts.maxRetained ?? DEFAULT_MAX_RETAINED))
   const now = opts.now ?? Date.now
   const idGen = opts.idGen ?? ((): string => randomBytes(8).toString("hex"))
+  // MACROTASK yield (not microtask): lets timers/IO run while await() spins on a
+  // still-`queued` entry whose placeholder promise settles synchronously.
+  const yieldMacrotask =
+    opts.yieldMacrotask ??
+    ((): Promise<void> =>
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, 0)
+      }))
   // ADR-0487 — admission queue. Default-OFF: when `admissionQueue` is absent
   // the queue is unreachable (no `queued` entry can be created) and the
   // scheduler is byte-identical to its pre-queue self.
@@ -586,6 +600,43 @@ export const defaultBackgroundSubagentScheduler = (
     })()
   }
 
+  /** Block until `entry` reaches a terminal state. A `queued` entry's `promise`
+   *  is a synchronous placeholder; `promote()` swaps in the real runner promise,
+   *  so re-read it each pass. A MACROTASK yield (never a microtask) between
+   *  passes lets timers / `drainQueue` / runner-IO make progress — a microtask
+   *  spin would starve the loop on a queued-forever entry. */
+  const awaitTerminal = async (entry: Entry): Promise<void> => {
+    while (!isTerminal(entry.result.status)) {
+      await entry.promise
+      if (isTerminal(entry.result.status)) break
+      await yieldMacrotask()
+    }
+  }
+
+  /** One abort-vs-promise race pass: resolve when the live `entry.promise`
+   *  settles OR the signal aborts, cleaning up the listener either way. */
+  const raceAbortOrSettle = (entry: Entry, signal: AbortSignal): Promise<void> =>
+    new Promise<void>((resolve) => {
+      const onAbort = (): void => {
+        signal.removeEventListener("abort", onAbort)
+        resolve()
+      }
+      signal.addEventListener("abort", onAbort, { once: true })
+      // Runner never rejects (startRun catches); the rejection arm is defense
+      // in depth so a stray rejection still unblocks the await.
+      entry.promise.then(onAbort, onAbort)
+    })
+
+  /** Block until terminal OR the await-signal aborts. Loops so a `queued`
+   *  placeholder settle does not return the parked snapshot before promotion. */
+  const awaitTerminalOrAbort = async (entry: Entry, signal: AbortSignal): Promise<void> => {
+    while (!isTerminal(entry.result.status) && !signal.aborted) {
+      await raceAbortOrSettle(entry, signal)
+      if (isTerminal(entry.result.status) || signal.aborted) break
+      await yieldMacrotask()
+    }
+  }
+
   // Auto-hydrate at construction (ADR-0153). When `opts.hydrateFrom` is
   // present, populate `store` BEFORE the scheduler is handed to the caller —
   // matches the voice of ADR-0124's `restoreFrom` opt. The choice between
@@ -660,47 +711,12 @@ export const defaultBackgroundSubagentScheduler = (
       // Fast path: already terminal.
       if (isTerminal(entry.result.status)) return snapshotResult(entry.result)
       const signal = opts?.signal
-      if (signal === undefined) {
-        // Loop until terminal. A `queued` entry's `promise` is a placeholder
-        // (`Promise.resolve()`) that settles immediately WITHOUT running;
-        // `promote()` swaps in the real runner promise. Re-read `entry.promise`
-        // after each settle so we follow the queued → running → terminal
-        // transition rather than returning early on the placeholder. A
-        // microtask yield between iterations prevents a busy-spin while still
-        // queued.
-        while (!isTerminal(entry.result.status)) {
-          await entry.promise
-          if (isTerminal(entry.result.status)) break
-          // Still non-terminal (queued, or just-promoted to running on a fresh
-          // promise) — yield to the event loop and re-check the live promise.
-          await Promise.resolve()
-        }
-        return snapshotResult(entry.result)
-      }
-      // Race entry.promise vs the signal. We do NOT cancel the subagent
-      // when the await-signal fires — the caller explicitly chose to
-      // separate "I got bored waiting" from "kill the work".
-      if (signal.aborted) return snapshotResult(entry.result)
-      await new Promise<void>((resolve) => {
-        const onAbort = (): void => {
-          signal.removeEventListener("abort", onAbort)
-          resolve()
-        }
-        signal.addEventListener("abort", onAbort, { once: true })
-        // When the runner settles first, also resolve.
-        entry.promise.then(
-          () => {
-            signal.removeEventListener("abort", onAbort)
-            resolve()
-          },
-          () => {
-            // Runner promise never rejects (startRun catches), but defense
-            // in depth: a stray rejection should still unblock await.
-            signal.removeEventListener("abort", onAbort)
-            resolve()
-          },
-        )
-      })
+      // No signal: block until terminal (queued entries block until promoted).
+      // With signal: block until terminal OR abort — we do NOT cancel the
+      // subagent when the await-signal fires (the caller separated "I got bored
+      // waiting" from "kill the work").
+      if (signal === undefined) await awaitTerminal(entry)
+      else if (!signal.aborted) await awaitTerminalOrAbort(entry, signal)
       return snapshotResult(entry.result)
     },
 

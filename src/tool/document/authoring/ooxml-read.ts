@@ -30,9 +30,13 @@ export const unescapeXml = (s: string): string => {
 }
 
 /** Convert a numeric char-ref code point to a string, dropping invalid ones
- *  (an out-of-range or NaN code point yields ""). */
+ *  (an out-of-range, NaN, or lone-surrogate code point yields ""). A surrogate
+ *  (0xD800–0xDFFF) is not a scalar value: `String.fromCodePoint` would emit an
+ *  ill-formed lone surrogate, so we drop it to keep readers' output
+ *  well-formed (`.isWellFormed()`). */
 const safeCodePoint = (cp: number): string => {
   if (!Number.isFinite(cp) || cp < 0 || cp > 0x10ffff) return ""
+  if (cp >= 0xd800 && cp <= 0xdfff) return ""
   try {
     return String.fromCodePoint(cp)
   } catch {

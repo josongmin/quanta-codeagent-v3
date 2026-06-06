@@ -23,6 +23,7 @@
 
 import { z } from "zod"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+import { unescapeXml } from "./authoring/ooxml-read"
 import { unzip } from "./authoring/zip-store"
 import { readJailedFileBytes } from "./xlsx-read"
 
@@ -43,22 +44,15 @@ export type ParsePptxResult =
   | { readonly ok: true; readonly slides: PptxSlideText[]; readonly text: string }
   | { readonly ok: false; readonly error: string }
 
-const unescapeXml = (s: string): string =>
-  s
-    .replace(/&#x([0-9a-fA-F]+);/g, (_m, h) => String.fromCodePoint(Number.parseInt(h, 16)))
-    .replace(/&#(\d+);/g, (_m, d) => String.fromCodePoint(Number.parseInt(d, 10)))
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, "&")
-
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
 
-/** Concatenate every `<a:t>…</a:t>` (DrawingML text run) within a fragment. */
+/** Concatenate every `<a:t>…</a:t>` (DrawingML text run) within a fragment.
+ *  The opening tag may carry attributes (e.g. `xml:space="preserve"` on a
+ *  foreign deck), so match `<a:t ...>` attribute-tolerantly — a strict `<a:t>`
+ *  silently dropped every attributed run. */
 const runText = (fragment: string): string => {
   let out = ""
-  const re = /<a:t>([\s\S]*?)<\/a:t>/g
+  const re = /<a:t\b[^>]*>([\s\S]*?)<\/a:t>/g
   for (let m = re.exec(fragment); m !== null; m = re.exec(fragment)) {
     out += unescapeXml(m[1] ?? "")
   }

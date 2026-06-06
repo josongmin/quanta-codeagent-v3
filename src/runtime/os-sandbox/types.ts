@@ -70,6 +70,44 @@ export type SandboxBackend =
   | "windows-restricted-token"
   | "passthrough"
 
+/**
+ * Best-effort, platform-specific signal that triggered a sandbox-denial
+ * classification. For the justification prompt + OTel ONLY — NEVER an
+ * auto-grant.
+ *
+ *   - `seatbelt-deny`   : macOS `sandbox-exec` / kernel Seatbelt deny stderr.
+ *   - `landlock-eperm`  : Linux Landlock FS denial (bare EPERM/EACCES — LOW).
+ *   - `seccomp-sigsys`  : Linux seccomp SIGSYS kill under our filter (HIGH).
+ *   - `exit-126`        : shell "cannot execute" — a denied process-exec (HIGH).
+ *   - `windows-access`  : Windows restricted-token ERROR_ACCESS_DENIED (LOW).
+ *   - `heuristic`       : a residual low-confidence catch-all.
+ */
+export type SandboxDenialSignal =
+  | "seatbelt-deny"
+  | "landlock-eperm"
+  | "seccomp-sigsys"
+  | "exit-126"
+  | "windows-access"
+  | "heuristic"
+
+/**
+ * Discriminated arm describing an OS-sandbox SYSCALL DENIAL (the sandbox ran
+ * AND blocked something) — distinct from a normal nonzero command failure and
+ * from a `degradeReason` (the sandbox could NOT run). Produced ONLY by the
+ * pure {@link classifySandboxDenial} and ONLY when `sandboxApplied === true`.
+ */
+export interface SandboxDenial {
+  readonly kind: "sandbox-blocked"
+  /** The platform-specific signal that produced the classification. */
+  readonly signal: SandboxDenialSignal
+  /** Confidence tier. `"high"` = an UNAMBIGUOUS signal (SIGSYS under our
+   *  seccomp filter, exit-126 denied-exec, the exact Seatbelt-deny stderr
+   *  PREFIX). `"low"` = an ambiguous signal (a bare EPERM / access-denied that
+   *  a real non-sandbox permission error is indistinguishable from); surfaced
+   *  to the user as a DECLINE-able SUGGESTION, never a silent escalation. */
+  readonly confidence: "high" | "low"
+}
+
 export interface SandboxedSpawnResult {
   readonly exitCode: number
   readonly stdout: string
@@ -79,6 +117,16 @@ export interface SandboxedSpawnResult {
   /** Reason for degradation. Present iff sandboxApplied===false AND
    *  policy.profile !== "off" AND policy.profile !== "danger-full-access". */
   readonly degradeReason?: string
+  /** OS-sandbox SYSCALL-DENIAL discriminant (RFC jun-6). Present iff
+   *  `sandboxApplied === true` AND {@link classifySandboxDenial} recognised a
+   *  block signal. MUTUALLY EXCLUSIVE with `degradeReason`:
+   *    - `degradeReason` = "the sandbox did NOT run (host could not enforce)".
+   *    - `denialReason`  = "the sandbox RAN and BLOCKED a syscall".
+   *  The two are never both present. Absent ⇒ a nonzero exit is a plain
+   *  command failure (the safe default — we UNDER-detect rather than
+   *  over-escalate). Only ever SET when `QUANTA_SANDBOX_ESCALATION` is on; OFF
+   *  ⇒ byte-identical to the pre-RFC result shape. */
+  readonly denialReason?: SandboxDenial
 }
 
 export interface SandboxAvailability {

@@ -199,6 +199,15 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     note: "In-memory inter-agent mailbox. CLI default-ON (seeded in apps/cli); bench/web opt-in (shared assembler — reproducibility).",
   },
   {
+    name: "team_create",
+    group: ["team_delete"],
+    origin: "@/tool/team",
+    gate: { kind: "config-slot", slot: "teamRegistry", env: "QUANTA_TEAM_PEER_MSG" },
+    default: {},
+    risk: "mutating",
+    note: "Peer teammate messaging (RFC jun-6) — mint/reap a team (membership scope over the shared mailbox). OPT-IN everywhere; registered only when QUANTA_TEAM_PEER_MSG is on AND the host injects a TeamRegistryPort. They spawn/reap the team boundary (the cross-team deny is enforced at send by the TeamScopedMailbox decorator, not these tools).",
+  },
+  {
     name: "objective_set",
     group: ["objective_get", "objective_update"],
     origin: "@/agent/tier1/objective",

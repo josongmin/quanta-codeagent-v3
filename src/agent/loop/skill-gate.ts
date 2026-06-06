@@ -1,4 +1,6 @@
-import type { LLMPort } from "@/llm"
+import type { LLMPort, ThinkingConfig } from "@/llm"
+import { supportsAdaptiveThinking } from "@/llm"
+import { runtimeConfig } from "@/shared"
 import { effortToTokenBudget } from "../effort"
 import { resolveAgentMode } from "../mode"
 import type { SkillGate, SkillTurnOverride } from "../turn-context"
@@ -77,13 +79,20 @@ export const resolveSkillTurnOverride = (
 export const applyEffortClassifierFloor = (
   resolved: ResolvedTurnOverride,
   classifier: AgentConfig["effortClassifier"],
-): { llm: LLMPort; thinking?: { type: "enabled"; budget_tokens: number } } => {
+): { llm: LLMPort; thinking?: ThinkingConfig } => {
   if (resolved.explicitOff) return { llm: resolved.llm }
   const classifierLevel = classifier?.currentRecommendation().level
   const classifierBudget =
     classifierLevel !== undefined ? effortToTokenBudget(classifierLevel) : undefined
   const budgetTokens = Math.max(resolved.budgetTokens ?? 0, classifierBudget ?? 0)
-  return budgetTokens > 0
-    ? { llm: resolved.llm, thinking: { type: "enabled", budget_tokens: budgetTokens } }
-    : { llm: resolved.llm }
+  // The "should we think at all" signal is UNCHANGED (effort/classifier-derived).
+  // Adaptive only changes the SHAPE — never whether thinking is requested.
+  if (budgetTokens <= 0) return { llm: resolved.llm }
+  // Knob ON + adaptive-capable family ⇒ self-paced adaptive (no budget_tokens,
+  // repairs the Opus-4.8 manual-budget 400). Otherwise the manual budget arm
+  // (knob OFF, OR an older/unknown model) — byte-identical to the pre-slice path.
+  if (runtimeConfig().adaptiveThinking && supportsAdaptiveThinking(resolved.llm.model)) {
+    return { llm: resolved.llm, thinking: { type: "adaptive" } }
+  }
+  return { llm: resolved.llm, thinking: { type: "enabled", budget_tokens: budgetTokens } }
 }

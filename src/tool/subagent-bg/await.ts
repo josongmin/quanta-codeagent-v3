@@ -13,7 +13,12 @@
 
 import { z } from "zod"
 import type { Tool, ToolContext, ToolEvent } from "../types"
-import type { BackgroundSubagentSchedulerPort, SubagentBgResult } from "./port"
+import type { BackgroundSubagentSchedulerPort, SubagentBgResult, SubagentBgStatus } from "./port"
+
+/** `queued` and `running` are NON-terminal — an await on either MUST block until
+ *  it settles. Only completed/failed/cancelled may fast-path. (A `queued` entry
+ *  short-circuited here would return the parked snapshot instead of the answer.) */
+const isTerminalStatus = (s: SubagentBgStatus): boolean => s !== "queued" && s !== "running"
 
 export const subagentAwaitInputSchema = z.object({
   id: z.string().min(1).describe("The subagent handle id returned by subagent_fork."),
@@ -108,7 +113,7 @@ export const subagentAwaitTool = (
       }
       return
     }
-    if (snap0.status !== "running") {
+    if (isTerminalStatus(snap0.status)) {
       yield { type: "result", result: { ok: true, output: formatResult(id, snap0) } }
       return
     }

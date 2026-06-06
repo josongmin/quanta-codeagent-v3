@@ -36,13 +36,30 @@ const TOOL_DIRS = [join(REPO_ROOT, "src", "tool"), join(REPO_ROOT, "src", "subag
 
 const readUtf8 = (path: string): string => readFileSync(path, "utf8")
 
+// The 2026-06 loop decomposition split the monolithic `loop.ts` into a thin
+// re-export shim + the `src/agent/loop/` slice. The wire markers these ratchets
+// pin now live across those files, so read the WHOLE loop surface (shim + slice)
+// — the invariant is "the loop threads these markers," not "in one file."
+const readLoopSurface = (): string => {
+  const parts = [readUtf8(join(SRC_AGENT, "loop.ts"))]
+  const loopDir = join(SRC_AGENT, "loop")
+  try {
+    for (const f of readdirSync(loopDir).sort()) {
+      if (f.endsWith(".ts")) parts.push(readUtf8(join(loopDir, f)))
+    }
+  } catch {
+    // No loop/ dir (pre-decomposition tree) — the shim read alone is the surface.
+  }
+  return parts.join("\n")
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  G1 — ADR-0409 post_compact wire markers in loop.ts (audit F1)
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("audit ratchet — G1 post_compact wire-presence (F1-class)", () => {
   test("loop.ts threads all four post_compact wire markers", () => {
-    const loopTs = readUtf8(join(SRC_AGENT, "loop.ts"))
+    const loopTs = readLoopSurface()
     // Each marker corresponds to one part of the ADR-0409 wire. A refactor
     // that removes any of them resurrects the dead-emit bug F1 fixed.
     const requiredMarkers: ReadonlyArray<readonly [string, string]> = [

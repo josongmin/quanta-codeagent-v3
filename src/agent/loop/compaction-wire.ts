@@ -1,3 +1,4 @@
+import { join } from "node:path"
 import type { Message, SystemPromptInput } from "@/llm"
 import type { CompactionEventVariant } from "@/memory/typed-event"
 import { errMessage, logger, runtimeConfig } from "@/shared"
@@ -12,8 +13,93 @@ import type { BreakerVerdict, CompactionBreaker } from "../compaction-breaker"
 import { appendSummary, type ConversationSummaryArchive } from "../conversation-summary-archive"
 import { buildPostCompactEmit, buildPreCompactHook } from "../loop-helpers"
 import { buildTurnContext } from "../prompt"
+import { createEvictionSpillPort, microcompactToolResults } from "../tool-result-evict"
 import type { AgentConfig } from "../types"
 import { emitRecovery, objectiveBudgetExhausted } from "./emit-helpers"
+
+// ──────────────────────────────────────────────────────────────────────────
+// RFC jun-6-microcompaction — tier-1 tool-result eviction (a CHEAPER FIRST tier
+// in front of `compactIfNeeded`). Knob-gated (`QUANTA_MICROCOMPACT`); when OFF
+// the pre-pass is NEVER constructed and this whole block is byte-identical.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Keep the LAST N tool_results intact (the live working set the model is
+ *  reasoning over right now). Overridable via `QUANTA_MICROCOMPACT_KEEP_RECENT`. */
+const DEFAULT_MICROCOMPACT_KEEP_RECENT = 3
+
+/** Commit a microcompaction ONLY if estimated tokensSaved > this floor. Mirrors
+ *  the reactive-squeeze magnitude (`REACTIVE_MIN_INPUT_TOKENS = 4_000`): below a
+ *  few thousand tokens of saving, churning the transcript is not worth it. A
+ *  knob (`QUANTA_MICROCOMPACT_FLOOR_TOKENS`), not a hard-coded heuristic. */
+const DEFAULT_MICROCOMPACT_FLOOR_TOKENS = 4_000
+
+/** Min interval (ms) between microcompaction fires — the time-based cadence held
+ *  in the wire (the pure core never sees the clock). Overridable via
+ *  `QUANTA_MICROCOMPACT_INTERVAL_MS`. An over-eager cadence is harmless: the
+ *  floor gate just no-ops a fire that frees too little. */
+const DEFAULT_MICROCOMPACT_INTERVAL_MS = 30_000
+
+/** Per-session last-fire timestamp for the cadence gate (the only mutable wire
+ *  state; keyed by session so concurrent runs don't share a clock). */
+const lastMicrocompactAt = new Map<string, number>()
+
+/**
+ * Tier-1 microcompaction pass (RFC §4.6). Runs INSIDE `maybeCompact` BEFORE
+ * `compactIfNeeded`, guarded by the knob + the time-based cadence gate. Installs
+ * the result via `wm.replace(...)` (NOT in-place mutation) so the delta-token
+ * counter re-anchors and `tokenTotal()` stays byte-identical to
+ * `estimateTokens(snapshot())` (§3.4 — the single most important correctness
+ * interaction). Returns `true` iff it changed the transcript.
+ */
+const maybeMicrocompact = (
+  config: AgentConfig,
+  wm: import("@/memory").WorkingMemory<Message> & {
+    tokenTotal?(): number
+    tokenReseed?(): void
+  },
+  snapshot: readonly Message[],
+  now: number,
+): boolean => {
+  const cfg = runtimeConfig()
+  if (!cfg.microcompact) return false
+  const sessionKey = config.sessionId ?? ""
+  const intervalMs = cfg.microcompactIntervalMs ?? DEFAULT_MICROCOMPACT_INTERVAL_MS
+  const last = lastMicrocompactAt.get(sessionKey)
+  if (last !== undefined && now - last < intervalMs) return false
+
+  const spill = createEvictionSpillPort({
+    spillDir: join(config.cwd, ".quanta", "tool-output"),
+  })
+  const result = microcompactToolResults({
+    messages: snapshot,
+    keepRecent: cfg.microcompactKeepRecent ?? DEFAULT_MICROCOMPACT_KEEP_RECENT,
+    tokensSavedFloor: cfg.microcompactFloorTokens ?? DEFAULT_MICROCOMPACT_FLOOR_TOKENS,
+    spill,
+  })
+  // Stamp the cadence clock on every fire ATTEMPT (whether or not it changed),
+  // so a repeated no-op clear does not re-scan every turn.
+  lastMicrocompactAt.set(sessionKey, now)
+  if (!result.changed) return false
+
+  // CRITICAL (§4.6): install via `wm.replace`, which flows through the
+  // delta-token decorator and reseeds the counter. An in-place edit of
+  // `wm.messages[i].content` would BYPASS the counter and drift `tokenTotal()`.
+  wm.replace([...result.messages])
+  // Stream-recovery reason stays `"compact"` (the stream union) with a
+  // `"microcompact"` detail so observability attributes a tier-1 clear distinctly
+  // from a tier-2 summarization without widening the recovery state machine.
+  emitRecovery(config, "compact", "microcompact")
+  emitCompactionEvent(config, {
+    kind: "compaction_event",
+    trigger: "pre_sampling",
+    reason: "context_limit",
+    tokensBefore: estimateTokens([...snapshot]),
+    tokensAfter: estimateTokens([...result.messages]),
+    messagesRemoved: 0,
+    at: now,
+  })
+  return true
+}
 
 export const maybeCompact = async (
   config: AgentConfig,
@@ -32,11 +118,20 @@ export const maybeCompact = async (
     return verdict
   }
   const onPreCompact = config.onPreCompact
-  const snapshot = [...wm.snapshot()]
+  let snapshot = [...wm.snapshot()]
   // FULL-snapshot read: O(1) `tokenTotal()` is byte-identical to
   // `estimateTokens(snapshot)` when the counter is wired (knob ON); falls back
   // to the full re-scan when OFF (`tokenTotal` absent).
-  const before = wm.tokenTotal?.() ?? estimateTokens(snapshot)
+  let before = wm.tokenTotal?.() ?? estimateTokens(snapshot)
+  // ── tier-1 microcompaction (RFC jun-6-microcompaction, knob-gated) ──
+  // Runs BEFORE the bg-controller reconcile + the tier-2 summarization, so both
+  // see the already-shrunk transcript (no stale-prefix double accounting). The
+  // pre-pass installs via `wm.replace` ⇒ the delta counter reseeds, so the
+  // re-read `before` below stays byte-identical to `estimateTokens(snapshot)`.
+  if (maybeMicrocompact(config, wm, snapshot, Date.now())) {
+    snapshot = [...wm.snapshot()]
+    before = wm.tokenTotal?.() ?? estimateTokens(snapshot)
+  }
   const bgLimitTokens = resolveCompactionLimitTokens(config.compaction?.thresholdTokens)
   const borrowed =
     bgController !== undefined

@@ -64,6 +64,7 @@ export {
   createTaskStopTool,
   type TaskOutputTimeoutPolicy,
 } from "./task-tools"
+export { createTeamRegistry, type TeamRegistryPort } from "./team/registry"
 export {
   SUBAGENT_6_TOOL_CONTRACTS,
   SUBAGENT_6_TOOL_NAMES,

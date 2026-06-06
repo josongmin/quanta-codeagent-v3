@@ -143,6 +143,12 @@ export type LLMErrorKind =
   | "too_many_failed_attempts"
   | "thread_rollback_failed"
   | "sandbox_error"
+  // RFC jun-6 — OS-sandbox SYSCALL BLOCK (the sandbox RAN and DENIED a
+  // syscall), distinct from `sandbox_error` (= the sandbox could NOT run).
+  // Layer-owned (only the sandbox port knows). Recovery: the escalation-retry
+  // loop offers a user-gated unsandboxed re-run (NEVER auto-grants). Default-OFF
+  // — emitted only when `QUANTA_SANDBOX_ESCALATION` is on.
+  | "sandbox_blocked"
   // ADR-0328 — Codex parity (`codex-rs/core/src/session/turn.rs:363-381`).
   // Provider-emitable: surfaced from the adapter boundary on a 400 with an
   // image-related marker. Recovery is handled by ADR-0323's

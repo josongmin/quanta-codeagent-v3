@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { TurnContextInput } from "@/agent/prompt"
 import { buildSystemPrompt, buildTurnContext } from "@/agent/prompt"
 import {
+  ADVISOR_TIMING_RAIL,
   ANTI_PLATITUDE,
   AUTONOMOUS_PREAMBLE,
   type DirectiveConfig,
@@ -44,6 +45,7 @@ const ALL_OFF: DirectiveConfig = {
   directiveThinkFreq: false,
   directiveAntiPlatitude: false,
   directiveParallelTools: false,
+  directiveAdvisorRail: false,
 }
 
 const base = (over: Partial<TurnContextInput> = {}): TurnContextInput => ({
@@ -85,6 +87,7 @@ const DIRECTIVES: ReadonlyArray<{
   { key: "directiveThinkFreq", text: THINK_FREQUENCY, marker: "THINKING BUDGET:" },
   { key: "directiveAntiPlatitude", text: ANTI_PLATITUDE, marker: "VOICE: substance only." },
   { key: "directiveParallelTools", text: PARALLEL_TOOLS, marker: "PARALLEL TOOLS:" },
+  { key: "directiveAdvisorRail", text: ADVISOR_TIMING_RAIL, marker: "ADVISOR: when the" },
 ]
 
 const onlyOn = (key: keyof DirectiveConfig): DirectiveConfig => ({ ...ALL_OFF, [key]: true })

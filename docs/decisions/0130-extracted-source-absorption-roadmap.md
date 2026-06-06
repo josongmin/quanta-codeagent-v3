@@ -1,6 +1,6 @@
 # ADR-0130 — Extracted-source absorption roadmap (R1–R6 → ADR 후보 catalog)
 
-- **Status**: Proposed (2026-05-24, roadmap only — individual ADRs are 0131+)
+- **Status**: ✅ **CLOSED / fully absorbed (jun-06)** — all 12 waves landed (W1–W5 = ADR 0131–0135 / W6 = 0159-retrieval-sota-stack / W7 = 0160-connectors-rest-api / W8 = 0161-scheduled-agent / W11 = 0162-plugin-process-isolation / W12 = 0163-multicloud-oauth-lock + 0163-foundry-future-ready). W9/W10 dropped as redundant. 코드 grep 전수검증(jun-06): reactor·hook-RPC·skill-scope·retrieval·connectors·scheduler 전부 src에 존재. 활성 backlog **0**. (was: Proposed 2026-05-24, roadmap only)
 - **Related**: [[extracted-source-novel-findings-2026-05-24]] (memory, 30-병렬 누적 결과), [[agent-analysis-corpus]] (코퍼스 위치), [[no-heuristics-only-validated]] (모든 흡수는 검증된 신호 기반)
 - **References**: `/.extracted_source/` 100MB+ corpus (Claude Desktop / Codex Desktop / Cursor / Claude Code CLI / Codex CLI / userdata) — all source paths anchor under this prefix
 
@@ -36,6 +36,8 @@ R1–R6 6-round, 30-병렬 agent 탐색으로 `.extracted_source/` (Cursor 3.2.1
 - W9 / W10 모두 **REDUNDANT** — drop from active backlog (이유는 위 표)
 - 활성 backlog: W6 W7 W8 W11 W12 = 5 (was 7)
 - ADR 0131 / 0135 PARTIALLY-NEEDED — scope 축소 가능 (foundation 안 다시 짤 필요 없음)
+
+**✅ 종결 갱신 (jun-06)**: 위 활성 backlog 5(W6/7/8/11/12)가 **전부 landed** → ADR 0159(retrieval)/0160(connectors-REST)/0161(scheduled-agent)/0162(plugin-isolation)/0163(multicloud-OAuth-lock+foundry). W1–W5도 0131–0135로 완료. **활성 backlog 0 — 이 로드맵 종결.** 코드 grep 전수검증(jun-06): `src/reactor`·hook-RPC·`src/skill`(7-scope)·retrieval·`src/connectors`·`src/scheduler` 전부 존재. 남은 흡수 대상은 신규 경쟁사 버전 출현 시에만(이 로드맵 범위 밖).
 
 ### 즉시 ADR proposal (이 roadmap과 함께)
 

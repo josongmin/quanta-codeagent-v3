@@ -19,6 +19,7 @@ import { errMessage } from "@/shared"
 import { FsJailError } from "@/storage"
 import { resolveJailedDoc } from "../_shared/resolve-jailed-doc"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+import { unescapeXml } from "./authoring/ooxml-read"
 import { findZipPart, unzip } from "./authoring/zip-store"
 
 const MAX_XLSX_BYTES = 32 * 1024 * 1024
@@ -49,17 +50,6 @@ export interface XlsxSheet {
 export type ParseXlsxResult =
   | { readonly ok: true; readonly sheets: XlsxSheet[] }
   | { readonly ok: false; readonly error: string }
-
-/** Reverse the 5 XML entities + numeric char refs. Pure. */
-const unescapeXml = (s: string): string =>
-  s
-    .replace(/&#x([0-9a-fA-F]+);/g, (_m, h) => String.fromCodePoint(Number.parseInt(h, 16)))
-    .replace(/&#(\d+);/g, (_m, d) => String.fromCodePoint(Number.parseInt(d, 10)))
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, "&")
 
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
 

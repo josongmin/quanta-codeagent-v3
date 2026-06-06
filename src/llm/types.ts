@@ -278,11 +278,33 @@ export interface RequestTimingCapture {
   markRequestSent(): void
 }
 
+/** Anthropic extended-thinking request shape (closed discriminated union).
+ *  - `enabled` — manual fixed budget (today's only arm; byte-identical). Used
+ *    for older models (Sonnet 4.5 / Haiku 4.5 / 3.x) and as the default-OFF /
+ *    knob-off path for every model.
+ *  - `adaptive` — the model self-paces per request (Anthropic 4.6+ families).
+ *    Carries NO `budget_tokens`. The optional `display` controls whether
+ *    thinking text is summarized (`"omitted"` is the API default → empty text).
+ *    Produced ONLY when `QUANTA_ADAPTIVE_THINKING` is on AND the model family is
+ *    adaptive-capable (`supportsAdaptiveThinking`); the manual `enabled` arm is
+ *    the per-model fallback so an older model never receives `{type:"adaptive"}`
+ *    (which would otherwise be a deprecation) nor `budget_tokens` on a 4.7/4.8
+ *    model (which 400s).
+ *  - `disabled` — explicit force-off. Not produced by the loop today (a
+ *    no-thinking turn omits the field entirely, byte-identical), kept so a
+ *    future caller can force thinking off on a model that would default it on.
+ *  The union is closed so the adapter/codec gets a compile error if a new arm is
+ *  added without a wire mapping. */
+export type ThinkingConfig =
+  | { readonly type: "enabled"; readonly budget_tokens: number }
+  | { readonly type: "adaptive"; readonly display?: "summarized" | "omitted" }
+  | { readonly type: "disabled" }
+
 export interface StreamInput {
   messages: Message[]
   system?: SystemPromptInput
   tools: ToolSchema[]
-  thinking?: { type: "enabled"; budget_tokens: number }
+  thinking?: ThinkingConfig
   /** ADR-0079 — optional pre-call gate. Absent (or `{kind:"auto"}`) ⇒ adapters
    *  emit the byte-identical pre-feature wire payload. `{kind:"tool",name}` with
    *  a name that doesn't match any entry in `tools` throws at the adapter (NOT

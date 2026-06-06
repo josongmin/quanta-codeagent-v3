@@ -18,6 +18,7 @@ config_refs:
     - QUANTA_DIRECTIVE_THINK_FREQ
     - QUANTA_DIRECTIVE_ANTI_PLATITUDE
     - QUANTA_DIRECTIVE_PARALLEL_TOOLS
+    - QUANTA_ADVISOR_RAIL
 owners: ["@songmin"]
 labels: [surface:core]
 depends_on: [mode-repo-rules-active-skills-working-state-memory-hints, build-turn-context]
@@ -47,6 +48,9 @@ purpose: |
        affirmations / filler praise; disagree plainly when evidence warrants.
     7. PARALLEL_TOOLS (QUANTA_DIRECTIVE_PARALLEL_TOOLS) — batch INDEPENDENT tool
        calls in a single turn; sequential only on a real data dependency.
+    8. ADVISOR_RAIL (QUANTA_ADVISOR_RAIL, RFC jun-6 §5.2) — when the `advisor`
+       tool is available, consult it BEFORE committing to an approach and BEFORE
+       declaring done; mentions forwardHistory:true (cc-cli advisor timing rail).
 
   BYTE-IDENTITY (headline invariant): the pure selector `selectActiveDirectives`
   returns "" when no knob is on, so nothing is pushed onto the dynamic parts and
@@ -95,6 +99,9 @@ knobs:
   - name: QUANTA_DIRECTIVE_PARALLEL_TOOLS
     default: 'undefined'
     purpose: Strict opt-in (`=== "1"`). ON ⇒ parallel tool-call nudge directive. OFF ⇒ absent (byte-identical).
+  - name: QUANTA_ADVISOR_RAIL
+    default: 'undefined'
+    purpose: Strict opt-in (`=== "1"`, RFC jun-6 §5.2). ON ⇒ advisor timing-rail directive (consult before approach / before done). OFF ⇒ absent (byte-identical).
 deliberate_hold: null
 notes: |
   Mechanism mirrors C3 brief-mode (`src/agent/brief.ts` + `BRIEF_NOTICE`): the

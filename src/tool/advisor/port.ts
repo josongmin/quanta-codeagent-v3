@@ -46,6 +46,13 @@ export type AdvisorErrorKind =
 export interface AdvisorConsultRequest {
   readonly question: string
   readonly context?: string
+  /** RFC jun-6 §5.1 — when `true`, the PORT (composition root) assembles the
+   *  REDACTED conversation transcript and prepends it to `context` before the
+   *  consult. The `@/tool` slice never sees the transcript (ToolContext carries
+   *  none by design) — it only forwards this boolean. A port with no transcript
+   *  source treats a `true` here as a no-op (the explicit question/context path
+   *  is unchanged). */
+  readonly forwardHistory?: boolean
   readonly model?: string
   readonly signal?: AbortSignal
 }

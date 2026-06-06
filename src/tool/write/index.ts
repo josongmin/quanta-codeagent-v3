@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { defaultFileSystemPort, type FileSystemPort, FsJailError } from "@/storage"
+import { globWriteGuardEvent, writeBudgetDeny } from "../_shared/exfil-rail-guards"
 import { defineTool } from "../factory"
 import { captureFileHistory } from "../file-history/capture"
 import { gitWriteGuardDeny } from "../git-write-guard-result"
@@ -49,6 +50,25 @@ const commitWrite = async (
   }
 }
 
+/** Static pre-fs denies for `write` (BEFORE any fs call, never a partial write):
+ *  ADR-0091 git-write-protection THEN jun-6 exfil-rail (b) glob-in-write. Both
+ *  default-OFF (unwired guard / flag absent ⇒ `null` ⇒ byte-identical). Extracted
+ *  so `execute` stays under the biome cognitive-complexity cap. */
+const writeStaticDeny = (path: string, ctx: ToolContext): ToolEvent | null =>
+  gitWriteGuardDeny(path, ctx) ?? globWriteGuardEvent(path, ctx)
+
+/** Pre-commit denies for `write` (AFTER existence check, BEFORE commit): ADR-0474
+ *  stale-read-guard THEN jun-6 exfil-rail (a) per-turn write-budget. Both
+ *  default-OFF (`null` ⇒ byte-identical). Extracted so `execute` stays under the
+ *  biome cognitive-complexity cap. */
+const writePreCommitDeny = async (
+  fs: FileSystemPort,
+  ctx: ToolContext,
+  path: string,
+  existed: boolean,
+): Promise<ToolResult | null> =>
+  (await staleWriteGuard(fs, ctx, path, existed)) ?? writeBudgetDeny(ctx)
+
 const schema = z.object({
   path: z.string().describe("File path (absolute or relative to cwd)"),
   content: z.string().describe("Full file content to write"),
@@ -92,15 +112,10 @@ export const makeWriteTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<
     interruptBehavior: (): "block" => "block",
 
     async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
-      // ADR-0091 git-write-protection: a write to `.git/{hooks,config,config.
-      // worktree,info/attributes}` or `.vscode/**` is a code-execution / policy
-      // -escape vector (git/editor auto-runs them). Static-deny BEFORE any fs
-      // call, mirroring the FsJailError hard-stop posture below — never a
-      // partial write. Default-OFF: when `ctx.gitWriteGuard` is unwired the
-      // helper returns null and the path is byte-identical.
-      const guardDeny = gitWriteGuardDeny(input.path, ctx)
-      if (guardDeny) {
-        yield guardDeny
+      // Static pre-fs denies (git-write-protection + jun-6 glob-in-write guard).
+      const staticDeny = writeStaticDeny(input.path, ctx)
+      if (staticDeny) {
+        yield staticDeny
         return
       }
       // Resolve relative paths against the session cwd, not process.cwd().
@@ -108,11 +123,12 @@ export const makeWriteTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<
       // are written, so a denied path is NEVER a partial write.
       try {
         const existed = await fs.fileExists(input.path, ctx.cwd)
-        // ADR-0474 — block overwriting a file read earlier this session that was
-        // externally modified since ("re-read first"). No-op when guard unwired.
-        const stale = await staleWriteGuard(fs, ctx, input.path, existed)
-        if (stale) {
-          yield { type: "result", result: stale }
+        // ADR-0474 stale-read-guard + jun-6 exfil-rail (a) per-turn write-budget,
+        // both AFTER the existence check and BEFORE the commit (a deny is never a
+        // partial write). Default-OFF ⇒ `null` ⇒ byte-identical.
+        const preCommitDeny = await writePreCommitDeny(fs, ctx, input.path, existed)
+        if (preCommitDeny) {
+          yield { type: "result", result: preCommitDeny }
           return
         }
         // ADR-0440 — capture the pre-write bytes ONLY when the tool-diff sink is

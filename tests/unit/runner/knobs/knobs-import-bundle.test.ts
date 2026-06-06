@@ -36,6 +36,7 @@ import { mustPassKnob } from "@/runner/knobs/knobs/must-pass"
 import { networkProxyKnob } from "@/runner/knobs/knobs/network-proxy"
 import { personaKnob } from "@/runner/knobs/knobs/persona"
 import { policyMergeKnob } from "@/runner/knobs/knobs/policy-merge"
+import { repoMapKnob } from "@/runner/knobs/knobs/repo-map"
 import { reproTestKnob } from "@/runner/knobs/knobs/repro-test"
 import { skillsKnob } from "@/runner/knobs/knobs/skills"
 import { subagentKnob } from "@/runner/knobs/knobs/subagent"
@@ -60,6 +61,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(networkProxyKnob),
   asAnyKnob(personaKnob),
   asAnyKnob(policyMergeKnob),
+  asAnyKnob(repoMapKnob),
   asAnyKnob(reproTestKnob),
   asAnyKnob(skillsKnob),
   asAnyKnob(subagentKnob),

@@ -236,6 +236,50 @@ describe("auto-title · sanitizeTitle (transcript-corruption defense)", () => {
     expect(out).toContain("Build")
   })
 
+  test("strips Trojan-Source bidi controls + zero-width formatters (visual-spoof defense)", () => {
+    // The C0/C1 sweep does NOT cover these (they are > U+009F and not
+    // whitespace), so a malicious first prompt / compromised cheap title model
+    // could otherwise write a title that visually misrepresents itself in the
+    // session list (CVE-2021-42574 / Trojan-Source class). Build the inputs from
+    // code points so the test source stays ASCII-clean and grep-safe.
+    const TARGETS = [
+      0x061c, // ARABIC LETTER MARK
+      0x200b, // ZERO WIDTH SPACE
+      0x200c, // ZERO WIDTH NON-JOINER
+      0x200d, // ZERO WIDTH JOINER
+      0x200e, // LEFT-TO-RIGHT MARK
+      0x200f, // RIGHT-TO-LEFT MARK
+      0x2060, // WORD JOINER
+      0x202a, // LRE
+      0x202b, // RLE
+      0x202c, // POP DIRECTIONAL FORMATTING
+      0x202d, // LRO
+      0x202e, // RLO (the classic Trojan-Source override)
+      0x2066, // LRI
+      0x2067, // RLI
+      0x2068, // FSI
+      0x2069, // PDI
+      0xfeff, // ZERO WIDTH NO-BREAK SPACE / BOM
+    ]
+    // Each target, individually, must be removed (and the visible text kept).
+    for (const cp of TARGETS) {
+      const out = sanitizeTitle(`Ship${String.fromCharCode(cp)}It`, 6)
+      expect(out).not.toContain(String.fromCharCode(cp))
+      expect(out.replace(/\s+/g, "")).toBe("ShipIt")
+    }
+    // And all of them interleaved at once → ZERO invisibles survive.
+    let mixed = "X"
+    for (const cp of TARGETS) mixed += `${String.fromCharCode(cp)}Y`
+    const out = sanitizeTitle(mixed, 20)
+    expect(out).toMatch(/^[XY ]+$/)
+    expect([...out].some((ch) => TARGETS.includes(ch.charCodeAt(0)))).toBe(false)
+  })
+
+  test("keeps legitimate non-ASCII (CJK / emoji) untouched — strip is targeted", () => {
+    expect(sanitizeTitle("빌드 서버 설정", 6)).toBe("빌드 서버 설정")
+    expect(sanitizeTitle("Fix 🚀 bug", 6)).toBe("Fix 🚀 bug")
+  })
+
   test("collapses newlines/tabs to single spaces (no multi-line metadata)", () => {
     const out = sanitizeTitle("Line one\nLine\ttwo\r\nthree", 10)
     expect(out).not.toContain("\n")

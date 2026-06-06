@@ -62,13 +62,23 @@ export interface TurnEnvContext {
    *  string from the renderer's perspective; the probe constrains it to the
    *  closed set. */
   pkgMgr?: string
+  /**
+   * Bounded, pre-rendered repo-map tree (turn-1 only — see {@link probeRepoMap}
+   * + RFC jun-6 §4). Verbatim string from the `file_tree_summary` renderer,
+   * ALREADY capped (depth / file-count / char-backstop) by the injected scan
+   * adapter. The renderer prints it under a fixed stale-tolerant header.
+   * Absent ⇒ no block change (byte-identical default-OFF). STRUCTURE ONLY —
+   * paths + counts, never file CONTENTS — so it never duplicates the memory /
+   * CLAUDE.md sections that ride their own blocks. */
+  repoMap?: string
 }
 
 const isEnvEmpty = (env: TurnEnvContext): boolean =>
   env.platform === undefined &&
   env.shell === undefined &&
   env.gitStatus === undefined &&
-  env.pkgMgr === undefined
+  env.pkgMgr === undefined &&
+  env.repoMap === undefined
 
 /**
  * Render the `## Environment` block, or `undefined` when the env carries no
@@ -83,6 +93,17 @@ export const renderEnvBlock = (env: TurnEnvContext | undefined): string | undefi
   if (env.shell !== undefined) lines.push(`Shell: ${env.shell}`)
   if (env.gitStatus !== undefined) lines.push(`Git: ${env.gitStatus}`)
   if (env.pkgMgr !== undefined) lines.push(`Package manager: ${env.pkgMgr}`)
+  // Repo map — bounded orientation tree (turn-1 only). Stale-tolerant framing
+  // is a FIXED literal (mirrors Codex's "may be incomplete… do not repeat back")
+  // so the renderer stays pure. The map string is already capped by the probe's
+  // injected scan adapter; the renderer never scans or truncates.
+  if (env.repoMap !== undefined) {
+    lines.push(
+      "",
+      "Repo map (bounded, may be incomplete or out of date — do not repeat back unless relevant):",
+      env.repoMap,
+    )
+  }
   return lines.join("\n")
 }
 
@@ -216,4 +237,69 @@ export const probeTurnEnv = (opts: ProbeTurnEnvOpts): TurnEnvContext => {
     // Defensive: leave field absent.
   }
   return out
+}
+
+// ─── probeRepoMap ────────────────────────────────────────────────────────────
+
+/** Default caps — deliberately TIGHTER than the `file_tree_summary` tool
+ *  defaults (depth 3 / 400 files) because turn-0 orientation is a cheaper-must-be
+ *  one-time payment than an on-demand tool call. See RFC jun-6 §4.4. */
+export const REPO_MAP_DEFAULT_MAX_DEPTH = 2
+export const REPO_MAP_DEFAULT_MAX_FILES = 200
+/** HARD char backstop (≈ ~1500 tokens). This is the SHAPE-INDEPENDENT bound: even
+ *  a directory with thousands of one-char filenames cannot blow turn-0 because
+ *  the rendered string is truncated at this many chars on a line boundary. */
+export const REPO_MAP_DEFAULT_MAX_CHARS = 6000
+
+/**
+ * Closed input shape for the live repo-map probe. The `scan` adapter is the
+ * load-bearing injection seam — it runs `rg --files` + the `file_tree_summary`
+ * PURE `aggregate`/`render` helpers and returns the ALREADY-BOUNDED tree string
+ * (or `undefined` on any failure). Injecting it keeps THIS slice free of
+ * `runShell` (the shell call stays in the runner adapter, exactly like
+ * `gitPorcelainStdout` is pre-captured for {@link probeTurnEnv}) and lets tests
+ * pass a canned tree for fully deterministic replay.
+ */
+export interface ProbeRepoMapOpts {
+  cwd: string
+  /** Injected scanner — captures one `rg --files` stdout, then aggregate/render
+   *  with deterministic `rank:"alpha"`, applies the `maxChars` truncation, and
+   *  returns the bounded tree (or `undefined` on any failure / empty repo). */
+  scan: (opts: {
+    cwd: string
+    maxDepth: number
+    maxFiles: number
+    maxChars: number
+  }) => Promise<string | undefined>
+  /** Default {@link REPO_MAP_DEFAULT_MAX_DEPTH}. */
+  maxDepth?: number
+  /** Default {@link REPO_MAP_DEFAULT_MAX_FILES}. */
+  maxFiles?: number
+  /** Default {@link REPO_MAP_DEFAULT_MAX_CHARS}. */
+  maxChars?: number
+}
+
+/**
+ * Live repo-map probe (turn-1 only — the turn gate lives in the CALLER, mirroring
+ * the `probeTurnEnv` split). The scan is side-effecting and lives behind the
+ * injected `scan` adapter; this function only thresholds the caps and collapses
+ * every failure to `undefined`.
+ *
+ * NEVER throws — best-effort, mirroring {@link probeTurnEnv}'s no-throw contract.
+ * A throwing / empty scan ⇒ `undefined` ⇒ no `repoMap` field ⇒ the env block is
+ * byte-identical to the no-map path.
+ */
+export const probeRepoMap = async (opts: ProbeRepoMapOpts): Promise<string | undefined> => {
+  try {
+    const tree = await opts.scan({
+      cwd: opts.cwd,
+      maxDepth: opts.maxDepth ?? REPO_MAP_DEFAULT_MAX_DEPTH,
+      maxFiles: opts.maxFiles ?? REPO_MAP_DEFAULT_MAX_FILES,
+      maxChars: opts.maxChars ?? REPO_MAP_DEFAULT_MAX_CHARS,
+    })
+    if (tree === undefined || tree.trim().length === 0) return undefined
+    return tree
+  } catch {
+    return undefined
+  }
 }

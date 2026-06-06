@@ -17,7 +17,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, readFileSync } from "node:fs"
+import { mkdtempSync, readdirSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { defaultForker, type ForkSessionPort } from "@/agent/fork-session"
@@ -129,10 +129,19 @@ describe("Wire 3 ADR-0219 — focus-chain reinject already wired in loop.ts", ()
     // wires `defaultFocusChainTracker({ reinjectEveryN })` and the loop
     // consumes it. This wire is COMPLETE in main; this case pins the fact
     // so we don't accidentally re-implement it.
-    const loopSrc = readFileSync(
-      join(import.meta.dir, "..", "..", "src", "agent", "loop.ts"),
-      "utf8",
-    )
+    // The 2026-06 loop decomposition relocated the focus-chain wire from the
+    // monolithic loop.ts into the `src/agent/loop/` slice; read the whole loop
+    // surface (shim + slice) so the tombstone pins the wire wherever it lives.
+    const agentDir = join(import.meta.dir, "..", "..", "src", "agent")
+    const loopParts = [readFileSync(join(agentDir, "loop.ts"), "utf8")]
+    try {
+      for (const f of readdirSync(join(agentDir, "loop")).sort()) {
+        if (f.endsWith(".ts")) loopParts.push(readFileSync(join(agentDir, "loop", f), "utf8"))
+      }
+    } catch {
+      // pre-decomposition tree: the shim is the whole surface.
+    }
+    const loopSrc = loopParts.join("\n")
     expect(loopSrc).toContain("cfg.focusChain")
     expect(loopSrc).toContain("tracker.tickTurn()")
     expect(loopSrc).toContain("tracker.getInjection()")

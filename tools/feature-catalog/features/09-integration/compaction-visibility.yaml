@@ -77,3 +77,10 @@ notes: |
   emit helper + 1-line callsite). 다음 wave: loop.ts에서
   config.objective.setNextActions로 closure 구성 + HookBus.emit("post_compact")
   subscriber wire-up. microcompact는 future tool/env knob으로 invoke.
+
+  ⚠️ 용어 구분(jun-06): 본 yaml의 `src/agent/microcompact/`(ADR-0409)는 whole-MESSAGE-drop
+  (oldest N% 메시지 통째 제거, orphan guard 無, disk persist 無, UNWIRED). 이와 별개로
+  jun-6-microcompaction RFC가 추가한 tier-1 tool-result eviction은 in-place tool_result CONTENT
+  clearing(block 보존 → orphan-safe, spill persist, wm.replace 배선 LIVE) — 별도 슬라이스
+  `src/agent/tool-result-evict/` + fc `microcompact-tool-result-evict.yaml`. 두 메커니즘은
+  알고리즘·safety profile·cost가 다르므로 카탈로그에서 conflate 금지.

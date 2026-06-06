@@ -18,7 +18,7 @@
  * `readImportFile` (credential-ban + no-follow-symlink, N10).
  */
 
-import { readdir } from "node:fs/promises"
+import { readdir, stat } from "node:fs/promises"
 import { basename, join } from "node:path"
 import { type GlobRule, loadGlobRules } from "@/agent/glob-rules"
 import { loadRepoRules } from "@/agent/repo-rules"
@@ -49,12 +49,31 @@ const malformed = (path: string, detail: string): MigrationWarning => ({
   detail,
 })
 
+/** DoS cap on a single competitor config file. A JSON config of more than 4 MiB
+ *  is hostile (or unsupported): parsing it would buffer the whole file + the
+ *  parse tree in memory. We `stat` the size BEFORE any byte is read so an
+ *  oversized file is refused without ever loading it into a parse. */
+const MAX_CONFIG_BYTES = 4 * 1024 * 1024
+
 /** Read + JSON.parse `path`. Returns the parsed value, or a typed warning on
- *  absent / unreadable / malformed. Credential / symlink reads are refused by
- *  `readImportFile` (the rejection surfaces as `unreadable`, never a crash). */
+ *  absent / unreadable / malformed / oversized. Credential / symlink reads are
+ *  refused by `readImportFile` (the rejection surfaces as `unreadable`, never a
+ *  crash). An over-cap file is refused on size alone — never read into a parse. */
 const readJson = async (
   path: string,
 ): Promise<{ ok: true; value: unknown } | { ok: false; warning: MigrationWarning }> => {
+  try {
+    const st = await stat(path)
+    if (st.isFile() && st.size > MAX_CONFIG_BYTES) {
+      return {
+        ok: false,
+        warning: malformed(path, `config file too large (${st.size} bytes > ${MAX_CONFIG_BYTES})`),
+      }
+    }
+  } catch {
+    // stat failure (absent / race) falls through to the read below, which
+    // produces the precise absent/unreadable warning.
+  }
   let raw: string
   try {
     raw = await readImportFile(path)

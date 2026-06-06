@@ -29,7 +29,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
 
 const REPO_ROOT = resolve(import.meta.dir, "../..")
@@ -82,13 +82,39 @@ const BARE_CATCH_BASELINE: Readonly<Record<string, number>> = {
 
 const BARE_CATCH_RE = /\}\s*catch\s*\{/g
 
-const countBareCatches = (relPath: string): number => {
-  const abs = resolve(REPO_ROOT, relPath)
-  const src = readFileSync(abs, "utf8")
-  return [...src.matchAll(BARE_CATCH_RE)].length
+// The 2026-06 loop decomposition split `src/agent/loop.ts` into a thin shim +
+// the `src/agent/loop/` slice. The bare-catches + pinned labels relocated there,
+// so for the loop entry the ratchet reads the WHOLE surface (shim + slice): the
+// invariant is "the LOOP has ≤ baseline bare-catches / still emits the label,"
+// independent of how the decomposition distributes them across files.
+const loopSurfaceFiles = (): string[] => {
+  const files = [resolve(REPO_ROOT, "src/agent/loop.ts")]
+  const dir = resolve(REPO_ROOT, "src/agent/loop")
+  try {
+    for (const f of readdirSync(dir).sort()) {
+      if (f.endsWith(".ts")) files.push(resolve(dir, f))
+    }
+  } catch {
+    // pre-decomposition tree: the shim is the whole surface.
+  }
+  return files
 }
 
-const fileContents = (relPath: string): string => readFileSync(resolve(REPO_ROOT, relPath), "utf8")
+const isLoop = (relPath: string): boolean => relPath === "src/agent/loop.ts"
+
+const countBareCatches = (relPath: string): number => {
+  const sources = isLoop(relPath)
+    ? loopSurfaceFiles().map((p) => readFileSync(p, "utf8"))
+    : [readFileSync(resolve(REPO_ROOT, relPath), "utf8")]
+  return sources.reduce((n, src) => n + [...src.matchAll(BARE_CATCH_RE)].length, 0)
+}
+
+const fileContents = (relPath: string): string =>
+  isLoop(relPath)
+    ? loopSurfaceFiles()
+        .map((p) => readFileSync(p, "utf8"))
+        .join("\n")
+    : readFileSync(resolve(REPO_ROOT, relPath), "utf8")
 
 describe("R3 audit-H — pinned labels survive on every audited catch site", () => {
   for (const { file, labels } of PINNED_LABELS) {

@@ -245,6 +245,28 @@ export const normalizeModelFamily = (model: string): string => {
   return m
 }
 
+/** Anthropic model FAMILIES that support `thinking:{type:"adaptive"}` (the
+ *  model self-paces per request). Keyed by NORMALIZED family so a cloud slug
+ *  (`anthropic.claude-opus-4-8-v1:0`, `claude-opus-4-6@20251101`) collapses to
+ *  the same key as the public slug. Sibling of {@link CACHE_1H_ALLOWLIST} —
+ *  reuses {@link normalizeModelFamily}. A model NOT in this set NEVER receives
+ *  `{type:"adaptive"}`; it falls back to the manual `{type:"enabled",
+ *  budget_tokens}` path (so Sonnet 4.5 / Haiku 4.5 / 3.x never 400 and never get
+ *  a deprecated adaptive request). NOTE deliberately EXCLUDES `claude-haiku-4-5`
+ *  (no adaptive support) even though it IS on the 1h-cache allowlist — the two
+ *  sets are intentionally different. */
+export const ADAPTIVE_THINKING_FAMILIES: ReadonlySet<string> = new Set([
+  "claude-opus-4-8",
+  "claude-opus-4-7",
+  "claude-opus-4-6",
+  "claude-sonnet-4-6",
+])
+
+/** True iff `model`'s normalized family is adaptive-thinking-capable. An absent
+ *  / unknown / garbage slug is NOT adaptive (fail-safe → manual budget). */
+export const supportsAdaptiveThinking = (model: string | undefined): boolean =>
+  model !== undefined && ADAPTIVE_THINKING_FAMILIES.has(normalizeModelFamily(model))
+
 /** Resolve the effective prompt-cache TTL for `model`. `"1h"` is granted ONLY
  *  when the knob selected `"1h"` AND the model's family is on the
  *  {@link CACHE_1H_ALLOWLIST}; otherwise `"5m"` (byte-identical fixed-5m

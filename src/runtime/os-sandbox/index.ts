@@ -1,5 +1,7 @@
 export { compileBubblewrapArgs } from "./bubblewrap"
 export { type DefaultOsSandboxConfig, defaultOsSandbox } from "./default"
+// RFC jun-6 — sandbox-block discriminant classifier (pure, default-OFF).
+export { classifySandboxDenial } from "./denial-classify"
 export {
   isBubblewrapAvailable,
   isLandlockAvailable,
@@ -24,9 +26,12 @@ export {
   linuxOsSandbox,
 } from "./linux"
 // ADR-0237 — layer-owned arm `sandbox_error` (default-OFF bridge).
+// RFC jun-6 — sibling `sandbox_blocked` converter (block vs degrade).
 export type { SandboxLlmErrorKnobs, SandboxResultWithLlmError } from "./llm-error-bridge"
 export {
+  isSandboxBlockedFailure,
   isSandboxDegradedFailure,
+  sandboxBlockToLlmError,
   sandboxResultToLlmError,
   withSandboxLlmErrorEmit,
 } from "./llm-error-bridge"
@@ -50,6 +55,8 @@ export type {
   OsSandboxConfig,
   SandboxAvailability,
   SandboxBackend,
+  SandboxDenial,
+  SandboxDenialSignal,
   SandboxedSpawnResult,
   SandboxedSpawnSpec,
   SandboxPolicy,

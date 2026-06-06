@@ -161,6 +161,24 @@ export interface RuntimeConfig {
    *  `bgCompactionEnabled` slice gate). Default false ⇒ the loop's existing
    *  synchronous proactive/reactive compaction paths are byte-identical. */
   readonly bgCompaction: boolean
+  /** RFC jun-6-microcompaction — tier-1 tool-result eviction gate
+   *  (`QUANTA_MICROCOMPACT`). Strict opt-in: `true` ONLY when the value is
+   *  exactly `"1"`. Default false ⇒ `maybeCompact` never constructs the
+   *  eviction pre-pass, never reads its clock, never touches the spill dir — the
+   *  existing tier-2-only flow is byte-identical. */
+  readonly microcompact: boolean
+  /** Keep the LAST N tool_results intact during a microcompaction
+   *  (`QUANTA_MICROCOMPACT_KEEP_RECENT`, positive int). Absent ⇒ the wire
+   *  default (the recent results are the live working set). */
+  readonly microcompactKeepRecent: number | undefined
+  /** Commit a microcompaction ONLY if estimated tokensSaved > this floor
+   *  (`QUANTA_MICROCOMPACT_FLOOR_TOKENS`, positive int). Below the floor,
+   *  churning the transcript is not worth it. Absent ⇒ the wire default. */
+  readonly microcompactFloorTokens: number | undefined
+  /** Time-based cadence (ms) between microcompaction fires
+   *  (`QUANTA_MICROCOMPACT_INTERVAL_MS`, positive int). A min-interval gate held
+   *  in the wire. Absent ⇒ the wire default. */
+  readonly microcompactIntervalMs: number | undefined
   /** ADR-0471 untrusted-source envelope gate (`QUANTA_UNTRUSTED_ENVELOPE`).
    *  Strict opt-in: `true` ONLY when the value is exactly `"1"` (mirrors the
    *  `untrustedEnvelopeEnabled` slice gate). Default false ⇒ tool-result text
@@ -332,6 +350,26 @@ export interface RuntimeConfig {
    *  fanning in (next phase / handoff / shutdown). Pure predicate + injected
    *  clock; absent ⇒ no beacons, byte-identical. */
   readonly teamIdle: boolean
+  /** Peer teammate messaging (`QUANTA_TEAM_PEER_MSG`, RFC jun-6). Strict opt-in
+   *  (`=== "1"`). Builds ON the EXISTING `QUANTA_TEAM_*` peer mailbox + wake-idle
+   *  substrate; adds three deltas. Default false ⇒ (a) the loop wires no
+   *  `peerInbox` drain (`pollPeerInbox` returns null ⇒ the turn loop is
+   *  byte-identical — peer mail surfaces ONLY via a manual `subagent_read_messages`
+   *  poll, today's behavior); (b) no `TeamScopedMailbox` decorator (the raw global
+   *  mailbox is used — no cross-team partition); (c) no team registry, `team_create`/
+   *  `team_delete` NOT registered. When ON: (1) auto-delivery — undelivered peer
+   *  mail drains into the recipient's turn at the turn-top seam (no manual poll;
+   *  a wake'd idle teammate now auto-receives); (2) team boundary — a
+   *  `TeamRegistryPort` + a `TeamScopedMailbox` decorator over the EXISTING store
+   *  denies cross-team `send` (before enqueue) and scopes `"*"` to the sender's
+   *  own team; `team_create`/`team_delete` mint/reap a membership scope (NOT a new
+   *  store — the audit-H caps stay global); (3) redaction — the auto-delivered
+   *  body is routed through `@/security/redaction` (peer content is untrusted-as-
+   *  DATA) before it enters context. SECURITY: the peer bus is a COMMS channel,
+   *  never a grant channel — auto-delivered mail enters context as INFORMATION
+   *  only; it does NOT invoke the permission decider, and the broker's
+   *  leader-authored-response-only widen (no-self-grant) is preserved. */
+  readonly teamPeerMsg: boolean
   /** C1 — Canvas / artifact persistence store (`QUANTA_ARTIFACT_STORE`). Strict
    *  opt-in (`=== "1"`). Default false ⇒ no registry, the artifact tools are NOT
    *  registered (byte-identical). When ON, the composition root mints ONE
@@ -397,6 +435,33 @@ export interface RuntimeConfig {
    *  structured reason is computed lazily ONLY when this is on (zero allocation
    *  otherwise). */
   readonly surfaceDenyReason: boolean
+  /** sandbox-escalation (RFC jun-6) — OS-sandbox block → user-gated
+   *  escalation-retry loop (`QUANTA_SANDBOX_ESCALATION`). Strict opt-in
+   *  (`=== "1"`). Default false ⇒ the platform result-mapping points NEVER
+   *  consult `classifySandboxDenial` (no `denialReason` is ever set),
+   *  `sandboxBlockToLlmError` is never wired, and a nonzero exit from a
+   *  sandboxed command is BYTE-IDENTICAL to today (a plain failure — no
+   *  discriminant, no escalation prompt, no post-denial record). When ON, a
+   *  recognised sandbox BLOCK (the sandbox ran AND denied a syscall) is surfaced
+   *  to the model as recoverable; the model may re-request the byte-same argv
+   *  `escalate:true` + a `justification`, routed through the EXISTING post-denial
+   *  3-step machine (`recordDenial` → `recordRiskSeen` → `recordUserOverride`) +
+   *  the normal permission gate (escalation NEVER auto-grants — always routes to
+   *  user/HITL). On approve the byte-same argv re-runs WITHOUT the sandbox
+   *  wrapper for that ONE call. NOTE: this unlocks a future SAFE default-ON
+   *  sandbox (a blocked-but-legitimate command now recovers via escalation
+   *  instead of failing opaquely) — but FLIPPING `QUANTA_SANDBOX` to default-ON
+   *  is a SEPARATE decision, explicitly OUT OF SCOPE here. */
+  readonly sandboxEscalation: boolean
+  /** sandbox-escalation per-turn retry cap (`QUANTA_SANDBOX_ESCALATION_MAX`,
+   *  the `ExecPolicyAmendmentExhausted` analog). Absent / invalid ⇒ the
+   *  escalation cap module's default (3). Bounds escalation REQUESTS per
+   *  `(threadId, turnId)` — once exhausted the tool returns a typed
+   *  `escalation-exhausted` result and fires no further prompt (anti-spam: a
+   *  model cannot loop escalate→deny→escalate forever). A KNOB, not a baked
+   *  constant. Separate from the loop-breaker — it bounds escalation requests,
+   *  not tool calls. */
+  readonly sandboxEscalationMax: number | undefined
   /** account-ratelimit (RFC jun-6) proactive pre-request delay gate
    *  (`QUANTA_RATELIMIT_PROACTIVE`). Strict opt-in (`=== "1"`). Default false ⇒
    *  the LLM adapters never capture `.withResponse()` ratelimit headers into the
@@ -511,6 +576,33 @@ export interface RuntimeConfig {
   readonly directiveAntiPlatitude: boolean
   /** Parallel tool-call nudge (`QUANTA_DIRECTIVE_PARALLEL_TOOLS`). */
   readonly directiveParallelTools: boolean
+  /** Advisor timing-rail directive (RFC jun-6 §5.2 — `QUANTA_ADVISOR_RAIL`).
+   *  When ON, the per-turn dynamic slot carries a short "consult the advisor
+   *  before committing to an approach / before declaring done" rail. Default
+   *  false ⇒ zero bytes ⇒ byte-identical. The TEXT itself only matters when the
+   *  `advisor` tool is also wired, but the selector emits it whenever the knob is
+   *  on (the rail is harmless prose when no advisor exists). */
+  readonly directiveAdvisorRail: boolean
+  /** adaptive-thinking (RFC jun-6) — Anthropic `thinking:{type:"adaptive"}` gate
+   *  (`QUANTA_ADAPTIVE_THINKING`). Strict opt-in (`=== "1"`). Default false ⇒
+   *  the effort/classifier producer (`applyEffortClassifierFloor`) emits the
+   *  manual `{type:"enabled", budget_tokens:N}` arm for EVERY model — BYTE-IDENTICAL
+   *  to today. When ON *and* the resolved model's family is adaptive-capable
+   *  (`supportsAdaptiveThinking` — Opus 4.6/4.7/4.8, Sonnet 4.6), the producer
+   *  emits `{type:"adaptive"}` (no `budget_tokens`) so the model self-paces; older
+   *  models (Sonnet 4.5 / Haiku 4.5 / 3.x) still fall back to the manual budget
+   *  (no 400). The "should we think at all" signal is unchanged (`budgetTokens >
+   *  0`, effort-derived) — this knob only changes the SHAPE, never whether
+   *  thinking is requested. Anthropic-only: OpenAI / Responses never read the
+   *  field. Repairs the latent live break where the default model `claude-opus-4-8`
+   *  400s on any non-zero manual budget. */
+  readonly adaptiveThinking: boolean
+  /** Advisor full-history forward (RFC jun-6 §5.1 — `QUANTA_ADVISOR_FORWARD_HISTORY`).
+   *  Strict `=== "1"` opt-in. Default false ⇒ the advisor knob wires NO
+   *  `transcriptSource`, so a `forwardHistory:true` request is a no-op (the
+   *  explicit question/context path is byte-identical). ON ⇒ the knob injects a
+   *  redacted live-transcript source into `advisorConsultFromLLM`. */
+  readonly advisorForwardHistory: boolean
   /** FS jail disable flag (`QUANTA_FS_JAIL=off`). Default false (jail ON). */
   readonly fsJailDisabled: boolean
   /** ADR-0062 cap-as-instruction dispatch enforcement (`QUANTA_CAP_ENFORCE=1`).
@@ -812,6 +904,30 @@ export interface RuntimeConfig {
    *  `routePermissionHookVerdict` (HARD_DENY floor enforced — a hook `allow`
    *  never overrides the denylist). Extra guard atop hook presence. */
   readonly permissionHook: boolean
+  /** jun-6 (RFC jun-6-exfil-egress-rails (b)) — glob-in-write-path guard gate
+   *  (`QUANTA_GLOB_WRITE_GUARD`). Strict opt-in (`=== "1"`). Default false ⇒ the
+   *  dispatch seam does NOT set `ToolContext.globWriteGuard`, so `write`/`edit`
+   *  accept a glob/wildcard `path` as a literal filename exactly as before
+   *  (byte-identical). When ON, a `path` that is a glob pattern (`*`/`?`/`{a,b}`)
+   *  is rejected with the verbatim cc-cli message BEFORE any fs call. The RFC
+   *  argues this is a strong default-ON candidate after a soak; it ships
+   *  default-OFF for byte-identity (mirrors `globWriteGuardEnabled`). */
+  readonly globWriteGuard: boolean
+  /** jun-6 (RFC jun-6-exfil-egress-rails (a)) — per-turn write/edit budget gate
+   *  (`QUANTA_WRITE_BUDGET`). Strict opt-in (`=== "1"`). Default false ⇒ no
+   *  budget port is constructed and `ToolContext.writeBudget` is absent, so
+   *  `write`/`edit` proceed byte-identically (no counter). The budget ALSO
+   *  requires a configured cap ({@link writeBudgetMax}) — both must be present
+   *  for any side effect (advertise-iff-able) — and only fires in an
+   *  untrusted-input turn (the §3.5 untrusted-envelope signal). */
+  readonly writeBudget: boolean
+  /** jun-6 (RFC jun-6-exfil-egress-rails (a)) — per-turn write/edit cap N
+   *  (`QUANTA_WRITE_BUDGET_MAX`, a positive integer). This is the CONFIGURABLE
+   *  KNOB value — there is NO hardcoded default (no-heuristics rule: the cap MUST
+   *  be calibrated from a real-turn write-count corpus, not guessed). Absent /
+   *  invalid ⇒ `undefined` ⇒ the budget stays INERT even when {@link writeBudget}
+   *  is on, so the path is byte-identical until an operator sets a cap. */
+  readonly writeBudgetMax: number | undefined
 }
 
 /** jun-6 — default watchdog cap (ms) for a `block`-tool critical section. The
@@ -832,6 +948,23 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // slice gate; `parseBool` also accepts true/on but the slice gate is the
     // SSOT, so keep it strict here too).
     bgCompaction: env["QUANTA_BG_COMPACTION"] === "1",
+    // RFC jun-6-microcompaction — strict `=== "1"` opt-in. Default false ⇒ the
+    // tier-1 eviction pre-pass is never constructed (byte-identical). The
+    // keep/floor/interval tunables are positive ints (no magic literals); absent
+    // ⇒ the wire applies its own named defaults.
+    microcompact: env["QUANTA_MICROCOMPACT"] === "1",
+    microcompactKeepRecent: parsePositiveInt(
+      env["QUANTA_MICROCOMPACT_KEEP_RECENT"],
+      "QUANTA_MICROCOMPACT_KEEP_RECENT",
+    ),
+    microcompactFloorTokens: parsePositiveInt(
+      env["QUANTA_MICROCOMPACT_FLOOR_TOKENS"],
+      "QUANTA_MICROCOMPACT_FLOOR_TOKENS",
+    ),
+    microcompactIntervalMs: parsePositiveInt(
+      env["QUANTA_MICROCOMPACT_INTERVAL_MS"],
+      "QUANTA_MICROCOMPACT_INTERVAL_MS",
+    ),
     // ADR-0471 — strict `=== "1"` opt-in (matches the `untrustedEnvelopeEnabled`
     // slice gate, which is the SSOT). Default false ⇒ dispatch wraps nothing.
     untrustedEnvelope: env["QUANTA_UNTRUSTED_ENVELOPE"] === "1",
@@ -894,6 +1027,11 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // Capability C — strict `=== "1"` opt-in. Default false ⇒ no idle beacons /
     // no fan-in barrier (the leader polls, byte-identical).
     teamIdle: env["QUANTA_TEAM_IDLE"] === "1",
+    // Peer teammate messaging (RFC jun-6) — strict `=== "1"` opt-in. Default
+    // false ⇒ no peerInbox drain (turn loop byte-identical), no TeamScopedMailbox
+    // decorator (raw global mailbox), no team registry / team_* tools. Builds ON
+    // the existing QUANTA_TEAM_* peer mailbox + wake-idle.
+    teamPeerMsg: env["QUANTA_TEAM_PEER_MSG"] === "1",
     // C1 — strict `=== "1"` opt-in. Default false ⇒ no artifact registry / tools
     // (byte-identical).
     artifactStore: env["QUANTA_ARTIFACT_STORE"] === "1",
@@ -917,6 +1055,15 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // C6 — strict `=== "1"` opt-in. Default false ⇒ no structured deny reason
     // attached / no content prefix / DecisionEvent unchanged (byte-identical).
     surfaceDenyReason: env["QUANTA_DENY_REASON"] === "1",
+    // sandbox-escalation (RFC jun-6) — strict `=== "1"` opt-in. Default false ⇒
+    // classifySandboxDenial is never consulted, no denialReason is ever set, no
+    // escalation prompt, no post-denial record (a sandboxed nonzero exit is
+    // byte-identical to a plain failure). Default-ON flip is OUT OF SCOPE.
+    sandboxEscalation: env["QUANTA_SANDBOX_ESCALATION"] === "1",
+    sandboxEscalationMax: parsePositiveInt(
+      env["QUANTA_SANDBOX_ESCALATION_MAX"],
+      "QUANTA_SANDBOX_ESCALATION_MAX",
+    ),
     // account-ratelimit — strict `=== "1"` opt-in. Default false ⇒ adapters
     // capture no ratelimit headers and the loop inserts no pre-request delay
     // (byte-identical).
@@ -957,6 +1104,13 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     directiveThinkFreq: env["QUANTA_DIRECTIVE_THINK_FREQ"] === "1",
     directiveAntiPlatitude: env["QUANTA_DIRECTIVE_ANTI_PLATITUDE"] === "1",
     directiveParallelTools: env["QUANTA_DIRECTIVE_PARALLEL_TOOLS"] === "1",
+    // Advisor timing-rail directive (RFC jun-6 §5.2) — strict `=== "1"` opt-in.
+    directiveAdvisorRail: env["QUANTA_ADVISOR_RAIL"] === "1",
+    // adaptive-thinking — strict `=== "1"` opt-in. Default false ⇒ the producer
+    // emits manual `{type:"enabled",budget_tokens}` for every model (byte-identical).
+    adaptiveThinking: env["QUANTA_ADAPTIVE_THINKING"] === "1",
+    // RFC jun-6 §5.1 — advisor full-history forward (strict `=== "1"` opt-in).
+    advisorForwardHistory: env["QUANTA_ADVISOR_FORWARD_HISTORY"] === "1",
     fsJailDisabled: parseBool(env["QUANTA_FS_JAIL"] === "off" ? "1" : undefined),
     capEnforce: parseBool(env["QUANTA_CAP_ENFORCE"]),
     gitSha: stringOrUndef(env["QUANTA_GIT_SHA"]),
@@ -1069,6 +1223,17 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // Default false ⇒ the gate does NOT emit permission_request (byte-identical;
     // falls through to the policy stack). Extra guard atop HookBus presence.
     permissionHook: env["QUANTA_PERMISSION_HOOK"] === "1",
+    // jun-6 exfil-rail (b) — strict `=== "1"` opt-in. Default false ⇒ no glob
+    // check threaded onto ToolContext (write/edit accept a glob path as a
+    // literal filename, byte-identical).
+    globWriteGuard: env["QUANTA_GLOB_WRITE_GUARD"] === "1",
+    // jun-6 exfil-rail (a) — strict `=== "1"` opt-in. Default false ⇒ no budget
+    // port wired (byte-identical). Also requires a configured cap below.
+    writeBudget: env["QUANTA_WRITE_BUDGET"] === "1",
+    // jun-6 exfil-rail (a) — the CONFIGURABLE cap N (positive integer). No
+    // hardcoded default (no-heuristics rule): absent/invalid ⇒ undefined ⇒ the
+    // budget stays inert even when QUANTA_WRITE_BUDGET=1.
+    writeBudgetMax: parsePositiveInt(env["QUANTA_WRITE_BUDGET_MAX"], "QUANTA_WRITE_BUDGET_MAX"),
   })
 }
 

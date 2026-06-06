@@ -26,6 +26,21 @@ purpose: |
   `advisor` knob (env QUANTA_ADVISOR_MODEL) env-flips the tool from absent to
   live by populating AgentConfig.advisor via advisorConsultFromLLM; absent env ⇒
   tool NOT registered (byte-identical, RFC §1.2).
+
+  forwardHistory mode (RFC jun-6 §5.1, default-OFF): `question` is now OPTIONAL
+  and a `forwardHistory:boolean` flag was added. With `forwardHistory:true` (and
+  no question) the model gets a holistic "review where I'm at" second opinion —
+  the PORT (composition root, src/agent/tier1/advisor.ts) assembles the
+  conversation transcript and prepends it to context. The @/tool slice never
+  sees the transcript (ToolContext carries none by design) — it only forwards
+  the boolean. CRITICAL: redactTranscript runs every message through the secret
+  scrubber (@/security redactSecrets — OpenAI/AWS/JWT/PEM) AND the PII scrubber
+  (compositePiiScanner — email/phone/SSN) BEFORE concatenation, with an
+  untrusted-as-DATA framing + tail-window/char size caps, so a leaked secret in
+  a prior tool result never reaches the advisor sub-LLM. The transcriptSource is
+  wired ONLY when QUANTA_ADVISOR_FORWARD_HISTORY=1 (fail-closed: off ⇒ no source
+  ⇒ forwardHistory:true is a no-op, byte-identical). At-least-one-of
+  {question, forwardHistory:true} is enforced (else ok:false, port never reached).
 evidence:
   code:
     - src/tool/advisor/advisor.ts
@@ -39,6 +54,8 @@ evidence:
     unit:
       - tests/unit/advisor-tool-hellgate.test.ts
       - tests/unit/advisor-knob-hellgate.test.ts
+      - tests/unit/advisor-forward-history.test.ts
+      - tests/unit/advisor-forward-schema.test.ts
     integration: []
     contract: []
 knobs: ["advisor"]

@@ -241,8 +241,10 @@ describe("auto-dream / cross-session trigger — hellgate", () => {
     expect(teamPath.endsWith("cross-session.md")).toBe(true)
 
     // The FileDreamWriteTarget refuses to write a live MEMORY.md and writes
-    // the team file via the injected fs.
-    const writes: Array<{ p: string; c: string }> = []
+    // the team file via the injected fs. The write is ATOMIC (jun-06 harden):
+    // a temp sibling is written then renamed onto the final target, so the
+    // FINAL landed file is at the team path — never a direct MEMORY.md write.
+    const files = new Map<string, string>()
     const mkdirs: string[] = []
     const fsFake = {
       mkdir: async (p: string): Promise<undefined> => {
@@ -250,15 +252,25 @@ describe("auto-dream / cross-session trigger — hellgate", () => {
         return undefined
       },
       writeFile: async (p: string, c: string): Promise<void> => {
-        writes.push({ p, c })
+        files.set(p, c)
+      },
+      rename: async (from: string, to: string): Promise<void> => {
+        const v = files.get(from)
+        if (v === undefined) throw new Error(`ENOENT rename ${from}`)
+        files.delete(from)
+        files.set(to, v)
+      },
+      unlink: async (p: string): Promise<void> => {
+        files.delete(p)
       },
     }
     const wt = new FileDreamWriteTarget({ memoryRoot: "/home/u/.quanta/memory", fs: fsFake })
     const n = await wt.write("hello team")
     expect(n).toBe(Buffer.byteLength("hello team", "utf8"))
-    expect(writes).toHaveLength(1)
-    expect(writes[0]?.p).toBe(teamPath)
-    expect(writes[0]?.p.endsWith("MEMORY.md")).toBe(false)
+    // Exactly the final team file remains (temp renamed away).
+    expect([...files.keys()]).toEqual([teamPath])
+    expect(files.get(teamPath)).toBe("hello team")
+    expect(teamPath.endsWith("MEMORY.md")).toBe(false)
     expect(mkdirs[0]?.endsWith("/team")).toBe(true)
   })
 

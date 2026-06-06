@@ -80,7 +80,23 @@ const buildTitlePrompt = (firstPrompt: string, maxWords: number, maxInputChars: 
  *  nothing usable remains (caller then skips the write). */
 export const sanitizeTitle = (raw: string, maxWords: number): string => {
   const collapsed = raw
+    // Strip C0/C1 control chars (NUL/BEL/ESC-introducer + the rest) so a
+    // model-emitted ANSI escape or terminal-control sequence can never survive
+    // into the title write — a transcript/terminal-escape injection defense.
+    // `\t`/`\n`/`\r` are excluded here; the next `\s+` rule collapses them to a
+    // single space rather than dropping them.
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: deliberately stripping control chars
+    .replace(/[\u0000-\u0008\u000e-\u001f\u007f-\u009f]/g, "")
     .replace(/\s+/g, " ")
+    // Strip the Trojan-Source / visual-spoofing class the C0/C1 sweep misses:
+    // bidi controls (ALM U+061C; LRM/RLM/LRE/RLE/PDF/LRO/RLO U+200E–U+202E;
+    // LRI/RLI/FSI/PDI U+2066–U+2069) and zero-width / invisible formatters
+    // (ZWSP U+200B, ZWNJ U+200C, ZWJ U+200D, WORD JOINER U+2060, BOM/ZWNBSP
+    // U+FEFF). These are NOT whitespace, so the `\s+` collapse above does not
+    // catch them — a malicious first prompt (or a compromised cheap title
+    // model) could otherwise write a title that visually misrepresents itself
+    // in the session list (CVE-2021-42574 / Trojan-Source class).
+    .replace(/[؜​-‏⁠‪-‮⁦-⁩﻿]/g, "")
     .trim()
     .replace(/^["'`]+|["'`]+$/g, "")
     .trim()

@@ -103,7 +103,7 @@ const depthOf = (rel: string): number => rel.split("/").length - 1
 /** Build a `dir → file[]` map from the flat ripgrep file list, capped by
  *  depth. Files at or below `maxDepth` segments are kept; deeper ones are
  *  rolled up into a `…/` rollup marker on their nearest in-scope ancestor. */
-interface TreeAgg {
+export interface TreeAgg {
   byDir: Map<string, string[]>
   deepRollup: Map<string, number>
   total: number
@@ -204,7 +204,11 @@ export const extBreakdown = (files: string[]): string => {
   return top3.map(([e, n]) => `${e}=${n}`).join(" ")
 }
 
-const aggregate = (files: string[], maxDepth: number, maxFiles: number): TreeAgg => {
+/** Pure aggregate of a flat `rg --files` list into a depth-/file-capped tree
+ *  structure. Exported so the env-context repo-map adapter (RFC jun-6 §4.3) can
+ *  reuse the same bounded core the tool uses — same "reuse the pure helper,
+ *  re-do the I/O at the seam" pattern env-context uses with `parsePorcelainV2`. */
+export const aggregate = (files: string[], maxDepth: number, maxFiles: number): TreeAgg => {
   const byDir = new Map<string, string[]>()
   const deepRollup = new Map<string, number>()
   let total = 0
@@ -320,7 +324,7 @@ const appendOrphanRollups = (out: string[], agg: TreeAgg): void => {
  *  within each directory, per-directory count shown. When `summaries` is
  *  given, each file gets a ` — <first-decl/comment>` purpose annotation.
  *  `rank` controls directory ordering; `recencyHits` is used only for "recency". */
-const render = (
+export const render = (
   agg: TreeAgg,
   maxFiles: number,
   summaries: Map<string, string> | undefined,

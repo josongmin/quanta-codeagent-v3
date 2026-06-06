@@ -30,6 +30,7 @@ export type {
   Provider,
 } from "./factory"
 export {
+  ADAPTIVE_THINKING_FAMILIES,
   createLLM,
   createMulticloudLLM,
   DEFAULT_MODEL,
@@ -37,8 +38,10 @@ export {
   MissingApiKeyError,
   MULTICLOUD_AUTH_ENV_KEYS,
   MULTICLOUD_DEFAULT_MODEL,
+  normalizeModelFamily,
   pickProvider,
   resolveVendorApiKey,
+  supportsAdaptiveThinking,
   tryCreateLLM,
 } from "./factory"
 export type { FallbackLLMOptions, FallbackMetricSink } from "./fallback"
@@ -124,6 +127,7 @@ export type {
   SystemPromptInput,
   TextBlock,
   ThinkingBlock,
+  ThinkingConfig,
   ToolChoice,
   ToolResultBlock,
   ToolSchema,

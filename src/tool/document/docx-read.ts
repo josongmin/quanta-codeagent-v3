@@ -13,6 +13,7 @@
 
 import { z } from "zod"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+import { unescapeXml } from "./authoring/ooxml-read"
 import { unzip } from "./authoring/zip-store"
 import { readJailedFileBytes } from "./xlsx-read"
 
@@ -26,16 +27,6 @@ export type DocxReadInput = z.infer<typeof docxReadInputSchema>
 export type ParseDocxResult =
   | { readonly ok: true; readonly paragraphs: string[]; readonly text: string }
   | { readonly ok: false; readonly error: string }
-
-const unescapeXml = (s: string): string =>
-  s
-    .replace(/&#x([0-9a-fA-F]+);/g, (_m, h) => String.fromCodePoint(Number.parseInt(h, 16)))
-    .replace(/&#(\d+);/g, (_m, d) => String.fromCodePoint(Number.parseInt(d, 10)))
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, "&")
 
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
 

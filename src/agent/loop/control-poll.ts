@@ -12,6 +12,39 @@ export type ConversationActionPollOutcome =
   | { kind: "finish_aborted"; reason: string }
   | { kind: "continue" }
 
+/**
+ * Peer teammate messaging — auto-delivery drain (RFC jun-6, DELTA #1).
+ *
+ * A tiny DUCK-TYPED port (NOT a direct `@/agent/subagent-mailbox` import from
+ * the loop — the loop receives the mailbox via assembly). The host wires a
+ * `drainFor` that reads THIS agent's undelivered peer mail (mark-delivered, so
+ * the same mail never re-injects across turns — shares the SAME per-recipient
+ * delivery cursor as the manual `subagent_read_messages` poll, so a message is
+ * delivered exactly ONCE regardless of path), redacts each body (untrusted-as-
+ * DATA), and renders it as ONE injected `role:"user"` message — or `null` when
+ * the inbox is empty. Bounded by the mailbox's own caps + a per-turn `limit`
+ * (the rest stays pending and drains over subsequent turns). Absent ⇒
+ * `pollPeerInbox` returns null ⇒ the turn loop is byte-identical (default-OFF).
+ */
+export interface PeerInboxDrain {
+  drainFor(agentId: string): Message | null
+}
+
+/** Drain THIS agent's auto-delivered peer mail at the turn-top seam (sibling of
+ *  {@link pollFollowUpQueue}). Returns null when no port is wired (default-OFF,
+ *  byte-identical) or the inbox is empty. The agent's mailbox identity is its
+ *  stable `mailboxAgentId` (the root session leaves it unset ⇒ `"root"`). */
+export const pollPeerInbox = (cfg: AgentConfig): Message | null => {
+  const port = cfg.peerInbox
+  if (port === undefined) return null
+  try {
+    return port.drainFor(cfg.mailboxAgentId ?? "root")
+  } catch (e) {
+    cfg.stream.emit({ type: "error", message: `peerInbox.drainFor failed: ${errMessage(e)}` })
+    return null
+  }
+}
+
 export const pollFollowUpQueue = (cfg: AgentConfig, sessionId: string): Message | null => {
   const queue = cfg.followUpQueue
   if (queue === undefined) return null

@@ -21,6 +21,7 @@ import {
   type ToolResult,
   type WorkingStateHandle,
 } from "@/tool"
+import { bindWriteBudgetTurn } from "@/tool/_shared/write-budget"
 import { composeToolResultContent } from "@/tool/image/compose"
 import { runAdmissibilityGate } from "./admissibility-gate"
 import { wireCheckpointedEffectChannel } from "./checkpoint-wiring"
@@ -792,6 +793,22 @@ const buildToolContext = (args: {
     // mutating path is byte-identical (default-OFF). The `@/agent` config-side
     // `FileHistorySink` is the same structural `@/tool` mirror.
     ...(config.fileHistory !== undefined ? { fileHistory: config.fileHistory } : {}),
+    // jun-6 exfil-rail (b) — thread the glob-in-write-path guard ENABLEMENT
+    // (the predicate itself is a pure leaf the write/edit tools own). Default-OFF
+    // (`QUANTA_GLOB_WRITE_GUARD` unset) ⇒ the flag is omitted ⇒ write/edit accept
+    // a glob path as a literal filename, byte-identical.
+    ...(runtimeConfig().globWriteGuard ? { globWriteGuard: true } : {}),
+    // jun-6 exfil-rail (a) — surface a TURN-BOUND write-budget port so write/edit
+    // tally each mutation against the per-turn counter (the host minted the
+    // session-long `SessionWriteBudget`; we bind the current turn so the count
+    // resets at each turn boundary). ABSENT (knob off / no cap / non-wiring host)
+    // ⇒ omitted ⇒ no counter, byte-identical (default-OFF).
+    ...((): { writeBudget: NonNullable<ToolContext["writeBudget"]> } | Record<string, never> => {
+      const budget = config.writeBudget
+      const max = runtimeConfig().writeBudgetMax
+      if (budget === undefined || max === undefined) return {}
+      return { writeBudget: bindWriteBudgetTurn(budget, config.run?.turn ?? 0, max) }
+    })(),
   }
 }
 

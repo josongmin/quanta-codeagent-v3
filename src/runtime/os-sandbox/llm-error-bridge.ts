@@ -103,6 +103,35 @@ export const sandboxResultToLlmError = (r: SandboxedSpawnResult): LLMError => {
 }
 
 /**
+ * RFC jun-6 — SIBLING converter for a sandbox BLOCK (the polar opposite of the
+ * degrade path above). Does THIS result represent an OS-sandbox syscall block
+ * (the sandbox RAN and DENIED something)? Pure.
+ *
+ * A block is identified by the discriminant {@link SandboxedSpawnResult.denialReason}
+ * being present — which the platform result-mapping points set (gated on the
+ * escalation knob) from {@link classifySandboxDenial}. This is NOT a reuse of
+ * `isSandboxDegradedFailure` (that fires on `sandboxApplied:false`); a block is
+ * `sandboxApplied:true` + a `denialReason`.
+ */
+export const isSandboxBlockedFailure = (r: SandboxedSpawnResult): boolean =>
+  r.sandboxApplied === true && r.denialReason !== undefined
+
+/** Build an LLMError describing a sandbox-BLOCKED result (`sandbox_blocked`
+ *  kind — distinct from the degrade path's `sandbox_error`). Pure. The
+ *  `denialReason` signal/confidence are carried in the message + cause for the
+ *  escalation prompt + OTel; the free-form command text is NOT inlined here. */
+export const sandboxBlockToLlmError = (r: SandboxedSpawnResult): LLMError => {
+  const d = r.denialReason
+  const signal = d?.signal ?? "heuristic"
+  const confidence = d?.confidence ?? "low"
+  const msg = `command blocked by OS sandbox (signal=${signal} confidence=${confidence} exitCode=${r.exitCode})`
+  return new LLMError(msg, {
+    kind: "sandbox_blocked",
+    cause: { result: r },
+  })
+}
+
+/**
  * Decorate an {@link OsSandbox} so degraded enforcement surfaces as a typed
  * `LLMError("sandbox_error", ...)` per the wired mode.
  *

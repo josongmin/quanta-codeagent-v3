@@ -1,0 +1,81 @@
+id: env-context-repo-map
+title: Bounded repo-map turn-0 injection into the env block (RFC jun-6 §4)
+section: 4
+subsystem: Context — per-turn dynamic block (env-context extension)
+order: 398
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+config_refs:
+  env:
+    - QUANTA_REPO_MAP
+owners: ["@songmin"]
+labels: ["surface:core", "prompt-touched", "absorbed:codex-0.135"]
+depends_on: [env-build-dynamic-context, file-tree-summary]
+purpose: |
+  Codex 0.135 prepends a bounded directory tree at session start so the model is
+  oriented without spending the first 1-2 tool calls on file_tree_summary / ls.
+  quanta already injects a `## Environment` block (env-context.ts, ADR-0397) and
+  already has a bounded, ignore-respecting tree renderer (file_tree_summary). This
+  feature renders a bounded tree into the env block ON TURN 1 ONLY, behind
+  QUANTA_REPO_MAP, reusing env-context's exact replay-determinism discipline:
+  the live scan lives in a NEW `probeRepoMap` (injected `scan` adapter — the
+  shell call stays in the runner adapter `makeRepoMapScan` over file_tree_summary's
+  exported PURE aggregate/render helpers), while `renderEnvBlock` stays pure (no
+  Date.now / Math.random / FS). The map is STRUCTURE ONLY (paths + counts via
+  `rg --files`) and EXCLUDES memory / CLAUDE.md contents (those ride their own
+  blocks) — no duplication. Stale-tolerant framing is a fixed literal mirroring
+  Codex ("may be incomplete or out of date — do not repeat back unless relevant").
+  THREE independent token-budget caps, all deliberately TIGHTER than the tool
+  defaults: maxDepth 2 (vs 3), maxFiles 200 (vs 400), and a SHAPE-INDEPENDENT
+  maxChars 6000 hard backstop applied after render (line-boundary truncation +
+  marker) — the last guarantees turn-0 can never blow up regardless of repo shape.
+evidence:
+  code:
+    - src/agent/env-context.ts
+    - src/runner/assemble/repo-map-scan.ts
+    - src/runner/knobs/knobs/repo-map.ts
+    - src/tool/file-tree-summary/index.ts
+    - src/agent/types.ts
+    - src/agent/index.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/repo-map-injection.test.ts
+      - tests/unit/repo-map-scan-caps.test.ts
+      - tests/unit/prompt-env-context-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: ["repo-map"]
+deliberate_hold: null
+notes: |
+  WIRING NOTE (loop-decomposition avoidance): the TURN-1 LOOP CALL is a documented
+  seam. The probe (probeRepoMap) + scan adapter (makeRepoMapScan) + renderer field
+  (TurnEnvContext.repoMap) + knob slot (config.repoMap caps) all land and are fully
+  tested, but the actual `if (turnIndex === 0) env.repoMap = await probeRepoMap(...)`
+  call site lives in the loop's per-turn env assembly
+  (src/agent/loop/context-assembler.ts), which is user/earlier-wave in-flight this
+  session and OFF-LIMITS. Same posture as probeTurnEnv itself, which is also an
+  opt-in seam with no current loop caller. Wiring is a one-line additive edit once
+  that file is free. Default-OFF byte-identity holds regardless (no map ⇒ env block
+  byte-identical).
+
+  Default-OFF byte-identity: QUANTA_REPO_MAP unset ⇒ config.repoMap absent ⇒ the
+  probe never runs ⇒ env.repoMap absent ⇒ renderEnvBlock byte-identical to today
+  (the ADR-0397 byte-identical hellgate is extended with a repoMap:undefined case).
+
+  Reuse note (honest): file_tree_summary's tool `execute` is an
+  AsyncIterable<ToolEvent> bundling the rg call + recency + purpose passes. We do
+  NOT call execute. makeRepoMapScan captures ONE `rg --files` stdout and calls the
+  exported PURE helpers (aggregateFileTree / renderFileTree, rank:"alpha" so no
+  recency git-log call is needed) then applies the maxChars backstop — the same
+  "reuse the pure core, re-do the I/O at the seam" pattern env-context uses with
+  parsePorcelainV2. The helpers were made `export` additively (no behavior change;
+  the file-tree-summary suites still pass).
+
+  Per-cap env overrides (QUANTA_REPO_MAP_MAX_DEPTH / _MAX_FILES / _MAX_CHARS) are a
+  documented follow-up: ApplyContext does not carry the env snapshot today, so the
+  knob uses the fixed RFC defaults (REPO_MAP_DEFAULT_* shared from @/agent).

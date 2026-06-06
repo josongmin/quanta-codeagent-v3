@@ -39,8 +39,16 @@ export const isResourceNotificationMethod = (method: string): boolean =>
 const asRecord = (v: unknown): Record<string, unknown> | null =>
   typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null
 
+/** DoS bound — maximum characters retained from an inbound `resource_updated`
+ *  notification `uri`. A hostile server can emit a multi-megabyte `uri` on a
+ *  subscribed resource; we keep only the bounded prefix so the notification is
+ *  never a large retain (no OOM). 8192 sits well above any realistic resource
+ *  URI (cf. common 2048-byte URL limits) while bounding the worst case. */
+export const RESOURCE_UPDATED_MAX_URI_CHARS = 8192
+
 /** Parse a known notification method + params into a typed event, or null when
- *  the method is unknown or the `resource_updated` params lack a `uri`. */
+ *  the method is unknown or the `resource_updated` params lack a `uri`. An
+ *  oversized `uri` is length-capped (bounded prefix) rather than retained. */
 export const parseResourceNotification = (
   method: string,
   params: unknown,
@@ -48,7 +56,13 @@ export const parseResourceNotification = (
   if (method === RESOURCE_UPDATED_METHOD) {
     const uri = asRecord(params)?.uri
     if (typeof uri !== "string" || uri === "") return null
-    return { kind: "resource_updated", uri }
+    // DoS bound: keep only the bounded prefix of an oversized uri (no large
+    // retain). `slice` on an over-cap string returns a new bounded string.
+    const bounded =
+      uri.length > RESOURCE_UPDATED_MAX_URI_CHARS
+        ? uri.slice(0, RESOURCE_UPDATED_MAX_URI_CHARS)
+        : uri
+    return { kind: "resource_updated", uri: bounded }
   }
   if (method === RESOURCE_LIST_CHANGED_METHOD) return { kind: "resource_list_changed" }
   if (method === PROMPT_LIST_CHANGED_METHOD) return { kind: "prompt_list_changed" }

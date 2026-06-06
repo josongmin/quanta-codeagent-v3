@@ -63,6 +63,7 @@ import {
 } from "@/agent/subagent-background"
 import { createSubagentMailbox, type MailboxPort } from "@/agent/subagent-mailbox"
 import { createSubagentRunner } from "@/agent/subagent-runner"
+import { untrustedEnvelopeEnabled } from "@/agent/untrusted-envelope"
 import {
   type BrowserPort,
   createCdpBrowser,
@@ -93,6 +94,7 @@ import { skillMcpDepsEnabled } from "@/skill/skill-mcp-deps"
 import { resolveJailed } from "@/storage"
 import type { AgentEvent, StreamPort } from "@/stream"
 import type { AppshotArtifactSink, AppshotSlot } from "@/tool"
+import { createSessionWriteBudget } from "@/tool/_shared/write-budget"
 import { type DnsResolver, nodeDnsResolver } from "@/tool/browser"
 import { ReadFileState, staleReadGuardEnabled } from "@/tool/stale-read-guard"
 import type { WebSearchProvider } from "@/tool/web"
@@ -429,6 +431,38 @@ const wireOptionalCapabilitySlots = (cfg: AgentConfig, env: AssemblerEnv): void 
   maybeWireVcsEventSink(cfg, env)
   maybeWireProgressSink(cfg, env)
   maybeWireSideAgent(cfg, env)
+  maybeWireWriteBudget(cfg, env)
+}
+
+/** jun-6 exfil-rail (a) — mint ONE per-session `SessionWriteBudget` when the
+ *  write-budget is opted in (`QUANTA_WRITE_BUDGET=1`) AND a cap is configured
+ *  (`QUANTA_WRITE_BUDGET_MAX=<N>`, a positive integer). BOTH must be present —
+ *  the cap is a KNOB value with NO hardcoded default (no-heuristics rule), so an
+ *  enabled-but-uncapped config stays inert. `untrustedContext` is resolved from
+ *  the EXISTING untrusted-envelope gate (`QUANTA_UNTRUSTED_ENVELOPE`): the budget
+ *  fires ONLY when the session is operating on untrusted input — a trusted
+ *  codegen session keeps unlimited writes. The over-cap verdict is `confirm` (the
+ *  narrow default per RFC §7 — the user can wave it through). Dispatch binds the
+ *  current turn so the counter resets per turn. Caller-override-safe; absent gate
+ *  / no cap ⇒ slot unset ⇒ no counter, byte-identical (default-OFF). */
+const maybeWireWriteBudget = (cfg: AgentConfig, env: AssemblerEnv): void => {
+  if (cfg.writeBudget !== undefined) return
+  if (env["QUANTA_WRITE_BUDGET"] !== "1") return
+  const max = parseWriteBudgetMax(env["QUANTA_WRITE_BUDGET_MAX"])
+  if (max === undefined) return
+  cfg.writeBudget = createSessionWriteBudget({
+    untrustedContext: untrustedEnvelopeEnabled(env),
+    maxWritesPerTurn: max,
+    overVerdict: "confirm",
+  })
+}
+
+/** Parse the `QUANTA_WRITE_BUDGET_MAX` cap from the injected env bag: a positive
+ *  integer, else `undefined` (the budget stays inert). No magic default. */
+const parseWriteBudgetMax = (raw: string | undefined): number | undefined => {
+  if (raw === undefined || !/^\d+$/.test(raw.trim())) return undefined
+  const n = Number.parseInt(raw.trim(), 10)
+  return Number.isInteger(n) && n > 0 ? n : undefined
 }
 
 /** N1 — mint the live side-agent daemon registry when opted in

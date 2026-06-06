@@ -107,6 +107,17 @@ export const PARALLEL_TOOLS: string = [
   "writes to the same file.",
 ].join("\n")
 
+/** 8. Advisor timing rail (RFC jun-6 §5.2 — `QUANTA_ADVISOR_RAIL`). Tells the
+ *  model the two canonical moments to consult the read-only `advisor` second
+ *  opinion (cc-cli parity). Harmless prose when no advisor tool is wired. */
+export const ADVISOR_TIMING_RAIL: string = [
+  "ADVISOR: when the `advisor` tool is available, consult it at two moments:",
+  "once BEFORE committing to a non-trivial approach (to pressure-test the plan),",
+  "and once BEFORE declaring the task done (to catch what you missed). It is a",
+  "read-only second opinion — it cannot act, so it is cheap to ask and safe to",
+  "ignore. Pass forwardHistory:true to have it review your whole task in context.",
+].join("\n")
+
 /**
  * The config slice {@link selectActiveDirectives} reads. A flat record of the
  * seven knob booleans — supplied by the loop layer from `runtimeConfig()`. Kept
@@ -121,6 +132,7 @@ export interface DirectiveConfig {
   readonly directiveThinkFreq: boolean
   readonly directiveAntiPlatitude: boolean
   readonly directiveParallelTools: boolean
+  readonly directiveAdvisorRail: boolean
 }
 
 /**
@@ -140,6 +152,7 @@ const DIRECTIVE_ORDER: ReadonlyArray<{
   { key: "directiveThinkFreq", text: THINK_FREQUENCY },
   { key: "directiveAntiPlatitude", text: ANTI_PLATITUDE },
   { key: "directiveParallelTools", text: PARALLEL_TOOLS },
+  { key: "directiveAdvisorRail", text: ADVISOR_TIMING_RAIL },
 ]
 
 /**

@@ -89,6 +89,14 @@ const ALLOWED_TERNARY_INLINE_SITES = new Set<string>([
   // FORBIDS any `@/shared` import, so `errMessage` cannot reach this file. The
   // inline ternary is the canonical-equivalent form kept by design.
   "integrations/github/idempotency.ts",
+  // jun-6 CLUSTER D #5 — `permission_propose_pattern` LLM-callable surface.
+  // The slice imports ONLY `zod` + its sibling `../types` port (no `@/shared`),
+  // matching the port-only discipline of the other plane-clean entries above:
+  // the file is the residual security-sensitive surface of ADR-0061's
+  // remember-patterns seam and deliberately carries zero `@/shared` coupling so
+  // the no-widen / no-self-grant audit stays self-contained. The inline ternary
+  // is the canonical-equivalent form kept by design.
+  "tool/permission-propose/index.ts",
   // R8 audit close-out (ADR-0165 §Plane discipline): the coverage adapter
   // quartet's plane-clean contract was tightened to admit ONE pure-helper
   // import (`errMessage` from `@/shared`, no I/O) so the canonical

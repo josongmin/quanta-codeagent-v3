@@ -6,7 +6,7 @@ import type { ShellSnapshotSession } from "../shell-snapshot-session"
 import { makeTurnHeader } from "../turn-kind"
 import type { AgentConfig } from "../types"
 import { latestUserTextFromWm, observeEffortClassifierPrompt } from "./context-assembler"
-import { pollConversationAction, pollFollowUpQueue } from "./control-poll"
+import { pollConversationAction, pollFollowUpQueue, pollPeerInbox } from "./control-poll"
 
 export const applySteerBarrierMessages = async (
   cfg: AgentConfig,
@@ -42,6 +42,13 @@ export const syncQueuedTurnInputs = async (args: {
 }): Promise<"continue" | "aborted"> => {
   const followUpResult = pollFollowUpQueue(args.cfg, args.sessionId)
   if (followUpResult !== null) args.wm.append(followUpResult)
+  // Peer teammate messaging (RFC jun-6, DELTA #1) — auto-deliver this agent's
+  // undelivered peer mail into the turn (no manual `subagent_read_messages`).
+  // INFORMATION-only: it never invokes the permission decider (no-grant-channel).
+  // Default-OFF: `pollPeerInbox` returns null when no port is wired ⇒ this seam
+  // is byte-identical (one extra null-returning call, no `wm` append).
+  const peerMail = pollPeerInbox(args.cfg)
+  if (peerMail !== null) args.wm.append(peerMail)
   const actionOutcome = await pollConversationAction(args.cfg, args.taskRegistry)
   if (actionOutcome.kind === "finish_aborted") return "aborted"
   if (actionOutcome.kind === "injection") {

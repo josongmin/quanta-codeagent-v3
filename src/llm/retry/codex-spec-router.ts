@@ -25,6 +25,8 @@
  *   too_many_failed_attempts → fatal                 (budget burned)
  *   thread_rollback_failed   → reactive_compaction   (rebuild shorter prefix)
  *   sandbox_error            → hitl_handoff          (user review host)
+ *   sandbox_blocked          → hitl_handoff          (user-gated escalation;
+ *                                                     NEVER auto-grants)
  *   invalid_image            → fatal                 (sanitize-retry happens
  *                                                     at the adapter wrap layer
  *                                                     — ADR-0328. By the time
@@ -90,6 +92,13 @@ export const codexSpecRoute = (kind: LLMErrorKind): RecoveryAction => {
     case "thread_rollback_failed":
       return "reactive_compaction"
     case "sandbox_error":
+      return "hitl_handoff"
+    case "sandbox_blocked":
+      // RFC jun-6: the OS sandbox RAN and BLOCKED a syscall. Unlike
+      // `sandbox_error` (host couldn't enforce — user inspects the host), a
+      // block is a recoverable, user-gated event: route to the escalation
+      // prompt surface (hand-off to the human who decides whether to re-run
+      // the byte-same argv unsandboxed). NEVER auto-grants.
       return "hitl_handoff"
     case "invalid_image":
       // ADR-0328: by the time the kind reaches this canonical router, the

@@ -1,0 +1,128 @@
+id: peer-teammate-messaging
+title: Peer teammate messaging — auto-delivered inbox + team-scoped bus + redaction
+section: 9
+subsystem: Subagent coordination (peer ↔ peer messaging)
+order: 99
+maturity: L3
+status: refined
+ui_surfaces: [cli, ide]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: partial
+owners: ["@songmin"]
+labels: ["surface:core"]
+depends_on: [subagent-mailbox, team-broker-coordination, team-idle-barrier-coordination]
+config_refs:
+  env: [QUANTA_TEAM_PEER_MSG]
+purpose: |
+  The THREE genuine deltas over quanta's EXISTING peer-messaging substrate
+  (RFC docs/plans/jun-6-peer-teammate-messaging.md). quanta ALREADY has the hard
+  parts and they are REUSED UNCHANGED: a peer-addressable bounded mailbox
+  (`src/agent/subagent-mailbox/{types,store}.ts` — `MailboxPort.send({from,to})`
+  is sibling↔sibling, with audit-H caps: maxRetained 1024 + retentionMs LRU +
+  per-sender quota), the `subagent_send_message`/`subagent_read_messages` tools,
+  the wake-idle gate (`SubagentTurnGate`/`TurnWakeRegistry`/`followup_task`→wake),
+  and the broker's no-self-grant invariant (`broker.ts` — only a leader-authored
+  `response` matching an outstanding correlationId widens permission). This slice
+  adds ONLY the three deltas Claude Code CLI 2.1.150 "Agent Teammate
+  Communication" has over that substrate.
+
+  DELTA #1 — AUTO-DELIVERY (no manual poll). The loop's turn-top
+  `syncQueuedTurnInputs` drained ONLY the user FollowUpQueue. A new
+  `pollPeerInbox` drain (`src/agent/loop/control-poll.ts`, sibling of
+  `pollFollowUpQueue`) is appended at that EXACT seam: it reads THIS agent's
+  undelivered peer mail (mark-delivered — shares the SAME per-recipient delivery
+  cursor as the manual poll, so a message is delivered exactly ONCE across
+  push+pull and never re-injects across turns), bounded by a per-turn limit (the
+  rest stays pending and drains FIFO over subsequent turns), and appends it as
+  ONE `role:"user"` message. A wake'd idle teammate now AUTO-receives its mail.
+
+  DELTA #2 — TEAM BOUNDARY + LIFECYCLE. A `TeamRegistryPort`
+  (`src/subagent/team/registry.ts` — membership set, `sameTeam`, create/delete/
+  add/remove; an agent belongs to exactly ONE team) + a `TeamScopedMailbox`
+  DECORATOR (`src/agent/subagent-mailbox/team-scoped.ts`) over the EXISTING store
+  (NOT a new store — the audit-H caps stay GLOBAL so total memory is bounded
+  regardless of team count). A cross-team `send` is DENIED before enqueue (never
+  reaches the victim's delivery cursor — a cross-team peer can't even place a
+  forged `response` into a victim's correlationId stream); a broadcast `"*"` is
+  scoped to the sender's OWN team roster. `team_create`/`team_delete` tools
+  (`src/tool/team/index.ts`, gated + mutating) mint/reap a membership scope;
+  teardown reaps the bus (the host disposes member runners via the existing
+  subagent disposer). A throwing gate fails CLOSED (denies, never widens).
+
+  DELTA #3 — BODY REDACTION (untrusted-as-DATA). The mailbox read path did
+  `escapeBodyForLine` (anti line-injection) but no secret/PII redaction. The
+  auto-delivered body is routed through `@/security/redaction` (injected
+  `redact?` seam, default identity ⇒ byte-identical when unwired) BEFORE
+  `escapeBodyForLine` — the two compose (scrub secrets, then guarantee one line
+  so a redacted body still can't forge a sibling line). The injection carries an
+  explicit `[teammate <from> — untrusted]` provenance header.
+
+  SECURITY (load-bearing): the peer bus is a COMMS channel, NEVER a grant
+  channel. Auto-delivered peer mail enters context as INFORMATION (a
+  `role:"user"` message) — the drain has no permission port and NEVER invokes the
+  permission decider; the recipient's own tool calls still go through its
+  admissibility gate / the leader broker. The broker's leader-authored-response-
+  only widen (no-self-grant, `broker.ts`) is UNTOUCHED. Cross-team deny is at
+  `send` (before enqueue).
+evidence:
+  code:
+    - src/subagent/team/registry.ts
+    - src/agent/subagent-mailbox/team-scoped.ts
+    - src/agent/subagent-mailbox/peer-inbox.ts
+    - src/agent/subagent-mailbox/index.ts
+    - src/agent/loop/control-poll.ts
+    - src/agent/loop/turn-iteration.ts
+    - src/tool/team/index.ts
+    - src/shared/runtime-config.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/peer-messaging-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_TEAM_PEER_MSG
+    where: src/shared/runtime-config.ts
+    default: 'false'
+    purpose: |
+      Strict `=== "1"` opt-in, building ON the EXISTING QUANTA_TEAM_* peer
+      mailbox + wake-idle. Default false ⇒ (a) the loop wires no `peerInbox`
+      drain (`pollPeerInbox` returns null ⇒ the turn loop is byte-identical —
+      peer mail surfaces ONLY via a manual `subagent_read_messages` poll); (b) no
+      `TeamScopedMailbox` decorator (the raw global mailbox — no cross-team
+      partition); (c) no team registry, `team_create`/`team_delete` NOT
+      registered. ON ⇒ all three deltas wire: auto-delivery at the turn-top seam,
+      cross-team deny + broadcast-scoped-to-team via the decorator, and body
+      redaction on the auto-delivered (untrusted) peer content. The audit-H caps
+      stay GLOBAL (one bounded store under a membership scope).
+notes: |
+  The three genuine deltas over quanta's already-built peer substrate (RFC
+  re-audit: quanta ALREADY has peer mailbox + bounded inbox + wake-idle + the
+  no-self-grant invariant — those are REUSED, not rebuilt). 21 hellgate cases
+  pin: DELTA #1 auto-delivery (A→B auto-injects into B's turn without a manual
+  read; delivered exactly once across push+pull — a later manual read is empty,
+  no re-inject; per-turn cap bounds injection, rest drains FIFO; root identity
+  fallback); default-OFF byte-identity (no port ⇒ null, empty inbox ⇒ null,
+  throwing drain ⇒ null never bubbles); DELTA #2 team boundary (cross-team send
+  denied before enqueue — pendingFor(victim)===0, store never got it; same-team
+  delivered; broadcast reaches only own team, un-teamed broadcasts to no one;
+  throwing gate fails closed; team_create auto-adds caller + team_delete reaps;
+  post-teardown the boundary re-applies; an agent belongs to exactly one team);
+  DELTA #3 redaction (a planted AWS key in a peer body is scrubbed to
+  [REDACTED:...] before injection; redaction composes with escapeBodyForLine — a
+  forged newline'd second line collapses to one line; default identity passes
+  through); SECURITY (auto-delivered mail is a user message tagged untrusted, no
+  permission API touched by the drain; the inbox stays bounded under a 5000-msg
+  flood — the decorator did NOT replace the store, the global maxRetained holds).
+  Absorption: Claude Code CLI 2.1.150 "Agent Teammate Communication"
+  (SendMessageTool maps onto the EXISTING subagent_send_message; TeamCreate/
+  TeamDelete = team_create/team_delete; auto-delivered inbox = DELTA #1;
+  message-wakes-idle-teammate = the EXISTING wake-idle gate). What this is NOT: no
+  new mailbox / wake registry / send tool (reused); no dedicated Teammate
+  plan-mode execution type (the mechanism composes existing parts under the knob;
+  the label is deferred UX). Slice fence: `src/subagent/team/registry.ts` is a
+  pure leaf (imports nothing); the decorator + drain take duck-typed ports
+  (membership gate, redactor) so the mailbox slice never imports @/subagent or
+  @/security; the loop takes `peerInbox` via assembly (no @/agent/subagent-mailbox
+  import from the loop).

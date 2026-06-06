@@ -34,7 +34,7 @@ import {
   DefaultCrossSessionInjector,
   renderMemorySection,
 } from "@/memory/cross-session"
-import { INITIAL_DREAM_STATE } from "@/memory/dream/types"
+import { type DreamOutcomeKind, INITIAL_DREAM_STATE } from "@/memory/dream/types"
 import { JsonlFileStage1Store, type Stage1OutputsStore } from "@/memory/stage1-store"
 import { errMessage, throwIfAborted } from "@/shared"
 
@@ -79,6 +79,29 @@ const parsePositiveNumberOrUndefined = (raw: string | undefined): number | undef
   return Number.isFinite(n) && n > 0 ? n : undefined
 }
 
+/** Valid `lastOutcome` enum values — anything else degrades to `null`. */
+const DREAM_OUTCOME_KINDS: ReadonlySet<string> = new Set<DreamOutcomeKind>([
+  "below_threshold",
+  "locked",
+  "completed",
+  "no_op",
+  "error",
+])
+
+/** Clamp a persisted session counter to a finite, non-negative integer. A
+ *  NaN/Infinity/negative/fractional value would poison the cadence, so it
+ *  degrades to 0 (negative) or its floor (fractional); non-finite ⇒ 0. */
+const sanitizeCounter = (n: number): number => {
+  if (!Number.isFinite(n)) return 0
+  const floored = Math.floor(n)
+  return floored > 0 ? floored : 0
+}
+
+/** Degrade an out-of-enum persisted `lastOutcome` to `null` (never surface a
+ *  poisoned string verbatim). */
+const sanitizeOutcome = (raw: unknown): DreamOutcomeKind | null =>
+  typeof raw === "string" && DREAM_OUTCOME_KINDS.has(raw) ? (raw as DreamOutcomeKind) : null
+
 /** JSON-file {@link DreamStatePort} — persists the tiny dream counter/clock at
  *  `<memoryRoot>/dream-state.json` so the sessions/hours cadence survives across
  *  CLI runs. Sync (the port contract); NO-THROW — a missing or corrupt file
@@ -91,14 +114,19 @@ class JsonFileDreamState implements DreamStatePort {
   read(): DreamState {
     try {
       const obj = JSON.parse(readFileSync(this.filePath, "utf8")) as Partial<DreamState>
-      if (
-        typeof obj.sessionsSinceLastDream === "number" &&
-        (obj.lastDreamAtMs === null || typeof obj.lastDreamAtMs === "number")
-      ) {
+      if (typeof obj.sessionsSinceLastDream === "number") {
+        // SANITIZE every persisted field — a corrupt counter must NOT pass
+        // through. A NaN/Infinity/negative counter poisons the cadence
+        // (`NaN + 1 >= threshold` is forever false; `-1000 + 1` takes 1000+
+        // sessions to fire), so clamp to a finite, non-negative integer. A
+        // non-finite clock degrades to `null`; an out-of-enum outcome to `null`.
         return {
-          sessionsSinceLastDream: obj.sessionsSinceLastDream,
-          lastDreamAtMs: obj.lastDreamAtMs,
-          lastOutcome: obj.lastOutcome ?? null,
+          sessionsSinceLastDream: sanitizeCounter(obj.sessionsSinceLastDream),
+          lastDreamAtMs:
+            typeof obj.lastDreamAtMs === "number" && Number.isFinite(obj.lastDreamAtMs)
+              ? obj.lastDreamAtMs
+              : null,
+          lastOutcome: sanitizeOutcome(obj.lastOutcome),
         }
       }
     } catch {

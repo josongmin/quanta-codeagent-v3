@@ -7,7 +7,15 @@
  * the store itself depends only on `node:crypto`). NOT a `@/agent` core import.
  */
 
+export {
+  createPeerInboxDrain,
+  type PeerInboxAdapterOptions,
+} from "./peer-inbox"
 export { createSubagentMailbox } from "./store"
+export {
+  type TeamMembershipGate,
+  teamScopedMailbox,
+} from "./team-scoped"
 export type {
   CreateSubagentMailboxOptions,
   MailboxMessage,

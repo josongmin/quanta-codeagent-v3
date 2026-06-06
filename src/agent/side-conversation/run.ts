@@ -192,6 +192,17 @@ export const SIDE_CONVERSATION_TOOL_EXCLUSIONS: readonly string[] = Object.freez
   "pty_read",
   "side_agent_findings",
   "side_agent_list",
+  // jun-06 — `poll_deferred` (ADR-0287 async-tools) is read-only (`null` in
+  // planModeMutatingTable) but polls a DEFERRED async-tool result owned by the
+  // main session's async registry — like `subagent_poll`, it is a main-session
+  // async-control surface, not the minimal exploration set a delegated
+  // side-conversation needs. Excluded so the allowlist stays a CONSCIOUS subset.
+  "poll_deferred",
+  // jun-06 — `subagent_force_background` (ADR-0487) is read-only-classified
+  // (`null`, plan-safe — it only reorders the agent's own background pool) but
+  // is a main-session background-scheduler control surface (like `subagent_poll`),
+  // not part of a lightweight side-conversation's exploration set. Excluded.
+  "subagent_force_background",
 ])
 
 // ===========================================================================

@@ -2,6 +2,7 @@ import type { z } from "zod"
 import type { DocumentBlock, ImageBlock } from "@/llm"
 import type { SensitivityClass } from "@/security"
 import type { HITLTier } from "@/shared"
+import type { WriteBudgetPort } from "./_shared/write-budget"
 import type { ShellExecObserver } from "./shell-exec-types"
 import type { ReadFileState } from "./stale-read-guard"
 
@@ -338,6 +339,27 @@ export interface ToolContext {
    *  builds the concrete per-call section over a suppressible derived signal +
    *  the watchdog clock. */
   criticalSection?: CriticalSectionSeam
+  /** jun-6 exfil-rail (b) — OPTIONAL glob-in-write-path guard flag. When `true`
+   *  (the dispatch seam threads it from `runtimeConfig().globWriteGuard`,
+   *  `QUANTA_GLOB_WRITE_GUARD=1`), the `write`/`edit` tools reject a `path` that
+   *  is a glob/wildcard pattern (`*`/`?`/`{a,b}`) with a typed `rejected` failure
+   *  and the verbatim cc-cli message BEFORE any fs call. ABSENT / `false` ⇒ no
+   *  glob check (byte-identical legacy path; a glob path is accepted as a literal
+   *  filename exactly as before). A plain boolean (not a port) because the guard
+   *  is a pure leaf predicate (`@/tool/_shared/glob-in-path`) the tool already
+   *  owns — only the ENABLEMENT crosses the seam. */
+  globWriteGuard?: boolean
+  /** jun-6 exfil-rail (a) — OPTIONAL per-turn write/edit budget port. The
+   *  `write`/`edit` tools call `recordWrite()` AFTER their existing guards; the
+   *  returned verdict (`ok`/`confirm`/`deny`) gates the mutation. The budget
+   *  fires ONLY in an untrusted-input turn (the host resolves `untrustedContext`
+   *  from the untrusted-envelope gate) and ONLY past the configured per-turn cap
+   *  (`QUANTA_WRITE_BUDGET_MAX`); the counter resets at each turn boundary (the
+   *  dispatch seam binds the current `config.run?.turn`). ABSENT (knob off /
+   *  non-wiring host) ⇒ omitted ⇒ the tool's `?.recordWrite()` is undefined and
+   *  the write proceeds byte-identically (default-OFF). Duck-typed (the seam
+   *  lives in `@/tool/_shared/write-budget`) so `@/tool` stays a leaf. */
+  writeBudget?: WriteBudgetPort
   /** file_history_rewind — OPTIONAL per-file snapshot capture sink. The
    *  file-mutating tools (`write`/`edit`) call `record` with the file's NEW
    *  bytes after a successful mutation so the `file_history_rewind` tool can

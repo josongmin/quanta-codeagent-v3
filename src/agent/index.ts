@@ -79,8 +79,13 @@ export {
   type SkillEffortAdvisory,
 } from "./effort"
 export {
+  type ProbeRepoMapOpts,
   type ProbeTurnEnvOpts,
+  probeRepoMap,
   probeTurnEnv,
+  REPO_MAP_DEFAULT_MAX_CHARS,
+  REPO_MAP_DEFAULT_MAX_DEPTH,
+  REPO_MAP_DEFAULT_MAX_FILES,
   renderEnvBlock,
   type TurnEnvContext,
 } from "./env-context"
@@ -334,9 +339,12 @@ export {
   submissionFromMessages,
 } from "./submission"
 export {
+  ADVISOR_TRANSCRIPT_MAX_CHARS,
+  ADVISOR_TRANSCRIPT_MAX_MESSAGES,
   type AdvisorConsultFromLLMOptions,
   advisorConsultFromLLM,
   buildAdvisorBlock,
+  redactTranscript,
 } from "./tier1/advisor"
 export { buildComposeAuthoringBlock } from "./tier1/compose-authoring"
 export { buildPrShipBlock } from "./tier1/pr-ship"

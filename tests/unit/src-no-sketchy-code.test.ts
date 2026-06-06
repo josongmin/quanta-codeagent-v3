@@ -254,6 +254,8 @@ const RULES: readonly Rule[] = [
         "SoX capture best-effort cleanup of child handle — absence/post-exit is the success state.",
       "agent/loop.ts":
         "R4-audit browser teardown on EVERY turn exit (incl. thrown loop): `browserDispose?.().catch(() => {})` is idempotent best-effort — the session is ending, nowhere to surface a dispose error.",
+      "agent/loop/entry.ts":
+        "jun-6 loop-decomp relocation: the `finally` teardown (`browserDispose?.().catch(() => {})` + the new appshot peer `appshotDispose?.().catch(() => {})`) moved verbatim from agent/loop.ts — idempotent best-effort dispose at session end, nowhere to surface the error.",
       "agent/streaming-boomerang/default-streamer.ts":
         "Terminal-chunk pushes into an already-closing channel (3 sites) — the consumer is gone, there is nowhere to surface a push error; documented best-effort, same posture as stream/adapters/jsonl-recorder.ts.",
       "apps/cli/repl/voice-live-wire.ts":
@@ -264,6 +266,8 @@ const RULES: readonly Rule[] = [
         "Best-effort reap of a dead/superseded browser session handle (2 sites) — post-close is the success state; documented inline.",
       "mcp/client.ts":
         "Reconnect closes the STALE carrier LAST (`old?.close().catch(() => {})`) — a close-time error is non-fatal because the transport is already replaced; surfacing it would block the rebuilt path. Documented inline at the call site (same posture as stream/adapters/jsonl-recorder.ts).",
+      "memory/dream/team-write-target.ts":
+        "jun-06 atomic-write harden: temp-file cleanup on a FAILED rename (`unlink(tmp).catch(() => {})`) — the real rename error is about to be RETHROWN, so a cleanup failure is non-fatal and there is nothing to surface (same best-effort posture as tool/browser/session-holder.ts).",
     },
   },
   {
@@ -366,6 +370,26 @@ const RULES: readonly Rule[] = [
       // factory the injection pattern delegates to). Each should migrate to
       // `(opts.now ?? Date.now)()` and drop from this allowlist.
       "agent/loop.ts": "BURN-DOWN: turnId/startedAt default clock (telemetry — lowest priority)",
+      // jun-6 loop decomposition (`agent/loop.ts` split into `agent/loop/*`):
+      // the telemetry/provenance timestamps + default-clock factories below were
+      // RELOCATED verbatim from the monolithic `agent/loop.ts` (already
+      // allowlisted above with the same telemetry rationale). None reach a
+      // model-facing/persisted-replay boundary — they stamp turn-header
+      // `startedAt`, compaction `at`/`ts`/`compactedAt` provenance, event
+      // `atMs`, the control-poll deadline, and the `() => Date.now()` default
+      // clock handed to the background-compaction summarizer.
+      "agent/loop/turn-iteration.ts":
+        "BURN-DOWN (loop-decomp relocation): turn-header `startedAt` default clock — telemetry, same as agent/loop.ts.",
+      "agent/loop/compaction-wire.ts":
+        "BURN-DOWN (loop-decomp relocation): compaction `at`/`ts` provenance stamps — telemetry, not model-facing replay.",
+      "agent/loop/recovery-executor.ts":
+        "BURN-DOWN (loop-decomp relocation): compaction `at`/`compactedAt` provenance stamps — telemetry, not model-facing replay.",
+      "agent/loop/control-poll.ts":
+        "BURN-DOWN (loop-decomp relocation): `Date.now()` is the steer-deadline arg to the control-poll handler — infra timing, not persisted/replayed.",
+      "agent/loop/emit-helpers.ts":
+        "BURN-DOWN (loop-decomp relocation): usage-event `atMs` telemetry stamp — not model-facing replay.",
+      "agent/loop/session-bootstrap.ts":
+        "BURN-DOWN (loop-decomp relocation): `() => Date.now()` default-clock factory handed to the bg-compaction summarizer — default-factory fallback.",
       "agent/memory-tools.ts":
         "BURN-DOWN: W6 injected clock+uuid; `Date.now` here is the default-factory fallback",
       "agent/prompt.ts":

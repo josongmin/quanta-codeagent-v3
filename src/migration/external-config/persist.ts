@@ -96,24 +96,53 @@ const pathExists = async (path: string): Promise<boolean> => {
   }
 }
 
-/** Read + JSON.parse an existing config file. Missing/malformed ⇒ `{}` so the
- *  merge starts from an empty base (never throws on a corrupt user file). */
-const readJsonObject = async (path: string): Promise<Record<string, unknown>> => {
+/**
+ * The state of an existing JSON config target, read fail-CLOSED.
+ *
+ *  - `absent`  — the file does not exist ⇒ a fresh write from an empty base.
+ *  - `empty`   — present but whitespace-only ⇒ also a fresh base (a 0-byte or
+ *                blank file carries no user data to lose).
+ *  - `object`  — present, parses to a plain JSON object ⇒ merge into it.
+ *  - `corrupt` — present but NOT parseable as a JSON object (JSONC, hand-edit,
+ *                trailing garbage, or a top-level array/scalar). We REFUSE to
+ *                overwrite — clobbering it to `{}` would DESTROY the user's
+ *                file (audited permissions / MCP servers). The caller surfaces
+ *                a `config-unreadable` warning and writes nothing.
+ */
+type ExistingJson =
+  | { readonly state: "absent" }
+  | { readonly state: "empty" }
+  | { readonly state: "object"; readonly value: Record<string, unknown> }
+  | { readonly state: "corrupt" }
+
+/** Read an existing JSON config target, fail-CLOSED on a corrupt present file
+ *  (never clobbers a hand-edited / JSONC config to `{}`). */
+const readExistingJson = async (path: string): Promise<ExistingJson> => {
   let raw: string
   try {
     raw = await readFile(path, "utf8")
   } catch {
-    return {}
+    return { state: "absent" }
   }
+  if (raw.trim().length === 0) return { state: "empty" }
+  let parsed: unknown
   try {
-    const parsed = JSON.parse(raw) as unknown
-    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {}
+    parsed = JSON.parse(raw)
   } catch {
-    return {}
+    return { state: "corrupt" }
   }
+  if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+    return { state: "object", value: parsed as Record<string, unknown> }
+  }
+  // A top-level array or scalar is not a config object — refuse rather than
+  // silently discard it.
+  return { state: "corrupt" }
 }
+
+/** A target was present-but-unparseable: refuse + surface a typed warning
+ *  (mirrors the `.mcp.json` writer's `config-unreadable` posture). */
+const corruptTargetWarning = (path: string): MigrationWarning =>
+  writeWarning(path, "config-unreadable: existing target is corrupt — refusing to overwrite")
 
 /** Union two string lists, order-stable (existing first, then new), deduped. */
 const unionList = (existing: unknown, incoming: readonly string[]): string[] => {
@@ -163,6 +192,53 @@ const writeWarning = (path: string, detail: string): MigrationWarning => ({
   detail,
 })
 
+// ─── CODE-EXEC guard on .mcp.json command/args ───────────────────────────
+//
+// `.mcp.json` is EXECUTABLE: quanta spawns `command` with `args`. A competitor
+// config is UNTRUSTED, so a planted `command` / `arg` carrying a shell
+// metacharacter (pipeline, command-substitution, redirection, control char)
+// must NEVER be written into the executable config. We accept only a "plain"
+// token — no whitespace in the command, no shell metacharacters in either.
+
+/** Shell metacharacters that turn a token into a code-exec vector once it
+ *  reaches a shell or an `argv` boundary. */
+const SHELL_METACHAR = /[|&;<>$`(){}[\]!*?]/
+
+/** True iff `s` contains a C0 control char (code point < 0x20 — incl. NUL,
+ *  TAB, newline). Checked by code point so no raw control char lives in
+ *  source. */
+const hasControlChar = (s: string): boolean => {
+  for (let i = 0; i < s.length; i++) {
+    if (s.charCodeAt(i) < 0x20) return true
+  }
+  return false
+}
+
+/** A safe MCP `command`: a single token (no whitespace) with no shell
+ *  metacharacters or control chars. `node`, `/usr/local/bin/mcp-fs`, `mcp-fs`
+ *  pass; `rm -rf ~; curl|sh`, `node evil`, `node\nrm -rf /` are rejected. */
+const isSafeCommand = (command: string): boolean =>
+  command.length > 0 &&
+  !/\s/.test(command) &&
+  !SHELL_METACHAR.test(command) &&
+  !hasControlChar(command)
+
+/** A safe MCP `arg`: no shell metacharacters or control chars. Path-y args
+ *  (`--root`, `/x/y`, `--port=8080`) pass; `$(whoami)`, `` `id` ``,
+ *  `x>/etc/passwd` are rejected. */
+const isSafeArg = (arg: string): boolean => !SHELL_METACHAR.test(arg) && !hasControlChar(arg)
+
+/** True iff EVERY executable field of an mcp entry is shell-safe. A non-stdio
+ *  entry (no command) is structurally safe — there is nothing to spawn. */
+const isSafeMcpEntry = (entry: {
+  readonly command?: string
+  readonly args?: readonly string[]
+}): boolean => {
+  if (entry.command !== undefined && !isSafeCommand(entry.command)) return false
+  if (entry.args !== undefined && !entry.args.every(isSafeArg)) return false
+  return true
+}
+
 /** Write `content` to `path`, but NEVER silently overwrite: if `path` already
  *  exists, write a `<stem>.imported<ext>` SIBLING instead. Returns the path
  *  actually written. Parent dirs are created. */
@@ -187,12 +263,30 @@ const siblingImportedPath = (path: string): string => {
 
 // ─── per-type writers ────────────────────────────────────────────────────
 
+/** Outcome of a JSON-config writer: whether a write actually happened + any
+ *  non-fatal warnings (corrupt-target refusal, dropped unsafe entry). */
+interface WriteOutcome {
+  readonly wrote: boolean
+  readonly warnings: readonly MigrationWarning[]
+}
+
+const NO_WRITE = (warning: MigrationWarning): WriteOutcome => ({
+  wrote: false,
+  warnings: [warning],
+})
+
 /** settings (permission) → `<project>/settings.json#permissions`. MERGES into
  *  any existing settings.json: union allow/deny/ask, preserve peer keys, only
- *  set `defaultMode` when absent (never override a native choice). */
-const persistSettings = async (projectDir: string, value: ConvertedSettings): Promise<void> => {
+ *  set `defaultMode` when absent (never override a native choice). Fail-CLOSED:
+ *  a present-but-corrupt settings.json is preserved (refused), not clobbered. */
+const persistSettings = async (
+  projectDir: string,
+  value: ConvertedSettings,
+): Promise<WriteOutcome> => {
   const path = join(projectDir, "settings.json")
-  const current = await readJsonObject(path)
+  const existing = await readExistingJson(path)
+  if (existing.state === "corrupt") return NO_WRITE(corruptTargetWarning(path))
+  const current = existing.state === "object" ? existing.value : {}
   const existingPerms =
     typeof current.permissions === "object" && current.permissions !== null
       ? (current.permissions as Record<string, unknown>)
@@ -208,15 +302,22 @@ const persistSettings = async (projectDir: string, value: ConvertedSettings): Pr
     next.defaultMode = value.defaultMode
   }
   await writeFile(path, `${JSON.stringify(next, null, 2)}\n`, "utf8")
+  return { wrote: true, warnings: [] }
 }
 
 /** hooks → `<project>/settings.json#hooks` in the exact Claude shape
  *  `loadCommandHookBindings` parses: `{ <Event>: [ { matcher?, hooks:[{type,
  *  command}] } ] }`. MERGES: appends groups under each event, preserving any
- *  existing hooks (idempotent — an identical group is not duplicated). */
-const persistHooks = async (projectDir: string, value: readonly ConvertedHook[]): Promise<void> => {
+ *  existing hooks (idempotent — an identical group is not duplicated).
+ *  Fail-CLOSED on a corrupt existing settings.json. */
+const persistHooks = async (
+  projectDir: string,
+  value: readonly ConvertedHook[],
+): Promise<WriteOutcome> => {
   const path = join(projectDir, "settings.json")
-  const current = await readJsonObject(path)
+  const existing = await readExistingJson(path)
+  if (existing.state === "corrupt") return NO_WRITE(corruptTargetWarning(path))
+  const current = existing.state === "object" ? existing.value : {}
   const hooks: Record<string, unknown[]> = {}
   const existingHooks =
     typeof current.hooks === "object" && current.hooks !== null
@@ -237,48 +338,82 @@ const persistHooks = async (projectDir: string, value: readonly ConvertedHook[])
   }
   const next: Record<string, unknown> = { ...current, hooks }
   await writeFile(path, `${JSON.stringify(next, null, 2)}\n`, "utf8")
+  return { wrote: true, warnings: [] }
 }
 
 /** mcp → `<project>/.mcp.json#mcpServers`. Writes ONLY the modeled shape
  *  (command/args, OR a bare entry for non-stdio). `env`/credentials are NEVER
  *  written — the converter dropped them and we serialize a closed field set.
- *  MERGES: a server already present (by name) is NOT overwritten. */
+ *  MERGES: a server already present (by name) is NOT overwritten.
+ *  Fail-CLOSED on a corrupt existing .mcp.json. CODE-EXEC guard: any entry
+ *  (incoming OR pre-existing) whose command/args carry a shell metacharacter is
+ *  DROPPED — never written into the executable config. */
 const persistMcp = async (
   projectDir: string,
   value: readonly ConvertedMcpServer[],
-): Promise<void> => {
+): Promise<WriteOutcome> => {
   const path = join(projectDir, ".mcp.json")
-  const current = await readJsonObject(path)
+  const existing = await readExistingJson(path)
+  if (existing.state === "corrupt") return NO_WRITE(corruptTargetWarning(path))
+  const current = existing.state === "object" ? existing.value : {}
+  const { servers, warnings } = mergeMcpServers(path, current, value)
+  const next: Record<string, unknown> = { ...current, mcpServers: servers }
+  await writeFile(path, `${JSON.stringify(next, null, 2)}\n`, "utf8")
+  return { wrote: true, warnings }
+}
+
+/** Build the merged `mcpServers` map: scrub + safety-check every pre-existing
+ *  entry, then add each incoming entry (never clobbering an existing name).
+ *  Any entry — pre-existing OR incoming — that fails the CODE-EXEC guard is
+ *  DROPPED with a typed warning, never written into the executable config. */
+const mergeMcpServers = (
+  path: string,
+  current: Record<string, unknown>,
+  value: readonly ConvertedMcpServer[],
+): { servers: Record<string, unknown>; warnings: MigrationWarning[] } => {
+  const warnings: MigrationWarning[] = []
+  const servers: Record<string, unknown> = {}
   // The mcp SOURCE probe is `<project>/.mcp.json` — the SAME path we write. So
   // the existing file may itself be the credential-bearing competitor file. We
   // SCRUB every pre-existing server entry to the modeled command/args shape
   // (dropping env / headers / any secret-bearing field) before merging — the
   // credential-drop is structural even when source == destination.
-  const servers: Record<string, unknown> = {}
-  const existing =
+  const existingServers =
     typeof current.mcpServers === "object" && current.mcpServers !== null
       ? (current.mcpServers as Record<string, unknown>)
       : {}
-  for (const [name, raw] of Object.entries(existing)) {
-    servers[name] = scrubMcpEntry(raw)
+  for (const [name, raw] of Object.entries(existingServers)) {
+    const entry = scrubMcpEntry(raw)
+    // A pre-existing entry must NOT be re-blessed if it carries an unsafe
+    // command (a planted hostile entry round-tripping through the scrub merge).
+    if (isSafeMcpEntry(entry)) {
+      servers[name] = entry
+    } else {
+      warnings.push(
+        writeWarning(path, `dropped unsafe pre-existing mcp server ${JSON.stringify(name)}`),
+      )
+    }
   }
   for (const s of value) {
     if (s.name in servers) continue // never clobber an existing (scrubbed) entry
+    if (!isSafeMcpEntry(s)) {
+      warnings.push(writeWarning(path, `dropped unsafe mcp server ${JSON.stringify(s.name)}`))
+      continue
+    }
     const entry: Record<string, unknown> = {}
     if (s.command !== undefined) entry.command = s.command
     if (s.args !== undefined) entry.args = [...s.args]
     // NOTE: deliberately NO env / headers / url-with-secrets — closed shape.
     servers[s.name] = entry
   }
-  const next: Record<string, unknown> = { ...current, mcpServers: servers }
-  await writeFile(path, `${JSON.stringify(next, null, 2)}\n`, "utf8")
+  return { servers, warnings }
 }
 
 /** Reduce ANY mcp server entry (possibly carrying `env`/credentials) to the
  *  modeled closed shape — keep ONLY command/args. Drops env, headers, and any
  *  other field that could carry a secret. */
-const scrubMcpEntry = (raw: unknown): Record<string, unknown> => {
-  const entry: Record<string, unknown> = {}
+const scrubMcpEntry = (raw: unknown): { command?: string; args?: string[] } => {
+  const entry: { command?: string; args?: string[] } = {}
   if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
     const o = raw as Record<string, unknown>
     if (typeof o.command === "string") entry.command = o.command
@@ -292,7 +427,7 @@ const scrubMcpEntry = (raw: unknown): Record<string, unknown> => {
 const persistSubagents = async (
   projectDir: string,
   value: readonly ConvertedSubagent[],
-): Promise<void> => {
+): Promise<WriteOutcome> => {
   for (const spec of value) {
     const path = join(projectDir, ".quanta", "agents", `${safeStem(spec.name)}.md`)
     const doc = renderFrontmatterDoc(
@@ -307,14 +442,19 @@ const persistSubagents = async (
     )
     await writeNoClobber(path, doc)
   }
+  return { wrote: value.length > 0, warnings: [] }
 }
 
 /** agents_md → `<project>/AGENTS.md` (quanta's native rule entrypoint). No-
  *  clobber: an existing AGENTS.md yields `AGENTS.imported.md`. */
-const persistRepoRules = async (projectDir: string, value: ConvertedRepoRules): Promise<void> => {
+const persistRepoRules = async (
+  projectDir: string,
+  value: ConvertedRepoRules,
+): Promise<WriteOutcome> => {
   const path = join(projectDir, "AGENTS.md")
   const body = value.body.endsWith("\n") ? value.body : `${value.body}\n`
   await writeNoClobber(path, body)
+  return { wrote: true, warnings: [] }
 }
 
 /** cursor_rules → `<project>/.quanta/rules/<name>.md` (frontmatter globs /
@@ -322,7 +462,7 @@ const persistRepoRules = async (projectDir: string, value: ConvertedRepoRules): 
 const persistGlobRules = async (
   projectDir: string,
   value: readonly ConvertedGlobRule[],
-): Promise<void> => {
+): Promise<WriteOutcome> => {
   let i = 0
   for (const rule of value) {
     i += 1
@@ -337,14 +477,16 @@ const persistGlobRules = async (
     if (rule.alwaysApply) fields.push(["alwaysApply", "true"])
     await writeNoClobber(path, renderFrontmatterDoc(fields, rule.body))
   }
+  return { wrote: value.length > 0, warnings: [] }
 }
 
-/** Persist ONE ok item to its destination. Throws on fs failure (caught by the
- *  per-item loop and converted to a warning). */
+/** Persist ONE ok item to its destination. Returns whether it wrote + any
+ *  non-fatal warnings (corrupt-target refusal, dropped unsafe entry). Throws
+ *  only on a real fs failure (caught by the per-item loop). */
 const persistOne = async (
   item: Extract<ConvertedItem, { ok: true }>,
   projectDir: string,
-): Promise<void> => {
+): Promise<WriteOutcome> => {
   switch (item.type) {
     case "settings":
       return persistSettings(projectDir, item.value)
@@ -403,8 +545,9 @@ export const persistConvertedItems = async (
   for (const item of input.converted) {
     if (!item.ok) continue
     try {
-      await persistOne(item, input.projectDir)
-      writtenTypes.push(item.type)
+      const outcome = await persistOne(item, input.projectDir)
+      warnings.push(...outcome.warnings)
+      if (outcome.wrote) writtenTypes.push(item.type)
     } catch (err) {
       const detail = (err as { code?: string }).code ?? errMessage(err)
       warnings.push(writeWarning(destLabel(input.projectDir, item.type), detail))

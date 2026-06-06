@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { defaultFileSystemPort, type FileSystemPort, FsJailError, sha256Hex } from "@/storage"
+import { globWriteGuardEvent, writeBudgetEvent } from "../_shared/exfil-rail-guards"
 import { captureFileHistory } from "../file-history/capture"
 import { gitWriteGuardDeny } from "../git-write-guard-result"
 import { guardWrite } from "../stale-read-guard"
@@ -195,6 +196,39 @@ const commitEdit = async (
   }
 }
 
+/** Static pre-read denies for `edit` (BEFORE the read, never a partial write):
+ *  ADR-0091 git-write-protection THEN jun-6 exfil-rail (b) glob-in-write. Both
+ *  default-OFF (`null` ⇒ byte-identical). Extracted so `execute` stays under the
+ *  biome cognitive-complexity cap. */
+const editStaticDeny = (path: string, ctx: ToolContext): ToolEvent | null =>
+  gitWriteGuardDeny(path, ctx) ?? globWriteGuardEvent(path, ctx)
+
+/** Pre-commit denies for `edit` (AFTER planning, BEFORE commit): ADR-0474
+ *  stale-read-guard THEN jun-6 exfil-rail (a) per-turn write-budget. Both
+ *  default-OFF (`null` ⇒ byte-identical). Extracted so `execute` stays under the
+ *  biome cognitive-complexity cap. */
+const editPreCommitDeny = async (
+  fs: FileSystemPort,
+  ctx: ToolContext,
+  path: string,
+): Promise<ToolEvent | null> => {
+  if (ctx.readFileState !== undefined) {
+    const cur = await fs.statFile(path, ctx.cwd)
+    const guard = guardWrite(ctx.readFileState, cur.path, cur.mtimeMs)
+    if (!guard.ok) {
+      return {
+        type: "result",
+        result: {
+          ok: false,
+          output: guard.error.message,
+          failure: { mode: "rejected", reason: "stale_read" },
+        },
+      }
+    }
+  }
+  return writeBudgetEvent(ctx)
+}
+
 /** Build the `edit` tool against an injected {@link FileSystemPort} (#13).
  *  `fs` defaults to the real `@/storage`-backed port, so the exported
  *  {@link editTool} is byte-identical to the pre-port direct-call version;
@@ -229,14 +263,10 @@ export const makeEditTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
   interruptBehavior: (): "block" => "block",
 
   async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
-    // ADR-0091 git-write-protection: an edit targeting `.git/{hooks,config,
-    // config.worktree,info/attributes}` or `.vscode/**` is a code-execution /
-    // policy-escape vector. Static-deny BEFORE the read, mirroring the
-    // FsJailError hard-stop below — never a partial write. Default-OFF: absent
-    // `ctx.gitWriteGuard` the helper returns null (byte-identical legacy path).
-    const guardDeny = gitWriteGuardDeny(input.path, ctx)
-    if (guardDeny) {
-      yield guardDeny
+    // Static pre-read denies (git-write-protection + jun-6 glob-in-write guard).
+    const staticDeny = editStaticDeny(input.path, ctx)
+    if (staticDeny) {
+      yield staticDeny
       return
     }
     // Resolve relative paths against the session cwd, not process.cwd().
@@ -248,24 +278,13 @@ export const makeEditTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
         yield { type: "result", result: planned.result }
         return
       }
-      // ADR-0474 — stale-read-guard: block editing a file that was READ earlier
-      // this session and externally modified since (mtime advanced), telling the
-      // model to re-read. No-op when the guard is unwired (ctx.readFileState
-      // absent) or the path was never read (guardWrite returns ok for `unread`).
-      if (ctx.readFileState !== undefined) {
-        const cur = await fs.statFile(input.path, ctx.cwd)
-        const guard = guardWrite(ctx.readFileState, cur.path, cur.mtimeMs)
-        if (!guard.ok) {
-          yield {
-            type: "result",
-            result: {
-              ok: false,
-              output: guard.error.message,
-              failure: { mode: "rejected", reason: "stale_read" },
-            },
-          }
-          return
-        }
+      // ADR-0474 stale-read-guard + jun-6 exfil-rail (a) per-turn write-budget,
+      // both AFTER planning and BEFORE the commit (a deny is never a partial
+      // write). Default-OFF ⇒ `null` ⇒ byte-identical.
+      const preCommitDeny = await editPreCommitDeny(fs, ctx, input.path)
+      if (preCommitDeny) {
+        yield preCommitDeny
+        return
       }
       // jun-6 tool-interrupt-behavior — the commit runs inside the OPTIONAL
       // critical section (inside `commitEdit`) so an in-flight ESC cannot tear a

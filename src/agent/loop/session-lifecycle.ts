@@ -14,7 +14,11 @@ import { persistSession } from "../memory"
 import { buildPersistDeps } from "../session-resources"
 import type { StopCategory } from "../stop-category"
 import type { AgentConfig, AgentOutcome, MemoryCitation, StopReason } from "../types"
-import { latestUserTextFromWm, observeEffortClassifierPrompt } from "./context-assembler"
+import {
+  latestUserTextFromWm,
+  observeEffortClassifierPrompt,
+  openingTurnUserText,
+} from "./context-assembler"
 import { emitInterrupted, emitSubagentCancel } from "./emit-helpers"
 import { emitUserPromptSubmitHook } from "./session-hooks"
 import {
@@ -162,7 +166,10 @@ export const runSessionStartSequence = async (args: {
     await args.cfg.hooks.emit({ type: "session_start", sessionId: args.sessionId })
   }
   if (args.cfg.autoTitlePort !== undefined) {
-    const firstPrompt = latestUserTextFromWm(args.wm)
+    // ONCE-ONLY: title the session from its OPENING prompt — fire only when the
+    // working memory holds exactly one user message. A resumed/continued
+    // transcript (≥2 user messages) skips, so no per-turn spend.
+    const firstPrompt = openingTurnUserText(args.wm)
     if (firstPrompt !== undefined && firstPrompt.trim() !== "") {
       args.cfg.autoTitlePort.maybeTitle(args.sessionId, firstPrompt)
     }

@@ -42,11 +42,12 @@ export const advisorInputSchema = z.object({
   question: z
     .string()
     .min(1)
+    .optional()
     .describe(
       "The question to put to the advisor model — a focused ask for a SECOND " +
         "OPINION (design trade-off, a tricky bug hypothesis, a review of your " +
-        "plan). Be specific; the advisor sees ONLY this question + the optional " +
-        "context, not your whole conversation.",
+        "plan). Be specific; the advisor sees this question + the optional " +
+        "context. OPTIONAL — omit ONLY when you set forwardHistory:true.",
     ),
   context: z
     .string()
@@ -55,6 +56,15 @@ export const advisorInputSchema = z.object({
       "Optional supporting context handed to the advisor verbatim (a code " +
         "snippet, an error trace, the relevant constraints). Keep it tight — the " +
         "advisor is a one-shot consult, not a full session.",
+    ),
+  forwardHistory: z
+    .boolean()
+    .optional()
+    .describe(
+      "Forward your (REDACTED) conversation transcript to the advisor instead " +
+        "of a hand-written context, so it sees the full task, tool calls, and " +
+        "results. Use for a holistic 'review where I'm at' second opinion. " +
+        "Secrets/PII in the transcript are scrubbed before they leave the loop.",
     ),
   model: z
     .string()
@@ -100,8 +110,12 @@ const formatResult = (r: AdvisorConsultResult): string =>
  *  signal, OMITTING absent optionals (exactOptionalPropertyTypes — never
  *  `undefined`-set). */
 const inputToRequest = (input: AdvisorInput, signal: AbortSignal): AdvisorConsultRequest => ({
-  question: input.question,
+  // `question` is optional in forwardHistory mode; the port assembles the
+  // (redacted) transcript and the question is purely supplementary. We forward
+  // an empty string when omitted so the port's composeUserText stays total.
+  question: input.question ?? "",
   ...(input.context !== undefined ? { context: input.context } : {}),
+  ...(input.forwardHistory !== undefined ? { forwardHistory: input.forwardHistory } : {}),
   ...(input.model !== undefined ? { model: input.model } : {}),
   signal,
 })
@@ -131,6 +145,16 @@ export const advisorTool = (port: AdvisorPort): Tool<AdvisorInput> => ({
     }
     if (ctx.signal.aborted) {
       yield { type: "result", result: { ok: false, output: "aborted before start" } }
+      return
+    }
+    // At-least-one-of {question, forwardHistory:true}. Neither ⇒ ok:false BEFORE
+    // the port is reached (RFC jun-6 §5.1) — a bare `{}` is not a valid consult.
+    const hasQuestion = typeof parsed.data.question === "string" && parsed.data.question.length > 0
+    if (!hasQuestion && parsed.data.forwardHistory !== true) {
+      yield {
+        type: "result",
+        result: { ok: false, output: "supply question or forwardHistory" },
+      }
       return
     }
     // Fail-closed allowlist check for an EXPLICIT model BEFORE touching the

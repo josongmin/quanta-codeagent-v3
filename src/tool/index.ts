@@ -187,7 +187,13 @@ export {
   renderModelOutput,
   validateToolOutput,
 } from "./factory"
-export { fileTreeSummaryTool, inferNextAction } from "./file-tree-summary"
+export {
+  aggregate as aggregateFileTree,
+  fileTreeSummaryTool,
+  inferNextAction,
+  render as renderFileTree,
+  type TreeAgg,
+} from "./file-tree-summary"
 export type { GhRunner } from "./gh"
 export { defaultGhRunner, ghTools } from "./gh"
 export type {
