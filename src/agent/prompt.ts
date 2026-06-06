@@ -13,7 +13,6 @@ import { renderEnvBlock, type TurnEnvContext } from "./env-context"
 import { type GlobRule, renderGlobRulesBlock, selectGlobRules } from "./glob-rules"
 import { assertValidIdentityLines } from "./identity"
 import { resolveAgentMode } from "./mode"
-import { type DirectiveConfig, selectActiveDirectives } from "./prompt-directives"
 import { type PersonaKind, personaLines } from "./persona"
 import {
   BODY_AFTER_PERSONA,
@@ -21,6 +20,7 @@ import {
   BRIEF_NOTICE,
   INTRO_LINES,
 } from "./prompt-body"
+import { type DirectiveConfig, selectActiveDirectives } from "./prompt-directives"
 import {
   type AgentMode as PromptPackMode,
   renderPackByMode,
