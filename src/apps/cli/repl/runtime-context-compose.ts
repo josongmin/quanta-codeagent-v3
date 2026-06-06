@@ -91,6 +91,10 @@ const buildBootstrapContextArgs = (args: {
   /** ADR-0428 jun-02 wire — composition-root env view used for the DIRECT
    *  `QUANTA_NETWORK_PROXY` read (mirrors `resolveMemoryConfigFromEnv`). */
   readonly env: Readonly<Record<string, string | undefined>>
+  /** F2 (round-2) — host-loaded named-agent resolver (`loadNamedAgents(cwd)`).
+   *  Threaded onto the overlay so the per-turn AgentConfig carries it. Absent ⇒
+   *  no `.quanta/agents` (or load fault) ⇒ overlay slot omitted (byte-identical). */
+  readonly namedAgentResolver?: NamedAgentResolver
 }): Parameters<typeof composeRuntimeBootstrapContext>[0] => {
   const {
     boot,
@@ -104,6 +108,7 @@ const buildBootstrapContextArgs = (args: {
     permissionStore,
     autoReview,
     env,
+    namedAgentResolver,
   } = args
   // ADR-0428 jun-02 wire — DIRECT env read of `QUANTA_NETWORK_PROXY` (this
   // surface builds its base via the host overlay, not `applyKnobs`). Absent /
@@ -132,6 +137,10 @@ const buildBootstrapContextArgs = (args: {
         }),
       ...(shellSnapshot !== undefined ? { shellSnapshot } : {}),
       ...(networkProxy !== undefined ? { networkProxy } : {}),
+      // F2 (round-2) — overlay the named-agent resolver when the surface loaded
+      // a non-empty `.quanta/agents` registry. Absent ⇒ slot omitted ⇒ the
+      // per-turn AgentConfig has no resolver (default-OFF byte-identical).
+      ...(namedAgentResolver !== undefined ? { namedAgentResolver } : {}),
     },
   }
 }
@@ -204,6 +213,17 @@ export const composeCliRuntimeContext = async (
   const planExitPort = createCliPlanExitPort({ ask: askLine })
   const userInputPort = createCliUserInputPort({ ask: askLine, stream: turnStream })
   const summarizerLlm = buildSessionMemoryAutoSummarizer(boot)
+  // F2 (round-2) — load `.quanta/agents` (+ native dir) ONCE per session at this
+  // async composition root, using the SESSION-RESOLVED `boot.cwd` (the jailed /
+  // resume-switched cwd the surface already settled on — NOT raw `process.cwd()`).
+  // Threaded onto the runtime overlay so the interactive REPL's per-turn
+  // AgentConfig carries `namedAgentResolver`, giving the primary surface the same
+  // named-agent resolution the headless `apps/agent` surface has. FAIL-OPEN +
+  // default-OFF: a thrown loader ⇒ `undefined`; an empty registry (no agent dir)
+  // ⇒ slot stays absent ⇒ no resolver set ⇒ byte-identical to today.
+  const namedAgents = await loadNamedAgents(boot.cwd).catch(() => undefined)
+  const namedAgentResolver =
+    namedAgents !== undefined && namedAgents.size > 0 ? namedAgents : undefined
   const runtimeContext = await composeRuntimeBootstrapContext({
     ...buildBootstrapContextArgs({
       boot,
@@ -217,6 +237,7 @@ export const composeCliRuntimeContext = async (
       permissionStore,
       autoReview,
       env: args.envSource ?? process.env,
+      ...(namedAgentResolver !== undefined ? { namedAgentResolver } : {}),
     }),
     ...(args.convStore !== undefined || args.responsesStore !== undefined
       ? {

@@ -24,13 +24,21 @@ describe("captureTokenBaseline — provider-aware cache buckets (D5)", () => {
 
   test("anthropic cache-HIT: inputTokens(200)+cacheRead(149800) ⇒ 150k captured", () => {
     const b = box(10)
-    captureTokenBaseline(b, { inputTokens: 200, cacheReadTokens: 149_800, model: ANTHROPIC }, 120_000)
+    captureTokenBaseline(
+      b,
+      { inputTokens: 200, cacheReadTokens: 149_800, model: ANTHROPIC },
+      120_000,
+    )
     expect(b.current).toEqual({ measuredInputTokens: 150_000, measuredAtMessageCount: 10 })
   })
 
   test("anthropic cache-creation bucket also counted", () => {
     const b = box(7)
-    captureTokenBaseline(b, { inputTokens: 1_000, cacheCreationTokens: 130_000, model: ANTHROPIC }, 120_000)
+    captureTokenBaseline(
+      b,
+      { inputTokens: 1_000, cacheCreationTokens: 130_000, model: ANTHROPIC },
+      120_000,
+    )
     expect(b.current).toEqual({ measuredInputTokens: 131_000, measuredAtMessageCount: 7 })
   })
 
@@ -39,7 +47,11 @@ describe("captureTokenBaseline — provider-aware cache buckets (D5)", () => {
     // cacheRead would record 190k (~2x the real prompt) → premature compaction.
     // Red-on-injection: drop the openai branch ⇒ measuredInputTokens === 190_000.
     const b = box(4)
-    captureTokenBaseline(b, { inputTokens: 100_000, cacheReadTokens: 90_000, model: OPENAI }, 50_000)
+    captureTokenBaseline(
+      b,
+      { inputTokens: 100_000, cacheReadTokens: 90_000, model: OPENAI },
+      50_000,
+    )
     expect(b.current).toEqual({ measuredInputTokens: 100_000, measuredAtMessageCount: 4 })
   })
 
@@ -57,7 +69,11 @@ describe("captureTokenBaseline — provider-aware cache buckets (D5)", () => {
 
   test("no sendCount yet ⇒ no capture (send-time count not recorded)", () => {
     const b = box(undefined)
-    captureTokenBaseline(b, { inputTokens: 200, cacheReadTokens: 149_800, model: ANTHROPIC }, 120_000)
+    captureTokenBaseline(
+      b,
+      { inputTokens: 200, cacheReadTokens: 149_800, model: ANTHROPIC },
+      120_000,
+    )
     expect(b.current).toBeUndefined()
   })
 
@@ -73,7 +89,11 @@ describe("captureTokenBaseline — provider-aware cache buckets (D5)", () => {
 
   test("non-finite authoritative input is ignored (fail-safe)", () => {
     const b = box(3)
-    captureTokenBaseline(b, { inputTokens: Number.NaN, cacheReadTokens: 149_800, model: ANTHROPIC }, 120_000)
+    captureTokenBaseline(
+      b,
+      { inputTokens: Number.NaN, cacheReadTokens: 149_800, model: ANTHROPIC },
+      120_000,
+    )
     expect(b.current).toBeUndefined()
   })
 })

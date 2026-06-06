@@ -61,7 +61,12 @@ import type { StreamConsumeResult } from "./types"
  */
 export const captureTokenBaseline = (
   box: TurnState["tokenBaseline"],
-  ev: { inputTokens: number; cacheReadTokens?: number; cacheCreationTokens?: number; model: string },
+  ev: {
+    inputTokens: number
+    cacheReadTokens?: number
+    cacheCreationTokens?: number
+    model: string
+  },
   sentEstimate: number,
 ): void => {
   if (box === undefined || box.sendCount === undefined) return

@@ -57,15 +57,18 @@ export const singlePidKillCalls = (text: string): string[] => {
   // Match `escalatingKill(` … `)` non-greedily up to the first `)`; the call
   // sites in this codebase never nest parens inside the arg list, so a simple
   // balanced-free match is sufficient and avoids false negatives.
+  // The regex requires `escalatingKill` IMMEDIATELY followed by `(` — so the
+  // function DEFINITION (`export const escalatingKill = (` — note the ` = (`
+  // with spaces) is never matched; only call sites are. A param list containing
+  // a `:` is a TYPE annotation (a definition/signature, not a call) and is
+  // skipped. A call with exactly one argument (no top-level comma) is the
+  // single-PID-kill violation.
   const re = /escalatingKill\(([^)]*)\)/g
   let m: RegExpExecArray | null = re.exec(text)
   while (m !== null) {
     const args = (m[1] ?? "").trim()
-    // Skip the definition: `export const escalatingKill = (proc, killer?) =>`.
-    // The definition's "(" is preceded by `= ` (an assignment), not a call.
-    const preceding = text.slice(Math.max(0, m.index - 8), m.index)
-    const isDefinition = /=\s*$/.test(preceding) || args.includes(":") // typed params
-    if (!isDefinition && args.length > 0 && !args.includes(",")) {
+    const isSignature = args.includes(":") // typed params ⇒ definition, not a call
+    if (!isSignature && args.length > 0 && !args.includes(",")) {
       violations.push(`escalatingKill(${args})`)
     }
     m = re.exec(text)
@@ -92,9 +95,9 @@ describe("single-PID kill ban — every escalatingKill passes a tree killer (D1 
       "escalatingKill(proc)",
     ])
     // The fixed form — killer wired.
-    expect(singlePidKillCalls("const { kill } = escalatingKill(proc, SANDBOX_TREE_KILLER)")).toEqual(
-      [],
-    )
+    expect(
+      singlePidKillCalls("const { kill } = escalatingKill(proc, SANDBOX_TREE_KILLER)"),
+    ).toEqual([])
     // The definition must NOT be flagged (it is not a call site).
     expect(
       singlePidKillCalls("export const escalatingKill = (proc: KillableChild) => ({})"),
