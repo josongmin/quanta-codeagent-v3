@@ -392,6 +392,25 @@ const maybeWireCoordinationBroker = (
   return { admissibility: { coordinationBroker: broker } }
 }
 
+/** RFC jun-6 (DELTA #2) — register a freshly-spawned child into the PARENT's
+ *  team so siblings share a team bus. No-op when no team registry is wired
+ *  (`teamPeerMsg` off) or the parent is un-teamed. The parent's mailbox label
+ *  (`mailboxAgentId ?? "root"`) is its membership key. NO-THROW: a malformed
+ *  registry call is swallowed (the spawn must never fail on a comms-channel
+ *  bookkeeping error). */
+const maybeRegisterChildTeam = (parent: AgentConfig, childLabel: string): void => {
+  const registry = parent.teamRegistry
+  if (registry === undefined) return
+  const parentLabel = parent.mailboxAgentId ?? "root"
+  const team = registry.teamOf(parentLabel)
+  if (team === undefined) return // parent un-teamed ⇒ child stays un-teamed
+  try {
+    registry.addMember(team, childLabel)
+  } catch {
+    // bookkeeping only — never fail a spawn on a registry hiccup
+  }
+}
+
 /** Construct the CHILD {@link AgentConfig} by shallow-cloning `parent` and
  *  applying the subagent overrides (see the override table in the report).
  *  `store`/`hooks`/`metrics`/`run`/`sessionId`/`memory` are DROPPED so a child
@@ -465,6 +484,15 @@ const buildChildConfig = (
     // mailbox (parent↔child + sibling↔sibling). The port is an in-process
     // shared-by-reference instance — safe across the worktree-isolation fork.
     ...(parent.subagentMailbox ? { subagentMailbox: parent.subagentMailbox } : {}),
+    // RFC jun-6 (DELTA #2) — propagate the team registry so a forked child shares
+    // the SAME membership scope (and can itself create/delete teams + the
+    // cross-team deny applies to it). Absent ⇒ no team boundary (byte-identical).
+    ...(parent.teamRegistry ? { teamRegistry: parent.teamRegistry } : {}),
+    // RFC jun-6 (DELTA #1) — propagate the auto-delivery drain so the child's
+    // turn loop AUTO-receives peer mail addressed to ITS label (the drain takes
+    // the agent id at call time — one shared port drains every label). Absent ⇒
+    // the child must manually poll (byte-identical default-OFF).
+    ...(parent.peerInbox ? { peerInbox: parent.peerInbox } : {}),
     // ADR-0437 follow-up — THIS child's own turn gate (never the parent's).
     // The child loop parks on it at clean-completion so a `followup_task`
     // wake (registered against this child's task id in the runner below) can
@@ -564,6 +592,12 @@ export const createSubagentRunner = (
       parentId: parentMailboxLabel,
     }
     childOrdinal += 1
+
+    // RFC jun-6 (DELTA #2) — register the spawned child into the PARENT's team
+    // (if the parent belongs to one) so siblings share a team bus + the
+    // cross-team deny applies. No-op when `teamPeerMsg` is off (no registry) or
+    // the parent is un-teamed (byte-identical default-OFF).
+    maybeRegisterChildTeam(parent, mailboxIds.agentId)
 
     // id is sanitized by withWorktree's safeId; depth+prompt make it
     // human-traceable while staying within the worktree-name charset.

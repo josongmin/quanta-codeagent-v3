@@ -53,9 +53,24 @@ export interface CostPanelUsageDelta {
   costUsd?: number | null
 }
 
+/** §23.5 — per-model cumulative bucket. One per distinct model id seen across
+ *  the session (attributed to whichever model was active at each turn). */
+export interface ModelCostBucket {
+  readonly model: string
+  readonly inputTokens: number
+  readonly outputTokens: number
+  readonly cacheReadTokens: number
+  /** `null` until a known-model turn produced a cost (mirrors the aggregate). */
+  readonly costUsd: number | null
+}
+
 export interface CostPanel {
   /** Read-only snapshot for tests + the slash command. */
   snapshot(): CostPanelState
+  /** §23.5 — per-model cumulative breakdown, sorted by model id
+   *  (deterministic). Empty when disabled or before any turn. A
+   *  heterogeneous-model session is no longer collapsed to the last model. */
+  byModel(): readonly ModelCostBucket[]
   /** Patch any field — used by the REPL to push the active model id when
    *  it changes mid-session (e.g. `/retry-with`). */
   update(patch: Partial<CostPanelState>): void
@@ -139,6 +154,29 @@ export const createCostPanel = (opts: CostPanelOptions): CostPanel => {
     model: opts.model,
   }
 
+  // §23.5 — per-model cumulative buckets. Keyed by the model active at each
+  // turn. Kept as a closure var (NOT on CostPanelState) so `snapshot()` stays
+  // byte-identical and existing deep-reads are unaffected.
+  const perModel = new Map<
+    string,
+    { inputTokens: number; outputTokens: number; cacheReadTokens: number; costUsd: number | null }
+  >()
+  const bucketFor = (
+    model: string,
+  ): {
+    inputTokens: number
+    outputTokens: number
+    cacheReadTokens: number
+    costUsd: number | null
+  } => {
+    let b = perModel.get(model)
+    if (b === undefined) {
+      b = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costUsd: null }
+      perModel.set(model, b)
+    }
+    return b
+  }
+
   const accumulateCost = (turnCost: number | null): void => {
     if (turnCost === null || !Number.isFinite(turnCost)) return
     state.totalCostUsd = (state.totalCostUsd ?? 0) + turnCost
@@ -169,8 +207,26 @@ export const createCostPanel = (opts: CostPanelOptions): CostPanel => {
     }
   }
 
+  // Deterministic model ordering — byte compare (avoids locale drift).
+  const sortedModelEntries = (): Array<
+    [
+      string,
+      {
+        inputTokens: number
+        outputTokens: number
+        cacheReadTokens: number
+        costUsd: number | null
+      },
+    ]
+  > => [...perModel.entries()].sort((a, z) => (a[0] < z[0] ? -1 : a[0] > z[0] ? 1 : 0))
+
   return {
     snapshot: () => ({ ...state }),
+
+    byModel: () => {
+      if (!enabled) return []
+      return sortedModelEntries().map(([model, b]) => ({ model, ...b }))
+    },
 
     update: (patch) => {
       if (!enabled) return
@@ -179,23 +235,26 @@ export const createCostPanel = (opts: CostPanelOptions): CostPanel => {
 
     incrementTurn: (usage) => {
       if (!enabled) return
+      const inTok = Math.max(0, usage.inputTokens ?? 0)
+      const outTok = Math.max(0, usage.outputTokens ?? 0)
+      const cacheTok = Math.max(0, usage.cacheReadTokens ?? 0)
       state.turns += 1
-      state.inputTokens += Math.max(0, usage.inputTokens ?? 0)
-      state.outputTokens += Math.max(0, usage.outputTokens ?? 0)
-      state.cacheReadTokens += Math.max(0, usage.cacheReadTokens ?? 0)
-      // Resolve cost: caller-provided > derived via pricing > null.
-      const provided = usage.costUsd
-      if (provided !== undefined) {
-        accumulateCost(provided ?? null)
-        return
-      }
-      const turnCost = costUsd(
-        state.model,
-        Math.max(0, usage.inputTokens ?? 0),
-        Math.max(0, usage.outputTokens ?? 0),
-        Math.max(0, usage.cacheReadTokens ?? 0),
-      )
+      state.inputTokens += inTok
+      state.outputTokens += outTok
+      state.cacheReadTokens += cacheTok
+      // Resolve cost ONCE: caller-provided > derived via pricing > null. Used
+      // for BOTH the aggregate and the per-model bucket so they never diverge.
+      const turnCost =
+        usage.costUsd !== undefined ? usage.costUsd : costUsd(state.model, inTok, outTok, cacheTok)
       accumulateCost(turnCost)
+      // §23.5 — attribute to the model active at this turn.
+      const b = bucketFor(state.model)
+      b.inputTokens += inTok
+      b.outputTokens += outTok
+      b.cacheReadTokens += cacheTok
+      if (turnCost !== null && Number.isFinite(turnCost)) {
+        b.costUsd = (b.costUsd ?? 0) + turnCost
+      }
     },
 
     render: () => {
@@ -223,6 +282,19 @@ export const createCostPanel = (opts: CostPanelOptions): CostPanel => {
         `${padLabel("Per turn avg:")}${perTurn}`,
         `${padLabel("Model:")}${state.model}`,
       ]
+      // §23.5 — append a per-model breakdown ONLY for heterogeneous sessions
+      // (>1 distinct model). A single-model session renders byte-identical to
+      // the pre-feature box (no extra rows).
+      if (perModel.size > 1) {
+        lines.push("")
+        lines.push("By model:")
+        for (const [model, b] of sortedModelEntries()) {
+          lines.push(
+            `  ${model}: ${b.inputTokens.toLocaleString("en-US")} in / ` +
+              `${b.outputTokens.toLocaleString("en-US")} out · ${formatUsd(b.costUsd)}`,
+          )
+        }
+      }
       return renderBox(lines, {
         title: "session cost",
         titleStyle: gray,

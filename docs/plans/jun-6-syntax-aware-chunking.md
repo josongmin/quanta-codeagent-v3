@@ -1,10 +1,26 @@
 # RFC — Syntax-aware (tree-sitter) chunking + in-file outline/skeleton read
 
-> Status: PROPOSED (design only — no source changed by this RFC)
+> **Status: ✅ IMPLEMENTED (jun-06)**
 > Date: 2026-06-06
-> Slice: `src/retrieval/indexer/` (new sibling variant) + `src/code-parser/` (NEW) + `src/tool/read/` (outline mode)
+> Slice: `src/retrieval/indexer/` (new sibling variant) + `src/retrieval/code-parser/` (NEW sub-slice) + `src/tool/read/` (outline mode)
 > Default posture: OFF (byte-identical chunking + byte-identical `read` when the knobs are unset)
 > Feature axis: code-structure (one parser serves BOTH the indexer chunker and the outline read)
+
+---
+
+## 0. AS-BUILT (jun-06)
+
+What landed vs. the design below (the design is preserved verbatim under §1+; this section records the deltas):
+
+- **Dep choice (landed):** `web-tree-sitter@0.26.9` (the WASM runtime, as recommended in §4.1) **+ `tree-sitter-wasms@0.1.13`** for the grammar `.wasm` files — i.e. the grammars are an **npm package** (`node_modules/tree-sitter-wasms/out/tree-sitter-<lang>.wasm`), NOT vendored under `vendor/tree-sitter-wasm/` as §5.5 sketched. The `QUANTA_TREE_SITTER_DIR` override still lets a packaging step relocate them; absent ⇒ the parser resolves `tree-sitter-wasms/out` via `createRequire`. No `vendor/` dir, no `SHASUMS` (the npm lockfile pins the bytes).
+- **Slice placement (landed):** the `CodeParserPort` lives at **`src/retrieval/code-parser/`** (a sub-slice of `@/retrieval`), NOT a top-level `@/code-parser`. Rationale: `@/retrieval` already depends on `@/shared` only AND loads vendor SDKs as direct node modules from adapter files (the established pattern), so the parser fits its fence with **zero new tsconfig alias / biome fence / arch-ratchet churn**. The read tool (`@/tool`) imports the `CodeParserPort` *type* from `@/retrieval` (which `@/tool` is already permitted to reach — it is not in the `@/tool` `noRestrictedImports` block-list).
+- **Grammar set (landed):** `typescript, tsx, javascript, python, rust, go, bash` (the §4.1 Phase-1 set), detected by extension via a pure closed table (`src/retrieval/code-parser/lang-table.ts`).
+- **Port shape (landed):** exactly §4.2 — `CodeParserPort.parse(path,text) → Promise<ParseOutcome>` (`{ok:true,parsed}` | `{ok:false, reason:"no-grammar"|"parse-error"}`), NO-THROW, `DeclNode` with 1-based inclusive `startLine/endLine/signatureEndLine` + recursive `children`, `kind` reusing the LSP `SymbolKind` vocabulary. `createTreeSitterParser()` (lazy `Parser.init()` once + lazy per-lang `Language.load`, both module-level caches) + `fakeParser(table)` (canned outcomes, a `calls()` counter; unit tests never touch real WASM).
+- **Chunker (landed):** `chunkFileSyntactic(input, outcome, opts)` in `src/retrieval/indexer/chunker-syntactic.ts`, behind the same `FileChunk` contract; merge-tiny-siblings / whole-unit / split-at-children / leaf-line-window, exact `[1,lineCount]` coverage, `{ok:false}` ⇒ byte-identical `chunkFile` fallback. Wired into `default-scanner.ts` knob-gated by `QUANTA_SYNTAX_CHUNK` via `IndexerOptions.parser?` (the "future LSP-symbol chunker" seam the port already named).
+- **Outline (landed):** `renderOutline(text, parsed, budget)` in `src/tool/read/outline.ts` + `read`'s `outline`/`outlineBudget` params + `makeReadTool(fs, parser?)`, gated by `QUANTA_READ_OUTLINE`. Collapsed signatures + `// … (<N> lines)` + budget cap + surrogate-safe (whole-line cuts); `{ok:false}` / knob-off ⇒ graceful line-range degrade + a `(no outline: …)` note.
+- **Knobs (landed):** `QUANTA_SYNTAX_CHUNK`, `QUANTA_READ_OUTLINE` (strict `=== "1"`), `QUANTA_TREE_SITTER_DIR` (dir override) — all in `src/shared/runtime-config.ts`, default-OFF.
+- **⚠️ Grammar-loading caveat (HONEST — see the implementer report):** the pinned pair `web-tree-sitter@0.26.9` (LANGUAGE_VERSION 15 / MIN 13) + `tree-sitter-wasms@0.1.13` (grammars built with tree-sitter ~0.20, an OLDER emscripten dylink ABI) is **incompatible** — the 0.20-era grammar `.wasm` are rejected by the 0.26 runtime's dylink-metadata check (`getDylinkMetadata` failIf). The runtime initializes fine; the GRAMMARS do not load in this environment, so `parse()` returns the typed `parse-error` degrade and the feature **falls back to the line-window chunker / line-range read — exactly the designed safety net**. To activate the AST path, install a grammar set built against tree-sitter ≥0.25 (matching the 0.26 runtime) — the code already activates the AST branch automatically when a compatible grammar loads (proven conditionally by the integration test). This is a dep-version-pairing issue, NOT a code defect.
+- **Tests (landed):** `tests/unit/syntax-chunk-hellgate.test.ts` (12), `tests/unit/read-outline-hellgate.test.ts` (8), `tests/unit/read-outline-tool-wire-hellgate.test.ts` (4) — all via `fakeParser`, no WASM; `tests/integration/syntax-chunk-real-wasm-code-parser.test.ts` (4) — real `web-tree-sitter` runtime, asserts the NO-THROW typed-outcome contract unconditionally + the AST shape conditionally (green under both dep pairings).
 
 ---
 

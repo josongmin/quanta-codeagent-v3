@@ -30,8 +30,8 @@
 import { promises as fs } from "node:fs"
 import { isAbsolute, join, sep } from "node:path"
 import { errMessage } from "@/shared"
-import { defaultGitRunner, type GitRunner, type GitRunResult } from "@/tool/git"
 import { writeFileAtomic } from "../atomic-write"
+import { defaultGitRunner, type GitRunner, type GitRunResult } from "../git-runner"
 import { evictLru } from "./cleanup"
 import { workspaceHash } from "./hash"
 import {

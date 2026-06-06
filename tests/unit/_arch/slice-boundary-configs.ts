@@ -23,6 +23,12 @@ const PEER_LIBRARY_DENY = [
   "@/stream",
 ] as const
 
+/** Layer-2 (composition / surface) slices. NO Layer-0/1 library or leaf slice
+ *  may VALUE-import these — that would be an UP-import (a lower layer reaching
+ *  up into the assembly/host/IPC/app surface). The AST scanner skips
+ *  `import type`, so type-only contracts (rare) stay allowed. */
+const LAYER2_DENY = ["@/runner", "@/host", "@/ipc", "@/apps"] as const
+
 export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
   agent: {
     slice: "agent",
@@ -79,10 +85,17 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
       "@/lsp",
       "@/stream",
     ],
-    // Documented carve-out: coverage_check tool consumes the @/observability/coverage
-    // sub-barrel (ADR-0165) as a typed contract — the coverage primitives are
-    // observability services that tools intentionally call into. Reviewed exception.
-    allowImports: ["@/observability/coverage"],
+    // Documented carve-outs:
+    //  • coverage_check tool consumes the @/observability/coverage sub-barrel
+    //    (ADR-0165) as a typed contract — coverage primitives are observability
+    //    services tools intentionally call into.
+    //  • apply_patch is the composition root for the pure `@/patch` applier's
+    //    injected `PatchTracePort` (closed-port DI). It wires the OTel-bound
+    //    adapter from @/observability/patch-trace HERE — the SINGLE runtime
+    //    binding of the `quanta.patch.*` vocabulary — so `@/patch` itself stays
+    //    a pure leaf with no `@/observability` value import.
+    // Reviewed exceptions.
+    allowImports: ["@/observability/coverage", "@/observability/patch-trace"],
     envAllowFiles: ["runner.ts", "from-env.ts"],
     requireSliceBarrel: true,
   },
@@ -191,22 +204,18 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
   },
   storage: {
     slice: "storage",
-    denyImports: [
-      "@/agent",
-      "@/mcp",
-      "@/rules",
-      "@/migration",
-      "@/session",
-      "@/subagent",
-      "@/skill",
-      "@/observability",
-      "@/llm",
-      "@/memory",
-      "@/permission",
-      "@/lsp",
-      "@/stream",
-    ],
-    envAllowFiles: ["default.ts"],
+    // Reuse the canonical PEER_LIBRARY_DENY (which INCLUDES `@/tool`) so a
+    // storage→tool VALUE import — the layering inversion that escaped CI when
+    // `shadow-odb/default.ts` up-imported `defaultGitRunner` from `@/tool/git`
+    // — now fails this guard. The generic git-exec port was relocated to the
+    // LEAF `@/storage/git-runner`; storage no longer crosses into `@/tool`.
+    denyImports: [...PEER_LIBRARY_DENY],
+    // `shadow-odb/default.ts` resolves a workspace hash; `git-runner/runner.ts`
+    // is the relocated `Bun.spawn` adapter whose deterministic-env scrub reads
+    // the parent `process.env` allowlist AT CALL TIME (the documented env
+    // boundary for the git effect port — same precedent as `@/tool`'s
+    // `runner.ts`/`from-env.ts`).
+    envAllowFiles: ["default.ts", "runner.ts"],
     requireSliceBarrel: true,
   },
   mcp: {
@@ -275,6 +284,43 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
     slice: "ipc",
     denyImports: ["@/rules", "@/patch", "@/migration"],
     includeBackupArtifacts: true,
+    requireSliceBarrel: true,
+  },
+  // `@/patch` is a pure leaf (V4A parser + applier + ports). Its ONLY runtime
+  // dependency is `@/shared` (leaf util). The applier takes an injected
+  // `PatchTracePort` (closed-port DI) for telemetry, so it imports NOTHING from
+  // the cross-cutting `@/observability` slice — the OTel binding lives in the
+  // `@/observability/patch-trace` adapter, wired at the `apply_patch` tool root.
+  // Denying the full peer-library set (incl. `@/observability`) locks that in:
+  // a regression that re-adds a VALUE import from any higher layer is flagged.
+  patch: {
+    slice: "patch",
+    denyImports: [...PEER_LIBRARY_DENY],
+    requireSliceBarrel: true,
+  },
+  // `@/git` is a pure leaf (cloud-branch-snapshot port + conflict-parser +
+  // passive-classify + directive-emit). Its ONLY runtime dependency is
+  // `@/shared`. Deny the full peer-library set AND every Layer-2 surface so a
+  // regression that re-adds a VALUE import from any higher layer is flagged.
+  // (Previously this slice had NO boundary config at all — a gap that let the
+  // whole up-import class escape CI.)
+  git: {
+    slice: "git",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    requireSliceBarrel: true,
+  },
+  // `@/browser` is a pure leaf (CDP port + adapter + snapshot + allowlist).
+  // ONLY runtime dependency is `@/shared`. Same full deny as `@/git`.
+  browser: {
+    slice: "browser",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    requireSliceBarrel: true,
+  },
+  // `@/scheduler` is a pure leaf (rrule parser + next-fire + automation engine
+  // + jsonl store). ONLY runtime dependency is `@/shared`. Same full deny.
+  scheduler: {
+    slice: "scheduler",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
     requireSliceBarrel: true,
   },
 }

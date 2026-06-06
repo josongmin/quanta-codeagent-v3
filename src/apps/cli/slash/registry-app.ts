@@ -17,6 +17,7 @@
  *   ...APP_SLASH_COMMANDS]` into the historic `BUILTINS`.
  */
 
+import { bugCmd } from "../bug-cmd"
 import { doctorCmd } from "../doctor"
 import { dreamCmd, isDreamSlashEnabled } from "../dream-cmd"
 import { mcpCmd } from "../mcp-cmd"
@@ -28,6 +29,7 @@ import { rewindToolCmd } from "../rewind-tool-cmd"
 import { sessionRegistryCmd } from "../session-registry-cmd"
 import { knobsCmd } from "../slash-commands-knobs"
 import type { SlashCommand } from "../slash-contract"
+import { releaseNotesCmd, versionCmd } from "../version-cmd"
 
 // `/rewind` + `/fork` (Claude Code v1.7196 pattern) — env-gated at module
 // load: `QUANTA_REWIND=0` removes them from the registry entirely. Default
@@ -61,4 +63,9 @@ export const APP_SLASH_COMMANDS: readonly SlashCommand[] = [
   sessionRegistryCmd,
   // jun-6 (RFC jun-6-doctor-selfcheck) — `/doctor` environment self-check.
   doctorCmd,
+  // §23.3/§23.4 transparency — `/version`, `/release-notes`, `/bug`. All
+  // read-only + additive (no existing command changes; no network).
+  versionCmd,
+  releaseNotesCmd,
+  bugCmd,
 ]

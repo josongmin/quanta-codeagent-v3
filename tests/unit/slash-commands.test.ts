@@ -133,6 +133,10 @@ describe("BUILTINS table", () => {
       "/knobs",
       "/session-registry",
       "/doctor",
+      // §23.3/§23.4 transparency — appended after /doctor in the app layer.
+      "/version",
+      "/release-notes",
+      "/bug",
     ])
   })
 })

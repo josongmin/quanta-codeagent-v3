@@ -101,7 +101,9 @@ import type { WebSearchProvider } from "@/tool/web"
 import { providerFromEnv } from "@/tool/web/providers"
 import { buildAppshotPortWire } from "./appshot-port-wire"
 import { buildMentionSymbolDeps } from "./internal/mention-symbol-deps"
+import { maybeWirePeerTeamMessaging } from "./peer-team-wire"
 import { maybeWireProgressSink } from "./progress-sink-wire"
+import { maybeWireBashSandboxEscalation } from "./sandbox-escalation-wire"
 
 /** Minimal env view this assembler reads. The surface owns the actual
  *  `process.env` global read (allowed in `src/apps/**`) and threads this view
@@ -673,6 +675,18 @@ export const assembleAgentConfig = (req: AssembleRequest, env: AssemblerEnv): Ag
   // caller-override-safe + byte-identical when its gate/resource is absent (see
   // the per-helper docs); the single call keeps this fn under the complexity cap.
   wireOptionalCapabilitySlots(cfg, env)
+  // RFC jun-6 Binding 1 — install the bash sandbox-block escalation handler when
+  // `QUANTA_SANDBOX_ESCALATION` is on (else clears any stale handler). Runs AFTER
+  // the optional slots so it can read the freshly-resolved `cfg.admissibility`
+  // permission store. Knob-OFF ⇒ no handler ⇒ the bash tool is byte-identical.
+  maybeWireBashSandboxEscalation(cfg)
+  // RFC jun-6 Binding 2 — peer teammate messaging (auto-delivered inbox +
+  // team-scoped bus). Wires `cfg.peerInbox` (turn-loop drain), wraps the shared
+  // mailbox with the team-membership decorator, mints the team registry, and
+  // registers the `team_*` tools — ONLY when `QUANTA_TEAM_PEER_MSG` is on. Runs
+  // AFTER `maybeWireMailbox` so it decorates the freshly-wired mailbox. Knob-OFF
+  // ⇒ no peerInbox, raw mailbox, no team registry (byte-identical).
+  maybeWirePeerTeamMessaging(cfg, env)
   // ADR-0334 — populate the ADR-0327-family wire slots on the freshly
   // assembled cfg. Idempotent + caller-override-precedence (ADR-0332):
   // any slot the caller already set on `req.base` is preserved verbatim.

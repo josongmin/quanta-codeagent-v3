@@ -241,6 +241,7 @@ describe("SLICE_RULES integrity", () => {
       "scheduler",
       "connectors",
       "plugin-isolation",
+      "browser",
       "apps",
     ])
     for (const rule of SLICE_RULES) {

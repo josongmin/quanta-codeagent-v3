@@ -829,6 +829,14 @@ const buildGatedToolPorts = (
     // `ProgressSink` from `ctx.progressSink` (surfaced by the dispatch seam from
     // `AgentConfig.progressSink`); absent sink ⇒ a no-op + ok:true.
     ...(cfg.progressUpdate ? { progressUpdate: true } : {}),
+    // code-mode (RFC jun-6-code-mode, Phase 1) — gated `code_cell` tool. Default-OFF:
+    // tool menu byte-identical unless QUANTA_CODE_MODE === "1". The tool reads its
+    // per-cell dispatch port from `ctx.codeCellDispatch` (surfaced by the dispatch
+    // seam from `AgentConfig.codeCellDispatchFactory`, wired by
+    // `wireOptionalAgentPorts`). The QuickJS-WASM module is lazily imported so the
+    // OFF binary never instantiates it; an unwired factory ⇒ typed `not_wired`.
+    // Slot extracted to a helper so this builder stays under the complexity cap.
+    ...codeModePortSlot(cfg.codeMode),
     // N6 — gated pty_* tools (attach/list/write/read/resize/kill). Default-OFF:
     // tool menu byte-identical unless QUANTA_PTY_ATTACH === "1". The tmux backend
     // (`Bun.spawn(["tmux", …])`, argv-array, no shell) is constructed at the
@@ -849,6 +857,13 @@ const buildGatedToolPorts = (
     ...resolveAppshotSlot(cfg.appshot, seams, artifactRegistry),
   }
 }
+
+/** code-mode (RFC jun-6-code-mode, Phase 1) — spread-ready `code_cell` tool slot.
+ *  `{}` when `QUANTA_CODE_MODE` is off ⇒ tool not registered ⇒ byte-identical menu
+ *  AND the QuickJS-WASM module never instantiated. Extracted so `buildGatedToolPorts`
+ *  stays under biome's cognitive-complexity cap. */
+const codeModePortSlot = (codeMode: boolean): { codeMode: true } | Record<string, never> =>
+  codeMode ? { codeMode: true } : {}
 
 /** G1 — resolve the spread-ready `appshot` slot (`{}` when the knob is OFF or no
  *  port is injectable, so the tool menu stays byte-identical). When ON AND a

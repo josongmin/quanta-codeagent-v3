@@ -126,6 +126,19 @@ describe("grounding schema", () => {
     ).toThrow("pairId requires stateContract")
   })
 
+  // isRecord array-handling safety: a JSON array IS `typeof "object"` and
+  // not null, so a naive narrower would let it through as a "record". The
+  // `!Array.isArray` guard makes an array root correctly fail-closed with
+  // the same "must be an object" error a scalar produces.
+  test("rejects an array root (array is not an object)", () => {
+    expect(() => parseGroundingCase([])).toThrow("grounding case must be an object")
+    expect(() => parseGroundingCase([minimalCase()])).toThrow("grounding case must be an object")
+  })
+
+  test("still accepts a normal object root", () => {
+    expect(parseGroundingCase(minimalCase()).id).toBe("sample")
+  })
+
   test("governed corpora stay at canary=28 and nightly=52", () => {
     expect(loadGroundingCases({ suite: "canary" })).toHaveLength(28)
     expect(loadGroundingCases({ suite: "nightly" })).toHaveLength(52)

@@ -3,8 +3,8 @@ title: jun-6 sandbox-block → escalation-retry loop (denialReason:sandbox-block
 section: 3
 subsystem: OS-sandbox usability — the user-gated escape hatch that unlocks a future default-ON sandbox
 order: 483
-maturity: L2
-status: new
+maturity: L3
+status: refined
 ui_surfaces: [cli]
 monitoring: integrated
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
@@ -50,12 +50,17 @@ evidence:
     - src/shared/runtime-config.ts
     - src/llm/retry/codex-spec-router.ts
     - src/agent/error-routing/default-classifier.ts
-  adrs: []
+    - src/tool/bash/sandbox-escalation-wire.ts
+    - src/tool/bash/index.ts
+    - src/host/runtime/sandbox-escalation-wire.ts
+    - src/host/runtime/agent-config-assembler.ts
+  adrs: ["docs/plans/jun-6-sandbox-escalation.md"]
   tests:
     unit:
       - tests/unit/sandbox-escalation-classify-hellgate.test.ts
       - tests/unit/sandbox-escalation-loop-hellgate.test.ts
       - tests/unit/sandbox-escalation-off-byte-identity-hellgate.test.ts
+      - tests/unit/sandbox-escalation-bash-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -65,22 +70,25 @@ knobs:
   - name: QUANTA_SANDBOX_ESCALATION_MAX
     default: 'undefined'
     purpose: per-turn escalation-retry cap (ExecPolicyAmendmentExhausted analog). 부재/무효 ⇒ cap 모듈 default 3. escalation REQUESTS 만 bound(tool 콜 아님) — 초과 시 typed escalation-exhausted, 추가 prompt 없음. KNOB(no-heuristics) — baked constant 아님.
-deliberate_hold:
-  reason: |
-    Phase-2 의 hot-path 배선(bash tool result-handling 이 block 에서 seedSandboxBlockDenial
-    → runSandboxEscalation 호출, escalate?/justification? 입력, 플랫폼 result-mapping point 가
-    knob-gate 로 denialReason set)은 in-flight bash/loop 파일(현 working tree 에 미커밋 변경
-    다수)과의 충돌 회피 위해 의도적 보류 → 따라서 L2(seam, validated+hellgate, NOT LIVE-composed).
-    orchestrator 는 모든 collaborator(store/clock/cap/presentRisk/gate/rerunUnsandboxed/audit)를
-    closed-port 주입으로 받아 격리 hellgate 로 전체 루프 증명.
-  promotion_path: |
-    L3 = bash tool result-handling 이 knob-ON 시 block→seedSandboxBlockDenial→
-    runSandboxEscalation 을 LIVE 호출(escalate?/justification? 입력 + 플랫폼 result-mapping
-    point 가 classifySandboxDenial 로 denialReason set) + bash hellgate 회귀검증.
 notes: |
-  설계/증명: RFC `docs/plans/jun-6-sandbox-escalation.md` (✅ IMPLEMENTED jun-06).
+  ✅ host-wired LIVE (jun-06) — bash hot-path 배선 완료 → L3. mode="read" sandboxed
+  명령이 APPLIED-sandbox nonzero exit 을 내면 bash tool 이 module-level seam
+  (`src/tool/bash/sandbox-escalation-wire.ts`, per-call-factory 선례 미러 — `@/tool`
+  은 `@/agent`/`@/permission` fence 격리라 직접 import 불가)을 호출. 컴포지션 루트
+  (`src/host/runtime/sandbox-escalation-wire.ts` `maybeWireBashSandboxEscalation`,
+  assembler 에서 knob-ON 시 install)가 classifier+orchestrator+post-denial store+
+  onConfirm gate 를 그 seam 의 handler 로 adapt: classifySandboxDenial(backend=
+  seatbelt, per-call port 은 darwin/sandbox-exec only) → seedSandboxBlockDenial →
+  runSandboxEscalation(cap→presentRisk(onConfirm)→recordRiskSeen/Override→NORMAL gate
+  (2번째 onConfirm consult, NOT bypass)→unsandboxed re-run). 승인 시 bash 가
+  baseShellOpts 로 perCallWrap 없이 byte-same 명령 re-run. knob-OFF ⇒ handler 미설치
+  ⇒ bash byte-identical. e2e: tests/unit/sandbox-escalation-bash-wire-hellgate.test.ts
+  (REAL bash tool + fake blocking sandbox: block→approve→unsandboxed re-run 성공 /
+  deny→stays blocked / cap exhaustion / knob-OFF byte-identical / 성공 미분류 /
+  mode=write 미에스컬레이션).
+  설계/증명: RFC `docs/plans/jun-6-sandbox-escalation.md` (✅ host-wired LIVE jun-06).
   ADR 미발행. discriminant(Phase 1)는 pure+tested; escalation 루프(Phase 2 머신)는
-  pure orchestrator 로 hellgate 완비하나 bash 배선은 deliberate_hold(L2).
+  pure orchestrator 로 hellgate 완비 + bash hot-path 배선 LIVE(L3).
   Detection-confidence tiers: HIGH = seccomp-sigsys(128+SIGSYS, landlock+seccomp backend) /
   exit-126(denied-exec, seatbelt|landlock|bwrap) / seatbelt-deny(EXACT line-anchored prefix
   `Sandbox:`/`sandbox-exec:`+deny token | `deny(1)` | `deny default`). LOW = landlock-eperm

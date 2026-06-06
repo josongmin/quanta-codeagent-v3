@@ -23,8 +23,10 @@
 import { createHash } from "node:crypto"
 import { type Dirent, promises as fsp } from "node:fs"
 import { join, relative, sep } from "node:path"
-import { err, ok, type Result } from "@/shared"
+import type { CodeParserPort } from "@/retrieval/code-parser"
+import { err, ok, type Result, runtimeConfig } from "@/shared"
 import { chunkFile } from "./chunker"
+import { chunkFileSyntactic } from "./chunker-syntactic"
 import { DeltaTracker, type FileStamp } from "./delta-tracker"
 import type { CodebaseIndexer, ScanOptions } from "./port"
 import type {
@@ -47,12 +49,16 @@ interface ScannerInternalOpts {
   readonly honorIgnoreFiles: boolean
   readonly chunker: ChunkerOptions
   readonly upsert?: ChunkUpsertPort
+  /** RFC jun-6 — optional syntax-aware parser. Consulted ONLY when the
+   *  `QUANTA_SYNTAX_CHUNK` knob is on (checked at the chunk site). */
+  readonly parser?: CodeParserPort
 }
 
 const normalizeScanner = (
   scanner: ScannerOptions,
   chunker: ChunkerOptions | undefined,
   upsert: ChunkUpsertPort | undefined,
+  parser: CodeParserPort | undefined,
 ): ScannerInternalOpts => ({
   root: scanner.root,
   glob: scanner.glob ?? DEFAULT_GLOB,
@@ -60,7 +66,30 @@ const normalizeScanner = (
   honorIgnoreFiles: scanner.honorIgnoreFiles ?? true,
   chunker: chunker ?? {},
   ...(upsert !== undefined ? { upsert } : {}),
+  ...(parser !== undefined ? { parser } : {}),
 })
+
+/** RFC jun-6 — pick the chunker. Default (knob off / no parser / unsupported)
+ *  is the BYTE-IDENTICAL line-window `chunkFile`. When the `QUANTA_SYNTAX_CHUNK`
+ *  knob is on AND a parser is wired, parse once and emit AST-aligned chunks
+ *  (which themselves fall back to the line-window on a `{ok:false}` outcome).
+ *  NO-THROW: a parser that rejects falls back to the line-window. */
+const chunkOneFile = async (
+  opts: ScannerInternalOpts,
+  input: { path: string; text: string; mtime: number; sha: string },
+): Promise<readonly FileChunk[]> => {
+  if (opts.parser !== undefined && runtimeConfig().syntaxChunk) {
+    try {
+      const outcome = await opts.parser.parse(input.path, input.text)
+      return chunkFileSyntactic(input, outcome, opts.chunker)
+    } catch {
+      // Defensive — the port is NO-THROW, but never let a parser fault abort
+      // the scan; fall back to the line-window.
+      return chunkFile(input, opts.chunker)
+    }
+  }
+  return chunkFile(input, opts.chunker)
+}
 
 /** Convert a relative path to forward-slash form regardless of platform. */
 const toPosix = (p: string): string => (sep === "/" ? p : p.split(sep).join("/"))
@@ -361,10 +390,12 @@ const doScan = async (
     }
     const sha = sha1OfBytes(res.outcome.bytes)
     snapshot.set(visit.relPath, { mtime: res.outcome.mtime, sha })
-    const chunks = chunkFile(
-      { path: visit.relPath, text, mtime: res.outcome.mtime, sha },
-      opts.chunker,
-    )
+    const chunks = await chunkOneFile(opts, {
+      path: visit.relPath,
+      text,
+      mtime: res.outcome.mtime,
+      sha,
+    })
     if (chunks.length > 0) chunksByPath.set(visit.relPath, chunks)
   }
   if (signal?.aborted) aborted = true
@@ -428,10 +459,8 @@ class DefaultIndexer implements CodebaseIndexer {
       const out = await doScan(this.opts, scanOpts.signal)
       if (out.aborted) return err({ kind: "aborted" as const })
       const parts = this.st.tracker.diff(out.snapshot)
-      const changed = mode === "initial" ? Array.from(out.snapshot.keys()) : [
-        ...parts.added,
-        ...parts.modified,
-      ]
+      const changed =
+        mode === "initial" ? Array.from(out.snapshot.keys()) : [...parts.added, ...parts.modified]
       // Apply upserts BEFORE updating tracker state so an upsert failure
       // does not leave the tracker claiming the file is already indexed.
       try {
@@ -490,6 +519,7 @@ export const createDefaultIndexer = (opts: {
   readonly scanner: ScannerOptions
   readonly chunker?: ChunkerOptions
   readonly upsert?: ChunkUpsertPort
+  readonly parser?: CodeParserPort
 }): CodebaseIndexer => {
   if (opts.scanner.root === "" || typeof opts.scanner.root !== "string") {
     // Surface as a tiny adapter that always returns invalid-config — the
@@ -504,7 +534,7 @@ export const createDefaultIndexer = (opts: {
   if (w !== undefined && o !== undefined && o >= w) {
     return invalidConfigIndexer("chunker.overlapLines must be < windowLines")
   }
-  return new DefaultIndexer(normalizeScanner(opts.scanner, opts.chunker, opts.upsert))
+  return new DefaultIndexer(normalizeScanner(opts.scanner, opts.chunker, opts.upsert, opts.parser))
 }
 
 const invalidConfigIndexer = (reason: string): CodebaseIndexer => ({

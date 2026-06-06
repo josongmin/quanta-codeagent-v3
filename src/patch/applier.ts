@@ -1,4 +1,3 @@
-import { attrs, QUANTA_ATTRS, recordAttrs, SPAN_NAMES } from "@/observability"
 import { errMessage } from "@/shared"
 // V4A apply_patch — AST → filesystem side effects.
 //
@@ -26,72 +25,57 @@ import {
   type PatchObservation,
   type PatchObserver,
   type PatchOp,
+  type PatchTracePort,
 } from "./types"
 
-/** Internal: the canonical OTel emitter for `quanta.patch.*` keys. Activates
- *  the ADR-0028 vocabulary (`quanta.patch.op` + `quanta.patch.fuzzy_match_tier`
- *  + `quanta.patch.fuzzy_matched`). Default-OFF when no span sink is registered
- *  (`recordAttrs` short-circuits to a zero-allocation no-op). Security
- *  invariant: only categorical op + tier scalars are emitted — NEVER the
- *  patch text, anchor strings, hunk content, or file paths. */
-const emitOtel: PatchObserver = (event) => {
-  if ("fuzzyMatchTier" in event) {
-    recordAttrs(
-      SPAN_NAMES.handleToolCall,
-      attrs({
-        [QUANTA_ATTRS.patch.op]: event.op,
-        [QUANTA_ATTRS.patch.fuzzyMatchTier]: event.fuzzyMatchTier,
-        [QUANTA_ATTRS.patch.fuzzyMatched]: event.fuzzyMatchTier !== "exact",
-      }),
-    )
-    return
-  }
-  recordAttrs(SPAN_NAMES.handleToolCall, attrs({ [QUANTA_ATTRS.patch.op]: event.op }))
-}
-
 /** Internal: a guaranteed-no-throw observer wrapper. Production calls pass
- *  through an optional end-user observer AND the canonical OTel emitter so
- *  vocabulary keys are always activated. Absent user observer ⇒ OTel emit only.
- *  A throw from EITHER observer is caught + swallowed so apply semantics are
- *  independent of telemetry health (mirrors `@/observability/spans.ts`). */
-const wrapObserver = (observer: PatchObserver | undefined): PatchObserver => {
-  if (observer === undefined) {
-    return (event: PatchObservation) => {
+ *  through an optional end-user observer AND an optional injected
+ *  {@link PatchTracePort} so the canonical `quanta.patch.*` vocabulary keys are
+ *  activated WITHOUT `@/patch` reaching into `@/observability` at runtime
+ *  (closed-port DI — the OTel binding lives in the adapter the composition root
+ *  passes). Absent trace port ⇒ no tracing (byte-identical to no telemetry);
+ *  absent user observer ⇒ trace-only (or nothing if both absent). A throw from
+ *  EITHER sink is caught + swallowed so apply semantics are independent of
+ *  telemetry health (mirrors `@/observability/spans.ts`). */
+const wrapObserver = (
+  observer: PatchObserver | undefined,
+  trace: PatchTracePort | undefined,
+): PatchObserver => {
+  return (event: PatchObservation) => {
+    if (observer !== undefined) {
       try {
-        emitOtel(event)
+        observer(event)
+      } catch {
+        // User-observer throw must not stop the canonical trace emit either.
+      }
+    }
+    if (trace !== undefined) {
+      try {
+        trace.recordPatchOp(event)
       } catch {
         // Telemetry bugs MUST NOT abort the apply pipeline.
       }
     }
   }
-  return (event: PatchObservation) => {
-    try {
-      observer(event)
-    } catch {
-      // User-observer throw must not stop the canonical OTel emit either.
-    }
-    try {
-      emitOtel(event)
-    } catch {
-      // Telemetry bugs MUST NOT abort the apply pipeline.
-    }
-  }
 }
 
 /** Apply a parsed V4A patch via the injected filesystem port. Per-op telemetry
- *  is emitted to the canonical span sink unconditionally via `recordAttrs`
- *  (default-OFF when no sink is registered — zero allocation). An optional
- *  `observer` receives the same event stream for in-process consumers (tests,
- *  test harnesses); production callers omit it. The observer / emitter NEVER
- *  receive patch text, file content, hunk lines, or anchor strings — only the
- *  categorical op (`"add" | "update" | "delete" | "move"`) and (for landed
- *  update hunks) the fuzzy-match tier (`"exact" | "whitespace"`). */
+ *  is emitted ONLY through the injected {@link PatchTracePort} (`trace`) — an
+ *  absent port is a byte-identical no-op (default-OFF; `@/patch` never reaches
+ *  into `@/observability`, the OTel binding lives in the adapter the composition
+ *  root passes). An optional `observer` receives the same event stream for
+ *  in-process consumers (tests, harnesses); production callers omit it. Neither
+ *  the observer nor the trace port receives patch text, file content, hunk
+ *  lines, or anchor strings — only the categorical op
+ *  (`"add" | "update" | "delete" | "move"`) and (for landed update hunks) the
+ *  fuzzy-match tier (`"exact" | "whitespace"`). */
 export async function applyPatch(
   patch: Patch,
   fs: PatchFileSystemPort,
   observer?: PatchObserver,
+  trace?: PatchTracePort,
 ): Promise<ApplyResult> {
-  const emit = wrapObserver(observer)
+  const emit = wrapObserver(observer, trace)
 
   // ── Phase 1: PLAN ────────────────────────────────────────────────────────
   // Validate every op and compute its concrete mutations (read files, locate

@@ -15,21 +15,11 @@ import { z } from "zod"
  *  Other mutating git commands (restore / checkout / push) deliberately stay
  *  on `bash` so that same layer governs them as before. */
 
-export interface GitRunResult {
-  stdout: string
-  stderr: string
-  exitCode: number
-}
-
-export interface GitRunner {
-  /** Run `git <args>` in `cwd`. The optional `signal` is propagated so a
-   *  cancelled tool call (loop abort, subagent cancel, side-conversation budget
-   *  exhaustion) actually kills the spawned `git` instead of leaking the
-   *  process for the full {@link defaultGitRunner} timeout. Added optionally to
-   *  preserve the existing fake-runner test surface (callers without a signal
-   *  still type-check and behave identically). */
-  run(args: readonly string[], cwd: string, signal?: AbortSignal): Promise<GitRunResult>
-}
+// The generic git-exec EFFECT port + its result shape were relocated to the
+// LEAF slice `@/storage/git-runner` (so non-tool consumers don't up-import the
+// `@/tool` library layer). Re-exported here so every existing
+// `@/tool/git/types` consumer keeps compiling byte-unchanged.
+export type { GitRunner, GitRunResult } from "@/storage/git-runner"
 
 // --- git_diff ----------------------------------------------------------------
 

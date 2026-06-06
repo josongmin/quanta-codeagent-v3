@@ -17,7 +17,7 @@
  *  explicitly. Nothing in this slice mutates the user's repo or
  *  consumes disk unless the caller invokes `init`/`registerHead`. */
 
-import type { GitRunner } from "@/tool/git"
+import type { GitRunner } from "../git-runner"
 
 /** Result of `init` — exposed so callers can log the resolved shadow dir. */
 export interface ShadowInitResult {

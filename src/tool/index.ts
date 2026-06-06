@@ -9,6 +9,7 @@ import { automationUpdateTool } from "./automation_update"
 import { makeBashTool } from "./bash"
 import { bashAwaitTool } from "./bash/await"
 import { bashKillTool } from "./bash/kill"
+import { codeCellTool } from "./codemode-tool"
 import { createCommunicateUpdateTool } from "./communicate-update"
 import { coverageCheckTool } from "./coverage_check"
 import { type DiagnosticsProvider, diagnosticsTool, nullDiagnosticsProvider } from "./diagnostics"
@@ -488,6 +489,7 @@ export {
 } from "./subagent-bg"
 export type {
   BlockerSurface,
+  CodeCellDispatchSeam,
   CriticalSectionHandle,
   CriticalSectionSeam,
   DeferredHandle,
@@ -678,6 +680,17 @@ export interface DefaultToolPorts {
    *  composition root wires the port (tmux/Bun backend) only when
    *  `QUANTA_PTY_ATTACH === "1"`. */
   ptySession?: PtySessionPort
+  /** code-mode (RFC jun-6-code-mode, Phase 1) — when true, append the gated
+   *  `code_cell` tool (run a model-authored JS program whose every `tools.X(args)`
+   *  re-enters the REAL dispatchTool). Absent/false ⇒ tool NOT registered
+   *  (byte-identical default menu; the QuickJS-WASM module is never instantiated,
+   *  it is lazily imported only when the tool runs). The composition root passes
+   *  this only when `QUANTA_CODE_MODE` is on AND it ALSO wires
+   *  `AgentConfig.codeCellDispatchFactory` (the security binding from
+   *  `@/agent/codemode-wire.ts`) — the tool reads its dispatch port from
+   *  `ToolContext.codeCellDispatch` (surfaced by the dispatch seam from that
+   *  factory); an unwired port yields a typed `not_wired` failure. */
+  codeMode?: boolean
   /** G1 (RFC jun-6-appgen-appshot, Phase 1) — when set, append `appshot_verify`
    *  (the closed spec→scaffold→render→screenshot→LLM-judge verify loop). Absent
    *  ⇒ tool NOT registered (byte-identical default menu). The composition root
@@ -700,6 +713,16 @@ export interface AppshotSlot {
 }
 
 export { automationUpdateTool } from "./automation_update"
+// code-mode (RFC jun-6-code-mode, Phase 1) — the gated `code_cell` tool. Default-OFF:
+// registered only when `DefaultToolPorts.codeMode === true` (QUANTA_CODE_MODE on AND
+// the host wired `AgentConfig.codeCellDispatchFactory`). The dispatch port arrives
+// per-call via `ToolContext.codeCellDispatch`; the QuickJS-WASM module is lazily
+// imported inside `@/codemode` only when the tool runs.
+export {
+  type CodeCellInput,
+  codeCellInputSchema,
+  codeCellTool,
+} from "./codemode-tool"
 // file_history_rewind — the per-file snapshot store + sink the composition root
 // mints ONCE per session (when QUANTA_FILE_HISTORY is on) and threads to BOTH
 // `DefaultToolPorts.fileHistory` (the tool read side) and `AgentConfig.fileHistory`
@@ -835,6 +858,14 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => {
   // the host's PTY/tmux backend are appended (exec-risk; foreign-tmux gated).
   if (ports.ptySession !== undefined) {
     base.push(...ptyTools(ports.ptySession))
+  }
+  // code-mode (RFC jun-6-code-mode) — conditional registration of code_cell.
+  // Absent/false ⇒ default set byte-identical (the model never sees the tool;
+  // the QuickJS-WASM module is never instantiated). Present ⇒ the gated cell tool
+  // is appended (it reads its dispatch port from ctx.codeCellDispatch, surfaced
+  // from AgentConfig.codeCellDispatchFactory; an unwired port ⇒ typed not_wired).
+  if (ports.codeMode === true) {
+    base.push(codeCellTool() as Tool)
   }
   // G1 (RFC jun-6) — conditional registration of appshot_verify. Absent slot ⇒
   // default set byte-identical (the model never sees the tool). Present ⇒ a tool

@@ -4,6 +4,7 @@
 
 import { z } from "zod"
 import type { Tool, ToolContext, ToolEvent } from "../types"
+import { backendErrorEvent, callPort } from "./no-throw"
 import type { TasksHandle, TasksTaskInfo } from "./port"
 
 export const listTasksInputSchema = z.object({
@@ -43,7 +44,12 @@ export const listMcpTasksTool = (port: TasksHandle): Tool<ListTasksInput> => ({
       yield { type: "result", result: { ok: false, output: "aborted before start" } }
       return
     }
-    const outcome = await port.list(parsed.data.cursor)
+    const listCall = await callPort(() => port.list(parsed.data.cursor))
+    if (!listCall.ok) {
+      yield backendErrorEvent(listCall.message)
+      return
+    }
+    const outcome = listCall.value
     if (!outcome.ok) {
       yield {
         type: "result",

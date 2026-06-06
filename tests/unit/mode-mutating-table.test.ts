@@ -7,7 +7,12 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { isMutatingTool, planModeMutatingTable, UnknownToolError } from "@/agent/mode"
+import {
+  CALLER_WIRE_TOOL_NAMES,
+  isMutatingTool,
+  planModeMutatingTable,
+  UnknownToolError,
+} from "@/agent/mode"
 import {
   createUpdateWorkingStateTool,
   defaultTools,
@@ -19,113 +24,14 @@ import {
 
 describe("mode mutating-table cross-check (ADR-0036)", () => {
   // Caller-wire tools: registered ONLY when the relevant AgentConfig slot is
-  // wired (ADR-0119/0122 shadow*, ADR-0130 subagent_*, ADR-0136 budget_status).
-  // Their MUTATING_TOOL_TABLE entries are PERMANENT so plan-mode dispatch
-  // cannot trip `UnknownToolError` on hosts that wire them. Cross-check
-  // includes them by NAME so the orphan check tolerates the entries without
-  // forcing every caller-wire factory to be reachable from this test.
-  const callerWireToolNames = [
-    "shadow_snapshots",
-    "shadow_rewind",
-    "shadow_restore_partial",
-    "subagent_fork",
-    "subagent_poll",
-    "subagent_await",
-    "budget_status",
-    // S2 closeout: caller-wire tools added to MUTATING_TOOL_TABLE so plan-mode
-    // dispatch never trips `UnknownToolError` regardless of which AgentConfig
-    // slots are wired. Same allowlist convention as the entries above —
-    // their factories are not enumerable from this test without forcing
-    // every host port (gh runner / memory provider / branch-search isolator /
-    // subagent runner / skill loader / workspace-search pipeline / web search
-    // provider / image-url fetcher / user-input port) to be injected.
-    "gh_pr_view",
-    "gh_pr_list",
-    "gh_pr_blame",
-    "gh_pr_review_diff",
-    "gh_issue_view",
-    "gh_check_status",
-    "gh_pr_comment",
-    "gh_pr_create",
-    "gh_pr_auto_merge",
-    "gh_pr_edit_labels",
-    "gh_pr_resolve_thread",
-    "memory_search",
-    "memory_write",
-    "memory_update",
-    "branch_search",
-    "task_output",
-    "task_stop",
-    "request_plan_exit",
-    "agent",
-    "Skill",
-    "ToolSearch",
-    "web_search",
-    "search_codebase",
-    "read_image_url",
-    // jun-04 caller-wire tools — coverage_check (DefaultToolPorts.coverageCheck),
-    // prompt_cache_status (wired observer), image_gen (DefaultToolPorts.imageGen),
-    // and the Office authoring writers (DefaultToolPorts.officeAuthoring). Their
-    // MUTATING_TOOL_TABLE entries are PERMANENT (plan-mode dispatch must never
-    // throw UnknownToolError when a host injects them), but the factories aren't
-    // enumerable here without forcing every gate on.
-    "coverage_check",
-    "prompt_cache_status",
-    "image_gen",
-    "xlsx_write",
-    "docx_write",
-    "pptx_write",
-    // R3 e2e-integration audit closeout — caller-wire tools previously absent
-    // from BOTH the table and this allowlist (so the cross-check never enforced
-    // their classification): apply_patch_structured (DefaultToolPorts.
-    // structuredPatch) + the 4 artifact/Canvas tools (DefaultToolPorts.
-    // artifactRegistry). list/get are read-only; register/destroy mutate the
-    // in-session canvas registry (working_state_write).
-    "apply_patch_structured",
-    "artifact_list",
-    "artifact_get",
-    "artifact_register",
-    "artifact_destroy",
-    // jun-05 §7/§9 host-binding session tools (N6 PTY / N3 MCP resources /
-    // N2 MCP connector / C2 progress / N1 side-agent). All caller-wire behind
-    // DefaultToolPorts / AgentConfig slots — not enumerable here without
-    // forcing every host port. PERMANENT table entries so plan-mode dispatch
-    // never mis-handles them when a host injects them.
-    "pty_list",
-    "pty_attach",
-    "pty_write",
-    "pty_read",
-    "pty_resize",
-    "pty_kill",
-    "mcp_list_resources",
-    "mcp_read_resource",
-    "mcp_list_prompts",
-    "mcp_get_prompt",
-    "mcp_connector_list",
-    "mcp_connector_install",
-    "communicate_update",
-    // CLUSTER D #5 — permission_propose_pattern caller-wire
-    // (DefaultToolPorts.permissionPatternPropose, QUANTA_REMEMBER_PATTERNS).
-    "permission_propose_pattern",
-    // jun-6 caller-wire tools — file_history_rewind
-    // (DefaultToolPorts.fileHistory, QUANTA_FILE_HISTORY) + skill_create
-    // (QUANTA_SKILL_CREATOR + a writable skills dir, registered in tier1/skill.ts).
-    // PERMANENT table entries so plan-mode dispatch never trips UnknownToolError
-    // on a host that wires them; not enumerable from `defaultTools` here.
-    "file_history_rewind",
-    "skill_create",
-    "side_agent_spawn",
-    "side_agent_list",
-    "side_agent_stop",
-    "side_agent_findings",
-    // jun-06 wave-3 caller-wire tools — ADR-0487 subagent_force_background
-    // (QUANTA_FORCE_BACKGROUND + admission queue) + G1 appshot_verify
-    // (DefaultToolPorts.appshot, QUANTA_APPSHOT).
-    "subagent_force_background",
-    "appshot_verify",
-    // ADR-0287 async-tools caller-wire (QUANTA_ASYNC_TOOLS).
-    "poll_deferred",
-  ]
+  // wired. Their MUTATING_TOOL_TABLE entries are PERMANENT so plan-mode
+  // dispatch cannot trip `UnknownToolError` on hosts that wire them. The list
+  // is the SINGLE SOURCE OF TRUTH exported from `@/agent/mode` (the same file
+  // that owns MUTATING_TOOL_TABLE) and is shared verbatim with the e2e drift
+  // detector in `tests/integration/plan-mode-dispatch-hell-e2e.test.ts`, so the
+  // two former hand-maintained copies can no longer diverge — adding a
+  // caller-wire tool is ONE edit alongside its table entry.
+  const callerWireToolNames = CALLER_WIRE_TOOL_NAMES
   const allTools = [
     ...defaultTools.map((t) => t.name),
     ...gitTools().map((t) => t.name),
@@ -137,6 +43,27 @@ describe("mode mutating-table cross-check (ADR-0036)", () => {
     requestUserInputTool().name,
     ...callerWireToolNames,
   ]
+
+  // ─── SSOT guard — the caller-wire allowlist cannot diverge between tests ──
+  // These pins make the footgun structurally impossible: both this test and
+  // the e2e drift detector derive their caller-wire set from the SAME exported
+  // constant, and every name in it is (a) classified in the table and (b) NOT
+  // already enumerable (so it isn't double-counted / silently stale).
+  test("caller-wire allowlist is the exported SSOT (no local hand-maintained copy)", () => {
+    // Identity: the test's allowlist IS the exported constant, not a copy.
+    expect(callerWireToolNames).toBe(CALLER_WIRE_TOOL_NAMES)
+    expect(Object.isFrozen(CALLER_WIRE_TOOL_NAMES)).toBe(true)
+  })
+
+  test("every caller-wire SSOT name is classified in MUTATING_TOOL_TABLE", () => {
+    const table = planModeMutatingTable()
+    const unclassified = CALLER_WIRE_TOOL_NAMES.filter((n) => !(n in table))
+    expect(unclassified).toEqual([])
+  })
+
+  test("caller-wire SSOT has no duplicate names", () => {
+    expect(new Set(CALLER_WIRE_TOOL_NAMES).size).toBe(CALLER_WIRE_TOOL_NAMES.length)
+  })
 
   test("every registered tool name has an entry in the mutating table", () => {
     const table = planModeMutatingTable()

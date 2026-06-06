@@ -20,6 +20,7 @@ import type {
   ToolResultEvidence,
 } from "../types"
 import { getBashPerCallSandboxFactory } from "./per-call-factory"
+import { getBashSandboxEscalationHandler } from "./sandbox-escalation-wire"
 
 const schema = z.object({
   command: z.string().describe("Shell command to run via bash -lc"),
@@ -244,12 +245,27 @@ const acquirePerCallPort = (
   return { port }
 }
 
+/** A mutable holder the per-call wrap records its outcome into, so the bash
+ *  result-handling site can know whether the sandbox was actually APPLIED (the
+ *  load-bearing precondition for the RFC jun-6 sandbox-block classifier — a
+ *  degraded/unapplied sandbox can never produce a "block"). */
+interface PerCallWrapOutcome {
+  sandboxApplied: boolean
+}
+
 /** ADR-0295 — adapt a {@link PerCallSandboxPort.wrap} call into the
- *  `ShellOptions.perCallWrap` shape. */
+ *  `ShellOptions.perCallWrap` shape. RFC jun-6 — also records the wrap outcome
+ *  into `outcome` so the result-handling site can detect a sandbox BLOCK. */
 const buildPerCallWrap =
-  (port: ReturnType<ReturnType<typeof getBashPerCallSandboxFactory>>) =>
+  (
+    port: ReturnType<ReturnType<typeof getBashPerCallSandboxFactory>>,
+    outcome: PerCallWrapOutcome,
+  ) =>
   async (argv: ReadonlyArray<string>, cwd: string) => {
     const w = await port.wrap(argv, cwd)
+    // RFC jun-6 — record whether the sandbox was applied for this call (a
+    // degrade ⇒ false ⇒ NEVER classified as a block).
+    outcome.sandboxApplied = w.sandboxApplied
     return {
       argv: [...w.argv],
       sandboxApplied: w.sandboxApplied,
@@ -370,6 +386,114 @@ const buildBackgroundResult = (
   return gen()
 }
 
+/** RFC jun-6 — the shell result shape `maybeEscalate` consumes/returns (a
+ *  structural subset of `ShellResult`, kept local so this slice never imports
+ *  `@/runtime/types`). */
+interface EscalatableShellResult {
+  readonly exitCode: number
+  readonly stdout: string
+  readonly stderr: string
+  readonly timedOut: boolean
+}
+
+/** RFC jun-6 — offer the user-gated sandbox-block escalation when a `mode="read"`
+ *  sandboxed command exited nonzero. Delegates to the host-installed handler
+ *  (`@/host/runtime` adapts the orchestrator + classifier + post-denial store +
+ *  HITL gate). Returns the (possibly re-run) result + an optional model-facing
+ *  note. DEFAULT-OFF / byte-identical: no handler installed, the sandbox was not
+ *  applied (mode="write" / degraded), a zero exit, or a timeout ⇒ returns the
+ *  ORIGINAL result with no note (the handler is never even consulted). */
+const maybeEscalate = async (
+  r: EscalatableShellResult,
+  meta: {
+    readonly command: string
+    readonly cwd: string
+    readonly sandboxApplied: boolean
+    readonly timedOut: boolean
+    readonly agentLabel?: string
+    readonly turnId?: string
+    readonly rerunUnsandboxed: () => Promise<{
+      exitCode: number
+      stdout: string
+      stderr: string
+      timedOut: boolean
+    }>
+  },
+): Promise<{ readonly result: EscalatableShellResult; readonly note?: string }> => {
+  // Fast default-OFF / not-a-block guards — the handler is consulted ONLY for an
+  // applied-sandbox nonzero non-timeout exit. A timeout is never a sandbox block.
+  if (!meta.sandboxApplied || r.exitCode === 0 || meta.timedOut) return { result: r }
+  const handler = getBashSandboxEscalationHandler()
+  if (handler === undefined) return { result: r }
+
+  const outcome = await handler({
+    command: meta.command,
+    cwd: meta.cwd,
+    exitCode: r.exitCode,
+    stdout: r.stdout,
+    stderr: r.stderr,
+    ...(meta.agentLabel !== undefined ? { agentLabel: meta.agentLabel } : {}),
+    ...(meta.turnId !== undefined ? { turnId: meta.turnId } : {}),
+    // The byte-same command, re-run WITHOUT the per-call sandbox wrap. The
+    // handler only invokes this AFTER a complete post-denial override + a
+    // gate-clear (escalation NEVER auto-grants — enforced in the machine).
+    rerunUnsandboxed: async () => {
+      const rr = await meta.rerunUnsandboxed()
+      return { exitCode: rr.exitCode, stdout: rr.stdout, stderr: rr.stderr }
+    },
+  })
+  // Not classified as a sandbox block (or handler declined) ⇒ byte-identical.
+  if (outcome === undefined) return { result: r }
+  // The re-run (when present) replaces the result; `timedOut` is false (a
+  // completed unsandboxed spawn). Absent ⇒ keep the original blocked result.
+  const result: EscalatableShellResult =
+    outcome.rerun !== undefined ? { ...outcome.rerun, timedOut: false } : r
+  return { result, note: outcome.note }
+}
+
+/** RFC jun-6 — run the foreground command and offer the sandbox-block
+ *  escalation in one place (keeps `bashExecute` under the complexity cap). The
+ *  per-call wrap records whether the sandbox was APPLIED; an applied-sandbox
+ *  nonzero exit is handed to the host escalation handler, which (on approve +
+ *  gate-clear) re-runs the BYTE-SAME command UNSANDBOXED. Knob-OFF / no handler
+ *  / not-a-block ⇒ returns the ORIGINAL result with no note (byte-identical). */
+const runShellWithEscalation = async (
+  cmd: string,
+  ctx: ToolContext,
+  input: Input,
+  perCallPort: ReturnType<ReturnType<typeof getBashPerCallSandboxFactory>> | undefined,
+): Promise<{ readonly result: EscalatableShellResult; readonly note?: string }> => {
+  const wrapOutcome: PerCallWrapOutcome = { sandboxApplied: false }
+  // Build the runShell options ONCE so an approved unsandboxed re-run can
+  // re-spawn the BYTE-SAME command with the per-call wrap REMOVED.
+  const baseShellOpts = {
+    cwd: ctx.cwd,
+    signal: ctx.signal,
+    ...(input.timeout_ms ? { timeoutMs: input.timeout_ms } : {}),
+    ...(ctx.onShellEvent ? { onShellEvent: ctx.onShellEvent } : {}),
+    ...(ctx.shellSnapshot ? { shellSnapshot: ctx.shellSnapshot } : {}),
+    ...(ctx.proxyEnv ? { proxyEnv: ctx.proxyEnv } : {}),
+    ...(ctx.localEnv ? { localEnv: ctx.localEnv } : {}),
+  } as const
+
+  const r = await runShell(cmd, {
+    ...baseShellOpts,
+    ...(perCallPort !== undefined
+      ? { perCallWrap: buildPerCallWrap(perCallPort, wrapOutcome) }
+      : {}),
+  })
+
+  return maybeEscalate(r, {
+    command: cmd,
+    cwd: ctx.cwd,
+    sandboxApplied: wrapOutcome.sandboxApplied,
+    timedOut: r.timedOut,
+    ...(ctx.agentLabel !== undefined ? { agentLabel: ctx.agentLabel } : {}),
+    ...(ctx.turnId !== undefined ? { turnId: ctx.turnId } : {}),
+    rerunUnsandboxed: () => runShell(cmd, baseShellOpts),
+  })
+}
+
 /** ADR-0297 — factory-built bash tool. The HITL tier closes over the
  *  operator-chosen sandbox profile (NOT the command string). Composition
  *  roots that resolve a profile (`src/apps/cli/sandbox-wire.ts`) wire it
@@ -449,40 +573,30 @@ async function* bashExecute(input: Input, ctx: ToolContext): AsyncIterable<ToolE
   }
   const perCallPort = acq.port
 
-  // PR-5 / ADR-0081: forward the optional shell-event observer through to
-  // `runShell`. Absent (default) ⇒ buffered legacy path, byte-identical.
-  // ADR-0235: forward the optional per-turn shell-snapshot seam through to
-  // `runShell`. Absent ⇒ no restore wrapping, exact byte-identical legacy spawn.
-  const r = await runShell(cmd, {
-    cwd: ctx.cwd,
-    signal: ctx.signal,
-    ...(input.timeout_ms ? { timeoutMs: input.timeout_ms } : {}),
-    ...(ctx.onShellEvent ? { onShellEvent: ctx.onShellEvent } : {}),
-    ...(ctx.shellSnapshot ? { shellSnapshot: ctx.shellSnapshot } : {}),
-    ...(perCallPort !== undefined ? { perCallWrap: buildPerCallWrap(perCallPort) } : {}),
-    // ADR-0428 jun-02 wire — thread the live egress-proxy env so the child's
-    // OWN sockets are funneled through the loopback proxy. Absent ⇒ omitted ⇒
-    // `runShell`'s `withProxyEnv(base, {})` returns the same env (byte-identical).
-    ...(ctx.proxyEnv ? { proxyEnv: ctx.proxyEnv } : {}),
-    // ADR-0455 — thread the DECLARED local-env selection so the child shell
-    // gets its vars / PATH-prepends composed over the scrubbed base (allowlist
-    // still governs). Absent ⇒ omitted ⇒ `applyLocalEnv` returns the same base
-    // env (byte-identical legacy).
-    ...(ctx.localEnv ? { localEnv: ctx.localEnv } : {}),
-  })
+  // PR-5 / ADR-0081 + ADR-0235 + RFC jun-6 — run the command (forwarding the
+  // optional observer / snapshot / proxy / local-env seams) AND offer the
+  // user-gated sandbox-block escalation when a `mode="read"` sandboxed call
+  // exits nonzero. The helper keeps `bashExecute` under the complexity cap.
+  const escalated = await runShellWithEscalation(cmd, ctx, input, perCallPort)
 
-  const { status, body } = formatRunBody(r)
+  const { status, body } = formatRunBody(escalated.result)
+  const escalationNote = escalated.note
+  // The re-run (when it happened) replaces the original result for failure
+  // derivation + evidence, so the model sees the UNSANDBOXED outcome.
+  const rr = escalated.result
 
-  // RFC-0002 §5.2 evidence. Attach via the typed `evidence` field.
+  // RFC-0002 §5.2 evidence. Attach via the typed `evidence` field. Uses the
+  // post-escalation result `rr` (identical to `r` when no escalation occurred).
   const evidence: ToolResultEvidence = {
-    ...(r.stderr ? { stderr: r.stderr.slice(-STDERR_CAP) } : {}),
-    exitCode: r.exitCode,
+    ...(rr.stderr ? { stderr: rr.stderr.slice(-STDERR_CAP) } : {}),
+    exitCode: rr.exitCode,
   }
 
   // ADR-0295 — when mode="read" and the spawn fails with an EACCES /
   // sandbox-style stderr, classify as `sandbox_violation` IN PREFERENCE to
-  // a plain `permission_denied`. The OS is the enforcer.
-  const failure = deriveSandboxViolation(mode, r) ?? deriveBashFailure(r, input.timeout_ms)
+  // a plain `permission_denied`. The OS is the enforcer. When the unsandboxed
+  // re-run cleared the violation (exit 0), no sandbox_violation is derived.
+  const failure = deriveSandboxViolation(mode, rr) ?? deriveBashFailure(rr, input.timeout_ms)
 
   // ADR-0474 — append a stale-read reminder when this (write-class) command
   // rewrote a file the agent had READ, so it re-reads before editing. No-op when
@@ -499,13 +613,18 @@ async function* bashExecute(input: Input, ctx: ToolContext): AsyncIterable<ToolE
   // We pass the combined `body` (stdout+stderr) so the single regex sweep sees
   // both git's progress (stderr) and its `[branch sha]` / `Pull request #N`
   // (stdout) lines.
-  maybeEmitPassiveVcs(cmd, body, r.exitCode, ctx as ToolContext & PassiveVcsHookCtx)
+  maybeEmitPassiveVcs(cmd, body, rr.exitCode, ctx as ToolContext & PassiveVcsHookCtx)
+
+  // RFC jun-6 — when the command was a sandbox block, append the model-facing
+  // escalation note (e.g. "blocked by sandbox; re-ran unsandboxed" / "escalation
+  // denied"). Absent ⇒ byte-identical (default-OFF / not-a-block).
+  const noteSuffix = escalationNote !== undefined ? `\n${escalationNote}` : ""
 
   yield {
     type: "result",
     result: {
-      ok: r.exitCode === 0 && !r.timedOut,
-      output: `[${status}]\n${body || "(no output)"}${staleReminder ? `\n${staleReminder}` : ""}`,
+      ok: rr.exitCode === 0 && !rr.timedOut,
+      output: `[${status}]\n${body || "(no output)"}${staleReminder ? `\n${staleReminder}` : ""}${noteSuffix}`,
       evidence,
       ...(failure ? { failure } : {}),
     },

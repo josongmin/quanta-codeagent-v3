@@ -216,7 +216,7 @@ export interface GroundingCase {
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null
+  typeof value === "object" && value !== null && !Array.isArray(value)
 
 const isOneOf = <T extends readonly string[]>(value: unknown, items: T): value is T[number] =>
   typeof value === "string" && (items as readonly string[]).includes(value)

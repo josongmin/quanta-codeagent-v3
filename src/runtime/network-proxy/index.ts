@@ -14,12 +14,55 @@ export { type AmendInput, type AmendmentRecord, NetworkPolicyAmendment } from ".
 export { type DecideInput, decideEgress, type EgressDecision } from "./decision"
 export { PROXY_ENV_KEYS, type ProxyEnvInput, withProxyEnv } from "./env"
 export {
+  EXFIL_SCOUTING_ENV,
+  exfilScoutingEnabled,
+} from "./exfil-scouting-gate"
+export {
   type EgressProxyContext,
   type EgressProxyDeps,
   withEgressProxy,
 } from "./lifecycle"
 export { type DialTarget, LoopbackEgressProxy, type ResolvePeerHost } from "./loopback-proxy"
+export type { MitmConfig, MitmFailMode } from "./mitm"
+export {
+  type CertAuthority,
+  type KeyPair,
+  type KeyPairSource,
+  type LeafCert,
+  MitmCertAuthority,
+  type MitmCertValidity,
+  nodeKeyPairSource,
+  type SerialSource,
+} from "./mitm-cert"
+export {
+  TLS_MITM_ACK_ENV,
+  TLS_MITM_ACK_PHRASE,
+  TLS_MITM_ENV,
+  tlsMitmAuthorized,
+} from "./mitm-gate"
 export type { NetworkProxyPort } from "./port"
+export {
+  type DetectScoutingOpts,
+  detectScouting,
+  type ScoutingSignal,
+} from "./scouting"
+export {
+  decideEgressScan,
+  EGRESS_REDACTION_MASK,
+  type EgressScanDisposition,
+  egressDenyReason,
+  fullyRedactable,
+  redactDeclared,
+  type SecretEgressConfig,
+  type SecretEgressMode,
+  type SecretEgressVerdict,
+  scanEgressText,
+} from "./secret-egress"
+export {
+  SECRET_EGRESS_ENV,
+  SECRET_EGRESS_MAX_BODY_ENV,
+  secretEgressMode,
+} from "./secret-egress-gate"
 export { METADATA_IPV4 } from "./ssrf"
 export type {
   DecisionLogEntry,

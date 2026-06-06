@@ -701,6 +701,37 @@
       }
     },
     {
+      "includes": ["**/src/codemode/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/agent": "Slice isolation (RFC jun-6-code-mode §5.1): @/codemode is a DUMB sandbox — it reaches the host ONLY via the injected CodeCellDispatchPort. It must NOT import @/agent (the binding lives in @/agent/codemode-wire.ts, never the reverse). This is the structural no-bypass invariant (§6.1).",
+                  "@/tool": "Slice isolation (RFC jun-6-code-mode §5.1): @/codemode does not know about tools or dispatchTool — only the injected port.",
+                  "@/permission": "Slice isolation (RFC jun-6-code-mode §6.1): @/codemode must NOT touch permission — every gate decision happens host-side in dispatchTool, behind the port.",
+                  "@/llm": "Slice isolation (RFC jun-6-code-mode §5.1): @/codemode depends on @/shared + @/security + the WASM dep only.",
+                  "@/mcp": "Slice isolation (RFC jun-6-code-mode §5.1): @/codemode depends on @/shared + @/security only.",
+                  "@/memory": "Slice isolation (RFC jun-6-code-mode §5.1): @/codemode depends on @/shared + @/security only.",
+                  "@/storage": "Slice isolation (RFC jun-6-code-mode §5.1): @/codemode depends on @/shared + @/security only.",
+                  "@/stream": "Slice isolation (RFC jun-6-code-mode §5.1): @/codemode depends on @/shared + @/security only.",
+                  "@/runtime": "Slice isolation (RFC jun-6-code-mode §5.1): @/codemode depends on @/shared + @/security only.",
+                  "@/lsp": "Slice isolation (RFC jun-6-code-mode §5.1): @/codemode depends on @/shared + @/security only.",
+                  "@/observability": "Slice isolation (RFC jun-6-code-mode §5.1): @/codemode depends on @/shared + @/security only.",
+                  "@/subagent": "Slice isolation (RFC jun-6-code-mode §5.1): @/codemode depends on @/shared + @/security only.",
+                  "@/session": "Slice isolation (RFC jun-6-code-mode §5.1): @/codemode depends on @/shared + @/security only.",
+                  "@/rules": "Slice isolation (RFC jun-6-code-mode §5.1): @/rules is reachable by @/agent only.",
+                  "@/patch": "Slice isolation (RFC jun-6-code-mode §5.1): @/patch is reachable by @/tool/apply-patch + @/agent only."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["**/src/patch/**"],
       "linter": {
         "rules": {

@@ -218,6 +218,14 @@ const RULES: readonly Rule[] = [
         "Inspector composition root — reads the same session-registry backend env by key; same posture as global.ts.",
       "host/runtime/pty-backend.ts":
         "ENV PROPAGATION — the Bun-native PTY factory forwards the parent env (merged with the caller's `env`) into `Bun.spawn({ terminal })` so the spawned PTY child inherits PATH/HOME; same pass-through posture as runtime/shell.ts and subagent/handlers-6.ts — not a feature-flag read.",
+      "storage/git-runner/runner.ts":
+        "ENV PROPAGATION — `buildGitEnv` copies a hardcoded ALLOWED_ENV allowlist INTO the scrubbed env handed to the spawned `git` child (deterministic overrides win last); intentional pass-through, not a feature read. Same posture as tool/git/runner.ts.",
+      "apps/cli/repo-info.ts":
+        "Surface repo-identity helpers for `/version` `/release-notes` `/bug` — `env: NodeJS.ProcessEnv = process.env` DI fallback at the composition root (QUANTA_REPO_URL/QUANTA_VERSION/QUANTA_COMMIT build-time overrides); tests inject explicit env. Same DI-fallback posture as status-pills.ts / login-cmd.ts.",
+      "apps/cli/version-cmd.ts":
+        "CLI sub-command surface (`/version` `/release-notes`) — `deps.env ?? process.env` DI fallback at the composition root; downstream resolveVersion/repoUrl accept env explicitly. Same posture as repo-info.ts / login-cmd.ts.",
+      "apps/cli/bug-cmd.ts":
+        "CLI sub-command surface (`/bug`) — `deps.env ?? process.env` DI fallback at the composition root; same posture as version-cmd.ts.",
     },
   },
   {

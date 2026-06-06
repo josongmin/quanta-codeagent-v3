@@ -15,7 +15,7 @@
  * `/voice` slash command.
  */
 
-import { err, errMessage, ok, type Result } from "@/shared"
+import { err, errMessage, ok, parseRetryAfterMs, type Result } from "@/shared"
 import type { FetchLike } from "./openai-whisper-transcriber"
 import type { TranscribeReq, TranscriberError, TranscriberPort, VoiceTranscript } from "./port"
 
@@ -36,13 +36,6 @@ const DEFAULT_TIMEOUT_MS = 60_000
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null
 
 const mimeFor = (format: "wav" | "webm"): string => (format === "webm" ? "audio/webm" : "audio/wav")
-
-const parseRetryAfterMs = (h: string | null): number | undefined => {
-  if (h === null) return undefined
-  const n = Number(h)
-  if (!Number.isFinite(n) || n < 0) return undefined
-  return Math.round(n * 1000)
-}
 
 interface DeepgramAlternative {
   readonly transcript?: unknown
@@ -145,7 +138,7 @@ const chainSignals = (
 const classifyStatus = (res: Response): TranscriberError | null => {
   if (res.status === 401 || res.status === 403) return { kind: "auth-failed", status: res.status }
   if (res.status === 429) {
-    const retry = parseRetryAfterMs(res.headers.get("retry-after"))
+    const retry = parseRetryAfterMs((name) => res.headers.get(name))
     return retry !== undefined
       ? { kind: "rate-limited", status: 429, retryAfterMs: retry }
       : { kind: "rate-limited", status: 429 }

@@ -15,6 +15,7 @@
  * error.kind }` so the model can branch by error kind.
  */
 
+import { isAbsolute } from "node:path"
 import { z } from "zod"
 import type { PipelineError, SearchHit, SearchPipeline } from "@/retrieval/pipeline"
 import { errMessage } from "@/shared"
@@ -36,6 +37,14 @@ export const searchCodebaseInputSchema = z.object({
     .max(MAX_K)
     .optional()
     .describe(`Max ranked hits to return (default ${DEFAULT_K}, max ${MAX_K})`),
+  scope: z
+    .string()
+    .max(1_024)
+    .optional()
+    .describe(
+      "Restrict results to a workspace-relative directory prefix, e.g. 'src/auth'. " +
+        "Omit (or pass '') to search the whole workspace.",
+    ),
 })
 
 export type SearchCodebaseInput = z.infer<typeof searchCodebaseInputSchema>
@@ -58,12 +67,59 @@ const rangeLabel = (metadata: Record<string, unknown> | undefined): string => {
   return `:${startLine ?? endLine}`
 }
 
+/** The path a hit renders/filters under — `metadata.path` when present, else
+ *  the hit id. Kept as ONE helper so `renderHits` and the scope filter agree
+ *  on what "the path" is (drift between the two would let a scope filter and
+ *  the rendered line disagree). */
+const hitPath = (h: SearchHit): string => {
+  const md = h.metadata as Record<string, unknown> | undefined
+  return typeof md?.path === "string" ? md.path : h.id
+}
+
+/** Normalize a model-supplied `scope` to a workspace-relative directory
+ *  prefix. Returns `null` when the scope escapes the workspace (absolute path,
+ *  or any `..` segment) so the caller can reject with a typed error — the same
+ *  posture the `grep`/`glob` tools take on a traversal pattern. An empty/blank
+ *  scope normalizes to `""` (no filter). Leading `./` and trailing slashes are
+ *  stripped so prefix-matching is exact. */
+const normalizeScope = (scope: string): string | null => {
+  const trimmed = scope.trim()
+  if (trimmed === "") return ""
+  if (isAbsolute(trimmed)) return null
+  const cleaned = trimmed.replace(/^\.\//, "").replace(/[/\\]+$/, "")
+  if (cleaned.split(/[/\\]/).includes("..")) return null
+  return cleaned
+}
+
+/** Resolve a model-supplied `scope` into a normalized prefix (or a typed
+ *  rejection). Extracted from `execute` so the generator stays under the
+ *  cognitive-complexity budget. `undefined`/blank ⇒ `{ scope: "" }` (no
+ *  filter); a traversal/absolute scope ⇒ `{ ok: false }`. */
+const resolveScope = (
+  raw: string | undefined,
+): { ok: true; scope: string } | { ok: false; output: string } => {
+  if (raw === undefined) return { ok: true, scope: "" }
+  const norm = normalizeScope(raw)
+  if (norm === null) return { ok: false, output: `scope escapes the workspace: ${raw}` }
+  return { ok: true, scope: norm }
+}
+
+/** True when `path` is inside (or equal to) the relative `scope` prefix.
+ *  Backslashes are folded to `/` and a leading `./` stripped so a hit path
+ *  recorded on either OS matches a normalized scope. `scope === ""` ⇒ always
+ *  true (no filter). */
+const inScope = (path: string, scope: string): boolean => {
+  if (scope === "") return true
+  const p = path.replace(/\\/g, "/").replace(/^\.\//, "")
+  return p === scope || p.startsWith(`${scope}/`)
+}
+
 const renderHits = (query: string, hits: readonly SearchHit[]): string => {
   if (hits.length === 0) return `No hits for query: ${query}`
   const lines: string[] = [`Found ${hits.length} hit(s) for: ${query}`]
   for (const h of hits) {
     const md = h.metadata as Record<string, unknown> | undefined
-    const path = typeof md?.path === "string" ? md.path : h.id
+    const path = hitPath(h)
     const range = rangeLabel(md)
     const score = h.score.toFixed(4)
     const rawSnippet =
@@ -121,9 +177,22 @@ export const searchCodebaseTool = (pipeline: SearchPipeline): Tool<SearchCodebas
       return
     }
     const k = parsed.data.k ?? DEFAULT_K
+    // Scope is a POST-filter: most pipelines (lexical default) don't honor a
+    // path filter at the engine level, so we filter the ranked hits here. When
+    // scoping, widen the candidate pool to the existing MAX_K cap so the filter
+    // has enough to slice `k` from — NOT an invented multiplier, just the
+    // already-enforced ceiling. Absent/blank scope ⇒ fetch exactly `k` and
+    // skip the filter, byte-identical to the pre-scope path.
+    const scoped = resolveScope(parsed.data.scope)
+    if (!scoped.ok) {
+      yield { type: "result", result: errResult(scoped.output, "invalid-config") }
+      return
+    }
+    const filtering = scoped.scope !== ""
+    const fetchK = filtering ? MAX_K : k
     let outcome: Awaited<ReturnType<SearchPipeline["search"]>>
     try {
-      outcome = await pipeline.search({ text: parsed.data.query, k })
+      outcome = await pipeline.search({ text: parsed.data.query, k: fetchK })
     } catch (e) {
       const msg = errMessage(e)
       yield {
@@ -139,9 +208,12 @@ export const searchCodebaseTool = (pipeline: SearchPipeline): Tool<SearchCodebas
       }
       return
     }
+    const hits = filtering
+      ? outcome.value.filter((h) => inScope(hitPath(h), scoped.scope)).slice(0, k)
+      : outcome.value
     yield {
       type: "result",
-      result: { ok: true, output: renderHits(parsed.data.query, outcome.value) },
+      result: { ok: true, output: renderHits(parsed.data.query, hits) },
     }
   },
 })

@@ -53,11 +53,7 @@ const discoverEntrypoints = async (): Promise<string[]> => {
 }
 
 const isSkipped = (name: string): boolean =>
-  !name.endsWith(".ts") ||
-  name.endsWith(".d.ts") ||
-  name.endsWith(".test.ts") ||
-  name.includes(".from-worktree") ||
-  name.includes(".my-backup")
+  !name.endsWith(".ts") || name.endsWith(".d.ts") || name.endsWith(".test.ts")
 
 const walk = async (dir: string): Promise<string[]> => {
   const out: string[] = []

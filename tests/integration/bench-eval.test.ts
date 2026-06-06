@@ -8,7 +8,7 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { existsSync, mkdtempSync, rmSync } from "node:fs"
-import { mkdir } from "node:fs/promises"
+import { mkdir, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { loadCorpus, writeSyntheticRealCorpus } from "../../src/apps/bench/corpus/loader"
@@ -74,6 +74,27 @@ describe("bench-eval: real corpus loader", () => {
     // Point the only task at an unknown repo by nuking the repo manifest dir.
     rmSync(join(dir, "external"), { recursive: true, force: true })
     expect(await loadCorpus(dir)).toEqual([])
+  })
+
+  // asRecord array-handling safety: a YAML array root IS `typeof "object"`
+  // and not null, so a naive `asRecord` would let it through as a "record"
+  // and then read `.task_id` / `.objective` off it (undefined) — the task
+  // would slip into the loader as a half-formed record. The `!Array.isArray`
+  // guard makes an array-root task YAML collapse to "skip" (returns null),
+  // so the valid sibling task is the ONLY instance loaded.
+  test("(a'') a task YAML whose root is a YAML array is skipped, valid sibling still loads", async () => {
+    const cacheDir = join(dir, "cache", "demo")
+    await writeSyntheticRealCorpus(dir, cacheDir)
+    // Drop a second task file whose top-level document is an array.
+    const taskDir = join(dir, "tasks", "repo", "swebench")
+    await writeFile(
+      join(taskDir, "py.repo.swebench_demo.array.yaml"),
+      "- task_id: py.repo.swebench_demo.array\n- objective: { statement: nope }\n",
+    )
+    const corpus = await loadCorpus(dir)
+    // Only the valid object-root task survives; the array-root one is skipped.
+    expect(corpus).toHaveLength(1)
+    expect((corpus[0] as Instance).id).toBe("py.repo.swebench_demo.001")
   })
 
   // W1-A audit fix: previous body had `expect(true).toBe(true); return` for

@@ -27,6 +27,23 @@ export interface DecisionLogEntry {
   readonly reason: string
   /** Wall-clock ms when the decision was reached (injected clock in tests). */
   readonly at: number
+  /**
+   * jun-6 exfil-rail (B) — outbound content-scan disposition for THIS
+   * connection. Absent ⇒ no secret-egress scan ran (host-only, the default).
+   * `scanned-clean` / `denied` / `redacted` describe a plaintext-HTTP scan;
+   * `connect-tunnel-unscanned` makes the HONEST HTTPS gap VISIBLE — the CONNECT
+   * tunnel carries opaque TLS bytes the proxy cannot read (needs MITM, deferred
+   * Phase-2 RFC), so its body was NOT scanned; `body-cap-unscanned` marks a body
+   * past the buffered-byte cap forwarded UNSCANNED (DoS guard, never blocked-
+   * by-truncation). These are advisory telemetry — they never change the host
+   * allow/deny verdict in `decision`.
+   */
+  readonly secretScan?:
+    | "scanned-clean"
+    | "denied"
+    | "redacted"
+    | "connect-tunnel-unscanned"
+    | "body-cap-unscanned"
 }
 
 /**
@@ -50,6 +67,35 @@ export interface NetworkProxyConfig {
    *  `localhost,127.0.0.1` so loopback dev servers are reachable WITHOUT being
    *  routed through (and SSRF-blocked by) the proxy. */
   readonly noProxy?: readonly string[]
+  /**
+   * jun-6 exfil-rail (B) — secret-aware egress (RFC §4.4). Absent ⇒ the egress
+   * decision is HOST-ONLY (no body/header scan), byte-identical. When present,
+   * the PLAINTEXT-HTTP path (`pipeHttp`) buffers the outbound body + scans body
+   * and header values for a declared/detected secret and denies/redacts on a
+   * hit.
+   *
+   * ⚠️ HTTPS IS OPAQUE: the `CONNECT host:443` tunnel carries raw TLS bytes the
+   * proxy cannot read, so a CONNECT request is NEVER content-scanned — instead a
+   * dedicated `connect-tunnel-unscanned` decision-log entry makes the gap
+   * VISIBLE (RFC §3.4 caveat; full coverage needs TLS MITM, a deferred Phase-2
+   * RFC). See `./secret-egress` + `loopback-proxy.ts`.
+   */
+  readonly secretEgress?: import("./secret-egress").SecretEgressConfig
+  /**
+   * jun-7 TLS-MITM (Phase-2 of exfil-rail (B)) — closes the HTTPS-opaque gap.
+   * Absent ⇒ a `CONNECT host:443` stays a RAW tunnel + `connect-tunnel-unscanned`
+   * marker (byte-identical to the pre-slice path). When present (operator-opt-in
+   * ONLY, see `./mitm-gate`), an ALLOWED CONNECT is TERMINATED at the proxy
+   * (presenting a leaf minted by the ephemeral CA), the decrypted request body +
+   * headers run through the SAME secret-egress scan as the plaintext path, then
+   * the proxy re-originates its OWN upstream TLS connection to the real host
+   * (validating the REAL server cert) and forwards.
+   *
+   * ⚠️ SECURITY: the MITM CA is a powerful trust anchor — ephemeral / in-memory /
+   * trusted only by quanta's OWN MITM'd client, never the OS. See `./mitm` +
+   * `./mitm-cert` for the blast-radius threat model.
+   */
+  readonly mitm?: import("./mitm").MitmConfig
 }
 
 /** Address the proxy is bound to after `listen()` resolves. */

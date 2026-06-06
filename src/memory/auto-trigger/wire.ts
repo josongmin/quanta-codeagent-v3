@@ -34,7 +34,7 @@
  * surface owns.
  */
 
-import { parseEnvFlag } from "@/runner/assemble/env-flag"
+import { parseEnvFlag } from "@/shared"
 import { DEFAULT_TRIGGER_POLICY, type TriggerPolicy } from "./types"
 
 /** Return shape of {@link assembleMemoryAuto}. `null` ⇒ disabled. */

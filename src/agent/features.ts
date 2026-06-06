@@ -79,6 +79,7 @@ import {
   buildSubagentBlock,
   buildSubagentIntrospectBlock,
   buildSubagentMailboxBlock,
+  buildTeamBlock,
   buildUserInputBlock,
   buildWebSearchBlock,
   buildWorkingStateBlock,
@@ -193,6 +194,10 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
 
   // ADR-0416 — subagent_send_message tool (default-OFF: empty when subagentMailbox absent)
   extraTools.push(...buildSubagentMailboxBlock(config))
+
+  // RFC jun-6 (DELTA #2) — team_create / team_delete lifecycle tools (default-OFF:
+  // empty when teamRegistry absent; wired only when QUANTA_TEAM_PEER_MSG is on)
+  extraTools.push(...buildTeamBlock(config))
 
   // ADR-0393 — synchronous delegate tool (default-OFF: empty when delegation absent)
   extraTools.push(...buildDelegateBlock(config))

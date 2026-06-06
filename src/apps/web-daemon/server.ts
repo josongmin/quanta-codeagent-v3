@@ -592,6 +592,21 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
     })
   }
 
+  // Bearer-auth gate shared by every authenticated route (WS upgrade + the
+  // `/threads`, `/config`, `/auth/*` HTTP routes). Returns a 401 `Response`
+  // when a token is configured AND the request fails to present a matching
+  // one; returns `null` (allow) when no token is configured or the presented
+  // token matches. Extracted from five byte-identical inline checks so each
+  // route is a one-line `const denied = requireAuth(url, req); if (denied) …`.
+  const requireAuth = (url: URL, req: Request): Response | null => {
+    if (config.authToken === undefined) return null
+    const presented = extractToken(url, req.headers.get("authorization"))
+    if (presented === undefined || !constantTimeEquals(presented, config.authToken)) {
+      return authReject()
+    }
+    return null
+  }
+
   const tryUpgrade = (req: Request, server: Server<WSData>): Response | undefined => {
     const url = new URL(req.url)
     if (url.pathname !== "/" && url.pathname !== "/ws") return undefined
@@ -650,12 +665,8 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
       // the same bearer auth as WS upgrade. Disabled (404) when persistence
       // is off (`QUANTA_WEB_DB=off`).
       if (url.pathname === "/threads" && req.method === "GET") {
-        if (config.authToken !== undefined) {
-          const presented = extractToken(url, req.headers.get("authorization"))
-          if (presented === undefined || !constantTimeEquals(presented, config.authToken)) {
-            return authReject()
-          }
-        }
+        const denied = requireAuth(url, req)
+        if (denied !== null) return denied
         if (threadStore === null) {
           return jsonResponse(404, { error: "persistence_disabled" })
         }
@@ -664,12 +675,8 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
       {
         const eventsMatch = url.pathname.match(/^\/threads\/([^/]+)\/events$/)
         if (eventsMatch !== null && req.method === "GET") {
-          if (config.authToken !== undefined) {
-            const presented = extractToken(url, req.headers.get("authorization"))
-            if (presented === undefined || !constantTimeEquals(presented, config.authToken)) {
-              return authReject()
-            }
-          }
+          const denied = requireAuth(url, req)
+          if (denied !== null) return denied
           if (threadStore === null) {
             return jsonResponse(404, { error: "persistence_disabled" })
           }
@@ -690,24 +697,16 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
         // bearer token as WS upgrade. Multi-client implication: all
         // attached clients see the change on their NEXT turn (shared
         // session).
-        if (config.authToken !== undefined) {
-          const presented = extractToken(url, req.headers.get("authorization"))
-          if (presented === undefined || !constantTimeEquals(presented, config.authToken)) {
-            return authReject()
-          }
-        }
+        const denied = requireAuth(url, req)
+        if (denied !== null) return denied
         return handleConfigPost(req)
       }
       // ChatGPT OAuth login/logout/whoami — same bearer auth; thin
       // wrappers around the CLI's existing `/login` slash compose
       // (`runBrowserFlow` → `exchangeCode` → `writeToken`).
       if (url.pathname.startsWith("/auth/") && (req.method === "POST" || req.method === "GET")) {
-        if (config.authToken !== undefined) {
-          const presented = extractToken(url, req.headers.get("authorization"))
-          if (presented === undefined || !constantTimeEquals(presented, config.authToken)) {
-            return authReject()
-          }
-        }
+        const denied = requireAuth(url, req)
+        if (denied !== null) return denied
         if (url.pathname === "/auth/login" && req.method === "POST") return handleAuthLoginStart()
         if (url.pathname === "/auth/logout" && req.method === "POST") return handleAuthLogout()
         if (url.pathname === "/auth/status" && req.method === "GET") return handleAuthStatus()

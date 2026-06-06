@@ -65,7 +65,13 @@ export const stripComments = (src: string): string =>
   src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
 
 const parseSourceFile = (src: string): ts.SourceFile =>
-  ts.createSourceFile("slice-boundary-scanner.ts", src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  ts.createSourceFile(
+    "slice-boundary-scanner.ts",
+    src,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  )
 
 const lineOf = (sf: ts.SourceFile, pos: number): number =>
   sf.getLineAndCharacterOfPosition(pos).line + 1
@@ -156,10 +162,7 @@ export const extractImports = (src: string): Array<{ line: number; spec: string 
   return out
 }
 
-export const scanLines = (
-  src: string,
-  pattern: RegExp,
-): Array<{ line: number; hit: string }> => {
+export const scanLines = (src: string, pattern: RegExp): Array<{ line: number; hit: string }> => {
   const out: Array<{ line: number; hit: string }> = []
   const stripped = stripComments(src)
   const lines = stripped.split("\n")
@@ -192,6 +195,19 @@ const isDeniedImport = (
     if (spec === d || spec.startsWith(`${d}/`)) return true
   }
   return false
+}
+
+/** Policy-level predicate: would `config`'s deny-list flag a VALUE import of
+ *  `spec`? Composed EXACTLY as `registerSliceBoundarySuite` does (same
+ *  self-prefix strip + deny/allow sets), so a negative test that drives this
+ *  proves the LIVE guard fires on a synthetic violation without needing an
+ *  on-disk fixture. (Type-only imports never reach this — `extractImports`
+ *  skips `import type` upstream.) */
+export const isImportDeniedByConfig = (spec: string, config: SliceBoundaryConfig): boolean => {
+  const selfPrefix = `@/${config.slice}`
+  const deny = new Set(config.denyImports.filter((d) => d !== selfPrefix))
+  const allow = new Set(config.allowImports ?? [])
+  return isDeniedImport(spec, deny, allow)
 }
 
 const leafName = (sliceDirPath: string, filePath: string): string => {
@@ -397,7 +413,7 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
       }
     })
 
-    test('no `node:process` named imports', () => {
+    test("no `node:process` named imports", () => {
       const violations: string[] = []
       for (const f of files) {
         for (const { line, hit } of scanNodeProcessNamedImports(readFileSync(f, "utf8"))) {

@@ -79,6 +79,17 @@ export class ToolRegistry {
     return [...this.tools.values()]
   }
 
+  /** code-mode (RFC jun-6-code-mode, Phase 2) — the registered tool NAMES in
+   *  stable registry (insertion) order. The `@/agent/codemode-wire` factory
+   *  reads this to build the cell's FULL `tools.*` surface from the agent's
+   *  ACTUAL registered set (a tool the agent can't use is never bound; a
+   *  newly-registered tool appears automatically). Same set `dispatchTool`
+   *  knows — the cell can never widen past what the loop exposes. Pure read of
+   *  the map keys; no leak (the names are stable identifiers, see `specs()`). */
+  toolNames(): string[] {
+    return [...this.tools.keys()]
+  }
+
   /** S16: extract a shell command from a tool call when the tool implements
    *  `extractShellCommand`. Returns `null` for tools that don't accept a
    *  shell command, OR when input validation fails. Permission policy uses

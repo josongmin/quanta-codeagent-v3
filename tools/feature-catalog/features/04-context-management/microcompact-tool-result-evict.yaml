@@ -56,7 +56,7 @@ evidence:
     # spill reuse: the evicted original is persisted to the SAME
     # .quanta/tool-output surface + pruneSpillDir bound as the capture-time cap.
     - src/tool/output-spill.ts
-  adrs: []
+  adrs: [492]
   tests:
     unit:
       # §6.1 — keep-last-N / clear-to-placeholder(preserve id+is_error, drop

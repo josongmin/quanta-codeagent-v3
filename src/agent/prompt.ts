@@ -471,6 +471,9 @@ const resolveDirectiveConfig = (): DirectiveConfig => {
     directiveParallelTools: c.directiveParallelTools,
     // RFC jun-6 §5.2 — advisor timing rail (QUANTA_ADVISOR_RAIL). Additive.
     directiveAdvisorRail: c.directiveAdvisorRail,
+    // RFC jun-6-code-mode Phase 3 — code_mode_only steering (QUANTA_CODE_MODE_ONLY).
+    // Additive; default-OFF ⇒ zero bytes (byte-identical dynamic tail).
+    codeModeOnly: c.codeModeOnly,
   }
 }
 

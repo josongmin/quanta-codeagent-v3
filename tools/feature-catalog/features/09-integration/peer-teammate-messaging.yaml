@@ -75,10 +75,17 @@ evidence:
     - src/agent/loop/turn-iteration.ts
     - src/tool/team/index.ts
     - src/shared/runtime-config.ts
-  adrs: []
+    - src/host/runtime/peer-team-wire.ts
+    - src/host/runtime/agent-config-assembler.ts
+    - src/agent/tier1/team.ts
+    - src/agent/features.ts
+    - src/agent/subagent-runner.ts
+    - src/agent/types.ts
+  adrs: ["docs/plans/jun-6-peer-teammate-messaging.md"]
   tests:
     unit:
       - tests/unit/peer-messaging-hellgate.test.ts
+      - tests/unit/peer-messaging-host-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -97,6 +104,21 @@ knobs:
       redaction on the auto-delivered (untrusted) peer content. The audit-H caps
       stay GLOBAL (one bounded store under a membership scope).
 notes: |
+  ✅ host-wired LIVE (jun-06) — 컴포지션 루트 배선 완료 → L3 LIVE-composed.
+  `src/host/runtime/peer-team-wire.ts` `maybeWirePeerTeamMessaging` (assembler 에서
+  knob-ON 시 호출)가: (1) per-session `createTeamRegistry()` → `cfg.teamRegistry`
+  (tier1 `buildTeamBlock` 이 team_create/team_delete 등록 + runner 가 자식 등록),
+  (2) `cfg.subagentMailbox` 를 `teamScopedMailbox` 로 decorate(cross-team deny +
+  broadcast team-scope, audit-H cap 은 global 유지 — replace 아닌 decorate),
+  (3) `cfg.peerInbox = createPeerInboxDrain(scoped, {redact: redactSecrets})`
+  (loop turn-top `pollPeerInbox` 가 auto-deliver). subagent-runner 가 자식 config 에
+  peerInbox+teamRegistry 전파 + 부모 팀에 자식(`root/0`) 등록. knob-OFF ⇒ no peerInbox,
+  raw mailbox, no registry, team_* 미등록(byte-identical). e2e:
+  tests/unit/peer-messaging-host-wire-hellgate.test.ts (REAL composition root + REAL
+  createSubagentRunner: 자식이 peerInbox/teamRegistry 상속+팀가입 → sibling 메시지가
+  자식 턴에 manual read 없이 auto-deliver / cross-team deny / knob-OFF byte-identical /
+  redaction). broker.ts UNTOUCHED(no-self-grant invariant 보존).
+
   The three genuine deltas over quanta's already-built peer substrate (RFC
   re-audit: quanta ALREADY has peer mailbox + bounded inbox + wake-idle + the
   no-self-grant invariant — those are REUSED, not rebuilt). 21 hellgate cases

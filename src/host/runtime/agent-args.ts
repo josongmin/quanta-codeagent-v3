@@ -275,6 +275,215 @@ const parseFloatStrict = (s: string, flag: string): number => {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Flag dispatch table (OCP)
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Mutable accumulator threaded through the flag handlers. Each {@link FlagSpec}
+ * `apply` writes into this struct; after the scan loop the optional fields are
+ * copied into the immutable {@link AgentArgs} output (omitting `undefined`/`false`
+ * exactly as the legacy if-chain did).
+ *
+ * Booleans default `false`; everything else `undefined` (= slot omitted).
+ */
+interface FlagAcc {
+  mode?: AgentMode
+  model?: string
+  provider?: ProviderToken
+  exhaustion?: BudgetExhaustionPolicy
+  prompt?: string
+  corpus?: string
+  instance?: string
+  predictions?: string
+  report?: string
+  ciBotDryRun: boolean
+  pr?: string
+  toolProfile?: ToolProfileToken
+  stickyModel: boolean
+  identityMode?: IdentityModeToken
+  focusChainEvery?: number
+  noAutoBackground: boolean
+  playbookTrigger: boolean
+  permissionProfile?: PermissionProfileToken
+  dials: Partial<BudgetDials>
+}
+
+/**
+ * A single flag's contract. Replaces one `if (a === "--x") { … }` arm:
+ *  - `takesValue: true`  → the next argv token is consumed via {@link takeValue}
+ *    (rejecting a missing/`--`-looking value) and passed to `apply` as `value`.
+ *  - `takesValue: false` → a bare boolean flag; `apply` gets `undefined` and
+ *    advances by one token.
+ *
+ * `apply` mutates the accumulator. Validation/enum-coercion lives inside `apply`,
+ * byte-identical to the legacy arm (it may throw {@link AgentArgsError}). Adding
+ * a new flag is ONE entry here, not an edit across the scan loop.
+ */
+type FlagSpec =
+  | { takesValue: true; apply: (acc: FlagAcc, value: string, flag: string) => void }
+  | { takesValue: false; apply: (acc: FlagAcc, value: undefined, flag: string) => void }
+
+/**
+ * Canonical-flag → spec. Aliases (e.g. `-p`) get their OWN entry pointing at the
+ * same spec so lookup is O(1) and the canonical-name set stays explicit. Dial
+ * flags are NOT listed here — they fan out from {@link DIAL_FLAG_MAP} and are
+ * resolved by the dedicated `isDialFlag` branch in the loop (its int-vs-float
+ * split keys off the resolved `BudgetDials` field, not the flag string).
+ */
+const FLAG_HANDLERS: Record<string, FlagSpec> = {
+  "--mode": {
+    takesValue: true,
+    apply: (acc, v) => {
+      if (!isValidMode(v)) {
+        throw new AgentArgsError(`--mode must be one of ${VALID_MODES.join("|")}, got '${v}'`)
+      }
+      acc.mode = v
+    },
+  },
+  "--model": {
+    takesValue: true,
+    apply: (acc, v) => {
+      acc.model = v
+    },
+  },
+  "--provider": {
+    takesValue: true,
+    apply: (acc, v) => {
+      if (!isValidProvider(v)) {
+        throw new AgentArgsError(
+          `--provider must be one of ${VALID_PROVIDERS.join("|")}, got '${v}'`,
+        )
+      }
+      acc.provider = v
+    },
+  },
+  "--exhaustion": {
+    takesValue: true,
+    apply: (acc, v) => {
+      if (!isValidExhaustion(v)) {
+        throw new AgentArgsError(
+          `--exhaustion must be one of ${VALID_EXHAUSTION.join("|")}, got '${v}'`,
+        )
+      }
+      acc.exhaustion = v
+    },
+  },
+  "-p": {
+    takesValue: true,
+    apply: (acc, v) => {
+      acc.prompt = v
+    },
+  },
+  "--prompt": {
+    takesValue: true,
+    apply: (acc, v) => {
+      acc.prompt = v
+    },
+  },
+  "--corpus": {
+    takesValue: true,
+    apply: (acc, v) => {
+      acc.corpus = v
+    },
+  },
+  "--instance": {
+    takesValue: true,
+    apply: (acc, v) => {
+      acc.instance = v
+    },
+  },
+  "--predictions": {
+    takesValue: true,
+    apply: (acc, v) => {
+      acc.predictions = v
+    },
+  },
+  "--report": {
+    takesValue: true,
+    apply: (acc, v) => {
+      acc.report = v
+    },
+  },
+  "--pr": {
+    takesValue: true,
+    apply: (acc, v) => {
+      acc.pr = v
+    },
+  },
+  "--dry-run": {
+    takesValue: false,
+    // ci-bot only: stub the PR-comment write at the runner edge.
+    apply: (acc) => {
+      acc.ciBotDryRun = true
+    },
+  },
+  "--tool-profile": {
+    takesValue: true,
+    apply: (acc, v) => {
+      if (!isValidToolProfile(v)) {
+        throw new AgentArgsError(
+          `--tool-profile must be one of ${VALID_TOOL_PROFILES.join("|")}, got '${v}'`,
+        )
+      }
+      acc.toolProfile = v
+    },
+  },
+  "--sticky-model": {
+    takesValue: false,
+    apply: (acc) => {
+      acc.stickyModel = true
+    },
+  },
+  "--identity-mode": {
+    takesValue: true,
+    apply: (acc, v) => {
+      if (!isValidIdentityMode(v)) {
+        throw new AgentArgsError(
+          `--identity-mode must be one of ${VALID_IDENTITY_MODES.join("|")}, got '${v}'`,
+        )
+      }
+      acc.identityMode = v
+    },
+  },
+  "--focus-chain-every": {
+    takesValue: true,
+    apply: (acc, raw, flag) => {
+      const n = parseIntStrict(raw, flag)
+      if (n === 0) {
+        // Reject 0 explicitly — the tracker treats 0 as "disable", but the
+        // operator wanting to disable should simply omit the flag (the slot
+        // is default-OFF). Accepting 0 would silently wire a no-op tracker.
+        throw new AgentArgsError(`flag '${flag}' must be > 0, got 0`)
+      }
+      acc.focusChainEvery = n
+    },
+  },
+  "--no-auto-background": {
+    takesValue: false,
+    apply: (acc) => {
+      acc.noAutoBackground = true
+    },
+  },
+  "--playbook-trigger": {
+    takesValue: false,
+    apply: (acc) => {
+      acc.playbookTrigger = true
+    },
+  },
+  "--permission-profile": {
+    takesValue: true,
+    apply: (acc, v) => {
+      if (!isValidPermissionProfile(v)) {
+        throw new AgentArgsError(
+          `--permission-profile must be one of ${VALID_PERMISSION_PROFILES.join("|")}, got '${v}'`,
+        )
+      }
+      acc.permissionProfile = v
+    },
+  },
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Main parser
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -301,27 +510,26 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
     }
   }
 
-  let mode: AgentMode | undefined
-  let model: string | undefined
-  let provider: ProviderToken | undefined
-  let exhaustion: BudgetExhaustionPolicy | undefined
-  let prompt: string | undefined
-  let corpus: string | undefined
-  let instance: string | undefined
-  let predictions: string | undefined
-  let report: string | undefined
-  let ciBotDryRun = false
-  let pr: string | undefined
-  // ADR-0236 — composition-root mega-wire flags. All default-OFF: when absent
-  // the assembled config carries no slot, the loop is byte-identical.
-  let toolProfile: ToolProfileToken | undefined
-  let stickyModel = false
-  let identityMode: IdentityModeToken | undefined
-  let focusChainEvery: number | undefined
-  let noAutoBackground = false
-  let playbookTrigger = false
-  let permissionProfile: PermissionProfileToken | undefined
-  const dials: Partial<BudgetDials> = {}
+  const acc = scanFlags(argv)
+  assertModeCombo(acc)
+  return assembleArgs(acc)
+}
+
+/**
+ * Single linear scan over `argv`, dispatching each loop-head token through
+ * {@link FLAG_HANDLERS} (then the dial fan-out, then unknown-flag throw). Pulled
+ * out of {@link parseAgentArgs} so the entry point stays a flat 3-step pipeline
+ * — the scan/validate/assemble split is structural only, the throws and the
+ * accumulator writes are byte-identical to the legacy inline loop.
+ */
+const scanFlags = (argv: readonly string[]): FlagAcc => {
+  const acc: FlagAcc = {
+    ciBotDryRun: false,
+    stickyModel: false,
+    noAutoBackground: false,
+    playbookTrigger: false,
+    dials: {},
+  }
 
   // Audit R2: duplicate-flag guard. None of our flags are repeatable, so the
   // propositional rule is "a flag seen twice is an error" — silently taking the
@@ -349,154 +557,17 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
     // unknown flags still throw below.
     if (a.startsWith("-")) markSeen(a)
 
-    if (a === "--mode") {
-      const v = takeValue(argv, i, a)
-      if (!isValidMode(v)) {
-        throw new AgentArgsError(`--mode must be one of ${VALID_MODES.join("|")}, got '${v}'`)
+    // OCP dispatch: a known non-dial flag is a single table entry. Value-taking
+    // specs consume argv[i+1] via takeValue (i += 2); boolean specs advance one.
+    const spec = FLAG_HANDLERS[a]
+    if (spec !== undefined) {
+      if (spec.takesValue) {
+        spec.apply(acc, takeValue(argv, i, a), a)
+        i += 2
+      } else {
+        spec.apply(acc, undefined, a)
+        i += 1
       }
-      mode = v
-      i += 2
-      continue
-    }
-
-    if (a === "--model") {
-      model = takeValue(argv, i, a)
-      i += 2
-      continue
-    }
-
-    if (a === "--provider") {
-      const v = takeValue(argv, i, a)
-      if (!isValidProvider(v)) {
-        throw new AgentArgsError(
-          `--provider must be one of ${VALID_PROVIDERS.join("|")}, got '${v}'`,
-        )
-      }
-      provider = v
-      i += 2
-      continue
-    }
-
-    if (a === "--exhaustion") {
-      const v = takeValue(argv, i, a)
-      if (!isValidExhaustion(v)) {
-        throw new AgentArgsError(
-          `--exhaustion must be one of ${VALID_EXHAUSTION.join("|")}, got '${v}'`,
-        )
-      }
-      exhaustion = v
-      i += 2
-      continue
-    }
-
-    if (a === "-p" || a === "--prompt") {
-      prompt = takeValue(argv, i, a)
-      i += 2
-      continue
-    }
-
-    if (a === "--corpus") {
-      corpus = takeValue(argv, i, a)
-      i += 2
-      continue
-    }
-
-    if (a === "--instance") {
-      instance = takeValue(argv, i, a)
-      i += 2
-      continue
-    }
-
-    if (a === "--predictions") {
-      predictions = takeValue(argv, i, a)
-      i += 2
-      continue
-    }
-
-    if (a === "--report") {
-      report = takeValue(argv, i, a)
-      i += 2
-      continue
-    }
-
-    if (a === "--pr") {
-      pr = takeValue(argv, i, a)
-      i += 2
-      continue
-    }
-
-    if (a === "--dry-run") {
-      // ci-bot only: stub the PR-comment write at the runner edge.
-      ciBotDryRun = true
-      i += 1
-      continue
-    }
-
-    if (a === "--tool-profile") {
-      const v = takeValue(argv, i, a)
-      if (!isValidToolProfile(v)) {
-        throw new AgentArgsError(
-          `--tool-profile must be one of ${VALID_TOOL_PROFILES.join("|")}, got '${v}'`,
-        )
-      }
-      toolProfile = v
-      i += 2
-      continue
-    }
-
-    if (a === "--sticky-model") {
-      stickyModel = true
-      i += 1
-      continue
-    }
-
-    if (a === "--identity-mode") {
-      const v = takeValue(argv, i, a)
-      if (!isValidIdentityMode(v)) {
-        throw new AgentArgsError(
-          `--identity-mode must be one of ${VALID_IDENTITY_MODES.join("|")}, got '${v}'`,
-        )
-      }
-      identityMode = v
-      i += 2
-      continue
-    }
-
-    if (a === "--focus-chain-every") {
-      const raw = takeValue(argv, i, a)
-      const n = parseIntStrict(raw, a)
-      if (n === 0) {
-        // Reject 0 explicitly — the tracker treats 0 as "disable", but the
-        // operator wanting to disable should simply omit the flag (the slot
-        // is default-OFF). Accepting 0 would silently wire a no-op tracker.
-        throw new AgentArgsError(`flag '${a}' must be > 0, got 0`)
-      }
-      focusChainEvery = n
-      i += 2
-      continue
-    }
-
-    if (a === "--no-auto-background") {
-      noAutoBackground = true
-      i += 1
-      continue
-    }
-
-    if (a === "--playbook-trigger") {
-      playbookTrigger = true
-      i += 1
-      continue
-    }
-
-    if (a === "--permission-profile") {
-      const v = takeValue(argv, i, a)
-      if (!isValidPermissionProfile(v)) {
-        throw new AgentArgsError(
-          `--permission-profile must be one of ${VALID_PERMISSION_PROFILES.join("|")}, got '${v}'`,
-        )
-      }
-      permissionProfile = v
-      i += 2
       continue
     }
 
@@ -506,7 +577,7 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
       // `maxCostUsd` is a dollar ceiling (fractional); every other dial is an
       // integer count/byte/ms/token unit.
       const n = key === "maxCostUsd" ? parseFloatStrict(raw, a) : parseIntStrict(raw, a)
-      dials[key] = n
+      acc.dials[key] = n
       i += 2
       continue
     }
@@ -514,30 +585,67 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
     throw new AgentArgsError(`unknown flag '${a}'`)
   }
 
-  if (mode === undefined) {
+  return acc
+}
+
+/**
+ * Cross-flag (mode ↔ companion) validation. Throws {@link AgentArgsError} in the
+ * EXACT order of the legacy inline guards: required-mode → wrong-mode rejects
+ * (corpus/instance/predictions/report/pr/prompt) → missing-companion requires
+ * (ci-bot/batch/headless). Narrows `acc.mode` to a defined {@link AgentMode}.
+ */
+/**
+ * Mode-only flags: `acc[field]` is rejected unless `mode === requires`. Listed in
+ * the legacy guard order (corpus→instance→predictions→report→pr→prompt). The
+ * `message` is verbatim the legacy throw text.
+ */
+const MODE_ONLY_GUARDS: readonly {
+  field: keyof FlagAcc
+  requires: AgentMode
+  message: string
+}[] = [
+  { field: "corpus", requires: "batch", message: `--corpus is only valid with --mode batch` },
+  { field: "instance", requires: "batch", message: `--instance is only valid with --mode batch` },
+  {
+    field: "predictions",
+    requires: "batch",
+    message: `--predictions is only valid with --mode batch`,
+  },
+  { field: "report", requires: "batch", message: `--report is only valid with --mode batch` },
+  { field: "pr", requires: "ci-bot", message: `--pr is only valid with --mode ci-bot` },
+  {
+    field: "prompt",
+    requires: "headless",
+    message: `-p/--prompt is only valid with --mode headless`,
+  },
+]
+
+/**
+ * Modes that REQUIRE a companion flag (the inverse direction). Listed in the
+ * legacy order (ci-bot→batch→headless); `message` verbatim.
+ */
+const MODE_REQUIRES_GUARDS: readonly {
+  mode: AgentMode
+  field: keyof FlagAcc
+  message: string
+}[] = [
+  { mode: "ci-bot", field: "pr", message: `--pr is required with --mode ci-bot` },
+  { mode: "batch", field: "corpus", message: `--corpus is required with --mode batch` },
+  { mode: "headless", field: "prompt", message: `-p/--prompt is required with --mode headless` },
+]
+
+function assertModeCombo(acc: FlagAcc): asserts acc is FlagAcc & { mode: AgentMode } {
+  if (acc.mode === undefined) {
     throw new AgentArgsError(
       `--mode is required (one of ${VALID_MODES.join("|")}); pass --help for usage`,
     )
   }
 
   // Mode-specific flag validation — each mode-only flag must accompany its mode.
-  if (corpus !== undefined && mode !== "batch") {
-    throw new AgentArgsError(`--corpus is only valid with --mode batch`)
-  }
-  if (instance !== undefined && mode !== "batch") {
-    throw new AgentArgsError(`--instance is only valid with --mode batch`)
-  }
-  if (predictions !== undefined && mode !== "batch") {
-    throw new AgentArgsError(`--predictions is only valid with --mode batch`)
-  }
-  if (report !== undefined && mode !== "batch") {
-    throw new AgentArgsError(`--report is only valid with --mode batch`)
-  }
-  if (pr !== undefined && mode !== "ci-bot") {
-    throw new AgentArgsError(`--pr is only valid with --mode ci-bot`)
-  }
-  if (prompt !== undefined && mode !== "headless") {
-    throw new AgentArgsError(`-p/--prompt is only valid with --mode headless`)
+  for (const g of MODE_ONLY_GUARDS) {
+    if (acc[g.field] !== undefined && acc.mode !== g.requires) {
+      throw new AgentArgsError(g.message)
+    }
   }
 
   // The OTHER direction — each mode that REQUIRES its companion flag must
@@ -546,35 +654,61 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
   // headless` with no prompt, `--mode batch` with no corpus) and either hang
   // or fault deeper at the runner edge. Throwing AgentArgsError here surfaces
   // it as exit 64 / EX_USAGE with usage text, same as the guards above.
-  if (mode === "ci-bot" && pr === undefined) {
-    throw new AgentArgsError(`--pr is required with --mode ci-bot`)
+  for (const g of MODE_REQUIRES_GUARDS) {
+    if (acc.mode === g.mode && acc[g.field] === undefined) {
+      throw new AgentArgsError(g.message)
+    }
   }
-  if (mode === "batch" && corpus === undefined) {
-    throw new AgentArgsError(`--corpus is required with --mode batch`)
-  }
-  if (mode === "headless" && prompt === undefined) {
-    throw new AgentArgsError(`-p/--prompt is required with --mode headless`)
-  }
+}
 
-  const out: AgentArgs = { mode, dials, help: false }
-  if (model !== undefined) out.model = model
-  if (provider !== undefined) out.provider = provider
-  if (exhaustion !== undefined) out.exhaustion = exhaustion
-  if (prompt !== undefined) out.prompt = prompt
-  if (corpus !== undefined) out.corpus = corpus
-  if (instance !== undefined) out.instance = instance
-  if (predictions !== undefined) out.predictions = predictions
-  if (report !== undefined) out.report = report
-  if (pr !== undefined) out.pr = pr
-  if (ciBotDryRun) out.ciBotDryRun = true
-  // ADR-0236 — composition-root mega-wire propagation.
-  if (toolProfile !== undefined) out.toolProfile = toolProfile
-  if (stickyModel) out.stickyModel = true
-  if (identityMode !== undefined) out.identityMode = identityMode
-  if (focusChainEvery !== undefined) out.focusChainEvery = focusChainEvery
-  if (noAutoBackground) out.noAutoBackground = true
-  if (playbookTrigger) out.playbookTrigger = true
-  if (permissionProfile !== undefined) out.permissionProfile = permissionProfile
+/**
+ * Copy the validated accumulator into the immutable {@link AgentArgs}, omitting
+ * each optional slot exactly as the legacy `if (x !== undefined) out.x = x`
+ * tail did (booleans only set when truthy). Required `mode` is guaranteed by the
+ * `assertModeCombo` narrowing.
+ */
+// Optional slots copied iff defined (string/enum/number). Order verbatim from
+// the legacy `if (x !== undefined) out.x = x` tail.
+const OPTIONAL_SLOTS = [
+  "model",
+  "provider",
+  "exhaustion",
+  "prompt",
+  "corpus",
+  "instance",
+  "predictions",
+  "report",
+  "pr",
+  "toolProfile",
+  "identityMode",
+  "focusChainEvery",
+  "permissionProfile",
+] as const satisfies readonly (keyof AgentArgs & keyof FlagAcc)[]
+
+// Boolean slots copied iff truthy (matches legacy `if (flag) out.flag = true`).
+const BOOLEAN_SLOTS = [
+  "ciBotDryRun",
+  "stickyModel",
+  "noAutoBackground",
+  "playbookTrigger",
+] as const satisfies readonly (keyof AgentArgs & keyof FlagAcc)[]
+
+const assembleArgs = (acc: FlagAcc & { mode: AgentMode }): AgentArgs => {
+  const out: AgentArgs = { mode: acc.mode, dials: acc.dials, help: false }
+  // ADR-0236 — composition-root mega-wire flags ride the same two tables.
+  for (const k of OPTIONAL_SLOTS) {
+    const v = acc[k]
+    if (v !== undefined) {
+      // Index assignment across a heterogeneous union — each (k,v) pair is
+      // structurally aligned by the `keyof AgentArgs & keyof FlagAcc` constraint.
+      ;(out[k] as unknown) = v
+    }
+  }
+  for (const k of BOOLEAN_SLOTS) {
+    if (acc[k]) {
+      ;(out[k] as unknown) = true
+    }
+  }
   return out
 }
 

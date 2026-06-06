@@ -24,6 +24,7 @@
  */
 
 import { z } from "zod"
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
 /** Duck-typed mirror of `@/agent/shadow-verify`'s `ShadowCheck`. Closed union. */
@@ -139,14 +140,32 @@ export const shadowVerifyTool = (port: ShadowVerifyPortMirror): Tool<ShadowVerif
       type: "progress",
       message: `shadow_verify: applying patch + running ${parsed.data.checks.join("/")} in scratch overlay…`,
     }
-    const result = await port.verify(
-      {
-        patch: parsed.data.patch,
-        checks: parsed.data.checks,
-        ...(parsed.data.test_target !== undefined ? { testTarget: parsed.data.test_target } : {}),
-      },
-      ctx.signal,
-    )
+    // NO-THROW boundary (Tool contract §2): the duck-typed `ShadowVerifyPort` is
+    // adapted from `@/agent`; a rejecting adapter MUST NOT reject this iterator
+    // (that hangs/corrupts the dispatch loop). Map any throw to a typed
+    // `ok:false` (`mode:"error"`) result instead.
+    let result: ShadowVerifyResultMirror
+    try {
+      result = await port.verify(
+        {
+          patch: parsed.data.patch,
+          checks: parsed.data.checks,
+          ...(parsed.data.test_target !== undefined ? { testTarget: parsed.data.test_target } : {}),
+        },
+        ctx.signal,
+      )
+    } catch (e) {
+      const msg = errMessage(e)
+      yield {
+        type: "result",
+        result: {
+          ok: false,
+          output: `shadow_verify: backend-error: ${msg}`,
+          failure: { mode: "error", modelVisibleError: msg },
+        },
+      }
+      return
+    }
     yield {
       type: "result",
       result: { ok: result.ok, output: renderShadowVerifyResult(result) },

@@ -969,6 +969,20 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   subagentMailbox?: MailboxPort
   /**
+   * Peer teammate messaging (RFC jun-6, DELTA #2) — host-owned team registry.
+   * When set, the composition root wraps {@link subagentMailbox} with the
+   * team-scope decorator (cross-team `send` denied + broadcast scoped to the
+   * sender's own team), the subagent runner registers each spawned child into
+   * it (so siblings share a team bus), and `buildTeamBlock` registers the
+   * `team_create`/`team_delete` lifecycle tools over it. Absent ⇒ no team
+   * boundary (the raw global mailbox), `team_*` tools NOT registered
+   * (default-OFF, byte-identical). Wired only when `QUANTA_TEAM_PEER_MSG` is on.
+   * Duck-typed (structural mirror of `TeamRegistryPort` in
+   * `@/subagent/team/registry`) so `@/agent` core stays slice-isolated from the
+   * `@/subagent` leaf.
+   */
+  teamRegistry?: import("../subagent").TeamRegistryPort
+  /**
    * RFC-04 / ADR-0437 — host-owned `TurnWakeRegistry`. The subagent runner
    * registers a per-child waker into THIS instance when a child loop starts;
    * `followup_task` calls `wake(agentId)` to trigger the child's turn. Absent ⇒
@@ -1194,6 +1208,36 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * is no-throw by contract.
    */
   fileHistory?: import("@/tool").FileHistorySink
+  /**
+   * code-mode (RFC jun-6-code-mode, Phase 1) — OPTIONAL per-cell dispatch-port
+   * FACTORY. When set (the composition root wires it ONLY when `QUANTA_CODE_MODE`
+   * is on), the dispatch seam calls `codeCellDispatchFactory(callId)` for a
+   * `code_cell` dispatch and surfaces the resulting port on
+   * `ToolContext.codeCellDispatch`. The factory (`@/agent/codemode-wire.ts`)
+   * closes over the loop's LIVE `config`/`permission`/`autoClassifier` and routes
+   * every in-cell tool call through the REAL `dispatchTool` — so a cell is N
+   * ordinary gated tool calls (structural no-bypass, §6.1). It is a FACTORY (not
+   * a port) so each cell gets a fresh deterministic call-id sequence keyed off the
+   * `code_cell` tool-call id. Absent (gate OFF / non-wiring host) ⇒ the dispatch
+   * seam omits the ctx field and the `code_cell` tool is not registered
+   * (byte-identical default-OFF). Typed via the `@/tool` structural
+   * {@link import("@/tool").CodeCellDispatchSeam} mirror so `@/tool` stays a leaf. */
+  codeCellDispatchFactory?: (callId: string) => import("@/tool").CodeCellDispatchSeam
+  /**
+   * code-mode (RFC jun-6-code-mode, Phase 2 — FULL tool surface). When set
+   * (the composition root wires it ONLY when `QUANTA_CODE_MODE` is on, alongside
+   * {@link codeCellDispatchFactory}), the dispatch seam surfaces the result on
+   * `ToolContext.codeCellSurface` so the `code_cell` cell binds `tools.<name>`
+   * for EVERY tool the agent has. It is a THUNK (`() => readonly string[]`) so it
+   * reads the LIVE `registry.toolNames()` at cell-dispatch time — a tool
+   * registered after assembly appears automatically, and a tool the agent lacks
+   * is never in the list (unbound in the cell). Each bound `tools.<name>` STILL
+   * re-enters the REAL `dispatchTool` via the port (the structural no-bypass
+   * invariant is UNCHANGED; this only widens which NAMES are exposed). Absent
+   * (gate OFF / non-wiring host) ⇒ the seam omits the ctx field and `@/codemode`
+   * falls back to the Phase-1 3-tool surface (`read`/`grep`/`write`) —
+   * byte-identical default-OFF. */
+  codeCellSurfaceTools?: () => readonly string[]
   /**
    * jun-6 exfil-rail (a) — OPTIONAL per-turn write/edit budget. When set, the
    * dispatch seam binds the CURRENT turn ordinal (`run?.turn ?? 0`) and surfaces

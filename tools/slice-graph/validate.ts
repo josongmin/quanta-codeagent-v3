@@ -79,6 +79,41 @@ export const SLICE_RULES: ReadonlyArray<ForbiddenEdge> = [
     reason: "Security is pure primitives; consumed not consumer (ADR-0001)",
   },
 
+  // === Up-import bar: Layer-0/1 libraries + leaves MUST NOT reach UP into the
+  //     Layer-2 composition / surface slices (runner / host / ipc / apps).
+  //     The composition root assembles these lower slices; a lower slice that
+  //     imports a Layer-2 slice is a reverse-layering inversion (the same CLASS
+  //     of bug as storage→tool). Each rule names one lower slice; the
+  //     destination set is the full Layer-2 surface. (build-graph collapses
+  //     `@/apps/...` specifiers under the `apps` slice, so `apps` here also
+  //     covers `src/apps/**`.) ===
+  ...(
+    [
+      "memory",
+      "agent",
+      "session",
+      "subagent",
+      "skill",
+      "llm",
+      "mcp",
+      "tool",
+      "storage",
+      "permission",
+      "lsp",
+      "stream",
+      "git",
+      "browser",
+      "scheduler",
+      "rules",
+      "security",
+      "observability",
+    ] as const
+  ).map((from) => ({
+    from,
+    to: ["runner", "host", "ipc", "apps"],
+    reason: `${from} is a lower layer; importing a Layer-2 surface (runner/host/ipc/apps) is a reverse-layering up-import (ADR-0001)`,
+  })),
+
   // === Plane-clean sub-slice rules (helper primitives cannot pull the loop) ===
   {
     from: "agent/subagent-resume",

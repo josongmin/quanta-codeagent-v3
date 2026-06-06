@@ -472,7 +472,144 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   // PROPOSES a UI build; it does not commit jailed artifacts mid-turn). Caller-wire
   // (DefaultToolPorts.appshot, QUANTA_APPSHOT); PERMANENT entry.
   appshot_verify: "write_filesystem",
+  // code-mode (RFC jun-6-code-mode, Phase 1) — code_cell runs a model-authored JS
+  // program whose every in-cell tools.X(args) re-enters the REAL dispatchTool. It
+  // can invoke MUTATING tools (write) and is at least as powerful as the union of
+  // the tools it can call ⇒ classified `write_filesystem` (plan PROPOSES; a cell
+  // that could write is blocked at the dispatch seam in plan mode). The per-call
+  // re-gating means an IN-CELL write is ALSO independently plan-blocked, so this
+  // is defense-in-depth, not the only guard. Caller-wire (DefaultToolPorts.codeMode
+  // + AgentConfig.codeCellDispatchFactory, QUANTA_CODE_MODE); PERMANENT entry so
+  // plan-mode dispatch never trips UnknownToolError when a host registers it.
+  code_cell: "write_filesystem",
 })
+
+/** SINGLE SOURCE OF TRUTH for the "caller-wire" tool-name allowlist.
+ *
+ *  A *caller-wire* tool is one whose {@link MUTATING_TOOL_TABLE} entry is
+ *  PERMANENT but whose registration is CONDITIONAL — it is minted only when a
+ *  host wires the relevant `DefaultToolPort` / `AgentConfig` slot (gated
+ *  default-OFF behind an env knob). Such a tool therefore is NOT enumerable
+ *  from the static `defaultTools` / `gitTools()` / `lspNavTools()` surfaces a
+ *  drift test can reach without injecting every host port.
+ *
+ *  The two drift detectors that cross-check the table against the registered
+ *  universe — `tests/integration/plan-mode-dispatch-hell-e2e.test.ts` and
+ *  `tests/unit/mode-mutating-table.test.ts` — must therefore augment the
+ *  enumerable tools with this NAME list so the orphan-direction check
+ *  ("every table key maps to a real tool") stays exact without forcing every
+ *  caller-wire factory to be reachable.
+ *
+ *  This constant exists to ELIMINATE a 3-way hand-sync footgun: previously
+ *  EACH of those two tests carried its own hand-maintained literal copy of
+ *  this list, and `MUTATING_TOOL_TABLE` was a third. Adding a caller-wire tool
+ *  to the table but forgetting one of the two copies produced a confusing
+ *  orphan/missing-direction failure (it bit poll_deferred,
+ *  subagent_force_background, appshot_verify, and silently drifted
+ *  read_image_url between the two copies). Now BOTH tests import THIS constant,
+ *  so adding a caller-wire tool is ONE edit (table entry + this list, both in
+ *  this file) and the two tests cannot diverge.
+ *
+ *  Invariant preserved: this list does NOT weaken the drift detectors. They
+ *  still fail if a table key matches neither an enumerable tool NOR a name
+ *  here (true orphan), and still fail if an enumerable tool is missing from
+ *  the table (true missing). The SSOT only removes the DUPLICATE copies. The
+ *  `caller-wire-ssot` test (in both files) additionally pins that no name here
+ *  is already enumerable (a name that leaks into `defaultTools` should be
+ *  dropped from this list, not double-counted) and that every name here has a
+ *  table entry (so the list cannot reference an unclassified tool). */
+export const CALLER_WIRE_TOOL_NAMES = Object.freeze([
+  // Shadow git ODB (ADR-0119 / ADR-0122) — config-slot shadowOdb.
+  "shadow_snapshots",
+  "shadow_rewind",
+  "shadow_restore_partial",
+  // Background subagent (ADR-0130) — config-slot subagentBackground.
+  "subagent_fork",
+  "subagent_poll",
+  "subagent_await",
+  // Budget surface (ADR-0136) — config-slot budgetLedger.
+  "budget_status",
+  // gh PR / issue surfaces — gitRunner-gated (gitTools but require runner port).
+  "gh_pr_view",
+  "gh_pr_list",
+  "gh_pr_blame",
+  "gh_pr_review_diff",
+  "gh_issue_view",
+  "gh_check_status",
+  "gh_pr_comment",
+  "gh_pr_create",
+  "gh_pr_auto_merge",
+  "gh_pr_edit_labels",
+  "gh_pr_resolve_thread",
+  // Memory layer (ADR-0135) — memory provider port.
+  "memory_search",
+  "memory_write",
+  "memory_update",
+  // Speculative branch search (ADR-0084) — branch-search isolator port.
+  "branch_search",
+  // Background subagent control surfaces.
+  "task_output",
+  "task_stop",
+  // Plan-review exit seam — planExitPort.
+  "request_plan_exit",
+  // Sub-agent spawn (ADR-0130) — subagent runner.
+  "agent",
+  // Skill loader + tool-search — loader-gated.
+  "Skill",
+  "ToolSearch",
+  // Web search + workspace retrieval — provider/pipeline ports.
+  "web_search",
+  "search_codebase",
+  // NOTE: `read_image_url` is intentionally NOT here — it ships in the static
+  // `defaultTools` array (enumerable by both drift detectors), so listing it
+  // would be a redundant, drift-prone duplicate. Its MUTATING_TOOL_TABLE entry
+  // (read-only) is still pinned by the enumerable missing/orphan checks.
+  // jun-04 observability / authoring / image-gen — DefaultToolPorts slots.
+  "coverage_check",
+  "prompt_cache_status",
+  "image_gen",
+  "xlsx_write",
+  "docx_write",
+  "pptx_write",
+  // R3 audit closeout — structured patch + artifact (Canvas) tools.
+  "apply_patch_structured",
+  "artifact_list",
+  "artifact_get",
+  "artifact_register",
+  "artifact_destroy",
+  // CLUSTER D #5 — permission pattern proposal (QUANTA_REMEMBER_PATTERNS).
+  "permission_propose_pattern",
+  // jun-6 — file-history rewind + skill authoring.
+  "file_history_rewind",
+  "skill_create",
+  // jun-05 §7/§9 host-binding session tools (N6 PTY / N3 MCP resources /
+  // N2 MCP connector / C2 progress / N1 side-agent).
+  "pty_list",
+  "pty_attach",
+  "pty_write",
+  "pty_read",
+  "pty_resize",
+  "pty_kill",
+  "mcp_list_resources",
+  "mcp_read_resource",
+  "mcp_list_prompts",
+  "mcp_get_prompt",
+  "mcp_connector_list",
+  "mcp_connector_install",
+  "communicate_update",
+  "side_agent_spawn",
+  "side_agent_list",
+  "side_agent_stop",
+  "side_agent_findings",
+  // jun-06 wave-3 — force-background (ADR-0487) + appshot_verify (G1).
+  "subagent_force_background",
+  "appshot_verify",
+  // ADR-0287 async-tools (QUANTA_ASYNC_TOOLS).
+  "poll_deferred",
+  // code-mode (RFC jun-6-code-mode, Phase 1) — DefaultToolPorts.codeMode +
+  // AgentConfig.codeCellDispatchFactory (QUANTA_CODE_MODE).
+  "code_cell",
+] as const)
 
 /** Thrown by {@link isMutatingTool} / {@link assertNotMutatingInPlanMode}
  *  when a tool name is not in the explicit table. Surfaces the missing tool

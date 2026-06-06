@@ -169,6 +169,24 @@ describe("renderActionDiff — fallback / caps", () => {
     expect(out).toBeUndefined()
   })
 
+  // asRecord array-handling safety: an array IS `typeof "object"` and
+  // not null, so a naive narrower would let it through as a "record" and
+  // then read `.path` / `.content` off it (undefined) — a latent bug. The
+  // `!Array.isArray` guard makes the array collapse to "no preview".
+  test("write with array input → no preview (array is not a record)", async () => {
+    const out = await renderActionDiff(action("write", [{ path: "/x/f", content: "hi" }]), {
+      readFile: async () => "",
+    })
+    expect(out).toBeUndefined()
+  })
+
+  test("write with a normal object input still renders", async () => {
+    const out = await renderActionDiff(action("write", { path: "/x/f", content: "hi" }), {
+      readFile: async () => "",
+    })
+    expect(out).toBeDefined()
+  })
+
   test("write of binary content (NUL byte) → preview skipped", async () => {
     const out = await renderActionDiff(
       action("write", { path: "/x/bin", content: `head${String.fromCharCode(0)}tail` }),

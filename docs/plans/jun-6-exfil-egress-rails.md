@@ -1,6 +1,6 @@
 # RFC — Exfiltration mechanical rails + secret-aware egress
 
-> Status: PARTIALLY IMPLEMENTED — **(a) write-count cap + (b) glob-in-write guard ✅ IMPLEMENTED (jun-06)**; (c) exfil-scouting + (B) secret-egress **deferred (Phase 2)**.
+> Status: IMPLEMENTED — **(a) write-count cap + (b) glob-in-write guard ✅ (jun-06)**; **(c) exfil-scouting ✅ IMPLEMENTED (jun-06)**; **(B) secret-egress ✅ IMPLEMENTED (jun-06, PLAINTEXT-HTTP)** — and the **HTTPS-opaque gap is now CLOSED** by the Phase-2 TLS-MITM RFC **✅ IMPLEMENTED (jun-07)**: `docs/plans/jun-6-tls-mitm-egress.md` (ephemeral-CA decrypt → reuse this scan → re-encrypt; default-OFF + operator-opt-in; node:tls runtime, fail-closed on Bun).
 > Date: 2026-06-06
 > Slices touched: `src/tool/write/`, `src/tool/edit/` (a, b), `src/permission/classifier.ts` (c), `src/runtime/network-proxy/` (B)
 > Default posture: OFF (byte-identical when every knob is unset)
@@ -164,7 +164,22 @@ export const pathLooksLikeGlob = (path: string): boolean => /* … */
 
 **Honesty.** This one is nearly free of false-positive risk (a real write target is a single concrete path; `**`/`*`/`{a,b}` in a write path is virtually always a bug or attack). The conservative detector + the `**` / `*` / `{,}` tokens keeps the rare literal-bracket filename safe. Default-OFF gated `QUANTA_GLOB_WRITE_GUARD=1` out of caution, but this is the lowest-risk candidate and a strong default-ON candidate after a soak.
 
-### 4.3 (c) Exfil-scouting sequence detector — **deferred (Phase 2)**
+### 4.3 (c) Exfil-scouting sequence detector — **✅ IMPLEMENTED (jun-06)**
+
+> **AS-BUILT (jun-06).** Pure `detectScouting(log, { threshold K, sampleCap? })`
+> (`src/runtime/network-proxy/scouting.ts`) reads the proxy's EXISTING
+> append-only `decisionLog()`, counts DISTINCT hosts whose decision is `deny`,
+> and returns an advisory `ScoutingSignal { kind:"exfil-scouting",
+> distinctDeniedHosts, sample }` IFF that count ≥ K. **K is a REQUIRED knob with
+> NO hardcoded default** (no-heuristics: a non-positive / non-integer K ⇒ `null`,
+> inert — never a guessed value); `QUANTA_EXFIL_SCOUTING_K` carries it. The
+> verbatim taxonomy line (`EXFIL_SCOUTING_TAXONOMY_LINE`) is appended to the
+> classifier prompt ONLY via `withExfilScoutingTaxonomy(base, enabled)` — OFF ⇒
+> `base` UNCHANGED (byte-identical prompt). Gate `exfilScoutingEnabled`
+> (`QUANTA_EXFIL_SCOUTING=1`). Advisory, NOT a hard auto-deny (RFC §7 (c)): only
+> DISTINCT hosts count, so a same-host retry loop / K allowlisted hosts never
+> trip it. Tests: `tests/unit/exfil-scouting-hellgate.test.ts`. The deny-log →
+> classify-port advisory surfacing is a host-binding follow-up (pure seam today).
 
 **Two parts.**
 
@@ -184,7 +199,37 @@ export const detectScouting = (
 
 **Honesty.** A legit turn that *probes several services it forgot to allowlist* trips this. So the signal is **advisory** (a `classification` hint feeding the classifier / a surfaced warning), NOT a hard auto-deny — the user can allowlist and continue. Threshold K must be high enough that a couple of misconfigured hosts don't fire (§7).
 
-### 4.4 (B) Secret-aware egress (the headline) — **deferred (Phase 2)**
+### 4.4 (B) Secret-aware egress (the headline) — **✅ IMPLEMENTED (jun-06, PLAINTEXT-HTTP only)**
+
+> **AS-BUILT (jun-06).** Closed-port `NetworkProxyConfig.secretEgress`
+> ({ `scanner` = `compositeSecretScanner()`, `mode:"deny"|"redact"`, `declared?`,
+> `maxBodyBytes` }) injects the EXISTING scanner into the proxy's PLAINTEXT-HTTP
+> path. `onRequest` → after the host-allow decision, when `secretEgress` is
+> present, `scanAndPipeHttp` buffers the outbound body up to `maxBodyBytes`,
+> scans body + header values (`scanEgressText`: a ZERO-FP `declared` exact-match
+> pass + the composite scanner), and on a hit either **denies** (403, a
+> secret-free reason naming only finding KINDS) or **redacts** (masks the
+> declared spans + drops the offending headers, forwards the rest via
+> `pipeBufferedHttp`). A scanner-only finding (no exact declared span) cannot be
+> safely in-place redacted ⇒ falls back to deny (fail-closed). A body past
+> `maxBodyBytes` is forwarded UNSCANNED with a visible `body-cap-unscanned`
+> decision-log marker (DoS guard — NEVER blocked-by-truncation). Gate
+> `secretEgressMode` (`QUANTA_SECRET_EGRESS=deny|redact`); `maxBodyBytes` from
+> `QUANTA_SECRET_EGRESS_MAX_BODY` (no hardcoded default). DEFAULT-OFF: absent ⇒
+> host-only decision, byte-identical.
+>
+> **⚠️ HTTPS GAP — NOW CLOSED (jun-07) by the Phase-2 TLS-MITM RFC.** With MITM
+> OFF (the default) the `CONNECT host:443` tunnel carries raw TLS bytes the proxy
+> cannot read, so a CONNECT request is NEVER content-scanned and `onConnect`
+> records a dedicated `connect-tunnel-unscanned` marker (VISIBLE, never a silent
+> claim). When the operator EXPLICITLY opts into TLS-MITM (`QUANTA_TLS_MITM=1` +
+> verbatim ack), an allowed CONNECT is TERMINATED, the decrypted body+headers run
+> through THIS SAME secret-egress scan, then re-originate upstream (real cert
+> validated). See `docs/plans/jun-6-tls-mitm-egress.md` (ephemeral-CA blast-radius
+> threat model; node:tls runtime, fail-closed on Bun). Tests:
+> `tests/unit/secret-egress-hellgate.test.ts` (pure core) +
+> `tests/integration/secret-egress-proxy-e2e.test.ts` (real-socket: deny/redact/
+> header/clean/CONNECT-unscanned/body-cap/default-OFF).
 
 **Where.** Inject the existing `compositeSecretScanner` into the egress DECISION's *request path*. Two integration points in `loopback-proxy.ts`, but ONLY the **plaintext-HTTP** path can be scanned (the HTTPS CONNECT tunnel is opaque — §3.4 caveat).
 
@@ -224,10 +269,11 @@ interface NetworkProxyConfig {
 | --- | --- | --- | --- |
 | (a) write cap (untrusted-gated) | ✅ | **✅ IMPLEMENTED (jun-06)** | trusted-context cap (rejected — breaks bulk authoring) |
 | (b) glob-in-write reject | ✅ | **✅ IMPLEMENTED (jun-06)** | — |
-| (c) scouting prose + deny-log detector | ✅ advisory | **deferred (Phase 2)** | hard auto-deny on scouting (too aggressive) |
-| (B) secret egress — plaintext HTTP body/header | ✅ | **deferred (Phase 2)** | TLS MITM for HTTPS bodies (`network.mitm`) — separate RFC |
+| (c) scouting prose + deny-log detector | ✅ advisory | **✅ IMPLEMENTED (jun-06)** | hard auto-deny on scouting (too aggressive) |
+| (B) secret egress — plaintext HTTP body/header | ✅ | **✅ IMPLEMENTED (jun-06)** | — |
+| (B-Phase2) TLS-MITM — HTTPS body/header | ✅ | **✅ IMPLEMENTED (jun-07)** | `jun-6-tls-mitm-egress.md`: ephemeral-CA decrypt→reuse scan→re-encrypt; default-OFF + operator-opt-in; node:tls runtime (fail-closed on Bun) |
 
-**Why defer TLS MITM:** terminating TLS to scan HTTPS bodies requires a locally-trusted CA injected into every child's trust store, breaks cert-pinned clients, adds latency, and is a large attack surface in its own right. The plaintext-HTTP + declared-secret coverage is a real, shippable slice; MITM is a Phase-2 decision with its own threat model.
+**TLS MITM (Phase-2, now done):** terminating TLS to scan HTTPS bodies does require a locally-trusted CA — but it is contained: an EPHEMERAL in-process CA trusted ONLY by quanta's own client for the MITM'd socket (never the OS / never persisted), double-gated default-OFF, upstream cert STILL validated, fail-closed on any handshake error. No new dep (pure `node:crypto` cert-gen). See the Phase-2 RFC for the full blast-radius threat model + the Bun runtime caveat.
 
 ---
 
@@ -280,8 +326,8 @@ The taxonomy is policy; teeth are enforcement; **the failure mode of teeth is br
 ## 8. 작업 분해 (L2/L3)
 
 1. (b) glob-in-write — **✅ DONE (jun-06)**: `glob-in-path.ts` pure leaf + `glob-write-gate.ts` + `_shared/exfil-rail-guards.ts` guard in write/edit + dispatch flag thread + hellgate.
-2. (B) secret-egress — **deferred (Phase 2)**: `NetworkProxyConfig.secretEgress` + `pipeHttp` body/header scan + redact/deny + caps + hellgate (HTTPS gap documented). Closed-port: inject `compositeSecretScanner`.
+2. (B) secret-egress — **✅ DONE (jun-06, PLAINTEXT-HTTP)**: `NetworkProxyConfig.secretEgress` (`secret-egress.ts` pure core + `secret-egress-gate.ts`) + `pipeHttp` body/header scan + redact/deny + body cap + `connect-tunnel-unscanned`/`body-cap-unscanned` visible markers + hellgate (pure + e2e). Closed-port: injects `compositeSecretScanner`. HTTPS-MITM DEFERRED → NEW Phase-2 RFC `docs/plans/jun-6-tls-mitm-egress.md`.
 3. (a) write-budget — **✅ DONE (jun-06)**: `WriteBudgetPort`/`SessionWriteBudget` (`_shared/write-budget.ts`) + `ToolContext.writeBudget` + `AgentConfig.writeBudget` + dispatch turn-bind reset + `maybeWireWriteBudget` untrusted-envelope tie + hellgate. **N is a required knob (`QUANTA_WRITE_BUDGET_MAX`), no default — calibrate from a real corpus before any default-ON.**
-4. (c) scouting — **deferred (Phase 2)**: taxonomy prose line + `detectScouting` over `decisionLog()` + advisory surfacing + hellgate.
+4. (c) scouting — **✅ DONE (jun-06)**: verbatim taxonomy prose line (`withExfilScoutingTaxonomy`, ON-only append) + `detectScouting` over `decisionLog()` (required-knob K, distinct-host count, advisory) + `exfil-scouting-gate.ts` + hellgate. Deny-log → classify-port advisory surfacing is a host-binding follow-up.
 
 Each is an independent, default-OFF, byte-identical slice; no ordering dependency beyond (B) reusing the deny-log that (c) also reads.

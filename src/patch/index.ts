@@ -19,5 +19,6 @@ export type {
   PatchObservation,
   PatchObserver,
   PatchOp,
+  PatchTracePort,
 } from "./types"
 export { PatchAnchorNotFoundError, PatchApplyError, PatchParseError } from "./types"

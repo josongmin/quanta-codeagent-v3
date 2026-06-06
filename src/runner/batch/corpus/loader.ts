@@ -59,7 +59,9 @@ const resolveRepo = (root: string, raw: string | undefined, fallback: string): s
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined)
 
 const asRecord = (v: unknown): Record<string, unknown> | undefined =>
-  typeof v === "object" && v !== null ? (v as Record<string, unknown>) : undefined
+  typeof v === "object" && v !== null && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : undefined
 
 // ── Synthetic / hand-authored layouts (A) + (B) ────────────────────────────
 

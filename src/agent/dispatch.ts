@@ -793,6 +793,24 @@ const buildToolContext = (args: {
     // mutating path is byte-identical (default-OFF). The `@/agent` config-side
     // `FileHistorySink` is the same structural `@/tool` mirror.
     ...(config.fileHistory !== undefined ? { fileHistory: config.fileHistory } : {}),
+    // code-mode (RFC jun-6-code-mode) — surface a per-cell dispatch port for the
+    // `code_cell` tool, built by the factory keyed off THIS tool-call id so the
+    // synthesized in-cell call ids (`cell_<callId>_<seq>`) are deterministic +
+    // unique. The factory routes every in-cell call through the REAL dispatchTool
+    // (structural no-bypass, §6.1). ABSENT (gate OFF / non-wiring host) ⇒ omitted
+    // ⇒ the tool yields a typed not_wired failure, byte-identical default-OFF.
+    ...(config.codeCellDispatchFactory !== undefined
+      ? { codeCellDispatch: config.codeCellDispatchFactory(toolCallId) }
+      : {}),
+    // code-mode (RFC jun-6-code-mode, Phase 2) — surface the agent's ACTUAL
+    // registered tool names so the `code_cell` cell binds `tools.<name>` for the
+    // FULL surface (each STILL re-gated through the port above). The thunk reads
+    // the LIVE registry at dispatch time. ABSENT (gate OFF / non-wiring host) ⇒
+    // omitted ⇒ `@/codemode` falls back to the Phase-1 3-tool surface,
+    // byte-identical default-OFF.
+    ...(config.codeCellSurfaceTools !== undefined
+      ? { codeCellSurface: config.codeCellSurfaceTools() }
+      : {}),
     // jun-6 exfil-rail (b) — thread the glob-in-write-path guard ENABLEMENT
     // (the predicate itself is a pure leaf the write/edit tools own). Default-OFF
     // (`QUANTA_GLOB_WRITE_GUARD` unset) ⇒ the flag is omitted ⇒ write/edit accept

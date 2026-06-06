@@ -43,7 +43,7 @@ import {
   type FileResolverOptions,
   type SkillRegistryReadOnly,
 } from "@/agent/plugin-app-resolver"
-import { parseEnvFlag } from "@/runner/assemble"
+import { parseEnvFlag } from "@/shared"
 
 /** Env subset the builder reads. A plain bag so callers can pass
  *  `process.env` OR a hermetic record (tests / non-Node hosts). */

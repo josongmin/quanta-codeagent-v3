@@ -5,6 +5,7 @@ import {
   ADVISOR_TIMING_RAIL,
   ANTI_PLATITUDE,
   AUTONOMOUS_PREAMBLE,
+  CODE_MODE_ONLY_DIRECTIVE,
   type DirectiveConfig,
   MEMORY_VERIFY,
   PARALLEL_TOOLS,
@@ -46,6 +47,7 @@ const ALL_OFF: DirectiveConfig = {
   directiveAntiPlatitude: false,
   directiveParallelTools: false,
   directiveAdvisorRail: false,
+  codeModeOnly: false,
 }
 
 const base = (over: Partial<TurnContextInput> = {}): TurnContextInput => ({
@@ -88,6 +90,7 @@ const DIRECTIVES: ReadonlyArray<{
   { key: "directiveAntiPlatitude", text: ANTI_PLATITUDE, marker: "VOICE: substance only." },
   { key: "directiveParallelTools", text: PARALLEL_TOOLS, marker: "PARALLEL TOOLS:" },
   { key: "directiveAdvisorRail", text: ADVISOR_TIMING_RAIL, marker: "ADVISOR: when the" },
+  { key: "codeModeOnly", text: CODE_MODE_ONLY_DIRECTIVE, marker: "CODE MODE: prefer the" },
 ]
 
 const onlyOn = (key: keyof DirectiveConfig): DirectiveConfig => ({ ...ALL_OFF, [key]: true })

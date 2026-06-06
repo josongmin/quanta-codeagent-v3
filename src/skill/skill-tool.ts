@@ -6,9 +6,50 @@ const schema = z.object({
   name: z
     .string()
     .describe("The name of a skill from the available-skills list. Do not guess names."),
+  args: z
+    .string()
+    .max(8_000)
+    .optional()
+    .describe(
+      "Optional arguments to interpolate into the skill body: `$ARGUMENTS` is " +
+        "replaced with the whole string, `$1`/`$2`/… with whitespace-split " +
+        "positionals. Omit for skills that take no arguments.",
+    ),
 })
 
 type Input = z.infer<typeof schema>
+
+/**
+ * Interpolate `$ARGUMENTS` / `$1`…`$N` placeholders in a skill body with the
+ * caller-supplied argument string (Claude Code `.claude/commands/*.md`
+ * parity). `$ARGUMENTS` → the whole (trimmed) string; `$N` → the Nth
+ * whitespace-split positional (1-indexed), out-of-range → `""`.
+ *
+ * Two safety properties:
+ *  - **Inert**: the result is injected as PROMPT CONTEXT, never executed, so
+ *    shell metacharacters in `args` are plain text. `String.replace` does not
+ *    re-scan inserted text, so an arg of `"$1"` can never trigger a second
+ *    substitution.
+ *  - **Byte-identical opt-out**: this is called ONLY when the caller passed
+ *    `args` (see {@link createSkillTool}). An absent `args` returns the body
+ *    verbatim, so every pre-existing invocation — and any body that happens to
+ *    contain a literal `$ARGUMENTS` — is unchanged.
+ */
+export const interpolateSkillArgs = (body: string, args: string): string => {
+  const all = args.trim()
+  const positionals = all.split(/\s+/).filter((t) => t !== "")
+  // SINGLE pass over the body: one regex alternation handles both placeholder
+  // kinds, so text inserted by a `$ARGUMENTS` expansion is NEVER re-scanned for
+  // `$N` (a chained `.replace().replace()` WOULD re-scan it — that was a real
+  // double-substitution bug). `\b` after `$ARGUMENTS` prevents matching
+  // `$ARGUMENTSX`. `d` is the captured digits for the `$N` branch, undefined
+  // for the `$ARGUMENTS` branch.
+  return body.replace(/\$ARGUMENTS\b|\$(\d+)/g, (_m, d?: string) => {
+    if (d === undefined) return all
+    const idx = Number(d)
+    return idx >= 1 && idx <= positionals.length ? (positionals[idx - 1] ?? "") : ""
+  })
+}
 
 /**
  * The author-declared tool allowlist for a skill, if any. Discovery resolves
@@ -120,9 +161,14 @@ export const createSkillTool = (skills: Skill[]): Tool<Input> => {
         }
         return
       }
+      // §22.2 — interpolate `$ARGUMENTS`/`$N` ONLY when the caller supplied
+      // args. Absent ⇒ body verbatim (byte-identical to every pre-feature
+      // invocation, incl. bodies containing a literal `$ARGUMENTS`).
+      const body =
+        input.args !== undefined ? interpolateSkillArgs(skill.body, input.args) : skill.body
       yield {
         type: "result",
-        result: { ok: true, output: `${scopingNote(skill)}\n\n${skill.body}` },
+        result: { ok: true, output: `${scopingNote(skill)}\n\n${body}` },
       }
     },
   }

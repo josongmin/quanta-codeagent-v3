@@ -8,6 +8,8 @@
  * plus `node:*` modules only.
  */
 
+import type { CodeParserPort } from "@/retrieval/code-parser"
+
 /** A single chunk extracted from a file. */
 export interface FileChunk {
   /** Workspace-relative path with forward slashes. Stable id key prefix. */
@@ -90,4 +92,11 @@ export interface IndexerOptions {
   readonly scanner: ScannerOptions
   readonly chunker?: ChunkerOptions
   readonly upsert?: ChunkUpsertPort
+  /** RFC jun-6 — the "future LSP-symbol chunker" seam the port already names.
+   *  An optional `CodeParserPort` (same `@/retrieval` slice). When present AND
+   *  the `QUANTA_SYNTAX_CHUNK` knob is on, the scanner parses each supported
+   *  file once and emits AST-aligned chunks (`chunkFileSyntactic`); otherwise
+   *  the pure line-window `chunkFile` is used (byte-identical to today).
+   *  Default absent ⇒ the parser is never consulted, no WASM loaded. */
+  readonly parser?: CodeParserPort
 }

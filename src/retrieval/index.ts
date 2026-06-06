@@ -14,6 +14,20 @@ export {
   DEFAULT_OVERLAP_RATIO,
   rechunk,
 } from "./chunk-bucket"
+// Code parser (RFC jun-6) — WASM tree-sitter `CodeParserPort` powering the
+// syntax-aware chunker + read outline. Default-OFF; constructed only when an
+// operator opts in via QUANTA_SYNTAX_CHUNK / QUANTA_READ_OUTLINE.
+export {
+  type CodeParserPort,
+  createTreeSitterParser,
+  type DeclNode,
+  type FakeParser,
+  fakeParser,
+  langForPath,
+  type ParsedFile,
+  type ParseLang,
+  type ParseOutcome,
+} from "./code-parser"
 export type {
   CommitEmbedder,
   CommitEmbedderOptions,
@@ -52,6 +66,7 @@ export {
   type ChunkUpsertPort as IndexerChunkUpsertPort,
   type CodebaseIndexer,
   chunkFile as indexerChunkFile,
+  chunkFileSyntactic as indexerChunkFileSyntactic,
   createDefaultIndexer,
   type DeltaPartition,
   DeltaTracker,

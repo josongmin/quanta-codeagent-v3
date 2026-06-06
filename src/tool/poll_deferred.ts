@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { errMessage } from "@/shared"
 import type { DeferredResultRegistry } from "./deferred/port"
 import type { DeferredError, Status } from "./deferred/types"
 import { defineTool } from "./factory"
@@ -100,9 +101,27 @@ export const pollDeferredTool = (registry: DeferredResultRegistry): Tool<PollDef
     isConcurrencySafe: () => true,
     async *execute(input: PollDeferredInput): AsyncIterable<ToolEvent> {
       const wantedAwait = typeof input.awaitMs === "number" && input.awaitMs > 0
-      const status: Status = wantedAwait
-        ? await registry.await({ id: input.handle, createdAt: 0 }, input.awaitMs)
-        : registry.poll({ id: input.handle, createdAt: 0 })
+      // NO-THROW boundary (Tool contract §2): a misbehaving registry must NOT
+      // reject this iterator (that hangs/corrupts the dispatch loop). Map any
+      // throw from the blocking `await` (or the synchronous `poll`) to a single
+      // typed `ok:false` (`mode:"error"`) result.
+      let status: Status
+      try {
+        status = wantedAwait
+          ? await registry.await({ id: input.handle, createdAt: 0 }, input.awaitMs)
+          : registry.poll({ id: input.handle, createdAt: 0 })
+      } catch (e) {
+        const msg = errMessage(e)
+        yield {
+          type: "result",
+          result: {
+            ok: false,
+            output: `poll_deferred: registry-error: ${msg}`,
+            failure: { mode: "error", modelVisibleError: msg },
+          },
+        }
+        return
+      }
       const head = renderStatus(status)
       if (status.kind === "completed") {
         const inner: ToolResult = status.result

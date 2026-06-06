@@ -34,9 +34,12 @@ import { docxReadTool } from "@/tool/document/docx-read"
 import { xlsxReadTool } from "@/tool/document/xlsx-read"
 import { imageGenTool } from "@/tool/image-gen"
 import { mcpResourcesTools } from "@/tool/mcp_resources"
+import { mcpTasksTools } from "@/tool/mcp_tasks"
 import { mcpConnectorTools } from "@/tool/mcp-connector"
+import { pollDeferredTool } from "@/tool/poll_deferred"
 import { promptCacheStatusTool } from "@/tool/prompt_cache_status"
 import { ptyTools } from "@/tool/pty"
+import { shadowVerifyTool } from "@/tool/shadow-verify"
 import { sideAgentTools } from "@/tool/side-agent"
 
 // ── harness ──────────────────────────────────────────────────────────────
@@ -148,6 +151,37 @@ const throwingObserver = () =>
 const throwingImagePort = () =>
   ({
     generate: () => Promise.reject(BOOM),
+    // biome-ignore lint/suspicious/noExplicitAny: structural throwing double
+  }) as any
+
+// jun-06 no-throw ratchet fixes — throwing ports for the tools whose execute
+// bodies were the round-3 class (port await with NO try/catch) and have now
+// been wrapped. These drive the FIX through the real iterator: a throwing port
+// must yield exactly one ok:false result, never reject.
+const throwingTasksPort = () =>
+  ({
+    list: () => Promise.reject(BOOM),
+    getInfo: () => Promise.reject(BOOM),
+    getResult: () => Promise.reject(BOOM),
+    cancel: () => Promise.reject(BOOM),
+    // biome-ignore lint/suspicious/noExplicitAny: structural throwing double
+  }) as any
+
+const throwingShadowPort = () =>
+  ({
+    verify: () => Promise.reject(BOOM),
+    // biome-ignore lint/suspicious/noExplicitAny: structural throwing double
+  }) as any
+
+const throwingDeferredRegistry = () =>
+  ({
+    await: () => Promise.reject(BOOM),
+    poll: () => {
+      throw BOOM
+    },
+    register: () => {
+      throw BOOM
+    },
     // biome-ignore lint/suspicious/noExplicitAny: structural throwing double
   }) as any
 
@@ -381,4 +415,60 @@ describe("fs-backed tools contract conformance", () => {
       })
     }
   }
+})
+
+// ── mcp_tasks (3) + shadow_verify (1) + poll_deferred (1) ───────────────────
+// jun-06 no-throw ratchet — these execute bodies awaited an INJECTED port with
+// NO try/catch (the round-3 class). Now guarded; a throwing port must yield ONE
+// ok:false result and the iterator must never reject. The static ratchet in
+// `tool-no-throw-contract-guard.test.ts` proves no NEW tool regresses; THESE
+// drive the fixed bodies through the real iterator at runtime.
+
+describe("mcp_tasks contract conformance (no-throw fix)", () => {
+  const valid: Record<string, unknown> = {
+    list_mcp_tasks: {},
+    get_mcp_task: { taskId: "t1" },
+    cancel_mcp_task: { taskId: "t1" },
+  }
+  for (const name of Object.keys(valid)) {
+    test(`${name}: throwing port → one ok:false result, no iterator reject`, async () => {
+      const tool = byName(mcpTasksTools(throwingTasksPort()), name)
+      const r = expectOneResultNoThrow(await drain(tool, valid[name], ctxLive()))
+      expect(r.ok).toBe(false)
+    })
+    test(`${name}: pre-aborted ctx → one clean ok:false result`, async () => {
+      const tool = byName(mcpTasksTools(throwingTasksPort()), name)
+      const r = expectOneResultNoThrow(await drain(tool, valid[name], ctxAborted()))
+      expect(r.ok).toBe(false)
+    })
+  }
+})
+
+describe("shadow_verify contract conformance (no-throw fix)", () => {
+  const validInput = { patch: "@@ -1 +1 @@", checks: ["lint"] }
+  test("throwing port → one ok:false (mode error), no iterator reject", async () => {
+    const tool = shadowVerifyTool(throwingShadowPort())
+    const r = expectOneResultNoThrow(await drain(tool, validInput, ctxLive()))
+    expect(r.ok).toBe(false)
+    expect(r.failure?.mode).toBe("error")
+  })
+  test("pre-aborted ctx → one clean ok:false result", async () => {
+    const tool = shadowVerifyTool(throwingShadowPort())
+    const r = expectOneResultNoThrow(await drain(tool, validInput, ctxAborted()))
+    expect(r.ok).toBe(false)
+  })
+})
+
+describe("poll_deferred contract conformance (no-throw fix)", () => {
+  test("throwing registry (blocking await) → one ok:false result, no iterator reject", async () => {
+    const tool = pollDeferredTool(throwingDeferredRegistry())
+    const r = expectOneResultNoThrow(await drain(tool, { handle: "h1", awaitMs: 5 }, ctxLive()))
+    expect(r.ok).toBe(false)
+    expect(r.failure?.mode).toBe("error")
+  })
+  test("throwing registry (sync poll) → one ok:false result, no iterator reject", async () => {
+    const tool = pollDeferredTool(throwingDeferredRegistry())
+    const r = expectOneResultNoThrow(await drain(tool, { handle: "h1" }, ctxLive()))
+    expect(r.ok).toBe(false)
+  })
 })

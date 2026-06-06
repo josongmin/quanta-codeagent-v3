@@ -4,6 +4,7 @@
 
 import { z } from "zod"
 import type { Tool, ToolContext, ToolEvent } from "../types"
+import { backendErrorEvent, callPort } from "./no-throw"
 import type { TasksHandle } from "./port"
 
 export const cancelTaskInputSchema = z.object({
@@ -34,7 +35,12 @@ export const cancelMcpTaskTool = (port: TasksHandle): Tool<CancelTaskInput> => (
       return
     }
     const taskId = parsed.data.taskId
-    const outcome = await port.cancel(taskId)
+    const cancelCall = await callPort(() => port.cancel(taskId))
+    if (!cancelCall.ok) {
+      yield backendErrorEvent(cancelCall.message)
+      return
+    }
+    const outcome = cancelCall.value
     if (outcome.ok) {
       yield { type: "result", result: { ok: true, output: `cancelled: ${taskId}` } }
       return

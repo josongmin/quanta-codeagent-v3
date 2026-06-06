@@ -18,6 +18,7 @@ export {
 export { assertNever } from "./assert-never"
 export { byteCompare } from "./byte-compare"
 export { chunkBatches } from "./chunk"
+export { parseEnvFlag } from "./env-flag"
 export { classify } from "./error-classifier"
 export type { HeaderLookup, LLMErrorKind, LLMProvider } from "./errors"
 export {

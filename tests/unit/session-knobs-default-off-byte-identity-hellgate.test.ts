@@ -75,6 +75,8 @@ const STRICT_ONE_KNOBS: ReadonlyArray<{
   { env: "QUANTA_DIRECTIVE_PARALLEL_TOOLS", read: (c) => c.directiveParallelTools },
   // RFC jun-6 §5.2 — advisor timing-rail directive (strict-`1` opt-in).
   { env: "QUANTA_ADVISOR_RAIL", read: (c) => c.directiveAdvisorRail },
+  // RFC jun-6-code-mode Phase 3 — code_mode_only steering (strict-`1` opt-in).
+  { env: "QUANTA_CODE_MODE_ONLY", read: (c) => c.codeModeOnly },
 ]
 
 /** Hostile / loose values a strict-`1` knob MUST treat as OFF. `"1"` is tested

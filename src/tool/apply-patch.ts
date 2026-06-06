@@ -28,6 +28,13 @@
 import * as nodeFs from "node:fs/promises"
 import * as path from "node:path"
 import { z } from "zod"
+// Documented cross-slice carve-out (mirror of `coverage_check`'s
+// `@/observability/coverage` exception): the V4A applier is a pure `@/patch`
+// leaf that takes an injected `PatchTracePort` (closed-port DI). This tool is
+// the composition root for `apply_patch`, so it wires the production OTel-bound
+// adapter here — the SINGLE runtime point the `quanta.patch.*` vocabulary is
+// bound. `@/patch` itself imports NOTHING from `@/observability`.
+import { otelPatchTracePort } from "@/observability/patch-trace"
 import {
   type ApplyResult,
   applyPatch,
@@ -39,6 +46,12 @@ import { errMessage } from "@/shared"
 import { FsJailError, resolveJailed } from "@/storage"
 import { classifyFastApplyError, failingTargetPath } from "./apply-patch-fallback-wire"
 import type { FastApplyFallbackSeam, GitWriteGuard, Tool, ToolContext, ToolEvent } from "./types"
+
+/** Process-wide OTel-bound patch tracing port, injected into every `applyPatch`
+ *  call from this tool. Stateless + Default-OFF (a zero-allocation no-op when no
+ *  span sink is registered), so a single shared instance is sufficient. */
+const PATCH_TRACE = otelPatchTracePort()
+
 /**
  * Raised when a `FsJailFileSystemPort` operation resolves to a path outside
  * the jail root. Distinct from `@/storage/FsJailError` so callers can
@@ -205,7 +218,8 @@ type Input = z.infer<typeof schema>
 function guardPatchTargets(patch: Patch, guard: GitWriteGuard | undefined): ToolEvent | null {
   if (guard === undefined) return null
   for (const op of patch.ops) {
-    const targets = op.kind === "update" && op.moveTo !== undefined ? [op.path, op.moveTo] : [op.path]
+    const targets =
+      op.kind === "update" && op.moveTo !== undefined ? [op.path, op.moveTo] : [op.path]
     for (const target of targets) {
       const reason = guard(target)
       if (reason != null) {
@@ -252,10 +266,12 @@ function formatApplyResult(r: ApplyResult): string {
  * primary patch and the fast-apply fallback re-emit — both are guarded, so a
  * model cannot re-emit a patch that targets `.git/hooks/**` to slip past.
  *
- * No observer argument: the patch slice owns OTel emission on its own
- * (ADR-0028 `quanta.patch.op` + `quanta.patch.fuzzy_match_tier` are wired
- * inside `applier.ts`, which keeps `@/tool/apply-patch` free of
- * `@/observability` and respects the `@/tool/**` slice-isolation fence).
+ * OTel emission (ADR-0028 `quanta.patch.op` + `quanta.patch.fuzzy_match_tier`)
+ * is wired by INJECTING `PATCH_TRACE` (the OTel-bound `PatchTracePort` adapter
+ * from `@/observability/patch-trace`) into `applyPatch`. The pure `@/patch`
+ * slice imports NOTHING from `@/observability`; this tool is the composition
+ * root that binds the vocabulary. The port is a Default-OFF no-op when no span
+ * sink is active, so emission is byte-identical to the prior self-wired path.
  */
 async function guardedParseAndApply(
   patchText: string,
@@ -269,8 +285,8 @@ async function guardedParseAndApply(
   if (guardDeny) return { guardDeny }
   // applyPatch throws PatchApplyError / PatchAnchorNotFoundError on apply
   // failure — propagate. FsJailFileSystemPort throws FsJailViolationError
-  // on boundary breach — propagate.
-  return { result: await applyPatch(patch, port) }
+  // on boundary breach — propagate. `PATCH_TRACE` injects the OTel binding.
+  return { result: await applyPatch(patch, port, undefined, PATCH_TRACE) }
 }
 
 /**
@@ -391,7 +407,14 @@ export const applyPatchTool: Tool<Input> = {
       }
       yield { type: "result", result: { ok: true, output: formatApplyResult(applied.result) } }
     } catch (err) {
-      const rescued = await tryFastApplyFallback(input.patch, err, port, fallback, ctx.signal, guard)
+      const rescued = await tryFastApplyFallback(
+        input.patch,
+        err,
+        port,
+        fallback,
+        ctx.signal,
+        guard,
+      )
       if (rescued === null) throw err
       const note =
         rescued.modelUsed !== undefined

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { extractJsonObject, parseGroundingDecisionText } from "@/../src/apps/eval/grounding"
+import { parseGroundingDecisionObject } from "@/../src/apps/eval/grounding/parser"
 
 describe("grounding parser", () => {
   test("parses an exact JSON decision object", () => {
@@ -45,5 +46,27 @@ describe("grounding parser", () => {
     expect(parsed.error).toBeUndefined()
     expect(parsed.decision?.referentId).toBe("prompt_rules")
     expect(parsed.structuredOutputValid).toBe(true)
+  })
+
+  // isRecord array-handling safety: a JSON array IS `typeof "object"` and
+  // not null, so a naive narrower would let it through as a "record". The
+  // `!Array.isArray` guard makes an array root correctly fail-closed.
+  test("rejects an array root (array is not an object)", () => {
+    expect(() => parseGroundingDecisionObject([])).toThrow("is not an object")
+    expect(() => parseGroundingDecisionObject([{ activeThreadId: "x" }])).toThrow(
+      "is not an object",
+    )
+  })
+
+  test("still accepts a normal object root", () => {
+    const decision = parseGroundingDecisionObject({
+      activeThreadId: "prompt_rules",
+      referentId: "prompt_rules",
+      intent: "status_check",
+      scope: "current_workstream",
+      shouldClarify: false,
+      confidence: "high",
+    })
+    expect(decision.activeThreadId).toBe("prompt_rules")
   })
 })

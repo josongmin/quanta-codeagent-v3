@@ -4,12 +4,25 @@
 
 import { z } from "zod"
 import type { Tool, ToolContext, ToolEvent } from "../types"
-import type { TasksHandle } from "./port"
+import { backendErrorEvent, callPort } from "./no-throw"
+import type { TasksHandle, TasksTaskResult } from "./port"
 
 export const getTaskInputSchema = z.object({
   taskId: z.string().min(1, "taskId is required"),
 })
 export type GetTaskInput = z.infer<typeof getTaskInputSchema>
+
+/** Render a terminal (non-`not-ready`) task result into model-facing text. */
+const renderTerminal = (r: Exclude<TasksTaskResult, { state: "not-ready" }>): string => {
+  switch (r.state) {
+    case "completed":
+      return `completed: ${r.output}`
+    case "failed":
+      return `failed: ${r.error}`
+    default:
+      return "cancelled"
+  }
+}
 
 export const getMcpTaskTool = (port: TasksHandle): Tool<GetTaskInput> => ({
   name: "get_mcp_task",
@@ -33,7 +46,12 @@ export const getMcpTaskTool = (port: TasksHandle): Tool<GetTaskInput> => ({
       return
     }
     const taskId = parsed.data.taskId
-    const info = await port.getInfo(taskId)
+    const infoCall = await callPort(() => port.getInfo(taskId))
+    if (!infoCall.ok) {
+      yield backendErrorEvent(infoCall.message)
+      return
+    }
+    const info = infoCall.value
     if (info === null) {
       yield {
         type: "result",
@@ -45,7 +63,12 @@ export const getMcpTaskTool = (port: TasksHandle): Tool<GetTaskInput> => ({
       }
       return
     }
-    const result = await port.getResult(taskId)
+    const resultCall = await callPort(() => port.getResult(taskId))
+    if (!resultCall.ok) {
+      yield backendErrorEvent(resultCall.message)
+      return
+    }
+    const result = resultCall.value
     if (result.state === "not-ready") {
       yield {
         type: "result",
@@ -53,12 +76,7 @@ export const getMcpTaskTool = (port: TasksHandle): Tool<GetTaskInput> => ({
       }
       return
     }
-    const payload =
-      result.state === "completed"
-        ? `completed: ${result.output}`
-        : result.state === "failed"
-          ? `failed: ${result.error}`
-          : "cancelled"
+    const payload = renderTerminal(result)
     yield { type: "result", result: { ok: true, output: `${taskId} [${info.state}]\n${payload}` } }
   },
 })

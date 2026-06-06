@@ -118,10 +118,32 @@ export const ADVISOR_TIMING_RAIL: string = [
   "ignore. Pass forwardHistory:true to have it review your whole task in context.",
 ].join("\n")
 
+/** 9. code_mode_only (RFC jun-6-code-mode §2.1 / Phase 3 — `QUANTA_CODE_MODE_ONLY`).
+ *  Steers the model to drive ALL multi-step work through the `code_cell` program
+ *  interface instead of one-tool-per-turn. The Codex `code_mode_only` analog: the
+ *  cell is the PRIMARY tool-calling surface. Each in-cell `tools.X(args)` is STILL
+ *  gated EXACTLY like a direct call (permission / HARD_DENY / plan-mode all apply
+ *  per call), so this changes the model's CALLING STYLE, never the security
+ *  posture. Harmless prose when `code_cell` is not wired (the model simply has no
+ *  cell tool to reach for, and the static rails still govern). */
+export const CODE_MODE_ONLY_DIRECTIVE: string = [
+  "CODE MODE: prefer the `code_cell` tool as your PRIMARY way to call tools. When",
+  "a task needs more than one tool call — read several files, branch on what you",
+  "find, fan out a search, then write a result — author ONE `code_cell` JS program",
+  "that does the whole sequence (`await tools.read(...)`, loops/conditionals over",
+  "the results, `await tools.write(...)`, then `return` a JSON value) instead of",
+  "emitting tool calls one per turn. Each `tools.X(...)` inside the cell is gated",
+  "EXACTLY like a direct call (permission, HARD_DENY, and plan-mode all apply per",
+  "call) — the cell is N ordinary gated calls, just expressed as one program. Use a",
+  "single direct tool call only for a genuinely one-shot action; collapse anything",
+  "multi-step into a cell. The cell is sandboxed: only `tools.*` — no require/fetch/",
+  "process/filesystem/network.",
+].join("\n")
+
 /**
  * The config slice {@link selectActiveDirectives} reads. A flat record of the
- * seven knob booleans — supplied by the loop layer from `runtimeConfig()`. Kept
- * as a narrow shape (not the whole RuntimeConfig) so the selector stays a pure,
+ * knob booleans — supplied by the loop layer from `runtimeConfig()`. Kept as a
+ * narrow shape (not the whole RuntimeConfig) so the selector stays a pure,
  * trivially-testable function with no env coupling.
  */
 export interface DirectiveConfig {
@@ -133,6 +155,9 @@ export interface DirectiveConfig {
   readonly directiveAntiPlatitude: boolean
   readonly directiveParallelTools: boolean
   readonly directiveAdvisorRail: boolean
+  /** RFC jun-6-code-mode Phase 3 — `code_mode_only` steering (`QUANTA_CODE_MODE_ONLY`).
+   *  Default false ⇒ zero bytes ⇒ byte-identical. */
+  readonly codeModeOnly: boolean
 }
 
 /**
@@ -153,6 +178,7 @@ const DIRECTIVE_ORDER: ReadonlyArray<{
   { key: "directiveAntiPlatitude", text: ANTI_PLATITUDE },
   { key: "directiveParallelTools", text: PARALLEL_TOOLS },
   { key: "directiveAdvisorRail", text: ADVISOR_TIMING_RAIL },
+  { key: "codeModeOnly", text: CODE_MODE_ONLY_DIRECTIVE },
 ]
 
 /**

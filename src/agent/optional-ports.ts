@@ -5,6 +5,7 @@ import { createSubagentMailbox } from "@/agent/subagent-mailbox"
 import type { LLMPort } from "@/llm"
 import { defaultRoleModelResolver, type RoleModelResolver } from "@/llm/role-model-override"
 import { AgentMetaRegistry, TurnWakeRegistry } from "@/subagent"
+import { buildCodeCellDispatchPort } from "./codemode-wire"
 import type { AgentConfig } from "./types"
 
 const QUANTA_FAST_APPLY_ENV = "QUANTA_FAST_APPLY"
@@ -16,6 +17,11 @@ const QUANTA_SUBAGENT_BATCH_ENV = "QUANTA_SUBAGENT_BATCH"
 const QUANTA_SUBAGENT_INTROSPECT_ENV = "QUANTA_SUBAGENT_INTROSPECT"
 /** RFC-04 / ADR-0437 — `followup_task` deliver-and-trigger tool gate. */
 const QUANTA_SUBAGENT_FOLLOWUP_ENV = "QUANTA_SUBAGENT_FOLLOWUP"
+/** RFC jun-6-code-mode (Phase 1) — `code_cell` dispatch-port wire gate. Strict
+ *  `"1"` (mirrors `runtimeConfig().codeMode` — NOT the `=on` convention the
+ *  subagent gates use) so the composition root flips the SAME knob the tool
+ *  registration (`DefaultToolPorts.codeMode`) reads. */
+const QUANTA_CODE_MODE_ENV = "QUANTA_CODE_MODE"
 
 /** Per-sender undelivered quota baked into the env-gated wire (R3 audit-H).
  *  Hosts wiring the mailbox by hand still get to override via the closed-port
@@ -116,10 +122,62 @@ export const wireOptionalAgentPorts = <T extends OptionalPortBase>(
     next = { ...next, subagentMailbox: defaultSubagentMailbox() } as T
   }
 
+  // RFC jun-6-code-mode (Phase 1) — wire the `code_cell` per-cell dispatch-port
+  // FACTORY behind `QUANTA_CODE_MODE=1`. Default-OFF byte-identical when unset.
+  next = wireCodeCellDispatch(next, env)
+
   // RFC-02/04 — subagent batch + introspect + followup tool gates. Extracted
   // so this function stays under biome's cognitive-complexity cap. Each gate is
   // default-OFF (`=on` only); unset ⇒ `next` returned verbatim (byte-identical).
   return wireSubagentToolGates(next, env)
+}
+
+/**
+ * RFC jun-6-code-mode (Phase 1) — composition-root wire for the `code_cell`
+ * tool's dispatch-port FACTORY. When `QUANTA_CODE_MODE=1` (the SAME knob that
+ * registers the tool via `DefaultToolPorts.codeMode`), set
+ * `AgentConfig.codeCellDispatchFactory` to a factory that, per cell-call-id,
+ * builds the security-critical {@link buildCodeCellDispatchPort} closing over the
+ * LIVE assembled `config` (`base`) + its `permission`. The dispatch seam
+ * (`dispatch.ts`) then calls `codeCellDispatchFactory(toolCallId)` for each
+ * `code_cell` dispatch and surfaces the port on `ctx.codeCellDispatch`.
+ *
+ * SECURITY (RFC §6.1 — structural no-bypass): the port routes EVERY in-cell
+ * `tools.X(args)` through the REAL `dispatchTool` with the SAME `config`/
+ * `permission` the loop holds — a cell is N ordinary gated tool calls. The
+ * factory closes over `base` BY REFERENCE so the gating reflects the exact posture
+ * the turn runs under (no snapshot, no widening). `autoClassifier` is left absent
+ * here (the loop's auto-mode classifier is a per-session object not present on
+ * `AgentConfig`); absent ⇒ in-cell read-only ops do NOT auto-pass, which is
+ * STRICTLY MORE RESTRICTIVE than the direct path — never a bypass.
+ *
+ * Default-OFF byte-identical (RFC §1.2): with `QUANTA_CODE_MODE` unset, `base` is
+ * returned UNCHANGED — no factory slot, and the tool is not registered, so the
+ * QuickJS-WASM module is never instantiated. Caller-override-precedence: a
+ * pre-set `codeCellDispatchFactory` is preserved verbatim.
+ */
+const wireCodeCellDispatch = <T extends OptionalPortBase>(base: T, env: OptionalPortEnv): T => {
+  if (env[QUANTA_CODE_MODE_ENV] !== "1") return base
+  if (base.codeCellDispatchFactory !== undefined) return base
+  const config = base as unknown as AgentConfig
+  // `permission` is REQUIRED on the assembled AgentConfig (the loop's live
+  // posture); read it off the config so the in-cell gate matches the turn exactly.
+  const permission = config.permission
+  if (permission === undefined) return base
+  return {
+    ...base,
+    codeCellDispatchFactory: (callId: string) =>
+      buildCodeCellDispatchPort({ config, permission, cellId: callId }),
+    // Phase 2 (FULL tool surface) — a thunk reading the LIVE registry so the
+    // cell binds `tools.<name>` for the agent's ACTUAL registered set (each STILL
+    // re-gated through the dispatch port above). Read lazily at cell-dispatch time
+    // so a tool registered after assembly appears automatically. Caller-override-
+    // precedence: a pre-set thunk is preserved (the spread keeps it below `...base`
+    // only if it was unset — we guard explicitly to mirror the factory above).
+    ...(base.codeCellSurfaceTools === undefined
+      ? { codeCellSurfaceTools: () => config.registry.toolNames() }
+      : {}),
+  } as T
 }
 
 /** Mailbox factory shared with the `QUANTA_SUBAGENT_MAILBOX` gate so a

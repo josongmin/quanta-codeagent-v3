@@ -534,6 +534,8 @@ const readOrEmpty = async (
 const defaultReadFile = (path: string): Promise<string> => readFile(path, "utf8")
 
 const asRecord = (v: unknown): Record<string, unknown> | undefined =>
-  v !== null && typeof v === "object" ? (v as Record<string, unknown>) : undefined
+  v !== null && typeof v === "object" && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : undefined
 
 const asString = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined)

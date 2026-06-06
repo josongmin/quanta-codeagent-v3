@@ -21,6 +21,7 @@ import { checkDispatchAllowed, type DispatchTurnState } from "@/agent/dispatch-s
 import {
   applyDeveloperModeTransition,
   assertNotMutatingInPlanMode,
+  CALLER_WIRE_TOOL_NAMES,
   type CollaborationMode,
   InvalidModeTransitionError,
   isMutatingTool,
@@ -62,104 +63,14 @@ beforeEach(() => {
 // production CLI builds it. If a new tool ships in any of these surfaces the
 // drift detector below will fire and force MUTATING_TOOL_TABLE to be updated.
 // Caller-wire tools: registered ONLY when the relevant AgentConfig slot is
-// wired (ADR-0119/0122 shadow*, ADR-0130 subagent_*/agent, ADR-0136
-// budget_status, ADR-0135 memory_*, ADR-0084 branch_search, gh PR surfaces,
-// Skill/ToolSearch loaders, web_search, search_codebase, request_plan_exit,
-// task_* control). Their MUTATING_TOOL_TABLE entries are PERMANENT so plan-mode
-// dispatch cannot trip `UnknownToolError` on hosts that wire them. They are not
+// wired. Their MUTATING_TOOL_TABLE entries are PERMANENT so plan-mode dispatch
+// cannot trip `UnknownToolError` on hosts that wire them. They are not
 // enumerable from `defaultTools`/`gitTools`/`lspNavTools` without injecting
-// every host port, so the cross-check includes them by NAME — same allowlist
-// convention as the sibling `tests/unit/mode-mutating-table.test.ts`.
-const CALLER_WIRE_TOOL_NAMES = [
-  "shadow_snapshots",
-  "shadow_rewind",
-  "shadow_restore_partial",
-  "subagent_fork",
-  "subagent_poll",
-  "subagent_await",
-  "budget_status",
-  "gh_pr_view",
-  "gh_pr_list",
-  "gh_pr_blame",
-  "gh_pr_review_diff",
-  "gh_issue_view",
-  "gh_check_status",
-  "gh_pr_comment",
-  "gh_pr_create",
-  "gh_pr_auto_merge",
-  // jun-6 wave-2 gh write surfaces — caller-wire (gitTools / gitRunner-gated),
-  // not enumerable from `defaultTools`. Included by name so the orphan-direction
-  // drift check stays exact.
-  "gh_pr_edit_labels",
-  "gh_pr_resolve_thread",
-  "memory_search",
-  "memory_write",
-  "memory_update",
-  "branch_search",
-  "task_output",
-  "task_stop",
-  "request_plan_exit",
-  "agent",
-  "Skill",
-  "ToolSearch",
-  "web_search",
-  "search_codebase",
-  // R3 e2e-integration audit closeout — the jun-04/jun-05 caller-wire tools whose
-  // MUTATING_TOOL_TABLE entries were added in src/agent/mode.ts behind their
-  // DefaultToolPorts slots (structuredPatch, artifactRegistry, coverageCheck,
-  // imageGen, officeAuthoring, ptySession, mcpResources, mcpConnector,
-  // progressUpdate, sideAgent). They register only when the host wires the port,
-  // so they are not enumerable from `defaultTools` — included here by name so the
-  // orphan-direction drift check stays exact (mirrors tests/unit/mode-mutating-table.test.ts).
-  "apply_patch_structured",
-  "artifact_list",
-  "artifact_get",
-  "artifact_register",
-  "artifact_destroy",
-  // CLUSTER D #5 — permission_propose_pattern (caller-wire behind
-  // DefaultToolPorts.permissionPatternPropose / QUANTA_REMEMBER_PATTERNS). Mutating
-  // (working_state_write); registers only when the host wires the no-widen port,
-  // so it is not enumerable from `defaultTools`.
-  "permission_propose_pattern",
-  // jun-6 caller-wire tools — file_history_rewind (DefaultToolPorts.fileHistory /
-  // QUANTA_FILE_HISTORY) and skill_create (QUANTA_SKILL_CREATOR). Both mutating
-  // (write_filesystem); each registers only when the host wires its port/knob, so
-  // neither is enumerable from `defaultTools`. Included by name so the
-  // orphan-direction drift check stays exact (mirrors tests/unit/mode-mutating-table.test.ts).
-  "file_history_rewind",
-  "skill_create",
-  "coverage_check",
-  "prompt_cache_status",
-  "image_gen",
-  "xlsx_write",
-  "docx_write",
-  "pptx_write",
-  "pty_list",
-  "pty_attach",
-  "pty_write",
-  "pty_read",
-  "pty_resize",
-  "pty_kill",
-  "mcp_list_resources",
-  "mcp_read_resource",
-  "mcp_list_prompts",
-  "mcp_get_prompt",
-  "mcp_connector_list",
-  "mcp_connector_install",
-  "communicate_update",
-  "side_agent_spawn",
-  "side_agent_list",
-  "side_agent_stop",
-  "side_agent_findings",
-  // jun-06 wave-3 caller-wire tools — ADR-0487 force-background (subagentBgTools
-  // behind QUANTA_FORCE_BACKGROUND + admission queue) and G1 appshot_verify
-  // (DefaultToolPorts.appshot behind QUANTA_APPSHOT). Both register only when the
-  // host wires the slot, so they are not in `defaultTools`.
-  "subagent_force_background",
-  "appshot_verify",
-  // ADR-0287 async-tools caller-wire (gated on QUANTA_ASYNC_TOOLS, not in defaultTools).
-  "poll_deferred",
-] as const
+// every host port, so the cross-check augments the enumerable set with the
+// shared `CALLER_WIRE_TOOL_NAMES` SSOT exported from `@/agent/mode` (the same
+// file that owns MUTATING_TOOL_TABLE). The sibling unit drift detector in
+// `tests/unit/mode-mutating-table.test.ts` imports the SAME constant — the two
+// formerly hand-maintained copies can no longer diverge.
 
 const ALL_REGISTERED_TOOL_NAMES = (() => {
   const names = new Set<string>()
@@ -218,6 +129,38 @@ describe("Scenario 1 — tool-registry exhaustiveness drift detector", () => {
   test("MUTATING_TOOL_TABLE is frozen (cannot be mutated at runtime)", () => {
     const table = planModeMutatingTable()
     expect(Object.isFrozen(table)).toBe(true)
+  })
+
+  // ─── SSOT divergence proof ────────────────────────────────────────────────
+  // The caller-wire allowlist used HERE and in the sibling unit drift detector
+  // is the SAME exported constant — it is structurally impossible for the two
+  // to drift. (Pre-SSOT, each test carried its own literal copy; one already
+  // had `read_image_url` the other lacked.) These pins also guarantee every
+  // SSOT name is classified in the table and is NOT already enumerable, so the
+  // augmentation cannot mask a true drift.
+  test("caller-wire allowlist is the frozen exported SSOT (no local copy)", () => {
+    expect(Object.isFrozen(CALLER_WIRE_TOOL_NAMES)).toBe(true)
+  })
+
+  test("every caller-wire SSOT name is classified in MUTATING_TOOL_TABLE", () => {
+    const table = planModeMutatingTable()
+    const unclassified = CALLER_WIRE_TOOL_NAMES.filter((n) => !(n in table))
+    expect(unclassified).toEqual([])
+  })
+
+  test("no caller-wire SSOT name is already enumerable from the static surfaces", () => {
+    // If a caller-wire tool starts shipping in `defaultTools`, it should be
+    // dropped from the SSOT (the enumerable set already covers it). Pin that
+    // the SSOT stays disjoint from what the static surfaces enumerate, so the
+    // augmentation is purely additive and never silently stale.
+    const enumerable = new Set<string>()
+    for (const t of defaultTools) enumerable.add(t.name)
+    for (const t of gitTools()) enumerable.add(t.name)
+    for (const t of lspNavTools(nullLspNavProvider)) enumerable.add(t.name)
+    enumerable.add(createUpdateWorkingStateTool(undefined).name)
+    enumerable.add(requestUserInputTool().name)
+    const leaked = CALLER_WIRE_TOOL_NAMES.filter((n) => enumerable.has(n))
+    expect(leaked).toEqual([])
   })
 })
 

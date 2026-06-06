@@ -25,6 +25,7 @@
  * `process.env` directly. The anti-regression scanner bans the latter.
  */
 
+import { tlsMitmAuthorized } from "@/runtime/network-proxy/mitm-gate"
 import { writeStderr } from "./terminal-io"
 
 export const LOG_LEVELS = ["debug", "info", "warn", "error"] as const
@@ -377,6 +378,43 @@ export interface RuntimeConfig {
    *  `DefaultToolPorts.artifactRegistry` (the generation tools register their
    *  outputs; the model lists/inspects/destroys via `artifact_*`). */
   readonly artifactStore: boolean
+  /** code-mode (RFC jun-6-code-mode, Phase 1) gate (`QUANTA_CODE_MODE`). Strict
+   *  opt-in (`=== "1"`). Default false ⇒ the composition root wires NO
+   *  `DefaultToolPorts.codeCellDispatch` factory, the `code_cell` tool is NOT
+   *  registered (byte-identical default menu), and the QuickJS-WASM module is
+   *  NEVER instantiated (lazily imported only when the tool runs). When ON the
+   *  agent gains `code_cell`: a model-authored JS program runs in a QuickJS-WASM
+   *  isolate whose every `await tools.X(args)` re-enters the REAL `dispatchTool`
+   *  (full admissibility gate / HARD_DENY / plan-mode / redaction — a cell is N
+   *  ordinary gated tool calls). The cell has NO require/fetch/process/FS/network
+   *  surface (QuickJS gives none; we add none). */
+  readonly codeMode: boolean
+  /** code-mode Phase 3 — `code_mode_only` steering gate (`QUANTA_CODE_MODE_ONLY`).
+   *  Strict opt-in (`=== "1"`). Default false ⇒ the per-turn dynamic
+   *  `<system-reminder>` carries NO code-mode steering directive (byte-identical
+   *  dynamic tail) — the model uses the normal one-tool-per-turn path. When ON,
+   *  `buildDynamicContext` splices the `CODE_MODE_ONLY_DIRECTIVE` (steers the
+   *  model to drive multi-step work through `code_cell` programs). Independent of
+   *  `codeMode` (the SECURITY gate that registers the tool + wires the port): the
+   *  directive is harmless prose when `code_cell` is not also wired, but a host
+   *  that wants the model to actually USE cells sets BOTH `QUANTA_CODE_MODE=1`
+   *  (registers + gates the tool) AND `QUANTA_CODE_MODE_ONLY=1` (steers toward it).
+   *  This knob NEVER hides individual tools or relaxes any gate — the in-cell
+   *  re-gating (permission / HARD_DENY / plan-mode) is unchanged; it only shapes
+   *  the model's calling STYLE via prompt prose. */
+  readonly codeModeOnly: boolean
+  /** code-mode WASM heap cap in bytes (`QUANTA_CODE_MODE_MEM_BYTES`). Unset ⇒
+   *  the tool falls back to the 64 MiB default (`CODE_MODE_DEFAULTS`). */
+  readonly codeModeMemBytes: number | undefined
+  /** code-mode wall-clock deadline ms (`QUANTA_CODE_MODE_TIMEOUT_MS`). Unset ⇒
+   *  30 s default. A `while(true){}` cell is interrupted at the deadline. */
+  readonly codeModeTimeoutMs: number | undefined
+  /** code-mode per-cell tool-call cap (`QUANTA_CODE_MODE_MAX_CALLS`). Unset ⇒
+   *  64 default. A runaway fan-out past the cap throws a typed cap error. */
+  readonly codeModeMaxCalls: number | undefined
+  /** code-mode model-facing output cap in bytes (`QUANTA_CODE_MODE_OUTPUT_CAP`).
+   *  Unset ⇒ 16 KiB default; over-cap return is truncated with a marker. */
+  readonly codeModeOutputCap: number | undefined
   /** file_history_rewind — per-file session-snapshot capture + restore
    *  (`QUANTA_FILE_HISTORY`). Strict opt-in (`=== "1"`). Default false ⇒ no
    *  per-file history store is constructed, the write/edit capture sink is NOT
@@ -603,6 +641,28 @@ export interface RuntimeConfig {
    *  explicit question/context path is byte-identical). ON ⇒ the knob injects a
    *  redacted live-transcript source into `advisorConsultFromLLM`. */
   readonly advisorForwardHistory: boolean
+  /** syntax-aware-chunking (RFC jun-6) — AST-aligned indexer chunker gate
+   *  (`QUANTA_SYNTAX_CHUNK`). Strict opt-in (`=== "1"`). Default false ⇒ the
+   *  indexer calls the pure line-window `chunkFile` exactly as today
+   *  (byte-identical retrieval); the `CodeParserPort` is never constructed and
+   *  NO WASM is loaded. When ON *and* a composition root injects a parser, the
+   *  scanner parses each supported file once and emits AST-aligned chunks
+   *  (`chunkFileSyntactic`) that never split a function mid-body, falling back
+   *  to the line-window for any non-supported / unparseable file. */
+  readonly syntaxChunk: boolean
+  /** read-outline (RFC jun-6) — collapsed signatures+structure `read` mode
+   *  gate (`QUANTA_READ_OUTLINE`). Strict opt-in (`=== "1"`). Default false ⇒
+   *  a `read outline:true` request returns the normal line-range read (the
+   *  parser is never constructed, no WASM); `read` without the flag is
+   *  byte-identical regardless. When ON *and* a parser is wired, `outline:true`
+   *  returns the collapsed signatures view (bodies elided to `// …`), budget-
+   *  sized, gracefully degrading to a line-range read on unsupported languages. */
+  readonly readOutline: boolean
+  /** Grammar-`.wasm` directory override for the `CodeParserPort`
+   *  (`QUANTA_TREE_SITTER_DIR`). Absent ⇒ the parser resolves the installed
+   *  `tree-sitter-wasms/out` dir. A packaging step that relocates the grammars
+   *  sets this. Only read when a parser is constructed (default-OFF ⇒ unread). */
+  readonly treeSitterDir: string | undefined
   /** FS jail disable flag (`QUANTA_FS_JAIL=off`). Default false (jail ON). */
   readonly fsJailDisabled: boolean
   /** ADR-0062 cap-as-instruction dispatch enforcement (`QUANTA_CAP_ENFORCE=1`).
@@ -928,6 +988,54 @@ export interface RuntimeConfig {
    *  invalid ⇒ `undefined` ⇒ the budget stays INERT even when {@link writeBudget}
    *  is on, so the path is byte-identical until an operator sets a cap. */
   readonly writeBudgetMax: number | undefined
+  /** jun-6 (RFC jun-6-exfil-egress-rails (c)) — exfil-scouting gate
+   *  (`QUANTA_EXFIL_SCOUTING`). Strict opt-in (`=== "1"`). Default false ⇒ the
+   *  deterministic `detectScouting` aggregate over the proxy deny-log is never
+   *  called and the "Exfil Scouting" taxonomy prose line is OMITTED from the
+   *  assembled classifier prompt (byte-identical prompt + behavior). When ON the
+   *  detector emits an ADVISORY signal (a classification hint, never a hard
+   *  auto-deny — RFC §7 (c)) for ≥ K distinct denied non-allowlisted hosts. */
+  readonly exfilScouting: boolean
+  /** jun-6 (RFC jun-6-exfil-egress-rails (c)) — exfil-scouting threshold K
+   *  (`QUANTA_EXFIL_SCOUTING_K`, a positive integer). The CONFIGURABLE KNOB —
+   *  NO hardcoded default (no-heuristics rule: K must be calibrated from a real
+   *  probe-burst corpus, not guessed). Absent / invalid ⇒ `undefined` ⇒ the
+   *  detector stays INERT even when {@link exfilScouting} is on, so the path is
+   *  byte-identical until an operator sets a threshold. */
+  readonly exfilScoutingK: number | undefined
+  /** jun-6 (RFC jun-6-exfil-egress-rails (B)) — secret-aware egress MODE
+   *  (`QUANTA_SECRET_EGRESS` = `deny` | `redact`). Any other value (unset, "1",
+   *  "true") ⇒ `undefined` (OFF) ⇒ the egress decision is HOST-ONLY (no
+   *  body/header scan), byte-identical. When set, the proxy injects the existing
+   *  `compositeSecretScanner` into the PLAINTEXT-HTTP request path and
+   *  denies/redacts a leaving declared/detected secret. ⚠️ HTTPS CONNECT tunnels
+   *  are OPAQUE (raw TLS) and are NEVER content-scanned — they log a visible
+   *  `connect-tunnel-unscanned` marker; full coverage needs TLS MITM, a deferred
+   *  Phase-2 RFC. `redact` is the recommended mode (RFC §7 (B)). */
+  readonly secretEgress: "deny" | "redact" | undefined
+  /** jun-6 (RFC jun-6-exfil-egress-rails (B)) — max buffered-body byte cap for
+   *  the secret-egress scan (`QUANTA_SECRET_EGRESS_MAX_BODY`, a positive
+   *  integer). DoS guard: a body past the cap is forwarded UNSCANNED with a
+   *  visible `body-cap-unscanned` log marker (never blocked-by-truncation). NO
+   *  hardcoded default (no-heuristics rule); absent / invalid ⇒ `undefined` ⇒
+   *  the wire treats secret-egress as INERT (a scan with no byte budget is not
+   *  advertised) until an operator sets the cap. */
+  readonly secretEgressMaxBody: number | undefined
+  /** jun-7 TLS-MITM (Phase-2 of exfil-rail (B)) — whether the operator has
+   *  EXPLICITLY opted into terminating + scanning HTTPS CONNECT traffic. STRONGER
+   *  gate than the other knobs (MITM mints a trust anchor the agent's client
+   *  accepts): requires BOTH `QUANTA_TLS_MITM=1` AND the verbatim ack phrase in
+   *  `QUANTA_TLS_MITM_ACK`. Either missing ⇒ `false` ⇒ the CONNECT path stays a
+   *  raw tunnel + `connect-tunnel-unscanned` marker (byte-identical). The
+   *  composition root only constructs an ephemeral MITM CA when this is `true`
+   *  AND `secretEgress` is set (nothing to scan otherwise). */
+  readonly tlsMitm: boolean
+  /** jun-7 TLS-MITM — fail-closed policy on a termination/scan error
+   *  (`QUANTA_TLS_MITM_ON_FAILURE` = `deny` | `opaque-tunnel`). `deny`
+   *  (recommended) hard-blocks an un-scannable host; `opaque-tunnel` falls back
+   *  to the raw tunnel + a VISIBLE `connect-tunnel-unscanned` marker. Any other
+   *  value ⇒ `deny` (fail closed by default). Inert unless {@link tlsMitm}. */
+  readonly tlsMitmOnFailure: "deny" | "opaque-tunnel"
 }
 
 /** jun-6 — default watchdog cap (ms) for a `block`-tool critical section. The
@@ -1035,6 +1143,29 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // C1 — strict `=== "1"` opt-in. Default false ⇒ no artifact registry / tools
     // (byte-identical).
     artifactStore: env["QUANTA_ARTIFACT_STORE"] === "1",
+    // code-mode (RFC jun-6-code-mode, Phase 1) — strict `=== "1"` opt-in. Default
+    // false ⇒ no codeCellDispatch port wired, no code_cell tool, the QuickJS-WASM
+    // module is never instantiated (byte-identical default menu + cold path).
+    codeMode: env["QUANTA_CODE_MODE"] === "1",
+    // code-mode Phase 3 — strict `=== "1"` opt-in. Default false ⇒ no steering
+    // directive (byte-identical dynamic tail). Independent of `codeMode`.
+    codeModeOnly: env["QUANTA_CODE_MODE_ONLY"] === "1",
+    codeModeMemBytes: parsePositiveInt(
+      env["QUANTA_CODE_MODE_MEM_BYTES"],
+      "QUANTA_CODE_MODE_MEM_BYTES",
+    ),
+    codeModeTimeoutMs: parsePositiveInt(
+      env["QUANTA_CODE_MODE_TIMEOUT_MS"],
+      "QUANTA_CODE_MODE_TIMEOUT_MS",
+    ),
+    codeModeMaxCalls: parsePositiveInt(
+      env["QUANTA_CODE_MODE_MAX_CALLS"],
+      "QUANTA_CODE_MODE_MAX_CALLS",
+    ),
+    codeModeOutputCap: parsePositiveInt(
+      env["QUANTA_CODE_MODE_OUTPUT_CAP"],
+      "QUANTA_CODE_MODE_OUTPUT_CAP",
+    ),
     // file_history_rewind — strict `=== "1"` opt-in. Default false ⇒ no per-file
     // history store, no capture sink, no file_history_rewind tool (byte-identical).
     fileHistory: env["QUANTA_FILE_HISTORY"] === "1",
@@ -1234,6 +1365,45 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // hardcoded default (no-heuristics rule): absent/invalid ⇒ undefined ⇒ the
     // budget stays inert even when QUANTA_WRITE_BUDGET=1.
     writeBudgetMax: parsePositiveInt(env["QUANTA_WRITE_BUDGET_MAX"], "QUANTA_WRITE_BUDGET_MAX"),
+    // jun-6 exfil-rail (c) — strict `=== "1"` opt-in. Default false ⇒ detector
+    // never called + scouting taxonomy line omitted (byte-identical). Requires
+    // a configured K below to fire.
+    exfilScouting: env["QUANTA_EXFIL_SCOUTING"] === "1",
+    // jun-6 exfil-rail (c) — the CONFIGURABLE threshold K (positive integer). No
+    // hardcoded default (no-heuristics rule): absent/invalid ⇒ undefined ⇒ the
+    // detector stays inert even when QUANTA_EXFIL_SCOUTING=1.
+    exfilScoutingK: parsePositiveInt(env["QUANTA_EXFIL_SCOUTING_K"], "QUANTA_EXFIL_SCOUTING_K"),
+    // jun-6 exfil-rail (B) — egress mode token (`deny`|`redact`). Any other
+    // value ⇒ undefined (OFF) ⇒ host-only egress decision (byte-identical).
+    secretEgress:
+      env["QUANTA_SECRET_EGRESS"] === "deny" || env["QUANTA_SECRET_EGRESS"] === "redact"
+        ? env["QUANTA_SECRET_EGRESS"]
+        : undefined,
+    // jun-6 exfil-rail (B) — buffered-body byte cap (positive integer). No
+    // hardcoded default (no-heuristics rule): absent/invalid ⇒ undefined ⇒ the
+    // wire treats secret-egress as inert until an operator sets the cap.
+    secretEgressMaxBody: parsePositiveInt(
+      env["QUANTA_SECRET_EGRESS_MAX_BODY"],
+      "QUANTA_SECRET_EGRESS_MAX_BODY",
+    ),
+    // jun-7 TLS-MITM — OPERATOR-OPT-IN (stronger gate). Requires BOTH the master
+    // switch `=1` AND the verbatim ack phrase, so a stray `=1` cannot mint a
+    // trust anchor. Either missing ⇒ false ⇒ CONNECT stays a raw tunnel
+    // (byte-identical). See `mitm-gate.ts`.
+    tlsMitm: tlsMitmAuthorized(env),
+    // jun-7 TLS-MITM — fail-closed policy. `opaque-tunnel` only on the exact
+    // token; everything else (incl. unset) ⇒ `deny` (fail closed by default).
+    tlsMitmOnFailure:
+      env["QUANTA_TLS_MITM_ON_FAILURE"] === "opaque-tunnel" ? "opaque-tunnel" : "deny",
+    // syntax-aware-chunking (RFC jun-6) — strict `=== "1"` opt-in. Default
+    // false ⇒ indexer uses the line-window chunkFile (byte-identical), parser
+    // never constructed, no WASM.
+    syntaxChunk: env["QUANTA_SYNTAX_CHUNK"] === "1",
+    // read-outline (RFC jun-6) — strict `=== "1"` opt-in. Default false ⇒
+    // `read outline:true` returns the line-range fallback, parser never built.
+    readOutline: env["QUANTA_READ_OUTLINE"] === "1",
+    // Grammar-wasm dir override. Absent ⇒ resolve tree-sitter-wasms/out.
+    treeSitterDir: stringOrUndef(env["QUANTA_TREE_SITTER_DIR"]),
   })
 }
 

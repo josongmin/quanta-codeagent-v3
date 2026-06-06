@@ -85,6 +85,29 @@ export type PatchObservation =
 export type PatchObserver = (event: PatchObservation) => void
 
 /**
+ * Injected tracing seam for the V4A applier (closed-port DI). The applier is a
+ * pure leaf and MUST NOT reach into the cross-cutting `@/observability` slice
+ * at runtime; instead the composition root passes an adapter that maps each
+ * {@link PatchObservation} onto the canonical `quanta.patch.*` OTel keys.
+ *
+ * Default-OFF: an ABSENT port is a no-op — the applier makes ZERO trace calls,
+ * byte-identical to running with no telemetry. This mirrors the `@/storage`
+ * `PatchFileSystemPort` posture: behaviour is fully determined by the injected
+ * ports, never by an ambient global.
+ *
+ * Security invariant (enforced by the adapter, contract-documented here): the
+ * port receives ONLY the categorical {@link PatchObservation} (op + fuzzy
+ * tier) — NEVER patch text, file content, hunk lines, anchor strings, or
+ * paths. A throw from `recordPatchOp` MUST be swallowed by the applier so a
+ * telemetry defect can never change apply semantics.
+ */
+export interface PatchTracePort {
+  /** Record one categorical per-op observation. No-throw contract; the applier
+   *  also defensively swallows any throw. */
+  recordPatchOp(event: PatchObservation): void
+}
+
+/**
  * Patch-specific FS port (read/write/delete/rename/exists). The general FS port
  * is `@/storage`'s `FileSystemPort` — DIFFERENT shape, different name on purpose.
  *

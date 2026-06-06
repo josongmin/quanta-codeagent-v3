@@ -373,7 +373,47 @@ export interface ToolContext {
    *  (structural mirror of the `@/tool/file-history` adapter) so `@/tool`'s
    *  hot-path types stay a leaf — same discipline as {@link ToolDiffSink}. */
   fileHistory?: FileHistorySink
+  /** code-mode (RFC jun-6-code-mode, Phase 1) — OPTIONAL host dispatch port for
+   *  the `code_cell` tool. The tool hands this verbatim to the `@/codemode`
+   *  sandbox, which calls it for EVERY in-cell `tools.X(args)`. The ONLY
+   *  implementation (`@/agent/codemode-wire.ts#buildCodeCellDispatchPort`)
+   *  routes each call through the REAL `dispatchTool` with the loop's live
+   *  permission/config — so a cell is N ordinary gated tool calls (the
+   *  structural no-bypass invariant, §6.1). Surfaced by the dispatch seam from
+   *  `AgentConfig.codeCellDispatchFactory` ONLY when `QUANTA_CODE_MODE` is on.
+   *  ABSENT (gate OFF / non-wiring host) ⇒ the tool yields a typed `not_wired`
+   *  failure (the tool is only REGISTERED when the port factory is present, so
+   *  this is belt-and-braces). Duck-typed (structural mirror of `@/codemode`'s
+   *  `CodeCellDispatchPort`) so `@/tool/types` stays a leaf — same discipline as
+   *  {@link FileHistorySink} / {@link ToolDiffSink}. */
+  codeCellDispatch?: CodeCellDispatchSeam
+  /** code-mode (RFC jun-6-code-mode, Phase 2) — OPTIONAL FULL cell tool surface.
+   *  The agent's ACTUAL registered tool names (`registry.toolNames()`), surfaced
+   *  by the dispatch seam from `AgentConfig.codeCellSurfaceTools` ALONGSIDE
+   *  {@link codeCellDispatch} ONLY when `QUANTA_CODE_MODE` is on. The `code_cell`
+   *  tool hands this to the `@/codemode` sandbox so the cell binds `tools.<name>`
+   *  for EVERY tool the agent has (each STILL re-gated through the dispatch port —
+   *  the security invariant is unchanged; this only widens which tool NAMES are
+   *  bound). A tool the agent lacks is absent from the list ⇒ unbound in the cell
+   *  (the cell can never widen its own surface). ABSENT ⇒ the sandbox falls back
+   *  to the Phase-1 3-tool surface (`read`/`grep`/`write`) — byte-identical for
+   *  any caller that wired the port but not the surface. A `readonly string[]`
+   *  (not a port) because it is a pure data snapshot the dispatch seam already
+   *  holds (`config.registry`); no behavior crosses the seam. */
+  codeCellSurface?: readonly string[]
 }
+
+/** code-mode (RFC jun-6-code-mode, Phase 1) — duck-typed mirror of
+ *  `CodeCellDispatchPort` from `@/codemode` (kept HERE so `@/tool/types` stays a
+ *  slice leaf — same discipline as {@link FileHistorySink}). `(name, input) =>
+ *  Promise<{ ok, content }>`: the host has already run the FULL `dispatchTool`
+ *  pipeline (admissibility gate / HARD_DENY / plan-mode / redaction) and
+ *  collapsed the result to the model-facing `content` (already redacted) + an
+ *  `ok` flag. NO-THROW at the port boundary by contract. */
+export type CodeCellDispatchSeam = (
+  name: string,
+  input: unknown,
+) => Promise<{ readonly ok: boolean; readonly content: string }>
 
 /** file_history_rewind — duck-typed per-file snapshot sink injected via
  *  {@link ToolContext}. Structural mirror of the `@/tool/file-history` store

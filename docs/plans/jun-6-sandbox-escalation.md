@@ -1,11 +1,14 @@
 # RFC — Sandbox-block → escalation-retry loop (`denialReason:"sandbox-blocked"` + HITL escape hatch)
 
-> **Status: ✅ IMPLEMENTED (jun-06)** — Phase 1 (discriminant + classifier +
+> **Status: ✅ host-wired LIVE (jun-06)** — Phase 1 (discriminant + classifier +
 > `sandbox_blocked` LLMError arm + knobs) LANDED & LIVE-pure; Phase 2 (the
 > escalation loop machine) LANDED as a fully-injected, hellgate-proven pure
-> orchestrator (`src/agent/sandbox-escalation/`); the bash hot-path *call site*
-> is the one deliberate hold (see As-built). Phase 3 (flip `QUANTA_SANDBOX`
-> default-ON) is OUT OF SCOPE (separate decision).
+> orchestrator (`src/agent/sandbox-escalation/`); **the bash hot-path *call site*
+> is now LIVE-wired** (`src/tool/bash/sandbox-escalation-wire.ts` module seam +
+> `src/host/runtime/sandbox-escalation-wire.ts` composition root install +
+> `src/tool/bash/index.ts` result-handling), e2e-proven through the REAL bash
+> tool (`tests/unit/sandbox-escalation-bash-wire-hellgate.test.ts`). Phase 3
+> (flip `QUANTA_SANDBOX` default-ON) is OUT OF SCOPE (separate decision).
 > Date: 2026-06-06
 > Slice: TOUCH `src/runtime/os-sandbox/*` + `src/permission/post-denial.ts` + `src/tool/bash/*` (new escalation seam)
 > Default posture: OFF (byte-identical when the knob is unset)
@@ -301,18 +304,35 @@ gate (the gate may still deny/hand-off — escalation does NOT bypass it) before
 re-running WITHOUT the sandbox wrapper for that ONE call. The model's
 `justification` flows to the AUDIT sink only, never the metric funnel.
 
-**The one deliberate hold (why fc maturity = L2, not L3):** the bash hot-path
-*call site* — bash result-handling invoking `seedSandboxBlockDenial` /
-`runSandboxEscalation`, and the platform result-mapping points
-(`landlock-native` `mapNapiResult`, the Seatbelt path, `wrapLinuxShellArgv`)
-SETTING `denialReason` under the knob — is NOT wired here, to avoid colliding
-with substantial in-flight uncommitted changes in `src/tool/bash/*` and the
-loop. The machine is complete + hellgate-proven; promoting to L3 is the
-bash-side wiring + a bash regression pass. `src/permission/post-denial.ts` was
-NOT modified (the existing 3-step API + injected clock already accept a
-sandbox-sourced denial verbatim — the cleanest reuse); the
-`decidedBy:"sandbox-escalation"` recorder source is a follow-up nicety, not a
-correctness requirement.
+**✅ host-wired LIVE (jun-06) — fc maturity L2 → L3.** The bash hot-path *call
+site* is now wired. Because `@/tool` is fence-isolated from `@/agent` /
+`@/permission` (RFC §3.1), the bash tool can NOT import the orchestrator
+directly; the wire is a duck-typed MODULE-LEVEL seam
+(`src/tool/bash/sandbox-escalation-wire.ts`, mirroring the existing
+`per-call-factory.ts` precedent) that the composition root installs. As-built:
+- `src/tool/bash/index.ts` — the per-call wrap records `sandboxApplied`; an
+  applied-sandbox nonzero non-timeout exit is handed to the installed handler
+  (`runShellWithEscalation` → `maybeEscalate`), which on approve replaces the
+  result with the UNSANDBOXED re-run (the byte-same command, perCallWrap removed)
+  and appends a model-facing note. Knob-OFF / no handler / not-a-block ⇒ the
+  ORIGINAL result, byte-identical.
+- `src/host/runtime/sandbox-escalation-wire.ts` (`maybeWireBashSandboxEscalation`,
+  called from the assembler) — adapts `classifySandboxDenial` (backend
+  `"seatbelt"`: the per-call port is darwin/`sandbox-exec` only) +
+  `seedSandboxBlockDenial` + `runSandboxEscalation` (`presentRisk` + the NORMAL
+  gate both route through the host `onConfirm` authority — escalation does NOT
+  bypass the gate) over the SAME `PermissionStore` the admissibility gate
+  consults. Installed ONLY when `QUANTA_SANDBOX_ESCALATION` is on.
+
+The platform result-mapping points (`landlock-native` `mapNapiResult`,
+`wrapLinuxShellArgv`) were NOT touched: the per-call bash sandbox is Seatbelt-only
+today, so classification happens at the bash result site against the `"seatbelt"`
+backend — wiring the Linux/Windows mappers is deferred until a per-call Linux
+sandbox lands (no current code path applies them per-call).
+`src/permission/post-denial.ts` was NOT modified (the existing 3-step API +
+injected clock already accept a sandbox-sourced denial verbatim — the cleanest
+reuse); the `decidedBy:"sandbox-escalation"` recorder source is a follow-up
+nicety, not a correctness requirement.
 
 **Default-ON flip (Phase 3) — OUT OF SCOPE.** This RFC built the escape hatch
 (the prerequisite). Flipping `QUANTA_SANDBOX` to default-ON is a SEPARATE

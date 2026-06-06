@@ -203,6 +203,66 @@ describe("createCostPanel: disabled instance is fully no-op", () => {
   })
 })
 
+// ── §23.5 per-model breakdown ─────────────────────────────────────────────
+
+describe("createCostPanel.byModel(): per-model attribution (§23.5)", () => {
+  test("single-model session ⇒ one bucket; renderDetailed byte-identical (no 'By model')", () => {
+    const panel = make({ model: "claude-sonnet-4-6" })
+    panel.incrementTurn({ inputTokens: 1000, outputTokens: 200 })
+    panel.incrementTurn({ inputTokens: 500, outputTokens: 100 })
+    const buckets = panel.byModel()
+    expect(buckets.length).toBe(1)
+    expect(buckets[0]?.model).toBe("claude-sonnet-4-6")
+    expect(buckets[0]?.inputTokens).toBe(1500)
+    expect(buckets[0]?.outputTokens).toBe(300)
+    // Invariant: single model ⇒ NO breakdown section in the detailed box.
+    expect(stripAnsi(panel.renderDetailed())).not.toContain("By model:")
+  })
+
+  test("heterogeneous session attributes tokens/cost to the active model per turn", () => {
+    const panel = make({ model: "claude-sonnet-4-6" })
+    panel.incrementTurn({ inputTokens: 1000, outputTokens: 200, costUsd: 0.5 })
+    panel.update({ model: "gpt-4o-mini" })
+    panel.incrementTurn({ inputTokens: 2000, outputTokens: 400, costUsd: 0.25 })
+    panel.incrementTurn({ inputTokens: 100, outputTokens: 50, costUsd: 0.05 })
+    const buckets = panel.byModel()
+    expect(buckets.length).toBe(2)
+    // sorted by model id (byte) — 'claude…' < 'gpt…'
+    expect(buckets.map((b) => b.model)).toEqual(["claude-sonnet-4-6", "gpt-4o-mini"])
+    const sonnet = buckets.find((b) => b.model === "claude-sonnet-4-6")
+    const gpt = buckets.find((b) => b.model === "gpt-4o-mini")
+    expect(sonnet?.inputTokens).toBe(1000)
+    expect(sonnet?.costUsd).toBeCloseTo(0.5, 6)
+    expect(gpt?.inputTokens).toBe(2100)
+    expect(gpt?.costUsd).toBeCloseTo(0.3, 6)
+  })
+
+  test("heterogeneous session ⇒ renderDetailed includes a 'By model' section", () => {
+    const panel = make({ model: "claude-sonnet-4-6" })
+    panel.incrementTurn({ inputTokens: 1000, outputTokens: 200, costUsd: 0.5 })
+    panel.update({ model: "gpt-4o-mini" })
+    panel.incrementTurn({ inputTokens: 2000, outputTokens: 400, costUsd: 0.25 })
+    const body = stripAnsi(panel.renderDetailed())
+    expect(body).toContain("By model:")
+    expect(body).toContain("claude-sonnet-4-6:")
+    expect(body).toContain("gpt-4o-mini:")
+  })
+
+  test("unknown-model turn contributes tokens but null cost to its bucket", () => {
+    const panel = make({ model: "fictional-9000" })
+    panel.incrementTurn({ inputTokens: 100, outputTokens: 50 })
+    const b = panel.byModel()[0]
+    expect(b?.inputTokens).toBe(100)
+    expect(b?.costUsd).toBeNull()
+  })
+
+  test("disabled instance ⇒ byModel() empty", () => {
+    const panel = make({ enabled: false })
+    panel.incrementTurn({ inputTokens: 100, outputTokens: 50, costUsd: 0.5 })
+    expect(panel.byModel()).toEqual([])
+  })
+})
+
 // ── color-OFF determinism ───────────────────────────────────────────────
 
 describe("createCostPanel: deterministic render under color=none", () => {

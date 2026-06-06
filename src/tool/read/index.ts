@@ -1,11 +1,13 @@
 import { homedir } from "node:os"
 import { z } from "zod"
+import type { CodeParserPort } from "@/retrieval/code-parser"
 import { classifyPath } from "@/security"
 import { runtimeConfig } from "@/shared"
 import { defaultFileSystemPort, type FileSystemPort, FsJailError } from "@/storage"
 import { defineTool } from "../factory"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 import { isNotebook, renderNotebook } from "./ipynb"
+import { DEFAULT_OUTLINE_BUDGET, renderOutline } from "./outline"
 
 /** Recognise the two file-missing shapes the injected {@link FileSystemPort}
  *  raises: (a) the OS `ENOENT` (errno -2) from `stat()` via `@/storage`'s
@@ -268,6 +270,33 @@ const tryReadDedup = (
   return { ok: true, output: renderFileUnchanged(path, offset, limit) }
 }
 
+/** RFC jun-6 — try the outline render. Returns a `ToolResult` ONLY when the
+ *  caller requested `outline:true`, the `QUANTA_READ_OUTLINE` knob is on, a
+ *  parser is wired, AND the parse succeeds for a supported language. On ANY
+ *  miss (knob off, no parser, unsupported language, parse error) returns
+ *  `null` so the caller falls through to the normal line-range read — with a
+ *  one-line `(no outline: …)` note prepended via {@link OUTLINE_FALLBACK_NOTE}
+ *  when the request was made but could not be served. NO-THROW. */
+const tryRenderOutline = async (
+  parser: CodeParserPort | undefined,
+  path: string,
+  text: string,
+  budget: number | undefined,
+): Promise<ToolResult | null> => {
+  if (!runtimeConfig().readOutline) return null
+  if (parser === undefined) return null
+  const outcome = await parser.parse(path, text)
+  if (!outcome.ok) return null
+  const body = renderOutline(text, outcome.parsed, budget ?? DEFAULT_OUTLINE_BUDGET)
+  return { ok: true, output: body }
+}
+
+/** The note prepended to a line-range read when `outline:true` was requested
+ *  but could not be served (no parser / unsupported language / parse error /
+ *  knob off). Keeps the degrade explicit + actionable. */
+const OUTLINE_FALLBACK_NOTE =
+  "(no outline: unsupported language or outline disabled; showing line-range read)\n"
+
 const schema = z.object({
   path: z.string().describe("File path (absolute or relative to cwd)"),
   // `offset` is a 1-based line index: it must be a non-negative integer.
@@ -277,6 +306,19 @@ const schema = z.object({
   // values at the schema boundary with a clear validation error instead.
   offset: z.number().int().min(0).optional().describe("1-based line to start from"),
   limit: z.number().int().positive().optional().describe("Max lines to read (default 2000)"),
+  // RFC jun-6 — collapsed signatures+structure view. Inert (line-range read)
+  // unless the QUANTA_READ_OUTLINE knob is on AND a parser is wired AND the
+  // language is supported; otherwise gracefully degrades to a normal read.
+  outline: z
+    .boolean()
+    .optional()
+    .describe("Return a collapsed signatures+structure view instead of raw lines"),
+  outlineBudget: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Max chars for the outline (default ~4000)"),
 })
 
 type Input = z.infer<typeof schema>
@@ -287,7 +329,10 @@ const DEFAULT_LIMIT = 2000
  *  `fs` defaults to the real `@/storage`-backed port, so the exported
  *  {@link readTool} is byte-identical to the pre-port direct-call version;
  *  tests pass an in-memory port for isolation. */
-export const makeReadTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<Input> =>
+export const makeReadTool = (
+  fs: FileSystemPort = defaultFileSystemPort,
+  parser?: CodeParserPort,
+): Tool<Input> =>
   defineTool<Input>({
     name: "read",
     description:
@@ -320,6 +365,26 @@ export const makeReadTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
       // No-op when the guard is off (ctx.readFileState absent). UNCHANGED by H9.
       ctx.readFileState?.record(outcome.info.path, outcome.info.mtimeMs)
 
+      // RFC jun-6 — outline mode. When `outline:true` is requested AND served
+      // (knob on + parser wired + supported language + clean parse), return the
+      // collapsed signatures view INSTEAD of the line-range. It bypasses H9
+      // dedup (a different view of the same range) and prepends a `(no outline:
+      // …)` note when the request could not be served (degrades to the normal
+      // read below). NO-THROW. Inert (this whole block skipped) when `outline`
+      // is unset ⇒ every non-outline read is byte-identical.
+      if (input.outline === true) {
+        const outlined = await tryRenderOutline(
+          parser,
+          outcome.info.path,
+          outcome.text,
+          input.outlineBudget,
+        )
+        if (outlined !== null) {
+          yield { type: "result", result: outlined }
+          return
+        }
+      }
+
       // H9 read-side dedup — the EFFECTIVE range is the resolved (offset, limit)
       // pair `renderReadOk` actually slices on, so an implicit `limit` dedups
       // against an explicit one that resolves to the same window. Keyed by the
@@ -350,11 +415,14 @@ export const makeReadTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
           outcome.info.mtimeMs,
         )
       }
+      // When `outline:true` was requested but could not be served, prepend the
+      // explicit degrade note so the model knows why it got line-ranges.
+      const outlineNote = input.outline === true ? OUTLINE_FALLBACK_NOTE : ""
       yield {
         type: "result",
         result: {
           ok: true,
-          output: renderReadOk(outcome.text, input.offset, effLimit),
+          output: outlineNote + renderReadOk(outcome.text, input.offset, effLimit),
         },
       }
     },

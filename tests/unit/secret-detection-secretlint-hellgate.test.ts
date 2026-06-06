@@ -121,6 +121,36 @@ describe("B. translation table — secretlint rule → SecretKind", () => {
     }
   })
 
+  // isRecord array-handling safety (ADR-0173 alignment). `isGcpServiceAccountJson`
+  // narrows the parsed JSON with `isRecord` before reading `.type` etc. A JSON
+  // *array* IS `typeof "object"` and not null; the `!Array.isArray` guard makes
+  // it fail-closed so a service-account object wrapped in an array is NOT
+  // mis-escalated to `gcp-service-account` (it stays a plain private-key-block).
+  // (Defense-in-depth: the downstream `.type === "service_account"` check
+  // already rejected arrays, but the helper now agrees with every other
+  // `isRecord`/`asRecord` in the codebase.)
+  test("B7' — array-wrapped service-account JSON is NOT mis-classified as GCP", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "secretlint-gcp-arr-test-"))
+    try {
+      const pemBody = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".repeat(4)
+      const fakePem = `-----BEGIN PRIVATE KEY-----\\nMI${pemBody.slice(0, 200)}=\\n-----END PRIVATE KEY-----`
+      const obj = `{"type":"service_account","project_id":"x","private_key_id":"a1b2c3","private_key":"${fakePem}","client_email":"x@y.iam.gserviceaccount.com"}`
+      // Object root → escalated to gcp-service-account (control).
+      const pObj = join(dir, "sa.json")
+      writeFileSync(pObj, obj)
+      const objFindings = await secretlintScanner().scanFile(pObj)
+      expect(objFindings.some((f) => f.kind === "gcp-service-account")).toBe(true)
+      // Array root → NOT a record → no GCP escalation; stays private-key-block.
+      const pArr = join(dir, "sa-array.json")
+      writeFileSync(pArr, `[${obj}]`)
+      const arrFindings = await secretlintScanner().scanFile(pArr)
+      expect(arrFindings.some((f) => f.kind === "gcp-service-account")).toBe(false)
+      expect(arrFindings.some((f) => f.kind === "private-key-block")).toBe(true)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   test("B8 — OpenAI rule → kind=openai-api-key", async () => {
     const findings = await secretlintScanner().scanText(`KEY=${OPENAI_KEY}`)
     const hit = findings.find((f) => f.kind === "openai-api-key")

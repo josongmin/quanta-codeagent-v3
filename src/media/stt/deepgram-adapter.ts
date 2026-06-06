@@ -1,4 +1,12 @@
-import { abortReasonOf, err, errMessage, fetchWithDeadline, ok, type Result } from "@/shared"
+import {
+  abortReasonOf,
+  err,
+  errMessage,
+  fetchWithDeadline,
+  ok,
+  parseRetryAfterMs,
+  type Result,
+} from "@/shared"
 import type { AudioBlob } from "../voice/types"
 import type { SpeechToTextPort, TranscribeOpts } from "./port"
 import type { SttError, Transcript } from "./types"
@@ -18,13 +26,6 @@ export interface DeepgramAdapterOpts {
   readonly apiKey: string
   readonly fetchFn?: FetchLike
   readonly endpoint?: string
-}
-
-const parseRetryAfterMs = (h: string | null): number | undefined => {
-  if (h === null) return undefined
-  const n = Number(h)
-  if (!Number.isFinite(n) || n < 0) return undefined
-  return Math.round(n * 1000)
 }
 
 const mimeOk = (mime: string): boolean => mime === "audio/wav" || mime === "audio/mp3"
@@ -102,7 +103,7 @@ export const createDeepgramAdapter = (opts: DeepgramAdapterOpts): SpeechToTextPo
         return err({ kind: "auth-failed", status: res.status })
       }
       if (res.status === 429) {
-        const retry = parseRetryAfterMs(res.headers.get("retry-after"))
+        const retry = parseRetryAfterMs((name) => res.headers.get(name))
         return err(
           retry !== undefined
             ? { kind: "rate-limited", status: 429, retryAfterMs: retry }
