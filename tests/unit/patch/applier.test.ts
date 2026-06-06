@@ -316,6 +316,30 @@ describe("applyPatch — `@@` context-header anchor (D7)", () => {
     await expect(applyPatch(parsePatch(text), fs)).rejects.toBeInstanceOf(PatchApplyError)
   })
 
+  test("header ALSO repeated as the first context line still applies (zero-hit fallback)", async () => {
+    // A common emitter shape: the `@@ class B {` scope line is ALSO the first
+    // context line of the hunk. The floor (line AFTER the last header match)
+    // skips past `class B {`, so the scoped search finds NOTHING — it must fall
+    // back to a whole-file scan rather than throw. Red-on-injection: without the
+    // zero-hit fallback this throws PatchAnchorNotFoundError.
+    const fs = new MemFs({
+      "a.ts": ["class A {", "  return 0", "}", "class B {", "  return 1", "}", ""].join("\n"),
+    })
+    const text = [
+      "*** Begin Patch",
+      "*** Update File: a.ts",
+      "@@ class B {",
+      " class B {",
+      "-  return 1",
+      "+  return 2",
+      "*** End Patch",
+    ].join("\n")
+    await applyPatch(parsePatch(text), fs)
+    expect(fs.snapshot()["a.ts"]).toBe(
+      ["class A {", "  return 0", "}", "class B {", "  return 2", "}", ""].join("\n"),
+    )
+  })
+
   test("a header matching no line falls back to whole-file (byte-identical)", async () => {
     // `@@ class Z` matches nothing → whole-file fallback; the unique body is
     // still found and applied exactly as a header-less patch would.

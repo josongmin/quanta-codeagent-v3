@@ -402,10 +402,44 @@ function locateBlock(
   // D7: when an `@@ <header>` is present, scope the tier search to lines after
   // the header. Absent / unmatched header ⇒ floor 0 ⇒ whole-file (byte-ident).
   const floor = resolveAnchorFloor(workLines, contextHeader)
+  const scoped = locateFromFloor(workLines, oldBlock, floor, path, hunkIdx)
+  if (scoped !== null) return scoped
 
+  // D7 zero-hit fallback: the scoped search found NOTHING (both tiers null).
+  // This happens when the block's own first line coincides with the `@@` header
+  // (the floor skipped past it) or the block precedes the anchor. Retry the
+  // whole file so an `@@` patch is never WORSE than a header-less one — strictly
+  // additive. A multi-match AMBIGUITY in the scoped pass throws (not null), so it
+  // does NOT reach here; only a genuine zero-hit falls back. Skip when floor is
+  // already 0 (the scoped pass WAS the whole file).
+  if (floor > 0) {
+    const whole = locateFromFloor(workLines, oldBlock, 0, path, hunkIdx)
+    if (whole !== null) return whole
+  }
+
+  throw new PatchAnchorNotFoundError(
+    path,
+    hunkIdx,
+    "Hunk context not found (neither exact nor whitespace-tolerant match)",
+  )
+}
+
+/**
+ * Run the exact→trimmed tier search from a search floor. Returns the located
+ * `{ index, tier }`, or `null` when BOTH tiers find zero matches (so the caller
+ * can fall back). A multi-match ambiguity at either tier THROWS (it does not
+ * return null) — the anchor narrowed the region but the block is still
+ * non-unique, which is a real failure the caller must not paper over.
+ */
+function locateFromFloor(
+  workLines: string[],
+  oldBlock: string[],
+  floor: number,
+  path: string,
+  hunkIdx: number,
+): { index: number; tier: FuzzyTier } | null {
   const exact = locateAtTier(workLines, oldBlock, /*trimmed*/ false, "exact", floor, path, hunkIdx)
   if (exact !== null) return { index: exact, tier: "exact" }
-
   const trimmed = locateAtTier(
     workLines,
     oldBlock,
@@ -416,12 +450,7 @@ function locateBlock(
     hunkIdx,
   )
   if (trimmed !== null) return { index: trimmed, tier: "whitespace" }
-
-  throw new PatchAnchorNotFoundError(
-    path,
-    hunkIdx,
-    "Hunk context not found (neither exact nor whitespace-tolerant match)",
-  )
+  return null
 }
 
 /**

@@ -36,6 +36,33 @@ import {
 } from "./skill-gate"
 import type { StreamConsumeResult } from "./types"
 
+/**
+ * D5 (jun-7) — fold the provider's usage into the token-baseline box.
+ *
+ * The authoritative input count MUST include the cache-read + cache-creation
+ * buckets: Anthropic reports `inputTokens` as the cache-MISS portion only
+ * (`cache_read_input_tokens` / `cache_creation_input_tokens` are separate), so
+ * on a cache-HIT turn `inputTokens` alone is a few hundred tokens while the real
+ * prompt is ~100k. Using `inputTokens` alone would (a) fail the `>= sentEstimate`
+ * exactness gate on every cached turn (baseline never refreshes) and (b) — if
+ * the gate were loosened — under-count the true prompt by the cache-read amount,
+ * the exact under-trigger D5 exists to prevent. We therefore sum all three
+ * buckets and trust the result only when it is `exact` (>= our chars/4 estimate
+ * of the sent prompt) and a send-time wm count was recorded by
+ * `prepareTurnContext`. Pure + exported so the capture is red-on-injection
+ * testable without driving the whole stream.
+ */
+export const captureTokenBaseline = (
+  box: TurnState["tokenBaseline"],
+  ev: { inputTokens: number; cacheReadTokens?: number; cacheCreationTokens?: number },
+  sentEstimate: number,
+): void => {
+  if (box === undefined || box.sendCount === undefined) return
+  const fullInput = ev.inputTokens + (ev.cacheReadTokens ?? 0) + (ev.cacheCreationTokens ?? 0)
+  if (!Number.isFinite(fullInput) || fullInput < sentEstimate) return
+  box.current = { measuredInputTokens: fullInput, measuredAtMessageCount: box.sendCount }
+}
+
 async function* teeUsage(
   config: AgentConfig,
   src: AsyncIterable<StreamEvent>,
@@ -56,21 +83,7 @@ async function* teeUsage(
   for await (const ev of guarded) {
     if (ev.type === "usage") {
       emitUsage(config, ev, recorder, collector, taskSpend)
-      // D5 capture — trust the authoritative count only when it is `exact`
-      // (>= our chars/4 estimate of the sent prompt; a provider reporting a
-      // truncated/cached count below the estimate is NOT trusted). The
-      // send-time wm count was recorded by `prepareTurnContext`.
-      if (
-        tokenBaselineBox !== undefined &&
-        tokenBaselineBox.sendCount !== undefined &&
-        Number.isFinite(ev.inputTokens) &&
-        ev.inputTokens >= sentEstimate
-      ) {
-        tokenBaselineBox.current = {
-          measuredInputTokens: ev.inputTokens,
-          measuredAtMessageCount: tokenBaselineBox.sendCount,
-        }
-      }
+      captureTokenBaseline(tokenBaselineBox, ev, sentEstimate)
     }
     if (ev.type === "llm_continuation") emitLlmContinuation(config, ev)
     if (ev.type === "output_progress") {

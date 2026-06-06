@@ -9,9 +9,13 @@
 
 import { describe, expect, test } from "bun:test"
 import { buildBugCmd, renderBug } from "@/../src/apps/cli/bug-cmd"
-import { repoUrl, resolveVersion } from "@/../src/apps/cli/repo-info"
+import { repoUrl, resolveCommit, resolveVersion } from "@/../src/apps/cli/repo-info"
 import type { SlashContext } from "@/../src/apps/cli/slash-contract"
-import { buildVersionCmd, renderVersion } from "@/../src/apps/cli/version-cmd"
+import {
+  buildReleaseNotesCmd,
+  buildVersionCmd,
+  renderVersion,
+} from "@/../src/apps/cli/version-cmd"
 
 const capCtx = (): { ctx: SlashContext; lines: string[] } => {
   const lines: string[] = []
@@ -64,6 +68,65 @@ describe("HELL-VER-2 — repoUrl override", () => {
     ]) {
       expect(repoUrl({ QUANTA_REPO_URL: evil })).toBe(def)
     }
+  })
+
+  test("malformed/normalization-hostile overrides fall back to default (audit 8/9)", () => {
+    const def = "https://github.com/josongmin/quanta-codeagent-v3"
+    for (const evil of [
+      "https:evil", // schemeless (no //) → not a real https:// URL
+      "https:///etc/passwd", // empty host
+      "https://example.com/x#frag", // fragment would swallow appended path
+      "https://example.com/x?a=b", // query would swallow appended path
+      "https://user:pass@evil.example", // userinfo
+    ]) {
+      expect(repoUrl({ QUANTA_REPO_URL: evil })).toBe(def)
+    }
+  })
+
+  test("accepted override is returned CANONICAL (origin+pathname, no trailing slash)", () => {
+    expect(repoUrl({ QUANTA_REPO_URL: "https://gitlab.com/me/repo/" })).toBe(
+      "https://gitlab.com/me/repo",
+    )
+    // appended paths compose cleanly (no double slash, path not swallowed)
+    const out = renderBug([], { env: { QUANTA_REPO_URL: "https://gitlab.com/me/repo" } })
+    expect(out).toContain("https://gitlab.com/me/repo/issues/new?title=")
+  })
+})
+
+describe("HELL-VER-4 — control-char / ANSI sanitization (audit finding 7, bug)", () => {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: asserting strings are stripped of control bytes
+  const CONTROL = /[\x00-\x1f\x7f-\x9f]/
+
+  test("QUANTA_VERSION with embedded ESC/newline is stripped (no terminal-escape injection)", () => {
+    const v = resolveVersion({ QUANTA_VERSION: "1.0\x1b]0;PWNED\x07\nFile a bug: https://evil" })
+    expect(CONTROL.test(v)).toBe(false)
+    expect(v).not.toContain("\n")
+  })
+
+  test("renderVersion strips ESC/BEL from the version (structural \\n between lines is fine)", () => {
+    const out = renderVersion({ env: { QUANTA_VERSION: "9.9\x1b[31m\x07" } })
+    expect(out).not.toContain("\x1b")
+    expect(out).not.toContain("\x07")
+    expect(out).toContain("quanta 9.9")
+    // every line is free of C0/C1 control bytes once the structural newline split is removed
+    for (const line of out.split("\n")) expect(CONTROL.test(line)).toBe(false)
+  })
+
+  test("QUANTA_COMMIT control bytes stripped before the 12-char slice", () => {
+    const c = resolveCommit({ QUANTA_COMMIT: "\x1b]0;xabcdef123456" })
+    expect(c !== undefined && CONTROL.test(c)).toBe(false)
+  })
+})
+
+describe("HELL-VER-5 — /release-notes command (audit finding 10)", () => {
+  test("prints version + /releases URL (no double slash) + exit 0", async () => {
+    const { ctx, lines } = capCtx()
+    const code = await buildReleaseNotesCmd({ env: { QUANTA_VERSION: "1.2.3" } }).run([], ctx)
+    expect(code).toBe(0)
+    const out = lines.join("")
+    expect(out).toContain("quanta 1.2.3")
+    expect(out).toContain("github.com/josongmin/quanta-codeagent-v3/releases")
+    expect(out).not.toContain("//releases")
   })
 })
 

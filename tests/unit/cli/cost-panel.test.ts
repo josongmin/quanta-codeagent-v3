@@ -263,6 +263,52 @@ describe("createCostPanel.byModel(): per-model attribution (§23.5)", () => {
   })
 })
 
+// ── §23.5 audit hardening (model sanitize / cost clamp / fmt / cache-read) ──
+
+describe("createCostPanel: audit hardening", () => {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: asserting control bytes are stripped
+  const CONTROL = /[\x00-\x1f\x7f-\x9f]/
+
+  test("model id with ESC/OSC bytes is sanitized at construction (no terminal injection)", () => {
+    const panel = make({ model: "evil\x1b]0;PWNED\x07\nFAKE" })
+    expect(CONTROL.test(panel.snapshot().model)).toBe(false)
+    expect(CONTROL.test(panel.render())).toBe(false)
+  })
+
+  test("model id is sanitized on mid-session update() too", () => {
+    const panel = make({ model: "ok" })
+    panel.update({ model: "x\x1b[31mRED" })
+    expect(panel.snapshot().model).toBe("xRED")
+  })
+
+  test("negative caller cost is clamped to 0 (no negative bill)", () => {
+    const panel = make({ model: "claude-sonnet-4-6" })
+    panel.incrementTurn({ inputTokens: 1, outputTokens: 1, costUsd: 1 })
+    panel.incrementTurn({ inputTokens: 1, outputTokens: 1, costUsd: -5 })
+    expect(panel.snapshot().totalCostUsd).toBeCloseTo(1, 6)
+    expect(panel.byModel()[0]?.costUsd).toBeCloseTo(1, 6)
+  })
+
+  test("formatTokens: <10k stays comma-grouped, >=10k goes k-form (via render)", () => {
+    const a = make()
+    a.incrementTurn({ inputTokens: 9999, outputTokens: 0 })
+    expect(stripAnsi(a.render())).toContain("9,999 in")
+    const b = make()
+    b.incrementTurn({ inputTokens: 12_000, outputTokens: 0 })
+    expect(stripAnsi(b.render())).toContain("12.0k in")
+  })
+
+  test("per-model breakdown row includes cache-read (reconciles with aggregate)", () => {
+    const panel = make({ model: "claude-sonnet-4-6" })
+    panel.incrementTurn({ inputTokens: 1000, outputTokens: 200, cacheReadTokens: 500, costUsd: 0.5 })
+    panel.update({ model: "gpt-4o-mini" })
+    panel.incrementTurn({ inputTokens: 2000, outputTokens: 400, cacheReadTokens: 800, costUsd: 0.25 })
+    const body = stripAnsi(panel.renderDetailed())
+    expect(body).toMatch(/claude-sonnet-4-6:.*500 cache/)
+    expect(body).toMatch(/gpt-4o-mini:.*800 cache/)
+  })
+})
+
 // ── color-OFF determinism ───────────────────────────────────────────────
 
 describe("createCostPanel: deterministic render under color=none", () => {

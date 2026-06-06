@@ -76,18 +76,29 @@ const hitPath = (h: SearchHit): string => {
   return typeof md?.path === "string" ? md.path : h.id
 }
 
+/** ONE separator-space normalizer used by BOTH `normalizeScope` and `inScope`
+ *  so the scope and the hit-path it is compared against always live in the same
+ *  form (the prior split — scope kept `\`/`./`, path folded them — silently
+ *  filtered out 100% of hits for a backslash / `./`-prefixed scope). Folds
+ *  `\`→`/`, strips ALL repeated leading `./`, and strips trailing slashes.
+ *  Pure string transform; never touches the filesystem. */
+const foldPathish = (s: string): string =>
+  s.replace(/\\/g, "/").replace(/^(\.\/)+/, "").replace(/\/+$/, "")
+
 /** Normalize a model-supplied `scope` to a workspace-relative directory
  *  prefix. Returns `null` when the scope escapes the workspace (absolute path,
  *  or any `..` segment) so the caller can reject with a typed error — the same
  *  posture the `grep`/`glob` tools take on a traversal pattern. An empty/blank
- *  scope normalizes to `""` (no filter). Leading `./` and trailing slashes are
- *  stripped so prefix-matching is exact. */
+ *  scope — AND the current-directory family (`.`, `./`, `././`) — normalizes to
+ *  `""` (no filter): a model passing `.` means "the whole workspace", not "a
+ *  directory literally named dot" (which would match nothing). */
 const normalizeScope = (scope: string): string | null => {
   const trimmed = scope.trim()
   if (trimmed === "") return ""
   if (isAbsolute(trimmed)) return null
-  const cleaned = trimmed.replace(/^\.\//, "").replace(/[/\\]+$/, "")
-  if (cleaned.split(/[/\\]/).includes("..")) return null
+  const cleaned = foldPathish(trimmed)
+  if (cleaned === "" || cleaned === ".") return ""
+  if (cleaned.split("/").includes("..")) return null
   return cleaned
 }
 
@@ -104,13 +115,13 @@ const resolveScope = (
   return { ok: true, scope: norm }
 }
 
-/** True when `path` is inside (or equal to) the relative `scope` prefix.
- *  Backslashes are folded to `/` and a leading `./` stripped so a hit path
- *  recorded on either OS matches a normalized scope. `scope === ""` ⇒ always
- *  true (no filter). */
+/** True when `path` is inside (or equal to) the relative `scope` prefix. Both
+ *  sides go through {@link foldPathish} so a hit path recorded on either OS (or
+ *  with a `./` prefix) matches a normalized scope. `scope === ""` ⇒ always true
+ *  (no filter). */
 const inScope = (path: string, scope: string): boolean => {
   if (scope === "") return true
-  const p = path.replace(/\\/g, "/").replace(/^\.\//, "")
+  const p = foldPathish(path)
   return p === scope || p.startsWith(`${scope}/`)
 }
 

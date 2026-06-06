@@ -184,7 +184,12 @@ describe("readTool", () => {
     // run of a 2-unit emoji so SOME pair lands on whatever boundary the cap
     // chooses, then assert the rendered prefix contains no lone surrogate.
     const emoji = "😀" // U+1F600, one surrogate pair (2 UTF-16 units)
-    const line = emoji.repeat(50_000) // 100k UTF-16 units, all pairs
+    // ODD single-unit prefix so the surrogate pairs sit at ODD start indices.
+    // With an even MAX_LINE_CHARS the raw cut then lands BETWEEN a pair's two
+    // units (charCodeAt(cut-1) is a HIGH surrogate) — forcing the backoff branch
+    // to fire. Without the prefix every pair is on an even boundary and the cut
+    // is always clean, so the backoff is never exercised (the old tautology).
+    const line = `a${emoji.repeat(50_000)}` // 1 + 100k UTF-16 units
     writeFileSync(f, line)
     const r = await run({ path: f })
     expect(r.ok).toBe(true)
@@ -208,6 +213,18 @@ describe("readTool", () => {
     expect(out).toMatch(/large file/i)
     // Content still present (first line numbered).
     expect(out).toContain("1\tline of text here")
+  })
+
+  test("oversized nudge is SUPPRESSED when the caller is already paging (offset set) (D8)", async () => {
+    const f = join(dir, "big-paged.txt")
+    const big = "line of text here\n".repeat(60_000) // > nudge threshold
+    writeFileSync(f, big)
+    const r = await run({ path: f, offset: 5000, limit: 10 })
+    expect(r.ok).toBe(true)
+    const out = r.output ?? ""
+    // The caller IS paging — advising "prefer offset/limit" would be a false
+    // positive, so the nudge must NOT appear.
+    expect(out).not.toMatch(/large file/i)
   })
 
   test("normal small files are byte-identical (no cap, no nudge) (D8)", async () => {

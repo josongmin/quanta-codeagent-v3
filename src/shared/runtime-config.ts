@@ -1236,10 +1236,14 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     mcpConnectors: env["QUANTA_MCP_CONNECTORS"] === "1",
     // N3 — strict `=== "1"` opt-in. Default false ⇒ no MCP resource/prompt tools.
     mcpResources: env["QUANTA_MCP_RESOURCES"] === "1",
-    // §19.1 — strict `=== "1"` opt-in. Default false ⇒ MCP tool annotations are
-    // ignored (annotationsHonored stays false; every MCP tool keeps its
-    // conservative read/concurrency classification, byte-identical).
-    mcpToolAnnotations: env["QUANTA_MCP_TOOL_ANNOTATIONS"] === "1",
+    // §19.1 — opt-in honoring of server-declared tool annotations. SSOT with the
+    // `mcp-tool-annotations` KNOB (Finding 2): both channels share the standard
+    // boolean vocabulary (`1`/`true`/`on`) via `parseBool`, so `=on`/`=true`
+    // activate the LIVE bridge identically to `=1` (the knob registry/telemetry
+    // no longer disagree with the consumer). Unset ⇒ false (annotationsHonored
+    // stays false; every MCP tool keeps its conservative read/concurrency
+    // classification, byte-identical default).
+    mcpToolAnnotations: parseBool(env["QUANTA_MCP_TOOL_ANNOTATIONS"]),
     progressUpdate: env["QUANTA_PROGRESS_UPDATE"] === "1",
     // #8 — strict `=== "1"` opt-in. Default false ⇒ no mid-turn capture facade.
     midTurnCapture: env["QUANTA_MIDTURN_CAPTURE"] === "1",

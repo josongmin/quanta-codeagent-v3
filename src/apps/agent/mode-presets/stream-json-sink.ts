@@ -102,7 +102,16 @@ export class StreamJsonSink implements StreamPort {
   emit(event: AgentEvent): void {
     const session = this.#toSessionEvent(event)
     if (session === undefined) return // unmapped / partial-gated ⇒ drop
-    const line = encodeSessionEvent(session)
+    // Encode INSIDE the no-throw boundary: a future mapping that introduces a
+    // non-JSON-safe field (BigInt / circular ref) would otherwise throw out of
+    // `emit` straight into the agent loop. Degrade to a logged drop instead.
+    let line: string
+    try {
+      line = encodeSessionEvent(session)
+    } catch (e) {
+      logger.warn(`[stream-json] encode failed (event dropped): ${errMessage(e)}`)
+      return
+    }
     if (this.#format === "stream-json") {
       // One NDJSON line per event; the encoder emits NO trailing newline, so
       // THIS sink owns the `\n` framing.

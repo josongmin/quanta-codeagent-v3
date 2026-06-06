@@ -111,9 +111,14 @@ export interface EscalatingKill {
  */
 export const escalatingKill = (proc: KillableChild, killer?: ProcessTreeKiller): EscalatingKill => {
   // Route a single signal either through the whole-tree killer (when wired AND
-  // the child has a pid) or the legacy single-PID `proc.kill()`. Both are
-  // no-op-safe after the child exits.
-  const useTree = killer !== undefined && typeof proc.pid === "number"
+  // the child has a POSITIVE pid) or the legacy single-PID `proc.kill()`. Both
+  // are no-op-safe after the child exits. The `pid > 0` guard is load-bearing:
+  // `signalTree(0)` would `process.kill(0, …)` the CALLER's whole process group
+  // (POSIX pid 0 = every process in the caller's group), self-terminating the
+  // agent. Bun.spawn always yields a positive pid for a live child, so this is a
+  // defensive backstop — and it matches the explicit `pid > 0` guard the
+  // pty-backend already applies (the three spawn sites must agree).
+  const useTree = killer !== undefined && typeof proc.pid === "number" && proc.pid > 0
   const sigterm = (): void => {
     if (useTree) (killer as ProcessTreeKiller).signalTree(proc.pid as number, "SIGTERM")
     else proc.kill()

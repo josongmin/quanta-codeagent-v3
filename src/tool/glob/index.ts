@@ -144,10 +144,12 @@ export const globTool = defineTool<Input>({
       return
     }
 
-    // Most-recently-modified first (mtime DESCENDING). Ties broken by path so
-    // the order is deterministic. The cap is applied AFTER the sort, so the
-    // newest files survive truncation.
-    survivors.sort((a, b) => b.mtimeMs - a.mtimeMs || a.rel.localeCompare(b.rel))
+    // Most-recently-modified first (mtime DESCENDING). Ties broken by path with
+    // a BYTE/code-unit compare (NOT localeCompare — locale ordering is
+    // machine/ICU-dependent and would make the output non-deterministic across
+    // environments). The cap is applied AFTER the sort, so the newest files
+    // survive truncation.
+    survivors.sort((a, b) => b.mtimeMs - a.mtimeMs || (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0))
     const more = survivors.length > MAX ? `\n… (truncated at ${MAX})` : ""
     const output =
       survivors

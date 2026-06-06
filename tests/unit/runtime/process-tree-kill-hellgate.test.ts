@@ -138,4 +138,22 @@ describe("escalatingKill wired with a ProcessTreeKiller (D1 wiring)", () => {
     expect(child.directKills).toBe(1)
     disarm()
   })
+
+  test("pid 0 NEVER routes through signalTree (would signal the caller's group)", () => {
+    // POSIX `process.kill(0, …)` signals EVERY process in the CALLER's process
+    // group — signalTree(0) would self-terminate the agent. A child whose pid is
+    // 0 (defensive; Bun never yields it for a live child) MUST fall back to the
+    // single-PID proc.kill(), matching the pty-backend's explicit `pid > 0`
+    // guard. Red-on-injection: drop `&& proc.pid > 0` and signalTree(0) fires.
+    const calls: Array<{ pid: number; signal: string }> = []
+    const killer: ProcessTreeKiller = {
+      signalTree: (pid, signal) => calls.push({ pid, signal }),
+    }
+    const child = fakeChild(0)
+    const { kill, disarm } = escalatingKill(child, killer)
+    kill()
+    expect(calls).toEqual([]) // signalTree NEVER called with pid 0
+    expect(child.directKills).toBe(1) // fell back to legacy single-PID kill
+    disarm()
+  })
 })

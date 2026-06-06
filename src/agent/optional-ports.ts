@@ -134,6 +134,11 @@ export const wireOptionalAgentPorts = <T extends OptionalPortBase>(
   // FACTORY behind `QUANTA_CODE_MODE=1`. Default-OFF byte-identical when unset.
   next = wireCodeCellDispatch(next, env)
 
+  // P12 — wire the REAL `closeout-critic` port behind `QUANTA_CLOSEOUT_CRITIC`.
+  // Default-OFF byte-identical when unset; gate ON but no reviewer subagent
+  // available ⇒ no port ⇒ the loop fails open (byte-identical completion).
+  next = wireCloseoutCritic(next, env)
+
   // RFC-02/04 — subagent batch + introspect + followup tool gates. Extracted
   // so this function stays under biome's cognitive-complexity cap. Each gate is
   // default-OFF (`=on` only); unset ⇒ `next` returned verbatim (byte-identical).
@@ -186,6 +191,140 @@ const wireCodeCellDispatch = <T extends OptionalPortBase>(base: T, env: Optional
       ? { codeCellSurfaceTools: () => config.registry.toolNames() }
       : {}),
   } as T
+}
+
+/**
+ * P12 — composition-root wire for the `closeout-critic` PORT (FINDING C). When
+ * `QUANTA_CLOSEOUT_CRITIC` is truthy (the SAME knob that flips
+ * `cfg.closeoutCritic.enabled` via `wireInteractiveKnobs`), inject a REAL
+ * `CloseoutCritic` adapter backed by the EXISTING reviewer subagent
+ * infrastructure (`materializeReviewerAgent`), so the feature is FUNCTIONAL
+ * rather than inert (an enabled-but-portless config always fails open to a
+ * no-op).
+ *
+ * The adapter is DI: the loop never hardcodes a reviewer — it only ever calls
+ * `cfg.closeoutCritic.critic`. Here we ADAPT the reviewer runner into the critic
+ * port shape (request → verdict) by running a read-only review subagent over the
+ * draft final answer + tool history and decoding its JSON reply into an
+ * ADVISORY `CloseoutCriticVerdict` (never blocks completion — see
+ * `closeout-critic.ts`).
+ *
+ * Default-OFF byte-identical (RFC §1.2):
+ *   - env unset / not truthy ⇒ `base` returned UNCHANGED (no port, no slot).
+ *   - knob ON but `config.subagent` absent ⇒ `materializeReviewerAgent` returns
+ *     `undefined` ⇒ NO port wired ⇒ the loop fails open (byte-identical
+ *     completion). Reviewer port CONSTRUCTION failing therefore degrades to the
+ *     existing fail-open path, never a crash.
+ *   - caller-override-precedence (ADR-0332): a pre-set `closeoutCritic.critic`
+ *     is preserved verbatim; we only fill an ABSENT port.
+ *
+ * The knob's `apply` MERGES `{ ...cfg.closeoutCritic, enabled: true }`, so the
+ * port we set here survives the subsequent `enabled` fold (and vice-versa: the
+ * order of the two wires does not matter — each only fills its own slot).
+ */
+const wireCloseoutCritic = <T extends OptionalPortBase>(base: T, env: OptionalPortEnv): T => {
+  const raw = env[QUANTA_CLOSEOUT_CRITIC_ENV]
+  if (raw === undefined || !CLOSEOUT_CRITIC_TRUTHY.has(raw)) return base
+  // Caller-override-precedence — never overwrite a host-supplied critic.
+  if (base.closeoutCritic?.critic !== undefined) return base
+  const critic = buildReviewerBackedCloseoutCritic(base as unknown as AgentConfig)
+  // No reviewer subagent available ⇒ NO port ⇒ fail-open (byte-identical).
+  if (critic === undefined) return base
+  return {
+    ...base,
+    closeoutCritic: { ...base.closeoutCritic, critic },
+  } as T
+}
+
+/** P12 — adapt the EXISTING reviewer subagent (`materializeReviewerAgent`) into
+ *  the {@link CloseoutCritic} port shape. Returns `undefined` when no reviewer
+ *  can be materialized (no `config.subagent`) ⇒ the wire fails open. The adapter
+ *  runs a READ-ONLY review child (`toolFilter` read/grep/glob, `taskKind:
+ *  "review"`) over the draft answer + name-only tool history and decodes its
+ *  reply into an advisory verdict. A failed/garbage child ⇒ a `denied`
+ *  ADVISORY verdict (the host/UI sees the second opinion); it NEVER throws and
+ *  NEVER blocks (the loop ignores the verdict for control flow). */
+const buildReviewerBackedCloseoutCritic = (config: AgentConfig): CloseoutCritic | undefined => {
+  const reviewer = materializeReviewerAgent(config)
+  if (reviewer === undefined) return undefined
+  return async (req): Promise<CloseoutCriticVerdict> => {
+    const result = await reviewer({
+      prompt: closeoutCriticPrompt(req.finalText, req.history),
+      depth: 1,
+      taskKind: "review",
+      toolFilter: ["read", "grep", "glob"],
+      ...(req.signal !== undefined ? { signal: req.signal } : {}),
+    })
+    if (!result.ok) {
+      return {
+        outcome: "denied",
+        rationale: `critic reviewer unavailable: ${result.finalText || "no result"}`,
+        riskLevel: "medium",
+      }
+    }
+    return decodeCloseoutVerdict(result.finalText)
+  }
+}
+
+/** Render the closeout-critic review prompt. Mirrors the guardian-reviewer
+ *  prompt posture but framed for a turn-closeout second opinion: the child
+ *  decides whether the agent's DRAFT final answer is acceptable as the turn's
+ *  conclusion, replying with the same JSON envelope the guardian uses. */
+const closeoutCriticPrompt = (
+  finalText: string,
+  history: ReadonlyArray<{ name: string }> | undefined,
+): string => {
+  const tools = history !== undefined && history.length > 0 ? history.map((h) => h.name).join(", ") : "(none)"
+  return [
+    "You are a second-opinion critic at an agent turn's CLOSEOUT.",
+    "The agent is about to declare the turn complete. Decide whether the draft",
+    "final answer is acceptable as the conclusion, given the tools it ran.",
+    "Respond with JSON only.",
+    "",
+    "Decision rules:",
+    '- return {"outcome":"approved",...} when the draft answer is acceptable to ship.',
+    '- return {"outcome":"denied",...} when the agent should keep working',
+    "  (claims unverified, task incomplete, obvious gap).",
+    "",
+    `Tools invoked this turn: ${tools}`,
+    "Draft final answer:",
+    "```",
+    finalText,
+    "```",
+    "",
+    'Output shape: JSON only: {"outcome":"approved"|"denied","rationale":"string","riskLevel?":"low"|"medium"|"high"}',
+  ].join("\n")
+}
+
+/** Decode the reviewer child's reply into an advisory {@link
+ *  CloseoutCriticVerdict}. Malformed / non-JSON output ⇒ a `denied` advisory
+ *  (surfaced as the second opinion, never a throw — the loop survives any
+ *  reviewer output). NO Zod here (the verdict is advisory-only; a missing field
+ *  degrades to a safe default rather than a hard parse failure). */
+const decodeCloseoutVerdict = (finalText: string): CloseoutCriticVerdict => {
+  let decoded: unknown
+  try {
+    decoded = JSON.parse(finalText)
+  } catch {
+    return { outcome: "denied", rationale: "critic returned non-JSON output", riskLevel: "medium" }
+  }
+  if (typeof decoded !== "object" || decoded === null) {
+    return { outcome: "denied", rationale: "critic returned a non-object reply", riskLevel: "medium" }
+  }
+  const rec = decoded as Record<string, unknown>
+  const outcome = rec.outcome === "approved" ? "approved" : "denied"
+  const rationale = typeof rec.rationale === "string" && rec.rationale.length > 0
+    ? rec.rationale
+    : "(no rationale)"
+  const riskLevel =
+    rec.riskLevel === "low" || rec.riskLevel === "medium" || rec.riskLevel === "high"
+      ? rec.riskLevel
+      : undefined
+  return {
+    outcome,
+    rationale,
+    ...(riskLevel !== undefined ? { riskLevel } : {}),
+  }
 }
 
 /** Mailbox factory shared with the `QUANTA_SUBAGENT_MAILBOX` gate so a

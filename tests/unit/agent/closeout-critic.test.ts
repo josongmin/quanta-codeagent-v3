@@ -9,8 +9,9 @@
  *      fail-open completion; a "denied" verdict ⇒ surfaced on the EXISTING
  *      `recovery`/`closeout` event WITHOUT blocking the completion.
  */
-import { describe, expect, test } from "bun:test"
+import { describe, expect, jest, test } from "bun:test"
 import {
+  CLOSEOUT_CRITIC_TIMEOUT_MS,
   type CloseoutCritic,
   type CloseoutCriticConfig,
   runCloseoutCritic,
@@ -120,6 +121,61 @@ describe("runCloseoutCritic — pure helper", () => {
     }
     const out = await runCloseoutCritic({ enabled: true, critic }, { finalText: "x" })
     expect(out?.detail).toBe("critic:unavailable: boom")
+  })
+
+  test("CLOSEOUT_CRITIC_TIMEOUT_MS is the documented 30s bound (mirrors command-hook timeout)", () => {
+    expect(CLOSEOUT_CRITIC_TIMEOUT_MS).toBe(30_000)
+  })
+
+  test("HANGING critic (never resolves) ⇒ fail-open via TIMEOUT within the bound", async () => {
+    jest.useFakeTimers()
+    try {
+      // A critic whose promise NEVER settles — only the bounded timeout can
+      // unstick the seal. The catch handler alone could not (it only sees a
+      // throw/reject), so this proves the race.
+      const wedged: CloseoutCritic = () => new Promise<never>(() => {})
+      const p = runCloseoutCritic({ enabled: true, critic: wedged }, { finalText: "x" })
+      jest.advanceTimersByTime(CLOSEOUT_CRITIC_TIMEOUT_MS)
+      const out = await p
+      expect(out?.detail).toBe("critic:unavailable: timed out")
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  test("HANGING critic + abort mid-flight ⇒ fail-open immediately (does NOT wait the full bound)", async () => {
+    const controller = new AbortController()
+    const wedged: CloseoutCritic = () => new Promise<never>(() => {})
+    const p = runCloseoutCritic(
+      { enabled: true, critic: wedged },
+      { finalText: "x", signal: controller.signal },
+    )
+    controller.abort()
+    const out = await p
+    expect(out?.detail).toBe("critic:unavailable: timed out")
+  })
+
+  test("ALREADY-aborted signal ⇒ fail-open WITHOUT invoking the critic", async () => {
+    let called = false
+    const critic: CloseoutCritic = async () => {
+      called = true
+      return { outcome: "approved", rationale: "ok" }
+    }
+    const out = await runCloseoutCritic(
+      { enabled: true, critic },
+      { finalText: "x", signal: AbortSignal.abort() },
+    )
+    expect(out?.detail).toBe("critic:unavailable: timed out")
+    expect(called).toBe(false)
+  })
+
+  test("fast critic still wins the race (timeout never fires for a prompt verdict)", async () => {
+    const critic: CloseoutCritic = async () => ({ outcome: "approved", rationale: "quick" })
+    const out = await runCloseoutCritic(
+      { enabled: true, critic },
+      { finalText: "x", signal: new AbortController().signal },
+    )
+    expect(out?.detail).toBe("critic:approved: quick")
   })
 
   test("request carries finalText + name-only history + signal", async () => {

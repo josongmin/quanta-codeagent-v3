@@ -6,9 +6,9 @@ order: 112
 maturity: L3
 status: stable
 ui_surfaces: [n-a]
-monitoring: recovery-event
+monitoring: partial
 modes: [n-a]
-configurable: knob
+configurable: integrated
 owners: ["@songmin"]
 labels: [surface:core, tier:core, default-off]
 depends_on: [fallback-kinds-policy]

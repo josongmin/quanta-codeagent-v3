@@ -21,9 +21,16 @@
  * garbage / empty / whitespace return `undefined` so the caller falls through to
  * the next layer (NOT a silent "off"). No heuristics.
  *
- * `apply` sets `AgentConfig.mcpToolAnnotations`, which the composition root reads
- * when assembling the `loadMcpTools` opts (`annotationsHonored`). No
- * `costMultiplier` (pure policy selection — zero added matrix budget).
+ * SSOT (Finding 2): the SOLE LIVE channel is the env var, read by the
+ * composition root via `runtimeConfig().mcpToolAnnotations` when assembling the
+ * `loadMcpTools` opts (`annotationsHonored`). That parse shares THIS knob's
+ * truthy vocabulary (`{1,on,true}`, via `parseBool`), so the knob registry /
+ * telemetry can never disagree with the consumer. The previous `apply` wrote
+ * `AgentConfig.mcpToolAnnotations`, but NOBODY read it (the bridge uses the
+ * runtime-config path) — so `apply` is now an identity no-op (it still
+ * advertises the knob in the registry for telemetry / `--help`, but mutates no
+ * config field). No `costMultiplier` (pure policy selection — zero added matrix
+ * budget).
  */
 
 import type { AgentConfig } from "@/agent"
@@ -38,15 +45,11 @@ const parseMcpToolAnnotations = (raw: string | undefined): true | undefined => {
   return TRUTHY.has(raw) ? true : undefined
 }
 
-const applyMcpToolAnnotations = (
-  cfg: AgentConfig,
-  value: true,
-  ctx: { surface: Surface },
-): AgentConfig => {
-  if (value !== true) return cfg
-  if (!SURFACES.includes(ctx.surface)) return cfg
-  return { ...cfg, mcpToolAnnotations: true }
-}
+/** SSOT (Finding 2) — identity no-op: the live channel is `runtimeConfig`
+ *  (env→`mcpToolAnnotations`), NOT `AgentConfig`. The knob stays registered (so
+ *  the env var is discoverable + telemetered) but writes no config field, since
+ *  the former `AgentConfig.mcpToolAnnotations` write was dead. */
+const applyMcpToolAnnotations = (cfg: AgentConfig, _value: true): AgentConfig => cfg
 
 export const mcpToolAnnotationsKnob: Knob<true> = {
   id: "mcp-tool-annotations",

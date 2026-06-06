@@ -96,7 +96,9 @@ const renderReadOk = (text: string, offset: number | undefined, limit: number): 
   const body = numbered === "" ? "(empty file)" : numbered + note
   // D8 soft nudge: a large file gets a one-line advisory PREPENDED (non-blocking
   // — content still follows). Estimated via chars/4, the agent's coarse proxy.
-  if (text.length / 4 > OVERSIZED_NUDGE_TOKENS) {
+  // Suppressed when the caller is ALREADY paging (`offset` set) — advising
+  // "prefer offset/limit" to someone using offset is a false positive.
+  if (offset === undefined && text.length / 4 > OVERSIZED_NUDGE_TOKENS) {
     return `… (large file — prefer offset/limit or grep to avoid flooding context)\n${body}`
   }
   return body

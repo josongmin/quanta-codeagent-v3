@@ -106,11 +106,20 @@ export interface CostPanelOptions {
 /** Compact token formatter — "1,247" / "12.3k" / "1.20M". Mirrors the
  *  turn-indicator formatter shape so the two surfaces look consistent. */
 const formatTokens = (n: number): string => {
-  if (n < 1000) return n.toLocaleString("en-US")
   if (n < 10_000) return n.toLocaleString("en-US")
   if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`
   return `${(n / 1_000_000).toFixed(2)}M`
 }
+
+/** Strip C0/C1/DEL control bytes from a model id before it is interpolated into
+ *  a status line or the boxed `/cost` report. A model id ultimately comes from
+ *  operator config, but an embedded ANSI/OSC escape would corrupt the box
+ *  border or rewrite the terminal title — same terminal-injection defense the
+ *  notify/auto-title slices apply. Cap keeps a pathological id from blowing out
+ *  the box width. */
+const sanitizeModel = (m: string): string =>
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: deliberately stripping control bytes
+  m.replace(/[\x00-\x1f\x7f-\x9f]/g, "").slice(0, 64)
 
 /** Format a USD total with sub-cent precision for small spends and 2-decimal
  *  precision once the bill exceeds $1. `null` ⇒ "n/a" (unknown model). */
@@ -151,7 +160,7 @@ export const createCostPanel = (opts: CostPanelOptions): CostPanel => {
     outputTokens: 0,
     cacheReadTokens: 0,
     totalCostUsd: null,
-    model: opts.model,
+    model: sanitizeModel(opts.model),
   }
 
   // §23.5 — per-model cumulative buckets. Keyed by the model active at each
@@ -205,6 +214,9 @@ export const createCostPanel = (opts: CostPanelOptions): CostPanel => {
       // the closed key list keeps the operation safe at runtime.
       ;(state[k] as unknown) = v
     }
+    // Model id may arrive via a mid-session patch (e.g. /retry-with) — keep the
+    // same control-byte defense as construction so render() can't be poisoned.
+    state.model = sanitizeModel(state.model)
   }
 
   // Deterministic model ordering — byte compare (avoids locale drift).
@@ -244,8 +256,13 @@ export const createCostPanel = (opts: CostPanelOptions): CostPanel => {
       state.cacheReadTokens += cacheTok
       // Resolve cost ONCE: caller-provided > derived via pricing > null. Used
       // for BOTH the aggregate and the per-model bucket so they never diverge.
-      const turnCost =
+      const rawCost =
         usage.costUsd !== undefined ? usage.costUsd : costUsd(state.model, inTok, outTok, cacheTok)
+      // Clamp a finite negative cost to 0 — symmetric with the Math.max(0, …)
+      // token clamps above. A negative bill (from a buggy/hostile upstream cost)
+      // must never drive the cumulative total below zero.
+      const turnCost =
+        rawCost !== null && Number.isFinite(rawCost) ? Math.max(0, rawCost) : rawCost
       accumulateCost(turnCost)
       // §23.5 — attribute to the model active at this turn.
       const b = bucketFor(state.model)
@@ -289,9 +306,12 @@ export const createCostPanel = (opts: CostPanelOptions): CostPanel => {
         lines.push("")
         lines.push("By model:")
         for (const [model, b] of sortedModelEntries()) {
+          // Include cache-read so the per-model rows reconcile against the
+          // aggregate `Cache read:` row above (parity with the box totals).
           lines.push(
             `  ${model}: ${b.inputTokens.toLocaleString("en-US")} in / ` +
-              `${b.outputTokens.toLocaleString("en-US")} out · ${formatUsd(b.costUsd)}`,
+              `${b.outputTokens.toLocaleString("en-US")} out / ` +
+              `${b.cacheReadTokens.toLocaleString("en-US")} cache · ${formatUsd(b.costUsd)}`,
           )
         }
       }
