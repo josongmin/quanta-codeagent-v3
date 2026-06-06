@@ -271,6 +271,10 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   subagent_fork: "bash_mutating",
   subagent_poll: null,
   subagent_await: null,
+  // ADR-0287 — poll_deferred: read-only poll of a deferred async-tool result
+  // (caller-wire, gated on QUANTA_ASYNC_TOOLS). Pure read, plan-safe like
+  // subagent_poll. Classified so plan-mode dispatch never trips UnknownToolError.
+  poll_deferred: null,
   // Read-only budget surface (ADR-0136). Pure render of the in-memory
   // ledger; no FS / shell / network touch. Safe in plan mode.
   budget_status: null,

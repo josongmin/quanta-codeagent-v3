@@ -3,12 +3,12 @@ title: Account rate-limit snapshot — proactive empty-bucket backoff from *-rat
 section: 7
 subsystem: LLM resilience — proactive rate-limit (complements B3 retry-after)
 order: 21
-maturity: L2
-status: new
+maturity: L3
+status: refined
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive, headless]
-configurable: planned
+configurable: integrated
 config_refs:
   env:
     - QUANTA_RATELIMIT_PROACTIVE
@@ -54,31 +54,38 @@ evidence:
     - src/llm/ratelimit-snapshot/policy.ts
     - src/llm/ratelimit-snapshot/notice.ts
     - src/llm/ratelimit-snapshot/index.ts
+    # jun-6 HOST WIRING:
+    # (a) header capture — OPTIONAL `onResponseHeaders` success-path hook on
+    #     StreamInput, consumed by the REAL adapters: Anthropic via
+    #     `.withResponse()` (absent ⇒ plain await, byte-identical), OpenAI
+    #     Responses via the raw fetch `Response.headers` after success validation.
+    - src/llm/types.ts
+    - src/llm/adapters/anthropic.ts
+    - src/llm/responses-stream.ts
+    # (b) pre-request delay — per-run store + injected clock/sleep minted in
+    #     `createRunAgentContext` (gate on); the loop's `streamConsume` awaits
+    #     `proactiveDelayMs(store.current())` BEFORE the stream (empty-bucket only)
+    #     and emits the `ratelimit_snapshot` notice; the same turn wires the
+    #     capture hook to feed `parseRateLimitSnapshot` → store.
+    - src/agent/loop.ts
+    - src/agent/turn-context.ts
+    - src/agent/types.ts
+    # (c) the no-leak notice as a transient, NON-accounting AgentEvent.
+    - src/stream/types.ts
   adrs: []
   tests:
     unit:
       - tests/unit/account-ratelimit-parse-hellgate.test.ts
       - tests/unit/account-ratelimit-policy-hellgate.test.ts
+      # reachability: knob-ON ⇒ remaining=0 header ⇒ proactive delay + notice
+      # through the REAL loop; REAL adapters fire `onResponseHeaders`; knob-OFF ⇒
+      # no capture/delay/notice (byte-identical).
+      - tests/unit/delta-ratelimit-reachability-hellgate.test.ts
     integration: []
     contract: []
 knobs:
   - QUANTA_RATELIMIT_PROACTIVE
-deliberate_hold:
-  reason: |
-    Phase 1 ships the pure slice (parser + store + policy + notice) only. The
-    composition-root wiring — the optional `onResponseHeaders` success-path hook
-    on the adapters, the gated pre-request `proactiveDelayMs` site in the loop,
-    and the `QUANTA_RATELIMIT_PROACTIVE` knob — is the NEXT step (touches the LLM
-    error/usage boundary + runtime-config + host, deliberately not edited here).
-    Phase 2 (opt-in operator-set soft margin) and Phase 3 (cross-window) are
-    deferred per the no-arbitrary-heuristic rule.
-  promotion_path: |
-    Wire `QUANTA_RATELIMIT_PROACTIVE` in runtime-config; thread the optional
-    `onResponseHeaders` hook through the adapters and call
-    `parseRateLimitSnapshot` → store on success; apply `proactiveDelayMs` at the
-    gated pre-stream site in the loop and forward `snapshotToNotice` to the
-    surface — then promote status new → refined and configurable planned →
-    integrated.
+deliberate_hold: null
 notes: |
   No invented threshold: the policy triggers ONLY on the provider's own
   `remaining <= 0` and waits the provider's own reset. No Date.now / Math.random

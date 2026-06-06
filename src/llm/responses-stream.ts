@@ -500,6 +500,20 @@ export async function* streamResponsesSurface(
       })
     }
 
+    // jun-6 account-ratelimit-snapshot — OPTIONAL success-path header capture
+    // (mirrors the Anthropic adapter's `.withResponse()` hook). Present ONLY
+    // when the loop wired the hook (gate QUANTA_RATELIMIT_PROACTIVE ON). The
+    // raw `Response`'s `headers.get` is the case-insensitive accessor the
+    // snapshot parser expects. Best-effort: a faulty quota consumer must never
+    // break the live stream. Absent ⇒ no call, byte-identical to pre-feature.
+    if (config.input.onResponseHeaders !== undefined) {
+      try {
+        config.input.onResponseHeaders((name) => res.headers.get(name))
+      } catch {
+        // swallow — header capture is non-essential observability.
+      }
+    }
+
     const outputItems: ResponsesInputItem[] = []
     // H15 — captured re-emittable reasoning items for THIS turn. Stays empty
     // unless carry-over is on AND the wire surfaces `item.reasoningItem` (which

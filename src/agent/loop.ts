@@ -1,5 +1,11 @@
 import type { LLMPort, Message, StreamEvent, SystemPromptInput, ToolChoice } from "@/llm"
 import { withImageSanitizationRetry } from "@/llm/image-sanitization-retry"
+import {
+  createRateLimitSnapshotStore,
+  parseRateLimitSnapshot,
+  proactiveDelayMs,
+  snapshotToNotice,
+} from "@/llm/ratelimit-snapshot"
 import { createWorkingMemory, type WorkingMemory } from "@/memory"
 import { createWorkingMemoryHistorySanitization } from "@/memory/history-sanitization"
 import {
@@ -661,7 +667,7 @@ const streamConsume = async (
   // captured by the dispatch factory (`./stream-callbacks#createStreamDispatcher`)
   // off the same `session`/`state` bundles, so they're no longer destructured
   // here — the local references were move-only, with no behavioural change.
-  const { config, specs, recorder, skillGate } = session
+  const { config, specs, recorder, skillGate, rateLimitProactive } = session
   const { collector, toolChoiceState, onTurnTiming, taskSpend } = state
   const { messages, system } = ctx
   // ADR-0079 — resolve the pre-call tool_choice from the loop-owned turn state.
@@ -753,6 +759,25 @@ const streamConsume = async (
       })
     }
   }
+  // jun-6 account-ratelimit-snapshot — PROACTIVE pre-request delay (gate ON ⇒
+  // `rateLimitProactive` present). Consult the last stored snapshot BEFORE
+  // opening the stream: `proactiveDelayMs` returns >0 ONLY when a provider
+  // window the LAST response reported is OUT (`remaining <= 0`), and then waits
+  // that window's SERVER-advertised reset (clamped 60s). No snapshot / non-empty
+  // ⇒ 0 ⇒ no wait, no notice (and on the FIRST turn the store is always empty,
+  // so the very first request never delays). Absent collaborators ⇒ this whole
+  // block is skipped (byte-identical). The notice is a transient, NON-accounting
+  // UI signal (numbers only, no header value).
+  if (rateLimitProactive !== undefined) {
+    const snapshot = rateLimitProactive.store.current()
+    if (snapshot !== undefined) {
+      const delayMs = proactiveDelayMs(snapshot)
+      if (delayMs > 0) {
+        config.stream.emit(snapshotToNotice(snapshot))
+        await rateLimitProactive.sleep(delayMs)
+      }
+    }
+  }
   try {
     const outcome = await streamingTurn({
       events: teeUsage(
@@ -772,6 +797,20 @@ const streamConsume = async (
           // passed to streamingTurn + tool ctx below.
           signal: config.signal,
           turnTimingCapture,
+          // jun-6 account-ratelimit-snapshot — OPTIONAL success-path header
+          // capture hook (gate ON ⇒ present). The adapter invokes it ONCE with a
+          // case-insensitive accessor; we parse the live quota meter and store it
+          // for the NEXT turn's proactive pre-request check above. Absent ⇒ field
+          // omitted ⇒ the adapter never calls `.withResponse()` (byte-identical).
+          ...(rateLimitProactive !== undefined
+            ? {
+                onResponseHeaders: (get: (name: string) => string | null): void => {
+                  rateLimitProactive.store.update(
+                    parseRateLimitSnapshot(get, rateLimitProactive.now),
+                  )
+                },
+              }
+            : {}),
         }),
         recorder,
         collector,
@@ -2436,6 +2475,13 @@ const cleanupFinishedSession = async (args: {
     args.cfg.stream.emit({ type: "error", message: `browser dispose failed: ${errMessage(e)}` })
   }
   try {
+    // G1 (RFC jun-6) — close the appshot verify-loop's lazily-spawned browser
+    // session (idempotent; shares the BrowserPort the browser block disposes).
+    await args.features.appshotDispose?.()
+  } catch (e) {
+    args.cfg.stream.emit({ type: "error", message: `appshot dispose failed: ${errMessage(e)}` })
+  }
+  try {
     // ADR-0476 — tear down every skill-attached MCP carrier (stdio procs + HTTP
     // connections) at session end. Absent session ⇒ no-op (byte-identical).
     await args.cfg.skillMcpSession?.shutdownAll()
@@ -2912,6 +2958,20 @@ const createRunAgentContext = async (config: AgentConfig): Promise<RunAgentConte
     () => wm.snapshot(),
     () => Date.now(),
   )
+  // jun-6 account-ratelimit-snapshot (gate QUANTA_RATELIMIT_PROACTIVE). Mint the
+  // per-run PROACTIVE collaborators ONCE, ONLY when the knob is on. The store is
+  // the per-route last-write-wins snapshot container fed by the adapter's
+  // success-path header hook; `now` is the injected clock (default Date.now —
+  // the ONE real-clock read site, overridable for tests); `sleep` the injected
+  // abort-aware delay (default the loop's `sleep`). Absent ⇒ no header hook
+  // wired, no delay applied, byte-identical reactive 429-retry path.
+  const rateLimitProactive: TurnSession["rateLimitProactive"] = runtimeConfig().proactiveRateLimit
+    ? {
+        store: createRateLimitSnapshotStore(),
+        now: cfg.proactiveRateLimit?.now ?? Date.now,
+        sleep: cfg.proactiveRateLimit?.sleep ?? ((ms: number) => sleep(ms, cfg.signal)),
+      }
+    : undefined
   const shellSnapshotSession: ShellSnapshotSession | undefined = buildShellSnapshotSession(
     cfg,
     (message) => cfg.stream.emit({ type: "error", message }),
@@ -2934,6 +2994,9 @@ const createRunAgentContext = async (config: AgentConfig): Promise<RunAgentConte
     // ADR-0473 — thread the (already-minted) speculative-compaction controller
     // into the turn loop so it actually borrows/re-arms. Absent ⇒ omitted.
     ...(bgCompaction !== undefined ? { bgCompaction } : {}),
+    // jun-6 account-ratelimit-snapshot — thread the per-run proactive collaborators
+    // (store + injected clock/sleep). Absent ⇒ omitted (byte-identical).
+    ...(rateLimitProactive !== undefined ? { rateLimitProactive } : {}),
     guards: guardChain,
     hookPromptPending,
   }
@@ -3269,5 +3332,7 @@ const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> => {
     // cleanupFinishedSession) is never reached. Idempotent: a normal finish
     // already disposed it, and the session-holder no-ops a second call.
     await ctx.features.browserDispose?.().catch(() => {})
+    // G1 — same fail-safe teardown for the appshot browser session (idempotent).
+    await ctx.features.appshotDispose?.().catch(() => {})
   }
 }

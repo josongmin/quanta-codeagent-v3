@@ -1101,6 +1101,19 @@ const execute = async (
   // the tool's own policy gates upstream).
   const composed = composeToolResultContent({ ...result, output })
   const contentBlocks = typeof composed === "string" ? undefined : composed
+  // Defense-in-depth (#12) — route `failure.modelVisibleError` through the SAME
+  // redaction chokepoint as `output` so a future surfacing of the field can never
+  // leak a secret. Byte-identical when absent / no secret (applyRedaction returns
+  // its input unchanged); redaction hits merge into `redactionHits`.
+  const failureRedaction =
+    result.failure?.mode === "error" && result.failure.modelVisibleError !== undefined
+      ? applyRedaction(result.failure.modelVisibleError, call, config)
+      : undefined
+  const finalFailure =
+    failureRedaction !== undefined
+      ? ({ ...result.failure, modelVisibleError: failureRedaction.output } as typeof result.failure)
+      : result.failure
+  const allHits = failureRedaction !== undefined ? [...hits, ...failureRedaction.hits] : hits
   return {
     block: resultBlock(call.id, output, !result.ok, contentBlocks),
     ok: result.ok,
@@ -1111,8 +1124,8 @@ const execute = async (
     // reason verbatim when it classified one. Omitted when absent so
     // `exactOptionalPropertyTypes` never sees `undefined` and callers that
     // do not read `failure` stay byte-identical.
-    ...(result.failure !== undefined ? { failure: result.failure } : {}),
-    ...(hits.length > 0 ? { redactionHits: hits } : {}),
+    ...(finalFailure !== undefined ? { failure: finalFailure } : {}),
+    ...(allHits.length > 0 ? { redactionHits: allHits } : {}),
     // ADR-0062 rule #3 — forward the nextAction hint onto the DispatchResult
     // so consumers (stream emitters, recorders) can observe it. Omitted when
     // absent (exactOptionalPropertyTypes).

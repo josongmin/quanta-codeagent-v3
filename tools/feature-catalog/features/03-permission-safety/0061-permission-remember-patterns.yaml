@@ -37,6 +37,19 @@ purpose: |
     cascade skip). pattern store 미설정 ⇒ byte-identical 레거시 경로.
   - 두 user-approved 경로(always-confirm tier + 모드정책 ask) 모두 cascadeOnApprove 통과 →
     동일 패턴이 두 번째 호출에서 `autoPassByPatterns`로 단락.
+
+  **Self-propose recording seam (CLUSTER D #5, 2026-06-06)** — 모델-facing 자가제안의
+  SAFE 기록 시드. `recordProposedPattern(store, {proposed, isMaybeDangerous}, {allowDangerous})`
+  + `PatternGrantStore`의 baseline/proposed provenance 분리:
+
+  - `PatternGrantStore.grant()`(user/policy 권위)는 BASELINE에 기록, 신규
+    `recordProposed()`(모델 제안)는 allowed에만 기록·baseline 미오염.
+  - NO-WIDEN / NO-SELF-GRANT 불변식: 제안 패턴이 baseline에 COVERED일 때만 기록,
+    하나라도 미커버면 전체 batch REJECT(`would_widen`) — 모델이 새 권한을 자가부여 불가
+    (coordination broker의 worker-can't-self-grant와 동일 불변식). All-or-nothing(부분기록
+    laundering 차단). recorded 패턴은 baseline에 안 들어가므로 chain-widen 불가.
+  - 하드닝 패리티: `no_store`(default-OFF) / `empty_patterns` / `dangerous_blocked`
+    (allowDangerous 없이 위험제안 거부). 순수·no-throw.
 evidence:
   code:
     - src/permission/remember-patterns.ts
@@ -47,6 +60,7 @@ evidence:
     unit:
       - tests/unit/permission-remember-patterns.test.ts
       - tests/unit/permission/remember-patterns-classifier-hell.test.ts
+      - tests/unit/permission-propose-pattern-hellgate.test.ts
       - tests/unit/admissibility-gate.test.ts
     integration:
       - tests/integration/remember-patterns-cascade-hell.test.ts
@@ -54,17 +68,21 @@ evidence:
 knobs: []
 deliberate_hold:
   reason: |
-    모델-facing schema 미배선 — `rememberPatterns` / `isMaybeDangerous`는
-    dispatch seam이 action에 plumb만 하고, LLM tool/schema 계약에는 아직
-    노출되지 않음 (src/agent/admissibility-gate.ts의 acknowledged TODO,
-    src/permission/gate-pattern-wire.ts `grantAndCascade` deliberate hold).
-    coverage-gated cascade는 동작하지만 모델이 자가 제안할 수 없음.
+    SAFE 기록 seam(`recordProposedPattern`, no-widen)은 2026-06-06 배선 완료 —
+    coverage-gated 자가제안 기록이 pure layer(`@/permission`)에서 동작.
+    남은 hold: LLM-CALLABLE tool/control-op 표면 — 모델이 실제로
+    `recordProposedPattern`을 호출할 tool 계약(manifest+dispatch)은 hot
+    permission/dispatch 경로 수술이라 미배선. seam은 host/test/future-tool이
+    즉시 호출 가능.
   promotion_path: |
-    1) Tool 계약에 rememberPatterns/isMaybeDangerous output 필드 추가
-       (defineTool out-schema 확장, ADR-0060 path).
-    2) 모델이 채워 보낸 값을 admissibility action surface로 통과.
-    3) end-to-end cascade test (모델 제안 → store grant → 두 번째 호출
-       auto-pass) 추가 후 L4 재승격.
+    1) 모델-facing tool/control-op(예: `permission_propose_pattern`) 추가 —
+       in-schema {proposed[], isMaybeDangerous} → `recordProposedPattern` 호출,
+       결과(recorded|rejected+reason)를 tool result로 반환. manifest(BASE/GATED)
+       + dispatch 등록 필요(hot path).
+    2) store를 host 합성 루트에서 실제 construct (현재 permissionPatternStore는
+       seam-only, production 미설정). user/policy allow-list → baseline grant.
+    3) end-to-end test (모델 propose → recorded → 두 번째 호출 auto-pass /
+       widen propose → rejected) 추가 후 L4 재승격.
 notes: |
   user_approved_for_session(ADR-0029)이 actionKey 단위 기억의 씨앗 — rememberPatterns는 그 위에
   패턴-단위 cascade를 얹음. LearningSource enum까지 추가해 trajectory 소비자가

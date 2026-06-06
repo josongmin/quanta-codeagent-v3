@@ -56,6 +56,7 @@ import type { TaskRegistry } from "../subagent"
 import type { SkillTurnOverride } from "./loop"
 import {
   buildAdvisorBlock,
+  buildAppshotBlock,
   buildBranchSearchBlock,
   buildBrowserBlock,
   buildBudgetBlock,
@@ -114,6 +115,11 @@ export interface SessionFeatures {
    *  `config.browser.port` is wired; absent ⇒ no browser tools (byte-identical).
    *  The loop invokes this at session end alongside {@link cleanup}. */
   browserDispose?: () => Promise<void>
+  /** Appshot browser-session teardown (G1, RFC jun-6). Closes the browser
+   *  session the appshot verify-loop port lazily spawned. Present only when
+   *  `config.appshot` is wired; absent ⇒ no appshot tool (byte-identical). The
+   *  loop invokes this at session end alongside {@link browserDispose}. */
+  appshotDispose?: () => Promise<void>
   /** Skill tool-scoping ENFORCEMENT data (ADR-0011): skill name →
    *  author-declared tool allowlist. An explicit empty list means "deny all
    *  ordinary tools" while still allowing the meta-tools (`Skill`,
@@ -258,6 +264,14 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
   const browserBlock = buildBrowserBlock(config)
   extraTools.push(...browserBlock.tools)
 
+  // --- Appshot verify-loop tool (G1, RFC jun-6-appgen-appshot) ------------
+  // default-OFF: EMPTY unless `config.appshot` is wired by the composition root
+  // (assembled over the live browser + judge LLM + jailed scaffold writer in
+  // `agent-config-assembler`). The lazily-spawned browser session teardown rides
+  // out via `appshotDispose`.
+  const appshotBlock = buildAppshotBlock(config)
+  extraTools.push(...appshotBlock.tools)
+
   return {
     extraTools,
     ...optionalFeatureFields({
@@ -265,6 +279,7 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
       taskRegistry: subagent?.taskRegistry,
       cleanup: subagent?.cleanup,
       browserDispose: browserBlock.tools.length > 0 ? browserBlock.dispose : undefined,
+      appshotDispose: appshotBlock.tools.length > 0 ? appshotBlock.dispose : undefined,
       skillAllowlists: skill?.allowlists,
       skillOverrides: skill?.overrides,
       // Inventory is present whenever `config.skills` is set — even an empty

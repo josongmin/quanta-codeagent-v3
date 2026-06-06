@@ -7,6 +7,7 @@ import {
   type VendorDetectorPort,
   type VendorId,
 } from "@/rules"
+import { sliceWholeChars } from "@/shared"
 import { matchesAnyGlob, parseFrontmatter } from "../skill"
 
 /**
@@ -115,7 +116,7 @@ const tryLoadRule = async (path: string): Promise<GlobRule | undefined> => {
     if (globs.length === 0 && !alwaysApply) return undefined
     const cappedBody =
       trimmed.length > MAX_RULE_BYTES
-        ? `${trimmed.slice(0, MAX_RULE_BYTES)}\n\n[truncated: ${trimmed.length} bytes total]`
+        ? `${sliceWholeChars(trimmed, MAX_RULE_BYTES)}\n\n[truncated: ${trimmed.length} bytes total]`
         : trimmed
     // YAML fold-scalar guard: the dependency-free parser does not implement
     // `>` / `|` folding — a YAML-shaped multiline description like

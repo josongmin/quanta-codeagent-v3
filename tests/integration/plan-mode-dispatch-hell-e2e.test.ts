@@ -145,6 +145,8 @@ const CALLER_WIRE_TOOL_NAMES = [
   // host wires the slot, so they are not in `defaultTools`.
   "subagent_force_background",
   "appshot_verify",
+  // ADR-0287 async-tools caller-wire (gated on QUANTA_ASYNC_TOOLS, not in defaultTools).
+  "poll_deferred",
 ] as const
 
 const ALL_REGISTERED_TOOL_NAMES = (() => {

@@ -61,6 +61,8 @@ export const buildFakeBootstrapDeps = (
     buildPlanStoreOrUndefined: () => undefined,
     buildWorkMetricsSink: () => undefined,
     buildLlm: () => llm,
+    // jun-6 — headless never auto-titles (no session store / cheap model).
+    buildAutoTitlePort: () => undefined,
     buildStreaming: () => ({ stream, run: undefined }),
     buildTooling: () => tooling,
     loadFeatures: async () => ({

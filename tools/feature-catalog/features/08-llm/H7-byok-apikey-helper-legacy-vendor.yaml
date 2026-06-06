@@ -3,12 +3,12 @@ title: BYOK apiKeyHelper mint for the LEGACY vendor key path (anthropic/openai)
 section: 8
 subsystem: LLM provider seam — credential rotation
 order: 10
-maturity: L3
-status: new
+maturity: L4
+status: refined
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
-configurable: planned
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli", "auth", "credential-rotation", "trust-gated", "h7", "absorbed:claude-code"]
 depends_on: [rotating-cloud-credentials]
@@ -61,11 +61,21 @@ evidence:
     - src/llm/factory.ts
     - src/llm/credential-helper.ts
     - src/llm/index.ts
+    - src/runner/assemble/llm.ts
+    - src/apps/cli/internal.ts
+    - src/apps/cli/repl.ts
+    - src/host/bootstrap/types.ts
+    - src/host/bootstrap/bootstrap-session.ts
   adrs: []
   tests:
     unit:
       - tests/unit/byok-apikey-resolve-hellgate.test.ts
       - tests/unit/byok-apikey-e2e-hellgate.test.ts
+      - tests/unit/host/bootstrap-host-extraction-hellgate.test.ts
+      # Reachability e2e: knob-on+helper ⇒ minted key reaches createLLM as
+      # opts.apiKey (overrides env); helper-empty ⇒ throws (env not clobbered);
+      # untrusted ⇒ fail-closed (0 shell); knob-off ⇒ env key, 0 shell.
+      - tests/unit/ai-title-byok-reachability-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -83,20 +93,28 @@ knobs:
     default: '0'
     purpose: 'FAIL-CLOSED trust attestation reused from H7 — only the literal 1 authorizes the mint shell to run; unset/anything else ⇒ typed untrusted decline, NEVER a run.'
 notes: |
-  L3 — slice + hellgate complete; composition-root knob-read is the L3→L4 step
-  (REPORTED, not yet wired here — owned by the runtime-config + CLI seam files
-  the host owns). `resolveVendorApiKey` (src/llm/factory.ts) is the proven async
-  pre-resolution helper; `MINTABLE_PROVIDERS = {anthropic, openai}` pins the
-  guard. Both are surfaced on the `@/llm` barrel.
+  L4 — slice + hellgate + LIVE composition-root threading complete (jun-6). The
+  full chain is reachable by config: CLI `cliBuildLlm` (async, `src/apps/cli/repl.ts`)
+  → `buildLLMWithByok` (`src/apps/cli/internal.ts`, gated on
+  `apiKeyHelperLegacyVendor` + legacy transport) → `buildLLMWithByokCore`
+  (`src/runner/assemble/llm.ts`) → `resolveVendorApiKey` → sync `createLLM`.
+  `resolveVendorApiKey` (src/llm/factory.ts) is the proven async pre-resolution
+  helper; `MINTABLE_PROVIDERS = {anthropic, openai}` pins the guard.
 
-  PENDING composition-root threading (REPORTED to the host, NOT done in this
-  slice — runtime-config.ts / internal.ts / agent-arg-builder.ts are owned
-  elsewhere): (1) a new `apiKeyHelperLegacyVendor: boolean` RuntimeConfig field
-  read strictly from `QUANTA_API_KEY_HELPER_LEGACY_VENDOR === "1"` (default
-  false); (2) the CLI/runner seam that already builds the H7 `CredentialSource`
-  (`buildCredentialSource`) passes it into `resolveVendorApiKey` ahead of the
-  legacy `buildLLMCore` ONLY when that knob is on; (3) since `buildLLMCore` is
-  sync, the seam awaits `resolveVendorApiKey` and threads the augmented opts.
+  The load-bearing host edit: `BuildLlmFactory` (`src/host/bootstrap/types.ts`)
+  now returns `LLMPort | Promise<LLMPort>` and `bootstrapSession`
+  (`src/host/bootstrap/bootstrap-session.ts`) `await`s `deps.buildLlm(...)`, so the
+  async mint-then-build resolves before `result.llm` is consumed (a leaked Promise
+  would have no `.stream`). Without this the async `cliBuildLlm` was a TYPE ERROR
+  against the prior sync factory and the Promise would have been assigned where an
+  `LLMPort` was expected. Locked by bootstrap hellgate cases 10b (async build is
+  awaited → resolved adapter, not a Promise) + 10c (rejecting async build → typed
+  `llm_build_failed`).
+
+  DEFAULT-OFF BYTE-IDENTITY preserved: knob unset OR cloud transport ⇒
+  `buildLLMWithByok` delegates verbatim to the sync `buildLLM` (immediate resolve);
+  knob on but no `apiKeyHelper` ⇒ `buildCredentialSource` returns undefined ⇒
+  `resolveVendorApiKey(source=undefined)` returns the same opts ⇒ env-key path.
 
   TESTS (14): byok-apikey-resolve (10) — mint feeds opts.apiKey for
   anthropic/openai; explicit opts.apiKey wins (0 shell); knob-off (source

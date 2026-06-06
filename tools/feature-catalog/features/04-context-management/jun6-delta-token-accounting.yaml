@@ -4,7 +4,7 @@ section: 4
 subsystem: Token estimator — 증분 카운터 (full-scan 회피)
 order: 23
 maturity: L3
-status: new
+status: refined
 ui_surfaces: [n-a]
 monitoring: n-a
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
@@ -30,11 +30,21 @@ evidence:
   code:
     - src/agent/token-delta/counter.ts
     - src/shared/runtime-config.ts
+    # jun-6 HOST WIRING — the counter is minted ONCE per run in
+    # `createRunAgentContext` when `runtimeConfig().deltaTokenCount`, threaded via
+    # TurnState.tokenCounter, and consumed at the compaction-threshold reads
+    # through `estimateWithCounter` (reseed+total ≡ full estimateTokens re-scan).
+    - src/agent/loop.ts
+    - src/agent/turn-context.ts
   adrs: []
   tests:
     unit:
       - tests/unit/delta-token-identity-hellgate.test.ts
       - tests/unit/delta-token-knob-off-hellgate.test.ts
+      - tests/unit/delta-token-property-fuzz-r2-hellgate.test.ts
+      # reachability: knob-ON ⇒ counter feeds the REAL loop's compaction precheck
+      # (currentTokens === full re-scan); knob-OFF ⇒ byte-identical surfaced value.
+      - tests/unit/delta-ratelimit-reachability-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -45,4 +55,8 @@ deliberate_hold: null
 notes: |
   설계/증명: RFC `docs/plans/jun-6-delta-token-accounting.md`. ADR 미발행이라 L3 유지(테스트·배선·
   byte-identity 증명 완비). `delta-token-identity-hellgate` 가 증분합 ≡ full-scan 을, `delta-token-knob-off-hellgate`
-  가 OFF byte-identity 를 봉인. `charsOf` 는 `estimateTokens` 와 공유(중복 휴리스틱 방지).
+  가 OFF byte-identity 를, `delta-ratelimit-reachability-hellgate` 가 REAL 루프 배선(ON: 카운터가 압축 precheck
+  의 currentTokens 를 공급, OFF: surfaced 값 byte-identical)을 봉인. `charsOf` 는 `estimateTokens` 와 공유(중복
+  휴리스틱 방지). 배선 형태=reseed-at-read(드리프트 불가: 매 read 가 ground-truth 로 재앵커링; hook 의 in-place
+  prompt rewrite 같은 out-of-band wm 변이에도 무영향). full-append 경로의 O(1) running-sum perf 최적화(=wm 포트가
+  카운터 소유)는 `@/memory` 포트 수정 필요라 후속.

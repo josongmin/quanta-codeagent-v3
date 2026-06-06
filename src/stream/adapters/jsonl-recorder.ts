@@ -90,6 +90,12 @@ export class JsonlRecorder implements StreamPort {
     // and add nothing a consumer needs (the terminal `usage` line carries the
     // authoritative count). Skipping here keeps it out of `KIND_MAP` / `dataOf`.
     if (event.type === "output_progress") return
+    // jun-6 account-ratelimit-snapshot — the `ratelimit_snapshot` notice is the
+    // SAME class of transient, NON-accounting UI signal as `output_progress` (a
+    // quota meter for the spinner, never folded into the recorder/budget). Skip
+    // it for the same reasons — it carries no durable trajectory value and must
+    // stay out of `KIND_MAP` / `dataOf`.
+    if (event.type === "ratelimit_snapshot") return
     if (this.written >= this.maxLines) {
       this.handleCap()
       return
@@ -253,7 +259,7 @@ export class JsonlRecorder implements StreamPort {
 // drops before reaching `kindOf`/`dataOf` (see the early return there), so it
 // has no trajectory kind or payload. Excluding it from the map type keeps that
 // invariant honest rather than mapping it to a kind that is never written.
-type RecordedEventType = Exclude<AgentEvent["type"], "output_progress">
+type RecordedEventType = Exclude<AgentEvent["type"], "output_progress" | "ratelimit_snapshot">
 type RecordedEvent = Extract<AgentEvent, { type: RecordedEventType }>
 
 const KIND_MAP: Record<RecordedEventType, TrajectoryKind> = {

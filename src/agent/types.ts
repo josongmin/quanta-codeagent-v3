@@ -314,6 +314,23 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
     readonly warmSignal?: AbortSignal
   }
   /**
+   * jun-6 account-ratelimit-snapshot (gate `QUANTA_RATELIMIT_PROACTIVE`).
+   * Optional injected collaborators for the PROACTIVE rate-limit path so the
+   * loop reads no real clock and sleeps no real timer in tests.
+   *   - `now` — injected wall-clock (epoch ms) fed to `parseRateLimitSnapshot`
+   *     and used to time the proactive delay. Defaults to `Date.now`.
+   *   - `sleep` — injected delay primitive `(ms) => Promise<void>`. Defaults to
+   *     the loop's abort-aware `setTimeout` sleep. A fake lets a test assert the
+   *     delay magnitude WITHOUT wall-clock waiting.
+   * The block is consulted ONLY when `runtimeConfig().proactiveRateLimit` is on;
+   * absent ⇒ the proactive store is never constructed, the header hook is never
+   * wired, no delay is applied, no notice emitted — byte-identical to today's
+   * reactive 429-retry path. */
+  proactiveRateLimit?: {
+    readonly now?: () => number
+    readonly sleep?: (ms: number) => Promise<void>
+  }
+  /**
    * Subagent recursion depth of THIS agent (0 = root user session). Set by
    * the subagent runner for forked children; propagated onto `ToolContext`
    * by the dispatch seam so the `Agent` tool can enforce `maxDepth`. Absent ⇒

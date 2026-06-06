@@ -895,9 +895,86 @@ export interface ToolResult {
  *     the model; `clientVisibleError` is richer detail for the UI/operator that
  *     is NOT necessarily forwarded to the model (Cursor's
  *     model-visible vs client-visible split). */
+/** C6 (RFC jun-6-deny-reason-surfacing) — duck-typed mirror of `DenyLayer`
+ *  from `@/permission/deny-reason` (kept here so `@/tool` stays slice-isolated
+ *  from `@/permission` — RFC §3.1; biome enforces). The deny SITE (always
+ *  unambiguous). Adding a value requires updating BOTH the producer AND this
+ *  mirror. */
+export type DenyLayerMirror =
+  | "hard-deny"
+  | "stack"
+  | "reviewer"
+  | "hook"
+  | "tool-profile"
+  | "mode"
+  | "broker"
+
+/** C6 — duck-typed mirror of `DenyPillar` from `@/permission/deny-reason`. */
+export type DenyPillarMirror = "fileSystem" | "network" | "sandbox" | "control" | "approval"
+
+/** C6 — duck-typed mirror of `PermissionStackSource` from
+ *  `@/permission/recorder` (the stack-axis enum reused verbatim on the
+ *  `layer:"stack"` deny path when derivable). */
+export type DenyStackSourceMirror =
+  | "hard-deny"
+  | "read-only-bypass"
+  | "post-denial-override"
+  | "per-thread"
+  | "per-host"
+  | "global-default"
+
+/**
+ * C6 (RFC jun-6-deny-reason-surfacing) — duck-typed mirror of
+ * `StructuredDenyReason` from `@/permission/deny-reason` (kept here so `@/tool`
+ * stays slice-isolated from `@/permission` — RFC §3.1; biome enforces the
+ * fence). The producer's `StructuredDenyReason` is structurally assignable to
+ * this shape; the agent-side `deny(..., denyReason)` builder attaches the real
+ * value, and this mirror is the only declaration `@/tool` consumers branch on.
+ *
+ * NO-LEAK (the core C6 constraint): `safeReason` is the recorder's already-
+ * sanitized one-liner surfaced VERBATIM — NEVER raw input / command text /
+ * regex source / matched HARD_DENY pattern. The HARD_DENY case carries the
+ * CATEGORICAL `hardDenySafeReason()` form, never the command-echoing prose.
+ *
+ * MIRROR INVARIANT — adding a `layer` / `pillar` / `stackSource` literal
+ * requires updating BOTH the producer AND this mirror; a consumer-side
+ * round-trip test in `tests/unit/` (which CAN see both slices) catches drift.
+ */
+export interface DenyReasonValue {
+  readonly verdict: "deny"
+  readonly layer: DenyLayerMirror
+  readonly pillar?: DenyPillarMirror
+  readonly stackSource?: DenyStackSourceMirror
+  readonly safeReason: string
+}
+
 export type ToolFailure =
   | { mode: "not_found"; path?: string }
-  | { mode: "permission_denied"; path?: string; isReadonly?: boolean }
+  | {
+      mode: "permission_denied"
+      path?: string
+      isReadonly?: boolean
+      /** C6 (RFC jun-6-deny-reason-surfacing) — OPTIONAL structured "why was
+       *  this denied" record, attached ONLY when `surfaceDenyReason`
+       *  (`QUANTA_DENY_REASON`) is on AND the deny flows through the
+       *  admissibility-gate's `deny(..., denyReason)` path. Lets the model
+       *  branch on the deciding `layer` / `pillar` instead of regex-matching
+       *  the prose `content`. ABSENT (default-OFF / a tool-level FS-jail deny
+       *  that does not thread it) ⇒ the envelope is `{mode, isReadonly}` only,
+       *  byte-identical to today.
+       *
+       *  SLICE FENCE (RFC §3.1; biome enforces): `@/tool` MUST NOT import
+       *  `@/permission`, so the value-shape is MIRRORED locally as
+       *  {@link DenyReasonValue} — structurally equivalent to
+       *  `StructuredDenyReason` from `@/permission/deny-reason`. The agent-side
+       *  deny() builder (`@/agent/dispatch-helpers`) produces the real
+       *  `StructuredDenyReason` (assignable to this mirror by structure) and the
+       *  gate is the only populating site. Adding a `DenyLayer` / `DenyPillar`
+       *  literal requires updating BOTH the producer AND this mirror; a
+       *  consumer-side test in `tests/unit/` (which CAN see both slices) catches
+       *  drift. */
+      denyReason?: DenyReasonValue
+    }
   | { mode: "rejected"; reason: string }
   | { mode: "timeout"; timeoutMs?: number }
   | { mode: "spawn_error"; error: string }

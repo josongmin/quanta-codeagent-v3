@@ -23,7 +23,7 @@
  * internals — the composition root wires the real adapters.
  */
 import { assembleFromEvents, type LLMPort, type StreamEvent } from "@/llm"
-import { errMessage } from "@/shared"
+import { errMessage, sliceWholeChars } from "@/shared"
 
 /** Injected collaborators for {@link createAutoTitlePort}. */
 export interface AutoTitlePorts {
@@ -67,7 +67,7 @@ export const MAX_TITLE_CHARS = 80
 
 const buildTitlePrompt = (firstPrompt: string, maxWords: number, maxInputChars: number): string => {
   const clipped =
-    firstPrompt.length > maxInputChars ? firstPrompt.slice(0, maxInputChars) : firstPrompt
+    firstPrompt.length > maxInputChars ? sliceWholeChars(firstPrompt, maxInputChars) : firstPrompt
   return (
     `Summarize this request as a title of at most ${maxWords} words. ` +
     `Respond with ONLY the title — no quotes, no punctuation, no preamble:\n\n` +
@@ -86,7 +86,7 @@ export const sanitizeTitle = (raw: string, maxWords: number): string => {
     .trim()
   if (collapsed === "") return ""
   const words = collapsed.split(" ").slice(0, maxWords).join(" ")
-  return words.length > MAX_TITLE_CHARS ? words.slice(0, MAX_TITLE_CHARS).trim() : words
+  return words.length > MAX_TITLE_CHARS ? sliceWholeChars(words, MAX_TITLE_CHARS).trim() : words
 }
 
 /** Drain `events` to joined assistant text. */

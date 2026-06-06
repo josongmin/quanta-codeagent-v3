@@ -259,6 +259,8 @@ const makeStubDeps = (
         SetupSessionDeps["buildLlm"]
       >
     },
+    // jun-6 (RFC jun-6-ai-session-title) — default-OFF stub: no auto-title port.
+    buildAutoTitlePort: () => undefined,
     buildStreaming: () =>
       ({ stream: stubStreamPort, run: undefined }) as unknown as ReturnType<
         SetupSessionDeps["buildStreaming"]

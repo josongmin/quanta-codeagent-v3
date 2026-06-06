@@ -10,13 +10,14 @@ import type {
   RuntimeSideConversationArgs,
   RuntimeSideConversationResult,
 } from "@/sdk/runtime"
-import { errMessage, logger } from "@/shared"
+import { errMessage, logger, runtimeConfig } from "@/shared"
 import type { PlaybookPlanQueueSink } from "@/skill/playbook"
 import { startReactorWatchBridge } from "../reactor-watch-bridge"
 import { type AwaySummaryWireHandle, maybeCreateAwaySummaryWire } from "./away-summary-wire"
 import type { ConvCheckpointWire } from "./conv-checkpoint-wire"
 import { ExternalPromptQueue } from "./external-prompt-queue"
 import { createHeartbeatBinder, heartbeatEnqueueHandler } from "./heartbeat-binder"
+import { maybeCreateMidTurnCaptureWire } from "./mid-turn-capture-wire"
 import { maybeCreateNdjsonSinkWire } from "./ndjson-wire"
 import type { PlaybookTriggerSurfaceSeam } from "./playbook-trigger-surface-seam"
 import {
@@ -142,6 +143,11 @@ export interface RunSessionLoopDeps {
    *  pipeline; a non-empty return is painted as a one-line preamble before the
    *  prompt. Absent ⇒ no preamble (default-OFF byte-identical). */
   readonly contextWarning?: () => string
+  /** #8 — the live plan-queue store the surface owns (the SAME store `/queue`
+   *  reads). Threaded so the loop can build the mid-turn capture facade over it
+   *  when `QUANTA_MIDTURN_CAPTURE=1`. Absent ⇒ no capture wire (default-OFF
+   *  byte-identical). */
+  readonly planQueueStore?: import("@/agent/plan-queue").PlanQueueStore
 }
 
 /** Default Esc-Esc cancel window (ms). Matches the prior inline constant in
@@ -330,6 +336,26 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     binder: heartbeatBinder,
     pushPrompt: (prompt) => externalPromptQueue.push(prompt),
   })
+  // #8 last-mile (jun-6) — mid-turn keystroke capture SEAM. Default-OFF: the
+  // wire is `undefined` unless `QUANTA_MIDTURN_CAPTURE=1` (read via
+  // runtimeConfig — no direct env access here) AND the surface supplied its
+  // plan-queue store + a thread id. With the wire absent NOTHING captures
+  // mid-turn input ⇒ the input/turn loop is byte-identical to today. The
+  // CONCURRENT keystroke SOURCE during a turn is a separate hot-path change
+  // (see jun-6 report residual); this seam connects a completed mid-turn line
+  // to the live plan-queue + the existing turn-boundary `externalPromptQueue`
+  // drain so a future reader (or a test) can deliver it without touching the
+  // raw-input loop. `midTurnCapture` is exported for that future source to wire.
+  const midTurnCapture =
+    deps.planQueueStore !== undefined
+      ? maybeCreateMidTurnCaptureWire({
+          enabled: runtimeConfig().midTurnCapture,
+          threadId: setup.sessionId,
+          planQueue: deps.planQueueStore,
+          pushExternal: (text) => externalPromptQueue.push(text),
+        })
+      : undefined
+  void midTurnCapture
   let lastUserInputAt = 0
   let lastTurnOutcome: LastTurnOutcome | undefined
   const liveAutomationSlot =

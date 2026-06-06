@@ -147,7 +147,13 @@ export type BootstrapRejectCounter = unknown
 // ── Dep factories injected by the surface.
 
 /** Build the main LLM adapter stack (retry + optional fallback + classifier).
- *  Replaces the prior internal `buildLlmStack` helper. */
+ *  Replaces the prior internal `buildLlmStack` helper.
+ *
+ *  MAY be async (jun-6 H7-BYOK): the legacy vendor path can pre-resolve its key
+ *  through an `apiKeyHelper` mint (one `await`ed shell) before the synchronous
+ *  `createLLM`. The host `await`s the result, so a `Promise<LLMPort>` return is
+ *  accepted; a synchronous `LLMPort` (the byte-identical default-OFF path)
+ *  resolves immediately. */
 export type BuildLlmFactory = (
   provider: Provider,
   model: string,
@@ -155,7 +161,21 @@ export type BuildLlmFactory = (
   permission: PermissionContext,
   signal: AbortSignal,
   slog: StructuredLogger,
-) => LLMPort
+) => LLMPort | Promise<LLMPort>
+
+/** jun-6 (RFC jun-6-ai-session-title) — build the fire-and-forget AI session
+ *  titler. Returns `undefined` (the default-OFF byte-identical path) unless
+ *  `QUANTA_SESSION_AUTO_TITLE` is on AND `QUANTA_SESSION_TITLE_MODEL` resolves a
+ *  cheap `LLMPort`; the surface builds the port from those knobs (mirroring the
+ *  `QUANTA_COMPACT_MODEL` precedent) and wires the real `renameSession` writer +
+ *  `loadSessionById` title-reader. The host carries it onto the result so
+ *  `context-binding.ts` can spread it into `AgentConfig.autoTitlePort`. The
+ *  `signal` is the session abort signal so a per-session cheap LLM is cancelled
+ *  on session end. */
+export type BuildAutoTitlePortFactory = (
+  provider: Provider,
+  signal: AbortSignal,
+) => AgentConfig["autoTitlePort"] | undefined
 
 /** Build the streaming stack (StreamPort + optional observability RunContext). */
 export type BuildStreamingFactory = (
@@ -311,6 +331,9 @@ export interface SessionBootstrapDeps {
   /** Build the LLM stack (retry + fallback + classifier). Replaces direct
    *  imports of `buildLLM` / `RetryingLLM` / `composeLLM` at the CLI seam. */
   readonly buildLlm: BuildLlmFactory
+  /** jun-6 — build the fire-and-forget AI session titler (default-OFF ⇒
+   *  `undefined`). Mirrors the `buildSummarizerLlm` second-LLM precedent. */
+  readonly buildAutoTitlePort: BuildAutoTitlePortFactory
   /** Build the streaming stack. Replaces direct import of
    *  `apps/cli/internal#buildStreaming`. */
   readonly buildStreaming: BuildStreamingFactory
@@ -438,6 +461,14 @@ export interface SessionBootstrapResult {
    *  Absent ⇒ the tool yields a typed `not_wired` failure to the model
    *  (byte-identical default-OFF for any caller that never invokes it). */
   readonly sessionConfigPort: AgentConfig["sessionConfigPort"]
+  /** jun-6 (RFC jun-6-ai-session-title) — fire-and-forget AI session titler,
+   *  built ONLY when `QUANTA_SESSION_AUTO_TITLE` is on AND
+   *  `QUANTA_SESSION_TITLE_MODEL` resolves a cheap `LLMPort` (else `undefined`).
+   *  The downstream `context-binding.ts` spreads it onto
+   *  `AgentConfig.autoTitlePort`; `runSessionStartSequence` then fires it ONCE on
+   *  the opening turn (never awaited, never clobbers a human rename). Absent ⇒
+   *  the loop's title branch is dead (byte-identical default-OFF). */
+  readonly autoTitlePort: AgentConfig["autoTitlePort"]
   readonly shutdownMcp: () => Promise<void>
   /** ADR-0301 — `--playbook-trigger` CLI flag echo, threaded from
    *  `SessionRuntimeConfigShape.playbookTriggerFlag`. The downstream loop

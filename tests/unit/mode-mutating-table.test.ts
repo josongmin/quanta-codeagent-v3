@@ -113,6 +113,8 @@ describe("mode mutating-table cross-check (ADR-0036)", () => {
     // (DefaultToolPorts.appshot, QUANTA_APPSHOT).
     "subagent_force_background",
     "appshot_verify",
+    // ADR-0287 async-tools caller-wire (QUANTA_ASYNC_TOOLS).
+    "poll_deferred",
   ]
   const allTools = [
     ...defaultTools.map((t) => t.name),

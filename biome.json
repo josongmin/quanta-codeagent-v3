@@ -1141,6 +1141,7 @@
         "!tests/unit/mcp-sampling-live-wire-e2e-hellgate.test.ts",
         "!tests/unit/mcp-roots-supervised-wire-e2e-hellgate.test.ts",
         "!tests/unit/h7-transport-e2e-hellgate.test.ts",
+        "!tests/unit/ai-title-byok-reachability-hellgate.test.ts",
         "!tests/integration/session-ux-e2e.test.ts",
         "!tests/integration/session-chaos-and-attack.test.ts",
         "!tests/integration/session-stress-and-concurrent.test.ts",
@@ -1157,7 +1158,9 @@
         "!tests/integration/integrations/github/end-to-end-real-adapter-r3.test.ts",
         "!tests/unit/heartbeat-binder-resume-hellgate.test.ts",
         "!tests/unit/heartbeat-binder-e2e-hellgate.test.ts",
-        "!tests/unit/doctor-selfcheck-hellgate.test.ts"
+        "!tests/unit/mid-turn-capture-wire-hellgate.test.ts",
+        "!tests/unit/doctor-selfcheck-hellgate.test.ts",
+        "!tests/unit/mcp-oauth-keyring-reachability-hellgate.test.ts"
       ],
       "linter": {
         "rules": {

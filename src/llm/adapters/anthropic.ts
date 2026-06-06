@@ -131,16 +131,31 @@ export class AnthropicAdapter implements LLMPort {
 
   private async openRawStream(input: StreamInput): Promise<AsyncIterable<RawEvent>> {
     try {
-      return (await this.client.messages.create(
-        buildAnthropicMessagesRequest(this.model, this.maxTokens, input, this.cacheTtl),
-        // Caller cancellation: the SDK request-options `signal` aborts the
-        // underlying fetch — covers the create()/TTFT phase that the stream
-        // wrapper cannot see (it only decorates the AsyncIterable returned
-        // AFTER create() resolves). Composes with the per-request `timeout`
-        // set at construction: whichever fires first cancels the request.
-        // Absent ⇒ `undefined` options, byte-identical to the pre-feature path.
-        input.signal ? { signal: input.signal } : undefined,
-      )) as unknown as AsyncIterable<RawEvent>
+      const req = buildAnthropicMessagesRequest(this.model, this.maxTokens, input, this.cacheTtl)
+      // Caller cancellation: the SDK request-options `signal` aborts the
+      // underlying fetch — covers the create()/TTFT phase that the stream
+      // wrapper cannot see (it only decorates the AsyncIterable returned
+      // AFTER create() resolves). Composes with the per-request `timeout`
+      // set at construction: whichever fires first cancels the request.
+      // Absent ⇒ `undefined` options, byte-identical to the pre-feature path.
+      const opts = input.signal ? { signal: input.signal } : undefined
+      const pending = this.client.messages.create(req, opts)
+      // jun-6 account-ratelimit-snapshot — OPTIONAL success-path header capture.
+      // Present ONLY when the loop wired the hook (gate QUANTA_RATELIMIT_PROACTIVE
+      // ON). `.withResponse()` returns the SAME parsed stream plus the raw
+      // `Response`; we hand the caller a case-insensitive header accessor and
+      // swallow any hook throw (it must never poison the live stream). Absent ⇒
+      // the plain `await pending` path runs, byte-identical to pre-feature.
+      if (input.onResponseHeaders !== undefined) {
+        const { data, response } = await pending.withResponse()
+        try {
+          input.onResponseHeaders((name) => response.headers.get(name))
+        } catch {
+          // best-effort: a faulty quota consumer must not break the stream.
+        }
+        return data as unknown as AsyncIterable<RawEvent>
+      }
+      return (await pending) as unknown as AsyncIterable<RawEvent>
     } catch (e) {
       throw LLMError.fromSdkError("anthropic", e)
     }

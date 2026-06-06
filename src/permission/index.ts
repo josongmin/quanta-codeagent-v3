@@ -53,8 +53,15 @@ export type {
   AutoPassOptions,
   AutoPassResult,
   FallThroughReason,
+  ProposePatternInput,
+  ProposePatternResult,
+  ProposeRejectReason,
 } from "./gate-pattern-wire"
-export { autoPassByPatterns, grantAndCascade } from "./gate-pattern-wire"
+export {
+  autoPassByPatterns,
+  grantAndCascade,
+  recordProposedPattern,
+} from "./gate-pattern-wire"
 export type { GitWriteProtectReason } from "./git-write-guard"
 export {
   ALL_GIT_WRITE_PROTECT_REASONS,

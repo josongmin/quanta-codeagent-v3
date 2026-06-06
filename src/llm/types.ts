@@ -330,6 +330,25 @@ export interface StreamInput {
    * zero behavioural change).
    */
   onChunk?: () => void
+  /**
+   * jun-6 account-ratelimit-snapshot (gate `QUANTA_RATELIMIT_PROACTIVE`).
+   * Optional SUCCESS-PATH response-headers hook. When present, an adapter that
+   * can observe the raw HTTP response (e.g. Anthropic's `.withResponse()`)
+   * invokes it ONCE with a case-insensitive header accessor so the caller can
+   * read the provider's live quota meter (`*-ratelimit-*-remaining` / `*-reset`)
+   * the provider returns on EVERY response. The caller feeds the accessor to
+   * `parseRateLimitSnapshot` and stores the result for a PROACTIVE pre-request
+   * delay; the adapter itself stays accounting-free.
+   *
+   * Best-effort by contract — adapters MUST swallow any exception thrown by the
+   * hook (a faulty consumer must never poison the live stream) and MUST NOT
+   * forward header VALUES anywhere (the accessor is read-only inside the hook).
+   *
+   * Absent (the default, and whenever the knob is OFF) ⇒ adapters do NOT call
+   * `.withResponse()` / capture headers and emit byte-identical wire payloads —
+   * the reactive B3 429-retry path is untouched either way.
+   */
+  onResponseHeaders?: (get: (name: string) => string | null) => void
   /** Optional terminal checkpoint sink. Responses surfaces call this when the
    *  server returns a resumable response id; other surfaces never invoke it.
    *  Best-effort by contract: adapters swallow callback failures so a caller's

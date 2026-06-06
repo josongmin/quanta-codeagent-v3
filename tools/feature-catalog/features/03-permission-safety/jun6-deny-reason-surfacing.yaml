@@ -30,12 +30,15 @@ evidence:
     - src/permission/deny-reason.ts
     - src/permission/index.ts
     - src/agent/admissibility-gate.ts
+    - src/agent/dispatch-helpers.ts
+    - src/tool/types.ts
     - src/shared/runtime-config.ts
   adrs: []
   tests:
     unit:
       - tests/unit/deny-reason-structure-hellgate.test.ts
       - tests/unit/deny-reason-noleak-hellgate.test.ts
+      - tests/unit/deny-reason-reachability-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -45,5 +48,13 @@ knobs:
 deliberate_hold: null
 notes: |
   설계/증명: RFC `docs/plans/jun-6-deny-reason-surfacing.md`. ADR 미발행이라 L3(테스트·배선 완비).
+  배선(L4): `admissibility-gate.ts` 의 모든 deny SITE 가 `deny(..., denyReason({layer,pillar,
+  safeReason}))` 로 구조화 reason 전달 → `dispatch-helpers.ts#deny()` 가 knob-ON 시
+  `denyContentPrefix` content 접두 + `ToolFailure.permission_denied.denyReason`(@/tool 의
+  `DenyReasonValue` duck-mirror) 첨부. NO-LEAK: HARD_DENY(early/handoff/policy-evaluate/stack)
+  는 categorical `hardDenySafeReason()` 사용(command echo 금지), stack/mode/rule 은 categorical
+  prefix/recorder-reason 만, reviewer/hook 은 categorical only.
   `deny-reason-structure-hellgate` 가 layer/pillar 분류를, `deny-reason-noleak-hellgate` 가
-  sanitized-by-construction(recorder 가 이미 노출하는 것 외 0)을 봉인. default-OFF byte-identical.
+  sanitized-by-construction 을, `deny-reason-reachability-hellgate` 가 REAL gate 를 통한
+  knob-ON 도달성(layer→stackSource) + knob-OFF byte-identity + HARD_DENY command/secret/regex
+  no-leak 을 봉인. default-OFF byte-identical.

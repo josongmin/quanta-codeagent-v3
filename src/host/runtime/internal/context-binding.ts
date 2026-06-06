@@ -29,6 +29,7 @@ import type {
   RuntimeAgentTurnDeps,
 } from "@/sdk/runtime/base"
 import type { SessionMeta } from "@/session"
+import { sliceWholeChars } from "@/shared"
 import type { AgentEvent } from "@/stream"
 import { automationUpdateTool, type Tool, ToolRegistry } from "@/tool"
 import { createSingleSessionRuntimeHost } from "../builder"
@@ -477,6 +478,10 @@ const buildBootstrapBaseShape = (
     ...whenDefined("shellSnapshot", args.overlay?.shellSnapshot),
     ...whenDefined("networkProxy", args.overlay?.networkProxy),
     ...whenDefined("sessionConfigPort", args.boot.sessionConfigPort),
+    // jun-6 (RFC jun-6-ai-session-title) — spread the AI titler ONLY when the
+    // surface built it (knob on + cheap model). Absent ⇒ slot omitted ⇒ the
+    // loop's first-turn title branch is dead (byte-identical default-OFF).
+    ...whenDefined("autoTitlePort", args.boot.autoTitlePort),
     sessionEffort: () => args.boot.effortStore.get(),
   })
 }
@@ -1024,7 +1029,7 @@ const createTurnStreamPort = (args: {
 const PREVIEW_MAX = 256
 
 const clampPreview = (text: string): string =>
-  text.length <= PREVIEW_MAX ? text : `${text.slice(0, PREVIEW_MAX - 1)}…`
+  text.length <= PREVIEW_MAX ? text : `${sliceWholeChars(text, PREVIEW_MAX - 1)}…`
 
 const previewToolArgs = (input: unknown): string => {
   let serialised: string

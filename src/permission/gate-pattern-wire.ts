@@ -113,6 +113,80 @@ export const autoPassByPatterns = (
   return { kind: "auto_pass", decision }
 }
 
+/** Inputs to {@link recordProposedPattern} — a MODEL-FACING self-propose. */
+export interface ProposePatternInput {
+  /** Patterns the MODEL proposes to remember for future auto-pass. Absent /
+   *  empty ⇒ rejected (`empty_patterns`). */
+  readonly proposed?: readonly string[] | undefined
+  /** Model self-flag. `true` blocks recording unless `allowDangerous` is set
+   *  (parity with {@link autoPassByPatterns}). Absent ⇒ treated as `false`. */
+  readonly isMaybeDangerous?: boolean | undefined
+}
+
+/** Why a self-propose recording was refused. Stable strings for observability. */
+export type ProposeRejectReason =
+  | "no_store"
+  | "empty_patterns"
+  | "dangerous_blocked"
+  | "would_widen"
+
+/** Discriminated result of {@link recordProposedPattern}. */
+export type ProposePatternResult =
+  | { readonly kind: "recorded"; readonly recorded: readonly string[] }
+  | { readonly kind: "rejected"; readonly reason: ProposeRejectReason }
+
+/**
+ * MODEL-FACING self-propose recording seam (CLUSTER D #5) with the NO-WIDEN /
+ * NO-SELF-GRANT security invariant.
+ *
+ * The model proposes patterns it would like remembered so future structurally-
+ * equivalent actions auto-pass via {@link autoPassByPatterns}. A proposal is
+ * RECORDED into `store` ONLY when EVERY proposed pattern is already covered by
+ * the USER/POLICY baseline (`store.isBaseline`). A proposal that would WIDEN
+ * beyond the baseline (any pattern the user/policy never granted) is REJECTED —
+ * the model can NEVER self-grant a new capability. This is the SAME invariant
+ * the coordination broker enforces (a worker cannot self-grant), expressed for
+ * permission patterns.
+ *
+ * Atomicity: ALL-OR-NOTHING. One uncovered pattern rejects the WHOLE batch and
+ * records nothing (a partial record could let a model launder a widen by pairing
+ * it with a covered pattern).
+ *
+ * No chain-widen: recorded patterns are written to `allowed` but NOT to the
+ * baseline (see {@link PatternGrantStore.recordProposed}), so a just-recorded
+ * pattern can never back a subsequent proposal.
+ *
+ * Hardening (parity with {@link autoPassByPatterns}):
+ *   - `store === undefined`            ⇒ rejected "no_store" (default-OFF).
+ *   - `proposed` absent / empty        ⇒ rejected "empty_patterns".
+ *   - `isMaybeDangerous && !allow`     ⇒ rejected "dangerous_blocked".
+ *   - any pattern not baseline-covered ⇒ rejected "would_widen" (NO self-grant).
+ *
+ * Pure (never throws); the store mutation is the only effect and only on the
+ * `recorded` arm.
+ */
+export const recordProposedPattern = (
+  store: PatternGrantStore | undefined,
+  input: ProposePatternInput,
+  opts: { readonly allowDangerous?: boolean } = {},
+): ProposePatternResult => {
+  if (store === undefined) return { kind: "rejected", reason: "no_store" }
+  const proposed = input.proposed
+  if (proposed === undefined || proposed.length === 0) {
+    return { kind: "rejected", reason: "empty_patterns" }
+  }
+  if (input.isMaybeDangerous === true && opts.allowDangerous !== true) {
+    return { kind: "rejected", reason: "dangerous_blocked" }
+  }
+  // NO-WIDEN: every proposed pattern MUST be in the trusted user/policy baseline.
+  // A single uncovered pattern rejects the whole batch (atomic, no laundering).
+  for (const p of proposed) {
+    if (!store.isBaseline(p)) return { kind: "rejected", reason: "would_widen" }
+  }
+  store.recordProposed(proposed)
+  return { kind: "recorded", recorded: proposed }
+}
+
 /** Cascade helper: grant a non-empty batch of patterns into `store` AND
  *  return the toolCallIds of any pending requests now satisfied by the new
  *  set. Empty `patterns` is a no-op (no grant, no cascade). Idempotent —

@@ -419,6 +419,19 @@ export interface RuntimeConfig {
    *  (the host adapter that turns the tool's mirror into a render-only
    *  `progress_update` AgentEvent). */
   readonly progressUpdate: boolean
+  /** #8 — mid-turn keystroke capture (`QUANTA_MIDTURN_CAPTURE`). Strict opt-in
+   *  (`=== "1"`). Default false ⇒ the CLI session loop wires NO mid-turn capture
+   *  facade; the input reader is byte-identical to today (one `readLine` per turn
+   *  boundary, no keystroke source while a turn runs). When ON, the session loop
+   *  builds a `defaultMidTurnCapture` over the live plan-queue + drains captured
+   *  lines onto the existing `externalPromptQueue` race, so a completed input
+   *  line that arrives WHILE a turn is in flight is enqueued (Codex "type while
+   *  running") and surfaced at the next turn boundary. NOTE: this knob wires the
+   *  capture→drain SEAM only; the concurrent raw-mode keystroke SOURCE during a
+   *  turn is a separate, hot-path change (see jun-6 report residual). With the
+   *  knob ON but no source feeding `captureMidTurnLine`, behavior is still
+   *  byte-identical. */
+  readonly midTurnCapture: boolean
   /** N6 — PTY/tmux session attach (`QUANTA_PTY_ATTACH`). Strict opt-in
    *  (`=== "1"`). Default false ⇒ the 6 `pty_*` tools are NOT registered
    *  (byte-identical, exec-risk). When ON, the composition root wires a
@@ -846,6 +859,8 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // N3 — strict `=== "1"` opt-in. Default false ⇒ no MCP resource/prompt tools.
     mcpResources: env["QUANTA_MCP_RESOURCES"] === "1",
     progressUpdate: env["QUANTA_PROGRESS_UPDATE"] === "1",
+    // #8 — strict `=== "1"` opt-in. Default false ⇒ no mid-turn capture facade.
+    midTurnCapture: env["QUANTA_MIDTURN_CAPTURE"] === "1",
     ptyAttach: env["QUANTA_PTY_ATTACH"] === "1",
     // C3 — brief-mode SEED. Uses the standard boolean knob vocabulary (1/true/on)
     // so it reads like the `effort` env seed; default-OFF ⇒ byte-identical.

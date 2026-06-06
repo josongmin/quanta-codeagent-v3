@@ -15,7 +15,8 @@ import { createIdleMonitor } from "./idle-monitor"
 import { loadImageBlock } from "./image-loader"
 import { createImageQueue, type ImageQueue } from "./image-queue"
 import {
-  buildLLM,
+  buildAutoTitlePort,
+  buildLLMWithByok,
   buildSkillsConfig,
   buildStreaming,
   buildTooling,
@@ -155,9 +156,13 @@ export const runSlashMain = async (_tok: string): Promise<number> => {
   })
 }
 
-/** ADR-0299 — compose the LLM stack at the CLI seam:
- *  `buildLLM` → `RetryingLLM` → `composeLLM`. */
-const cliBuildLlm: Parameters<typeof setupSession>[0]["buildLlm"] = (
+/** ADR-0299 + jun-6 H7-BYOK — compose the LLM stack at the CLI seam:
+ *  `buildLLMWithByok` → `RetryingLLM` → `composeLLM`. ASYNC: the inner build may
+ *  `await` an `apiKeyHelper` mint on the legacy vendor path under
+ *  `QUANTA_API_KEY_HELPER_LEGACY_VENDOR=1`; off / cloud-transport ⇒ it delegates
+ *  to the sync `buildLLM` (resolves immediately, byte-identical). `bootstrapSession`
+ *  already `await`s the returned promise. */
+const cliBuildLlm: Parameters<typeof setupSession>[0]["buildLlm"] = async (
   provider,
   model,
   mode,
@@ -165,7 +170,7 @@ const cliBuildLlm: Parameters<typeof setupSession>[0]["buildLlm"] = (
   signal,
   slog,
 ) => {
-  const llm = buildLLM(provider, model)
+  const llm = await buildLLMWithByok(provider, model)
   const retryingLLM = new RetryingLLM({ inner: llm, signal })
   return composeLLM(retryingLLM, provider, signal, mode, permission, slog)
 }
@@ -224,6 +229,8 @@ const sessionSetupDeps: Parameters<typeof setupSession>[0] = {
   buildWorkMetricsSink,
   // ADR-0299 — env-bound factories the host consumes as deps.
   buildLlm: cliBuildLlm,
+  // jun-6 (ai-session-title) — default-OFF ⇒ undefined ⇒ byte-identical.
+  buildAutoTitlePort: (provider, signal) => buildAutoTitlePort(provider, signal),
   buildStreaming,
   buildTooling,
   // B1 (jun-04) — adapt the host's `(slog, llm?)` factory shape to the CLI

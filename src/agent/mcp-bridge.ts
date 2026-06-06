@@ -6,6 +6,7 @@ import {
   McpClient,
   type McpClientTransport,
   McpError,
+  type McpOAuthProviderPort,
   McpReconnectSupervisor,
   type McpServerConfig,
   type McpToolDef,
@@ -378,7 +379,15 @@ export interface SamplingWiringInput {
 export const applyMcpClientWiring = (
   opts: NonNullable<ConstructorParameters<typeof McpClient>[1]>,
   wiring: SamplingWiringInput | undefined,
+  oauthProvider?: McpOAuthProviderPort,
 ): NonNullable<ConstructorParameters<typeof McpClient>[1]> => {
+  // H18 (jun-06 live-wire) — the OAuth provider is applied through the SAME
+  // unification point as the inbound bundle so the single-client and the
+  // supervised (restart) factory wire it IDENTICALLY (no path can set the
+  // provider while the other forgets it). Present ⇒ each constructed client
+  // consults it for a bearer when its `oauth:true` config opts in; absent ⇒ the
+  // client keeps `headlessOAuthRejecter` (byte-identical: no token, no header).
+  if (oauthProvider !== undefined) opts.oauthProvider = oauthProvider
   if (wiring === undefined) return opts
   // The negotiator reflects BOTH sampling AND roots (computed together at the
   // source); set it whenever ANY inbound capability is wired.
@@ -412,6 +421,17 @@ export interface LoadMcpToolsOpts {
    *  reconnected client RE-advertises + re-handles. Absent ⇒ byte-identical (no
    *  advertisement, headless rejecter, empty roots). */
   samplingWiring?: SamplingWiringInput
+  /** H18 (jun-06 live-wire) — the connectors-backed `McpOAuthProviderPort` the
+   *  composition root assembled via `buildMcpOAuthWiring` (present IFF
+   *  `QUANTA_MCP_OAUTH=1` AND deps available). When present, EVERY constructed
+   *  client (single AND supervised path) is given this provider, so a server
+   *  whose config opts in (`oauth:true`) resolves a bearer before its HTTP
+   *  carrier is built and attaches `Authorization: Bearer`. Absent ⇒ each client
+   *  keeps `headlessOAuthRejecter` (byte-identical: no discovery, flow, header).
+   *  The keyring composition (`QUANTA_MCP_OAUTH_KEYRING`) is BAKED INTO this
+   *  provider's token store at the root (`resolveMcpOAuthKeyringOption`), so the
+   *  bridge stays a pure consumer — it never reads `process.platform`. */
+  oauthProvider?: McpOAuthProviderPort
 }
 
 /** Load one server on the ADR-0435 supervised (auto-restart) path. `create`
@@ -463,6 +483,7 @@ const loadSingle = async (
   elicitationPrompterFor: ElicitationPrompterFactory | undefined,
   transportFor: ((config: McpServerConfig) => McpClientTransport) | undefined,
   samplingWiring: SamplingWiringInput | undefined,
+  oauthProvider: McpOAuthProviderPort | undefined,
 ): Promise<{ tools: Tool[]; client: McpStoppable; resources?: ResourcesCapableClient } | null> => {
   const clientOpts: ConstructorParameters<typeof McpClient>[1] = {}
   if (elicitationPrompterFor !== undefined) {
@@ -475,9 +496,11 @@ const loadSingle = async (
   // helper the supervised factory uses: the negotiator (computed at the source to
   // advertise `sampling`/`roots` IFF wired) and the ports that answer them are
   // set as one unit, so the client can never advertise a capability it would
-  // answer with `-32601`. Absent ⇒ no override (defaultNegotiator + the client's
-  // headless rejecter + empty roots), byte-identical to the legacy load.
-  applyMcpClientWiring(clientOpts, samplingWiring)
+  // answer with `-32601`. H18 (jun-06) — the OAuth provider rides the same
+  // helper so it is applied identically on both paths. Absent ⇒ no override
+  // (defaultNegotiator + the client's headless rejecter + empty roots + the
+  // headless OAuth rejecter), byte-identical to the legacy load.
+  applyMcpClientWiring(clientOpts, samplingWiring, oauthProvider)
   const client = new McpClient(config, clientOpts)
   try {
     await client.start()
@@ -516,7 +539,13 @@ export const loadMcpTools = async (
     const loaded =
       supervisorDepsFor !== undefined
         ? await loadSupervised(config, supervisorDepsFor(config))
-        : await loadSingle(config, elicitationPrompterFor, opts?.transportFor, opts?.samplingWiring)
+        : await loadSingle(
+            config,
+            elicitationPrompterFor,
+            opts?.transportFor,
+            opts?.samplingWiring,
+            opts?.oauthProvider,
+          )
     if (loaded === null) continue
     tools.push(...loaded.tools)
     clients.push(loaded.client)

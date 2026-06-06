@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs"
 import { lstat, readFile } from "node:fs/promises"
 import { dirname, join, relative, resolve, sep } from "node:path"
+import { sliceWholeChars } from "@/shared"
 
 /**
  * Repo-local rule ingestion (Codex `repo-local-rule-ingestion-audit.md` mirror,
@@ -191,7 +192,7 @@ const tryRead = async (path: string): Promise<string | undefined> => {
       // auditors) can see that the rules were cut. The byte count refers to
       // the UTF-16 code units returned by `readFile("utf8")` — same unit
       // String.prototype.length reports, kept consistent for the marker.
-      return `${body.slice(0, MAX_BYTES)}\n\n[truncated: ${body.length} bytes total, showing first 64 KiB]`
+      return `${sliceWholeChars(body, MAX_BYTES)}\n\n[truncated: ${body.length} bytes total, showing first 64 KiB]`
     }
     return body
   } catch {

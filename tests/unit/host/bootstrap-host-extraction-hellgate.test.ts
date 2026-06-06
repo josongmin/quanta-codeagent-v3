@@ -102,6 +102,8 @@ const makeFakeDeps = (overrides: Partial<SessionBootstrapDeps> = {}): SessionBoo
     buildPlanStoreOrUndefined: () => undefined,
     buildWorkMetricsSink: () => undefined,
     buildLlm: () => fakeLLM,
+    // jun-6 (RFC jun-6-ai-session-title) — default-OFF stub: no auto-title port.
+    buildAutoTitlePort: () => undefined,
     buildStreaming: () => ({
       stream: { emit: () => undefined },
       run: undefined,
@@ -378,6 +380,58 @@ describe("ADR-0299 host-bootstrap-extraction hellgate", () => {
     expect(caught).toBeInstanceOf(SessionBootstrapError)
     expect((caught as SessionBootstrapError).kind).toBe("llm_build_failed")
     expect((caught as SessionBootstrapError).message).toBe("provider key missing")
+  })
+
+  // jun-6 H7-BYOK — `BuildLlmFactory` may return `Promise<LLMPort>` so the
+  // legacy vendor path can `await` an `apiKeyHelper` mint (one shell) ahead of the
+  // synchronous `createLLM`. The host MUST `await` `deps.buildLlm(...)`, else
+  // `result.llm` would be an UNRESOLVED PROMISE (no `.stream`) and every LLM call
+  // would crash. Before the await was wired, `cliBuildLlm` (async) was a type
+  // error against the sync factory; this case locks the async contract in.
+  test("10b. an ASYNC buildLlm is AWAITED — result.llm is the resolved adapter, not a Promise", async () => {
+    let resolvedAfterMint = false
+    const asyncAdapter: LLMPort = {
+      stream: async function* () {
+        yield* []
+      },
+    }
+    const deps = makeFakeDeps({
+      // Mirrors the legacy-vendor BYOK path: an awaited async step (the mint)
+      // precedes returning the adapter.
+      buildLlm: async () => {
+        await Promise.resolve()
+        resolvedAfterMint = true
+        return asyncAdapter
+      },
+      // The shared fake omits this (a separate track's gap); supply it so this
+      // case reaches the LLM-await path rather than the unrelated titler call.
+      buildAutoTitlePort: () => undefined,
+    })
+    const result = await bootstrapSession(deps, makeRuntime(), {})
+    expect(resolvedAfterMint).toBe(true)
+    // The host awaited the promise: `result.llm` is the adapter itself …
+    expect(result.llm).toBe(asyncAdapter)
+    // … with a callable `.stream` (a leaked Promise would have none).
+    expect(typeof (result.llm as LLMPort).stream).toBe("function")
+    expect(result.llm).not.toBeInstanceOf(Promise)
+  })
+
+  test("10c. a REJECTING async buildLlm is wrapped into a typed SessionBootstrapError", async () => {
+    const deps = makeFakeDeps({
+      buildLlm: async () => {
+        await Promise.resolve()
+        throw new Error("apiKeyHelper mint failed (untrusted)")
+      },
+    })
+    let caught: unknown
+    try {
+      await bootstrapSession(deps, makeRuntime(), {})
+    } catch (e) {
+      caught = e
+    }
+    expect(caught).toBeInstanceOf(SessionBootstrapError)
+    expect((caught as SessionBootstrapError).kind).toBe("llm_build_failed")
+    expect((caught as SessionBootstrapError).message).toBe("apiKeyHelper mint failed (untrusted)")
   })
 
   test("11. resolveResume conflict gets wrapped (kind: resume_conflict)", async () => {

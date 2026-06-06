@@ -63,6 +63,9 @@ export const buildSessionLoopOptions = async (deps: {
     registerReplaceMessages: wires.setReplaceMessages,
     registerSideConversationStart: wires.setSideConversationStart,
     registerPlanQueueSendNow: wires.setPlanQueueSendNow,
+    // #8 — the live plan-queue store, threaded so the loop can build the
+    // mid-turn capture facade over it when QUANTA_MIDTURN_CAPTURE=1.
+    planQueueStore: wires.planQueueStore,
     runtimeFacadeCompose: wires.runtimeFacadeCompose,
     // ADR-0293 — seam attached by the loop once externalPromptQueue is born.
     playbookSeam: wires.playbookSeam,

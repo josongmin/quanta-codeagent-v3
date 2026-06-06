@@ -252,7 +252,7 @@ export const bootstrapSession = async (
   const effortStore = createEffortStore(parseEffort(runtime.env.QUANTA_EFFORT) ?? "default")
   let finalLLM: LLMPort
   try {
-    finalLLM = deps.buildLlm(
+    finalLLM = await deps.buildLlm(
       runtime.provider,
       runtime.model,
       runtime.mode,
@@ -263,6 +263,14 @@ export const bootstrapSession = async (
   } catch (e) {
     return failSessionBootstrap("llm_build_failed", errMessage(e), e)
   }
+
+  // jun-6 (RFC jun-6-ai-session-title) — build the fire-and-forget AI titler.
+  // Default-OFF: the surface factory returns `undefined` unless
+  // `QUANTA_SESSION_AUTO_TITLE` is on AND `QUANTA_SESSION_TITLE_MODEL` resolves a
+  // cheap port. Mirrors the `buildSummarizerLlm` second-LLM precedent (the cheap
+  // LLM is pinned to the session abort signal so it is cancelled on session end).
+  // Absent ⇒ `context-binding.ts` omits `AgentConfig.autoTitlePort` (byte-identical).
+  const autoTitlePort = deps.buildAutoTitlePort(runtime.provider, abort.signal)
 
   // B1 (jun-04) — thread the freshly-built LLM so an inbound MCP
   // `sampling/createMessage` can be fulfilled by the loaded clients (the surface
@@ -425,6 +433,7 @@ export const bootstrapSession = async (
       identityModeState,
       focusChain,
       sessionConfigPort,
+      autoTitlePort,
       shutdownMcp,
       // ADR-0301 — present the parsed CLI flag as `true | undefined`. Mapping
       // `false → undefined` lets the downstream consumer spread the slot

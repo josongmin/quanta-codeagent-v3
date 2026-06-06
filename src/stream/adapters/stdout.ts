@@ -148,6 +148,12 @@ export class StdoutStream implements StreamPort {
         // (a transient in-place update), NOT this line-oriented monitor. A
         // line per streamed delta would flood stdout, so this sink ignores it.
         break
+      case "ratelimit_snapshot":
+        // jun-6 account-ratelimit-snapshot — transient quota-meter notice for
+        // the CLI spinner/status-bar (presence + N-left + reset-in), NOT this
+        // line-oriented monitor. Ignored here for the same reason as
+        // `output_progress` (a richer surface renders it in place).
+        break
       case "response_queued":
         this.write(renderResponseQueued(event))
         break

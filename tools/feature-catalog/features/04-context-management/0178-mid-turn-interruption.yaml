@@ -10,7 +10,7 @@ monitoring: n-a
 modes: [interactive]
 configurable: integrated
 config_refs:
-  env: []
+  env: ["QUANTA_MIDTURN_CAPTURE"]
 owners: ["@songmin"]
 labels: ["adr-0178", "tier:1", "plan-queue", "interruption"]
 depends_on:
@@ -32,16 +32,27 @@ evidence:
     - src/agent/mid-turn-interruption/types.ts
     - src/agent/mid-turn-interruption/default.ts
     - src/agent/mid-turn-interruption/index.ts
+    - src/apps/cli/repl/mid-turn-capture-wire.ts
   adrs:
     - docs/decisions/0178-mid-turn-interruption.md
   tests:
     unit:
       - tests/unit/mid-turn-interruption-hellgate.test.ts
-    integration: []
+      - tests/unit/mid-turn-capture-wire-hellgate.test.ts
+    integration:
+      - tests/integration/plan-queue-mid-turn-e2e.test.ts
     contract: []
-knobs: []
+knobs: ["midturn-capture"]
 deliberate_hold: null
 notes: |
   `MidTurnCancelCause = "user-abort"` defined locally to keep plane
   clean — structural assign across ADR-0177-sibling cancel-cause union
   is closed-string-union widening only.
+
+  jun-6 #8 last-mile: `mid-turn-capture-wire.ts` is the CLI SURFACE binding
+  that was previously missing — it builds `defaultMidTurnCapture` over the live
+  plan-queue and mirrors captured lines onto the `externalPromptQueue` so the
+  existing turn-boundary race drains them as the next prompt. Gated by
+  `QUANTA_MIDTURN_CAPTURE=1` (default-OFF, byte-identical). The seam is wired
+  + tested; the CONCURRENT raw-mode keystroke SOURCE that runs alongside a
+  streaming turn is a deliberate residual (a hot-path change to the input loop).

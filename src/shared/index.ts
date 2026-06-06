@@ -57,6 +57,7 @@ export {
   SWEBENCH_CACHE_LEVELS,
 } from "./runtime-config"
 export type { ShellExecEvent, ShellExecObserver } from "./shell-exec-types"
+export { sliceWholeChars } from "./slice-whole-chars"
 export type { TerminalIo, TerminalWriter } from "./terminal-io"
 export {
   __resetTerminalIo,

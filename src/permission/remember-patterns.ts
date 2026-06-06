@@ -89,9 +89,23 @@ export const autoResolvable = (args: {
  *  grants and ask it which pending requests cascade open. */
 export class PatternGrantStore {
   private allowed: Set<string>
+  /**
+   * The USER/POLICY-granted subset of {@link allowed} — the TRUSTED baseline.
+   * `grant()` (the user/policy authority path) adds here; the model-facing
+   * `recordProposed()` path does NOT. The split is load-bearing for the
+   * no-widen / no-self-grant invariant: a model proposal may only be recorded
+   * when it is COVERED by the baseline, and recording it never promotes it INTO
+   * the baseline (so the model cannot chain-widen: propose A covered by the
+   * baseline, then propose B "covered by" A). Empty/absent ⇒ no proposal can
+   * ever be recorded (the model has no trusted ground to refine).
+   */
+  private baseline: Set<string>
 
   constructor(initial?: Iterable<string>) {
+    // Constructor seeds are USER/POLICY grants (the host builds the store from
+    // the persisted allow-list), so they form the trusted baseline too.
     this.allowed = new Set<string>(initial ?? [])
+    this.baseline = new Set<string>(this.allowed)
   }
 
   /** Snapshot of the currently-granted patterns (defensive copy). */
@@ -99,8 +113,26 @@ export class PatternGrantStore {
     return new Set(this.allowed)
   }
 
-  /** Add patterns to the session's allowed set. Idempotent. */
+  /** Add patterns to the session's allowed set AS BASELINE (user/policy
+   *  authority). Idempotent. This is the ONLY path that widens the trusted
+   *  ground a model proposal can refine. */
   grant(patterns: readonly string[]): void {
+    this.allowed = grantPatterns(this.allowed, patterns)
+    this.baseline = grantPatterns(this.baseline, patterns)
+  }
+
+  /** True iff `pattern` is in the trusted USER/POLICY baseline (NOT merely a
+   *  model-recorded refinement). The no-widen predicate keys off this. */
+  isBaseline(pattern: string): boolean {
+    return this.baseline.has(pattern)
+  }
+
+  /** Record a model-PROPOSED pattern into the auto-pass `allowed` set WITHOUT
+   *  touching the baseline. The caller (`recordProposedPattern`) MUST have
+   *  already verified every pattern is baseline-covered — this method performs
+   *  no coverage check itself; it is the unconditional write half of the seam.
+   *  Idempotent. */
+  recordProposed(patterns: readonly string[]): void {
     this.allowed = grantPatterns(this.allowed, patterns)
   }
 

@@ -86,16 +86,18 @@ import {
 } from "@/observability/codex-r2-metrics"
 import { defaultPromptCacheObserver } from "@/observability/prompt-cache"
 import { CI_BOT_DEFAULT_ALLOWLIST } from "@/runtime/network-allowlist"
-import { runtimeConfig } from "@/shared"
 import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
 import type { RuntimeAgentTurnAssembler, RuntimeAgentTurnDeps } from "@/sdk/runtime/base"
+import { runtimeConfig } from "@/shared"
 import { skillMcpDepsEnabled } from "@/skill/skill-mcp-deps"
 import { resolveJailed } from "@/storage"
 import type { AgentEvent, StreamPort } from "@/stream"
+import type { AppshotArtifactSink, AppshotSlot } from "@/tool"
 import { type DnsResolver, nodeDnsResolver } from "@/tool/browser"
 import { ReadFileState, staleReadGuardEnabled } from "@/tool/stale-read-guard"
 import type { WebSearchProvider } from "@/tool/web"
 import { providerFromEnv } from "@/tool/web/providers"
+import { buildAppshotPortWire } from "./appshot-port-wire"
 import { buildMentionSymbolDeps } from "./internal/mention-symbol-deps"
 import { maybeWireProgressSink } from "./progress-sink-wire"
 
@@ -291,6 +293,50 @@ const maybeWireBrowser = (cfg: AgentConfig, env: AssemblerEnv): void => {
   if (port.availability() !== null) slot.browser = { port, resolver: nodeDnsResolver }
 }
 
+/** G1 (RFC jun-6-appgen-appshot) — env-gated appshot verify-loop wiring. Mutates
+ *  `cfg` to assemble the REAL {@link AppshotPort} into `cfg.appshot` — but ONLY
+ *  when ALL of:
+ *    - `QUANTA_APPSHOT=1` (the strict opt-in knob), AND
+ *    - a live `BrowserPort` is wired (`cfg.browser.port`, set by
+ *      {@link maybeWireBrowser} above when QUANTA_BROWSER_TOOL=on + a system Chrome
+ *      exists) — appshot's render/screenshot arrows RIDE that browser, AND
+ *    - a judge `LLMPort` is in scope (`cfg.llm`, always present on a real base).
+ *  This is the one layer where the browser + judge are both reachable; the
+ *  pre-assembler `agent-arg-builder` cannot mint this slot (no BrowserPort there).
+ *  When wired, render/screenshot → the live browser, verify → `cfg.llm` (cheap
+ *  LLM-judge), scaffold → `makeJailedScaffold(cfg.cwd)`, and — when the Canvas
+ *  store is ALSO on (`cfg.artifactRegistry`, threaded from the composition root) —
+ *  the final scaffold registers into that SAME registry the `artifact_*` tools
+ *  read. Missing knob / browser / judge ⇒ slot unset ⇒ no tool (byte-identical
+ *  default-OFF). Caller-override-safe: a pre-set `cfg.appshot` is preserved.
+ *  Reads env off the injected `env` view (never `process.env`). */
+const maybeWireAppshot = (cfg: AgentConfig, env: AssemblerEnv): void => {
+  if (env.QUANTA_APPSHOT !== "1") return
+  const slot = cfg as AgentConfig & {
+    appshot?: AppshotSlot
+    browser?: { port: BrowserPort }
+    artifactRegistry?: AppshotArtifactSink
+    appshotDispose?: () => Promise<void>
+  }
+  if (slot.appshot !== undefined) return // caller-override-precedence (ADR-0332)
+  const browser = slot.browser?.port
+  // No browser wired (Chrome absent or QUANTA_BROWSER_TOOL off) ⇒ render/
+  // screenshot are unreachable ⇒ leave the slot unset (byte-identical). The
+  // judge is `cfg.llm`, always a real adapter on a production base.
+  if (browser === undefined) return
+  const wire = buildAppshotPortWire({ browser, judge: cfg.llm, cwd: cfg.cwd })
+  slot.appshot = {
+    port: wire.port,
+    now: () => Date.now(),
+    ...(slot.artifactRegistry !== undefined ? { artifactSink: slot.artifactRegistry } : {}),
+  }
+  // The lazily-spawned appshot browser session shares the SAME BrowserPort the
+  // browser block already disposes; `wire.dispose` is idempotent and closes only
+  // the handle appshot itself spawned. The tier-1 appshot block registers it into
+  // teardown (mirrors browserDispose).
+  slot.appshotDispose = wire.dispose
+}
+
 /** ADR-0394 — objective tools (`objective_set`/`objective_update`/`objective_get`).
  *  Default-ON: an in-memory `ObjectivePort` is wired unless
  *  `QUANTA_OBJECTIVE_TOOLS="0"`. Lightweight (no I/O / external dep).
@@ -369,6 +415,9 @@ const parseAssemblerPositiveInt = (raw: string | undefined): number | undefined 
  *  caller-override-safe, and a no-op when its gate/resource is absent. */
 const wireOptionalCapabilitySlots = (cfg: AgentConfig, env: AssemblerEnv): void => {
   maybeWireBrowser(cfg, env)
+  // G1 — runs AFTER maybeWireBrowser so it can read the freshly-wired
+  // `cfg.browser.port`; no-op unless QUANTA_APPSHOT=1 AND a browser is present.
+  maybeWireAppshot(cfg, env)
   maybeWireObjective(cfg, env)
   maybeWireMailbox(cfg, env)
   maybeWireWebSearch(cfg, env)

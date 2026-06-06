@@ -44,6 +44,7 @@
  */
 
 import type { Message } from "@/llm"
+import type { RateLimitSnapshotStore } from "@/llm/ratelimit-snapshot"
 import type { WorkingMemory } from "@/memory"
 import type { TurnTiming } from "@/observability"
 import type { AutoModeClassifier } from "@/permission"
@@ -152,6 +153,18 @@ export interface TurnSession {
    *  TTFM on the FIRST call (subsequent calls are no-ops). Absent ⇒ no TTFM,
    *  byte-identical legacy. */
   readonly ttfm?: { markFirstDispatch(): void }
+  /** jun-6 account-ratelimit-snapshot (gate `QUANTA_RATELIMIT_PROACTIVE`).
+   *  Per-run PROACTIVE rate-limit collaborators, constructed ONCE in
+   *  `createRunAgentContext` ONLY when the knob is on. The `store` is the
+   *  per-route snapshot container fed by the adapter's `onResponseHeaders`
+   *  success-path hook; `now` is the injected clock; `sleep` the injected delay.
+   *  Absent ⇒ the loop wires no header hook and applies no pre-request delay
+   *  (byte-identical reactive 429-retry). */
+  readonly rateLimitProactive?: {
+    readonly store: RateLimitSnapshotStore
+    readonly now: () => number
+    readonly sleep: (ms: number) => Promise<void>
+  }
 }
 
 /**

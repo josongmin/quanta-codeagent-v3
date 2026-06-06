@@ -12,7 +12,7 @@ import {
   planEviction,
   scoreEntry,
 } from "@/memory"
-import { throwIfAborted } from "@/shared"
+import { sliceWholeChars, throwIfAborted } from "@/shared"
 import { arbitrateConsolidation, type ConsolidationOp } from "./memory-consolidate"
 import { distillSession, finalAssistantText } from "./memory-distill"
 import { emptyPersistStats, type PersistStats, type RecallStats } from "./memory-stats"
@@ -67,7 +67,7 @@ const hashShort = (s: string): string => {
 
 /** Truncate `text` to {@link MAX_ENTRY_CHARS}, appending an ellipsis if cut. */
 const truncate = (text: string): string =>
-  text.length > MAX_ENTRY_CHARS ? `${text.slice(0, MAX_ENTRY_CHARS)}…` : text
+  text.length > MAX_ENTRY_CHARS ? `${sliceWholeChars(text, MAX_ENTRY_CHARS)}…` : text
 
 /** Embed one string, returning the vector only if it is the expected dim. */
 const embedOne = async (

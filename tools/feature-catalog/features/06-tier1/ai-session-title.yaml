@@ -3,8 +3,8 @@ title: createAutoTitlePort + generateSessionTitle — opt-in cheap-model first-t
 section: 6
 subsystem: runner/session-ops — auto-title
 order: 466
-maturity: L3
-status: new
+maturity: L4
+status: refined
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive, headless]
@@ -46,10 +46,21 @@ purpose: |
 evidence:
   code:
     - src/runner/session-ops/auto-title.ts
+    # Composition-root wiring (L3→L4): the CLI surface builds the cheap LLM +
+    # session-store adapters and threads the port through bootstrap → AgentConfig.
+    - src/apps/cli/internal.ts          # buildAutoTitlePort (mirrors buildSummarizerLlm)
+    - src/apps/cli/repl.ts              # buildAutoTitlePort dep wired into setupSession deps
+    - src/host/bootstrap/bootstrap-session.ts  # deps.buildAutoTitlePort(provider, signal) → result.autoTitlePort
+    - src/host/runtime/internal/context-binding.ts  # spread onto AgentConfig.autoTitlePort
   adrs: []
   tests:
     unit:
       - tests/unit/ai-session-title-core-hellgate.test.ts
+      - tests/unit/auto-session-title-hellgate.test.ts
+      # Reachability e2e: knob-on ⇒ root BUILDS the port + a fired maybeTitle
+      # titles a temp session via the real renameSession adapter; knob/model-off
+      # ⇒ no port; human-rename not clobbered.
+      - tests/unit/ai-title-byok-reachability-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -69,7 +80,19 @@ knobs:
       into the titler.
 deliberate_hold: null
 notes: |
-  L3 (slice + hellgate present; the loop kick-off + composition-root wiring of
-  the cheap LLMPort / renameSession adapter / loadSessionById title-reader are
-  the L4 promotion step). The leaf is fully closed-port and default-OFF, so it
-  is dead code until a root builds and injects the port. RFC §7 Phase-1 scope.
+  L4 (jun-6 reachability landed). The composition-root wiring is now LIVE: the
+  CLI surface `buildAutoTitlePort` (`src/apps/cli/internal.ts`) builds the cheap
+  `LLMPort` from `QUANTA_SESSION_TITLE_MODEL` via the proven `buildSummarizerLlmCore`
+  (mirroring the `QUANTA_COMPACT_MODEL` precedent) and injects the real
+  `renameSession` writer + `loadSessionById` title-reader + a `startsWith("Untitled")`
+  placeholder predicate. It is wired as a `SessionBootstrapDeps.buildAutoTitlePort`
+  factory (`repl.ts`), invoked in `bootstrapSession` with `(provider, abort.signal)`,
+  carried on `SessionBootstrapResult.autoTitlePort`, and spread onto
+  `AgentConfig.autoTitlePort` in `context-binding.ts`. The loop's existing turn-1
+  fire (`runSessionStartSequence`) then drives it ONCE on the opening turn.
+
+  DEFAULT-OFF byte-identity preserved: the factory returns `undefined` unless BOTH
+  `QUANTA_SESSION_AUTO_TITLE` is on AND `QUANTA_SESSION_TITLE_MODEL` resolves a
+  cheap port (the cost gate — NEVER the expensive main model) ⇒ no port spread ⇒
+  the loop's title branch is dead (proven by jun06-seam-default-off-byte-identity
+  + the reachability battery's knob-off cases). RFC §7 Phase-1 scope.

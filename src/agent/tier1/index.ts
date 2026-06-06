@@ -19,6 +19,7 @@ export {
   advisorConsultFromLLM,
   buildAdvisorBlock,
 } from "./advisor"
+export { type AppshotBlock, buildAppshotBlock } from "./appshot"
 export { buildClassifierBlock } from "./auto-classifier"
 export { buildBranchSearchBlock } from "./branch-search"
 export { buildBrowserBlock } from "./browser"
@@ -38,9 +39,9 @@ export { buildPlanExitBlock } from "./plan-exit"
 export { buildPlanMutationBlock } from "./plan-mutation"
 export { buildPrShipBlock } from "./pr-ship"
 export { buildPromptCacheBlock } from "./prompt-cache"
-export { buildSideAgentBlock } from "./side-agent"
 export { buildShadowBlock } from "./shadow"
 export { buildShadowVerifyBlock } from "./shadow-verify"
+export { buildSideAgentBlock } from "./side-agent"
 export { buildSkillBlock, type SkillBlock } from "./skill"
 export { buildSubagentBlock, type SubagentBlock } from "./subagent"
 export { buildSubagentBatchBlock } from "./subagent-batch"

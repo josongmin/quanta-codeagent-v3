@@ -3,8 +3,8 @@ title: MCP OAuth token storage in the OS keyring (Keychain / libsecret), file-fa
 section: 9
 subsystem: MCP HTTP transport authentication
 order: 479
-maturity: L2
-status: new
+maturity: L3
+status: refined
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive, headless]
@@ -57,14 +57,17 @@ evidence:
     - src/host/runtime/keyring/index.ts
     - src/host/runtime/index.ts
     - src/host/runtime/mcp-oauth-provider.ts
+    - src/agent/mcp-bridge.ts
+    - src/apps/cli/internal.ts
     - src/shared/runtime-config.ts
   adrs: [160]
   tests:
     unit:
       - tests/unit/mcp-oauth-keyring-compose-hellgate.test.ts
       - tests/unit/mcp-oauth-keyring-adapter-hellgate.test.ts
+      - tests/unit/mcp-oauth-keyring-reachability-hellgate.test.ts
 knobs:
   - name: QUANTA_MCP_OAUTH_KEYRING
     default: 'undefined'
     purpose: 'Strict =="1" opt-in. ON (+ QUANTA_MCP_OAUTH=1 + the OS keyring available()) ⇒ the composition root injects composeTokenStore(realKeyring, fileStore) for the H18 MCP OAuth TokenStorePort: tokens persist in the OS Keychain/libsecret, an existing 0600 file token is migrated in on first read, delete spans both stores. OFF / no keyring ⇒ the 0600 file store is injected unchanged (byte-identical).'
-notes: 'Closed-port: the OS CLI runs through an injected KeyringExec (Bun.spawn argv-array, no shell) — secrets travel ONLY via stdin, never argv (no ps-visible token). Read/probe/delete are NO-THROW so a keyring outage degrades to re-login via the H18 TOTAL tokenFor; set() THROWS on a non-zero exit (write did not persist) so compose engages the 0600 file fallback instead of silently dropping the token. Windows Credential Manager is a follow-up (null keyring keeps it correct meanwhile). Phase 3 (RFC §7): generalize the same KeyringPort to back chatgpt-oauth + trust-scope stores (self-documented follow-ups).'
+notes: 'LIVE-WIRED jun-06: the keyring is now REACHABLE end-to-end. resolveMcpOAuthProvider (src/apps/cli/internal.ts) calls resolveMcpOAuthKeyringOption(process.platform) (the ONLY process.platform read for the keyring decision) and bakes composeTokenStore(realKeyring, fileStore) into the H18 provider token store, which mcp-bridge threads into every McpClient via clientOpts.oauthProvider (applyMcpClientWiring, both single + supervised paths). Sealed by tests/unit/mcp-oauth-keyring-reachability-hellgate.test.ts: knob-on ⇒ token persists to a fake keyring (NOT the file) + bearer on the MCP request; secret never on argv; knob-off ⇒ no provider, byte-identical. Closed-port: the OS CLI runs through an injected KeyringExec (Bun.spawn argv-array, no shell) — secrets travel ONLY via stdin, never argv (no ps-visible token). Read/probe/delete are NO-THROW so a keyring outage degrades to re-login via the H18 TOTAL tokenFor; set() THROWS on a non-zero exit (write did not persist) so compose engages the 0600 file fallback instead of silently dropping the token. Windows Credential Manager is a follow-up (null keyring keeps it correct meanwhile). Phase 3 (RFC §7): generalize the same KeyringPort to back chatgpt-oauth + trust-scope stores (self-documented follow-ups).'

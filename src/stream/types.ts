@@ -367,6 +367,22 @@ export type AgentEvent =
        *  intent — lets a surface anchor / coalesce updates within a turn). */
       turn?: number
     }
+  // jun-6 account-ratelimit-snapshot (gate `QUANTA_RATELIMIT_PROACTIVE`). A
+  // transient UI signal mirroring the slice's `RateLimitNotice` (numbers + the
+  // constant type tag ONLY — never a header VALUE string, no org-id leak). Like
+  // `output_progress` it is NON-accounting: the loop forwards it without folding
+  // it into the recorder / budget meter. Emitted ONLY when the loop applied a
+  // proactive empty-bucket delay (knob ON); NullStream swallows it, so the
+  // default-OFF byte-identical contract holds. Fields mirror
+  // `src/llm/ratelimit-snapshot/notice.ts` structurally (slice isolation).
+  | {
+      type: "ratelimit_snapshot"
+      requestsRemaining?: number
+      requestsResetMs?: number
+      tokensRemaining?: number
+      tokensResetMs?: number
+      observedAt: number
+    }
   | { type: "done"; reason: string; turns: number }
 
 /**

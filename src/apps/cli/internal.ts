@@ -1,3 +1,6 @@
+import { spawn as spawnChild } from "node:child_process"
+import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises"
+import { join as joinPath } from "node:path"
 import type { ElicitationPrompterFactory, SamplingWiringInput } from "@/agent"
 import {
   type AgentConfig,
@@ -10,14 +13,31 @@ import {
   resolvePersona,
 } from "@/agent"
 import { defaultIdentityProvider, type IdentityMode } from "@/agent/identity"
-import { buildRootsWiring, buildSamplingWiring, pickMcpNegotiator } from "@/host/runtime"
-import type { LLMPort } from "@/llm"
+import {
+  createCliOAuthCallback,
+  deriveChallengeS256,
+  generateCodeVerifier,
+  generateState,
+  resolveQuantaHome,
+} from "@/auth/chatgpt-oauth"
+import type { FetchPort, TokenRecord, TokenStorePort } from "@/connectors"
+import {
+  buildMcpOAuthWiring,
+  buildRootsWiring,
+  buildSamplingWiring,
+  type McpBrowserFlowResult,
+  type McpOAuthDeps,
+  pickMcpNegotiator,
+  resolveMcpOAuthKeyringOption,
+} from "@/host/runtime"
+import type { CredentialSource, LLMPort } from "@/llm"
 import {
   type CapabilityNegotiator,
   DEFAULT_BACKOFF_POLICY,
   type ElicitationPrompter,
   McpClient,
   type McpClientTransport,
+  type McpOAuthProviderPort,
   type McpServerConfig,
   type RootsProviderPort,
   type SamplingHandlerPort,
@@ -28,7 +48,9 @@ import { Metrics, type StructuredLogger } from "@/observability"
 import type { PermissionContext, PermissionMode } from "@/permission"
 import {
   buildCompactionBreakerConfigCore,
+  buildCredentialSource,
   buildEmbedderCore,
+  buildLLMWithByokCore,
   buildMainLLMCore,
   buildMemoryForSession,
   buildSearchPipelineFromEnv,
@@ -51,6 +73,7 @@ import {
   selectLlmTransport,
 } from "@/runner/assemble"
 import type { Tooling } from "@/runner/assemble/tooling"
+import { type AutoTitlePort, createAutoTitlePort } from "@/runner/session-ops/auto-title"
 import { resolveSandboxProfileFromEnv } from "@/runtime"
 import {
   createBunSpawner,
@@ -58,6 +81,7 @@ import {
   type ShellSnapshotPort,
 } from "@/runtime/shell-snapshot"
 import type { ShellSnapshotMetric } from "@/runtime/shell-snapshot/metric-port"
+import { loadSessionById, renameSession } from "@/session"
 import { logger, type RunContext, runtimeConfig } from "@/shared"
 import { MCPRootSchema, PLUGIN_MCP_FILE } from "@/skill/plugin-manifest"
 import type { AssistantTextPainter, StreamPort } from "@/stream"
@@ -411,6 +435,116 @@ export const buildSummarizerLlm = (
     env: process.env,
   })
 
+/** jun-6 (RFC jun-6-ai-session-title) — TRUE iff a title is still the
+ *  auto/placeholder value (safe to overwrite). A fresh id-mode session is
+ *  seeded with `defaultUntitled(now)` (`"Untitled YYYY-MM-DD HH:mm"`); an empty
+ *  title is also a placeholder. Anything else ⇒ a human (or a prior auto-title)
+ *  named it ⇒ the titler MUST yield (don't-clobber). Mirrors the leaf's
+ *  injected-predicate contract so the leaf never encodes the seeded-title shape. */
+const isAutoTitlePlaceholder = (title: string): boolean =>
+  title === "" || title.startsWith("Untitled")
+
+/** jun-6 (RFC jun-6-ai-session-title) — build the fire-and-forget AI session
+ *  titler at the CLI composition root, MIRRORING the `QUANTA_COMPACT_MODEL`
+ *  second-LLM construction (`buildSummarizerLlm`): a CHEAP `LLMPort` is built
+ *  synchronously from `QUANTA_SESSION_TITLE_MODEL` and injected into
+ *  `createAutoTitlePort` alongside the real `renameSession` writer +
+ *  `loadSessionById` title-reader + placeholder predicate + clock.
+ *
+ *  DEFAULT-OFF BYTE-IDENTITY (RFC §1.2): returns `undefined` unless
+ *  `runtimeConfig().sessionAutoTitle` is on AND `sessionTitleModel` resolves a
+ *  cheap port. Absent ⇒ no `AgentConfig.autoTitlePort` ⇒ the loop's first-turn
+ *  title branch is dead ⇒ no extra LLM call, no title write (byte-identical).
+ *  The cheap port NEVER falls back to the expensive main model — an armed
+ *  `sessionAutoTitle` with no `sessionTitleModel` stays inert (the cost gate).
+ *
+ *  `seamLlm` is a TEST seam (mirrors `buildSummarizerLlm`/`buildLLM` DI): a
+ *  reachability test injects a fake cheap LLM so the titler runs without a real
+ *  provider key. Production omits it ⇒ the cheap port is built from env via the
+ *  proven `buildSummarizerLlmCore` (retry-wrapped, same as the main stack). */
+export const buildAutoTitlePort = (
+  mainProvider: Provider,
+  signal: AbortSignal,
+  seamLlm?: LLMPort,
+): AutoTitlePort | undefined => {
+  const cfg = runtimeConfig()
+  if (!cfg.sessionAutoTitle) return undefined
+  const llm =
+    seamLlm ??
+    buildSummarizerLlmCore({
+      mainProvider,
+      signal,
+      model: cfg.sessionTitleModel,
+      env: process.env,
+    })
+  // No cheap model ⇒ inert (NEVER the expensive main model). Both the knob AND
+  // the model must be present (advertise-iff-able), exactly like the compaction
+  // summarizer's `QUANTA_COMPACT_MODEL` gate.
+  if (llm === undefined) return undefined
+  return createAutoTitlePort({
+    llm,
+    rename: (id, title) => renameSession(id, title),
+    currentTitle: async (id) => (await loadSessionById(id))?.meta.title,
+    isPlaceholder: isAutoTitlePlaceholder,
+    clock: () => Date.now(),
+  })
+}
+
+/** jun-6 (RFC jun-6-byok-apikey-helper) — async BYOK variant of {@link buildLLM}
+ *  for the LEGACY vendor key path (anthropic/openai). The legacy LLM-build seam
+ *  is SYNCHRONOUS while the H7 `apiKeyHelper` mint is ASYNC, so this seam `await`s
+ *  the single pre-resolution step (`resolveVendorApiKey`, inside
+ *  `buildLLMWithByokCore`) that may replace the vendor env key with a
+ *  broker-minted short-lived key, then builds the adapter with the (possibly
+ *  key-augmented) opts.
+ *
+ *  DEFAULT-OFF BYTE-IDENTITY: the mint is consulted ONLY when
+ *  `runtimeConfig().apiKeyHelperLegacyVendor` is on AND the legacy (non-cloud)
+ *  transport is selected AND an H7 `CredentialSource` was built (≥1 H7 knob set).
+ *  Any precondition absent ⇒ this delegates verbatim to the sync {@link buildLLM}
+ *  (preserving the H7/ADR-0139 transport selection + cloud rotation), which is
+ *  byte-identical to today. When ON and the helper mints, the minted key arrives
+ *  as `opts.apiKey` (which wins over env inside `createLLM`); a configured-but-
+ *  broken / untrusted helper FAILS LOUDLY (the H7 fail-before-wire posture),
+ *  never a silent fall-through to a stale env key.
+ *
+ *  `seams` mirrors {@link buildLLM}'s test DI — the H7 shell + clock are threaded
+ *  into `buildCredentialSource` so a reachability test drives the mint over a
+ *  fake shell. Production omits ⇒ the real `runShell`/`Date.now` are used. */
+export const buildLLMWithByok = async (
+  provider: Provider,
+  model: string,
+  seams: BuildLlmTestSeams = {},
+): Promise<LLMPort> => {
+  const cfg = runtimeConfig()
+  const selection = selectLlmTransport({ transport: cfg.llmTransport, env: process.env })
+  // Mint only applies to the LEGACY vendor path; the multicloud transports use
+  // the sibling cloud-credential refresh (not the vendor apiKeyHelper mint), so
+  // route them through the unchanged sync seam.
+  if (!cfg.apiKeyHelperLegacyVendor || selection.kind !== "legacy") {
+    return buildLLM(provider, model, seams)
+  }
+  // FAIL-CLOSED — the H7 credential source is built ONLY when a knob is set; the
+  // mint shell runs only under the explicit `QUANTA_LLM_CREDENTIAL_TRUSTED`
+  // attestation. No knob ⇒ `source` is `undefined`; untrusted ⇒ the source
+  // declines ⇒ `resolveVendorApiKey` returns the same opts (env key untouched).
+  const source: CredentialSource | undefined = buildCredentialSource({
+    apiKeyHelper: cfg.apiKeyHelper,
+    apiKeyHelperTtlMs: cfg.apiKeyHelperTtlMs,
+    awsAuthRefresh: cfg.awsAuthRefresh,
+    gcpAuthRefresh: cfg.gcpAuthRefresh,
+    isTrusted: () => cfg.llmCredentialTrusted,
+    ...(seams.shellExec !== undefined ? { shellExec: seams.shellExec } : {}),
+    ...(seams.now !== undefined ? { now: seams.now } : {}),
+  })
+  return buildLLMWithByokCore({
+    provider,
+    model,
+    env: process.env,
+    ...(source !== undefined ? { source } : {}),
+  })
+}
+
 /**
  * Resolve the fallback-provider model ids from `QUANTA_MODEL_FALLBACK`.
  * Default OFF: unset ⇒ `[]` so the llm stack is left byte-identical to
@@ -527,12 +661,17 @@ const mcpSupervisorDepsFor = (
   slog: StructuredLogger,
   wiring: SamplingWiringInput | undefined,
   transportFor: ((config: McpServerConfig) => McpClientTransport) | undefined,
+  oauthProvider: McpOAuthProviderPort | undefined,
 ) => {
   return (_config: McpServerConfig): SupervisorDeps => ({
     factory: (c): SupervisableMcpClient => {
       const clientOpts: NonNullable<ConstructorParameters<typeof McpClient>[1]> = {}
       if (transportFor !== undefined) clientOpts.transport = transportFor(c)
-      applyMcpClientWiring(clientOpts, wiring)
+      // H18 (jun-06 live-wire) — bake the OAuth provider into the restart factory
+      // via the SAME helper the single-client path uses, so a reconnected client
+      // RE-resolves a bearer for an `oauth:true` server. Absent ⇒ headless
+      // rejecter (byte-identical to the pre-wire supervised path).
+      applyMcpClientWiring(clientOpts, wiring, oauthProvider)
       return new McpClient(c, clientOpts)
     },
     policy: DEFAULT_BACKOFF_POLICY,
@@ -544,6 +683,170 @@ const mcpSupervisorDepsFor = (
     onStateChange: (s) =>
       slog.info("mcp.supervisor.state", { server: s.serverName, state: s.state }),
   })
+}
+
+// ── H18 (jun-06) — live-wire the MCP OAuth provider at the composition root ──
+//
+// The keyring slice + `buildMcpOAuthWiring` + `resolveMcpOAuthKeyringOption`
+// were sealed but had NO LIVE CALLER (the bridge never set
+// `clientOpts.oauthProvider`). The block below assembles the connectors-backed
+// provider — file token store (0600) + injected fetch/clock/browser-flow/issuer
+// — and threads it (with the keyring composition baked into its token store)
+// into BOTH MCP-load paths. Default-OFF: `QUANTA_MCP_OAUTH` unset ⇒
+// `buildMcpOAuthWiring` returns `{ provider: undefined }` ⇒ no provider wired ⇒
+// byte-identical to today's no-auth load.
+
+/** A file-backed, multi-server `TokenStorePort` (one 0600 JSON file per server
+ *  under `<quanta-home>/mcp-oauth/`). This is the H18 default token store the
+ *  keyring DECORATOR (`composeTokenStore`) wraps when
+ *  `QUANTA_MCP_OAUTH_KEYRING=1`; OFF ⇒ it is used directly (byte-identical to
+ *  the documented "0600 file by default" H18 store). Tokens are NEVER logged —
+ *  they live only in the 0600 file and the in-memory record. NO-THROW reads
+ *  (a corrupt/absent file ⇒ `undefined` ⇒ the provider re-auths) so a bad file
+ *  never crashes the MCP load. */
+const createFileMcpTokenStore = (dir: string): TokenStorePort => {
+  const safe = (id: string): string => id.replace(/[^A-Za-z0-9_.-]+/g, "_")
+  const fileFor = (id: string): string => joinPath(dir, `${safe(id)}.json`)
+  return {
+    async read(id: string): Promise<TokenRecord | undefined> {
+      try {
+        const raw = await readFile(fileFor(id), "utf8")
+        const parsed = JSON.parse(raw) as unknown
+        if (parsed === null || typeof parsed !== "object") return undefined
+        const o = parsed as Record<string, unknown>
+        if (typeof o.accessToken !== "string" || typeof o.tokenType !== "string") return undefined
+        return o as unknown as TokenRecord
+      } catch {
+        // Absent / unreadable / malformed ⇒ treat as "no token" (re-auth path).
+        return undefined
+      }
+    },
+    async write(id: string, record: TokenRecord): Promise<void> {
+      await mkdir(dir, { recursive: true })
+      const path = fileFor(id)
+      const tmp = `${path}.tmp`
+      await writeFile(tmp, `${JSON.stringify(record)}\n`, "utf8")
+      if (process.platform !== "win32") await chmod(tmp, 0o600)
+      await rename(tmp, path)
+    },
+    async delete(id: string): Promise<void> {
+      try {
+        await unlink(fileFor(id))
+      } catch {
+        // Idempotent — an absent file is fine.
+      }
+    },
+  }
+}
+
+/** The production `FetchPort` for OAuth discovery / DCR / token exchange: a thin
+ *  shape adapter over `globalThis.fetch` (read at the root only). */
+const realMcpFetchPort: FetchPort = async (url, init) => {
+  const res = await fetch(url, {
+    ...(init?.method !== undefined ? { method: init.method } : {}),
+    ...(init?.headers !== undefined ? { headers: init.headers as Record<string, string> } : {}),
+    ...(init?.body !== undefined ? { body: init.body } : {}),
+    ...(init?.signal !== undefined ? { signal: init.signal } : {}),
+  })
+  return { status: res.status, ok: res.ok, text: () => res.text() }
+}
+
+/** A generic RFC 6749 §4.1 authorization-code + PKCE browser flow for an MCP
+ *  server, REUSING the surface-agnostic loopback callback receiver
+ *  (`createCliOAuthCallback`, the SAME seam the chatgpt-oauth `/login` flow uses)
+ *  and the chatgpt-oauth PKCE helpers. It builds a STANDARD authorize URL
+ *  against the DISCOVERED `authorizeEndpoint` (not the OpenAI-specific URL that
+ *  `runBrowserFlow` hard-codes), so it works against any RFC-8414 issuer the H18
+ *  provider discovered. Returns `{ code, verifier, redirectUri }` for the host
+ *  provider to exchange (the exchange + refresh live in the connectors-backed
+ *  provider; this only obtains the code). The authorization code is NEVER
+ *  logged. */
+const runMcpBrowserFlow = async (input: {
+  readonly authorizeEndpoint: string
+  readonly clientId: string
+  readonly serverName: string
+}): Promise<McpBrowserFlowResult> => {
+  const verifier = generateCodeVerifier()
+  const challenge = deriveChallengeS256(verifier)
+  const state = generateState()
+  const callback = createCliOAuthCallback()
+  const handle = await callback.start({ expectedState: state })
+  const url = new URL(input.authorizeEndpoint)
+  url.searchParams.set("response_type", "code")
+  url.searchParams.set("client_id", input.clientId)
+  url.searchParams.set("redirect_uri", handle.redirectUri)
+  url.searchParams.set("code_challenge", challenge)
+  url.searchParams.set("code_challenge_method", "S256")
+  url.searchParams.set("state", state)
+  logger.info("mcp-oauth: opening browser for authorization", { server: input.serverName })
+  // Open the user's browser (best-effort — a headless box can paste the URL the
+  // callback receiver printed). Failure to open is non-fatal; the loopback
+  // receiver still awaits the redirect.
+  try {
+    const opener =
+      process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open"
+    spawnChild(opener, [url.toString()], { stdio: "ignore", detached: true }).unref()
+  } catch {
+    // Opener unavailable ⇒ the receiver's printed URL is the fallback.
+  }
+  const result = await handle.received
+  return { code: result.code, verifier, redirectUri: handle.redirectUri }
+}
+
+/** Resolve the per-server OAuth issuer from its config `url` origin (the
+ *  standard MCP pattern: RFC 8414 discovery runs against the resource server's
+ *  origin). A server without a `url` (stdio carrier) or without `oauth:true`
+ *  yields `undefined` ⇒ the provider obtains no token for it (unauthenticated). */
+const mcpIssuerResolver =
+  (servers: ReadonlyArray<McpServerConfig>) =>
+  (serverName: string): string | undefined => {
+    const server = servers.find((s) => s.name === serverName)
+    if (server?.oauth !== true || server.url === undefined) return undefined
+    try {
+      return new URL(server.url).origin
+    } catch {
+      return undefined
+    }
+  }
+
+/** H18 (jun-06) — assemble the connectors-backed `McpOAuthProviderPort` for the
+ *  CLI MCP load, or `undefined` when OFF. `buildMcpOAuthWiring` is the single
+ *  gate: it returns a provider ONLY when `QUANTA_MCP_OAUTH=1` AND deps are
+ *  present (the per-server `oauth:true` flag is the second gate, applied inside
+ *  the `McpClient`). The keyring composition (`QUANTA_MCP_OAUTH_KEYRING`) is
+ *  resolved here via `resolveMcpOAuthKeyringOption()` (the ONLY `process.platform`
+ *  read for the keyring decision) and BAKED into the provider's token store, so
+ *  the bridge never reaches for the keyring. When NO server opts into `oauth`,
+ *  the deps are omitted ⇒ no provider (byte-identical, no file store created).
+ *
+ *  `opts.fetchPort` / `opts.browserFlow` / `opts.tokenStoreDir` / `opts.keyring`
+ *  are test seams (inject a fake auth server + scripted browser flow + a tmp
+ *  store dir + a fake-exec keyring option); production omits them. */
+export const resolveMcpOAuthProvider = (
+  servers: ReadonlyArray<McpServerConfig>,
+  opts: {
+    readonly fetchPort?: FetchPort
+    readonly browserFlow?: typeof runMcpBrowserFlow
+    readonly tokenStoreDir?: string
+    readonly keyring?: ReturnType<typeof resolveMcpOAuthKeyringOption>
+  } = {},
+): McpOAuthProviderPort | undefined => {
+  const enabled = runtimeConfig().mcpOAuth
+  // Cheap short-circuit: no server opts into OAuth ⇒ no deps ⇒ no provider, and
+  // crucially no file store directory created (byte-identical when the knob is
+  // on but unused). Still routes through the gate so the OFF path is the
+  // documented single decision point (returns `{ provider: undefined }`).
+  const anyOAuth = servers.some((s) => s.oauth === true && s.url !== undefined)
+  if (!enabled || !anyOAuth) return buildMcpOAuthWiring(enabled, undefined).provider
+  const dir = opts.tokenStoreDir ?? joinPath(resolveQuantaHome(process.env), "mcp-oauth")
+  const deps: McpOAuthDeps = {
+    fetchPort: opts.fetchPort ?? realMcpFetchPort,
+    tokenStore: createFileMcpTokenStore(dir),
+    clockPort: { now: () => Date.now() },
+    runBrowserFlow: opts.browserFlow ?? runMcpBrowserFlow,
+    issuerFor: mcpIssuerResolver(servers),
+  }
+  return buildMcpOAuthWiring(enabled, deps, opts.keyring ?? resolveMcpOAuthKeyringOption()).provider
 }
 
 /**
@@ -801,6 +1104,12 @@ export interface LoadFeaturesOpts {
    *  consent prompter + sampling wiring are exercised without a real TTY.
    *  Production omits it (the factory reads `process.stdin.isTTY`). */
   readonly elicitationPrompterFor?: ElicitationPrompterFactory
+  /** H18 (jun-06 live-wire) — test seam for the MCP OAuth provider assembly: a
+   *  fake auth-server `fetchPort`, a scripted `browserFlow`, a tmp
+   *  `tokenStoreDir`, and a fake-exec `keyring` option. Forwarded verbatim to
+   *  {@link resolveMcpOAuthProvider}. Production omits it (real `globalThis.fetch`,
+   *  loopback browser flow, `<quanta-home>/mcp-oauth/`, live keyring). */
+  readonly mcpOAuthDeps?: Parameters<typeof resolveMcpOAuthProvider>[1]
 }
 
 /** B1 (jun-04) — compute the advertise-iff-able inbound-sampling wiring for the
@@ -905,6 +1214,7 @@ const buildMcpLoadOpts = (
   args: {
     readonly autoRestart: boolean
     readonly inboundWiring: ReturnType<typeof resolveMcpInboundWiring>
+    readonly oauthProvider: McpOAuthProviderPort | undefined
     readonly opts: LoadFeaturesOpts
   },
 ): Parameters<typeof loadMcpTools>[2] => ({
@@ -913,18 +1223,22 @@ const buildMcpLoadOpts = (
   // (so a reconnected client re-advertises); on the single-client path it is the
   // `samplingWiring` opt the bridge applies to the one client. The transport seam
   // (test-only) is threaded into the supervisor factory too so a supervised
-  // client can be driven by a scripted transport.
+  // client can be driven by a scripted transport. H18 (jun-06) — the OAuth
+  // provider rides BOTH paths identically: baked into the supervisor factory AND
+  // passed as the single-client `oauthProvider` opt.
   ...(args.autoRestart
     ? {
         supervisorDepsFor: mcpSupervisorDepsFor(
           slog,
           args.inboundWiring,
           args.opts.mcpTransportFor,
+          args.oauthProvider,
         ),
       }
     : {}),
   ...(args.inboundWiring !== undefined ? { samplingWiring: args.inboundWiring } : {}),
   ...(args.opts.mcpTransportFor !== undefined ? { transportFor: args.opts.mcpTransportFor } : {}),
+  ...(args.oauthProvider !== undefined ? { oauthProvider: args.oauthProvider } : {}),
 })
 
 /** Start the configured MCP servers (or short-circuit to an empty bundle when
@@ -989,7 +1303,14 @@ export const loadFeatures = async (
   // the single-client AND the supervised path (threaded into the restart
   // factory), so a reconnected client re-advertises sampling+roots.
   const inboundWiring = resolveMcpInboundWiring(opts.llm, elicitationPrompterFor)
-  const mcpLoadOpts = buildMcpLoadOpts(slog, { autoRestart, inboundWiring, opts })
+  // H18 (jun-06 live-wire) — the connectors-backed MCP OAuth provider, resolved
+  // from the loaded server configs (the issuer is each server's `url` origin).
+  // Undefined unless `QUANTA_MCP_OAUTH=1` AND a server opts in (`oauth:true`);
+  // the keyring composition (`QUANTA_MCP_OAUTH_KEYRING`) is baked into its token
+  // store here. Test seams (`opts.mcpOAuthDeps`) inject a fake auth server /
+  // browser flow / store dir; production omits them.
+  const oauthProvider = resolveMcpOAuthProvider(mcpConfigs, opts.mcpOAuthDeps)
+  const mcpLoadOpts = buildMcpLoadOpts(slog, { autoRestart, inboundWiring, oauthProvider, opts })
   const {
     tools: mcpBridgedTools,
     clients: mcpClients,

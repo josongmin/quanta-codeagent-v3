@@ -25,6 +25,7 @@
  *   whitespace).
  */
 
+import { sliceWholeChars } from "@/shared"
 import type { Frequency, RRule, RRuleParseError, Weekday } from "./types"
 import { parseWeekday, serializeWeekday } from "./weekday"
 
@@ -241,7 +242,7 @@ const malformed = (message: string): RRuleParseError => ({
 
 const TRUNC_LIMIT = 64
 const truncate = (s: string): string =>
-  s.length > TRUNC_LIMIT ? `${s.slice(0, TRUNC_LIMIT - 1)}…` : s
+  s.length > TRUNC_LIMIT ? `${sliceWholeChars(s, TRUNC_LIMIT - 1)}…` : s
 
 const parseFreq = (raw: string): Frequency | undefined => {
   const up = raw.toUpperCase()

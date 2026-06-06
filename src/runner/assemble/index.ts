@@ -24,6 +24,7 @@ export { wireInteractiveKnobs } from "./interactive-knobs"
 export {
   buildCredentialSource,
   buildLLMCore,
+  buildLLMWithByokCore,
   buildMainLLMCore,
   buildMulticloudLLMCore,
   type ComposeLlmInput,

@@ -13,6 +13,8 @@
  */
 
 import type { ToolResultBlock } from "@/llm"
+import { denyContentPrefix, type StructuredDenyReason } from "@/permission"
+import { runtimeConfig } from "@/shared"
 import type { DispatchResult } from "./dispatch-types"
 
 /** Suffix appended to every HITL hand-off message. Phrased to make it clear
@@ -42,9 +44,40 @@ export const resultBlock = (
 
 /** Build a deny short-circuit result. `preview` is a stable string tag used by
  *  trajectory tests to classify the deny reason (`denied`/`declined`/`handoff`
- *  /`plan-blocked`/`hook-denied`/…) without parsing the user-facing content. */
-export const deny = (id: string, content: string, preview: string): DispatchResult => ({
-  block: resultBlock(id, content, true),
-  ok: false,
-  preview,
-})
+ *  /`plan-blocked`/`hook-denied`/…) without parsing the user-facing content.
+ *
+ *  C6 (RFC jun-6-deny-reason-surfacing) — the OPTIONAL `denyReason` is the
+ *  pre-sanitized {@link StructuredDenyReason} the admissibility-gate deny SITE
+ *  hands down (its `safeReason` is the SAME already-scrubbed recorder one-liner;
+ *  the HARD_DENY case uses the categorical `hardDenySafeReason()`, never the
+ *  command-echoing prose). It is surfaced ONLY when BOTH:
+ *    1. `denyReason` is present (the gate passed one), AND
+ *    2. `runtimeConfig().surfaceDenyReason` (`QUANTA_DENY_REASON`) is ON.
+ *  In that case the categorical `[denied · layer=… · pillar=…]` prefix
+ *  (derived ONLY from `layer`/`pillar` — never `safeReason`/raw text) is
+ *  PREPENDED to `content`, and the structured record is attached to the
+ *  `ToolFailure.permission_denied` envelope so the model can branch on the
+ *  deciding layer.
+ *
+ *  DEFAULT-OFF BYTE-IDENTITY (sacred): when `denyReason` is absent OR the knob
+ *  is off, the returned value is the verbatim `{block, ok:false, preview}` —
+ *  no prefix, NO `failure` key (exactOptionalPropertyTypes ⇒ never set to
+ *  `undefined`), identical to every legacy caller. The knob is read lazily so
+ *  the OFF path allocates nothing extra. */
+export const deny = (
+  id: string,
+  content: string,
+  preview: string,
+  denyReason?: StructuredDenyReason,
+): DispatchResult => {
+  if (denyReason === undefined || !runtimeConfig().surfaceDenyReason) {
+    return { block: resultBlock(id, content, true), ok: false, preview }
+  }
+  const prefixed = `${denyContentPrefix(denyReason)}${content}`
+  return {
+    block: resultBlock(id, prefixed, true),
+    ok: false,
+    preview,
+    failure: { mode: "permission_denied", denyReason },
+  }
+}
