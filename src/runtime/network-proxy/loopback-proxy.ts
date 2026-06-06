@@ -71,6 +71,52 @@ const IDENTITY_DIAL: DialTarget = (host, port) => ({ host, port })
  */
 export type ResolvePeerHost = (sock: Socket) => string | undefined
 
+/** A readable byte stream just wide enough for {@link readCappedBody} (both
+ *  `http.IncomingMessage` and a TLS socket satisfy it). */
+interface ByteReadable {
+  on(event: "data", cb: (chunk: Buffer) => void): unknown
+  on(event: "end", cb: () => void): unknown
+  on(event: "error", cb: (err: unknown) => void): unknown
+}
+
+/** The outcome of a STREAMING-capped body read: the buffered bytes (capped) +
+ *  whether the stream went over the cap (the overflow is NOT retained). */
+export interface CappedBody {
+  readonly body: Buffer
+  readonly overCap: boolean
+}
+
+/**
+ * Read a request body with a STREAMING byte cap. Once the accumulated size
+ * exceeds `cap`, we STOP accumulating (releasing what we held) and flag
+ * `overCap` — so a hostile huge body can NEVER be fully buffered in memory
+ * (the DoS guard). Used by BOTH the plaintext path and the TLS-MITM parse path
+ * so the cap discipline is defined ONCE (the MITM path previously buffered the
+ * whole body before consulting the cap — a memory-DoS the plaintext path never
+ * had). Resolves on `end` OR `error` (a truncated read is still capped). Pure
+ * aside from the stream it drains; never throws.
+ */
+export const readCappedBody = (stream: ByteReadable, cap: number): Promise<CappedBody> =>
+  new Promise((resolve) => {
+    let chunks: Buffer[] = []
+    let size = 0
+    let overCap = false
+    const finish = (): void =>
+      resolve({ body: overCap ? Buffer.alloc(0) : Buffer.concat(chunks), overCap })
+    stream.on("data", (c: Buffer) => {
+      if (overCap) return
+      size += c.length
+      if (size > cap) {
+        overCap = true
+        chunks = [] // release what we held; the overflow is never scanned/forwarded
+        return
+      }
+      chunks.push(c)
+    })
+    stream.on("end", finish)
+    stream.on("error", finish)
+  })
+
 /** A single decrypted HTTP request parsed off a terminated TLS-MITM socket. */
 interface ParsedTlsRequest {
   readonly method: string
@@ -78,8 +124,14 @@ interface ParsedTlsRequest {
   readonly headers: IncomingHttpHeaders
   /** Header values concatenated for the secret scan (names are not secrets). */
   readonly headerText: string
-  /** The fully-buffered request body. */
+  /** The buffered request body, CAPPED at the scan budget (a body past the cap is
+   *  truncated here — never fully held in memory — and {@link bodyOverCap} set so
+   *  the caller forwards UNSCANNED rather than scanning a partial body). */
   readonly body: Buffer
+  /** True IFF the decrypted body exceeded the scan cap (so it was NOT fully
+   *  buffered). The caller forwards it unscanned with a `body-cap-unscanned`
+   *  marker — identical disposition to the plaintext path's streaming cap. */
+  readonly bodyOverCap: boolean
 }
 
 /** Strip a `host:port` (or bracketed IPv6) authority down to the bare host. */
@@ -321,23 +373,9 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
 
   /** Buffer the request body, returning `null` if it exceeds `cap` bytes (so the
    *  caller forwards it unscanned rather than blocking-by-truncation). */
-  private bufferBody(req: IncomingMessage, cap: number): Promise<string | null> {
-    return new Promise((resolve) => {
-      const chunks: Buffer[] = []
-      let size = 0
-      let overCap = false
-      req.on("data", (c: Buffer) => {
-        if (overCap) return
-        size += c.length
-        if (size > cap) {
-          overCap = true
-          return
-        }
-        chunks.push(c)
-      })
-      req.on("end", () => resolve(overCap ? null : Buffer.concat(chunks).toString("utf8")))
-      req.on("error", () => resolve(overCap ? null : Buffer.concat(chunks).toString("utf8")))
-    })
+  private async bufferBody(req: IncomingMessage, cap: number): Promise<string | null> {
+    const { body, overCap } = await readCappedBody(req, cap)
+    return overCap ? null : body.toString("utf8")
   }
 
   /** Concatenate header values into a single scannable text blob (header NAMES
@@ -552,8 +590,12 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
     const timer = setTimeout(() => failHandshake("handshake-timeout"), mitm.handshakeTimeoutMs)
     if (typeof timer.unref === "function") timer.unref()
 
-    // Parse exactly one decrypted HTTP request off the TLS socket.
-    const parsed = await this.parseTlsRequest(tlsClient)
+    // Parse exactly one decrypted HTTP request off the TLS socket. The body is
+    // buffered with a STREAMING cap (`maxBodyBytes`) so a huge decrypted HTTPS
+    // body can NEVER be fully held in memory (DoS parity with the plaintext
+    // `bufferBody` path — see the over-cap handling below).
+    const cfg = mitm.secretEgress
+    const parsed = await this.parseTlsRequest(tlsClient, cfg.maxBodyBytes)
     clearTimeout(timer)
     if (handshakeFailed) return
     if (parsed === null) {
@@ -561,15 +603,20 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
       return
     }
 
-    const cfg = mitm.secretEgress
-    const buffered = parsed.body.length > cfg.maxBodyBytes ? null : parsed.body.toString("utf8")
-    if (buffered === null) {
-      // Over the cap — forward UNSCANNED (never blocked-by-truncation), VISIBLE
-      // marker. Still goes through upstream-validated TLS.
-      this.record(host, decision, "body-cap-unscanned")
-      this.mitmForwardUpstream(tlsClient, host, port, parsed, parsed.body, [])
+    if (parsed.bodyOverCap) {
+      // Over the cap — the body was NOT fully buffered (streaming cap, so a huge
+      // decrypted body can never OOM the proxy). Unlike the plaintext path (which
+      // re-streams the untouched original `req`), the MITM path has already
+      // consumed the TLS bytes into the parser, so we CANNOT losslessly forward
+      // the original body — `parsed.body` is truncated. Scanning a partial body
+      // is unsafe (the secret could sit past the cap) AND forwarding a truncated
+      // body would corrupt the request. So FAIL CLOSED per `onFailure` (deny /
+      // opaque-tunnel): if we cannot scan it AND cannot forward it intact, it does
+      // not leave. The gap stays VISIBLE in the log.
+      this.mitmFailClosed(clientSocket, host, mitm, decision, "body-over-cap", tlsClient)
       return
     }
+    const buffered = parsed.body.toString("utf8")
 
     let disposition: Awaited<ReturnType<typeof decideEgressScan>>
     try {
@@ -748,7 +795,10 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
    * path / headers / buffered body, or `null` on a parse error / timeout-less
    * close. The body is buffered fully (the cap is applied by the caller).
    */
-  private parseTlsRequest(tlsClient: TLSSocketType): Promise<ParsedTlsRequest | null> {
+  private parseTlsRequest(
+    tlsClient: TLSSocketType,
+    maxBodyBytes: number,
+  ): Promise<ParsedTlsRequest | null> {
     return new Promise((resolve) => {
       let settled = false
       const done = (v: ParsedTlsRequest | null): void => {
@@ -757,16 +807,20 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
         resolve(v)
       }
       const innerServer = createServer((req, _res) => {
-        const chunks: Buffer[] = []
-        req.on("data", (c: Buffer) => chunks.push(c))
-        req.on("end", () => {
+        // STREAMING cap (DoS parity with `bufferBody` — SAME `readCappedBody`):
+        // a huge decrypted HTTPS body is never fully held in memory. Over the cap
+        // ⇒ `bodyOverCap` set + the body released; the caller fails closed (cannot
+        // scan a partial body, cannot forward a truncated one over the already-
+        // consumed TLS socket).
+        void readCappedBody(req, maxBodyBytes).then(({ body, overCap }) => {
           const url = new URL(req.url ?? "/", "http://placeholder")
           done({
             method: req.method ?? "GET",
             path: url.pathname + url.search,
             headers: req.headers,
             headerText: this.headerScanText(req),
-            body: Buffer.concat(chunks),
+            body,
+            bodyOverCap: overCap,
           })
         })
         req.on("error", () => done(null))

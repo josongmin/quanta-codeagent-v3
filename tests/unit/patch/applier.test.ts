@@ -246,6 +246,94 @@ describe("applyPatch — Update File (whitespace-tolerant match)", () => {
 })
 
 // ---------------------------------------------------------------------------
+// D7 — `@@ <context-header>` as a jump anchor (RFC jun-7 §3.2).
+// The parser stores `hunk.contextHeader` but the applier used to ignore it and
+// whole-file scan → an `@@ class A` header that disambiguates two identical
+// bodies still threw "Ambiguous context". With the anchor honoured the search
+// narrows to lines AFTER the header, resolving to the unique in-scope match.
+// Red-on-injection: ignore the header (revert to whole-file) ⇒ ambiguous throw.
+// ---------------------------------------------------------------------------
+
+describe("applyPatch — `@@` context-header anchor (D7)", () => {
+  test("header narrows two identical bodies to the in-scope one", async () => {
+    // Two `return 1` bodies; only the one under `class B` is the target. The
+    // `@@ class B` header scopes the search past the first body.
+    const fs = new MemFs({
+      "a.ts": [
+        "class A {",
+        "  f() {",
+        "    return 1",
+        "  }",
+        "}",
+        "class B {",
+        "  f() {",
+        "    return 1",
+        "  }",
+        "}",
+        "",
+      ].join("\n"),
+    })
+    const text = [
+      "*** Begin Patch",
+      "*** Update File: a.ts",
+      "@@ class B {",
+      "-    return 1",
+      "+    return 2",
+      "*** End Patch",
+    ].join("\n")
+    await applyPatch(parsePatch(text), fs)
+    expect(fs.snapshot()["a.ts"]).toBe(
+      [
+        "class A {",
+        "  f() {",
+        "    return 1",
+        "  }",
+        "}",
+        "class B {",
+        "  f() {",
+        "    return 2",
+        "  }",
+        "}",
+        "",
+      ].join("\n"),
+    )
+  })
+
+  test("without the header the same edit is ambiguous (proves the anchor matters)", async () => {
+    // Same file + same hunk body but NO `@@` header → whole-file scan finds two
+    // `return 1` matches → ambiguous throw. This is the red-on-injection mirror.
+    const fs = new MemFs({
+      "a.ts": ["class A {", "    return 1", "}", "class B {", "    return 1", "}", ""].join("\n"),
+    })
+    const text = [
+      "*** Begin Patch",
+      "*** Update File: a.ts",
+      "@@",
+      "-    return 1",
+      "+    return 2",
+      "*** End Patch",
+    ].join("\n")
+    await expect(applyPatch(parsePatch(text), fs)).rejects.toBeInstanceOf(PatchApplyError)
+  })
+
+  test("a header matching no line falls back to whole-file (byte-identical)", async () => {
+    // `@@ class Z` matches nothing → whole-file fallback; the unique body is
+    // still found and applied exactly as a header-less patch would.
+    const fs = new MemFs({ "a.ts": ["class A {", "    return 1", "}", ""].join("\n") })
+    const text = [
+      "*** Begin Patch",
+      "*** Update File: a.ts",
+      "@@ class Z {",
+      "-    return 1",
+      "+    return 2",
+      "*** End Patch",
+    ].join("\n")
+    await applyPatch(parsePatch(text), fs)
+    expect(fs.snapshot()["a.ts"]).toBe(["class A {", "    return 2", "}", ""].join("\n"))
+  })
+})
+
+// ---------------------------------------------------------------------------
 // End-of-File anchor.
 // ---------------------------------------------------------------------------
 

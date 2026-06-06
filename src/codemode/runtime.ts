@@ -582,14 +582,26 @@ const installToolsBinding = (
   // identifier name (e.g. `gh_pr_view`) is dot-reachable as `tools.gh_pr_view`
   // (RFC §4.2) AND a non-identifier name is still bracket-reachable — neither can
   // break the setup eval. The host port re-gates every call regardless of name.
+  //
+  // SURFACE-ESCAPE FENCE (cycle-2 audit): the raw bridge `__cmDispatch` accepts
+  // ANY tool name — so leaving it on the cell's `globalThis` would let a cell call
+  // `__cmDispatch("bash", …)` directly, WIDENING its surface past `surfaceTools`
+  // (the documented "a name not in the surface is unreachable / the cell cannot
+  // widen its own surface" invariant, RFC §4.2). The setup IIFE captures the
+  // bridge into a LOCAL, builds the bound `tools.*` closures over that local, then
+  // DELETES `__cmDispatch` from the global so the cell body (which runs AFTER this
+  // setup) can reach the bridge ONLY through the surface-restricted `tools` object.
   const toolNames = JSON.stringify(bind.surfaceTools)
   const wrapper = `
     (() => {
+      const __bridge = globalThis.__cmDispatch;
       const tools = {};
       for (const __t of ${toolNames}) {
-        tools[__t] = (args) => __cmDispatch(__t, args === undefined ? null : args);
+        tools[__t] = (args) => __bridge(__t, args === undefined ? null : args);
       }
       globalThis.tools = tools;
+      // Fence: drop the raw bridge so the cell can reach it ONLY via tools.*.
+      try { delete globalThis.__cmDispatch; } catch (_e) {}
     })();
   `
   const setup = ctx.evalCode(wrapper, "cm_tools_setup.js")

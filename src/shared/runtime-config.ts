@@ -561,6 +561,15 @@ export interface RuntimeConfig {
    *  mcp-origin array (H2 untrusted-source envelope applies). With no such server
    *  the handle is undefined ⇒ tools still absent. */
   readonly mcpResources: boolean
+  /** §19.1 — honor MCP server-declared tool annotations (`QUANTA_MCP_TOOL_ANNOTATIONS`).
+   *  Strict opt-in (`=== "1"`). The global default-OFF master switch: when OFF the
+   *  bridge ignores `readOnlyHint`/`idempotentHint` entirely (`annotationsHonored`
+   *  stays false ⇒ every MCP tool keeps its conservative read/concurrency
+   *  classification, byte-identical). When ON the composition root passes
+   *  `loadMcpTools` opts `annotationsHonored:true`, so a TRUSTED server's
+   *  annotations may ELEVATE a tool's `isReadOnly`/`isConcurrencySafe` predicates
+   *  (never demote — annotations can only relax, and only for trusted origins). */
+  readonly mcpToolAnnotations: boolean
   /** C2 — structured mid-turn progress report (`QUANTA_PROGRESS_UPDATE`). Strict
    *  opt-in (`=== "1"`). Default false ⇒ the `communicate_update` tool is NOT
    *  registered (byte-identical). When ON, the composition root passes
@@ -586,6 +595,14 @@ export interface RuntimeConfig {
    *  (byte-identical, exec-risk). When ON, the composition root wires a
    *  `DefaultToolPorts.ptySession` backend (tmux/Bun). */
   readonly ptyAttach: boolean
+  /** D3 (jun-7-naive-impl-hardening) — PTY env-inherit ESCAPE HATCH
+   *  (`QUANTA_PTY_INHERIT_ENV`). Default false ⇒ the PTY child's env is SCRUBBED
+   *  through the same `scrubEnv`/`applyLocalEnv` chokepoint as `runShell`
+   *  (`*_API_KEY`/`*_TOKEN`/`*_SECRET` dropped — closes the credential leak from
+   *  the legacy full `{ ...process.env }` inherit). Truthy (`1`/`true`/`on`) ⇒
+   *  the interactive shell inherits the FULL parent env (mirrors runShell's
+   *  `inheritEnv`). */
+  readonly ptyInheritEnv: boolean
   /** C3 — brief-mode session-posture knob SEED (`QUANTA_BRIEF`). Accepts the
    *  standard boolean knob vocabulary (`1`/`true`/`on`, case-insensitive) ⇒
    *  true; absent / any other value ⇒ false (default-OFF, byte-identical). This
@@ -1219,10 +1236,17 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     mcpConnectors: env["QUANTA_MCP_CONNECTORS"] === "1",
     // N3 — strict `=== "1"` opt-in. Default false ⇒ no MCP resource/prompt tools.
     mcpResources: env["QUANTA_MCP_RESOURCES"] === "1",
+    // §19.1 — strict `=== "1"` opt-in. Default false ⇒ MCP tool annotations are
+    // ignored (annotationsHonored stays false; every MCP tool keeps its
+    // conservative read/concurrency classification, byte-identical).
+    mcpToolAnnotations: env["QUANTA_MCP_TOOL_ANNOTATIONS"] === "1",
     progressUpdate: env["QUANTA_PROGRESS_UPDATE"] === "1",
     // #8 — strict `=== "1"` opt-in. Default false ⇒ no mid-turn capture facade.
     midTurnCapture: env["QUANTA_MIDTURN_CAPTURE"] === "1",
     ptyAttach: env["QUANTA_PTY_ATTACH"] === "1",
+    // D3 — PTY env-inherit escape hatch. Default false ⇒ scrubbed (secure).
+    // Truthy (`1`/`true`/`on`) ⇒ full parent-env inherit (interactive opt-out).
+    ptyInheritEnv: parseBool(env["QUANTA_PTY_INHERIT_ENV"]),
     // C3 — brief-mode SEED. Uses the standard boolean knob vocabulary (1/true/on)
     // so it reads like the `effort` env seed; default-OFF ⇒ byte-identical.
     brief: parseBool(env["QUANTA_BRIEF"]),

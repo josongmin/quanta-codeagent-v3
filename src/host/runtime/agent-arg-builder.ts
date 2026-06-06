@@ -530,6 +530,16 @@ export const resolveLocalEnvSelection = async (
 const localEnvSlotOf = (p: AssembleRequestPartial): { localEnv?: LocalEnvSelection } =>
   p.localEnv !== undefined ? { localEnv: p.localEnv } : {}
 
+// Spread-ready projection of the partial's named-agent resolver (`{}` when absent
+// ⇒ no branch in `buildBaseFromArgs`, keeps it under biome's cognitive-complexity
+// cap — same pattern as `localEnvSlotOf`). Absent ⇒ `AgentConfig.namedAgentResolver`
+// stays unset ⇒ the subagent runner's resolve path is byte-identical (no named
+// agent ever matches).
+const namedAgentResolverSlotOf = (
+  p: AssembleRequestPartial,
+): { namedAgentResolver?: import("@/agent").NamedAgentResolver } =>
+  p.namedAgentResolver !== undefined ? { namedAgentResolver: p.namedAgentResolver } : {}
+
 // ADR-0454 jun-02 wire — install disk-configured command hooks onto the base's
 // HookBus. SECURITY: command hooks run ARBITRARY shell, so the slice is
 // triple-gated INSIDE (enabled + acknowledgedRisk + ≥1 binding) + injection-safe
@@ -1499,6 +1509,11 @@ export const buildBaseFromArgs = (
     // shell.ts applies it via the existing `applyLocalEnv` seam, allowlist-
     // governed).
     ...localEnvSlotOf(p),
+    // Named-agent registry resolver loaded at the (async) root and carried on the
+    // partial (`{}` when absent ⇒ spawn path byte-identical; the subagent runner
+    // reads it off `AgentConfig.namedAgentResolver` and an absent resolver / empty
+    // registry never matches a spawn).
+    ...namedAgentResolverSlotOf(p),
     // ADR-0279 — spread the automation slot conditionally (default-OFF;
     // `exactOptionalPropertyTypes` — no `undefined` literal on the config).
     ...(automationSlot !== null ? { automationEngine: automationSlot } : {}),
@@ -1561,6 +1576,14 @@ export interface AssembleRequestPartial {
   pr?: string
   /** ci-bot only: stub the PR comment write at the runner edge. */
   ciBotDryRun?: boolean
+  /** P26 headless `--output-format <text|json|stream-json>` — lifted onto
+   *  `HeadlessExtras.output` by `applyModeSpecificRequestFields`. Absent ⇒ slot
+   *  omitted ⇒ legacy human-text stdout (byte-identical). */
+  outputFormat?: import("@/host/runtime/agent-args").OutputFormatToken
+  /** P26 headless `--include-partial` — lifted onto `HeadlessExtras.includePartial`
+   *  (only valid alongside a json/stream-json output format; parser enforced).
+   *  Absent ⇒ slot omitted ⇒ milestone events only. */
+  includePartial?: boolean
   /** ADR-0236 composition-root mega-wire — propagated into base via
    *  `buildBaseFromArgs`. Each defaults to OFF; absent ⇒ slot omitted. */
   toolProfile?: import("@/host/runtime/agent-args").ToolProfileToken
@@ -1600,6 +1623,15 @@ export interface AssembleRequestPartial {
    *  when `QUANTA_COMMAND_HOOKS=1`, and threaded onto the SYNC
    *  `buildBaseFromArgs`. Absent ⇒ no command hooks installed (default-OFF). */
   commandHookBindings?: readonly CommandHookBinding[]
+  /** Named-agent registry resolver loaded ONCE per session from `.quanta/agents`
+   *  (+ native dir) at the (async) composition root (`runMain` calls
+   *  `loadNamedAgents(cwd)`), threaded onto the SYNC `buildBaseFromArgs` (whose
+   *  builder is sync, mirroring `localEnv`). `buildBaseFromArgs` lifts it onto
+   *  `AgentConfig.namedAgentResolver`, which the subagent runner consults per
+   *  spawn. Absent (no `.quanta/agents` dir ⇒ empty registry ⇒ not threaded, or
+   *  an unreadable dir caught fail-open) ⇒ slot omitted ⇒ spawn path
+   *  byte-identical. */
+  namedAgentResolver?: import("@/agent").NamedAgentResolver
 }
 
 /** ADR-0236 + ADR-0301 — propagate the composition-root mega-wire flags
@@ -1642,6 +1674,11 @@ export const toAssembleRequest = (args: AgentArgs): AssembleRequestPartial => {
   if (args.report !== undefined) out.report = args.report
   if (args.pr !== undefined) out.pr = args.pr
   if (args.ciBotDryRun) out.ciBotDryRun = true
+  // P26 — echo the headless structured-output flags onto the projection;
+  // `applyModeSpecificRequestFields` folds them into `out.headless`. Absent ⇒
+  // slot omitted (byte-identical text path).
+  if (args.outputFormat !== undefined) out.outputFormat = args.outputFormat
+  if (args.includePartial) out.includePartial = true
   // ADR-0236 + ADR-0301 — extracted helper keeps this function under the
   // biome cognitive-complexity cap.
   liftMegaWireFields(args, out)

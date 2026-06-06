@@ -36,6 +36,14 @@ import {
   resolveRunAgent,
 } from "../assemble"
 import { exitCodeForOutcome } from "../run"
+import { StreamJsonSink } from "./stream-json-sink"
+
+/** P26 — does this run want a STRUCTURED stdout contract (json / stream-json)?
+ *  `text` / absent ⇒ false ⇒ the legacy StdoutStream + final-text path runs
+ *  byte-identically. Single predicate so the two call sites (`buildHeadlessBase`
+ *  stream choice + `runMode` final-print skip) cannot drift apart. */
+const wantsStructuredOutput = (req: AssembleRequest): boolean =>
+  req.headless?.output === "json" || req.headless?.output === "stream-json"
 
 /** Build the AgentConfig.base for headless. Reuses the caller's `req.base`
  *  fields where present, fills the rest with safe headless defaults. The single
@@ -44,9 +52,15 @@ import { exitCodeForOutcome } from "../run"
 const buildHeadlessBase = (
   req: AssembleRequest,
   prompt: string,
+  structuredSink: StreamJsonSink | undefined,
 ): Omit<AgentConfig, "modePolicy" | "budgetMeter"> => {
   const cwd = req.base.cwd ?? process.cwd()
-  const stream: StreamPort = req.base.stream ?? new StdoutStream()
+  // P26 — when a structured stdout contract is selected the agent loop must
+  // emit INTO the StreamJsonSink (which encodes each AgentEvent → versioned
+  // SessionEvent NDJSON / JSON-array on stdout). It WINS over `req.base.stream`
+  // so the human renderer never co-mingles with the machine contract. Absent ⇒
+  // the historical `req.base.stream ?? new StdoutStream()` (byte-identical text).
+  const stream: StreamPort = structuredSink ?? req.base.stream ?? new StdoutStream()
   const permission: PermissionContext = req.base.permission ?? { mode: "acceptEdits" }
   // DIP factory call; headless has no preset-specific fs/diagnostics ports.
   const registry =
@@ -54,22 +68,25 @@ const buildHeadlessBase = (
       ? req.base.registry
       : new ToolRegistry(buildDefaultTools())
   const messages: Message[] = [{ role: "user", content: [{ type: "text", text: prompt }] }]
-  return wireOptionalAgentPorts({
-    ...req.base,
-    llm: req.base.llm,
-    registry,
-    stream,
-    permission,
-    messages,
-    system: req.base.system ?? buildSystemPrompt(cwd),
-    cwd,
-    maxTurns: req.base.maxTurns ?? 20,
-    // T01 (audit L5 H-2): inherit the composition-root's REAL signal. The
-    // dead `?? new AbortController().signal` throwaway is removed — `req.base`
-    // carries a live SIGINT-wired signal (required field), so Ctrl+C now
-    // reaches the loop instead of being swallowed by a dropped controller.
-    signal: req.base.signal,
-  }, process.env)
+  return wireOptionalAgentPorts(
+    {
+      ...req.base,
+      llm: req.base.llm,
+      registry,
+      stream,
+      permission,
+      messages,
+      system: req.base.system ?? buildSystemPrompt(cwd),
+      cwd,
+      maxTurns: req.base.maxTurns ?? 20,
+      // T01 (audit L5 H-2): inherit the composition-root's REAL signal. The
+      // dead `?? new AbortController().signal` throwaway is removed — `req.base`
+      // carries a live SIGINT-wired signal (required field), so Ctrl+C now
+      // reaches the loop instead of being swallowed by a dropped controller.
+      signal: req.base.signal,
+    },
+    process.env,
+  )
 }
 
 /**
@@ -92,17 +109,34 @@ export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {
   if (typeof prompt !== "string" || prompt.trim() === "") {
     throw new Error("headless.runMode: req.headless.prompt is required (non-empty string)")
   }
-  const base = buildHeadlessBase(req, prompt)
+  // P26 — construct the structured-output sink ONCE (json / stream-json) so it
+  // is both the `cfg.stream` the loop emits into AND the object we finalize after
+  // the run (json mode flushes its buffered array here). Absent for text /
+  // default ⇒ undefined ⇒ byte-identical legacy path.
+  const structuredSink = wantsStructuredOutput(req)
+    ? new StreamJsonSink({
+        format: req.headless?.output === "json" ? "json" : "stream-json",
+        ...(req.headless?.includePartial === true ? { includePartial: true } : {}),
+      })
+    : undefined
+
+  const base = buildHeadlessBase(req, prompt, structuredSink)
   const cfg = assembleAgentConfig({ ...req, base })
 
   const runner = resolveRunAgent(req.seams)
   const outcome = await runner(cfg)
 
-  // Final-answer emission — JSON mode already streamed events into `cfg.stream`;
-  // plain text mode prints the LAST assistant message verbatim. When the
-  // outcome carries no assistant turn (e.g. immediate error), nothing is
-  // printed — the exit code carries the signal.
-  if (req.headless?.output !== "json") {
+  // P26 — flush the json-mode aggregate (single JSON array). No-op in
+  // stream-json mode (every line already streamed) and when no sink is wired.
+  structuredSink?.finalize()
+
+  // Final-answer emission — a STRUCTURED run (json / stream-json) already
+  // streamed/buffered the machine contract onto stdout via the sink, so the
+  // human-readable final-text print is SKIPPED (it would corrupt the
+  // jq-parseable stdout). Plain text mode prints the LAST assistant message
+  // verbatim. When the outcome carries no assistant turn (e.g. immediate
+  // error), nothing is printed — the exit code carries the signal.
+  if (!wantsStructuredOutput(req)) {
     const lastAssistant = outcome.messages.findLast?.((m) => m.role === "assistant")
     if (lastAssistant) {
       const textParts = Array.isArray(lastAssistant.content)

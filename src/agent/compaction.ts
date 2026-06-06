@@ -1,5 +1,5 @@
 import type { ContentBlock, LLMPort, Message, SystemPromptInput } from "@/llm"
-import { assembleFromEvents } from "@/llm"
+import { assembleFromEvents, resolveModelWindow } from "@/llm"
 import { errMessage, logger, type Result, runtimeConfig } from "@/shared"
 import {
   BackgroundSummarizationController,
@@ -55,6 +55,53 @@ export const charsOf = (messages: readonly Message[]): number => {
  *  is preserved (applied once over the total, NOT per message). */
 export const estimateTokens = (messages: Message[]): number => Math.ceil(charsOf(messages) / 4)
 
+/**
+ * D5 (jun-7 naive-impl hardening) — an authoritative input-token measurement
+ * from the provider's last successful response, paired with the message count
+ * at the moment it was measured.
+ */
+export interface TokenBaseline {
+  /** The provider's authoritative `usage.inputTokens` from the last successful
+   *  response. Only trusted when it was the `exact` count (authoritative ≥
+   *  estimate), which the loop checks before constructing this. */
+  readonly measuredInputTokens: number
+  /** `messages.length` at the moment the measurement was taken. The trigger
+   *  count adds the chars/4 estimate of ONLY the messages appended AFTER this
+   *  index (the authoritative count already covers the prefix). */
+  readonly measuredAtMessageCount: number
+}
+
+/**
+ * D5 — the token count the compaction trigger should gate on. With a
+ * `tokenBaseline`, anchor on the provider's authoritative input count and only
+ * ESTIMATE the suffix appended since the measurement; without one, fall back to
+ * the chars/4 estimate over the whole transcript (legacy, byte-identical).
+ *
+ * Fail-SAFE on a stale/invalid baseline: if `measuredAtMessageCount` is out of
+ * range for the current transcript (e.g. messages were compacted/replaced under
+ * it, so the recorded index no longer maps to the same suffix) we DROP the
+ * baseline and use the legacy estimate rather than risk an under-count (the
+ * RFC's "prefer fail-SAFE over over-trigger" — but here a bad mapping could
+ * also UNDER-count, so the only safe move is the full estimate). A non-finite /
+ * negative measurement is likewise ignored.
+ */
+export const triggerTokenCount = (messages: Message[], baseline?: TokenBaseline): number => {
+  if (
+    baseline === undefined ||
+    !Number.isFinite(baseline.measuredInputTokens) ||
+    baseline.measuredInputTokens < 0 ||
+    !Number.isInteger(baseline.measuredAtMessageCount) ||
+    baseline.measuredAtMessageCount < 0 ||
+    // Out of range ⇒ the recorded index no longer maps onto this transcript
+    // (history was replaced/compacted under the baseline). Fail-safe to legacy.
+    baseline.measuredAtMessageCount > messages.length
+  ) {
+    return estimateTokens(messages)
+  }
+  const appended = messages.slice(baseline.measuredAtMessageCount)
+  return baseline.measuredInputTokens + estimateTokens(appended)
+}
+
 /** Rough context-token footprint of an image, in chars (ADR-0083). The base64
  *  length is NOT a faithful proxy (a 1 MB image is ~1.3 M base64 chars but only
  *  ~1.5 k tokens to the model), so we use a fixed estimate ≈ 1.5 k tokens
@@ -102,13 +149,59 @@ const blockChars = (b: ContentBlock): number => {
   }
 }
 
-const resolveThreshold = (explicit?: number): number => {
+/**
+ * D4 (jun-7 naive-impl hardening) — safety margin (tokens) reserved BELOW the
+ * derived threshold so that the chars/4 estimate's known under-count and a few
+ * pending in-flight tokens cannot sail past the provider's hard window before
+ * the proactive path folds history. Named after Claude Code's identical
+ * `13000`-token reserve (claude-cli `CLAUDE_CODE_MAX_CONTEXT_TOKENS` derivation:
+ * `window − outputReserve − 13000`). NOT a heuristic threshold — a fixed
+ * safety budget cited from the reference implementation.
+ */
+const COMPACTION_SAFETY_MARGIN = 13_000
+
+/**
+ * D4 — derive the compaction threshold for a KNOWN model from its context
+ * window: `window − maxOutput(reserve) − COMPACTION_SAFETY_MARGIN`. The reserve
+ * is the model's table `maxOutput` (a spec value, NOT a guess) so a compaction
+ * never leaves too little room for the model to finish its reply. Returns
+ * `undefined` for an un-tabled model (caller falls back to the 120k legacy
+ * constant — byte-identical pre-D4 path). Clamped to `> 0` defensively (every
+ * tabled window satisfies `window > maxOutput + margin`, asserted in the
+ * hellgate, but a degenerate future entry must never yield a non-positive or
+ * negative threshold that would make compaction fire every turn).
+ */
+const deriveModelThreshold = (model: string): number | undefined => {
+  const window = resolveModelWindow(model)
+  if (window === undefined) return undefined
+  const derived = window.contextWindow - window.maxOutput - COMPACTION_SAFETY_MARGIN
+  return derived > 0 ? derived : undefined
+}
+
+/**
+ * Resolve the proactive compaction threshold. Precedence (D4):
+ *   1. explicit per-config override (`thresholdTokens`) — authoritative;
+ *   2. env override (`QUANTA_COMPACT_TOKENS` via `runtimeConfig`) — authoritative;
+ *   3. derived from the model's context window (KNOWN model only) — D4;
+ *   4. `DEFAULT_THRESHOLD` (120_000) legacy — UNKNOWN model byte-identical.
+ *
+ * The explicit + env overrides stay AUTHORITATIVE and unchanged; the model-
+ * derived layer sits strictly BELOW them. Signal-presence (a known model id)
+ * gates the new behavior — no global knob, and an un-tabled model is identical
+ * to the pre-D4 path.
+ */
+const resolveThreshold = (explicit?: number, model?: string): number => {
   if (explicit !== undefined) return explicit
   // S5: env is read in ONE place (runtimeConfig) — validated + frozen at
   // startup. A garbage value there is rejected with a stderr warn rather
   // than silently flipping the threshold here.
   const env = runtimeConfig().compactTokens
-  return env !== undefined ? env : DEFAULT_THRESHOLD
+  if (env !== undefined) return env
+  if (model !== undefined) {
+    const derived = deriveModelThreshold(model)
+    if (derived !== undefined) return derived
+  }
+  return DEFAULT_THRESHOLD
 }
 
 /**
@@ -121,8 +214,8 @@ const resolveThreshold = (explicit?: number): number => {
  * precedence to {@link resolveThreshold}, exported so the loop never re-derives
  * it (no literals at the call site).
  */
-export const resolveCompactionLimitTokens = (explicit?: number): number =>
-  resolveThreshold(explicit)
+export const resolveCompactionLimitTokens = (explicit?: number, model?: string): number =>
+  resolveThreshold(explicit, model)
 
 /** tool_use ids referenced by tool_result blocks in `m` (if any). */
 const toolResultRefs = (m: Message): string[] =>
@@ -207,6 +300,26 @@ export interface CompactInput {
    *  Accepts the widened {@link SystemPromptInput} (string or cache blocks). */
   system: SystemPromptInput
   thresholdTokens?: number
+  /**
+   * D4 (jun-7 naive-impl hardening) — the model id the loop is talking to. When
+   * present AND no explicit/env threshold override is set, the threshold is
+   * DERIVED from the model's context window (`window − maxOutput − margin`)
+   * instead of the model-blind 120k constant. Absent / unknown model ⇒ 120k
+   * legacy, byte-identical (signal-presence gates — no global knob).
+   */
+  model?: string
+  /**
+   * D5 (jun-7 naive-impl hardening) — authoritative token baseline from the
+   * provider's last successful response. When present, the trigger token count
+   * is `measuredInputTokens + estimateTokens(messages.slice(measuredAtMessage
+   * Count))` (authoritative baseline + chars/4 of ONLY the messages appended
+   * since the measurement) instead of the chars/4 estimate over the WHOLE
+   * transcript. This closes the chars/4 under-count (20-40% on code/JSON-dense
+   * transcripts) that let a real 150k estimate ~115k and sail past the gate
+   * into a hard `context_window_exceeded`. Absent (turn-1 / provider doesn't
+   * report / not `exact`) ⇒ `estimateTokens(messages)` legacy, byte-identical.
+   */
+  tokenBaseline?: TokenBaseline
   keepRecentTurns?: number
   /** ADR-0133 — caller-computed flag (`archive.summaries.length === 0` in
    *  the loop wire). Forwarded verbatim to {@link preCompactHook}. Absent ⇒
@@ -439,9 +552,13 @@ export const reactiveCompact = async (
  * allocation — byte-identical to the pre-hook path.
  */
 export const compactIfNeeded = async (input: CompactInput): Promise<CompactResult> => {
-  const threshold = resolveThreshold(input.thresholdTokens)
+  // D4 — model-derived threshold (known model only; unknown ⇒ 120k legacy).
+  const threshold = resolveThreshold(input.thresholdTokens, input.model)
   const keepTurns = input.keepRecentTurns ?? DEFAULT_KEEP_TURNS
-  const currentTokens = estimateTokens(input.messages)
+  // D5 — gate on the authoritative-baseline-anchored count when a baseline is
+  // present; otherwise the chars/4 estimate over the whole transcript (legacy,
+  // byte-identical). `currentTokens` is reused below for the preflight query.
+  const currentTokens = triggerTokenCount(input.messages, input.tokenBaseline)
   if (currentTokens <= threshold) {
     return { compacted: false, messages: input.messages, reason: "under_threshold" }
   }

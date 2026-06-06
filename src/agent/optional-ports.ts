@@ -5,7 +5,9 @@ import { createSubagentMailbox } from "@/agent/subagent-mailbox"
 import type { LLMPort } from "@/llm"
 import { defaultRoleModelResolver, type RoleModelResolver } from "@/llm/role-model-override"
 import { AgentMetaRegistry, TurnWakeRegistry } from "@/subagent"
+import type { CloseoutCritic, CloseoutCriticVerdict } from "./closeout-critic"
 import { buildCodeCellDispatchPort } from "./codemode-wire"
+import { materializeReviewerAgent } from "./tier1/reviewer-subagent"
 import type { AgentConfig } from "./types"
 
 const QUANTA_FAST_APPLY_ENV = "QUANTA_FAST_APPLY"
@@ -22,6 +24,12 @@ const QUANTA_SUBAGENT_FOLLOWUP_ENV = "QUANTA_SUBAGENT_FOLLOWUP"
  *  subagent gates use) so the composition root flips the SAME knob the tool
  *  registration (`DefaultToolPorts.codeMode`) reads. */
 const QUANTA_CODE_MODE_ENV = "QUANTA_CODE_MODE"
+/** P12 — `closeout-critic` port wire gate. Same `QUANTA_CLOSEOUT_CRITIC` env the
+ *  knob's `enabled` fold reads; the truthy set mirrors the knob's
+ *  (`["1","on","true"]`) so the port is constructed on EXACTLY the runs the knob
+ *  turns the feature on. */
+const QUANTA_CLOSEOUT_CRITIC_ENV = "QUANTA_CLOSEOUT_CRITIC"
+const CLOSEOUT_CRITIC_TRUTHY = new Set(["1", "on", "true"])
 
 /** Per-sender undelivered quota baked into the env-gated wire (R3 audit-H).
  *  Hosts wiring the mailbox by hand still get to override via the closed-port

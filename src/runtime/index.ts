@@ -1,5 +1,18 @@
 export type { EscalatingKill, GuardedSpawnHooks, KillableChild } from "./guarded-spawn"
 export { escalatingKill, KILL_GRACE_MS, withSpawnedChild } from "./guarded-spawn"
+export type {
+  PpidWalkDeps,
+  ProcessRow,
+  ProcessTableProvider,
+  ProcessTreeKiller,
+  SignalSender,
+  TreeSignal,
+} from "./process-tree"
+export {
+  createPpidWalkKiller,
+  defaultPpidWalkKiller,
+  parsePsTable,
+} from "./process-tree"
 export {
   applyLocalEnv,
   LOCAL_ENV_CANDIDATES,

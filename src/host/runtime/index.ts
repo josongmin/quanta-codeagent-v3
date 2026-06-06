@@ -25,6 +25,7 @@ export {
   AgentArgsError,
   formatHelp,
   type IdentityModeToken,
+  type OutputFormatToken,
   type PermissionProfileToken,
   type ProviderToken,
   parseAgentArgs,

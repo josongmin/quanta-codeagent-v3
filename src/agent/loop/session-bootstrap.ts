@@ -188,6 +188,11 @@ export const createRunAgentContext = async (config: AgentConfig): Promise<RunAge
     onRedaction: recordRedaction,
     onTurnTiming: recordTurnTiming,
     ...(cfg.taskBudget !== undefined ? { taskSpend: { tokens: 0 } } : {}),
+    // D5 (jun-7) — one shared mutable box per session (spread by reference into
+    // every turn's TurnState, so the capture persists across turns). Empty until
+    // an exact provider usage lands; absent a baseline the trigger is legacy
+    // chars/4 (byte-identical). Allocated only when compaction is configured.
+    ...(cfg.compaction !== undefined ? { tokenBaseline: {} } : {}),
   }
 
   const finish: FinishAgentSession = async (reason, turns, stopCategory, refusal) =>

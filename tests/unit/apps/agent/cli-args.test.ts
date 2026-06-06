@@ -196,4 +196,81 @@ describe("formatHelp", () => {
     expect(h).toContain("--max-cost-usd")
     expect(h).toContain("--max-patch-bytes")
   })
+
+  test("documents the headless structured-output flags", () => {
+    const h = formatHelp()
+    expect(h).toContain("--output-format")
+    expect(h).toContain("--include-partial")
+  })
+})
+
+describe("parseAgentArgs — P26 headless --output-format / --include-partial", () => {
+  test("absent ⇒ outputFormat/includePartial slots omitted (byte-identical)", () => {
+    const a = parseAgentArgs(["--mode", "headless", "-p", "task"])
+    expect(a.outputFormat).toBeUndefined()
+    expect(a.includePartial).toBeUndefined()
+  })
+
+  test.each(["text", "json", "stream-json"] as const)(
+    "accepts --output-format %s",
+    (fmt) => {
+      const a = parseAgentArgs(["--mode", "headless", "-p", "task", "--output-format", fmt])
+      expect(a.outputFormat).toBe(fmt)
+    },
+  )
+
+  test("rejects an invalid --output-format value", () => {
+    expect(() =>
+      parseAgentArgs(["--mode", "headless", "-p", "task", "--output-format", "yaml"]),
+    ).toThrow(/--output-format must be one of/)
+  })
+
+  test("rejects --output-format outside --mode headless", () => {
+    expect(() =>
+      parseAgentArgs(["--mode", "interactive", "--output-format", "json"]),
+    ).toThrow(/--output-format is only valid with --mode headless/)
+  })
+
+  test("rejects --include-partial outside --mode headless", () => {
+    expect(() =>
+      parseAgentArgs(["--mode", "interactive", "--include-partial"]),
+    ).toThrow(/--include-partial is only valid with --mode headless/)
+  })
+
+  test("rejects --include-partial without a structured --output-format", () => {
+    expect(() =>
+      parseAgentArgs(["--mode", "headless", "-p", "task", "--include-partial"]),
+    ).toThrow(/--include-partial requires --output-format json\|stream-json/)
+  })
+
+  test("rejects --include-partial with --output-format text", () => {
+    expect(() =>
+      parseAgentArgs([
+        "--mode",
+        "headless",
+        "-p",
+        "task",
+        "--output-format",
+        "text",
+        "--include-partial",
+      ]),
+    ).toThrow(/--include-partial requires --output-format json\|stream-json/)
+  })
+
+  test.each(["json", "stream-json"] as const)(
+    "accepts --include-partial with --output-format %s",
+    (fmt) => {
+      const a = parseAgentArgs([
+        "--mode",
+        "headless",
+        "-p",
+        "task",
+        "--output-format",
+        fmt,
+        "--include-partial",
+      ])
+      expect(a.outputFormat).toBe(fmt)
+      expect(a.includePartial).toBe(true)
+    },
+  )
 })

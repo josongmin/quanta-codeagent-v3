@@ -21,8 +21,10 @@
  * registered (byte-identical default menu).
  */
 
-import { errMessage } from "@/shared/errors"
+import { DEFAULT_ENV_ALLOWLIST, defaultPpidWalkKiller } from "@/runtime"
 import type { PtyBackend } from "@/shared"
+import { runtimeConfig } from "@/shared"
+import { errMessage } from "@/shared/errors"
 import { FsJailError, resolveJailed } from "@/storage"
 import {
   createBunPtyAdapter,
@@ -131,15 +133,33 @@ export const bunPtyFactory = (jailRoot: string): PtyFactoryPort => ({
   },
   spawn(argv, cwd, env, terminal): PtyChildHandle {
     const term = bunTerminalByHandle.get(terminal)
-    const child = Bun.spawn(argv as string[], {
-      cwd,
-      env: { ...process.env, ...env },
-      // `terminal` is the Bun-native option that attaches a real controlling tty.
-      ...(term !== undefined ? { terminal: term } : {}),
-    } as Parameters<typeof Bun.spawn>[1]) as unknown as BunSpawnedChild
+    // D3 — scrub the child env through the same chokepoint as `runShell`
+    // (drops `*_API_KEY`/`*_TOKEN`/`*_SECRET`). Default scrubbed; opt out with
+    // `QUANTA_PTY_INHERIT_ENV` for an interactive shell that needs full env.
+    const childEnv = buildPtyEnv({
+      parentEnv: process.env,
+      declared: env,
+      inheritEnv: runtimeConfig().ptyInheritEnv,
+    })
+    const child = Bun.spawn(
+      argv as string[],
+      {
+        cwd,
+        env: childEnv,
+        // `terminal` is the Bun-native option that attaches a real controlling tty.
+        ...(term !== undefined ? { terminal: term } : {}),
+      } as Parameters<typeof Bun.spawn>[1],
+    ) as unknown as BunSpawnedChild
+    const pid = child.pid ?? 0
     return {
-      pid: child.pid ?? 0,
-      kill: () => child.kill(),
+      pid,
+      // D1 — reap the whole PTY process tree (shell + its job-control children)
+      // instead of only the shell pid. Fall back to the single-PID `child.kill()`
+      // if we have no usable pid (defensive — Bun always populates it). No-throw.
+      kill: () => {
+        if (pid > 0) PTY_TREE_KILLER.signalTree(pid, "SIGTERM")
+        else child.kill()
+      },
     }
   },
   jailCwd(cwd) {
@@ -152,6 +172,72 @@ export const bunPtyFactory = (jailRoot: string): PtyFactoryPort => ({
     }
   },
 })
+
+/** Inputs to {@link buildPtyEnv}, all injected so the env policy is a pure,
+ *  testable unit (the production caller passes `process.env` +
+ *  `runtimeConfig().ptyInheritEnv`). */
+export interface BuildPtyEnvArgs {
+  /** The parent process env (production: `process.env`). */
+  readonly parentEnv: Record<string, string | undefined>
+  /** The declared per-spawn overlay (the PTY tool's `env` arg), or undefined. */
+  readonly declared: Readonly<Record<string, string>> | undefined
+  /** Escape hatch — true keeps the FULL parent env (interactive opt-out). */
+  readonly inheritEnv: boolean
+}
+
+/**
+ * D3 — build the PTY child env through the SAME chokepoint as `runShell`.
+ *
+ * Default (`inheritEnv:false`): scrub the parent env to the
+ * {@link DEFAULT_ENV_ALLOWLIST} (drops `*_API_KEY`/`*_TOKEN`/`*_SECRET` and
+ * every other non-allowlisted var, ADR-0006), then overlay the declared vars
+ * — but ONLY allowlisted names pass (a declared secret name is still dropped),
+ * mirroring `applyLocalEnv`'s var-overlay governance. This closes the
+ * credential leak from the legacy `{ ...process.env, ...env }` full inherit.
+ *
+ * Opt-out (`inheritEnv:true`): the full parent env, then the declared overlay
+ * (no allowlist filtering) — the pre-D3 interactive behaviour, now explicit.
+ *
+ * Pure + no-throw. Returns a plain `Record<string,string>` ready for
+ * `Bun.spawn({ env })`.
+ */
+export const buildPtyEnv = (args: BuildPtyEnvArgs): Record<string, string> => {
+  const { parentEnv, declared, inheritEnv } = args
+  const allow = new Set(DEFAULT_ENV_ALLOWLIST)
+
+  if (inheritEnv) {
+    // Full inherit (escape hatch): copy every defined parent var, then overlay
+    // the declared vars unfiltered — byte-identical to the legacy spread.
+    const out: Record<string, string> = {}
+    for (const [k, v] of Object.entries(parentEnv)) {
+      if (v !== undefined) out[k] = v
+    }
+    if (declared !== undefined) {
+      for (const [k, v] of Object.entries(declared)) out[k] = v
+    }
+    return out
+  }
+
+  // Scrubbed (default): only allowlisted names from the parent, then overlay
+  // only allowlisted declared names — the same allowlist that scrubbed the base.
+  const out: Record<string, string> = {}
+  for (const name of DEFAULT_ENV_ALLOWLIST) {
+    const v = parentEnv[name]
+    if (v !== undefined) out[name] = v
+  }
+  if (declared !== undefined) {
+    for (const [k, v] of Object.entries(declared)) {
+      if (allow.has(k)) out[k] = v
+    }
+  }
+  return out
+}
+
+/** D1 — whole-tree killer for PTY children. An attached interactive shell
+ *  (`bash`/`zsh`) is the root of a tree (the shell + whatever it launches); the
+ *  legacy `child.kill()` SIGTERMed only the shell pid, leaking its job-control
+ *  children. Module-level singleton (the adapter is pure per `signalTree`). */
+const PTY_TREE_KILLER = defaultPpidWalkKiller()
 
 /** Map a returned {@link PtyTerminalHandle} back to its live `Bun.Terminal` so
  *  `spawn` can attach the SAME terminal. WeakMap ⇒ the entry is collected with

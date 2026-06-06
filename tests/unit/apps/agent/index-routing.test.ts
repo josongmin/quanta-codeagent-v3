@@ -128,4 +128,28 @@ describe("toAssembleRequest — projection", () => {
     expect(Object.hasOwn(req, "prompt")).toBe(false)
     expect(Object.hasOwn(req, "exhaustion")).toBe(false)
   })
+
+  test("P26 — lifts outputFormat/includePartial when present", () => {
+    const req = toAssembleRequest({
+      mode: "headless",
+      dials: {},
+      prompt: "task",
+      outputFormat: "stream-json",
+      includePartial: true,
+      help: false,
+    })
+    expect(req.outputFormat).toBe("stream-json")
+    expect(req.includePartial).toBe(true)
+  })
+
+  test("P26 — omits outputFormat/includePartial when absent (byte-identical)", () => {
+    const req = toAssembleRequest({
+      mode: "headless",
+      dials: {},
+      prompt: "task",
+      help: false,
+    })
+    expect(Object.hasOwn(req, "outputFormat")).toBe(false)
+    expect(Object.hasOwn(req, "includePartial")).toBe(false)
+  })
 })

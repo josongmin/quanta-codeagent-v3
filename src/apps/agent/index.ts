@@ -27,6 +27,7 @@ import { loadEnvFiles } from "@/shared/env-files"
 
 loadEnvFiles([".env.dev", ".env.local", ".env"])
 
+import { loadNamedAgents } from "@/agent"
 import { loadCommandHookBindings } from "@/agent/command-hooks"
 // ADR-0303 thin-surface relocation — the env-READING "argv → AgentConfig base"
 // composition builder + the pure argv parser moved DOWN into `@/host/runtime`
@@ -102,7 +103,14 @@ export {
 
 const applyModeSpecificRequestFields = (out: AssembleRequest, p: AssembleRequestPartial): void => {
   if (p.mode === "headless" && p.prompt !== undefined) {
-    out.headless = { prompt: p.prompt }
+    // P26 — fold the structured-output flags onto HeadlessExtras. Absent ⇒ each
+    // spread is `{}` ⇒ `out.headless` is exactly `{ prompt }` as before (the
+    // byte-identical legacy text path).
+    out.headless = {
+      prompt: p.prompt,
+      ...(p.outputFormat ? { output: p.outputFormat } : {}),
+      ...(p.includePartial ? { includePartial: true } : {}),
+    }
     return
   }
   if (p.mode === "batch" && p.corpus !== undefined) {
@@ -197,6 +205,17 @@ export const runMain = async (deps: MainDeps = {}): Promise<void> => {
     partial.commandHookBindings = await loadCommandHookBindings(
       join(process.cwd(), "settings.json"),
     )
+  }
+  // Named-agent registry — load `.quanta/agents` (+ native dir) ONCE per session
+  // at the async root and thread the resolver onto the partial; `buildBaseFromArgs`
+  // lifts it onto `AgentConfig.namedAgentResolver` (read by the subagent runner per
+  // spawn). Default-OFF byte-identical: no agent dir ⇒ EMPTY registry ⇒ field stays
+  // absent ⇒ no named agent ever resolves. FAIL-OPEN: the loader already swallows an
+  // absent/unreadable dir, but we guard defensively so a registry-load fault can
+  // NEVER throw on the assembly path — a thrown loader yields an empty resolver.
+  const namedAgents = await loadNamedAgents(process.cwd()).catch(() => undefined)
+  if (namedAgents !== undefined && namedAgents.size > 0) {
+    partial.namedAgentResolver = namedAgents
   }
 
   // T01 (audit L5 H-2 / M-6): the composition root owns ONE real cancellation

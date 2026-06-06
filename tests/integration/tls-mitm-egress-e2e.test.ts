@@ -314,6 +314,69 @@ describe("TLS-MITM e2e — FAIL-CLOSED on a stuck/unsupported handshake (all run
   })
 })
 
+describePositive(
+  "TLS-MITM e2e — over-cap body is FAIL-CLOSED (streaming-cap DoS guard) [node]",
+  () => {
+    // HELLGATE (cycle-2 audit): the MITM parse path previously buffered the ENTIRE
+    // decrypted HTTPS body into memory BEFORE consulting `maxBodyBytes` — a huge
+    // body could OOM the proxy (the plaintext `bufferBody` path has a STREAMING cap
+    // and never regressed). The fix applies the same streaming cap in
+    // `parseTlsRequest` AND fails closed on an over-cap body (it cannot scan a
+    // partial body, and unlike the plaintext path it cannot re-stream the original
+    // over the already-consumed TLS socket, so a truncated forward would corrupt
+    // the request). We assert: an over-cap body → DENY, never reaches the origin.
+    test("a body past maxBodyBytes ⇒ DENY (never buffered whole, never reaches origin)", async () => {
+      received = []
+      // Tiny cap; the body is far larger — and crucially the secret sits PAST the
+      // cap boundary, so the old "buffer-all-then-forward-unscanned" path would have
+      // leaked it. The streaming-cap fix fails closed instead.
+      const mitm = mitmConfig({ declared: [DECLARED], maxBodyBytes: 64 })
+      const proxy = new LoopbackEgressProxy(
+        { enabled: true, allowlist: [HOST], secretEgress: mitm.secretEgress, mitm },
+        {
+          dial: toOrigin(),
+          resolvePeerHost: publicPeer,
+          upstreamTlsExtra: () => ({ ca: upstreamCa.caCertPem() }),
+        },
+      )
+      const { port } = await proxy.listen()
+      try {
+        const big = `${"A".repeat(4096)}&leak=${DECLARED}`
+        const res = await httpsThroughProxy(port, mitm.certAuthority.caCertPem(), big)
+        // Fail-closed: the secret NEVER reached the real origin.
+        expect(received).toHaveLength(0)
+        expect(res.status === 403 || res.status === 0).toBe(true) // deny (403) or reset
+        expect(proxy.decisionLog().at(-1)?.secretScan).toBe("denied")
+      } finally {
+        await proxy.close()
+      }
+    })
+
+    test("a body AT the cap is still scanned + forwarded (no over-correction)", async () => {
+      received = []
+      const legit = "hello=world" // 11 bytes, well under the cap
+      const mitm = mitmConfig({ declared: [DECLARED], maxBodyBytes: 1024 })
+      const proxy = new LoopbackEgressProxy(
+        { enabled: true, allowlist: [HOST], secretEgress: mitm.secretEgress, mitm },
+        {
+          dial: toOrigin(),
+          resolvePeerHost: publicPeer,
+          upstreamTlsExtra: () => ({ ca: upstreamCa.caCertPem() }),
+        },
+      )
+      const { port } = await proxy.listen()
+      try {
+        const res = await httpsThroughProxy(port, mitm.certAuthority.caCertPem(), legit)
+        expect(res.status).toBe(200)
+        expect(received[0]).toBe(legit)
+        expect(proxy.decisionLog().at(-1)?.secretScan).toBe("scanned-clean")
+      } finally {
+        await proxy.close()
+      }
+    })
+  },
+)
+
 describe("TLS-MITM e2e — default-OFF byte-identity", () => {
   test("no mitm config ⇒ CONNECT stays a raw tunnel + connect-tunnel-unscanned marker", async () => {
     received = []

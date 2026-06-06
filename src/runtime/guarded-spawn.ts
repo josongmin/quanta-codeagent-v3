@@ -42,6 +42,8 @@
  *    throw skips it for free, identical to the prior code.
  */
 
+import type { ProcessTreeKiller } from "./process-tree"
+
 /** Grace period between the polite SIGTERM and the forceful SIGKILL. A child
  *  that traps or ignores SIGTERM (`trap '' TERM`) would otherwise run to
  *  natural completion despite an abort/timeout; after this window we escalate
@@ -55,10 +57,17 @@ export const KILL_GRACE_MS = 2_000
 /** Structural mirror of the slice of `Bun.Subprocess` the escalating kill
  *  needs: a `kill(signal?)` that accepts an OS signal name/number, and an
  *  `exited` promise that resolves when the child is reaped. Kept structural so
- *  the helper does not couple the guard module to the full Bun type. */
+ *  the helper does not couple the guard module to the full Bun type.
+ *
+ *  D1 — `pid` is the child's process id (`Bun.Subprocess.pid`,
+ *  `BashSubprocess` already carries it). It is OPTIONAL so the legacy single-PID
+ *  fallback and the existing fake children (which only stub `kill`/`exited`)
+ *  keep typechecking; it is only read when a {@link ProcessTreeKiller} is
+ *  injected. */
 export interface KillableChild {
   kill(signal?: number | NodeJS.Signals): void
   readonly exited: Promise<number>
+  readonly pid?: number
 }
 
 /** What {@link escalatingKill} hands back: the `kill` closure to wire into a
@@ -92,8 +101,27 @@ export interface EscalatingKill {
  * Centralized here so every spawn site (runShell, LocalSandbox, DockerSandbox)
  * gets the same escalation by passing this `kill` to {@link withSpawnedChild}
  * and `disarm` in its `cleanup`.
+ *
+ * D1 — when a {@link ProcessTreeKiller} is supplied AND the child exposes a
+ * numeric `pid`, the polite SIGTERM and the escalated SIGKILL both go to the
+ * WHOLE descendant tree (`killer.signalTree(pid, …)`), so a `bash → node →
+ * vite-worker` tree is fully reaped instead of leaking the grandchildren. When
+ * the killer is ABSENT (tests / un-wired sites) the path is BYTE-IDENTICAL to
+ * the legacy single-PID `proc.kill()`.
  */
-export const escalatingKill = (proc: KillableChild): EscalatingKill => {
+export const escalatingKill = (proc: KillableChild, killer?: ProcessTreeKiller): EscalatingKill => {
+  // Route a single signal either through the whole-tree killer (when wired AND
+  // the child has a pid) or the legacy single-PID `proc.kill()`. Both are
+  // no-op-safe after the child exits.
+  const useTree = killer !== undefined && typeof proc.pid === "number"
+  const sigterm = (): void => {
+    if (useTree) (killer as ProcessTreeKiller).signalTree(proc.pid as number, "SIGTERM")
+    else proc.kill()
+  }
+  const sigkill = (): void => {
+    if (useTree) (killer as ProcessTreeKiller).signalTree(proc.pid as number, "SIGKILL")
+    else proc.kill("SIGKILL")
+  }
   let graceTimer: ReturnType<typeof setTimeout> | undefined
   const disarm = () => {
     if (graceTimer !== undefined) {
@@ -108,7 +136,7 @@ export const escalatingKill = (proc: KillableChild): EscalatingKill => {
 
   const kill = () => {
     try {
-      proc.kill() // polite SIGTERM first
+      sigterm() // polite SIGTERM first (whole tree when a killer is wired)
     } catch {
       // already exited
     }
@@ -117,7 +145,7 @@ export const escalatingKill = (proc: KillableChild): EscalatingKill => {
     graceTimer = setTimeout(() => {
       graceTimer = undefined
       try {
-        proc.kill("SIGKILL") // signal 9 — uncatchable, for TERM-trapping children
+        sigkill() // signal 9 — uncatchable, for TERM-trapping children/trees
       } catch {
         // already exited in the grace window
       }

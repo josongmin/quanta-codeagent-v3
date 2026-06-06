@@ -34,6 +34,38 @@ export interface McpServerConfig {
    *  server. Omitted/false ⇒ byte-identical to the pre-H18 client: no discovery,
    *  no flow, no header. HTTP carrier only (a `url` must be set). */
   oauth?: boolean
+  /** §19.1 — host-declared per-server TRUST. The single signal that authorizes
+   *  the bridge to HONOR a server's self-declared `ToolAnnotations` (read-only /
+   *  idempotent hints) when the `QUANTA_MCP_TOOL_ANNOTATIONS` knob is ALSO on.
+   *
+   *  SECURITY: annotations are SELF-DECLARED by the server, so an UNTRUSTED
+   *  server's `readOnlyHint:true` must NEVER relax a permission/concurrency
+   *  predicate (a hostile server would set it to escape HITL + run in parallel).
+   *  Omitted/false ⇒ the server is untrusted ⇒ annotations can only ever leave
+   *  the predicates at the conservative `false/false` (byte-identical to the
+   *  pre-annotation bridge). Set to `true` ONLY for first-party / operator-vetted
+   *  servers. Trust here can only ELEVATE, never downgrade. */
+  trusted?: boolean
+}
+
+/** §19.1 — MCP `ToolAnnotations` (spec 2025-06-18). Every field is an UNTRUSTED
+ *  hint the server self-declares — advisory only, NEVER trusted to relax a
+ *  security predicate unless BOTH the default-OFF knob is set AND the server is
+ *  explicitly host-trusted (see `@/agent` mcp-bridge `honored`). A field is
+ *  carried ONLY when it arrived as a real JSON boolean; a poisoned non-boolean
+ *  value (`"true"`, `1`, `{}`, `null`) is dropped at parse time so it can never
+ *  be truthy-coerced downstream. */
+export interface McpToolAnnotations {
+  /** Human-friendly title (display only; no security meaning). */
+  title?: string
+  /** Server claims the tool does not modify its environment. */
+  readOnlyHint?: boolean
+  /** Server claims the tool may perform destructive updates. */
+  destructiveHint?: boolean
+  /** Server claims repeated calls with the same args have no additional effect. */
+  idempotentHint?: boolean
+  /** Server claims the tool interacts with an open world (e.g. the internet). */
+  openWorldHint?: boolean
 }
 
 /** A tool advertised by the server's `tools/list`. */
@@ -41,6 +73,25 @@ export interface McpToolDef {
   name: string
   description: string
   inputSchema: Record<string, unknown>
+  /** §19.1 — sanitized, boolean-only annotations the server advertised. Absent
+   *  when the server sent none OR every advertised field was poisoned
+   *  (non-boolean). Carrying it does NOT change any predicate by itself — the
+   *  bridge only ever CONSULTS it under a trust gate + knob (default-OFF). */
+  annotations?: McpToolAnnotations
+}
+
+/** §19.3 — a non-text content block surfaced from a `tools/call` result. An
+ *  `image` block carries base64 `data` + `mimeType`; an embedded `resource`
+ *  block (a blob resource) becomes a native document. Bounded + magic-checked at
+ *  the bridge (where the `@/tool` 5 MB image cap is reachable) before reaching
+ *  the model — the `@/mcp` slice stays a pure shape extractor (no `@/tool`
+ *  import, RFC §3.1). */
+export interface McpMediaBlock {
+  kind: "image" | "resource"
+  /** Base64 payload (image data, or embedded-resource blob). */
+  data: string
+  /** IANA media type advertised by the server (validated downstream). */
+  mimeType: string
 }
 
 /** Outcome of a `tools/call`. `content` is every text content block joined by
@@ -48,4 +99,11 @@ export interface McpToolDef {
 export interface McpCallResult {
   ok: boolean
   content: string
+  /** §19.3 — non-text content blocks (image / embedded resource) the server
+   *  returned. OPTIONAL: absent (or empty) when the server returned only text,
+   *  so the legacy text-only result is byte-identical and every existing
+   *  consumer (which reads only `ok`/`content`) is unaffected. The bridge maps
+   *  these to `ToolResult.images` / `ToolResult.documents` after the inbound
+   *  size cap + magic-byte sniff. */
+  media?: McpMediaBlock[]
 }

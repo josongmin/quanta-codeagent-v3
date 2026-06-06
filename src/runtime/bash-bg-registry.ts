@@ -31,13 +31,36 @@
  *    Lookup misses return `null`; the tool maps that to a typed `ToolFailure`.
  */
 
+import { type BoundedBuffer, createBoundedBuffer } from "./bounded-buffer"
 import { escalatingKill, type KillableChild } from "./guarded-spawn"
+import { defaultPpidWalkKiller, type ProcessTreeKiller } from "./process-tree"
 import { scrubEnv } from "./sandbox"
 import { getShellSandbox } from "./shell-sandbox-holder"
 
 /** Default registry cap. Overflow evicts the OLDEST (insertion-ordered Map
  *  iteration) entry — its process is SIGTERM'd before the entry drops. */
 export const DEFAULT_MAX_BG_SHELLS = 16
+
+/** D1 — whole-tree killer for background shells. Module-level singleton (the
+ *  adapter is pure per `signalTree`). A long-running `bash -lc "npm run dev"`
+ *  forks node→workers; on `bash_kill` / cap-eviction / abort this reaps the
+ *  whole tree instead of leaking the workers (legacy single-PID). When a fake
+ *  handle without a numeric `pid` is registered (tests), `escalatingKill`
+ *  auto-falls back to the single-PID `proc.kill()` — byte-identical. */
+const BG_TREE_KILLER: ProcessTreeKiller = defaultPpidWalkKiller()
+
+/** D2 — per-handle VERBATIM output budget. Output AT OR UNDER this is preserved
+ *  in full (the ADR-0411 contract: a background COMPLETED result is not
+ *  head-sliced); only ONCE it exceeds this does the buffer elide the middle,
+ *  keeping an 8k head + 4k tail (see `bounded-buffer.ts`). This is the OOM fix:
+ *  a `tail -f`/`yes` can no longer grow the accumulator without bound — the
+ *  retained buffer is O(this), not O(total streamed).
+ *
+ *  Value = 200_000, the SAME budget as the foreground `capToolOutput`
+ *  (`DEFAULT_TOOL_OUTPUT_MAX` in `src/tool/output-spill.ts` — POLICY SOURCE).
+ *  Re-declared locally (named const) rather than imported, to avoid crossing
+ *  the `@/runtime` ↔ `@/tool` slice fence. */
+export const MAX_BG_BUFFER_BYTES = 200_000
 
 /** Polling interval for `awaitHandle` regex match. A tight loop would burn CPU;
  *  too coarse a window would make the await feel sluggish. 50ms is the same
@@ -59,10 +82,13 @@ export interface BgShellHandle {
   readonly cwd: string
   readonly startedAt: number
   status: BgShellStatus
-  /** Output accumulator — bytes-as-decoded-utf8 since the bash tool only ever
-   *  surfaces text to the model. */
-  stdout: string
-  stderr: string
+  /** Output accumulators — bytes-as-decoded-utf8 since the bash tool only ever
+   *  surfaces text to the model. D2: BOUNDED head+tail buffers (cap
+   *  {@link MAX_BG_BUFFER_BYTES}) so a `tail -f`/`yes` cannot OOM the agent.
+   *  `snapshot()` reads `.value()`; the external `BgShellSnapshot.stdout: string`
+   *  shape is unchanged. */
+  readonly stdout: BoundedBuffer
+  readonly stderr: BoundedBuffer
   exitCode: number | null
   /** Resolves the moment the OS reaps the child (regardless of WHY — exit,
    *  kill, abort). The registry await loop races this against the regex/poll. */
@@ -306,7 +332,7 @@ export const createBashBgRegistry = (config: BashBgRegistryConfig = {}): BashBgR
     }
     const proc = await port.spawn({ command, cwd })
     const id = crypto.randomUUID()
-    const { kill, disarm } = escalatingKill(proc)
+    const { kill, disarm } = escalatingKill(proc, BG_TREE_KILLER)
     let exitedResolve!: () => void
     const exited = new Promise<void>((res) => {
       exitedResolve = res
@@ -317,8 +343,8 @@ export const createBashBgRegistry = (config: BashBgRegistryConfig = {}): BashBgR
       cwd,
       startedAt: Date.now(),
       status: "running",
-      stdout: "",
-      stderr: "",
+      stdout: createBoundedBuffer(MAX_BG_BUFFER_BYTES),
+      stderr: createBoundedBuffer(MAX_BG_BUFFER_BYTES),
       exitCode: null,
       exited,
       kill,
@@ -334,10 +360,10 @@ export const createBashBgRegistry = (config: BashBgRegistryConfig = {}): BashBgR
     // single background "lifecycle" promise; we attach a `.then`/`.catch` for
     // bookkeeping but never await it inline.
     const stdoutDone = drainStream(proc.stdout, (chunk) => {
-      handle.stdout += chunk
+      handle.stdout.append(chunk)
     })
     const stderrDone = drainStream(proc.stderr, (chunk) => {
-      handle.stderr += chunk
+      handle.stderr.append(chunk)
     })
     void (async () => {
       try {
@@ -366,8 +392,8 @@ export const createBashBgRegistry = (config: BashBgRegistryConfig = {}): BashBgR
     cwd: h.cwd,
     startedAt: h.startedAt,
     status: h.status,
-    stdout: h.stdout,
-    stderr: h.stderr,
+    stdout: h.stdout.value(),
+    stderr: h.stderr.value(),
     exitCode: h.exitCode,
   })
 
@@ -405,7 +431,11 @@ export const createBashBgRegistry = (config: BashBgRegistryConfig = {}): BashBgR
     const h = entries.get(id)
     if (h === undefined) return null
     const { regex, timeoutMs, signal } = opts
-    const matchesNow = (): boolean => regex?.test(`${h.stdout}\n${h.stderr}`) ?? false
+    // D2 — match against the BOUNDED `.value()` (head+tail) rather than an
+    // unbounded accumulator: a never-matching regex over an unbounded `tail -f`
+    // stream can no longer grow without limit (also shrinks the ReDoS surface).
+    const matchesNow = (): boolean =>
+      regex?.test(`${h.stdout.value()}\n${h.stderr.value()}`) ?? false
     // Fast-paths (already terminal OR regex matches now) ⇒ no polling.
     if (h.status !== "running") {
       return { snapshot: snapshot(h), matched: matchesNow(), timedOut: false }

@@ -22,6 +22,14 @@ export {
   type TickKind,
 } from "./budget"
 export {
+  type CloseoutCritic,
+  type CloseoutCriticConfig,
+  type CloseoutCriticObservation,
+  type CloseoutCriticRequest,
+  type CloseoutCriticVerdict,
+  runCloseoutCritic,
+} from "./closeout-critic"
+export {
   COMMAND_HOOKS_ENABLED_WITHOUT_ACK_MESSAGE,
   type CommandHookBinding,
   type CommandHookConfig,
@@ -44,7 +52,14 @@ export {
   parseCommandHookBindings,
   runCommandHooks,
 } from "./command-hooks"
-export { charsOf, compactIfNeeded, estimateTokens, findBoundary } from "./compaction"
+export {
+  charsOf,
+  compactIfNeeded,
+  estimateTokens,
+  findBoundary,
+  type TokenBaseline,
+  triggerTokenCount,
+} from "./compaction"
 export {
   type BreakerVerdict,
   CompactionBreaker,
@@ -221,6 +236,15 @@ export {
 } from "./memory-tools"
 export { AgentRecorder, METRIC } from "./metrics"
 export { isMutatingToolBlockedInMode, modeBlockReason, resolveAgentMode } from "./mode"
+export {
+  loadNamedAgents,
+  MAX_AGENT_FILES,
+  MAX_AGENT_SYSTEM_BYTES,
+  NAMED_AGENT_DIRS,
+  type NamedAgentDefinition,
+  NamedAgentRegistry,
+  type NamedAgentResolver,
+} from "./named-agent-registry"
 export { wireOptionalAgentPorts } from "./optional-ports"
 export { type PersonaKind, resolvePersona } from "./persona"
 export { isMutatingToolBlockedInPlan } from "./plan"

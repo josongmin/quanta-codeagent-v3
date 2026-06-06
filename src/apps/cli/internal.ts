@@ -1239,6 +1239,12 @@ const buildMcpLoadOpts = (
   ...(args.inboundWiring !== undefined ? { samplingWiring: args.inboundWiring } : {}),
   ...(args.opts.mcpTransportFor !== undefined ? { transportFor: args.opts.mcpTransportFor } : {}),
   ...(args.oauthProvider !== undefined ? { oauthProvider: args.oauthProvider } : {}),
+  // §19.1 (QUANTA_MCP_TOOL_ANNOTATIONS) — the global default-OFF master switch.
+  // OFF (default) ⇒ slot omitted ⇒ the bridge's `annotationsHonored` stays false
+  // ⇒ `honored = annotationsHonored && trusted` is false for EVERY tool, so the
+  // read/concurrency predicates keep their conservative classification
+  // (byte-identical). ON ⇒ a TRUSTED server's annotations may elevate them.
+  ...(runtimeConfig().mcpToolAnnotations ? { annotationsHonored: true } : {}),
 })
 
 /** Start the configured MCP servers (or short-circuit to an empty bundle when

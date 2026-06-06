@@ -36,6 +36,7 @@ import {
   PluginHostError,
 } from "@/plugin-isolation"
 import { errMessage, logger, QuantaError } from "@/shared"
+import { extractMedia, sanitizeAnnotations } from "./client"
 import type { McpCallResult, McpServerConfig, McpToolDef } from "./types"
 
 const PROTOCOL_VERSION = "2025-06-18"
@@ -68,6 +69,8 @@ interface RawTool {
   name: string
   description?: string
   inputSchema?: Record<string, unknown>
+  /** §19.1 — server-advertised `ToolAnnotations`; sanitized at {@link mapTool}. */
+  annotations?: unknown
 }
 interface ToolsListResult {
   tools?: RawTool[]
@@ -76,17 +79,24 @@ interface ToolsListResult {
 interface ContentBlock {
   type: string
   text?: string
+  data?: string
+  mimeType?: string
+  resource?: unknown
 }
 interface ToolsCallResult {
   content?: ContentBlock[]
   isError?: boolean
 }
 
-const mapTool = (t: RawTool): McpToolDef => ({
-  name: t.name,
-  description: t.description ?? "",
-  inputSchema: t.inputSchema ?? { type: "object" },
-})
+const mapTool = (t: RawTool): McpToolDef => {
+  const annotations = sanitizeAnnotations(t.annotations)
+  return {
+    name: t.name,
+    description: t.description ?? "",
+    inputSchema: t.inputSchema ?? { type: "object" },
+    ...(annotations !== undefined ? { annotations } : {}),
+  }
+}
 
 const joinTextBlocks = (content: ContentBlock[] | undefined): string =>
   (content ?? [])
@@ -249,9 +259,13 @@ export class IsolatedMcpClient {
       }
       throw e
     }
+    // §19.3 — mirror the in-process client: surface non-text media alongside the
+    // joined text. Empty ⇒ `media` omitted (byte-identical text-only result).
+    const media = extractMedia(res.content)
     return {
       ok: res.isError !== true,
       content: capResultText(joinTextBlocks(res.content)),
+      ...(media.length > 0 ? { media } : {}),
     }
   }
 

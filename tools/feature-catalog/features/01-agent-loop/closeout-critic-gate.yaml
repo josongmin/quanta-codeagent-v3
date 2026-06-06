@@ -1,0 +1,42 @@
+id: closeout-critic-gate
+title: Optional second-opinion critic at turn closeout (advisory, never blocks)
+section: 1
+subsystem: 에이전트 루프 — closeout critic gate (P12 jun-7 gap-other-agent 흡수)
+order: 112
+maturity: L3
+status: stable
+ui_surfaces: [n-a]
+monitoring: recovery-event
+modes: [n-a]
+configurable: knob
+owners: ["@songmin"]
+labels: [surface:core, tier:core, default-off]
+depends_on: [fallback-kinds-policy]
+purpose: |
+  루프가 `{kind:"completed"}` 턴을 봉인하기 직전, 주입된 reviewer/critic 포트(DI)에게
+  draft 최종답변에 대한 second-opinion verdict를 advisory로 요청하는 OPTIONAL 게이트.
+  새 모듈 src/agent/closeout-critic.ts(닫힌 포트 `CloseoutCritic` + fail-open helper
+  `runCloseoutCritic` — NEVER throws). 루프의 두 completed 봉인 지점(recovery-executor.ts
+  `applyAction`: action.do==="completed" / no-tool-call proceed)에서
+  `maybeRunCloseoutCritic`를 호출.
+
+  default-OFF / byte-identical: `QUANTA_CLOSEOUT_CRITIC` 미설정 또는 포트 미주입 ⇒
+  `config.closeoutCritic` 미존재/`enabled!==true`/`critic===undefined`이면 헬퍼가 SYNC하게
+  `undefined`를 반환(promise·await·allocation·emit 없음) → 봉인 경로 byte-identical.
+  포트 미주입+knob ON ⇒ FAIL-OPEN(차단·throw 없이 스킵). critic이 throw하면 helper가
+  catch하여 observation으로 변환(루프 크래시 없음). "denied" verdict는 기존 `recovery`
+  이벤트(reason `closeout`, detail `critic:` 접두)로 구조화 surface — 절대 완료를 차단하지
+  않음(advisory data only, 제어흐름 불변).
+evidence:
+  code:
+    - src/agent/closeout-critic.ts
+    - src/agent/loop/recovery-executor.ts
+    - src/runner/knobs/knobs/closeout-critic.ts
+  adrs: []
+  tests:
+    unit: [tests/unit/agent/closeout-critic.test.ts, tests/unit/agent/closeout-critic-hellgate.test.ts]
+    integration: []
+    contract: []
+knobs: [closeout-critic]
+deliberate_hold: null
+notes: 'HOT-PATH 슬라이스 — default-OFF byte-identical이 #1 우선. reviewer는 DI 포트로만 도달(하드코딩 없음). 포트 absent/unavailable ⇒ FAIL-OPEN(완료 차단 금지·throw 금지). verdict는 기존 recovery 이벤트로만 surface, 새 RecoveryReason 변형 없음(`critic:` detail 접두로 구분).'

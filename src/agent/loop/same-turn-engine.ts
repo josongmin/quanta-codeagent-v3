@@ -38,6 +38,7 @@ export const runTurn = async (
       turnInjects,
       state.taskSpend,
       bgCompaction,
+      state.tokenBaseline,
     )
     if (breakerVerdict.abort) return { kind: "error", reason: breakerVerdict.reason }
     const result = await streamConsume(turnSession, state, ctx)

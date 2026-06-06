@@ -22,7 +22,13 @@ export {
   type EgressProxyDeps,
   withEgressProxy,
 } from "./lifecycle"
-export { type DialTarget, LoopbackEgressProxy, type ResolvePeerHost } from "./loopback-proxy"
+export {
+  type CappedBody,
+  type DialTarget,
+  LoopbackEgressProxy,
+  type ResolvePeerHost,
+  readCappedBody,
+} from "./loopback-proxy"
 export type { MitmConfig, MitmFailMode } from "./mitm"
 export {
   type CertAuthority,

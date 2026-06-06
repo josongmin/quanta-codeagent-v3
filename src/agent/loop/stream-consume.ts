@@ -13,6 +13,7 @@ import {
   startSpan,
 } from "@/observability"
 import { abortReasonOf, errMessage, LLMError } from "@/shared"
+import { estimateTokens } from "../compaction"
 import { buildTtftAttrs } from "../loop-helpers"
 import type { buildTurnContext } from "../prompt"
 import { createStreamDispatcher, type TurnTimingAnchors } from "../stream-callbacks"
@@ -41,13 +42,36 @@ async function* teeUsage(
   recorder: TurnSession["recorder"],
   collector: TurnState["collector"],
   taskSpend: TurnState["taskSpend"],
+  // D5 (jun-7) — the token-baseline box + the chars/4 estimate of the SENT
+  // prompt. When the provider's authoritative `inputTokens` is at least our
+  // estimate (the `exact` contract), record it paired with the send-time wm
+  // count so the next turn's compaction trigger anchors on the provider's truth.
+  tokenBaselineBox: TurnState["tokenBaseline"],
+  sentEstimate: number,
 ): AsyncIterable<StreamEvent> {
   const guarded =
     config.streamWatchdog !== undefined && config.streamTimeoutPolicy !== undefined
       ? config.streamWatchdog.wrap(src, config.streamTimeoutPolicy, config.signal)
       : src
   for await (const ev of guarded) {
-    if (ev.type === "usage") emitUsage(config, ev, recorder, collector, taskSpend)
+    if (ev.type === "usage") {
+      emitUsage(config, ev, recorder, collector, taskSpend)
+      // D5 capture — trust the authoritative count only when it is `exact`
+      // (>= our chars/4 estimate of the sent prompt; a provider reporting a
+      // truncated/cached count below the estimate is NOT trusted). The
+      // send-time wm count was recorded by `prepareTurnContext`.
+      if (
+        tokenBaselineBox !== undefined &&
+        tokenBaselineBox.sendCount !== undefined &&
+        Number.isFinite(ev.inputTokens) &&
+        ev.inputTokens >= sentEstimate
+      ) {
+        tokenBaselineBox.current = {
+          measuredInputTokens: ev.inputTokens,
+          measuredAtMessageCount: tokenBaselineBox.sendCount,
+        }
+      }
+    }
     if (ev.type === "llm_continuation") emitLlmContinuation(config, ev)
     if (ev.type === "output_progress") {
       config.stream.emit({
@@ -144,6 +168,8 @@ export const streamConsume = async (
         recorder,
         collector,
         taskSpend,
+        state.tokenBaseline,
+        estimateTokens(messages),
       ),
       isConcurrencySafe: (name, input) => config.registry.isConcurrencySafe(name, input),
       isReadOnly: (name) => config.registry.isReadOnly(name),

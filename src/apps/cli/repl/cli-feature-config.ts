@@ -3,6 +3,7 @@ import { isCostPanelEnabled } from "../cost-panel"
 import type { DebugCategory } from "../debug-tracer"
 import { parseDebugEnv } from "../debug-tracer"
 import { isLifecyclePillsEnabled, readPillEnvFlags } from "../lifecycle-pills"
+import { isRatelimitNoticeEnabled } from "../ratelimit-notice"
 import { isCliRewindGitEnabled } from "../rewind-git"
 import { isIndicatorEnabled } from "../turn-indicator"
 import { isTurnSummaryEnabled, isTurnSummaryVerbose } from "../turn-summary"
@@ -55,6 +56,12 @@ export interface CliFeatureConfig {
   readonly decisionMetricsEnabled: boolean
   readonly turnSummary: { readonly enabled: boolean; readonly verbose: boolean }
   readonly turnIndicator: { readonly enabled: boolean; readonly intervalMs: number }
+  /** P27 — `QUANTA_RATELIMIT_NOTICE` gate for the transient rate-limit
+   *  quota notice on the bottom status bar. DEFAULT-OFF: unset ⇒ disabled
+   *  (the operator must opt in), so the no-tee path is byte-identical and
+   *  the stdout adapter's empty `ratelimit_snapshot` case stays the only
+   *  observer. */
+  readonly ratelimitNotice: { readonly enabled: boolean }
   readonly debugTracer: {
     readonly enabled: boolean
     readonly categories: ReadonlySet<DebugCategory> | undefined
@@ -160,6 +167,9 @@ export const readCliFeatureConfig = (
       enabled: isIndicatorEnabled(env, stdoutIsTTY),
       intervalMs: indicatorIntervalMs,
     },
+    // P27 — default-OFF: `isRatelimitNoticeEnabled` returns false unless the
+    // operator sets `QUANTA_RATELIMIT_NOTICE` to a truthy value.
+    ratelimitNotice: { enabled: isRatelimitNoticeEnabled(env) },
     debugTracer: {
       enabled: debugEnabled,
       categories: debugParsed.categories,

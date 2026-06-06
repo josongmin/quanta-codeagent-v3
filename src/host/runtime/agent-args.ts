@@ -59,6 +59,15 @@ export interface AgentArgs {
   /** ci-bot: `--dry-run` — stub the PR-comment write (read the PR but do not
    *  post). Used for safe e2e validation. Absent ⇒ real post. */
   ciBotDryRun?: boolean
+  /** P26 — headless `--output-format <text|json|stream-json>`. When set, the
+   *  composition root threads it onto `HeadlessExtras.output` so the headless
+   *  runner emits the structured stdout contract. Only valid with `--mode
+   *  headless`. Absent ⇒ slot omitted ⇒ legacy human-text stdout (byte-identical). */
+  outputFormat?: OutputFormatToken
+  /** P26 — headless `--include-partial`. When set (requires `--output-format
+   *  json|stream-json`), the structured sink ALSO emits streaming-delta
+   *  (partial assistant-text) events. Absent ⇒ milestone events only. */
+  includePartial?: boolean
   /** `--help` / `-h` short-circuit. */
   help: boolean
   /** ADR-0236 — `--tool-profile <write|ask|minimal|code-only>`. When set, the
@@ -103,6 +112,10 @@ export interface AgentArgs {
   permissionProfile?: PermissionProfileToken
 }
 
+/** P26 — closed set of headless stdout contracts accepted on `--output-format`.
+ *  Aligned 1:1 with `HeadlessExtras.output` (the `text` / `json` / `stream-json`
+ *  union). */
+export type OutputFormatToken = "text" | "json" | "stream-json"
 /** ADR-0236 — closed set of tool-profile names accepted on `--tool-profile`. */
 export type ToolProfileToken = "write" | "ask" | "minimal" | "code-only"
 /** ADR-0236 — closed set of identity modes accepted on `--identity-mode`.
@@ -137,6 +150,13 @@ const VALID_EXHAUSTION = [
   "emit-partial",
   "fail-run",
 ] as const satisfies readonly BudgetExhaustionPolicy[]
+
+/** P26 — closed set for `--output-format`. */
+const VALID_OUTPUT_FORMATS = [
+  "text",
+  "json",
+  "stream-json",
+] as const satisfies readonly OutputFormatToken[]
 
 /** ADR-0236 — closed set for `--tool-profile`. */
 const VALID_TOOL_PROFILES = [
@@ -204,6 +224,10 @@ const isValidProvider = (s: string): s is ProviderToken =>
 
 const isValidExhaustion = (s: string): s is BudgetExhaustionPolicy =>
   (VALID_EXHAUSTION as readonly string[]).includes(s)
+
+/** P26 type guard for `--output-format`. */
+const isValidOutputFormat = (s: string): s is OutputFormatToken =>
+  (VALID_OUTPUT_FORMATS as readonly string[]).includes(s)
 
 /** ADR-0236 type guard for `--tool-profile`. */
 const isValidToolProfile = (s: string): s is ToolProfileToken =>
@@ -298,6 +322,8 @@ interface FlagAcc {
   report?: string
   ciBotDryRun: boolean
   pr?: string
+  outputFormat?: OutputFormatToken
+  includePartial: boolean
   toolProfile?: ToolProfileToken
   stickyModel: boolean
   identityMode?: IdentityModeToken
@@ -417,6 +443,26 @@ const FLAG_HANDLERS: Record<string, FlagSpec> = {
       acc.ciBotDryRun = true
     },
   },
+  "--output-format": {
+    takesValue: true,
+    // headless only (cross-checked in assertModeCombo): structured stdout contract.
+    apply: (acc, v) => {
+      if (!isValidOutputFormat(v)) {
+        throw new AgentArgsError(
+          `--output-format must be one of ${VALID_OUTPUT_FORMATS.join("|")}, got '${v}'`,
+        )
+      }
+      acc.outputFormat = v
+    },
+  },
+  "--include-partial": {
+    takesValue: false,
+    // headless only + requires --output-format json|stream-json (both cross-checked
+    // in assertModeCombo): emit streaming-delta events from the structured sink.
+    apply: (acc) => {
+      acc.includePartial = true
+    },
+  },
   "--tool-profile": {
     takesValue: true,
     apply: (acc, v) => {
@@ -525,6 +571,7 @@ export const parseAgentArgs = (argv: readonly string[]): AgentArgs => {
 const scanFlags = (argv: readonly string[]): FlagAcc => {
   const acc: FlagAcc = {
     ciBotDryRun: false,
+    includePartial: false,
     stickyModel: false,
     noAutoBackground: false,
     playbookTrigger: false,
@@ -618,6 +665,11 @@ const MODE_ONLY_GUARDS: readonly {
     requires: "headless",
     message: `-p/--prompt is only valid with --mode headless`,
   },
+  {
+    field: "outputFormat",
+    requires: "headless",
+    message: `--output-format is only valid with --mode headless`,
+  },
 ]
 
 /**
@@ -659,6 +711,21 @@ function assertModeCombo(acc: FlagAcc): asserts acc is FlagAcc & { mode: AgentMo
       throw new AgentArgsError(g.message)
     }
   }
+
+  // P26 — `--include-partial` is a boolean (default false, so it cannot ride the
+  // MODE_ONLY_GUARDS `!== undefined` check like the string flags). Validate it
+  // explicitly: (a) headless-only, and (b) only meaningful with a structured
+  // contract — milestone-vs-partial is a json/stream-json concept, so requiring
+  // `--output-format json|stream-json` keeps the flag from silently no-op'ing on
+  // the text path.
+  if (acc.includePartial) {
+    if (acc.mode !== "headless") {
+      throw new AgentArgsError(`--include-partial is only valid with --mode headless`)
+    }
+    if (acc.outputFormat !== "json" && acc.outputFormat !== "stream-json") {
+      throw new AgentArgsError(`--include-partial requires --output-format json|stream-json`)
+    }
+  }
 }
 
 /**
@@ -679,6 +746,7 @@ const OPTIONAL_SLOTS = [
   "predictions",
   "report",
   "pr",
+  "outputFormat",
   "toolProfile",
   "identityMode",
   "focusChainEvery",
@@ -688,6 +756,7 @@ const OPTIONAL_SLOTS = [
 // Boolean slots copied iff truthy (matches legacy `if (flag) out.flag = true`).
 const BOOLEAN_SLOTS = [
   "ciBotDryRun",
+  "includePartial",
   "stickyModel",
   "noAutoBackground",
   "playbookTrigger",
@@ -748,6 +817,10 @@ MODE-SPECIFIC
   --predictions <path>    batch only — JSONL predictions output path
   --report <path>         batch only — JSON report output path
   --pr <num>              ci-bot only — PR number
+  --output-format <f>     headless only — one of ${VALID_OUTPUT_FORMATS.join("|")}
+                          (text ⇒ legacy stdout; json/stream-json ⇒ machine contract)
+  --include-partial       headless only — also emit streaming-delta events
+                          (requires --output-format json|stream-json)
 
 BUDGET DIALS (operator-requested ceilings; clamped to per-mode caps)
 ${dialLines}

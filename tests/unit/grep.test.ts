@@ -79,4 +79,37 @@ describe("grepTool", () => {
   test("schema rejects missing pattern", () => {
     expect(grepTool.inputSchema.safeParse({}).success).toBe(false)
   })
+
+  test("output_mode=count returns per-file match counts", async () => {
+    // rg -c emits `path:count` rows; two files contain `needle`.
+    const { result } = await collect({ pattern: "needle", output_mode: "count" })
+    expect(result.ok).toBe(true)
+    const rows = result.output.split("\n").sort()
+    expect(rows).toContain("a.ts:1")
+    expect(rows).toContain("notes.md:1")
+  })
+
+  test("output_mode=files_with_matches returns paths only", async () => {
+    const { result } = await collect({ pattern: "needle", output_mode: "files_with_matches" })
+    expect(result.ok).toBe(true)
+    const rows = result.output.split("\n").sort()
+    expect(rows).toContain("a.ts")
+    expect(rows).toContain("notes.md")
+    // No `:line:` content rows under -l.
+    expect(result.output).not.toContain("const needle")
+  })
+
+  test("context lines (-A) include the following line", async () => {
+    const { result } = await collect({ pattern: "needle", path: "a.ts", A: 1 })
+    expect(result.ok).toBe(true)
+    // rg -A 1 emits the match then the trailing context line.
+    expect(result.output).toContain("const needle = 1")
+    expect(result.output).toContain("const other = 2")
+  })
+
+  test("case-insensitive flag matches mixed case", async () => {
+    const { result } = await collect({ pattern: "NEEDLE", i: true, path: "a.ts" })
+    expect(result.ok).toBe(true)
+    expect(result.output).toContain("const needle = 1")
+  })
 })

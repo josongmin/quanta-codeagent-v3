@@ -17,6 +17,17 @@ describe("applyFuzzyEdit", () => {
     expect(r.next).toBe("function f() {\nreturn a - b\n}")
   })
 
+  test("CRLF file: fuzzy splice preserves \\r\\n (no mixed EOL) — D6", () => {
+    // CRLF haystack, LF needle with looser whitespace → only fuzzy matches; the
+    // spliced replacement must come back CRLF, not LF (mixed-EOL corruption).
+    const src = "function f() {\r\n      return    a +  b\r\n}\r\n"
+    const r = applyFuzzyEdit(src, "return a + b", "return a - b", false)
+    expect(r.ok).toBe(true)
+    expect(r.next).toBe("function f() {\r\nreturn a - b\r\n}\r\n")
+    // No lone-LF anywhere in the result.
+    expect(/[^\r]\n/.test(r.next ?? "")).toBe(false)
+  })
+
   test("anchored-trim match reached when whitespace-flex over-collapses", () => {
     // Needle has a single internal space; file line has a double internal
     // space. normalizeLine collapses BOTH sides so whitespace-flex still

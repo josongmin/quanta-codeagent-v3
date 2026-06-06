@@ -118,6 +118,24 @@ export interface SubagentRequest {
    *  to the parent's effort, mirroring `resolveEffort`'s numeric-advisory
    *  rule). Absent ⇒ child inherits the parent's effort (byte-identical). */
   effort?: string
+  /** §20.1 (Claude/Cursor role-specialized system prompt) — EXPLICIT role
+   *  system prompt the child loop should run with, REPLACING the inherited
+   *  `parent.system`. `buildChildConfig` uses `req.system ?? parent.system`, so
+   *  absent ⇒ the child inherits the parent's identity (byte-identical). The
+   *  agent-side named-agent registry (§20.2) resolves a matching `agentType` to
+   *  a definition and threads its body in here so a forked explorer/reviewer
+   *  runs with its OWN role persona instead of the parent's. The slice itself
+   *  never reads/loads this — it only carries the field. */
+  system?: string
+  /** §20.2 — prompt MODE the named-agent definition declared (one of the
+   *  prompt-mode SSOT: `default|plan|review|audit|architect|editor`). The
+   *  agent-side runner casts + applies it onto the child config's `mode` so a
+   *  `mode: review` definition runs the child in the read-only-by-prompt
+   *  posture. The slice keeps it a `string` (it owns no `AgentMode` enum). The
+   *  registry only emits a value that already passed the SSOT membership check,
+   *  so an unrecognised mode never reaches here. Absent ⇒ child inherits the
+   *  parent's mode (byte-identical). */
+  mode?: string
 }
 
 export interface SubagentResult {

@@ -154,6 +154,70 @@ describe("readTool", () => {
     expect(readTool.inputSchema.safeParse({ path: "x", offset: 3 }).success).toBe(true)
   })
 
+  // -------------------------------------------------------------------------
+  // D8 — per-line char cap + oversized nudge (RFC jun-7 §3.3).
+  // Red-on-injection: removing the per-line cap dumps the whole 200k line, so
+  // the rendered line length assertion goes RED.
+  // -------------------------------------------------------------------------
+
+  test("a single oversized line is truncated with an elision marker (D8)", async () => {
+    const f = join(dir, "minified.js")
+    // One physical line, 200k chars — a minified bundle shape.
+    const oneLine = "x".repeat(200_000)
+    writeFileSync(f, oneLine)
+    const r = await run({ path: f })
+    expect(r.ok).toBe(true)
+    const out = r.output ?? ""
+    // The rendered content line (after the `1\t` prefix) must be capped well
+    // under the original 200k; assert the whole output is far smaller and the
+    // in-band elision marker is present.
+    expect(out.length).toBeLessThan(10_000)
+    expect(out).toContain("chars elided")
+  })
+
+  test("oversized line truncation is surrogate-safe (no split pair) (D8)", async () => {
+    const f = join(dir, "emoji.txt")
+    // Pad with single-unit chars up to one unit BEFORE the cap, then place an
+    // astral emoji (a surrogate pair) straddling the cap boundary. The cap must
+    // not slice between the high and low surrogate.
+    // We don't assume the exact cap here; instead build a line that is mostly a
+    // run of a 2-unit emoji so SOME pair lands on whatever boundary the cap
+    // chooses, then assert the rendered prefix contains no lone surrogate.
+    const emoji = "😀" // U+1F600, one surrogate pair (2 UTF-16 units)
+    const line = emoji.repeat(50_000) // 100k UTF-16 units, all pairs
+    writeFileSync(f, line)
+    const r = await run({ path: f })
+    expect(r.ok).toBe(true)
+    const out = r.output ?? ""
+    // No lone surrogate anywhere in the rendered output.
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(out)).toBe(
+      false,
+    )
+    expect(out).toContain("chars elided")
+  })
+
+  test("a large file prepends a one-line advisory nudge (D8, non-blocking)", async () => {
+    const f = join(dir, "big.txt")
+    // Many normal lines whose total size exceeds the token budget.
+    const big = `${"line of text here\n".repeat(120_000)}`
+    writeFileSync(f, big)
+    const r = await run({ path: f })
+    // Still returns content (nudge, not refuse).
+    expect(r.ok).toBe(true)
+    const out = r.output ?? ""
+    expect(out).toMatch(/large file/i)
+    // Content still present (first line numbered).
+    expect(out).toContain("1\tline of text here")
+  })
+
+  test("normal small files are byte-identical (no cap, no nudge) (D8)", async () => {
+    const f = join(dir, "small-d8.txt")
+    writeFileSync(f, "alpha\nbeta\ngamma")
+    const r = await run({ path: f })
+    expect(r.ok).toBe(true)
+    expect(r.output).toBe("1\talpha\n2\tbeta\n3\tgamma")
+  })
+
   test("a relative path resolves against ctx.cwd, not process.cwd()", async () => {
     // The file lives only under the session cwd (dir); a bare name must hit it.
     writeFileSync(join(dir, "relative-read.txt"), "from-ctx-cwd")

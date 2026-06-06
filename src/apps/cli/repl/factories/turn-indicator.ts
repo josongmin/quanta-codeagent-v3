@@ -1,53 +1,10 @@
 import type { StreamPort } from "@/stream"
 import { TeeStream } from "@/stream"
+import { buildRatelimitNoticePort } from "../../ratelimit-notice"
 import type { StatusBar } from "../../status-bar"
 import { createTurnIndicator, type TurnIndicator } from "../../turn-indicator"
 import type { CliFeatureConfig } from "../cli-feature-config"
-
-/** Bridge `AgentEvent`s into the live turn indicator. Implements `StreamPort`
- *  so it can be teed alongside the existing recorder/stdout port — the
- *  upstream emit path is unchanged (TeeStream forwards every event to every
- *  port in order) and the indicator just sips the ones it cares about.
- *
- *  Sliced taxonomy (only events that move the indicator state):
- *    - `assistant_text` / `tool_call` ⇒ `markFirstChunk` (TTFT seam — the
- *      first emit of either is the moment the model started producing
- *      something the user can see). Idempotent on the indicator side.
- *    - `output_progress` ⇒ `updateUsage` with the LIVE cumulative output count
- *      (the rising "· N tokens"). `exact` is threaded through so an estimated
- *      tail renders with a `~` prefix. This is the vendor-agnostic live feed —
- *      synthesized by the `withLiveUsage` decorator from normalized
- *      text/thinking deltas, upgraded to provider-authoritative when available.
- *    - `usage` ⇒ `updateUsage` with the cumulative token counts (authoritative;
- *      snaps the count exact at end-of-turn). Cost stays OFF for now (no
- *      per-model price table is wired at this surface; a future round can hand
- *      a `costUsd` in).
- *  Every other event is ignored — the indicator is purely a UX surface, not
- *  a trajectory recorder. Errors in the indicator are swallowed in place so
- *  a faulty render can never poison the recorder path. */
-const buildIndicatorPort = (ind: TurnIndicator): StreamPort => ({
-  emit: (event): void => {
-    try {
-      if (event.type === "assistant_text" || event.type === "tool_call") {
-        ind.markFirstChunk()
-        return
-      }
-      if (event.type === "output_progress") {
-        ind.updateUsage({ outputTokens: event.outputTokens, exact: event.exact })
-        return
-      }
-      if (event.type === "usage") {
-        ind.updateUsage({
-          inputTokens: event.inputTokens,
-          outputTokens: event.outputTokens,
-        })
-      }
-    } catch {
-      // Intentional: an indicator failure must not surface as an emit error
-      // (TeeStream would otherwise track it as a degraded record).
-    }
-  },
-})
+import { buildIndicatorPort } from "./indicator-stream-port"
 
 /** Build the (indicator, turnStream) pair for the REPL surface — extracted
  *  from `runRepl` so the host stays under biome's cognitive-complexity
@@ -56,7 +13,15 @@ const buildIndicatorPort = (ind: TurnIndicator): StreamPort => ({
  *  verbatim (no tee, no extra fan-out) so the existing recorder + stdout
  *  port path is byte-identical to the pre-indicator code. `intervalMs`
  *  is clamped to a finite positive integer; a bad env value (`abc`, `-5`)
- *  falls back to the 80 ms default. */
+ *  falls back to the 80 ms default.
+ *
+ *  P27 — when `featureCfg.ratelimitNotice.enabled` (default-OFF
+ *  `QUANTA_RATELIMIT_NOTICE`), the rate-limit notice port is teed onto the
+ *  SAME `statusBar` so a `ratelimit_snapshot` event paints a transient quota
+ *  notice. The two gates are independent: the tee is allocated when EITHER the
+ *  indicator OR the notice is on. When BOTH are off, `turnStream === stream`
+ *  verbatim (no tee, byte-identical to the pre-P27 path). The notice port's own
+ *  emit swallows render errors, so it never poisons the recorder leg. */
 export const buildTurnIndicatorAndStream = (
   featureCfg: CliFeatureConfig,
   statusBar: StatusBar,
@@ -64,6 +29,19 @@ export const buildTurnIndicatorAndStream = (
 ): { indicator: TurnIndicator; turnStream: StreamPort } => {
   const { enabled, intervalMs } = featureCfg.turnIndicator
   const indicator = createTurnIndicator({ statusBar, enabled, intervalMs })
-  if (!enabled) return { indicator, turnStream: stream }
-  return { indicator, turnStream: new TeeStream([stream, buildIndicatorPort(indicator)]) }
+
+  // Collect the surface ports to tee alongside the upstream recorder/stdout
+  // stream. Order is preserved by TeeStream (the upstream `stream` stays first
+  // so its observers see every event before any UX surface).
+  const extraPorts: StreamPort[] = []
+  if (enabled) extraPorts.push(buildIndicatorPort(indicator))
+  // Optional-chained: a feature config assembled before P27 (or a partial test
+  // stub) has no `ratelimitNotice` block ⇒ treated as OFF (no tee), preserving
+  // the byte-identical default-OFF contract.
+  if (featureCfg.ratelimitNotice?.enabled === true) {
+    extraPorts.push(buildRatelimitNoticePort(statusBar))
+  }
+
+  if (extraPorts.length === 0) return { indicator, turnStream: stream }
+  return { indicator, turnStream: new TeeStream([stream, ...extraPorts]) }
 }

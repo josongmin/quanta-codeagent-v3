@@ -75,13 +75,20 @@ import type { LLMPort, Message } from "@/llm"
 import type { Role } from "@/llm/role-model-override"
 import { isGitRepo, withWorktree } from "@/runtime"
 import { QuantaError, runtimeConfig } from "@/shared"
-import { SubagentTurnGate, type TurnWakeRegistry } from "@/subagent"
+import {
+  type AgentMetaRegistry,
+  assignNickname,
+  SubagentTurnGate,
+  type TurnWakeRegistry,
+} from "@/subagent"
 import { ToolRegistry } from "@/tool"
 import type { SubagentRequest, SubagentResult, SubagentRunner } from "../subagent/types"
 import { isAllowed as isConfirmAllowed, normalizeConfirm } from "./confirm-decision"
 import { buildLeaderHitlBroker, type LeaderEscalationDecider } from "./coordination-broker-wire"
 import { type EffortLevel, parseEffort } from "./effort"
 import { runAgent } from "./loop"
+import type { NamedAgentDefinition, NamedAgentResolver } from "./named-agent-registry"
+import type { AgentMode } from "./prompt"
 import type { AgentConfig, AgentOutcome } from "./types"
 
 const DEFAULT_MAX_DEPTH = 3
@@ -349,6 +356,74 @@ const buildSeedPrompt = (req: SubagentRequest): string => {
 }
 
 /**
+ * §20.1/§20.2 — resolve the named-agent definition for this spawn (if any) and
+ * fold it into an EFFECTIVE request. A definition is consulted ONLY when the
+ * parent wired a `namedAgentResolver` AND `req.agentType` matches a loaded
+ * definition; otherwise the original `req` is returned unchanged (the
+ * byte-identical default-OFF path — no resolver, or no match).
+ *
+ * Precedence is EXPLICIT-REQUEST-WINS for every field (a caller's explicit
+ * value always beats the definition's default — mirrors `taskKind`/`toolFilter`):
+ *   - `system`     ← `req.system ?? def.system`
+ *   - `toolFilter` ← `req.toolFilter ?? def.tools`   (narrow-only, see below)
+ *   - `model`      ← `req.model ?? def.model`
+ *   - `mode`       ← `req.mode ?? def.mode`
+ *
+ * SECURITY (tool widening — the crux): `def.tools` is REPO-CONTROLLED and is
+ * carried ONLY as the spawn's `toolFilter`. `buildChildConfig` feeds that into
+ * `filterRegistry(parent.registry, toolFilter)`, which INTERSECTS the names
+ * against the PARENT registry's `specs()` (`allow.has(name)`). So a definition
+ * naming a tool the parent never granted yields a child registry WITHOUT it —
+ * the named definition can only NARROW, never widen. This function performs no
+ * grant of its own.
+ */
+const applyNamedAgent = (parent: AgentConfig, req: SubagentRequest): SubagentRequest => {
+  // Read the resolver via a structural accessor so this slice compiles whether
+  // or not the (parent-owned) `AgentConfig.namedAgentResolver?: NamedAgentResolver`
+  // field has landed yet — EMIT-BLOCK in the report adds it. No field ⇒
+  // `undefined` ⇒ byte-identical default-OFF.
+  const resolver = (parent as { namedAgentResolver?: NamedAgentResolver }).namedAgentResolver
+  if (resolver === undefined || req.agentType === undefined || req.agentType.length === 0) {
+    return req
+  }
+  const def: NamedAgentDefinition | undefined = resolver.resolve(req.agentType)
+  if (def === undefined) return req
+  // Explicit-request-wins on every field; the definition only supplies a
+  // default for fields the caller left absent. `toolFilter` rides through
+  // `filterRegistry` (intersection ⇒ narrow-only) so `def.tools` can never widen.
+  return {
+    ...req,
+    ...(req.system === undefined ? { system: def.system } : {}),
+    ...(req.toolFilter === undefined && def.tools !== undefined ? { toolFilter: def.tools } : {}),
+    ...(req.model === undefined && def.model !== undefined ? { model: def.model } : {}),
+    ...(req.mode === undefined && def.mode !== undefined ? { mode: def.mode } : {}),
+  }
+}
+
+/** §20.1 — pick the child's role system prompt. `req.system` (set by an
+ *  explicit caller OR a matched named-agent definition via `applyNamedAgent`)
+ *  REPLACES the inherited `parent.system`; absent ⇒ `parent.system`
+ *  (byte-identical). Extracted so the ternary lives outside `buildChildConfig`'s
+ *  cognitive-complexity budget. */
+const resolveChildSystem = (parent: AgentConfig, req: SubagentRequest): string =>
+  req.system !== undefined && req.system.length > 0 ? req.system : parent.system
+
+/** §20.2 — pick the child's prompt `mode`. A named-agent definition's `mode:`
+ *  (folded into `req.mode`) overrides the inherited parent mode; absent ⇒ the
+ *  child inherits `parent.mode` exactly as before (byte-identical). `req.mode`
+ *  is a SSOT-validated string (the registry's `normalizeMode` only emits an
+ *  `AGENT_PROMPT_MODES` member), so the narrowing cast carries no runtime risk.
+ *  Returns a spread fragment so an absent mode omits the key entirely (honors
+ *  exactOptionalPropertyTypes). */
+const resolveChildMode = (
+  parent: AgentConfig,
+  req: SubagentRequest,
+): Pick<AgentConfig, "mode"> | Record<string, never> => {
+  if (req.mode !== undefined && req.mode.length > 0) return { mode: req.mode as AgentMode }
+  return parent.mode !== undefined ? { mode: parent.mode } : {}
+}
+
+/**
  * Capability B (multi-agent coordination) — wire the leader-mediated escalation
  * broker onto the CHILD's admissibility bundle. DEFAULT-OFF: returns `{}` (no
  * `admissibility` slot ⇒ byte-identical legacy child) UNLESS `QUANTA_TEAM_BROKER`
@@ -411,6 +486,33 @@ const maybeRegisterChildTeam = (parent: AgentConfig, childLabel: string): void =
   }
 }
 
+/** §20.3 — record a DISPLAY nickname for a freshly-spawned child in the host's
+ *  `AgentMetaRegistry` side-table (the `list_agents` label source, keyed by the
+ *  registry TASK id `rec.id`). The child's STABLE id stays the ordinal mailbox
+ *  label (`root/0`); the nickname is a human-friendly maestro name
+ *  DETERMINISTICALLY derived from that STABLE mailbox id via `assignNickname`
+ *  (FNV-1a seed ⇒ same id always maps to the same name, so a recorded session
+ *  re-mints identical labels). Prefers an explicit `agentType` (more
+ *  informative) over the nickname, falling back to the nickname so an un-typed
+ *  child shows "Karajan" instead of a bare description prefix. No-op when the
+ *  host did not wire `subagentAgentMeta`, OR the spawn has no registry `taskId`
+ *  to key on (foreground/legacy path) ⇒ byte-identical (the meta table stays
+ *  empty exactly as before and `list_agents` keeps its `agentType`/description
+ *  fallback). This is the wiring that turns `assignNickname` from dead code into
+ *  the live display path. */
+const recordChildNickname = (
+  agentMeta: AgentMetaRegistry | undefined,
+  taskId: string | undefined,
+  mailboxAgentId: string,
+  depth: number,
+  agentType: string | undefined,
+): void => {
+  if (agentMeta === undefined || taskId === undefined || taskId.length === 0) return
+  const nickname = assignNickname(mailboxAgentId)
+  const label = agentType !== undefined && agentType.length > 0 ? agentType : nickname
+  agentMeta.set(taskId, { depth, label })
+}
+
 /** Construct the CHILD {@link AgentConfig} by shallow-cloning `parent` and
  *  applying the subagent overrides (see the override table in the report).
  *  `store`/`hooks`/`metrics`/`run`/`sessionId`/`memory` are DROPPED so a child
@@ -422,12 +524,17 @@ const maybeRegisterChildTeam = (parent: AgentConfig, childLabel: string): void =
  *  checkpointPath / resultShape) augmentation rules. */
 const buildChildConfig = (
   parent: AgentConfig,
-  req: SubagentRequest,
+  rawReq: SubagentRequest,
   cwd: string,
   mailboxIds: { agentId: string; parentId: string },
   toolNamespace?: ToolNamespaceStrategy,
   turnGate?: SubagentTurnGate,
 ): AgentConfig => {
+  // §20.1/§20.2 — fold a matching named-agent definition into the request
+  // (system / toolFilter / model / mode), explicit-request-wins. No resolver or
+  // no match ⇒ `req === rawReq` (byte-identical). `def.tools` only ever NARROWS
+  // (it rides `toolFilter` → `filterRegistry` intersection).
+  const req = applyNamedAgent(parent, rawReq)
   const seed: Message[] = [
     { role: "user", content: [{ type: "text", text: buildSeedPrompt(req) }] },
   ]
@@ -450,6 +557,10 @@ const buildChildConfig = (
   // into a non-ok SubagentResult.
   const childLlm = resolveChildLlm(parent, req)
   const childEffort = resolveChildEffort(req)
+  // §20.1 — the child's role system prompt: an explicit caller `req.system` OR a
+  // matched named-agent definition (folded into `req.system` by
+  // `applyNamedAgent`); absent ⇒ inherit `parent.system` (byte-identical).
+  const childSystem = resolveChildSystem(parent, req)
   // Shallow clone, then strip the inheritance-unsafe keys. We rebuild the
   // object explicitly (rather than `delete`) to satisfy
   // exactOptionalPropertyTypes: omit keys entirely, never assign `undefined`.
@@ -459,7 +570,9 @@ const buildChildConfig = (
     stream: parent.stream,
     permission: parent.permission,
     messages: seed,
-    system: parent.system,
+    // §20.1 — role-specialized system prompt (see `resolveChildSystem`). Absent
+    // override ⇒ `parent.system` (byte-identical to pre-§20.1).
+    system: childSystem,
     cwd,
     maxTurns: req.budget?.maxTurns ?? parent.maxTurns,
     // Child abort is composed from BOTH the parent loop's signal and the
@@ -516,7 +629,11 @@ const buildChildConfig = (
     // mutating tools at dispatch — if the child collapses to `default`, a
     // review-posture parent could spawn a child that writes. Verify/closeout
     // guards and HITL 4-tier are also safety contracts the child must honor.
-    ...(parent.mode !== undefined ? { mode: parent.mode } : {}),
+    // §20.2 — a named-agent definition's `mode:` (folded into `req.mode` by
+    // `applyNamedAgent`, already validated against the prompt-mode SSOT) sets the
+    // child's posture; absent ⇒ inherit the parent's mode (byte-identical). The
+    // SSOT membership check happened registry-side, so the cast is contract-safe.
+    ...resolveChildMode(parent, req),
     ...(parent.verifyGuard !== undefined ? { verifyGuard: parent.verifyGuard } : {}),
     ...(parent.closeoutGuard !== undefined ? { closeoutGuard: parent.closeoutGuard } : {}),
     ...(parent.hitl !== undefined ? { hitl: parent.hitl } : {}),
@@ -598,6 +715,18 @@ export const createSubagentRunner = (
     // cross-team deny applies. No-op when `teamPeerMsg` is off (no registry) or
     // the parent is un-teamed (byte-identical default-OFF).
     maybeRegisterChildTeam(parent, mailboxIds.agentId)
+
+    // §20.3 — record this child's display nickname in the host's AgentMeta
+    // side-table (keyed by the registry task id). Deterministically seeded from
+    // the STABLE mailbox id so `list_agents` shows a friendly maestro name.
+    // No-op without `subagentAgentMeta` or a `taskId` (byte-identical).
+    recordChildNickname(
+      parent.subagentAgentMeta,
+      req.taskId,
+      mailboxIds.agentId,
+      req.depth,
+      req.agentType,
+    )
 
     // id is sanitized by withWorktree's safeId; depth+prompt make it
     // human-traceable while staying within the worktree-name charset.

@@ -1,3 +1,4 @@
+import { detectEol } from "./eol"
 import { applyExactEdit, type EditOutcome } from "./exact"
 import { inAnyRange, type LineRange } from "./line-range"
 
@@ -22,9 +23,18 @@ const filterSpansByRange = (
 /** Collapse internal whitespace runs to a single space and trim the ends. */
 const normalizeLine = (line: string): string => line.trim().replace(/\s+/g, " ")
 
-const splitLines = (s: string): string[] => s.split("\n")
+/** Split into lines for COMPARISON, dropping the EOL terminator (`\r?\n`) so a
+ *  CRLF file's `"foo\r"` reduces to `"foo"`. The original terminator is NOT
+ *  stored on the line — the splice phase re-emits the file's detected EOL (D6).
+ *  Splitting on `\n` only (the pre-fix behaviour) left a trailing `\r` on every
+ *  CRLF line that the rungs' `.trim()` then stripped, so a matched window was
+ *  re-joined LF and neighbours stayed CRLF = mixed-EOL corruption. */
+const splitLines = (s: string): string[] => s.split(/\r?\n/)
 
-/** Rebuild `lines`, replacing the [span) window with `repl`'s own lines. */
+/** Rebuild `lines`, replacing the [span) window with `repl`'s own lines. The
+ *  model's `repl` arrives LF-delimited; we split it the same EOL-agnostic way
+ *  so the eventual `join(eol)` (in {@link applyWindows}) normalizes the whole
+ *  result — including the spliced-in region — to the file's native terminator. */
 const spliceLines = (lines: string[], span: LineSpan, repl: string): string[] => {
   const before = lines.slice(0, span.start)
   const after = lines.slice(span.end)
@@ -101,7 +111,10 @@ const applyWindows = (
     outcome: {
       ok: true,
       message: `Replaced ${count} occurrence(s) via ${strategy} match`,
-      next: next.join("\n"),
+      // Join with the file's native EOL so a uniform CRLF file stays CRLF and a
+      // uniform LF file stays LF (D6) — the comparison phase dropped the
+      // terminator, this is the single place it is restored.
+      next: next.join(detectEol(source)),
     },
   }
 }
@@ -225,7 +238,8 @@ const tryScoredCandidate = (
     outcome: {
       ok: true,
       message: `Replaced 1 occurrence(s) via scored-candidate best match (exact-anchor ${best.score} > ${runnerUp.score})`,
-      next: next.join("\n"),
+      // Native-EOL join (D6): keep the file uniform after the splice.
+      next: next.join(detectEol(source)),
     },
   }
 }

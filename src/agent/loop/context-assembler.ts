@@ -1,4 +1,5 @@
 import type { Message } from "@/llm"
+import { resolveModelWindow } from "@/llm"
 import type { WorkingMemory } from "@/memory"
 import { errMessage, runtimeConfig } from "@/shared"
 import type { TaskBudget } from "../budget"
@@ -210,6 +211,14 @@ export const prepareTurnContext = async (
   hookPromptInjects: readonly HookPromptInject[] | undefined,
   taskSpend: { tokens: number } | undefined,
   bgController: BackgroundSummarizationController<BgSummaryPayload> | undefined,
+  // D5 (jun-7) — the per-session token-baseline BOX. `current` (set by the prior
+  // turn's exact usage) anchors this turn's compaction trigger; `undefined` ⇒
+  // chars/4 estimate (legacy, byte-identical). After compaction settles we
+  // record `sendCount` = the wm length of the prompt about to be sent, so the
+  // usage capture can pair it with the provider's authoritative input count.
+  tokenBaselineBox:
+    | { current?: import("../compaction").TokenBaseline; sendCount?: number }
+    | undefined,
 ): Promise<{
   readonly ctx: ReturnType<typeof buildTurnContext>
   readonly breakerVerdict: BreakerVerdict
@@ -224,7 +233,12 @@ export const prepareTurnContext = async (
     turn,
     bgController,
     resetEffortClassifier,
+    tokenBaselineBox?.current,
   )
+  // Record the send-time wm length AFTER compaction settled — this is the base
+  // the NEXT turn's compaction will slice, and the count the usage capture pairs
+  // with the authoritative `inputTokens` for this prompt.
+  if (tokenBaselineBox !== undefined) tokenBaselineBox.sendCount = wm.snapshot().length
   const wsSnapshot = workingState?.snapshot()
   const contextEvents = resolveContextEventsForTurn(config)
   const mentionMessages = await resolveMentionInjectionMessages(config, wm)
@@ -284,7 +298,10 @@ export const emitPromptAssembled = (
       repoRulesPresent: policy.repoRulesPresent,
       sessionCtxPresent: policy.sessionCtxPresent,
       userAppendPresent: policy.userAppendPresent,
-      max: 0,
+      // D4 (jun-7) — the model's real context window (or 0 for an un-tabled
+      // model, the surface's "unknown" sentinel), so the usage gauge is
+      // window-relative instead of always reporting 0.
+      max: resolveModelWindow(configuredModel(config.llm))?.contextWindow ?? 0,
       model: configuredModel(config.llm),
     })
   } catch (e) {

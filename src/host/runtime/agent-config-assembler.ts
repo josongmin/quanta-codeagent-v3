@@ -118,8 +118,17 @@ export type AssemblerEnv = Record<string, string | undefined>
 export interface HeadlessExtras {
   /** Single prompt for one-shot execution. */
   prompt: string
-  /** When `"json"`, stream as structured events instead of plain stdout. */
-  output?: "text" | "json"
+  /** P26 — headless stdout contract (CLI `--output-format`):
+   *    • `"text"` / absent ⇒ legacy human stdout (byte-identical default),
+   *    • `"json"` ⇒ one well-formed top-level JSON value (an array of the
+   *      session-protocol events) flushed at run end,
+   *    • `"stream-json"` ⇒ one versioned NDJSON `SessionEvent` line per event.
+   *  The legacy `"json"` callers keep working (the union is a superset). */
+  output?: "text" | "json" | "stream-json"
+  /** P26 — when true, the `json`/`stream-json` sink ALSO emits streaming-delta
+   *  (partial assistant-text) events. Absent ⇒ milestone events only (the small,
+   *  stable default machine contract). No effect on `text`. */
+  includePartial?: boolean
 }
 
 export interface BatchExtras {

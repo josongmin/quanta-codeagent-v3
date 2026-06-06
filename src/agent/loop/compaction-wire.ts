@@ -15,7 +15,7 @@ import { buildPostCompactEmit, buildPreCompactHook } from "../loop-helpers"
 import { buildTurnContext } from "../prompt"
 import { createEvictionSpillPort, microcompactToolResults } from "../tool-result-evict"
 import type { AgentConfig } from "../types"
-import { emitRecovery, objectiveBudgetExhausted } from "./emit-helpers"
+import { configuredModel, emitRecovery, objectiveBudgetExhausted } from "./emit-helpers"
 
 // ──────────────────────────────────────────────────────────────────────────
 // RFC jun-6-microcompaction — tier-1 tool-result eviction (a CHEAPER FIRST tier
@@ -110,6 +110,10 @@ export const maybeCompact = async (
   turn: number,
   bgController: BackgroundSummarizationController<BgSummaryPayload> | undefined,
   resetClassifier: (classifier: AgentConfig["effortClassifier"]) => void,
+  // D5 (jun-7) — the authoritative input-token baseline captured by the prior
+  // turn's `exact` provider usage. `undefined` on turn-1 / before any exact
+  // usage ⇒ the trigger uses the chars/4 estimate (legacy, byte-identical).
+  tokenBaseline: import("../compaction").TokenBaseline | undefined,
 ): Promise<BreakerVerdict> => {
   if (!config.compaction) return { abort: false }
   const verdict = breaker?.check() ?? { abort: false }
@@ -132,7 +136,12 @@ export const maybeCompact = async (
     snapshot = [...wm.snapshot()]
     before = wm.tokenTotal?.() ?? estimateTokens(snapshot)
   }
-  const bgLimitTokens = resolveCompactionLimitTokens(config.compaction?.thresholdTokens)
+  // D4 (jun-7 naive-impl hardening) — the bg-controller ceiling must match the
+  // synchronous proactive path's model-derived threshold, so pass the same model.
+  const bgLimitTokens = resolveCompactionLimitTokens(
+    config.compaction?.thresholdTokens,
+    configuredModel(config.llm),
+  )
   const borrowed =
     bgController !== undefined
       ? await bgController.reconcileAtTurnBoundary({
@@ -170,6 +179,12 @@ export const maybeCompact = async (
         llm: config.compaction.summarizerLlm ?? config.llm,
         system,
         isFirstCompaction,
+        // D4 — model-derived threshold (known model ⇒ window−reserve−margin;
+        // unknown ⇒ 120k legacy). D5 — authoritative-baseline trigger when the
+        // loop captured an `exact` usage (absent ⇒ chars/4 over the whole
+        // transcript, byte-identical legacy).
+        model: configuredModel(config.llm),
+        ...(tokenBaseline !== undefined ? { tokenBaseline } : {}),
         ...(config.compaction.thresholdTokens !== undefined
           ? { thresholdTokens: config.compaction.thresholdTokens }
           : {}),

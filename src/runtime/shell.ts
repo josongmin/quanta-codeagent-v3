@@ -1,11 +1,19 @@
 import { escalatingKill, withSpawnedChild } from "./guarded-spawn"
 import { applyLocalEnv } from "./local-env"
 import { withProxyEnv } from "./network-proxy"
+import { defaultPpidWalkKiller } from "./process-tree"
 import { DEFAULT_ENV_ALLOWLIST, scrubEnv } from "./sandbox"
 import { getShellSandbox } from "./shell-sandbox-holder"
 import type { RunShellEvent, ShellOptions, ShellResult } from "./types"
 
 const DEFAULT_TIMEOUT_MS = 120_000
+
+/** D1 — the whole-tree killer for foreground shells. Module-level singleton:
+ *  the adapter is pure (it only reads the process table + signals on each
+ *  `signalTree` call, no state), so one instance serves every `runShell`. On
+ *  abort/timeout this reaps the `bash → child → grandchild` tree instead of
+ *  leaking the grandchildren (legacy single-PID `proc.kill()`). */
+const FOREGROUND_TREE_KILLER = defaultPpidWalkKiller()
 
 /**
  * Typed sandbox-application status for a single `runShell` invocation (T08 —
@@ -208,7 +216,7 @@ export const runShell = async (
   // SIGTERM→SIGKILL escalation: a child that traps/ignores SIGTERM is force-
   // killed after KILL_GRACE_MS. `disarm` clears the grace timer; we call it in
   // the guard's `cleanup` so it cannot leak past the child's lifetime.
-  const { kill, disarm } = escalatingKill(proc)
+  const { kill, disarm } = escalatingKill(proc, FOREGROUND_TREE_KILLER)
   const onAbort = () => {
     if (abortReason === null) abortReason = "user_abort"
     kill()

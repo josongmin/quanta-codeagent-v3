@@ -47,6 +47,38 @@ const classifyFsError = (e: unknown, path: string): ToolResult | null => {
   return null
 }
 
+/** Per-line character cap (D8). A single minified-bundle line can be megabytes;
+ *  unpageable (offset/limit are line-based, so it is all "line 1") and it
+ *  floods the context window. We cap each RENDERED line and mark the elision
+ *  in-band. 2000 matches Claude Code's `Read` per-line truncation budget — a
+ *  line longer than this is almost always machine-generated, and 2000 chars is
+ *  ample to recognise the line + pivot to `grep`/`offset`. */
+const MAX_LINE_CHARS = 2000
+
+/** Soft oversized-file budget (D8). When a file's estimated token footprint
+ *  (chars/4 — same coarse proxy the rest of the agent uses for display) exceeds
+ *  this, we PREPEND a non-blocking advisory nudging the model toward
+ *  offset/limit or grep. We still return the content — this is advice, not a
+ *  refusal (workflow must not break). 25000 tokens (~100k chars) is the point
+ *  past which a whole-file dump meaningfully crowds the working context. */
+const OVERSIZED_NUDGE_TOKENS = 25_000
+
+/** Truncate `line` to at most `MAX_LINE_CHARS` code units WITHOUT splitting a
+ *  UTF-16 surrogate pair, appending an in-band elision marker that reports how
+ *  many code units were dropped. If the cap would land between a high and low
+ *  surrogate we back off one unit so the pair stays intact (surrogate-safe per
+ *  the repo's truncation guard). Short lines pass through verbatim. */
+const truncateLine = (line: string): string => {
+  if (line.length <= MAX_LINE_CHARS) return line
+  let cut = MAX_LINE_CHARS
+  // A high surrogate (U+D800..U+DBFF) at the last kept position has its low
+  // partner just past the cut — back off one unit to keep the pair whole.
+  const lastKept = line.charCodeAt(cut - 1)
+  if (lastKept >= 0xd800 && lastKept <= 0xdbff) cut -= 1
+  const elided = line.length - cut
+  return `${line.slice(0, cut)} … (+${elided} chars elided)`
+}
+
 /** Render the line-numbered slice for an `ok:true` read. Extracted so
  *  `execute` stays under the lint complexity gate (the typed-failure catches
  *  raised the in-line branch count beyond 15). Pure: no I/O, no schema. */
@@ -56,10 +88,18 @@ const renderReadOk = (text: string, offset: number | undefined, limit: number): 
   const end = Math.min(lines.length, start + limit)
   const numbered = lines
     .slice(start, end)
-    .map((line, i) => `${start + i + 1}\t${line}`)
+    // D8: cap each rendered line so one giant (minified) line can't flood the
+    // context. Truncation is surrogate-safe and marks the elision in-band.
+    .map((line, i) => `${start + i + 1}\t${truncateLine(line)}`)
     .join("\n")
   const note = end < lines.length ? `\n… (${lines.length - end} more lines, use offset)` : ""
-  return numbered === "" ? "(empty file)" : numbered + note
+  const body = numbered === "" ? "(empty file)" : numbered + note
+  // D8 soft nudge: a large file gets a one-line advisory PREPENDED (non-blocking
+  // — content still follows). Estimated via chars/4, the agent's coarse proxy.
+  if (text.length / 4 > OVERSIZED_NUDGE_TOKENS) {
+    return `… (large file — prefer offset/limit or grep to avoid flooding context)\n${body}`
+  }
+  return body
 }
 
 /** B5 device guard — classify a FIFO / char-device / block-device target into a

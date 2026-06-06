@@ -70,6 +70,120 @@ export const providerCredentialKind = (provider: LlmProvider): ProviderCredentia
 export const providerCredentialSource = (provider: LlmProvider): ProviderCredentialSource =>
   PROVIDER_CREDENTIALS[provider].source
 
+// ── D4 (jun-7 naive-impl hardening) — model→context-window SSOT ──────────────
+//
+// The compaction threshold used to be a single model-blind `120_000` constant
+// (`@/agent/compaction.DEFAULT_THRESHOLD`) and the usage snapshot hardcoded
+// `max:0` ("unknown window"). On a 1M-window model that compacts at 12% of the
+// window; on a 32k model it never triggers and the provider rejects first. This
+// table is the SSOT the compaction threshold + the status-line denominator
+// derive from.
+//
+// Plane-clean: still imports ONLY `provider-types`. Values are from PUBLIC
+// model specs (dated below). UNKNOWN model id ⇒ `resolveModelWindow` returns
+// `undefined` and every caller falls back to the legacy `120_000` path
+// (signal-presence gates — no global knob), so an un-tabled model is
+// byte-identical to the pre-D4 behavior.
+
+/**
+ * Context-window facts for a single model id, in TOKENS.
+ *  - `contextWindow` — total input+output budget the provider accepts.
+ *  - `maxOutput`     — the max tokens the model can GENERATE in one response;
+ *                      we reserve this from the window when deriving the
+ *                      compaction threshold (so a compaction never leaves too
+ *                      little room for the model to finish its reply).
+ */
+export interface ModelWindow {
+  readonly contextWindow: number
+  readonly maxOutput: number
+}
+
+/**
+ * Model id → {@link ModelWindow}. Keyed by the EXACT provider model slug the
+ * repo sends (`DEFAULT_MODEL` in `@/llm/factory` + the model-swap / role-
+ * override candidates). An un-listed model degrades safely (legacy 120k) — see
+ * {@link resolveModelWindow}. Closed-ish: adding a new default model SHOULD add
+ * its window here, but a miss is non-fatal.
+ *
+ * Sources (PUBLIC specs, retrieved 2026-06-07):
+ *   - Anthropic Claude models reference (docs.anthropic.com/en/docs/about-
+ *     claude/models): Claude 3/3.5/3.7/4 family = 200_000 token context.
+ *     Sonnet 4 supports a 1M-token beta context (`context-1m-2025-08-07`).
+ *     Max output: Opus 4 = 32_000; Sonnet 4 = 64_000; Haiku 3.5 = 8_192.
+ *   - OpenAI models reference (platform.openai.com/docs/models): GPT-5 family
+ *     = 400_000 context / 128_000 max output; GPT-4o = 128_000 / 16_384;
+ *     o-series reasoning (o1/o3) = 200_000 / 100_000.
+ */
+export const MODEL_CONTEXT_WINDOWS: Record<string, ModelWindow> = {
+  // ── Anthropic (200k window family) ──
+  "claude-opus-4-6": { contextWindow: 200_000, maxOutput: 32_000 },
+  "claude-opus-4-8": { contextWindow: 200_000, maxOutput: 32_000 },
+  "claude-opus-4": { contextWindow: 200_000, maxOutput: 32_000 },
+  "claude-sonnet-4-6": { contextWindow: 200_000, maxOutput: 64_000 },
+  "claude-sonnet-4-5": { contextWindow: 200_000, maxOutput: 64_000 },
+  "claude-sonnet-4": { contextWindow: 200_000, maxOutput: 64_000 },
+  "claude-3-7-sonnet": { contextWindow: 200_000, maxOutput: 64_000 },
+  "claude-3-5-sonnet": { contextWindow: 200_000, maxOutput: 8_192 },
+  "claude-3-5-haiku": { contextWindow: 200_000, maxOutput: 8_192 },
+  "claude-haiku-4-5": { contextWindow: 200_000, maxOutput: 8_192 },
+  // ── Anthropic 1M-token beta context (Sonnet) ──
+  "claude-sonnet-4-6-1m": { contextWindow: 1_000_000, maxOutput: 64_000 },
+  "claude-sonnet-4-5-1m": { contextWindow: 1_000_000, maxOutput: 64_000 },
+  // ── OpenAI GPT-5 family (400k window) ──
+  "gpt-5": { contextWindow: 400_000, maxOutput: 128_000 },
+  "gpt-5-mini": { contextWindow: 400_000, maxOutput: 128_000 },
+  "gpt-5-nano": { contextWindow: 400_000, maxOutput: 128_000 },
+  "gpt-5-pro": { contextWindow: 400_000, maxOutput: 128_000 },
+  "gpt-5-codex": { contextWindow: 400_000, maxOutput: 128_000 },
+  // ── OpenAI GPT-4o (128k window) ──
+  "gpt-4o": { contextWindow: 128_000, maxOutput: 16_384 },
+  "gpt-4o-mini": { contextWindow: 128_000, maxOutput: 16_384 },
+  // ── OpenAI o-series reasoning (200k window) ──
+  o1: { contextWindow: 200_000, maxOutput: 100_000 },
+  "o3-mini": { contextWindow: 200_000, maxOutput: 100_000 },
+}
+
+/**
+ * Provider-FAMILY fallback windows, keyed by a substring of the model id. Used
+ * by {@link resolveModelWindow} when the exact id is not in
+ * {@link MODEL_CONTEXT_WINDOWS} (e.g. a dated `-20250514` suffix or a future
+ * point release). CONSERVATIVE: the smallest reasonable window + output for the
+ * family, so a fallback never OVER-estimates the budget (which would push
+ * compaction too late). Order matters — first match wins, so the longest /
+ * most-specific prefixes are listed first.
+ */
+const MODEL_FAMILY_FALLBACKS: ReadonlyArray<readonly [string, ModelWindow]> = [
+  ["claude-opus", { contextWindow: 200_000, maxOutput: 32_000 }],
+  ["claude-sonnet", { contextWindow: 200_000, maxOutput: 64_000 }],
+  ["claude-haiku", { contextWindow: 200_000, maxOutput: 8_192 }],
+  ["claude-3", { contextWindow: 200_000, maxOutput: 8_192 }],
+  ["claude", { contextWindow: 200_000, maxOutput: 8_192 }],
+  ["gpt-5", { contextWindow: 400_000, maxOutput: 128_000 }],
+  ["gpt-4o", { contextWindow: 128_000, maxOutput: 16_384 }],
+]
+
+/**
+ * Resolve a model id to its {@link ModelWindow}. Precedence:
+ *   1. EXACT id in {@link MODEL_CONTEXT_WINDOWS};
+ *   2. provider-FAMILY fallback (substring match in {@link MODEL_FAMILY_FALLBACKS})
+ *      — handles dated/suffixed slugs (`claude-opus-4-8-20260101`) and future
+ *      point releases without a table edit;
+ *   3. `undefined` — an unknown provider/model; the caller falls back to the
+ *      legacy 120k threshold (byte-identical pre-D4 path).
+ *
+ * Pure leaf — no I/O, no globals. The empty string / `"unknown"` sentinel the
+ * loop uses for a test double returns `undefined` (no family match).
+ */
+export const resolveModelWindow = (model: string): ModelWindow | undefined => {
+  if (model === "") return undefined
+  const exact = MODEL_CONTEXT_WINDOWS[model]
+  if (exact !== undefined) return exact
+  for (const [needle, window] of MODEL_FAMILY_FALLBACKS) {
+    if (model.includes(needle)) return window
+  }
+  return undefined
+}
+
 /** The closed set of spellings we accept as a truthy boolean env value. We
  *  accept the four the user community uses and reject everything else —
  *  including the empty string, `"0"`, `"false"`, and arbitrary numbers (`"2"`

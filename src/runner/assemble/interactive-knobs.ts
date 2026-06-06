@@ -37,6 +37,7 @@
 import type { AgentConfig } from "@/agent"
 import type { AnyKnob, ApplyContext, Surface } from "@/runner/knobs"
 import { advisorKnob } from "@/runner/knobs/knobs/advisor"
+import { closeoutCriticKnob } from "@/runner/knobs/knobs/closeout-critic"
 import { closeoutGuardKnob } from "@/runner/knobs/knobs/closeout-guard"
 import { composeAuthoringKnob } from "@/runner/knobs/knobs/compose-authoring"
 import { gitDirectiveKnob } from "@/runner/knobs/knobs/git-directive"
@@ -66,6 +67,12 @@ const INTERACTIVE_KNOBS: readonly AnyKnob[] = [
   // is already consumed by the loop (buildGitDirectiveEmit + per-turn flush);
   // this knob just reaches the live cli/agent surfaces.
   gitDirectiveKnob as AnyKnob,
+  // QUANTA_CLOSEOUT_CRITIC — second-opinion critic at turn closeout (P12). Folds
+  // `cfg.closeoutCritic.enabled = true`; its `apply` MERGES so a DI-supplied
+  // `critic` port (wired at the composition root by `wireCloseoutCritic` BEFORE
+  // this fold) is preserved. Knob ON without a port ⇒ the loop fails open. The
+  // knob's own apply surface-guards to [cli, agent-batch, agent-interactive].
+  closeoutCriticKnob as AnyKnob,
 ]
 
 /** The minimum the three knobs' `apply` read off the config: `advisor` and

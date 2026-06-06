@@ -37,6 +37,7 @@ import type { BudgetLedger } from "./budget-ledger"
 import type { CapEnforcer } from "./cap-enforcer"
 import type { GranularRegistryPort } from "./checkpoint/granular-registry"
 import type { CheckpointTriggerMode, DestructivenessOracle } from "./checkpoint-policy"
+import type { CloseoutCriticConfig } from "./closeout-critic"
 import type { ConfirmDecision } from "./confirm-decision"
 import type { ConversationActionPort } from "./conversation-action"
 import type { ConversationCheckpointStore } from "./conversation-checkpoint"
@@ -52,6 +53,7 @@ import type { HandoffRequiredEvent } from "./hitl-tier"
 import type { HookBus } from "./hooks"
 import type { IdeContextProvider } from "./ide-context"
 import type { LocalizePhaseConfig, LocalizePhaseState } from "./localize-phase-guard"
+import type { NamedAgentResolver } from "./named-agent-registry"
 import type { ObjectivePort } from "./objective"
 import type { PlanStore } from "./plan/state"
 import type { PlanExitOutcome } from "./plan-exit"
@@ -449,6 +451,27 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * See {@link WorkingStateBlock} for the field-level docs.
    */
   workingState?: WorkingStateBlock
+  /** §19.1 (jun-7 gap-other-agent) — honor a TRUSTED MCP server's
+   *  `ToolAnnotations` (readOnly/idempotent hints) when deriving bridged-tool
+   *  `isReadOnly`/`isConcurrencySafe` predicates. Knob `QUANTA_MCP_TOOL_ANNOTATIONS`.
+   *  The composition root reads it into `loadMcpTools` opts (`annotationsHonored`);
+   *  the per-server `McpServerConfig.trusted` flag is the second gate. Absent ⇒
+   *  every MCP tool stays mutating/non-concurrency-safe (byte-identical). */
+  mcpToolAnnotations?: boolean
+  /** §20.2 (jun-7 gap-other-agent) — host-wired named-agent resolver. The
+   *  subagent runner consults this when a spawn carries a matching `agentType`
+   *  and folds the resolved definition's `{system, tools, model, mode}` into the
+   *  child (narrow-only tools, explicit-request-wins). Absent ⇒ no named-agent
+   *  resolution and the spawn path is byte-identical. Host builds it via
+   *  `loadNamedAgents(cwd)`. */
+  namedAgentResolver?: NamedAgentResolver
+  /** P12 (jun-7 gap-other-agent) — closeout critic gate. Absent ⇒ OFF and the
+   *  loop's completion seal is byte-identical. When `enabled` AND `critic`
+   *  injected, the loop consults the critic right before sealing a completed
+   *  turn; the verdict surfaces as an advisory `recovery`/`closeout` event and
+   *  NEVER blocks completion. Port absent / critic throws ⇒ FAIL-OPEN. Knob:
+   *  `QUANTA_CLOSEOUT_CRITIC`. */
+  closeoutCritic?: CloseoutCriticConfig
   /** HITL 4-tier gate (Codex hitl-audit.md absorption). Absent ⇒ legacy
    *  single-tier behavior (byte-identical). When enabled, every dispatch
    *  computes the effective tier and routes through tier-specific gates:
@@ -2158,6 +2181,9 @@ export interface SafetyConfig {
   localizePhase?: LocalizePhaseConfig
   localizePhaseState?: LocalizePhaseState
   closeoutGuard?: { enabled?: boolean; fourRule?: boolean }
+  /** P12 — closeout critic gate (mirrors `closeoutGuard` placement on both
+   *  AgentConfig and SafetyConfig). See AgentConfig.closeoutCritic. */
+  closeoutCritic?: CloseoutCriticConfig
   dedupGate?: DedupGate
   dedupGateConfig?: { disabled?: boolean; caps?: Partial<DedupGateCaps> }
 }

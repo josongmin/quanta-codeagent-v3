@@ -217,4 +217,23 @@ export interface TurnState {
    * enforcement `BudgetMeter` (orthogonality contract). Absent ⇒ no
    * accumulation, no forward, byte-identical default-OFF. */
   taskSpend?: { tokens: number }
+  /**
+   * D5 (jun-7 naive-impl hardening) — authoritative token-baseline box. The
+   * loop OVERWRITES `current` after every turn whose provider `usage` reported
+   * an `exact` input count (authoritative ≥ chars/4 estimate), recording the
+   * count + the `messages.length` at send time. `maybeCompact` reads it so the
+   * NEXT turn's compaction trigger anchors on the provider's truth + a chars/4
+   * estimate of ONLY the suffix appended since. Allocated ONCE per session
+   * (spread into every turn's TurnState). `current` undefined ⇒ no baseline ⇒
+   * the trigger uses the legacy chars/4 estimate (byte-identical). The box is
+   * ALWAYS allocated (no knob): the field only takes effect once an exact usage
+   * lands, and absent that the trigger is byte-identical. */
+  tokenBaseline?: {
+    current?: import("./compaction").TokenBaseline
+    /** The `wm.snapshot().length` recorded by `prepareTurnContext` for the
+     *  prompt about to be sent (after this turn's compaction settled). The
+     *  usage capture pairs it with the provider's authoritative `inputTokens`
+     *  to form `current`. Undefined until the first turn is prepared. */
+    sendCount?: number
+  }
 }

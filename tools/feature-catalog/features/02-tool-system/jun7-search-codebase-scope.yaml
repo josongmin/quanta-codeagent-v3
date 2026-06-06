@@ -27,6 +27,7 @@ purpose: |
 evidence:
   code:
     - src/tool/search-codebase/index.ts
+    - src/runner/assemble/search-pipeline.ts
   adrs: []
   tests:
     unit:

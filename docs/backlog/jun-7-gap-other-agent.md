@@ -3,6 +3,24 @@
 > **출처**: `.extracted_source/` 코퍼스 — Claude Desktop 1.0.734 · Claude Code CLI 2.1.150 (`claude-code-cli/_cli-symbols.txt`) · Codex Desktop 3390 / codex-rs 0.135 (`codex/_codex-rs-0.135-symbols.txt`) · Codex CLI 0.133 (`codex-cli/`) · Cursor 3.5.33 (`cursor/out/vs/workbench/workbench.desktop.main.js`) · userdata configs.
 > **방법**: 12바퀴 적대 검증(7 claim-verify + 5 신규영역). 각 항목 경쟁사 소스(파일:심볼/라인) ↔ quanta 소스(파일:라인) **field-by-field 대조**. "같은 이름 심볼 = covered" 핸드웨이브 금지 — grep으로 부재 확인.
 
+## ✅ Wave R 랜딩 (jun-7) — 비겹침 나머지 5 slice 구현완료
+
+사용자가 고-ROI Wave 1-4(grep/glob·MCP annotations+image·subagent identity·stdout-json·ratelimit·verify-gate)를 직접 가져갔고, **파일 충돌 없는 나머지 leaf 5개를 SOTA++ + 3x 적대검증으로 구현**:
+
+| slice | 갭 | 상태 | 파일 |
+|---|---|---|---|
+| R1 | §21.5 search_codebase `scope` directory filter | **LANDED** | `src/tool/search-codebase/index.ts` |
+| R2 | §22.2 Skill `$ARGUMENTS`/`$N` 템플릿 | **LANDED** | `src/skill/skill-tool.ts` |
+| R3 | §23.3 `/version`·`/release-notes` | **LANDED** | `src/apps/cli/version-cmd.ts`+`repo-info.ts` |
+| R4 | §23.4 `/bug` → prefilled GitHub issue URL | **LANDED** | `src/apps/cli/bug-cmd.ts` |
+| R5 | §23.5 per-model cost breakdown | **LANDED** | `src/apps/cli/cost-panel.ts` |
+
+**3x 적대검증서 실버그 2개 잡고 구조수정**: F1=skill `$ARGUMENTS`→`$N` 이중치환(chained replace 재스캔)→single-pass 정규식. F3=`QUANTA_REPO_URL` 스킴검증 없음→https-only 폴백. 둘 다 red-on-injection 회귀테스트 박음. 포스처: correctness-fix는 default-ON, 전부 "absent 입력→byte-identical" 불변식 테스트. fc 4 entry(`jun7-*`) 등록, tsc0/biome0/회귀0.
+
+**나머지(아직 deferred — 사용자 wave 파일군과 충돌)**: §19.2/19.4/19.5(MCP client.ts), §20.4(subagent-runner.ts), §23.2(ratelimit 렌더러), §22.3(reverse-MCP). 사용자 wave land 후 그 위에서 additive.
+
+---
+
 ## ⚠️ 정직한 흡수율 (이전 "90%"는 과대평가)
 
 근거로 ~45개 claim 깊이 검증:
@@ -39,7 +57,7 @@
 | # | GAP | 카테고리 | 비용 | 임팩트 |
 |---|---|---|---|---|
 | P11 | shell 출력 ANSI/control-char strip 없음(`bash/index.ts:281`) | Shell-IO | **저(pure fn)** | 중-고(colored CLI 흔함) |
-| P12 | closeout-triggered critic gate(부품 다 있음, 배선만) | Verify | 저-중 | 고 |
+| P12 | closeout-triggered critic gate(부품 다 있음, 배선만) — **LANDED ✅** (`src/agent/closeout-critic.ts` closed-port `CloseoutCritic`+fail-open `runCloseoutCritic` / `loop/recovery-executor.ts` 두 completed 봉인지점 `maybeRunCloseoutCritic` / knob `QUANTA_CLOSEOUT_CRITIC` default-OFF. reviewer는 DI 포트로만, 포트 absent⇒fail-open, denied verdict는 기존 `recovery`/`closeout` 이벤트로 advisory surface·완료 차단 안 함. OFF/포트-absent⇒await 전 sync 단락 byte-identical) | Verify | 저-중 | 고 |
 | P13 | per-model context-window 비례 compaction(고정120k, model-blind) | Efficiency | 중 | 중-고(토큰) |
 | P14 | 과긴 단일라인 truncation 없음(`read/index.ts:53`) | IO | 저 | 중 |
 | P15 | UTF-16/BOM 감지(UTF-16을 binary로 오분류) | Encoding | 중 | 중(Windows 고) |
@@ -581,20 +599,23 @@
 
 > quanta **네이티브** 도구 계약은 경쟁사보다 우위(9-arm `ToolFailure` 유니언·`nextAction` cap·`criticalSection`/`interruptBehavior`·image/document result block). 갭은 전부 **MCP ingestion** — 서버가 보낸 프로토콜 richness를 quanta가 버림.
 
-### 19.1 [NEW-GAP] MCP `ToolAnnotations`(readOnly/destructive/idempotent/openWorldHint) ingestion서 드롭 — HIGH-ROI
+### 19.1 [LANDED ✅] MCP `ToolAnnotations`(readOnly/destructive/idempotent/openWorldHint) ingestion서 드롭 — HIGH-ROI
 - **경쟁사**: Codex `struct ToolAnnotations with 5 elements`(`_codex-rs-0.135-symbols.txt`); Claude CLI readOnlyHint×4/destructiveHint×3/idempotentHint×2/openWorldHint×3; Cursor MCP dist 동일 4개.
 - **quanta**: `src/mcp/client.ts:77-82` `RawTool`이 `{name,description,inputSchema}`만 narrow — `annotations` 미파싱. `src/agent/mcp-bridge.ts:87-88`이 **모든 MCP 도구를 `isReadOnly:()=>false, isConcurrencySafe:()=>false` 하드코딩**. `annotations` grep 0.
 - **델타**: 모든 MCP 도구가 mutating+non-concurrency-safe 취급 → `readOnlyHint:true` 서버 도구가 read-only 병렬배치 못 타고 `always-confirm` HITL로 잘못 default(`inferToolTier`). **quanta 전 permission/concurrency 머신이 isReadOnly/isConcurrencySafe/hitlTier로 동작하는데 MCP엔 상수 거짓.** 4 hint→기존 ToolCore predicate 매핑은 작은 adapter 변경. **ROI 고(보안+병렬).**
+- **구현**: `McpToolAnnotations` 타입(`types.ts`) + `sanitizeAnnotations`(boolean-ONLY lift, poison `"true"`/`1`/`{}`/`null` 드롭)가 `RawTool.annotations`→`McpToolDef.annotations` 파싱(`client.ts`+`isolated-client.ts` 양쪽). 브리지 `annotationPredicates`가 **TRUST GATE** 하에 매핑: `honored = QUANTA_MCP_TOOL_ANNOTATIONS knob ON && McpServerConfig.trusted===true`; `isReadOnly = honored && readOnlyHint===true`; `isConcurrencySafe = isReadOnly && idempotentHint!==false`. **annotations는 trusted+knobOn에서만 ELEVATE; 절대 downgrade 안 함**. untrusted/knobOff/poison/absent ⇒ `false/false` byte-identical. knob=`mcp-tool-annotations`(`AgentConfig.mcpToolAnnotations`). hellgate(red-on-injection): untrusted+`readOnlyHint:true`→`isReadOnly()===false`, knobOff(trusted여도)→false, poison string→false. 13 bridge + 14 parse 테스트.
 
 ### 19.2 [NEW-GAP] MCP `structuredContent` + result `_meta` `tools/call`서 폐기
 - **경쟁사**: Codex `struct CallToolResult with 4 elements`=content/structuredContent/isError/_meta; Claude structuredContent×30/outputSchema×63; Cursor ×15/×13.
 - **quanta**: `src/mcp/client.ts:91-93` `ToolsCallResult`이 `{content?,isError?}`만; `:161-165` `joinTextBlocks`가 text만. structuredContent/_meta grep 0. 네이티브 `ToolResult.structured`+`outputSchema` seam(`types.ts:889`)은 있으나 MCP에 미배선.
 - **델타**: 서버의 typed structured payload 무음 드롭. **ROI 중**(네이티브 structured는 deprecated-그룹이라 내부 수요 낮으나 MCP interop엔 lossy).
 
-### 19.3 [NEW-GAP] 비-텍스트 MCP content block(image/audio/resource/resource_link) 결과서 드롭 — image HIGH
+### 19.3 [LANDED ✅] 비-텍스트 MCP content block(image/audio/resource/resource_link) 결과서 드롭 — image HIGH
 - **경쟁사**: Codex `RawImageContent`/`RawAudioContent`/`RawEmbeddedResource`/`resource_link`; Claude `audio`×9/`resource_link`×6.
 - **quanta**: `src/mcp/client.ts:161-165` `joinTextBlocks`가 `type==="text"`만 → image/audio/resource 전부 폐기. `ContentBlock`(`:87-90`)은 `{type,text?}`만.
 - **델타**: 스크린샷/오디오/embedded resource 반환하는 MCP 도구가 빈/부분 출력. **네이티브 `ToolResult.images`/`documents`(`types.ts:931,942`)는 이미 모델에 plumb** — MCP→ToolResult 매핑만 안함. **image ROI 고(렌더 쪽 이미 완성).**
+- **구현**: `ContentBlock`을 `{type,text?,data?,mimeType?,resource?}`로 확장 + `extractMedia`(`client.ts`, 양 클라이언트 재사용)가 `image`(data+mimeType)→`McpMediaBlock{kind:"image"}`, embedded `resource`(blob+mimeType)→`{kind:"resource"}`. `McpCallResult.media?` OPTIONAL(텍스트-only면 omit ⇒ byte-identical). 브리지 `mediaToResultFields`가 **네이티브 vision 도구와 동일 안전**: image는 base64-decode→**5MB cap(`READ_IMAGE_MAX_BYTES` 재사용)**→**magic-byte sniff(`sniffMediaType`, 서버 거짓 mimeType 무시)**; over-cap/unrecognized/bad-base64는 SKIP+정직 마커(crash 없음), 검증바이트 재인코딩→`ToolResult.images`. resource→`ToolResult.documents`. audio는 아직 미매핑(`type`만 추가, 별 follow-up). hellgate: oversized→skip+marker(no crash), 거짓 mimeType+비이미지→skip, valid PNG→magic-byte로 `image/png`(서버 lying `image/jpeg` 덮어씀).
+- **남은(아직 미구현)**: §19.2(`structuredContent`/`_meta`)는 본 슬라이스 범위 밖 — 여전히 OPEN. audio content block plumb도 OPEN(`ToolResult`에 audio sink 부재).
 
 ### 19.4 [PARTIAL] MCP progress(`notifications/progress`) bridge 없음
 - **경쟁사**: Claude progressToken×5/notifications/progress×5/ProgressToken×13; Cursor progressToken×12.
@@ -614,20 +635,23 @@
 
 > quanta는 subagent **plumbing**(coordination/mailbox/depth/model-override/owned-forbidden/nickname-pool)은 두꺼우나 **identity/specialization은 얇음** — child가 항상 `parent.system` 상속, agentType은 display-label-only.
 
-### 20.1 [NEW-GAP] role-specialized SYSTEM PROMPT 없음 — HIGH-ROI
+### 20.1 [LANDED ✅] role-specialized SYSTEM PROMPT 없음 — HIGH-ROI
 - **경쟁사**: Claude 각 agent type이 자체 `getSystemPrompt`+전문 시스템프롬프트(`_cli-symbols.txt:124846-124868` general-purpose/local-agent/guide); Cursor `SubagentType{Explore,Debug,Bash,ComputerUse,BrowserUse,VmSetupHelper,…}`(`cursor-agent-exec/dist/main.js:28915-29096`) 각 distinct posture; Codex role file이 role별 non-empty `developer_instructions` 강제(`:6217`).
 - **quanta**: `src/agent/subagent-runner.ts:461` `buildChildConfig`가 `system:parent.system`. `SubagentRequest`(`src/subagent/types.ts`)에 `system`/`developer_instructions` 필드 **없음**. 유일 전문 프롬프트는 내부 `reviewer-subagent.ts:33`(non-selectable).
 - **델타**: 모든 subagent가 부모 identity로 실행 — explorer에 read-only-research 페르소나, reviewer에 critique 페르소나 줄 방법 없음. `SubagentRequest`에 optional `system` 추가 + `buildChildConfig`서 `parent.system` 대체, default-OFF byte-identical. **ROI 고(역할위임 실제 작동의 핵심).**
+- **구현**: `SubagentRequest`에 optional `system?`/`mode?` 추가(`src/subagent/types.ts`; `model?`은 ADR-0451서 기존). `buildChildConfig`가 `resolveChildSystem(parent,req)`=`req.system??parent.system` 사용(`src/agent/subagent-runner.ts`) — `req.system` absent ⇒ child.system===parent.system byte-identical. 명시 caller OR 매칭 named-agent def(§20.2)이 system 주입. hellgate `tests/unit/subagent/named-agent-spawn-hellgate.test.ts`(NAS-SYS/EXPLICIT/NORES/NOMATCH/SYSABS/MODE) + fc `subagent-role-identity.yaml`.
 
-### 20.2 [NEW-GAP] named agent definitions 런타임 로드 안됨(write-only)
+### 20.2 [LANDED ✅] named agent definitions 런타임 로드 안됨(write-only)
 - **경쟁사**: Claude `.claude/agents/*.md`(when_to_use/tools/disallowedTools/permissionMode/mcpServers/maxTurns/model/color, `_cli-symbols.txt:124846`); Codex agent-role TOML(layered load + 중복탐지 `:6202-6232`).
 - **quanta**: `src/migration/external-config/convert.ts:245`이 `.claude/agents/<name>.md` **read** + `persist.ts:427`이 `.quanta/agents/<name>.md` **write** — 단 **런타임서 `.quanta/agents/*.md` 로드 안함**(`readdir.*agents`/`loadAgentDefinition`/`namedAgentRegistry`/`resolveAgentType` grep 0).
 - **델타**: 경쟁사 agent 파일 ingest하나 named agent 인스턴스화 불가. agent_type→{system,tools,model,mode} registry 없음. converter(producer)는 이미 있음 — 런타임 loader+registry만. **20.1과 같은 seam**(로드된 .md body가 곧 전문 system prompt). **ROI 고.**
+- **구현**: NEW `src/agent/named-agent-registry.ts` — `loadNamedAgents(cwd)`가 `.quanta/agents/*.md`(PERSIST 목적지)+`.claude/agents/*.md`(Claude parity) 로드, **converter와 동일한 `@/skill#parseFrontmatter` 재사용**(파서 중복 없음), `Map<agentType,{system,tools?,model?,mode?}>`+`resolve()` 구축. 런너 `applyNamedAgent(parent,req)`가 `AgentConfig.namedAgentResolver`(structural 접근)서 매칭 agentType → `{system,toolFilter,model,mode}` fold(explicit-request-wins). **SECURITY(tool widening)**: def.tools는 repo-controlled → `toolFilter`로만 타고 `filterRegistry` INTERSECTION(parent 부여 surface와 교집합) ⇒ NARROW-only, 절대 widen 불가(NAS-WIDEN red-on-injection 증명: parent에 bash 無 → def `tools:[bash]` 요청해도 child에 bash 無). symlink 거부+64KB body cap+256 file cap. 無 dir ⇒ empty registry byte-identical. loader hellgate `tests/unit/agent/named-agent-registry.test.ts`(NAR-01~09).
 
-### 20.3 [NEW-GAP] nickname pool DEAD CODE(미배선)
+### 20.3 [LANDED ✅] nickname pool DEAD CODE(미배선)
 - **경쟁사**: Codex per-thread `agent_nickname`+`agentRole` persist(`:7694,4731`), role별 `nickname_candidates`(`:6206`), 2-4단어 `agent_namer`.
 - **quanta**: `src/subagent/nicknames.ts` 39-name maestro pool+`assignNickname`/`nextSequentialNickname` — **자체 테스트 외 호출 0**. 실 spawn은 ordinal `root/0`,`root/1`(`subagent-runner.ts:591`). display label은 `agentType??prompt.slice(0,40)`.
 - **델타**: pool(+FNV-1a seeding) 만들고 미배선. `assignNickname(mailboxId)`를 `registry.register`에 몇 줄. **built-but-unwired, ROI 저-중(observability).**
+- **구현**: `recordChildNickname`(`src/agent/subagent-runner.ts`)이 spawn마다 `assignNickname(STABLE mailboxId)` → host `AgentMetaRegistry`(=`list_agents` label source, `req.taskId` 키)에 DISPLAY label write. STABLE id는 ordinal `root/0` 유지(불변), nickname은 거기서 deterministic 파생(FNV-1a, clock/uuid 無 → recorded session 동일 재생). `agentType` 우선(더 informative), 無이면 nickname fallback. `assignNickname`을 `@/subagent` barrel서 export(dead→live). `subagentAgentMeta` 無 OR `taskId` 無 ⇒ no-op byte-identical. hellgate NAS-NICK/NICK-OFF/deterministic.
 
 ### 20.4 [PARTIAL] owned/forbidden surfaces advisory-only(미enforce) + role 정책테이블 미커플
 - **경쟁사**: Codex role `filesystem subpath`/`glob` access **enforce**(deny-default subtree, `:6228`).
@@ -662,7 +686,7 @@
 - **quanta**: `src/tool/glob/index.ts:55-74` — `Bun.Glob().scan({dot:false})`가 **`.gitignore` 미존중** → `node_modules/`/`dist/` 반환(300-entry cap을 junk가 먹음); `hits.sort()` alphabetical(mtime 아님 — 최근수정 파일 묻힘).
 - **델타**: gitignore 존중(또는 post-filter) + mtime sort. **ROI 중-고(cap 낭비/관련성).**
 
-### 21.5 [NEW-GAP] search_codebase directory scoping 없음
+### 21.5 [LANDED jun-7 Wave R] search_codebase directory scoping
 - **경쟁사**: Cursor `codebase_search`/`grep_search` `target_directories`(×8).
 - **quanta**: `src/tool/search-codebase/index.ts:26-39` `{query,k}`만 — path/scope 파라미터 없음(엔진 `src/retrieval/`은 강한데). "src/auth/ 안에서만 semantic-search" 불가, 전체 검색 후 필터.
 - **델타**: 도구 표면에 scope 1 필드(엔진은 이미 지원). **ROI 중.**
@@ -675,12 +699,13 @@
 
 > quanta 확장성 강함(in-process hook bus + shell command-hooks + skills-as-commands + plugin loader + migration importer). 갭은 좁음: stdout JSON output + `$ARGUMENTS` 템플릿 + reverse-MCP. (quanta는 Claude Agent SDK 하네스 **안**서 돌아 일부 SDK 기능 N/A.)
 
-### 22.1 [NEW-GAP] `--output-format stream-json`(stdout) 없음 — HIGH-ROI(keystone)
+### 22.1 [LANDED ✅] `--output-format stream-json`(stdout) — HIGH-ROI(keystone)
 - **경쟁사**: Claude `--print`/`-p`+`--output-format json|stream-json`+`--input-format`+`--include-partial`+`--replay-user-messages` — SDK/CI consumer용 stdout 메시지 envelope.
 - **quanta**: `src/host/runtime/agent-args.ts:131` `--mode headless -p`는 있으나 `--output-format` **없음**. `src/apps/headless/index.ts:132`는 FakeLlm 테스트 하네스. NDJSON sink(`ndjson-wire.ts:100`)는 TCP port/file 타겟(introspection firehose)지 stdout consumer 계약 아님. **`SessionEvent`(`src/protocol/session/events.ts:125`)+codec은 이미 완비** — stdout writer만 없음.
 - **델타**: `quanta -p "..." --output-format stream-json | jq` 가 아무것도 안 줌. CI/script/SDK consumer 못붙음. **ROI 고(작은 wire, 큰 unlock — headless+output-format 갭이 한 fix로 합쳐짐).**
+- **구현**: 새 `src/apps/agent/mode-presets/stream-json-sink.ts` — `StreamPort`를 구현한 `StreamJsonSink`가 각 `AgentEvent`를 `SessionEvent`로 매핑하고 **이미 완성된 `encodeSessionEvent` 코덱을 그대로 재사용**(`{version:"session.v1",kind:"event",payload}` 봉투, bespoke 인코딩 없음). `stream-json`=이벤트당 1줄 NDJSON, `json`=끝에 단일 최상위 JSON 배열로 flush. partial/delta(`assistant_text`→`turn.output.delta`)는 `--include-partial`일 때만. 사람용 최종답변은 `logger`(stderr-bound)로 가 stdout 머신 컨트랙트를 오염 안 함. headless 프리셋(`mode-presets/headless.ts`)이 `req.headless.output`을 읽어 sink를 mint+cfg.stream 주입+json finalize. `HeadlessExtras`(`agent-config-assembler.ts`)에 `output:"text"|"json"|"stream-json"`+`includePartial` 확장. 기본/`text`=stdout byte-identical(default-OFF). 테스트: `stream-json-sink.test.ts`(11) + `headless-stream-json-e2e.test.ts`(6) = 17 신규, jq 파이프라인 exit-0 실증. **CLI arg 파싱 경로(`agent-args.ts` 파서·`agent-arg-builder.ts` `AssembleRequestPartial`·`index.ts` `applyModeSpecificRequestFields`)는 PARENT-OWNED이라 EMIT로 위임**(아래 패치 스펙).
 
-### 22.2 [NEW-GAP] custom command `$ARGUMENTS`/`$1` 템플릿 없음
+### 22.2 [LANDED jun-7 Wave R] custom command `$ARGUMENTS`/`$1` 템플릿
 - **경쟁사**: Claude `.claude/commands/*.md` `$ARGUMENTS`/`$1`/`$2` positional 치환.
 - **quanta**: skill이 command 표면(`src/skill/discover.ts:119` allowed-tools/argument-hint/model/userInvocable 파싱은 패리티) 단 `$ARGUMENTS`/`$1` 치환 없음(grep 0) — argument-hint는 descriptive-only, skill body verbatim 주입.
 - **델타**: parameterized prompt-command 불가. frontmatter scaffold는 있음, invocation서 interpolation 패스만. **ROI 중.**
@@ -702,24 +727,25 @@
 
 > quanta 예상보다 강함 — `/cost`(tokens/duration/$/per-turn)·`/usage`·`/context`(segmented window%)·`/status`·`/doctor`·`/help` 다 있음. **`/init`도 present**(`src/skill/system-skills/init/SKILL.md` — 스카우팅 오보고 정정). 갭은 usage-LIMIT 투명성·release-notes·feedback에 집중.
 
-### 23.1 [NEW-GAP] usage-limit "approaching limit · resets" UX — HIGH-ROI(데이터 있음, 미렌더)
+### 23.1 [LANDED ✅] usage-limit "approaching limit · resets" UX — HIGH-ROI(데이터 있음, 미렌더)
 - **경쟁사**: Claude `_cli-symbols.txt` — `You're close to your ${usage limit}`/`Approaching ${_} · resets ${O}`, rateLimitType별 라벨(weekly/session/Opus/Sonnet); Codex `RateLimitSnapshot{limit_name,primary,secondary,credits,plan_type,rate_limit_reached}`+`RateLimitWindow{used_percent,window_minutes,resets_at}`.
 - **quanta**: snapshot **파싱은 함**(`src/llm/ratelimit-snapshot/parse.ts`,`notice.ts:13`) 단 proactive backoff에만 씀(`policy.ts:27`), notice **렌더 안됨** — `src/stream/adapters/stdout.ts:151`이 `ratelimit_snapshot` 명시적 **무시**("a richer surface renders it" — 근데 그 surface 없음, render grep 0).
 - **델타**: "한도 X%"·"approaching · resets Y"·소진 전 경고 없음. **데이터 이미 캡처됨 — status-line/spinner 렌더러+임계값만. ROI 고.**
+- **구현 (P27, jun-7)**: `src/apps/cli/ratelimit-notice.ts` (신규 closed StreamPort) — `ratelimit_snapshot` 이벤트를 status-bar transient notice("⚠ 한도 reached · resets 3h")로 렌더. **surface 결정은 새 percent 도입 0 — 슬라이스가 이미 계산한 REACHED 신호(empty-window predicate `remaining <= 0`, `policy.ts::proactiveDelayMs`가 backoff 도출하는 바로 그 신호) 재사용**. gate=`QUANTA_RATELIMIT_NOTICE`(DEFAULT-OFF, knob `ratelimit-notice`), OFF면 port 미설치→`stdout.ts:151` 빈 case byte-identical. malformed/partial(NaN/neg/missing)은 슬라이스 parser가 graceful-skip→무페인트; throwing statusBar는 try/catch로 swallow(tee isolation). 배선: `cli-feature-config.ts`(`ratelimitNotice.enabled`)+`repl/factories/turn-indicator.ts`(TeeStream 합류, indicator gate와 독립). 테스트 26: `ratelimit-notice-hellgate`(16)+`ratelimit-notice-wire-hellgate`(5)+`ratelimit-notice-knob`(3)+`ratelimit-snapshot-stdout-ignore-hellgate`(2). fc=`ratelimit-snapshot-render`. (남은 §23.2 quota-exhausted graceful UX는 error-path 한정, deferred.)
 
 ### 23.2 [PARTIAL] quota-exhausted graceful UX
 - **경쟁사**: Claude typed reset-time 메시지.
 - **quanta**: error-path만(`src/agent/error-routing/types.ts:21` `usageLimitExceeded — Fatal` → abort), "소진, HH:MM 리셋" 표시 없음. **ROI 중.**
 
-### 23.3 [NEW-GAP] release-notes / version 표시
+### 23.3 [LANDED jun-7 Wave R] release-notes / version 표시
 - **경쟁사**: Claude `/release-notes`+`What's new` 패널+`VERSION`.
 - **quanta**: `/release-notes`/`/version`/`/changelog` 없음(grep 0), `QUANTA_VERSION="0"` 하드코딩 placeholder(`session-cmd.ts:92`) 미surface, `--version` 없음. **ROI 저-중(`/version`은 cheap).**
 
-### 23.4 [NEW-GAP] `/bug` feedback + first-run welcome
+### 23.4 [LANDED jun-7 Wave R] `/bug` feedback (first-run welcome는 deferred)
 - **경쟁사**: Claude `/bug`+Submit Feedback flow; first-run welcome/trust dialog.
 - **quanta**: `/bug`/`/feedback` 없음(grep 0); first-run/welcome/banner 없음. **ROI 저**(quanta는 hosted product 아니라 `/bug`→GitHub issue URL이 cheap analog).
 
-### 23.5 [PARTIAL] per-model cost breakdown + unified `/config`
+### 23.5 [LANDED jun-7 Wave R] per-model cost breakdown (unified `/config`는 deferred)
 - **경쟁사**: Claude "Usage by model"(model별 input/output/cacheRead/$); `/config`(×93).
 - **quanta**: `src/apps/cli/cost-panel.ts:42` single `model`(last-writer) — heterogeneous-model 세션이 마지막 model로 collapse. `/config` 없음(`/knobs`/`/color`/`/profile` piecemeal). **ROI 중(`Map<model,bucket>`)/저(`/config`).**
 

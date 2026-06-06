@@ -41,10 +41,14 @@ describe("globTool", () => {
     expect(globTool.isConcurrencySafe({ pattern: "*" })).toBe(true)
   })
 
-  test("matches top-level files and returns sorted relative paths", async () => {
+  test("matches files and returns relative paths (rg glob semantics)", async () => {
+    // NOTE (engine swap): under ripgrep `-g` semantics a bare `*.ts` glob
+    // matches a basename at ANY depth (it is the gitignore-style glob Claude /
+    // Cursor use), unlike Bun.Glob's top-level-only `*.ts`. Order is mtime-DESC
+    // now, so compare set-wise.
     const r = await run({ pattern: "*.ts" })
     expect(r.ok).toBe(true)
-    expect(r.output).toBe("a.ts\nb.ts")
+    expect(r.output.split("\n").sort()).toEqual(["a.ts", "b.ts", join("src", "nested", "deep.ts")])
   })
 
   test("recursive ** pattern reaches nested files", async () => {

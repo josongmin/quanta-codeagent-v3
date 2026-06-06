@@ -338,10 +338,39 @@ function applyHunkInPlace(
     )
   }
 
-  const { index, tier } = locateBlock(workLines, oldBlock, hunk.endOfFile, path, hunkIdx)
+  const { index, tier } = locateBlock(
+    workLines,
+    oldBlock,
+    hunk.endOfFile,
+    hunk.contextHeader,
+    path,
+    hunkIdx,
+  )
   // Splice oldBlock.length lines out at matchIndex, splice newBlock in.
   workLines.splice(index, oldBlock.length, ...newBlock)
   return tier
+}
+
+/**
+ * D7 — resolve the `@@ <header>` jump anchor to a search-floor index.
+ *
+ * Returns the index of the line JUST AFTER the LAST line whose trimmed text
+ * equals the trimmed header, so the subsequent block search is scoped to the
+ * region following that anchor (Codex's `@@ class Foo` jump semantics). When the
+ * header is absent OR matches no line we return `0` — a whole-file search,
+ * byte-identical to the pre-D7 behaviour (STRICTLY ADDITIVE). We match the LAST
+ * occurrence so a header like `@@ class B {` jumps past an earlier `class A`
+ * body that may coincidentally share lines.
+ */
+function resolveAnchorFloor(workLines: string[], contextHeader: string | undefined): number {
+  if (contextHeader === undefined) return 0
+  const needle = contextHeader.trim()
+  if (needle === "") return 0
+  let floor = 0
+  for (let i = 0; i < workLines.length; i++) {
+    if ((workLines[i] ?? "").trim() === needle) floor = i + 1
+  }
+  return floor
 }
 
 /**
@@ -362,12 +391,19 @@ function locateBlock(
   workLines: string[],
   oldBlock: string[],
   endOfFile: boolean,
+  contextHeader: string | undefined,
   path: string,
   hunkIdx: number,
 ): { index: number; tier: FuzzyTier } {
+  // The EOF anchor is trailing-aligned (single candidate position), so a `@@`
+  // jump header cannot further constrain it — leave that path untouched.
   if (endOfFile) return locateEofBlock(workLines, oldBlock, path, hunkIdx)
 
-  const exact = locateAtTier(workLines, oldBlock, /*trimmed*/ false, "exact", path, hunkIdx)
+  // D7: when an `@@ <header>` is present, scope the tier search to lines after
+  // the header. Absent / unmatched header ⇒ floor 0 ⇒ whole-file (byte-ident).
+  const floor = resolveAnchorFloor(workLines, contextHeader)
+
+  const exact = locateAtTier(workLines, oldBlock, /*trimmed*/ false, "exact", floor, path, hunkIdx)
   if (exact !== null) return { index: exact, tier: "exact" }
 
   const trimmed = locateAtTier(
@@ -375,6 +411,7 @@ function locateBlock(
     oldBlock,
     /*trimmed*/ true,
     "whitespace-tolerant",
+    floor,
     path,
     hunkIdx,
   )
@@ -431,10 +468,11 @@ function locateAtTier(
   oldBlock: string[],
   trimmed: boolean,
   tierLabel: string,
+  floor: number,
   path: string,
   hunkIdx: number,
 ): number | null {
-  const hits = findAllMatches(workLines, oldBlock, trimmed)
+  const hits = findAllMatches(workLines, oldBlock, trimmed, floor)
   if (hits.length === 0) return null
   if (hits.length > 1) {
     throw new PatchApplyError(
@@ -447,11 +485,17 @@ function locateAtTier(
   return idx ?? null
 }
 
-/** All indices where `oldBlock` matches in `workLines`. */
-function findAllMatches(workLines: string[], oldBlock: string[], trimmed: boolean): number[] {
+/** All indices >= `floor` where `oldBlock` matches in `workLines`. `floor` is
+ *  the D7 anchor search-floor (0 = whole file). */
+function findAllMatches(
+  workLines: string[],
+  oldBlock: string[],
+  trimmed: boolean,
+  floor: number,
+): number[] {
   const hits: number[] = []
   const last = workLines.length - oldBlock.length
-  for (let i = 0; i <= last; i++) {
+  for (let i = floor; i <= last; i++) {
     if (matchesAt(workLines, oldBlock, i, trimmed)) hits.push(i)
   }
   return hits

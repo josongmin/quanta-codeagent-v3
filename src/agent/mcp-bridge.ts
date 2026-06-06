@@ -1,4 +1,5 @@
 import { z } from "zod"
+import type { DocumentBlock, ImageBlock } from "@/llm"
 import {
   type CapabilityNegotiator,
   clientTasksPort,
@@ -6,6 +7,7 @@ import {
   McpClient,
   type McpClientTransport,
   McpError,
+  type McpMediaBlock,
   type McpOAuthProviderPort,
   McpReconnectSupervisor,
   type McpServerConfig,
@@ -15,19 +17,23 @@ import {
   type SupervisorDeps,
   tasksPortOver,
 } from "@/mcp"
+import { MAX_PDF_BYTES, PDF_MEDIA_TYPE, sniffPdfMagic } from "@/tool/document"
 import { errMessage, logger } from "@/shared"
 import {
   type ResourcesHandleResult as HandleResult,
   mcpTasksTools,
   type PromptEntry,
   type PromptResult,
+  READ_IMAGE_MAX_BYTES,
   type ResourceBlock,
   type ResourceEntry,
   type ResourcesHandle,
+  sniffMediaType,
   type TasksHandle,
   type Tool,
   type ToolContext,
   type ToolEvent,
+  type ToolResult,
 } from "@/tool"
 
 /**
@@ -76,21 +82,183 @@ const passthroughSchema = (jsonSchema: Record<string, unknown>): z.ZodType<unkno
 
 const isMcpError = (e: unknown): e is McpError => e instanceof McpError
 
-/** Adapt one MCP tool definition (on a started client) to our Tool interface. */
-export const mcpToolToTool = (client: McpClient, def: McpToolDef, serverName: string): Tool => {
+/** §19.1 — the per-server gate that authorizes HONORING a tool's self-declared
+ *  annotations. Both signals are required and BOTH fail-closed:
+ *   - `annotationsHonored` — the `QUANTA_MCP_TOOL_ANNOTATIONS` knob is ON.
+ *   - `trusted` — the host marked THIS server trusted (`McpServerConfig.trusted`).
+ *
+ *  Absent ⇒ `{ annotationsHonored:false, trusted:false }` (the default), which is
+ *  byte-identical to the pre-§19.1 bridge: every MCP tool stays
+ *  `isReadOnly:()=>false, isConcurrencySafe:()=>false`. */
+export interface McpToolBindOpts {
+  /** `QUANTA_MCP_TOOL_ANNOTATIONS` knob — global default-OFF master switch. */
+  readonly annotationsHonored?: boolean
+  /** `McpServerConfig.trusted` — this server is host-vetted. */
+  readonly trusted?: boolean
+}
+
+/** §19.1 — derive the `{ isReadOnly, isConcurrencySafe }` predicates for an MCP
+ *  tool from its sanitized annotations under the trust gate.
+ *
+ *  `honored = annotationsHonored && trusted`. Annotations may ONLY ELEVATE (and
+ *  only for a trusted server with the knob on); they can NEVER downgrade safety:
+ *   - `isReadOnly = honored && readOnlyHint === true`
+ *   - `isConcurrencySafe = honored && readOnlyHint === true && idempotentHint !== false`
+ *
+ *  When `honored` is false — knob off, untrusted server, OR no annotations — both
+ *  predicates are `false`, byte-identical to the conservative legacy default (so
+ *  an untrusted server's `readOnlyHint:true` can NOT escape HITL or run in
+ *  parallel). Because `sanitizeAnnotations` already dropped non-boolean hints, a
+ *  poisoned `readOnlyHint:"true"` arrives as `undefined` here ⇒ `=== true` is
+ *  false ⇒ the tool stays mutating. */
+const annotationPredicates = (
+  def: McpToolDef,
+  opts: McpToolBindOpts | undefined,
+): { isReadOnly: boolean; isConcurrencySafe: boolean } => {
+  const honored = opts?.annotationsHonored === true && opts?.trusted === true
+  if (!honored) return { isReadOnly: false, isConcurrencySafe: false }
+  const ann = def.annotations
+  const isReadOnly = ann?.readOnlyHint === true
+  const isConcurrencySafe = isReadOnly && ann?.idempotentHint !== false
+  return { isReadOnly, isConcurrencySafe }
+}
+
+/** §19.3 — map MCP media blocks onto the native `ToolResult.images`/`documents`
+ *  sinks, applying the SAME inbound safety the native vision tools enforce:
+ *   - image blocks: base64-decode, reject over the repo-wide 5 MB cap
+ *     ({@link READ_IMAGE_MAX_BYTES}), and CLASSIFY by magic bytes (a spoofed
+ *     `mimeType` cannot smuggle a non-image / oversized blob to the model — an
+ *     unrecognized type is dropped). Honest: an over-cap or unrecognized block is
+ *     SKIPPED, never crashes the call, and is surfaced via a trailing marker.
+ *   - resource blocks: base64-decode, enforce the 32 MB document cap
+ *     ({@link MAX_PDF_BYTES}), require the `application/pdf` mimeType allowlist
+ *     ({@link PDF_MEDIA_TYPE}), and CLASSIFY by `%PDF-` magic bytes — an over-cap,
+ *     disallowed-mimeType, or spoofed-magic resource is SKIPPED (same honest
+ *     marker as the image path), never forwarded uncapped to the model.
+ *
+ *  Returns the `{ images?, documents? }` slice (each field present only when
+ *  non-empty, exactOptionalPropertyTypes-clean) plus a human-readable `note`
+ *  appended to the tool output when any block was skipped (so the model learns
+ *  the result was clipped rather than silently losing content). */
+/** §19.3 — validate ONE inbound image media block: base64-decode, enforce the
+ *  5 MB cap, and CLASSIFY by magic bytes (the server's self-declared `mimeType`
+ *  is ignored — a spoofed type cannot smuggle non-image / oversized bytes). A
+ *  bad-base64, empty, over-cap, or unrecognized block returns `null` (skipped),
+ *  never throws. The returned block's `data` is the re-encoded validated bytes
+ *  (any whitespace/garbage padding the server added is dropped). */
+const validateImageBlock = (data: string): ImageBlock | null => {
+  let bytes: Buffer
+  try {
+    bytes = Buffer.from(data, "base64")
+  } catch {
+    return null
+  }
+  if (bytes.length === 0 || bytes.length > READ_IMAGE_MAX_BYTES) return null
+  const mediaType = sniffMediaType(bytes)
+  if (mediaType === null) return null
+  return { type: "image", data: bytes.toString("base64"), mediaType }
+}
+
+/** §19.3 (Finding 1) — validate ONE inbound resource/document media block under
+ *  the SAME gate discipline as images, so an untrusted MCP server cannot smuggle
+ *  an oversized or non-document blob into the model prompt:
+ *   - base64-decode (empty / undecodable ⇒ skipped),
+ *   - enforce the {@link MAX_PDF_BYTES} 32 MB cap — the Anthropic Messages API
+ *     document-block raw-byte ceiling (the SSOT the native `pdf_read` tool uses);
+ *     a value the codec/provider can actually carry, NOT an arbitrary number,
+ *   - validate the server's self-declared `mimeType` against the allowlist (the
+ *     `anthropic-messages-codec` only emits `application/pdf` document blocks —
+ *     {@link PDF_MEDIA_TYPE} — so anything else is dropped),
+ *   - CLASSIFY by magic bytes (`%PDF-` via {@link sniffPdfMagic}): a spoofed
+ *     `application/pdf` over non-pdf bytes is dropped, mirroring the image path's
+ *     magic-over-mimeType rule.
+ *  A bad / over-cap / disallowed / magic-mismatched block returns `null`
+ *  (skipped, surfaced via the trailing marker), never throws. The returned
+ *  block's `data` is re-encoded from the validated bytes. */
+const validateResourceBlock = (data: string, mimeType: string): DocumentBlock | null => {
+  if (mimeType !== PDF_MEDIA_TYPE) return null
+  let bytes: Buffer
+  try {
+    bytes = Buffer.from(data, "base64")
+  } catch {
+    return null
+  }
+  if (bytes.length === 0 || bytes.length > MAX_PDF_BYTES) return null
+  if (!sniffPdfMagic(bytes)) return null
+  return { type: "document", data: bytes.toString("base64"), mediaType: PDF_MEDIA_TYPE }
+}
+
+const mediaToResultFields = (
+  media: readonly McpMediaBlock[] | undefined,
+): { images?: ImageBlock[]; documents?: DocumentBlock[]; note: string } => {
+  const images: ImageBlock[] = []
+  const documents: DocumentBlock[] = []
+  let skipped = 0
+  for (const m of media ?? []) {
+    if (m.kind === "image") {
+      const img = validateImageBlock(m.data)
+      if (img === null) skipped += 1
+      else images.push(img)
+    } else {
+      const doc = validateResourceBlock(m.data, m.mimeType)
+      if (doc === null) skipped += 1
+      else documents.push(doc)
+    }
+  }
+  const note =
+    skipped > 0
+      ? `\n[mcp: ${skipped} media block(s) skipped: over size cap, unrecognized image type, or non-pdf/oversized resource]`
+      : ""
+  return {
+    ...(images.length > 0 ? { images } : {}),
+    ...(documents.length > 0 ? { documents } : {}),
+    note,
+  }
+}
+
+/** §19.3 — fold an `McpCallResult` into a native {@link ToolResult}, attaching
+ *  any validated image/document media. No media ⇒ byte-identical to the legacy
+ *  `{ ok, output }` result (no `images`/`documents` keys, no note). */
+const toToolResult = (res: {
+  ok: boolean
+  content: string
+  media?: McpMediaBlock[]
+}): ToolResult => {
+  const { images, documents, note } = mediaToResultFields(res.media)
+  return {
+    ok: res.ok,
+    output: `${res.content}${note}`,
+    ...(images !== undefined ? { images } : {}),
+    ...(documents !== undefined ? { documents } : {}),
+  }
+}
+
+/** Adapt one MCP tool definition (on a started client) to our Tool interface.
+ *
+ *  §19.1 — `opts` carries the per-server annotation trust gate. Omitted (the
+ *  default) ⇒ predicates are the conservative `false/false` and media is still
+ *  surfaced (the §19.3 path is trust-independent — it only adds typed image/
+ *  document blocks the model can see, never relaxes a permission predicate). */
+export const mcpToolToTool = (
+  client: McpClient,
+  def: McpToolDef,
+  serverName: string,
+  opts?: McpToolBindOpts,
+): Tool => {
   const name = mcpToolName(serverName, def.name)
   const schema = passthroughSchema(def.inputSchema)
+  const { isReadOnly, isConcurrencySafe } = annotationPredicates(def, opts)
   return {
     name,
     description: def.description,
     inputSchema: schema,
-    isReadOnly: () => false,
-    isConcurrencySafe: () => false,
+    isReadOnly: () => isReadOnly,
+    isConcurrencySafe: () => isConcurrencySafe,
     async *execute(input: unknown, _ctx: ToolContext): AsyncIterable<ToolEvent> {
       yield { type: "progress", message: `calling ${serverName} tool ${def.name}` }
       try {
         const res = await client.callTool(def.name, input)
-        yield { type: "result", result: { ok: res.ok, output: res.content } }
+        yield { type: "result", result: toToolResult(res) }
       } catch (e) {
         const message = isMcpError(e) ? e.message : errMessage(e)
         yield { type: "result", result: { ok: false, output: message } }
@@ -160,20 +328,22 @@ export const mcpToolToToolSupervised = (
   sup: McpReconnectSupervisor,
   def: McpToolDef,
   serverName: string,
+  opts?: McpToolBindOpts,
 ): Tool => {
   const name = mcpToolName(serverName, def.name)
   const schema = passthroughSchema(def.inputSchema)
+  const { isReadOnly, isConcurrencySafe } = annotationPredicates(def, opts)
   return {
     name,
     description: def.description,
     inputSchema: schema,
-    isReadOnly: () => false,
-    isConcurrencySafe: () => false,
+    isReadOnly: () => isReadOnly,
+    isConcurrencySafe: () => isConcurrencySafe,
     async *execute(input: unknown, _ctx: ToolContext): AsyncIterable<ToolEvent> {
       yield { type: "progress", message: `calling ${serverName} tool ${def.name}` }
       try {
         const res = await sup.callTool(def.name, input)
-        yield { type: "result", result: { ok: res.ok, output: res.content } }
+        yield { type: "result", result: toToolResult(res) }
       } catch (e) {
         const message = isMcpError(e) ? e.message : errMessage(e)
         yield { type: "result", result: { ok: false, output: message } }
@@ -432,7 +602,27 @@ export interface LoadMcpToolsOpts {
    *  provider's token store at the root (`resolveMcpOAuthKeyringOption`), so the
    *  bridge stays a pure consumer — it never reads `process.platform`. */
   oauthProvider?: McpOAuthProviderPort
+  /** §19.1 (`QUANTA_MCP_TOOL_ANNOTATIONS`) — the global default-OFF master switch
+   *  for honoring server-declared `ToolAnnotations`. When `true`, a tool from a
+   *  server whose config is `trusted:true` derives its `isReadOnly`/
+   *  `isConcurrencySafe` predicates from the (sanitized) annotations; an
+   *  UNTRUSTED server is unaffected regardless. Absent/false ⇒ byte-identical
+   *  (every MCP tool stays `false/false`). The trust gate is enforced per server
+   *  inside {@link annotationPredicates}, so this flag alone can never elevate an
+   *  untrusted server. */
+  annotationsHonored?: boolean
 }
+
+/** §19.1 — the bind opts for ONE server: combine the global knob flag with this
+ *  server's host-declared trust. Both must be true for annotations to be
+ *  honored; fail-closed on either. */
+const bindOptsFor = (
+  config: McpServerConfig,
+  annotationsHonored: boolean | undefined,
+): McpToolBindOpts => ({
+  annotationsHonored: annotationsHonored === true,
+  trusted: config.trusted === true,
+})
 
 /** Load one server on the ADR-0435 supervised (auto-restart) path. `create`
  *  never throws on a failed first start (it enters backoff), so a flaky server
@@ -448,11 +638,13 @@ export interface LoadMcpToolsOpts {
 const loadSupervised = async (
   config: McpServerConfig,
   deps: SupervisorDeps,
+  annotationsHonored: boolean | undefined,
 ): Promise<{ tools: Tool[]; client: McpStoppable; resources?: ResourcesCapableClient } | null> => {
   const sup = await McpReconnectSupervisor.create(config, deps)
+  const bindOpts = bindOptsFor(config, annotationsHonored)
   try {
     const defs = await sup.listTools()
-    const tools = defs.map((def) => mcpToolToToolSupervised(sup, def, config.name))
+    const tools = defs.map((def) => mcpToolToToolSupervised(sup, def, config.name, bindOpts))
     // ADR-0435 follow-up (limitation CLOSED): bridge the ADR-0431 `tasks/*`
     // surface on the supervised path too. The handle is built over the
     // SUPERVISOR (not a concrete client), so it re-resolves the current live
@@ -484,6 +676,7 @@ const loadSingle = async (
   transportFor: ((config: McpServerConfig) => McpClientTransport) | undefined,
   samplingWiring: SamplingWiringInput | undefined,
   oauthProvider: McpOAuthProviderPort | undefined,
+  annotationsHonored: boolean | undefined,
 ): Promise<{ tools: Tool[]; client: McpStoppable; resources?: ResourcesCapableClient } | null> => {
   const clientOpts: ConstructorParameters<typeof McpClient>[1] = {}
   if (elicitationPrompterFor !== undefined) {
@@ -505,7 +698,8 @@ const loadSingle = async (
   try {
     await client.start()
     const defs = await client.listTools()
-    const tools = defs.map((def) => mcpToolToTool(client, def, config.name))
+    const bindOpts = bindOptsFor(config, annotationsHonored)
+    const tools = defs.map((def) => mcpToolToTool(client, def, config.name, bindOpts))
     // ADR-0431 — default-OFF MCP tasks surface: wired iff the server advertised
     // the `tasks/*` capability. No advertisement ⇒ no tools.
     tools.push(...tasksToolsFor(client))
@@ -538,13 +732,14 @@ export const loadMcpTools = async (
   for (const config of servers) {
     const loaded =
       supervisorDepsFor !== undefined
-        ? await loadSupervised(config, supervisorDepsFor(config))
+        ? await loadSupervised(config, supervisorDepsFor(config), opts?.annotationsHonored)
         : await loadSingle(
             config,
             elicitationPrompterFor,
             opts?.transportFor,
             opts?.samplingWiring,
             opts?.oauthProvider,
+            opts?.annotationsHonored,
           )
     if (loaded === null) continue
     tools.push(...loaded.tools)

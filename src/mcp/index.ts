@@ -10,7 +10,13 @@ export {
   fullNegotiator,
   type McpCapabilityRecord,
 } from "./capabilities"
-export { McpClient, type McpClientTransport, McpError } from "./client"
+export {
+  extractMedia,
+  McpClient,
+  type McpClientTransport,
+  McpError,
+  sanitizeAnnotations,
+} from "./client"
 export {
   type CliPrompterIO,
   cliPrompter,
@@ -104,4 +110,10 @@ export {
   type StdioSpawnFn,
   type StdioTransportOpts,
 } from "./transports/stdio"
-export type { McpCallResult, McpServerConfig, McpToolDef } from "./types"
+export type {
+  McpCallResult,
+  McpMediaBlock,
+  McpServerConfig,
+  McpToolAnnotations,
+  McpToolDef,
+} from "./types"

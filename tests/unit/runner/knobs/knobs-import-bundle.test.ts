@@ -23,6 +23,7 @@ import { beforeAll, describe, expect, test } from "bun:test"
 import { type AnyKnob, allKnobs, asAnyKnob, registerKnob } from "@/runner/knobs"
 import { advisorKnob } from "@/runner/knobs/knobs/advisor"
 import { branchSearchKnob } from "@/runner/knobs/knobs/branch-search"
+import { closeoutCriticKnob } from "@/runner/knobs/knobs/closeout-critic"
 import { closeoutGuardKnob } from "@/runner/knobs/knobs/closeout-guard"
 import { composeAuthoringKnob } from "@/runner/knobs/knobs/compose-authoring"
 import { gitDirectiveKnob } from "@/runner/knobs/knobs/git-directive"
@@ -30,12 +31,14 @@ import { hooksKnob } from "@/runner/knobs/knobs/hooks"
 import { issueHintKnob } from "@/runner/knobs/knobs/issue-hint"
 import { localizePhaseKnob } from "@/runner/knobs/knobs/localize-phase"
 import { lspKnob } from "@/runner/knobs/knobs/lsp"
+import { mcpToolAnnotationsKnob } from "@/runner/knobs/knobs/mcp-tool-annotations"
 import { memoryModeKnob } from "@/runner/knobs/knobs/memory-mode"
 import { multiVoterKnob } from "@/runner/knobs/knobs/multi-voter"
 import { mustPassKnob } from "@/runner/knobs/knobs/must-pass"
 import { networkProxyKnob } from "@/runner/knobs/knobs/network-proxy"
 import { personaKnob } from "@/runner/knobs/knobs/persona"
 import { policyMergeKnob } from "@/runner/knobs/knobs/policy-merge"
+import { ratelimitNoticeKnob } from "@/runner/knobs/knobs/ratelimit-notice"
 import { repoMapKnob } from "@/runner/knobs/knobs/repo-map"
 import { reproTestKnob } from "@/runner/knobs/knobs/repro-test"
 import { skillsKnob } from "@/runner/knobs/knobs/skills"
@@ -48,6 +51,7 @@ import { join } from "node:path"
 const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(advisorKnob),
   asAnyKnob(branchSearchKnob),
+  asAnyKnob(closeoutCriticKnob),
   asAnyKnob(closeoutGuardKnob),
   asAnyKnob(composeAuthoringKnob),
   asAnyKnob(gitDirectiveKnob),
@@ -55,12 +59,14 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(issueHintKnob),
   asAnyKnob(localizePhaseKnob),
   asAnyKnob(lspKnob),
+  asAnyKnob(mcpToolAnnotationsKnob),
   asAnyKnob(memoryModeKnob),
   asAnyKnob(multiVoterKnob),
   asAnyKnob(mustPassKnob),
   asAnyKnob(networkProxyKnob),
   asAnyKnob(personaKnob),
   asAnyKnob(policyMergeKnob),
+  asAnyKnob(ratelimitNoticeKnob),
   asAnyKnob(repoMapKnob),
   asAnyKnob(reproTestKnob),
   asAnyKnob(skillsKnob),

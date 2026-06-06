@@ -62,6 +62,11 @@ export {
   type PrewarmOutcome,
   prewarmLlm,
 } from "./prewarm"
+// D4 (jun-7 naive-impl hardening) — model→context-window SSOT. Pure leaf
+// (imports only `provider-types`), so re-exporting through the barrel drags no
+// SDK dependency; the compaction slice + the loop's usage-snapshot consume it.
+export type { ModelWindow } from "./provider-metadata"
+export { MODEL_CONTEXT_WINDOWS, resolveModelWindow } from "./provider-metadata"
 export type { ProviderEnv, ProviderId, ResolvedProvider } from "./providers"
 export { PROVIDER_ENV_KEYS, resolveProvider } from "./providers"
 export type {
