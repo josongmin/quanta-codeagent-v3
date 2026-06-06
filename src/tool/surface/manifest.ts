@@ -543,6 +543,19 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     note: "Canvas / artifact persistence store (§7). Session registry for NON-code generation outputs (image_gen PNGs, xlsx/docx/pptx files) — list/get/destroy by id + a stable `quanta-artifact://<id>` preview URL, so artifacts live OUTSIDE the transcript. `register` is host-side (the generation tools register their outputs); the model only reads/manages. Opt-in EVERYWHERE (QUANTA_ARTIFACT_STORE): a new capability whose registry must be wired, so it never auto-seeds. Pure in-memory registry (@/artifact, injected clock + id-factory); duck-typed port keeps @/tool fence-clean.",
   },
   {
+    name: "permission_propose_pattern",
+    origin: "@/tool/permission-propose (via DefaultToolPorts.permissionPatternPropose)",
+    gate: {
+      kind: "config-slot",
+      slot: "DefaultToolPorts.permissionPatternPropose",
+      env: "QUANTA_REMEMBER_PATTERNS",
+    },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "mutating",
+    adr: "0061",
+    note: "CLUSTER D #5 — model-facing RECORDING half of ADR-0061 remember-patterns. The model proposes patterns it would like remembered so a future structurally-equivalent action auto-passes (autoPassByPatterns). risk:mutating — it MUTATES the session permission pattern store (records into `allowed`). NO-WIDEN / NO-SELF-GRANT: a proposal is recorded ONLY when EVERY pattern is already covered by the trusted user/policy baseline; any uncovered pattern rejects the WHOLE batch (would_widen, all-or-nothing — no laundering); recorded patterns never enter the baseline (no chain-widen); dangerous proposals gated. The tool routes EXCLUSIVELY through the injected port (recordProposedPattern) — never a raw store write — so the invariant cannot be bypassed by unchecked model input. Opt-in EVERYWHERE (QUANTA_REMEMBER_PATTERNS): mutates permission state, so it never auto-seeds. Duck-typed port keeps @/tool fence-clean (no @/permission import). Host store construction needs a trusted baseline seed (REPORTED residual — empty baseline is safe-but-rejects-all; a wrong baseline is a security hole).",
+  },
+  {
     name: "side_agent_spawn",
     group: ["side_agent_list", "side_agent_stop", "side_agent_findings"],
     origin: "@/tool/side-agent (via tier1 buildSideAgentBlock on AgentConfig.sideAgentDaemons)",

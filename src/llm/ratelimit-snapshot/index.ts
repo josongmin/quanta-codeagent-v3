@@ -11,7 +11,7 @@
 export type { RateLimitNotice } from "./notice"
 export { snapshotToNotice } from "./notice"
 export type { HeaderLookup, RateLimitSnapshot } from "./parse"
-export { parseRateLimitResetMs, parseRateLimitSnapshot } from "./parse"
+export { MAX_RESET_HORIZON_MS, parseRateLimitResetMs, parseRateLimitSnapshot } from "./parse"
 export { MAX_PROACTIVE_DELAY_MS, proactiveDelayMs } from "./policy"
 export type { RateLimitSnapshotStore } from "./store"
 export { createRateLimitSnapshotStore } from "./store"

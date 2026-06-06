@@ -69,6 +69,7 @@ import {
   type MergeStrategy,
   mergeProfileLayers,
   NAMED_PROFILE_NAMES,
+  PatternGrantStore,
   type PermissionMode,
   type PermissionProfile,
   type ProfileDefinition,
@@ -76,6 +77,7 @@ import {
   type ProfileLayerSlots,
   ProfileValidationError,
   permissionModeFromProfile,
+  recordProposedPattern,
   resolveProfileByName,
   resolveProfileInheritance,
   type TwoLayerManager,
@@ -605,9 +607,99 @@ const resolvePtySessionSlot = (
  * cap. Construction of every adapter is IO-free — no spawn/fetch happens until a
  * tool actually dispatches.
  */
+/**
+ * CLUSTER D #5 — the SHARED per-session permission slice (store + propose port).
+ *
+ * BASELINE-SEED RESIDUAL — CLOSED. The store is the SINGLE instance threaded to
+ * BOTH consumers so the model can only refine what the USER already approved:
+ *
+ *   1. {@link buildBaseFromArgs} sets it on `AgentConfig.permissionPatternStore`,
+ *      so the admissibility-gate's user-approval path (`cascadeOnApprove` →
+ *      `grantAndCascade` → `store.grant(...)`) writes USER/POLICY-approved
+ *      patterns INTO THIS store's `baseline`, and the gate's `autoPassByPatterns`
+ *      reads coverage FROM the same store.
+ *   2. {@link buildGatedToolPorts} wires `permission_propose_pattern` over the
+ *      SAME store, so `recordProposedPattern`'s `isBaseline` check is meaningful:
+ *      a model proposal is recorded ONLY when every pattern is in the baseline
+ *      the gate grew via user approvals. The baseline is therefore seeded LIVE,
+ *      at runtime, by the user — never fabricated from a guessed allow-list.
+ *
+ * SECURITY (load-bearing): the propose port writes via `recordProposed` (the
+ * `allowed`-only, no-widen-gated half) — it NEVER calls `store.grant`, so a model
+ * proposal can never seed the baseline (no self-grant, no chain-widen: a recorded
+ * `allowed` pattern is not baseline, so refining IT is still `would_widen`).
+ * Dangerous gating stays CLOSED (`allowDangerous: false`) — no operator opt-in
+ * knob is wired here.
+ *
+ * Default-OFF: returns `undefined` unless `QUANTA_REMEMBER_PATTERNS === "1"`. The
+ * store is allocated ONCE per `buildBaseFromArgs` call (per session) and reused by
+ * both consumers — never two divergent empty-baseline stores.
+ */
+interface PermissionPatternSlice {
+  readonly store: PatternGrantStore
+  readonly proposePort: {
+    recordProposed: (input: {
+      proposed: readonly string[]
+      isMaybeDangerous?: boolean
+    }) => ReturnType<typeof recordProposedPattern>
+  }
+}
+
+const resolvePermissionPatternSlice = (): PermissionPatternSlice | undefined => {
+  if (runtimeConfig().rememberPatterns !== true) return undefined
+  // ONE per-session store. The gate grows its baseline via user approvals
+  // (`store.grant`); the propose port refines within it via `recordProposed`.
+  const store = new PatternGrantStore()
+  return {
+    store,
+    proposePort: {
+      recordProposed: (input: { proposed: readonly string[]; isMaybeDangerous?: boolean }) =>
+        recordProposedPattern(
+          store,
+          {
+            proposed: input.proposed,
+            ...(input.isMaybeDangerous !== undefined
+              ? { isMaybeDangerous: input.isMaybeDangerous }
+              : {}),
+          },
+          // Dangerous gating CLOSED — no operator opt-in knob at this layer.
+          { allowDangerous: false },
+        ),
+    },
+  }
+}
+
+/** Spread-ready `AgentConfig.permissionPatternStore` slot for the shared slice
+ *  ({@link resolvePermissionPatternSlice}). `{}` when the slice is absent (knob
+ *  OFF) ⇒ the base literal carries NO extra branch (keeps `buildBaseFromArgs`
+ *  under biome's cognitive-complexity cap; mirrors `networkProxySlot` /
+ *  `prewarmSlot`). Present ⇒ the gate reads/writes THE SAME store the propose
+ *  tool received. */
+const permissionPatternStoreSlot = (
+  slice: PermissionPatternSlice | undefined,
+): { permissionPatternStore: PatternGrantStore } | Record<string, never> =>
+  slice !== undefined ? { permissionPatternStore: slice.store } : {}
+
+/** Spread-ready `DefaultToolPorts.permissionPatternPropose` slot. `{}` when the
+ *  shared slice is absent (knob OFF / not threaded) ⇒ the gated-ports literal in
+ *  {@link buildGatedToolPorts} carries NO extra branch (keeps that function under
+ *  biome's cognitive-complexity cap; mirrors the other spread-ready slots).
+ *  Present ⇒ the tool refines the SAME baseline the gate grows. */
+const permissionProposePortSlot = (
+  slice: PermissionPatternSlice | undefined,
+): { permissionPatternPropose: PermissionPatternSlice["proposePort"] } | Record<string, never> =>
+  slice !== undefined ? { permissionPatternPropose: slice.proposePort } : {}
+
 const buildGatedToolPorts = (
   env: NodeJS.ProcessEnv,
   seams?: CompositionSeams,
+  /** CLUSTER D #5 — the SHARED permission slice built once by
+   *  {@link buildBaseFromArgs} and threaded to BOTH the gate
+   *  (`AgentConfig.permissionPatternStore`) and the propose tool here. Absent ⇒
+   *  the `permission_propose_pattern` slot is omitted (byte-identical). NEVER
+   *  construct a fresh store here — that would give the tool an empty baseline
+   *  divergent from the gate's grown one. */
+  permissionPatternSlice?: PermissionPatternSlice,
 ): DefaultToolPorts => {
   const cfg = runtimeConfig()
   // C1 — ONE per-session artifact registry when the Canvas store is enabled.
@@ -630,6 +722,14 @@ const buildGatedToolPorts = (
     // unless QUANTA_ARTIFACT_STORE === "1". Mints ONE per-session registry
     // (real clock + monotonic id factory) shared by the artifact_* tools.
     ...(artifactRegistry !== undefined ? { artifactRegistry } : {}),
+    // CLUSTER D #5 — gated permission_propose_pattern tool over the SHARED
+    // per-session store built by `buildBaseFromArgs` (BASELINE-SEED RESIDUAL
+    // CLOSED). The SAME store backs `AgentConfig.permissionPatternStore`, so the
+    // model can only refine patterns the USER already approved via the gate's
+    // `store.grant(...)` path. We NEVER construct a fresh empty-baseline store
+    // here. Spread-ready slot (`{}` when off ⇒ tool not registered ⇒
+    // byte-identical).
+    ...permissionProposePortSlot(permissionPatternSlice),
     // N2 — gated MCP connector discovery tools (mcp_connector_list/_install).
     // Default-OFF: tool menu byte-identical unless QUANTA_MCP_CONNECTORS === "1".
     // The port lists the bundled reference catalog and installs a chosen server
@@ -725,12 +825,16 @@ const buildBaseRegistry = (args: {
   /** Required key, value MAY be `undefined` (no conditional spread at the call
    *  site ⇒ no added branch). Absent ⇒ every gated port uses its real backend. */
   readonly seams: CompositionSeams | undefined
+  /** CLUSTER D #5 — the SHARED permission slice (store + propose port) so the
+   *  `permission_propose_pattern` tool refines the SAME baseline the gate grows
+   *  via `AgentConfig.permissionPatternStore`. Absent ⇒ tool omitted. */
+  readonly permissionPatternSlice: PermissionPatternSlice | undefined
 }): ToolRegistry =>
   new ToolRegistry([
     ...buildDefaultTools({
       ...(args.automationSlot !== null ? { automationEngine: args.automationSlot.engine } : {}),
       ...(args.sandboxProfile !== undefined ? { sandboxProfile: args.sandboxProfile } : {}),
-      ...buildGatedToolPorts(args.env, args.seams),
+      ...buildGatedToolPorts(args.env, args.seams, args.permissionPatternSlice),
     }),
     ...(args.searchWire !== null ? [args.searchWire.tool] : []),
     // ADR-0287 — async-tools `poll_deferred`. Default-OFF: registered ONLY when
@@ -1235,6 +1339,16 @@ export const buildBaseFromArgs = (
   // both undefined ⇒ byte-identical legacy.
   const { managerSlot: permissionProfileSlot, mode: profilePermissionMode } =
     resolvePermissionProfileWiring(p.permissionProfile, env)
+  // CLUSTER D #5 — BASELINE-SEED RESIDUAL CLOSED. Build ONE per-session
+  // PatternGrantStore + its no-widen propose port (default-OFF: `undefined`
+  // unless QUANTA_REMEMBER_PATTERNS=1). The SAME store is threaded into BOTH
+  // `buildBaseRegistry` (the `permission_propose_pattern` tool) AND
+  // `AgentConfig.permissionPatternStore` (the admissibility-gate). The gate
+  // grows the store's BASELINE via user approvals (`store.grant`); the propose
+  // tool refines within it via `store.recordProposed` (no-widen). Absent ⇒ the
+  // store slot is omitted (no auto-pass, no cascade) AND the tool is absent —
+  // byte-identical to today's no-pattern behaviour.
+  const permissionPatternSlice = resolvePermissionPatternSlice()
   // ADR-0236 — `--no-auto-background`: future hosts that wire `autoBackground`
   // by default can call `resolveAutoBackgroundOverride(p.noAutoBackground)` to
   // hard-force the slot OFF. Today no host defaults it on, so the flag has no
@@ -1246,7 +1360,14 @@ export const buildBaseFromArgs = (
     // DIP: route through the factory (no app-specific ports at this baseline
     // entry — modes/CLI wire their own fs/diagnostics ports). Behavior is
     // byte-identical to the `defaultTools` singleton.
-    registry: buildBaseRegistry({ env, automationSlot, sandboxProfile, searchWire, seams }),
+    registry: buildBaseRegistry({
+      env,
+      automationSlot,
+      sandboxProfile,
+      searchWire,
+      seams,
+      permissionPatternSlice,
+    }),
     stream,
     // GAP2 — when a named permission profile is selected the live permission
     // mode is DERIVED from its approval pillar; absent ⇒ the historical
@@ -1300,6 +1421,15 @@ export const buildBaseFromArgs = (
     // consumer can read the per-thread layered policy. Default-OFF: absent ⇒
     // slot omitted (`exactOptionalPropertyTypes` — no `undefined` literal).
     ...permissionProfileSlot,
+    // CLUSTER D #5 — share the SAME PatternGrantStore the propose tool received
+    // (via `buildBaseRegistry` above) with the admissibility-gate. The gate
+    // writes the user/policy baseline via `cascadeOnApprove` → `grantAndCascade`
+    // → `store.grant(...)` on a user approval, and reads coverage via
+    // `autoPassByPatterns`. The propose tool can therefore only refine what the
+    // user already approved. Spread-ready slot (`{}` when off ⇒ no branch here ⇒
+    // gate byte-identical: no auto-pass, no cascade). `permissionAllowDangerous`
+    // stays unset ⇒ dangerous actions ALWAYS go through the reviewer.
+    ...permissionPatternStoreSlot(permissionPatternSlice),
   }
 
   attachExecutionPlaneSlots(base, p)

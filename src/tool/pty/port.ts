@@ -83,10 +83,33 @@ export interface PtySessionPort {
   kill(handle: PtyHandle): Promise<PtyResult<void>>
 }
 
-/** Bounds + caps the slice enforces uniformly (mirrors the 6-tool discipline). */
+/* Bounds + caps the slice enforces uniformly. These are the SSOT both backends
+ * (tmux + Bun-native) read; the use-sites re-state the basis inline. Each value
+ * is a DEFENSIVE bound (reject/truncate-safe), not a protocol constant — they
+ * exist so a flood-write or absurd resize cannot exhaust memory, and the exact
+ * magnitudes are chosen to mirror the EXISTING terminal-tool discipline rather
+ * than invented here. */
+
+/** Max bytes per `write` (live stdin), measured in UTF-8 WIRE bytes. Mirrors
+ *  Codex's `write_stdin` cap / the tmux `send-keys` discipline — one keystroke
+ *  burst, not a file transfer. Over-cap ⇒ a typed `too-large` (never truncated
+ *  silently). */
 export const PTY_MAX_WRITE_BYTES = 64 * 1024
+/** Max distinct handles whose last-capture snapshot the tmux adapter retains at
+ *  once — bounds the per-handle `lastCapture` map so a session reading from many
+ *  foreign panes cannot grow it without limit. A NEW handle past the cap ⇒
+ *  `cap-exceeded` (detach/kill frees a slot). Injectable per-adapter
+ *  (`createTmuxAdapter({ maxAttached })`); this is the default. */
 export const PTY_MAX_ATTACHED = 32
+/** Decoded output-ring retention per owned session, in UTF-16 code units. A
+ *  scrollback bound: the oldest chunks are head-truncated past this, and the gap
+ *  is SIGNALLED on the next `read` (a `… [N chunks dropped] …` marker), never
+ *  dropped silently. 256 KiB ≈ a few thousand lines of terminal scrollback —
+ *  enough to resume a turn's view, bounded so one flood-write cannot leak. */
 export const PTY_RING_BYTES = 256 * 1024
+/** Terminal dimension bounds (cols/rows). `1` rejects a 0-sized tty; `1000` is a
+ *  sanity ceiling rejecting an absurd resize (no real terminal is 1000×1000+).
+ *  Out-of-range ⇒ a typed `invalid-size`, never a backend crash. */
 export const PTY_MIN_DIM = 1
 export const PTY_MAX_DIM = 1000
 

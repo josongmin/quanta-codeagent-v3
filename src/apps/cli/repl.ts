@@ -315,6 +315,9 @@ export const runRepl = async (): Promise<void> => {
         rfc09,
         featureCfg,
         env: process.env,
+        // #8 (jun-6) — host binds stdin for the in-turn reader (only consumed
+        // when QUANTA_MIDTURN_CAPTURE=1; the loop/reader slice never poke stdin).
+        inTurnStdin: process.stdin,
       }),
     )
   } finally {

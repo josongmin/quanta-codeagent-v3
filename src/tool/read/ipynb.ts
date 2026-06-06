@@ -25,6 +25,13 @@
  *  other extension is `false` here, so `read` returns unchanged content. */
 export const isNotebook = (path: string): boolean => /\.ipynb$/i.test(path)
 
+/** Hard cap on the number of cells rendered. A pathological notebook with tens
+ *  of thousands of cells must not blow the budget (DoS guard): cells beyond
+ *  this count are dropped and a one-line truncation notice is appended, so the
+ *  render stays bounded while the model is told it is incomplete. `read`'s outer
+ *  `offset`/`limit` still pages the (now bounded) document. */
+export const MAX_NOTEBOOK_CELLS = 1000
+
 export interface NotebookRenderOpts {
   /** Append each code cell's textual outputs (stream/text-plain/error). Base64
    *  image blobs are ALWAYS stripped regardless of this flag. */
@@ -174,7 +181,11 @@ export const renderNotebook = (text: string, opts: NotebookRenderOpts): string |
   if (!isObject(parsed) || !Array.isArray(parsed["cells"])) return null
   const cells = parsed["cells"]
   if (cells.length === 0) return "(empty notebook: 0 cells)"
+  const shown = Math.min(cells.length, MAX_NOTEBOOK_CELLS)
   const blocks: string[] = []
-  for (let i = 0; i < cells.length; i++) blocks.push(renderCell(cells[i], i, opts))
+  for (let i = 0; i < shown; i++) blocks.push(renderCell(cells[i], i, opts))
+  if (cells.length > shown) {
+    blocks.push(`… (${cells.length - shown} more cell(s) elided: cell cap ${MAX_NOTEBOOK_CELLS})`)
+  }
   return blocks.join("\n\n")
 }

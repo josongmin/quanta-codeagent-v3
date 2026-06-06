@@ -36,9 +36,18 @@ import {
 } from "./loop"
 import type { AppshotArtifactSink, AppshotPort } from "./port"
 
+/** Upper bound on the model-supplied `prompt` (chars). Defensive input cap, not
+ *  a semantic limit: the prompt is a natural-language app SPEC, so even a very
+ *  detailed brief is well under this; the bound only rejects a pathological
+ *  multi-megabyte string before it is threaded into the scaffold adapter
+ *  (zod `.max()` ⇒ a typed validation error, never a silent truncation). 32_000
+ *  chars ≈ 8k tokens at the ~4 chars/token estimate this repo uses
+ *  (`agent/compaction.ts`), i.e. a roomy spec budget. Named (not inline) so the
+ *  basis is auditable. */
 const PROMPT_MAX = 32_000
 /** Default iteration cap when the model omits `max_iterations`. Conservative —
- *  enough to refine once or twice without burning tokens on a stuck judge. */
+ *  enough to refine once or twice without burning tokens on a stuck judge.
+ *  Within the hard `[APPSHOT_MIN_ITER, APPSHOT_MAX_ITER]` band (see loop.ts). */
 const DEFAULT_ITER = 3
 
 export const appshotVerifyInputSchema = z.object({

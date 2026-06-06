@@ -26,6 +26,7 @@
  * `backend-error` result.
  */
 
+import { errMessage } from "@/shared/errors"
 import {
   type AttachResult,
   type BunPtyAdapter,
@@ -185,7 +186,7 @@ export const createBunPtyAdapter = (factory: PtyFactoryPort): BunPtyAdapter => {
         sessions.set(handle, session)
         return okR({ handle, cursor: 0 })
       } catch (e) {
-        return errR("backend-error", `spawn failed: ${String(e)}`)
+        return errR("backend-error", `spawn failed: ${errMessage(e)}`)
       }
     },
 
@@ -223,7 +224,7 @@ export const createBunPtyAdapter = (factory: PtyFactoryPort): BunPtyAdapter => {
         r.value.terminal.write(payload)
         return okR(undefined)
       } catch (e) {
-        return errR("backend-error", `terminal write failed: ${String(e)}`)
+        return errR("backend-error", `terminal write failed: ${errMessage(e)}`)
       }
     },
 
@@ -257,7 +258,7 @@ export const createBunPtyAdapter = (factory: PtyFactoryPort): BunPtyAdapter => {
         r.value.terminal.resize(cols, rows)
         return okR(undefined)
       } catch (e) {
-        return errR("backend-error", `terminal resize failed: ${String(e)}`)
+        return errR("backend-error", `terminal resize failed: ${errMessage(e)}`)
       }
     },
 

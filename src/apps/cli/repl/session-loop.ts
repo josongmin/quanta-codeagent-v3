@@ -17,7 +17,12 @@ import { type AwaySummaryWireHandle, maybeCreateAwaySummaryWire } from "./away-s
 import type { ConvCheckpointWire } from "./conv-checkpoint-wire"
 import { ExternalPromptQueue } from "./external-prompt-queue"
 import { createHeartbeatBinder, heartbeatEnqueueHandler } from "./heartbeat-binder"
-import { maybeCreateMidTurnCaptureWire } from "./mid-turn-capture-wire"
+import {
+  type InTurnLineReaderHandle,
+  type InTurnReaderStdin,
+  startInTurnLineReader,
+} from "./in-turn-reader"
+import { type MidTurnCaptureHandle, maybeCreateMidTurnCaptureWire } from "./mid-turn-capture-wire"
 import { maybeCreateNdjsonSinkWire } from "./ndjson-wire"
 import type { PlaybookTriggerSurfaceSeam } from "./playbook-trigger-surface-seam"
 import {
@@ -148,6 +153,13 @@ export interface RunSessionLoopDeps {
    *  when `QUANTA_MIDTURN_CAPTURE=1`. Absent ⇒ no capture wire (default-OFF
    *  byte-identical). */
   readonly planQueueStore?: import("@/agent/plan-queue").PlanQueueStore
+  /** #8 last-mile (jun-6) — the live stdin source for the CONCURRENT in-turn
+   *  keystroke reader (closed-port DI; the host binds `process.stdin`, tests bind
+   *  a fake). Only consumed when the mid-turn-capture wire is PRESENT
+   *  (`QUANTA_MIDTURN_CAPTURE=1` + a plan-queue store + a thread id). Absent ⇒ no
+   *  reader is ever started ⇒ stdin stays detached during the turn, byte-identical
+   *  to today (the SACRED default-OFF invariant). */
+  readonly inTurnStdin?: InTurnReaderStdin
 }
 
 /** Default Esc-Esc cancel window (ms). Matches the prior inline constant in
@@ -336,17 +348,18 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     binder: heartbeatBinder,
     pushPrompt: (prompt) => externalPromptQueue.push(prompt),
   })
-  // #8 last-mile (jun-6) — mid-turn keystroke capture SEAM. Default-OFF: the
-  // wire is `undefined` unless `QUANTA_MIDTURN_CAPTURE=1` (read via
-  // runtimeConfig — no direct env access here) AND the surface supplied its
-  // plan-queue store + a thread id. With the wire absent NOTHING captures
-  // mid-turn input ⇒ the input/turn loop is byte-identical to today. The
-  // CONCURRENT keystroke SOURCE during a turn is a separate hot-path change
-  // (see jun-6 report residual); this seam connects a completed mid-turn line
-  // to the live plan-queue + the existing turn-boundary `externalPromptQueue`
-  // drain so a future reader (or a test) can deliver it without touching the
-  // raw-input loop. `midTurnCapture` is exported for that future source to wire.
-  const midTurnCapture =
+  // #8 last-mile (jun-6) — mid-turn keystroke capture SEAM + the CONCURRENT
+  // in-turn SOURCE that now feeds it. Default-OFF: the wire is `undefined` unless
+  // `QUANTA_MIDTURN_CAPTURE=1` (read via runtimeConfig — no direct env access
+  // here) AND the surface supplied its plan-queue store + a thread id. With the
+  // wire absent NOTHING captures mid-turn input AND no reader is ever started ⇒
+  // the input/turn loop is byte-identical to today (stdin stays detached during
+  // the turn, exactly as before — the SACRED invariant). When the wire IS present
+  // the loop starts an `in-turn-reader` right before each `await runOneTurn` and
+  // disposes it in the `finally` (see `withInTurnCapture`), so every completed
+  // line typed WHILE the turn streams lands on the plan-queue + the turn-boundary
+  // `externalPromptQueue` drain.
+  const midTurnCapture: MidTurnCaptureHandle | undefined =
     deps.planQueueStore !== undefined
       ? maybeCreateMidTurnCaptureWire({
           enabled: runtimeConfig().midTurnCapture,
@@ -355,7 +368,37 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
           pushExternal: (text) => externalPromptQueue.push(text),
         })
       : undefined
-  void midTurnCapture
+  // The in-flight turn index the captured line is tagged with (carried into the
+  // FollowUp for replay ordering). Bumped once per turn, BEFORE the reader starts,
+  // by `withInTurnCapture`. 0 when no turn has run / capture is off.
+  let currentTurnIndex = 0
+  // Wrap a `runOneTurn` invocation with the concurrent in-turn reader. When the
+  // capture wire is absent OR no stdin was injected, this is a pure passthrough
+  // (default-OFF byte-identical — no reader allocated, no listener attached). When
+  // present, EXACTLY ONE reader is alive for the lifetime of the awaited turn: it
+  // is started before the await and disposed in the `finally` (every exit path —
+  // normal completion, a thrown turn error, an Esc-Esc/Ctrl-C abort), so it can
+  // never leak into the next turn or collide with the turn-boundary reader.
+  const withInTurnCapture = async <R>(run: () => Promise<R>): Promise<R> => {
+    if (midTurnCapture === undefined || deps.inTurnStdin === undefined) {
+      return await run()
+    }
+    currentTurnIndex += 1
+    const turnIndexForCapture = currentTurnIndex
+    const reader: InTurnLineReaderHandle = startInTurnLineReader({
+      stdin: deps.inTurnStdin,
+      onLine: (line) => {
+        // captureLine is itself no-throw (the facade swallows internal faults);
+        // it is async, so kick it off fire-and-forget — the reader never awaits.
+        void midTurnCapture.captureLine(line, turnIndexForCapture)
+      },
+    })
+    try {
+      return await run()
+    } finally {
+      reader.dispose()
+    }
+  }
   let lastUserInputAt = 0
   let lastTurnOutcome: LastTurnOutcome | undefined
   const liveAutomationSlot =
@@ -582,40 +625,44 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
 
   const runOneShotBranch = async (): Promise<void> => {
     try {
-      const out = await runOneTurn<{
-        readonly messages: readonly Message[]
-        readonly outcomeReason?: AgentOutcome["reason"]
-      }>(
-        {
-          outerAbort: abort,
-          statusBar,
-          turnIndicator,
-          turnSummary,
-          escWindowMs: ESC_WINDOW_MS,
-          body: async (turnSignal) =>
-            await runSessionTurn({ text: setup.argPrompt as string, turnSignal }),
-        },
-        {
-          onAfterResult: (result) => {
-            surfaceState = updateSessionState(surfaceState, { history: result.messages })
-            // The host-injected `renderTurnDashboard` sink does the metrics
-            // snapshot fold + dashboard write + cost-panel fold internally
-            // (host wires it to the SAME inline code the prior `turn` closure
-            // ran). One-shot AND interactive funnel through this single sink
-            // so the per-turn render is byte-identical across both paths.
-            sinks.renderTurnDashboard()
-            sinks.renderAndResetSummary(result)
-            sinks.flushLifecyclePills()
-            if (result.outcomeReason !== undefined) {
-              lastTurnOutcome = mapAgentOutcomeToReactorOutcome({
-                reason: result.outcomeReason,
-              } as AgentOutcome)
-            }
-            // ADR-0292 — turn-end snapshot. No-op when the wire is null.
-            recordTurnSnapshot(result.messages)
+      // #8 last-mile (jun-6) — the concurrent in-turn reader wraps the awaited
+      // turn (no-op passthrough when capture is off ⇒ byte-identical).
+      const out = await withInTurnCapture(() =>
+        runOneTurn<{
+          readonly messages: readonly Message[]
+          readonly outcomeReason?: AgentOutcome["reason"]
+        }>(
+          {
+            outerAbort: abort,
+            statusBar,
+            turnIndicator,
+            turnSummary,
+            escWindowMs: ESC_WINDOW_MS,
+            body: async (turnSignal) =>
+              await runSessionTurn({ text: setup.argPrompt as string, turnSignal }),
           },
-          onError: sinks.renderTurnError,
-        },
+          {
+            onAfterResult: (result) => {
+              surfaceState = updateSessionState(surfaceState, { history: result.messages })
+              // The host-injected `renderTurnDashboard` sink does the metrics
+              // snapshot fold + dashboard write + cost-panel fold internally
+              // (host wires it to the SAME inline code the prior `turn` closure
+              // ran). One-shot AND interactive funnel through this single sink
+              // so the per-turn render is byte-identical across both paths.
+              sinks.renderTurnDashboard()
+              sinks.renderAndResetSummary(result)
+              sinks.flushLifecyclePills()
+              if (result.outcomeReason !== undefined) {
+                lastTurnOutcome = mapAgentOutcomeToReactorOutcome({
+                  reason: result.outcomeReason,
+                } as AgentOutcome)
+              }
+              // ADR-0292 — turn-end snapshot. No-op when the wire is null.
+              recordTurnSnapshot(result.messages)
+            },
+            onError: sinks.renderTurnError,
+          },
+        ),
       )
       // RFC-09 (A) — turn-completion notify (one-shot path). Fires BEFORE the
       // finally drains the close stack (which restores the title via dispose).
@@ -728,45 +775,51 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
         if (next === null) break
         await renderAwayRecapIfReturned(awaySummary, wasIdle, surfaceState.history, abort.signal)
         const prompt = normalizeCliPromptInput(next)
-        const out = await runOneTurn<{
-          readonly messages: readonly Message[]
-          readonly outcomeReason?: AgentOutcome["reason"]
-        }>(
-          {
-            outerAbort: abort,
-            statusBar,
-            turnIndicator,
-            turnSummary,
-            escWindowMs: ESC_WINDOW_MS,
-            body: async (turnSignal) =>
-              await runSessionTurn({
-                text: prompt.text,
-                images: prompt.images,
-                turnSignal,
-              }),
-          },
-          {
-            onAfterResult: (result) => {
-              surfaceState = updateSessionState(surfaceState, { history: result.messages })
-              sinks.renderTurnDashboard()
-              sinks.renderAndResetSummary(result)
-              sinks.flushLifecyclePills()
-              if (result.outcomeReason !== undefined) {
-                lastTurnOutcome = mapAgentOutcomeToReactorOutcome({
-                  reason: result.outcomeReason,
-                } as AgentOutcome)
-              }
-              recordTurnSnapshot(result.messages)
-              // ADR-0468 — mirror the turn boundary to the introspection sink.
-              // No-op (no alloc) when the sink is the default-OFF NullNdjsonSink.
-              ndjson.sink.emit({
-                type: "turn.complete",
-                ts: Date.now(),
-                messageCount: result.messages.length,
-              })
+        // #8 last-mile (jun-6) — the concurrent in-turn reader wraps the awaited
+        // turn (no-op passthrough when capture is off ⇒ byte-identical). The
+        // turn-boundary reader (`promptSource.next` above) has already resolved +
+        // detached, so the in-turn reader is the ONLY stdin consumer for the turn.
+        const out = await withInTurnCapture(() =>
+          runOneTurn<{
+            readonly messages: readonly Message[]
+            readonly outcomeReason?: AgentOutcome["reason"]
+          }>(
+            {
+              outerAbort: abort,
+              statusBar,
+              turnIndicator,
+              turnSummary,
+              escWindowMs: ESC_WINDOW_MS,
+              body: async (turnSignal) =>
+                await runSessionTurn({
+                  text: prompt.text,
+                  images: prompt.images,
+                  turnSignal,
+                }),
             },
-            onError: sinks.renderTurnError,
-          },
+            {
+              onAfterResult: (result) => {
+                surfaceState = updateSessionState(surfaceState, { history: result.messages })
+                sinks.renderTurnDashboard()
+                sinks.renderAndResetSummary(result)
+                sinks.flushLifecyclePills()
+                if (result.outcomeReason !== undefined) {
+                  lastTurnOutcome = mapAgentOutcomeToReactorOutcome({
+                    reason: result.outcomeReason,
+                  } as AgentOutcome)
+                }
+                recordTurnSnapshot(result.messages)
+                // ADR-0468 — mirror the turn boundary to the introspection sink.
+                // No-op (no alloc) when the sink is the default-OFF NullNdjsonSink.
+                ndjson.sink.emit({
+                  type: "turn.complete",
+                  ts: Date.now(),
+                  messageCount: result.messages.length,
+                })
+              },
+              onError: sinks.renderTurnError,
+            },
+          ),
         )
         process.stderr.write("\n")
         if (out.turnAborted || out.result === undefined) {

@@ -3,8 +3,8 @@ title: rememberPatterns — 권한 패턴 학습 + cascade 자동해소
 section: 3
 subsystem: 권한 학습 (v0.dev 흡수, ADR-0061)
 order: 61
-maturity: L3
-status: hold
+maturity: L4
+status: refined
 ui_surfaces: [n-a]
 monitoring: n-a
 modes: [n-a]
@@ -13,7 +13,7 @@ owners: ["@songmin"]
 labels: [absorbed:v0, surface:cli]
 depends_on: [183-safety-net-green, agent-loop-branch-hardening, reviewer-3tier, agent-dispatch-core, cross-slice-mirror]
 config_refs:
-  env: []
+  env: [QUANTA_REMEMBER_PATTERNS]
 purpose: |
   v0.dev 권한 학습 흡수 — 모델이 필요 권한을 직접 제안(suggestedPermissions)하고 위험을
   자가표시(isMaybeDangerous). "패턴 허용" 1회 → 대기 중인 모든 다른 tool 요청을 재평가해
@@ -55,41 +55,66 @@ evidence:
     - src/permission/remember-patterns.ts
     - src/permission/gate-pattern-wire.ts
     - src/agent/admissibility-gate.ts
+    - src/tool/permission-propose/index.ts
+    - src/host/runtime/agent-arg-builder.ts
   adrs: [61]
   tests:
     unit:
       - tests/unit/permission-remember-patterns.test.ts
       - tests/unit/permission/remember-patterns-classifier-hell.test.ts
       - tests/unit/permission-propose-pattern-hellgate.test.ts
+      - tests/unit/permission-propose-pattern-tool-hellgate.test.ts
+      - tests/unit/permission-pattern-shared-store-composition-hellgate.test.ts
+      - tests/unit/permission-gate-pattern-wire.test.ts
       - tests/unit/admissibility-gate.test.ts
     integration:
       - tests/integration/remember-patterns-cascade-hell.test.ts
+      - tests/integration/plan-mode-dispatch-hell-e2e.test.ts
     contract: []
-knobs: []
-deliberate_hold:
-  reason: |
-    SAFE 기록 seam(`recordProposedPattern`, no-widen)은 2026-06-06 배선 완료 —
-    coverage-gated 자가제안 기록이 pure layer(`@/permission`)에서 동작.
-    남은 hold: LLM-CALLABLE tool/control-op 표면 — 모델이 실제로
-    `recordProposedPattern`을 호출할 tool 계약(manifest+dispatch)은 hot
-    permission/dispatch 경로 수술이라 미배선. seam은 host/test/future-tool이
-    즉시 호출 가능.
-  promotion_path: |
-    1) 모델-facing tool/control-op(예: `permission_propose_pattern`) 추가 —
-       in-schema {proposed[], isMaybeDangerous} → `recordProposedPattern` 호출,
-       결과(recorded|rejected+reason)를 tool result로 반환. manifest(BASE/GATED)
-       + dispatch 등록 필요(hot path).
-    2) store를 host 합성 루트에서 실제 construct (현재 permissionPatternStore는
-       seam-only, production 미설정). user/policy allow-list → baseline grant.
-    3) end-to-end test (모델 propose → recorded → 두 번째 호출 auto-pass /
-       widen propose → rejected) 추가 후 L4 재승격.
+knobs: [QUANTA_REMEMBER_PATTERNS]
 notes: |
+  **LLM-callable tool 표면 배선 완료 (CLUSTER D #5, 2026-06-06)** — residual였던
+  모델-facing RECORDING 표면 배선. `permission_propose_pattern` 도구
+  (`src/tool/permission-propose/`): in-schema `{proposed: string[] (1..32),
+  is_maybe_dangerous?}` → 주입된 duck-typed `PermissionPatternProposePort`
+  (=`recordProposedPattern` 어댑터)로만 라우팅 → typed `recorded{patterns}` |
+  `rejected{reason}`(would_widen/dangerous_blocked/no_store/empty). NO-THROW
+  (throwing port→typed error). `isReadOnly:()=>false`. `@/tool` fence-clean
+  (duck-typed port, `@/permission` 미import).
+
+  3-SSOT 등록: manifest(risk=mutating, GATED, QUANTA_REMEMBER_PATTERNS) +
+  MUTATING_TOOL_TABLE(`working_state_write`) + plan-mode e2e/mode-mutating-table
+  CALLER_WIRE 등록. default-OFF: `DefaultToolPorts.permissionPatternPropose`
+  미배선 ⇒ 도구 부재 byte-identical(QUANTA_REMEMBER_PATTERNS=1일 때만 host 배선).
+
+  host store 합성: 노브 ON 시 host가 per-session `PatternGrantStore` + no-widen
+  port construct. **BASELINE-SEED RESIDUAL — CLOSED (2026-06-06)**: 이전엔 합성
+  레이어에서 신뢰 user/policy allow-list 도달 불가라 EMPTY baseline로
+  safe-but-rejects-all(모든 제안 would_widen)였다. 이제 host가 ONE per-session
+  store를 construct해 BOTH 소비자에 thread: (1) `AgentConfig.permissionPatternStore`
+  (admissibility-gate의 user-approve `cascadeOnApprove`→`grantAndCascade`→
+  `store.grant` baseline write + `autoPassByPatterns` read), (2)
+  `permission_propose_pattern` 도구 port (동일 store의 `recordProposed`).
+  baseline은 위조 대신 RUNTIME에 user-approval이 LIVE로 시드 — 모델은 user가 이미
+  승인한 패턴만 refine 가능. SECURITY: propose port는 `recordProposed`(allowed-only,
+  no-widen-gated)로만 write → `store.grant` 절대 미호출 ⇒ 모델 제안이 baseline을
+  seed 불가(no self-grant, no chain-widen: recorded allowed 패턴은 baseline 아니라
+  그걸 refine해도 would_widen). dangerous gating CLOSED(allowDangerous:false). 합성
+  wiring(file:line): `src/host/runtime/agent-arg-builder.ts`
+  `resolvePermissionPatternSlice`(store+port 1회 construct) +
+  `permissionPatternStoreSlot`/`permissionProposePortSlot`(spread-ready, default-OFF
+  `{}`) — gate consumption은 기존 LIVE(admissibility-gate.ts `runPatternAutoPassGate`/
+  `cascadeOnApprove`)라 별도 배선 불요.
+
   user_approved_for_session(ADR-0029)이 actionKey 단위 기억의 씨앗 — rememberPatterns는 그 위에
   패턴-단위 cascade를 얹음. LearningSource enum까지 추가해 trajectory 소비자가
   "왜 자동허용됐는가"를 exhaustive switch로 분기 가능.
 
-  deferred-wire: source has TODO acknowledging gap — 모델 surface가 미배선이라
-  자가 제안 cascade 사이클이 닫히지 않음. L3로 honest-demote (2026-05-25 audit).
+  history: 2026-05-25 audit는 모델 surface 미배선으로 L3 honest-demote. 2026-06-06
+  `permission_propose_pattern` tool 배선으로 모델-facing RECORDING 사이클이 닫혀
+  L4 재승격. 같은 날 host SHARED-store wiring으로 BASELINE-SEED RESIDUAL도 CLOSED
+  (gate user-approval이 baseline을 LIVE 시드 → 기능이 실제 USEFUL+SECURE; 위
+  BASELINE-SEED RESIDUAL — CLOSED 참조).
 
   Out-of-scope follow-ups: ML 분류기 v2(현재는 deterministic prefix-token sniffer;
   알려진 위험 플래그 over-fit 우려).

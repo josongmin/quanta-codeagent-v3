@@ -21,6 +21,7 @@
  * registered (byte-identical default menu).
  */
 
+import { errMessage } from "@/shared/errors"
 import type { PtyBackend } from "@/shared"
 import { FsJailError, resolveJailed } from "@/storage"
 import {
@@ -146,7 +147,7 @@ export const bunPtyFactory = (jailRoot: string): PtyFactoryPort => ({
       const jailed = resolveJailed(cwd, jailRoot)
       return { ok: true, cwd: jailed as unknown as string }
     } catch (e) {
-      const reason = e instanceof FsJailError ? e.message : String(e)
+      const reason = e instanceof FsJailError ? e.message : errMessage(e)
       return { ok: false, reason }
     }
   },

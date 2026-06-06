@@ -1106,3 +1106,223 @@ describe("session-loop — search-wire dispose threading (L5 M-11)", () => {
     expect(runtimeCalls.runtimeClose).toBe(1)
   })
 })
+
+// === #8 last-mile (jun-6) — CONCURRENT in-turn keystroke SOURCE wiring =========
+
+/**
+ * These hellgates seal the SOURCE half wired into the session loop: while a turn
+ * is in flight, the loop runs a concurrent `in-turn-reader` over the INJECTED
+ * stdin (default-OFF) and routes each completed line to
+ * `captureLine(line, currentTurnIndex)` ⇒ the plan-queue + the turn-boundary
+ * `externalPromptQueue` drain.
+ *
+ *   ON-1:  knob ON + a line typed during the turn ⇒ it lands on the plan-queue
+ *          tagged with the in-flight turn index AND drains as the next prompt.
+ *   ON-2:  multiple lines during one turn ⇒ all captured in order.
+ *   OFF-1: knob OFF ⇒ the reader is NEVER started (no listener attached, no
+ *          resume) ⇒ stdin stays detached, byte-identical to today.
+ *   LIFE-1: the reader is DISPOSED after the turn (listener detached, prior
+ *          paused state restored) — even when the turn THROWS.
+ */
+
+/** A fake stdin for the loop's `inTurnStdin` slot. It emits a queued line on
+ *  `resume()` — which the in-turn reader calls right after attaching its `data`
+ *  listener — so the line is delivered WHILE the reader is alive (i.e. during the
+ *  turn). Tracks listener count + raw/pause calls so we can prove lifecycle. */
+const makeLoopFakeStdin = (opts: {
+  isTTY?: boolean
+  emitOnResume?: readonly string[]
+}): import("../../../../src/apps/cli/repl/in-turn-reader").InTurnReaderStdin & {
+  listenerCount(): number
+  rawCalls: boolean[]
+  resumeCalls: number
+  pauseCalls: number
+} => {
+  const listeners: Array<(chunk: Buffer | string) => void> = []
+  const rawCalls: boolean[] = []
+  let isRaw = false
+  let paused = true
+  const queue = [...(opts.emitOnResume ?? [])]
+  const fake = {
+    isTTY: opts.isTTY ?? false,
+    get isRaw() {
+      return isRaw
+    },
+    isPaused: () => paused,
+    rawCalls,
+    resumeCalls: 0,
+    pauseCalls: 0,
+    setRawMode: (mode: boolean) => {
+      isRaw = mode
+      rawCalls.push(mode)
+      return fake
+    },
+    on: (_event: "data", listener: (chunk: Buffer | string) => void) => {
+      listeners.push(listener)
+      return fake
+    },
+    removeListener: (_event: "data", listener: (chunk: Buffer | string) => void) => {
+      const idx = listeners.indexOf(listener)
+      if (idx >= 0) listeners.splice(idx, 1)
+      return fake
+    },
+    resume: () => {
+      paused = false
+      fake.resumeCalls += 1
+      // Deliver the queued lines NOW — the reader has just attached its listener.
+      const pending = queue.splice(0, queue.length)
+      for (const chunk of pending) for (const l of [...listeners]) l(chunk)
+      return fake
+    },
+    pause: () => {
+      paused = true
+      fake.pauseCalls += 1
+      return fake
+    },
+    listenerCount: () => listeners.length,
+  }
+  return fake
+}
+
+describe("session-loop — in-turn keystroke SOURCE wiring (#8)", () => {
+  const KNOB = "QUANTA_MIDTURN_CAPTURE"
+  let prevKnob: string | undefined
+  let resetRuntimeConfig: () => void
+  let defaultPlanQueueStore: typeof import("@/agent/plan-queue").defaultPlanQueueStore
+
+  beforeAll(async () => {
+    ;({ __resetRuntimeConfig: resetRuntimeConfig } = await import("@/shared/runtime-config"))
+    ;({ defaultPlanQueueStore } = await import("@/agent/plan-queue"))
+  })
+  beforeEach(() => {
+    prevKnob = process.env[KNOB]
+  })
+  afterEach(() => {
+    if (prevKnob === undefined) delete process.env[KNOB]
+    else process.env[KNOB] = prevKnob
+    resetRuntimeConfig()
+  })
+
+  test("ON-1: a line typed during the turn lands on the plan-queue with the turn index + drains next turn", async () => {
+    process.env[KNOB] = "1"
+    resetRuntimeConfig()
+    const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
+    const setup = await buildSetup(undefined)
+    const sinks = buildSinks()
+    const planQueue = defaultPlanQueueStore()
+    const stdin = makeLoopFakeStdin({ emitOnResume: ["please also lint the repo\n"] })
+    // One interactive turn, then end.
+    promptQueue.push("do the work", null)
+    await runSessionLoop({
+      setup,
+      dispatchSlash: async () => false,
+      sinks,
+      registerExitTeardown: () => undefined,
+      planQueueStore: planQueue,
+      inTurnStdin: stdin,
+    })
+    // The captured line is on THIS thread's plan-queue partition, tagged with
+    // the in-flight turn index (1 — the first turn).
+    const snap = planQueue.peek(setup.sessionId as string)
+    expect(snap).toHaveLength(1)
+    expect(snap[0]?.text).toBe("please also lint the repo")
+    expect(snap[0]?.arrivedDuringTurn).toBe(1)
+    expect(snap[0]?.source).toBe("user_keystroke")
+    // The reader resumed the stream (it was consumed during the turn).
+    expect(stdin.resumeCalls).toBeGreaterThanOrEqual(1)
+  })
+
+  test("ON-2: multiple lines during one turn ⇒ all captured in order", async () => {
+    process.env[KNOB] = "1"
+    resetRuntimeConfig()
+    const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
+    const setup = await buildSetup(undefined)
+    const sinks = buildSinks()
+    const planQueue = defaultPlanQueueStore()
+    const stdin = makeLoopFakeStdin({ emitOnResume: ["first\n", "second\nthird\n"] })
+    promptQueue.push("go", null)
+    await runSessionLoop({
+      setup,
+      dispatchSlash: async () => false,
+      sinks,
+      registerExitTeardown: () => undefined,
+      planQueueStore: planQueue,
+      inTurnStdin: stdin,
+    })
+    const snap = planQueue.peek(setup.sessionId as string)
+    expect(snap.map((e) => e.text)).toEqual(["first", "second", "third"])
+  })
+
+  test("OFF-1: knob OFF ⇒ reader NEVER starts (no listener, no resume) — byte-identical", async () => {
+    delete process.env[KNOB]
+    resetRuntimeConfig()
+    const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
+    const setup = await buildSetup(undefined)
+    const sinks = buildSinks()
+    const planQueue = defaultPlanQueueStore()
+    const stdin = makeLoopFakeStdin({ emitOnResume: ["should never be read\n"] })
+    promptQueue.push("go", null)
+    await runSessionLoop({
+      setup,
+      dispatchSlash: async () => false,
+      sinks,
+      registerExitTeardown: () => undefined,
+      planQueueStore: planQueue,
+      inTurnStdin: stdin,
+    })
+    // No reader was ever attached ⇒ no listener, no resume, nothing captured.
+    expect(stdin.listenerCount()).toBe(0)
+    expect(stdin.resumeCalls).toBe(0)
+    expect(planQueue.peek(setup.sessionId as string)).toEqual([])
+  })
+
+  test("OFF-2: knob ON but no stdin injected ⇒ no reader (the loop short-circuits)", async () => {
+    process.env[KNOB] = "1"
+    resetRuntimeConfig()
+    const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
+    const setup = await buildSetup(undefined)
+    const sinks = buildSinks()
+    const planQueue = defaultPlanQueueStore()
+    promptQueue.push("go", null)
+    // inTurnStdin omitted ⇒ withInTurnCapture is a pure passthrough.
+    await expect(
+      runSessionLoop({
+        setup,
+        dispatchSlash: async () => false,
+        sinks,
+        registerExitTeardown: () => undefined,
+        planQueueStore: planQueue,
+      }),
+    ).resolves.toBeUndefined()
+    expect(planQueue.peek(setup.sessionId as string)).toEqual([])
+  })
+
+  test("LIFE-1: the in-turn reader is disposed after the turn — even when the turn THROWS", async () => {
+    process.env[KNOB] = "1"
+    resetRuntimeConfig()
+    const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
+    const setup = await buildSetup(undefined)
+    const sinks = buildSinks()
+    const planQueue = defaultPlanQueueStore()
+    const stdin = makeLoopFakeStdin({ emitOnResume: ["typed before the crash\n"] })
+    promptQueue.push("explode", null)
+    bridgeState.failWith = new Error("turn boom")
+    await runSessionLoop({
+      setup,
+      dispatchSlash: async () => false,
+      sinks,
+      registerExitTeardown: () => undefined,
+      planQueueStore: planQueue,
+      inTurnStdin: stdin,
+    })
+    // The turn threw (surfaced via renderTurnError) — but the reader's finally
+    // still ran: listener detached (no leak) + prior paused state restored.
+    expect(sinks.events).toContain("error")
+    expect(stdin.listenerCount()).toBe(0)
+    expect(stdin.pauseCalls).toBeGreaterThanOrEqual(1)
+    // The line typed before the crash was still captured (reader was alive).
+    expect(planQueue.peek(setup.sessionId as string).map((e) => e.text)).toEqual([
+      "typed before the crash",
+    ])
+  })
+})

@@ -1,13 +1,9 @@
 import type { OsSandboxProfile } from "@/runtime"
 import type { AutomationEnginePort } from "@/scheduler/automation-engine"
 import type { FileSystemPort } from "@/storage"
-import {
-  type AppshotArtifactSink,
-  type AppshotPort,
-  appshotVerifyTool,
-} from "./appshot"
 import { applyPatchTool } from "./apply-patch"
 import { makeApplyPatchStructuredTool } from "./apply-patch-structured-tool"
+import { type AppshotArtifactSink, type AppshotPort, appshotVerifyTool } from "./appshot"
 import { type ArtifactRegistryPort, artifactTools } from "./artifact"
 import { automationUpdateTool } from "./automation_update"
 import { makeBashTool } from "./bash"
@@ -42,6 +38,7 @@ import { localizeTool } from "./localize"
 import { mcpResourcesTools, type ResourcesHandle } from "./mcp_resources"
 import { type McpConnectorDiscoveryPort, mcpConnectorTools } from "./mcp-connector"
 import { parseTestFailureTool } from "./parse-test-failure"
+import { type PermissionPatternProposePort, permissionProposeTools } from "./permission-propose"
 import { type PtySessionPort, ptyTools } from "./pty"
 import { makeReadTool, readTool } from "./read"
 import { scriptedReplaceTool } from "./scripted-replace"
@@ -53,6 +50,34 @@ import { makeWriteTool, writeTool } from "./write"
 
 export { applyPatchTool, FsJailViolationError } from "./apply-patch"
 export { makeApplyPatchStructuredTool } from "./apply-patch-structured-tool"
+// `appshot` cluster (G1, RFC jun-6) — the CLOSED generation→verification loop
+// (`appshot_verify`): spec → scaffold → render → screenshot → LLM-judge →
+// iterate (bounded). Composes the existing browser_* + jailed-write +
+// artifact-store ends, all effects injected via `AppshotPort`. Caller-wired +
+// default-OFF: registered only when `DefaultToolPorts.appshot` is set (the
+// composition root passes a port wired to the real BrowserPort + LLM-judge +
+// jailed scaffold when `QUANTA_APPSHOT` is on).
+export {
+  APPSHOT_MAX_ITER,
+  APPSHOT_MAX_SCREENSHOT_BYTES,
+  APPSHOT_MIN_ITER,
+  type AppSpec,
+  type AppshotArtifactSink,
+  type AppshotPort,
+  type AppshotRequest,
+  type AppshotResult,
+  type AppshotToolOptions,
+  type AppshotVerifyInput,
+  appshotVerifyInputSchema,
+  appshotVerifyTool,
+  clampIter as appshotClampIter,
+  makeJailedScaffold,
+  renderScaffoldHtml,
+  runAppshotLoop,
+  type ScaffoldResult,
+  type ScaffoldWritePort,
+  type VerifyVerdict,
+} from "./appshot"
 // C1 — artifact (Canvas) read/manage tools. Caller-wired via
 // `DefaultToolPorts.artifactRegistry` (default-OFF; the host passes a session
 // registry when `QUANTA_ARTIFACT_STORE` is on). The duck-typed port keeps
@@ -232,34 +257,6 @@ export {
   imageGenTool,
   openAiImagePort,
 } from "./image-gen"
-// `appshot` cluster (G1, RFC jun-6) — the CLOSED generation→verification loop
-// (`appshot_verify`): spec → scaffold → render → screenshot → LLM-judge →
-// iterate (bounded). Composes the existing browser_* + jailed-write +
-// artifact-store ends, all effects injected via `AppshotPort`. Caller-wired +
-// default-OFF: registered only when `DefaultToolPorts.appshot` is set (the
-// composition root passes a port wired to the real BrowserPort + LLM-judge +
-// jailed scaffold when `QUANTA_APPSHOT` is on).
-export {
-  APPSHOT_MAX_ITER,
-  APPSHOT_MAX_SCREENSHOT_BYTES,
-  APPSHOT_MIN_ITER,
-  type AppshotArtifactSink,
-  type AppshotPort,
-  type AppshotRequest,
-  type AppshotResult,
-  type AppshotToolOptions,
-  type AppshotVerifyInput,
-  type AppSpec,
-  appshotVerifyInputSchema,
-  appshotVerifyTool,
-  clampIter as appshotClampIter,
-  makeJailedScaffold,
-  renderScaffoldHtml,
-  runAppshotLoop,
-  type ScaffoldResult,
-  type ScaffoldWritePort,
-  type VerifyVerdict,
-} from "./appshot"
 export type {
   LspNavProvider,
   LspNavSession,
@@ -363,6 +360,24 @@ export {
   parseTestFailure,
   parseTestFailureTool,
 } from "./parse-test-failure"
+// CLUSTER D #5 — model-facing permission self-propose tool
+// (`permission_propose_pattern`). Caller-wired via
+// `DefaultToolPorts.permissionPatternPropose` (default-OFF; the host wires a
+// port adapting `@/permission`'s `recordProposedPattern` over a per-session
+// `PatternGrantStore` ONLY when `QUANTA_REMEMBER_PATTERNS` is on). The duck-typed
+// `PermissionPatternProposePort` keeps `@/tool` fence-clean (no `@/permission`
+// import). NO-WIDEN / NO-SELF-GRANT enforced by the port; tool routes EXCLUSIVELY
+// through it.
+export {
+  type PermissionPatternProposePort,
+  type PermissionProposePatternInput,
+  PROPOSE_PATTERN_MAX,
+  type ProposePortInput,
+  type ProposePortResult,
+  type ProposeRejectReason as PermissionProposeRejectReason,
+  permissionProposePatternInputSchema,
+  permissionProposeTools,
+} from "./permission-propose"
 export {
   buildPlanTools,
   createPlanTool,
@@ -607,6 +622,15 @@ export interface DefaultToolPorts {
    *  when `QUANTA_ARTIFACT_STORE` is on. `register` is host-side (the generation
    *  tools register their outputs); the model only lists/inspects/destroys. */
   artifactRegistry?: ArtifactRegistryPort
+  /** CLUSTER D #5 — when set, append `permission_propose_pattern` (the model-
+   *  facing RECORDING half of ADR-0061's remember-patterns seam). Absent ⇒ tool
+   *  NOT registered (byte-identical default menu). The composition root wires a
+   *  port adapting `@/permission`'s `recordProposedPattern` over a per-session
+   *  `PatternGrantStore` ONLY when `QUANTA_REMEMBER_PATTERNS` is on AND it can
+   *  construct the store. The duck-typed port keeps `@/tool` fence-clean; the
+   *  no-widen / no-self-grant invariant is enforced inside the port (the tool
+   *  routes EXCLUSIVELY through it, never a raw store write). */
+  permissionPatternPropose?: PermissionPatternProposePort
   /** N2 — when set, append the MCP connector discovery tools
    *  (`mcp_connector_list` / `mcp_connector_install`). Absent ⇒ tools NOT
    *  registered (byte-identical). The composition root wires a discovery port
@@ -741,6 +765,13 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => {
   // host's session registry are appended.
   if (ports.artifactRegistry !== undefined) {
     base.push(...artifactTools(ports.artifactRegistry))
+  }
+  // CLUSTER D #5 — conditional registration of permission_propose_pattern. Absent
+  // port ⇒ default set is byte-identical (the model never sees the tool). Present
+  // ⇒ the self-propose tool bound to the host's no-widen recording port is
+  // appended (mutating; records into the session pattern store via the port).
+  if (ports.permissionPatternPropose !== undefined) {
+    base.push(...permissionProposeTools(ports.permissionPatternPropose))
   }
   // N2 — conditional registration of the MCP connector discovery tools. Absent
   // port ⇒ default set byte-identical. Present ⇒ `mcp_connector_list` /

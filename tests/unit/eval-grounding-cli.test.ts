@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
-import { mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { ResultStore } from "@/../src/apps/eval/storage"
 import type { GroundingPayload } from "@/../src/apps/eval/storage"
+import { ResultStore } from "@/../src/apps/eval/storage"
 
 const runEval = (...args: string[]) =>
   spawnSync(process.execPath, ["run", "src/apps/eval/index.ts", ...args], {
@@ -170,7 +170,10 @@ describe("eval grounding CLI", () => {
     )
     expect(badReplayCorpus.status).toBe(1)
     expect(badReplayCorpus.stderr).toContain("--corpus must be replay_critical or replay_nightly")
-  })
+    // Each `runEval` cold-spawns `bun run src/apps/eval/index.ts` (~13s app load);
+    // this test fires several, so the 5s default test timeout is structurally too
+    // tight (flaky timeout, not a logic failure). Generous bound for the subprocess.
+  }, 60_000)
 
   test("grounding run rejects invalid concurrency", () => {
     const out = runEval("grounding", "run", "--suite", "canary", "--concurrency", "0")
@@ -427,5 +430,7 @@ describe("eval grounding CLI", () => {
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
-  })
+    // Cold-spawns the eval CLI (~13s load) multiple times (baseline→candidate→
+    // compare); 5s default timeout is structurally too tight → flaky. Generous bound.
+  }, 60_000)
 })

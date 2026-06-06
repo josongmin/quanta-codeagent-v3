@@ -116,6 +116,11 @@ const CALLER_WIRE_TOOL_NAMES = [
   "artifact_get",
   "artifact_register",
   "artifact_destroy",
+  // CLUSTER D #5 — permission_propose_pattern (caller-wire behind
+  // DefaultToolPorts.permissionPatternPropose / QUANTA_REMEMBER_PATTERNS). Mutating
+  // (working_state_write); registers only when the host wires the no-widen port,
+  // so it is not enumerable from `defaultTools`.
+  "permission_propose_pattern",
   "coverage_check",
   "prompt_cache_status",
   "image_gen",

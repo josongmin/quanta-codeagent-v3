@@ -104,6 +104,9 @@ describe("mode mutating-table cross-check (ADR-0036)", () => {
     "mcp_connector_list",
     "mcp_connector_install",
     "communicate_update",
+    // CLUSTER D #5 — permission_propose_pattern caller-wire
+    // (DefaultToolPorts.permissionPatternPropose, QUANTA_REMEMBER_PATTERNS).
+    "permission_propose_pattern",
     "side_agent_spawn",
     "side_agent_list",
     "side_agent_stop",

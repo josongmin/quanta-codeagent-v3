@@ -433,6 +433,16 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   artifact_get: null,
   artifact_register: "working_state_write",
   artifact_destroy: "working_state_write",
+  // CLUSTER D #5 — permission_propose_pattern: the model-facing RECORDING half of
+  // ADR-0061 remember-patterns. It MUTATES the in-memory session pattern store
+  // (records a baseline-covered proposal into `allowed` so a future action
+  // auto-passes) — no FS/shell/git/network side effect, purely in-session durable
+  // permission state, so `working_state_write` is the right kind (plan PROPOSES a
+  // pattern grant; it does not commit one mid-turn). Caller-wire
+  // (DefaultToolPorts.permissionPatternPropose, QUANTA_REMEMBER_PATTERNS);
+  // PERMANENT entry so plan-mode dispatch never trips UnknownToolError when a host
+  // wires the port.
+  permission_propose_pattern: "working_state_write",
   // ADR-0487 — subagent_force_background: promote/reorder a QUEUED background
   // subagent within its own admission pool (move-to-front / burst-run). It only
   // reorders work the agent already requested — no NEW workspace mutation — so

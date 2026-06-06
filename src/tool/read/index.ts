@@ -209,11 +209,26 @@ const resolveReadOutcome = async (
  *  (still readable as JSON). NEVER throws. `offset`/`limit` then page the
  *  RENDERED text in `renderReadOk` exactly as for a raw file, and the H9
  *  dedup/mtime record (keyed by path+mtime, unchanged) is unaffected. */
+/** Per-cell-output char budget for the `.ipynb` render (NOT a whole-file cap).
+ *  Basis: a notebook can carry MANY cells × outputs, so each individual stream /
+ *  text-plain / traceback output is sub-budgeted to keep one pathological cell
+ *  from dominating, AFTER which the WHOLE rendered document is still subject to
+ *  the outer `capToolOutput` ceiling (`DEFAULT_TOOL_OUTPUT_MAX = 200_000`,
+ *  `tool/output-spill.ts`). 2_000 ≈ 1% of that whole-tool ceiling — generous for
+ *  a single output (a typical printed DataFrame / traceback is far smaller) yet
+ *  bounded so 100 cells cannot each emit a megabyte. Truncation is signalled
+ *  in-band by `renderNotebook` (the `… (+N chars elided)` marker), never silent.
+ *  Named (not a bare literal) so the basis is auditable; a future knob would add
+ *  it here, but it is intentionally NOT a knob today — it is a defensive bound
+ *  the model never needs to tune, and the outer cap is the operator-tunable one
+ *  (`QUANTA_TOOL_OUTPUT_MAX`). */
+const IPYNB_PER_OUTPUT_MAX_CHARS = 2_000
+
 const maybeRenderNotebook = (path: string, text: string): string => {
   if (!isNotebook(path)) return text
   const rendered = renderNotebook(text, {
     includeOutputs: runtimeConfig().ipynbIncludeOutputs,
-    maxOutputChars: 2000,
+    maxOutputChars: IPYNB_PER_OUTPUT_MAX_CHARS,
   })
   return rendered ?? text
 }

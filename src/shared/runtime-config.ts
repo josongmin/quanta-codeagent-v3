@@ -339,6 +339,15 @@ export interface RuntimeConfig {
    *  `DefaultToolPorts.artifactRegistry` (the generation tools register their
    *  outputs; the model lists/inspects/destroys via `artifact_*`). */
   readonly artifactStore: boolean
+  /** CLUSTER D #5 — remember-patterns RECORDING seam (`QUANTA_REMEMBER_PATTERNS`).
+   *  Strict opt-in (`=== "1"`). Default false ⇒ no `PatternGrantStore` is
+   *  constructed, `DefaultToolPorts.permissionPatternPropose` stays absent, and
+   *  `permission_propose_pattern` is NOT registered (byte-identical). When ON, the
+   *  composition root mints ONE per-session `PatternGrantStore` seeded with the
+   *  trusted user/policy baseline and wires the no-widen propose port (the model
+   *  may then propose baseline-covered pattern refinements; an uncovered proposal
+   *  is rejected — it can never self-grant a new capability). */
+  readonly rememberPatterns: boolean
   /** C6 — structured deny-reason surfacing (`QUANTA_DENY_REASON`). Strict opt-in
    *  (`=== "1"`). Default false ⇒ the `ToolFailure.permission_denied` envelope
    *  omits `denyReason`, the model-facing deny `content` carries no
@@ -831,6 +840,9 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // C1 — strict `=== "1"` opt-in. Default false ⇒ no artifact registry / tools
     // (byte-identical).
     artifactStore: env["QUANTA_ARTIFACT_STORE"] === "1",
+    // CLUSTER D #5 — strict `=== "1"` opt-in. Default false ⇒ no PatternGrantStore
+    // constructed, no permission_propose_pattern tool (byte-identical).
+    rememberPatterns: env["QUANTA_REMEMBER_PATTERNS"] === "1",
     // C6 — strict `=== "1"` opt-in. Default false ⇒ no structured deny reason
     // attached / no content prefix / DecisionEvent unchanged (byte-identical).
     surfaceDenyReason: env["QUANTA_DENY_REASON"] === "1",

@@ -45,6 +45,12 @@ export const buildSessionLoopOptions = async (deps: {
   featureCfg: CliFeatureConfig
   /** Injected by the host (repl.ts) so this slice never touches `process.env`. */
   env: NodeJS.ProcessEnv
+  /** #8 last-mile (jun-6) — the live stdin source for the CONCURRENT in-turn
+   *  keystroke reader. Injected by the host (repl.ts binds `process.stdin`) so
+   *  this slice + the loop never poke `process.stdin` directly. Threaded onto
+   *  the loop's `inTurnStdin` slot; only consumed when `QUANTA_MIDTURN_CAPTURE=1`
+   *  (the loop short-circuits otherwise ⇒ default-OFF byte-identical). */
+  inTurnStdin?: import("./in-turn-reader").InTurnReaderStdin
 }): Promise<SessionLoopArgs> => {
   const { setup, surfaceState, wires, rfc09, featureCfg, env } = deps
   return {
@@ -66,6 +72,9 @@ export const buildSessionLoopOptions = async (deps: {
     // #8 — the live plan-queue store, threaded so the loop can build the
     // mid-turn capture facade over it when QUANTA_MIDTURN_CAPTURE=1.
     planQueueStore: wires.planQueueStore,
+    // #8 last-mile (jun-6) — the stdin source for the in-turn reader (host-
+    // injected; default-OFF unless the capture knob is set). Spread by-presence.
+    ...(deps.inTurnStdin !== undefined ? { inTurnStdin: deps.inTurnStdin } : {}),
     runtimeFacadeCompose: wires.runtimeFacadeCompose,
     // ADR-0293 — seam attached by the loop once externalPromptQueue is born.
     playbookSeam: wires.playbookSeam,

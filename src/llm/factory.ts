@@ -213,7 +213,7 @@ const resolveReasoningCarryover = (env: EnvLikeDecl): boolean =>
  *  `claude-opus-4-8@20250101`) maps to the same family as the public slug. A
  *  model NOT in this set NEVER receives `ttl:"1h"` even when the knob is on —
  *  the codec stays byte-identical (5m) for it. */
-const CACHE_1H_ALLOWLIST: ReadonlySet<string> = new Set([
+export const CACHE_1H_ALLOWLIST: ReadonlySet<string> = new Set([
   "claude-opus-4-8",
   "claude-opus-4-7",
   "claude-opus-4-6",
@@ -226,12 +226,22 @@ const CACHE_1H_ALLOWLIST: ReadonlySet<string> = new Set([
  *  Strips a leading `anthropic.` vendor prefix (Bedrock), a trailing
  *  `-v<N>:<N>` Bedrock version, a trailing `@<date>` Vertex pin, and a trailing
  *  `-<8-digit-date>` public-API date suffix. Lowercased for case tolerance. */
-const normalizeModelFamily = (model: string): string => {
+export const normalizeModelFamily = (model: string): string => {
   let m = model.toLowerCase().trim()
   if (m.startsWith("anthropic.")) m = m.slice("anthropic.".length)
-  m = m.replace(/-v\d+:\d+$/, "") // Bedrock version suffix
-  m = m.replace(/@\d{6,}$/, "") // Vertex @date pin
-  m = m.replace(/-\d{8}$/, "") // public-API -YYYYMMDD suffix
+  // Peel trailing cloud affixes to a FIXPOINT so a combined slug
+  // (`…-v1:0-20250101`, `…-20250101-20250102`) collapses fully — a single
+  // ordered pass would peel only the outermost affix and leave a non-family
+  // key, so the allowlist lookup would non-deterministically miss. Bounded by
+  // the strict shrink each iteration causes (no affix ⇒ exit).
+  for (;;) {
+    const next = m
+      .replace(/-v\d+:\d+$/, "") // Bedrock version suffix
+      .replace(/@\d{6,}$/, "") // Vertex @date pin
+      .replace(/-\d{8}$/, "") // public-API -YYYYMMDD suffix
+    if (next === m) break
+    m = next
+  }
   return m
 }
 
@@ -239,7 +249,7 @@ const normalizeModelFamily = (model: string): string => {
  *  when the knob selected `"1h"` AND the model's family is on the
  *  {@link CACHE_1H_ALLOWLIST}; otherwise `"5m"` (byte-identical fixed-5m
  *  cache_control). Pure — `cfg` is the frozen runtime config. */
-const resolveCacheTtl = (model: string, cfg: { readonly cacheTtl: CacheTtl }): CacheTtl =>
+export const resolveCacheTtl = (model: string, cfg: { readonly cacheTtl: CacheTtl }): CacheTtl =>
   cfg.cacheTtl === "1h" && CACHE_1H_ALLOWLIST.has(normalizeModelFamily(model)) ? "1h" : "5m"
 
 /** Composition-root resolution of the ChatGPT-OAuth body-debug flag. Explicit

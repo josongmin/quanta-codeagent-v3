@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import type { HeaderLookup } from "@/llm/ratelimit-snapshot"
-import { parseRateLimitResetMs, parseRateLimitSnapshot } from "@/llm/ratelimit-snapshot"
+import {
+  MAX_RESET_HORIZON_MS,
+  parseRateLimitResetMs,
+  parseRateLimitSnapshot,
+} from "@/llm/ratelimit-snapshot"
 import { parseRetryAfterMs } from "@/shared"
 
 /**
@@ -201,7 +205,15 @@ describe("differential parity — reset band logic matches B3", () => {
         (name) => (name.toLowerCase() === "x-ratelimit-reset" ? raw : null),
         now,
       )
-      expect(mine).toBe(b3)
+      // DOCUMENTED divergence (R2 hardening): an absurd magnitude (> 1-year
+      // horizon, e.g. "1e308") that B3 surfaces raw is clamped to `undefined`
+      // here so a junk meter never drives a multi-millennium proactive delay.
+      // Everywhere else the snapshot parser is byte-for-byte identical to B3.
+      if (b3 !== undefined && b3 > MAX_RESET_HORIZON_MS) {
+        expect(mine).toBeUndefined()
+      } else {
+        expect(mine).toBe(b3)
+      }
     })
   }
 })

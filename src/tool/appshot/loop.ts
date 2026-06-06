@@ -28,7 +28,22 @@ import type { AppSpec, AppshotArtifactSink, AppshotPort, VerifyVerdict } from ".
 
 /** Hard floor/ceiling on the iteration cap so a caller can never request an
  *  unbounded (or zero) loop. The model picks within `[MIN, MAX]`; out-of-range
- *  is clamped, not rejected. */
+ *  is clamped, not rejected (and a non-finite request clamps to the SAFE
+ *  extreme — `APPSHOT_MIN_ITER`, never the ceiling: see {@link clampIter}).
+ *
+ *  Basis for MAX = 8 (a COST bound, not a correctness constant): each iteration
+ *  is one FULL scaffold→render(Chrome)→screenshot→LLM-judge cycle — the most
+ *  expensive thing this tool does (a real browser launch + a judge model call).
+ *  The cap exists ONLY to stop a stuck judge (one that never returns `pass`)
+ *  from burning unbounded browser launches + judge tokens; correctness does not
+ *  depend on the exact number because the loop ALSO terminates early on the
+ *  first `pass` and fail-closed on any effect error. 8 = a generous "refine a
+ *  handful of times" budget: the edit arrow folds each failing verdict's notes
+ *  forward, and in practice a converging app passes in 2-3; 8 leaves headroom
+ *  for a slow-converging spec without letting a non-converging one loop forever.
+ *  It is deliberately a small constant rather than a knob — it is a defensive
+ *  ceiling the model never needs to tune (it requests its own `max_iterations`
+ *  WITHIN this band), and the per-call request is the tunable axis. */
 export const APPSHOT_MIN_ITER = 1
 export const APPSHOT_MAX_ITER = 8
 /** PNG byte cap — refuse an oversize screenshot rather than judge it. Mirrors
