@@ -102,9 +102,9 @@ describe("buildMemoryConfig delegates to resolveMemoryConfigFromEnv (no copy-pas
     })
   })
 
-  test("distill 'OFF' (uppercase) → not opted out, equals factory", () => {
+  test("distill 'OFF' (uppercase) → opted out (case-insensitive gate vocab), equals factory", () => {
     process.env.QUANTA_MEMORY_DISTILL = "OFF"
-    expect(assertDelegated(undefined)?.distill).toBeUndefined()
+    expect(assertDelegated(undefined)?.distill).toBe(false)
   })
 
   test("recallTiers comma list → parsed + dedup, equals factory", () => {

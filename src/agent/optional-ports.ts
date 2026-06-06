@@ -4,7 +4,7 @@ import { dispatchSideConversation } from "@/agent/side-conversation"
 import { createSubagentMailbox } from "@/agent/subagent-mailbox"
 import type { LLMPort } from "@/llm"
 import { defaultRoleModelResolver, type RoleModelResolver } from "@/llm/role-model-override"
-import { gateOn } from "@/shared"
+import { gateOn, logger } from "@/shared"
 import { AgentMetaRegistry, TurnWakeRegistry } from "@/subagent"
 import type { CloseoutCritic, CloseoutCriticVerdict } from "./closeout-critic"
 import { buildCodeCellDispatchPort } from "./codemode-wire"
@@ -236,7 +236,15 @@ const wireCloseoutCritic = <T extends OptionalPortBase>(base: T, env: OptionalPo
   if (base.closeoutCritic?.critic !== undefined) return base
   const critic = buildReviewerBackedCloseoutCritic(base as unknown as AgentConfig)
   // No reviewer subagent available ⇒ NO port ⇒ fail-open (byte-identical).
-  if (critic === undefined) return base
+  // Surface this once at wire time: the operator turned the knob ON but the
+  // critic will silently never fire because no subagent runner is configured —
+  // a stderr warning makes the inert state visible instead of a silent no-op.
+  if (critic === undefined) {
+    logger.warn(
+      `QUANTA_CLOSEOUT_CRITIC is on but no reviewer subagent is configured (config.subagent absent) — the closeout critic will not run. Configure a subagent runner to enable it.`,
+    )
+    return base
+  }
   return {
     ...base,
     closeoutCritic: { ...base.closeoutCritic, critic },
@@ -281,7 +289,8 @@ const closeoutCriticPrompt = (
   finalText: string,
   history: ReadonlyArray<{ name: string }> | undefined,
 ): string => {
-  const tools = history !== undefined && history.length > 0 ? history.map((h) => h.name).join(", ") : "(none)"
+  const tools =
+    history !== undefined && history.length > 0 ? history.map((h) => h.name).join(", ") : "(none)"
   return [
     "You are a second-opinion critic at an agent turn's CLOSEOUT.",
     "The agent is about to declare the turn complete. Decide whether the draft",
@@ -316,13 +325,16 @@ const decodeCloseoutVerdict = (finalText: string): CloseoutCriticVerdict => {
     return { outcome: "denied", rationale: "critic returned non-JSON output", riskLevel: "medium" }
   }
   if (typeof decoded !== "object" || decoded === null) {
-    return { outcome: "denied", rationale: "critic returned a non-object reply", riskLevel: "medium" }
+    return {
+      outcome: "denied",
+      rationale: "critic returned a non-object reply",
+      riskLevel: "medium",
+    }
   }
   const rec = decoded as Record<string, unknown>
   const outcome = rec.outcome === "approved" ? "approved" : "denied"
-  const rationale = typeof rec.rationale === "string" && rec.rationale.length > 0
-    ? rec.rationale
-    : "(no rationale)"
+  const rationale =
+    typeof rec.rationale === "string" && rec.rationale.length > 0 ? rec.rationale : "(no rationale)"
   const riskLevel =
     rec.riskLevel === "low" || rec.riskLevel === "medium" || rec.riskLevel === "high"
       ? rec.riskLevel

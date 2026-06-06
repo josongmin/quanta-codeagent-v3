@@ -312,6 +312,58 @@ describe("account-ratelimit-snapshot — loop reachability (QUANTA_RATELIMIT_PRO
     expect(stream.events.some((e) => e.type === "ratelimit_snapshot")).toBe(false)
   })
 
+  test("F3 decouple: NOTICE alone (PROACTIVE off) ⇒ remaining=0 EMITS notice but NEVER sleeps", async () => {
+    // The round-2 F3 fix: the snapshot store + header hook + notice emit are now
+    // built when EITHER QUANTA_RATELIMIT_PROACTIVE *or* QUANTA_RATELIMIT_NOTICE is
+    // on — so the notice knob ALONE produces a `ratelimit_snapshot` event. The
+    // pre-request `sleep` stays gated on PROACTIVE only, so notice-only never
+    // delays the request.
+    const sleeps: number[] = []
+    const llm = new ScriptedLLM(
+      [
+        [
+          { type: "tool_use_start", id: "t1", name: "noop" },
+          { type: "tool_use_end", id: "t1", input: { note: "hi" } },
+          { type: "message_stop", stop_reason: "tool_use" },
+        ],
+        textScript("final answer"),
+      ],
+      [
+        { "anthropic-ratelimit-tokens-remaining": "0", "anthropic-ratelimit-tokens-reset": "5" },
+        undefined,
+      ],
+    )
+    const stream = new RecordingStream()
+    // NOTE: PROACTIVE is NOT set — only NOTICE. The injected now/sleep still ride
+    // AgentConfig.proactiveRateLimit (the clock injection is knob-independent).
+    const out = await withKnobs({ QUANTA_RATELIMIT_NOTICE: "1" }, () =>
+      runAgent(
+        baseCfg({
+          llm,
+          stream,
+          proactiveRateLimit: {
+            now: () => 1_000_000,
+            sleep: async (ms) => {
+              sleeps.push(ms)
+            },
+          },
+        }),
+      ),
+    )
+    expect(out.reason).toBe("completed")
+    // Header hook WAS wired (capture runs under notice too).
+    expect(llm.inputs[0]?.onResponseHeaders).toBeDefined()
+    // The reached-window notice WAS emitted...
+    const notice = stream.events.find((e) => e.type === "ratelimit_snapshot")
+    expect(notice).toBeDefined()
+    if (notice && notice.type === "ratelimit_snapshot") {
+      expect(notice.tokensRemaining).toBe(0)
+      expect(notice.tokensResetMs).toBe(5_000)
+    }
+    // ...but NO backoff sleep was applied (PROACTIVE off ⇒ notice-only never delays).
+    expect(sleeps).toEqual([])
+  })
+
   test("OFF ⇒ header hook NEVER wired, no delay, no notice (byte-identical)", async () => {
     const sleeps: number[] = []
     const llm = new ScriptedLLM(

@@ -160,9 +160,16 @@ describe("session-knobs default-OFF — canonical gate parse (no accidental-enab
     expect(leaked).toEqual([])
   })
 
+  // DELIBERATE strict-`1` SECURITY exceptions: code-mode gates execute
+  // model-authored code in the QuickJS-WASM sandbox, so they intentionally do
+  // NOT honor the loose truthy vocabulary — only the exact literal `"1"` arms
+  // them (a stray `=on`/`=true` must never accidentally enable code execution).
+  const SECURITY_STRICT_ONE = new Set<string>(["QUANTA_CODE_MODE", "QUANTA_CODE_MODE_ONLY"])
+
   test("each opt-in knob flips true for EVERY truthy token (1/on/true/yes, case+trim)", () => {
     const stuckOff: string[] = []
     for (const k of STRICT_ONE_KNOBS) {
+      if (SECURITY_STRICT_ONE.has(k.env)) continue // strict-`1` security carve-out
       for (const good of ENABLING_VALUES) {
         process.env[k.env] = good
         __resetRuntimeConfig()
@@ -174,6 +181,27 @@ describe("session-knobs default-OFF — canonical gate parse (no accidental-enab
     // Any entry here is a gate that did NOT honor the canonical vocabulary —
     // either stuck-off or still strict `=== "1"` (the inconsistency we removed).
     expect(stuckOff).toEqual([])
+  })
+
+  test("code-mode SECURITY gates stay strict `=== \"1\"` (loose truthy must NOT arm)", () => {
+    const leaked: string[] = []
+    for (const k of STRICT_ONE_KNOBS) {
+      if (!SECURITY_STRICT_ONE.has(k.env)) continue
+      // `"1"` arms; every OTHER truthy spelling must be REFUSED.
+      for (const loose of ["on", "true", "yes", "ON", " 1 "]) {
+        process.env[k.env] = loose
+        __resetRuntimeConfig()
+        if (k.read(runtimeConfig()) !== false) leaked.push(`${k.env}=${JSON.stringify(loose)}`)
+        delete process.env[k.env]
+        __resetRuntimeConfig()
+      }
+      process.env[k.env] = "1"
+      __resetRuntimeConfig()
+      if (k.read(runtimeConfig()) !== true) leaked.push(`${k.env}=stuck-off-on-"1"`)
+      delete process.env[k.env]
+      __resetRuntimeConfig()
+    }
+    expect(leaked).toEqual([])
   })
 })
 

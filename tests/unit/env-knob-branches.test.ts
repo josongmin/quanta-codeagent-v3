@@ -282,9 +282,9 @@ describe("buildMemoryConfig — sub-knob branches", () => {
     })
   })
 
-  test("distill='OFF' (uppercase) does NOT opt out (literal lowercase only)", () => {
+  test("distill='OFF' (uppercase) DOES opt out (case-insensitive canonical gate vocab)", () => {
     process.env.QUANTA_MEMORY_DISTILL = "OFF"
-    expect(buildMemoryConfig(undefined)?.distill).toBeUndefined()
+    expect(buildMemoryConfig(undefined)?.distill).toBe(false)
   })
 })
 

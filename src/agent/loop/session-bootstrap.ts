@@ -146,13 +146,20 @@ export const createRunAgentContext = async (config: AgentConfig): Promise<RunAge
       () => wm.snapshot(),
       () => Date.now(),
     )
-  const rateLimitProactive: TurnSession["rateLimitProactive"] = runtimeConfig().proactiveRateLimit
-    ? {
-        store: createRateLimitSnapshotStore(),
-        now: cfg.proactiveRateLimit?.now ?? Date.now,
-        sleep: cfg.proactiveRateLimit?.sleep ?? ((ms: number) => sleep(ms, cfg.signal)),
-      }
-    : undefined
+  // F3 decouple: the snapshot store + response-header capture are built when
+  // EITHER proactive-backoff OR the `QUANTA_RATELIMIT_NOTICE` render wants them,
+  // so the notice knob ALONE produces `ratelimit_snapshot` events. `proactive`
+  // distinguishes the two — only the backoff knob applies the pre-request sleep.
+  const rlProactive = runtimeConfig().proactiveRateLimit
+  const rateLimitProactive: TurnSession["rateLimitProactive"] =
+    rlProactive || runtimeConfig().ratelimitNotice
+      ? {
+          store: createRateLimitSnapshotStore(),
+          now: cfg.proactiveRateLimit?.now ?? Date.now,
+          sleep: cfg.proactiveRateLimit?.sleep ?? ((ms: number) => sleep(ms, cfg.signal)),
+          proactive: rlProactive,
+        }
+      : undefined
   const shellSnapshotSession: ShellSnapshotSession | undefined = buildShellSnapshotSession(
     cfg,
     (message) => cfg.stream.emit({ type: "error", message }),

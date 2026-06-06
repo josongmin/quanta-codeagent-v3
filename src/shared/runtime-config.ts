@@ -84,6 +84,19 @@ export const parseBool = (raw: string | undefined): boolean => {
   return raw === "1" || raw.toLowerCase() === "true" || raw.toLowerCase() === "on"
 }
 
+/** "Is the rate-limit NOTICE surface wanted?" — lenient truthy: absent / `""` /
+ *  `0` / `false` / `off` / `no` (case-insensitive) ⇒ false; ANY other value ⇒
+ *  true. Exported as the SINGLE SSOT predicate shared by the core loop
+ *  (snapshot-capture gate in `session-bootstrap`) and the CLI render gate
+ *  (`isRatelimitNoticeEnabled`). The notice and proactive-backoff both feed the
+ *  SAME snapshot store; this decides whether the store/capture is built when
+ *  proactive is OFF, so `QUANTA_RATELIMIT_NOTICE` alone produces snapshots. */
+export const ratelimitNoticeWanted = (raw: string | undefined): boolean => {
+  if (raw === undefined) return false
+  const norm = raw.trim().toLowerCase()
+  return !(norm === "" || norm === "0" || norm === "false" || norm === "off" || norm === "no")
+}
+
 /** Boolean knob that DEFAULTS to true: absent ⇒ true; an explicit off-vocabulary
  *  value (`0`/`false`/`off`, case-insensitive) ⇒ false; anything else ⇒ true.
  *  Used by the single default-ON knob (`QUANTA_IPYNB_OUTPUTS`) — see the field
@@ -515,6 +528,13 @@ export interface RuntimeConfig {
    *  feeds an `account-ratelimit` snapshot store and the loop pauses by the
    *  derived pre-request delay to avoid tripping the account limit. */
   readonly proactiveRateLimit: boolean
+  /** `QUANTA_RATELIMIT_NOTICE` (P27) — operator wants the transient CLI quota
+   *  notice. SSOT for the core loop's snapshot-capture gate: when ON (even with
+   *  `proactiveRateLimit` OFF) the loop builds the snapshot store + header hook
+   *  and EMITS `ratelimit_snapshot` on a reached window, so the CLI notice port
+   *  has events to render. Absent ⇒ false; the store is built only if proactive
+   *  is on (byte-identical). */
+  readonly ratelimitNotice: boolean
   /** N6 PTY backend selector (`QUANTA_PTY_BACKEND`). `tmux` (default,
    *  byte-identical) | `bun` (Bun-native terminal) | `both` (bun w/ tmux
    *  fallback). Only consulted when `ptyAttach` is on (else no PTY tools are
@@ -1228,6 +1248,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // capture no ratelimit headers and the loop inserts no pre-request delay
     // (byte-identical).
     proactiveRateLimit: gateOn(env, "QUANTA_RATELIMIT_PROACTIVE"),
+    ratelimitNotice: ratelimitNoticeWanted(env.QUANTA_RATELIMIT_NOTICE),
     // N6 PTY backend selector. Default "tmux" ⇒ byte-identical to pre-slice path.
     ptyBackend: parsePtyBackend(env["QUANTA_PTY_BACKEND"]),
     // H18/keyring — strict `=== "1"` opt-in. Default false ⇒ MCP OAuth uses the

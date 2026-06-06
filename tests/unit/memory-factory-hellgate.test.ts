@@ -184,12 +184,12 @@ describe("buildMemoryForSession — distill / consolidate / selfEdit env opt-out
     })
   })
 
-  test("QUANTA_MEMORY_DISTILL=OFF (uppercase) does NOT opt out (literal lowercase only — legacy invariant)", () => {
+  test("QUANTA_MEMORY_DISTILL=OFF (uppercase) DOES opt out (case-insensitive canonical gate vocab)", () => {
     withTmpSqlite((p) => {
       const slot = buildMemoryForSession(
         env({ QUANTA_MEMORY_PATH: p, QUANTA_MEMORY_DISTILL: "OFF" }),
       )
-      expect(slot.config?.distill).toBeUndefined()
+      expect(slot.config?.distill).toBe(false)
     })
   })
 

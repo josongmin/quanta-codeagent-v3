@@ -23,22 +23,18 @@
  */
 
 import { type RateLimitSnapshot, snapshotToNotice } from "@/llm/ratelimit-snapshot"
+import { ratelimitNoticeWanted } from "@/shared"
 import type { StreamPort } from "@/stream"
 import type { StatusBar } from "./status-bar"
 
 /** Truthy/falsy gate. P27 is DEFAULT-OFF, so — unlike the spinner — UNSET is
- *  also OFF: the operator must opt in. Mirrors the strict `working-state`
- *  knob parse (only `1`/`on`/`true`/non-falsy enables). Pure: reads only its
- *  argument. */
-export const isRatelimitNoticeEnabled = (env: NodeJS.ProcessEnv): boolean => {
-  const raw = env.QUANTA_RATELIMIT_NOTICE
-  if (raw === undefined) return false
-  const norm = raw.trim().toLowerCase()
-  if (norm === "" || norm === "0" || norm === "false" || norm === "off" || norm === "no") {
-    return false
-  }
-  return true
-}
+ *  also OFF: the operator must opt in. Delegates to the SHARED
+ *  `ratelimitNoticeWanted` SSOT predicate (`@/shared`) so this CLI render gate
+ *  and the core loop's snapshot-CAPTURE gate (`session-bootstrap`, which builds
+ *  the snapshot store/header-hook when this is on even with proactive OFF) read
+ *  ONE definition — `QUANTA_RATELIMIT_NOTICE` alone both captures AND renders. */
+export const isRatelimitNoticeEnabled = (env: NodeJS.ProcessEnv): boolean =>
+  ratelimitNoticeWanted(env.QUANTA_RATELIMIT_NOTICE)
 
 /** Transient notice dwell time (ms). The status-bar auto-reverts to its
  *  default text after this window. 4 s is long enough to read a short notice

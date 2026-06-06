@@ -164,8 +164,12 @@ export const streamConsume = async (
     if (snapshot !== undefined) {
       const delayMs = proactiveDelayMs(snapshot)
       if (delayMs > 0) {
+        // F3 decouple: emit the reached-window notice in BOTH modes (proactive
+        // backoff AND notice-only), but apply the pre-request backoff `sleep`
+        // ONLY under proactive — so `QUANTA_RATELIMIT_NOTICE` alone renders the
+        // notice without ever delaying the request (byte-identical no-sleep).
         config.stream.emit(snapshotToNotice(snapshot))
-        await rateLimitProactive.sleep(delayMs)
+        if (rateLimitProactive.proactive) await rateLimitProactive.sleep(delayMs)
       }
     }
   }

@@ -21,6 +21,18 @@
  * WRONG group. The ppid-walk needs no new deps (`ps` exists on macOS + Linux),
  * is what Cursor's proclist does, and is race-minimised by signalling the root
  * FIRST (stops new forks before we enumerate the rest of the tree).
+ *
+ * KNOWN LIMITATION (honest — verified by a real-process repro): a child that
+ * DOUBLE-FORKS / daemonizes (`( cmd & )`, `disown`, an explicit `setsid`) escapes.
+ * It reparents to init (ppid=1) at startup — BEFORE the `ps` snapshot — so it is
+ * no longer reachable from `rootPid` in the ppid graph, and root-first signalling
+ * cannot help because the detach already happened. This is inherent to EVERY
+ * ppid-walk teardown (Cursor's proclist has the same gap); only an OS process
+ * group (a negative-pgid kill, requiring spawn-time group leadership Bun does not
+ * expose, and `setsid` which is absent on macOS) would catch it. The COMMON
+ * agent case — a build/test/dev-server tree `bash → node → workers` that stays in
+ * the ppid graph — IS reaped; the deliberately-detaching case is not. Do NOT
+ * describe this killer as "orphan-proof".
  */
 
 export type TreeSignal = "SIGTERM" | "SIGKILL"

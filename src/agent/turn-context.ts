@@ -164,6 +164,12 @@ export interface TurnSession {
     readonly store: RateLimitSnapshotStore
     readonly now: () => number
     readonly sleep: (ms: number) => Promise<void>
+    /** F3 decouple: this snapshot-capture object is built when proactive-backoff
+     *  OR the `QUANTA_RATELIMIT_NOTICE` render is wanted. `proactive` is true ONLY
+     *  for the backoff knob — the loop EMITS the reached-window notice in BOTH
+     *  modes but applies the pre-request `sleep` ONLY when `proactive` (so
+     *  notice-only never delays the request, byte-identical to no-proactive). */
+    readonly proactive: boolean
   }
 }
 
