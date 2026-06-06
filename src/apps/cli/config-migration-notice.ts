@@ -23,7 +23,7 @@ import {
   type MigrationItemType,
   runConfigMigration,
 } from "@/migration/external-config"
-import { runtimeConfig } from "@/shared"
+import { gateOn, runtimeConfig } from "@/shared"
 
 /** Order item types appear in the notice (stable, deterministic). */
 const TYPE_ORDER: readonly MigrationItemType[] = [
@@ -137,7 +137,7 @@ export const runConfigMigrationImport = async (
     return undefined
   }
   // The persist is a SEPARATE confirmed opt-in beyond the feature gate.
-  if (!migrateConfig || env.QUANTA_MIGRATE_CONFIG_IMPORT !== "1") return undefined
+  if (!migrateConfig || !gateOn(env, "QUANTA_MIGRATE_CONFIG_IMPORT")) return undefined
   try {
     const result = await importExternalConfig({
       enabled: true,

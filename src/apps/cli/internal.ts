@@ -82,7 +82,7 @@ import {
 } from "@/runtime/shell-snapshot"
 import type { ShellSnapshotMetric } from "@/runtime/shell-snapshot/metric-port"
 import { loadSessionById, renameSession } from "@/session"
-import { gateDisabled, logger, type RunContext, runtimeConfig } from "@/shared"
+import { gateDisabled, gateOn, logger, type RunContext, runtimeConfig } from "@/shared"
 import { MCPRootSchema, PLUGIN_MCP_FILE } from "@/skill/plugin-manifest"
 import type { AssistantTextPainter, StreamPort } from "@/stream"
 import {
@@ -145,7 +145,7 @@ export const pickPersona = (): PersonaKind => resolvePersona(process.env)
  *  unknown-mode fallback line (no throw, no silent default to "default"
  *  — the operator's typo is surfaced via the prompt itself). */
 export const pickIdentity = (): readonly string[] | undefined => {
-  if (process.env.QUANTA_IDENTITY !== "1") return undefined
+  if (!gateOn(process.env, "QUANTA_IDENTITY")) return undefined
   const raw = process.env.QUANTA_IDENTITY_MODE ?? "default"
   return defaultIdentityProvider().identityFor(raw as IdentityMode)
 }
@@ -611,13 +611,13 @@ export const observeDir = (): string | undefined => {
 }
 
 /** Plan mode is on when `QUANTA_PLAN=1` or `--plan` is present. */
-export const planEnabled = (): boolean => process.env.QUANTA_PLAN === "1" || hasArg("--plan")
+export const planEnabled = (): boolean => gateOn(process.env, "QUANTA_PLAN") || hasArg("--plan")
 
 /** LSP diagnostics tool is on when `QUANTA_LSP=1` or `--lsp` is present.
  *  Default OFF: `defaultTools` already registers a no-op `diagnostics`; this
  *  only swaps in the real language-server-backed provider when asked. The
  *  bridge itself still degrades gracefully if a server binary is absent. */
-export const lspEnabled = (): boolean => process.env.QUANTA_LSP === "1" || hasArg("--lsp")
+export const lspEnabled = (): boolean => gateOn(process.env, "QUANTA_LSP") || hasArg("--lsp")
 
 /** Codex `may-20-codex-lsp.md` absorption (ADR-0015). LSP NAV tools
  *  (definition / references / hover / type_definition / implementation /
@@ -629,7 +629,7 @@ export const lspNavEnabled = (): boolean => process.env.QUANTA_LSP_TOOLS === "fu
 /** Codex `may-20-codex-signal.md` absorption (ADR-0016). First-class
  *  git tools (diff/status/log/blame) are NOT in `defaultTools` to keep the
  *  default registry byte-identical. Opt-in via `QUANTA_GIT_TOOLS=1`. */
-export const gitToolsEnabled = (): boolean => process.env.QUANTA_GIT_TOOLS === "1"
+export const gitToolsEnabled = (): boolean => gateOn(process.env, "QUANTA_GIT_TOOLS")
 
 /** MCP crash-detection + auto-restart (ADR-0435). Default-OFF: when unset,
  *  `loadMcpTools` runs the single-client path and MCP behavior is
@@ -893,7 +893,7 @@ export interface BuildShellSnapshotConfigOpts {
 export const buildShellSnapshotConfig = (
   opts: BuildShellSnapshotConfigOpts = {},
 ): AgentConfig["shellSnapshot"] | undefined => {
-  const enabled = process.env.QUANTA_SHELL_SNAPSHOT === "1" || hasArg("--shell-snapshot")
+  const enabled = gateOn(process.env, "QUANTA_SHELL_SNAPSHOT") || hasArg("--shell-snapshot")
   if (!enabled) return undefined
   const intEnv = (key: string): number | undefined => {
     const raw = process.env[key]
@@ -1287,7 +1287,7 @@ export const loadFeatures = async (
   opts: LoadFeaturesOpts = {},
 ): Promise<Features> => {
   const planMode = planEnabled()
-  const metrics = process.env.QUANTA_METRICS === "1" ? new Metrics() : undefined
+  const metrics = gateOn(process.env, "QUANTA_METRICS") ? new Metrics() : undefined
   const state = statePath()
   const resume = resumePath()
   const mcpConfigs = await readMcpConfig(slog)
@@ -1539,10 +1539,10 @@ export const buildTooling = (
     ...(sandboxProfile !== undefined ? { sandboxProfile } : {}),
     // ADR-0464 — CLI surface owns the env read; default-ON in the CLI is seeded
     // by the gate-default block in index.ts (so unset ⇒ "1" ⇒ tool registered).
-    ...(process.env.QUANTA_ENABLE_STRUCTURED_PATCH === "1" ? { structuredPatch: true } : {}),
+    ...(gateOn(process.env, "QUANTA_ENABLE_STRUCTURED_PATCH") ? { structuredPatch: true } : {}),
     // ADR-0165 — same posture as structuredPatch: CLI owns the env read,
     // default-ON via the SSOT-derived gate-default seed in index.ts.
-    ...(process.env.QUANTA_COVERAGE_TOOL === "1" ? { coverageCheck: true } : {}),
+    ...(gateOn(process.env, "QUANTA_COVERAGE_TOOL") ? { coverageCheck: true } : {}),
     ...(budgetRemainingPercent !== undefined ? { budgetRemainingPercent } : {}),
   })
 }

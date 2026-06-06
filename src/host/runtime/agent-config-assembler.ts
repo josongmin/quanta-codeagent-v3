@@ -324,7 +324,7 @@ const maybeWireBrowser = (cfg: AgentConfig, env: AssemblerEnv): void => {
  *  default-OFF). Caller-override-safe: a pre-set `cfg.appshot` is preserved.
  *  Reads env off the injected `env` view (never `process.env`). */
 const maybeWireAppshot = (cfg: AgentConfig, env: AssemblerEnv): void => {
-  if (env.QUANTA_APPSHOT !== "1") return
+  if (!gateOn(env, "QUANTA_APPSHOT")) return
   const slot = cfg as AgentConfig & {
     appshot?: AppshotSlot
     browser?: { port: BrowserPort }
@@ -359,7 +359,7 @@ const maybeWireObjective = (cfg: AgentConfig, env: AssemblerEnv): void => {
   // web-daemon, so a default-ON would change their tool menu (and SWE-bench
   // reproducibility). The CLI host seeds `QUANTA_OBJECTIVE_TOOLS=1` (index.ts)
   // to opt in; other surfaces stay byte-identical unless they set it.
-  if (env.QUANTA_OBJECTIVE_TOOLS !== "1") return
+  if (!gateOn(env, "QUANTA_OBJECTIVE_TOOLS")) return
   const slot = cfg as AgentConfig & { objective?: ObjectivePort }
   if (slot.objective !== undefined) return
   slot.objective = createObjectiveStore()
@@ -370,7 +370,7 @@ const maybeWireObjective = (cfg: AgentConfig, env: AssemblerEnv): void => {
  *  parallel-worker router so spawned children can exchange messages. */
 const maybeWireMailbox = (cfg: AgentConfig, env: AssemblerEnv): void => {
   // Opt-in (shared assembler — see maybeWireObjective). CLI seeds it ON.
-  if (env.QUANTA_SUBAGENT_MAILBOX !== "1") return
+  if (!gateOn(env, "QUANTA_SUBAGENT_MAILBOX")) return
   const slot = cfg as AgentConfig & { subagentMailbox?: MailboxPort }
   if (slot.subagentMailbox !== undefined) return
   slot.subagentMailbox = createSubagentMailbox()
@@ -458,7 +458,7 @@ const wireOptionalCapabilitySlots = (cfg: AgentConfig, env: AssemblerEnv): void 
  *  / no cap ⇒ slot unset ⇒ no counter, byte-identical (default-OFF). */
 const maybeWireWriteBudget = (cfg: AgentConfig, env: AssemblerEnv): void => {
   if (cfg.writeBudget !== undefined) return
-  if (env["QUANTA_WRITE_BUDGET"] !== "1") return
+  if (!gateOn(env, "QUANTA_WRITE_BUDGET")) return
   const max = parseWriteBudgetMax(env["QUANTA_WRITE_BUDGET_MAX"])
   if (max === undefined) return
   cfg.writeBudget = createSessionWriteBudget({
@@ -491,7 +491,7 @@ const parseWriteBudgetMax = (raw: string | undefined): number | undefined => {
  *  the dedicated runner still honors the per-pass `maxTurns` + the registry's
  *  `maxConcurrent` guard. */
 const maybeWireSideAgent = (cfg: AgentConfig, env: AssemblerEnv): void => {
-  if (env.QUANTA_SIDE_AGENT !== "1") return
+  if (!gateOn(env, "QUANTA_SIDE_AGENT")) return
   const slot = cfg as AgentConfig & { sideAgentDaemons?: unknown }
   if (slot.sideAgentDaemons !== undefined) return
   const mailbox = (cfg as AgentConfig & { subagentMailbox?: MailboxPort }).subagentMailbox
@@ -512,7 +512,7 @@ const maybeWireSideAgent = (cfg: AgentConfig, env: AssemblerEnv): void => {
  *  cache buckets. Caller-override-safe; absent gate ⇒ slot unset ⇒ no feed, no
  *  tool (byte-identical default-OFF). */
 const maybeWirePromptCacheObserver = (cfg: AgentConfig, env: AssemblerEnv): void => {
-  if (env.QUANTA_PROMPT_CACHE_STATUS !== "1") return
+  if (!gateOn(env, "QUANTA_PROMPT_CACHE_STATUS")) return
   if (cfg.promptCacheObserver !== undefined) return
   cfg.promptCacheObserver = defaultPromptCacheObserver()
 }
@@ -614,7 +614,7 @@ export const createPassiveVcsStreamSink = (stream: StreamPort): PassiveVcsEventS
  *  is byte-identical (default-OFF). The sink emits onto `cfg.stream` — the SAME
  *  stream the loop's other AgentEvents ride. */
 const maybeWireVcsEventSink = (cfg: AgentConfig, env: AssemblerEnv): void => {
-  if (env.QUANTA_PASSIVE_VCS !== "1") return
+  if (!gateOn(env, "QUANTA_PASSIVE_VCS")) return
   if (cfg.vcsEventSink !== undefined) return
   cfg.vcsEventSink = createPassiveVcsStreamSink(cfg.stream)
 }
@@ -663,7 +663,7 @@ export const assembleAgentConfig = (req: AssembleRequest, env: AssemblerEnv): Ag
     // never reads `process.env` itself (slice-boundary invariant). Caller
     // override on `req.base` wins; otherwise `QUANTA_LSP_DIAGNOSTICS_HOOK=1`.
     lspDiagnosticsHookEnabled:
-      req.base.lspDiagnosticsHookEnabled ?? env.QUANTA_LSP_DIAGNOSTICS_HOOK === "1",
+      req.base.lspDiagnosticsHookEnabled ?? gateOn(env, "QUANTA_LSP_DIAGNOSTICS_HOOK"),
     // ADR-0412 — resolve the check_secrets tool gate HERE. Caller override on
     // `req.base` wins; otherwise `QUANTA_SECRET_CHECK_TOOL=on`.
     secretCheckToolEnabled:

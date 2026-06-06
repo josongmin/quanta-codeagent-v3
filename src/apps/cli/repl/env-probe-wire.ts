@@ -46,7 +46,7 @@ import {
   runEnvProbe,
   type StartupWarning,
 } from "@/runtime/env-probe"
-import { errMessage, type Result } from "@/shared"
+import { errMessage, gateOn, type Result } from "@/shared"
 
 /** Structural mirror of the user-facing notice channel. The host passes the
  *  real `StreamPort` (`@/stream`); we only need `emit` of an `in_progress`
@@ -97,7 +97,7 @@ const DEFAULT_PROBE_TIMEOUT_MS = 5_000
 
 /** True iff the gate is the literal `"1"` (case-sensitive). Anything else
  *  (`undefined` / `"0"` / `"true"` / `""`) is OFF. */
-const isGateOn = (env: NodeJS.ProcessEnv): boolean => env.QUANTA_ENABLE_ENV_PROBE === "1"
+const isGateOn = (env: NodeJS.ProcessEnv): boolean => gateOn(env, "QUANTA_ENABLE_ENV_PROBE")
 
 /** Parse the timeout knob. Non-positive / non-finite / unset ⇒ the documented
  *  default. No heuristic — a single explicit env integer or the constant. */

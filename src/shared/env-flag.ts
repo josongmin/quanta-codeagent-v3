@@ -60,3 +60,26 @@ export const gateDisabled = (env: Record<string, string | undefined>, name: stri
   const raw = env[name]
   return raw !== undefined && GATE_FALSY.has(raw.trim().toLowerCase())
 }
+
+/**
+ * STRICT opt-in for SECURITY gates — ON only for the EXACT literal `"1"`. A loose
+ * spelling (`on`/`true`/`yes`/` 1 `) is REFUSED. Use this (NOT {@link gateOn})
+ * for capabilities where an accidental enable is dangerous — e.g. code-mode
+ * (executes model-authored code in the QuickJS-WASM sandbox). The strictness is
+ * the safety property: arming a dangerous capability must be a deliberate,
+ * unambiguous `=1`, never a stray truthy value.
+ */
+export const gateOnStrict = (env: Record<string, string | undefined>, name: string): boolean =>
+  env[name] === "1"
+
+/**
+ * STRICT kill-switch for SECURITY protections — disabled only for the EXACT
+ * literal `"off"`. A loose `"0"`/`"false"`/`"no"` does NOT drop the protection.
+ * Use this (NOT {@link gateDisabled}) for safety controls that default ON and
+ * must not be silently disabled — e.g. the filesystem jail. Tearing down a
+ * protection requires the deliberate, unambiguous `=off`.
+ */
+export const gateDisabledStrict = (
+  env: Record<string, string | undefined>,
+  name: string,
+): boolean => env[name] === "off"

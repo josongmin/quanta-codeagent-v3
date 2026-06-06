@@ -66,7 +66,7 @@ const resolveObservableFactory = async (
   // gated ON, so the emitter (observability) / canvas sink shares ONE facade
   // (= ONE session host) with the served session. Both gates OFF ⇒ the lazy
   // factory passes through unchanged + facade is undefined (byte-identical).
-  if (!gateOn(process.env, "QUANTA_OBSERVABILITY") && process.env.QUANTA_WEB_CANVAS !== "1") {
+  if (!gateOn(process.env, "QUANTA_OBSERVABILITY") && !gateOn(process.env, "QUANTA_WEB_CANVAS")) {
     return { runtimeFactory: baseFactory, facade: undefined }
   }
   const facade = (await baseFactory()) as ObservableRuntimeFacade
@@ -172,7 +172,7 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
     handle = await startWebDaemon(config)
   } catch (error) {
     const msg = errMessage(error)
-    const strict = process.env.QUANTA_WEB_STRICT_PORT === "1"
+    const strict = gateOn(process.env, "QUANTA_WEB_STRICT_PORT")
     if (strict || !msg.toLowerCase().includes("port")) throw error
     process.stderr.write(
       `web-daemon: port ${config.port} in use — falling back to OS-picked port\n`,

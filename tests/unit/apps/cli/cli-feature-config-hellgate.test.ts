@@ -328,13 +328,17 @@ describe("ADR-0297 readCliFeatureConfig — env-knob sweep", () => {
     expect(readCliFeatureConfig({}, true, true).decisionMetricsEnabled).toBe(false)
   })
 
-  test("QUANTA_METRICS=1 toggles workMetricsSinkEnabled (and only the literal '1')", () => {
+  test("QUANTA_METRICS toggles workMetricsSinkEnabled (canonical truthy vocab)", () => {
     expect(readCliFeatureConfig({ QUANTA_METRICS: "1" }, true, true).workMetricsSinkEnabled).toBe(
       true,
     )
+    // Post-unification: `true`/`on` enable too (uniform with every other gate).
     expect(
       readCliFeatureConfig({ QUANTA_METRICS: "true" }, true, true).workMetricsSinkEnabled,
-    ).toBe(false)
+    ).toBe(true)
+    expect(readCliFeatureConfig({ QUANTA_METRICS: "0" }, true, true).workMetricsSinkEnabled).toBe(
+      false,
+    )
     expect(readCliFeatureConfig({}, true, true).workMetricsSinkEnabled).toBe(false)
   })
 })

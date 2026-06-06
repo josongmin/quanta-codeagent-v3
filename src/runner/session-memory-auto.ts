@@ -36,7 +36,7 @@ import {
 } from "@/memory/cross-session"
 import { type DreamOutcomeKind, INITIAL_DREAM_STATE } from "@/memory/dream/types"
 import { JsonlFileStage1Store, type Stage1OutputsStore } from "@/memory/stage1-store"
-import { errMessage, throwIfAborted } from "@/shared"
+import { errMessage, gateOn, throwIfAborted } from "@/shared"
 
 const noopWarn = (_msg: string): void => {}
 
@@ -392,7 +392,7 @@ export const buildCrossSessionDreamTrigger = (deps: {
   readonly logWarn: (msg: string) => void
 }): CrossSessionDreamTrigger | undefined => {
   const view: DreamConfigView = {
-    autoDream: deps.env.QUANTA_AUTO_DREAM === "1",
+    autoDream: gateOn(deps.env, "QUANTA_AUTO_DREAM"),
     autoDreamSessions: parsePositiveIntOrUndefined(deps.env.QUANTA_AUTO_DREAM_SESSIONS),
     autoDreamHours: parsePositiveNumberOrUndefined(deps.env.QUANTA_AUTO_DREAM_HOURS),
   }

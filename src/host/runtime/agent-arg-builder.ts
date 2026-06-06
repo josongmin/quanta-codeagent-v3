@@ -159,7 +159,7 @@ export class ProviderKeyMissingError extends Error {
 }
 
 const resolveIdentityFromEnv = (env: NodeJS.ProcessEnv): readonly string[] | undefined => {
-  if (env.QUANTA_IDENTITY !== "1") return undefined
+  if (!gateOn(env, "QUANTA_IDENTITY")) return undefined
   const raw = env.QUANTA_IDENTITY_MODE ?? "default"
   return defaultIdentityProvider().identityFor(raw as IdentityMode)
 }
@@ -345,7 +345,7 @@ const resolveSelectedProfile = (
  *  the entire codebase. `@/runner/assemble/retrieval.ts` is env-free; the
  *  surface (this file) projects ENV → typed input. */
 const isRetrievalHybridEnabled = (env: NodeJS.ProcessEnv): boolean =>
-  env.QUANTA_RETRIEVAL_HYBRID === "1"
+  gateOn(env, "QUANTA_RETRIEVAL_HYBRID")
 
 /** ADR-0196 — pick the MCP capability negotiator from env. `QUANTA_MCP_CAPS=full`
  *  swaps to {@link fullNegotiator} which advertises `{tools, elicitation, tasks}`.
@@ -562,7 +562,7 @@ export const installCommandHooksIntoBase = (
   env: NodeJS.ProcessEnv,
   bindings: readonly CommandHookBinding[] | undefined,
 ): void => {
-  if (env.QUANTA_COMMAND_HOOKS !== "1") return // default-OFF
+  if (!gateOn(env, "QUANTA_COMMAND_HOOKS")) return // default-OFF
   const config: CommandHookConfig = {
     enabled: true,
     ...(env.QUANTA_COMMAND_HOOKS_ACK !== undefined
@@ -772,16 +772,16 @@ const buildGatedToolPorts = (
   // very registry the artifact_* tools read). Absent ⇒ `undefined` ⇒ both the
   // `artifactRegistry` slot AND the appshot sink stay omitted (byte-identical).
   const artifactRegistry =
-    process.env.QUANTA_ARTIFACT_STORE === "1"
+    gateOn(process.env, "QUANTA_ARTIFACT_STORE")
       ? createArtifactRegistry({ now: () => Date.now(), idFactory: monotonicIdFactory() })
       : undefined
   return {
     // ADR-0464 — gated structured-apply tool. Default-OFF: tool menu is
     // byte-identical unless QUANTA_ENABLE_STRUCTURED_PATCH === "1".
-    ...(process.env.QUANTA_ENABLE_STRUCTURED_PATCH === "1" ? { structuredPatch: true } : {}),
+    ...(gateOn(process.env, "QUANTA_ENABLE_STRUCTURED_PATCH") ? { structuredPatch: true } : {}),
     // ADR-0165 — gated coverage_check tool. Default-OFF: tool menu is
     // byte-identical unless QUANTA_COVERAGE_TOOL === "1".
-    ...(process.env.QUANTA_COVERAGE_TOOL === "1" ? { coverageCheck: true } : {}),
+    ...(gateOn(process.env, "QUANTA_COVERAGE_TOOL") ? { coverageCheck: true } : {}),
     // C1 — gated artifact (Canvas) tools. Default-OFF: tool menu byte-identical
     // unless QUANTA_ARTIFACT_STORE === "1". Mints ONE per-session registry
     // (real clock + monotonic id factory) shared by the artifact_* tools.

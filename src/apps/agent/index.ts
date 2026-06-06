@@ -49,7 +49,7 @@ import {
   formatHelp,
   parseAgentArgs,
 } from "@/host/runtime/agent-args"
-import { errMessage, runtimeConfig, setTerminalIo } from "@/shared"
+import { errMessage, gateOn, runtimeConfig, setTerminalIo } from "@/shared"
 import type { AssembleRequest } from "./assemble"
 
 export { buildSearchPipelineFromEnv, clearSearchPipelineWireForTests }
@@ -201,7 +201,7 @@ export const runMain = async (deps: MainDeps = {}): Promise<void> => {
   // the async root, ONLY when opted in, and thread onto the partial. Default-OFF:
   // knob unset ⇒ not loaded ⇒ no command hooks. The enabled-without-ack fail-fast
   // throw happens later in buildBaseFromArgs (startup, never mid-turn).
-  if (process.env.QUANTA_COMMAND_HOOKS === "1") {
+  if (gateOn(process.env, "QUANTA_COMMAND_HOOKS")) {
     partial.commandHookBindings = await loadCommandHookBindings(
       join(process.cwd(), "settings.json"),
     )

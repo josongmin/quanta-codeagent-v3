@@ -4,7 +4,7 @@ import { dispatchSideConversation } from "@/agent/side-conversation"
 import { createSubagentMailbox } from "@/agent/subagent-mailbox"
 import type { LLMPort } from "@/llm"
 import { defaultRoleModelResolver, type RoleModelResolver } from "@/llm/role-model-override"
-import { gateOn, logger } from "@/shared"
+import { gateOn, gateOnStrict, logger } from "@/shared"
 import { AgentMetaRegistry, TurnWakeRegistry } from "@/subagent"
 import type { CloseoutCritic, CloseoutCriticVerdict } from "./closeout-critic"
 import { buildCodeCellDispatchPort } from "./codemode-wire"
@@ -177,7 +177,7 @@ export const wireOptionalAgentPorts = <T extends OptionalPortBase>(
  * pre-set `codeCellDispatchFactory` is preserved verbatim.
  */
 const wireCodeCellDispatch = <T extends OptionalPortBase>(base: T, env: OptionalPortEnv): T => {
-  if (env[QUANTA_CODE_MODE_ENV] !== "1") return base
+  if (!gateOnStrict(env, QUANTA_CODE_MODE_ENV)) return base
   if (base.codeCellDispatchFactory !== undefined) return base
   const config = base as unknown as AgentConfig
   // `permission` is REQUIRED on the assembled AgentConfig (the loop's live
@@ -229,6 +229,15 @@ const wireCodeCellDispatch = <T extends OptionalPortBase>(base: T, env: Optional
  * port we set here survives the subsequent `enabled` fold (and vice-versa: the
  * order of the two wires does not matter — each only fills its own slot).
  */
+/** Process-scoped guard so the "knob on but no reviewer" warning fires AT MOST
+ *  once — `wireOptionalAgentPorts` runs once per surface assembly and can run
+ *  twice on a double-wired path (arg-builder + context-binding), so without this
+ *  the same advisory would repeat. Reset seam for tests. */
+let warnedCloseoutCriticNoReviewer = false
+export const __resetCloseoutCriticWarning = (): void => {
+  warnedCloseoutCriticNoReviewer = false
+}
+
 const wireCloseoutCritic = <T extends OptionalPortBase>(base: T, env: OptionalPortEnv): T => {
   const raw = env[QUANTA_CLOSEOUT_CRITIC_ENV]
   if (raw === undefined || !CLOSEOUT_CRITIC_TRUTHY.has(raw)) return base
@@ -236,13 +245,18 @@ const wireCloseoutCritic = <T extends OptionalPortBase>(base: T, env: OptionalPo
   if (base.closeoutCritic?.critic !== undefined) return base
   const critic = buildReviewerBackedCloseoutCritic(base as unknown as AgentConfig)
   // No reviewer subagent available ⇒ NO port ⇒ fail-open (byte-identical).
-  // Surface this once at wire time: the operator turned the knob ON but the
-  // critic will silently never fire because no subagent runner is configured —
-  // a stderr warning makes the inert state visible instead of a silent no-op.
+  // `wireOptionalAgentPorts` is the FINAL composition transform per surface, so a
+  // `config.subagent` absent HERE is the genuine final state (nothing adds it
+  // later). Surface it once: the operator turned the knob ON but the critic will
+  // silently never fire — a stderr warning makes the inert state visible instead
+  // of a silent no-op. Guarded to once-per-process so a double-wire never spams.
   if (critic === undefined) {
-    logger.warn(
-      `QUANTA_CLOSEOUT_CRITIC is on but no reviewer subagent is configured (config.subagent absent) — the closeout critic will not run. Configure a subagent runner to enable it.`,
-    )
+    if (!warnedCloseoutCriticNoReviewer) {
+      warnedCloseoutCriticNoReviewer = true
+      logger.warn(
+        `QUANTA_CLOSEOUT_CRITIC is on but no reviewer subagent is configured (config.subagent absent) — the closeout critic will not run. Configure a subagent runner to enable it.`,
+      )
+    }
     return base
   }
   return {

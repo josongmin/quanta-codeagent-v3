@@ -22,7 +22,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
-import { gateDisabled, gateOn } from "@/shared"
+import { gateDisabled, gateDisabledStrict, gateOn, gateOnStrict } from "@/shared"
 
 /** Raw legacy gate comparison: `QUANTA_NAME"]? (===|!==) "1"|"on"|"off"`. */
 const RAW_GATE = /QUANTA_[A-Z0-9_]+"?\]?\s*(?:===|!==)\s*"(?:1|on|off)"/
@@ -60,10 +60,13 @@ const scanRawGates = (): { total: number; byFile: Record<string, number> } => {
   return { total, byFile }
 }
 
-/** The frozen ceiling — measured at unification time. MAY ONLY DECREASE: migrate
- *  a raw comparison to `gateOn`/`gateDisabled` and lower this number. NEVER raise
- *  it; a deliberate strict-`1` security gate (code-mode) is part of this budget. */
-const RAW_GATE_CEILING = 50
+/** The frozen ceiling. The jun-7 burn-down drove ALL scattered raw gate
+ *  comparisons to ZERO — every `QUANTA_*` gate now routes through the SSOT
+ *  (`gateOn`/`gateDisabled`, or `gateOnStrict`/`gateDisabledStrict` for the
+ *  code-mode/fs-jail security gates). This ceiling is therefore 0: a NEW raw
+ *  `=== "1"|"on"|"off"` comparison is a regression — use the SSOT helpers. NEVER
+ *  raise it. */
+const RAW_GATE_CEILING = 0
 
 describe("gate-vocabulary SSOT — canonical readers exist", () => {
   test("gateOn is opt-in (default OFF), accepts the full truthy vocab", () => {
@@ -83,6 +86,20 @@ describe("gate-vocabulary SSOT — canonical readers exist", () => {
     }
     for (const v of ["1", "on", "", "garbage"]) {
       expect(gateDisabled({ X: v }, "X")).toBe(false)
+    }
+  })
+
+  test("gateOnStrict (SECURITY opt-in) arms ONLY for the exact '1'", () => {
+    expect(gateOnStrict({ X: "1" }, "X")).toBe(true)
+    for (const v of ["on", "true", "yes", " 1 ", "0", "off", ""]) {
+      expect(gateOnStrict({ X: v }, "X")).toBe(false)
+    }
+  })
+
+  test("gateDisabledStrict (SECURITY kill-switch) disables ONLY for the exact 'off'", () => {
+    expect(gateDisabledStrict({ X: "off" }, "X")).toBe(true)
+    for (const v of ["0", "false", "no", "on", "1", ""]) {
+      expect(gateDisabledStrict({ X: v }, "X")).toBe(false)
     }
   })
 })

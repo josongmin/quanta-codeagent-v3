@@ -90,11 +90,16 @@ describe("benchOptIns — env resolver (pure, three independent flags)", () => {
     expect(benchOptIns().lspNav).toBe(true)
   })
 
-  test("QUANTA_BENCH_LSP=0 / other-value → treated as unset (lspNav:false)", () => {
+  test("QUANTA_BENCH_LSP falsy/garbage → lspNav:false (canonical gate vocab)", () => {
     process.env.QUANTA_BENCH_LSP = "0"
     expect(benchOptIns().lspNav).toBe(false)
-    process.env.QUANTA_BENCH_LSP = "yes"
+    process.env.QUANTA_BENCH_LSP = "off"
     expect(benchOptIns().lspNav).toBe(false)
+    process.env.QUANTA_BENCH_LSP = "nope"
+    expect(benchOptIns().lspNav).toBe(false)
+    // ...but any truthy token enables (uniform with every other gate).
+    process.env.QUANTA_BENCH_LSP = "on"
+    expect(benchOptIns().lspNav).toBe(true)
   })
 
   test("QUANTA_LSP_TOOLS=partial → lspNav:false (only 'full' triggers, same as CLI)", () => {
@@ -110,11 +115,13 @@ describe("benchOptIns — env resolver (pure, three independent flags)", () => {
     expect(r.skills).toBeUndefined()
   })
 
-  test("QUANTA_BENCH_SUBAGENT not exactly '1' → undefined (strict gate)", () => {
-    process.env.QUANTA_BENCH_SUBAGENT = "true"
-    expect(benchOptIns().subagent).toBeUndefined()
+  test("QUANTA_BENCH_SUBAGENT falsy → undefined; any truthy → enabled (canonical vocab)", () => {
     process.env.QUANTA_BENCH_SUBAGENT = "0"
     expect(benchOptIns().subagent).toBeUndefined()
+    process.env.QUANTA_BENCH_SUBAGENT = "off"
+    expect(benchOptIns().subagent).toBeUndefined()
+    process.env.QUANTA_BENCH_SUBAGENT = "true"
+    expect(benchOptIns().subagent).toEqual({})
   })
 
   test("QUANTA_BENCH_SKILLS=1 → skills:{} (bundled-only, no user dir)", () => {
@@ -125,11 +132,13 @@ describe("benchOptIns — env resolver (pure, three independent flags)", () => {
     expect(r.subagent).toBeUndefined()
   })
 
-  test("QUANTA_BENCH_SKILLS not exactly '1' → undefined (strict gate)", () => {
-    process.env.QUANTA_BENCH_SKILLS = "true"
+  test("QUANTA_BENCH_SKILLS falsy/empty → undefined; any truthy → enabled (canonical vocab)", () => {
+    process.env.QUANTA_BENCH_SKILLS = "0"
     expect(benchOptIns().skills).toBeUndefined()
     process.env.QUANTA_BENCH_SKILLS = ""
     expect(benchOptIns().skills).toBeUndefined()
+    process.env.QUANTA_BENCH_SKILLS = "true"
+    expect(benchOptIns().skills).toEqual({})
   })
 
   test("ALL THREE on simultaneously → all three wired (independent flags compose)", () => {

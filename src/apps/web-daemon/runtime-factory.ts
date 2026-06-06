@@ -196,11 +196,11 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
     // ADR-0440 — canvas usage source. Gate OFF ⇒ undefined ⇒ no
     // `onPromptAssembled` capture (byte-identical) + no facade port ⇒ the
     // server attaches no canvas sink.
-    const canvasUsage = env.QUANTA_WEB_CANVAS === "1" ? createCanvasUsageSource() : undefined
+    const canvasUsage = gateOn(env, "QUANTA_WEB_CANVAS") ? createCanvasUsageSource() : undefined
     // ADR-0440 wire-finish — tool-diff source. Gate OFF ⇒ undefined ⇒ no
     // `onToolDiff` wired (no tool captures, byte-identical) + no facade port ⇒
     // the server forwards no `tool.diff` frames.
-    const canvasToolDiff = env.QUANTA_WEB_CANVAS === "1" ? createCanvasToolDiffSource() : undefined
+    const canvasToolDiff = gateOn(env, "QUANTA_WEB_CANVAS") ? createCanvasToolDiffSource() : undefined
     const base: Omit<AgentConfig, "modePolicy" | "budgetMeter"> = {
       llm,
       registry: new ToolRegistry(buildDefaultTools()),

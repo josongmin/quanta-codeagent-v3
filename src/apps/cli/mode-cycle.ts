@@ -17,6 +17,7 @@
  * session). This store remains the UI input cell; the engine holds authority.
  */
 
+import { gateOn } from "@/shared"
 import type { AgentMode } from "@/agent"
 import type { PermissionMode } from "@/permission"
 
@@ -113,7 +114,7 @@ export const createModeCycleStore = (start: ModeCyclePosture = DEFAULT_POSTURE):
 
 /** Env gate — `QUANTA_MODE_CYCLE=1` enables the shift+tab cycle. Any other
  *  value (incl. absent) ⇒ OFF (the hook is never wired ⇒ byte-identical). */
-export const modeCycleEnabled = (env: NodeJS.ProcessEnv): boolean => env.QUANTA_MODE_CYCLE === "1"
+export const modeCycleEnabled = (env: NodeJS.ProcessEnv): boolean => gateOn(env, "QUANTA_MODE_CYCLE")
 
 const ESC = "\x1b["
 const RESET = `${ESC}0m`

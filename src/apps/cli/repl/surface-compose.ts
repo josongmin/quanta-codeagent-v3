@@ -256,14 +256,14 @@ export const buildPromptUx = async (
  *  literal `"1"` enables (mirrors the strict opt-in posture of the new RFC-11
  *  layers — bad/absent value ⇒ off ⇒ byte-identical). */
 const externalEditorEnabled = (env: NodeJS.ProcessEnv): boolean =>
-  env.QUANTA_EXTERNAL_EDITOR === "1"
+  gateOn(env, "QUANTA_EXTERNAL_EDITOR")
 
 /** RFC-11 / ADR-0447 — `QUANTA_KEYBINDINGS=1` gate. When set, load + merge
  *  `~/.quanta/keybindings.json` over the defaults; any load defect degrades to
  *  the default map (no-throw) and warnings are echoed to stderr. Absent ⇒
  *  `undefined` ⇒ the reader runs its hardcoded if-chain (byte-identical). */
 const buildKeybindingMap = async (env: NodeJS.ProcessEnv): Promise<KeybindingMap | undefined> => {
-  if (env.QUANTA_KEYBINDINGS !== "1") return undefined
+  if (!gateOn(env, "QUANTA_KEYBINDINGS")) return undefined
   const { map, warnings } = await loadKeybindings()
   for (const w of warnings) process.stderr.write(`keybindings: ${w}\n`)
   return map

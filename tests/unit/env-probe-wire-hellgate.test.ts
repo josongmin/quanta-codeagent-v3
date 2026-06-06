@@ -54,7 +54,7 @@ const MISSING_BIN: StartupWarning = {
 }
 
 describe("env-probe-wire — gate-OFF NOOP byte-identical", () => {
-  for (const value of [undefined, "0", "true", "", "ON", " 1"]) {
+  for (const value of [undefined, "0", "off", "false", "no", "", "garbage"]) {
     it(`OFF for QUANTA_ENABLE_ENV_PROBE=${JSON.stringify(value)} — zero work`, async () => {
       let execCalls = 0
       const exec: ProbeExecPort = async () => {

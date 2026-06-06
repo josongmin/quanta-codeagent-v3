@@ -23,6 +23,7 @@
  * module stays `process.env`-free and below `src/apps/**`.
  */
 
+import { gateOn } from "@/shared"
 import type { AgentConfig } from "@/agent"
 import type { AgentEvent, StreamPort } from "@/stream"
 import type { ProgressSink, ProgressUpdateMirror } from "@/tool"
@@ -83,7 +84,7 @@ export const createProgressStreamSink = (stream: StreamPort): ProgressSink => ({
  * change.
  */
 export const maybeWireProgressSink = (cfg: AgentConfig, env: AssemblerEnv): void => {
-  if (env.QUANTA_PROGRESS_UPDATE !== "1") return
+  if (!gateOn(env, "QUANTA_PROGRESS_UPDATE")) return
   if (cfg.progressSink !== undefined) return
   cfg.progressSink = createProgressStreamSink(cfg.stream)
 }

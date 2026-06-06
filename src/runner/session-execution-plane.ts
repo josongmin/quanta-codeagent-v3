@@ -1,3 +1,4 @@
+import { gateOn } from "@/shared"
 import {
   buildSubagentForkOnAccept,
   defaultProposeHandler,
@@ -161,7 +162,7 @@ export const buildSharedExecutionPlaneRuntimeAugments = async (
   // `maxQueued` (QUANTA_BG_MAX_QUEUED) is consulted ONLY when the queue is on;
   // absent ⇒ the scheduler's built-in DEFAULT_MAX_QUEUED (64) — no behavior shift
   // on the default-OFF path.
-  const admissionQueue = args.envSource.QUANTA_SUBAGENT_QUEUE === "1"
+  const admissionQueue = gateOn(args.envSource, "QUANTA_SUBAGENT_QUEUE")
   const maxQueued = parsePositiveInt(args.envSource.QUANTA_BG_MAX_QUEUED)
   const inner = defaultBackgroundSubagentScheduler({
     runner: childRunner,

@@ -31,6 +31,7 @@
  * whether to call `providerFromEnv()` or pass a hand-built provider.
  */
 
+import { gateOn } from "@/shared"
 import type { WebSearchProvider } from "../search"
 import { braveSearchProvider } from "./brave"
 import { duckduckgoSearchProvider } from "./duckduckgo"
@@ -50,7 +51,7 @@ export const providerFromEnv = (
   if (braveKey !== undefined && braveKey.length > 0) {
     return braveSearchProvider({ apiKey: braveKey })
   }
-  if (env.QUANTA_WEB_SEARCH_DUCKDUCKGO === "1") {
+  if (gateOn(env, "QUANTA_WEB_SEARCH_DUCKDUCKGO")) {
     return duckduckgoSearchProvider()
   }
   return undefined

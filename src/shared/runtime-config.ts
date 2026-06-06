@@ -26,7 +26,7 @@
  */
 
 import { tlsMitmAuthorized } from "@/runtime/network-proxy/mitm-gate"
-import { gateDisabled, gateOn } from "./env-flag"
+import { gateDisabled, gateDisabledStrict, gateOn, gateOnStrict } from "./env-flag"
 import { writeStderr } from "./terminal-io"
 
 export const LOG_LEVELS = ["debug", "info", "warn", "error"] as const
@@ -1194,11 +1194,12 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // (arbitrary in-cell JS that dispatches tools), so a typo'd/loose truthy
     // spelling (`true`/`on`) must NOT enable it — strict opt-in is the contract
     // (jun-7 hellgate: `codeMode true ONLY for "1"`). The uniform-gateOn refactor
-    // is correct for ordinary gates; security gates stay strict by design.
-    codeMode: env["QUANTA_CODE_MODE"] === "1",
-    // code-mode Phase 3 — strict `=== "1"` opt-in (same security rationale).
+    // is correct for ordinary gates; security gates stay strict by design —
+    // `gateOnStrict` is the SSOT primitive for that (exact "1", refuses loose on/true).
+    codeMode: gateOnStrict(env, "QUANTA_CODE_MODE"),
+    // code-mode Phase 3 — strict `"1"` opt-in (same security rationale).
     // Default false ⇒ no steering directive (byte-identical dynamic tail).
-    codeModeOnly: env["QUANTA_CODE_MODE_ONLY"] === "1",
+    codeModeOnly: gateOnStrict(env, "QUANTA_CODE_MODE_ONLY"),
     codeModeMemBytes: parsePositiveInt(
       env["QUANTA_CODE_MODE_MEM_BYTES"],
       "QUANTA_CODE_MODE_MEM_BYTES",
@@ -1303,7 +1304,9 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     adaptiveThinking: gateOn(env, "QUANTA_ADAPTIVE_THINKING"),
     // RFC jun-6 §5.1 — advisor full-history forward (strict `=== "1"` opt-in).
     advisorForwardHistory: gateOn(env, "QUANTA_ADVISOR_FORWARD_HISTORY"),
-    fsJailDisabled: gateDisabled(env, "QUANTA_FS_JAIL"),
+    // SECURITY protection (filesystem jail) — tearing it down requires the
+    // deliberate, unambiguous `=off`; a loose `=0` must NOT silently drop the jail.
+    fsJailDisabled: gateDisabledStrict(env, "QUANTA_FS_JAIL"),
     capEnforce: parseBool(env["QUANTA_CAP_ENFORCE"]),
     gitSha: stringOrUndef(env["QUANTA_GIT_SHA"]),
     pricingVersion: stringOrUndef(env["QUANTA_PRICING_VERSION"]),
@@ -1366,7 +1369,8 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
       "QUANTA_AUTO_DREAM_SESSIONS",
     ),
     autoDreamHours: parsePositiveNumber(env["QUANTA_AUTO_DREAM_HOURS"], "QUANTA_AUTO_DREAM_HOURS"),
-    logRateLimitDisabled: gateDisabled(env, "QUANTA_LOG_RATE_LIMIT"),
+    // Log rate-limit is a DoS guard; disabling it requires the unambiguous `=off`.
+    logRateLimitDisabled: gateDisabledStrict(env, "QUANTA_LOG_RATE_LIMIT"),
     // H7 — rotating cloud credentials. All default-UNSET ⇒ no helper, no
     // pre-call refresh, byte-identical provider paths.
     apiKeyHelper: stringOrUndef(env["QUANTA_API_KEY_HELPER"]),

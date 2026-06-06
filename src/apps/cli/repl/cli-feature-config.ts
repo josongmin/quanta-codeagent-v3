@@ -1,3 +1,4 @@
+import { gateOn } from "@/shared"
 import { isBranchProgressEnabled } from "../branch-search-progress"
 import { isCostPanelEnabled } from "../cost-panel"
 import type { DebugCategory } from "../debug-tracer"
@@ -157,7 +158,7 @@ export const readCliFeatureConfig = (
     costPanel: { enabled: isCostPanelEnabled(env, stdoutIsTTY) },
     branchProgress: { enabled: isBranchProgressEnabled(env, stdoutIsTTY) },
     planStore: { enabled: parsePlanStoreEnv(env.QUANTA_PLAN_STORE) },
-    workMetricsSinkEnabled: env.QUANTA_METRICS === "1",
+    workMetricsSinkEnabled: gateOn(env, "QUANTA_METRICS"),
     decisionMetricsEnabled: parseDecisionMetricsEnv(env.QUANTA_DECISION_METRICS),
     turnSummary: {
       enabled: isTurnSummaryEnabled(env, stdoutIsTTY),

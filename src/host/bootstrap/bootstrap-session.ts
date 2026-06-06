@@ -42,7 +42,7 @@ import {
   type ToolProfileSessionState,
 } from "@/runner/assemble"
 import { isPathLikeToken } from "@/runner/orchestrate"
-import { errMessage, logger } from "@/shared"
+import { errMessage, gateOn, logger } from "@/shared"
 import {
   type BootstrapFeatures,
   type SessionBootstrapDeps,
@@ -156,7 +156,7 @@ const buildSessionStatePorts = (args: {
   const identityModeState = resolveIdentityModeState(args.env)
   const focusChain = resolveFocusChain(args.env)
   const systemSource = createSystemSource(
-    args.identity === undefined && args.env.QUANTA_IDENTITY === "1"
+    args.identity === undefined && gateOn(args.env, "QUANTA_IDENTITY")
       ? buildSystemPromptForMode({
           mode: identityModeState.get(),
           registry: identityModeState.registry,

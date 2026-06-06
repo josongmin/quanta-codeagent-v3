@@ -227,8 +227,8 @@ describe("B/C — default-OFF: no slot ⇒ tool ABSENT (byte-identical)", () => 
     expect(buildAppshotBlock(cfg).tools).toEqual([])
   })
 
-  test("B2 — knob set to a non-'1' value ⇒ slot unset (strict opt-in)", () => {
-    for (const raw of ["0", "on", "true", "", "yes"]) {
+  test("B2 — knob set to a falsy/garbage value ⇒ slot unset (canonical gate vocab)", () => {
+    for (const raw of ["0", "off", "false", "no", "", "garbage"]) {
       const cfg = assemble(baseWithBrowser(tmpCwd(), fakeJudge("PASS"), fakeBrowser()), {
         QUANTA_APPSHOT: raw,
       })

@@ -71,7 +71,7 @@ import {
   selectInstances,
   writeArtifacts as writeBatchArtifacts,
 } from "@/runner/batch/core"
-import { byteCompare, errMessage, logger, runtimeConfig, setTerminalIo } from "@/shared"
+import { byteCompare, errMessage, gateOn, logger, runtimeConfig, setTerminalIo } from "@/shared"
 import {
   aggregate,
   benchRunDir,
@@ -536,7 +536,7 @@ const maybeRunDatasetMode = async (
  *  unless `QUANTA_SWEBENCH_PYTHON=1` AND the official harness is importable
  *  (probe is real here). Default-off ⇒ the local testCmd path is unchanged. */
 const buildPythonSwebench = async (): Promise<RunCfg["pythonSwebench"]> => {
-  if (process.env.QUANTA_SWEBENCH_PYTHON !== "1") return undefined
+  if (!gateOn(process.env, "QUANTA_SWEBENCH_PYTHON")) return undefined
   if (!(await isPythonSwebenchAvailable())) {
     logger.info(
       'QUANTA_SWEBENCH_PYTHON=1 but `python -c "import swebench"` failed — falling back to local testCmd verifier.',
@@ -589,7 +589,7 @@ const runCustomCorpusMode = async (
   // `--instance <substr>` selects by id substring BEFORE the limit slice, so a
   // single repo (e.g. django) can be run without scanning the alphabetical head.
   const all = selectInstances(selection.all, instanceFilter, null)
-  const pythonHarness = process.env.QUANTA_SWEBENCH_PYTHON === "1"
+  const pythonHarness = gateOn(process.env, "QUANTA_SWEBENCH_PYTHON")
 
   // `--dry-run`: load + count + print the plan; NEVER build an LLM or run.
   if (argFlag("--dry-run")) {

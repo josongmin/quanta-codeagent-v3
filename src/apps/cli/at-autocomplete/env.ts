@@ -6,6 +6,8 @@
  * `readLine` byte-identical (RFC §4.8 — `@` stays an ordinary input char).
  */
 
+import { gateOn } from "@/shared"
+
 /** `true` iff the `@`-mention autocomplete feature is enabled. */
 export const atAutocompleteEnabled = (env: NodeJS.ProcessEnv = process.env): boolean =>
-  env.QUANTA_AT_AUTOCOMPLETE === "1"
+  gateOn(env, "QUANTA_AT_AUTOCOMPLETE")

@@ -26,22 +26,23 @@
  * default-OFF contract (`applyKnobs(base, …) === base` when this is the only
  * resolved knob).
  *
- * DEFAULT-OFF: STRICT truthy gate — only `"1"`, `"on"`, `"true"` parse to `true`.
- * Unset / falsy / empty / garbage ⇒ `undefined` so the resolver falls through to
- * the next layer (NOT a silent "off"), exactly like `working-state`. No heuristics.
+ * DEFAULT-OFF: delegates to the SHARED `ratelimitNoticeWanted` SSOT predicate so
+ * this knob's telemetry/`--help`/`/knobs` view can NEVER disagree with the actual
+ * runtime gate (`runtimeConfig().ratelimitNotice` + the CLI render gate). Absent /
+ * falsy (`""`/`0`/`false`/`off`/`no`) ⇒ `undefined` so the resolver falls through
+ * to the next layer (NOT a silent "off"); ANY other value ⇒ `true`. One predicate,
+ * three channels — no observability drift.
  */
 
 import type { AgentConfig } from "@/agent"
+import { ratelimitNoticeWanted } from "@/shared"
 import { registerKnob } from "../registry"
 import type { Knob, Surface } from "../types"
 
 const SURFACES: readonly Surface[] = ["cli"]
-const TRUTHY = new Set(["1", "on", "true"])
 
-const parseRatelimitNotice = (raw: string | undefined): true | undefined => {
-  if (raw === undefined) return undefined
-  return TRUTHY.has(raw) ? true : undefined
-}
+const parseRatelimitNotice = (raw: string | undefined): true | undefined =>
+  ratelimitNoticeWanted(raw) ? true : undefined
 
 /** PURE no-op: this is a CLI surface-render flag, not an AgentConfig knob. The
  *  config is returned UNCHANGED so the byte-identical contract holds. */

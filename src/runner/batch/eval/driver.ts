@@ -41,7 +41,7 @@ import {
 } from "@/agent"
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
-import { errMessage } from "@/shared"
+import { errMessage, gateOn } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
 import { type AttemptObservation, BenchObserver, UsageTap } from "../observe"
@@ -304,17 +304,17 @@ export const benchOptIns = (): {
 } => {
   // ADR-0015 LSP-nav: original gate `QUANTA_LSP_TOOLS=full` (same as CLI) OR
   // the new bench-only gate `QUANTA_BENCH_LSP=1`. Either one ⇒ tools wired.
-  const lspNav = process.env.QUANTA_LSP_TOOLS === "full" || process.env.QUANTA_BENCH_LSP === "1"
+  const lspNav = process.env.QUANTA_LSP_TOOLS === "full" || gateOn(process.env, "QUANTA_BENCH_LSP")
   // Subagent: bench-only `QUANTA_BENCH_SUBAGENT=1`. Empty block ⇒ runner default
   // applies (no per-bench maxDepth tuning — keep the surface minimal until a
   // measured reason appears).
   const subagent: AgentConfig["subagent"] | undefined =
-    process.env.QUANTA_BENCH_SUBAGENT === "1" ? {} : undefined
+    gateOn(process.env, "QUANTA_BENCH_SUBAGENT") ? {} : undefined
   // Skills: bench-only `QUANTA_BENCH_SKILLS=1`. Empty block ⇒ bundled system
   // skills ONLY (ADR-0045) — bench never points at a user dir (measurement
   // integrity). `changedPaths` is left unset (full inventory).
   const skills: AgentConfig["skills"] | undefined =
-    process.env.QUANTA_BENCH_SKILLS === "1" ? {} : undefined
+    gateOn(process.env, "QUANTA_BENCH_SKILLS") ? {} : undefined
   // Localize-phase (Agentless absorption — Tier 0): bench-only
   // `QUANTA_BENCH_LOCALIZE_PHASE=<int>`. The value is the number of leading
   // turns to block mutating tools. Domain: positive integer 1..20 (cap is a

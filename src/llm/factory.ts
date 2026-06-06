@@ -1,3 +1,4 @@
+import { gateOn } from "@/shared"
 import { hasUsableChatgptToken } from "@/auth/chatgpt-oauth"
 import type { LLMProvider } from "@/shared/errors"
 import { runtimeConfig } from "@/shared/runtime-config"
@@ -190,7 +191,7 @@ export type EnvLike = Record<string, string | undefined>
  *  `process.env` (slice-boundary invariant). */
 const resolveServiceTier = (opts: CreateLLMOptions, env: EnvLikeDecl): string | undefined => {
   if (opts.serviceTier !== undefined) return opts.serviceTier
-  const fromFast = env.QUANTA_FAST === "1" ? "priority" : undefined
+  const fromFast = gateOn(env, "QUANTA_FAST") ? "priority" : undefined
   const value = fromFast ?? env.QUANTA_SERVICE_TIER
   return value !== undefined && value.length > 0 ? value : undefined
 }
@@ -205,7 +206,7 @@ const resolveReasoningEffort = (opts: CreateLLMOptions, env: EnvLikeDecl): strin
  *  (`QUANTA_REASONING_CARRYOVER`). Default-OFF: unset ⇒ false ⇒ the Responses
  *  adapters drop thinking + emit no `include` (byte-identical). */
 const resolveReasoningCarryover = (env: EnvLikeDecl): boolean =>
-  env.QUANTA_REASONING_CARRYOVER === "1"
+  gateOn(env, "QUANTA_REASONING_CARRYOVER")
 
 /** Models whose Anthropic cache_control supports the extended `ttl:"1h"`
  *  breakpoint. Keyed by NORMALIZED model FAMILY (vendor prefix + date suffix
@@ -277,7 +278,7 @@ export const resolveCacheTtl = (model: string, cfg: { readonly cacheTtl: CacheTt
 /** Composition-root resolution of the ChatGPT-OAuth body-debug flag. Explicit
  *  option wins; otherwise `QUANTA_DEBUG_OAUTH === "1"`. */
 const resolveDebugOAuth = (opts: CreateLLMOptions, env: EnvLikeDecl): boolean =>
-  opts.debugOAuth ?? env.QUANTA_DEBUG_OAUTH === "1"
+  opts.debugOAuth ?? gateOn(env, "QUANTA_DEBUG_OAUTH")
 
 const resolveOpenAISurface = (
   opts: CreateLLMOptions,
