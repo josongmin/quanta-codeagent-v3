@@ -1178,6 +1178,23 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   progressSink?: import("@/tool").ProgressSink
   /**
+   * file_history_rewind — OPTIONAL per-file snapshot capture sink. When set, the
+   * dispatch seam surfaces it onto {@link import("@/tool").ToolContext}'s
+   * `fileHistory` so the `write`/`edit` tools record each new file version into
+   * the session history store the `file_history_rewind` tool reads. The
+   * composition root mints ONE bounded store per session (when
+   * `QUANTA_FILE_HISTORY` is on) and wires BOTH this sink AND
+   * `DefaultToolPorts.fileHistory` (the tool's read side) over the SAME store.
+   *
+   * Absent ⇒ the dispatch seam omits the ctx field, `captureFileHistory` is a
+   * no-op, and the run is byte-identical for every legacy caller (RFC §1.2,
+   * default-OFF). Typed via the `@/tool` structural
+   * {@link import("@/tool").FileHistorySink} mirror so `@/tool` stays a leaf
+   * (same discipline as `progressSink` / `vcsEventSink`). Best-effort: the sink
+   * is no-throw by contract.
+   */
+  fileHistory?: import("@/tool").FileHistorySink
+  /**
    * Codex Submission op envelope (ADR-0072, Spec A3). When set the loop
    * derives the seed user-turn from `submission.op` instead of `messages`
    * (`user_input` / `user_input_with_turn_context` only — other op variants

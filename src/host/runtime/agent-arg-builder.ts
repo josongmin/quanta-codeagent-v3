@@ -103,8 +103,12 @@ import type { AgentEvent, StreamPort } from "@/stream"
 import {
   type AppshotPort,
   buildDefaultTools,
+  createFileHistorySink,
+  createFileHistoryStore,
   createTmuxAdapter,
   type DefaultToolPorts,
+  type FileHistorySink,
+  type FileHistoryStore,
   openAiImagePort,
   pollDeferredTool,
   type TmuxExec,
@@ -647,6 +651,13 @@ interface PermissionPatternSlice {
 
 const resolvePermissionPatternSlice = (): PermissionPatternSlice | undefined => {
   if (runtimeConfig().rememberPatterns !== true) return undefined
+  // CLUSTER D #5 residual — operator opt-in to RECORD dangerous-flagged
+  // proposals. Default false ⇒ `allowDangerous: false` (a dangerous proposal is
+  // always rejected, byte-identical). ON ⇒ `allowDangerous: true` lifts ONLY the
+  // dangerous-gate. SECURITY: the no-widen gate inside `recordProposedPattern` is
+  // independent of `allowDangerous`, so a dangerous-AND-uncovered proposal is
+  // still `would_widen` rejected — the knob can NEVER seed a new capability.
+  const allowDangerous = runtimeConfig().rememberPatternsDangerous === true
   // ONE per-session store. The gate grows its baseline via user approvals
   // (`store.grant`); the propose port refines within it via `recordProposed`.
   const store = new PatternGrantStore()
@@ -662,12 +673,50 @@ const resolvePermissionPatternSlice = (): PermissionPatternSlice | undefined => 
               ? { isMaybeDangerous: input.isMaybeDangerous }
               : {}),
           },
-          // Dangerous gating CLOSED — no operator opt-in knob at this layer.
-          { allowDangerous: false },
+          // Dangerous-gate state from the operator knob; the no-widen gate is
+          // unaffected (it always rejects an uncovered proposal).
+          { allowDangerous },
         ),
     },
   }
 }
+
+/** file_history_rewind — the SHARED per-file snapshot slice. The store is the
+ *  read side (`DefaultToolPorts.fileHistory`, backing `file_history_rewind`); the
+ *  sink is the write side (`AgentConfig.fileHistory`, surfaced onto
+ *  `ctx.fileHistory` so write/edit record each new file version into the SAME
+ *  store). One store per session — both sides MUST share it, so we mint once
+ *  here and thread both, exactly like the permission-pattern slice. */
+interface FileHistorySlice {
+  readonly store: FileHistoryStore
+  readonly sink: FileHistorySink
+}
+
+/** Mint the shared file-history slice when `QUANTA_FILE_HISTORY` is on (strict
+ *  `=== "1"` via `runtimeConfig().fileHistory`). Absent ⇒ `undefined` ⇒ no store,
+ *  no sink, no tool — byte-identical. Bounds default to the store's bounded ring
+ *  (per-path version + byte cap); the injected clock is the real `Date.now`
+ *  (the ONLY time source — no clock in the pure store). */
+const resolveFileHistorySlice = (): FileHistorySlice | undefined => {
+  if (runtimeConfig().fileHistory !== true) return undefined
+  const store = createFileHistoryStore({ now: () => Date.now() })
+  return { store, sink: createFileHistorySink(store) }
+}
+
+/** Spread-ready `DefaultToolPorts.fileHistory` slot (the tool read side). `{}`
+ *  when the slice is absent ⇒ `buildGatedToolPorts` literal carries no branch. */
+const fileHistoryPortSlot = (
+  slice: FileHistorySlice | undefined,
+): { fileHistory: FileHistoryStore } | Record<string, never> =>
+  slice !== undefined ? { fileHistory: slice.store } : {}
+
+/** Spread-ready `AgentConfig.fileHistory` slot (the write/edit capture side).
+ *  `{}` when off ⇒ the base literal carries no branch and `ctx.fileHistory` stays
+ *  absent (capture is a no-op, byte-identical). */
+const fileHistorySinkSlot = (
+  slice: FileHistorySlice | undefined,
+): { fileHistory: FileHistorySink } | Record<string, never> =>
+  slice !== undefined ? { fileHistory: slice.sink } : {}
 
 /** Spread-ready `AgentConfig.permissionPatternStore` slot for the shared slice
  *  ({@link resolvePermissionPatternSlice}). `{}` when the slice is absent (knob
@@ -700,6 +749,11 @@ const buildGatedToolPorts = (
    *  construct a fresh store here — that would give the tool an empty baseline
    *  divergent from the gate's grown one. */
   permissionPatternSlice?: PermissionPatternSlice,
+  /** file_history_rewind — the SHARED file-history slice minted by
+   *  {@link buildBaseFromArgs}. The store half wires `file_history_rewind`;
+   *  the SAME store's sink wires `AgentConfig.fileHistory` (write/edit capture).
+   *  Absent ⇒ the tool slot is omitted (byte-identical). */
+  fileHistorySlice?: FileHistorySlice,
 ): DefaultToolPorts => {
   const cfg = runtimeConfig()
   // C1 — ONE per-session artifact registry when the Canvas store is enabled.
@@ -730,6 +784,11 @@ const buildGatedToolPorts = (
     // here. Spread-ready slot (`{}` when off ⇒ tool not registered ⇒
     // byte-identical).
     ...permissionProposePortSlot(permissionPatternSlice),
+    // file_history_rewind — gated per-file snapshot list/restore tool over the
+    // SHARED session store (the SAME store whose sink wires AgentConfig.fileHistory
+    // so write/edit record into exactly what this tool reads). Default-OFF: `{}`
+    // when QUANTA_FILE_HISTORY is off ⇒ tool not registered ⇒ byte-identical.
+    ...fileHistoryPortSlot(fileHistorySlice),
     // N2 — gated MCP connector discovery tools (mcp_connector_list/_install).
     // Default-OFF: tool menu byte-identical unless QUANTA_MCP_CONNECTORS === "1".
     // The port lists the bundled reference catalog and installs a chosen server
@@ -829,12 +888,21 @@ const buildBaseRegistry = (args: {
    *  `permission_propose_pattern` tool refines the SAME baseline the gate grows
    *  via `AgentConfig.permissionPatternStore`. Absent ⇒ tool omitted. */
   readonly permissionPatternSlice: PermissionPatternSlice | undefined
+  /** file_history_rewind — the SHARED file-history slice; its store half wires
+   *  `file_history_rewind` here (the sink half wires `AgentConfig.fileHistory`).
+   *  Absent ⇒ the tool is omitted (byte-identical). */
+  readonly fileHistorySlice: FileHistorySlice | undefined
 }): ToolRegistry =>
   new ToolRegistry([
     ...buildDefaultTools({
       ...(args.automationSlot !== null ? { automationEngine: args.automationSlot.engine } : {}),
       ...(args.sandboxProfile !== undefined ? { sandboxProfile: args.sandboxProfile } : {}),
-      ...buildGatedToolPorts(args.env, args.seams, args.permissionPatternSlice),
+      ...buildGatedToolPorts(
+        args.env,
+        args.seams,
+        args.permissionPatternSlice,
+        args.fileHistorySlice,
+      ),
     }),
     ...(args.searchWire !== null ? [args.searchWire.tool] : []),
     // ADR-0287 — async-tools `poll_deferred`. Default-OFF: registered ONLY when
@@ -1349,6 +1417,12 @@ export const buildBaseFromArgs = (
   // store slot is omitted (no auto-pass, no cascade) AND the tool is absent —
   // byte-identical to today's no-pattern behaviour.
   const permissionPatternSlice = resolvePermissionPatternSlice()
+  // file_history_rewind — mint the SHARED per-file snapshot slice ONCE (store +
+  // sink over the same store) when QUANTA_FILE_HISTORY is on. The store wires the
+  // `file_history_rewind` tool (read side, via buildBaseRegistry → buildGatedToolPorts);
+  // the sink wires `AgentConfig.fileHistory` (write side, the write/edit capture).
+  // Absent ⇒ both omitted ⇒ no capture, no tool — byte-identical.
+  const fileHistorySlice = resolveFileHistorySlice()
   // ADR-0236 — `--no-auto-background`: future hosts that wire `autoBackground`
   // by default can call `resolveAutoBackgroundOverride(p.noAutoBackground)` to
   // hard-force the slot OFF. Today no host defaults it on, so the flag has no
@@ -1367,6 +1441,7 @@ export const buildBaseFromArgs = (
       searchWire,
       seams,
       permissionPatternSlice,
+      fileHistorySlice,
     }),
     stream,
     // GAP2 — when a named permission profile is selected the live permission
@@ -1430,6 +1505,11 @@ export const buildBaseFromArgs = (
     // gate byte-identical: no auto-pass, no cascade). `permissionAllowDangerous`
     // stays unset ⇒ dangerous actions ALWAYS go through the reviewer.
     ...permissionPatternStoreSlot(permissionPatternSlice),
+    // file_history_rewind — surface the capture sink so the dispatch seam threads
+    // it onto `ctx.fileHistory`; write/edit then record each new file version into
+    // the SAME store `file_history_rewind` reads. `{}` when off ⇒ no branch here ⇒
+    // `ctx.fileHistory` absent ⇒ capture is a no-op (byte-identical).
+    ...fileHistorySinkSlot(fileHistorySlice),
   }
 
   attachExecutionPlaneSlots(base, p)

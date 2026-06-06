@@ -229,3 +229,91 @@ describe("startInTurnLineReader — #8 concurrent in-turn SOURCE", () => {
     expect(lines).toEqual(["ok"])
   })
 })
+
+// ── ROUND-2 (multi-turn lifecycle / listener-leak lens) ─────────────────────
+// The session loop wraps each turn as `try { reader=start(); await run() }
+// finally { reader.dispose() }`. These seal the contract that wiring DEPENDS ON:
+// EXACTLY ONE listener alive during a turn, ZERO between/after — even when a
+// turn THROWS or aborts mid-stream, and across many back-to-back turns there is
+// never an overlap (two live readers contending for the same stdin).
+describe("startInTurnLineReader — multi-turn lifecycle (loop finally contract)", () => {
+  /** Mimic the loop's per-turn wrapper: start a reader, run the turn, dispose in
+   *  finally regardless of outcome. */
+  const withReader = async <R>(
+    stdin: InTurnReaderStdin,
+    onLine: (l: string) => void,
+    run: () => Promise<R>,
+  ): Promise<R> => {
+    const reader = startInTurnLineReader({ stdin, onLine })
+    try {
+      return await run()
+    } finally {
+      reader.dispose()
+    }
+  }
+
+  test("K. a turn that THROWS mid-stream still disposes the reader (no leak)", async () => {
+    const stdin = makeFakeStdin({ isTTY: true, initialRaw: false, initialPaused: true })
+    const lines: string[] = []
+    await expect(
+      withReader(
+        stdin,
+        (l) => void lines.push(l),
+        async () => {
+          stdin.emit("typed during the turn\n")
+          expect(stdin.listenerCount()).toBe(1) // exactly one live mid-turn
+          throw new Error("turn blew up mid-stream")
+        },
+      ),
+    ).rejects.toThrow("turn blew up")
+    // finally ran ⇒ listener detached, raw + paused restored.
+    expect(stdin.listenerCount()).toBe(0)
+    expect(stdin.isRaw).toBe(false)
+    expect(stdin.paused).toBe(true)
+    expect(lines).toEqual(["typed during the turn"])
+  })
+
+  test("L. N back-to-back turns ⇒ never more than ONE listener; ZERO between turns", async () => {
+    const stdin = makeFakeStdin({ isTTY: true, initialRaw: false, initialPaused: true })
+    const captured: string[] = []
+    for (let turn = 0; turn < 5; turn++) {
+      // Between turns there is NO in-turn reader attached.
+      expect(stdin.listenerCount()).toBe(0)
+      await withReader(
+        stdin,
+        (l) => void captured.push(l),
+        async () => {
+          // Exactly one reader is alive for the lifetime of this turn.
+          expect(stdin.listenerCount()).toBe(1)
+          stdin.emit(`turn-${turn}\n`)
+        },
+      )
+      // Disposed in finally ⇒ back to zero, ready for the next turn-boundary reader.
+      expect(stdin.listenerCount()).toBe(0)
+    }
+    expect(captured).toEqual(["turn-0", "turn-1", "turn-2", "turn-3", "turn-4"])
+    // Raw + paused fully restored to the pre-loop state after the last turn.
+    expect(stdin.isRaw).toBe(false)
+    expect(stdin.paused).toBe(true)
+  })
+
+  test("M. an abort (reject) during the turn disposes exactly like a normal exit", async () => {
+    const stdin = makeFakeStdin({ isTTY: true, initialRaw: true, initialPaused: false })
+    const ac = new AbortController()
+    await expect(
+      withReader(
+        stdin,
+        () => undefined,
+        async () => {
+          // Model an Esc-Esc / Ctrl-C abort surfacing as a rejection of the turn.
+          ac.abort()
+          throw Object.assign(new Error("aborted"), { name: "AbortError" })
+        },
+      ),
+    ).rejects.toThrow("aborted")
+    expect(stdin.listenerCount()).toBe(0)
+    // Prior raw=true / paused=false are restored EXACTLY (no clobber on abort).
+    expect(stdin.isRaw).toBe(true)
+    expect(stdin.paused).toBe(false)
+  })
+})

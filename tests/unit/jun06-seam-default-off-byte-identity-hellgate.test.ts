@@ -42,6 +42,7 @@ const JUN06_SEAM_KNOBS = [
   "QUANTA_MCP_CONNECTORS",
   "QUANTA_MCP_RESOURCES",
   "QUANTA_APPSHOT",
+  "QUANTA_FILE_HISTORY",
 ] as const
 
 /** The STRICT-`1` seam gates: arm ONLY for the exact literal `"1"` (a hostile
@@ -60,6 +61,7 @@ const STRICT_ONE_GATES: ReadonlyArray<{
   { field: "mcpConnectors", env: "QUANTA_MCP_CONNECTORS" },
   { field: "mcpResources", env: "QUANTA_MCP_RESOURCES" },
   { field: "appshot", env: "QUANTA_APPSHOT" },
+  { field: "fileHistory", env: "QUANTA_FILE_HISTORY" },
 ]
 
 /** `sessionAutoTitle` deliberately uses the STANDARD boolean vocabulary

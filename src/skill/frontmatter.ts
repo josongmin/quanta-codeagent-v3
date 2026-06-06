@@ -192,3 +192,5 @@ export const parseFrontmatter = (text: string): ParsedFrontmatter => {
 
   return { data, body }
 }
+
+export { SkillCategorySchema, SkillStabilitySchema } from "./skill-frontmatter"

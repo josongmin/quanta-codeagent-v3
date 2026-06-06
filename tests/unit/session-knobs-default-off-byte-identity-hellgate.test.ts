@@ -64,6 +64,7 @@ const STRICT_ONE_KNOBS: ReadonlyArray<{
   { env: "QUANTA_MCP_RESOURCES", read: (c) => c.mcpResources },
   { env: "QUANTA_PROGRESS_UPDATE", read: (c) => c.progressUpdate },
   { env: "QUANTA_PTY_ATTACH", read: (c) => c.ptyAttach },
+  { env: "QUANTA_FILE_HISTORY", read: (c) => c.fileHistory },
 ]
 
 /** Hostile / loose values a strict-`1` knob MUST treat as OFF. `"1"` is tested

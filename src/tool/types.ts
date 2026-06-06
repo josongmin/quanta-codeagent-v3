@@ -338,6 +338,31 @@ export interface ToolContext {
    *  builds the concrete per-call section over a suppressible derived signal +
    *  the watchdog clock. */
   criticalSection?: CriticalSectionSeam
+  /** file_history_rewind — OPTIONAL per-file snapshot capture sink. The
+   *  file-mutating tools (`write`/`edit`) call `record` with the file's NEW
+   *  bytes after a successful mutation so the `file_history_rewind` tool can
+   *  later restore that path to this exact version. Surfaced by the dispatch
+   *  seam from `AgentConfig.fileHistory` ONLY when `QUANTA_FILE_HISTORY` is on
+   *  (the host wires the SAME store the tool reads). ABSENT (gate OFF / non-
+   *  wiring host) ⇒ omitted ⇒ the capture helper is a single `undefined` check
+   *  and a no-op — zero capture, byte-identical legacy path (default-OFF). The
+   *  sink resolves+jails the path internally (rejecting an escape) so the
+   *  recorded key matches what the tool's `resolveJailed` produces. Duck-typed
+   *  (structural mirror of the `@/tool/file-history` adapter) so `@/tool`'s
+   *  hot-path types stay a leaf — same discipline as {@link ToolDiffSink}. */
+  fileHistory?: FileHistorySink
+}
+
+/** file_history_rewind — duck-typed per-file snapshot sink injected via
+ *  {@link ToolContext}. Structural mirror of the `@/tool/file-history` store
+ *  adapter (kept HERE so the hot-path tool types stay a leaf — same discipline
+ *  as {@link ToolDiffSink}). `record` is NO-THROW at the port boundary by
+ *  contract; a mutating tool calls it INSIDE a guard so a misbehaving sink can
+ *  never break a successful mutation. The sink resolves + jails `path` against
+ *  `cwd` internally and silently drops an escape (the mutation already
+ *  succeeded; a capture failure must never surface as a tool failure). */
+export interface FileHistorySink {
+  record(input: { readonly path: string; readonly cwd: string; readonly content: string }): void
 }
 
 /** jun-6 tool-interrupt-behavior — duck-typed critical-section seam injected via

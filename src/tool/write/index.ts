@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { defaultFileSystemPort, type FileSystemPort, FsJailError } from "@/storage"
 import { defineTool } from "../factory"
+import { captureFileHistory } from "../file-history/capture"
 import { gitWriteGuardDeny } from "../git-write-guard-result"
 import { guardWrite } from "../stale-read-guard"
 import { captureToolDiff } from "../tool-diff-capture"
@@ -133,6 +134,10 @@ export const makeWriteTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<
         // when the seam is unwired; byte-identical legacy path).
         await commitWrite(fs, ctx, input.path, input.content)
         if (captureDiff) captureToolDiff(ctx, before, input.content, input.path)
+        // file_history_rewind — record the NEW bytes as a per-file version so
+        // the model can later restore THIS exact state. No-op when the sink is
+        // unwired (gate OFF ⇒ ctx.fileHistory absent ⇒ byte-identical).
+        captureFileHistory(ctx, input.path, input.content)
         const bytes = Buffer.byteLength(input.content, "utf8")
         yield {
           type: "result",

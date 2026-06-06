@@ -339,6 +339,17 @@ export interface RuntimeConfig {
    *  `DefaultToolPorts.artifactRegistry` (the generation tools register their
    *  outputs; the model lists/inspects/destroys via `artifact_*`). */
   readonly artifactStore: boolean
+  /** file_history_rewind — per-file session-snapshot capture + restore
+   *  (`QUANTA_FILE_HISTORY`). Strict opt-in (`=== "1"`). Default false ⇒ no
+   *  per-file history store is constructed, the write/edit capture sink is NOT
+   *  wired (no recording), and `file_history_rewind` is NOT registered
+   *  (byte-identical). When ON, the composition root mints ONE per-session
+   *  bounded {@link FileHistoryStore} (`@/tool/file-history`), wires its sink
+   *  onto `AgentConfig.fileHistory` (write/edit record each new file version),
+   *  and registers the list/restore tool bound to the SAME store. Bounded per
+   *  path (versions + bytes — no unbounded growth) and jailed (a path can't
+   *  escape cwd; same `resolveJailed` chokepoint as read/write). */
+  readonly fileHistory: boolean
   /** CLUSTER D #5 — remember-patterns RECORDING seam (`QUANTA_REMEMBER_PATTERNS`).
    *  Strict opt-in (`=== "1"`). Default false ⇒ no `PatternGrantStore` is
    *  constructed, `DefaultToolPorts.permissionPatternPropose` stays absent, and
@@ -348,6 +359,32 @@ export interface RuntimeConfig {
    *  may then propose baseline-covered pattern refinements; an uncovered proposal
    *  is rejected — it can never self-grant a new capability). */
   readonly rememberPatterns: boolean
+  /** CLUSTER D #5 residual — operator opt-in to RECORD `maybeDangerous`
+   *  self-proposed patterns (`QUANTA_REMEMBER_PATTERNS_DANGEROUS`). Strict opt-in
+   *  (`=== "1"`). Default false ⇒ a model proposal flagged dangerous is ALWAYS
+   *  rejected (`dangerous`), routed to the reviewer — the current safe behavior,
+   *  byte-identical. When ON, the composition root passes `allowDangerous: true`
+   *  into the propose port so a dangerous-BUT-baseline-covered proposal records.
+   *  SECURITY (load-bearing): this lifts ONLY the extra dangerous-gate; the
+   *  no-widen gate is UNTOUCHED — a dangerous-AND-uncovered proposal is still
+   *  `would_widen` rejected, so the knob can never let a model self-grant a new
+   *  capability. Inert unless `rememberPatterns` is also ON (no slice ⇒ no port). */
+  readonly rememberPatternsDangerous: boolean
+  /** jun-6 (Codex paste-burst) — large-paste coalescing threshold
+   *  (`QUANTA_PASTE_BURST`, a positive integer = the inclusive min-char count).
+   *  Absent / invalid ⇒ `undefined` ⇒ the CLI reader echoes a paste inline
+   *  exactly as today (byte-identical). When set, a SINGLE keypress carrying ≥
+   *  this many chars is echoed as `[Pasted Content N chars]` while the FULL text
+   *  still submits. Detection is chunk-SIZE only (no clock). The reader slice
+   *  takes this by injection (`ReadLineOptions.pasteBurst`); it never reads env. */
+  readonly pasteBurstMinChars: number | undefined
+  /** jun-6 (Codex skill-creator) — agent-callable skill-authoring tool gate
+   *  (`QUANTA_SKILL_CREATOR`). Strict opt-in (`=== "1"`). Default false ⇒ no
+   *  `SkillWriterPort` is constructed and the `skill_create` tool is NOT
+   *  registered (byte-identical default tool surface). When ON, the composition
+   *  root wires a jailed writer (under the user/repo skills dir) and registers
+   *  the tool so the model can scaffold + validate + install a new skill. */
+  readonly skillCreator: boolean
   /** C6 — structured deny-reason surfacing (`QUANTA_DENY_REASON`). Strict opt-in
    *  (`=== "1"`). Default false ⇒ the `ToolFailure.permission_denied` envelope
    *  omits `denyReason`, the model-facing deny `content` carries no
@@ -840,9 +877,23 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // C1 — strict `=== "1"` opt-in. Default false ⇒ no artifact registry / tools
     // (byte-identical).
     artifactStore: env["QUANTA_ARTIFACT_STORE"] === "1",
+    // file_history_rewind — strict `=== "1"` opt-in. Default false ⇒ no per-file
+    // history store, no capture sink, no file_history_rewind tool (byte-identical).
+    fileHistory: env["QUANTA_FILE_HISTORY"] === "1",
     // CLUSTER D #5 — strict `=== "1"` opt-in. Default false ⇒ no PatternGrantStore
     // constructed, no permission_propose_pattern tool (byte-identical).
     rememberPatterns: env["QUANTA_REMEMBER_PATTERNS"] === "1",
+    // CLUSTER D #5 residual — strict `=== "1"` opt-in. Default false ⇒ a
+    // dangerous self-proposal is always rejected (reviewer-routed), byte-identical.
+    // ON ⇒ the propose port is wired with `allowDangerous: true` (lifts ONLY the
+    // dangerous-gate; the no-widen gate still rejects an uncovered proposal).
+    rememberPatternsDangerous: env["QUANTA_REMEMBER_PATTERNS_DANGEROUS"] === "1",
+    // jun-6 paste-burst — positive-integer min-char threshold. Absent / invalid
+    // ⇒ undefined ⇒ the CLI reader echoes a paste inline (byte-identical).
+    pasteBurstMinChars: parsePositiveInt(env["QUANTA_PASTE_BURST"], "QUANTA_PASTE_BURST"),
+    // jun-6 skill-creator — strict `=== "1"` opt-in. Default false ⇒ no writer
+    // port, `skill_create` not registered (byte-identical default tool surface).
+    skillCreator: env["QUANTA_SKILL_CREATOR"] === "1",
     // C6 — strict `=== "1"` opt-in. Default false ⇒ no structured deny reason
     // attached / no content prefix / DecisionEvent unchanged (byte-identical).
     surfaceDenyReason: env["QUANTA_DENY_REASON"] === "1",

@@ -62,12 +62,15 @@ evidence:
     - src/tool/mcp_resources/index.ts
     - src/tool/index.ts
     - src/agent/mcp-bridge.ts
+    - src/mcp/reconnect/supervisor.ts
+    - src/mcp/reconnect/port.ts
     - src/apps/cli/internal.ts
     - src/shared/runtime-config.ts
   tests:
     unit:
       - tests/unit/mcp-resource-tools-hellgate.test.ts
       - tests/unit/mcp-resources-host-wire-e2e-hellgate.test.ts
+      - tests/unit/mcp-resources-supervised-hellgate.test.ts
       - tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts
       - tests/unit/session-knobs-default-off-byte-identity-hellgate.test.ts
     integration: []
@@ -97,10 +100,12 @@ notes: |
           read/get=route(순서대로 시도, ok:true hit 우선, 아니면 first real failure,
           전부 unsupported면 typed unsupported). NO-THROW end-to-end.
         - `resourcesHandleFor(clients)`: resources OR prompts 광고한 클라만 모아 aggregate,
-          0개면 undefined. SUPERVISED 클라(McpReconnectSupervisor)는 resources 메서드
-          미노출이라 EXCLUDE(fake 안 함 — 정직한 한계).
-        - `loadSingle`이 concrete client를 `resources`로 surface, `loadMcpTools`가
-          `{tools, clients, resources?}` 반환.
+          0개면 undefined. SUPERVISED 클라(McpReconnectSupervisor)도 INCLUDE(jun-06 RFC,
+          한계 CLOSED): supervisor가 6 `resources/*`+`prompts/*` 메서드를 노출하고 매 콜
+          CURRENT live client를 re-resolve해 `ResourcesCapableClient`를 구조적으로 만족.
+          reconnect gap 동안엔 typed `transport` failure(no-throw)라 그 한 콜에서만 빠짐.
+        - `loadSingle`이 concrete client를, `loadSupervised`가 supervisor를 `resources`로
+          surface, `loadMcpTools`가 `{tools, clients, resources?}` 반환.
     (2) `src/apps/cli/internal.ts` `loadFeatures` — knob+handle 게이팅으로
         `mcpResourcesTools(handle)`을 mcpTools에 append(origin=mcp ⇒ H2 envelope 자동).
         zero servers/지원 안 함 ⇒ handle undefined ⇒ tools absent + byte-identical.
@@ -109,6 +114,10 @@ notes: |
   builtin origin 오태깅 = 회귀, test-visible). 실제 활성화는 loadFeatures 경로,
   `mcp-resources-host-wire-e2e-hellgate.test.ts`가 e2e로 핀(live single + multi-client
   concat/route + knob-off byte-identical + zero-clients + origin=mcp).
-  Phase-2 deferred: SUPERVISED(auto-restart) 클라 resources 표면화(supervisor에
-  resources 메서드 노출 필요) + prompt-template materialization + resources/subscribe
-  notification-stream.
+  SUPERVISED resources 표면화 DONE(jun-06 RFC): supervisor가 6 resources/prompts
+  메서드를 노출(매 콜 live client re-resolve, reconnect gap=typed transport no-throw)
+  → `loadSupervised`가 supervisor를 aggregate에 admit. 핀:
+  `mcp-resources-supervised-hellgate.test.ts`(31 케이스: healthy proxy/reconnect-gap
+  fail-fast/queue/degraded/restart-swap/capability-drift/method-set-absent/mixed
+  aggregate/default-OFF). Phase-2 deferred(잔여): prompt-template materialization +
+  resources/subscribe notification-stream.

@@ -38,6 +38,7 @@ evidence:
   tests:
     unit:
       - tests/unit/llm-adapter-mantle-hellgate.test.ts
+      - tests/unit/mantle-adapter-real-stream-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

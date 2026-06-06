@@ -199,6 +199,15 @@ const SESSION_MUTATING_ENTRIES: ReadonlyArray<readonly [string, string]> = [
   ["mcp_connector_install", "write_filesystem"],
   ["side_agent_spawn", "subagent_spawn"],
   ["side_agent_stop", "subagent_control"],
+  // file_history_rewind — caller-wire (DefaultToolPorts.fileHistory, gated on
+  // QUANTA_FILE_HISTORY). `op:restore` WRITES a prior file version back ⇒
+  // write_filesystem; classified mutating so plan mode blocks it.
+  ["file_history_rewind", "write_filesystem"],
+  // skill_create — caller-wire (QUANTA_SKILL_CREATOR + a writable skills dir).
+  // WRITES <name>/SKILL.md to the jailed skills dir ⇒ write_filesystem;
+  // classified mutating so plan mode blocks it with the correct typed error
+  // (not UnknownToolError). Round-1 jun-6 audit finding.
+  ["skill_create", "write_filesystem"],
 ]
 
 describe("jun-05 session tools — MUTATING_TOOL_TABLE completeness (round-2 cross-cut)", () => {

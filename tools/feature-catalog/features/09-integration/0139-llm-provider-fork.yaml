@@ -29,8 +29,10 @@ purpose: |
   provider-missing-dependency) + 5-tier resolveProvider(explicit?, env?)
   precedence. Default-OFF — legacy
   adapter path untouched (byte-identical when ProviderId resolves to
-  "default"). Bedrock/Vertex are Phase 2 (real stream via optional cloud
-  sub-SDK, missing-dep typed-throw when absent); Foundry is Phase 2 stub.
+  "default"). Bedrock/Vertex/Foundry are all REAL stream (ADR-0172,
+  optional cloud sub-SDK, missing-dep typed-throw when absent); Mantle is a
+  real stream skeleton HELD on its unpublished @anthropic-ai/mantle-sdk
+  (same missing-dep typed-throw, install-to-enable — NOT a stub).
   FACTORY WIRE NOW LIVE (H7): createMulticloudLLM in src/llm/factory.ts
   consults this registry's precedence ladder to select the transport AND
   injects the H7 CredentialSource into the Bedrock/Vertex adapters, so the
@@ -72,7 +74,8 @@ knobs:
 deliberate_hold: null
 notes: |
   Wire is opt-in: legacy AnthropicAdapter still default. Foundry adapter
-  is Phase 2 (interface-only stub); promotes when Azure client lib choice
-  finalizes. ProviderError closes 3 cases: provider-unsupported /
+  graduated to a REAL stream (ADR-0172) once @anthropic-ai/foundry-sdk@0.2.3
+  shipped; Mantle is a real stream skeleton awaiting its unpublished SDK
+  (install-to-enable). ProviderError closes 3 cases: provider-unsupported /
   provider-misconfigured / provider-missing-dependency — caller maps to
   typed LLMErrorKind upstream.

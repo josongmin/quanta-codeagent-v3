@@ -1,6 +1,6 @@
 import type { OsSandboxProfile } from "@/runtime"
 import type { AutomationEnginePort } from "@/scheduler/automation-engine"
-import type { FileSystemPort } from "@/storage"
+import { defaultFileSystemPort, type FileSystemPort } from "@/storage"
 import { applyPatchTool } from "./apply-patch"
 import { makeApplyPatchStructuredTool } from "./apply-patch-structured-tool"
 import { type AppshotArtifactSink, type AppshotPort, appshotVerifyTool } from "./appshot"
@@ -29,6 +29,7 @@ import {
 // Pure-TS STORED-ZIP + OOXML; conditionally registered via DefaultToolPorts.officeAuthoring.
 import { makeDocxWriteTool, makePptxWriteTool, makeXlsxWriteTool } from "./document/authoring"
 import { editTool, makeEditTool } from "./edit"
+import { type FileHistoryStore, makeFileHistoryRewindTool } from "./file-history"
 import { fileTreeSummaryTool } from "./file-tree-summary"
 import { globTool } from "./glob"
 import { grepTool } from "./grep"
@@ -485,6 +486,7 @@ export type {
   CriticalSectionSeam,
   DeferredHandle,
   DeferredToolResult,
+  FileHistorySink,
   GitWriteGuard,
   HITLTier,
   NextAction,
@@ -622,6 +624,16 @@ export interface DefaultToolPorts {
    *  when `QUANTA_ARTIFACT_STORE` is on. `register` is host-side (the generation
    *  tools register their outputs); the model only lists/inspects/destroys. */
   artifactRegistry?: ArtifactRegistryPort
+  /** file_history_rewind — when set, append `file_history_rewind` (per-file
+   *  session-snapshot list/restore) bound to this session's history store.
+   *  Absent ⇒ tool NOT registered (byte-identical default menu). The
+   *  composition root mints ONE `createFileHistoryStore()` (from
+   *  `@/tool/file-history`) and passes it here ONLY when `QUANTA_FILE_HISTORY`
+   *  is on — the SAME store it wires onto `AgentConfig.fileHistory` (so the
+   *  write/edit capture sink records into exactly what this tool reads). The
+   *  tool's FS writer is `ports.fs ?? defaultFileSystemPort` (the same jailed
+   *  port write/edit use), so a restore is confined to cwd. */
+  fileHistory?: FileHistoryStore
   /** CLUSTER D #5 — when set, append `permission_propose_pattern` (the model-
    *  facing RECORDING half of ADR-0061's remember-patterns seam). Absent ⇒ tool
    *  NOT registered (byte-identical default menu). The composition root wires a
@@ -682,6 +694,15 @@ export interface AppshotSlot {
 }
 
 export { automationUpdateTool } from "./automation_update"
+// file_history_rewind — the per-file snapshot store + sink the composition root
+// mints ONCE per session (when QUANTA_FILE_HISTORY is on) and threads to BOTH
+// `DefaultToolPorts.fileHistory` (the tool read side) and `AgentConfig.fileHistory`
+// (the write/edit capture sink). Default-OFF: nothing constructs them otherwise.
+export {
+  createFileHistorySink,
+  createFileHistoryStore,
+  type FileHistoryStore,
+} from "./file-history"
 // N6 (jun-4-pty-attach.md) — PTY/tmux session attach tools + the tmux backend.
 // Caller-wired via `DefaultToolPorts.ptySession` (default-OFF; host wires a
 // backend when `QUANTA_PTY_ATTACH === "1"`). `createTmuxAdapter` is the MVP-A
@@ -765,6 +786,16 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => {
   // host's session registry are appended.
   if (ports.artifactRegistry !== undefined) {
     base.push(...artifactTools(ports.artifactRegistry))
+  }
+  // file_history_rewind — conditional registration of the per-file snapshot
+  // list/restore tool. Absent store ⇒ default set is byte-identical (the model
+  // never sees the tool). Present ⇒ the tool bound to the host's session history
+  // store + the same jailed FS port write/edit use is appended (mutating on
+  // restore; jailed; bounded ring inside the store).
+  if (ports.fileHistory !== undefined) {
+    base.push(
+      makeFileHistoryRewindTool(ports.fileHistory, ports.fs ?? defaultFileSystemPort) as Tool,
+    )
   }
   // CLUSTER D #5 — conditional registration of permission_propose_pattern. Absent
   // port ⇒ default set is byte-identical (the model never sees the tool). Present

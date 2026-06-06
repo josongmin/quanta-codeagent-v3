@@ -5,6 +5,8 @@ import {
   type AutoModeClassifier,
   gitWriteProtectReason,
   type PermissionContext,
+  type StructuredDenyReason,
+  structuredDenyReason,
 } from "@/permission"
 import { type RedactionHit, redactSecrets, type SensitivityClass } from "@/security"
 import { compositePiiScanner } from "@/security/pii-redaction"
@@ -45,6 +47,26 @@ import type { AgentConfig } from "./types"
 import { wrapToolResult } from "./untrusted-envelope"
 
 export type { DispatchResult } from "./dispatch-types"
+
+/**
+ * C6 (RFC jun-6-deny-reason-surfacing) — knob-gated structured-deny builder for
+ * the dispatch-seam denies that fire BEFORE `runAdmissibilityGate` (the
+ * `plan` collaboration-mode mutating block). Mirrors the admissibility-gate's
+ * local `denyReason(...)`: returns `undefined` (zero allocation) when
+ * `surfaceDenyReason` (`QUANTA_DENY_REASON`) is OFF, so `deny(...,
+ * denyReason(...))` is BYTE-IDENTICAL to the legacy `deny(...)` on the default
+ * path. The dispatch-helper `deny()` ALSO re-checks the knob (defence in depth).
+ *
+ * SECURITY (no-leak): callers pass a CATEGORICAL `safeReason` (mode literal +
+ * tool name at most — never tool input), the same surface the recorder already
+ * sees; the prefix is derived from `layer`/`pillar` enums only.
+ */
+const denyReason = (input: {
+  layer: import("@/permission").DenyLayer
+  pillar?: import("@/permission").DenyPillar
+  safeReason: string
+}): StructuredDenyReason | undefined =>
+  runtimeConfig().surfaceDenyReason ? structuredDenyReason(input) : undefined
 
 /** Max chars of stderr retained on the dispatch result (RFC-0002 §5.2).
  *  Kept in lock-step with the per-tool cap (bash/test_runner = 4 000) so this
@@ -168,7 +190,25 @@ const consultDispatchGuard = (call: ToolUseBlock, config: AgentConfig): Dispatch
     // Collapse `ask` to a deny in v1 (the wire to HITL queue is a deferred
     // follow-up). The `"guard-ask"` preview tag is the recognition surface a
     // future re-router keys on without changing this seam.
-    return deny(call.id, `Dispatch guard requested confirmation: ${decision.reason}`, "guard-ask")
+    //
+    // C6: the dispatch-guard is a seam-level PERMISSION deny that fires BEFORE
+    // `runAdmissibilityGate` (like the plan-mode block), so it MUST carry the
+    // structured reason for the model to branch on the deciding layer. It
+    // composes `@/permission` policy detectors (git-write-protect / branch-only
+    // / network egress), so `layer:"stack"` is the closest canonical layer.
+    // `pillar` is OMITTED: the `GuardDecision` shape exposes only `hardDeny` +
+    // a prose `reason`, not WHICH detector fired, so any pillar would be a guess
+    // (a wrong pillar is worse than none — see deny-reason.ts).
+    //
+    // SECURITY (no-leak): `decision.reason` echoes the path/command/host on the
+    // model-facing `content` (agent-authored — acceptable), but the STRUCTURED
+    // `safeReason` is a CATEGORICAL one-liner that carries NO input.
+    return deny(
+      call.id,
+      `Dispatch guard requested confirmation: ${decision.reason}`,
+      "guard-ask",
+      denyReason({ layer: "stack", safeReason: "dispatch guard requested confirmation" }),
+    )
   }
   // `kind === "deny"`. `hardDeny:true` carries the security-boundary
   // signal forward via the deny content prefix — downstream loop classifiers
@@ -178,7 +218,21 @@ const consultDispatchGuard = (call: ToolUseBlock, config: AgentConfig): Dispatch
   const prefix = decision.hardDeny
     ? "Action blocked by dispatch guard (hard): "
     : "Action blocked by dispatch guard: "
-  return deny(call.id, `${prefix}${decision.reason}`, "guard-deny")
+  // C6: structured reason for the seam-level guard deny (see the `ask` arm). The
+  // `hardDeny` flag selects a CATEGORICAL safeReason wording (security boundary
+  // vs recoverable posture) — NEVER `decision.reason`, which echoes the matched
+  // path/command/host. `layer:"stack"`, pillar OMITTED.
+  return deny(
+    call.id,
+    `${prefix}${decision.reason}`,
+    "guard-deny",
+    denyReason({
+      layer: "stack",
+      safeReason: decision.hardDeny
+        ? "dispatch guard blocked (security boundary)"
+        : "dispatch guard blocked (recoverable posture)",
+    }),
+  )
 }
 
 const isSessionApprovalRequiredError = (error: unknown): boolean => {
@@ -731,6 +785,13 @@ const buildToolContext = (args: {
     // (default-OFF). The `@/agent` config-side `ProgressSink` is the same
     // structural `@/tool` mirror.
     ...(config.progressSink !== undefined ? { progressSink: config.progressSink } : {}),
+    // file_history_rewind — surface the per-file snapshot capture sink so the
+    // write/edit tools record each new file version into the session history
+    // store the `file_history_rewind` tool reads. ABSENT (QUANTA_FILE_HISTORY
+    // off / non-wiring host) ⇒ omitted ⇒ `captureFileHistory` is a no-op and the
+    // mutating path is byte-identical (default-OFF). The `@/agent` config-side
+    // `FileHistorySink` is the same structural `@/tool` mirror.
+    ...(config.fileHistory !== undefined ? { fileHistory: config.fileHistory } : {}),
   }
 }
 
@@ -773,7 +834,21 @@ const dispatchToolInner = async (
   if (collab === "plan" && !registry.isReadOnly(call.name)) {
     const seamDecision = checkDispatchAllowed({ collaborationMode: collab }, { name: call.name })
     if (!seamDecision.ok) {
-      return deny(call.id, seamDecision.reason.message, "mode-blocked")
+      return deny(
+        call.id,
+        seamDecision.reason.message,
+        "mode-blocked",
+        // C6: the dispatch-seam plan-mode block is the same conceptual deny as
+        // the admissibility-gate `denyIfModeBlocked` (`layer:"mode"` /
+        // `pillar:"approval"`), just fired earlier on the collaboration-mode
+        // path. Categorical safeReason (mode literal + tool name only — the
+        // typed error `message` already surfaces them on `content`, never input).
+        denyReason({
+          layer: "mode",
+          pillar: "approval",
+          safeReason: "tool blocked in plan collaboration mode",
+        }),
+      )
     }
   }
 

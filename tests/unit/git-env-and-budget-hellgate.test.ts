@@ -168,6 +168,94 @@ describe("applyBudget — fused AbortSignal (hellgate)", () => {
     expect(applyBudget(parent, { maxWallTimeMs: 0 }).signal).toBe(parent)
     expect(applyBudget(parent, { maxWallTimeMs: Number.NaN }).signal).toBe(parent)
   })
+
+  // ── ROUND-2 (listener-leak / lifecycle lens) ──────────────────────────────
+  // A long-lived parent signal is reused across MANY git ops. Each `applyBudget`
+  // attaches one `abort` listener to the parent; `cleanup()` MUST remove it.
+  // Without removal a 1000-op session leaks 1000 listeners on the parent. We
+  // probe via a spy parent that counts add/remove.
+  const spyParent = (): {
+    signal: AbortSignal
+    abort: () => void
+    liveListeners: () => number
+  } => {
+    const ctrl = new AbortController()
+    // Track listener IDENTITY (a Set), so a double-remove of the SAME listener is
+    // correctly idempotent (matches native removeEventListener). This measures
+    // REAL leakage: a listener that was added and never removed. (The spec auto-
+    // removes a {once} listener when it fires without routing through our spy, so
+    // after a parent-abort the set may still hold it — tests below account for
+    // that by relying on the ADD/REMOVE balance the cleanup() path drives, which
+    // is the actual leak surface for a long-lived parent.)
+    const live = new Set<EventListener>()
+    const realAdd = ctrl.signal.addEventListener.bind(ctrl.signal)
+    const realRemove = ctrl.signal.removeEventListener.bind(ctrl.signal)
+    ;(ctrl.signal as unknown as { addEventListener: typeof realAdd }).addEventListener = ((
+      type: string,
+      l: EventListener,
+      o?: AddEventListenerOptions | boolean,
+    ) => {
+      if (type === "abort") live.add(l)
+      return realAdd(type as "abort", l, o as AddEventListenerOptions)
+    }) as typeof realAdd
+    ;(ctrl.signal as unknown as { removeEventListener: typeof realRemove }).removeEventListener = ((
+      type: string,
+      l: EventListener,
+      o?: EventListenerOptions | boolean,
+    ) => {
+      if (type === "abort") live.delete(l)
+      return realRemove(type as "abort", l, o as EventListenerOptions)
+    }) as typeof realRemove
+    return { signal: ctrl.signal, abort: () => ctrl.abort(), liveListeners: () => live.size }
+  }
+
+  test("HELL-18: cleanup removes the parent listener — 1000 ops leak ZERO listeners", () => {
+    const parent = spyParent()
+    for (let i = 0; i < 1000; i++) {
+      const { cleanup } = applyBudget(parent.signal, { maxWallTimeMs: 60_000 })
+      cleanup()
+    }
+    // Every op added one + removed one ⇒ net zero live abort listeners.
+    expect(parent.liveListeners()).toBe(0)
+  })
+
+  test("HELL-19: timer-fire path still leaves the parent listener removable (no orphan)", async () => {
+    const parent = spyParent()
+    const { signal, cleanup } = applyBudget(parent.signal, { maxWallTimeMs: 10 })
+    // While the budget timer is pending, the parent listener is live.
+    expect(parent.liveListeners()).toBe(1)
+    await new Promise((r) => setTimeout(r, 30))
+    // Budget elapsed ⇒ fused signal aborted by the timer, NOT the parent…
+    expect(signal?.aborted).toBe(true)
+    // …but the parent listener is still attached (timer-fire does not remove it).
+    expect(parent.liveListeners()).toBe(1)
+    // cleanup() reclaims it — no orphan listener on the long-lived parent.
+    cleanup()
+    expect(parent.liveListeners()).toBe(0)
+  })
+
+  test("HELL-20: parent-abort path ⇒ fused aborts AND cleanup is safe/idempotent (timer reclaimed)", () => {
+    const parent = spyParent()
+    const { signal, cleanup } = applyBudget(parent.signal, { maxWallTimeMs: 60_000 })
+    expect(parent.liveListeners()).toBe(1)
+    parent.abort()
+    expect(signal?.aborted).toBe(true)
+    // cleanup() clears the pending budget timer AND removes the parent listener
+    // by identity. Calling it twice is safe (idempotent Set delete + idempotent
+    // native removeEventListener) — the observable live count lands at 0 and
+    // never goes negative.
+    cleanup()
+    cleanup()
+    expect(parent.liveListeners()).toBe(0)
+  })
+
+  test("HELL-21: no-budget path attaches NO listener to the parent (zero overhead)", () => {
+    const parent = spyParent()
+    const { cleanup } = applyBudget(parent.signal, undefined)
+    expect(parent.liveListeners()).toBe(0)
+    cleanup()
+    expect(parent.liveListeners()).toBe(0)
+  })
 })
 
 // ── Budget — resolveMaxCommits (ADR-0107) ───────────────────────────────

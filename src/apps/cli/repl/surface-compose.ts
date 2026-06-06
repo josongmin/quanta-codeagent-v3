@@ -43,7 +43,7 @@ import {
   type SessionEnvelopeRecord,
   saveSessionById,
 } from "@/session"
-import { errMessage, logger } from "@/shared"
+import { errMessage, logger, runtimeConfig } from "@/shared"
 import { defaultShadowOdb, type ShadowOdb } from "@/storage"
 import {
   type AtCandidateProvider,
@@ -117,6 +117,10 @@ export interface PromptUxOpts {
    *  defaults). Present iff `QUANTA_KEYBINDINGS=1`. Absent ⇒ hardcoded keys
    *  (byte-identical). */
   readonly keybindings?: KeybindingMap
+  /** jun-6 (Codex paste-burst) — large-paste coalescing threshold. Present iff
+   *  `QUANTA_PASTE_BURST` is a positive integer (read via `runtimeConfig`).
+   *  Absent ⇒ paste echoes inline (byte-identical). */
+  readonly pasteBurst?: { readonly minChars: number }
 }
 
 /** Opt-in env gate for this surface's feature knobs (QUANTA_WORKING_STATE /
@@ -233,6 +237,10 @@ export const buildPromptUx = async (
     ? buildExternalEditor({ env, onWarn: (line) => process.stderr.write(`${line}\n`) })
     : undefined
   const keybindings = await buildKeybindingMap(env)
+  // jun-6 paste-burst — read the threshold from the frozen runtime-config (the
+  // SINGLE env touchpoint; no new `env.QUANTA_*` gate here). Absent / invalid ⇒
+  // undefined ⇒ the reader echoes a paste inline (byte-identical).
+  const pasteBurstMinChars = runtimeConfig().pasteBurstMinChars
   return {
     ...(promptHistory !== undefined ? { promptHistory } : {}),
     multiline: multiline.enabled,
@@ -240,6 +248,7 @@ export const buildPromptUx = async (
     ...buildModeCycle(env, onPosture),
     ...(openEditor !== undefined ? { openEditor } : {}),
     ...(keybindings !== undefined ? { keybindings } : {}),
+    ...(pasteBurstMinChars !== undefined ? { pasteBurst: { minChars: pasteBurstMinChars } } : {}),
   }
 }
 

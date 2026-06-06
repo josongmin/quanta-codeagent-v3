@@ -17,8 +17,9 @@ purpose: |
   + `@anthropic-ai/vertex-sdk` (Phase 1 was typed-throw stubs). DI `clientFactory`
   test seam keeps tests off-network; shared `mapRawEvent` reused from the public
   anthropic adapter (transport-only substitution, no grammar fork). Auth env
-  fallback chain via SDK (AWS shared creds / GCP ADC). Foundry stays Phase 1
-  stub (Anthropic SDK ships no Foundry helper yet).
+  fallback chain via SDK (AWS shared creds / GCP ADC). Foundry has since
+  graduated to its own real stream (ADR-0172, @anthropic-ai/foundry-sdk@0.2.3);
+  Mantle is a real stream skeleton awaiting its unpublished SDK.
 evidence:
   code:
     - src/llm/providers/bedrock-adapter.ts

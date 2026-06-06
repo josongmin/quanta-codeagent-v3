@@ -37,6 +37,8 @@ evidence:
   tests:
     unit:
       - tests/unit/llm-providers/registry-hellgate.test.ts
+      - tests/unit/llm-providers/foundry-adapter-hellgate.test.ts
+      - tests/unit/llm-providers/foundry-real-stream-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

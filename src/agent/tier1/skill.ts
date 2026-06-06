@@ -14,14 +14,17 @@
  * (byte-identical, RFC §1.2).
  */
 
-import { runtimeConfig } from "@/shared"
+import { errMessage, runtimeConfig } from "@/shared"
+import { FsJailError, resolveJailed } from "@/storage"
 import type { Tool } from "@/tool"
 import type { Skill } from "../../skill"
 import {
+  createSkillCreatorTool,
   createSkillTool,
   createToolSearchTool,
   discoverSkills,
   discoverSystemSkills,
+  type SkillWriterPort,
   skillEffortOverride,
   skillModelOverride,
   skillsActivatedFor,
@@ -65,6 +68,26 @@ const skillOverrideEntry = (s: Skill): SkillTurnOverride | undefined => {
   }
 }
 
+/**
+ * jun-6 (skill-creator) — a jailed {@link SkillWriterPort} rooted at the user
+ * skills `dir`. The relative `<name>/SKILL.md` is resolved through
+ * `resolveJailed` so a path escape can never write outside the skills dir
+ * (defence-in-depth atop the slice's kebab-case name re-validation). `Bun.write`
+ * creates the `<name>/` parent dir. NO-THROW: an escape or write error is
+ * returned as a typed `{ ok:false }` so the tool surfaces it cleanly. */
+const buildJailedSkillWriter = (dir: string): SkillWriterPort => ({
+  write: async (relPath, content) => {
+    try {
+      const abs = resolveJailed(relPath, dir)
+      await Bun.write(abs, content)
+      return { ok: true, path: abs }
+    } catch (e) {
+      const reason = e instanceof FsJailError ? "path escapes the skills directory" : errMessage(e)
+      return { ok: false, reason }
+    }
+  },
+})
+
 /** Build the skill block from `config.skills`. Returns `undefined` when the
  *  block is absent so the composer can skip it. Pure except for
  *  `discoverSkills`'s directory IO. */
@@ -95,6 +118,13 @@ export const buildSkillBlock = async (config: AgentConfig): Promise<SkillBlock |
     createSkillTool(skills),
     createToolSearchTool(() => config.registry.specs()),
   ]
+  // jun-6 (skill-creator) — register the agent-callable `skill_create` tool ONLY
+  // when the operator opts in (`QUANTA_SKILL_CREATOR`) AND a writable user skills
+  // `dir` is configured (system-skills-only sessions have nowhere to install).
+  // Default-OFF / no-dir ⇒ the tool is NOT on the menu (byte-identical surface).
+  if (runtimeConfig().skillCreator && dir !== undefined) {
+    tools.push(createSkillCreatorTool(buildJailedSkillWriter(dir)))
+  }
   const al = new Map<string, string[]>()
   // ADR-0011 §6.2 → L4: build the per-skill model/effort override map alongside
   // the allowlist map. A skill contributes an entry only when it declares

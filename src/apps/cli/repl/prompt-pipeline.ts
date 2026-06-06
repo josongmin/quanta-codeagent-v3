@@ -40,6 +40,12 @@ export interface PromptPipelineUxOpts {
   /** RFC-11 / ADR-0447 — loaded keybinding map (merged over defaults). When
    *  present, keys remap to bound actions. Absent ⇒ byte-identical. */
   readonly keybindings?: KeybindingMap
+  /** jun-6 (Codex paste-burst) — large-paste coalescing. When present
+   *  (`{ minChars }`), a paste of ≥minChars chars echoes a `[Pasted Content N
+   *  chars]` placeholder while the full text still submits. Built at the host
+   *  from the `QUANTA_PASTE_BURST` knob; absent ⇒ paste echoes inline
+   *  (byte-identical). */
+  readonly pasteBurst?: { readonly minChars: number }
 }
 
 type PromptLineReader = (
@@ -123,6 +129,7 @@ const defaultPromptLineReader: PromptLineReader = async (
       ...(ux?.onCycleMode !== undefined ? { onCycleMode: ux.onCycleMode } : {}),
       ...(ux?.openEditor !== undefined ? { openEditor: ux.openEditor } : {}),
       ...(ux?.keybindings !== undefined ? { keybindings: ux.keybindings } : {}),
+      ...(ux?.pasteBurst !== undefined ? { pasteBurst: ux.pasteBurst } : {}),
     })
     return raw.trim()
   } catch (e) {

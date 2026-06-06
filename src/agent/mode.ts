@@ -422,6 +422,22 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   // ADR-0464 — apply_patch_structured: per-file-isolated V4A apply, same write
   // posture as apply_patch (plan PROPOSES, does not commit).
   apply_patch_structured: "write_filesystem",
+  // file_history_rewind — caller-wire (registered only when DefaultToolPorts.
+  // fileHistory is wired, gated default-OFF on QUANTA_FILE_HISTORY). `op:restore`
+  // WRITES a prior file version back to the worktree through the same jailed FS
+  // port write/edit use ⇒ `write_filesystem` (plan PROPOSES, does not commit a
+  // restore mid-turn). `op:list` is read-only, but the tool's worst-case op
+  // mutates the filesystem, so it is classified mutating (a single table entry
+  // per tool name; the read path is gated at the tool, not the table).
+  file_history_rewind: "write_filesystem",
+  // skill_create — caller-wire (registered only when QUANTA_SKILL_CREATOR is on
+  // AND a writable user skills `dir` is configured; tier1/skill.ts). It WRITES
+  // `<name>/SKILL.md` to the jailed skills directory through an injected writer
+  // port ⇒ `write_filesystem` (plan PROPOSES authoring a skill; it does not
+  // commit a new file mid-turn). PERMANENT entry so plan-mode dispatch blocks it
+  // with the correct PlanModeMutatingBlockedError instead of tripping
+  // UnknownToolError (the same omission class the S2 + round-2 closeouts fixed).
+  skill_create: "write_filesystem",
   // C1 — artifact (Canvas) read/manage tools. list/get are read-only enumerations
   // over the in-memory session registry (plan-safe). register/destroy MUTATE that
   // session-canvas registry — no FS/shell/git side effect, purely in-session

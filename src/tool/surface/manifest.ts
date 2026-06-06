@@ -543,6 +543,19 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     note: "Canvas / artifact persistence store (§7). Session registry for NON-code generation outputs (image_gen PNGs, xlsx/docx/pptx files) — list/get/destroy by id + a stable `quanta-artifact://<id>` preview URL, so artifacts live OUTSIDE the transcript. `register` is host-side (the generation tools register their outputs); the model only reads/manages. Opt-in EVERYWHERE (QUANTA_ARTIFACT_STORE): a new capability whose registry must be wired, so it never auto-seeds. Pure in-memory registry (@/artifact, injected clock + id-factory); duck-typed port keeps @/tool fence-clean.",
   },
   {
+    name: "file_history_rewind",
+    origin: "@/tool/file-history (via DefaultToolPorts.fileHistory)",
+    gate: {
+      kind: "config-slot",
+      slot: "DefaultToolPorts.fileHistory",
+      env: "QUANTA_FILE_HISTORY",
+    },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "mutating",
+    adr: "file-history",
+    note: "Per-file session-snapshot list/restore (Claude tengu_file_history_rewind parity). The write/edit capture sink records a file's NEW bytes on each successful mutation into a per-session bounded store (per-path version + byte cap, oldest-evicted ring — no unbounded growth); the tool's `op:list` enumerates the versions for a path and `op:restore` writes a chosen version back through the SAME jailed FS port write/edit use (`resolveJailed` — a `../escape` is rejected before any store lookup or write). Distinct from shadow_rewind (whole-workspace anchor) and message rewind — this is per-FILE undo. risk:mutating — restore overwrites one file. Opt-in EVERYWHERE (QUANTA_FILE_HISTORY): a new capability whose store must be wired, so it never auto-seeds; default-OFF ⇒ no capture, tool absent, byte-identical. Pure in-memory store (@/tool/file-history, injected clock); duck-typed sink keeps the @/tool hot-path types a leaf.",
+  },
+  {
     name: "permission_propose_pattern",
     origin: "@/tool/permission-propose (via DefaultToolPorts.permissionPatternPropose)",
     gate: {

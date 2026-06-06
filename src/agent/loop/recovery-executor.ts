@@ -1,0 +1,154 @@
+import type { SystemPromptInput } from "@/llm"
+import { estimateTokens, reactiveCompact } from "../compaction"
+import { metaUser, runGuardChain } from "../guards"
+import type { RecoveryAction } from "../recovery"
+import { decideFromStopPolicy, decideOnAssembled, decideOnStreamError } from "../recovery"
+import { backoffDelayMs } from "../retry"
+import type { ToolHistoryEntry } from "../session-resources"
+import { stripOrphanToolUse } from "../turn-closeout"
+import type { TurnSession, TurnState } from "../turn-context"
+import { emitCompactionEvent } from "./compaction-wire"
+import { resetEffortClassifier } from "./context-assembler"
+import { emitRecovery, objectiveBudgetExhausted } from "./emit-helpers"
+import { sleep } from "./sleep"
+import type { StreamSuccess, TurnResult } from "./types"
+
+type Step = { done: false } | { done: true; result: TurnResult }
+
+export const CONTINUE: Step = { done: false }
+
+export const EMPTY_TOOL_HISTORY: readonly ToolHistoryEntry[] = Object.freeze([])
+
+export const applyNonSuccessRecoveryAction = async (
+  session: TurnSession,
+  state: TurnState,
+  action: RecoveryAction,
+  result: StreamSuccess | { error: unknown; message: string },
+  ctxSystem: SystemPromptInput,
+): Promise<Step | null> => {
+  const { config } = session
+  const { wm, breaker } = state
+  if (action.do === "error") {
+    return { done: true, result: { kind: "error", reason: action.reason } }
+  }
+  if (action.do === "refusal") {
+    const success = result as StreamSuccess
+    const sealed = stripOrphanToolUse(success.message)
+    wm.append(sealed)
+    return {
+      done: true,
+      result: { kind: "refusal", rationale: action.rationale, message: sealed },
+    }
+  }
+  if (action.do === "backoff") {
+    emitRecovery(config, "backoff", `attempt ${action.attempt}`)
+    await sleep(backoffDelayMs(action.attempt), config.signal)
+    return CONTINUE
+  }
+  if (action.do !== "compact") return null
+  emitRecovery(config, "compact")
+  const verdict = breaker?.check()
+  if (verdict?.abort) return { done: true, result: { kind: "error", reason: verdict.reason } }
+  const snapshot = [...wm.snapshot()]
+  const before = estimateTokens(snapshot)
+  const compacted = await reactiveCompact({
+    messages: snapshot,
+    llm: config.compaction?.summarizerLlm ?? config.llm,
+    system: ctxSystem,
+  })
+  if (!compacted.ok) return { done: true, result: { kind: "error", reason: compacted.reason } }
+  const after = estimateTokens(compacted.messages)
+  breaker?.recordReactive(before, after)
+  emitCompactionEvent(config, {
+    kind: "compaction_event",
+    trigger: "mid_turn",
+    reason: "context_limit",
+    tokensBefore: before,
+    tokensAfter: after,
+    messagesRemoved: Math.max(snapshot.length - compacted.messages.length, 0),
+    at: Date.now(),
+  })
+  wm.replace(compacted.messages)
+  resetEffortClassifier(config.effortClassifier)
+  try {
+    const provenance: import("../recovery-reason").RecoveryProvenance = {
+      reason: "ptl_reactive",
+      tokensBefore: before,
+      tokensAfter: after,
+      turnsDropped: Math.max(snapshot.length - compacted.messages.length, 0),
+      turnsKept: compacted.messages.length,
+      compactedAt: Date.now(),
+    }
+    const threadId = config.sessionId ?? ""
+    await config.hooks?.emit({ type: "post_compact", threadId, provenance })
+    if (
+      config.objective !== undefined &&
+      threadId.length > 0 &&
+      !objectiveBudgetExhausted(config, threadId)
+    ) {
+      config.objective.setNextActions(threadId, [
+        "Resuming after mid-turn compaction (PTL recovery)",
+      ])
+    }
+  } catch {
+    // No-throw.
+  }
+  return CONTINUE
+}
+
+export const applyAction = async (
+  session: TurnSession,
+  state: TurnState,
+  action: RecoveryAction,
+  result: StreamSuccess | { error: unknown; message: string },
+  ctxSystem: SystemPromptInput,
+  history: readonly ToolHistoryEntry[],
+): Promise<Step> => {
+  const { config, guards } = session
+  const { wm, toolChoiceState } = state
+  const nonSuccessStep = await applyNonSuccessRecoveryAction(
+    session,
+    state,
+    action,
+    result,
+    ctxSystem,
+  )
+  if (nonSuccessStep !== null) return nonSuccessStep
+  const success = result as StreamSuccess
+  const message = success.message
+  if (guards.length > 0) {
+    const blocked = runGuardChain(guards, {
+      action,
+      message,
+      wm,
+      history,
+      toolChoiceState,
+      emit: (reason) => emitRecovery(config, reason),
+    })
+    if (blocked !== undefined) return CONTINUE
+  }
+  if (action.do === "completed") {
+    wm.append(message)
+    return { done: true, result: { kind: "completed", message } }
+  }
+  if (action.do === "nudge") {
+    emitRecovery(config, action.reason)
+    if (action.keepMessage) wm.append(message)
+    wm.append(metaUser(action.text))
+    return CONTINUE
+  }
+  wm.append(message)
+  const toolCalls = message.content.filter((b) => b.type === "tool_use")
+  if (toolCalls.length === 0) return { done: true, result: { kind: "completed", message } }
+  return { done: true, result: { kind: "tools", message, resultBlocks: success.resultBlocks } }
+}
+
+export const resolveTurnAction = (
+  policy: import("../stop-reason").StopReasonPolicy | undefined,
+  result: StreamSuccess | { error: unknown; message: string },
+  rec: import("../recovery").RecoveryState,
+): RecoveryAction => {
+  if ("error" in result) return decideOnStreamError(result.error, result.message, rec)
+  const override = decideFromStopPolicy(policy, result.stopReason)
+  return override ?? decideOnAssembled(result.stopReason, result.message, rec)
+}

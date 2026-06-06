@@ -107,6 +107,13 @@ describe("mode mutating-table cross-check (ADR-0036)", () => {
     // CLUSTER D #5 — permission_propose_pattern caller-wire
     // (DefaultToolPorts.permissionPatternPropose, QUANTA_REMEMBER_PATTERNS).
     "permission_propose_pattern",
+    // jun-6 caller-wire tools — file_history_rewind
+    // (DefaultToolPorts.fileHistory, QUANTA_FILE_HISTORY) + skill_create
+    // (QUANTA_SKILL_CREATOR + a writable skills dir, registered in tier1/skill.ts).
+    // PERMANENT table entries so plan-mode dispatch never trips UnknownToolError
+    // on a host that wires them; not enumerable from `defaultTools` here.
+    "file_history_rewind",
+    "skill_create",
     "side_agent_spawn",
     "side_agent_list",
     "side_agent_stop",

@@ -1,0 +1,77 @@
+id: file-history-rewind
+title: Per-file session snapshot list/restore (file_history_rewind — Claude tengu parity)
+section: 2
+subsystem: 도구 — file history (per-FILE undo, Claude file_history_rewind 흡수)
+order: 172
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:cli", "absorbed:claude"]
+depends_on: []
+purpose: |
+  Claude `tengu_file_history_rewind_*` 흡수 — 세션 중 특정 FILE을 이전 버전으로 복원.
+  write/edit가 성공할 때마다 그 파일의 NEW bytes를 per-path 타임라인에 기록 →
+  `file_history_rewind`로 한 파일의 버전 목록 조회 + 임의 버전 복원. shadow_rewind
+  (whole-workspace 1개 anchor)·message rewind와 구별되는 per-FILE undo.
+
+  STEP-1 (중복 검증): shadow-ODB `restorePartial`(ADR-0122)은 named path를 복원하지만
+  단일 anchor(last-registered/verified)에서만 — per-FILE 버전 타임라인이 없음(쓰기마다
+  버전 1개씩 쌓아 임의 버전 선택 불가). 따라서 실제 GAP, 빌드함.
+
+  코어 (`src/tool/file-history/store.ts`, PURE leaf, 주입 clock — Date.now 없음):
+    - `FileVersion{version,content,recordedAt,byteLength}`, per-path monotonic
+      ordinal(1-indexed, 축출돼도 재사용 안 함 → 축출된 ordinal은 undefined, 다른
+      파일 bytes 절대 반환 안 함).
+    - `createFileHistoryStore({now,bounds?})` → record/list/get/keys (in-memory Map,
+      insertion order). BOUNDED: per-path maxVersions + maxBytes 캡, 초과 시 oldest
+      evict(ring) — 단, 유일 copy는 절대 안 버림. 0/음수 캡은 1로 clamp.
+
+  capture hook (`src/tool/file-history/capture.ts` + sink.ts): write/edit가 성공 후
+  `captureFileHistory(ctx, path, newBytes)` 호출 → duck-typed `ctx.fileHistory` sink이
+  `resolveJailed`로 path를 jail+정규화해 store에 record. sink absent(gate OFF) ⇒ 단일
+  undefined 체크 no-op(byte-identical). throw해도 swallow(mutation 이미 성공).
+
+  도구 (`src/tool/file-history/tool.ts`): `file_history_rewind{op:list|restore, path,
+  version?}`. list=read-only 버전 열거; restore=선택 버전 bytes를 write/edit과 동일한
+  jailed FS port로 되씀(DESTRUCTIVE on 1 file). path는 store lookup/write 前 `resolveJailed`
+  로 jail(`../escape` → bad_path 거부, NO write). 타입 실패 = ok:false + 안정 코드
+  (not_found:/no_history:/bad_path:).
+
+  SSOT: manifest(GATED config-slot, risk:mutating) + mode.ts MUTATING_TOOL_TABLE
+  (`file_history_rewind: write_filesystem` — restore가 FS write) + caller-wire allowlist.
+  `DefaultToolPorts.fileHistory`로 caller-wired, `QUANTA_FILE_HISTORY` default-OFF.
+  호스트(`agent-arg-builder`)가 세션당 store 1개 mint → 같은 store를 tool(read)과
+  `AgentConfig.fileHistory` sink(write)에 둘 다 wire(dispatch seam이 ctx.fileHistory로 surface).
+evidence:
+  code:
+    - src/tool/file-history/store.ts
+    - src/tool/file-history/tool.ts
+    - src/tool/file-history/capture.ts
+    - src/tool/file-history/sink.ts
+    - src/tool/file-history/index.ts
+    - src/tool/write/index.ts
+    - src/tool/edit/index.ts
+    - src/tool/index.ts
+    - src/agent/dispatch.ts
+    - src/host/runtime/agent-arg-builder.ts
+  tests:
+    unit:
+      - tests/unit/file-history-rewind-hellgate.test.ts
+    integration: []
+    contract: []
+  adrs: []
+knobs:
+  - name: QUANTA_FILE_HISTORY
+    default: 'undefined'
+    purpose: 'strict =1 opt-in; on ⇒ per-file capture sink + file_history_rewind tool; off ⇒ byte-identical'
+notes: |
+  L3: pure bounded store + capture sink + list/restore 도구 + manifest/mode/
+  caller-wire SSOT + 세션 wiring(store 1개를 tool read + AgentConfig sink write 둘 다)
+  완비, default-OFF byte-identical. shadow-ODB restorePartial과 직교(그건 whole-snapshot
+  anchor, 이건 per-FILE 타임라인). BOUNDED(per-path version+byte 캡, oldest-evict ring) +
+  JAILED(resolveJailed, ../escape 거부). 17 hellgate(store ring/byte-cap/clamp, sink
+  jailed-key/escape-drop, tool list/restore/not_found/no_history/bad_path, default-OFF).

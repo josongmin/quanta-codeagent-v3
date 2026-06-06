@@ -153,4 +153,43 @@ describe("PatternGrantStore", () => {
     })
     expect(idsDanger).toEqual(["t2"])
   })
+
+  // ── ROUND-2 (concurrency / atomicity lens) ────────────────────────────────
+  // grant/recordProposed/granted are each FULLY SYNCHRONOUS (no await mid-
+  // mutation), so on JS's single thread no reader can observe a half-applied
+  // grant, and recordProposed can never widen the baseline regardless of how
+  // calls interleave. These seal the baseline-vs-allowed split under adversarial
+  // ordering.
+  test("recordProposed NEVER promotes into the baseline (no chain-widen under interleaving)", () => {
+    const store = new PatternGrantStore(["base"])
+    // Model records a baseline-covered pattern (the wire pre-checks coverage; we
+    // exercise the raw write half here). It lands in `allowed`…
+    store.recordProposed(["base"])
+    expect(store.isCovered(["base"])).toBe(true)
+    // …but is NOT in the baseline, so a derived pattern can never be "covered"
+    // by it via the baseline predicate.
+    expect(store.isBaseline("base")).toBe(true) // user-seeded ⇒ baseline
+    store.recordProposed(["refine"]) // raw write of an arbitrary pattern
+    expect(store.isCovered(["refine"])).toBe(true) // it is in `allowed`…
+    expect(store.isBaseline("refine")).toBe(false) // …but NOT baseline (no widen)
+  })
+
+  test("a grant is atomic to a concurrent reader: granted() never sees half-applied state", () => {
+    const store = new PatternGrantStore()
+    // Interleave a read between two grants. Each grant fully replaces both sets
+    // synchronously, so the snapshot is always self-consistent (all-or-nothing).
+    store.grant(["a", "b"])
+    const snap1 = store.granted()
+    expect(snap1.has("a") && snap1.has("b")).toBe(true)
+    store.recordProposed(["a"]) // a baseline pattern re-recorded (idempotent)
+    store.grant(["c"])
+    const snap2 = store.granted()
+    // every previously-granted pattern is still present (no clobber by the
+    // model-facing recordProposed write) AND the new baseline grant is visible.
+    expect(snap2.has("a") && snap2.has("b") && snap2.has("c")).toBe(true)
+    // baseline tracked grants only; recordProposed("a") didn't change baseline
+    // membership of anything.
+    expect(store.isBaseline("a")).toBe(true)
+    expect(store.isBaseline("c")).toBe(true)
+  })
 })

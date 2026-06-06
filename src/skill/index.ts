@@ -91,6 +91,14 @@ export type {
   SkillSourceInputs,
 } from "./registry"
 export { buildSkillRegistry, defaultSkillSources } from "./registry"
+// jun-6 — agent-callable skill-authoring tool (scaffold + validate + install).
+export {
+  createSkillCreatorTool,
+  renderSkillMarkdown,
+  type SkillWriteResult,
+  type SkillWriterPort,
+  validateScaffold,
+} from "./skill-creator"
 // ADR-0457 — codex skill ECOSYSTEM bundled resources (agents/openai.yaml +
 // scripts/references/assets presence).
 export {

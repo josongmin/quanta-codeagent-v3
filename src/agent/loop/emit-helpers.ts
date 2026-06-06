@@ -1,0 +1,172 @@
+import type { StreamEvent, ToolChoice } from "@/llm"
+import type { PromptPolicySnapshot, TurnPolicySnapshot } from "@/shared"
+import { errMessage, logger, runtimeConfig } from "@/shared"
+import type { CancelSubagentOutcome, ResponseQueuedReason } from "../control-op-handler"
+import type { AgentRecorder } from "../metrics"
+import type { RecoveryReason } from "../recovery"
+import type { AgentConfig } from "../types"
+import type { TurnWorkMetricsCollector } from "../work-metrics-collector"
+
+export const emitUsage = (
+  config: AgentConfig,
+  ev: Extract<StreamEvent, { type: "usage" }>,
+  recorder: AgentRecorder | undefined,
+  collector: TurnWorkMetricsCollector | undefined,
+  taskSpend: { tokens: number } | undefined,
+): void => {
+  config.stream.emit({
+    type: "usage",
+    inputTokens: ev.inputTokens,
+    outputTokens: ev.outputTokens,
+    model: ev.model,
+    ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
+    ...(ev.cacheCreationTokens !== undefined
+      ? { cacheCreationTokens: ev.cacheCreationTokens }
+      : {}),
+  })
+  recorder?.tokensUsed(ev.inputTokens, ev.outputTokens, ev.cacheReadTokens)
+  config.budgetMeter?.tick("input_tokens", ev.inputTokens)
+  config.budgetMeter?.tick("output_tokens", ev.outputTokens)
+  collector?.recordUsage({
+    tokensInput: ev.inputTokens,
+    tokensOutput: ev.outputTokens,
+    ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
+  })
+  if (taskSpend !== undefined) {
+    const inTok = Number.isFinite(ev.inputTokens) && ev.inputTokens > 0 ? ev.inputTokens : 0
+    const outTok = Number.isFinite(ev.outputTokens) && ev.outputTokens > 0 ? ev.outputTokens : 0
+    taskSpend.tokens += inTok + outTok
+  }
+  config.promptCacheObserver?.record({
+    model: ev.model,
+    sessionId: config.sessionId ?? "",
+    turnIndex: 0,
+    atMs: Date.now(),
+    inputTokens: ev.inputTokens,
+    cacheCreationTokens: ev.cacheCreationTokens ?? 0,
+    cacheReadTokens: ev.cacheReadTokens ?? 0,
+    outputTokens: ev.outputTokens,
+  })
+}
+
+export const emitRecovery = (
+  config: AgentConfig,
+  reason: RecoveryReason,
+  detail?: string,
+): void => {
+  config.stream.emit({
+    type: "recovery",
+    reason,
+    ...(detail !== undefined ? { detail } : {}),
+  })
+}
+
+export const configuredModel = (llm: AgentConfig["llm"]): string => {
+  const m = llm.model
+  return m !== undefined && m !== "" ? m : "unknown"
+}
+
+export const objectiveBudgetExhausted = (config: AgentConfig, threadId: string): boolean => {
+  if (!runtimeConfig().objectiveBudgetEnforce) return false
+  if (config.objective === undefined || threadId.length === 0) return false
+  try {
+    return config.objective.get(threadId)?.status === "budget_limited"
+  } catch (e) {
+    logger.warn(`loop.objectiveBudgetExhausted: ${errMessage(e)}`)
+    return false
+  }
+}
+
+export const isSessionApprovalRequiredError = (error: unknown): boolean => {
+  if (typeof error !== "object" || error === null || !("approval" in error)) return false
+  const approval = (error as { approval?: unknown }).approval
+  return (
+    typeof approval === "object" &&
+    approval !== null &&
+    "approvalId" in approval &&
+    "reason" in approval &&
+    "requestedAt" in approval
+  )
+}
+
+export const finalizeTurnPolicy = (args: {
+  readonly promptPolicy: PromptPolicySnapshot
+  readonly toolChoice: ToolChoice
+  readonly promptCacheKey?: string
+}): TurnPolicySnapshot => ({
+  ...args.promptPolicy,
+  toolChoice: args.toolChoice.kind,
+  ...(args.toolChoice.kind === "tool" ? { toolChoiceToolName: args.toolChoice.name } : {}),
+  promptCacheKeyPresent: args.promptCacheKey !== undefined && args.promptCacheKey.length > 0,
+})
+
+export const emitLlmRequest = (config: AgentConfig, policy: TurnPolicySnapshot): void => {
+  config.stream.emit({
+    type: "llm_request",
+    model: configuredModel(config.llm),
+    ...(config.llm.provider !== undefined ? { provider: config.llm.provider } : {}),
+    ...(config.llm.surfaceId !== undefined ? { surfaceId: config.llm.surfaceId } : {}),
+    ...(config.llm.transportId !== undefined ? { transportId: config.llm.transportId } : {}),
+    ...(config.llm.authMode !== undefined ? { authMode: config.llm.authMode } : {}),
+    policy,
+  })
+}
+
+export const emitLlmContinuation = (
+  config: AgentConfig,
+  ev: Extract<StreamEvent, { type: "llm_continuation" }>,
+): void => {
+  config.stream.emit({
+    type: "llm_continuation",
+    ...(config.llm.provider !== undefined ? { provider: config.llm.provider } : {}),
+    surfaceId: ev.surfaceId,
+    transportId: ev.transportId,
+    phase: ev.phase,
+    mode: ev.mode,
+    reason: ev.reason,
+    ...(ev.statusCode !== undefined ? { statusCode: ev.statusCode } : {}),
+  })
+}
+
+export const emitSubagentCancel = (
+  config: AgentConfig,
+  subagentId: string,
+  outcome: CancelSubagentOutcome,
+  source: "submission_op" | "conversation_action",
+): void => {
+  config.stream.emit({
+    type: "subagent_cancel",
+    subagentId,
+    outcome:
+      outcome === "registry_absent"
+        ? "registry_absent"
+        : outcome === "stopped"
+          ? "stopped"
+          : "not_found",
+    source,
+  })
+}
+
+export const emitResponseQueued = (
+  config: AgentConfig,
+  reason: ResponseQueuedReason,
+  hint?: string,
+): void => {
+  config.stream.emit({
+    type: "response_queued",
+    reason,
+    ...(hint !== undefined ? { hint } : {}),
+  })
+}
+
+export const emitInterrupted = (
+  config: AgentConfig,
+  source: "submission_interrupt" | "conversation_action_cancel",
+  reason?: string,
+): void => {
+  config.stream.emit({
+    type: "interrupted",
+    source,
+    ...(reason !== undefined ? { reason } : {}),
+  })
+}

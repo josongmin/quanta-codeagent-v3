@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { defaultFileSystemPort, type FileSystemPort, FsJailError, sha256Hex } from "@/storage"
+import { captureFileHistory } from "../file-history/capture"
 import { gitWriteGuardDeny } from "../git-write-guard-result"
 import { guardWrite } from "../stale-read-guard"
 import { captureToolDiff } from "../tool-diff-capture"
@@ -276,6 +277,9 @@ export const makeEditTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
       // (the daemon runs the diff once); the file is already written, so the
       // helper swallows any sink throw.
       captureToolDiff(ctx, planned.before, planned.next, input.path)
+      // file_history_rewind — record the post-edit bytes as a per-file version.
+      // No-op when the sink is unwired (gate OFF ⇒ byte-identical legacy path).
+      captureFileHistory(ctx, input.path, planned.next)
       yield { type: "result", result: { ok: true, output: `${input.path}: ${planned.message}` } }
     } catch (e) {
       if (e instanceof FsJailError) {

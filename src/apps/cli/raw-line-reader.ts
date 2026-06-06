@@ -114,6 +114,58 @@ export interface ReadLineOptions {
    *  history, heredoc, search) is preserved unchanged. Absent ⇒ NO remap, the
    *  hardcoded if-chain runs verbatim (byte-identical). */
   readonly keybindings?: KeybindingMap
+  /** jun-6 (Codex paste-burst) — large-paste coalescing. When injected, a SINGLE
+   *  keypress whose `str` carries at least `minChars` characters (a bracketed
+   *  paste arrives as ONE multi-char keypress) is echoed as a compact
+   *  `[Pasted Content <n> chars]` placeholder INSTEAD of the raw text — while the
+   *  FULL pasted text is still spliced into the buffer and submitted verbatim.
+   *  Detection uses chunk SIZE only (no clock / timing). Absent (default-OFF) ⇒
+   *  every keypress path is byte-identical to today's build (paste is inserted +
+   *  echoed inline, exactly as before). Injected at the composition root from the
+   *  `QUANTA_PASTE_BURST` knob (the slice never reads env directly). */
+  readonly pasteBurst?: PasteBurstOptions
+}
+
+/** jun-6 — paste-burst coalescing config (closed-port DI; the slice never reads
+ *  env). `minChars` is the inclusive threshold: a single keypress carrying ≥
+ *  this many chars is collapsed to a placeholder on echo. */
+export interface PasteBurstOptions {
+  readonly minChars: number
+}
+
+/** jun-6 — a recorded paste segment. `text` is the EXACT pasted substring (the
+ *  source of truth lives in `buf`); `placeholder` is the `[Pasted Content <n>
+ *  chars]` echo shown in its place. Display rendering replaces the first
+ *  occurrence of `text` in `buf` with `placeholder`; submission ignores this
+ *  list entirely (the buffer is already the full text). */
+interface PasteSegment {
+  readonly text: string
+  readonly placeholder: string
+}
+
+/** jun-6 — render the placeholder for a pasted blob of `n` chars. Pure; the
+ *  exact wording mirrors the Codex CLI ("[Pasted Content <n> chars]"). */
+export const pasteBurstPlaceholder = (n: number): string => `[Pasted Content ${n} chars]`
+
+/** jun-6 — project `buf` to its echo form by collapsing each recorded paste
+ *  segment to its placeholder (first occurrence, left-to-right). Pure: returns
+ *  `buf` unchanged when there are no segments (so the OFF / no-paste path is
+ *  byte-identical). A segment whose text is no longer present (the user edited
+ *  across it) is skipped — the raw chars then show, never a crash. */
+export const projectPasteDisplay = (buf: string, segments: readonly PasteSegment[]): string => {
+  if (segments.length === 0) return buf
+  let out = ""
+  let rest = buf
+  // Replace each segment's text in document order. Pastes are large unique
+  // blobs, so a left-to-right first-occurrence replace is unambiguous.
+  const ordered = [...segments].sort((a, b) => buf.indexOf(a.text) - buf.indexOf(b.text))
+  for (const seg of ordered) {
+    const at = rest.indexOf(seg.text)
+    if (at < 0) continue // edited away — leave the raw chars in place
+    out += rest.slice(0, at) + seg.placeholder
+    rest = rest.slice(at + seg.text.length)
+  }
+  return out + rest
 }
 
 export class AbortError extends Error {
@@ -236,6 +288,10 @@ interface State {
   /** RFC-12 — `@`-mention dropdown sub-state. Dormant (`at.active=false`)
    *  unless `opts.atProvider` is injected AND the user typed a boundary `@`. */
   at: AtState
+  /** jun-6 — recorded paste-burst segments. Empty unless `opts.pasteBurst` is
+   *  injected AND a ≥minChars keypress arrived. Display-only: `buf` always holds
+   *  the FULL text; these only collapse the ECHO. */
+  pasteSegments: PasteSegment[]
 }
 
 const ghostSuffix = (buf: string, candidates: readonly string[]): string => {
@@ -298,6 +354,7 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
       heredocFence: "",
       heredocLines: [],
       at: createAtState(),
+      pasteSegments: [],
     }
     // Reset the history cursor at the start of every readLine so `↑` always
     // pulls the freshest entry first. Default-OFF when `opts.history` absent.
@@ -458,19 +515,30 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
       // Heredoc continuation: dim "… " indicator in the gutter to signal the
       // user is composing a multiline body.
       const displayPrompt = state.heredocOpen ? `${DIM}… ${RESET}` : `${CYAN}${opts.prompt}${RESET}`
-      out += fillBgRow(`${displayPrompt}${state.buf}`)
+      // jun-6 — collapse recorded paste blobs to `[Pasted Content N chars]` for
+      // the ECHO only. `buf` is unchanged (full text submits). No segments ⇒
+      // `echoBuf === state.buf`, so the OFF / no-paste path is byte-identical.
+      const echoBuf = projectPasteDisplay(state.buf, state.pasteSegments)
+      out += fillBgRow(`${displayPrompt}${echoBuf}`)
       // Ghost text (only when list is closed AND cursor at end AND not in heredoc).
       if (!state.listOpen && !state.heredocOpen && state.cursor === state.buf.length) {
         const ghost = ghostSuffix(state.buf, state.candidates)
         if (ghost !== "") {
           // Repaint with ghost embedded inside the BG row.
           out += CR + ERASE_LINE
-          out += fillBgRow(`${displayPrompt}${state.buf}${DIM}${ghost}${RESET}`)
+          out += fillBgRow(`${displayPrompt}${echoBuf}${DIM}${ghost}${RESET}`)
         }
       }
-      // Cursor back to prompt line, buf cursor col.
+      // Cursor back to prompt line, buf cursor col. With paste placeholders the
+      // cursor anchors to the END of the echo (a paste always lands the caret
+      // after the collapsed blob); no segments ⇒ the original `buf.slice(0,
+      // cursor)` width (byte-identical).
       const displayPromptCols = state.heredocOpen ? 2 : promptCols
-      out += CR + moveRight(displayPromptCols + stringColumns(state.buf.slice(0, state.cursor)))
+      const cursorWidth =
+        state.pasteSegments.length === 0
+          ? stringColumns(state.buf.slice(0, state.cursor))
+          : stringColumns(echoBuf)
+      out += CR + moveRight(displayPromptCols + cursorWidth)
       stdout.write(out)
     }
 
@@ -502,8 +570,12 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
       // For a multiline body (heredoc submit) we echo line-by-line with the
       // continuation indicator on every subsequent row so the transcript
       // visually matches what the user typed.
-      if (state.buf.includes("\n")) {
-        const lines = state.buf.split("\n")
+      // jun-6 — the final echo collapses paste blobs too (the transcript shows
+      // `[Pasted Content N chars]`, not the raw blob). No segments ⇒
+      // `echoBuf === state.buf` (byte-identical exit echo).
+      const echoBuf = projectPasteDisplay(state.buf, state.pasteSegments)
+      if (echoBuf.includes("\n")) {
+        const lines = echoBuf.split("\n")
         const head = lines[0] ?? ""
         const tail = lines.slice(1)
         let echo = `${CR}${ERASE_LINE}${opts.prompt}${head}\n`
@@ -511,7 +583,7 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
         stdout.write(echo)
         return
       }
-      stdout.write(CR + ERASE_LINE + opts.prompt + state.buf + "\n")
+      stdout.write(`${CR}${ERASE_LINE}${opts.prompt}${echoBuf}\n`)
     }
 
     const settleResolve = (value: string): void => {
@@ -1075,6 +1147,22 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
             : ({ kind: "ignore" } as const)
         state.buf = state.buf.slice(0, state.cursor) + str + state.buf.slice(state.cursor)
         state.cursor += str.length
+        // jun-6 (Codex paste-burst) — a SINGLE keypress carrying ≥minChars chars
+        // is a large paste: record it so the ECHO collapses to `[Pasted Content
+        // N chars]` while `buf` (just spliced above) keeps the FULL text for
+        // submission. Detection is chunk-SIZE only (no clock). Default-OFF
+        // (`opts.pasteBurst` undefined) ⇒ this is skipped and the paste echoes
+        // inline exactly as before (byte-identical). The char count is the
+        // code-point length (Unicode-safe), matching what the user pasted.
+        if (opts.pasteBurst !== undefined) {
+          const charCount = [...str].length
+          if (charCount >= opts.pasteBurst.minChars) {
+            state.pasteSegments.push({
+              text: str,
+              placeholder: pasteBurstPlaceholder(charCount),
+            })
+          }
+        }
         // Any direct edit invalidates the history navigation context:
         // the buf no longer represents a recalled entry, so a follow-up `↓`
         // shouldn't try to restore a stale "draft".
