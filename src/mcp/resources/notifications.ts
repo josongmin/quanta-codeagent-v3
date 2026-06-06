@@ -19,6 +19,10 @@ export type McpResourceNotification =
   | { readonly kind: "resource_updated"; readonly uri: string }
   | { readonly kind: "resource_list_changed" }
   | { readonly kind: "prompt_list_changed" }
+  // §19.5 — the server's TOOL list changed (e.g. after an auth that unlocked
+  // more tools). Routed on the SAME observer channel so a host can re-`tools/
+  // list` and refresh the registered surface. Carried as a parameterless event.
+  | { readonly kind: "tools_list_changed" }
 
 /** Optional sink for resource/prompt change notifications. Total + no-throw is
  *  the contract; the router never awaits it. */
@@ -29,12 +33,15 @@ export interface McpResourceObserver {
 export const RESOURCE_UPDATED_METHOD = "notifications/resources/updated"
 export const RESOURCE_LIST_CHANGED_METHOD = "notifications/resources/list_changed"
 export const PROMPT_LIST_CHANGED_METHOD = "notifications/prompts/list_changed"
+export const TOOLS_LIST_CHANGED_METHOD = "notifications/tools/list_changed"
 
-/** Returns true iff `method` is one of the three notifications we route. */
+/** Returns true iff `method` is one of the inbound change notifications we
+ *  route to the observer. */
 export const isResourceNotificationMethod = (method: string): boolean =>
   method === RESOURCE_UPDATED_METHOD ||
   method === RESOURCE_LIST_CHANGED_METHOD ||
-  method === PROMPT_LIST_CHANGED_METHOD
+  method === PROMPT_LIST_CHANGED_METHOD ||
+  method === TOOLS_LIST_CHANGED_METHOD
 
 const asRecord = (v: unknown): Record<string, unknown> | null =>
   typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null
@@ -66,6 +73,7 @@ export const parseResourceNotification = (
   }
   if (method === RESOURCE_LIST_CHANGED_METHOD) return { kind: "resource_list_changed" }
   if (method === PROMPT_LIST_CHANGED_METHOD) return { kind: "prompt_list_changed" }
+  if (method === TOOLS_LIST_CHANGED_METHOD) return { kind: "tools_list_changed" }
   return null
 }
 

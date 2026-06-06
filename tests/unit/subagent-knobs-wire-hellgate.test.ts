@@ -69,8 +69,11 @@ describe("subagent tool knobs — composition-root wire (ADR-0436/0437)", () => 
     expect(toolNames(wired)).toEqual([])
   })
 
-  test("falsey / typo values do NOT enable (strict =on only)", () => {
-    for (const v of ["1", "true", "off", "0", "ON", "yes", ""]) {
+  // Canonical gate vocabulary (`@/shared#gateOn`): a falsy token, empty, or
+  // garbage leaves the gate OFF. (Previously these gates were strict `=== "on"`;
+  // they now share the one SSOT grammar so `=1`/`=on`/`=true` ALL enable.)
+  test("falsey / typo values do NOT enable", () => {
+    for (const v of ["off", "0", "false", "no", "", "  ", "yep", "2"]) {
       const wired = wireOptionalAgentPorts(baseConfig(), {
         QUANTA_SUBAGENT_BATCH: v,
         QUANTA_SUBAGENT_INTROSPECT: v,
@@ -78,6 +81,16 @@ describe("subagent tool knobs — composition-root wire (ADR-0436/0437)", () => 
       })
       expect(wired.subagent).toBeUndefined()
       expect(toolNames(wired)).toEqual([])
+    }
+  })
+
+  // The consistency win: every recognized truthy spelling enables, so `=1`
+  // (the value the CLI seed loop writes) activates these gates identically to
+  // `=on` — no more silent-off footgun for the followup/batch/introspect family.
+  test("any truthy token (1/on/true/yes, case-insensitive) enables", () => {
+    for (const v of ["1", "on", "true", "yes", "ON", "TRUE"]) {
+      const wired = wireOptionalAgentPorts(baseConfig(), { QUANTA_SUBAGENT_BATCH: v })
+      expect(wired.subagent?.enableBatchSpawn).toBe(true)
     }
   })
 

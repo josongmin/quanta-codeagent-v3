@@ -79,26 +79,29 @@ const STRICT_ONE_KNOBS: ReadonlyArray<{
   { env: "QUANTA_CODE_MODE_ONLY", read: (c) => c.codeModeOnly },
 ]
 
-/** Hostile / loose values a strict-`1` knob MUST treat as OFF. `"1"` is tested
- *  separately as the ONLY enabling value. */
+/** Values a canonical opt-in gate (`@/shared#gateOn`) MUST treat as OFF: the
+ *  recognized falsy tokens, empty, and unrecognized garbage. (Post-unification
+ *  the gates accept the WHOLE truthy vocabulary, not just the exact `"1"` — so
+ *  `on`/`true`/`yes` moved to ENABLING_VALUES below. The default-OFF guarantee
+ *  is unchanged: nothing here, nor unset, ever flips a gate ON.) */
 const NON_ENABLING_VALUES = [
   "0",
-  "true",
-  "TRUE",
-  "True",
-  "on",
-  "ON",
-  "yes",
   "false",
-  " 1",
-  "1 ",
-  " 1 ",
+  "off",
+  "no",
+  "",
+  "  ",
+  "enabled",
+  "disabled",
+  "2",
   "01",
   "1.0",
-  "",
-  "enabled",
-  "2",
 ] as const
+
+/** Values a canonical opt-in gate MUST treat as ON — the full truthy token set,
+ *  case-insensitive and whitespace-trimmed (the SSOT `gateOn` grammar). This is
+ *  the consistency guarantee: `=1` and `=on` (and friends) enable EVERY gate. */
+const ENABLING_VALUES = ["1", "on", "true", "yes", "TRUE", "ON", "Yes", " 1 ", "  on  "] as const
 
 /** All env vars this battery drives — snapshot+strip before each test so the
  *  ambient shell can't pre-enable a gate (and restore after). */
@@ -128,10 +131,10 @@ afterEach(() => {
 
 const toolNames = (tools: readonly Tool[]): string[] => tools.map((t) => t.name).sort()
 
-// ─── 1. STRICT PARSE — only the exact `"1"` enables ────────────────────────────
+// ─── 1. CANONICAL GATE PARSE — falsy/garbage OFF, full truthy vocab ON ──────────
 
-describe('session-knobs default-OFF — strict `=== "1"` parse (no accidental-enable)', () => {
-  test("with EVERY strict-`1` knob unset, every boolean projection reads false", () => {
+describe("session-knobs default-OFF — canonical gate parse (no accidental-enable)", () => {
+  test("with EVERY opt-in knob unset, every boolean projection reads false", () => {
     const c = runtimeConfig()
     const on: string[] = []
     for (const k of STRICT_ONE_KNOBS) {
@@ -141,7 +144,7 @@ describe('session-knobs default-OFF — strict `=== "1"` parse (no accidental-en
     expect(on).toEqual([])
   })
 
-  test("each strict-`1` knob stays false for EVERY non-`1` value", () => {
+  test("each opt-in knob stays false for EVERY falsy/garbage value", () => {
     const leaked: string[] = []
     for (const k of STRICT_ONE_KNOBS) {
       for (const bad of NON_ENABLING_VALUES) {
@@ -152,20 +155,24 @@ describe('session-knobs default-OFF — strict `=== "1"` parse (no accidental-en
         __resetRuntimeConfig()
       }
     }
-    // Any entry here is an ACCIDENTAL-ENABLE (a loose parse flipped a default-OFF
-    // gate ON for a non-`1` value).
+    // Any entry here is an ACCIDENTAL-ENABLE (a parse flipped a default-OFF gate
+    // ON for a falsy/garbage value).
     expect(leaked).toEqual([])
   })
 
-  test('each strict-`1` knob DOES flip true for the exact `"1"` (gate is live, not stuck-off)', () => {
+  test("each opt-in knob flips true for EVERY truthy token (1/on/true/yes, case+trim)", () => {
     const stuckOff: string[] = []
     for (const k of STRICT_ONE_KNOBS) {
-      process.env[k.env] = "1"
-      __resetRuntimeConfig()
-      if (k.read(runtimeConfig()) !== true) stuckOff.push(k.env)
-      delete process.env[k.env]
-      __resetRuntimeConfig()
+      for (const good of ENABLING_VALUES) {
+        process.env[k.env] = good
+        __resetRuntimeConfig()
+        if (k.read(runtimeConfig()) !== true) stuckOff.push(`${k.env}=${JSON.stringify(good)}`)
+        delete process.env[k.env]
+        __resetRuntimeConfig()
+      }
     }
+    // Any entry here is a gate that did NOT honor the canonical vocabulary —
+    // either stuck-off or still strict `=== "1"` (the inconsistency we removed).
     expect(stuckOff).toEqual([])
   })
 })

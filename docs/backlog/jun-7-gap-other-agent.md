@@ -21,7 +21,19 @@
 
 전부 red-on-injection 회귀테스트 박음. 포스처: correctness-fix는 default-ON, 전부 "absent 입력→byte-identical" 불변식. fc 4 entry(`jun7-*`) 등록, tsc0/biome0/회귀0(1188 pass).
 
-**나머지(아직 deferred — 사용자 wave 파일군과 충돌)**: §19.2/19.4/19.5(MCP client.ts), §20.4(subagent-runner.ts), §23.2(ratelimit 렌더러), §22.3(reverse-MCP). 사용자 wave land 후 그 위에서 additive.
+### Wave R2 (jun-7, 사용자 wave land 후) — MCP ingestion 트리오 완성
+
+사용자 Wave 1-C(annotations+image)가 land한 뒤, 같은 파일군 위에 additive로 MCP ingestion 잔여를 완성(+ 3회 적대 셀프검증):
+
+| 갭 | 상태 | 핵심 |
+|---|---|---|
+| §19.2 structuredContent → `ToolResult.structured` | **LANDED** | client `ToolsCallResult.structuredContent` → `McpCallResult.structured` → bridge `toToolResult`. absent⇒byte-identical |
+| §19.4 MCP progress bridge | **LANDED** | 신규 `src/mcp/progress.ts`(parse+DoS cap) + client per-token `progressHandlers` + dispatch route + bridge `streamMcpCall`(async-queue) → `ToolEvent.progress`. **default-OFF seam**(`McpToolBindOpts.progress`): off⇒`_meta` 미전송 byte-identical wire |
+| §19.5 tools/list_changed | **LANDED** | `notifications/tools/list_changed` → 기존 observer 채널에 `tools_list_changed` variant 추가(host re-list hook) |
+
+적대검증 finding: progress가 모든 wire에 `_meta` 붙이던 것 → **default-OFF 게이팅**으로 byte-identical 복구. dispatch 복잡도 32→clean(resolveResponse/routeProgressNotification 추출). streamMcpCall sync-throw 하드닝. tsc0/biome0(내 함수)/MCP 591 pass.
+
+**아직 deferred**: §20.4 owned/forbidden FS enforce(subagent-runner hot-path, advisory→enforce 별도 수술) · §22.3 reverse-MCP(신규 server-side subsystem) · §23.2 quota-exhausted graceful(**clean leaf 아님** — `usageLimitExceeded` 메시지 구성이 LLM 에러분류 레이어를 가로지름 + 네 §23.1 ratelimit-notice가 이미 approaching/exhausted+resetMs 대부분 처리). 셋 다 별도 집중 작업 권장.
 
 ---
 
@@ -609,7 +621,7 @@
 - **델타**: 모든 MCP 도구가 mutating+non-concurrency-safe 취급 → `readOnlyHint:true` 서버 도구가 read-only 병렬배치 못 타고 `always-confirm` HITL로 잘못 default(`inferToolTier`). **quanta 전 permission/concurrency 머신이 isReadOnly/isConcurrencySafe/hitlTier로 동작하는데 MCP엔 상수 거짓.** 4 hint→기존 ToolCore predicate 매핑은 작은 adapter 변경. **ROI 고(보안+병렬).**
 - **구현**: `McpToolAnnotations` 타입(`types.ts`) + `sanitizeAnnotations`(boolean-ONLY lift, poison `"true"`/`1`/`{}`/`null` 드롭)가 `RawTool.annotations`→`McpToolDef.annotations` 파싱(`client.ts`+`isolated-client.ts` 양쪽). 브리지 `annotationPredicates`가 **TRUST GATE** 하에 매핑: `honored = QUANTA_MCP_TOOL_ANNOTATIONS knob ON && McpServerConfig.trusted===true`; `isReadOnly = honored && readOnlyHint===true`; `isConcurrencySafe = isReadOnly && idempotentHint!==false`. **annotations는 trusted+knobOn에서만 ELEVATE; 절대 downgrade 안 함**. untrusted/knobOff/poison/absent ⇒ `false/false` byte-identical. knob=`mcp-tool-annotations`(`AgentConfig.mcpToolAnnotations`). hellgate(red-on-injection): untrusted+`readOnlyHint:true`→`isReadOnly()===false`, knobOff(trusted여도)→false, poison string→false. 13 bridge + 14 parse 테스트.
 
-### 19.2 [NEW-GAP] MCP `structuredContent` + result `_meta` `tools/call`서 폐기
+### 19.2 [LANDED jun-7 R2] MCP `structuredContent`→ToolResult.structured (result `_meta`는 소비처 없어 미surface)
 - **경쟁사**: Codex `struct CallToolResult with 4 elements`=content/structuredContent/isError/_meta; Claude structuredContent×30/outputSchema×63; Cursor ×15/×13.
 - **quanta**: `src/mcp/client.ts:91-93` `ToolsCallResult`이 `{content?,isError?}`만; `:161-165` `joinTextBlocks`가 text만. structuredContent/_meta grep 0. 네이티브 `ToolResult.structured`+`outputSchema` seam(`types.ts:889`)은 있으나 MCP에 미배선.
 - **델타**: 서버의 typed structured payload 무음 드롭. **ROI 중**(네이티브 structured는 deprecated-그룹이라 내부 수요 낮으나 MCP interop엔 lossy).
@@ -619,14 +631,14 @@
 - **quanta**: `src/mcp/client.ts:161-165` `joinTextBlocks`가 `type==="text"`만 → image/audio/resource 전부 폐기. `ContentBlock`(`:87-90`)은 `{type,text?}`만.
 - **델타**: 스크린샷/오디오/embedded resource 반환하는 MCP 도구가 빈/부분 출력. **네이티브 `ToolResult.images`/`documents`(`types.ts:931,942`)는 이미 모델에 plumb** — MCP→ToolResult 매핑만 안함. **image ROI 고(렌더 쪽 이미 완성).**
 - **구현**: `ContentBlock`을 `{type,text?,data?,mimeType?,resource?}`로 확장 + `extractMedia`(`client.ts`, 양 클라이언트 재사용)가 `image`(data+mimeType)→`McpMediaBlock{kind:"image"}`, embedded `resource`(blob+mimeType)→`{kind:"resource"}`. `McpCallResult.media?` OPTIONAL(텍스트-only면 omit ⇒ byte-identical). 브리지 `mediaToResultFields`가 **네이티브 vision 도구와 동일 안전**: image는 base64-decode→**5MB cap(`READ_IMAGE_MAX_BYTES` 재사용)**→**magic-byte sniff(`sniffMediaType`, 서버 거짓 mimeType 무시)**; over-cap/unrecognized/bad-base64는 SKIP+정직 마커(crash 없음), 검증바이트 재인코딩→`ToolResult.images`. resource→`ToolResult.documents`. audio는 아직 미매핑(`type`만 추가, 별 follow-up). hellgate: oversized→skip+marker(no crash), 거짓 mimeType+비이미지→skip, valid PNG→magic-byte로 `image/png`(서버 lying `image/jpeg` 덮어씀).
-- **남은(아직 미구현)**: §19.2(`structuredContent`/`_meta`)는 본 슬라이스 범위 밖 — 여전히 OPEN. audio content block plumb도 OPEN(`ToolResult`에 audio sink 부재).
+- **남은(부분구현)**: §19.2 `structuredContent`는 이제 **PARSED+매핑됨**(`mcp/client.ts` → `ToolResult.structured`, round-1) — result `_meta` 절반과 전용 테스트만 OPEN(완전 OPEN 아님). audio content block plumb은 여전히 OPEN(`ToolResult`에 audio sink 부재).
 
-### 19.4 [PARTIAL] MCP progress(`notifications/progress`) bridge 없음
+### 19.4 [LANDED jun-7 R2] MCP progress bridge (default-OFF seam)
 - **경쟁사**: Claude progressToken×5/notifications/progress×5/ProgressToken×13; Cursor progressToken×12.
 - **quanta**: 네이티브 `ToolEvent.progress`는 렌더(`registry.ts:136`)되고 `mcp-bridge.ts:90`이 coarse "calling…" 1줄. 단 `tools/call` `_meta`에 progressToken 미전송 + inbound progress handler 없음(grep 0). 느린 MCP 도구가 mid-call progress 0.
 - **델타**: UX-only(correctness X). inbound-notification plumbing(`resources/notifications.ts`) 재사용 가능. **ROI 중.**
 
-### 19.5 [PARTIAL] `notifications/tools/list_changed` 구독 없음
+### 19.5 [LANDED jun-7 R2] `notifications/tools/list_changed` → observer route
 - **경쟁사**: Claude tools/list_changed×8/listChanged×25(재-list).
 - **quanta**: client로 `listChanged:false`만 광고, 서버 push시 re-`tools/list` 핸들러 없음. connect시 1회 enumerate 후 freeze(`client.ts:424`). reconnect supervisor는 full swap시만 re-list.
 - **델타**: mid-session 도구 추가/제거(auth 후 등) 미반영. **ROI 저-중**(static-menu는 reproducibility 기능이기도).
@@ -735,7 +747,7 @@
 - **경쟁사**: Claude `_cli-symbols.txt` — `You're close to your ${usage limit}`/`Approaching ${_} · resets ${O}`, rateLimitType별 라벨(weekly/session/Opus/Sonnet); Codex `RateLimitSnapshot{limit_name,primary,secondary,credits,plan_type,rate_limit_reached}`+`RateLimitWindow{used_percent,window_minutes,resets_at}`.
 - **quanta**: snapshot **파싱은 함**(`src/llm/ratelimit-snapshot/parse.ts`,`notice.ts:13`) 단 proactive backoff에만 씀(`policy.ts:27`), notice **렌더 안됨** — `src/stream/adapters/stdout.ts:151`이 `ratelimit_snapshot` 명시적 **무시**("a richer surface renders it" — 근데 그 surface 없음, render grep 0).
 - **델타**: "한도 X%"·"approaching · resets Y"·소진 전 경고 없음. **데이터 이미 캡처됨 — status-line/spinner 렌더러+임계값만. ROI 고.**
-- **구현 (P27, jun-7)**: `src/apps/cli/ratelimit-notice.ts` (신규 closed StreamPort) — `ratelimit_snapshot` 이벤트를 status-bar transient notice("⚠ 한도 reached · resets 3h")로 렌더. **surface 결정은 새 percent 도입 0 — 슬라이스가 이미 계산한 REACHED 신호(empty-window predicate `remaining <= 0`, `policy.ts::proactiveDelayMs`가 backoff 도출하는 바로 그 신호) 재사용**. gate=`QUANTA_RATELIMIT_NOTICE`(DEFAULT-OFF, knob `ratelimit-notice`), OFF면 port 미설치→`stdout.ts:151` 빈 case byte-identical. malformed/partial(NaN/neg/missing)은 슬라이스 parser가 graceful-skip→무페인트; throwing statusBar는 try/catch로 swallow(tee isolation). 배선: `cli-feature-config.ts`(`ratelimitNotice.enabled`)+`repl/factories/turn-indicator.ts`(TeeStream 합류, indicator gate와 독립). 테스트 26: `ratelimit-notice-hellgate`(16)+`ratelimit-notice-wire-hellgate`(5)+`ratelimit-notice-knob`(3)+`ratelimit-snapshot-stdout-ignore-hellgate`(2). fc=`ratelimit-snapshot-render`. (남은 §23.2 quota-exhausted graceful UX는 error-path 한정, deferred.)
+- **구현 (P27, jun-7)**: `src/apps/cli/ratelimit-notice.ts` (신규 closed StreamPort) — `ratelimit_snapshot` 이벤트를 status-bar transient notice("⚠ 한도 reached · resets 3h")로 렌더. **surface 결정은 새 percent 도입 0 — 슬라이스가 이미 계산한 REACHED 신호(empty-window predicate `remaining <= 0`, `policy.ts::proactiveDelayMs`가 backoff 도출하는 바로 그 신호) 재사용**. gate=`QUANTA_RATELIMIT_NOTICE`(DEFAULT-OFF, knob `ratelimit-notice`), OFF면 port 미설치→`stdout.ts:151` 빈 case byte-identical. malformed/partial(NaN/neg/missing)은 슬라이스 parser가 graceful-skip→무페인트; throwing statusBar는 try/catch로 swallow(tee isolation). 배선: `cli-feature-config.ts`(`ratelimitNotice.enabled`)+`repl/factories/turn-indicator.ts`(TeeStream 합류, indicator gate와 독립). 테스트 26: `ratelimit-notice-hellgate`(16)+`ratelimit-notice-wire-hellgate`(5)+`ratelimit-notice-knob`(3)+`ratelimit-snapshot-stdout-ignore-hellgate`(2). fc=`ratelimit-snapshot-render`. **⚠️ 알려진 의존성(F3, round-2 audit)**: `ratelimit_snapshot` 이벤트의 유일 emitter가 `QUANTA_RATELIMIT_PROACTIVE=1`(`stream-consume.ts` proactive-backoff 경로)에 게이트돼 `QUANTA_RATELIMIT_NOTICE`만으로는 render port만 설치되고 이벤트 0→무페인트. **두 노브 모두 ON 필요**(knob/fc/이 doc 명시). capture를 proactive-delay에서 분리하는 건 follow-up(hot·동시편집 loop 파일이라 보류). (남은 §23.2 quota-exhausted graceful UX는 error-path 한정, deferred.)
 
 ### 23.2 [PARTIAL] quota-exhausted graceful UX
 - **경쟁사**: Claude typed reset-time 메시지.

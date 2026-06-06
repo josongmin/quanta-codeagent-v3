@@ -163,14 +163,25 @@ describe("ADR-0415 Part 2 — resolveObservabilityWire(env, {hookBus}) [real Hoo
     expect(handle.shadowVerify).toBeUndefined()
   })
 
-  test("[4] gate explicitly off (=off / =1 / =true / =ON) ⇒ noop (strict 'on' only)", () => {
-    for (const raw of ["off", "1", "true", "ON", "On"]) {
+  test("[4] gate falsy/garbage ⇒ noop (canonical gate vocab — default-OFF)", () => {
+    for (const raw of ["off", "0", "false", "no", "", "garbage"]) {
       const bus = new RecordingHookBus()
       const handle = resolveObservabilityWire({ [ENV_KEY]: raw } as NodeJS.ProcessEnv, {
         hookBus: bus,
       })
       expect(bus.subscribeCount).toBe(0)
       expect(handle.runLedger).toBeUndefined()
+    }
+  })
+
+  test("[4b] gate any truthy token (1/on/true/ON) ⇒ wired (no more strict-'on' footgun)", () => {
+    for (const raw of ["1", "on", "true", "ON", "On", "yes"]) {
+      const bus = new RecordingHookBus()
+      const handle = resolveObservabilityWire({ [ENV_KEY]: raw } as NodeJS.ProcessEnv, {
+        hookBus: bus,
+      })
+      expect(bus.subscribeCount).toBe(1)
+      expect(handle.runLedger).toBeDefined()
     }
   })
 

@@ -77,7 +77,11 @@ const loadFromEnvBody = (src: string): string => {
 const discoverKnobs = (src: string): readonly string[] => {
   const body = loadFromEnvBody(src)
   const found = new Set<string>()
-  const re = /env\["(QUANTA_[A-Z0-9_]+)"\]/g
+  // A knob is read either directly (`env["QUANTA_X"]`, used by the parseBool /
+  // parsePositiveInt / parser readers) OR via the canonical gate SSOT
+  // (`gateOn(env, "QUANTA_X")` / `gateDisabled(env, "QUANTA_X")`). Discover BOTH
+  // forms so the unification migration didn't blind this guard.
+  const re = /(?:env\["|gate(?:On|Disabled)\(env,\s*")(QUANTA_[A-Z0-9_]+)"/g
   for (const m of body.matchAll(re)) found.add(m[1] as string)
   return [...found].sort()
 }
@@ -293,7 +297,9 @@ describe("knob default-off completeness guard (auto-discovery)", () => {
     // of the loadFromEnv body) must not be SMALLER than what we discovered — if
     // it were, our body-slice missed reads.
     const wholeFile = new Set<string>()
-    for (const m of RUNTIME_CONFIG_TEXT.matchAll(/env\["(QUANTA_[A-Z0-9_]+)"\]/g)) {
+    for (const m of RUNTIME_CONFIG_TEXT.matchAll(
+      /(?:env\["|gate(?:On|Disabled)\(env,\s*")(QUANTA_[A-Z0-9_]+)"/g,
+    )) {
       wholeFile.add(m[1] as string)
     }
     expect(DISCOVERED_KNOBS.length).toBe(wholeFile.size)

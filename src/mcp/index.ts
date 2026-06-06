@@ -29,6 +29,14 @@ export {
 } from "./elicitation"
 export { headlessOAuthRejecter, type McpOAuthProviderPort } from "./oauth"
 export {
+  isProgressMethod,
+  type McpProgress,
+  type McpProgressHandler,
+  PROGRESS_MAX_MESSAGE_CHARS,
+  PROGRESS_METHOD,
+  parseProgress,
+} from "./progress"
+export {
   type BackoffPolicy,
   backoffDelay,
   DEFAULT_BACKOFF_POLICY,

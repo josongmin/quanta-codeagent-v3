@@ -156,6 +156,12 @@ const MODEL_FAMILY_FALLBACKS: ReadonlyArray<readonly [string, ModelWindow]> = [
   ["claude-opus", { contextWindow: 200_000, maxOutput: 32_000 }],
   ["claude-sonnet", { contextWindow: 200_000, maxOutput: 64_000 }],
   ["claude-haiku", { contextWindow: 200_000, maxOutput: 8_192 }],
+  // 3.7 Sonnet has a 64k output budget (unlike 3.5 Sonnet's 8192). Its DATED /
+  // `-latest` slugs (`claude-3-7-sonnet-20250219`) miss the `claude-sonnet`
+  // needle (`3-7` infix) and would otherwise fall through to the broader
+  // `claude-3` entry below (8192), compacting ~56k tokens too LATE. This entry
+  // MUST precede `claude-3` so the dated 3.7-Sonnet slugs route correctly.
+  ["claude-3-7-sonnet", { contextWindow: 200_000, maxOutput: 64_000 }],
   ["claude-3", { contextWindow: 200_000, maxOutput: 8_192 }],
   ["claude", { contextWindow: 200_000, maxOutput: 8_192 }],
   ["gpt-5", { contextWindow: 400_000, maxOutput: 128_000 }],

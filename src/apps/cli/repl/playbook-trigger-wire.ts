@@ -30,7 +30,7 @@
 
 import { existsSync, statSync } from "node:fs"
 import { resolve as resolvePath } from "node:path"
-import { errMessage } from "@/shared"
+import { errMessage, gateOn } from "@/shared"
 import {
   createInlineTriggerWatcher,
   type PlaybookPlanQueueSink,
@@ -81,7 +81,7 @@ const EMPTY_REGISTRY: PlaybookRegistry = {
  *  Env wins over a flag=false because operators tend to set env vars to
  *  override a hard-coded default. */
 const isOptedIn = (env: NodeJS.ProcessEnv, cliFlag: boolean | undefined): boolean => {
-  if (env.QUANTA_PLAYBOOK_TRIGGER === "on") return true
+  if (gateOn(env, "QUANTA_PLAYBOOK_TRIGGER")) return true
   return cliFlag === true
 }
 

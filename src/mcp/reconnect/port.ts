@@ -6,6 +6,7 @@
  *  `onExit` to each so they satisfy {@link SupervisableMcpClient} without the
  *  supervisor reaching across to a concrete type. */
 
+import type { McpProgressHandler } from "../progress"
 import type {
   McpPrompt,
   McpPromptResult,
@@ -20,7 +21,13 @@ import type { McpCallResult, McpServerConfig, McpToolDef } from "../types"
 export interface SupervisableMcpClient {
   start(): Promise<void>
   listTools(): Promise<McpToolDef[]>
-  callTool(name: string, args: unknown): Promise<McpCallResult>
+  // §19.4 — optional per-call progress sink. The optional 3rd param keeps every
+  // existing 2-arg implementer (e.g. IsolatedMcpClient) structurally valid.
+  callTool(
+    name: string,
+    args: unknown,
+    opts?: { onProgress?: McpProgressHandler },
+  ): Promise<McpCallResult>
   stop(): Promise<void>
   /** Subscribe to a one-shot transport/process exit notification. Returns an
    *  unsubscribe. When no handler is registered the client's exit path is

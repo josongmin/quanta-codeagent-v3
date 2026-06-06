@@ -22,23 +22,24 @@
  * shell only.
  */
 
-import {
-  createServer,
-  request as httpRequest,
-  type IncomingHttpHeaders,
-  type IncomingMessage,
-  type Server,
-} from "node:http"
+import { createServer, request as httpRequest, type IncomingMessage, type Server } from "node:http"
 import { request as httpsRequestOverTls } from "node:https"
 import { isIP, connect as netConnect, type Socket } from "node:net"
-import { createSecureContext, TLSSocket, type TLSSocket as TLSSocketType } from "node:tls"
 import { classifyHost } from "@/shared/net/ssrf"
 import { NetworkPolicyAmendment } from "./amendment"
 import { decideEgress, type EgressDecision } from "./decision"
 import type { MitmConfig } from "./mitm"
+import type { MitmTlsChannel, OpenMitmChannel, ParsedTlsRequest } from "./mitm-channel"
+import { openBunMitmChannel } from "./mitm-channel-bun"
+import { makeNodeMitmChannelOpener } from "./mitm-channel-node"
 import type { NetworkProxyPort } from "./port"
+import { readCappedBody } from "./read-capped-body"
 import { decideEgressScan, type SecretEgressConfig } from "./secret-egress"
 import type { DecisionLogEntry, NetworkProxyConfig, ProxyAddress } from "./types"
+
+// Re-export the body-cap reader (hoisted to its own module to break a cycle with
+// the node:tls MITM channel adapter) so existing importers keep working.
+export { type ByteReadable, type CappedBody, readCappedBody } from "./read-capped-body"
 
 const DEFAULT_BIND_HOST = "127.0.0.1"
 
@@ -70,69 +71,6 @@ const IDENTITY_DIAL: DialTarget = (host, port) => ({ host, port })
  * for allow-path tests; an internal literal for the rebinding-block proof).
  */
 export type ResolvePeerHost = (sock: Socket) => string | undefined
-
-/** A readable byte stream just wide enough for {@link readCappedBody} (both
- *  `http.IncomingMessage` and a TLS socket satisfy it). */
-interface ByteReadable {
-  on(event: "data", cb: (chunk: Buffer) => void): unknown
-  on(event: "end", cb: () => void): unknown
-  on(event: "error", cb: (err: unknown) => void): unknown
-}
-
-/** The outcome of a STREAMING-capped body read: the buffered bytes (capped) +
- *  whether the stream went over the cap (the overflow is NOT retained). */
-export interface CappedBody {
-  readonly body: Buffer
-  readonly overCap: boolean
-}
-
-/**
- * Read a request body with a STREAMING byte cap. Once the accumulated size
- * exceeds `cap`, we STOP accumulating (releasing what we held) and flag
- * `overCap` — so a hostile huge body can NEVER be fully buffered in memory
- * (the DoS guard). Used by BOTH the plaintext path and the TLS-MITM parse path
- * so the cap discipline is defined ONCE (the MITM path previously buffered the
- * whole body before consulting the cap — a memory-DoS the plaintext path never
- * had). Resolves on `end` OR `error` (a truncated read is still capped). Pure
- * aside from the stream it drains; never throws.
- */
-export const readCappedBody = (stream: ByteReadable, cap: number): Promise<CappedBody> =>
-  new Promise((resolve) => {
-    let chunks: Buffer[] = []
-    let size = 0
-    let overCap = false
-    const finish = (): void =>
-      resolve({ body: overCap ? Buffer.alloc(0) : Buffer.concat(chunks), overCap })
-    stream.on("data", (c: Buffer) => {
-      if (overCap) return
-      size += c.length
-      if (size > cap) {
-        overCap = true
-        chunks = [] // release what we held; the overflow is never scanned/forwarded
-        return
-      }
-      chunks.push(c)
-    })
-    stream.on("end", finish)
-    stream.on("error", finish)
-  })
-
-/** A single decrypted HTTP request parsed off a terminated TLS-MITM socket. */
-interface ParsedTlsRequest {
-  readonly method: string
-  readonly path: string
-  readonly headers: IncomingHttpHeaders
-  /** Header values concatenated for the secret scan (names are not secrets). */
-  readonly headerText: string
-  /** The buffered request body, CAPPED at the scan budget (a body past the cap is
-   *  truncated here — never fully held in memory — and {@link bodyOverCap} set so
-   *  the caller forwards UNSCANNED rather than scanning a partial body). */
-  readonly body: Buffer
-  /** True IFF the decrypted body exceeded the scan cap (so it was NOT fully
-   *  buffered). The caller forwards it unscanned with a `body-cap-unscanned`
-   *  marker — identical disposition to the plaintext path's streaming cap. */
-  readonly bodyOverCap: boolean
-}
 
 /** Strip a `host:port` (or bracketed IPv6) authority down to the bare host. */
 const bareHost = (authority: string): string => {
@@ -211,6 +149,17 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
    */
   private readonly upstreamTlsExtra: () => Record<string, unknown>
 
+  /**
+   * jun-7 TLS-MITM — the runtime TLS-termination CHANNEL opener (capability seam).
+   * Production capability-detects: on **Bun** the `Bun.listen` terminator bridge
+   * ({@link openBunMitmChannel}) — which the jun-07 spike PROVED drives a real
+   * handshake (the node:tls server-wrap stalls on Bun); on **Node** the node:tls
+   * wrap ({@link makeNodeMitmChannelOpener}). Tests inject a fake opener to drive
+   * the scan/forward logic hermetically. NEVER disables the security model — both
+   * openers present the SAME ephemeral-CA leaf and the upstream leg is unchanged.
+   */
+  private readonly openMitmChannel: OpenMitmChannel
+
   constructor(
     private readonly config: NetworkProxyConfig,
     deps: {
@@ -219,6 +168,7 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
       dial?: DialTarget
       resolvePeerHost?: ResolvePeerHost
       upstreamTlsExtra?: () => Record<string, unknown>
+      openMitmChannel?: OpenMitmChannel
     } = {},
   ) {
     this.now = deps.now ?? Date.now
@@ -226,6 +176,13 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
     this.dial = deps.dial ?? IDENTITY_DIAL
     this.resolvePeerHost = deps.resolvePeerHost ?? ((s) => s.remoteAddress)
     this.upstreamTlsExtra = deps.upstreamTlsExtra ?? (() => ({}))
+    // Capability-detect the TLS-termination mechanism: Bun bridge first (returns
+    // a channel only under Bun), else the node:tls wrap. The Bun opener returns
+    // `null` off-Bun, so the `??` falls through to the node opener on Node.
+    const nodeOpener = makeNodeMitmChannelOpener((h) => this.headerScanTextFrom(h))
+    this.openMitmChannel =
+      deps.openMitmChannel ??
+      ((sock, leaf) => openBunMitmChannel(sock, leaf) ?? nodeOpener(sock, leaf))
     this.server = createServer((req, res) => this.onRequest(req, res))
     // The `connect` event types `socket` as `Duplex`; for a TCP CONNECT it is
     // always a `net.Socket`. Narrow it for the tunnel path.
@@ -381,8 +338,16 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
   /** Concatenate header values into a single scannable text blob (header NAMES
    *  are not secrets; only values are scanned). */
   private headerScanText(req: IncomingMessage): string {
-    return Object.values(req.headers)
-      .map((v) => (Array.isArray(v) ? v.join(" ") : (v ?? "")))
+    return this.headerScanTextFrom(req.headers)
+  }
+
+  /** Same blob construction over a bare header map (used by the node:tls MITM
+   *  channel adapter so the header-scan text matches the plaintext path EXACTLY).
+   *  The Bun bridge builds its own blob in `parseHttpRequestBuffer` with the
+   *  same join semantics. */
+  private headerScanTextFrom(headers: Record<string, unknown>): string {
+    return Object.values(headers)
+      .map((v) => (Array.isArray(v) ? v.join(" ") : ((v as string | undefined) ?? "")))
       .join("\n")
   }
 
@@ -533,18 +498,20 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
    * request, re-originate upstream. Fail-closed per `mitm.onFailure`.
    *
    * Flow:
-   *   1. Wrap `clientSocket` in a SERVER-side TLSSocket presenting the leaf cert
-   *      minted for `host` (signed by the ephemeral CA the agent's client
-   *      trusts). The handshake completes against OUR CA only.
-   *   2. Parse the decrypted bytes as ONE HTTP request (a one-shot http.Server on
-   *      top of the TLSSocket). Buffer the body up to the cap.
+   *   1. Mint the leaf for `host` (signed by the ephemeral CA the agent's client
+   *      trusts) and open a runtime TLS-termination {@link MitmTlsChannel} on
+   *      `clientSocket` — node:tls on Node, the `Bun.listen` bridge on Bun
+   *      (capability-detected; the handshake completes against OUR CA only).
+   *   2. `channel.parse()` reads exactly ONE decrypted HTTP request, buffering the
+   *      body up to the streaming cap.
    *   3. Run the SHARED `decideEgressScan` (deny / redact / clean).
    *   4. On deny ⇒ 403 over the terminated TLS + close (fail closed). Otherwise
    *      open an OWN upstream TLS connection to the real host, VALIDATING the real
    *      server cert (default trust store — NOT our MITM CA), forward the
    *      (possibly redacted) request, pipe the response back.
    *
-   * Any handshake / mint / scan error ⇒ {@link mitmFailClosed}.
+   * Any handshake / mint / scan error ⇒ {@link mitmFailClosed}. The watchdog turns
+   * a stuck handshake (e.g. an incompatible runtime) into a hard DENY.
    */
   private async mitmTerminate(
     clientSocket: Socket,
@@ -561,59 +528,49 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
       return
     }
 
-    // Server-side TLS on the client socket (we present the leaf).
-    let tlsClient: TLSSocketType
-    try {
-      tlsClient = new TLSSocket(clientSocket, {
-        isServer: true,
-        secureContext: createSecureContext({ key: leaf.keyPem, cert: leaf.certPem }),
-      })
-    } catch {
+    // Open the runtime TLS-termination channel (Bun bridge / node:tls wrap).
+    const channel = this.openMitmChannel(clientSocket, leaf)
+    if (channel === null) {
       this.mitmFailClosed(clientSocket, host, mitm, decision, "tls-context-failed")
       return
     }
 
-    // A handshake failure (e.g. a cert-pinning client that refuses our leaf) ⇒
-    // fail closed. We never silently pass it unscanned.
-    let handshakeFailed = false
-    const failHandshake = (cause: string): void => {
-      if (handshakeFailed) return
-      handshakeFailed = true
-      this.mitmFailClosed(clientSocket, host, mitm, decision, cause, tlsClient)
-    }
-    tlsClient.on("error", () => failHandshake("client-handshake-error"))
-
     // FAIL-CLOSED WATCHDOG: if the decrypted request does not parse within the
     // budget (a stuck/incompatible handshake — e.g. a runtime that cannot drive
-    // server-side TLS on a CONNECT-upgraded socket), we DENY rather than hang.
-    // This guarantees a stuck MITM never silently lets unscanned bytes leave.
-    const timer = setTimeout(() => failHandshake("handshake-timeout"), mitm.handshakeTimeoutMs)
-    if (typeof timer.unref === "function") timer.unref()
-
-    // Parse exactly one decrypted HTTP request off the TLS socket. The body is
-    // buffered with a STREAMING cap (`maxBodyBytes`) so a huge decrypted HTTPS
-    // body can NEVER be fully held in memory (DoS parity with the plaintext
-    // `bufferBody` path — see the over-cap handling below).
+    // TLS termination), we DENY rather than hang. `parse()` NEVER rejects (it
+    // resolves `null` on error), so the only stall source is a hung handshake,
+    // which the watchdog bounds. This guarantees a stuck MITM never silently lets
+    // unscanned bytes leave.
     const cfg = mitm.secretEgress
-    const parsed = await this.parseTlsRequest(tlsClient, cfg.maxBodyBytes)
-    clearTimeout(timer)
-    if (handshakeFailed) return
+    let watchdogFired = false
+    const watchdog = new Promise<null>((resolve) => {
+      const timer = setTimeout(() => {
+        watchdogFired = true
+        resolve(null)
+      }, mitm.handshakeTimeoutMs)
+      if (typeof timer.unref === "function") timer.unref()
+    })
+
+    const parsed = await Promise.race([channel.parse(cfg.maxBodyBytes), watchdog])
+    if (watchdogFired) {
+      this.mitmFailClosed(clientSocket, host, mitm, decision, "handshake-timeout", channel)
+      return
+    }
     if (parsed === null) {
-      this.mitmFailClosed(clientSocket, host, mitm, decision, "request-parse-failed")
+      this.mitmFailClosed(clientSocket, host, mitm, decision, "request-parse-failed", channel)
       return
     }
 
     if (parsed.bodyOverCap) {
       // Over the cap — the body was NOT fully buffered (streaming cap, so a huge
-      // decrypted body can never OOM the proxy). Unlike the plaintext path (which
-      // re-streams the untouched original `req`), the MITM path has already
+      // decrypted body can never OOM the proxy). The MITM path has already
       // consumed the TLS bytes into the parser, so we CANNOT losslessly forward
       // the original body — `parsed.body` is truncated. Scanning a partial body
       // is unsafe (the secret could sit past the cap) AND forwarding a truncated
       // body would corrupt the request. So FAIL CLOSED per `onFailure` (deny /
       // opaque-tunnel): if we cannot scan it AND cannot forward it intact, it does
       // not leave. The gap stays VISIBLE in the log.
-      this.mitmFailClosed(clientSocket, host, mitm, decision, "body-over-cap", tlsClient)
+      this.mitmFailClosed(clientSocket, host, mitm, decision, "body-over-cap", channel)
       return
     }
     const buffered = parsed.body.toString("utf8")
@@ -622,20 +579,20 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
     try {
       disposition = await decideEgressScan(buffered, parsed.headerText, cfg)
     } catch {
-      this.mitmFailClosed(clientSocket, host, mitm, decision, "scan-error", tlsClient)
+      this.mitmFailClosed(clientSocket, host, mitm, decision, "scan-error", channel)
       return
     }
 
     if (disposition.kind === "deny") {
       // Fail closed at the scan: a secret is leaving. 403 over the terminated TLS.
       this.record(host, { decision: "deny", reason: disposition.reason }, "denied")
-      this.writeTlsHttp(tlsClient, 403, disposition.reason)
+      this.writeChannelHttp(channel, 403, disposition.reason)
       return
     }
     if (disposition.kind === "redact") {
       this.record(host, { decision: "allow", reason: disposition.reason }, "redacted")
       this.mitmForwardUpstream(
-        tlsClient,
+        channel,
         host,
         port,
         parsed,
@@ -649,7 +606,7 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
       { decision: "allow", reason: "secret-egress: scanned clean (mitm)" },
       "scanned-clean",
     )
-    this.mitmForwardUpstream(tlsClient, host, port, parsed, parsed.body, [])
+    this.mitmForwardUpstream(channel, host, port, parsed, parsed.body, [])
   }
 
   /**
@@ -661,7 +618,7 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
    * authenticate).
    */
   private mitmForwardUpstream(
-    tlsClient: TLSSocketType,
+    channel: MitmTlsChannel,
     host: string,
     port: number,
     parsed: ParsedTlsRequest,
@@ -699,27 +656,27 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
       (up) => {
         if (this.peerIsBlocked(up.socket)) {
           up.destroy()
-          this.writeTlsHttp(tlsClient, 403, "egress denied: peer resolved to blocked address")
+          this.writeChannelHttp(channel, 403, "egress denied: peer resolved to blocked address")
           return
         }
-        // Re-encrypt the upstream response back to the client over OUR TLS.
+        // Re-encrypt the upstream response back to the client over OUR TLS channel.
         const statusLine = `HTTP/1.1 ${up.statusCode ?? 502} ${up.statusMessage ?? ""}\r\n`
         const headerLines = Object.entries(up.headers)
           .filter(([, v]) => v !== undefined)
           .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : v}\r\n`)
           .join("")
-        if (tlsClient.writable) tlsClient.write(statusLine + headerLines + "\r\n")
+        channel.write(`${statusLine}${headerLines}\r\n`)
         up.on("data", (c: Buffer) => {
-          if (tlsClient.writable) tlsClient.write(c)
+          channel.write(c)
         })
         up.on("end", () => {
-          if (tlsClient.writable) tlsClient.end()
+          channel.end()
         })
       },
     )
     upstream.on("error", () => {
       // Upstream cert rejection / dial failure / reset ⇒ 502, never a blind pass.
-      this.writeTlsHttp(tlsClient, 502, "upstream TLS error (cert not validated or unreachable)")
+      this.writeChannelHttp(channel, 502, "upstream TLS error (cert not validated or unreachable)")
     })
     if (body.length > 0 && parsed.method !== "GET" && parsed.method !== "HEAD") upstream.write(body)
     upstream.end()
@@ -740,97 +697,53 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
     mitm: MitmConfig,
     decision: EgressDecision,
     cause: string,
-    tlsClient?: TLSSocketType,
+    channel?: MitmTlsChannel,
   ): void {
     if (mitm.onFailure === "opaque-tunnel") {
       // We already wrote `200 Connection Established`; if TLS hasn't begun we
       // cannot cleanly re-tunnel the same socket, so this fallback is best-effort
       // ONLY when termination never consumed bytes. Record the visible gap.
       this.record(host, decision, "connect-tunnel-unscanned")
-      if (tlsClient !== undefined && !tlsClient.destroyed) tlsClient.destroy()
+      channel?.destroy()
       if (!clientSocket.destroyed) clientSocket.destroy()
       return
     }
     // Default: deny — hard close, scanned-as-denied so the gap is never silent.
     // The deny is recorded REGARDLESS of whether we can write a clean 403 (a
-    // stuck/unsupported handshake may leave the TLS socket un-writable). The
+    // stuck/unsupported handshake may leave the channel un-writable). The
     // invariant that matters: nothing leaves unscanned + the log says `denied`.
     this.record(host, { decision: "deny", reason: `mitm fail-closed: ${cause}` }, "denied")
     const wrote =
-      tlsClient?.writable === true &&
-      this.writeTlsHttp(tlsClient, 403, `egress denied: mitm fail-closed (${cause})`)
+      channel?.writable() === true &&
+      this.writeChannelHttp(channel, 403, `egress denied: mitm fail-closed (${cause})`)
     if (!wrote) {
       // Could not deliver a clean 403 — hard-destroy so the client errors out
       // promptly (it must NOT believe the request was forwarded).
-      if (tlsClient !== undefined && !tlsClient.destroyed) tlsClient.destroy()
+      channel?.destroy()
       if (!clientSocket.destroyed) clientSocket.destroy()
     }
   }
 
-  /** Write a minimal HTTP response over the terminated TLS socket + close.
+  /** Write a minimal HTTP response over the terminated TLS channel + close.
    *  Returns `true` IFF the write was delivered; on ANY error (e.g. a runtime
-   *  that left the TLS socket un-handshaked) returns `false` so the caller
+   *  that left the channel un-handshaked) returns `false` so the caller
    *  hard-destroys instead. NO-THROW. */
-  private writeTlsHttp(tlsClient: TLSSocketType, status: number, body: string): boolean {
-    if (!tlsClient.writable) {
-      if (!tlsClient.destroyed) tlsClient.destroy()
+  private writeChannelHttp(channel: MitmTlsChannel, status: number, body: string): boolean {
+    if (!channel.writable()) {
+      channel.destroy()
       return false
     }
     const safe = this.sanitize(body)
-    try {
-      tlsClient.end(
-        `HTTP/1.1 ${status} ${status === 403 ? "Forbidden" : status === 502 ? "Bad Gateway" : "OK"}\r\n` +
-          `content-type: text/plain\r\ncontent-length: ${Buffer.byteLength(safe)}\r\n\r\n${safe}`,
-      )
-      return true
-    } catch {
-      if (!tlsClient.destroyed) tlsClient.destroy()
+    const wrote = channel.write(
+      `HTTP/1.1 ${status} ${status === 403 ? "Forbidden" : status === 502 ? "Bad Gateway" : "OK"}\r\n` +
+        `content-type: text/plain\r\ncontent-length: ${Buffer.byteLength(safe)}\r\n\r\n${safe}`,
+    )
+    if (!wrote) {
+      channel.destroy()
       return false
     }
-  }
-
-  /**
-   * Parse exactly ONE decrypted HTTP request off the terminated TLS socket by
-   * running a one-shot in-process `http.Server` over it. Returns the method /
-   * path / headers / buffered body, or `null` on a parse error / timeout-less
-   * close. The body is buffered fully (the cap is applied by the caller).
-   */
-  private parseTlsRequest(
-    tlsClient: TLSSocketType,
-    maxBodyBytes: number,
-  ): Promise<ParsedTlsRequest | null> {
-    return new Promise((resolve) => {
-      let settled = false
-      const done = (v: ParsedTlsRequest | null): void => {
-        if (settled) return
-        settled = true
-        resolve(v)
-      }
-      const innerServer = createServer((req, _res) => {
-        // STREAMING cap (DoS parity with `bufferBody` — SAME `readCappedBody`):
-        // a huge decrypted HTTPS body is never fully held in memory. Over the cap
-        // ⇒ `bodyOverCap` set + the body released; the caller fails closed (cannot
-        // scan a partial body, cannot forward a truncated one over the already-
-        // consumed TLS socket).
-        void readCappedBody(req, maxBodyBytes).then(({ body, overCap }) => {
-          const url = new URL(req.url ?? "/", "http://placeholder")
-          done({
-            method: req.method ?? "GET",
-            path: url.pathname + url.search,
-            headers: req.headers,
-            headerText: this.headerScanText(req),
-            body,
-            bodyOverCap: overCap,
-          })
-        })
-        req.on("error", () => done(null))
-      })
-      innerServer.on("clientError", () => done(null))
-      // Feed the already-accepted TLS socket into the HTTP parser.
-      innerServer.emit("connection", tlsClient)
-      tlsClient.on("error", () => done(null))
-      tlsClient.on("close", () => done(null))
-    })
+    channel.end()
+    return true
   }
 
   private openTunnel(clientSocket: Socket, head: Buffer, host: string, port: number): void {

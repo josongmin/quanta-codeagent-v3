@@ -7,9 +7,10 @@ import {
   routeElicitation,
 } from "./elicitation/inbound-router"
 import type { ElicitationPrompter } from "./elicitation/port"
-import { isResponse, type JsonRpcMessage } from "./jsonrpc"
+import { isResponse, type JsonRpcMessage, type JsonRpcResponse } from "./jsonrpc"
 import { headlessOAuthRejecter } from "./oauth"
 import type { McpOAuthProviderPort } from "./oauth/port"
+import { isProgressMethod, type McpProgressHandler, parseProgress } from "./progress"
 import type { McpPrompt } from "./resources"
 import {
   isResourceNotificationMethod,
@@ -107,6 +108,10 @@ interface ContentBlock {
 interface ToolsCallResult {
   content?: ContentBlock[]
   isError?: boolean
+  /** §19.2 — the spec's typed `structuredContent` payload (a JSON object whose
+   *  shape the server's `outputSchema` describes). Carried opaque; the bridge
+   *  maps it onto `ToolResult.structured`. Absent ⇒ unchanged text-only result. */
+  structuredContent?: unknown
 }
 
 /** H19 — build the typed `unsupported` failure for a method whose required
@@ -323,6 +328,12 @@ export class McpClient {
   private readonly resourceObserver: McpResourceObserver | undefined
 
   private nextId = 1
+  /** §19.4 — per-call progress sinks, keyed by the `progressToken` the call put
+   *  in its `tools/call` `_meta`. Registered for the duration of a `callTool`
+   *  that supplied an `onProgress`, removed in its `finally`. Empty ⇒ no progress
+   *  routing (byte-identical to a client that never sends a progressToken). */
+  private readonly progressHandlers = new Map<string | number, McpProgressHandler>()
+  private nextProgressToken = 1
   private readonly pending = new Map<number, PendingRequest>()
   private started = false
   private stopped = false
@@ -515,12 +526,34 @@ export class McpClient {
     )
   }
 
-  async callTool(name: string, args: unknown): Promise<McpCallResult> {
+  async callTool(
+    name: string,
+    args: unknown,
+    opts?: { onProgress?: McpProgressHandler },
+  ): Promise<McpCallResult> {
     this.ensureReady()
-    const res = (await this.request("tools/call", {
-      name,
-      arguments: args ?? {},
-    })) as ToolsCallResult
+    // §19.4 — when the caller wants progress, mint a unique token, register the
+    // sink, and attach `_meta.progressToken` so the server knows it MAY emit
+    // `notifications/progress` for this call. No `onProgress` ⇒ no token, no
+    // `_meta` (byte-identical to the legacy `tools/call` params).
+    const progressToken = opts?.onProgress !== undefined ? this.nextProgressToken++ : undefined
+    if (progressToken !== undefined && opts?.onProgress !== undefined) {
+      this.progressHandlers.set(progressToken, opts.onProgress)
+    }
+    try {
+      const res = (await this.request("tools/call", {
+        name,
+        arguments: args ?? {},
+        ...(progressToken !== undefined ? { _meta: { progressToken } } : {}),
+      })) as ToolsCallResult
+      return this.foldCallResult(res)
+    } finally {
+      if (progressToken !== undefined) this.progressHandlers.delete(progressToken)
+    }
+  }
+
+  /** Fold the raw `tools/call` result into the typed {@link McpCallResult}. */
+  private foldCallResult(res: ToolsCallResult): McpCallResult {
     // §19.3 — surface non-text media (image / embedded resource) ALONGSIDE the
     // joined text. Empty ⇒ `media` is omitted so the result is byte-identical to
     // the legacy text-only shape for every server that returns only text.
@@ -529,6 +562,9 @@ export class McpClient {
       ok: res.isError !== true,
       content: capResultText(joinTextBlocks(res.content)),
       ...(media.length > 0 ? { media } : {}),
+      // §19.2 — carry the server's typed structuredContent through to the bridge.
+      // Absent ⇒ omitted (byte-identical to the legacy text-only result).
+      ...(res.structuredContent !== undefined ? { structured: res.structuredContent } : {}),
     }
   }
 
@@ -814,44 +850,64 @@ export class McpClient {
 
   private dispatch(msg: JsonRpcMessage): void {
     if (isResponse(msg)) {
-      const id = typeof msg.id === "number" ? msg.id : Number(msg.id)
-      const entry = this.takePending(id)
-      if (!entry) return
-      if (msg.error) {
-        // R4 (structured-401) — when the carrier surfaced a real HTTP status
-        // through `error.data.httpStatus`, copy it onto the typed error so
-        // `isUnauthorizedError` keys off the STRUCTURED number (unforgeable by
-        // message text) rather than a substring. Absent ⇒ undefined (the legacy
-        // substring fallback applies), byte-identical to the pre-R4 error.
-        const httpStatus = httpStatusOf(msg.error.data)
-        entry.reject(
-          new McpError(
-            `mcp error ${msg.error.code}: ${msg.error.message}`,
-            httpStatus !== undefined ? { httpStatus } : undefined,
-          ),
-        )
-      } else {
-        entry.resolve(msg.result)
-      }
+      this.resolveResponse(msg)
       return
     }
-    // Track C: an inbound REQUEST (has both `id` and `method`) is a call FROM
-    // the server. Route elicitation requests to the prompter and reply.
-    // Notifications (a `method` WITHOUT an `id`) carry no reply obligation and
-    // are ignored — byte-identical to the pre-Track-C behavior.
-    if ("method" in msg && "id" in msg) {
-      this.handleInboundRequest(msg.id, msg.method, "params" in msg ? msg.params : undefined)
+    if (!("method" in msg)) return
+    const params = "params" in msg ? msg.params : undefined
+    // Track C: an inbound REQUEST (has both `id` and `method`) is a call FROM the
+    // server (elicitation / sampling / roots) and carries a reply obligation.
+    if ("id" in msg) {
+      this.handleInboundRequest(msg.id, msg.method, params)
       return
     }
-    // H19 — an inbound NOTIFICATION (a `method` WITHOUT an `id`) carries no reply
-    // obligation. Resource/prompt change notifications route to the optional
-    // observer; any other notification is ignored (byte-identical to pre-H19).
-    if ("method" in msg && isResourceNotificationMethod(msg.method)) {
-      routeResourceNotification(
-        this.resourceObserver,
-        msg.method,
-        "params" in msg ? msg.params : undefined,
+    // A `method` WITHOUT an `id` is a NOTIFICATION (no reply obligation).
+    // §19.4 progress routes to the per-call sink; H19/§19.5 resource/prompt/tool
+    // change notifications route to the optional observer; anything else is
+    // ignored (byte-identical to the pre-notification client).
+    if (isProgressMethod(msg.method)) {
+      this.routeProgressNotification(params)
+      return
+    }
+    if (isResourceNotificationMethod(msg.method)) {
+      routeResourceNotification(this.resourceObserver, msg.method, params)
+    }
+  }
+
+  /** Settle the pending request a server RESPONSE correlates to. Extracted from
+   *  {@link dispatch} so the dispatcher stays a flat router. R4 (structured-401):
+   *  a carrier-surfaced `error.data.httpStatus` is copied onto the typed error so
+   *  `isUnauthorizedError` keys off the STRUCTURED number, not a substring. */
+  private resolveResponse(msg: JsonRpcResponse): void {
+    const id = typeof msg.id === "number" ? msg.id : Number(msg.id)
+    const entry = this.takePending(id)
+    if (!entry) return
+    if (msg.error) {
+      const httpStatus = httpStatusOf(msg.error.data)
+      entry.reject(
+        new McpError(
+          `mcp error ${msg.error.code}: ${msg.error.message}`,
+          httpStatus !== undefined ? { httpStatus } : undefined,
+        ),
       )
+      return
+    }
+    entry.resolve(msg.result)
+  }
+
+  /** §19.4 — route an inbound `notifications/progress` to the PER-CALL sink
+   *  registered under its `progressToken`. Unknown/expired token ⇒ dropped. The
+   *  sink is no-throw by contract, but we guard so a buggy one can never crash
+   *  the transport message pump. */
+  private routeProgressNotification(params: unknown): void {
+    const p = parseProgress(params)
+    if (p === null) return
+    const handler = this.progressHandlers.get(p.progressToken)
+    if (handler === undefined) return
+    try {
+      handler(p)
+    } catch {
+      // swallow — a throwing progress sink must not break dispatch
     }
   }
 

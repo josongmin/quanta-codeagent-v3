@@ -19,7 +19,13 @@
  *     "no baseline ⇒ MISSES (reproduces the bug)" assertion stays GREEN.
  */
 import { describe, expect, test } from "bun:test"
-import { compactIfNeeded, estimateTokens, type TokenBaseline, triggerTokenCount } from "@/agent"
+import {
+  compactIfNeeded,
+  estimateTokens,
+  markBaselineStaleIfShrunk,
+  type TokenBaseline,
+  triggerTokenCount,
+} from "@/agent"
 import type { LLMPort, Message, StreamEvent, StreamInput, SystemPromptInput } from "@/llm"
 import { resolveModelWindow } from "@/llm/provider-metadata"
 
@@ -231,5 +237,69 @@ describe("D5 — authoritative token baseline (triggerTokenCount + compactIfNeed
       tokenBaseline: { measuredInputTokens: 130_000, measuredAtMessageCount: messages.length },
     })
     expect(triggered.compacted).toBe(true)
+  })
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+// D5 STALE-BASELINE-ACROSS-COMPACTION (jun-7 audit R-concurrency).
+// A baseline measured against a pre-compaction prefix becomes STALE once a
+// compaction replaces that prefix: its `measuredAtMessageCount` index now points
+// at different content. While the transcript is shorter than the index the
+// `triggerTokenCount` out-of-range fail-safe hides it — but once it REGROWS past
+// the index the fail-safe stops firing and the stale 150k baseline forces a
+// premature compaction on a tiny transcript. `markBaselineStaleIfShrunk` (wired
+// in prepareTurnContext on every shrinking compaction) closes this.
+// ───────────────────────────────────────────────────────────────────────────
+
+describe("D5 stale baseline is invalidated on a shrinking compaction", () => {
+  const mk = (i: number): Message => ({
+    role: i % 2 ? "assistant" : "user",
+    content: [{ type: "text", text: `m${i} ${"x".repeat(80)}` }],
+  })
+
+  test("REPRODUCE the bug: an in-range stale baseline over-counts a tiny transcript", () => {
+    const small = Array.from({ length: 45 }, (_, i) => mk(i)) // ~900 est tokens
+    const stale: TokenBaseline = { measuredInputTokens: 150_000, measuredAtMessageCount: 40 }
+    // 40 <= 45 ⇒ the out-of-range fail-safe does NOT fire, so the stale baseline
+    // is used: 150_000 + estimate(suffix) ≫ the real ~900-token count.
+    expect(triggerTokenCount(small, stale)).toBeGreaterThan(120_000)
+    expect(estimateTokens(small)).toBeLessThan(5_000)
+  })
+
+  test("markBaselineStaleIfShrunk clears current when the transcript shrank (the fix)", () => {
+    const box: { current?: TokenBaseline; sendCount?: number } = {
+      current: { measuredInputTokens: 150_000, measuredAtMessageCount: 40 },
+      sendCount: 42,
+    }
+    // A proactive compaction shrank 42 → 8 messages.
+    markBaselineStaleIfShrunk(box, 42, 8)
+    expect(box.current).toBeUndefined() // stale baseline dropped
+  })
+
+  test("markBaselineStaleIfShrunk is a NO-OP when the transcript grew or held steady", () => {
+    const keep: TokenBaseline = { measuredInputTokens: 150_000, measuredAtMessageCount: 40 }
+    const grew = { current: { ...keep }, sendCount: 42 }
+    markBaselineStaleIfShrunk(grew, 42, 50) // grew ⇒ no compaction replaced the prefix
+    expect(grew.current).toEqual(keep)
+    const same = { current: { ...keep }, sendCount: 42 }
+    markBaselineStaleIfShrunk(same, 42, 42)
+    expect(same.current).toEqual(keep)
+  })
+
+  test("LIFECYCLE: invalidated baseline ⇒ a regrown tiny transcript does NOT over-trigger", () => {
+    // Turn N captured a baseline against a big prefix.
+    const box: { current?: TokenBaseline; sendCount?: number } = {
+      current: { measuredInputTokens: 150_000, measuredAtMessageCount: 40 },
+      sendCount: 42,
+    }
+    // Turn N+1 compacted 42 → 8 (prefix replaced) ⇒ invalidate.
+    markBaselineStaleIfShrunk(box, 42, 8)
+    // Turns later the transcript regrew to 45 small messages.
+    const regrown = Array.from({ length: 45 }, (_, i) => mk(i))
+    // With the baseline cleared the trigger is the legacy chars/4 estimate —
+    // NOT the stale 150k — so no premature compaction. Red-on-injection: drop the
+    // invalidation and this reverts to >120k (the bug above).
+    expect(triggerTokenCount(regrown, box.current)).toBe(estimateTokens(regrown))
+    expect(triggerTokenCount(regrown, box.current)).toBeLessThan(5_000)
   })
 })

@@ -26,6 +26,7 @@
  */
 
 import { tlsMitmAuthorized } from "@/runtime/network-proxy/mitm-gate"
+import { gateDisabled, gateOn } from "./env-flag"
 import { writeStderr } from "./terminal-io"
 
 export const LOG_LEVELS = ["debug", "info", "warn", "error"] as const
@@ -1078,12 +1079,12 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // ADR-0473 — strict `=== "1"` opt-in (matches the `bgCompactionEnabled`
     // slice gate; `parseBool` also accepts true/on but the slice gate is the
     // SSOT, so keep it strict here too).
-    bgCompaction: env["QUANTA_BG_COMPACTION"] === "1",
+    bgCompaction: gateOn(env, "QUANTA_BG_COMPACTION"),
     // RFC jun-6-microcompaction — strict `=== "1"` opt-in. Default false ⇒ the
     // tier-1 eviction pre-pass is never constructed (byte-identical). The
     // keep/floor/interval tunables are positive ints (no magic literals); absent
     // ⇒ the wire applies its own named defaults.
-    microcompact: env["QUANTA_MICROCOMPACT"] === "1",
+    microcompact: gateOn(env, "QUANTA_MICROCOMPACT"),
     microcompactKeepRecent: parsePositiveInt(
       env["QUANTA_MICROCOMPACT_KEEP_RECENT"],
       "QUANTA_MICROCOMPACT_KEEP_RECENT",
@@ -1098,80 +1099,85 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     ),
     // ADR-0471 — strict `=== "1"` opt-in (matches the `untrustedEnvelopeEnabled`
     // slice gate, which is the SSOT). Default false ⇒ dispatch wraps nothing.
-    untrustedEnvelope: env["QUANTA_UNTRUSTED_ENVELOPE"] === "1",
+    untrustedEnvelope: gateOn(env, "QUANTA_UNTRUSTED_ENVELOPE"),
     // ADR-0472 — strict `=== "1"` opt-in (matches the `editRepairLoopEnabled`
     // slice gate, the SSOT). Default false ⇒ no lint-delta attached.
-    editRepairLoop: env["QUANTA_EDIT_REPAIR_LOOP"] === "1",
+    editRepairLoop: gateOn(env, "QUANTA_EDIT_REPAIR_LOOP"),
     // ADR-0476 — strict `=== "1"` opt-in (matches the `skillMcpDepsEnabled`
     // slice gate). Default false ⇒ no deps lifted, no auto-attach.
-    skillMcpDeps: env["QUANTA_SKILL_MCP_DEPS"] === "1",
+    skillMcpDeps: gateOn(env, "QUANTA_SKILL_MCP_DEPS"),
     // ADR-0470 B1 follow-up — strict `=== "1"` opt-in. SEAM (validated, not yet
     // composed at the root): no production code reads this field, so it is a
     // no-op today (byte-identical ON or OFF). Default false ⇒ MCP `sampling` is
     // NOT advertised and the headless rejecter declines (`no-handler`). Intended
     // end state: the composition root wires a handler (and advertises) only when
     // this is on AND an LLM + consent prompter are present.
-    mcpSampling: env["QUANTA_MCP_SAMPLING"] === "1",
+    mcpSampling: gateOn(env, "QUANTA_MCP_SAMPLING"),
     // delta-token-accounting (RFC jun-6) — strict `=== "1"` opt-in. Default
     // false ⇒ the loop never constructs the counter and calls `estimateTokens`
     // directly at every site (byte-identical). ON guards CONSTRUCTION/perf only;
     // the counter's numbers are byte-identical to a full re-scan by §4.1.
-    deltaTokenCount: env["QUANTA_DELTA_TOKEN_COUNT"] === "1",
+    deltaTokenCount: gateOn(env, "QUANTA_DELTA_TOKEN_COUNT"),
     // H19 — strict `=== "1"` opt-in. Default false ⇒ MCP `roots` is NOT
     // advertised and inbound `roots/list` answers an empty list (byte-identical).
     // The composition root advertises + wires the RootsProviderPort together
     // only when this is on AND a workspace roots source is available.
-    mcpRoots: env["QUANTA_MCP_ROOTS"] === "1",
+    mcpRoots: gateOn(env, "QUANTA_MCP_ROOTS"),
     // H18 — strict `=== "1"` opt-in. Default false ⇒ no OAuth provider is wired,
     // the McpClient falls back to the headless rejecter (no token), every MCP
     // load is byte-identical (no discovery, no flow, no Authorization header).
-    mcpOAuth: env["QUANTA_MCP_OAUTH"] === "1",
+    mcpOAuth: gateOn(env, "QUANTA_MCP_OAUTH"),
     // H9 — strict `=== "1"` opt-in. Default false ⇒ the read tool renders full
     // content on every call and allocates no per-range dedup state.
-    readDedup: env["QUANTA_READ_DEDUP"] === "1",
+    readDedup: gateOn(env, "QUANTA_READ_DEDUP"),
     // H6 — strict `=== "1"` opt-in. Default false ⇒ the bash post-exec hook
     // classifies nothing and touches no sink (byte-identical).
-    passiveVcs: env["QUANTA_PASSIVE_VCS"] === "1",
+    passiveVcs: gateOn(env, "QUANTA_PASSIVE_VCS"),
     // H14a — strict `=== "1"` opt-in. Default false ⇒ no image_gen port wired,
     // tool not registered (byte-identical default menu).
-    imageGen: env["QUANTA_IMAGE_GEN"] === "1",
+    imageGen: gateOn(env, "QUANTA_IMAGE_GEN"),
     // H14b — strict `=== "1"` opt-in. Default false ⇒ no office authoring tools.
-    officeAuthoring: env["QUANTA_OFFICE_AUTHORING"] === "1",
+    officeAuthoring: gateOn(env, "QUANTA_OFFICE_AUTHORING"),
     // H15 — strict `=== "1"` opt-in. Default false ⇒ responses-wire byte-identical
     // (encrypted reasoning dropped, no include, no re-emit). OpenAI-Responses only.
-    reasoningCarryover: env["QUANTA_REASONING_CARRYOVER"] === "1",
+    reasoningCarryover: gateOn(env, "QUANTA_REASONING_CARRYOVER"),
     // H17 — idle goal-continuation + budget enforcement. Strict `=== "1"` opt-in;
     // default false ⇒ objective stays informational-only (byte-identical).
-    goalContinuationEnforce: env["QUANTA_GOAL_ENFORCE"] === "1",
+    goalContinuationEnforce: gateOn(env, "QUANTA_GOAL_ENFORCE"),
     // H13 — strict `=== "1"` opt-in. Default false ⇒ no config-migration detect,
     // no prompt, no ledger (byte-identical startup).
-    migrateConfig: env["QUANTA_MIGRATE_CONFIG"] === "1",
+    migrateConfig: gateOn(env, "QUANTA_MIGRATE_CONFIG"),
     // H17 — strict `=== "1"` opt-in. Default false ⇒ objective budget stays
     // informational (status never flips, idle-continuation byte-identical).
-    objectiveBudgetEnforce: env["QUANTA_OBJECTIVE_BUDGET_ENFORCE"] === "1",
+    objectiveBudgetEnforce: gateOn(env, "QUANTA_OBJECTIVE_BUDGET_ENFORCE"),
     // Capability A — strict `=== "1"` opt-in. Default false ⇒ batch fan-out is
     // the existing flat parallel pool (byte-identical, no DAG ordering).
-    teamDag: env["QUANTA_TEAM_DAG"] === "1",
+    teamDag: gateOn(env, "QUANTA_TEAM_DAG"),
     // Capability B — strict `=== "1"` opt-in. Default false ⇒ a denied worker
     // tool stays a hard failure (no escalation broker, byte-identical).
-    teamBroker: env["QUANTA_TEAM_BROKER"] === "1",
+    teamBroker: gateOn(env, "QUANTA_TEAM_BROKER"),
     // Capability C — strict `=== "1"` opt-in. Default false ⇒ no idle beacons /
     // no fan-in barrier (the leader polls, byte-identical).
-    teamIdle: env["QUANTA_TEAM_IDLE"] === "1",
+    teamIdle: gateOn(env, "QUANTA_TEAM_IDLE"),
     // Peer teammate messaging (RFC jun-6) — strict `=== "1"` opt-in. Default
     // false ⇒ no peerInbox drain (turn loop byte-identical), no TeamScopedMailbox
     // decorator (raw global mailbox), no team registry / team_* tools. Builds ON
     // the existing QUANTA_TEAM_* peer mailbox + wake-idle.
-    teamPeerMsg: env["QUANTA_TEAM_PEER_MSG"] === "1",
+    teamPeerMsg: gateOn(env, "QUANTA_TEAM_PEER_MSG"),
     // C1 — strict `=== "1"` opt-in. Default false ⇒ no artifact registry / tools
     // (byte-identical).
-    artifactStore: env["QUANTA_ARTIFACT_STORE"] === "1",
+    artifactStore: gateOn(env, "QUANTA_ARTIFACT_STORE"),
     // code-mode (RFC jun-6-code-mode, Phase 1) — strict `=== "1"` opt-in. Default
     // false ⇒ no codeCellDispatch port wired, no code_cell tool, the QuickJS-WASM
     // module is never instantiated (byte-identical default menu + cold path).
+    // STRICT `=== "1"` (NOT the loose `gateOn`): code-mode is a SECURITY gate
+    // (arbitrary in-cell JS that dispatches tools), so a typo'd/loose truthy
+    // spelling (`true`/`on`) must NOT enable it — strict opt-in is the contract
+    // (jun-7 hellgate: `codeMode true ONLY for "1"`). The uniform-gateOn refactor
+    // is correct for ordinary gates; security gates stay strict by design.
     codeMode: env["QUANTA_CODE_MODE"] === "1",
-    // code-mode Phase 3 — strict `=== "1"` opt-in. Default false ⇒ no steering
-    // directive (byte-identical dynamic tail). Independent of `codeMode`.
+    // code-mode Phase 3 — strict `=== "1"` opt-in (same security rationale).
+    // Default false ⇒ no steering directive (byte-identical dynamic tail).
     codeModeOnly: env["QUANTA_CODE_MODE_ONLY"] === "1",
     codeModeMemBytes: parsePositiveInt(
       env["QUANTA_CODE_MODE_MEM_BYTES"],
@@ -1191,29 +1197,29 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     ),
     // file_history_rewind — strict `=== "1"` opt-in. Default false ⇒ no per-file
     // history store, no capture sink, no file_history_rewind tool (byte-identical).
-    fileHistory: env["QUANTA_FILE_HISTORY"] === "1",
+    fileHistory: gateOn(env, "QUANTA_FILE_HISTORY"),
     // CLUSTER D #5 — strict `=== "1"` opt-in. Default false ⇒ no PatternGrantStore
     // constructed, no permission_propose_pattern tool (byte-identical).
-    rememberPatterns: env["QUANTA_REMEMBER_PATTERNS"] === "1",
+    rememberPatterns: gateOn(env, "QUANTA_REMEMBER_PATTERNS"),
     // CLUSTER D #5 residual — strict `=== "1"` opt-in. Default false ⇒ a
     // dangerous self-proposal is always rejected (reviewer-routed), byte-identical.
     // ON ⇒ the propose port is wired with `allowDangerous: true` (lifts ONLY the
     // dangerous-gate; the no-widen gate still rejects an uncovered proposal).
-    rememberPatternsDangerous: env["QUANTA_REMEMBER_PATTERNS_DANGEROUS"] === "1",
+    rememberPatternsDangerous: gateOn(env, "QUANTA_REMEMBER_PATTERNS_DANGEROUS"),
     // jun-6 paste-burst — positive-integer min-char threshold. Absent / invalid
     // ⇒ undefined ⇒ the CLI reader echoes a paste inline (byte-identical).
     pasteBurstMinChars: parsePositiveInt(env["QUANTA_PASTE_BURST"], "QUANTA_PASTE_BURST"),
     // jun-6 skill-creator — strict `=== "1"` opt-in. Default false ⇒ no writer
     // port, `skill_create` not registered (byte-identical default tool surface).
-    skillCreator: env["QUANTA_SKILL_CREATOR"] === "1",
+    skillCreator: gateOn(env, "QUANTA_SKILL_CREATOR"),
     // C6 — strict `=== "1"` opt-in. Default false ⇒ no structured deny reason
     // attached / no content prefix / DecisionEvent unchanged (byte-identical).
-    surfaceDenyReason: env["QUANTA_DENY_REASON"] === "1",
+    surfaceDenyReason: gateOn(env, "QUANTA_DENY_REASON"),
     // sandbox-escalation (RFC jun-6) — strict `=== "1"` opt-in. Default false ⇒
     // classifySandboxDenial is never consulted, no denialReason is ever set, no
     // escalation prompt, no post-denial record (a sandboxed nonzero exit is
     // byte-identical to a plain failure). Default-ON flip is OUT OF SCOPE.
-    sandboxEscalation: env["QUANTA_SANDBOX_ESCALATION"] === "1",
+    sandboxEscalation: gateOn(env, "QUANTA_SANDBOX_ESCALATION"),
     sandboxEscalationMax: parsePositiveInt(
       env["QUANTA_SANDBOX_ESCALATION_MAX"],
       "QUANTA_SANDBOX_ESCALATION_MAX",
@@ -1221,27 +1227,27 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // account-ratelimit — strict `=== "1"` opt-in. Default false ⇒ adapters
     // capture no ratelimit headers and the loop inserts no pre-request delay
     // (byte-identical).
-    proactiveRateLimit: env["QUANTA_RATELIMIT_PROACTIVE"] === "1",
+    proactiveRateLimit: gateOn(env, "QUANTA_RATELIMIT_PROACTIVE"),
     // N6 PTY backend selector. Default "tmux" ⇒ byte-identical to pre-slice path.
     ptyBackend: parsePtyBackend(env["QUANTA_PTY_BACKEND"]),
     // H18/keyring — strict `=== "1"` opt-in. Default false ⇒ MCP OAuth uses the
     // plain 0600 file token store (byte-identical, no keyring wrap).
-    mcpOAuthKeyring: env["QUANTA_MCP_OAUTH_KEYRING"] === "1",
+    mcpOAuthKeyring: gateOn(env, "QUANTA_MCP_OAUTH_KEYRING"),
     // ADR-0487 — strict `=== "1"` opt-in. Default false ⇒ scheduler built without
     // admissionQueue (throw-at-cap) and no 4th tool (byte-identical).
-    subagentQueue: env["QUANTA_SUBAGENT_QUEUE"] === "1",
+    subagentQueue: gateOn(env, "QUANTA_SUBAGENT_QUEUE"),
     // ADR-0487 — strict `=== "1"` opt-in. Default false ⇒ subagentBgTools mints no
     // subagent_force_background tool (byte-identical).
-    forceBackground: env["QUANTA_FORCE_BACKGROUND"] === "1",
+    forceBackground: gateOn(env, "QUANTA_FORCE_BACKGROUND"),
     // G1 — strict `=== "1"` opt-in. Default false ⇒ no DefaultToolPorts.appshot
     // slot, appshot_verify not registered (byte-identical default menu).
-    appshot: env["QUANTA_APPSHOT"] === "1",
+    appshot: gateOn(env, "QUANTA_APPSHOT"),
     // N1 — strict `=== "1"` opt-in. Default false ⇒ no side-agent daemons/tools.
-    sideAgent: env["QUANTA_SIDE_AGENT"] === "1",
+    sideAgent: gateOn(env, "QUANTA_SIDE_AGENT"),
     // N2 — strict `=== "1"` opt-in. Default false ⇒ no MCP connector tools.
-    mcpConnectors: env["QUANTA_MCP_CONNECTORS"] === "1",
+    mcpConnectors: gateOn(env, "QUANTA_MCP_CONNECTORS"),
     // N3 — strict `=== "1"` opt-in. Default false ⇒ no MCP resource/prompt tools.
-    mcpResources: env["QUANTA_MCP_RESOURCES"] === "1",
+    mcpResources: gateOn(env, "QUANTA_MCP_RESOURCES"),
     // §19.1 — opt-in honoring of server-declared tool annotations. SSOT with the
     // `mcp-tool-annotations` KNOB (Finding 2): both channels share the standard
     // boolean vocabulary (`1`/`true`/`on`) via `parseBool`, so `=on`/`=true`
@@ -1250,10 +1256,10 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // stays false; every MCP tool keeps its conservative read/concurrency
     // classification, byte-identical default).
     mcpToolAnnotations: parseBool(env["QUANTA_MCP_TOOL_ANNOTATIONS"]),
-    progressUpdate: env["QUANTA_PROGRESS_UPDATE"] === "1",
+    progressUpdate: gateOn(env, "QUANTA_PROGRESS_UPDATE"),
     // #8 — strict `=== "1"` opt-in. Default false ⇒ no mid-turn capture facade.
-    midTurnCapture: env["QUANTA_MIDTURN_CAPTURE"] === "1",
-    ptyAttach: env["QUANTA_PTY_ATTACH"] === "1",
+    midTurnCapture: gateOn(env, "QUANTA_MIDTURN_CAPTURE"),
+    ptyAttach: gateOn(env, "QUANTA_PTY_ATTACH"),
     // D3 — PTY env-inherit escape hatch. Default false ⇒ scrubbed (secure).
     // Truthy (`1`/`true`/`on`) ⇒ full parent-env inherit (interactive opt-out).
     ptyInheritEnv: parseBool(env["QUANTA_PTY_INHERIT_ENV"]),
@@ -1262,21 +1268,21 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     brief: parseBool(env["QUANTA_BRIEF"]),
     // §5 prompt-directive bundle — strict `=== "1"` opt-in per directive. Each
     // default false ⇒ `selectActiveDirectives` emits nothing ⇒ byte-identical.
-    directiveAutonomous: env["QUANTA_DIRECTIVE_AUTONOMOUS"] === "1",
-    directiveReadComplete: env["QUANTA_DIRECTIVE_READ_COMPLETE"] === "1",
-    directiveProgress: env["QUANTA_DIRECTIVE_PROGRESS"] === "1",
-    directiveMemoryVerify: env["QUANTA_DIRECTIVE_MEMORY_VERIFY"] === "1",
-    directiveThinkFreq: env["QUANTA_DIRECTIVE_THINK_FREQ"] === "1",
-    directiveAntiPlatitude: env["QUANTA_DIRECTIVE_ANTI_PLATITUDE"] === "1",
-    directiveParallelTools: env["QUANTA_DIRECTIVE_PARALLEL_TOOLS"] === "1",
+    directiveAutonomous: gateOn(env, "QUANTA_DIRECTIVE_AUTONOMOUS"),
+    directiveReadComplete: gateOn(env, "QUANTA_DIRECTIVE_READ_COMPLETE"),
+    directiveProgress: gateOn(env, "QUANTA_DIRECTIVE_PROGRESS"),
+    directiveMemoryVerify: gateOn(env, "QUANTA_DIRECTIVE_MEMORY_VERIFY"),
+    directiveThinkFreq: gateOn(env, "QUANTA_DIRECTIVE_THINK_FREQ"),
+    directiveAntiPlatitude: gateOn(env, "QUANTA_DIRECTIVE_ANTI_PLATITUDE"),
+    directiveParallelTools: gateOn(env, "QUANTA_DIRECTIVE_PARALLEL_TOOLS"),
     // Advisor timing-rail directive (RFC jun-6 §5.2) — strict `=== "1"` opt-in.
-    directiveAdvisorRail: env["QUANTA_ADVISOR_RAIL"] === "1",
+    directiveAdvisorRail: gateOn(env, "QUANTA_ADVISOR_RAIL"),
     // adaptive-thinking — strict `=== "1"` opt-in. Default false ⇒ the producer
     // emits manual `{type:"enabled",budget_tokens}` for every model (byte-identical).
-    adaptiveThinking: env["QUANTA_ADAPTIVE_THINKING"] === "1",
+    adaptiveThinking: gateOn(env, "QUANTA_ADAPTIVE_THINKING"),
     // RFC jun-6 §5.1 — advisor full-history forward (strict `=== "1"` opt-in).
-    advisorForwardHistory: env["QUANTA_ADVISOR_FORWARD_HISTORY"] === "1",
-    fsJailDisabled: parseBool(env["QUANTA_FS_JAIL"] === "off" ? "1" : undefined),
+    advisorForwardHistory: gateOn(env, "QUANTA_ADVISOR_FORWARD_HISTORY"),
+    fsJailDisabled: gateDisabled(env, "QUANTA_FS_JAIL"),
     capEnforce: parseBool(env["QUANTA_CAP_ENFORCE"]),
     gitSha: stringOrUndef(env["QUANTA_GIT_SHA"]),
     pricingVersion: stringOrUndef(env["QUANTA_PRICING_VERSION"]),
@@ -1333,13 +1339,13 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     deferredCap: parsePositiveInt(env["QUANTA_DEFERRED_CAP"], "QUANTA_DEFERRED_CAP"),
     // H16 — strict `=== "1"` opt-in (matches the slice gate; default-OFF).
     // OFF ⇒ no CrossSessionDreamTrigger constructed, byte-identical.
-    autoDream: env["QUANTA_AUTO_DREAM"] === "1",
+    autoDream: gateOn(env, "QUANTA_AUTO_DREAM"),
     autoDreamSessions: parsePositiveInt(
       env["QUANTA_AUTO_DREAM_SESSIONS"],
       "QUANTA_AUTO_DREAM_SESSIONS",
     ),
     autoDreamHours: parsePositiveNumber(env["QUANTA_AUTO_DREAM_HOURS"], "QUANTA_AUTO_DREAM_HOURS"),
-    logRateLimitDisabled: env["QUANTA_LOG_RATE_LIMIT"] === "off",
+    logRateLimitDisabled: gateDisabled(env, "QUANTA_LOG_RATE_LIMIT"),
     // H7 — rotating cloud credentials. All default-UNSET ⇒ no helper, no
     // pre-call refresh, byte-identical provider paths.
     apiKeyHelper: stringOrUndef(env["QUANTA_API_KEY_HELPER"]),
@@ -1356,14 +1362,14 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // H7 — explicit fail-closed trust attestation for the credential-helper
     // shell. Strict `=== "1"`: only an explicit opt-in authorizes arbitrary
     // command execution; unset / anything else ⇒ untrusted (no shell).
-    llmCredentialTrusted: env["QUANTA_LLM_CREDENTIAL_TRUSTED"] === "1",
+    llmCredentialTrusted: gateOn(env, "QUANTA_LLM_CREDENTIAL_TRUSTED"),
     // Prompt-cache 1h TTL — only the literal "1h" opts in; any other value
     // (incl. absent) ⇒ "5m" (byte-identical fixed-5m cache_control). The
     // factory additionally gates "1h" behind a model allowlist.
     cacheTtl: env["QUANTA_PROMPT_CACHE_TTL"] === "1h" ? "1h" : "5m",
     // OAuth revoke-on-logout — strict `=== "1"` opt-in. Default false ⇒ logout
     // only clears local state (byte-identical, no network revoke call).
-    oauthRevokeOnLogout: env["QUANTA_OAUTH_REVOKE_ON_LOGOUT"] === "1",
+    oauthRevokeOnLogout: gateOn(env, "QUANTA_OAUTH_REVOKE_ON_LOGOUT"),
     // jun-6 (ADR-0481) — DEFAULT-ON (the only default-true knob). Toggles only
     // whether `.ipynb` TEXTUAL outputs are appended; cell-source render + base64
     // stripping are unconditional. NO effect on non-`.ipynb` reads (extension
@@ -1371,7 +1377,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     ipynbIncludeOutputs: parseBoolDefaultTrue(env["QUANTA_IPYNB_OUTPUTS"]),
     // jun-6 BYOK — strict `=== "1"` opt-in. Default false ⇒ the legacy LLM-build
     // seam passes `source: undefined` (byte-identical key resolution).
-    apiKeyHelperLegacyVendor: env["QUANTA_API_KEY_HELPER_LEGACY_VENDOR"] === "1",
+    apiKeyHelperLegacyVendor: gateOn(env, "QUANTA_API_KEY_HELPER_LEGACY_VENDOR"),
     // jun-6 AI session title — boolean knob vocabulary (1/true/on). Default false
     // ⇒ no autoTitlePort built, loop branch dead (byte-identical). Both this and
     // sessionTitleModel must be present for the feature to arm.
@@ -1379,7 +1385,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     sessionTitleModel: stringOrUndef(env["QUANTA_SESSION_TITLE_MODEL"]),
     // jun-6 tool-interrupt — strict `=== "1"` opt-in. Default false ⇒ dispatch
     // threads the raw signal, no criticalSection (block behaves like cancel).
-    toolInterruptBlock: env["QUANTA_TOOL_INTERRUPT_BLOCK"] === "1",
+    toolInterruptBlock: gateOn(env, "QUANTA_TOOL_INTERRUPT_BLOCK"),
     // jun-6 — watchdog cap (ms). Absent / invalid ⇒ DEFAULT_CRITICAL_SECTION_MAX_MS.
     criticalSectionMaxMs:
       parsePositiveInt(env["QUANTA_CRITICAL_SECTION_MAX_MS"], "QUANTA_CRITICAL_SECTION_MAX_MS") ??
@@ -1387,14 +1393,14 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // jun-6 permission_request hook — strict `=== "1"` opt-in kill-switch.
     // Default false ⇒ the gate does NOT emit permission_request (byte-identical;
     // falls through to the policy stack). Extra guard atop HookBus presence.
-    permissionHook: env["QUANTA_PERMISSION_HOOK"] === "1",
+    permissionHook: gateOn(env, "QUANTA_PERMISSION_HOOK"),
     // jun-6 exfil-rail (b) — strict `=== "1"` opt-in. Default false ⇒ no glob
     // check threaded onto ToolContext (write/edit accept a glob path as a
     // literal filename, byte-identical).
-    globWriteGuard: env["QUANTA_GLOB_WRITE_GUARD"] === "1",
+    globWriteGuard: gateOn(env, "QUANTA_GLOB_WRITE_GUARD"),
     // jun-6 exfil-rail (a) — strict `=== "1"` opt-in. Default false ⇒ no budget
     // port wired (byte-identical). Also requires a configured cap below.
-    writeBudget: env["QUANTA_WRITE_BUDGET"] === "1",
+    writeBudget: gateOn(env, "QUANTA_WRITE_BUDGET"),
     // jun-6 exfil-rail (a) — the CONFIGURABLE cap N (positive integer). No
     // hardcoded default (no-heuristics rule): absent/invalid ⇒ undefined ⇒ the
     // budget stays inert even when QUANTA_WRITE_BUDGET=1.
@@ -1402,7 +1408,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // jun-6 exfil-rail (c) — strict `=== "1"` opt-in. Default false ⇒ detector
     // never called + scouting taxonomy line omitted (byte-identical). Requires
     // a configured K below to fire.
-    exfilScouting: env["QUANTA_EXFIL_SCOUTING"] === "1",
+    exfilScouting: gateOn(env, "QUANTA_EXFIL_SCOUTING"),
     // jun-6 exfil-rail (c) — the CONFIGURABLE threshold K (positive integer). No
     // hardcoded default (no-heuristics rule): absent/invalid ⇒ undefined ⇒ the
     // detector stays inert even when QUANTA_EXFIL_SCOUTING=1.
@@ -1432,10 +1438,10 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // syntax-aware-chunking (RFC jun-6) — strict `=== "1"` opt-in. Default
     // false ⇒ indexer uses the line-window chunkFile (byte-identical), parser
     // never constructed, no WASM.
-    syntaxChunk: env["QUANTA_SYNTAX_CHUNK"] === "1",
+    syntaxChunk: gateOn(env, "QUANTA_SYNTAX_CHUNK"),
     // read-outline (RFC jun-6) — strict `=== "1"` opt-in. Default false ⇒
     // `read outline:true` returns the line-range fallback, parser never built.
-    readOutline: env["QUANTA_READ_OUTLINE"] === "1",
+    readOutline: gateOn(env, "QUANTA_READ_OUTLINE"),
     // Grammar-wasm dir override. Absent ⇒ resolve tree-sitter-wasms/out.
     treeSitterDir: stringOrUndef(env["QUANTA_TREE_SITTER_DIR"]),
   })

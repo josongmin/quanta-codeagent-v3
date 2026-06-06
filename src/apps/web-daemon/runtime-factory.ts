@@ -9,6 +9,7 @@
  * as a long-running session over the WS transport instead of stdin.
  */
 
+import { gateOn } from "@/shared"
 import type { AgentConfig } from "@/agent"
 import { buildSystemPrompt, HookBus } from "@/agent"
 import type { ApprovalStateMachinePort } from "@/agent/approval-state-machine"
@@ -141,7 +142,7 @@ const wireSessionObservability = (
   env: Record<string, string | undefined>,
   cwd: string,
 ): { readonly handle: ObservabilityWireHandle; readonly bus: HookBus | undefined } => {
-  if (env.QUANTA_OBSERVABILITY !== "on") {
+  if (!gateOn(env, "QUANTA_OBSERVABILITY")) {
     return { handle: wireObservability(), bus: undefined }
   }
   const bus = new HookBus()

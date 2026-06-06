@@ -129,11 +129,11 @@ describe("jun-04 collective default-OFF — runtime-config gates", () => {
     expect(wired).toEqual([])
   })
 
-  test("each gate flips ON only for the EXACT `1` value (no loose truthiness)", () => {
-    // Sample three representative strict-`1` gates: a hostile `true`/`on`/`yes`
-    // must NOT enable them (the strict-`1` posture is what makes default-OFF a
-    // hard guarantee, not a coincidence).
-    for (const bad of ["true", "on", "yes", "0", "TRUE", " 1"]) {
+  test("each gate stays OFF for falsy/garbage and flips ON for any truthy token", () => {
+    // Post-unification (`@/shared#gateOn`) the gates share ONE vocabulary: a
+    // falsy token or garbage keeps them OFF (the default-OFF guarantee — unset
+    // is still OFF), while any recognized truthy spelling enables them.
+    for (const bad of ["0", "false", "off", "no", "", "garbage", "2"]) {
       process.env.QUANTA_PASSIVE_VCS = bad
       process.env.QUANTA_IMAGE_GEN = bad
       process.env.QUANTA_BG_COMPACTION = bad
@@ -146,11 +146,14 @@ describe("jun-04 collective default-OFF — runtime-config gates", () => {
       delete process.env.QUANTA_IMAGE_GEN
       delete process.env.QUANTA_BG_COMPACTION
     }
-    // And the exact `1` DOES enable (proves the gate is live, not stuck-off).
-    process.env.QUANTA_PASSIVE_VCS = "1"
-    __resetRuntimeConfig()
-    expect(runtimeConfig().passiveVcs).toBe(true)
-    delete process.env.QUANTA_PASSIVE_VCS
+    // Every truthy token enables (proves the gate is live AND uniform: `=1` and
+    // `=on` both work, case-insensitive and whitespace-trimmed).
+    for (const good of ["1", "on", "true", "yes", "TRUE", " 1 "]) {
+      process.env.QUANTA_PASSIVE_VCS = good
+      __resetRuntimeConfig()
+      expect(runtimeConfig().passiveVcs).toBe(true)
+      delete process.env.QUANTA_PASSIVE_VCS
+    }
   })
 })
 

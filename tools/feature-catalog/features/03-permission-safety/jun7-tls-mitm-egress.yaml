@@ -38,15 +38,25 @@ purpose: |
   handshake/mint/scan 에러 ⇒ deny(권장) 또는 opaque-tunnel(가시 마커). watchdog
   (handshakeTimeoutMs) 가 stuck handshake 를 hard deny 로 전환 — 절대 unscanned 통과 안 함.
 
-  ⚠️ RUNTIME(정직): server-side TLS 종단(CONNECT-upgraded 소켓)은 node:tls 에서 동작,
-  Bun 1.3.x 는 아직 못 함(handshake stall). watchdog 이 stall 을 fail-closed deny 로
-  바꿔 안전은 유지. positive(secret-caught+forward) 증명은 Node 에서. prod 은 Bun 이라
-  실제 MITM 기능은 node:tls 런타임에서만 — Bun 에선 fail-closed.
+  ✅ RUNTIME (RESOLVED jun-07): TLS 종단 메커니즘은 `MitmTlsChannel` seam 으로
+  capability-detect — Node 는 node:tls server-wrap, Bun 은 one-shot `Bun.listen({tls})`
+  terminator + raw CONNECT 소켓 byte-pipe 브리지(Bun 은 server-wrap 한 raw 소켓에
+  ClientHello 미전달이라 node:tls 경로 stall → 브리지로 우회). 복호 plaintext 는 수동
+  HTTP 파서(`parseHttpRequestBuffer`)로 파싱(Bun 의 http.Server.emit("connection") 은
+  파싱 미구동, 스파이크로 확인). secret-egress 스캔/upstream-forward/fail-closed/ephemeral-CA
+  /watchdog 는 두 transport 가 공유 — 보안모델 불변. HTTPS-MITM 이 이제 **Bun(prod 런타임)**
+  포함 BOTH 에서 기능. 스파이크(Bun 1.3.14): Bun.listen TLS 가 minted leaf 로 종단 +
+  CA-only-trust 클라가 handshake 완료(authorized:true), 브리지가 복호 바이트 surface,
+  응답 재암호 라운드트립 — 전부 실증.
 evidence:
   code:
     - src/runtime/network-proxy/mitm-cert.ts
     - src/runtime/network-proxy/mitm.ts
     - src/runtime/network-proxy/mitm-gate.ts
+    - src/runtime/network-proxy/mitm-channel.ts
+    - src/runtime/network-proxy/mitm-channel-node.ts
+    - src/runtime/network-proxy/mitm-channel-bun.ts
+    - src/runtime/network-proxy/read-capped-body.ts
     - src/runtime/network-proxy/loopback-proxy.ts
     - src/runtime/network-proxy/secret-egress.ts
     - src/runtime/network-proxy/types.ts
@@ -58,6 +68,8 @@ evidence:
       - tests/unit/tls-mitm-cert.test.ts
       - tests/unit/tls-mitm-gate.test.ts
       - tests/unit/tls-mitm-scan-integration.test.ts
+      - tests/unit/tls-mitm-bun-bridge-parse.test.ts
+      - tests/unit/tls-mitm-bun-bridge-hellgate.test.ts
     integration:
       - tests/integration/tls-mitm-egress-e2e.test.ts
     contract: []
@@ -79,14 +91,20 @@ notes: |
   설계/증명: RFC `docs/plans/jun-6-tls-mitm-egress.md` (✅ IMPLEMENTED jun-07). 갭 cross-link:
   `docs/plans/jun-6-exfil-egress-rails.md` (B) HTTPS-opaque 갭이 본 RFC 로 CLOSED.
   배선: `onConnect` 가 ALLOWED 이고 `config.mitm` 존재 시 `mitmTerminate` 분기 —
-  leaf mint → server-side TLSSocket 종단 → `parseTlsRequest`(one-shot http 파서로 1 req
-  복호 파싱) → `decideEgressScan`(plaintext 와 SAME 코어) → deny(TLS 위 403)/redact(마스킹
-  후 upstream)/clean → `mitmForwardUpstream`(node:https, rejectUnauthorized:true, SNI;
-  upstreamTlsExtra 는 test-only 추가 trust root, security 필드 뒤에 spread 라 절대 약화 불가).
-  marker: scanned-clean|denied|redacted|body-cap-unscanned(MITM 경로) / connect-tunnel-unscanned(OFF
+  leaf mint → `openMitmChannel`(capability-detect: Bun bridge / node:tls wrap) → channel
+  종단 → `channel.parse`(1 req 복호 파싱; Node 는 one-shot http 파서, Bun 은 수동 파서) →
+  `decideEgressScan`(plaintext 와 SAME 코어) → deny(TLS 위 403)/redact(마스킹 후 upstream)/
+  clean → `mitmForwardUpstream`(node:https, rejectUnauthorized:true, SNI; upstreamTlsExtra 는
+  test-only 추가 trust root, security 필드 뒤에 spread 라 절대 약화 불가). watchdog 은
+  `Promise.race(channel.parse, timeout)` 로 stuck handshake 를 hard deny 전환.
+  marker: scanned-clean|denied|redacted(MITM 경로) / connect-tunnel-unscanned(OFF
   또는 opaque-tunnel fallback). cert-gen: 순수 node:crypto DER 인코더 + ECDSA-P256 sign,
   X509Certificate 가 parse/verify/chain 확인(unit). hellgate: cert-gen(self-sign/chain/SAN/
   host-mismatch/cache/determinism/clock), gate(이중게이트 ON, switch-alone/ack-alone/typo/
   truthy-not-1/empty OFF), scan-integration(clean/deny-body/deny-header/redact/scanner-only→deny),
-  REAL-TLS e2e(node: secret HTTPS body→403 never-reaches-origin, legit→200 no-FP, redact origin-sees-mask,
-  bad-upstream-cert→502; all-runtimes: stuck-handshake→deny watchdog, MITM-OFF→raw-tunnel byte-identity).
+  bun-bridge-parse(framing+fail-closed: over-cap/chunked/malformed/header-DoS),
+  bun-bridge-hellgate(GAP-CLOSED ON BUN: real-content-scan deny vs watchdog 구별; DI hostile
+  channel parse-never-resolves→watchdog-deny, parse→null→deny, opaque-tunnel→visible-marker),
+  REAL-TLS e2e(ALL RUNTIMES incl Bun: secret HTTPS body→403 never-reaches-origin, legit→200 no-FP,
+  redact origin-sees-mask, bad-upstream-cert→502, stuck-handshake→deny watchdog, MITM-OFF→raw-tunnel
+  byte-identity).

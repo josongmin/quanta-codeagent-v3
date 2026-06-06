@@ -185,10 +185,12 @@ describe("selectIndexEmbedder — embedder selection", () => {
 // ──────────────────────────────────────────────────────────────────────────
 
 describe("isPersistOn — knob gate", () => {
-  test("B0. default off", () => {
+  test("B0. default off; any truthy token (1/on/…) enables (canonical gate vocab)", () => {
     expect(isPersistOn({})).toBe(false)
     expect(isPersistOn({ QUANTA_INDEX_PERSIST: "off" })).toBe(false)
-    expect(isPersistOn({ QUANTA_INDEX_PERSIST: "1" })).toBe(false)
+    expect(isPersistOn({ QUANTA_INDEX_PERSIST: "0" })).toBe(false)
+    // Post-unification: `=1` enables just like `=on` (no more strict-"on" footgun).
+    expect(isPersistOn({ QUANTA_INDEX_PERSIST: "1" })).toBe(true)
     expect(isPersistOn({ QUANTA_INDEX_PERSIST: "on" })).toBe(true)
   })
 })

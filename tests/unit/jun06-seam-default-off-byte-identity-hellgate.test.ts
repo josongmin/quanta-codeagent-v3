@@ -110,26 +110,29 @@ describe("jun-6 seam default-OFF — runtime-config gates", () => {
     expect(runtimeConfig().sessionTitleModel).toBeUndefined()
   })
 
-  test("each STRICT-`1` seam gate flips ON ONLY for the exact literal `1` (no loose truthiness)", () => {
+  test("each seam gate stays OFF for falsy/garbage, flips ON for any truthy token", () => {
     for (const { field, env } of STRICT_ONE_GATES) {
-      // Hostile values must NOT enable a strict-`1` gate.
-      for (const bad of ["true", "on", "yes", "0", "TRUE", " 1", "1 ", ""]) {
+      // Falsy tokens / garbage must NOT enable the gate (default-OFF guarantee).
+      for (const bad of ["0", "false", "off", "no", "", "garbage", "2"]) {
         process.env[env] = bad
         __resetRuntimeConfig()
         const c = runtimeConfig()
         if (c[field] !== false) {
-          throw new Error(`${field} armed on hostile value ${JSON.stringify(bad)} (env ${env})`)
+          throw new Error(`${field} armed on falsy/garbage value ${JSON.stringify(bad)} (env ${env})`)
         }
         delete process.env[env]
       }
-      // The exact literal `1` DOES enable (proves the gate is live, not stuck-off).
-      process.env[env] = "1"
-      __resetRuntimeConfig()
-      const c = runtimeConfig()
-      if (c[field] !== true) {
-        throw new Error(`${field} did NOT arm on "1" (env ${env}) — gate is stuck off`)
+      // The canonical truthy vocabulary (`gateOn`) ALL enables — `=1` and `=on`
+      // alike, case-insensitive and whitespace-trimmed (the consistency win).
+      for (const good of ["1", "on", "true", "yes", "TRUE", " 1 "]) {
+        process.env[env] = good
+        __resetRuntimeConfig()
+        const c = runtimeConfig()
+        if (c[field] !== true) {
+          throw new Error(`${field} did NOT arm on truthy ${JSON.stringify(good)} (env ${env})`)
+        }
+        delete process.env[env]
       }
-      delete process.env[env]
     }
     __resetRuntimeConfig()
     expect(true).toBe(true)

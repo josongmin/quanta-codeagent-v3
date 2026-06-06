@@ -4,6 +4,7 @@ import type { WorkingMemory } from "@/memory"
 import { errMessage, runtimeConfig } from "@/shared"
 import type { TaskBudget } from "../budget"
 import type { BgSummaryPayload } from "../compaction"
+import { markBaselineStaleIfShrunk } from "../compaction"
 import type { BackgroundSummarizationController } from "../compaction/index"
 import type { BreakerVerdict, CompactionBreaker } from "../compaction-breaker"
 import type { ConversationSummaryArchive } from "../conversation-summary-archive"
@@ -217,13 +218,24 @@ export const prepareTurnContext = async (
   // record `sendCount` = the wm length of the prompt about to be sent, so the
   // usage capture can pair it with the provider's authoritative input count.
   tokenBaselineBox:
-    | { current?: import("../compaction").TokenBaseline; sendCount?: number }
+    | { current?: import("../compaction").TokenBaseline | undefined; sendCount?: number }
     | undefined,
 ): Promise<{
   readonly ctx: ReturnType<typeof buildTurnContext>
   readonly breakerVerdict: BreakerVerdict
 }> => {
   const memoryContext = await resolveMemoryContext(config, wm, recorder, citations)
+  // D5 (jun-7) — capture the pre-compaction length. If `maybeCompact` SHRINKS the
+  // transcript (proactive summarize / microcompact replaces the prefix), any
+  // `tokenBaseline.current` measured against the OLD prefix is now STALE: its
+  // `measuredAtMessageCount` index points at content that was replaced, and once
+  // the transcript regrows past that index the `> messages.length` fail-safe no
+  // longer fires — `triggerTokenCount` would then return a huge stale value and
+  // force a premature compaction on a tiny transcript. So we INVALIDATE the
+  // baseline whenever the transcript shrinks; a fresh exact usage re-establishes
+  // it against the new prefix. (This turn's `maybeCompact` already consumed the
+  // still-valid `.current` above — the clear only affects subsequent turns.)
+  const lenBeforeCompact = wm.snapshot().length
   const breakerVerdict = await maybeCompact(
     config,
     staticSystemFor(config),
@@ -235,10 +247,15 @@ export const prepareTurnContext = async (
     resetEffortClassifier,
     tokenBaselineBox?.current,
   )
-  // Record the send-time wm length AFTER compaction settled — this is the base
-  // the NEXT turn's compaction will slice, and the count the usage capture pairs
-  // with the authoritative `inputTokens` for this prompt.
-  if (tokenBaselineBox !== undefined) tokenBaselineBox.sendCount = wm.snapshot().length
+  if (tokenBaselineBox !== undefined) {
+    // Invalidate a baseline whose measured prefix was just replaced by a
+    // shrinking compaction (proactive summarize / microcompact).
+    markBaselineStaleIfShrunk(tokenBaselineBox, lenBeforeCompact, wm.snapshot().length)
+    // Record the send-time wm length AFTER compaction settled — the base the NEXT
+    // turn's compaction will slice + the count the usage capture pairs with the
+    // authoritative `inputTokens` for this prompt.
+    tokenBaselineBox.sendCount = wm.snapshot().length
+  }
   const wsSnapshot = workingState?.snapshot()
   const contextEvents = resolveContextEventsForTurn(config)
   const mentionMessages = await resolveMentionInjectionMessages(config, wm)

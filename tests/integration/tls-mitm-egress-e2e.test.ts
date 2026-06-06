@@ -70,17 +70,20 @@ const egress = (over: Partial<SecretEgressConfig> = {}): SecretEgressConfig => (
 })
 
 /**
- * RUNTIME NOTE (honest): a full TLS-MITM requires the runtime to drive a
- * SERVER-side TLS handshake on a socket obtained from an HTTP `connect` event
- * (socket upgrade). node:tls does this; Bun (1.3.x) currently does NOT — the
- * ClientHello never reaches the wrapped server-side TLSSocket, so the handshake
- * stalls. The proxy's FAIL-CLOSED watchdog turns that stall into a hard DENY (a
- * secret can NEVER leak through a stuck handshake), but the POSITIVE proof
- * (secret scanned + legit body forwarded over real HTTPS) can only be exercised
- * on a runtime that supports the upgrade — so the positive cases run under Node,
- * the fail-closed case runs everywhere. See the RFC "runtime support" section.
+ * RUNTIME NOTE (jun-07 — RESOLVED): a full TLS-MITM requires the runtime to drive
+ * SERVER-side TLS termination on a socket obtained from an HTTP `connect` event
+ * (socket upgrade). node:tls does this by wrapping the raw socket; Bun (1.3.x)
+ * does NOT deliver the ClientHello to a server-wrapped raw socket. The proxy now
+ * CAPABILITY-DETECTS: on Bun it runs a one-shot `Bun.listen({ tls })` terminator
+ * on an ephemeral loopback port and BYTE-PIPES the raw CONNECT socket to it (the
+ * jun-07 spike proved this completes a real handshake on Bun 1.3.14 + surfaces
+ * the decrypted bytes); on Node it keeps the node:tls wrap. So the POSITIVE proof
+ * (secret scanned + legit body forwarded over real HTTPS) now runs on BOTH
+ * runtimes — including Bun, the production runtime. See the RFC "runtime support"
+ * section.
  */
 const IS_BUN = typeof (globalThis as { Bun?: unknown }).Bun !== "undefined"
+void IS_BUN // retained for the runtime-note context; positive cases now run on all runtimes
 
 /** Build a fresh MITM config with its OWN ephemeral CA. */
 const mitmConfig = (
@@ -176,84 +179,99 @@ const httpsThroughProxy = (
     ctrl.on("error", (e) => resolve({ status: 0, body: "", err: e.message }))
   })
 
-// The POSITIVE proof (full decrypt → scan → re-originate over real HTTPS) needs
-// a runtime that can drive server-side TLS on a CONNECT-upgraded socket. Bun
-// 1.3.x cannot (see RUNTIME NOTE) — those cases run on Node only.
-const describePositive = IS_BUN ? describe.skip : describe
+// The POSITIVE proof (full decrypt → scan → re-originate over real HTTPS) now
+// runs on BOTH runtimes: node:tls termination on Node, the Bun.listen terminator
+// bridge on Bun (jun-07). The label "[all runtimes]" reflects the closed gap.
+const describePositive = describe
 
-describePositive("TLS-MITM e2e — HTTPS body secret is now CAUGHT (gap closed) [node]", () => {
-  test("declared secret in an HTTPS POST body → 403 deny, never reaches origin", async () => {
-    received = []
-    const mitm = mitmConfig({ declared: [DECLARED] })
-    const proxy = new LoopbackEgressProxy(
-      { enabled: true, allowlist: [HOST], secretEgress: mitm.secretEgress, mitm },
-      {
-        dial: toOrigin(),
-        resolvePeerHost: publicPeer,
-        upstreamTlsExtra: () => ({ ca: upstreamCa.caCertPem() }),
-      },
-    )
-    const { port } = await proxy.listen()
-    try {
-      const res = await httpsThroughProxy(port, mitm.certAuthority.caCertPem(), `data=${DECLARED}`)
-      expect(res.status).toBe(403)
-      expect(res.body.includes(DECLARED)).toBe(false) // never echo the secret
-      expect(received).toHaveLength(0) // NEVER reached the real origin
-      expect(proxy.decisionLog().at(-1)?.secretScan).toBe("denied")
-    } finally {
-      await proxy.close()
-    }
-  })
+describePositive(
+  "TLS-MITM e2e — HTTPS body secret is now CAUGHT (gap closed) [all runtimes]",
+  () => {
+    test("declared secret in an HTTPS POST body → 403 deny, never reaches origin", async () => {
+      received = []
+      const mitm = mitmConfig({ declared: [DECLARED] })
+      const proxy = new LoopbackEgressProxy(
+        { enabled: true, allowlist: [HOST], secretEgress: mitm.secretEgress, mitm },
+        {
+          dial: toOrigin(),
+          resolvePeerHost: publicPeer,
+          upstreamTlsExtra: () => ({ ca: upstreamCa.caCertPem() }),
+        },
+      )
+      const { port } = await proxy.listen()
+      try {
+        const res = await httpsThroughProxy(
+          port,
+          mitm.certAuthority.caCertPem(),
+          `data=${DECLARED}`,
+        )
+        expect(res.status).toBe(403)
+        expect(res.body.includes(DECLARED)).toBe(false) // never echo the secret
+        expect(received).toHaveLength(0) // NEVER reached the real origin
+        expect(proxy.decisionLog().at(-1)?.secretScan).toBe("denied")
+      } finally {
+        await proxy.close()
+      }
+    })
 
-  test("a legit HTTPS body → 200, forwarded unchanged, logged scanned-clean (no FP)", async () => {
-    received = []
-    const mitm = mitmConfig({ declared: [DECLARED] })
-    const proxy = new LoopbackEgressProxy(
-      { enabled: true, allowlist: [HOST], secretEgress: mitm.secretEgress, mitm },
-      {
-        dial: toOrigin(),
-        resolvePeerHost: publicPeer,
-        upstreamTlsExtra: () => ({ ca: upstreamCa.caCertPem() }),
-      },
-    )
-    const { port } = await proxy.listen()
-    try {
-      const res = await httpsThroughProxy(port, mitm.certAuthority.caCertPem(), "hello=world&n=42")
-      expect(res.status).toBe(200)
-      expect(res.body).toBe("ORIGIN-OK")
-      expect(received[0]).toBe("hello=world&n=42")
-      expect(proxy.decisionLog().at(-1)?.secretScan).toBe("scanned-clean")
-    } finally {
-      await proxy.close()
-    }
-  })
+    test("a legit HTTPS body → 200, forwarded unchanged, logged scanned-clean (no FP)", async () => {
+      received = []
+      const mitm = mitmConfig({ declared: [DECLARED] })
+      const proxy = new LoopbackEgressProxy(
+        { enabled: true, allowlist: [HOST], secretEgress: mitm.secretEgress, mitm },
+        {
+          dial: toOrigin(),
+          resolvePeerHost: publicPeer,
+          upstreamTlsExtra: () => ({ ca: upstreamCa.caCertPem() }),
+        },
+      )
+      const { port } = await proxy.listen()
+      try {
+        const res = await httpsThroughProxy(
+          port,
+          mitm.certAuthority.caCertPem(),
+          "hello=world&n=42",
+        )
+        expect(res.status).toBe(200)
+        expect(res.body).toBe("ORIGIN-OK")
+        expect(received[0]).toBe("hello=world&n=42")
+        expect(proxy.decisionLog().at(-1)?.secretScan).toBe("scanned-clean")
+      } finally {
+        await proxy.close()
+      }
+    })
 
-  test("redact mode: the ORIGIN sees the MASK, the raw secret never leaves over HTTPS", async () => {
-    received = []
-    const mitm = mitmConfig({ declared: [DECLARED], mode: "redact" })
-    const proxy = new LoopbackEgressProxy(
-      { enabled: true, allowlist: [HOST], secretEgress: mitm.secretEgress, mitm },
-      {
-        dial: toOrigin(),
-        resolvePeerHost: publicPeer,
-        upstreamTlsExtra: () => ({ ca: upstreamCa.caCertPem() }),
-      },
-    )
-    const { port } = await proxy.listen()
-    try {
-      const res = await httpsThroughProxy(port, mitm.certAuthority.caCertPem(), `data=${DECLARED}`)
-      expect(res.status).toBe(200)
-      expect(received.length).toBe(1)
-      expect(received[0]?.includes(DECLARED)).toBe(false)
-      expect(received[0]).toContain("[REDACTED:secret-egress]")
-      expect(proxy.decisionLog().at(-1)?.secretScan).toBe("redacted")
-    } finally {
-      await proxy.close()
-    }
-  })
-})
+    test("redact mode: the ORIGIN sees the MASK, the raw secret never leaves over HTTPS", async () => {
+      received = []
+      const mitm = mitmConfig({ declared: [DECLARED], mode: "redact" })
+      const proxy = new LoopbackEgressProxy(
+        { enabled: true, allowlist: [HOST], secretEgress: mitm.secretEgress, mitm },
+        {
+          dial: toOrigin(),
+          resolvePeerHost: publicPeer,
+          upstreamTlsExtra: () => ({ ca: upstreamCa.caCertPem() }),
+        },
+      )
+      const { port } = await proxy.listen()
+      try {
+        const res = await httpsThroughProxy(
+          port,
+          mitm.certAuthority.caCertPem(),
+          `data=${DECLARED}`,
+        )
+        expect(res.status).toBe(200)
+        expect(received.length).toBe(1)
+        expect(received[0]?.includes(DECLARED)).toBe(false)
+        expect(received[0]).toContain("[REDACTED:secret-egress]")
+        expect(proxy.decisionLog().at(-1)?.secretScan).toBe("redacted")
+      } finally {
+        await proxy.close()
+      }
+    })
+  },
+)
 
-describePositive("TLS-MITM e2e — UPSTREAM cert is STILL validated [node]", () => {
+describePositive("TLS-MITM e2e — UPSTREAM cert is STILL validated [all runtimes]", () => {
   test("an upstream cert NOT covered by the trusted CA ⇒ 502 (MITM does not blindly accept)", async () => {
     received = []
     const mitm = mitmConfig({ declared: [DECLARED] })
@@ -315,7 +333,7 @@ describe("TLS-MITM e2e — FAIL-CLOSED on a stuck/unsupported handshake (all run
 })
 
 describePositive(
-  "TLS-MITM e2e — over-cap body is FAIL-CLOSED (streaming-cap DoS guard) [node]",
+  "TLS-MITM e2e — over-cap body is FAIL-CLOSED (streaming-cap DoS guard) [all runtimes]",
   () => {
     // HELLGATE (cycle-2 audit): the MITM parse path previously buffered the ENTIRE
     // decrypted HTTPS body into memory BEFORE consulting `maxBodyBytes` — a huge

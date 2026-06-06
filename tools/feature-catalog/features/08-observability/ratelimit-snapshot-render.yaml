@@ -14,7 +14,7 @@ owners: ["@songmin"]
 labels: ["surface:cli", "observability-primitive", "default-off"]
 depends_on: [context-usage-metrics]
 config_refs:
-  env: ["QUANTA_RATELIMIT_NOTICE"]
+  env: ["QUANTA_RATELIMIT_NOTICE", "QUANTA_RATELIMIT_PROACTIVE"]
 purpose: |
   jun-6 account-ratelimit-snapshot 슬라이스(src/llm/ratelimit-snapshot/: parse.ts·notice.ts·
   policy.ts·store.ts)는 provider의 LIVE quota meter(anthropic-ratelimit-* / x-ratelimit-*)를
@@ -56,4 +56,4 @@ evidence:
     contract: []
 knobs: [ratelimit-notice]
 deliberate_hold: null
-notes: 'Negative invariants: (a) 새 percent/threshold 도입 0 — surface 결정은 오직 슬라이스가 계산한 empty-window(`remaining <= 0`) 신호(policy.ts) 재사용, "approaching at 80%" 류 quanta-invented 임계 없음. (b) recorder/budget 미오염 — `ratelimit_snapshot`은 output_progress와 동급 transient·non-accounting 신호로 jsonl-recorder도 skip. (c) stdout 라인-모니터는 영구 빈 case(라인 폭주 방지) — 표시는 in-place status-bar transient만. (d) header VALUE string(org-id 유출 위험) 절대 미전달 — notice는 numbers + type tag only. (e) DEFAULT-OFF: spinner와 달리 unset도 OFF(operator opt-in).'
+notes: 'Negative invariants: (a) 새 percent/threshold 도입 0 — surface 결정은 오직 슬라이스가 계산한 empty-window(`remaining <= 0`) 신호(policy.ts) 재사용, "approaching at 80%" 류 quanta-invented 임계 없음. (b) recorder/budget 미오염 — `ratelimit_snapshot`은 output_progress와 동급 transient·non-accounting 신호로 jsonl-recorder도 skip. (c) stdout 라인-모니터는 영구 빈 case(라인 폭주 방지) — 표시는 in-place status-bar transient만. (d) header VALUE string(org-id 유출 위험) 절대 미전달 — notice는 numbers + type tag only. (e) DEFAULT-OFF: spinner와 달리 unset도 OFF(operator opt-in). (f) ⚠️ 의존성(F3): `ratelimit_snapshot` 이벤트의 유일 emitter가 `QUANTA_RATELIMIT_PROACTIVE=1`(stream-consume.ts proactive-backoff 경로)에 게이트돼 있어 `QUANTA_RATELIMIT_NOTICE=1`만으로는 render port만 설치되고 이벤트가 0 → 무페인트. 두 노브 모두 ON이어야 표시됨. snapshot capture를 proactive-delay에서 분리하는 것은 tracked follow-up(hot·동시편집 loop 파일이라 보류).'

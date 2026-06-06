@@ -19,7 +19,7 @@ import type { Server, ServerWebSocket } from "bun"
 import type { ContextUsageBreakdown } from "@/agent/context/usage-breakdown"
 import { type SessionTransport, wrapWebSocketLikeAsSessionTransport } from "@/ipc/session"
 import type { RuntimeSession } from "@/sdk/runtime"
-import { errMessage, logger } from "@/shared"
+import { errMessage, gateDisabled, logger } from "@/shared"
 import { handleAuthLoginStart, handleAuthLogout, handleAuthStatus } from "./auth-routes"
 import { type CanvasEmitterHandle, createCanvasEmitter } from "./canvas-emitter"
 import {
@@ -574,7 +574,7 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
   // SQLite-backed thread persistence — append every SessionEvent on the
   // shared session to `~/.quanta/web-daemon/threads.db` (override path
   // via `QUANTA_WEB_DB_DIR`). Disable by setting `QUANTA_WEB_DB=off`.
-  const threadStore = process.env.QUANTA_WEB_DB === "off" ? null : openThreadStore()
+  const threadStore = gateDisabled(process.env, "QUANTA_WEB_DB") ? null : openThreadStore()
   let unsubPersist: (() => void) | null = null
   if (threadStore !== null) {
     threadStore.upsertThread({ id: sharedSession.sessionId })

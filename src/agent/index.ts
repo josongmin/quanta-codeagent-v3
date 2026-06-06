@@ -57,6 +57,7 @@ export {
   compactIfNeeded,
   estimateTokens,
   findBoundary,
+  markBaselineStaleIfShrunk,
   type TokenBaseline,
   triggerTokenCount,
 } from "./compaction"

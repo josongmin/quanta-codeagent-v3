@@ -3,11 +3,12 @@
 > **Status: ✅ IMPLEMENTED (jun-07)** — full in-process TLS-MITM (ephemeral CA,
 > per-host leaf mint, decrypt → reuse the existing secret-egress scan → re-encrypt
 > upstream) with **no new dependency** (pure `node:crypto` cert-gen). Default-OFF +
-> operator-explicit-opt-in. **Runtime caveat (honest):** the server-side TLS
-> termination on a `CONNECT`-upgraded socket works on **node:tls**; **Bun 1.3.x**
-> cannot yet drive it (it stalls the handshake) — the **fail-closed watchdog turns
-> that stall into a hard DENY** so a secret can NEVER leak through a stuck handshake,
-> and the positive (secret-caught + forward) proof runs under Node. See §8.
+> operator-explicit-opt-in. **✅ RESOLVED (jun-07): Bun.listen TLS-terminator bridge
+> — HTTPS-MITM now functional on Bun** (the production runtime). The TLS-termination
+> mechanism is now CAPABILITY-DETECTED behind a `MitmTlsChannel` seam: node:tls on
+> Node, a one-shot `Bun.listen({ tls })` terminator + byte-pipe on Bun. The
+> fail-closed watchdog + ephemeral-CA + upstream-`rejectUnauthorized` security model
+> are unchanged and shared by both transports. See §8.
 > Phase-2 follow-up to `jun-6-exfil-egress-rails.md` (B).
 > Date: 2026-06-07
 
@@ -155,22 +156,53 @@ determinism and it lives inside node:crypto. Every INJECTION-CONTROLLED field �
 serial, subject, SAN, validity, public key — is byte-stable, which the unit test
 pins.)
 
-## 8. Runtime support (honest)
+## 8. Runtime support (✅ RESOLVED jun-07 — functional on BOTH runtimes)
 
-A full TLS-MITM needs the runtime to drive a **server-side** TLS handshake on a
-socket obtained from an HTTP `connect` event (a socket upgrade):
+A full TLS-MITM needs the runtime to drive **server-side** TLS termination on a
+socket obtained from an HTTP `connect` event (a socket upgrade). The mechanism is
+now CAPABILITY-DETECTED behind a `MitmTlsChannel` seam (`mitm-channel.ts`), so the
+proxy's scan + upstream-forward logic is transport-agnostic and the security model
+is defined ONCE:
 
-- **node:tls** — works. The full positive flow (secret in an HTTPS body → caught
-  + denied; legit body → forwarded; redact masks the body; bad upstream cert →
-  502) is proven under Node.
-- **Bun 1.3.x** — does NOT yet drive it: the ClientHello does not reach the
-  wrapped server-side `TLSSocket`, so the handshake stalls. **This is a runtime
-  limitation, not a missing dep and not a design flaw** — the same code is correct
-  under Node. The **fail-closed watchdog** (§6) converts the stall into a hard
-  DENY, so on Bun the rail is *safe but not yet functional* (it denies MITM'd
-  HTTPS rather than scanning it). Production runs on Bun today, so the practical
-  posture is: **enable MITM only on a node:tls runtime** until Bun supports the
-  upgrade; on Bun it fails closed.
+- **node:tls** (`mitm-channel-node.ts`) — works. Wrap the raw socket in a
+  server-side `TLSSocket`; Node delivers the ClientHello to a server-wrapped
+  existing socket. The full positive flow (secret caught + denied; legit body
+  forwarded; redact masks the body; bad upstream cert → 502) is proven under Node.
+- **Bun 1.3.x** (`mitm-channel-bun.ts`) — **now FUNCTIONAL via the Bun.listen
+  TLS-terminator bridge.** Bun does NOT deliver the ClientHello to a server-wrapped
+  raw socket (the original node:tls path stalls there), so instead we:
+  1. mint the leaf for `host` with the SAME ephemeral CA,
+  2. start a **one-shot `Bun.listen({ tls:{ cert, key } })` terminator** on an
+     ephemeral `127.0.0.1:0` loopback port (Bun-native TLS server — terminates
+     fine),
+  3. **byte-pipe** the raw CONNECT socket to the terminator over a plain
+     `net.connect`; the client's ClientHello (carried over the pipe) reaches the
+     Bun TLS server, the handshake COMPLETES, and the terminator surfaces the
+     **decrypted plaintext**,
+  4. parse the plaintext HTTP request MANUALLY (`parseHttpRequestBuffer` — Bun's
+     `http.Server.emit("connection", …)` does NOT drive the node:http parser, so
+     the node-style parse is not reusable on Bun), run the SAME `decideEgressScan`,
+     and write the (re-encrypted) response back through the terminator.
+
+  **EMPIRICAL PROOF (jun-07):** a standalone spike on **Bun 1.3.14** confirmed (a)
+  `Bun.listen` TLS terminates against a minted leaf and a node:tls client trusting
+  ONLY the ephemeral CA completes the handshake (`authorized: true`); (b) the full
+  bridge (raw CONNECT socket ↔ byte-pipe ↔ terminator) surfaces decrypted bytes;
+  (c) the response round-trips re-encrypted to the client. The e2e
+  (`tls-mitm-egress-e2e.test.ts`) + the Bun hellgate
+  (`tls-mitm-bun-bridge-hellgate.test.ts`) now PASS on Bun: a declared secret in an
+  HTTPS body is CAUGHT by a REAL content scan (decision-log reason `outbound
+  secret`, not a watchdog fail-closed), legit bodies forward unchanged (no FP), a
+  bad upstream cert → 502 (upstream STILL validated), and a hostile/stuck channel
+  fails closed (DENY, secret never forwarded).
+
+**SECURITY — the bridge changes NOTHING:** the leaf is signed by the SAME
+ephemeral, in-memory, single-consumer CA; the loopback terminator binds
+`127.0.0.1:0` (never routable), is ONE-SHOT (per CONNECT, not a persistent
+listener), and carries ONLY that connection's bytes; the upstream leg is
+unchanged (`rejectUnauthorized:true` against the default trust store with SNI);
+ANY bridge/handshake/parse error fails closed (the watchdog still bounds a stuck
+handshake). Default-OFF is byte-identical on both runtimes.
 
 ## 9. Test plan
 
@@ -183,27 +215,43 @@ socket obtained from an HTTP `connect` event (a socket upgrade):
 - **Unit** (`tests/unit/tls-mitm-scan-integration.test.ts`): the SHARED
   `decideEgressScan` core — clean / deny (body + header) / redact / scanner-only-
   falls-back-to-deny — proving the MITM transport reuses the plaintext policy.
-- **Integration REAL-TLS** (`tests/integration/tls-mitm-egress-e2e.test.ts`):
-  a local HTTPS origin + the MITM proxy + a client trusting the MITM CA →
-  - `[node]` declared secret in an HTTPS body → 403, never reaches the origin,
-    logged `denied` (THE GAP CLOSED);
-  - `[node]` legit body → 200, forwarded unchanged, `scanned-clean` (no FP);
-  - `[node]` redact mode → the origin sees the MASK;
-  - `[node]` bad upstream cert → 502 (upstream STILL validated);
-  - `[all runtimes]` a stuck/unsupported handshake → DENY (watchdog), secret
-    never reaches origin;
-  - `[all runtimes]` MITM OFF → CONNECT stays a raw tunnel + `connect-tunnel-
-    unscanned` (default-OFF byte-identity).
+- **Unit** (`tests/unit/tls-mitm-bun-bridge-parse.test.ts`): the manual HTTP/1.1
+  request parser the Bun bridge uses — framing (incomplete header waits; full
+  request parsed; partial body waits; multi-value headers; path normalization) +
+  the FAIL-CLOSED decisions (Content-Length over the cap / chunked / malformed /
+  unbounded-header-DoS ⇒ `bodyOverCap`; a body AT the cap is not over-corrected).
+- **Integration REAL-TLS** (`tests/integration/tls-mitm-egress-e2e.test.ts`) —
+  now `[all runtimes]` (node:tls on Node, the Bun.listen bridge on Bun):
+  - declared secret in an HTTPS body → 403, never reaches the origin, logged
+    `denied` (THE GAP CLOSED — now on Bun too);
+  - legit body → 200, forwarded unchanged, `scanned-clean` (no FP);
+  - redact mode → the origin sees the MASK;
+  - bad upstream cert → 502 (upstream STILL validated);
+  - a stuck/unsupported handshake → DENY (watchdog), secret never reaches origin;
+  - MITM OFF → CONNECT stays a raw tunnel + `connect-tunnel-unscanned` (default-OFF
+    byte-identity).
+- **Bun HELLGATE** (`tests/unit/tls-mitm-bun-bridge-hellgate.test.ts`): the
+  GAP-CLOSED proof ON BUN (the secret deny comes from a REAL content scan — reason
+  `outbound secret` — NOT a watchdog/handshake fail-closed, distinguishing the
+  functional path from the old denied-but-non-functional one) + DI-injected hostile
+  channels (parse-never-resolves ⇒ watchdog DENY; parse→null ⇒ DENY;
+  opaque-tunnel ⇒ visible `connect-tunnel-unscanned`) proving fail-closed for the
+  bridge transport.
 
 ## 10. ROI
 
 - **Closes the single biggest hole** in the secret-egress rail: HTTPS bodies were
-  100% invisible; with MITM on a supporting runtime they are scanned by the same
-  zero-FP declared + composite scanner.
-- **Cost:** ~190 LOC cert-gen (no dep) + ~200 LOC proxy transport, all behind a
+  100% invisible; with MITM enabled they are scanned by the same zero-FP declared
+  + composite scanner — now on **BOTH** runtimes including **Bun, the production
+  runtime** (the prior Bun gap is resolved by the `Bun.listen` bridge).
+- **Cost:** ~190 LOC cert-gen (no dep) + ~200 LOC proxy transport + the channel
+  seam (~3 small adapters, no dep — `Bun.listen`/`net` are built-in), all behind a
   double-gated default-OFF knob; zero impact when off (byte-identical).
-- **Residual risk:** (a) the Bun runtime gap (mitigated to fail-closed); (b) cert-
-  pinned clients break under MITM (use `opaque-tunnel` fail mode for them); (c)
-  the CA is a trust anchor — contained to ephemeral / in-process / single-socket
-  scope (§3). These are documented, not hidden.
+- **Residual risk:** (a) ~~the Bun runtime gap~~ **RESOLVED (jun-07)** — functional
+  on Bun via the bridge, fail-closed on any error; (b) cert-pinned clients break
+  under MITM (use `opaque-tunnel` fail mode for them); (c) the CA is a trust anchor
+  — contained to ephemeral / in-process / single-socket scope (§3); (d) the Bun
+  bridge spins a one-shot loopback TLS listener per MITM'd CONNECT (bound to
+  `127.0.0.1:0`, reaped when the connection closes) — a small per-connection cost
+  paid only when MITM is explicitly enabled. These are documented, not hidden.
 ```

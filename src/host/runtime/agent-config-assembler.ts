@@ -89,7 +89,7 @@ import { defaultPromptCacheObserver } from "@/observability/prompt-cache"
 import { CI_BOT_DEFAULT_ALLOWLIST } from "@/runtime/network-allowlist"
 import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
 import type { RuntimeAgentTurnAssembler, RuntimeAgentTurnDeps } from "@/sdk/runtime/base"
-import { runtimeConfig } from "@/shared"
+import { gateOn, runtimeConfig } from "@/shared"
 import { skillMcpDepsEnabled } from "@/skill/skill-mcp-deps"
 import { resolveJailed } from "@/storage"
 import type { AgentEvent, StreamPort } from "@/stream"
@@ -290,7 +290,7 @@ const networkDispatchGuardFor = (req: AssembleRequest, policy: ModePolicy) => {
  *  No-op (byte-identical registry) otherwise. Reads env off the injected
  *  `env` view (never `process.env`). */
 const maybeWireBrowser = (cfg: AgentConfig, env: AssemblerEnv): void => {
-  if (env.QUANTA_BROWSER_TOOL !== "on") return
+  if (!gateOn(env, "QUANTA_BROWSER_TOOL")) return
   const slot = cfg as AgentConfig & { browser?: { port: BrowserPort; resolver?: DnsResolver } }
   if (slot.browser !== undefined) return // caller-override-precedence (ADR-0332)
   const port = createCdpBrowser({
@@ -392,7 +392,7 @@ const maybeWireWebSearch = (cfg: AgentConfig, env: AssemblerEnv): void => {
  *  by default to avoid handing the model two redundant parallel-spawn APIs. When
  *  on, children run through the same depth-guarded `SubagentRunner`. */
 const maybeWireBackgroundSubagent = (cfg: AgentConfig, env: AssemblerEnv): void => {
-  if (env.QUANTA_SUBAGENT_BG !== "on") return
+  if (!gateOn(env, "QUANTA_SUBAGENT_BG")) return
   const slot = cfg as AgentConfig & {
     subagentBackground?: { scheduler: BackgroundSubagentScheduler }
   }
@@ -667,7 +667,7 @@ export const assembleAgentConfig = (req: AssembleRequest, env: AssemblerEnv): Ag
     // ADR-0412 — resolve the check_secrets tool gate HERE. Caller override on
     // `req.base` wins; otherwise `QUANTA_SECRET_CHECK_TOOL=on`.
     secretCheckToolEnabled:
-      req.base.secretCheckToolEnabled ?? env.QUANTA_SECRET_CHECK_TOOL === "on",
+      req.base.secretCheckToolEnabled ?? gateOn(env, "QUANTA_SECRET_CHECK_TOOL"),
   }
   // Track A1 — network-egress enforcement. Derive the dispatch guard from the
   // active mode's NetworkLever. Caller-override-precedence (ADR-0332): a

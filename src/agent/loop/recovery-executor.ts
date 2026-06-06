@@ -78,6 +78,11 @@ export const applyNonSuccessRecoveryAction = async (
     at: Date.now(),
   })
   wm.replace(compacted.messages)
+  // D5 (jun-7) — reactive compaction replaced the transcript prefix, so any
+  // token-baseline measured against the OLD prefix is now stale (its index would
+  // mis-map once the transcript regrows). Invalidate it; a fresh exact usage
+  // re-establishes the baseline against the new prefix.
+  if (state.tokenBaseline !== undefined) state.tokenBaseline.current = undefined
   resetEffortClassifier(config.effortClassifier)
   try {
     const provenance: import("../recovery-reason").RecoveryProvenance = {

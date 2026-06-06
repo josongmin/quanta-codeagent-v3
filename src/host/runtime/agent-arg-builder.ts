@@ -98,7 +98,7 @@ import {
   selectEnvironment,
 } from "@/runtime"
 import { type AutomationEngineSlot, assembleAutomation } from "@/scheduler/runtime-wire"
-import { errMessage, logger, type PtyBackend, runtimeConfig } from "@/shared"
+import { errMessage, gateOn, logger, type PtyBackend, runtimeConfig } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import {
   type AppshotPort,
@@ -1214,7 +1214,7 @@ export const resolveObservabilityWire = (
   opts: { readonly hookBus?: HookBus } = {},
 ): ObservabilityWireHandle =>
   wireObservability({
-    enabled: env.QUANTA_OBSERVABILITY === "on",
+    enabled: gateOn(env, "QUANTA_OBSERVABILITY"),
     repoRoot: process.cwd(),
     // ADR-0415 — forward the adapted live bus so attribution subscribes to
     // `post_tool_use`. Omitted ⇒ ports populate, attribution stays inert.
@@ -1239,7 +1239,7 @@ const resolveObservabilitySlots = (
     "hooks" | "objective" | "runLedger" | "approvalStateMachine" | "shadowVerify"
   >
 > => {
-  const bus = env.QUANTA_OBSERVABILITY === "on" ? new HookBus() : undefined
+  const bus = gateOn(env, "QUANTA_OBSERVABILITY") ? new HookBus() : undefined
   const wire = resolveObservabilityWire(env, bus !== undefined ? { hookBus: bus } : {})
   return {
     ...(wire.objective !== undefined ? { objective: wire.objective } : {}),

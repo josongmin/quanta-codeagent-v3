@@ -9,6 +9,14 @@
  * from `src/llm/ratelimit-snapshot/policy.ts`, i.e. the provider literally reports
  * a window with `remaining <= 0`. No quanta-invented threshold.
  *
+ * ⚠️ DEPENDENCY (jun-7 F3): the ONLY emitter of the `ratelimit_snapshot` event is
+ * gated behind `QUANTA_RATELIMIT_PROACTIVE=1` (`src/agent/loop/stream-consume.ts`,
+ * the proactive-backoff path). So `QUANTA_RATELIMIT_NOTICE=1` ALONE installs the
+ * render port but receives NO events — to see the notice you must ALSO set
+ * `QUANTA_RATELIMIT_PROACTIVE=1`. Decoupling the snapshot capture/emit from the
+ * proactive-delay gate is a tracked follow-up (it touches a hot, concurrently-
+ * edited loop file). Until then this knob is a no-op without its companion.
+ *
  * SURFACE = `cli` only: it drives a terminal-status-bar render, which has no
  * meaning on bench / agent-* surfaces. Like the spinner / pills knobs the actual
  * gate is read by `readCliFeatureConfig` (`src/apps/cli/repl/cli-feature-config.ts`)
@@ -46,7 +54,9 @@ export const ratelimitNoticeKnob: Knob<true> = {
   surfaces: SURFACES,
   parse: parseRatelimitNotice,
   apply: applyRatelimitNotice,
-  describe: "Transient CLI status-bar notice when the provider reports a quota window empty (P27)",
+  describe:
+    "Transient CLI status-bar notice when the provider reports a quota window empty (P27). " +
+    "Requires QUANTA_RATELIMIT_PROACTIVE=1 to receive snapshot events.",
   source: "jun-7-gap-other-agent §23.1",
 }
 

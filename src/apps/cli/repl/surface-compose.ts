@@ -43,7 +43,7 @@ import {
   type SessionEnvelopeRecord,
   saveSessionById,
 } from "@/session"
-import { errMessage, logger, runtimeConfig } from "@/shared"
+import { errMessage, gateOn, logger, runtimeConfig } from "@/shared"
 import { defaultShadowOdb, type ShadowOdb } from "@/storage"
 import {
   type AtCandidateProvider,
@@ -670,7 +670,7 @@ export const composeSurfaceWires = (
   // `QUANTA_PER_TOOL_RECORD=on` ⇒ wrap every tool in the session registry
   // with a pre-execute snapshot recorder. Absent / any other value ⇒
   // tools execute byte-identical, registry stays empty.
-  if (envSource.QUANTA_PER_TOOL_RECORD === "on") {
+  if (gateOn(envSource, "QUANTA_PER_TOOL_RECORD")) {
     const recorder = createPerToolSnapshotRecorder({
       registry: granularRegistry,
       readFile: async (path: string): Promise<string | null> => {
@@ -835,7 +835,7 @@ export const composeSurfaceWires = (
   // wires the live wire; anything else leaves the slot `null` so the slash
   // prints "not wired" and the loop's recordTurn hook is a no-op.
   const convCheckpointWire =
-    envSource.QUANTA_CHECKPOINT_CONV === "on" ? startConvCheckpointWire({ store: convStore }) : null
+    gateOn(envSource, "QUANTA_CHECKPOINT_CONV") ? startConvCheckpointWire({ store: convStore }) : null
   // ADR-0291 — composer + text inbox: surface-owned mutable holders.
   const composerHandle = createComposerHandle("")
   const textInbox = createTextInbox()

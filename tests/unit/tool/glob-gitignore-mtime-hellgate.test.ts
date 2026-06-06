@@ -32,8 +32,13 @@ afterAll(() => rmSync(root, { recursive: true, force: true }))
 mkdirSync(join(work, "src"), { recursive: true })
 mkdirSync(join(work, "node_modules", "pkg"), { recursive: true })
 mkdirSync(outside, { recursive: true })
-writeFileSync(join(work, ".gitignore"), "node_modules/\n")
+// node_modules/ is a DIRECTORY ignore; secret.env.ts is a FILE-NAME ignore (the
+// F1 case — ripgrep's `-g <pattern>` force-include would RE-ADMIT this individual
+// file, which is why the tool now filters the glob IN-PROCESS over the
+// gitignore-pruned `rg --files` list instead of via `-g`).
+writeFileSync(join(work, ".gitignore"), "node_modules/\nsecret.env.ts\n")
 writeFileSync(join(work, "src", "in.ts"), "1")
+writeFileSync(join(work, "src", "secret.env.ts"), "FILELEVELSECRET")
 writeFileSync(join(work, "node_modules", "pkg", "secret-dep.ts"), "DEP")
 writeFileSync(join(outside, "secret.ts"), "TOPSECRET")
 execFileSync("git", ["init", "-q"], { cwd: work })
@@ -66,6 +71,28 @@ describe("glob ripgrep engine cannot leak gitignored or out-of-jail paths", () =
     }
   })
 
+  test("(a2) a FILE-NAME .gitignore (secret.env.ts) is NOT returned under **/*.ts — F1", async () => {
+    // The F1 regression: `rg --files -g '**/*.ts'` RE-ADMITS an individually
+    // gitignored file (`-g` is a force-include override). The in-process filter
+    // over plain `rg --files` keeps the gitignore prune authoritative, so a
+    // gitignored file can NEVER surface regardless of the matching pattern.
+    const r = await run({ pattern: "**/*.ts" })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.output).not.toContain("secret.env.ts")
+      expect(r.output).not.toContain("FILELEVELSECRET")
+      expect(r.output).toContain(join("src", "in.ts"))
+    }
+  })
+
+  test("(a2b) the gitignored file is NOT reachable even by an EXACT-name pattern", async () => {
+    // Even when the model targets the ignored file by name, the gitignore prune
+    // wins (the file was never in the `rg --files` list to match against).
+    const r = await run({ pattern: "src/secret.env.ts" })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.output).toBe("(no files matched)")
+  })
+
   test("(b) a symlink/** to OUTSIDE the jail never surfaces the secret", async () => {
     if (!symlinkOk) return // symlink unsupported in this sandbox; skip
     const r = await run({ pattern: "**/*.ts" })
@@ -95,11 +122,12 @@ describe("glob ripgrep engine cannot leak gitignored or out-of-jail paths", () =
     expect(r.ok).toBe(false)
   })
 
-  test("a single-quote in the pattern cannot break out of the rg argv", async () => {
-    // Pattern-injection: a `'` must be safely escaped by `sq()`. A broken quote
-    // would either error the shell or change the command; we just require the
-    // jail/contract holds (no crash, no out-of-jail leak). No file matches this
-    // literal pattern, so the friendly empty message is the expected outcome.
+  test("a single-quote / shell metachar in the pattern is inert (no argv exposure)", async () => {
+    // Pattern-injection is now structurally impossible: the pattern NEVER enters
+    // the rg argv (rg runs `--files` with no pattern); it is only matched
+    // in-process by `Bun.Glob`. A `'`/metachar therefore cannot reach the shell
+    // at all. We still require the jail/contract holds (no crash, no leak). No
+    // file matches this literal pattern, so the friendly empty message results.
     const r = await run({ pattern: "weird'name*.ts" })
     expect(r.ok).toBe(true)
     if (r.ok) {

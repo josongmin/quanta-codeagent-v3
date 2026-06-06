@@ -1,0 +1,60 @@
+id: jun7-mcp-ingestion-progress-structured
+title: MCP ingestion completion — structuredContent · progress · tools/list_changed (§19.2/§19.4/§19.5)
+section: 9
+subsystem: MCP ingestion 경계 (서버 프로토콜 richness 흡수)
+order: 195
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex", "absorbed:claude"]
+depends_on: [mcp-tool-annotations-content, mcp-tool-bridge]
+config_refs:
+  env: ["QUANTA_MCP_PROGRESS"]
+purpose: |
+  Completes the MCP `tools/call` ingestion boundary on top of the landed
+  annotations+media work:
+   - §19.2 structuredContent — the client carries the server's typed
+     `structuredContent` (`ToolsCallResult` → `McpCallResult.structured`) and the
+     bridge maps it onto `ToolResult.structured`. Absent ⇒ omitted
+     (byte-identical text-only result).
+   - §19.4 progress — a new `src/mcp/progress.ts` parses `notifications/progress`
+     (token/finite-progress validation + a 2 KB message DoS cap); the client
+     mints a per-call `progressToken`, registers a per-token sink, routes inbound
+     ticks via `dispatch`→`routeProgressNotification`, and the bridge's
+     `streamMcpCall` relays them as real-time `ToolEvent.progress` through a
+     producer/consumer async-queue. DEFAULT-OFF seam (`McpToolBindOpts.progress`,
+     env `QUANTA_MCP_PROGRESS`): off ⇒ NO `onProgress` ⇒ NO `_meta.progressToken`
+     on the wire (byte-identical request; a strict server never sees an
+     unexpected `_meta`).
+   - §19.5 tools/list_changed — `notifications/tools/list_changed` joins the
+     existing inbound-observer channel as a `tools_list_changed` event so a host
+     can re-`tools/list` after an auth unlocks more tools.
+  Hardening (3-round adversarial self-verify): the progress wire is gated
+  default-OFF (byte-identity), `dispatch` was refactored to a flat router
+  (`resolveResponse`/`routeProgressNotification` extracted; complexity 32→≤15),
+  `streamMcpCall` maps even a synchronous throw to an `ok:false` result, and a
+  throwing progress sink can never crash the transport pump.
+evidence:
+  code:
+    - src/mcp/progress.ts
+    - src/mcp/client.ts
+    - src/agent/mcp-bridge.ts
+    - src/mcp/resources/notifications.ts
+    - src/mcp/reconnect/supervisor.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/agent/mcp-bridge-progress-structured-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_MCP_PROGRESS
+    where: src/agent/mcp-bridge.ts (McpToolBindOpts.progress seam)
+    default: "0"
+    purpose: opt-in to streaming notifications/progress (off ⇒ no _meta on the wire)
+deliberate_hold: null
+notes: 'jun-7 Wave R2 (completes §19 MCP ingestion alongside the landed §19.1/§19.3). result `_meta` is intentionally NOT surfaced (no ToolResult slot / no consumer — carrying it would be dead). The QUANTA_MCP_PROGRESS knob is a documented seam (bridge gate wired); the runner-knob registration is a future one-liner.'

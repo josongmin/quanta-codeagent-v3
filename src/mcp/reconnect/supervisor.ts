@@ -17,6 +17,7 @@
 
 import { errMessage } from "@/shared"
 import { McpError } from "../client"
+import type { McpProgressHandler } from "../progress"
 import type {
   McpPrompt,
   McpPromptResult,
@@ -149,11 +150,17 @@ export class McpReconnectSupervisor {
 
   /** Indirection entry point for bridged tools. Applies the pending-call policy
    *  then delegates to the current live client. */
-  async callTool(name: string, args: unknown): Promise<McpCallResult> {
+  async callTool(
+    name: string,
+    args: unknown,
+    opts?: { onProgress?: McpProgressHandler },
+  ): Promise<McpCallResult> {
     if (this.state !== "healthy") {
       await this.awaitHealthyOrFail()
     }
-    return this.client.callTool(name, args)
+    // §19.4 — forward the per-call progress sink to the live client. Absent ⇒
+    // byte-identical to the pre-progress delegate.
+    return this.client.callTool(name, args, opts)
   }
 
   /** ADR-0435 follow-up — does the CURRENT live client's server advertise the

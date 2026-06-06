@@ -85,6 +85,28 @@ export interface TokenBaseline {
  * also UNDER-count, so the only safe move is the full estimate). A non-finite /
  * negative measurement is likewise ignored.
  */
+/**
+ * D5 — invalidate a token baseline whose measured prefix was replaced by a
+ * compaction that SHRANK the transcript.
+ *
+ * After a proactive/microcompact summarize replaces the first messages, the
+ * baseline's recorded `measuredAtMessageCount` index no longer maps to the same
+ * content. The `triggerTokenCount` out-of-range fail-safe catches it only while
+ * the transcript is shorter than the index; once it REGROWS past that index the
+ * fail-safe stops firing and a stale baseline would force a premature compaction
+ * on a tiny transcript (the inverse of the bug D5 fixes). Clearing `current`
+ * falls the trigger back to the chars/4 estimate until a fresh exact usage
+ * re-establishes the baseline against the new prefix. No-op when the transcript
+ * grew or stayed the same (a non-shrinking turn never replaced the prefix).
+ */
+export const markBaselineStaleIfShrunk = (
+  box: { current?: TokenBaseline | undefined; sendCount?: number } | undefined,
+  lenBefore: number,
+  lenAfter: number,
+): void => {
+  if (box !== undefined && lenAfter < lenBefore) box.current = undefined
+}
+
 export const triggerTokenCount = (messages: Message[], baseline?: TokenBaseline): number => {
   if (
     baseline === undefined ||

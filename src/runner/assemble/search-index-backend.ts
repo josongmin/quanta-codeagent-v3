@@ -42,7 +42,7 @@ import {
   type VectorStore,
 } from "@/retrieval/engines"
 import type { SearchHit, SemanticIndex } from "@/retrieval/pipeline"
-import { errMessage, logger } from "@/shared"
+import { errMessage, gateOn, logger } from "@/shared"
 
 /** Caller-supplied upsert surface — mirrors `IndexerChunkUpsertPort`. */
 export interface ChunkUpsertPort {
@@ -291,7 +291,7 @@ export const selectIndexEmbedder = (
 ): IndexEmbed => resolveIndexEmbedder(env, factory).embed
 
 /** `QUANTA_INDEX_PERSIST=on` toggles the sqlite-backed delta store. */
-export const isPersistOn = (env: NodeJS.ProcessEnv): boolean => env.QUANTA_INDEX_PERSIST === "on"
+export const isPersistOn = (env: NodeJS.ProcessEnv): boolean => gateOn(env, "QUANTA_INDEX_PERSIST")
 
 const chunkId = (c: IndexerFileChunk): string => `${c.path}:${c.startLine}-${c.endLine}`
 

@@ -42,6 +42,7 @@
  *     factory boundary so callers only need one knob).
  */
 
+import { gateDisabled } from "@/shared"
 import type { AgentConfig } from "@/agent"
 import type { PersistentStorePort } from "@/memory"
 import {
@@ -185,9 +186,9 @@ export const resolveMemoryConfigFromEnv = (
         ? envLimit
         : undefined
   const recallTiers = parseRecallTiers(env.QUANTA_MEMORY_RECALL_TIERS)
-  const distillOff = env.QUANTA_MEMORY_DISTILL === "off"
-  const consolidateOff = env.QUANTA_MEMORY_CONSOLIDATE === "off"
-  const selfEditOff = env.QUANTA_MEMORY_SELF_EDIT === "off"
+  const distillOff = gateDisabled(env, "QUANTA_MEMORY_DISTILL")
+  const consolidateOff = gateDisabled(env, "QUANTA_MEMORY_CONSOLIDATE")
+  const selfEditOff = gateDisabled(env, "QUANTA_MEMORY_SELF_EDIT")
   // ADR-0432 default-OFF extras. Reuse the knob's pure parse helpers so the
   // env→config projection is identical between the CLI env-read path and the
   // knob framework surface (single source of truth). Any unresolved axis is

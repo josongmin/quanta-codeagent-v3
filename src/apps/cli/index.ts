@@ -69,23 +69,21 @@ const CLI_FEATURE_GATES = [
   "QUANTA_TEAM_DAG",
   "QUANTA_TEAM_BROKER",
   "QUANTA_TEAM_IDLE",
+  // followup_task (ADR-0041/0437) — the agent↔agent ACTIVE-call tool: deliver a
+  // message to an existing child AND trigger/interrupt its turn (vs the passive
+  // subagent_send_message mailbox the child must poll). Wired via optional-ports
+  // `wireOptionalAgentPorts`; now that its gate routes through the canonical
+  // `gateOn` SSOT it accepts the standard "1" like every other gate, so it rides
+  // the normal seed loop below (the old strict-"on" special case is gone).
+  "QUANTA_SUBAGENT_FOLLOWUP",
 ]
 // The LLM TOOL gates the CLI opts in by default are DERIVED from the tool-
 // surface SSOT (`seedEnvVarsForSurface`) — the single source of truth. Adding a
 // CLI-default-ON tool to the manifest auto-seeds its gate here; no parallel list
-// to drift. `QUANTA_X=0` (any value ≠ "1") still wins (we only seed when unset).
+// to drift. `QUANTA_X=0` (any non-truthy token) still wins (we only seed when unset).
 for (const gate of [...CLI_FEATURE_GATES, ...seedEnvVarsForSurface("cli")]) {
   if (process.env[gate] === undefined) process.env[gate] = "1"
 }
-// followup_task (ADR-0041/0437) — the agent↔agent ACTIVE-call tool: deliver a
-// message to an existing child AND trigger/interrupt its turn (vs the passive
-// subagent_send_message mailbox the child must poll). It is wired ONLY via
-// optional-ports `wireOptionalAgentPorts` whose gate is a STRICT `=== "on"`
-// (envGateOn), NOT the `parseEnvFlag`/`"1"` convention the loop above seeds — and
-// it has no CLI-path reader — so it cannot ride that loop. Seed it to "on"
-// explicitly so a leader can drive its workers out of the box. Any explicit value
-// ≠ "on" (e.g. `QUANTA_SUBAGENT_FOLLOWUP=off`) still wins — we only seed when unset.
-if (process.env.QUANTA_SUBAGENT_FOLLOWUP === undefined) process.env.QUANTA_SUBAGENT_FOLLOWUP = "on"
 
 /** Validated `QUANTA_REMOTE_TIMEOUT_MS` → optional `{ defaultTimeoutMs }`.
  *  A raw `Number.parseInt` would forward `NaN` on garbage input (silently

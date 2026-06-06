@@ -82,7 +82,7 @@ import {
 } from "@/runtime/shell-snapshot"
 import type { ShellSnapshotMetric } from "@/runtime/shell-snapshot/metric-port"
 import { loadSessionById, renameSession } from "@/session"
-import { logger, type RunContext, runtimeConfig } from "@/shared"
+import { gateDisabled, logger, type RunContext, runtimeConfig } from "@/shared"
 import { MCPRootSchema, PLUGIN_MCP_FILE } from "@/skill/plugin-manifest"
 import type { AssistantTextPainter, StreamPort } from "@/stream"
 import {
@@ -270,7 +270,7 @@ export const buildEmbedder = (
 ): ReturnType<typeof buildEmbedderCore> =>
   buildEmbedderCore({
     store,
-    disabled: process.env.QUANTA_MEMORY_EMBED === "off",
+    disabled: gateDisabled(process.env, "QUANTA_MEMORY_EMBED"),
     ...(process.env.OPENAI_API_KEY !== undefined ? { apiKey: process.env.OPENAI_API_KEY } : {}),
     ...(process.env.OPENAI_BASE_URL !== undefined ? { baseURL: process.env.OPENAI_BASE_URL } : {}),
     ...(process.env.QUANTA_MEMORY_EMBED_MODEL !== undefined
@@ -408,7 +408,7 @@ export const buildCompactionBreakerConfig = (): AgentConfig["compactionBreaker"]
   const reactiveMax = intEnv("QUANTA_COMPACT_BREAKER_REACTIVE_MAX")
   const proactiveMax = intEnv("QUANTA_COMPACT_BREAKER_PROACTIVE_MAX")
   return buildCompactionBreakerConfigCore({
-    ...(process.env.QUANTA_COMPACT_BREAKER === "off" ? { disabled: true } : {}),
+    ...(gateDisabled(process.env, "QUANTA_COMPACT_BREAKER") ? { disabled: true } : {}),
     ...(Number.isFinite(reactiveMax) ? { reactiveMax } : {}),
     ...(Number.isFinite(proactiveMax) ? { proactiveMax } : {}),
   })

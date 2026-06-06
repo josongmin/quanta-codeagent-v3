@@ -106,4 +106,9 @@ export interface McpCallResult {
    *  these to `ToolResult.images` / `ToolResult.documents` after the inbound
    *  size cap + magic-byte sniff. */
   media?: McpMediaBlock[]
+  /** §19.2 — the server's typed `structuredContent` payload, carried opaque.
+   *  OPTIONAL: absent when the server returned only text/`content`, so the
+   *  legacy result is byte-identical. The bridge maps it onto
+   *  `ToolResult.structured` so a model/consumer can read the typed shape. */
+  structured?: unknown
 }

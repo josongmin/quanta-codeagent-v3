@@ -21,7 +21,7 @@
  */
 
 import type { RuntimeFacade } from "@/sdk/runtime"
-import { errMessage } from "@/shared"
+import { errMessage, gateOn } from "@/shared"
 import type { ObservableRuntimeFacade } from "./runtime-factory"
 import { type CanvasPorts, type ObservabilityPorts, startWebDaemon } from "./server"
 import type { WebDaemonConfig, WebDaemonHandle } from "./types"
@@ -66,7 +66,7 @@ const resolveObservableFactory = async (
   // gated ON, so the emitter (observability) / canvas sink shares ONE facade
   // (= ONE session host) with the served session. Both gates OFF ⇒ the lazy
   // factory passes through unchanged + facade is undefined (byte-identical).
-  if (process.env.QUANTA_OBSERVABILITY !== "on" && process.env.QUANTA_WEB_CANVAS !== "1") {
+  if (!gateOn(process.env, "QUANTA_OBSERVABILITY") && process.env.QUANTA_WEB_CANVAS !== "1") {
     return { runtimeFactory: baseFactory, facade: undefined }
   }
   const facade = (await baseFactory()) as ObservableRuntimeFacade

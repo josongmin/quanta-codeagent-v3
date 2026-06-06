@@ -41,6 +41,16 @@ export {
   type SerialSource,
 } from "./mitm-cert"
 export {
+  isBunRuntime,
+  type ManualParseState,
+  type MitmTlsChannel,
+  type OpenMitmChannel,
+  type ParsedTlsRequest,
+  parseHttpRequestBuffer,
+} from "./mitm-channel"
+export { openBunMitmChannel } from "./mitm-channel-bun"
+export { makeNodeMitmChannelOpener } from "./mitm-channel-node"
+export {
   TLS_MITM_ACK_ENV,
   TLS_MITM_ACK_PHRASE,
   TLS_MITM_ENV,

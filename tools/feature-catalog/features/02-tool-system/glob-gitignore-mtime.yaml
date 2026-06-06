@@ -14,23 +14,29 @@ labels: [surface:cli, security-touched]
 depends_on: [glob-tool]
 purpose: |
   P25 engine swap for the `glob` tool: enumeration moved from `Bun.Glob.scan`
-  to `rg --files -g <pattern>` (run with `cwd: base`, no path arg → paths are
-  emitted RELATIVE to the jailed base). This makes glob honor `.gitignore` /
-  `.ignore` NATIVELY (node_modules/, dist/ junk excluded) — consistent with the
-  `grep` tool which already shells to rg — and matches Claude/Cursor glob
-  semantics. This is a deliberate, documented DEFAULT behavior change, NOT a
-  gated toggle. Surviving hits are stat'd and sorted by mtime DESCENDING
-  (most-recently-modified first, ties broken by path), THEN the MAX=300 cap is
-  applied so the newest files survive truncation.
+  to `rg --files` (run with `cwd: base`, no path arg → paths are emitted
+  RELATIVE to the jailed base) followed by an IN-PROCESS `Bun.Glob(pattern).match`
+  filter. This makes glob honor `.gitignore` / `.ignore` NATIVELY (node_modules/,
+  dist/ junk excluded) — consistent with the `grep` tool which already shells to
+  rg. Surviving hits are stat'd and sorted by mtime DESCENDING (most-recently-
+  modified first, ties broken by a BYTE compare), THEN the MAX=300 cap is applied
+  so the newest files survive truncation.
+
+  F1 (jun-7): the pattern is matched IN-PROCESS, NOT via rg `-g <pattern>`.
+  ripgrep's `-g` is a force-INCLUDE override that RE-ADMITS individually
+  gitignored files matching the glob (a gitignored `secret.ts` would surface
+  under `**/*.ts`), which would break the "respects .gitignore" contract. Listing
+  all non-ignored files with plain `rg --files` and filtering with `Bun.Glob`
+  keeps the gitignore prune authoritative — a gitignored file can NEVER surface.
 
   Jail invariant preserved EXACTLY across the swap: (1) the `path` base is
   jail-validated via `@/storage.resolveJailed` BEFORE the rg argv is built;
   (2) an absolute (`/etc/*`) or `..`-segment pattern is REJECTED up front,
-  loud, before it reaches the argv; (3) every emitted hit is re-jailed against
-  ctx.cwd and DROPPED if it escapes (defense-in-depth — rg also does not follow
-  symlinks by default). The pattern is single-quoted via `sq()` (mirrors grep)
-  so shell metacharacters reach rg verbatim and cannot break out of the argv.
-  `--null` separates paths so a newline in a name cannot forge an entry.
+  loud; (3) every emitted hit is re-jailed against ctx.cwd and DROPPED if it
+  escapes (defense-in-depth — rg also does not follow symlinks by default). The
+  pattern NEVER enters the rg argv at all (rg runs `--files` with no pattern; the
+  glob is applied in-process), so a shell metacharacter has no argv to break out
+  of. `--null` separates paths so a newline in a name cannot forge an entry.
   Fail-closed: rg exit >1 / timeout surfaces a clear error (the repo already
   depends on rg).
 evidence:
@@ -49,10 +55,10 @@ knobs: []
 deliberate_hold: null
 notes: |
   Supersedes the Bun.Glob enumeration described in `glob-tool` (order 108).
-  Behavior delta vs the old path is INTENTIONALLY just two things: gitignored
-  entries are now excluded, and results are mtime-DESC (the differential test
-  `glob-gitignore-mtime.test.ts` pins exactly this). Side effect of rg `-g`
-  semantics: a bare `*.ts` matches a basename at ANY depth (gitignore-style
-  glob), unlike Bun.Glob's top-level-only `*.ts` — also the Claude/Cursor norm.
-  Hidden files stay excluded (`--hidden` deliberately omitted = prior
-  `dot:false`).
+  Behavior delta vs the old `Bun.Glob.scan` path: gitignored entries are now
+  excluded and results are mtime-DESC (the differential test
+  `glob-gitignore-mtime.test.ts` pins this). Matching uses STANDARD `Bun.Glob`
+  semantics — a bare `*.ts` matches ONLY top-level files (one path segment); use
+  `**/*.ts` for any depth. Hidden files stay excluded (rg `--hidden` omitted =
+  prior `dot:false`). The F1 hellgate (`glob-gitignore-mtime-hellgate.test.ts`)
+  locks that a file-name `.gitignore` entry can never leak via any pattern.

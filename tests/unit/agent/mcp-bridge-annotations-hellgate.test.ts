@@ -172,7 +172,9 @@ describe("§19.3 hellgate — media cap + magic-byte validation, no crash", () =
     expect(res.images).toHaveLength(1)
     // magic-byte SSOT overrides the server's lying mimeType
     expect(res.images?.[0]?.mediaType).toBe("image/png")
-    expect(res.output).toBe("here")
+    // attached media is named in the (envelope-fenced) text channel as UNTRUSTED
+    expect(res.output).toContain("here")
+    expect(res.output).toContain("UNTRUSTED")
   })
 
   test("embedded resource (valid small pdf) ⇒ ToolResult.documents (passthrough)", async () => {
@@ -189,7 +191,8 @@ describe("§19.3 hellgate — media cap + magic-byte validation, no crash", () =
     )
     const res = await drainResult(tool.execute({}, ctx))
     expect(res.documents).toEqual([{ type: "document", data: pdf, mediaType: "application/pdf" }])
-    expect(res.output).toBe("doc")
+    expect(res.output).toContain("doc")
+    expect(res.output).toContain("UNTRUSTED")
   })
 
   test("no media ⇒ byte-identical { ok, output } (no images/documents/marker)", async () => {
@@ -271,7 +274,8 @@ describe("§19.3 hellgate — resource/document cap + mimeType + magic, no crash
     )
     const res = await drainResult(tool.execute({}, ctx))
     expect(res.documents).toEqual([{ type: "document", data, mediaType: "application/pdf" }])
-    expect(res.output).toBe("ok")
+    expect(res.output).toContain("ok")
+    expect(res.output).toContain("UNTRUSTED")
   })
 
   test("bad base64 resource ⇒ skipped, no crash", async () => {

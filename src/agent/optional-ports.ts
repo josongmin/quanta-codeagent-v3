@@ -4,6 +4,7 @@ import { dispatchSideConversation } from "@/agent/side-conversation"
 import { createSubagentMailbox } from "@/agent/subagent-mailbox"
 import type { LLMPort } from "@/llm"
 import { defaultRoleModelResolver, type RoleModelResolver } from "@/llm/role-model-override"
+import { gateOn } from "@/shared"
 import { AgentMetaRegistry, TurnWakeRegistry } from "@/subagent"
 import type { CloseoutCritic, CloseoutCriticVerdict } from "./closeout-critic"
 import { buildCodeCellDispatchPort } from "./codemode-wire"
@@ -53,7 +54,13 @@ type OptionalPortBase = Pick<
 > &
   Partial<AgentConfig>
 
-const envGateOn = (env: OptionalPortEnv, key: string): boolean => env[key] === "on"
+// Delegate to the canonical SSOT gate reader (`@/shared#gateOn`) so the whole
+// optional-ports family (fast-apply / effort-auto / mailbox / batch / introspect
+// / followup / code-mode) accepts the SAME vocabulary as every other gate —
+// `=1` AND `=on` (and `true`/`yes`) all activate. Previously this was a strict
+// `=== "on"`, which silently ignored `=1` (the followup-task footgun). Superset:
+// the value `"on"` still activates, unset is still OFF.
+const envGateOn = (env: OptionalPortEnv, key: string): boolean => gateOn(env, key)
 
 const resolveModelPort = (base: OptionalPortBase, modelId: string): LLMPort | null => {
   if (base.llm.model === modelId) return base.llm

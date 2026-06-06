@@ -52,6 +52,21 @@ describe("D4 resolveModelWindow — model→context-window SSOT", () => {
     expect(resolveModelWindow("gpt-5-2026-99-99")?.contextWindow).toBe(400_000)
   })
 
+  test("family fallback: DATED claude-3-7-sonnet keeps its 64k output (not the claude-3 8192)", () => {
+    // `claude-3-7-sonnet-20250219` / `-latest` are real Anthropic slugs that miss
+    // the `claude-sonnet` needle (the `3-7` infix) and must NOT fall through to
+    // the broader `claude-3` family (8192) — 3.7 Sonnet has a 64k output budget,
+    // so the derived threshold differs by ~56k. Red-on-injection: remove the
+    // `claude-3-7-sonnet` fallback entry ⇒ maxOutput resolves to 8192.
+    expect(MODEL_CONTEXT_WINDOWS["claude-3-7-sonnet-20250219"]).toBeUndefined()
+    for (const id of ["claude-3-7-sonnet-20250219", "claude-3-7-sonnet-latest"]) {
+      expect(resolveModelWindow(id)).toEqual({ contextWindow: 200_000, maxOutput: 64_000 })
+    }
+    // The dated 3.5 Sonnet legitimately keeps the claude-3 default (8192) — its
+    // real output budget IS 8192, so the broader fallback is correct for it.
+    expect(resolveModelWindow("claude-3-5-sonnet-20241022")?.maxOutput).toBe(8_192)
+  })
+
   test("UNKNOWN model id → undefined (legacy 120k fallback path)", () => {
     expect(resolveModelWindow("mystery-llm-9000")).toBeUndefined()
     expect(resolveModelWindow("")).toBeUndefined()
