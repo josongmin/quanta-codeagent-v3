@@ -556,6 +556,19 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     note: "Per-file session-snapshot list/restore (Claude tengu_file_history_rewind parity). The write/edit capture sink records a file's NEW bytes on each successful mutation into a per-session bounded store (per-path version + byte cap, oldest-evicted ring — no unbounded growth); the tool's `op:list` enumerates the versions for a path and `op:restore` writes a chosen version back through the SAME jailed FS port write/edit use (`resolveJailed` — a `../escape` is rejected before any store lookup or write). Distinct from shadow_rewind (whole-workspace anchor) and message rewind — this is per-FILE undo. risk:mutating — restore overwrites one file. Opt-in EVERYWHERE (QUANTA_FILE_HISTORY): a new capability whose store must be wired, so it never auto-seeds; default-OFF ⇒ no capture, tool absent, byte-identical. Pure in-memory store (@/tool/file-history, injected clock); duck-typed sink keeps the @/tool hot-path types a leaf.",
   },
   {
+    name: "skill_create",
+    origin: "@/skill (createSkillCreatorTool, via tier1 buildSkillBlock when QUANTA_SKILL_CREATOR)",
+    gate: {
+      kind: "config-slot",
+      slot: "QUANTA_SKILL_CREATOR (tier1 jailed SkillWriterPort)",
+      env: "QUANTA_SKILL_CREATOR",
+    },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "mutating",
+    adr: "skill-creator",
+    note: "jun-6 (Codex skill-creator) — agent-callable skill-authoring tool. Scaffolds a SKILL.md from the given frontmatter+body, validates it against the discovery schema + size cap, then installs it through a jailed SkillWriterPort under the user/repo skills dir (a name that is not kebab-case, or a body over MAX_SKILL_SIZE_BYTES, is rejected BEFORE any disk write; the port is no-throw and a thrown port maps to a typed error, mirroring permission_propose_pattern). risk:mutating — it writes a new skill file the host loads next session. Opt-in EVERYWHERE (QUANTA_SKILL_CREATOR): a new capability whose writer must be wired, so it never auto-seeds; default-OFF ⇒ no writer port, tool absent, byte-identical default surface.",
+  },
+  {
     name: "permission_propose_pattern",
     origin: "@/tool/permission-propose (via DefaultToolPorts.permissionPatternPropose)",
     gate: {

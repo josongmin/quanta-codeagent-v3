@@ -50,7 +50,10 @@ export const applyNonSuccessRecoveryAction = async (
   const verdict = breaker?.check()
   if (verdict?.abort) return { done: true, result: { kind: "error", reason: verdict.reason } }
   const snapshot = [...wm.snapshot()]
-  const before = estimateTokens(snapshot)
+  // FULL-snapshot read: O(1) `tokenTotal()` byte-identical to the re-scan when
+  // the counter is wired (knob ON); falls back to `estimateTokens` when OFF.
+  const before =
+    (wm as typeof wm & { tokenTotal?(): number }).tokenTotal?.() ?? estimateTokens(snapshot)
   const compacted = await reactiveCompact({
     messages: snapshot,
     llm: config.compaction?.summarizerLlm ?? config.llm,

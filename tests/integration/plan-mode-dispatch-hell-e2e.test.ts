@@ -121,6 +121,13 @@ const CALLER_WIRE_TOOL_NAMES = [
   // (working_state_write); registers only when the host wires the no-widen port,
   // so it is not enumerable from `defaultTools`.
   "permission_propose_pattern",
+  // jun-6 caller-wire tools — file_history_rewind (DefaultToolPorts.fileHistory /
+  // QUANTA_FILE_HISTORY) and skill_create (QUANTA_SKILL_CREATOR). Both mutating
+  // (write_filesystem); each registers only when the host wires its port/knob, so
+  // neither is enumerable from `defaultTools`. Included by name so the
+  // orphan-direction drift check stays exact (mirrors tests/unit/mode-mutating-table.test.ts).
+  "file_history_rewind",
+  "skill_create",
   "coverage_check",
   "prompt_cache_status",
   "image_gen",

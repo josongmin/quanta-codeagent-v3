@@ -1,10 +1,11 @@
 import { basename } from "node:path"
 import type { Message, SystemBlock } from "@/llm"
-import type {
-  AgentPromptMode,
-  PromptHookContextMode,
-  PromptPolicySnapshot,
-  PromptSummaryPrefix,
+import {
+  type AgentPromptMode,
+  type PromptHookContextMode,
+  type PromptPolicySnapshot,
+  type PromptSummaryPrefix,
+  runtimeConfig,
 } from "@/shared"
 import { renderTaskBudgetBlock, type TaskBudget } from "./budget/task-budget"
 import { buildPersistentInjectionMessages } from "./context-change"
@@ -12,6 +13,7 @@ import { renderEnvBlock, type TurnEnvContext } from "./env-context"
 import { type GlobRule, renderGlobRulesBlock, selectGlobRules } from "./glob-rules"
 import { assertValidIdentityLines } from "./identity"
 import { resolveAgentMode } from "./mode"
+import { type DirectiveConfig, selectActiveDirectives } from "./prompt-directives"
 import { type PersonaKind, personaLines } from "./persona"
 import {
   BODY_AFTER_PERSONA,
@@ -260,6 +262,14 @@ export interface TurnContextInput {
    *  per turn and threads it here. Absent / `false` ⇒ no notice, byte-identical
    *  to the pre-feature dynamic tail (the primary safety invariant). */
   brief?: boolean
+
+  /** §5 prompt-directive bundle (jun-06) — optional override for the seven
+   *  DEFAULT-OFF behavioral directives. When OMITTED, `buildDynamicContext`
+   *  resolves the knobs from the frozen `runtimeConfig()` (the production path).
+   *  Supplying it lets a test/caller drive the selection without env mutation;
+   *  the pure selector ({@link selectActiveDirectives}) consumes this slice.
+   *  ALL-false / omitted-with-knobs-unset ⇒ no directive bytes (byte-identical). */
+  directiveConfig?: DirectiveConfig
 }
 
 export interface TurnContext {
@@ -445,6 +455,33 @@ const appendHookContextMessage = (
  *  freshly-emitted guidance is read last by the model. `injectBeforeUser`
  *  is NOT folded here — it rides as a separate user-side message in
  *  {@link buildTurnContext}. */
+/** §5 — project the frozen `runtimeConfig()` onto the narrow {@link DirectiveConfig}
+ *  slice the pure selector consumes. The loop layer (`prompt.ts`) is the env
+ *  reader; the bundle module stays pure/injected. Default-OFF ⇒ every field
+ *  false ⇒ the selector emits nothing. */
+const resolveDirectiveConfig = (): DirectiveConfig => {
+  const c = runtimeConfig()
+  return {
+    directiveAutonomous: c.directiveAutonomous,
+    directiveReadComplete: c.directiveReadComplete,
+    directiveProgress: c.directiveProgress,
+    directiveMemoryVerify: c.directiveMemoryVerify,
+    directiveThinkFreq: c.directiveThinkFreq,
+    directiveAntiPlatitude: c.directiveAntiPlatitude,
+    directiveParallelTools: c.directiveParallelTools,
+  }
+}
+
+/** §5 — push the active prompt-directive block onto the dynamic `parts`. The
+ *  selection slice comes from `input.directiveConfig` (caller/test override) or,
+ *  when omitted, the frozen `runtimeConfig()` knobs. No-op (zero bytes pushed)
+ *  when no knob is on, preserving byte-identical default-OFF. Extracted from
+ *  {@link buildDynamicContext} so its cognitive complexity does not grow. */
+const appendActiveDirectives = (parts: string[], input: TurnContextInput): void => {
+  const directives = selectActiveDirectives(input.directiveConfig ?? resolveDirectiveConfig())
+  if (directives.length > 0) parts.push("", directives)
+}
+
 const buildDynamicContext = (
   input: TurnContextInput,
   effectiveMode: AgentMode,
@@ -462,6 +499,12 @@ const buildDynamicContext = (
   // It tightens prose verbosity ONLY; the static correctness rails
   // (BODY_AFTER_PROMPT_PACK) are untouched and authoritative above it.
   if (input.brief === true) parts.push("", BRIEF_NOTICE)
+  // §5 prompt-directive bundle (jun-06) — seven DEFAULT-OFF behavioral directives
+  // ride the per-turn DYNAMIC slot AFTER the brief notice (same family of prose
+  // shapers) and BEFORE repo-rules. Extracted to a helper so buildDynamicContext's
+  // cognitive complexity is unchanged. ALL knobs unset ⇒ nothing pushed ⇒ the
+  // dynamic tail is byte-identical to the pre-bundle output (headline invariant).
+  appendActiveDirectives(parts, input)
   // ADR-0397 env block — sits ABOVE repo-rules because env/build context is
   // host-static authority (the platform/shell/pkg-mgr don't change mid-turn
   // and the git snapshot is taken at turn boundary). Absent / empty env ⇒

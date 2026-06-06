@@ -255,11 +255,7 @@ describe("createSkillCreatorTool — throwing port yields a typed result (no ite
 
   test("a writer port that throws a NON-Error ⇒ still a typed ok:false", async () => {
     const throwingPort: SkillWriterPort = {
-      // biome-ignore lint/suspicious/useAwait: deliberate non-Error throw
-      write: async () => {
-        // eslint-disable-next-line no-throw-literal
-        throw "stringly-typed failure"
-      },
+      write: () => Promise.reject("stringly-typed failure"),
     }
     const tool = createSkillCreatorTool(throwingPort)
     const res = await drive(tool, { name: "ok", description: "d", body: "b" }, ctx)

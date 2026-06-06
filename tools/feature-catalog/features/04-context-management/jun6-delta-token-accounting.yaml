@@ -3,7 +3,7 @@ title: Delta token accounting — O(1) incremental estimateTokens memoization
 section: 4
 subsystem: Token estimator — 증분 카운터 (full-scan 회피)
 order: 23
-maturity: L3
+maturity: L4
 status: refined
 ui_surfaces: [n-a]
 monitoring: n-a
@@ -30,12 +30,20 @@ evidence:
   code:
     - src/agent/token-delta/counter.ts
     - src/shared/runtime-config.ts
-    # jun-6 HOST WIRING — the counter is minted ONCE per run in
-    # `createRunAgentContext` when `runtimeConfig().deltaTokenCount`, threaded via
-    # TurnState.tokenCounter, and consumed at the compaction-threshold reads
-    # through `estimateWithCounter` (reseed+total ≡ full estimateTokens re-scan).
-    - src/agent/loop.ts
-    - src/agent/turn-context.ts
+    # jun-6 HOST WIRING (LIVE). The counter is wrapped onto the wm ONCE per run at
+    # the composition root (`createRunAgentContext`) when
+    # `runtimeConfig().deltaTokenCount`, via a faithful WorkingMemory decorator
+    # that maintains the running estimate at the single mutation chokepoint and
+    # exposes the optional `tokenTotal()`/`tokenReseed()` accessors. The
+    # compaction-threshold FULL-snapshot reads consume it as
+    # `wm.tokenTotal?.() ?? estimateTokens(snapshot)` (ON ⇒ O(1) reseed+running
+    # total ≡ full re-scan; OFF ⇒ raw wm ⇒ byte-identical `estimateTokens`).
+    - src/agent/token-delta/wm-decorator.ts
+    - src/agent/loop/session-bootstrap.ts
+    - src/agent/loop/compaction-wire.ts
+    - src/agent/loop/recovery-executor.ts
+    # the in-place user_prompt_submit rewrite re-anchors the counter (no drift).
+    - src/agent/loop/session-hooks.ts
   adrs: []
   tests:
     unit:
@@ -45,6 +53,10 @@ evidence:
       # reachability: knob-ON ⇒ counter feeds the REAL loop's compaction precheck
       # (currentTokens === full re-scan); knob-OFF ⇒ byte-identical surfaced value.
       - tests/unit/delta-ratelimit-reachability-hellgate.test.ts
+      # loop-wire e2e: drives the REAL createRunAgentContext + runAgent; asserts
+      # tokenTotal() ≡ estimateTokens(snapshot) after append/replace/clear/rewrite
+      # + a seeded fuzz (no drift), and OFF byte-identity (no methods present).
+      - tests/unit/delta-token-loop-wire-e2e-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -53,10 +65,20 @@ knobs:
     purpose: Strict opt-in (`=== "1"`). ON 이면 루프가 증분 카운터를 mint(perf 경로). 산출 토큰 수는 OFF 와 byte-identical — 동작 변화 없음, 재스캔 비용만 절감.
 deliberate_hold: null
 notes: |
-  설계/증명: RFC `docs/plans/jun-6-delta-token-accounting.md`. ADR 미발행이라 L3 유지(테스트·배선·
-  byte-identity 증명 완비). `delta-token-identity-hellgate` 가 증분합 ≡ full-scan 을, `delta-token-knob-off-hellgate`
-  가 OFF byte-identity 를, `delta-ratelimit-reachability-hellgate` 가 REAL 루프 배선(ON: 카운터가 압축 precheck
-  의 currentTokens 를 공급, OFF: surfaced 값 byte-identical)을 봉인. `charsOf` 는 `estimateTokens` 와 공유(중복
-  휴리스틱 방지). 배선 형태=reseed-at-read(드리프트 불가: 매 read 가 ground-truth 로 재앵커링; hook 의 in-place
-  prompt rewrite 같은 out-of-band wm 변이에도 무영향). full-append 경로의 O(1) running-sum perf 최적화(=wm 포트가
-  카운터 소유)는 `@/memory` 포트 수정 필요라 후속.
+  설계/증명: RFC `docs/plans/jun-6-delta-token-accounting.md`. jun-6 HOST WIRING 으로 LIVE 배선 완료 →
+  L4 승격(loop-mint deferred hold 제거; configurable=integrated). 배선 형태=composition-root 데코레이터:
+  `createRunAgentContext` 가 knob ON 일 때 wm 을 `decorateWithDeltaCounter` 로 감싸 단일 mutation chokepoint
+  에서 running estimate 를 유지하고 optional `tokenTotal()`/`tokenReseed()` 를 노출. 압축 threshold 의 FULL-
+  snapshot read(`compaction-wire` before/usedTokens, `recovery-executor` before)만 `wm.tokenTotal?.() ??
+  estimateTokens(snapshot)` 로 O(1) 소비 — summary-only(`installed.slice(0,1)`) / POST-compaction `after`
+  (=wm.replace 직전, 카운터가 아직 미반영하는 DIFFERENT message set)는 의도적으로 `estimateTokens` 유지.
+  reseed correctness: `replace`(압축 prefix→summary swap·fork)·`clear`·in-place prompt rewrite
+  (`session-hooks` 의 `tokenReseed`)에서 카운터가 post-event snapshot 으로 재앵커 → 드리프트 불가.
+  봉인: `delta-token-identity-hellgate`(증분합 ≡ full-scan), `delta-token-property-fuzz-r2-hellgate`(fuzz),
+  `delta-token-knob-off-hellgate`(OFF byte-identity), `delta-ratelimit-reachability-hellgate`(precheck
+  currentTokens === full re-scan ON, surfaced 값 byte-identical OFF), `delta-token-loop-wire-e2e-hellgate`
+  (REAL createRunAgentContext+runAgent: append/replace/clear/rewrite·fuzz 후 매 스텝 total()≡estimateTokens,
+  OFF 시 메서드 부재). `charsOf` 는 `estimateTokens` 와 공유(중복 휴리스틱 방지). default-OFF 시 wm 은 RAW
+  결과(데코레이터·카운터 미구성)라 산출 숫자·이벤트 스트림 byte-identical. ADR 미발행이나 LIVE 배선+byte-identity
+  증명 완비라 L4(operational). full-append O(1) running-sum 을 `@/memory` 포트가 직접 소유하는 형태는
+  포트 수정 필요라 후속(현 데코레이터는 포트 무수정·구조적 superset).

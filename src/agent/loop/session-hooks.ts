@@ -67,4 +67,9 @@ export const rewriteUserPromptMessage = (
   })
   if (!rewritten) newContent.unshift({ type: "text", text: newText })
   wm.messages[lastUserIdx] = { ...userMsg, content: newContent }
+  // This in-place element write bypasses `append`/`replace`, so the delta-token
+  // counter (when wired, knob ON) would not observe the char-count change.
+  // Re-anchor it to the live snapshot to keep `tokenTotal()` byte-identical to a
+  // full `estimateTokens` re-scan. No-op (method absent) when the knob is OFF.
+  ;(wm as WorkingMemory<Message> & { tokenReseed?(): void }).tokenReseed?.()
 }

@@ -23,7 +23,10 @@
  *      loop still completes.
  */
 
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type { AgentConfig } from "@/agent"
 import { dispatchTool } from "@/agent/dispatch"
 import { buildAppshotBlock } from "@/agent/tier1"
@@ -140,7 +143,21 @@ const call = (input: unknown): ToolUseBlock => ({
   input,
 })
 
-const tmpCwd = () => process.cwd()
+/** Per-test jail root under OS temp — appshot scaffold must NOT litter the repo. */
+const tmpRoots: string[] = []
+
+const tmpCwd = (): string => {
+  const dir = mkdtempSync(join(tmpdir(), "quanta-appshot-"))
+  tmpRoots.push(dir)
+  return dir
+}
+
+afterEach(() => {
+  while (tmpRoots.length > 0) {
+    const dir = tmpRoots.pop()
+    if (dir !== undefined) rmSync(dir, { recursive: true, force: true })
+  }
+})
 
 /* ---------------------------------------------------------------- */
 /* A — full reachability: assemble → block → dispatch → artifact     */
@@ -179,9 +196,8 @@ describe("A — appshot reachability via the assembler (knob-on + browser + judg
       QUANTA_APPSHOT: "1",
     })
     const block = buildAppshotBlock(cfg)
-    const dir = `appshot-reach-${Date.now()}`
     const res = await dispatchTool(
-      call({ prompt: "a hello-world page", out_dir: dir, max_iterations: 3 }),
+      call({ prompt: "a hello-world page", out_dir: "reach", max_iterations: 3 }),
       cfgForDispatch(cfg, block.tools),
       BYPASS,
     )
@@ -280,7 +296,7 @@ describe("E — the assembler-wired judge LLM drives the loop verdict", () => {
     )
     const block = buildAppshotBlock(cfg)
     const res = await dispatchTool(
-      call({ prompt: "page with an H1", out_dir: `appshot-e-${Date.now()}`, max_iterations: 3 }),
+      call({ prompt: "page with an H1", out_dir: "verify-e", max_iterations: 3 }),
       cfgForDispatch(cfg, block.tools),
       BYPASS,
     )
@@ -307,7 +323,7 @@ describe("F — Canvas store off ⇒ no artifact registration (byte-identical)",
     expect(slot?.artifactSink).toBeUndefined()
     const block = buildAppshotBlock(cfg)
     const res = await dispatchTool(
-      call({ prompt: "any page", out_dir: `appshot-f-${Date.now()}`, max_iterations: 2 }),
+      call({ prompt: "any page", out_dir: "verify-f", max_iterations: 2 }),
       cfgForDispatch(cfg, block.tools),
       BYPASS,
     )

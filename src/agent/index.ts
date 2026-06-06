@@ -341,6 +341,10 @@ export {
 export { buildComposeAuthoringBlock } from "./tier1/compose-authoring"
 export { buildPrShipBlock } from "./tier1/pr-ship"
 export { createTokenDeltaCounter, type TokenDeltaCounter } from "./token-delta/counter"
+export {
+  type DeltaTokenWorkingMemory,
+  decorateWithDeltaCounter,
+} from "./token-delta/wm-decorator"
 export type {
   AgentConfig,
   AgentOutcome,

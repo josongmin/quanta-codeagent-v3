@@ -491,6 +491,26 @@ export interface RuntimeConfig {
    *  When false at seed AND never toggled, `buildDynamicContext` emits no
    *  `BRIEF_NOTICE` and the per-turn dynamic tail is byte-identical. */
   readonly brief: boolean
+  /** §5 prompt-directive bundle (jun-06) — seven independent DEFAULT-OFF
+   *  behavioral directives, each spliced into the per-turn DYNAMIC
+   *  `<system-reminder>` by `buildDynamicContext` (`src/agent/prompt.ts`) ONLY
+   *  when its knob is ON (`=== "1"`). Each defaults false ⇒ contributes zero
+   *  bytes ⇒ the dynamic tail is byte-identical (proven by the all-OFF golden).
+   *  See `src/agent/prompt-directives.ts` for the texts + the pure selector. */
+  /** Autonomous-loop preamble (`QUANTA_DIRECTIVE_AUTONOMOUS`). */
+  readonly directiveAutonomous: boolean
+  /** Read-completeness directive (`QUANTA_DIRECTIVE_READ_COMPLETE`). */
+  readonly directiveReadComplete: boolean
+  /** Progress-narration discipline (`QUANTA_DIRECTIVE_PROGRESS`). */
+  readonly directiveProgress: boolean
+  /** Memory-drift verify-before-trust (`QUANTA_DIRECTIVE_MEMORY_VERIFY`). */
+  readonly directiveMemoryVerify: boolean
+  /** Thinking-frequency self-regulation (`QUANTA_DIRECTIVE_THINK_FREQ`). */
+  readonly directiveThinkFreq: boolean
+  /** Anti-platitude voice (`QUANTA_DIRECTIVE_ANTI_PLATITUDE`). */
+  readonly directiveAntiPlatitude: boolean
+  /** Parallel tool-call nudge (`QUANTA_DIRECTIVE_PARALLEL_TOOLS`). */
+  readonly directiveParallelTools: boolean
   /** FS jail disable flag (`QUANTA_FS_JAIL=off`). Default false (jail ON). */
   readonly fsJailDisabled: boolean
   /** ADR-0062 cap-as-instruction dispatch enforcement (`QUANTA_CAP_ENFORCE=1`).
@@ -928,6 +948,15 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // C3 — brief-mode SEED. Uses the standard boolean knob vocabulary (1/true/on)
     // so it reads like the `effort` env seed; default-OFF ⇒ byte-identical.
     brief: parseBool(env["QUANTA_BRIEF"]),
+    // §5 prompt-directive bundle — strict `=== "1"` opt-in per directive. Each
+    // default false ⇒ `selectActiveDirectives` emits nothing ⇒ byte-identical.
+    directiveAutonomous: env["QUANTA_DIRECTIVE_AUTONOMOUS"] === "1",
+    directiveReadComplete: env["QUANTA_DIRECTIVE_READ_COMPLETE"] === "1",
+    directiveProgress: env["QUANTA_DIRECTIVE_PROGRESS"] === "1",
+    directiveMemoryVerify: env["QUANTA_DIRECTIVE_MEMORY_VERIFY"] === "1",
+    directiveThinkFreq: env["QUANTA_DIRECTIVE_THINK_FREQ"] === "1",
+    directiveAntiPlatitude: env["QUANTA_DIRECTIVE_ANTI_PLATITUDE"] === "1",
+    directiveParallelTools: env["QUANTA_DIRECTIVE_PARALLEL_TOOLS"] === "1",
     fsJailDisabled: parseBool(env["QUANTA_FS_JAIL"] === "off" ? "1" : undefined),
     capEnforce: parseBool(env["QUANTA_CAP_ENFORCE"]),
     gitSha: stringOrUndef(env["QUANTA_GIT_SHA"]),

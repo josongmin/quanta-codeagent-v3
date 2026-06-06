@@ -119,7 +119,12 @@ describe("tool-surface manifest — FULL-universe completeness (the guard that w
   // the manifest, so a new tool — or a new orphan — can never silently escape.
   const scanRegisteredToolNames = (): Set<string> => {
     const out = execSync(
-      "grep -rhoE 'name: \"[a-z_]+\"' src/tool src/subagent src/agent/tier1",
+      // src/skill/skill-creator.ts is scanned explicitly so an agent-callable tool
+      // defined OUTSIDE src/tool (skill_create lives there but is registered from
+      // src/agent/tier1) cannot escape the manifest completeness scan. Scoped to the
+      // single source file (not all of src/skill) to avoid picking up SKILL.md
+      // frontmatter names / test-fixture `name:` literals that are not tools.
+      "grep -rhoE 'name: \"[a-z_]+\"' src/tool src/subagent src/agent/tier1 src/skill/skill-creator.ts",
     ).toString()
     const re = /name: "([a-z_]+)"/g
     const found = new Set<string>()

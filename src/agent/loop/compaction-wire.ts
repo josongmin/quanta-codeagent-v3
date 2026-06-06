@@ -18,7 +18,7 @@ import { emitRecovery, objectiveBudgetExhausted } from "./emit-helpers"
 export const maybeCompact = async (
   config: AgentConfig,
   system: SystemPromptInput,
-  wm: import("@/memory").WorkingMemory<Message>,
+  wm: import("@/memory").WorkingMemory<Message> & { tokenTotal?(): number },
   breaker: CompactionBreaker | undefined,
   archive: ConversationSummaryArchive | undefined,
   turn: number,
@@ -33,7 +33,10 @@ export const maybeCompact = async (
   }
   const onPreCompact = config.onPreCompact
   const snapshot = [...wm.snapshot()]
-  const before = estimateTokens(snapshot)
+  // FULL-snapshot read: O(1) `tokenTotal()` is byte-identical to
+  // `estimateTokens(snapshot)` when the counter is wired (knob ON); falls back
+  // to the full re-scan when OFF (`tokenTotal` absent).
+  const before = wm.tokenTotal?.() ?? estimateTokens(snapshot)
   const bgLimitTokens = resolveCompactionLimitTokens(config.compaction?.thresholdTokens)
   const borrowed =
     bgController !== undefined
@@ -139,7 +142,10 @@ export const maybeCompact = async (
     breaker?.recordProactive(before, before)
   }
   bgController?.maybeStart({
-    usedTokens: estimateTokens([...wm.snapshot()]),
+    // FULL-snapshot read of the (possibly just-compacted) live wm. The decorator
+    // reseeds on `replace`, so `tokenTotal()` reflects the post-compaction set
+    // and is byte-identical to the re-scan; OFF ⇒ direct `estimateTokens`.
+    usedTokens: wm.tokenTotal?.() ?? estimateTokens([...wm.snapshot()]),
     limitTokens: bgLimitTokens,
   })
   return { abort: false }

@@ -59,6 +59,11 @@ Thumbs.db
 # Bun (binary lockfile; commit bun.lock)
 bun.lockb
 
+# Appshot hellgate leftovers (pre-fix tests wrote under repo root)
+appshot-e-*/
+appshot-f-*/
+appshot-reach-*/
+
 # Test / coverage — root-anchored so it only matches the project-root test
 # output dir, NOT every nested `coverage/`. The anchor-less form silently
 # excluded `src/observability/coverage/` (9 production files / ~2700 LOC)

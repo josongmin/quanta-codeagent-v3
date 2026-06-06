@@ -67,6 +67,11 @@ export interface FileHistoryBounds {
   readonly maxPaths?: number
 }
 
+/** Default across-path cap (distinct files). Non-optional constant so the store
+ *  has a guaranteed-`number` fallback even when a bounds literal omits
+ *  `maxPaths`. */
+export const DEFAULT_MAX_PATHS = 512
+
 /** Default bounds — small enough that an idle session reclaims, large enough to
  *  hold a realistic edit chain on a source file. Overridable via the knob's
  *  optional suffix parse (see runtime-config). */
@@ -78,7 +83,7 @@ export const DEFAULT_FILE_HISTORY_BOUNDS: FileHistoryBounds = {
   // 512 distinct files — covers an active session's working set; a big refactor
   // or codegen run that touches more than this evicts the least-recently-touched
   // file's timeline rather than growing the map without bound.
-  maxPaths: 512,
+  maxPaths: DEFAULT_MAX_PATHS,
 }
 
 /** The store port. Pure in-memory default below. NO-THROW. The capture sink
@@ -136,9 +141,7 @@ export const createFileHistoryStore = (opts: FileHistoryStoreOptions): FileHisto
   const maxPaths = Math.max(
     1,
     Math.floor(
-      rawMaxPaths !== undefined && Number.isFinite(rawMaxPaths)
-        ? rawMaxPaths
-        : DEFAULT_FILE_HISTORY_BOUNDS.maxPaths,
+      rawMaxPaths !== undefined && Number.isFinite(rawMaxPaths) ? rawMaxPaths : DEFAULT_MAX_PATHS,
     ),
   )
   // Insertion-ordered: the FIRST key is the least-recently-recorded (LRU). A

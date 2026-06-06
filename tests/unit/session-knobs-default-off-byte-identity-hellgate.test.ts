@@ -65,6 +65,14 @@ const STRICT_ONE_KNOBS: ReadonlyArray<{
   { env: "QUANTA_PROGRESS_UPDATE", read: (c) => c.progressUpdate },
   { env: "QUANTA_PTY_ATTACH", read: (c) => c.ptyAttach },
   { env: "QUANTA_FILE_HISTORY", read: (c) => c.fileHistory },
+  // §5 prompt-directive bundle (jun-06) — seven DEFAULT-OFF directive knobs.
+  { env: "QUANTA_DIRECTIVE_AUTONOMOUS", read: (c) => c.directiveAutonomous },
+  { env: "QUANTA_DIRECTIVE_READ_COMPLETE", read: (c) => c.directiveReadComplete },
+  { env: "QUANTA_DIRECTIVE_PROGRESS", read: (c) => c.directiveProgress },
+  { env: "QUANTA_DIRECTIVE_MEMORY_VERIFY", read: (c) => c.directiveMemoryVerify },
+  { env: "QUANTA_DIRECTIVE_THINK_FREQ", read: (c) => c.directiveThinkFreq },
+  { env: "QUANTA_DIRECTIVE_ANTI_PLATITUDE", read: (c) => c.directiveAntiPlatitude },
+  { env: "QUANTA_DIRECTIVE_PARALLEL_TOOLS", read: (c) => c.directiveParallelTools },
 ]
 
 /** Hostile / loose values a strict-`1` knob MUST treat as OFF. `"1"` is tested

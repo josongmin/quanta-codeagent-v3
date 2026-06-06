@@ -31,6 +31,7 @@ import {
 } from "../session-resources"
 import { buildShellSnapshotSession, type ShellSnapshotSession } from "../shell-snapshot-session"
 import { runSessionPrewarm, type TtfmMarker } from "../startup-prewarm"
+import { decorateWithDeltaCounter } from "../token-delta/wm-decorator"
 import { createToolChoiceTurnState } from "../tool-choice"
 import type { TurnSession } from "../turn-context"
 import type { AgentConfig, MemoryCitation } from "../types"
@@ -98,7 +99,16 @@ export const createRunAgentContext = async (config: AgentConfig): Promise<RunAge
   }
 
   const skillGate = buildSkillGate(features.skillAllowlists, features.skillOverrides)
-  const wm: WorkingMemory<Message> = createWorkingMemory<Message>(buildSeedMessages(cfg))
+  // The wm is the SINGLE mutation chokepoint. When `deltaTokenCount` is ON we
+  // wrap it with a delta-counter-maintaining decorator so the compaction
+  // threshold gates can read `tokenTotal()` in O(1) instead of re-scanning the
+  // whole transcript (RFC jun-6-delta-token-accounting). Default-OFF the wm is
+  // the RAW result — no decorator, no `tokenTotal` — and every read site falls
+  // back to `estimateTokens`, byte-identical.
+  const rawWm: WorkingMemory<Message> = createWorkingMemory<Message>(buildSeedMessages(cfg))
+  const wm: WorkingMemory<Message> = runtimeConfig().deltaTokenCount
+    ? decorateWithDeltaCounter(rawWm)
+    : rawWm
   cfg.llm = maybeWrapImageSanitizationRetry(cfg, wm)
   const recorder = cfg.metrics ? new AgentRecorder(cfg.metrics) : undefined
   const ttfm = await maybeRunSessionPrewarm(cfg, recorder)
