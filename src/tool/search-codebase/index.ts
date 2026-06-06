@@ -83,7 +83,10 @@ const hitPath = (h: SearchHit): string => {
  *  `\`→`/`, strips ALL repeated leading `./`, and strips trailing slashes.
  *  Pure string transform; never touches the filesystem. */
 const foldPathish = (s: string): string =>
-  s.replace(/\\/g, "/").replace(/^(\.\/)+/, "").replace(/\/+$/, "")
+  s
+    .replace(/\\/g, "/")
+    .replace(/^(\.\/)+/, "")
+    .replace(/\/+$/, "")
 
 /** Normalize a model-supplied `scope` to a workspace-relative directory
  *  prefix. Returns `null` when the scope escapes the workspace (absolute path,

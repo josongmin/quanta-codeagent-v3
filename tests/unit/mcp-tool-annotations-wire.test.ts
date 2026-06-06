@@ -6,10 +6,13 @@
  * `buildMcpLoadOpts` (src/apps/cli/internal.ts) reads to spread
  * `annotationsHonored:true` onto the `loadMcpTools` opts bag. This test pins the
  * SSOT the spread reads:
- *   - env unset / not "1" ⇒ `mcpToolAnnotations === false` ⇒ slot omitted ⇒ the
- *     bridge's `annotationsHonored` stays false ⇒ `honored = annotationsHonored
- *     && trusted` is false for every tool (byte-identical default).
- *   - env "1" ⇒ `mcpToolAnnotations === true` ⇒ opts carry `annotationsHonored`.
+ *   - env unset / falsy (`"0"`, `"false"`, `"off"`, garbage) ⇒
+ *     `mcpToolAnnotations === false` ⇒ slot omitted ⇒ the bridge's
+ *     `annotationsHonored` stays false ⇒ `honored = annotationsHonored &&
+ *     trusted` is false for every tool (byte-identical default).
+ *   - env truthy (`"1"` / `"true"` / `"on"`, case-insensitive — the SAME
+ *     `parseBool` vocab the knob registry uses, so the two channels agree) ⇒
+ *     `mcpToolAnnotations === true` ⇒ opts carry `annotationsHonored`.
  *
  * The exact opts-spread predicate (`runtimeConfig().mcpToolAnnotations ? {…} : {}`)
  * is replicated here so a regression that drops the knob read is caught.
@@ -41,20 +44,23 @@ describe("QUANTA_MCP_TOOL_ANNOTATIONS — runtime-config knob read", () => {
     expect(Object.hasOwn(annotationsSlot(), "annotationsHonored")).toBe(false)
   })
 
-  test("'0' / 'true' (not strict '1') ⇒ false ⇒ slot omitted", () => {
-    process.env[KEY] = "0"
-    __resetRuntimeConfig()
-    expect(runtimeConfig().mcpToolAnnotations).toBe(false)
-    process.env[KEY] = "true"
-    __resetRuntimeConfig()
-    expect(runtimeConfig().mcpToolAnnotations).toBe(false)
-    expect(Object.hasOwn(annotationsSlot(), "annotationsHonored")).toBe(false)
+  test("falsy values ('0' / 'false' / garbage) ⇒ false ⇒ slot omitted", () => {
+    for (const v of ["0", "false", "off", "nope"]) {
+      process.env[KEY] = v
+      __resetRuntimeConfig()
+      expect(runtimeConfig().mcpToolAnnotations).toBe(false)
+      expect(Object.hasOwn(annotationsSlot(), "annotationsHonored")).toBe(false)
+    }
   })
 
-  test("strict '1' ⇒ true ⇒ opts carry annotationsHonored:true", () => {
-    process.env[KEY] = "1"
-    __resetRuntimeConfig()
-    expect(runtimeConfig().mcpToolAnnotations).toBe(true)
-    expect(annotationsSlot()).toEqual({ annotationsHonored: true })
+  test("truthy vocab ('1' / 'true' / 'on') ⇒ true ⇒ opts carry annotationsHonored", () => {
+    // SSOT: runtime-config now uses the SAME parseBool vocab as the knob
+    // registry, so '1'/'true'/'on' all activate (the two channels agree).
+    for (const v of ["1", "true", "TRUE", "on"]) {
+      process.env[KEY] = v
+      __resetRuntimeConfig()
+      expect(runtimeConfig().mcpToolAnnotations).toBe(true)
+      expect(annotationsSlot()).toEqual({ annotationsHonored: true })
+    }
   })
 })

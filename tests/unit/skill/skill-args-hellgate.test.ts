@@ -41,6 +41,11 @@ describe("HELL-ARGS-1 — pure interpolation", () => {
     expect(interpolateSkillArgs("$10", args)).toBe("w10")
   })
 
+  test("$0 → empty (1-indexed), $01 → positional 1 (pinned current behavior)", () => {
+    expect(interpolateSkillArgs("[$0]", "a b")).toBe("[]")
+    expect(interpolateSkillArgs("$01", "a b")).toBe("a")
+  })
+
   test("both placeholders in one body", () => {
     expect(interpolateSkillArgs("all=[$ARGUMENTS] first=$1", "p q")).toBe("all=[p q] first=p")
   })

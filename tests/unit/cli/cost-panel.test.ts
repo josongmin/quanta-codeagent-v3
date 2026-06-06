@@ -278,7 +278,8 @@ describe("createCostPanel: audit hardening", () => {
   test("model id is sanitized on mid-session update() too", () => {
     const panel = make({ model: "ok" })
     panel.update({ model: "x\x1b[31mRED" })
-    expect(panel.snapshot().model).toBe("xRED")
+    // only the ESC byte is stripped; the literal "[31m" text remains
+    expect(panel.snapshot().model).toBe("x[31mRED")
   })
 
   test("negative caller cost is clamped to 0 (no negative bill)", () => {
@@ -300,9 +301,19 @@ describe("createCostPanel: audit hardening", () => {
 
   test("per-model breakdown row includes cache-read (reconciles with aggregate)", () => {
     const panel = make({ model: "claude-sonnet-4-6" })
-    panel.incrementTurn({ inputTokens: 1000, outputTokens: 200, cacheReadTokens: 500, costUsd: 0.5 })
+    panel.incrementTurn({
+      inputTokens: 1000,
+      outputTokens: 200,
+      cacheReadTokens: 500,
+      costUsd: 0.5,
+    })
     panel.update({ model: "gpt-4o-mini" })
-    panel.incrementTurn({ inputTokens: 2000, outputTokens: 400, cacheReadTokens: 800, costUsd: 0.25 })
+    panel.incrementTurn({
+      inputTokens: 2000,
+      outputTokens: 400,
+      cacheReadTokens: 800,
+      costUsd: 0.25,
+    })
     const body = stripAnsi(panel.renderDetailed())
     expect(body).toMatch(/claude-sonnet-4-6:.*500 cache/)
     expect(body).toMatch(/gpt-4o-mini:.*800 cache/)

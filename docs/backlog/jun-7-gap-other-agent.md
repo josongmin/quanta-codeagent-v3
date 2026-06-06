@@ -15,7 +15,11 @@
 | R4 | §23.4 `/bug` → prefilled GitHub issue URL | **LANDED** | `src/apps/cli/bug-cmd.ts` |
 | R5 | §23.5 per-model cost breakdown | **LANDED** | `src/apps/cli/cost-panel.ts` |
 
-**3x 적대검증서 실버그 2개 잡고 구조수정**: F1=skill `$ARGUMENTS`→`$N` 이중치환(chained replace 재스캔)→single-pass 정규식. F3=`QUANTA_REPO_URL` 스킴검증 없음→https-only 폴백. 둘 다 red-on-injection 회귀테스트 박음. 포스처: correctness-fix는 default-ON, 전부 "absent 입력→byte-identical" 불변식 테스트. fc 4 entry(`jun7-*`) 등록, tsc0/biome0/회귀0.
+**2-라운드 적대검증으로 보강**:
+- **1차(3-agent)** 실버그 2: F1=skill `$ARGUMENTS`→`$N` 이중치환(chained replace 재스캔)→single-pass 정규식. F3=`QUANTA_REPO_URL` 스킴검증 없음→https-only.
+- **2차(30-agent 적대+객관, refute-by-default)** 22제기→15확정→전부 구조수정: **R1** normalizeScope/inScope **asymmetry 근본제거**(공유 `foldPathish`: 백슬래시 scope 0건·`scope="."` 0건·`././` 부분strip 동시해결) + 에러분기 테스트. **R3/R4** repo-controlled package.json version의 **ANSI/OSC 터미널-주입**(untrusted repo open 시 `/version`) sanitize=진짜 bug + repoUrl 정규화(fragment/query/userinfo/FQDN 검증). **R5** model id sanitize·음수 cost clamp·formatTokens dead-branch·per-model cache-read(reconcile).
+
+전부 red-on-injection 회귀테스트 박음. 포스처: correctness-fix는 default-ON, 전부 "absent 입력→byte-identical" 불변식. fc 4 entry(`jun7-*`) 등록, tsc0/biome0/회귀0(1188 pass).
 
 **나머지(아직 deferred — 사용자 wave 파일군과 충돌)**: §19.2/19.4/19.5(MCP client.ts), §20.4(subagent-runner.ts), §23.2(ratelimit 렌더러), §22.3(reverse-MCP). 사용자 wave land 후 그 위에서 additive.
 

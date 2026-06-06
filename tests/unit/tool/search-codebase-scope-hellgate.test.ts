@@ -57,10 +57,8 @@ const runFull = async (
   return last.result
 }
 
-const run = async (
-  tool: ReturnType<typeof searchCodebaseTool>,
-  input: unknown,
-): Promise<string> => (await runFull(tool, input)).output
+const run = async (tool: ReturnType<typeof searchCodebaseTool>, input: unknown): Promise<string> =>
+  (await runFull(tool, input)).output
 
 describe("HELL-SCOPE-1 — absent scope is byte-identical (fetch k, no filter)", () => {
   test("no scope ⇒ pipeline called with exactly k, all hits rendered", async () => {
@@ -213,7 +211,11 @@ describe("HELL-SCOPE-6 — error-kind passthrough on the scoped path (audit find
         return ok([])
       },
     }
-    const r = await runFull(searchCodebaseTool(pipeline), { query: "x", scope: "src/auth" }, ctx(true))
+    const r = await runFull(
+      searchCodebaseTool(pipeline),
+      { query: "x", scope: "src/auth" },
+      ctx(true),
+    )
     expect(r.ok).toBe(false)
     expect(r.output).toContain("aborted before start")
     expect(calls.length).toBe(0)

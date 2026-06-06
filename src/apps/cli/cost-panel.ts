@@ -261,8 +261,7 @@ export const createCostPanel = (opts: CostPanelOptions): CostPanel => {
       // Clamp a finite negative cost to 0 — symmetric with the Math.max(0, …)
       // token clamps above. A negative bill (from a buggy/hostile upstream cost)
       // must never drive the cumulative total below zero.
-      const turnCost =
-        rawCost !== null && Number.isFinite(rawCost) ? Math.max(0, rawCost) : rawCost
+      const turnCost = rawCost !== null && Number.isFinite(rawCost) ? Math.max(0, rawCost) : rawCost
       accumulateCost(turnCost)
       // §23.5 — attribute to the model active at this turn.
       const b = bucketFor(state.model)

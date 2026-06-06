@@ -11,11 +11,7 @@ import { describe, expect, test } from "bun:test"
 import { buildBugCmd, renderBug } from "@/../src/apps/cli/bug-cmd"
 import { repoUrl, resolveCommit, resolveVersion } from "@/../src/apps/cli/repo-info"
 import type { SlashContext } from "@/../src/apps/cli/slash-contract"
-import {
-  buildReleaseNotesCmd,
-  buildVersionCmd,
-  renderVersion,
-} from "@/../src/apps/cli/version-cmd"
+import { buildReleaseNotesCmd, buildVersionCmd, renderVersion } from "@/../src/apps/cli/version-cmd"
 
 const capCtx = (): { ctx: SlashContext; lines: string[] } => {
   const lines: string[] = []
