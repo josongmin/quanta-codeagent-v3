@@ -102,14 +102,18 @@ export const globTool = defineTool<Input>({
 
     // Enumerate via ripgrep so `.gitignore`/`.ignore` are honored NATIVELY
     // (node_modules/, dist/ junk is excluded) — consistent with `src/tool/grep`,
-    // which already shells to rg. `--files` lists files; `-g <pattern>` filters
-    // to the glob. `--hidden` is intentionally OMITTED so dotfiles stay excluded
-    // (matches the prior `dot:false` semantics). The pattern is single-quoted
-    // (`sq`) so it reaches rg verbatim and cannot break out of the argv. We do
-    // NOT pass a path argument: running rg with `cwd: base` makes it search the
-    // jailed base and emit paths RELATIVE to it (an absolute path argument would
-    // make rg print absolute paths, defeating the relative-output contract).
-    const cmd = ["rg", "--files", "--color=never", "--null", "-g", sq(input.pattern)].join(" ")
+    // which already shells to rg. We list ALL non-ignored files (`--files`) and
+    // apply the glob IN-PROCESS below, rather than via rg's `-g <pattern>`:
+    // ripgrep treats `-g` as a force-INCLUDE override that RE-ADMITS individual
+    // files matched by `.gitignore`/`.ignore` (a gitignored `secret.ts` would
+    // surface under `**/*.ts`), which contradicts this tool's "Respects
+    // .gitignore" contract. Filtering in-process keeps the gitignore prune
+    // authoritative. `--hidden` is intentionally OMITTED so dotfiles stay
+    // excluded (matches the prior `dot:false` semantics). We do NOT pass a path
+    // argument: running rg with `cwd: base` makes it emit paths RELATIVE to the
+    // jailed base (an absolute path argument would make rg print absolute paths,
+    // defeating the relative-output contract).
+    const cmd = ["rg", "--files", "--color=never", "--null"].join(" ")
     const r = await runShell(cmd, { cwd: base, signal: ctx.signal })
 
     // rg exits 1 with no stdout when nothing matched. Exit >1 is a real failure
@@ -134,7 +138,15 @@ export const globTool = defineTool<Input>({
 
     // `--null` separates paths with NUL so a path containing a newline cannot
     // forge an extra entry. rg prints paths relative to the jailed `base` (cwd).
-    const rawHits = r.stdout.split("\0").filter((p) => p.length > 0)
+    const allFiles = r.stdout.split("\0").filter((p) => p.length > 0)
+
+    // Apply the glob IN-PROCESS over the gitignore-pruned file list. `Bun.Glob`
+    // gives standard glob semantics (`*` = one path segment, `**` = any depth) —
+    // `src/**/*.ts` matches nested, `*.ts` matches top-level only. Because the
+    // input list already excludes gitignored entries, a gitignored file can
+    // NEVER surface here regardless of the pattern (the F1 fix).
+    const matcher = new Bun.Glob(input.pattern)
+    const rawHits = allFiles.filter((rel) => matcher.match(rel))
 
     // Re-jail + stat each hit (defense in depth; see `collectSurvivors`).
     const survivors = await collectSurvivors(rawHits, base, ctx.cwd)

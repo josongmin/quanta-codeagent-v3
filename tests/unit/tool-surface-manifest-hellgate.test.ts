@@ -97,11 +97,13 @@ describe("tool-surface manifest — CLI default-ON seed derives from the SSOT", 
         "QUANTA_ENABLE_STRUCTURED_PATCH",
         "QUANTA_OBJECTIVE_TOOLS",
         "QUANTA_PROMPT_CACHE_STATUS",
+        "QUANTA_SIDE_AGENT",
         "QUANTA_SUBAGENT",
         "QUANTA_SUBAGENT_6TOOLS",
         "QUANTA_SUBAGENT_BATCH",
         "QUANTA_SUBAGENT_INTROSPECT",
         "QUANTA_SUBAGENT_MAILBOX",
+        "QUANTA_TEAM_PEER_MSG",
       ].sort(),
     )
   })

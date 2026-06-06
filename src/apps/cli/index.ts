@@ -57,6 +57,18 @@ const CLI_FEATURE_GATES = [
   // runtime-config layer keeps non-CLI surfaces byte-identical; `QUANTA_READ_DEDUP=0`
   // (any value ≠ "1") still wins here (we only seed when unset).
   "QUANTA_READ_DEDUP",
+  // Multi-agent coordination behavior knobs (RFC jun-4/jun-6, ADR-0479/0480/0482)
+  // — the agent↔agent "tiki-taka" protocol. These are BEHAVIOR modifiers on the
+  // already-wired host seams, NOT LLM tools (so they are not in the tool-surface
+  // manifest): TEAM_DAG makes spawn_batch honor `dependencies` (ordered fan-out),
+  // TEAM_BROKER lets a soft-denied worker escalate to the leader's HITL authority
+  // (worker can NEVER self-grant — see coordination-broker-wire.ts), TEAM_IDLE
+  // gives the leader a fan-in barrier over resident side-agent daemons. CLI opts
+  // in by default; the SLICES stay default-OFF at the runtime-config layer, so
+  // non-CLI embeddings are byte-identical and `QUANTA_TEAM_*=0` still wins.
+  "QUANTA_TEAM_DAG",
+  "QUANTA_TEAM_BROKER",
+  "QUANTA_TEAM_IDLE",
 ]
 // The LLM TOOL gates the CLI opts in by default are DERIVED from the tool-
 // surface SSOT (`seedEnvVarsForSurface`) — the single source of truth. Adding a

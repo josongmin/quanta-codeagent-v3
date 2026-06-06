@@ -297,7 +297,6 @@ const toResult = (outcome: AgentOutcome): SubagentResult => ({
  *  (the child simply has no tools — it can still answer from the prompt). */
 const filterRegistry = (parent: ToolRegistry, toolFilter: string[] | undefined): ToolRegistry => {
   if (!toolFilter) return parent
-  return parent /* INJECTED noop filter */
   const allow = new Set(toolFilter)
   const kept = parent
     .specs()
