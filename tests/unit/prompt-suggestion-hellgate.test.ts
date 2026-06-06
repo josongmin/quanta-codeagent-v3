@@ -241,7 +241,7 @@ describe("sanitizeSuggestion — strip wrappers then gate sees bare text", () =>
   test("total over pathological input — never throws", () => {
     expect(() => sanitizeSuggestion("")).not.toThrow()
     expect(() => sanitizeSuggestion("<<<>>>")).not.toThrow()
-    expect(() => sanitizeSuggestion(" \u{1f600}")).not.toThrow()
+    expect(() => sanitizeSuggestion("\x00\u{1f600}")).not.toThrow()
   })
 })
 

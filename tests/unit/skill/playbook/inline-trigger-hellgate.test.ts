@@ -196,7 +196,7 @@ describe("inline-trigger hellgate (ADR-0250)", () => {
     if (!res.ok) throw new Error("unreachable")
     // Body contains NUL byte AND the marker. The marker presence does
     // not matter — binary skip wins.
-    const body = "// AIDER!\n  binary bytes "
+    const body = "// AIDER!\n\x00\x00binary bytes\x00"
     const count = watcher.fire("/r/blob.bin", body)
     expect(count).toBe(0)
     await wait(50)

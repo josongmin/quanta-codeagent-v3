@@ -460,8 +460,8 @@ describe("MCP e2e hell-cases — adversarial tool arguments and results", () => 
     const c = advClient("concurrent") // concurrent mode echoes id back
     try {
       await withTimeout(c.start(), 10_000, "nul-arg start")
-      const res = await withTimeout(c.callTool("alpha", { evil: "a bc" }), 10_000, "nul-arg call")
-      // The JSON-RPC encoder lets through ` ` (JSON spec allows it via
+      const res = await withTimeout(c.callTool("alpha", { evil: "a\x00bc" }), 10_000, "nul-arg call")
+      // The JSON-RPC encoder lets through `\x00` (JSON spec allows it via
       // escape; encodeMessage uses JSON.stringify which escapes it). The
       // server parses, the response carries the id back.
       expect(res.ok).toBe(true)
@@ -497,7 +497,7 @@ describe("MCP e2e hell-cases — adversarial tool arguments and results", () => 
       expect(res.ok).toBe(true)
       expect(res.content).toContain("before")
       expect(res.content).toContain("after")
-      expect(res.content).toContain(" ")
+      expect(res.content).toContain("\x00")
       expect(res.content).toContain("")
     } finally {
       await c.stop().catch(() => undefined)

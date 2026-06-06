@@ -299,7 +299,7 @@ describe("JSONL store hellgate", () => {
 
   test("[D3][adversarial] line with NUL byte injected — line skipped, neighbors survive", async () => {
     // Attack: a malicious automation submission embeds \0 in a string
-    // field (legal in JSON via " "). Some readers crash on this;
+    // field (legal in JSON via "\x00"). Some readers crash on this;
     // the JSONL walker MUST tolerate it. Either the line parses
     // successfully (the schema would still validate) or it's skipped —
     // both are acceptable as long as neighbors survive.
@@ -311,7 +311,7 @@ describe("JSONL store hellgate", () => {
       await store.save("/w", sample("good1"))
       const file = join(dir, "wsh", "automations.jsonl")
       // Literal NUL byte inside the line.
-      const evil = '{"id":"nul ","title":"x","prompt":"p"}'
+      const evil = '{"id":"nul\x00","title":"x","prompt":"p"}'
       await appendFile(file, `${evil}\n`, "utf8")
       await store.save("/w", sample("good2"))
       const loaded = await store.load("/w")

@@ -660,7 +660,7 @@ describe("runAgent hell-cases — adversarial tool_use", () => {
     // and the dispatch wraps that throw into an ok:false tool_result. Pin:
     // never a process-level crash; always a recoverable tool_result block.
     const llm = new FakeLLM([
-      toolUseScript("c1", "write", { path: `${dir}/has nul.txt`, content: "x" }),
+      toolUseScript("c1", "write", { path: `${dir}/has\x00nul.txt`, content: "x" }),
       textScript("recovered"),
     ])
     const stream = new RecordingStream()

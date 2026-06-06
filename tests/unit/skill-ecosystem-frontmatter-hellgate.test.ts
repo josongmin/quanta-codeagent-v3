@@ -296,7 +296,7 @@ describe("C. bundled resources (agents/scripts/references/assets)", () => {
     )
     await mkdir(join(dir, "agents"), { recursive: true })
     // Binary garbage / no interface block at all.
-    await writeFile(join(dir, "agents", "openai.yaml"), "  not yaml : : [", "utf8")
+    await writeFile(join(dir, "agents", "openai.yaml"), "\x00 not yaml : : [", "utf8")
     const skills = await discoverSkills(root)
     expect(skills).toHaveLength(1) // skill itself survives
     expect(skills[0]?.resources?.agentsYaml).toBeUndefined() // resource omitted

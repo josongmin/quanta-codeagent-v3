@@ -376,7 +376,7 @@ describe("G. idempotence / no-throw", () => {
   })
 
   test("G4 — binary-ish / control-char input does not throw", () => {
-    const junk = " �\u{1F600}\x07\x1b[31m raw bytes \uD800"
+    const junk = "\x00�\u{1F600}\x07\x1b[31m raw bytes \uD800"
     expect(() => R(junk)).not.toThrow()
     expect(() => piiMask(junk)).not.toThrow()
   })

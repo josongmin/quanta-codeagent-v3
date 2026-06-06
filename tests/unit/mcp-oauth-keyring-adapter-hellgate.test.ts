@@ -252,8 +252,8 @@ describe("serialize — parseRecord is TOTAL", () => {
   })
   it("round-trips secrets with newline / quote / unicode / NUL / very-long field values EXACTLY", () => {
     const nasty: TokenRecord = {
-      accessToken: 'line1\nline2\t"q"\\ \u{1F510}π—' + "x".repeat(8192),
-      refreshToken: "ref\r\nwith nul and 日本語",
+      accessToken: 'line1\nline2\t"q"\\\x00\u{1F510}π—' + "x".repeat(8192),
+      refreshToken: "ref\r\nwith\x00nul and 日本語",
       expiresAt: 1_700_000_000_000,
       tokenType: 'Bea"rer\n',
     }
@@ -261,7 +261,7 @@ describe("serialize — parseRecord is TOTAL", () => {
     // JSON escapes control chars, so the serialized blob has NO raw newline/NUL
     // that the get() trailing-\n strip or a CLI could mangle.
     expect(blob).not.toContain("\n")
-    expect(blob).not.toContain(" ")
+    expect(blob).not.toContain("\x00")
     expect(parseRecord(blob)).toEqual(nasty) // exact round-trip
   })
 

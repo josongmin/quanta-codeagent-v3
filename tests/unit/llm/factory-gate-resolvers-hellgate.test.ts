@@ -100,7 +100,5 @@ describe("BLOCKER — resolved serviceTier/debugOAuth value not observable from 
   // value-level assertion (`serviceTier === "priority"`) is unreachable without
   // editing source (export the resolver, or add a fetchImpl passthrough). Left
   // as a todo so the gap is visible in the test report. See REPORT.
-  test.todo(
-    "QUANTA_FAST=1 ⇒ adapter request body service_tier='priority' (needs exported resolver or fetchImpl seam)",
-  )
+  test.todo("QUANTA_FAST=1 ⇒ adapter request body service_tier='priority' (needs exported resolver or fetchImpl seam)", () => {})
 })

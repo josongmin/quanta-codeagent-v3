@@ -59,6 +59,45 @@ TOPOLOGY A (chat panel)                          TOPOLOGY B (terminal claude)
 
 ---
 
+## 0.5 ⚠️ IDE-coupling vs general capability (read this before treating anything as an "IDE gap")
+
+Most of what this extension exposes is **NOT an IDE feature** — it's a **general agent/CLI capability** that
+quanta should (and mostly does) own regardless of surface. The extension just *surfaces* them. Don't read
+PART 4 as an IDE gap list. Classification (general-capability present/absent checked against `src` by grep
+— coarse; "present" = an impl exists, mechanism parity still needs a real read, per the false-parity rule):
+
+| Subsystem | Class | quanta today |
+|---|---|---|
+| Lockfile + WS MCP server + 12 `mcp__ide__*` tools (§6) | **IDE-coupling** | n/a — only if quanta ships its own extension |
+| `selection_changed`/`at_mentioned`/editor-LSP push (§4.5,§5-src,§9) | **IDE-coupling** | n/a |
+| native `vscode.diff` accept/reject UI (§8) | **IDE-coupling** | reviewer `onConfirm` is the analog |
+| debugger/Jupyter MCP from editor (§7) | **IDE-coupling** | no |
+| webview UI protocol + VS Code manifest/keybindings (§10,§11) | **IDE-coupling** | n/a |
+| terminal shell-integration exec (§14) | **IDE-coupling** (VS Code terminal API) | n/a (quanta *is* the terminal) |
+| SDK-spawn-as-subprocess topology (§1) | **IDE-coupling** (host pattern) | `ide.ts` host seam |
+| — | | |
+| OAuth / credentials (§15) | **general** | ✅ chatgpt-oauth + provider seam |
+| /rewind file checkpoints + snapshots (§17) | **general** | ✅ session/store + Shadow ODB (ADR-0108) — reconcile |
+| conversation fork (§17) | **general** | ✅ present (verify algorithm parity) |
+| session storage `.jsonl` + titles (§17) | **general** | ✅ session/store |
+| permission modes / canUseTool (§4) | **general** | ✅ permission subsystem |
+| hooks engine + 30 events + 5 types (§3,§12) | **general** | ✅ hooks engine |
+| MCP lifecycle + elicitation + MCP-OAuth (§19) | **general** | ✅ present (elicitation in permission/types) |
+| control-request runtime vocab (§2) | **general** (host↔agent control) | partial — see §21 |
+| per-edit diagnostic-delta inject (§5 mechanism) | **general** (run checker after edit, inject only-new) | ❌ has turn-level verify, not per-edit |
+| push notifications (§18) | **general** | ✅ cli/notify port |
+| remote-control / teleport (§18) | **general / claude.ai-specific** | remote runner ✅; teleport ❌ (probably skip) |
+| plugins / marketplace (§19) | **general** | thin — verify |
+| compaction / worktree / advisor | **general** | ✅ already |
+
+**Net:** the doc's durable value is the **IDE-coupling** rows (a real spec for an own-extension build) +
+the **control-request vocabulary** (§2). The general rows are a **parity checklist**, not a backlog — only
+two stand out as genuinely worth absorbing: **per-edit diagnostic-delta injection** (§5, the one true
+"new" item) and tightening the **control-request runtime surface** (§2). Everything else: quanta has it;
+verify mechanism parity if a specific behavior matters, don't reimplement.
+
+---
+
 # PART 1 — TOPOLOGY A (extension-driven, SDK over stdio)
 
 ## 1. CLI spawn  **[V]** (`extension.js:42389-42541`)
@@ -536,23 +575,30 @@ The foundational abstraction. **A channel = one spawned CLI + its SDK `query` + 
 
 ## 21. Quanta mapping & gap table (verified)
 
-| Item | Claude Code | quanta today | Action |
-|---|---|---|---|
-| Compaction security-constraint verbatim preserve | yes | **added 2026-06-07** (SUMMARY_SYSTEM + CONTINUATION_SYSTEM) | ✅ done |
-| Diagnostics Pre/Post-edit delta inject (§5) | yes (hook pair, 8-tuple "new" key, JSON, 750/1000ms) | no | wire hook pair; pick diagnostics source |
-| Control-request runtime protocol (§2) | yes (~30 subtypes) | 0 hits | define host↔agent control vocab for the `ide` preset |
-| `thinClientDispatch` routing (slash cmds on thin hosts) | yes (`control-request`, `post-text`) | 0 hits | add optional descriptor; adapter routes |
-| Hook bridge as live closures (§3) | yes (SDK) | quanta hooks are config-based | consider closure/RPC hooks for host-driven mode |
-| IDE host adapter (lockfile+WS MCP / SDK spawn) (§1,6,7) | yes (this ext) | designed seam only (`ide.ts`, "out of repo") | build when own-extension roadmap'd; use this as spec |
-| 12 IDE MCP tools + return shapes (§6.4) | yes | n/a | blueprint for quanta's editor tool surface |
-| Debugger/Jupyter MCP (§7,§19) | yes | no | optional; high effort |
-| Multi-channel manager (FIFO input, broadcast sync) (§13) | yes | `ide` preset = single channel | needed for concurrent host conversations |
-| File checkpoint + /rewind (hard-link snapshots) (§17) | yes | quanta has Shadow ODB (ADR-0108) — verify it covers /rewind UX | reconcile with existing shadow-ODB |
-| Conversation fork (UUID-remap + snapshot copy) (§17) | yes | check session fork support | absorb fork algorithm if absent |
-| Terminal shell-integration exec (3s fallback) + env handoff (§14) | yes | n/a (quanta is the CLI) | reference for quanta's own terminal launcher |
-| Remote-control bridge / teleport / SSH (§18) | yes | partial (remote runner exists) | compare to quanta remote/headless |
-| Elicitation as host callback (§19) | yes | `onConfirm` only (binary) | generalize reviewer seam to MCP-driven prompts |
-| advisor / loop / schedule / hooks-engine / MCP / multi-scope memory / streaming / permission RPC / follow-up queue / worktree / sandbox / compaction / chatgpt-oauth | yes | **already present** | none (not gaps) |
+Split by class (see §0.5). Don't conflate "in the extension" with "missing from quanta."
+
+### A. Genuinely worth absorbing now (general capability quanta lacks or only partly has)
+| Item | quanta today | Action |
+|---|---|---|
+| Compaction security-constraint verbatim preserve | **added 2026-06-07** | ✅ done |
+| **Per-edit diagnostic-delta inject (§5 mechanism)** — run checker after each edit, inject only-NEW (8-tuple key, JSON) | turn-level verify/closeout only, not per-edit | wire Pre/PostToolUse hook pair; source = LSP (IDE) or `tsc --noEmit`/eslint (CLI) |
+| **Control-request runtime surface (§2)** — uniform mid-session `set_model`/`set_permission_mode`/`get_context_usage`/`interrupt`/`rewind` over one channel | partial / scattered | consolidate as the `ide`-preset host↔agent control vocab |
+| `thinClientDispatch` command routing across surfaces | 0 hits | add optional descriptor (`control-request`/`post-text`) |
+| Elicitation generalized (vs binary `onConfirm`) (§19) | `onConfirm` only | generalize reviewer seam to arbitrary MCP-driven prompts |
+
+### B. IDE-coupling — only when quanta ships its own editor extension (use this doc as the spec)
+| Item | Source section |
+|---|---|
+| Lockfile discovery + WS MCP server + 12 `mcp__ide__*` tools (return shapes) | §6 |
+| selection/at-mention notifications + editor-LSP diagnostics push | §4.5, §6.5, §9 |
+| native `vscode.diff` accept/reject → reviewer `onConfirm` | §8 |
+| webview UI protocol (~60 RPCs) + VS Code manifest/keybindings | §10, §11 |
+| SDK-spawn-as-subprocess host topology | §1 |
+| debugger/Jupyter MCP, terminal shell-integration exec | §7, §14 |
+
+### C. General capabilities quanta ALREADY has (parity reference — NOT gaps; verify mechanism only if a specific behavior matters)
+OAuth/credentials (§15) · /rewind file checkpoints + Shadow ODB (§17, reconcile ADR-0108) · conversation fork (§17) · session `.jsonl` storage + titles (§17) · permission modes/canUseTool (§4) · hooks engine + events (§3,§12) · MCP lifecycle + elicitation + MCP-OAuth (§19) · push notifications (§18) · remote runner (§18) · plugins (thin — verify) · compaction · worktree · advisor · streaming · follow-up queue.
+(Skip: teleport — claude.ai-specific.)
 
 **Build order recommendation:** (1) diagnostics hook pair [done-able now, CLI+IDE], (2) control-request +
 thinClientDispatch vocab [unlocks the `ide` preset host contract], (3) full IDE adapter [own-extension

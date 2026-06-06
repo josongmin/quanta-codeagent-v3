@@ -58,7 +58,8 @@ describe("poll_deferred — synchronous registry.poll() throws (no awaitMs)", ()
     expect(r.output).toContain("poll_deferred: registry-error:")
     expect(r.output).toContain("registry poll blew up")
     expect(r.failure?.mode).toBe("error")
-    expect(r.failure?.modelVisibleError).toBe("registry poll blew up")
+    if (r.failure?.mode === "error")
+      expect(r.failure.modelVisibleError).toBe("registry poll blew up")
   })
 
   test("awaitMs:0 still routes through the synchronous poll path", async () => {
@@ -77,7 +78,8 @@ describe("poll_deferred — registry.await() rejects (awaitMs>0)", () => {
     expect(r.output).toContain("poll_deferred: registry-error:")
     expect(r.output).toContain("registry await blew up")
     expect(r.failure?.mode).toBe("error")
-    expect(r.failure?.modelVisibleError).toBe("registry await blew up")
+    if (r.failure?.mode === "error")
+      expect(r.failure.modelVisibleError).toBe("registry await blew up")
   })
 
   test("await throwing SYNCHRONOUSLY (before returning a promise) is also caught", async () => {

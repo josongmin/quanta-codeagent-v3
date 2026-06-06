@@ -1385,8 +1385,11 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     llmTransport: stringOrUndef(env["QUANTA_LLM_TRANSPORT"]),
     // H7 — explicit fail-closed trust attestation for the credential-helper
     // shell. Strict `=== "1"`: only an explicit opt-in authorizes arbitrary
-    // command execution; unset / anything else ⇒ untrusted (no shell).
-    llmCredentialTrusted: gateOn(env, "QUANTA_LLM_CREDENTIAL_TRUSTED"),
+    // command execution; unset / anything else ⇒ untrusted (no shell). Strict
+    // (`gateOnStrict`) — a dangerous gate authorizing arbitrary command exec must
+    // NOT honor loose spellings (`on`/`true`/`yes`); only the literal `1` opts in.
+    // Pinned by `dangerous-gate-strict-ratchet-hellgate`.
+    llmCredentialTrusted: gateOnStrict(env, "QUANTA_LLM_CREDENTIAL_TRUSTED"),
     // Prompt-cache 1h TTL — only the literal "1h" opts in; any other value
     // (incl. absent) ⇒ "5m" (byte-identical fixed-5m cache_control). The
     // factory additionally gates "1h" behind a model allowlist.

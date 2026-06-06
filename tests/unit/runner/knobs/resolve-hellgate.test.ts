@@ -328,9 +328,9 @@ describe("hellgate / resolve — value content adversarial", () => {
     const r = resolveKnobs({
       surface: "bench",
       knobs: km(mk<string>("k", strParse)),
-      cliArgs: { k: "a b" },
+      cliArgs: { k: "a\x00b" },
     })
-    expect(r.get("k")?.value).toBe("a b")
+    expect(r.get("k")?.value).toBe("a\x00b")
   })
 
   test("whitespace-only value reaches parser (parser decides)", () => {

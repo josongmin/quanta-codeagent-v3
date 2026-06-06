@@ -290,7 +290,7 @@ describe("ADR-0076 Gap-2 HELL — signature accumulation modes", () => {
 
   test("I-G2: non-ASCII binary-like signature roundtrip bytewise", () => {
     // Anthropic signatures are opaque; treat as a byte bag.
-    const sig = "sig: ÿ​\u{1F600}_end"
+    const sig = "sig:\x00ÿ​\u{1F600}_end"
     const events: StreamEvent[] = [
       { type: "thinking_delta", text: "t" },
       { type: "signature_delta", signature: sig },
@@ -362,7 +362,7 @@ describe("ADR-0076 Gap-2 HELL — content stress", () => {
   })
 
   test("control chars (\\x00 / \\x1b) inside thinking text preserved verbatim", () => {
-    const text = "before midend"
+    const text = "before\x00midend"
     const events: StreamEvent[] = [
       { type: "thinking_delta", text },
       { type: "message_stop", stop_reason: "end_turn" },

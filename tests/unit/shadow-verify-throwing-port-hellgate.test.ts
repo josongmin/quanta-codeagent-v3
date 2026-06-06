@@ -64,7 +64,8 @@ describe("shadow_verify — port.verify() rejects (async)", () => {
     expect(r.result.output).toContain("shadow_verify: backend-error:")
     expect(r.result.output).toContain("worktree provisioning failed")
     expect(r.result.failure?.mode).toBe("error")
-    expect(r.result.failure?.modelVisibleError).toBe("worktree provisioning failed")
+    if (r.result.failure?.mode === "error")
+      expect(r.result.failure.modelVisibleError).toBe("worktree provisioning failed")
   })
 
   test("the progress event is still emitted BEFORE the error result", async () => {

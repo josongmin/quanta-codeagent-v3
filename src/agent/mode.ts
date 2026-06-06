@@ -56,6 +56,14 @@ export const isMutatingToolBlockedInMode = (mode: AgentMode, action: ToolAction)
   return !MUTATING_MODES.has(mode)
 }
 
+/** True iff `mode` PERMITS mutating tools (a write-capable posture). SSOT
+ *  membership check over {@link MUTATING_MODES}: `default`/`editor` are mutating;
+ *  `plan`/`review`/`audit`/`architect` (and any unknown mode) are read-only
+ *  (fail-closed, mirroring {@link isMutatingToolBlockedInMode}). Used by the
+ *  subagent runner's most-restrictive mode clamp so a repo-controlled named-agent
+ *  `mode:` can never RELAX a read-only parent into a write-capable child. */
+export const isMutatingMode = (mode: AgentMode): boolean => MUTATING_MODES.has(mode)
+
 /** Human-readable rationale for the deny message returned when a mutating
  *  tool is blocked. Used by dispatch so the LLM gets a specific reason ("in
  *  review mode") instead of a generic refusal. */

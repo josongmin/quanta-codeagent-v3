@@ -216,7 +216,7 @@ describe("issue-hint hellgate — adversarial inputs (25+ cases)", () => {
   })
 
   test("h22: input with NUL byte not break extraction", () => {
-    const text = "a/b.py  then TypeError"
+    const text = "a/b.py\x00 then TypeError"
     expect(() => extractIssueHint(text)).not.toThrow()
     const h = extractIssueHint(text)
     expect(h.errors).toContain("TypeError")

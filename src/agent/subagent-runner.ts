@@ -87,6 +87,7 @@ import { isAllowed as isConfirmAllowed, normalizeConfirm } from "./confirm-decis
 import { buildLeaderHitlBroker, type LeaderEscalationDecider } from "./coordination-broker-wire"
 import { type EffortLevel, parseEffort } from "./effort"
 import { runAgent } from "./loop"
+import { isMutatingMode } from "./mode"
 import type { NamedAgentDefinition, NamedAgentResolver } from "./named-agent-registry"
 import type { AgentMode } from "./prompt"
 import type { AgentConfig, AgentOutcome } from "./types"
@@ -419,8 +420,24 @@ const resolveChildMode = (
   parent: AgentConfig,
   req: SubagentRequest,
 ): Pick<AgentConfig, "mode"> | Record<string, never> => {
-  if (req.mode !== undefined && req.mode.length > 0) return { mode: req.mode as AgentMode }
-  return parent.mode !== undefined ? { mode: parent.mode } : {}
+  const parentMode = parent.mode
+  if (req.mode !== undefined && req.mode.length > 0) {
+    const requested = req.mode as AgentMode
+    // Most-restrictive clamp (SECURITY): a named-agent `mode:` (repo-controlled
+    // definition, folded into `req.mode`) may FURTHER restrict the child but must
+    // never RELAX a read-only parent (plan/review/audit/architect) into a
+    // write-capable posture (default/editor). Without this, a definition
+    // declaring `mode: default` would let a review-posture parent spawn a child
+    // that invokes mutating tools — the exact escalation that unconditional
+    // parent-mode inheritance prevented. A read-only parent therefore floors the
+    // child; two mutating modes, or a parent that is already mutating, honor the
+    // request as-is. Pinned by `named-agent-mode-clamp-hellgate`.
+    if (parentMode !== undefined && !isMutatingMode(parentMode) && isMutatingMode(requested)) {
+      return { mode: parentMode }
+    }
+    return { mode: requested }
+  }
+  return parentMode !== undefined ? { mode: parentMode } : {}
 }
 
 /**

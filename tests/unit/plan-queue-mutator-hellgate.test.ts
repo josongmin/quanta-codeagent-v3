@@ -316,7 +316,7 @@ describe("PlanQueueStore mutators — D. delete / findEntry / isolation", () => 
   test("MUT-14: mutators NEVER throw on adversarial inputs (string-typed id with weird shapes)", () => {
     const s = fresh()
     s.enqueue(input("t1", "alive"))
-    const bogus = ["", "fu-", "fu-t-x", "../../etc/passwd", "fu-t1-99999999", " "]
+    const bogus = ["", "fu-", "fu-t-x", "../../etc/passwd", "fu-t1-99999999", "\x00"]
     for (const id of bogus) {
       // All four mutators (and findEntry) must return cleanly. No throws.
       let threw: unknown = null

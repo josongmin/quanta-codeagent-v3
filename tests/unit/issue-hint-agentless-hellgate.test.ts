@@ -260,13 +260,13 @@ describe("agentlessLocalize — adversarial integration", () => {
   })
 
   test("LLM hands back response with embedded null bytes", async () => {
-    const raw = "FILE: src/a.py \nREASON:  null bytes"
+    const raw = "FILE: src/a.py\x00\nREASON: \x00null bytes"
     const llm = new ScriptedLLM(raw)
     const out = await agentlessLocalize("issue", {
       llm,
       fileTree: async () => TREE,
     })
-    // The   trailing the path means it won't exactly match "src/a.py" in
+    // The \x00 trailing the path means it won't exactly match "src/a.py" in
     // the fileTreeSet → dropped. This is the intended hardening: exact-match
     // membership rejects any subtle string-tampering.
     expect(out.files).toEqual([])
