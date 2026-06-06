@@ -240,3 +240,99 @@ The `justification` and the escalation decision are logged via the existing post
 - `src/tool/bash/*` (Phase 2) — `escalate?`/`justification?` inputs; block→`recordDenial`→prompt→re-run-unsandboxed-through-gate; `always-confirm` tier annotation for `escalate:true`; cap enforcement.
 - `src/shared/runtime-config.ts` — `sandboxEscalation` / `sandboxEscalationMax` (+ env parse).
 - `src/tool/surface/manifest.ts` — gated `escalate` field note + drift-guard update.
+
+---
+
+## 10. As-built (jun-06)
+
+**What LANDED (Phase 1 + the Phase-2 machine):**
+
+- **Discriminant.** `SandboxedSpawnResult.denialReason?: SandboxDenial`
+  (`src/runtime/os-sandbox/types.ts`) — mutually exclusive with `degradeReason`
+  (block = "sandbox ran AND denied"; degrade = "sandbox did NOT run"). New
+  closed types `SandboxDenial` + `SandboxDenialSignal`.
+- **The classifier (pure).** `classifySandboxDenial(result, backend)` in
+  `src/runtime/os-sandbox/denial-classify.ts`. No IO/clock/env.
+- **`sandbox_blocked` LLMError arm.** New `LLMErrorKind` arm in
+  `src/shared/errors.ts` (distinct from the degrade `sandbox_error`); sibling
+  converter `sandboxBlockToLlmError` + detector `isSandboxBlockedFailure` in
+  `llm-error-bridge.ts`. Routed `→ hitl_handoff` (user-gated) in
+  `src/llm/retry/codex-spec-router.ts`; typed-error mapping in
+  `src/agent/error-routing/default-classifier.ts`.
+- **Knobs.** `QUANTA_SANDBOX_ESCALATION` (strict `=== "1"`, default-OFF) +
+  `QUANTA_SANDBOX_ESCALATION_MAX` (positive-int cap; default 3) in
+  `src/shared/runtime-config.ts`.
+- **The escalation loop machine (pure, fully-injected).**
+  `src/agent/sandbox-escalation/` — `cap.ts` (per-turn
+  `ExecPolicyAmendmentExhausted` analog) + `orchestrator.ts`
+  (`seedSandboxBlockDenial` + `runSandboxEscalation`). Every collaborator
+  (`store`/`clock`/`cap`/`presentRisk`/`gate`/`rerunUnsandboxed`/`audit`) is a
+  closed-port injection, so the WHOLE loop (block→post-denial 3-step→gate→
+  unsandboxed re-run) is hellgate-proven in isolation. It REUSES the existing
+  `post-denial.ts` machine verbatim — a sandbox-block is just a new *source* of
+  a denial record; no new approval primitive.
+
+**Detection-confidence tiers (the hard part — honest):**
+
+- **HIGH (unambiguous):** `seccomp-sigsys` (exit `128+SIGSYS=159` under the
+  `landlock+seccomp` backend — no normal command raises SIGSYS); `exit-126`
+  (denied `process-exec` under a no-exec profile, on seatbelt/landlock/bwrap);
+  `seatbelt-deny` (an EXACT line-anchored stderr PREFIX — `Sandbox:` /
+  `sandbox-exec:` *with* a `deny` token, or `deny(1)` / `deny default` — NEVER
+  a free substring).
+- **LOW (ambiguous → decline-able SUGGESTION):** `landlock-eperm` (a bare
+  `EPERM`/`EACCES`, which a real non-sandbox permission error mimics exactly);
+  `windows-access` (restricted-token exit 5).
+- **The false-positive guard (load-bearing):** EVERY detection gates on
+  `sandboxApplied === true` FIRST (a degraded/unapplied sandbox is NEVER
+  classified, even if the *command itself* printed `Sandbox: deny` to stderr);
+  a normal non-sandbox `EPERM` with no high-confidence signal is NOT classified
+  high; an unrecognised nonzero exit yields `undefined` (we UNDER-detect rather
+  than over-escalate). Sealed by `sandbox-escalation-classify-hellgate.test.ts`
+  (incl. the normal-EPERM-not-misdetected + the `sandboxApplied:false`-never-
+  classified + the substring-not-matched cases).
+
+**The escalation-NEVER-auto invariant:** the loop fires `recordRiskSeen` only
+when the risk surface renders, then `recordUserOverride` only on user approval,
+preserving the ADR-0046 `deniedAt ≤ seenRiskAt ≤ userOverrideAt` timestamp
+ordering (a fabricated/out-of-order override keeps `hasPostDenialOverride`
+false). On approval the byte-same argv is routed through the NORMAL permission
+gate (the gate may still deny/hand-off — escalation does NOT bypass it) before
+re-running WITHOUT the sandbox wrapper for that ONE call. The model's
+`justification` flows to the AUDIT sink only, never the metric funnel.
+
+**The one deliberate hold (why fc maturity = L2, not L3):** the bash hot-path
+*call site* — bash result-handling invoking `seedSandboxBlockDenial` /
+`runSandboxEscalation`, and the platform result-mapping points
+(`landlock-native` `mapNapiResult`, the Seatbelt path, `wrapLinuxShellArgv`)
+SETTING `denialReason` under the knob — is NOT wired here, to avoid colliding
+with substantial in-flight uncommitted changes in `src/tool/bash/*` and the
+loop. The machine is complete + hellgate-proven; promoting to L3 is the
+bash-side wiring + a bash regression pass. `src/permission/post-denial.ts` was
+NOT modified (the existing 3-step API + injected clock already accept a
+sandbox-sourced denial verbatim — the cleanest reuse); the
+`decidedBy:"sandbox-escalation"` recorder source is a follow-up nicety, not a
+correctness requirement.
+
+**Default-ON flip (Phase 3) — OUT OF SCOPE.** This RFC built the escape hatch
+(the prerequisite). Flipping `QUANTA_SANDBOX` to default-ON is a SEPARATE
+decision, gated on Phase-2 bash wiring + a corpus measurement of the
+false-positive rate.
+
+**Residual false-positive risk (honest):** the `seatbelt-deny` stderr match is
+the riskiest signal — a command could in principle print a line starting with
+`Sandbox:` + a `deny` token. Mitigated by the line-anchored EXACT prefix (not a
+substring) + the `sandboxApplied:true` precondition + `confidence:"high"` STILL
+requiring user approval to act (NEVER-auto). The `landlock-eperm` /
+`windows-access` LOW tier is *deliberately* indistinguishable from a real
+permission error — hence surfaced as a decline-able suggestion, not an
+auto-escalation. Net: a false positive costs the user one declinable question,
+never a silent unsandboxed run.
+
+**Gates:** tsc green (full `src` typecheck); biome clean on all new/touched
+files (the one residual `noExcessiveCognitiveComplexity` warning in
+`src/shared/errors.ts#classify` PRE-DATES this change — verified against HEAD);
+`fc validate` green (893 features, all evidence resolved). New hellgate:
+`tests/unit/sandbox-escalation-{classify,loop,off-byte-identity}-hellgate.test.ts`
+— 29 tests / 0 fail; existing os-sandbox + post-denial + recovery-router suites
+regression-clean.
