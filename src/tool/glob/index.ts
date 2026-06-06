@@ -14,13 +14,6 @@ type Input = z.infer<typeof schema>
 
 const MAX = 300
 
-// Single-quote for the rg argv — mirrors `src/tool/grep`'s `sq()` so a pattern
-// containing shell metacharacters is passed VERBATIM to ripgrep and cannot
-// break out of the argument into the surrounding `bash -lc` command. The
-// absolute/`..` escape check still runs BEFORE this (an escaping pattern is
-// rejected, never quoted-and-run).
-const sq = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`
-
 /** A surviving glob hit: the base-relative path emitted by rg plus its mtime. */
 type Survivor = { rel: string; mtimeMs: number }
 

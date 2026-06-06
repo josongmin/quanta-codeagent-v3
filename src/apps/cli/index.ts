@@ -77,6 +77,15 @@ const CLI_FEATURE_GATES = [
 for (const gate of [...CLI_FEATURE_GATES, ...seedEnvVarsForSurface("cli")]) {
   if (process.env[gate] === undefined) process.env[gate] = "1"
 }
+// followup_task (ADR-0041/0437) — the agent↔agent ACTIVE-call tool: deliver a
+// message to an existing child AND trigger/interrupt its turn (vs the passive
+// subagent_send_message mailbox the child must poll). It is wired ONLY via
+// optional-ports `wireOptionalAgentPorts` whose gate is a STRICT `=== "on"`
+// (envGateOn), NOT the `parseEnvFlag`/`"1"` convention the loop above seeds — and
+// it has no CLI-path reader — so it cannot ride that loop. Seed it to "on"
+// explicitly so a leader can drive its workers out of the box. Any explicit value
+// ≠ "on" (e.g. `QUANTA_SUBAGENT_FOLLOWUP=off`) still wins — we only seed when unset.
+if (process.env.QUANTA_SUBAGENT_FOLLOWUP === undefined) process.env.QUANTA_SUBAGENT_FOLLOWUP = "on"
 
 /** Validated `QUANTA_REMOTE_TIMEOUT_MS` → optional `{ defaultTimeoutMs }`.
  *  A raw `Number.parseInt` would forward `NaN` on garbage input (silently
@@ -167,16 +176,32 @@ const main = async (): Promise<void> => {
     // ADR-0303 thin-surface — these moved DOWN into `@/host/runtime`, so the
     // CLI reaches them by reaching DOWN (allowed) instead of sideways into
     // `apps/agent` (a cross-surface edge the coupling ratchet forbids).
-    const [{ parseAgentArgs, buildBaseFromArgs, toAssembleRequest }, { createSubagentRunner }] =
-      await Promise.all([import("@/host/runtime"), import("@/agent")])
+    const [
+      { parseAgentArgs, buildBaseFromArgs, toAssembleRequest },
+      { createSubagentRunner, loadNamedAgents },
+    ] = await Promise.all([import("@/host/runtime"), import("@/agent")])
+    // F2 (round-2) — load `.quanta/agents` (+ native dir) ONCE and thread the
+    // resolver onto the assemble partial so a `quanta batch` row whose model
+    // emits `agent_type:"foo"` resolves the named definition (parity with the
+    // headless `apps/agent` surface). `buildBaseFromArgs` lifts the partial slot
+    // onto `AgentConfig.namedAgentResolver`, which the SubagentRunner consults
+    // per spawn. cwd = `process.cwd()` (batch has no jailed cwd before assembly;
+    // each child row inherits the headless parent base's cwd, also process.cwd()).
+    // FAIL-OPEN + default-OFF byte-identical: no agent dir ⇒ EMPTY registry ⇒
+    // slot stays absent ⇒ no named agent ever resolves; a thrown loader is
+    // swallowed to `undefined` so assembly can NEVER fault on the registry load.
+    const batchPartial = toAssembleRequest(
+      parseAgentArgs(["--mode", "headless", "-p", "batch-runner-parent"]),
+    )
+    const batchNamedAgents = await loadNamedAgents(process.cwd()).catch(() => undefined)
+    if (batchNamedAgents !== undefined && batchNamedAgents.size > 0) {
+      batchPartial.namedAgentResolver = batchNamedAgents
+    }
     // A headless parent config is enough to build the row-dispatch SubagentRunner
     // (batch never enters the parent's own agent loop — each row is a child, so
     // the placeholder `-p` is never consumed; it only satisfies headless arg
     // validation).
-    const base = buildBaseFromArgs(
-      toAssembleRequest(parseAgentArgs(["--mode", "headless", "-p", "batch-runner-parent"])),
-      ac.signal,
-    )
+    const base = buildBaseFromArgs(batchPartial, ac.signal)
     const runner = createSubagentRunner(base)
     const code = await runBatchCmd(batchArgv, { runner })
     process.off("SIGINT", onSig)

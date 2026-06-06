@@ -451,13 +451,12 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * See {@link WorkingStateBlock} for the field-level docs.
    */
   workingState?: WorkingStateBlock
-  /** §19.1 (jun-7 gap-other-agent) — honor a TRUSTED MCP server's
-   *  `ToolAnnotations` (readOnly/idempotent hints) when deriving bridged-tool
-   *  `isReadOnly`/`isConcurrencySafe` predicates. Knob `QUANTA_MCP_TOOL_ANNOTATIONS`.
-   *  The composition root reads it into `loadMcpTools` opts (`annotationsHonored`);
-   *  the per-server `McpServerConfig.trusted` flag is the second gate. Absent ⇒
-   *  every MCP tool stays mutating/non-concurrency-safe (byte-identical). */
-  mcpToolAnnotations?: boolean
+  // §19.1 NOTE (SSOT): there is deliberately NO `mcpToolAnnotations` field here.
+  // The SOLE LIVE channel for the `QUANTA_MCP_TOOL_ANNOTATIONS` knob is the
+  // env var, read at the composition root via `runtimeConfig().mcpToolAnnotations`
+  // and folded into the `loadMcpTools` opts (`annotationsHonored`); the bridge
+  // never reads an `AgentConfig` field, so a config field here would be dead
+  // (and an observability footgun). The knob's `apply` is an identity no-op.
   /** §20.2 (jun-7 gap-other-agent) — host-wired named-agent resolver. The
    *  subagent runner consults this when a spawn carries a matching `agentType`
    *  and folds the resolved definition's `{system, tools, model, mode}` into the

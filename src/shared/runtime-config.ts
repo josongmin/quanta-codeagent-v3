@@ -72,7 +72,13 @@ const parsePositiveInt = (raw: string | undefined, varName: string): number | un
   return n
 }
 
-const parseBool = (raw: string | undefined): boolean => {
+/** SSOT truthy predicate for boolean env knobs. Case-INSENSITIVE: `"1"` /
+ *  `"true"` / `"on"` (any case) ⇒ true; `undefined` / empty / any other value ⇒
+ *  false. Exported so a knob's own `parse` can reuse the EXACT same function as
+ *  the live `runtimeConfig()` read (e.g. `QUANTA_MCP_TOOL_ANNOTATIONS`), making
+ *  the two channels byte-equal — no `"TRUE"`/`"ON"` divergence between the knob
+ *  registry/telemetry and the consumer. */
+export const parseBool = (raw: string | undefined): boolean => {
   if (raw === undefined) return false
   return raw === "1" || raw.toLowerCase() === "true" || raw.toLowerCase() === "on"
 }

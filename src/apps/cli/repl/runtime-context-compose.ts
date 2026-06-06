@@ -1,5 +1,5 @@
 import * as readline from "node:readline/promises"
-import { createOnConfirmReviewerPort } from "@/agent"
+import { createOnConfirmReviewerPort, loadNamedAgents, type NamedAgentResolver } from "@/agent"
 import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import { createClassifierBackedAutoReview } from "@/agent/reviewer-port"
 import type { SessionBootstrapResult } from "@/host/bootstrap"

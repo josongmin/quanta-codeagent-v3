@@ -25,10 +25,15 @@
  * the env-allowlist source of truth is shared either way. See ADR-0454.
  */
 
-import { scrubEnv } from "@/runtime"
+import { defaultPpidWalkKiller, scrubEnv } from "@/runtime"
 import { escalatingKill, withSpawnedChild } from "@/runtime/guarded-spawn"
 import { disclaimedShellArgv } from "@/runtime/shell-disclaim"
 import type { CommandHookExecOpts, CommandHookExecPort, CommandHookExecResult } from "./types"
+
+/** D1 (jun-7) — whole-tree killer for the sandboxed command-hook shell. A hook
+ *  runs an arbitrary `bash` command that can fork children; the legacy single-
+ *  PID kill orphaned that subtree on timeout/abort. Module-level singleton. */
+const HOOK_TREE_KILLER = defaultPpidWalkKiller()
 
 const TRUNCATION_MARKER = "\n…[output truncated by command-hook maxOutputBytes]"
 
@@ -76,7 +81,7 @@ export const createSandboxCommandHookExec = (): CommandHookExecPort => ({
       // capture stdout/exit.
     }
 
-    const { kill, disarm } = escalatingKill(proc)
+    const { kill, disarm } = escalatingKill(proc, HOOK_TREE_KILLER)
     const timer = setTimeout(() => {
       timedOut = true
       kill()

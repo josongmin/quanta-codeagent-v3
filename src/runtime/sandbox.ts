@@ -1,8 +1,16 @@
 import { QuantaError } from "@/shared"
 import { escalatingKill, withSpawnedChild } from "./guarded-spawn"
 import { type ProxyEnvInput, withProxyEnv } from "./network-proxy"
+import { defaultPpidWalkKiller } from "./process-tree"
 import { disclaimedShellArgv } from "./shell-disclaim"
 import type { ShellResult } from "./types"
+
+/** D1 (jun-7) — whole-tree killer for the sandboxed `bash -lc` / `docker run`
+ *  spawns below. LocalSandbox runs a user-command shell that forks children;
+ *  the legacy single-PID `proc.kill()` SIGTERMed only the shell and orphaned its
+ *  subtree (the exact bug shell.ts/bash-bg fix). Module-level singleton (the
+ *  ppid-walk adapter is pure per `signalTree`). */
+const SANDBOX_TREE_KILLER = defaultPpidWalkKiller()
 
 /**
  * Declarative confinement for a single command execution.
@@ -211,7 +219,7 @@ export class LocalSandbox implements Sandbox {
 
     // SIGTERM→SIGKILL escalation (KILL_GRACE_MS): a TERM-trapping child is
     // force-killed; `disarm` clears the grace timer in the guard's cleanup.
-    const { kill, disarm } = escalatingKill(proc)
+    const { kill, disarm } = escalatingKill(proc, SANDBOX_TREE_KILLER)
     const timer = setTimeout(() => {
       timedOut = true
       kill()
@@ -366,7 +374,7 @@ export class DockerSandbox implements Sandbox {
     const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe" })
     // SIGTERM→SIGKILL escalation (KILL_GRACE_MS): a `docker run` that ignores
     // TERM is force-killed; `disarm` clears the grace timer in cleanup.
-    const { kill, disarm } = escalatingKill(proc)
+    const { kill, disarm } = escalatingKill(proc, SANDBOX_TREE_KILLER)
     const timer = setTimeout(() => {
       timedOut = true
       kill()

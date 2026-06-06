@@ -219,6 +219,14 @@ type RuntimeBootstrapOverlay = {
    *  `LoopbackEgressProxy` and threads `proxyEnv` into the bash-tool child
    *  spawn. Absent ⇒ slot omitted (default-OFF, byte-identical). */
   readonly networkProxy?: AgentConfig["networkProxy"]
+  /** F2 (round-2) — host-wired named-agent resolver (`loadNamedAgents(cwd)`).
+   *  When set, the base carries `namedAgentResolver` so the per-turn assembled
+   *  `AgentConfig` (and thus the SubagentRunner the loop builds) resolves a
+   *  spawn's `agentType` to a `.quanta/agents` definition — parity with the
+   *  headless `apps/agent` surface, which threads the same resolver via its
+   *  `AssembleRequestPartial`. Absent ⇒ slot omitted (default-OFF,
+   *  byte-identical: no named agent ever resolves). */
+  readonly namedAgentResolver?: AgentConfig["namedAgentResolver"]
 }
 
 interface RuntimeBootstrapHelpers {
@@ -477,6 +485,9 @@ const buildBootstrapBaseShape = (
     ...whenDefined("admissibility", args.overlay?.admissibility),
     ...whenDefined("shellSnapshot", args.overlay?.shellSnapshot),
     ...whenDefined("networkProxy", args.overlay?.networkProxy),
+    // F2 (round-2) — lift the host-wired named-agent resolver onto the base so
+    // the per-turn `assembleAgentConfig` spread carries it to the SubagentRunner.
+    ...whenDefined("namedAgentResolver", args.overlay?.namedAgentResolver),
     ...whenDefined("sessionConfigPort", args.boot.sessionConfigPort),
     // jun-6 (RFC jun-6-ai-session-title) — spread the AI titler ONLY when the
     // surface built it (knob on + cheap model). Absent ⇒ slot omitted ⇒ the

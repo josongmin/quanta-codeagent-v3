@@ -17,33 +17,35 @@
  * Annotations can only ever ELEVATE a trusted server's tool, never downgrade
  * safety.
  *
- * STRICT truthy gate — only `"1"`, `"on"`, `"true"` parse to `true`. Falsy /
- * garbage / empty / whitespace return `undefined` so the caller falls through to
- * the next layer (NOT a silent "off"). No heuristics.
+ * Truthy gate — `"1"` / `"on"` / `"true"` (CASE-INSENSITIVE) parse to `true`;
+ * falsy / garbage / empty return `undefined` so the caller falls through to the
+ * next layer (NOT a silent "off"). No heuristics.
  *
- * SSOT (Finding 2): the SOLE LIVE channel is the env var, read by the
+ * SSOT (Finding 2 / SSOT): the SOLE LIVE channel is the env var, read by the
  * composition root via `runtimeConfig().mcpToolAnnotations` when assembling the
- * `loadMcpTools` opts (`annotationsHonored`). That parse shares THIS knob's
- * truthy vocabulary (`{1,on,true}`, via `parseBool`), so the knob registry /
- * telemetry can never disagree with the consumer. The previous `apply` wrote
+ * `loadMcpTools` opts (`annotationsHonored`). This knob's `parse` reuses the
+ * EXACT SAME `parseBool` predicate that `runtimeConfig` uses for this env var, so
+ * the two channels are BYTE-EQUAL on every value — including case variants like
+ * `"TRUE"` / `"ON"`, which previously diverged (the knob's old case-SENSITIVE
+ * Set reported OFF while the bridge read ON). The previous `apply` wrote
  * `AgentConfig.mcpToolAnnotations`, but NOBODY read it (the bridge uses the
- * runtime-config path) — so `apply` is now an identity no-op (it still
- * advertises the knob in the registry for telemetry / `--help`, but mutates no
- * config field). No `costMultiplier` (pure policy selection — zero added matrix
- * budget).
+ * runtime-config path) — so that field is now removed and `apply` is an identity
+ * no-op (it still advertises the knob in the registry for telemetry / `--help`,
+ * but mutates no config field). No `costMultiplier` (pure policy selection —
+ * zero added matrix budget).
  */
 
 import type { AgentConfig } from "@/agent"
+import { parseBool } from "@/shared"
 import { registerKnob } from "../registry"
 import type { Knob, Surface } from "../types"
 
 const SURFACES: readonly Surface[] = ["cli", "agent-batch", "agent-interactive"]
-const TRUTHY = new Set(["1", "on", "true"])
 
-const parseMcpToolAnnotations = (raw: string | undefined): true | undefined => {
-  if (raw === undefined) return undefined
-  return TRUTHY.has(raw) ? true : undefined
-}
+const parseMcpToolAnnotations = (raw: string | undefined): true | undefined =>
+  // SSOT — reuse the SAME predicate `runtimeConfig().mcpToolAnnotations` uses, so
+  // the knob registry/telemetry can NEVER disagree with the live bridge read.
+  parseBool(raw) ? true : undefined
 
 /** SSOT (Finding 2) — identity no-op: the live channel is `runtimeConfig`
  *  (env→`mcpToolAnnotations`), NOT `AgentConfig`. The knob stays registered (so

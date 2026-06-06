@@ -54,6 +54,7 @@ export type { PtyBackend, RuntimeConfig, SwebenchCacheLevel } from "./runtime-co
 export {
   __resetRuntimeConfig,
   LOG_LEVELS,
+  parseBool,
   runtimeConfig,
   SWEBENCH_CACHE_LEVELS,
 } from "./runtime-config"
