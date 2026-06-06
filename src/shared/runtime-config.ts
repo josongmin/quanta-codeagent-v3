@@ -26,7 +26,7 @@
  */
 
 import { tlsMitmAuthorized } from "@/runtime/network-proxy/mitm-gate"
-import { gateDisabled, gateDisabledStrict, gateOn, gateOnStrict } from "./env-flag"
+import { gateDisabledStrict, gateOn, gateOnStrict } from "./env-flag"
 import { writeStderr } from "./terminal-io"
 
 export const LOG_LEVELS = ["debug", "info", "warn", "error"] as const
@@ -1098,7 +1098,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // ADR-0473 — strict `=== "1"` opt-in (matches the `bgCompactionEnabled`
     // slice gate; `parseBool` also accepts true/on but the slice gate is the
     // SSOT, so keep it strict here too).
-    bgCompaction: gateOn(env, "QUANTA_BG_COMPACTION"),
+    bgCompaction: gateOnStrict(env, "QUANTA_BG_COMPACTION"),
     // RFC jun-6-microcompaction — strict `=== "1"` opt-in. Default false ⇒ the
     // tier-1 eviction pre-pass is never constructed (byte-identical). The
     // keep/floor/interval tunables are positive ints (no magic literals); absent
@@ -1118,13 +1118,13 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     ),
     // ADR-0471 — strict `=== "1"` opt-in (matches the `untrustedEnvelopeEnabled`
     // slice gate, which is the SSOT). Default false ⇒ dispatch wraps nothing.
-    untrustedEnvelope: gateOn(env, "QUANTA_UNTRUSTED_ENVELOPE"),
+    untrustedEnvelope: gateOnStrict(env, "QUANTA_UNTRUSTED_ENVELOPE"),
     // ADR-0472 — strict `=== "1"` opt-in (matches the `editRepairLoopEnabled`
     // slice gate, the SSOT). Default false ⇒ no lint-delta attached.
-    editRepairLoop: gateOn(env, "QUANTA_EDIT_REPAIR_LOOP"),
+    editRepairLoop: gateOnStrict(env, "QUANTA_EDIT_REPAIR_LOOP"),
     // ADR-0476 — strict `=== "1"` opt-in (matches the `skillMcpDepsEnabled`
     // slice gate). Default false ⇒ no deps lifted, no auto-attach.
-    skillMcpDeps: gateOn(env, "QUANTA_SKILL_MCP_DEPS"),
+    skillMcpDeps: gateOnStrict(env, "QUANTA_SKILL_MCP_DEPS"),
     // ADR-0470 B1 follow-up — strict `=== "1"` opt-in. SEAM (validated, not yet
     // composed at the root): no production code reads this field, so it is a
     // no-op today (byte-identical ON or OFF). Default false ⇒ MCP `sampling` is
@@ -1421,7 +1421,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // jun-6 exfil-rail (b) — strict `=== "1"` opt-in. Default false ⇒ no glob
     // check threaded onto ToolContext (write/edit accept a glob path as a
     // literal filename, byte-identical).
-    globWriteGuard: gateOn(env, "QUANTA_GLOB_WRITE_GUARD"),
+    globWriteGuard: gateOnStrict(env, "QUANTA_GLOB_WRITE_GUARD"),
     // jun-6 exfil-rail (a) — strict `=== "1"` opt-in. Default false ⇒ no budget
     // port wired (byte-identical). Also requires a configured cap below.
     writeBudget: gateOn(env, "QUANTA_WRITE_BUDGET"),
@@ -1432,7 +1432,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // jun-6 exfil-rail (c) — strict `=== "1"` opt-in. Default false ⇒ detector
     // never called + scouting taxonomy line omitted (byte-identical). Requires
     // a configured K below to fire.
-    exfilScouting: gateOn(env, "QUANTA_EXFIL_SCOUTING"),
+    exfilScouting: gateOnStrict(env, "QUANTA_EXFIL_SCOUTING"),
     // jun-6 exfil-rail (c) — the CONFIGURABLE threshold K (positive integer). No
     // hardcoded default (no-heuristics rule): absent/invalid ⇒ undefined ⇒ the
     // detector stays inert even when QUANTA_EXFIL_SCOUTING=1.

@@ -126,16 +126,39 @@ const matchesFilter = (
   return true
 }
 
-/** Eviction ordering key: 0 = delivered (evict first), 1 = undelivered. A cell
- *  (direct OR broadcast) counts as delivered once ANY reader has consumed it. */
-const deliveredRank = (cell: Cell): 0 | 1 => (cell.delivered.size > 0 ? 0 : 1)
+/** Eviction ordering key: 0 = fully delivered (evict first), 1 = still pending.
+ *
+ *  DIRECT cells have exactly ONE intended reader (`cell.to`), so any delivery
+ *  means fully delivered. A BROADCAST has many readers but the store does not
+ *  know the agent universe a-priori; instead it tracks `knownReaders` (every id
+ *  observed via `read`) and treats a broadcast as fully delivered ONLY when
+ *  EVERY known non-sender reader has consumed it. This is the jun-07 structural
+ *  fix: the prior rank treated a broadcast as evict-first once ANY one reader
+ *  read it, so under memory pressure a broadcast still PENDING for a slower
+ *  sibling could be reclaimed ahead of a fully-consumed one — silent loss within
+ *  the observed population. Ranking against `knownReaders` keeps a partially-read
+ *  broadcast in the pending tier until every observed reader has it. (A reader
+ *  that has never called `read` is not in `knownReaders`, so it cannot pin a
+ *  broadcast; the retention window is the backstop for a future first-time
+ *  reader. Total memory stays bounded by `maxRetained` regardless.) */
+const deliveredRank = (cell: Cell, knownReaders: ReadonlySet<string>): 0 | 1 => {
+  if (cell.delivered.size === 0) return 1 // nobody has read it → keep
+  if (cell.to !== BROADCAST) return 0 // direct: its sole intended reader consumed
+  for (const r of knownReaders) {
+    if (r !== cell.from && !cell.delivered.has(r)) return 1 // pending for a known reader
+  }
+  return 0
+}
 
-/** Is `cell` an UNDELIVERED-to-anyone cell attributable to `sender`? Used by
- *  the per-sender quota: a cell counts as long as no reader has consumed it
- *  (`delivered.size === 0`). Module-level so the closure per-send predicate
- *  inlines the same definition the eviction loop uses. */
-const isUndeliveredFromSender = (cell: Cell, sender: string): boolean =>
-  cell.from === sender && deliveredRank(cell) === 1
+/** Is `cell` an UNDELIVERED (still-pending) cell attributable to `sender`? Used
+ *  by the per-sender quota. Mirrors the eviction `deliveredRank` so a partially-
+ *  delivered broadcast (pending for some known reader) still counts toward the
+ *  sender's undelivered budget. */
+const isUndeliveredFromSender = (
+  cell: Cell,
+  sender: string,
+  knownReaders: ReadonlySet<string>,
+): boolean => cell.from === sender && deliveredRank(cell, knownReaders) === 1
 
 /** Apply the per-sender quota to every distinct sender currently present in
  *  `cells`. Module-level so `fromSnapshot` stays under the cognitive-complexity
@@ -143,11 +166,15 @@ const isUndeliveredFromSender = (cell: Cell, sender: string): boolean =>
  *  hole (audit-H R3): without this sweep, an adversarial snapshot can seed
  *  any number of undelivered cells past `cap` for a single sender, and the
  *  `send`-time quota would not retroactively reclaim them. */
-const enforcePerSenderQuotaAll = (cells: Map<string, Cell>, cap: number | undefined): void => {
+const enforcePerSenderQuotaAll = (
+  cells: Map<string, Cell>,
+  cap: number | undefined,
+  knownReaders: ReadonlySet<string>,
+): void => {
   if (cap === undefined || !Number.isFinite(cap) || cap <= 0) return
   const seenSenders = new Set<string>()
   for (const c of cells.values()) seenSenders.add(c.from)
-  for (const sender of seenSenders) enforcePerSenderQuota(cells, sender, cap)
+  for (const sender of seenSenders) enforcePerSenderQuota(cells, sender, cap, knownReaders)
 }
 
 /** Per-sender quota: ensure `sender` holds at most `cap` undelivered cells.
@@ -159,6 +186,7 @@ const enforcePerSenderQuota = (
   cells: Map<string, Cell>,
   sender: string,
   cap: number | undefined,
+  knownReaders: ReadonlySet<string>,
 ): void => {
   if (cap === undefined || !Number.isFinite(cap) || cap <= 0) return
   // Tally + collect this sender's undelivered cells in insertion order
@@ -166,7 +194,7 @@ const enforcePerSenderQuota = (
   // `clockNow`, so this IS the FIFO order).
   const undelivered: Cell[] = []
   for (const c of cells.values()) {
-    if (isUndeliveredFromSender(c, sender)) undelivered.push(c)
+    if (isUndeliveredFromSender(c, sender, knownReaders)) undelivered.push(c)
   }
   if (undelivered.length <= cap) return
   undelivered.sort((a, b) => a.sentAt - b.sentAt)
@@ -186,6 +214,7 @@ const evict = (
   maxRetained: number,
   retentionMs: number,
   t: number,
+  knownReaders: ReadonlySet<string>,
 ): void => {
   if (retentionMs > 0) {
     for (const [id, c] of cells) {
@@ -194,8 +223,8 @@ const evict = (
   }
   if (cells.size <= maxRetained) return
   const all = [...cells.values()].sort((a, b) => {
-    const ra = deliveredRank(a)
-    const rb = deliveredRank(b)
+    const ra = deliveredRank(a, knownReaders)
+    const rb = deliveredRank(b, knownReaders)
     return ra !== rb ? ra - rb : a.sentAt - b.sentAt
   })
   let drop = cells.size - maxRetained
@@ -283,6 +312,12 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
 
   /** Insertion order preserved by Map iteration; `id → Cell`. */
   const cells = new Map<string, Cell>()
+  /** Every agent id ever observed via `read` — the OBSERVED reader population a
+   *  broadcast's "fully delivered" rank is computed against (see `deliveredRank`).
+   *  Naturally bounded by the number of distinct agents in the session; reader
+   *  ids are system-minted (the runner's mailbox labels / `ctx.agentLabel`), not
+   *  arbitrary caller input via the tool surface. */
+  const knownReaders = new Set<string>()
 
   const clockNow = (): number => {
     try {
@@ -341,8 +376,8 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
         // Per-sender quota runs BEFORE the global LRU so a hostile sender's
         // excess always lands on its OWN oldest undelivered cell — never on a
         // legitimate sibling's at the same `rank=1` undelivered tier.
-        enforcePerSenderQuota(cells, cell.from, maxUndeliveredPerSender)
-        evict(cells, maxRetained, retentionMs, t)
+        enforcePerSenderQuota(cells, cell.from, maxUndeliveredPerSender, knownReaders)
+        evict(cells, maxRetained, retentionMs, t, knownReaders)
         return toMessage(cell)
       } catch (e) {
         logger.warn(`subagent-mailbox.send: ${errMessage(e)}`)
@@ -361,6 +396,9 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
     read(agentId, opts2): readonly MailboxMessage[] {
       try {
         if (!isNonEmptyString(agentId)) return Object.freeze([])
+        // Record the OBSERVED reader so a broadcast's "fully delivered" rank can
+        // require every known reader to have consumed it before it is evict-first.
+        knownReaders.add(agentId)
         const picked = collect(agentId, opts2)
         return Object.freeze(markDelivered(picked, agentId, clockNow()))
       } catch (e) {
@@ -453,7 +491,7 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
         // the quota to every distinct sender present in the imported
         // snapshot so the in-memory state is bounded the moment restore
         // completes. NO-OP when `maxUndeliveredPerSender` is OFF.
-        enforcePerSenderQuotaAll(cells, maxUndeliveredPerSender)
+        enforcePerSenderQuotaAll(cells, maxUndeliveredPerSender, knownReaders)
       } catch (e) {
         logger.warn(`subagent-mailbox.fromSnapshot: ${errMessage(e)}`)
         // leave whatever survived; never throw

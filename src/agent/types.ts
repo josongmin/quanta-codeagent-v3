@@ -1058,6 +1058,16 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    */
   mailboxParentId?: string
   /**
+   * ADR-0437 follow-up (BUG#4 self-target guard) — THIS child's own registry
+   * task id (`req.taskId`). Threaded so `followup_task` can reject a child
+   * targeting its OWN loop (`input.agentId === subagentTaskId ⇒ self_target`):
+   * the introspect block wires it as `ownAgentId`. Distinct from
+   * `mailboxAgentId` (the disjoint mailbox-label namespace, `root/N`). The root
+   * session and any non-spawned agent leave this UNSET ⇒ no self-target guard
+   * (byte-identical; root is never a `followup_task` target anyway).
+   */
+  subagentTaskId?: string
+  /**
    * ADR-0223 auto-background after 2 s — Claude Code UX absorption. When set,
    * dispatch wraps each tool `execute()` with two-line `tickToolStart` /
    * `tickToolEnd` calls into `autoBackground.detector` so a host poll can ask

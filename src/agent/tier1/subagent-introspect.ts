@@ -55,6 +55,10 @@ export const buildSubagentIntrospectBlock = (config: AgentConfig): Tool[] => {
     // reaches the child's real inbox instead of a phantom task-id address. Absent
     // a binding (`labelOf` ⇒ undefined) the handler falls back to the id verbatim.
     ...(wake !== undefined ? { resolveLabel: (id: string) => wake.labelOf(id) } : {}),
+    // BUG#4 self-target guard — reject a child `followup_task`-ing its OWN loop.
+    // The child carries its registry task id as `subagentTaskId`; absent (root /
+    // non-spawned) ⇒ no guard (root is never a valid target anyway).
+    ...(config.subagentTaskId !== undefined ? { ownAgentId: config.subagentTaskId } : {}),
     ...(config.mailboxAgentId !== undefined ? { callerLabel: config.mailboxAgentId } : {}),
     ...(wantList ? { enableIntrospect: true } : {}),
     ...(wantFollowup ? { enableFollowup: true } : {}),

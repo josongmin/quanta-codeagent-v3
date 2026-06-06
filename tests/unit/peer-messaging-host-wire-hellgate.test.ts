@@ -138,8 +138,8 @@ describe("RFC jun-6 Binding 2 — peer messaging LIVE composition wire", () => {
     // observe the post-completion state, not the live peer-messaging path.
     const seen: AgentConfig[] = []
     const live: {
-      joinedTeam?: string
-      sameTeam?: boolean
+      joinedTeam?: string | undefined
+      sameTeam?: boolean | undefined
       injected: string
       secondDrainEmpty?: boolean
     } = { injected: "" }
@@ -197,8 +197,8 @@ describe("RFC jun-6 Binding 2 — peer messaging LIVE composition wire", () => {
     // child is no longer in alpha.
     const seen: AgentConfig[] = []
     const live: {
-      joinedTeam?: string
-      intruderPending?: number
+      joinedTeam?: string | undefined
+      intruderPending?: number | undefined
       intruderDrainNull?: boolean
       legit: string
     } = { legit: "" }
@@ -263,7 +263,7 @@ describe("RFC jun-6 Binding 2 — peer messaging LIVE composition wire", () => {
   test("HELL-5: redaction — a secret-shaped peer body is scrubbed before it auto-delivers", () => {
     const mailbox = createSubagentMailbox({ now: stepClock() })
     const cfg = parentCfg({ subagentMailbox: mailbox, mailboxAgentId: "root" })
-    cfg.teamRegistry = undefined
+    // teamRegistry starts undefined (parentCfg sets none); the wire mints it.
     maybeWirePeerTeamMessaging(cfg, env)
     cfg.teamRegistry?.create("alpha", ["root", "peer"])
 

@@ -79,6 +79,41 @@ describe("mailbox — broadcast delivery is per-recipient (BUG#1)", () => {
   })
 })
 
+describe("mailbox — eviction keeps broadcasts still PENDING for a known reader", () => {
+  test("under maxRetained pressure a fully-delivered broadcast is reclaimed BEFORE one still pending for a known sibling", () => {
+    let t = 0
+    const mb = createSubagentMailbox({ now: () => ++t, maxRetained: 1 })
+    // A and B both become KNOWN readers by draining once.
+    mb.send({ from: "S", to: "*", kind: "broadcast", body: "warmup" })
+    mb.read("A")
+    mb.read("B")
+
+    // Y (older) is read by A only ⇒ still PENDING for known reader B.
+    mb.send({ from: "S", to: "*", kind: "broadcast", body: "Y" })
+    mb.read("A") // A drains: gets warmup-already-seen? no — gets Y
+    // X (newer) is read by BOTH ⇒ fully delivered.
+    mb.send({ from: "S", to: "*", kind: "broadcast", body: "X" })
+    mb.read("A")
+    mb.read("B")
+
+    // The buffer is over capacity; eviction must drop the FULLY-delivered X, not
+    // the pending-for-B Y. So B can still receive Y.
+    expect(mb.read("B").map((m) => m.body)).toContain("Y")
+  })
+
+  test("a broadcast read by ALL known readers is evictable (does not pin the buffer)", () => {
+    let t = 0
+    const mb = createSubagentMailbox({ now: () => ++t, maxRetained: 1 })
+    mb.send({ from: "S", to: "*", kind: "broadcast", body: "first" })
+    mb.read("A") // only A is ever a known reader
+    mb.send({ from: "S", to: "*", kind: "broadcast", body: "second" })
+    mb.read("A")
+    // 'first' is fully delivered to the only known reader (A) ⇒ reclaimable; the
+    // buffer did not overflow past maxRetained.
+    expect(mb.read("A").map((m) => m.body)).toEqual([]) // A is fully drained
+  })
+})
+
 describe("dag-gate — markFailed cannot resurrect a terminal node (Finding 3)", () => {
   test("markFailed after markComplete does NOT retroactively block a dependent", async () => {
     const r = createDagGate([

@@ -615,6 +615,10 @@ const buildChildConfig = (
     // single in-memory mailbox instance (a child fork can both send and read).
     mailboxAgentId: mailboxIds.agentId,
     mailboxParentId: mailboxIds.parentId,
+    // ADR-0437 follow-up (BUG#4) — the child's OWN registry task id, so its
+    // `followup_task` can reject a self-target (`input.agentId === ownAgentId`).
+    // Absent `req.taskId` (foreground/legacy) ⇒ omitted (byte-identical).
+    ...(req.taskId !== undefined ? { subagentTaskId: req.taskId } : {}),
     // Propagated so a forked child can participate in the SAME inter-agent
     // mailbox (parent↔child + sibling↔sibling). The port is an in-process
     // shared-by-reference instance — safe across the worktree-isolation fork.

@@ -8,10 +8,11 @@
  * team registry's `agentId→teamId` / `teamId→Set<agentId>` maps: unbounded
  * membership growth, and a roster (`members()`) cluttered with dead children.
  *
- * FIX: `maybeRegisterChildTeam` returns a NO-THROW disposer that calls
- * `removeMember(team, childLabel)`; the runner invokes it in the same `finally`
- * that disposes the waker. `removeMember` is team-scoped (no-op if the child was
- * re-homed), so it never removes a child that joined a different team mid-flight.
+ * FIX: a symmetric `maybeUnregisterChildTeam` runs in the same `finally` that
+ * disposes the waker, calling `removeMember(team, childLabel)`. `removeMember` is
+ * team-scoped (the registry guards `teamByAgent.get(child) === team`), so a child
+ * that re-homed itself via `team_create` keeps its chosen team — only a transient
+ * child that joined the parent's team here is reaped.
  *
  * Default-OFF byte-identity is preserved: no `teamRegistry` OR an un-teamed
  * parent ⇒ the helper returns `undefined` ⇒ nothing to dispose.
@@ -21,9 +22,9 @@ import { describe, expect, test } from "bun:test"
 import type { runAgent } from "../../src/agent/loop"
 import { createSubagentRunner } from "../../src/agent/subagent-runner"
 import type { AgentConfig, AgentOutcome } from "../../src/agent/types"
-import { ToolRegistry } from "../../src/tool"
 import { createTeamRegistry } from "../../src/subagent"
 import type { SubagentRequest } from "../../src/subagent/types"
+import { ToolRegistry } from "../../src/tool"
 
 const parentConfig = (over: Partial<AgentConfig> = {}): AgentConfig =>
   ({

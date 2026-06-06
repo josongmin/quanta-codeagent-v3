@@ -31,7 +31,12 @@ import { errMessage } from "@/shared"
 // disclosure). The ledger is keyed by TaskRegistry identity, and the 6-tool
 // router shares the SAME registry as the `agent` tool, so a task stamped by one
 // is gated identically by the other (single SSOT for the security invariant).
-import { buildCheckpointPath, loadContinueFromForOwner, ownersForRegistry } from "./agent-tool"
+import {
+  buildCheckpointPath,
+  loadContinueFromForOwner,
+  ownersForRegistry,
+  ROOT_LINEAGE,
+} from "./agent-tool"
 import type { TaskOwnerToken, TaskRegistry } from "./registry"
 import type {
   CloseAgentInput,
@@ -573,7 +578,9 @@ export const handleSpawnAgent = async (
   // T04 — `continue_from` lineage gate (shared with the foreground `agent` tool
   // via the per-registry owners ledger). Resolve BEFORE minting the task so a
   // cross-lineage denial fails the spawn with no side effects.
-  const lineage = deps.requesterLineage ?? "root"
+  // Use the SAME root sentinel as the `agent` tool so an unlabeled root agent's
+  // tasks are continue_from-able across BOTH tools (no false ownership denial).
+  const lineage = deps.requesterLineage ?? ROOT_LINEAGE
   let priorAttempt: string | undefined
   if (input.continue_from !== undefined) {
     const loaded = loadContinueFromForOwner(

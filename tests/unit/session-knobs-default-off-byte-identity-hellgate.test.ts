@@ -160,11 +160,19 @@ describe("session-knobs default-OFF — canonical gate parse (no accidental-enab
     expect(leaked).toEqual([])
   })
 
-  // DELIBERATE strict-`1` SECURITY exceptions: code-mode gates execute
-  // model-authored code in the QuickJS-WASM sandbox, so they intentionally do
-  // NOT honor the loose truthy vocabulary — only the exact literal `"1"` arms
-  // them (a stray `=on`/`=true` must never accidentally enable code execution).
-  const SECURITY_STRICT_ONE = new Set<string>(["QUANTA_CODE_MODE", "QUANTA_CODE_MODE_ONLY"])
+  // DELIBERATE strict-`1` gates: each has a SLICE reader that is strict `=== "1"`
+  // by design, so the runtime-config field MUST stay strict too (else the two
+  // readers split-brain on `=on`). Code-mode runs model code (QuickJS); the
+  // others are protections / heavy seams whose authors pinned strict so a stray
+  // `=on`/`=true` cannot accidentally arm them. Only the exact `"1"` enables.
+  const SECURITY_STRICT_ONE = new Set<string>([
+    "QUANTA_CODE_MODE",
+    "QUANTA_CODE_MODE_ONLY",
+    "QUANTA_BG_COMPACTION",
+    "QUANTA_UNTRUSTED_ENVELOPE",
+    "QUANTA_EDIT_REPAIR_LOOP",
+    "QUANTA_SKILL_MCP_DEPS",
+  ])
 
   test("each opt-in knob flips true for EVERY truthy token (1/on/true/yes, case+trim)", () => {
     const stuckOff: string[] = []
