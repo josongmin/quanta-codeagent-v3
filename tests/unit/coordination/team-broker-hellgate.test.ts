@@ -3,11 +3,11 @@
  *
  * Plan: docs/plans/multiagent-coordination.md §2.B + §3 + §5.
  *
- * These cases pin the pure cores of `src/subagent/coordination/broker.ts`:
+ * These cases pin the pure PROTOCOL PRIMITIVES of
+ * `src/subagent/coordination/broker.ts` (the live in-process wire composes
+ * them — see `team-broker-e2e-hellgate.test.ts`):
  *   - the escalation envelope round-trips (`parseEscalationRequest` /
  *     `buildDecisionResponse`) keeping the SAME `correlationId`;
- *   - `brokerStep` maps each parseable pending request → exactly one decision
- *     response via the injected decider, and is idempotent on re-read;
  *   - malformed / non-`request` input is rejected (typed undefined, no crash);
  *   - SECURITY (load-bearing): the worker-side `applyDecisionResponse` ONLY
  *     honors a leader-authored `response` matching the outstanding
@@ -20,7 +20,6 @@ import { describe, expect, it } from "bun:test"
 import type { MailboxMessage } from "@/agent/subagent-mailbox"
 import {
   applyDecisionResponse,
-  brokerStep,
   buildDecisionResponse,
   type EscalationDecision,
   type EscalationRequest,
@@ -48,7 +47,6 @@ const reqMsg = (over?: Partial<MailboxMessage>): MailboxMessage => ({
 })
 
 const approve = (): EscalationDecision => ({ approved: true })
-const deny = (reason: string) => (): EscalationDecision => ({ approved: false, reason })
 
 describe("broker — escalation envelope (pure)", () => {
   it("parses a well-formed request envelope", () => {
@@ -110,48 +108,6 @@ describe("broker — buildDecisionResponse (pure, correlationId round-trip)", ()
     const out = buildDecisionResponse(reqMsg(), { approved: false, reason: "policy: no rm -rf" })
     expect(out.correlationId).toBe(CID)
     expect(JSON.parse(out.body)).toEqual({ approved: false, reason: "policy: no rm -rf" })
-  })
-})
-
-describe("broker — brokerStep (pure loop body)", () => {
-  it("maps each parseable pending request to exactly one decision response", () => {
-    const pending = [reqMsg(), reqMsg({ id: "m2", correlationId: "corr-2" })]
-    const out = brokerStep(pending, approve)
-    expect(out).toHaveLength(2)
-    expect(out.map((r) => r.correlationId).sort()).toEqual(["corr-2", CID].sort())
-    for (const r of out) expect(JSON.parse(r.body)).toEqual({ approved: true })
-  })
-
-  it("skips non-request / malformed pending entries (no crash, no response)", () => {
-    const pending = [
-      reqMsg(),
-      reqMsg({ id: "m2", kind: "response" }),
-      reqMsg({ id: "m3", body: "{bad" }),
-    ]
-    const out = brokerStep(pending, approve)
-    expect(out).toHaveLength(1)
-    expect(out[0]?.correlationId).toBe(CID)
-  })
-
-  it("is idempotent on re-read — same pending ⇒ same responses (no double-grant)", () => {
-    const pending = [reqMsg()]
-    const a = brokerStep(pending, approve)
-    const b = brokerStep(pending, approve)
-    expect(a).toEqual(b)
-    expect(a).toHaveLength(1)
-  })
-
-  it("routes deny decisions through unchanged", () => {
-    const out = brokerStep([reqMsg()], deny("nope"))
-    expect(JSON.parse(out[0]?.body ?? "{}")).toEqual({ approved: false, reason: "nope" })
-  })
-
-  it("does not throw if the injected decider throws — that request yields no response", () => {
-    const throwing = () => {
-      throw new Error("decider blew up")
-    }
-    const out = brokerStep([reqMsg()], throwing)
-    expect(out).toEqual([])
   })
 })
 

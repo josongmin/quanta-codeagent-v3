@@ -289,3 +289,76 @@ describe("ADR-0041 — block cleanup tears down 6-tool PTY children", () => {
     void runner
   })
 })
+
+// ─── FULL-PATH plumbing: tool.execute(ctx) → withCtxSignal → dispatch → handler.
+//     Proves the per-child controls + checkpoint(cwd) + continue_from(lineage)
+//     survive the REAL tool surface (not just a direct handler unit call). ─────
+describe("spawn_agent 6-tool — ctx-plumbed per-child controls (e2e)", () => {
+  const driveWith = async (tool: Tool, input: unknown, c: ToolContext): Promise<void> => {
+    for await (const _ev of tool.execute(input as never, c)) void _ev
+  }
+
+  test("ctx.cwd → checkpointPath and schema fields reach the child request", async () => {
+    const seen: SubagentRequest[] = []
+    const runner: SubagentRunner = async (req) => {
+      seen.push(req)
+      return settledResult()
+    }
+    const reg = new TaskRegistry()
+    const spawn = createSubagent6Tools({ runner, registry: reg }).tools.find(
+      (t) => t.name === "spawn_agent",
+    )!
+    const c = {
+      cwd: "/workspace",
+      signal: new AbortController().signal,
+      agentLabel: "leader-1",
+    } as ToolContext
+    await driveWith(
+      spawn,
+      {
+        prompt: "reduce core",
+        isolation: "worktree",
+        owned_surfaces: ["src/core/"],
+        forbidden_surfaces: ["src/runtime/"],
+        task_kind: "edit",
+        result_shape: "JSON {ok}",
+      },
+      c,
+    )
+    await new Promise<void>((res) => setTimeout(res, 5))
+    const req = seen[0]
+    expect(req?.isolation).toBe("worktree")
+    expect(req?.ownedSurfaces).toEqual(["src/core/"])
+    expect(req?.forbiddenSurfaces).toEqual(["src/runtime/"])
+    expect(req?.taskKind).toBe("edit")
+    expect(req?.resultShape).toBe("JSON {ok}")
+  })
+
+  test("continue_from is lineage-gated through the real tool path (ctx.agentLabel)", async () => {
+    const reg = new TaskRegistry()
+    const runner: SubagentRunner = async () => settledResult({ finalText: "A-out" })
+    const spawn = createSubagent6Tools({ runner, registry: reg }).tools.find(
+      (t) => t.name === "spawn_agent",
+    )!
+    const asLeader = (label: string): ToolContext =>
+      ({ cwd: "/w", signal: new AbortController().signal, agentLabel: label }) as ToolContext
+
+    // Leader-1 launches A (stamped to its lineage via ctx.agentLabel).
+    let aId = ""
+    for await (const ev of spawn.execute({ prompt: "A" } as never, asLeader("leader-1"))) {
+      if (ev.type === "result") aId = ev.result.output.match(/agentId: (\S+)/)?.[1] ?? ""
+    }
+    await new Promise<void>((res) => setTimeout(res, 5))
+    expect(reg.get(aId)?.result?.finalText).toBe("A-out")
+
+    // Leader-2 (foreign lineage) is DENIED continue_from A through the tool path.
+    let denied = ""
+    for await (const ev of spawn.execute(
+      { prompt: "steal", continue_from: aId } as never,
+      asLeader("leader-2"),
+    )) {
+      if (ev.type === "result") denied = ev.result.output
+    }
+    expect(denied.toLowerCase()).toContain("ownership denied")
+  })
+})

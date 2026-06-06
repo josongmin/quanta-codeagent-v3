@@ -14,7 +14,7 @@ import { z } from "zod"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 import { loadItems } from "./load-items"
 import type { BatchItemResult, BatchRunResult, SubagentBatchDeps } from "./port"
-import { type RunBatchArgs, runBatch } from "./run-batch"
+import { type ChildSpawnOptions, deriveId, type RunBatchArgs, runBatch } from "./run-batch"
 import type { BatchItem } from "./template"
 
 const itemSchema = z.union([z.string(), z.record(z.string(), z.unknown())])
@@ -82,6 +82,31 @@ export const spawnBatchInputSchema = z
           "(not dispatched). Item ids come from id_field (object items) or the index. " +
           "A cyclic/dangling graph is refused. Omit for flat parallel fan-out.",
       ),
+    // ── batch-wide per-worker controls (parity with spawn_agent). Applied to
+    //    EVERY worker; the runner already honors each on the forked child.
+    isolation: z
+      .enum(["none", "worktree"])
+      .optional()
+      .describe('"worktree" runs EACH worker in its own isolated git worktree (own write scope).'),
+    task_kind: z
+      .enum(["read", "edit", "review"])
+      .optional()
+      .describe("Coarse role for every worker (read/edit/review) — derives a default tool allowlist."),
+    result_shape: z
+      .string()
+      .min(1)
+      .max(2000)
+      .optional()
+      .describe("One-line spec injected into EVERY worker's seed for the shape of its final answer."),
+    effort: z
+      .enum(["default", "low", "medium", "high", "max"])
+      .optional()
+      .describe("Effort tier capping every worker's thinking budget."),
+    model: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Model id every worker runs on (must be an enabled candidate; unknown id fails the spawn)."),
   })
   .strict()
 
@@ -94,6 +119,41 @@ const renderItemLine = (r: BatchItemResult): string => {
     return `  [${r.index}] ${r.id}: ok (${r.turns} turns) ${head.slice(0, 120)}`
   }
   return `  [${r.index}] ${r.id}: error — ${r.error ?? "unknown"}`
+}
+
+/** Deterministic per-worker glyph pool (index-keyed; no RNG) — gives each
+ *  spawned worker a stable visual marker in the "Spawning N agents" banner. */
+const WORKER_GLYPHS = ["🟦", "🟥", "🟪", "🟨", "🟩", "🟧", "⬛", "🟫"] as const
+
+/** One-line task preview for a batch item (string item ⇒ its head; object item
+ *  ⇒ compact key=value head). Truncated so the banner stays scannable. */
+const itemTaskPreview = (item: BatchItem): string => {
+  const text =
+    typeof item === "string"
+      ? item
+      : Object.entries(item as Record<string, unknown>)
+          .map(([k, v]) => `${k}=${String(v)}`)
+          .join(" ")
+  const head = text.split("\n")[0] ?? ""
+  return head.length > 100 ? `${head.slice(0, 100)}…` : head
+}
+
+/** Render the "Spawning N agents" dispatch banner (parity with the screenshot
+ *  fan-out UI): a header + one `Created <glyph> agent-<id> … Task: <head>` line
+ *  per worker. Emitted as a progress event BEFORE the pool runs so the operator
+ *  sees the fan-out shape (repo + per-worker task) up front. */
+const renderSpawnBanner = (
+  items: readonly BatchItem[],
+  cwd: string,
+  idField: string | undefined,
+): string => {
+  const lines = [`Spawning ${items.length} agents — repo: ${cwd}`]
+  items.forEach((item, i) => {
+    const glyph = WORKER_GLYPHS[i % WORKER_GLYPHS.length]
+    const id = deriveId(item, i, idField)
+    lines.push(`  Created ${glyph} agent-${id} — Task: ${itemTaskPreview(item)}`)
+  })
+  return lines.join("\n")
 }
 
 /** Render the full model-facing output string. */
@@ -118,16 +178,41 @@ const errResult = (message: string): ToolEvent => ({
 
 /** Build the {@link RunBatchArgs} from validated input + loaded items, OMITTING
  *  absent optional fields (exactOptionalPropertyTypes). Pure. */
-const toRunArgs = (args: SpawnBatchInput, items: readonly BatchItem[]): RunBatchArgs => ({
-  items,
-  promptTemplate: args.prompt_template,
-  ...(args.max_concurrency !== undefined ? { maxConcurrency: args.max_concurrency } : {}),
-  ...(args.per_item_timeout_ms !== undefined ? { perItemTimeoutMs: args.per_item_timeout_ms } : {}),
-  ...(args.id_field !== undefined ? { idField: args.id_field } : {}),
-  ...(args.max_turns !== undefined ? { maxTurns: args.max_turns } : {}),
-  ...(args.output_schema !== undefined ? { outputSchema: args.output_schema } : {}),
-  ...(args.dependencies !== undefined ? { dependencies: args.dependencies } : {}),
-})
+const toRunArgs = (args: SpawnBatchInput, items: readonly BatchItem[]): RunBatchArgs => {
+  const childOptions = toChildOptions(args)
+  return {
+    items,
+    promptTemplate: args.prompt_template,
+    ...(args.max_concurrency !== undefined ? { maxConcurrency: args.max_concurrency } : {}),
+    ...(args.per_item_timeout_ms !== undefined
+      ? { perItemTimeoutMs: args.per_item_timeout_ms }
+      : {}),
+    ...(args.id_field !== undefined ? { idField: args.id_field } : {}),
+    ...(args.max_turns !== undefined ? { maxTurns: args.max_turns } : {}),
+    ...(args.output_schema !== undefined ? { outputSchema: args.output_schema } : {}),
+    ...(args.dependencies !== undefined ? { dependencies: args.dependencies } : {}),
+    ...(childOptions !== undefined ? { childOptions } : {}),
+  }
+}
+
+/** Collect the batch-wide per-worker controls into a {@link ChildSpawnOptions},
+ *  or `undefined` when none are set (so an unset batch is byte-identical). */
+const toChildOptions = (args: SpawnBatchInput): ChildSpawnOptions | undefined => {
+  const opts: {
+    isolation?: "none" | "worktree"
+    taskKind?: "read" | "edit" | "review"
+    resultShape?: string
+    effort?: string
+    model?: string
+  } = {
+    ...(args.isolation !== undefined ? { isolation: args.isolation } : {}),
+    ...(args.task_kind !== undefined ? { taskKind: args.task_kind } : {}),
+    ...(args.result_shape !== undefined ? { resultShape: args.result_shape } : {}),
+    ...(args.effort !== undefined ? { effort: args.effort } : {}),
+    ...(args.model !== undefined ? { model: args.model } : {}),
+  }
+  return Object.keys(opts).length > 0 ? opts : undefined
+}
 
 /** An empty-list run result (zero spawns). */
 const emptyRun: BatchRunResult = {
@@ -190,6 +275,18 @@ export const spawnBatchTool = (deps: SubagentBatchDeps): Tool<SpawnBatchInput> =
         result: { ok: true, output: renderOutput(emptyRun), structured: emptyRun },
       }
       return
+    }
+
+    // Fan-out banner (parity with the parallel-spawn UI): announce the N workers
+    // — repo + per-worker glyph/id/task — BEFORE the pool runs so the operator
+    // sees the shape up front, not just the after-the-fact summary.
+    yield {
+      type: "progress",
+      message: renderSpawnBanner(
+        loaded.items,
+        ctx.cwd,
+        args.id_field !== undefined ? args.id_field : undefined,
+      ),
     }
 
     // Stream progress through a queue the async runBatch fills as items settle.

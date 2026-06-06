@@ -2,6 +2,7 @@ import type { HookPromptInject } from "../hooks"
 import type { TurnSession, TurnState } from "../turn-context"
 import { prepareTurnContext } from "./context-assembler"
 import { applyAction, EMPTY_TOOL_HISTORY, resolveTurnAction } from "./recovery-executor"
+import { resolveActiveModelId } from "./skill-gate"
 import { streamConsume } from "./stream-consume"
 import { buildTurnSessionView, classifyTurnAbort } from "./turn-gate"
 import type { TurnResult } from "./types"
@@ -25,6 +26,11 @@ export const runTurn = async (
       bgCompaction?.cancelIfPending()
       return classifyTurnAbort(gate, config.signal)
     }
+    // D4 (jun-7) — resolve the model that will ACTUALLY process this turn
+    // (sticky-model / skill override), so compaction's window threshold tracks
+    // the ACTIVE model, not the base `config.llm`. Resolved here, before
+    // compaction; `streamConsume` re-resolves the full `turnLlm` for the stream.
+    const activeModel = await resolveActiveModelId(turnConfig, session.skillGate?.activeOverride())
     const { ctx, breakerVerdict } = await prepareTurnContext(
       turnConfig,
       wm,
@@ -39,6 +45,7 @@ export const runTurn = async (
       state.taskSpend,
       bgCompaction,
       state.tokenBaseline,
+      activeModel,
     )
     if (breakerVerdict.abort) return { kind: "error", reason: breakerVerdict.reason }
     const result = await streamConsume(turnSession, state, ctx)

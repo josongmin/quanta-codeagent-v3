@@ -486,6 +486,28 @@ const maybeRegisterChildTeam = (parent: AgentConfig, childLabel: string): void =
   }
 }
 
+/** RFC jun-6 (DELTA #2) — SYMMETRIC teardown for {@link maybeRegisterChildTeam}.
+ *  A finished child must LEAVE the parent's team: without this the roster grows
+ *  unbounded over a session (every spawn adds, nothing removes) and the stale
+ *  member keeps appearing in the team's broadcast-scope roster (`membersOf`) and
+ *  passing `sameTeam`, so mail addressed to a dead child lingers undelivered.
+ *  `removeMember` is a NO-OP when the child re-homed itself to another team
+ *  (the registry guards `teamByAgent.get(child) === team`), so a child that
+ *  ran `team_create` keeps its chosen team. NO-THROW: a teardown hiccup must
+ *  never mask the child's real result. */
+const maybeUnregisterChildTeam = (parent: AgentConfig, childLabel: string): void => {
+  const registry = parent.teamRegistry
+  if (registry === undefined) return
+  const parentLabel = parent.mailboxAgentId ?? "root"
+  const team = registry.teamOf(parentLabel)
+  if (team === undefined) return
+  try {
+    registry.removeMember(team, childLabel)
+  } catch {
+    // bookkeeping only — never fail a teardown on a registry hiccup
+  }
+}
+
 /** §20.3 — record a DISPLAY nickname for a freshly-spawned child in the host's
  *  `AgentMetaRegistry` side-table (the `list_agents` label source, keyed by the
  *  registry TASK id `rec.id`). The child's STABLE id stays the ordinal mailbox
@@ -746,7 +768,7 @@ export const createSubagentRunner = (
     // wake registry OR absent `req.taskId` ⇒ `gate` undefined + no waker
     // (byte-identical legacy / foreground path). The disposer runs in
     // `finally` so a wake on a finished child reports `no-receiver`.
-    const wakerWiring = registerChildWaker(parent.subagentTurnWake, req.taskId)
+    const wakerWiring = registerChildWaker(parent.subagentTurnWake, req.taskId, mailboxIds.agentId)
     const turnGate = wakerWiring?.gate
 
     try {
@@ -781,6 +803,11 @@ export const createSubagentRunner = (
       // races completion sees `no-receiver` (honest degrade) rather than a
       // wake into a dead loop. The disposer also unregisters the waker.
       wakerWiring?.dispose()
+      // RFC jun-6 (DELTA #2) — SYMMETRIC team teardown: a finished child leaves
+      // the parent's team so the roster does not grow unbounded and no stale
+      // member lingers in the broadcast scope / sameTeam gate. No-op when the
+      // child re-homed itself or no registry is wired (byte-identical default).
+      maybeUnregisterChildTeam(parent, mailboxIds.agentId)
     }
   }
 }
@@ -800,13 +827,17 @@ export const createSubagentRunner = (
 const registerChildWaker = (
   wake: TurnWakeRegistry | undefined,
   taskId: string | undefined,
+  mailboxLabel: string,
 ): { gate: SubagentTurnGate; dispose: () => void } | undefined => {
   if (wake === undefined || taskId === undefined) return undefined
   const gate = new SubagentTurnGate()
   // The waker maps the gate's `woke`/`queued` 1:1 onto the registry's
   // `WakeOutcome` (the third outcome, `no-receiver`, is produced by the
-  // registry itself when no waker is registered — never by the waker).
-  const unregister = wake.register(taskId, (reason: string) => gate.wake(reason))
+  // registry itself when no waker is registered — never by the waker). The
+  // mailbox label is bound alongside so `followup_task` can translate this
+  // child's task id → its inbox address (`root/N`) and deliver to the REAL
+  // mailbox the child drains, not the phantom task-id address (BUG#4 fix).
+  const unregister = wake.register(taskId, (reason: string) => gate.wake(reason), mailboxLabel)
   return {
     gate,
     dispose: (): void => {

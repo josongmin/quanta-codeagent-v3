@@ -121,7 +121,17 @@ export const createDagGate = (initial: readonly TaskNode[]): CreateGateResult =>
   }
 
   const markFailed = (id: string, state: "failed" | "cancelled" = "failed"): void => {
-    nodes = nodes.map((n) => (n.id === id ? { id: n.id, dependsOn: n.dependsOn, state } : n))
+    nodes = nodes.map((n) => {
+      if (n.id !== id) return n
+      // Mirror `onComplete`'s terminal-state guard (dag.ts): a node that already
+      // reached a TERMINAL state must not be flipped. Without this, a
+      // `markComplete(id)` followed by a later `markFailed(id)` retroactively
+      // turns a `completed` node `failed` while its dependents — already released
+      // by the completion — stay released, leaving the graph inconsistent (a
+      // `failed` node whose dependents ran). Only a non-terminal node transitions.
+      if (n.state === "completed" || n.state === "failed" || n.state === "cancelled") return n
+      return { id: n.id, dependsOn: n.dependsOn, state }
+    })
     flush()
   }
 

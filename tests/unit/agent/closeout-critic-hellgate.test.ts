@@ -176,8 +176,13 @@ describe("closeout-critic hellgate — source fence", () => {
       expect(l).not.toContain("subagent-runner")
       expect(l).not.toMatch(/["']\.\/loop/)
     }
-    // Leaf module: ZERO imports (no cycle, no hardcoded reviewer).
-    expect(importLines).toEqual([])
+    // Near-leaf: the ONLY permitted import is the canonical `errMessage` from
+    // `@/shared` (a dependency-free leaf util mandated by the audit-H ratchet —
+    // it cannot form a cycle back into the agent loop). No reviewer/loop imports
+    // (enforced above), no hardcoded reviewer.
+    for (const l of importLines) {
+      expect(l).toMatch(/from\s+["']@\/shared["']/)
+    }
     expect(src).not.toContain("createSubagentRunner")
   })
 

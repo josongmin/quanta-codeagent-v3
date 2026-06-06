@@ -11,19 +11,29 @@
  * `pendingFor` ⇒ `0`) on ANY internal error or malformed input. No method throws.
  *
  * Delivery model (see ./types doc + ADR-0416):
- *   - DIRECT  (`to === agentId`): a PER-RECIPIENT delivered set
- *     (`directDelivered: recipientId → deliveredAt`). The public
- *     `MailboxMessage.deliveredAt` reflects the FIRST recipient's stamp. Per-
- *     recipient tracking (rather than a single shared `deliveredAt` stamp) is
- *     the audit-H structural fix: one recipient draining its inbox can NEVER
- *     mark another agent's DIRECT mail delivered, so multi-sibling direct
- *     routing is reliable even if two readers transiently match the same `to`.
- *   - BROADCAST(`to === "*"`): per-AGENT `lastReadAt` cursor. A broadcast is
- *     delivered ONCE PER AGENT (each reader has its own cursor) and NEVER to
- *     its own sender.
+ *   - DIRECT  (`to === agentId`) AND BROADCAST (`to === "*"`) share ONE delivery
+ *     mechanism: a PER-READER delivered set on the cell (`delivered: readerId →
+ *     deliveredAt`). A message is undelivered to `agentId` exactly while
+ *     `!delivered.has(agentId)`. The public `MailboxMessage.deliveredAt` projects
+ *     the EARLIEST reader's stamp.
+ *
+ *     This per-reader model (jun-07 fix) REPLACES the prior broadcast `lastReadAt`
+ *     watermark cursor. The cursor advanced to the MAX `sentAt` of a read — but a
+ *     `limit`- or `since`-truncated read marks the cursor past broadcasts it did
+ *     NOT return, silently losing them. A per-reader set marks ONLY the cells
+ *     actually returned, so truncation (limit/since) and same-`sentAt` ties are
+ *     lossless: an undelivered broadcast survives until that specific reader
+ *     consumes it.
+ *
+ *     Idempotency is set-membership (a re-read finds `delivered.has(agentId)`);
+ *     a broadcast is never delivered to its own sender (`cell.from === agentId`
+ *     short-circuits selection).
  *
  * Eviction: bounded by `maxRetained` (default 1024) + `retentionMs` (default
- * 3_600_000ms). Reclaims DELIVERED-before-UNDELIVERED, oldest-`sentAt` first.
+ * 3_600_000ms). Reclaims DELIVERED-before-UNDELIVERED, oldest-`sentAt` first. A
+ * cell counts as delivered (evict-first) once ANY reader has consumed it — for a
+ * broadcast this is best-effort under sustained memory pressure (the documented
+ * LRU bound), distinct from the lossless within-cap delivery above.
  *
  * Per-sender quota (audit-H R2): `maxUndeliveredPerSender` (default OFF) caps
  * how many UNDELIVERED cells any single `from` may simultaneously occupy. A
@@ -50,11 +60,12 @@ const DEFAULT_MAX_RETAINED = 1024
 const DEFAULT_RETENTION_MS = 3_600_000
 const BROADCAST = "*"
 
-/** Internal mutable cell. DIRECT delivery is tracked PER RECIPIENT via
- *  `directDelivered` (recipientId → deliveredAt) — the audit-H fix so one
- *  reader cannot consume another agent's direct mail. The public
- *  `MailboxMessage.deliveredAt` is projected as the EARLIEST recipient stamp.
- *  Broadcast delivery is tracked separately via per-agent cursors. */
+/** Internal mutable cell. Delivery — DIRECT and BROADCAST alike — is tracked
+ *  PER READER via `delivered` (readerId → first-delivery timestamp). A message
+ *  is undelivered to a given agent exactly while its id is absent from this map;
+ *  marking is therefore confined to the cells actually returned by a read, so a
+ *  `limit`/`since`-truncated read can never strand an unread broadcast (jun-07
+ *  fix). The public `MailboxMessage.deliveredAt` projects the EARLIEST stamp. */
 interface Cell {
   id: string
   from: string
@@ -63,15 +74,15 @@ interface Cell {
   body: string
   correlationId?: string
   sentAt: number
-  /** recipientId → first-delivery timestamp. Empty ⇒ undelivered to anyone. */
-  directDelivered: Map<string, number>
+  /** readerId → first-delivery timestamp. Empty ⇒ undelivered to anyone. */
+  delivered: Map<string, number>
 }
 
-/** Earliest per-recipient delivery stamp on a cell (the public
+/** Earliest per-reader delivery stamp on a cell (the public
  *  `MailboxMessage.deliveredAt`), or `undefined` when delivered to no one. */
 const earliestDelivered = (cell: Cell): number | undefined => {
   let min: number | undefined
-  for (const t of cell.directDelivered.values()) {
+  for (const t of cell.delivered.values()) {
     if (min === undefined || t < min) min = t
   }
   return min
@@ -115,35 +126,16 @@ const matchesFilter = (
   return true
 }
 
-/** A broadcast is "fully seen" once at least one distinct non-sender agent has
- *  a cursor past it (it has served active readers; an entirely-unseen broadcast
- *  stays undelivered). Module-level so callers stay under the complexity cap. */
-const broadcastSeen = (cell: Cell, cursors: Map<string, number>): boolean => {
-  if (cell.to !== BROADCAST) return false
-  for (const [agentId, cursor] of cursors) {
-    if (agentId !== cell.from && cursor >= cell.sentAt) return true
-  }
-  return false
-}
-
-/** Eviction ordering key: 0 = delivered (evict first), 1 = undelivered. A
- *  DIRECT cell counts as delivered once ANY recipient has consumed it. */
-const deliveredRank = (cell: Cell, cursors: Map<string, number>): 0 | 1 =>
-  cell.directDelivered.size > 0 || broadcastSeen(cell, cursors) ? 0 : 1
+/** Eviction ordering key: 0 = delivered (evict first), 1 = undelivered. A cell
+ *  (direct OR broadcast) counts as delivered once ANY reader has consumed it. */
+const deliveredRank = (cell: Cell): 0 | 1 => (cell.delivered.size > 0 ? 0 : 1)
 
 /** Is `cell` an UNDELIVERED-to-anyone cell attributable to `sender`? Used by
- *  the per-sender quota: a DIRECT cell counts as long as no recipient has
- *  consumed it (`directDelivered.size === 0`); a BROADCAST counts as long as
- *  no non-sender agent's cursor has reached it. Module-level so the closure
- *  per-send predicate inlines the same definition the eviction loop uses. */
-const isUndeliveredFromSender = (
-  cell: Cell,
-  sender: string,
-  cursors: Map<string, number>,
-): boolean => {
-  if (cell.from !== sender) return false
-  return deliveredRank(cell, cursors) === 1
-}
+ *  the per-sender quota: a cell counts as long as no reader has consumed it
+ *  (`delivered.size === 0`). Module-level so the closure per-send predicate
+ *  inlines the same definition the eviction loop uses. */
+const isUndeliveredFromSender = (cell: Cell, sender: string): boolean =>
+  cell.from === sender && deliveredRank(cell) === 1
 
 /** Apply the per-sender quota to every distinct sender currently present in
  *  `cells`. Module-level so `fromSnapshot` stays under the cognitive-complexity
@@ -151,15 +143,11 @@ const isUndeliveredFromSender = (
  *  hole (audit-H R3): without this sweep, an adversarial snapshot can seed
  *  any number of undelivered cells past `cap` for a single sender, and the
  *  `send`-time quota would not retroactively reclaim them. */
-const enforcePerSenderQuotaAll = (
-  cells: Map<string, Cell>,
-  cursors: Map<string, number>,
-  cap: number | undefined,
-): void => {
+const enforcePerSenderQuotaAll = (cells: Map<string, Cell>, cap: number | undefined): void => {
   if (cap === undefined || !Number.isFinite(cap) || cap <= 0) return
   const seenSenders = new Set<string>()
   for (const c of cells.values()) seenSenders.add(c.from)
-  for (const sender of seenSenders) enforcePerSenderQuota(cells, cursors, sender, cap)
+  for (const sender of seenSenders) enforcePerSenderQuota(cells, sender, cap)
 }
 
 /** Per-sender quota: ensure `sender` holds at most `cap` undelivered cells.
@@ -169,18 +157,16 @@ const enforcePerSenderQuotaAll = (
  *  positive / not finite (default-OFF legacy behavior). */
 const enforcePerSenderQuota = (
   cells: Map<string, Cell>,
-  cursors: Map<string, number>,
   sender: string,
   cap: number | undefined,
 ): void => {
   if (cap === undefined || !Number.isFinite(cap) || cap <= 0) return
   // Tally + collect this sender's undelivered cells in insertion order
   // (Map iteration is insertion order, and `sentAt` is monotonic per
-  // `clockNow`, so this IS the FIFO order). Stop at the first delivered
-  // cell or non-match — we only care about the undelivered tail.
+  // `clockNow`, so this IS the FIFO order).
   const undelivered: Cell[] = []
   for (const c of cells.values()) {
-    if (isUndeliveredFromSender(c, sender, cursors)) undelivered.push(c)
+    if (isUndeliveredFromSender(c, sender)) undelivered.push(c)
   }
   if (undelivered.length <= cap) return
   undelivered.sort((a, b) => a.sentAt - b.sentAt)
@@ -197,7 +183,6 @@ const enforcePerSenderQuota = (
  *  Module-level so `createSubagentMailbox` stays under the complexity cap. */
 const evict = (
   cells: Map<string, Cell>,
-  cursors: Map<string, number>,
   maxRetained: number,
   retentionMs: number,
   t: number,
@@ -209,8 +194,8 @@ const evict = (
   }
   if (cells.size <= maxRetained) return
   const all = [...cells.values()].sort((a, b) => {
-    const ra = deliveredRank(a, cursors)
-    const rb = deliveredRank(b, cursors)
+    const ra = deliveredRank(a)
+    const rb = deliveredRank(b)
     return ra !== rb ? ra - rb : a.sentAt - b.sentAt
   })
   let drop = cells.size - maxRetained
@@ -221,27 +206,23 @@ const evict = (
   }
 }
 
-/** Mark the picked cells delivered for `agentId` and advance the broadcast
- *  cursor, returning the projected messages. DIRECT cells get a PER-RECIPIENT
- *  `directDelivered[agentId]` stamp (so another recipient's delivery state is
- *  untouched — the audit-H fix); broadcast idempotency comes from advancing the
- *  agent's cursor past the newest delivered `sentAt`. Module-level so `read`
- *  stays under the complexity cap. */
-const markDelivered = (
-  picked: Cell[],
-  agentId: string,
-  cursors: Map<string, number>,
-  maxSeenSentAt: number,
-  t: number,
-): MailboxMessage[] => {
+/** Mark the picked cells delivered for `agentId`, returning the projected
+ *  messages. Each cell addressed to `agentId` (direct or broadcast) gets a
+ *  PER-READER `delivered[agentId]` stamp the FIRST time it is read — another
+ *  reader's delivery state is untouched, so a truncated read never strands a
+ *  cell for a different reader. Module-level so `read` stays under the
+ *  complexity cap. */
+const markDelivered = (picked: Cell[], agentId: string, t: number): MailboxMessage[] => {
   const out: MailboxMessage[] = []
   for (const c of picked) {
-    if (c.to === agentId && !c.directDelivered.has(agentId)) c.directDelivered.set(agentId, t)
+    if (
+      c.from !== agentId &&
+      (c.to === agentId || c.to === BROADCAST) &&
+      !c.delivered.has(agentId)
+    ) {
+      c.delivered.set(agentId, t)
+    }
     out.push(toMessage(c))
-  }
-  if (maxSeenSentAt >= 0) {
-    const prev = cursors.get(agentId) ?? -1
-    if (maxSeenSentAt > prev) cursors.set(agentId, maxSeenSentAt)
   }
   return out
 }
@@ -256,12 +237,14 @@ const cellFromMessage = (m: unknown): Cell | null => {
   const deliveredAt = finiteOrUndefined(rec.deliveredAt)
   const to = isString(rec.to) ? rec.to : ""
   // Snapshot carries only a single public `deliveredAt`. Reconstruct the
-  // per-recipient map: a delivered DIRECT message (concrete `to`, not "*")
-  // re-seeds `{ [to]: deliveredAt }`; broadcasts keep an empty direct map
-  // (their delivery lives in the per-agent cursor, not the snapshot).
-  const directDelivered = new Map<string, number>()
+  // per-reader map: a delivered DIRECT message (concrete `to`, not "*")
+  // re-seeds `{ [to]: deliveredAt }`. A BROADCAST keeps an empty delivered map
+  // (the public message cannot name WHICH agent read it), so a restored
+  // broadcast is re-delivered to every reader — the same lossy-on-restore
+  // posture as the prior cursor model (the cursor was cleared on `fromSnapshot`).
+  const delivered = new Map<string, number>()
   if (deliveredAt !== undefined && to.length > 0 && to !== BROADCAST) {
-    directDelivered.set(to, deliveredAt)
+    delivered.set(to, deliveredAt)
   }
   return {
     id: isNonEmptyString(rec.id) ? rec.id : `msg_${randomUUID()}`,
@@ -271,7 +254,7 @@ const cellFromMessage = (m: unknown): Cell | null => {
     body: isString(rec.body) ? rec.body : "",
     ...(correlationId !== undefined ? { correlationId } : {}),
     sentAt: finiteOrZero(rec.sentAt),
-    directDelivered,
+    delivered,
   }
 }
 
@@ -300,9 +283,6 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
 
   /** Insertion order preserved by Map iteration; `id → Cell`. */
   const cells = new Map<string, Cell>()
-  /** Per-agent broadcast read cursor: `agentId → lastReadAt (sentAt watermark)`.
-   *  A broadcast with `sentAt > cursor` is undelivered for that agent. */
-  const broadcastCursor = new Map<string, number>()
 
   const clockNow = (): number => {
     try {
@@ -315,38 +295,31 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
   }
 
   /** Selection predicate: is `cell` addressed to `agentId` and not-yet-seen?
-   *  DIRECT delivery is checked PER RECIPIENT (`directDelivered.has(agentId)`)
-   *  so a sibling consuming its own mail never hides another sibling's. */
+   *  Delivery is checked PER READER (`delivered.has(agentId)`) for BOTH direct
+   *  and broadcast, so a sibling consuming its own mail never hides another
+   *  sibling's, and a truncated read never strands an unseen broadcast. */
   const isUndeliveredFor = (cell: Cell, agentId: string): boolean => {
     if (cell.from === agentId) return false // never deliver to self
-    if (cell.to === agentId) return !cell.directDelivered.has(agentId)
-    if (cell.to === BROADCAST) {
-      const cursor = broadcastCursor.get(agentId) ?? -1
-      return cell.sentAt > cursor
-    }
+    if (cell.to === agentId || cell.to === BROADCAST) return !cell.delivered.has(agentId)
     return false
   }
 
-  /** Collect undelivered messages for `agentId` honoring `since` + `limit`. */
-  const collect = (
-    agentId: string,
-    opts2?: { limit?: number; since?: number },
-  ): { cells: Cell[]; maxSeenSentAt: number } => {
+  /** Collect undelivered messages for `agentId` honoring `since` + `limit`,
+   *  oldest-`sentAt` first. The returned list is EXACTLY the set that `read`
+   *  marks delivered — so a `limit`/`since` cut never advances delivery past a
+   *  cell it did not return. */
+  const collect = (agentId: string, opts2?: { limit?: number; since?: number }): Cell[] => {
     const since = finiteOrUndefined(opts2?.since)
     const limit = finiteOrUndefined(opts2?.limit)
     const out: Cell[] = []
-    let maxSeenSentAt = -1
     for (const c of cells.values()) {
       if (!isUndeliveredFor(c, agentId)) continue
       if (since !== undefined && c.sentAt <= since) continue
       out.push(c)
-      if (c.sentAt > maxSeenSentAt) maxSeenSentAt = c.sentAt
     }
     out.sort((a, b) => a.sentAt - b.sentAt)
-    if (limit !== undefined && limit >= 0 && out.length > limit) {
-      return { cells: out.slice(0, limit), maxSeenSentAt }
-    }
-    return { cells: out, maxSeenSentAt }
+    if (limit !== undefined && limit >= 0 && out.length > limit) return out.slice(0, limit)
+    return out
   }
 
   return {
@@ -362,14 +335,14 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
           body: isString(init?.body) ? init.body : "",
           ...(correlationId !== undefined ? { correlationId } : {}),
           sentAt: t,
-          directDelivered: new Map<string, number>(),
+          delivered: new Map<string, number>(),
         }
         cells.set(cell.id, cell)
         // Per-sender quota runs BEFORE the global LRU so a hostile sender's
         // excess always lands on its OWN oldest undelivered cell — never on a
         // legitimate sibling's at the same `rank=1` undelivered tier.
-        enforcePerSenderQuota(cells, broadcastCursor, cell.from, maxUndeliveredPerSender)
-        evict(cells, broadcastCursor, maxRetained, retentionMs, t)
+        enforcePerSenderQuota(cells, cell.from, maxUndeliveredPerSender)
+        evict(cells, maxRetained, retentionMs, t)
         return toMessage(cell)
       } catch (e) {
         logger.warn(`subagent-mailbox.send: ${errMessage(e)}`)
@@ -388,9 +361,8 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
     read(agentId, opts2): readonly MailboxMessage[] {
       try {
         if (!isNonEmptyString(agentId)) return Object.freeze([])
-        const { cells: picked, maxSeenSentAt } = collect(agentId, opts2)
-        const out = markDelivered(picked, agentId, broadcastCursor, maxSeenSentAt, clockNow())
-        return Object.freeze(out)
+        const picked = collect(agentId, opts2)
+        return Object.freeze(markDelivered(picked, agentId, clockNow()))
       } catch (e) {
         logger.warn(`subagent-mailbox.read: ${errMessage(e)}`)
         return Object.freeze([])
@@ -400,8 +372,7 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
     peek(agentId, opts2): readonly MailboxMessage[] {
       try {
         if (!isNonEmptyString(agentId)) return Object.freeze([])
-        const { cells: picked } = collect(agentId, opts2)
-        return Object.freeze(picked.map(toMessage))
+        return Object.freeze(collect(agentId, opts2).map(toMessage))
       } catch (e) {
         logger.warn(`subagent-mailbox.peek: ${errMessage(e)}`)
         return Object.freeze([])
@@ -417,8 +388,8 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
         // DIRECT message delivered to `c.to` so a later `read(c.to)` no longer
         // surfaces it. A broadcast / empty `to` has no single recipient to ack;
         // it still round-trips the message unchanged. Idempotent per recipient.
-        if (c.to.length > 0 && c.to !== BROADCAST && !c.directDelivered.has(c.to)) {
-          c.directDelivered.set(c.to, clockNow())
+        if (c.to.length > 0 && c.to !== BROADCAST && !c.delivered.has(c.to)) {
+          c.delivered.set(c.to, clockNow())
         }
         return toMessage(c)
       } catch (e) {
@@ -469,7 +440,6 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
       try {
         // REPLACE, not merge.
         cells.clear()
-        broadcastCursor.clear()
         const messages = (snap as MailboxSnapshot | undefined)?.messages
         if (!Array.isArray(messages)) return
         for (const m of messages) {
@@ -483,7 +453,7 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
         // the quota to every distinct sender present in the imported
         // snapshot so the in-memory state is bounded the moment restore
         // completes. NO-OP when `maxUndeliveredPerSender` is OFF.
-        enforcePerSenderQuotaAll(cells, broadcastCursor, maxUndeliveredPerSender)
+        enforcePerSenderQuotaAll(cells, maxUndeliveredPerSender)
       } catch (e) {
         logger.warn(`subagent-mailbox.fromSnapshot: ${errMessage(e)}`)
         // leave whatever survived; never throw

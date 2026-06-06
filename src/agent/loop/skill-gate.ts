@@ -47,6 +47,31 @@ export const readStickyModelForMode = async (config: AgentConfig): Promise<strin
   })
 }
 
+/**
+ * D4 (jun-7 naive-impl hardening) — the model id that will ACTUALLY process this
+ * turn, accounting for a skill `model:` override or a per-mode sticky model.
+ *
+ * The compaction threshold MUST read THIS (not the base `config.llm`): when a
+ * session swaps model mid-stream (sticky-model / skill override), `config.llm`
+ * still names the BASE model, so deriving the context-window threshold from it
+ * re-introduces the exact model-blind bug D4 fixed (e.g. base opus-200k + sticky
+ * sonnet-1m compacts at 155k instead of 923k; the inverse overflows). Mirrors the
+ * model pick in {@link resolveSkillTurnOverride} (`override.model ?? sticky ?? base`)
+ * but returns only the id (the `configuredModel` normalization, inlined to avoid
+ * a `./emit-helpers` import cycle). `"unknown"` when no model is configured ⇒
+ * `resolveModelWindow` misses ⇒ the 120k legacy threshold (byte-identical).
+ */
+export const resolveActiveModelId = async (
+  config: AgentConfig,
+  override: SkillTurnOverride | undefined,
+): Promise<string> => {
+  const stickyModelId = await readStickyModelForMode(config)
+  const id = override?.model ?? stickyModelId
+  const port = id !== undefined ? config.modelCandidates?.find((c) => c.id === id)?.port : undefined
+  const model = (port ?? config.llm).model
+  return model !== undefined && model !== "" ? model : "unknown"
+}
+
 export const resolveSkillTurnOverride = (
   config: AgentConfig,
   override: SkillTurnOverride | undefined,

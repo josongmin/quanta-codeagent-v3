@@ -68,13 +68,16 @@ const toEvent = <S>(out: DispatchOutput, renderSuccess: SuccessRender<S>): ToolE
   return { type: "result", result: { ok: false, output: detail } }
 }
 
-/** Forward the live context's abort signal into the deps the dispatcher
- *  threads to `exec_command` (so a cancelled tool call kills the child). The
- *  per-call `ctx.signal` (always present — required on ToolContext) wins since
- *  it tracks THIS dispatch, overriding any base `deps.signal` a host set. */
+/** Forward the live context into the deps the dispatcher threads down: the
+ *  abort signal (so a cancelled tool call kills the child), plus `ctx.cwd`
+ *  (spawn_agent `checkpoint` path) and `ctx.agentLabel` as the requester lineage
+ *  (spawn_agent `continue_from` ownership gate). The per-call `ctx.*` wins over
+ *  any base value a host set since it tracks THIS dispatch. */
 const withCtxSignal = (deps: Subagent6Deps, ctx: ToolContext): Subagent6Deps => ({
   ...deps,
   signal: ctx.signal,
+  cwd: ctx.cwd,
+  ...(ctx.agentLabel !== undefined ? { requesterLineage: ctx.agentLabel } : {}),
 })
 
 /**

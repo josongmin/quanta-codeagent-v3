@@ -26,6 +26,22 @@ import { clampBatchTimeout } from "./port"
 import type { BatchItem } from "./template"
 import { renderTemplate } from "./template"
 
+/** Per-WORKER spawn controls applied to EVERY item in the batch (parity with
+ *  the foreground `agent` / `spawn_agent` per-child controls). The runner
+ *  already honors each on the forked child; the batch just threads them. */
+export interface ChildSpawnOptions {
+  /** `"worktree"` ⇒ each worker runs in its own isolated git worktree. */
+  readonly isolation?: "none" | "worktree"
+  /** Coarse role for the default tool allowlist (read/edit/review). */
+  readonly taskKind?: "read" | "edit" | "review"
+  /** One-line spec injected into every worker's seed for its final answer. */
+  readonly resultShape?: string
+  /** Effort tier capping each worker's thinking budget. */
+  readonly effort?: string
+  /** Model id every worker runs on (must be an enabled candidate). */
+  readonly model?: string
+}
+
 export interface RunBatchArgs {
   readonly items: readonly BatchItem[]
   readonly promptTemplate: string
@@ -33,6 +49,9 @@ export interface RunBatchArgs {
   readonly perItemTimeoutMs?: number
   readonly idField?: string
   readonly maxTurns?: number
+  /** Batch-wide per-worker spawn controls (isolation / taskKind / resultShape /
+   *  effort / model). Absent ⇒ each worker inherits the parent (byte-identical). */
+  readonly childOptions?: ChildSpawnOptions
   /** Parent-side JSON-shape validation. When set, each worker's finalText is
    *  parsed as JSON and shallow-checked to be an object whose top-level keys
    *  cover every key declared here; violations mark JUST that item error. */
@@ -50,7 +69,7 @@ export interface RunBatchDeps extends SubagentBatchDeps {
 }
 
 /** Derive the stable item id: `id_field` value (object items) else String(index). */
-const deriveId = (item: BatchItem, index: number, idField: string | undefined): string => {
+export const deriveId = (item: BatchItem, index: number, idField: string | undefined): string => {
   if (idField !== undefined && typeof item === "object" && item !== null) {
     const v = (item as Record<string, unknown>)[idField]
     if (v !== undefined && v !== null) return String(v)
@@ -117,6 +136,7 @@ const runOneItem = async (
   maxTurns: number | undefined,
   timeoutMs: number,
   batchSignal: AbortSignal,
+  childOptions: ChildSpawnOptions | undefined,
 ): Promise<
   | { kind: "ok"; finalText: string; turns: number }
   | { kind: "worker-failed"; finalText: string; turns: number }
@@ -146,6 +166,13 @@ const runOneItem = async (
       depth,
       signal: ac.signal,
       ...(maxTurns !== undefined ? { budget: { maxTurns } } : {}),
+      // Batch-wide per-worker controls (parity with spawn_agent). Each is
+      // honored by the runner; conditional-spread keeps the unset path identical.
+      ...(childOptions?.isolation !== undefined ? { isolation: childOptions.isolation } : {}),
+      ...(childOptions?.taskKind !== undefined ? { taskKind: childOptions.taskKind } : {}),
+      ...(childOptions?.resultShape !== undefined ? { resultShape: childOptions.resultShape } : {}),
+      ...(childOptions?.effort !== undefined ? { effort: childOptions.effort } : {}),
+      ...(childOptions?.model !== undefined ? { model: childOptions.model } : {}),
     }
     const winner = await Promise.race([
       runner(req).then((r) => ({ tag: "done" as const, r })),
@@ -340,6 +367,7 @@ export const runBatch = async (
         args.maxTurns,
         timeoutMs,
         signal,
+        args.childOptions,
       )
       settle(index, id, toItemResult(index, id, outcome, args.outputSchema))
     } finally {

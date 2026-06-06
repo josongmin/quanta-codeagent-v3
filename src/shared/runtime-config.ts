@@ -357,12 +357,11 @@ export interface RuntimeConfig {
   /** Capability B — leader-mediated permission escalation broker
    *  (`QUANTA_TEAM_BROKER`). Strict opt-in (`=== "1"`). Default false ⇒ a worker
    *  that hits a denied tool fails hard (today's behavior — no escalation path).
-   *  When ON, the spawning agent (the leader) runs a `brokerLoop`
-   *  (`@/subagent/coordination`) that reads pending escalation `request`s from
-   *  the subagent mailbox, runs each through the host's permission decide/HITL,
-   *  and sends a leader-authored `response` back. The worker applies ONLY a
-   *  leader-authored response matching its outstanding correlationId — it can
-   *  NEVER self-grant (load-bearing security invariant, plan §5). */
+   *  When ON, the worker's SOFT-deny is brokered IN-PROCESS by the leader's
+   *  wire (`@/agent/coordination-broker-wire#buildLeaderHitlBroker`): it runs the
+   *  escalation through the host's permission decide/HITL and the worker applies
+   *  ONLY a leader-authored response matching its outstanding correlationId — it
+   *  can NEVER self-grant (load-bearing security invariant, plan §5). */
   readonly teamBroker: boolean
   /** Capability C — team-idle barrier (`QUANTA_TEAM_IDLE`). Strict opt-in
    *  (`=== "1"`). Default false ⇒ the leader polls / no fan-in barrier (today).

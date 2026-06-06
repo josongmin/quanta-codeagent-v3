@@ -26,6 +26,12 @@
  */
 import type { Subprocess } from "bun"
 import { errMessage } from "@/shared"
+// Reuse the foreground `agent` tool's PROVEN continue_from lineage gate +
+// checkpoint-path builder + per-registry owners ledger (T04 — no cross-lineage
+// disclosure). The ledger is keyed by TaskRegistry identity, and the 6-tool
+// router shares the SAME registry as the `agent` tool, so a task stamped by one
+// is gated identically by the other (single SSOT for the security invariant).
+import { buildCheckpointPath, loadContinueFromForOwner, ownersForRegistry } from "./agent-tool"
 import type { TaskOwnerToken, TaskRegistry } from "./registry"
 import type {
   CloseAgentInput,
@@ -507,6 +513,14 @@ interface SpawnAgentDeps {
    *  scheduler's `DEFAULT_MAX_CONCURRENT` knob (`subagent-background.ts`) but
    *  applies to the FOREGROUND spawn path, which had no cap. */
   maxConcurrent?: number
+  /** Parent workspace cwd — used to build the `checkpoint` path
+   *  (`<cwd>/.subagent-state/<taskId>.md`). Injected by the dispatch seam from
+   *  `ctx.cwd`. Absent ⇒ `checkpoint` is ignored (no path to write to). */
+  cwd?: string
+  /** The REQUESTING agent's stable lineage label (`ctx.agentLabel`). Gates
+   *  `continue_from`: a task stamped by a DIFFERENT lineage is denied before any
+   *  finalText read (T04). Absent ⇒ root lineage (`"root"`). */
+  requesterLineage?: string
 }
 
 /** Count currently-running tasks in the registry — the B3 concurrency gauge.
@@ -535,7 +549,7 @@ export const handleSpawnAgent = async (
   // STRICTER of the two — the model can shrink its own budget but the host
   // ceiling is binding.
   const hostCap = deps.maxDepth ?? DEFAULT_MAX_DEPTH
-  const cap = Math.min(input.maxDepth ?? Number.POSITIVE_INFINITY, hostCap)
+  const cap = Math.min(input.max_depth ?? Number.POSITIVE_INFINITY, hostCap)
   if (childDepth > cap) {
     return errSpawn(
       `Subagent denied: depth ${childDepth} exceeds maxDepth ${cap}`,
@@ -556,19 +570,61 @@ export const handleSpawnAgent = async (
     )
   }
 
+  // T04 — `continue_from` lineage gate (shared with the foreground `agent` tool
+  // via the per-registry owners ledger). Resolve BEFORE minting the task so a
+  // cross-lineage denial fails the spawn with no side effects.
+  const lineage = deps.requesterLineage ?? "root"
+  let priorAttempt: string | undefined
+  if (input.continue_from !== undefined) {
+    const loaded = loadContinueFromForOwner(
+      deps.registry,
+      ownersForRegistry(deps.registry),
+      input.continue_from,
+      lineage,
+    )
+    if (loaded.kind === "not_owner") {
+      return errSpawn(
+        `Cannot continue from ${input.continue_from}: it belongs to a different agent lineage (ownership denied).`,
+        "ownership_denied",
+      )
+    }
+    if (loaded.kind === "ok") priorAttempt = loaded.text
+  }
+
   const taskId = deps.registry.newId()
   const { abort, ownerToken } = deps.registry.register({
     id: taskId,
     description: input.prompt.slice(0, 120),
-    ...(input.agentType !== undefined ? { agentType: input.agentType } : {}),
+    ...(input.agent_type !== undefined ? { agentType: input.agent_type } : {}),
   })
+  // T04 — stamp the launching lineage so a later `continue_from` of THIS task
+  // from a foreign lineage is denied (mirrors the `agent` tool's recordOwner).
+  ownersForRegistry(deps.registry).set(taskId, lineage)
 
   // RFC-04 — record depth/label into the optional side-table so list_agents can
   // show richer rows. No-op when the host didn't wire one (byte-identical).
   deps.agentMeta?.set(taskId, {
     depth: childDepth,
-    label: input.agentType ?? input.prompt.slice(0, 40),
+    label: input.agent_type ?? input.prompt.slice(0, 40),
   })
+
+  // Per-child budget from the optional turn/token caps (parity with the
+  // foreground `agent` tool). Built only when at least one is set.
+  const budget =
+    input.max_turns !== undefined || input.max_tokens !== undefined
+      ? {
+          ...(input.max_turns !== undefined ? { maxTurns: input.max_turns } : {}),
+          ...(input.max_tokens !== undefined ? { maxTokens: input.max_tokens } : {}),
+        }
+      : undefined
+
+  // `checkpoint` ⇒ tell the child to write interim findings to a parent-readable
+  // path. Skipped under `isolation:"worktree"` (parent cannot read inside a
+  // throwaway worktree) and when no cwd was injected (nowhere to point it).
+  const checkpointPath =
+    input.checkpoint === true && input.isolation !== "worktree" && deps.cwd !== undefined
+      ? buildCheckpointPath(deps.cwd, taskId)
+      : undefined
 
   const req: SubagentRequest = {
     prompt: input.prompt,
@@ -577,8 +633,23 @@ export const handleSpawnAgent = async (
     // ADR-0437 follow-up — thread the registry task id so the runner can
     // register a per-child turn waker under the SAME id `followup_task` uses.
     taskId,
-    ...(input.agentType !== undefined ? { agentType: input.agentType } : {}),
-    ...(input.toolFilter !== undefined ? { toolFilter: input.toolFilter } : {}),
+    ...(input.agent_type !== undefined ? { agentType: input.agent_type } : {}),
+    ...(input.tool_filter !== undefined ? { toolFilter: input.tool_filter } : {}),
+    // Parity passthroughs — the runner already honors each (buildChildConfig /
+    // buildSeedPrompt). Conditional-spread so an unset field is byte-identical.
+    ...(input.isolation !== undefined ? { isolation: input.isolation } : {}),
+    ...(input.owned_surfaces !== undefined ? { ownedSurfaces: input.owned_surfaces } : {}),
+    ...(input.forbidden_surfaces !== undefined
+      ? { forbiddenSurfaces: input.forbidden_surfaces }
+      : {}),
+    ...(input.task_kind !== undefined ? { taskKind: input.task_kind } : {}),
+    ...(input.result_shape !== undefined ? { resultShape: input.result_shape } : {}),
+    ...(input.model !== undefined ? { model: input.model } : {}),
+    ...(input.role !== undefined ? { role: input.role } : {}),
+    ...(input.effort !== undefined ? { effort: input.effort } : {}),
+    ...(budget !== undefined ? { budget } : {}),
+    ...(priorAttempt !== undefined ? { priorAttempt } : {}),
+    ...(checkpointPath !== undefined ? { checkpointPath } : {}),
   }
 
   // Fire-and-forget: the registry record settles when the runner returns.

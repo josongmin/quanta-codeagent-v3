@@ -220,6 +220,10 @@ export const prepareTurnContext = async (
   tokenBaselineBox:
     | { current?: import("../compaction").TokenBaseline | undefined; sendCount?: number }
     | undefined,
+  // D4 (jun-7) — the model that will ACTUALLY process this turn (sticky/skill
+  // swap resolved in `runTurn`), so the compaction window threshold tracks the
+  // active model, not base `config.llm`. Defaults to the base model id.
+  activeModel: string = configuredModel(config.llm),
 ): Promise<{
   readonly ctx: ReturnType<typeof buildTurnContext>
   readonly breakerVerdict: BreakerVerdict
@@ -246,6 +250,7 @@ export const prepareTurnContext = async (
     bgController,
     resetEffortClassifier,
     tokenBaselineBox?.current,
+    activeModel,
   )
   if (tokenBaselineBox !== undefined) {
     // Invalidate a baseline whose measured prefix was just replaced by a
@@ -297,13 +302,15 @@ export const prepareTurnContext = async (
     untrustedEnvelope: runtimeConfig().untrustedEnvelope,
   })
   const finalCtx = injectRedactionBanner(config, await injectIdeContext(config, ctx))
-  emitPromptAssembled(config, finalCtx)
+  emitPromptAssembled(config, finalCtx, activeModel)
   return { ctx: finalCtx, breakerVerdict }
 }
 
 export const emitPromptAssembled = (
   config: AgentConfig,
   ctx: ReturnType<typeof buildTurnContext>,
+  // D4 (jun-7) — the active turn model (sticky/skill swap); defaults to base.
+  activeModel: string = configuredModel(config.llm),
 ): void => {
   const hook = config.onPromptAssembled
   if (hook === undefined) return
@@ -318,8 +325,8 @@ export const emitPromptAssembled = (
       // D4 (jun-7) — the model's real context window (or 0 for an un-tabled
       // model, the surface's "unknown" sentinel), so the usage gauge is
       // window-relative instead of always reporting 0.
-      max: resolveModelWindow(configuredModel(config.llm))?.contextWindow ?? 0,
-      model: configuredModel(config.llm),
+      max: resolveModelWindow(activeModel)?.contextWindow ?? 0,
+      model: activeModel,
     })
   } catch (e) {
     config.stream.emit({

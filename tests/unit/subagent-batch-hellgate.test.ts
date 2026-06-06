@@ -87,6 +87,57 @@ describe("spawn_batch — RFC-02 / ADR-0436", () => {
     expect(run?.items[2]?.output).toBe("R:do c")
   })
 
+  // CLI fan-out banner — "Spawning N agents" + per-worker Created lines up front.
+  test("emits a 'Spawning N agents' banner (repo + per-worker glyph/id/task)", async () => {
+    const tool = spawnBatchTool(makeDeps(async () => ok("x")))
+    const events = await driveAll(tool, {
+      items: ["reduce core", "reduce runtime"],
+      prompt_template: "do {{item}}",
+    })
+    const banner = events.find(
+      (e) => e.type === "progress" && e.message.startsWith("Spawning 2 agents"),
+    )
+    expect(banner).toBeDefined()
+    if (banner?.type === "progress") {
+      expect(banner.message).toContain("repo: /tmp")
+      expect(banner.message).toContain("Created")
+      expect(banner.message).toContain("agent-0")
+      expect(banner.message).toContain("Task: reduce core")
+    }
+  })
+
+  // Batch-wide per-worker controls thread into EVERY child request.
+  test("childOptions (isolation/taskKind/resultShape/effort/model) thread to each worker", async () => {
+    const reqs: Array<{
+      isolation?: string
+      taskKind?: string
+      resultShape?: string
+      effort?: string
+      model?: string
+    }> = []
+    const runner: BatchSubagentRunner = async (req) => {
+      reqs.push(req as never)
+      return ok("x")
+    }
+    await driveAll(spawnBatchTool(makeDeps(runner)), {
+      items: ["a", "b"],
+      prompt_template: "{{item}}",
+      isolation: "worktree",
+      task_kind: "review",
+      result_shape: "JSON {ok}",
+      effort: "high",
+      model: "gpt-5",
+    })
+    expect(reqs.length).toBe(2)
+    for (const r of reqs) {
+      expect(r.isolation).toBe("worktree")
+      expect(r.taskKind).toBe("review")
+      expect(r.resultShape).toBe("JSON {ok}")
+      expect(r.effort).toBe("high")
+      expect(r.model).toBe("gpt-5")
+    }
+  })
+
   // 2. partial-failure isolation
   test("one item throwing does NOT stop the rest", async () => {
     const runner: BatchSubagentRunner = async (req) => {

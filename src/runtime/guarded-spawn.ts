@@ -136,10 +136,22 @@ export const escalatingKill = (proc: KillableChild, killer?: ProcessTreeKiller):
   }
   // Clear the grace timer the instant the child is reaped — covers the common
   // case where the child exits on SIGTERM (or on its own) before the grace
-  // window elapses, so the SIGKILL is never sent and the timer never leaks.
-  void proc.exited.then(disarm, disarm)
+  // window elapses, so the SIGKILL is never sent and the timer never leaks. The
+  // `reaped` latch ALSO makes a LATER kill() a no-op: signalling a long-dead pid
+  // risks SIGKILL-ing a RECYCLED pid (the OS reused it for an unrelated process)
+  // 2s later, and re-arming the grace timer after `proc.exited` already resolved
+  // would leak a timer nothing clears. A caller that kills an already-terminal
+  // handle (e.g. `bash-bg-registry` evictOldest on a `completed` shell) must NOT
+  // trigger either hazard.
+  let reaped = false
+  const markReaped = (): void => {
+    reaped = true
+    disarm()
+  }
+  void proc.exited.then(markReaped, markReaped)
 
   const kill = () => {
+    if (reaped) return // child already reaped — never signal a (possibly recycled) dead pid
     try {
       sigterm() // polite SIGTERM first (whole tree when a killer is wired)
     } catch {

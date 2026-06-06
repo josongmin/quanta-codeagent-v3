@@ -1,24 +1,24 @@
 /**
- * Capability B — Leader-broker — E2E HELLGATE over the REAL mailbox.
+ * Capability B — Leader-broker — E2E HELLGATE over the LIVE wire.
  *
  * Plan: docs/plans/multiagent-coordination.md §2.B + §3 + §5.
  *
- * A fake blocked worker sends an escalation `request` through a real
- * `createSubagentMailbox()`; a fake leader runs `brokerLoop` with an injected
- * decider; the worker then reads the matching `response` and applies it. This
- * proves the composition end-to-end against the real transport — not a stub.
+ * This exercises the ACTUAL live path the admissibility gate consults on a
+ * worker's SOFT permission denial: `buildLeaderHitlBroker`
+ * (`@/agent/coordination-broker-wire`) over a REAL `createSubagentMailbox()`.
+ * The escalation round-trip (request → leader-decide → response → apply) runs
+ * IN-PROCESS within `escalate()`; the mailbox carries only the audit trail. The
+ * prior `brokerLoop` mailbox-read-loop was never wired live and was removed
+ * (jun-07) — so this battery now proves the mechanism that genuinely runs.
  *
- * Determinism: the mailbox `now` clock is injected (no `Date.now()`).
+ * Determinism: the mailbox `now` clock + the correlation-id source are injected
+ * (no `Date.now()` / `Math.random`).
  */
 
 import { describe, expect, test } from "bun:test"
+import { buildLeaderHitlBroker } from "@/agent/coordination-broker-wire"
 import { createSubagentMailbox } from "@/agent/subagent-mailbox"
-import {
-  applyDecisionResponse,
-  brokerLoop,
-  type EscalationDecision,
-  type EscalationRequest,
-} from "@/subagent/coordination/broker"
+import { applyDecisionResponse, type EscalationRequest } from "@/subagent/coordination/broker"
 
 const LEADER = "leader"
 const WORKER = "worker"
@@ -29,101 +29,96 @@ const makeClock = () => {
   return () => ++t
 }
 
-const escalate = (mailbox: ReturnType<typeof createSubagentMailbox>, correlationId: string) => {
-  const req: EscalationRequest = {
-    tool: "shell",
-    scope: "exec:git push --force",
-    reason: "rewrite remote history per user request",
-  }
-  mailbox.send({
-    from: WORKER,
-    to: LEADER,
-    kind: "request",
-    body: JSON.stringify(req),
-    correlationId,
-  })
+/** A deterministic correlation-id source — never `Math.random`. */
+const makeCid = () => {
+  let n = 0
+  return () => `esc-${n++}`
 }
 
-describe("broker e2e — real mailbox round-trip", () => {
-  test("blocked worker escalates → leader approves → worker proceeds", () => {
+const REQ: EscalationRequest = {
+  tool: "shell",
+  scope: "exec:git push --force",
+  reason: "rewrite remote history per user request",
+}
+
+describe("broker e2e — live wire over the real mailbox", () => {
+  test("blocked worker escalates → leader approves → worker proceeds", async () => {
     const mailbox = createSubagentMailbox({ now: makeClock() })
-    const correlationId = "esc-approve-1"
-
-    // 1. blocked worker sends an escalation request to the leader
-    escalate(mailbox, correlationId)
-    expect(mailbox.pendingFor(LEADER)).toBe(1)
-
-    // 2. leader brokers it with an approve-decider
-    const approve = (): EscalationDecision => ({ approved: true })
-    const sent = brokerLoop({ mailbox, leaderId: LEADER, decide: approve })
-    expect(sent).toBe(1)
-
-    // request was consumed (leader read its inbox)
-    expect(mailbox.pendingFor(LEADER)).toBe(0)
-
-    // 3. worker reads the matching response and applies it
-    const inbox = mailbox.read(WORKER)
-    const resp = inbox.find((m) => m.correlationId === correlationId && m.kind === "response")
-    expect(resp).toBeDefined()
-    if (resp === undefined) return
-    expect(applyDecisionResponse(resp, correlationId, { leaderId: LEADER })).toEqual({
-      approved: true,
+    const broker = buildLeaderHitlBroker({
+      workerId: WORKER,
+      leaderId: LEADER,
+      leaderDecide: () => ({ approved: true }),
+      mailbox,
+      nextCorrelationId: makeCid(),
     })
+
+    expect(await broker.escalate(REQ)).toEqual({ approved: true })
+
+    // The audit trail recorded a leader-authored response (`from === LEADER`),
+    // and the audit rows were acked (delivered) so they evict before real mail.
+    const responses = mailbox.list({ kind: "response" })
+    expect(responses).toHaveLength(1)
+    expect(responses[0]?.from).toBe(LEADER)
+    expect(responses[0]?.deliveredAt).toBeDefined()
   })
 
-  test("deny path → worker stays blocked", () => {
+  test("deny path → worker stays blocked, reason surfaced", async () => {
     const mailbox = createSubagentMailbox({ now: makeClock() })
-    const correlationId = "esc-deny-1"
-
-    escalate(mailbox, correlationId)
-    const deny = (): EscalationDecision => ({ approved: false, reason: "force-push is denied" })
-    const sent = brokerLoop({ mailbox, leaderId: LEADER, decide: deny })
-    expect(sent).toBe(1)
-
-    const inbox = mailbox.read(WORKER)
-    const resp = inbox.find((m) => m.correlationId === correlationId)
-    expect(resp).toBeDefined()
-    if (resp === undefined) return
-    const decision = applyDecisionResponse(resp, correlationId, { leaderId: LEADER })
-    expect(decision).toEqual({ approved: false, reason: "force-push is denied" })
+    const broker = buildLeaderHitlBroker({
+      workerId: WORKER,
+      leaderId: LEADER,
+      leaderDecide: () => ({ approved: false, reason: "force-push is denied" }),
+      mailbox,
+      nextCorrelationId: makeCid(),
+    })
+    expect(await broker.escalate(REQ)).toEqual({ approved: false, reason: "force-push is denied" })
   })
 
-  test("brokerLoop with an empty inbox sends nothing (no-throw)", () => {
-    const mailbox = createSubagentMailbox({ now: makeClock() })
-    expect(brokerLoop({ mailbox, leaderId: LEADER, decide: () => ({ approved: true }) })).toBe(0)
+  test("async leader authority (HITL) is awaited", async () => {
+    const broker = buildLeaderHitlBroker({
+      workerId: WORKER,
+      leaderId: LEADER,
+      leaderDecide: async () => {
+        await Promise.resolve()
+        return { approved: true }
+      },
+      nextCorrelationId: makeCid(),
+    })
+    expect(await broker.escalate(REQ)).toEqual({ approved: true })
   })
 
-  test("SECURITY e2e — a worker self-authored response is NOT honored", () => {
-    const mailbox = createSubagentMailbox({ now: makeClock() })
-    const correlationId = "esc-forge-1"
+  test("works with NO audit mailbox — the decision authority is unchanged", async () => {
+    const broker = buildLeaderHitlBroker({
+      workerId: WORKER,
+      leaderId: LEADER,
+      leaderDecide: () => ({ approved: true }),
+      nextCorrelationId: makeCid(),
+    })
+    expect(await broker.escalate(REQ)).toEqual({ approved: true })
+  })
 
-    // the worker, instead of waiting for the leader, sends ITSELF an approval
-    mailbox.send({
+  test("SECURITY — the grant authority is the leader's decider, never the worker", async () => {
+    // The worker has no handle on `leaderDecide`; whatever it puts on the wire,
+    // only a leader-authored response widens it. A worker-FORGED response
+    // (`from === WORKER`) is rejected by the worker-side applier even with a
+    // matching correlationId — the e2e expression of "no self-grant".
+    const forged = {
       from: WORKER,
       to: WORKER,
-      kind: "response",
+      kind: "response" as const,
       body: JSON.stringify({ approved: true }),
-      correlationId,
-    })
-    // the leader never ran — there is no leader-authored grant.
-    const inbox = mailbox.read(WORKER)
-    const forged = inbox.find((m) => m.correlationId === correlationId)
-    // The forged message is NOT delivered to its own sender by the mailbox
-    // (never-deliver-to-self), and even if surfaced it must be rejected because
-    // `from !== leaderId`. Either way the worker stays blocked.
-    if (forged !== undefined) {
-      expect(applyDecisionResponse(forged, correlationId, { leaderId: LEADER })).toBeUndefined()
-    } else {
-      expect(forged).toBeUndefined()
+      correlationId: "esc-0",
     }
-  })
+    expect(applyDecisionResponse(forged, "esc-0", { leaderId: LEADER })).toBeUndefined()
 
-  test("idempotent re-broker — a second loop over an already-drained inbox grants nothing more", () => {
-    const mailbox = createSubagentMailbox({ now: makeClock() })
-    escalate(mailbox, "esc-idem-1")
-    const approve = (): EscalationDecision => ({ approved: true })
-    expect(brokerLoop({ mailbox, leaderId: LEADER, decide: approve })).toBe(1)
-    // inbox drained by the first read inside brokerLoop ⇒ nothing to broker
-    expect(brokerLoop({ mailbox, leaderId: LEADER, decide: approve })).toBe(0)
+    // And the live wire's own grant is gated purely by `leaderDecide`: a denying
+    // leader yields denied regardless of what the worker requested.
+    const broker = buildLeaderHitlBroker({
+      workerId: WORKER,
+      leaderId: LEADER,
+      leaderDecide: () => ({ approved: false, reason: "policy" }),
+      nextCorrelationId: makeCid(),
+    })
+    expect(await broker.escalate(REQ)).toEqual({ approved: false, reason: "policy" })
   })
 })

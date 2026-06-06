@@ -8,18 +8,20 @@
 
 ## 0. 결함 요약 + 분류
 
-| # | 결함 | 클러스터 | 근거(파일:라인) | 심각도 | 종류 | 기본값 |
-|---|---|---|---|---|---|---|
-| D1 | 단일-PID kill → 프로세스 트리 orphan | exec/수명 | `runtime/guarded-spawn.ts:111` + `shell.ts:186`/`bash-bg-registry.ts:115`/`pty-backend.ts:134` | 🔴 HIGH | 리소스 누수 | ON (버그픽스) |
-| D2 | bg-shell 출력버퍼 메모리 무제한 → OOM | exec/수명 | `bash-bg-registry.ts:337,340` | 🔴 HIGH | 리소스 누수 | ON |
-| D3 | PTY env 미scrub (full `process.env` inherit) | exec/보안 | `pty-backend.ts:136` | 🔴 보안 | 크레덴셜 누수 | ON+opt-out |
-| D4 | compaction threshold 모델-블라인드 `120_000` | compaction/측정 | `compaction.ts:35` + `loop/context-assembler.ts:287` (`max:0`) | 🔴 HIGH | 잘못된 상수 | ON+fallback |
-| D5 | chars/4 추정이 authoritative API token 무시 | compaction/측정 | `compaction.ts:56,444` + `llm/live-usage/index.ts` | 🟠 MED-HIGH | 부정확 측정 | ON+fallback |
-| D6 | CRLF fuzzy splice 드롭 → mixed-EOL silent corruption | edit/정확성 | `tool/edit/fuzzy.ts:25,31` | 🔴 corruption | silent 데이터손상 | ON (버그픽스) |
-| D7 | V4A `@@` context-header 파싱하나 무시 | patch/기능 | `patch/parser.ts:224` + `patch/applier.ts:341` | 🟠 MED | dropped capability | ON (additive) |
-| D8 | read per-line truncation 없음 → minified 범람 | read/IO | `tool/read/index.ts:53` | 🟠 MED | context 범람 | ON |
+> **⚠️ 상태 재검증 (verified jun-07)**: 아래 8개 결함은 **전부 FIXED + 실제 배선 완료**됐다. 소스를 직접 grep/read해 확인 — D1~D8 모든 픽스가 설계대로 구현됐고 호출부(spawn 3-site / loop / applier / read render)까지 LIVE다. **남은 하드닝 잔여 = 0**. 이 RFC는 이제 "구현 완료된 설계의 기록"이다. 각 §의 STATUS 라인 참조.
 
-**시퀀싱**: D1·D2·D3(exec 클러스터, 공유 ProcessTreeKiller 포트) → D6·D7·D8(순수함수, 독립, 병렬가능) → D4·D5(compaction, 공유 TokenWindow seam, 가장 큰 수술). exec과 compaction은 hot-path라 1개씩 회귀검증(메모리 교훈: hot-path 배선은 수술).
+| # | 결함 | 클러스터 | 근거(파일:라인) | 심각도 | 종류 | 상태 (verified jun-07) |
+|---|---|---|---|---|---|---|
+| D1 | 단일-PID kill → 프로세스 트리 orphan | exec/수명 | `runtime/guarded-spawn.ts:111` + `shell.ts:186`/`bash-bg-registry.ts:115`/`pty-backend.ts:134` | 🔴 HIGH | 리소스 누수 | ✅ FIXED (`runtime/process-tree.ts` ProcessTreeKiller + 3 spawn-site 배선) |
+| D2 | bg-shell 출력버퍼 메모리 무제한 → OOM | exec/수명 | `bash-bg-registry.ts:337,340` | 🔴 HIGH | 리소스 누수 | ✅ FIXED (`runtime/bounded-buffer.ts` + bash-bg-registry `.append()`) |
+| D3 | PTY env 미scrub (full `process.env` inherit) | exec/보안 | `pty-backend.ts:136` | 🔴 보안 | 크레덴셜 누수 | ✅ FIXED (`pty-backend.ts:204 buildPtyEnv` 스크럽 + `QUANTA_PTY_INHERIT_ENV` opt-out) |
+| D4 | compaction threshold 모델-블라인드 `120_000` | compaction/측정 | `compaction.ts:35` + `loop/context-assembler.ts:287` (`max:0`) | 🔴 HIGH | 잘못된 상수 | ✅ FIXED (`llm/provider-metadata.ts MODEL_CONTEXT_WINDOWS` + `compaction.ts:215 resolveThreshold`) |
+| D5 | chars/4 추정이 authoritative API token 무시 | compaction/측정 | `compaction.ts:56,444` + `llm/live-usage/index.ts` | 🟠 MED-HIGH | 부정확 측정 | ✅ FIXED (`compaction.ts TokenBaseline`/`triggerTokenCount` + `loop/stream-consume.ts captureTokenBaseline` 배선) |
+| D6 | CRLF fuzzy splice 드롭 → mixed-EOL silent corruption | edit/정확성 | `tool/edit/fuzzy.ts:25,31` | 🔴 corruption | silent 데이터손상 | ✅ FIXED (`tool/edit/eol.ts detectEol` + fuzzy `/\r?\n/` split + native-EOL join) |
+| D7 | V4A `@@` context-header 파싱하나 무시 | patch/기능 | `patch/parser.ts:224` + `patch/applier.ts:341` | 🟠 MED | dropped capability | ✅ FIXED (`patch/applier.ts:365 resolveAnchorFloor` → locateBlock search-floor) |
+| D8 | read per-line truncation 없음 → minified 범람 | read/IO | `tool/read/index.ts:53` | 🟠 MED | context 범람 | ✅ FIXED (`tool/read/index.ts:56 MAX_LINE_CHARS=2000` truncateLine + oversized nudge) |
+
+**시퀀싱**: D1·D2·D3(exec 클러스터, 공유 ProcessTreeKiller 포트) → D6·D7·D8(순수함수, 독립, 병렬가능) → D4·D5(compaction, 공유 TokenWindow seam, 가장 큰 수술). exec과 compaction은 hot-path라 1개씩 회귀검증(메모리 교훈: hot-path 배선은 수술). **— 시퀀싱은 모두 소화됨, 8/8 land.**
 
 ---
 
@@ -37,6 +39,8 @@
 ## 2. 클러스터 A — 프로세스 수명 (D1·D2·D3)
 
 ### 2.1 공유 신설: `ProcessTreeKiller` 포트 (`@/runtime/process-tree`)
+
+> **STATUS: ✅ FIXED (verified jun-07)** — `src/runtime/process-tree.ts`가 설계대로 존재(ppid-walk 어댑터 (B) 채택, fast-path (A)pgid는 의도적 미채택 — Bun detached 미확인). `createPpidWalkKiller`/`defaultPpidWalkKiller`/`parsePsTable` 구현. **3 spawn-site 전부 배선 LIVE**: `shell.ts:16,219`(FOREGROUND_TREE_KILLER), `bash-bg-registry.ts:36,339`(BG_TREE_KILLER), `pty-backend.ts:24,160,240`(PTY_TREE_KILLER). `escalatingKill(proc, killer)`가 `guarded-spawn.ts:112-129`에서 `signalTree(pid, SIGTERM/SIGKILL)`로 트리 시그널, killer 부재 시 single-PID byte-identical fallback. `pid>0` 가드(자기 그룹 자살 방지) 박힘. KNOWN LIMITATION(double-fork/setsid escape)는 소스 주석에 정직히 문서화.
 
 **문제 (D1)**: 모든 spawn site가 `Bun.spawn(argv, {...})` 후 `proc.kill()` = **직접 child PID에만** SIGTERM. `bash -lc "npm run dev"`는 bash→node→vite-worker 트리인데 bash만 죽고 자식은 init로 reparent돼 포트/CPU/락 점유. `escalatingKill`(`guarded-spawn.ts:96`)의 SIGKILL escalation도 이미 죽은 bash PID만 때림.
 
@@ -71,6 +75,8 @@ export interface ProcessTreeKiller {
 
 ### 2.2 D2 — bg-shell 출력버퍼 bounded ring (`@/runtime/bounded-buffer`)
 
+> **STATUS: ✅ FIXED (verified jun-07)** — `src/runtime/bounded-buffer.ts` 존재(`createBoundedBuffer` head 8k + tail 4k + `…(+N bytes elided)…` 마커, surrogate-safe). `bash-bg-registry.ts`가 `BgShellHandle.stdout/stderr: BoundedBuffer`로 전환(`:90-91`), `MAX_BG_BUFFER_BYTES=200_000`(`:63`)로 생성(`:350-351`), drain이 `handle.stdout.append(chunk)`(`:367,370`), snapshot은 `.value()`(`:399-400`), awaitHandle regex도 bounded `.value()` 대상(`:442`). naive `+= chunk` 제거됨.
+
 **문제**: `bash-bg-registry.ts:337,340` `handle.stdout += chunk`/`stderr += chunk` **per-handle 바이트캡 없음**. LRU(`MAX_BG_SHELLS=16`)는 shell *개수*만. `tail -f`/`yes`/chatty server가 무한증식→agent OOM. LRU는 newest라 안 evict.
 
 **경쟁사**: Codex `disable_output_cap`+`max_output_tokens` = **accumulator에 캡**(렌더뷰 아닌 버퍼 자체).
@@ -99,6 +105,8 @@ export const createBoundedBuffer = (maxBytes: number): BoundedBuffer => /* head/
 
 ### 2.3 D3 — PTY env scrub (`pty-backend.ts`)
 
+> **STATUS: ✅ FIXED (verified jun-07)** — `pty-backend.ts:204 buildPtyEnv`가 신설돼 spawn env를 스크럽(`:139-143` 호출). 기본(`inheritEnv:false`)은 `DEFAULT_ENV_ALLOWLIST`만 통과(parent에서도 declared에서도 — declared 시크릿 이름도 드롭), opt-out `QUANTA_PTY_INHERIT_ENV`(`runtimeConfig().ptyInheritEnv`)는 legacy full-spread. naive `{ ...process.env, ...env }` 직접 spread 제거됨.
+
 **문제**: `pty-backend.ts:136` `env: { ...process.env, ...env }` = **전체 부모 env inherit**. `runShell`은 `scrubEnv()`(`*_API_KEY`/`*_TOKEN`/`*_SECRET` 드롭, ADR-0006)인데 PTY는 raw → 대화형 셸에 크레덴셜 노출(좁지만 실제 누수 벡터).
 
 **구조적 픽스** — env scrub 단일 chokepoint를 PTY에도:
@@ -113,6 +121,8 @@ export const createBoundedBuffer = (maxBytes: number): BoundedBuffer => /* head/
 ## 3. 클러스터 B — 순수함수 정확성 (D6·D7·D8, 독립·병렬)
 
 ### 3.1 D6 — CRLF EOL 보존 (`tool/edit/fuzzy.ts`)
+
+> **STATUS: ✅ FIXED (verified jun-07)** — `src/tool/edit/eol.ts` 신설(`detectEol`: `\r\n` strict-majority면 CRLF, 타이/LF-majority면 LF, pure 정수비교 무-임계값). `fuzzy.ts:32 splitLines = s.split(/\r?\n/)`(`\r` 컨텍스트 제거), `spliceLines` 후 `next.join(detectEol(source))`(`:117,242`)로 원본 EOL 복원. LF 파일·exact 경로 byte-identical, CRLF 파일만 동작 변경 = corruption 차단 지점.
 
 **문제**: `splitLines = s.split("\n")`(`:25`)만. CRLF 파일서 haystack `"foo\r"` vs needle `"foo"`: exact rung 실패→whitespace-flex/anchored-trim의 `.trim()`이 `\r` 스트립해 **매치**→`spliceLines`(`:31`)가 `\r` 없는 newString으로 교체→이웃 줄은 `\r` 유지 = **mixed line-ending**. CRLF 파일 한 블록 fuzzy 편집이 편집줄만 LF로 무음변환.
 
@@ -137,6 +147,8 @@ export const detectEol = (source: string): EolStyle => /* 지배적 EOL: \r\n �
 
 ### 3.2 D7 — V4A `@@` context-header를 jump anchor로 (`patch/applier.ts`)
 
+> **STATUS: ✅ FIXED (verified jun-07)** — `applier.ts:365 resolveAnchorFloor(workLines, contextHeader)`가 신설돼 `@@ <header>` 매칭 마지막 줄 이후로 search-floor 산출, `locateBlock`(`:390`)이 `:404 floor`로 tier 검색을 narrow. header 부재(`floor=0`) 또는 floor 너머 블록 없음이면 whole-file retry(`:409-411`) — strictly additive. `@@` 없는 patch byte-identical, 전엔 ambiguous-throw하던 게 unique-apply. parser가 저장만 하고 applier가 무시하던 dead-parse 닫힘.
+
 **문제**: `patch/parser.ts:224` `hunk.contextHeader = header` 저장하나 `locateBlock`(`applier.ts:341,361`)이 **never 참조** — whole-file 스캔으로 위치 → 모델이 `@@ class Foo`로 동일 메서드 바디 중 하나 disambiguate해도 무시→`Ambiguous context — N matches`(`:441`) throw. Codex 자기 포맷인데 못 씀(파싱은 해서 "되는 척").
 
 **구조적 픽스** — `locateBlock`을 anchor-scoped:
@@ -148,6 +160,8 @@ export const detectEol = (source: string): EolStyle => /* 지배적 EOL: \r\n �
 **기본값**: ON(additive). **가드**: 동일 메서드 바디 2곳 + `@@ class A` anchor patch → A쪽만 적용, B 불변 단언. anchor 무시로 되돌리면 ambiguous-throw로 red. `@@`-없는 기존 patch 코퍼스 회귀 = byte-identical.
 
 ### 3.3 D8 — read per-line truncation + 토큰-aware nudge (`tool/read/index.ts`)
+
+> **STATUS: ✅ FIXED (verified jun-07)** — `read/index.ts:56 MAX_LINE_CHARS=2000`(Claude Read 패리티) + `:71 truncateLine`(surrogate-safe, in-band `… (+N chars elided)` 마커), `renderReadOk:93`가 줄단위로 적용. `:64 OVERSIZED_NUDGE_TOKENS=25_000` soft nudge 헤더(`:101-103`, offset 사용 중이면 억제, refuse 아닌 advise). 5MB-1줄 minified 범람 차단. **주의**: 이건 jun-07 syntax-chunking/outline 작업과 별개로 D8 전용 per-line cap이 실재함을 확인한 것.
 
 **문제**: `renderReadOk`(`:53`)가 `\n` split 후 줄단위 slice, **per-line char cap 없음**. 5MB minified 번들=1줄=limit에 1 카운트→200k 외곽캡까지 통째 방출(읽을수없는 단일줄, offset/limit은 줄단위라 페이징 불가).
 
@@ -164,6 +178,8 @@ export const detectEol = (source: string): EolStyle => /* 지배적 EOL: \r\n �
 ## 4. 클러스터 C — compaction 측정 (D4·D5, 공유 TokenWindow seam, 최대 수술)
 
 ### 4.1 D4 — model→context-window SSOT + 파생 threshold
+
+> **STATUS: ✅ FIXED (verified jun-07)** — `src/llm/provider-metadata.ts`에 `MODEL_CONTEXT_WINDOWS`(`:117`, exact id→`ModelWindow{contextWindow,maxOutput}`) + `MODEL_FAMILY_FALLBACKS`(`:155`) + `resolveModelWindow`(`:183` exact→family→undefined) 신설, `@/llm`에서 export(`index.ts:68-69`). `compaction.ts:196 deriveModelThreshold` = `window − maxOutput − COMPACTION_SAFETY_MARGIN(13_000)`, `:215 resolveThreshold` precedence = explicit→env(`compactTokens`)→derived→`DEFAULT_THRESHOLD(120_000)` legacy(unknown-model byte-identical). `CompactInput.model` 주입(`:578 resolveThreshold(input.thresholdTokens, input.model)`). 단 `DEFAULT_THRESHOLD = 120_000`은 **여전히 존재 — 의도된 unknown-model fallback**이지 결함 아님. **주의(微distinction)**: jun-07 세션의 *microcompaction*(`agent/microcompact/`, `compaction/background.ts`)은 별개 기능 — D4의 model-window 파생 threshold와 무관(D4는 *언제 proactive compaction을 트리거할 임계값*을 모델 윈도우에서 파생, microcompaction은 *어떻게 점진 압축*).
 
 **문제**: `compaction.ts:35` `DEFAULT_THRESHOLD = 120_000` **모델-블라인드 상수**. 레포에 model→window 테이블 전무. `loop/context-assembler.ts:287`이 usage snapshot에 `max:0`("unknown window") 하드코딩. → 200k 모델서 40% 영구 미사용, **1M 모델서 12%만 사용(88% 버림)**, 32k 모델선 트리거 안 돼 provider가 먼저 reject.
 
@@ -194,6 +210,8 @@ export const resolveModelWindow = (model: string): ModelWindow | undefined => /*
 - 회귀: 120k 가정 박힌 기존 compaction 테스트 = unknown-model 경로로 유지.
 
 ### 4.2 D5 — authoritative token baseline (live-usage → compaction)
+
+> **STATUS: ✅ FIXED (verified jun-07)** — `compaction.ts:63 TokenBaseline{measuredInputTokens, measuredAtMessageCount}` + `:110 triggerTokenCount(messages, baseline)` = `baseline.measuredInputTokens + estimateTokens(messages.slice(measuredAtMessageCount))`(authoritative baseline + 델타만 chars/4), baseline 부재/out-of-range면 legacy `estimateTokens(all)` fail-safe. **loop 배선 LIVE**: `loop/stream-consume.ts:62 captureTokenBaseline`가 `usage` 이벤트의 provider authoritative `inputTokens`(+ Anthropic은 cacheRead/cacheCreation 합산, OpenAI은 이미 포함 — provider-aware) 기록, `exact` 게이트(`fullInput >= sentEstimate`일 때만 신뢰, `:78`). `compaction-wire.ts:116,191`로 주입, `context-assembler.ts:252 markBaselineStaleIfShrunk`로 prefix 교체 시 stale 무효화. `session-bootstrap.ts:202`가 box 초기화. **주의(微distinction)**: jun-07의 *delta-token 카운팅*(`agent/token-delta/counter.ts`)은 chars/4 기반 디스플레이 메모이제이션 — authoritative API 토큰 baseline(D5)과는 **다름**. D5는 provider가 보고한 `inputTokens`(authoritative)를 compaction 트리거의 baseline으로 *실제 ingest*함을 확인 — 이건 token-delta와 별개로 실재.
 
 **문제**: `compactIfNeeded`(`:444`)가 `estimateTokens(input.messages)`=`chars/4`로만 게이트. quanta는 provider authoritative count(`llm/live-usage/index.ts` `usage.inputTokens`, `exact` 플래그까지)를 **이미 받지만 display(output_progress)에만** 씀. chars/4는 code/JSON/identifier-dense서 **20~40% under-count** → 실 150k가 ~115k 추정돼 120k 게이트 통과 → 하드 `context_window_exceeded` → reactive PTL(더 lossy). 이미지/PDF는 고정 char proxy(IMAGE=6000/DOC=12000)라 20장 PDF=1장 동일.
 

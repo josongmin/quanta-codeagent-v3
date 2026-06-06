@@ -293,7 +293,10 @@ const SUMMARY_SYSTEM =
   "You are a transcript compactor. Summarize the conversation so far into a " +
   "terse, information-dense brief: the task, key decisions, files touched, " +
   "tool outcomes (note what was confirmed by running/reading vs. assumed), " +
-  "and any open threads. Plain prose, no preamble. Be concise."
+  "and any open threads. Note any security-relevant instructions or " +
+  "constraints the user stated (e.g. files not to touch, commands not to " +
+  "run, scopes off-limits) — these MUST be preserved verbatim so they keep " +
+  "applying after compaction. Plain prose, no preamble. Be concise."
 
 const renderBlock = (b: ContentBlock): string => {
   switch (b.type) {
@@ -481,7 +484,10 @@ const CONTINUATION_SYSTEM =
   "a fresh context: (1) the task/goal, (2) what you've done and learned " +
   "(mark which claims you verified vs. assumed), (3) key files/paths and " +
   "their state, (4) the exact next command/edit to run, not a vague " +
-  "direction. Wrap it in <summary></summary>."
+  "direction, (5) any security-relevant instructions or constraints the user " +
+  "stated (files not to touch, commands not to run, scopes off-limits) — " +
+  "preserve these verbatim so they keep applying after the context resets. " +
+  "Wrap it in <summary></summary>."
 
 export interface ReactiveCompactInput {
   messages: Message[]

@@ -89,9 +89,9 @@ const spawnFake = (input: {
   // F15 — build & validate the spawn_agent payload (strict).
   const payloadCandidate = {
     prompt: `child '${nickname}' for parent '${parentTaskId}'`,
-    agentType: role,
-    toolFilter: allowedToolNames,
-    maxDepth: 3,
+    agent_type: role,
+    tool_filter: allowedToolNames,
+    max_depth: 3,
   }
   const parsed = SpawnAgentInputSchema.safeParse(payloadCandidate)
   if (!parsed.success) {
@@ -302,7 +302,7 @@ describe("nickname pool coverage via sequential allocator", () => {
       // 6-tool schema and the nickname pool stay compatible (string min(1)).
       const r = SpawnAgentInputSchema.safeParse({
         prompt: `child '${n}'`,
-        agentType: "explorer",
+        agent_type: "explorer",
       })
       expect(r.success).toBe(true)
     }

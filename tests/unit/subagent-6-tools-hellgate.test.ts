@@ -35,6 +35,7 @@ import {
   PtyTable,
   SUBAGENT_6_TOOL_NAMES,
   type Subagent6Deps,
+  type SubagentRequest,
   type SubagentRunner,
   TaskRegistry,
 } from "@/subagent"
@@ -383,11 +384,121 @@ describe("HELLGATE — handleSpawnAgent", () => {
   test("input maxDepth overrides deps.maxDepth (the spawn request's cap is authoritative)", async () => {
     const reg = new TaskRegistry()
     const r = await handleSpawnAgent(
-      { prompt: "p", maxDepth: 0 },
+      { prompt: "p", max_depth: 0 },
       { runner: slowRunner(10), registry: reg, maxDepth: 100, parentDepth: 0 },
     )
     expect(r.kind).toBe("error")
     if (r.kind === "error") expect(r.cause).toBe("depth_exceeded")
+  })
+
+  test("parity passthroughs thread into the SubagentRequest (isolation / surfaces / role / budget)", async () => {
+    const reg = new TaskRegistry()
+    let captured: SubagentRequest | undefined
+    const capturingRunner: SubagentRunner = async (req) => {
+      captured = req
+      return { ok: true, finalText: "done", turns: 1 }
+    }
+    const r = await handleSpawnAgent(
+      {
+        prompt: "reduce quanta-core",
+        isolation: "worktree",
+        owned_surfaces: ["src/core/"],
+        forbidden_surfaces: ["src/runtime/"],
+        task_kind: "edit",
+        result_shape: "JSON {ok, summary}",
+        model: "gpt-5",
+        role: "executor",
+        effort: "high",
+        max_turns: 7,
+        max_tokens: 1000,
+      },
+      { runner: capturingRunner, registry: reg },
+    )
+    expect(r.kind).toBe("success")
+    // Let the fire-and-forget runner observe the request.
+    await new Promise<void>((res) => setTimeout(res, 5))
+    expect(captured?.isolation).toBe("worktree")
+    expect(captured?.ownedSurfaces).toEqual(["src/core/"])
+    expect(captured?.forbiddenSurfaces).toEqual(["src/runtime/"])
+    expect(captured?.taskKind).toBe("edit")
+    expect(captured?.resultShape).toBe("JSON {ok, summary}")
+    expect(captured?.model).toBe("gpt-5")
+    expect(captured?.role).toBe("executor")
+    expect(captured?.effort).toBe("high")
+    expect(captured?.budget).toEqual({ maxTurns: 7, maxTokens: 1000 })
+  })
+
+  test("unset parity fields ⇒ absent from the request (byte-identical default)", async () => {
+    const reg = new TaskRegistry()
+    let captured: SubagentRequest | undefined
+    const capturingRunner: SubagentRunner = async (req) => {
+      captured = req
+      return { ok: true, finalText: "done", turns: 1 }
+    }
+    await handleSpawnAgent({ prompt: "p" }, { runner: capturingRunner, registry: reg })
+    await new Promise<void>((res) => setTimeout(res, 5))
+    expect(captured?.isolation).toBeUndefined()
+    expect(captured?.ownedSurfaces).toBeUndefined()
+    expect(captured?.budget).toBeUndefined()
+    expect(captured?.model).toBeUndefined()
+  })
+
+  test("checkpoint ⇒ checkpointPath built from cwd; skipped under worktree isolation", async () => {
+    const reg = new TaskRegistry()
+    const seen: Array<SubagentRequest> = []
+    const runner: SubagentRunner = async (req) => {
+      seen.push(req)
+      return { ok: true, finalText: "x", turns: 1 }
+    }
+    const spawn = await handleSpawnAgent(
+      { prompt: "p", checkpoint: true },
+      { runner, registry: reg, cwd: "/work" },
+    )
+    if (spawn.kind !== "success") throw new Error("spawn should succeed")
+    await new Promise<void>((res) => setTimeout(res, 5))
+    expect(seen[0]?.checkpointPath).toBe(`/work/.subagent-state/${spawn.agentId}.md`)
+
+    // worktree isolation ⇒ parent can't read inside it ⇒ no checkpoint.
+    await handleSpawnAgent(
+      { prompt: "p", checkpoint: true, isolation: "worktree" },
+      { runner, registry: reg, cwd: "/work" },
+    )
+    await new Promise<void>((res) => setTimeout(res, 5))
+    expect(seen[1]?.checkpointPath).toBeUndefined()
+  })
+
+  test("continue_from is LINEAGE-GATED: foreign lineage denied, owner gets priorAttempt", async () => {
+    const reg = new TaskRegistry()
+    const runner: SubagentRunner = async () => ({ ok: true, finalText: "A-findings", turns: 1 })
+    // Worker X launches task A (stamped to lineage "agent-X") and it settles.
+    const a = await handleSpawnAgent(
+      { prompt: "task A" },
+      { runner, registry: reg, requesterLineage: "agent-X" },
+    )
+    if (a.kind !== "success") throw new Error("spawn A should succeed")
+    await new Promise<void>((res) => setTimeout(res, 5))
+    expect(reg.get(a.agentId)?.result?.finalText).toBe("A-findings")
+
+    // Foreign lineage "agent-Y" CANNOT continue from A (cross-lineage denied).
+    const denied = await handleSpawnAgent(
+      { prompt: "steal", continue_from: a.agentId },
+      { runner, registry: reg, requesterLineage: "agent-Y" },
+    )
+    expect(denied.kind).toBe("error")
+    if (denied.kind === "error") expect(denied.cause).toBe("ownership_denied")
+
+    // The OWNER lineage "agent-X" warm-starts: A's finalText becomes priorAttempt.
+    let captured: SubagentRequest | undefined
+    const capRunner: SubagentRunner = async (req) => {
+      captured = req
+      return { ok: true, finalText: "B", turns: 1 }
+    }
+    await handleSpawnAgent(
+      { prompt: "continue", continue_from: a.agentId },
+      { runner: capRunner, registry: reg, requesterLineage: "agent-X" },
+    )
+    await new Promise<void>((res) => setTimeout(res, 5))
+    expect(captured?.priorAttempt).toBe("A-findings")
   })
 })
 

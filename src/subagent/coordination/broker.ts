@@ -1,16 +1,22 @@
 /**
  * Multi-agent coordination — Capability B: Leader-mediated permission
- * escalation (broker).
+ * escalation (broker) — PURE PROTOCOL PRIMITIVES.
  *
  * Plan: docs/plans/multiagent-coordination.md §2.B + §3 + §5.
  *
- * Flow: a worker that hits a denied tool sends a mailbox `request` whose `body`
- * is an escalation envelope `{ tool, scope, reason }` (JSON) addressed to the
- * LEADER, carrying a `correlationId`. The leader's `brokerLoop` reads the
- * pending requests, runs each through the injected {@link EscalationDeciderPort}
- * (which wraps the host's `@/permission` decide / HITL), and sends a `response`
- * back with the SAME `correlationId`. The worker matches that response by
- * correlationId and applies the decision it did NOT author.
+ * Flow (the LIVE path is `@/agent/coordination-broker-wire#buildLeaderHitlBroker`):
+ * a worker that hits a SOFT-denied tool escalates. The wire composes these three
+ * pure primitives IN-PROCESS within one call — there is no asynchronous mailbox
+ * read-loop on the live path:
+ *   1. {@link parseEscalationRequest} — typed `{ tool, scope, reason }` envelope.
+ *   2. the LEADER authority (the parent agent's HITL/onConfirm, injected by the
+ *      wire — never visible to the worker) decides; {@link buildDecisionResponse}
+ *      serializes a leader-authored `response` round-tripping the `correlationId`.
+ *   3. {@link applyDecisionResponse} — the worker-side applier (see SECURITY).
+ * The mailbox carries only an AUDIT trail of these rows; it is NOT the decision
+ * transport (a prior `brokerLoop`/`brokerStep` mailbox-read-loop existed here but
+ * was never wired live — removed jun-07 to stop the docs advertising a mechanism
+ * that does not run).
  *
  * SECURITY (load-bearing, plan §5): the broker is a GRANT path, so the only
  * authority that can widen a worker's permission is a LEADER-authored
@@ -22,16 +28,14 @@
  * provenance posture — grants flow from the higher-authority source only.)
  *
  * SLICE FENCE (`src/subagent/**`): this leaf imports ONLY `@/shared`. The
- * decision authority is the HOST's — injected via the duck-typed
- * {@link EscalationDeciderPort} (a `decide` function), NOT a hard `@/permission`
- * import (which the biome fence forbids from `@/subagent`). The transport
- * ({@link MailboxPort}) is likewise injected; we depend only on the structural
- * shape of a mailbox message, declared locally as {@link BrokerMessage}.
+ * decision authority is the HOST's — injected by the wire, NOT a hard
+ * `@/permission` import (which the biome fence forbids from `@/subagent`). These
+ * primitives depend only on the structural shape of a mailbox message, declared
+ * locally as {@link BrokerMessage}.
  *
- * NO-THROW: every public function degrades gracefully on hostile / malformed
- * input — parsers return `undefined`, `brokerStep` skips the offending entry,
- * `brokerLoop` returns the count it actually sent. No function throws. No
- * `Date.now()` / `Math.random` / `localeCompare`.
+ * NO-THROW: every function degrades gracefully on hostile / malformed input —
+ * parsers return `undefined`. No function throws. No `Date.now()` /
+ * `Math.random` / `localeCompare`.
  */
 
 import { errMessage, logger } from "@/shared"
@@ -51,14 +55,6 @@ export interface EscalationRequest {
 export type EscalationDecision =
   | { readonly approved: true }
   | { readonly approved: false; readonly reason: string }
-
-/**
- * Injected decision seam — the LEADER owns it; the worker never sees it. The
- * host wires this to its `@/permission` decide path / HITL prompter. Duck-typed
- * (a plain function) so the slice fence holds: the decision LOGIC lives in the
- * host, not in `@/subagent`.
- */
-export type EscalationDeciderPort = (req: EscalationRequest) => EscalationDecision
 
 /** The structural shape of a mailbox message this slice consumes. A local
  *  mirror of `@/agent/subagent-mailbox#MailboxMessage` so the fence holds (no
@@ -137,90 +133,6 @@ export const buildDecisionResponse = (
   body: JSON.stringify(decision),
   correlationId: isString(req?.correlationId) ? req.correlationId : "",
 })
-
-/**
- * Pure loop body: map each PARSEABLE pending `request` → exactly one decision
- * response via the injected `decide`. Non-`request` / malformed entries are
- * skipped (no response, no crash). If `decide` itself throws on an entry, that
- * entry is skipped (no response) rather than aborting the whole step — a hostile
- * envelope cannot poison the leader's loop.
- *
- * Idempotent on re-read: the SAME pending list ⇒ the SAME responses (the
- * function is a pure projection — it grants nothing on its own; the transport's
- * read-cursor is what makes the LIVE loop drain-once, see `brokerLoop`).
- */
-export const brokerStep = (
-  pending: readonly BrokerMessage[],
-  decide: EscalationDeciderPort,
-): DecisionResponse[] => {
-  const out: DecisionResponse[] = []
-  if (!Array.isArray(pending)) return out
-  for (const msg of pending) {
-    const req = parseEscalationRequest(msg)
-    if (req === undefined) continue
-    let decision: EscalationDecision
-    try {
-      decision = decide(req)
-    } catch (e) {
-      logger.warn(`broker.brokerStep decide: ${errMessage(e)}`)
-      continue
-    }
-    out.push(buildDecisionResponse(msg, decision))
-  }
-  return out
-}
-
-/** The minimal transport surface `brokerLoop` needs from a `MailboxPort` —
- *  injected, duck-typed, so the slice fence holds (no `@/agent` import). */
-export interface BrokerMailbox {
-  /** Returns undelivered messages for the leader and MARKS them delivered. */
-  read(agentId: string): readonly BrokerMessage[]
-  send(init: {
-    from: string
-    to: string
-    kind: "request" | "response" | "broadcast"
-    body: string
-    correlationId?: string
-  }): unknown
-}
-
-/**
- * Thin leader-side loop: read the leader's pending `request`s, broker them, and
- * send each `response` back over the mailbox. Returns the number of responses
- * actually sent. NO-THROW — a transport failure logs and returns the count so
- * far. Default-OFF: the host only calls this when `QUANTA_TEAM_BROKER` is on.
- */
-export const brokerLoop = (opts: {
-  mailbox: BrokerMailbox
-  leaderId: string
-  decide: EscalationDeciderPort
-}): number => {
-  const { mailbox, leaderId, decide } = opts
-  try {
-    if (!isNonEmptyString(leaderId)) return 0
-    const pending = mailbox.read(leaderId)
-    const responses = brokerStep(pending, decide)
-    let sent = 0
-    for (const r of responses) {
-      try {
-        mailbox.send({
-          from: leaderId,
-          to: r.to,
-          kind: r.kind,
-          body: r.body,
-          correlationId: r.correlationId,
-        })
-        sent++
-      } catch (e) {
-        logger.warn(`broker.brokerLoop send: ${errMessage(e)}`)
-      }
-    }
-    return sent
-  } catch (e) {
-    logger.warn(`broker.brokerLoop: ${errMessage(e)}`)
-    return 0
-  }
-}
 
 /**
  * Worker-side applier — the ONLY path by which a worker accepts a wider

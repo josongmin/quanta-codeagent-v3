@@ -156,4 +156,26 @@ describe("escalatingKill wired with a ProcessTreeKiller (D1 wiring)", () => {
     expect(child.directKills).toBe(1) // fell back to legacy single-PID kill
     disarm()
   })
+
+  test("kill() AFTER the child is reaped is a no-op — no leaked SIGKILL timer (PID-reuse hazard)", async () => {
+    // The bug: `bash-bg-registry` evictOldest killed an already-`completed` shell;
+    // `escalatingKill` re-armed a 2s SIGKILL grace timer that nothing cleared,
+    // firing `signalTree(pid, SIGKILL)` on a long-dead pid 2s later — which the OS
+    // may have RECYCLED for an unrelated process. The `reaped` latch makes a
+    // post-exit kill() a no-op (no signal, no timer). Red-on-injection: remove the
+    // `if (reaped) return` and this sees a SIGTERM + a SIGKILL after the grace.
+    const calls: Array<{ pid: number; signal: string }> = []
+    const killer: ProcessTreeKiller = {
+      signalTree: (pid, signal) => calls.push({ pid, signal }),
+    }
+    const child = fakeChild(4242)
+    const { kill, disarm } = escalatingKill(child, killer)
+    ;(child as unknown as { __resolve: () => void }).__resolve() // child exits / is reaped
+    await Promise.resolve() // let `proc.exited.then(markReaped)` flip the latch
+    await Promise.resolve()
+    kill() // a LATE kill (e.g. eviction of a completed shell)
+    await Bun.sleep(KILL_GRACE_MS + 100)
+    expect(calls).toEqual([]) // NO SIGTERM, NO leaked SIGKILL on the dead pid
+    disarm()
+  })
 })

@@ -71,6 +71,12 @@ export interface Subagent6Deps {
   agentMeta?: { set(agentId: string, meta: { depth: number; label: string }): void }
   /** Forwarded to exec_command timeout/abort plumbing. */
   signal?: AbortSignal
+  /** Parent workspace cwd (from `ctx.cwd`) — forwarded to spawn_agent's
+   *  `checkpoint` path builder. Absent ⇒ checkpoint ignored. */
+  cwd?: string
+  /** Requesting agent's lineage label (from `ctx.agentLabel`) — forwarded to
+   *  spawn_agent's `continue_from` ownership gate. Absent ⇒ root lineage. */
+  requesterLineage?: string
 }
 
 /** Generic discriminated-error shape used by the router itself for meta-
@@ -156,6 +162,8 @@ const routeSpawnAgent: Route = async (input, deps) => {
     ...(deps.parentDepth !== undefined ? { parentDepth: deps.parentDepth } : {}),
     ...(deps.maxConcurrent !== undefined ? { maxConcurrent: deps.maxConcurrent } : {}),
     ...(deps.agentMeta !== undefined ? { agentMeta: deps.agentMeta } : {}),
+    ...(deps.cwd !== undefined ? { cwd: deps.cwd } : {}),
+    ...(deps.requesterLineage !== undefined ? { requesterLineage: deps.requesterLineage } : {}),
   })
 }
 

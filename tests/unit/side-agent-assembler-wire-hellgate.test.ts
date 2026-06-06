@@ -77,8 +77,8 @@ describe("N1 — maybeWireSideAgent (host-binding closeout)", () => {
     expect(buildSideAgentBlock(cfg)).toEqual([])
   })
 
-  test("B2 — gate set to non-'1' ⇒ slot undefined (strict opt-in)", () => {
-    for (const raw of ["0", "true", "on", "", "yes"]) {
+  test("B2 — gate set to a falsy/garbage value ⇒ slot undefined (canonical gate vocab)", () => {
+    for (const raw of ["0", "off", "false", "no", "", "garbage"]) {
       const cfg = assembleAgentConfig(
         { mode: "interactive", base: baseReq(`sess-side-${raw}`) },
         { QUANTA_SIDE_AGENT: raw },

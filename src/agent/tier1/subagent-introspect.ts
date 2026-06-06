@@ -48,6 +48,13 @@ export const buildSubagentIntrospectBlock = (config: AgentConfig): Tool[] => {
     ...(config.subagentAgentMeta !== undefined ? { agentMeta: config.subagentAgentMeta } : {}),
     ...(mailbox !== undefined ? { mailbox } : {}),
     ...(wake !== undefined ? { wake } : {}),
+    // BUG#4 fix — `followup_task`'s `agentId` is the registry TASK id, but the
+    // target child reads its inbox under a DISJOINT mailbox label (`root/N`).
+    // The wake registry records that mapping at child-spawn (`register(taskId,
+    // …, mailboxLabel)`); resolve the delivery address through it so the message
+    // reaches the child's real inbox instead of a phantom task-id address. Absent
+    // a binding (`labelOf` ⇒ undefined) the handler falls back to the id verbatim.
+    ...(wake !== undefined ? { resolveLabel: (id: string) => wake.labelOf(id) } : {}),
     ...(config.mailboxAgentId !== undefined ? { callerLabel: config.mailboxAgentId } : {}),
     ...(wantList ? { enableIntrospect: true } : {}),
     ...(wantFollowup ? { enableFollowup: true } : {}),

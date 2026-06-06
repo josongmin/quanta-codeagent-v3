@@ -366,7 +366,7 @@ describe("introspect default-OFF + gating — RFC-04 §8.15", () => {
     const spawn = tools.find((t) => t.name === "spawn_agent") as Tool
     // drive spawn_agent through the real Tool.execute surface
     for await (const _ev of spawn.execute(
-      { prompt: "explore the repo", agentType: "Explore" } as never,
+      { prompt: "explore the repo", agent_type: "Explore" } as never,
       ctxLess as never,
     )) {
       /* consume */

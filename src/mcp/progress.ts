@@ -9,6 +9,8 @@
  *  gracefully (byte-identical to a client that never sent a progressToken).
  */
 
+import { sliceWholeChars } from "@/shared"
+
 export const PROGRESS_METHOD = "notifications/progress"
 
 /** A parsed progress notification. `progressToken` correlates to the call that
@@ -49,9 +51,12 @@ export const parseProgress = (params: unknown): McpProgress | null => {
   } = { progressToken: token, progress }
   if (typeof r.total === "number" && Number.isFinite(r.total)) out.total = r.total
   if (typeof r.message === "string" && r.message !== "") {
+    // Surrogate-safe cap: an MCP server message is untrusted UTF-16 and may end
+    // its prefix mid-surrogate-pair (emoji); `sliceWholeChars` never splits a
+    // pair, so the bounded message can't carry a lone surrogate downstream.
     out.message =
       r.message.length > PROGRESS_MAX_MESSAGE_CHARS
-        ? r.message.slice(0, PROGRESS_MAX_MESSAGE_CHARS)
+        ? sliceWholeChars(r.message, PROGRESS_MAX_MESSAGE_CHARS)
         : r.message
   }
   return out

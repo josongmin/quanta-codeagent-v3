@@ -32,19 +32,38 @@ export type Waker = (reason: string) => WakeOutcome
 
 export class TurnWakeRegistry {
   private readonly wakers = new Map<string, Waker>()
+  /** `agentId` (the registry TASK id `followup_task` targets) → that child's
+   *  MAILBOX label (`root/N`). The two id namespaces are disjoint: a child is
+   *  registered here under its task id but reads its inbox under its mailbox
+   *  label, so `followup_task`'s mailbox delivery MUST translate task id →
+   *  label or the message goes to a phantom address (jun-07 BUG#4 fix). */
+  private readonly labels = new Map<string, string>()
 
   /** Register a persistent waker for `agentId`. Returns a disposer the runner
    *  MUST call when the child loop terminates (so a wake on a dead agent
    *  reports `no-receiver`, not a leaked callback). Registering twice for the
    *  same id replaces the prior waker (last-writer-wins — the latest loop owns
-   *  the child). */
-  register(agentId: string, waker: Waker): () => void {
+   *  the child). `label` (when given) is the child's mailbox label, recorded so
+   *  {@link labelOf} can translate this task id to its inbox address. */
+  register(agentId: string, waker: Waker, label?: string): () => void {
     this.wakers.set(agentId, waker)
+    if (label !== undefined) this.labels.set(agentId, label)
     return () => {
       // Only delete if it is still OUR waker (a re-register may have replaced
-      // it; the older disposer must not clobber the newer entry).
-      if (this.wakers.get(agentId) === waker) this.wakers.delete(agentId)
+      // it; the older disposer must not clobber the newer entry). The label is
+      // dropped under the SAME guard so a re-registered child keeps its label.
+      if (this.wakers.get(agentId) === waker) {
+        this.wakers.delete(agentId)
+        this.labels.delete(agentId)
+      }
     }
+  }
+
+  /** The mailbox label bound to `agentId` (its registry task id), or `undefined`
+   *  when none was recorded — `followup_task` resolves the delivery address with
+   *  this so a message reaches the child's real inbox (`root/N`), not its task id. */
+  labelOf(agentId: string): string | undefined {
+    return this.labels.get(agentId)
   }
 
   has(agentId: string): boolean {

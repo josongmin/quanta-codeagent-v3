@@ -28,6 +28,8 @@
  * short-circuits before any await.
  */
 
+import { errMessage } from "@/shared"
+
 /** A single critic verdict over the agent's draft final answer. Structurally
  *  minimal so the port has no dependency on the reviewer-subagent internals —
  *  any adapter (reviewer subagent, classifier, human) can produce one. */
@@ -139,8 +141,8 @@ export const runCloseoutCritic = async (
     verdict = raced
   } catch (e) {
     // FAIL-OPEN: a throwing critic must never crash the loop. Surface as data.
-    const message = e instanceof Error ? e.message : String(e)
-    return { detail: `critic:unavailable: ${message}` }
+    // Canonical `errMessage` (audit-H ratchet) instead of an inline ternary.
+    return { detail: `critic:unavailable: ${errMessage(e)}` }
   }
   return { detail: `critic:${renderVerdict(verdict)}` }
 }

@@ -141,15 +141,21 @@ export const wireOptionalAgentPorts = <T extends OptionalPortBase>(
   // FACTORY behind `QUANTA_CODE_MODE=1`. Default-OFF byte-identical when unset.
   next = wireCodeCellDispatch(next, env)
 
-  // P12 — wire the REAL `closeout-critic` port behind `QUANTA_CLOSEOUT_CRITIC`.
-  // Default-OFF byte-identical when unset; gate ON but no reviewer subagent
-  // available ⇒ no port ⇒ the loop fails open (byte-identical completion).
-  next = wireCloseoutCritic(next, env)
-
   // RFC-02/04 — subagent batch + introspect + followup tool gates. Extracted
   // so this function stays under biome's cognitive-complexity cap. Each gate is
   // default-OFF (`=on` only); unset ⇒ `next` returned verbatim (byte-identical).
-  return wireSubagentToolGates(next, env)
+  // MUST run BEFORE wireCloseoutCritic: a subagent tool gate (e.g. followup,
+  // seeded `=on` by apps/cli) can CREATE `next.subagent` here, and the critic's
+  // reviewer is materialized FROM `config.subagent` — so the critic wire has to
+  // observe the FINAL subagent state, not the pre-gate one.
+  next = wireSubagentToolGates(next, env)
+
+  // P12 — wire the REAL `closeout-critic` port behind `QUANTA_CLOSEOUT_CRITIC`.
+  // Default-OFF byte-identical when unset; gate ON but no reviewer subagent
+  // available ⇒ no port ⇒ the loop fails open (byte-identical completion). This
+  // is the GENUINE final transform (after the subagent gates above), so a
+  // `config.subagent` absent here is the real end state.
+  return wireCloseoutCritic(next, env)
 }
 
 /**

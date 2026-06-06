@@ -186,8 +186,9 @@ export interface FollowupTaskDeps {
   /** Caller's mailbox label (sender). Defaults to "parent" when the host did
    *  not derive one. */
   readonly callerLabel: string
-  /** Maps an agentId to its mailbox label. Absent ⇒ id used verbatim. */
-  readonly resolveLabel?: (agentId: string) => string
+  /** Maps an agentId (registry task id) to its mailbox label. Returns
+   *  `undefined` for an unknown id; absent dep ⇒ the id is used verbatim. */
+  readonly resolveLabel?: (agentId: string) => string | undefined
   /** When set, a `followup_task` whose `agentId` equals this is rejected with
    *  `cause:"self_target"` (a child must not re-trigger its own loop). Absent ⇒
    *  no self-target guard (host did not inject own id). */
@@ -264,7 +265,7 @@ export interface IntrospectToolsDeps {
   readonly mailbox?: MailboxSendPort
   readonly wake?: TurnWakeRegistry
   readonly callerLabel?: string
-  readonly resolveLabel?: (agentId: string) => string
+  readonly resolveLabel?: (agentId: string) => string | undefined
   readonly ownAgentId?: string
   /** Gate: build `list_agents` only when true. */
   readonly enableIntrospect?: boolean

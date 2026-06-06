@@ -7,10 +7,11 @@
  * runner when `QUANTA_TEAM_DAG` is on AND a batch carries dependency edges.
  *
  * Capability B — Leader-mediated permission escalation (`broker.ts`): pure
- * envelope + helpers over the injected mailbox + a duck-typed permission
- * decider. Default-OFF (`QUANTA_TEAM_BROKER`). Load-bearing security invariant:
- * a worker can never self-grant; only a leader-authored response widens a
- * permission.
+ * protocol primitives (`parseEscalationRequest` / `buildDecisionResponse` /
+ * `applyDecisionResponse`) composed IN-PROCESS by the live wire
+ * (`@/agent/coordination-broker-wire`). Default-OFF (`QUANTA_TEAM_BROKER`).
+ * Load-bearing security invariant: a worker can never self-grant; only a
+ * leader-authored response widens a permission.
  *
  * Slice fence (`src/subagent/**`): all modules import only `@/shared` +
  * siblings — pure leaf, no `@/mcp`/`@/agent` (the mailbox + permission decider
@@ -19,13 +20,9 @@
 
 export {
   applyDecisionResponse,
-  type BrokerMailbox,
   type BrokerMessage,
-  brokerLoop,
-  brokerStep,
   buildDecisionResponse,
   type DecisionResponse,
-  type EscalationDeciderPort,
   type EscalationDecision,
   type EscalationRequest,
   parseEscalationRequest,

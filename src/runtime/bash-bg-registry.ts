@@ -315,7 +315,11 @@ export const createBashBgRegistry = (config: BashBgRegistryConfig = {}): BashBgR
     const handle = entries.get(oldestId)
     if (handle === undefined) return
     entries.delete(oldestId)
-    handle.kill()
+    // Only kill a STILL-RUNNING shell — matching the other kill sites (`onAbort`,
+    // `kill`, `killAll`). A `completed` shell is already reaped; calling kill on
+    // it used to re-arm a leaked SIGKILL grace timer (now also latched in
+    // `escalatingKill`, but the guard keeps this site consistent + cheaper).
+    if (handle.status === "running") handle.kill()
     await handle.exited.catch(() => {
       /* already terminal */
     })

@@ -114,6 +114,10 @@ export const maybeCompact = async (
   // turn's `exact` provider usage. `undefined` on turn-1 / before any exact
   // usage ⇒ the trigger uses the chars/4 estimate (legacy, byte-identical).
   tokenBaseline: import("../compaction").TokenBaseline | undefined,
+  // D4 (jun-7) — the model that will ACTUALLY process this turn (sticky/skill
+  // swap), so the window-derived threshold tracks the active model, not base
+  // `config.llm`. Defaults to the base model id.
+  activeModel: string = configuredModel(config.llm),
 ): Promise<BreakerVerdict> => {
   if (!config.compaction) return { abort: false }
   const verdict = breaker?.check() ?? { abort: false }
@@ -140,7 +144,7 @@ export const maybeCompact = async (
   // synchronous proactive path's model-derived threshold, so pass the same model.
   const bgLimitTokens = resolveCompactionLimitTokens(
     config.compaction?.thresholdTokens,
-    configuredModel(config.llm),
+    activeModel,
   )
   const borrowed =
     bgController !== undefined
@@ -183,7 +187,7 @@ export const maybeCompact = async (
         // unknown ⇒ 120k legacy). D5 — authoritative-baseline trigger when the
         // loop captured an `exact` usage (absent ⇒ chars/4 over the whole
         // transcript, byte-identical legacy).
-        model: configuredModel(config.llm),
+        model: activeModel,
         ...(tokenBaseline !== undefined ? { tokenBaseline } : {}),
         ...(config.compaction.thresholdTokens !== undefined
           ? { thresholdTokens: config.compaction.thresholdTokens }

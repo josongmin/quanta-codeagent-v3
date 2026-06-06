@@ -227,7 +227,7 @@ describe("HELLGATE (d) — spawn_agent caps are fail-closed when knobs omitted",
     // depth=4. A model passing maxDepth=99 must STILL be denied at the host's 3.
     const registry = new TaskRegistry()
     const r = await handleSpawnAgent(
-      { prompt: "fan out deep", maxDepth: 99 },
+      { prompt: "fan out deep", max_depth: 99 },
       { runner: neverRunner, registry, maxDepth: 3, parentDepth: 3 },
     )
     expect(r.kind).toBe("error")
@@ -240,7 +240,7 @@ describe("HELLGATE (d) — spawn_agent caps are fail-closed when knobs omitted",
     // model maxDepth=1, parentDepth=1 ⇒ child depth=2 > model's 1 ⇒ denied.
     const registry = new TaskRegistry()
     const r = await handleSpawnAgent(
-      { prompt: "self-limit", maxDepth: 1 },
+      { prompt: "self-limit", max_depth: 1 },
       { runner: neverRunner, registry, maxDepth: 5, parentDepth: 1 },
     )
     expect(r.kind).toBe("error")

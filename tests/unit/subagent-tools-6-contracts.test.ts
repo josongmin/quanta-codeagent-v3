@@ -142,20 +142,28 @@ describe("spawn_agent", () => {
     const r = SpawnAgentInputSchema.safeParse({ prompt: "do x" })
     expect(r.success).toBe(true)
   })
-  test("accepts with explicit toolFilter", () => {
+  test("accepts with explicit tool_filter (snake_case parity with the agent tool)", () => {
     const r = SpawnAgentInputSchema.safeParse({
       prompt: "do x",
-      agentType: "Explore",
-      toolFilter: ["Read", "Grep"],
-      maxDepth: 3,
+      agent_type: "Explore",
+      tool_filter: ["Read", "Grep"],
+      max_depth: 3,
+      isolation: "worktree",
+      owned_surfaces: ["src/core/"],
+      task_kind: "edit",
     })
     expect(r.success).toBe(true)
+  })
+  test("rejects camelCase field (strict: must use snake_case)", () => {
+    expect(SpawnAgentInputSchema.safeParse({ prompt: "x", toolFilter: ["Read"] }).success).toBe(
+      false,
+    )
   })
   test("rejects empty prompt", () => {
     expect(SpawnAgentInputSchema.safeParse({ prompt: "" }).success).toBe(false)
   })
-  test("rejects empty toolFilter element", () => {
-    expect(SpawnAgentInputSchema.safeParse({ prompt: "x", toolFilter: [""] }).success).toBe(false)
+  test("rejects empty tool_filter element", () => {
+    expect(SpawnAgentInputSchema.safeParse({ prompt: "x", tool_filter: [""] }).success).toBe(false)
   })
   test("success output requires non-empty agentId", () => {
     expect(SpawnAgentOutputSchema.safeParse({ kind: "success", agentId: "" }).success).toBe(false)

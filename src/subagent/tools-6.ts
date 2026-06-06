@@ -148,12 +148,52 @@ export const SpawnAgentInputSchema = z
      *  inlined into the spawn arg. */
     prompt: z.string().min(1).max(32768),
     /** Optional named profile (e.g. "Explore", "Plan"). Absent ⇒ default. */
-    agentType: z.string().min(1).optional(),
+    agent_type: z.string().min(1).optional(),
     /** Explicit tool-name allowlist filtering the child's registry. */
-    toolFilter: z.array(z.string().min(1)).optional(),
+    tool_filter: z.array(z.string().min(1)).optional(),
     /** Hard cap on recursion depth — child registers at parent depth + 1 and
      *  the registry refuses spawns that would exceed this. */
-    maxDepth: z.number().int().nonnegative().optional(),
+    max_depth: z.number().int().nonnegative().optional(),
+    // ── parity with the foreground `agent` tool (ADR-0451 + Codex seed
+    //    augmentation): every field below is already honored by the runner —
+    //    these expose them to the model so a background spawn can request the
+    //    SAME per-child controls the foreground tool already could. Field names
+    //    are snake_case to match the `agent` tool + spawn_batch (one convention
+    //    across every spawn surface so the model never guesses the casing).
+    /** `"worktree"` runs the child in an isolated git worktree (own write
+     *  scope). Absent ⇒ shares the parent cwd. */
+    isolation: z.enum(["none", "worktree"]).optional(),
+    /** Files/paths the child may read or modify — injected as an ownership
+     *  boundary into the child's seed (intent gating; pairs with `worktree`). */
+    owned_surfaces: z.array(z.string().min(1)).max(128).optional(),
+    /** Files/paths the child must NOT touch. Pairs with `owned_surfaces`. */
+    forbidden_surfaces: z.array(z.string().min(1)).max(128).optional(),
+    /** Coarse role: `read` / `edit` / `review` — derives a default tool
+     *  allowlist when `tool_filter` is absent. */
+    task_kind: z.enum(["read", "edit", "review"]).optional(),
+    /** One-line spec for the shape of the child's final answer (injected into
+     *  the seed so the parent can parse it without bespoke extraction). */
+    result_shape: z.string().min(1).max(2000).optional(),
+    /** Per-child turn budget. */
+    max_turns: z.number().int().positive().optional(),
+    /** Per-child token budget (provider-counted). */
+    max_tokens: z.number().int().positive().optional(),
+    /** Run the child on this specific model id (must be an enabled candidate;
+     *  unknown id fails the spawn). Highest precedence over `role`/parent. */
+    model: z.string().min(1).optional(),
+    /** Dispatch role used to resolve a per-role model when `model` is unset. */
+    role: z.string().min(1).optional(),
+    /** Effort tier capping the child's thinking budget. */
+    effort: z.enum(["default", "low", "medium", "high", "max"]).optional(),
+    /** Prior settled task id to WARM-START from — its finalText is prepended to
+     *  the child's seed. Ownership-gated: only a task launched by THIS agent's
+     *  lineage can be continued (cross-lineage read is denied). */
+    continue_from: z.string().min(1).optional(),
+    /** When true, the child is told to periodically write interim findings to
+     *  `<cwd>/.subagent-state/<task_id>.md` so the parent can monitor/recover.
+     *  Ignored together with `isolation:"worktree"` (parent cannot read inside a
+     *  throwaway worktree). */
+    checkpoint: z.boolean().optional(),
   })
   .strict()
 export type SpawnAgentInput = z.infer<typeof SpawnAgentInputSchema>

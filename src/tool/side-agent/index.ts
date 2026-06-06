@@ -93,6 +93,10 @@ export const sideAgentSpawnInputSchema = z.object({
     .positive()
     .optional()
     .describe("Auto-stop after this much wall-idle with no finding; omit for never."),
+  metadata: z
+    .record(z.string(), z.string())
+    .optional()
+    .describe("Free-form string tags attached to the daemon (for tracking/filtering in list)."),
 })
 export type SideAgentSpawnInput = z.infer<typeof sideAgentSpawnInputSchema>
 
@@ -123,6 +127,7 @@ const toSpec = (input: SideAgentSpawnInput): SideAgentSpecView => ({
   maxWakes: input.max_wakes,
   maxTurnsPerWake: input.max_turns_per_wake,
   ...(input.idle_reap_ms !== undefined ? { idleReapMs: input.idle_reap_ms } : {}),
+  ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
 })
 
 const renderSnapshot = (s: SideAgentSnapshotView): string => {

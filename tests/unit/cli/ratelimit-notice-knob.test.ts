@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { AgentConfig } from "../../../src/agent"
+import { isRatelimitNoticeEnabled } from "../../../src/apps/cli/ratelimit-notice"
 import { ratelimitNoticeKnob } from "../../../src/runner/knobs/knobs/ratelimit-notice"
 
 /**
@@ -19,13 +20,42 @@ describe("P27 ratelimitNoticeKnob — record shape + strict default-OFF parse", 
     expect(ratelimitNoticeKnob.category).toBe("hint")
   })
 
-  test("strict parse — only 1/on/true enable; unset/falsy/garbage ⇒ undefined", () => {
+  test("lenient SSOT parse — falsy ⇒ undefined; any other value ⇒ true (shared ratelimitNoticeWanted)", () => {
     expect(ratelimitNoticeKnob.parse(undefined)).toBeUndefined()
-    for (const v of ["0", "false", "off", "no", "", "yes", "garbage"]) {
+    for (const v of ["0", "false", "off", "no", "", "  ", "OFF", "False"]) {
       expect(ratelimitNoticeKnob.parse(v)).toBeUndefined()
     }
-    for (const v of ["1", "on", "true"]) {
+    // The knob delegates to the lenient `ratelimitNoticeWanted` SSOT so it can
+    // NEVER disagree with the live capture/render gate — `yes`/`TRUE`/garbage
+    // all enable (previously this strict-Set parse said undefined for them while
+    // the real gate said ON: the observability drift this fix removes).
+    for (const v of ["1", "on", "true", "TRUE", "On", "yes", "garbage", "2"]) {
       expect(ratelimitNoticeKnob.parse(v)).toBe(true)
+    }
+  })
+
+  test("SSOT: knob.parse truthy ⟺ isRatelimitNoticeEnabled — three channels agree on every value", () => {
+    for (const v of [
+      undefined,
+      "",
+      "0",
+      "false",
+      "off",
+      "no",
+      "1",
+      "on",
+      "true",
+      "TRUE",
+      "On",
+      "yes",
+      "y",
+      "2",
+      "garbage",
+      "  true  ",
+    ]) {
+      const knobOn = ratelimitNoticeKnob.parse(v) === true
+      const gateOn = isRatelimitNoticeEnabled({ QUANTA_RATELIMIT_NOTICE: v } as NodeJS.ProcessEnv)
+      expect(knobOn).toBe(gateOn) // telemetry channel === live render/capture channel
     }
   })
 
