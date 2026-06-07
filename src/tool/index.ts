@@ -844,7 +844,7 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => {
   if (ports.askUser !== undefined) {
     base.push(askUserTool(ports.askUser) as Tool)
   }
-  // ADR-0497 (gap GAP 11) — conditional `reflect` registration. Absent port ⇒
+  // ADR-0504 (gap GAP 11) — conditional `reflect` registration. Absent port ⇒
   // tool NOT registered (byte-identical). Present ⇒ the mid-turn self-correction
   // tool bound to the host's LLM-backed reflect port (per-session quota enforced).
   if (ports.reflect !== undefined) {

@@ -1,0 +1,39 @@
+id: agent-requested-rules
+title: agent-requested rules — description-only rule fetch-on-demand matcher (ADR-0509)
+section: 3
+subsystem: rules — agent-requested (description-only) rule selection
+order: 213
+maturity: L2
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, ide]
+configurable: planned
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:cursor"]
+depends_on: [glob-rules-auto-inject]
+config_refs:
+  env: ["QUANTA_FETCH_RULES"]
+purpose: |
+  Cursor's "agent-requested" rules: a description-only rule (no globs, not
+  always-apply) the model pulls in on demand by matching its task against the rule's
+  description. quanta's glob-rule loader DROPPED such rules. This lands the ESSENTIAL
+  matcher: a pure matchRulesByDescription(query, rules, limit) over RequestableRule
+  {name,description,body} — deterministic token-overlap (lowercase, split non-alnum,
+  drop short + stopwords, Set-dedup), score>0, sorted score desc then name, capped.
+  NO tuned threshold (standard IR). Maturity L2: the loader change (collect not drop)
+  + the fetch_rules tool + composition injection are the documented follow-up (no
+  production data source until then). Fuzz-proven against a brute-force oracle.
+evidence:
+  code:
+    - src/agent/agent-requested-rules.ts
+  adrs: [509]
+  tests:
+    unit:
+      - tests/unit/agent-requested-rules-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: "Essential matcher only — fetch_rules tool + loader index + composition injection are the documented integration follow-up (matcher has no production data source until then)."
+  promotion_path: "Wire the glob-rules loader to collect description-only rules into a requestable index + add the fetch_rules tool over matchRulesByDescription + inject at the composition root."

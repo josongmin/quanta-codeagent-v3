@@ -1,4 +1,5 @@
 import { type AgentMode, EFFORT_LEVELS, effortToTokenBudget, type WorkingState } from "@/agent"
+import { type InboundMode, parseInboundMode } from "@/agent/inbound-mode"
 import {
   defaultGranularRegistry,
   type GranularRegistryPort,
@@ -419,6 +420,14 @@ export interface ReplSurfaceWires {
   readonly setPlanQueueSendNow: (
     fn: ((inj: SendNowInjection) => { ok: true } | { ok: false; reason: string }) | undefined,
   ) => void
+  /** §steer — the conversation-action surface (weave/interrupt sinks +
+   *  activeTurnRef), present only when `QUANTA_CONVERSATION_ACTIONS=1`. Threaded
+   *  to the session loop's in-turn reader for weave/interrupt routing. */
+  readonly conversationActions?: ConversationActionSurface
+  /** §steer — the session-mutable inbound delivery mode (queue|weave|interrupt),
+   *  seeded from `QUANTA_INBOUND_MODE`. The session loop reads `.current` per
+   *  mid-turn line; the `/inbound` slash mutates it. */
+  readonly inboundMode: { current: InboundMode }
   /** Track D (runtime → REPL context wire) — the per-turn prompt-assembly sink
    *  the composition root wires into `AgentConfig.onPromptAssembled`. Each call
    *  retains the latest snapshot the `/context` slash renders via the
@@ -779,6 +788,14 @@ export const composeSurfaceWires = (
   const conversationActions = isEnvTruthy(envSource.QUANTA_CONVERSATION_ACTIONS)
     ? createConversationActionSurface()
     : undefined
+  // §steer — session-mutable inbound delivery mode (queue | weave | interrupt),
+  // seeded from QUANTA_INBOUND_MODE (default `queue`), mutated at runtime by the
+  // `/inbound` slash. The session loop reads `.current` per mid-turn line; the
+  // slash handler writes it. weave/interrupt are only EFFECTIVE when
+  // `conversationActions` is also wired (else the loop degrades to queue).
+  const inboundMode: { current: InboundMode } = {
+    current: parseInboundMode(envSource.QUANTA_INBOUND_MODE) ?? "queue",
+  }
   const runtimeFacadeCompose: RuntimeFacadeComposeOptions = {
     granularRegistry,
     onPromptAssembled: promptAssembled.sink,
@@ -1064,6 +1081,11 @@ export const composeSurfaceWires = (
     setSideConversationStart,
     planQueueStore,
     setPlanQueueSendNow,
+    // §steer — the inbound delivery surface: the conversation-action surface (for
+    // weave/interrupt sinks + activeTurnRef) and the mutable mode ref. Both are
+    // threaded to the session loop's in-turn reader.
+    ...(conversationActions !== undefined ? { conversationActions } : {}),
+    inboundMode,
     promptAssembledSink: contextUsageHolder.sink,
     // RFC-09 (B) — expose the retained per-turn usage snapshot getter so the
     // host can bind the pre-compaction warning to the SAME token count the

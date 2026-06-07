@@ -50,8 +50,10 @@ const knobsOnLine = (line: string): string[] => {
 const isDeclarationFile = (path: string): boolean =>
   path.endsWith("src/shared/runtime-config.ts") ||
   path.includes("src/runner/knobs/") ||
-  // the future apps/cli-local registry (declared, not orphan) — pre-registered
-  path.endsWith("src/apps/cli/cli-knobs.ts")
+  // the CLI-local registry (ADR-0503 P1) — declared, not orphan
+  path.endsWith("src/apps/cli/cli-knobs.ts") ||
+  // the daemon/agent-side declaration inventory (ADR-0503 P1)
+  path.endsWith("src/config/knob-inventory.ts")
 
 /** Files excluded from the orphan scan entirely: tests, type decls, and the
  *  `--help` doc renderer (it NAMES knobs as documentation, not reads). */
@@ -70,7 +72,12 @@ const isReadLine = (line: string): boolean => {
     /\bprocess\.env\b/.test(line) ||
     /\benv\s*[.[]/.test(line) ||
     /\bgate(?:On|Disabled)(?:Strict)?\s*\(/.test(line) ||
-    /\bparseEnvFlag\s*\(/.test(line)
+    /\bparseEnvFlag\s*\(/.test(line) ||
+    // const-keyed gate: `const FOO_ENV = "QUANTA_X"` then `gateOn(env, FOO_ENV)`.
+    // The gateOn line has only a BARE const ref (invisible), so we instead count
+    // the const DEFINITION (a QUANTA literal being ASSIGNED). Precise `= "..."`
+    // form excludes error/log strings like `Error("QUANTA_X failed")`.
+    /[=:]\s*["']QUANTA_[A-Z0-9_]+["']/.test(line)
   )
 }
 
@@ -98,8 +105,14 @@ const declaredTokensIn = (text: string): Set<string> => {
 /** EXCEPTIONS — tokens that look like knob reads but are NOT a registrable knob
  *  (e.g. a doc/error-string literal, a const NAME echoed in a read line). Each
  *  MUST carry a reason. Keep this SMALL; prefer registering a real knob. */
-const EXCEPTIONS: ReadonlyMap<string, string> = new Map([
-  // (populate during P1 burn-down triage; empty = every read must be declared)
+const EXCEPTIONS: ReadonlyMap<string, string> = new Map<string, string>([
+  // SECRETS (ADR-0503) — credentials are owned by @/auth / the keyring, NEVER the
+  // knob registry (a `/config set` of an API key would be a billing/scope hazard).
+  // They are read at their auth call site; intentionally NOT a registrable knob.
+  ["QUANTA_WEB_AUTH_TOKEN", "secret: web-daemon bearer token (apps/web-daemon, @/auth-owned)"],
+  ["QUANTA_LANCE_API_KEY", "secret: Lance vector-DB credential (search-index-backend)"],
+  ["QUANTA_QDRANT_API_KEY", "secret: Qdrant vector-DB credential (search-index-backend)"],
+  ["QUANTA_CHATGPT_AUTH_SOURCE", "secret: ChatGPT token-store preference (@/auth/chatgpt-oauth)"],
 ])
 
 const scan = (): { declared: Set<string>; orphans: Map<string, string> } => {
@@ -149,9 +162,14 @@ const scan = (): { declared: Set<string>; orphans: Map<string, string> } => {
  *                flash timings + status/lifecycle pills)
  *    181 → 171  (P1-C cluster 2: 10 REPL render/input/history knobs → cli-knobs.ts)
  *    171 → 139  (P1-C cluster 3: 32 CLI render/input/status/session/voice → cli-knobs.ts)
- *  Remaining 139 = ~31 apps/cli AGENT-GATE (→ runtime-config, P1-B) + ~108
- *  host/runner/daemon (A→@/runner/knobs · B→runtime-config · BENCH · SECRET-excl). */
-const ORPHAN_CEILING = 139
+ *    139 → 0    (P1 complete: +21 CLI agent-gates & +9 subagent/remote → cli-knobs.ts;
+ *                +95 host/runner/daemon/bench → src/config/knob-inventory.ts;
+ *                4 secrets → EXCEPTIONS. ALL reads now declared.)
+ *  CEILING IS 0: every QUANTA_* read is declared in a registry OR a secret
+ *  exception. A new undeclared read is a hard regression. Read-routing of
+ *  declared knobs to their typed home (runtime-config field / @/runner/knobs
+ *  Knob) is P4 — declaration here already closes the governance gap. */
+const ORPHAN_CEILING = 0
 
 describe("knob-registry completeness ratchet (ADR-0503 P0)", () => {
   test(`orphan QUANTA_* reads (declared nowhere) stay <= ${ORPHAN_CEILING}`, () => {
@@ -184,5 +202,10 @@ describe("knob-registry completeness ratchet (ADR-0503 P0)", () => {
     expect(knobsOnLine(`gateOn(env, "QUANTA_FAKE_ORPHAN")`)).toEqual(["QUANTA_FAKE_ORPHAN"])
     expect(knobsOnLine(`const x = process.env.QUANTA_DOT_READ`)).toEqual(["QUANTA_DOT_READ"])
     expect(knobsOnLine(`gateOnStrict(env, QUANTA_CODE_MODE_ENV)`)).toEqual([]) // bare const ref skipped
+    // P2-R1 fix: a const-keyed gate is caught at its DEFINITION line (the QUANTA
+    // literal being assigned), closing the `gateOn(env, CONST)` false-negative hole.
+    expect(isReadLine(`const CONTEXT_1M_FLAG = "QUANTA_CONTEXT_1M"`)).toBe(true)
+    expect(knobsOnLine(`const CONTEXT_1M_FLAG = "QUANTA_CONTEXT_1M"`)).toEqual(["QUANTA_CONTEXT_1M"])
+    expect(isReadLine(`  throw new Error("QUANTA_X failed")`)).toBe(false) // error string still NOT a read
   })
 })

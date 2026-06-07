@@ -9,6 +9,8 @@ import { createSubagentMailbox } from "@/agent/subagent-mailbox"
 import type { LLMPort } from "@/llm"
 import { defaultRoleModelResolver, type RoleModelResolver } from "@/llm/role-model-override"
 import { gateOn, gateOnStrict, logger, runtimeConfig } from "@/shared"
+import type { AgentEvent } from "@/stream"
+import { ItemLifecycleTracker, itemLifecycleEnabled, type StreamPort } from "@/stream"
 import { AgentMetaRegistry, TurnWakeRegistry } from "@/subagent"
 import type { CloseoutCritic, CloseoutCriticVerdict } from "./closeout-critic"
 import { buildCodeCellDispatchPort } from "./codemode-wire"
@@ -172,7 +174,32 @@ export const wireOptionalAgentPorts = <T extends OptionalPortBase>(
   // available ⇒ no port ⇒ the loop fails open (byte-identical completion). This
   // is the GENUINE final transform (after the subagent gates above), so a
   // `config.subagent` absent here is the real end state.
-  return wireCloseoutCritic(next, env)
+  // GAP 10 — item-lifecycle stream projector. The GENUINE final transform: it
+  // decorates `config.stream` so every emitted AgentEvent ALSO yields its
+  // item_started/updated/completed lifecycle events (host UIs that render
+  // per-item progress). Default-OFF (`QUANTA_ITEM_LIFECYCLE` unset ⇒ the stream
+  // is returned unwrapped, byte-identical).
+  return wireItemLifecycleStream(wireCloseoutCritic(next, env), env)
+}
+
+/**
+ * GAP 10 — wrap `base.stream` so each emitted event also emits the lifecycle
+ * events the {@link ItemLifecycleTracker} derives. Default-OFF: gate unset (or no
+ * stream) ⇒ `base` returned verbatim. The lifecycle events are emitted on the
+ * SOURCE stream (not the wrapper) so there is no re-entrancy.
+ */
+const wireItemLifecycleStream = <T extends OptionalPortBase>(base: T, env: OptionalPortEnv): T => {
+  if (!itemLifecycleEnabled(env)) return base
+  const source = base.stream
+  if (source === undefined) return base
+  const tracker = new ItemLifecycleTracker()
+  const wrapped: StreamPort = {
+    emit(event: AgentEvent): void {
+      source.emit(event)
+      for (const ev of tracker.track(event)) source.emit(ev)
+    },
+  }
+  return { ...base, stream: wrapped } as T
 }
 
 /**
@@ -487,7 +514,8 @@ const wireFastApplyMerge = <T extends OptionalPortBase>(base: T): T => {
   // resolver falls through to `applyModel` for the unconfigured `"apply"` role,
   // so the call binds to the operator-set cheap model, not the chat model.
   const applyRoleResolver: ApplyRoleResolverLike = {
-    resolve: (role, fallback) => (roleModelResolver as { resolve: (r: string, f: string) => string }).resolve(role, fallback),
+    resolve: (role, fallback) =>
+      (roleModelResolver as { resolve: (r: string, f: string) => string }).resolve(role, fallback),
   }
   const parentSessionId = resolveSessionId(next)
   // Capture for the per-request LLM resolution (mirrors the fallback block).

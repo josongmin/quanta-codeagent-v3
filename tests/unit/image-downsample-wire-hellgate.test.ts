@@ -46,6 +46,11 @@ const runResult = async (tool: ReturnType<typeof makeReadImageTool>, file: strin
   return last
 }
 
+const overCap = (r: ToolResult): boolean =>
+  r.failure !== undefined &&
+  "modelVisibleError" in r.failure &&
+  r.failure.modelVisibleError === "image_over_cap"
+
 const okPort = (calls: { n: number }): ImageDownsamplePort => ({
   downsample: async (_b, mediaType) => {
     calls.n++
@@ -60,7 +65,7 @@ describe("read_image downsample wiring", () => {
   test("port ABSENT ⇒ oversized image rejected (byte-identical default-OFF)", async () => {
     const r = await runResult(makeReadImageTool(), "big.png")
     expect(r.ok).toBe(false)
-    expect(r.failure?.modelVisibleError).toBe("image_over_cap")
+    expect(overCap(r)).toBe(true)
   })
 
   test("port PRESENT ⇒ oversized image downsampled + returned", async () => {
@@ -81,6 +86,6 @@ describe("read_image downsample wiring", () => {
   test("port returns 'unable' ⇒ falls back to over-cap rejection (no throw)", async () => {
     const r = await runResult(makeReadImageTool(unablePort), "big.png")
     expect(r.ok).toBe(false)
-    expect(r.failure?.modelVisibleError).toBe("image_over_cap")
+    expect(overCap(r)).toBe(true)
   })
 })

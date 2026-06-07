@@ -122,6 +122,43 @@ export const CLI_KNOBS: readonly CliKnob[] = [
   { envKey: "QUANTA_VOICE_LIVE_ENDPOINT", kind: "string", default: "wss://api.openai.com/v1/realtime", group: "voice", describe: "Realtime WS endpoint.", readSite: "repl/voice-live-wire.ts" },
   { envKey: "QUANTA_VOICE_LIVE_MODEL", kind: "string", default: "gpt-realtime", group: "voice", describe: "Realtime API model.", readSite: "repl/voice-live-wire.ts" },
   { envKey: "QUANTA_VOICE_LIVE_VOICE", kind: "string", default: "", group: "voice", describe: "Realtime voice name.", readSite: "repl/voice-live-wire.ts" },
+
+  // ── P1-C cluster 4 — CLI-surface gates that SEED agent features (read in
+  //    apps/cli/internal.ts etc.; declared here because read here — eventual
+  //    typed home may be runtime-config, P4 read-routing). Defaults verified.
+  { envKey: "QUANTA_LSP", kind: "bool", default: false, group: "misc", describe: "LSP diagnostics tools (opt-in).", readSite: "internal.ts" },
+  { envKey: "QUANTA_SKILLS", kind: "bool", default: true, group: "misc", describe: "Skills framework (default ON).", readSite: "internal.ts" },
+  { envKey: "QUANTA_SKILLS_DIR", kind: "string", default: "", group: "misc", describe: "Custom skills directory path.", readSite: "internal.ts" },
+  { envKey: "QUANTA_PLAN", kind: "bool", default: false, group: "misc", describe: "Plan mode (opt-in).", readSite: "internal.ts" },
+  { envKey: "QUANTA_GIT_TOOLS", kind: "bool", default: false, group: "misc", describe: "First-class git tools (opt-in).", readSite: "internal.ts" },
+  { envKey: "QUANTA_VERIFY_GUARD", kind: "bool", default: false, group: "misc", describe: "Block finish after unverified mutating tool (opt-in).", readSite: "internal.ts" },
+  { envKey: "QUANTA_VERIFY_GUARD_MAX_TRIPS", kind: "int", default: 2, group: "misc", describe: "Max verify-guard forced turns.", readSite: "internal.ts" },
+  { envKey: "QUANTA_KNOBS_PRESET", kind: "string", default: "", group: "misc", describe: "Named knob preset to apply at boot.", readSite: "knobs-bootstrap.ts" },
+  { envKey: "QUANTA_MODEL_FALLBACK", kind: "string", default: "", group: "misc", describe: "Fallback model id list.", readSite: "internal.ts" },
+  { envKey: "QUANTA_MCP_AUTORESTART", kind: "bool", default: false, group: "mcp", describe: "MCP crash auto-restart (opt-in).", readSite: "internal.ts" },
+  { envKey: "QUANTA_COMPACT_BREAKER", kind: "bool", default: true, group: "misc", describe: "Compaction breaker (default ON).", readSite: "internal.ts" },
+  { envKey: "QUANTA_COMPACT_MODEL", kind: "string", default: "", group: "misc", describe: "Dedicated model for compaction.", readSite: "internal.ts" },
+  { envKey: "QUANTA_COMPACT_PROVIDER", kind: "string", default: "", group: "misc", describe: "Provider override for compaction.", readSite: "internal.ts" },
+  { envKey: "QUANTA_MEMORY_EMBED", kind: "bool", default: true, group: "misc", describe: "Memory vector embedding (default ON).", readSite: "internal.ts" },
+  { envKey: "QUANTA_MEMORY_EMBED_MODEL", kind: "string", default: "", group: "misc", describe: "Custom memory embedding model.", readSite: "internal.ts" },
+  { envKey: "QUANTA_ENABLE_ENV_PROBE", kind: "bool", default: false, group: "session", describe: "Shell environment probe (opt-in).", readSite: "repl/env-probe-wire.ts" },
+  { envKey: "QUANTA_ENV_PROBE_TIMEOUT_MS", kind: "int", default: 5000, group: "session", describe: "Env-probe timeout (ms).", readSite: "repl/env-probe-wire.ts" },
+  { envKey: "QUANTA_PLAYBOOK_TRIGGER", kind: "bool", default: false, group: "session", describe: "Playbook auto-trigger (opt-in).", readSite: "repl/playbook-trigger-wire.ts" },
+  { envKey: "QUANTA_SHELL_SNAPSHOT", kind: "bool", default: false, group: "session", describe: "Shell environment capture (opt-in).", readSite: "internal.ts" },
+  { envKey: "QUANTA_SHELL_SNAPSHOT_SHELL", kind: "enum", default: "auto", group: "session", describe: "Shell for snapshot (auto/zsh/bash).", readSite: "internal.ts" },
+  { envKey: "QUANTA_SHELL_SNAPSHOT_TURN", kind: "bool", default: true, group: "session", describe: "Snapshot per-turn (=0 = start-only).", readSite: "internal.ts" },
+
+  // ── P1-C cluster 5 — subagent fan-out + remote + workflow (apps/cli reads).
+  { envKey: "QUANTA_SUBAGENT_6TOOLS", kind: "bool", default: true, group: "misc", describe: "6-tool background subagent router (default ON).", readSite: "internal.ts" },
+  { envKey: "QUANTA_SUBAGENT_BATCH", kind: "bool", default: true, group: "misc", describe: "spawn_batch fan-out tool (default ON).", readSite: "internal.ts" },
+  { envKey: "QUANTA_SUBAGENT_INTROSPECT", kind: "bool", default: true, group: "misc", describe: "Subagent introspection tool (default ON).", readSite: "internal.ts" },
+  { envKey: "QUANTA_SUBAGENT_MAX_CONCURRENT", kind: "int", default: 0, group: "misc", describe: "Max concurrent subagents (0 = host default).", readSite: "internal.ts" },
+  { envKey: "QUANTA_SUBAGENT_MAX_DEPTH", kind: "int", default: 0, group: "misc", describe: "Subagent recursion depth cap (0 = host default).", readSite: "internal.ts" },
+  { envKey: "QUANTA_WORKFLOW", kind: "bool", default: false, group: "misc", describe: "Declarative workflow tool (opt-in).", readSite: "internal.ts" },
+  { envKey: "QUANTA_RETRY_MODELS", kind: "string", default: "", group: "misc", describe: "Fallback model list for transient retry.", readSite: "repl/surface-compose.ts" },
+  { envKey: "QUANTA_REMOTE_DEFAULT_IMAGE", kind: "string", default: "", group: "misc", describe: "Default Docker image for remote runner.", readSite: "index.ts" },
+  { envKey: "QUANTA_REMOTE_TIMEOUT_MS", kind: "int", default: 0, group: "misc", describe: "Remote runner default timeout (ms).", readSite: "index.ts" },
+  { envKey: "QUANTA_RULE_INDICATOR", kind: "bool", default: true, group: "status-ui", describe: "Active-rule indicator pill (default ON; =0 opts out).", readSite: "rule-indicator.ts" },
 ]
 
 /** All CLI-local knob declarations (for `--help` / `/knobs` derivation + the

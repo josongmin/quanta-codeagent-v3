@@ -1,0 +1,247 @@
+/**
+ * `@/config/knob-inventory.ts` — daemon/agent-side knob DECLARATION registry
+ * (ADR-0503 P1, the non-CLI counterpart to `apps/cli/cli-knobs.ts`).
+ *
+ * These `QUANTA_*` knobs are read DIRECTLY (gateOn/env) at the composition root
+ * (`@/host`), the assemble layer (`@/runner`), the daemon (`apps/web-daemon`),
+ * observability, and the LLM factory — bypassing the typed `runtime-config`
+ * struct. This file DECLARES them (envKey + kind + default + home) so they are
+ * (a) non-orphan to the completeness ratchet (ADR-0503), (b) discoverable in
+ * `--help` / `/knobs`. It is DECLARATION-ONLY: it does NOT change runtime
+ * behavior — each knob is still read at its existing site. The `home` field
+ * records where the knob's TYPED field ultimately belongs (read-routing = P4):
+ *   - "runtime-config" : daemon/host VALUE or composition-root gate (the bulk)
+ *   - "runner-knobs"   : would become an AgentConfig-mutating `@/runner/knobs` Knob
+ *   - "bench"          : bench-only (resolveBenchKnobs surface)
+ *
+ * Slice note: PURE DATA — no imports, no env reads, zero work at import. Lives
+ * in `@/config` (config slice; node:path + local only — no upward imports).
+ *
+ * Secrets are DELIBERATELY ABSENT (QUANTA_WEB_AUTH_TOKEN, QUANTA_LANCE_API_KEY,
+ * QUANTA_QDRANT_API_KEY, QUANTA_CHATGPT_AUTH_SOURCE) — credentials are owned by
+ * `@/auth` / the keyring, never the knob registry (see ratchet EXCEPTIONS).
+ */
+
+export type InventoryKind = "bool" | "int" | "float" | "string" | "enum"
+export type KnobHome = "runtime-config" | "runner-knobs" | "bench"
+
+export interface KnobInventoryEntry {
+  readonly envKey: `QUANTA_${string}`
+  readonly kind: InventoryKind
+  readonly default: boolean | number | string | undefined
+  readonly group:
+    | "host-gate"
+    | "permission"
+    | "memory"
+    | "mcp"
+    | "search"
+    | "retrieval"
+    | "diff"
+    | "observability"
+    | "llm"
+    | "remote"
+    | "sandbox"
+    | "session-registry"
+    | "web-daemon"
+    | "bench"
+    | "auth"
+    | "scheduler"
+    | "security"
+    | "agent-feature"
+    | "integration"
+  readonly home: KnobHome
+  readonly describe: string
+  readonly readSite: string
+}
+
+/** Host composition-root gates + values (src/host/runtime, src/host/bootstrap). */
+const HOST: readonly KnobInventoryEntry[] = [
+  { envKey: "QUANTA_BG_MAX_QUEUED", kind: "int", default: undefined, group: "host-gate", home: "runtime-config", describe: "Admission queue max-queued cap.", readSite: "host/runtime/agent-config-assembler.ts" },
+  { envKey: "QUANTA_BROWSER_TOOL", kind: "bool", default: false, group: "host-gate", home: "runtime-config", describe: "Chrome browser tool gate.", readSite: "host/runtime/agent-config-assembler.ts" },
+  { envKey: "QUANTA_COMMAND_HOOKS", kind: "bool", default: false, group: "host-gate", home: "runtime-config", describe: "Disk-configured command-hook execution gate.", readSite: "host/runtime/agent-arg-builder.ts" },
+  { envKey: "QUANTA_COMMAND_HOOKS_ACK", kind: "string", default: undefined, group: "host-gate", home: "runtime-config", describe: "Acknowledgement phrase for command-hooks.", readSite: "host/runtime/agent-arg-builder.ts" },
+  { envKey: "QUANTA_COVERAGE_TOOL", kind: "bool", default: false, group: "host-gate", home: "runtime-config", describe: "Coverage analysis tool gate.", readSite: "host/runtime/agent-arg-builder.ts" },
+  { envKey: "QUANTA_ENABLE_STRUCTURED_PATCH", kind: "bool", default: false, group: "host-gate", home: "runtime-config", describe: "Structured patch output format gate.", readSite: "host/runtime/agent-arg-builder.ts" },
+  { envKey: "QUANTA_OBSERVABILITY", kind: "bool", default: false, group: "observability", home: "runtime-config", describe: "Hook-bus + observability wiring.", readSite: "host/runtime/agent-arg-builder.ts" },
+  { envKey: "QUANTA_OBJECTIVE_TOOLS", kind: "bool", default: false, group: "host-gate", home: "runtime-config", describe: "Objective management tools gate.", readSite: "host/runtime/agent-config-assembler.ts" },
+  { envKey: "QUANTA_IDENTITY", kind: "bool", default: false, group: "host-gate", home: "runtime-config", describe: "System-prompt identity-mode injection gate.", readSite: "host/runtime/agent-arg-builder.ts" },
+  { envKey: "QUANTA_IDENTITY_MODE", kind: "enum", default: "default", group: "host-gate", home: "runtime-config", describe: "Identity system-prompt variant.", readSite: "host/bootstrap/bootstrap-session.ts" },
+  { envKey: "QUANTA_EFFORT", kind: "enum", default: "default", group: "host-gate", home: "runtime-config", describe: "Effort tier for budget/thinking.", readSite: "host/bootstrap/bootstrap-session.ts" },
+  { envKey: "QUANTA_FOCUS_CHAIN_EVERY", kind: "int", default: 6, group: "host-gate", home: "runtime-config", describe: "Re-inject focus-chain every N turns.", readSite: "host/bootstrap/bootstrap-session.ts" },
+  { envKey: "QUANTA_TOOL_PROFILE", kind: "enum", default: "write", group: "host-gate", home: "runtime-config", describe: "Tool profile (read/write/execute/all).", readSite: "host/bootstrap/bootstrap-session.ts" },
+  { envKey: "QUANTA_MEMORY_AUTO", kind: "bool", default: true, group: "memory", home: "runtime-config", describe: "Cross-session memory auto-promotion (default ON).", readSite: "host/runtime/agent-arg-builder.ts" },
+  { envKey: "QUANTA_MEMORY_THRESHOLD", kind: "float", default: 0.7, group: "memory", home: "runtime-config", describe: "Memory promote threshold (0-1).", readSite: "host/runtime/agent-arg-builder.ts" },
+  { envKey: "QUANTA_MEMORY_MIN_USAGE", kind: "int", default: 1, group: "memory", home: "runtime-config", describe: "Min usageCount to promote.", readSite: "host/runtime/agent-arg-builder.ts" },
+  { envKey: "QUANTA_MEMORY_WRITE_GUARD_PCT", kind: "string", default: undefined, group: "memory", home: "runtime-config", describe: "Write-guard budget meter %.", readSite: "host/bootstrap/bootstrap-session.ts" },
+  { envKey: "QUANTA_STALE_READ_GUARD", kind: "bool", default: false, group: "host-gate", home: "runtime-config", describe: "Stale-read freshness guard (write-blocking).", readSite: "host/runtime/agent-config-assembler.ts" },
+  { envKey: "QUANTA_PROMPT_CACHE_STATUS", kind: "bool", default: false, group: "host-gate", home: "runtime-config", describe: "Prompt-cache observer gate.", readSite: "host/runtime/agent-config-assembler.ts" },
+  { envKey: "QUANTA_PERMISSION_PROFILE", kind: "enum", default: undefined, group: "permission", home: "runtime-config", describe: "Named permission profile.", readSite: "host/runtime/agent-arg-builder.ts" },
+  { envKey: "QUANTA_PERMISSION_PROFILES_JSON", kind: "string", default: "{}", group: "permission", home: "runtime-config", describe: "User-defined permission profile JSON.", readSite: "host/runtime/agent-arg-builder.ts" },
+  { envKey: "QUANTA_PERMISSION_PROFILE_PER_USER", kind: "enum", default: undefined, group: "permission", home: "runtime-config", describe: "Layered profile: per-user override.", readSite: "host/runtime/agent-arg-builder.ts" },
+  { envKey: "QUANTA_PERMISSION_PROFILE_PER_REPO", kind: "enum", default: undefined, group: "permission", home: "runtime-config", describe: "Layered profile: per-repo override.", readSite: "host/runtime/agent-arg-builder.ts" },
+  { envKey: "QUANTA_PERMISSION_PROFILE_TEAM_ADMIN", kind: "enum", default: undefined, group: "permission", home: "runtime-config", describe: "Layered profile: team-admin override.", readSite: "host/runtime/agent-arg-builder.ts" },
+  { envKey: "QUANTA_POLICY_MERGE_STRATEGY", kind: "enum", default: "source-precedence", group: "permission", home: "runtime-config", describe: "Profile merge strategy.", readSite: "host/runtime/agent-arg-builder.ts" },
+  { envKey: "QUANTA_PREWARM", kind: "bool", default: false, group: "host-gate", home: "runtime-config", describe: "LLM prewarming clock gate.", readSite: "host/runtime/agent-arg-builder.ts" },
+  { envKey: "QUANTA_LOCAL_ENV", kind: "string", default: undefined, group: "host-gate", home: "runtime-config", describe: ".quanta/environment.toml selection.", readSite: "host/runtime/agent-arg-builder.ts" },
+  { envKey: "QUANTA_MCP_CAPS", kind: "enum", default: "default", group: "mcp", home: "runtime-config", describe: "MCP capability negotiation (full/default).", readSite: "host/runtime/agent-arg-builder.ts" },
+  { envKey: "QUANTA_MCP_CONFIG", kind: "string", default: ".mcp.json", group: "mcp", home: "runtime-config", describe: "MCP config file path override.", readSite: "host/runtime/agent-arg-builder.ts" },
+  { envKey: "QUANTA_RETRIEVAL_HYBRID", kind: "bool", default: false, group: "search", home: "runtime-config", describe: "Hybrid semantic retrieval stack gate.", readSite: "host/runtime/agent-arg-builder.ts" },
+  { envKey: "QUANTA_SUBAGENT_BG", kind: "bool", default: false, group: "host-gate", home: "runtime-config", describe: "Background subagent scheduler gate.", readSite: "host/runtime/agent-config-assembler.ts" },
+  { envKey: "QUANTA_SUBAGENT_MAILBOX", kind: "bool", default: false, group: "host-gate", home: "runtime-config", describe: "Inter-subagent mailbox gate.", readSite: "host/runtime/agent-config-assembler.ts" },
+  { envKey: "QUANTA_LSP_DIAGNOSTICS_HOOK", kind: "bool", default: false, group: "host-gate", home: "runtime-config", describe: "LSP post-edit diagnostics hook gate.", readSite: "host/runtime/agent-config-assembler.ts" },
+  { envKey: "QUANTA_SECRET_CHECK_TOOL", kind: "bool", default: false, group: "host-gate", home: "runtime-config", describe: "Secret-scanning tool gate.", readSite: "host/runtime/agent-config-assembler.ts" },
+  { envKey: "QUANTA_MENTION_SYMBOL", kind: "bool", default: true, group: "host-gate", home: "runtime-config", describe: "LSP symbol mention resolver (default ON).", readSite: "host/runtime/agent-config-assembler.ts" },
+  { envKey: "QUANTA_AUTOMATION", kind: "bool", default: false, group: "host-gate", home: "runtime-config", describe: "Automation engine gate.", readSite: "host/runtime/agent-arg-builder.ts" },
+  { envKey: "QUANTA_AUTORUN_POLICY", kind: "string", default: undefined, group: "permission", home: "runtime-config", describe: "Scheduler autorun eligibility policy.", readSite: "permission/autorun-eligibility-wire.ts" },
+  { envKey: "QUANTA_WEB_SEARCH_DUCKDUCKGO", kind: "bool", default: false, group: "search", home: "runtime-config", describe: "DuckDuckGo web-search provider gate.", readSite: "host/runtime/agent-config-assembler.ts" },
+  { envKey: "QUANTA_NETWORK_PROXY", kind: "string", default: undefined, group: "host-gate", home: "runtime-config", describe: "Socket egress proxy config.", readSite: "host/runtime/agent-arg-builder.ts" },
+  { envKey: "QUANTA_PROVIDER", kind: "enum", default: undefined, group: "llm", home: "runtime-config", describe: "LLM provider override (anthropic/openai).", readSite: "host/runtime/agent-arg-builder.ts" },
+]
+
+/** Search / index / retrieval / diff (src/runner/assemble, src/retrieval, src/runner). */
+const RUNNER: readonly KnobInventoryEntry[] = [
+  { envKey: "QUANTA_INDEX", kind: "bool", default: false, group: "search", home: "runtime-config", describe: "Enable semantic/hybrid search indexing.", readSite: "runner/assemble/search-pipeline.ts" },
+  { envKey: "QUANTA_PIPELINE", kind: "enum", default: "lexical", group: "search", home: "runtime-config", describe: "Search pipeline preset.", readSite: "runner/assemble/search-pipeline.ts" },
+  { envKey: "QUANTA_INDEX_GLOB", kind: "string", default: undefined, group: "search", home: "runtime-config", describe: "File glob for index scope.", readSite: "runner/assemble/search-pipeline.ts" },
+  { envKey: "QUANTA_INDEX_INTERVAL_MS", kind: "int", default: 5000, group: "search", home: "runtime-config", describe: "Delta scan interval (ms).", readSite: "runner/assemble/search-pipeline.ts" },
+  { envKey: "QUANTA_INDEX_DB_PATH", kind: "string", default: ":memory:", group: "search", home: "runtime-config", describe: "Search index sqlite path.", readSite: "runner/assemble/search-index-backend.ts" },
+  { envKey: "QUANTA_INDEX_PERSIST", kind: "bool", default: false, group: "search", home: "runtime-config", describe: "Sqlite-backed delta store toggle.", readSite: "runner/assemble/search-index-backend.ts" },
+  { envKey: "QUANTA_EMBED_PROVIDER", kind: "string", default: undefined, group: "retrieval", home: "runtime-config", describe: "Semantic search embedder provider.", readSite: "runner/assemble/search-index-backend.ts" },
+  { envKey: "QUANTA_VECTOR_STORE", kind: "enum", default: undefined, group: "retrieval", home: "runtime-config", describe: "Vector store provider selection.", readSite: "runner/assemble/search-index-backend.ts" },
+  { envKey: "QUANTA_LANCE_MAX_DIM", kind: "int", default: undefined, group: "retrieval", home: "runtime-config", describe: "Lance vector DB max dimension.", readSite: "runner/assemble/search-index-backend.ts" },
+  { envKey: "QUANTA_LANCE_BASE_URL", kind: "string", default: undefined, group: "retrieval", home: "runtime-config", describe: "Lance vector DB base URL.", readSite: "runner/assemble/search-index-backend.ts" },
+  { envKey: "QUANTA_LANCE_TABLE", kind: "string", default: undefined, group: "retrieval", home: "runtime-config", describe: "Lance vector DB table name.", readSite: "runner/assemble/search-index-backend.ts" },
+  { envKey: "QUANTA_QDRANT_MAX_DIM", kind: "int", default: undefined, group: "retrieval", home: "runtime-config", describe: "Qdrant vector DB max dimension.", readSite: "runner/assemble/search-index-backend.ts" },
+  { envKey: "QUANTA_QDRANT_COLLECTION", kind: "string", default: undefined, group: "retrieval", home: "runtime-config", describe: "Qdrant collection name.", readSite: "runner/assemble/search-index-backend.ts" },
+  { envKey: "QUANTA_QDRANT_BASE_URL", kind: "string", default: undefined, group: "retrieval", home: "runtime-config", describe: "Qdrant base URL.", readSite: "runner/assemble/search-index-backend.ts" },
+  { envKey: "QUANTA_RERANKER", kind: "enum", default: "identity", group: "retrieval", home: "runtime-config", describe: "Search result reranker provider.", readSite: "retrieval/reranker/registry.ts" },
+  { envKey: "QUANTA_EMBED_CACHE", kind: "enum", default: "none", group: "retrieval", home: "runtime-config", describe: "Embedding vector cache backend.", readSite: "retrieval/cache/registry.ts" },
+  { envKey: "QUANTA_MM_EMBED", kind: "enum", default: undefined, group: "retrieval", home: "runtime-config", describe: "Multi-modal embedder provider.", readSite: "retrieval/multimodal/registry.ts" },
+  { envKey: "QUANTA_CLIP_ENDPOINT", kind: "string", default: undefined, group: "retrieval", home: "runtime-config", describe: "CLIP REST embedder endpoint.", readSite: "retrieval/multimodal/registry.ts" },
+  { envKey: "QUANTA_MEMORY_PATH", kind: "string", default: undefined, group: "memory", home: "runtime-config", describe: "Session memory sqlite path.", readSite: "runner/assemble/memory-factory.ts" },
+  { envKey: "QUANTA_DIFF_MAX_BYTES", kind: "int", default: 67108864, group: "diff", home: "runtime-config", describe: "Diff content byte cap per file.", readSite: "runner/diff-ops.ts" },
+  { envKey: "QUANTA_DIFF_MAX_LINES", kind: "int", default: 200, group: "diff", home: "runtime-config", describe: "Diff visible line cap.", readSite: "runner/diff-ops.ts" },
+]
+
+/** Daemon / observability / llm / remote / sandbox / session-registry. */
+const DAEMON: readonly KnobInventoryEntry[] = [
+  { envKey: "QUANTA_WEB_PORT", kind: "int", default: 4096, group: "web-daemon", home: "runtime-config", describe: "Web-daemon TCP listen port.", readSite: "apps/web-daemon/index.ts" },
+  { envKey: "QUANTA_WEB_BIND", kind: "string", default: "0.0.0.0", group: "web-daemon", home: "runtime-config", describe: "Web-daemon bind address.", readSite: "apps/web-daemon/index.ts" },
+  { envKey: "QUANTA_WEB_CANVAS", kind: "bool", default: false, group: "web-daemon", home: "runtime-config", describe: "Canvas rendering gate.", readSite: "apps/web-daemon/runtime-factory.ts" },
+  { envKey: "QUANTA_SUBAGENT", kind: "bool", default: true, group: "web-daemon", home: "runtime-config", describe: "Subagent fan-out gate (default ON).", readSite: "apps/web-daemon/runtime-factory.ts" },
+  { envKey: "QUANTA_OTEL_ENDPOINT", kind: "string", default: undefined, group: "observability", home: "runtime-config", describe: "OpenTelemetry collector URL.", readSite: "observability/otel-exporter.ts" },
+  { envKey: "QUANTA_OTEL_SERVICE_NAME", kind: "string", default: "quanta-codeagent", group: "observability", home: "runtime-config", describe: "OTel service name.", readSite: "observability/otel-exporter.ts" },
+  { envKey: "QUANTA_OTEL_BATCH_SIZE", kind: "int", default: 64, group: "observability", home: "runtime-config", describe: "OTel batch flush threshold.", readSite: "observability/otel-exporter.ts" },
+  { envKey: "QUANTA_OTEL_FLUSH_MS", kind: "int", default: 5000, group: "observability", home: "runtime-config", describe: "OTel timer flush interval (ms).", readSite: "observability/otel-exporter.ts" },
+  { envKey: "QUANTA_DEPLOYMENT_ENV", kind: "string", default: "unknown", group: "observability", home: "runtime-config", describe: "Deployment environment label.", readSite: "observability/metrics/otel-resource.ts" },
+  { envKey: "QUANTA_SERVICE_NAME", kind: "string", default: "quanta", group: "observability", home: "runtime-config", describe: "Service identity.", readSite: "observability/metrics/otel-resource.ts" },
+  { envKey: "QUANTA_VERSION", kind: "string", default: "0.0.0", group: "observability", home: "runtime-config", describe: "Service version fallback.", readSite: "observability/metrics/otel-resource.ts" },
+  { envKey: "QUANTA_NAMESPACE", kind: "string", default: undefined, group: "observability", home: "runtime-config", describe: "Service namespace (optional).", readSite: "observability/metrics/otel-resource.ts" },
+  { envKey: "QUANTA_FAST", kind: "bool", default: false, group: "llm", home: "runtime-config", describe: "Resolve service_tier to priority.", readSite: "llm/factory.ts" },
+  { envKey: "QUANTA_SERVICE_TIER", kind: "string", default: undefined, group: "llm", home: "runtime-config", describe: "OpenAI service tier.", readSite: "llm/factory.ts" },
+  { envKey: "QUANTA_REASONING_EFFORT", kind: "enum", default: undefined, group: "llm", home: "runtime-config", describe: "Reasoning effort level.", readSite: "llm/factory.ts" },
+  { envKey: "QUANTA_REASONING_CARRYOVER", kind: "bool", default: false, group: "llm", home: "runtime-config", describe: "Carry reasoning to responses.", readSite: "llm/factory.ts" },
+  { envKey: "QUANTA_DEBUG_OAUTH", kind: "bool", default: false, group: "llm", home: "runtime-config", describe: "Debug ChatGPT OAuth body.", readSite: "llm/factory.ts" },
+  { envKey: "QUANTA_OPENAI_SURFACE", kind: "enum", default: "auto", group: "llm", home: "runtime-config", describe: "OpenAI responses|chat-completions.", readSite: "llm/factory.ts" },
+  { envKey: "QUANTA_REMOTE_RUNNER", kind: "enum", default: "none", group: "remote", home: "runtime-config", describe: "Remote runner backend selector.", readSite: "remote/runner/registry.ts" },
+  { envKey: "QUANTA_REMOTE_NETWORK", kind: "string", default: undefined, group: "remote", home: "runtime-config", describe: "Remote runner network mode.", readSite: "remote/runner/docker-adapter.ts" },
+  { envKey: "QUANTA_SANDBOX", kind: "enum", default: "default", group: "sandbox", home: "runtime-config", describe: "OS sandbox profile selector.", readSite: "runtime/os-sandbox/env.ts" },
+  { envKey: "QUANTA_SANDBOX_ESCALATION", kind: "bool", default: false, group: "sandbox", home: "runtime-config", describe: "Sandbox escalation check gate.", readSite: "runtime/os-sandbox/types.ts" },
+  { envKey: "QUANTA_SESSION_REGISTRY_SQLITE_PATH", kind: "string", default: undefined, group: "session-registry", home: "runtime-config", describe: "SQLite registry backend path.", readSite: "agent/session-resource-registry/global.ts" },
+  { envKey: "QUANTA_SESSION_REGISTRY_DISK_DIR", kind: "string", default: undefined, group: "session-registry", home: "runtime-config", describe: "Disk registry backend dir.", readSite: "agent/session-resource-registry/global.ts" },
+  { envKey: "QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES", kind: "int", default: undefined, group: "session-registry", home: "runtime-config", describe: "WAL size threshold (bytes).", readSite: "agent/session-resource-registry/auto-sweep.ts" },
+  { envKey: "QUANTA_SESSION_REGISTRY_WAL_CHECKPOINT_MODE", kind: "enum", default: undefined, group: "session-registry", home: "runtime-config", describe: "WAL checkpoint upgrade mode.", readSite: "agent/session-resource-registry/auto-sweep.ts" },
+]
+
+/** Bench-only knobs (src/runner/batch/eval, src/apps/bench). Home = the bench
+ *  surface (resolveBenchKnobs); declared here for governance completeness. */
+const BENCH: readonly KnobInventoryEntry[] = [
+  { envKey: "QUANTA_BENCH_LSP", kind: "bool", default: false, group: "bench", home: "bench", describe: "Bench: language-server tools gate.", readSite: "runner/batch/eval/driver.ts" },
+  { envKey: "QUANTA_BENCH_SUBAGENT", kind: "bool", default: false, group: "bench", home: "bench", describe: "Bench: enable subagent spawning.", readSite: "runner/batch/eval/driver.ts" },
+  { envKey: "QUANTA_BENCH_SKILLS", kind: "bool", default: false, group: "bench", home: "bench", describe: "Bench: system skills bundling.", readSite: "runner/batch/eval/driver.ts" },
+  { envKey: "QUANTA_BENCH_LOCALIZE_PHASE", kind: "string", default: undefined, group: "bench", home: "bench", describe: "Bench: localization phase turns.", readSite: "runner/batch/eval/driver.ts" },
+  { envKey: "QUANTA_BENCH_BRANCH_SEARCH", kind: "string", default: undefined, group: "bench", home: "bench", describe: "Bench: branch-search K-best.", readSite: "runner/batch/eval/driver.ts" },
+  { envKey: "QUANTA_BENCH_ISSUE_HINT", kind: "enum", default: "off", group: "bench", home: "bench", describe: "Bench: issue-hint extraction mode.", readSite: "runner/batch/eval/driver.ts" },
+  { envKey: "QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL", kind: "string", default: undefined, group: "bench", home: "bench", describe: "Bench: expected/actual extraction.", readSite: "runner/batch/eval/driver.ts" },
+  { envKey: "QUANTA_BENCH_REPRO_TEST", kind: "int", default: undefined, group: "bench", home: "bench", describe: "Bench: repro-test selection K.", readSite: "runner/batch/eval/driver.ts" },
+  { envKey: "QUANTA_BENCH_RETRY_TRANSIENT", kind: "string", default: undefined, group: "bench", home: "bench", describe: "Bench: transient retry cap.", readSite: "runner/batch/eval/driver.ts" },
+]
+
+/** P1 cluster — memory pipeline (memory-factory.ts), @-mention resolver caps
+ *  (mention-runner), swebench/bench harness, web-daemon persistence. */
+const EXTRA: readonly KnobInventoryEntry[] = [
+  // memory pipeline — gateDisabled (=off disables) ⇒ default-ON; recall values
+  { envKey: "QUANTA_MEMORY", kind: "enum", default: "memory", group: "memory", home: "runtime-config", describe: "Long-term memory store kind (unset⇒memory; sqlite/off).", readSite: "runner/assemble/memory-factory.ts" },
+  { envKey: "QUANTA_MEMORY_DISTILL", kind: "bool", default: true, group: "memory", home: "runtime-config", describe: "Memory distillation (=off disables).", readSite: "runner/assemble/memory-factory.ts" },
+  { envKey: "QUANTA_MEMORY_CONSOLIDATE", kind: "bool", default: true, group: "memory", home: "runtime-config", describe: "Memory consolidation (=off disables).", readSite: "runner/assemble/memory-factory.ts" },
+  { envKey: "QUANTA_MEMORY_SELF_EDIT", kind: "bool", default: true, group: "memory", home: "runtime-config", describe: "Memory self-edit (=off disables).", readSite: "runner/assemble/memory-factory.ts" },
+  { envKey: "QUANTA_MEMORY_LINE_CITATIONS", kind: "bool", default: true, group: "memory", home: "runtime-config", describe: "Memory line citations (=off disables).", readSite: "runner/assemble/memory-factory.ts" },
+  { envKey: "QUANTA_MEMORY_RECALL_LIMIT", kind: "int", default: undefined, group: "memory", home: "runtime-config", describe: "Memory recall result limit.", readSite: "runner/assemble/memory-factory.ts" },
+  { envKey: "QUANTA_MEMORY_RECALL_TIERS", kind: "string", default: undefined, group: "memory", home: "runtime-config", describe: "Memory recall tier selection.", readSite: "runner/assemble/memory-factory.ts" },
+  // @-mention resolver caps — all default-ON; numeric caps optional
+  { envKey: "QUANTA_MENTION_FILE_MAX_BYTES", kind: "int", default: undefined, group: "host-gate", home: "runtime-config", describe: "@file mention byte cap.", readSite: "agent/mention-runner/default-resolver.ts" },
+  { envKey: "QUANTA_MENTION_FILE_TAIL_RATIO", kind: "float", default: undefined, group: "host-gate", home: "runtime-config", describe: "@file mention head/tail ratio.", readSite: "agent/mention-runner/default-resolver.ts" },
+  { envKey: "QUANTA_MENTION_SYMBOL_RESOLVER", kind: "enum", default: undefined, group: "host-gate", home: "runtime-config", describe: "@symbol mention resolver backend.", readSite: "agent/mention-runner/default-resolver.ts" },
+  { envKey: "QUANTA_MENTION_SYMBOL_TIMEOUT_MS", kind: "int", default: undefined, group: "host-gate", home: "runtime-config", describe: "@symbol resolver timeout (ms).", readSite: "agent/mention-runner/default-resolver.ts" },
+  // bench / swebench harness
+  { envKey: "QUANTA_LSP_TOOLS", kind: "enum", default: undefined, group: "bench", home: "bench", describe: "Bench LSP-nav tools (=full).", readSite: "runner/batch/eval/driver.ts" },
+  { envKey: "QUANTA_MODEL", kind: "string", default: undefined, group: "bench", home: "bench", describe: "Bench model id (--model).", readSite: "apps/bench/index.ts" },
+  { envKey: "QUANTA_OBSERVE_DIR", kind: "string", default: undefined, group: "bench", home: "bench", describe: "Bench observation output dir.", readSite: "apps/bench/index.ts" },
+  { envKey: "QUANTA_REPAIR_ROUNDS", kind: "int", default: undefined, group: "bench", home: "bench", describe: "Bench repair-round count.", readSite: "apps/bench/index.ts" },
+  { envKey: "QUANTA_SWEBENCH_REPO_BASE_URL", kind: "string", default: "https://github.com/", group: "bench", home: "bench", describe: "SWE-bench repo base URL.", readSite: "apps/bench/index.ts" },
+  { envKey: "QUANTA_SWEBENCH_DATASET", kind: "string", default: "", group: "bench", home: "bench", describe: "SWE-bench dataset file.", readSite: "apps/bench/index.ts" },
+  { envKey: "QUANTA_SWEBENCH_DATASET_NAME", kind: "string", default: undefined, group: "bench", home: "bench", describe: "SWE-bench dataset name.", readSite: "apps/bench/index.ts" },
+  { envKey: "QUANTA_SWEBENCH_PYTHON", kind: "bool", default: false, group: "bench", home: "bench", describe: "SWE-bench python harness gate.", readSite: "apps/bench/index.ts" },
+  { envKey: "QUANTA_SWEBENCH_CORPUS_ROOT", kind: "string", default: "", group: "bench", home: "bench", describe: "SWE-bench corpus root.", readSite: "apps/bench/index.ts" },
+  // web-daemon persistence / serving
+  { envKey: "QUANTA_WEB_DB", kind: "string", default: undefined, group: "web-daemon", home: "runtime-config", describe: "Web-daemon DB backend/path.", readSite: "apps/web-daemon/server.ts" },
+  { envKey: "QUANTA_WEB_DB_DIR", kind: "string", default: "~/.quanta/web-daemon", group: "web-daemon", home: "runtime-config", describe: "Web-daemon sqlite dir.", readSite: "apps/web-daemon/persistence-sqlite.ts" },
+  { envKey: "QUANTA_WEB_DIST", kind: "string", default: undefined, group: "web-daemon", home: "runtime-config", describe: "Web-daemon static dist dir.", readSite: "apps/web-daemon/server.ts" },
+  { envKey: "QUANTA_WEB_STRICT_PORT", kind: "bool", default: false, group: "web-daemon", home: "runtime-config", describe: "Fail if port busy (no auto-increment).", readSite: "apps/web-daemon/index.ts" },
+]
+
+/** P2 audit cluster — CONST-KEYED gates surfaced when the ratchet learned to
+ *  see `const X = "QUANTA_Y"; gateOn(env, X)` (ADR-0503 P2-R1: a real ratchet
+ *  false-negative hole). All bool gateOn (default OFF) unless noted. */
+const CONST_KEYED: readonly KnobInventoryEntry[] = [
+  { envKey: "QUANTA_CONTEXT_1M", kind: "bool", default: false, group: "llm", home: "runtime-config", describe: "1M-token context window (opt-in).", readSite: "llm/context-1m.ts" },
+  { envKey: "QUANTA_ITEM_LIFECYCLE", kind: "bool", default: false, group: "agent-feature", home: "runtime-config", describe: "Stream item-lifecycle events (opt-in).", readSite: "stream/item-lifecycle.ts" },
+  { envKey: "QUANTA_FAST_APPLY", kind: "bool", default: false, group: "agent-feature", home: "runtime-config", describe: "Fast-apply edit merge (opt-in).", readSite: "agent/optional-ports.ts" },
+  { envKey: "QUANTA_EFFORT_AUTO", kind: "bool", default: false, group: "agent-feature", home: "runtime-config", describe: "Automatic effort escalation (opt-in).", readSite: "agent/optional-ports.ts" },
+  { envKey: "QUANTA_SUBAGENT_FOLLOWUP", kind: "bool", default: false, group: "agent-feature", home: "runtime-config", describe: "Subagent follow-up task tool (opt-in).", readSite: "agent/optional-ports.ts" },
+  { envKey: "QUANTA_ENABLE_AWAY_SUMMARY", kind: "bool", default: false, group: "agent-feature", home: "runtime-config", describe: "Away-summary on long turns (opt-in).", readSite: "agent/away-summary/runner.ts" },
+  { envKey: "QUANTA_ENABLE_PROMPT_SUGGESTION", kind: "bool", default: false, group: "agent-feature", home: "runtime-config", describe: "Prompt-suggestion orchestrator (opt-in).", readSite: "agent/prompt-suggestion/orchestrator.ts" },
+  { envKey: "QUANTA_PROACTIVE_REACTOR", kind: "bool", default: false, group: "agent-feature", home: "runtime-config", describe: "Proactive self-wake reactor (opt-in).", readSite: "reactor/self-wake.ts" },
+  { envKey: "QUANTA_CONTROL_REQUEST", kind: "bool", default: false, group: "agent-feature", home: "runtime-config", describe: "Runtime control-request surface (opt-in).", readSite: "agent/control-request/types.ts" },
+  { envKey: "QUANTA_REFLECT", kind: "bool", default: false, group: "agent-feature", home: "runtime-config", describe: "Reflection tool (opt-in).", readSite: "tool/surface/manifest.ts" },
+  { envKey: "QUANTA_SHADOW", kind: "bool", default: false, group: "agent-feature", home: "runtime-config", describe: "Shadow-workspace tooling (opt-in).", readSite: "tool/surface/manifest.ts" },
+  { envKey: "QUANTA_THIN_CLIENT_DISPATCH", kind: "bool", default: false, group: "agent-feature", home: "runtime-config", describe: "Thin-client dispatch routing (opt-in).", readSite: "shared/thin-client-route.ts" },
+  { envKey: "QUANTA_USE_FOUNDRY", kind: "bool", default: false, group: "llm", home: "runtime-config", describe: "Azure AI Foundry provider (opt-in).", readSite: "llm/providers/registry.ts" },
+  { envKey: "QUANTA_USE_MANTLE", kind: "bool", default: false, group: "llm", home: "runtime-config", describe: "Mantle provider (opt-in).", readSite: "llm/providers/registry.ts" },
+  { envKey: "QUANTA_GH_ACTIONS_TRIGGER", kind: "bool", default: false, group: "integration", home: "runtime-config", describe: "GitHub Actions event-source trigger (opt-in).", readSite: "integrations/github/event-source-actions.ts" },
+  { envKey: "QUANTA_SCHEDULER", kind: "bool", default: false, group: "scheduler", home: "runtime-config", describe: "Background scheduler runtime (opt-in).", readSite: "scheduler/runtime.ts" },
+  { envKey: "QUANTA_AUTOMATION_INTERVAL_MS", kind: "int", default: undefined, group: "scheduler", home: "runtime-config", describe: "Scheduler automation tick interval (ms).", readSite: "scheduler/runtime-wire.ts" },
+  // security — composite TLS-MITM gate (master + verbatim ack phrase)
+  { envKey: "QUANTA_TLS_MITM", kind: "bool", default: false, group: "security", home: "runtime-config", describe: "TLS-MITM master switch (strict; pairs with _ACK).", readSite: "runtime/network-proxy/mitm-gate.ts" },
+  { envKey: "QUANTA_TLS_MITM_ACK", kind: "string", default: undefined, group: "security", home: "runtime-config", describe: "Verbatim ack phrase enabling TLS-MITM.", readSite: "runtime/network-proxy/mitm-gate.ts" },
+  // ChatGPT OAuth endpoint/client config (PUBLIC config, not secrets — defaults baked in)
+  { envKey: "QUANTA_OAUTH_ISSUER", kind: "string", default: "https://auth.openai.com", group: "auth", home: "runtime-config", describe: "OAuth issuer URL override.", readSite: "auth/chatgpt-oauth/config.ts" },
+  { envKey: "QUANTA_CHATGPT_API_BASE", kind: "string", default: "https://chatgpt.com/backend-api", group: "auth", home: "runtime-config", describe: "ChatGPT API base URL override.", readSite: "auth/chatgpt-oauth/config.ts" },
+  { envKey: "QUANTA_OAUTH_CLIENT_ID", kind: "string", default: "app_EMoamEEZ73f0CkXaXp7hrann", group: "auth", home: "runtime-config", describe: "OAuth client id override (public).", readSite: "auth/chatgpt-oauth/config.ts" },
+  { envKey: "QUANTA_OAUTH_SKU", kind: "string", default: "CODEX", group: "auth", home: "runtime-config", describe: "OAuth SKU override.", readSite: "auth/chatgpt-oauth/config.ts" },
+  { envKey: "QUANTA_OAUTH_ORIGINATOR", kind: "string", default: "codex_cli", group: "auth", home: "runtime-config", describe: "OAuth originator override.", readSite: "auth/chatgpt-oauth/config.ts" },
+]
+
+/** The full daemon/agent-side knob inventory (declaration-only). */
+export const KNOB_INVENTORY: readonly KnobInventoryEntry[] = [
+  ...HOST,
+  ...RUNNER,
+  ...DAEMON,
+  ...BENCH,
+  ...EXTRA,
+  ...CONST_KEYED,
+]
+
+export const allInventoryKnobs = (): readonly KnobInventoryEntry[] => KNOB_INVENTORY
+export const inventoryKnob = (envKey: string): KnobInventoryEntry | undefined =>
+  KNOB_INVENTORY.find((k) => k.envKey === envKey)

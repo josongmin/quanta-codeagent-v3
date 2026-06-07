@@ -1,0 +1,37 @@
+id: context-1m-window
+title: 1M-context window opt-in (Anthropic context-1m beta) — derived eligibility (ADR-0505)
+section: 8
+subsystem: LLM — long-context window negotiation
+order: 205
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:claude"]
+depends_on: [llm-factory]
+config_refs:
+  env: ["QUANTA_CONTEXT_1M"]
+purpose: |
+  Opt into Anthropic's 1M-token context window via the context-1m-2025-08-07 beta
+  header. A 1M request is expressed by a `[1m]` model-id suffix OR
+  `QUANTA_CONTEXT_1M`; eligibility is DERIVED (not hardcoded) by checking
+  `${model}-1m ∈ MODEL_CONTEXT_WINDOWS`. The factory strips `[1m]` from the API
+  model id, de-dups the beta header against caller betas, and attaches it ONLY
+  when active+eligible. Default-OFF byte-identical (no suffix/knob ⇒ no header,
+  model id unchanged). Compaction-window-metadata bump is a documented follow-up.
+evidence:
+  code:
+    - src/llm/context-1m.ts
+    - src/llm/factory.ts
+  adrs: [505]
+  tests:
+    unit:
+      - tests/unit/context-1m-hellgate.test.ts
+      - tests/unit/context-1m-factory-e2e-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null

@@ -1,0 +1,130 @@
+/**
+ * Inbound message-delivery mode — the SSOT for how a user message fired WHILE a
+ * turn is in flight is handled. Three modes:
+ *
+ *   - `queue`     — append to the follow-up queue; it runs as the NEXT turn once
+ *                   the current one finishes (FIFO follow-up; the default).
+ *   - `weave`     — inject the message into the CURRENT in-flight turn so the
+ *                   model sees it on its next step (Claude-IDE live blend). Built
+ *                   on the §steer decision engine (`steer()`).
+ *   - `interrupt` — abort the current turn and resubmit this message as a fresh
+ *                   turn (Codex barge-in / overwrite-and-restart).
+ *
+ * {@link routeInbound} is the PURE decision: given the mode + the live turn
+ * snapshot, it returns WHAT the surface should do. It never performs the side
+ * effect (the CLI/loop executes it) and never reaches mutable state — the clock
+ * + turn snapshot are injected (deterministic / replay-safe).
+ *
+ * KEY INVARIANT — a message is NEVER silently lost. A `weave`/`interrupt` that
+ * cannot apply (no active turn, a non-steerable review/compact turn, an
+ * interrupted turn, a turn-id mismatch) falls back to `queue_fallback` carrying
+ * the original text + the reason, so the surface still enqueues it (and can ack
+ * the user why it degraded). Only genuinely empty / oversized input is
+ * `rejected` (consistent across all three modes).
+ */
+
+import {
+  type ActiveTurnState,
+  type SteerConfig,
+  type SteerInjection,
+  type SteerRejectionReason,
+  steer,
+} from "./steering"
+
+export type InboundMode = "queue" | "interrupt" | "weave"
+
+/** Closed set — drift guard + CLI cycle iterate this. */
+export const ALL_INBOUND_MODES = [
+  "queue",
+  "interrupt",
+  "weave",
+] as const satisfies readonly InboundMode[]
+
+/** The non-default modes (need an active steerable turn to apply directly). */
+type NonQueueMode = Exclude<InboundMode, "queue">
+
+/** Discriminated decision the surface executes. */
+export type InboundDecision =
+  /** Enqueue → next turn (the default path; also the explicit `queue` mode). */
+  | { readonly kind: "queue"; readonly text: string }
+  /** Inject into the current turn (steer accepted). */
+  | { readonly kind: "weave"; readonly injection: SteerInjection }
+  /** Abort the current turn + resubmit `text` as a fresh turn. */
+  | { readonly kind: "interrupt"; readonly text: string }
+  /** A weave/interrupt that could not apply mid-turn — enqueued instead (NOT
+   *  lost); `reason` is the steer rejection so the surface can ack the user. */
+  | {
+      readonly kind: "queue_fallback"
+      readonly text: string
+      readonly from: NonQueueMode
+      readonly reason: SteerRejectionReason
+    }
+  /** Genuinely unusable input — nothing is enqueued. */
+  | { readonly kind: "rejected"; readonly reason: "empty_input" | "input_too_large" }
+
+export interface RouteInboundArgs {
+  readonly mode: InboundMode
+  readonly input: string
+  /** Live turn snapshot (the loop's `activeTurnRef.current`). */
+  readonly state: ActiveTurnState
+  readonly config: SteerConfig
+  /** Injected wall-clock ms (no `Date.now()` in core). */
+  readonly now: number
+  /** Optional optimistic-concurrency turn id the surface observed. Omitted ⇒
+   *  target whatever turn is active (the CLI never observes a turn id). */
+  readonly expectedTurnId?: string
+}
+
+/** UTF-8 byte length — mirrors `steering.ts` so the oversized check is identical
+ *  across modes (queue included). */
+const UTF8 = new TextEncoder()
+const byteLen = (s: string): number => UTF8.encode(s).length
+
+/** Validate input uniformly (all modes). Returns a `rejected` decision or null. */
+const rejectBadInput = (input: string, maxBytes: number): InboundDecision | null => {
+  if (input.trim().length === 0) return { kind: "rejected", reason: "empty_input" }
+  if (byteLen(input) > maxBytes) return { kind: "rejected", reason: "input_too_large" }
+  return null
+}
+
+/** Pure routing decision — see module header. */
+export const routeInbound = (args: RouteInboundArgs): InboundDecision => {
+  const { mode, input, state, config, now } = args
+
+  const bad = rejectBadInput(input, config.maxInputBytes)
+  if (bad !== null) return bad
+
+  if (mode === "queue") return { kind: "queue", text: input }
+
+  if (mode === "weave") {
+    // Reuse the §steer engine as the SINGLE source of steerability truth. Target
+    // the active turn's id when the surface did not observe one.
+    const expectedTurnId = args.expectedTurnId ?? state.currentTurn?.turnId
+    if (expectedTurnId === undefined) {
+      // No active turn ⇒ steer would reject `no_active_turn`; skip the call (it
+      // requires a string turn id) and fall back to queue.
+      return { kind: "queue_fallback", text: input, from: "weave", reason: "no_active_turn" }
+    }
+    const outcome = steer({ input, expectedTurnId, submittedAt: now }, state, config)
+    return outcome.kind === "accepted"
+      ? { kind: "weave", injection: outcome.injection }
+      : { kind: "queue_fallback", text: input, from: "weave", reason: outcome.reason }
+  }
+
+  // interrupt: only meaningful against a live, non-interrupted turn.
+  if (state.currentTurn === null) {
+    return { kind: "queue_fallback", text: input, from: "interrupt", reason: "no_active_turn" }
+  }
+  if (state.isInterrupted) {
+    return { kind: "queue_fallback", text: input, from: "interrupt", reason: "interrupted" }
+  }
+  return { kind: "interrupt", text: input }
+}
+
+/** Parse a raw env / config string into an {@link InboundMode}. Unrecognised ⇒
+ *  `undefined` (caller falls through to its default — usually `queue`). */
+export const parseInboundMode = (raw: string | undefined): InboundMode | undefined => {
+  if (raw === undefined) return undefined
+  const v = raw.trim().toLowerCase()
+  return (ALL_INBOUND_MODES as readonly string[]).includes(v) ? (v as InboundMode) : undefined
+}

@@ -55,6 +55,13 @@ export interface ConversationActionSurface {
   pushCancel(reason: string): void
   /** Enqueue a mid-turn `summarize` request. */
   pushSummarize(): void
+  /** §steer (weave mode) — enqueue a mid-turn `user_message` to inject into the
+   *  CURRENT turn. The loop's `decideAction` runs the §steer steerability check
+   *  (review/compact turns are refused) and injects on the next step. `input`
+   *  must be non-empty (the inbound router pre-validates; the loop also gates).
+   *  No `expectedTurnId` — targets whatever turn is active (the REPL never
+   *  observed a turn id, mirroring the cancel/summarize contract above). */
+  pushUserMessage(input: string): void
   /** Number of pending (not-yet-drained) actions — for status/observability. */
   pending(): number
 }
@@ -90,6 +97,9 @@ export const createConversationActionSurface = (): ConversationActionSurface => 
     },
     pushSummarize(): void {
       queue.push({ kind: "summarize" })
+    },
+    pushUserMessage(input: string): void {
+      queue.push({ kind: "user_message", input })
     },
     pending(): number {
       return queue.length

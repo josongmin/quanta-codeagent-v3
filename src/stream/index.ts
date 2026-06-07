@@ -14,6 +14,11 @@ export type { DegradedRecord, TeeStreamOpts } from "./adapters/tee"
 export { TeeStream } from "./adapters/tee"
 export type { DecisionEmitter, DecisionEvent } from "./decision-emitter"
 export { decisionEmitterFromStream, safeEmitDecision } from "./decision-emitter"
+export {
+  ITEM_LIFECYCLE_FLAG,
+  ItemLifecycleTracker,
+  itemLifecycleEnabled,
+} from "./item-lifecycle"
 export type { StreamPort } from "./ports"
 export type {
   AgentEvent,

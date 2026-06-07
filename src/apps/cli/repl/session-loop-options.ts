@@ -75,6 +75,13 @@ export const buildSessionLoopOptions = async (deps: {
     // #8 last-mile (jun-6) — the stdin source for the in-turn reader (host-
     // injected; default-OFF unless the capture knob is set). Spread by-presence.
     ...(deps.inTurnStdin !== undefined ? { inTurnStdin: deps.inTurnStdin } : {}),
+    // §steer — inbound delivery: the conversation-action surface (weave/interrupt
+    // sinks + activeTurnRef) + the session-mutable mode ref. Spread by-presence
+    // so the queue-default / surface-absent path stays byte-identical.
+    ...(wires.conversationActions !== undefined
+      ? { conversationActions: wires.conversationActions }
+      : {}),
+    inboundMode: wires.inboundMode,
     runtimeFacadeCompose: wires.runtimeFacadeCompose,
     // ADR-0293 — seam attached by the loop once externalPromptQueue is born.
     playbookSeam: wires.playbookSeam,
