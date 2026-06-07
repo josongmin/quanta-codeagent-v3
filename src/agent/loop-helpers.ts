@@ -165,7 +165,9 @@ export const buildPreCompactHook = (hooks: HookBus | undefined): PreCompactHookF
 export const buildPostCompactEmit = (
   hooks: HookBus | undefined,
   threadId: string,
-): ((provenance: import("@/agent/recovery-reason").RecoveryProvenance) => Promise<void>) | undefined => {
+):
+  | ((provenance: import("@/agent/recovery-reason").RecoveryProvenance) => Promise<void>)
+  | undefined => {
   if (hooks === undefined) return undefined
   return async (provenance) => {
     await hooks.emit({ type: "post_compact", threadId, provenance })

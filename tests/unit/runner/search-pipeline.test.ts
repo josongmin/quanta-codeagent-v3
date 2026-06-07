@@ -14,8 +14,7 @@ const chunk = (path: string, startLine: number, endLine: number): IndexerFileChu
   sha: "0",
 })
 
-const failed = (kind: IndexError["kind"]) =>
-  ({ ok: false as const, error: { kind } })
+const failed = (kind: IndexError["kind"]) => ({ ok: false as const, error: { kind } })
 
 describe("createTrackedSemanticUpsert", () => {
   test("returns null when no scan mutations were observed", () => {

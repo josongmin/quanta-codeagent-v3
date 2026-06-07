@@ -1,16 +1,12 @@
-import type {
-  GroundingCase,
-  GroundingDecision,
-  GroundingNormalizationProfile,
-} from "./schema"
 import {
-  normalizeGroundingDecisionHeuristically,
   type GroundingNormalizationPassResult as HeuristicPassResult,
+  normalizeGroundingDecisionHeuristically,
 } from "./normalization/heuristic"
 import {
   normalizeGroundingDecisionStructurally,
   type GroundingNormalizationPassResult as StructuralPassResult,
 } from "./normalization/structural"
+import type { GroundingCase, GroundingDecision, GroundingNormalizationProfile } from "./schema"
 
 export interface GroundingNormalizationResult {
   decision: GroundingDecision

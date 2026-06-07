@@ -16,8 +16,8 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import type { Message } from "@/llm"
 import { type PersistDeps, persistSession } from "@/agent/memory"
+import type { Message } from "@/llm"
 import type { MemoryEntry, PersistentStorePort } from "@/memory"
 
 /** Assistant message in block-content form — the heuristic distiller reads

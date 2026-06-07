@@ -6,7 +6,7 @@ import {
   parseReactorWatchEnvelope,
 } from "../../src/apps/cli/reactor-watch-bridge"
 import { ExternalPromptQueue } from "../../src/apps/cli/repl/external-prompt-queue"
-import { injectSimulatedTurn, REACTOR_ENV_FLAG, type ProactiveTrigger } from "../../src/reactor"
+import { injectSimulatedTurn, type ProactiveTrigger, REACTOR_ENV_FLAG } from "../../src/reactor"
 
 const fakeTrigger = (): ProactiveTrigger =>
   Object.freeze({

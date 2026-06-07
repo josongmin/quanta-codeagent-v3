@@ -189,7 +189,10 @@ describe("runBrowserFlow port handling", () => {
   test("ports unavailable in the callback provider surface a typed ports_in_use error", async () => {
     const provider: OAuthCallbackProvider = {
       async start() {
-        throw new BrowserFlowError("ports_in_use", "Local callback ports [1455, 1457] are already in use.")
+        throw new BrowserFlowError(
+          "ports_in_use",
+          "Local callback ports [1455, 1457] are already in use.",
+        )
       },
     }
     const flow = runBrowserFlow({
@@ -197,9 +200,7 @@ describe("runBrowserFlow port handling", () => {
       opener: captureOpener,
       timeoutMs: 200,
       callbackProvider: provider,
-    }).catch(
-      (e: Error) => e,
-    )
+    }).catch((e: Error) => e)
     const result = await flow
     expect(result).toMatchObject({ name: "BrowserFlowError", reason: "ports_in_use" })
   })

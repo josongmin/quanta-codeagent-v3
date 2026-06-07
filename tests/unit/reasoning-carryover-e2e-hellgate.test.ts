@@ -68,14 +68,14 @@ const runTurn1 = async (args: {
   const prepared = prepareResponsesContinuationRequest({
     input: turn1Input,
     model: "gpt-5",
-    transportId: "openai-responses",
+    transportId: "public",
     ...(args.reasoningCarryover ? { reasoningCarryover: true } : {}),
     ...(args.store !== undefined ? { reasoningCarryoverStore: args.store } : {}),
   })
   await drain(
     streamResponsesSurface({
       provider: "openai",
-      transportId: "openai-responses",
+      transportId: "public",
       model: "gpt-5",
       input: turn1Input,
       request: prepared,
@@ -106,7 +106,7 @@ describe("H15 e2e — 2-turn Responses carry-over", () => {
     const turn2 = prepareResponsesContinuationRequest({
       input: turn2Input,
       model: "gpt-5",
-      transportId: "openai-responses",
+      transportId: "public",
       reasoningCarryover: true,
       reasoningCarryoverStore: store,
     })
@@ -133,14 +133,14 @@ describe("H15 e2e — 2-turn Responses carry-over", () => {
     const off = prepareResponsesContinuationRequest({
       input: turn2Input,
       model: "gpt-5",
-      transportId: "openai-responses",
+      transportId: "public",
       // gate off, no store
     })
     // Legacy: no carry-over args at all.
     const legacy = prepareResponsesContinuationRequest({
       input: turn2Input,
       model: "gpt-5",
-      transportId: "openai-responses",
+      transportId: "public",
     })
     expect(JSON.stringify(off.fullBody)).toBe(JSON.stringify(legacy.fullBody))
     expect(off.fullBody.include).toBeUndefined()
@@ -165,14 +165,14 @@ describe("H15 e2e — 2-turn Responses carry-over", () => {
     const prepared = prepareResponsesContinuationRequest({
       input: turnInput,
       model: "gpt-5",
-      transportId: "openai-responses",
+      transportId: "public",
       reasoningCarryover: true,
       reasoningCarryoverStore: store,
     })
     await drain(
       streamResponsesSurface({
         provider: "openai",
-        transportId: "openai-responses",
+        transportId: "public",
         model: "gpt-5",
         input: turnInput,
         request: prepared,

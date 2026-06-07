@@ -10,8 +10,8 @@
 
 import { describe, expect, test } from "bun:test"
 import { createArtifactRegistry, monotonicIdFactory } from "@/artifact"
-import { artifactTools, buildDefaultTools } from "@/tool"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
+import { artifactTools, buildDefaultTools } from "@/tool"
 
 const ctx = (): ToolContext => ({ cwd: "/repo", signal: new AbortController().signal })
 
@@ -23,8 +23,7 @@ const run = async (tool: Tool, input: unknown): Promise<{ ok: boolean; output: s
   return last
 }
 
-const reg = () =>
-  createArtifactRegistry({ now: () => 1, idFactory: monotonicIdFactory("art") })
+const reg = () => createArtifactRegistry({ now: () => 1, idFactory: monotonicIdFactory("art") })
 
 const byName = (tools: Tool[], name: string): Tool => {
   const t = tools.find((x) => x.name === name)

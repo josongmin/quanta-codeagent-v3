@@ -77,7 +77,7 @@ describe("HELLGATE R5 — class 1: lexical traversal", () => {
   test("a path that is the jail ROOT itself is allowed; the PARENT is rejected", () => {
     const { jail } = freshJail("c1b")
     expect(() => resolveJailed(".", jail)).not.toThrow()
-    expect(resolveJailed(".", jail)).toBe(jail)
+    expect(String(resolveJailed(".", jail))).toBe(jail)
     expect(() => resolveJailed("..", jail)).toThrow(FsJailError)
   })
 
@@ -155,7 +155,7 @@ describe("HELLGATE R5 — class 2: symlink escape (the classic)", () => {
     const { jail } = freshJail("c2danglein")
     symlinkSync(join(jail, "future"), join(jail, "ilink")) // inside, absent target
     expect(() => resolveJailed("ilink/x.txt", jail)).not.toThrow()
-    expect(resolveJailed("ilink/x.txt", jail)).toBe(join(jail, "ilink", "x.txt"))
+    expect(String(resolveJailed("ilink/x.txt", jail))).toBe(join(jail, "ilink", "x.txt"))
   })
 })
 
@@ -200,7 +200,7 @@ describe("HELLGATE R5 — class 4: special-path bounds (no whole-disk via the ja
     // Even when a request normalizes upward, it can never reach `/`.
     expect(() => resolveJailed("../../../../../../../..", jail)).toThrow(FsJailError)
     // A request whose only valid resolution is the jail root stays bounded.
-    expect(resolveJailed("./", jail)).toBe(jail)
+    expect(String(resolveJailed("./", jail))).toBe(jail)
   })
 
   test("an empty / undefined jail root is REFUSED (no silent un-jail bypass)", () => {
@@ -292,8 +292,10 @@ describe("HELLGATE R5 — in-jail access STILL WORKS (fix is not over-broad)", (
     const { jail } = freshJail("happy")
     mkdirSync(join(jail, "d"))
     writeFileSync(join(jail, "d", "real.txt"), "hi")
-    expect(resolveJailed("d/real.txt", jail)).toBe(join(jail, "d", "real.txt"))
-    expect(resolveJailed("brand/new/file.txt", jail)).toBe(join(jail, "brand", "new", "file.txt"))
+    expect(String(resolveJailed("d/real.txt", jail))).toBe(join(jail, "d", "real.txt"))
+    expect(String(resolveJailed("brand/new/file.txt", jail))).toBe(
+      join(jail, "brand", "new", "file.txt"),
+    )
     // inward symlink to existing in-jail dir
     symlinkSync(join(jail, "d"), join(jail, "alias"))
     expect(() => resolveJailed("alias/real.txt", jail)).not.toThrow()

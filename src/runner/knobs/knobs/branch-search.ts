@@ -22,8 +22,8 @@
  */
 
 import type { AgentConfig, BranchSearchConfig } from "@/agent"
-import {type Knob, type Surface } from "../types"
 import { registerKnob } from "../registry"
+import type { Knob, Surface } from "../types"
 
 const SURFACES: readonly Surface[] = ["bench"]
 const BENCH_BRANCH_TIMEOUT_MS = 60_000

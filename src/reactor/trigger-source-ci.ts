@@ -168,9 +168,7 @@ export const createCiTriggerSource = (opts: CiTriggerOpts): TriggerSourcePort =>
  * even if the consumer never restarts. 1024 ≈ ~year of typical CI volume.
  */
 const SEEN_RUNS_CAP = 1024
-export const createInMemorySeenRuns = (
-  seed: readonly string[] = [],
-): SnapshotSeenRunsStore => {
+export const createInMemorySeenRuns = (seed: readonly string[] = []): SnapshotSeenRunsStore => {
   const m = new Map<string, true>()
   const add = (id: string): void => {
     if (m.has(id)) return

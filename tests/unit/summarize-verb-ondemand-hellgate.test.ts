@@ -58,6 +58,7 @@ describe("compactIfNeeded — force (on-demand) bypass", () => {
     // without force: tiny transcript is under threshold → no compaction.
     const off = await compactIfNeeded({ messages, llm, system: "sys" })
     expect(off.compacted).toBe(false)
+    if (off.compacted) throw new Error("expected no compaction under threshold")
     expect(off.reason).toBe("under_threshold")
     // with force: summarizes regardless of the threshold.
     const on = await compactIfNeeded({ messages, llm, system: "sys", force: true })
@@ -69,6 +70,7 @@ describe("compactIfNeeded — force (on-demand) bypass", () => {
     const llm = new FakeSummarizerLLM()
     const r = await compactIfNeeded({ messages: [u("only one")], llm, system: "sys", force: true })
     expect(r.compacted).toBe(false)
+    if (r.compacted) throw new Error("expected no compaction for single indivisible turn")
     expect(r.reason).toBe("no_boundary")
   })
 })

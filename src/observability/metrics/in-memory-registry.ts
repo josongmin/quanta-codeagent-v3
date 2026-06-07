@@ -191,12 +191,7 @@ const observeQuantileSketch = (state: P2Quantile, value: number): void => {
   const positions = state.markerPositions
   const desired = state.desiredPositions
   const increments = state.positionIncrements
-  if (
-    heights === null ||
-    positions === null ||
-    desired === null ||
-    increments === null
-  ) {
+  if (heights === null || positions === null || desired === null || increments === null) {
     return
   }
 

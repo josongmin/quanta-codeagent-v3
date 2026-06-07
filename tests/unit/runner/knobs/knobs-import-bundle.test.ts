@@ -20,6 +20,8 @@
  * `beforeAll`, guarded by presence so we never trigger a collision throw.
  */
 import { beforeAll, describe, expect, test } from "bun:test"
+import { readdir } from "node:fs/promises"
+import { join } from "node:path"
 import { type AnyKnob, allKnobs, asAnyKnob, registerKnob } from "@/runner/knobs"
 import { advisorKnob } from "@/runner/knobs/knobs/advisor"
 import { branchSearchKnob } from "@/runner/knobs/knobs/branch-search"
@@ -45,8 +47,6 @@ import { skillsKnob } from "@/runner/knobs/knobs/skills"
 import { subagentKnob } from "@/runner/knobs/knobs/subagent"
 import { taskBudgetKnob } from "@/runner/knobs/knobs/task-budget"
 import { workingStateKnob } from "@/runner/knobs/knobs/working-state"
-import { readdir } from "node:fs/promises"
-import { join } from "node:path"
 
 const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(advisorKnob),
@@ -75,7 +75,17 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(workingStateKnob),
 ]
 
-const PER_KNOB_DIR = join(import.meta.dir, "..", "..", "..", "..", "src", "runner", "knobs", "knobs")
+const PER_KNOB_DIR = join(
+  import.meta.dir,
+  "..",
+  "..",
+  "..",
+  "..",
+  "src",
+  "runner",
+  "knobs",
+  "knobs",
+)
 
 const ALL_KNOB_IDS = ALL_KNOBS.map((k) => k.id)
 

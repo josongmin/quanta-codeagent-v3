@@ -27,13 +27,13 @@ describe("normalizeRedactionConfig — startup contract", () => {
     expect(() => normalizeRedactionConfig({ disabled: true })).toThrow(
       REDACTION_DISABLED_WITHOUT_ACK_MESSAGE,
     )
-    expect(() =>
-      normalizeRedactionConfig({ disabled: true, acknowledgedRisk: "" }),
-    ).toThrow(REDACTION_DISABLED_WITHOUT_ACK_MESSAGE)
+    expect(() => normalizeRedactionConfig({ disabled: true, acknowledgedRisk: "" })).toThrow(
+      REDACTION_DISABLED_WITHOUT_ACK_MESSAGE,
+    )
     // Whitespace-only ack is not a real explanation.
-    expect(() =>
-      normalizeRedactionConfig({ disabled: true, acknowledgedRisk: "   " }),
-    ).toThrow(REDACTION_DISABLED_WITHOUT_ACK_MESSAGE)
+    expect(() => normalizeRedactionConfig({ disabled: true, acknowledgedRisk: "   " })).toThrow(
+      REDACTION_DISABLED_WITHOUT_ACK_MESSAGE,
+    )
   })
 
   test("throws RedactionConfigError specifically (not bare Error)", () => {

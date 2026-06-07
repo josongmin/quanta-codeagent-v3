@@ -70,7 +70,8 @@ describe("withLiveUsage — enabled", () => {
     ]
     const out = await drain(withLiveUsage(mockPort(events), { enabled: true }))
     // Every original event survives in order (progress events are interleaved).
-    expect(out.filter((e) => e.type !== "output_progress")).toEqual(events)
+    const passthrough: StreamEvent[] = out.filter((e) => e.type !== "output_progress")
+    expect(passthrough).toEqual(events)
   })
 
   test("estimate path: text_delta drives a rising ~estimate (exact:false)", async () => {

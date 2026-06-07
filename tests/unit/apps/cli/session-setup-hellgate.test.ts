@@ -314,6 +314,11 @@ const makeStubDeps = (
         rationale: "stub",
         decidedAt: new Date(0),
       })) as unknown as ReturnType<SetupSessionDeps["createSubagentBackedGuardianReview"]>,
+    createSubagentBackedGuardianAssess: () => async () => ({
+      kind: "allow",
+      rationale: "stub",
+      riskLevel: "low",
+    }),
     buildMcpSurfaceInfo: () => undefined,
     buildIdleGuards: () => ({
       idleMonitor: {

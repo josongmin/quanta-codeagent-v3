@@ -32,11 +32,11 @@ import {
   createEmbedderFromEnv,
   createHeadlessEmbedder,
   createStoreFromEnv,
-  negotiateCapabilities,
   type Embedder,
   type EmbedderCapabilities,
   type EmbedderEnv,
   type LanceStoreOptions,
+  negotiateCapabilities,
   type QdrantStoreOptions,
   type SqliteDb,
   type VectorStore,
@@ -193,8 +193,7 @@ const safeObserve = (
   }
 }
 
-const nowOrDate = (nowMs: (() => number) | undefined): number =>
-  (nowMs ?? (() => Date.now()))()
+const nowOrDate = (nowMs: (() => number) | undefined): number => (nowMs ?? (() => Date.now()))()
 
 const buildLegacyHashEmbedder = (): ResolvedIndexEmbedder => ({
   embed: async (text: string) => hashEmbed(text),
@@ -385,7 +384,9 @@ class SqliteManifestStore implements ChunkManifestStore {
   }
 
   async listPaths(): Promise<readonly string[]> {
-    const rows = this.db.query<{ path: string }>(`SELECT DISTINCT path FROM ${MANIFEST_TABLE}`).all()
+    const rows = this.db
+      .query<{ path: string }>(`SELECT DISTINCT path FROM ${MANIFEST_TABLE}`)
+      .all()
     return rows.map((row) => row.path)
   }
 
@@ -452,10 +453,7 @@ const resolveStoreDeps = (
   if (provider === "sqlite") {
     const dbHandle = opts.db ?? openLocalIndexDb(env, "store")
     return {
-      deps:
-        dbHandle === null
-          ? {}
-          : { sqlite: { db: dbHandle, tableName: PERSIST_TABLE } },
+      deps: dbHandle === null ? {} : { sqlite: { db: dbHandle, tableName: PERSIST_TABLE } },
       ...(dbHandle !== null ? { dbHandle } : {}),
     }
   }
@@ -499,7 +497,7 @@ const resolveStoreDeps = (
           : {},
     }
   }
-  return { deps: { } }
+  return { deps: {} }
 }
 
 const resolveManifestStore = (
@@ -566,11 +564,13 @@ const buildVectorStoreRuntime = async (
   }
 }
 
-const mapStoredHits = (hits: readonly {
-  readonly id: string
-  readonly score: number
-  readonly metadata?: Readonly<Record<string, string | number | boolean>>
-}[]): SearchHit[] =>
+const mapStoredHits = (
+  hits: readonly {
+    readonly id: string
+    readonly score: number
+    readonly metadata?: Readonly<Record<string, string | number | boolean>>
+  }[],
+): SearchHit[] =>
   hits.map((h) => {
     const meta = h.metadata ?? {}
     return {
@@ -724,7 +724,9 @@ export const buildSemanticBackend = (
     // a typed `failed` state so the consumer can refuse to wire a broken
     // index rather than dropping chunks into a black hole (L5 H-4/M-13).
     const reason = `unknown QUANTA_VECTOR_STORE "${selection.raw}" (expected in-memory | sqlite | lance | qdrant)`
-    logger.error(`search index store ${reason}; semantic backend FAILED (explicit store, fail-closed).`)
+    logger.error(
+      `search index store ${reason}; semantic backend FAILED (explicit store, fail-closed).`,
+    )
     return newDisabledBackend(reason)
   }
   const runtime = buildVectorStoreRuntime(env, selection, resolvedEmbedder, opts)

@@ -8,7 +8,6 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { assertOk } from "../_support/assert-ok"
 import { createHeadlessBrowser, type DomModel } from "@/browser"
 import type {
   BrowserFs,
@@ -22,6 +21,7 @@ import { createCdpBrowser } from "@/browser/cdp-adapter"
 import { ok } from "@/shared"
 import type { Tool, ToolResult } from "@/tool"
 import { createBrowserToolset } from "@/tool/browser"
+import { assertOk } from "../_support/assert-ok"
 
 const PAGE: DomModel = {
   title: "Form",

@@ -23,15 +23,15 @@ import { errMessage, gateDisabled, logger } from "@/shared"
 import { handleAuthLoginStart, handleAuthLogout, handleAuthStatus } from "./auth-routes"
 import { type CanvasEmitterHandle, createCanvasEmitter } from "./canvas-emitter"
 import {
-  createObservabilityEmitter,
-  type ObservabilityEmitterHandle,
-} from "./observability-emitter"
-import {
   buildWebKnobCatalog,
   catalogByGroup,
   resolveCatalogValues,
   webSafeKnobValue,
 } from "./knob-catalog-wire"
+import {
+  createObservabilityEmitter,
+  type ObservabilityEmitterHandle,
+} from "./observability-emitter"
 import { openThreadStore } from "./persistence-sqlite"
 import {
   createSessionRegistry,

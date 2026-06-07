@@ -13,11 +13,11 @@
  *      DROPS anything not mappable (never sends an invalid tier).
  */
 import { describe, expect, test } from "bun:test"
+import type { StreamInput } from "@/llm"
 import {
   buildAnthropicMessagesRequest,
   normalizeAnthropicServiceTier,
 } from "@/llm/anthropic-messages-codec"
-import type { StreamInput } from "@/llm"
 
 const input = (): StreamInput =>
   ({
@@ -26,10 +26,13 @@ const input = (): StreamInput =>
   }) as unknown as StreamInput
 
 const reqOf = (serviceTier?: string) =>
-  buildAnthropicMessagesRequest("claude-opus-4-8", 1024, input(), "5m", serviceTier) as unknown as Record<
-    string,
-    unknown
-  >
+  buildAnthropicMessagesRequest(
+    "claude-opus-4-8",
+    1024,
+    input(),
+    "5m",
+    serviceTier,
+  ) as unknown as Record<string, unknown>
 
 describe("anthropic service_tier — byte-identical OFF path", () => {
   test("no serviceTier ⇒ no service_tier key", () => {

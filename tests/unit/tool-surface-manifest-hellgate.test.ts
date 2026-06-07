@@ -66,7 +66,7 @@ describe("tool-surface manifest — no orphans / no dups", () => {
 describe("tool-surface manifest — GATED factories match the manifest two-way", () => {
   test("6-tool router names === manifest spawn_agent group", () => {
     const set = createSubagent6Tools({
-      runner: async () => ({ ok: true, text: "", messages: [] }),
+      runner: async () => ({ ok: true, finalText: "", turns: 0, messages: [] }),
       registry: new TaskRegistry(),
     })
     expect(names(set.tools)).toEqual(groupNames("spawn_agent"))

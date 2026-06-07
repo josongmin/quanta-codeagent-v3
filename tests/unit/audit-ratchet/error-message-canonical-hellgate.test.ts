@@ -245,132 +245,162 @@ const scanForRawStringCall = (): readonly Match[] => {
 }
 
 describe("error-message canonical ratchet (R2 audit-H)", () => {
-  test("no `(e as Error).message` outside the in-flight allowlist", { timeout: 30_000 }, () => {
-    const all = scanForUnsafeCasts()
-    const unexpected = all
-      .filter((m) => !ALLOWED_UNSAFE_CAST_SITES.has(m.relPath))
-      .sort((a, b) => a.relPath.localeCompare(b.relPath))
+  test(
+    "no `(e as Error).message` outside the in-flight allowlist",
+    () => {
+      const all = scanForUnsafeCasts()
+      const unexpected = all
+        .filter((m) => !ALLOWED_UNSAFE_CAST_SITES.has(m.relPath))
+        .sort((a, b) => a.relPath.localeCompare(b.relPath))
 
-    if (unexpected.length > 0) {
-      throw new Error(
-        [
-          "Unsafe `(e as Error).message` cast detected under src/.",
-          "Use the canonical `errMessage` from `@/shared`:",
-          '  import { errMessage } from "@/shared"',
-          "  errMessage(e) // defined for every throw shape",
-          "",
-          "Unexpected hits:",
-          ...unexpected.map((m) => `- ${m.relPath}:${m.lineNo}  ${m.line}`),
-        ].join("\n"),
+      if (unexpected.length > 0) {
+        throw new Error(
+          [
+            "Unsafe `(e as Error).message` cast detected under src/.",
+            "Use the canonical `errMessage` from `@/shared`:",
+            '  import { errMessage } from "@/shared"',
+            "  errMessage(e) // defined for every throw shape",
+            "",
+            "Unexpected hits:",
+            ...unexpected.map((m) => `- ${m.relPath}:${m.lineNo}  ${m.line}`),
+          ].join("\n"),
+        )
+      }
+
+      expect(unexpected).toEqual([])
+    },
+    { timeout: 30_000 },
+  )
+
+  test(
+    "in-flight allowlist sites still own their unsafe casts (no false-positive cleanup)",
+    () => {
+      // Every entry in the allowlist MUST still have at least one hit. If the
+      // user has migrated a site already, the allowlist entry must be removed
+      // in the same change to keep the ratchet honest.
+      const byPath = new Map<string, number>()
+      for (const m of scanForUnsafeCasts()) {
+        byPath.set(m.relPath, (byPath.get(m.relPath) ?? 0) + 1)
+      }
+      const allowlistedButGone = [...ALLOWED_UNSAFE_CAST_SITES].filter((path) => !byPath.has(path))
+      expect(allowlistedButGone).toEqual([])
+    },
+    { timeout: 30_000 },
+  )
+
+  test(
+    "no file-local `const errMessage = …` shadow declarations",
+    () => {
+      const all = scanForShadowDefinitions()
+      const unexpected = all
+        .filter((m) => !ALLOWED_SHADOW_DEFINITION_SITES.has(m.relPath))
+        .sort((a, b) => a.relPath.localeCompare(b.relPath))
+
+      if (unexpected.length > 0) {
+        throw new Error(
+          [
+            "File-local `const errMessage = …` shadow detected under src/.",
+            "There is exactly ONE canonical `errMessage` — it lives in `@/shared`.",
+            "Import it instead of re-defining a local copy with drifting policy.",
+            "",
+            "Unexpected shadows:",
+            ...unexpected.map((m) => `- ${m.relPath}:${m.lineNo}  ${m.line}`),
+          ].join("\n"),
+        )
+      }
+
+      expect(unexpected).toEqual([])
+    },
+    { timeout: 30_000 },
+  )
+
+  test(
+    "no inline `X instanceof Error ? X.message : String(X)` ternary outside plane-clean allowlist (R5)",
+    () => {
+      const all = scanForCanonicalTernary()
+      const unexpected = all
+        .filter((m) => !ALLOWED_TERNARY_INLINE_SITES.has(m.relPath))
+        .sort((a, b) => a.relPath.localeCompare(b.relPath))
+
+      if (unexpected.length > 0) {
+        throw new Error(
+          [
+            "Inline canonical ternary `X instanceof Error ? X.message : String(X)` detected under src/.",
+            "Use the canonical `errMessage` from `@/shared`:",
+            '  import { errMessage } from "@/shared"',
+            "  errMessage(e)",
+            "",
+            "The behaviour is byte-identical, and the helper centralises future",
+            "fixes (e.g. throwing-toString guard) so they reach every callsite.",
+            "",
+            "Unexpected hits:",
+            ...unexpected.map((m) => `- ${m.relPath}:${m.lineNo}  ${m.line}`),
+          ].join("\n"),
+        )
+      }
+
+      expect(unexpected).toEqual([])
+    },
+    { timeout: 30_000 },
+  )
+
+  test(
+    "ternary allowlist sites still have at least one inline hit (no false-positive cleanup)",
+    () => {
+      const byPath = new Map<string, number>()
+      for (const m of scanForCanonicalTernary()) {
+        byPath.set(m.relPath, (byPath.get(m.relPath) ?? 0) + 1)
+      }
+      const allowlistedButGone = [...ALLOWED_TERNARY_INLINE_SITES].filter(
+        (path) => !byPath.has(path),
       )
-    }
+      expect(allowlistedButGone).toEqual([])
+    },
+    { timeout: 30_000 },
+  )
 
-    expect(unexpected).toEqual([])
-  })
+  test(
+    "no bare `String(e|err|cause|error)` outside the intentional allowlist (R5)",
+    () => {
+      const all = scanForRawStringCall()
+      const unexpected = all
+        .filter((m) => !ALLOWED_RAW_STRING_SITES.has(m.relPath))
+        .sort((a, b) => a.relPath.localeCompare(b.relPath))
 
-  test("in-flight allowlist sites still own their unsafe casts (no false-positive cleanup)", { timeout: 30_000 }, () => {
-    // Every entry in the allowlist MUST still have at least one hit. If the
-    // user has migrated a site already, the allowlist entry must be removed
-    // in the same change to keep the ratchet honest.
-    const byPath = new Map<string, number>()
-    for (const m of scanForUnsafeCasts()) {
-      byPath.set(m.relPath, (byPath.get(m.relPath) ?? 0) + 1)
-    }
-    const allowlistedButGone = [...ALLOWED_UNSAFE_CAST_SITES].filter((path) => !byPath.has(path))
-    expect(allowlistedButGone).toEqual([])
-  })
+      if (unexpected.length > 0) {
+        throw new Error(
+          [
+            "Bare `String(e|err|cause|error)` detected under src/.",
+            "`String(e)` calls `e.toString()` when `e` is an Error — yielding",
+            '`"Error: <message>"` and leaking the class name into log records.',
+            "Use the canonical `errMessage` from `@/shared` so Error-thrown values",
+            "extract `.message` directly:",
+            '  import { errMessage } from "@/shared"',
+            "  errMessage(e)",
+            "",
+            "Unexpected hits:",
+            ...unexpected.map((m) => `- ${m.relPath}:${m.lineNo}  ${m.line}`),
+          ].join("\n"),
+        )
+      }
 
-  test("no file-local `const errMessage = …` shadow declarations", { timeout: 30_000 }, () => {
-    const all = scanForShadowDefinitions()
-    const unexpected = all
-      .filter((m) => !ALLOWED_SHADOW_DEFINITION_SITES.has(m.relPath))
-      .sort((a, b) => a.relPath.localeCompare(b.relPath))
+      expect(unexpected).toEqual([])
+    },
+    { timeout: 30_000 },
+  )
 
-    if (unexpected.length > 0) {
-      throw new Error(
-        [
-          "File-local `const errMessage = …` shadow detected under src/.",
-          "There is exactly ONE canonical `errMessage` — it lives in `@/shared`.",
-          "Import it instead of re-defining a local copy with drifting policy.",
-          "",
-          "Unexpected shadows:",
-          ...unexpected.map((m) => `- ${m.relPath}:${m.lineNo}  ${m.line}`),
-        ].join("\n"),
-      )
-    }
-
-    expect(unexpected).toEqual([])
-  })
-
-  test("no inline `X instanceof Error ? X.message : String(X)` ternary outside plane-clean allowlist (R5)", { timeout: 30_000 }, () => {
-    const all = scanForCanonicalTernary()
-    const unexpected = all
-      .filter((m) => !ALLOWED_TERNARY_INLINE_SITES.has(m.relPath))
-      .sort((a, b) => a.relPath.localeCompare(b.relPath))
-
-    if (unexpected.length > 0) {
-      throw new Error(
-        [
-          "Inline canonical ternary `X instanceof Error ? X.message : String(X)` detected under src/.",
-          "Use the canonical `errMessage` from `@/shared`:",
-          '  import { errMessage } from "@/shared"',
-          "  errMessage(e)",
-          "",
-          "The behaviour is byte-identical, and the helper centralises future",
-          "fixes (e.g. throwing-toString guard) so they reach every callsite.",
-          "",
-          "Unexpected hits:",
-          ...unexpected.map((m) => `- ${m.relPath}:${m.lineNo}  ${m.line}`),
-        ].join("\n"),
-      )
-    }
-
-    expect(unexpected).toEqual([])
-  })
-
-  test("ternary allowlist sites still have at least one inline hit (no false-positive cleanup)", { timeout: 30_000 }, () => {
-    const byPath = new Map<string, number>()
-    for (const m of scanForCanonicalTernary()) {
-      byPath.set(m.relPath, (byPath.get(m.relPath) ?? 0) + 1)
-    }
-    const allowlistedButGone = [...ALLOWED_TERNARY_INLINE_SITES].filter((path) => !byPath.has(path))
-    expect(allowlistedButGone).toEqual([])
-  })
-
-  test("no bare `String(e|err|cause|error)` outside the intentional allowlist (R5)", { timeout: 30_000 }, () => {
-    const all = scanForRawStringCall()
-    const unexpected = all
-      .filter((m) => !ALLOWED_RAW_STRING_SITES.has(m.relPath))
-      .sort((a, b) => a.relPath.localeCompare(b.relPath))
-
-    if (unexpected.length > 0) {
-      throw new Error(
-        [
-          "Bare `String(e|err|cause|error)` detected under src/.",
-          "`String(e)` calls `e.toString()` when `e` is an Error — yielding",
-          '`"Error: <message>"` and leaking the class name into log records.',
-          "Use the canonical `errMessage` from `@/shared` so Error-thrown values",
-          "extract `.message` directly:",
-          '  import { errMessage } from "@/shared"',
-          "  errMessage(e)",
-          "",
-          "Unexpected hits:",
-          ...unexpected.map((m) => `- ${m.relPath}:${m.lineNo}  ${m.line}`),
-        ].join("\n"),
-      )
-    }
-
-    expect(unexpected).toEqual([])
-  })
-
-  test("raw-String allowlist sites still have at least one hit", { timeout: 30_000 }, () => {
-    const byPath = new Map<string, number>()
-    for (const m of scanForRawStringCall()) {
-      byPath.set(m.relPath, (byPath.get(m.relPath) ?? 0) + 1)
-    }
-    const allowlistedButGone = [...ALLOWED_RAW_STRING_SITES].filter((path) => !byPath.has(path))
-    expect(allowlistedButGone).toEqual([])
-  })
+  test(
+    "raw-String allowlist sites still have at least one hit",
+    () => {
+      const byPath = new Map<string, number>()
+      for (const m of scanForRawStringCall()) {
+        byPath.set(m.relPath, (byPath.get(m.relPath) ?? 0) + 1)
+      }
+      const allowlistedButGone = [...ALLOWED_RAW_STRING_SITES].filter((path) => !byPath.has(path))
+      expect(allowlistedButGone).toEqual([])
+    },
+    { timeout: 30_000 },
+  )
 
   test("self-check: ternary regex matches the canonical form on a synthetic sample", () => {
     const sample = "const m = e instanceof Error ? e.message : String(e)"
@@ -379,9 +409,7 @@ describe("error-message canonical ratchet (R2 audit-H)", () => {
 
   test("self-check: ternary regex does NOT match non-canonical fallbacks", () => {
     expect(
-      TERNARY_PATTERN.test(
-        'const m = e instanceof Error ? e.message : "yaml parse failure"',
-      ),
+      TERNARY_PATTERN.test('const m = e instanceof Error ? e.message : "yaml parse failure"'),
     ).toBe(false)
     expect(
       TERNARY_PATTERN.test(

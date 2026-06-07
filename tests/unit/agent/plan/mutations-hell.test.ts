@@ -65,16 +65,8 @@ describe("createPlan happy + invariants", () => {
     expect(Object.keys(plan.todos)).toHaveLength(2)
   })
   test("pure: same inputs+idGen+now → same plan", () => {
-    const a = createPlan(
-      { name: "x", overview: "y", todos: [{ content: "T" }] },
-      NOW,
-      seqGen("a"),
-    )
-    const b = createPlan(
-      { name: "x", overview: "y", todos: [{ content: "T" }] },
-      NOW,
-      seqGen("a"),
-    )
+    const a = createPlan({ name: "x", overview: "y", todos: [{ content: "T" }] }, NOW, seqGen("a"))
+    const b = createPlan({ name: "x", overview: "y", todos: [{ content: "T" }] }, NOW, seqGen("a"))
     expect(JSON.stringify(a)).toEqual(JSON.stringify(b))
   })
   test("default isProject=false", () => {
@@ -89,7 +81,10 @@ describe("createPlan happy + invariants", () => {
         name: "p",
         overview: "o",
         todos: [{ content: "A" }, { content: "B" }, { content: "C" }],
-        phases: [{ name: "ph1", todoIndexes: [0, 1] }, { name: "ph2", todoIndexes: [2] }],
+        phases: [
+          { name: "ph1", todoIndexes: [0, 1] },
+          { name: "ph2", todoIndexes: [2] },
+        ],
       },
       NOW,
       seqGen(),
@@ -112,7 +107,11 @@ describe("createPlan errors", () => {
   })
   test("content_too_long: name", () => {
     const e = expectErr(
-      createPlan({ name: "x".repeat(PLAN_LIMITS.MAX_NAME + 1), overview: "o", todos: [{ content: "T" }] }, NOW, seqGen()),
+      createPlan(
+        { name: "x".repeat(PLAN_LIMITS.MAX_NAME + 1), overview: "o", todos: [{ content: "T" }] },
+        NOW,
+        seqGen(),
+      ),
     )
     expect(e.kind).toBe("content_too_long")
     if (e.kind !== "content_too_long") throw new Error()
@@ -121,7 +120,15 @@ describe("createPlan errors", () => {
   })
   test("content_too_long: overview", () => {
     const e = expectErr(
-      createPlan({ name: "n", overview: "y".repeat(PLAN_LIMITS.MAX_OVERVIEW + 1), todos: [{ content: "T" }] }, NOW, seqGen()),
+      createPlan(
+        {
+          name: "n",
+          overview: "y".repeat(PLAN_LIMITS.MAX_OVERVIEW + 1),
+          todos: [{ content: "T" }],
+        },
+        NOW,
+        seqGen(),
+      ),
     )
     expect(e.kind).toBe("content_too_long")
     if (e.kind !== "content_too_long") throw new Error()
@@ -129,7 +136,15 @@ describe("createPlan errors", () => {
   })
   test("content_too_long: todo content", () => {
     const e = expectErr(
-      createPlan({ name: "n", overview: "o", todos: [{ content: "z".repeat(PLAN_LIMITS.MAX_TODO_CONTENT + 1) }] }, NOW, seqGen()),
+      createPlan(
+        {
+          name: "n",
+          overview: "o",
+          todos: [{ content: "z".repeat(PLAN_LIMITS.MAX_TODO_CONTENT + 1) }],
+        },
+        NOW,
+        seqGen(),
+      ),
     )
     expect(e.kind).toBe("content_too_long")
     if (e.kind !== "content_too_long") throw new Error()
@@ -140,13 +155,21 @@ describe("createPlan errors", () => {
     // The todo references itself by id, which we know via injected idGen (single-id idGen).
     const idGen = () => "self-A"
     const e = expectErr(
-      createPlan({ name: "n", overview: "o", todos: [{ content: "T", dependencies: ["self-A"] }] }, NOW, idGen),
+      createPlan(
+        { name: "n", overview: "o", todos: [{ content: "T", dependencies: ["self-A"] }] },
+        NOW,
+        idGen,
+      ),
     )
     expect(e.kind).toBe("self_dependency")
   })
   test("dependency_unknown at create time", () => {
     const e = expectErr(
-      createPlan({ name: "n", overview: "o", todos: [{ content: "T", dependencies: ["nope"] }] }, NOW, seqGen()),
+      createPlan(
+        { name: "n", overview: "o", todos: [{ content: "T", dependencies: ["nope"] }] },
+        NOW,
+        seqGen(),
+      ),
     )
     expect(e.kind).toBe("dependency_unknown")
   })
@@ -172,12 +195,16 @@ describe("addTodos", () => {
   })
   test("phase_not_found when adding with unknown phaseId", () => {
     const plan = basePlan()
-    const e = expectErr(addTodos(plan, [{ content: "X", phaseId: "ghost" }], NOW + 1, seqGen("add")))
+    const e = expectErr(
+      addTodos(plan, [{ content: "X", phaseId: "ghost" }], NOW + 1, seqGen("add")),
+    )
     expect(e.kind).toBe("phase_not_found")
   })
   test("dependency_unknown when referencing missing id", () => {
     const plan = basePlan()
-    const e = expectErr(addTodos(plan, [{ content: "X", dependencies: ["nope"] }], NOW + 1, seqGen("add")))
+    const e = expectErr(
+      addTodos(plan, [{ content: "X", dependencies: ["nope"] }], NOW + 1, seqGen("add")),
+    )
     expect(e.kind).toBe("dependency_unknown")
   })
 })
@@ -207,7 +234,9 @@ describe("updateTodos", () => {
     const firstId = Object.keys(plan.todos)[0]
     if (firstId === undefined) throw new Error()
     // First move to completed.
-    const p1 = unwrap(updateTodos(plan, [{ id: firstId, status: "in_progress" }], true, NOW + 1)).plan
+    const p1 = unwrap(
+      updateTodos(plan, [{ id: firstId, status: "in_progress" }], true, NOW + 1),
+    ).plan
     const p2 = unwrap(updateTodos(p1, [{ id: firstId, status: "completed" }], true, NOW + 2)).plan
     // Now try illegal transition.
     const e = expectErr(updateTodos(p2, [{ id: firstId, status: "pending" }], true, NOW + 3))
@@ -220,7 +249,17 @@ describe("updateTodos", () => {
     const plan = basePlan()
     const id = Object.keys(plan.todos)[0]
     if (id === undefined) throw new Error()
-    const e = expectErr(updateTodos(plan, [{ id, content: "x" }, { id, content: "y" }], true, NOW + 1))
+    const e = expectErr(
+      updateTodos(
+        plan,
+        [
+          { id, content: "x" },
+          { id, content: "y" },
+        ],
+        true,
+        NOW + 1,
+      ),
+    )
     expect(e.kind).toBe("duplicate_id")
   })
   test("dependency_cycle introduced via patch deps", () => {
@@ -246,7 +285,12 @@ describe("updateTodos", () => {
     const id = Object.keys(plan.todos)[0]
     if (id === undefined) throw new Error()
     const e = expectErr(
-      updateTodos(plan, [{ id, content: "z".repeat(PLAN_LIMITS.MAX_TODO_CONTENT + 1) }], true, NOW + 1),
+      updateTodos(
+        plan,
+        [{ id, content: "z".repeat(PLAN_LIMITS.MAX_TODO_CONTENT + 1) }],
+        true,
+        NOW + 1,
+      ),
     )
     expect(e.kind).toBe("content_too_long")
   })
@@ -331,7 +375,9 @@ describe("updateMeta", () => {
     expect(d.plan.name).toBe("new")
   })
   test("content_too_long on name", () => {
-    const e = expectErr(updateMeta(basePlan(), { name: "x".repeat(PLAN_LIMITS.MAX_NAME + 1) }, NOW + 1))
+    const e = expectErr(
+      updateMeta(basePlan(), { name: "x".repeat(PLAN_LIMITS.MAX_NAME + 1) }, NOW + 1),
+    )
     expect(e.kind).toBe("content_too_long")
   })
 })

@@ -21,11 +21,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import {
-  PORTABLE_SESSION_VERSION,
-  PortableSessionImportError,
-  parsePortableSession,
-} from "@/ipc"
+import { PORTABLE_SESSION_VERSION, PortableSessionImportError, parsePortableSession } from "@/ipc"
 
 const META = {
   id: "src-nest",
@@ -140,9 +136,7 @@ describe("@/ipc import — nested content-block symmetry hellgate", () => {
   })
 
   test("HELL-NEST-7: tool_use MISSING input is REJECTED", () => {
-    expectMessagesInvalid(
-      blobWithContent([{ type: "tool_use", id: "tu-1", name: "bash" }]),
-    )
+    expectMessagesInvalid(blobWithContent([{ type: "tool_use", id: "tu-1", name: "bash" }]))
   })
 
   // HELL-NEST-8/9/10 (self-audit H13): the importer is SYMMETRIC with the

@@ -2,7 +2,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { __resetRuntimeConfig } from "@/shared"
 import {
   appendEnvelope,
   type EventMsgRecord,
@@ -11,6 +10,7 @@ import {
   type SessionEnvelopeRecord,
   sessionEnvelopePath,
 } from "@/session"
+import { __resetRuntimeConfig } from "@/shared"
 
 const root = mkdtempSync(join(tmpdir(), "session-envelope-seam-"))
 

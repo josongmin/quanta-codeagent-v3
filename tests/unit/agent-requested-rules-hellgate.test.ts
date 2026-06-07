@@ -17,10 +17,14 @@
  *   4. NO-THROW on empty inputs.
  */
 import { describe, expect, test } from "bun:test"
-import { matchRulesByDescription } from "@/agent/agent-requested-rules"
 import type { RequestableRule } from "@/agent/agent-requested-rules"
+import { matchRulesByDescription } from "@/agent/agent-requested-rules"
 
-const rule = (name: string, description: string): RequestableRule => ({ name, description, body: "…" })
+const rule = (name: string, description: string): RequestableRule => ({
+  name,
+  description,
+  body: "…",
+})
 const rules: readonly RequestableRule[] = [
   rule("ts-style", "TypeScript code style and naming conventions"),
   rule("py-style", "Python formatting and lint rules"),

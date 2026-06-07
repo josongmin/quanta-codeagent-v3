@@ -42,9 +42,7 @@ describe("memory citation end-to-end (loop surface)", () => {
         llm,
         store,
         sessionId: "test-citation-e2e",
-        messages: [
-          { role: "user", content: [{ type: "text", text: "tell me about Postgres" }] },
-        ],
+        messages: [{ role: "user", content: [{ type: "text", text: "tell me about Postgres" }] }],
         memory: { recallLimit: 5 },
       }),
     )

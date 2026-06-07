@@ -45,7 +45,15 @@ const makeMemPort = (seed: Record<string, string> = {}) => {
       files.set(path, content)
     },
     async statFile(path: string): Promise<FileInfo> {
-      return { path, size: files.get(path)?.length ?? 0, isDirectory: false }
+      return {
+        path,
+        size: files.get(path)?.length ?? 0,
+        isDirectory: false,
+        mtimeMs: 0,
+        isFIFO: false,
+        isCharacterDevice: false,
+        isBlockDevice: false,
+      }
     },
     async fileExists(path: string): Promise<boolean> {
       return files.has(path)

@@ -37,16 +37,9 @@ import { z } from "zod"
 import type { AgentConfig } from "@/agent"
 import { HookBus } from "@/agent"
 import { type AdmissibilityAction, runAdmissibilityGate } from "@/agent/admissibility-gate"
-import type {
-  ToolPolicy,
-  ToolProfileName,
-  ToolProfileResolver,
-} from "@/agent/tool-profile"
+import type { ToolPolicy, ToolProfileName, ToolProfileResolver } from "@/agent/tool-profile"
 import type { ToolUseBlock } from "@/llm"
-import {
-  __resetDefaultPermissionStore,
-  type PermissionContext,
-} from "@/permission"
+import { __resetDefaultPermissionStore, type PermissionContext } from "@/permission"
 import { __resetRuntimeConfig } from "@/shared"
 import type { Tool } from "@/tool"
 import { ToolRegistry } from "@/tool"
@@ -67,9 +60,8 @@ const makeShellTool = (name: string): Tool => {
       yield { type: "result", result: { ok: true, output: "ran" } }
     },
   }
-  ;(
-    tool as Tool & { extractShellCommand: (input: unknown) => string | null }
-  ).extractShellCommand = (input) => (input as { command: string }).command
+  ;(tool as Tool & { extractShellCommand: (input: unknown) => string | null }).extractShellCommand =
+    (input) => (input as { command: string }).command
   return tool
 }
 

@@ -318,7 +318,9 @@ const buildExecutionPlaneSpreads = (d: SessionDeps): Partial<AgentConfig> => ({
   ...(d.conversationCheckpoint !== undefined
     ? { conversationCheckpoint: d.conversationCheckpoint }
     : {}),
-  ...(d.responsesContinuation !== undefined ? { responsesContinuation: d.responsesContinuation } : {}),
+  ...(d.responsesContinuation !== undefined
+    ? { responsesContinuation: d.responsesContinuation }
+    : {}),
   ...(d.granularRegistry !== undefined ? { granularRegistry: d.granularRegistry } : {}),
   ...(d.stage1OutputsStore !== undefined ? { stage1OutputsStore: d.stage1OutputsStore } : {}),
   ...(d.automationEngine !== undefined ? { automationEngine: d.automationEngine } : {}),

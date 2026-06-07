@@ -13,7 +13,10 @@ import type { StreamEvent } from "@/llm"
  * LLM stream wrap with salvage).
  */
 
-const makeAsyncIter = <T>(items: T[], opts?: { onCancel?: () => void; signal?: AbortSignal }): AsyncIterable<T> => ({
+const makeAsyncIter = <T>(
+  items: T[],
+  opts?: { onCancel?: () => void; signal?: AbortSignal },
+): AsyncIterable<T> => ({
   async *[Symbol.asyncIterator]() {
     for (const item of items) {
       if (opts?.signal?.aborted) {
@@ -25,7 +28,11 @@ const makeAsyncIter = <T>(items: T[], opts?: { onCancel?: () => void; signal?: A
   },
 })
 
-const makeControlledStream = (): { iter: AsyncIterable<StreamEvent>; push: (ev: StreamEvent) => void; close: () => void } => {
+const makeControlledStream = (): {
+  iter: AsyncIterable<StreamEvent>
+  push: (ev: StreamEvent) => void
+  close: () => void
+} => {
   let resolve: ((v: { done: true } | { done: false; value: StreamEvent }) => void) | null = null
   const queue: StreamEvent[] = []
   let closed = false
@@ -77,7 +84,9 @@ describe("A. CancellationSignal contract", () => {
   test("HELL-A3: listener fires synchronously on cancel", () => {
     const c = createCancellationController()
     let fired = false
-    c.signal.addEventListener("abort", () => { fired = true })
+    c.signal.addEventListener("abort", () => {
+      fired = true
+    })
     c.cancel("budget-breach")
     expect(fired).toBe(true)
   })
@@ -85,9 +94,15 @@ describe("A. CancellationSignal contract", () => {
   test("HELL-A4: multiple listeners all fire once", () => {
     const c = createCancellationController()
     let n = 0
-    c.signal.addEventListener("abort", () => { n++ })
-    c.signal.addEventListener("abort", () => { n++ })
-    c.signal.addEventListener("abort", () => { n++ })
+    c.signal.addEventListener("abort", () => {
+      n++
+    })
+    c.signal.addEventListener("abort", () => {
+      n++
+    })
+    c.signal.addEventListener("abort", () => {
+      n++
+    })
     c.cancel("timeout")
     expect(n).toBe(3)
   })
@@ -95,7 +110,9 @@ describe("A. CancellationSignal contract", () => {
   test("HELL-A5: removeEventListener prevents call", () => {
     const c = createCancellationController()
     let fired = false
-    const handler = () => { fired = true }
+    const handler = () => {
+      fired = true
+    }
     c.signal.addEventListener("abort", handler)
     c.signal.removeEventListener("abort", handler)
     c.cancel("external")
@@ -106,7 +123,9 @@ describe("A. CancellationSignal contract", () => {
     const c = createCancellationController()
     c.cancel("external")
     let fired = false
-    c.signal.addEventListener("abort", () => { fired = true })
+    c.signal.addEventListener("abort", () => {
+      fired = true
+    })
     expect(fired).toBe(true)
   })
 })
@@ -115,7 +134,9 @@ describe("B. Controller idempotency", () => {
   test("HELL-B1: cancel twice same cause → no-op second call", () => {
     const c = createCancellationController()
     let fires = 0
-    c.signal.addEventListener("abort", () => { fires++ })
+    c.signal.addEventListener("abort", () => {
+      fires++
+    })
     c.cancel("user-abort")
     c.cancel("user-abort")
     expect(fires).toBe(1)
@@ -170,7 +191,9 @@ describe("D. CleanupHandler orchestration", () => {
     let calledCause: string | null = null
     c.registerCleanup({
       name: "h1",
-      cleanup: async (cause) => { calledCause = cause },
+      cleanup: async (cause) => {
+        calledCause = cause
+      },
     })
     c.cancel("user-abort")
     await c.finalize(null)
@@ -184,9 +207,24 @@ describe("D. CleanupHandler orchestration", () => {
   test("HELL-D2: multiple handlers all called", async () => {
     const c = createCancellationController()
     const calls: string[] = []
-    c.registerCleanup({ name: "h1", cleanup: async () => { calls.push("h1") } })
-    c.registerCleanup({ name: "h2", cleanup: async () => { calls.push("h2") } })
-    c.registerCleanup({ name: "h3", cleanup: async () => { calls.push("h3") } })
+    c.registerCleanup({
+      name: "h1",
+      cleanup: async () => {
+        calls.push("h1")
+      },
+    })
+    c.registerCleanup({
+      name: "h2",
+      cleanup: async () => {
+        calls.push("h2")
+      },
+    })
+    c.registerCleanup({
+      name: "h3",
+      cleanup: async () => {
+        calls.push("h3")
+      },
+    })
     c.cancel("user-abort")
     await c.finalize(null)
     expect(calls.sort()).toEqual(["h1", "h2", "h3"])
@@ -197,11 +235,15 @@ describe("D. CleanupHandler orchestration", () => {
     let h2Called = false
     c.registerCleanup({
       name: "boom",
-      cleanup: async () => { throw new Error("oops") },
+      cleanup: async () => {
+        throw new Error("oops")
+      },
     })
     c.registerCleanup({
       name: "good",
-      cleanup: async () => { h2Called = true },
+      cleanup: async () => {
+        h2Called = true
+      },
     })
     c.cancel("external")
     const outcome = await c.finalize(null)
@@ -216,7 +258,9 @@ describe("D. CleanupHandler orchestration", () => {
     let called = false
     const dereg = c.registerCleanup({
       name: "h1",
-      cleanup: async () => { called = true },
+      cleanup: async () => {
+        called = true
+      },
     })
     dereg()
     c.cancel("external")
@@ -234,7 +278,12 @@ describe("D. CleanupHandler orchestration", () => {
   test("HELL-D6: finalize idempotent (cached outcome)", async () => {
     const c = createCancellationController()
     let cleanupCalls = 0
-    c.registerCleanup({ name: "h", cleanup: async () => { cleanupCalls++ } })
+    c.registerCleanup({
+      name: "h",
+      cleanup: async () => {
+        cleanupCalls++
+      },
+    })
     c.cancel("external")
     const o1 = await c.finalize(null)
     const o2 = await c.finalize(null)
@@ -252,7 +301,9 @@ describe("E. cancellableStream salvage", () => {
       { type: "text_delta", delta: "!" },
     ])
     const stream = cancellableStream({ source, controller: c })
-    for await (const _ of stream) { /* consume */ }
+    for await (const _ of stream) {
+      /* consume */
+    }
     expect(stream.partial().partialText).toBe("Hello, world!")
   })
 
@@ -263,7 +314,9 @@ describe("E. cancellableStream salvage", () => {
       { type: "tool_use_end", id: "t1", input: { path: "/x" } },
     ])
     const stream = cancellableStream({ source, controller: c })
-    for await (const _ of stream) { /* consume */ }
+    for await (const _ of stream) {
+      /* consume */
+    }
     const p = stream.partial()
     expect(p.toolUses.length).toBe(1)
     expect(p.toolUses[0]?.name).toBe("read")
@@ -278,7 +331,9 @@ describe("E. cancellableStream salvage", () => {
       // No tool_use_end
     ])
     const stream = cancellableStream({ source, controller: c })
-    for await (const _ of stream) { /* consume */ }
+    for await (const _ of stream) {
+      /* consume */
+    }
     expect(stream.partial().toolUses.length).toBe(0)
     expect(stream.partial().hasUsableToolUses).toBe(false)
   })
@@ -289,7 +344,9 @@ describe("E. cancellableStream salvage", () => {
       { type: "usage", inputTokens: 100, outputTokens: 50, model: "x" } as StreamEvent,
     ])
     const stream = cancellableStream({ source, controller: c })
-    for await (const _ of stream) { /* consume */ }
+    for await (const _ of stream) {
+      /* consume */
+    }
     expect(stream.partial().usage.inputTokens).toBe(100)
     expect(stream.partial().usage.outputTokens).toBe(50)
   })
@@ -298,7 +355,9 @@ describe("E. cancellableStream salvage", () => {
     const c = createCancellationController()
     const source = makeAsyncIter<StreamEvent>([{ type: "text_delta", delta: "ok" }])
     const stream = cancellableStream({ source, controller: c })
-    for await (const _ of stream) { /* consume */ }
+    for await (const _ of stream) {
+      /* consume */
+    }
     expect(await stream.outcome()).toBeNull()
   })
 
@@ -307,7 +366,9 @@ describe("E. cancellableStream salvage", () => {
     const { iter, push, close } = makeControlledStream()
     const stream = cancellableStream({ source: iter, controller: c })
     const consume = (async () => {
-      for await (const _ of stream) { /* consume */ }
+      for await (const _ of stream) {
+        /* consume */
+      }
     })()
     push({ type: "text_delta", delta: "partial" })
     await new Promise((r) => setTimeout(r, 5))
@@ -330,18 +391,27 @@ describe("E. cancellableStream salvage", () => {
       { type: "text_delta", delta: "fresh" },
     ])
     const stream = cancellableStream({ source, controller: c })
-    for await (const _ of stream) { /* consume */ }
+    for await (const _ of stream) {
+      /* consume */
+    }
     expect(stream.partial().partialText).toBe("fresh")
   })
 
   test("HELL-E8: cancel propagates through controller.finalize", async () => {
     const c = createCancellationController()
     let cleanupRan = false
-    c.registerCleanup({ name: "h", cleanup: async () => { cleanupRan = true } })
+    c.registerCleanup({
+      name: "h",
+      cleanup: async () => {
+        cleanupRan = true
+      },
+    })
     const { iter, push, close } = makeControlledStream()
     const stream = cancellableStream({ source: iter, controller: c })
     const consume = (async () => {
-      for await (const _ of stream) { /* consume */ }
+      for await (const _ of stream) {
+        /* consume */
+      }
     })()
     push({ type: "text_delta", delta: "a" })
     await new Promise((r) => setTimeout(r, 5))

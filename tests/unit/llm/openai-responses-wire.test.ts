@@ -80,9 +80,9 @@ describe("buildResponsesBody", () => {
 
 describe("toResponsesToolChoice", () => {
   test("invalid named tool throws loudly", () => {
-    expect(() =>
-      toResponsesToolChoice({ kind: "tool", name: "missing" }, ["bash"]),
-    ).toThrow(LLMError)
+    expect(() => toResponsesToolChoice({ kind: "tool", name: "missing" }, ["bash"])).toThrow(
+      LLMError,
+    )
   })
 })
 
@@ -129,8 +129,12 @@ describe("strictExtensionTail", () => {
   })
 
   test("non-extension returns null", () => {
-    const baseline = [{ type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] }]
-    const current = [{ type: "message", role: "user", content: [{ type: "input_text", text: "changed" }] }]
+    const baseline = [
+      { type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] },
+    ]
+    const current = [
+      { type: "message", role: "user", content: [{ type: "input_text", text: "changed" }] },
+    ]
     expect(strictExtensionTail(current, baseline)).toBeNull()
   })
 })

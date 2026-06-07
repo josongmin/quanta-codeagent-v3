@@ -113,7 +113,7 @@ const httpsThroughProxy = (
       })
       let resp = ""
       tls.setEncoding("utf8")
-      tls.on("data", (d) => {
+      tls.on("data", (d: string | Buffer) => {
         resp += d
       })
       tls.on("end", () => {

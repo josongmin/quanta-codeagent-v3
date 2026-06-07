@@ -28,7 +28,11 @@
 
 import { describe, expect, test } from "bun:test"
 
-import { createDefaultNPhaseDriver, type PhaseSpec, TransitionError } from "../../../src/agent/n-phase"
+import {
+  createDefaultNPhaseDriver,
+  type PhaseSpec,
+  TransitionError,
+} from "../../../src/agent/n-phase"
 
 const chain: ReadonlyArray<PhaseSpec> = [
   { id: "init", name: "Init", requiresFeedback: false, allowSkip: false },

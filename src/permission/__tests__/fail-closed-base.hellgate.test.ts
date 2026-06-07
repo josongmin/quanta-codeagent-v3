@@ -21,14 +21,14 @@ import { canAccess, containsPath } from "../access-check"
 import { DEFAULT_PROTECTED_BRANCHES, decideBranchOnly } from "../branch-only"
 import { createJsonStateFile } from "../json-state-file"
 import { hostAllowsMutation, hostMutationVerdict } from "../per-host-mode"
+import { threadAllowsMutation } from "../per-thread-store"
 import type {
   FileSystemEntry,
   FileSystemSandboxPolicy,
   PermissionProfile,
 } from "../permission-profile"
-import { threadAllowsMutation } from "../per-thread-store"
-import { createCachedResolver } from "../special-path-resolver"
 import type { ThreadPermission } from "../permission-store"
+import { createCachedResolver } from "../special-path-resolver"
 
 /* ─── builders ─────────────────────────────────────────────────────────── */
 

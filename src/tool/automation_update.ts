@@ -20,10 +20,7 @@
  */
 
 import { z } from "zod"
-import type {
-  AutomationEnginePort,
-  EngineAutomation,
-} from "@/scheduler/automation-engine"
+import type { AutomationEnginePort, EngineAutomation } from "@/scheduler/automation-engine"
 import { parseRRule } from "@/scheduler/rrule-parser"
 import { defineTool } from "./factory"
 import type { Tool, ToolEvent } from "./types"

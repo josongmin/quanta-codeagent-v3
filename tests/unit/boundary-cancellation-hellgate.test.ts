@@ -24,7 +24,11 @@ import { HttpSseMcpTransport } from "@/mcp/transports/http-sse"
 import { createDeepgramAdapter } from "@/media/stt/deepgram-adapter"
 import { createWhisperAdapter } from "@/media/stt/openai-whisper-adapter"
 
-const wavBlob = () => ({ mime: "audio/wav" as const, bytes: new Uint8Array([1, 2, 3, 4]) })
+const wavBlob = () => ({
+  mime: "audio/wav" as const,
+  bytes: new Uint8Array([1, 2, 3, 4]),
+  durationMs: 1000,
+})
 
 describe("shadow-verify apply — cancellation gated, never touches the scratch fs", () => {
   test("an already-aborted signal returns 'aborted' and does NOT apply the patch", async () => {
@@ -69,7 +73,7 @@ describe("STT adapters — deadline + caller signal wired through the primitive"
   test("deepgram: a hung connection times out with a TYPED 'timeout' reason and aborts the fetch", async () => {
     let fetchSignalAborted = false
     // A fetch that never resolves unless its signal aborts (models a hung server).
-    const fetchFn = (_i: string | URL, init?: RequestInit): Promise<Response> =>
+    const fetchFn = (_i: string | URL | Request, init?: RequestInit): Promise<Response> =>
       new Promise((_res, reject) => {
         init?.signal?.addEventListener("abort", () => {
           fetchSignalAborted = true
@@ -88,7 +92,7 @@ describe("STT adapters — deadline + caller signal wired through the primitive"
 
   test("whisper: a caller-cancel maps to a TYPED 'aborted' reason", async () => {
     const c = new AbortController()
-    const fetchFn = (_i: string | URL, init?: RequestInit): Promise<Response> =>
+    const fetchFn = (_i: string | URL | Request, init?: RequestInit): Promise<Response> =>
       new Promise((_res, reject) => {
         init?.signal?.addEventListener("abort", () => {
           const e = new Error("aborted") as Error & { name: string }

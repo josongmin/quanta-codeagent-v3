@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import {
   defaultResponsesContinuationStore,
-  responsesContinuationLlmPort,
   type LLMPort,
+  responsesContinuationLlmPort,
   type StreamEvent,
   type StreamInput,
 } from "@/llm"

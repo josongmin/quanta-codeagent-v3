@@ -130,88 +130,94 @@ describe("git_review_diff — e2e (real git + scripted reviewer)", () => {
     expect(HAS_GIT).toBe(true)
   })
 
-  test.skipIf(!HAS_GIT)("two-commit repo: base=HEAD~1, head=HEAD ⇒ reviewer sees real diff + returns parsed report", async () => {
-    const reviewer = scriptedReviewer({
-      ok: true,
-      finalText: JSON.stringify({
-        summary: "1 minor issue.",
-        findings: [
-          {
-            file: "feat.ts",
-            line: 2,
-            severity: "warning",
-            what: "TODO comment retained",
-            why: "Indicates incomplete validation",
-            impact: "May ship unverified input handling",
-          },
-        ],
-      }),
-      turns: 2,
-    })
+  test.skipIf(!HAS_GIT)(
+    "two-commit repo: base=HEAD~1, head=HEAD ⇒ reviewer sees real diff + returns parsed report",
+    async () => {
+      const reviewer = scriptedReviewer({
+        ok: true,
+        finalText: JSON.stringify({
+          summary: "1 minor issue.",
+          findings: [
+            {
+              file: "feat.ts",
+              line: 2,
+              severity: "warning",
+              what: "TODO comment retained",
+              why: "Indicates incomplete validation",
+              impact: "May ship unverified input handling",
+            },
+          ],
+        }),
+        turns: 2,
+      })
 
-    // Simulated main-loop history. The whole point of the absorption is that
-    // the review does NOT mutate this; only ONE tool_result is appended.
-    const mainHistory: { type: string; text: string }[] = [
-      { type: "user", text: "review the latest changes" },
-    ]
+      // Simulated main-loop history. The whole point of the absorption is that
+      // the review does NOT mutate this; only ONE tool_result is appended.
+      const mainHistory: { type: string; text: string }[] = [
+        { type: "user", text: "review the latest changes" },
+      ]
 
-    const ctx: ToolContext = {
-      cwd: repoDir,
-      signal: new AbortController().signal,
-      reviewerAgent: reviewer.runner,
-    }
+      const ctx: ToolContext = {
+        cwd: repoDir,
+        signal: new AbortController().signal,
+        reviewerAgent: reviewer.runner,
+      }
 
-    const r = await collect(
-      gitReviewDiffTool(defaultGitRunner),
-      { base: "HEAD~1", head: "HEAD", focus: "look for missing input validation" },
-      ctx,
-    )
+      const r = await collect(
+        gitReviewDiffTool(defaultGitRunner),
+        { base: "HEAD~1", head: "HEAD", focus: "look for missing input validation" },
+        ctx,
+      )
 
-    // Tool result is OK, with the parsed report rendered.
-    expect(r.ok).toBe(true)
-    expect(r.output).toContain("TODO comment retained")
-    const struct = r.structured as { summary: string; findings: { file: string }[] } | undefined
-    expect(struct?.findings.length).toBe(1)
-    expect(struct?.findings[0]?.file).toBe("feat.ts")
+      // Tool result is OK, with the parsed report rendered.
+      expect(r.ok).toBe(true)
+      expect(r.output).toContain("TODO comment retained")
+      const struct = r.structured as { summary: string; findings: { file: string }[] } | undefined
+      expect(struct?.findings.length).toBe(1)
+      expect(struct?.findings[0]?.file).toBe("feat.ts")
 
-    // Reviewer was invoked EXACTLY ONCE — and its `prompt` carried the real diff
-    // text + the caller's focus hint. Depth chained from absent ctx.depth ⇒ 1.
-    expect(reviewer.calls.length).toBe(1)
-    const call = reviewer.calls[0]
-    expect(call?.depth).toBe(1)
-    expect(call?.taskKind).toBe("review")
-    expect(call?.toolFilter).toEqual(["read", "grep", "glob"])
-    expect(call?.prompt).toContain("feat.ts")
-    expect(call?.prompt).toContain("TODO: validate x is positive")
-    expect(call?.prompt).toContain("look for missing input validation")
+      // Reviewer was invoked EXACTLY ONCE — and its `prompt` carried the real diff
+      // text + the caller's focus hint. Depth chained from absent ctx.depth ⇒ 1.
+      expect(reviewer.calls.length).toBe(1)
+      const call = reviewer.calls[0]
+      expect(call?.depth).toBe(1)
+      expect(call?.taskKind).toBe("review")
+      expect(call?.toolFilter).toEqual(["read", "grep", "glob"])
+      expect(call?.prompt).toContain("feat.ts")
+      expect(call?.prompt).toContain("TODO: validate x is positive")
+      expect(call?.prompt).toContain("look for missing input validation")
 
-    // Main session "history" was NOT mutated by the reviewer's internal turns.
-    // We simulate appending the tool_result here — only ONE entry is added.
-    mainHistory.push({ type: "tool_result", text: r.output })
-    expect(mainHistory.length).toBe(2)
-    expect(mainHistory.map((m) => m.type)).toEqual(["user", "tool_result"])
-  })
+      // Main session "history" was NOT mutated by the reviewer's internal turns.
+      // We simulate appending the tool_result here — only ONE entry is added.
+      mainHistory.push({ type: "tool_result", text: r.output })
+      expect(mainHistory.length).toBe(2)
+      expect(mainHistory.map((m) => m.type)).toEqual(["user", "tool_result"])
+    },
+  )
 
-  test.skipIf(!HAS_GIT)("paths scope the diff (only files under given path are reviewed)", async () => {
-    const reviewer = scriptedReviewer({
-      ok: true,
-      finalText: JSON.stringify({ summary: "clean", findings: [] }),
-      turns: 1,
-    })
-    const ctx: ToolContext = {
-      cwd: repoDir,
-      signal: new AbortController().signal,
-      reviewerAgent: reviewer.runner,
-    }
-    await collect(
-      gitReviewDiffTool(defaultGitRunner),
-      { base: "HEAD~1", head: "HEAD", paths: ["seed.txt"] },
-      ctx,
-    )
-    // seed.txt did not change between HEAD~1 and HEAD ⇒ empty diff ⇒ reviewer
-    // is NOT invoked.
-    expect(reviewer.calls.length).toBe(0)
-  })
+  test.skipIf(!HAS_GIT)(
+    "paths scope the diff (only files under given path are reviewed)",
+    async () => {
+      const reviewer = scriptedReviewer({
+        ok: true,
+        finalText: JSON.stringify({ summary: "clean", findings: [] }),
+        turns: 1,
+      })
+      const ctx: ToolContext = {
+        cwd: repoDir,
+        signal: new AbortController().signal,
+        reviewerAgent: reviewer.runner,
+      }
+      await collect(
+        gitReviewDiffTool(defaultGitRunner),
+        { base: "HEAD~1", head: "HEAD", paths: ["seed.txt"] },
+        ctx,
+      )
+      // seed.txt did not change between HEAD~1 and HEAD ⇒ empty diff ⇒ reviewer
+      // is NOT invoked.
+      expect(reviewer.calls.length).toBe(0)
+    },
+  )
 
   test.skipIf(!HAS_GIT)("empty diff (base === head) ⇒ ok:true + no reviewer call", async () => {
     const reviewer = scriptedReviewer({

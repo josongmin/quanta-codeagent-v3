@@ -23,9 +23,9 @@
 import { describe, expect, test } from "bun:test"
 import { z } from "zod"
 import type { AgentConfig } from "@/agent"
+import { MODE_PRESETS } from "@/agent"
 import { dispatchTool } from "@/agent/dispatch"
 import { buildNetworkDispatchGuard, type NetworkPosture } from "@/agent/dispatch-guard"
-import { MODE_PRESETS } from "@/agent"
 import type { ToolUseBlock } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import type { Tool, ToolEvent } from "@/tool"
@@ -179,7 +179,11 @@ describe("HELL-NET-07 open posture ⇒ no guard ⇒ egress executes", () => {
   test("no dispatchGuard wired → web_fetch runs (ok=true), no guard tag", async () => {
     const guard = buildNetworkDispatchGuard({ posture: "open" })
     const cfg = config(guard !== undefined ? { dispatchGuard: guard } : {})
-    const res = await dispatchTool(call("web_fetch", { url: "https://evil.example.com/x" }), cfg, perm)
+    const res = await dispatchTool(
+      call("web_fetch", { url: "https://evil.example.com/x" }),
+      cfg,
+      perm,
+    )
     expect(res.ok).toBe(true)
     expect(res.preview).not.toBe("guard-deny")
     expect(res.preview).not.toBe("guard-ask")
@@ -192,8 +196,13 @@ describe("HELL-NET-08 allowlist posture ⇒ off-list URL denied at dispatch", ()
       posture: "allowlist",
       hosts: ["api.github.com"],
     })
-    const cfg = config({ dispatchGuard: guard })
-    const res = await dispatchTool(call("web_fetch", { url: "https://evil.example.com/x" }), cfg, perm)
+    expect(guard).toBeDefined()
+    const cfg = config(guard !== undefined ? { dispatchGuard: guard } : {})
+    const res = await dispatchTool(
+      call("web_fetch", { url: "https://evil.example.com/x" }),
+      cfg,
+      perm,
+    )
     expect(res.ok).toBe(false)
     expect(res.preview).toBe("guard-deny")
   })
@@ -202,8 +211,13 @@ describe("HELL-NET-08 allowlist posture ⇒ off-list URL denied at dispatch", ()
       posture: "allowlist",
       hosts: ["api.github.com"],
     })
-    const cfg = config({ dispatchGuard: guard })
-    const res = await dispatchTool(call("web_fetch", { url: "https://api.github.com/x" }), cfg, perm)
+    expect(guard).toBeDefined()
+    const cfg = config(guard !== undefined ? { dispatchGuard: guard } : {})
+    const res = await dispatchTool(
+      call("web_fetch", { url: "https://api.github.com/x" }),
+      cfg,
+      perm,
+    )
     expect(res.ok).toBe(true)
   })
 })
@@ -215,8 +229,13 @@ describe("HELL-NET-09 perRequestApproval ⇒ off-list URL routes to guard-ask", 
       hosts: ["api.github.com"],
       perRequestApproval: true,
     })
-    const cfg = config({ dispatchGuard: guard })
-    const res = await dispatchTool(call("web_fetch", { url: "https://evil.example.com/x" }), cfg, perm)
+    expect(guard).toBeDefined()
+    const cfg = config(guard !== undefined ? { dispatchGuard: guard } : {})
+    const res = await dispatchTool(
+      call("web_fetch", { url: "https://evil.example.com/x" }),
+      cfg,
+      perm,
+    )
     expect(res.ok).toBe(false)
     expect(res.preview).toBe("guard-ask")
   })

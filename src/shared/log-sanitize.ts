@@ -41,12 +41,9 @@
  *     whitelisting at the alerting layer, not sanitize.
  */
 
-const ANSI_OSC_DCS_APC_RE = new RegExp(
-  "\\u001b\\][\\s\\S]*?(?:\\u0007|\\u001b\\\\)|\\u001b[PX^_][\\s\\S]*?\\u001b\\\\",
-  "g",
-)
-const ANSI_CSI_RE = new RegExp("\\u001b\\[[0-9;?]*[ -/]*[@-~]", "g")
-const CONTROL_RE = new RegExp("[\\u0000-\\u0008\\u000a-\\u001f\\u007f-\\u009f]", "g")
+const ANSI_OSC_DCS_APC_RE = /\u001b\][\s\S]*?(?:\u0007|\u001b\\)|\u001b[PX^_][\s\S]*?\u001b\\/g
+const ANSI_CSI_RE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g
+const CONTROL_RE = /[\u0000-\u0008\u000a-\u001f\u007f-\u009f]/g
 /** Bidi controls + zero-width + soft hyphen (U+00AD) + lone surrogates
  *  (U+D800-U+DFFF).
  *  Soft hyphen is invisible but splits grep-anchored alert tokens. Lone
@@ -54,10 +51,7 @@ const CONTROL_RE = new RegExp("[\\u0000-\\u0008\\u000a-\\u001f\\u007f-\\u009f]",
  *  NFKC throws on lone surrogates, the try/catch fallback leaves them in
  *  the raw stream, and no other regex catches them). NFKC does not
  *  decompose any of these. */
-const BIDI_ZW_RE = new RegExp(
-  "[\\u00ad\\u200b-\\u200f\\u202a-\\u202e\\u2066-\\u2069\\ufeff\\ud800-\\udfff]",
-  "g",
-)
+const BIDI_ZW_RE = /[\u00ad\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff\ud800-\udfff]/g
 
 const normalizeNfkc = (s: string): string => {
   try {

@@ -3,12 +3,12 @@ import { join } from "node:path"
 import { isGroundingFileId, resolveGroundingSpecificFileContext } from "./file-context"
 import { resolveGroundingReferentContext } from "./referent-context"
 import {
-  parseGroundingCase,
   type GroundingCase,
   type GroundingCorpus,
   type GroundingHistoryEntry,
   type GroundingStateContract,
   type GroundingSuite,
+  parseGroundingCase,
 } from "./schema"
 import { stableJson } from "./stable-json"
 
@@ -72,9 +72,13 @@ const normalizeStateContract = (stateContract: GroundingStateContract): Groundin
     ...(stateContract.latestToolResultId !== undefined
       ? { latestToolResultId: stateContract.latestToolResultId }
       : {}),
-    ...(stateContract.latestToolName !== undefined ? { latestToolName: stateContract.latestToolName } : {}),
+    ...(stateContract.latestToolName !== undefined
+      ? { latestToolName: stateContract.latestToolName }
+      : {}),
     ...(candidateFileIds !== undefined ? { candidateFileIds } : {}),
-    ...(stateContract.primaryFileId !== undefined ? { primaryFileId: stateContract.primaryFileId } : {}),
+    ...(stateContract.primaryFileId !== undefined
+      ? { primaryFileId: stateContract.primaryFileId }
+      : {}),
     ...(policyMarkers !== undefined ? { policyMarkers } : {}),
   }
 }
@@ -92,8 +96,15 @@ const hasStructuredHistoryMetadata = (entry: GroundingHistoryEntry): boolean =>
 const validateSpecificFileAuthority = (groundingCase: GroundingCase): void => {
   if (groundingCase.gold.scope !== "specific_file") return
   const resolved = resolveGroundingSpecificFileContext(groundingCase)
-  if (groundingCase.gold.shouldClarify === true || groundingCase.gold.intent === "clarify_request") {
-    if (!resolved.isAmbiguous && resolved.candidateFileIds.length < 2 && resolved.utteranceFileIds.length < 2) {
+  if (
+    groundingCase.gold.shouldClarify === true ||
+    groundingCase.gold.intent === "clarify_request"
+  ) {
+    if (
+      !resolved.isAmbiguous &&
+      resolved.candidateFileIds.length < 2 &&
+      resolved.utteranceFileIds.length < 2
+    ) {
       throw new Error(
         `grounding case ${groundingCase.id} specific_file clarify cases must expose at least two candidate files`,
       )
@@ -101,7 +112,9 @@ const validateSpecificFileAuthority = (groundingCase: GroundingCase): void => {
     return
   }
   if (groundingCase.gold.referentId === null || !isGroundingFileId(groundingCase.gold.referentId)) {
-    throw new Error(`grounding case ${groundingCase.id} specific_file cases must use a file referentId`)
+    throw new Error(
+      `grounding case ${groundingCase.id} specific_file cases must use a file referentId`,
+    )
   }
   if (resolved.resolvedReferentId !== groundingCase.gold.referentId) {
     throw new Error(
@@ -111,7 +124,11 @@ const validateSpecificFileAuthority = (groundingCase: GroundingCase): void => {
 }
 
 const validateSpecificReferentAuthority = (groundingCase: GroundingCase): void => {
-  if (groundingCase.gold.scope !== "specific_subthread" && groundingCase.gold.scope !== "latest_tool_result") return
+  if (
+    groundingCase.gold.scope !== "specific_subthread" &&
+    groundingCase.gold.scope !== "latest_tool_result"
+  )
+    return
   const resolved = resolveGroundingReferentContext(groundingCase)
   if (groundingCase.gold.shouldClarify === true) {
     if (!resolved.isAmbiguous && resolved.candidateReferentIds.length < 2) {
@@ -122,7 +139,9 @@ const validateSpecificReferentAuthority = (groundingCase: GroundingCase): void =
     return
   }
   if (groundingCase.gold.referentId === null) {
-    throw new Error(`grounding case ${groundingCase.id} ${groundingCase.gold.scope} cases must use a referentId`)
+    throw new Error(
+      `grounding case ${groundingCase.id} ${groundingCase.gold.scope} cases must use a referentId`,
+    )
   }
   if (resolved.resolvedReferentId !== groundingCase.gold.referentId) {
     throw new Error(
@@ -205,18 +224,24 @@ const validateAmbiguityAuthority = (groundingCase: GroundingCase): void => {
       return
     case "thread":
       if (candidateThreads.length < 2) {
-        throw new Error(`grounding case ${groundingCase.id} thread ambiguity requires at least two candidateThreadIds`)
+        throw new Error(
+          `grounding case ${groundingCase.id} thread ambiguity requires at least two candidateThreadIds`,
+        )
       }
       return
     case "file":
       if (candidateFiles.length + candidateReferents.filter(isGroundingFileId).length < 2) {
-        throw new Error(`grounding case ${groundingCase.id} file ambiguity requires at least two candidate files`)
+        throw new Error(
+          `grounding case ${groundingCase.id} file ambiguity requires at least two candidate files`,
+        )
       }
       return
     case "subthread":
     case "tool_result":
       if (candidateReferents.length < 2) {
-        throw new Error(`grounding case ${groundingCase.id} ${ambiguityClass} ambiguity requires at least two candidateReferentIds`)
+        throw new Error(
+          `grounding case ${groundingCase.id} ${ambiguityClass} ambiguity requires at least two candidateReferentIds`,
+        )
       }
       return
   }
@@ -260,8 +285,13 @@ const validateSummaryEquivalencePairs = (cases: readonly GroundingCase[]): void 
     if (raw === undefined || summary === undefined) {
       throw new Error(`grounding pair ${pairId} must contain exactly one raw and one summary case`)
     }
-    if (!raw.history.some(hasStructuredHistoryMetadata) || !summary.history.some(hasStructuredHistoryMetadata)) {
-      throw new Error(`grounding pair ${pairId} must expose structured history metadata on both sides`)
+    if (
+      !raw.history.some(hasStructuredHistoryMetadata) ||
+      !summary.history.some(hasStructuredHistoryMetadata)
+    ) {
+      throw new Error(
+        `grounding pair ${pairId} must expose structured history metadata on both sides`,
+      )
     }
     if (stableJson(pairContract(raw)) !== stableJson(pairContract(summary))) {
       throw new Error(`grounding pair ${pairId} raw/summary contract mismatch`)
@@ -286,10 +316,7 @@ const validateCriticalBucketGovernance = (
   }
 }
 
-const validateGroundingCases = (
-  cases: readonly GroundingCase[],
-  corpus: GroundingCorpus,
-): void => {
+const validateGroundingCases = (cases: readonly GroundingCase[], corpus: GroundingCorpus): void => {
   for (const groundingCase of cases) {
     validateStateContract(groundingCase)
     validateSpecificFileAuthority(groundingCase)
@@ -307,10 +334,7 @@ const resolveCorpus = (opts: LoadGroundingCasesOpts): GroundingCorpus => {
   return opts.suite ?? "canary"
 }
 
-const dirsForCorpus = (
-  root: string,
-  corpus: GroundingCorpus,
-): readonly string[] => {
+const dirsForCorpus = (root: string, corpus: GroundingCorpus): readonly string[] => {
   switch (corpus) {
     case "canary":
       return [join(root, "canary")]

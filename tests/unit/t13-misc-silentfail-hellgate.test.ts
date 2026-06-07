@@ -16,39 +16,31 @@
  *  (g) mcp-bridge: LoadMcpToolsOpts is ONE interface (no declaration merge).
  *  (h) dispatch-seam-guard: doc claim "wiring deferred" is false — guard is wired.
  */
-import { describe, expect, test } from "bun:test"
-import { afterEach, beforeEach } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { createJsonlCustom3pRegistry } from "@/connectors/custom-3p/jsonl-store"
+import type { HealthProbe } from "@/connectors/custom-3p/port"
 import {
-  __resetCatalogCacheForTest,
-  ChatGPTOAuthAdapter,
-} from "@/llm/adapters/chatgpt-oauth"
-import {
-  __resetLoggerRateLimit,
-  __resetTerminalIo,
-  setTerminalIo,
-} from "@/shared"
-import {
-  SnapshotErrorThrown,
   createInMemoryFileLock,
   type GitProcessPort,
   type GitProcessResult,
   type SnapshotClock,
+  SnapshotErrorThrown,
   snapshotDirtyToCloudBranch,
 } from "@/git/cloud-branch-snapshot"
-import { defaultResponsesContinuationStore } from "@/llm"
-import type { StreamEvent, StreamInput } from "@/llm/types"
 import type { LLMPort, StreamEvent as ToolStreamEvent, StreamInput as ToolStreamInput } from "@/llm"
-import { ghPrOpenTool } from "@/tool/gh"
+import { defaultResponsesContinuationStore } from "@/llm"
+import { __resetCatalogCacheForTest, ChatGPTOAuthAdapter } from "@/llm/adapters/chatgpt-oauth"
+import type { StreamEvent, StreamInput } from "@/llm/types"
+import type { JsonRpcMessage } from "@/mcp/jsonrpc"
+import { HttpSseMcpTransport } from "@/mcp/transports/http-sse"
+import { __resetLoggerRateLimit, __resetTerminalIo, setTerminalIo } from "@/shared"
 import type { GhRunResult } from "@/tool/gh"
+import { ghPrOpenTool } from "@/tool/gh"
 import type { GitRunner, GitRunResult } from "@/tool/git/types"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
-import { createJsonlCustom3pRegistry } from "@/connectors/custom-3p/jsonl-store"
-import type { HealthProbe } from "@/connectors/custom-3p/port"
-import { HttpSseMcpTransport } from "@/mcp/transports/http-sse"
-import type { JsonRpcMessage } from "@/mcp/jsonrpc"
 
 // ── (a) gh_pr_open — distinguish git failure from legit negative ──────────────
 
@@ -116,7 +108,10 @@ describe("(a) gh_pr_open distinguishes git failure from legit negative", () => {
       },
     }
     const res = await drain(
-      ghPrOpenTool(gh({ code: 0, stdout: "url" }) as never, git, new FakeAuthor()).execute({}, ctx()),
+      ghPrOpenTool(gh({ code: 0, stdout: "url" }) as never, git, new FakeAuthor()).execute(
+        {},
+        ctx(),
+      ),
     )
     expect(res.ok).toBe(false)
     expect(res.output).toContain("could not run git")
@@ -159,11 +154,20 @@ describe("(b) cloud-branch-snapshot fails CLOSED on size-probe failure", () => {
     match: (a: readonly string[]) => boolean
     result: GitProcessResult
   }[] => [
-    { match: (a) => a[0] === "rev-parse" && a[1] === "--git-dir", result: { stdout: ".git", stderr: "", exitCode: 0 } },
-    { match: (a) => a[0] === "symbolic-ref", result: { stdout: "refs/heads/main", stderr: "", exitCode: 0 } },
+    {
+      match: (a) => a[0] === "rev-parse" && a[1] === "--git-dir",
+      result: { stdout: ".git", stderr: "", exitCode: 0 },
+    },
+    {
+      match: (a) => a[0] === "symbolic-ref",
+      result: { stdout: "refs/heads/main", stderr: "", exitCode: 0 },
+    },
     { match: (a) => a[0] === "status", result: { stdout: " M file.ts", stderr: "", exitCode: 0 } },
     // numstat probe FAILS:
-    { match: (a) => a[0] === "diff" && a.includes("--numstat"), result: { stdout: "", stderr: "diff exploded", exitCode: 1 } },
+    {
+      match: (a) => a[0] === "diff" && a.includes("--numstat"),
+      result: { stdout: "", stderr: "diff exploded", exitCode: 1 },
+    },
   ]
 
   test("probe exit!=0 ⇒ diff-too-large with reason 'estimate-unavailable' (NOT assumed small)", async () => {
@@ -197,15 +201,43 @@ describe("(b) cloud-branch-snapshot fails CLOSED on size-probe failure", () => {
     }
     const all = [
       ...responses,
-      { match: (a: readonly string[]) => a[0] === "branch" && a[1] !== "-D", result: { stdout: "", stderr: "", exitCode: 0 } },
-      { match: (a: readonly string[]) => a[0] === "stash" && a[1] === "push", result: { stdout: "", stderr: "", exitCode: 0 } },
-      { match: (a: readonly string[]) => a[0] === "checkout" && a[1] !== "--force" && !a.includes("main"), result: { stdout: "", stderr: "", exitCode: 0 } },
-      { match: (a: readonly string[]) => a[0] === "stash" && a[1] === "pop", result: { stdout: "", stderr: "", exitCode: 0 } },
-      { match: (a: readonly string[]) => a[0] === "add", result: { stdout: "", stderr: "", exitCode: 0 } },
-      { match: (a: readonly string[]) => a[0] === "commit", result: { stdout: "", stderr: "", exitCode: 0 } },
-      { match: (a: readonly string[]) => a[0] === "push", result: { stdout: "", stderr: "", exitCode: 0 } },
-      { match: (a: readonly string[]) => a[0] === "rev-parse" && a[1] === "HEAD", result: { stdout: "sha1", stderr: "", exitCode: 0 } },
-      { match: (a: readonly string[]) => a[0] === "checkout" && a.includes("main"), result: { stdout: "", stderr: "", exitCode: 0 } },
+      {
+        match: (a: readonly string[]) => a[0] === "branch" && a[1] !== "-D",
+        result: { stdout: "", stderr: "", exitCode: 0 },
+      },
+      {
+        match: (a: readonly string[]) => a[0] === "stash" && a[1] === "push",
+        result: { stdout: "", stderr: "", exitCode: 0 },
+      },
+      {
+        match: (a: readonly string[]) =>
+          a[0] === "checkout" && a[1] !== "--force" && !a.includes("main"),
+        result: { stdout: "", stderr: "", exitCode: 0 },
+      },
+      {
+        match: (a: readonly string[]) => a[0] === "stash" && a[1] === "pop",
+        result: { stdout: "", stderr: "", exitCode: 0 },
+      },
+      {
+        match: (a: readonly string[]) => a[0] === "add",
+        result: { stdout: "", stderr: "", exitCode: 0 },
+      },
+      {
+        match: (a: readonly string[]) => a[0] === "commit",
+        result: { stdout: "", stderr: "", exitCode: 0 },
+      },
+      {
+        match: (a: readonly string[]) => a[0] === "push",
+        result: { stdout: "", stderr: "", exitCode: 0 },
+      },
+      {
+        match: (a: readonly string[]) => a[0] === "rev-parse" && a[1] === "HEAD",
+        result: { stdout: "sha1", stderr: "", exitCode: 0 },
+      },
+      {
+        match: (a: readonly string[]) => a[0] === "checkout" && a.includes("main"),
+        result: { stdout: "", stderr: "", exitCode: 0 },
+      },
     ]
     const res = await snapshotDirtyToCloudBranch({
       gitPort: sgit(all),
@@ -234,11 +266,23 @@ describe("(c) custom-3p jsonl seed drops scheme-mismatched rows", () => {
     const path = join(dir, "custom-3p.jsonl")
     // mcp endpoints must be ws://|wss://|stdio: — http:// is a scheme mismatch.
     const poisoned = {
-      spec: { id: "bad", displayName: "Bad", kind: "mcp", endpoint: "http://evil.example", auth: "none" },
+      spec: {
+        id: "bad",
+        displayName: "Bad",
+        kind: "mcp",
+        endpoint: "http://evil.example",
+        auth: "none",
+      },
       state: "configured",
     }
     const good = {
-      spec: { id: "good", displayName: "Good", kind: "mcp", endpoint: "wss://ok.example", auth: "none" },
+      spec: {
+        id: "good",
+        displayName: "Good",
+        kind: "mcp",
+        endpoint: "wss://ok.example",
+        auth: "none",
+      },
       state: "configured",
     }
     await writeFile(path, `${JSON.stringify(poisoned)}\n${JSON.stringify(good)}\n`, { mode: 0o600 })
@@ -283,9 +327,9 @@ describe("(d) http-sse correlates a connection-level POST failure to the request
     expect(enqueueErr).toBeNull()
     // The reject is surfaced on the next microtask(s), NOT after a 30s timeout.
     await new Promise((r) => setTimeout(r, 5))
-    const errResp = received.find(
-      (m) => "id" in m && (m as { id?: unknown }).id === 7,
-    ) as { id: number; error?: { message: string } } | undefined
+    const errResp = received.find((m) => "id" in m && (m as { id?: unknown }).id === 7) as
+      | { id: number; error?: { message: string } }
+      | undefined
     expect(errResp).toBeDefined()
     expect(errResp?.error?.message).toContain("ECONNREFUSED")
     await t.close()
@@ -353,9 +397,9 @@ describe("(d) http-sse correlates a connection-level POST failure to the request
     expect(enqueueErr).toBeNull()
     // Surfaced on the next microtask(s), NOT after a 30s timeout.
     await new Promise((r) => setTimeout(r, 5))
-    const errResp = received.find(
-      (m) => "id" in m && (m as { id?: unknown }).id === 7,
-    ) as { id: number; error?: { code: number; message: string } } | undefined
+    const errResp = received.find((m) => "id" in m && (m as { id?: unknown }).id === 7) as
+      | { id: number; error?: { code: number; message: string } }
+      | undefined
     expect(errResp).toBeDefined()
     // Identical wire shape to the connection-level sibling: code -32000, message
     // carries the HTTP status so the caller can tell the two failure modes apart.
@@ -542,10 +586,7 @@ describe("(g) LoadMcpToolsOpts is a single interface", () => {
 describe("(h) dispatch-seam-guard is wired (doc + behaviour)", () => {
   test("guard denies a plan-mode mutating tool and allows read-only", async () => {
     const { checkDispatchAllowed } = await import("@/agent/dispatch-seam-guard")
-    const planMutating = checkDispatchAllowed(
-      { collaborationMode: "plan" },
-      { name: "git_commit" },
-    )
+    const planMutating = checkDispatchAllowed({ collaborationMode: "plan" }, { name: "git_commit" })
     expect(planMutating.ok).toBe(false)
     const def = checkDispatchAllowed({ collaborationMode: "default" }, { name: "git_commit" })
     expect(def.ok).toBe(true)

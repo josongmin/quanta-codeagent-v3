@@ -16,12 +16,8 @@
  * and the message subscription stays live.
  */
 import { describe, expect, test } from "bun:test"
+import type { McpTransport, McpTransportExitHandler, McpTransportMessageHandler } from "@/mcp"
 import { McpClient, McpError, type McpServerConfig } from "@/mcp"
-import type {
-  McpTransport,
-  McpTransportExitHandler,
-  McpTransportMessageHandler,
-} from "@/mcp"
 import type { JsonRpcMessage } from "@/mcp/jsonrpc"
 
 type InitOutcome =

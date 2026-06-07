@@ -197,11 +197,31 @@ describe("GAP7-5: resume an interrupted job", () => {
   // Simulate a crash: a `running` job whose items are stranded mid-flight.
   const crashedJob = async (store: InMemoryJobStore) => {
     const job: BatchJob = {
-      id: "crashed", name: "j", status: "running", instruction: "do",
-      inputHeadersJson: "[]", poolSize: 2, maxAttempts: 2, createdAt: 1, updatedAt: 1, startedAt: 1,
+      id: "crashed",
+      name: "j",
+      status: "running",
+      instruction: "do",
+      inputHeadersJson: "[]",
+      poolSize: 2,
+      maxAttempts: 2,
+      createdAt: 1,
+      updatedAt: 1,
+      startedAt: 1,
     }
-    const mk = (itemId: string, rowIndex: number, status: BatchJobItem["status"], attempt: number): BatchJobItem => ({
-      jobId: "crashed", itemId, rowIndex, rowJson: "{}", status, attemptCount: attempt, createdAt: 1, updatedAt: 1,
+    const mk = (
+      itemId: string,
+      rowIndex: number,
+      status: BatchJobItem["status"],
+      attempt: number,
+    ): BatchJobItem => ({
+      jobId: "crashed",
+      itemId,
+      rowIndex,
+      rowJson: "{}",
+      status,
+      attemptCount: attempt,
+      createdAt: 1,
+      updatedAt: 1,
     })
     await store.createJob(job, [
       mk("i0", 0, "done", 1),
@@ -240,8 +260,15 @@ describe("GAP7-5: resume an interrupted job", () => {
   test("a terminal (completed) job ⇒ resume is a no-op snapshot", async () => {
     const { store, runner } = makeRunner(okDispatch())
     const job: BatchJob = {
-      id: "done-job", name: "j", status: "completed", instruction: "do",
-      inputHeadersJson: "[]", poolSize: 2, maxAttempts: 1, createdAt: 1, updatedAt: 1,
+      id: "done-job",
+      name: "j",
+      status: "completed",
+      instruction: "do",
+      inputHeadersJson: "[]",
+      poolSize: 2,
+      maxAttempts: 1,
+      createdAt: 1,
+      updatedAt: 1,
     }
     await store.createJob(job, [])
     const snap = await runner.resume("done-job")
@@ -253,11 +280,25 @@ describe("GAP7 audit R2: concurrency-safe item claim (no double-dispatch)", () =
   test("claimItem is atomic: two concurrent claims on one pending item ⇒ exactly one wins", async () => {
     const store = new InMemoryJobStore()
     const job: BatchJob = {
-      id: "j", name: "j", status: "running", instruction: "i", inputHeadersJson: "[]",
-      poolSize: 1, maxAttempts: 1, createdAt: 1, updatedAt: 1,
+      id: "j",
+      name: "j",
+      status: "running",
+      instruction: "i",
+      inputHeadersJson: "[]",
+      poolSize: 1,
+      maxAttempts: 1,
+      createdAt: 1,
+      updatedAt: 1,
     }
     const it: BatchJobItem = {
-      jobId: "j", itemId: "i1", rowIndex: 0, rowJson: "{}", status: "pending", attemptCount: 0, createdAt: 1, updatedAt: 1,
+      jobId: "j",
+      itemId: "i1",
+      rowIndex: 0,
+      rowJson: "{}",
+      status: "pending",
+      attemptCount: 0,
+      createdAt: 1,
+      updatedAt: 1,
     }
     await store.createJob(job, [it])
     const [a, b] = await Promise.all([store.claimItem("j", "i1", 2), store.claimItem("j", "i1", 3)])
@@ -275,9 +316,16 @@ describe("GAP7 audit R2: concurrency-safe item claim (no double-dispatch)", () =
       return Promise.resolve(ok<RowDispatchResult>({ value: { ok: true } }))
     }
     const mk = () =>
-      new BatchJobRunner({ store, dispatch: countingDispatch, clock: makeClock(), newId: makeIdGen() })
+      new BatchJobRunner({
+        store,
+        dispatch: countingDispatch,
+        clock: makeClock(),
+        newId: makeIdGen(),
+      })
     const submitter = mk()
-    const submitted = await submitter.submit(spec([{ a: "0" }, { a: "1" }, { a: "2" }, { a: "3" }], { poolSize: 4 }))
+    const submitted = await submitter.submit(
+      spec([{ a: "0" }, { a: "1" }, { a: "2" }, { a: "3" }], { poolSize: 4 }),
+    )
     if (!submitted.ok) throw new Error("unreachable")
     // Two runners drive the SAME job over the SAME store concurrently.
     await Promise.all([mk().runToEnd(submitted.value), mk().runToEnd(submitted.value)])

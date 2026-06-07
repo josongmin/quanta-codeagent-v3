@@ -51,7 +51,12 @@ const ruleOf = (s: string): RRule => {
 const utc = (y: number, mo: number, d: number, h = 0, mi = 0): number =>
   Date.UTC(y, mo - 1, d, h, mi, 0)
 
-const seed = async (eng: AutomationEnginePort, id: string, nextRunAt: number, ruleStr = "FREQ=DAILY") => {
+const seed = async (
+  eng: AutomationEnginePort,
+  id: string,
+  nextRunAt: number,
+  ruleStr = "FREQ=DAILY",
+) => {
   const r = await eng.schedule({
     id,
     title: "T",

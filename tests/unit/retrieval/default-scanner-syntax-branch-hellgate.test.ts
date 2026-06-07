@@ -46,9 +46,8 @@ afterEach(async () => {
 const linesFile = (n: number): string =>
   `${Array.from({ length: n }, (_, i) => `L${i + 1}`).join("\n")}\n`
 
-const collectCorpus = (
-  ix: ReturnType<typeof createDefaultIndexer>,
-): readonly FileChunk[] => Array.from(ix.getCorpus())
+const collectCorpus = (ix: ReturnType<typeof createDefaultIndexer>): readonly FileChunk[] =>
+  Array.from(ix.getCorpus())
 
 describe("default-scanner chunkOneFile — knob ON + parser (ok:true) ⇒ syntactic chunks", () => {
   test("AST-aligned chunks are emitted (one chunk per oversized decl, not line-windows)", async () => {

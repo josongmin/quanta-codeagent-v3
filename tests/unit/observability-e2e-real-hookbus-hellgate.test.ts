@@ -15,8 +15,8 @@
 
 import { describe, expect, test } from "bun:test"
 import { HookBus } from "@/agent/hooks"
-import { resolveObservabilityWire } from "@/apps/agent"
 import type { RecoveryProvenance } from "@/agent/recovery-reason"
+import { resolveObservabilityWire } from "@/apps/agent"
 
 const ENV_KEY = "QUANTA_OBSERVABILITY"
 const onEnv = { [ENV_KEY]: "on" } as NodeJS.ProcessEnv

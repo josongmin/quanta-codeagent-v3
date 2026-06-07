@@ -7,15 +7,13 @@
  * `context-1m-2025-08-07` beta header, and that the OFF path is byte-identical.
  */
 import { describe, expect, test } from "bun:test"
+import { createLLM } from "@/llm"
 import type { AnthropicAdapter } from "@/llm/adapters/anthropic"
 import { CONTEXT_1M_BETA } from "@/llm/context-1m"
-import { createLLM } from "@/llm"
 
 const KEY = { ANTHROPIC_API_KEY: "sk-ant-test" }
 const betas = (model: string, env: Record<string, string | undefined> = {}): readonly string[] =>
-  (
-    createLLM("anthropic", { model }, { ...KEY, ...env }) as unknown as AnthropicAdapter
-  ).betaHeaders
+  (createLLM("anthropic", { model }, { ...KEY, ...env }) as unknown as AnthropicAdapter).betaHeaders
 
 describe("1M-context factory e2e — activation", () => {
   test("[1m] suffix on eligible model ⇒ 1M beta header on the adapter", () => {

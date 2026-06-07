@@ -118,7 +118,9 @@ describe("jun-6 seam default-OFF — runtime-config gates", () => {
         __resetRuntimeConfig()
         const c = runtimeConfig()
         if (c[field] !== false) {
-          throw new Error(`${field} armed on falsy/garbage value ${JSON.stringify(bad)} (env ${env})`)
+          throw new Error(
+            `${field} armed on falsy/garbage value ${JSON.stringify(bad)} (env ${env})`,
+          )
         }
         delete process.env[env]
       }

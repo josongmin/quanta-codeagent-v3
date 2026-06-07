@@ -25,8 +25,8 @@
  */
 
 import type { AgentConfig } from "@/agent"
-import {type Knob, type Surface } from "../types"
 import { registerKnob } from "../registry"
+import type { Knob, Surface } from "../types"
 
 const SURFACES: readonly Surface[] = ["bench", "agent-batch", "agent-interactive"]
 

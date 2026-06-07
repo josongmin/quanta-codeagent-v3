@@ -5,8 +5,8 @@
 
 import { defaultConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import {
-  registerCheckpointParitySuite,
   type CheckpointParityHarness,
+  registerCheckpointParitySuite,
 } from "./_parity/checkpoint-parity"
 
 let tickValue = 1_000

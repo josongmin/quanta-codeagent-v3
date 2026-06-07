@@ -1,13 +1,17 @@
 import { describe, expect, test } from "bun:test"
+import type {
+  BackgroundSubagentScheduler,
+  SubagentResult,
+  SubagentSpec,
+} from "@/agent/subagent-background"
+import type { StreamEvent } from "@/llm"
+import type { LlmProvider } from "@/llm/providers"
 import { defaultMetricsRegistry } from "@/observability/metrics/index"
 import {
   instrumentLlmProvider,
   instrumentSubagentScheduler,
   withCallCounter,
 } from "@/observability/metrics/instrument"
-import type { LlmProvider } from "@/llm/providers"
-import type { BackgroundSubagentScheduler, SubagentResult, SubagentSpec } from "@/agent/subagent-background"
-import type { StreamEvent } from "@/llm"
 
 /**
  * Instrument wrap hellgate (ADR-0159).
@@ -30,7 +34,9 @@ const fakeLlmProvider = (overrides: Partial<LlmProvider> = {}): LlmProvider =>
     ...overrides,
   }) as unknown as LlmProvider
 
-const fakeScheduler = (overrides: Partial<BackgroundSubagentScheduler> = {}): BackgroundSubagentScheduler =>
+const fakeScheduler = (
+  overrides: Partial<BackgroundSubagentScheduler> = {},
+): BackgroundSubagentScheduler =>
   ({
     fork: () => "bg-fake-id",
     poll: () => null,
@@ -188,7 +194,10 @@ describe("instrumentSubagentScheduler", () => {
 
   test("HELL-SCH-5: poll/list/prune pass through verbatim", () => {
     const m = defaultMetricsRegistry()
-    const s = instrumentSubagentScheduler(fakeScheduler({ list: () => [] as never, prune: () => 7 }), m)
+    const s = instrumentSubagentScheduler(
+      fakeScheduler({ list: () => [] as never, prune: () => 7 }),
+      m,
+    )
     expect(s.poll("x")).toBe(null)
     expect(s.list()).toEqual([])
     expect(s.prune(1000)).toBe(7)

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { createOnConfirmReviewerPort } from "@/agent"
-import { ReviewerUnavailableError, type ReviewContext, type ToolActionKeyed } from "@/permission"
 import { createClassifierBackedAutoReview } from "@/agent/reviewer-port"
+import { type ReviewContext, ReviewerUnavailableError, type ToolActionKeyed } from "@/permission"
 
 const action: ToolActionKeyed = {
   tool: "dangerous",
@@ -37,9 +37,9 @@ describe("createOnConfirmReviewerPort", () => {
 
   test("fails closed for unsupported higher-tier reviewers", async () => {
     const port = createOnConfirmReviewerPort({ onConfirm: async () => true })
-    await expect(port.autoReview(action, { ...ctx, configReviewer: "auto_review" })).rejects.toThrow(
-      ReviewerUnavailableError,
-    )
+    await expect(
+      port.autoReview(action, { ...ctx, configReviewer: "auto_review" }),
+    ).rejects.toThrow(ReviewerUnavailableError)
     await expect(
       port.guardianReview(action, { ...ctx, configReviewer: "guardian_subagent" }),
     ).rejects.toThrow(ReviewerUnavailableError)

@@ -13,7 +13,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import type { ParsedFile } from "@/retrieval"
+import type { DeclNode, ParsedFile } from "@/retrieval"
 import { renderOutline } from "@/tool/read/outline"
 
 describe("read-outline hellgate", () => {
@@ -94,7 +94,7 @@ describe("read-outline hellgate", () => {
 
   test("budget cap — stops at a decl boundary + appends elided marker, <= budget-ish", () => {
     const lines: string[] = []
-    const decls: ParsedFile["decls"] = []
+    const decls: DeclNode[] = []
     for (let i = 0; i < 20; i++) {
       const start = i * 3 + 1
       lines.push(`function f${i}() {`, `  return ${i}`, "}")

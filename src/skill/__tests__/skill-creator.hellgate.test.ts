@@ -231,7 +231,11 @@ describe("createSkillCreatorTool — throwing port yields a typed result (no ite
     for await (const ev of tool.execute(input as never, ctx as never)) {
       if (ev.type === "result") {
         const f = (ev.result as { failure?: { mode?: string } }).failure
-        results.push({ ok: ev.result.ok, output: ev.result.output, mode: f?.mode })
+        results.push({
+          ok: ev.result.ok,
+          output: ev.result.output,
+          ...(f?.mode !== undefined ? { mode: f.mode } : {}),
+        })
       }
     }
     // exactly ONE terminal result.

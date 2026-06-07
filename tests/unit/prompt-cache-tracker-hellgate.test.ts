@@ -144,9 +144,15 @@ describe("ADR-0182 — prompt-cache tracker math (A)", () => {
 
   test("[5] multi-session → per-session isolation", () => {
     const o = defaultPromptCacheObserver()
-    o.record(evt({ sessionId: "A", model: "claude-sonnet-4-6", inputTokens: 100, cacheReadTokens: 200 }))
-    o.record(evt({ sessionId: "A", model: "claude-opus-4-7", inputTokens: 25, cacheReadTokens: 50 }))
-    o.record(evt({ sessionId: "B", model: "claude-haiku-4-5", inputTokens: 50, cacheReadTokens: 999 }))
+    o.record(
+      evt({ sessionId: "A", model: "claude-sonnet-4-6", inputTokens: 100, cacheReadTokens: 200 }),
+    )
+    o.record(
+      evt({ sessionId: "A", model: "claude-opus-4-7", inputTokens: 25, cacheReadTokens: 50 }),
+    )
+    o.record(
+      evt({ sessionId: "B", model: "claude-haiku-4-5", inputTokens: 50, cacheReadTokens: 999 }),
+    )
     const s = o.snapshot()
     expect(s.perSession.size).toBe(2)
     expect(s.perSession.get("A")?.totalInputTokens).toBe(125)
@@ -249,7 +255,8 @@ describe("ADR-0182 — prompt-cache tracker aggregate-only + reset (C)", () => {
     for (let i = 0; i < 15; i += 1) {
       const event = evt({
         sessionId: i % 2 === 0 ? "even" : "odd",
-        model: i % 3 === 0 ? "claude-sonnet-4-6" : i % 3 === 1 ? "claude-opus-4-7" : "claude-haiku-4-5",
+        model:
+          i % 3 === 0 ? "claude-sonnet-4-6" : i % 3 === 1 ? "claude-opus-4-7" : "claude-haiku-4-5",
         inputTokens: i + 1,
         cacheReadTokens: i,
       })

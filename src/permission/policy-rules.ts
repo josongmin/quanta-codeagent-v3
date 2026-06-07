@@ -329,4 +329,4 @@ const HARD_DENY: readonly RegExp[] = HARD_DENY_RULES.map((r) => r.pattern)
 const normalizeShellForDeny = (command: string): string =>
   command.replace(/''|""/g, "").replace(/\\([A-Za-z0-9])/g, "$1")
 
-export { HARD_DENY, HARD_DENY_RULES, normalizeShellForDeny, type HardDenyRule }
+export { HARD_DENY, HARD_DENY_RULES, type HardDenyRule, normalizeShellForDeny }

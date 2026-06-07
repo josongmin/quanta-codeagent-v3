@@ -32,7 +32,9 @@ export const resolveGroundingCorpus = (
     case "adversarial_nightly":
       return rawCorpus
     default:
-      throw new Error("grounding corpus must be one of canary, nightly, replay_critical, replay_nightly, adversarial_canary, adversarial_nightly")
+      throw new Error(
+        "grounding corpus must be one of canary, nightly, replay_critical, replay_nightly, adversarial_canary, adversarial_nightly",
+      )
   }
 }
 

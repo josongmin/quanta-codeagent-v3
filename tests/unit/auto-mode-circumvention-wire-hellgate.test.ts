@@ -28,10 +28,10 @@ import { describe, expect, test } from "bun:test"
 import {
   AutoModeClassifier,
   CIRCUMVENTION_TAXONOMY_LINE,
-  type ClassifyDecision,
-  type ClassifyRequest,
   CircumventionTracker,
   CLASSIFIER_SYSTEM_PROMPT,
+  type ClassifyDecision,
+  type ClassifyRequest,
   type EffectSignature,
   evaluateAuto,
   type PermissionContext,
@@ -95,12 +95,17 @@ describe("circumvention — ADVISORY posture (default)", () => {
 
     const { port, prompts } = recordingPort("allow")
     const clf = new AutoModeClassifier(port)
-    const dec = await evaluateAuto(action("bash", { command: "echo > /repo/X" }), autoCtx(port), clf, {
-      tracker,
-      effect: writeSig("/repo/X"),
-      turn: 2,
-      posture: "advisory",
-    })
+    const dec = await evaluateAuto(
+      action("bash", { command: "echo > /repo/X" }),
+      autoCtx(port),
+      clf,
+      {
+        tracker,
+        effect: writeSig("/repo/X"),
+        turn: 2,
+        posture: "advisory",
+      },
+    )
     // Advisory NEVER auto-blocks — the LLM (here mock-allow) still decides.
     expect(dec.kind).toBe("allow")
     expect(prompts[0]).toContain(CIRCUMVENTION_TAXONOMY_LINE)
@@ -126,12 +131,17 @@ describe("circumvention — ESCALATE posture (strict)", () => {
     tracker.noteDenied(writeSig("/repo/X"), "Write", 1)
     const { port, prompts } = recordingPort("allow") // would allow if consulted
     const clf = new AutoModeClassifier(port)
-    const dec = await evaluateAuto(action("bash", { command: "echo > /repo/X" }), autoCtx(port), clf, {
-      tracker,
-      effect: writeSig("/repo/X"),
-      turn: 2,
-      posture: "escalate",
-    })
+    const dec = await evaluateAuto(
+      action("bash", { command: "echo > /repo/X" }),
+      autoCtx(port),
+      clf,
+      {
+        tracker,
+        effect: writeSig("/repo/X"),
+        turn: 2,
+        posture: "escalate",
+      },
+    )
     expect(dec.kind).toBe("ask")
     // The forced ask short-circuits BEFORE the classifier — no prompt recorded.
     expect(prompts.length).toBe(0)
@@ -158,11 +168,16 @@ describe("soft-deny records / allow clears the tracker", () => {
     tracker.noteDenied(writeSig("/repo/X"), "Write", 1)
     const { port } = recordingPort("allow")
     const clf = new AutoModeClassifier(port)
-    const dec = await evaluateAuto(action("bash", { command: "echo > /repo/X" }), autoCtx(port), clf, {
-      tracker,
-      effect: writeSig("/repo/X"),
-      turn: 2,
-    })
+    const dec = await evaluateAuto(
+      action("bash", { command: "echo > /repo/X" }),
+      autoCtx(port),
+      clf,
+      {
+        tracker,
+        effect: writeSig("/repo/X"),
+        turn: 2,
+      },
+    )
     expect(dec.kind).toBe("allow")
     expect(tracker.size()).toBe(0)
   })
@@ -240,12 +255,17 @@ describe("circumvention — MULTI-PATH decoy (round-4) at the policy layer", () 
     tracker.noteDenied(writeSig("/repo/X"), "Write", 1)
     const { port } = recordingPort("allow")
     const clf = new AutoModeClassifier(port)
-    const dec = await evaluateAuto(action("bash", { command: "echo > /repo/X" }), autoCtx(port), clf, {
-      tracker,
-      effect: writeSig("/repo/X"),
-      turn: 2,
-      posture: "escalate",
-    })
+    const dec = await evaluateAuto(
+      action("bash", { command: "echo > /repo/X" }),
+      autoCtx(port),
+      clf,
+      {
+        tracker,
+        effect: writeSig("/repo/X"),
+        turn: 2,
+        posture: "escalate",
+      },
+    )
     expect(dec.kind).toBe("ask")
   })
 })

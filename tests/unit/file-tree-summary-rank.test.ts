@@ -209,5 +209,4 @@ describe("unified rollup display", () => {
     expect(typeof prh).toBe("function")
     expect(typeof eb).toBe("function")
   })
-
 })

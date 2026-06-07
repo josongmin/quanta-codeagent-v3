@@ -33,6 +33,8 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { readCliFeatureConfig } from "../../../src/apps/cli/repl/cli-feature-config"
+import { buildTimelinePanelAndStream } from "../../../src/apps/cli/repl/factories"
 import {
   buildReplSlashCtx,
   dispatchReplSlash,
@@ -40,8 +42,6 @@ import {
   type ReplSlashCtx,
 } from "../../../src/apps/cli/repl/slash-surface"
 import { BUILTINS, runSlashCommand, type SlashContext } from "../../../src/apps/cli/slash-commands"
-import { readCliFeatureConfig } from "../../../src/apps/cli/repl/cli-feature-config"
-import { buildTimelinePanelAndStream } from "../../../src/apps/cli/repl/factories"
 import type { SessionEnvelopeRecord } from "../../../src/session"
 import type { AgentEvent, StreamPort } from "../../../src/stream"
 
@@ -274,7 +274,11 @@ describe("Track T — `buildTimelinePanelAndStream` boot toggle (real factory)",
   })
 
   test("env-parse: non-TTY forces enabled=false regardless of height", () => {
-    const cfg = readCliFeatureConfig({ QUANTA_TIMELINE: "5" } as NodeJS.ProcessEnv, undefined, false)
+    const cfg = readCliFeatureConfig(
+      { QUANTA_TIMELINE: "5" } as NodeJS.ProcessEnv,
+      undefined,
+      false,
+    )
     expect(cfg.timelinePanel.enabled).toBe(false)
     expect(cfg.timelinePanel.height).toBe(5)
   })

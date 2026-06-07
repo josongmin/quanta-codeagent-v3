@@ -263,7 +263,8 @@ describe("ai-session-title — run-once + knob-off semantics", () => {
     // "no port" and assert nothing happens to the fakes.
     const llm = new FakeLLM(textScript("Should Not Run"))
     const rename = new FakeRename()
-    const port: ReturnType<typeof createAutoTitlePort> | undefined = undefined
+    const buildPort = (): ReturnType<typeof createAutoTitlePort> | undefined => undefined
+    const port = buildPort()
     // The loop's branch is `if (autoTitlePort && isFirstTurn) ...`; with the
     // knob off the port is never built, so this branch is dead.
     port?.maybeTitle("s14", "x")

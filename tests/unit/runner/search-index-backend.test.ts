@@ -28,10 +28,7 @@ const chunk = (path: string, text: string, start = 1, end = 5): IndexerFileChunk
   sha: "0",
 })
 
-const batchFor = (
-  chunks: readonly IndexerFileChunk[],
-  deletedPaths: readonly string[] = [],
-) => {
+const batchFor = (chunks: readonly IndexerFileChunk[], deletedPaths: readonly string[] = []) => {
   const changedPaths = new Map<string, string[]>()
   for (const c of chunks) {
     const ids = changedPaths.get(c.path) ?? []
@@ -153,7 +150,9 @@ describe("selectIndexEmbedder — embedder selection", () => {
         seen.push(labels === undefined ? { name } : { name, labels })
       },
     }
-    const primary = resolveIndexEmbedder({ QUANTA_EMBED_PROVIDER: "headless" }, undefined, { metrics })
+    const primary = resolveIndexEmbedder({ QUANTA_EMBED_PROVIDER: "headless" }, undefined, {
+      metrics,
+    })
     await primary.embed("primary")
     const fallback = resolveIndexEmbedder(
       { QUANTA_EMBED_PROVIDER: "headless" },
@@ -168,13 +167,12 @@ describe("selectIndexEmbedder — embedder selection", () => {
       { metrics },
     )
     await fallback.embed("fallback")
-    expect(seen.some((s) => s.name === "search.index.embed.latency_ms" && s.labels?.mode === "primary")).toBe(
-      true,
-    )
+    expect(
+      seen.some((s) => s.name === "search.index.embed.latency_ms" && s.labels?.mode === "primary"),
+    ).toBe(true)
     expect(
       seen.some(
-        (s) =>
-          s.name === "search.index.embed.latency_ms" && s.labels?.mode === "fallback-headless",
+        (s) => s.name === "search.index.embed.latency_ms" && s.labels?.mode === "fallback-headless",
       ),
     ).toBe(true)
   })
@@ -456,8 +454,7 @@ describe("buildSemanticBackend — sqlite persist", () => {
     await backend.port.query(hashEmbed("alpha"), 1)
     expect(
       seen.some(
-        (s) =>
-          s.name === "search.index.query.latency_ms" && s.labels?.store === "legacy-in-memory",
+        (s) => s.name === "search.index.query.latency_ms" && s.labels?.store === "legacy-in-memory",
       ),
     ).toBe(true)
   })

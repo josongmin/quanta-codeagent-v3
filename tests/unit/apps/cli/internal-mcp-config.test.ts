@@ -1,8 +1,8 @@
+import { describe, expect, test } from "bun:test"
 import { mkdtempSync } from "node:fs"
 import { rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { describe, expect, test } from "bun:test"
 import { StructuredLogger } from "@/observability"
 import { readMcpConfig, resolveMcpConfigPath } from "../../../../src/apps/cli/internal"
 

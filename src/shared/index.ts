@@ -28,20 +28,6 @@ export {
   parseEnvFlag,
   readBool,
 } from "./env-flag"
-export {
-  __resetKnobOverrides,
-  getKnobOverride,
-  knobOverrideCount,
-  knobOverrides,
-  knobOverridesVersion,
-  setKnobOverride,
-} from "./knob-overrides"
-export {
-  THIN_CLIENT_DISPATCH_FLAG,
-  THIN_CLIENT_ROUTES,
-  parseThinClientRoute,
-  type ThinClientRoute,
-} from "./thin-client-route"
 export { classify } from "./error-classifier"
 export type { HeaderLookup, LLMErrorKind, LLMProvider } from "./errors"
 export {
@@ -55,6 +41,14 @@ export {
   ToolInputError,
   toError,
 } from "./errors"
+export {
+  __resetKnobOverrides,
+  getKnobOverride,
+  knobOverrideCount,
+  knobOverrides,
+  knobOverridesVersion,
+  setKnobOverride,
+} from "./knob-overrides"
 export type {
   LlmContinuationObservation,
   LlmRequestObservation,
@@ -92,6 +86,12 @@ export {
   writeStderr,
   writeStdout,
 } from "./terminal-io"
+export {
+  parseThinClientRoute,
+  THIN_CLIENT_DISPATCH_FLAG,
+  THIN_CLIENT_ROUTES,
+  type ThinClientRoute,
+} from "./thin-client-route"
 export type {
   DegradedData,
   LlmUsageData,

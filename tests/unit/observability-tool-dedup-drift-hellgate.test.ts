@@ -44,9 +44,7 @@ describe("ADR-0189: per-tool TTL drift detector", () => {
         metrics,
         onDriftWarn: (m) => warnMsgs.push(m),
       })
-      const driftRows = metrics
-        .snapshot()
-        .filter((r) => r.name === "tool.dedup.config_drift.total")
+      const driftRows = metrics.snapshot().filter((r) => r.name === "tool.dedup.config_drift.total")
       expect(driftRows).toHaveLength(0)
       expect(warnMsgs).toHaveLength(0)
     })

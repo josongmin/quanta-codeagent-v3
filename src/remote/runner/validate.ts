@@ -14,14 +14,12 @@
  */
 
 import { err, ok, type Result } from "@/shared"
-import { RemoteError } from "./types"
 import type { RemoteSpec } from "./types"
+import { RemoteError } from "./types"
 
 const ENV_KEY = /^[A-Z_][A-Z0-9_]*$/
 
-export const validateSpec = (
-  spec: RemoteSpec,
-): Result<true, RemoteError> => {
+export const validateSpec = (spec: RemoteSpec): Result<true, RemoteError> => {
   if (typeof spec.image !== "string" || spec.image.trim() === "") {
     return err(new RemoteError("invalid-spec", "image must be a non-empty string"))
   }
@@ -38,9 +36,7 @@ export const validateSpec = (
   if (spec.timeoutMs !== undefined) {
     const t = spec.timeoutMs
     if (typeof t !== "number" || !Number.isFinite(t) || t < 0) {
-      return err(
-        new RemoteError("invalid-spec", `timeoutMs invalid: ${String(spec.timeoutMs)}`),
-      )
+      return err(new RemoteError("invalid-spec", `timeoutMs invalid: ${String(spec.timeoutMs)}`))
     }
   }
   if (spec.mounts !== undefined) {

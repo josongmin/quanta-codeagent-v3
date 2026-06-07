@@ -29,8 +29,8 @@ import type { AssembledMessage, RecoveryAction } from "@/agent/recovery"
 import { createToolChoiceTurnState } from "@/agent/tool-choice"
 import type { TurnSession, TurnState } from "@/agent/turn-context"
 import type { AgentConfig } from "@/agent/types"
-import type { StreamEvent } from "@/llm"
 import { createWorkingMemory } from "@/memory"
+import type { AgentEvent } from "@/stream"
 
 const ROOT = join(import.meta.dir, "../../..")
 const read = (rel: string): string => readFileSync(join(ROOT, rel), "utf8")
@@ -45,16 +45,16 @@ const completedAction: RecoveryAction = { do: "completed" }
 // site in applyAction (the no-tool-call path).
 const proceedAction: RecoveryAction = { do: "proceed" }
 
-const recoveryEvents = (events: StreamEvent[]): Extract<StreamEvent, { type: "recovery" }>[] =>
-  events.filter((e): e is Extract<StreamEvent, { type: "recovery" }> => e.type === "recovery")
+const recoveryEvents = (events: AgentEvent[]): Extract<AgentEvent, { type: "recovery" }>[] =>
+  events.filter((e): e is Extract<AgentEvent, { type: "recovery" }> => e.type === "recovery")
 
 const drive = async (
   action: RecoveryAction,
   closeoutCritic: unknown,
-): Promise<{ events: StreamEvent[]; result: Awaited<ReturnType<typeof applyAction>> }> => {
-  const events: StreamEvent[] = []
+): Promise<{ events: AgentEvent[]; result: Awaited<ReturnType<typeof applyAction>> }> => {
+  const events: AgentEvent[] = []
   const config = {
-    stream: { emit: (e: StreamEvent) => events.push(e) },
+    stream: { emit: (e: AgentEvent) => events.push(e) },
     signal: new AbortController().signal,
     ...(closeoutCritic !== undefined ? { closeoutCritic } : {}),
   } as unknown as AgentConfig
@@ -79,7 +79,8 @@ describe("closeout-critic hellgate — (a) knob OFF byte-identical", () => {
   test("undefined config ⇒ completes, zero recovery events (both seal sites)", async () => {
     for (const action of [completedAction, proceedAction]) {
       const { events, result } = await drive(action, undefined)
-      expect(result.result.kind).toBe("completed")
+      expect(result.done).toBe(true)
+      if (result.done) expect(result.result.kind).toBe("completed")
       expect(recoveryEvents(events)).toEqual([])
     }
   })
@@ -114,7 +115,8 @@ describe("closeout-critic hellgate — (b) port absent + ON ⇒ fail-open", () =
   test("enabled:true, no critic ⇒ completes, no throw, no event", async () => {
     for (const action of [completedAction, proceedAction]) {
       const { events, result } = await drive(action, { enabled: true })
-      expect(result.result.kind).toBe("completed")
+      expect(result.done).toBe(true)
+      if (result.done) expect(result.result.kind).toBe("completed")
       expect(recoveryEvents(events)).toEqual([])
     }
   })
@@ -128,7 +130,8 @@ describe("closeout-critic hellgate — (c) verdicts never block / crash", () => 
       riskLevel: "high",
     })
     const { events, result } = await drive(completedAction, { enabled: true, critic })
-    expect(result.result.kind).toBe("completed")
+    expect(result.done).toBe(true)
+    if (result.done) expect(result.result.kind).toBe("completed")
     expect(recoveryEvents(events)[0]?.reason).toBe("closeout")
     expect(recoveryEvents(events)[0]?.detail).toContain("denied")
   })
@@ -138,7 +141,8 @@ describe("closeout-critic hellgate — (c) verdicts never block / crash", () => 
       throw new Error("reviewer down")
     }
     const { events, result } = await drive(completedAction, { enabled: true, critic })
-    expect(result.result.kind).toBe("completed")
+    expect(result.done).toBe(true)
+    if (result.done) expect(result.result.kind).toBe("completed")
     expect(recoveryEvents(events)[0]?.detail).toBe("critic:unavailable: reviewer down")
   })
 

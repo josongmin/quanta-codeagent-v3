@@ -114,7 +114,9 @@ describe("kernel replay-lite", () => {
     expect(replay.snapshot).not.toBe(snapshot)
     expect(replay.snapshot.state).not.toBe(snapshot.state)
     expect(replay.snapshot.state.lastLlmRequest).not.toBe(snapshot.state.lastLlmRequest)
-    expect(replay.snapshot.state.lastLlmRequest?.policy).not.toBe(snapshot.state.lastLlmRequest?.policy)
+    expect(replay.snapshot.state.lastLlmRequest?.policy).not.toBe(
+      snapshot.state.lastLlmRequest?.policy,
+    )
     expect(replay.snapshot.state.lastLlmContinuation).not.toBe(snapshot.state.lastLlmContinuation)
     expect(replay.snapshot.openArtifacts).not.toBe(snapshot.openArtifacts)
     expect(replay.tail.map((event) => event.seq)).toEqual([11, 12])

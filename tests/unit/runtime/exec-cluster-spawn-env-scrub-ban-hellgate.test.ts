@@ -214,12 +214,10 @@ describe("exec-cluster spawn env-scrub ban — every shell spawn routes through 
     ])
     // (1) raw full-inherit spread.
     expect(
-      leakySpawnCalls("Bun.spawn(argv, { cwd, env: { ...process.env }, stdout: \"pipe\" })"),
+      leakySpawnCalls('Bun.spawn(argv, { cwd, env: { ...process.env }, stdout: "pipe" })'),
     ).toEqual(['Bun.spawn(argv, { cwd, env: { ...process.env }, stdout: "pipe" })'])
     // The fixed form — env routed through the scrubber.
-    expect(leakySpawnCalls("Bun.spawn(argv, { cwd, env: scrubEnv(), stdout: \"pipe\" })")).toEqual(
-      [],
-    )
+    expect(leakySpawnCalls('Bun.spawn(argv, { cwd, env: scrubEnv(), stdout: "pipe" })')).toEqual([])
     // Bare identifier `env: childEnv` traced to its scrubber assignment ⇒ clean.
     expect(
       leakySpawnCalls(
@@ -227,9 +225,9 @@ describe("exec-cluster spawn env-scrub ban — every shell spawn routes through 
       ),
     ).toEqual([])
     // …but a bare identifier with NO scrubber assignment IS flagged.
-    expect(leakySpawnCalls("const childEnv = process.env\nBun.spawn(a, { env: childEnv })")).toEqual([
-      "Bun.spawn(a, { env: childEnv })",
-    ])
+    expect(
+      leakySpawnCalls("const childEnv = process.env\nBun.spawn(a, { env: childEnv })"),
+    ).toEqual(["Bun.spawn(a, { env: childEnv })"])
     // Allowlisted argv-tool — not flagged even without env.
     expect(leakySpawnCalls('Bun.spawn(["tmux", ...args], { stdout: "pipe" })')).toEqual([])
   })

@@ -103,7 +103,10 @@ describe("ask_user — adversarial input", () => {
     }
     const tool = askUserTool(spy)
     const r = await resultOf(
-      tool.execute({ kind: "multiselect", prompt: "p", options: ["a", "b"], minSelected: 3 }, ctx()),
+      tool.execute(
+        { kind: "multiselect", prompt: "p", options: ["a", "b"], minSelected: 3 },
+        ctx(),
+      ),
     )
     expect(r.ok).toBe(false)
     expect(reached).toBe(false)

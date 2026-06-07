@@ -18,9 +18,7 @@ import {
 
 const toolResultTexts = (messages: readonly Message[]): string[] =>
   messages.flatMap((message) =>
-    message.content.flatMap((block) =>
-      block.type === "tool_result" ? [block.content] : [],
-    ),
+    message.content.flatMap((block) => (block.type === "tool_result" ? [block.content] : [])),
   )
 
 const messageTexts = (messages: readonly Message[]): string[] =>
@@ -152,17 +150,18 @@ describe("request_plan_exit lifecycle e2e", () => {
 
     expect(outcome.reason).toBe("completed")
     expect(existsSync(blocked)).toBe(false)
-    expect(toolResultTexts(outcome.messages).some((text) => text.includes(`Changes requested: ${feedback}`))).toBe(
-      true,
-    )
+    expect(
+      toolResultTexts(outcome.messages).some((text) =>
+        text.includes(`Changes requested: ${feedback}`),
+      ),
+    ).toBe(true)
     expect(toolResultTexts(outcome.messages).some((text) => text.includes("blocked in plan"))).toBe(
       true,
     )
     const secondTurnTexts = messageTexts(llm.seenMessages[1] ?? [])
     expect(
       secondTurnTexts.some(
-        (text) =>
-          text.includes("Operator feedback on the active plan:") && text.includes(feedback),
+        (text) => text.includes("Operator feedback on the active plan:") && text.includes(feedback),
       ),
     ).toBe(true)
     expect(eventsOf(stream, "mode_changed")).toHaveLength(0)

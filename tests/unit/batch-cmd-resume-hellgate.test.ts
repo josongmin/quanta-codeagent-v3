@@ -10,9 +10,9 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import type { BatchJob, BatchJobItem } from "@/agent/batch-jobs"
+import { parseBatchArgs, runBatchCmd } from "@/apps/cli/batch-cmd"
 import { SqliteJobStore } from "@/host/runtime/batch-jobs-sqlite-store"
 import type { SubagentRunner } from "@/subagent"
-import { parseBatchArgs, runBatchCmd } from "@/apps/cli/batch-cmd"
 
 const echo: SubagentRunner = () => Promise.resolve({ ok: true, finalText: "done" } as never)
 const CSV = "name\nAlice\nBob"
@@ -77,21 +77,37 @@ describe("quanta batch — durable --db + restart resume", () => {
     // Seed a CRASHED job directly: status running, 2 items stranded `running`.
     const seed = new SqliteJobStore(dbPath)
     const job: BatchJob = {
-      id: "crashed", name: "j", status: "running", instruction: "greet",
-      inputHeadersJson: '["name"]', poolSize: 2, maxAttempts: 1, createdAt: 1, updatedAt: 1, startedAt: 1,
+      id: "crashed",
+      name: "j",
+      status: "running",
+      instruction: "greet",
+      inputHeadersJson: '["name"]',
+      poolSize: 2,
+      maxAttempts: 1,
+      createdAt: 1,
+      updatedAt: 1,
+      startedAt: 1,
     }
     const item = (id: string, idx: number, status: BatchJobItem["status"]): BatchJobItem => ({
-      jobId: "crashed", itemId: id, rowIndex: idx, rowJson: JSON.stringify({ name: id }),
-      status, attemptCount: status === "running" ? 1 : 0, createdAt: 1, updatedAt: 1,
+      jobId: "crashed",
+      itemId: id,
+      rowIndex: idx,
+      rowJson: JSON.stringify({ name: id }),
+      status,
+      attemptCount: status === "running" ? 1 : 0,
+      createdAt: 1,
+      updatedAt: 1,
     })
     await seed.createJob(job, [item("Alice", 0, "running"), item("Bob", 1, "running")])
     seed.close()
 
     const { io, written } = makeIo({})
-    const code = await runBatchCmd(
-      ["--resume", "crashed", "--db", dbPath, "--out", "out.csv"],
-      { runner: echo, io, now: () => 2, newId: counterId() },
-    )
+    const code = await runBatchCmd(["--resume", "crashed", "--db", dbPath, "--out", "out.csv"], {
+      runner: echo,
+      io,
+      now: () => 2,
+      newId: counterId(),
+    })
     expect(code).toBe(0)
     const store = new SqliteJobStore(dbPath)
     const done = await store.getJob("crashed")

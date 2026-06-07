@@ -21,10 +21,11 @@
  * `inferToolTier` only) `read` renders under "none" in all three surfaces and
  * these assertions FAIL.
  */
+
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { __resetHitlOverrides } from "../../../src/agent/hitl-tier-registry"
 import { runPermissionRender } from "../../../src/apps/cli/permission-explain"
 import type { SlashContext } from "../../../src/apps/cli/slash-commands"

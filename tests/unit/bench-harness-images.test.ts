@@ -8,7 +8,9 @@ import {
   listSwebenchImages,
 } from "../../src/apps/bench/harness"
 
-const okSpawn = (stdout: string): DockerSpawn => async () => ({ code: 0, stdout, stderr: "" })
+const okSpawn =
+  (stdout: string): DockerSpawn =>
+  async () => ({ code: 0, stdout, stderr: "" })
 
 describe("classifyImage", () => {
   test("base tier", () => {
@@ -115,7 +117,11 @@ describe("hasEnvImage", () => {
     expect(hasEnvImage([envImg], "django_1776_django", "arm64")).toBe(false)
   })
   test("non-env tier ignored", () => {
-    const inst: ImageInfo = { ...envImg, repository: "sweb.eval.x86_64.django_1776_django", tier: "instance" }
+    const inst: ImageInfo = {
+      ...envImg,
+      repository: "sweb.eval.x86_64.django_1776_django",
+      tier: "instance",
+    }
     expect(hasEnvImage([inst], "django_1776_django", "x86_64")).toBe(false)
   })
 })

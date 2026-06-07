@@ -138,15 +138,35 @@ describe("C3 hellgate — unit-level escape behavior on the raw escaper", () => 
   describe("evasion variants pass through as inert data (genuine count stays 1)", () => {
     const variants: { label: string; payload: string; escapedEqualsInput: boolean }[] = [
       // Space between `<` and `/` — not the genuine token.
-      { label: "space-split closer `< /system-reminder>`", payload: "< /system-reminder>", escapedEqualsInput: true },
+      {
+        label: "space-split closer `< /system-reminder>`",
+        payload: "< /system-reminder>",
+        escapedEqualsInput: true,
+      },
       // U+2011 non-breaking hyphen instead of ASCII `-`.
-      { label: "non-breaking-hyphen `</system‑reminder>`", payload: "</system‑reminder>", escapedEqualsInput: true },
+      {
+        label: "non-breaking-hyphen `</system‑reminder>`",
+        payload: "</system‑reminder>",
+        escapedEqualsInput: true,
+      },
       // No closing `>` immediately after the name.
-      { label: "no-gt opener `<system-reminder FAKE`", payload: "<system-reminder FAKE", escapedEqualsInput: true },
+      {
+        label: "no-gt opener `<system-reminder FAKE`",
+        payload: "<system-reminder FAKE",
+        escapedEqualsInput: true,
+      },
       // Interior space instead of hyphen.
-      { label: "spaced-name `</system reminder>`", payload: "</system reminder>", escapedEqualsInput: true },
+      {
+        label: "spaced-name `</system reminder>`",
+        payload: "</system reminder>",
+        escapedEqualsInput: true,
+      },
       // HTML-entity double-encoded — not angle brackets at all.
-      { label: "entity-encoded `&lt;/system-reminder&gt;`", payload: "&lt;/system-reminder&gt;", escapedEqualsInput: true },
+      {
+        label: "entity-encoded `&lt;/system-reminder&gt;`",
+        payload: "&lt;/system-reminder&gt;",
+        escapedEqualsInput: true,
+      },
     ]
 
     for (const v of variants) {

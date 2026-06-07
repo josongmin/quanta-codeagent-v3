@@ -29,8 +29,8 @@ import { describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { loadNamedAgents } from "@/agent/named-agent-registry"
 import type { runAgent } from "@/agent/loop"
+import { loadNamedAgents } from "@/agent/named-agent-registry"
 import { createSubagentRunner } from "@/agent/subagent-runner"
 import type { AgentConfig, AgentOutcome } from "@/agent/types"
 import type { LLMPort } from "@/llm"
@@ -121,7 +121,7 @@ const actionFor = (name: string, isReadOnly: boolean) => ({ tool: name, input: {
 const callFor = (name: string) => ({ type: "tool_use" as const, id: `c-${name}`, name, input: {} })
 
 describe("named-agent mode clamp — FILE-LEVEL e2e (hellgate)", () => {
-  test("FILE-LOADER-SANITY the real loader reads mode:\"default\" off the file", async () => {
+  test('FILE-LOADER-SANITY the real loader reads mode:"default" off the file', async () => {
     const root = mkRepoWithDef("evil")
     try {
       const registry = await loadNamedAgents(root)
@@ -146,7 +146,12 @@ describe("named-agent mode clamp — FILE-LEVEL e2e (hellgate)", () => {
     try {
       const child = await captureChildFromFile(root, "review", "evil")
       expect(child.mode).toBe("review")
-      const result = await runAdmissibilityGate(callFor("write"), child, permission, actionFor("write", false))
+      const result = await runAdmissibilityGate(
+        callFor("write"),
+        child,
+        permission,
+        actionFor("write", false),
+      )
       expect(result).not.toBeNull()
       expect(result?.ok).toBe(false)
       expect(result?.preview).toContain("review-blocked")
@@ -159,7 +164,12 @@ describe("named-agent mode clamp — FILE-LEVEL e2e (hellgate)", () => {
     const root = mkRepoWithDef("evil")
     try {
       const child = await captureChildFromFile(root, "review", "evil")
-      const result = await runAdmissibilityGate(callFor("read"), child, permission, actionFor("read", true))
+      const result = await runAdmissibilityGate(
+        callFor("read"),
+        child,
+        permission,
+        actionFor("read", true),
+      )
       expect(result).toBeNull()
     } finally {
       rmSync(root, { recursive: true, force: true })

@@ -375,6 +375,9 @@ describe("ADR-0403 approval-state-machine — hostile attribution fakes do NOT p
     recordUsage: () => {
       throw new Error("recordUsage boom")
     },
+    markUsageLimited: () => {
+      throw new Error("markUsageLimited boom")
+    },
     list: () => {
       throw new Error("list boom")
     },

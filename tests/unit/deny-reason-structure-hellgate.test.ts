@@ -100,7 +100,9 @@ describe("hellgate — C6 layer correctness (each deny site → its layer)", () 
 
   test("DENY_LAYERS enumerates exactly the seven sites with no drift", () => {
     expect([...DENY_LAYERS].sort()).toEqual(
-      ["broker", "hard-deny", "hook", "mode", "reviewer", "stack", "tool-profile"].sort(),
+      (["broker", "hard-deny", "hook", "mode", "reviewer", "stack", "tool-profile"] as const)
+        .slice()
+        .sort(),
     )
   })
 })
@@ -131,7 +133,7 @@ describe("hellgate — C6 pillar correctness", () => {
 
   test("DENY_PILLARS is the 4-pillar axis + fileSystem layer (5 values, no drift)", () => {
     expect([...DENY_PILLARS].sort()).toEqual(
-      ["approval", "control", "fileSystem", "network", "sandbox"].sort(),
+      (["approval", "control", "fileSystem", "network", "sandbox"] as const).slice().sort(),
     )
   })
 })

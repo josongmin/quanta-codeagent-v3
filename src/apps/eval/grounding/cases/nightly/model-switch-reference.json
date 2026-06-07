@@ -2,9 +2,7 @@
   "schema": 2,
   "id": "model-switch-reference",
   "usecase": "persistent-context.conversation-state.thread-grounding",
-  "contextChanges": [
-    { "field": "model", "prev": "gpt-4o", "next": "gpt-4.1" }
-  ],
+  "contextChanges": [{ "field": "model", "prev": "gpt-4o", "next": "gpt-4.1" }],
   "history": [
     {
       "role": "assistant",

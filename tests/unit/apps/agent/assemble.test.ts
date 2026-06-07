@@ -11,9 +11,9 @@
  * file to be updated — that is the structural drift detector for Phase 4.
  */
 import { describe, expect, test } from "bun:test"
+import { assembleAgentConfig } from "@/../src/apps/agent/assemble"
 import type { AgentConfig } from "@/agent"
 import { ALL_AGENT_MODES, type RunMode } from "@/agent"
-import { assembleAgentConfig } from "@/../src/apps/agent/assemble"
 
 /** Minimal AgentConfig core — only the required fields. The assembler does
  *  NOT touch these, so opaque stubs are sufficient for the contract test. */
@@ -29,7 +29,6 @@ const makeBase = (): Omit<AgentConfig, "modePolicy" | "budgetMeter"> =>
     cwd: "/tmp/stub",
     signal: new AbortController().signal,
   }) as Omit<AgentConfig, "modePolicy" | "budgetMeter">
-
 
 describe("assembleAgentConfig — preset matrix completeness", () => {
   for (const mode of ALL_AGENT_MODES) {

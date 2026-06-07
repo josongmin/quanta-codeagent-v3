@@ -4,13 +4,10 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { buildLoginCmd } from "../../../src/apps/cli/login-cmd"
 import { buildLogoutCmd } from "../../../src/apps/cli/logout-cmd"
-import { buildStatusCmd } from "../../../src/apps/cli/status-cmd"
-import {
-  chatgptTokenPath,
-  writeToken,
-} from "../../../src/auth/chatgpt-oauth"
 import type { SlashContext } from "../../../src/apps/cli/slash-commands"
+import { buildStatusCmd } from "../../../src/apps/cli/status-cmd"
 import type { OAuthCallbackProvider } from "../../../src/auth/chatgpt-oauth"
+import { chatgptTokenPath, writeToken } from "../../../src/auth/chatgpt-oauth"
 
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "")
 
@@ -65,7 +62,11 @@ const makeControlledProvider = (): {
 }
 
 const toBase64Url = (s: string): string =>
-  Buffer.from(s, "utf8").toString("base64").replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_")
+  Buffer.from(s, "utf8")
+    .toString("base64")
+    .replace(/=+$/, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
 
 const fakeIdToken = (plan: string): string => {
   const h = toBase64Url('{"alg":"RS256"}')

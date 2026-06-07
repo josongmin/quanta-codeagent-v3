@@ -94,26 +94,32 @@ describe("ADR-0238 bun-spawner hellgate", () => {
   })
 
   // ─── HELL-SS-BUN-03 — non-zero exit with stdout still forwarded ─────────
-  test.skipIf(!HAS_BASH)("HELL-SS-BUN-03 non-zero exit with stdout body is forwarded as-is", async () => {
-    const spawner = createBunSpawner()
-    // Print to stdout then exit 7 — upstream's permissive dump tolerates
-    // non-zero exit when stdout is non-empty.
-    const result = await spawner.run(["bash", "-c", "echo hello; exit 7"], { timeoutMs: 5_000 })
-    expect(result.timedOut).toBe(false)
-    expect(result.spawnFailed).toBeUndefined()
-    expect(result.code).toBe(7)
-    expect(result.stdout.trim()).toBe("hello")
-  })
+  test.skipIf(!HAS_BASH)(
+    "HELL-SS-BUN-03 non-zero exit with stdout body is forwarded as-is",
+    async () => {
+      const spawner = createBunSpawner()
+      // Print to stdout then exit 7 — upstream's permissive dump tolerates
+      // non-zero exit when stdout is non-empty.
+      const result = await spawner.run(["bash", "-c", "echo hello; exit 7"], { timeoutMs: 5_000 })
+      expect(result.timedOut).toBe(false)
+      expect(result.spawnFailed).toBeUndefined()
+      expect(result.code).toBe(7)
+      expect(result.stdout.trim()).toBe("hello")
+    },
+  )
 
   // ─── HELL-SS-BUN-04 — empty stdout returns empty body ───────────────────
-  test.skipIf(!HAS_BASH)("HELL-SS-BUN-04 empty stdout returns empty string (upstream maps to empty-capture)", async () => {
-    const spawner = createBunSpawner()
-    const result = await spawner.run(["bash", "-c", "true"], { timeoutMs: 5_000 })
-    expect(result.code).toBe(0)
-    expect(result.stdout).toBe("")
-    expect(result.timedOut).toBe(false)
-    expect(result.spawnFailed).toBeUndefined()
-  })
+  test.skipIf(!HAS_BASH)(
+    "HELL-SS-BUN-04 empty stdout returns empty string (upstream maps to empty-capture)",
+    async () => {
+      const spawner = createBunSpawner()
+      const result = await spawner.run(["bash", "-c", "true"], { timeoutMs: 5_000 })
+      expect(result.code).toBe(0)
+      expect(result.stdout).toBe("")
+      expect(result.timedOut).toBe(false)
+      expect(result.spawnFailed).toBeUndefined()
+    },
+  )
 
   // ─── HELL-SS-BUN-05 — argv is defensively copied ────────────────────────
   test("HELL-SS-BUN-05 argv array is defensively copied (caller mutation safe)", async () => {
@@ -143,45 +149,54 @@ describe("ADR-0238 bun-spawner hellgate", () => {
   })
 
   // ─── HELL-SS-BUN-08 — full port round-trip via real shell ───────────────
-  test.skipIf(!HAS_BASH)("HELL-SS-BUN-08 port.capture round-trip writes a real snapshot file", async () => {
-    const spawner = createBunSpawner()
-    const port = createShellSnapshotPort(spawner, tmpHome)
-    const res = await port.capture({ shell: "bash" })
-    expect(res.ok).toBe(true)
-    if (!res.ok) return
-    expect(res.value.shell).toBe("bash")
-    const st = statSync(res.value.path)
-    expect(st.size).toBeGreaterThan(0)
-    // mode 0600 invariant from file-store (defense-in-depth across the bun
-    // adapter switch).
-    expect(st.mode & 0o777).toBe(0o600)
-  })
+  test.skipIf(!HAS_BASH)(
+    "HELL-SS-BUN-08 port.capture round-trip writes a real snapshot file",
+    async () => {
+      const spawner = createBunSpawner()
+      const port = createShellSnapshotPort(spawner, tmpHome)
+      const res = await port.capture({ shell: "bash" })
+      expect(res.ok).toBe(true)
+      if (!res.ok) return
+      expect(res.value.shell).toBe("bash")
+      const st = statSync(res.value.path)
+      expect(st.size).toBeGreaterThan(0)
+      // mode 0600 invariant from file-store (defense-in-depth across the bun
+      // adapter switch).
+      expect(st.mode & 0o777).toBe(0o600)
+    },
+  )
 
   // ─── HELL-SS-BUN-09 — kill timer cleared on normal exit ─────────────────
-  test.skipIf(!HAS_BASH)("HELL-SS-BUN-09 normal exit does not leak the kill timer (no late handle)", async () => {
-    const spawner = createBunSpawner()
-    const result = await spawner.run(["bash", "-c", "echo ok"], { timeoutMs: 2_000 })
-    expect(result.timedOut).toBe(false)
-    expect(result.code).toBe(0)
-    expect(result.stdout.trim()).toBe("ok")
-    // Allow a tick — if a timer had leaked it would attempt a kill on a dead
-    // pid. The bun-spawner catches the throw so the only observable evidence
-    // would be an unhandled rejection (test runner would crash). Sleeping
-    // past the original timeout proves the cleanup is sound.
-    await new Promise((r) => setTimeout(r, 100))
-  })
+  test.skipIf(!HAS_BASH)(
+    "HELL-SS-BUN-09 normal exit does not leak the kill timer (no late handle)",
+    async () => {
+      const spawner = createBunSpawner()
+      const result = await spawner.run(["bash", "-c", "echo ok"], { timeoutMs: 2_000 })
+      expect(result.timedOut).toBe(false)
+      expect(result.code).toBe(0)
+      expect(result.stdout.trim()).toBe("ok")
+      // Allow a tick — if a timer had leaked it would attempt a kill on a dead
+      // pid. The bun-spawner catches the throw so the only observable evidence
+      // would be an unhandled rejection (test runner would crash). Sleeping
+      // past the original timeout proves the cleanup is sound.
+      await new Promise((r) => setTimeout(r, 100))
+    },
+  )
 
   // ─── HELL-SS-BUN-10 — zsh capture round-trip (when available) ───────────
-  test.skipIf(!HAS_ZSH)("HELL-SS-BUN-10 zsh capture argv produces a non-empty body (when zsh present)", async () => {
-    const spawner = createBunSpawner()
-    // Same argv shape the slice adapter constructs (zsh-capture.ts).
-    const result = await spawner.run(["zsh", "-i", "-c", "typeset -p; alias; declare -f"], {
-      timeoutMs: 8_000,
-    })
-    expect(result.spawnFailed).toBeUndefined()
-    expect(result.timedOut).toBe(false)
-    // zsh interactive dump may exit 0 OR non-zero (rc-file may warn); we
-    // only require some bytes came through.
-    expect(result.stdout.length).toBeGreaterThan(0)
-  })
+  test.skipIf(!HAS_ZSH)(
+    "HELL-SS-BUN-10 zsh capture argv produces a non-empty body (when zsh present)",
+    async () => {
+      const spawner = createBunSpawner()
+      // Same argv shape the slice adapter constructs (zsh-capture.ts).
+      const result = await spawner.run(["zsh", "-i", "-c", "typeset -p; alias; declare -f"], {
+        timeoutMs: 8_000,
+      })
+      expect(result.spawnFailed).toBeUndefined()
+      expect(result.timedOut).toBe(false)
+      // zsh interactive dump may exit 0 OR non-zero (rc-file may warn); we
+      // only require some bytes came through.
+      expect(result.stdout.length).toBeGreaterThan(0)
+    },
+  )
 })

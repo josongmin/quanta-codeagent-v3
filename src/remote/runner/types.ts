@@ -33,12 +33,7 @@
  *   - `cancelled`   — terminal: explicit `cancel(handle)` or AbortSignal
  *                     cascade from the spawner.
  */
-export type RemoteStatusKind =
-  | "pending"
-  | "running"
-  | "succeeded"
-  | "failed"
-  | "cancelled"
+export type RemoteStatusKind = "pending" | "running" | "succeeded" | "failed" | "cancelled"
 
 /** All five status arms — closed array for runtime exhaustiveness checks. */
 export const ALL_REMOTE_STATUS_KINDS: ReadonlyArray<RemoteStatusKind> = [
@@ -196,11 +191,7 @@ export class RemoteError extends Error {
   readonly kind: RemoteErrorKind
   readonly backend: RemoteBackend | undefined
 
-  constructor(
-    kind: RemoteErrorKind,
-    message: string,
-    backend?: RemoteBackend | undefined,
-  ) {
+  constructor(kind: RemoteErrorKind, message: string, backend?: RemoteBackend | undefined) {
     super(`RemoteError(${kind}): ${message}`)
     this.kind = kind
     this.backend = backend

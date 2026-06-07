@@ -19,9 +19,9 @@
  * hand-list-free auto-discovery, so a new offender cannot hide.
  */
 
+import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
-import { describe, expect, test } from "bun:test"
 import { gateDisabled, gateDisabledStrict, gateOn, gateOnStrict } from "@/shared"
 
 /** Raw legacy gate comparison — caught in TWO forms so a const-keyed gate can't
@@ -125,7 +125,9 @@ describe("gate-vocabulary ratchet — raw comparisons only ever decrease", () =>
       )
     }
     // biome-ignore lint/suspicious/noConsole: ratchet visibility for reviewers
-    console.log(`[gate-ratchet] ${total}/${RAW_GATE_CEILING} raw gate comparisons remain (burn-down)`)
+    console.log(
+      `[gate-ratchet] ${total}/${RAW_GATE_CEILING} raw gate comparisons remain (burn-down)`,
+    )
     expect(total).toBeLessThanOrEqual(RAW_GATE_CEILING)
   })
 

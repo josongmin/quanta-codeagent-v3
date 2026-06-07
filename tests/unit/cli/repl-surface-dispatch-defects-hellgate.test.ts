@@ -32,8 +32,8 @@
 
 import { describe, expect, test } from "bun:test"
 import { AgentArgsError, parseAgentArgs } from "../../../src/apps/agent/cli-args"
-import { extractApplyPatchPaths } from "../../../src/apps/cli/repl/surface-compose"
 import { projectSlashCtx, type ReplSlashCtx } from "../../../src/apps/cli/repl/slash-surface"
+import { extractApplyPatchPaths } from "../../../src/apps/cli/repl/surface-compose"
 
 /* ------------------------------------------------------------------ */
 /* (a) extractApplyPatchPaths — V4A header parse                        */
@@ -138,7 +138,9 @@ describe("HELL-PROJ — slash projector SSOT", () => {
 describe("HELL-ARGS — required mode-flag enforcement", () => {
   test("HELL-ARGS-01: --mode ci-bot without --pr throws (was silently OK)", () => {
     expect(() => parseAgentArgs(["--mode", "ci-bot"])).toThrow(AgentArgsError)
-    expect(() => parseAgentArgs(["--mode", "ci-bot"])).toThrow(/--pr is required with --mode ci-bot/)
+    expect(() => parseAgentArgs(["--mode", "ci-bot"])).toThrow(
+      /--pr is required with --mode ci-bot/,
+    )
   })
 
   test("HELL-ARGS-02: --mode batch without --corpus throws", () => {

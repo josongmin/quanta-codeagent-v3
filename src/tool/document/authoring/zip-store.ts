@@ -373,7 +373,7 @@ const decodeAndVerifyCrc = (
   const decoded = decodeEntryPayload(method, payload, entryCap, name)
   if (!decoded.ok) return decoded
   const actual = crc32(decoded.data)
-  if (actual !== (storedCrc >>> 0)) {
+  if (actual !== storedCrc >>> 0) {
     return {
       ok: false,
       error: `zip: CRC mismatch for "${name}" (declared ${storedCrc >>> 0}, computed ${actual}): corrupted or tampered archive`,
@@ -438,7 +438,8 @@ const readCentralRecord = (
   const extraLen = readU16(zip, p + 30)
   const commentLen = readU16(zip, p + 32)
   const localOffset = readU32(zip, p + 42)
-  if (p + 46 + nameLen > zip.length) return { ok: false, error: `zip: truncated name at entry ${n}` }
+  if (p + 46 + nameLen > zip.length)
+    return { ok: false, error: `zip: truncated name at entry ${n}` }
   const name = new TextDecoder().decode(zip.subarray(p + 46, p + 46 + nameLen))
 
   // Cheap early reject on the DECLARED size, in the SAME position as the original

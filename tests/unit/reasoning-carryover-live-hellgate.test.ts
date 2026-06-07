@@ -78,14 +78,14 @@ const runTurn = async (args: {
   const prepared = prepareResponsesContinuationRequest({
     input: turnInput,
     model: "gpt-5",
-    transportId: "openai-responses",
+    transportId: "public",
     ...(args.reasoningCarryover ? { reasoningCarryover: true } : {}),
     ...(args.store !== undefined ? { reasoningCarryoverStore: args.store } : {}),
   })
   await drain(
     streamResponsesSurface({
       provider: "openai",
-      transportId: "openai-responses",
+      transportId: "public",
       model: "gpt-5",
       input: turnInput,
       request: prepared,
@@ -108,7 +108,7 @@ const buildTurn2 = (args: {
   const prepared = prepareResponsesContinuationRequest({
     input: turn2Input,
     model: "gpt-5",
-    transportId: "openai-responses",
+    transportId: "public",
     ...(args.reasoningCarryover ? { reasoningCarryover: true } : {}),
     ...(args.store !== undefined ? { reasoningCarryoverStore: args.store } : {}),
   })
@@ -154,7 +154,7 @@ describe("H15 LIVE — per-session store capture ⇒ replay", () => {
     const legacy = prepareResponsesContinuationRequest({
       input: input("sess-A", "step 2"),
       model: "gpt-5",
-      transportId: "openai-responses",
+      transportId: "public",
     }).fullBody
     expect(JSON.stringify(off)).toBe(JSON.stringify(legacy))
     expect(off.include).toBeUndefined()
@@ -264,7 +264,7 @@ describe("H15 LIVE — multi-session isolation", () => {
     const legacyB = prepareResponsesContinuationRequest({
       input: input("sess-B", "step 2"),
       model: "gpt-5",
-      transportId: "openai-responses",
+      transportId: "public",
     }).fullBody
     expect(JSON.stringify(bodyB)).toBe(JSON.stringify(legacyB))
     expect(bodyB.include).toBeUndefined()

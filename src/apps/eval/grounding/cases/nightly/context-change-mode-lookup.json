@@ -2,9 +2,7 @@
   "schema": 2,
   "id": "context-change-mode-lookup",
   "usecase": "persistent-context.conversation-state.thread-grounding",
-  "contextChanges": [
-    { "field": "mode", "prev": "default", "next": "review" }
-  ],
+  "contextChanges": [{ "field": "mode", "prev": "default", "next": "review" }],
   "history": [
     {
       "role": "assistant",

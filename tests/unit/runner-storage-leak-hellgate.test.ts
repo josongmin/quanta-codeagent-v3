@@ -23,10 +23,10 @@
  */
 
 import { Database } from "bun:sqlite"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import {
   type CheckpointPolicy,
   defaultCheckpointPolicy,
@@ -70,11 +70,15 @@ const makeRecordingOdb = (opts: {
       return 0
     },
   }
-  return { odb, get registerHeadCalls() {
-    return state.registerHeadCalls
-  }, get cleanupCalls() {
-    return state.cleanupCalls
-  } }
+  return {
+    odb,
+    get registerHeadCalls() {
+      return state.registerHeadCalls
+    },
+    get cleanupCalls() {
+      return state.cleanupCalls
+    },
+  }
 }
 
 const makeTool = (readOnly: boolean): Tool => ({

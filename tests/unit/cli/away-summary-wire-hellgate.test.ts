@@ -16,6 +16,7 @@ import {
   maybeCreateAwaySummaryWire,
 } from "@/apps/cli/repl/away-summary-wire"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
+import type { Logger } from "@/shared/logger"
 
 const txt = (s: string): StreamEvent => ({ type: "text_delta", delta: s })
 const stop: StreamEvent = { type: "message_stop", stop_reason: "end_turn" }
@@ -38,7 +39,13 @@ const ACTIVE_TURNS = [
   { role: "assistant" as const, text: "found root cause, applying patch" },
 ]
 
-const silentLog = { debug() {}, info() {}, warn() {}, error() {} }
+const silentLog: Logger = {
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+  child: () => silentLog,
+}
 
 describe("away-summary-wire hellgate", () => {
   it("gate OFF ⇒ NOOP handle, zero LLM consumption, gate-off skip", async () => {

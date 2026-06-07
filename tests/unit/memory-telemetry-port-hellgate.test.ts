@@ -25,8 +25,8 @@ import {
   type Phase2OutcomeKind,
   type Phase2TelemetryEvent,
   RECALL_EVENT_ALLOWED_KEYS,
-  rankEntries,
   type RecallTelemetryEvent,
+  rankEntries,
 } from "@/memory"
 import { runPhase1 } from "@/memory/consolidate/phase1"
 import { runPhase2 } from "@/memory/consolidate/phase2"
@@ -102,7 +102,11 @@ function fakeRegistry(): {
 
 /** Stage1 store stub that succeeds on upsert + watermark. */
 function fakeStage1Store(): Stage1StorePort {
-  let watermark: WatermarkState = { lastSuccessAt: null, lastInitAt: null, lastConsolidatedCount: 0 }
+  let watermark: WatermarkState = {
+    lastSuccessAt: null,
+    lastInitAt: null,
+    lastConsolidatedCount: 0,
+  }
   return {
     async upsert(_row) {},
     async fetchSince(_w, _limit) {
@@ -122,11 +126,7 @@ function fakeStage1Store(): Stage1StorePort {
 
 function fakeWriter(): MemoryWriter {
   return {
-    async writeAtomic(_args: {
-      memoryMd: string
-      rawMemoriesMd: string
-      memorySummaryMd: string
-    }) {
+    async writeAtomic(_args: { memoryMd: string; rawMemoriesMd: string; memorySummaryMd: string }) {
       return { gitCommitSha: null }
     },
   } as unknown as MemoryWriter
@@ -219,7 +219,12 @@ describe("MemoryTelemetryPort surface", () => {
   })
 
   test("Default-OFF: phase2 with no telemetry parameter does not throw", async () => {
-    const out = await runPhase2(phase2InputSuccess(), consolidatePort(), fakeStage1Store(), fakeWriter())
+    const out = await runPhase2(
+      phase2InputSuccess(),
+      consolidatePort(),
+      fakeStage1Store(),
+      fakeWriter(),
+    )
     expect(out.kind).toBe("consolidated")
   })
 
@@ -419,9 +424,9 @@ describe("outcome enum mapping (phase1)", () => {
         throw new Error("db dead")
       },
     }
-    await expect(runPhase1(phase1InputSuccess(), distillPort(), badStore, rec.port)).rejects.toThrow(
-      "db dead",
-    )
+    await expect(
+      runPhase1(phase1InputSuccess(), distillPort(), badStore, rec.port),
+    ).rejects.toThrow("db dead")
     expect(rec.phase1[0]!.outcome).toBe("error")
   })
 })
@@ -592,7 +597,12 @@ describe("sink resilience", () => {
       recordPhase2() {},
       recordRecall() {},
     }
-    const out = await runPhase1(phase1InputSuccess(), distillPort(), fakeStage1Store(), throwingPort)
+    const out = await runPhase1(
+      phase1InputSuccess(),
+      distillPort(),
+      fakeStage1Store(),
+      throwingPort,
+    )
     expect(out.kind).toBe("distilled")
   })
 

@@ -1,9 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import {
-  CANVAS_PROTOCOL_VERSION,
-  decodeCanvasFrame,
-  encodeCanvasFrame,
-} from "@/protocol/canvas"
+import { CANVAS_PROTOCOL_VERSION, decodeCanvasFrame, encodeCanvasFrame } from "@/protocol/canvas"
 import {
   decodeObservabilityFrame,
   encodeObservabilityFrame,

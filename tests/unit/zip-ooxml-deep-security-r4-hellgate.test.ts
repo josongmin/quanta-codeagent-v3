@@ -209,7 +209,9 @@ describe("R4 zip-slip — hostile entry names are STRING keys, never FS paths", 
   })
 
   test("docx reader: a `..`-named document.xml is NOT matched (exact-name only)", () => {
-    const raw = utf8(`<w:document><w:body><w:p><w:r><w:t>hi</w:t></w:r></w:p></w:body></w:document>`)
+    const raw = utf8(
+      `<w:document><w:body><w:p><w:r><w:t>hi</w:t></w:r></w:p></w:body></w:document>`,
+    )
     const zip = craftZip({ entries: [{ name: "../word/document.xml", raw, method: 0 }] })
     expect(parseDocx(zip).ok).toBe(false)
   })
@@ -381,7 +383,9 @@ describe("R4 XML-bomb resistance — no entity expansion, no catastrophic backtr
     for (let i = 0; i < depth; i++) paras += `<a:p>${inner}</a:p>`
     inner = ""
     const slide = `<p:sld><p:cSld><p:spTree><p:sp>${paras}</p:sp></p:spTree></p:cSld></p:sld>`
-    const zip = craftZip({ entries: [{ name: "ppt/slides/slide1.xml", raw: utf8(slide), method: 0 }] })
+    const zip = craftZip({
+      entries: [{ name: "ppt/slides/slide1.xml", raw: utf8(slide), method: 0 }],
+    })
     const t0 = Date.now()
     let threw = false
     let out: ReturnType<typeof parsePptx> | undefined
@@ -435,8 +439,12 @@ describe("R4 duplicate entry names — deterministic resolution", () => {
   })
 
   test("two document.xml parts in a docx: parseDocx deterministically reads the FIRST", () => {
-    const a = utf8(`<w:document><w:body><w:p><w:r><w:t>ALPHA</w:t></w:r></w:p></w:body></w:document>`)
-    const b = utf8(`<w:document><w:body><w:p><w:r><w:t>BETA</w:t></w:r></w:p></w:body></w:document>`)
+    const a = utf8(
+      `<w:document><w:body><w:p><w:r><w:t>ALPHA</w:t></w:r></w:p></w:body></w:document>`,
+    )
+    const b = utf8(
+      `<w:document><w:body><w:p><w:r><w:t>BETA</w:t></w:r></w:p></w:body></w:document>`,
+    )
     const zip = craftZip({
       entries: [
         { name: "word/document.xml", raw: a, method: 0 },

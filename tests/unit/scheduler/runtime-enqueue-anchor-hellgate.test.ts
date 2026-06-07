@@ -22,18 +22,18 @@
 
 import { describe, expect, test } from "bun:test"
 import { createAutomation, transitionStatus } from "@/scheduler/automation"
-import { createSchedulerRuntime } from "@/scheduler/runtime"
 import { parseRRule } from "@/scheduler/rrule-parser"
-import {
-  type AgentLoopPort,
-  type Automation,
-  type AutomationStorePort,
-  type ClockPort,
-  type EnvPort,
-  type ModelAvailabilityPort,
-  type RRule,
-  type SchedulerEvent,
-  type SchedulerSinkPort,
+import { createSchedulerRuntime } from "@/scheduler/runtime"
+import type {
+  AgentLoopPort,
+  Automation,
+  AutomationStorePort,
+  ClockPort,
+  EnvPort,
+  ModelAvailabilityPort,
+  RRule,
+  SchedulerEvent,
+  SchedulerSinkPort,
 } from "@/scheduler/types"
 
 const ruleOf = (s: string): RRule => {

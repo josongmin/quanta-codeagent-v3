@@ -86,7 +86,8 @@ const craftZip = (opts: {
   /** Override the declared compSize in the headers (to point past EOF). */
   compSizeOverride?: number
 }): Uint8Array => {
-  const payload = opts.payloadOverride ?? (opts.method === 8 ? deflateRawSync(Buffer.from(opts.raw)) : opts.raw)
+  const payload =
+    opts.payloadOverride ?? (opts.method === 8 ? deflateRawSync(Buffer.from(opts.raw)) : opts.raw)
   const crc = opts.crc ?? crc32(opts.raw)
   const compSize = opts.compSizeOverride ?? payload.length
   const nm = utf8(opts.name)
@@ -207,7 +208,16 @@ describe("R2 zip-store unzip — CRC-32 verification (no silent corruption)", ()
 describe("R2 zip-store — real serializer round-trip survives CRC verify", () => {
   test("buildXlsx → parseXlsx: cells round-trip unchanged (no false CRC rejection)", () => {
     const bytes = buildXlsx({
-      sheets: [{ name: "Data", rows: [["id", "name"], ["1", "Ada"], ["2", "Bo"]] }],
+      sheets: [
+        {
+          name: "Data",
+          rows: [
+            ["id", "name"],
+            ["1", "Ada"],
+            ["2", "Bo"],
+          ],
+        },
+      ],
     })
     // The container itself unzips cleanly (every entry's CRC verifies).
     expect(unzip(bytes).ok).toBe(true)

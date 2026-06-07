@@ -9,12 +9,12 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { DEFAULT_EVICTION_CAPS, EVICTION_DECAY, planEviction } from "@/memory/eviction"
-import { rankEntries } from "@/memory/ranking"
-import { EMBED_DIM, type MemoryEntry, type MemoryQuery, STALE_MAX_MS } from "@/memory/types"
 import { persistSession, recallContext, SESSION_TAG } from "@/agent/memory"
 import type { LLMPort, Message, StreamEvent } from "@/llm"
 import { type EmbedderPort, InMemoryStore, type PersistentStorePort } from "@/memory"
+import { DEFAULT_EVICTION_CAPS, EVICTION_DECAY, planEviction } from "@/memory/eviction"
+import { rankEntries } from "@/memory/ranking"
+import { EMBED_DIM, type MemoryEntry, type MemoryQuery, STALE_MAX_MS } from "@/memory/types"
 
 /**
  * C5 — memory consolidate/evict boundary HELLGATE.
@@ -127,9 +127,7 @@ describe("C5 hellgate — eviction decay/delete age boundary (exactly STALE_MAX_
   })
 
   test("superseded entry EXACTLY at 30d ⇒ NOT deleted (delete requires strictly > STALE_MAX_MS)", () => {
-    const cand = [
-      entry({ id: "supAt", supersededBy: "x", createdAt: NOW - STALE_MAX_MS }),
-    ]
+    const cand = [entry({ id: "supAt", supersededBy: "x", createdAt: NOW - STALE_MAX_MS })]
     const plan = planEviction(cand, undefined, NOW)
     // age is not > STALE_MAX_MS, so no ancient-superseded delete. It is stale
     // (not archived) so no decay either.
@@ -211,7 +209,13 @@ describe("C5 hellgate — recall HARD filters cannot be bypassed by score", () =
   test("freshness filter does NOT resurrect a superseded item (supersede dominates freshness)", () => {
     const cand = [
       // Fresh AND requested freshness bucket, BUT superseded → excluded.
-      entry({ id: "freshButDead", createdAt: NOW, supersededBy: "live", embedding: vec(2), importance: 1 }),
+      entry({
+        id: "freshButDead",
+        createdAt: NOW,
+        supersededBy: "live",
+        embedding: vec(2),
+        importance: 1,
+      }),
       // Also fresh, live → the only survivor.
       entry({ id: "live", createdAt: NOW, embedding: vec(2), importance: 0.1 }),
     ]

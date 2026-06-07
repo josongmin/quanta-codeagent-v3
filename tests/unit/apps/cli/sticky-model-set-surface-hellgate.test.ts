@@ -16,7 +16,9 @@ import { join } from "node:path"
 import {
   fsBackedStickyModelStore,
   inMemoryStickyModelStore,
+  StickyModelWriteError,
 } from "../../../../src/agent/sticky-model"
+import type { StickyModelStore } from "../../../../src/agent/sticky-model/port"
 import {
   buildStickyModelAdapter,
   STICKY_MODEL_MODES,
@@ -72,18 +74,20 @@ describe("ADR-0462 follow-up — /sticky-model SET surface hellgate", () => {
   })
 
   test("CASE-4: adapter surfaces store write failure as typed write-error (never throws)", async () => {
-    const failing = {
+    const failing: StickyModelStore = {
       get: async () => undefined,
       load: async () => ({ ok: true as const, snapshot: {} }),
       set: async () => ({
         ok: false as const,
-        error: Object.assign(new Error("disk full"), { name: "StickyModelWriteError" }),
+        error: new StickyModelWriteError("/tmp/sticky.json", "disk full"),
       }),
     }
     const a = buildStickyModelAdapter({ store: failing })
     const res = await a.set("review", "sonnet")
     expect(typeof res === "object" && res.kind).toBe("write-error")
-    expect(typeof res === "object" && res.message).toContain("disk full")
+    if (typeof res !== "object" || res.kind !== "write-error")
+      throw new Error("expected write-error result")
+    expect(res.message).toContain("disk full")
   })
 
   test("CASE-5: STICKY_MODEL_MODES is exactly the 6 prompt modes", () => {

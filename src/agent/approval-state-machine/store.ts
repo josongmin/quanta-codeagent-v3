@@ -272,7 +272,9 @@ export const createApprovalStateMachine = (opts?: {
   const objective = opts?.objective
   const ledger = opts?.ledger
   const maxRetained =
-    typeof opts?.maxRetained === "number" && Number.isFinite(opts.maxRetained) && opts.maxRetained > 0
+    typeof opts?.maxRetained === "number" &&
+    Number.isFinite(opts.maxRetained) &&
+    opts.maxRetained > 0
       ? Math.floor(opts.maxRetained)
       : DEFAULT_MAX_RETAINED
   const requests = new Map<string, ApprovalRequest>()

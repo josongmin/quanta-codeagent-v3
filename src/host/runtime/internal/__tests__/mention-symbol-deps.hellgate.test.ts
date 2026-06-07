@@ -94,6 +94,8 @@ const realSemanticLookup = async (chunk: {
     text: chunk.text,
     startLine: chunk.startLine,
     endLine: chunk.startLine + 1,
+    mtime: 0,
+    sha: "0".repeat(40),
   })
   return createSemanticSymbolLookup({ index: backend.port, embed })
 }

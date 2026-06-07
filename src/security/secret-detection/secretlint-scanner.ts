@@ -22,10 +22,7 @@
 import { readFile } from "node:fs/promises"
 import { lintSource } from "@secretlint/core"
 import { creator as recommendedPreset } from "@secretlint/secretlint-rule-preset-recommend"
-import type {
-  SecretLintCoreConfig,
-  SecretLintCoreResultMessage,
-} from "@secretlint/types"
+import type { SecretLintCoreConfig, SecretLintCoreResultMessage } from "@secretlint/types"
 import {
   DEFAULT_MAX_FINDINGS,
   mask,
@@ -98,30 +95,18 @@ export const DEFAULT_SECRETLINT_CONFIG: SecretLintCoreConfig = {
  */
 const RULE_TO_KIND: ReadonlyMap<string, SecretKind> = new Map([
   ["@secretlint/secretlint-rule-openai|OPENAI_TOKEN", "openai-api-key" as const],
-  [
-    "@secretlint/secretlint-rule-anthropic|ANTHROPIC_API_KEY",
-    "anthropic-api-key" as const,
-  ],
+  ["@secretlint/secretlint-rule-anthropic|ANTHROPIC_API_KEY", "anthropic-api-key" as const],
   ["@secretlint/secretlint-rule-github|GITHUB_TOKEN", "github-token" as const],
   ["@secretlint/secretlint-rule-aws|AWSAccessKeyID", "aws-access-key" as const],
-  [
-    "@secretlint/secretlint-rule-aws|AWSSecretAccessKey",
-    "aws-secret-key" as const,
-  ],
+  ["@secretlint/secretlint-rule-aws|AWSSecretAccessKey", "aws-secret-key" as const],
   ["@secretlint/secretlint-rule-aws|AWSAccountID", "aws-access-key" as const],
   ["@secretlint/secretlint-rule-gcp|PrivateKeyJSON", "gcp-service-account" as const],
   ["@secretlint/secretlint-rule-gcp|PrivateKeyP12", "gcp-service-account" as const],
   ["@secretlint/secretlint-rule-slack|SLACK_TOKEN", "slack-token" as const],
   ["@secretlint/secretlint-rule-stripe|STRIPE_SECRET_KEY_LIVE", "stripe-key" as const],
   ["@secretlint/secretlint-rule-stripe|STRIPE_SECRET_KEY_TEST", "stripe-key" as const],
-  [
-    "@secretlint/secretlint-rule-stripe|STRIPE_RESTRICTED_KEY_LIVE",
-    "stripe-key" as const,
-  ],
-  [
-    "@secretlint/secretlint-rule-stripe|STRIPE_RESTRICTED_KEY_TEST",
-    "stripe-key" as const,
-  ],
+  ["@secretlint/secretlint-rule-stripe|STRIPE_RESTRICTED_KEY_LIVE", "stripe-key" as const],
+  ["@secretlint/secretlint-rule-stripe|STRIPE_RESTRICTED_KEY_TEST", "stripe-key" as const],
   ["@secretlint/secretlint-rule-privatekey|PrivateKey", "private-key-block" as const],
 ])
 
@@ -219,10 +204,7 @@ const messageToFinding = (
   return buildFinding(kind, mask(matched), m.loc.start.line, m.loc.start.column + 1, ctx.file)
 }
 
-const runSecretlint = async (
-  text: string,
-  ctx: ScanContext,
-): Promise<SecretFinding[]> => {
+const runSecretlint = async (text: string, ctx: ScanContext): Promise<SecretFinding[]> => {
   const result = await lintSource({
     source: {
       content: text,

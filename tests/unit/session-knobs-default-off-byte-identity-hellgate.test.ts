@@ -191,7 +191,7 @@ describe("session-knobs default-OFF — canonical gate parse (no accidental-enab
     expect(stuckOff).toEqual([])
   })
 
-  test("code-mode SECURITY gates stay strict `=== \"1\"` (loose truthy must NOT arm)", () => {
+  test('code-mode SECURITY gates stay strict `=== "1"` (loose truthy must NOT arm)', () => {
     const leaked: string[] = []
     for (const k of STRICT_ONE_KNOBS) {
       if (!SECURITY_STRICT_ONE.has(k.env)) continue

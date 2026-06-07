@@ -56,7 +56,7 @@ const portFor = (model: string | undefined): LLMPort =>
 
 const resolved = (model: string | undefined, budgetTokens?: number): ResolvedTurnOverride => ({
   llm: portFor(model),
-  budgetTokens,
+  ...(budgetTokens !== undefined ? { budgetTokens } : {}),
   explicitOff: false,
 })
 

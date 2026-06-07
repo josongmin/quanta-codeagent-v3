@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import { type AdmissibilityWaveAOptions, runAdmissibilityGate } from "@/agent/admissibility-gate"
 import {
-  OutcomeInvariantError,
-  ReviewerUnavailableError,
   type DenialMemory,
+  OutcomeInvariantError,
   type PermissionContext,
+  ReviewerUnavailableError,
   type ToolActionKeyed,
 } from "@/permission"
 import { RulesStore } from "@/rules"
@@ -256,4 +256,3 @@ describe("Wave A: RulesStore-only paths", () => {
 })
 
 // ─── 3. ReviewerPort only (HITL always-confirm escalation) ────────────────
-

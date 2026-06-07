@@ -17,16 +17,11 @@
  *    spurious hit.
  */
 
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises"
 import { createHash } from "node:crypto"
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
 import type { Message, StreamInput } from "../types"
-import type {
-  MatchPolicy,
-  RecordedInteraction,
-  ReplayMatchOpts,
-  ReplayStore,
-} from "./types"
+import type { MatchPolicy, RecordedInteraction, ReplayMatchOpts, ReplayStore } from "./types"
 
 export interface JsonlReplayStoreOpts {
   /** Absolute path to the `.jsonl` cassette. Parent dir is created on demand. */

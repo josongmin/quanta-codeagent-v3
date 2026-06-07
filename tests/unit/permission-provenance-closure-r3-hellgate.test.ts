@@ -58,7 +58,7 @@ const absWrite = (v: string): FileSystemEntry => ({
   access: "write",
 })
 
-const STRATEGIES: ReadonlyArray<MergeStrategy> = ["source-precedence", "most-restrictive"]
+const STRATEGIES: MergeStrategy[] = ["source-precedence", "most-restrictive"]
 
 /** Merge through the LIVE bridge under a strategy, returning the merged profile. */
 const merge = (slots: ProfileLayerSlots, strat: MergeStrategy): PermissionProfile =>

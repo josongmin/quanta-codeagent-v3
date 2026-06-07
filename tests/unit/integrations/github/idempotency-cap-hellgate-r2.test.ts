@@ -16,7 +16,11 @@
 import { describe, expect, test } from "bun:test"
 import { randomBytes } from "node:crypto"
 
-import { computeIdempotencyKey, createDeliveryStore } from "@/integrations/github"
+import {
+  computeIdempotencyKey,
+  createDeliveryStore,
+  createDurableDeliveryStore,
+} from "@/integrations/github"
 
 describe("ADR-0311/0313 hellgate R2 — delivery cap + key fuzz", () => {
   test("cap=1024 exact: 1024 adds remain, 1025th evicts oldest", () => {
@@ -112,7 +116,7 @@ describe("ADR-0311/0313 hellgate R2 — delivery cap + key fuzz", () => {
 
   test("persistPath is documented but does not crash when set", () => {
     expect(() =>
-      createDeliveryStore({ persistPath: "/tmp/nonexistent.json", maxEntries: 8 }),
+      createDurableDeliveryStore({ persistPath: "/tmp/nonexistent.json", maxEntries: 8 }),
     ).not.toThrow()
   })
 

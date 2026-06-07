@@ -187,7 +187,9 @@ export class LlmPhase2Port implements Phase2Port {
     let result: Awaited<ReturnType<Phase2Summarizer>>
     try {
       result = await this.summarize(
-        args.signal === undefined ? { system, userText } : { system, userText, signal: args.signal },
+        args.signal === undefined
+          ? { system, userText }
+          : { system, userText, signal: args.signal },
       )
     } catch (e) {
       if (isAbortError(e)) throw e

@@ -129,7 +129,9 @@ export const createCompositeAtProvider = (deps: CompositeAtProviderDeps): AtCand
       // kind's failure isolated to that kind (NO-THROW contract, RFC §6.1).
       const [files, skills, plugins, apps] = await Promise.all([
         safe(() => fileLister(query, signal)),
-        safe(async () => (deps.listSkills ? listKebab(deps.listSkills(), query, "skill", max) : [])),
+        safe(async () =>
+          deps.listSkills ? listKebab(deps.listSkills(), query, "skill", max) : [],
+        ),
         safe(async () =>
           deps.listPlugins ? listKebab(deps.listPlugins(), query, "plugin", max) : [],
         ),

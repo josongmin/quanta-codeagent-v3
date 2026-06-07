@@ -27,11 +27,11 @@
  * the corpus is byte-stable across runs and CI.
  */
 
+import { afterAll, describe, expect, test } from "bun:test"
 import { execFileSync } from "node:child_process"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterAll, describe, expect, test } from "bun:test"
 import { type ConflictBlock, parseConflicts } from "@/git"
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -437,7 +437,9 @@ describe("conflict-parser differential fuzz — PART 2: constructed adversarial"
       const src =
         `${MARK("<", runLen)} HEAD${eol}` +
         `ours-1${eol}` +
-        (baseLabel === "" ? `${MARK("|", runLen)}${eol}` : `${MARK("|", runLen)} ${baseLabel}${eol}`) +
+        (baseLabel === ""
+          ? `${MARK("|", runLen)}${eol}`
+          : `${MARK("|", runLen)} ${baseLabel}${eol}`) +
         `base-1${eol}base-2${eol}` +
         `${MARK("=", runLen)}${eol}` +
         `theirs-1${eol}` +

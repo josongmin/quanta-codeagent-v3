@@ -103,6 +103,7 @@ const objectiveWithThrowingClear = (): ObjectivePort => {
     setNextActions: () => obj,
     markCriterion: () => obj,
     recordUsage: () => obj,
+    markUsageLimited: () => obj,
     list: () => Object.freeze([obj]),
     toSnapshot: () => ({ objectives: Object.freeze([obj]) }),
     fromSnapshot: () => undefined,

@@ -81,12 +81,7 @@ export type GroundingAmbiguityClass = (typeof GROUNDING_AMBIGUITY_CLASSES)[numbe
 export const GROUNDING_PAIR_ROLES = ["raw", "summary"] as const
 export type GroundingPairRole = (typeof GROUNDING_PAIR_ROLES)[number]
 
-export const GROUNDING_HISTORY_KINDS = [
-  "message",
-  "directive",
-  "tool_result",
-  "summary",
-] as const
+export const GROUNDING_HISTORY_KINDS = ["message", "directive", "tool_result", "summary"] as const
 export type GroundingHistoryKind = (typeof GROUNDING_HISTORY_KINDS)[number]
 
 export const GROUNDING_HISTORY_METADATA_FIELDS = [
@@ -273,11 +268,21 @@ const parseHistoryEntry = (raw: unknown): GroundingHistoryEntry => {
       ? { mentionedFileIds: parseStringList(mentionedFileIds, "history entry mentionedFileIds") }
       : {}),
     ...(mentionedReferentIds !== undefined
-      ? { mentionedReferentIds: parseStringList(mentionedReferentIds, "history entry mentionedReferentIds") }
+      ? {
+          mentionedReferentIds: parseStringList(
+            mentionedReferentIds,
+            "history entry mentionedReferentIds",
+          ),
+        }
       : {}),
     ...(toolName !== undefined ? { toolName } : {}),
     ...(mentionedThreadIds !== undefined
-      ? { mentionedThreadIds: parseStringList(mentionedThreadIds, "history entry mentionedThreadIds") }
+      ? {
+          mentionedThreadIds: parseStringList(
+            mentionedThreadIds,
+            "history entry mentionedThreadIds",
+          ),
+        }
       : {}),
     ...(policyMarkers !== undefined
       ? { policyMarkers: parseStringList(policyMarkers, "history entry policyMarkers") }
@@ -297,7 +302,9 @@ const parseStateContract = (raw: unknown): GroundingStateContract => {
     latestToolResultId !== null &&
     typeof latestToolResultId !== "string"
   ) {
-    throw new Error("grounding case stateContract.latestToolResultId must be string|null when present")
+    throw new Error(
+      "grounding case stateContract.latestToolResultId must be string|null when present",
+    )
   }
   const latestToolName = raw["latestToolName"]
   if (latestToolName !== undefined && typeof latestToolName !== "string") {
@@ -314,19 +321,41 @@ const parseStateContract = (raw: unknown): GroundingStateContract => {
   return {
     activeThreadId,
     ...(visibleThreadIds !== undefined
-      ? { visibleThreadIds: parseStringList(visibleThreadIds, "grounding case stateContract.visibleThreadIds") }
+      ? {
+          visibleThreadIds: parseStringList(
+            visibleThreadIds,
+            "grounding case stateContract.visibleThreadIds",
+          ),
+        }
       : {}),
     ...(pausedThreadIds !== undefined
-      ? { pausedThreadIds: parseStringList(pausedThreadIds, "grounding case stateContract.pausedThreadIds") }
+      ? {
+          pausedThreadIds: parseStringList(
+            pausedThreadIds,
+            "grounding case stateContract.pausedThreadIds",
+          ),
+        }
       : {}),
-    ...(latestToolResultId !== undefined ? { latestToolResultId: latestToolResultId as string | null } : {}),
+    ...(latestToolResultId !== undefined
+      ? { latestToolResultId: latestToolResultId as string | null }
+      : {}),
     ...(latestToolName !== undefined ? { latestToolName } : {}),
     ...(candidateFileIds !== undefined
-      ? { candidateFileIds: parseStringList(candidateFileIds, "grounding case stateContract.candidateFileIds") }
+      ? {
+          candidateFileIds: parseStringList(
+            candidateFileIds,
+            "grounding case stateContract.candidateFileIds",
+          ),
+        }
       : {}),
     ...(primaryFileId !== undefined ? { primaryFileId: primaryFileId as string | null } : {}),
     ...(policyMarkers !== undefined
-      ? { policyMarkers: parseStringList(policyMarkers, "grounding case stateContract.policyMarkers") }
+      ? {
+          policyMarkers: parseStringList(
+            policyMarkers,
+            "grounding case stateContract.policyMarkers",
+          ),
+        }
       : {}),
   }
 }
@@ -334,12 +363,10 @@ const parseStateContract = (raw: unknown): GroundingStateContract => {
 const parseSourceProvenance = (raw: unknown): GroundingSourceProvenance => {
   if (!isRecord(raw)) throw new Error("grounding case sourceProvenance must be an object")
   const kind = raw["kind"]
-  if (
-    kind !== "manual" &&
-    kind !== "trajectory_freeze" &&
-    kind !== "session_freeze"
-  ) {
-    throw new Error("grounding case sourceProvenance.kind must be manual|trajectory_freeze|session_freeze")
+  if (kind !== "manual" && kind !== "trajectory_freeze" && kind !== "session_freeze") {
+    throw new Error(
+      "grounding case sourceProvenance.kind must be manual|trajectory_freeze|session_freeze",
+    )
   }
   const sessionId = raw["sessionId"]
   if (sessionId !== undefined && typeof sessionId !== "string") {
@@ -353,7 +380,9 @@ const parseSourceProvenance = (raw: unknown): GroundingSourceProvenance => {
       typeof seqRange[0] !== "number" ||
       typeof seqRange[1] !== "number")
   ) {
-    throw new Error("grounding case sourceProvenance.seqRange must be a [number, number] tuple when present")
+    throw new Error(
+      "grounding case sourceProvenance.seqRange must be a [number, number] tuple when present",
+    )
   }
   return {
     kind,
@@ -526,14 +555,21 @@ export const parseGroundingCase = (raw: unknown): GroundingCase => {
     ...(mode !== undefined ? { mode } : {}),
     ...(cwd !== undefined ? { cwd } : {}),
     ...(memoryContext !== undefined ? { memoryContext } : {}),
-    ...(raw["workingState"] !== undefined ? { workingState: raw["workingState"] as WorkingState } : {}),
+    ...(raw["workingState"] !== undefined
+      ? { workingState: raw["workingState"] as WorkingState }
+      : {}),
     ...(repoRulesText !== undefined ? { repoRulesText } : {}),
     ...(Array.isArray(raw["contextChanges"])
       ? { contextChanges: raw["contextChanges"].map(parseContextChange) }
       : {}),
     ...(stateContract !== undefined ? { stateContract: parseStateContract(stateContract) } : {}),
     ...(candidateThreadIds !== undefined
-      ? { candidateThreadIds: parseStringList(candidateThreadIds, "grounding case candidateThreadIds") }
+      ? {
+          candidateThreadIds: parseStringList(
+            candidateThreadIds,
+            "grounding case candidateThreadIds",
+          ),
+        }
       : {}),
     ...(candidateReferentIds !== undefined
       ? {

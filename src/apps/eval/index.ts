@@ -31,11 +31,11 @@ import { isKnownAdapter, KNOWN_ADAPTERS, runCompare } from "./compare"
 import {
   buildGroundingComparison,
   buildGroundingGateResult,
-  buildGroundingRouteMatrixGateResult,
   buildGroundingRegressionResult,
   buildGroundingReport,
-  GROUNDING_CORPORA,
+  buildGroundingRouteMatrixGateResult,
   evaluateGroundingRegression,
+  GROUNDING_CORPORA,
   GROUNDING_GATE_PROFILES,
   GROUNDING_MODES,
   GROUNDING_REGRESSION_PROFILES,
@@ -44,8 +44,8 @@ import {
   isGroundingRouteMatrixName,
   readGroundingReplayDraft,
   resolveGroundingBaseline,
-  runGroundingPreflightCheck,
   runGrounding,
+  runGroundingPreflightCheck,
   writeGroundingReplayDraft,
   writePromotedGroundingReplayCase,
 } from "./grounding"
@@ -192,20 +192,23 @@ const cmdGrounding = async (): Promise<number> => {
         console.error("eval grounding run: --suite must be canary or nightly")
         return 1
       }
-      if (corpus !== undefined && !GROUNDING_CORPORA.includes(corpus as (typeof GROUNDING_CORPORA)[number])) {
-        console.error(
-          `eval grounding run: --corpus must be one of ${GROUNDING_CORPORA.join(", ")}`,
-        )
+      if (
+        corpus !== undefined &&
+        !GROUNDING_CORPORA.includes(corpus as (typeof GROUNDING_CORPORA)[number])
+      ) {
+        console.error(`eval grounding run: --corpus must be one of ${GROUNDING_CORPORA.join(", ")}`)
         return 1
       }
       const mode = argValue("--mode")
-      if (mode !== undefined && !GROUNDING_MODES.includes(mode as (typeof GROUNDING_MODES)[number])) {
+      if (
+        mode !== undefined &&
+        !GROUNDING_MODES.includes(mode as (typeof GROUNDING_MODES)[number])
+      ) {
         console.error(`eval grounding run: --mode must be one of ${GROUNDING_MODES.join(", ")}`)
         return 1
       }
       const limitRaw = argValue("--limit")
-      const limit =
-        limitRaw !== undefined ? Number.parseInt(limitRaw, 10) : undefined
+      const limit = limitRaw !== undefined ? Number.parseInt(limitRaw, 10) : undefined
       if (
         limitRaw !== undefined &&
         (!Number.isFinite(limit) || limit === undefined || limit < 0 || !Number.isInteger(limit))
@@ -304,7 +307,9 @@ const cmdGrounding = async (): Promise<number> => {
         }
         const runIds = csvValues(argValue("--run-ids"))
         if (runIds === undefined || runIds.length === 0) {
-          console.error("eval grounding gate: --run-ids <id1,id2,...> is required with --route-matrix")
+          console.error(
+            "eval grounding gate: --run-ids <id1,id2,...> is required with --route-matrix",
+          )
           return 1
         }
         const profile = argValue("--profile")
@@ -319,7 +324,8 @@ const cmdGrounding = async (): Promise<number> => {
         const markdownOut = argValue("--markdown-out")
         const jsonOut = argValue("--json-out")
         if (markdownOut !== undefined) writeTextFile(markdownOut, gate.markdown)
-        if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(gate.result, null, 2)}\n`)
+        if (jsonOut !== undefined)
+          writeTextFile(jsonOut, `${JSON.stringify(gate.result, null, 2)}\n`)
         if (gate.result.failures.length === 0) {
           console.error(`grounding route-matrix gate passed: matrix=${routeMatrix}`)
           return 0
@@ -392,9 +398,11 @@ const cmdGrounding = async (): Promise<number> => {
         outPath,
       }
       if (sessionSnapshotPath !== undefined) scaffoldOpts.sessionSnapshotPath = sessionSnapshotPath
-      if (stateJsonPath !== undefined) scaffoldOpts.stateContract = readJsonFile(stateJsonPath) as never
+      if (stateJsonPath !== undefined)
+        scaffoldOpts.stateContract = readJsonFile(stateJsonPath) as never
       if (candidateThreadIds !== undefined) scaffoldOpts.candidateThreadIds = candidateThreadIds
-      if (candidateReferentIds !== undefined) scaffoldOpts.candidateReferentIds = candidateReferentIds
+      if (candidateReferentIds !== undefined)
+        scaffoldOpts.candidateReferentIds = candidateReferentIds
       if (ambiguityClass !== undefined) scaffoldOpts.ambiguityClass = ambiguityClass as never
       const result = writeGroundingReplayDraft(scaffoldOpts)
       const jsonOut = argValue("--json-out")
@@ -424,7 +432,9 @@ const cmdGrounding = async (): Promise<number> => {
         return 1
       }
       if (corpus !== "replay_critical" && corpus !== "replay_nightly") {
-        console.error("eval grounding promote-replay: --corpus must be replay_critical or replay_nightly")
+        console.error(
+          "eval grounding promote-replay: --corpus must be replay_critical or replay_nightly",
+        )
         return 1
       }
       const blockingEligibleRaw = argValue("--blocking-eligible")
@@ -503,7 +513,8 @@ const cmdGrounding = async (): Promise<number> => {
       const jsonOut = argValue("--json-out")
       const regression = buildGroundingRegressionResult(out.comparison, profile)
       if (markdownOut !== undefined) writeTextFile(markdownOut, regression.markdown)
-      if (jsonOut !== undefined) writeTextFile(jsonOut, `${JSON.stringify(regression.result, null, 2)}\n`)
+      if (jsonOut !== undefined)
+        writeTextFile(jsonOut, `${JSON.stringify(regression.result, null, 2)}\n`)
       if (regression.result.failures.length === 0) {
         console.error(
           `grounding regress passed: profile=${profile} baseline=${baselineRunId} candidate=${candidateRunId}`,

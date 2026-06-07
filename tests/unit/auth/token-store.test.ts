@@ -3,14 +3,14 @@ import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/pr
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import {
+  deleteToken,
   hasUsableChatgptToken,
+  isExpired,
   readCodexAuthToken,
   readResolvedToken,
+  readToken,
   type TokenRecord,
   TokenStoreError,
-  deleteToken,
-  isExpired,
-  readToken,
   writeToken,
 } from "../../../src/auth/chatgpt-oauth/token-store"
 
@@ -24,7 +24,11 @@ const sampleRecord: TokenRecord = {
 }
 
 const toBase64Url = (s: string): string =>
-  Buffer.from(s, "utf8").toString("base64").replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_")
+  Buffer.from(s, "utf8")
+    .toString("base64")
+    .replace(/=+$/, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
 
 const fakeJwt = (payload: Record<string, unknown>): string => {
   const header = toBase64Url('{"alg":"RS256"}')

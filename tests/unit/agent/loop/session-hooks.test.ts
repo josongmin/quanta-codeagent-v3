@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { HookBus } from "@/agent/hooks"
 import { emitUserPromptSubmitHook, summarizeUserPrompt } from "@/agent/loop/session-hooks"
 import type { AgentConfig } from "@/agent/types"
 import type { Message } from "@/llm"
@@ -12,6 +13,10 @@ const baseConfig = (hooks?: AgentConfig["hooks"]): AgentConfig => ({
   llm: { stream: async function* () {} },
   registry: new ToolRegistry([]),
   stream: stubStream(),
+  permission: { mode: "default" },
+  messages: [],
+  system: "",
+  cwd: "/tmp",
   maxTurns: 1,
   signal: new AbortController().signal,
   ...(hooks !== undefined ? { hooks } : {}),
@@ -41,9 +46,9 @@ describe("session-hooks", () => {
         ],
       },
     ])
-    const cfg = baseConfig({
-      emit: async () => ({ deny: null, updatedPrompt: "rewritten" }),
-    } as AgentConfig["hooks"])
+    const hooks = new HookBus()
+    hooks.on("user_prompt_submit", () => ({ updatedPrompt: "rewritten" }))
+    const cfg = baseConfig(hooks)
 
     const denied = await emitUserPromptSubmitHook(cfg, wm, "session-1")
 
@@ -64,9 +69,9 @@ describe("session-hooks", () => {
       content: [{ type: "text", text: "blocked" }],
     }
     const wm = createWorkingMemory<Message>([original])
-    const cfg = baseConfig({
-      emit: async () => ({ deny: { deny: "policy" } }),
-    } as AgentConfig["hooks"])
+    const hooks = new HookBus()
+    hooks.on("user_prompt_submit", () => ({ deny: "policy" }))
+    const cfg = baseConfig(hooks)
 
     const denied = await emitUserPromptSubmitHook(cfg, wm, "session-1")
 

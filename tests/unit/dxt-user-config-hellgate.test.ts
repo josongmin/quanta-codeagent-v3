@@ -300,5 +300,8 @@ describe("interpolateLaunchSpec", () => {
 
 function expectErrKind(r: Result<unknown, UserConfigError>, kind: string): void {
   expect(r.ok).toBe(false)
-  if (!r.ok) expect(r.error.kind).toBe(kind)
+  if (!r.ok) {
+    const actualKind: string = r.error.kind
+    expect(actualKind).toBe(kind)
+  }
 }

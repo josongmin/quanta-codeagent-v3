@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import type { StreamPort } from "@/stream"
-import { createCliPlanExitPort, createCliUserInputPort } from "../../../../src/apps/cli/repl/session-host-ports"
+import {
+  createCliPlanExitPort,
+  createCliUserInputPort,
+} from "../../../../src/apps/cli/repl/session-host-ports"
 
 const scriptedAsk = (...answers: string[]) => {
   const prompts: string[] = []

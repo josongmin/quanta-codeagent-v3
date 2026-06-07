@@ -111,6 +111,8 @@ describe("reconcileToolPairing — B4 resume-boundary tool-pair reconciliation",
     // assistant text + use preserved, stub appended as a user message after it
     expect(out.length).toBe(3)
     const stub = out[2]
+    expect(stub).toBeDefined()
+    if (stub === undefined) throw new Error("expected stub message")
     expect(stub.role).toBe("user")
     const stubBlocks = stub.content as Block[]
     expect(stubBlocks.length).toBe(1)
@@ -120,7 +122,10 @@ describe("reconcileToolPairing — B4 resume-boundary tool-pair reconciliation",
     expect(sr.is_error).toBe(true)
     expect(sr.content).toBe(RECONCILE_PLACEHOLDER_TEXT)
     // the orphan use's surrounding text is untouched (not dropped)
-    expect((out[1].content as Block[])[0]).toEqual(text("sure"))
+    const asstMsg = out[1]
+    expect(asstMsg).toBeDefined()
+    if (asstMsg === undefined) throw new Error("expected assistant message")
+    expect((asstMsg.content as Block[])[0]).toEqual(text("sure"))
   })
 
   // (b) tool_result with no preceding tool_use → dropped
@@ -129,7 +134,10 @@ describe("reconcileToolPairing — B4 resume-boundary tool-pair reconciliation",
     const out = reconcileToolPairing(input) as Msg[]
     assertModelValid(out)
     // the ghost result is gone; the surrounding text survives
-    const second = out[1].content as Block[]
+    const secondMsg = out[1]
+    expect(secondMsg).toBeDefined()
+    if (secondMsg === undefined) throw new Error("expected second message")
+    const second = secondMsg.content as Block[]
     expect(second.some((b) => b.type === "tool_result")).toBe(false)
     expect(second).toContainEqual(text("ctx"))
   })
@@ -239,7 +247,10 @@ describe("reconcileToolPairing — B4 resume-boundary tool-pair reconciliation",
     const out = reconcileToolPairing(input) as Msg[]
     assertModelValid(out)
     expect(out.length).toBe(2)
-    const stubBlocks = out[1].content as Block[]
+    const stubMsg = out[1]
+    expect(stubMsg).toBeDefined()
+    if (stubMsg === undefined) throw new Error("expected stub message")
+    const stubBlocks = stubMsg.content as Block[]
     expect(stubBlocks.length).toBe(2)
     expect((stubBlocks[0] as ToolResultBlock).tool_use_id).toBe("p")
     expect((stubBlocks[1] as ToolResultBlock).tool_use_id).toBe("q")

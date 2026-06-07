@@ -110,7 +110,9 @@ describe("grounding storage roundtrip", () => {
     })
     const row = matrix.blocks
       .flatMap((block) => block.rows)
-      .find((candidate) => candidate.id === "persistent-context.conversation-state.thread-grounding")
+      .find(
+        (candidate) => candidate.id === "persistent-context.conversation-state.thread-grounding",
+      )
     expect(row?.cells.grounding.verdict).toBe("pass")
     expect(row?.cells.grounding.count).toBe(1)
   })

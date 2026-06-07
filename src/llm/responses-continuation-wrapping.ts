@@ -7,9 +7,7 @@ export interface ResponsesContinuationWrappingOpts {
   readonly store: ResponsesContinuationStore
 }
 
-export const responsesContinuationLlmPort = (
-  opts: ResponsesContinuationWrappingOpts,
-): LLMPort => ({
+export const responsesContinuationLlmPort = (opts: ResponsesContinuationWrappingOpts): LLMPort => ({
   ...(opts.inner.model !== undefined ? { model: opts.inner.model } : {}),
   ...(opts.inner.provider !== undefined ? { provider: opts.inner.provider } : {}),
   ...(opts.inner.surfaceId !== undefined ? { surfaceId: opts.inner.surfaceId } : {}),

@@ -121,9 +121,9 @@ describe("allow-list zero-host widen hellgate", () => {
       },
       bad: { extends: ["permissive", "orgCeil"] },
     }
-    expect(() =>
-      resolveProfileInheritance("bad", widenReg, { onManagedWiden: "throw" }),
-    ).toThrow(ProfileInheritanceError)
+    expect(() => resolveProfileInheritance("bad", widenReg, { onManagedWiden: "throw" })).toThrow(
+      ProfileInheritanceError,
+    )
     try {
       resolveProfileInheritance("bad", widenReg, { onManagedWiden: "throw" })
     } catch (e) {
@@ -166,8 +166,10 @@ describe("allow-list zero-host widen hellgate", () => {
     // layer: allow-all layer + allow-list layer with hosts ⇒ those hosts survive.
     const allowAll = mkProfile({ mode: "allow-all" })
     const listed = mkProfile({ mode: "allow-list", allowHosts: ["a.com"] })
-    const merged = mergeProfileLayers({ perUser: allowAll, teamAdmin: listed }, "most-restrictive")
-      .merged
+    const merged = mergeProfileLayers(
+      { perUser: allowAll, teamAdmin: listed },
+      "most-restrictive",
+    ).merged
     expect(merged.network.mode).toBe("allow-list")
     expect(merged.network.allowHosts).toEqual(["a.com"])
   })

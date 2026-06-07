@@ -14,11 +14,7 @@
  */
 import type { StreamEvent } from "@/llm"
 
-import type {
-  CancellationController,
-  CancellationOutcome,
-  PartialResult,
-} from "./types"
+import type { CancellationController, CancellationOutcome, PartialResult } from "./types"
 
 export interface CancellableStreamOpts {
   /** Upstream LLM stream — already cancelled-aware at the SDK level via

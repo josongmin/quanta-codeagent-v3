@@ -25,6 +25,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { ConnectorOutageError, createRestConnectorRegistry } from "@/connectors/rest-registry"
 import type {
   CacheEntry,
   CachePort,
@@ -33,7 +34,6 @@ import type {
   FetchPort,
   FetchPortResponse,
 } from "@/connectors/types"
-import { ConnectorOutageError, createRestConnectorRegistry } from "@/connectors/rest-registry"
 
 interface Script {
   readonly status: number

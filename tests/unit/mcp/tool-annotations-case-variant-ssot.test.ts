@@ -64,6 +64,6 @@ describe("mcpToolAnnotations — case-variant knob⇄runtime-config SSOT", () =>
   test("apply is an identity no-op (the dead AgentConfig field is removed)", () => {
     // The knob no longer writes any config field; apply returns the input cfg.
     const cfg = { sentinel: true } as unknown as Parameters<typeof mcpToolAnnotationsKnob.apply>[0]
-    expect(mcpToolAnnotationsKnob.apply(cfg, true)).toBe(cfg)
+    expect(mcpToolAnnotationsKnob.apply(cfg, true, { surface: "cli" })).toBe(cfg)
   })
 })

@@ -14,13 +14,7 @@ export type UseCaseId = string
 
 /** Tier of evidence the result was produced under. Mirrors the 6-tier verification
  *  stack from `docs/analysis/may-21-coding-agent-query-usecase.md` §검증 방법. */
-export type EvalTier =
-  | "audit"
-  | "synthetic"
-  | "grounding"
-  | "public"
-  | "trajectory"
-  | "compare"
+export type EvalTier = "audit" | "synthetic" | "grounding" | "public" | "trajectory" | "compare"
 
 /** A scenario verdict. `pass`/`fail` are deterministic outcomes; `partial`
  *  means the rubric was met for some items only; `error` is harness failure

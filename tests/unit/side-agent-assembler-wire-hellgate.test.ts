@@ -18,6 +18,7 @@ import { describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
 import { buildSideAgentBlock } from "@/agent/tier1"
 import { type AssembleRequest, assembleAgentConfig } from "@/host/runtime/agent-config-assembler"
+import type { SideAgentDaemonPort } from "@/tool/side-agent"
 
 const baseReq = (sessionId: string): AssembleRequest["base"] => ({
   llm: {
@@ -53,9 +54,10 @@ describe("N1 — maybeWireSideAgent (host-binding closeout)", () => {
       { mode: "interactive", base: baseReq("sess-side-on") },
       { QUANTA_SIDE_AGENT: "1" },
     )
-    expect(cfg.sideAgentDaemons).toBeDefined()
+    const reg = cfg.sideAgentDaemons
+    expect(reg).toBeDefined()
+    if (reg === undefined) throw new Error("expected sideAgentDaemons to be wired")
     // structural-mirror SideAgentDaemonPort surface (spawn/list/stop/findings)
-    const reg = cfg.sideAgentDaemons as Record<string, unknown>
     expect(typeof reg.spawn).toBe("function")
     expect(typeof reg.list).toBe("function")
     expect(typeof reg.stop).toBe("function")
@@ -88,10 +90,10 @@ describe("N1 — maybeWireSideAgent (host-binding closeout)", () => {
   })
 
   test("C1 — caller-supplied registry is preserved (caller-override-precedence)", () => {
-    const sentinel = {
-      spawn: () => undefined,
+    const sentinel: SideAgentDaemonPort = {
+      spawn: () => "side-agent-id",
       list: () => [],
-      stop: () => undefined,
+      stop: () => false,
       findings: () => [],
     }
     const cfg = assembleAgentConfig(
@@ -100,10 +102,10 @@ describe("N1 — maybeWireSideAgent (host-binding closeout)", () => {
         base: {
           ...baseReq("sess-side-pre"),
           sideAgentDaemons: sentinel,
-        } as AssembleRequest["base"],
+        },
       },
       { QUANTA_SIDE_AGENT: "1" },
     )
-    expect(cfg.sideAgentDaemons).toBe(sentinel as never)
+    expect(cfg.sideAgentDaemons).toBe(sentinel)
   })
 })

@@ -75,7 +75,17 @@ export interface KnobsSurfaceWire {
   readonly configPath: string
 }
 
-const SUBCOMMANDS = ["show", "list", "all", "find", "set", "reset", "preset", "save", "help"] as const
+const SUBCOMMANDS = [
+  "show",
+  "list",
+  "all",
+  "find",
+  "set",
+  "reset",
+  "preset",
+  "save",
+  "help",
+] as const
 type Subcommand = (typeof SUBCOMMANDS)[number]
 const isSubcommand = (s: string): s is Subcommand => (SUBCOMMANDS as readonly string[]).includes(s)
 
@@ -198,7 +208,9 @@ const renderAll = (ctx: SlashContext): number => {
     ctx.out(`\n${group} (${knobs.length})\n`)
     for (const k of knobs) {
       const v = values.get(k.envKey)
-      ctx.out(`${catalogLine(k, displaySafeValue(k.kind, v?.raw, v?.source), v?.isDefault ?? true)}\n`)
+      ctx.out(
+        `${catalogLine(k, displaySafeValue(k.kind, v?.raw, v?.source), v?.isDefault ?? true)}\n`,
+      )
     }
   }
   return 0
@@ -301,13 +313,18 @@ const doSet = (args: readonly string[], wire: KnobsSurfaceWire, ctx: SlashContex
     if (cat !== undefined) {
       // Validate raw against kind (parity with the runner path's fail-fast —
       // don't silently store a garbage numeric that the reader will drop).
-      if ((cat.kind === "int" || cat.kind === "float") && !Number.isFinite(Number(raw.trim() || "x"))) {
+      if (
+        (cat.kind === "int" || cat.kind === "float") &&
+        !Number.isFinite(Number(raw.trim() || "x"))
+      ) {
         ctx.err(`/knobs set: ${id} expects ${cat.kind}, got: ${JSON.stringify(raw)}\n`)
         return 1
       }
       const allowed = cat.kind === "enum" ? knobEnumValues(id) : undefined
       if (allowed !== undefined && !allowed.includes(raw)) {
-        ctx.err(`/knobs set: ${id} must be one of {${allowed.join(", ")}}, got: ${JSON.stringify(raw)}\n`)
+        ctx.err(
+          `/knobs set: ${id} must be one of {${allowed.join(", ")}}, got: ${JSON.stringify(raw)}\n`,
+        )
         return 1
       }
       if (!setCliKnobOverride(id, raw)) {

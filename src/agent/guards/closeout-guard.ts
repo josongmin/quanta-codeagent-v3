@@ -19,12 +19,7 @@
 
 import type { Message } from "@/llm"
 import { type CloseoutGuardState, decideCloseoutGuard } from "../closeout-guard"
-import {
-  type TurnGuard,
-  type TurnGuardContext,
-  type TurnGuardResult,
-  guardBlocked,
-} from "./chain"
+import { guardBlocked, type TurnGuard, type TurnGuardContext, type TurnGuardResult } from "./chain"
 import { isFinishAttempt, metaUser } from "./shared"
 
 export const createCloseoutGuard = (args: {

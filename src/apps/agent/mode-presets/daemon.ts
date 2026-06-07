@@ -86,21 +86,24 @@ const buildDaemonBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" |
     req.base.registry instanceof ToolRegistry
       ? req.base.registry
       : new ToolRegistry(buildDefaultTools())
-  return wireOptionalAgentPorts({
-    ...req.base,
-    llm: req.base.llm,
-    registry,
-    stream,
-    permission,
-    messages: req.base.messages ?? [],
-    system: req.base.system ?? buildSystemPrompt(cwd),
-    cwd,
-    maxTurns: req.base.maxTurns ?? 40,
-    // T01 (audit L5 H-2): inherit the composition-root's REAL SIGINT-wired
-    // signal; dead throwaway controller removed.
-    signal: req.base.signal,
-    branchSearch: req.base.branchSearch ?? DAEMON_BRANCH_SEARCH,
-  }, process.env)
+  return wireOptionalAgentPorts(
+    {
+      ...req.base,
+      llm: req.base.llm,
+      registry,
+      stream,
+      permission,
+      messages: req.base.messages ?? [],
+      system: req.base.system ?? buildSystemPrompt(cwd),
+      cwd,
+      maxTurns: req.base.maxTurns ?? 40,
+      // T01 (audit L5 H-2): inherit the composition-root's REAL SIGINT-wired
+      // signal; dead throwaway controller removed.
+      signal: req.base.signal,
+      branchSearch: req.base.branchSearch ?? DAEMON_BRANCH_SEARCH,
+    },
+    process.env,
+  )
 }
 
 export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {

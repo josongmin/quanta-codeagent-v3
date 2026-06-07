@@ -1,77 +1,126 @@
 import type { LLMPort } from "@/llm"
-import { makeRunId, ResultStore, type GroundingPayload } from "../storage"
+import { type GroundingPayload, makeRunId, ResultStore } from "../storage"
 import type { Verdict } from "../types"
 import {
+  type GroundingExecutionConfig,
   manualSuiteForCorpus,
   resolveGroundingCorpus,
   resolveGroundingExecutionConfig,
-  type GroundingExecutionConfig,
 } from "./config"
-import { groundingHarnessFingerprint } from "./harness"
-import { loadGroundingCases, type LoadGroundingCasesOpts } from "./loader"
 import {
   buildGroundingExecutionContract,
-  groundingExecutionContractFingerprint,
   type GroundingExecutionRoute,
+  groundingExecutionContractFingerprint,
 } from "./execution-contract"
-import {
-  runGroundingPreflight,
-  runGroundingProbe,
-  type GroundingPreflightResult,
-} from "./probe"
+import { groundingHarnessFingerprint } from "./harness"
+import { type LoadGroundingCasesOpts, loadGroundingCases } from "./loader"
 import { normalizeGroundingDecision } from "./normalizer"
-import { emptyGroundingMatches, scoreGroundingDecision } from "./scorer"
+import { type GroundingPreflightResult, runGroundingPreflight, runGroundingProbe } from "./probe"
 import type { GroundingCase, GroundingCorpus, GroundingMode, GroundingSuite } from "./schema"
+import { emptyGroundingMatches, scoreGroundingDecision } from "./scorer"
 import { shortHash, stableJson } from "./stable-json"
 
 export {
-  manualSuiteForCorpus,
-  resolveGroundingCorpus,
-  resolveGroundingExecutionConfig,
-  type GroundingExecutionConfig,
-} from "./config"
-export {
-  resolveGroundingBaseline,
   type GroundingBaselineResolution,
   type GroundingBaselineStatus,
+  resolveGroundingBaseline,
 } from "./baseline"
 export {
   buildGroundingComparison,
   buildGroundingRegressionResult,
   evaluateGroundingRegression,
   GROUNDING_REGRESSION_PROFILES,
-  isGroundingRegressionProfile,
   type GroundingComparisonOutput,
   type GroundingRegressionFailure,
   type GroundingRegressionOutput,
   type GroundingRegressionProfile,
   type GroundingRegressionResult,
+  isGroundingRegressionProfile,
 } from "./compare"
 export {
-  buildGroundingGateResult,
-  buildGroundingRouteMatrixGateResult,
-  buildGroundingReport,
+  type GroundingExecutionConfig,
+  manualSuiteForCorpus,
+  resolveGroundingCorpus,
+  resolveGroundingExecutionConfig,
+} from "./config"
+export {
+  classifyGroundingInfraError,
+  classifyGroundingParserError,
+  GROUNDING_ERROR_KINDS,
+  type GroundingErrorKind,
+} from "./diagnostics"
+export {
+  buildGroundingExecutionContract,
+  type GroundingExecutionContract,
+  type GroundingExecutionRoute,
+  groundingExecutionContractFingerprint,
+} from "./execution-contract"
+export {
+  extractGroundingFileIds,
+  type GroundingSpecificFileContext,
+  isGroundingFileId,
+  resolveGroundingSpecificFileContext,
+} from "./file-context"
+export { buildGroundingHarnessManifest, groundingHarnessFingerprint } from "./harness"
+export { loadGroundingCases } from "./loader"
+export { normalizeGroundingDecision } from "./normalizer"
+export { extractJsonObject, parseGroundingDecisionText } from "./parser"
+export {
+  type GroundingPreflightResult,
+  resolveGroundingProbeProfile,
+  runGroundingPreflight,
+  runGroundingProbe,
+} from "./probe"
+export {
+  type GroundingReferentContext,
+  resolveGroundingReferentContext,
+} from "./referent-context"
+export {
+  type BuildGroundingReplayDraftOpts,
+  buildGroundingReplayDraft,
+  type GroundingReplayDraft,
+  type GroundingReplayDraftResult,
+  type GroundingReplayPromotionResult,
+  type PromoteGroundingReplayDraftOpts,
+  promoteGroundingReplayDraft,
+  readGroundingReplayDraft,
+  type WriteGroundingReplayDraftOpts,
+  type WritePromotedGroundingReplayCaseOpts,
+  writeGroundingReplayDraft,
+  writePromotedGroundingReplayCase,
+} from "./replay-scaffold"
+export {
   buildGroundingBucketReports,
+  buildGroundingGateResult,
   buildGroundingMetrics,
+  buildGroundingReport,
+  buildGroundingRouteMatrixGateResult,
   evaluateGroundingGate,
   GROUNDING_GATE_PROFILES,
-  isGroundingGateProfile,
   type GroundingGateFailure,
   type GroundingGateOutput,
   type GroundingGateProfile,
   type GroundingGateResult,
+  type GroundingReportOutput,
   type GroundingRouteMatrixFailure,
   type GroundingRouteMatrixGateOutput,
   type GroundingRouteMatrixGateResult,
-  type GroundingReportOutput,
+  isGroundingGateProfile,
 } from "./report"
 export {
+  GROUNDING_ROUTE_MATRICES,
+  type GroundingRouteMatrix,
+  type GroundingRouteMatrixCell,
+  type GroundingRouteMatrixName,
+  isGroundingRouteMatrixName,
+} from "./route-matrix"
+export {
   GROUNDING_BUCKETS,
-  GROUNDING_CORPORA,
   GROUNDING_CONFIDENCE,
+  GROUNDING_CORPORA,
   GROUNDING_HARNESS_CONTRACT,
-  GROUNDING_HISTORY_METADATA_FIELDS,
   GROUNDING_HISTORY_KINDS,
+  GROUNDING_HISTORY_METADATA_FIELDS,
   GROUNDING_INTENTS,
   GROUNDING_MODES,
   GROUNDING_NORMALIZATION_PROFILES,
@@ -84,13 +133,12 @@ export {
   GROUNDING_STATE_CONTRACT_FIELDS,
   GROUNDING_SUITES,
   GROUNDING_USECASE,
-  parseGroundingCase,
   type GroundingAmbiguityClass,
   type GroundingBucket,
   type GroundingCase,
   type GroundingConfidence,
-  type GroundingCorpus,
   type GroundingContextChange,
+  type GroundingCorpus,
   type GroundingDecision,
   type GroundingHistoryEntry,
   type GroundingHistoryKind,
@@ -105,61 +153,9 @@ export {
   type GroundingSourceProvenance,
   type GroundingStateContract,
   type GroundingSuite,
+  parseGroundingCase,
 } from "./schema"
-export {
-  GROUNDING_ERROR_KINDS,
-  classifyGroundingInfraError,
-  classifyGroundingParserError,
-  type GroundingErrorKind,
-} from "./diagnostics"
-export { extractJsonObject, parseGroundingDecisionText } from "./parser"
-export { loadGroundingCases } from "./loader"
 export { emptyGroundingMatches, scoreGroundingDecision } from "./scorer"
-export {
-  extractGroundingFileIds,
-  isGroundingFileId,
-  resolveGroundingSpecificFileContext,
-  type GroundingSpecificFileContext,
-} from "./file-context"
-export {
-  resolveGroundingReferentContext,
-  type GroundingReferentContext,
-} from "./referent-context"
-export {
-  runGroundingPreflight,
-  runGroundingProbe,
-  resolveGroundingProbeProfile,
-  type GroundingPreflightResult,
-} from "./probe"
-export { normalizeGroundingDecision } from "./normalizer"
-export { buildGroundingHarnessManifest, groundingHarnessFingerprint } from "./harness"
-export {
-  buildGroundingExecutionContract,
-  groundingExecutionContractFingerprint,
-  type GroundingExecutionContract,
-  type GroundingExecutionRoute,
-} from "./execution-contract"
-export {
-  GROUNDING_ROUTE_MATRICES,
-  isGroundingRouteMatrixName,
-  type GroundingRouteMatrix,
-  type GroundingRouteMatrixCell,
-  type GroundingRouteMatrixName,
-} from "./route-matrix"
-export {
-  buildGroundingReplayDraft,
-  promoteGroundingReplayDraft,
-  readGroundingReplayDraft,
-  writeGroundingReplayDraft,
-  writePromotedGroundingReplayCase,
-  type BuildGroundingReplayDraftOpts,
-  type GroundingReplayDraft,
-  type GroundingReplayDraftResult,
-  type GroundingReplayPromotionResult,
-  type PromoteGroundingReplayDraftOpts,
-  type WriteGroundingReplayDraftOpts,
-  type WritePromotedGroundingReplayCaseOpts,
-} from "./replay-scaffold"
 
 export interface GroundingRunOpts extends LoadGroundingCasesOpts {
   llm: LLMPort
@@ -229,17 +225,12 @@ const executeGroundingCase = async (
   const matches = emptyGroundingMatches()
   const normalization =
     probe.error === undefined && probe.decision !== undefined
-      ? normalizeGroundingDecision(
-          groundingCase,
-          probe.decision,
-          execConfig.normalizationProfile,
-        )
+      ? normalizeGroundingDecision(groundingCase, probe.decision, execConfig.normalizationProfile)
       : undefined
   const rawActual = probe.error === undefined ? probe.decision : undefined
   const normalizedActual =
     execConfig.normalizationProfile === "none" ? undefined : normalization?.decision
-  const scoredActual =
-    execConfig.normalizationProfile === "none" ? rawActual : normalizedActual
+  const scoredActual = execConfig.normalizationProfile === "none" ? rawActual : normalizedActual
   const route = llmRoute(opts.llm)
   const executionContractFingerprint = groundingExecutionContractFingerprint(
     buildGroundingExecutionContract(route, execConfig, groundingCase.corpus ?? "canary"),
@@ -273,12 +264,22 @@ const executeGroundingCase = async (
     normalizationApplied: normalization?.applied ?? false,
     ...(normalization !== undefined ? { normalizationReasons: [...normalization.reasons] } : {}),
     executionContractFingerprint,
-    ...(groundingCase.sourceProvenance !== undefined ? { sourceProvenance: groundingCase.sourceProvenance } : {}),
+    ...(groundingCase.sourceProvenance !== undefined
+      ? { sourceProvenance: groundingCase.sourceProvenance }
+      : {}),
     ...(groundingCase.humanAudit !== undefined ? { humanAudit: groundingCase.humanAudit } : {}),
-    ...(groundingCase.candidateThreadIds !== undefined ? { candidateThreadIds: groundingCase.candidateThreadIds } : {}),
-    ...(groundingCase.candidateReferentIds !== undefined ? { candidateReferentIds: groundingCase.candidateReferentIds } : {}),
-    ...(groundingCase.ambiguityClass !== undefined ? { ambiguityClass: groundingCase.ambiguityClass } : {}),
-    ...(groundingCase.blockingEligible !== undefined ? { blockingEligible: groundingCase.blockingEligible } : {}),
+    ...(groundingCase.candidateThreadIds !== undefined
+      ? { candidateThreadIds: groundingCase.candidateThreadIds }
+      : {}),
+    ...(groundingCase.candidateReferentIds !== undefined
+      ? { candidateReferentIds: groundingCase.candidateReferentIds }
+      : {}),
+    ...(groundingCase.ambiguityClass !== undefined
+      ? { ambiguityClass: groundingCase.ambiguityClass }
+      : {}),
+    ...(groundingCase.blockingEligible !== undefined
+      ? { blockingEligible: groundingCase.blockingEligible }
+      : {}),
     ...(groundingCase.pairId !== undefined ? { pairId: groundingCase.pairId } : {}),
     ...(groundingCase.pairRole !== undefined ? { pairRole: groundingCase.pairRole } : {}),
     ...(probe.error !== undefined ? { parseError: probe.error } : {}),

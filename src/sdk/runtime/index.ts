@@ -1,4 +1,12 @@
-export { createRuntime } from "./create-runtime"
+export type {
+  ComposeRuntimeBootstrapContextArgs,
+  CreateRuntimeFacadeArgs,
+  CreateRuntimeFromAgentConfigBaseArgs,
+  CreateRuntimeFromBootstrapArgs,
+  RuntimeContext,
+  RuntimeFacadeComposeOptions,
+  RuntimeWireSummary,
+} from "./context"
 export {
   composeRuntimeBootstrapContext,
   createRuntimeFromAgentConfigBase,
@@ -6,6 +14,8 @@ export {
   materializeReviewerAgent,
   summarizeRuntimeContext,
 } from "./context"
+export { createRuntime } from "./create-runtime"
+export type { AttachedSessionTransport, AttachSessionTransportArgs } from "./transport"
 export { attachSessionTransport, detachSessionTransport } from "./transport"
 export type {
   CreateRuntimeOptions,
@@ -19,13 +29,3 @@ export type {
   SessionDispatchOptions,
   SessionDispatchResult,
 } from "./types"
-export type {
-  ComposeRuntimeBootstrapContextArgs,
-  CreateRuntimeFacadeArgs,
-  CreateRuntimeFromAgentConfigBaseArgs,
-  CreateRuntimeFromBootstrapArgs,
-  RuntimeContext,
-  RuntimeFacadeComposeOptions,
-  RuntimeWireSummary,
-} from "./context"
-export type { AttachedSessionTransport, AttachSessionTransportArgs } from "./transport"

@@ -1,8 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import {
-  DEFAULT_PROTECTED_BRANCHES,
-  decideBranchOnly,
-} from "@/../src/permission/branch-only"
+import { DEFAULT_PROTECTED_BRANCHES, decideBranchOnly } from "@/../src/permission/branch-only"
 
 describe("decideBranchOnly — git push", () => {
   test("push refspec to protected branch is denied", () => {
@@ -59,11 +56,7 @@ describe("decideBranchOnly — HELLGATE: wildcard refspec push (H3)", () => {
   })
 
   test("push '*:*' from feature branch is DENIED", () => {
-    const v = decideBranchOnly(
-      "git push origin *:*",
-      DEFAULT_PROTECTED_BRANCHES,
-      "feature/x",
-    )
+    const v = decideBranchOnly("git push origin *:*", DEFAULT_PROTECTED_BRANCHES, "feature/x")
     expect(v.allowed).toBe(false)
   })
 

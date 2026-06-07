@@ -127,9 +127,15 @@ describe("ADR-0182 — prompt-cache observability — A. record + snapshot", () 
 
   test("[6] perSession aggregation splits by sessionId and keeps per-session perModel local", () => {
     const o = defaultPromptCacheObserver()
-    o.record(evt({ sessionId: "s1", model: "claude-sonnet-4-6", inputTokens: 100, cacheReadTokens: 50 }))
-    o.record(evt({ sessionId: "s1", model: "claude-opus-4-7", inputTokens: 25, cacheReadTokens: 75 }))
-    o.record(evt({ sessionId: "s2", model: "claude-haiku-4-5", inputTokens: 200, cacheReadTokens: 100 }))
+    o.record(
+      evt({ sessionId: "s1", model: "claude-sonnet-4-6", inputTokens: 100, cacheReadTokens: 50 }),
+    )
+    o.record(
+      evt({ sessionId: "s1", model: "claude-opus-4-7", inputTokens: 25, cacheReadTokens: 75 }),
+    )
+    o.record(
+      evt({ sessionId: "s2", model: "claude-haiku-4-5", inputTokens: 200, cacheReadTokens: 100 }),
+    )
     o.record(evt({ sessionId: "s1", model: "claude-sonnet-4-6", inputTokens: 50 }))
     const snap = o.snapshot()
     expect(snap.perSession.size).toBe(2)

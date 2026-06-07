@@ -81,10 +81,7 @@ const makeTransport = (closeCbs: Array<() => void>): CdpTransport => ({
 
 // Spawner whose `exited` promise is externally resolvable, so a test can fire
 // process death (proc.exited path). Tracks kill() calls = process teardown.
-const makeSpawner = (
-  kills: number[],
-  exiters: Array<(code: number) => void>,
-): ProcessSpawner => ({
+const makeSpawner = (kills: number[], exiters: Array<(code: number) => void>): ProcessSpawner => ({
   which: () => "/usr/bin/google-chrome",
   spawn: (): SpawnedProcess => {
     const idx = kills.length

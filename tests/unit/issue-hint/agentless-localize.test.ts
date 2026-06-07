@@ -243,7 +243,10 @@ describe("agentlessLocalize — full integration with mock LLM", () => {
       { type: "stream_reset" },
       { type: "text_delta", delta: "FILE: requests/models.py\n" },
       { type: "text_delta", delta: "REASON: prepare_url IDNAError handling\n" },
-      { type: "text_delta", delta: "FILE: requests/adapters.py\nREASON: HTTPAdapter URL preparation" },
+      {
+        type: "text_delta",
+        delta: "FILE: requests/adapters.py\nREASON: HTTPAdapter URL preparation",
+      },
       { type: "message_stop", stop_reason: "end_turn" },
     ])
     const out = await agentlessLocalize("real issue", { ...baseDeps, llm })

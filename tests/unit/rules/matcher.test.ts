@@ -72,10 +72,7 @@ describe("matchCommand — longest-prefix-match wins", () => {
   })
 
   test("equal-length identical prefixes resolve by source order (lower index wins)", () => {
-    const rules = [
-      makeRule("allow", "git push", 1),
-      makeRule("deny", "git push", 2),
-    ]
+    const rules = [makeRule("allow", "git push", 1), makeRule("deny", "git push", 2)]
     const outcome = matchCommand("git push origin main", rules)
     expect(outcome.kind).toBe("matched")
     if (outcome.kind === "matched") {

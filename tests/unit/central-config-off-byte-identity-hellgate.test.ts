@@ -15,8 +15,13 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { type LayerPaths, type ReadTextPort, readLayers, resolveDiskConfig } from "@/config"
-import { parseSettingSources } from "@/config"
+import {
+  type LayerPaths,
+  parseSettingSources,
+  type ReadTextPort,
+  readLayers,
+  resolveDiskConfig,
+} from "@/config"
 import { __resetRuntimeConfig, runtimeConfig } from "@/shared"
 
 const KNOBS = [
@@ -94,7 +99,12 @@ describe("loader does ZERO reads when no source is discovered", () => {
       calls++
       return undefined
     }
-    const noPaths: LayerPaths = { managed: undefined, user: undefined, project: undefined, local: undefined }
+    const noPaths: LayerPaths = {
+      managed: undefined,
+      user: undefined,
+      project: undefined,
+      local: undefined,
+    }
     const layers = await readLayers(noPaths, read, () => {})
     expect(calls).toBe(0)
     expect(Object.keys(layers).length).toBe(0)

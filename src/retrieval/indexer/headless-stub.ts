@@ -15,13 +15,7 @@ import { err, ok, type Result } from "@/shared"
 import { chunkFile } from "./chunker"
 import { DeltaTracker, type FileStamp } from "./delta-tracker"
 import type { CodebaseIndexer, ScanOptions } from "./port"
-import type {
-  ChunkerOptions,
-  ChunkUpsertPort,
-  FileChunk,
-  IndexError,
-  IndexStats,
-} from "./types"
+import type { ChunkerOptions, ChunkUpsertPort, FileChunk, IndexError, IndexStats } from "./types"
 
 export interface HeadlessIndexerOpts {
   /** Mutable map the test controls — additions / deletions reflect in
@@ -57,10 +51,8 @@ export const headlessIndexerStub = (opts: HeadlessIndexerOpts): CodebaseIndexer 
     try {
       const snap = snapshot()
       const parts = tracker.diff(snap)
-      const changed = mode === "initial" ? Array.from(snap.keys()) : [
-        ...parts.added,
-        ...parts.modified,
-      ]
+      const changed =
+        mode === "initial" ? Array.from(snap.keys()) : [...parts.added, ...parts.modified]
       const newChunks = new Map<string, readonly FileChunk[]>()
       for (const path of changed) {
         if (scanOpts.signal?.aborted) return err({ kind: "aborted" as const })

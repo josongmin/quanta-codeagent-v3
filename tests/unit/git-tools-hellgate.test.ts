@@ -22,10 +22,11 @@
  * TYPED `ToolResult` (ok:true|false) and NEVER lets an unhandled throw escape
  * `execute()`. We assert behavior, not just absence-of-crash.
  */
+
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import {
   defaultGitRunner,
   gitBlameHeatmapTool,

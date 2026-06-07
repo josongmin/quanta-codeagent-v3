@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { createStdioTransport, type WireEnvelope } from "@/ipc"
-import { createSessionStdioTransport, encodeSessionTransportMessage } from "@/ipc/session"
 import type { SessionTransportMessage } from "@/ipc/session"
+import { createSessionStdioTransport, encodeSessionTransportMessage } from "@/ipc/session"
 
 /**
  * U5-ipc-framing hellgate — unbounded line-buffer OOM (PROTOCOL_IPC).
@@ -145,7 +145,9 @@ describe("U5 session stdio transport: unbounded-frame DoS guard", () => {
     const pair = makeStreamPair()
     const t = createSessionStdioTransport({ reader: pair.reader, writer: pair.writer })
     const seen: SessionTransportMessage[] = []
-    t.onMessage((m) => { seen.push(m) })
+    t.onMessage((m) => {
+      seen.push(m)
+    })
 
     expect(pair.attached).toBe(true)
     pair.push(overCapChunk)
@@ -167,7 +169,9 @@ describe("U5 session stdio transport: unbounded-frame DoS guard", () => {
     const pair = makeStreamPair()
     const t = createSessionStdioTransport({ reader: pair.reader, writer: pair.writer })
     const seen: SessionTransportMessage[] = []
-    t.onMessage((m) => { seen.push(m) })
+    t.onMessage((m) => {
+      seen.push(m)
+    })
 
     const message: SessionTransportMessage = { kind: "connect", sessionId: "session-1" }
     const wire = `${encodeSessionTransportMessage(message)}\n`

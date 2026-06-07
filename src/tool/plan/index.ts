@@ -15,10 +15,10 @@ export { currentPlanTool } from "./current-plan"
 export { planErrorMessage, planFailure } from "./error-mapping"
 export { removeTodosTool } from "./remove-todos"
 export {
-  type CurrentPlanInput,
   type CreatePlanInput,
-  currentPlanSchema,
+  type CurrentPlanInput,
   createPlanSchema,
+  currentPlanSchema,
   type RemoveTodosInput,
   removeTodosSchema,
   type UpdatePlanInput,

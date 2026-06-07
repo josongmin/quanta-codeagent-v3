@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { ResultStore } from "@/../src/apps/eval/storage"
 import { resolveGroundingBaseline } from "@/../src/apps/eval/grounding"
+import { ResultStore } from "@/../src/apps/eval/storage"
 
 describe("grounding baseline resolver", () => {
   test("resolves the latest prior finished comparable run", async () => {

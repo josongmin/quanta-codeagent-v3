@@ -24,9 +24,9 @@
  *      like `out.length <= 4000` are behavioral and are NOT matched here.)
  */
 
+import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
-import { describe, expect, test } from "bun:test"
 
 const ROOTS = ["tests", "src"]
 
@@ -63,9 +63,11 @@ const TRUE_TERMINATOR = /expect\(\s*true\s*\)\s*\.\s*toBe\(\s*true\s*\)/g
 
 // ── B. source-line-count budget: `expect(<loc-ish var>).toBeLessThan(N)` in a
 //    file that derives a line count via `.split("\n").length`. ───────────────
-const LOC_ASSERT = /expect\(\s*\w*(?:loc|lines|lineCount|locCount|sloc)\w*\s*\)\s*\.\s*toBeLessThan(?:OrEqual)?\(/i
+const LOC_ASSERT =
+  /expect\(\s*\w*(?:loc|lines|lineCount|locCount|sloc)\w*\s*\)\s*\.\s*toBeLessThan(?:OrEqual)?\(/i
 const LINE_COUNT_DERIVE = /\.split\(\s*["'`]\\n["'`]\s*\)\s*\.length/
-const LOC_ASSERT_INLINE = /\.split\(\s*["'`]\\n["'`]\s*\)\s*\.length\s*\)?\s*\.\s*toBeLessThan(?:OrEqual)?\(/
+const LOC_ASSERT_INLINE =
+  /\.split\(\s*["'`]\\n["'`]\s*\)\s*\.length\s*\)?\s*\.\s*toBeLessThan(?:OrEqual)?\(/
 
 const scan = (): {
   trueTerminators: { total: number; byFile: Record<string, number> }

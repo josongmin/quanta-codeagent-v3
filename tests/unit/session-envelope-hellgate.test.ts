@@ -20,14 +20,15 @@
  *   - a malformed / truncated line is a TYPED error, and one bad line in a
  *     stream does NOT lose the rest of the log
  */
+
+import { afterAll, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterAll, describe, expect, test } from "bun:test"
 import {
   decodeSessionLine,
-  encodeSessionLine,
   type EventMsgRecord,
+  encodeSessionLine,
   iterateSessionFile,
   type ResponseItemRecord,
   SESSION_ENVELOPE_VERSION,

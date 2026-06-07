@@ -34,7 +34,11 @@ import {
   assembleAgentConfig as assembleAgentConfigWithEnv,
 } from "@/host/runtime/agent-config-assembler"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
-import { createSkillMcpSession, type SkillMcpDepsEnv } from "@/skill/skill-mcp-deps"
+import {
+  createSkillMcpSession,
+  type SkillMcpDepsEnv,
+  type SkillMcpSession,
+} from "@/skill/skill-mcp-deps"
 
 // --- leaf-port fakes (mirror skill-mcp-attach-adapter-hellgate) -------------
 
@@ -245,15 +249,19 @@ describe("C. assembler maybeWireSkillMcp", () => {
   })
 
   test("C3 — caller-supplied session is preserved (caller-override-precedence)", () => {
-    const sentinel = { reconcile: async () => ({ attached: [], detached: [] }) }
+    const sentinel: SkillMcpSession = {
+      reconcile: async () => ({ attached: [], detached: [] }),
+      shutdownAll: async () => {},
+      attachedIdentities: () => [],
+    }
     const cfg = assembleAgentConfigWithEnv(
       {
         mode: "interactive",
-        base: { ...baseReq("sess-mcp-pre"), skillMcpSession: sentinel } as AssembleRequest["base"],
+        base: { ...baseReq("sess-mcp-pre"), skillMcpSession: sentinel },
       },
       { QUANTA_SKILL_MCP_DEPS: "1" },
     )
-    expect(cfg.skillMcpSession).toBe(sentinel as never)
+    expect(cfg.skillMcpSession).toBe(sentinel)
   })
 })
 

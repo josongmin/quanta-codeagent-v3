@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { buildInteractiveTurnAssembler } from "@/apps/web-daemon/runtime-factory"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
-import { ToolRegistry, defaultTools } from "@/tool"
+import { defaultTools, ToolRegistry } from "@/tool"
 import { RecordingStream } from "./_harness"
 
 const root = mkdtempSync(join(tmpdir(), "interactive-turn-assembler-"))

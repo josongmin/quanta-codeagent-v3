@@ -90,10 +90,12 @@ export interface CheckpointBaseWire {
  * `store.record(...)` from outside this slice.
  */
 export const defaultCheckpointBaseWire = (opts?: CheckpointBaseWireOpts): CheckpointBaseWire => {
-  const store = opts?.store ?? defaultConversationCheckpointStore({
-    ...(opts?.maxEntries !== undefined ? { maxEntries: opts.maxEntries } : {}),
-    ...(opts?.now !== undefined ? { now: opts.now } : {}),
-  })
+  const store =
+    opts?.store ??
+    defaultConversationCheckpointStore({
+      ...(opts?.maxEntries !== undefined ? { maxEntries: opts.maxEntries } : {}),
+      ...(opts?.now !== undefined ? { now: opts.now } : {}),
+    })
   const base: SessionForker = defaultSessionForker(store, {
     ...(opts?.now !== undefined ? { now: opts.now } : {}),
   })

@@ -32,7 +32,10 @@ import type { EngineStatus } from "./port"
  *   | errored  | true          | scheduled   |  ← H5: retry, don't die
  *   | errored  | false         | errored     |
  */
-export const advancedStatus = (outcome: "fired" | "errored", hasFutureFire: boolean): EngineStatus => {
+export const advancedStatus = (
+  outcome: "fired" | "errored",
+  hasFutureFire: boolean,
+): EngineStatus => {
   if (hasFutureFire) return "scheduled"
   return outcome === "errored" ? "errored" : "fired"
 }

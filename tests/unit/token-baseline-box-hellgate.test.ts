@@ -24,7 +24,8 @@ import type { Message } from "@/llm"
 const ANTHROPIC = "claude-opus-4-8"
 const OPENAI = "gpt-5"
 
-const mkBox = (sendCount?: number): TokenBaselineBoxState => ({ sendCount, current: undefined })
+const mkBox = (sendCount?: number): TokenBaselineBoxState =>
+  sendCount === undefined ? { current: undefined } : { sendCount, current: undefined }
 
 const userMsg = (text: string): Message => ({
   role: "user",

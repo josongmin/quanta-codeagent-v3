@@ -324,9 +324,7 @@ export const renderHelp = (builtins: readonly SlashCommand[]): string => {
     lines.push(renderEnvRow(e))
   }
   lines.push("")
-  lines.push(
-    dim("(/knobs all → full 240+ knob catalog, grouped · /knobs find <q> → search.)"),
-  )
+  lines.push(dim("(/knobs all → full 240+ knob catalog, grouped · /knobs find <q> → search.)"))
   return renderBox(lines, {
     title: "quanta — slash commands",
     titleStyle: bold,

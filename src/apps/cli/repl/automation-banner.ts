@@ -16,11 +16,7 @@
  * `paint()` so callers that forgot the env gate still pay zero cost.
  */
 
-import type {
-  AutomationEnginePort,
-  InboxItem,
-  TickOutcome,
-} from "@/scheduler/automation-engine"
+import type { AutomationEnginePort, InboxItem, TickOutcome } from "@/scheduler/automation-engine"
 
 /** Public surface — what the host calls to paint or to subscribe to ticks. */
 export interface InboxBanner {

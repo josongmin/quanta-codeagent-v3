@@ -55,7 +55,7 @@ const makeClient = (lastEventId: string | null, hasGetter = true) => {
   return { client, crash: (r?: string) => handlers.forEach((h) => h(r)) }
 }
 
-const CONFIG: McpServerConfig = { name: "srv", url: "https://mcp.example" }
+const CONFIG: McpServerConfig = { name: "srv", command: [], url: "https://mcp.example" }
 const deps = (
   factory: SupervisorDeps["factory"],
   clock: ReturnType<typeof makeClock>,

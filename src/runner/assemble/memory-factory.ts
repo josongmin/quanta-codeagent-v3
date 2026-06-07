@@ -42,7 +42,6 @@
  *     factory boundary so callers only need one knob).
  */
 
-import { gateDisabled } from "@/shared"
 import type { AgentConfig } from "@/agent"
 import type { PersistentStorePort } from "@/memory"
 import {
@@ -50,6 +49,7 @@ import {
   parseMemoryThreadMode,
   parseMemoryWriteGuardPct,
 } from "@/runner/knobs/memory-mode-parse"
+import { gateDisabled } from "@/shared"
 import { parseEnvFlag } from "./env-flag"
 import { buildMemoryConfigCore, type MemoryConfigAssembleInput, parseRecallTiers } from "./memory"
 import { buildStoreCore } from "./store"

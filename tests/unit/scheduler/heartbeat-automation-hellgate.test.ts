@@ -9,13 +9,13 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { createAutomation } from "@/scheduler/automation"
 import {
-  activeHeartbeatForThread,
   type Automation,
+  activeHeartbeatForThread,
   type HeartbeatPolicySnapshot,
   validateHeartbeatCandidate,
 } from "@/scheduler"
+import { createAutomation } from "@/scheduler/automation"
 import { parseRRule } from "@/scheduler/rrule-parser"
 import { defaultJsonlAutomationStore, type JsonlAutomationStoreOpts } from "@/scheduler/store-jsonl"
 

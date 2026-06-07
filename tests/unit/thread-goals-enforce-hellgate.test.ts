@@ -54,7 +54,7 @@ const enforcingStore = (now: () => number): ObjectivePort =>
 
 describe("HELLGATE [H17] — 6-state status machine", () => {
   test("budget exceeded ⇒ budget_limited (hard-stop)", () => {
-    let t = 1_000
+    const t = 1_000
     const store = enforcingStore(() => t)
     store.set(TID, { goal: "g", budget: { maxTokens: 100 } })
     store.recordUsage(TID, { tokens: 99 })
@@ -92,7 +92,7 @@ describe("HELLGATE [H17] — 6-state status machine", () => {
   })
 
   test("priority — blockers outrank usage_limited outranks budget_limited outranks completed", () => {
-    let t = 1_000
+    const t = 1_000
     const store = enforcingStore(() => t)
     store.set(TID, { goal: "g", successCriteria: ["c"], budget: { maxTokens: 1 } })
     store.recordUsage(TID, { tokens: 1 }) // exhausted

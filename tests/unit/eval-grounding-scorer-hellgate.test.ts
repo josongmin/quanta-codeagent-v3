@@ -4,7 +4,7 @@
  * may degrade to partial.
  */
 import { describe, expect, test } from "bun:test"
-import { scoreGroundingDecision, type GroundingCase } from "@/../src/apps/eval/grounding"
+import { type GroundingCase, scoreGroundingDecision } from "@/../src/apps/eval/grounding"
 
 const baseCase = (over: Partial<GroundingCase> = {}): GroundingCase => ({
   schema: 2,

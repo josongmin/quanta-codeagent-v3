@@ -111,7 +111,9 @@ export const spawnAgentsCsvTool = (port: BatchRunPort): Tool<SpawnAgentsCsvInput
           instruction: parsed.data.instruction,
           csv: parsed.data.csv,
           ...(parsed.data.poolSize !== undefined ? { poolSize: parsed.data.poolSize } : {}),
-          ...(parsed.data.maxAttempts !== undefined ? { maxAttempts: parsed.data.maxAttempts } : {}),
+          ...(parsed.data.maxAttempts !== undefined
+            ? { maxAttempts: parsed.data.maxAttempts }
+            : {}),
         },
         c.signal,
       )

@@ -44,10 +44,10 @@ export type {
   ToolCompletedEvent,
   ToolInvokedEvent,
   TurnCompletedEvent,
+  TurnFailedEvent,
   TurnLlmContinuationEvent,
   TurnLlmRequestEvent,
   TurnOutputDeltaEvent,
-  TurnFailedEvent,
   TurnStartedEvent,
 } from "./events"
 export {

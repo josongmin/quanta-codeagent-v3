@@ -344,7 +344,7 @@ describe("INTERACTION H2×H14b — wrapping a tool_result whose body is an offic
 
 describe("ORPHAN coverage_check — read-only, no-throw, path-jail, abort", () => {
   test("declared read-only + concurrency-safe (plan-mode safe surface)", () => {
-    expect(coverageCheckTool.isReadOnly?.({} as never)).toBe(true)
+    expect(coverageCheckTool.isReadOnly?.()).toBe(true)
     expect(coverageCheckTool.isConcurrencySafe?.({} as never)).toBe(true)
   })
 
@@ -409,7 +409,7 @@ describe("ORPHAN prompt_cache_status — read-only, no-throw on a hostile observ
 
   test("declared read-only + concurrency-safe", () => {
     const tool = promptCacheStatusTool({ snapshot: okSnap } as unknown as PromptCacheObserver)
-    expect(tool.isReadOnly?.({} as never)).toBe(true)
+    expect(tool.isReadOnly?.()).toBe(true)
     expect(tool.isConcurrencySafe?.({} as never)).toBe(true)
   })
 
@@ -463,6 +463,7 @@ const scriptedInner = (steps: ReadonlyArray<{ kind: "throw"; error: unknown } | 
     async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
       const step = steps[Math.min(i, steps.length - 1)]
       i += 1
+      if (step === undefined) throw new Error("no scripted step")
       if (step !== "ok") throw step.error
       yield okStop
     },

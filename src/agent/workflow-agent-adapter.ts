@@ -11,6 +11,7 @@
  * not-ok result so the engine records `agent_error` instead of crashing.
  */
 
+import { errMessage } from "@/shared"
 import type { SubagentRunner } from "@/subagent"
 import type { AgentRunPort, AgentRunRequest, AgentRunResult } from "@/workflow"
 
@@ -46,7 +47,7 @@ export const subagentRunnerToAgentRunPort = (
         ? { ok: true, text: res.finalText }
         : { ok: false, text: res.finalText, errorMessage: "subagent returned ok:false" }
     } catch (e) {
-      return { ok: false, text: "", errorMessage: e instanceof Error ? e.message : String(e) }
+      return { ok: false, text: "", errorMessage: errMessage(e) }
     }
   },
 })

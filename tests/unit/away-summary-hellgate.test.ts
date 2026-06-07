@@ -44,12 +44,16 @@ const activeTranscript: readonly RecapTurn[] = [
 
 /** A SummarizeFn spy: records every call's args, returns a scripted Result. */
 const spySummarizer = (
-  result: Result<string> | (() => Result<string>),
+  result: Result<string, unknown> | (() => Result<string, unknown>),
 ): {
   fn: SummarizeFn
-  calls: { system: string; transcript: readonly RecapTurn[]; signal?: AbortSignal }[]
+  calls: { system: string; transcript: readonly RecapTurn[]; signal?: AbortSignal | undefined }[]
 } => {
-  const calls: { system: string; transcript: readonly RecapTurn[]; signal?: AbortSignal }[] = []
+  const calls: {
+    system: string
+    transcript: readonly RecapTurn[]
+    signal?: AbortSignal | undefined
+  }[] = []
   const fn: SummarizeFn = async (args) => {
     calls.push({ system: args.system, transcript: args.transcript, signal: args.signal })
     return typeof result === "function" ? result() : result

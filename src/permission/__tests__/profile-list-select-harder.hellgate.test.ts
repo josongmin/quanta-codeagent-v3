@@ -342,11 +342,11 @@ describe("H. Structural validator — strict, total, no leak", () => {
       "network",
       "sandbox",
     ])
-    expect((profile as Record<string, unknown>).evil).toBeUndefined()
+    expect("evil" in profile).toBe(false)
     expect(Object.keys(profile.approval).sort()).toEqual(["mode", "promptUser"])
-    expect((profile.approval as Record<string, unknown>).backdoor).toBeUndefined()
+    expect("backdoor" in profile.approval).toBe(false)
     expect(Object.keys(profile.network).sort()).toEqual(["allowHosts", "mode"])
-    expect((profile.network as Record<string, unknown>).evilHost).toBeUndefined()
+    expect("evilHost" in profile.network).toBe(false)
   })
 
   // A bogus enum on EVERY pillar is a typed reject (each pillar's parser).

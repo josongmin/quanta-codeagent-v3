@@ -114,9 +114,7 @@ export const decideBranchOnly = (
     // ref (branches+tags+refs/*), `--tags` pushes all tags. Each can clobber a
     // protected branch from a feature branch — deny before positional checks.
     // Mirrors the `isDestructive` flag-scan in the reset block below.
-    const isWildcardPush = pushToks.some(
-      (t) => t === "--all" || t === "--mirror" || t === "--tags",
-    )
+    const isWildcardPush = pushToks.some((t) => t === "--all" || t === "--mirror" || t === "--tags")
     if (isWildcardPush) {
       return {
         allowed: false,
@@ -186,9 +184,7 @@ export const decideBranchOnly = (
     // `git reset --hard HEAD~3` on main → fell through to allow and rewrote
     // the protected branch. Deny any destructive reset on a protected current
     // branch, regardless of (or absent) the target ref.
-    const isDestructive = allToks.some(
-      (t) => t === "--hard" || t === "--merge" || t === "--keep",
-    )
+    const isDestructive = allToks.some((t) => t === "--hard" || t === "--merge" || t === "--keep")
     if (isDestructive && currentBranch && protectedBranches.includes(currentBranch)) {
       return {
         allowed: false,

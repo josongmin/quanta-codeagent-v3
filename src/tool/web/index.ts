@@ -20,7 +20,6 @@
  *  web-search.ts` (caller-wired through `AgentConfig.webSearch.provider`).
  */
 
-export { htmlToMarkdown, turndown } from "./html-to-markdown"
 export {
   WEB_FETCH_DEFAULT_MAX_BYTES,
   WEB_FETCH_MAX_BYTES_CEILING,
@@ -30,6 +29,7 @@ export {
   webFetchInputSchema,
   webFetchTool,
 } from "./fetch"
+export { htmlToMarkdown, turndown } from "./html-to-markdown"
 export {
   WEB_SEARCH_DEFAULT_LIMIT,
   WEB_SEARCH_MAX_LIMIT,

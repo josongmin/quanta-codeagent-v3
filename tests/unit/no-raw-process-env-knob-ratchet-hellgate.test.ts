@@ -15,9 +15,9 @@
  * NON-BLOCKING: the ceiling is the current high-water mark, not 0.
  */
 
+import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
-import { describe, expect, test } from "bun:test"
 
 /** Global-reach knob reads: `process.env.QUANTA_X` / `process.env["QUANTA_X"]` /
  *  ``process.env[`QUANTA_X`]`` (template) / `const {QUANTA_X} = process.env`

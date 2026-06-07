@@ -16,6 +16,7 @@
 import { describe, expect, test } from "bun:test"
 import type {
   BackgroundSubagentScheduler,
+  ForceBackgroundOutcome,
   SubagentHandleId,
   SubagentResult,
   SubagentSpec,
@@ -97,6 +98,10 @@ const fakeScheduler = (): FakeScheduler => {
     },
     hydrateWithPrune(): { restored: number; pruned: number } {
       return { restored: 0, pruned: 0 }
+    },
+    forceBackground(): ForceBackgroundOutcome {
+      // The fake has no admission queue, so nothing can be promoted.
+      return "queue_disabled"
     },
   }
   return {

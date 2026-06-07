@@ -17,11 +17,12 @@
  *      cache entry under a failing network.
  */
 import { describe, expect, test } from "bun:test"
+import { ConnectorOutageError, createRestConnectorRegistry } from "@/connectors/rest-registry"
 import {
-  createRestConnectorRegistry,
-  ConnectorOutageError,
-} from "@/connectors/rest-registry"
-import { createTokenRefreshScheduler, LEAD_MS, type TimerPort } from "@/connectors/token-refresh-scheduler"
+  createTokenRefreshScheduler,
+  LEAD_MS,
+  type TimerPort,
+} from "@/connectors/token-refresh-scheduler"
 import type { CachePort, FetchPort, TokenRecord } from "@/connectors/types"
 
 // ─── (13) re-arm after stop()/cancel() ───────────────────────────────────────
@@ -122,7 +123,13 @@ const cacheWith = (value: string, writtenAt: number): CachePort => ({
 })
 
 const VALID = JSON.stringify([
-  { id: "gh", displayName: "GitHub", host: "api.github.com", auth: "oauth", oauthIssuer: "https://github.com" },
+  {
+    id: "gh",
+    displayName: "GitHub",
+    host: "api.github.com",
+    auth: "oauth",
+    oauthIssuer: "https://github.com",
+  },
 ])
 // Missing `id` and `host`, and `auth` outside the oauth|none union.
 const POISONED = JSON.stringify([{ displayName: "Bad", auth: "totally-bogus" }])

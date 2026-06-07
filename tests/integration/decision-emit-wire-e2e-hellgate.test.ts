@@ -131,9 +131,11 @@ describe("ADR-0269 Phase 3 wire — caller-site static invariants", () => {
     expect(src).not.toContain("emitBudgetExhaustedDecision")
   })
 
-  test("CASE-2b: loop.ts imports + invokes emitBudgetExhaustedDecision at turn epilogue", async () => {
-    const src = await readSrc("src/agent/loop.ts")
-    expect(src).toContain('import { emitBudgetExhaustedDecision } from "./decision-emit-phase3"')
+  test("CASE-2b: loop/turn-outcome.ts imports + invokes emitBudgetExhaustedDecision at turn epilogue", async () => {
+    // loop.ts was split into loop/ submodules; the budget-exhausted epilogue now
+    // lives in loop/turn-outcome.ts (imports decision-emit-phase3 via `../`).
+    const src = await readSrc("src/agent/loop/turn-outcome.ts")
+    expect(src).toContain('import { emitBudgetExhaustedDecision } from "../decision-emit-phase3"')
     // The exhaustion check + emit must live on the same path so the emit is
     // co-located with the `budget_exhausted` finish — never split. The turn
     // epilogue was refactored from a direct `ctx.finish("budget_exhausted",…)`

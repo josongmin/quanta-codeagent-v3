@@ -22,8 +22,8 @@ import type { ToolHistoryEntry } from "@/agent/session-resources"
 import { createToolChoiceTurnState } from "@/agent/tool-choice"
 import type { TurnSession, TurnState } from "@/agent/turn-context"
 import type { AgentConfig } from "@/agent/types"
-import type { StreamEvent } from "@/llm"
 import { createWorkingMemory } from "@/memory"
+import type { AgentEvent } from "@/stream"
 
 const textMessage = (text: string): AssembledMessage => ({
   role: "assistant",
@@ -33,20 +33,20 @@ const textMessage = (text: string): AssembledMessage => ({
 const completedAction: RecoveryAction = { do: "completed" }
 
 /** Capture stream events the loop emits. */
-const captureStream = (): { events: StreamEvent[]; emit: (e: StreamEvent) => void } => {
-  const events: StreamEvent[] = []
+const captureStream = (): { events: AgentEvent[]; emit: (e: AgentEvent) => void } => {
+  const events: AgentEvent[] = []
   return { events, emit: (e) => events.push(e) }
 }
 
-const recoveryEvents = (events: StreamEvent[]): Extract<StreamEvent, { type: "recovery" }>[] =>
-  events.filter((e): e is Extract<StreamEvent, { type: "recovery" }> => e.type === "recovery")
+const recoveryEvents = (events: AgentEvent[]): Extract<AgentEvent, { type: "recovery" }>[] =>
+  events.filter((e): e is Extract<AgentEvent, { type: "recovery" }> => e.type === "recovery")
 
 /** Minimal session/state pair that drives `applyAction`'s completed path. Only
  *  the fields `applyAction` + `maybeRunCloseoutCritic` read are populated. */
 const driveCompleted = async (
   closeoutCritic: CloseoutCriticConfig | undefined,
   opts: { history?: ToolHistoryEntry[]; message?: AssembledMessage } = {},
-): Promise<{ events: StreamEvent[]; result: Awaited<ReturnType<typeof applyAction>> }> => {
+): Promise<{ events: AgentEvent[]; result: Awaited<ReturnType<typeof applyAction>> }> => {
   const stream = captureStream()
   const message = opts.message ?? textMessage("final answer")
   const config = {
@@ -229,6 +229,7 @@ describe("applyAction — closeout-critic loop seam", () => {
   test("approved verdict surfaces a closeout recovery event, still completes", async () => {
     const critic: CloseoutCritic = async () => ({ outcome: "approved", rationale: "ship it" })
     const { events, result } = await driveCompleted({ enabled: true, critic })
+    if (!result.done) throw new Error("expected completed step")
     expect(result.result.kind).toBe("completed")
     const recs = recoveryEvents(events)
     expect(recs).toHaveLength(1)
@@ -244,6 +245,7 @@ describe("applyAction — closeout-critic loop seam", () => {
     })
     const { events, result } = await driveCompleted({ enabled: true, critic })
     // CRUX: a denial NEVER blocks — the turn still seals completed.
+    if (!result.done) throw new Error("expected completed step")
     expect(result.result.kind).toBe("completed")
     const recs = recoveryEvents(events)
     expect(recs[0]?.reason).toBe("closeout")
@@ -255,6 +257,7 @@ describe("applyAction — closeout-critic loop seam", () => {
       throw new Error("kaboom")
     }
     const { events, result } = await driveCompleted({ enabled: true, critic })
+    if (!result.done) throw new Error("expected completed step")
     expect(result.result.kind).toBe("completed")
     expect(recoveryEvents(events)[0]?.detail).toBe("critic:unavailable: kaboom")
   })

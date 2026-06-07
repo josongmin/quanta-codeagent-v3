@@ -23,6 +23,20 @@ export { buildAutorunEligibility } from "./autorun-eligibility-wire"
 export type { BranchOnlyVerdict } from "./branch-only"
 export { DEFAULT_PROTECTED_BRANCHES, decideBranchOnly } from "./branch-only"
 export type {
+  CircumventionSignal,
+  EffectSignature,
+  LayeredRule,
+} from "./circumvention"
+export {
+  buildAutoModeOverlay,
+  CIRCUMVENTION_TTL_TURNS,
+  CircumventionTracker,
+  canonicalizeEffectPath,
+  extractShellWritePaths,
+  extractWriteEffect,
+  extractWriteEffects,
+} from "./circumvention"
+export type {
   AutoDecision,
   AutoModeOverlay,
   ClassifierPort,
@@ -46,20 +60,6 @@ export {
   withExfilScoutingTaxonomy,
   withUserRuleOverlay,
 } from "./classifier"
-export type {
-  CircumventionSignal,
-  EffectSignature,
-  LayeredRule,
-} from "./circumvention"
-export {
-  buildAutoModeOverlay,
-  canonicalizeEffectPath,
-  CIRCUMVENTION_TTL_TURNS,
-  CircumventionTracker,
-  extractShellWritePaths,
-  extractWriteEffect,
-  extractWriteEffects,
-} from "./circumvention"
 export type {
   DenyLayer,
   DenyPillar,

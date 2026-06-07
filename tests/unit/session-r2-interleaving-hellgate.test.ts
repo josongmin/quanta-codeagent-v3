@@ -217,7 +217,7 @@ describe("R2 · bg-scheduler — no double-promote / no resurrection / cap-respe
     const runCount = new Map<string, number>()
     const running = new Set<string>()
     let maxObserved = 0
-    let freeR0: (() => void) | null = null
+    const ctl: { freeR0: (() => void) | null } = { freeR0: null }
     const runner: SubagentRunner = (req: SubagentRequest) => {
       const t = req.prompt
       runCount.set(t, (runCount.get(t) ?? 0) + 1)
@@ -225,7 +225,7 @@ describe("R2 · bg-scheduler — no double-promote / no resurrection / cap-respe
       maxObserved = Math.max(maxObserved, running.size)
       return new Promise<SliceResult>((res) => {
         if (t === "r0") {
-          freeR0 = () => {
+          ctl.freeR0 = () => {
             running.delete(t)
             res({ ok: true, finalText: "r0", turns: 1 })
           }
@@ -246,7 +246,7 @@ describe("R2 · bg-scheduler — no double-promote / no resurrection / cap-respe
 
     // Free r0 (schedules drainQueue on a microtask → it MUST observe q2 already
     // burst-promoted) AND synchronously force-burst q2 in the SAME boundary.
-    freeR0?.()
+    ctl.freeR0?.()
     const outcome = sched.forceBackground(q2, { allowBurst: true })
     await settle()
 
@@ -293,12 +293,12 @@ describe("R2 · bg-scheduler — no double-promote / no resurrection / cap-respe
   test("RESURRECTION · cancel a queued entry, THEN free a slot: drain NEVER revives it", async () => {
     bgSeq = 0
     const runCount = new Map<string, number>()
-    let freeFirst: (() => void) | null = null
+    const ctl: { freeFirst: (() => void) | null } = { freeFirst: null }
     const runner: SubagentRunner = (req: SubagentRequest) => {
       const t = req.prompt
       runCount.set(t, (runCount.get(t) ?? 0) + 1)
       return new Promise<SliceResult>((res) => {
-        if (t === "first") freeFirst = () => res({ ok: true, finalText: "first", turns: 1 })
+        if (t === "first") ctl.freeFirst = () => res({ ok: true, finalText: "first", turns: 1 })
       })
     }
     const sched = defaultBackgroundSubagentScheduler({
@@ -316,7 +316,7 @@ describe("R2 · bg-scheduler — no double-promote / no resurrection / cap-respe
     expect(sched.poll(qId)?.status).toBe("cancelled")
 
     // Free the slot → drainQueue runs and MUST skip the cancelled entry.
-    freeFirst?.()
+    ctl.freeFirst?.()
     await settle()
 
     expect(runCount.get("queued") ?? 0).toBe(0) // never started
@@ -344,7 +344,7 @@ describe("R2 · bg-scheduler — no double-promote / no resurrection / cap-respe
 
 // ════════════════════════════ 8 · MCP supervisor ══════════════════════════════
 
-const supCfg = { name: "srv", command: "x", args: [] } as McpServerConfig
+const supCfg: McpServerConfig = { name: "srv", command: ["x"] }
 
 const makeSupClock = () => {
   let now = 0
@@ -377,7 +377,7 @@ const makeSupClock = () => {
 describe("R2 · MCP supervisor — stop() racing a parked proxy waiter (no hang / no leak)", () => {
   test("LEAK/LIVENESS · stop() while a resources proxy is PARKED in queue mode: typed transport failure, queue-wait timer cancelled", async () => {
     const clock = makeSupClock()
-    let exitHandler: ((r?: string) => void) | null = null
+    const ctl: { exitHandler: ((r?: string) => void) | null } = { exitHandler: null }
     const client: SupervisableMcpClient = {
       async start() {},
       async listTools() {
@@ -388,7 +388,7 @@ describe("R2 · MCP supervisor — stop() racing a parked proxy waiter (no hang 
       },
       async stop() {},
       onExit(h) {
-        exitHandler = h
+        ctl.exitHandler = h
         return () => {}
       },
       serverSupportsResources() {
@@ -412,7 +412,7 @@ describe("R2 · MCP supervisor — stop() racing a parked proxy waiter (no hang 
     }
     const sup = await McpReconnectSupervisor.create(supCfg, deps)
     // Crash → not-healthy → a resources proxy will PARK in the queue.
-    exitHandler?.("boom")
+    ctl.exitHandler?.("boom")
     expect(sup.snapshot().state).not.toBe("healthy")
 
     const parked = sup.listResources() // parks (queue mode, not healthy)

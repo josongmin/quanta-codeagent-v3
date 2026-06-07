@@ -128,4 +128,3 @@ describe("HELL-PF-C — response.incomplete maps reason and preserves usage", ()
     expect(usage && usage.type === "usage" ? usage.outputTokens : undefined).toBe(7)
   })
 })
-

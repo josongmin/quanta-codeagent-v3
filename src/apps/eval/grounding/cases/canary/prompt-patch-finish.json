@@ -3,7 +3,10 @@
   "id": "prompt-patch-finish",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "history": [
-    { "role": "assistant", "text": "Active thread prompt_rules has one remaining patch before closeout." }
+    {
+      "role": "assistant",
+      "text": "Active thread prompt_rules has one remaining patch before closeout."
+    }
   ],
   "targetUtterance": "그 패치까지 마무리해.",
   "gold": {

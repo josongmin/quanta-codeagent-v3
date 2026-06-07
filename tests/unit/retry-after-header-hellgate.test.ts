@@ -243,7 +243,13 @@ describe("ADR-0208 RetryingLLM honors retry-after", () => {
     expect(isRetryable(auth)).toBe(false)
     const slept: number[] = []
     const inner = new ScriptedLLM([{ kind: "throw", error: auth }])
-    const r = new RetryingLLM({ inner, sleep: async (ms) => slept.push(ms), random: () => 1 })
+    const r = new RetryingLLM({
+      inner,
+      sleep: async (ms) => {
+        slept.push(ms)
+      },
+      random: () => 1,
+    })
     await expect(collect(r.stream({ messages: [], tools: [] }))).rejects.toThrow()
     expect(inner.calls).toBe(1) // no retry
     expect(slept).toEqual([]) // never slept

@@ -8,9 +8,9 @@
  *     lifecycle events on the underlying sink (no re-entrancy, original event first).
  */
 import { describe, expect, test } from "bun:test"
-import type { LLMPort } from "@/llm"
 import { wireOptionalAgentPorts } from "@/agent/optional-ports"
 import type { AgentConfig } from "@/agent/types"
+import type { LLMPort } from "@/llm"
 import type { AgentEvent, StreamPort } from "@/stream"
 
 const capturingStream = (): { stream: StreamPort; seen: AgentEvent[] } => {

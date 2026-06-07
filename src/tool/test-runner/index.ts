@@ -139,8 +139,7 @@ export const testRunnerTool: Tool<Input> = {
   // build (single source), so the gate sees and denies the poisoned path. The
   // fixed prefix is the only non-model text, so the no-path case still yields
   // "" (nothing to deny).
-  extractShellCommand: (input: Input): string =>
-    input.command ?? projectShellCommand(input.path),
+  extractShellCommand: (input: Input): string => input.command ?? projectShellCommand(input.path),
 
   async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const resolved = input.command ?? (await detectCommand(ctx.cwd, input.path))

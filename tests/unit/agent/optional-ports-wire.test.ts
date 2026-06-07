@@ -1,9 +1,10 @@
 import { describe, expect, spyOn, test } from "bun:test"
 import { __resetCloseoutCriticWarning, wireOptionalAgentPorts } from "@/agent/optional-ports"
+import type { AgentConfig } from "@/agent/types"
 import { defaultRoleModelResolver } from "@/llm/role-model-override"
 import { logger } from "@/shared"
 
-const base = () => ({
+const base = (): Partial<AgentConfig> & Pick<AgentConfig, "llm" | "signal"> => ({
   llm: {
     model: "test-model",
     async *stream() {},

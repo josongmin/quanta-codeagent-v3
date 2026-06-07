@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import {
   buildGroundingHarnessManifest,
+  type GroundingCase,
   groundingHarnessFingerprint,
   runGroundingProbe,
-  type GroundingCase,
 } from "@/../src/apps/eval/grounding"
+import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 
 class CaptureLLM implements LLMPort {
   readonly provider = "openai"
@@ -31,7 +31,9 @@ class FlakyFirstChunkTimeoutLLM implements LLMPort {
   async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
     this.calls += 1
     if (this.calls === 1) {
-      throw new Error("LLM stream first-chunk timeout after 60000ms (provider sent no data; timed out)")
+      throw new Error(
+        "LLM stream first-chunk timeout after 60000ms (provider sent no data; timed out)",
+      )
     }
     yield {
       type: "text_delta",

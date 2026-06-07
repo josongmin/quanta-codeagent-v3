@@ -329,8 +329,7 @@ describe("§7 SSOT single-source ratchet — the permanent triplication guard", 
     // quoted). Doc-comments mention versions UNQUOTED (`spec 2025-06-18`), so the
     // quote-anchored guard catches a real re-divergence without false-tripping on
     // prose. Covers `'…'`, `"…"`, and template `` `…` `` forms.
-    const quotedVersionLiteral = (ver: string): RegExp =>
-      new RegExp(`["'\`]${ver}["'\`]`)
+    const quotedVersionLiteral = (ver: string): RegExp => new RegExp(`["'\`]${ver}["'\`]`)
     for (const file of offenders) {
       const src = readSrc(file)
       // No file may assign a protocol-version string to a const/let/var.

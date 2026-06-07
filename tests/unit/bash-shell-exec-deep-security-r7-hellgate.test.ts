@@ -42,20 +42,13 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { AutoModeClassifier } from "@/permission/classifier"
+import { evaluate, evaluateAuto, hardDenyReason } from "@/permission/policy"
+import { HARD_DENY_RULES, normalizeShellForDeny } from "@/permission/policy-rules"
+import type { PermissionContext, ToolAction } from "@/permission/types"
 import { makeBashTool } from "@/tool/bash"
-import { makeBashKillTool } from "@/tool/bash/kill"
 import { makeBashAwaitTool } from "@/tool/bash/await"
-
-import {
-  HARD_DENY_RULES,
-  normalizeShellForDeny,
-} from "@/permission/policy-rules"
-import {
-  evaluate,
-  evaluateAuto,
-  hardDenyReason,
-} from "@/permission/policy"
-import type { ToolAction, PermissionContext } from "@/permission/types"
+import { makeBashKillTool } from "@/tool/bash/kill"
 
 /** Build a bash ToolAction carrying the raw command string the way the
  *  dispatch seam populates `shellCommand` via `extractShellCommand`. */
@@ -226,13 +219,7 @@ describe("R7 — normalizeShellForDeny: documented, idempotent, deny-widening", 
 describe("R7 — sandbox-driven HITL: absent profile ⇒ always-confirm for every command", () => {
   const noProfile = makeBashTool() // legacy singleton-equivalent: no profile
 
-  const cmds: readonly string[] = [
-    "ls",
-    "echo hi",
-    "git status",
-    "cat package.json",
-    "true",
-  ]
+  const cmds: readonly string[] = ["ls", "echo hi", "git status", "cat package.json", "true"]
   for (const cmd of cmds) {
     test(`tier is always-confirm regardless of command text: ${cmd}`, () => {
       expect(noProfile.hitlTier?.({ command: cmd })).toBe("always-confirm")
@@ -271,12 +258,10 @@ describe("R7 — HARD_DENY overrides every permission mode for the obfuscated fo
 
   test("auto mode: HARD_DENY fires before the classifier is ever consulted", async () => {
     let classifierCalled = false
-    const classifier = {
-      evaluate: async () => {
-        classifierCalled = true
-        return { verdict: "allow" as const, reason: "stub", fallback: false }
-      },
-    }
+    const classifier = new AutoModeClassifier(async () => {
+      classifierCalled = true
+      return { verdict: "allow" as const, reason: "stub" }
+    })
     const d = await evaluateAuto(bashAction(obf), ctx("auto"), classifier)
     expect(d.kind).toBe("deny")
     expect(classifierCalled).toBe(false)
@@ -357,7 +342,7 @@ describe("R7 — bash output is a tool result (enveloped at dispatch), length de
   test("bash declares non-read-only + non-concurrency-safe (side effects unknowable)", () => {
     const t = makeBashTool()
     expect(t.isReadOnly()).toBe(false)
-    expect(t.isConcurrencySafe()).toBe(false)
+    expect(t.isConcurrencySafe({ command: "echo hi" })).toBe(false)
   })
 
   test("bash exposes classifySource so dispatch can envelope its output as untrusted", () => {

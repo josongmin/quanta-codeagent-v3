@@ -32,9 +32,9 @@
  * the `resolveMcpSandboxAsync` job, deferred to the Lima ADR follow-up).
  */
 
-import { passthroughMcpSandbox } from "./passthrough"
 import { appleVzMicroVmSandbox } from "./applevz-microvm"
 import { limaMicroVmSandbox } from "./lima-microvm"
+import { passthroughMcpSandbox } from "./passthrough"
 import type { McpSandbox, McpSandboxConfig, McpSandboxPolicy } from "./types"
 
 export interface McpSandboxRegistryConfig extends McpSandboxConfig {

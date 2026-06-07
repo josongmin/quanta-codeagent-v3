@@ -20,8 +20,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { promises as fs } from "node:fs"
-import { mkdtempSync } from "node:fs"
+import { promises as fs, mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { evictLru } from "@/storage/shadow-odb/cleanup"

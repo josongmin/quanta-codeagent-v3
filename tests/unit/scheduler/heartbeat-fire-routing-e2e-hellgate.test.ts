@@ -64,7 +64,14 @@ const run = async (automation: Automation): Promise<EnqOpts[]> => {
   const clock: ClockPort = { now: () => FIRED_AT }
   const env: EnvPort = { get: () => undefined }
   const availability: ModelAvailabilityPort = { isAvailable: async () => true }
-  const rt = createSchedulerRuntime({ store, availability, clock, env, agentLoop: loop, workspace: "/w" })
+  const rt = createSchedulerRuntime({
+    store,
+    availability,
+    clock,
+    env,
+    agentLoop: loop,
+    workspace: "/w",
+  })
   await rt.tickOnce()
   return captured
 }

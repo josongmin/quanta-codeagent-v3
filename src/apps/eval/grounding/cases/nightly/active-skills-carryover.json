@@ -2,9 +2,7 @@
   "schema": 2,
   "id": "active-skills-carryover",
   "usecase": "persistent-context.conversation-state.thread-grounding",
-  "contextChanges": [
-    { "field": "active_skills", "prev": [], "next": ["rr"] }
-  ],
+  "contextChanges": [{ "field": "active_skills", "prev": [], "next": ["rr"] }],
   "history": [
     {
       "role": "assistant",

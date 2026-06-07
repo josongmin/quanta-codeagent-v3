@@ -1,8 +1,5 @@
+import type { LlmContinuationObservation, LlmRequestObservation } from "@/shared/llm-route-types"
 import type { CapabilityManifest } from "./capabilities"
-import type {
-  LlmContinuationObservation,
-  LlmRequestObservation,
-} from "@/shared/llm-route-types"
 
 export interface ArtifactRef {
   readonly artifactId: string

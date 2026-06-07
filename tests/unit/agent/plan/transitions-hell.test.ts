@@ -21,7 +21,11 @@
 
 import { describe, expect, test } from "bun:test"
 import { isValidTransition, TRANSITION_MATRIX } from "../../../../src/agent/plan/transitions"
-import { ALL_TODO_STATUSES, TERMINAL_TODO_STATUSES, type TodoStatus } from "../../../../src/agent/plan/types"
+import {
+  ALL_TODO_STATUSES,
+  TERMINAL_TODO_STATUSES,
+  type TodoStatus,
+} from "../../../../src/agent/plan/types"
 
 // ── Rule table (the canonical spec, mirrored here for exhaustive testing) ─
 

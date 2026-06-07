@@ -1,5 +1,5 @@
-import type { GroundingCase } from "./schema"
 import { isGroundingFileId } from "./file-context"
+import type { GroundingCase } from "./schema"
 
 const GENERIC_SUBTHREAD_CUES = [
   "그거",
@@ -43,7 +43,13 @@ const GENERIC_SUBTHREAD_CUES = [
   "깨진 지점",
 ] as const
 
-const TOOL_RESULT_CUES = ["깨진 지점", "tool output", "여기서", "failed case", "parseerror"] as const
+const TOOL_RESULT_CUES = [
+  "깨진 지점",
+  "tool output",
+  "여기서",
+  "failed case",
+  "parseerror",
+] as const
 
 const uniqueOrdered = (values: readonly string[]): readonly string[] => [...new Set(values)]
 
@@ -56,7 +62,9 @@ const contextChangeReferents = (groundingCase: GroundingCase): readonly string[]
       if (event.field === "mode" && typeof event.next === "string") return [`${event.next}_mode`]
       if (event.field === "model" && typeof event.next === "string") return [event.next]
       if (event.field === "active_skills" && Array.isArray(event.next)) {
-        return event.next.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "")
+        return event.next.filter(
+          (entry): entry is string => typeof entry === "string" && entry.trim() !== "",
+        )
       }
       return []
     }),
@@ -71,7 +79,9 @@ const memoryContextReferents = (groundingCase: GroundingCase): readonly string[]
 const historyReferents = (groundingCase: GroundingCase): readonly string[] =>
   uniqueOrdered(
     groundingCase.history.flatMap((entry) => [
-      ...(entry.referentId !== undefined && entry.referentId !== null && !isGroundingFileId(entry.referentId)
+      ...(entry.referentId !== undefined &&
+      entry.referentId !== null &&
+      !isGroundingFileId(entry.referentId)
         ? [entry.referentId]
         : []),
       ...(entry.mentionedReferentIds ?? []),
@@ -81,7 +91,11 @@ const historyReferents = (groundingCase: GroundingCase): readonly string[] =>
 const currentHistoryReferent = (groundingCase: GroundingCase): string | null => {
   for (let index = groundingCase.history.length - 1; index >= 0; index -= 1) {
     const entry = groundingCase.history[index]!
-    if (entry.referentId !== undefined && entry.referentId !== null && !isGroundingFileId(entry.referentId)) {
+    if (
+      entry.referentId !== undefined &&
+      entry.referentId !== null &&
+      !isGroundingFileId(entry.referentId)
+    ) {
       return entry.referentId
     }
   }
@@ -101,7 +115,9 @@ export interface GroundingReferentContext {
   suggestsLatestToolResult: boolean
 }
 
-export const resolveGroundingReferentContext = (groundingCase: GroundingCase): GroundingReferentContext => {
+export const resolveGroundingReferentContext = (
+  groundingCase: GroundingCase,
+): GroundingReferentContext => {
   const utterance = groundingCase.targetUtterance.toLowerCase()
   const history = historyReferents(groundingCase)
   const fromContextChanges = contextChangeReferents(groundingCase)
@@ -109,7 +125,8 @@ export const resolveGroundingReferentContext = (groundingCase: GroundingCase): G
   const candidates = uniqueOrdered([...history, ...fromContextChanges, ...fromMemory])
   const primaryReferentId = currentHistoryReferent(groundingCase)
   const suggestsLatestToolResult =
-    groundingCase.history.some((entry) => entry.kind === "tool_result") || includesAny(utterance, TOOL_RESULT_CUES)
+    groundingCase.history.some((entry) => entry.kind === "tool_result") ||
+    includesAny(utterance, TOOL_RESULT_CUES)
   const suggestsSpecificSubthread =
     includesAny(utterance, GENERIC_SUBTHREAD_CUES) ||
     primaryReferentId !== null ||

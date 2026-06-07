@@ -15,8 +15,8 @@
  * past the older discovery regex).
  */
 
-import { readFileSync } from "node:fs"
 import { describe, expect, test } from "bun:test"
+import { readFileSync } from "node:fs"
 import { RUNTIME_CONFIG_KNOBS } from "@/shared/runtime-config-knobs"
 
 /** Slice the `loadFromEnv` function body out of runtime-config.ts source. */
@@ -70,7 +70,9 @@ describe("runtime-config-knobs ↔ loadFromEnv parity (ADR-0503 P3)", () => {
   })
 
   test("discovery regex catches dot-access (the RATELIMIT_NOTICE blind spot)", () => {
-    expect(discoverFromLoadEnv('x = env.QUANTA_RATELIMIT_NOTICE').has("QUANTA_RATELIMIT_NOTICE")).toBe(true)
+    expect(
+      discoverFromLoadEnv("x = env.QUANTA_RATELIMIT_NOTICE").has("QUANTA_RATELIMIT_NOTICE"),
+    ).toBe(true)
     expect(discoverFromLoadEnv('gateOn(env, "QUANTA_FOO")').has("QUANTA_FOO")).toBe(true)
     expect(discoverFromLoadEnv('env["QUANTA_BAR"]').has("QUANTA_BAR")).toBe(true)
   })

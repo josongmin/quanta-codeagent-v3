@@ -73,7 +73,7 @@ let realFetch: typeof globalThis.fetch
 const installCannedFetch = (): void => {
   fetchCalls = []
   const b64 = Buffer.from(PNG_1x1).toString("base64")
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
     const url = String(input)
     fetchCalls.push(url)
     return new Response(JSON.stringify({ data: [{ b64_json: b64 }] }), {
@@ -268,7 +268,7 @@ describe("C1 cross-tool — n>1 image batch", () => {
     // The canned provider returns ONE image per call; with n=2 the tool writes
     // two siblings only if the provider returns two. Stub a two-image response.
     const b64 = Buffer.from(PNG_1x1).toString("base64")
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
       fetchCalls.push(String(input))
       return new Response(JSON.stringify({ data: [{ b64_json: b64 }, { b64_json: b64 }] }), {
         status: 200,

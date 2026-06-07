@@ -179,7 +179,9 @@ describe("lane-manager hellgate (ADR-0285)", () => {
           const sig = spec.signal
           if (sig === undefined) {
             // Should not happen — lane always passes a merged signal.
-            resolve(successBoomerang({ mode: spec.mode, summary: "no sig", turns: 0, durationMs: 0 }))
+            resolve(
+              successBoomerang({ mode: spec.mode, summary: "no sig", turns: 0, durationMs: 0 }),
+            )
             return
           }
           if (sig.aborted) {

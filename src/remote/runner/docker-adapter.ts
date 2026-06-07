@@ -21,7 +21,7 @@
  *   - 1000-cycle zombie-free (HELL-DK-15).
  */
 
-import { ok, err, type Result } from "@/shared"
+import { err, ok, type Result } from "@/shared"
 import type { RemoteRunner } from "./port"
 import {
   RemoteError,
@@ -77,10 +77,7 @@ export interface DockerAdapterOpts {
  *  Network policy: when `--network=none` is requested via
  *  `RemoteSpec.env.QUANTA_REMOTE_NETWORK = "none"` we inject `--network=none`.
  *  Otherwise the default docker network is used. */
-export const composeDockerRunArgv = (
-  spec: RemoteSpec,
-  name: string,
-): readonly string[] => {
+export const composeDockerRunArgv = (spec: RemoteSpec, name: string): readonly string[] => {
   const argv: string[] = ["docker", "run", "-d", "--name", name]
 
   // env flags — `-e KEY` (no value) deletes inherited env vars.
@@ -165,7 +162,9 @@ export const parseDockerInspectLine = (
 /* ------------------------------------------------------------------ */
 
 /** Classify `docker run` stderr into a RemoteErrorKind. */
-export const classifyDockerStderr = (stderr: string): {
+export const classifyDockerStderr = (
+  stderr: string,
+): {
   kind: "daemon-unavailable" | "image-not-found" | "transport"
   message: string
 } => {

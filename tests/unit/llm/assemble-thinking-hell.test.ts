@@ -52,9 +52,7 @@ describe("ADR-0076 Gap-2 HELL — orphan signature_delta", () => {
     // ADR-0077: every text block now carries a structural `phase`
     // ({"commentary"|"final_answer"}) computed by a deterministic backward
     // scan; a turn with no tool_use after the text ⇒ phase: "final_answer".
-    expect(message.content).toEqual([
-      { type: "text", text: "actual text", phase: "final_answer" },
-    ])
+    expect(message.content).toEqual([{ type: "text", text: "actual text", phase: "final_answer" }])
     expect(message.content.some((b) => b.type === "thinking")).toBe(false)
   })
 

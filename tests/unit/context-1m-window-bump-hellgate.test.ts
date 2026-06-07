@@ -10,11 +10,11 @@
  *   - default-OFF: no knob/suffix ⇒ no key ⇒ 200k window (byte-identical).
  */
 import { describe, expect, test } from "bun:test"
+import { resolveWindowModel } from "@/agent/loop/emit-helpers"
+import type { AgentConfig } from "@/agent/types"
 import { createLLM } from "@/llm"
 import type { AnthropicAdapter } from "@/llm/adapters/anthropic"
 import { resolveModelWindow } from "@/llm/provider-metadata"
-import { resolveWindowModel } from "@/agent/loop/emit-helpers"
-import type { AgentConfig } from "@/agent/types"
 
 const KEY = { ANTHROPIC_API_KEY: "sk-ant-test" }
 const adapter = (model: string, env: Record<string, string | undefined>): AnthropicAdapter =>
@@ -41,7 +41,10 @@ describe("1M window — adapter pins contextWindowKey when active", () => {
 
 describe("1M window — resolveWindowModel + resolveModelWindow", () => {
   const llmWith = (key?: string): AgentConfig["llm"] =>
-    ({ model: "claude-sonnet-4-5", ...(key !== undefined ? { contextWindowKey: key } : {}) }) as AgentConfig["llm"]
+    ({
+      model: "claude-sonnet-4-5",
+      ...(key !== undefined ? { contextWindowKey: key } : {}),
+    }) as AgentConfig["llm"]
 
   test("active base model + pinned key ⇒ resolves the 1M window", () => {
     const wm = resolveWindowModel(llmWith("claude-sonnet-4-5-1m"))

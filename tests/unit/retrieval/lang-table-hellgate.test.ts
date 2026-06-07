@@ -56,12 +56,9 @@ describe("lang-table — langForPath (extension detection)", () => {
   ]
 
   // ".gitignore": lastIndexOf(".") is index 0, ext = "gitignore" → unknown → null.
-  test.each(cases.filter(([p]) => p !== ".gitignore"))(
-    "%s ⇒ %s",
-    (path, expected) => {
-      expect(langForPath(path)).toBe(expected)
-    },
-  )
+  test.each(cases.filter(([p]) => p !== ".gitignore"))("%s ⇒ %s", (path, expected) => {
+    expect(langForPath(path)).toBe(expected)
+  })
 
   test("dotfile with no real extension (.gitignore) ⇒ null (ext 'gitignore' unknown)", () => {
     expect(langForPath(".gitignore")).toBeNull()

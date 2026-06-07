@@ -18,7 +18,12 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { isWireEnvelope, parsePortableSession, PORTABLE_SESSION_VERSION, PortableSessionImportError } from "@/ipc"
+import {
+  isWireEnvelope,
+  PORTABLE_SESSION_VERSION,
+  PortableSessionImportError,
+  parsePortableSession,
+} from "@/ipc"
 import { isFallbackTrigger } from "@/llm"
 import { hardDenyReason } from "@/permission"
 import { __resetRuntimeConfig, LLMError, runtimeConfig } from "@/shared"

@@ -105,6 +105,7 @@ describe("gh_pr_open", () => {
     expect(res.ok).toBe(true)
     expect(res.output).toBe("https://github.com/o/r/pull/42")
     const create = g.argv[0]
+    if (create === undefined) throw new Error("expected gh invocation")
     expect(create).toContain("create")
     expect(create).toContain("--base")
     expect(create[create.indexOf("--base") + 1]).toBe("main")
@@ -193,6 +194,7 @@ describe("gh_pr_open", () => {
     const g = recordingGh({ code: 0, stdout: "url" })
     await drain(ghPrOpenTool(g.runner, git, author()).execute({ base: "origin/release" }, ctx()))
     const create = g.argv[0]
+    if (create === undefined) throw new Error("expected gh invocation")
     expect(create[create.indexOf("--base") + 1]).toBe("release")
   })
 
@@ -220,6 +222,7 @@ describe("gh_pr_open", () => {
       ghPrOpenTool(g.runner, git, author("feat: x; rm -rf /\n\nbody $(whoami)")).execute({}, ctx()),
     )
     const create = g.argv[0]
+    if (create === undefined) throw new Error("expected gh invocation")
     const title = create[create.indexOf("--title") + 1]
     const body = create[create.indexOf("--body") + 1]
     expect(title).toBe("feat: x; rm -rf /")
@@ -231,7 +234,7 @@ describe("gh_pr_open", () => {
     const t = ghPrOpenTool(gh({}) as never, git, author())
     expect(t.name).toBe("gh_pr_open")
     expect(t.isReadOnly()).toBe(false)
-    expect(t.isConcurrencySafe()).toBe(false)
+    expect(t.isConcurrencySafe({})).toBe(false)
   })
 })
 

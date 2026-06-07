@@ -12,11 +12,11 @@
 
 export { buildGuardChain } from "./build"
 export {
+  guardBlocked,
+  runGuardChain,
   type TurnGuard,
   type TurnGuardContext,
   type TurnGuardResult,
-  guardBlocked,
-  runGuardChain,
 } from "./chain"
 export { createCloseoutGuard } from "./closeout-guard"
 export { isFinishAttempt, metaUser } from "./shared"

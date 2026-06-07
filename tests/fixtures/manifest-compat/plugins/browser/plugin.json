@@ -8,14 +8,7 @@
   "homepage": "https://github.com/openai/openai/tree/master/lib/browser_use/plugin",
   "repository": "https://github.com/openai/openai/tree/master/lib/browser_use/plugin",
   "license": "Proprietary",
-  "keywords": [
-    "browser",
-    "automation",
-    "chrome",
-    "iab",
-    "node-repl",
-    "browser-client"
-  ],
+  "keywords": ["browser", "automation", "chrome", "iab", "node-repl", "browser-client"],
   "skills": "./skills/",
   "interface": {
     "displayName": "Browser",
@@ -23,17 +16,11 @@
     "longDescription": "Browser lets Codex open and control the in-app browser, mainly for local development pages and files. Use it to navigate, inspect, click, type, and take screenshots while testing pages inside Codex.",
     "developerName": "OpenAI",
     "category": "Engineering",
-    "capabilities": [
-      "Interactive",
-      "Read",
-      "Write"
-    ],
+    "capabilities": ["Interactive", "Read", "Write"],
     "websiteURL": "https://openai.com/",
     "privacyPolicyURL": "https://openai.com/policies/row-privacy-policy/",
     "termsOfServiceURL": "https://openai.com/policies/row-terms-of-use/",
-    "defaultPrompt": [
-      "Test my checkout flow on localhost"
-    ],
+    "defaultPrompt": ["Test my checkout flow on localhost"],
     "brandColor": "#013B7B",
     "composerIcon": "./assets/composer-icon.png",
     "logo": "./assets/browser.png",

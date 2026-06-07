@@ -294,6 +294,9 @@ const buildSetup = async (
     admissibility: () => undefined,
     planExitPort: () => undefined,
     userInputPort: () => undefined,
+    permissionModeState: () => undefined,
+    stickyModelStore: () => undefined,
+    dreamTrigger: () => undefined,
   }
   // Use a permissive `as never` cast for fields the loop only forwards.
   const result = {
@@ -317,6 +320,8 @@ const buildSetup = async (
     mcpTools: [],
     mcpSurface: undefined,
     skillsConfig: undefined as never,
+    memoryStore: undefined,
+    memoryEmbedder: undefined,
     // L5 M-11 — per-session search-wire teardown. The fixture leaves it
     // `undefined` (no wire built) by default; the dispose hellgates below
     // inject their own via the `searchPipelineDispose` deps slot.

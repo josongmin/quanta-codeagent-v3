@@ -17,6 +17,7 @@
  *   - `verifyHubSignature256` exposes the HMAC contract for adapter authors.
  */
 
+export { defaultDeliveryPersist } from "./adapters/delivery-persist-fs"
 export type { NormalizeOpts, ParseGhEventOpts } from "./event-payload"
 export { normalizeGhEvent, parseGhEventFile, safeReadEventFile } from "./event-payload"
 export type { ActionsEventSourceOpts } from "./event-source-actions"
@@ -37,7 +38,6 @@ export {
   createDeliveryStore,
   createDurableDeliveryStore,
 } from "./idempotency"
-export { defaultDeliveryPersist } from "./adapters/delivery-persist-fs"
 export type { MentionFilter, MentionFilterOpts } from "./mention-filter"
 export { createMentionFilter } from "./mention-filter"
 export type { LoadPrContextOpts } from "./pr-context-loader"

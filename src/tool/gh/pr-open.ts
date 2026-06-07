@@ -26,8 +26,8 @@
  * gitWrite lever (registration is OFF unless an author LLM is wired).
  */
 import { z } from "zod"
-import { errMessage } from "../../shared"
 import type { LLMPort } from "../../llm"
+import { errMessage } from "../../shared"
 import { publishGitDirective } from "../git/_directive-publish"
 import { composePrText } from "../git/compose"
 import type { GitRunner } from "../git/types"
@@ -70,10 +70,7 @@ type GitProbe<T> =
 /** Resolve the current branch via `git rev-parse --abbrev-ref HEAD`.
  *  exitCode 0 + a real name ⇒ ok; exitCode 0 + "HEAD" ⇒ negative (detached);
  *  a throw or exitCode>0 (e.g. 128 not-a-repo) ⇒ git-failed. */
-const currentBranch = async (
-  runner: GitRunner,
-  ctx: ToolContext,
-): Promise<GitProbe<string>> => {
+const currentBranch = async (runner: GitRunner, ctx: ToolContext): Promise<GitProbe<string>> => {
   try {
     const r = await runner.run(["rev-parse", "--abbrev-ref", "HEAD"], ctx.cwd, ctx.signal)
     if (r.exitCode !== 0) {

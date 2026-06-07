@@ -17,7 +17,9 @@ describe("readCliKnob — typed read + precedence (ADR-0503 P4)", () => {
   test("kind parsing: bool (truthy vocab) / int / string", () => {
     expect(readCliKnob("QUANTA_PILLS", "bool", { QUANTA_PILLS: "on" })).toBe(true)
     expect(readCliKnob("QUANTA_PILLS", "bool", { QUANTA_PILLS: "0" })).toBe(false)
-    expect(readCliKnob("QUANTA_FLASH_ERROR_MS", "int", { QUANTA_FLASH_ERROR_MS: "1200" })).toBe(1200)
+    expect(readCliKnob("QUANTA_FLASH_ERROR_MS", "int", { QUANTA_FLASH_ERROR_MS: "1200" })).toBe(
+      1200,
+    )
     expect(readCliKnob("QUANTA_MD_MODE", "string", { QUANTA_MD_MODE: "strict" })).toBe("strict")
   })
 
@@ -45,10 +47,14 @@ describe("readCliKnob — typed read + precedence (ADR-0503 P4)", () => {
   test("precedence: session override beats env beats default", () => {
     // default 4000, env 1200, session 9000 → session wins
     setCliKnobOverride("QUANTA_FLASH_ERROR_MS", "9000")
-    expect(readCliKnob("QUANTA_FLASH_ERROR_MS", "int", { QUANTA_FLASH_ERROR_MS: "1200" })).toBe(9000)
+    expect(readCliKnob("QUANTA_FLASH_ERROR_MS", "int", { QUANTA_FLASH_ERROR_MS: "1200" })).toBe(
+      9000,
+    )
     // env beats default when no session
     __resetCliKnobOverrides()
-    expect(readCliKnob("QUANTA_FLASH_ERROR_MS", "int", { QUANTA_FLASH_ERROR_MS: "1200" })).toBe(1200)
+    expect(readCliKnob("QUANTA_FLASH_ERROR_MS", "int", { QUANTA_FLASH_ERROR_MS: "1200" })).toBe(
+      1200,
+    )
   })
 
   test("setCliKnobOverride / clear / snapshot", () => {
@@ -61,6 +67,8 @@ describe("readCliKnob — typed read + precedence (ADR-0503 P4)", () => {
   })
 
   test("int parse rejects non-finite ⇒ undefined", () => {
-    expect(readCliKnob("QUANTA_FLASH_ERROR_MS", "int", { QUANTA_FLASH_ERROR_MS: "abc" })).toBeUndefined()
+    expect(
+      readCliKnob("QUANTA_FLASH_ERROR_MS", "int", { QUANTA_FLASH_ERROR_MS: "abc" }),
+    ).toBeUndefined()
   })
 })

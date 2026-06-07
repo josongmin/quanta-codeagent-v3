@@ -114,7 +114,9 @@ describe("keyring adapters — name injection is inert (argv array, no shell)", 
       // every evil name is preceded by a flag/keyword that consumes it
       const i = c.args.indexOf(evilSvc)
       expect(i).toBeGreaterThan(0)
-      expect(["-s", "service"]).toContain(c.args[i - 1])
+      const preceding = c.args[i - 1]
+      expect(preceding).toBeDefined()
+      expect(["-s", "service"]).toContain(preceding!)
     }
   })
 })

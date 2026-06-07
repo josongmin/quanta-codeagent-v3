@@ -1,8 +1,11 @@
 import type { AgentOutcome } from "@/agent"
+import type { ImageBlock, Message } from "@/llm"
 import type {
-  ImageBlock,
-  Message,
-} from "@/llm"
+  ArtifactRef,
+  CapabilityManifest,
+  PendingApprovalView,
+  SessionEvent,
+} from "@/protocol/session"
 import type {
   LlmSurfaceId,
   LlmTransportId,
@@ -11,12 +14,6 @@ import type {
   ResponsesContinuationReason,
 } from "@/shared/llm-route-types"
 import type { TurnPolicySnapshot } from "@/shared/turn-policy-types"
-import type {
-  ArtifactRef,
-  CapabilityManifest,
-  PendingApprovalView,
-  SessionEvent,
-} from "@/protocol/session"
 import type { KernelSessionState } from "./state"
 
 export interface KernelClock {

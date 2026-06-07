@@ -6,6 +6,7 @@
  * the headless stub is the truth source for port invariants.
  */
 import { describe, expect, test } from "bun:test"
+import type { RemoteRunner, RemoteSpec } from "@/remote"
 import {
   ALL_REMOTE_BACKENDS,
   ALL_REMOTE_ERROR_KINDS,
@@ -16,7 +17,6 @@ import {
   selectRemoteRunner,
   validateSpec,
 } from "@/remote"
-import type { RemoteRunner, RemoteSpec } from "@/remote"
 
 const baseSpec = (over: Partial<RemoteSpec> = {}): RemoteSpec => ({
   image: "alpine:3.20",

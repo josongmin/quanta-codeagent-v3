@@ -46,7 +46,12 @@ const fakePort = (overrides?: Partial<RenameApplyPort>): FakePort => {
     applySignals.push(signal)
     return realApply(edit, signal)
   }
-  return Object.assign(merged, { computeCalls, applyCalls, computeSignals, applySignals }) as FakePort
+  return Object.assign(merged, {
+    computeCalls,
+    applyCalls,
+    computeSignals,
+    applySignals,
+  }) as FakePort
 }
 
 const ctx = (signal?: AbortSignal): ToolContext => ({
@@ -110,12 +115,14 @@ describe("lsp_rename_apply — metadata", () => {
 
   test("HELL-A4: hitlTier() === 'always-confirm'", () => {
     const t = lspRenameApplyTool(fakePort())
-    expect(t.hitlTier?.({
-      path: "x.ts",
-      line: 1,
-      character: 1,
-      newName: "Bar",
-    })).toBe("always-confirm")
+    expect(
+      t.hitlTier?.({
+        path: "x.ts",
+        line: 1,
+        character: 1,
+        newName: "Bar",
+      }),
+    ).toBe("always-confirm")
   })
 })
 
@@ -316,14 +323,18 @@ describe("lsp_rename_apply — error & signal", () => {
 describe("lsp_rename_apply — determinism", () => {
   test("HELL-F16: same input + same fake edit ⇒ byte-identical output", async () => {
     const e = edit(2, 2)
-    const r1 = await collect(
-      lspRenameApplyTool(fakePort({ computeRename: async () => e })),
-      { path: "x.ts", line: 1, character: 1, newName: "Bar" },
-    )
-    const r2 = await collect(
-      lspRenameApplyTool(fakePort({ computeRename: async () => e })),
-      { path: "x.ts", line: 1, character: 1, newName: "Bar" },
-    )
+    const r1 = await collect(lspRenameApplyTool(fakePort({ computeRename: async () => e })), {
+      path: "x.ts",
+      line: 1,
+      character: 1,
+      newName: "Bar",
+    })
+    const r2 = await collect(lspRenameApplyTool(fakePort({ computeRename: async () => e })), {
+      path: "x.ts",
+      line: 1,
+      character: 1,
+      newName: "Bar",
+    })
     expect(r1.output).toBe(r2.output)
     expect(r1.ok).toBe(r2.ok)
   })

@@ -3,8 +3,8 @@ import { type AdmissibilityWaveAOptions, runAdmissibilityGate } from "@/agent/ad
 import {
   type ApprovalDecision,
   OutcomeInvariantError,
-  ReviewerUnavailableError,
   type ReviewerPort,
+  ReviewerUnavailableError,
 } from "@/permission"
 import { ToolRegistry } from "@/tool"
 import {

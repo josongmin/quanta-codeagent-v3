@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test"
+import { chunkBatches as memoryEmbedderChunk } from "@/agent/memory-embedder"
+import { isAbortError as embedderAbort } from "@/retrieval/embedders/_abort"
 import { chunkBatches } from "@/shared/chunk"
 import { isAbortError } from "@/shared/errors"
-import { isAbortError as embedderAbort } from "@/retrieval/embedders/_abort"
-import { chunkBatches as memoryEmbedderChunk } from "@/agent/memory-embedder"
 
 /**
  * T7-shared-solid consolidation. Proves the ONE canonical `isAbortError` /
@@ -54,11 +54,7 @@ describe("shared-solid consolidation: chunkBatches canonical", () => {
   })
 
   it("splits into contiguous batches of at most size, preserving order", () => {
-    expect(chunkBatches([1, 2, 3, 4, 5], 2)).toEqual([
-      [1, 2],
-      [3, 4],
-      [5],
-    ])
+    expect(chunkBatches([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]])
   })
 
   it("guards size<=0 by clamping to batch-of-1 (no infinite loop)", () => {

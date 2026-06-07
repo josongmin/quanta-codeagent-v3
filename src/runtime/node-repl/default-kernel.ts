@@ -421,10 +421,24 @@ interface ReadFail {
  *  cannot be driven through a real `node -i` child (its stdout reader does not
  *  reject mid-wait on demand), so the test injects a `ChunkReader` whose
  *  `read()` rejects and asserts the bounded race timer is still cleared. */
+/** Injectable timer pair for the race below. Defaults to the ambient globals;
+ *  the timer-leak hellgate injects LOCAL spies so it never monkeypatches
+ *  `globalThis.setTimeout` (a process-global mutation that leaks across
+ *  concurrently-running test files and makes the assertion flaky). */
+export interface ReadUntilTimers {
+  readonly set: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>
+  readonly clear: (handle: ReturnType<typeof setTimeout>) => void
+}
+const DEFAULT_TIMERS: ReadUntilTimers = {
+  set: (fn, ms) => setTimeout(fn, ms),
+  clear: (handle) => clearTimeout(handle),
+}
+
 export const readUntil = async (
   reader: ChunkReader,
   sentinel: string,
   timeoutMs: number,
+  timers: ReadUntilTimers = DEFAULT_TIMERS,
 ): Promise<ReadResult | ReadFail> => {
   const decoder = new TextDecoder()
   let buf = ""
@@ -455,7 +469,7 @@ export const readUntil = async (
           const raced = await Promise.race([
             reader.read(),
             new Promise<typeof TIMED_OUT>((r) => {
-              timer = setTimeout(() => r(TIMED_OUT), remainingMs)
+              timer = timers.set(() => r(TIMED_OUT), remainingMs)
             }),
           ])
           if (raced === TIMED_OUT) {
@@ -463,7 +477,7 @@ export const readUntil = async (
           }
           chunk = raced
         } finally {
-          if (timer !== undefined) clearTimeout(timer)
+          if (timer !== undefined) timers.clear(timer)
         }
       } else {
         chunk = await reader.read()

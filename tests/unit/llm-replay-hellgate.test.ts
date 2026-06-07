@@ -12,15 +12,15 @@ import { afterAll, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { defaultResponsesContinuationStore, type LLMPort } from "@/llm"
 import type { StreamEvent, StreamInput } from "@/llm"
+import { defaultResponsesContinuationStore, type LLMPort } from "@/llm"
 import {
   defaultHashRequest,
   jsonlReplayStore,
   type RecordedInteraction,
+  ReplayMissError,
   type ReplayStore,
   recordingLlmPort,
-  ReplayMissError,
   replayLlmPort,
   stableStringify,
 } from "@/llm/replay"
@@ -57,7 +57,10 @@ function rec(id: string, request: StreamInput, events: StreamEvent[]): RecordedI
   }
 }
 
-function stubInner(events: StreamEvent[], opts: { model?: string; throwAt?: number } = {}): LLMPort {
+function stubInner(
+  events: StreamEvent[],
+  opts: { model?: string; throwAt?: number } = {},
+): LLMPort {
   return {
     ...(opts.model !== undefined ? { model: opts.model } : { model: "stub-model" }),
     stream(_input: StreamInput): AsyncIterable<StreamEvent> {

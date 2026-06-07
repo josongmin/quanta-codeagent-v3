@@ -1,26 +1,21 @@
 import { describe, expect, test } from "bun:test"
+import { mkdir, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { buildSessionFeatures } from "@/agent/features"
 import { defaultBackgroundSubagentScheduler } from "@/agent/subagent-background"
 import type { AgentConfig } from "@/agent/types"
 import type { LLMPort } from "@/llm"
 import { resolveProvider } from "@/llm/providers"
-import {
-  type CodeActionPort,
-  type FormatPort,
-  type SignatureHelpPort,
-} from "@/lsp"
-import { type PermissionContext } from "@/permission"
+import type { CodeActionPort, FormatPort, SignatureHelpPort } from "@/lsp"
+import type { PermissionContext } from "@/permission"
 import { ToolRegistry } from "@/tool"
-import { composeToolResultContent } from "@/tool/image"
-import { readImageTool } from "@/tool/image"
 import { pdfReadTool } from "@/tool/document/pdf-read"
+import { composeToolResultContent, readImageTool } from "@/tool/image"
 import { lspCodeActionTool } from "@/tool/lsp_nav/code-action"
 import { lspFormatTool } from "@/tool/lsp_nav/format"
-import { lspSignatureHelpTool } from "@/tool/lsp_nav/signature-help"
 import { lspRenameApplyTool } from "@/tool/lsp_nav/rename-apply"
-import { writeFile, rm, mkdir } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import path from "node:path"
+import { lspSignatureHelpTool } from "@/tool/lsp_nav/signature-help"
 
 /**
  * E2E hexagonal closeout (ADR-0139/0140/0141).
@@ -76,7 +71,8 @@ describe("hexagonal closeout — 3 ports co-exist", () => {
 
   test("E2E-2: subagentBackground wired → 3 tools (fork/poll/await) in extraTools", async () => {
     const scheduler = defaultBackgroundSubagentScheduler({
-      runner: async () => ({ ok: true, output: "fake-runner-result", turns: 1, finalText: "ok" }) as never,
+      runner: async () =>
+        ({ ok: true, output: "fake-runner-result", turns: 1, finalText: "ok" }) as never,
     })
     const features = await buildSessionFeatures(
       makeMinimalConfig({ subagentBackground: { scheduler } }),
@@ -152,16 +148,19 @@ describe("hexagonal closeout — LSP port composition (ADR-0141)", () => {
 
 describe("hexagonal closeout — content-block composer e2e (ADR-0126 W1 + ADR-0137)", () => {
   test("E2E-9: read_image → composer returns ContentBlock array with ImageBlock", async () => {
-    const dir = path.join(tmpdir(), `closeout-img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+    const dir = path.join(
+      tmpdir(),
+      `closeout-img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    )
     await mkdir(dir, { recursive: true })
     try {
       // 67-byte minimal PNG (1x1 pixel; same payload as the ADR-0126 hellgate)
       const png = new Uint8Array([
-        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
-        0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x62, 0x00, 0x01, 0x00, 0x00,
-        0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
-        0x42, 0x60, 0x82,
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f,
+        0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x62, 0x00,
+        0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49,
+        0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
       ])
       await writeFile(path.join(dir, "x.png"), png)
       let last: { ok: boolean; output: string; images?: unknown } | null = null
@@ -169,7 +168,13 @@ describe("hexagonal closeout — content-block composer e2e (ADR-0126 W1 + ADR-0
         { path: "x.png" } as never,
         { cwd: dir, signal: new AbortController().signal } as never,
       )) {
-        if (ev.type === "result") last = ev.result as unknown as { ok: boolean; output: string; images?: unknown; documents?: unknown }
+        if (ev.type === "result")
+          last = ev.result as unknown as {
+            ok: boolean
+            output: string
+            images?: unknown
+            documents?: unknown
+          }
       }
       expect((last as { ok: boolean } | null)?.ok).toBe(true)
       const composed = composeToolResultContent(last as never)
@@ -186,7 +191,10 @@ describe("hexagonal closeout — content-block composer e2e (ADR-0126 W1 + ADR-0
   })
 
   test("E2E-10: pdf_read → composer returns ContentBlock array with DocumentBlock", async () => {
-    const dir = path.join(tmpdir(), `closeout-pdf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+    const dir = path.join(
+      tmpdir(),
+      `closeout-pdf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    )
     await mkdir(dir, { recursive: true })
     try {
       const header = "%PDF-1.4\n%\xff\xff\xff\xff\n"
@@ -202,7 +210,13 @@ describe("hexagonal closeout — content-block composer e2e (ADR-0126 W1 + ADR-0
         { path: "x.pdf" } as never,
         { cwd: dir, signal: new AbortController().signal } as never,
       )) {
-        if (ev.type === "result") last = ev.result as unknown as { ok: boolean; output: string; images?: unknown; documents?: unknown }
+        if (ev.type === "result")
+          last = ev.result as unknown as {
+            ok: boolean
+            output: string
+            images?: unknown
+            documents?: unknown
+          }
       }
       expect((last as { ok: boolean } | null)?.ok).toBe(true)
       const composed = composeToolResultContent(last as never)
@@ -250,8 +264,6 @@ describe("hexagonal closeout — port swap independence", () => {
     const f2 = await buildSessionFeatures(
       makeMinimalConfig({ subagentBackground: { scheduler: fake2 } }),
     )
-    expect(f1.extraTools.map((t) => t.name).sort()).toEqual(
-      f2.extraTools.map((t) => t.name).sort(),
-    )
+    expect(f1.extraTools.map((t) => t.name).sort()).toEqual(f2.extraTools.map((t) => t.name).sort())
   })
 })

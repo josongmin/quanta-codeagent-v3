@@ -6,8 +6,8 @@ import {
   indexFilePath,
   listSessions,
   removeFromIndex,
-  staticSessionRootProvider,
   type SessionMeta,
+  staticSessionRootProvider,
   upsertMeta,
 } from "@/session"
 import { __resetRuntimeConfig } from "@/shared"

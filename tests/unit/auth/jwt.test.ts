@@ -1,9 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import {
-  JwtDecodeError,
-  decodeJwtClaims,
-  isFreePlan,
-} from "../../../src/auth/chatgpt-oauth/jwt"
+import { decodeJwtClaims, isFreePlan, JwtDecodeError } from "../../../src/auth/chatgpt-oauth/jwt"
 
 const toBase64Url = (s: string): string =>
   Buffer.from(s, "utf8")

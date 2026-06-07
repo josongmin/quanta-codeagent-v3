@@ -24,9 +24,9 @@
  * files; "reads" = QUANTA_* tokens in env-access lines of every OTHER src file.
  */
 
+import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
-import { describe, expect, test } from "bun:test"
 
 /** A QUANTA_* env-var read is ALWAYS either quoted (`"QUANTA_X"` — bracket
  *  access / gate-helper arg / `envKey:` decl) or a dot-access (`env.QUANTA_X`,
@@ -215,7 +215,9 @@ describe("knob-registry completeness ratchet (ADR-0503 P0)", () => {
     // P2-R1 fix: a const-keyed gate is caught at its DEFINITION line (the QUANTA
     // literal being assigned), closing the `gateOn(env, CONST)` false-negative hole.
     expect(isReadLine(`const CONTEXT_1M_FLAG = "QUANTA_CONTEXT_1M"`)).toBe(true)
-    expect(knobsOnLine(`const CONTEXT_1M_FLAG = "QUANTA_CONTEXT_1M"`)).toEqual(["QUANTA_CONTEXT_1M"])
+    expect(knobsOnLine(`const CONTEXT_1M_FLAG = "QUANTA_CONTEXT_1M"`)).toEqual([
+      "QUANTA_CONTEXT_1M",
+    ])
     expect(isReadLine(`  throw new Error("QUANTA_X failed")`)).toBe(false) // error string still NOT a read
     // R3 mutation-test: destructure + template-bracket evasion forms are caught.
     expect(isReadLine("const { QUANTA_DESTRUCT } = env")).toBe(true)

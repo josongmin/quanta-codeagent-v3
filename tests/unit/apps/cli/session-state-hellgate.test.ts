@@ -1,9 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
-import {
-  type SessionState,
-  updateSessionState,
-} from "../../../../src/apps/cli/repl/session-state"
+import { type SessionState, updateSessionState } from "../../../../src/apps/cli/repl/session-state"
 
 // Stub LLM port — never called; just satisfies the type slot.
 const stubLlm: LLMPort = {

@@ -2,9 +2,9 @@ import { existsSync } from "node:fs"
 import {
   DEFAULT_SANDBOX_EXEC_PATH,
   installShellSandbox,
-  resolveSandboxProfileFromEnv as resolveSandboxProfileFromRuntimeEnv,
   type OsSandboxPolicy,
   type OsSandboxProfile,
+  resolveSandboxProfileFromEnv as resolveSandboxProfileFromRuntimeEnv,
   type ShellSandboxSlot,
   type WrappedShellArgv,
   wrapShellArgv,

@@ -13,7 +13,7 @@
 import { describe, expect, test } from "bun:test"
 import type { BudgetClampEvent } from "@/agent/budget/events"
 import type { BudgetCaps, BudgetDials } from "@/agent/budget/types"
-import { __TEST_DIAL_FIELDS as DIAL_FIELDS, clampDials } from "@/agent/run-mode/clamp"
+import { clampDials, __TEST_DIAL_FIELDS as DIAL_FIELDS } from "@/agent/run-mode/clamp"
 
 const NEAR_INT_MAX = Number.MAX_SAFE_INTEGER
 
@@ -25,18 +25,12 @@ describe("HELL-CLAMP — propositional clamp adversarial cases", () => {
   })
 
   test("CASE 02 — +Infinity requested treated as absent", () => {
-    const out = clampDials(
-      { maxTurns: Number.POSITIVE_INFINITY } as BudgetDials,
-      { maxTurns: 10 },
-    )
+    const out = clampDials({ maxTurns: Number.POSITIVE_INFINITY } as BudgetDials, { maxTurns: 10 })
     expect(out.maxTurns).toBe(10)
   })
 
   test("CASE 03 — -Infinity requested treated as absent", () => {
-    const out = clampDials(
-      { maxTurns: Number.NEGATIVE_INFINITY } as BudgetDials,
-      { maxTurns: 10 },
-    )
+    const out = clampDials({ maxTurns: Number.NEGATIVE_INFINITY } as BudgetDials, { maxTurns: 10 })
     expect(out.maxTurns).toBe(10)
   })
 
@@ -47,13 +41,9 @@ describe("HELL-CLAMP — propositional clamp adversarial cases", () => {
 
   test("CASE 05 — NaN cap treated as absent (requested wins, no clamp)", () => {
     let clamped = false
-    const out = clampDials(
-      { maxTurns: 5 },
-      { maxTurns: Number.NaN } as BudgetCaps,
-      () => {
-        clamped = true
-      },
-    )
+    const out = clampDials({ maxTurns: 5 }, { maxTurns: Number.NaN } as BudgetCaps, () => {
+      clamped = true
+    })
     expect(out.maxTurns).toBe(5)
     expect(clamped).toBe(false)
   })

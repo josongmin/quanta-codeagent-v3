@@ -65,7 +65,15 @@ const recordingFs = (): { port: FileSystemPort; writes: { path: string; content:
       writes.push({ path, content })
     },
     async statFile(path): Promise<FileInfo> {
-      return { path, size: 0, isDirectory: false, mtimeMs: 0 }
+      return {
+        path,
+        size: 0,
+        isDirectory: false,
+        mtimeMs: 0,
+        isFIFO: false,
+        isCharacterDevice: false,
+        isBlockDevice: false,
+      }
     },
     async fileExists(path) {
       return writes.some((x) => x.path === path)
@@ -316,7 +324,7 @@ describe("file_history_rewind tool — list / restore round-trip", () => {
       },
     }
     const tool = makeFileHistoryRewindTool(store, jailingPort)
-    const results: Array<{ ok: boolean; output: string; mode?: string }> = []
+    const results: Array<{ ok: boolean; output: string; mode?: string | undefined }> = []
     for await (const ev of tool.execute(
       { op: "restore", path: "src/a.ts", version: 1 } as never,
       ctx(),

@@ -9,18 +9,21 @@
  *   - default-OFF byte-identity: buildDefaultTools() has no fetch_rules.
  */
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { loadGlobRules, loadRequestableRules } from "@/agent/glob-rules"
-import { buildDefaultTools } from "@/tool"
-import { fetchRulesTool } from "@/tool/fetch-rules"
-import type { FetchRulesPort } from "@/tool/fetch-rules"
-import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
 import { buildCliFetchRulesTool, fetchRulesPortForCwd } from "@/apps/cli/fetch-rules-wire"
+import { buildDefaultTools } from "@/tool"
+import type { FetchRulesPort } from "@/tool/fetch-rules"
+import { fetchRulesTool } from "@/tool/fetch-rules"
+import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
 
 const ctx = (): ToolContext => ({ cwd: ".", signal: new AbortController().signal }) as ToolContext
-const drain = async (tool: ReturnType<typeof fetchRulesTool>, input: unknown): Promise<ToolResult> => {
+const drain = async (
+  tool: ReturnType<typeof fetchRulesTool>,
+  input: unknown,
+): Promise<ToolResult> => {
   let last: ToolResult | undefined
   for await (const ev of tool.execute(input as never, ctx()) as AsyncIterable<ToolEvent>) {
     if (ev.type === "result") last = ev.result
@@ -45,10 +48,7 @@ describe("fetch_rules — loader collects description-only (not auto-inject)", (
       "---\ndescription: React component conventions and hooks\n---\nUse functional components.",
     )
     // globbed ⇒ auto-inject (NOT requestable)
-    writeFileSync(
-      path.join(rulesDir, "ts.md"),
-      "---\nglobs: '*.ts'\n---\nNo any.",
-    )
+    writeFileSync(path.join(rulesDir, "ts.md"), "---\nglobs: '*.ts'\n---\nNo any.")
   }
 
   test("loadRequestableRules keeps description-only; loadGlobRules drops it", async () => {

@@ -571,6 +571,18 @@ describe("Exhaustive AgentEvent switch covers the 6 new variants (drift gate)", 
         return "knobs_applied"
       case "done":
         return "done"
+      case "output_progress":
+        return "output_progress"
+      case "item_started":
+        return "item_started"
+      case "item_updated":
+        return "item_updated"
+      case "item_completed":
+        return "item_completed"
+      case "progress_update":
+        return "progress_update"
+      case "ratelimit_snapshot":
+        return "ratelimit_snapshot"
       default: {
         const _exhaustive: never = e
         return _exhaustive

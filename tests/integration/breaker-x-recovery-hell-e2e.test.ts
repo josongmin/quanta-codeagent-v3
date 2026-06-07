@@ -63,8 +63,7 @@ import { cfg, ev, RecordingStream, ScriptedLLM, text, thr, withTimeout } from ".
  */
 
 /** A PTL stream error (routes to the `compact` recovery action). */
-const ptl = (): ReturnType<typeof thr> =>
-  thr(new LLMError("400 prompt is too long for this model"))
+const ptl = (): ReturnType<typeof thr> => thr(new LLMError("400 prompt is too long for this model"))
 
 /** A transient stream error (routes to `backoff`, consumes a stream-retry). */
 const transient = (tag: string): ReturnType<typeof thr> =>

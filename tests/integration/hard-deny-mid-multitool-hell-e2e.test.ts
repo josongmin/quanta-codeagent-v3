@@ -168,10 +168,7 @@ const runMulti = async (
   label: string,
 ): Promise<RunResult> => {
   const log: ExecLog = { commands: [], reads: [], unsafe: [] }
-  const llm = new ScriptedLLM([
-    ev(multiToolUse(calls)),
-    ev(text("done")),
-  ])
+  const llm = new ScriptedLLM([ev(multiToolUse(calls)), ev(text("done"))])
   const stream = new RecordingStream()
   const handoffs: HandoffRequiredEvent[] = []
   const config: AgentConfig = cfg({
@@ -204,9 +201,7 @@ const runMulti = async (
 /** Pull the tool_result `tool_use_id` sequence from the assembled user
  *  message the loop appended for the NEXT turn (model-call order, the
  *  documented `streamingTurn` invariant). `llm.seenMessages[1]` is that turn. */
-const resultBlockOrder = (
-  inputs: ScriptedLLM["inputs"],
-): { id: string; isError: boolean }[] => {
+const resultBlockOrder = (inputs: ScriptedLLM["inputs"]): { id: string; isError: boolean }[] => {
   const turn2 = inputs[1]
   if (!turn2) return []
   // The tool_result blocks live in the LAST user message of turn 2.

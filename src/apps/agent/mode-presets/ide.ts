@@ -88,22 +88,25 @@ const buildIdeBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" | "b
     req.base.registry instanceof ToolRegistry
       ? req.base.registry
       : new ToolRegistry(buildDefaultTools())
-  return wireOptionalAgentPorts({
-    ...req.base,
-    llm: req.base.llm,
-    registry,
-    stream,
-    permission,
-    messages: req.base.messages ?? [],
-    system: req.base.system ?? buildSystemPrompt(cwd),
-    cwd,
-    maxTurns: req.base.maxTurns ?? 200,
-    // T01 (audit L5 H-2): inherit the composition-root's REAL SIGINT-wired
-    // signal; dead throwaway controller removed.
-    signal: req.base.signal,
-    // branch_search default-on unless the caller already chose.
-    branchSearch: req.base.branchSearch ?? IDE_BRANCH_SEARCH,
-  }, process.env)
+  return wireOptionalAgentPorts(
+    {
+      ...req.base,
+      llm: req.base.llm,
+      registry,
+      stream,
+      permission,
+      messages: req.base.messages ?? [],
+      system: req.base.system ?? buildSystemPrompt(cwd),
+      cwd,
+      maxTurns: req.base.maxTurns ?? 200,
+      // T01 (audit L5 H-2): inherit the composition-root's REAL SIGINT-wired
+      // signal; dead throwaway controller removed.
+      signal: req.base.signal,
+      // branch_search default-on unless the caller already chose.
+      branchSearch: req.base.branchSearch ?? IDE_BRANCH_SEARCH,
+    },
+    process.env,
+  )
 }
 
 export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {

@@ -123,7 +123,7 @@ const resolve = (
   const merged = mergeLayered(configLayers, {
     base: BASE_PROFILE,
     strategy,
-    restrictiveness,
+    ...(restrictiveness !== undefined ? { restrictiveness } : {}),
   })
   return { merged: merged.merged, overrides: merged.overrides, dropped: guarded.dropped }
 }

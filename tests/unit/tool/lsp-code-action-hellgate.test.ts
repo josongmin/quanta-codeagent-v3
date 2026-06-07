@@ -15,12 +15,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import type {
-  CodeAction,
-  CodeActionKind,
-  CodeActionPort,
-  CodeActionWorkspaceEdit,
-} from "@/lsp"
+import type { CodeAction, CodeActionKind, CodeActionPort, CodeActionWorkspaceEdit } from "@/lsp"
 import { lspCodeActionTool } from "@/tool/lsp_nav"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
 
@@ -50,9 +45,7 @@ const fakePort = (overrides?: Partial<CodeActionPort>): FakePort => {
   const merged: CodeActionPort = { ...base, ...(overrides ?? {}) }
   const realResolve = merged.resolveCodeActions
   merged.resolveCodeActions = async (file, line, col, kind, signal) => {
-    resolveCalls.push(
-      kind === undefined ? { file, line, col } : { file, line, col, kind },
-    )
+    resolveCalls.push(kind === undefined ? { file, line, col } : { file, line, col, kind })
     resolveSignals.push(signal)
     return realResolve(file, line, col, kind, signal)
   }
@@ -86,11 +79,7 @@ const collect = async (
   return result
 }
 
-const action = (
-  title: string,
-  kind: CodeActionKind = "quickfix",
-  editFiles = 0,
-): CodeAction => {
+const action = (title: string, kind: CodeActionKind = "quickfix", editFiles = 0): CodeAction => {
   const a: CodeAction = { title, kind }
   if (editFiles > 0) {
     const changes = Array.from({ length: editFiles }, (_, i) => ({
@@ -124,9 +113,7 @@ describe("lsp_code_action — metadata", () => {
 
   test("HELL-A3: isConcurrencySafe() === true", () => {
     const t = lspCodeActionTool(fakePort())
-    expect(
-      t.isConcurrencySafe({ path: "x.ts", line: 1, character: 1 }),
-    ).toBe(true)
+    expect(t.isConcurrencySafe({ path: "x.ts", line: 1, character: 1 })).toBe(true)
   })
 })
 

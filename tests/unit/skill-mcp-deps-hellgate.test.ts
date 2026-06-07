@@ -233,7 +233,7 @@ describe("AttachMcpPort — injected seam (port inversion)", () => {
           out.push({
             serviceName: s.serviceName,
             attached: !already,
-            reason: already ? "already-attached" : undefined,
+            ...(already ? { reason: "already-attached" } : {}),
           })
         }
         return out

@@ -1,4 +1,4 @@
-import { type GroundingExecutionConfig } from "./config"
+import type { GroundingExecutionConfig } from "./config"
 import type { GroundingCorpus, GroundingMode } from "./schema"
 import { shortHash, stableJson } from "./stable-json"
 

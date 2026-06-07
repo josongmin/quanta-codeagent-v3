@@ -25,8 +25,7 @@ describe("Layer-2 format patterns — positive matches", () => {
   })
 
   test("aws_secret_access_key_assignment", () => {
-    const input =
-      "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\nother line"
+    const input = "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\nother line"
     const r = redactSecrets(input, { origin: "tool_result" })
     expect(r.unchanged).toBe(false)
     expect(r.hits.some((h) => h.kind === "aws_secret_access_key_assignment")).toBe(true)
@@ -196,7 +195,7 @@ describe("Determinism and ordering invariants", () => {
     const tok = `ghp_${"a".repeat(36)}`
     const r = redactSecrets(`token=${tok}`, {
       origin: "tool_result",
-      whitelist: [new RegExp(`ghp_a{36}`)],
+      whitelist: [/ghp_a{36}/],
     })
     expect(r.unchanged).toBe(true)
     expect(r.hits).toHaveLength(0)

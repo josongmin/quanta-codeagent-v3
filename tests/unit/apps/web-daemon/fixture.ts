@@ -15,13 +15,13 @@ import {
   createSessionTransportBridge,
   type SessionTransport,
 } from "@/ipc/session"
+import type { ImageBlock } from "@/llm"
 import {
   type SessionCommand,
   type SessionEvent,
   SessionProtocolValidationError,
   type SessionSnapshotLite,
 } from "@/protocol/session"
-import type { ImageBlock } from "@/llm"
 import type {
   RuntimeFacade,
   RuntimeSession,
@@ -137,10 +137,7 @@ export const createStubRuntimeFactory = (): {
             return { revision: snapshot.revision, seq: snapshot.seq, events: [event] }
           }
           case "turn.run": {
-            if (
-              snapshot.state.draftInput.trim().length === 0 &&
-              draftImages.length === 0
-            ) {
+            if (snapshot.state.draftInput.trim().length === 0 && draftImages.length === 0) {
               throw new SessionProtocolValidationError("empty_turn_input")
             }
             const prompt = snapshot.state.draftInput
@@ -203,10 +200,8 @@ export const createStubRuntimeFactory = (): {
               revision: snapshot.revision + 1,
               seq: snapshot.seq + 2,
               state: (() => {
-                const {
-                  streamingAssistantText: _streamingAssistantText,
-                  ...runningState
-                } = snapshot.state
+                const { streamingAssistantText: _streamingAssistantText, ...runningState } =
+                  snapshot.state
                 return {
                   ...runningState,
                   status: "idle" as const,

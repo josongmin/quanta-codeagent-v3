@@ -30,10 +30,10 @@ import {
   __resetDefaultPermissionStore,
   AutoModeClassifier,
   CIRCUMVENTION_TAXONOMY_LINE,
-  type ClassifyDecision,
-  type ClassifyRequest,
   CircumventionTracker,
   CLASSIFIER_SYSTEM_PROMPT,
+  type ClassifyDecision,
+  type ClassifyRequest,
   type PermissionContext,
 } from "@/permission"
 import { RulesStore } from "@/rules"
@@ -110,8 +110,9 @@ const actionOf = (command: string): AdmissibilityAction => ({
   isReadOnly: false,
 })
 
-const autoPermission = (port: (r: ClassifyRequest) => Promise<ClassifyDecision>): PermissionContext =>
-  ({ mode: "auto", classify: port }) as PermissionContext
+const autoPermission = (
+  port: (r: ClassifyRequest) => Promise<ClassifyDecision>,
+): PermissionContext => ({ mode: "auto", classify: port }) as PermissionContext
 
 /** A rules store with a TRUSTED user-layer `allow` line. */
 const storeWithUserAllow = (): RulesStore => {
@@ -124,9 +125,16 @@ describe("KNOBS OFF (default) — classifier sees canonical prompt, no wiring", 
   test("overlay store wired but knob OFF ⇒ NO operator-rule section", async () => {
     const { port, prompts } = recordingPort()
     const classifier = new AutoModeClassifier(port)
-    await runAdmissibilityGate(call("ls"), cfg({}), autoPermission(port), actionOf("ls"), classifier, {
-      rulesStore: storeWithUserAllow(),
-    })
+    await runAdmissibilityGate(
+      call("ls"),
+      cfg({}),
+      autoPermission(port),
+      actionOf("ls"),
+      classifier,
+      {
+        rulesStore: storeWithUserAllow(),
+      },
+    )
     expect(prompts.length).toBeGreaterThan(0)
     expect(prompts[0]).toBe(CLASSIFIER_SYSTEM_PROMPT)
     expect(prompts[0]).not.toContain("Operator Rules")
@@ -159,9 +167,16 @@ describe("QUANTA_AUTO_MODE_RULES=1 — overlay composes onto the prompt", () => 
     __resetRuntimeConfig()
     const { port, prompts } = recordingPort()
     const classifier = new AutoModeClassifier(port)
-    await runAdmissibilityGate(call("ls"), cfg({}), autoPermission(port), actionOf("ls"), classifier, {
-      rulesStore: storeWithUserAllow(),
-    })
+    await runAdmissibilityGate(
+      call("ls"),
+      cfg({}),
+      autoPermission(port),
+      actionOf("ls"),
+      classifier,
+      {
+        rulesStore: storeWithUserAllow(),
+      },
+    )
     expect(prompts[0]).not.toBe(CLASSIFIER_SYSTEM_PROMPT)
     expect(prompts[0]).toContain("Operator Rules")
     expect(prompts[0]).toContain("terraform apply")
@@ -172,9 +187,16 @@ describe("QUANTA_AUTO_MODE_RULES=1 — overlay composes onto the prompt", () => 
     __resetRuntimeConfig()
     const { port, prompts } = recordingPort()
     const classifier = new AutoModeClassifier(port)
-    await runAdmissibilityGate(call("ls"), cfg({}), autoPermission(port), actionOf("ls"), classifier, {
-      rulesStore: storeWithUserAllow(),
-    })
+    await runAdmissibilityGate(
+      call("ls"),
+      cfg({}),
+      autoPermission(port),
+      actionOf("ls"),
+      classifier,
+      {
+        rulesStore: storeWithUserAllow(),
+      },
+    )
     // Security knob is strict `=== "1"`; a loose "on" must NOT loosen the gate.
     expect(prompts[0]).toBe(CLASSIFIER_SYSTEM_PROMPT)
   })

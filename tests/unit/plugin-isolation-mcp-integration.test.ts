@@ -43,17 +43,14 @@ describe("ADR-0162 IsolatedMcpClient — backwards compat", () => {
     const before = process.env.MCP_USE_ISOLATED_SPAWN
     // Trap Proxy that throws if isolatedMcpEnabledFromEnv mutates the env
     // object it was handed (it should only read).
-    const trap = new Proxy(
-      { MCP_USE_ISOLATED_SPAWN: "1" } as Record<string, string | undefined>,
-      {
-        set() {
-          throw new Error("env mutation forbidden — flag-detection must be pure")
-        },
-        deleteProperty() {
-          throw new Error("env mutation (delete) forbidden")
-        },
+    const trap = new Proxy({ MCP_USE_ISOLATED_SPAWN: "1" } as Record<string, string | undefined>, {
+      set() {
+        throw new Error("env mutation forbidden — flag-detection must be pure")
       },
-    )
+      deleteProperty() {
+        throw new Error("env mutation (delete) forbidden")
+      },
+    })
     expect(() => isolatedMcpEnabledFromEnv(trap)).not.toThrow()
     isolatedMcpEnabledFromEnv({ MCP_USE_ISOLATED_SPAWN: "1" })
     isolatedMcpEnabledFromEnv({ MCP_USE_ISOLATED_SPAWN: "0" })

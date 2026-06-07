@@ -207,20 +207,23 @@ export const runScenario = async (scenario: Scenario, opts: RunOpts): Promise<Ru
     let turns = 0
     try {
       const outcome = await runAgent(
-        wireOptionalAgentPorts({
-          llm: opts.llm,
-          // DIP factory: synthetic scenarios run against the default port surface;
-          // sandbox confinement comes from the tmp-dir cwd + `forbidden` matcher,
-        // not from substituting fs ports here.
-        registry: new ToolRegistry(buildDefaultTools()),
-        stream,
-        permission,
-        messages,
-        system: buildSystemPrompt(sandbox),
-          cwd: sandbox,
-          maxTurns: opts.maxTurns ?? scenario.maxTurns ?? DEFAULT_MAX_TURNS,
-          signal: controller.signal,
-        }, process.env),
+        wireOptionalAgentPorts(
+          {
+            llm: opts.llm,
+            // DIP factory: synthetic scenarios run against the default port surface;
+            // sandbox confinement comes from the tmp-dir cwd + `forbidden` matcher,
+            // not from substituting fs ports here.
+            registry: new ToolRegistry(buildDefaultTools()),
+            stream,
+            permission,
+            messages,
+            system: buildSystemPrompt(sandbox),
+            cwd: sandbox,
+            maxTurns: opts.maxTurns ?? scenario.maxTurns ?? DEFAULT_MAX_TURNS,
+            signal: controller.signal,
+          },
+          process.env,
+        ),
       )
       stopReason = timedOut ? "timeout" : outcome.reason
       turns = outcome.turns

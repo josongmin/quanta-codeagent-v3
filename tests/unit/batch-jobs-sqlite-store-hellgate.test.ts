@@ -23,14 +23,36 @@ const okDispatch: RowDispatchPort = () =>
   Promise.resolve(ok<RowDispatchResult>({ value: { done: true }, threadId: "t" }))
 let clock = 1000
 const makeRunner = (store: SqliteJobStore) =>
-  new BatchJobRunner({ store, dispatch: okDispatch, clock: () => ++clock, newId: (() => { let n = 0; return () => `id-${++n}` })() })
+  new BatchJobRunner({
+    store,
+    dispatch: okDispatch,
+    clock: () => ++clock,
+    newId: (() => {
+      let n = 0
+      return () => `id-${++n}`
+    })(),
+  })
 
 const job = (id: string): BatchJob => ({
-  id, name: "j", status: "pending", instruction: "do", inputHeadersJson: "[]",
-  poolSize: 2, maxAttempts: 1, createdAt: 1, updatedAt: 1,
+  id,
+  name: "j",
+  status: "pending",
+  instruction: "do",
+  inputHeadersJson: "[]",
+  poolSize: 2,
+  maxAttempts: 1,
+  createdAt: 1,
+  updatedAt: 1,
 })
 const item = (jobId: string, itemId: string, rowIndex: number): BatchJobItem => ({
-  jobId, itemId, rowIndex, rowJson: "{}", status: "pending", attemptCount: 0, createdAt: 1, updatedAt: 1,
+  jobId,
+  itemId,
+  rowIndex,
+  rowJson: "{}",
+  status: "pending",
+  attemptCount: 0,
+  createdAt: 1,
+  updatedAt: 1,
 })
 
 describe("SqliteJobStore — port round-trip", () => {
@@ -77,8 +99,12 @@ describe("SqliteJobStore — port round-trip", () => {
     const s = new SqliteJobStore()
     const runner = makeRunner(s)
     const submitted = await runner.submit({
-      name: "j", instruction: "do", rows: [{ a: "1" }, { a: "2" }, { a: "3" }],
-      headers: ["a"], poolSize: 2, maxAttempts: 1,
+      name: "j",
+      instruction: "do",
+      rows: [{ a: "1" }, { a: "2" }, { a: "3" }],
+      headers: ["a"],
+      poolSize: 2,
+      maxAttempts: 1,
     })
     expect(submitted.ok).toBe(true)
     if (!submitted.ok) throw new Error("unreachable")

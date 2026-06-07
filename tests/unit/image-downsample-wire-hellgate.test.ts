@@ -13,7 +13,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { type ImageDownsamplePort, makeReadImageTool, MAX_IMAGE_BYTES } from "@/tool/image"
+import { type ImageDownsamplePort, MAX_IMAGE_BYTES, makeReadImageTool } from "@/tool/image"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
 
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
@@ -37,7 +37,10 @@ afterAll(() => rmSync(dir, { recursive: true, force: true }))
 
 const ctx = (): ToolContext => ({ cwd: dir, signal: new AbortController().signal }) as ToolContext
 
-const runResult = async (tool: ReturnType<typeof makeReadImageTool>, file: string): Promise<ToolResult> => {
+const runResult = async (
+  tool: ReturnType<typeof makeReadImageTool>,
+  file: string,
+): Promise<ToolResult> => {
   let last: ToolResult | undefined
   for await (const ev of tool.execute({ path: file }, ctx()) as AsyncIterable<ToolEvent>) {
     if (ev.type === "result") last = ev.result

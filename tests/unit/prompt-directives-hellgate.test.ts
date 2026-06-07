@@ -260,8 +260,23 @@ describe('§5 directive bundle — env knob wiring (strict === "1")', () => {
     expect(tailText(input)).toContain("AUTONOMOUS MODE:")
   })
 
-  test('a loose value ("true") does NOT enable the directive (strict 1)', () => {
+  // Directives are CANONICAL opt-in gates (gateOn) — the full truthy vocabulary
+  // (1/on/true/yes) enables them, per the gate-vocab unification + the SSOT
+  // carve-out in session-knobs-default-off-byte-identity (directives are NOT in
+  // SECURITY_STRICT_ONE; only code-mode/bg-compaction/etc. stay strict-`1`).
+  test('a truthy value ("true") ALSO enables the directive (canonical gateOn vocab)', () => {
     process.env.QUANTA_DIRECTIVE_PARALLEL_TOOLS = "true"
+    __resetRuntimeConfig()
+    const input: TurnContextInput = {
+      baseMessages: seed,
+      cwd: "/repo",
+      now: () => Date.parse("2026-06-05T00:00:00Z"),
+    }
+    expect(tailText(input)).toContain("PARALLEL TOOLS:")
+  })
+
+  test('a falsy/garbage value ("0"/"nope") does NOT enable the directive', () => {
+    process.env.QUANTA_DIRECTIVE_PARALLEL_TOOLS = "nope"
     __resetRuntimeConfig()
     const input: TurnContextInput = {
       baseMessages: seed,

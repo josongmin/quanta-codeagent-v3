@@ -9,7 +9,6 @@
  * as a long-running session over the WS transport instead of stdin.
  */
 
-import { gateOn } from "@/shared"
 import type { AgentConfig } from "@/agent"
 import { buildSystemPrompt, HookBus } from "@/agent"
 import type { ApprovalStateMachinePort } from "@/agent/approval-state-machine"
@@ -30,6 +29,7 @@ import { pickProvider, tryCreateLLM } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { buildSkillsConfigCore, buildSubagentConfigCore, parseEnvFlag } from "@/runner/assemble"
 import { createRuntimeFromAgentConfigBase, type RuntimeFacade } from "@/sdk/runtime"
+import { gateOn } from "@/shared"
 import { StdoutStream } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
 import {
@@ -200,7 +200,9 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
     // ADR-0440 wire-finish — tool-diff source. Gate OFF ⇒ undefined ⇒ no
     // `onToolDiff` wired (no tool captures, byte-identical) + no facade port ⇒
     // the server forwards no `tool.diff` frames.
-    const canvasToolDiff = gateOn(env, "QUANTA_WEB_CANVAS") ? createCanvasToolDiffSource() : undefined
+    const canvasToolDiff = gateOn(env, "QUANTA_WEB_CANVAS")
+      ? createCanvasToolDiffSource()
+      : undefined
     const base: Omit<AgentConfig, "modePolicy" | "budgetMeter"> = {
       llm,
       registry: new ToolRegistry(buildDefaultTools()),

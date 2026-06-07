@@ -82,6 +82,8 @@ class SpyObjectivePort implements ObjectivePort {
   }
   markCriterion: ObjectivePort["markCriterion"] = (t, c, m) => this.inner.markCriterion(t, c, m)
   recordUsage: ObjectivePort["recordUsage"] = (t, u) => this.inner.recordUsage(t, u)
+  markUsageLimited: ObjectivePort["markUsageLimited"] = (t, until) =>
+    this.inner.markUsageLimited(t, until)
   list: ObjectivePort["list"] = () => this.inner.list()
   toSnapshot: ObjectivePort["toSnapshot"] = () => this.inner.toSnapshot()
   fromSnapshot: ObjectivePort["fromSnapshot"] = (s) => this.inner.fromSnapshot(s)

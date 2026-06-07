@@ -29,10 +29,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import {
-  buildMemoryForSession,
-  type MemoryAutoTriggerPolicy,
-} from "@/runner/assemble"
+import { buildMemoryForSession, type MemoryAutoTriggerPolicy } from "@/runner/assemble"
 
 /** Minimal env helper — typed as ProcessEnv via cast for clarity. */
 const env = (e: Record<string, string | undefined> = {}): NodeJS.ProcessEnv =>
@@ -67,17 +64,22 @@ describe("buildMemoryForSession — default-ON contract", () => {
     expect(slot.autoTrigger).toBeDefined()
   })
 
-  test.each(["1", "true", "on", "yes", "", "TRUE", "On"])(
-    "QUANTA_MEMORY=%p (bare truthy) ⇒ VOLATILE store (default kind never writes to disk)",
-    (raw) => {
-      // No tmp dir / path needed — a bare truthy value resolves to the
-      // volatile kind, NOT sqlite (persistent is `QUANTA_MEMORY=sqlite` only).
-      const slot = buildMemoryForSession(env({ QUANTA_MEMORY: raw }))
-      expect(slot.store).toBeDefined()
-      expect(typeof slot.store?.recall).toBe("function")
-      expect(slot.config).toBeDefined()
-    },
-  )
+  test.each([
+    "1",
+    "true",
+    "on",
+    "yes",
+    "",
+    "TRUE",
+    "On",
+  ])("QUANTA_MEMORY=%p (bare truthy) ⇒ VOLATILE store (default kind never writes to disk)", (raw) => {
+    // No tmp dir / path needed — a bare truthy value resolves to the
+    // volatile kind, NOT sqlite (persistent is `QUANTA_MEMORY=sqlite` only).
+    const slot = buildMemoryForSession(env({ QUANTA_MEMORY: raw }))
+    expect(slot.store).toBeDefined()
+    expect(typeof slot.store?.recall).toBe("function")
+    expect(slot.config).toBeDefined()
+  })
 
   test("QUANTA_MEMORY=sqlite ⇒ on-disk store (the ONLY persistent opt-in)", () => {
     withTmpSqlite((p) => {
@@ -90,16 +92,21 @@ describe("buildMemoryForSession — default-ON contract", () => {
 })
 
 describe("buildMemoryForSession — falsey QUANTA_MEMORY collapses entire bundle", () => {
-  test.each(["0", "off", "no", "false", "OFF", " no ", "False"])(
-    "QUANTA_MEMORY=%p ⇒ {} (store, config, autoTrigger all omitted)",
-    (raw) => {
-      const slot = buildMemoryForSession(env({ QUANTA_MEMORY: raw }))
-      expect(slot).toEqual({})
-      expect(slot.store).toBeUndefined()
-      expect(slot.config).toBeUndefined()
-      expect(slot.autoTrigger).toBeUndefined()
-    },
-  )
+  test.each([
+    "0",
+    "off",
+    "no",
+    "false",
+    "OFF",
+    " no ",
+    "False",
+  ])("QUANTA_MEMORY=%p ⇒ {} (store, config, autoTrigger all omitted)", (raw) => {
+    const slot = buildMemoryForSession(env({ QUANTA_MEMORY: raw }))
+    expect(slot).toEqual({})
+    expect(slot.store).toBeUndefined()
+    expect(slot.config).toBeUndefined()
+    expect(slot.autoTrigger).toBeUndefined()
+  })
 
   test("byte-identical legacy: QUANTA_MEMORY=off matches override.storeDisabled=true", () => {
     const a = buildMemoryForSession(env({ QUANTA_MEMORY: "off" }))
@@ -224,9 +231,7 @@ describe("buildMemoryForSession — distill / consolidate / selfEdit env opt-out
 describe("buildMemoryForSession — auto-trigger semantics", () => {
   test("QUANTA_MEMORY_AUTO=off ⇒ autoTrigger undefined (store/config still on)", () => {
     withTmpSqlite((p) => {
-      const slot = buildMemoryForSession(
-        env({ QUANTA_MEMORY_PATH: p, QUANTA_MEMORY_AUTO: "off" }),
-      )
+      const slot = buildMemoryForSession(env({ QUANTA_MEMORY_PATH: p, QUANTA_MEMORY_AUTO: "off" }))
       expect(slot.store).toBeDefined()
       expect(slot.config).toBeDefined()
       expect(slot.autoTrigger).toBeUndefined()
@@ -281,10 +286,9 @@ describe("buildMemoryForSession — auto-trigger semantics", () => {
 
   test("override.autoTrigger=null FORCES off even when env=on (DI hard veto)", () => {
     withTmpSqlite((p) => {
-      const slot = buildMemoryForSession(
-        env({ QUANTA_MEMORY_PATH: p, QUANTA_MEMORY_AUTO: "on" }),
-        { autoTrigger: null },
-      )
+      const slot = buildMemoryForSession(env({ QUANTA_MEMORY_PATH: p, QUANTA_MEMORY_AUTO: "on" }), {
+        autoTrigger: null,
+      })
       expect(slot.store).toBeDefined()
       expect(slot.autoTrigger).toBeUndefined()
     })
@@ -295,10 +299,7 @@ describe("buildMemoryForSession — store path resolution", () => {
   test("override.storePath wins over env path", () => {
     withTmpSqlite((p) => {
       withTmpSqlite((override) => {
-        const slot = buildMemoryForSession(
-          env({ QUANTA_MEMORY_PATH: p }),
-          { storePath: override },
-        )
+        const slot = buildMemoryForSession(env({ QUANTA_MEMORY_PATH: p }), { storePath: override })
         // Both are valid stores; the override path was used. We assert by
         // re-running with the override as the env path and confirming the
         // same shape (factory is path-deterministic for this assertion).

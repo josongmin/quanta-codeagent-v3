@@ -35,8 +35,8 @@ import {
   type Stage1StorePort,
   type WatermarkState,
 } from "@/memory"
-import { errMessage } from "@/shared"
 import type { Stage1Entry, Stage1OutputsStore } from "@/memory/stage1-store"
+import { errMessage } from "@/shared"
 import type { Stage1Record, Stage1StorePortV2 } from "./memory/stage1-store"
 
 /** Outcome of a session-end consolidator attempt. Mirrors `Phase1Outcome`

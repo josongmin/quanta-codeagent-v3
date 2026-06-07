@@ -183,9 +183,7 @@ describe("HELL-RTV-14 close DURING connect handshake (TOCTOU)", () => {
     expect(h.session.state()).toBe("listening")
     // session.update + audio-start were sent.
     expect(outboundTexts(h.stub).some((t) => t.includes('"session.update"'))).toBe(true)
-    expect(
-      h.stub.outbound().some((o) => o.kind === "audio-start" && o.format === "pcm"),
-    ).toBe(true)
+    expect(h.stub.outbound().some((o) => o.kind === "audio-start" && o.format === "pcm")).toBe(true)
     // pump is live; a chunk forwards an append.
     expect(h.pump.started - h.pump.stopped).toBe(1)
     h.pump.emit(new Uint8Array([0, 1, 2, 3, 4, 5]))

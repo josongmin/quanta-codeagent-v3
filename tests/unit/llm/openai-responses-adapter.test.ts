@@ -171,9 +171,7 @@ describe("OpenAIResponsesAdapter continuation", () => {
     expect((bodies[1]?.input as unknown[])?.length).toBe(1)
     expect(bodies[2]?.previous_response_id).toBeUndefined()
     expect((bodies[2]?.input as unknown[])?.length).toBe(3)
-    expect(
-      secondTurnEvents.filter((e) => e.type === "llm_continuation"),
-    ).toEqual([
+    expect(secondTurnEvents.filter((e) => e.type === "llm_continuation")).toEqual([
       {
         type: "llm_continuation",
         surfaceId: "openai-responses",

@@ -1,6 +1,4 @@
-import type {
-  ImageBlock,
-} from "@/llm"
+import type { ImageBlock } from "@/llm"
 import type {
   LlmSurfaceId,
   LlmTransportId,

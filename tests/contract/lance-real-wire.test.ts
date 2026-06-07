@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test"
+import { once } from "node:events"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { createServer } from "node:net"
-import { once } from "node:events"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -115,9 +115,10 @@ const readLog = (path: string): ReadonlyArray<{ path: string; body: unknown }> =
 }
 
 const exportLines = (prefix: string, count: number): string =>
-  Array.from({ length: count }, (_, i) => `export const ${prefix}_${String(i + 1).padStart(3, "0")} = ${i + 1}`).join(
-    "\n",
-  ) + "\n"
+  Array.from(
+    { length: count },
+    (_, i) => `export const ${prefix}_${String(i + 1).padStart(3, "0")} = ${i + 1}`,
+  ).join("\n") + "\n"
 
 const expectedInitialIds = [
   "src/main.ts:1-50",
@@ -171,7 +172,7 @@ const startLanceShim = async (
       "LOG_PATH = os.environ['LOG_PATH']",
       "db = lancedb.connect(DB_DIR)",
       "def q(s):",
-      "    return s.replace(\"'\", \"''\")",
+      '    return s.replace("\'", "\'\'")',
       "def table_names():",
       "    return set(db.table_names())",
       "def ensure_table(name, docs):",
@@ -188,7 +189,7 @@ const startLanceShim = async (
       "    if not ids:",
       "        return",
       "    joined = ', '.join(f\"'{q(v)}'\" for v in ids)",
-      "    table.delete(f\"id IN ({joined})\")",
+      '    table.delete(f"id IN ({joined})")',
       "def normalize_doc(doc):",
       "    meta = doc.get('metadata') or {}",
       "    return {",
@@ -275,14 +276,18 @@ const startLanceShim = async (
     stderr: "ignore",
   })
 
-  await waitUntil(async () => {
-    try {
-      await fetch(`http://127.0.0.1:${port}`)
-      return true
-    } catch {
-      return false
-    }
-  }, 10_000, "real Lance shim listen")
+  await waitUntil(
+    async () => {
+      try {
+        await fetch(`http://127.0.0.1:${port}`)
+        return true
+      } catch {
+        return false
+      }
+    },
+    10_000,
+    "real Lance shim listen",
+  )
 
   return {
     baseURL: `http://127.0.0.1:${port}`,
@@ -297,7 +302,10 @@ const startLanceShim = async (
   }
 }
 
-const inspectRealTable = (pythonCommand: string, dbDir: string): { rowCount: number; ids: string[]; texts: string[] } => {
+const inspectRealTable = (
+  pythonCommand: string,
+  dbDir: string,
+): { rowCount: number; ids: string[]; texts: string[] } => {
   const proc = Bun.spawnSync(
     [
       pythonCommand,
@@ -345,10 +353,14 @@ describe("search pipeline Lance wire (real LanceDB backing via compatible REST s
       const wired = buildSearchPipelineFromEnv(buildWireEnv(shim.baseURL), workspace)
       expect(wired).not.toBeNull()
 
-      await waitUntil(() => {
-        const entries = readLog(logPath)
-        return entries.filter((entry) => entry.path === "/v1/table/docs/upsert").length >= 4
-      }, 15_000, "initial real Lance upserts")
+      await waitUntil(
+        () => {
+          const entries = readLog(logPath)
+          return entries.filter((entry) => entry.path === "/v1/table/docs/upsert").length >= 4
+        },
+        15_000,
+        "initial real Lance upserts",
+      )
 
       const first = await wired?.pipeline.search({ text: "alpha_001", k: 1 })
       expect(first?.ok).toBe(true)
@@ -357,17 +369,21 @@ describe("search pipeline Lance wire (real LanceDB backing via compatible REST s
       await wait(25)
       writeFileSync(join(workspace, "src", "main.ts"), "export const gamma = 3\n", "utf8")
 
-      await waitUntil(() => {
-        const entries = readLog(logPath)
-        const sawRewrite = entries.some(
-          (entry) =>
-            entry.path === "/v1/table/docs/upsert" &&
-            ((entry.body as { docs?: Array<{ metadata?: { text?: unknown } }> }).docs?.[0]?.metadata?.text ===
-              "export const gamma = 3"),
-        )
-        const sawDelete = entries.some((entry) => entry.path === "/v1/table/docs/delete")
-        return sawRewrite && sawDelete
-      }, 15_000, "real Lance rewrite delete + upsert")
+      await waitUntil(
+        () => {
+          const entries = readLog(logPath)
+          const sawRewrite = entries.some(
+            (entry) =>
+              entry.path === "/v1/table/docs/upsert" &&
+              (entry.body as { docs?: Array<{ metadata?: { text?: unknown } }> }).docs?.[0]
+                ?.metadata?.text === "export const gamma = 3",
+          )
+          const sawDelete = entries.some((entry) => entry.path === "/v1/table/docs/delete")
+          return sawRewrite && sawDelete
+        },
+        15_000,
+        "real Lance rewrite delete + upsert",
+      )
 
       const second = await wired?.pipeline.search({ text: "gamma", k: 1 })
       expect(second?.ok).toBe(true)
@@ -406,10 +422,14 @@ describe("search pipeline Lance wire (real LanceDB backing via compatible REST s
 
       const firstWire = buildSearchPipelineFromEnv(env, workspace)
       expect(firstWire).not.toBeNull()
-      await waitUntil(() => {
-        const entries = readLog(logPath)
-        return entries.filter((entry) => entry.path === "/v1/table/docs/upsert").length >= 4
-      }, 15_000, "initial persisted-manifest real Lance upserts")
+      await waitUntil(
+        () => {
+          const entries = readLog(logPath)
+          return entries.filter((entry) => entry.path === "/v1/table/docs/upsert").length >= 4
+        },
+        15_000,
+        "initial persisted-manifest real Lance upserts",
+      )
       expect(inspectRealTable(python, dbDir).ids).toEqual(expectedInitialIds)
 
       const baseline = readLog(logPath).length
@@ -421,16 +441,20 @@ describe("search pipeline Lance wire (real LanceDB backing via compatible REST s
       const secondWire = buildSearchPipelineFromEnv(env, workspace)
       expect(secondWire).not.toBeNull()
 
-      const restartDelete = await waitUntil(() => {
-        const entries = readLog(logPath).slice(baseline)
-        const deleteCall = entries.find((entry) => entry.path === "/v1/table/docs/delete")
-        const rewriteCall = entries.find(
-          (entry) => entry.path === "/v1/table/docs/upsert" && rewriteTextSeen(entry),
-        )
-        const table = inspectRealTable(python, dbDir)
-        if (deleteCall === undefined || rewriteCall === undefined) return null
-        return table.rowCount === 1 && table.ids[0] === "src/main.ts:1-1" ? deleteCall : null
-      }, 15_000, "restart-safe stale delete")
+      const restartDelete = await waitUntil(
+        () => {
+          const entries = readLog(logPath).slice(baseline)
+          const deleteCall = entries.find((entry) => entry.path === "/v1/table/docs/delete")
+          const rewriteCall = entries.find(
+            (entry) => entry.path === "/v1/table/docs/upsert" && rewriteTextSeen(entry),
+          )
+          const table = inspectRealTable(python, dbDir)
+          if (deleteCall === undefined || rewriteCall === undefined) return null
+          return table.rowCount === 1 && table.ids[0] === "src/main.ts:1-1" ? deleteCall : null
+        },
+        15_000,
+        "restart-safe stale delete",
+      )
       if (restartDelete === null) throw new Error("unreachable")
 
       expect([...deleteIds(restartDelete)].sort()).toEqual(expectedInitialIds)

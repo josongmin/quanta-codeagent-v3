@@ -23,8 +23,12 @@ describe("web knob catalog (ADR-0503 P3)", () => {
 
   test("webSafeKnobValue redacts CUSTOM string values (paths/commands/policy)", () => {
     // string + non-default (env/session) ⇒ redacted (would leak path/command/JSON)
-    expect(webSafeKnobValue("string", { raw: "/Users/jo/.quanta", source: "env" })).toBe("[redacted]")
-    expect(webSafeKnobValue("string", { raw: "aws-vault exec p --", source: "session" })).toBe("[redacted]")
+    expect(webSafeKnobValue("string", { raw: "/Users/jo/.quanta", source: "env" })).toBe(
+      "[redacted]",
+    )
+    expect(webSafeKnobValue("string", { raw: "aws-vault exec p --", source: "session" })).toBe(
+      "[redacted]",
+    )
     // string DEFAULT is public (lives in source) ⇒ shown
     expect(webSafeKnobValue("string", { raw: "info", source: "default" })).toBe("info")
     // bounded kinds are safe ⇒ always shown

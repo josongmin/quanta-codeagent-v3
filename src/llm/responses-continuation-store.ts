@@ -26,9 +26,8 @@ export interface ResponsesContinuationStoreOpts {
 
 const DEFAULT_MAX_ENTRIES = 100
 
-const freezeItems = (
-  items: readonly ResponsesInputItem[],
-): ReadonlyArray<ResponsesInputItem> => Object.freeze(items.slice()) as ReadonlyArray<ResponsesInputItem>
+const freezeItems = (items: readonly ResponsesInputItem[]): ReadonlyArray<ResponsesInputItem> =>
+  Object.freeze(items.slice()) as ReadonlyArray<ResponsesInputItem>
 
 export const defaultResponsesContinuationStore = (
   opts?: ResponsesContinuationStoreOpts,

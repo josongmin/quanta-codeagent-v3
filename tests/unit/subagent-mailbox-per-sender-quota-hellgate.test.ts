@@ -133,12 +133,12 @@ describe("subagent mailbox — per-sender undelivered quota (audit-H R2)", () =>
     }
     const surviving = new Set(mb.list().map((m) => m.id))
     // The 3 oldest (b0, b1, b2) are gone; the 3 newest (b3, b4, b5) remain.
-    expect(surviving.has(ids[0])).toBe(false)
-    expect(surviving.has(ids[1])).toBe(false)
-    expect(surviving.has(ids[2])).toBe(false)
-    expect(surviving.has(ids[3])).toBe(true)
-    expect(surviving.has(ids[4])).toBe(true)
-    expect(surviving.has(ids[5])).toBe(true)
+    expect(surviving.has(ids[0]!)).toBe(false)
+    expect(surviving.has(ids[1]!)).toBe(false)
+    expect(surviving.has(ids[2]!)).toBe(false)
+    expect(surviving.has(ids[3]!)).toBe(true)
+    expect(surviving.has(ids[4]!)).toBe(true)
+    expect(surviving.has(ids[5]!)).toBe(true)
   })
 
   test("(5) one sender's quota does NOT cap another's", () => {
@@ -194,7 +194,7 @@ describe("subagent mailbox — per-sender undelivered quota (audit-H R2)", () =>
     }
     const own = mb.list().filter((m) => m.from === "s")
     expect(own.length).toBe(1)
-    expect(own[0].body).toBe("m4")
+    expect(own[0]!.body).toBe("m4")
   })
 
   test("(8) hostile-mixed-with-legit: real recipient still reads its message", () => {
@@ -215,7 +215,7 @@ describe("subagent mailbox — per-sender undelivered quota (audit-H R2)", () =>
     // Alice reads — legit message survives + is delivered.
     const inbox = mb.read("alice")
     expect(inbox.length).toBe(1)
-    expect(inbox[0].body).toBe("hi alice")
+    expect(inbox[0]!.body).toBe("hi alice")
   })
 
   test("(9) quota + global LRU interaction: per-sender first, then global if needed", () => {

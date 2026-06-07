@@ -35,9 +35,9 @@ const run = async (tool: Tool, input: unknown): Promise<{ ok: boolean; output: s
 
 const ok = <T>(value: T): PtyResult<T> => ({ ok: true, value })
 const err = <T>(
-  code: PtyResult<T> extends { ok: false; code: infer C } ? C : never,
+  code: Extract<PtyResult<T>, { ok: false }>["code"],
   message: string,
-): PtyResult<T> => ({ ok: false, code, message }) as PtyResult<T>
+): PtyResult<T> => ({ ok: false, code, message })
 
 /** A scripted in-memory backend: a ring of chunks per handle + a foreign jail. */
 const mkFake = (

@@ -73,9 +73,7 @@ describe("foundry-adapter — hellgate (A: meta surface)", () => {
   })
 
   test("HELL-A4: endpoint synthesises from resource name when no baseURL", () => {
-    const a = foundryProviderAdapter(
-      base({ auth: { azureResource: "acme", azureApiKey: "k" } }),
-    )
+    const a = foundryProviderAdapter(base({ auth: { azureResource: "acme", azureApiKey: "k" } }))
     expect(a.endpoint).toContain("acme.services.ai.azure.com")
   })
 

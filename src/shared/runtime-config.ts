@@ -1257,7 +1257,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // false ⇒ the loop never constructs the counter and calls `estimateTokens`
     // directly at every site (byte-identical). ON guards CONSTRUCTION/perf only;
     // the counter's numbers are byte-identical to a full re-scan by §4.1.
-    deltaTokenCount: gateOn(env, "QUANTA_DELTA_TOKEN_COUNT"),
+    deltaTokenCount: gateOnStrict(env, "QUANTA_DELTA_TOKEN_COUNT"),
     // H19 — strict `=== "1"` opt-in. Default false ⇒ MCP `roots` is NOT
     // advertised and inbound `roots/list` answers an empty list (byte-identical).
     // The composition root advertises + wires the RootsProviderPort together
@@ -1346,7 +1346,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // dangerous self-proposal is always rejected (reviewer-routed), byte-identical.
     // ON ⇒ the propose port is wired with `allowDangerous: true` (lifts ONLY the
     // dangerous-gate; the no-widen gate still rejects an uncovered proposal).
-    rememberPatternsDangerous: gateOn(env, "QUANTA_REMEMBER_PATTERNS_DANGEROUS"),
+    rememberPatternsDangerous: gateOnStrict(env, "QUANTA_REMEMBER_PATTERNS_DANGEROUS"),
     // jun-6 paste-burst — positive-integer min-char threshold. Absent / invalid
     // ⇒ undefined ⇒ the CLI reader echoes a paste inline (byte-identical).
     pasteBurstMinChars: parsePositiveInt(env["QUANTA_PASTE_BURST"], "QUANTA_PASTE_BURST"),
@@ -1410,8 +1410,11 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // C3 — brief-mode SEED. Uses the standard boolean knob vocabulary (1/true/on)
     // so it reads like the `effort` env seed; default-OFF ⇒ byte-identical.
     brief: parseBool(env["QUANTA_BRIEF"]),
-    // §5 prompt-directive bundle — strict `=== "1"` opt-in per directive. Each
-    // default false ⇒ `selectActiveDirectives` emits nothing ⇒ byte-identical.
+    // §5 prompt-directive bundle — CANONICAL opt-in (gateOn: full truthy vocab
+    // 1/on/true/yes) per the gate-vocab unification; directives are behavior
+    // toggles, NOT security gates (the SSOT carve-out in session-knobs keeps only
+    // code-mode/bg-compaction/etc. strict-`1`). Each default false ⇒
+    // `selectActiveDirectives` emits nothing ⇒ byte-identical.
     directiveAutonomous: gateOn(env, "QUANTA_DIRECTIVE_AUTONOMOUS"),
     directiveReadComplete: gateOn(env, "QUANTA_DIRECTIVE_READ_COMPLETE"),
     directiveProgress: gateOn(env, "QUANTA_DIRECTIVE_PROGRESS"),
@@ -1419,7 +1422,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     directiveThinkFreq: gateOn(env, "QUANTA_DIRECTIVE_THINK_FREQ"),
     directiveAntiPlatitude: gateOn(env, "QUANTA_DIRECTIVE_ANTI_PLATITUDE"),
     directiveParallelTools: gateOn(env, "QUANTA_DIRECTIVE_PARALLEL_TOOLS"),
-    // Advisor timing-rail directive (RFC jun-6 §5.2) — strict `=== "1"` opt-in.
+    // Advisor timing-rail directive (RFC jun-6 §5.2) — canonical opt-in (gateOn).
     directiveAdvisorRail: gateOn(env, "QUANTA_ADVISOR_RAIL"),
     // adaptive-thinking — strict `=== "1"` opt-in. Default false ⇒ the producer
     // emits manual `{type:"enabled",budget_tokens}` for every model (byte-identical).

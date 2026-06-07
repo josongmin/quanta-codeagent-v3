@@ -2,11 +2,11 @@ import { describe, expect, test } from "bun:test"
 import {
   isTruthyEnv,
   PROVIDER_CREDENTIALS,
-  providerCredentials,
   providerCredentialSource,
+  providerCredentials,
 } from "@/llm/provider-metadata"
-import { LLM_PROVIDERS } from "@/llm/provider-types"
 import { resolveProviderWithRouter } from "@/llm/provider-router"
+import { LLM_PROVIDERS } from "@/llm/provider-types"
 
 /**
  * T07 hellgate — the canonical provider-metadata authority (SSOT ratchet).

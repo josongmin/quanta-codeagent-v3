@@ -21,7 +21,7 @@
  * call but not the other and the collision assertion fails.
  */
 import { describe, expect, test } from "bun:test"
-import { canonicalizeEffectPath, CircumventionTracker } from "@/permission/circumvention"
+import { CircumventionTracker, canonicalizeEffectPath } from "@/permission/circumvention"
 
 const cwd = "/repo"
 

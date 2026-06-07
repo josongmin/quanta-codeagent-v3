@@ -36,7 +36,7 @@ const cannedImagesFetch = (
   b64: string,
 ): { fetcher: typeof fetch; calls: Array<{ url: string; init?: RequestInit }> } => {
   const calls: Array<{ url: string; init?: RequestInit }> = []
-  const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const fetcher = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     calls.push({ url: String(input), ...(init !== undefined ? { init } : {}) })
     return new Response(JSON.stringify({ data: [{ b64_json: b64 }] }), {
       status: 200,

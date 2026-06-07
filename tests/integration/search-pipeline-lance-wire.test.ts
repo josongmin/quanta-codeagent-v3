@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { once } from "node:events"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http"
+import type { AddressInfo } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { AddressInfo } from "node:net"
 import {
   buildSearchPipelineFromEnv,
   clearSearchPipelineWireForTests,
@@ -158,9 +158,10 @@ const startLanceRestFixture = async (): Promise<LanceRestFixture> => {
 }
 
 const exportLines = (prefix: string, count: number): string =>
-  Array.from({ length: count }, (_, i) => `export const ${prefix}_${String(i + 1).padStart(3, "0")} = ${i + 1}`).join(
-    "\n",
-  ) + "\n"
+  Array.from(
+    { length: count },
+    (_, i) => `export const ${prefix}_${String(i + 1).padStart(3, "0")} = ${i + 1}`,
+  ).join("\n") + "\n"
 
 const expectedInitialIds = [
   "src/main.ts:1-50",
@@ -228,15 +229,19 @@ describe("search pipeline Lance wire", () => {
     await wait(25)
     await writeFile(join(dir, "src", "main.ts"), "export const gamma = 3\n")
 
-    const rewrite = await waitUntil(() => {
-      const deleteCall = fixture?.calls.find((call) => call.path === "/v1/table/docs/delete")
-      const rewriteCall = fixture?.calls.find(
-        (call) => call.path === "/v1/table/docs/upsert" && rewriteTextSeen(call),
-      )
-      if (deleteCall === undefined || rewriteCall === undefined) return null
-      const ids = fixture?.tableIds("docs") ?? []
-      return ids.length === 1 && ids[0] === "src/main.ts:1-1" ? { deleteCall, rewriteCall } : null
-    }, 10_000, "rewrite delete + single-chunk upsert")
+    const rewrite = await waitUntil(
+      () => {
+        const deleteCall = fixture?.calls.find((call) => call.path === "/v1/table/docs/delete")
+        const rewriteCall = fixture?.calls.find(
+          (call) => call.path === "/v1/table/docs/upsert" && rewriteTextSeen(call),
+        )
+        if (deleteCall === undefined || rewriteCall === undefined) return null
+        const ids = fixture?.tableIds("docs") ?? []
+        return ids.length === 1 && ids[0] === "src/main.ts:1-1" ? { deleteCall, rewriteCall } : null
+      },
+      10_000,
+      "rewrite delete + single-chunk upsert",
+    )
     if (rewrite === null) throw new Error("unreachable")
 
     expect([...deleteIds(rewrite.deleteCall)].sort()).toEqual(expectedInitialIds)
@@ -282,12 +287,16 @@ describe("search pipeline Lance wire", () => {
 
     const secondWire = buildSearchPipelineFromEnv(env, dir)
     expect(secondWire).not.toBeNull()
-    const deleteCall = await waitUntil(() => {
-      const call = fixture?.calls.find((entry) => entry.path === "/v1/table/docs/delete")
-      if (call === undefined) return null
-      const ids = fixture?.tableIds("docs") ?? []
-      return ids.length === 1 && ids[0] === "src/main.ts:1-1" ? call : null
-    }, 10_000, "restart-safe stale delete")
+    const deleteCall = await waitUntil(
+      () => {
+        const call = fixture?.calls.find((entry) => entry.path === "/v1/table/docs/delete")
+        if (call === undefined) return null
+        const ids = fixture?.tableIds("docs") ?? []
+        return ids.length === 1 && ids[0] === "src/main.ts:1-1" ? call : null
+      },
+      10_000,
+      "restart-safe stale delete",
+    )
     if (deleteCall === null) throw new Error("unreachable")
 
     expect([...deleteIds(deleteCall)].sort()).toEqual(expectedInitialIds)

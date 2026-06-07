@@ -132,7 +132,12 @@ describe("ADR-0076 Gap-5 — refusal short-circuits Phase 3 deferred dispatch", 
       { type: "text_delta", delta: "Decided to refuse" },
       { type: "message_stop", stop_reason: "refusal" },
     ]
-    const res = await streamingTurn({ events: gen(events), isConcurrencySafe, isReadOnly, dispatch })
+    const res = await streamingTurn({
+      events: gen(events),
+      isConcurrencySafe,
+      isReadOnly,
+      dispatch,
+    })
     expect(res.kind).toBe("assembled")
     if (res.kind !== "assembled") return
     expect(res.stopReason).toBe("refusal")
@@ -154,7 +159,12 @@ describe("ADR-0076 Gap-5 — refusal short-circuits Phase 3 deferred dispatch", 
       ...toolUse("unsafe2", "bash", { command: "rm -rf" }),
       { type: "message_stop", stop_reason: "refusal" },
     ]
-    const res = await streamingTurn({ events: gen(events), isConcurrencySafe, isReadOnly, dispatch })
+    const res = await streamingTurn({
+      events: gen(events),
+      isConcurrencySafe,
+      isReadOnly,
+      dispatch,
+    })
     expect(res.kind).toBe("assembled")
     if (res.kind !== "assembled") return
     expect(dispatchCalls).toEqual(["safe1"])
@@ -222,7 +232,12 @@ describe("ADR-0076 Gap-5 — refusal short-circuits Phase 3 deferred dispatch", 
       { type: "text_delta", delta: "On reflection, I refuse." },
       { type: "message_stop", stop_reason: "refusal" },
     ]
-    const res = await streamingTurn({ events: gen(events), isConcurrencySafe, isReadOnly, dispatch })
+    const res = await streamingTurn({
+      events: gen(events),
+      isConcurrencySafe,
+      isReadOnly,
+      dispatch,
+    })
     expect(res.kind).toBe("assembled")
     if (res.kind !== "assembled") return
     expect(res.stopReason).toBe("refusal")

@@ -13,10 +13,10 @@
  * Total = 30 cases.
  */
 
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import type {
   BackgroundSubagentScheduler,
   SubagentHandleId,
@@ -62,9 +62,7 @@ const mkRecord = (over: Partial<ToolCallRecord> & { toolUseId: string }): ToolCa
   tsAfter: over.tsAfter ?? 1100,
   workspace: over.workspace ?? "/ws/R",
   ...(over.shadowCommit !== undefined ? { shadowCommit: over.shadowCommit } : {}),
-  ...(over.sensitiveRedacted !== undefined
-    ? { sensitiveRedacted: over.sensitiveRedacted }
-    : {}),
+  ...(over.sensitiveRedacted !== undefined ? { sensitiveRedacted: over.sensitiveRedacted } : {}),
 })
 
 const mkHandle = (over: Partial<PersistedHandle> & { id: string }): PersistedHandle => ({
@@ -99,6 +97,11 @@ const fakeScheduler = (): FakeScheduler => {
     },
     cancel(): boolean {
       return false
+    },
+    forceBackground() {
+      // This fake has no admission queue (fork throws-at-cap), so there is
+      // nothing to promote — mirrors the default queue-disabled scheduler.
+      return "queue_disabled"
     },
     list(): ReadonlyArray<{
       id: SubagentHandleId
@@ -350,10 +353,7 @@ describe("B. ToolCallRecord + JSONL store", () => {
   test("HG-B6: sensitiveRedacted marker preserved", async () => {
     const baseDir = join(tmpRoot, "b6")
     const store = defaultJsonlToolHistoryStore({ baseDir })
-    await store.append(
-      "bg-6",
-      mkRecord({ toolUseId: "tu-6", sensitiveRedacted: true }),
-    )
+    await store.append("bg-6", mkRecord({ toolUseId: "tu-6", sensitiveRedacted: true }))
     const out = await store.list("bg-6")
     expect(out[0]?.sensitiveRedacted).toBe(true)
   })
@@ -361,10 +361,7 @@ describe("B. ToolCallRecord + JSONL store", () => {
   test("HG-B7: shadowCommit present for mutating tiers, absent for pure", async () => {
     const baseDir = join(tmpRoot, "b7")
     const store = defaultJsonlToolHistoryStore({ baseDir })
-    await store.append(
-      "bg-7",
-      mkRecord({ toolUseId: "tu-pure", tier: "pure" }),
-    )
+    await store.append("bg-7", mkRecord({ toolUseId: "tu-pure", tier: "pure" }))
     await store.append(
       "bg-7",
       mkRecord({

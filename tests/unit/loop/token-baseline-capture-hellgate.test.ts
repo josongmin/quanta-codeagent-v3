@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import type { TokenBaselineBoxState } from "@/agent"
 import { captureTokenBaseline } from "@/agent/loop/stream-consume"
 
 /**
@@ -20,7 +21,8 @@ const ANTHROPIC = "claude-opus-4-8"
 const OPENAI = "gpt-5"
 
 describe("captureTokenBaseline — provider-aware cache buckets (D5)", () => {
-  const box = (sendCount?: number) => ({ sendCount, current: undefined as undefined | object })
+  const box = (sendCount?: number): TokenBaselineBoxState =>
+    sendCount === undefined ? { current: undefined } : { sendCount, current: undefined }
 
   test("anthropic cache-HIT: inputTokens(200)+cacheRead(149800) ⇒ 150k captured", () => {
     const b = box(10)

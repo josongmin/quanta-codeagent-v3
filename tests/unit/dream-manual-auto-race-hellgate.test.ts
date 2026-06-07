@@ -32,12 +32,12 @@ const gatedConsolidate = (kind: "no_op" | "write" = "no_op") => {
     release = r
   })
   const port: DreamConsolidatePort = {
-    async consolidate() {
+    async consolidate(_input: { readonly signal?: AbortSignal }) {
       consolidations += 1
       await gate
       return kind === "no_op"
         ? { kind: "no_op" as const }
-        : { kind: "write" as const, content: "consolidated" }
+        : { kind: "consolidated" as const, content: "consolidated" }
     },
   }
   return {

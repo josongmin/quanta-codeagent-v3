@@ -17,9 +17,10 @@
  *   - `allowedTools` / `category` / `stability` field shapes.
  *   - Activation glob (`paths:`) behavior.
  */
+
+import { describe, expect, test } from "bun:test"
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
-import { describe, expect, test } from "bun:test"
 import { parseFrontmatter } from "@/skill"
 
 const SKILL_ROOT = join(import.meta.dir, "..", "..", "src", "skill", "system-skills")

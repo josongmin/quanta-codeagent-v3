@@ -385,7 +385,8 @@ describe("decideAction — closed enum coverage", () => {
       "control_turn_mismatch",
       "not_interrupted",
     ])
-    expect(ALL_ACTION_REJECTION_REASONS.length).toBe(ALL_REJECTION_REASONS.length + 2)
+    const actionReasonCount: number = ALL_ACTION_REJECTION_REASONS.length
+    expect(actionReasonCount).toBe(ALL_REJECTION_REASONS.length + 2)
   })
 
   test("exhaustiveness — every ALL_ACTION_KINDS member is a real branch (no never default hit)", () => {

@@ -44,17 +44,17 @@ import {
   inMemoryAutomationEngine,
   tickScheduler,
 } from "@/scheduler/automation-engine"
+import { parseRRule } from "@/scheduler/rrule-parser"
 import {
   type AssembleAutomationDeps,
-  assembleAutomation,
   AUTOMATION_ENV_FLAG,
   AUTOMATION_INTERVAL_ENV,
+  assembleAutomation,
   DEFAULT_AUTOMATION_INTERVAL_MS,
 } from "@/scheduler/runtime-wire"
-import { parseRRule } from "@/scheduler/rrule-parser"
 import type { AgentLoopPort, RRule } from "@/scheduler/types"
-import { automationUpdateTool } from "@/tool/automation_update"
 import { buildDefaultTools } from "@/tool"
+import { automationUpdateTool } from "@/tool/automation_update"
 import type { ToolContext, ToolEvent } from "@/tool/types"
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
@@ -281,7 +281,11 @@ describe("ADR-0279/0280 — automation wire hellgate", () => {
     expect(engine.runs).toHaveLength(1)
     // Clock skews backwards to 10:30 — should NOT re-fire (engine's
     // advanced nextRunAt is at next day).
-    const out = await tickScheduler({ engine, now: utc(2026, 5, 25, 10, 30), handler: slot.handler })
+    const out = await tickScheduler({
+      engine,
+      now: utc(2026, 5, 25, 10, 30),
+      handler: slot.handler,
+    })
     expect(out.kind).toBe("idle")
     expect(engine.runs).toHaveLength(1) // unchanged
   })
@@ -353,7 +357,9 @@ describe("ADR-0279/0280 — automation wire hellgate", () => {
         ;(h as { cleared: boolean }).cleared = true
       },
     }
-    const cfg = { automationEngine: { ...slot, now: () => utc(2026, 5, 25, 11) } } as unknown as AgentConfig
+    const cfg = {
+      automationEngine: { ...slot, now: () => utc(2026, 5, 25, 11) },
+    } as unknown as AgentConfig
     const handle = startAutomationEngineTicker(cfg, deps)
     // Fire one tick
     arms[0]!.cb()

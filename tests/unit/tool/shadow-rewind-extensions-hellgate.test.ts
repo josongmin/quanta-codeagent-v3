@@ -189,7 +189,9 @@ describe("shadow_restore_partial — schema + routing + metadata", () => {
     const odb = fakeOdb()
     const t = shadowRestorePartialTool(odb)
     const events = await collectEvents(t, { paths: ["a.ts"], target: "verified" })
-    const result = events.find((ev): ev is Extract<ToolEvent, { type: "result" }> => ev.type === "result")
+    const result = events.find(
+      (ev): ev is Extract<ToolEvent, { type: "result" }> => ev.type === "result",
+    )
     expect(result).toBeDefined()
     expect(result?.result.ok).toBe(false)
     expect(result?.result.output.startsWith("not-implemented:")).toBe(true)

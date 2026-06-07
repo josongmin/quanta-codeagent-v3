@@ -2,13 +2,16 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { pdfReadTool, sniffPdfMagic } from "@/tool/document/pdf-read"
 import type { ToolContext, ToolResult } from "@/tool"
+import { pdfReadTool, sniffPdfMagic } from "@/tool/document/pdf-read"
 
 const tool = pdfReadTool
 
 const mkTmp = async (): Promise<string> => {
-  const dir = path.join(tmpdir(), `quanta-pdf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+  const dir = path.join(
+    tmpdir(),
+    `quanta-pdf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  )
   await mkdir(dir, { recursive: true })
   return dir
 }
@@ -31,7 +34,8 @@ const minimalPdfBytes = (): Uint8Array => {
     "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n" +
     "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n" +
     "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]>>endobj\n"
-  const trailer = "xref\n0 4\n0000000000 65535 f\ntrailer<</Size 4/Root 1 0 R>>\nstartxref\n200\n%%EOF\n"
+  const trailer =
+    "xref\n0 4\n0000000000 65535 f\ntrailer<</Size 4/Root 1 0 R>>\nstartxref\n200\n%%EOF\n"
   return new TextEncoder().encode(header + body + trailer)
 }
 

@@ -164,7 +164,8 @@ const assertFollowUp = (value: unknown): FollowUp => {
   if (!isRecord(value)) throw new Error("Malformed FollowUpQueueSnapshot entry")
   if (typeof value.id !== "string") throw new Error("Malformed FollowUpQueueSnapshot entry")
   if (typeof value.content !== "string") throw new Error("Malformed FollowUpQueueSnapshot entry")
-  if (typeof value.submittedAt !== "number") throw new Error("Malformed FollowUpQueueSnapshot entry")
+  if (typeof value.submittedAt !== "number")
+    throw new Error("Malformed FollowUpQueueSnapshot entry")
   if (value.submittedTurnId !== null && typeof value.submittedTurnId !== "string") {
     throw new Error("Malformed FollowUpQueueSnapshot entry")
   }
@@ -323,9 +324,7 @@ export class FollowUpQueue {
     }
     const version = snapshot.version
     if (version !== 1 && version !== 2) {
-      throw new Error(
-        `Unsupported FollowUpQueueSnapshot version: ${String(version)}`,
-      )
+      throw new Error(`Unsupported FollowUpQueueSnapshot version: ${String(version)}`)
     }
     if (!Array.isArray(snapshot.threads)) {
       throw new Error("Malformed FollowUpQueueSnapshot threads")

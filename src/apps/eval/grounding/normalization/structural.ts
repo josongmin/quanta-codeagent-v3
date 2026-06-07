@@ -27,7 +27,9 @@ const contextChangeReferents = (groundingCase: GroundingCase): readonly string[]
       if (event.field === "mode" && typeof event.next === "string") return [`${event.next}_mode`]
       if (event.field === "model" && typeof event.next === "string") return [event.next]
       if (event.field === "active_skills" && Array.isArray(event.next)) {
-        return event.next.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "")
+        return event.next.filter(
+          (entry): entry is string => typeof entry === "string" && entry.trim() !== "",
+        )
       }
       return []
     }),
@@ -37,7 +39,9 @@ const collectReferentCandidates = (groundingCase: GroundingCase): readonly strin
   uniqueOrdered([
     ...(groundingCase.candidateReferentIds ?? []).filter((entry) => !isGroundingFileId(entry)),
     ...groundingCase.history.flatMap((entry) => [
-      ...(entry.referentId !== undefined && entry.referentId !== null && !isGroundingFileId(entry.referentId)
+      ...(entry.referentId !== undefined &&
+      entry.referentId !== null &&
+      !isGroundingFileId(entry.referentId)
         ? [entry.referentId]
         : []),
       ...(entry.mentionedReferentIds ?? []).filter((candidate) => !isGroundingFileId(candidate)),
@@ -48,7 +52,11 @@ const collectReferentCandidates = (groundingCase: GroundingCase): readonly strin
 const latestStructuredReferentId = (groundingCase: GroundingCase): string | null => {
   for (let index = groundingCase.history.length - 1; index >= 0; index -= 1) {
     const entry = groundingCase.history[index]!
-    if (entry.referentId !== undefined && entry.referentId !== null && !isGroundingFileId(entry.referentId)) {
+    if (
+      entry.referentId !== undefined &&
+      entry.referentId !== null &&
+      !isGroundingFileId(entry.referentId)
+    ) {
       return entry.referentId
     }
   }
@@ -92,14 +100,18 @@ export const normalizeGroundingDecisionStructurally = (
   const stateContract = groundingCase.stateContract
   const threadCandidates = collectThreadCandidates(groundingCase)
   const canonicalActiveThread =
-    stateContract?.activeThreadId ?? activeThreadFromStructuredHistory(groundingCase) ?? decision.activeThreadId
+    stateContract?.activeThreadId ??
+    activeThreadFromStructuredHistory(groundingCase) ??
+    decision.activeThreadId
   const fileContext = resolveGroundingSpecificFileContext(groundingCase)
   const subthreadCandidates = collectReferentCandidates(groundingCase)
   const primaryStructuredReferent = latestStructuredReferentId(groundingCase)
   const latestToolResult = latestStructuredToolResult(groundingCase)
-  const latestToolResultId = stateContract?.latestToolResultId ?? latestToolResult?.referentId ?? null
+  const latestToolResultId =
+    stateContract?.latestToolResultId ?? latestToolResult?.referentId ?? null
   const latestToolThreadId = latestToolResult?.threadId ?? null
-  const explicitFileId = fileContext.utteranceFileIds.length === 1 ? (fileContext.utteranceFileIds[0] ?? null) : null
+  const explicitFileId =
+    fileContext.utteranceFileIds.length === 1 ? (fileContext.utteranceFileIds[0] ?? null) : null
   const uniqueMatchingFileId =
     fileContext.matchingCandidateFileIds.length === 1
       ? (fileContext.matchingCandidateFileIds[0] ?? null)
@@ -110,7 +122,9 @@ export const normalizeGroundingDecisionStructurally = (
   const uniqueSubthreadReferentId =
     subthreadCandidates.length === 1 ? (subthreadCandidates[0] ?? null) : null
   const decisionReferentIsFile =
-    decision.referentId !== null && decision.referentId !== undefined && isGroundingFileId(decision.referentId)
+    decision.referentId !== null &&
+    decision.referentId !== undefined &&
+    isGroundingFileId(decision.referentId)
   const keepStructuredCurrentReferent =
     decision.referentId !== null &&
     !decisionReferentIsFile &&
@@ -201,13 +215,17 @@ export const normalizeGroundingDecisionStructurally = (
     referentId !== canonicalActiveThread &&
     !isGroundingFileId(referentId)
   ) {
-    scope = latestToolResultId !== null && referentId === latestToolResultId ? "latest_tool_result" : "specific_subthread"
+    scope =
+      latestToolResultId !== null && referentId === latestToolResultId
+        ? "latest_tool_result"
+        : "specific_subthread"
   }
 
   if (scope === "latest_tool_result") {
     if (latestToolResultId !== null) {
       referentId = latestToolResultId
-      if (activeThreadId === null && latestToolThreadId !== null) activeThreadId = latestToolThreadId
+      if (activeThreadId === null && latestToolThreadId !== null)
+        activeThreadId = latestToolThreadId
       shouldClarify = false
     } else {
       scope = "specific_subthread"

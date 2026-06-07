@@ -5,6 +5,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { BudgetMeter } from "@/agent/budget"
 import { resolveTurnLoopOutcome, shouldParkOnGate } from "@/agent/loop/turn-outcome"
 import type { RunAgentContext, TurnResult } from "@/agent/loop/types"
 import type { AgentConfig } from "@/agent/types"
@@ -26,6 +27,14 @@ const assistantText = (text: string): Message => ({
   content: [{ type: "text", text }],
 })
 
+/** A real BudgetMeter already over its turn dial ⇒ `checkExhausted()` reports
+ *  `{ exhausted: true, kind: "turn" }`. */
+const exhaustedTurnMeter = (): BudgetMeter => {
+  const meter = new BudgetMeter({ dials: { maxTurns: 0 } })
+  meter.tick("turn")
+  return meter
+}
+
 const baseArgs = (overrides?: {
   result?: TurnResult
   turn?: number
@@ -40,16 +49,13 @@ const baseArgs = (overrides?: {
     llm: { stream: async function* () {} },
     registry: new ToolRegistry([]),
     stream,
+    permission: { mode: "default" },
+    messages: [],
+    system: "",
+    cwd: "/tmp",
     maxTurns: 10,
     signal: new AbortController().signal,
-    ...(overrides?.budgetExhausted === true
-      ? {
-          budgetMeter: {
-            tick: () => {},
-            checkExhausted: () => ({ exhausted: true as const, kind: "turn" as const }),
-          },
-        }
-      : {}),
+    ...(overrides?.budgetExhausted === true ? { budgetMeter: exhaustedTurnMeter() } : {}),
   }
   return {
     cfg,
@@ -158,17 +164,24 @@ describe("resolveTurnLoopOutcome", () => {
 })
 
 describe("shouldParkOnGate", () => {
-  const minimalCtx = (gate?: SubagentTurnGate): RunAgentContext =>
-    ({
-      cfg: {
-        llm: { stream: async function* () {} },
-        registry: new ToolRegistry([]),
-        stream: new RecordingStream(),
-        maxTurns: 1,
-        signal: new AbortController().signal,
-        ...(gate !== undefined ? { subagentTurnGate: gate } : {}),
-      },
-    }) as RunAgentContext
+  // `shouldParkOnGate` reads ONLY `ctx.cfg` (`.subagentTurnGate` + `.signal`),
+  // so a cfg-only context is sufficient. Asserted via the `Partial` supertype
+  // (NOT `unknown`) since the rest of `RunAgentContext` is intentionally absent.
+  const minimalCtx = (gate?: SubagentTurnGate): RunAgentContext => {
+    const cfg: AgentConfig = {
+      llm: { stream: async function* () {} },
+      registry: new ToolRegistry([]),
+      stream: new RecordingStream(),
+      permission: { mode: "default" },
+      messages: [],
+      system: "",
+      cwd: "/tmp",
+      maxTurns: 1,
+      signal: new AbortController().signal,
+      ...(gate !== undefined ? { subagentTurnGate: gate } : {}),
+    }
+    return { cfg } as Partial<RunAgentContext> as RunAgentContext
+  }
 
   test("no gate ⇒ false (default-OFF)", async () => {
     const parked = await shouldParkOnGate(minimalCtx(), {

@@ -308,13 +308,15 @@ export const benchOptIns = (): {
   // Subagent: bench-only `QUANTA_BENCH_SUBAGENT=1`. Empty block ⇒ runner default
   // applies (no per-bench maxDepth tuning — keep the surface minimal until a
   // measured reason appears).
-  const subagent: AgentConfig["subagent"] | undefined =
-    gateOn(process.env, "QUANTA_BENCH_SUBAGENT") ? {} : undefined
+  const subagent: AgentConfig["subagent"] | undefined = gateOn(process.env, "QUANTA_BENCH_SUBAGENT")
+    ? {}
+    : undefined
   // Skills: bench-only `QUANTA_BENCH_SKILLS=1`. Empty block ⇒ bundled system
   // skills ONLY (ADR-0045) — bench never points at a user dir (measurement
   // integrity). `changedPaths` is left unset (full inventory).
-  const skills: AgentConfig["skills"] | undefined =
-    gateOn(process.env, "QUANTA_BENCH_SKILLS") ? {} : undefined
+  const skills: AgentConfig["skills"] | undefined = gateOn(process.env, "QUANTA_BENCH_SKILLS")
+    ? {}
+    : undefined
   // Localize-phase (Agentless absorption — Tier 0): bench-only
   // `QUANTA_BENCH_LOCALIZE_PHASE=<int>`. The value is the number of leading
   // turns to block mutating tools. Domain: positive integer 1..20 (cap is a
@@ -871,41 +873,44 @@ export const buildConfig = (
       content: [{ type: "text", text }],
     },
   ]
-  return wireOptionalAgentPorts({
-    llm: deps.llm,
-    registry,
-    stream,
-    permission,
-    messages,
-    system: buildSystemPrompt(sandbox),
-    cwd: sandbox,
-    maxTurns: deps.maxTurns,
-    signal,
-    onConfirm: async () => false,
-    // Real SWE-bench repos blow the context window over a long trajectory.
-    // Enable proactive + reactive compaction (RFC §8 / ADR-0004 robustness):
-    // without this, large-repo instances PTL-die instead of compacting.
-    compaction: {},
-    // Verify-guard (ADR-0013): observed bench failure — agent edits a
-    // source file then declares "done" with 0 verification → wrong fix ships.
-    // Gated exactly like SWEBENCH_DIRECTIVE (real SWE-bench only; custom-corpus
-    // byte-identical). Absent ⇒ guard OFF, loop unchanged.
-    //
-    // mustPass (outcome-gate) extension — sanity runs with skills/subagent ON
-    // showed the model can call `test_runner`, receive `ok:false`, and STILL
-    // declare "done"; the presence-only guard accepts the call as "verified"
-    // because it ran. mustPass = ALSO require the verify to PASS. maxTrips=2
-    // gives one budget slot per branch (presence + must-pass) so a single run
-    // can hit both before the cap; SWE-bench prioritizes measurement integrity
-    // over the over-correction risk that motivated DEFAULT_MAX_TRIPS=1.
-    ...(instance.swebench ? { verifyGuard: { mustPass: true, maxTrips: 2 } } : {}),
-    // Bench A/B opt-ins (default-OFF; all unset ⇒ keys omitted entirely,
-    // exactOptionalPropertyTypes-friendly, AgentConfig byte-identical).
-    ...(opt.subagent !== undefined ? { subagent: opt.subagent } : {}),
-    ...(opt.skills !== undefined ? { skills: opt.skills } : {}),
-    ...(opt.localizePhase !== undefined ? { localizePhase: opt.localizePhase } : {}),
-    ...(opt.branchSearch !== undefined ? { branchSearch: opt.branchSearch } : {}),
-  }, process.env)
+  return wireOptionalAgentPorts(
+    {
+      llm: deps.llm,
+      registry,
+      stream,
+      permission,
+      messages,
+      system: buildSystemPrompt(sandbox),
+      cwd: sandbox,
+      maxTurns: deps.maxTurns,
+      signal,
+      onConfirm: async () => false,
+      // Real SWE-bench repos blow the context window over a long trajectory.
+      // Enable proactive + reactive compaction (RFC §8 / ADR-0004 robustness):
+      // without this, large-repo instances PTL-die instead of compacting.
+      compaction: {},
+      // Verify-guard (ADR-0013): observed bench failure — agent edits a
+      // source file then declares "done" with 0 verification → wrong fix ships.
+      // Gated exactly like SWEBENCH_DIRECTIVE (real SWE-bench only; custom-corpus
+      // byte-identical). Absent ⇒ guard OFF, loop unchanged.
+      //
+      // mustPass (outcome-gate) extension — sanity runs with skills/subagent ON
+      // showed the model can call `test_runner`, receive `ok:false`, and STILL
+      // declare "done"; the presence-only guard accepts the call as "verified"
+      // because it ran. mustPass = ALSO require the verify to PASS. maxTrips=2
+      // gives one budget slot per branch (presence + must-pass) so a single run
+      // can hit both before the cap; SWE-bench prioritizes measurement integrity
+      // over the over-correction risk that motivated DEFAULT_MAX_TRIPS=1.
+      ...(instance.swebench ? { verifyGuard: { mustPass: true, maxTrips: 2 } } : {}),
+      // Bench A/B opt-ins (default-OFF; all unset ⇒ keys omitted entirely,
+      // exactOptionalPropertyTypes-friendly, AgentConfig byte-identical).
+      ...(opt.subagent !== undefined ? { subagent: opt.subagent } : {}),
+      ...(opt.skills !== undefined ? { skills: opt.skills } : {}),
+      ...(opt.localizePhase !== undefined ? { localizePhase: opt.localizePhase } : {}),
+      ...(opt.branchSearch !== undefined ? { branchSearch: opt.branchSearch } : {}),
+    },
+    process.env,
+  )
 }
 
 interface Phase {

@@ -67,10 +67,13 @@ describe("toAnthropicSystem — system-block breakpoint", () => {
       text: string
       cache_control?: unknown
     }>
-    expect(out[0].cache_control).toEqual({ type: "ephemeral" })
-    expect("ttl" in (out[0].cache_control as object)).toBe(false)
+    const first = out[0]
+    const second = out[1]
+    if (first === undefined || second === undefined) throw new Error("expected two blocks")
+    expect(first.cache_control).toEqual({ type: "ephemeral" })
+    expect("ttl" in (first.cache_control as object)).toBe(false)
     // The non-cache block must carry NO cache_control at all.
-    expect("cache_control" in out[1]).toBe(false)
+    expect("cache_control" in second).toBe(false)
   })
 
   test('"5m" ⇒ byte-identical to default', () => {
@@ -82,8 +85,11 @@ describe("toAnthropicSystem — system-block breakpoint", () => {
       text: string
       cache_control?: { type: string; ttl?: string }
     }>
-    expect(out[0].cache_control).toEqual({ type: "ephemeral", ttl: "1h" })
-    expect("cache_control" in out[1]).toBe(false)
+    const first = out[0]
+    const second = out[1]
+    if (first === undefined || second === undefined) throw new Error("expected two blocks")
+    expect(first.cache_control).toEqual({ type: "ephemeral", ttl: "1h" })
+    expect("cache_control" in second).toBe(false)
   })
 
   test("string system prompt is returned verbatim regardless of ttl", () => {
@@ -96,7 +102,8 @@ describe("toAnthropicSystem — system-block breakpoint", () => {
       { type: "text", text: "a" },
       { type: "text", text: "b" },
     ])
-    const out = toAnthropicSystem(noCache, "1h") as Array<Record<string, unknown>>
+    const out = toAnthropicSystem(noCache, "1h")
+    if (typeof out === "string") throw new Error("expected block array")
     for (const b of out) expect("cache_control" in b).toBe(false)
   })
 })
@@ -115,11 +122,16 @@ describe("cacheConversationPrefix — last-message breakpoint", () => {
 
   test("default ⇒ last text block carries bare ephemeral (golden)", () => {
     const out = cacheConversationPrefix(buildMsgs())
-    const last = out[1].content as Array<{ text: string; cache_control?: unknown }>
+    const assistant = out[1]
+    if (assistant === undefined) throw new Error("expected assistant message")
+    const last = assistant.content as Array<{ text: string; cache_control?: unknown }>
+    const lastFirst = last[0]
+    const lastSecond = last[1]
+    if (lastFirst === undefined || lastSecond === undefined) throw new Error("expected two blocks")
     // Stamped on the LAST text block (`answer`), not the first.
-    expect(last[1].cache_control).toEqual({ type: "ephemeral" })
-    expect("ttl" in (last[1].cache_control as object)).toBe(false)
-    expect("cache_control" in last[0]).toBe(false)
+    expect(lastSecond.cache_control).toEqual({ type: "ephemeral" })
+    expect("ttl" in (lastSecond.cache_control as object)).toBe(false)
+    expect("cache_control" in lastFirst).toBe(false)
   })
 
   test('"5m" ⇒ deep-equal to default', () => {
@@ -128,9 +140,14 @@ describe("cacheConversationPrefix — last-message breakpoint", () => {
 
   test('"1h" ⇒ last text block carries ttl:"1h"; exactly ONE breakpoint', () => {
     const out = cacheConversationPrefix(buildMsgs(), "1h")
-    const last = out[1].content as Array<{ text: string; cache_control?: unknown }>
-    expect(last[1].cache_control).toEqual({ type: "ephemeral", ttl: "1h" })
-    expect("cache_control" in last[0]).toBe(false)
+    const assistant = out[1]
+    if (assistant === undefined) throw new Error("expected assistant message")
+    const last = assistant.content as Array<{ text: string; cache_control?: unknown }>
+    const lastFirst = last[0]
+    const lastSecond = last[1]
+    if (lastFirst === undefined || lastSecond === undefined) throw new Error("expected two blocks")
+    expect(lastSecond.cache_control).toEqual({ type: "ephemeral", ttl: "1h" })
+    expect("cache_control" in lastFirst).toBe(false)
     // Breakpoint count unchanged vs the 5m path.
     const count5m = JSON.stringify(cacheConversationPrefix(buildMsgs(), "5m")).split(
       '"cache_control"',
@@ -183,9 +200,13 @@ describe("cacheConversationPrefix — last-message breakpoint", () => {
     // Even with "1h", a block that ALREADY carries cache_control is untouched
     // (the codec never silently flips a caller-set ttl).
     const out = cacheConversationPrefix(pre as never, "1h")
-    const last = out[0].content as Array<{ cache_control?: { ttl?: string } }>
-    expect(last[0].cache_control).toEqual({ type: "ephemeral" })
-    expect(last[0].cache_control?.ttl).toBeUndefined()
+    const msg = out[0]
+    if (msg === undefined) throw new Error("expected message")
+    const last = msg.content as Array<{ cache_control?: { type: string; ttl?: string } }>
+    const lastFirst = last[0]
+    if (lastFirst === undefined) throw new Error("expected block")
+    expect(lastFirst.cache_control).toEqual({ type: "ephemeral" })
+    expect(lastFirst.cache_control?.ttl).toBeUndefined()
   })
 })
 
@@ -226,14 +247,8 @@ describe("buildAnthropicMessagesRequest — end-to-end wire shape", () => {
   })
 
   test('"1h" leaves model / max_tokens / stream / tools / no-beta-header untouched', () => {
-    const req5m = buildAnthropicMessagesRequest("claude-opus-4-8", 1024, input, "5m") as Record<
-      string,
-      unknown
-    >
-    const req1h = buildAnthropicMessagesRequest("claude-opus-4-8", 1024, input, "1h") as Record<
-      string,
-      unknown
-    >
+    const req5m = buildAnthropicMessagesRequest("claude-opus-4-8", 1024, input, "5m")
+    const req1h = buildAnthropicMessagesRequest("claude-opus-4-8", 1024, input, "1h")
     expect(req1h.model).toBe(req5m.model)
     expect(req1h.max_tokens).toBe(req5m.max_tokens)
     expect(req1h.stream).toBe(req5m.stream)

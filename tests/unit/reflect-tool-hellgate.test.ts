@@ -17,8 +17,8 @@
  */
 import { describe, expect, test } from "bun:test"
 import { buildDefaultTools } from "@/tool"
-import { reflectTool } from "@/tool/reflect"
 import type { ReflectInput, ReflectPort, ReflectResult } from "@/tool/reflect"
+import { reflectTool } from "@/tool/reflect"
 import type { ToolContext, ToolEvent } from "@/tool/types"
 
 const ctx = (): ToolContext => ({ signal: new AbortController().signal }) as unknown as ToolContext
@@ -32,8 +32,15 @@ const portReturning = (res: ReflectResult, calls?: { n: number }): ReflectPort =
     return res
   },
 })
-const ok: ReflectResult = { ok: true, analysis: "try a different anchor", recommendNewApproach: true }
-const good = { situation: "edits keep failing the same way", next_steps: "switch to AST-based edit" }
+const ok: ReflectResult = {
+  ok: true,
+  analysis: "try a different anchor",
+  recommendNewApproach: true,
+}
+const good = {
+  situation: "edits keep failing the same way",
+  next_steps: "switch to AST-based edit",
+}
 
 describe("reflect — forcing function (both fields required)", () => {
   test("missing next_steps ⇒ ok:false before the port", async () => {

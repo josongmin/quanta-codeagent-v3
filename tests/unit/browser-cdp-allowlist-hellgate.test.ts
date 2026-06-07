@@ -15,8 +15,8 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { assertOk } from "../_support/assert-ok"
 import { CDP_ALLOWED_METHODS, createHeadlessBrowser, isCdpMethodAllowed } from "@/browser"
+import { assertOk } from "../_support/assert-ok"
 
 const DANGEROUS = [
   // R1 audit [17]: Runtime.evaluate is model-reachable arbitrary JS → denied.

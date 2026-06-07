@@ -82,13 +82,22 @@ describe("drainControlRequests — plan + apply in order", () => {
 
   test("permission mode with NO allowlist ⇒ rejected (privilege boundary)", () => {
     const { calls, applier } = recorder()
-    drainControlRequests(queuePort([{ kind: "set_permission_mode", mode: "bypassPermissions" }]), {}, applier)
+    drainControlRequests(
+      queuePort([{ kind: "set_permission_mode", mode: "bypassPermissions" }]),
+      {},
+      applier,
+    )
     expect(calls[0]).toContain("reject:")
   })
 
   test("BOUNDED: a hostile always-returns port stops at the cap", () => {
     let n = 0
-    const hostile = { next: (): ControlRequest => { n++; return { kind: "get_context_usage" } } }
+    const hostile = {
+      next: (): ControlRequest => {
+        n++
+        return { kind: "get_context_usage" }
+      },
+    }
     const effects = drainControlRequests(hostile, ctx, recorder().applier)
     expect(effects.length).toBe(MAX_CONTROL_REQUESTS_PER_DRAIN)
     expect(n).toBe(MAX_CONTROL_REQUESTS_PER_DRAIN)
@@ -114,7 +123,11 @@ describe("drainControlRequests — plan + apply in order", () => {
         throw new Error("apply boom")
       },
     }
-    const effects = drainControlRequests(queuePort([{ kind: "set_thinking", level: "low" }]), ctx, applier)
+    const effects = drainControlRequests(
+      queuePort([{ kind: "set_thinking", level: "low" }]),
+      ctx,
+      applier,
+    )
     expect(effects).toHaveLength(0)
   })
 })

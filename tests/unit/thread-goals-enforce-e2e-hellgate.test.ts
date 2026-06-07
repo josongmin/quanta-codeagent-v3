@@ -17,8 +17,11 @@
 import { describe, expect, test } from "bun:test"
 import type { ObjectivePort } from "@/agent/objective"
 import { createObjectiveStore } from "@/agent/objective"
-import { type ContinuationDeps, runIdleContinuation } from "@/agent/objective/continuation"
-import { ContinuationSemaphore } from "@/agent/objective/continuation"
+import {
+  type ContinuationDeps,
+  ContinuationSemaphore,
+  runIdleContinuation,
+} from "@/agent/objective/continuation"
 
 const TID = "thread-e2e"
 

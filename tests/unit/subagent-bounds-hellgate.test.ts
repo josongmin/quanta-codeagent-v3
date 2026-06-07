@@ -20,12 +20,12 @@ import {
   handleWaitAgent,
   type WaitTimeoutPolicy,
 } from "@/subagent/handlers-6"
+import { TaskRegistry } from "@/subagent/registry"
 import {
   clampTaskOutputTimeout,
   createTaskOutputTool,
   DEFAULT_TASK_OUTPUT_TIMEOUT_POLICY,
 } from "@/subagent/task-tools"
-import { TaskRegistry } from "@/subagent/registry"
 import type { SubagentRunner } from "@/subagent/types"
 import type { ToolContext, ToolEvent } from "@/tool"
 
@@ -103,7 +103,10 @@ describe("B2 task_output honors the injected timeout policy", () => {
     const tool = createTaskOutputTool(registry, { minMs: 1, maxMs: 50, defaultMs: 10 })
     const start = Date.now()
     const events: ToolEvent[] = []
-    for await (const ev of tool.execute({ task_id: id, block: true, timeout_ms: 9_999_999 }, ctx())) {
+    for await (const ev of tool.execute(
+      { task_id: id, block: true, timeout_ms: 9_999_999 },
+      ctx(),
+    )) {
       events.push(ev)
     }
     const result = events.find((e) => e.type === "result")

@@ -51,8 +51,8 @@ export {
 } from "./tool-history"
 export {
   defaultToolReplayPolicy,
-  replayToolHistory,
   type ReplayToolHistoryOpts,
+  replayToolHistory,
   type ShadowCommitRestorer,
   type ToolReplayDecision,
   type ToolReplayOutcome,

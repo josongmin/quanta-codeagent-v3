@@ -30,6 +30,11 @@
 
 export { type DefaultStuckDetectorOpts, defaultStuckDetector } from "./default-tracker"
 export {
+  type BuildSubagentForkOnAcceptOpts,
+  buildSubagentForkOnAccept,
+  type SubagentForkSink,
+} from "./fork-on-accept"
+export {
   type AutoBackgroundAcceptCallback,
   type AutoBackgroundConfig,
   DEFAULT_STUCK_THRESHOLD_MS,
@@ -38,12 +43,6 @@ export {
   type StuckProbeResult,
   type ToolTrackingEntry,
 } from "./port"
-
-export {
-  type BuildSubagentForkOnAcceptOpts,
-  buildSubagentForkOnAccept,
-  type SubagentForkSink,
-} from "./fork-on-accept"
 export { type DefaultProposeHandlerOpts, defaultProposeHandler } from "./propose-handler"
 
 export { computeStuckProbe, normalizeThreshold, stuckProbeAbsent } from "./stuck-detector"

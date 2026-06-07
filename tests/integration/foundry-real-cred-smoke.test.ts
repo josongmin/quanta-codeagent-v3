@@ -17,10 +17,7 @@
  *   3. Abort signal aborts a long-running stream cleanly.
  */
 import { describe, expect, test } from "bun:test"
-import {
-  FoundryProviderAdapter,
-  foundryProviderAdapter,
-} from "@/llm/providers/foundry-adapter"
+import { FoundryProviderAdapter, foundryProviderAdapter } from "@/llm/providers/foundry-adapter"
 import type { ProviderConfig } from "@/llm/providers/provider-port"
 
 const enabled = process.env.QUANTA_FOUNDRY_SMOKE === "1"

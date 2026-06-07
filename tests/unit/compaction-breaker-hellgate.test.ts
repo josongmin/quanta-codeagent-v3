@@ -9,8 +9,8 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { CompactionBreaker, DEFAULT_COMPACTION_BREAKER_CAPS } from "@/agent/compaction-breaker"
 import { reactiveCompact } from "@/agent/compaction"
+import { CompactionBreaker, DEFAULT_COMPACTION_BREAKER_CAPS } from "@/agent/compaction-breaker"
 import type { LLMPort, Message, StreamEvent } from "@/llm"
 
 /**

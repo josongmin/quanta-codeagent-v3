@@ -204,13 +204,14 @@ describe("buildStore — QUANTA_MEMORY branches (ADR-0414 default-ON)", () => {
     expect(buildStore()).toBeUndefined()
   })
 
-  test.each(["0", "false", "no"])(
-    "QUANTA_MEMORY=%p → undefined (additional falsey aliases under ADR-0414)",
-    (raw) => {
-      process.env.QUANTA_MEMORY = raw
-      expect(buildStore()).toBeUndefined()
-    },
-  )
+  test.each([
+    "0",
+    "false",
+    "no",
+  ])("QUANTA_MEMORY=%p → undefined (additional falsey aliases under ADR-0414)", (raw) => {
+    process.env.QUANTA_MEMORY = raw
+    expect(buildStore()).toBeUndefined()
+  })
 
   test("QUANTA_MEMORY=memory → InMemoryStore instance (volatile)", () => {
     process.env.QUANTA_MEMORY = "memory"

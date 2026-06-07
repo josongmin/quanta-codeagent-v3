@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import type { EvalRecord, GroundingPayload } from "@/../src/apps/eval/storage"
 import {
   buildGroundingGateResult,
-  buildGroundingRouteMatrixGateResult,
   buildGroundingReport,
+  buildGroundingRouteMatrixGateResult,
   evaluateGroundingGate,
 } from "@/../src/apps/eval/grounding"
+import type { EvalRecord, GroundingPayload } from "@/../src/apps/eval/storage"
 
 const payload = (over: Partial<GroundingPayload> = {}): GroundingPayload => {
   const actual = over.actual ?? {
@@ -658,58 +658,50 @@ describe("grounding report", () => {
   })
 
   test("route matrix gate fails on duplicate exact-contract matches", () => {
-    const rawA = buildGroundingReport(
-      [record("raw-a", payload())],
-      "raw-a",
-      {
-        ts: 1,
-        schema: 1,
-        runId: "raw-a",
-        tier: "grounding",
-        argv: [],
-        counts: { pass: 1, partial: 0, fail: 0, error: 0, skipped: 0 },
-        durationMs: 1,
-        status: "finished",
-        params: {
-          suite: "canary",
-          corpus: "canary",
-          mode: "raw",
-          probeProfile: "minimal",
-          normalizationProfile: "none",
-          outputProtocol: "exact_json",
-          provider: "openai",
-          model: "gpt-4.1",
-          surfaceId: "openai-responses",
-          transportId: "public",
-        },
+    const rawA = buildGroundingReport([record("raw-a", payload())], "raw-a", {
+      ts: 1,
+      schema: 1,
+      runId: "raw-a",
+      tier: "grounding",
+      argv: [],
+      counts: { pass: 1, partial: 0, fail: 0, error: 0, skipped: 0 },
+      durationMs: 1,
+      status: "finished",
+      params: {
+        suite: "canary",
+        corpus: "canary",
+        mode: "raw",
+        probeProfile: "minimal",
+        normalizationProfile: "none",
+        outputProtocol: "exact_json",
+        provider: "openai",
+        model: "gpt-4.1",
+        surfaceId: "openai-responses",
+        transportId: "public",
       },
-    ).report
-    const rawB = buildGroundingReport(
-      [record("raw-b", payload())],
-      "raw-b",
-      {
-        ts: 1,
-        schema: 1,
-        runId: "raw-b",
-        tier: "grounding",
-        argv: [],
-        counts: { pass: 1, partial: 0, fail: 0, error: 0, skipped: 0 },
-        durationMs: 1,
-        status: "finished",
-        params: {
-          suite: "canary",
-          corpus: "canary",
-          mode: "raw",
-          probeProfile: "minimal",
-          normalizationProfile: "none",
-          outputProtocol: "exact_json",
-          provider: "openai",
-          model: "gpt-4.1",
-          surfaceId: "openai-responses",
-          transportId: "public",
-        },
+    }).report
+    const rawB = buildGroundingReport([record("raw-b", payload())], "raw-b", {
+      ts: 1,
+      schema: 1,
+      runId: "raw-b",
+      tier: "grounding",
+      argv: [],
+      counts: { pass: 1, partial: 0, fail: 0, error: 0, skipped: 0 },
+      durationMs: 1,
+      status: "finished",
+      params: {
+        suite: "canary",
+        corpus: "canary",
+        mode: "raw",
+        probeProfile: "minimal",
+        normalizationProfile: "none",
+        outputProtocol: "exact_json",
+        provider: "openai",
+        model: "gpt-4.1",
+        surfaceId: "openai-responses",
+        transportId: "public",
       },
-    ).report
+    }).report
 
     const out = buildGroundingRouteMatrixGateResult([rawA, rawB], "primary-openai", "canary")
     expect(out.result.passed).toBe(false)

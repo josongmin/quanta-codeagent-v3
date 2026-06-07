@@ -93,12 +93,7 @@ describe("validateDag: dependency_unknown (dangling)", () => {
 
 describe("validateDag: dependency_cycle — direct 2-node A → B → A", () => {
   test("typed reject + path includes both nodes", () => {
-    const r = validateDag(
-      build([
-        todo("A", ["B"]),
-        todo("B", ["A"]),
-      ]),
-    )
+    const r = validateDag(build([todo("A", ["B"]), todo("B", ["A"])]))
     expect(r.ok).toBe(false)
     if (r.ok) throw new Error("unreachable")
     expect(r.error.kind).toBe("dependency_cycle")
@@ -139,12 +134,7 @@ describe("validateDag: 7-node deeply nested cycle", () => {
 describe("findCycle: returns null on acyclic graph", () => {
   test("linear A→B→C→D returns null", () => {
     const cycle = findCycle(
-      build([
-        todo("A", ["B"]),
-        todo("B", ["C"]),
-        todo("C", ["D"]),
-        todo("D"),
-      ]),
+      build([todo("A", ["B"]), todo("B", ["C"]), todo("C", ["D"]), todo("D")]),
     )
     expect(cycle).toBeNull()
   })
@@ -195,12 +185,7 @@ describe("topologicalSort: acyclic graphs", () => {
     // Convention: dependencies come BEFORE dependents (Kahn from source).
     // A depends on B → B must come before A.
     const out = topologicalSort(
-      build([
-        todo("A", ["B"]),
-        todo("B", ["C"]),
-        todo("C", ["D"]),
-        todo("D"),
-      ]),
+      build([todo("A", ["B"]), todo("B", ["C"]), todo("C", ["D"]), todo("D")]),
     )
     if (!Array.isArray(out)) throw new Error("expected array, got cycle")
     expect(out).toEqual(["D", "C", "B", "A"])
@@ -209,12 +194,7 @@ describe("topologicalSort: acyclic graphs", () => {
   test("tie-break determinism: parallel siblings sorted by id ascending", () => {
     // Three roots with no deps + one consumer that depends on all three.
     const out = topologicalSort(
-      build([
-        todo("Consumer", ["zeta", "alpha", "mu"]),
-        todo("zeta"),
-        todo("alpha"),
-        todo("mu"),
-      ]),
+      build([todo("Consumer", ["zeta", "alpha", "mu"]), todo("zeta"), todo("alpha"), todo("mu")]),
     )
     if (!Array.isArray(out)) throw new Error("expected array, got cycle")
     // parallel sources: alpha, mu, zeta — sorted ascending
@@ -226,12 +206,7 @@ describe("topologicalSort: acyclic graphs", () => {
 
   test("tie-break determinism applies when children become ready in non-lex input order", () => {
     const out = topologicalSort(
-      build([
-        todo("zeta", ["root"]),
-        todo("alpha", ["root"]),
-        todo("mu", ["root"]),
-        todo("root"),
-      ]),
+      build([todo("zeta", ["root"]), todo("alpha", ["root"]), todo("mu", ["root"]), todo("root")]),
     )
     if (!Array.isArray(out)) throw new Error("expected array, got cycle")
     expect(out).toEqual(["root", "alpha", "mu", "zeta"])
@@ -308,12 +283,7 @@ describe("validateDag: acyclic + well-formed → ok:true", () => {
 
   test("diamond: A→{B,C}→D", () => {
     const r = validateDag(
-      build([
-        todo("A", ["B", "C"]),
-        todo("B", ["D"]),
-        todo("C", ["D"]),
-        todo("D"),
-      ]),
+      build([todo("A", ["B", "C"]), todo("B", ["D"]), todo("C", ["D"]), todo("D")]),
     )
     expect(r.ok).toBe(true)
   })
@@ -369,12 +339,7 @@ describe("findCycle: optional startId narrows search", () => {
   })
 
   test("startId on acyclic node returns null even if graph has cycle elsewhere", () => {
-    const plan = build([
-      todo("X"),
-      todo("Y", ["X"]),
-      todo("A", ["B"]),
-      todo("B", ["A"]),
-    ])
+    const plan = build([todo("X"), todo("Y", ["X"]), todo("A", ["B"]), todo("B", ["A"])])
     const cycle = findCycle(plan, "X")
     expect(cycle).toBeNull()
   })

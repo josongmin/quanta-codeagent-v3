@@ -1,13 +1,18 @@
 import type { EvalRecord, GroundingPayload, RunSummaryRecord } from "../storage"
 import type { Verdict } from "../types"
 import type { GroundingErrorKind } from "./diagnostics"
-import { GROUNDING_BUCKETS, type GroundingBucket, type GroundingMode, type GroundingSeverity } from "./schema"
 import type {
   GroundingRouteMatrix,
   GroundingRouteMatrixCell,
   GroundingRouteMatrixName,
 } from "./route-matrix"
 import { GROUNDING_ROUTE_MATRICES } from "./route-matrix"
+import {
+  GROUNDING_BUCKETS,
+  type GroundingBucket,
+  type GroundingMode,
+  type GroundingSeverity,
+} from "./schema"
 
 export interface GroundingMetrics {
   thread_selection_accuracy: number
@@ -183,7 +188,7 @@ const severityRank: Record<GroundingSeverity, number> = {
 }
 
 const actualTuple = (payload: GroundingPayload, which: "scored" | "raw"): string | null => {
-  const actual = which === "raw" ? payload.rawActual : payload.scoredActual ?? payload.actual
+  const actual = which === "raw" ? payload.rawActual : (payload.scoredActual ?? payload.actual)
   return actual === undefined
     ? null
     : JSON.stringify({
@@ -288,7 +293,7 @@ const buildGroundingMetricsWithSource = (
       staleDenom += 1
       if (matches.staleContextTrapMiss) staleMiss += 1
     }
-    const actual = which === "raw" ? payload.rawActual : payload.scoredActual ?? payload.actual
+    const actual = which === "raw" ? payload.rawActual : (payload.scoredActual ?? payload.actual)
     const predictedClarify = actual?.shouldClarify === true
     const goldClarify = payload.gold.shouldClarify === true
     if (predictedClarify && goldClarify) clarifyTp += 1
@@ -307,7 +312,10 @@ const buildGroundingMetricsWithSource = (
     const raw = slots.get("raw")
     const summary = slots.get("summary")
     if (raw === undefined || summary === undefined) continue
-    if (actualTuple(raw, which) !== null && actualTuple(raw, which) === actualTuple(summary, which)) {
+    if (
+      actualTuple(raw, which) !== null &&
+      actualTuple(raw, which) === actualTuple(summary, which)
+    ) {
       summaryMatches += 1
     }
   }
@@ -334,11 +342,15 @@ const buildNormalizationLift = (
   rawMetrics: GroundingMetrics | undefined,
 ): GroundingNormalizationLift => ({
   thread_selection_accuracy:
-    rawMetrics === undefined ? 0 : metrics.thread_selection_accuracy - rawMetrics.thread_selection_accuracy,
+    rawMetrics === undefined
+      ? 0
+      : metrics.thread_selection_accuracy - rawMetrics.thread_selection_accuracy,
   referent_accuracy:
     rawMetrics === undefined ? 0 : metrics.referent_accuracy - rawMetrics.referent_accuracy,
   exact_tuple_match_rate:
-    rawMetrics === undefined ? 0 : metrics.exact_tuple_match_rate - rawMetrics.exact_tuple_match_rate,
+    rawMetrics === undefined
+      ? 0
+      : metrics.exact_tuple_match_rate - rawMetrics.exact_tuple_match_rate,
 })
 
 export const buildGroundingBucketReports = (
@@ -391,12 +403,17 @@ const buildErrorKinds = (
   return counts as Readonly<Record<GroundingErrorKind | "unknown", number>>
 }
 
-const summaryParam = (summary: RunSummaryRecord | null | undefined, key: string): string | undefined => {
+const summaryParam = (
+  summary: RunSummaryRecord | null | undefined,
+  key: string,
+): string | undefined => {
   const value = summary?.params?.[key]
   return typeof value === "string" ? value : undefined
 }
 
-const summaryRunView = (summary: RunSummaryRecord | null | undefined): GroundingReport["run"] | undefined => {
+const summaryRunView = (
+  summary: RunSummaryRecord | null | undefined,
+): GroundingReport["run"] | undefined => {
   if (summary === null || summary === undefined) return undefined
   return {
     durationMs: summary.durationMs,
@@ -460,7 +477,11 @@ const renderMarkdown = (report: GroundingReport): string => {
     `Verdicts: PASS=${report.counts.pass} PARTIAL=${report.counts.partial} FAIL=${report.counts.fail} ERR=${report.counts.error}`,
   )
   if (Object.keys(report.errorKinds).length > 0) {
-    lines.push(`Errors: ${Object.entries(report.errorKinds).map(([k, v]) => `${k}=${v}`).join(", ")}`)
+    lines.push(
+      `Errors: ${Object.entries(report.errorKinds)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(", ")}`,
+    )
   }
   lines.push("")
   lines.push("## Metrics")
@@ -472,7 +493,9 @@ const renderMarkdown = (report: GroundingReport): string => {
   lines.push(`- clarify_precision: ${pct(report.metrics.clarify_precision)}`)
   lines.push(`- clarify_recall: ${pct(report.metrics.clarify_recall)}`)
   lines.push(`- wrong_thread_rate: ${pct(report.metrics.wrong_thread_rate)}`)
-  lines.push(`- stale_context_attachment_rate: ${pct(report.metrics.stale_context_attachment_rate)}`)
+  lines.push(
+    `- stale_context_attachment_rate: ${pct(report.metrics.stale_context_attachment_rate)}`,
+  )
   lines.push(`- summary_equivalence_rate: ${pct(report.metrics.summary_equivalence_rate)}`)
   lines.push(`- exact_tuple_match_rate: ${pct(report.metrics.exact_tuple_match_rate)}`)
   lines.push(`- structured_output_validity: ${pct(report.metrics.structured_output_validity)}`)
@@ -487,7 +510,9 @@ const renderMarkdown = (report: GroundingReport): string => {
     lines.push("")
     lines.push("## Normalization Lift")
     lines.push("")
-    lines.push(`- thread_selection_accuracy: ${pct(report.normalizationLift.thread_selection_accuracy)}`)
+    lines.push(
+      `- thread_selection_accuracy: ${pct(report.normalizationLift.thread_selection_accuracy)}`,
+    )
     lines.push(`- referent_accuracy: ${pct(report.normalizationLift.referent_accuracy)}`)
     lines.push(`- exact_tuple_match_rate: ${pct(report.normalizationLift.exact_tuple_match_rate)}`)
   }
@@ -528,8 +553,10 @@ const CANARY_THRESHOLDS = {
   structured_output_validity: 1,
 } as const
 
-const bucketById = (report: GroundingReport, bucket: GroundingBucket): GroundingBucketReport | undefined =>
-  report.buckets.find((entry) => entry.bucket === bucket)
+const bucketById = (
+  report: GroundingReport,
+  bucket: GroundingBucket,
+): GroundingBucketReport | undefined => report.buckets.find((entry) => entry.bucket === bucket)
 
 const renderGateMarkdown = (result: GroundingGateResult): string => {
   const lines: string[] = []
@@ -573,7 +600,9 @@ const renderRouteMatrixGateMarkdown = (result: GroundingRouteMatrixGateResult): 
   lines.push("")
   lines.push("## Cells")
   lines.push("")
-  lines.push("| Cell | Run | Mode | Corpus | Probe | Normalize | Output | Status | Route | Failures |")
+  lines.push(
+    "| Cell | Run | Mode | Corpus | Probe | Normalize | Output | Status | Route | Failures |",
+  )
   lines.push("|---|---|---|---|---|---|---|---|---|---|")
   for (const cell of result.cells) {
     const routeBits = [
@@ -599,10 +628,7 @@ const renderRouteMatrixGateMarkdown = (result: GroundingRouteMatrixGateResult): 
   return lines.join("\n")
 }
 
-const matchesMatrixCell = (
-  report: GroundingReport,
-  cell: GroundingRouteMatrixCell,
-): boolean =>
+const matchesMatrixCell = (report: GroundingReport, cell: GroundingRouteMatrixCell): boolean =>
   report.mode === cell.mode &&
   report.corpus === cell.corpus &&
   (cell.provider === undefined || report.route.provider === cell.provider) &&
@@ -629,10 +655,18 @@ export const evaluateGroundingGate = (
       }
       const metrics = report.metrics
       if (metrics.wrong_thread_rate !== CANARY_THRESHOLDS.wrong_thread_rate) {
-        failures.push({ metric: "wrong_thread_rate", expected: "== 0", actual: metrics.wrong_thread_rate })
+        failures.push({
+          metric: "wrong_thread_rate",
+          expected: "== 0",
+          actual: metrics.wrong_thread_rate,
+        })
       }
       if (metrics.clarify_recall !== CANARY_THRESHOLDS.clarify_recall) {
-        failures.push({ metric: "clarify_recall", expected: "== 1.0", actual: metrics.clarify_recall })
+        failures.push({
+          metric: "clarify_recall",
+          expected: "== 1.0",
+          actual: metrics.clarify_recall,
+        })
       }
       if (metrics.summary_equivalence_rate !== CANARY_THRESHOLDS.summary_equivalence_rate) {
         failures.push({

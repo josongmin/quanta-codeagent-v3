@@ -120,9 +120,7 @@ describe("workflow yaml validity", () => {
     expect(src).toContain(
       'bun run eval grounding run --mode engine --suite canary --concurrency 4 --json-out "$RUNNER_TEMP/grounding/engine-canary-run.json"',
     )
-    expect(src).toContain(
-      "run_lane assisted-nightly assisted --suite nightly 4",
-    )
+    expect(src).toContain("run_lane assisted-nightly assisted --suite nightly 4")
     expect(src).toContain("run_lane raw-replay-critical raw --corpus replay_critical 2")
     expect(src).toContain("run_lane engine-replay-critical engine --corpus replay_critical 2")
     expect(src).toContain("run_lane raw-replay-nightly raw --corpus replay_nightly 2")
@@ -130,7 +128,9 @@ describe("workflow yaml validity", () => {
     expect(src).toContain("run_lane raw-adversarial-canary raw --corpus adversarial_canary 2")
     expect(src).toContain("run_lane engine-adversarial-canary engine --corpus adversarial_canary 2")
     expect(src).toContain("run_lane raw-adversarial-nightly raw --corpus adversarial_nightly 2")
-    expect(src).toContain("run_lane engine-adversarial-nightly engine --corpus adversarial_nightly 2")
+    expect(src).toContain(
+      "run_lane engine-adversarial-nightly engine --corpus adversarial_nightly 2",
+    )
     expect(src).toContain("bun run eval grounding baseline --candidate")
     expect(src).toContain("--concurrency 4")
     expect(src).toContain("bun run eval grounding report --run-id")
@@ -148,7 +148,8 @@ describe("workflow yaml validity", () => {
     const { src } = loadWorkflow("grounding-live-gate.yml")
     const canaryStart = src.indexOf("jobs:\n  canary:")
     const nightlyStart = src.indexOf("\n  nightly:")
-    const canarySlice = canaryStart >= 0 && nightlyStart > canaryStart ? src.slice(canaryStart, nightlyStart) : src
+    const canarySlice =
+      canaryStart >= 0 && nightlyStart > canaryStart ? src.slice(canaryStart, nightlyStart) : src
     expect(canarySlice).not.toContain("--mode assisted")
   })
 

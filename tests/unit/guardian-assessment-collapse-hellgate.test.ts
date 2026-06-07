@@ -170,7 +170,8 @@ describe("collapseAssessment — tuple exhaustiveness (drift guard)", () => {
     // Pin the count so adding a union member without a tuple entry (the compile
     // guard `_assessmentKindsExhaustive`) is ALSO caught here as a fast-fail.
     expect(seen.size).toBe(7)
-    expect(ALL_ASSESSMENT_KINDS.length).toBe(seen.size)
+    const kindCount: number = ALL_ASSESSMENT_KINDS.length
+    expect(kindCount).toBe(seen.size)
   })
 })
 
@@ -227,7 +228,11 @@ describe("collapseAssessment — allow_with_edit with MISSING/undefined updatedI
   })
 
   test("entirely-absent updatedInput key ⇒ guardian_denied (no allow-original)", () => {
-    const a = { kind: "allow_with_edit", rationale: "fix", steer: "safer" } as unknown as ActionAssessment
+    const a = {
+      kind: "allow_with_edit",
+      rationale: "fix",
+      steer: "safer",
+    } as unknown as ActionAssessment
     const d = collapseAssessment(a, DECIDED_AT)
     expect(isAllowed(d.outcome)).toBe(false)
     expect(d.outcome).toBe("guardian_denied")
@@ -496,7 +501,12 @@ describe("reviewAction dispatch — knob gating (OFF byte-identity ratchet)", ()
     const port: ReviewerPort = {
       userReview: async () => binaryDecision,
       autoReview: async () => binaryDecision,
-      // guardianReview INTENTIONALLY omitted — assessor-only port.
+      // Assessor-only intent: guardianReview is present but MUST NOT be reached
+      // (the knob-on assessor path services the guardian tier). It throws so a
+      // regression that bypassed the assessor would fail loudly.
+      guardianReview: async () => {
+        throw new Error("guardianReview must not be called on the assessor path")
+      },
       guardianAssess: async () => {
         calls.push("guardianAssess")
         return { kind: "deny", rationale: "no", denyReason: denyR }
@@ -515,9 +525,15 @@ describe("reviewAction dispatch — knob gating (OFF byte-identity ratchet)", ()
     // ReviewerUnavailableError, exactly as today.
     delete process.env.QUANTA_GUARDIAN_ASSESSOR
     __resetRuntimeConfig()
+    // This test REQUIRES guardianReview to be ABSENT at runtime: the OFF-path
+    // safety is the `typeof port.guardianReview !== "function"` guard throwing
+    // ReviewerUnavailableError. The only way to model a runtime-absent required
+    // method is the codebase's established test pattern (see reviewer.test.ts) —
+    // `undefined as unknown as` — NOT a bug paper-over but deliberate guard-test infra.
     const port: ReviewerPort = {
       userReview: async () => binaryDecision,
       autoReview: async () => binaryDecision,
+      guardianReview: undefined as unknown as ReviewerPort["guardianReview"],
       guardianAssess: async () => ({ kind: "allow", rationale: "x", riskLevel: "low" }),
     }
     await expect(reviewAction(action, ctx(), port)).rejects.toThrow(ReviewerUnavailableError)

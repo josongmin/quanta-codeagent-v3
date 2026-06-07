@@ -74,8 +74,8 @@ export {
   type McpOAuthDeps,
   type McpOAuthKeyringOption,
   type McpOAuthWiring,
-  resolveMcpOAuthKeyringOption,
   type RunMcpBrowserFlow,
+  resolveMcpOAuthKeyringOption,
 } from "./mcp-oauth-provider"
 export {
   buildRootsWiring,

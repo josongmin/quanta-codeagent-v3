@@ -6,12 +6,12 @@
  * SIGINT handler set is exercised via an injected `signalSource`.
  */
 import { describe, expect, test } from "bun:test"
-import type { AgentConfig, AgentOutcome, StopReason } from "@/agent"
 import {
   exitCodeForOutcome,
   runAgentLifecycle,
   runAgentLifecycleWith,
 } from "@/../src/apps/agent/run"
+import type { AgentConfig, AgentOutcome, StopReason } from "@/agent"
 
 /** Build an opaque AgentConfig — the wrapper doesn't read any field except
  *  `signal`. We hand it an aborted controller in some tests. */

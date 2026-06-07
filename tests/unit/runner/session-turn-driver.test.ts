@@ -111,7 +111,7 @@ describe("driveSessionTurn — behavioral contract", () => {
   test("missing turn payload throws the verbatim error", async () => {
     const rec: Recorder = { appends: [], responds: [] }
     const run = driveSessionTurn({
-      session: fakeSession([{ turn: undefined } as SessionDispatchResult], rec),
+      session: fakeSession([{ revision: 1, seq: 1, events: [] }], rec),
       resolveApproval: async () => "approve",
       text: "x",
       turnSignal: new AbortController().signal,

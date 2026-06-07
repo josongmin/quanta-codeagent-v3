@@ -71,8 +71,7 @@ const isTurnCall = (messages: Message[]): boolean => {
 
 /** All `stream()` calls that were genuine agent turns (reminder-wrapped),
  *  oldest-first. The non-turn distill/persist call is filtered out. */
-const turnCalls = (llm: ScriptedLLM): Message[][] =>
-  llm.seenMessages.filter(isTurnCall)
+const turnCalls = (llm: ScriptedLLM): Message[][] => llm.seenMessages.filter(isTurnCall)
 
 /** Boundary census over the trailing reminder text the loop SENT. `genuineOpen`
  *  / `genuineClose` are the real-wrapper tokens the model would treat as a true
@@ -99,10 +98,7 @@ const seedUser = (t: string): Message[] =>
 /** Base config wired for a REAL `runAgent`, with the three forge surfaces left
  *  to the caller to attach. Uses the harness `ScriptedLLM` so the caller can
  *  read back exactly what the loop sent. */
-const e2eConfig = (
-  llm: ScriptedLLM,
-  over: Partial<AgentConfig> = {},
-): AgentConfig => ({
+const e2eConfig = (llm: ScriptedLLM, over: Partial<AgentConfig> = {}): AgentConfig => ({
   llm,
   registry: new ToolRegistry(defaultTools),
   stream: new RecordingStream(),

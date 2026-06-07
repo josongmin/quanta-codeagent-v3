@@ -26,9 +26,9 @@
  * failure points directly at the missing protection. They cost ~10ms each.
  */
 
-import { readdirSync, readFileSync } from "node:fs"
-import { join, resolve as resolvePath } from "node:path"
 import { describe, expect, test } from "bun:test"
+import { type Dirent, readdirSync, readFileSync } from "node:fs"
+import { join, resolve as resolvePath } from "node:path"
 
 const REPO_ROOT = resolvePath(__dirname, "..", "..")
 const SRC_AGENT = join(REPO_ROOT, "src", "agent")
@@ -157,7 +157,7 @@ const collectMatcherBanners = (): string[] => {
 const collectAllToolSources = (): string => {
   const buf: string[] = []
   const walk = (dir: string): void => {
-    let entries: ReturnType<typeof readdirSync>
+    let entries: Dirent<string>[]
     try {
       entries = readdirSync(dir, { withFileTypes: true })
     } catch {

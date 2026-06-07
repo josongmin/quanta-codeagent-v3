@@ -28,9 +28,9 @@ const PHASE2_STATE = { turn: 3 } as const
 
 describe("localize-phase apply_patch escape (finding #10)", () => {
   test("apply_patch is BLOCKED during Phase 1 (was the escape)", () => {
-    expect(decideLocalizePhase({ toolName: "apply_patch", state: PHASE1_STATE, cfg: CFG }).block).toBe(
-      true,
-    )
+    expect(
+      decideLocalizePhase({ toolName: "apply_patch", state: PHASE1_STATE, cfg: CFG }).block,
+    ).toBe(true)
   })
 
   test("apply_patch is in the closed MUTATING_TOOL_NAMES set", () => {
@@ -45,7 +45,8 @@ describe("localize-phase apply_patch escape (finding #10)", () => {
   // (apply_patch_structured absent) this returns {block:false} and FAILS.
   test("apply_patch_structured is BLOCKED during Phase 1 (sibling escape)", () => {
     expect(
-      decideLocalizePhase({ toolName: "apply_patch_structured", state: PHASE1_STATE, cfg: CFG }).block,
+      decideLocalizePhase({ toolName: "apply_patch_structured", state: PHASE1_STATE, cfg: CFG })
+        .block,
     ).toBe(true)
   })
 
@@ -55,29 +56,36 @@ describe("localize-phase apply_patch escape (finding #10)", () => {
 
   test("apply_patch_structured passes in Phase 2 (block is phase-scoped, not a blanket ban)", () => {
     expect(
-      decideLocalizePhase({ toolName: "apply_patch_structured", state: PHASE2_STATE, cfg: CFG }).block,
+      decideLocalizePhase({ toolName: "apply_patch_structured", state: PHASE2_STATE, cfg: CFG })
+        .block,
     ).toBe(false)
   })
 
   test("the other registered edit tools stay blocked (no regression)", () => {
     for (const name of ["edit", "write", "scripted_replace"]) {
-      expect(decideLocalizePhase({ toolName: name, state: PHASE1_STATE, cfg: CFG }).block).toBe(true)
+      expect(decideLocalizePhase({ toolName: name, state: PHASE1_STATE, cfg: CFG }).block).toBe(
+        true,
+      )
     }
   })
 
   test("bash stays EXEMPT in Phase 1 (deliberate — a mis-fix gating all non-read-only tools breaks this)", () => {
-    expect(decideLocalizePhase({ toolName: "bash", state: PHASE1_STATE, cfg: CFG }).block).toBe(false)
+    expect(decideLocalizePhase({ toolName: "bash", state: PHASE1_STATE, cfg: CFG }).block).toBe(
+      false,
+    )
   })
 
   test("read-only exploration tools pass in Phase 1", () => {
     for (const name of ["read", "grep", "glob", "search_codebase", "localize"]) {
-      expect(decideLocalizePhase({ toolName: name, state: PHASE1_STATE, cfg: CFG }).block).toBe(false)
+      expect(decideLocalizePhase({ toolName: name, state: PHASE1_STATE, cfg: CFG }).block).toBe(
+        false,
+      )
     }
   })
 
   test("apply_patch passes in Phase 2 (block is phase-scoped, not a blanket ban)", () => {
-    expect(decideLocalizePhase({ toolName: "apply_patch", state: PHASE2_STATE, cfg: CFG }).block).toBe(
-      false,
-    )
+    expect(
+      decideLocalizePhase({ toolName: "apply_patch", state: PHASE2_STATE, cfg: CFG }).block,
+    ).toBe(false)
   })
 })

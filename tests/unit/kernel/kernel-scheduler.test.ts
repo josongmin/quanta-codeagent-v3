@@ -402,7 +402,7 @@ describe("kernel scheduler approval flow", () => {
                 mode: "resume"
                 reason: "prepared_resume"
               }
-            | { type: "assistant_text.delta"; delta: string }
+            | { type: "assistant_text.delta"; delta: string },
         ) => void
       }) => {
         onEvent?.({

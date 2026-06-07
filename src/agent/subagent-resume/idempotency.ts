@@ -36,10 +36,7 @@
  */
 
 /** 3-tier idempotency classification. See module-doc for semantics. */
-export type IdempotencyTier =
-  | "pure"
-  | "mutating-recoverable"
-  | "mutating-external"
+export type IdempotencyTier = "pure" | "mutating-recoverable" | "mutating-external"
 
 /** Closed port — implementations need only `classify`. Default factory is
  *  pure data; callers may inject custom tables to extend coverage. */

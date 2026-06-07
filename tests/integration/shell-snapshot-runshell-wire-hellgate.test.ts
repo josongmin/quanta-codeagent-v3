@@ -42,10 +42,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { runAgent } from "@/agent"
-import {
-  buildShellSnapshotSession,
-  resolveShell,
-} from "@/agent/shell-snapshot-session"
+import { buildShellSnapshotSession, resolveShell } from "@/agent/shell-snapshot-session"
 import type {
   CaptureOptions,
   ShellSnapshotPort,
@@ -275,7 +272,10 @@ describe("HELL-SS-WIRE-A01 / A02 (loop) — runAgent + bash tool end-to-end", ()
       // assistant turn 1: invoke bash to echo the marker
       toolUse("call1", "bash", { command: "echo MARK=${HELLGATE_MARK:-unset}" }),
       // assistant turn 2: end
-      [{ type: "text_delta", delta: "done" }, { type: "message_stop", stop_reason: "end_turn" }],
+      [
+        { type: "text_delta", delta: "done" },
+        { type: "message_stop", stop_reason: "end_turn" },
+      ],
     ])
     const stream = new NullStream()
     const outcome = await runAgent(
@@ -299,7 +299,10 @@ describe("HELL-SS-WIRE-A01 / A02 (loop) — runAgent + bash tool end-to-end", ()
   test("A01 cfg.shellSnapshot ABSENT ⇒ bash sees MARK=unset (no source prefix)", async () => {
     const llm = new FakeLLM([
       toolUse("call1", "bash", { command: "echo MARK=${HELLGATE_MARK:-unset}" }),
-      [{ type: "text_delta", delta: "done" }, { type: "message_stop", stop_reason: "end_turn" }],
+      [
+        { type: "text_delta", delta: "done" },
+        { type: "message_stop", stop_reason: "end_turn" },
+      ],
     ])
     const outcome = await runAgent(baseConfig({ llm, maxTurns: 3 }))
     const toolResults = outcome.messages.flatMap((m) =>
@@ -313,7 +316,10 @@ describe("HELL-SS-WIRE-A01 / A02 (loop) — runAgent + bash tool end-to-end", ()
   test("A09 prune called once at session start with configured cleanupOlderThanMs", async () => {
     const t = buildTestPort()
     const llm = new FakeLLM([
-      [{ type: "text_delta", delta: "ok" }, { type: "message_stop", stop_reason: "end_turn" }],
+      [
+        { type: "text_delta", delta: "ok" },
+        { type: "message_stop", stop_reason: "end_turn" },
+      ],
     ])
     await runAgent(
       baseConfig({
@@ -331,7 +337,10 @@ describe("HELL-SS-WIRE-A01 / A02 (loop) — runAgent + bash tool end-to-end", ()
     const t = buildTestPort({ forceCaptureKind: "fail" })
     const llm = new FakeLLM([
       toolUse("call1", "bash", { command: "echo MARK=${HELLGATE_MARK:-unset}" }),
-      [{ type: "text_delta", delta: "done" }, { type: "message_stop", stop_reason: "end_turn" }],
+      [
+        { type: "text_delta", delta: "done" },
+        { type: "message_stop", stop_reason: "end_turn" },
+      ],
     ])
     const stream = new NullStream()
     const outcome = await runAgent(
@@ -342,7 +351,9 @@ describe("HELL-SS-WIRE-A01 / A02 (loop) — runAgent + bash tool end-to-end", ()
     // failure). At least one error event mentions shell-snapshot.
     const errEvents = stream.events.filter((e) => e.type === "error")
     expect(
-      errEvents.some((e) => (e as { type: "error"; message: string }).message.includes("shell-snapshot")),
+      errEvents.some((e) =>
+        (e as { type: "error"; message: string }).message.includes("shell-snapshot"),
+      ),
     ).toBe(true)
     // bash still ran on the legacy spawn path: marker observed as "unset".
     const toolResults = outcome.messages.flatMap((m) =>

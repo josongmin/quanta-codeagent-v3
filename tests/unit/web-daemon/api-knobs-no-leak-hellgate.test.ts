@@ -8,8 +8,8 @@
  * CI, AND statically asserts the endpoint actually ROUTES through the helper.
  */
 
-import { readFileSync } from "node:fs"
 import { describe, expect, test } from "bun:test"
+import { readFileSync } from "node:fs"
 import {
   buildWebKnobCatalog,
   resolveCatalogValues,

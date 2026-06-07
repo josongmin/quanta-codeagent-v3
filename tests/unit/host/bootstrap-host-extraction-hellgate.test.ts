@@ -147,6 +147,7 @@ const makeFakeDeps = (overrides: Partial<SessionBootstrapDeps> = {}): SessionBoo
     switchToSessionCwd: (cwd) => cwd,
     materializeReviewerAgent: () => undefined,
     createSubagentBackedGuardianReview: () => (async () => ({})) as never,
+    createSubagentBackedGuardianAssess: () => (async () => ({})) as never,
     buildMcpSurfaceInfo: () => undefined,
     buildIdleGuards: () => ({
       idleMonitor: { markActive: () => undefined } as never,

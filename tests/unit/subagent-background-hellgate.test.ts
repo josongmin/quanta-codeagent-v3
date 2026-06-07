@@ -382,6 +382,7 @@ describe("background subagent tools — C. tool surface", () => {
       fork: () => "bg-minimal",
       poll: () => null,
       await: async () => null,
+      forceBackground: () => "not_found",
     }
     expect(subagentBgTools(minimalPort).map((tool) => tool.name)).toEqual([
       "subagent_fork",

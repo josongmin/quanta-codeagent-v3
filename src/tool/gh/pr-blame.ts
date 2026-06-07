@@ -22,10 +22,10 @@
 import { z } from "zod"
 import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "../types"
-import { DEFAULT_TIMEOUT_MS, type GhRunner, defaultGhRunner } from "./runner"
-import { normalizeRef, refRejected } from "./ref"
 import { buildBlameBody } from "./pr-blame-parser"
 import type { RawPrViewJson } from "./pr-blame-types"
+import { normalizeRef, refRejected } from "./ref"
+import { DEFAULT_TIMEOUT_MS, defaultGhRunner, type GhRunner } from "./runner"
 
 export const prBlameSchema = z.object({
   pr: z.union([z.string(), z.number()]).describe("PR number or URL"),

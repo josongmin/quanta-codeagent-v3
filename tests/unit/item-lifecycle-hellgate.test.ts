@@ -19,8 +19,8 @@
  *   5. itemLifecycleEnabled is default-OFF via the @/shared SSOT.
  */
 import { describe, expect, test } from "bun:test"
-import { ItemLifecycleTracker, itemLifecycleEnabled } from "@/stream/item-lifecycle"
 import type { AgentEvent } from "@/stream"
+import { ItemLifecycleTracker, itemLifecycleEnabled } from "@/stream/item-lifecycle"
 
 const types = (evs: readonly AgentEvent[]) => evs.map((e) => e.type)
 const text = (delta: string): AgentEvent => ({ type: "assistant_text", delta })

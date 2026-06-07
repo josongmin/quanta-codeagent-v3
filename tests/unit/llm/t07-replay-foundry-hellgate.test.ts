@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
+import type { LLMPort } from "@/llm/ports"
 import { foundryProviderAdapter } from "@/llm/providers/foundry-adapter"
 import { replayLlmPort } from "@/llm/replay/replay-llm"
 import type { ReplayStore } from "@/llm/replay/types"
-import type { LLMPort } from "@/llm/ports"
 import type { StreamEvent, StreamInput } from "@/llm/types"
 import { LLMError } from "@/shared"
 
@@ -13,6 +13,10 @@ import { LLMError } from "@/shared"
 
 const missStore: ReplayStore = {
   match: async () => null,
+  append: async () => {},
+  load: async () => [],
+  save: async () => {},
+  reset: () => {},
 }
 
 const baseInput = (signal?: AbortSignal): StreamInput => ({

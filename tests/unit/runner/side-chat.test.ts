@@ -22,7 +22,6 @@
 import { describe, expect, test } from "bun:test"
 import type { AgentConfig, AgentOutcome } from "@/agent"
 import type { Message } from "@/llm"
-import type { OrchestrateDeps } from "@/runner/orchestrate/run-once"
 import {
   buildSideChatHistory,
   buildSideChatRegistry,
@@ -32,6 +31,7 @@ import {
   SIDE_CHAT_FORBIDDEN,
   SIDE_CHAT_MAX_TURNS_CAP,
 } from "@/runner"
+import type { OrchestrateDeps } from "@/runner/orchestrate/run-once"
 import { defaultTools, ToolRegistry } from "@/tool"
 
 /** Build a minimal `OrchestrateDeps` stub. Most fields are unused because the

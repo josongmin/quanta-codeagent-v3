@@ -3,6 +3,7 @@
  *  the slice fence into `@/llm`. */
 export type { AtomicWriteSync } from "./atomic-write"
 export { defaultAtomicWriteSync, sha256Hex, writeFileAtomic } from "./atomic-write"
+export { canonicalizePath } from "./fs-jail-lib"
 export type { FileSystemPort, JailedPath } from "./service"
 export {
   clearFsJailDecisionSink,
@@ -43,4 +44,3 @@ export {
   workspaceHash,
 } from "./shadow-odb"
 export type { FileInfo } from "./types"
-export { canonicalizePath } from "./fs-jail-lib"

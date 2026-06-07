@@ -22,12 +22,7 @@
  *      over `allow` in the resolved set (defense-in-depth).
  */
 
-import type {
-  HookGroupSetting,
-  ResolvedSettings,
-  SettingsLayer,
-  SettingsLayerName,
-} from "./types"
+import type { HookGroupSetting, ResolvedSettings, SettingsLayer, SettingsLayerName } from "./types"
 import { LAYER_PRECEDENCE, REPO_LAYERS } from "./types"
 
 /** De-dup a list preserving first-seen order. */

@@ -64,7 +64,11 @@ const SCRIPT_INDEX = 6 // position of the `bash -c` script body in the argv
 describe("lima injection hardening (L9 C1)", () => {
   test("HELL-LIMA-01: metacharacter image is a discrete token, not spliced into script", () => {
     const evil = "x; touch /pwned #"
-    const argv = composeLimaSpawnArgv("vm0", "quanta-remote-abc", baseSpec({ image: evil, cmd: [] }))
+    const argv = composeLimaSpawnArgv(
+      "vm0",
+      "quanta-remote-abc",
+      baseSpec({ image: evil, cmd: [] }),
+    )
     const script = argv[SCRIPT_INDEX] ?? ""
     expect(script.includes(evil)).toBe(false)
     expect(argv).toContain(evil) // present ONLY as its own argv element
@@ -83,7 +87,11 @@ describe("lima injection hardening (L9 C1)", () => {
   })
 
   test("HELL-LIMA-03: cmd tokens with shell metachars survive as literal argv entries", () => {
-    const argv = composeLimaSpawnArgv("vm0", "id-1", baseSpec({ image: "img", cmd: ["$(id)", "`x`", ";rm"] }))
+    const argv = composeLimaSpawnArgv(
+      "vm0",
+      "id-1",
+      baseSpec({ image: "img", cmd: ["$(id)", "`x`", ";rm"] }),
+    )
     expect(argv).toContain("$(id)")
     expect(argv).toContain("`x`")
     expect(argv).toContain(";rm")
@@ -122,7 +130,12 @@ describe("lima injection hardening (L9 C1)", () => {
 
   test("HELL-LIMA-07: timeoutMs:0 never spawns + status reports terminal timeout", async () => {
     const { proc, argvLog } = makeProc([])
-    const adapter = createLimaAdapter({ process: proc, vm: "vm0", uuid: () => "u2", nowMs: () => 7 })
+    const adapter = createLimaAdapter({
+      process: proc,
+      vm: "vm0",
+      uuid: () => "u2",
+      nowMs: () => 7,
+    })
     const spawn = await adapter.spawn(baseSpec({ timeoutMs: 0 }))
     expect(spawn.ok).toBe(true)
     expect(argvLog.length).toBe(0) // never reached limactl

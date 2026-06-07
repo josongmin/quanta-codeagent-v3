@@ -18,10 +18,10 @@
 // source-grep allowed — T1 wiring suite below intentionally pins the
 // `withStreamTimeout` import in both adapter sources so a refactor that rips
 // the wrapper out of one adapter fails fast (per file header item 5).
+
+import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { describe, expect, test } from "bun:test"
-import { LLMError } from "@/shared/errors"
 import {
   DEFAULT_FIRST_CHUNK_MS,
   DEFAULT_IDLE_MS,
@@ -29,6 +29,7 @@ import {
   withStreamTimeout,
   withStreamTimeoutProbed,
 } from "@/llm/stream-timeout"
+import { LLMError } from "@/shared/errors"
 
 /** Hand-rolled stub `AsyncIterable` whose `next()` resolves with the given
  *  chunks one at a time, with an optional delay AFTER the final value before
@@ -310,9 +311,7 @@ describe("resolveStreamTimeoutMs — precedence", () => {
       firstChunkMs: 5_000,
       idleMs: 7_000,
     })
-    expect(
-      resolveStreamTimeoutMs(5_000, 7_000, { firstChunkMs: 1_000, idleMs: 2_000 }),
-    ).toEqual({
+    expect(resolveStreamTimeoutMs(5_000, 7_000, { firstChunkMs: 1_000, idleMs: 2_000 })).toEqual({
       firstChunkMs: 1_000,
       idleMs: 2_000,
     })

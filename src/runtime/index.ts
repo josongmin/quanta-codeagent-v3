@@ -1,18 +1,5 @@
 export type { EscalatingKill, GuardedSpawnHooks, KillableChild } from "./guarded-spawn"
 export { escalatingKill, KILL_GRACE_MS, withSpawnedChild } from "./guarded-spawn"
-export type {
-  PpidWalkDeps,
-  ProcessRow,
-  ProcessTableProvider,
-  ProcessTreeKiller,
-  SignalSender,
-  TreeSignal,
-} from "./process-tree"
-export {
-  createPpidWalkKiller,
-  defaultPpidWalkKiller,
-  parsePsTable,
-} from "./process-tree"
 export {
   applyLocalEnv,
   LOCAL_ENV_CANDIDATES,
@@ -37,6 +24,19 @@ export {
   wrapShellArgv,
 } from "./os-sandbox"
 export { resolveSandboxProfileFromEnv } from "./os-sandbox/env"
+export type {
+  PpidWalkDeps,
+  ProcessRow,
+  ProcessTableProvider,
+  ProcessTreeKiller,
+  SignalSender,
+  TreeSignal,
+} from "./process-tree"
+export {
+  createPpidWalkKiller,
+  defaultPpidWalkKiller,
+  parsePsTable,
+} from "./process-tree"
 export type { DockerSandboxOptions, Sandbox, SandboxPolicy } from "./sandbox"
 export {
   DEFAULT_ENV_ALLOWLIST,

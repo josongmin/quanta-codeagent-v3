@@ -56,7 +56,12 @@ describe("dedup #15 — env brake follows registry.extractShellCommand, not the 
     // none blocked. The fix routes via the registry extractor ⇒ env single
     // bucket ⇒ braked by the 3rd.
     const v1 = g.record("shell", { command: "pip install setuptools" }, 1, registryShellOf)
-    const v2 = g.record("shell", { command: "apt-get install python3-distutils" }, 2, registryShellOf)
+    const v2 = g.record(
+      "shell",
+      { command: "apt-get install python3-distutils" },
+      2,
+      registryShellOf,
+    )
     const v3 = g.record("shell", { command: "brew install python@3" }, 3, registryShellOf)
     expect(v1.blocked).toBe(false)
     expect(v2.blocked).toBe(false)
@@ -271,15 +276,21 @@ describe("dedup #16 — same-turn parallel fan-out is not a spin (count distinct
     const file = "/src/mod.py"
     // Turn 1: 4 parallel edits — all allowed (one distinct turn).
     for (let i = 0; i < 4; i++) {
-      expect(g.record("edit", { path: file, old_string: `a${i}`, new_string: `b${i}` }, 1).blocked).toBe(
-        false,
-      )
+      expect(
+        g.record("edit", { path: file, old_string: `a${i}`, new_string: `b${i}` }, 1).blocked,
+      ).toBe(false)
     }
     // Now the model keeps editing the SAME file on separate turns 2..5.
     // editThreshold 5 ⇒ distinct turns 1,2,3,4 = 4 (pass), turn 5 = 5 (block).
-    expect(g.record("edit", { path: file, old_string: "c", new_string: "d" }, 2).blocked).toBe(false)
-    expect(g.record("edit", { path: file, old_string: "e", new_string: "f" }, 3).blocked).toBe(false)
-    expect(g.record("edit", { path: file, old_string: "g", new_string: "h" }, 4).blocked).toBe(false)
+    expect(g.record("edit", { path: file, old_string: "c", new_string: "d" }, 2).blocked).toBe(
+      false,
+    )
+    expect(g.record("edit", { path: file, old_string: "e", new_string: "f" }, 3).blocked).toBe(
+      false,
+    )
+    expect(g.record("edit", { path: file, old_string: "g", new_string: "h" }, 4).blocked).toBe(
+      false,
+    )
     const v = g.record("edit", { path: file, old_string: "i", new_string: "j" }, 5)
     expect(v.blocked).toBe(true)
     if (v.blocked) {

@@ -6,10 +6,7 @@ import type {
   SessionSnapshotLite,
   SessionStateView,
 } from "@/protocol/session"
-import type {
-  LlmContinuationObservation,
-  LlmRequestObservation,
-} from "@/shared/llm-route-types"
+import type { LlmContinuationObservation, LlmRequestObservation } from "@/shared/llm-route-types"
 import { SingleWriterLease } from "./lease"
 
 export interface KernelTranscriptState {

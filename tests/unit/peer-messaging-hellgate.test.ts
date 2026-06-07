@@ -233,7 +233,7 @@ describe("peer-messaging DELTA #2 — team lifecycle + teardown reaps bus", () =
       },
     )
     expect(created.ok).toBe(true)
-    expect(registry.members("t1").sort()).toEqual(["A", "B"])
+    expect([...registry.members("t1")].sort()).toEqual(["A", "B"])
 
     const deleted = await runTool(tools, "team_delete", { team_id: "t1" }, { agentLabel: "A" })
     expect(deleted.ok).toBe(true)

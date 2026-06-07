@@ -40,6 +40,7 @@ const port: PtySessionPort = {
   write: async () => okPty(undefined) as never,
   read: async () => okPty({ chunks: [], nextSeq: 0 }) as never,
   resize: async () => okPty(undefined) as never,
+  detach: async () => okPty(undefined) as never,
   kill: async () => okPty(undefined) as never,
 }
 

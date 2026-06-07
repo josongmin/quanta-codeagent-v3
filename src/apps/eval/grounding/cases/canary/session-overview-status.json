@@ -3,7 +3,10 @@
   "id": "session-overview-status",
   "usecase": "persistent-context.conversation-state.thread-grounding",
   "history": [
-    { "role": "assistant", "text": "prompt_rules is near closeout, feature_catalog is mid-flight, oauth_abort_flow is paused." }
+    {
+      "role": "assistant",
+      "text": "prompt_rules is near closeout, feature_catalog is mid-flight, oauth_abort_flow is paused."
+    }
   ],
   "targetUtterance": "지금 전체적으로 뭐 남았냐?",
   "gold": {

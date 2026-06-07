@@ -234,7 +234,8 @@ export const resolveCatalogValues = (
   for (const k of catalog.values()) {
     const envV = env[k.envKey]
     const sesV = session[k.envKey]
-    if (envV !== undefined) out.set(k.envKey, { envKey: k.envKey, raw: envV, source: "env", isDefault: false })
+    if (envV !== undefined)
+      out.set(k.envKey, { envKey: k.envKey, raw: envV, source: "env", isDefault: false })
     else if (sesV !== undefined)
       out.set(k.envKey, { envKey: k.envKey, raw: sesV, source: "session", isDefault: false })
     else {

@@ -18,14 +18,18 @@ import type {
   SkybridgeSpawner,
 } from "@/mcp/skybridge/types"
 
-const which = (): McpSandboxConfig["which"] => async (bin) =>
+const which = (): NonNullable<McpSandboxConfig["which"]> => async (bin) =>
   bin === "lima" ? "/usr/local/bin/lima" : null
 
 const runnerRunning: SkybridgeRunner = async (argv) => {
   // list → report our VM as Running so `lima start` is skipped.
   if (argv[1] === "list") {
     // The VM name is derived from spec.id; we just answer "running" for any.
-    return { exitCode: 0, stdout: JSON.stringify({ name: argv[2] ?? "x", status: "Running" }), stderr: "" }
+    return {
+      exitCode: 0,
+      stdout: JSON.stringify({ name: argv[2] ?? "x", status: "Running" }),
+      stderr: "",
+    }
   }
   return { exitCode: 0, stdout: "", stderr: "" }
 }

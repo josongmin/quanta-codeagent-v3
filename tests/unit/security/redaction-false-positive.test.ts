@@ -14,8 +14,7 @@ import { redactSecrets } from "@/security"
 
 describe("False-positive guards — must NOT redact normal text", () => {
   test("variable name containing 'aws' is unchanged", () => {
-    const input =
-      "const aws_cool_test = 42\nlet awesome = key\nfunction api_key_helper() {}"
+    const input = "const aws_cool_test = 42\nlet awesome = key\nfunction api_key_helper() {}"
     const r = redactSecrets(input, { origin: "tool_result" })
     expect(r.unchanged).toBe(true)
     expect(r.text).toBe(input)

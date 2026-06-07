@@ -135,11 +135,7 @@ interface AutomationRow {
 }
 
 const isEngineStatus = (s: string): s is EngineStatus =>
-  s === "scheduled" ||
-  s === "running" ||
-  s === "fired" ||
-  s === "cancelled" ||
-  s === "errored"
+  s === "scheduled" || s === "running" || s === "fired" || s === "cancelled" || s === "errored"
 
 const parseRuleJson = (raw: string): RRule | undefined => {
   let parsed: unknown

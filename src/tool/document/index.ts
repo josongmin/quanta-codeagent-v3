@@ -59,11 +59,11 @@ export {
 } from "./pdf-read"
 export {
   type ParsePptxResult,
-  parsePptx,
   type PptxReadInput,
+  type PptxSlideText,
+  parsePptx,
   pptxReadInputSchema,
   pptxReadTool,
-  type PptxSlideText,
 } from "./pptx-read"
 export {
   type ParseXlsxResult,

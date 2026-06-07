@@ -18,10 +18,7 @@ import { join } from "node:path"
 import type { KnobValue, KnobValueMap } from "@/runner/knobs"
 import "../../../src/apps/cli/knobs-bootstrap" // populate registry via side-effect
 
-import {
-  __resetCliKnobOverrides,
-  readCliKnob,
-} from "../../../src/apps/cli/cli-knobs-accessor"
+import { __resetCliKnobOverrides, readCliKnob } from "../../../src/apps/cli/cli-knobs-accessor"
 import { buildKnobsSlash, type KnobsSurfaceWire } from "../../../src/apps/cli/slash-commands-knobs"
 import type { SlashContext } from "../../../src/apps/cli/slash-contract"
 

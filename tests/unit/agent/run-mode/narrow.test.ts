@@ -4,12 +4,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import {
-  assertModeMatrix,
-  MODE_PRESETS,
-  type ModePolicy,
-  narrowMode,
-} from "@/agent"
+import { assertModeMatrix, MODE_PRESETS, type ModePolicy, narrowMode } from "@/agent"
 
 describe("narrowMode (assertion function)", () => {
   test("interactive policy narrows successfully", () => {

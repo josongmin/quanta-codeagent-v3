@@ -30,10 +30,7 @@
     "longDescription": "Create, edit, inspect, render, verify, and export XLSX, CSV, and TSV spreadsheets locally, including local XLSX authoring for native Google Sheets handoff. Use Spreadsheets when the durable output or target is a spreadsheet, workbook, sheet, Google Sheet, or CSV file.",
     "developerName": "OpenAI",
     "category": "Productivity",
-    "capabilities": [
-      "Interactive",
-      "Write"
-    ],
+    "capabilities": ["Interactive", "Write"],
     "websiteURL": "https://openai.com/",
     "privacyPolicyURL": "https://openai.com/policies/privacy-policy/",
     "termsOfServiceURL": "https://openai.com/policies/terms-of-use/",

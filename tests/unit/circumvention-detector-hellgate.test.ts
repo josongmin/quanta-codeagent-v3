@@ -26,9 +26,9 @@
  */
 import { describe, expect, test } from "bun:test"
 import {
-  canonicalizeEffectPath,
   CIRCUMVENTION_TTL_TURNS,
   CircumventionTracker,
+  canonicalizeEffectPath,
   type EffectSignature,
   extractShellWritePaths,
   extractWriteEffect,
@@ -120,7 +120,9 @@ describe("extractWriteEffect — tool-vs-shell dispatch", () => {
   })
 
   test("a read tool yields undefined", () => {
-    expect(extractWriteEffect("bash", { command: "cat /repo/X" }, "cat /repo/X", CWD)).toBeUndefined()
+    expect(
+      extractWriteEffect("bash", { command: "cat /repo/X" }, "cat /repo/X", CWD),
+    ).toBeUndefined()
   })
 
   test("a tool with no path / no shell command yields undefined", () => {

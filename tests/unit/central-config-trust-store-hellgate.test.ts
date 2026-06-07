@@ -6,11 +6,11 @@
 
 import { describe, expect, test } from "bun:test"
 import {
+  canonicalizeProjectPath,
+  canonicalizeTrustedPaths,
   type TrustPersistencePort,
   type TrustRecord,
   TrustStore,
-  canonicalizeProjectPath,
-  canonicalizeTrustedPaths,
 } from "@/config"
 
 const emptyPort = (): TrustPersistencePort => {

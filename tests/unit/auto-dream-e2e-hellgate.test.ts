@@ -129,7 +129,7 @@ const mkStage1Entry = (now: number): Stage1Output => ({
   selectedForPhase2SourceUpdatedAt: now,
   lastUsage: now,
   usageCount: 1,
-  outcome: "pass",
+  outcome: "success",
   outcomeEvidence: "tests green",
 })
 

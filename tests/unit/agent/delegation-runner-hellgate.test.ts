@@ -28,8 +28,8 @@
 import { describe, expect, test } from "bun:test"
 import {
   ALL_RUNNER_ERROR_KINDS,
-  defaultDelegationRunner,
   type DelegateSpec,
+  defaultDelegationRunner,
   headlessDelegationRunner,
   MAX_DEPTH,
 } from "@/agent/delegation-runner"
@@ -62,21 +62,15 @@ describe("delegation-runner hellgate (ADR-0283)", () => {
     // The closed boomerang error kinds the router uses are:
     // "cancelled" | "budget-overflow" | "mode-missing" | "runner-error" | "timeout"
     expect(out.errorKind).toBeDefined()
-    expect([
-      "cancelled",
-      "budget-overflow",
-      "mode-missing",
-      "runner-error",
-      "timeout",
-    ]).toContain(out.errorKind as string)
+    expect(["cancelled", "budget-overflow", "mode-missing", "runner-error", "timeout"]).toContain(
+      out.errorKind as string,
+    )
   })
 
   // -------------------------------------------------------------------------
   test("HELL-DR-03 budget overflow ⇒ typed Err (budget-overflow)", async () => {
     const r = defaultDelegationRunner()
-    const out = await r.delegate(
-      baseSpec({ budget: { maxTurns: 9_999_999 } }),
-    )
+    const out = await r.delegate(baseSpec({ budget: { maxTurns: 9_999_999 } }))
     expect(out.ok).toBe(false)
     expect(out.errorKind).toBe("budget-overflow")
   })
@@ -177,7 +171,6 @@ describe("delegation-runner hellgate (ADR-0283)", () => {
       if (s !== undefined) expect(o.mode).toBe(s.mode)
     })
   })
-
 
   // -------------------------------------------------------------------------
   test("HELL-DR-12 headless stub is deterministic", async () => {
@@ -282,5 +275,4 @@ describe("delegation-runner hellgate (ADR-0283)", () => {
     expect(typeof mod.MAX_DEPTH).toBe("number")
     expect(Array.isArray(mod.ALL_RUNNER_ERROR_KINDS)).toBe(true)
   })
-
 })

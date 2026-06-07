@@ -4,7 +4,7 @@
  * No real `gh` binary required; the runner returns a fixture per argv.
  */
 import { describe, expect, test } from "bun:test"
-import { ghTools, type GhRunner, type GhRunResult } from "@/../src/tool/gh"
+import { type GhRunner, type GhRunResult, ghTools } from "@/../src/tool/gh"
 
 const makeRunner = (
   responses: Record<string, GhRunResult>,
@@ -28,10 +28,15 @@ const runOnce = async <I>(
   tool: ReturnType<typeof ghTools>[number],
   input: unknown,
 ): Promise<{ ok: boolean; output?: string }> => {
-  for await (const ev of (tool.execute as (i: unknown, c: typeof ctx) => AsyncIterable<{
-    type: string
-    result?: { ok: boolean; output?: string }
-  }>)(input, ctx)) {
+  for await (const ev of (
+    tool.execute as (
+      i: unknown,
+      c: typeof ctx,
+    ) => AsyncIterable<{
+      type: string
+      result?: { ok: boolean; output?: string }
+    }>
+  )(input, ctx)) {
     if (ev.type === "result" && ev.result) return ev.result
   }
   return { ok: false, output: "no result emitted" }

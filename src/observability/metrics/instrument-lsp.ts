@@ -56,12 +56,8 @@ export const instrumentLspClient = <T extends InstrumentableLspClient>(
       ok = "false"
       throw e
     } finally {
-      safe(metrics, () =>
-        metrics.increment(`${prefix}.request.total`, 1, { method, ok }),
-      )
-      safe(metrics, () =>
-        metrics.observe(`${prefix}.request.duration_ms`, now() - t0, { method }),
-      )
+      safe(metrics, () => metrics.increment(`${prefix}.request.total`, 1, { method, ok }))
+      safe(metrics, () => metrics.observe(`${prefix}.request.duration_ms`, now() - t0, { method }))
     }
   }
 
@@ -72,13 +68,25 @@ export const instrumentLspClient = <T extends InstrumentableLspClient>(
       if (typeof orig !== "function") return orig
       switch (prop) {
         case "requestCodeActions":
-          return (...args: unknown[]) => wrap("code_action", () => (orig as (...a: unknown[]) => Promise<unknown>).apply(target, args))
+          return (...args: unknown[]) =>
+            wrap("code_action", () =>
+              (orig as (...a: unknown[]) => Promise<unknown>).apply(target, args),
+            )
         case "requestFormatting":
-          return (...args: unknown[]) => wrap("formatting", () => (orig as (...a: unknown[]) => Promise<unknown>).apply(target, args))
+          return (...args: unknown[]) =>
+            wrap("formatting", () =>
+              (orig as (...a: unknown[]) => Promise<unknown>).apply(target, args),
+            )
         case "requestSignatureHelp":
-          return (...args: unknown[]) => wrap("signature_help", () => (orig as (...a: unknown[]) => Promise<unknown>).apply(target, args))
+          return (...args: unknown[]) =>
+            wrap("signature_help", () =>
+              (orig as (...a: unknown[]) => Promise<unknown>).apply(target, args),
+            )
         case "applyWorkspaceEdit":
-          return (...args: unknown[]) => wrap("apply_workspace_edit", () => (orig as (...a: unknown[]) => Promise<unknown>).apply(target, args))
+          return (...args: unknown[]) =>
+            wrap("apply_workspace_edit", () =>
+              (orig as (...a: unknown[]) => Promise<unknown>).apply(target, args),
+            )
         default:
           return orig
       }

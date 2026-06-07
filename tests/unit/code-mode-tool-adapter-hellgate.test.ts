@@ -62,10 +62,7 @@ describe("code_cell adapter — pre-flight failures (a)", () => {
   test("an already-aborted signal ⇒ ok:false / aborted (before any VM spin)", async () => {
     const ac = new AbortController()
     ac.abort()
-    const r = await runTool(
-      { code: "return 1;" },
-      { codeCellDispatch: okSeam, signal: ac.signal },
-    )
+    const r = await runTool({ code: "return 1;" }, { codeCellDispatch: okSeam, signal: ac.signal })
     expect(r.ok).toBe(false)
     expect((r as { failure: { modelVisibleError: string } }).failure.modelVisibleError).toBe(
       "aborted",
@@ -81,10 +78,7 @@ describe("code_cell adapter — pre-flight failures (a)", () => {
   })
 
   test("invalid input (non-positive timeoutMs) ⇒ ok:false / invalid_input", async () => {
-    const r = await runTool(
-      { code: "return 1;", timeoutMs: 0 },
-      { codeCellDispatch: okSeam },
-    )
+    const r = await runTool({ code: "return 1;", timeoutMs: 0 }, { codeCellDispatch: okSeam })
     expect(r.ok).toBe(false)
     expect((r as { failure: { modelVisibleError: string } }).failure.modelVisibleError).toBe(
       "invalid_input",

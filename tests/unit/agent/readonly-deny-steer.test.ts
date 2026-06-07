@@ -14,11 +14,7 @@
  * test is hermetic.
  */
 import { describe, expect, test } from "bun:test"
-import {
-  buildDenySteerMessage,
-  type ConfirmDecision,
-  READONLY_DENY_STEER_NOTE,
-} from "@/agent"
+import { buildDenySteerMessage, type ConfirmDecision, READONLY_DENY_STEER_NOTE } from "@/agent"
 
 const denyAndSteer = (steer: string): ConfirmDecision => ({
   decision: "deny_and_steer",

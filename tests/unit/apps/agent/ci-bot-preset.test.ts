@@ -9,10 +9,7 @@
  *   - env allowlist excludes user secrets (OPENAI_API_KEY etc)
  */
 import { describe, expect, test } from "bun:test"
-import {
-  buildCiBotWiring,
-  CI_ENV_ALLOWLIST,
-} from "@/../src/apps/agent/mode-presets/ci-bot-policy"
+import { buildCiBotWiring, CI_ENV_ALLOWLIST } from "@/../src/apps/agent/mode-presets/ci-bot-policy"
 
 describe("buildCiBotWiring — tool surface", () => {
   test("includes git + gh tools", () => {

@@ -31,8 +31,7 @@ interface TokenResponse {
   readonly expires_in?: number
 }
 
-const isObject = (v: unknown): v is Record<string, unknown> =>
-  v !== null && typeof v === "object"
+const isObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object"
 
 const parseTokenResponse = (raw: unknown): TokenResponse => {
   if (!isObject(raw)) {
@@ -55,7 +54,11 @@ const parseTokenResponse = (raw: unknown): TokenResponse => {
   // already expired (or NaN-expiry), looping the user through refresh forever.
   // Drop a present-but-invalid value rather than silently trusting it.
   if (raw.expires_in !== undefined) {
-    if (typeof raw.expires_in !== "number" || !Number.isFinite(raw.expires_in) || raw.expires_in <= 0) {
+    if (
+      typeof raw.expires_in !== "number" ||
+      !Number.isFinite(raw.expires_in) ||
+      raw.expires_in <= 0
+    ) {
       throw new TokenExchangeError(0, {
         error: "shape",
         error_description: "expires_in is not a finite positive number",

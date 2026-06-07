@@ -41,8 +41,9 @@
 
 import { describe, expect, test } from "bun:test"
 import type { FileInfo, FileSystemPort } from "@/storage"
-import type { FastApplyMergeSeam, ToolContext, ToolResult } from "@/tool"
+import type { ToolContext, ToolResult } from "@/tool"
 import { makeEditTool } from "@/tool/edit"
+import type { FastApplyMergeSeam } from "@/tool/types"
 
 /** Recording in-memory FS: counts writes so we can prove fail-closed paths
  *  perform NO write, and the accept path writes EXACTLY once via the commit. */
@@ -60,7 +61,15 @@ const makePort = (seed: Record<string, string>) => {
       files.set(path, content)
     },
     async statFile(path: string): Promise<FileInfo> {
-      return { path, size: files.get(path)?.length ?? 0, isDirectory: false }
+      return {
+        path,
+        size: files.get(path)?.length ?? 0,
+        isDirectory: false,
+        mtimeMs: 0,
+        isFIFO: false,
+        isCharacterDevice: false,
+        isBlockDevice: false,
+      }
     },
     async fileExists(path: string): Promise<boolean> {
       return files.has(path)

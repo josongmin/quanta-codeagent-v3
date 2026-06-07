@@ -69,7 +69,11 @@ const cfgStub = (sink: { emit: (e: unknown) => void }) =>
 describe("session-end killAll wiring (M1)", () => {
   test("cleanupFinishedSession reaps a still-running bg shell via killAll()", async () => {
     const proc = makeNeverExitingProc()
-    const port: BashProcessHandlePort = { async spawn() { return proc } }
+    const port: BashProcessHandlePort = {
+      async spawn() {
+        return proc
+      },
+    }
     const registry = createBashBgRegistry({ port })
     installBashBgRegistry(registry)
 

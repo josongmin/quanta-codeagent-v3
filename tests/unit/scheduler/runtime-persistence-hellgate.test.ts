@@ -16,8 +16,8 @@
 
 import { describe, expect, test } from "bun:test"
 import { createAutomation } from "@/scheduler/automation"
-import { createSchedulerRuntime } from "@/scheduler/runtime"
 import { parseRRule } from "@/scheduler/rrule-parser"
+import { createSchedulerRuntime } from "@/scheduler/runtime"
 import { defaultJsonlAutomationStore } from "@/scheduler/store-jsonl"
 import {
   type AgentLoopPort,
@@ -150,9 +150,7 @@ describe("T10 M10 — error-state persistence failure is observable", () => {
     expect(kinds).toContain("scheduler.error")
     // A persistence failure must surface — not vanish.
     expect(
-      f.events.some(
-        (e) => e.type === "scheduler.skipped" && e.reason === "store-save-failed",
-      ),
+      f.events.some((e) => e.type === "scheduler.skipped" && e.reason === "store-save-failed"),
     ).toBe(true)
   })
 })

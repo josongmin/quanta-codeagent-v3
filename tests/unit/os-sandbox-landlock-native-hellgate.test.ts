@@ -202,10 +202,7 @@ describe("B. nativeLandlockOsSandbox — spawn runtime dispatch", () => {
     const { binding } = makeFakeBinding()
     const sandbox = nativeLandlockOsSandbox({ binding, spawner })
     const ctrl = new AbortController()
-    await sandbox.spawn(
-      { command: ["x"], cwd: "/ws", signal: ctrl.signal },
-      POLICY_OFF,
-    )
+    await sandbox.spawn({ command: ["x"], cwd: "/ws", signal: ctrl.signal }, POLICY_OFF)
     expect(calls[0]?.signal).toBe(ctrl.signal)
   })
 
@@ -239,10 +236,7 @@ describe("B. nativeLandlockOsSandbox — spawn runtime dispatch", () => {
       },
     })
     const sandbox = nativeLandlockOsSandbox({ binding })
-    const r: SandboxedSpawnResult = await sandbox.spawn(
-      { command: ["cmd"], cwd: "/ws" },
-      POLICY_WW,
-    )
+    const r: SandboxedSpawnResult = await sandbox.spawn({ command: ["cmd"], cwd: "/ws" }, POLICY_WW)
     expect(r.exitCode).toBe(7)
     expect(r.stdout).toBe("OUT")
     expect(r.stderr).toBe("ERR")
@@ -276,10 +270,7 @@ describe("C. defaultOsSandbox — Linux fallback chain (ADR-0175)", () => {
       spawner,
       which: whichBwrap, // Phase 2 also resolvable — proves native wins.
     }
-    const r = await defaultOsSandbox(cfg).spawn(
-      { command: ["cmd"], cwd: "/ws" },
-      POLICY_WW,
-    )
+    const r = await defaultOsSandbox(cfg).spawn({ command: ["cmd"], cwd: "/ws" }, POLICY_WW)
     expect(r.stdout).toBe("native!")
     expect(r.sandboxApplied).toBe(true)
     expect(calls).toHaveLength(1) // binding actually invoked
@@ -297,10 +288,7 @@ describe("C. defaultOsSandbox — Linux fallback chain (ADR-0175)", () => {
       spawner,
       which: whichBwrap,
     }
-    const r = await defaultOsSandbox(cfg).spawn(
-      { command: ["cmd"], cwd: "/ws" },
-      POLICY_WW,
-    )
+    const r = await defaultOsSandbox(cfg).spawn({ command: ["cmd"], cwd: "/ws" }, POLICY_WW)
     expect(r.sandboxApplied).toBe(true)
     // argv[0] should be bwrap (Phase 2 spawn).
     expect(calls[0]?.argv[0]).toBe("bwrap")
@@ -314,10 +302,7 @@ describe("C. defaultOsSandbox — Linux fallback chain (ADR-0175)", () => {
       spawner,
       which: whichNone,
     }
-    const r = await defaultOsSandbox(cfg).spawn(
-      { command: ["cmd"], cwd: "/ws" },
-      POLICY_WW,
-    )
+    const r = await defaultOsSandbox(cfg).spawn({ command: ["cmd"], cwd: "/ws" }, POLICY_WW)
     expect(r.sandboxApplied).toBe(false)
     expect(r.degradeReason).toContain("linux-bwrap-missing")
   })
@@ -333,10 +318,7 @@ describe("C. defaultOsSandbox — Linux fallback chain (ADR-0175)", () => {
       spawner,
       which: whichSandboxExec,
     }
-    const r = await defaultOsSandbox(cfg).spawn(
-      { command: ["cmd"], cwd: "/ws" },
-      POLICY_WW,
-    )
+    const r = await defaultOsSandbox(cfg).spawn({ command: ["cmd"], cwd: "/ws" }, POLICY_WW)
     expect(r.sandboxApplied).toBe(true)
     expect(calls).toHaveLength(0) // native binding not invoked on darwin
   })

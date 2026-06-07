@@ -17,8 +17,8 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { assertOk } from "../_support/assert-ok"
 import { buildSnapshot, createHeadlessBrowser, createRefMap, type DomModel } from "@/browser"
+import { assertOk } from "../_support/assert-ok"
 
 const MODEL: DomModel = {
   title: "Login",

@@ -78,10 +78,7 @@ const makeBase = (sink: { ctx?: ToolContext }): AgentConfig =>
   }) as unknown as AgentConfig
 
 /** Drive the env snapshot → reset the cached runtimeConfig → run the comp-root. */
-const wireWith = (
-  env: Record<string, string | undefined>,
-  base: AgentConfig,
-): AgentConfig => {
+const wireWith = (env: Record<string, string | undefined>, base: AgentConfig): AgentConfig => {
   const prev: Record<string, string | undefined> = {}
   for (const k of ["QUANTA_FAST_APPLY_MERGE", "QUANTA_FAST_APPLY_MODEL"]) {
     prev[k] = process.env[k]
@@ -143,7 +140,6 @@ describe("jun-7-misc 06 fast-apply MERGE composition-root WIRE hellgate", () => 
     expect("fastApplyMerge" in wired).toBe(false)
   })
 
-
   test("WIRE-05 ON-gate but NO apply model ⇒ no port (both required)", () => {
     const sink: { ctx?: ToolContext } = {}
     const base = makeBase(sink)
@@ -158,10 +154,7 @@ describe("jun-7-misc 06 fast-apply MERGE composition-root WIRE hellgate", () => 
   test("WIRE-06 ON-gate but EMPTY apply model ⇒ no port", () => {
     const sink: { ctx?: ToolContext } = {}
     const base = makeBase(sink)
-    const wired = wireWith(
-      { QUANTA_FAST_APPLY_MERGE: "1", QUANTA_FAST_APPLY_MODEL: "" },
-      base,
-    )
+    const wired = wireWith({ QUANTA_FAST_APPLY_MERGE: "1", QUANTA_FAST_APPLY_MODEL: "" }, base)
     expect(wired.fastApplyMerge).toBeUndefined()
     expect(wired).toBe(base)
   })

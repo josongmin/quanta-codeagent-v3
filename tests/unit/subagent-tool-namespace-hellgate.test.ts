@@ -22,8 +22,8 @@ import {
 } from "@/agent/subagent-runner"
 import type { AgentConfig, AgentOutcome } from "@/agent/types"
 import type { SubagentRequest } from "@/subagent/types"
-import { ToolRegistry } from "@/tool"
 import type { Tool, ToolEvent } from "@/tool"
+import { ToolRegistry } from "@/tool"
 
 /** A real Tool-shaped stub (inputSchema + execute), matching the runtime
  *  contract so `registry.specs()` (which serializes the zod schema) works. */

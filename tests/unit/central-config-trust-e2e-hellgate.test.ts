@@ -59,24 +59,24 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import {
-  type ReadTextPort,
-  type TrustPersistencePort,
-  type TrustRecord,
-  TrustStore,
-  canonicalizeTrustedPaths,
-  parseSettingSources,
-  resolveDiskConfig,
-} from "@/config"
 import {
   bindingsFromHookEvents,
   loadCommandHookBindings,
 } from "@/agent/command-hooks/settings-loader"
 import type { CommandHookBinding } from "@/agent/command-hooks/types"
+import {
+  canonicalizeTrustedPaths,
+  parseSettingSources,
+  type ReadTextPort,
+  resolveDiskConfig,
+  type TrustPersistencePort,
+  type TrustRecord,
+  TrustStore,
+} from "@/config"
 import { __resetRuntimeConfig, runtimeConfig } from "@/shared"
 
 // ── REAL closed-port IO: the concrete `node:fs` read the host injects. A call

@@ -523,7 +523,11 @@ export const defaultBudgetLedger = (opts?: BudgetLedgerOpts): BudgetLedger => {
     return created
   }
 
-  const maybeDropBucket = (map: Map<string, MutableCost>, key: string, agg: MutableCost | undefined): void => {
+  const maybeDropBucket = (
+    map: Map<string, MutableCost>,
+    key: string,
+    agg: MutableCost | undefined,
+  ): void => {
     if (agg === undefined) return
     if (isEmptyAggregate(agg)) map.delete(key)
   }

@@ -25,13 +25,7 @@
  */
 
 import type { Result } from "@/shared"
-import type {
-  RemoteError,
-  RemoteHandle,
-  RemoteLogsOpts,
-  RemoteSpec,
-  RemoteStatus,
-} from "./types"
+import type { RemoteError, RemoteHandle, RemoteLogsOpts, RemoteSpec, RemoteStatus } from "./types"
 
 /**
  * Remote runner port — closed surface for every backend.

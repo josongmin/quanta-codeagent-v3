@@ -17,9 +17,9 @@
  * list cannot drift away from its real consumers silently.
  */
 
+import { describe, expect, test } from "bun:test"
 import { execSync } from "node:child_process"
 import { readFileSync } from "node:fs"
-import { describe, expect, test } from "bun:test"
 
 const INDEX_SRC = "src/apps/cli/index.ts"
 

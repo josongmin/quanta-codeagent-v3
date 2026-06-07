@@ -208,20 +208,23 @@ export const replayFixture = async (opts: ReplayOpts): Promise<ReplayResult> => 
     let runError: string | undefined
     try {
       const outcome = await runAgent(
-        wireOptionalAgentPorts({
-          llm: opts.llm,
-          // DIP factory: trajectory replay runs against the SAME default port
-          // surface as production (no replay-specific fs/diagnostics ports),
-        // byte-identical to the prior singleton.
-        registry: new ToolRegistry(buildDefaultTools()),
-        stream,
-        permission,
-        messages,
-        system: buildSystemPrompt(sandbox),
-          cwd: sandbox,
-          maxTurns: opts.maxTurns ?? Math.max(original.turns + 2, DEFAULT_MIN_REPLAY_TURNS),
-          signal: controller.signal,
-        }, process.env),
+        wireOptionalAgentPorts(
+          {
+            llm: opts.llm,
+            // DIP factory: trajectory replay runs against the SAME default port
+            // surface as production (no replay-specific fs/diagnostics ports),
+            // byte-identical to the prior singleton.
+            registry: new ToolRegistry(buildDefaultTools()),
+            stream,
+            permission,
+            messages,
+            system: buildSystemPrompt(sandbox),
+            cwd: sandbox,
+            maxTurns: opts.maxTurns ?? Math.max(original.turns + 2, DEFAULT_MIN_REPLAY_TURNS),
+            signal: controller.signal,
+          },
+          process.env,
+        ),
       )
       replayTurns = outcome.turns
       if (outcome.reason === "error") runError = "runAgent reported error"

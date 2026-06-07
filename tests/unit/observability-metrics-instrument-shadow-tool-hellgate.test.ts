@@ -48,11 +48,17 @@ describe("instrumentShadowOdb", () => {
   test("registerHead kind defaults to 'manual'; opts can override to 'auto'", async () => {
     const m1 = defaultMetricsRegistry()
     await instrumentShadowOdb(fakeShadow(), m1).registerHead("/ws")
-    expect(m1.snapshot().find((s) => s.name === "shadow.checkpoint.total")?.labels.kind).toBe("manual")
+    expect(m1.snapshot().find((s) => s.name === "shadow.checkpoint.total")?.labels.kind).toBe(
+      "manual",
+    )
 
     const m2 = defaultMetricsRegistry()
-    await instrumentShadowOdb(fakeShadow(), m2, { defaultCheckpointKind: "auto" }).registerHead("/ws")
-    expect(m2.snapshot().find((s) => s.name === "shadow.checkpoint.total")?.labels.kind).toBe("auto")
+    await instrumentShadowOdb(fakeShadow(), m2, { defaultCheckpointKind: "auto" }).registerHead(
+      "/ws",
+    )
+    expect(m2.snapshot().find((s) => s.name === "shadow.checkpoint.total")?.labels.kind).toBe(
+      "auto",
+    )
   })
 
   test("rewindToLast → rewind.total label target=last + duration_ms", async () => {
@@ -153,7 +159,7 @@ describe("instrumentTool", () => {
     expect(m.snapshot().some((s) => s.name === "tool.call.duration_ms")).toBe(true)
   })
 
-  test("ok:false result → ok=\"false\" label", async () => {
+  test('ok:false result → ok="false" label', async () => {
     const m = defaultMetricsRegistry()
     const t = instrumentTool(
       fakeTool({
@@ -169,7 +175,7 @@ describe("instrumentTool", () => {
     expect(m.snapshot().find((s) => s.name === "tool.call.total")?.labels.ok).toBe("false")
   })
 
-  test("tool execute throws → ok=\"false\" + still emit + rethrow", async () => {
+  test('tool execute throws → ok="false" + still emit + rethrow', async () => {
     const m = defaultMetricsRegistry()
     const t = instrumentTool(
       fakeTool({

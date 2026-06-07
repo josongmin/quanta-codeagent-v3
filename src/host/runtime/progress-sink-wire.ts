@@ -23,8 +23,8 @@
  * module stays `process.env`-free and below `src/apps/**`.
  */
 
-import { gateOn } from "@/shared"
 import type { AgentConfig } from "@/agent"
+import { gateOn } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import type { ProgressSink, ProgressUpdateMirror } from "@/tool"
 import type { AssemblerEnv } from "./agent-config-assembler"

@@ -7,17 +7,18 @@
  * `StreamInput.signal` threading; without that wire, behaviour is
  * byte-identical to the pre-feature path.
  */
-export {
-  type CancellableStream,
-  type CancellableStreamOpts,
-  cancellableStream,
-} from "./llm-stream-cancel"
+
 export {
   createCancellationController,
   type DefaultControllerOpts,
   fromAbortSignal,
   toAbortSignal,
 } from "./default"
+export {
+  type CancellableStream,
+  type CancellableStreamOpts,
+  cancellableStream,
+} from "./llm-stream-cancel"
 export {
   type CancellationCause,
   type CancellationController,

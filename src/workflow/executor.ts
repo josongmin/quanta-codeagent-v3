@@ -6,6 +6,7 @@
  * effect is `agentRun`; all decisions are pure functions of the tree + results.
  */
 
+import { errMessage } from "@/shared"
 import { Semaphore } from "./semaphore"
 import { validateStructured } from "./structured"
 import type {
@@ -31,8 +32,6 @@ const DEFAULT_RETRIES = 2
 const CORRECTIVE =
   "Your previous response did not match the required schema. Respond with ONLY valid JSON " +
   "matching the schema. Validation error: "
-
-const errMessage = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 /** Internal per-agent outcome: a recorded {@link StepOutcome} OR a skip. */
 type AgentRunOutcome = StepOutcome | { readonly skipped: SkipReason }

@@ -38,11 +38,13 @@ describe("isPathAllowed — pure subtree matcher", () => {
   test("outside owned ⇒ DENIED (not_owned)", () => {
     const v = isPathAllowed("/repo/docs/readme.md", policy())
     expect(v.allowed).toBe(false)
+    if (v.allowed) throw new Error("expected denied")
     expect(v.reason).toBe("not_owned")
   })
   test("forbidden subtree ⇒ DENIED even when also inside owned (forbidden wins)", () => {
     const v = isPathAllowed("/repo/src/secrets/key.txt", policy())
     expect(v.allowed).toBe(false)
+    if (v.allowed) throw new Error("expected denied")
     expect(v.reason).toBe("forbidden")
   })
   test("empty owned + forbidden set ⇒ allow-all-except-forbidden", () => {

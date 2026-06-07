@@ -73,10 +73,15 @@ const noServerStream = (): Response => new Response("", { status: 405 })
  * a restore fn + the per-POST log. This is the SOLE injection — the client and
  * its transport are otherwise fully real.
  */
-const installServer = (serverChoice: string | undefined): { log: PostLog[]; restore: () => void } => {
+const installServer = (
+  serverChoice: string | undefined,
+): { log: PostLog[]; restore: () => void } => {
   const log: PostLog[] = []
   const original = globalThis.fetch
-  globalThis.fetch = (async (_url: string, init: { method: string; headers: Record<string, string>; body?: string }) => {
+  globalThis.fetch = (async (
+    _url: string,
+    init: { method: string; headers: Record<string, string>; body?: string },
+  ) => {
     const protocolHeader = init.headers["mcp-protocol-version"]
     if (init.method !== "POST") return noServerStream()
     const payload = init.body ? (JSON.parse(init.body) as { method?: string; id?: number }) : {}
@@ -96,7 +101,12 @@ const installServer = (serverChoice: string | undefined): { log: PostLog[]; rest
     }
     return accepted202()
   }) as unknown as typeof fetch
-  return { log, restore: () => { globalThis.fetch = original } }
+  return {
+    log,
+    restore: () => {
+      globalThis.fetch = original
+    },
+  }
 }
 
 const httpCfg = (): McpServerConfig => ({ name: "e2e-remote", command: [], url: ENDPOINT })

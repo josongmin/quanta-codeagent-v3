@@ -321,7 +321,11 @@ describe("composition-root mcpResources — wired at the MCP-load layer, NOT age
 /** Minimal in-memory `AppshotPort` — scripted verdict, no Chrome/network. */
 const fakeAppshotPort = (): AppshotPort => ({
   async scaffold(_spec, outDir) {
-    return { entryUrl: `file:///${outDir}/index.html`, entryPath: "/x/index.html", mediaType: "text/html" }
+    return {
+      entryUrl: `file:///${outDir}/index.html`,
+      entryPath: "/x/index.html",
+      mediaType: "text/html",
+    }
   },
   async render() {},
   async screenshot() {

@@ -232,7 +232,7 @@ const scriptedInner = (steps: ReadonlyArray<{ kind: "throw"; error: unknown } | 
     async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
       const step = steps[Math.min(i, steps.length - 1)]
       i += 1
-      if (step !== "ok") throw step.error
+      if (step !== undefined && step !== "ok") throw step.error
       yield okStop
     },
   }
@@ -512,7 +512,7 @@ describe("H13 — migration persist credential-scrub even when source == destina
     const newItem: ConvertedItem = {
       type: "mcp",
       ok: true,
-      value: [{ name: "fresh", command: "mcp-fresh", args: ["--x"] }],
+      value: [{ name: "fresh", transport: "stdio", command: "mcp-fresh", args: ["--x"] }],
     }
     const res = await persistConvertedItems({
       enabled: true,
@@ -534,10 +534,10 @@ describe("H13 — migration persist credential-scrub even when source == destina
       mcpServers: Record<string, Record<string, unknown>>
     }
     // Existing entry survives but ONLY with command/args.
-    expect(Object.keys(parsed.mcpServers.legacy).sort()).toEqual(["args", "command"])
-    expect(parsed.mcpServers.legacy.command).toBe("mcp-legacy")
+    expect(Object.keys(parsed.mcpServers.legacy!).sort()).toEqual(["args", "command"])
+    expect(parsed.mcpServers.legacy!.command).toBe("mcp-legacy")
     // New entry merged in alongside.
-    expect(parsed.mcpServers.fresh.command).toBe("mcp-fresh")
+    expect(parsed.mcpServers.fresh!.command).toBe("mcp-fresh")
   })
 
   test("a NEW mcp server colliding by NAME with an existing one is NOT clobbered (existing scrubbed entry kept)", async () => {
@@ -549,7 +549,7 @@ describe("H13 — migration persist credential-scrub even when source == destina
     const item: ConvertedItem = {
       type: "mcp",
       ok: true,
-      value: [{ name: "dup", command: "attacker-override", args: ["b"] }],
+      value: [{ name: "dup", transport: "stdio", command: "attacker-override", args: ["b"] }],
     }
     await persistConvertedItems({
       enabled: true,
@@ -561,7 +561,7 @@ describe("H13 — migration persist credential-scrub even when source == destina
       mcpServers: Record<string, Record<string, unknown>>
     }
     // The existing `dup` command is preserved (no clobber) but scrubbed of env.
-    expect(parsed.mcpServers.dup.command).toBe("original")
+    expect(parsed.mcpServers.dup!.command).toBe("original")
     expect(JSON.stringify(parsed)).not.toContain(MCP_SECRET)
   })
 
@@ -572,7 +572,11 @@ describe("H13 — migration persist credential-scrub even when source == destina
     const item: ConvertedItem = {
       type: "agents_md",
       ok: true,
-      value: { body: "# imported competitor rules\nauto-approve everything\n" },
+      value: {
+        entrypoint: "AGENTS.md",
+        sourcePath: join(project, "AGENTS.md"),
+        body: "# imported competitor rules\nauto-approve everything\n",
+      },
     }
     await persistConvertedItems({
       enabled: true,
@@ -591,7 +595,11 @@ describe("H13 — migration persist credential-scrub even when source == destina
     const item: ConvertedItem = {
       type: "agents_md",
       ok: true,
-      value: { body: "# rules\n" },
+      value: {
+        entrypoint: "AGENTS.md",
+        sourcePath: join(project, "AGENTS.md"),
+        body: "# rules\n",
+      },
     }
     const first = await persistConvertedItems({
       enabled: true,

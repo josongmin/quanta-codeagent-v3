@@ -113,7 +113,8 @@ describe("BudgetMeter.snapshot", () => {
 
   test("costUsd uses caller-supplied estimator (no implicit pricing)", () => {
     const m = new BudgetMeter({
-      estimateCostUsd: ({ inputTokens, outputTokens }) => inputTokens * 0.001 + outputTokens * 0.002,
+      estimateCostUsd: ({ inputTokens, outputTokens }) =>
+        inputTokens * 0.001 + outputTokens * 0.002,
     })
     m.tick("input_tokens", 1000)
     m.tick("output_tokens", 500)

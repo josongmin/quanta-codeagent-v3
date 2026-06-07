@@ -25,12 +25,8 @@
  * the pin / double-settle assertions.
  */
 import { describe, expect, test } from "bun:test"
+import type { McpTransport, McpTransportExitHandler, McpTransportMessageHandler } from "@/mcp"
 import { McpClient, type McpServerConfig } from "@/mcp"
-import type {
-  McpTransport,
-  McpTransportExitHandler,
-  McpTransportMessageHandler,
-} from "@/mcp"
 
 /** Records every outbound id; lets the test control WHEN each scripted reply is
  *  flushed, so it can deliver the first `initialize` error AFTER the retry. */

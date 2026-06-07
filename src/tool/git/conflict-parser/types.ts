@@ -6,10 +6,11 @@
  * maintained) copy. It now re-exports the canonical types so the tool layer and
  * the git library slice share a single source of truth.
  */
-export { ALL_MARKER_STYLES, ConflictParserInputError } from "@/git/conflict-parser"
+
 export type {
   ConflictBlock,
   ConflictMarkerStyle,
   ConflictParseDiagnostic,
   ConflictParseResult,
 } from "@/git/conflict-parser"
+export { ALL_MARKER_STYLES, ConflictParserInputError } from "@/git/conflict-parser"

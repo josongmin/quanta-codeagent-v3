@@ -25,10 +25,10 @@ import {
 } from "@/agent/subagent-background"
 import { buildSubagentBgBlock } from "@/agent/tier1"
 import type { AgentConfig, FeaturesConfig } from "@/agent/types"
-import type { SubagentResult, SubagentRunner } from "@/subagent"
 import type { LLMPort } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import type { StreamPort } from "@/stream"
+import type { SubagentResult, SubagentRunner } from "@/subagent"
 import { defaultTools, ToolRegistry } from "@/tool"
 
 /** A never-settling runner — every hellgate here forks then asserts on

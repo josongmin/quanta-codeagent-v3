@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import type { SessionSnapshotLite } from "@/protocol/session"
 import {
   decodeSessionCommand,
   decodeSessionEvent,
@@ -9,7 +10,6 @@ import {
   SESSION_PROTOCOL_VERSION,
   SessionProtocolValidationError,
 } from "@/protocol/session"
-import type { SessionSnapshotLite } from "@/protocol/session"
 
 describe("@/protocol/session codec", () => {
   test("round-trips commands with envelope metadata", () => {
@@ -258,9 +258,7 @@ describe("@/protocol/session codec", () => {
   // assertFiniteNumber as the event path AND guard every required field. The
   // pre-fix bare `typeof === "number"` test let NaN/Infinity through, and
   // state/capabilities/pendingApproval/openArtifacts were unchecked entirely.
-  const corruptSnapshot = (
-    mutate: (s: Record<string, unknown>) => void,
-  ): string => {
+  const corruptSnapshot = (mutate: (s: Record<string, unknown>) => void): string => {
     const payload: Record<string, unknown> = { ...validSnapshot() }
     mutate(payload)
     return JSON.stringify({
@@ -297,16 +295,16 @@ describe("@/protocol/session codec", () => {
   })
 
   test("rejects snapshot with mistyped required fields", () => {
-    expect(() =>
-      decodeSessionSnapshot(corruptSnapshot((s) => (s.state = "running"))),
-    ).toThrow(SessionProtocolValidationError)
-    expect(() =>
-      decodeSessionSnapshot(corruptSnapshot((s) => (s.capabilities = []))),
-    ).toThrow(SessionProtocolValidationError)
+    expect(() => decodeSessionSnapshot(corruptSnapshot((s) => (s.state = "running")))).toThrow(
+      SessionProtocolValidationError,
+    )
+    expect(() => decodeSessionSnapshot(corruptSnapshot((s) => (s.capabilities = [])))).toThrow(
+      SessionProtocolValidationError,
+    )
     // openArtifacts must be an array, not an object.
-    expect(() =>
-      decodeSessionSnapshot(corruptSnapshot((s) => (s.openArtifacts = {}))),
-    ).toThrow(SessionProtocolValidationError)
+    expect(() => decodeSessionSnapshot(corruptSnapshot((s) => (s.openArtifacts = {})))).toThrow(
+      SessionProtocolValidationError,
+    )
     // pendingApproval scalar is rejected, but null stays accepted (no over-correction).
     expect(() =>
       decodeSessionSnapshot(corruptSnapshot((s) => (s.pendingApproval = "pending"))),

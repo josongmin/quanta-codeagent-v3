@@ -102,7 +102,7 @@ describe("T07 wire-callbacks hellgate", () => {
   })
 
   test("H2: finalizeCalls is a generator surface (yield-able inside try/catch)", () => {
-    const pending = new Map([[0, { id: "c1", name: "bash", args: '{"cmd":"ls"}' }]])
+    const pending = new Map([[0, { id: "c1", name: "bash", args: '{"cmd":"ls"}', started: true }]])
     const out = [...finalizeCalls(pending)]
     expect(out[0]).toMatchObject({ type: "tool_use_end", id: "c1" })
   })

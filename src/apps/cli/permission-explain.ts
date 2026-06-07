@@ -23,11 +23,12 @@
  * non-TTY render (matches the rest of the slash-command UX).
  */
 
+import { resolveHitlAnnotation } from "@/agent"
 import {
   type AxisStep,
   type HITLTier,
-  inferToolTier,
   type InspectToolMeta,
+  inferToolTier,
   inspectPermission,
   listHardDenyRuleDescriptors,
   type ModePolicyMatrix,
@@ -35,7 +36,6 @@ import {
   type PermissionInspection,
   type PermissionMode,
 } from "@/permission"
-import { resolveHitlAnnotation } from "@/agent"
 import { defaultTools, type Tool } from "@/tool"
 import { bold, cyan, dim, renderBox } from "@/ui/ui-helpers"
 import type { SlashCommand, SlashContext } from "./slash-commands"

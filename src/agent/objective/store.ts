@@ -158,9 +158,7 @@ const toSnapshotObjective = (cell: Cell, enforce: boolean, now: number): Snapsho
     successCriteria: Object.freeze(cell.criteria.map((c) => Object.freeze({ ...c }))),
     status: deriveStatus(cell, enforce, now),
     explicitStatus: cell.explicitStatus,
-    ...(cell.usageLimitedUntil !== undefined
-      ? { usageLimitedUntil: cell.usageLimitedUntil }
-      : {}),
+    ...(cell.usageLimitedUntil !== undefined ? { usageLimitedUntil: cell.usageLimitedUntil } : {}),
     budget: buildBudget(cell),
     blockers: Object.freeze(cell.blockers.map((b) => Object.freeze({ ...b }))),
     nextActions: Object.freeze([...cell.nextActions]),

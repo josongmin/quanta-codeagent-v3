@@ -10,7 +10,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { defaultPlanQueueStore, type SendNowSink } from "@/agent/plan-queue"
-import { __test as queueInternals, queueCmd } from "../../../src/apps/cli/queue-cmd"
+import { queueCmd, __test as queueInternals } from "../../../src/apps/cli/queue-cmd"
 import {
   isSlashCommand,
   runSlashCommand,

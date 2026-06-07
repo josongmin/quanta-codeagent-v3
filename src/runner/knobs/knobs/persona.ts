@@ -23,8 +23,8 @@
 
 import type { AgentConfig } from "@/agent"
 import { buildSystemPrompt } from "@/agent"
-import {type Knob, type Surface } from "../types"
 import { registerKnob } from "../registry"
+import type { Knob, Surface } from "../types"
 
 const SURFACES: readonly Surface[] = ["cli", "agent-batch", "agent-interactive"]
 

@@ -37,7 +37,7 @@ describe("gate (default-OFF)", () => {
   test("exactly '1' opts in", () => {
     expect(staleReadGuardEnabled(ON)).toBe(true)
   })
-  test.each([
+  test.each<Readonly<Record<string, string | undefined>>>([
     {},
     { [STALE_READ_GUARD_ENV]: "0" },
     { [STALE_READ_GUARD_ENV]: "true" },

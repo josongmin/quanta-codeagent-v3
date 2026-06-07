@@ -51,4 +51,8 @@ export type SummarizeFn = (args: {
   readonly system: string
   readonly transcript: readonly RecapTurn[]
   readonly signal?: AbortSignal | undefined
-}) => Promise<Result<string>>
+  // The error arm is `unknown`, NOT `Error`: the summarizer is an INJECTED port
+  // (LLM adapter / test), so its failure value can't be trusted to be an Error.
+  // The runner's `errorDetail(error: unknown)` is defensive by design — the type
+  // now matches that contract (a string/circular failure is a valid input).
+}) => Promise<Result<string, unknown>>

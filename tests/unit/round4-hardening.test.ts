@@ -253,10 +253,7 @@ describe("R4-2 — cross-feature: glob rules + hooks updatedInput compose cleanl
     }
     const hooks = new HookBus()
     hooks.on("pre_tool_use", () => ({ deny: "cross-feature deny" }))
-    const llm = new RecordingLLM([
-      toolUseScript("t1", "echo", {}),
-      textScript("done"),
-    ])
+    const llm = new RecordingLLM([toolUseScript("t1", "echo", {}), textScript("done")])
     const out = await runAgent({
       registry: new ToolRegistry([echoTool]),
       stream: new RecordingStream(),

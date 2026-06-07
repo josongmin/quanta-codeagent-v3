@@ -16,9 +16,9 @@
  *   - Honors the 24-metric recipe table in ADR-0158.
  */
 
-import type { LlmProvider } from "@/llm/providers"
-import type { StreamEvent, StreamInput } from "@/llm"
 import type { BackgroundSubagentScheduler, SubagentSpec } from "@/agent/subagent-background"
+import type { StreamEvent, StreamInput } from "@/llm"
+import type { LlmProvider } from "@/llm/providers"
 import type { MetricsRegistry } from "./port"
 
 const safe = (metrics: MetricsRegistry, fn: () => void): void => {
@@ -75,17 +75,23 @@ export const instrumentLlmProvider = (
           if (firstEventAt === null) {
             firstEventAt = now()
             safe(metrics, () =>
-              metrics.observe(`${prefix}.stream.ttft_ms`, firstEventAt! - t0, { provider: provLabel }),
+              metrics.observe(`${prefix}.stream.ttft_ms`, firstEventAt! - t0, {
+                provider: provLabel,
+              }),
             )
           }
           if (ev.type === "message_stop") {
-            stopReason = typeof ev.stop_reason === "string" && ev.stop_reason.length > 0 ? ev.stop_reason : "unknown"
+            stopReason =
+              typeof ev.stop_reason === "string" && ev.stop_reason.length > 0
+                ? ev.stop_reason
+                : "unknown"
           }
           yield ev
         }
       } catch (e) {
         stopReason = "error"
-        const code = e instanceof Error && "code" in e && typeof e.code === "string" ? e.code : "unknown"
+        const code =
+          e instanceof Error && "code" in e && typeof e.code === "string" ? e.code : "unknown"
         safe(metrics, () =>
           metrics.increment(`${prefix}.stream.failures.total`, 1, { provider: provLabel, code }),
         )
@@ -152,9 +158,7 @@ export const instrumentSubagentScheduler = (
     forceBackground(id, forceOpts) {
       // ADR-0487 — instrument the promote outcome (closed union as a label).
       const outcome = scheduler.forceBackground(id, forceOpts)
-      safe(metrics, () =>
-        metrics.increment(`${prefix}.force_background.total`, 1, { outcome }),
-      )
+      safe(metrics, () => metrics.increment(`${prefix}.force_background.total`, 1, { outcome }))
       return outcome
     },
     list: scheduler.list.bind(scheduler),

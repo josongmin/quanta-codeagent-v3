@@ -17,6 +17,7 @@ import { describe, expect, test } from "bun:test"
 import { defaultConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import type {
   BackgroundSubagentScheduler,
+  ForceBackgroundOutcome,
   SubagentHandleId,
   SubagentResult,
   SubagentSpec,
@@ -89,6 +90,9 @@ const fakeScheduler = (): FakeScheduler => {
     },
     cancel(): boolean {
       return false
+    },
+    forceBackground(): ForceBackgroundOutcome {
+      return "queue_disabled"
     },
     list(): ReadonlyArray<{
       id: SubagentHandleId

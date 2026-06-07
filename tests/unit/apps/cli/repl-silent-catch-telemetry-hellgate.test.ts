@@ -89,7 +89,9 @@ describe("swallowAndLog — emits structured warn with error message", () => {
 
 describe("swallowAndLog — failure isolation", () => {
   test("undefined slog is a no-op (does not throw)", () => {
-    expect(() => swallowAndLog(undefined, "repl.indicator_failure", new Error("boom"))).not.toThrow()
+    expect(() =>
+      swallowAndLog(undefined, "repl.indicator_failure", new Error("boom")),
+    ).not.toThrow()
   })
 
   test("throwing sink swallowed — outer catch contract preserved", () => {

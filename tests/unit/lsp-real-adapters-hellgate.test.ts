@@ -97,9 +97,7 @@ class FakeLspClient extends LspClient {
   get pendingTmps(): string[] {
     const renamed = new Set(this.renames.map((r) => r.from))
     const unlinked = new Set(this.unlinks)
-    return this.writes
-      .map((w) => w.path)
-      .filter((p) => !renamed.has(p) && !unlinked.has(p))
+    return this.writes.map((w) => w.path).filter((p) => !renamed.has(p) && !unlinked.has(p))
   }
 
   override async start(): Promise<void> {

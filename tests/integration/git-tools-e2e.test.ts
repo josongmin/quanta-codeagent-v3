@@ -104,17 +104,20 @@ describe("git_commit / git_branch_switch — e2e (real git)", () => {
     expect(log.stdout).toMatch(/wip:/)
   })
 
-  test.skipIf(!HAS_GIT)("git_commit({mode:'regular', message}) creates a named commit", async () => {
-    await writeFile(join(repoDir, "regular.txt"), "regular\n")
-    const r = await collect(
-      gitCommitTool(defaultGitRunner),
-      { message: "feat: add regular file" },
-      repoDir,
-    )
-    expect(r.ok).toBe(true)
-    const log = await git(repoDir, ["log", "--oneline", "-1"])
-    expect(log.stdout).toContain("feat: add regular file")
-  })
+  test.skipIf(!HAS_GIT)(
+    "git_commit({mode:'regular', message}) creates a named commit",
+    async () => {
+      await writeFile(join(repoDir, "regular.txt"), "regular\n")
+      const r = await collect(
+        gitCommitTool(defaultGitRunner),
+        { message: "feat: add regular file" },
+        repoDir,
+      )
+      expect(r.ok).toBe(true)
+      const log = await git(repoDir, ["log", "--oneline", "-1"])
+      expect(log.stdout).toContain("feat: add regular file")
+    },
+  )
 
   test.skipIf(!HAS_GIT)("git_branch_switch dirty + autoWip:true commits + switches", async () => {
     // Ensure we are back on main with a clean tree before this test.
@@ -137,29 +140,32 @@ describe("git_commit / git_branch_switch — e2e (real git)", () => {
     expect(log.stdout).toMatch(/wip:/)
   })
 
-  test.skipIf(!HAS_GIT)("git_branch_switch dirty + autoWip:false ⇒ ok:false (no mutation)", async () => {
-    // Reset to a known-clean main.
-    await git(repoDir, ["checkout", "-q", "main"])
-    await writeFile(join(repoDir, "still-dirty.txt"), "x\n")
+  test.skipIf(!HAS_GIT)(
+    "git_branch_switch dirty + autoWip:false ⇒ ok:false (no mutation)",
+    async () => {
+      // Reset to a known-clean main.
+      await git(repoDir, ["checkout", "-q", "main"])
+      await writeFile(join(repoDir, "still-dirty.txt"), "x\n")
 
-    const before = await git(repoDir, ["rev-parse", "HEAD"])
-    const r = await collect(
-      gitBranchSwitchTool(defaultGitRunner),
-      { branch: "doesnt-matter", create: true, autoWip: false },
-      repoDir,
-    )
-    expect(r.ok).toBe(false)
-    expect(r.output).toMatch(/dirty|stash|autoWip/i)
+      const before = await git(repoDir, ["rev-parse", "HEAD"])
+      const r = await collect(
+        gitBranchSwitchTool(defaultGitRunner),
+        { branch: "doesnt-matter", create: true, autoWip: false },
+        repoDir,
+      )
+      expect(r.ok).toBe(false)
+      expect(r.output).toMatch(/dirty|stash|autoWip/i)
 
-    // HEAD unchanged + still on main.
-    const after = await git(repoDir, ["rev-parse", "HEAD"])
-    expect(after.stdout).toBe(before.stdout)
-    const head = await git(repoDir, ["rev-parse", "--abbrev-ref", "HEAD"])
-    expect(head.stdout.trim()).toBe("main")
+      // HEAD unchanged + still on main.
+      const after = await git(repoDir, ["rev-parse", "HEAD"])
+      expect(after.stdout).toBe(before.stdout)
+      const head = await git(repoDir, ["rev-parse", "--abbrev-ref", "HEAD"])
+      expect(head.stdout.trim()).toBe("main")
 
-    // Cleanup the untracked file so later tests start clean.
-    await rm(join(repoDir, "still-dirty.txt"), { force: true })
-  })
+      // Cleanup the untracked file so later tests start clean.
+      await rm(join(repoDir, "still-dirty.txt"), { force: true })
+    },
+  )
 
   test.skipIf(!HAS_GIT)("git_branch_switch clean tree: plain switch (no wip)", async () => {
     // Make sure we're clean on main.
@@ -182,13 +188,16 @@ describe("git_commit / git_branch_switch — e2e (real git)", () => {
     expect(afterLog.stdout).toBe(beforeLog.stdout)
   })
 
-  test.skipIf(!HAS_GIT)("branch-name injection guard blocks shell metacharacters at schema layer", async () => {
-    const r = await collect(
-      gitBranchSwitchTool(defaultGitRunner),
-      { branch: "x;touch /tmp/quanta-pwned", create: true },
-      repoDir,
-    )
-    expect(r.ok).toBe(false)
-    expect(r.output).toMatch(/invalid input|branch/i)
-  })
+  test.skipIf(!HAS_GIT)(
+    "branch-name injection guard blocks shell metacharacters at schema layer",
+    async () => {
+      const r = await collect(
+        gitBranchSwitchTool(defaultGitRunner),
+        { branch: "x;touch /tmp/quanta-pwned", create: true },
+        repoDir,
+      )
+      expect(r.ok).toBe(false)
+      expect(r.output).toMatch(/invalid input|branch/i)
+    },
+  )
 })

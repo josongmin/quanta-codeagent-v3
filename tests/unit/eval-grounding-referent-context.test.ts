@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { resolveGroundingReferentContext, type GroundingCase } from "@/../src/apps/eval/grounding"
+import { type GroundingCase, resolveGroundingReferentContext } from "@/../src/apps/eval/grounding"
 
 const baseCase = (overrides: Partial<GroundingCase> = {}): GroundingCase => ({
   schema: 2,
@@ -77,7 +77,9 @@ describe("grounding referent context", () => {
 
     const memory = resolveGroundingReferentContext(
       baseCase({
-        history: [{ role: "assistant", text: "Active thread grounding_gate is tuning thresholds." }],
+        history: [
+          { role: "assistant", text: "Active thread grounding_gate is tuning thresholds." },
+        ],
         memoryContext: "Remember: fail_closed_policy means wrong_thread must stay 0.",
         targetUtterance: "그 제약 아직 유지하냐?",
         gold: {

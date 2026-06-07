@@ -71,7 +71,8 @@ const buildDeflateZip = (entries: readonly ZipEntry[]): Uint8Array => {
   }
   const crc32 = (b: Uint8Array): number => {
     let crc = 0xffffffff
-    for (let i = 0; i < b.length; i++) crc = (table[(crc ^ (b[i] as number)) & 0xff] as number) ^ (crc >>> 8)
+    for (let i = 0; i < b.length; i++)
+      crc = (table[(crc ^ (b[i] as number)) & 0xff] as number) ^ (crc >>> 8)
     return (crc ^ 0xffffffff) >>> 0
   }
   const out: number[] = []
@@ -174,9 +175,7 @@ describe("xlsx_read hellgate — DEFLATE support (real-world shape)", () => {
     const parts = unzip(stored)
     expect(parts.ok).toBe(true)
     if (!parts.ok) return
-    const deflated = buildDeflateZip(
-      parts.entries.map((e) => ({ path: e.path, data: e.data })),
-    )
+    const deflated = buildDeflateZip(parts.entries.map((e) => ({ path: e.path, data: e.data })))
     const r = parseXlsx(deflated)
     expect(r.ok).toBe(true)
     if (!r.ok) return
@@ -306,7 +305,7 @@ describe("xlsx_read hellgate — adversarial / no-throw", () => {
     expect(r.sheets[0]?.rowCount).toBe(0)
   })
 
-  test("HELL-9: inline-string cell (t=\"inlineStr\") un-escaped", () => {
+  test('HELL-9: inline-string cell (t="inlineStr") un-escaped', () => {
     const sheetXml =
       '<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
       '<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>a &amp; b &lt;c&gt;</t></is></c></row></sheetData></worksheet>'

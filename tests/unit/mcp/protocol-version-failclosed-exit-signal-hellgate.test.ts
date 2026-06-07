@@ -25,12 +25,8 @@
  * fires the supervisor. Both emit a spurious exit; this test catches both.
  */
 import { describe, expect, test } from "bun:test"
+import type { McpTransport, McpTransportExitHandler, McpTransportMessageHandler } from "@/mcp"
 import { McpClient, McpError, type McpServerConfig } from "@/mcp"
-import type {
-  McpTransport,
-  McpTransportExitHandler,
-  McpTransportMessageHandler,
-} from "@/mcp"
 
 type InitOutcome =
   | { result: Record<string, unknown> }

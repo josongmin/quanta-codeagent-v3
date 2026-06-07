@@ -133,7 +133,11 @@ describe("responses-wire incomplete-usage + tool-delta correlation hellgate", ()
           }),
           JSON.stringify({
             type: "response.completed",
-            response: { id: "resp_1", model: "gpt-5", usage: { input_tokens: 3, output_tokens: 5 } },
+            response: {
+              id: "resp_1",
+              model: "gpt-5",
+              usage: { input_tokens: 3, output_tokens: 5 },
+            },
           }),
         ]),
         { provider: "openai", fallbackModel: "gpt-5" },

@@ -35,13 +35,21 @@ const extractStepReferent = (groundingCase: GroundingCase): string | null => {
 }
 
 const historyText = (groundingCase: GroundingCase): string =>
-  groundingCase.history.map((entry) => entry.text).join("\n").toLowerCase()
+  groundingCase.history
+    .map((entry) => entry.text)
+    .join("\n")
+    .toLowerCase()
 
 const isEntireSessionStatus = (utterance: string): boolean =>
   includesAny(utterance, ["전체적으로", "세션 전체", "overall", "all up", "what remains overall"])
 
 const isExplicitClarifyPolicy = (utterance: string): boolean =>
-  includesAny(utterance, ["애매하면 먼저 물어봐", "애매하면 물어봐", "먼저 물어봐", "clarify first"])
+  includesAny(utterance, [
+    "애매하면 먼저 물어봐",
+    "애매하면 물어봐",
+    "먼저 물어봐",
+    "clarify first",
+  ])
 
 const isRerunRequest = (utterance: string): boolean =>
   includesAny(utterance, ["다시 돌려", "다시 실행", "rerun", "run it again"])
@@ -109,10 +117,18 @@ const isGenericFileReference = (utterance: string): boolean =>
   includesAny(utterance, ["그 파일", "that file"])
 
 const hasThreadAmbiguity = (groundingCase: GroundingCase): boolean =>
-  includesAny(historyText(groundingCase), ["two open threads", "both are unfinished", "both were mentioned"])
+  includesAny(historyText(groundingCase), [
+    "two open threads",
+    "both are unfinished",
+    "both were mentioned",
+  ])
 
 const hasFileAmbiguity = (groundingCase: GroundingCase): boolean =>
-  includesAny(historyText(groundingCase), ["both files", "two candidate files", "still has two candidate files"])
+  includesAny(historyText(groundingCase), [
+    "both files",
+    "two candidate files",
+    "still has two candidate files",
+  ])
 
 const normalizeIntent = (
   groundingCase: GroundingCase,
@@ -152,7 +168,8 @@ export const normalizeGroundingDecisionHeuristically = (
   const canonicalActiveThread =
     stateContract?.activeThreadId ?? inferredActiveThread ?? decision.activeThreadId
   const hasLatestToolResultAuthority =
-    (stateContract?.latestToolResultId !== undefined && stateContract.latestToolResultId !== null) ||
+    (stateContract?.latestToolResultId !== undefined &&
+      stateContract.latestToolResultId !== null) ||
     groundingCase.history.some((entry) => entry.kind === "tool_result")
   let activeThreadId = decision.activeThreadId
   let referentId = decision.referentId
@@ -218,7 +235,8 @@ export const normalizeGroundingDecisionHeuristically = (
   if (stepReferent !== null) {
     referentId = stepReferent
     scope = "specific_subthread"
-    if (activeThreadId === null && inferredActiveThread !== null) activeThreadId = inferredActiveThread
+    if (activeThreadId === null && inferredActiveThread !== null)
+      activeThreadId = inferredActiveThread
   }
 
   if (hasThreadAmbiguity(groundingCase) && isGenericThreadReference(utterance)) {
@@ -325,15 +343,14 @@ export const normalizeGroundingDecisionHeuristically = (
     ...decision,
     activeThreadId,
     referentId,
-    intent:
-      normalizeIntent(groundingCase, {
-        ...decision,
-        activeThreadId,
-        referentId,
-        intent,
-        scope,
-        shouldClarify,
-      }),
+    intent: normalizeIntent(groundingCase, {
+      ...decision,
+      activeThreadId,
+      referentId,
+      intent,
+      scope,
+      shouldClarify,
+    }),
     scope,
     shouldClarify,
   }

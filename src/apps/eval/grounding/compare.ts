@@ -1,9 +1,9 @@
 import type { GroundingPayload } from "../storage"
 import type { Verdict } from "../types"
 import type { GroundingErrorKind } from "./diagnostics"
+import type { GroundingBucketReport, GroundingMetrics, GroundingReport } from "./report"
 import type { GroundingBucket, GroundingDecision, GroundingSeverity } from "./schema"
 import { GROUNDING_BUCKETS } from "./schema"
-import type { GroundingBucketReport, GroundingMetrics, GroundingReport } from "./report"
 
 export type GroundingComparabilityStatus = "match" | "mismatch" | "unknown"
 
@@ -83,8 +83,14 @@ export interface GroundingComparisonReport {
     baselineCaseSetFingerprint?: string
     candidateCaseSetFingerprint?: string
   }
-  baseline: Pick<GroundingReport, "suite" | "corpus" | "mode" | "route" | "counts" | "metrics" | "run">
-  candidate: Pick<GroundingReport, "suite" | "corpus" | "mode" | "route" | "counts" | "metrics" | "run">
+  baseline: Pick<
+    GroundingReport,
+    "suite" | "corpus" | "mode" | "route" | "counts" | "metrics" | "run"
+  >
+  candidate: Pick<
+    GroundingReport,
+    "suite" | "corpus" | "mode" | "route" | "counts" | "metrics" | "run"
+  >
   metricDeltas: GroundingMetricDeltaSet
   bucketDeltas: readonly GroundingBucketDelta[]
   changes: readonly GroundingCaseChange[]
@@ -153,9 +159,7 @@ export interface GroundingRegressionOutput {
   result: GroundingRegressionResult
 }
 
-export const isGroundingRegressionProfile = (
-  value: string,
-): value is GroundingRegressionProfile =>
+export const isGroundingRegressionProfile = (value: string): value is GroundingRegressionProfile =>
   GROUNDING_REGRESSION_PROFILES.includes(value as GroundingRegressionProfile)
 
 const emptyCounts = (): Record<Verdict, number> => ({
@@ -218,10 +222,7 @@ const metricDeltaSet = (
     baseline.summary_equivalence_rate,
     candidate.summary_equivalence_rate,
   ),
-  exact_tuple_match_rate: delta(
-    baseline.exact_tuple_match_rate,
-    candidate.exact_tuple_match_rate,
-  ),
+  exact_tuple_match_rate: delta(baseline.exact_tuple_match_rate, candidate.exact_tuple_match_rate),
   structured_output_validity: delta(
     baseline.structured_output_validity,
     candidate.structured_output_validity,
@@ -233,9 +234,7 @@ const bucketMap = (
 ): ReadonlyMap<GroundingBucket, GroundingBucketReport> =>
   new Map(buckets.map((bucket) => [bucket.bucket, bucket]))
 
-const payloadMap = (
-  payloads: readonly GroundingPayload[],
-): ReadonlyMap<string, GroundingPayload> =>
+const payloadMap = (payloads: readonly GroundingPayload[]): ReadonlyMap<string, GroundingPayload> =>
   new Map(payloads.map((payload) => [payload.caseId, payload]))
 
 const changedDecisionFields = (
@@ -336,29 +335,41 @@ const comparabilityStatus = (
 
 const renderMarkdown = (comparison: GroundingComparisonReport): string => {
   const lines: string[] = []
-  lines.push(
-    `# Grounding Compare — ${comparison.baselineRunId} -> ${comparison.candidateRunId}`,
-  )
+  lines.push(`# Grounding Compare — ${comparison.baselineRunId} -> ${comparison.candidateRunId}`)
   lines.push("")
   lines.push(`Comparable: ${comparison.comparable ? "yes" : "no"}`)
   lines.push(`Baseline route: ${renderRoute(comparison.baseline.route)}`)
   lines.push(`Candidate route: ${renderRoute(comparison.candidate.route)}`)
-  lines.push(`Suite: ${comparison.baseline.suite ?? "unknown"} -> ${comparison.candidate.suite ?? "unknown"}`)
-  lines.push(`Corpus: ${comparison.comparability.baselineCorpus ?? "unknown"} -> ${comparison.comparability.candidateCorpus ?? "unknown"}`)
-  lines.push(`Mode: ${comparison.comparability.baselineMode ?? "unknown"} -> ${comparison.comparability.candidateMode ?? "unknown"}`)
+  lines.push(
+    `Suite: ${comparison.baseline.suite ?? "unknown"} -> ${comparison.candidate.suite ?? "unknown"}`,
+  )
+  lines.push(
+    `Corpus: ${comparison.comparability.baselineCorpus ?? "unknown"} -> ${comparison.comparability.candidateCorpus ?? "unknown"}`,
+  )
+  lines.push(
+    `Mode: ${comparison.comparability.baselineMode ?? "unknown"} -> ${comparison.comparability.candidateMode ?? "unknown"}`,
+  )
   lines.push(
     `Comparability: suite=${comparison.comparability.suite}, corpus=${comparison.comparability.corpus}, mode=${comparison.comparability.mode}, probeProfile=${comparison.comparability.probeProfile}, normalizationProfile=${comparison.comparability.normalizationProfile}, harness=${comparison.comparability.harness}, route=${comparison.comparability.route}, executionContract=${comparison.comparability.executionContract}, caseSet=${comparison.comparability.caseSet}`,
   )
   lines.push("")
   lines.push("## Metrics")
   lines.push("")
-  lines.push(`- thread_selection_accuracy: ${renderMetricDelta(comparison.metricDeltas.thread_selection_accuracy)}`)
+  lines.push(
+    `- thread_selection_accuracy: ${renderMetricDelta(comparison.metricDeltas.thread_selection_accuracy)}`,
+  )
   lines.push(`- referent_accuracy: ${renderMetricDelta(comparison.metricDeltas.referent_accuracy)}`)
   lines.push(`- clarify_recall: ${renderMetricDelta(comparison.metricDeltas.clarify_recall)}`)
   lines.push(`- wrong_thread_rate: ${renderMetricDelta(comparison.metricDeltas.wrong_thread_rate)}`)
-  lines.push(`- summary_equivalence_rate: ${renderMetricDelta(comparison.metricDeltas.summary_equivalence_rate)}`)
-  lines.push(`- exact_tuple_match_rate: ${renderMetricDelta(comparison.metricDeltas.exact_tuple_match_rate)}`)
-  lines.push(`- structured_output_validity: ${renderMetricDelta(comparison.metricDeltas.structured_output_validity)}`)
+  lines.push(
+    `- summary_equivalence_rate: ${renderMetricDelta(comparison.metricDeltas.summary_equivalence_rate)}`,
+  )
+  lines.push(
+    `- exact_tuple_match_rate: ${renderMetricDelta(comparison.metricDeltas.exact_tuple_match_rate)}`,
+  )
+  lines.push(
+    `- structured_output_validity: ${renderMetricDelta(comparison.metricDeltas.structured_output_validity)}`,
+  )
   lines.push("")
   lines.push("## Buckets")
   lines.push("")
@@ -589,7 +600,8 @@ export const buildGroundingComparison = (
     const change = caseChange(caseId, left.get(caseId), right.get(caseId))
     if (change === null) continue
     changes.push(change)
-    if (change.kind === "regressed" || change.kind === "missing_in_candidate") regressions.push(change)
+    if (change.kind === "regressed" || change.kind === "missing_in_candidate")
+      regressions.push(change)
     if (change.kind === "improved" || change.kind === "new_in_candidate") improvements.push(change)
   }
 
@@ -770,7 +782,8 @@ export const evaluateGroundingRegression = (
       if (comparison.comparability.executionContract === "unknown") {
         failures.push({
           kind: "execution_contract_unverified",
-          message: "missing execution contract fingerprints; comparison is not structurally verifiable",
+          message:
+            "missing execution contract fingerprints; comparison is not structurally verifiable",
           baseline: comparison.comparability.baselineExecutionContractFingerprint ?? "unknown",
           candidate: comparison.comparability.candidateExecutionContractFingerprint ?? "unknown",
         })

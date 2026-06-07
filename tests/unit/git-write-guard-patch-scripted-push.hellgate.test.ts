@@ -101,11 +101,9 @@ describe("(a) apply_patch git-write-guard — escape-vector targets denied", () 
     const dir = sub("delete-vscode")
     mkdirSync(join(dir, ".vscode"), { recursive: true })
     writeFileSync(join(dir, ".vscode/tasks.json"), "{}")
-    const patch = [
-      "*** Begin Patch",
-      "*** Delete File: .vscode/tasks.json",
-      "*** End Patch",
-    ].join("\n")
+    const patch = ["*** Begin Patch", "*** Delete File: .vscode/tasks.json", "*** End Patch"].join(
+      "\n",
+    )
     const r = await drain(applyPatchTool.execute({ patch } as never, ctx(dir, REAL_GUARD)))
     expect(r.ok).toBe(false)
     expect(r.failure).toEqual({ mode: "permission_denied", path: ".vscode/tasks.json" })
@@ -170,7 +168,9 @@ describe("(a) apply_patch git-write-guard — escape-vector targets denied", () 
     }
     const c: ToolContext = { ...ctx(dir, REAL_GUARD), fastApplyFallback: fallback }
     // Original error surfaces as a throw (non-rescue path) — never a hook write.
-    await expect(drain(applyPatchTool.execute({ patch: failingPatch } as never, c))).rejects.toThrow()
+    await expect(
+      drain(applyPatchTool.execute({ patch: failingPatch } as never, c)),
+    ).rejects.toThrow()
     expect(existsSync(join(dir, ".git/hooks/pre-push"))).toBe(false)
   })
 
@@ -270,18 +270,13 @@ describe("(c) decideBranchOnly — wildcard push flags denied from a feature bra
   // — not the bare-push current-branch check — is what catches them).
   const wildcards = ["--all", "--mirror", "--tags"] as const
 
-  test.each(wildcards.map((f) => [f] as const))(
-    "git push %s origin from a feature branch is denied",
-    (flag) => {
-      const v = decideBranchOnly(
-        `git push ${flag} origin`,
-        DEFAULT_PROTECTED_BRANCHES,
-        "feature/x",
-      )
-      expect(v.allowed).toBe(false)
-      if (!v.allowed) expect(v.reason).toContain(flag.slice(2))
-    },
-  )
+  test.each(
+    wildcards.map((f) => [f] as const),
+  )("git push %s origin from a feature branch is denied", (flag) => {
+    const v = decideBranchOnly(`git push ${flag} origin`, DEFAULT_PROTECTED_BRANCHES, "feature/x")
+    expect(v.allowed).toBe(false)
+    if (!v.allowed) expect(v.reason).toContain(flag.slice(2))
+  })
 
   test("git push --all with no remote is still denied", () => {
     const v = decideBranchOnly("git push --all", DEFAULT_PROTECTED_BRANCHES, "feature/x")
@@ -289,11 +284,7 @@ describe("(c) decideBranchOnly — wildcard push flags denied from a feature bra
   })
 
   test("ordinary feature-branch refspec push still allowed (no false positive)", () => {
-    const v = decideBranchOnly(
-      "git push origin feature/x",
-      DEFAULT_PROTECTED_BRANCHES,
-      "feature/x",
-    )
+    const v = decideBranchOnly("git push origin feature/x", DEFAULT_PROTECTED_BRANCHES, "feature/x")
     expect(v.allowed).toBe(true)
   })
 })

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { runAgent } from "@/agent"
-import { FollowUpQueue, threadId } from "@/agent/follow-up-queue"
 import type { FollowUpQueueSnapshot } from "@/agent/follow-up-queue"
-import { FakeLLM, cfg, text, withTimeout } from "../_harness"
+import { FollowUpQueue, threadId } from "@/agent/follow-up-queue"
+import { cfg, FakeLLM, text, withTimeout } from "../_harness"
 
 const baseFollowUp = (content: string, submittedAt: number) => ({
   content,

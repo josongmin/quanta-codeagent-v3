@@ -255,9 +255,7 @@ describe("createVerifyGuard adapter — byte-identical to decideVerifyGuard", ()
   test("non-finish action ⇒ pass-through (undefined)", () => {
     const guard = createVerifyGuard({ cfg: {}, state: createVerifyGuardState() })
     // backoff is NOT a finish attempt; the chain must short-circuit cheap.
-    const r = guard.decide(
-      minimalCtx({ action: { do: "backoff", attempt: 0 } as RecoveryAction }),
-    )
+    const r = guard.decide(minimalCtx({ action: { do: "backoff", attempt: 0 } as RecoveryAction }))
     expect(r).toBeUndefined()
   })
 
@@ -297,9 +295,7 @@ describe("createCloseoutGuard adapter — byte-identical to decideCloseoutGuard"
       cfg: { enabled: true },
       state: createCloseoutGuardState(),
     })
-    const r = guard.decide(
-      minimalCtx({ action: { do: "backoff", attempt: 0 } as RecoveryAction }),
-    )
+    const r = guard.decide(minimalCtx({ action: { do: "backoff", attempt: 0 } as RecoveryAction }))
     expect(r).toBeUndefined()
   })
 

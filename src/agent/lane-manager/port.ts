@@ -40,5 +40,8 @@ export interface LaneManager {
    *  `timeoutMs` (when present) caps the TOTAL wait — a lane still running
    *  past the cap surfaces `error.kind="timeout"`. Already-settled lanes
    *  return their stored outcome regardless. */
-  awaitAll(handles: ReadonlyArray<LaneHandle>, timeoutMs?: number): Promise<ReadonlyArray<LaneResult>>
+  awaitAll(
+    handles: ReadonlyArray<LaneHandle>,
+    timeoutMs?: number,
+  ): Promise<ReadonlyArray<LaneResult>>
 }

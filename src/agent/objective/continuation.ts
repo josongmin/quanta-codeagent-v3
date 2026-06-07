@@ -242,7 +242,10 @@ export const runIdleContinuation = async (
 
     const preDecision = evaluateContinuation(scanInput)
     if (!preDecision.launch) {
-      return { launched: false, ...(preDecision.skipReason ? { skipReason: preDecision.skipReason } : {}) }
+      return {
+        launched: false,
+        ...(preDecision.skipReason ? { skipReason: preDecision.skipReason } : {}),
+      }
     }
 
     // All scan-time guards passed — try to take the single permit.

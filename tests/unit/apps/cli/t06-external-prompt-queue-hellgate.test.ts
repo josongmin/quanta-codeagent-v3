@@ -19,7 +19,9 @@ const prompt = (text: string): CliPromptInput => text
 
 describe("T06 / external prompt queue — thin-surface ownership (ADR-0303)", () => {
   test("OWN-1: the generic queue mechanism lives below src/apps/** (in @/runner)", () => {
-    expect(existsSync(join(REPO_ROOT, "src/runner/orchestrate/external-prompt-queue.ts"))).toBe(true)
+    expect(existsSync(join(REPO_ROOT, "src/runner/orchestrate/external-prompt-queue.ts"))).toBe(
+      true,
+    )
     const generic = readFileSync(
       join(REPO_ROOT, "src/runner/orchestrate/external-prompt-queue.ts"),
       "utf8",

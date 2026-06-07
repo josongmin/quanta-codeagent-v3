@@ -1,11 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import * as fs from "node:fs"
 import * as path from "node:path"
-import {
-  canonicalizeArgs,
-  DedupGate,
-  DEFAULT_DEDUP_GATE_CAPS,
-} from "@/agent/dispatch-dedup"
+import { canonicalizeArgs, DEFAULT_DEDUP_GATE_CAPS, DedupGate } from "@/agent/dispatch-dedup"
 import { __resetRuntimeConfig } from "@/shared"
 
 /** Tiny helper: record N calls of the same shape at given turns and return the

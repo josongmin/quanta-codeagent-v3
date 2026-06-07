@@ -153,6 +153,8 @@ describe("H16 — /dream MANUAL trigger (REPL composer ctx injection)", () => {
       fs: {
         mkdir: async () => undefined,
         writeFile: async () => undefined,
+        rename: async () => undefined,
+        unlink: async () => undefined,
       },
     })
     // Force the pathological basename the guard defends against.
@@ -169,7 +171,12 @@ describe("H16 — /dream MANUAL trigger (REPL composer ctx injection)", () => {
     }
     const writeTarget: DreamWriteTargetPort = new FileDreamWriteTarget({
       memoryRoot: r,
-      fs: { mkdir: async () => undefined, writeFile: async () => undefined },
+      fs: {
+        mkdir: async () => undefined,
+        writeFile: async () => undefined,
+        rename: async () => undefined,
+        unlink: async () => undefined,
+      },
     })
     const clock = fixedClock(1_000_000)
     // Build a trigger with the SAME shape as the live one but a throwing port,

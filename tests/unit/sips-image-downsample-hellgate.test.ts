@@ -66,7 +66,12 @@ describe.if(isDarwin)("sips image downsample — real resize", () => {
   })
 
   test("aspect ratio preserved (128x64 ⇒ 16x8)", async () => {
-    const out = await sipsImageDownsamplePort().downsample(makeBmp(128, 64), "image/png", 5_000_000, 16)
+    const out = await sipsImageDownsamplePort().downsample(
+      makeBmp(128, 64),
+      "image/png",
+      5_000_000,
+      16,
+    )
     expect(out.kind).toBe("ok")
     if (out.kind !== "ok") return
     const { w, h } = pngDims(out.bytes)
@@ -87,7 +92,13 @@ describe.if(isDarwin)("sips image downsample — real resize", () => {
   test("a pre-aborted signal ⇒ unable, never spawns", async () => {
     const ac = new AbortController()
     ac.abort()
-    const out = await sipsImageDownsamplePort().downsample(makeBmp(64, 64), "image/png", 5_000_000, 16, ac.signal)
+    const out = await sipsImageDownsamplePort().downsample(
+      makeBmp(64, 64),
+      "image/png",
+      5_000_000,
+      16,
+      ac.signal,
+    )
     expect(out.kind).toBe("unable")
   })
 })

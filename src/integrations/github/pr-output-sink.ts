@@ -267,7 +267,8 @@ const findExistingReview = async (
       if (!row.body.includes(needle)) continue
       return Object.freeze({
         id: row.id,
-        htmlUrl: typeof row.html_url === "string" && row.html_url.length > 0 ? row.html_url : undefined,
+        htmlUrl:
+          typeof row.html_url === "string" && row.html_url.length > 0 ? row.html_url : undefined,
       })
     }
     if (rows.length < 100) return undefined

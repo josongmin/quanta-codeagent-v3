@@ -10,12 +10,8 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import {
-  asScrubbedEnv,
-  type ScrubbedEnv,
-  type ScrubbedSpawner,
-} from "@/runtime/scrubbed-spawn"
 import { scrubEnv } from "@/runtime/sandbox"
+import { asScrubbedEnv, type ScrubbedEnv, type ScrubbedSpawner } from "@/runtime/scrubbed-spawn"
 
 describe("asScrubbedEnv — zero-cost brand (S1)", () => {
   test("returns the SAME reference (no copy / allocation)", () => {

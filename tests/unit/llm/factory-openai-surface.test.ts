@@ -17,11 +17,7 @@ describe("createLLM openai surface selection", () => {
   })
 
   test("explicit surface=responses selects the Responses adapter", () => {
-    const llm = createLLM(
-      "openai",
-      { model: "gpt-5-mini", apiKey: "k", surface: "responses" },
-      {},
-    )
+    const llm = createLLM("openai", { model: "gpt-5-mini", apiKey: "k", surface: "responses" }, {})
     expect(llm.surfaceId).toBe("openai-responses")
   })
 

@@ -14,7 +14,13 @@ import { createRestConnectorRegistry } from "@/connectors/rest-registry"
 import type { CachePort, FetchPort } from "@/connectors/types"
 
 const CATALOG = JSON.stringify([
-  { id: "gh", displayName: "GitHub", host: "api.github.com", auth: "oauth", oauthIssuer: "https://github.com" },
+  {
+    id: "gh",
+    displayName: "GitHub",
+    host: "api.github.com",
+    auth: "oauth",
+    oauthIssuer: "https://github.com",
+  },
 ])
 
 const cacheWith = (value: string, writtenAt: number): CachePort => ({

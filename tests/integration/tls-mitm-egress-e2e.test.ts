@@ -161,7 +161,7 @@ const httpsThroughProxy = (
         })
         let resp = ""
         tls.setEncoding("utf8")
-        tls.on("data", (d) => {
+        tls.on("data", (d: string | Buffer) => {
           resp += d
         })
         tls.on("end", () => {
@@ -169,7 +169,7 @@ const httpsThroughProxy = (
           resolve({ status, body: resp.slice(resp.indexOf("\r\n\r\n") + 4) })
           ctrl.destroy()
         })
-        tls.on("error", (e) => {
+        tls.on("error", (e: Error) => {
           resolve({ status: 0, body: "", err: e.message })
           ctrl.destroy()
         })

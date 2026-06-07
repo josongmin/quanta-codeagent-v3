@@ -125,54 +125,63 @@ describe("git_compose_commit → git_commit (real git repo)", () => {
     expect(HAS_GIT).toBe(true)
   })
 
-  test.skipIf(!HAS_GIT)("stage → author message → git_commit lands the authored subject", async () => {
-    // Stage a real change.
-    await writeFile(join(repoDir, "feature.ts"), "export const x = 1\n")
-    await git(repoDir, ["add", "feature.ts"])
+  test.skipIf(!HAS_GIT)(
+    "stage → author message → git_commit lands the authored subject",
+    async () => {
+      // Stage a real change.
+      await writeFile(join(repoDir, "feature.ts"), "export const x = 1\n")
+      await git(repoDir, ["add", "feature.ts"])
 
-    // Author from the staged diff (ScriptedLLM is deterministic).
-    const composeRes = await drain(
-      gitComposeCommitTool(defaultGitRunner, new ScriptedLLM(AUTHORED_MESSAGE)).execute(
-        {},
-        ctx(repoDir),
-      ),
-    )
-    expect(composeRes.ok).toBe(true)
-    const authored = composeRes.output as string
-    expect(authored).toContain("feat(compose): add diff→prose authoring")
-    const structured = composeRes.structured as { conventional: boolean; type: string }
-    expect(structured.conventional).toBe(true)
-    expect(structured.type).toBe("feat")
+      // Author from the staged diff (ScriptedLLM is deterministic).
+      const composeRes = await drain(
+        gitComposeCommitTool(defaultGitRunner, new ScriptedLLM(AUTHORED_MESSAGE)).execute(
+          {},
+          ctx(repoDir),
+        ),
+      )
+      expect(composeRes.ok).toBe(true)
+      const authored = composeRes.output as string
+      expect(authored).toContain("feat(compose): add diff→prose authoring")
+      const structured = composeRes.structured as { conventional: boolean; type: string }
+      expect(structured.conventional).toBe(true)
+      expect(structured.type).toBe("feat")
 
-    // Round-trip into git_commit regular mode — a REAL commit must result.
-    const commitRes = await drain(
-      gitCommitTool(defaultGitRunner).execute({ mode: "regular", message: authored }, ctx(repoDir)),
-    )
-    expect(commitRes.ok).toBe(true)
+      // Round-trip into git_commit regular mode — a REAL commit must result.
+      const commitRes = await drain(
+        gitCommitTool(defaultGitRunner).execute(
+          { mode: "regular", message: authored },
+          ctx(repoDir),
+        ),
+      )
+      expect(commitRes.ok).toBe(true)
 
-    // The authored subject is the new HEAD commit subject.
-    const log = await git(repoDir, ["log", "--oneline", "-1"])
-    expect(log.ok).toBe(true)
-    expect(log.stdout).toContain("feat(compose): add diff→prose authoring")
+      // The authored subject is the new HEAD commit subject.
+      const log = await git(repoDir, ["log", "--oneline", "-1"])
+      expect(log.ok).toBe(true)
+      expect(log.stdout).toContain("feat(compose): add diff→prose authoring")
 
-    // The body landed too (full message in the commit object).
-    const body = await git(repoDir, ["log", "-1", "--pretty=%B"])
-    expect(body.stdout).toContain("WHY: closes the yeet gap.")
-  })
+      // The body landed too (full message in the commit object).
+      const body = await git(repoDir, ["log", "-1", "--pretty=%B"])
+      expect(body.stdout).toContain("WHY: closes the yeet gap.")
+    },
+  )
 
-  test.skipIf(!HAS_GIT)("nothing staged ⇒ typed ok:false, NO commit created (clean tree)", async () => {
-    const before = await git(repoDir, ["rev-parse", "HEAD"])
-    const res = await drain(
-      gitComposeCommitTool(defaultGitRunner, new ScriptedLLM(AUTHORED_MESSAGE)).execute(
-        {},
-        ctx(repoDir),
-      ),
-    )
-    expect(res.ok).toBe(false)
-    expect(res.output).toContain("nothing staged")
-    const after = await git(repoDir, ["rev-parse", "HEAD"])
-    expect(after.stdout).toBe(before.stdout) // HEAD unchanged — authoring never commits
-  })
+  test.skipIf(!HAS_GIT)(
+    "nothing staged ⇒ typed ok:false, NO commit created (clean tree)",
+    async () => {
+      const before = await git(repoDir, ["rev-parse", "HEAD"])
+      const res = await drain(
+        gitComposeCommitTool(defaultGitRunner, new ScriptedLLM(AUTHORED_MESSAGE)).execute(
+          {},
+          ctx(repoDir),
+        ),
+      )
+      expect(res.ok).toBe(false)
+      expect(res.output).toContain("nothing staged")
+      const after = await git(repoDir, ["rev-parse", "HEAD"])
+      expect(after.stdout).toBe(before.stdout) // HEAD unchanged — authoring never commits
+    },
+  )
 })
 
 // ─── B. ENV-FLIP REGISTRY (knob → features assembly) ─────────────────────────

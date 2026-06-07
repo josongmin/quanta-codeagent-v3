@@ -14,10 +14,11 @@
  *               rejection (dispatchScan swallows the detached error)
  *   HELL-PB-07  a normal onFire still fires for a matching marker
  */
+
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { dispatchScan, expandBraces, matchesGlobSubset } from "@/skill/playbook"
 
 describe("inline-trigger brace-expansion DoS bound (L3 C-13)", () => {
@@ -95,18 +96,19 @@ describe("inline-trigger fire-and-forget routing (L3 C-14)", () => {
   test("HELL-PB-07: normal onFire fires for a matching marker", async () => {
     const file = join(dir, "ok.ts")
     await writeFile(file, "line1\n// do this AI!\n", "utf8")
-    let fired: { line: number; marker: string } | null = null
+    const captured: { fired: { line: number; marker: string } | null } = { fired: null }
     dispatchScan(
       file,
       "AI!",
       (f) => {
-        fired = { line: f.line, marker: f.marker }
+        captured.fired = { line: f.line, marker: f.marker }
       },
       123,
     )
     await new Promise((r) => setTimeout(r, 50))
-    expect(fired).not.toBeNull()
-    expect(fired?.line).toBe(2)
+    expect(captured.fired).not.toBeNull()
+    if (captured.fired === null) throw new Error("expected onFire to have fired")
+    expect(captured.fired.line).toBe(2)
     expect(unhandled.length).toBe(0)
   })
 })

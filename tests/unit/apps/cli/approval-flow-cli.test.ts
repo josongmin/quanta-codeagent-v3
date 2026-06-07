@@ -152,14 +152,17 @@ const stubSetup = (approvalDecisions: readonly ("approve" | "deny")[]) => {
     materializeReviewerAgent: () => undefined,
     registry: () => ({ has: () => false, all: () => [] }) as never,
     permissionMode: () => "default",
+    permissionModeState: () => undefined,
     automationEngine: () => undefined,
     toolProfileState: () => undefined,
     identityModeState: () => undefined,
     focusChain: () => undefined,
+    stickyModelStore: () => undefined,
     decisionEmitter: () => undefined,
     admissibility: () => undefined,
     planExitPort: () => undefined,
     userInputPort: () => undefined,
+    dreamTrigger: () => undefined,
   }
 
   const setup: SessionSetupResult = {
@@ -182,6 +185,9 @@ const stubSetup = (approvalDecisions: readonly ("approve" | "deny")[]) => {
     mcpClients: [],
     mcpTools: [],
     mcpSurface: undefined,
+    memoryStore: undefined,
+    memoryEmbedder: undefined,
+    searchPipelineDispose: undefined,
     skillsConfig: undefined as never,
     lifecyclePills: {
       update: () => undefined,

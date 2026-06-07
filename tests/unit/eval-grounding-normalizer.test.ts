@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { normalizeGroundingDecision, type GroundingCase } from "@/../src/apps/eval/grounding"
+import { type GroundingCase, normalizeGroundingDecision } from "@/../src/apps/eval/grounding"
 
 const baseCase = (overrides: Partial<GroundingCase> = {}): GroundingCase => ({
   schema: 2,
@@ -197,7 +197,10 @@ describe("grounding decision normalizer", () => {
       baseCase({
         history: [
           { role: "assistant", text: "Two open threads remain: prompt_rules and feature_catalog." },
-          { role: "assistant", text: "Both are unfinished and both were mentioned in the last status pass." },
+          {
+            role: "assistant",
+            text: "Both are unfinished and both were mentioned in the last status pass.",
+          },
         ],
         targetUtterance: "그거 먼저 끝내.",
       }),
@@ -217,7 +220,10 @@ describe("grounding decision normalizer", () => {
     const ambiguousFiles = normalizeGroundingDecision(
       baseCase({
         history: [
-          { role: "assistant", text: "Active thread prompt_rules is touching src/agent/prompt.ts and src/agent/loop.ts." },
+          {
+            role: "assistant",
+            text: "Active thread prompt_rules is touching src/agent/prompt.ts and src/agent/loop.ts.",
+          },
           { role: "assistant", text: "Both files still have open edits." },
         ],
         targetUtterance: "그 파일만 건드려.",
@@ -736,7 +742,10 @@ describe("grounding decision normalizer", () => {
       baseCase({
         history: [
           { role: "assistant", text: "Two open threads remain: prompt_rules and feature_catalog." },
-          { role: "assistant", text: "Both are unfinished and both were mentioned in the last status pass." },
+          {
+            role: "assistant",
+            text: "Both are unfinished and both were mentioned in the last status pass.",
+          },
         ],
         targetUtterance: "그거 먼저 끝내.",
       }),

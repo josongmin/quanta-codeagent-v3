@@ -99,7 +99,9 @@ afterEach(() => {
   activeRestore = null
 })
 
-const httpSpec = (over: Partial<McpServerSpec> = {}): McpServerSpec =>
+const httpSpec = (
+  over: Partial<Omit<McpServerSpec, "url">> & { url?: string | undefined } = {},
+): McpServerSpec =>
   ({
     serviceName: "remote",
     transport: "streamable_http",

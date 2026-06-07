@@ -4,6 +4,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { buildKnobCatalog } from "@/apps/cli/knob-catalog-wire"
 import {
   type CatalogSources,
   catalogByGroup,
@@ -12,19 +13,50 @@ import {
   resolveCatalogValues,
   searchCatalog,
 } from "@/config/knob-catalog"
-import { buildKnobCatalog } from "@/apps/cli/knob-catalog-wire"
 
 const SRC: CatalogSources = {
   cli: [
-    { envKey: "QUANTA_PILLS", kind: "bool", default: true, describe: "status pills", group: "status-ui" },
-    { envKey: "QUANTA_SHARED", kind: "bool", default: false, describe: "cli view", group: "render" },
+    {
+      envKey: "QUANTA_PILLS",
+      kind: "bool",
+      default: true,
+      describe: "status pills",
+      group: "status-ui",
+    },
+    {
+      envKey: "QUANTA_SHARED",
+      kind: "bool",
+      default: false,
+      describe: "cli view",
+      group: "render",
+    },
   ],
   inventory: [
-    { envKey: "QUANTA_OTEL_FLUSH_MS", kind: "int", default: 5000, describe: "otel flush", group: "observability", home: "runtime-config" },
-    { envKey: "QUANTA_SHARED", kind: "string", default: "inv", describe: "inv view", group: "host-gate", home: "runtime-config" },
+    {
+      envKey: "QUANTA_OTEL_FLUSH_MS",
+      kind: "int",
+      default: 5000,
+      describe: "otel flush",
+      group: "observability",
+      home: "runtime-config",
+    },
+    {
+      envKey: "QUANTA_SHARED",
+      kind: "string",
+      default: "inv",
+      describe: "inv view",
+      group: "host-gate",
+      home: "runtime-config",
+    },
   ],
   runner: [
-    { envKey: "QUANTA_ADVISOR_MODEL", describe: "advisor", category: "agent", default: "x", hotToggleable: true },
+    {
+      envKey: "QUANTA_ADVISOR_MODEL",
+      describe: "advisor",
+      category: "agent",
+      default: "x",
+      hotToggleable: true,
+    },
     { envKey: "QUANTA_SHARED", describe: "runner view", category: "tool", hotToggleable: false },
   ],
 }
@@ -54,19 +86,21 @@ describe("knob-catalog merge/search/resolve (ADR-0503 P3)", () => {
     const cat = mergeKnobCatalog(SRC)
     expect(searchCatalog(cat, "otel").map((k) => k.envKey)).toContain("QUANTA_OTEL_FLUSH_MS")
     expect(searchCatalog(cat, "advisor")[0]?.envKey).toBe("QUANTA_ADVISOR_MODEL")
-    expect(searchCatalog(cat, "observability").map((k) => k.envKey)).toContain("QUANTA_OTEL_FLUSH_MS")
+    expect(searchCatalog(cat, "observability").map((k) => k.envKey)).toContain(
+      "QUANTA_OTEL_FLUSH_MS",
+    )
   })
 
   test("resolve: env > session > default with source tracking", () => {
     const cat = mergeKnobCatalog(SRC)
-    const vals = resolveCatalogValues(
-      cat,
-      { QUANTA_PILLS: "0" },
-      { QUANTA_OTEL_FLUSH_MS: "9000" },
-    )
+    const vals = resolveCatalogValues(cat, { QUANTA_PILLS: "0" }, { QUANTA_OTEL_FLUSH_MS: "9000" })
     expect(vals.get("QUANTA_PILLS")).toMatchObject({ raw: "0", source: "env", isDefault: false })
     expect(vals.get("QUANTA_OTEL_FLUSH_MS")).toMatchObject({ raw: "9000", source: "session" })
-    expect(vals.get("QUANTA_ADVISOR_MODEL")).toMatchObject({ raw: "x", source: "default", isDefault: true })
+    expect(vals.get("QUANTA_ADVISOR_MODEL")).toMatchObject({
+      raw: "x",
+      source: "default",
+      isDefault: true,
+    })
   })
 
   test("integration: buildKnobCatalog merges all 3 real registries (large + 0 dups)", () => {

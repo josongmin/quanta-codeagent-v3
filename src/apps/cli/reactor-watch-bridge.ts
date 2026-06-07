@@ -1,7 +1,7 @@
 import { mkdir, unlink } from "node:fs/promises"
+import { connect, createServer, type Server, type Socket } from "node:net"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
-import { connect, createServer, type Server, type Socket } from "node:net"
 import type { ProactiveTrigger, TriggerEvidence, TriggerReason } from "@/reactor"
 import { sanitizeId } from "@/session"
 
@@ -102,7 +102,7 @@ const safeMessage = (error: unknown): string =>
 
 export const deliverReactorWatchEnvelope = async (args: {
   readonly raw: string
-  sessionId: string,
+  sessionId: string
   onTrigger: (trigger: ProactiveTrigger) => Promise<void> | void
   onError?: (message: string) => void
 }): Promise<void> => {

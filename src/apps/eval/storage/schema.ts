@@ -9,11 +9,13 @@
  * Storage format: JSONL, append-only. Each line is exactly one
  * `EvalRecord` (envelope) carrying one of the tier-specific payloads.
  */
+
+import type { GroundingErrorKind } from "../grounding/diagnostics"
 import type {
   GroundingAmbiguityClass,
   GroundingBucket,
-  GroundingDecision,
   GroundingCorpus,
+  GroundingDecision,
   GroundingHumanAudit,
   GroundingMode,
   GroundingNormalizationProfile,
@@ -24,7 +26,6 @@ import type {
   GroundingSourceProvenance,
   GroundingSuite,
 } from "../grounding/schema"
-import type { GroundingErrorKind } from "../grounding/diagnostics"
 import type { CoverageLevel, EvalTier, UseCaseId, Verdict } from "../types"
 
 export const SCHEMA_VERSION = 1 as const

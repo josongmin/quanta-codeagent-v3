@@ -114,11 +114,7 @@ describe("jsonl-store-atomic-hellgate", () => {
   test("HELL-5: concurrent in-process mutations converge to a consistent file", async () => {
     const path = freshPath()
     const reg = createJsonlCustom3pRegistry({ path, healthProbe: okProbe })
-    await Promise.all([
-      reg.register(spec("a")),
-      reg.register(spec("b")),
-      reg.register(spec("c")),
-    ])
+    await Promise.all([reg.register(spec("a")), reg.register(spec("b")), reg.register(spec("c"))])
     const reloaded = createJsonlCustom3pRegistry({ path, healthProbe: okProbe })
     const ids = (await reloaded.list()).map((s) => String(s.id)).sort()
     expect(ids).toEqual(["a", "b", "c"])
@@ -182,7 +178,9 @@ describe("jsonl-store-atomic-hellgate", () => {
     await reg.register(spec("alpha"))
     await reg.register(spec("beta"))
     await reg.remove(asProviderId("alpha"))
-    const lines = readFileSync(path, "utf-8").split("\n").filter((l) => l.length > 0)
+    const lines = readFileSync(path, "utf-8")
+      .split("\n")
+      .filter((l) => l.length > 0)
     expect(lines.length).toBe(1)
     const reloaded = createJsonlCustom3pRegistry({ path, healthProbe: okProbe })
     expect((await reloaded.list()).map((s) => s.id)).toEqual([asProviderId("beta")])

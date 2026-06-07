@@ -76,7 +76,9 @@ describe("renderActionDiff — a real RECORD input still produces a preview", ()
   })
 
   test("a primitive (non-object) input ⇒ undefined too (asRecord rejects)", async () => {
-    expect(await renderActionDiff(action("write", "str"), { readFile: emptyReader })).toBeUndefined()
+    expect(
+      await renderActionDiff(action("write", "str"), { readFile: emptyReader }),
+    ).toBeUndefined()
     expect(await renderActionDiff(action("write", null), { readFile: emptyReader })).toBeUndefined()
     expect(await renderActionDiff(action("write", 42), { readFile: emptyReader })).toBeUndefined()
   })

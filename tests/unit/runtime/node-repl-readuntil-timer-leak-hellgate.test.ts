@@ -12,8 +12,8 @@
  * asserts the race timer was cancelled. Against the still-holed code (clearTimeout
  * only on the resolve branch) the reject path skips it and this assertion fails.
  */
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { readUntil } from "@/runtime/node-repl/default-kernel"
+import { beforeEach, describe, expect, test } from "bun:test"
+import { type ReadUntilTimers, readUntil } from "@/runtime/node-repl/default-kernel"
 
 interface ChunkReader {
   read(): Promise<{ done: boolean; value?: Uint8Array }>
@@ -21,27 +21,28 @@ interface ChunkReader {
 }
 
 describe("node-repl readUntil clears the race timer even when read() rejects (H14)", () => {
-  const realClear = globalThis.clearTimeout
-  const realSet = globalThis.setTimeout
   let cleared: Array<unknown>
   let armed: Array<unknown>
+  // LOCAL injected timers — the spy is scoped to THIS readUntil call, never the
+  // process-global `setTimeout`. Monkeypatching the global made the assertion
+  // flaky: bun runs test files concurrently in one process, so a sibling file's
+  // `setTimeout` could land in `armed` and never be cleared by readUntil.
+  let timers: ReadUntilTimers
 
   beforeEach(() => {
     cleared = []
     armed = []
-    globalThis.setTimeout = ((fn: (...a: unknown[]) => void, ms?: number, ...rest: unknown[]) => {
-      const h = realSet(fn as (...a: unknown[]) => void, ms, ...(rest as []))
-      armed.push(h)
-      return h
-    }) as typeof globalThis.setTimeout
-    globalThis.clearTimeout = ((h: unknown) => {
-      cleared.push(h)
-      return realClear(h as Parameters<typeof realClear>[0])
-    }) as typeof globalThis.clearTimeout
-  })
-  afterEach(() => {
-    globalThis.setTimeout = realSet
-    globalThis.clearTimeout = realClear
+    timers = {
+      set: (fn, ms) => {
+        const h = setTimeout(fn, ms)
+        armed.push(h)
+        return h
+      },
+      clear: (h) => {
+        cleared.push(h)
+        clearTimeout(h)
+      },
+    }
   })
 
   test("a read() that REJECTS mid-wait still clears the bounded race timer (no dangling handle)", async () => {
@@ -50,13 +51,13 @@ describe("node-repl readUntil clears the race timer even when read() rejects (H1
     const rejecting: ChunkReader = {
       read: () =>
         new Promise((_resolve, reject) => {
-          realSet(() => reject(new Error("stream torn")), 10)
+          setTimeout(() => reject(new Error("stream torn")), 10)
         }),
       releaseLock: () => {},
     }
 
     // timeoutMs > 0 so the timeout-race branch (the one with the timer) runs.
-    const res = await readUntil(rejecting, "__never__", 5_000)
+    const res = await readUntil(rejecting, "__never__", 5_000, timers)
 
     // The reject surfaces as a failed read (not a timeout).
     expect(res.ok).toBe(false)
@@ -80,7 +81,7 @@ describe("node-repl readUntil clears the race timer even when read() rejects (H1
         Promise.resolve({ done: false, value: new TextEncoder().encode("X__sentinel__Y") }),
       releaseLock: () => {},
     }
-    const res = await readUntil(okReader, "__sentinel__", 5_000)
+    const res = await readUntil(okReader, "__sentinel__", 5_000, timers)
     expect(res.ok).toBe(true)
     if (res.ok) expect(res.body).toBe("X")
     expect(armed.length).toBeGreaterThan(0)

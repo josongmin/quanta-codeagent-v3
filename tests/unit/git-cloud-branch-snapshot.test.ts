@@ -523,7 +523,10 @@ describe("ADR-0132 Phase B — guards + error paths", () => {
       { match: (a) => a[0] === "rev-parse" && a[1] === "--git-dir", result: ok(".git") },
       { match: (a) => a[0] === "symbolic-ref", result: ok("refs/heads/main") },
       { match: (a) => a[0] === "status", result: ok(" M tracked.ts\n?? extra.dat") },
-      { match: (a) => a[0] === "diff" && a.includes("--numstat"), result: ok("100\t0\ttracked.ts") },
+      {
+        match: (a) => a[0] === "diff" && a.includes("--numstat"),
+        result: ok("100\t0\ttracked.ts"),
+      },
     ])
     const lock = createInMemoryFileLock()
     try {

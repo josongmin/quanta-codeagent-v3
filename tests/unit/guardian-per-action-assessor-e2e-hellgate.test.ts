@@ -36,11 +36,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { createOnConfirmReviewerPort } from "@/agent/reviewer-port"
 import {
   createSubagentBackedGuardianAssess,
   createSubagentBackedGuardianReview,
 } from "@/agent/tier1/reviewer-subagent"
-import { createOnConfirmReviewerPort } from "@/agent/reviewer-port"
 import {
   type ApprovalDecision,
   isAllowed,

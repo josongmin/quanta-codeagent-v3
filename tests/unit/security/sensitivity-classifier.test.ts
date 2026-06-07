@@ -47,9 +47,9 @@ describe("classifyPath — dotfile / extension / SSH / tree rules", () => {
   test("git-credentials / legacy dockercfg / gcloud ADC are secret", () => {
     expect(classifyPath(`${HOME}/.git-credentials`, HOME)).toBe("secret")
     expect(classifyPath(`${HOME}/.dockercfg`, HOME)).toBe("secret")
-    expect(
-      classifyPath(`${HOME}/.config/gcloud/application_default_credentials.json`, HOME),
-    ).toBe("secret")
+    expect(classifyPath(`${HOME}/.config/gcloud/application_default_credentials.json`, HOME)).toBe(
+      "secret",
+    )
   })
 
   test("~/.gnupg/** is secret regardless of basename", () => {

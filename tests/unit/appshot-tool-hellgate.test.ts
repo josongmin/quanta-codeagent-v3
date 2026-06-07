@@ -94,7 +94,7 @@ describe("appshot_verify — A. metadata", () => {
     expect(tool.name).toBe("appshot_verify")
     expect(tool.isReadOnly()).toBe(false)
     expect(tool.isConcurrencySafe({} as never)).toBe(false)
-    expect(tool.hitlTier?.({} as never, {} as never)).toBe("pre-approval-ok")
+    expect(tool.hitlTier?.({} as never)).toBe("pre-approval-ok")
   })
 })
 

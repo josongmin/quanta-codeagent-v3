@@ -182,16 +182,8 @@ describe("grounding schema", () => {
           }),
         }),
       )
-      writeCase(
-        canary,
-        "must-clarify",
-        minimalCase({ id: "must-clarify", bucket: "must_clarify" }),
-      )
-      writeCase(
-        canary,
-        "stale",
-        minimalCase({ id: "stale", bucket: "stale_context_trap" }),
-      )
+      writeCase(canary, "must-clarify", minimalCase({ id: "must-clarify", bucket: "must_clarify" }))
+      writeCase(canary, "stale", minimalCase({ id: "stale", bucket: "stale_context_trap" }))
       writeCase(
         canary,
         "wrong-thread",
@@ -215,7 +207,9 @@ describe("grounding schema", () => {
         "bad-file",
         minimalCase({
           id: "bad-file",
-          history: [{ role: "assistant", text: "Active thread prompt_rules touched prompt files." }],
+          history: [
+            { role: "assistant", text: "Active thread prompt_rules touched prompt files." },
+          ],
           targetUtterance: "그 파일부터 손봐.",
           gold: {
             activeThreadId: "prompt_rules",
@@ -273,16 +267,8 @@ describe("grounding schema", () => {
           stateContract: pairState(),
         }),
       )
-      writeCase(
-        canary,
-        "must-clarify",
-        minimalCase({ id: "must-clarify", bucket: "must_clarify" }),
-      )
-      writeCase(
-        canary,
-        "stale",
-        minimalCase({ id: "stale", bucket: "stale_context_trap" }),
-      )
+      writeCase(canary, "must-clarify", minimalCase({ id: "must-clarify", bucket: "must_clarify" }))
+      writeCase(canary, "stale", minimalCase({ id: "stale", bucket: "stale_context_trap" }))
       writeCase(
         canary,
         "wrong-thread",
@@ -332,16 +318,8 @@ describe("grounding schema", () => {
           stateContract: pairState(),
         }),
       )
-      writeCase(
-        canary,
-        "must-clarify",
-        minimalCase({ id: "must-clarify", bucket: "must_clarify" }),
-      )
-      writeCase(
-        canary,
-        "stale",
-        minimalCase({ id: "stale", bucket: "stale_context_trap" }),
-      )
+      writeCase(canary, "must-clarify", minimalCase({ id: "must-clarify", bucket: "must_clarify" }))
+      writeCase(canary, "stale", minimalCase({ id: "stale", bucket: "stale_context_trap" }))
       writeCase(
         canary,
         "wrong-thread",
@@ -374,44 +352,28 @@ describe("grounding schema", () => {
     try {
       const canary = join(root, "canary")
       mkdirSync(canary, { recursive: true })
-      writeCase(
-        canary,
-        "pair-raw",
-        {
-          ...minimalCase({
-            id: "pair-raw",
-            bucket: "tool_noise",
-            pairId: "pair-1",
-            pairRole: "raw",
-            stateContract: pairState(),
-          }),
-          history: [{ role: "assistant", text: "Active thread prompt_rules." }],
-        },
-      )
-      writeCase(
-        canary,
-        "pair-summary",
-        {
-          ...minimalCase({
-            id: "pair-summary",
-            bucket: "summary_equivalence",
-            pairId: "pair-1",
-            pairRole: "summary",
-            stateContract: pairState(),
-          }),
-          history: [{ role: "assistant", text: "Conversation summary: prompt_rules is active." }],
-        },
-      )
-      writeCase(
-        canary,
-        "must-clarify",
-        minimalCase({ id: "must-clarify", bucket: "must_clarify" }),
-      )
-      writeCase(
-        canary,
-        "stale",
-        minimalCase({ id: "stale", bucket: "stale_context_trap" }),
-      )
+      writeCase(canary, "pair-raw", {
+        ...minimalCase({
+          id: "pair-raw",
+          bucket: "tool_noise",
+          pairId: "pair-1",
+          pairRole: "raw",
+          stateContract: pairState(),
+        }),
+        history: [{ role: "assistant", text: "Active thread prompt_rules." }],
+      })
+      writeCase(canary, "pair-summary", {
+        ...minimalCase({
+          id: "pair-summary",
+          bucket: "summary_equivalence",
+          pairId: "pair-1",
+          pairRole: "summary",
+          stateContract: pairState(),
+        }),
+        history: [{ role: "assistant", text: "Conversation summary: prompt_rules is active." }],
+      })
+      writeCase(canary, "must-clarify", minimalCase({ id: "must-clarify", bucket: "must_clarify" }))
+      writeCase(canary, "stale", minimalCase({ id: "stale", bucket: "stale_context_trap" }))
       writeCase(
         canary,
         "wrong-thread",

@@ -10,6 +10,7 @@
  * policy.profile.
  */
 
+export { appleVzMicroVmSandbox, appleVzVmName, detectAppleVz } from "./applevz-microvm"
 export {
   detectNativeAppleVz,
   mapPolicyToNapi as mapPolicyToNapiVz,
@@ -20,7 +21,6 @@ export {
   type NativeAppleVzConfig,
   nativeAppleVzSandbox,
 } from "./applevz-native"
-export { appleVzMicroVmSandbox, appleVzVmName, detectAppleVz } from "./applevz-microvm"
 export { containerMcpSandbox } from "./container"
 export { compileLimaConfig, detectLima, limaMicroVmSandbox, limaVmName } from "./lima-microvm"
 export { microvmMcpSandbox } from "./microvm"

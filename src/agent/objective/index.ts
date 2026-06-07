@@ -7,11 +7,6 @@
  * the agent loop, dispatch, features, prompt, or any tool.
  */
 
-export {
-  ContinuationSemaphore,
-  evaluateContinuation,
-  runIdleContinuation,
-} from "./continuation"
 export type {
   ContinuationDecision,
   ContinuationDeps,
@@ -19,6 +14,11 @@ export type {
   ContinuationRunResult,
   ContinuationSkipReason,
   GoalContinuationInput,
+} from "./continuation"
+export {
+  ContinuationSemaphore,
+  evaluateContinuation,
+  runIdleContinuation,
 } from "./continuation"
 export { createObjectiveStore } from "./store"
 export type {

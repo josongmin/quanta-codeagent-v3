@@ -215,14 +215,12 @@ describe("lsp_format — error & signal", () => {
 describe("lsp_format — determinism", () => {
   test("HELL-F15: same input + same fake data ⇒ byte-identical output", async () => {
     const data = [tEdit(0), tEdit(5)]
-    const r1 = await collect(
-      lspFormatTool(fakePort({ format: async () => data })),
-      { path: "x.ts" },
-    )
-    const r2 = await collect(
-      lspFormatTool(fakePort({ format: async () => data })),
-      { path: "x.ts" },
-    )
+    const r1 = await collect(lspFormatTool(fakePort({ format: async () => data })), {
+      path: "x.ts",
+    })
+    const r2 = await collect(lspFormatTool(fakePort({ format: async () => data })), {
+      path: "x.ts",
+    })
     expect(r1.output).toBe(r2.output)
     expect(r1.ok).toBe(r2.ok)
   })

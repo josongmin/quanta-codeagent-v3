@@ -16,8 +16,8 @@ import {
   MAX_CACHE_BREAKPOINTS,
   validateSectionsCacheBudget,
 } from "@/agent/prompt-sections"
-import { MEMORY_SUMMARY_MAX_BYTES } from "@/memory/consolidate/constants"
 import type { Message } from "@/llm"
+import { MEMORY_SUMMARY_MAX_BYTES } from "@/memory/consolidate/constants"
 
 /**
  * C4 — cache breakpoint cap HELLGATE.

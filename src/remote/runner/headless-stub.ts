@@ -25,16 +25,16 @@
  * `docker-adapter.ts` / `lima-adapter.ts` / `apple-vz-adapter.ts`.
  */
 
-import { ok, err, type Result } from "@/shared"
+import { err, ok, type Result } from "@/shared"
 import type { RemoteRunner } from "./port"
 import {
+  RemoteError,
   type RemoteError as RemoteErrorType,
   type RemoteHandle,
   type RemoteLogsOpts,
   type RemoteSpec,
   type RemoteStatus,
   type RemoteStatusKind,
-  RemoteError,
 } from "./types"
 import { validateSpec } from "./validate"
 
@@ -59,8 +59,7 @@ interface InternalRecord {
   argv: readonly string[]
 }
 
-const formatSpec = (spec: RemoteSpec): string =>
-  `${spec.image} ${spec.cmd.join(" ")}`.trim()
+const formatSpec = (spec: RemoteSpec): string => `${spec.image} ${spec.cmd.join(" ")}`.trim()
 
 export const createHeadlessRunner = (opts: HeadlessRunnerOpts = {}): RemoteRunner => {
   const clock: HeadlessClock = opts.clock ?? REAL_CLOCK
@@ -123,17 +122,12 @@ export const createHeadlessRunner = (opts: HeadlessRunnerOpts = {}): RemoteRunne
         return err(new RemoteError("unknown-handle", handle.id, "headless"))
       }
       const isTerminal =
-        record.status === "succeeded" ||
-        record.status === "failed" ||
-        record.status === "cancelled"
+        record.status === "succeeded" || record.status === "failed" || record.status === "cancelled"
       if (!isTerminal) finalize(record, "cancelled", undefined, "user-cancel")
       return ok(undefined)
     },
 
-    async *logs(
-      handle: RemoteHandle,
-      opts: RemoteLogsOpts = {},
-    ): AsyncIterable<string> {
+    async *logs(handle: RemoteHandle, opts: RemoteLogsOpts = {}): AsyncIterable<string> {
       const record = records.get(handle.id)
       if (record === undefined) {
         // For an unknown handle the iterator simply yields nothing.

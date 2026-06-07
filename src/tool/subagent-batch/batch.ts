@@ -91,13 +91,17 @@ export const spawnBatchInputSchema = z
     task_kind: z
       .enum(["read", "edit", "review"])
       .optional()
-      .describe("Coarse role for every worker (read/edit/review) — derives a default tool allowlist."),
+      .describe(
+        "Coarse role for every worker (read/edit/review) — derives a default tool allowlist.",
+      ),
     result_shape: z
       .string()
       .min(1)
       .max(2000)
       .optional()
-      .describe("One-line spec injected into EVERY worker's seed for the shape of its final answer."),
+      .describe(
+        "One-line spec injected into EVERY worker's seed for the shape of its final answer.",
+      ),
     effort: z
       .enum(["default", "low", "medium", "high", "max"])
       .optional()
@@ -106,7 +110,9 @@ export const spawnBatchInputSchema = z
       .string()
       .min(1)
       .optional()
-      .describe("Model id every worker runs on (must be an enabled candidate; unknown id fails the spawn)."),
+      .describe(
+        "Model id every worker runs on (must be an enabled candidate; unknown id fails the spawn).",
+      ),
   })
   .strict()
 

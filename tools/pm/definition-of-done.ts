@@ -66,6 +66,10 @@ export const checkFeatureDoD = (feature: Feature, strict = false): DoDResult => 
   const ev = feature.evidence
   const unit = ev.tests.unit
   const integration = ev.tests.integration
+  // `contract` is a real `evidence.tests` axis (schema.ts) — a *-hellgate filed
+  // there counts toward the e2e bar exactly like unit/integration. Omitting it
+  // (the prior bug) silently failed features whose hellgate lives under contract.
+  const contract = ev.tests.contract
 
   const catalog: DoDCheck =
     ev.code.length > 0 && ev.adrs.length > 0
@@ -80,7 +84,7 @@ export const checkFeatureDoD = (feature: Feature, strict = false): DoDResult => 
       ? { ok: true, detail: `${unit.length} unit test file(s)` }
       : { ok: false, detail: "no unit tests — write the failing test first, then wire to green" }
 
-  const hellPaths = [...unit, ...integration].filter(isHellgatePath)
+  const hellPaths = [...unit, ...integration, ...contract].filter(isHellgatePath)
   const e2eHellgate: DoDCheck =
     hellPaths.length > 0
       ? { ok: true, detail: `${hellPaths.length} hellgate/e2e test(s): ${hellPaths.join(", ")}` }

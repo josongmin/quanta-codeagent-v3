@@ -124,7 +124,13 @@ describe("permission-store — partial-fold denial bypass (hellgate)", () => {
     const onDisk = JSON.parse(await readFile(filePath, "utf8")) as {
       deniedActions: Record<
         string,
-        { threadId: string; actionSignature: string; deniedAt: number; deniedReason: string; seenRiskAt?: number }
+        {
+          threadId: string
+          actionSignature: string
+          deniedAt: number
+          deniedReason: string
+          seenRiskAt?: number
+        }
       >
     }
     onDisk.deniedActions[key] = {

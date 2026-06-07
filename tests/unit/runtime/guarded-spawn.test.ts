@@ -79,10 +79,9 @@ describe("withSpawnedChild — RAII spawn guard contract", () => {
     // Normal
     await withSpawnedChild({ kill: () => {}, cleanup: cleanupSpy }, async () => undefined)
     // Throw
-    await withSpawnedChild(
-      { kill: () => {}, cleanup: cleanupSpy },
-      async () => undefined,
-    ).catch(() => {})
+    await withSpawnedChild({ kill: () => {}, cleanup: cleanupSpy }, async () => undefined).catch(
+      () => {},
+    )
     await withSpawnedChild({ kill: () => {}, cleanup: cleanupSpy }, async () => {
       throw new Error("x")
     }).catch(() => {})

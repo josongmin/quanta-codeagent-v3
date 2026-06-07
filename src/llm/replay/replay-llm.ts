@@ -19,10 +19,10 @@
  * (`input.signal`) is honoured: aborting between events stops yielding.
  */
 
+import { throwIfAborted } from "@/shared"
+import type { LlmSurfaceId, LlmTransportId } from "@/shared/llm-route-types"
 import type { LLMPort } from "../ports"
 import type { StreamEvent, StreamInput } from "../types"
-import type { LlmSurfaceId, LlmTransportId } from "@/shared/llm-route-types"
-import { throwIfAborted } from "@/shared"
 import { recordingLlmPort } from "./recording-llm"
 import {
   type MatchPolicy,

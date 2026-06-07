@@ -116,7 +116,7 @@ describe("image_gen — metadata", () => {
     const t = imageGenTool()
     expect(t.name).toBe("image_gen")
     expect(t.isReadOnly?.()).toBe(false)
-    expect(t.isConcurrencySafe?.()).toBe(false)
+    expect(t.isConcurrencySafe?.({ prompt: "x", outputPath: "out.png" })).toBe(false)
   })
 })
 

@@ -6,17 +6,12 @@
  * image pull fail, OOM, naming collision, etc.) without a live daemon.
  */
 import { describe, expect, test } from "bun:test"
+import type { DockerExecResult, DockerProcess, RemoteHandle, RemoteSpec } from "@/remote"
 import {
   classifyDockerStderr,
   composeDockerRunArgv,
   createDockerAdapter,
   parseDockerInspectLine,
-} from "@/remote"
-import type {
-  DockerExecResult,
-  DockerProcess,
-  RemoteHandle,
-  RemoteSpec,
 } from "@/remote"
 
 const baseSpec = (over: Partial<RemoteSpec> = {}): RemoteSpec => ({
@@ -71,7 +66,13 @@ describe("HELL-DK-01 — spawn produces docker-backend handle", () => {
       expect(r.value.backend).toBe("docker")
       expect(r.value.id).toBe("quanta-remote-fixed-uuid")
     }
-    expect(argvLog[0]?.slice(0, 5)).toEqual(["docker", "run", "-d", "--name", "quanta-remote-fixed-uuid"])
+    expect(argvLog[0]?.slice(0, 5)).toEqual([
+      "docker",
+      "run",
+      "-d",
+      "--name",
+      "quanta-remote-fixed-uuid",
+    ])
   })
 })
 
@@ -148,7 +149,8 @@ describe("HELL-DK-05 — daemon down", () => {
       {
         exitCode: 1,
         stdout: "",
-        stderr: "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?",
+        stderr:
+          "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?",
       },
     ])
     const adapter = createDockerAdapter({ process: proc, uuid: () => "u" })
@@ -221,7 +223,9 @@ describe("HELL-DK-08 — network disabled", () => {
     )
     expect(argv).toContain("--network=none")
     // The hoisted env should NOT be passed as -e KEY=VALUE
-    const eIdx = argv.findIndex((v, i) => v === "-e" && argv[i + 1] === "QUANTA_REMOTE_NETWORK=none")
+    const eIdx = argv.findIndex(
+      (v, i) => v === "-e" && argv[i + 1] === "QUANTA_REMOTE_NETWORK=none",
+    )
     expect(eIdx).toBe(-1)
   })
 })
@@ -231,10 +235,7 @@ describe("HELL-DK-08 — network disabled", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 describe("HELL-DK-09 — mounts → -v", () => {
   test("read-write mount maps to source:target", () => {
-    const argv = composeDockerRunArgv(
-      baseSpec({ mounts: [{ source: "/a", target: "/b" }] }),
-      "x",
-    )
+    const argv = composeDockerRunArgv(baseSpec({ mounts: [{ source: "/a", target: "/b" }] }), "x")
     const idx = argv.indexOf("-v")
     expect(idx).toBeGreaterThanOrEqual(0)
     expect(argv[idx + 1]).toBe("/a:/b")
@@ -279,7 +280,8 @@ describe("HELL-DK-11 — naming collision retry", () => {
             return {
               exitCode: 1,
               stdout: "",
-              stderr: "docker: Error response from daemon: Conflict. The container name '/quanta-remote-a' is already in use by container '0xabc'.",
+              stderr:
+                "docker: Error response from daemon: Conflict. The container name '/quanta-remote-a' is already in use by container '0xabc'.",
             }
           }
           return { exitCode: 0, stdout: "deadbeef", stderr: "" }
@@ -309,10 +311,7 @@ describe("HELL-DK-11 — naming collision retry", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 describe("HELL-DK-12 — logs --since resume", () => {
   test("opts.since injects --since=<seconds>", async () => {
-    const { proc, streamArgvLog } = makeProc(
-      [{ exitCode: 0, stdout: "", stderr: "" }],
-      ["x"],
-    )
+    const { proc, streamArgvLog } = makeProc([{ exitCode: 0, stdout: "", stderr: "" }], ["x"])
     const adapter = createDockerAdapter({ process: proc, uuid: () => "u" })
     const sp = await adapter.spawn(baseSpec())
     if (!sp.ok) throw new Error("spawn failed")

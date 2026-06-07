@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { branchSearchTool } from "@/agent/branch-search/tool"
 import type { StreamInput } from "@/llm"
 import type { ToolContext, ToolResult } from "@/tool"
-import { branchSearchTool } from "@/agent/branch-search/tool"
 
 const fakeLlm = {
   model: "fake-branch-search",

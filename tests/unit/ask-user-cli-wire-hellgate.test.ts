@@ -44,7 +44,8 @@ describe("ask_user CLI wiring — kind routing through the adapter", () => {
     expect((await resultOf(tool.execute({ kind: "boolean", prompt: "ok?" }, ctx()))).ok).toBe(true)
     expect((await resultOf(tool.execute({ kind: "number", prompt: "n?" }, ctx()))).ok).toBe(true)
     expect(
-      (await resultOf(tool.execute({ kind: "select", prompt: "p", options: ["a", "b"] }, ctx()))).ok,
+      (await resultOf(tool.execute({ kind: "select", prompt: "p", options: ["a", "b"] }, ctx())))
+        .ok,
     ).toBe(true)
     expect(
       (

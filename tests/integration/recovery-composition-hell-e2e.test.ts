@@ -42,12 +42,24 @@ import { describe, expect, test } from "bun:test"
 import { runAgent } from "@/agent"
 import type { StreamEvent } from "@/llm"
 import { LLMError } from "@/shared"
-import { cfg, ev, RecordingStream, ScriptedLLM, type Step, text, thr, toolUse, withTimeout } from "./_harness"
+import {
+  cfg,
+  ev,
+  RecordingStream,
+  ScriptedLLM,
+  type Step,
+  text,
+  thr,
+  toolUse,
+  withTimeout,
+} from "./_harness"
 
 const empty: StreamEvent[] = [{ type: "message_stop", stop_reason: "end_turn" }]
 
 const recoveryReasons = (stream: RecordingStream): string[] =>
-  stream.events.filter((e) => e.type === "recovery").map((e) => (e.type === "recovery" ? e.reason : ""))
+  stream.events
+    .filter((e) => e.type === "recovery")
+    .map((e) => (e.type === "recovery" ? e.reason : ""))
 
 describe("recovery COMPOSITION hellgate — different kinds chained in one run", () => {
   // ───────────────────────────────────────────────────────────────────────
@@ -87,7 +99,9 @@ describe("recovery COMPOSITION hellgate — different kinds chained in one run",
     // The final assistant turn is the composed answer, and the kept partial
     // from the max_tokens nudge survives in the transcript.
     const last = out.messages.findLast((m) => m.role === "assistant")
-    expect(last?.content.some((b) => b.type === "text" && b.text === "composed final answer")).toBe(true)
+    expect(last?.content.some((b) => b.type === "text" && b.text === "composed final answer")).toBe(
+      true,
+    )
     expect(
       out.messages.some(
         (m) =>

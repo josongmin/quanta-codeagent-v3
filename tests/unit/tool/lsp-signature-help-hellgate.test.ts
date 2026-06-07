@@ -82,9 +82,7 @@ describe("lsp_signature_help — metadata", () => {
 
   test("HELL-A3: isConcurrencySafe() === true", () => {
     const t = lspSignatureHelpTool(fakePort())
-    expect(
-      t.isConcurrencySafe({ path: "x.ts", line: 1, character: 1 }),
-    ).toBe(true)
+    expect(t.isConcurrencySafe({ path: "x.ts", line: 1, character: 1 })).toBe(true)
   })
 })
 
@@ -256,14 +254,16 @@ describe("lsp_signature_help — error & signal", () => {
 describe("lsp_signature_help — determinism", () => {
   test("HELL-F14: same input + same fake data ⇒ byte-identical output", async () => {
     const data = [sig("foo(a: number, b: string)", ["a: number", "b: string"], 1)]
-    const r1 = await collect(
-      lspSignatureHelpTool(fakePort({ signatureHelp: async () => data })),
-      { path: "x.ts", line: 1, character: 1 },
-    )
-    const r2 = await collect(
-      lspSignatureHelpTool(fakePort({ signatureHelp: async () => data })),
-      { path: "x.ts", line: 1, character: 1 },
-    )
+    const r1 = await collect(lspSignatureHelpTool(fakePort({ signatureHelp: async () => data })), {
+      path: "x.ts",
+      line: 1,
+      character: 1,
+    })
+    const r2 = await collect(lspSignatureHelpTool(fakePort({ signatureHelp: async () => data })), {
+      path: "x.ts",
+      line: 1,
+      character: 1,
+    })
     expect(r1.output).toBe(r2.output)
     expect(r1.ok).toBe(r2.ok)
   })

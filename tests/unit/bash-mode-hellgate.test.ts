@@ -267,11 +267,7 @@ describe("C. mode='read' + write attempt → typed sandbox_violation failure", (
     // and not the `unknown` catch-all.
     const fakePort: PerCallSandboxPort = {
       wrap: () => ({
-        argv: [
-          "bash",
-          "-lc",
-          "echo 'sandbox: network outbound connection denied' >&2; exit 1",
-        ],
+        argv: ["bash", "-lc", "echo 'sandbox: network outbound connection denied' >&2; exit 1"],
         sandboxApplied: true,
       }),
       availability: () => ({ supported: true }),

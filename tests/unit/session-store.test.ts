@@ -504,9 +504,9 @@ describe("session store — git/provider regressions", () => {
 
     await deleteSession("tenant-1", provider)
     expect(await loadSessionById("tenant-1", provider)).toBeUndefined()
-    expect((await listSessions({ includeArchived: true }, provider)).map((m) => m.id)).not.toContain(
-      "tenant-1",
-    )
+    expect(
+      (await listSessions({ includeArchived: true }, provider)).map((m) => m.id),
+    ).not.toContain("tenant-1")
   })
 
   test("rewindToMessage honors provider-scoped storage", async () => {
@@ -537,6 +537,9 @@ describe("session store — git/provider regressions", () => {
     const result = await rewindToMessage("tenant-rw", "m1", provider)
     expect(result).toEqual({ removed: 1 })
     expect(await loadSessionById("tenant-rw")).toBeUndefined()
-    expect((await loadSessionById("tenant-rw", provider))?.messages.map((m) => m.id)).toEqual(["m0", "m1"])
+    expect((await loadSessionById("tenant-rw", provider))?.messages.map((m) => m.id)).toEqual([
+      "m0",
+      "m1",
+    ])
   })
 })

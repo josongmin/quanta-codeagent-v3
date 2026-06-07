@@ -12,7 +12,10 @@ import { createJobResultReporter, reportJobResultTool } from "@/tool/report-job-
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
 
 const ctx = (): ToolContext => ({ cwd: ".", signal: new AbortController().signal }) as ToolContext
-const run = async (tool: ReturnType<typeof reportJobResultTool>, input: unknown): Promise<ToolResult> => {
+const run = async (
+  tool: ReturnType<typeof reportJobResultTool>,
+  input: unknown,
+): Promise<ToolResult> => {
   let last: ToolResult | undefined
   for await (const ev of tool.execute(input as never, ctx()) as AsyncIterable<ToolEvent>) {
     if (ev.type === "result") last = ev.result
@@ -48,16 +51,21 @@ describe("report_agent_job_result — tool + capture-once reporter", () => {
 describe("report_agent_job_result — extraTools seam + dispatch preference", () => {
   // A fake runner that runs the injected extraTools' report tool, simulating a
   // child that calls report_agent_job_result with a structured value.
-  const reportingRunner = (reported: unknown): SubagentRunner => async (req) => {
-    const tool = (req.extraTools ?? []).find((t) => t.name === "report_agent_job_result")
-    expect(tool).toBeDefined() // seam: the tool reached the child registry
-    if (tool) {
-      for await (const _ev of tool.execute({ result: reported } as never, ctx()) as AsyncIterable<ToolEvent>) {
-        // drain — the tool reports into the captured reporter
+  const reportingRunner =
+    (reported: unknown): SubagentRunner =>
+    async (req) => {
+      const tool = (req.extraTools ?? []).find((t) => t.name === "report_agent_job_result")
+      expect(tool).toBeDefined() // seam: the tool reached the child registry
+      if (tool) {
+        for await (const _ev of tool.execute(
+          { result: reported } as never,
+          ctx(),
+        ) as AsyncIterable<ToolEvent>) {
+          // drain — the tool reports into the captured reporter
+        }
       }
+      return { ok: true, finalText: "ignored free text" } as never
     }
-    return { ok: true, finalText: "ignored free text" } as never
-  }
 
   test("a child that REPORTS ⇒ adapter uses the reported value (NOT finalText)", async () => {
     const adapter = buildRowDispatchAdapter(reportingRunner({ structured: true }))
@@ -67,8 +75,14 @@ describe("report_agent_job_result — extraTools seam + dispatch preference", ()
   })
 
   test("a child that does NOT report ⇒ falls back to parseChildValue(finalText)", async () => {
-    const silent: SubagentRunner = () => Promise.resolve({ ok: true, finalText: '{"fromText":1}' } as never)
-    const res = await buildRowDispatchAdapter(silent)({ instruction: "i", rowJson: "{}", rowIndex: 0, attempt: 1 })
+    const silent: SubagentRunner = () =>
+      Promise.resolve({ ok: true, finalText: '{"fromText":1}' } as never)
+    const res = await buildRowDispatchAdapter(silent)({
+      instruction: "i",
+      rowJson: "{}",
+      rowIndex: 0,
+      attempt: 1,
+    })
     expect(res.ok).toBe(true)
     if (res.ok) expect(res.value.value).toEqual({ fromText: 1 })
   })

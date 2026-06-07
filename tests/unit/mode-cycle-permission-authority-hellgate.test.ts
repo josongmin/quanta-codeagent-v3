@@ -76,9 +76,7 @@ describe("mode-cycle permission authority hellgate (ADR-0303)", () => {
 
     const ctx = read("src/sdk/runtime/context.ts")
     expect(ctx).toContain("permissionModeState(): RuntimeContextPermissionModeStateView")
-    expect(ctx).toContain(
-      "permissionModeState: () => record.state.snapshot.permissionModeState",
-    )
+    expect(ctx).toContain("permissionModeState: () => record.state.snapshot.permissionModeState")
   })
 
   test("CLI loop syncs the mode-cycle posture into the engine cell before each turn", () => {

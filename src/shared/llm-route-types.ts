@@ -2,10 +2,7 @@
  *  Anthropic can arrive via public API / Bedrock / Vertex / Foundry / Mantle
  *  while still speaking the same Messages grammar; OpenAI can speak either
  *  Chat Completions or Responses. */
-export type LlmSurfaceId =
-  | "anthropic-messages"
-  | "openai-chat-completions"
-  | "openai-responses"
+export type LlmSurfaceId = "anthropic-messages" | "openai-chat-completions" | "openai-responses"
 
 /** Canonical transport ids. Pair with `LLMPort.provider` (legacy vendor/auth
  *  badge) and `surfaceId` to recover the full route without overloading one

@@ -66,5 +66,5 @@ export const webSafeKnobValue = (
   resolved: { readonly raw: string | undefined; readonly source: string } | undefined,
 ): string | undefined => displaySafeValue(kind, resolved?.raw, resolved?.source)
 
-export { catalogByGroup, resolveCatalogValues }
 export type { UnifiedKnob }
+export { catalogByGroup, resolveCatalogValues }

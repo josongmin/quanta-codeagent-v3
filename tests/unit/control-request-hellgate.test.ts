@@ -93,9 +93,12 @@ describe("control-request — fail-closed validation", () => {
   test("SECURITY: set_permission_mode with ABSENT allowlist ⇒ rejected (fail-closed)", () => {
     // The permission axis is a privilege boundary — unlike model/thinking it must
     // NOT accept on an absent allowlist (would let a model set "bypass").
-    const e = planControlRequest({ kind: "set_permission_mode", mode: "bypassPermissions" }, {
-      usage: undefined,
-    })
+    const e = planControlRequest(
+      { kind: "set_permission_mode", mode: "bypassPermissions" },
+      {
+        usage: undefined,
+      },
+    )
     expect(e.kind).toBe("rejected")
   })
   test("SECURITY: 'bypassPermissions' rejected when not in the explicit allowlist", () => {

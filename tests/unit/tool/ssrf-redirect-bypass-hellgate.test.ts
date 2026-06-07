@@ -21,8 +21,8 @@ import { describe, expect, test } from "bun:test"
 import {
   fetchWithSsrfGuard,
   type HostResolver,
-  SsrfGuardError,
   SSRF_MAX_REDIRECTS,
+  SsrfGuardError,
 } from "@/shared/net/ssrf"
 import { readImageUrlTool } from "@/tool/image/from-url"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
@@ -45,7 +45,8 @@ const ctx = (): ToolContext => ({ cwd: "/tmp", signal: new AbortController().sig
  *  should have blocked, so we fail loudly (an internal service was reached). */
 const scriptedFetch = (script: Record<string, () => Response>): typeof fetch => {
   return (async (input: string | URL | Request) => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+    const url =
+      typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
     const make = script[url]
     if (make === undefined) {
       throw new Error(`UNEXPECTED FETCH (bypass!): ${url}`)
@@ -100,16 +101,18 @@ describe("A. fetchWithSsrfGuard — redirect targets re-checked on every hop", (
     test(`DENY redirect to ${label}`, async () => {
       const start = "https://public.example.com/"
       const fetcher = scriptedFetch({ [start]: redirectTo(target) })
-      await expect(fetchWithSsrfGuard(fetcher, start, { signal: sig }, { resolveHost: RESOLVE })).rejects.toThrow(
-        SsrfGuardError,
-      )
+      await expect(
+        fetchWithSsrfGuard(fetcher, start, { signal: sig }, { resolveHost: RESOLVE }),
+      ).rejects.toThrow(SsrfGuardError)
     })
   }
 
   test("DENY https→http downgrade redirect", async () => {
     const start = "https://public.example.com/"
     const fetcher = scriptedFetch({ [start]: redirectTo("http://public.example.com/insecure") })
-    await expect(fetchWithSsrfGuard(fetcher, start, { signal: sig }, { resolveHost: RESOLVE })).rejects.toMatchObject({
+    await expect(
+      fetchWithSsrfGuard(fetcher, start, { signal: sig }, { resolveHost: RESOLVE }),
+    ).rejects.toMatchObject({
       reason: "non_https_redirect",
     })
   })
@@ -134,7 +137,12 @@ describe("A. fetchWithSsrfGuard — redirect targets re-checked on every hop", (
     }
     const fetcher = scriptedFetch(script)
     await expect(
-      fetchWithSsrfGuard(fetcher, "https://public.example.com/0", { signal: sig }, { resolveHost: RESOLVE }),
+      fetchWithSsrfGuard(
+        fetcher,
+        "https://public.example.com/0",
+        { signal: sig },
+        { resolveHost: RESOLVE },
+      ),
     ).rejects.toMatchObject({ reason: "too_many_redirects" })
   })
 
@@ -149,7 +157,12 @@ describe("A. fetchWithSsrfGuard — redirect targets re-checked on every hop", (
 
   test("ALLOW direct public 200 (happy path unchanged)", async () => {
     const fetcher = scriptedFetch({ "https://public.example.com/": ok("hello") })
-    const res = await fetchWithSsrfGuard(fetcher, "https://public.example.com/", { signal: sig }, { resolveHost: RESOLVE })
+    const res = await fetchWithSsrfGuard(
+      fetcher,
+      "https://public.example.com/",
+      { signal: sig },
+      { resolveHost: RESOLVE },
+    )
     expect(res.status).toBe(200)
     expect(await res.text()).toBe("hello")
   })
@@ -160,7 +173,12 @@ describe("A. fetchWithSsrfGuard — redirect targets re-checked on every hop", (
       "https://b.example.com/": redirectTo("https://c.example.com/"),
       "https://c.example.com/": ok("final"),
     })
-    const res = await fetchWithSsrfGuard(fetcher, "https://a.example.com/", { signal: sig }, { resolveHost: RESOLVE })
+    const res = await fetchWithSsrfGuard(
+      fetcher,
+      "https://a.example.com/",
+      { signal: sig },
+      { resolveHost: RESOLVE },
+    )
     expect(await res.text()).toBe("final")
   })
 
@@ -169,7 +187,12 @@ describe("A. fetchWithSsrfGuard — redirect targets re-checked on every hop", (
       "https://a.example.com/start": redirectTo("/landing"),
       "https://a.example.com/landing": ok("landed"),
     })
-    const res = await fetchWithSsrfGuard(fetcher, "https://a.example.com/start", { signal: sig }, { resolveHost: RESOLVE })
+    const res = await fetchWithSsrfGuard(
+      fetcher,
+      "https://a.example.com/start",
+      { signal: sig },
+      { resolveHost: RESOLVE },
+    )
     expect(await res.text()).toBe("landed")
   })
 
@@ -180,7 +203,12 @@ describe("A. fetchWithSsrfGuard — redirect targets re-checked on every hop", (
       "https://a.example.com/start": redirectTo("//169.254.169.254/meta"),
     })
     await expect(
-      fetchWithSsrfGuard(fetcher, "https://a.example.com/start", { signal: sig }, { resolveHost: RESOLVE }),
+      fetchWithSsrfGuard(
+        fetcher,
+        "https://a.example.com/start",
+        { signal: sig },
+        { resolveHost: RESOLVE },
+      ),
     ).rejects.toThrow(SsrfGuardError)
   })
 })
@@ -195,7 +223,9 @@ describe("B. web_fetch — redirect to internal is a typed permission_denied", (
       "https://public.example.com/": redirectTo("https://169.254.169.254/latest/meta-data/"),
       // NOTE: IMDS intentionally NOT in the script — reaching it throws "bypass".
     })
-    const r = await collect(webFetchTool({ fetcher, resolveHost: RESOLVE }), { url: "https://public.example.com/" })
+    const r = await collect(webFetchTool({ fetcher, resolveHost: RESOLVE }), {
+      url: "https://public.example.com/",
+    })
     expect(r.ok).toBe(false)
     if (!r.ok) {
       expect(r.output.toLowerCase()).toContain("ssrf")
@@ -208,7 +238,9 @@ describe("B. web_fetch — redirect to internal is a typed permission_denied", (
       "https://public.example.com/": redirectTo("https://cdn.example.com/page"),
       "https://cdn.example.com/page": ok("<h1>Hi</h1>", "text/html"),
     })
-    const r = await collect(webFetchTool({ fetcher, resolveHost: RESOLVE }), { url: "https://public.example.com/" })
+    const r = await collect(webFetchTool({ fetcher, resolveHost: RESOLVE }), {
+      url: "https://public.example.com/",
+    })
     expect(r.ok).toBe(true)
   })
 })
@@ -256,14 +288,24 @@ describe("C. DNS-rebinding — resolved-IP re-check", () => {
   test("name resolving to 169.254.169.254 (IMDS) is denied (dns_rebind_*)", async () => {
     const resolveHost: HostResolver = async () => ["169.254.169.254"]
     await expect(
-      fetchWithSsrfGuard(evilFetcher, "https://rebind.attacker.example/", { signal: sig }, { resolveHost }),
+      fetchWithSsrfGuard(
+        evilFetcher,
+        "https://rebind.attacker.example/",
+        { signal: sig },
+        { resolveHost },
+      ),
     ).rejects.toMatchObject({ name: "SsrfGuardError" })
   })
 
   test("name resolving to an RFC1918 address is denied", async () => {
     const resolveHost: HostResolver = async () => ["10.0.0.5"]
     await expect(
-      fetchWithSsrfGuard(evilFetcher, "https://rebind.attacker.example/", { signal: sig }, { resolveHost }),
+      fetchWithSsrfGuard(
+        evilFetcher,
+        "https://rebind.attacker.example/",
+        { signal: sig },
+        { resolveHost },
+      ),
     ).rejects.toMatchObject({ name: "SsrfGuardError" })
   })
 
@@ -293,10 +335,9 @@ describe("C. DNS-rebinding — resolved-IP re-check", () => {
 
   test("web_fetch surfaces the rebind as a typed permission_denied", async () => {
     const resolveHost: HostResolver = async () => ["127.0.0.1"]
-    const r = await collect(
-      webFetchTool({ fetcher: evilFetcher, resolveHost }),
-      { url: "https://rebind.attacker.example/" },
-    )
+    const r = await collect(webFetchTool({ fetcher: evilFetcher, resolveHost }), {
+      url: "https://rebind.attacker.example/",
+    })
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.failure?.mode).toBe("permission_denied")
   })

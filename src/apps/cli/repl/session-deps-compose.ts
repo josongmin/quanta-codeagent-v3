@@ -1,5 +1,5 @@
 export {
-  composeCliRuntimeContext,
   type CliRuntimeContextBindings,
   type ComposeCliRuntimeContextArgs,
+  composeCliRuntimeContext,
 } from "./runtime-context-compose"

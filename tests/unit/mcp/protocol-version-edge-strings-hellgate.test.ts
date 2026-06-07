@@ -14,6 +14,7 @@
  *     legacy-tolerant route-around.
  */
 import { describe, expect, test } from "bun:test"
+import type { McpTransport, McpTransportExitHandler, McpTransportMessageHandler } from "@/mcp"
 import {
   isSupportedProtocolVersion,
   LATEST_PROTOCOL_VERSION,
@@ -21,11 +22,6 @@ import {
   McpError,
   type McpServerConfig,
   resolveOfferedVersion,
-} from "@/mcp"
-import type {
-  McpTransport,
-  McpTransportExitHandler,
-  McpTransportMessageHandler,
 } from "@/mcp"
 import type { JsonRpcMessage } from "@/mcp/jsonrpc"
 
@@ -52,7 +48,9 @@ class OneShotTransport implements McpTransport {
     const p = payload as { id?: number; method?: string }
     if (p.method === "initialize" && typeof p.id === "number") {
       const id = p.id
-      queueMicrotask(() => this.msgHandler?.({ jsonrpc: "2.0", id, result: this.reply } as JsonRpcMessage))
+      queueMicrotask(() =>
+        this.msgHandler?.({ jsonrpc: "2.0", id, result: this.reply } as JsonRpcMessage),
+      )
     }
     return null
   }
@@ -80,13 +78,13 @@ describe("offer-resolution never puts an unspeakable string on the wire", () => 
 })
 
 describe("server-chosen near-miss strings fail CLOSED (no fail-open drift)", () => {
-  test('empty-string protocolVersion ⇒ McpError (NOT legacy-tolerant, NOT silent proceed)', async () => {
+  test("empty-string protocolVersion ⇒ McpError (NOT legacy-tolerant, NOT silent proceed)", async () => {
     const t = new OneShotTransport({ protocolVersion: "", capabilities: {} })
     const c = new McpClient(cfg(), { transport: t })
     await expect(c.start()).rejects.toBeInstanceOf(McpError)
   })
 
-  test('whitespace-padded near-miss of a REAL version ⇒ McpError (exact match only)', async () => {
+  test("whitespace-padded near-miss of a REAL version ⇒ McpError (exact match only)", async () => {
     const t = new OneShotTransport({ protocolVersion: "2025-06-18 ", capabilities: {} })
     const c = new McpClient(cfg(), { transport: t })
     await expect(c.start()).rejects.toBeInstanceOf(McpError)

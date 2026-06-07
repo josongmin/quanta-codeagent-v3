@@ -31,7 +31,9 @@ afterEach(() => {
 })
 
 const writePatch = (file: string): string =>
-  ["*** Begin Patch", `*** Update File: ${file}`, "@@", "-beta", "+BETA", "*** End Patch"].join("\n")
+  ["*** Begin Patch", `*** Update File: ${file}`, "@@", "-beta", "+BETA", "*** End Patch"].join(
+    "\n",
+  )
 
 const lastUserText = (messages: readonly Message[]): string => {
   for (let i = messages.length - 1; i >= 0; i--) {

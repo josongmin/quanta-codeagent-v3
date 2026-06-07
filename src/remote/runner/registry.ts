@@ -15,25 +15,18 @@
  * supplies wiring for; this keeps the registry itself pure + import-safe.
  */
 
-import type { RemoteRunner } from "./port"
-import { createHeadlessRunner, type HeadlessRunnerOpts } from "./headless-stub"
+import { type AppleVZHost, createAppleVZAdapter } from "./apple-vz-adapter"
 import { createDockerAdapter, type DockerProcess } from "./docker-adapter"
+import { createHeadlessRunner, type HeadlessRunnerOpts } from "./headless-stub"
 import { createLimaAdapter, type LimaProcess } from "./lima-adapter"
-import { createAppleVZAdapter, type AppleVZHost } from "./apple-vz-adapter"
+import type { RemoteRunner } from "./port"
 
 export type RemoteRunnerName = "docker" | "lima" | "apple-vz" | "headless"
 
-const KNOWN_RUNNERS: ReadonlyArray<RemoteRunnerName> = [
-  "docker",
-  "lima",
-  "apple-vz",
-  "headless",
-]
+const KNOWN_RUNNERS: ReadonlyArray<RemoteRunnerName> = ["docker", "lima", "apple-vz", "headless"]
 
 /** Parse the env knob (case-insensitive). Returns null for unset / unknown / "none". */
-export const parseRemoteRunnerEnv = (
-  raw: string | undefined,
-): RemoteRunnerName | null => {
+export const parseRemoteRunnerEnv = (raw: string | undefined): RemoteRunnerName | null => {
   if (raw === undefined || raw === "") return null
   const norm = raw.toLowerCase().trim()
   if (norm === "none") return null

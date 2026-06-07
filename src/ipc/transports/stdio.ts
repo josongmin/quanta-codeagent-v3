@@ -151,10 +151,7 @@ export const createStdioTransport = (opts: CreateStdioTransportOpts): BridgeTran
     else if (typeof opts.reader.removeListener === "function")
       opts.reader.removeListener("data", onData)
   }
-  const detachLifecycle = (
-    event: ReaderLifecycleEvent,
-    handler: (arg?: unknown) => void,
-  ): void => {
+  const detachLifecycle = (event: ReaderLifecycleEvent, handler: (arg?: unknown) => void): void => {
     if (typeof lifecycle.off === "function") lifecycle.off(event, handler)
     else if (typeof lifecycle.removeListener === "function")
       lifecycle.removeListener(event, handler)

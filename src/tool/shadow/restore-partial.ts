@@ -27,7 +27,9 @@ export const shadowRestorePartialInputSchema = z.object({
   target: z
     .enum(["last", "verified"])
     .optional()
-    .describe("Snapshot selector. 'last' is supported; path-scoped 'verified' restore is reserved but not implemented in v1."),
+    .describe(
+      "Snapshot selector. 'last' is supported; path-scoped 'verified' restore is reserved but not implemented in v1.",
+    ),
   allowDirtyMerge: z
     .boolean()
     .optional()

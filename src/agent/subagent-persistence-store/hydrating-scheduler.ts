@@ -26,8 +26,8 @@ import type {
   BackgroundSubagentScheduler,
   SubagentHandleId,
   SubagentResult,
-  SubagentStatus,
   SubagentSpec,
+  SubagentStatus,
 } from "../subagent-background"
 import type { PersistedHandle, PersistedSubagentStatus, PersistentSchedulerStore } from "./types"
 

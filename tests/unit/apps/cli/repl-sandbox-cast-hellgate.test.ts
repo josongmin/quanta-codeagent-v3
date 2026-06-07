@@ -5,10 +5,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import {
-  parseSandboxMode,
-  VALID_SANDBOX_MODES,
-} from "../../../../src/apps/cli/sandbox-mode-parse"
+import { parseSandboxMode, VALID_SANDBOX_MODES } from "../../../../src/apps/cli/sandbox-mode-parse"
 
 describe("parseSandboxMode — valid values pass through", () => {
   test("'read-only' → 'read-only'", () => {

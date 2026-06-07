@@ -261,7 +261,7 @@ describe("E2E pillar 1b — circumvention detection (real gate records deny, the
     // STEP 1 — drive the REAL gate for a Write to /repo/X with a classifier that
     // DENIES. evaluateAuto's soft-deny arm calls tracker.noteDenied for us — we
     // do NOT touch the tracker directly. This is the production record path.
-    const denyPort = recordingPort("deny")
+    const denyPort = recordingPort("block")
     const denyClassifier = new AutoModeClassifier(denyPort.port)
     const denyResult = await runAdmissibilityGate(
       writeCall("/repo/X"),
@@ -308,7 +308,7 @@ describe("E2E pillar 1b — circumvention detection (real gate records deny, the
 
     const tracker = new CircumventionTracker()
     // Soft-deny a Write to /repo/X through the real gate.
-    const denyPort = recordingPort("deny")
+    const denyPort = recordingPort("block")
     await runAdmissibilityGate(
       writeCall("/repo/X"),
       cfg(),

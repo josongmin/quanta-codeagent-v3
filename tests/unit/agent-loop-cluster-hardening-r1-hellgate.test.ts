@@ -339,9 +339,7 @@ describe("H6 passive-vcs — false-positive cuts + correct classification (hellg
     // guard, and help exits 0). R2 added the help/usage guard in classifier.ts,
     // so a man-page `Fast-forward` example no longer emits a phantom `merged`
     // event — the CONSCIOUS, test-visible tightening R1 anticipated.
-    expect(
-      cls("git merge --help", "Fast-forward\n   integrate without a merge commit"),
-    ).toBeNull()
+    expect(cls("git merge --help", "Fast-forward\n   integrate without a merge commit")).toBeNull()
     // A real merge still classifies.
     expect(cls("git merge feature", "Fast-forward\n abc1234..def5678")).toEqual({
       branch: { action: "merged" },
@@ -606,7 +604,7 @@ describe("B4 resume reconcile — tool-pairing repairs (hellgate)", () => {
     const out = reconcileToolPairing(msgs)
     // The early result is dropped; the use lands a synthesized stub AFTER it.
     expect(out).toHaveLength(2)
-    expect((out[0] as { content: Array<{ type: string }> }).content[0].type).toBe("tool_use")
+    expect((out[0] as { content: Array<{ type: string }> }).content[0]?.type).toBe("tool_use")
     const stub = out[1] as { role: string; content: Array<Record<string, unknown>> }
     expect(stub.content[0]).toMatchObject({
       type: "tool_result",
@@ -647,7 +645,7 @@ describe("B4 resume reconcile — tool-pairing repairs (hellgate)", () => {
     ]
     const out = reconcileToolPairing(msgs)
     expect(out).toHaveLength(1)
-    expect((out[0] as { content: Array<{ type: string }> }).content).toEqual([
+    expect((out[0] as { content: Array<{ type: string; text?: string }> }).content).toEqual([
       { type: "text", text: "keep me" },
     ])
   })

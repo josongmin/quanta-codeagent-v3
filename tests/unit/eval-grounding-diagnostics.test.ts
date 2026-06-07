@@ -2,12 +2,12 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import {
   classifyGroundingInfraError,
   runGrounding,
   runGroundingPreflightCheck,
 } from "@/../src/apps/eval/grounding"
+import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 
 class JsonLLM implements LLMPort {
   readonly provider = "openai"

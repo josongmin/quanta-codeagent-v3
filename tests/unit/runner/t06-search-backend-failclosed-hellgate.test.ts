@@ -1,9 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { IndexerFileChunk } from "@/retrieval"
-import {
-  buildSemanticBackend,
-  type SemanticBackend,
-} from "@/runner/assemble/search-index-backend"
+import { buildSemanticBackend, type SemanticBackend } from "@/runner/assemble/search-index-backend"
 
 /**
  * T06 — Search backend fail-closed hellgate (L5 H-4 / M-12 / M-13).
@@ -25,6 +22,8 @@ const chunk = (path: string): IndexerFileChunk => ({
   startLine: 1,
   endLine: 2,
   text: "hello world",
+  mtime: 1_700_000_000_000,
+  sha: "da39a3ee5e6b4b0d3255bfef95601890afd80709",
 })
 
 const upsertThenQuery = async (backend: SemanticBackend): Promise<number> => {

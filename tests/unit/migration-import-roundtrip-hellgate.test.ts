@@ -30,7 +30,7 @@ import * as fsp from "node:fs/promises"
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import type { ContentBlock } from "@/llm"
+import type { Message } from "@/llm"
 import type { SessionCommandDeps } from "@/runner/session-ops"
 import { loadSessionById, staticSessionRootProvider } from "@/session"
 import { createCliImportHandlerWithRoot } from "../../src/apps/cli/session-import-handler"
@@ -131,7 +131,7 @@ describe("ADR-0430 competitor-import round-trip + adversarial hellgate", () => {
     const id = files[0]?.replace(/\.json$/, "") as string
     const loaded = await loadSessionById(id, staticSessionRootProvider(sessionsRoot))
     expect(loaded).toBeDefined()
-    const expectedMessages: Array<{ role: string; content: ContentBlock[] }> = [
+    const expectedMessages: Message[] = [
       { role: "user", content: [{ type: "text", text: "explain the bug" }] },
       { role: "assistant", content: [{ type: "text", text: "it is an off-by-one" }] },
     ]

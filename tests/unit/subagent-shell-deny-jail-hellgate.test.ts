@@ -16,10 +16,11 @@
  *   (e) exec_command(pty:true) with NO ptyTable returns cause:"pty_unsupported"
  *       instead of silently running an untracked PTY.
  */
-import { mkdtempSync, mkdirSync, realpathSync, rmSync } from "node:fs"
+
+import { describe, expect, test } from "bun:test"
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { describe, expect, test } from "bun:test"
 import { resolveJailed } from "@/storage"
 import {
   createSubagent6Tools,
@@ -127,7 +128,11 @@ describe("HELLGATE (c) — exec_command path jail", () => {
   })
 
   test("no jail wired ⇒ legacy behavior (cwd honored, no rejection)", async () => {
-    const r = await handleExecCommand({ command: "echo legacy", cwd: process.cwd(), timeoutMs: 5000 })
+    const r = await handleExecCommand({
+      command: "echo legacy",
+      cwd: process.cwd(),
+      timeoutMs: 5000,
+    })
     expect(r.kind).toBe("success")
   })
 })
@@ -258,7 +263,10 @@ describe("HELLGATE (d) — spawn_agent caps are fail-closed when knobs omitted",
     }
     // With an explicit cap of 1, the next spawn (1 already running) is rejected.
     const capped = new TaskRegistry()
-    await handleSpawnAgent({ prompt: "first" }, { runner: neverRunner, registry: capped, maxConcurrent: 1 })
+    await handleSpawnAgent(
+      { prompt: "first" },
+      { runner: neverRunner, registry: capped, maxConcurrent: 1 },
+    )
     const over = await handleSpawnAgent(
       { prompt: "over" },
       { runner: neverRunner, registry: capped, maxConcurrent: 1 },

@@ -11,13 +11,33 @@
  * regardless of the registry state.
  */
 
-export type { RemoteRunner } from "./port"
+export type { AppleVZAdapterOpts, AppleVZHost } from "./apple-vz-adapter"
+export { createAppleVZAdapter } from "./apple-vz-adapter"
+export type {
+  DockerAdapterOpts,
+  DockerExecResult,
+  DockerLogStream,
+  DockerProcess,
+} from "./docker-adapter"
 export {
-  ALL_REMOTE_BACKENDS,
-  ALL_REMOTE_ERROR_KINDS,
-  ALL_REMOTE_STATUS_KINDS,
-  RemoteError,
-} from "./types"
+  classifyDockerStderr,
+  composeDockerRunArgv,
+  createDockerAdapter,
+  parseDockerInspectLine,
+} from "./docker-adapter"
+export type { HeadlessRunnerOpts } from "./headless-stub"
+export { createHeadlessRunner } from "./headless-stub"
+export type { LimaAdapterOpts, LimaExecResult, LimaProcess } from "./lima-adapter"
+export {
+  composeLimaCancelArgv,
+  composeLimaSpawnArgv,
+  composeLimaStatusArgv,
+  createLimaAdapter,
+  safeLimaId,
+} from "./lima-adapter"
+export type { RemoteRunner } from "./port"
+export type { RemoteRunnerName, RemoteRunnerSeams } from "./registry"
+export { parseRemoteRunnerEnv, selectRemoteRunner } from "./registry"
 export type {
   RemoteBackend,
   RemoteErrorKind,
@@ -28,30 +48,10 @@ export type {
   RemoteStatus,
   RemoteStatusKind,
 } from "./types"
+export {
+  ALL_REMOTE_BACKENDS,
+  ALL_REMOTE_ERROR_KINDS,
+  ALL_REMOTE_STATUS_KINDS,
+  RemoteError,
+} from "./types"
 export { validateSpec } from "./validate"
-export { createHeadlessRunner } from "./headless-stub"
-export type { HeadlessRunnerOpts } from "./headless-stub"
-export {
-  classifyDockerStderr,
-  composeDockerRunArgv,
-  createDockerAdapter,
-  parseDockerInspectLine,
-} from "./docker-adapter"
-export type {
-  DockerAdapterOpts,
-  DockerExecResult,
-  DockerLogStream,
-  DockerProcess,
-} from "./docker-adapter"
-export {
-  composeLimaCancelArgv,
-  composeLimaSpawnArgv,
-  composeLimaStatusArgv,
-  createLimaAdapter,
-  safeLimaId,
-} from "./lima-adapter"
-export type { LimaAdapterOpts, LimaExecResult, LimaProcess } from "./lima-adapter"
-export { createAppleVZAdapter } from "./apple-vz-adapter"
-export type { AppleVZAdapterOpts, AppleVZHost } from "./apple-vz-adapter"
-export { parseRemoteRunnerEnv, selectRemoteRunner } from "./registry"
-export type { RemoteRunnerName, RemoteRunnerSeams } from "./registry"

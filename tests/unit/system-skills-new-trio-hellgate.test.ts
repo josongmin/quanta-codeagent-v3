@@ -131,10 +131,9 @@ describe("ADR-0176 — debug/blame skills trio (hellgate)", () => {
       ).toBe("true")
 
       // allowedTools is a non-empty list AND contains the spec'd tools
-      expect(
-        Array.isArray(data.allowedTools),
-        `[${spec.dir}] allowedTools must be a list`,
-      ).toBe(true)
+      expect(Array.isArray(data.allowedTools), `[${spec.dir}] allowedTools must be a list`).toBe(
+        true,
+      )
       const allowedTools = data.allowedTools as ReadonlyArray<string>
       for (const tool of spec.expectedAllowedTools) {
         expect(allowedTools, `[${spec.dir}] allowedTools must contain ${tool}`).toContain(tool)
@@ -182,10 +181,7 @@ describe("ADR-0176 — debug/blame skills trio (hellgate)", () => {
 
       // All 5 required sections present (no silent restructuring)
       for (const section of REQUIRED_SECTIONS) {
-        expect(
-          body.includes(section),
-          `[${spec.dir}] body must contain "${section}"`,
-        ).toBe(true)
+        expect(body.includes(section), `[${spec.dir}] body must contain "${section}"`).toBe(true)
       }
 
       // Body cites the specific tool names from allowedTools (not generic

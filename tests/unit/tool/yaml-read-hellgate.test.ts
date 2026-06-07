@@ -2,13 +2,16 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { yamlReadTool } from "@/tool/document/yaml-read"
 import type { ToolContext, ToolResult } from "@/tool"
+import { yamlReadTool } from "@/tool/document/yaml-read"
 
 const tool = yamlReadTool
 
 const mkTmp = async (): Promise<string> => {
-  const dir = path.join(tmpdir(), `quanta-yaml-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+  const dir = path.join(
+    tmpdir(),
+    `quanta-yaml-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  )
   await mkdir(dir, { recursive: true })
   return dir
 }

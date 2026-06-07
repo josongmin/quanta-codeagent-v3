@@ -342,9 +342,12 @@ describe("HELLGATE — findTopLevelUsage catches synthetic deadlock conditions",
   })
 
   test("[16] reference inside a `//` line comment is NOT flagged", () => {
-    const src = ['import { foo } from "./x"', "", "// uses foo at top level", "export const x = 1"].join(
-      "\n",
-    )
+    const src = [
+      'import { foo } from "./x"',
+      "",
+      "// uses foo at top level",
+      "export const x = 1",
+    ].join("\n")
     const hits = findTopLevelUsage(src, ["foo"])
     expect(hits).toEqual([])
   })

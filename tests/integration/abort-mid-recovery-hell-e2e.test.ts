@@ -45,20 +45,19 @@
  * reuses the shared `_harness.ts` doubles.
  */
 import { describe, expect, test } from "bun:test"
+import { z } from "zod"
 import type { AgentConfig } from "@/agent"
 import { runAgent } from "@/agent"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { LLMError } from "@/shared"
-import { defineTool } from "@/tool"
-import { ToolRegistry } from "@/tool"
-import { z } from "zod"
+import { defineTool, ToolRegistry } from "@/tool"
 import {
   cfg,
   ev,
   multiToolUse,
   RecordingStream,
-  type Step,
   ScriptedLLM,
+  type Step,
   text,
   thr,
   toolUse,
@@ -374,9 +373,7 @@ describe("HELLGATE — control: identical scripts WITHOUT signal flip complete n
       ev(text("verified, done")),
     ])
     const out = await withTimeout(
-      runAgent(
-        cfg({ llm, registry, stream: new RecordingStream(), verifyGuard: { maxTrips: 1 } }),
-      ),
+      runAgent(cfg({ llm, registry, stream: new RecordingStream(), verifyGuard: { maxTrips: 1 } })),
       HARD_MS,
       "control-verify-forced-turn",
     )

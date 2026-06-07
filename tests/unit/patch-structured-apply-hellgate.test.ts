@@ -74,15 +74,15 @@ class JailFs extends MemFs {
       throw e
     }
   }
-  async readFile(path: string): Promise<string> {
+  override async readFile(path: string): Promise<string> {
     this.guard(path)
     return super.readFile(path)
   }
-  async writeFile(path: string, content: string): Promise<void> {
+  override async writeFile(path: string, content: string): Promise<void> {
     this.guard(path)
     return super.writeFile(path, content)
   }
-  async exists(path: string): Promise<boolean> {
+  override async exists(path: string): Promise<boolean> {
     this.guard(path)
     return super.exists(path)
   }
@@ -315,7 +315,7 @@ describe("applyPatchStructured — no-throw boundary", () => {
 
   test("misbehaving port (write throws) captured as per-file failure, not propagated", async () => {
     class BadWriteFs extends MemFs {
-      async writeFile(): Promise<void> {
+      override async writeFile(): Promise<void> {
         throw new Error("disk on fire")
       }
     }
@@ -345,7 +345,7 @@ describe("applyPatchStructured — no-throw boundary", () => {
 
   test("misbehaving port that throws a NON-Error value is still a per-file failure", async () => {
     class WeirdThrowFs extends MemFs {
-      async writeFile(): Promise<void> {
+      override async writeFile(): Promise<void> {
         // biome-ignore lint/style/useThrowOnlyError: adversarial port
         throw "string-shaped failure"
       }

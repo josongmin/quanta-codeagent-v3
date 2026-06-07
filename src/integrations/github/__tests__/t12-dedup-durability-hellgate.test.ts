@@ -20,12 +20,8 @@ import {
   type RedactPort,
 } from "@/integrations/github"
 import { createPrOutputSink } from "@/integrations/github/pr-output-sink"
-import {
-  createInMemoryWatermarkStore,
-  createPrCommentTriggerSource,
-} from "@/reactor"
-import type { ClockPort } from "@/reactor"
-import type { GhCliPort, GhCliResult } from "@/reactor"
+import type { ClockPort, GhCliPort, GhCliResult } from "@/reactor"
+import { createInMemoryWatermarkStore, createPrCommentTriggerSource } from "@/reactor"
 
 const redactPassthrough: RedactPort = { redact: (s) => s }
 
@@ -186,9 +182,7 @@ describe("T12 / H10 — review + review-comment dedup", () => {
     // PATCH happened; no POST to /pulls/<n>/comments.
     expect(calls.some((c) => c.includes("PATCH"))).toBe(true)
     expect(
-      calls.some(
-        (c) => c.includes("POST") && c.some((s) => s.endsWith("/pulls/1/comments")),
-      ),
+      calls.some((c) => c.includes("POST") && c.some((s) => s.endsWith("/pulls/1/comments"))),
     ).toBe(false)
   })
 })

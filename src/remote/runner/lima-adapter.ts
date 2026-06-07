@@ -36,7 +36,7 @@
  *   - `logs(handle)`   → `limactl shell {vm} -- tail -f <logfile>` (structured argv — no shell)
  */
 
-import { ok, err, type Result } from "@/shared"
+import { err, ok, type Result } from "@/shared"
 import type { RemoteRunner } from "./port"
 import {
   RemoteError,

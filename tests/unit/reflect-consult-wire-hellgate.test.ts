@@ -6,8 +6,8 @@
  * NO-THROW failure mapping.
  */
 import { describe, expect, test } from "bun:test"
-import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { reflectConsultFromLLM } from "@/agent"
+import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 
 const textLLM = (text: string): LLMPort => ({
   model: "m",
@@ -26,7 +26,9 @@ const req = { situation: "the same edit keeps failing", nextSteps: "try a differ
 
 describe("reflectConsultFromLLM — one-shot critique", () => {
   test("assembles the critique text ⇒ ok:true", async () => {
-    const r = await reflectConsultFromLLM({ llm: textLLM("Your anchor is ambiguous; widen it.") }).reflect(req)
+    const r = await reflectConsultFromLLM({
+      llm: textLLM("Your anchor is ambiguous; widen it."),
+    }).reflect(req)
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.analysis).toContain("ambiguous")
   })

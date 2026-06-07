@@ -432,7 +432,9 @@ describe("PART 2 — static ratchet: no NEW naive cap-slice on a string", () => 
           lines.join("\n"),
       )
     }
-  })
+    // AST-scans the whole src/ tree — the 5s default trips on a cold run (~6.8s
+    // measured). 30s headroom so the ratchet never flakes under full-suite load.
+  }, 30_000)
 
   test("burn-down list is MINIMAL — every entry still corresponds to a live site", () => {
     const live = new Set(collectAllCapSlices().map(keyOf))
@@ -444,13 +446,13 @@ describe("PART 2 — static ratchet: no NEW naive cap-slice on a string", () => 
           stale.map((s) => `  ${s}`).join("\n"),
       )
     }
-  })
+  }, 30_000)
 
   test("hash/id allowlist is MINIMAL — every cap is still referenced by a live slice", () => {
     const liveCaps = new Set(collectAllCapSlices().map((s) => s.cap))
     const stale = [...ALLOW_HASH_ID_CAPS].filter((c) => !liveCaps.has(c))
     expect(stale).toEqual([])
-  })
+  }, 30_000)
 
   // SELF-PROOF that the ratchet actually FIRES on a synthetic NEW cap-slice and
   // stays CLEAN when the same cap is routed through the surrogate-safe helper —

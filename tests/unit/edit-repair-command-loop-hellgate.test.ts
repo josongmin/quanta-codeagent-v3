@@ -19,15 +19,15 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { AgentConfig } from "@/agent"
-import type { ExecRunner } from "@/agent/edit-repair-wire"
 import { dispatchTool } from "@/agent/dispatch"
+import type { ExecRunner } from "@/agent/edit-repair-wire"
 import type { ToolResultBlock, ToolUseBlock } from "@/llm"
 import type { LLMPort } from "@/llm/ports"
 import type { StreamEvent, StreamInput } from "@/llm/types"
 import { __resetDefaultPermissionStore, type PermissionContext } from "@/permission"
 import { __resetRuntimeConfig } from "@/shared"
-import { editTool } from "@/tool/edit"
 import { ToolRegistry } from "@/tool"
+import { editTool } from "@/tool/edit"
 
 /** A fast model that always replies with the SAME corrected file content. */
 const fakeLlm = (reply: string): LLMPort => ({
@@ -125,7 +125,9 @@ describe("H1 LoopOnCommand — command fails then repairs green", () => {
     // The fast model's correction WON (it overwrote the edit's "OK" with "FIXED").
     expect(readFileSync(file, "utf8")).toBe("FIXED\n")
     // The model-facing output advertises the green command repair.
-    expect(content(res.block as ToolResultBlock)).toContain("`run-tests` passed after 1 repair attempt(s)")
+    expect(content(res.block as ToolResultBlock)).toContain(
+      "`run-tests` passed after 1 repair attempt(s)",
+    )
   })
 })
 
@@ -206,7 +208,12 @@ describe("H1 LoopOnCommand — byte-identical default-OFF", () => {
     const { exec, calls } = scriptedExec([1, 0])
     const cfg = config({ llm: fakeLlm("x"), editRepair: { command: "t", exec } })
     // A read-class call has no edit path ⇒ extractEditPath returns null.
-    const badCall: ToolUseBlock = { type: "tool_use", id: "r1", name: "edit", input: { not_a_path: 1 } }
+    const badCall: ToolUseBlock = {
+      type: "tool_use",
+      id: "r1",
+      name: "edit",
+      input: { not_a_path: 1 },
+    }
     await dispatchTool(badCall, cfg, perm).catch(() => undefined)
     expect(calls.length).toBe(0)
   })

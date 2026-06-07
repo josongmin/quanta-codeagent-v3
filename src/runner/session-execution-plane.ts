@@ -1,4 +1,3 @@
-import { gateOn } from "@/shared"
 import {
   buildSubagentForkOnAccept,
   defaultProposeHandler,
@@ -30,10 +29,11 @@ import {
 import type { AgentConfig } from "@/agent/types"
 import {
   defaultResponsesContinuationStore,
-  responsesContinuationLlmPort,
   type Message,
   type ResponsesContinuationStore,
+  responsesContinuationLlmPort,
 } from "@/llm"
+import { gateOn } from "@/shared"
 import { assembleConfig, type SessionDeps } from "./assemble/config"
 
 export interface SharedExecutionPlaneArgs {

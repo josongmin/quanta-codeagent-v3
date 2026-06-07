@@ -105,7 +105,13 @@ describe("JsonFileDreamState — corrupt NUMERIC fields sanitize to a clean coun
       expect(Number.isInteger(s.sessionsSinceLastDream)).toBe(true)
       expect(s.sessionsSinceLastDream).toBeGreaterThanOrEqual(0)
       // and the trigger produced a well-formed outcome (never crashed)
-      expect(["below_threshold", "completed", "no_op"]).toContain(outcome?.kind)
+      if (outcome === undefined) throw new Error("expected an outcome")
+      const validKinds: ReadonlyArray<typeof outcome.kind> = [
+        "below_threshold",
+        "completed",
+        "no_op",
+      ]
+      expect(validKinds).toContain(outcome.kind)
     })
   }
 

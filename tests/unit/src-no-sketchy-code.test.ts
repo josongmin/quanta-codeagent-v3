@@ -521,9 +521,12 @@ describe("src/: anti-regression scan (root-cause invariants)", () => {
       )
     }
     expect(failures.length).toBe(0)
-  })
+    // Walks ~2200 src files + cold module transpile — the 5s default trips on a
+    // cold run (measured ~9.6s cold, ~1s warm). 30s gives ample headroom so the
+    // ratchet never flakes under full-suite load.
+  }, 30_000)
 
   test("scan covers a non-empty file set (smoke)", () => {
     expect(files.length).toBeGreaterThan(80)
-  })
+  }, 30_000)
 })

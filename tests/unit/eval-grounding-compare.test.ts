@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import type { EvalRecord, GroundingPayload, RunSummaryRecord } from "@/../src/apps/eval/storage"
 import {
   buildGroundingComparison,
   buildGroundingRegressionResult,
   buildGroundingReport,
   evaluateGroundingRegression,
 } from "@/../src/apps/eval/grounding"
+import type { EvalRecord, GroundingPayload, RunSummaryRecord } from "@/../src/apps/eval/storage"
 
 const payload = (over: Partial<GroundingPayload> = {}): GroundingPayload => {
   const actual = over.actual ?? {
@@ -324,7 +324,10 @@ describe("grounding compare", () => {
   test("regression output exposes dedicated pass/fail authority", () => {
     const runId = "same-run"
     const records: EvalRecord[] = [
-      record(runId, payload({ caseId: "raw", pairId: "pair-1", pairRole: "raw", severity: "critical" })),
+      record(
+        runId,
+        payload({ caseId: "raw", pairId: "pair-1", pairRole: "raw", severity: "critical" }),
+      ),
       record(
         runId,
         payload({
@@ -635,7 +638,8 @@ describe("grounding compare", () => {
       },
       {
         kind: "execution_contract_unverified",
-        message: "missing execution contract fingerprints; comparison is not structurally verifiable",
+        message:
+          "missing execution contract fingerprints; comparison is not structurally verifiable",
         baseline: "unknown",
         candidate: "unknown",
       },

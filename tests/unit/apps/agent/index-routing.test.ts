@@ -11,8 +11,8 @@
  * real `process.exit` or dynamic `import()` is hit.
  */
 import { describe, expect, test } from "bun:test"
-import type { RunMode } from "@/agent"
 import { type ModeDispatcher, runMain, toAssembleRequest } from "@/../src/apps/agent/index"
+import type { RunMode } from "@/agent"
 
 type Capture = {
   stdout: string

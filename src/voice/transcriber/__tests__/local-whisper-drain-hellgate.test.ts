@@ -169,7 +169,11 @@ describe("local whisper stdout drain + timeout/cancel (L9 H3)", () => {
 
   test("HELL-WSP-05: happy path reads the output txt", async () => {
     const { spawner } = makeSpawner({ stdoutChunks: [], exitAfterStdoutDrain: true })
-    const t = createLocalWhisperTranscriber({ spawner, fs: memFs("transcript text"), timeoutMs: 5000 })
+    const t = createLocalWhisperTranscriber({
+      spawner,
+      fs: memFs("transcript text"),
+      timeoutMs: 5000,
+    })
     const res = await t.transcribe({ audio: enc("RIFF"), format: "wav" })
     expect(res.ok).toBe(true)
     if (res.ok) expect(res.value.text).toBe("transcript text")

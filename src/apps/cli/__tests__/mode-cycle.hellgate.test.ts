@@ -148,6 +148,7 @@ describe("mode-cycle — raw-line-reader shift+tab (§4.2)", () => {
         meta: "m",
         onCycleMode: () => {
           cycled = true
+          return undefined
         },
       },
       io,
@@ -168,6 +169,7 @@ describe("mode-cycle — raw-line-reader shift+tab (§4.2)", () => {
         completer: () => [], // no completion candidates ⇒ Tab is inert
         onCycleMode: () => {
           cycles += 1
+          return undefined
         },
       },
       io,

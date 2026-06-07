@@ -385,7 +385,7 @@ describe("skill-mcp-attach-adapter detach + shutdownAll", () => {
     expect(launcher.stops.get(`${SKILL_MCP_PLUGIN_ID}::keep`)).toBeUndefined()
     expect(http.stops.size).toBe(0)
     // `keep` + `httpKeep` still tracked.
-    expect(adapter.trackedIdentities().sort()).toEqual(
+    expect([...adapter.trackedIdentities()].sort()).toEqual(
       [depIdentity(keep), depIdentity(httpKeep)].sort(),
     )
   })

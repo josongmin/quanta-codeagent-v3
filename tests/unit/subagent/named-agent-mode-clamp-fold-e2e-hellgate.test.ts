@@ -121,7 +121,10 @@ describe("named-agent mode clamp — REAL fold path (hellgate)", () => {
   test("FOLD-1 resolver def.mode=default ⇒ review parent ⇒ child stays review", async () => {
     // The hostile definition declares a write-capable mode; folding it into
     // req.mode then clamping must NOT relax the review parent.
-    const parent = withResolver(parentConfig("review"), resolverFor("evil", defWithMode("evil", "default")))
+    const parent = withResolver(
+      parentConfig("review"),
+      resolverFor("evil", defWithMode("evil", "default")),
+    )
     const child = await captureChild(parent, { prompt: "go", depth: 1, agentType: "evil" })
     expect(child.mode).toBe("review")
   })
@@ -148,10 +151,7 @@ describe("named-agent mode clamp — REAL fold path (hellgate)", () => {
     // Caller explicitly asks default (wins over def.mode=audit) — but the review
     // parent floors it back to review. Proves the clamp is downstream of BOTH
     // the explicit-request-wins fold AND the def default.
-    const parent = withResolver(
-      parentConfig("review"),
-      resolverFor("x", defWithMode("x", "audit")),
-    )
+    const parent = withResolver(parentConfig("review"), resolverFor("x", defWithMode("x", "audit")))
     const child = await captureChild(parent, {
       prompt: "go",
       depth: 1,
@@ -162,7 +162,10 @@ describe("named-agent mode clamp — REAL fold path (hellgate)", () => {
   })
 
   test("FOLD-NOMATCH unknown agentType ⇒ no def folded ⇒ inherit parent (byte-identical)", async () => {
-    const parent = withResolver(parentConfig("review"), resolverFor("known", defWithMode("known", "default")))
+    const parent = withResolver(
+      parentConfig("review"),
+      resolverFor("known", defWithMode("known", "default")),
+    )
     const child = await captureChild(parent, { prompt: "go", depth: 1, agentType: "unknown" })
     expect(child.mode).toBe("review")
   })
@@ -228,7 +231,10 @@ describe("named-agent mode clamp — END-TO-END dispatch denial (hellgate)", () 
   })
 
   test("E2E-DENY review-clamped child DENIES a mutating tool (write) at the real gate", async () => {
-    const parent = withResolver(parentConfig("review"), resolverFor("evil", defWithMode("evil", "default")))
+    const parent = withResolver(
+      parentConfig("review"),
+      resolverFor("evil", defWithMode("evil", "default")),
+    )
     const child = await captureChild(parent, { prompt: "go", depth: 1, agentType: "evil" })
     // Sanity: the clamp landed.
     expect(child.mode).toBe("review")
@@ -246,7 +252,10 @@ describe("named-agent mode clamp — END-TO-END dispatch denial (hellgate)", () 
   })
 
   test("E2E-ALLOW the SAME review-clamped child still ADMITS a read-only tool (read)", async () => {
-    const parent = withResolver(parentConfig("review"), resolverFor("evil", defWithMode("evil", "default")))
+    const parent = withResolver(
+      parentConfig("review"),
+      resolverFor("evil", defWithMode("evil", "default")),
+    )
     const child = await captureChild(parent, { prompt: "go", depth: 1, agentType: "evil" })
     const result = await runAdmissibilityGate(
       callFor("read"),
@@ -267,7 +276,10 @@ describe("named-agent mode clamp — END-TO-END dispatch denial (hellgate)", () 
     // denial is caused by the read-only mode clamp specifically: the SAME tool,
     // SAME definition, only the parent posture differs, and ONLY the read-only
     // posture produces a `*-blocked` mode deny.
-    const parent = withResolver(parentConfig("default"), resolverFor("evil", defWithMode("evil", "default")))
+    const parent = withResolver(
+      parentConfig("default"),
+      resolverFor("evil", defWithMode("evil", "default")),
+    )
     const child = await captureChild(parent, { prompt: "go", depth: 1, agentType: "evil" })
     expect(child.mode).toBe("default")
     const result = await runAdmissibilityGate(

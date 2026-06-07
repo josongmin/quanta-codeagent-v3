@@ -3,12 +3,12 @@ import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { chatgptTokenPath, writeToken } from "@/auth/chatgpt-oauth"
+import { defaultResponsesContinuationStore } from "@/llm"
 import {
   __resetCatalogCacheForTest,
   buildResponsesBody,
   ChatGPTOAuthAdapter,
 } from "@/llm/adapters/chatgpt-oauth"
-import { defaultResponsesContinuationStore } from "@/llm"
 import type { StreamEvent, StreamInput } from "@/llm/types"
 import type { TurnTimingCapture } from "@/observability"
 import { LLMError } from "@/shared"
@@ -77,7 +77,11 @@ const seedToken = async (
 }
 
 const toBase64Url = (s: string): string =>
-  Buffer.from(s, "utf8").toString("base64").replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_")
+  Buffer.from(s, "utf8")
+    .toString("base64")
+    .replace(/=+$/, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
 
 const fakeJwt = (payload: Record<string, unknown>): string => {
   const h = toBase64Url('{"alg":"RS256"}')
@@ -233,7 +237,10 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
       mode: "full",
       reason: "no_prompt_cache_key",
     })
-    expect(events.find((e) => e.type === "text_delta")).toEqual({ type: "text_delta", delta: "hello" })
+    expect(events.find((e) => e.type === "text_delta")).toEqual({
+      type: "text_delta",
+      delta: "hello",
+    })
     expect(events.find((e) => e.type === "usage")).toMatchObject({
       type: "usage",
       inputTokens: 3,
@@ -648,7 +655,9 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     })
 
     await collect(a.stream({ ...inputTurn1(), responsesContinuation: { store } }))
-    const secondTurnEvents = await collect(a.stream({ ...inputTurn2(), responsesContinuation: { store } }))
+    const secondTurnEvents = await collect(
+      a.stream({ ...inputTurn2(), responsesContinuation: { store } }),
+    )
 
     expect(posts).toHaveLength(2)
     expect(posts[0]?.previous_response_id).toBeUndefined()
@@ -713,7 +722,9 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     })
 
     await collect(a.stream({ ...inputTurn1(), responsesContinuation: { store } }))
-    const secondTurnEvents = await collect(a.stream({ ...inputTurn2(), responsesContinuation: { store } }))
+    const secondTurnEvents = await collect(
+      a.stream({ ...inputTurn2(), responsesContinuation: { store } }),
+    )
     await collect(a.stream({ ...inputTurn3(), responsesContinuation: { store } }))
 
     expect(posts).toHaveLength(4)
@@ -729,9 +740,7 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
         content: [{ type: "input_text", text: "again" }],
       },
     ])
-    expect(
-      secondTurnEvents.filter((e) => e.type === "llm_continuation"),
-    ).toEqual([
+    expect(secondTurnEvents.filter((e) => e.type === "llm_continuation")).toEqual([
       {
         type: "llm_continuation",
         surfaceId: "openai-responses",
@@ -795,7 +804,9 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     })
 
     await collect(a.stream({ ...inputTurn1(), responsesContinuation: { store } }))
-    const secondTurnEvents = await collect(a.stream({ ...inputTurn2(), responsesContinuation: { store } }))
+    const secondTurnEvents = await collect(
+      a.stream({ ...inputTurn2(), responsesContinuation: { store } }),
+    )
     await collect(a.stream({ ...inputTurn3(), responsesContinuation: { store } }))
 
     expect(posts).toHaveLength(4)
@@ -805,9 +816,7 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     expect((posts[2]?.input as unknown[])?.length).toBe(3)
     expect(posts[3]?.previous_response_id).toBeUndefined()
     expect((posts[3]?.input as unknown[])?.length).toBe(5)
-    expect(
-      secondTurnEvents.filter((e) => e.type === "llm_continuation"),
-    ).toEqual([
+    expect(secondTurnEvents.filter((e) => e.type === "llm_continuation")).toEqual([
       {
         type: "llm_continuation",
         surfaceId: "openai-responses",

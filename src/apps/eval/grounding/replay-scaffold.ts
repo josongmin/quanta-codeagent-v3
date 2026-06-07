@@ -3,10 +3,8 @@ import { dirname, resolve } from "node:path"
 import type { SessionSnapshotLite } from "@/protocol/session/snapshot"
 import type { TrajectoryEvent } from "@/shared"
 import { loadSession } from "../trajectory/source"
-import { stableJson } from "./stable-json"
 import {
   GROUNDING_USECASE,
-  parseGroundingCase,
   type GroundingAmbiguityClass,
   type GroundingBucket,
   type GroundingCase,
@@ -17,7 +15,9 @@ import {
   type GroundingSeverity,
   type GroundingSourceProvenance,
   type GroundingStateContract,
+  parseGroundingCase,
 } from "./schema"
+import { stableJson } from "./stable-json"
 
 export interface GroundingReplayDraft {
   schema: GroundingCase["schema"]
@@ -85,8 +85,7 @@ const DUMMY_GOLD: GroundingDecision = {
   confidence: "high",
 }
 
-const parseJsonFile = <T>(path: string): T =>
-  JSON.parse(readFileSync(path, "utf8")) as T
+const parseJsonFile = <T>(path: string): T => JSON.parse(readFileSync(path, "utf8")) as T
 
 const toPolicyMarkers = (
   snapshot: SessionSnapshotLite | undefined,
@@ -101,9 +100,7 @@ const toPolicyMarkers = (
   return out.size === 0 ? undefined : [...out].sort()
 }
 
-const collectAssistantHistory = (
-  events: readonly TrajectoryEvent[],
-): GroundingHistoryEntry[] => {
+const collectAssistantHistory = (events: readonly TrajectoryEvent[]): GroundingHistoryEntry[] => {
   const out: GroundingHistoryEntry[] = []
   let assistantText = ""
   const flushAssistantText = (): void => {
@@ -139,8 +136,7 @@ const collectAssistantHistory = (
   return out
 }
 
-const unique = (values: readonly string[]): readonly string[] =>
-  [...new Set(values)].sort()
+const unique = (values: readonly string[]): readonly string[] => [...new Set(values)].sort()
 
 const lastToolResult = (
   history: readonly GroundingHistoryEntry[],
@@ -229,7 +225,8 @@ const deriveStateContract = (
 }
 
 const validateReplayDraft = (raw: unknown): GroundingReplayDraft => {
-  if (typeof raw !== "object" || raw === null) throw new Error("grounding replay draft must be an object")
+  if (typeof raw !== "object" || raw === null)
+    throw new Error("grounding replay draft must be an object")
   const obj = raw as Record<string, unknown>
   if ("gold" in obj) throw new Error("grounding replay draft must not include gold")
   if ("corpus" in obj) throw new Error("grounding replay draft must not include corpus")
@@ -292,7 +289,10 @@ export const buildGroundingReplayDraft = (
     sessionId: session.sessionId,
     ...(session.events.length > 0
       ? {
-          seqRange: [session.events[0]!.seq, session.events[session.events.length - 1]!.seq] as const,
+          seqRange: [
+            session.events[0]!.seq,
+            session.events[session.events.length - 1]!.seq,
+          ] as const,
         }
       : {}),
   }
@@ -305,7 +305,9 @@ export const buildGroundingReplayDraft = (
     bucket: opts.bucket,
     severity: opts.severity,
     ...(stateContract !== undefined ? { stateContract } : {}),
-    ...(opts.candidateThreadIds !== undefined ? { candidateThreadIds: opts.candidateThreadIds } : {}),
+    ...(opts.candidateThreadIds !== undefined
+      ? { candidateThreadIds: opts.candidateThreadIds }
+      : {}),
     ...(opts.candidateReferentIds !== undefined
       ? { candidateReferentIds: opts.candidateReferentIds }
       : {}),

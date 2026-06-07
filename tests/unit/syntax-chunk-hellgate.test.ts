@@ -170,11 +170,7 @@ describe("syntax-chunk hellgate", () => {
     const text = linesFile(205)
     const parsed: ParsedFile = {
       lang: "typescript",
-      decls: [
-        leaf("const", "A", 1, 10),
-        leaf("const", "B", 15, 20),
-        leaf("const", "C", 200, 205),
-      ],
+      decls: [leaf("const", "A", 1, 10), leaf("const", "B", 15, 20), leaf("const", "C", 200, 205)],
     }
     const chunks = [...chunkFileSyntactic(mkInput(text), { ok: true, parsed }, { maxLines })]
     // INVARIANT 1: no emitted chunk exceeds maxLines. None of these decls is an
@@ -233,11 +229,7 @@ describe("syntax-chunk hellgate", () => {
     const text = linesFile(lineCount)
     const parsed: ParsedFile = {
       lang: "typescript",
-      decls: [
-        leaf("const", "A", 6, 8),
-        leaf("const", "B", 12, 15),
-        leaf("const", "C", 200, 205),
-      ],
+      decls: [leaf("const", "A", 6, 8), leaf("const", "B", 12, 15), leaf("const", "C", 200, 205)],
     }
     const chunks = [
       ...chunkFileSyntactic(mkInput(text), { ok: true, parsed }, { maxLines, windowLines: 50 }),

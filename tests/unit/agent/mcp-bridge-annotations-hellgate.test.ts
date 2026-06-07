@@ -52,7 +52,7 @@ describe("§19.1 hellgate — annotations cannot escape HITL/parallel", () => {
       trusted: false,
     })
     expect(tool.isReadOnly()).toBe(false)
-    expect(tool.isConcurrencySafe()).toBe(false)
+    expect(tool.isConcurrencySafe({})).toBe(false)
   })
 
   test("(b) knob OFF ⇒ false/false EVEN for a trusted server", () => {
@@ -61,13 +61,13 @@ describe("§19.1 hellgate — annotations cannot escape HITL/parallel", () => {
       trusted: true,
     })
     expect(tool.isReadOnly()).toBe(false)
-    expect(tool.isConcurrencySafe()).toBe(false)
+    expect(tool.isConcurrencySafe({})).toBe(false)
   })
 
   test("(b') no opts at all ⇒ byte-identical false/false", () => {
     const tool = mcpToolToTool(client, def({ readOnlyHint: true, idempotentHint: true }), "good")
     expect(tool.isReadOnly()).toBe(false)
-    expect(tool.isConcurrencySafe()).toBe(false)
+    expect(tool.isConcurrencySafe({})).toBe(false)
   })
 
   test("(c) poisoned readOnlyHint:'true' on trusted+knob-on ⇒ false (parse dropped it)", () => {
@@ -79,7 +79,7 @@ describe("§19.1 hellgate — annotations cannot escape HITL/parallel", () => {
       trusted: true,
     })
     expect(tool.isReadOnly()).toBe(false)
-    expect(tool.isConcurrencySafe()).toBe(false)
+    expect(tool.isConcurrencySafe({})).toBe(false)
   })
 
   test("ONLY trusted + knob ON + real readOnlyHint:true ELEVATES", () => {
@@ -88,7 +88,7 @@ describe("§19.1 hellgate — annotations cannot escape HITL/parallel", () => {
       trusted: true,
     })
     expect(tool.isReadOnly()).toBe(true)
-    expect(tool.isConcurrencySafe()).toBe(true)
+    expect(tool.isConcurrencySafe({})).toBe(true)
   })
 
   test("readOnly but idempotentHint:false ⇒ read-only YES, concurrency NO", () => {
@@ -97,7 +97,7 @@ describe("§19.1 hellgate — annotations cannot escape HITL/parallel", () => {
       trusted: true,
     })
     expect(tool.isReadOnly()).toBe(true)
-    expect(tool.isConcurrencySafe()).toBe(false)
+    expect(tool.isConcurrencySafe({})).toBe(false)
   })
 
   test("readOnly true, idempotent ABSENT ⇒ concurrency YES (idempotent!==false)", () => {
@@ -106,7 +106,7 @@ describe("§19.1 hellgate — annotations cannot escape HITL/parallel", () => {
       trusted: true,
     })
     expect(tool.isReadOnly()).toBe(true)
-    expect(tool.isConcurrencySafe()).toBe(true)
+    expect(tool.isConcurrencySafe({})).toBe(true)
   })
 
   test("non-read-only tool never concurrency-safe even when idempotent", () => {
@@ -115,7 +115,7 @@ describe("§19.1 hellgate — annotations cannot escape HITL/parallel", () => {
       trusted: true,
     })
     expect(tool.isReadOnly()).toBe(false)
-    expect(tool.isConcurrencySafe()).toBe(false)
+    expect(tool.isConcurrencySafe({})).toBe(false)
   })
 })
 
@@ -218,7 +218,13 @@ describe("§19.3 hellgate — resource/document cap + mimeType + magic, no crash
       fakeClient({
         ok: true,
         content: "big",
-        media: [{ kind: "resource", data: Buffer.from(huge).toString("base64"), mimeType: "application/pdf" }],
+        media: [
+          {
+            kind: "resource",
+            data: Buffer.from(huge).toString("base64"),
+            mimeType: "application/pdf",
+          },
+        ],
       }),
       def(),
       "srv",
@@ -250,7 +256,11 @@ describe("§19.3 hellgate — resource/document cap + mimeType + magic, no crash
         ok: true,
         content: "x",
         media: [
-          { kind: "resource", data: Buffer.from("not a pdf").toString("base64"), mimeType: "application/pdf" },
+          {
+            kind: "resource",
+            data: Buffer.from("not a pdf").toString("base64"),
+            mimeType: "application/pdf",
+          },
         ],
       }),
       def(),
@@ -302,7 +312,11 @@ describe("§19.3 hellgate — resource/document cap + mimeType + magic, no crash
         content: "mix",
         media: [
           { kind: "resource", data: good, mimeType: "application/pdf" },
-          { kind: "resource", data: Buffer.from(huge).toString("base64"), mimeType: "application/pdf" },
+          {
+            kind: "resource",
+            data: Buffer.from(huge).toString("base64"),
+            mimeType: "application/pdf",
+          },
         ],
       }),
       def(),

@@ -17,8 +17,8 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { emitPromptAssembled } from "@/agent/loop/context-assembler"
 import type { PromptAssembledSnapshot } from "@/agent/context/usage-breakdown"
+import { emitPromptAssembled } from "@/agent/loop/context-assembler"
 import type { AgentConfig } from "@/agent/types"
 
 // Minimal turn-context stub — `emitPromptAssembled` reads only `ctx.system` and

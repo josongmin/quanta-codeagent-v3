@@ -9,7 +9,7 @@ export {
   type DefaultDelegationRunnerOpts,
   defaultDelegationRunner,
 } from "./default-runner"
-export { headlessDelegationRunner, type HeadlessStubOpts } from "./headless-stub"
+export { type HeadlessStubOpts, headlessDelegationRunner } from "./headless-stub"
 export type { DelegationRunnerPort } from "./port"
 export {
   ALL_RUNNER_ERROR_KINDS,

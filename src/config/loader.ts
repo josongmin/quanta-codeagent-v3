@@ -18,8 +18,8 @@
  */
 
 import type {
-  HooksSettings,
   HookGroupSetting,
+  HooksSettings,
   LayerSecurity,
   PermissionSettings,
   SettingsLayer,
@@ -87,7 +87,11 @@ const parseHookEvents = (
       const hooks: { type?: string; command?: string }[] = []
       for (const h of rawHooks) {
         const ho = asObject(h)
-        if (ho?.type === "command" && typeof ho.command === "string" && ho.command.trim().length > 0) {
+        if (
+          ho?.type === "command" &&
+          typeof ho.command === "string" &&
+          ho.command.trim().length > 0
+        ) {
           hooks.push({ type: "command", command: ho.command })
         }
       }
