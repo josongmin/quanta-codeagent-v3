@@ -26,7 +26,6 @@ import { describe, expect, test } from "bun:test"
 import { compactIfNeeded, reactiveCompact } from "@/agent/compaction"
 import { HookBus } from "@/agent/hooks"
 import { buildPostCompactEmit } from "@/agent/loop-helpers"
-import { createMicroCompactor } from "@/agent/microcompact"
 import type { RecoveryProvenance } from "@/agent/recovery-reason"
 import type { LLMPort, Message, StreamEvent, StreamInput, SystemPromptInput } from "@/llm"
 
@@ -216,43 +215,6 @@ describe("TKT-0409 — long-session post_compact emit + provenance e2e", () => {
     expect(objective.calls[0]?.actions[0]).toContain("PTL")
   })
 
-  test("MICROCOMPACT — createMicroCompactor drops oldest %, emits provenance + via bus + objective", async () => {
-    const { bus, events } = captureBus()
-    const objective = captureObjective()
-    const threadId = "thread-micro"
-    const messages = longSessionTranscript().map((m) => ({
-      role: m.role,
-      content: m.content,
-    }))
-
-    // 25% drop (default) over a 62-message transcript ⇒ 15 oldest go.
-    const micro = createMicroCompactor()
-    const result = micro.compact({
-      messages,
-      threadId,
-      preserveRecentTurns: 6,
-      dropRatio: 0.25,
-    })
-
-    // The microcompactor returns the provenance directly — to prove it
-    // reaches the bus + objective wires we publish through the same channels
-    // the proactive loop wire uses.
-    expect(result.provenance.reason).toBe("microcompact")
-    expect(result.turnsDropped).toBeGreaterThan(0)
-    expect(result.turnsKept).toBeGreaterThan(0)
-    expect(result.turnsDropped + result.turnsKept).toBe(messages.length)
-    await bus.emit({ type: "post_compact", threadId, provenance: result.provenance })
-    objective.fn(threadId, [`agent compacted: reason ${result.provenance.reason} — partial drop`])
-
-    expect(events.length).toBe(1)
-    expect(events[0]?.provenance.reason).toBe("microcompact")
-    expect(events[0]?.provenance.turnsDropped).toBe(result.turnsDropped)
-    expect(events[0]?.provenance.turnsKept).toBe(result.turnsKept)
-
-    expect(objective.calls.length).toBe(1)
-    expect(objective.calls[0]?.actions[0]).toContain("microcompact")
-  })
-
   test("BYTE-IDENTICAL — long session, no callbacks wired ⇒ compaction succeeds with no event, no objective", async () => {
     const llm = new SummarizingLLM("LEGACY")
     const messages = longSessionTranscript()
@@ -359,26 +321,6 @@ describe("TKT-0409 — long-session post_compact emit + provenance e2e", () => {
     expect("summaryRef" in p).toBe(false)
     // resumeStep IS present (compactIfNeeded always materializes it).
     expect(typeof p.resumeStep).toBe("string")
-  })
-
-  test("ADVERSARIAL — microcompact dropRatio out-of-range clamped ⇒ provenance still well-formed", async () => {
-    const micro = createMicroCompactor()
-    const messages = longSessionTranscript()
-    // dropRatio=2 ⇒ clamped to 1 (would drop everything but the protected suffix)
-    const over = micro.compact({
-      messages,
-      threadId: "t-clamp",
-      dropRatio: 2,
-      preserveRecentTurns: 4,
-    })
-    expect(over.provenance.reason).toBe("microcompact")
-    expect(over.turnsKept).toBeGreaterThanOrEqual(4)
-    expect(over.turnsDropped + over.turnsKept).toBe(messages.length)
-    // dropRatio=-1 ⇒ clamped to 0 ⇒ no drops
-    const under = micro.compact({ messages, threadId: "t-clamp", dropRatio: -1 })
-    expect(under.turnsDropped).toBe(0)
-    expect(under.turnsKept).toBe(messages.length)
-    expect(under.provenance.reason).toBe("microcompact")
   })
 
   test("ADVERSARIAL — proactive defer (preflight 'defer_one_turn') over long session ⇒ NO event, NO objective call", async () => {

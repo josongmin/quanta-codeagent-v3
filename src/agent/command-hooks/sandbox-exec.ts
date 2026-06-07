@@ -25,8 +25,10 @@
  * the env-allowlist source of truth is shared either way. See ADR-0454.
  */
 
+import type { Subprocess } from "bun"
 import { defaultPpidWalkKiller, scrubEnv } from "@/runtime"
 import { escalatingKill, withSpawnedChild } from "@/runtime/guarded-spawn"
+import { asScrubbedEnv, bunScrubbedSpawner } from "@/runtime/scrubbed-spawn"
 import { disclaimedShellArgv } from "@/runtime/shell-disclaim"
 import type { CommandHookExecOpts, CommandHookExecPort, CommandHookExecResult } from "./types"
 
@@ -52,20 +54,21 @@ const capOutput = (text: string, maxBytes: number): string => {
 export const createSandboxCommandHookExec = (): CommandHookExecPort => ({
   exec: async (opts: CommandHookExecOpts): Promise<CommandHookExecResult> => {
     // SAME env scrub as LocalSandbox — only allowlisted names reach the child;
-    // parent secrets are dropped.
-    const env = scrubEnv(opts.envAllowlist)
+    // parent secrets are dropped. S1 — branded at the scrubber chokepoint, then
+    // routed through the typed `spawnScrubbed` boundary (a leak is a tsc error).
+    const env = asScrubbedEnv(scrubEnv(opts.envAllowlist))
     // Dotfile-skipping shell (POSIX_SPAWN_SETDISCLAIM approximation). The user
     // command is the argv tail — never concatenated with the payload.
     const argv = [...disclaimedShellArgv("bash", opts.command)]
     let timedOut = false
 
-    const proc = Bun.spawn(argv, {
+    const proc = bunScrubbedSpawner(argv, {
       cwd: opts.cwd,
       env,
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
-    })
+    }) as Subprocess<"pipe", "pipe", "pipe">
 
     // Deliver the payload as JSON on stdin, then EOF. A hook reads its input
     // here (Claude Code contract). Writing is best-effort — a command that does

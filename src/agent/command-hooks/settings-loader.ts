@@ -18,6 +18,7 @@
  */
 
 import { readFile } from "node:fs/promises"
+import type { HookGroupSetting } from "@/config"
 import type { CommandHookBinding } from "./types"
 
 /** Coerce an unknown into a non-null plain object, else undefined. */
@@ -90,4 +91,40 @@ export const loadCommandHookBindings = async (
     throw err
   }
   return parseCommandHookBindings(text)
+}
+
+/**
+ * Convert the `@/config` resolved-and-TRUST-GATED hook events into
+ * {@link CommandHookBinding}s (ADR-0497, jun-7-misc 05). This is the
+ * trust-gated replacement for the §2 `process.cwd()`-relative
+ * {@link loadCommandHookBindings} read: when `QUANTA_CENTRAL_CONFIG` is on, the
+ * composition root feeds `resolveDiskConfig(...).hooks` (already gated — an
+ * UNTRUSTED repo's hook commands have ALREADY been dropped by the merge) here
+ * instead of reading `<cwd>/settings.json` directly with no trust gate.
+ *
+ * The flatten is byte-identical to {@link parseCommandHookBindings}: one
+ * binding per `{type:"command", command}` (the `@/config` loader already
+ * filtered non-command / empty-command hooks), preserving the per-group
+ * `matcher`. A repo whose grants were dropped for untrust yields ZERO bindings
+ * for those layers — the malicious hook command never becomes a binding.
+ */
+const bindingsFromConfigGroup = (event: string, group: HookGroupSetting): CommandHookBinding[] => {
+  const matcher = typeof group.matcher === "string" ? group.matcher : undefined
+  const out: CommandHookBinding[] = []
+  for (const h of group.hooks ?? []) {
+    if (h.type === "command" && typeof h.command === "string" && h.command.trim().length > 0) {
+      out.push({ event, command: h.command, ...(matcher !== undefined ? { matcher } : {}) })
+    }
+  }
+  return out
+}
+
+export const bindingsFromHookEvents = (
+  events: Readonly<Record<string, readonly HookGroupSetting[]>>,
+): CommandHookBinding[] => {
+  const out: CommandHookBinding[] = []
+  for (const [event, groups] of Object.entries(events)) {
+    for (const group of groups) out.push(...bindingsFromConfigGroup(event, group))
+  }
+  return out
 }

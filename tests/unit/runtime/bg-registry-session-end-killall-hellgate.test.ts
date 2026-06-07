@@ -30,7 +30,10 @@ afterEach(() => {
 })
 
 /** A never-exiting fake child that records its kill count — stands in for a
- *  detached `bash -lc "npm run dev"` that the session-end reap must terminate. */
+ *  detached `bash -lc "npm run dev"` that the session-end reap must terminate.
+ *  NO numeric `pid` ⇒ `escalatingKill` uses the single-PID `proc.kill()` spy
+ *  (NEVER `process.kill` on a real pid). `kill()` resolves `exited` so the
+ *  registry's `await handle.exited` inside `killAll()` settles. */
 const makeNeverExitingProc = (): BashSubprocess & { killCount: number } => {
   let resolveExit!: (code: number) => void
   const exited = new Promise<number>((res) => {
@@ -47,7 +50,6 @@ const makeNeverExitingProc = (): BashSubprocess & { killCount: number } => {
     stdout: empty(),
     stderr: empty(),
     exited,
-    pid: 4242,
     kill() {
       this.killCount += 1
       resolveExit(143)

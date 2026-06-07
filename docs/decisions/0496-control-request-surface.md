@@ -50,3 +50,14 @@ same posture as `SubmissionOp.set_mode` ships in today.
 Gives quanta one typed, validated, fail-closed control vocabulary for live-session steering — the missing
 "host drives a live agent" surface for the `ide` preset. Pure + ported now; live-loop application is the
 low-risk follow-up wire done one subtype at a time with regression checks (per hot-path discipline).
+
+## CLI wiring note (2026-06-07) — deliberately NOT wired on CLI (redundant, not deferred)
+
+This surface is for a HOST (ide/web) to steer the loop over a wire. On the **CLI the user IS the
+controller** and the same effects ALREADY exist as first-class slash commands: `set_model` ⇔ `/model`
+(ADR-0462 sticky model) + `/retry-with` (ADR-0065/0066 model swap); `get_context_usage` ⇔ `/context` +
+`/cost` + `/usage`; effort ⇔ the effort slash. Adding a `controlRequestPort` poll to the turn loop on CLI
+would (a) duplicate those slash commands and (b) be hot-path surgery on every turn for a consumer that
+isn't the CLI. So control-request stays the verified host-wire vocabulary; its live consumer is the
+out-of-repo ide/web adapter (like the rest of §6/§10 in the IDE spec). This is an architectural decision,
+not an unfinished wire — `set_model`/`get_context_usage` are genuinely usable on CLI today via slash.

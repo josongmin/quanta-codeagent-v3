@@ -141,7 +141,7 @@ const loadWith = async (
   // Answer initialize + tools/list so the load resolves.
   const init = transport.sent.find((m) => m.method === "initialize") as { id: number } | undefined
   if (init !== undefined) {
-    transport.emit({ jsonrpc: "2.0", id: init.id, result: { protocolVersion: "x" } })
+    transport.emit({ jsonrpc: "2.0", id: init.id, result: { protocolVersion: "2025-06-18" } })
   }
   await flush()
   const list = transport.sent.find((m) => m.method === "tools/list") as { id: number } | undefined

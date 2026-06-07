@@ -7,6 +7,7 @@ import {
   compactIfNeeded,
   estimateTokens,
   resolveCompactionLimitTokens,
+  TokenBaselineBox,
 } from "../compaction"
 import type { BackgroundSummarizationController } from "../compaction/index"
 import type { BreakerVerdict, CompactionBreaker } from "../compaction-breaker"
@@ -129,9 +130,7 @@ export const maybeCompact = async (
   // baseline: the length-based `markBaselineStaleIfShrunk` (context-assembler)
   // structurally cannot see a content-only shrink, so the stale prefix-measured
   // baseline would otherwise force a premature tier-2 compaction.
-  tokenBaselineBox:
-    | { current?: import("../compaction").TokenBaseline | undefined; sendCount?: number }
-    | undefined,
+  tokenBaselineBox: import("../compaction").TokenBaselineBoxState | undefined,
   // D4 (jun-7) — the model that will ACTUALLY process this turn (sticky/skill
   // swap), so the window-derived threshold tracks the active model, not base
   // `config.llm`. Defaults to the base model id.
@@ -161,7 +160,8 @@ export const maybeCompact = async (
     // so the baseline measured against that fat prefix is now stale. Invalidate
     // it; the tier-2 decision below + the next turn re-anchor on chars/4 until a
     // fresh exact usage lands. (The length-based invalidation cannot catch this.)
-    if (tokenBaselineBox !== undefined) tokenBaselineBox.current = undefined
+    if (tokenBaselineBox !== undefined)
+      TokenBaselineBox.wrap(tokenBaselineBox).invalidateOnContentChange()
   }
   // D4 (jun-7 naive-impl hardening) — the bg-controller ceiling must match the
   // synchronous proactive path's model-derived threshold, so pass the same model.
@@ -211,8 +211,10 @@ export const maybeCompact = async (
         // loop captured an `exact` usage (absent ⇒ chars/4 over the whole
         // transcript, byte-identical legacy).
         model: activeModel,
-        ...(tokenBaselineBox?.current !== undefined
-          ? { tokenBaseline: tokenBaselineBox.current }
+        ...(tokenBaselineBox !== undefined &&
+        TokenBaselineBox.wrap(tokenBaselineBox).currentBaseline() !== undefined
+          ? // biome-ignore lint/style/noNonNullAssertion: guarded by the check above
+            { tokenBaseline: TokenBaselineBox.wrap(tokenBaselineBox).currentBaseline()! }
           : {}),
         ...(config.compaction.thresholdTokens !== undefined
           ? { thresholdTokens: config.compaction.thresholdTokens }

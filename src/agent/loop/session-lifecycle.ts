@@ -1,5 +1,6 @@
 import type { Message } from "@/llm"
 import type { TurnTiming } from "@/observability"
+import { getBashBgRegistry } from "@/runtime/bash-bg-registry"
 import type { RedactionHit, RedactionOrigin } from "@/security"
 import { errMessage } from "@/shared"
 import {

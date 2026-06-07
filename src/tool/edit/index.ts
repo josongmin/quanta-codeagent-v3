@@ -111,6 +111,131 @@ const checkHashPrecondition = (
   }
 }
 
+/** jun-7-misc 06 (ADR ≥0497) — derive a terse, Cursor-style edit sketch from the
+ *  already-failed `old_string`/`new_string` (Open-Q §9.5 decision: DERIVE, never
+ *  change the main model's output contract). The sketch fences the new text
+ *  between two `// ... existing code ...` elisions so the apply model knows the
+ *  unchanged regions are preserved and only the named region changes. Pure. */
+const buildEditSketch = (oldString: string, newString: string): string =>
+  [
+    "// ... existing code ...",
+    `// replace this exact region:`,
+    oldString,
+    "// with:",
+    newString,
+    "// ... existing code ...",
+  ].join("\n")
+
+/** jun-7-misc 06 — EDIT-SCOPED verification of a model-merged file (ticket §4.c).
+ *  The runner already ran the generic structural check (non-empty, changed,
+ *  no leftover elision marker); this adds the bounds the EDIT knows about:
+ *    - the merged file MUST contain `new_string` (the intended change landed),
+ *    - the merged file MUST NOT still contain `old_string` (unless the new text
+ *      itself contains it, e.g. an append) — i.e. the old anchor was resolved,
+ *    - the merged file MUST differ from the original (a no-op is not a fix).
+ *  Returns the rejection reason, or null when the merge is acceptable AS A
+ *  PROPOSAL (it then still flows through the normal gated commit). Conservative
+ *  by construction: any doubt ⇒ reject ⇒ fall through to the typed mismatch. */
+const verifyEditScopedMerge = (
+  original: string,
+  merged: string,
+  oldString: string,
+  newString: string,
+): string | null => {
+  if (merged === original) return "merged file unchanged"
+  // R1 adversarial fix — a DELETION edit (new_string === "") makes the
+  // `merged.includes(newString)` "did the change land" check vacuously true (every
+  // string contains ""), so a hallucinated merge of arbitrary unrelated content
+  // would pass. The merge rung has no trustworthy landed-signal for an empty
+  // new_string, so refuse it and fall through to the typed mismatch (fail-closed).
+  if (newString.length === 0) return "empty new_string has no verifiable landed signal"
+  if (!merged.includes(newString)) return "merged file does not contain new_string"
+  // The old anchor must be gone — UNLESS the replacement text itself embeds it
+  // (append / wrap), in which case its presence is expected. Conservative: only
+  // accept when the old anchor is absent OR the new text legitimately re-introduces it.
+  if (merged.includes(oldString) && !newString.includes(oldString)) {
+    return "merged file still contains old_string (anchor not replaced)"
+  }
+  return null
+}
+
+/** jun-7-misc 06 — the OPTIONAL merge rung. Reached ONLY when the deterministic
+ *  exact/fuzzy ladder missed AND `ctx.fastApplyMerge` is wired (gate ON +
+ *  apply-model configured). Derives a terse sketch, asks the apply model to
+ *  merge it into the CURRENT file, verifies the proposal (runner-level structural
+ *  + edit-scoped here), and on success returns the merged bytes for the SAME
+ *  gated commit any edit takes. NO-THROW: a port that throws, returns ok:false,
+ *  or whose merge fails verification ⇒ `null` ⇒ caller falls through to the
+ *  byte-identical typed mismatch. Absent port ⇒ never called (byte-identical). */
+const tryFastApplyMergeRung = async (
+  ctx: ToolContext,
+  source: string,
+  input: Input,
+  lineRanges: readonly LineRange[] | undefined,
+): Promise<string | null> => {
+  const port = ctx.fastApplyMerge
+  if (port === undefined) return null
+  // R1 adversarial fix — when the caller declared a bounded `line_ranges` scope,
+  // the deterministic ladder honors it, but a WHOLE-FILE merge cannot. A model
+  // merge handed the entire file could mutate lines OUTSIDE the declared scope
+  // (e.g. a secret on another line) while still landing new_string — a scope
+  // escape the structural checks can't catch. Conservatively skip the rung
+  // entirely under line_ranges and fall through to the typed mismatch.
+  if (lineRanges !== undefined) return null
+  // R2 adversarial fix — `replace_all` is a deterministic contract (change EVERY
+  // occurrence of old_string). A whole-file model merge sees only a terse sketch,
+  // and the edit-scoped verification checks single-occurrence presence/absence —
+  // it CANNOT prove all N sites changed. A merge that changes only one (or the
+  // wrong) site still passes `merged.includes(new_string)` while silently
+  // violating replace_all. The rung cannot honor that contract, so skip it and
+  // fall through to the typed mismatch (fail-closed; no heuristic).
+  if (input.replace_all === true) return null
+  let result: Awaited<ReturnType<typeof port.apply>>
+  try {
+    result = await port.apply(
+      {
+        original: source,
+        editSketch: buildEditSketch(input.old_string, input.new_string),
+        path: input.path,
+      },
+      ctx.signal,
+    )
+  } catch {
+    // Port broke its NO-THROW contract — fail-closed to the typed mismatch.
+    return null
+  }
+  if (!result.ok || result.merged === null) return null
+  const reject = verifyEditScopedMerge(source, result.merged, input.old_string, input.new_string)
+  if (reject !== null) return null
+  return result.merged
+}
+
+/** H12 — resolve + validate the OPTIONAL caller-supplied `line_ranges`. Returns
+ *  `{ ranges }` (undefined ⇒ whole-file, byte-identical legacy) on success, or a
+ *  typed `rejected` failure when a supplied range is malformed. Pure; extracted
+ *  from `planEdit` to keep it under the biome cognitive-complexity cap. */
+const resolveLineRanges = (
+  input: Input,
+):
+  | { ok: true; ranges: readonly LineRange[] | undefined }
+  | { ok: false; result: { ok: false; output: string; failure: ToolFailure } } => {
+  const ranges: readonly LineRange[] | undefined =
+    input.line_ranges !== undefined && input.line_ranges.length > 0 ? input.line_ranges : undefined
+  if (ranges === undefined) return { ok: true, ranges: undefined }
+  const verdict = validateLineRanges(ranges)
+  if (!verdict.ok) {
+    return {
+      ok: false,
+      result: {
+        ok: false,
+        output: verdict.message,
+        failure: { mode: "rejected", reason: verdict.message },
+      },
+    }
+  }
+  return { ok: true, ranges }
+}
+
 /** Plan the edit: read the file, gate on the optional hash precondition,
  *  apply exact (then fuzzy if requested) replacement. Returns either a typed
  *  failure result (early exit) or the new bytes ready to commit. No I/O
@@ -119,11 +244,12 @@ const checkHashPrecondition = (
 const planEdit = async (
   fs: FileSystemPort,
   input: Input,
-  cwd: string | undefined,
+  ctx: ToolContext,
 ): Promise<
   | { kind: "ready"; before: string; next: string; message: string }
   | { kind: "failure"; result: { ok: false; output: string; failure: ToolFailure } }
 > => {
+  const cwd = ctx.cwd
   const source = await fs.readFile(input.path, cwd)
   const preconditionFailure = checkHashPrecondition(source, input.path, input.expected_hash)
   if (preconditionFailure !== null) return { kind: "failure", result: preconditionFailure }
@@ -131,27 +257,31 @@ const planEdit = async (
   // range is a model error, surfaced as `rejected` so it fixes the span rather
   // than wondering why the edit "found nothing". Absent ⇒ undefined (whole-file
   // search, byte-identical legacy path).
-  const lineRanges: readonly LineRange[] | undefined =
-    input.line_ranges !== undefined && input.line_ranges.length > 0 ? input.line_ranges : undefined
-  if (lineRanges !== undefined) {
-    const verdict = validateLineRanges(lineRanges)
-    if (!verdict.ok) {
-      return {
-        kind: "failure",
-        result: {
-          ok: false,
-          output: verdict.message,
-          failure: { mode: "rejected", reason: verdict.message },
-        },
-      }
-    }
-  }
+  const rangesResolved = resolveLineRanges(input)
+  if (!rangesResolved.ok) return { kind: "failure", result: rangesResolved.result }
+  const lineRanges = rangesResolved.ranges
   const replaceAll = input.replace_all ?? false
   let result = applyExactEdit(source, input.old_string, input.new_string, replaceAll, lineRanges)
   if ((!result.ok || result.next === undefined) && input.fuzzy) {
     result = applyFuzzyEdit(source, input.old_string, input.new_string, replaceAll, lineRanges)
   }
   if (!result.ok || result.next === undefined) {
+    // jun-7-misc 06 — OPTIONAL model-apply MERGE rung, AFTER the deterministic
+    // exact/fuzzy ladder missed and BEFORE the typed mismatch (ticket §4.b: only
+    // spend an apply-model call once the free rungs miss). Default-OFF: when
+    // `ctx.fastApplyMerge` is unwired this is a single `undefined` check and the
+    // path below is BYTE-IDENTICAL to the legacy mismatch. When wired, a verified
+    // merge becomes the `ready` bytes that flow through the SAME gated commit +
+    // diff-sink path as any edit — never a blind write.
+    const merged = await tryFastApplyMergeRung(ctx, source, input, lineRanges)
+    if (merged !== null) {
+      return {
+        kind: "ready",
+        before: source,
+        next: merged,
+        message: "applied via fast-apply merge",
+      }
+    }
     // H12 paired improvement — annotate AMBIGUOUS failures (the anchor matched
     // multiple spots) with the file's total line count so the model can pick a
     // `line_ranges` value on retry to disambiguate by scope, instead of a blind
@@ -273,7 +403,7 @@ export const makeEditTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
     // The jail check fires in readFile() (and again in writeFile()) BEFORE
     // any write, so a denied path is NEVER a partial write.
     try {
-      const planned = await planEdit(fs, input, ctx.cwd)
+      const planned = await planEdit(fs, input, ctx)
       if (planned.kind === "failure") {
         yield { type: "result", result: planned.result }
         return

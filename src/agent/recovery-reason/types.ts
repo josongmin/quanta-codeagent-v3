@@ -36,8 +36,9 @@
  *    cheaper than continuing with stale context).
  *  - `"fork_branch"` — a session fork created a new compaction point on the
  *    parent (the fork inherits a snapshot; the parent records the split).
- *  - `"microcompact"` — partial drop (oldest N% only) rather than full reset.
- *    Set by {@link createMicroCompactor} when it actually dropped messages.
+ *  - `"microcompact"` — a tier-1 tool_result eviction (the orphan-safe
+ *    `microcompactToolResults` in `tool-result-evict`) replaced bulky tool
+ *    output with a spill reference rather than a full transcript reset.
  */
 export type RecoveryReason =
   | "token_budget_exceeded"
@@ -71,9 +72,8 @@ export const isRecoveryReason = (v: unknown): v is RecoveryReason =>
   typeof v === "string" && (RECOVERY_REASONS as readonly string[]).includes(v)
 
 /**
- * Provenance record carried on every `post_compact` event AND on every
- * `MicroCompactResult`. Everything readonly — provenance is observed, never
- * mutated by a downstream consumer.
+ * Provenance record carried on every `post_compact` event. Everything readonly
+ * — provenance is observed, never mutated by a downstream consumer.
  *
  * Fields:
  * - `reason`: WHY the compaction happened (closed enum above).

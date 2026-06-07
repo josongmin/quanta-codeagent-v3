@@ -4,7 +4,7 @@ import type { WorkingMemory } from "@/memory"
 import { errMessage, runtimeConfig } from "@/shared"
 import type { TaskBudget } from "../budget"
 import type { BgSummaryPayload } from "../compaction"
-import { markBaselineStaleIfShrunk } from "../compaction"
+import { TokenBaselineBox } from "../compaction"
 import type { BackgroundSummarizationController } from "../compaction/index"
 import type { BreakerVerdict, CompactionBreaker } from "../compaction-breaker"
 import type { ConversationSummaryArchive } from "../conversation-summary-archive"
@@ -217,9 +217,7 @@ export const prepareTurnContext = async (
   // chars/4 estimate (legacy, byte-identical). After compaction settles we
   // record `sendCount` = the wm length of the prompt about to be sent, so the
   // usage capture can pair it with the provider's authoritative input count.
-  tokenBaselineBox:
-    | { current?: import("../compaction").TokenBaseline | undefined; sendCount?: number }
-    | undefined,
+  tokenBaselineBox: import("../compaction").TokenBaselineBoxState | undefined,
   // D4 (jun-7) — the model that will ACTUALLY process this turn (sticky/skill
   // swap resolved in `runTurn`), so the compaction window threshold tracks the
   // active model, not base `config.llm`. Defaults to the base model id.
@@ -253,13 +251,14 @@ export const prepareTurnContext = async (
     activeModel,
   )
   if (tokenBaselineBox !== undefined) {
+    const baseline = TokenBaselineBox.wrap(tokenBaselineBox)
     // Invalidate a baseline whose measured prefix was just replaced by a
     // shrinking compaction (proactive summarize / microcompact).
-    markBaselineStaleIfShrunk(tokenBaselineBox, lenBeforeCompact, wm.snapshot().length)
+    baseline.invalidateOnShrink(lenBeforeCompact, wm.snapshot().length)
     // Record the send-time wm length AFTER compaction settled — the base the NEXT
     // turn's compaction will slice + the count the usage capture pairs with the
     // authoritative `inputTokens` for this prompt.
-    tokenBaselineBox.sendCount = wm.snapshot().length
+    baseline.recordSendCount(wm.snapshot().length)
   }
   const wsSnapshot = workingState?.snapshot()
   const contextEvents = resolveContextEventsForTurn(config)

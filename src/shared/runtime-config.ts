@@ -23,6 +23,18 @@
  * Adding an env var: write a `parseFoo` helper + add a field to `RuntimeConfig`
  * + parse in `loadFromEnv`. Use the var FROM `runtimeConfig()`, never from
  * `process.env` directly. The anti-regression scanner bans the latter.
+ *
+ * Disk config precedence (jun-7-misc 05, the `@/config` slice): when
+ * `QUANTA_CENTRAL_CONFIG` is on, an OPTIONAL on-disk config is consulted UNDER
+ * env. The resolution order, high→low, is:
+ *   env > managed > user > project(trusted) > local(trusted)
+ * i.e. an explicit `QUANTA_*` env var ALWAYS wins; the disk value is only a
+ * fallback an operator can set in `settings.json`. The ONE exception (§9 Q2,
+ * decided): a MANAGED layer key flagged non-overridable
+ * (`allowManagedPermissionRulesOnly`/`allowManagedHooksOnly`) is org-locked and
+ * is NOT overridable by env (lockdown semantics) — but that gating lives in the
+ * `@/config` merge, not here; this chokepoint only consumes the already-resolved
+ * value. Absent the knob, NO disk read occurs and this file is byte-identical.
  */
 
 import { tlsMitmAuthorized } from "@/runtime/network-proxy/mitm-gate"
@@ -1079,6 +1091,97 @@ export interface RuntimeConfig {
    *  to the raw tunnel + a VISIBLE `connect-tunnel-unscanned` marker. Any other
    *  value ⇒ `deny` (fail closed by default). Inert unless {@link tlsMitm}. */
   readonly tlsMitmOnFailure: "deny" | "opaque-tunnel"
+  /** jun-7-misc 02 (manifest codex-compat) — read-only codex-shape manifest
+   *  ingest normalizer gate (`QUANTA_MANIFEST_COMPAT`). Strict opt-in
+   *  (`=== "1"`). SECURITY-relevant: it LOOSENS manifest validation (accepts a
+   *  foreign/codex-shaped manifest by coercing its shape on ingest), so an
+   *  accidental loose-truthy enable must NOT arm it — strict `=1` only. Default
+   *  false ⇒ the loader rejects non-quanta manifests exactly as today
+   *  (byte-identical validation). The normalizer never widens a grant; it only
+   *  renames/coerces SHAPE on read. */
+  readonly manifestCompat: boolean
+  /** jun-7-misc 03 (guardian per-action assessor) — per-action LLM risk
+   *  assessor gate (`QUANTA_GUARDIAN_ASSESSOR`). Strict opt-in (`=== "1"`).
+   *  Default false ⇒ no guardian assessor is constructed, the admissibility gate
+   *  consults no per-action LLM risk pass, and tool dispatch is byte-identical.
+   *  When ON *and* a judge LLM + the guardian wiring are assembled at the
+   *  composition root, a candidate action may be routed through the assessor for
+   *  an advisory risk signal (it NEVER auto-grants — it can only add caution /
+   *  route to HITL, never widen a grant). */
+  readonly guardianAssessor: boolean
+  /** jun-7-misc 04 (auto-mode rule overlay) — user-authored rule overlay onto
+   *  the auto-mode classifier system prompt (`QUANTA_AUTO_MODE_RULES`). Strict
+   *  opt-in (`=== "1"`). Default false ⇒ `evaluateAuto` flows the exact current
+   *  `CLASSIFIER_SYSTEM_PROMPT` (or scout-overlaid prompt) unchanged
+   *  (byte-identical classification). When ON, `withUserRuleOverlay` splices the
+   *  operator's rule text into the classifier prompt. */
+  readonly autoModeRules: boolean
+  /** jun-7-misc 04 (auto-mode circumvention detect) — denied-effect re-attempt
+   *  tracker gate (`QUANTA_CIRCUMVENT_DETECT`). Strict opt-in (`=== "1"`).
+   *  Default false ⇒ no `CircumventionTracker` is constructed, zero effect
+   *  signatures are recorded, and the auto-mode gate is byte-identical. When ON,
+   *  a sibling tracker records a denied action's effect-signature so a
+   *  semantically-equivalent retry via a DIFFERENT tool surfaces an advisory
+   *  circumvention signal (never an auto-deny — advisory only). */
+  readonly circumventDetect: boolean
+  /** jun-7-misc 05 (central-config trust) — repo-local central config loader
+   *  gate (`QUANTA_CENTRAL_CONFIG`). Strict opt-in (`=== "1"`). SECURITY:
+   *  reading a repo-local config file is RCE-adjacent (a hostile repo could plant
+   *  config that steers tool behavior), so it must be a deliberate `=1` opt-in.
+   *  Default false ⇒ NO repo-local config file is discovered, read, or merged
+   *  (byte-identical startup). When ON, the config lane's disk loader (wired
+   *  LATER — only the gate field lives here) reads + merges a trust-gated
+   *  repo-local central config. */
+  readonly centralConfig: boolean
+  /** jun-7-misc 06 (model-based fast-apply) — model-apply MERGE rung gate
+   *  (`QUANTA_FAST_APPLY_MERGE`). Strict opt-in (`=== "1"`). DISTINCT from the
+   *  existing `QUANTA_FAST_APPLY` (the V4A re-emit rung, gated in
+   *  `agent/optional-ports.ts`) — this knob adds a NEW optional model-apply rung.
+   *  Default false ⇒ no `FastApplyPort` (merge) is constructed, `ctx.fastApplyMerge`
+   *  is undefined, and the edit fallback ladder is the byte-identical
+   *  `exact → fuzzy → V4A re-emit` with ZERO apply-model dispatches. Requires BOTH
+   *  this gate AND a configured {@link fastApplyModel} for any provider call
+   *  (advertise-iff-able). */
+  readonly fastApplyMerge: boolean
+  /** jun-7-misc 06 — operator-chosen apply-model id for the fast-apply MERGE rung
+   *  (`QUANTA_FAST_APPLY_MODEL`, mirrors `QUANTA_COMPACT_MODEL`). Absent ⇒ no
+   *  `FastApplyPort` is built even when {@link fastApplyMerge} is on (both must be
+   *  present — advertise-iff-able). NO default model: the apply model is
+   *  operator-set (a cheap specialist) and must be measured against the re-emit
+   *  baseline, not guessed (`no-heuristics-only-validated`). Never defaults to the
+   *  main agent model (that would defeat the cost win). */
+  readonly fastApplyModel: string | undefined
+  /** jun-7-misc 01 (MCP protocol version) — OPTIONAL max-offered MCP protocol
+   *  version override (`QUANTA_MCP_PROTOCOL_MAX`, a protocol-version string).
+   *  Absent ⇒ undefined ⇒ negotiation offers the code-side SSOT max version
+   *  (the SSOT list lives in `src/mcp`); negotiation is otherwise ALWAYS-ON and
+   *  backward-compatible, so there is NO gate. When set, it pins the MAX version
+   *  the client/server offers (e.g. to cap at an older spec for a peer that
+   *  mis-handles a newer one). An unknown/unsupported value is the mcp lane's
+   *  concern to validate against its SSOT; this field only carries the raw
+   *  override string. */
+  readonly mcpProtocolMax: string | undefined
+  /** jun-7-misc 05 (central-config trust) — user-config-dir override for the
+   *  `@/config` USER layer (`QUANTA_CONFIG_DIR`, analogous to Claude's
+   *  `CLAUDE_CONFIG_DIR`). Absent ⇒ undefined ⇒ the config lane defaults to
+   *  `~/.quanta`. PURELY a path string carried for the loader; it has NO effect
+   *  unless {@link centralConfig} is on (the loader is never invoked otherwise),
+   *  so a set-but-disabled value is byte-identical. */
+  readonly centralConfigDir: string | undefined
+  /** jun-7-misc 05 (central-config trust) — the `--setting-sources` analogue
+   *  (`QUANTA_SETTING_SOURCES`, a comma list subset of
+   *  `managed,user,project,local`). Absent ⇒ undefined ⇒ the config lane honors
+   *  ALL layers. Carried raw; the `@/config` lane parses + validates it. No
+   *  effect unless {@link centralConfig} is on. */
+  readonly centralConfigSources: string | undefined
+  /** jun-7-misc 05 (central-config trust) — static trusted-path allow-list for
+   *  HEADLESS/CI grants (`QUANTA_TRUSTED_PATHS`, a comma/`:`-free path list,
+   *  §9 Q3). Absent ⇒ undefined ⇒ NO path is statically trusted (headless ⇒
+   *  untrusted, period — the safe default). When set, the config lane
+   *  canonicalizes each entry into the trust set. This is the EXPLICIT CI
+   *  opt-in; it NEVER auto-trusts cwd. No effect unless {@link centralConfig}
+   *  is on. */
+  readonly trustedPaths: string | undefined
 }
 
 /** jun-6 — default watchdog cap (ms) for a `block`-tool critical section. The
@@ -1471,6 +1574,58 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     readOutline: gateOn(env, "QUANTA_READ_OUTLINE"),
     // Grammar-wasm dir override. Absent ⇒ resolve tree-sitter-wasms/out.
     treeSitterDir: stringOrUndef(env["QUANTA_TREE_SITTER_DIR"]),
+    // jun-7-misc 02 — strict `=== "1"` opt-in. SECURITY-relevant (LOOSENS
+    // manifest validation by accepting a coerced foreign/codex shape on ingest),
+    // so it stays strict — a loose truthy spelling must NOT arm it. Default false
+    // ⇒ non-quanta manifests are rejected exactly as today (byte-identical).
+    manifestCompat: gateOnStrict(env, "QUANTA_MANIFEST_COMPAT"),
+    // jun-7-misc 03 — strict `=== "1"` opt-in. Default false ⇒ no guardian
+    // assessor constructed, no per-action LLM risk pass, tool dispatch
+    // byte-identical. The assessor (when wired) is advisory-only — never grants.
+    guardianAssessor: gateOnStrict(env, "QUANTA_GUARDIAN_ASSESSOR"),
+    // jun-7-misc 04 — strict `=== "1"` opt-in. Default false ⇒ `evaluateAuto`
+    // flows the exact current CLASSIFIER_SYSTEM_PROMPT unchanged (byte-identical).
+    autoModeRules: gateOnStrict(env, "QUANTA_AUTO_MODE_RULES"),
+    // jun-7-misc 04 — strict `=== "1"` opt-in. Default false ⇒ no
+    // CircumventionTracker constructed, zero signatures recorded, the auto-mode
+    // gate is byte-identical. Advisory-only signal when ON (never an auto-deny).
+    circumventDetect: gateOnStrict(env, "QUANTA_CIRCUMVENT_DETECT"),
+    // jun-7-misc 05 — strict `=== "1"` opt-in. SECURITY: reading a repo-local
+    // config is RCE-adjacent, so a deliberate `=1` is required. Default false ⇒
+    // no repo-local config discovered/read/merged (byte-identical startup). The
+    // disk loader's structural wiring lands LATER (config lane); only the gate
+    // field lives here.
+    centralConfig: gateOnStrict(env, "QUANTA_CENTRAL_CONFIG"),
+    // jun-7-misc 06 — strict `=== "1"` opt-in. DISTINCT from QUANTA_FAST_APPLY
+    // (the existing V4A re-emit rung gated in agent/optional-ports.ts). Default
+    // false ⇒ no FastApplyPort (merge) constructed, ctx.fastApplyMerge undefined,
+    // the edit ladder is the byte-identical exact→fuzzy→V4A re-emit with ZERO
+    // apply-model dispatches. Requires BOTH this gate AND a configured model below.
+    fastApplyMerge: gateOnStrict(env, "QUANTA_FAST_APPLY_MERGE"),
+    // jun-7-misc 06 — operator-chosen apply-model id (mirrors QUANTA_COMPACT_MODEL).
+    // Absent ⇒ no port built even when fastApplyMerge is on (both required —
+    // advertise-iff-able). NO default model (no-heuristics rule: measure vs the
+    // re-emit baseline; never default to the main agent model).
+    fastApplyModel: stringOrUndef(env["QUANTA_FAST_APPLY_MODEL"]),
+    // jun-7-misc 01 — OPTIONAL max-offered MCP protocol version override. Absent
+    // ⇒ undefined ⇒ negotiation offers the code-side SSOT max (src/mcp);
+    // negotiation is otherwise always-on/backward-compatible (NO gate). When set,
+    // pins the MAX version offered. The raw string is carried as-is; the mcp lane
+    // validates it against its SSOT version list.
+    mcpProtocolMax: stringOrUndef(env["QUANTA_MCP_PROTOCOL_MAX"]),
+    // jun-7-misc 05 — user-config-dir override for the @/config USER layer.
+    // Absent ⇒ undefined ⇒ config lane defaults to ~/.quanta. No effect unless
+    // centralConfig is on (loader never invoked otherwise) ⇒ byte-identical.
+    centralConfigDir: stringOrUndef(env["QUANTA_CONFIG_DIR"]),
+    // jun-7-misc 05 — `--setting-sources` analogue (subset of
+    // managed,user,project,local). Absent ⇒ undefined ⇒ all layers. Carried
+    // raw; the @/config lane parses/validates. No effect unless centralConfig.
+    centralConfigSources: stringOrUndef(env["QUANTA_SETTING_SOURCES"]),
+    // jun-7-misc 05 — static trusted-path allow-list for headless/CI (§9 Q3).
+    // Absent ⇒ undefined ⇒ NO static trust (headless ⇒ untrusted, the safe
+    // default). EXPLICIT CI opt-in; never auto-trusts cwd. No effect unless
+    // centralConfig is on.
+    trustedPaths: stringOrUndef(env["QUANTA_TRUSTED_PATHS"]),
   })
 }
 

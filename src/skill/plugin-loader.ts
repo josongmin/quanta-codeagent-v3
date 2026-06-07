@@ -24,7 +24,7 @@ import {
   PLUGIN_MCP_FILE,
   PLUGIN_SKILLS_DIR,
   type PluginManifest,
-  PluginManifestSchema,
+  parsePluginManifest,
 } from "./plugin-manifest"
 
 /** A skill entry observed under `<pluginDir>/skills/<name>/SKILL.md`. The
@@ -132,7 +132,10 @@ export const loadPluginManifest = async (pluginDir: string): Promise<LoadedPlugi
   const manifestPath = join(pluginDir, PLUGIN_DIR_NAME, PLUGIN_MANIFEST_FILE)
   const manifestRead = await readJson(manifestPath)
   if (!manifestRead.ok) throw manifestRead.err
-  const parsed = PluginManifestSchema.safeParse(manifestRead.value)
+  // jun-7-misc 02 — single closed-port parse. Default-OFF (`QUANTA_MANIFEST_COMPAT`
+  // unset) ⇒ byte-identical to `PluginManifestSchema.safeParse`; when armed it
+  // coerces codex shape (string `skills` → array) + accepts `repository`.
+  const parsed = parsePluginManifest(manifestRead.value)
   if (!parsed.success) {
     const issues = parsed.error.issues
       .map((i) => `  - ${i.path.join(".") || "<root>"}: ${i.message}`)

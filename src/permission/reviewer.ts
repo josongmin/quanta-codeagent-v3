@@ -23,6 +23,8 @@
  *     each other on `outcome`; identical-but-duplicate records are deduped.
  */
 
+import { runtimeConfig } from "@/shared/runtime-config"
+import { collapseAssessment } from "./assessment-collapse"
 import { buildDecision, isAdmissible, isAllowed } from "./outcome"
 import { emitPermissionDecision, type PermissionOutcomeLabel } from "./recorder"
 import type {
@@ -146,17 +148,35 @@ const replayDenial = (denial: DenialMemory, decidedAt: number): ApprovalDecision
 }
 
 /** Verify the port exposes a callable method for the requested reviewer
- *  BEFORE invoking it. Missing methods raise `ReviewerUnavailableError`. */
+ *  BEFORE invoking it. Missing methods raise `ReviewerUnavailableError`.
+ *
+ *  jun-7-misc 03 (ADR-0497, R2 hole-fix): for the `guardian_subagent` tier the
+ *  richer `guardianAssess` is an ALTERNATIVE servicer to the binary
+ *  `guardianReview` — `dispatchFresh` routes to it when (and only when) the
+ *  `QUANTA_GUARDIAN_ASSESSOR` knob is strictly on. So a composition that wires
+ *  the assessor as the guardian path MAY omit `guardianReview`; the availability
+ *  pre-check must accept EITHER servicer the SAME way `dispatchFresh` selects
+ *  one, or it would throw `ReviewerUnavailableError` before the assessor is ever
+ *  reached. The knob-gated `guardianAssess` acceptance EXACTLY mirrors the
+ *  dispatch branch — absent the knob (every OFF path) the check is the verbatim
+ *  legacy 3-way method probe (byte-identical: an assessor-only port still fails
+ *  closed with `ReviewerUnavailableError`, never silently falling through). */
 const assertReviewerAvailable = (reviewer: ReviewerTier, port: ReviewerPort): void => {
-  const method =
-    reviewer === "user"
-      ? port.userReview
-      : reviewer === "auto_review"
-        ? port.autoReview
-        : port.guardianReview
-  if (typeof method !== "function") {
-    throw new ReviewerUnavailableError(reviewer)
+  if (reviewer === "user") {
+    if (typeof port.userReview !== "function") throw new ReviewerUnavailableError(reviewer)
+    return
   }
+  if (reviewer === "auto_review") {
+    if (typeof port.autoReview !== "function") throw new ReviewerUnavailableError(reviewer)
+    return
+  }
+  // guardian_subagent: the assessor is a valid servicer ONLY under the strict
+  // knob — identical predicate to `dispatchFresh`. Otherwise require the binary
+  // guardianReview, exactly as today.
+  const assessorServices =
+    typeof port.guardianAssess === "function" && runtimeConfig().guardianAssessor
+  if (assessorServices) return
+  if (typeof port.guardianReview !== "function") throw new ReviewerUnavailableError(reviewer)
 }
 
 /** Validate a port-supplied decision against the invariant matrix. Throws
@@ -206,6 +226,34 @@ const emitReviewerDecision = (decision: ApprovalDecision): void => {
   })
 }
 
+/** Dispatch a FRESH (non-replayed) decision to the configured reviewer.
+ *
+ *  jun-7-misc 03 (ADR-0497): when the active tier is `guardian_subagent`, the
+ *  port exposes the OPTIONAL richer `guardianAssess`, AND the
+ *  `QUANTA_GUARDIAN_ASSESSOR` knob is strictly on, the guardian renders a typed
+ *  {@link ActionAssessment} that `collapseAssessment` reduces to the standard
+ *  `ApprovalDecision` (the single boundary). The richer call REPLACES the binary
+ *  `guardianReview` for that one verdict — it is the SAME guardian round-trip
+ *  with a richer reply shape, not an extra LLM pass (ticket §9.3).
+ *
+ *  DEFAULT-OFF BYTE-IDENTITY: absent the method (every current impl) OR with the
+ *  knob off, this is the EXACT legacy 3-way dispatch — `guardianAssess` is never
+ *  called and `collapseAssessment` is never reached. */
+const dispatchFresh = async (
+  action: ToolActionKeyed,
+  ctx: ReviewContext,
+  port: ReviewerPort,
+): Promise<ApprovalDecision> => {
+  if (ctx.configReviewer === "user") return port.userReview(action, ctx)
+  if (ctx.configReviewer === "auto_review") return port.autoReview(action, ctx)
+  // guardian_subagent tier.
+  if (typeof port.guardianAssess === "function" && runtimeConfig().guardianAssessor) {
+    const assessment = await port.guardianAssess(action, ctx)
+    return collapseAssessment(assessment, ctx.decidedAt)
+  }
+  return port.guardianReview(action, ctx)
+}
+
 /** Main entry point. Resolves sticky precedence, then dispatches to the
  *  configured reviewer. Returns a validated `ApprovalDecision`.
  *
@@ -225,12 +273,7 @@ export const reviewAction = async (
     return replayed
   }
   assertReviewerAvailable(ctx.configReviewer, port)
-  const fresh =
-    ctx.configReviewer === "user"
-      ? await port.userReview(action, ctx)
-      : ctx.configReviewer === "auto_review"
-        ? await port.autoReview(action, ctx)
-        : await port.guardianReview(action, ctx)
+  const fresh = await dispatchFresh(action, ctx, port)
   const validated = validateDecision(fresh)
   emitReviewerDecision(validated)
   return validated

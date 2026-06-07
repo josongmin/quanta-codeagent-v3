@@ -1,6 +1,8 @@
 // ADR-0135 — Permission profile + file_system_sandbox_policy 2-layer.
 export type { AccessVerdict, CanAccessOpts } from "./access-check"
 export { canAccess } from "./access-check"
+// jun-7-misc 03 (ADR-0497) — guardian per-action typed assessment collapse.
+export { collapseAssessment } from "./assessment-collapse"
 export type { ApprovalRecord, ApprovalReviewer, ApprovalReviewerOpts } from "./auto-approval-review"
 export { createApprovalReviewer } from "./auto-approval-review"
 // ADR-0453 — Heartbeat autorun eligibility (pure verdict consumed by scheduler/reactor).
@@ -332,4 +334,10 @@ export type {
   ReviewerTier,
   ToolAction,
   ToolActionKeyed,
+} from "./types"
+export {
+  type ActionAssessment,
+  ALL_ASSESSMENT_KINDS,
+  type AssessmentEscalation,
+  type AssessmentKind,
 } from "./types"

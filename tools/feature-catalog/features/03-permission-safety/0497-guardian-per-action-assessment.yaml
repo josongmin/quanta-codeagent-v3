@@ -1,0 +1,81 @@
+id: guardian-per-action-assessment
+title: Guardian per-action TYPED assessment — binary verdict → discriminated ActionAssessment (collapse boundary)
+section: 3
+subsystem: 권한 게이트 — guardian 리뷰어를 veto에서 steering-wheel로 (Codex 0.135 per-action assessor 흡수)
+order: 497
+maturity: L2
+status: hold
+ui_surfaces: [n-a]
+monitoring: integrated
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+config_refs:
+  env: [QUANTA_GUARDIAN_ASSESSOR]
+owners: ["@songmin"]
+labels: [surface:cli, category:permission, security, security-touched, default-off, absorbed:codex]
+depends_on: [reviewer-3tier, deny-and-steer-verb, review-kind-matrix, deny-reason-surfacing]
+purpose: |
+  quanta guardian/reviewer 가 BINARY (approve|deny) 인 한계를 닫는 ADR-0497. Codex
+  0.135 의 per-action assessor (`GuardianAssessmentEvent` 11-field + `ReviewDecision`
+  approved_exec/proposed_exec/network_policy_amendment/denied/abort/timed_out) 흡수.
+  타입드 `ActionAssessment` discriminated union (allow / allow_for_session /
+  allow_with_edit / ask / deny / deny_and_steer / escalate)을 OPT-IN richer assessor
+  가 emit → 단 하나의 순수 boundary `collapseAssessment` 가 기존 8-state
+  `ApprovalDecision` 으로 COLLAPSE → 기존 consumer(reviewer.ts dispatch / outcome.ts
+  matrix / admissibility-gate routing)는 BYTE-IDENTICAL. assessor 는 OPTIONAL
+  `ReviewerPort.guardianAssess?` 메서드 (최소 blast-radius); `reviewAction` 의
+  `dispatchFresh` 가 guardian tier + 메서드 present + 크놉 ON 일 때만 호출, 아니면
+  verbatim binary `guardianReview` fall-through. SAME guardian round-trip — extra LLM
+  pass 없음(richer reply schema 만). SAFETY (load-bearing): collapse 는 TOTAL +
+  CONSERVATIVE — allow/allow_for_session 만 allow outcome 로 collapse, 나머지 전부 +
+  unknown/future/parse-failure kind 는 최소 deny(fail-closed), NEVER silent allow.
+  allow_with_edit 는 절대 allow-original 로 degrade 안 함(corrected input 은
+  counter-proposal → steered deny; 원본 미실행). allow_for_session 은 machine
+  assessor 가 세션-wide 권한 안 넓힘(one-shot guardian_approved). escalate 는 절대
+  auto-grant 안 함(forced ask). collapse 출력은 buildDecision 경유라 matrix 가
+  second-line(잘못된 pair ⇒ OutcomeInvariantError throw). DEFAULT-OFF byte-identical:
+  크놉 부재(또는 메서드 부재 — 모든 현 impl 이 omit) ⇒ guardianAssess 미호출,
+  collapse 미도달, guardian path 가 현재 binary 와 동일. loose-truthy("true")는
+  미무장(strict `=== "1"`, security boundary).
+evidence:
+  code:
+    - src/permission/types.ts
+    - src/permission/assessment-collapse.ts
+    - src/permission/reviewer.ts
+    - src/permission/index.ts
+    - src/agent/tier1/reviewer-subagent.ts
+    - src/agent/reviewer-port.ts
+    - src/shared/runtime-config.ts
+  adrs: [497]
+  tests:
+    unit:
+      - tests/unit/guardian-assessment-collapse-hellgate.test.ts
+      - tests/unit/guardian-assessor-subagent-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_GUARDIAN_ASSESSOR
+    default: 'undefined'
+    purpose: Strict opt-in (`=== "1"`). OFF ⇒ guardianAssess 미호출, collapseAssessment 미도달, guardian path 가 binary ApprovalDecision 과 byte-identical. loose-truthy 미무장(security boundary). ON + composition-root wiring + 메서드 present 일 때만 per-action typed assessment.
+deliberate_hold:
+  reason: 'Composition-root LIVE wiring (optional-ports.ts / index.ts / reviewer-policy.ts 에서 크놉-ON 시 createSubagentBackedGuardianAssess 선택)은 documented follow-up — seam(pure types + collapse + adapter + dispatch branch)은 fully tested + OFF 로 ship. allow_for_session-sticky + escalate-as-grant 은 각자 별도 gate 로 deferred. GuardianDeniedAction operator override 는 deny-memory mutation surface 필요 — follow-up.'
+  promotion_path: 'Composition-root 가 knob-ON 시 assessor adapter 를 guardianAssess 로 install 하면 L3; allow_with_edit 의 reviewer→executor input-mutation hop 이 land 하면(현재는 steered-deny 로 conservative collapse) edit 가 실행되어 full Codex parity → L4.'
+notes: |
+  collapse boundary 가 단 하나(`collapseAssessment`)인 게 설계 핵심: 새 타입이 legacy
+  consumer 에 절대 안 닿음. assessor reply schema 는 zod discriminatedUnion 7-kind;
+  malformed/failed/unparseable ⇒ fallbackAssessment(kind:"deny", categorical denyReason)
+  — C6 no-leak(raw command 미유출). Open Q 결정(가장 보수적): 7-kind 전부 union 에
+  포함하되 allow_for_session→one-shot, escalate→ask, allow_with_edit→steered-deny 로
+  conservative collapse; ReviewKind 재사용(parallel 6-class enum 안 만듦); sticky-allow
+  + escalate-grant + operator-override 는 별도 gate/follow-up. hellgate: 25 케이스
+  (per-variant routing 7 / conservative property(ALL_ASSESSMENT_KINDS) / unknown-kind
+  fail-closed / matrix second-line throw / OFF byte-identity ratchet(knob OFF / loose-
+  truthy / ON / 메서드-부재) / assessor decoder fail-closed 4 + happy-path decode 6).
+  설계 정본: docs/tickets/misc-jun-7/03-guardian-per-action-assessor.md + ADR-0497.
+  R1 adversarial hardening(+8 케이스, 총 33): ALL_ASSESSMENT_KINDS 컴파일-타임
+  exhaustiveness guard(union↔tuple 드리프트 — 새 allow-ish variant 가 tuple 누락 시
+  conservative-property 테스트가 silently skip 하던 hole 차단; `_assessmentKindsExhaustive`
+  type-level); allow_with_edit 가 aggressive/empty updatedInput 에도 NON-allow steered-deny;
+  empty-rationale/non-integer decidedAt collapse ⇒ OutcomeInvariantError throw; assessor
+  decoder .strict() red-on-injection(injected extra key/__proto__ ⇒ deny), missing-steer
+  /no-kind/empty-text ⇒ deny.

@@ -1,7 +1,9 @@
 /** Streamable-HTTP (+ SSE) transport for the MCP client (ADR-0391).
  *
- *  Implements the MCP "Streamable HTTP" transport (spec rev 2025-03-26): the
- *  client communicates with a single server endpoint URL.
+ *  Implements the MCP "Streamable HTTP" transport: the client communicates with
+ *  a single server endpoint URL. The `mcp-protocol-version` header is negotiated
+ *  per session (ticket misc-jun-7/01) — it carries the OFFERED version on the
+ *  `initialize` POST and the SERVER-PINNED version on every request thereafter.
  *
  *   - Outbound: every JSON-RPC message is sent as an HTTP `POST` with
  *     `Content-Type: application/json` and
@@ -26,6 +28,7 @@
 
 import { errMessage, logger, throwIfAborted } from "@/shared"
 import { isResponse, type JsonRpcMessage } from "../jsonrpc"
+import { LATEST_PROTOCOL_VERSION } from "../protocol-version"
 import type {
   McpTransport,
   McpTransportExitHandler,
@@ -33,7 +36,6 @@ import type {
   McpTransportPayload,
 } from "./port"
 
-const PROTOCOL_VERSION = "2025-06-18"
 const SESSION_HEADER = "mcp-session-id"
 
 /** Minimal fetch shape so the transport can be driven without a network in
@@ -71,6 +73,12 @@ export interface HttpSseTransportOpts {
   readonly openServerStream?: boolean
   /** `fetch` seam (test injection). Default = global `fetch`. */
   readonly fetch?: HttpFetchFn
+  /** Ticket misc-jun-7/01 — the protocol version to stamp on the
+   *  `mcp-protocol-version` header UNTIL negotiation pins one. This is the
+   *  OFFERED version (knob-resolved by the client). Omitting it defaults to
+   *  {@link LATEST_PROTOCOL_VERSION}; the client always supplies the resolved
+   *  offer so the header on the `initialize` POST matches the offered body. */
+  readonly protocolVersion?: string
 }
 
 /** Parse one SSE event block's accumulated `data:` lines into text. SSE allows
@@ -110,6 +118,11 @@ export class HttpSseMcpTransport implements McpTransport {
   private readonly decoder = new TextDecoder()
 
   private sessionId: string | null = null
+  /** Ticket misc-jun-7/01 — the protocol version stamped on the
+   *  `mcp-protocol-version` header. Starts at the OFFERED version; the client
+   *  re-pins it to the SERVER-CHOSEN version via {@link setProtocolVersion}
+   *  once the `initialize` reply is accepted. */
+  private protocolVersion: string
   private started = false
   private closed = false
   private exitFired = false
@@ -127,6 +140,7 @@ export class HttpSseMcpTransport implements McpTransport {
     this.staticHeaders = { ...(opts.headers ?? {}) }
     this.openServerStream = opts.openServerStream ?? true
     this.fetchFn = opts.fetch ?? (globalThis.fetch as unknown as HttpFetchFn)
+    this.protocolVersion = opts.protocolVersion ?? LATEST_PROTOCOL_VERSION
   }
 
   async start(): Promise<void> {
@@ -147,6 +161,14 @@ export class HttpSseMcpTransport implements McpTransport {
     return () => {
       this.exitHandlers.delete(handler)
     }
+  }
+
+  /** Ticket misc-jun-7/01 — re-pin the `mcp-protocol-version` header to the
+   *  SERVER-CHOSEN version after the client accepts the `initialize` reply.
+   *  Before this is called the header carries the offered version (set at
+   *  construction), so the `initialize` POST itself is self-consistent. */
+  setProtocolVersion(version: string): void {
+    this.protocolVersion = version
   }
 
   /** POST is async, but the {@link McpTransport.send} contract is sync (returns
@@ -207,7 +229,7 @@ export class HttpSseMcpTransport implements McpTransport {
 
   private requestHeaders(extra: Record<string, string>): Record<string, string> {
     const headers: Record<string, string> = {
-      "mcp-protocol-version": PROTOCOL_VERSION,
+      "mcp-protocol-version": this.protocolVersion,
       ...this.staticHeaders,
       ...extra,
     }

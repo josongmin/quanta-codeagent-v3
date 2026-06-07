@@ -94,6 +94,7 @@ import {
 } from "@/tool"
 import { DefaultDeferredResultRegistry } from "@/tool/deferred/default-registry"
 import { createMarkdownPainter } from "./markdown-painter"
+import { buildCliAskUserTool } from "./ask-user-wire"
 import { buildCliElicitationPrompterFactory } from "./mcp-elicitation-prompter"
 import { isPathLikeToken } from "./resume"
 import { isIndicatorEnabled } from "./turn-indicator"
@@ -1504,9 +1505,15 @@ export const buildTooling = (
   // would register deferred work into. Merged into `extraTools` alongside the
   // search wire so the registration is independent of the search pipeline.
   const asyncDeferredTools = buildAsyncDeferredTools()
+  // ADR-0494 — gated `ask_user` (structured elicitation). Default-OFF: null
+  // unless QUANTA_ASK_USER is on AND stdin is a TTY (headless ⇒ no prompter ⇒
+  // no tool ⇒ byte-identical menu). The terminal prompter is owned here in the
+  // app layer (the host layer is forbidden from touching process stdio).
+  const askUserTool = buildCliAskUserTool(process.env)
   const extraTools: Tool[] = [
     ...(searchWire !== null ? [searchWire.tool] : []),
     ...asyncDeferredTools,
+    ...(askUserTool !== null ? [askUserTool] : []),
   ]
   return buildToolingCore({
     store,

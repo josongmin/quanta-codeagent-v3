@@ -1,5 +1,6 @@
 import type { ContentBlock, LLMPort, Message, SystemPromptInput } from "@/llm"
 import { assembleFromEvents, resolveModelWindow } from "@/llm"
+import { providerOf } from "@/observability"
 import { errMessage, logger, type Result, runtimeConfig } from "@/shared"
 import {
   BackgroundSummarizationController,
@@ -122,6 +123,134 @@ export const triggerTokenCount = (messages: Message[], baseline?: TokenBaseline)
   }
   const appended = messages.slice(baseline.measuredAtMessageCount)
   return baseline.measuredInputTokens + estimateTokens(appended)
+}
+
+/**
+ * The mutable per-session storage the loop spreads into every turn's TurnState.
+ * Declared structurally (NOT as the class) because the box is ALLOCATED in
+ * `session-bootstrap` as `{}` and a couple of legacy invalidation sites still
+ * assign `.current` directly. {@link TokenBaselineBox} is the OWNER of the
+ * invariants over this shape — every NEW call site goes through the class, which
+ * is why the four scattered correctness patches (provider cache-bucket
+ * arithmetic, invalidate-on-shrink, invalidate-on-content-change, empty-model
+ * double-count) now live in ONE place instead of guarding each call site.
+ */
+export interface TokenBaselineBoxState {
+  current?: TokenBaseline | undefined
+  sendCount?: number
+}
+
+/**
+ * S2 (jun-7 FINAL) — the OWNER of the D5 token-baseline invariants.
+ *
+ * The bare `{ current?, sendCount? }` box accreted FOUR scattered correctness
+ * patches across 8 audit rounds (each a guard bolted onto a different call
+ * site): provider-aware cache-bucket arithmetic + the empty-model double-count
+ * guard (capture), invalidate-on-shrink (the length-based stale clear),
+ * invalidate-on-content-change (microcompact keeps the COUNT but replaces
+ * tool_result CONTENT), and the in-range fail-safe (trigger). That is the
+ * classic "bare object + a guard at every call site" smell.
+ *
+ * This class WRAPS the shared mutable {@link TokenBaselineBoxState} (it does NOT
+ * own the allocation — the loop allocates `{}` once per session and spreads it
+ * by reference into every turn, so the class is a thin per-call view over the
+ * SAME object) and exposes the four invariants as named operations. The internal
+ * `current`/`sendCount` are mutated ONLY here. Pure (no clock, no env): the
+ * `clock`/`env` reads stay where they already were in the wire.
+ */
+export class TokenBaselineBox {
+  constructor(private readonly box: TokenBaselineBoxState) {}
+
+  /** Construct a view over the shared mutable box (allocated elsewhere). */
+  static wrap(box: TokenBaselineBoxState): TokenBaselineBox {
+    return new TokenBaselineBox(box)
+  }
+
+  /**
+   * Fold the provider's usage into the authoritative input count — the PRIVATE
+   * invariant that the rest of the loop never re-implements.
+   *
+   * The cache-bucket arithmetic is PROVIDER-DEPENDENT (the exact divergence
+   * `costUsd`/`providerOf` encode in `@/observability/pricing`):
+   *  - **anthropic**: `inputTokens` EXCLUDES cache reads (`cache_read` /
+   *    `cache_creation` are disjoint buckets) → full prompt = `inputTokens +
+   *    cacheRead + cacheCreation`. On a cache-HIT turn `inputTokens` alone is a
+   *    few hundred tokens while the real prompt is ~100k.
+   *  - **openai / empty-model**: `prompt_tokens` (our `inputTokens`) ALREADY
+   *    INCLUDES `cached_tokens` → full = `inputTokens`; adding cacheRead
+   *    double-counts. An EMPTY/unidentified model id (`usage.model ?? ""`) also
+   *    takes this branch — `providerOf("")` defaults to "anthropic", so blindly
+   *    summing would 2× double-count an OpenAI-shaped payload that didn't echo
+   *    `model`, recording a baseline far above the real prompt → premature
+   *    compaction discarding history.
+   *
+   * Trusts the result ONLY when it is `exact` (`>= sentEstimate`, our chars/4
+   * estimate of the sent prompt) AND a send-time wm count was recorded by
+   * {@link recordSendCount}. Otherwise no-op (legacy chars/4 stays in force).
+   */
+  capture(
+    usage: {
+      inputTokens: number
+      cacheReadTokens?: number
+      cacheCreationTokens?: number
+      model: string
+    },
+    sentEstimate: number,
+  ): void {
+    if (this.box.sendCount === undefined) return
+    const isAnthropic = usage.model !== "" && providerOf(usage.model) === "anthropic"
+    const fullInput = isAnthropic
+      ? usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheCreationTokens ?? 0)
+      : usage.inputTokens
+    if (!Number.isFinite(fullInput) || fullInput < sentEstimate) return
+    this.box.current = {
+      measuredInputTokens: fullInput,
+      measuredAtMessageCount: this.box.sendCount,
+    }
+  }
+
+  /** Record the wm length of the prompt about to be sent (after this turn's
+   *  compaction settled). The {@link capture} pairs it with the provider's
+   *  authoritative input count to form the baseline. */
+  recordSendCount(len: number): void {
+    this.box.sendCount = len
+  }
+
+  /**
+   * Invalidate a baseline whose measured prefix was replaced by a compaction
+   * that SHRANK the transcript (proactive/reactive summarize). See
+   * {@link markBaselineStaleIfShrunk} for the full rationale — the length-based
+   * `> messages.length` fail-safe stops firing once the transcript regrows past
+   * the recorded index, so the stale baseline would force a premature
+   * compaction. No-op when the transcript grew or held steady.
+   */
+  invalidateOnShrink(lenBefore: number, lenAfter: number): void {
+    if (lenAfter < lenBefore) this.box.current = undefined
+  }
+
+  /**
+   * Invalidate a baseline after a CONTENT-only change the length check cannot
+   * see — a tier-1 microcompact replaces tool_result CONTENT while keeping the
+   * message COUNT stable, so the prefix-measured baseline is now stale but
+   * `invalidateOnShrink` (length-based) structurally misses it. Clearing falls
+   * the trigger back to chars/4 until a fresh exact usage re-anchors.
+   */
+  invalidateOnContentChange(): void {
+    this.box.current = undefined
+  }
+
+  /** The current authoritative baseline value (for the compaction wire to pass
+   *  through to `compactIfNeeded`), or `undefined` when none is established. */
+  currentBaseline(): TokenBaseline | undefined {
+    return this.box.current
+  }
+
+  /** The token count the compaction trigger gates on: the in-range fail-safe +
+   *  suffix-estimate anchored on the authoritative baseline (delegates to the
+   *  pure {@link triggerTokenCount}). */
+  trigger(messages: Message[]): number {
+    return triggerTokenCount(messages, this.box.current)
+  }
 }
 
 /** Rough context-token footprint of an image, in chars (ADR-0083). The base64

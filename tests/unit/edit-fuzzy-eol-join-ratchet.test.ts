@@ -75,7 +75,7 @@ export const allJoinCalls = (text: string): string[] => {
 describe("R-D6 — fuzzy-splice EOL-join ratchet", () => {
   const src = readFileSync(FUZZY_SRC, "utf8")
 
-  test("fuzzy.ts contains NO bare `.join(\"\\n\")` reassembly (would re-open D6)", () => {
+  test('fuzzy.ts contains NO bare `.join("\\n")` reassembly (would re-open D6)', () => {
     expect(bareLfReassemblyJoins(src)).toEqual([])
   })
 
@@ -94,7 +94,7 @@ describe("R-D6 — fuzzy-splice EOL-join ratchet", () => {
   })
 
   // -- RED-ON-INJECTION ----------------------------------------------------
-  test("RED: a synthetic spliceLines body rejoining with `.join(\"\\n\")` is FLAGGED", () => {
+  test('RED: a synthetic spliceLines body rejoining with `.join("\\n")` is FLAGGED', () => {
     const injected = `
       const spliceLines = (lines, span, repl) => {
         const before = lines.slice(0, span.start)
@@ -113,7 +113,7 @@ describe("R-D6 — fuzzy-splice EOL-join ratchet", () => {
     expect(bareLfReassemblyJoins("next: next.join(detectEol(source)),")).toEqual([])
   })
 
-  test("NOT a false-positive: an unrelated message `.join(\", \")` is NOT flagged as a bare-LF violation", () => {
+  test('NOT a false-positive: an unrelated message `.join(", ")` is NOT flagged as a bare-LF violation', () => {
     // Only the lone-`\n` reassembly re-opens the D6 corruption; a comma-join (or
     // any other separator) used for message rendering is out of scope.
     expect(bareLfReassemblyJoins('parts.join(", ")')).toEqual([])

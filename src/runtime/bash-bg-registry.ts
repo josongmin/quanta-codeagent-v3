@@ -35,6 +35,7 @@ import { type BoundedBuffer, createBoundedBuffer } from "./bounded-buffer"
 import { escalatingKill, type KillableChild } from "./guarded-spawn"
 import { defaultPpidWalkKiller, type ProcessTreeKiller } from "./process-tree"
 import { scrubEnv } from "./sandbox"
+import { asScrubbedEnv, bunScrubbedSpawner } from "./scrubbed-spawn"
 import { getShellSandbox } from "./shell-sandbox-holder"
 
 /** Default registry cap. Overflow evicts the OLDEST (insertion-ordered Map
@@ -134,12 +135,15 @@ export interface BashProcessHandlePort {
  *  as a foreground shell — there is NO posture downgrade when going async. */
 export const defaultBashProcessHandlePort: BashProcessHandlePort = {
   async spawn({ command, cwd }) {
-    const env = scrubEnv()
+    // S1 — the env is BRANDED at the scrubber chokepoint, then handed to the
+    // typed `spawnScrubbed` boundary: an inherit-by-omission / raw-spread leak
+    // here is a tsc error, not just an R-D3 scan hit.
+    const env = asScrubbedEnv(scrubEnv())
     const baseArgv: ReadonlyArray<string> = ["bash", "-lc", command]
     const slot = getShellSandbox()
     const argv = slot !== undefined ? (await slot.wrap(baseArgv, cwd)).argv : [...baseArgv]
-    const proc = Bun.spawn(argv, { cwd, env, stdout: "pipe", stderr: "pipe" })
-    return proc as unknown as BashSubprocess
+    const proc = bunScrubbedSpawner(argv, { cwd, env, stdout: "pipe", stderr: "pipe" })
+    return proc as BashSubprocess
   },
 }
 

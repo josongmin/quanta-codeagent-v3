@@ -66,7 +66,7 @@ const startReady = async (client: McpClient, transport: ScriptedTransport): Prom
   const startP = client.start()
   await flush()
   const init = transport.sent[0] as { id: number }
-  transport.emit({ jsonrpc: "2.0", id: init.id, result: { protocolVersion: "x" } })
+  transport.emit({ jsonrpc: "2.0", id: init.id, result: { protocolVersion: "2025-06-18" } })
   await startP
 }
 

@@ -1,5 +1,11 @@
 import { z } from "zod"
-import type { ApprovalDecision, ReviewerPort, ToolActionKeyed } from "@/permission"
+import {
+  type ActionAssessment,
+  type ApprovalDecision,
+  type ReviewerPort,
+  structuredDenyReason,
+  type ToolActionKeyed,
+} from "@/permission"
 import type { StreamPort } from "@/stream"
 import type { ReviewerRunner } from "@/tool/types"
 import { createSubagentRunner } from "../subagent-runner"
@@ -153,5 +159,188 @@ export const createSubagentBackedGuardianReview = (opts: {
       )
     }
     return decodeGuardianDecision(result.finalText, action.tool, ctx.decidedAt)
+  }
+}
+
+/* ------------------------------------------------------------------------- *
+ * jun-7-misc 03 (ADR-0497) — richer per-action ASSESSOR variant.
+ *
+ * Behind the `QUANTA_GUARDIAN_ASSESSOR` knob, the guardian renders a typed
+ * `ActionAssessment` instead of the binary outcome. This is the SAME guardian
+ * round-trip (no extra LLM pass — ticket §9.3); only the reply SHAPE is richer.
+ * It is wired into the OPTIONAL `ReviewerPort.guardianAssess` method; the binary
+ * path above is untouched, so the OFF default is byte-identical.
+ *
+ * SAFETY: every malformed / failed / unparseable reply ⇒ `{kind:"deny"}`
+ * (fail-closed). The downstream `collapseAssessment` is the conservative,
+ * fail-closed boundary; this decoder mirrors that floor.
+ * ------------------------------------------------------------------------- */
+
+const ASSESS_RESULT_SHAPE =
+  'JSON only. One of: {"kind":"allow","rationale":"string","riskLevel":"low"|"medium"|"high"} | ' +
+  '{"kind":"allow_with_edit","rationale":"string","updatedInput":<corrected tool input>,"steer":"string"} | ' +
+  '{"kind":"ask","rationale":"string"} | ' +
+  '{"kind":"deny","rationale":"string"} | ' +
+  '{"kind":"deny_and_steer","rationale":"string","steer":"string"} | ' +
+  '{"kind":"escalate","rationale":"string","axis":"sandbox"|"network"|"permission"}'
+
+const assessReplySchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("allow"),
+      rationale: z.string().min(1),
+      riskLevel: z.enum(["low", "medium", "high"]).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("allow_with_edit"),
+      rationale: z.string().min(1),
+      updatedInput: z.unknown(),
+      steer: z.string().min(1),
+    })
+    .strict(),
+  z.object({ kind: z.literal("ask"), rationale: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("deny"), rationale: z.string().min(1) }).strict(),
+  z
+    .object({
+      kind: z.literal("deny_and_steer"),
+      rationale: z.string().min(1),
+      steer: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("escalate"),
+      rationale: z.string().min(1),
+      axis: z.enum(["sandbox", "network", "permission"]),
+    })
+    .strict(),
+])
+
+const assessorPrompt = (action: ToolActionKeyed, reviewKind: string | undefined): string =>
+  [
+    "You are the guardian assessor for a tool approval gate.",
+    "Assess the proposed action and respond with JSON only.",
+    "",
+    "Decision kinds (pick exactly one):",
+    '- "allow": run the action as-proposed (only when clearly acceptable).',
+    '- "allow_with_edit": the action is fine ONLY with a correction — supply the corrected `updatedInput` and a `steer` describing the change. The original is NOT run; the correction is fed back to the model.',
+    '- "ask": you are uncertain — escalate to the human operator.',
+    '- "deny": reject the action (unsafe / not derivable from a safer step).',
+    '- "deny_and_steer": reject AND supply a `steer` with a concrete safer next step.',
+    '- "escalate": the action needs a sandbox/network/permission policy amendment, not a yes/no — name the `axis`.',
+    "When in doubt, prefer the more restrictive kind. Never allow an unsafe action.",
+    "",
+    `Tool: ${action.tool}`,
+    `Review kind: ${reviewKind ?? "unknown"}`,
+    `Read only: ${action.isReadOnly ? "yes" : "no"}`,
+    "Input JSON:",
+    "```json",
+    renderActionInput(action.input),
+    "```",
+    "",
+    `Output shape: ${ASSESS_RESULT_SHAPE}`,
+  ].join("\n")
+
+/** Fail-closed assessment. Mirrors `fallbackDecision` — every parse / run
+ *  failure collapses (via `collapseAssessment`) to `guardian_denied`. The
+ *  `denyReason` is a CATEGORICAL `layer:"reviewer"` record (C6 no-leak: never
+ *  the raw input / command). */
+const fallbackAssessment = (safeReason: string, rationale: string): ActionAssessment => ({
+  kind: "deny",
+  rationale,
+  denyReason: structuredDenyReason({ layer: "reviewer", pillar: "approval", safeReason }),
+})
+
+const decodeAssessment = (finalText: string, tool: string): ActionAssessment => {
+  let decoded: unknown
+  try {
+    decoded = JSON.parse(finalText)
+  } catch {
+    return fallbackAssessment(
+      "guardian assessor returned invalid JSON",
+      `guardian assessor returned invalid JSON for ${tool}`,
+    )
+  }
+  const parsed = assessReplySchema.safeParse(decoded)
+  if (!parsed.success) {
+    return fallbackAssessment(
+      "guardian assessor returned an unrecognized assessment",
+      `guardian assessor returned an unrecognized assessment for ${tool}`,
+    )
+  }
+  const reply = parsed.data
+  switch (reply.kind) {
+    case "allow":
+      return { kind: "allow", rationale: reply.rationale, riskLevel: reply.riskLevel ?? "high" }
+    case "allow_with_edit":
+      return {
+        kind: "allow_with_edit",
+        rationale: reply.rationale,
+        updatedInput: reply.updatedInput,
+        steer: reply.steer,
+      }
+    case "ask":
+      return { kind: "ask", rationale: reply.rationale }
+    case "deny":
+      return fallbackAssessment("reviewer denied the action", reply.rationale)
+    case "deny_and_steer":
+      return {
+        kind: "deny_and_steer",
+        rationale: reply.rationale,
+        steer: reply.steer,
+        denyReason: structuredDenyReason({
+          layer: "reviewer",
+          pillar: "approval",
+          safeReason: "reviewer denied the action",
+        }),
+      }
+    case "escalate":
+      return { kind: "escalate", rationale: reply.rationale, escalation: { axis: reply.axis } }
+    default: {
+      // Exhaustive over the parsed union; an unhandled kind fails closed.
+      const _exhaustive: never = reply
+      return fallbackAssessment(
+        "guardian assessor returned an unknown assessment kind",
+        `guardian assessor returned an unknown assessment kind for ${tool}: ${String(_exhaustive)}`,
+      )
+    }
+  }
+}
+
+/** Concrete guardian-ASSESSOR adapter (ADR-0497). Sibling to
+ *  `createSubagentBackedGuardianReview`; emits the typed `ActionAssessment` that
+ *  `collapseAssessment` reduces to a standard `ApprovalDecision`. Malformed /
+ *  failed child output ⇒ a fail-closed `{kind:"deny"}`. Wired into
+ *  `ReviewerPort.guardianAssess` ONLY when the knob is on (composition root). */
+export const createSubagentBackedGuardianAssess = (opts: {
+  reviewer: ReviewerRunner
+  parentDepth?: number
+  signal?: AbortSignal
+}): NonNullable<ReviewerPort["guardianAssess"]> => {
+  const childDepth = (opts.parentDepth ?? 0) + 1
+  return async (action, ctx): Promise<ActionAssessment> => {
+    if (action.isReadOnly) {
+      return {
+        kind: "allow",
+        rationale: `read-only ${ctx.reviewKind ?? "action"} for ${action.tool} requires no guardian escalation`,
+        riskLevel: "low",
+      }
+    }
+    const result = await opts.reviewer({
+      prompt: assessorPrompt(action, ctx.reviewKind),
+      depth: childDepth,
+      taskKind: "review",
+      toolFilter: REVIEWER_TOOL_FILTER,
+      ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
+    })
+    if (!result.ok) {
+      return fallbackAssessment(
+        "guardian assessor failed",
+        `guardian assessor failed for ${action.tool}: ${result.finalText || "no result"}`,
+      )
+    }
+    return decodeAssessment(result.finalText, action.tool)
   }
 }

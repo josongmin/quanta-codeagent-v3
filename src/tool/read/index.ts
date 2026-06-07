@@ -1,4 +1,8 @@
 import { homedir } from "node:os"
+// Node's `util.TextDecoder` is typed to accept any string label; the Bun global
+// `TextDecoder`'s `Bun.Encoding` type omits `utf-16le`/`utf-16be` (a bun-types
+// gap — the runtime, backed by this same Node decoder, accepts them).
+import { TextDecoder } from "node:util"
 import { z } from "zod"
 import type { CodeParserPort } from "@/retrieval/code-parser"
 import { classifyPath } from "@/security"
@@ -139,49 +143,109 @@ const classifyDeviceFile = (
  *  enough that a NUL in the leading content of a binary (PNG/ZIP/ELF headers all
  *  carry a NUL in their first bytes) is seen, small enough that classifying a
  *  multi-gigabyte file never reads more than this prefix. Not a heuristic
- *  THRESHOLD — the binary signal is the PRESENCE of any NUL in this window. */
+ *  THRESHOLD — the binary signal is the PRESENCE of any NUL in this window
+ *  AFTER the BOM check (see {@link classifyEncoding}): a UTF-16 BOM marks a NUL-
+ *  rich-but-textual file, so the BOM is consulted FIRST. */
 const BINARY_SNIFF_BYTES = 8192
 
-/** B5 binary guard — sniff a bounded leading byte window for a NUL (`0x00`).
- *  A NUL never appears in normal UTF-8 / Latin-1 / UTF-16-LE-without-BOM text,
- *  so its presence is the standard binary discriminator. Returns a typed
- *  `rejected` ToolResult when the file is binary, else `null`. Skips the check
- *  entirely when the port does not expose `readFileBytes` (legacy in-memory
- *  fakes) — those callers keep the exact pre-guard text-read behavior. */
-const classifyBinaryFile = async (
-  fs: FileSystemPort,
-  path: string,
-  cwd: string,
-): Promise<ToolResult | null> => {
-  if (fs.readFileBytes === undefined) return null
-  const head = await fs.readFileBytes(path, BINARY_SNIFF_BYTES, cwd)
-  if (!head.includes(0x00)) return null
-  return {
-    ok: false,
-    output:
-      `Cannot read ${path}: this tool cannot read binary files. ` +
-      "Use a dedicated tool (e.g. read_image) for non-text content.",
-    failure: { mode: "rejected", reason: "binary_file" },
+/** P15 (jun-7) — BOM-driven text encoding. A leading byte-order mark is a
+ *  DETERMINISTIC encoding signal (not a heuristic): every Windows / .NET /
+ *  PowerShell `>`-redirect text file emits one. We recognise the three decodable
+ *  BOMs; anything else (incl. BOM-less UTF-16, which would need a heuristic
+ *  alternating-NUL probe — deliberately NOT done, to avoid false-classifying a
+ *  genuine binary as text) falls through to the plain-UTF-8 / NUL-binary path. */
+type BomEncoding = "utf8-bom" | "utf16le" | "utf16be"
+
+/** Detect a decodable BOM at the start of the sniff window. Returns `null` for
+ *  no recognised BOM. The `FF FE 00 00` case is the UTF-32LE BOM (Unicode
+ *  disambiguation rule) — we cannot decode UTF-32, so we return `null` and let
+ *  it reach the binary guard rather than mis-decode it as UTF-16LE. Pure. */
+const detectBomEncoding = (head: Uint8Array): BomEncoding | null => {
+  if (head.length >= 3 && head[0] === 0xef && head[1] === 0xbb && head[2] === 0xbf) {
+    return "utf8-bom"
   }
+  if (head.length >= 2 && head[0] === 0xff && head[1] === 0xfe) {
+    // FF FE 00 00 ⇒ UTF-32LE, not UTF-16LE — fall through (undecodable here).
+    if (head.length >= 4 && head[2] === 0x00 && head[3] === 0x00) return null
+    return "utf16le"
+  }
+  if (head.length >= 2 && head[0] === 0xfe && head[1] === 0xff) return "utf16be"
+  return null
 }
 
-/** B5 unreadable-target guard — the device check (pure, on the already-fetched
- *  stat) followed by the binary NUL sniff (a bounded byte read). Returns a typed
- *  `rejected` ToolResult for the FIRST tripped guard, or `null` for an ordinary
- *  text file. ORDER MATTERS: the device check runs BEFORE the byte read so we
- *  NEVER attempt the hanging `read()` on a FIFO to sniff it. Extracted out of
- *  `execute` so the generator stays under the lint complexity gate — the byte
- *  read may throw (TOCTOU unlink / jail escape), so `execute` wraps the call in
- *  the same `classifyFsError` catch it already uses for `readFile`. */
-const classifyUnreadableTarget = async (
+/** Classification of the sniffed leading window: a recognised text BOM ⇒ text
+ *  (with its encoding), a NUL with no text BOM ⇒ binary, otherwise plain UTF-8.
+ *  `head === null` (port has no `readFileBytes` — legacy in-memory fakes) ⇒
+ *  plain UTF-8 with the binary sniff unavailable, exactly the pre-guard
+ *  behavior. `encoding: null` means decode with the default UTF-8 path. */
+type EncodingClass = { kind: "binary" } | { kind: "text"; encoding: BomEncoding | null }
+
+const classifyEncoding = (head: Uint8Array | null): EncodingClass => {
+  if (head === null) return { kind: "text", encoding: null }
+  const bom = detectBomEncoding(head)
+  if (bom !== null) return { kind: "text", encoding: bom }
+  // No text BOM: a NUL is the standard binary discriminator. (A NUL DOES appear
+  // in UTF-16 text — which is exactly why the BOM is checked first above.)
+  if (head.includes(0x00)) return { kind: "binary" }
+  return { kind: "text", encoding: null }
+}
+
+/** Sniff the bounded leading window for the binary + BOM classification. Returns
+ *  `null` when the port cannot read raw bytes (legacy fakes) — the caller then
+ *  treats the file as plain UTF-8 (binary/BOM detection unavailable). May throw
+ *  (TOCTOU unlink / jail escape); the caller wraps it in {@link runFsStep}. */
+const sniffHead = async (
   fs: FileSystemPort,
-  info: { isFIFO: boolean; isCharacterDevice: boolean; isBlockDevice: boolean },
   path: string,
   cwd: string,
-): Promise<ToolResult | null> => {
-  const device = classifyDeviceFile(info, path)
-  if (device !== null) return device
-  return classifyBinaryFile(fs, path, cwd)
+): Promise<Uint8Array | null> => {
+  if (fs.readFileBytes === undefined) return null
+  return fs.readFileBytes(path, BINARY_SNIFF_BYTES, cwd)
+}
+
+/** Typed `binary_file` rejection (shared by the guard). */
+const binaryRejected = (path: string): ToolResult => ({
+  ok: false,
+  output:
+    `Cannot read ${path}: this tool cannot read binary files. ` +
+    "Use a dedicated tool (e.g. read_image) for non-text content.",
+  failure: { mode: "rejected", reason: "binary_file" },
+})
+
+/** U+FEFF — the BOM code point as it appears in a DECODED string (explicit
+ *  escape, not an invisible literal, so it survives copy/paste + future lints).
+ *  Bun's `file.text()` usually consumes a UTF-8 BOM already, making the strip a
+ *  no-op; we strip defensively for ports/runtimes that surface it. */
+const UTF8_BOM = "\uFEFF"
+
+/** Read the file content with the detected encoding. For UTF-16 (LE/BE) we read
+ *  the full byte length the stat reported and decode with the matching
+ *  `TextDecoder` — which strips the leading BOM (`ignoreBOM` defaults false) and
+ *  is surrogate-correct. For UTF-8(-BOM) we keep the default `readFile`
+ *  (UTF-8) path, stripping a leading BOM char if one survived the decode. The
+ *  UTF-16 branch only runs when a BOM was detected from a non-null head, so
+ *  `readFileBytes` is guaranteed present there. May throw; wrapped by the caller
+ *  in {@link runFsStep}. */
+const readTextByEncoding = async (
+  fs: FileSystemPort,
+  path: string,
+  cwd: string,
+  size: number,
+  encoding: BomEncoding | null,
+): Promise<string> => {
+  if (encoding === "utf16le" || encoding === "utf16be") {
+    // `size` from stat bounds the read; a non-`readFileBytes` port never reaches
+    // here (encoding would be null), so the assertion is sound.
+    const bytes = await (fs.readFileBytes as NonNullable<FileSystemPort["readFileBytes"]>)(
+      path,
+      size,
+      cwd,
+    )
+    const label = encoding === "utf16le" ? "utf-16le" : "utf-16be"
+    return new TextDecoder(label).decode(bytes)
+  }
+  const text = await fs.readFile(path, cwd)
+  return encoding === "utf8-bom" && text.startsWith(UTF8_BOM) ? text.slice(1) : text
 }
 
 /** Stat info shape used by the read pipeline (mirror of `@/storage`'s
@@ -239,21 +303,33 @@ const resolveReadOutcome = async (
     }
   }
 
-  // B5 device + binary guard — reject a FIFO / device file (would BLOCK the
-  // loop forever or dump unbounded bytes) and binary content (would token-
-  // explode the transcript) BEFORE the text read. The bounded byte sniff may
-  // throw on a TOCTOU unlink / jail escape — classified the same way.
-  const guard = await runFsStep(
-    () => classifyUnreadableTarget(fs, info, input.path, ctx.cwd),
+  // B5 device guard — a FIFO / device file would BLOCK the loop forever or dump
+  // unbounded bytes. PURE (on the already-fetched stat); runs BEFORE any byte
+  // read so we NEVER attempt the hanging read() on a FIFO to sniff it.
+  const device = classifyDeviceFile(info, input.path)
+  if (device !== null) return { kind: "failure", result: device }
+
+  // P15 + B5 — sniff the bounded leading window ONCE for BOTH the BOM (encoding)
+  // and the binary NUL discriminator. ORDER: a UTF-16 BOM marks a NUL-rich-but-
+  // textual file, so the BOM is consulted before the NUL check (pre-fix, UTF-16
+  // text was wrongly rejected as binary). The byte read may throw on a TOCTOU
+  // unlink / jail escape — classified the same way as `readFile`.
+  const headStep = await runFsStep(() => sniffHead(fs, input.path, ctx.cwd), input.path)
+  if (headStep.kind === "failure") return headStep
+  const cls = classifyEncoding(headStep.value)
+  if (cls.kind === "binary") {
+    return { kind: "failure", result: binaryRejected(input.path) }
+  }
+
+  // Content read by detected encoding (UTF-16 → decode with the matching
+  // TextDecoder; UTF-8(-BOM) → the default text read). Belt-and-braces: an
+  // in-flight unlink between `statFile()` and the read surfaces ENOENT here too;
+  // FsJail is re-checked inside the port and stays a permission_denied. Same
+  // classifier so the typed mapping holds on TOCTOU.
+  const read = await runFsStep(
+    () => readTextByEncoding(fs, input.path, ctx.cwd, info.size, cls.encoding),
     input.path,
   )
-  if (guard.kind === "failure") return guard
-  if (guard.value !== null) return { kind: "failure", result: guard.value }
-
-  // Belt-and-braces: an in-flight unlink between `statFile()` and `readFile()`
-  // surfaces ENOENT here too; FsJail is re-checked inside readFile() and stays
-  // a permission_denied. Same classifier so the typed mapping holds on TOCTOU.
-  const read = await runFsStep(() => fs.readFile(input.path, ctx.cwd), input.path)
   if (read.kind === "failure") return read
   return { kind: "ok", text: maybeRenderNotebook(input.path, read.value), info }
 }

@@ -31,7 +31,7 @@ import { gateDisabled, gateDisabledStrict, gateOn, gateOnStrict } from "@/shared
  *    (b) const/dot-keyed:    `env[IDENT] (===|!==) "1|on|off"` / `env.IDENT === …`
  *  Both must route through `@/shared#gateOn(Strict)` / `gateDisabled(Strict)`. */
 const RAW_GATE =
-  /(?:QUANTA_[A-Z0-9_]+"?\]?|\benv\s*\[\s*[A-Za-z_$][\w$]*\s*\])\s*(?:===|!==)\s*"(?:1|on|off)"/
+  /(?:QUANTA_[A-Z0-9_]+["']?\]?|\benv\s*\[\s*[A-Za-z_$][\w$]*\s*\])\s*(?:===|!==)\s*["'](?:1|on|off)["']/
 
 const isCommentLine = (line: string): boolean => {
   const t = line.trimStart()
@@ -139,6 +139,7 @@ describe("gate-vocabulary ratchet — raw comparisons only ever decrease", () =>
       `const f = env.QUANTA_Y !== "on"`,
       `return env[SOME_CONST] === "1"`,
       `x = env[FLAG] === "off"`,
+      `if (env['QUANTA_SINGLE'] === '1') {}`, // single-quote evasion (jun-7 R2 audit)
     ]
     for (const line of caught) expect(RAW_GATE.test(line)).toBe(true)
 

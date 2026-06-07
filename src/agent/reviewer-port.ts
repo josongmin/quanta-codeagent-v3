@@ -1,12 +1,12 @@
 import {
-  AutoModeClassifier,
-  CLASSIFIER_SYSTEM_PROMPT,
-  ReviewerUnavailableError,
   type ApprovalDecision,
   type ApprovalOutcome,
+  AutoModeClassifier,
+  CLASSIFIER_SYSTEM_PROMPT,
   type PermissionContext,
   type ReviewContext,
   type ReviewerPort,
+  ReviewerUnavailableError,
   type ToolActionKeyed,
 } from "@/permission"
 import { normalizeConfirm } from "./confirm-decision"
@@ -21,6 +21,12 @@ export interface OnConfirmReviewerPortOptions {
   /** Optional guardian-review implementation. Absent ⇒ fail closed when a
    *  caller selects `defaultReviewer: "guardian_subagent"`. */
   guardianReview?: ReviewerPort["guardianReview"]
+  /** jun-7-misc 03 (ADR-0497) — OPTIONAL richer per-action assessor for the
+   *  guardian tier. Wired ONLY when the `QUANTA_GUARDIAN_ASSESSOR` knob is on
+   *  (composition root). Absent ⇒ the port omits the method entirely, so
+   *  `reviewAction`'s knob-gated branch never fires and the guardian path is the
+   *  exact binary `guardianReview` (byte-identical OFF). */
+  guardianAssess?: ReviewerPort["guardianAssess"]
   /** Approval outcome to emit on a positive human decision. Defaults to the
    *  narrowest one-shot allow; callers that want session stickiness may opt
    *  into `user_approved_for_session`. */
@@ -40,9 +46,10 @@ const reviewTarget = (action: ToolActionKeyed, ctx: ReviewContext): string =>
 const riskLevelFor = (action: ToolActionKeyed): ApprovalDecision["riskLevel"] =>
   action.isReadOnly ? "low" : "high"
 
-const unavailable = (
-  reviewer: "auto_review" | "guardian_subagent",
-): ReviewerPort["autoReview"] | ReviewerPort["guardianReview"] =>
+const unavailable =
+  (
+    reviewer: "auto_review" | "guardian_subagent",
+  ): ReviewerPort["autoReview"] | ReviewerPort["guardianReview"] =>
   async () => {
     throw new ReviewerUnavailableError(reviewer)
   }
@@ -88,9 +95,7 @@ export const createClassifierBackedAutoReview = (
  *  surface. This closes the "zero prod impl" gap for USER-tier review while
  *  staying fail-closed for AUTO/GUARDIAN tiers unless a composition root
  *  supplies real implementations for those methods. */
-export const createOnConfirmReviewerPort = (
-  opts: OnConfirmReviewerPortOptions,
-): ReviewerPort => {
+export const createOnConfirmReviewerPort = (opts: OnConfirmReviewerPortOptions): ReviewerPort => {
   const approveOutcome = opts.approveOutcome ?? "user_approved"
   return {
     userReview: async (action, ctx) => {
@@ -131,5 +136,10 @@ export const createOnConfirmReviewerPort = (
     },
     autoReview: opts.autoReview ?? unavailable("auto_review"),
     guardianReview: opts.guardianReview ?? unavailable("guardian_subagent"),
+    // jun-7-misc 03 (ADR-0497): include the OPTIONAL assessor method ONLY when a
+    // composition root supplied it (knob-on). Omitted otherwise so the port
+    // shape stays byte-identical and `reviewAction`'s `typeof guardianAssess ===
+    // "function"` guard is false on the OFF path.
+    ...(opts.guardianAssess !== undefined ? { guardianAssess: opts.guardianAssess } : {}),
   }
 }

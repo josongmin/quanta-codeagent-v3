@@ -234,12 +234,5 @@ export interface TurnState {
    * the trigger uses the legacy chars/4 estimate (byte-identical). The box is
    * ALWAYS allocated (no knob): the field only takes effect once an exact usage
    * lands, and absent that the trigger is byte-identical. */
-  tokenBaseline?: {
-    current?: import("./compaction").TokenBaseline | undefined
-    /** The `wm.snapshot().length` recorded by `prepareTurnContext` for the
-     *  prompt about to be sent (after this turn's compaction settled). The
-     *  usage capture pairs it with the provider's authoritative `inputTokens`
-     *  to form `current`. Undefined until the first turn is prepared. */
-    sendCount?: number
-  }
+  tokenBaseline?: import("./compaction").TokenBaselineBoxState
 }

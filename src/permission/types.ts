@@ -1,5 +1,6 @@
 import type { HITLTier } from "@/shared"
 import type { ClassifierPort } from "./classifier"
+import type { StructuredDenyReason } from "./deny-reason"
 import type { ReviewDecision, ReviewKind } from "./review-kind"
 
 export type PermissionDecision =
@@ -154,6 +155,120 @@ export interface ToolActionKeyed {
   readonly actionKey: string
 }
 
+/* ------------------------------------------------------------------------- *
+ * jun-7-misc 03 — Guardian per-action TYPED assessment (ADR-0497).
+ *
+ * Codex 0.135's guardian is a per-action ASSESSOR that emits a typed decision
+ * (`approved_exec` / `proposed_exec` / `network_policy_amendment` / `denied` /
+ * `abort` / `timed_out`), not a bool. quanta's guardian is binary today
+ * (`guardian_approved | guardian_denied`). `ActionAssessment` is the OPT-IN
+ * richer output that COLLAPSES to the existing 8-state `ApprovalOutcome` before
+ * any current consumer sees it (`collapseAssessment` in `assessment-collapse.ts`
+ * is the single boundary). The collapse is a STRICT SUPERSET: every variant maps
+ * onto an existing `ApprovalOutcome` + existing gate seam, so OFF/legacy
+ * consumers observe an unchanged `ApprovalDecision`.
+ *
+ * SAFETY (the load-bearing invariant): the collapse is TOTAL and CONSERVATIVE.
+ * Only `allow` / `allow_for_session` collapse to an allow; every other variant —
+ * AND any unknown/future/parse-failure kind — collapses to AT LEAST `ask`, and
+ * by default `guardian_denied` (fail-closed). `allow_with_edit` NEVER degrades
+ * to "allow-original": absent the input-mutation seam it collapses to a steered
+ * DENY (the original input is never executed). See `assessment-collapse.ts`.
+ * ------------------------------------------------------------------------- */
+
+/** A guardian's sandbox/permission escalation request (the Codex
+ *  `*_policy_amendment` lane). VALUE-ONLY and CATEGORICAL — it names the axis
+ *  the guardian wants widened, NEVER the raw action/command. The default
+ *  collapse of an `escalate` is a forced `ask` (HITL); a sandbox auto-grant is a
+ *  separately-gated opt-in (deferred — see ticket §9). */
+export type AssessmentEscalation =
+  | { readonly axis: "sandbox" }
+  | { readonly axis: "network" }
+  | { readonly axis: "permission" }
+
+/** The typed per-action assessment a richer guardian assessor emits. A
+ *  discriminated union on `kind`, value-only (loggable/serializable, parity with
+ *  {@link ApprovalDecision}). Every variant has an existing quanta home; the
+ *  variant set is the verified Codex 0.135 subset (ticket §3.2) — do NOT invent
+ *  variants beyond it.
+ *
+ *  Collapse targets (see `collapseAssessment`):
+ *   - `allow`            ⇒ `guardian_approved`              (one-shot allow)
+ *   - `allow_for_session`⇒ `guardian_approved`              (conservative one-shot;
+ *                          sticky session-allow is a stricter separate opt-in —
+ *                          a MACHINE assessor never silently widens to session)
+ *   - `allow_with_edit`  ⇒ `guardian_denied` + steer        (counter-proposal;
+ *                          ORIGINAL never runs — never an allow-original)
+ *   - `ask`              ⇒ forced HITL (escalate to user reviewer)
+ *   - `deny`             ⇒ `guardian_denied` + StructuredDenyReason
+ *   - `deny_and_steer`   ⇒ `guardian_denied` + reject_and_tell steer
+ *   - `escalate`         ⇒ forced HITL (ask-the-human; never auto-grant) */
+export type ActionAssessment =
+  | {
+      readonly kind: "allow"
+      readonly rationale: string
+      readonly riskLevel: ApprovalDecision["riskLevel"]
+    }
+  | { readonly kind: "allow_for_session"; readonly rationale: string }
+  | {
+      readonly kind: "allow_with_edit"
+      readonly rationale: string
+      /** The guardian's corrected tool input — a counter-proposal. Carried for
+       *  audit/telemetry, BUT the conservative collapse does NOT execute it: it
+       *  becomes the steer message of a DENY. The original input never runs. */
+      readonly updatedInput: unknown
+      /** Concise human-readable description of the correction, fed back to the
+       *  model as steering when the edit collapses to a steered deny. */
+      readonly steer: string
+    }
+  | { readonly kind: "ask"; readonly rationale: string }
+  | { readonly kind: "deny"; readonly rationale: string; readonly denyReason: StructuredDenyReason }
+  | {
+      readonly kind: "deny_and_steer"
+      readonly rationale: string
+      readonly denyReason: StructuredDenyReason
+      readonly steer: string
+    }
+  | {
+      readonly kind: "escalate"
+      readonly rationale: string
+      readonly escalation: AssessmentEscalation
+    }
+
+/** Discriminant literal of {@link ActionAssessment}. */
+export type AssessmentKind = ActionAssessment["kind"]
+
+/** All assessment kinds enumerated as a runtime tuple — exhaustive-coverage
+ *  helper for tests/mapping (parity with `ALL_OUTCOMES` / `ALL_REVIEW_KINDS`).
+ *  Declared here next to the union so the two can never drift.
+ *
+ *  EXHAUSTIVENESS GUARD (R1 hardening): the `as const satisfies` clause pins the
+ *  element TYPES, but `satisfies ReadonlyArray<AssessmentKind>` alone does NOT
+ *  catch a MISSING member — a new union kind that is never listed here would
+ *  silently slip past the conservative-property test (which iterates THIS tuple).
+ *  The `AssertNoMissingKind` type below closes that: if a kind is added to
+ *  {@link ActionAssessment} but not to this tuple, `_assessmentKindsExhaustive`
+ *  fails to TYPECHECK (the uncovered kind is reported as not assignable to
+ *  `never`). This is the SECURITY-relevant guard — a silently-untested new
+ *  allow-ish variant is exactly the drift this prevents. */
+export const ALL_ASSESSMENT_KINDS = [
+  "allow",
+  "allow_for_session",
+  "allow_with_edit",
+  "ask",
+  "deny",
+  "deny_and_steer",
+  "escalate",
+] as const satisfies ReadonlyArray<AssessmentKind>
+
+/** Compile-time exhaustiveness: any {@link AssessmentKind} NOT present in
+ *  {@link ALL_ASSESSMENT_KINDS} surfaces here as a type error (it resolves to a
+ *  non-`never` type, which is not assignable to `never`). Pure type machinery —
+ *  zero runtime cost, erased at build. */
+type MissingAssessmentKind = Exclude<AssessmentKind, (typeof ALL_ASSESSMENT_KINDS)[number]>
+const _assessmentKindsExhaustive: MissingAssessmentKind extends never ? true : never = true
+void _assessmentKindsExhaustive
+
 /** Injected reviewer port — one method per `ReviewerTier`. The reviewer
  *  module owns dispatch and invariant enforcement; the port owns the actual
  *  IO (prompt UX, classifier call, subagent fan-out). Real implementations
@@ -162,6 +277,15 @@ export interface ReviewerPort {
   autoReview(action: ToolActionKeyed, ctx: ReviewContext): Promise<ApprovalDecision>
   guardianReview(action: ToolActionKeyed, ctx: ReviewContext): Promise<ApprovalDecision>
   userReview(action: ToolActionKeyed, ctx: ReviewContext): Promise<ApprovalDecision>
+  /** jun-7-misc 03 (ADR-0497) — OPTIONAL richer per-action assessor for the
+   *  guardian tier. ADDITIVE: absent on every current impl, so the OFF path is
+   *  byte-identical. When present AND the `QUANTA_GUARDIAN_ASSESSOR` knob is on,
+   *  `reviewAction` calls this instead of `guardianReview`, then
+   *  `collapseAssessment` reduces the typed assessment to the standard
+   *  `ApprovalDecision` BEFORE any downstream consumer. The collapse is the
+   *  single boundary; everything past it is unchanged. Fail-closed: any reject /
+   *  parse failure inside the impl MUST yield `{kind:"deny", …}`. */
+  guardianAssess?(action: ToolActionKeyed, ctx: ReviewContext): Promise<ActionAssessment>
 }
 
 /** Per-action review context. Pure data — no callbacks. */

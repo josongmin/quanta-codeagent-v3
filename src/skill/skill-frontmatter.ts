@@ -24,7 +24,10 @@
  * NO dependency on `js-yaml`. NO heuristic recovery. Failures carry a 1-based
  * line number so authors can find the offending line in the raw SKILL.md.
  */
+
 import { z } from "zod"
+import { runtimeConfig } from "@/shared"
+import { normalizeSkillFrontmatter } from "./manifest-compat"
 import { SKILL_INSTALL_STATES, SKILL_SCOPES } from "./types"
 
 export const SkillCategorySchema = z.enum(["skill", "extension"])
@@ -110,6 +113,70 @@ export const SkillFrontmatterSchema = z
     }
   })
 export type SkillFrontmatter = z.infer<typeof SkillFrontmatterSchema>
+
+/**
+ * jun-7-misc 02 — codex-shape ingest variant of {@link SkillFrontmatterSchema}.
+ *
+ * Differs from the strict schema in exactly two SAFE-BY-CONSTRUCTION ways:
+ *   1. OUTER `.strict()` → `.strip()`: genuinely-unknown frontmatter keys
+ *      (codex's `license`, future extensions) are DROPPED, never interpreted.
+ *   2. `userInvocable: z.boolean().default(false)` — codex treats it optional
+ *      (absent in `briefing`); absent ⇒ `false` (conservative "not user-
+ *      invocable unless declared"; a `true` default would auto-expose every
+ *      ingested codex skill as a `/slash` command — the riskier choice).
+ *
+ * The SECURITY-load-bearing `allowedTools` element schema is UNCHANGED
+ * (`z.array(z.string().min(1))`) — the normalizer may RENAME the kebab key but
+ * the VALUE is still strictly validated, so a renamed key can never carry a
+ * non-string / wildcard the schema rejects. The admin-scope `superRefine` is
+ * preserved verbatim.
+ *
+ * Used ONLY when `runtimeConfig().manifestCompat` is armed (strict `=== "1"`).
+ * Default-OFF callers use {@link SkillFrontmatterSchema} ⇒ byte-identical. */
+export const SkillFrontmatterCompatSchema = z
+  .object({
+    name: z
+      .string()
+      .min(1)
+      .regex(/^[a-z0-9][a-z0-9-]*$/, "name must be kebab-case"),
+    description: z.string().min(1),
+    userInvocable: z.boolean().default(false),
+    // Codex's frontmatter SSOT is `{name, description, license, allowed-tools,
+    // metadata}` (quick_validate.py:40) — `category`/`stability`/`allowedTools`
+    // are quanta-only. For foreign INGEST we default them conservatively rather
+    // than reject: a tool-less codex skill (briefing) gets `allowedTools: []`
+    // (NO tools, the safe scoping), `category: "skill"` (it IS LLM-callable),
+    // and `stability: "experimental"` (foreign ingest is never "stable" by fiat).
+    // A quanta-native SKILL.md ALWAYS declares all three, so this never changes
+    // a native parse. The element shape stays strict (`z.string().min(1)`).
+    allowedTools: z.array(z.string().min(1)).default([]),
+    category: SkillCategorySchema.default("skill"),
+    stability: SkillStabilitySchema.default("experimental"),
+    scope: SkillScopeSchema.optional(),
+    installState: SkillInstallStateSchema.optional(),
+    adminInstalledBy: z.string().min(1).optional(),
+    "argument-hint": z.string().min(1).optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+    "thin-client-dispatch": z.enum(["local", "post-text", "control-request"]).optional(),
+  })
+  .strip()
+  .superRefine((v, ctx) => {
+    if (v.scope === "admin" && v.installState !== undefined && v.installState !== "required") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "admin scope requires installState='required' (or omit it)",
+        path: ["installState"],
+      })
+    }
+    if (v.adminInstalledBy !== undefined && v.scope !== "admin") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "adminInstalledBy is only valid when scope='admin'",
+        path: ["adminInstalledBy"],
+      })
+    }
+  })
+export type SkillFrontmatterCompat = z.infer<typeof SkillFrontmatterCompatSchema>
 
 export class FrontmatterParseError extends Error {
   override readonly name = "FrontmatterParseError"
@@ -308,6 +375,12 @@ const findClosingFence = (lines: readonly string[]): number => {
  */
 interface CollectState {
   nestedParent: string | null
+  /** jun-7-misc 02 (compat-only) — key of a top-level `key:` (empty value)
+   *  whose following indented `- item` lines form a YAML block-list (codex's
+   *  `allowed-tools:` shape). null unless a block-list header was just opened.
+   *  ONLY ever set when the manifest-compat knob is armed; in the default-OFF
+   *  path this stays null so parsing is byte-identical. */
+  blockListParent: string | null
 }
 
 /** ADR-0457 — attach an indented `child: scalar` line to the pending nested-map
@@ -346,6 +419,33 @@ const tryNestedChild = (
 /** True when `raw` is an indented `child: scalar` mapping line (ADR-0457). */
 const isIndentedChild = (raw: string): boolean => /^\s+[A-Za-z][A-Za-z0-9_-]*\s*:\s*.+$/.test(raw)
 
+/** jun-7-misc 02 — true when `raw` is an indented YAML block-list item
+ *  (`  - value`). Compat-only; reused for the codex `allowed-tools:` shape. */
+const isBlockListItem = (raw: string): boolean => /^\s+-\s+.+$/.test(raw)
+
+/** jun-7-misc 02 (compat-only) — append an indented `- value` block-list item
+ *  to the pending block-list parent. The element VALUE reuses {@link parseRhs}
+ *  and MUST resolve to a string (the tool allowlist is a string[]); a non-
+ *  string element is rejected loudly. Returns true when consumed. */
+const tryBlockListItem = (
+  raw: string,
+  lineno: number,
+  data: Record<string, ScalarValue>,
+  parent: string,
+): boolean => {
+  const item = raw.match(/^\s+-\s+(.*)$/)
+  if (!item) return false
+  const value = parseRhs((item[1] ?? "").trim(), lineno)
+  if (typeof value !== "string") {
+    throw new FrontmatterParseError(`block-list '${parent}' items must be string scalars`, lineno)
+  }
+  const cur = data[parent]
+  const list = Array.isArray(cur) ? cur : []
+  list.push(value)
+  data[parent] = list
+  return true
+}
+
 /** True when `raw` is blank or a full-line comment (skippable). */
 const isBlankOrComment = (raw: string): boolean => raw.trim() === "" || raw.trim().startsWith("#")
 
@@ -360,6 +460,15 @@ const collectOneFrontmatterLine = (
     // ADR-0457: an indented line is allowed ONLY as a nested-map child directly
     // under a pending empty-value parent. Anything else stays unsupported.
     if (state.nestedParent !== null && tryNestedChild(raw, lineno, data, state.nestedParent)) {
+      return state
+    }
+    // jun-7-misc 02 (compat-only): an indented `- item` under a pending block-
+    // list parent. `blockListParent` is ONLY non-null when the compat knob is
+    // armed, so the default-OFF path never reaches here (byte-identical).
+    if (
+      state.blockListParent !== null &&
+      tryBlockListItem(raw, lineno, data, state.blockListParent)
+    ) {
       return state
     }
     throw new FrontmatterParseError("indented continuation lines are not supported", lineno)
@@ -380,7 +489,7 @@ const collectOneFrontmatterLine = (
   // parent is intercepted by lookahead in `splitAndCollect` and never lands
   // here.)
   data[key] = parseRhs(rhs, lineno)
-  return { nestedParent: null }
+  return { nestedParent: null, blockListParent: null }
 }
 
 /** Find the next non-blank/comment line index at-or-after `from`, or -1. */
@@ -415,9 +524,72 @@ const nestedMapHeaderKey = (
   return key
 }
 
+/**
+ * jun-7-misc 02 (compat-only) lookahead: if `line` is a top-level `key:` with
+ * an empty value AND the next content line is an indented `- item`, return that
+ * key (opening a YAML block-list parent). Mirrors {@link nestedMapHeaderKey}
+ * for the codex `allowed-tools:` block-list shape. Returns null otherwise.
+ * The caller ONLY invokes this when the manifest-compat knob is armed.
+ */
+const blockListHeaderKey = (
+  line: string,
+  data: Record<string, ScalarValue>,
+  lines: readonly string[],
+  i: number,
+  end: number,
+): string | null => {
+  if (isBlankOrComment(line) || /^\s/.test(line)) return null
+  if (!/^[A-Za-z][A-Za-z0-9_-]*\s*:\s*$/.test(line)) return null
+  const nxt = nextContentLine(lines, i + 1, end)
+  if (nxt === -1 || !isBlockListItem(lines[nxt] ?? "")) return null
+  const key = (line.match(/^([A-Za-z][A-Za-z0-9_-]*)/)?.[1] ?? "").trim()
+  if (key in data) {
+    throw new FrontmatterParseError(`duplicate key '${key}'`, i + 1)
+  }
+  // Seed an empty array so a header with zero following items resolves to [].
+  data[key] = []
+  return key
+}
+
+/** Process one frontmatter line, returning the next {@link CollectState}.
+ *  Extracted from {@link splitAndCollect} so the loop stays flat. `compat`
+ *  (jun-7-misc 02, default-OFF ⇒ BYTE-IDENTICAL) arms the codex block-list
+ *  lookahead + top-level reset; with it false this is the original behavior. */
+const stepFrontmatterLine = (
+  data: Record<string, ScalarValue>,
+  lines: readonly string[],
+  i: number,
+  end: number,
+  state: CollectState,
+  compat: boolean,
+): CollectState => {
+  const line = lines[i] ?? ""
+  // Default-OFF byte-identity: `idle` is exactly `nestedParent === null` (the
+  // original guard) because `blockListParent` is ALWAYS null unless `compat`.
+  // jun-7-misc 02 (compat-only): a TOP-LEVEL (non-indented) line terminates any
+  // pending block-list/nested parent, so a new header lookahead can fire even
+  // when a previous block is still pending (e.g. `metadata:` right after an
+  // `allowed-tools:` block-list). The widened reset is gated to `compat`.
+  const topLevelReset = compat && !/^\s/.test(line) && !isBlankOrComment(line)
+  const idle = (state.nestedParent === null && state.blockListParent === null) || topLevelReset
+  const header = idle ? nestedMapHeaderKey(line, data, lines, i, end) : null
+  if (header !== null) return { nestedParent: header, blockListParent: null }
+  // jun-7-misc 02 (compat-only): block-list header lookahead. Inert unless
+  // `compat` is armed, so default-OFF parsing is byte-identical (never called).
+  const blockHeader = compat && idle ? blockListHeaderKey(line, data, lines, i, end) : null
+  if (blockHeader !== null) return { nestedParent: null, blockListParent: blockHeader }
+  // jun-7-misc 02 (compat-only): a top-level line that did NOT open a new
+  // header clears any pending parent so a stale `blockListParent` does not
+  // swallow the next top-level key.
+  const base = topLevelReset ? { nestedParent: null, blockListParent: null } : state
+  return collectOneFrontmatterLine(line, i + 1, data, base)
+}
+
 /** Split frontmatter (must start with `---` on line 1) from the markdown body
- *  and parse every key/value pair into the restricted scalar/bool/list set. */
-const splitAndCollect = (text: string): SplitResult => {
+ *  and parse every key/value pair into the restricted scalar/bool/list set.
+ *  `compat` (jun-7-misc 02, default false ⇒ BYTE-IDENTICAL) additionally
+ *  recognises the codex `allowed-tools:` YAML block-list shape. */
+const splitAndCollect = (text: string, compat = false): SplitResult => {
   const normalized = text.replace(/\r\n/g, "\n")
   const lines = normalized.split("\n")
   if (lines[0]?.trim() !== FENCE) {
@@ -428,16 +600,9 @@ const splitAndCollect = (text: string): SplitResult => {
     throw new FrontmatterParseError("unterminated frontmatter (missing closing '---')", 1)
   }
   const data: Record<string, ScalarValue> = {}
-  let state: CollectState = { nestedParent: null }
+  let state: CollectState = { nestedParent: null, blockListParent: null }
   for (let i = 1; i < end; i++) {
-    const line = lines[i] ?? ""
-    const header =
-      state.nestedParent === null ? nestedMapHeaderKey(line, data, lines, i, end) : null
-    if (header !== null) {
-      state = { nestedParent: header }
-      continue
-    }
-    state = collectOneFrontmatterLine(line, i + 1, data, state)
+    state = stepFrontmatterLine(data, lines, i, end, state, compat)
   }
   const body = lines
     .slice(end + 1)
@@ -577,14 +742,23 @@ export const liftRawDependenciesBlock = (content: string): { tools: unknown[] } 
 export const parseSkillMarkdown = (
   content: string,
 ): ParseResult<{ frontmatter: SkillFrontmatter; body: string }> => {
+  // jun-7-misc 02 — codex-shape ingest. Strict `=== "1"` opt-in. Default-OFF ⇒
+  // `compat` is false, the block-list lookahead is never armed, no normalizer
+  // runs, and the strict schema is used ⇒ BYTE-IDENTICAL to pre-ticket behavior.
+  const compat = runtimeConfig().manifestCompat
   let split: SplitResult
   try {
-    split = splitAndCollect(content)
+    split = splitAndCollect(content, compat)
   } catch (e) {
     if (e instanceof FrontmatterParseError) return { ok: false, error: e }
     throw e
   }
-  const parsed = SkillFrontmatterSchema.safeParse(split.rawData)
+  // Compat: rename the two enumerated kebab keys (native camel wins on conflict)
+  // BEFORE validation, then validate against the relaxed (strip + default)
+  // schema. The grant-bearing `allowedTools` element shape is unchanged.
+  const rawData = compat ? normalizeSkillFrontmatter(split.rawData) : split.rawData
+  const schema = compat ? SkillFrontmatterCompatSchema : SkillFrontmatterSchema
+  const parsed = schema.safeParse(rawData)
   if (!parsed.success) {
     const first = parsed.error.issues[0]
     const path = first?.path.join(".") || "<root>"

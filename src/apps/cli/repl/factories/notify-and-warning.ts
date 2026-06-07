@@ -7,10 +7,18 @@
  * `isTTY`). The host calls this once and threads the result straight into
  * `runSessionLoop`. Both knobs default-OFF ⇒ all fields `undefined` ⇒
  * byte-identical.
+ *
+ * M3/S3 (jun-7 FINAL): the context-% warning now derives its threshold from the
+ * SAME SSOT the compaction wire uses (`resolveCompactionLimitTokens`, which
+ * applies the D4 model-window derivation). Previously this hardcoded the
+ * model-blind 120k constant, so on a 1M-context session the warning disagreed
+ * with the real ~923k threshold. The active model is read per-turn from the
+ * retained usage view (`view.model`), so the display can never disagree with
+ * the real compaction threshold for that model.
  */
 
 import * as nodePath from "node:path"
-import { runtimeConfig } from "@/shared"
+import { resolveCompactionLimitTokens } from "@/agent"
 import { renderContextWarning, toWarningView } from "../../context-warning"
 import {
   createOscNotificationPort,
@@ -18,12 +26,6 @@ import {
   resolveNotifyChannel,
 } from "../../notify"
 import type { SegmentedUsageView } from "../../status-line"
-
-/** Compaction threshold the warning compares against — mirrors
- *  `compaction.ts` `resolveThreshold` (`runtimeConfig().compactTokens ??
- *  DEFAULT_THRESHOLD`). DEFAULT_THRESHOLD is 120_000; kept local so the warning
- *  path never imports `@/agent`. */
-const COMPACT_DEFAULT_THRESHOLD = 120_000
 
 export interface NotifyAndWarningBundle {
   /** RFC-09 (A) — built only when `QUANTA_NOTIFY` opt-in + stdout TTY. */
@@ -55,10 +57,18 @@ export const buildNotifyAndContextWarning = (args: {
           },
         })
 
-  const compactThreshold = runtimeConfig().compactTokens ?? COMPACT_DEFAULT_THRESHOLD
   const contextWarning =
     process.stderr.isTTY === true
-      ? (): string => renderContextWarning(toWarningView(args.contextUsageView(), compactThreshold))
+      ? (): string => {
+          const view = args.contextUsageView()
+          // M3/S3 — derive the threshold from the SAME SSOT compaction uses,
+          // model-aware via the active model on the retained view. No explicit
+          // per-config override is plumbed to the display, so the resolver
+          // applies the env override then the model-window derivation then the
+          // 120k legacy default — identical precedence to the compaction wire.
+          const compactThreshold = resolveCompactionLimitTokens(undefined, view?.model)
+          return renderContextWarning(toWarningView(view, compactThreshold))
+        }
       : undefined
 
   return {

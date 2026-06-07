@@ -23,7 +23,11 @@ const agentSchema = z.object({
   isolation: z
     .enum(["none", "worktree"])
     .optional()
-    .describe('"worktree" runs the subagent in an isolated git worktree.'),
+    .describe(
+      '"worktree" runs the subagent in an isolated git worktree (own write scope). ' +
+        "REQUIRES the workspace to be a git repo — otherwise it falls back to no isolation " +
+        "(shares the parent cwd).",
+    ),
   max_turns: z.number().optional().describe("Turn budget for the child loop"),
   max_tokens: z.number().optional().describe("Token budget for the child loop"),
   task_kind: z
@@ -43,11 +47,18 @@ const agentSchema = z.object({
   owned_surfaces: z
     .array(z.string())
     .optional()
-    .describe("Files/paths the child is permitted to read or modify."),
+    .describe(
+      "Files/paths the child should confine its reads/edits to. ADVISORY: injected " +
+        "into the child's seed as guidance — NOT enforced by the tool layer. Pair with " +
+        "isolation:'worktree' for a hard (filesystem) write boundary.",
+    ),
   forbidden_surfaces: z
     .array(z.string())
     .optional()
-    .describe("Files/paths the child must NOT touch. Pairs with owned_surfaces."),
+    .describe(
+      "Files/paths the child should avoid. ADVISORY (seed guidance, NOT system-enforced) — " +
+        "pairs with owned_surfaces; use isolation:'worktree' for hard isolation.",
+    ),
   continue_from: z
     .string()
     .optional()

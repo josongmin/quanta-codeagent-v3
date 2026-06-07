@@ -57,7 +57,8 @@
 
 > **STATUS (verified jun-07 src grep)** — P-list 검증마커는 각 §섹션 본문에 인라인(아래 §14–§26). 요약(15 verified flips/confirms):
 > **✅ LANDED (14)**: P5(tool_search) · P12(closeout-critic) · P13(=§26.5 model-window) · P14(=§26.10 read truncation) · P19(MCP annotations) · P20(MCP image) · P21(subagent system) · P22(named-agent load) · P23(grep -A/-B/-C) · P24(grep output_mode) · P25(glob gitignore/mtime) · P26(stream-json) · P27(ratelimit notice) · §26.1(tree-sitter chunking — jun-07 2nd-pass 배선). 또 §12.2 HTTPS-MITM body-scan(Node+Bun)·D1-D8 naive-impl 하든 8/8 FIXED.
-> **🔲 OPEN (10)**: P1(MCP proto 2025-06-18 그대로) · P3(Guardian assessor) · P4(auto-mode bypass) · P6(image downsample) · P7(중앙config/trust-gate) · P10(MCP SSE resume) · **P11(shell ANSI-strip — verified OPEN)** · P15(UTF-16/BOM) · P16(bash -lc Windows) · P17(NotebookEdit). P18(corrupt-store)은 §13 소관(이번 검증범위 외).
+> **🔲 OPEN (8)**: P1(MCP proto 2025-06-18 그대로) · P3(Guardian assessor) · P4(auto-mode bypass) · P6(image downsample) · P7(중앙config/trust-gate) · P10(MCP SSE resume) · P16(bash -lc Windows) · P17(NotebookEdit). P18(corrupt-store)은 §13 소관(이번 검증범위 외).
+> **✅ LANDED 추가 (jun-7 후속)**: **P11(shell ANSI-strip)** — 이전 마커 stale였음: `stripAnsi`(ui-helper) 심볼만 grep해 OPEN 오판. 실제론 전용함수 `stripModelControlChars`(M4 jun-7; OSC/DCS/CSI/C0 strip + `\n`/`\t` 보존, ui-helper보다 강함)가 `bash/index.ts:312` `formatRunBody` + `:365` bg-completed 양 경로에 무조건 배선(게이트 없음). **P15(UTF-16/BOM)** — `read`가 BOM 기반(UTF-8/UTF-16 LE+BE) 결정적 감지로 UTF-16 텍스트를 binary 오분류 안 하고 매칭 TextDecoder로 디코드(13-case hellgate). §16.3 참조.
 > **PARTIAL (3)**: P2(skill 측 부분해소·plugin 측 strict 그대로) · P8(subagent worktree isolation 있음·Enter/ExitWorktree 도구 없음) · P9(compaction-window 해소·1m beta-header 미plumb).
 
 | # | GAP | 카테고리 | 비용 | 임팩트 |
@@ -77,11 +78,11 @@
 
 | # | GAP | 카테고리 | 비용 | 임팩트 |
 |---|---|---|---|---|
-| P11 | shell 출력 ANSI/control-char strip 없음(`bash/index.ts:281`) | Shell-IO | **저(pure fn)** | 중-고(colored CLI 흔함) |
+| P11 | ✅ **DONE** — shell 출력 ANSI/control-char strip (`stripModelControlChars` `bash/index.ts:298`, 양 경로 배선) | Shell-IO | **저(pure fn)** | 중-고(colored CLI 흔함) |
 | P12 | closeout-triggered critic gate(부품 다 있음, 배선만) — **LANDED ✅** (`src/agent/closeout-critic.ts` closed-port `CloseoutCritic`+fail-open `runCloseoutCritic` / `loop/recovery-executor.ts` 두 completed 봉인지점 `maybeRunCloseoutCritic` / knob `QUANTA_CLOSEOUT_CRITIC` default-OFF. reviewer는 DI 포트로만, 포트 absent⇒fail-open, denied verdict는 기존 `recovery`/`closeout` 이벤트로 advisory surface·완료 차단 안 함. OFF/포트-absent⇒await 전 sync 단락 byte-identical) | Verify | 저-중 | 고 |
 | P13 | per-model context-window 비례 compaction(고정120k, model-blind) | Efficiency | 중 | 중-고(토큰) |
 | P14 | 과긴 단일라인 truncation 없음(`read/index.ts:53`) | IO | 저 | 중 |
-| P15 | UTF-16/BOM 감지(UTF-16을 binary로 오분류) | Encoding | 중 | 중(Windows 고) |
+| P15 | ✅ **DONE** — UTF-16/BOM 감지(BOM 결정적, read-path, 13-case hellgate; §16.3) | Encoding | 중 | 중(Windows 고) |
 | P16 | shell 하드코딩 `bash -lc`(Windows shell 없음 `shell.ts:138`) | Platform | 중 | 중(Windows surface) |
 | P17 | cell-aware NotebookEdit(read half는 shipped) | IO | 중 | 중(data-science) |
 | P18 | aggregate corrupt-store 감지+복구안내(전체 history 무음손실 방지) | Resilience | 저 | 중 |
@@ -100,7 +101,7 @@
 | P26 | `--output-format stream-json`(stdout) 없음 — SessionEvent+codec 완비, writer만 | SDK | 저-중 | 고(CI/SDK keystone) |
 | P27 | usage-limit "approaching·resets" UX(snapshot 파싱됨, `stdout.ts:151` 무시) | Transparency | 저 | 고 |
 
-> **싼 quick-win 묶음(비용 저, 즉효)**: P11 ANSI-strip · P14 라인-truncation · **P19 MCP annotations** · **P23/P24 grep context+output_mode** · **P25 glob gitignore/mtime** · P18 corrupt-store hint · P2 skill/plugin schema 완화 · P9 model[1m] · P27 ratelimit 렌더 · §18.2/§22.2 prose/템플릿. 
+> **싼 quick-win 묶음(비용 저, 즉효)**: ~~P11 ANSI-strip~~(✅done) · ~~P14 라인-truncation~~(✅done) · ~~P15 UTF-16/BOM~~(✅done jun-7) · **P19 MCP annotations** · **P23/P24 grep context+output_mode** · **P25 glob gitignore/mtime** · P18 corrupt-store hint · P2 skill/plugin schema 완화 · P9 model[1m] · P27 ratelimit 렌더 · §18.2/§22.2 prose/템플릿. 
 > **"부품 다 있고 배선만"(composition-only, ROI 고)**: P12 closeout-critic · P20 MCP image 매핑 · P21+P22 subagent system+named-load(한 seam) · P26 stdout-json · P27 ratelimit-render.
 
 ---
@@ -553,11 +554,11 @@
 - **quanta**: `src/storage/service.ts:319-323` `readFile`→`Bun.file().text()` **전체 read** 후 slice. `offset`/`limit`은 in-memory 배열 페이징, disk read 아님. 전체-파일 byte cap 없음.
 - **델타**: `offset:1,limit:50`이어도 멀티-GB 텍스트파일 전체 materialize = memory-DoS 표면(binary guard는 binary 케이스만 방지). **ROI 중.**
 
-### 16.3 [NEW-GAP] UTF-8 전용 — BOM/UTF-16 감지 없음 (UTF-16을 binary로 오분류) — 🔲 **STILL OPEN (verified jun-07)** (= P15)
-> **VERIFIED jun-07 OPEN**: `charset`/`utf-16`/`stripBom`/`﻿` 디코딩 grep=0. read는 여전히 `Bun.file().text()`(UTF-8 고정), shell decode는 `TextDecoder("utf-8")`. `read/index.ts:133`·`storage/service.ts:351`의 "UTF-16-LE-without-BOM"은 주석(NUL-sniff 설명)뿐 실제 디코딩 아님. UTF-16-LE 파일은 여전히 binary 오분류.
+### 16.3 [NEW-GAP] UTF-8 전용 — BOM/UTF-16 감지 없음 (UTF-16을 binary로 오분류) — ✅ **LANDED (jun-7 read-path)** (= P15)
+> **LANDED jun-7**: `read`에 BOM 기반 결정적 인코딩 감지 추가 — `detectBomEncoding`(UTF-8 BOM `EF BB BF`·UTF-16LE `FF FE`·UTF-16BE `FE FF`; `FF FE 00 00`=UTF-32LE 트랩은 디코드불가→binary로 폴백) + `classifyEncoding`(BOM 먼저, 그 다음에만 NUL=binary 판정 → UTF-16 텍스트가 NUL-rich여도 통과) + `readTextByEncoding`(UTF-16은 `readFileBytes(size)`+매칭 `TextDecoder`로 디코드, BOM strip; UTF-8-BOM은 stray `﻿` strip). `read/index.ts`·`storage/service.ts:351`의 "UTF-16-without-BOM never NUL" **거짓 주석 정정**. BOM-less UTF-16 휴리스틱 sniff는 의도적 미채택(genuine-binary 오분류 방지). `tests/unit/read-utf16-bom-encoding-hellgate.test.ts`(13-case: LE/BE/UTF8-BOM·surrogate·offset·boundary-defang·UTF-32 트랩·binary 회귀·plain-UTF8 byte-identical). tsc0/biome0. ⚠️ shell decode(`shell.ts` `TextDecoder("utf-8")`)는 별개 — stdout이 UTF-16인 경우는 미처리(드묾, 별도).
 - **경쟁사**: Claude CLI encoding 테이블 `utf-8 utf-16{be,le} unicode-1-1-utf-8`(:1045) + `﻿` BOM 클래스(:107447).
-- **quanta**: read는 `Bun.file().text()`(UTF-8), shell decode는 hard `new TextDecoder("utf-8")`(`src/runtime/shell.ts:290`). charset 감지/BOM strip/UTF-16 없음(`charset|utf-16|bom` grep 0). slice-whole-chars는 출력안전이지 입력디코딩 아님.
-- **델타**: UTF-16-LE 파일(Windows PowerShell `>` 흔함)이 BOM+NUL-interleave로 **binary NUL guard 트립 → binary로 거부**(실은 텍스트). UTF-8-BOM은 line1 상단 stray `﻿`. **ROI 중(Windows 유저엔 고).**
+- **quanta (pre-fix, 정정됨)**: read가 `Bun.file().text()`(UTF-8 고정)였고 binary NUL guard가 UTF-16을 거부했음. **jun-7 read-path 수정으로 해소**(위 LANDED 참조). shell decode(`shell.ts` `TextDecoder("utf-8")`)는 별개 미해결 — stdout UTF-16은 드물어 별도.
+- **델타 (해소)**: UTF-16-LE 파일(Windows PowerShell `>` 흔함)이 이제 BOM 감지로 텍스트로 읽힘. UTF-8-BOM stray `﻿`도 strip. **ROI 중(Windows 유저엔 고) — 실현됨.**
 
 ### 16.4 [PARTIAL] edit가 CRLF 미보존 — ✅ **LANDED (verified jun-07)** (= §26.8)
 > **STATUS FLIP → LANDED (jun-07 "D6")**: 신규 `tool/edit/eol.ts` `detectEol`(CRLF strict-majority) + `fuzzy.ts:32` `split(/\r?\n/)` + splice가 `next.join(detectEol(source))`로 검출된 EOL 재방출(`fuzzy.ts:117,242`). 상세는 §26.8. (참고: `exact.ts`는 byte-identical literal splice라 CRLF 보존 — fuzzy 경로만 버그였고 그게 fix됨.)
@@ -581,8 +582,8 @@
 
 ## 17. Cross-platform / Shell / Terminal
 
-### 17.1 [NEW-GAP] shell 출력 ANSI/control-char strip 없음 — HIGH-ROI — 🔲 **STILL OPEN (verified jun-07)** (= P11)
-> **VERIFIED jun-07 OPEN**: `bash/index.ts:281` `formatRunBody`가 **여전히 `[r.stdout, r.stderr].filter(Boolean).join("\n").trimEnd()` verbatim**(직접 읽음 — stripAnsi 미적용). `stripAnsi` 유틸은 `ui/ui-helpers.ts`에 존재+issue-hint/stdout-adapter서 쓰이나 모델-대면 shell 출력 경로엔 미배선. 순수함수 quick-win 그대로.
+### 17.1 [NEW-GAP] shell 출력 ANSI/control-char strip 없음 — HIGH-ROI — ✅ **LANDED (M4, jun-7)** — 이전 OPEN 마커는 stale (= P11)
+> **정정**: 이전 "verified OPEN"은 `stripAnsi`(ui-helper) **심볼명만** grep해 오판. 실제론 전용함수 `stripModelControlChars`(`bash/index.ts:298`, M4 jun-7-Phase2)가 OSC/DCS(`ESC ] … BEL|ST`)·CSI(`ESC [ … @-~`)·C0 control(`\t`/`\n` 보존, `\r`+DEL strip)을 전부 제거 — ui-helper보다 강함(layout-preserving). `formatRunBody`(`:312`, 포그라운드)+`buildBackgroundCompletedResult`(`:365`, bg) 양 경로에 **무조건**(게이트 없음) 배선. surrogate-safe+idempotent. 갭 닫힘, 다른(더 나은) 메커니즘으로.
 - **경쟁사**: Claude CLI `stripANSI`(`_cli-symbols.txt:119654`) + `Contains control characters`(:122353).
 - **quanta**: `src/tool/bash/index.ts` `formatRunBody`(:281-290) raw stdout/stderr verbatim join — ANSI/OSC/control scrub 없음. read도 raw. `stripAnsi|\x1b|control.char` grep 0.
 - **델타**: `ls --color=always`/progress spinner/`vite` 등 escape 코드가 transcript flood(토큰낭비+모델혼란), NUL 등 control char 무sanitize. **비용 저(pure fn)/ROI 중-고**(colored CLI 극히 흔함).
@@ -924,7 +925,7 @@
 
 ### 26.11 🟠 minor + dead-code (혼합 — PTY scrub LANDED, ANSI/dead-code 여전히 OPEN)
 - **PTY env 미scrub**(security note) — ✅ **LANDED (verified jun-07 "D3")**: `host/runtime/pty-backend.ts:196` 신규 `buildPtyEnv`가 `runShell`과 동일 chokepoint로 child env scrub(default `inheritEnv:false` ⇒ `DEFAULT_ENV_ALLOWLIST`로 `*_API_KEY`/`*_TOKEN`/`*_SECRET` 드롭, `childEnv`). 헤더 주석 명시 "credential leak from the legacy `{...process.env, ...env}` full inherit". **누수 벡터 닫힘.**
-- **ANSI/control-char 모델로 미strip**(§17.1 확인) — 🔲 **STILL OPEN (verified jun-07)**: `bash/index.ts:281` `formatRunBody`가 **여전히 `[r.stdout, r.stderr].join("\n")` verbatim** — stripAnsi 미적용(직접 읽음). `stripAnsi` 유틸은 `ui/ui-helpers.ts`에 존재하고 issue-hint extractor/stdout adapter서 쓰이나 **모델-대면 shell 출력 경로엔 미배선**. 순수함수 quick-win 그대로.
+- **ANSI/control-char 모델로 미strip**(§17.1) — ✅ **LANDED (M4, jun-7)**: 이전 OPEN은 `stripAnsi`(ui-helper) 심볼명만 grep한 오판. 실제론 전용 `stripModelControlChars`(`bash/index.ts:298`, OSC/DCS/CSI/C0 strip·`\n`/`\t` 보존)가 `formatRunBody`(`:312`)+bg-completed(`:365`) 양 경로에 무조건 배선됨. §17.1 참조.
 - **dead code `microcompact/compactor.ts`** — 🔲 **STILL OPEN (verified jun-07)**: `createMicroCompactor`(naive FIFO) **non-test 호출자 여전히 0**(`recovery-reason/types.ts`는 type-doc 참조뿐). 라이브 microcompaction은 orphan-safe `tool-result-evict`(`compaction-wire.ts:73` `microcompactToolResults` 배선됨). dead FIFO **삭제 권장** 유효.
 
 ### 26.12 🟢 확인결과 나이브 아님 (정정 — "고치지 마라")
@@ -937,7 +938,7 @@
 - **shell 나머지**: 출력 truncation head8k+tail4k+disk spill(ADR-0411), timeout SIGTERM→SIGKILL graceful(`KILL_GRACE_MS=2000`), streaming 증분(`RunShellEvent`), `runShell` env scrub. **나이브 아님.**
 
 > **이번 바퀴 핵심**: quanta의 **알고리즘 코어(retry/classifier/edit-matcher/cost/compaction-strategy)는 나이브 아니라 오히려 우위**. 나이브함은 **측정·배선·트리거**에 집중.
-> **VERIFIED jun-07 진척**: 🔴 6종 중 5종 **LANDED** — 26.4 authoritative-token ✅ · 26.5 window-table ✅ · 26.6 orphan-kill(tree-killer 전 site 배선) ✅ · 26.7 bg-buffer OOM ✅ · 26.8 CRLF ✅ · 26.9 V4A anchor ✅ · 26.10 read per-line+token-guard ✅ · 26.11 PTY env scrub ✅. **여전히 OPEN**: 26.1 tree-sitter 미배선(headline overclaim 그대로 — parser 미주입) · 26.2 hash-embed 기본 · 26.3 4-real-embedder · 26.11 ANSI-strip(shell 출력경로) · 26.11 microcompact FIFO dead-code 삭제. **남은 🔴 우선순위: 26.1 tree-sitter wire(유일하게 실-correctness 영향 남음) > 26.11 ANSI-strip.** "retrieval 강함" 라벨은 tree-sitter shipped 기준 여전히 부분 과대평가.
+> **VERIFIED jun-07 진척**: 🔴 6종 중 5종 **LANDED** — 26.4 authoritative-token ✅ · 26.5 window-table ✅ · 26.6 orphan-kill(tree-killer 전 site 배선) ✅ · 26.7 bg-buffer OOM ✅ · 26.8 CRLF ✅ · 26.9 V4A anchor ✅ · 26.10 read per-line+token-guard ✅ · 26.11 PTY env scrub ✅. **여전히 OPEN**: 26.1 tree-sitter 미배선(headline overclaim 그대로 — parser 미주입) · 26.2 hash-embed 기본 · 26.3 4-real-embedder · 26.11 microcompact FIFO dead-code 삭제. (26.11 ANSI-strip은 ✅ LANDED — 위 §17.1, stripModelControlChars 배선됨.) **남은 🔴 우선순위: 26.1 tree-sitter wire(유일하게 실-correctness 영향 남음).** "retrieval 강함" 라벨은 tree-sitter shipped 기준 여전히 부분 과대평가.
 
 ---
 

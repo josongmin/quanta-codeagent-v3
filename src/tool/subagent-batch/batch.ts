@@ -125,8 +125,18 @@ const renderItemLine = (r: BatchItemResult): string => {
  *  spawned worker a stable visual marker in the "Spawning N agents" banner. */
 const WORKER_GLYPHS = ["🟦", "🟥", "🟪", "🟨", "🟩", "🟧", "⬛", "🟫"] as const
 
+/** Strip terminal-injection vectors from a banner field. Item text is
+ *  MODEL/USER-controlled and the banner is written to the operator's terminal,
+ *  so a raw `\r` (line overwrite), ANSI/C0 control, or bidi-override could FORGE
+ *  banner lines / corrupt scrollback. Drop every C0 control (incl CR/ESC/tab)
+ *  and the Unicode bidi-override range before display. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: deliberately matching control chars to STRIP them
+const stripBannerUnsafe = (s: string): string =>
+  s.replace(/[\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069]/g, "")
+
 /** One-line task preview for a batch item (string item ⇒ its head; object item
- *  ⇒ compact key=value head). Truncated so the banner stays scannable. */
+ *  ⇒ compact key=value head). Sanitized (no control/bidi chars) + truncated so
+ *  the banner stays scannable AND uninjectable. */
 const itemTaskPreview = (item: BatchItem): string => {
   const text =
     typeof item === "string"
@@ -134,7 +144,7 @@ const itemTaskPreview = (item: BatchItem): string => {
       : Object.entries(item as Record<string, unknown>)
           .map(([k, v]) => `${k}=${String(v)}`)
           .join(" ")
-  const head = text.split("\n")[0] ?? ""
+  const head = stripBannerUnsafe(text.split("\n")[0] ?? "")
   return head.length > 100 ? `${head.slice(0, 100)}…` : head
 }
 

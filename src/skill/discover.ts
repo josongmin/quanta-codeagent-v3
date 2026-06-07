@@ -1,7 +1,8 @@
 import { readdir, readFile } from "node:fs/promises"
 import { basename, join, sep } from "node:path"
-import { errMessage, parseThinClientRoute } from "@/shared"
+import { errMessage, parseThinClientRoute, runtimeConfig } from "@/shared"
 import { parseFrontmatter } from "./frontmatter"
+import { normalizeSkillFrontmatter } from "./manifest-compat"
 import { liftRawDependenciesBlock } from "./skill-frontmatter"
 import { discoverSkillResources } from "./skill-resources"
 import { checkSkillSize, MAX_SKILL_SIZE_BYTES } from "./skill-size"
@@ -115,9 +116,27 @@ const resolveAdminInstalledBy = (
   return asScalar(data.adminInstalledBy ?? data.admin_installed_by) ?? null
 }
 
+/**
+ * jun-7-misc 02 — codex-shape ingest (strict `=== "1"` opt-in). Default-OFF ⇒
+ * the lenient parser output is returned UNCHANGED ⇒ byte-identical. When armed,
+ * rename the two enumerated kebab keys (`allowed-tools` → `allowedTools`,
+ * `user-invocable` → `userInvocable`; native camel wins on conflict) so the
+ * tool-scoping read at `declaredAllowedTools(data.allowedTools)` sees a codex
+ * kebab `allowed-tools` block-list instead of SILENTLY DROPPING it. The
+ * normalizer only renames SHAPE; the grant VALUE is unchanged.
+ */
+const ingestCompatData = (
+  data: Record<string, string | string[]>,
+): Record<string, string | string[]> =>
+  runtimeConfig().manifestCompat
+    ? (normalizeSkillFrontmatter(data) as Record<string, string | string[]>)
+    : data
+
 /** Build a {@link Skill} from a file's raw contents. */
 const toSkill = (name: string, sourcePath: string, raw: string): Skill => {
-  const { data, body } = parseFrontmatter(raw)
+  const parsed = parseFrontmatter(raw)
+  const body = parsed.body
+  const data = ingestCompatData(parsed.data)
   const description =
     asScalar(data.description) ??
     body

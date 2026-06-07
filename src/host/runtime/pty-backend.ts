@@ -22,6 +22,7 @@
  */
 
 import { DEFAULT_ENV_ALLOWLIST, defaultPpidWalkKiller } from "@/runtime"
+import { asScrubbedEnv, bunScrubbedSpawner } from "@/runtime/scrubbed-spawn"
 import type { PtyBackend } from "@/shared"
 import { runtimeConfig } from "@/shared"
 import { errMessage } from "@/shared/errors"
@@ -136,20 +137,22 @@ export const bunPtyFactory = (jailRoot: string): PtyFactoryPort => ({
     // D3 — scrub the child env through the same chokepoint as `runShell`
     // (drops `*_API_KEY`/`*_TOKEN`/`*_SECRET`). Default scrubbed; opt out with
     // `QUANTA_PTY_INHERIT_ENV` for an interactive shell that needs full env.
-    const childEnv = buildPtyEnv({
-      parentEnv: process.env,
-      declared: env,
-      inheritEnv: runtimeConfig().ptyInheritEnv,
-    })
-    const child = Bun.spawn(
-      argv as string[],
-      {
-        cwd,
-        env: childEnv,
-        // `terminal` is the Bun-native option that attaches a real controlling tty.
-        ...(term !== undefined ? { terminal: term } : {}),
-      } as Parameters<typeof Bun.spawn>[1],
-    ) as unknown as BunSpawnedChild
+    // S1 — brand at the scrubber chokepoint, then route through the typed
+    // `spawnScrubbed` boundary so an env leak is a tsc error. The `terminal`
+    // attach option rides the `extra` escape hatch.
+    const childEnv = asScrubbedEnv(
+      buildPtyEnv({
+        parentEnv: process.env,
+        declared: env,
+        inheritEnv: runtimeConfig().ptyInheritEnv,
+      }),
+    )
+    const child = bunScrubbedSpawner(argv, {
+      cwd,
+      env: childEnv,
+      // `terminal` is the Bun-native option that attaches a real controlling tty.
+      ...(term !== undefined ? { extra: { terminal: term } } : {}),
+    }) as unknown as BunSpawnedChild
     const pid = child.pid ?? 0
     return {
       pid,

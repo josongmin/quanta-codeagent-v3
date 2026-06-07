@@ -29,6 +29,16 @@ export const parseEnvFlag = (raw: string | undefined, defaultOn: boolean): boole
 const GATE_TRUTHY: ReadonlySet<string> = new Set(["1", "on", "true", "yes"])
 const GATE_FALSY: ReadonlySet<string> = new Set(["0", "off", "false", "no"])
 
+/** Value-level predicates over the canonical token sets (trim + case-insensitive)
+ *  — the SINGLE place the vocabulary is defined. `gateOn`/`gateDisabled` (env+name)
+ *  and `parseBool`/`parseBoolDefaultTrue` (raw value) ALL route through these, so
+ *  every boolean knob accepts the IDENTICAL vocabulary regardless of which helper
+ *  reads it (no `yes`-works-here-not-there or whitespace divergence). */
+export const isTruthyToken = (raw: string | undefined): boolean =>
+  raw !== undefined && GATE_TRUTHY.has(raw.trim().toLowerCase())
+export const isFalsyToken = (raw: string | undefined): boolean =>
+  raw !== undefined && GATE_FALSY.has(raw.trim().toLowerCase())
+
 /**
  * Canonical OPT-IN gate read. Default OFF. Returns true iff the value is a
  * recognized truthy token (`1`/`on`/`true`/`yes`, case-insensitive). Unset,
@@ -42,10 +52,8 @@ const GATE_FALSY: ReadonlySet<string> = new Set(["0", "off", "false", "no"])
  *   - the ONLY new behavior is that the OTHER truthy spellings now also work,
  *     so `QUANTA_X=1` AND `QUANTA_X=on` activate every gate uniformly.
  */
-export const gateOn = (env: Record<string, string | undefined>, name: string): boolean => {
-  const raw = env[name]
-  return raw !== undefined && GATE_TRUTHY.has(raw.trim().toLowerCase())
-}
+export const gateOn = (env: Record<string, string | undefined>, name: string): boolean =>
+  isTruthyToken(env[name])
 
 /**
  * Canonical KILL-SWITCH read. Default ON. Returns true (= DISABLED) iff the
@@ -56,10 +64,8 @@ export const gateOn = (env: Record<string, string | undefined>, name: string): b
  * still disables, unset still leaves the feature ON, and `QUANTA_X=0` now ALSO
  * disables — so `=0` is a uniform off-switch across opt-in gates AND kill-switches.
  */
-export const gateDisabled = (env: Record<string, string | undefined>, name: string): boolean => {
-  const raw = env[name]
-  return raw !== undefined && GATE_FALSY.has(raw.trim().toLowerCase())
-}
+export const gateDisabled = (env: Record<string, string | undefined>, name: string): boolean =>
+  isFalsyToken(env[name])
 
 /**
  * STRICT opt-in for SECURITY gates — ON only for the EXACT literal `"1"`. A loose

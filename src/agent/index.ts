@@ -58,7 +58,10 @@ export {
   estimateTokens,
   findBoundary,
   markBaselineStaleIfShrunk,
+  resolveCompactionLimitTokens,
   type TokenBaseline,
+  TokenBaselineBox,
+  type TokenBaselineBoxState,
   triggerTokenCount,
 } from "./compaction"
 export {

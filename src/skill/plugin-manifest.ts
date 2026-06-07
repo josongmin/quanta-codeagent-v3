@@ -19,7 +19,10 @@
  * Strictness: every schema uses `.strict()` so misspelled keys fail loudly
  * (ZERO heuristics / fallbacks — Cluster E hard rule).
  */
+
 import { z } from "zod"
+import { runtimeConfig } from "@/shared"
+import { normalizePluginManifest } from "./manifest-compat"
 
 /** Closed Capability enum lifted from Codex's plugin schema (exact triplet —
  *  do NOT widen without an ADR; widening silently broadens a plugin's
@@ -108,6 +111,76 @@ export const PluginManifestSchema = z
   })
   .strict()
 export type PluginManifest = z.infer<typeof PluginManifestSchema>
+
+/**
+ * jun-7-misc 02 — codex-shape ingest variant of {@link PluginManifestSchema}.
+ *
+ * Differs from the strict schema in exactly two SAFE-BY-CONSTRUCTION ways:
+ *   1. OUTER `.strict()` → `.strip()`: genuinely-unknown TOP-LEVEL keys
+ *      (codex's `license`-adjacent extensions, future `policy`/`authentication`
+ *      blocks) are DROPPED, never interpreted. `.strip()` (not `.passthrough()`)
+ *      so a stripped key can NEVER be read off the parsed object downstream.
+ *   2. Additive optional `repository` (string-URL OR `{url,type?}` — both real
+ *      ecosystem shapes). A manifest WITHOUT `repository` parses identically to
+ *      the strict schema, so this is no-regression for quanta-native files.
+ *
+ * The SECURITY-load-bearing INNER blocks stay `.strict()` UNCHANGED:
+ *   - `MCPServerSpecSchema` (server-spawn descriptor — typo'd key MUST hard-fail)
+ *   - `PluginInterfaceSchema` (`capabilities` = declared-surface enum)
+ *   - `PluginAuthorSchema`
+ *   - `CapabilitySchema` (closed enum)
+ * Loosening the OUTER schema cannot widen any grant because every grant-bearing
+ * field is an INNER strict-validated field. Unknown outer keys are dropped.
+ *
+ * Used ONLY when `runtimeConfig().manifestCompat` is armed (strict `=== "1"`).
+ * Default-OFF callers use {@link PluginManifestSchema} ⇒ byte-identical today. */
+export const PluginManifestCompatSchema = z
+  .object({
+    name: z
+      .string()
+      .min(1)
+      .regex(/^[a-z0-9][a-z0-9._-]*$/, "name must be kebab/snake-case"),
+    version: z.string().min(1),
+    description: z.string().min(1),
+    author: PluginAuthorSchema,
+    homepage: z.string().url().optional(),
+    license: z.string().min(1),
+    keywords: z.array(z.string()),
+    mcpServers: z.record(z.string(), MCPServerSpecSchema).optional(),
+    skills: z.array(z.string()).optional(),
+    interface: PluginInterfaceSchema,
+    // Additive optional: cached codex artifacts carry a string URL; some
+    // ecosystems use a `{type,url}` object — accept both. Captured (not
+    // stripped) so the loader MAY surface it later.
+    repository: z
+      .union([
+        z.string().url(),
+        z.object({ url: z.string().url(), type: z.string().optional() }).strip(),
+      ])
+      .optional(),
+  })
+  .strip()
+export type PluginManifestCompat = z.infer<typeof PluginManifestCompatSchema>
+
+/**
+ * Parse a plugin manifest. Single closed-port entry: when the
+ * `QUANTA_MANIFEST_COMPAT` knob is OFF (default) this is BYTE-IDENTICAL to
+ * `PluginManifestSchema.safeParse(raw)` — same schema, no normalizer, no
+ * `repository` field. When ON it runs the pure {@link normalizePluginManifest}
+ * (string `skills` → array) then validates against the relaxed
+ * {@link PluginManifestCompatSchema}.
+ *
+ * `log` is an optional debug sink for dropped/coerced keys (ticket §5 drift
+ * observability); inert by default. */
+export const parsePluginManifest = (
+  raw: unknown,
+  log?: (message: string) => void,
+): z.SafeParseReturnType<unknown, PluginManifest | PluginManifestCompat> => {
+  if (!runtimeConfig().manifestCompat) {
+    return PluginManifestSchema.safeParse(raw)
+  }
+  return PluginManifestCompatSchema.safeParse(normalizePluginManifest(raw, log))
+}
 
 /** `.mcp.json` is allowed to declare multiple servers under `mcpServers`. */
 export const MCPRootSchema = z

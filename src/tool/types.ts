@@ -244,6 +244,22 @@ export interface ToolContext {
    *  from `AgentConfig.fastApplyFallback`. ABSENT ⇒ exact pre-ADR behavior
    *  (the V4A error throws immediately, NO fallback attempt, byte-identical). */
   fastApplyFallback?: FastApplyFallbackSeam
+  /** jun-7-misc 06 (ADR ≥0497) — OPTIONAL model-based fast-apply MERGE rung. The
+   *  `edit` tool calls this ONCE when the deterministic ladder misses (exact +
+   *  fuzzy both fail to anchor): it hands the apply model the CURRENT file +
+   *  a terse edit sketch derived from `old_string`/`new_string` and gets back a
+   *  full MERGED file PROPOSAL. The proposal is then re-verified IN the edit tool
+   *  (must drop the old text, contain the new text, differ from the original) and
+   *  routed through the SAME gated commit + diff-sink path as any edit — a model
+   *  merge is NEVER a side-channel blind write. On `{ok:false}` / a port throw /
+   *  any verification miss the ladder falls through to the existing typed
+   *  mismatch (byte-identical recovery). Duck-typed (structural mirror of
+   *  `FastApplyPort` in `@/agent/fast-apply-fallback`) so `@/tool` never imports
+   *  `@/agent`; the dispatch seam wires the concrete port from
+   *  `AgentConfig.fastApplyMerge` when `QUANTA_FAST_APPLY_MERGE=1` AND
+   *  `QUANTA_FAST_APPLY_MODEL` are both set. ABSENT (default) ⇒ the ladder is the
+   *  byte-identical `exact → fuzzy → typed mismatch`, ZERO apply-model dispatch. */
+  fastApplyMerge?: FastApplyMergeSeam
   /** ADR-0428 jun-02 wire — OPTIONAL socket-level egress proxy env. When the
    *  `network-proxy` knob is active, a composition root / `runAgent` constructs
    *  + `listen()`s a `LoopbackEgressProxy` and the dispatch seam surfaces the
@@ -562,6 +578,32 @@ export interface FastApplyFallbackSeam {
     },
     signal?: AbortSignal,
   ): Promise<FastApplyAttemptResultMirror>
+}
+
+/** jun-7-misc 06 (ADR ≥0497) — duck-typed mirror of `FastApplyPort` (the MERGE
+ *  direction) from `@/agent/fast-apply-fallback`, kept HERE so `@/tool` stays
+ *  slice-isolated from `@/agent` (RFC §3.1; biome enforces) exactly as
+ *  {@link FastApplyFallbackSeam} mirrors the re-emit port above. Distinct from
+ *  the re-emit seam: where re-emit returns a fresh V4A `newPatch`, this returns
+ *  the full MERGED file. `apply` is NO-THROW at the port boundary (the producer
+ *  collapses every dep/verification failure to `{ ok:false, merged:null }`); the
+ *  consumer (`edit`) additionally guards a port that breaks its contract by
+ *  throwing, and NEVER writes `merged` without its own edit-scoped verification
+ *  + the normal gated commit path. A new field requires updating BOTH the
+ *  producer (`FastApplyMergeResult`) AND this mirror. */
+export interface FastApplyMergeResultMirror {
+  readonly ok: boolean
+  readonly merged: string | null
+  readonly rationale: string
+  readonly modelUsed?: string
+}
+
+/** Structural mirror of `FastApplyPort` (merge direction). */
+export interface FastApplyMergeSeam {
+  apply(
+    input: { original: string; editSketch: string; path?: string },
+    signal?: AbortSignal,
+  ): Promise<FastApplyMergeResultMirror>
 }
 
 /** Canonical seam declaration for the `session_config` tool. Lives in

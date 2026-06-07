@@ -68,3 +68,65 @@ export interface FastApplyFallbackDeps {
   readonly sideConversation: SideConversationLike
   readonly defaultModel: string
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * jun-7-misc 06 (ADR ≥0497) — model-based fast-apply MERGE rung.
+ *
+ * A SECOND, sibling port to {@link FastApplyFallbackPort}. Where the re-emit
+ * port above asks a model to re-author a V4A *patch* (which must itself
+ * re-anchor), the MERGE port asks a dedicated apply model to fold a terse/lazy
+ * edit sketch (`// ... existing code ...` elisions, Cursor 3.5.33's apply IO
+ * shape) directly into the full original file and return the MERGED full file —
+ * no second round of diff anchoring.
+ *
+ * It is an OPTIONAL rung, inserted AFTER fuzzy and BEFORE the V4A re-emit. The
+ * merge is a *proposal*, never a blind write: the consumer verifies the merged
+ * bytes and routes them through the SAME gated commit/diff path as any edit,
+ * fail-closing to the existing ladder on any error or verification miss.
+ *
+ * Slice discipline is identical to the re-emit port: types + `@/shared` only,
+ * collaborators duck-typed, NO-THROW at the port boundary (every dep failure
+ * collapses to `{ ok:false, merged:null, rationale }`).
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** The outcome of ONE merge attempt. `ok:true` ⇒ `merged` is the full merged
+ *  file the caller MAY accept (after its own verification + the normal edit
+ *  gate); `ok:false` ⇒ `merged` is null and `rationale` explains why (always
+ *  nonempty). `modelUsed` records which apply model ran (when an attempt was
+ *  made). The port NEVER decides acceptance — it only proposes. */
+export interface FastApplyMergeResult {
+  readonly ok: boolean
+  readonly merged: string | null
+  readonly rationale: string
+  readonly modelUsed?: string
+}
+
+/** The fast-apply MERGE port. `apply` is NO-THROW: it takes the original file
+ *  + a terse edit sketch and returns the merged full file (REWRITE flavor).
+ *  The apply model is OPERATOR-CONFIGURED (`QUANTA_FAST_APPLY_MODEL`) and
+ *  resolved as the `"apply"` role — NEVER the main agent model (that would
+ *  defeat the cost win). */
+export interface FastApplyPort {
+  apply(
+    input: { original: string; editSketch: string; path?: string },
+    signal?: AbortSignal,
+  ): Promise<FastApplyMergeResult>
+}
+
+/** Duck-typed slice of `@/llm` `RoleModelResolver` for the merge rung — the
+ *  apply model is resolved under the `"apply"` role (distinct from the re-emit
+ *  rung's `"executor"`). The composition-root adapter forwards to the real
+ *  resolver; a role MISS returns `applyModel` (the operator-set id) so the
+ *  apply call NEVER silently falls back to the main model. */
+export interface ApplyRoleResolverLike {
+  resolve(role: "apply", applyModel: string): string
+}
+
+export interface FastApplyMergeDeps {
+  readonly roleResolver: ApplyRoleResolverLike
+  readonly sideConversation: SideConversationLike
+  /** Operator-chosen apply-model id (`QUANTA_FAST_APPLY_MODEL`). REQUIRED — the
+   *  wire only constructs the port when this is present, so there is no default
+   *  here (no fall-through to the main model). */
+  readonly applyModel: string
+}

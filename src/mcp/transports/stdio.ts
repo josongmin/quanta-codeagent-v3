@@ -97,6 +97,14 @@ export class StdioMcpTransport implements McpTransport {
     }
   }
 
+  /** No-op: stdio carries the protocol version only in the `initialize` request
+   *  BODY (which the client controls), never in a per-request header. The
+   *  negotiated pin is therefore irrelevant to this carrier — byte-identical to
+   *  the pre-ticket stdio transport. */
+  setProtocolVersion(_version: string): void {
+    // stdio stamps no header; the negotiated version has no wire effect here.
+  }
+
   onExit(handler: McpTransportExitHandler): () => void {
     this.exitHandlers.add(handler)
     return () => {

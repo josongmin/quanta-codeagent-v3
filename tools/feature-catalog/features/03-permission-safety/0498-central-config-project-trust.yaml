@@ -1,0 +1,53 @@
+id: central-config-project-trust
+title: Central on-disk config loader + per-project trust gate
+section: 3
+subsystem: Central config (@/config) + project-trust
+order: 90
+maturity: L4
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+owners: ["@songmin"]
+labels: [surface:cli, security-touched]
+depends_on: [auto-mode-classifier]
+purpose: |
+  신규 @/config 슬라이스 — Claude/Codex 형상의 layered on-disk config loader
+  (managed > user > project > local) + per-project **trust gate**. layered file
+  read는 fail-soft per-layer(누락 skip, malformed skip+1 warn, EACCES propagate),
+  merge는 precedence + managed-non-overridable(allowManagedPermissionRulesOnly/
+  allowManagedHooksOnly) + deny-over-allow. trust store는 canonical-path 키,
+  default UNTRUSTED, path-pinned(/a trust가 /b·/a/sub로 안 샘). 보안 crux:
+  UNTRUSTED repo의 project/local layer는 capability-granting(allow/ask/hooks/mcp)을
+  전부 drop하고 managed+user만 적용 — 단 tightening(deny)은 untrust여도 적용.
+  default-OFF: QUANTA_CENTRAL_CONFIG=1(strict) 없으면 disk read 0/byte-identical.
+  §2 ungated `<cwd>/settings.json#hooks` read를 trust-gated 경로로 봉합.
+evidence:
+  code:
+    - src/config/index.ts
+    - src/config/loader.ts
+    - src/config/merge.ts
+    - src/config/trust-store.ts
+    - src/config/types.ts
+    - src/agent/command-hooks/settings-loader.ts
+  adrs:
+    - docs/decisions/0498-central-config-loader-project-trust.md
+  tests:
+    unit:
+      - tests/unit/central-config-trust-hellgate.test.ts
+      - tests/unit/central-config-trust-store-hellgate.test.ts
+      - tests/unit/central-config-off-byte-identity-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - QUANTA_CENTRAL_CONFIG
+  - QUANTA_CONFIG_DIR
+  - QUANTA_SETTING_SOURCES
+  - QUANTA_TRUSTED_PATHS
+deliberate_hold: null
+notes: |
+  closed port — runtime-config / command-hooks가 @/config 인터페이스에 의존하고
+  concrete file IO + trust persistence는 composition root에서 주입(@/config → @/agent
+  import 없음). managed OS discovery path enumeration + 실 trust prompt 배선은
+  composition-root follow-up(슬라이스는 managedPath/trusted/read를 주입받기만 함).

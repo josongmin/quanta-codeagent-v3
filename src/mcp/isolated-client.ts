@@ -35,11 +35,15 @@ import {
   PluginHost,
   PluginHostError,
 } from "@/plugin-isolation"
-import { errMessage, logger, QuantaError } from "@/shared"
-import { extractMedia, sanitizeAnnotations } from "./client"
+import { errMessage, logger, QuantaError, runtimeConfig } from "@/shared"
+import { extractMedia, McpError, sanitizeAnnotations } from "./client"
+import {
+  isSupportedProtocolVersion,
+  resolveOfferedVersion,
+  SUPPORTED_PROTOCOL_VERSIONS,
+} from "./protocol-version"
 import type { McpCallResult, McpServerConfig, McpToolDef } from "./types"
 
-const PROTOCOL_VERSION = "2025-06-18"
 const CLIENT_INFO = { name: "quanta", version: "0.1.0" }
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 const MAX_TOOLS_LIST_PAGES = 256
@@ -148,6 +152,10 @@ export class IsolatedMcpClient {
   private host: PluginHost | null = null
   private started = false
   private stopped = false
+  /** Ticket misc-jun-7/01 — protocol version pinned from the `initialize` reply
+   *  (the server's choice, or the offer when it omits one). `null` until
+   *  `start()` completes. */
+  private negotiatedVersion: string | null = null
   /** External exit subscribers (ADR-0435 auto-restart supervisor). Empty unless
    *  a supervisor wires one in — no fan-out when empty (byte-identical). */
   private readonly exitHandlers = new Set<(reason?: string) => void>()
@@ -196,11 +204,22 @@ export class IsolatedMcpClient {
       () => this.notifyExit("process exit"),
     )
     try {
-      await this.host.call("initialize", {
-        protocolVersion: PROTOCOL_VERSION,
+      // Ticket misc-jun-7/01 — offer the SSOT version (knob-resolved), the SAME
+      // source the in-process client uses. The isolated spawner has no JSON-RPC
+      // error/retry surface to drive the §4.c bounded re-offer, so it offers the
+      // resolved version directly; operators who know a peer chokes on the bump
+      // pin it back via `QUANTA_MCP_PROTOCOL_MAX`.
+      const offered = resolveOfferedVersion(runtimeConfig().mcpProtocolMax)
+      const initResult = await this.host.call("initialize", {
+        protocolVersion: offered,
         clientInfo: CLIENT_INFO,
         capabilities: {},
       })
+      // Read the server's chosen version (previously discarded). Accept iff in
+      // the SSOT; a version we do not implement fails closed with a typed
+      // `McpError` (Codex `UNSUPPORTED_PROTOCOL` parity); an absent/malformed
+      // slot is legacy-tolerant (pin the offer) — never throws on shape.
+      this.pinNegotiatedVersion(initResult, offered)
       this.host.notify("notifications/initialized", {})
     } catch (e) {
       // Roll back partial start so a follow-up start() can be reattempted.
@@ -304,5 +323,31 @@ export class IsolatedMcpClient {
       throw new IsolatedMcpError(`mcp server "${this.config.name}" is not running`)
     }
     return this.host
+  }
+
+  /** Ticket misc-jun-7/01 — accept/legacy-tolerant/fail-closed the server's
+   *  chosen `protocolVersion`, mirroring the in-process client. Same SSOT, one
+   *  source. The isolated path stamps no header, so there is nothing to re-pin;
+   *  the pinned value is recorded for diagnostics + parity. */
+  private pinNegotiatedVersion(initResult: unknown, offered: string): void {
+    const replied =
+      typeof initResult === "object" && initResult !== null && !Array.isArray(initResult)
+        ? (initResult as Record<string, unknown>).protocolVersion
+        : undefined
+    if (typeof replied !== "string") {
+      this.negotiatedVersion = offered
+      return
+    }
+    if (!isSupportedProtocolVersion(replied)) {
+      throw new McpError(
+        `mcp server "${this.config.name}" replied with unsupported protocolVersion "${replied}"; supported: ${SUPPORTED_PROTOCOL_VERSIONS.join(", ")}`,
+      )
+    }
+    this.negotiatedVersion = replied
+  }
+
+  /** Ticket misc-jun-7/01 — the protocol version pinned for this session. */
+  pinnedProtocolVersion(): string | null {
+    return this.negotiatedVersion
   }
 }

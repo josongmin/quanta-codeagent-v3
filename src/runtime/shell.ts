@@ -1,8 +1,10 @@
+import type { Subprocess } from "bun"
 import { escalatingKill, withSpawnedChild } from "./guarded-spawn"
 import { applyLocalEnv } from "./local-env"
 import { withProxyEnv } from "./network-proxy"
 import { defaultPpidWalkKiller } from "./process-tree"
 import { DEFAULT_ENV_ALLOWLIST, scrubEnv } from "./sandbox"
+import { asScrubbedEnv, bunScrubbedSpawner } from "./scrubbed-spawn"
 import { getShellSandbox } from "./shell-sandbox-holder"
 import type { RunShellEvent, ShellOptions, ShellResult } from "./types"
 
@@ -127,7 +129,10 @@ export const runShell = async (
   // so the child's OWN sockets are funneled through the loopback egress proxy,
   // closing the subprocess egress bypass. Absent (or `address` undefined) ⇒
   // `withProxyEnv` returns the SAME `baseEnv` reference — byte-identical legacy.
-  const env = withProxyEnv(localEnvBase, options.proxyEnv ?? {})
+  // S1 — brand the composed env at the scrubber chokepoint; the spawn below
+  // routes through the typed `spawnScrubbed` boundary so an env leak is a tsc
+  // error (the `inheritEnv:true` opt-out is still rooted here, explicit).
+  const env = asScrubbedEnv(withProxyEnv(localEnvBase, options.proxyEnv ?? {}))
 
   // S1 — OS sandbox wire-up. Default-OFF: when the CLI surface did not
   // install a slot (via `installShellSandbox`), `getShellSandbox()` returns
@@ -191,12 +196,12 @@ export const runShell = async (
   // `sandboxedArgv` flows through unchanged (byte-identical legacy).
   const snap = options.shellSnapshot
   const argv = snap !== undefined ? snap.restore(snap.handle, sandboxedArgv).argv : sandboxedArgv
-  const proc = Bun.spawn(argv, {
+  const proc = bunScrubbedSpawner(argv, {
     cwd,
     env,
     stdout: "pipe",
     stderr: "pipe",
-  })
+  }) as Subprocess<"ignore", "pipe", "pipe">
 
   // Emit `start` BEFORE we begin draining either pipe so observers see the
   // ordering invariant (start ≺ any stdout/stderr ≺ exit/aborted). The

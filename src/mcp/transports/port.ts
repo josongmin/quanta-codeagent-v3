@@ -55,6 +55,20 @@ export interface McpTransport {
    *  request failure — it never throws. */
   send(payload: McpTransportPayload): Error | null
 
+  /** Pin the NEGOTIATED MCP protocol version for the session (ticket
+   *  misc-jun-7/01). Called once by the client after the `initialize` reply is
+   *  accepted, so a carrier that stamps the version on the wire (HTTP's
+   *  `mcp-protocol-version` header) carries the SERVER-CHOSEN value on every
+   *  subsequent request — not the offered constant. stdio stamps no header, so
+   *  this is a no-op there. Idempotent; safe to call before/without it (the
+   *  carrier falls back to its offered default until pinned).
+   *
+   *  OPTIONAL on the port: a carrier (or a test double) that stamps no version
+   *  on the wire may omit it entirely — the client calls it with optional
+   *  chaining, so absence is byte-identical to a no-op. The two shipped
+   *  transports (stdio no-op, http-sse re-pin) both implement it. */
+  setProtocolVersion?(version: string): void
+
   /** Terminate the carrier. Idempotent; resolves once teardown is complete. */
   close(): Promise<void>
 }

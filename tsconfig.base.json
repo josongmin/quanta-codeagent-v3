@@ -59,6 +59,8 @@
       "@/agent/*": ["./src/agent/*"],
       "@/rules": ["./src/rules/index.ts"],
       "@/rules/*": ["./src/rules/*"],
+      "@/config": ["./src/config/index.ts"],
+      "@/config/*": ["./src/config/*"],
       "@/migration": ["./src/migration/index.ts"],
       "@/migration/*": ["./src/migration/*"],
       "@/patch": ["./src/patch/index.ts"],

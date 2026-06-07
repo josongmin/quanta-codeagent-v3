@@ -8,13 +8,12 @@ import {
   attrs,
   createTurnTimingCapture,
   endSpan,
-  providerOf,
   SPAN_NAMES,
   type Span,
   startSpan,
 } from "@/observability"
 import { abortReasonOf, errMessage, LLMError } from "@/shared"
-import { estimateTokens } from "../compaction"
+import { estimateTokens, TokenBaselineBox } from "../compaction"
 import { buildTtftAttrs } from "../loop-helpers"
 import type { buildTurnContext } from "../prompt"
 import { createStreamDispatcher, type TurnTimingAnchors } from "../stream-callbacks"
@@ -40,24 +39,11 @@ import type { StreamConsumeResult } from "./types"
 /**
  * D5 (jun-7) — fold the provider's usage into the token-baseline box.
  *
- * The authoritative input count must reflect the FULL prompt the provider saw,
- * and the cache-bucket arithmetic is PROVIDER-DEPENDENT (the exact divergence
- * `costUsd`/`providerOf` already encode in `@/observability/pricing`):
- *  - **anthropic**: `inputTokens` EXCLUDES cache reads (`cache_read` /
- *    `cache_creation` are disjoint buckets) → the full prompt is
- *    `inputTokens + cacheRead + cacheCreation`. On a cache-HIT turn `inputTokens`
- *    alone is a few hundred tokens while the real prompt is ~100k.
- *  - **openai**: `prompt_tokens` (our `inputTokens`) ALREADY INCLUDES
- *    `cached_tokens` (cacheRead is a SUBSET, no creation bucket) → the full
- *    prompt IS `inputTokens`; adding cacheRead double-counts (the exact bug the
- *    pricing module was fixed for — it would record a baseline far above the
- *    real prompt and compact prematurely, discarding history).
- *
- * We trust the result only when it is `exact` (>= our chars/4 estimate of the
- * sent prompt — a provider reporting a truncated/under-cached count below the
- * estimate is NOT trusted) and a send-time wm count was recorded by
- * `prepareTurnContext`. Pure + exported so the capture is red-on-injection
- * testable without driving the whole stream.
+ * S2 (jun-7 FINAL): the provider-aware cache arithmetic + the empty-model guard
+ * + the `>= sentEstimate` exactness gate are now OWNED by {@link
+ * TokenBaselineBox.capture} (the single owner of the D5 invariants). This stays
+ * exported as a thin delegate so the red-on-injection capture test can exercise
+ * the arithmetic without driving the whole stream. `undefined` box ⇒ no-op.
  */
 export const captureTokenBaseline = (
   box: TurnState["tokenBaseline"],
@@ -69,21 +55,8 @@ export const captureTokenBaseline = (
   },
   sentEstimate: number,
 ): void => {
-  if (box === undefined || box.sendCount === undefined) return
-  // Provider-aware cache arithmetic: Anthropic's `inputTokens` EXCLUDES cache
-  // reads (sum them); OpenAI's INCLUDES them (don't). We add the buckets ONLY
-  // for a POSITIVELY-identified Anthropic model — an EMPTY/unidentified model id
-  // (a provider that didn't echo `model`, `usage.model ?? ""`) falls back to
-  // inputTokens-alone, the OpenAI-safe path: for OpenAI it's already correct, and
-  // for an Anthropic cache-HIT it under-reports below the estimate ⇒ the capture
-  // is SKIPPED ⇒ legacy chars/4 (safe), never the 2× double-count `providerOf("")
-  // === "anthropic"` would otherwise produce (premature compaction).
-  const isAnthropic = ev.model !== "" && providerOf(ev.model) === "anthropic"
-  const fullInput = isAnthropic
-    ? ev.inputTokens + (ev.cacheReadTokens ?? 0) + (ev.cacheCreationTokens ?? 0)
-    : ev.inputTokens
-  if (!Number.isFinite(fullInput) || fullInput < sentEstimate) return
-  box.current = { measuredInputTokens: fullInput, measuredAtMessageCount: box.sendCount }
+  if (box === undefined) return
+  TokenBaselineBox.wrap(box).capture(ev, sentEstimate)
 }
 
 async function* teeUsage(

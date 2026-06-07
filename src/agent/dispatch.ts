@@ -31,7 +31,7 @@ import { deny, resultBlock } from "./dispatch-helpers"
 import { checkDispatchAllowed } from "./dispatch-seam-guard"
 import type { DispatchResult } from "./dispatch-types"
 import {
-  computeLintDelta,
+  computeLintDeltaTolerant,
   type Diagnostic,
   type RepairReactorPort,
   renderLintDelta,
@@ -364,6 +364,26 @@ const extractEditPath = (call: ToolUseBlock): string | null => {
   return null
 }
 
+/** ADR-0495 — the edit's NET line delta (newlines added − removed), the
+ *  tolerance window for {@link computeLintDeltaTolerant} so a pre-existing lint
+ *  that merely shifted lines is not mis-reported as introduced. Derived from the
+ *  edit INPUT (no extra I/O): `edit` ⇒ Δnewlines(new_string, old_string);
+ *  `write` ⇒ 0 (full overwrite — prior line count unknown, so fall back to the
+ *  exact-line legacy behavior). Pure, no-throw. */
+const countNewlines = (s: string): number => {
+  let n = 0
+  for (let i = 0; i < s.length; i++) if (s.charCodeAt(i) === 10) n++
+  return n
+}
+const editLineShift = (call: ToolUseBlock): number => {
+  const input = call.input as Record<string, unknown> | null | undefined
+  if (call.name !== "edit" || input === null || typeof input !== "object") return 0
+  const o = input.old_string
+  const n = input.new_string
+  if (typeof o !== "string" || typeof n !== "string") return 0
+  return countNewlines(n) - countNewlines(o)
+}
+
 /** Map a `@/tool` `DiagnosticItem` (LSP-shaped, 0-based, severity incl.
  *  information/hint) to the edit-repair `Diagnostic` (1-based-agnostic, severity
  *  error|warning|info). Pure. */
@@ -399,9 +419,13 @@ const openLintBracket = async (
       finish: async (output: string): Promise<string> => {
         try {
           const post = await session.diagnostics(filePath)
-          const introduced = computeLintDelta(
+          // ADR-0495 — tolerant delta: pass the edit's net line delta so a
+          // pre-existing lint that merely shifted lines is NOT mis-blamed on the
+          // edit. lineShift=0 (write / no shift) ≡ the legacy exact-line delta.
+          const introduced = computeLintDeltaTolerant(
             pre.map((d) => toDiag(d, filePath)),
             post.map((d) => toDiag(d, filePath)),
+            editLineShift(call),
           )
           if (introduced.length === 0) {
             await session.stop()

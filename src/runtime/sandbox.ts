@@ -1,7 +1,9 @@
+import type { Subprocess } from "bun"
 import { QuantaError } from "@/shared"
 import { escalatingKill, withSpawnedChild } from "./guarded-spawn"
 import { type ProxyEnvInput, withProxyEnv } from "./network-proxy"
 import { defaultPpidWalkKiller } from "./process-tree"
+import { asScrubbedEnv, bunScrubbedSpawner } from "./scrubbed-spawn"
 import { disclaimedShellArgv } from "./shell-disclaim"
 import type { ShellResult } from "./types"
 
@@ -198,9 +200,11 @@ export class LocalSandbox implements Sandbox {
     // ADR-0428 jun-02 wire — inject the egress proxy env over the scrubbed base
     // so a LocalSandbox child's OWN sockets are gated too (closing the same
     // bypass `runShell` closes). Absent ⇒ `withProxyEnv` returns the same env.
-    const env = withProxyEnv(
-      scrubEnv(policy.envAllowlist ?? DEFAULT_ENV_ALLOWLIST),
-      policy.proxyEnv ?? {},
+    // S1 — branded at the scrubber chokepoint (compose-through-`withProxyEnv` is
+    // still rooted at `scrubEnv`), then routed through the typed `spawnScrubbed`
+    // boundary: an env leak here is a tsc error, not just an R-D3 scan hit.
+    const env = asScrubbedEnv(
+      withProxyEnv(scrubEnv(policy.envAllowlist ?? DEFAULT_ENV_ALLOWLIST), policy.proxyEnv ?? {}),
     )
     const cwd = this.resolveCwd(policy.cwdJail)
     const timeoutMs = policy.timeoutMs ?? DEFAULT_TIMEOUT_MS
@@ -210,12 +214,12 @@ export class LocalSandbox implements Sandbox {
       policy.disclaimShell === true
         ? [...disclaimedShellArgv("bash", command)]
         : ["bash", "-lc", command]
-    const proc = Bun.spawn(argv, {
+    const proc = bunScrubbedSpawner(argv, {
       cwd,
       env,
       stdout: "pipe",
       stderr: "pipe",
-    })
+    }) as Subprocess<"ignore", "pipe", "pipe">
 
     // SIGTERM→SIGKILL escalation (KILL_GRACE_MS): a TERM-trapping child is
     // force-killed; `disarm` clears the grace timer in the guard's cleanup.

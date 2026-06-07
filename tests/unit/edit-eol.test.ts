@@ -111,3 +111,86 @@ describe("applyFuzzyEdit — EOL preservation (D6)", () => {
     expect(r.next).toBe("x = 2\r\nmid\r\nx = 2\r\n")
   })
 })
+
+// ---------------------------------------------------------------------------
+// T-D6 (RFC jun-7 Phase-2-FINAL W3) — REAL-FS disk round-trip CRLF.
+//
+// The `applyFuzzyEdit` tests above are pure-string only (no disk). The plan
+// flagged the real-modality proof as MISSING: nothing exercised the actual
+// `edit` tool's read→edit→write path against a CRLF file ON DISK. This drives
+// the REAL `editTool` (default `@/storage` filesystem port) against a temp CRLF
+// file, with a WHITESPACE-APPROXIMATE `old_string` (different internal spacing
+// + LF-typed needle) so the EXACT rung MISSES and the FUZZY rung — the rung that
+// carried the D6 mixed-EOL bug — is the one that applies. We then re-READ the
+// file from disk and assert: (1) NO lone-`\n` was introduced (the file stays
+// uniformly CRLF), and (2) the edit applied correctly.
+// ---------------------------------------------------------------------------
+
+const diskDir = mkdtempSync(join(tmpdir(), "edit-eol-disk-"))
+afterAll(() => rmSync(diskDir, { recursive: true, force: true }))
+
+const ctx = (cwd: string): ToolContext => ({
+  cwd,
+  signal: new AbortController().signal,
+})
+
+const runEdit = async (input: unknown, cwd: string): Promise<ToolResult> => {
+  let result: ToolResult | undefined
+  for await (const ev of editTool.execute(input as never, ctx(cwd))) {
+    if (ev.type === "result") result = ev.result
+  }
+  if (!result) throw new Error("no result from editTool")
+  return result
+}
+
+/** Every terminator in `s` is CRLF — no lone `\n` (mirror of the helper above,
+ *  duplicated locally so the disk block reads standalone). */
+const diskHasNoLoneLf = (s: string): boolean => {
+  for (let i = 0; i < s.length; i++) {
+    if (s.charCodeAt(i) === 0x0a && s.charCodeAt(i - 1) !== 0x0d) return false
+  }
+  return true
+}
+
+describe("editTool — real-FS disk round-trip preserves CRLF via the FUZZY rung (T-D6)", () => {
+  test("a whitespace-approx fuzzy edit on a CRLF file leaves it uniformly CRLF", async () => {
+    const f = join(diskDir, "crlf-source.ts")
+    // A genuine CRLF file on disk (the bytes carry `\r\n` terminators).
+    const original = "function f() {\r\n      return    a +  b\r\n}\r\n"
+    writeFileSync(f, original)
+    // Sanity: the file is CRLF on disk before we touch it.
+    expect(readFileSync(f, "utf8")).toBe(original)
+
+    // `old_string` differs from the on-disk line by INTERNAL whitespace and is
+    // typed with LF — so the EXACT rung cannot match and the FUZZY rung (the one
+    // that had the D6 bug) is what applies. `fuzzy:true` is required to engage it.
+    const r = await runEdit(
+      { path: f, old_string: "return a + b", new_string: "return a - b", fuzzy: true },
+      diskDir,
+    )
+    expect(r.ok).toBe(true)
+    // The success message proves a NON-exact (whitespace-flex/anchored-trim) rung
+    // engaged — i.e. the rung that carried the corruption bug.
+    expect(r.output).toMatch(/whitespace-flexible|anchored-trim/)
+
+    // Re-read the bytes from DISK (the real modality) and assert no corruption.
+    const after = readFileSync(f, "utf8")
+    expect(diskHasNoLoneLf(after)).toBe(true) // uniformly CRLF, no lone-LF
+    expect(after).toBe("function f() {\r\nreturn a - b\r\n}\r\n") // edit applied
+  })
+
+  test("an LF file edited the same way stays uniformly LF on disk (no CRLF introduced)", async () => {
+    const f = join(diskDir, "lf-source.ts")
+    const original = "function f() {\n      return    a +  b\n}\n"
+    writeFileSync(f, original)
+    const r = await runEdit(
+      { path: f, old_string: "return a + b", new_string: "return a - b", fuzzy: true },
+      diskDir,
+    )
+    expect(r.ok).toBe(true)
+    const after = readFileSync(f, "utf8")
+    // No CR was introduced — the LF file stays LF.
+    expect(after.includes("\r")).toBe(false)
+    expect(after).toBe("function f() {\nreturn a - b\n}\n")
+  })
+})

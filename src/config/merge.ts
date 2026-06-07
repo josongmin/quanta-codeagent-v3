@@ -1,0 +1,155 @@
+/**
+ * Precedence merge + managed-non-overridable + per-project trust gate for the
+ * central config slice (ADR-0497, jun-7-misc 05, §4.b / §4.c).
+ *
+ * Precedence (high→low): managed > user > project > local. The merge is PURE —
+ * it takes the already-parsed layers and a boolean `trusted` and produces the
+ * resolved settings. No IO, no env, no clock.
+ *
+ * The three load-bearing rules (each maps to a competitor primitive, §3/§5):
+ *
+ *   1. **Managed non-overridable** (Claude `allowManagedPermissionRulesOnly` /
+ *      `allowManagedHooksOnly`). When the MANAGED layer sets the flag, ONLY
+ *      managed permission rules / hooks apply — user/project/local cannot add.
+ *      This holds even for a TRUSTED repo.
+ *   2. **Trust gate** (Codex `trust_level`, Claude `hasTrustDialogAccepted`).
+ *      For an UNTRUSTED project, the repo layers (project + local) contribute
+ *      NOTHING capability-granting: their permission `allow`/`ask`, `hooks`,
+ *      and `mcp` are DROPPED. Only managed + user (machine-owned) apply.
+ *   3. **Tightening always allowed** (asymmetry, §4.c). A repo layer's
+ *      permission `deny` is applied EVEN when untrusted — a repo narrowing its
+ *      own boundary is safe; only widening requires trust. `deny` always wins
+ *      over `allow` in the resolved set (defense-in-depth).
+ */
+
+import type {
+  HookGroupSetting,
+  ResolvedSettings,
+  SettingsLayer,
+  SettingsLayerName,
+} from "./types"
+import { LAYER_PRECEDENCE, REPO_LAYERS } from "./types"
+
+/** De-dup a list preserving first-seen order. */
+const uniq = (xs: readonly string[]): string[] => {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const x of xs) {
+    if (!seen.has(x)) {
+      seen.add(x)
+      out.push(x)
+    }
+  }
+  return out
+}
+
+/** A layer is a repo layer (project/local) iff it is attacker-shippable. */
+const isRepoLayer = (layer: SettingsLayerName): boolean => REPO_LAYERS.includes(layer)
+
+/**
+ * Merge the parsed layers into the trust-gated {@link ResolvedSettings}.
+ *
+ * @param layers   parsed layers (a subset of the four; absent ⇒ contributes
+ *                 nothing). Iterated low→high so higher precedence wins last.
+ * @param trusted  whether the current PROJECT path is trusted. When false, the
+ *                 repo layers' capability grants are dropped (§4.c).
+ */
+export const mergeSettings = (
+  layers: Partial<Record<SettingsLayerName, SettingsLayer>>,
+  trusted: boolean,
+): ResolvedSettings => {
+  const managed = layers.managed
+  const managedPermsOnly = managed?.security?.permissions?.allowManagedPermissionRulesOnly === true
+  const managedHooksOnly = managed?.security?.hooks?.allowManagedHooksOnly === true
+
+  const allow: string[] = []
+  const deny: string[] = []
+  const ask: string[] = []
+  const hooks: Record<string, HookGroupSetting[]> = {}
+  const mcpEnabled: string[] = []
+  let model: string | undefined
+  const droppedForUntrust: SettingsLayerName[] = []
+
+  // Low→high so higher-precedence layers append last; `uniq` then preserves the
+  // de-dup but the union semantics (§4.b list-union) mean order is informational.
+  const lowToHigh = [...LAYER_PRECEDENCE].reverse()
+  for (const layerName of lowToHigh) {
+    const layer = layers[layerName]
+    if (layer === undefined) continue
+    const repo = isRepoLayer(layerName)
+    const managedLayer = layerName === "managed"
+
+    // For an UNTRUSTED repo layer, its LOOSENING grants are dropped. Note: deny
+    // (tightening) still applies below regardless of trust.
+    const dropLoosening = repo && !trusted
+
+    let droppedHere = false
+
+    // ── benign band — §9 Q6 v1 decision: DROP the WHOLE repo band when the
+    //    project is untrusted (benign keys included). A repo-shipped `model`
+    //    could redirect the agent's model id, so an untrusted repo contributes
+    //    nothing — not even a "benign" override. Machine-owned (managed/user)
+    //    benign keys always apply. ──
+    if (layer.benign?.model !== undefined) {
+      if (dropLoosening) droppedHere = true
+      else model = layer.benign.model
+    }
+
+    const sec = layer.security
+    if (sec === undefined) {
+      if (droppedHere) droppedForUntrust.push(layerName)
+      continue
+    }
+
+    // ── permission deny — TIGHTENING, always applied (even untrusted repo) ──
+    if (sec.permissions?.deny !== undefined) deny.push(...sec.permissions.deny)
+
+    // ── managed-non-overridable: when managed sets the flag, lower layers
+    //    cannot contribute allow/ask/hooks. Managed itself still applies. ──
+    const permsBlocked = managedPermsOnly && !managedLayer
+    const hooksBlocked = managedHooksOnly && !managedLayer
+
+    // ── permission allow/ask — LOOSENING ──
+    if (sec.permissions?.allow !== undefined) {
+      if (dropLoosening) droppedHere = true
+      else if (!permsBlocked) allow.push(...sec.permissions.allow)
+    }
+    if (sec.permissions?.ask !== undefined) {
+      if (dropLoosening) droppedHere = true
+      else if (!permsBlocked) ask.push(...sec.permissions.ask)
+    }
+
+    // ── hooks — command execution, LOOSENING ──
+    if (sec.hooks?.events !== undefined) {
+      if (dropLoosening) droppedHere = true
+      else if (!hooksBlocked) {
+        for (const [event, groups] of Object.entries(sec.hooks.events)) {
+          const bucket = hooks[event] ?? []
+          bucket.push(...groups)
+          hooks[event] = bucket
+        }
+      }
+    }
+
+    // ── mcp server launchers — LOOSENING ──
+    if (sec.mcp?.enabledServers !== undefined) {
+      if (dropLoosening) droppedHere = true
+      else mcpEnabled.push(...sec.mcp.enabledServers)
+    }
+
+    if (droppedHere) droppedForUntrust.push(layerName)
+  }
+
+  // deny always wins over allow (defense-in-depth, §4.b).
+  const denySet = new Set(deny)
+  const allowFinal = uniq(allow).filter((rule) => !denySet.has(rule))
+  const askFinal = uniq(ask).filter((rule) => !denySet.has(rule))
+
+  return {
+    permissions: { allow: allowFinal, deny: uniq(deny), ask: askFinal },
+    hooks,
+    mcpEnabledServers: uniq(mcpEnabled),
+    model,
+    droppedForUntrust,
+  }
+}

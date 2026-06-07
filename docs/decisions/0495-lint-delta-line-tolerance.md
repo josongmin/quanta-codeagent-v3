@@ -31,9 +31,21 @@ non-negative integer tolerance (`|trunc|`, NaN ⇒ 0).
 
 ## Default posture
 
-Additive pure function — no behavior change to existing callers (they keep calling `computeLintDelta`).
-Adopting the tolerant matcher in the live dispatch bracket is a gated one-line swap that also plumbs the
-edit's line delta through the diagnostics adapter — the documented follow-up wire. Default-OFF until then.
+Additive pure function — no behavior change to the OFF path. Live within the existing
+`QUANTA_EDIT_REPAIR_LOOP` gate (no new flag): the dispatch bracket now calls the tolerant matcher.
+
+## Live wiring (DONE, 2026-06-07)
+
+`src/agent/dispatch.ts` `openLintBracket` (the per-edit lint bracket) now calls
+`computeLintDeltaTolerant(pre, post, editLineShift(call))` instead of `computeLintDelta`. `editLineShift`
+derives the edit's net line delta from the edit INPUT with no extra I/O — `edit` ⇒
+`newlines(new_string) − newlines(old_string)`; `write` ⇒ 0 (full overwrite, ≡ legacy exact-line). Because
+`lineShift=0` reproduces `computeLintDelta` exactly, the OFF path and the no-shift case stay byte-identical;
+a line-inserting/removing edit now correctly stops mis-reporting shifted pre-existing lints as "introduced."
+Scope: the INITIAL introduced-detection (the user-visible annotation + repair-loop trigger). The iterative
+`lintRepairCheck` (`edit-repair-wire.ts`) keeps exact matching — when the initial detection is empty the
+repair loop never runs, so the high-value false-positive is fixed; the cumulative-shift case inside an
+active repair loop is a smaller, bounded follow-up. Verified by the 434-test edit-repair suite (green).
 
 ## Correctness invariants (hellgate-proven)
 

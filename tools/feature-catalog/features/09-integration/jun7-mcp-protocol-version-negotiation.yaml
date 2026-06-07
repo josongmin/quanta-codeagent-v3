@@ -1,0 +1,88 @@
+id: jun7-mcp-protocol-version-negotiation
+title: MCP protocol-version SSOT + negotiated supported-set (bump + downgrade-safe handshake)
+section: 9
+subsystem: MCP — protocol-version negotiation (interop with current-gen servers)
+order: 196
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:cursor", "absorbed:codex", "absorbed:claude"]
+depends_on: [mcp-transport-port-and-http-sse, mcp-client]
+config_refs:
+  env: ["QUANTA_MCP_PROTOCOL_MAX"]
+purpose: |
+  Replaces the single fixed (triplicated) `PROTOCOL_VERSION = "2025-06-18"`
+  literal with a newest-first SSOT + a downgrade-safe negotiation seam, closing
+  the interop gap (every competitor negotiates a supported-set; quanta pinned one
+  and never validated the server's reply).
+
+  SSOT (`src/mcp/protocol-version.ts`): `SUPPORTED_PROTOCOL_VERSIONS`
+  (newest-first: 2025-11-25 · 2025-06-18 · 2025-03-26 · 2024-11-05 · 2024-10-07 —
+  verbatim parity with Cursor `cursor-mcp/dist/main.js:9322` + Claude Code IDE
+  spec §6.2.1), `LATEST_PROTOCOL_VERSION`, `PROTOCOL_DOWNGRADE_FLOOR`,
+  `isSupportedProtocolVersion`, `resolveOfferedVersion`. The three private
+  `const PROTOCOL_VERSION` (client.ts/isolated-client.ts/http-sse.ts) are DELETED
+  and import the one source; a §7 ratchet test forbids re-divergence.
+
+  Negotiation in `client.start()`: OFFER the newest (or the knob ceiling); READ
+  the server's chosen `protocolVersion` (previously DISCARDED) and
+   - IN the set ⇒ accept + pin (the HTTP `mcp-protocol-version` header then
+     carries the PINNED value via `transport.setProtocolVersion`, not the offer),
+   - ABSENT/malformed ⇒ legacy-tolerant (pin the offer; no regression; never
+     throws on shape),
+   - PRESENT but NOT in the set ⇒ fail-closed typed `McpError` (Codex
+     `UNSUPPORTED_PROTOCOL` parity — never proceed on a version we don't speak).
+  §4.c offer-side downgrade: a strict server that rejects an unknown NEWER offer
+  with a JSON-RPC error triggers exactly ONE bounded re-offer at the floor
+  (2025-06-18); a second failure (or a floor-level offer) propagates — never
+  loops. The isolated-spawn client (default-OFF) consumes the SAME SSOT + applies
+  the same accept/legacy/fail-closed read on the reply it previously discarded.
+
+  Posture: NOT default-OFF — negotiation is ALWAYS-ON and backward-compatible
+  (an old-only server's wire is byte-identical FROM the post-initialize point).
+  The one observable change is the OFFERED value on the first `initialize`,
+  guarded by the §4.c downgrade + the `QUANTA_MCP_PROTOCOL_MAX` knob (pin the
+  ceiling back to 2025-06-18 ⇒ byte-identical to pre-ticket; no re-offer probe).
+  Capabilities are UNCHANGED (still whatever the wired negotiator compiles —
+  today `{}`); the bump does NOT auto-enable listChanged/tasks/elicitation (each
+  is a separate knob-gated follow-up this version bump unblocks).
+evidence:
+  code:
+    - src/mcp/protocol-version.ts
+    - src/mcp/index.ts
+    - src/mcp/client.ts
+    - src/mcp/isolated-client.ts
+    - src/mcp/transports/http-sse.ts
+    - src/mcp/transports/stdio.ts
+    - src/mcp/transports/port.ts
+    - src/shared/runtime-config.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/mcp/protocol-version-negotiation-hellgate.test.ts
+      - tests/unit/mcp/protocol-version-http-header-hellgate.test.ts
+      - tests/unit/mcp/protocol-version-isolated-hellgate.test.ts
+      - tests/unit/mcp/protocol-version-failclosed-teardown-hellgate.test.ts
+      - tests/unit/mcp/protocol-version-edge-strings-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_MCP_PROTOCOL_MAX
+    where: src/shared/runtime-config.ts (mcpProtocolMax) → src/mcp resolveOfferedVersion
+    default: ""
+    purpose: pin the MAX offered protocol version (e.g. back to 2025-06-18 for a peer that mis-handles the bump). Absent ⇒ offer the SSOT newest. Unsupported value ⇒ conservative fallback to newest (never an unspeakable version on the wire).
+deliberate_hold: null
+notes: |
+  jun-7-misc 01. The candidate ADR (ticket §) was NOT landed — docs/decisions/ is
+  outside this lane's owned file set and 0497+ are already allocated by concurrent
+  lanes; `adrs: []` until an ADR number is reconciled centrally. The
+  `QUANTA_MCP_PROTOCOL_MAX` runtime-config field was added by the Knobs phase
+  (consumed via runtimeConfig().mcpProtocolMax). Open-question decisions
+  (conservative): adopt version-negotiation ALONE (no new capability auto-enable);
+  global knob v1 (no speculative per-server override); fail-closed on an
+  unsupported server-chosen version; the initialize POST header carries the
+  OFFERED version (negotiation hasn't run), subsequent requests the PINNED one.

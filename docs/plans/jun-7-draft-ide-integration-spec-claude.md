@@ -782,8 +782,13 @@ roadmap], with §6/§7 as the copy-from spec.
   (66729-68348, 86457-86660), §14 terminal (63425, 85646-86152, 88693), §15 OAuth (27499-27825, 43165, 8029),
   §17 rewind/fork/storage (43245, 67082-67499, 68999), §18 chrome/remote/teleport/ssh/deeplink
   (68265-68729, 69119, 62354, 89244), §19 elicitation/plugins/notify (43140, 66869-66929, 85308, 86230).
-- **Medium ([I], cross-agent synthesis):** §2 control subtypes, §4 can_use_tool shape, §10 full RPC catalog
-  (some line refs unverified), §12 schema groupings.
+- **Spot-verified against source (rev8 adversarial pass):** §2 control subtypes (`interrupt/set_permission_mode/
+  set_model/set_max_thinking_tokens/rewind_files/get_context_usage` all confirmed at `43223-43357`); §1 spawn
+  flags (`--effort/--max-budget-usd/--task-budget/--betas/--json-schema/--fork-session/--managed-settings`
+  confirmed `42470-42524`); §10 webview RPCs (49/49 sampled types present in source); §12 hook events (30/30
+  present in schema); §15 keychain (`-credentials`+`security`); §17 session record types (5/5); §18 `claude-cli://`,
+  `sshConfigs/sshHost/sshIdentityFile`; §19 marketplace `github/npm/inline`. **No hallucinated entries found** —
+  the agent-sourced lists held up. (Line refs in §10/§13-19 may be approximate; the *string literals* are real.)
 - **Lower (strings dump only):** §6.3 CLI-side discovery/transport/reconnect/env — line refs in the 110k-,
   126k-, 146k-, 241k-line ranges of `_cli-symbols.txt`; the **SSE-vs-WS ordering is uncertain** — verify
   against a live `claude --debug` IDE connect before relying on it.

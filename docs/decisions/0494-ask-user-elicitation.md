@@ -33,6 +33,20 @@ OFF. Gate `QUANTA_ASK_USER` + `DefaultToolPorts.askUser`. Absent ⇒ the tool is
 (byte-identical default menu). A headless host wires a port that returns typed `headless-denied`, so the
 agent never blocks on an absent human.
 
+## CLI wiring (LIVE, 2026-06-07)
+
+Wired in the **app layer** (`src/apps/cli/ask-user-wire.ts` + `buildTooling` `extraTools` in
+`src/apps/cli/internal.ts`), NOT the host layer — the terminal-defaults ratchet forbids `src/host/runtime`
+(non-app) from owning process stdio. `buildCliAskUserTool(env)` returns the tool ONLY when `QUANTA_ASK_USER`
+is on AND stdin is a TTY; it reuses the SAME interactive prompter the MCP elicitation surface uses
+(`buildCliElicitationPrompterFactory` → readline-on-stdin / prompt-to-stderr, TTY-gated), wrapped by the
+PURE `askUserPortFromPrompter` (no stdio of its own). Off / non-TTY (piped, headless) ⇒ `null` ⇒ the tool
+is absent (byte-identical menu — the agent never sees a question it could not answer). So
+`QUANTA_ASK_USER=1 claude` on a terminal gives the agent a working structured-question channel. The generic
+`DefaultToolPorts.askUser` seam (`@/tool`) remains for non-CLI hosts (web/ide) to inject their own prompter.
+Adapter + kind-routing + empty-enum→empty-options mapping proven by
+`tests/unit/ask-user-cli-wire-hellgate.test.ts`.
+
 ## Correctness invariants (hellgate-proven)
 
 1. Happy path: each kind routes to the port and renders the typed value.

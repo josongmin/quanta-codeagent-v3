@@ -161,12 +161,15 @@ export const SpawnAgentInputSchema = z
     //    are snake_case to match the `agent` tool + spawn_batch (one convention
     //    across every spawn surface so the model never guesses the casing).
     /** `"worktree"` runs the child in an isolated git worktree (own write
-     *  scope). Absent ⇒ shares the parent cwd. */
+     *  scope). REQUIRES the workspace to be a git repo — otherwise falls back to
+     *  no isolation (shares the parent cwd). Absent ⇒ shares the parent cwd. */
     isolation: z.enum(["none", "worktree"]).optional(),
-    /** Files/paths the child may read or modify — injected as an ownership
-     *  boundary into the child's seed (intent gating; pairs with `worktree`). */
+    /** Files/paths the child should confine reads/edits to. ADVISORY — injected
+     *  into the child's seed as intent guidance, NOT enforced by the tool layer.
+     *  Pair with `isolation:"worktree"` for a hard (filesystem) write boundary. */
     owned_surfaces: z.array(z.string().min(1)).max(128).optional(),
-    /** Files/paths the child must NOT touch. Pairs with `owned_surfaces`. */
+    /** Files/paths the child should avoid. ADVISORY (seed guidance, NOT
+     *  system-enforced); pairs with `owned_surfaces`. */
     forbidden_surfaces: z.array(z.string().min(1)).max(128).optional(),
     /** Coarse role: `read` / `edit` / `review` — derives a default tool
      *  allowlist when `tool_filter` is absent. */

@@ -1,4 +1,4 @@
-import { errMessage, QuantaError } from "@/shared"
+import { errMessage, QuantaError, runtimeConfig } from "@/shared"
 import { type CapabilityNegotiator, defaultNegotiator } from "./capabilities"
 import { headlessRejecter } from "./elicitation"
 import {
@@ -11,6 +11,12 @@ import { isResponse, type JsonRpcMessage, type JsonRpcResponse } from "./jsonrpc
 import { headlessOAuthRejecter } from "./oauth"
 import type { McpOAuthProviderPort } from "./oauth/port"
 import { isProgressMethod, type McpProgressHandler, parseProgress } from "./progress"
+import {
+  isSupportedProtocolVersion,
+  PROTOCOL_DOWNGRADE_FLOOR,
+  resolveOfferedVersion,
+  SUPPORTED_PROTOCOL_VERSIONS,
+} from "./protocol-version"
 import type { McpPrompt } from "./resources"
 import {
   isResourceNotificationMethod,
@@ -43,7 +49,6 @@ import type {
   McpToolDef,
 } from "./types"
 
-const PROTOCOL_VERSION = "2025-06-18"
 const CLIENT_INFO = { name: "quanta", version: "0.1.0" }
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 const MAX_TOOLS_LIST_PAGES = 256
@@ -267,11 +272,15 @@ export type McpClientTransport = McpTransport | ((config: McpServerConfig) => Mc
  *  HTTP-SSE carrier is selected only when the config carries a `url` (an
  *  explicit opt-in), preserving stdio byte-identity for every command-based
  *  server. */
-const defaultTransportFor = (config: McpServerConfig): McpTransport => {
+const defaultTransportFor = (config: McpServerConfig, offeredVersion: string): McpTransport => {
   if (config.url !== undefined && config.url !== "") {
     return new HttpSseMcpTransport({
       url: config.url,
       name: config.name,
+      // Ticket misc-jun-7/01 — stamp the OFFERED protocol version on the header
+      // until negotiation pins the server-chosen one (client calls
+      // `setProtocolVersion` after `initialize`).
+      protocolVersion: offeredVersion,
       ...(config.headers !== undefined ? { headers: config.headers } : {}),
     })
   }
@@ -349,6 +358,16 @@ export class McpClient {
    *  optional `tasks/*` surface: tools are wired ONLY when a connected server
    *  advertises `capabilities.tasks` — absent ⇒ byte-identical (no tools). */
   private serverCapabilities: Record<string, unknown> | null = null
+  /** Ticket misc-jun-7/01 — the protocol version OFFERED on `initialize`,
+   *  resolved once at construction from {@link resolveOfferedVersion} (the
+   *  `QUANTA_MCP_PROTOCOL_MAX` knob, else the SSOT newest). Bound into the
+   *  default/HTTP transport factory so the carrier stamps the same offer the
+   *  `initialize` body carries. */
+  private readonly offeredVersion: string
+  /** Ticket misc-jun-7/01 — the protocol version PINNED after the server's
+   *  `initialize` reply was accepted (the offer when the server omits one).
+   *  `null` until `start()` completes. */
+  private negotiatedVersion: string | null = null
   /** External exit subscribers (ADR-0435 auto-restart supervisor). Empty unless
    *  a supervisor wires one in — when empty, `onTransportExit` is byte-identical
    *  to the pre-ADR behavior (the fan-out loop iterates zero times). */
@@ -382,7 +401,17 @@ export class McpClient {
     // a non-opted-in server) is byte-identical: no deferral, no header.
     this.oauthProvider = opts?.oauthProvider ?? headlessOAuthRejecter
     this.oauthActive = config.oauth === true && opts?.oauthProvider !== undefined
+    // Ticket misc-jun-7/01 — resolve the OFFERED protocol version once. Absent
+    // knob ⇒ SSOT newest (competitor parity); `QUANTA_MCP_PROTOCOL_MAX` pins a
+    // lower ceiling (e.g. back to the floor ⇒ byte-identical to pre-ticket). An
+    // unsupported override conservatively falls back to the SSOT newest.
+    this.offeredVersion = resolveOfferedVersion(runtimeConfig().mcpProtocolMax)
     const t = opts?.transport
+    // Bind the offered version into the DEFAULT factory so the HTTP carrier
+    // stamps the same offer the `initialize` body carries. An INJECTED factory
+    // (test double) keeps its single-arg `McpClientTransport` shape unchanged.
+    const boundDefault = (cfg: McpServerConfig): McpTransport =>
+      defaultTransportFor(cfg, this.offeredVersion)
     // When OAuth is active we MUST resolve the bearer before constructing the
     // carrier (the HTTP transport reads static headers at construction time), so
     // we defer to `start()` — UNLESS an explicit transport INSTANCE was supplied
@@ -394,7 +423,7 @@ export class McpClient {
       this.transport = t
       this.transportFactory = null
     } else {
-      const factory = t ?? defaultTransportFor
+      const factory = t ?? boundDefault
       if (this.oauthActive) {
         // Defer construction until the bearer is known.
         this.transport = null
@@ -434,24 +463,125 @@ export class McpClient {
     // answers 401, surfaced like any other error) rather than crashing the load.
     if (this.transport === null) {
       const token = await this.oauthProvider.tokenFor(this.config.name)
-      this.transport = (this.transportFactory ?? defaultTransportFor)(
-        this.withBearer(this.config, token),
-      )
+      const build =
+        this.transportFactory ??
+        ((cfg: McpServerConfig) => defaultTransportFor(cfg, this.offeredVersion))
+      this.transport = build(this.withBearer(this.config, token))
     }
     const transport = this.transport
     this.unsubscribeMessage = transport.onMessage((msg) => this.dispatch(msg))
     this.unsubscribeExit = transport.onExit(() => this.onTransportExit())
     await transport.start()
 
-    const initResult = await this.request("initialize", {
-      protocolVersion: PROTOCOL_VERSION,
+    // Ticket misc-jun-7/01 — negotiate the protocol version. Offer the resolved
+    // version; the §4.c single bounded re-offer downgrades to the floor IFF a
+    // strict server rejects an unknown NEWER offer with a JSON-RPC error.
+    //
+    // R1 (fail-closed teardown): the negotiation read introduces a NEW throw
+    // site that fires AFTER a successful `initialize` (a server replying with an
+    // unsupported version), at which point the carrier is already `start()`ed
+    // with its pumps live. Pre-ticket the reply was discarded, so this could not
+    // throw. Tear the carrier down before propagating so a fail-closed (or a §4.c
+    // double-reject) never leaks a live transport, subscriptions, or — on HTTP —
+    // a standalone SSE GET. `stop()` is idempotent and closes the carrier, drops
+    // the subscriptions, and fails any pending request.
+    try {
+      const { result: initResult, offered } = await this.initializeWithDowngrade(transport)
+      this.serverCapabilities = asRecord(initResult)?.capabilities
+        ? (asRecord(asRecord(initResult)?.capabilities) ?? {})
+        : {}
+      // Read + accept/legacy-tolerant/fail-closed the server's chosen
+      // protocolVersion (previously discarded), then pin the HTTP header to it.
+      this.pinNegotiatedVersion(initResult, offered, transport)
+    } catch (err) {
+      await this.stop().catch(() => {})
+      throw err
+    }
+    this.notify("notifications/initialized", {})
+  }
+
+  /** Ticket misc-jun-7/01 — issue `initialize` offering {@link offeredVersion};
+   *  on a rejection from a STRICT server (a JSON-RPC error rather than a
+   *  negotiated-down reply) AND only when the offer was newer than the floor,
+   *  retry exactly ONCE at the floor ({@link PROTOCOL_DOWNGRADE_FLOOR}). The
+   *  re-offer is bounded — a second failure (or a non-McpError, or an offer that
+   *  was already the floor) propagates, never looping. The §5 worst case is one
+   *  extra round-trip, then byte-identical.
+   *
+   *  Returns BOTH the raw result AND the version that ultimately succeeded on
+   *  the wire, so the legacy-tolerant pin (server omits `protocolVersion`) uses
+   *  the offer that actually connected — not the pre-downgrade offer.
+   *
+   *  The downgrade is offer-side only: a spec-compliant server that negotiates
+   *  DOWN (returns the floor in a SUCCESSFUL reply) never enters the catch — it
+   *  is handled by {@link pinNegotiatedVersion}'s accept branch. */
+  private async initializeWithDowngrade(
+    transport: McpTransport,
+  ): Promise<{ result: unknown; offered: string }> {
+    const offer = this.offeredVersion
+    try {
+      return { result: await this.sendInitialize(offer), offered: offer }
+    } catch (err) {
+      // Re-offer ONLY when the offered version was newer than the floor (so the
+      // floor is a real downgrade) and the failure is a protocol error (any
+      // McpError thrown by the request core — a strict server's -32602, a
+      // synthesized transport error, etc.). A floor-level offer has nowhere to
+      // downgrade to, so it propagates.
+      if (offer === PROTOCOL_DOWNGRADE_FLOOR || !(err instanceof McpError)) throw err
+      // Re-pin the transport header to the floor for the re-offer POST so the
+      // header and body agree on the retry.
+      transport.setProtocolVersion?.(PROTOCOL_DOWNGRADE_FLOOR)
+      const result = await this.sendInitialize(PROTOCOL_DOWNGRADE_FLOOR)
+      return { result, offered: PROTOCOL_DOWNGRADE_FLOOR }
+    }
+  }
+
+  /** Emit a single `initialize` request with `version` as the offered
+   *  `protocolVersion`. Capabilities + clientInfo are unchanged by this ticket. */
+  private sendInitialize(version: string): Promise<unknown> {
+    return this.request("initialize", {
+      protocolVersion: version,
       clientInfo: CLIENT_INFO,
       capabilities: this.negotiator.compile(),
     })
-    this.serverCapabilities = asRecord(initResult)?.capabilities
-      ? (asRecord(asRecord(initResult)?.capabilities) ?? {})
-      : {}
-    this.notify("notifications/initialized", {})
+  }
+
+  /** Ticket misc-jun-7/01 — read the server's chosen `protocolVersion` from the
+   *  `initialize` reply and decide:
+   *   - ABSENT (legacy-tolerant) ⇒ pin the OFFERED version that connected
+   *     (today's behavior, no regression). A malformed/non-string slot is
+   *     treated as absent — routed around, never thrown on (§4.e).
+   *   - IN the supported set ⇒ accept + pin it (this is what the HTTP header then
+   *     carries on every subsequent request).
+   *   - PRESENT but NOT in the set ⇒ fail closed with a typed `McpError` (Codex
+   *     `UNSUPPORTED_PROTOCOL` parity). We never proceed on a version we do not
+   *     implement. This is a PROTOCOL error ⇒ a throw, NOT an `isError` result. */
+  private pinNegotiatedVersion(
+    initResult: unknown,
+    offered: string,
+    transport: McpTransport,
+  ): void {
+    const replied = asRecord(initResult)?.protocolVersion
+    if (typeof replied !== "string") {
+      // Absent or malformed → legacy-tolerant: pin the offer that connected.
+      this.negotiatedVersion = offered
+      transport.setProtocolVersion?.(offered)
+      return
+    }
+    if (!isSupportedProtocolVersion(replied)) {
+      throw new McpError(
+        `mcp server "${this.config.name}" replied with unsupported protocolVersion "${replied}"; supported: ${SUPPORTED_PROTOCOL_VERSIONS.join(", ")}`,
+      )
+    }
+    this.negotiatedVersion = replied
+    transport.setProtocolVersion?.(replied)
+  }
+
+  /** Ticket misc-jun-7/01 — the protocol version pinned for this session (the
+   *  server's choice, or the offer when the server omitted one). `null` until
+   *  `start()` completes. Exposed for diagnostics + the SSOT wire tests. */
+  pinnedProtocolVersion(): string | null {
+    return this.negotiatedVersion
   }
 
   /** ADR-0431 — does the connected server advertise the `tasks/*` capability?

@@ -174,7 +174,7 @@ const loadAndHandshake = async (
   }
   const init = await waitFor("initialize")
   if (init !== undefined) {
-    transport.emit({ jsonrpc: "2.0", id: init.id, result: { protocolVersion: "x" } })
+    transport.emit({ jsonrpc: "2.0", id: init.id, result: { protocolVersion: "2025-06-18" } })
   }
   const list = await waitFor("tools/list")
   if (list !== undefined) {

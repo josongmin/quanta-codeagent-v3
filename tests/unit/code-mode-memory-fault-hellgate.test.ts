@@ -109,6 +109,28 @@ describe("memory limit — POST-FAULT classification (a)", () => {
     expect(r.output).toContain("boom")
   }, 15000)
 
+  // KNOWN + ACCEPTED, cosmetic-only (see the BEST-EFFORT note on `isQuickJsOom`):
+  // a cell can FORGE QuickJS's OOM identity to self-label its failure "memory".
+  // `status` only selects the model-visible diagnostic tag — BOTH code_cell_memory
+  // and code_cell_error are ok:false; the forged label escapes no sandbox/cap/
+  // surface and is shown back to the same model. Pinned so the behavior is
+  // documented (not a surprise) and a future change to it is noticed. There is no
+  // clean counter-measure: a post-OOM heap probe reads low for both a real and a
+  // forged fault, so it cannot distinguish them.
+  test("KNOWN cosmetic spoof: a forged InternalError('out of memory') self-labels 'memory'", async () => {
+    const r = await runTiny(
+      `throw Object.assign(new Error("out of memory"), { name: "InternalError" });`,
+    )
+    expect(r.status).toBe("memory") // documented best-effort: the label is forgeable
+  }, 15000)
+
+  test("a forged InternalError with a NON-OOM message stays 'error' (message identity required)", async () => {
+    const r = await runTiny(
+      `throw Object.assign(new Error("just a normal error"), { name: "InternalError" });`,
+    )
+    expect(r.status).toBe("error")
+  }, 15000)
+
   test("a normal compute cell is 'ok' (the classifier never fires on success)", async () => {
     const r = await runTiny(`let s = 0; for (let i = 0; i < 100; i++) s += i; return s;`)
     expect(r.status).toBe("ok")

@@ -37,6 +37,14 @@ export {
   parseProgress,
 } from "./progress"
 export {
+  isSupportedProtocolVersion,
+  LATEST_PROTOCOL_VERSION,
+  PROTOCOL_DOWNGRADE_FLOOR,
+  resolveOfferedVersion,
+  SUPPORTED_PROTOCOL_VERSIONS,
+  type SupportedProtocolVersion,
+} from "./protocol-version"
+export {
   type BackoffPolicy,
   backoffDelay,
   DEFAULT_BACKOFF_POLICY,

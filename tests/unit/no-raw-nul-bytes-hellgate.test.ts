@@ -26,16 +26,17 @@ function* walk(dir: string): Generator<string> {
     const p = join(dir, entry)
     const s = statSync(p)
     if (s.isDirectory()) yield* walk(p)
-    else if (entry.endsWith(".ts")) yield p
+    else if (entry.endsWith(".ts") || entry.endsWith(".md")) yield p
   }
 }
 
 describe("source integrity — no raw NUL (0x00) bytes", () => {
-  test("every src/ AND tests/ .ts file is NUL-free (use the \\x00 escape, never a raw byte)", () => {
+  test("every src/tests .ts AND docs .md file is NUL-free (use \\x00, never a raw byte)", () => {
     const offenders: string[] = []
-    // Tests scan too: a raw NUL in a FIXTURE string (NUL/control-char handling
-    // tests) makes the test file binary just the same — write it as `\x00`.
-    for (const root of ["src", "tests"]) {
+    // src+tests .ts (a raw NUL in a fixture string binary-flags the test file
+    // just like source) AND docs .md (a raw NUL in an ADR — e.g. illustrating a
+    // stripped control char — makes the doc binary; write it as `\x00`/`U+0000`).
+    for (const root of ["src", "tests", "docs"]) {
       for (const file of walk(root)) {
         const buf = readFileSync(file)
         const idx = buf.indexOf(0)

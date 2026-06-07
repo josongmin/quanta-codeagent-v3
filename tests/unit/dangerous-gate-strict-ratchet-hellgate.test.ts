@@ -212,7 +212,40 @@ const readAllSrc = (): ReadonlyArray<readonly [path: string, text: string]> => {
   return out
 }
 
-const ALL_SRC = readAllSrc()
+/**
+ * F2 FIX — strip comments before scanning. The scan is raw-text, so a COMMENT or
+ * MIGRATION NOTE that merely *mentions* a loose call (e.g.
+ * `// replaced gateOn(env,"QUANTA_CODE_MODE") with gateOnStrict`) used to FALSELY
+ * trip the ratchet and break CI on a benign edit. We remove line- and block-
+ * comments first so only EXECUTABLE code is scanned.
+ *
+ * Conservative, not a full lexer: we walk the text char-by-char tracking whether
+ * we are inside a string/template literal, and only strip `//…` / `/* … *​/` when
+ * NOT inside a string. This avoids the classic `https://` false-strip (the `//`
+ * is inside a quoted string) and avoids blanking the gate-name argument of a real
+ * call (which lives in code, never a comment). Stripped comment bytes are replaced
+ * with spaces of equal length so line/column geometry (and our regexes) are
+ * unaffected by anything but the now-absent comment text.
+ */
+/** Replace a matched comment with equal-length whitespace (newlines preserved) so
+ *  line/column geometry is unchanged but the comment TEXT is gone. */
+const blank = (m: string): string => m.replace(/[^\n]/g, " ")
+
+/**
+ * Single-pass tokenizer: a `g`-flag regex whose alternation prefers (in order)
+ * STRING/TEMPLATE literals, then line comments, then block comments. Because a
+ * string literal is matched as ONE token, a `//` or `/​*` INSIDE a string (e.g. a
+ * `https://` URL) is consumed by the string arm and never seen as a comment —
+ * exactly the `://` false-strip we must avoid. Only the comment arms are blanked;
+ * everything else (including real code calls) passes through verbatim.
+ */
+const TOKEN = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`|\/\/[^\n]*|\/\*[\s\S]*?\*\//g
+
+const stripComments = (src: string): string =>
+  src.replace(TOKEN, (m) => (m.startsWith("//") || m.startsWith("/*") ? blank(m) : m))
+
+/** Comment-stripped view of every src file — what every src-wide assertion scans. */
+const ALL_SRC = readAllSrc().map(([p, text]) => [p, stripComments(text)] as const)
 
 /** Escape a string for use as a literal inside a RegExp. */
 const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -224,11 +257,60 @@ const argAlternation = (g: DangerousGate): string => {
   return `(?:${parts.join("|")})`
 }
 
-/** `<accessor>(<anything-no-comma>, <arg>)` — matches the call by accessor name
- *  and arg (literal or const), tolerant of whitespace. The first arg is the env
- *  source (any non-paren, non-comma run), the second is the gate name. */
+/**
+ * `<accessor>(<env-source>, <gate-name>)` — matches the call by accessor name and
+ * gate-name arg (literal or const), tolerant of whitespace.
+ *
+ * F1 FIX — the env-source arg may itself be a CALL (`getEnv()`, `process.env`,
+ * `this.env()`). The old matcher used `[^,()]+`, which FORBIDS parens and so let
+ * `gateOn(getEnv(), "QUANTA_CODE_MODE")` slip the ratchet. We now allow parens in
+ * the source arg via a NON-GREEDY `[^,]+?` (still no comma — that would cross into
+ * a third argument / a separate call), so the env source can be an arbitrary
+ * (paren-bearing) accessor expression and the loosening is still caught. The
+ * non-greedy quantifier plus the anchored `, <gate-name>)` tail prevents
+ * over-matching across two adjacent calls. */
 const callRe = (accessor: string, g: DangerousGate): RegExp =>
-  new RegExp(`\\b${accessor}\\s*\\(\\s*[^,()]+,\\s*${argAlternation(g)}\\s*\\)`)
+  new RegExp(`\\b${accessor}\\s*\\(\\s*[^,]+?,\\s*${argAlternation(g)}\\s*\\)`)
+
+/**
+ * F3 FIX — police the READERS, not just the one `gateOn`/`gateDisabled` accessor
+ * pair. A dangerous gate re-read through a LOOSER primitive bypasses the strict
+ * guard entirely. The two security-relevant evasion shapes:
+ *
+ *   (a) `parseEnvFlag(env.QUANTA_CODE_MODE, …)` — the exported helper accepts
+ *       on/true/yes AND an EMPTY string as truthy (looser than gateOnStrict's
+ *       exact `=== "1"`). Reading a dangerous gate through it broadens activation.
+ *   (b) raw `env.QUANTA_CODE_MODE === "on"|"true"|"yes"|"1"` (or the
+ *       `env["QUANTA_CODE_MODE"]` bracket form) — an inline comparison that
+ *       sidesteps the centralized strict primitive. Even the `=== "1"` strict
+ *       spelling is banned inline: dangerous gates must funnel through
+ *       `gateOnStrict`/`gateDisabledStrict`, never an ad-hoc compare.
+ *
+ * Each returns a regex that, run over comment-stripped src, flags the evasion. */
+const parseEnvFlagRe = (g: DangerousGate): RegExp =>
+  // parseEnvFlag( … <gate-name> … )  — gate name referenced as the env value
+  // arg, as a literal or alias, in dotted (`env.NAME`) or bracket (`env["NAME"]`)
+  // form, or the bare alias const. We require the name to appear before the next
+  // `)` so we don't match across an unrelated later call.
+  new RegExp(`\\bparseEnvFlag\\s*\\(\\s*[^)]*?${nameRef(g)}[^)]*\\)`)
+
+const rawCompareRe = (g: DangerousGate): RegExp =>
+  // <gate-name-ref>(]?) (!|=)== "on"|"true"|"yes"|"1"  — inline strict/loose
+  // compare. The optional `]` lets the bracket read `env["QUANTA_X"] === …` match
+  // (the quoted literal is closed by `]` before the operator).
+  new RegExp(`${nameRef(g)}\\s*\\]?\\s*(?:!|=)==\\s*"(?:on|true|yes|1)"`)
+
+/** Reference to a dangerous gate's name as a value-read: the quoted literal (so
+ *  `env["QUANTA_X"]` matches), `env.QUANTA_X` dotted form, OR any const alias. */
+const nameRef = (g: DangerousGate): string => {
+  const parts = [
+    `"${esc(g.literal)}"`,
+    `\\.${esc(g.literal)}\\b`,
+    `\\b${esc(g.literal)}\\b`,
+    ...g.aliases.map((a) => `\\b${esc(a)}\\b`),
+  ]
+  return `(?:${parts.join("|")})`
+}
 
 describe("dangerous gates use the STRICT primitive SRC-WIDE (const-alias-aware ratchet)", () => {
   for (const g of DANGEROUS_GATES) {
@@ -251,6 +333,27 @@ describe("dangerous gates use the STRICT primitive SRC-WIDE (const-alias-aware r
       const present = ALL_SRC.some(([, text]) => strictRe.test(text))
       expect(present).toBe(true)
     })
+
+    // F3 — NO looser READER of this dangerous gate anywhere in src: no
+    // parseEnvFlag(env.GATE, …) (accepts on/true/yes/empty) and no inline
+    // raw `=== "on"|"true"|"yes"|"1"` compare (sidesteps the strict primitive).
+    const pefRe = parseEnvFlagRe(g)
+    const rawRe = rawCompareRe(g)
+    test(`${g.literal} — NO looser reader (parseEnvFlag / raw === compare) anywhere in src`, () => {
+      const pefOffenders = ALL_SRC.filter(([, text]) => pefRe.test(text)).map(([p]) =>
+        p.slice(SRC_ROOT.length + 1),
+      )
+      const rawOffenders = ALL_SRC.filter(([, text]) => rawRe.test(text)).map(([p]) =>
+        p.slice(SRC_ROOT.length + 1),
+      )
+      // A looser reader is the SHARPEST bypass: it evades the gateOn/gateDisabled
+      // accessor check above entirely while still broadening activation of the
+      // dangerous capability. Any hit is a real security regression.
+      expect({ parseEnvFlag: pefOffenders, rawCompare: rawOffenders }).toEqual({
+        parseEnvFlag: [],
+        rawCompare: [],
+      })
+    })
   }
 
   test("the src-wide dangerous-gate inventory is non-empty (guard is live, not vacuous)", () => {
@@ -261,5 +364,91 @@ describe("dangerous gates use the STRICT primitive SRC-WIDE (const-alias-aware r
     // Defends against a silently-empty readdir (e.g. wrong root) making every
     // 'present' assertion vacuously... fail, and every 'no-loose' vacuously pass.
     expect(ALL_SRC.length).toBeGreaterThan(100)
+  })
+})
+
+// ─── F1/F2/F3 SELF-TESTS: red-on-injection + green-on-benign ─────────────────
+//
+// The src-wide assertions above are only as trustworthy as the detectors they
+// run. These tests pin the DETECTOR behaviour against synthetic strings so a
+// future refactor that silently re-narrows a regex (re-opening an evasion) goes
+// RED here even when the live tree happens to be clean.
+
+const CODE_MODE: DangerousGate = {
+  literal: "QUANTA_CODE_MODE",
+  kind: "on",
+  aliases: ["QUANTA_CODE_MODE_ENV"],
+  why: "self-test fixture",
+}
+
+describe("detector self-tests — red on each evasion form, green on benign comment", () => {
+  // F1: env source is itself a CALL (parens) — old `[^,()]+` matcher missed this.
+  test("F1 red-on-injection: loose matcher catches a paren-bearing env source", () => {
+    const looseRe = callRe("gateOn", CODE_MODE)
+    expect(`  if (gateOn(getEnv(), "QUANTA_CODE_MODE")) {`).toMatch(looseRe)
+    // alias form with a call source is caught too
+    expect(`gateOn(this.env(), QUANTA_CODE_MODE_ENV)`).toMatch(looseRe)
+    // and it must NOT over-match across two adjacent unrelated calls / a comma
+    // that would belong to a 3-arg call (no gate-name tail ⇒ no match)
+    expect(`gateOn(getEnv(), "QUANTA_OTHER")`).not.toMatch(looseRe)
+  })
+
+  // F2: a comment/migration note mentioning a loose call must NOT trip the scan.
+  test("F2 green-on-benign: a loose call appearing ONLY in a comment is stripped", () => {
+    const looseRe = callRe("gateOn", CODE_MODE)
+    const benign = stripComments(
+      [
+        '// jun-07: replaced gateOn(env, "QUANTA_CODE_MODE") with gateOnStrict',
+        "/* migration: gateOn(getEnv(), QUANTA_CODE_MODE_ENV) is GONE */",
+        'export const enabled = gateOnStrict(env, "QUANTA_CODE_MODE")',
+      ].join("\n"),
+    )
+    // the comment mentions are gone; only the real strict call survives
+    expect(benign).not.toMatch(looseRe)
+    expect(benign).toMatch(callRe("gateOnStrict", CODE_MODE))
+  })
+
+  // F2 corollary: stripping must NOT eat a `//` that lives inside a string (URL).
+  test("F2 green: comment-strip preserves `//` inside a string literal (URL)", () => {
+    const kept = stripComments('const u = "https://example.com/QUANTA_CODE_MODE"')
+    expect(kept).toContain("https://example.com/QUANTA_CODE_MODE")
+  })
+
+  // F2 corollary: stripping must NOT blank the gate-name arg of a REAL loose call
+  // (the arg is code, not a comment) — a genuine regression still goes red.
+  test("F2 red preserved: a REAL loose call (not in a comment) is still caught", () => {
+    const looseRe = callRe("gateOn", CODE_MODE)
+    const real = stripComments(
+      '// note: code-mode\nconst on = gateOn(env, "QUANTA_CODE_MODE") // loosened!',
+    )
+    expect(real).toMatch(looseRe)
+  })
+
+  // F3: looser readers — parseEnvFlag + raw === compare — are detected.
+  test("F3 red-on-injection: parseEnvFlag reader of a dangerous gate is caught", () => {
+    const pefRe = parseEnvFlagRe(CODE_MODE)
+    expect(`const on = parseEnvFlag(env.QUANTA_CODE_MODE, false)`).toMatch(pefRe)
+    expect(`parseEnvFlag(env["QUANTA_CODE_MODE"], true)`).toMatch(pefRe)
+    expect(`parseEnvFlag(process.env[QUANTA_CODE_MODE_ENV], false)`).toMatch(pefRe)
+    // an unrelated gate must NOT trip this gate's detector
+    expect(`parseEnvFlag(env.QUANTA_SOMETHING_ELSE, false)`).not.toMatch(pefRe)
+  })
+
+  test('F3 red-on-injection: raw `=== "on"|"true"|"yes"|"1"` compare is caught', () => {
+    const rawRe = rawCompareRe(CODE_MODE)
+    expect(`if (env.QUANTA_CODE_MODE === "on") {`).toMatch(rawRe)
+    expect(`env["QUANTA_CODE_MODE"] === "true"`).toMatch(rawRe)
+    expect(`QUANTA_CODE_MODE_ENV === "yes"`).toMatch(rawRe)
+    expect(`raw === "1"` /* must reference the gate to count */).not.toMatch(rawRe)
+    expect(`env.QUANTA_CODE_MODE === "1"`).toMatch(rawRe)
+  })
+
+  // F3 green: a raw compare that lives ONLY in a comment (the live tree has
+  // exactly this at src/host/runtime/agent-arg-builder.ts) must NOT trip after
+  // comment-stripping — proving the F2 strip protects the F3 reader scan too.
+  test("F3 green-on-benign: a raw compare mentioned only in a comment is stripped", () => {
+    const rawRe = rawCompareRe(CODE_MODE)
+    const benign = stripComments('// tool menu byte-identical unless QUANTA_CODE_MODE === "1".')
+    expect(benign).not.toMatch(rawRe)
   })
 })

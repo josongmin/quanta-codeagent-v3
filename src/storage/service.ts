@@ -347,10 +347,11 @@ export const statFile = async (path: string, baseDir?: string): Promise<FileInfo
 /**
  * B5 binary guard — read a BOUNDED leading window of a file as raw bytes
  * (jailed identically to {@link readFile}). The `read` tool sniffs the
- * returned bytes for a NUL (`0x00`): its presence is the standard text/binary
- * discriminator git and editors use (a UTF-8 / UTF-16-LE-without-BOM text file
- * never contains a NUL in normal content). Reading only a bounded prefix means
- * a multi-gigabyte binary is NOT slurped into memory just to classify it.
+ * returned bytes: a leading BOM (UTF-8 / UTF-16 LE/BE) marks text, and ONLY in
+ * its ABSENCE is a NUL (`0x00`) the binary discriminator git and editors use.
+ * (UTF-16 text IS full of NULs, so the BOM must be checked first — see
+ * `read`'s `classifyEncoding`.) Reading only a bounded prefix means a
+ * multi-gigabyte binary is NOT slurped into memory just to classify it.
  *
  * `maxBytes` is the caller-supplied window. Returns the actual bytes read
  * (`<= maxBytes`; shorter for a small file). Routes through {@link resolvePath}
