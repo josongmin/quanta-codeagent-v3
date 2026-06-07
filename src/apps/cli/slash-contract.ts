@@ -150,6 +150,10 @@ export interface SlashContext {
   readonly conversationActions?:
     | import("./repl/conversation-action-surface").ConversationActionSurface
     | undefined
+  /** §steer — the session-mutable inbound delivery mode ref (queue|weave|
+   *  interrupt). `/inbound` reads/sets `.current`; the session loop reads it per
+   *  mid-turn line. Absent ⇒ `/inbound` prints "not wired". */
+  readonly inboundMode?: { current: import("@/agent/inbound-mode").InboundMode } | undefined
 }
 
 /** Inventory row returned by {@link SlashContext.skills}. Mirrors the host

@@ -19,6 +19,7 @@
  *   ...APP_SLASH_COMMANDS]` into the historic `BUILTINS`.
  */
 
+import { ALL_INBOUND_MODES, parseInboundMode } from "@/agent/inbound-mode"
 import { runDebugCmd } from "../debug-cmd"
 import { retryWithCmd } from "../retry-with"
 import { sideCmd } from "../side-cmd"
@@ -98,6 +99,49 @@ const summarizeNowCmd: SlashCommand = {
   },
 }
 
+/** `/inbound` — §steer: show or set the inbound message-delivery mode. A fired
+ *  message while a turn is in flight is handled per mode:
+ *    queue     — runs as the NEXT turn (default; FIFO follow-up)
+ *    weave     — injected into the CURRENT turn (Claude-IDE live blend)
+ *    interrupt — aborts the current turn + restarts with the message (Codex barge-in)
+ *  weave/interrupt need `QUANTA_CONVERSATION_ACTIONS=on` + `QUANTA_MIDTURN_CAPTURE=on`
+ *  to actually take effect (else the loop degrades to queue). */
+const inboundCmd: SlashCommand = {
+  name: "/inbound",
+  describe: "Show/set inbound message delivery mode (queue | weave | interrupt)",
+  category: "config",
+  async run(args, ctx) {
+    if (ctx.inboundMode === undefined) {
+      ctx.out("/inbound: not wired in this surface\n")
+      return 0
+    }
+    const arg = args.join(" ").trim().toLowerCase()
+    if (arg === "" || arg === "show" || arg === "status") {
+      ctx.out(`/inbound: ${ctx.inboundMode.current} (modes: queue | weave | interrupt)\n`)
+      return 0
+    }
+    const parsed = parseInboundMode(arg)
+    if (parsed === undefined) {
+      ctx.out(`/inbound: unknown mode '${arg}' — use queue | weave | interrupt\n`)
+      return 1
+    }
+    ctx.inboundMode.current = parsed
+    const needsSurface = parsed !== "queue" && ctx.conversationActions === undefined
+    const note = needsSurface
+      ? " (NOTE: weave/interrupt need QUANTA_CONVERSATION_ACTIONS=on + QUANTA_MIDTURN_CAPTURE=on)"
+      : ""
+    ctx.out(`/inbound: mode → ${parsed}${note}\n`)
+    return 0
+  },
+  complete(_args, partial) {
+    const p = partial.toLowerCase()
+    return ALL_INBOUND_MODES.filter((m) => m.startsWith(p)).map((m) => ({
+      value: m,
+      kind: "argument" as const,
+    }))
+  },
+}
+
 /** Slot order matches the layered ordering. The historic slot of
  *  `/retry-with` (index 6 in the old BUILTINS) is intentionally NOT
  *  preserved — see ADR-0306 §"Slot ordering" for the rationale. */
@@ -108,4 +152,5 @@ export const SESSION_SLASH_COMMANDS: readonly SlashCommand[] = [
   whyCmd,
   cancelCmd,
   summarizeNowCmd,
+  inboundCmd,
 ]

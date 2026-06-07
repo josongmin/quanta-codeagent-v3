@@ -499,6 +499,9 @@ const buildSurfaceDispatch = (args: {
    *  QUANTA_CONVERSATION_ACTIONS is on; absent ⇒ /cancel + /summarize-now
    *  print "not wired". */
   readonly conversationActions?: ConversationActionSurface | undefined
+  /** §steer — the session-mutable inbound delivery mode ref, so `/inbound`
+   *  reads/sets it (the SAME ref the session loop reads per mid-turn line). */
+  readonly inboundMode?: { current: InboundMode } | undefined
 }): ((input: string) => Promise<boolean>) => {
   return async (input: string): Promise<boolean> => {
     const head = input.split(/\s+/)[0] ?? ""
