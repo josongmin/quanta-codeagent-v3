@@ -47,6 +47,7 @@ import {
   buildKnobCatalog,
   catalogByGroup,
   displaySafeValue,
+  knobEnumValues,
   resolveCatalogValues,
   searchCatalog,
   type UnifiedKnob,
@@ -302,6 +303,11 @@ const doSet = (args: readonly string[], wire: KnobsSurfaceWire, ctx: SlashContex
       // don't silently store a garbage numeric that the reader will drop).
       if ((cat.kind === "int" || cat.kind === "float") && !Number.isFinite(Number(raw.trim() || "x"))) {
         ctx.err(`/knobs set: ${id} expects ${cat.kind}, got: ${JSON.stringify(raw)}\n`)
+        return 1
+      }
+      const allowed = cat.kind === "enum" ? knobEnumValues(id) : undefined
+      if (allowed !== undefined && !allowed.includes(raw)) {
+        ctx.err(`/knobs set: ${id} must be one of {${allowed.join(", ")}}, got: ${JSON.stringify(raw)}\n`)
         return 1
       }
       if (!setCliKnobOverride(id, raw)) {

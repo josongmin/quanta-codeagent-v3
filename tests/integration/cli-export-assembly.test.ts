@@ -212,7 +212,14 @@ describe("CLI export-closure assembly (in-process e2e)", () => {
     expect(typeof config.store?.recall).toBe("function")
     expect(config.embedder).toBeUndefined()
     expect(config.memory).toBeDefined()
-    expect(config.subagent).toEqual({})
+    // Subagent is DEFAULT-ON (QUANTA_SUBAGENT + its 6tools/batch/introspect
+    // sub-gates all default-ON), so a no-knob run enables the fan-out router with
+    // those three flags; only the optional numeric caps stay omitted.
+    expect(config.subagent).toEqual({
+      enable6Tools: true,
+      enableBatchSpawn: true,
+      enableIntrospect: true,
+    })
     expect(config.skills).toEqual({})
     expect(config.compactionBreaker).toBeUndefined()
     expect(config.verifyGuard).toBeUndefined()
@@ -261,7 +268,12 @@ describe("CLI export-closure assembly (in-process e2e)", () => {
     expect(config.compaction).toEqual({})
 
     // (3) the opt-in capability blocks landed on the config with their parsed knobs.
-    expect(config.subagent).toEqual({ maxDepth: 2 })
+    expect(config.subagent).toEqual({
+      maxDepth: 2,
+      enable6Tools: true,
+      enableBatchSpawn: true,
+      enableIntrospect: true,
+    })
     expect(config.skills).toEqual({})
   })
 
@@ -322,6 +334,10 @@ describe("CLI export-closure assembly (in-process e2e)", () => {
     const roleModelResolver = {
       resolve: (role: "executor" | "default", defaultModel: string) =>
         role === "executor" ? "alt-model" : defaultModel,
+      // stubs for the override API (this test only exercises `resolve`)
+      setOverride: () => ({ ok: true as const }),
+      clearOverride: () => {},
+      listOverrides: () => ({}),
     } satisfies NonNullable<SessionDeps["roleModelResolver"]>
     const effortClassifier = {
       onUserPrompt: () => [],

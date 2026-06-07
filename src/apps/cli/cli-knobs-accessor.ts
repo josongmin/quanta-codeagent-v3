@@ -96,7 +96,9 @@ export const readCliKnob = <K extends CliKnob["kind"]>(
   const k: CliKnob["kind"] = kind // widen so the switch narrows on the union, not generic K
   if (k === "bool") return readBool(raw, knobDefault(envKey) === "true") as KindToValue<K>
   if (k === "int") {
-    const n = Number(raw)
+    // base-10 parseInt to match the legacy `Number.parseInt(raw, 10)` call sites
+    // byte-identically (Number() would diverge on "2px"/"2.5").
+    const n = Number.parseInt(raw, 10)
     return Number.isFinite(n) ? (n as KindToValue<K>) : undefined
   }
   return (raw.length > 0 ? raw : undefined) as KindToValue<K> | undefined

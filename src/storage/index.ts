@@ -43,3 +43,4 @@ export {
   workspaceHash,
 } from "./shadow-odb"
 export type { FileInfo } from "./types"
+export { canonicalizePath } from "./fs-jail-lib"

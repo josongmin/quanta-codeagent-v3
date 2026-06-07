@@ -18,7 +18,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { errMessage } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import type { ImageDownsampleOutcome, ImageDownsamplePort, SupportedMediaType } from "@/tool/image"
 
 /** sips does NOT infer output format from the `.ext` alone (it can keep the
@@ -84,7 +84,9 @@ export const sipsImageDownsamplePort = (): ImageDownsamplePort => ({
     } catch (e) {
       return { kind: "unable", reason: errMessage(e) }
     } finally {
-      await rm(dir, { recursive: true, force: true }).catch(() => {})
+      await rm(dir, { recursive: true, force: true }).catch((e) =>
+        logger.warn(`sips temp cleanup failed: ${errMessage(e)}`),
+      )
     }
   },
 })

@@ -328,8 +328,7 @@ export const buildSubagentConfig = (
   taskRegistry?: import("@/subagent").TaskRegistry,
 ): AgentConfig["subagent"] | undefined => {
   const enabled = readCliKnob("QUANTA_SUBAGENT", "bool") ?? true
-  const rawDepth = process.env.QUANTA_SUBAGENT_MAX_DEPTH
-  const depth = rawDepth !== undefined ? Number.parseInt(rawDepth, 10) : Number.NaN
+  const depth = readCliKnob("QUANTA_SUBAGENT_MAX_DEPTH", "int")
   // ADR-0041 — parallel-worker (6-tool) router. CLI default-ON is seeded by the
   // gate block in index.ts (QUANTA_SUBAGENT_6TOOLS), so the agent can fan out
   // background `spawn_agent`/`wait_agent` workers. `QUANTA_SUBAGENT_6TOOLS=0`
@@ -337,8 +336,7 @@ export const buildSubagentConfig = (
   // to the workspace by the loop assembly; dangerous commands still pass the
   // permission/HITL gate.
   const enable6Tools = enabled && (readCliKnob("QUANTA_SUBAGENT_6TOOLS", "bool") ?? true)
-  const rawConc = process.env.QUANTA_SUBAGENT_MAX_CONCURRENT
-  const conc = rawConc !== undefined ? Number.parseInt(rawConc, 10) : Number.NaN
+  const conc = readCliKnob("QUANTA_SUBAGENT_MAX_CONCURRENT", "int")
   // Companions to the parallel-worker router: `spawn_batch` (fan a prompt list
   // out in one call) + `list_agents` (see the spawned workers). Default-ON under
   // QUANTA_SUBAGENT; `QUANTA_SUBAGENT_BATCH=0` / `QUANTA_SUBAGENT_INTROSPECT=0`
@@ -354,10 +352,10 @@ export const buildSubagentConfig = (
   const enableSpawnAgentsCsv = enabled && (readCliKnob("QUANTA_SPAWN_AGENTS_CSV", "bool") ?? false)
   return buildSubagentConfigCore({
     enabled,
-    ...(Number.isFinite(depth) ? { maxDepth: depth } : {}),
+    ...(depth !== undefined ? { maxDepth: depth } : {}),
     ...(taskRegistry !== undefined ? { taskRegistry } : {}),
     ...(enable6Tools ? { enable6Tools: true } : {}),
-    ...(Number.isFinite(conc) ? { maxConcurrent: conc } : {}),
+    ...(conc !== undefined ? { maxConcurrent: conc } : {}),
     ...(enableBatchSpawn ? { enableBatchSpawn: true } : {}),
     ...(enableIntrospect ? { enableIntrospect: true } : {}),
     ...(enableWorkflow ? { enableWorkflow: true } : {}),
@@ -374,11 +372,10 @@ export const buildSubagentConfig = (
  */
 export const buildVerifyGuardConfig = (): AgentConfig["verifyGuard"] | undefined => {
   const enabled = process.env.QUANTA_VERIFY_GUARD !== undefined
-  const raw = process.env.QUANTA_VERIFY_GUARD_MAX_TRIPS
-  const trips = raw !== undefined ? Number.parseInt(raw, 10) : Number.NaN
+  const trips = readCliKnob("QUANTA_VERIFY_GUARD_MAX_TRIPS", "int")
   return buildVerifyGuardConfigCore({
     enabled,
-    ...(Number.isFinite(trips) ? { maxTrips: trips } : {}),
+    ...(trips !== undefined ? { maxTrips: trips } : {}),
   })
 }
 

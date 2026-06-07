@@ -17,7 +17,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { allKnobs, asAnyKnob, knobsForSurface, registerKnob } from "@/runner/knobs"
+import { allKnobs, type AnyKnob, knobsForSurface, registerKnob } from "@/runner/knobs"
 import { advisorKnob } from "@/runner/knobs/knobs/advisor"
 import { closeoutGuardKnob } from "@/runner/knobs/knobs/closeout-guard"
 import { hooksKnob } from "@/runner/knobs/knobs/hooks"
@@ -35,8 +35,18 @@ beforeAll(async () => {
   // throw. Keeps the `knobsForSurface('cli')` membership assertion below
   // order-independent in the full single-process suite run. (Previously only
   // advisor was guarded → the other four flaked when a reset preceded this file.)
-  for (const k of [closeoutGuardKnob, hooksKnob, personaKnob, workingStateKnob, advisorKnob]) {
-    if (!allKnobs().has(k.id)) registerKnob(asAnyKnob(k))
+  // The seed array mixes Knob<T> of different T, so its element type is a union
+  // that asAnyKnob<T> can't infer a single T from (Knob is invariant in T, EOPT).
+  // Widen each to AnyKnob explicitly — the registry stores AnyKnob anyway.
+  const seeds: readonly AnyKnob[] = [
+    closeoutGuardKnob,
+    hooksKnob,
+    personaKnob,
+    workingStateKnob,
+    advisorKnob,
+  ] as unknown as readonly AnyKnob[]
+  for (const k of seeds) {
+    if (!allKnobs().has(k.id)) registerKnob(k)
   }
 })
 

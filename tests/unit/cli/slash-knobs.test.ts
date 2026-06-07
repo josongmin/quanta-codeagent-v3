@@ -430,6 +430,18 @@ describe("/knobs set — catalog knob (envKey) → CLI accessor session (ADR-050
     expect(h.stderr()).toContain("unknown knob")
   })
 
+  test("set REJECTS an out-of-set value for a CLOSED enum knob", async () => {
+    __resetCliKnobOverrides()
+    const h = buildHarness()
+    const bad = await h.cmd.run(["set", "QUANTA_LOG_LEVEL=bogus"], h.ctx)
+    expect(bad).toBe(1)
+    expect(h.stderr()).toContain("must be one of")
+    // a valid enum value is accepted
+    const ok = await h.cmd.run(["set", "QUANTA_LOG_LEVEL=debug"], h.ctx)
+    expect(ok).toBe(0)
+    __resetCliKnobOverrides()
+  })
+
   test("set REJECTS a garbage numeric for an int catalog knob (no silent store)", async () => {
     __resetCliKnobOverrides()
     const h = buildHarness()

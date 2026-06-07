@@ -17,6 +17,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { assertOk } from "../_support/assert-ok"
 import { buildSnapshot, createHeadlessBrowser, createRefMap, type DomModel } from "@/browser"
 
 const MODEL: DomModel = {
@@ -155,7 +156,7 @@ describe("HELLGATE snapshot — headless flow exhaustive branches", () => {
     const b = createHeadlessBrowser({ pages })
     const h = await b.spawn()
     expect(h.ok).toBe(true)
-    if (!h.ok) return
+    assertOk(h)
     const nav = await b.navigate(h.value, "https://app.test/login")
     expect(nav.ok).toBe(true)
     const snap = await b.snapshot(h.value)
@@ -170,7 +171,7 @@ describe("HELLGATE snapshot — headless flow exhaustive branches", () => {
   test("HELL-SNAP-06: click(bogus ref) ⇒ element-not-found", async () => {
     const b = createHeadlessBrowser({ pages })
     const h = await b.spawn()
-    if (!h.ok) return
+    assertOk(h)
     await b.navigate(h.value, "https://app.test/login")
     await b.snapshot(h.value)
     const r = await b.click(h.value, "e999")
@@ -184,7 +185,7 @@ describe("HELLGATE snapshot — headless flow exhaustive branches", () => {
   test("HELL-SNAP-07: navigate(unknown url) ⇒ navigation-denied", async () => {
     const b = createHeadlessBrowser({ pages })
     const h = await b.spawn()
-    if (!h.ok) return
+    assertOk(h)
     const r = await b.navigate(h.value, "https://evil.test/")
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.error.kind).toBe("navigation-denied")
@@ -193,7 +194,7 @@ describe("HELLGATE snapshot — headless flow exhaustive branches", () => {
   test("HELL-SNAP-08: pre-aborted signal ⇒ cancelled", async () => {
     const b = createHeadlessBrowser({ pages })
     const h = await b.spawn()
-    if (!h.ok) return
+    assertOk(h)
     const ac = new AbortController()
     ac.abort()
     const r = await b.navigate(h.value, "https://app.test/login", ac.signal)
@@ -204,7 +205,7 @@ describe("HELLGATE snapshot — headless flow exhaustive branches", () => {
   test("HELL-SNAP-09: close idempotent; post-close ⇒ closed", async () => {
     const b = createHeadlessBrowser({ pages })
     const h = await b.spawn()
-    if (!h.ok) return
+    assertOk(h)
     const c1 = await b.close(h.value)
     expect(c1.ok).toBe(true)
     const c2 = await b.close(h.value) // second close — no throw
@@ -238,7 +239,7 @@ describe("HELLGATE snapshot — headless flow exhaustive branches", () => {
   test("HELL-SNAP-13: a ref from page A is DEAD after navigating to page B (no fresh snapshot) ⇒ element-not-found", async () => {
     const b = createHeadlessBrowser({ pages: pages2 })
     const h = await b.spawn()
-    if (!h.ok) return
+    assertOk(h)
     await b.navigate(h.value, "https://app.test/login")
     await b.snapshot(h.value) // mints e1..e4 against page A
     // sanity: the page-A ref is live BEFORE we navigate away
@@ -257,7 +258,7 @@ describe("HELLGATE snapshot — headless flow exhaustive branches", () => {
   test("HELL-SNAP-14: after re-snapshot on page B, the same path mints FRESH ref numbers (no silent rebind)", async () => {
     const b = createHeadlessBrowser({ pages: pages2 })
     const h = await b.spawn()
-    if (!h.ok) return
+    assertOk(h)
     await b.navigate(h.value, "https://app.test/login")
     const snapA = await b.snapshot(h.value)
     expect(snapA.ok).toBe(true)

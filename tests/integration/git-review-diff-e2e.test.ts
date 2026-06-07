@@ -92,12 +92,17 @@ const scriptedReviewer = (final: ReviewerResult): ScriptedReviewer => {
   return { runner, calls }
 }
 
-let gitAvailable = false
+// Probe git ONCE at module load (top-level await is allowed in Bun test files)
+// so `test.skipIf(!HAS_GIT)` makes the runner emit a real `skipped` count when
+// git is absent. The prior pattern (`if (!HAS_GIT) return`) silently
+// PASSED — making the suite green where git was missing was indistinguishable
+// from an actually-green suite.
+const HAS_GIT = await hasGit()
+
 let repoDir = ""
 
 beforeAll(async () => {
-  gitAvailable = await hasGit()
-  if (!gitAvailable) return
+  if (!HAS_GIT) return
   repoDir = await mkdtemp(join(tmpdir(), "git-review-diff-e2e-"))
   await git(repoDir, ["init", "-q"])
   await git(repoDir, ["checkout", "-q", "-b", "main"])
@@ -121,12 +126,11 @@ afterAll(async () => {
 })
 
 describe("git_review_diff — e2e (real git + scripted reviewer)", () => {
-  test.skipIf(!gitAvailable)("environment probe — git is available", () => {
-    expect(gitAvailable).toBe(true)
+  test.skipIf(!HAS_GIT)("environment probe — git is available", () => {
+    expect(HAS_GIT).toBe(true)
   })
 
-  test("two-commit repo: base=HEAD~1, head=HEAD ⇒ reviewer sees real diff + returns parsed report", async () => {
-    if (!gitAvailable) return
+  test.skipIf(!HAS_GIT)("two-commit repo: base=HEAD~1, head=HEAD ⇒ reviewer sees real diff + returns parsed report", async () => {
     const reviewer = scriptedReviewer({
       ok: true,
       finalText: JSON.stringify({
@@ -188,8 +192,7 @@ describe("git_review_diff — e2e (real git + scripted reviewer)", () => {
     expect(mainHistory.map((m) => m.type)).toEqual(["user", "tool_result"])
   })
 
-  test("paths scope the diff (only files under given path are reviewed)", async () => {
-    if (!gitAvailable) return
+  test.skipIf(!HAS_GIT)("paths scope the diff (only files under given path are reviewed)", async () => {
     const reviewer = scriptedReviewer({
       ok: true,
       finalText: JSON.stringify({ summary: "clean", findings: [] }),
@@ -210,8 +213,7 @@ describe("git_review_diff — e2e (real git + scripted reviewer)", () => {
     expect(reviewer.calls.length).toBe(0)
   })
 
-  test("empty diff (base === head) ⇒ ok:true + no reviewer call", async () => {
-    if (!gitAvailable) return
+  test.skipIf(!HAS_GIT)("empty diff (base === head) ⇒ ok:true + no reviewer call", async () => {
     const reviewer = scriptedReviewer({
       ok: true,
       finalText: "(unused)",
@@ -232,8 +234,7 @@ describe("git_review_diff — e2e (real git + scripted reviewer)", () => {
     expect(r.output).toMatch(/no diff|empty/i)
   })
 
-  test("reviewer port absent ⇒ ok:false (no throw, deterministic)", async () => {
-    if (!gitAvailable) return
+  test.skipIf(!HAS_GIT)("reviewer port absent ⇒ ok:false (no throw, deterministic)", async () => {
     const ctx: ToolContext = {
       cwd: repoDir,
       signal: new AbortController().signal,

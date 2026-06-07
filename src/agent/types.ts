@@ -507,6 +507,12 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    *  is the session-level "interrupted" signal (vs the per-turn
    *  {@link ActiveTurnState.isInterrupted} which resets each boundary). */
   interruptedTurnBuffer?: import("./interrupted-turn").InterruptedTurnBuffer
+  /** §20.4 (ticket-12) — subagent FS owned/forbidden ENFORCEMENT policy. Built
+   *  from the spawn request's `ownedSurfaces`/`forbiddenSurfaces` (canonicalized)
+   *  when `QUANTA_FS_OWNERSHIP_ENFORCE` is on; the dispatch gate HARD-blocks a
+   *  write outside owned / inside forbidden. Absent / `enforced:false` ⇒ the
+   *  advisory-only legacy (seed-prompt guidance), byte-identical. */
+  ownershipPolicy?: import("./ownership-policy").OwnershipPolicy
   /** ADR-0030: awaited ONCE at the top of each turn (before the next LLM
    *  call) so a surface can fence a mid-turn injection into the conversation
    *  buffer before the loop snapshots it. Absent ⇒ never awaited

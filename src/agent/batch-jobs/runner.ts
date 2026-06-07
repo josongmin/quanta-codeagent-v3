@@ -265,15 +265,20 @@ export class BatchJobRunner {
     job: BatchJob,
     snapshotItem: BatchJobItem,
     signal?: AbortSignal,
-  ): Promise<"done" | "retry" | "failed" | "aborted" | "store-failed"> {
+  ): Promise<"done" | "retry" | "failed" | "aborted" | "store-failed" | "skip"> {
     if (signal?.aborted) return "aborted"
 
-    // Load a fresh copy + flip to running.
-    const item: BatchJobItem = { ...snapshotItem }
-    item.status = "running"
-    item.attemptCount += 1
-    item.updatedAt = this.deps.clock()
-    if (!(await this.persist(item))) return "store-failed"
+    // ATOMICALLY claim the item (pending→running, attempt+1). Concurrency-safe:
+    // if a sibling pump (or another runner over a shared store) already claimed
+    // it, `claimItem` returns null and we SKIP — never double-dispatch a row.
+    const claim = await this.deps.store.claimItem(
+      snapshotItem.jobId,
+      snapshotItem.itemId,
+      this.deps.clock(),
+    )
+    if (!claim.ok) return "store-failed"
+    if (claim.value === null) return "skip" // lost the claim — another worker owns it
+    const item: BatchJobItem = { ...claim.value }
 
     const dispatched = await this.deps.dispatch({
       instruction: job.instruction,

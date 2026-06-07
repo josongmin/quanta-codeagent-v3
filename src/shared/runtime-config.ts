@@ -1137,6 +1137,11 @@ export interface RuntimeConfig {
    *  semantically-equivalent retry via a DIFFERENT tool surfaces an advisory
    *  circumvention signal (never an auto-deny — advisory only). */
   readonly circumventDetect: boolean
+  /** §20.4 (ticket-12) — HARD-enforce subagent `ownedSurfaces`/`forbiddenSurfaces`
+   *  at the dispatch FS-write seam (`QUANTA_FS_OWNERSHIP_ENFORCE`). Strict opt-in
+   *  (`=== "1"`). OFF ⇒ those surfaces stay advisory seed-prompt guidance only
+   *  (byte-identical legacy). */
+  readonly fsOwnershipEnforce: boolean
   /** jun-7-misc 05 (central-config trust) — repo-local central config loader
    *  gate (`QUANTA_CENTRAL_CONFIG`). Strict opt-in (`=== "1"`). SECURITY:
    *  reading a repo-local config file is RCE-adjacent (a hostile repo could plant
@@ -1605,6 +1610,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // CircumventionTracker constructed, zero signatures recorded, the auto-mode
     // gate is byte-identical. Advisory-only signal when ON (never an auto-deny).
     circumventDetect: gateOnStrict(env, "QUANTA_CIRCUMVENT_DETECT"),
+    fsOwnershipEnforce: gateOnStrict(env, "QUANTA_FS_OWNERSHIP_ENFORCE"),
     // jun-7-misc 05 — strict `=== "1"` opt-in. SECURITY: reading a repo-local
     // config is RCE-adjacent, so a deliberate `=1` is required. Default false ⇒
     // no repo-local config discovered/read/merged (byte-identical startup). The

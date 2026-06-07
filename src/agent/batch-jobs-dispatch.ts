@@ -107,6 +107,10 @@ export const buildInMemoryBatchRunPort = (
   // child runs at `parentDepth + 1` so the runner's maxDepth guard bounds a
   // batch-of-batches (a child that calls spawn_agents_on_csv again).
   parentDepth = 0,
+  // Injected clock (the `opts.now ?? Date.now` discipline — bare reference, not a
+  // `Date.now()` literal, so the domain-clock ratchet stays clean). The batch
+  // timestamps are job provenance, not model-facing replay.
+  now: () => number = Date.now,
 ): BatchRunPort => ({
   run: async (input, signal) => {
     const parsed = parseRowsFromCsv(input.csv)
@@ -115,7 +119,7 @@ export const buildInMemoryBatchRunPort = (
     const jobRunner = new BatchJobRunner({
       store,
       dispatch: buildRowDispatchAdapter(runner, parentDepth + 1),
-      clock: () => Date.now(),
+      clock: now,
       newId: () => crypto.randomUUID(),
     })
     const submitted = await jobRunner.submit({

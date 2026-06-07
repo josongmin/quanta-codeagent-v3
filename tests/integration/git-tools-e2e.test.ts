@@ -68,12 +68,16 @@ const hasGit = async (): Promise<boolean> => {
   }
 }
 
-let gitAvailable = false
+// Probe git ONCE at module load (top-level await is allowed in Bun test files)
+// so `test.skipIf(!HAS_GIT)` makes the runner emit a real `skipped` count when
+// git is absent. The prior pattern (`if (!HAS_GIT) return`) silently
+// PASSED — making the suite green in environments where git was missing was
+// indistinguishable from an actually-green suite.
+const HAS_GIT = await hasGit()
 let repoDir = ""
 
 beforeAll(async () => {
-  gitAvailable = await hasGit()
-  if (!gitAvailable) return
+  if (!HAS_GIT) return
   repoDir = await mkdtemp(join(tmpdir(), "git-mut-e2e-"))
   await git(repoDir, ["init", "-q"])
   await git(repoDir, ["checkout", "-q", "-b", "main"])
@@ -87,12 +91,11 @@ afterAll(async () => {
 })
 
 describe("git_commit / git_branch_switch — e2e (real git)", () => {
-  test.skipIf(!gitAvailable)("environment probe — git is available", () => {
-    expect(gitAvailable).toBe(true)
+  test.skipIf(!HAS_GIT)("environment probe — git is available", () => {
+    expect(HAS_GIT).toBe(true)
   })
 
-  test("git_commit({mode:'wip'}) creates a wip commit", async () => {
-    if (!gitAvailable) return
+  test.skipIf(!HAS_GIT)("git_commit({mode:'wip'}) creates a wip commit", async () => {
     await writeFile(join(repoDir, "wip-a.txt"), "wip content A\n")
     const r = await collect(gitCommitTool(defaultGitRunner), { mode: "wip" }, repoDir)
     expect(r.ok).toBe(true)
@@ -101,8 +104,7 @@ describe("git_commit / git_branch_switch — e2e (real git)", () => {
     expect(log.stdout).toMatch(/wip:/)
   })
 
-  test("git_commit({mode:'regular', message}) creates a named commit", async () => {
-    if (!gitAvailable) return
+  test.skipIf(!HAS_GIT)("git_commit({mode:'regular', message}) creates a named commit", async () => {
     await writeFile(join(repoDir, "regular.txt"), "regular\n")
     const r = await collect(
       gitCommitTool(defaultGitRunner),
@@ -114,8 +116,7 @@ describe("git_commit / git_branch_switch — e2e (real git)", () => {
     expect(log.stdout).toContain("feat: add regular file")
   })
 
-  test("git_branch_switch dirty + autoWip:true commits + switches", async () => {
-    if (!gitAvailable) return
+  test.skipIf(!HAS_GIT)("git_branch_switch dirty + autoWip:true commits + switches", async () => {
     // Ensure we are back on main with a clean tree before this test.
     await git(repoDir, ["checkout", "-q", "main"])
     await writeFile(join(repoDir, "dirty.txt"), "dirty\n")
@@ -136,8 +137,7 @@ describe("git_commit / git_branch_switch — e2e (real git)", () => {
     expect(log.stdout).toMatch(/wip:/)
   })
 
-  test("git_branch_switch dirty + autoWip:false ⇒ ok:false (no mutation)", async () => {
-    if (!gitAvailable) return
+  test.skipIf(!HAS_GIT)("git_branch_switch dirty + autoWip:false ⇒ ok:false (no mutation)", async () => {
     // Reset to a known-clean main.
     await git(repoDir, ["checkout", "-q", "main"])
     await writeFile(join(repoDir, "still-dirty.txt"), "x\n")
@@ -161,8 +161,7 @@ describe("git_commit / git_branch_switch — e2e (real git)", () => {
     await rm(join(repoDir, "still-dirty.txt"), { force: true })
   })
 
-  test("git_branch_switch clean tree: plain switch (no wip)", async () => {
-    if (!gitAvailable) return
+  test.skipIf(!HAS_GIT)("git_branch_switch clean tree: plain switch (no wip)", async () => {
     // Make sure we're clean on main.
     await git(repoDir, ["checkout", "-q", "main"])
 
@@ -183,8 +182,7 @@ describe("git_commit / git_branch_switch — e2e (real git)", () => {
     expect(afterLog.stdout).toBe(beforeLog.stdout)
   })
 
-  test("branch-name injection guard blocks shell metacharacters at schema layer", async () => {
-    if (!gitAvailable) return
+  test.skipIf(!HAS_GIT)("branch-name injection guard blocks shell metacharacters at schema layer", async () => {
     const r = await collect(
       gitBranchSwitchTool(defaultGitRunner),
       { branch: "x;touch /tmp/quanta-pwned", create: true },

@@ -89,6 +89,7 @@ import { type EffortLevel, parseEffort } from "./effort"
 import { runAgent } from "./loop"
 import { isMutatingMode } from "./mode"
 import type { NamedAgentDefinition, NamedAgentResolver } from "./named-agent-registry"
+import { buildOwnershipPolicy } from "./ownership-policy"
 import type { AgentMode } from "./prompt"
 import type { AgentConfig, AgentOutcome } from "./types"
 
@@ -631,6 +632,16 @@ const buildChildConfig = (
   // matched named-agent definition (folded into `req.system` by
   // `applyNamedAgent`); absent ⇒ inherit `parent.system` (byte-identical).
   const childSystem = resolveChildSystem(parent, req)
+  // §20.4 (ticket-12) — assemble the ENFORCED ownership policy from the request's
+  // owned/forbidden surfaces (canonicalized against the child cwd) ONLY when the
+  // strict `QUANTA_FS_OWNERSHIP_ENFORCE` knob is on. No surfaces / knob off ⇒
+  // `undefined` ⇒ the surfaces stay advisory seed-prompt guidance (byte-identical).
+  const ownershipPolicy = buildOwnershipPolicy({
+    ...(req.ownedSurfaces ? { owned: req.ownedSurfaces } : {}),
+    ...(req.forbiddenSurfaces ? { forbidden: req.forbiddenSurfaces } : {}),
+    cwd,
+    enforced: runtimeConfig().fsOwnershipEnforce,
+  })
   // Shallow clone, then strip the inheritance-unsafe keys. We rebuild the
   // object explicitly (rather than `delete`) to satisfy
   // exactOptionalPropertyTypes: omit keys entirely, never assign `undefined`.
@@ -644,6 +655,8 @@ const buildChildConfig = (
     // override ⇒ `parent.system` (byte-identical to pre-§20.1).
     system: childSystem,
     cwd,
+    // §20.4 — the enforced FS ownership boundary (undefined ⇒ advisory legacy).
+    ...(ownershipPolicy !== undefined ? { ownershipPolicy } : {}),
     maxTurns: req.budget?.maxTurns ?? parent.maxTurns,
     // Child abort is composed from BOTH the parent loop's signal and the
     // per-request signal (driven by `TaskRegistry.stop(id)` from `task_stop`).

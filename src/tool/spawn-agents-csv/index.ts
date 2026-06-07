@@ -14,6 +14,7 @@
  * composition root injects the port (absent ⇒ tool absent, byte-identical).
  */
 import { z } from "zod"
+import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
 /** Outcome the composition-root adapter returns after running a batch. */
@@ -100,16 +101,24 @@ export const spawnAgentsCsvTool = (port: BatchRunPort): Tool<SpawnAgentsCsvInput
       yield { type: "result", result: { ok: false, output: "aborted before start" } }
       return
     }
-    const res = await port.run(
-      {
-        name: parsed.data.name,
-        instruction: parsed.data.instruction,
-        csv: parsed.data.csv,
-        ...(parsed.data.poolSize !== undefined ? { poolSize: parsed.data.poolSize } : {}),
-        ...(parsed.data.maxAttempts !== undefined ? { maxAttempts: parsed.data.maxAttempts } : {}),
-      },
-      c.signal,
-    )
+    // NO-THROW contract §2: the port is no-throw BY CONTRACT, but guard the await
+    // anyway so a misbehaving host port can never escape the tool iterator.
+    let res: Awaited<ReturnType<BatchRunPort["run"]>>
+    try {
+      res = await port.run(
+        {
+          name: parsed.data.name,
+          instruction: parsed.data.instruction,
+          csv: parsed.data.csv,
+          ...(parsed.data.poolSize !== undefined ? { poolSize: parsed.data.poolSize } : {}),
+          ...(parsed.data.maxAttempts !== undefined ? { maxAttempts: parsed.data.maxAttempts } : {}),
+        },
+        c.signal,
+      )
+    } catch (e) {
+      yield { type: "result", result: { ok: false, output: `batch failed: ${errMessage(e)}` } }
+      return
+    }
     if (!res.ok) {
       yield { type: "result", result: { ok: false, output: `batch failed: ${res.reason}` } }
       return

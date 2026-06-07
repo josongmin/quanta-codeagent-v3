@@ -28,7 +28,7 @@ export interface CliKnob {
   readonly kind: CliKnobKind
   /** Value when the env var is unset. For `bool`, `true` = default-ON (a
    *  kill-switch knob: `=0`/`=off` disables); `false` = opt-in. */
-  readonly default: boolean | number | string
+  readonly default: boolean | number | string | undefined
   /** One-line summary for `--help` / `/knobs` (W3). */
   readonly describe: string
   /** Grouping bucket for the config UI. */
@@ -133,7 +133,7 @@ export const CLI_KNOBS: readonly CliKnob[] = [
   { envKey: "QUANTA_GIT_TOOLS", kind: "bool", default: false, group: "misc", describe: "First-class git tools (opt-in).", readSite: "internal.ts" },
   { envKey: "QUANTA_FETCH_RULES", kind: "bool", default: false, group: "misc", describe: "Fetch-rules tool gate (opt-in).", readSite: "fetch-rules-wire.ts" },
   { envKey: "QUANTA_VERIFY_GUARD", kind: "bool", default: false, group: "misc", describe: "Block finish after unverified mutating tool (opt-in).", readSite: "internal.ts" },
-  { envKey: "QUANTA_VERIFY_GUARD_MAX_TRIPS", kind: "int", default: 2, group: "misc", describe: "Max verify-guard forced turns.", readSite: "internal.ts" },
+  { envKey: "QUANTA_VERIFY_GUARD_MAX_TRIPS", kind: "int", default: undefined, group: "misc", describe: "Max verify-guard forced turns (unset ⇒ downstream default 2).", readSite: "internal.ts" },
   { envKey: "QUANTA_KNOBS_PRESET", kind: "string", default: "", group: "misc", describe: "Named knob preset to apply at boot.", readSite: "knobs-bootstrap.ts" },
   { envKey: "QUANTA_MODEL_FALLBACK", kind: "string", default: "", group: "misc", describe: "Fallback model id list.", readSite: "internal.ts" },
   { envKey: "QUANTA_MCP_AUTORESTART", kind: "bool", default: false, group: "mcp", describe: "MCP crash auto-restart (opt-in).", readSite: "internal.ts" },
@@ -153,8 +153,8 @@ export const CLI_KNOBS: readonly CliKnob[] = [
   { envKey: "QUANTA_SUBAGENT_6TOOLS", kind: "bool", default: true, group: "misc", describe: "6-tool background subagent router (default ON).", readSite: "internal.ts" },
   { envKey: "QUANTA_SUBAGENT_BATCH", kind: "bool", default: true, group: "misc", describe: "spawn_batch fan-out tool (default ON).", readSite: "internal.ts" },
   { envKey: "QUANTA_SUBAGENT_INTROSPECT", kind: "bool", default: true, group: "misc", describe: "Subagent introspection tool (default ON).", readSite: "internal.ts" },
-  { envKey: "QUANTA_SUBAGENT_MAX_CONCURRENT", kind: "int", default: 0, group: "misc", describe: "Max concurrent subagents (0 = host default).", readSite: "internal.ts" },
-  { envKey: "QUANTA_SUBAGENT_MAX_DEPTH", kind: "int", default: 0, group: "misc", describe: "Subagent recursion depth cap (0 = host default).", readSite: "internal.ts" },
+  { envKey: "QUANTA_SUBAGENT_MAX_CONCURRENT", kind: "int", default: undefined, group: "misc", describe: "Max concurrent subagents (unset/0 ⇒ host default).", readSite: "internal.ts" },
+  { envKey: "QUANTA_SUBAGENT_MAX_DEPTH", kind: "int", default: undefined, group: "misc", describe: "Subagent recursion depth cap (unset/0 ⇒ host default).", readSite: "internal.ts" },
   { envKey: "QUANTA_WORKFLOW", kind: "bool", default: false, group: "misc", describe: "Declarative workflow tool (opt-in).", readSite: "internal.ts" },
   { envKey: "QUANTA_SPAWN_AGENTS_CSV", kind: "bool", default: false, group: "misc", describe: "spawn_agents_on_csv subagent tool gate (opt-in).", readSite: "internal.ts" },
   { envKey: "QUANTA_RETRY_MODELS", kind: "string", default: "", group: "misc", describe: "Fallback model list for transient retry.", readSite: "repl/surface-compose.ts" },

@@ -3,6 +3,7 @@ import type { LLMPort } from "@/llm/ports"
 import { attrs, endSpan, QUANTA_ATTRS, SPAN_NAMES, type Span, startSpan } from "@/observability"
 import {
   type AutoModeClassifier,
+  extractWriteEffects,
   gitWriteProtectReason,
   type PermissionContext,
   type StructuredDenyReason,
@@ -41,6 +42,7 @@ import { buildRepairReactor, commandRepairCheck, lintRepairCheck } from "./edit-
 import { LocalEffectChannel } from "./effect-channel"
 import { decideLocalizePhase } from "./localize-phase-guard"
 import { resolveCollaborationMode } from "./mode"
+import { checkWriteEffects } from "./ownership-policy"
 import { planStoreToMutator } from "./plan/mutator-adapter"
 import { runPlanExitFlow } from "./plan-exit-flow"
 import { materializeReviewerAgent } from "./tier1/reviewer-subagent"
@@ -971,6 +973,26 @@ const dispatchToolInner = async (
     },
   })
   if (gated) return gated
+  // §20.4 (ticket-12) — subagent FS ownership ENFORCEMENT. After the
+  // admissibility gate, before execute: a child carrying an enforced
+  // owned/forbidden policy is HARD-blocked from writing outside its owned set /
+  // inside its forbidden set (every write-effect of the call — incl. bash
+  // `sed -i`/redirect via the shared extractor — re-canonicalized symlink-safe).
+  // Default-OFF: no policy / `enforced !== true` ⇒ skipped (byte-identical).
+  if (config.ownershipPolicy?.enforced === true) {
+    const own = checkWriteEffects(
+      extractWriteEffects(call.name, call.input, shellCommand, config.cwd, action.isReadOnly),
+      config.ownershipPolicy,
+    )
+    if (!own.allowed) {
+      return deny(
+        call.id,
+        `subagent ownership boundary: ${own.reason === "forbidden" ? "forbidden path" : "path not in owned set"} — ${own.path}`,
+        "ownership-policy-denied",
+        denyReason({ layer: "stack", safeReason: "subagent ownership boundary violated" }),
+      )
+    }
+  }
   // SECURITY: the rewrite is applied AFTER the permission / HARD_DENY gates ran
   // on the original input. A hook is operator-authored local code at the trust
   // level of the permission config itself, so this is intentional (the model

@@ -172,6 +172,28 @@ export const searchCatalog = (
     .map((h) => h.k)
 }
 
+/**
+ * Closed valid-value sets for enum knobs (ADR-0503 P4 — `/knobs set` validation
+ * + web option lists). SSOT for the sets, kept HERE (not threaded through every
+ * registry) so it's one place to extend. Only knobs with a genuinely CLOSED set
+ * (confirmed against the reader) appear — open-set enums (named permission
+ * profiles, etc.) are deliberately ABSENT, so `/knobs set` accepts any value for
+ * them (the reader still validates). A NEW closed enum should add its set here.
+ */
+export const KNOB_ENUM_VALUES: ReadonlyMap<string, readonly string[]> = new Map([
+  ["QUANTA_LOG_LEVEL", ["debug", "info", "warn", "error"]],
+  ["QUANTA_PTY_BACKEND", ["tmux", "bun", "both"]],
+  ["QUANTA_PROMPT_CACHE_TTL", ["5m", "1h"]],
+  ["QUANTA_TLS_MITM_ON_FAILURE", ["deny", "opaque-tunnel"]],
+  ["QUANTA_NOTIFY", ["off", "bell", "title"]],
+  ["QUANTA_SHELL_SNAPSHOT_SHELL", ["auto", "zsh", "bash"]],
+  ["QUANTA_TOOL_PROFILE", ["read", "write", "execute", "all"]],
+])
+
+/** Closed valid set for an enum knob, or `undefined` (open set ⇒ accept any). */
+export const knobEnumValues = (envKey: string): readonly string[] | undefined =>
+  KNOB_ENUM_VALUES.get(envKey)
+
 /** One resolved knob value + where it came from (for `/config`/web "current"). */
 export interface ResolvedKnobValue {
   readonly envKey: string

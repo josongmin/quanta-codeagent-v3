@@ -8,6 +8,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { assertOk } from "../_support/assert-ok"
 import { createHeadlessBrowser, type DomModel } from "@/browser"
 import type {
   BrowserFs,
@@ -201,7 +202,7 @@ describe("HELLGATE verbs — adapter dispatch", () => {
   test("press_key dispatches Input.dispatchKeyEvent down+up", async () => {
     const { b, sent } = adapter()
     const h = await b.spawn()
-    if (!h.ok) return
+    assertOk(h)
     const r = await b.pressKey(h.value, "Enter")
     expect(r.ok).toBe(true)
     const keys = sent.filter((s) => s.method === "Input.dispatchKeyEvent")
@@ -215,7 +216,7 @@ describe("HELLGATE verbs — adapter dispatch", () => {
   test("press_key(Enter) carries the full virtual-key descriptor on BOTH down+up", async () => {
     const { b, sent } = adapter()
     const h = await b.spawn()
-    if (!h.ok) return
+    assertOk(h)
     expect((await b.pressKey(h.value, "Enter")).ok).toBe(true)
     const keys = sent.filter((s) => s.method === "Input.dispatchKeyEvent")
     expect(keys.length).toBe(2)
@@ -231,7 +232,7 @@ describe("HELLGATE verbs — adapter dispatch", () => {
   test("press_key(Tab) stamps the vk/code but NO text (non-text-generating key)", async () => {
     const { b, sent } = adapter()
     const h = await b.spawn()
-    if (!h.ok) return
+    assertOk(h)
     expect((await b.pressKey(h.value, "Tab")).ok).toBe(true)
     const k = sent.find((s) => s.method === "Input.dispatchKeyEvent")
     expect(k?.params.windowsVirtualKeyCode).toBe(9)
@@ -242,7 +243,7 @@ describe("HELLGATE verbs — adapter dispatch", () => {
   test("press_key(single char) sends printable text + KeyX code", async () => {
     const { b, sent } = adapter()
     const h = await b.spawn()
-    if (!h.ok) return
+    assertOk(h)
     expect((await b.pressKey(h.value, "a")).ok).toBe(true)
     const k = sent.find((s) => s.method === "Input.dispatchKeyEvent")
     expect(k?.params.key).toBe("a")
@@ -257,7 +258,7 @@ describe("HELLGATE verbs — adapter dispatch", () => {
   test("click / fill / type emit in-page JS that focuses the element first", async () => {
     const { b, sent } = adapter()
     const h = await b.spawn()
-    if (!h.ok) return
+    assertOk(h)
     await b.navigate(h.value, "https://x.test/")
     await b.snapshot(h.value) // refs e1 (doc), e2 (textbox /0)
     sent.length = 0
@@ -274,7 +275,7 @@ describe("HELLGATE verbs — adapter dispatch", () => {
   test("mouse_click_xy dispatches pressed+released at coords", async () => {
     const { b, sent } = adapter()
     const h = await b.spawn()
-    if (!h.ok) return
+    assertOk(h)
     const r = await b.mouseClickXY(h.value, 11, 22)
     expect(r.ok).toBe(true)
     const mice = sent.filter((s) => s.method === "Input.dispatchMouseEvent")
@@ -285,7 +286,7 @@ describe("HELLGATE verbs — adapter dispatch", () => {
   test("drag ref→coords: pressed at element center, released at target", async () => {
     const { b, sent } = adapter()
     const h = await b.spawn()
-    if (!h.ok) return
+    assertOk(h)
     await b.navigate(h.value, "https://x.test/")
     await b.snapshot(h.value) // refs e1,e2
     const r = await b.drag(h.value, "e2", { x: 99, y: 88 })

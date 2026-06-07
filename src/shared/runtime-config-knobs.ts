@@ -695,6 +695,13 @@ export const RUNTIME_CONFIG_KNOBS: readonly RuntimeConfigKnob[] = [
     describe: "Denied-effect re-attempt tracker gate.",
   },
   {
+    envKey: "QUANTA_FS_OWNERSHIP_ENFORCE",
+    kind: "bool",
+    default: false,
+    group: "permission",
+    describe: "Hard-enforce subagent owned/forbidden FS surfaces at dispatch (§20.4).",
+  },
+  {
     envKey: "QUANTA_API_KEY_HELPER",
     kind: "string",
     default: undefined,

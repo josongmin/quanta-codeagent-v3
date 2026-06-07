@@ -48,6 +48,21 @@ export interface JobStorePort {
   listItems(jobId: string): Promise<Result<ReadonlyArray<BatchJobItem>, BatchJobError>>
   /** Overwrite a single item (status / attemptCount / result / lastError). */
   putItem(item: BatchJobItem): Promise<Result<void, BatchJobError>>
+  /**
+   * ATOMICALLY claim a `pending` item for dispatch (concurrency-safe): if the
+   * item is still `pending`, flip it to `running`, increment `attemptCount`, set
+   * `updatedAt = now`, and return the UPDATED item. If it is NOT pending (already
+   * claimed by a concurrent worker, or terminal), return `ok(null)` — the caller
+   * skips it. This is the single compare-and-set that makes the pump's
+   * read-pending→write-running safe under concurrent runners over a SHARED store
+   * (without it, two pumps both observe the same `pending` rows and double-
+   * dispatch). For a single pump the claim always wins ⇒ byte-identical.
+   */
+  claimItem(
+    jobId: string,
+    itemId: string,
+    now: number,
+  ): Promise<Result<BatchJobItem | null, BatchJobError>>
 }
 
 /**
@@ -137,5 +152,33 @@ export class InMemoryJobStore implements JobStorePort {
     }
     list[idx] = cloneItem(item)
     return Promise.resolve(ok(undefined))
+  }
+
+  claimItem(
+    jobId: string,
+    itemId: string,
+    now: number,
+  ): Promise<Result<BatchJobItem | null, BatchJobError>> {
+    const list = this.items.get(jobId)
+    if (!list) return Promise.resolve(err<BatchJobError>({ kind: "job-not-found", jobId }))
+    const idx = list.findIndex((i) => i.itemId === itemId)
+    if (idx < 0) {
+      return Promise.resolve(
+        err<BatchJobError>({ kind: "store-failed", reason: `unknown item: ${itemId}` }),
+      )
+    }
+    const cur = list[idx] as BatchJobItem
+    // Compare-and-set is atomic here because JS is single-threaded: this whole
+    // method runs to completion within one microtask tick — no `await` between
+    // the status read and the write, so two concurrent claims cannot interleave.
+    if (cur.status !== "pending") return Promise.resolve(ok(null)) // lost / not claimable
+    const claimed: BatchJobItem = {
+      ...cur,
+      status: "running",
+      attemptCount: cur.attemptCount + 1,
+      updatedAt: now,
+    }
+    list[idx] = cloneItem(claimed)
+    return Promise.resolve(ok(cloneItem(claimed)))
   }
 }

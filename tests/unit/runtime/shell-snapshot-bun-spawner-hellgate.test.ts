@@ -44,6 +44,15 @@ const hasBin = async (bin: string): Promise<boolean> => {
   }
 }
 
+// Probe shells ONCE at module load (top-level await is allowed in Bun test
+// files) so `test.skipIf(!HAS_BASH)` / `test.skipIf(!HAS_ZSH)` make the runner
+// emit a real `skipped` count when the binary is absent. The prior pattern
+// (`if (!hasBash) return` inside the body) silently PASSED — making the suite
+// green on a stripped CI image was indistinguishable from an actually-green
+// suite.
+const HAS_BASH = await hasBin("bash")
+const HAS_ZSH = await hasBin("zsh")
+
 let tmpHome: string
 
 beforeEach(() => {
@@ -72,9 +81,7 @@ describe("ADR-0238 bun-spawner hellgate", () => {
   })
 
   // ─── HELL-SS-BUN-02 — hung shell past timeoutMs ─────────────────────────
-  test("HELL-SS-BUN-02 timeoutMs cap triggers kill + timedOut:true", async () => {
-    const hasBash = await hasBin("bash")
-    if (!hasBash) return // headless CI; we cover this path in BUN-04
+  test.skipIf(!HAS_BASH)("HELL-SS-BUN-02 timeoutMs cap triggers kill + timedOut:true", async () => {
     const spawner = createBunSpawner()
     const t0 = Date.now()
     const result = await spawner.run(["bash", "-c", "sleep 5"], { timeoutMs: 150 })
@@ -87,9 +94,7 @@ describe("ADR-0238 bun-spawner hellgate", () => {
   })
 
   // ─── HELL-SS-BUN-03 — non-zero exit with stdout still forwarded ─────────
-  test("HELL-SS-BUN-03 non-zero exit with stdout body is forwarded as-is", async () => {
-    const hasBash = await hasBin("bash")
-    if (!hasBash) return
+  test.skipIf(!HAS_BASH)("HELL-SS-BUN-03 non-zero exit with stdout body is forwarded as-is", async () => {
     const spawner = createBunSpawner()
     // Print to stdout then exit 7 — upstream's permissive dump tolerates
     // non-zero exit when stdout is non-empty.
@@ -101,9 +106,7 @@ describe("ADR-0238 bun-spawner hellgate", () => {
   })
 
   // ─── HELL-SS-BUN-04 — empty stdout returns empty body ───────────────────
-  test("HELL-SS-BUN-04 empty stdout returns empty string (upstream maps to empty-capture)", async () => {
-    const hasBash = await hasBin("bash")
-    if (!hasBash) return
+  test.skipIf(!HAS_BASH)("HELL-SS-BUN-04 empty stdout returns empty string (upstream maps to empty-capture)", async () => {
     const spawner = createBunSpawner()
     const result = await spawner.run(["bash", "-c", "true"], { timeoutMs: 5_000 })
     expect(result.code).toBe(0)
@@ -126,8 +129,6 @@ describe("ADR-0238 bun-spawner hellgate", () => {
   test("HELL-SS-BUN-06 timeoutMs ≤ 0 falls back to the default cap", async () => {
     // Inject a TINY default so we can observe the fallback acting on a hung
     // shell. With timeoutMs:0 in the run call, the factory default applies.
-    const hasBash = await hasBin("bash")
-    if (!hasBash) return
     const spawner = createBunSpawner({ defaultTimeoutMs: 150 })
     const t0 = Date.now()
     const result = await spawner.run(["bash", "-c", "sleep 5"], { timeoutMs: 0 })
@@ -142,9 +143,7 @@ describe("ADR-0238 bun-spawner hellgate", () => {
   })
 
   // ─── HELL-SS-BUN-08 — full port round-trip via real shell ───────────────
-  test("HELL-SS-BUN-08 port.capture round-trip writes a real snapshot file", async () => {
-    const hasBash = await hasBin("bash")
-    if (!hasBash) return
+  test.skipIf(!HAS_BASH)("HELL-SS-BUN-08 port.capture round-trip writes a real snapshot file", async () => {
     const spawner = createBunSpawner()
     const port = createShellSnapshotPort(spawner, tmpHome)
     const res = await port.capture({ shell: "bash" })
@@ -159,9 +158,7 @@ describe("ADR-0238 bun-spawner hellgate", () => {
   })
 
   // ─── HELL-SS-BUN-09 — kill timer cleared on normal exit ─────────────────
-  test("HELL-SS-BUN-09 normal exit does not leak the kill timer (no late handle)", async () => {
-    const hasBash = await hasBin("bash")
-    if (!hasBash) return
+  test.skipIf(!HAS_BASH)("HELL-SS-BUN-09 normal exit does not leak the kill timer (no late handle)", async () => {
     const spawner = createBunSpawner()
     const result = await spawner.run(["bash", "-c", "echo ok"], { timeoutMs: 2_000 })
     expect(result.timedOut).toBe(false)
@@ -175,9 +172,7 @@ describe("ADR-0238 bun-spawner hellgate", () => {
   })
 
   // ─── HELL-SS-BUN-10 — zsh capture round-trip (when available) ───────────
-  test("HELL-SS-BUN-10 zsh capture argv produces a non-empty body (when zsh present)", async () => {
-    const hasZsh = await hasBin("zsh")
-    if (!hasZsh) return
+  test.skipIf(!HAS_ZSH)("HELL-SS-BUN-10 zsh capture argv produces a non-empty body (when zsh present)", async () => {
     const spawner = createBunSpawner()
     // Same argv shape the slice adapter constructs (zsh-capture.ts).
     const result = await spawner.run(["zsh", "-i", "-c", "typeset -p; alias; declare -f"], {

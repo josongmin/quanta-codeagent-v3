@@ -96,12 +96,16 @@ class ScriptedLLM implements LLMPort {
   }
 }
 
-let gitAvailable = false
+// Probe git ONCE at module load (top-level await is allowed in Bun test files)
+// so `test.skipIf(!HAS_GIT)` makes the runner emit a real `skipped` count when
+// git is absent. The prior pattern (`if (!HAS_GIT) return`) silently
+// PASSED — making the suite green when git was missing was indistinguishable
+// from an actually-green suite.
+const HAS_GIT = await hasGit()
 let repoDir = ""
 
 beforeAll(async () => {
-  gitAvailable = await hasGit()
-  if (!gitAvailable) return
+  if (!HAS_GIT) return
   repoDir = await mkdtemp(join(tmpdir(), "git-compose-e2e-"))
   await git(repoDir, ["init", "-q"])
   await git(repoDir, ["checkout", "-q", "-b", "main"])
@@ -117,12 +121,11 @@ afterAll(async () => {
 // ─── A. REAL e2e: author → commit ────────────────────────────────────────────
 
 describe("git_compose_commit → git_commit (real git repo)", () => {
-  test("environment probe — git available", () => {
-    expect(gitAvailable).toBe(true)
+  test.skipIf(!HAS_GIT)("environment probe — git available", () => {
+    expect(HAS_GIT).toBe(true)
   })
 
-  test("stage → author message → git_commit lands the authored subject", async () => {
-    if (!gitAvailable) return
+  test.skipIf(!HAS_GIT)("stage → author message → git_commit lands the authored subject", async () => {
     // Stage a real change.
     await writeFile(join(repoDir, "feature.ts"), "export const x = 1\n")
     await git(repoDir, ["add", "feature.ts"])
@@ -157,8 +160,7 @@ describe("git_compose_commit → git_commit (real git repo)", () => {
     expect(body.stdout).toContain("WHY: closes the yeet gap.")
   })
 
-  test("nothing staged ⇒ typed ok:false, NO commit created (clean tree)", async () => {
-    if (!gitAvailable) return
+  test.skipIf(!HAS_GIT)("nothing staged ⇒ typed ok:false, NO commit created (clean tree)", async () => {
     const before = await git(repoDir, ["rev-parse", "HEAD"])
     const res = await drain(
       gitComposeCommitTool(defaultGitRunner, new ScriptedLLM(AUTHORED_MESSAGE)).execute(

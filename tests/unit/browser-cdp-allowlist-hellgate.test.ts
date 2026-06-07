@@ -15,6 +15,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { assertOk } from "../_support/assert-ok"
 import { CDP_ALLOWED_METHODS, createHeadlessBrowser, isCdpMethodAllowed } from "@/browser"
 
 const DANGEROUS = [
@@ -84,7 +85,7 @@ describe("HELLGATE CDP-allowlist — dangerous methods denied in code", () => {
     const b = createHeadlessBrowser()
     const h = await b.spawn()
     expect(h.ok).toBe(true)
-    if (!h.ok) return
+    assertOk(h)
 
     const allowed = await b.cdp(h.value, "DOM.getDocument")
     expect(allowed.ok).toBe(true)

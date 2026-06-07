@@ -65,6 +65,10 @@ const RULES: readonly Rule[] = [
         "CLI feature-flag bootstrap — threads typed values via AgentConfig; downstream modules never read env directly. TODO(S5): migrate to runtimeConfig progressively.",
       "apps/cli/config-migration-notice.ts":
         "Injection-first by design (the file is explicitly env-free/homedir-free — every path injected): `process.env` is ONLY the default for the injected `env` param so the CLI entry works without threading, while tests inject a fake env. The action flag is read off that injected param, not a module-level process.env — same CLI-bootstrap posture as apps/cli/internal.ts. TODO(S5): migrate the flag to runtimeConfig progressively.",
+      "apps/cli/ask-user-wire.ts":
+        "Injection-first: `process.env` is ONLY the default for the injected `env` param (tests pass a fake env); the gate is read off that param via `gateOn(env, ...)`, never a module-level process.env. Same DI-boundary posture as config-migration-notice.ts.",
+      "apps/cli/fetch-rules-wire.ts":
+        "Injection-first: `process.env` is ONLY the default for the injected `env` param (tests pass a fake env); the gate is read off that param via `gateOn(env, ...)`, never a module-level process.env. Same DI-boundary posture as config-migration-notice.ts.",
       "apps/bench/index.ts": "bench CLI has its own dotenv shim; same bootstrap posture as the CLI",
       "apps/bench/eval/driver.ts":
         "LSP-nav opt-in probe (`QUANTA_LSP_TOOLS=full`) — same gate as CLI; tools register harmlessly without a server. Same posture as the bench CLI's env reads.",
@@ -247,6 +251,8 @@ const RULES: readonly Rule[] = [
     pattern: /catch\s*\(?[\s\S]{0,40}?\)?\s*\{\s*\}/,
     why: "Empty catch swallows errors — log via `@/shared.logger`, rethrow, or surface a typed error event.",
     allowlist: {
+      "codemode/runtime.ts":
+        "FALSE POSITIVE — the `catch {}` is INSIDE a template-string of generated cell-bootstrap JS (runs in the WASM cell, not TS control flow here); `delete globalThis.__cmDispatch` is best-effort fencing in that emitted code.",
       "stream/adapters/jsonl-recorder.ts":
         "explicit best-effort recording of a degraded line — the file already documents the fallthrough",
       "session/store.ts": "ENOENT-style file delete cleanup; absence is the success state",

@@ -43,10 +43,17 @@ function* walk(dir: string): Generator<string> {
   }
 }
 
-/** Designated readers / composition-root assemblers that MAY touch process.env
- *  by contract (the SSOT freezer + the typed accessor's default bag). */
+/** Designated readers / non-production env readers that MAY touch process.env by
+ *  contract — so the ceiling reflects PRODUCTION live-control debt, not noise:
+ *   - the typed accessor's own default bag IS process.env;
+ *   - bench / eval / batch HARNESSES read env to configure benchmark + eval runs
+ *     (a test-harness concern, never a user-facing live-toggle setting).
+ *  A NEW production-slice raw read is NOT exempt — it still trips the ceiling. */
 const isExempt = (path: string): boolean =>
-  path.endsWith("src/apps/cli/cli-knobs-accessor.ts") // the accessor's default bag IS process.env
+  path.endsWith("src/apps/cli/cli-knobs-accessor.ts") ||
+  path.includes("/apps/bench/") ||
+  path.includes("/runner/batch/eval/") ||
+  path.includes("/apps/agent/eval/")
 
 const scan = (): { total: number; byFile: Record<string, number> } => {
   const byFile: Record<string, number> = {}
@@ -68,10 +75,13 @@ const scan = (): { total: number; byFile: Record<string, number> } => {
 
 /** Baseline high-water mark (jun-07). May ONLY decrease as reads route through
  *  `readCliKnob` / `runtimeConfig()` / `resolveKnobs`. A new raw read fails. */
-// Burn-down: 91 → 85 → 82 → 77 (P4 R2/R3: + the SUBAGENT/SKILLS default-ON
-// parseEnvFlag cluster routed through readCliKnob via the unified `readBool`
-// SSOT — subagent/6tools/batch/introspect/skills, byte-identical).
-const CEILING = 77
+// Burn-down: 91 → 85 → 82 → 77 → 74 (P4 R2/R3/R4 routing), then → 53 by
+// EXEMPTING the bench/eval/batch harness (env-config for test runs, not a
+// user-facing live-toggle). 53 = remaining PRODUCTION-slice raw reads — the
+// meaningful live-control debt that future routing drives to its floor (launch-
+// params like RESUME/STATE_PATH legitimately stay raw; literal-toggle idioms
+// like MD_HIGHLIGHT `!== "0"` are deliberate).
+const CEILING = 53
 
 describe("no-raw-process.env-knob ratchet (ADR-0503 P4)", () => {
   test(`raw process.env.QUANTA_* reads stay <= ${CEILING} (decreasing burn-down)`, () => {

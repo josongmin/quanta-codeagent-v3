@@ -226,6 +226,46 @@ export class SqliteJobStore implements JobStorePort {
     }
   }
 
+  claimItem(
+    jobId: string,
+    itemId: string,
+    now: number,
+  ): Promise<Result<BatchJobItem | null, BatchJobError>> {
+    try {
+      // ATOMIC compare-and-set: the `AND status='running'... WHERE status='pending'`
+      // predicate makes the claim a single statement — sqlite serialises it, so
+      // two concurrent workers cannot both flip the same row from pending.
+      const changed = this.db
+        .query(
+          `UPDATE agent_job_items
+             SET status='running', attempt_count = attempt_count + 1, updated_at = ?
+             WHERE item_id = ? AND job_id = ? AND status = 'pending'`,
+        )
+        .run(now, itemId, jobId)
+      if (changed.changes === 0) {
+        // Not claimable: either the item does not exist / job is gone, OR it was
+        // already claimed/terminal (status != pending) — the latter is the
+        // concurrent-loser case ⇒ ok(null), not an error.
+        const row = this.db
+          .query("SELECT job_id FROM agent_job_items WHERE item_id = ? AND job_id = ?")
+          .get(itemId, jobId)
+        if (row !== null) return Promise.resolve(ok(null)) // exists but not pending ⇒ lost
+        const jobExists = this.db.query("SELECT id FROM agent_jobs WHERE id = ?").get(jobId)
+        return Promise.resolve(
+          jobExists === null
+            ? err<BatchJobError>({ kind: "job-not-found", jobId })
+            : err<BatchJobError>({ kind: "store-failed", reason: `unknown item: ${itemId}` }),
+        )
+      }
+      const updated = this.db
+        .query("SELECT * FROM agent_job_items WHERE item_id = ? AND job_id = ?")
+        .get(itemId, jobId) as ItemRow | null
+      return Promise.resolve(updated === null ? ok(null) : ok(toItem(updated)))
+    } catch (e) {
+      return Promise.resolve(err<BatchJobError>({ kind: "store-failed", reason: errMessage(e) }))
+    }
+  }
+
   private insertJob(job: BatchJob): void {
     this.db
       .query(

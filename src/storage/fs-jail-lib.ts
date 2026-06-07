@@ -69,6 +69,15 @@ const canonicalize = (path: string, resolveSymlinks: boolean): string => {
   return resolveSymlinks ? realResolve(abs) : abs
 }
 
+/** §20.4 — reusable symlink-aware path canonicalization (absolute + `..`
+ *  normalize + segment-by-segment symlink expansion, including not-yet-created
+ *  components, bounded hops). `base` resolves a relative `path`. Exported so the
+ *  FS-ownership gate shares the SAME create-then-escape-proof canonicalization
+ *  the jail uses (so an owned/forbidden boundary can't be bypassed via symlink
+ *  or `..`). Pure-ish (reads lstat/readlink only; never writes). */
+export const canonicalizePath = (path: string, base?: string): string =>
+  canonicalize(base !== undefined ? resolve(base, path) : path, true)
+
 export const fsJailLib = (opts: FsJailLibOptions): FsJailLib => {
   const canonicalRoot = canonicalize(opts.root, opts.resolveSymlinks)
 

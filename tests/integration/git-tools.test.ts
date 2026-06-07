@@ -54,12 +54,17 @@ const hasGit = async (): Promise<boolean> => {
   }
 }
 
+// Probe git ONCE at module load (top-level await is allowed in Bun test files)
+// so `test.skipIf(!HAS_GIT)` makes the runner emit a real `skipped` count when
+// git is absent. The prior pattern (`if (!HAS_GIT) return`) silently
+// PASSED — making the suite green in environments where git was missing was
+// indistinguishable from an actually-green suite.
+const HAS_GIT = await hasGit()
+
 let repoDir = ""
-let gitAvailable = false
 
 beforeAll(async () => {
-  gitAvailable = await hasGit()
-  if (!gitAvailable) return
+  if (!HAS_GIT) return
   repoDir = await mkdtemp(join(tmpdir(), "git-tools-it-"))
   // Init repo with explicit main branch (works on git < 2.28 too).
   await run(repoDir, ["init", "-q"])
@@ -80,15 +85,14 @@ describe("git tools — integration (real git)", () => {
   // W1-A audit fix: previous "environment probe" test always called
   // `expect(true).toBe(true)` so it claimed PASS regardless of whether git
   // was actually probed. Replace with a real assertion: the suite runs only
-  // when `gitAvailable` is true (verified at module load), and this test
+  // when `HAS_GIT` is true (verified at module load), and this test
   // pins that the probe latched correctly. When git is absent the test is
   // skipped, surfaced as `skipped`, not silently green.
-  test.skipIf(!gitAvailable)("environment probe — git is available", () => {
-    expect(gitAvailable).toBe(true)
+  test.skipIf(!HAS_GIT)("environment probe — git is available", () => {
+    expect(HAS_GIT).toBe(true)
   })
 
-  test("git_status: working tree clean after a commit", async () => {
-    if (!gitAvailable) return
+  test.skipIf(!HAS_GIT)("git_status: working tree clean after a commit", async () => {
     const t = gitStatusTool(defaultGitRunner)
     const result = await collect(t, {}, repoDir)
     expect(result.ok).toBe(true)
@@ -96,8 +100,7 @@ describe("git tools — integration (real git)", () => {
     expect(result.output).toMatch(/clean|working tree clean/i)
   })
 
-  test("git_status: detects unstaged modification", async () => {
-    if (!gitAvailable) return
+  test.skipIf(!HAS_GIT)("git_status: detects unstaged modification", async () => {
     await writeFile(join(repoDir, "foo.txt"), "line 1\nLINE TWO\nLINE 3 EDITED\n")
     try {
       const result = await collect(gitStatusTool(defaultGitRunner), {}, repoDir)
@@ -110,8 +113,7 @@ describe("git tools — integration (real git)", () => {
     }
   })
 
-  test("git_status: detects untracked file", async () => {
-    if (!gitAvailable) return
+  test.skipIf(!HAS_GIT)("git_status: detects untracked file", async () => {
     const newPath = join(repoDir, "untracked.txt")
     await writeFile(newPath, "hello\n")
     try {
@@ -124,8 +126,7 @@ describe("git tools — integration (real git)", () => {
     }
   })
 
-  test("git_diff: shows hunk after editing a committed file", async () => {
-    if (!gitAvailable) return
+  test.skipIf(!HAS_GIT)("git_diff: shows hunk after editing a committed file", async () => {
     await writeFile(join(repoDir, "foo.txt"), "line 1\nLINE TWO!!\nline 3\n")
     try {
       const result = await collect(gitDiffTool(defaultGitRunner), {}, repoDir)
@@ -138,15 +139,13 @@ describe("git tools — integration (real git)", () => {
     }
   })
 
-  test("git_diff: clean tree → 'no diff'", async () => {
-    if (!gitAvailable) return
+  test.skipIf(!HAS_GIT)("git_diff: clean tree → 'no diff'", async () => {
     const result = await collect(gitDiffTool(defaultGitRunner), {}, repoDir)
     expect(result.ok).toBe(true)
     expect(result.output).toMatch(/no diff/i)
   })
 
-  test("git_log: lists 2 commits", async () => {
-    if (!gitAvailable) return
+  test.skipIf(!HAS_GIT)("git_log: lists 2 commits", async () => {
     const result = await collect(gitLogTool(defaultGitRunner), { n: 10 }, repoDir)
     expect(result.ok).toBe(true)
     const lines = result.output.split("\n").filter(Boolean)
@@ -156,15 +155,13 @@ describe("git tools — integration (real git)", () => {
     expect(result.output).toContain("Test Author")
   })
 
-  test("git_log: with file restriction", async () => {
-    if (!gitAvailable) return
+  test.skipIf(!HAS_GIT)("git_log: with file restriction", async () => {
     const result = await collect(gitLogTool(defaultGitRunner), { file: "foo.txt", n: 5 }, repoDir)
     expect(result.ok).toBe(true)
     expect(result.output).toContain("initial commit")
   })
 
-  test("git_blame: identifies last author/commit/summary for line 2", async () => {
-    if (!gitAvailable) return
+  test.skipIf(!HAS_GIT)("git_blame: identifies last author/commit/summary for line 2", async () => {
     const result = await collect(
       gitBlameTool(defaultGitRunner),
       { file: "foo.txt", line: 2 },
@@ -178,8 +175,7 @@ describe("git tools — integration (real git)", () => {
     expect(result.output).toContain("LINE TWO")
   })
 
-  test("not a git repository: status returns ok:false", async () => {
-    if (!gitAvailable) return
+  test.skipIf(!HAS_GIT)("not a git repository: status returns ok:false", async () => {
     const nonRepo = await mkdtemp(join(tmpdir(), "git-tools-nonrepo-"))
     try {
       const result = await collect(gitStatusTool(defaultGitRunner), {}, nonRepo)

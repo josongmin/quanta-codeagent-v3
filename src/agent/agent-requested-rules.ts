@@ -14,6 +14,7 @@
  * name+description; rules with score > 0 are returned, ranked by score desc then
  * name (stable), capped at `limit`. Pure + NO-THROW.
  */
+import { byteCompare } from "@/shared"
 
 /** A rule eligible for on-demand fetch (description-only / agent-requested). */
 export interface RequestableRule {
@@ -79,6 +80,8 @@ export const matchRulesByDescription = (
     for (const t of q) if (hay.has(t)) score++
     if (score > 0) scored.push({ rule, score })
   }
-  scored.sort((a, b) => b.score - a.score || a.rule.name.localeCompare(b.rule.name))
+  // byteCompare (NOT localeCompare): a deterministic byte-order tie-break so the
+  // ranked output is replay-stable across machines/ICU versions.
+  scored.sort((a, b) => b.score - a.score || byteCompare(a.rule.name, b.rule.name))
   return scored.slice(0, Math.max(0, limit)).map((s) => s.rule)
 }

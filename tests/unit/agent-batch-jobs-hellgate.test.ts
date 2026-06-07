@@ -249,6 +249,43 @@ describe("GAP7-5: resume an interrupted job", () => {
   })
 })
 
+describe("GAP7 audit R2: concurrency-safe item claim (no double-dispatch)", () => {
+  test("claimItem is atomic: two concurrent claims on one pending item ⇒ exactly one wins", async () => {
+    const store = new InMemoryJobStore()
+    const job: BatchJob = {
+      id: "j", name: "j", status: "running", instruction: "i", inputHeadersJson: "[]",
+      poolSize: 1, maxAttempts: 1, createdAt: 1, updatedAt: 1,
+    }
+    const it: BatchJobItem = {
+      jobId: "j", itemId: "i1", rowIndex: 0, rowJson: "{}", status: "pending", attemptCount: 0, createdAt: 1, updatedAt: 1,
+    }
+    await store.createJob(job, [it])
+    const [a, b] = await Promise.all([store.claimItem("j", "i1", 2), store.claimItem("j", "i1", 3)])
+    const winners = [a, b].filter((r) => r.ok && r.value !== null)
+    const losers = [a, b].filter((r) => r.ok && r.value === null)
+    expect(winners).toHaveLength(1) // exactly one claim won
+    expect(losers).toHaveLength(1) // the other got null (lost)
+  })
+
+  test("two concurrent runToEnd over a SHARED store ⇒ each row dispatched EXACTLY once", async () => {
+    const store = new InMemoryJobStore()
+    const dispatches = new Map<number, number>()
+    const countingDispatch: RowDispatchPort = (req) => {
+      dispatches.set(req.rowIndex, (dispatches.get(req.rowIndex) ?? 0) + 1)
+      return Promise.resolve(ok<RowDispatchResult>({ value: { ok: true } }))
+    }
+    const mk = () =>
+      new BatchJobRunner({ store, dispatch: countingDispatch, clock: makeClock(), newId: makeIdGen() })
+    const submitter = mk()
+    const submitted = await submitter.submit(spec([{ a: "0" }, { a: "1" }, { a: "2" }, { a: "3" }], { poolSize: 4 }))
+    if (!submitted.ok) throw new Error("unreachable")
+    // Two runners drive the SAME job over the SAME store concurrently.
+    await Promise.all([mk().runToEnd(submitted.value), mk().runToEnd(submitted.value)])
+    for (const [, n] of dispatches) expect(n).toBe(1) // NO double-dispatch
+    expect([...dispatches.keys()].sort()).toEqual([0, 1, 2, 3]) // every row ran
+  })
+})
+
 describe("output schema enforcement", () => {
   const schemaJson = JSON.stringify({
     type: "object",
