@@ -17,6 +17,7 @@
  */
 
 import { BudgetMeter, buildSystemPrompt, createEffortStore, parseEffort } from "@/agent"
+import { type CapabilityDescriptor, runCapabilityProbe, type Surface } from "@/capability"
 import { defaultFocusChainTracker, type FocusChainPort } from "@/agent/focus-chain"
 import {
   buildSystemPromptForMode,
@@ -216,6 +217,40 @@ const buildPromptState = (
   }
 }
 
+/**
+ * ADR-0503 P3 — armed capability consistency probe (READ-ONLY drift sweep).
+ *
+ * Behind the strict master gate `QUANTA_CAPABILITY_LAYER` (default-OFF). When
+ * OFF: {@link runCapabilityProbe} short-circuits to `[]` BEFORE any work, so this
+ * function logs nothing and adds ZERO behavior — the un-armed bootstrap path is
+ * byte-identical (the #1 invariant). When ON: it sweeps every declared capability
+ * × surface, comparing the unified resolver against the legacy per-surface gate,
+ * and SURFACES any split-brain (`agrees === false`) as a single `warn` line. It
+ * NEVER enforces or replaces a legacy gate — observe-only.
+ *
+ * The legacy gate is injected: for the seed registry (all `llmTool` caps) the
+ * legacy gate is the tool's own env gate, `gateOn(env, cap.gate.envKey)`.
+ */
+const probeCapabilityConsistency = (env: NodeJS.ProcessEnv): void => {
+  const legacyGateFor = (cap: CapabilityDescriptor, _surface: Surface): boolean =>
+    gateOn(env, cap.gate.envKey)
+  const probes = runCapabilityProbe(env, legacyGateFor)
+  const splitBrain = probes.filter((p) => !p.agrees)
+  if (splitBrain.length > 0) {
+    logger.warn(
+      `capability layer: split-brain exposure drift detected (observe-only) on ${splitBrain.length} (capability,surface) pair(s)`,
+      {
+        drift: splitBrain.map((p) => ({
+          capability: p.capabilityId,
+          surface: p.surface,
+          resolved: p.resolved,
+          legacy: p.legacy,
+        })),
+      },
+    )
+  }
+}
+
 /** Resolve feature flags, tooling, resume state, and reusable session deps that
  *  do not require terminal-specific host wiring.
  *
@@ -230,6 +265,10 @@ export const bootstrapSession = async (
   featureCfg: SessionFeatureConfig,
 ): Promise<SessionBootstrapResult> => {
   const slog = new StructuredLogger()
+  // ADR-0503 P3 — armed, read-only capability consistency probe. Gated on the
+  // strict master gate inside the runner; OFF ⇒ byte-identical no-op (no probe,
+  // no log). Observe-only: it never enforces or replaces a legacy gate.
+  probeCapabilityConsistency(runtime.env)
   const { idleMonitor, rejectCounter } = deps.buildIdleGuards(runtime)
   // ADR-0303 — the permission posture is engine-owned mutable state, not a
   // slash-local mirror. `permission.mode` is an ACCESSOR over

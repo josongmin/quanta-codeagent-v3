@@ -10,11 +10,13 @@
 
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
+import { CONFIG_ALLOWED_KEYS } from "@/apps/web-daemon/server"
 import {
   buildWebKnobCatalog,
   resolveCatalogValues,
   webSafeKnobValue,
 } from "@/apps/web-daemon/knob-catalog-wire"
+import { isSessionForbidden } from "@/shared"
 
 describe("GET /api/knobs never leaks custom string values (ADR-0503 security)", () => {
   test("redaction: no custom string value survives, across the FULL catalog", () => {
@@ -62,3 +64,14 @@ describe("GET /api/knobs never leaks custom string values (ADR-0503 security)", 
 function buildKnobCatalogForLeakTest() {
   return buildWebKnobCatalog()
 }
+
+describe("POST /config write-allowlist never overlaps the security carve-out (R2 hardening)", () => {
+  test("CONFIG_ALLOWED_KEYS ∩ SESSION_FORBIDDEN_KNOBS = ∅ (no strict knob is web-writable)", () => {
+    // The /config writer mutates process.env directly (bypassing setKnobOverride),
+    // so a strict-security knob in the write allowlist would be armable via an
+    // authed HTTP POST. This pins the invariant that the two sets stay disjoint;
+    // handleConfigPost ALSO rejects isSessionForbidden(key) at runtime (belt+suspenders).
+    const overlap = [...CONFIG_ALLOWED_KEYS].filter((k) => isSessionForbidden(k))
+    expect(overlap).toEqual([])
+  })
+})

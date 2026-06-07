@@ -14,11 +14,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import "../../src/apps/cli/knobs-bootstrap" // populate @/runner registry (for the wire)
+import "../../../src/apps/cli/knobs-bootstrap" // populate @/runner registry (for the wire)
 import { __resetRuntimeConfig, runtimeConfig } from "@/shared/runtime-config"
-import { __resetCliKnobOverrides, readCliKnob } from "../../src/apps/cli/cli-knobs-accessor"
-import { buildKnobsSlash, type KnobsSurfaceWire } from "../../src/apps/cli/slash-commands-knobs"
-import type { SlashContext } from "../../src/apps/cli/slash-contract"
+import { __resetCliKnobOverrides, readCliKnob } from "../../../src/apps/cli/cli-knobs-accessor"
+import { buildKnobsSlash, type KnobsSurfaceWire } from "../../../src/apps/cli/slash-commands-knobs"
+import type { SlashContext } from "../../../src/apps/cli/slash-contract"
 
 // minimal wire — the catalog-knob path of doSet does NOT use the @/runner wire,
 // so a stub resolution/save is enough to build the command.

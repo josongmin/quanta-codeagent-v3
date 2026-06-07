@@ -13,6 +13,7 @@
  * Pure forwarding wrapper — no slice-side imports of `@/observability`.
  */
 
+// biome-ignore lint/style/noRestrictedImports: type-only import (erased at compile time) — no runtime slice coupling; the AST slice-boundary scanner exempts type imports.
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 import type { MetricsRegistry } from "./port"
 

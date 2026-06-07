@@ -41,6 +41,7 @@ import {
   type Patch,
   type PatchFileSystemPort,
   parsePatch,
+  // biome-ignore lint/style/noRestrictedImports: @/patch is reachable by @/tool/apply-patch per the documented ADR slice carve-out.
 } from "@/patch"
 import { errMessage } from "@/shared"
 import { FsJailError, resolveJailed } from "@/storage"

@@ -12,15 +12,15 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { buildLogoutCmd } from "../../src/apps/cli/logout-cmd"
-import type { SlashContext } from "../../src/apps/cli/slash-commands"
+import { buildLogoutCmd } from "../../../src/apps/cli/logout-cmd"
+import type { SlashContext } from "../../../src/apps/cli/slash-commands"
 import {
   chatgptTokenPath,
   defaultRevocationEndpoint,
   type FetchPort,
   revokeRefreshToken,
   writeToken,
-} from "../../src/auth/chatgpt-oauth"
+} from "../../../src/auth/chatgpt-oauth"
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI SGR escapes (control chars) is the point — mirrors sibling auth CLI tests.
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "")

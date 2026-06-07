@@ -27,6 +27,7 @@ import { isRewindEnabled, rewindCommands } from "../rewind-cmd"
 import { rewindConvCmd } from "../rewind-conv-cmd"
 import { rewindToolCmd } from "../rewind-tool-cmd"
 import { sessionRegistryCmd } from "../session-registry-cmd"
+import { capabilitiesCmd, capsAliasCmd } from "../slash-commands-capabilities"
 import { knobsCmd } from "../slash-commands-knobs"
 import type { SlashCommand } from "../slash-contract"
 import { releaseNotesCmd, versionCmd } from "../version-cmd"
@@ -59,6 +60,10 @@ export const APP_SLASH_COMMANDS: readonly SlashCommand[] = [
   ...DREAM_COMMANDS,
   rewindConvCmd,
   knobsCmd,
+  // ADR-0503 P3 — operator visibility for the cross-surface capability layer
+  // (gates + per-surface exposure grid). Read-only; `/caps` is the alias.
+  capabilitiesCmd,
+  capsAliasCmd,
   // ADR-0370 — operator visibility for the session-resource-registry slice.
   sessionRegistryCmd,
   // jun-6 (RFC jun-6-doctor-selfcheck) — `/doctor` environment self-check.

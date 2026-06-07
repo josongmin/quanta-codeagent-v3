@@ -12,6 +12,10 @@ export type {
   CapabilitySurfaces,
   Surface,
 } from "./descriptor"
+export {
+  type CapabilityProbeResult,
+  runCapabilityProbe,
+} from "./probe-all"
 export { allCapabilities, CAPABILITIES } from "./registry"
 export {
   CAPABILITY_LAYER_ENV,

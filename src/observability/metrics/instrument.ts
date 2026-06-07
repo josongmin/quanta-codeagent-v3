@@ -17,6 +17,7 @@
  */
 
 import type { BackgroundSubagentScheduler, SubagentSpec } from "@/agent/subagent-background"
+// biome-ignore lint/style/noRestrictedImports: type-only import (erased at compile time) — no runtime slice coupling; the AST slice-boundary scanner exempts type imports.
 import type { StreamEvent, StreamInput } from "@/llm"
 import type { LlmProvider } from "@/llm/providers"
 import type { MetricsRegistry } from "./port"

@@ -19,7 +19,7 @@ import type { Server, ServerWebSocket } from "bun"
 import type { ContextUsageBreakdown } from "@/agent/context/usage-breakdown"
 import { type SessionTransport, wrapWebSocketLikeAsSessionTransport } from "@/ipc/session"
 import type { RuntimeSession } from "@/sdk/runtime"
-import { errMessage, gateDisabled, logger } from "@/shared"
+import { errMessage, gateDisabled, isSessionForbidden, logger } from "@/shared"
 import { handleAuthLoginStart, handleAuthLogout, handleAuthStatus } from "./auth-routes"
 import { type CanvasEmitterHandle, createCanvasEmitter } from "./canvas-emitter"
 import {
@@ -305,7 +305,7 @@ const authReject = (): Response =>
  *     accidental shell-style injection if the env is ever spliced
  *     into a child process command line in the future.
  */
-const CONFIG_ALLOWED_KEYS = new Set([
+export const CONFIG_ALLOWED_KEYS = new Set([
   "QUANTA_FAST",
   "QUANTA_SERVICE_TIER",
   "QUANTA_MODEL",
@@ -328,6 +328,13 @@ const handleConfigPost = async (req: Request): Promise<Response> => {
   for (const [key, raw] of Object.entries(entries)) {
     if (!CONFIG_ALLOWED_KEYS.has(key)) {
       return jsonResponse(400, { error: "unknown_key", key })
+    }
+    // Defense-in-depth: this HTTP writer mutates process.env DIRECTLY (bypassing
+    // the `setKnobOverride` chokepoint), so it must ALSO honor the security
+    // carve-out — never let an authed POST arm a strict-security knob (code-mode/
+    // fs-jail/tls-mitm/...) even if one is ever added to CONFIG_ALLOWED_KEYS.
+    if (isSessionForbidden(key)) {
+      return jsonResponse(403, { error: "forbidden_security_knob", key })
     }
     if (raw === null || raw === "") {
       delete process.env[key]

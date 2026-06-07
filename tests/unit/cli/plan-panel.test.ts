@@ -21,15 +21,15 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import type { Plan, TodoItem, TodoStatus } from "../../src/agent/plan/types"
+import type { Plan, TodoItem, TodoStatus } from "../../../src/agent/plan/types"
 import {
   PLAN_PANEL_NO_PLAN,
   PLAN_PANEL_NOT_WIRED,
   renderPlanHeader,
   renderPlanPanel,
-} from "../../src/apps/cli/plan-panel"
-import { runSlashCommand, type SlashContext } from "../../src/apps/cli/slash-commands"
-import { setColorPolicy, stripAnsi } from "../../src/ui/ui-helpers"
+} from "../../../src/apps/cli/plan-panel"
+import { runSlashCommand, type SlashContext } from "../../../src/apps/cli/slash-commands"
+import { setColorPolicy, stripAnsi } from "../../../src/ui/ui-helpers"
 
 const makeTodo = (id: string, content: string, status: TodoStatus, createdAt = 0): TodoItem => ({
   id,

@@ -1,5 +1,6 @@
 id: image-gen
 title: image_gen tool — text→image generation + edit (NEW binary-generation category)
+capability: image-gen
 section: 2
 subsystem: Binary-artifact generation (H14a, jun-3-misc §3)
 order: 600

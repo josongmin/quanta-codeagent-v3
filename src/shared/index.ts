@@ -44,9 +44,11 @@ export {
 export {
   __resetKnobOverrides,
   getKnobOverride,
+  isSessionForbidden,
   knobOverrideCount,
   knobOverrides,
   knobOverridesVersion,
+  SESSION_FORBIDDEN_KNOBS,
   setKnobOverride,
 } from "./knob-overrides"
 export type {

@@ -7,6 +7,7 @@
 // be unit-tested in isolation. NO I/O here — the consumer reads the source
 // snapshot through the already-constructed `PatchFileSystemPort`.
 
+// biome-ignore lint/style/noRestrictedImports: @/patch is reachable by @/tool/apply-patch per the documented ADR slice carve-out.
 import { PatchAnchorNotFoundError, PatchApplyError, PatchParseError } from "@/patch"
 import type { FastApplyFailureKind } from "./types"
 

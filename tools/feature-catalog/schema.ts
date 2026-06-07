@@ -43,6 +43,15 @@ export const FeatureSchema = z.object({
   supersedes: z.array(z.string()).default([]),
   superseded_by: z.string().optional(),
   sunset_date: z.string().optional(),
+  // Cross-axis link to the capability layer (`src/capability/registry.ts`).
+  // Optional + additive: a feature exposed as a gated LLM-tool/slash/skill/hook
+  // capability sets `capability:` to the capability id it maps to, making the
+  // FEATURE axis ↔ CAPABILITY axis cross-referenceable (the 3-axis consistency
+  // ratchet asserts this id resolves to a real CAPABILITIES entry).
+  capability: z
+    .string()
+    .regex(/^[a-z0-9][a-z0-9-]*$/, "kebab-case capability id")
+    .optional(),
   // SOTA Tier-3 — 4-axis integration tracking (all optional, defaults to "n-a").
   ui_surfaces: z.array(UiSurface).default([]),
   monitoring: IntegrationStatus.default("n-a"),

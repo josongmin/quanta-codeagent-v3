@@ -22,7 +22,7 @@ import {
   buildSuggestFnAdapter,
   maybeCreatePromptSuggestionWire,
   type PromptSuggestionRunArgs,
-} from "../../src/apps/cli/repl/prompt-suggestion-wire"
+} from "../../../src/apps/cli/repl/prompt-suggestion-wire"
 
 const ON = { QUANTA_ENABLE_PROMPT_SUGGESTION: "1" } as const
 

@@ -1,5 +1,6 @@
 id: office-authoring
 title: xlsx_write / docx_write tools — generate real .xlsx / .docx (NEW Office-authoring category)
+capability: office-authoring
 section: 2
 subsystem: Binary-artifact generation (H14b, jun-3-misc §3)
 order: 601

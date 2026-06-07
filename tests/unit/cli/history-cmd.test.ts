@@ -6,9 +6,9 @@ import {
   historyCmd,
   parseHistoryArgs,
   resolveCap,
-} from "../../src/apps/cli/history-cmd"
-import { runSlashCommand, type SlashContext } from "../../src/apps/cli/slash-commands"
-import type { Message } from "../../src/llm"
+} from "../../../src/apps/cli/history-cmd"
+import { runSlashCommand, type SlashContext } from "../../../src/apps/cli/slash-commands"
+import type { Message } from "../../../src/llm"
 
 interface Captured {
   out: string

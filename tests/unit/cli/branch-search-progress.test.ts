@@ -11,7 +11,7 @@ import {
   formatBranchesPanel,
   formatStatusLine,
   isBranchProgressEnabled,
-} from "../../src/apps/cli/branch-search-progress"
+} from "../../../src/apps/cli/branch-search-progress"
 
 const sig = (kind: VerifierSignal["kind"], pass: boolean): VerifierSignal => ({
   kind,

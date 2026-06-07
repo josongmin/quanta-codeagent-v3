@@ -28,6 +28,7 @@ import {
   readCliKnob,
   setCliKnobOverride,
 } from "../../../src/apps/cli/cli-knobs-accessor"
+import { buildCompactionBreakerConfig } from "../../../src/apps/cli/internal"
 
 // Both knobs are default-ON kill-switches; the migrated read is
 // `!(readCliKnob(key,"bool") ?? true)` ≡ `gateDisabled(env, key)`.
@@ -86,5 +87,21 @@ describe("read-routing burn-down e2e (ADR-0503 P4)", () => {
         expect(disabledViaAccessor(key, env)).toBe(gateDisabled(env as Record<string, string | undefined>, key))
       }
     }
+  })
+
+  test("REAL call site: /config set QUANTA_COMPACT_BREAKER=off disables the breaker (fences internal.ts migration)", () => {
+    // buildCompactionBreakerConfig() reads the knob via readCliKnob with NO env
+    // arg (process.env + the override store) — exercising the ACTUAL migrated
+    // internal.ts call site, so a regression there (e.g. `?? true`→`?? false`,
+    // or re-pointing at raw process.env) flips this assertion RED.
+    delete process.env.QUANTA_COMPACT_BREAKER // deterministic: no env, no override
+    __resetCliKnobOverrides()
+    expect(buildCompactionBreakerConfig()?.disabled).toBeUndefined() // default-ON ⇒ not disabled
+
+    setCliKnobOverride("QUANTA_COMPACT_BREAKER", "off") // live /config set off
+    expect(buildCompactionBreakerConfig()?.disabled).toBe(true) // override reaches the REAL builder
+
+    setCliKnobOverride("QUANTA_COMPACT_BREAKER", undefined) // clear ⇒ reverts
+    expect(buildCompactionBreakerConfig()?.disabled).toBeUndefined()
   })
 })

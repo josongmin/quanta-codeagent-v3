@@ -4,9 +4,9 @@ import {
   deliverReactorWatchEnvelope,
   encodeReactorWatchEnvelope,
   parseReactorWatchEnvelope,
-} from "../../src/apps/cli/reactor-watch-bridge"
-import { ExternalPromptQueue } from "../../src/apps/cli/repl/external-prompt-queue"
-import { injectSimulatedTurn, type ProactiveTrigger, REACTOR_ENV_FLAG } from "../../src/reactor"
+} from "../../../src/apps/cli/reactor-watch-bridge"
+import { ExternalPromptQueue } from "../../../src/apps/cli/repl/external-prompt-queue"
+import { injectSimulatedTurn, type ProactiveTrigger, REACTOR_ENV_FLAG } from "../../../src/reactor"
 
 const fakeTrigger = (): ProactiveTrigger =>
   Object.freeze({

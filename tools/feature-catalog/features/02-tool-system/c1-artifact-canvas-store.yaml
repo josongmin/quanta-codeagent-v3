@@ -1,5 +1,6 @@
 id: artifact-canvas-store
 title: Canvas / artifact persistence store (C1 — non-code generation outputs)
+capability: artifact-store
 section: 2
 subsystem: 도구 — artifact store (생성축 lifecycle, Cursor Canvas 흡수)
 order: 170

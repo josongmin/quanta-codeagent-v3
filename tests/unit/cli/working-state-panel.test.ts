@@ -29,15 +29,15 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import type { WorkingState } from "../../src/agent"
-import { BUILTINS, runSlashCommand, type SlashContext } from "../../src/apps/cli/slash-commands"
+import type { WorkingState } from "../../../src/agent"
+import { BUILTINS, runSlashCommand, type SlashContext } from "../../../src/apps/cli/slash-commands"
 import {
   __internal,
   formatWorkingStateSummaryRow,
   formatWorkingStateTransient,
   renderWorkingStatePanel,
-} from "../../src/apps/cli/working-state-panel"
-import { setColorPolicy, stripAnsi } from "../../src/ui/ui-helpers"
+} from "../../../src/apps/cli/working-state-panel"
+import { setColorPolicy, stripAnsi } from "../../../src/ui/ui-helpers"
 
 const emptySnap = (): WorkingState => ({
   ownerShortlist: [],

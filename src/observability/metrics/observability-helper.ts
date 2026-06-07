@@ -35,6 +35,7 @@ import type { BackgroundSubagentScheduler } from "@/agent/subagent-background"
 import type { LlmProvider } from "@/llm/providers"
 import { errMessage } from "@/shared"
 import type { ShadowOdb } from "@/storage/shadow-odb"
+// biome-ignore lint/style/noRestrictedImports: type-only import (erased at compile time) — no runtime slice coupling; the AST slice-boundary scanner exempts type imports.
 import type { Tool } from "@/tool"
 import { buildHealthSnapshot, writeHealthSnapshot } from "./health-snapshot"
 import { instrumentLlmProvider, instrumentSubagentScheduler } from "./instrument"
