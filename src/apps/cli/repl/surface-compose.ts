@@ -1,5 +1,4 @@
 import { type AgentMode, EFFORT_LEVELS, effortToTokenBudget, type WorkingState } from "@/agent"
-import { type InboundMode, parseInboundMode } from "@/agent/inbound-mode"
 import {
   defaultGranularRegistry,
   type GranularRegistryPort,
@@ -14,6 +13,7 @@ import {
   type ConversationCheckpointStore,
   defaultConversationCheckpointStore,
 } from "@/agent/conversation-checkpoint"
+import { type InboundMode, parseInboundMode } from "@/agent/inbound-mode"
 import {
   defaultPlanQueueStore,
   type PlanQueueStore,
@@ -500,8 +500,9 @@ const buildSurfaceDispatch = (args: {
    *  print "not wired". */
   readonly conversationActions?: ConversationActionSurface | undefined
   /** §steer — the session-mutable inbound delivery mode ref, so `/inbound`
-   *  reads/sets it (the SAME ref the session loop reads per mid-turn line). */
-  readonly inboundMode?: { current: InboundMode } | undefined
+   *  reads/sets it (the SAME ref the session loop reads per mid-turn line).
+   *  Always present (the REPL seeds it `queue`). */
+  readonly inboundMode: { current: InboundMode }
 }): ((input: string) => Promise<boolean>) => {
   return async (input: string): Promise<boolean> => {
     const head = input.split(/\s+/)[0] ?? ""
@@ -558,6 +559,8 @@ const buildSurfaceDispatch = (args: {
       ...(args.conversationActions !== undefined
         ? { conversationActions: args.conversationActions }
         : {}),
+      // `/inbound` mode ref (always present in the REPL — seeded queue).
+      inboundMode: args.inboundMode,
     }
     await runSlashCommand(input, ctx)
     return true
@@ -854,8 +857,9 @@ export const composeSurfaceWires = (
   // ADR-0292 — turn-end record wire. Env-gated: `QUANTA_CHECKPOINT_CONV=on`
   // wires the live wire; anything else leaves the slot `null` so the slash
   // prints "not wired" and the loop's recordTurn hook is a no-op.
-  const convCheckpointWire =
-    gateOn(envSource, "QUANTA_CHECKPOINT_CONV") ? startConvCheckpointWire({ store: convStore }) : null
+  const convCheckpointWire = gateOn(envSource, "QUANTA_CHECKPOINT_CONV")
+    ? startConvCheckpointWire({ store: convStore })
+    : null
   // ADR-0291 — composer + text inbox: surface-owned mutable holders.
   const composerHandle = createComposerHandle("")
   const textInbox = createTextInbox()
@@ -1067,6 +1071,7 @@ export const composeSurfaceWires = (
         : undefined,
     ...(shadowOdb !== undefined ? { shadowOdb } : {}),
     ...(conversationActions !== undefined ? { conversationActions } : {}),
+    inboundMode,
   })
 
   return {

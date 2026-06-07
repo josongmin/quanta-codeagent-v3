@@ -421,10 +421,10 @@
 - **quanta**: 부재(`ctrl\+b|move.*background` grep 0). tool-layer `run_in_background`는 있으나 REPL 제스처 없음.
 - **델타**: in-flight task 백그라운드 제스처 없음. **ROI 중(긴 셸).**
 
-### 11.5 [NEW-GAP] 같은-턴 interrupt-and-steer — PARTIAL (have mid-turn capture + next-turn drain + Esc-Esc cancel, missing interrupt-and-inject-into-current-turn + restore: verified jun-07 `INTERRUPTED_TURN`/`injectInbound`/`restoreInterrupted` grep 0 in `src/`)
-- **경쟁사**: Claude `INTERRUPTED_TURN` restore + "Injecting inbound user message" (ESC가 in-flight 턴 인터럽트 + 새 메시지 현재턴 주입 + 인터럽트턴 복원).
-- **quanta**: `in-turn-reader.ts`+`mid-turn-capture-wire.ts`는 mid-turn 키 캡처하나 **다음 턴 경계서 drain**(`externalPromptQueue`), Esc-Esc(`turn-cancel-install.ts`)는 CANCEL만.
-- **델타**: queue-for-next-turn은 있으나 interrupt-and-inject-into-current-turn + 복원 없음. **ROI 중(steering 유일 nuance).**
+### 11.5 [NEW-GAP] 같은-턴 interrupt-and-steer — ✅ **LANDED (jun-7 inbound-mode SSOT)**
+- **경쟁사**: Claude `INTERRUPTED_TURN` restore + "Injecting inbound user message" (ESC가 in-flight 턴 인터럽트 + 새 메시지 현재턴 주입). Claude는 IDE 플러그인 모드 한정.
+- **quanta (LANDED)**: **3-mode inbound 메시지 전달 SSOT** — `src/agent/inbound-mode.ts` `InboundMode = queue|weave|interrupt` + `routeInbound`(pure 결정, §steer `steer()` 재사용). 모드별: **queue**(다음턴 drain, 기본; 기존 mid-turn-capture) · **weave**(현재턴 inject = Claude-IDE 라이브 블렌드; conversation-action `pushUserMessage`→`decideAction`→injection, ADR-0071 채널) · **interrupt**(현재턴 abort + replacement 새턴; `pushCancel`+enqueue). 디스패치 `src/apps/cli/repl/inbound-dispatch.ts`(`dispatchInbound`/`handleInboundLine`/`routeMidTurnLine`), session-loop `onLine` 배선(default-OFF byte-identical), `/inbound` 슬래시(queue|weave|interrupt 런타임 전환), gate `QUANTA_INBOUND_MODE`(+weave/interrupt는 `QUANTA_CONVERSATION_ACTIONS`+`QUANTA_MIDTURN_CAPTURE`). **터미널 CLI에서 동작**(Claude는 IDE-only). 불변식: 비-empty 메시지 절대 유실 안 함(weave/interrupt 불가시 queue_fallback; oversized도 보존). ~42 test(router+dispatch+e2e), 3R 적대리뷰(oversized-loss 버그 수정+routeMidTurnLine 추출+테스트). tsc0/biome0, 모든 모드 binary boot 검증.
+- **남은 것**: 인터럽트-턴 복원(`INTERRUPTED_TURN` restore)은 미구현(abort는 unwind지 복원 아님) · weave는 미세 race(턴이 결정~poll 사이 종료시 optimistic-mismatch로 reject, 오주입 방지) · mid-turn 입력 가시성(스트리밍 중 입력라인 redraw lane)은 TTY hot-path라 보류.
 
 ### 11.6 [PARTIAL] `/model` 인터랙티브 피커 + `/diff` working-tree — PARTIAL (have /retry-with+/sticky-model SET-by-id + edit-diff /diff, missing list-and-pick picker + ad-hoc git working-tree diff: verified jun-07 `modelPicker`/`gitWorkingTreeDiff` grep 0 in `src/apps/cli/`)
 - **경쟁사**: Claude/Codex `/model`(×26, 최다 참조), Codex `/diff`(×6, git working-tree).

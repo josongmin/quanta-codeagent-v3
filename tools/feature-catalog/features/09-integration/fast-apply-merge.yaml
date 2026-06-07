@@ -85,7 +85,7 @@ evidence:
     - src/agent/fast-apply-fallback/index.ts
     - src/tool/types.ts
     - src/tool/edit/index.ts
-  adrs: [498]
+  adrs: ["docs/decisions/0500-model-based-fast-apply-merge.md"]
   tests:
     unit:
       - tests/unit/fast-apply-merge-runner-hellgate.test.ts

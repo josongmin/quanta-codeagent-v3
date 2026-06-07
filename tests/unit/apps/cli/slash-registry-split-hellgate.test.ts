@@ -74,6 +74,7 @@ const EXPECTED_NAMES = new Set<string>([
   "/why",
   "/cancel",
   "/summarize-now",
+  "/inbound",
   // app (env-gated `/rewind`+`/fork`+`/memory` enabled by default)
   "/permission",
   "/mcp",
@@ -91,6 +92,11 @@ const EXPECTED_NAMES = new Set<string>([
   "/brief", // registry-surface.ts — turn brief/summary
   "/dream", // dream-cmd.ts — cross-session memory consolidation (auto-dream)
   "/doctor", // doctor/ — jun-6 environment self-check
+  // jun-7 Wave-R additions (already registered; catalog was stale) — version-cmd /
+  // bug-cmd landed but EXPECTED_NAMES was not updated. Reconciled here.
+  "/version",
+  "/release-notes",
+  "/bug",
 ])
 
 describe("ADR-0306 — slash registry split hellgate (CLI-03)", () => {

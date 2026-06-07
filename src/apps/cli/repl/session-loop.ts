@@ -15,16 +15,16 @@ import { errMessage, gateOnStrict, logger, runtimeConfig } from "@/shared"
 import type { PlaybookPlanQueueSink } from "@/skill/playbook"
 import { startReactorWatchBridge } from "../reactor-watch-bridge"
 import { type AwaySummaryWireHandle, maybeCreateAwaySummaryWire } from "./away-summary-wire"
-import type { ConversationActionSurface } from "./conversation-action-surface"
 import type { ConvCheckpointWire } from "./conv-checkpoint-wire"
+import type { ConversationActionSurface } from "./conversation-action-surface"
 import { ExternalPromptQueue } from "./external-prompt-queue"
-import { handleInboundLine } from "./inbound-dispatch"
 import { createHeartbeatBinder, heartbeatEnqueueHandler } from "./heartbeat-binder"
 import {
   type InTurnLineReaderHandle,
   type InTurnReaderStdin,
   startInTurnLineReader,
 } from "./in-turn-reader"
+import { routeMidTurnLine } from "./inbound-dispatch"
 import { type MidTurnCaptureHandle, maybeCreateMidTurnCaptureWire } from "./mid-turn-capture-wire"
 import { maybeCreateNdjsonSinkWire } from "./ndjson-wire"
 import type { PlaybookTriggerSurfaceSeam } from "./playbook-trigger-surface-seam"
@@ -408,32 +408,20 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     const reader: InTurnLineReaderHandle = startInTurnLineReader({
       stdin: deps.inTurnStdin,
       onLine: (line) => {
-        // §steer — route the mid-turn line by inbound mode. DEFAULT (queue) OR
-        // no conversation-action surface ⇒ the existing capture path (plan-queue
-        // + next-turn drain), byte-identical. weave/interrupt route through the
-        // pure `handleInboundLine` (tested) against the live turn snapshot.
-        const mode = deps.inboundMode?.current ?? "queue"
-        const surface = deps.conversationActions
-        if (mode === "queue" || surface === undefined) {
-          // captureLine is itself no-throw (the facade swallows internal faults);
-          // it is async, so kick it off fire-and-forget — the reader never awaits.
-          void midTurnCapture.captureLine(line, turnIndexForCapture)
-          return
-        }
-        // weave/interrupt: decide + dispatch against the live turn state. The ack
-        // is intentionally NOT rendered inline (mid-stream redraw contention) —
-        // the EFFECT (injection / abort / enqueue) is the user-visible signal.
-        handleInboundLine({
-          line,
-          mode,
-          state: surface.activeTurnRef.current,
-          config: { maxInputBytes: INBOUND_MAX_BYTES },
-          now: Date.now(),
-          sinks: {
-            enqueue: (t) => externalPromptQueue.push(t),
-            weave: (t) => surface.pushUserMessage(t),
-            interrupt: (r) => surface.pushCancel(r),
-          },
+        // §steer — route the mid-turn line by inbound mode (tested core in
+        // `routeMidTurnLine`). DEFAULT (queue) OR no conversation-action surface ⇒
+        // the existing capture path (plan-queue + next-turn drain), byte-identical.
+        // weave/interrupt ⇒ decide+dispatch against the live turn snapshot. The
+        // ack is intentionally NOT rendered inline (mid-stream redraw contention)
+        // — the EFFECT (injection / abort / enqueue) is the user-visible signal.
+        routeMidTurnLine(line, {
+          mode: deps.inboundMode?.current ?? "queue",
+          surface: deps.conversationActions,
+          // captureLine is no-throw + async; fire-and-forget (reader never awaits).
+          captureLine: (l) => void midTurnCapture.captureLine(l, turnIndexForCapture),
+          enqueue: (t) => externalPromptQueue.push(t),
+          maxInputBytes: INBOUND_MAX_BYTES,
+          now: () => Date.now(),
         })
       },
     })

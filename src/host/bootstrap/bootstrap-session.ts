@@ -443,6 +443,7 @@ export const bootstrapSession = async (
       playbookCliFlag: runtime.playbookTriggerFlag === true ? true : undefined,
       materializeReviewerAgent: deps.materializeReviewerAgent,
       createSubagentBackedGuardianReview: deps.createSubagentBackedGuardianReview,
+      createSubagentBackedGuardianAssess: deps.createSubagentBackedGuardianAssess,
     }
   } catch (error) {
     await stopMcpClients(features.mcpClients)

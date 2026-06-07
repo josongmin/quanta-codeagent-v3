@@ -28,8 +28,7 @@
 
 import { afterEach, describe, expect, test } from "bun:test"
 import { type AgentConfig, wireOptionalAgentPorts } from "@/agent"
-import { dispatchTool } from "@/agent/dispatch"
-import type { LLMPort, StreamEvent, StreamInput, ToolUseBlock } from "@/llm"
+import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { __resetRuntimeConfig } from "@/shared"
 import { type Tool, type ToolContext, type ToolEvent, ToolRegistry } from "@/tool"
@@ -78,13 +77,6 @@ const makeBase = (sink: { ctx?: ToolContext }): AgentConfig =>
     permission: perm,
   }) as unknown as AgentConfig
 
-const call = (id = "c1"): ToolUseBlock => ({
-  type: "tool_use",
-  id,
-  name: "probe_merge_ctx",
-  input: {},
-})
-
 /** Drive the env snapshot → reset the cached runtimeConfig → run the comp-root. */
 const wireWith = (
   env: Record<string, string | undefined>,
@@ -129,18 +121,13 @@ describe("jun-7-misc 06 fast-apply MERGE composition-root WIRE hellgate", () => 
     expect(typeof wired.fastApplyMerge?.apply).toBe("function")
   })
 
-  test("WIRE-02 ON: dispatch threads config.fastApplyMerge → ctx.fastApplyMerge (production-reachable)", async () => {
-    const sink: { ctx?: ToolContext } = {}
-    const wired = wireWith(
-      { QUANTA_FAST_APPLY_MERGE: "1", QUANTA_FAST_APPLY_MODEL: APPLY_MODEL },
-      makeBase(sink),
-    )
-    const res = await dispatchTool(call(), wired, perm)
-    expect(res.ok).toBe(true)
-    // The REAL dispatch seam surfaced the comp-root's port to the tool.
-    expect(sink.ctx?.fastApplyMerge).toBeDefined()
-    expect(sink.ctx?.fastApplyMerge).toBe(wired.fastApplyMerge)
-  })
+  // NOTE: the dispatch-layer THREADING (config.fastApplyMerge → ctx.fastApplyMerge
+  // via the conditional spread at `dispatch.ts`) is a pure forward and is proven
+  // end-to-end by `fast-apply-merge-e2e-hellgate.test.ts`, which drives the REAL
+  // edit tool through a real `dispatchTool` and asserts the merge port reaches the
+  // tool. A minimal hand-cast `AgentConfig` cannot build a full `ToolContext`, so
+  // this WIRE suite pins only the comp-root CONTRACT (population, byte-identity,
+  // strict gate) — the half the e2e could not reach.
 
   // ───────────────────────────────────────────────────────────────────────────
   // (b) DEFAULT-OFF byte-identity — knob unset ⇒ no port, no allocation.
@@ -156,13 +143,6 @@ describe("jun-7-misc 06 fast-apply MERGE composition-root WIRE hellgate", () => 
     expect("fastApplyMerge" in wired).toBe(false)
   })
 
-  test("WIRE-04 OFF: ctx.fastApplyMerge is undefined at the tool", async () => {
-    const sink: { ctx?: ToolContext } = {}
-    const wired = wireWith({}, makeBase(sink))
-    const res = await dispatchTool(call(), wired, perm)
-    expect(res.ok).toBe(true)
-    expect(sink.ctx?.fastApplyMerge).toBeUndefined()
-  })
 
   test("WIRE-05 ON-gate but NO apply model ⇒ no port (both required)", () => {
     const sink: { ctx?: ToolContext } = {}

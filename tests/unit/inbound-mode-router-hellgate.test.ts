@@ -59,13 +59,16 @@ describe("inbound router — input validation (all modes)", () => {
     }
   })
 
-  test("oversized input ⇒ rejected input_too_large", () => {
-    const big = "x".repeat(1001)
-    for (const m of ALL_INBOUND_MODES) {
-      const d = route(m, big, activeMain)
-      expect(d.kind).toBe("rejected")
-      expect(d.kind === "rejected" && d.reason).toBe("input_too_large")
-    }
+  test("oversized input is NEVER lost — preserved per mode (no hard reject)", () => {
+    const big = "x".repeat(1001) // > maxInputBytes (1000)
+    // queue: enqueued as-is (next turn has no inject-size limit).
+    expect(route("queue", big, activeMain).kind).toBe("queue")
+    // weave: too big to inject mid-turn ⇒ steer rejects input_too_large ⇒ queued.
+    const w = route("weave", big, activeMain)
+    expect(w.kind).toBe("queue_fallback")
+    expect(w.kind === "queue_fallback" && w.reason).toBe("input_too_large")
+    // interrupt: aborts + the (big) replacement runs as the next turn.
+    expect(route("interrupt", big, activeMain).kind).toBe("interrupt")
   })
 })
 

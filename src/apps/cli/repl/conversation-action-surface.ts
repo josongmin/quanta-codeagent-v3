@@ -99,7 +99,16 @@ export const createConversationActionSurface = (): ConversationActionSurface => 
       queue.push({ kind: "summarize" })
     },
     pushUserMessage(input: string): void {
-      queue.push({ kind: "user_message", input })
+      // §steer — `decideAction`'s `user_message` path delegates to `steer()`,
+      // which MANDATES an `expectedTurnId` (unlike cancel/summarize, whose
+      // optimistic check is opt-in). Capture the LIVE turn id at push time from
+      // the holder we own: if a new turn started before the loop drains this,
+      // the id mismatches and the loop REJECTS (optimistic concurrency) instead
+      // of injecting into the wrong turn. No active turn ⇒ `""` ⇒ steer rejects
+      // `no_active_turn` (never throws). The inbound router only routes weave
+      // here when a turn is active, so the common path carries a real id.
+      const expectedTurnId = activeTurnRef.current.currentTurn?.turnId ?? ""
+      queue.push({ kind: "user_message", input, expectedTurnId })
     },
     pending(): number {
       return queue.length

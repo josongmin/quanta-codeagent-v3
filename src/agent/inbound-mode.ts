@@ -75,24 +75,16 @@ export interface RouteInboundArgs {
   readonly expectedTurnId?: string
 }
 
-/** UTF-8 byte length — mirrors `steering.ts` so the oversized check is identical
- *  across modes (queue included). */
-const UTF8 = new TextEncoder()
-const byteLen = (s: string): number => UTF8.encode(s).length
-
-/** Validate input uniformly (all modes). Returns a `rejected` decision or null. */
-const rejectBadInput = (input: string, maxBytes: number): InboundDecision | null => {
-  if (input.trim().length === 0) return { kind: "rejected", reason: "empty_input" }
-  if (byteLen(input) > maxBytes) return { kind: "rejected", reason: "input_too_large" }
-  return null
-}
-
 /** Pure routing decision — see module header. */
 export const routeInbound = (args: RouteInboundArgs): InboundDecision => {
   const { mode, input, state, config, now } = args
 
-  const bad = rejectBadInput(input, config.maxInputBytes)
-  if (bad !== null) return bad
+  // ONLY genuinely empty input is a hard reject (nothing to deliver). Oversized
+  // input is NEVER dropped: `queue`/`interrupt` preserve it via the next-turn
+  // path (no inject-size constraint there), and `weave`'s `steer()` downgrades
+  // an over-`maxInputBytes` line to `queue_fallback` below — so a large paste is
+  // always at least queued, never silently lost.
+  if (input.trim().length === 0) return { kind: "rejected", reason: "empty_input" }
 
   if (mode === "queue") return { kind: "queue", text: input }
 

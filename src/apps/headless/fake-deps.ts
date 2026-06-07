@@ -98,6 +98,7 @@ export const buildFakeBootstrapDeps = (
     // verbatim — keeps this slice free of `@/permission#ReviewerPort`.
     materializeReviewerAgent: () => undefined,
     createSubagentBackedGuardianReview: () => (async () => ({})) as never,
+    createSubagentBackedGuardianAssess: () => (async () => ({})) as never,
     buildMcpSurfaceInfo: () => undefined,
     buildIdleGuards: () => ({
       idleMonitor: { markActive: () => undefined },

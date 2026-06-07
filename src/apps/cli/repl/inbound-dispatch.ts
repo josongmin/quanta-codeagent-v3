@@ -18,6 +18,7 @@
 
 import { type InboundDecision, type InboundMode, routeInbound } from "@/agent/inbound-mode"
 import type { ActiveTurnState, SteerConfig } from "@/agent/steering"
+import type { ConversationActionSurface } from "./conversation-action-surface"
 
 export interface InboundSinks {
   /** Enqueue text to run as the next turn (`externalPromptQueue.push`). */
@@ -87,3 +88,46 @@ export const handleInboundLine = (args: {
     }),
     args.sinks,
   )
+
+export interface MidTurnLineDeps {
+  /** The live inbound delivery mode (read per line — `/inbound` may mutate it). */
+  readonly mode: InboundMode
+  /** The conversation-action surface for weave/interrupt. Absent ⇒ every mode
+   *  degrades to the queue capture path (byte-identical). */
+  readonly surface: ConversationActionSurface | undefined
+  /** The existing queue path (plan-queue capture + next-turn drain). Used for
+   *  `queue` mode AND whenever `surface` is absent. */
+  readonly captureLine: (line: string) => void
+  /** `externalPromptQueue.push` — the next-turn drain (weave/interrupt fallbacks
+   *  + the interrupt replacement land here). */
+  readonly enqueue: (text: string) => void
+  /** §steer `maxInputBytes` ceiling for one mid-turn line. */
+  readonly maxInputBytes: number
+  /** Injected clock (the CLI passes `() => Date.now()`). */
+  readonly now: () => number
+}
+
+/** Route ONE mid-turn line by mode — the tested core of the session loop's
+ *  in-turn `onLine` handler. `queue` (default) OR no surface ⇒ the existing
+ *  capture path (byte-identical). weave/interrupt ⇒ decide+dispatch against the
+ *  live turn snapshot via {@link handleInboundLine}. Returns the {@link InboundAck}
+ *  (the caller renders or discards it); the capture path returns a `queued` ack. */
+export const routeMidTurnLine = (line: string, deps: MidTurnLineDeps): InboundAck => {
+  const surface = deps.surface
+  if (deps.mode === "queue" || surface === undefined) {
+    deps.captureLine(line)
+    return { kind: "queued", message: "⤷ queued — runs after the current turn" }
+  }
+  return handleInboundLine({
+    line,
+    mode: deps.mode,
+    state: surface.activeTurnRef.current,
+    config: { maxInputBytes: deps.maxInputBytes },
+    now: deps.now(),
+    sinks: {
+      enqueue: deps.enqueue,
+      weave: (t) => surface.pushUserMessage(t),
+      interrupt: (r) => surface.pushCancel(r),
+    },
+  })
+}

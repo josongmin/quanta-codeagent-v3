@@ -41,7 +41,9 @@ evidence:
     - src/permission/policy.ts
     - src/agent/admissibility-gate.ts
     - src/shared/runtime-config.ts
-  adrs: ["docs/tickets/misc-jun-7/04-auto-mode-rule-overlay-circumvention.md"]
+  adrs:
+    - docs/decisions/0502-auto-mode-rule-overlay-circumvention.md
+    - docs/tickets/misc-jun-7/04-auto-mode-rule-overlay-circumvention.md
   tests:
     unit:
       - tests/unit/circumvention-detector-hellgate.test.ts
@@ -65,7 +67,7 @@ knobs:
 deliberate_hold: null
 notes: |
   설계 provenance: 티켓 `docs/tickets/misc-jun-7/04-auto-mode-rule-overlay-circumvention.md`
-  §3.2/§4.b/§5. ADR(≥0497) 미발행 — 티켓이 authoritative design. v1 granularity =
+  §3.2/§4.b/§5. ADR-0502 발행됨(reconcile pass) — 티켓은 상세 design 정본. v1 granularity =
   path-equality only(티켓 Open Question §6.1, prefix/content-class 매칭은 데이터측정
   전까지 보류 — no-heuristics rule). Posture default = advisory(§6.3); forced-`ask` 는
   stricter opt-in. Network-exfil circumvention 은 out-of-scope(§6.5, 기존 exfil-scouting

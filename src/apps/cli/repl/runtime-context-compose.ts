@@ -8,6 +8,7 @@ import type { PermissionStore, ToolAction } from "@/permission"
 import type { PendingApprovalView } from "@/protocol/session"
 import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
 import { composeRuntimeBootstrapContext, type RuntimeContext } from "@/sdk/runtime"
+import { runtimeConfig } from "@/shared"
 import { decisionEmitterFromStream, type StreamPort } from "@/stream"
 import { diffPreviewEnabled, renderActionDiff } from "../diff-preview"
 import type { IdleMonitor } from "../idle-monitor"
@@ -167,12 +168,24 @@ const buildAdmissibility = (args: {
           signal: boot.abort.signal,
         })
       : undefined
+  // jun-7-misc 03 (ADR-0497) — the per-action TYPED assessor is SELECTED here only
+  // when the strict `QUANTA_GUARDIAN_ASSESSOR` knob is on AND a reviewer agent
+  // exists. Knob off ⇒ `guardianAssess` stays undefined and is never spread into
+  // the port options, so the reviewer port is byte-identical to the binary path.
+  const guardianAssess =
+    reviewerAgent !== undefined && runtimeConfig().guardianAssessor
+      ? boot.createSubagentBackedGuardianAssess({
+          reviewer: reviewerAgent,
+          signal: boot.abort.signal,
+        })
+      : undefined
   const reviewerPort =
-    autoReview !== undefined || guardianReview !== undefined
+    autoReview !== undefined || guardianReview !== undefined || guardianAssess !== undefined
       ? createOnConfirmReviewerPort({
           onConfirm,
           ...(autoReview !== undefined ? { autoReview } : {}),
           ...(guardianReview !== undefined ? { guardianReview } : {}),
+          ...(guardianAssess !== undefined ? { guardianAssess } : {}),
         })
       : userReviewerPort
   return {

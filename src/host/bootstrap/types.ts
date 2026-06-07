@@ -257,6 +257,17 @@ export type CreateGuardianReviewFactory = (opts: {
   signal?: AbortSignal
 }) => ReviewerPort["guardianReview"]
 
+/** Build the subagent-backed guardian per-action ASSESSOR adapter (jun-7-misc
+ *  03, ADR-0497). Sibling of {@link CreateGuardianReviewFactory} with an
+ *  identical opts shape; emits the typed assessor servicer the composition root
+ *  wires into `ReviewerPort.guardianAssess` ONLY when the
+ *  `QUANTA_GUARDIAN_ASSESSOR` knob is on. */
+export type CreateGuardianAssessFactory = (opts: {
+  reviewer: ReviewerRunner
+  parentDepth?: number
+  signal?: AbortSignal
+}) => NonNullable<ReviewerPort["guardianAssess"]>
+
 /** Build the MCP `/mcp` surface descriptor from configs + bridged tools.
  *  Returns `undefined` when there is nothing to show. The CLI binds this to
  *  `apps/cli/repl/mcp-surface-wire#buildMcpSurfaceInfo`. */

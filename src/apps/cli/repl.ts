@@ -2,6 +2,7 @@ import * as readline from "node:readline/promises"
 import { RetryingLLM } from "@/agent"
 import { defaultConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import {
+  createSubagentBackedGuardianAssess,
   createSubagentBackedGuardianReview,
   materializeReviewerAgent,
 } from "@/agent/tier1/reviewer-subagent"
@@ -246,6 +247,7 @@ const sessionSetupDeps: Parameters<typeof setupSession>[0] = {
   switchToSessionCwd,
   materializeReviewerAgent,
   createSubagentBackedGuardianReview,
+  createSubagentBackedGuardianAssess,
   buildMcpSurfaceInfo,
   buildIdleGuards: cliBuildIdleGuards,
   loadPermissionStore: async (): Promise<PermissionStore | undefined> => {
