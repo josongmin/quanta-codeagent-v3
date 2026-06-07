@@ -41,8 +41,11 @@
  *     whitelisting at the alerting layer, not sanitize.
  */
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: the sanitizer deliberately matches OSC/DCS/APC escapes to strip them.
 const ANSI_OSC_DCS_APC_RE = /\u001b\][\s\S]*?(?:\u0007|\u001b\\)|\u001b[PX^_][\s\S]*?\u001b\\/g
+// biome-ignore lint/suspicious/noControlCharactersInRegex: deliberately matches CSI escapes to strip them.
 const ANSI_CSI_RE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g
+// biome-ignore lint/suspicious/noControlCharactersInRegex: deliberately matches C0/C1 control chars to strip them.
 const CONTROL_RE = /[\u0000-\u0008\u000a-\u001f\u007f-\u009f]/g
 /** Bidi controls + zero-width + soft hyphen (U+00AD) + lone surrogates
  *  (U+D800-U+DFFF).

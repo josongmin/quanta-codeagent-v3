@@ -16,6 +16,7 @@ import { installStatusBar } from "../../../src/apps/cli/status-bar"
  *  save/restore the cursor across paints) so the remaining run-length is the
  *  visible-char width the terminal would actually advance the cursor by. */
 const stripCsi = (s: string): string =>
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: test asserts ANSI/control handling.
   s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/\x1b[78]/g, "")
 
 describe("status-bar paintRow visible-width invariant", () => {

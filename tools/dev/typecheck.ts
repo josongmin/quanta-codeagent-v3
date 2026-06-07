@@ -98,6 +98,36 @@ const safeStat = async (relativePath: string): Promise<{ path: string; size: num
   }
 }
 
+type FingerprintEntry = { path: string; hash: string }
+
+// Hash the actual CONTENT of each tracked file, not a mtime+size proxy.
+// Rationale (RCA jun-08): mtime+size is an unsound change-detector — a content
+// change that preserves size while mtime is reset to an older value
+// (git checkout / stash pop / rsync --times / mtime-preserving editors) yields
+// an identical fingerprint, so the stamp falsely reports "unchanged" and tsc is
+// skipped, masking newly-introduced type errors. Content hashing is exact:
+// any byte change in a checked file invalidates the stamp. Reads are cheap
+// relative to a full `tsc --noEmit` pass, so the cache's perf benefit (skip when
+// the tree is truly byte-identical) is preserved.
+export const hashTrackedFile = async (
+  relativePath: string,
+  baseDir: string = repoRoot,
+): Promise<FingerprintEntry | null> => {
+  const absolute = join(baseDir, relativePath)
+  try {
+    const info = await stat(absolute)
+    if (!info.isFile()) return null
+    const content = await readFile(absolute)
+    const hash = createHash("sha1").update(content).digest("hex")
+    return { path: relativePath, hash }
+  } catch {
+    return null
+  }
+}
+
+export const fingerprintOf = (entries: readonly FingerprintEntry[]): string =>
+  createHash("sha1").update(JSON.stringify(entries)).digest("hex")
+
 const buildFingerprint = async (target: TypecheckTarget, configPath: string): Promise<string> => {
   const selected = targetConfig[target]
   const trackedFiles = new Set<string>(trackedConfigFiles(target, configPath))
@@ -105,9 +135,9 @@ const buildFingerprint = async (target: TypecheckTarget, configPath: string): Pr
     for (const file of await walkTrackedFiles(root)) trackedFiles.add(file)
   }
   const entries = (
-    await Promise.all([...trackedFiles].sort().map((file) => safeStat(file)))
-  ).filter((entry): entry is { path: string; size: number; mtimeMs: number } => entry !== null)
-  return createHash("sha1").update(JSON.stringify(entries)).digest("hex")
+    await Promise.all([...trackedFiles].sort().map((file) => hashTrackedFile(file)))
+  ).filter((entry): entry is FingerprintEntry => entry !== null)
+  return fingerprintOf(entries)
 }
 
 const loadPreviousFingerprint = async (stampPath: string): Promise<string | null> => {
@@ -120,84 +150,89 @@ const loadPreviousFingerprint = async (stampPath: string): Promise<string | null
   }
 }
 
-if (!(target in targetConfig)) {
-  console.error(`unknown typecheck target: ${target}`)
-  console.error("usage: bun run tools/dev/typecheck.ts [src|tests|all]")
-  process.exit(2)
-}
+const runTypecheck = async (): Promise<never> => {
+  if (!(target in targetConfig)) {
+    console.error(`unknown typecheck target: ${target}`)
+    console.error("usage: bun run tools/dev/typecheck.ts [src|tests|all]")
+    process.exit(2)
+  }
 
-const selected = targetConfig[target]
-const start = performance.now()
-const skipAllowed = process.env["QUANTA_TYPECHECK_NO_SKIP"] !== "1"
-const debugEnabled = process.env["QUANTA_TYPECHECK_DEBUG"] === "1"
-const buildInfoPath = join(repoRoot, selected.buildInfo)
-const stampPath = join(repoRoot, selected.stamp)
+  const selected = targetConfig[target]
+  const start = performance.now()
+  const skipAllowed = process.env["QUANTA_TYPECHECK_NO_SKIP"] !== "1"
+  const debugEnabled = process.env["QUANTA_TYPECHECK_DEBUG"] === "1"
+  const stampPath = join(repoRoot, selected.stamp)
 
-await mkdir(buildInfoDir, { recursive: true })
+  await mkdir(buildInfoDir, { recursive: true })
 
-console.log(
-  `typecheck target=${target} scope=${selected.label} config=${selected.config} buildinfo=${selected.buildInfo}`,
-)
-
-const fingerprint = await buildFingerprint(target, selected.config)
-const previousFingerprint = await loadPreviousFingerprint(selected.stamp)
-const buildInfoExists = await safeStat(selected.buildInfo)
-
-if (debugEnabled) {
   console.log(
-    `typecheck debug target=${target} previousFingerprint=${previousFingerprint ?? "null"} currentFingerprint=${fingerprint} buildInfoExists=${buildInfoExists !== null}`,
+    `typecheck target=${target} scope=${selected.label} config=${selected.config} buildinfo=${selected.buildInfo}`,
   )
-}
 
-if (skipAllowed && buildInfoExists !== null && previousFingerprint === fingerprint) {
+  const fingerprint = await buildFingerprint(target, selected.config)
+  const previousFingerprint = await loadPreviousFingerprint(selected.stamp)
+  const buildInfoExists = await safeStat(selected.buildInfo)
+
+  if (debugEnabled) {
+    console.log(
+      `typecheck debug target=${target} previousFingerprint=${previousFingerprint ?? "null"} currentFingerprint=${fingerprint} buildInfoExists=${buildInfoExists !== null}`,
+    )
+  }
+
+  if (skipAllowed && buildInfoExists !== null && previousFingerprint === fingerprint) {
+    const durationMs = Math.round(performance.now() - start)
+    console.log(`typecheck target=${target} unchanged; skipping (${durationMs}ms)`)
+    process.exit(0)
+  }
+
+  const proc = Bun.spawn(
+    [
+      tscBin,
+      "-p",
+      selected.config,
+      "--noEmit",
+      "--incremental",
+      "--pretty",
+      "false",
+      "--tsBuildInfoFile",
+      selected.buildInfo,
+    ],
+    {
+      cwd: repoRoot,
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
+      env: process.env,
+    },
+  )
+
+  const exitCode = await proc.exited
   const durationMs = Math.round(performance.now() - start)
-  console.log(`typecheck target=${target} unchanged; skipping (${durationMs}ms)`)
-  process.exit(0)
-}
 
-const proc = Bun.spawn(
-  [
-    tscBin,
-    "-p",
-    selected.config,
-    "--noEmit",
-    "--incremental",
-    "--pretty",
-    "false",
-    "--tsBuildInfoFile",
-    selected.buildInfo,
-  ],
-  {
-    cwd: repoRoot,
-    stdin: "inherit",
-    stdout: "inherit",
-    stderr: "inherit",
-    env: process.env,
-  },
-)
-
-const exitCode = await proc.exited
-const durationMs = Math.round(performance.now() - start)
-
-if (exitCode === 0) {
-  await writeFile(
-    stampPath,
-    JSON.stringify(
-      {
-        target,
-        fingerprint,
-        debug: {
+  if (exitCode === 0) {
+    await writeFile(
+      stampPath,
+      JSON.stringify(
+        {
           target,
-          computedAt: new Date().toISOString(),
+          fingerprint,
+          debug: {
+            target,
+            computedAt: new Date().toISOString(),
+          },
+          config: selected.config,
+          buildInfo: selected.buildInfo,
         },
-        config: selected.config,
-        buildInfo: selected.buildInfo,
-      },
-      null,
-      2,
-    ),
-  )
-  console.log(`typecheck target=${target} passed (${durationMs}ms)`)
+        null,
+        2,
+      ),
+    )
+    console.log(`typecheck target=${target} passed (${durationMs}ms)`)
+  }
+
+  process.exit(exitCode)
 }
 
-process.exit(exitCode)
+if (import.meta.main) {
+  await runTypecheck()
+}

@@ -219,6 +219,7 @@ const CYAN = `${ESC}36m`
 const GRAY = `${ESC}90m`
 const REVERSE = `${ESC}7m`
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: deliberately matches ANSI SGR sequences to strip them.
 const ANSI_RE = /\x1b\[[0-9;]*m/g
 const stripAnsi = (s: string): string => s.replace(ANSI_RE, "")
 

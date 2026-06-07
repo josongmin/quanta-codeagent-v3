@@ -238,6 +238,9 @@ export const buildDefaultSlashCommands = (deps: {
   /** Snapshot fetcher — called at action time so each invocation sees the
    *  current state without stale closures. */
   getContext: () => SlashCommandContext
+  /** Open the Settings / Knobs panel. Wired by the host (App) which owns the
+   *  panel's open state + the daemon endpoint. */
+  openKnobsPanel: () => void
 }): readonly SlashCommand[] => {
   // Helper that returns the draft prefilled with `/<cmd> ` so the user can
   // type args + hit Enter. The daemon receives `input.append` with that
@@ -420,7 +423,15 @@ export const buildDefaultSlashCommands = (deps: {
     { slug: "rewind-tool",   description: "Rewind a single tool call",                 action: prefill("rewind-tool") },
     { slug: "rewind-conv",   description: "Rewind to a previous conversation point",   action: prefill("rewind-conv") },
     { slug: "fork",          description: "Fork conversation (env-gated)",             action: prefill("fork") },
-    { slug: "knobs",         description: "Inspect / tune runtime knobs",              action: prefill("knobs") },
+    {
+      slug: "knobs",
+      aliases: ["settings", "config"],
+      description: "Open the Settings panel — inspect / tune runtime knobs",
+      action: () => {
+        deps.openKnobsPanel()
+        return ""
+      },
+    },
     { slug: "permission",    description: "Permission store explainer",                action: prefill("permission") },
   ]
   allCommands.push(...commands)

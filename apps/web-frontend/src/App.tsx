@@ -3,6 +3,7 @@ import { ChatPanel } from "./components/ChatPanel"
 import { ConnectionUrlPill } from "./components/ConnectionUrlPill"
 import { HeaderTitle } from "./components/HeaderTitle"
 import { HotkeyToast } from "./components/HotkeyToast"
+import { KnobsPanel } from "./components/KnobsPanel"
 import { ModeBadge } from "./components/ModeBadge"
 import { ObservabilityPane } from "./components/ObservabilityPane"
 import { PortBadge } from "./components/PortBadge"
@@ -16,6 +17,7 @@ import {
 import { StatusBar } from "./components/StatusBar"
 import { buildAuthSlashCommands } from "./components/slash-auth"
 import { buildLlmConfigSlashCommands, httpUrlFromWsUrl } from "./components/slash-llm-config"
+import type { KnobsEndpoint } from "./components/slash-knobs"
 import { TokenCounter } from "./components/TokenCounter"
 import { isHotkeyImagePayload, type PendingImageAttachment } from "./composer/image-attachment"
 import { useImageAttachment } from "./composer/use-image-attachment"
@@ -211,6 +213,7 @@ export const App = (): JSX.Element => {
   const sendTurn = useSendTurn(client, learnedSessionId)
 
   const [draft, setDraft] = useState("")
+  const [knobsPanelOpen, setKnobsPanelOpen] = useState(false)
   const attachment = useImageAttachment()
   const [resolvedConnection, setResolvedConnection] = useState<{
     url: string
@@ -455,6 +458,23 @@ export const App = (): JSX.Element => {
   const focusImageAttachment = useCallback((): void => {
     inputRef.current?.focus()
   }, [])
+  const openKnobsPanel = useCallback((): void => {
+    setKnobsPanelOpen(true)
+  }, [])
+  const closeKnobsPanel = useCallback((): void => {
+    setKnobsPanelOpen(false)
+  }, [])
+
+  // Daemon endpoint for the Knobs panel (GET /api/knobs + POST /config).
+  // Derived from the resolved WS URL — same host/port, http scheme. `null`
+  // until the first daemon-info round-trip completes.
+  const knobsEndpoint = useMemo<KnobsEndpoint | null>(() => {
+    if (resolvedConnection === null) return null
+    return {
+      httpUrl: httpUrlFromWsUrl(resolvedConnection.url),
+      ...(resolvedConnection.token !== undefined ? { token: resolvedConnection.token } : {}),
+    }
+  }, [resolvedConnection])
 
   // Slash command catalogue (frontend-only commands). Pass into ChatPanel
   // so the floating SlashPalette renders above InputBar when draft starts
@@ -465,6 +485,7 @@ export const App = (): JSX.Element => {
       focusImageAttachment,
       appendClientMessage,
       getContext: getSlashContext,
+      openKnobsPanel,
     })
     if (resolvedConnection === null) return base
     const sharedEndpoint = {
@@ -483,6 +504,7 @@ export const App = (): JSX.Element => {
     resolvedConnection,
     appendClientMessage,
     getSlashContext,
+    openKnobsPanel,
   ])
 
   // Keep the ref in sync so `submit`'s slash-routing path sees the latest
@@ -544,6 +566,9 @@ export const App = (): JSX.Element => {
         <ObservabilityPane state={observability} usage={contextUsage} />
       </div>
       <HotkeyToast />
+      {knobsPanelOpen ? (
+        <KnobsPanel endpoint={knobsEndpoint} onClose={closeKnobsPanel} />
+      ) : null}
     </div>
   )
 }

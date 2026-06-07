@@ -128,6 +128,7 @@ describe("HELLGATE — abort mid same-turn backoff", () => {
         // abort. Make it loud rather than silently passing.
         throw new Error("RETRY STREAM OPENED AFTER ABORT — backoff abort leaked")
         // unreachable yield keeps this a valid generator
+        // biome-ignore lint/correctness/noUnreachable: intentional post-throw yield that pins the async-generator yield type.
         yield { type: "message_stop", stop_reason: "end_turn" }
       },
     }
@@ -265,6 +266,7 @@ describe("HELLGATE — abort mid verify-guard forced turn", () => {
         }
         // Turn 4 (the FORCED verify turn) — must NEVER open.
         throw new Error("FORCED VERIFY TURN STREAMED AFTER ABORT — leak")
+        // biome-ignore lint/correctness/noUnreachable: intentional post-throw yield that pins the async-generator yield type.
         yield { type: "message_stop", stop_reason: "end_turn" }
       },
     }

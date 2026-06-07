@@ -82,7 +82,7 @@ import {
 } from "@/runtime/shell-snapshot"
 import type { ShellSnapshotMetric } from "@/runtime/shell-snapshot/metric-port"
 import { loadSessionById, renameSession } from "@/session"
-import { gateDisabled, logger, type RunContext, runtimeConfig } from "@/shared"
+import { logger, type RunContext, runtimeConfig } from "@/shared"
 import { MCPRootSchema, PLUGIN_MCP_FILE } from "@/skill/plugin-manifest"
 import type { AssistantTextPainter, StreamPort } from "@/stream"
 import {
@@ -273,7 +273,10 @@ export const buildEmbedder = (
 ): ReturnType<typeof buildEmbedderCore> =>
   buildEmbedderCore({
     store,
-    disabled: gateDisabled(process.env, "QUANTA_MEMORY_EMBED"),
+    // ADR-0503 P4: routed through the typed accessor (was gateDisabled). The
+    // knob default is ON, so disabled = NOT readBool(raw, true) — byte-identical
+    // to gateDisabled (both treat unset/empty/unrecognized as ON, falsy as off).
+    disabled: !(readCliKnob("QUANTA_MEMORY_EMBED", "bool") ?? true),
     ...(process.env.OPENAI_API_KEY !== undefined ? { apiKey: process.env.OPENAI_API_KEY } : {}),
     ...(process.env.OPENAI_BASE_URL !== undefined ? { baseURL: process.env.OPENAI_BASE_URL } : {}),
     ...(process.env.QUANTA_MEMORY_EMBED_MODEL !== undefined
@@ -417,7 +420,10 @@ export const buildCompactionBreakerConfig = (): AgentConfig["compactionBreaker"]
   const reactiveMax = intEnv("QUANTA_COMPACT_BREAKER_REACTIVE_MAX")
   const proactiveMax = intEnv("QUANTA_COMPACT_BREAKER_PROACTIVE_MAX")
   return buildCompactionBreakerConfigCore({
-    ...(gateDisabled(process.env, "QUANTA_COMPACT_BREAKER") ? { disabled: true } : {}),
+    // ADR-0503 P4: routed through the typed accessor (was gateDisabled). Knob
+    // default is ON ⇒ disabled iff readBool(raw, true) is false — byte-identical
+    // to gateDisabled (unset/empty/unrecognized ⇒ ON, falsy token ⇒ disabled).
+    ...(!(readCliKnob("QUANTA_COMPACT_BREAKER", "bool") ?? true) ? { disabled: true } : {}),
     ...(Number.isFinite(reactiveMax) ? { reactiveMax } : {}),
     ...(Number.isFinite(proactiveMax) ? { proactiveMax } : {}),
   })

@@ -122,6 +122,16 @@ export const RUNTIME_CONFIG_KNOBS: readonly RuntimeConfigKnob[] = [
     describe: "Canvas artifact persistence store.",
   },
   {
+    // ADR-0503 P3 master gate for the cross-surface capability-exposure layer
+    // (@/capability). Strict opt-in; default-OFF ⇒ resolveExposure is unused and
+    // each surface keeps its legacy per-surface gate (byte-identical degrade).
+    envKey: "QUANTA_CAPABILITY_LAYER",
+    kind: "bool",
+    default: false,
+    group: "meta",
+    describe: "Cross-surface capability-exposure layer master gate (consistency probe).",
+  },
+  {
     envKey: "QUANTA_FILE_HISTORY",
     kind: "bool",
     default: false,

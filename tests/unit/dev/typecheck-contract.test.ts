@@ -52,7 +52,7 @@ describe("typecheck contract", () => {
     expect(workflow).toContain("run: bun run typecheck:all")
   })
 
-  test("ci caches portable tsc buildinfo but never the local mtime-based skip stamps", () => {
+  test("ci caches portable tsc buildinfo but never the local content-hash skip stamps", () => {
     const workflow = readText(".github/workflows/ci.yml")
     expect(workflow).toContain("name: restore typecheck incremental cache")
     expect(workflow).toContain("uses: actions/cache@v4")

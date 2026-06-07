@@ -77,11 +77,21 @@ const scan = (): { total: number; byFile: Record<string, number> } => {
  *  `readCliKnob` / `runtimeConfig()` / `resolveKnobs`. A new raw read fails. */
 // Burn-down: 91 → 85 → 82 → 77 → 74 (P4 R2/R3/R4 routing), then → 53 by
 // EXEMPTING the bench/eval/batch harness (env-config for test runs, not a
-// user-facing live-toggle). 53 = remaining PRODUCTION-slice raw reads — the
-// meaningful live-control debt that future routing drives to its floor (launch-
-// params like RESUME/STATE_PATH legitimately stay raw; literal-toggle idioms
-// like MD_HIGHLIGHT `!== "0"` are deliberate).
-const CEILING = 53
+// user-facing live-toggle), then → 51 by routing internal.ts's two default-ON
+// kill-switch gateDisabled reads (QUANTA_MEMORY_EMBED / QUANTA_COMPACT_BREAKER)
+// through `readCliKnob("…","bool")` — provably byte-identical (gateDisabled(env,X)
+// ≡ !readBool(env[X], true) for a default-true knob), now live-controllable.
+// 51 = remaining PRODUCTION-slice raw reads — the meaningful live-control debt
+// that future routing drives to its floor. The reads that legitimately STAY raw
+// (not byte-identically routable): launch-params (RESUME/STATE_PATH/OBSERVE_DIR),
+// presence-checks (`QUANTA_X !== undefined`: VERIFY_GUARD/COMPACT_PROVIDER/
+// MEMORY_EMBED_MODEL/MEMORY), literal-toggle kill-switches (MD_HIGHLIGHT `!== "0"`,
+// SHELL_SNAPSHOT_TURN `!== "0"`, LSP_TOOLS `=== "full"`), and string/parseEnvFlag
+// reads whose empty-string ("") semantics diverge from `readBool` (IDENTITY_MODE,
+// SKILLS_DIR, COMPACT_MODEL, MODEL_FALLBACK, MCP_AUTORESTART, MD_MODE,
+// SHELL_SNAPSHOT_SHELL) — routing those would NOT be byte-identical, so they wait
+// for a per-read accessor that preserves the legacy "" quirk.
+const CEILING = 51
 
 describe("no-raw-process.env-knob ratchet (ADR-0503 P4)", () => {
   test(`raw process.env.QUANTA_* reads stay <= ${CEILING} (decreasing burn-down)`, () => {

@@ -27,6 +27,8 @@
       "@/shared/*": ["./src/shared/*"],
       "@/artifact": ["./src/artifact/index.ts"],
       "@/artifact/*": ["./src/artifact/*"],
+      "@/capability": ["./src/capability/index.ts"],
+      "@/capability/*": ["./src/capability/*"],
       "@/codemode": ["./src/codemode/index.ts"],
       "@/codemode/*": ["./src/codemode/*"],
       "@/llm": ["./src/llm/index.ts"],

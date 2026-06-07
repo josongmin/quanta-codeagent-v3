@@ -9,6 +9,7 @@ import { buildStatusCmd } from "../../../src/apps/cli/status-cmd"
 import type { OAuthCallbackProvider } from "../../../src/auth/chatgpt-oauth"
 import { chatgptTokenPath, writeToken } from "../../../src/auth/chatgpt-oauth"
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: test asserts on a control-char-stripping regex.
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, "")
 
 interface Cap {

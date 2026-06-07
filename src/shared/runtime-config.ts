@@ -410,6 +410,13 @@ export interface RuntimeConfig {
    *  `DefaultToolPorts.artifactRegistry` (the generation tools register their
    *  outputs; the model lists/inspects/destroys via `artifact_*`). */
   readonly artifactStore: boolean
+  /** ADR-0503 P3 — master gate for the cross-surface capability-exposure layer
+   *  (`@/capability`, `QUANTA_CAPABILITY_LAYER`). Strict opt-in (`=== "1"`).
+   *  Default false ⇒ `resolveExposure` is NOT wired into any live surface gate;
+   *  each surface keeps its legacy per-surface env read (byte-identical degrade).
+   *  When ON the read-only consistency probe cross-checks the unified resolver
+   *  against the legacy gate to catch split-brain drift (it never mutates flow). */
+  readonly capabilityLayer: boolean
   /** code-mode (RFC jun-6-code-mode, Phase 1) gate (`QUANTA_CODE_MODE`). Strict
    *  opt-in (`=== "1"`). Default false ⇒ the composition root wires NO
    *  `DefaultToolPorts.codeCellDispatch` factory, the `code_cell` tool is NOT
@@ -1307,6 +1314,10 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // C1 — strict `=== "1"` opt-in. Default false ⇒ no artifact registry / tools
     // (byte-identical).
     artifactStore: gateOn(env, "QUANTA_ARTIFACT_STORE"),
+    // ADR-0503 P3 — capability-layer master gate. STRICT `=== "1"` opt-in (arming
+    // a cross-cutting layer is deliberate). Default false ⇒ resolveExposure is
+    // unused, each surface keeps its legacy gate (byte-identical degrade).
+    capabilityLayer: gateOnStrict(env, "QUANTA_CAPABILITY_LAYER"),
     // code-mode (RFC jun-6-code-mode, Phase 1) — strict `=== "1"` opt-in. Default
     // false ⇒ no codeCellDispatch port wired, no code_cell tool, the QuickJS-WASM
     // module is never instantiated (byte-identical default menu + cold path).

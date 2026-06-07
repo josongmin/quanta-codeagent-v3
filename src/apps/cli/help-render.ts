@@ -36,6 +36,7 @@
 
 import { byteCompare } from "@/shared/byte-compare"
 import { bold, cyan, dim, renderBox } from "@/ui/ui-helpers"
+import type { UnifiedKnob } from "./knob-catalog-wire"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 
 /** Virtual REPL commands (short-circuited by `composePromptPipeline` BEFORE the
@@ -75,13 +76,16 @@ const KEYBINDS: readonly { readonly key: string; readonly describe: string }[] =
  *  cannot silently empty out. Surface-level vars not routed through the SSOT
  *  (e.g. `QUANTA_PROVIDER`, `QUANTA_MODEL`, `QUANTA_PLAN`, ~120 others) live
  *  in `docs/` and are intentionally not enumerated here. */
-interface EnvRow {
+export interface EnvRow {
   readonly key: string
   readonly defaultLabel: string
   readonly describe: string
 }
 
-const ENV_TABLE: readonly EnvRow[] = [
+/** The curated `--help` env rows. Exported so the drift-guard hellgate
+ *  (`help-env-catalog-drift-hellgate.test.ts`) can assert every row still
+ *  maps to a live knob in `buildKnobCatalog()`. */
+export const ENV_TABLE: readonly EnvRow[] = [
   { key: "QUANTA_LOG_LEVEL", defaultLabel: "info", describe: "debug|info|warn|error" },
   {
     key: "QUANTA_COMPACT_TOKENS",
@@ -220,6 +224,80 @@ const ENV_TABLE: readonly EnvRow[] = [
     describe: "ADR-0471 untrusted-source envelope gate ('1' to enable)",
   },
 ] as const
+
+/** A single drift finding from {@link auditEnvTableDrift}.
+ *   - `missing`       — an `ENV_TABLE` key no longer exists in the catalog
+ *                       (stale/renamed/removed knob still documented in `--help`).
+ *   - `default-drift` — a *safe-to-check* row's curated `defaultLabel` disagrees
+ *                       with the catalog default (silent default skew). */
+export interface EnvDriftFinding {
+  readonly kind: "missing" | "default-drift"
+  readonly key: string
+  readonly detail: string
+}
+
+/** Sentinel `defaultLabel`s that describe surface behaviour rather than a
+ *  literal catalog default (`(auto)`/`(minted)`/`(unset)`/`(empty)`/…). These
+ *  are intentionally NOT default-checked — the catalog has no equivalent. */
+const isSentinelLabel = (label: string): boolean =>
+  /^\(.*\)$/.test(label) || // (auto) (minted) (unset) (empty) (home) (probe) (preset) (tty:rich)
+  label.startsWith("~") || // path defaults: ~/.quanta, ~/.quanta/sessions
+  label.includes("|") // enum hint string: "rich|plain"
+
+/** Whether a row is SAFE to default-check against the catalog. We only assert
+ *  equality where the catalog carries a concrete default AND the curated label
+ *  is a plain literal. We deliberately skip:
+ *   - sentinel labels (no catalog equivalent),
+ *   - inverted bool flags whose var name describes the feature but whose
+ *     catalog field is a `*Disabled` flag (label `"on"`, default `false`):
+ *     e.g. `QUANTA_FS_JAIL` ("on") ↔ `fsJailDisabled` (false). Comparing these
+ *     would false-positive. */
+const isDefaultCheckable = (row: EnvRow, knob: UnifiedKnob): boolean => {
+  if (knob.default === undefined) return false
+  if (isSentinelLabel(row.defaultLabel)) return false
+  if (knob.kind === "bool" && row.defaultLabel === "on") return false
+  return true
+}
+
+/** Normalize a catalog default to the string form the curated `defaultLabel`
+ *  uses (bool ⇒ on/off; number ⇒ decimal; string/enum ⇒ as-is). */
+const catalogDefaultLabel = (knob: UnifiedKnob): string => {
+  const d = knob.default
+  if (typeof d === "boolean") return d ? "on" : "off"
+  return String(d)
+}
+
+/** PURE drift audit: `--help` curated env rows vs the unified-catalog SSOT.
+ *  Returns one finding per problem (empty ⇒ no drift). Membership is the
+ *  primary guard; default consistency is a conservative secondary check over
+ *  the {@link isDefaultCheckable} subset only. Exported for the hellgate. */
+export const auditEnvTableDrift = (
+  rows: readonly EnvRow[],
+  catalog: ReadonlyMap<string, UnifiedKnob>,
+): readonly EnvDriftFinding[] => {
+  const findings: EnvDriftFinding[] = []
+  for (const row of rows) {
+    const knob = catalog.get(row.key)
+    if (knob === undefined) {
+      findings.push({
+        kind: "missing",
+        key: row.key,
+        detail: "key absent from buildKnobCatalog() (stale/renamed/removed knob)",
+      })
+      continue
+    }
+    if (!isDefaultCheckable(row, knob)) continue
+    const expected = catalogDefaultLabel(knob)
+    if (expected !== row.defaultLabel) {
+      findings.push({
+        kind: "default-drift",
+        key: row.key,
+        detail: `--help label "${row.defaultLabel}" != catalog default "${expected}"`,
+      })
+    }
+  }
+  return findings
+}
 
 /** Column width for the slash-name column. Wide enough for `/reload-skills`
  *  plus 2 chars of breathing room — keeps describe columns aligned without

@@ -295,6 +295,7 @@ const ANSI_CSI_RE = new RegExp(`${ESC}\\[[0-9;?]*[ -/]*[@-~]`, "g")
 // C0 controls EXCEPT `\t` (U+0009) and `\n` (U+000A), plus DEL (U+007F). `\r`
 // (U+000D) IS stripped — a bare CR rewinds the line and is pure terminal noise
 // to the model; the visible text after it survives.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: deliberately matches C0 control chars to strip terminal noise from model output.
 const C0_CONTROL_RE = /[\u0000-\u0008\u000b-\u001f\u007f]/g
 
 export const stripModelControlChars = (s: string): string =>

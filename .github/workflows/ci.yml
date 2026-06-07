@@ -28,9 +28,10 @@ jobs:
           bun-version: latest
       - run: bun install --frozen-lockfile
       - name: restore typecheck incremental cache
-        # Cache ONLY .tsbuildinfo. The local skip stamps are mtime-based and
-        # are not portable across fresh CI checkouts, but tsc incremental state
-        # still helps repeated PR/main runs re-check less work.
+        # Cache ONLY .tsbuildinfo. The local skip stamps are content-hash
+        # snapshots of the local tree and are not cached, so CI always re-runs
+        # tsc; tsc incremental state still helps repeated PR/main runs re-check
+        # less work.
         uses: actions/cache@v4
         with:
           path: |

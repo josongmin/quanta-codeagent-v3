@@ -86,6 +86,7 @@ export const blue = (s) => wrap(s, C.blue)
 export const magenta = (s) => wrap(s, C.magenta)
 export const cyan = (s) => wrap(s, C.cyan)
 export const gray = (s) => wrap(s, C.gray)
+// biome-ignore lint/suspicious/noControlCharactersInRegex: deliberately matches ANSI/control sequences.
 const ANSI_RE = /\x1b\[[0-9;]*m/g
 export const stripAnsi = (s) => s.replace(ANSI_RE, "")
 export const visibleWidth = (s) => stripAnsi(s).length
