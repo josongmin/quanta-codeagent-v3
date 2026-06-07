@@ -67,7 +67,10 @@ const scan = (): { total: number; byFile: Record<string, number> } => {
 
 /** Baseline high-water mark (jun-07). May ONLY decrease as reads route through
  *  `readCliKnob` / `runtimeConfig()` / `resolveKnobs`. A new raw read fails. */
-const CEILING = 91
+// Burn-down: 91 → 85 → 82 (P4: 9 CLI bool gates in internal.ts routed through
+// readCliKnob — plan/lsp/git-tools/workflow/shell-snapshot/metrics, then
+// identity/structured-patch/coverage-tool).
+const CEILING = 82
 
 describe("no-raw-process.env-knob ratchet (ADR-0503 P4)", () => {
   test(`raw process.env.QUANTA_* reads stay <= ${CEILING} (decreasing burn-down)`, () => {

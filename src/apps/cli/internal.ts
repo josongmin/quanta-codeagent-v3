@@ -82,7 +82,7 @@ import {
 } from "@/runtime/shell-snapshot"
 import type { ShellSnapshotMetric } from "@/runtime/shell-snapshot/metric-port"
 import { loadSessionById, renameSession } from "@/session"
-import { gateDisabled, gateOn, logger, type RunContext, runtimeConfig } from "@/shared"
+import { gateDisabled, logger, type RunContext, runtimeConfig } from "@/shared"
 import { MCPRootSchema, PLUGIN_MCP_FILE } from "@/skill/plugin-manifest"
 import type { AssistantTextPainter, StreamPort } from "@/stream"
 import {
@@ -94,6 +94,7 @@ import {
 } from "@/tool"
 import { DefaultDeferredResultRegistry } from "@/tool/deferred/default-registry"
 import { buildCliAskUserTool } from "./ask-user-wire"
+import { readCliKnob } from "./cli-knobs-accessor"
 import { createMarkdownPainter } from "./markdown-painter"
 import { buildCliElicitationPrompterFactory } from "./mcp-elicitation-prompter"
 import { isPathLikeToken } from "./resume"
@@ -146,7 +147,7 @@ export const pickPersona = (): PersonaKind => resolvePersona(process.env)
  *  unknown-mode fallback line (no throw, no silent default to "default"
  *  — the operator's typo is surfaced via the prompt itself). */
 export const pickIdentity = (): readonly string[] | undefined => {
-  if (!gateOn(process.env, "QUANTA_IDENTITY")) return undefined
+  if (!readCliKnob("QUANTA_IDENTITY", "bool")) return undefined
   const raw = process.env.QUANTA_IDENTITY_MODE ?? "default"
   return defaultIdentityProvider().identityFor(raw as IdentityMode)
 }
@@ -346,7 +347,7 @@ export const buildSubagentConfig = (
   // §25.1 — `run_workflow` (LLM-authored declarative orchestration). DEFAULT-OFF
   // (gateOn ⇒ must be explicitly QUANTA_WORKFLOW=on/1): it fans out a tree of
   // subagents, so it opts in rather than riding the default subagent-ON seed.
-  const enableWorkflow = enabled && gateOn(process.env, "QUANTA_WORKFLOW")
+  const enableWorkflow = enabled && (readCliKnob("QUANTA_WORKFLOW", "bool") ?? false)
   return buildSubagentConfigCore({
     enabled,
     ...(Number.isFinite(depth) ? { maxDepth: depth } : {}),
@@ -617,13 +618,15 @@ export const observeDir = (): string | undefined => {
 }
 
 /** Plan mode is on when `QUANTA_PLAN=1` or `--plan` is present. */
-export const planEnabled = (): boolean => gateOn(process.env, "QUANTA_PLAN") || hasArg("--plan")
+export const planEnabled = (): boolean =>
+  (readCliKnob("QUANTA_PLAN", "bool") ?? false) || hasArg("--plan")
 
 /** LSP diagnostics tool is on when `QUANTA_LSP=1` or `--lsp` is present.
  *  Default OFF: `defaultTools` already registers a no-op `diagnostics`; this
  *  only swaps in the real language-server-backed provider when asked. The
  *  bridge itself still degrades gracefully if a server binary is absent. */
-export const lspEnabled = (): boolean => gateOn(process.env, "QUANTA_LSP") || hasArg("--lsp")
+export const lspEnabled = (): boolean =>
+  (readCliKnob("QUANTA_LSP", "bool") ?? false) || hasArg("--lsp")
 
 /** Codex `may-20-codex-lsp.md` absorption (ADR-0015). LSP NAV tools
  *  (definition / references / hover / type_definition / implementation /
@@ -635,7 +638,7 @@ export const lspNavEnabled = (): boolean => process.env.QUANTA_LSP_TOOLS === "fu
 /** Codex `may-20-codex-signal.md` absorption (ADR-0016). First-class
  *  git tools (diff/status/log/blame) are NOT in `defaultTools` to keep the
  *  default registry byte-identical. Opt-in via `QUANTA_GIT_TOOLS=1`. */
-export const gitToolsEnabled = (): boolean => gateOn(process.env, "QUANTA_GIT_TOOLS")
+export const gitToolsEnabled = (): boolean => readCliKnob("QUANTA_GIT_TOOLS", "bool") ?? false
 
 /** MCP crash-detection + auto-restart (ADR-0435). Default-OFF: when unset,
  *  `loadMcpTools` runs the single-client path and MCP behavior is
@@ -899,7 +902,8 @@ export interface BuildShellSnapshotConfigOpts {
 export const buildShellSnapshotConfig = (
   opts: BuildShellSnapshotConfigOpts = {},
 ): AgentConfig["shellSnapshot"] | undefined => {
-  const enabled = gateOn(process.env, "QUANTA_SHELL_SNAPSHOT") || hasArg("--shell-snapshot")
+  const enabled =
+    (readCliKnob("QUANTA_SHELL_SNAPSHOT", "bool") ?? false) || hasArg("--shell-snapshot")
   if (!enabled) return undefined
   const intEnv = (key: string): number | undefined => {
     const raw = process.env[key]
@@ -1293,7 +1297,7 @@ export const loadFeatures = async (
   opts: LoadFeaturesOpts = {},
 ): Promise<Features> => {
   const planMode = planEnabled()
-  const metrics = gateOn(process.env, "QUANTA_METRICS") ? new Metrics() : undefined
+  const metrics = readCliKnob("QUANTA_METRICS", "bool") ? new Metrics() : undefined
   const state = statePath()
   const resume = resumePath()
   const mcpConfigs = await readMcpConfig(slog)
@@ -1551,10 +1555,10 @@ export const buildTooling = (
     ...(sandboxProfile !== undefined ? { sandboxProfile } : {}),
     // ADR-0464 — CLI surface owns the env read; default-ON in the CLI is seeded
     // by the gate-default block in index.ts (so unset ⇒ "1" ⇒ tool registered).
-    ...(gateOn(process.env, "QUANTA_ENABLE_STRUCTURED_PATCH") ? { structuredPatch: true } : {}),
+    ...(readCliKnob("QUANTA_ENABLE_STRUCTURED_PATCH", "bool") ? { structuredPatch: true } : {}),
     // ADR-0165 — same posture as structuredPatch: CLI owns the env read,
     // default-ON via the SSOT-derived gate-default seed in index.ts.
-    ...(gateOn(process.env, "QUANTA_COVERAGE_TOOL") ? { coverageCheck: true } : {}),
+    ...(readCliKnob("QUANTA_COVERAGE_TOOL", "bool") ? { coverageCheck: true } : {}),
     ...(budgetRemainingPercent !== undefined ? { budgetRemainingPercent } : {}),
   })
 }
