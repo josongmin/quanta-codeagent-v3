@@ -7,6 +7,61 @@ import { buildResumeMessage } from "../interrupted-turn"
 import type { AgentConfig } from "../types"
 import { emitInterrupted, emitResponseQueued, emitSubagentCancel } from "./emit-helpers"
 
+/** §11.5 (08a) — rejection reasons for which a `user_message` is NOT re-queued
+ *  (the message is genuinely undeliverable or the user is unwinding): empty
+ *  content, an oversize body that must not bypass the size guard, and a
+ *  deliberate interrupt. Every OTHER reason (`expected_turn_mismatch`,
+ *  `no_active_turn`, `non_steerable_*`) re-routes via injection so the message
+ *  is never lost. */
+const NO_REQUEUE_REASONS: ReadonlySet<string> = new Set([
+  "empty_input",
+  "input_too_large",
+  "interrupted",
+])
+
+/** §11.5 — `resume` consults the SESSION interrupted-turn buffer (not the
+ *  per-turn `isInterrupted` gate, which resets every boundary). Restore
+ *  re-injects the captured turn through the injection path; nothing buffered ⇒ a
+ *  clean no-op. Extracted to keep {@link pollConversationAction} under the
+ *  cognitive-complexity cap. */
+const handleResumeAction = (cfg: AgentConfig): ConversationActionPollOutcome => {
+  const turn = cfg.interruptedTurnBuffer?.take() ?? null
+  if (turn === null) {
+    cfg.stream.emit({
+      type: "recovery",
+      reason: "conversation_action_noop",
+      detail: "resume:nothing_to_resume",
+    })
+    return { kind: "continue" }
+  }
+  return {
+    kind: "injection",
+    message: { role: "user", content: [{ type: "text", text: buildResumeMessage(turn) }] },
+  }
+}
+
+/** §11.5 (08a) — a non-empty `user_message` (weave) that missed its target turn
+ *  must NOT be silently dropped; re-route via injection (lands next boundary).
+ *  {@link NO_REQUEUE_REASONS} stay drop+error. Extracted for complexity. */
+const handleRejectedAction = (
+  cfg: AgentConfig,
+  action: { kind: string; input?: string },
+  reason: string,
+): ConversationActionPollOutcome => {
+  if (
+    action.kind === "user_message" &&
+    (action.input ?? "").trim().length > 0 &&
+    !NO_REQUEUE_REASONS.has(reason)
+  ) {
+    return {
+      kind: "injection",
+      message: { role: "user", content: [{ type: "text", text: action.input ?? "" }] },
+    }
+  }
+  cfg.stream.emit({ type: "error", message: `conversation_action rejected: ${reason}` })
+  return { kind: "continue" }
+}
+
 export type ConversationActionPollOutcome =
   | { kind: "none" }
   | { kind: "injection"; message: Message }
@@ -87,21 +142,7 @@ export const pollConversationAction = async (
   // captured turn through the existing `injection` path; nothing buffered ⇒ a
   // clean no-op. Handled before the `activeTurnRef`-required `decideAction` so
   // `resume` works even on a fresh (non-interrupted) turn header.
-  if (action.kind === "resume") {
-    const turn = cfg.interruptedTurnBuffer?.take() ?? null
-    if (turn === null) {
-      cfg.stream.emit({
-        type: "recovery",
-        reason: "conversation_action_noop",
-        detail: "resume:nothing_to_resume",
-      })
-      return { kind: "continue" }
-    }
-    return {
-      kind: "injection",
-      message: { role: "user", content: [{ type: "text", text: buildResumeMessage(turn) }] },
-    }
-  }
+  if (action.kind === "resume") return handleResumeAction(cfg)
   if (cfg.activeTurnRef === undefined) {
     cfg.stream.emit({
       type: "error",
@@ -115,13 +156,7 @@ export const pollConversationAction = async (
     { maxInputBytes: 64 * 1024 },
     Date.now(),
   )
-  if (outcome.kind === "rejected") {
-    cfg.stream.emit({
-      type: "error",
-      message: `conversation_action rejected: ${outcome.reason}`,
-    })
-    return { kind: "continue" }
-  }
+  if (outcome.kind === "rejected") return handleRejectedAction(cfg, action, outcome.reason)
   if (outcome.kind === "accepted_injection") {
     return {
       kind: "injection",

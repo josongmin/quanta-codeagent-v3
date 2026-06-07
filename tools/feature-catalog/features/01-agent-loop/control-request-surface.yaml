@@ -27,11 +27,13 @@ purpose: |
 evidence:
   code:
     - src/agent/control-request/types.ts
+    - src/agent/control-request/apply.ts
     - src/agent/control-request/index.ts
   adrs: [496]
   tests:
     unit:
       - tests/unit/control-request-hellgate.test.ts
+      - tests/unit/control-request-apply-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

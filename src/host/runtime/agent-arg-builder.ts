@@ -19,7 +19,7 @@
  */
 
 import { join as joinPath } from "node:path"
-import { buildSystemPrompt, HookBus, wireOptionalAgentPorts } from "@/agent"
+import { buildSystemPrompt, HookBus, reflectConsultFromLLM, wireOptionalAgentPorts } from "@/agent"
 import {
   type CommandHookBinding,
   type CommandHookConfig,
@@ -764,6 +764,10 @@ const buildGatedToolPorts = (
    *  the SAME store's sink wires `AgentConfig.fileHistory` (write/edit capture).
    *  Absent ⇒ the tool slot is omitted (byte-identical). */
   fileHistorySlice?: FileHistorySlice,
+  /** gap GAP 11 (ADR-0504) — the assembled main LLM, used to build the LLM-backed
+   *  `reflect` port when `QUANTA_REFLECT` is on. `null` (no provider) ⇒ no reflect
+   *  port ⇒ tool absent (byte-identical). */
+  llm?: LLMPort | null,
 ): DefaultToolPorts => {
   const cfg = runtimeConfig()
   // C1 — ONE per-session artifact registry when the Canvas store is enabled.
@@ -771,10 +775,9 @@ const buildGatedToolPorts = (
   // instance as its artifact sink (the loop registers the final scaffold into the
   // very registry the artifact_* tools read). Absent ⇒ `undefined` ⇒ both the
   // `artifactRegistry` slot AND the appshot sink stay omitted (byte-identical).
-  const artifactRegistry =
-    gateOn(process.env, "QUANTA_ARTIFACT_STORE")
-      ? createArtifactRegistry({ now: () => Date.now(), idFactory: monotonicIdFactory() })
-      : undefined
+  const artifactRegistry = gateOn(process.env, "QUANTA_ARTIFACT_STORE")
+    ? createArtifactRegistry({ now: () => Date.now(), idFactory: monotonicIdFactory() })
+    : undefined
   return {
     // ADR-0464 — gated structured-apply tool. Default-OFF: tool menu is
     // byte-identical unless QUANTA_ENABLE_STRUCTURED_PATCH === "1".
@@ -828,6 +831,12 @@ const buildGatedToolPorts = (
               : {}),
           }),
         }
+      : {}),
+    // reflect (gap GAP 11, ADR-0504) — gated LLM-backed self-correction tool.
+    // Default-OFF: tool menu byte-identical unless QUANTA_REFLECT is on AND a real
+    // LLM is present (a one-shot critique turn rides the main LLM, no tools offered).
+    ...(llm != null && gateOn(env, "QUANTA_REFLECT")
+      ? { reflect: reflectConsultFromLLM({ llm }) }
       : {}),
     // H14b — gated Office authoring tools (xlsx_write/docx_write/pptx_write).
     // Default-OFF: tool menu byte-identical unless QUANTA_OFFICE_AUTHORING === "1".
@@ -917,6 +926,9 @@ const buildBaseRegistry = (args: {
    *  `file_history_rewind` here (the sink half wires `AgentConfig.fileHistory`).
    *  Absent ⇒ the tool is omitted (byte-identical). */
   readonly fileHistorySlice: FileHistorySlice | undefined
+  /** gap GAP 11 (ADR-0504) — assembled main LLM for the gated `reflect` port.
+   *  `null` ⇒ no reflect port (byte-identical). */
+  readonly llm: LLMPort | null
 }): ToolRegistry =>
   new ToolRegistry([
     ...buildDefaultTools({
@@ -927,6 +939,7 @@ const buildBaseRegistry = (args: {
         args.seams,
         args.permissionPatternSlice,
         args.fileHistorySlice,
+        args.llm,
       ),
     }),
     ...(args.searchWire !== null ? [args.searchWire.tool] : []),
@@ -1467,6 +1480,7 @@ export const buildBaseFromArgs = (
       seams,
       permissionPatternSlice,
       fileHistorySlice,
+      llm,
     }),
     stream,
     // GAP2 — when a named permission profile is selected the live permission

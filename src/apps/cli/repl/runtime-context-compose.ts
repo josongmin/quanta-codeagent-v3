@@ -4,7 +4,7 @@ import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoin
 import { createClassifierBackedAutoReview } from "@/agent/reviewer-port"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
 import type { ResponsesContinuationStore } from "@/llm"
-import type { PermissionStore, ToolAction } from "@/permission"
+import { CircumventionTracker, type PermissionStore, type ToolAction } from "@/permission"
 import type { PendingApprovalView } from "@/protocol/session"
 import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
 import { composeRuntimeBootstrapContext, type RuntimeContext } from "@/sdk/runtime"
@@ -188,6 +188,16 @@ const buildAdmissibility = (args: {
           ...(guardianAssess !== undefined ? { guardianAssess } : {}),
         })
       : userReviewerPort
+  // §3.2 (ticket-04a) — mint the tool-switch CIRCUMVENTION tracker ONLY when the
+  // strict `QUANTA_CIRCUMVENT_DETECT` knob is on. Session-scoped (one per
+  // bootstrap): it accumulates prior soft-denies across turns so the gate can
+  // catch a Bash command that writes a file a prior Edit/Write deny protects.
+  // The detection/gate/classifier were fully built but DEAD (never instantiated)
+  // — this is the missing comp-root mint. Knob off ⇒ undefined ⇒ never spread ⇒
+  // the gate's circumvention precheck never arms (byte-identical legacy).
+  const circumventionTracker = runtimeConfig().circumventDetect
+    ? new CircumventionTracker()
+    : undefined
   return {
     ...(permissionStore !== undefined ? { permissionStore } : {}),
     reviewerPort,
@@ -198,6 +208,7 @@ const buildAdmissibility = (args: {
       hasAutoReview: autoReview !== undefined,
       hasGuardianReview: guardianReview !== undefined,
     }),
+    ...(circumventionTracker !== undefined ? { circumventionTracker } : {}),
   }
 }
 

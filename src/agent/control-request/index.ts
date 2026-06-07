@@ -1,4 +1,11 @@
 /** Barrel — control-request runtime surface (ADR-0496). See `./types`. */
+
+export {
+  applyControlEffect,
+  type ControlEffectApplier,
+  drainControlRequests,
+  MAX_CONTROL_REQUESTS_PER_DRAIN,
+} from "./apply"
 export {
   ALL_CONTROL_REQUEST_KINDS,
   CONTROL_REQUEST_FLAG,

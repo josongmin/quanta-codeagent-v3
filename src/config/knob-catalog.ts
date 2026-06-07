@@ -181,6 +181,23 @@ export interface ResolvedKnobValue {
 }
 
 /**
+ * Display-safe value for ANY surface (`/knobs all`, web `/api/knobs`). A CUSTOM
+ * free-form STRING value (source env/session) may hold a filesystem path, a
+ * credential-helper command line, or policy JSON — never surface it verbatim
+ * where output can be pasted/transmitted. Bounded bool/int/float/enum values and
+ * registry DEFAULTS (public, in-source) are shown. Single SSOT so CLI + web can't
+ * drift on what's sensitive. (ADR-0503 P3 security re-audit.)
+ */
+export const displaySafeValue = (
+  kind: UnifiedKnob["kind"],
+  raw: string | undefined,
+  source: string | undefined,
+): string | undefined =>
+  kind === "string" && raw !== undefined && source !== undefined && source !== "default"
+    ? "[redacted]"
+    : raw
+
+/**
  * Resolve the live RAW value + source for every catalog knob, given the env bag
  * + session overrides (`/config set`). Precedence env > session > default. Pure
  * (no process.env reach — the surface injects the bag). Raw strings only; typed

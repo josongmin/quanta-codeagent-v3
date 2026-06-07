@@ -20,9 +20,10 @@ import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
 
 /** Global-reach knob reads: `process.env.QUANTA_X` / `process.env["QUANTA_X"]` /
- *  `gate*(process.env, …)`. (Injected-`env` reads are fine — that's DI.) */
+ *  ``process.env[`QUANTA_X`]`` (template) / `const {QUANTA_X} = process.env`
+ *  (destructure) / `gate*(process.env, …)`. (Injected-`env` reads are fine — DI.) */
 const RAW =
-  /process\.env\.QUANTA_[A-Z0-9_]+|process\.env\[\s*["']QUANTA_|gate(?:On|Disabled)(?:Strict)?\s*\(\s*process\.env\b/
+  /process\.env\.QUANTA_[A-Z0-9_]+|process\.env\[\s*[`"']QUANTA_|gate(?:On|Disabled)(?:Strict)?\s*\(\s*process\.env\b|\{[^}]*\bQUANTA_[A-Z0-9_]+[^}]*\}\s*=\s*process\.env\b/
 
 const isComment = (l: string): boolean => {
   const t = l.trimStart()
@@ -56,7 +57,7 @@ const scan = (): { total: number; byFile: Record<string, number> } => {
       if (isComment(line)) continue
       // count each occurrence on the line (a line may read >1 knob)
       const m = line.match(
-        /process\.env\.QUANTA_[A-Z0-9_]+|process\.env\[\s*["']QUANTA_|gate(?:On|Disabled)(?:Strict)?\s*\(\s*process\.env\b/g,
+        /process\.env\.QUANTA_[A-Z0-9_]+|process\.env\[\s*[`"']QUANTA_|gate(?:On|Disabled)(?:Strict)?\s*\(\s*process\.env\b|\{[^}]*\bQUANTA_[A-Z0-9_]+[^}]*\}\s*=\s*process\.env\b/g,
       )
       if (m) n += m.length
     }
@@ -95,9 +96,14 @@ describe("no-raw-process.env-knob ratchet (ADR-0503 P4)", () => {
     expect(RAW.test(`const x = process.env.QUANTA_FOO`)).toBe(true)
     expect(RAW.test(`if (gateOn(process.env, "QUANTA_BAR")) {}`)).toBe(true)
     expect(RAW.test(`process.env["QUANTA_BAZ"]`)).toBe(true)
+    // evasion forms (jun-7 R3 mutation-test) are now caught:
+    expect(RAW.test("const x = process.env[`QUANTA_TMPL`]")).toBe(true)
+    expect(RAW.test("const { QUANTA_DESTRUCT } = process.env")).toBe(true)
     // injected env (DI) is fine — NOT flagged:
     expect(RAW.test(`const x = env.QUANTA_FOO`)).toBe(false)
     expect(RAW.test(`if (gateOn(env, "QUANTA_BAR")) {}`)).toBe(false)
     expect(RAW.test(`readCliKnob("QUANTA_FOO", "bool", env)`)).toBe(false)
+    // assigning the whole env (legit DI default) must NOT trip the destructure rule:
+    expect(RAW.test(`const env = process.env`)).toBe(false)
   })
 })

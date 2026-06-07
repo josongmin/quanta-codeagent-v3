@@ -44,3 +44,14 @@ P0는 **순수 측정 테스트** — 런타임 동작 0 변경, byte-identical.
 - **rev1 `src/config/registry` 신축**: `@/runner/knobs`가 이미 그것 → 4번째 시스템=파편화 악화. DROP.
 - **3-도메인 물리 병합**: 레이어상 불가(or 173 call-site DI 대공사) — 논리 통합(ratchet+capability)이 동일 UX를 훨씬 싸게 제공.
 - **type-union 컴파일-에러 강제를 P0로**: `gateOn(name:string)`이라 173 call-site 변환 필요 = P4급. P0는 source-scan ratchet으로.
+
+## 구현 현황 (2026-06-08 갱신 — 위 결정의 실제 빌드 상태)
+
+P0~P3 대부분 LANDED + 2라운드 적대어딧으로 경화. 실제 구조(원 §2의 "3-도메인 read-home"은 유지되, 그 위에 **선언 registry 4개**가 얹힘):
+
+- **선언 registry 4**: `apps/cli/cli-knobs.ts`(CLI-render ~89) · `@/config/knob-inventory.ts`(daemon/agent orphan ~142) · `@/shared/runtime-config-knobs.ts`(typed runtime-config 142, 신규) · `@/runner/knobs`(~49). 3개(cli/inventory/runtime-config-knobs)는 **pairwise disjoint** 강제(`knob-registry-disjoint-hellgate`).
+- **통합 catalog**: `@/config/knob-catalog.ts`(순수 merge/search/resolve/`displaySafeValue`) → `buildKnobCatalog()` **388 knob 단일 SSOT**(cli wire 4소스 / web wire 3소스 cli제외). precedence cli<inventory<runtime-config<runner.
+- **표면**: `/knobs all`·`/knobs find`(slash-commands-knobs, LIVE) · `--help`는 ENV_TABLE(41) 유지 + `/knobs all/find` **포인터**(전체 catalog 파생은 미완, 포인터로 대체) · web `GET /api/knobs`(auth-gated, LIVE). read-routing P4 시작: `readCliKnob` 접근자 + 9 CLI bool 게이트 마이그레이션(byte-identical).
+- **6 ratchet**: completeness(orphan 0) · disjoint · parity(runtime-config-knobs≡loadFromEnv) · no-raw-process-env(ceiling 82) · no-raw-nul · default-off. 4개(1/3/4/6)는 destructure·template-bracket evasion까지 봉인(R3 mutation-test).
+- **보안**(R2/R3 어딧): web `/api/knobs`는 `displaySafeValue`로 custom string값(경로/credential-helper 명령/정책JSON) redact(default·bool/int/enum은 노출). CLI `/knobs all`도 동일 redact. secret 4종은 registry 자체서 제외. strict-gate(code-mode/tls-mitm/fs-jail/central-config)는 readCliKnob 미경유 → 약화 없음.
+- **미구현(backlog)**: Capability 레이어(P3, `QUANTA_CAPABILITY_LAYER` 미선언) · `--help` 전체 catalog 파생(P2 잔여) · settings.json knobs band(P3) · read-routing 82→0 잔여(P4) · web 프론트 settings UI.

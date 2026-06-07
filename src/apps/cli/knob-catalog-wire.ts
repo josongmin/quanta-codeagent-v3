@@ -12,6 +12,7 @@ import {
   type CatalogSources,
   catalogByGroup,
   catalogList,
+  displaySafeValue,
   mergeKnobCatalog,
   resolveCatalogValues,
   type ResolvedKnobValue,
@@ -67,5 +68,5 @@ export const buildKnobCatalog = (): ReadonlyMap<string, UnifiedKnob> => {
 }
 
 /** Re-exports so the CLI command modules import one place. */
-export { catalogByGroup, catalogList, resolveCatalogValues, searchCatalog }
+export { catalogByGroup, catalogList, displaySafeValue, resolveCatalogValues, searchCatalog }
 export type { ResolvedKnobValue, UnifiedKnob }

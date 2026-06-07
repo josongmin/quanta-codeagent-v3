@@ -36,12 +36,19 @@ const stripComment = (l: string): string => {
 /** Every `QUANTA_*` knob read in the body, across all forms. */
 const discoverFromLoadEnv = (body: string): ReadonlySet<string> => {
   const found = new Set<string>()
-  const re = /env\.(QUANTA_[A-Z0-9_]+)|env\[\s*["'](QUANTA_[A-Z0-9_]+)["']|["'](QUANTA_[A-Z0-9_]+)["']/g
+  // env.X (dot) | env[`/"/'X] (bracket incl. template) | "X"/`X` (quoted gate) |
+  // { X } = env (destructure). Covers every read form loadFromEnv could use.
+  const re =
+    /env\.(QUANTA_[A-Z0-9_]+)|env\[\s*[`"'](QUANTA_[A-Z0-9_]+)[`"']|[`"'](QUANTA_[A-Z0-9_]+)[`"']/g
+  const destruct = /\{([^}]*\bQUANTA_[A-Z0-9_]+[^}]*)\}\s*=\s*(?:process\.)?env\b/g
   for (const line of body.split("\n")) {
     const clean = stripComment(line)
     for (const m of clean.matchAll(re)) {
       const name = m[1] ?? m[2] ?? m[3]
       if (name !== undefined) found.add(name)
+    }
+    for (const d of clean.matchAll(destruct)) {
+      for (const t of (d[1] as string).matchAll(/\bQUANTA_[A-Z0-9_]+/g)) found.add(t[0])
     }
   }
   return found

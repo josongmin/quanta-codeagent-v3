@@ -42,8 +42,8 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { readFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { resolveCommandHookBindings } from "@/apps/agent"
 import { loadCommandHookBindings } from "@/agent/command-hooks"
+import { resolveCommandHookBindings } from "@/apps/agent"
 import type { ReadTextPort, TrustPersistencePort, TrustRecord } from "@/config"
 import { __resetRuntimeConfig, runtimeConfig } from "@/shared"
 
@@ -245,5 +245,30 @@ describe("WIRE default-OFF byte-identity — knob unset ⇒ legacy path, zero ce
       expect(persistenceCtorCalls).toBe(0)
       expect(bindings).toEqual([{ event: "PreToolUse", command: MALICIOUS, matcher: "Bash" }])
     }
+  })
+})
+
+describe("§P7 (ticket-05) — dropped-for-untrust settings are no longer SILENT", () => {
+  test("UNTRUSTED repo with a dropped layer ⇒ warn fires the 'ignored' notice", async () => {
+    process.env.QUANTA_CENTRAL_CONFIG = "1"
+    const warnings: string[] = []
+    await resolveCommandHookBindings(repoCwd, {
+      ...deps(),
+      warn: (m: string) => warnings.push(m),
+    })
+    // The untrusted project layer (.quanta/settings.json#hooks) was dropped — the
+    // user is now TOLD (previously an empty `() => {}` sink swallowed it).
+    expect(warnings.some((w) => w.includes("ignored") && w.includes("untrusted"))).toBe(true)
+  })
+
+  test("TRUSTED repo (allow-list) ⇒ no dropped-for-untrust warning (nothing dropped)", async () => {
+    process.env.QUANTA_CENTRAL_CONFIG = "1"
+    process.env.QUANTA_TRUSTED_PATHS = realRepoCwd
+    const warnings: string[] = []
+    await resolveCommandHookBindings(repoCwd, {
+      ...deps(),
+      warn: (m: string) => warnings.push(m),
+    })
+    expect(warnings.some((w) => w.includes("ignored") && w.includes("untrusted"))).toBe(false)
   })
 })

@@ -83,10 +83,14 @@ const discoverKnobs = (src: string): readonly string[] => {
   // Discover ALL forms — the dot-access form (e.g. env.QUANTA_RATELIMIT_NOTICE)
   // was previously a blind spot.
   const re =
-    /env\["(QUANTA_[A-Z0-9_]+)"|env\.(QUANTA_[A-Z0-9_]+)|gate(?:On|Disabled)(?:Strict)?\(env,\s*"(QUANTA_[A-Z0-9_]+)"/g
+    /env\[\s*[`"](QUANTA_[A-Z0-9_]+)[`"]|env\.(QUANTA_[A-Z0-9_]+)|gate(?:On|Disabled)(?:Strict)?\(env,\s*"(QUANTA_[A-Z0-9_]+)"/g
   for (const m of body.matchAll(re)) {
     const name = m[1] ?? m[2] ?? m[3]
     if (name !== undefined) found.add(name)
+  }
+  // destructure read: `const { QUANTA_X } = env` / `… = process.env`
+  for (const d of body.matchAll(/\{([^}]*\bQUANTA_[A-Z0-9_]+[^}]*)\}\s*=\s*(?:process\.)?env\b/g)) {
+    for (const t of (d[1] as string).matchAll(/\bQUANTA_[A-Z0-9_]+/g)) found.add(t[0])
   }
   return [...found].sort()
 }
@@ -303,10 +307,15 @@ describe("knob default-off completeness guard (auto-discovery)", () => {
     // it were, our body-slice missed reads.
     const wholeFile = new Set<string>()
     for (const m of RUNTIME_CONFIG_TEXT.matchAll(
-      /env\["(QUANTA_[A-Z0-9_]+)"|env\.(QUANTA_[A-Z0-9_]+)|gate(?:On|Disabled)(?:Strict)?\(env,\s*"(QUANTA_[A-Z0-9_]+)"/g,
+      /env\[\s*[`"](QUANTA_[A-Z0-9_]+)[`"]|env\.(QUANTA_[A-Z0-9_]+)|gate(?:On|Disabled)(?:Strict)?\(env,\s*"(QUANTA_[A-Z0-9_]+)"/g,
     )) {
       const name = m[1] ?? m[2] ?? m[3]
       if (name !== undefined) wholeFile.add(name)
+    }
+    for (const d of RUNTIME_CONFIG_TEXT.matchAll(
+      /\{([^}]*\bQUANTA_[A-Z0-9_]+[^}]*)\}\s*=\s*(?:process\.)?env\b/g,
+    )) {
+      for (const t of (d[1] as string).matchAll(/\bQUANTA_[A-Z0-9_]+/g)) wholeFile.add(t[0])
     }
     expect(DISCOVERED_KNOBS.length).toBe(wholeFile.size)
     // biome-ignore lint/suspicious/noConsole: the spec requires PRINTING the enumerated knob count

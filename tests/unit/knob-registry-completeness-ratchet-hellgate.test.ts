@@ -34,14 +34,20 @@ import { describe, expect, test } from "bun:test"
  *  CONST reference whose VALUE is the real var (declared at the const site) — NOT
  *  a distinct knob, so we must NOT count the const name. These two precise
  *  extractors skip const-name false-positives (the `*_ENV` noise). */
-const QUOTED = /["'](QUANTA_[A-Z0-9_]+)["']/g
+const QUOTED = /[`"'](QUANTA_[A-Z0-9_]+)[`"']/g // backtick ⇒ template-bracket env[`X`]
 const ENV_DOT = /\benv\.(QUANTA_[A-Z0-9_]+)\b/g
+// destructure read: `const { QUANTA_X, QUANTA_Y } = env` / `… = process.env`
+const DESTRUCT = /\{([^}]*\bQUANTA_[A-Z0-9_]+[^}]*)\}\s*=\s*(?:process\.)?env\b/g
+const TOKEN = /\bQUANTA_[A-Z0-9_]+/g
 
-/** Every real-read QUANTA_* token on a line (quoted ∪ env-dot). */
+/** Every real-read QUANTA_* token on a line (quoted ∪ env-dot ∪ destructure). */
 const knobsOnLine = (line: string): string[] => {
   const out: string[] = []
   for (const m of line.matchAll(QUOTED)) out.push(m[1] as string)
   for (const m of line.matchAll(ENV_DOT)) out.push(m[1] as string)
+  for (const d of line.matchAll(DESTRUCT)) {
+    for (const t of (d[1] as string).matchAll(TOKEN)) out.push(t[0])
+  }
   return out
 }
 
@@ -75,11 +81,13 @@ const isReadLine = (line: string): boolean => {
     /\benv\s*[.[]/.test(line) ||
     /\bgate(?:On|Disabled)(?:Strict)?\s*\(/.test(line) ||
     /\bparseEnvFlag\s*\(/.test(line) ||
+    // destructure read: `const { QUANTA_X } = env` / `… = process.env`
+    /\}\s*=\s*(?:process\.)?env\b/.test(line) ||
     // const-keyed gate: `const FOO_ENV = "QUANTA_X"` then `gateOn(env, FOO_ENV)`.
     // The gateOn line has only a BARE const ref (invisible), so we instead count
     // the const DEFINITION (a QUANTA literal being ASSIGNED). Precise `= "..."`
-    // form excludes error/log strings like `Error("QUANTA_X failed")`.
-    /[=:]\s*["']QUANTA_[A-Z0-9_]+["']/.test(line)
+    // form (incl. backtick) excludes error/log strings like `Error("QUANTA_X failed")`.
+    /[=:]\s*[`"']QUANTA_[A-Z0-9_]+[`"']/.test(line)
   )
 }
 
@@ -209,5 +217,15 @@ describe("knob-registry completeness ratchet (ADR-0503 P0)", () => {
     expect(isReadLine(`const CONTEXT_1M_FLAG = "QUANTA_CONTEXT_1M"`)).toBe(true)
     expect(knobsOnLine(`const CONTEXT_1M_FLAG = "QUANTA_CONTEXT_1M"`)).toEqual(["QUANTA_CONTEXT_1M"])
     expect(isReadLine(`  throw new Error("QUANTA_X failed")`)).toBe(false) // error string still NOT a read
+    // R3 mutation-test: destructure + template-bracket evasion forms are caught.
+    expect(isReadLine("const { QUANTA_DESTRUCT } = env")).toBe(true)
+    expect(knobsOnLine("const { QUANTA_DESTRUCT, QUANTA_TWO } = process.env")).toEqual([
+      "QUANTA_DESTRUCT",
+      "QUANTA_TWO",
+    ])
+    expect(isReadLine("const x = env[`QUANTA_TMPL`]")).toBe(true)
+    expect(knobsOnLine("const x = env[`QUANTA_TMPL`]")).toEqual(["QUANTA_TMPL"])
+    // a non-QUANTA destructure is harmless (read-line but yields no tokens)
+    expect(knobsOnLine("const { foo, bar } = env")).toEqual([])
   })
 })

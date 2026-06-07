@@ -46,6 +46,7 @@ import { setCliKnobOverride } from "./cli-knobs-accessor"
 import {
   buildKnobCatalog,
   catalogByGroup,
+  displaySafeValue,
   resolveCatalogValues,
   searchCatalog,
   type UnifiedKnob,
@@ -196,7 +197,7 @@ const renderAll = (ctx: SlashContext): number => {
     ctx.out(`\n${group} (${knobs.length})\n`)
     for (const k of knobs) {
       const v = values.get(k.envKey)
-      ctx.out(`${catalogLine(k, v?.raw, v?.isDefault ?? true)}\n`)
+      ctx.out(`${catalogLine(k, displaySafeValue(k.kind, v?.raw, v?.source), v?.isDefault ?? true)}\n`)
     }
   }
   return 0

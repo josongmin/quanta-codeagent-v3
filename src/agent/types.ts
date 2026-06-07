@@ -647,6 +647,16 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
      * byte-identical legacy deny. See `coordination-broker-wire.ts`.
      */
     coordinationBroker?: import("./admissibility-gate").GateEscalationBroker
+    /**
+     * §3.2 (ticket-04a) — tool-switch CIRCUMVENTION tracker. The session-scoped
+     * accumulator of prior soft-denies; the gate consults it (`opts.turn` from
+     * `run.turn`, write-effects auto-extracted) to catch a Bash command that
+     * writes a file an Edit/Write deny-rule protects. The detection + gate +
+     * classifier prompt were fully built but DEAD (never instantiated); the
+     * comp-root mints this ONLY when `QUANTA_CIRCUMVENT_DETECT` is on. Absent ⇒
+     * the gate's circumvention precheck never arms (byte-identical legacy).
+     */
+    circumventionTracker?: import("@/permission").CircumventionTracker
   }
   /**
    * Plan-exit port (ADR-0062). Host-supplied I/O seam that surfaces a plan

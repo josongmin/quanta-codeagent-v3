@@ -34,13 +34,13 @@ import { loadCommandHookBindings } from "@/agent/command-hooks"
 import { bindingsFromHookEvents } from "@/agent/command-hooks/settings-loader"
 import type { CommandHookBinding } from "@/agent/command-hooks/types"
 import {
+  canonicalizeTrustedPaths,
+  parseSettingSources,
   type ReadTextPort,
+  resolveDiskConfig,
   type TrustPersistencePort,
   type TrustRecord,
   TrustStore,
-  canonicalizeTrustedPaths,
-  parseSettingSources,
-  resolveDiskConfig,
 } from "@/config"
 // ADR-0303 thin-surface relocation — the env-READING "argv → AgentConfig base"
 // composition builder + the pure argv parser moved DOWN into `@/host/runtime`
@@ -62,7 +62,7 @@ import {
   formatHelp,
   parseAgentArgs,
 } from "@/host/runtime/agent-args"
-import { errMessage, gateOn, runtimeConfig, setTerminalIo } from "@/shared"
+import { errMessage, gateOn, logger, runtimeConfig, setTerminalIo } from "@/shared"
 import type { AssembleRequest } from "./assemble"
 
 export { buildSearchPipelineFromEnv, clearSearchPipelineWireForTests }
@@ -242,6 +242,11 @@ export interface ResolveCommandHooksDeps {
   /** Trust-store persistence factory keyed by the resolved trust-file path
    *  (default: the concrete `~/.quanta/trust.json` reader/writer). */
   readonly makeTrustPersistence?: (trustFilePath: string) => TrustPersistencePort
+  /** §P7 (ticket-05) — sink for the "settings dropped because the project is
+   *  untrusted" notice + malformed-layer warnings. Default: `logger.warn`. The
+   *  gate was previously SILENT (an empty sink), so a user never learned their
+   *  repo-local `.quanta/settings.json` hooks/permissions were ignored. */
+  readonly warn?: (msg: string) => void
 }
 
 export const resolveCommandHookBindings = async (
@@ -272,6 +277,9 @@ export const resolveCommandHookBindings = async (
     (rc.trustedPaths ?? "").split(",").map((s) => s.trim()),
   )
   const trusted = store.isTrusted(realCwd) || trustedFromEnv.has(realCwd)
+  // §P7 (ticket-05) — real warn sink (was an empty `() => {}`): surfaces both
+  // malformed-layer skips AND the "dropped because untrusted" notice below.
+  const warn = deps.warn ?? ((m: string) => logger.warn(m))
   const resolved = await resolveDiskConfig({
     cwd: realCwd,
     userConfigDir,
@@ -283,8 +291,18 @@ export const resolveCommandHookBindings = async (
     trusted,
     sources: parseSettingSources(rc.centralConfigSources),
     read: deps.read ?? fsReadText,
-    warn: () => {},
+    warn,
   })
+  // §P7 (ticket-05) — no longer SILENT: tell the user which untrusted layers had
+  // their loosening grants (allow / hooks / mcp launchers) dropped, and how to
+  // trust the project. Tightening (deny) still applied; only loosening dropped.
+  if (!trusted && resolved.droppedForUntrust.length > 0) {
+    warn(
+      `[quanta] ${resolved.droppedForUntrust.length} setting layer(s) ignored for the untrusted ` +
+        `project ${realCwd} (${resolved.droppedForUntrust.join(", ")}): allow/hooks/mcp grants are ` +
+        `not honored until you trust it (add to QUANTA_TRUSTED_PATHS or the trust store).`,
+    )
+  }
   return bindingsFromHookEvents(resolved.hooks)
 }
 

@@ -12,6 +12,7 @@
 import {
   type CatalogSources,
   catalogByGroup,
+  displaySafeValue,
   mergeKnobCatalog,
   resolveCatalogValues,
   type UnifiedKnob,
@@ -63,10 +64,7 @@ export const buildWebKnobCatalog = (): ReadonlyMap<string, UnifiedKnob> => {
 export const webSafeKnobValue = (
   kind: UnifiedKnob["kind"],
   resolved: { readonly raw: string | undefined; readonly source: string } | undefined,
-): string | undefined =>
-  kind === "string" && resolved !== undefined && resolved.source !== "default"
-    ? "[redacted]"
-    : resolved?.raw
+): string | undefined => displaySafeValue(kind, resolved?.raw, resolved?.source)
 
 export { catalogByGroup, resolveCatalogValues }
 export type { UnifiedKnob }
