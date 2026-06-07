@@ -21,6 +21,16 @@ import { mergeSettings } from "./merge"
 import type { ResolvedSettings, SettingsLayerName } from "./types"
 import { EMPTY_RESOLVED } from "./types"
 
+export type { LayerPaths, ReadTextPort, WarnSink } from "./loader"
+export { parseSettingsLayer, readLayers } from "./loader"
+export { osManagedSettingsPath } from "./managed-path"
+export { mergeSettings } from "./merge"
+export type { TrustPersistencePort, TrustRecord } from "./trust-store"
+export {
+  canonicalizeProjectPath,
+  canonicalizeTrustedPaths,
+  TrustStore,
+} from "./trust-store"
 export type {
   HookGroupSetting,
   LayerBenign,
@@ -31,15 +41,6 @@ export type {
   SettingsLayerName,
 } from "./types"
 export { EMPTY_RESOLVED, LAYER_PRECEDENCE, MACHINE_OWNED_LAYERS, REPO_LAYERS } from "./types"
-export type { LayerPaths, ReadTextPort, WarnSink } from "./loader"
-export { parseSettingsLayer, readLayers } from "./loader"
-export { mergeSettings } from "./merge"
-export type { TrustPersistencePort, TrustRecord } from "./trust-store"
-export {
-  canonicalizeProjectPath,
-  canonicalizeTrustedPaths,
-  TrustStore,
-} from "./trust-store"
 
 /** The four discovery filenames (Claude-shape JSON — §9 Q1 decided JSON). */
 export const PROJECT_SETTINGS_FILE = "settings.json"
@@ -120,8 +121,23 @@ const discoverPaths = (input: ResolveInput): LayerPaths => {
  * gate read of its own, by design — it's a pure port).
  */
 export const resolveDiskConfig = async (input: ResolveInput): Promise<ResolvedSettings> => {
-  const paths = discoverPaths(input)
-  const layers = await readLayers(paths, input.read, input.warn)
+  const layers = await readDiskLayers(input)
   if (Object.keys(layers).length === 0) return EMPTY_RESOLVED
   return mergeSettings(layers, input.trusted)
 }
+
+/** Read the selected on-disk layers ONCE (fail-soft), WITHOUT merging — for the
+ *  trust-prompt flow that must merge the SAME bytes at two trust levels (check
+ *  untrusted, then re-merge trusted on grant) WITHOUT a second disk read (audit
+ *  R1 #5 — eliminates the read→prompt→re-read TOCTOU window). `input.trusted` is
+ *  irrelevant here (it only affects the merge); pass it through unchanged. */
+export const readDiskLayers = async (input: ResolveInput) =>
+  readLayers(discoverPaths(input), input.read, input.warn)
+
+/** Merge already-read layers at a given trust level. Mirror of the second half
+ *  of {@link resolveDiskConfig}; pairs with {@link readDiskLayers}. */
+export const mergeDiskLayers = (
+  layers: Awaited<ReturnType<typeof readDiskLayers>>,
+  trusted: boolean,
+): ResolvedSettings =>
+  Object.keys(layers).length === 0 ? EMPTY_RESOLVED : mergeSettings(layers, trusted)

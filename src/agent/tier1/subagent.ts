@@ -14,6 +14,7 @@
 
 import { resolveJailed } from "@/storage"
 import type { Tool } from "@/tool"
+import { spawnAgentsCsvTool } from "@/tool/spawn-agents-csv"
 import { createRunWorkflowTool } from "@/tool/workflow/run-workflow-tool"
 import {
   createAgentTool,
@@ -24,9 +25,12 @@ import {
   type TaskRegistry,
   type WaitTimeoutPolicy,
 } from "../../subagent"
+import { buildInMemoryBatchRunPort } from "../batch-jobs-dispatch"
+import { buildForkTurnsPreamble, composeForkedPrompt } from "../fork-turns"
 import { createSubagentRunner } from "../subagent-runner"
 import type { AgentConfig } from "../types"
 import { subagentRunnerToAgentRunPort } from "../workflow-agent-adapter"
+import { redactTranscript } from "./advisor"
 
 /** Materialized subagent block. The three tools share ONE `TaskRegistry`
  *  instance — both `agentTool.registry` and the returned `taskRegistry` point
@@ -112,6 +116,17 @@ export const buildSubagentBlock = (config: AgentConfig): SubagentBlock | undefin
     ...(config.subagent.taskRegistry !== undefined
       ? { registry: config.subagent.taskRegistry }
       : {}),
+    // GAP8a fork_turns — compose an inherited (redacted) parent-transcript
+    // preamble onto the child prompt for the requested fork spec. Sources
+    // `config.messages` (the session SEED transcript — same convention as the
+    // advisor's transcriptSource; the loop's live working-memory is a separate
+    // buffer). `redactTranscript` (advisor) scrubs secrets + PII.
+    // `fork_turns:"none"` (default) ⇒ identity (byte-identical cold start).
+    forkPrompt: (prompt, spec) =>
+      composeForkedPrompt(
+        prompt,
+        buildForkTurnsPreamble(config.messages ?? [], spec, redactTranscript),
+      ),
   })
   // Bind a NON-undefined local so the cleanup closure doesn't need a non-
   // null assertion on the outer `taskRegistry` (which is typed as optional
@@ -137,6 +152,11 @@ export const buildSubagentBlock = (config: AgentConfig): SubagentBlock | undefin
     taskOutputTool,
     createTaskStopTool(reg),
     ...workflowTools(config.subagent.enableWorkflow === true, runner),
+    // GAP7-4 — `spawn_agents_on_csv` over the SAME runner (one child per CSV row,
+    // ephemeral in-memory store). Default-OFF (QUANTA_SPAWN_AGENTS_CSV).
+    ...(config.subagent.enableSpawnAgentsCsv === true
+      ? [spawnAgentsCsvTool(buildInMemoryBatchRunPort(runner, config.depth ?? 0)) as Tool]
+      : []),
   ]
 
   // ADR-0041 LIVE assembly — when `enable6Tools` is set, build the six-tool

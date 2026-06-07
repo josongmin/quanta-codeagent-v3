@@ -30,6 +30,7 @@ import {
   InMemoryJobStore,
   type JobRow,
   type JobStorePort,
+  MAX_POOL_SIZE,
   parseRowsFromCsv,
   type RowDispatchPort,
   type RowDispatchResult,
@@ -172,6 +173,81 @@ describe("happy path", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // Schema enforcement
 // ─────────────────────────────────────────────────────────────────────────────
+
+describe("GAP7-1: concurrency cap (poolSize bound)", () => {
+  test("poolSize > MAX_POOL_SIZE ⇒ invalid-spec (fan-out DoS guard)", async () => {
+    const { runner } = makeRunner(okDispatch())
+    const r = await runner.submit(spec([{ a: "x" }], { poolSize: MAX_POOL_SIZE + 1 }))
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error.kind).toBe("invalid-spec")
+  })
+  test("poolSize === MAX_POOL_SIZE ⇒ accepted (boundary inclusive)", async () => {
+    const { runner } = makeRunner(okDispatch())
+    const r = await runner.submit(spec([{ a: "x" }], { poolSize: MAX_POOL_SIZE }))
+    expect(r.ok).toBe(true)
+  })
+  test("poolSize 0 / negative still rejected", async () => {
+    const { runner } = makeRunner(okDispatch())
+    expect((await runner.submit(spec([{ a: "x" }], { poolSize: 0 }))).ok).toBe(false)
+    expect((await runner.submit(spec([{ a: "x" }], { poolSize: -3 }))).ok).toBe(false)
+  })
+})
+
+describe("GAP7-5: resume an interrupted job", () => {
+  // Simulate a crash: a `running` job whose items are stranded mid-flight.
+  const crashedJob = async (store: InMemoryJobStore) => {
+    const job: BatchJob = {
+      id: "crashed", name: "j", status: "running", instruction: "do",
+      inputHeadersJson: "[]", poolSize: 2, maxAttempts: 2, createdAt: 1, updatedAt: 1, startedAt: 1,
+    }
+    const mk = (itemId: string, rowIndex: number, status: BatchJobItem["status"], attempt: number): BatchJobItem => ({
+      jobId: "crashed", itemId, rowIndex, rowJson: "{}", status, attemptCount: attempt, createdAt: 1, updatedAt: 1,
+    })
+    await store.createJob(job, [
+      mk("i0", 0, "done", 1),
+      mk("i1", 1, "running", 1), // stranded
+      mk("i2", 2, "running", 1), // stranded
+    ])
+  }
+
+  test("stranded `running` items are re-dispatched ⇒ job completes", async () => {
+    const { store, runner } = makeRunner(okDispatch())
+    await crashedJob(store)
+    const snap = await runner.resume("crashed")
+    expect(snap.ok).toBe(true)
+    if (!snap.ok) throw new Error("unreachable")
+    expect(snap.value.job.status).toBe("completed")
+    expect(snap.value.items.every((i) => i.status === "done")).toBe(true)
+    // the previously-done item stays done; the two stranded ones were re-run.
+    expect(snap.value.items.find((i) => i.itemId === "i0")?.status).toBe("done")
+  })
+
+  test("a stranded item's interrupted attempt is rolled back (attempt cap honored)", async () => {
+    // Runner that always fails: a resumed item at attempt 1 (rolled back to 0)
+    // gets maxAttempts(2) fresh tries, then sticky-fails — proving the roll-back.
+    let calls = 0
+    const failing: RowDispatchPort = () => {
+      calls++
+      return Promise.resolve(err({ kind: "store-failed", reason: "x" }))
+    }
+    const { store, runner } = makeRunner(failing)
+    await crashedJob(store)
+    await runner.resume("crashed")
+    // 2 stranded items × 2 attempts each (roll-back gave each a full cap) = 4.
+    expect(calls).toBe(4)
+  })
+
+  test("a terminal (completed) job ⇒ resume is a no-op snapshot", async () => {
+    const { store, runner } = makeRunner(okDispatch())
+    const job: BatchJob = {
+      id: "done-job", name: "j", status: "completed", instruction: "do",
+      inputHeadersJson: "[]", poolSize: 2, maxAttempts: 1, createdAt: 1, updatedAt: 1,
+    }
+    await store.createJob(job, [])
+    const snap = await runner.resume("done-job")
+    expect(snap.ok && snap.value.job.status).toBe("completed")
+  })
+})
 
 describe("output schema enforcement", () => {
   const schemaJson = JSON.stringify({

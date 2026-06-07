@@ -46,6 +46,10 @@ export interface SubagentConfigAssembleInput {
    *  surface owns the env read (QUANTA_WORKFLOW). Absent/false ⇒ not registered
    *  (byte-identical). */
   enableWorkflow?: boolean | undefined
+  /** GAP7-4 — when true, the `spawn_agents_on_csv` tool (CSV batch fan-out) is
+   *  registered against the shared runner. The surface owns the env read
+   *  (QUANTA_SPAWN_AGENTS_CSV). Absent/false ⇒ not registered (byte-identical). */
+  enableSpawnAgentsCsv?: boolean | undefined
 }
 
 export const buildSubagentConfigCore = (
@@ -73,6 +77,9 @@ export const buildSubagentConfigCore = (
   }
   if (input.enableWorkflow === true) {
     out.enableWorkflow = true
+  }
+  if (input.enableSpawnAgentsCsv === true) {
+    out.enableSpawnAgentsCsv = true
   }
   return out
 }

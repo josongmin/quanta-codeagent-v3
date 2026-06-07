@@ -18,10 +18,32 @@
  * `__resetCliKnobOverrides` is a test seam.
  */
 
+import { allInventoryKnobs } from "@/config/knob-inventory"
 import { isTruthyToken } from "@/shared"
-import { type CliKnob, cliKnob } from "./cli-knobs"
+import { allRuntimeConfigKnobs } from "@/shared/runtime-config-knobs"
+import { CLI_KNOBS, type CliKnob } from "./cli-knobs"
 
 type EnvBag = Readonly<Record<string, string | undefined>>
+
+/**
+ * envKey → declared default, across the 3 PURE declaration registries (cli +
+ * inventory + runtime-config-knobs). Lets `readCliKnob` supply the right default
+ * for ANY catalog knob, not just CLI-local ones — without this a read of an
+ * inventory/runtime-config knob returned `undefined` even though a default was
+ * declared (latent footgun). @/runner knobs are excluded (their default flows
+ * through their own `resolveKnobs`, and importing them needs side-effect
+ * registration). Built once, lazily. */
+let DEFAULTS: Map<string, NonNullable<CliKnob["default"]> | undefined> | undefined
+const knobDefault = (envKey: string): string | undefined => {
+  if (DEFAULTS === undefined) {
+    DEFAULTS = new Map()
+    for (const k of CLI_KNOBS) DEFAULTS.set(k.envKey, k.default)
+    for (const k of allInventoryKnobs()) DEFAULTS.set(k.envKey, k.default)
+    for (const k of allRuntimeConfigKnobs()) DEFAULTS.set(k.envKey, k.default)
+  }
+  const d = DEFAULTS.get(envKey)
+  return d === undefined ? undefined : String(d)
+}
 
 /** Session overrides set via `/config set` — highest precedence, live. */
 let SESSION: Map<string, string> = new Map()
@@ -46,8 +68,7 @@ const resolveRaw = (envKey: string, env: EnvBag): string | undefined => {
   if (ses !== undefined) return ses
   const e = env[envKey]
   if (e !== undefined) return e
-  const knob = cliKnob(envKey)
-  return knob?.default === undefined ? undefined : String(knob.default)
+  return knobDefault(envKey)
 }
 
 type KindToValue<K extends CliKnob["kind"]> = K extends "int"

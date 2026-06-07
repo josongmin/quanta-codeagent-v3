@@ -349,6 +349,9 @@ export const buildSubagentConfig = (
   // (gateOn ⇒ must be explicitly QUANTA_WORKFLOW=on/1): it fans out a tree of
   // subagents, so it opts in rather than riding the default subagent-ON seed.
   const enableWorkflow = enabled && (readCliKnob("QUANTA_WORKFLOW", "bool") ?? false)
+  // GAP7-4 — `spawn_agents_on_csv` (CSV batch fan-out). DEFAULT-OFF (opt-in: it
+  // spawns one child per row, so it does not ride the default subagent-ON seed).
+  const enableSpawnAgentsCsv = enabled && (readCliKnob("QUANTA_SPAWN_AGENTS_CSV", "bool") ?? false)
   return buildSubagentConfigCore({
     enabled,
     ...(Number.isFinite(depth) ? { maxDepth: depth } : {}),
@@ -358,6 +361,7 @@ export const buildSubagentConfig = (
     ...(enableBatchSpawn ? { enableBatchSpawn: true } : {}),
     ...(enableIntrospect ? { enableIntrospect: true } : {}),
     ...(enableWorkflow ? { enableWorkflow: true } : {}),
+    ...(enableSpawnAgentsCsv ? { enableSpawnAgentsCsv: true } : {}),
   })
 }
 

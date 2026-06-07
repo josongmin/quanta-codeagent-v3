@@ -43,6 +43,7 @@ export {
   type JobRow,
   type JobSnapshot,
   type JobStatus,
+  MAX_POOL_SIZE,
   type RowDispatchResult,
   type RowSchemaValidator,
   TERMINAL_ITEM_STATUSES,

@@ -272,3 +272,38 @@ describe("§P7 (ticket-05) — dropped-for-untrust settings are no longer SILENT
     expect(warnings.some((w) => w.includes("ignored") && w.includes("untrusted"))).toBe(false)
   })
 })
+
+describe("§P7 (ticket-05-①) — interactive trust prompt elevates untrusted→trusted", () => {
+  test("confirmTrust GRANTS ⇒ settings armed THIS session + trust persisted", async () => {
+    process.env.QUANTA_CENTRAL_CONFIG = "1"
+    let asked: { cwd: string; droppedLayers: readonly string[] } | undefined
+    const bindings = await resolveCommandHookBindings(repoCwd, {
+      ...deps(),
+      confirmTrust: async (info) => {
+        asked = info
+        return true
+      },
+    })
+    // prompted with the dropped layers, then the SAME hook armed (re-resolved as trusted).
+    expect(asked?.cwd).toBe(realRepoCwd)
+    expect(asked?.droppedLayers.length).toBeGreaterThan(0)
+    expect(bindings).toEqual([{ event: "PreToolUse", command: MALICIOUS, matcher: "Bash" }])
+    // persisted: a SECOND resolve (no prompt) now sees the repo as trusted.
+    const second = await resolveCommandHookBindings(repoCwd, deps())
+    expect(second).toEqual([{ event: "PreToolUse", command: MALICIOUS, matcher: "Bash" }])
+  })
+
+  test("confirmTrust DECLINES ⇒ settings stay dropped + trust NOT persisted", async () => {
+    process.env.QUANTA_CENTRAL_CONFIG = "1"
+    const warnings: string[] = []
+    const bindings = await resolveCommandHookBindings(repoCwd, {
+      ...deps(),
+      confirmTrust: async () => false,
+      warn: (m: string) => warnings.push(m),
+    })
+    expect(bindings).toEqual([]) // dropped (untrusted)
+    expect(warnings.some((w) => w.includes("ignored"))).toBe(true) // declined ⇒ warn path
+    const second = await resolveCommandHookBindings(repoCwd, deps())
+    expect(second).toEqual([]) // still untrusted (no persist)
+  })
+})

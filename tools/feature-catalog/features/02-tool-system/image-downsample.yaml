@@ -29,11 +29,13 @@ evidence:
     - src/tool/image/downsample-plan.ts
     - src/tool/image/downsample-port.ts
     - src/tool/image/read.ts
+    - src/host/runtime/sips-image-downsample.ts
   adrs: [507]
   tests:
     unit:
       - tests/unit/image-downsample-plan-hellgate.test.ts
       - tests/unit/image-downsample-wire-hellgate.test.ts
+      - tests/unit/sips-image-downsample-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

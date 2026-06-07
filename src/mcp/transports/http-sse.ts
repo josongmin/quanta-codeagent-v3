@@ -101,7 +101,13 @@ export const sseDataFromBlock = (block: string): { data: string | null; id: stri
     if (line.startsWith("data:")) {
       data.push(line.slice(5).replace(/^ /, ""))
     } else if (line.startsWith("id:")) {
-      id = line.slice(3).replace(/^ /, "")
+      // Audit R1#3 + R2#1 — an EMPTY or ALL-WHITESPACE id field (`id:` / `id: ` /
+      // `id:  ` / `id:\t`) resets the last-event-id per WHATWG SSE §9.2.4; for
+      // resumption a blank cursor is useless and must NOT become a malformed
+      // `Last-Event-ID: ` header, so coerce blank → null (`.trim()` catches the
+      // multi-space / tab cases the single-space strip misses).
+      const v = line.slice(3).replace(/^ /, "")
+      id = v.trim().length > 0 ? v : null
     }
   }
   return { data: data.length === 0 ? null : data.join("\n"), id }
@@ -345,7 +351,7 @@ export class HttpSseMcpTransport implements McpTransport {
     }
   }
 
-  private async openStandaloneStream(): Promise<void> {
+  private async openStandaloneStream(isResumeRetry = false): Promise<void> {
     const abort = new AbortController()
     this.serverStreamAbort = abort
     // If close() already fired (the standalone GET races a fast teardown), the
@@ -390,7 +396,28 @@ export class HttpSseMcpTransport implements McpTransport {
       return
     }
     // 405 = server has no standalone stream; that's spec-legal, proceed.
-    if (!res.ok || res.status === 405) return
+    if (!res.ok) {
+      // §1.2 — a NON-405 failure WHILE CARRYING a resume cursor may mean the id
+      // is unknown/expired (the server restarted with a fresh session, or the id
+      // aged out). Drop the stale cursor + retry the GET exactly ONCE without
+      // `Last-Event-ID` so a bad cursor can't wedge the server stream. The
+      // `isResumeRetry` guard makes this strictly one extra attempt — no loop.
+      if (
+        !isResumeRetry &&
+        !this.closed && // Audit R1 #6 — never start the retry on a torn-down transport.
+        res.status !== 405 &&
+        this.lastEventId !== null
+      ) {
+        logger.info("mcp: SSE resume reset (cursor rejected on reconnect)", {
+          server: this.name,
+          status: res.status,
+          staleEventId: this.lastEventId,
+        })
+        this.lastEventId = null
+        return this.openStandaloneStream(true)
+      }
+      return
+    }
     const contentType = (res.headers.get("content-type") ?? "").toLowerCase()
     if (!contentType.includes("text/event-stream")) return
     // close() may have fired while the GET handshake was in flight — don't open
@@ -466,9 +493,15 @@ export class HttpSseMcpTransport implements McpTransport {
           boundary = buffer.indexOf("\n\n")
         }
       }
-      // Flush a trailing event with no terminating blank line.
+      // Flush a trailing event with no terminating blank line (back-compat: some
+      // servers omit the final `\n\n`). Audit R1#4 + R2#2 — advance the cursor
+      // from this block ONLY when every line is COMPLETE (buffer ends with `\n`):
+      // a complete-but-not-blank-terminated event's id is real (else a reconnect
+      // RE-replays the just-delivered event = duplicate), but a stream cut
+      // MID-line (`id: ab…`) must NOT record a truncated id.
+      const trailingComplete = buffer.endsWith("\n")
       const parsed = sseDataFromBlock(buffer)
-      if (parsed.id !== null) this.lastEventId = parsed.id
+      if (trailingComplete && parsed.id !== null) this.lastEventId = parsed.id
       if (parsed.data !== null) this.decodeAndEmit(parsed.data)
     } catch (e) {
       logger.debug("mcp: SSE stream ended", { server: this.name, error: errMessage(e) })

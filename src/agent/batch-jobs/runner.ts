@@ -36,6 +36,7 @@ import {
   type BatchJobSpec,
   type ItemFailureKind,
   type JobSnapshot,
+  MAX_POOL_SIZE,
   type RowSchemaValidator,
   TERMINAL_ITEM_STATUSES,
 } from "./types"
@@ -72,6 +73,14 @@ const validateSpec = (spec: BatchJobSpec): BatchJobError | null => {
   }
   if (!Number.isInteger(spec.poolSize) || spec.poolSize < 1) {
     return { kind: "invalid-spec", reason: "spec.poolSize must be an integer ≥ 1" }
+  }
+  // GAP7-1: bound concurrent fan-out. An uncapped poolSize over a large CSV would
+  // launch one subagent loop per row at once (provider/cost/memory blowup).
+  if (spec.poolSize > MAX_POOL_SIZE) {
+    return {
+      kind: "invalid-spec",
+      reason: `spec.poolSize ${spec.poolSize} exceeds MAX_POOL_SIZE ${MAX_POOL_SIZE}`,
+    }
   }
   if (!Number.isInteger(spec.maxAttempts) || spec.maxAttempts < 1) {
     return { kind: "invalid-spec", reason: "spec.maxAttempts must be an integer ≥ 1" }
@@ -179,6 +188,42 @@ export class BatchJobRunner {
     await this.finalize(job, "completed")
     const snap = await this.snapshot(jobId)
     return snap
+  }
+
+  /**
+   * Resume an interrupted job (GAP7-5). After a crash/restart over a durable
+   * store, a job may be left `pending`/`running` with items stranded `running`
+   * (the attempt was started but never settled). This:
+   *   1. no-ops on a job already terminal (`completed`/`failed`/`cancelled`) —
+   *      returns its snapshot;
+   *   2. resets every stranded `running` item back to `pending`, rolling the
+   *      interrupted attempt back by one (mirrors the abort roll-back) so it gets
+   *      a fresh try and the attempt cap is honored;
+   *   3. drives the job to completion via {@link runToEnd}.
+   * NO-THROW: a store fault surfaces as `Err`.
+   */
+  async resume(jobId: string, signal?: AbortSignal): Promise<Result<JobSnapshot, BatchJobError>> {
+    const jobRes = await this.deps.store.getJob(jobId)
+    if (!jobRes.ok) return err(jobRes.error)
+    const job = jobRes.value
+    if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") {
+      return this.snapshot(jobId)
+    }
+    const itemsRes = await this.deps.store.listItems(jobId)
+    if (!itemsRes.ok) return err(itemsRes.error)
+    for (const it of itemsRes.value) {
+      if (it.status !== "running") continue
+      const reset: BatchJobItem = {
+        ...it,
+        status: "pending",
+        attemptCount: Math.max(0, it.attemptCount - 1),
+        lastError: "resumed after interruption",
+        updatedAt: this.deps.clock(),
+      }
+      const put = await this.deps.store.putItem(reset)
+      if (!put.ok) return err(put.error)
+    }
+    return this.runToEnd(jobId, signal)
   }
 
   /**

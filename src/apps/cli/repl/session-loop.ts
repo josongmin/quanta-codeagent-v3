@@ -25,6 +25,7 @@ import {
   startInTurnLineReader,
 } from "./in-turn-reader"
 import { routeMidTurnLine } from "./inbound-dispatch"
+import { clearInputLane, enterLaneMode, exitLaneMode, renderInputLane } from "./input-lane"
 import { type MidTurnCaptureHandle, maybeCreateMidTurnCaptureWire } from "./mid-turn-capture-wire"
 import { maybeCreateNdjsonSinkWire } from "./ndjson-wire"
 import type { PlaybookTriggerSurfaceSeam } from "./playbook-trigger-surface-seam"
@@ -181,6 +182,99 @@ export interface RunSessionLoopDeps {
  *  pathological paste cannot be injected wholesale. Named, not an inlined magic
  *  number (no-heuristic rule). */
 const INBOUND_MAX_BYTES = 64 * 1024
+
+/** §08b / audit R3 — the bottom mid-turn input-lane renderer. Entered LAZILY on
+ *  the FIRST keystroke (a turn with no mid-turn typing never reserves the scroll
+ *  region ⇒ byte-identical viewport), capturing the terminal height ONCE so the
+ *  per-keystroke render + the teardown all target the SAME row even across a
+ *  mid-turn resize. Extracted to a module factory to keep `runSessionLoop` under
+ *  the cognitive-complexity cap. The caller writes `render` into the in-turn
+ *  reader's `onPartial` and calls `teardown()` in the turn's `finally`. */
+const makeLaneRenderer = (
+  out: NodeJS.WriteStream,
+): {
+  render: (buffer: string) => void
+  teardown: () => void
+} => {
+  let laneRows: number | null = null
+  return {
+    render(buffer: string): void {
+      if (buffer.length === 0 && laneRows === null) return // nothing typed yet
+      if (laneRows === null) {
+        laneRows = out.rows ?? 24 // first keystroke: reserve the bottom row.
+        out.write(enterLaneMode(laneRows))
+      }
+      const cols = out.columns
+      out.write(
+        buffer.length > 0
+          ? renderInputLane(buffer, { rows: laneRows, ...(cols !== undefined ? { cols } : {}) })
+          : clearInputLane({ rows: laneRows }),
+      )
+    },
+    teardown(): void {
+      if (laneRows === null) return
+      try {
+        out.write(exitLaneMode(laneRows))
+      } catch {
+        /* stdout torn down — nothing to restore */
+      }
+      laneRows = null
+    },
+  }
+}
+
+/** Wrap a `runOneTurn` invocation with the concurrent in-turn reader (+ optional
+ *  bottom input lane). Default-OFF passthrough when no capture wire / stdin. When
+ *  active, EXACTLY ONE reader is alive for the awaited turn — started before the
+ *  await, disposed in `finally` (every exit path) so it never leaks into the next
+ *  turn nor collides with the turn-boundary reader. Extracted to a module factory
+ *  (owns the per-turn index counter) to keep `runSessionLoop` under the
+ *  cognitive-complexity cap. */
+const makeInTurnCaptureWrapper = (args: {
+  readonly midTurnCapture: MidTurnCaptureHandle | undefined
+  readonly inTurnStdin: InTurnReaderStdin | undefined
+  readonly inboundMode: { current: InboundMode } | undefined
+  readonly conversationActions: ConversationActionSurface | undefined
+  readonly externalPromptQueue: ExternalPromptQueue
+  /** `QUANTA_MIDTURN_VISIBLE` knob value; the TTY gate is applied here. */
+  readonly midTurnVisibleKnob: boolean
+}): (<R>(run: () => Promise<R>) => Promise<R>) => {
+  // §08b — the lane render is opt-in AND TTY-only (ANSI to a pipe corrupts output).
+  const midTurnVisible = args.midTurnVisibleKnob && process.stdout.isTTY === true
+  let currentTurnIndex = 0
+  return async <R>(run: () => Promise<R>): Promise<R> => {
+    const { midTurnCapture, inTurnStdin } = args
+    if (midTurnCapture === undefined || inTurnStdin === undefined) return await run()
+    currentTurnIndex += 1
+    const turnIndexForCapture = currentTurnIndex
+    // §08b / audit R3 — lazy bottom-input-lane renderer (entered on first
+    // keystroke, rows captured once). Undefined ⇒ no `onPartial`, no region change.
+    const lane = midTurnVisible ? makeLaneRenderer(process.stdout) : undefined
+    const reader: InTurnLineReaderHandle = startInTurnLineReader({
+      stdin: inTurnStdin,
+      onLine: (line) => {
+        // §steer — route by inbound mode (tested core `routeMidTurnLine`). queue /
+        // no surface ⇒ capture path (byte-identical); weave/interrupt ⇒ decide
+        // against the live turn. Ack NOT rendered inline (the EFFECT is the signal).
+        routeMidTurnLine(line, {
+          mode: args.inboundMode?.current ?? "queue",
+          surface: args.conversationActions,
+          captureLine: (l) => void midTurnCapture.captureLine(l, turnIndexForCapture),
+          enqueue: (t) => args.externalPromptQueue.push(t),
+          maxInputBytes: INBOUND_MAX_BYTES,
+          now: () => Date.now(),
+        })
+      },
+      ...(lane !== undefined ? { onPartial: lane.render } : {}),
+    })
+    try {
+      return await run()
+    } finally {
+      reader.dispose()
+      lane?.teardown() // R3 — only if entered; uses rows captured at enter.
+    }
+  }
+}
 
 /** Default Esc-Esc cancel window (ms). Matches the prior inline constant in
  *  `runRepl.installTurnCancel`. Held as a module constant so the runner +
@@ -388,49 +482,18 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
           pushExternal: (text) => externalPromptQueue.push(text),
         })
       : undefined
-  // The in-flight turn index the captured line is tagged with (carried into the
-  // FollowUp for replay ordering). Bumped once per turn, BEFORE the reader starts,
-  // by `withInTurnCapture`. 0 when no turn has run / capture is off.
-  let currentTurnIndex = 0
-  // Wrap a `runOneTurn` invocation with the concurrent in-turn reader. When the
-  // capture wire is absent OR no stdin was injected, this is a pure passthrough
-  // (default-OFF byte-identical — no reader allocated, no listener attached). When
-  // present, EXACTLY ONE reader is alive for the lifetime of the awaited turn: it
-  // is started before the await and disposed in the `finally` (every exit path —
-  // normal completion, a thrown turn error, an Esc-Esc/Ctrl-C abort), so it can
-  // never leak into the next turn or collide with the turn-boundary reader.
-  const withInTurnCapture = async <R>(run: () => Promise<R>): Promise<R> => {
-    if (midTurnCapture === undefined || deps.inTurnStdin === undefined) {
-      return await run()
-    }
-    currentTurnIndex += 1
-    const turnIndexForCapture = currentTurnIndex
-    const reader: InTurnLineReaderHandle = startInTurnLineReader({
-      stdin: deps.inTurnStdin,
-      onLine: (line) => {
-        // §steer — route the mid-turn line by inbound mode (tested core in
-        // `routeMidTurnLine`). DEFAULT (queue) OR no conversation-action surface ⇒
-        // the existing capture path (plan-queue + next-turn drain), byte-identical.
-        // weave/interrupt ⇒ decide+dispatch against the live turn snapshot. The
-        // ack is intentionally NOT rendered inline (mid-stream redraw contention)
-        // — the EFFECT (injection / abort / enqueue) is the user-visible signal.
-        routeMidTurnLine(line, {
-          mode: deps.inboundMode?.current ?? "queue",
-          surface: deps.conversationActions,
-          // captureLine is no-throw + async; fire-and-forget (reader never awaits).
-          captureLine: (l) => void midTurnCapture.captureLine(l, turnIndexForCapture),
-          enqueue: (t) => externalPromptQueue.push(t),
-          maxInputBytes: INBOUND_MAX_BYTES,
-          now: () => Date.now(),
-        })
-      },
-    })
-    try {
-      return await run()
-    } finally {
-      reader.dispose()
-    }
-  }
+  // Wrap a `runOneTurn` invocation with the concurrent in-turn reader (+ optional
+  // input lane). Extracted to a module factory so `runSessionLoop` stays under the
+  // cognitive-complexity cap; the factory owns the per-turn index counter + the
+  // §08b `QUANTA_MIDTURN_VISIBLE`+TTY gate.
+  const withInTurnCapture = makeInTurnCaptureWrapper({
+    midTurnCapture,
+    inTurnStdin: deps.inTurnStdin,
+    inboundMode: deps.inboundMode,
+    conversationActions: deps.conversationActions,
+    externalPromptQueue,
+    midTurnVisibleKnob: runtimeConfig().midTurnVisible,
+  })
   let lastUserInputAt = 0
   let lastTurnOutcome: LastTurnOutcome | undefined
   const liveAutomationSlot =

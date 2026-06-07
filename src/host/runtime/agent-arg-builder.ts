@@ -118,6 +118,7 @@ import {
 import { DefaultDeferredResultRegistry } from "@/tool/deferred/default-registry"
 import { buildMcpConnectorDiscoveryPort } from "./mcp-connector-wire"
 import { buildPtyBackend } from "./pty-backend"
+import { sipsImageDownsamplePort } from "./sips-image-downsample"
 
 /** Hermetic test seams for the composition root (mirrors the H7 `seams?`
  *  precedent on {@link AssembleRequest}). Absent ⇒ every wire uses its REAL
@@ -831,6 +832,13 @@ const buildGatedToolPorts = (
               : {}),
           }),
         }
+      : {}),
+    // image downsample (gap GAP 1, ADR-0507) — gated macOS `sips`-backed codec so
+    // read_image SHRINKS oversized images instead of rejecting. PLATFORM-BOUND
+    // (darwin only) + default-OFF: absent ⇒ over-cap images rejected as before
+    // (byte-identical). Non-macOS / gate-off ⇒ no port.
+    ...(process.platform === "darwin" && gateOn(env, "QUANTA_IMAGE_DOWNSAMPLE")
+      ? { imageDownsample: sipsImageDownsamplePort() }
       : {}),
     // reflect (gap GAP 11, ADR-0504) — gated LLM-backed self-correction tool.
     // Default-OFF: tool menu byte-identical unless QUANTA_REFLECT is on AND a real

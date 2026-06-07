@@ -32,6 +32,16 @@ describe("readCliKnob — typed read + precedence (ADR-0503 P4)", () => {
     expect(readCliKnob("QUANTA_NOT_A_KNOB", "string", {})).toBeUndefined()
   })
 
+  test("resolves defaults from ALL pure registries, not just cli-knobs (footgun fix)", () => {
+    // QUANTA_MEMORY_AUTO is an INVENTORY knob (default true) — previously readCliKnob
+    // returned undefined for it; now it supplies the declared default.
+    expect(readCliKnob("QUANTA_MEMORY_AUTO", "bool", {})).toBe(true)
+    // a runtime-config-knobs default (QUANTA_LOG_LEVEL = "info")
+    expect(readCliKnob("QUANTA_LOG_LEVEL", "string", {})).toBe("info")
+    // env still overrides the registry default
+    expect(readCliKnob("QUANTA_MEMORY_AUTO", "bool", { QUANTA_MEMORY_AUTO: "0" })).toBe(false)
+  })
+
   test("precedence: session override beats env beats default", () => {
     // default 4000, env 1200, session 9000 → session wins
     setCliKnobOverride("QUANTA_FLASH_ERROR_MS", "9000")

@@ -44,8 +44,9 @@ import {
   type RowDispatchPort,
   type RowDispatchResult,
 } from "@/agent/batch-jobs"
+import { buildRowDispatchAdapter } from "@/agent/batch-jobs-dispatch"
 import { err, errMessage, ok, type Result } from "@/shared"
-import type { SubagentRequest, SubagentResult, SubagentRunner } from "@/subagent"
+import type { SubagentRunner } from "@/subagent"
 
 /** EX_USAGE — a usage/argument error (matches the BSD sysexits convention the
  *  rest of the CLI maps argument faults to). */
@@ -237,66 +238,11 @@ export const parseBatchArgs = (argv: readonly string[]): Result<ParsedBatchArgs,
   })
 }
 
-/**
- * Parse a subagent's final assistant text into the structured `value` the
- * runner stores + validates. Tries strict JSON first (so a child that emits a
- * JSON object satisfies an output schema directly); on a non-JSON answer it
- * wraps the raw text as `{ text }` so a schema-less job still records the
- * answer. Never throws.
- */
-const parseChildValue = (finalText: string): unknown => {
-  const trimmed = finalText.trim()
-  if (trimmed.length === 0) return { text: "" }
-  try {
-    return JSON.parse(trimmed)
-  } catch {
-    return { text: finalText }
-  }
-}
-
-/**
- * Build a {@link RowDispatchPort} OVER the injected {@link SubagentRunner}.
- * This is the adapter the spec calls for: it wraps the real subagent dispatch
- * (the concrete dependency) and satisfies the slice's injected port.
- *
- * Contract (matches `RowDispatchPort` JSDoc):
- *   - ONE call = ONE row's subagent task (depth 1 child of the batch root).
- *   - NO-THROW: a runner rejection is caught + converted to
- *     `Err({kind:"store-failed"})` so the runner's retry/fail path handles it
- *     (never bubbles).
- *   - An aborted dispatch (signal fired) resolves `Err({kind:"aborted"})`.
- *   - The row's JSON is appended to the instruction so the child sees both.
- */
-export const buildRowDispatchAdapter = (runner: SubagentRunner): RowDispatchPort => {
-  return async (req) => {
-    if (req.signal?.aborted) return err({ kind: "aborted" as const })
-    const prompt = `${req.instruction}\n\n## Row ${req.rowIndex} (JSON)\n${req.rowJson}`
-    const childReq: SubagentRequest = {
-      prompt,
-      depth: 1,
-      taskKind: "read",
-      ...(req.signal ? { signal: req.signal } : {}),
-    }
-    let result: SubagentResult
-    try {
-      result = await runner(childReq)
-    } catch (e) {
-      // No-throw boundary: a thrown runner becomes a typed dispatch failure so
-      // the runner's retry/fail path owns it (mirrors the port's "child errored
-      // → Err, never reject" contract).
-      return err({ kind: "store-failed" as const, reason: errMessage(e) })
-    }
-    if (req.signal?.aborted) return err({ kind: "aborted" as const })
-    if (!result.ok) {
-      return err({
-        kind: "store-failed" as const,
-        reason: result.finalText || "subagent dispatch failed",
-      })
-    }
-    const value: RowDispatchResult = { value: parseChildValue(result.finalText) }
-    return ok(value)
-  }
-}
+// `parseChildValue` + `buildRowDispatchAdapter` moved to
+// `@/agent/batch-jobs-dispatch` (the `@/subagent` bridge) so the agent-tool
+// fan-out (`spawn_agents_on_csv`, tier1) and this human CLI share ONE adapter
+// instead of duplicating it. Re-exported for callers importing it from here.
+export { buildRowDispatchAdapter }
 
 /** Counter-backed id minter (deterministic ordinal + a per-process salt so two
  *  concurrent runs never collide). Used only when the caller injects none. */

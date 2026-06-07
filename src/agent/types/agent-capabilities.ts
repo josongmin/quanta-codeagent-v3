@@ -106,6 +106,12 @@ export type SubagentBlock = {
    *  trio/6-tool use (each workflow step is one subagent spawn). Requires
    *  `subagent` enabled (a runner must exist). Default-OFF (QUANTA_WORKFLOW). */
   enableWorkflow?: boolean
+  /** GAP7-4 — `spawn_agents_on_csv` agent-callable batch fan-out. Absent/`false`
+   *  ⇒ NOT registered (byte-identical). `true` ⇒ the tier-1 subagent block builds
+   *  it against the SAME injected runner (one subagent per CSV row, bounded pool).
+   *  Requires `subagent` enabled (a runner must exist). Default-OFF
+   *  (QUANTA_SPAWN_AGENTS_CSV). */
+  enableSpawnAgentsCsv?: boolean
 }
 
 /**

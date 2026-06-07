@@ -1,0 +1,44 @@
+id: spawn-agents-on-csv
+title: spawn_agents_on_csv — agent-callable CSV batch fan-out (capped, durable, resumable) (ADR-0510)
+section: 2
+subsystem: 도구 — batch fan-out (one subagent per CSV row; Codex spawn_agents_on_csv parity)
+order: 214
+maturity: L4
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "absorbed:codex"]
+depends_on: [agent-loop-core]
+config_refs:
+  env: ["QUANTA_SPAWN_AGENTS_CSV"]
+purpose: |
+  Make the ADR-0463 batch-jobs domain agent-callable + production-grade. The agent
+  hands a CSV + a shared instruction; `spawn_agents_on_csv` fans ONE subagent per
+  row (bounded by MAX_POOL_SIZE=32 — the fan-out DoS guard), collects each row's
+  structured result, returns a results CSV. Wired in the tier-1 subagent block
+  over the SAME runner (ephemeral in-memory store), gated QUANTA_SPAWN_AGENTS_CSV,
+  hitlTier:always-confirm (cost-bearing). Recursion-safe: each row's child runs at
+  parentDepth+1 so the runner's maxDepth guard bounds a batch-of-batches; an abort
+  surfaces as ok:false (not a 0/N false success). Durable path: SqliteJobStore
+  (agent_jobs/agent_job_items, restart-survival) + BatchJobRunner.resume() (resets
+  stranded running items) back the human `quanta batch` CLI. The
+  RowDispatchPort-over-SubagentRunner adapter is shared (batch-jobs-dispatch.ts).
+evidence:
+  code:
+    - src/agent/batch-jobs/runner.ts
+    - src/agent/batch-jobs-dispatch.ts
+    - src/host/runtime/batch-jobs-sqlite-store.ts
+    - src/tool/spawn-agents-csv/index.ts
+  adrs: [463, 510]
+  tests:
+    unit:
+      - tests/unit/agent-batch-jobs-hellgate.test.ts
+      - tests/unit/batch-jobs-sqlite-store-hellgate.test.ts
+      - tests/unit/spawn-agents-csv-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold: null

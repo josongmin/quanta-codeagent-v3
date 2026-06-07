@@ -28,6 +28,14 @@ const agentSchema = z.object({
         "REQUIRES the workspace to be a git repo — otherwise it falls back to no isolation " +
         "(shares the parent cwd).",
     ),
+  fork_turns: z
+    .union([z.literal("none"), z.literal("all"), z.number().int().min(0)])
+    .optional()
+    .describe(
+      "Inherit the parent's recent conversation: 'none' (cold start, default), " +
+        "'all', or N (the last N turns). The inherited transcript is REDACTED and " +
+        "framed as data; use it so the child starts with context instead of cold.",
+    ),
   max_turns: z.number().optional().describe("Turn budget for the child loop"),
   max_tokens: z.number().optional().describe("Token budget for the child loop"),
   task_kind: z
@@ -166,6 +174,12 @@ export interface AgentToolOptions {
   maxDepth?: number
   /** Shared registry so the Task* tools observe the same background tasks. */
   registry?: TaskRegistry
+  /** GAP8a fork_turns — compose the child prompt with an inherited (redacted)
+   *  parent-transcript preamble for the requested fork spec. Injected by the
+   *  composition root (`@/agent` tier1, which owns the transcript + redactor) so
+   *  this slice stays plane-clean (no upward `@/agent` import). ABSENT ⇒ the
+   *  prompt is used as-is (byte-identical cold start). */
+  forkPrompt?: (prompt: string, spec: "none" | "all" | number) => string
 }
 
 /** Read the caller's recursion depth off the ToolContext if the host set it.
@@ -533,7 +547,14 @@ export const createAgentTool = (
       // Mint the task id ONCE so the SAME id keys (a) the background registry
       // entry AND (b) the checkpoint file path the child writes to.
       const { taskId, checkpointPath } = resolveTaskInfo(input, ctx, registry)
-      const req = buildRequest(input, childDepth, pre.priorAttempt, checkpointPath)
+      // GAP8a fork_turns: compose an inherited parent-context preamble onto the
+      // prompt when the composition root wired `forkPrompt`. Absent dep or
+      // `fork_turns:"none"` ⇒ prompt unchanged (byte-identical cold start).
+      const forkedInput: AgentInput =
+        opts.forkPrompt !== undefined
+          ? { ...input, prompt: opts.forkPrompt(input.prompt, input.fork_turns ?? "none") }
+          : input
+      const req = buildRequest(forkedInput, childDepth, pre.priorAttempt, checkpointPath)
 
       if (input.background === true) {
         yield launchBackground(opts, registry, input, req, taskId, (id) =>

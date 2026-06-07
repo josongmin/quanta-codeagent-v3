@@ -24,6 +24,7 @@
 import { readFile, realpath, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import * as readline from "node:readline/promises"
 import { buildSearchPipelineFromEnv, clearSearchPipelineWireForTests } from "@/runner/assemble"
 import { loadEnvFiles } from "@/shared/env-files"
 
@@ -35,9 +36,11 @@ import { bindingsFromHookEvents } from "@/agent/command-hooks/settings-loader"
 import type { CommandHookBinding } from "@/agent/command-hooks/types"
 import {
   canonicalizeTrustedPaths,
+  mergeDiskLayers,
+  osManagedSettingsPath,
   parseSettingSources,
   type ReadTextPort,
-  resolveDiskConfig,
+  readDiskLayers,
   type TrustPersistencePort,
   type TrustRecord,
   TrustStore,
@@ -182,7 +185,36 @@ const fsReadText: ReadTextPort = async (path) => {
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code
     if (code === "ENOENT" || code === "ENOTDIR") return undefined
+    // Audit R1 #4 — a present-but-unreadable layer (EACCES, e.g. a root-owned
+    // `/etc/quanta/managed-settings.json` with 600 perms) must NOT crash boot.
+    // Treat it as absent (no contribution) + log; ticket-05-③ made `managedPath`
+    // always-returned, so without this a stray perms bit would DoS every session.
+    if (code === "EACCES" || code === "EISDIR" || code === "EPERM") {
+      logger.warn(`[quanta] central config: cannot read ${path} (${code}) — skipping layer`)
+      return undefined
+    }
     throw err
+  }
+}
+
+/** §P7 (ticket-05-①) — the concrete interactive trust prompt. A one-shot
+ *  readline `[y/N]` ONLY on a real interactive terminal (both stdin+stdout
+ *  TTYs); a non-TTY (headless / piped / CI) returns `false` WITHOUT reading, so
+ *  boot never blocks on input. Grant ⇒ the caller persists trust + re-resolves. */
+const defaultTrustPrompt = async (info: {
+  cwd: string
+  droppedLayers: readonly string[]
+}): Promise<boolean> => {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return false
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+  try {
+    const answer = await rl.question(
+      `\n[quanta] This project ships settings (${info.droppedLayers.join(", ")}) that are IGNORED ` +
+        `because it is untrusted:\n  ${info.cwd}\nTrust this project and apply its settings? [y/N] `,
+    )
+    return /^y(es)?$/i.test(answer.trim())
+  } finally {
+    rl.close()
   }
 }
 
@@ -247,6 +279,15 @@ export interface ResolveCommandHooksDeps {
    *  gate was previously SILENT (an empty sink), so a user never learned their
    *  repo-local `.quanta/settings.json` hooks/permissions were ignored. */
   readonly warn?: (msg: string) => void
+  /** §P7 (ticket-05-①) — interactive trust elevation prompt. Invoked ONLY when
+   *  the project is untrusted AND has dropped loosening grants. Returning `true`
+   *  persists the trust grant + re-resolves as trusted (this session honors the
+   *  settings, no restart). Absent ⇒ no prompt (the warn path runs) — the headless
+   *  / non-TTY / CI default, so boot never blocks on input. */
+  readonly confirmTrust?: (info: {
+    cwd: string
+    droppedLayers: readonly string[]
+  }) => Promise<boolean>
 }
 
 export const resolveCommandHookBindings = async (
@@ -280,29 +321,52 @@ export const resolveCommandHookBindings = async (
   // §P7 (ticket-05) — real warn sink (was an empty `() => {}`): surfaces both
   // malformed-layer skips AND the "dropped because untrusted" notice below.
   const warn = deps.warn ?? ((m: string) => logger.warn(m))
-  const resolved = await resolveDiskConfig({
+  // Build the resolve input ONCE so the post-trust re-resolve reuses it verbatim
+  // (only `trusted` flips). §P7 ticket-05-③ managedPath = the OS lockdown file.
+  const resolveInput = {
     cwd: realCwd,
     userConfigDir,
-    // Managed-OS-path enumeration (the `/Library/.../managed-settings.json` /
-    // `/etc/quanta` machine layer, §9 Q5) is DEFERRED — undefined ⇒ the managed
-    // layer is simply absent (never read), which is fail-safe (a non-existent
-    // machine layer just doesn't contribute). Wiring it is a follow-up.
-    managedPath: undefined,
+    managedPath: osManagedSettingsPath(
+      process.platform,
+      rc.managedSettingsPath,
+      process.env.PROGRAMDATA,
+    ),
     trusted,
     sources: parseSettingSources(rc.centralConfigSources),
     read: deps.read ?? fsReadText,
     warn,
-  })
-  // §P7 (ticket-05) — no longer SILENT: tell the user which untrusted layers had
+  }
+  // Audit R1 #5 — read the layers ONCE; merge at the two trust levels off the
+  // SAME bytes (no read→prompt→re-read TOCTOU window where a repo swaps its
+  // settings between the check and the post-grant re-merge).
+  const layers = await readDiskLayers(resolveInput)
+  const resolved = mergeDiskLayers(layers, trusted)
+  if (trusted || resolved.droppedForUntrust.length === 0) {
+    return bindingsFromHookEvents(resolved.hooks)
+  }
+  // UNTRUSTED with dropped loosening grants. §P7 ticket-05-① — offer interactive
+  // elevation: if a `confirmTrust` prompt is wired AND the user grants, persist
+  // the trust + RE-MERGE as trusted so THIS session honors the settings (no
+  // restart, no re-read). Declined / no prompt ⇒ fall through to the warn.
+  if (deps.confirmTrust !== undefined) {
+    const granted = await deps.confirmTrust({
+      cwd: realCwd,
+      droppedLayers: resolved.droppedForUntrust,
+    })
+    if (granted) {
+      store.setTrusted(realCwd, Date.now())
+      await store.flush()
+      return bindingsFromHookEvents(mergeDiskLayers(layers, true).hooks)
+    }
+  }
+  // §P7 ticket-05-② — no longer SILENT: tell the user which untrusted layers had
   // their loosening grants (allow / hooks / mcp launchers) dropped, and how to
   // trust the project. Tightening (deny) still applied; only loosening dropped.
-  if (!trusted && resolved.droppedForUntrust.length > 0) {
-    warn(
-      `[quanta] ${resolved.droppedForUntrust.length} setting layer(s) ignored for the untrusted ` +
-        `project ${realCwd} (${resolved.droppedForUntrust.join(", ")}): allow/hooks/mcp grants are ` +
-        `not honored until you trust it (add to QUANTA_TRUSTED_PATHS or the trust store).`,
-    )
-  }
+  warn(
+    `[quanta] ${resolved.droppedForUntrust.length} setting layer(s) ignored for the untrusted ` +
+      `project ${realCwd} (${resolved.droppedForUntrust.join(", ")}): allow/hooks/mcp grants are ` +
+      `not honored until you trust it (add to QUANTA_TRUSTED_PATHS or the trust store).`,
+  )
   return bindingsFromHookEvents(resolved.hooks)
 }
 
@@ -360,7 +424,13 @@ export const runMain = async (deps: MainDeps = {}): Promise<void> => {
     // <cwd>/settings.json)` read (byte-identical, no disk-config / trust read);
     // knob ON ⇒ the trust-gated central loader (an UNTRUSTED repo's hook
     // commands are dropped before they can become live bindings).
-    partial.commandHookBindings = await resolveCommandHookBindings(process.cwd())
+    partial.commandHookBindings = await resolveCommandHookBindings(process.cwd(), {
+      // Audit R1 #6 — TTY-guard at the WIRE (defense-in-depth): only arm the
+      // interactive prompt on a real terminal, so a headless / piped / CI boot
+      // never even constructs a readline (the prompt ALSO self-guards, but the
+      // wire-site gate means removing the inner check can't regress into a hang).
+      ...(process.stdin.isTTY && process.stdout.isTTY ? { confirmTrust: defaultTrustPrompt } : {}),
+    })
   }
   // Named-agent registry — load `.quanta/agents` (+ native dir) ONCE per session
   // at the async root and thread the resolver onto the partial; `buildBaseFromArgs`

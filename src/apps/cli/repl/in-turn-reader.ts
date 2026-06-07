@@ -64,6 +64,12 @@ export interface InTurnLineReaderDeps {
    *  reader guards it so a throw can never break the in-flight turn. MAY be
    *  async; the reader does not await it (fire-and-forget, ordered by arrival). */
   readonly onLine: (line: string) => void | Promise<void>
+  /** §11.5 ticket-08b — OPTIONAL per-keystroke hook with the CURRENT partial-line
+   *  buffer (after each chunk: every char / backspace / terminator). The session
+   *  loop wires this (TTY only) to redraw the bottom input lane via
+   *  {@link renderInputLane}; after a terminator/CTRL-C it fires with `""` so the
+   *  lane clears. Absent ⇒ no render (byte-identical: the reader writes nothing). */
+  readonly onPartial?: (buffer: string) => void
   /** Optional max bytes held in the partial-line accumulator before the partial
    *  is dropped (a paste / runaway producer with no newline must not grow the
    *  buffer unbounded mid-turn). Defaults to 64 KiB. A dropped partial is
@@ -81,6 +87,8 @@ export interface InTurnLineReaderHandle {
 const CR = 0x0d
 const LF = 0x0a
 const CTRL_C = 0x03
+const BACKSPACE = 0x08 // ^H
+const DELETE = 0x7f // DEL (most terminals send this for Backspace)
 const DEFAULT_MAX_LINE_BYTES = 64 * 1024
 
 /**
@@ -147,6 +155,22 @@ export const startInTurnLineReader = (deps: InTurnLineReaderDeps): InTurnLineRea
     },
     /** Handle an ordinary char: accumulate, bounding the partial. Once a line
      *  has overflowed, swallow its remaining chars until the next terminator. */
+    /** §08b — Backspace/DEL edits the buffer (was previously accumulated as a
+     *  raw control char, corrupting the captured line). No-op on an empty or
+     *  overflowed partial. */
+    backspace(): void {
+      if (this.overflowed || this.partial.length === 0) return
+      // Audit R1 #1 — surrogate-aware: a Backspace must delete a whole code point,
+      // not a lone UTF-16 unit (else an emoji/astral char leaves a broken half-
+      // surrogate in the captured line). Drop 2 units when the tail is a low
+      // surrogate preceded by a high surrogate.
+      const last = this.partial.charCodeAt(this.partial.length - 1)
+      const prev = this.partial.length >= 2 ? this.partial.charCodeAt(this.partial.length - 2) : 0
+      const isPair = last >= 0xdc00 && last <= 0xdfff && prev >= 0xd800 && prev <= 0xdbff
+      const drop = isPair ? 2 : 1
+      this.partial = this.partial.slice(0, -drop)
+      this.bytes = Math.max(0, this.bytes - drop)
+    },
     push(ch: string): void {
       if (this.overflowed) return
       this.partial += ch
@@ -171,7 +195,19 @@ export const startInTurnLineReader = (deps: InTurnLineReaderDeps): InTurnLineRea
       const code = text.charCodeAt(i)
       if (code === CTRL_C) acc.reset()
       else if (code === CR || code === LF) acc.terminate()
+      else if (code === BACKSPACE || code === DELETE) acc.backspace()
       else acc.push(text[i] ?? "")
+    }
+    // §08b — surface the live buffer for the bottom input-lane redraw (or `""`
+    // after a terminator/CTRL-C ⇒ clear the lane). No-throw: a faulting render
+    // sink must never break the in-flight turn. Audit R1 #3 — skip empty chunks
+    // (0 bytes processed ⇒ nothing changed ⇒ no spurious lane redraw/flicker).
+    if (deps.onPartial !== undefined && text.length > 0) {
+      try {
+        deps.onPartial(acc.partial)
+      } catch {
+        /* render sink threw — swallow; the in-flight turn is sacred */
+      }
     }
   }
 

@@ -190,6 +190,19 @@ export type RowSchemaValidator = (
  */
 export const DEFAULT_POOL_SIZE = 4
 
+/**
+ * HARD ceiling on `poolSize` — the max items a job may run concurrently (GAP7-1).
+ * The pump launches `slice(0, poolSize)` rows at once, so without a cap a job over
+ * a 1000-row CSV would fan out 1000 simultaneous subagent loops (provider rate-
+ * limit blowup + cost spike + local memory exhaustion — the DoS vector the audit
+ * flagged: `poolSize ≤ MAX_SAFE_INTEGER`). 32 = 8× {@link DEFAULT_POOL_SIZE},
+ * generous headroom for legitimate parallelism while keeping concurrent provider
+ * pressure bounded. A safety ceiling, NOT a tuned throughput threshold; a spec
+ * over it is rejected at submit (`invalid-spec`) rather than silently clamped, so
+ * the caller learns its request was unsafe.
+ */
+export const MAX_POOL_SIZE = 32
+
 /** A snapshot of a job + its items, returned by `await()` / `tick()`. */
 export interface JobSnapshot {
   readonly job: BatchJob

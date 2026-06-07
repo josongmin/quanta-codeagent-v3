@@ -628,6 +628,18 @@ export interface RuntimeConfig {
    *  knob ON but no source feeding `captureMidTurnLine`, behavior is still
    *  byte-identical. */
   readonly midTurnCapture: boolean
+  /** §11.5 ticket-08b — render the bottom input LANE for mid-turn keystrokes
+   *  (`QUANTA_MIDTURN_VISIBLE`). Strict opt-in, TTY-only. With capture on the
+   *  reader sees keystrokes but the user types BLIND; this knob makes the session
+   *  loop echo the live partial into a bottom-anchored lane (cursor save/restore
+   *  so streamed output above is undisturbed). Separate from capture because the
+   *  render is a stdout hot-path write — capture-without-render stays the safe
+   *  default. Non-TTY / OFF ⇒ no render (byte-identical). */
+  readonly midTurnVisible: boolean
+  /** §P7 ticket-05-③ — override for the OS managed-settings file path
+   *  (`QUANTA_MANAGED_SETTINGS_PATH`). Non-blank ⇒ used on every platform (CI /
+   *  org-lockdown escape hatch); absent ⇒ the per-OS default. */
+  readonly managedSettingsPath: string | undefined
   /** N6 — PTY/tmux session attach (`QUANTA_PTY_ATTACH`). Strict opt-in
    *  (`=== "1"`). Default false ⇒ the 6 `pty_*` tools are NOT registered
    *  (byte-identical, exec-risk). When ON, the composition root wires a
@@ -1383,6 +1395,8 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     progressUpdate: gateOn(env, "QUANTA_PROGRESS_UPDATE"),
     // #8 — strict `=== "1"` opt-in. Default false ⇒ no mid-turn capture facade.
     midTurnCapture: gateOn(env, "QUANTA_MIDTURN_CAPTURE"),
+    midTurnVisible: gateOn(env, "QUANTA_MIDTURN_VISIBLE"),
+    managedSettingsPath: env.QUANTA_MANAGED_SETTINGS_PATH,
     ptyAttach: gateOn(env, "QUANTA_PTY_ATTACH"),
     // D3 — PTY env-inherit escape hatch. Default false ⇒ scrubbed (secure).
     // Truthy (`1`/`true`/`on`) ⇒ full parent-env inherit (interactive opt-out).

@@ -87,7 +87,12 @@ describe("batch-cmd wire — gate-OFF inertness (A)", () => {
 
 describe("batch-cmd wire — happy path (B)", () => {
   test("one runner call per row + results CSV written", async () => {
-    const { runner, calls } = makeRunner((req) => okResult(`handled row ${req.rowIndex}`))
+    // The adapter embeds the row index in the prompt ("## Row N") — a
+    // SubagentRequest has no `rowIndex` field (see the prompt-branch note below),
+    // so derive it from the prompt.
+    const { runner, calls } = makeRunner((req) =>
+      okResult(`handled row ${req.prompt.match(/## Row (\d+)/)?.[1] ?? "?"}`),
+    )
     const { io, written, out } = makeIo({ "in.csv": CSV })
 
     const code = await runBatchCmd(

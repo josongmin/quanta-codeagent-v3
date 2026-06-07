@@ -317,3 +317,106 @@ describe("startInTurnLineReader — multi-turn lifecycle (loop finally contract)
     expect(stdin.paused).toBe(false)
   })
 })
+
+describe("startInTurnLineReader — §08b backspace edit + onPartial render hook", () => {
+  test("backspace (DEL 0x7f) edits the buffer, not captured as a raw char", () => {
+    const stdin = makeFakeStdin({ isTTY: false })
+    const lines: string[] = []
+    const reader = startInTurnLineReader({ stdin, onLine: (l) => void lines.push(l) })
+    stdin.emit("helo\x7flo\n") // "helo" → backspace → "hel" → "lo" ⇒ "hello"
+    reader.dispose()
+    expect(lines).toEqual(["hello"])
+  })
+
+  test("backspace 0x08 (^H) also edits; backspace on empty is a no-op", () => {
+    const stdin = makeFakeStdin({ isTTY: false })
+    const lines: string[] = []
+    const reader = startInTurnLineReader({ stdin, onLine: (l) => void lines.push(l) })
+    stdin.emit("\x08\x08ab\x08c\n") // leading bs on empty = no-op; "ab"→bs→"a"→"c" = "ac"
+    reader.dispose()
+    expect(lines).toEqual(["ac"])
+  })
+
+  test("onPartial fires the live buffer per chunk, and '' after a terminator", () => {
+    const stdin = makeFakeStdin({ isTTY: false })
+    const partials: string[] = []
+    const reader = startInTurnLineReader({
+      stdin,
+      onLine: () => {},
+      onPartial: (b) => partials.push(b),
+    })
+    stdin.emit("h")
+    stdin.emit("i")
+    stdin.emit("\n")
+    reader.dispose()
+    expect(partials).toEqual(["h", "hi", ""]) // draw "h", draw "hi", clear on Enter
+  })
+
+  test("onPartial reflects backspace shrinking the buffer", () => {
+    const stdin = makeFakeStdin({ isTTY: false })
+    const partials: string[] = []
+    const reader = startInTurnLineReader({
+      stdin,
+      onLine: () => {},
+      onPartial: (b) => partials.push(b),
+    })
+    stdin.emit("ab")
+    stdin.emit("\x7f")
+    reader.dispose()
+    expect(partials).toEqual(["ab", "a"])
+  })
+
+  test("a throwing onPartial sink does NOT escape (turn is sacred)", () => {
+    const stdin = makeFakeStdin({ isTTY: false })
+    const reader = startInTurnLineReader({
+      stdin,
+      onLine: () => {},
+      onPartial: () => {
+        throw new Error("render boom")
+      },
+    })
+    expect(() => stdin.emit("x")).not.toThrow()
+    reader.dispose()
+  })
+})
+
+describe("startInTurnLineReader — audit R1 hardening (surrogate backspace + empty chunk)", () => {
+  test("backspace deletes a WHOLE astral code point (no lone surrogate left)", () => {
+    const stdin = makeFakeStdin({ isTTY: false })
+    const partials: string[] = []
+    const reader = startInTurnLineReader({
+      stdin,
+      onLine: () => {},
+      onPartial: (b) => partials.push(b),
+    })
+    stdin.emit("😀") // U+1F600 = 2 UTF-16 units
+    stdin.emit("\x7f") // one Backspace must remove the WHOLE emoji
+    reader.dispose()
+    expect(partials).toEqual(["😀", ""]) // "" (len 0), NOT a lone surrogate (len 1)
+    expect(partials[1]?.length).toBe(0)
+  })
+
+  test("an ASCII tail after an astral char backspaces normally (drops 1 unit)", () => {
+    const stdin = makeFakeStdin({ isTTY: false })
+    const lines: string[] = []
+    const reader = startInTurnLineReader({ stdin, onLine: (l) => void lines.push(l) })
+    stdin.emit("😀a\x7f\n") // emoji + "a" → bs drops "a" → just the emoji
+    reader.dispose()
+    expect(lines).toEqual(["😀"])
+  })
+
+  test("an EMPTY chunk does NOT fire onPartial (no spurious lane redraw)", () => {
+    const stdin = makeFakeStdin({ isTTY: false })
+    const partials: string[] = []
+    const reader = startInTurnLineReader({
+      stdin,
+      onLine: () => {},
+      onPartial: (b) => partials.push(b),
+    })
+    stdin.emit("") // 0 bytes ⇒ no render
+    expect(partials).toEqual([])
+    stdin.emit("x") // real input ⇒ render
+    reader.dispose()
+    expect(partials).toEqual(["x"])
+  })
+})
