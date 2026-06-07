@@ -9,6 +9,7 @@ import {
 } from "@/rules"
 import { sliceWholeChars } from "@/shared"
 import { matchesAnyGlob, parseFrontmatter } from "../skill"
+import type { RequestableRule } from "./agent-requested-rules"
 
 /**
  * File-scoped rule auto-injection (Cursor `.cursor/rules/*.mdc` parity — the
@@ -96,7 +97,12 @@ const normalizeGlobs = (raw: string | string[] | undefined): string[] => {
  *  symlink, not a regular file, unreadable, has an empty body, or declares
  *  neither `globs` nor `alwaysApply` (a rule that can never inject is dropped
  *  so it doesn't masquerade as active). */
-const tryLoadRule = async (path: string): Promise<GlobRule | undefined> => {
+/** Parse one rule file into a {@link GlobRule} WITHOUT the auto-inject drop — a
+ *  description-only rule (no globs, not always-apply) is returned here so the
+ *  requestable-rules loader can collect it (ADR-0509). The auto-inject filter is
+ *  applied by {@link tryLoadRule}. Returns undefined only on a genuinely
+ *  unusable file (symlink / non-file / empty body / read-or-parse error). */
+const parseRuleFile = async (path: string): Promise<GlobRule | undefined> => {
   try {
     // SECURITY: reject symlinks for the same reason repo-rules.ts does — a
     // symlinked rule file could point at a secret (`~/.ssh/id_rsa`) and its
@@ -112,8 +118,6 @@ const tryLoadRule = async (path: string): Promise<GlobRule | undefined> => {
     // string "true" (case-insensitive tolerance for hand-written rule files).
     const alwaysApply =
       typeof data.alwaysApply === "string" && data.alwaysApply.toLowerCase() === "true"
-    // A rule with neither globs nor alwaysApply can never auto-inject — drop it.
-    if (globs.length === 0 && !alwaysApply) return undefined
     const cappedBody =
       trimmed.length > MAX_RULE_BYTES
         ? `${sliceWholeChars(trimmed, MAX_RULE_BYTES)}\n\n[truncated: ${trimmed.length} bytes total]`
@@ -140,6 +144,17 @@ const tryLoadRule = async (path: string): Promise<GlobRule | undefined> => {
     // ENOENT / EACCES / parse failure ⇒ skip this file (best-effort loader).
     return undefined
   }
+}
+
+/** Load one rule for AUTO-INJECTION. A rule with neither globs nor alwaysApply
+ *  can never auto-inject — drop it here (it is instead surfaced on demand via
+ *  {@link loadRequestableRules}). Preserves the original {@link loadGlobRules}
+ *  behavior exactly. */
+const tryLoadRule = async (path: string): Promise<GlobRule | undefined> => {
+  const rule = await parseRuleFile(path)
+  if (rule === undefined) return undefined
+  if (rule.globs.length === 0 && !rule.alwaysApply) return undefined
+  return rule
 }
 
 /** Load every file-scoped rule under `cwd`'s rule directories. Returns `[]`
@@ -169,6 +184,45 @@ export const loadGlobRules = async (cwd: string): Promise<GlobRule[]> => {
     }
   }
   return rules
+}
+
+/** Load the description-only rules under `cwd` (no globs, not always-apply) as
+ *  an agent-REQUESTABLE index (ADR-0509). These are exactly the rules
+ *  {@link loadGlobRules} drops — the model summons them ON DEMAND via the
+ *  `fetch_rules` tool instead of having them auto-injected every turn. A
+ *  requestable rule MUST carry a non-empty description (the match key). Same
+ *  dir-walk + deterministic order + {@link MAX_RULE_FILES} bound + ONCE-per-
+ *  session convention as `loadGlobRules`. Returns `[]` when none exist. */
+export const loadRequestableRules = async (cwd: string): Promise<RequestableRule[]> => {
+  const out: RequestableRule[] = []
+  for (const dir of GLOB_RULE_DIRS) {
+    if (out.length >= MAX_RULE_FILES) break
+    const abs = join(cwd, dir)
+    let names: string[]
+    try {
+      names = await readdir(abs)
+    } catch {
+      continue // directory absent ⇒ skip
+    }
+    for (const name of [...names].sort()) {
+      if (out.length >= MAX_RULE_FILES) break
+      if (!RULE_EXTENSIONS.some((ext) => name.endsWith(ext))) continue
+      const rule = await parseRuleFile(join(abs, name))
+      if (
+        rule !== undefined &&
+        rule.globs.length === 0 &&
+        !rule.alwaysApply &&
+        rule.description !== undefined
+      ) {
+        out.push({
+          name: basename(rule.sourcePath),
+          description: rule.description,
+          body: rule.body,
+        })
+      }
+    }
+  }
+  return out
 }
 
 /**

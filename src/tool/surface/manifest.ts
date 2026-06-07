@@ -586,6 +586,19 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     note: "Mid-turn self-correction (gap-other-agent GAP 11, Cursor reflectToolCall parity) — when the agent's actions are not working it calls `reflect` with its situation + the DIFFERENT plan it proposes (next_steps REQUIRED — the forcing function) and gets a critique back in-band. EXPENSIVE: a per-session call quota is enforced. Pure interaction (isReadOnly, hitlTier:none, no shell extractor); the reflection itself rides an LLM-backed ReflectPort the composition root wires (like advisor) ONLY when QUANTA_REFLECT is on. Opt-in EVERYWHERE: a new capability whose backend must be wired, so it never auto-seeds; absent port ⇒ tool absent, byte-identical. Distinct from advisor (advisor = second opinion on a question; reflect = self-critique of the agent's own trajectory with a committed plan).",
   },
   {
+    name: "fetch_rules",
+    origin: "@/tool/fetch-rules (via DefaultToolPorts.fetchRules)",
+    gate: {
+      kind: "config-slot",
+      slot: "DefaultToolPorts.fetchRules",
+      env: "QUANTA_FETCH_RULES",
+    },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "read-only",
+    adr: "0509",
+    note: "Agent-requested rules retrieval (gap-other-agent GAP 6, Cursor agent-requested rules parity) — description-only rule files (no globs, not always-apply) are NOT auto-injected; the model summons them ON DEMAND by describing its task, and `fetch_rules` ranks the requestable-rules index by description overlap (the pure matchRulesByDescription, no tuned threshold) returning the matching bodies. Read-only (isReadOnly, hitlTier:none, no shell extractor). The index + matcher ride a host FetchRulesPort (keeps @/tool plane-clean — the rule loader lives in @/agent). Opt-in EVERYWHERE (QUANTA_FETCH_RULES): wired ONLY when the gate is on AND the requestable index is non-empty; absent port ⇒ tool absent, byte-identical.",
+  },
+  {
     name: "file_history_rewind",
     origin: "@/tool/file-history (via DefaultToolPorts.fileHistory)",
     gate: {

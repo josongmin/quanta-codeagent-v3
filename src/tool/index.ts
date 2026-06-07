@@ -31,6 +31,7 @@ import {
 // Pure-TS STORED-ZIP + OOXML; conditionally registered via DefaultToolPorts.officeAuthoring.
 import { makeDocxWriteTool, makePptxWriteTool, makeXlsxWriteTool } from "./document/authoring"
 import { editTool, makeEditTool } from "./edit"
+import { type FetchRulesPort, fetchRulesTool } from "./fetch-rules"
 import { type FileHistoryStore, makeFileHistoryRewindTool } from "./file-history"
 import { fileTreeSummaryTool } from "./file-tree-summary"
 import { globTool } from "./glob"
@@ -646,6 +647,11 @@ export interface DefaultToolPorts {
    *  wires an LLM-backed `ReflectPort` ONLY when `QUANTA_REFLECT` is on (like the
    *  advisor port). The tool enforces a per-session quota (reflect is expensive). */
   reflect?: ReflectPort
+  /** ADR-0509 (gap GAP 6) — when set, append `fetch_rules` (agent-requested
+   *  description-only rule retrieval). Absent ⇒ tool NOT registered (byte-identical).
+   *  The composition root wires a port over the requestable-rules index + matcher
+   *  ONLY when `QUANTA_FETCH_RULES` is on AND the index is non-empty. */
+  fetchRules?: FetchRulesPort
   /** gap-other-agent GAP 1 — when set, `read_image` downsamples an oversized image
    *  (> MAX_IMAGE_BYTES) via this codec instead of rejecting. Absent ⇒ over-cap
    *  images are rejected exactly as before (byte-identical). The composition root
@@ -849,6 +855,12 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => {
   // tool bound to the host's LLM-backed reflect port (per-session quota enforced).
   if (ports.reflect !== undefined) {
     base.push(reflectTool(ports.reflect) as Tool)
+  }
+  // ADR-0509 (gap GAP 6) — conditional `fetch_rules` registration. Absent port ⇒
+  // tool NOT registered (byte-identical). Present ⇒ the agent-requested-rules
+  // retrieval tool bound to the host's requestable-rules index + matcher.
+  if (ports.fetchRules !== undefined) {
+    base.push(fetchRulesTool(ports.fetchRules) as Tool)
   }
   // file_history_rewind — conditional registration of the per-file snapshot
   // list/restore tool. Absent store ⇒ default set is byte-identical (the model

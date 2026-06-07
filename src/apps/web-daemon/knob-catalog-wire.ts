@@ -53,5 +53,20 @@ export const buildWebKnobCatalog = (): ReadonlyMap<string, UnifiedKnob> => {
   return mergeKnobCatalog(sources)
 }
 
+/**
+ * Web-safe value for a knob over `/api/knobs`. A CUSTOM free-form STRING value
+ * (source env/session) may hold a filesystem path, credential-helper command
+ * line, or policy JSON — never echo it over the network. Bounded bool/int/float/
+ * enum values are safe; registry DEFAULTS are public (in source), so only a
+ * non-default string value is redacted. (ADR-0503 P3, security re-audit jun-7.)
+ */
+export const webSafeKnobValue = (
+  kind: UnifiedKnob["kind"],
+  resolved: { readonly raw: string | undefined; readonly source: string } | undefined,
+): string | undefined =>
+  kind === "string" && resolved !== undefined && resolved.source !== "default"
+    ? "[redacted]"
+    : resolved?.raw
+
 export { catalogByGroup, resolveCatalogValues }
 export type { UnifiedKnob }

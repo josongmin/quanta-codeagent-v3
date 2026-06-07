@@ -79,21 +79,32 @@ export interface HttpSseTransportOpts {
    *  {@link LATEST_PROTOCOL_VERSION}; the client always supplies the resolved
    *  offer so the header on the `initialize` POST matches the offered body. */
   readonly protocolVersion?: string
+  /** §1.2 resumption — seed the last-seen SSE event id so the standalone GET
+   *  sends `Last-Event-ID` on connect (the reconnect supervisor passes the dead
+   *  transport's `getLastEventId()` here when it mints the replacement). Absent
+   *  ⇒ no header (byte-identical fresh connect). */
+  readonly resumeFromEventId?: string
 }
 
-/** Parse one SSE event block's accumulated `data:` lines into text. SSE allows
- *  multiple `data:` fields per event, joined by `\n`. */
-const sseDataFromBlock = (block: string): string | null => {
+/** Parse one SSE event block into its `data` text + the event `id` (§1.2
+ *  resumption). SSE allows multiple `data:` fields per event (joined by `\n`);
+ *  the LAST `id:` field in the block is the event id (WHATWG SSE §9.2.4). A
+ *  block may carry an id with no data (a bare cursor advance) — `data` is then
+ *  `null` but `id` still surfaces. `event:` / `:`(comment) / blanks are ignored.
+ *  Exported for the resumption hellgate. */
+export const sseDataFromBlock = (block: string): { data: string | null; id: string | null } => {
   const lines = block.split("\n")
   const data: string[] = []
+  let id: string | null = null
   for (const raw of lines) {
     const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw
     if (line.startsWith("data:")) {
       data.push(line.slice(5).replace(/^ /, ""))
+    } else if (line.startsWith("id:")) {
+      id = line.slice(3).replace(/^ /, "")
     }
-    // `event:`, `id:`, `:`(comment), and blanks are ignored — we only need data.
   }
-  return data.length === 0 ? null : data.join("\n")
+  return { data: data.length === 0 ? null : data.join("\n"), id }
 }
 
 /** Pull the JSON-RPC `id` off an outbound payload, if any. A request carries a
@@ -123,6 +134,9 @@ export class HttpSseMcpTransport implements McpTransport {
    *  re-pins it to the SERVER-CHOSEN version via {@link setProtocolVersion}
    *  once the `initialize` reply is accepted. */
   private protocolVersion: string
+  /** §1.2 — last SSE event id seen (or the resume seed). Sent as `Last-Event-ID`
+   *  on the standalone GET so a server replays from after it. */
+  private lastEventId: string | null
   private started = false
   private closed = false
   private exitFired = false
@@ -141,6 +155,15 @@ export class HttpSseMcpTransport implements McpTransport {
     this.openServerStream = opts.openServerStream ?? true
     this.fetchFn = opts.fetch ?? (globalThis.fetch as unknown as HttpFetchFn)
     this.protocolVersion = opts.protocolVersion ?? LATEST_PROTOCOL_VERSION
+    this.lastEventId = opts.resumeFromEventId ?? null
+  }
+
+  /** §1.2 — the last SSE event id seen on the server stream (or the resume
+   *  seed). The reconnect supervisor reads this off a dying transport and passes
+   *  it as `resumeFromEventId` to the replacement so the server replays missed
+   *  events. `null` when no id-tagged event was seen. */
+  getLastEventId(): string | null {
+    return this.lastEventId
   }
 
   async start(): Promise<void> {
@@ -333,7 +356,12 @@ export class HttpSseMcpTransport implements McpTransport {
     try {
       const handshake = this.fetchFn(this.url, {
         method: "GET",
-        headers: this.requestHeaders({ accept: "text/event-stream" }),
+        // §1.2 — resume from the last seen event id when we have one (the WHATWG
+        // SSE reconnect header); absent ⇒ no header (byte-identical fresh GET).
+        headers: this.requestHeaders({
+          accept: "text/event-stream",
+          ...(this.lastEventId !== null ? { "Last-Event-ID": this.lastEventId } : {}),
+        }),
         signal: abort.signal,
       })
       // Race the handshake against abort. A fetch impl that ignores the signal
@@ -432,14 +460,16 @@ export class HttpSseMcpTransport implements McpTransport {
         while (boundary !== -1) {
           const block = buffer.slice(0, boundary)
           buffer = buffer.slice(boundary + 2)
-          const data = sseDataFromBlock(block)
-          if (data !== null) this.decodeAndEmit(data)
+          const parsed = sseDataFromBlock(block)
+          if (parsed.id !== null) this.lastEventId = parsed.id // §1.2 resume cursor
+          if (parsed.data !== null) this.decodeAndEmit(parsed.data)
           boundary = buffer.indexOf("\n\n")
         }
       }
       // Flush a trailing event with no terminating blank line.
-      const data = sseDataFromBlock(buffer)
-      if (data !== null) this.decodeAndEmit(data)
+      const parsed = sseDataFromBlock(buffer)
+      if (parsed.id !== null) this.lastEventId = parsed.id
+      if (parsed.data !== null) this.decodeAndEmit(parsed.data)
     } catch (e) {
       logger.debug("mcp: SSE stream ended", { server: this.name, error: errMessage(e) })
     } finally {

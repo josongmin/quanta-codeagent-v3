@@ -18,6 +18,10 @@ import { join } from "node:path"
 import type { KnobValue, KnobValueMap } from "@/runner/knobs"
 import "../../../src/apps/cli/knobs-bootstrap" // populate registry via side-effect
 
+import {
+  __resetCliKnobOverrides,
+  readCliKnob,
+} from "../../../src/apps/cli/cli-knobs-accessor"
 import { buildKnobsSlash, type KnobsSurfaceWire } from "../../../src/apps/cli/slash-commands-knobs"
 import type { SlashContext } from "../../../src/apps/cli/slash-contract"
 
@@ -400,5 +404,45 @@ describe("/knobs completion", () => {
     const vals = out.map((c) => c.value)
     expect(vals).toContain("baseline")
     expect(vals).toContain("everything")
+  })
+})
+
+describe("/knobs set — catalog knob (envKey) → CLI accessor session (ADR-0503 P4)", () => {
+  test("set QUANTA_LSP=on is LIVE for readCliKnob (not a dead session bag)", async () => {
+    __resetCliKnobOverrides()
+    expect(readCliKnob("QUANTA_LSP", "bool", {})).toBe(false) // registry default
+    const h = buildHarness()
+    const exit = await h.cmd.run(["set", "QUANTA_LSP=on"], h.ctx)
+    expect(exit).toBe(0)
+    expect(h.stdout()).toContain("session override")
+    // the WIN: the override is now effective for accessor-routed reads
+    expect(readCliKnob("QUANTA_LSP", "bool", {})).toBe(true)
+    // reset clears it
+    await h.cmd.run(["reset", "QUANTA_LSP"], h.ctx)
+    expect(readCliKnob("QUANTA_LSP", "bool", {})).toBe(false)
+    __resetCliKnobOverrides()
+  })
+
+  test("set on a genuinely-unknown id still errors", async () => {
+    const h = buildHarness()
+    const exit = await h.cmd.run(["set", "QUANTA_NOT_A_REAL_KNOB=on"], h.ctx)
+    expect(exit).toBe(1)
+    expect(h.stderr()).toContain("unknown knob")
+  })
+
+  test("set REJECTS a garbage numeric for an int catalog knob (no silent store)", async () => {
+    __resetCliKnobOverrides()
+    const h = buildHarness()
+    const exit = await h.cmd.run(["set", "QUANTA_FLASH_ERROR_MS=garbage"], h.ctx)
+    expect(exit).toBe(1)
+    expect(h.stderr()).toContain("expects int")
+    // empty value for an int is also rejected (not silently stored as 0)
+    const exit2 = await h.cmd.run(["set", "QUANTA_FLASH_ERROR_MS="], h.ctx)
+    expect(exit2).toBe(1)
+    // a valid int is accepted
+    const ok = await h.cmd.run(["set", "QUANTA_FLASH_ERROR_MS=1200"], h.ctx)
+    expect(ok).toBe(0)
+    expect(readCliKnob("QUANTA_FLASH_ERROR_MS", "int", {})).toBe(1200)
+    __resetCliKnobOverrides()
   })
 })

@@ -454,6 +454,12 @@ export interface CompactInput {
    *  Accepts the widened {@link SystemPromptInput} (string or cache blocks). */
   system: SystemPromptInput
   thresholdTokens?: number
+  /** §11.5 — ON-DEMAND force (the `/summarize-now` mid-turn verb). When true,
+   *  the `under_threshold` early-return is SKIPPED so a summarize happens even
+   *  below the auto-window trigger. The `no_boundary` guard still applies (a
+   *  single indivisible turn cannot be summarized). Absent/false ⇒ the
+   *  threshold-gated auto path, byte-identical. */
+  force?: boolean
   /**
    * D4 (jun-7 naive-impl hardening) — the model id the loop is talking to. When
    * present AND no explicit/env threshold override is set, the threshold is
@@ -716,7 +722,9 @@ export const compactIfNeeded = async (input: CompactInput): Promise<CompactResul
   // present; otherwise the chars/4 estimate over the whole transcript (legacy,
   // byte-identical). `currentTokens` is reused below for the preflight query.
   const currentTokens = triggerTokenCount(input.messages, input.tokenBaseline)
-  if (currentTokens <= threshold) {
+  // §11.5 — `force` (on-demand `/summarize-now`) bypasses the threshold gate; the
+  // `no_boundary` guard below still holds (nothing safely summarizable ⇒ no-op).
+  if (input.force !== true && currentTokens <= threshold) {
     return { compacted: false, messages: input.messages, reason: "under_threshold" }
   }
   const boundary = findBoundary(input.messages, keepTurns)

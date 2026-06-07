@@ -173,7 +173,7 @@ const EXTRA: readonly KnobInventoryEntry[] = [
   { envKey: "QUANTA_MEMORY_DISTILL", kind: "bool", default: true, group: "memory", home: "runtime-config", describe: "Memory distillation (=off disables).", readSite: "runner/assemble/memory-factory.ts" },
   { envKey: "QUANTA_MEMORY_CONSOLIDATE", kind: "bool", default: true, group: "memory", home: "runtime-config", describe: "Memory consolidation (=off disables).", readSite: "runner/assemble/memory-factory.ts" },
   { envKey: "QUANTA_MEMORY_SELF_EDIT", kind: "bool", default: true, group: "memory", home: "runtime-config", describe: "Memory self-edit (=off disables).", readSite: "runner/assemble/memory-factory.ts" },
-  { envKey: "QUANTA_MEMORY_LINE_CITATIONS", kind: "bool", default: true, group: "memory", home: "runtime-config", describe: "Memory line citations (=off disables).", readSite: "runner/assemble/memory-factory.ts" },
+  { envKey: "QUANTA_MEMORY_LINE_CITATIONS", kind: "bool", default: false, group: "memory", home: "runtime-config", describe: "Memory line-citations opt-in (set =1 to enable).", readSite: "runner/assemble/memory-factory.ts" },
   { envKey: "QUANTA_MEMORY_RECALL_LIMIT", kind: "int", default: undefined, group: "memory", home: "runtime-config", describe: "Memory recall result limit.", readSite: "runner/assemble/memory-factory.ts" },
   { envKey: "QUANTA_MEMORY_RECALL_TIERS", kind: "string", default: undefined, group: "memory", home: "runtime-config", describe: "Memory recall tier selection.", readSite: "runner/assemble/memory-factory.ts" },
   // @-mention resolver caps — all default-ON; numeric caps optional

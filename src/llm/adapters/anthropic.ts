@@ -26,6 +26,9 @@ interface AnthropicConfig {
    *  it to Anthropic's `auto`|`standard_only` and DROPS anything else. Absent ⇒
    *  no `service_tier` key (byte-identical). */
   serviceTier?: string
+  /** gap GAP 3 (ADR-0505) — the `<model>-1m` context-window key when the
+   *  context-1m beta is active; surfaced as {@link LLMPort.contextWindowKey}. */
+  contextWindowKey?: string
   /** T1 stream-hang guard overrides. Caller-supplied wins over env knobs
    *  (`QUANTA_LLM_STREAM_FIRST_CHUNK_MS` / `QUANTA_LLM_STREAM_IDLE_MS`); env
    *  wins over the defaults baked into `src/llm/stream-timeout.ts`. Read
@@ -111,6 +114,9 @@ export class AnthropicAdapter implements LLMPort {
    *  (like {@link betaHeaders}) so a factory→adapter e2e can assert the threading
    *  without driving a live request. */
   readonly serviceTier: string | undefined
+  /** gap GAP 3 (ADR-0505) — the `<model>-1m` window key when context-1m is
+   *  active; resolves the 1M compaction window while `model` stays canonical. */
+  readonly contextWindowKey?: string
   readonly betaHeaders: readonly string[]
   /** T1 stream-hang guard: pinned at construction (env knobs + optional
    *  caller overrides resolved ONCE) and applied to every `stream()` call
@@ -139,6 +145,7 @@ export class AnthropicAdapter implements LLMPort {
     this.maxTokens = config.maxTokens ?? 8192
     this.cacheTtl = config.cacheTtl ?? "5m"
     this.serviceTier = config.serviceTier
+    if (config.contextWindowKey !== undefined) this.contextWindowKey = config.contextWindowKey
   }
 
   private async openRawStream(input: StreamInput): Promise<AsyncIterable<RawEvent>> {

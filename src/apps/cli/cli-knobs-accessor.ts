@@ -12,8 +12,10 @@
  * ratchet a single designated reader so a NEW scattered env read is a CI failure.
  *
  * Pure-ish: `env` is injectable (defaults to `process.env`); session overrides
- * live in a module-level bag mutated only via `setCliKnobOverride` (mirrors the
- * `/knobs set` DEFAULT_OVERRIDES bag). `__resetCliKnobOverrides` is a test seam.
+ * live in a module-level bag mutated via `setCliKnobOverride` — WIRED to
+ * `/knobs set <envKey>=<val>` (slash-commands-knobs `doSet`) for catalog knobs,
+ * so a live `/knobs set` is effective this session for any read routed here.
+ * `__resetCliKnobOverrides` is a test seam.
  */
 
 import { isTruthyToken } from "@/shared"

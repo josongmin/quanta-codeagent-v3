@@ -6,6 +6,7 @@ import { stampTurn } from "../session-resources"
 import type { ShellSnapshotSession } from "../shell-snapshot-session"
 import { makeTurnHeader } from "../turn-kind"
 import type { AgentConfig } from "../types"
+import { compactNowOnDemand } from "./compaction-wire"
 import { latestUserTextFromWm, observeEffortClassifierPrompt } from "./context-assembler"
 import { pollConversationAction, pollFollowUpQueue, pollPeerInbox } from "./control-poll"
 
@@ -63,6 +64,11 @@ export const syncQueuedTurnInputs = async (args: {
   if (actionOutcome.kind === "injection") {
     args.wm.append(actionOutcome.message)
     observeEffortClassifierPrompt(args.cfg.effortClassifier, latestUserTextFromWm(args.wm))
+  }
+  if (actionOutcome.kind === "summarize") {
+    // §11.5 — the `/summarize-now` verb: run an on-demand force-compaction over
+    // working memory. No-op when `config.compaction` is absent (degrades clean).
+    await compactNowOnDemand(args.cfg, args.wm)
   }
   return "continue"
 }

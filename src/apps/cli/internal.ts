@@ -95,6 +95,7 @@ import {
 import { DefaultDeferredResultRegistry } from "@/tool/deferred/default-registry"
 import { buildCliAskUserTool } from "./ask-user-wire"
 import { readCliKnob } from "./cli-knobs-accessor"
+import { buildCliFetchRulesTool } from "./fetch-rules-wire"
 import { createMarkdownPainter } from "./markdown-painter"
 import { buildCliElicitationPrompterFactory } from "./mcp-elicitation-prompter"
 import { isPathLikeToken } from "./resume"
@@ -1519,10 +1520,15 @@ export const buildTooling = (
   // no tool ⇒ byte-identical menu). The terminal prompter is owned here in the
   // app layer (the host layer is forbidden from touching process stdio).
   const askUserTool = buildCliAskUserTool(process.env)
+  // gap-other-agent GAP 6 (ADR-0509) — gated `fetch_rules` (agent-requested
+  // description-only rules). Default-OFF: null unless QUANTA_FETCH_RULES is on.
+  // The port lazily loads the requestable-rules index from the workspace cwd.
+  const fetchRulesTool = buildCliFetchRulesTool(process.cwd(), process.env)
   const extraTools: Tool[] = [
     ...(searchWire !== null ? [searchWire.tool] : []),
     ...asyncDeferredTools,
     ...(askUserTool !== null ? [askUserTool] : []),
+    ...(fetchRulesTool !== null ? [fetchRulesTool] : []),
   ]
   return buildToolingCore({
     store,

@@ -102,7 +102,7 @@ export const RUNTIME_CONFIG_KNOBS: readonly RuntimeConfigKnob[] = [
   { envKey: "QUANTA_SESSION_TITLE_MODEL", kind: "string", default: undefined, group: "session", describe: "Cheap model id for auto-title." },
   { envKey: "QUANTA_GIT_SHA", kind: "string", default: undefined, group: "git", describe: "Git SHA stamp for trajectory producer." },
   { envKey: "QUANTA_PASSIVE_VCS", kind: "bool", default: false, group: "git", describe: "Passive git/gh VCS classification gate." },
-  { envKey: "QUANTA_FS_JAIL", kind: "bool", default: true, group: "permission", describe: "FS jail (=off disables — security protection)." },
+  { envKey: "QUANTA_FS_JAIL", kind: "bool", default: false, group: "permission", describe: "FS-jail DISABLE flag (default off=jail active; =off disables, strict)." },
   { envKey: "QUANTA_REMEMBER_PATTERNS", kind: "bool", default: false, group: "permission", describe: "Remember-patterns recording seam." },
   { envKey: "QUANTA_REMEMBER_PATTERNS_DANGEROUS", kind: "bool", default: false, group: "permission", describe: "Opt-in for dangerous remembered patterns." },
   { envKey: "QUANTA_DENY_REASON", kind: "bool", default: false, group: "permission", describe: "Structured deny-reason surfacing gate." },

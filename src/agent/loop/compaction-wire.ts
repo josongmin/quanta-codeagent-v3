@@ -16,7 +16,12 @@ import { buildPostCompactEmit, buildPreCompactHook } from "../loop-helpers"
 import { buildTurnContext } from "../prompt"
 import { createEvictionSpillPort, microcompactToolResults } from "../tool-result-evict"
 import type { AgentConfig } from "../types"
-import { configuredModel, emitRecovery, objectiveBudgetExhausted } from "./emit-helpers"
+import {
+  configuredModel,
+  emitRecovery,
+  objectiveBudgetExhausted,
+  resolveWindowModel,
+} from "./emit-helpers"
 
 // ──────────────────────────────────────────────────────────────────────────
 // RFC jun-6-microcompaction — tier-1 tool-result eviction (a CHEAPER FIRST tier
@@ -114,6 +119,40 @@ const maybeMicrocompact = (
   return true
 }
 
+/** §11.5 — ON-DEMAND summarize (the `/summarize-now` mid-turn verb). A lean
+ *  force-compaction over the live working memory: unlike {@link maybeCompact}
+ *  (auto-window, microcompact + bg-controller machinery), this skips all the
+ *  optimizers and just runs ONE tier-2 summarize regardless of the token
+ *  threshold (`force:true`), installing the result via `wm.replace`. Returns
+ *  whether it actually compacted (`no_boundary` ⇒ false, no-op). Default-OFF:
+ *  `config.compaction` absent ⇒ returns false (the verb degrades to a no-op). */
+export const compactNowOnDemand = async (
+  config: AgentConfig,
+  wm: import("@/memory").WorkingMemory<Message> & { tokenTotal?(): number },
+  activeModel: string = configuredModel(config.llm),
+): Promise<boolean> => {
+  if (!config.compaction) return false
+  const result = await compactIfNeeded({
+    messages: [...wm.snapshot()],
+    llm: config.compaction.summarizerLlm ?? config.llm,
+    system: config.system,
+    force: true,
+    // GAP 3 (ADR-0505): threshold resolves against the 1M window when active.
+    model: resolveWindowModel(config.llm, activeModel),
+    ...(config.compaction.thresholdTokens !== undefined
+      ? { thresholdTokens: config.compaction.thresholdTokens }
+      : {}),
+    ...(config.compaction.keepRecentTurns !== undefined
+      ? { keepRecentTurns: config.compaction.keepRecentTurns }
+      : {}),
+  })
+  if (!result.compacted) return false
+  // CRITICAL (§4.6): install via `wm.replace` so the delta-token counter reseeds
+  // (a direct `wm.messages[i]` write would bypass it and drift `tokenTotal()`).
+  wm.replace([...result.messages])
+  return true
+}
+
 export const maybeCompact = async (
   config: AgentConfig,
   system: SystemPromptInput,
@@ -167,7 +206,7 @@ export const maybeCompact = async (
   // synchronous proactive path's model-derived threshold, so pass the same model.
   const bgLimitTokens = resolveCompactionLimitTokens(
     config.compaction?.thresholdTokens,
-    activeModel,
+    resolveWindowModel(config.llm, activeModel),
   )
   const borrowed =
     bgController !== undefined
@@ -209,8 +248,10 @@ export const maybeCompact = async (
         // D4 — model-derived threshold (known model ⇒ window−reserve−margin;
         // unknown ⇒ 120k legacy). D5 — authoritative-baseline trigger when the
         // loop captured an `exact` usage (absent ⇒ chars/4 over the whole
-        // transcript, byte-identical legacy).
-        model: activeModel,
+        // transcript, byte-identical legacy). GAP 3 (ADR-0505): the window
+        // resolves to the 1M key when context-1m is active (compactIfNeeded uses
+        // `model` ONLY for the threshold, never for records).
+        model: resolveWindowModel(config.llm, activeModel),
         ...(tokenBaselineBox !== undefined &&
         TokenBaselineBox.wrap(tokenBaselineBox).currentBaseline() !== undefined
           ? // biome-ignore lint/style/noNonNullAssertion: guarded by the check above

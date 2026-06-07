@@ -157,6 +157,10 @@ const ADAPTER_REGISTRY: Record<
     return new AnthropicAdapter({
       apiKey,
       model: ctx1m.model,
+      // gap GAP 3 (ADR-0505) — pin the 1M window key ONLY when context-1m is
+      // active+eligible; absent ⇒ compaction resolves the window from `model`
+      // (byte-identical 200k default).
+      ...(ctx1m.active ? { contextWindowKey: ctx1m.windowKey } : {}),
       ...(serviceTier !== undefined ? { serviceTier } : {}),
       ...(betaHeaders !== undefined ? { betaHeaders } : {}),
       ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),

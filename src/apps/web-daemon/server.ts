@@ -30,6 +30,7 @@ import {
   buildWebKnobCatalog,
   catalogByGroup,
   resolveCatalogValues,
+  webSafeKnobValue,
 } from "./knob-catalog-wire"
 import { openThreadStore } from "./persistence-sqlite"
 import {
@@ -687,12 +688,18 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
         const current = resolveCatalogValues(catalog, process.env)
         const grouped = [...catalogByGroup(catalog).entries()].map(([group, knobs]) => ({
           group,
-          knobs: knobs.map((k) => ({
-            ...k,
-            value: current.get(k.envKey)?.raw,
-            source: current.get(k.envKey)?.source,
-            isDefault: current.get(k.envKey)?.isDefault,
-          })),
+          knobs: knobs.map((k) => {
+            const v = current.get(k.envKey)
+            // webSafeKnobValue redacts CUSTOM string values (paths / credential-
+            // helper commands / policy JSON live in string knobs); bool/int/enum
+            // + registry defaults are safe. (security re-audit jun-7.)
+            return {
+              ...k,
+              value: webSafeKnobValue(k.kind, v),
+              source: v?.source,
+              isDefault: v?.isDefault,
+            }
+          }),
         }))
         return jsonResponse(200, { total: catalog.size, groups: grouped })
       }

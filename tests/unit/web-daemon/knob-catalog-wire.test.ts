@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { buildWebKnobCatalog } from "@/apps/web-daemon/knob-catalog-wire"
+import { buildWebKnobCatalog, webSafeKnobValue } from "@/apps/web-daemon/knob-catalog-wire"
 
 describe("web knob catalog (ADR-0503 P3)", () => {
   test("includes inventory + runner knobs, EXCLUDES cli-render knobs", () => {
@@ -19,6 +19,20 @@ describe("web knob catalog (ADR-0503 P3)", () => {
     expect(cat.has("QUANTA_PILLS")).toBe(false)
     expect(cat.has("QUANTA_STATUSBAR")).toBe(false)
     expect([...cat.values()].some((k) => k.home === "cli")).toBe(false)
+  })
+
+  test("webSafeKnobValue redacts CUSTOM string values (paths/commands/policy)", () => {
+    // string + non-default (env/session) ⇒ redacted (would leak path/command/JSON)
+    expect(webSafeKnobValue("string", { raw: "/Users/jo/.quanta", source: "env" })).toBe("[redacted]")
+    expect(webSafeKnobValue("string", { raw: "aws-vault exec p --", source: "session" })).toBe("[redacted]")
+    // string DEFAULT is public (lives in source) ⇒ shown
+    expect(webSafeKnobValue("string", { raw: "info", source: "default" })).toBe("info")
+    // bounded kinds are safe ⇒ always shown
+    expect(webSafeKnobValue("bool", { raw: "true", source: "env" })).toBe("true")
+    expect(webSafeKnobValue("int", { raw: "5000", source: "env" })).toBe("5000")
+    expect(webSafeKnobValue("enum", { raw: "high", source: "env" })).toBe("high")
+    // unset ⇒ undefined
+    expect(webSafeKnobValue("string", undefined)).toBeUndefined()
   })
 
   test("never exposes secrets (excluded from inventory by construction)", () => {

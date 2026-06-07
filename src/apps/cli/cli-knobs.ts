@@ -131,6 +131,7 @@ export const CLI_KNOBS: readonly CliKnob[] = [
   { envKey: "QUANTA_SKILLS_DIR", kind: "string", default: "", group: "misc", describe: "Custom skills directory path.", readSite: "internal.ts" },
   { envKey: "QUANTA_PLAN", kind: "bool", default: false, group: "misc", describe: "Plan mode (opt-in).", readSite: "internal.ts" },
   { envKey: "QUANTA_GIT_TOOLS", kind: "bool", default: false, group: "misc", describe: "First-class git tools (opt-in).", readSite: "internal.ts" },
+  { envKey: "QUANTA_FETCH_RULES", kind: "bool", default: false, group: "misc", describe: "Fetch-rules tool gate (opt-in).", readSite: "fetch-rules-wire.ts" },
   { envKey: "QUANTA_VERIFY_GUARD", kind: "bool", default: false, group: "misc", describe: "Block finish after unverified mutating tool (opt-in).", readSite: "internal.ts" },
   { envKey: "QUANTA_VERIFY_GUARD_MAX_TRIPS", kind: "int", default: 2, group: "misc", describe: "Max verify-guard forced turns.", readSite: "internal.ts" },
   { envKey: "QUANTA_KNOBS_PRESET", kind: "string", default: "", group: "misc", describe: "Named knob preset to apply at boot.", readSite: "knobs-bootstrap.ts" },

@@ -350,7 +350,14 @@ export class McpReconnectSupervisor {
     this.transition("restarting")
     this.restartEpoch += 1
     const epoch = this.restartEpoch
-    const fresh = this.deps.factory(this.config)
+    // §1.2 (ticket-09) — carry the dying client's last SSE event id into the
+    // replacement so its standalone GET sends `Last-Event-ID` and the server
+    // replays messages missed during the outage. Null/absent ⇒ fresh connect
+    // (byte-identical to pre-ticket behaviour).
+    const resumeFromEventId = this.client.getLastEventId?.() ?? undefined
+    const restartConfig =
+      resumeFromEventId !== undefined ? { ...this.config, resumeFromEventId } : this.config
+    const fresh = this.deps.factory(restartConfig)
     try {
       await fresh.start()
       // Re-run tools/list so a non-advertising server is detected as a failed

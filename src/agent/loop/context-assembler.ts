@@ -21,7 +21,7 @@ import { buildTurnContext } from "../prompt"
 import type { AgentConfig, MemoryCitation } from "../types"
 import type { WorkingStateSession } from "../working-state"
 import { maybeCompact, resolveContextEventsForTurn, staticSystemFor } from "./compaction-wire"
-import { configuredModel } from "./emit-helpers"
+import { configuredModel, resolveWindowModel } from "./emit-helpers"
 
 export const resolveMemoryContext = async (
   config: AgentConfig,
@@ -324,7 +324,9 @@ export const emitPromptAssembled = (
       // D4 (jun-7) — the model's real context window (or 0 for an un-tabled
       // model, the surface's "unknown" sentinel), so the usage gauge is
       // window-relative instead of always reporting 0.
-      max: resolveModelWindow(activeModel)?.contextWindow ?? 0,
+      // GAP 3 (ADR-0505): the gauge tracks the 1M window when context-1m is
+      // active; `model` stays the real active id for reporting.
+      max: resolveModelWindow(resolveWindowModel(config.llm, activeModel))?.contextWindow ?? 0,
       model: activeModel,
     })
   } catch (e) {

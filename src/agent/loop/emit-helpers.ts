@@ -66,6 +66,21 @@ export const configuredModel = (llm: AgentConfig["llm"]): string => {
   return m !== undefined && m !== "" ? m : "unknown"
 }
 
+/** gap GAP 3 (ADR-0505) — the model id to resolve the CONTEXT WINDOW against
+ *  (compaction threshold + usage gauge). When the active turn model IS the
+ *  configured base model AND the port pins a 1M window key (context-1m active),
+ *  resolve the window against that `<model>-1m` key so compaction tracks the
+ *  granted 1M window. A skill/sticky SWAP (active != base) or no pinned key ⇒ the
+ *  active model id as-is. NEVER returned to reporting/records — those keep the
+ *  real model id; this is window-resolution ONLY. */
+export const resolveWindowModel = (
+  llm: AgentConfig["llm"],
+  activeModel: string = configuredModel(llm),
+): string =>
+  llm.contextWindowKey !== undefined && activeModel === configuredModel(llm)
+    ? llm.contextWindowKey
+    : activeModel
+
 export const objectiveBudgetExhausted = (config: AgentConfig, threadId: string): boolean => {
   if (!runtimeConfig().objectiveBudgetEnforce) return false
   if (config.objective === undefined || threadId.length === 0) return false

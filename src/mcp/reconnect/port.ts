@@ -40,6 +40,11 @@ export interface SupervisableMcpClient {
    *  A client that omits `serverSupportsTasks` ⇒ the supervisor reports no
    *  tasks capability ⇒ no `mcp_task_*` tools (byte-identical default-OFF). */
   serverSupportsTasks?(): boolean
+  /** §1.2 (ticket-09) — OPTIONAL. The supervisor reads the last SSE event id off
+   *  the dying client and seeds it into the replacement's config
+   *  (`resumeFromEventId`) so the new GET sends `Last-Event-ID`. A client that
+   *  omits this (or returns null) ⇒ no resume hint (byte-identical fresh GET). */
+  getLastEventId?(): string | null
   /** ADR-0435 follow-up — OPTIONAL outbound JSON-RPC dispatch for `tasks/*`.
    *  Present iff `serverSupportsTasks` is. */
   requestRaw?(method: string, params?: unknown): Promise<unknown>

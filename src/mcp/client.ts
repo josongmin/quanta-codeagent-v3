@@ -303,6 +303,11 @@ const defaultTransportFor = (config: McpServerConfig, offeredVersion: string): M
       // `setProtocolVersion` after `initialize`).
       protocolVersion: offeredVersion,
       ...(config.headers !== undefined ? { headers: config.headers } : {}),
+      // §1.2 (ticket-09) — seed the SSE resume cursor so the standalone GET sends
+      // `Last-Event-ID` (the supervisor carries it across a restart).
+      ...(config.resumeFromEventId !== undefined
+        ? { resumeFromEventId: config.resumeFromEventId }
+        : {}),
     })
   }
   return new StdioMcpTransport(config)
@@ -626,6 +631,15 @@ export class McpClient {
     const caps = this.serverCapabilities
     if (caps === null) return false
     return asRecord(caps.tasks) !== null
+  }
+
+  /** §1.2 (ticket-09) — the last SSE event id seen on the standalone stream, for
+   *  the reconnect supervisor to carry across a restart (passed as the new
+   *  client's `resumeFromEventId`). Feature-detected: only the HTTP-SSE carrier
+   *  tracks it; stdio / a torn-down transport ⇒ `null` (no resume). */
+  getLastEventId(): string | null {
+    const t = this.transport as { getLastEventId?(): string | null } | null
+    return typeof t?.getLastEventId === "function" ? t.getLastEventId() : null
   }
 
   /** H19 — does the connected server advertise `resources`? Reads the

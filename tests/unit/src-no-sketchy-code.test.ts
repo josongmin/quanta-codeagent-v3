@@ -131,6 +131,8 @@ const RULES: readonly Rule[] = [
         "CLI rewind-git composition root — env DI fallback per CLI posture.",
       "apps/cli/sandbox-wire.ts":
         "Sandbox-wire composition root — env DI fallback per CLI posture.",
+      "apps/cli/cli-knobs-accessor.ts":
+        "THE designated CLI knob env reader (ADR-0503 P4) — env DI fallback to process.env is its contract; also exempt in the no-raw-process-env ratchet.",
       "apps/cli/status-flash-config.ts":
         "Surface status-flash config — env DI fallback at TTY composition.",
       "apps/cli/status-pills.ts":

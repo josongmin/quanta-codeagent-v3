@@ -27,6 +27,11 @@ export interface McpServerConfig {
   /** Static headers merged into every HTTP request (e.g. `Authorization`).
    *  HTTP carrier only. */
   headers?: Record<string, string>
+  /** §1.2 (ticket-09) — SSE resume seed. The reconnect supervisor stamps the
+   *  dying transport's last SSE event id here when it mints the replacement, so
+   *  the new standalone GET sends `Last-Event-ID` and the server replays missed
+   *  server→client messages. Omitted ⇒ fresh connect (byte-identical). HTTP only. */
+  resumeFromEventId?: string
   /** H18 — per-server OAuth opt-in. When `true` AND an `oauthProvider` is wired
    *  into the `McpClient`, the client resolves a bearer token (RFC 8414
    *  discovery → DCR → PKCE browser flow → token, with RFC 6749 §6 refresh) and

@@ -77,12 +77,17 @@ const loadFromEnvBody = (src: string): string => {
 const discoverKnobs = (src: string): readonly string[] => {
   const body = loadFromEnvBody(src)
   const found = new Set<string>()
-  // A knob is read either directly (`env["QUANTA_X"]`, used by the parseBool /
-  // parsePositiveInt / parser readers) OR via the canonical gate SSOT
-  // (`gateOn(env, "QUANTA_X")` / `gateDisabled(env, "QUANTA_X")`). Discover BOTH
-  // forms so the unification migration didn't blind this guard.
-  const re = /(?:env\["|gate(?:On|Disabled)(?:Strict)?\(env,\s*")(QUANTA_[A-Z0-9_]+)"/g
-  for (const m of body.matchAll(re)) found.add(m[1] as string)
+  // A knob is read directly (`env["QUANTA_X"]` bracket OR `env.QUANTA_X` dot,
+  // used by the parseBool / parsePositiveInt / parser readers) OR via the
+  // canonical gate SSOT (`gateOn(env, "QUANTA_X")` / `gateDisabled(env, …)`).
+  // Discover ALL forms — the dot-access form (e.g. env.QUANTA_RATELIMIT_NOTICE)
+  // was previously a blind spot.
+  const re =
+    /env\["(QUANTA_[A-Z0-9_]+)"|env\.(QUANTA_[A-Z0-9_]+)|gate(?:On|Disabled)(?:Strict)?\(env,\s*"(QUANTA_[A-Z0-9_]+)"/g
+  for (const m of body.matchAll(re)) {
+    const name = m[1] ?? m[2] ?? m[3]
+    if (name !== undefined) found.add(name)
+  }
   return [...found].sort()
 }
 
@@ -298,9 +303,10 @@ describe("knob default-off completeness guard (auto-discovery)", () => {
     // it were, our body-slice missed reads.
     const wholeFile = new Set<string>()
     for (const m of RUNTIME_CONFIG_TEXT.matchAll(
-      /(?:env\["|gate(?:On|Disabled)(?:Strict)?\(env,\s*")(QUANTA_[A-Z0-9_]+)"/g,
+      /env\["(QUANTA_[A-Z0-9_]+)"|env\.(QUANTA_[A-Z0-9_]+)|gate(?:On|Disabled)(?:Strict)?\(env,\s*"(QUANTA_[A-Z0-9_]+)"/g,
     )) {
-      wholeFile.add(m[1] as string)
+      const name = m[1] ?? m[2] ?? m[3]
+      if (name !== undefined) wholeFile.add(name)
     }
     expect(DISCOVERED_KNOBS.length).toBe(wholeFile.size)
     // biome-ignore lint/suspicious/noConsole: the spec requires PRINTING the enumerated knob count

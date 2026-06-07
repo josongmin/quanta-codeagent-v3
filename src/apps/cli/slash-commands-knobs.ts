@@ -42,6 +42,7 @@ import {
   writeKnobConfig,
 } from "@/runner/knobs"
 import { errMessage } from "@/shared"
+import { setCliKnobOverride } from "./cli-knobs-accessor"
 import {
   buildKnobCatalog,
   catalogByGroup,
@@ -291,6 +292,21 @@ const doSet = (args: readonly string[], wire: KnobsSurfaceWire, ctx: SlashContex
   const raw = pair.slice(eq + 1)
   const knob = allKnobs().get(id)
   if (knob === undefined) {
+    // Not an @/runner knob (id-keyed). It may be a catalog knob addressed by
+    // envKey (cli/inventory/runtime-config) — route to the CLI accessor's
+    // session bag so reads via readCliKnob (ADR-0503 P4) pick it up live.
+    const cat = buildKnobCatalog().get(id)
+    if (cat !== undefined) {
+      // Validate raw against kind (parity with the runner path's fail-fast —
+      // don't silently store a garbage numeric that the reader will drop).
+      if ((cat.kind === "int" || cat.kind === "float") && !Number.isFinite(Number(raw.trim() || "x"))) {
+        ctx.err(`/knobs set: ${id} expects ${cat.kind}, got: ${JSON.stringify(raw)}\n`)
+        return 1
+      }
+      setCliKnobOverride(id, raw)
+      ctx.out(`/knobs: ${id} = ${raw} (session override; live for readCliKnob-routed reads)\n`)
+      return 0
+    }
     ctx.err(`/knobs set: unknown knob: ${id}\n`)
     return 1
   }
@@ -317,6 +333,12 @@ const doReset = (args: readonly string[], wire: KnobsSurfaceWire, ctx: SlashCont
   }
   const id = args[0] as string
   if (allKnobs().get(id) === undefined) {
+    // catalog knob (envKey) — clear its CLI-accessor session override
+    if (buildKnobCatalog().has(id)) {
+      setCliKnobOverride(id, undefined)
+      ctx.out(`/knobs: ${id} session override cleared\n`)
+      return 0
+    }
     ctx.err(`/knobs reset: unknown knob: ${id}\n`)
     return 1
   }

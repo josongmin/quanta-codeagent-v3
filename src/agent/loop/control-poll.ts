@@ -11,6 +11,9 @@ export type ConversationActionPollOutcome =
   | { kind: "none" }
   | { kind: "injection"; message: Message }
   | { kind: "finish_aborted"; reason: string }
+  /** §11.5 — the `summarize` verb: the loop runs an on-demand compaction pass
+   *  over working memory (was a dead no-op before this ticket). */
+  | { kind: "summarize" }
   | { kind: "continue" }
 
 /**
@@ -143,6 +146,11 @@ export const pollConversationAction = async (
       })
     }
     return { kind: "continue" }
+  }
+  if (act.kind === "summarize") {
+    // §11.5 — surface the request; the loop (turn-iteration) runs the on-demand
+    // compaction pass over working memory (it owns `wm`).
+    return { kind: "summarize" }
   }
   cfg.stream.emit({
     type: "recovery",
