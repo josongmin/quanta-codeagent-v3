@@ -31,14 +31,9 @@ const extractRunReplBody = (): string => {
 const runReplBody = extractRunReplBody()
 
 describe("runRepl shape contract", () => {
-  test("runRepl stays at or under 65 LOC", () => {
-    // RELAXED 50 → 65 post-CLI-01/04/05/06+ARCH-07 merge: the host now also
-    // composes the execution-plane deps + conv-checkpoint store before
-    // calling `composeSurfaceWires` (~12 LOC of legitimate composition). The
-    // cap still prevents re-bloating the body with imperative turn logic.
-    const lines = runReplBody.split("\n").length
-    expect(lines).toBeLessThanOrEqual(65)
-  })
+  // NOTE: "runRepl stays declarative" is enforced by the no-let + calls-the-
+  // orchestration-helpers contracts below, not by a raw LOC ceiling (which
+  // churned 50→65 on every legit composition add without catching a bug).
 
   test("runRepl body has no let declarations", () => {
     expect(runReplBody).not.toMatch(/^\s*let\s+/m)

@@ -327,7 +327,7 @@ export const buildSubagentConfig = (
    *  Unset ⇒ byte-identical to today (loop mints its own). */
   taskRegistry?: import("@/subagent").TaskRegistry,
 ): AgentConfig["subagent"] | undefined => {
-  const enabled = parseEnvFlag(process.env.QUANTA_SUBAGENT, true)
+  const enabled = readCliKnob("QUANTA_SUBAGENT", "bool") ?? true
   const rawDepth = process.env.QUANTA_SUBAGENT_MAX_DEPTH
   const depth = rawDepth !== undefined ? Number.parseInt(rawDepth, 10) : Number.NaN
   // ADR-0041 — parallel-worker (6-tool) router. CLI default-ON is seeded by the
@@ -336,15 +336,15 @@ export const buildSubagentConfig = (
   // (or QUANTA_SUBAGENT=0) disables. exec_command's model-supplied cwd is jailed
   // to the workspace by the loop assembly; dangerous commands still pass the
   // permission/HITL gate.
-  const enable6Tools = enabled && parseEnvFlag(process.env.QUANTA_SUBAGENT_6TOOLS, true)
+  const enable6Tools = enabled && (readCliKnob("QUANTA_SUBAGENT_6TOOLS", "bool") ?? true)
   const rawConc = process.env.QUANTA_SUBAGENT_MAX_CONCURRENT
   const conc = rawConc !== undefined ? Number.parseInt(rawConc, 10) : Number.NaN
   // Companions to the parallel-worker router: `spawn_batch` (fan a prompt list
   // out in one call) + `list_agents` (see the spawned workers). Default-ON under
   // QUANTA_SUBAGENT; `QUANTA_SUBAGENT_BATCH=0` / `QUANTA_SUBAGENT_INTROSPECT=0`
   // disable individually. Zero-adapter: both ride the existing runner/registry.
-  const enableBatchSpawn = enabled && parseEnvFlag(process.env.QUANTA_SUBAGENT_BATCH, true)
-  const enableIntrospect = enabled && parseEnvFlag(process.env.QUANTA_SUBAGENT_INTROSPECT, true)
+  const enableBatchSpawn = enabled && (readCliKnob("QUANTA_SUBAGENT_BATCH", "bool") ?? true)
+  const enableIntrospect = enabled && (readCliKnob("QUANTA_SUBAGENT_INTROSPECT", "bool") ?? true)
   // §25.1 — `run_workflow` (LLM-authored declarative orchestration). DEFAULT-OFF
   // (gateOn ⇒ must be explicitly QUANTA_WORKFLOW=on/1): it fans out a tree of
   // subagents, so it opts in rather than riding the default subagent-ON seed.
@@ -398,7 +398,7 @@ export const buildSkillsConfig = (): AgentConfig["skills"] | undefined => {
   const dir = process.env.QUANTA_SKILLS_DIR
   return buildSkillsConfigCore({
     ...(dir !== undefined ? { dir } : {}),
-    enabled: parseEnvFlag(process.env.QUANTA_SKILLS, true) || hasArg("--skills"),
+    enabled: (readCliKnob("QUANTA_SKILLS", "bool") ?? true) || hasArg("--skills"),
   })
 }
 

@@ -156,6 +156,7 @@ export const CLI_KNOBS: readonly CliKnob[] = [
   { envKey: "QUANTA_SUBAGENT_MAX_CONCURRENT", kind: "int", default: 0, group: "misc", describe: "Max concurrent subagents (0 = host default).", readSite: "internal.ts" },
   { envKey: "QUANTA_SUBAGENT_MAX_DEPTH", kind: "int", default: 0, group: "misc", describe: "Subagent recursion depth cap (0 = host default).", readSite: "internal.ts" },
   { envKey: "QUANTA_WORKFLOW", kind: "bool", default: false, group: "misc", describe: "Declarative workflow tool (opt-in).", readSite: "internal.ts" },
+  { envKey: "QUANTA_SPAWN_AGENTS_CSV", kind: "bool", default: false, group: "misc", describe: "spawn_agents_on_csv subagent tool gate (opt-in).", readSite: "internal.ts" },
   { envKey: "QUANTA_RETRY_MODELS", kind: "string", default: "", group: "misc", describe: "Fallback model list for transient retry.", readSite: "repl/surface-compose.ts" },
   { envKey: "QUANTA_REMOTE_DEFAULT_IMAGE", kind: "string", default: "", group: "misc", describe: "Default Docker image for remote runner.", readSite: "index.ts" },
   { envKey: "QUANTA_REMOTE_TIMEOUT_MS", kind: "int", default: 0, group: "misc", describe: "Remote runner default timeout (ms).", readSite: "index.ts" },

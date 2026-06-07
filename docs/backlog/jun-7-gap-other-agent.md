@@ -55,6 +55,8 @@
 
 ## 🔴 우선순위 TOP (ROI×임팩트, 근거 확정)
 
+> **🟢 STATUS UPDATE (re-verified jun-08, 4병렬 어딧)** — 아래 jun-07 OPEN-8이 **전부 닫힘/스킵**: P1/P3/P4/P6/P7/P10 ✅ LANDED(jun-07~08 in-flight+misc-ticket closeout), P16(Windows·skip)·P17(NotebookEdit·user-skip). **추가 stale-flip → ✅ LANDED**: P9(`[1m]` context-1m.ts 풀배선)·§9.2(Anthropic service_tier 배선)·§10.1(agent-requested rule, ADR-0509)·§12.4(per-project MCP=central-config 흡수)·§23.2(reached+reset=ratelimit-notice 커버). **남은 IMPROVE(있는데 미완)**: P8(worktree 에이전트도구+edit-fence)·§20.4(FS owned/forbidden 강제화)·§12.2(MITM header-rewrite)·§11.6(/model picker)·§11.7(statusLine+색맹팔레트) → 계획 `docs/tickets/misc-jun-7/11-15-*.md`. **남은 NEW**: §11.1(/init)·§11.2(/agents fleet)·§11.4(Ctrl+B)·§22.3(reverse-MCP)·§1.3/1.5(MCP templates/Tasks)·§6.2-6.4(browser)·§9.4/9.5(reasoning summary/verbosity).
+>
 > **STATUS (verified jun-07 src grep)** — P-list 검증마커는 각 §섹션 본문에 인라인(아래 §14–§26). 요약(15 verified flips/confirms):
 > **✅ LANDED (14)**: P5(tool_search) · P12(closeout-critic) · P13(=§26.5 model-window) · P14(=§26.10 read truncation) · P19(MCP annotations) · P20(MCP image) · P21(subagent system) · P22(named-agent load) · P23(grep -A/-B/-C) · P24(grep output_mode) · P25(glob gitignore/mtime) · P26(stream-json) · P27(ratelimit notice) · §26.1(tree-sitter chunking — jun-07 2nd-pass 배선). 또 §12.2 HTTPS-MITM body-scan(Node+Bun)·D1-D8 naive-impl 하든 8/8 FIXED.
 > **🔲 OPEN (8)**: P1(MCP proto 2025-06-18 그대로) · P3(Guardian assessor) · P4(auto-mode bypass) · P6(image downsample) · P7(중앙config/trust-gate) · P10(MCP SSE resume) · P16(bash -lc Windows) · P17(NotebookEdit). P18(corrupt-store)은 §13 소관(이번 검증범위 외).
@@ -329,12 +331,12 @@
 
 ## 9. LLM 레이어 — Model / Caching / Reasoning / Usage
 
-### 9.1 [NEW-GAP] Model `[1m]` 1M-context 와이어링(orphan literal) — P9 — 🔲 OPEN (verified jun-07: `context-1m`/`[1m]` suffix-strip/`anthropic-beta` header grep 0 in `src/llm/`; `advisor.ts:53` `claude-opus-4-8[1m]` 리터럴 여전히 orphan. [NOTE: `src/llm/provider-metadata.ts` MODEL_CONTEXT_WINDOWS에 `claude-sonnet-4-*-1m`(1M) 엔트리가 §15.1용으로 신설됐으나, 이는 window 메타지 `[1m]` suffix 감지/beta-header 활성화가 아님 — 이 갭의 코어는 여전히 OPEN])
+### 9.1 [NEW-GAP] Model `[1m]` 1M-context 와이어링 — P9 — ✅ **LANDED (re-verified jun-08; 이전 jun-07 OPEN 마커 STALE)**: `src/llm/context-1m.ts`(`CONTEXT_1M_BETA="context-1m-2025-08-07"`+`SUFFIX="[1m]"`+`resolveContext1M()` — 접미사 strip→모델 감지→beta header+window key 활성)+`factory.ts:147-156`(Anthropic adapter가 호출, beta header de-dup, `contextWindowKey`를 `-1m` 변종으로 pin). orphan 아니라 풀배선.
 - **경쟁사**: `claude-code-cli/_cli-symbols.txt` — 모델 `sonnet[1m]`/`opus[1m]`, `[1m]` suffix → `context-1m-2025` beta 활성+window 1,000,000.
 - **quanta**: `src/runner/knobs/knobs/advisor.ts:53`에 `claude-opus-4-8[1m]` **리터럴만 존재**, suffix 감지/strip/`context-1m` `anthropic-beta` 헤더 세팅 코드 **부재**(`context-1m|\[1m\]` grep 0). 이 id 넘기면 `...-4-8[1m]` 그대로 보내 400.
 - **델타**: advisor가 이미 광고하는 1M-context를 실제론 못씀(half-wired). **비용 저/ROI 중-고.**
 
-### 9.2 [NEW-GAP] Anthropic `service_tier` 미전송 — 🔲 OPEN (verified jun-07: `service_tier`/`serviceTier` grep 0 in `src/llm/anthropic-messages-codec.ts`; OpenAI Responses(`openai-responses-wire.ts:153`+`factory.ts`)에만 세팅. `QUANTA_SERVICE_TIER` 놉은 존재하나 Anthropic codec 미연결)
+### 9.2 [NEW-GAP] Anthropic `service_tier` 미전송 — ✅ **LANDED (re-verified jun-08; 이전 OPEN STALE)**: `anthropic-messages-codec.ts:183-191` `normalizeAnthropicServiceTier`(auto/priority/fast→"auto", standard→"standard_only")+`:202-210` `buildAnthropicMessagesRequest`가 정의시 body에 `service_tier` 포함. `factory.ts:142-146`서 resolve→adapter thread. OpenAI+Anthropic 양쪽 배선.
 - **경쟁사**: `claude-code-cli/_cli-symbols.txt` — `service_tier`(×9, priority/batch).
 - **quanta**: OpenAI-Responses에만 세팅(`src/llm/openai-responses-wire.ts:153`,`factory.ts:131`). `toAnthropicCreateParams`(`src/llm/anthropic-messages-codec.ts:184-205`)엔 `service_tier` 없음(grep 0). `QUANTA_SERVICE_TIER` 놉은 이미 존재.
 - **델타**: Anthropic priority-tier(저지연) 못씀. **비용 저(~3줄)/ROI 중.**
@@ -365,7 +367,7 @@
 
 ## 10. Rules / Context / Mentions / Retrieval / Compaction
 
-### 10.1 [ACTUAL-GAP] Agent-Requested 룰 — description-only 룰 무음 드롭 — 🔲 OPEN (verified jun-07: `fetch_rules`/`agent.requested`/`agentRequested` grep 0 in `src/agent/glob-rules.ts`; globs/alwaysApply 없는 룰 DROP 그대로)
+### 10.1 [ACTUAL-GAP] Agent-Requested 룰 — description-only 룰 무음 드롭 — ✅ **LANDED (re-verified jun-08; 이전 OPEN STALE, ADR-0509)**: `src/agent/agent-requested-rules.ts`+`glob-rules.ts:189-226` `loadRequestableRules`+`src/tool/fetch-rules/fetch-rules.ts` `fetch_rules` 도구(token-overlap 랭킹). description-only 룰을 on-demand로 surface — 무음드롭 해소.
 - **경쟁사**: Cursor 4 룰타입 — Always/Auto-Attached(glob)/Manual(@)/**Agent-Requested**(description-only, 모델이 카탈로그서 본문 fetch). `cursor-agent-exec/dist/main.js` `fetch_rules_params`/`FetchRules` capability + `rules.map(e=>\`- ${e.name}: ${e.description}\`)` 카탈로그.
 - **quanta**: `src/agent/glob-rules.ts:116` — globs도 alwaysApply도 없는 룰 **DROP**("can never auto-inject — drop it"). `description`은 파싱하나 hint로만 렌더(:205), selection key 아님(`selectGlobRules` :181은 changedPaths×globs만). `fetch_rules`/`agent.requested` grep 0.
 - **델타**: 마이그레이션 유저의 description-only `.mdc` 룰 손실 = **실 correctness 갭**. **비용 저-중/ROI 중-고.**
@@ -459,7 +461,7 @@
 - **quanta**: sandbox는 `extraReadPaths`/`extraWritePaths`(`os-sandbox/types.ts:33-35`) 있으나 **FS jail은 single-cwd**(`apply-patch-structured-tool.ts:119` `jailRoot:ctx.cwd`). persisted 멀티루트 jail config 없음.
 - **델타**: OS-sandbox는 루트 넓힐 수 있으나 도구-레벨 read/write jail은 못함. **ROI 중(monorepo sibling).**
 
-### 12.4 [PARTIAL] per-project MCP enable/disable — 🔲 OPEN (verified jun-07: `enabledMcp`/`disabledMcp`/`enableAllProjectMcp` grep 0 in `src/`; `.mcp.json` discovery만)
+### 12.4 [PARTIAL] per-project MCP enable/disable — ✅ **LANDED (re-verified jun-08; 이전 OPEN STALE — ADR-0497 central-config로 흡수)**: `config/types.ts:74-78` `McpSettings.enabledServers` + `merge.ts:148-151` 4-layer(managed>user>project>local) 정밀+trust-gate(untrusted repo의 loosening grant 드롭) + `config/types.ts:114` `mcpEnabledServers` resolved. Claude/Codex 패리티.
 - **경쟁사**: Codex `[plugins."x@y"] enabled=true`(`config.toml:48-60`); Claude `enabledMcpjsonServers`/`disabledMcpjsonServers`/`enableAllProjectMcpServers`(×16-22).
 - **quanta**: `.mcp.json` discovery는 있으나 per-project allow/deny/enable config 레이어 없음(`enabledMcp|disabledMcp` grep 0).
 - **델타**: 프로젝트 MCP 서버 auto-connect 게이팅 없음(보안: Claude `enabledMcpjsonServers`가 닫는 위협). **ROI 중.**
@@ -779,9 +781,9 @@
 - **델타**: "한도 X%"·"approaching · resets Y"·소진 전 경고 없음. **데이터 이미 캡처됨 — status-line/spinner 렌더러+임계값만. ROI 고.**
 - **구현 (P27, jun-7)**: `src/apps/cli/ratelimit-notice.ts` (신규 closed StreamPort) — `ratelimit_snapshot` 이벤트를 status-bar transient notice("⚠ 한도 reached · resets 3h")로 렌더. **surface 결정은 새 percent 도입 0 — 슬라이스가 이미 계산한 REACHED 신호(empty-window predicate `remaining <= 0`, `policy.ts::proactiveDelayMs`가 backoff 도출하는 바로 그 신호) 재사용**. gate=`QUANTA_RATELIMIT_NOTICE`(DEFAULT-OFF, knob `ratelimit-notice`), OFF면 port 미설치→`stdout.ts:151` 빈 case byte-identical. malformed/partial(NaN/neg/missing)은 슬라이스 parser가 graceful-skip→무페인트; throwing statusBar는 try/catch로 swallow(tee isolation). 배선: `cli-feature-config.ts`(`ratelimitNotice.enabled`)+`repl/factories/turn-indicator.ts`(TeeStream 합류, indicator gate와 독립). 테스트 26: `ratelimit-notice-hellgate`(16)+`ratelimit-notice-wire-hellgate`(5)+`ratelimit-notice-knob`(3)+`ratelimit-snapshot-stdout-ignore-hellgate`(2). fc=`ratelimit-snapshot-render`. **✅ F3 분리 완료(round-2 발견→해결)**: `session-bootstrap`이 snapshot store+header-capture를 `QUANTA_RATELIMIT_NOTICE OR QUANTA_RATELIMIT_PROACTIVE`일 때 생성(공유 SSOT predicate `ratelimitNoticeWanted`, runtimeConfig+CLI 한 정의), `stream-consume`이 reached-window를 양쪽 모드서 emit하되 `sleep`은 PROACTIVE만 → **`QUANTA_RATELIMIT_NOTICE` 단독으로 capture+render 완결, 요청 지연 없음**. `delta-ratelimit-reachability-hellgate`에 NOTICE-only emit+no-sleep 케이스 lock. (남은 §23.2 quota-exhausted graceful UX는 error-path 한정, deferred.)
 
-### 23.2 [PARTIAL] quota-exhausted graceful UX
+### 23.2 [PARTIAL→사실상 커버] quota-exhausted graceful UX — ✅ **EFFECTIVELY COVERED (re-verified jun-08)**
 - **경쟁사**: Claude typed reset-time 메시지.
-- **quanta**: error-path만(`src/agent/error-routing/types.ts:21` `usageLimitExceeded — Fatal` → abort), "소진, HH:MM 리셋" 표시 없음. **ROI 중.**
+- **quanta**: ① error-routing(`error-routing/types.ts:21` `usageLimitExceeded`→abort, 분류 O) + ② **graceful 렌더는 §23.1 ratelimit-notice가 처리** — `apps/cli/ratelimit-notice.ts:99` `renderReachedNotice`가 reached+reset("⚠ 한도 reached · resets 3h")를 status-bar transient로 표시(empty-window `remaining<=0` predicate). 즉 reached+reset UX는 존재. **남은 미세**: hard-error abort PATH 자체에 inline reset-time 메시지는 없음(ratelimit-notice는 proactive surface). ROI 저(거의 닫힘).
 
 ### 23.3 [LANDED jun-7 Wave R] release-notes / version 표시
 - **경쟁사**: Claude `/release-notes`+`What's new` 패널+`VERSION`.

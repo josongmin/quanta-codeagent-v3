@@ -39,6 +39,7 @@
 
 import { tlsMitmAuthorized } from "@/runtime/network-proxy/mitm-gate"
 import { gateDisabledStrict, gateOn, gateOnStrict } from "./env-flag"
+import { knobOverrideCount, knobOverrides, knobOverridesVersion } from "./knob-overrides"
 import { writeStderr } from "./terminal-io"
 
 export const LOG_LEVELS = ["debug", "info", "warn", "error"] as const
@@ -1644,13 +1645,24 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
 }
 
 let cached: RuntimeConfig | undefined
+let cachedVersion = -1
 
-/** Read the frozen runtime config. First call evaluates + freezes; subsequent
- *  calls return the cached value. Env changes during a run have NO effect on
- *  the returned object — intentional, so a test/harness that mutates env mid-
- *  run can't desync feature behavior. */
+/** Read the runtime config. `process.env` is read once + cached; but LIVE
+ *  session overrides (`/knobs set`, the `@/shared/knob-overrides` store) are
+ *  merged ON TOP and the cache is keyed on {@link knobOverridesVersion}, so a
+ *  set takes effect on the next read (ADR-0503 P4 live-control). With NO
+ *  overrides the merged bag === `process.env` → byte-identical to the legacy
+ *  frozen behavior. Raw ad-hoc `process.env` mutation mid-run is still ignored
+ *  (intentional) — only the override store is a live channel. */
 export const runtimeConfig = (): RuntimeConfig => {
-  if (cached === undefined) cached = loadFromEnv(process.env)
+  const version = knobOverridesVersion()
+  if (cached === undefined || cachedVersion !== version) {
+    cached =
+      knobOverrideCount() === 0
+        ? loadFromEnv(process.env)
+        : loadFromEnv({ ...process.env, ...knobOverrides() })
+    cachedVersion = version
+  }
   return cached
 }
 

@@ -19,7 +19,13 @@
  */
 
 import { allInventoryKnobs } from "@/config/knob-inventory"
-import { isTruthyToken } from "@/shared"
+import {
+  __resetKnobOverrides,
+  getKnobOverride,
+  knobOverrides,
+  readBool,
+  setKnobOverride,
+} from "@/shared"
 import { allRuntimeConfigKnobs } from "@/shared/runtime-config-knobs"
 import { CLI_KNOBS, type CliKnob } from "./cli-knobs"
 
@@ -45,26 +51,22 @@ const knobDefault = (envKey: string): string | undefined => {
   return d === undefined ? undefined : String(d)
 }
 
-/** Session overrides set via `/config set` — highest precedence, live. */
-let SESSION: Map<string, string> = new Map()
+/** Apply (or clear) a live override. Delegates to the UNIFIED `@/shared/knob-
+ *  overrides` store so the same `/knobs set` is also seen by `runtimeConfig()`
+ *  (one SSOT, not a CLI-local bag). Returns `false` if refused (security-boundary
+ *  knob — set those via env/managed only). */
+export const setCliKnobOverride = (envKey: string, raw: string | undefined): boolean =>
+  setKnobOverride(envKey, raw)
 
-/** Apply (or clear, with `undefined`) a live session override for a CLI knob. */
-export const setCliKnobOverride = (envKey: string, raw: string | undefined): void => {
-  if (raw === undefined) SESSION.delete(envKey)
-  else SESSION.set(envKey, raw)
-}
+/** Snapshot of current overrides (for `/knobs save` / inspection). */
+export const cliKnobOverrides = (): Readonly<Record<string, string>> => knobOverrides()
 
-/** Snapshot of current session overrides (for `/knobs save` / inspection). */
-export const cliKnobOverrides = (): Readonly<Record<string, string>> => Object.fromEntries(SESSION)
+/** Test seam — reset the shared override store between cases. */
+export const __resetCliKnobOverrides = (): void => __resetKnobOverrides()
 
-/** Test seam — reset the session bag between cases. */
-export const __resetCliKnobOverrides = (): void => {
-  SESSION = new Map()
-}
-
-/** Raw resolution: session > env > registry default. `undefined` = unset everywhere. */
+/** Raw resolution: session override > env > registry default. `undefined` = unset. */
 const resolveRaw = (envKey: string, env: EnvBag): string | undefined => {
-  const ses = SESSION.get(envKey)
+  const ses = getKnobOverride(envKey)
   if (ses !== undefined) return ses
   const e = env[envKey]
   if (e !== undefined) return e
@@ -79,8 +81,10 @@ type KindToValue<K extends CliKnob["kind"]> = K extends "int"
 
 /**
  * Read a CLI knob as its typed value (per `kind`), or `undefined` when unset
- * everywhere (caller applies its own fallback). bool uses the SSOT truthy vocab
- * (`isTruthyToken`); int/float parse finite numbers; string/enum return the raw.
+ * everywhere (caller applies its own fallback). bool uses the unified `readBool`
+ * SSOT (lenient: unrecognized ⇒ registry default) so it serves BOTH gateOn-
+ * (default-off) and parseEnvFlag-(default-on) origins byte-identically; int/float
+ * parse finite numbers; string/enum return the raw.
  */
 export const readCliKnob = <K extends CliKnob["kind"]>(
   envKey: string,
@@ -90,7 +94,7 @@ export const readCliKnob = <K extends CliKnob["kind"]>(
   const raw = resolveRaw(envKey, env)
   if (raw === undefined) return undefined
   const k: CliKnob["kind"] = kind // widen so the switch narrows on the union, not generic K
-  if (k === "bool") return isTruthyToken(raw) as KindToValue<K>
+  if (k === "bool") return readBool(raw, knobDefault(envKey) === "true") as KindToValue<K>
   if (k === "int") {
     const n = Number(raw)
     return Number.isFinite(n) ? (n as KindToValue<K>) : undefined

@@ -14,6 +14,7 @@
  */
 import { err, errMessage, ok } from "@/shared"
 import type { SubagentRequest, SubagentResult, SubagentRunner } from "@/subagent"
+import { createJobResultReporter, reportJobResultTool } from "@/tool/report-job-result"
 import type { BatchRunOutcome, BatchRunPort } from "@/tool/spawn-agents-csv"
 import {
   type BatchJobItem,
@@ -54,10 +55,15 @@ export const buildRowDispatchAdapter = (
   return async (req) => {
     if (req.signal?.aborted) return err({ kind: "aborted" as const })
     const prompt = `${req.instruction}\n\n## Row ${req.rowIndex} (JSON)\n${req.rowJson}`
+    // GAP7-2: give the child a per-row `report_agent_job_result` (via the
+    // extraTools seam) so it can report a STRUCTURED result by tool-call; if it
+    // does, that wins over parsing the free-text final message (more reliable).
+    const captured = createJobResultReporter()
     const childReq: SubagentRequest = {
       prompt,
       depth: childDepth,
       taskKind: "read",
+      extraTools: [reportJobResultTool(captured.reporter)],
       ...(req.signal ? { signal: req.signal } : {}),
     }
     let result: SubagentResult
@@ -73,7 +79,10 @@ export const buildRowDispatchAdapter = (
         reason: result.finalText || "subagent dispatch failed",
       })
     }
-    const value: RowDispatchResult = { value: parseChildValue(result.finalText) }
+    const taken = captured.taken()
+    const value: RowDispatchResult = {
+      value: taken.reported ? taken.value : parseChildValue(result.finalText),
+    }
     return ok(value)
   }
 }

@@ -304,8 +304,13 @@ const doSet = (args: readonly string[], wire: KnobsSurfaceWire, ctx: SlashContex
         ctx.err(`/knobs set: ${id} expects ${cat.kind}, got: ${JSON.stringify(raw)}\n`)
         return 1
       }
-      setCliKnobOverride(id, raw)
-      ctx.out(`/knobs: ${id} = ${raw} (session override; live for readCliKnob-routed reads)\n`)
+      if (!setCliKnobOverride(id, raw)) {
+        ctx.err(
+          `/knobs set: ${id} is a security-boundary knob — set it via env / managed config only, not a session override.\n`,
+        )
+        return 1
+      }
+      ctx.out(`/knobs: ${id} = ${raw} (session override; live this session)\n`)
       return 0
     }
     ctx.err(`/knobs set: unknown knob: ${id}\n`)

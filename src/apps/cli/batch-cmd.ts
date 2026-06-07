@@ -40,11 +40,14 @@ import {
   compileRowSchema,
   DEFAULT_POOL_SIZE,
   InMemoryJobStore,
+  type JobStorePort,
+  MAX_POOL_SIZE,
   parseRowsFromCsv,
   type RowDispatchPort,
   type RowDispatchResult,
 } from "@/agent/batch-jobs"
 import { buildRowDispatchAdapter } from "@/agent/batch-jobs-dispatch"
+import { SqliteJobStore } from "@/host/runtime/batch-jobs-sqlite-store"
 import { err, errMessage, ok, type Result } from "@/shared"
 import type { SubagentRunner } from "@/subagent"
 
@@ -85,12 +88,16 @@ export interface BatchCmdOptions {
 }
 
 interface ParsedBatchArgs {
-  readonly input: string
-  readonly instruction: string
+  readonly input?: string
+  readonly instruction?: string
   readonly output: string
   readonly schema?: string
   readonly poolSize: number
   readonly maxAttempts: number
+  /** GAP7-3 — durable sqlite store path. Absent ⇒ ephemeral in-memory. */
+  readonly db?: string
+  /** GAP7-5 — resume this existing job id from `--db` (skips submit). */
+  readonly resume?: string
 }
 
 /** Default IO bound to the real process. Constructed ONLY when the caller does
@@ -124,13 +131,18 @@ OPTIONS
   --schema <path>        JSON output-schema descriptor; each row's result is
                          validated against it (a row that fails is marked
                          failed, never aborts the job)
-  --pool <int>           Max concurrent rows in flight (default ${DEFAULT_POOL_SIZE})
+  --pool <int>           Max concurrent rows in flight (default ${DEFAULT_POOL_SIZE}, max ${MAX_POOL_SIZE})
   --max-attempts <int>   Per-row attempt cap (default ${DEFAULT_MAX_ATTEMPTS})
+  --db <path>            Durable sqlite store (survives restart; enables --resume).
+                         Absent ⇒ ephemeral in-memory (byte-identical default).
+  --resume <jobId>       Re-drive an existing job from --db (requires --db + --out;
+                         --in/--instruction not needed). Resets interrupted rows.
   --help, -h             Print this help and exit
 
 NOTES
   • Default-OFF: nothing runs unless this subcommand is invoked.
   • A single row failure is surfaced in the output CSV; it never aborts the run.
+  • --pool is capped at ${MAX_POOL_SIZE} (fan-out safety); a larger value is rejected.
 `
 
 /** Read `argv[i+1]`; reject a missing value or a value that is itself a flag. */
@@ -162,6 +174,11 @@ interface ArgsAcc {
   schema?: string
   poolSize: number
   maxAttempts: number
+  /** GAP7-3 — durable sqlite store path (`--db`). Absent ⇒ ephemeral in-memory. */
+  db?: string
+  /** GAP7-5 — resume an existing job id from `--db` instead of submitting a new
+   *  one (`--resume <jobId>`). Requires `--db`. */
+  resume?: string
 }
 
 /** Table-driven flag handler. Each known flag consumes its value + writes the
@@ -199,6 +216,14 @@ const FLAG_HANDLERS: Record<
     acc.maxAttempts = n.value
     return ok(undefined)
   },
+  "--db": (acc, raw) => {
+    acc.db = raw
+    return ok(undefined)
+  },
+  "--resume": (acc, raw) => {
+    acc.resume = raw
+    return ok(undefined)
+  },
 }
 
 /** Pure argv parser for the `batch` subcommand. Returns `Err(reason)` on any
@@ -222,6 +247,21 @@ export const parseBatchArgs = (argv: readonly string[]): Result<ParsedBatchArgs,
     i += 2
   }
 
+  // GAP7-5 resume: a `--resume <jobId>` run re-drives an EXISTING job from the
+  // durable store, so it requires `--db` + `--out` (export) but NOT
+  // `--in`/`--instruction` (the job + its rows already live in the db).
+  if (acc.resume !== undefined) {
+    if (acc.db === undefined) return err("--resume <jobId> requires --db <path>")
+    if (acc.output === undefined) return err("--out <output.csv> is required")
+    return ok({
+      output: acc.output,
+      poolSize: acc.poolSize,
+      maxAttempts: acc.maxAttempts,
+      db: acc.db,
+      resume: acc.resume,
+    })
+  }
+
   if (acc.input === undefined) return err("--in <input.csv> is required")
   if (acc.instruction === undefined || acc.instruction.length === 0) {
     return err("--instruction <text> is required")
@@ -235,6 +275,7 @@ export const parseBatchArgs = (argv: readonly string[]): Result<ParsedBatchArgs,
     poolSize: acc.poolSize,
     maxAttempts: acc.maxAttempts,
     ...(acc.schema !== undefined ? { schema: acc.schema } : {}),
+    ...(acc.db !== undefined ? { db: acc.db } : {}),
   })
 }
 
@@ -262,6 +303,12 @@ const buildSpec = (
   args: ParsedBatchArgs,
   io: BatchCmdIo,
 ): Result<{ spec: BatchJobSpec; outputSchemaJson?: string }, number> => {
+  // Validation guarantees these on the non-resume path; the guard narrows the
+  // now-optional fields (resume runs never reach buildSpec).
+  if (args.input === undefined || args.instruction === undefined) {
+    io.err("quanta batch: --in and --instruction are required\n")
+    return err(EXIT_USAGE)
+  }
   let csvSource: string
   try {
     csvSource = io.readFile(args.input)
@@ -364,40 +411,85 @@ export const runBatchCmd = async (
   }
   const args = parsed.value
 
+  // GAP7-3 — durable sqlite store when `--db` is given (survives restart so
+  // `--resume` can recover); else ephemeral in-memory (byte-identical default).
+  const store: JobStorePort =
+    args.db !== undefined ? new SqliteJobStore(args.db) : new InMemoryJobStore()
+  try {
+    return await runOrResume(args, opts, io, log, store)
+  } finally {
+    if (store instanceof SqliteJobStore) store.close()
+  }
+}
+
+/** Submit-and-run a new job OR resume an existing one, then export. Split out so
+ *  `runBatchCmd` owns only the store lifecycle (construct + close). */
+const runOrResume = async (
+  args: ParsedBatchArgs,
+  opts: BatchCmdOptions,
+  io: BatchCmdIo,
+  log: { warn: (m: string) => void; error: (m: string) => void },
+  store: JobStorePort,
+): Promise<number> => {
+  // GAP7-5 resume: re-drive an EXISTING job. Compile the schema from the STORED
+  // job header (so re-run rows are validated identically to the original).
+  if (args.resume !== undefined) {
+    const jobRes = await store.getJob(args.resume)
+    if (!jobRes.ok) {
+      io.err(`quanta batch: cannot resume — ${describeError(jobRes.error)}\n`)
+      return EXIT_USAGE
+    }
+    const runner = makeRunner(opts, store, jobRes.value.outputSchemaJson)
+    return await driveAndExport(runner, args.resume, args, io, log, (id, sig) =>
+      runner.resume(id, sig),
+    )
+  }
+
   const built = buildSpec(args, io)
   if (!built.ok) return built.error
-
-  const runner = new BatchJobRunner({
-    store: new InMemoryJobStore(),
-    dispatch: buildRowDispatchAdapter(opts.runner),
-    clock: opts.now ?? Date.now,
-    newId: opts.newId ?? defaultIdGen(),
-    // Compile the schema only when present — the runner skips validation when
-    // `schema` is omitted (byte-identical to a schema-less job).
-    ...(built.value.outputSchemaJson !== undefined
-      ? { schema: compileRowSchema(built.value.outputSchemaJson) }
-      : {}),
-  })
-
+  const runner = makeRunner(opts, store, built.value.outputSchemaJson)
   const submitted = await runner.submit(built.value.spec)
   if (!submitted.ok) {
     log.error(`[batch] submit failed: ${submitted.error.kind}`)
     io.err(`quanta batch: invalid job — ${describeError(submitted.error)}\n`)
     return EXIT_USAGE
   }
-  const jobId = submitted.value
+  return await driveAndExport(runner, submitted.value, args, io, log, (id, sig) =>
+    runner.runToEnd(id, sig),
+  )
+}
 
+/** Build a runner over the given store, compiling the optional output schema. */
+const makeRunner = (
+  opts: BatchCmdOptions,
+  store: JobStorePort,
+  outputSchemaJson: string | undefined,
+): BatchJobRunner =>
+  new BatchJobRunner({
+    store,
+    dispatch: buildRowDispatchAdapter(opts.runner),
+    clock: opts.now ?? Date.now,
+    newId: opts.newId ?? defaultIdGen(),
+    ...(outputSchemaJson !== undefined ? { schema: compileRowSchema(outputSchemaJson) } : {}),
+  })
+
+/** Wire SIGINT/SIGTERM → abort, drive the job to a terminal state via `drive`,
+ *  then export the results CSV. Shared by the submit + resume paths. */
+const driveAndExport = async (
+  runner: BatchJobRunner,
+  jobId: string,
+  args: ParsedBatchArgs,
+  io: BatchCmdIo,
+  log: { warn: (m: string) => void; error: (m: string) => void },
+  drive: (jobId: string, signal: AbortSignal) => Promise<Result<unknown, { kind: string }>>,
+): Promise<number> => {
   const ac = new AbortController()
-  const onSig = () => {
-    ac.abort()
-  }
+  const onSig = () => ac.abort()
   process.on("SIGINT", onSig)
   process.on("SIGTERM", onSig)
   try {
-    const final = await runner.runToEnd(jobId, ac.signal)
+    const final = await drive(jobId, ac.signal)
     if (!final.ok) {
-      // `aborted` (Ctrl-C) or a job-level store fault — still try to export
-      // whatever rows completed so partial progress is not lost.
       log.warn(`[batch] job did not complete cleanly: ${final.error.kind}`)
     }
     return await exportAndReport(runner, jobId, args, io, final.ok)

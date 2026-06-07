@@ -52,6 +52,11 @@ export interface SubagentRequest {
    *  `runAgent`. Absent ⇒ only the parent loop's signal cancels the child
    *  (legacy / foreground call path). */
   signal?: AbortSignal
+  /** GAP7-2 — per-dispatch tools the child gets IN ADDITION to its filtered
+   *  registry (appended after `toolFilter` so the allowlist never drops them).
+   *  Used by the batch row-dispatch to bind a fresh `report_agent_job_result`
+   *  reporter per row. Absent ⇒ byte-identical (no extra tools). */
+  extraTools?: readonly import("@/tool").Tool[]
   /** Typed role classification (read / edit / review). When set AND
    *  `toolFilter` is absent the runner derives a sensible default allowlist
    *  from the kind. Always overridable by an explicit `toolFilter`. */

@@ -83,7 +83,6 @@ const HOST: readonly KnobInventoryEntry[] = [
   { envKey: "QUANTA_POLICY_MERGE_STRATEGY", kind: "enum", default: "source-precedence", group: "permission", home: "runtime-config", describe: "Profile merge strategy.", readSite: "host/runtime/agent-arg-builder.ts" },
   { envKey: "QUANTA_PREWARM", kind: "bool", default: false, group: "host-gate", home: "runtime-config", describe: "LLM prewarming clock gate.", readSite: "host/runtime/agent-arg-builder.ts" },
   { envKey: "QUANTA_IMAGE_DOWNSAMPLE", kind: "bool", default: false, group: "host-gate", home: "runtime-config", describe: "macOS sips image-downsample port gate (opt-in).", readSite: "host/runtime/agent-arg-builder.ts" },
-  { envKey: "QUANTA_MANAGED_SETTINGS_PATH", kind: "string", default: undefined, group: "host-gate", home: "runtime-config", describe: "Managed settings.json path override (ADR-0497).", readSite: "config/managed-path.ts" },
   { envKey: "QUANTA_LOCAL_ENV", kind: "string", default: undefined, group: "host-gate", home: "runtime-config", describe: ".quanta/environment.toml selection.", readSite: "host/runtime/agent-arg-builder.ts" },
   { envKey: "QUANTA_MCP_CAPS", kind: "enum", default: "default", group: "mcp", home: "runtime-config", describe: "MCP capability negotiation (full/default).", readSite: "host/runtime/agent-arg-builder.ts" },
   { envKey: "QUANTA_MCP_CONFIG", kind: "string", default: ".mcp.json", group: "mcp", home: "runtime-config", describe: "MCP config file path override.", readSite: "host/runtime/agent-arg-builder.ts" },

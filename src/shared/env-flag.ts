@@ -40,6 +40,24 @@ export const isFalsyToken = (raw: string | undefined): boolean =>
   raw !== undefined && GATE_FALSY.has(raw.trim().toLowerCase())
 
 /**
+ * The UNIFIED bool reader (ADR-0503 P4 R2 bool-vocab SSOT). Canonical token
+ * vocabulary + a caller default for everything else (unset / "" / unrecognized)
+ * — LENIENT (unrecognized ⇒ default), per the agreed policy. Reconciles the two
+ * legacy conventions so the typed knob accessor serves EITHER byte-identically:
+ *   - `gateOn(env,X)` ≡ `readBool(env[X], false)`  (default-OFF opt-in; incl `""`)
+ *   - `parseEnvFlag(env[X], true)` ≡ `readBool(env[X], true)` (default-ON)
+ * The only intentional divergence from `parseEnvFlag` is dropping its legacy
+ * `""`→true quirk (`QUANTA_X=` is not an opt-in).
+ */
+export const readBool = (raw: string | undefined, defaultOn: boolean): boolean => {
+  if (raw === undefined) return defaultOn
+  const v = raw.trim().toLowerCase()
+  if (GATE_TRUTHY.has(v)) return true
+  if (GATE_FALSY.has(v)) return false
+  return defaultOn
+}
+
+/**
  * Canonical OPT-IN gate read. Default OFF. Returns true iff the value is a
  * recognized truthy token (`1`/`on`/`true`/`yes`, case-insensitive). Unset,
  * empty, a falsy token, or any unrecognized value ⇒ OFF.

@@ -49,6 +49,19 @@
 
 ---
 
+## Tickets 11–15 — IMPROVE cluster (jun-08 재어딧 산출) → `11-15-improve-cluster.md`
+4병렬 재어딧이 백로그 jun-07 OPEN 다수가 이미 SOTA임을 확인(P1/P3/P4/P6/P7/P10 닫힘; stale-flip ✅: **P9 `[1m]`**·**§9.2 service_tier**·**§10.1 agent-requested rule**·**§12.4 per-project MCP**·**§23.2 reached/reset**). 남은 "있는데 미완"=5:
+
+| # | 갭 | 현재(있는 것) | 미완(SOTA++로 닫을 것) | ROI |
+|---|---|---|---|---|
+| 11 | P8 worktree | host `withWorktree()`+`fork --worktree` | 에이전트 도구 `enter/exit_worktree`+Bash/Edit **edit-fence**(slot) | 고 |
+| 12 | §20.4 FS owned/forbidden | subagent에 **prompt 텍스트(advisory)** | dispatch **gate 9.5** 강제(canonical+symlink/`..`/bash, fail-closed) | 중-고(보안) |
+| 13 | §12.2 MITM header | secret값 redaction(drop) | pure `applyHeaderRules`(strip/set/rewrite, redaction 우선) | 중 |
+| 14 | §11.6 /model | set-by-id(`/sticky-model`) | `/effort` 미러 인터랙티브 피커(mode-implicit) | 저 |
+| 15 | §11.7 statusLine | 고정 usage bar | scriptable 명령(shell:false+5s cap)+색맹 팔레트(Okabe-Ito) | 저 |
+
+시퀀싱: **12(보안)→11(고)→13(자기완결)→14·15(UX 묶음)**. 전부 default-OFF·TDD red-first·3R 어딧.
+
 ## Discipline (all tickets)
 - TDD red-first; hellgate scenarios incl. red-on-injection; e2e through real seams.
 - default-OFF byte-identity for new slices/knobs; gate-vocab via `@/shared` `gateOn`.

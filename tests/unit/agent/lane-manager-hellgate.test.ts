@@ -28,7 +28,6 @@ import type { DelegationRunnerPort } from "@/agent/delegation-runner"
 import {
   ALL_LANE_ERROR_KINDS,
   defaultLaneManager,
-  DEFAULT_MAX_CONCURRENCY,
   type LaneResult,
   type LaneSpec,
 } from "@/agent/lane-manager"
@@ -347,14 +346,6 @@ describe("lane-manager hellgate (ADR-0285)", () => {
     expect(out.length).toBe(2)
     expect(at(out, 0).id).toBe(h1.id)
     expect(at(out, 1).id).toBe(h2.id)
-  })
-
-  // -------------------------------------------------------------------------
-  test("HELL-LM-11 default-OFF byte-identical: import has no side effects", async () => {
-    const m1 = await import("@/agent/lane-manager")
-    const m2 = await import("@/agent/lane-manager")
-    expect(m1.defaultLaneManager).toBe(m2.defaultLaneManager)
-    expect(m1.DEFAULT_MAX_CONCURRENCY).toBe(DEFAULT_MAX_CONCURRENCY)
   })
 
   // -------------------------------------------------------------------------

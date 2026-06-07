@@ -81,7 +81,7 @@ import {
   SubagentTurnGate,
   type TurnWakeRegistry,
 } from "@/subagent"
-import { ToolRegistry } from "@/tool"
+import { type Tool, ToolRegistry } from "@/tool"
 import type { SubagentRequest, SubagentResult, SubagentRunner } from "../subagent/types"
 import { isAllowed as isConfirmAllowed, normalizeConfirm } from "./confirm-decision"
 import { buildLeaderHitlBroker, type LeaderEscalationDecider } from "./coordination-broker-wire"
@@ -296,8 +296,25 @@ const toResult = (outcome: AgentOutcome): SubagentResult => ({
  *  {@link ToolRegistry} from the intersection. Absent filter ⇒ inherit the
  *  parent registry as-is. An empty/all-miss filter yields an empty registry
  *  (the child simply has no tools — it can still answer from the prompt). */
-const filterRegistry = (parent: ToolRegistry, toolFilter: string[] | undefined): ToolRegistry => {
-  if (!toolFilter) return parent
+const filterRegistry = (
+  parent: ToolRegistry,
+  toolFilter: string[] | undefined,
+  // GAP7-2 — per-dispatch tools the child gets IN ADDITION to the filtered set
+  // (e.g. a batch row's `report_agent_job_result` bound to a fresh reporter).
+  // Appended AFTER the filter so the allowlist never drops them. Absent ⇒
+  // byte-identical to the pre-seam behavior.
+  extraTools?: readonly Tool[],
+): ToolRegistry => {
+  const extra = extraTools ?? []
+  const allTools = (): Tool[] =>
+    parent
+      .specs()
+      .map((s) => parent.get(s.name))
+      .filter((t): t is Tool => t !== undefined)
+  if (!toolFilter) {
+    if (extra.length === 0) return parent // no filter + no extras ⇒ inherit as-is
+    return new ToolRegistry([...allTools(), ...extra])
+  }
   const allow = new Set(toolFilter)
   const kept = parent
     .specs()
@@ -305,7 +322,7 @@ const filterRegistry = (parent: ToolRegistry, toolFilter: string[] | undefined):
     .filter((name) => allow.has(name))
     .map((name) => parent.get(name))
     .filter((t): t is NonNullable<typeof t> => t !== undefined)
-  return new ToolRegistry(kept)
+  return new ToolRegistry([...kept, ...extra])
 }
 
 /** Compose the child's {@link AbortSignal} from up to two sources: the parent
@@ -597,7 +614,7 @@ const buildChildConfig = (
   // round-trips). The child's mailbox label (`mailboxIds.agentId`, e.g.
   // `root/0`) is the per-child namespace token — distinct per sibling, so
   // concurrent siblings cannot collide. Absent ⇒ raw names (byte-identical).
-  const filtered = filterRegistry(parent.registry, req.toolFilter)
+  const filtered = filterRegistry(parent.registry, req.toolFilter, req.extraTools)
   const childRegistry =
     toolNamespace !== undefined
       ? namespaceRegistry(filtered, toolNamespace, mailboxIds.agentId)

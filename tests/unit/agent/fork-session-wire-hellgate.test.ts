@@ -62,13 +62,6 @@ describe("fork-session-wire hellgate (ADR-0284)", () => {
   })
 
   // -------------------------------------------------------------------------
-  test("HELL-FW-03 default-OFF byte-identical: import side-effect free", async () => {
-    const m1 = await import("@/agent/fork-session-wire")
-    const m2 = await import("@/agent/fork-session-wire")
-    expect(m1.defaultCheckpointBaseWire).toBe(m2.defaultCheckpointBaseWire)
-  })
-
-  // -------------------------------------------------------------------------
   test("HELL-FW-04 checkpoint store FULL (LRU) + fork ⇒ evicted ids miss", async () => {
     const wire = defaultCheckpointBaseWire({ maxEntries: 2 })
     wire.store.record("a", [mkMsg("a")])

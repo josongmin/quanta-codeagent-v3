@@ -32,12 +32,15 @@ evidence:
     - src/agent/batch-jobs-dispatch.ts
     - src/host/runtime/batch-jobs-sqlite-store.ts
     - src/tool/spawn-agents-csv/index.ts
+    - src/tool/report-job-result/index.ts
   adrs: [463, 510]
   tests:
     unit:
       - tests/unit/agent-batch-jobs-hellgate.test.ts
       - tests/unit/batch-jobs-sqlite-store-hellgate.test.ts
       - tests/unit/spawn-agents-csv-hellgate.test.ts
+      - tests/unit/batch-cmd-resume-hellgate.test.ts
+      - tests/unit/report-job-result-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

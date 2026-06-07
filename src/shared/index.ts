@@ -26,7 +26,16 @@ export {
   isFalsyToken,
   isTruthyToken,
   parseEnvFlag,
+  readBool,
 } from "./env-flag"
+export {
+  __resetKnobOverrides,
+  getKnobOverride,
+  knobOverrideCount,
+  knobOverrides,
+  knobOverridesVersion,
+  setKnobOverride,
+} from "./knob-overrides"
 export {
   THIN_CLIENT_DISPATCH_FLAG,
   THIN_CLIENT_ROUTES,

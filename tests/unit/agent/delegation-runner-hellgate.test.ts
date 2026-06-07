@@ -178,15 +178,6 @@ describe("delegation-runner hellgate (ADR-0283)", () => {
     })
   })
 
-  // -------------------------------------------------------------------------
-  test("HELL-DR-11 default-OFF byte-identical: import has no side effects", async () => {
-    // Re-importing the module twice must produce the same factory shape; the
-    // mere import must NOT register global state.
-    const mod1 = await import("@/agent/delegation-runner")
-    const mod2 = await import("@/agent/delegation-runner")
-    expect(mod1.defaultDelegationRunner).toBe(mod2.defaultDelegationRunner)
-    expect(mod1.MAX_DEPTH).toBe(mod2.MAX_DEPTH)
-  })
 
   // -------------------------------------------------------------------------
   test("HELL-DR-12 headless stub is deterministic", async () => {

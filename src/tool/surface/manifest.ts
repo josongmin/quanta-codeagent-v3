@@ -142,9 +142,25 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     note: "§25.1 LLM-authored DECLARATIVE multi-agent workflow: a JSON `WorkflowSpec` (phases · steps seq/parallel · forEach fan-out · `{{ref}}` templates · typed outputSchema) compiled + driven to completion; each step = one subagent spawn. Rides the tier-1 subagent block (reuses its runner via the workflow adapter) so it needs `subagent` enabled AND QUANTA_WORKFLOW. Default-OFF every surface (opt-in) — it fans out a tree of children.",
   },
   {
+    name: "report_agent_job_result",
+    origin: "@/tool/report-job-result",
+    gate: {
+      kind: "config-slot",
+      slot: "SubagentRequest.extraTools",
+      env: "QUANTA_SPAWN_AGENTS_CSV",
+    },
+    default: {},
+    risk: "meta",
+    note: "GAP7-2 (ADR-0510, Codex report_agent_job_result parity) — batch-WORKER tool: a child spawned by spawn_agents_on_csv reports its STRUCTURED row result by tool-call (any JSON) instead of leaving it in free-text (more reliable). NOT a main-agent tool — injected per-row into the child via the SubagentRequest.extraTools seam with a fresh capture-once reporter; the dispatch adapter prefers the reported value over parseChildValue(finalText). Pure (isReadOnly, hitlTier:none). Present only inside a batch child (when spawn_agents_on_csv runs); the main registry never carries it.",
+  },
+  {
     name: "spawn_agents_on_csv",
     origin: "@/tool/spawn-agents-csv",
-    gate: { kind: "config-slot", slot: "subagent.enableSpawnAgentsCsv", env: "QUANTA_SPAWN_AGENTS_CSV" },
+    gate: {
+      kind: "config-slot",
+      slot: "subagent.enableSpawnAgentsCsv",
+      env: "QUANTA_SPAWN_AGENTS_CSV",
+    },
     default: {},
     risk: "spawns-subagent",
     note: "GAP7-4 (ADR-0463, Codex spawn_agents_on_csv parity) — agent-callable batch fan-out: a CSV + a shared instruction → ONE subagent per row (bounded by a hard MAX_POOL_SIZE concurrency cap), each row's structured result collected into a results CSV. Rides the tier-1 subagent block (reuses its runner via the batch-jobs-dispatch adapter over an ephemeral in-memory store; the durable sqlite store + resume is the human `quanta batch` CLI path). Needs `subagent` enabled AND QUANTA_SPAWN_AGENTS_CSV. Default-OFF every surface (opt-in) — one child agent per row is cost-bearing (hitlTier:always-confirm).",

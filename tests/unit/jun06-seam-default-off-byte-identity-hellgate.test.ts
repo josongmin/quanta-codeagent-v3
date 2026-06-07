@@ -135,7 +135,9 @@ describe("jun-6 seam default-OFF — runtime-config gates", () => {
       }
     }
     __resetRuntimeConfig()
-    expect(true).toBe(true)
+    // Non-vacuous terminator: the per-iteration `throw`s above are the real
+    // assertions; this guards against an empty gate table silently passing.
+    expect(STRICT_ONE_GATES.length).toBeGreaterThan(0)
   })
 
   test("standard-boolean seam gate (sessionAutoTitle): off when unset/`0`/`false`, on for `1`", () => {
@@ -156,6 +158,6 @@ describe("jun-6 seam default-OFF — runtime-config gates", () => {
       delete process.env[env]
     }
     __resetRuntimeConfig()
-    expect(true).toBe(true)
+    expect(STANDARD_BOOL_GATES.length).toBeGreaterThan(0)
   })
 })

@@ -1,0 +1,74 @@
+/**
+ * `@/shared/knob-overrides.ts` — the SINGLE process-level session-override store
+ * for `QUANTA_*` knobs (ADR-0503 P4 live-control SSOT).
+ *
+ * `/knobs set <envKey>=<val>` writes HERE (one place), and every read accessor
+ * consults it so a live set takes effect this session WITHOUT a restart:
+ *   - `runtimeConfig()` (@/shared)   — merges over `process.env`, cache keyed on
+ *     {@link knobOverridesVersion} so a set invalidates it
+ *   - `readCliKnob()` (apps/cli)     — session layer of its precedence chain
+ *   - (later) `resolveKnobs()` (@/runner)
+ *
+ * Lives in `@/shared` (leaf) so all layers import it downward. Process-memory
+ * ONLY — never persisted (that is `/knobs save`'s explicit, separate job). A
+ * monotonic version counter lets cached accessors detect changes cheaply.
+ */
+
+/**
+ * SECURITY carve-out (RFC §4.3): knobs that gate a security boundary must NOT be
+ * enable-able via a session `/knobs set` — only via `env` / managed config that
+ * a workspace can't forge. Without this, making `runtimeConfig()` session-aware
+ * would let `/knobs set QUANTA_CODE_MODE=1` enable code execution / disable the
+ * FS jail / authorize TLS-MITM at runtime. Enforced at BOTH the writer (`/knobs
+ * set` rejects) and the reader (`runtimeConfig` merge drops these). */
+export const SESSION_FORBIDDEN_KNOBS: ReadonlySet<string> = new Set([
+  "QUANTA_CODE_MODE",
+  "QUANTA_CODE_MODE_ONLY",
+  "QUANTA_FS_JAIL",
+  "QUANTA_TLS_MITM",
+  "QUANTA_TLS_MITM_ACK",
+  "QUANTA_CENTRAL_CONFIG",
+  "QUANTA_LLM_CREDENTIAL_TRUSTED",
+])
+
+/** True if `envKey` is a security-boundary knob that a session override may NOT set. */
+export const isSessionForbidden = (envKey: string): boolean => SESSION_FORBIDDEN_KNOBS.has(envKey)
+
+let OVERRIDES = new Map<string, string>()
+let VERSION = 0
+
+/** Set (or clear, with `undefined`) a live override. Bumps the version on any
+ *  real change so version-keyed caches (runtimeConfig) rebuild on next read.
+ *  Returns `false` (and does NOT store) if `envKey` is a security-boundary knob
+ *  ({@link isSessionForbidden}) — the single chokepoint that keeps a session
+ *  override out of EVERY reader (runtimeConfig / readCliKnob / resolveKnobs). */
+export const setKnobOverride = (envKey: string, raw: string | undefined): boolean => {
+  if (raw !== undefined && isSessionForbidden(envKey)) return false
+  if (raw === undefined) {
+    if (OVERRIDES.delete(envKey)) VERSION++
+    return true
+  }
+  if (OVERRIDES.get(envKey) !== raw) {
+    OVERRIDES.set(envKey, raw)
+    VERSION++
+  }
+  return true
+}
+
+/** The live override for one knob, or `undefined` if none. */
+export const getKnobOverride = (envKey: string): string | undefined => OVERRIDES.get(envKey)
+
+/** Immutable snapshot of all overrides (for merging into an env bag / `/knobs save`). */
+export const knobOverrides = (): Readonly<Record<string, string>> => Object.fromEntries(OVERRIDES)
+
+/** Number of active overrides (fast "any overrides?" check). */
+export const knobOverrideCount = (): number => OVERRIDES.size
+
+/** Monotonic version — increments on every effective set/clear. Cache key. */
+export const knobOverridesVersion = (): number => VERSION
+
+/** Test seam — wipe the store (bumps version so caches invalidate). */
+export const __resetKnobOverrides = (): void => {
+  OVERRIDES = new Map()
+  VERSION++
+}

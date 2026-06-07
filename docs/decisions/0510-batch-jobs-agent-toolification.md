@@ -26,7 +26,10 @@ Five increments, each default-OFF + TDD:
 
 ## Consequences
 
-The agent can run bounded CSV batches; the human CLI keeps the durable sqlite path. A
-per-row `report_agent_job_result` worker tool was prototyped then REMOVED — it cannot be
-injected per-dispatch without a `SubagentRequest` extra-tools seam (final-text parsing via
-`parseChildValue` is the working mechanism); re-introduce it with that seam.
+The agent can run bounded CSV batches; the human CLI keeps the durable sqlite path
+(`--db`/`--resume`). The per-row `report_agent_job_result` worker tool is wired via a NEW
+`SubagentRequest.extraTools` seam (the runner's `filterRegistry` appends per-dispatch tools
+to the child registry AFTER the allowlist filter, byte-identical when absent): the dispatch
+adapter mints a capture-once reporter per row, injects the tool, and PREFERS the reported
+structured value over `parseChildValue(finalText)` (text parse remains the fallback). The
+`extraTools` seam is generic — any future per-dispatch child tool reuses it.
