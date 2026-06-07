@@ -133,6 +133,30 @@ describe("guardian assessor subagent adapter — happy paths decode correctly", 
   })
 })
 
+describe("guardian assessor subagent adapter — non-object JSON fails closed (R4 hardening)", () => {
+  // The model's `finalText` is JSON.parse'd then handed to a discriminatedUnion
+  // schema. Well-formed JSON that is NOT a decision object — a bare primitive, a
+  // null, or an array (e.g. a model that wraps its single decision in a list, or
+  // emits a bare `true`) — must NOT slip past the decoder. Each fails closed to
+  // a deny that collapses to a non-allow. (Red-on-injection: drop the
+  // discriminatedUnion `.safeParse` gate and a `[{kind:"allow"}]` reply would
+  // throw or mis-decode rather than deny.)
+  for (const [label, text] of [
+    ["bare true", "true"],
+    ["bare null", "null"],
+    ["bare number", "42"],
+    ["array of one allow", '[{"kind":"allow","rationale":"x"}]'],
+    ["bare string", '"allow"'],
+  ] as const) {
+    test(`${label} ⇒ deny (collapses to non-allow)`, async () => {
+      const assess = createSubagentBackedGuardianAssess({ reviewer: runnerReturning(true, text) })
+      const a = await assess(mutatingAction, ctx)
+      expect(a.kind).toBe("deny")
+      expect(isAllowed(collapseAssessment(a, DECIDED_AT).outcome)).toBe(false)
+    })
+  }
+})
+
 describe("guardian assessor subagent adapter — strict-schema hardening (red-on-injection)", () => {
   test("an allow reply with INJECTED extra keys is REJECTED by .strict() ⇒ deny", async () => {
     // A prompt-injected reply that smuggles an unexpected field alongside an

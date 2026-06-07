@@ -21,6 +21,11 @@ interface AnthropicConfig {
    *  (one adapter = one session), so `defaultHeaders` is the minimal-surface
    *  seam. Tier-0 absorption #0-6. */
   betaHeaders?: readonly string[]
+  /** gap-other-agent GAP 5 — Anthropic `service_tier` intent (resolved from
+   *  `QUANTA_SERVICE_TIER` / `QUANTA_FAST` at the factory). The codec normalizes
+   *  it to Anthropic's `auto`|`standard_only` and DROPS anything else. Absent ⇒
+   *  no `service_tier` key (byte-identical). */
+  serviceTier?: string
   /** T1 stream-hang guard overrides. Caller-supplied wins over env knobs
    *  (`QUANTA_LLM_STREAM_FIRST_CHUNK_MS` / `QUANTA_LLM_STREAM_IDLE_MS`); env
    *  wins over the defaults baked into `src/llm/stream-timeout.ts`. Read
@@ -100,6 +105,12 @@ export class AnthropicAdapter implements LLMPort {
   readonly authMode = "Anthropic BYOK"
   private readonly maxTokens: number
   private readonly cacheTtl: CacheTtl
+  /** gap-other-agent GAP 5 — Anthropic `service_tier` intent (resolved at the
+   *  composition root; the codec normalizes it to auto|standard_only at request
+   *  time). Absent ⇒ no `service_tier` key (byte-identical). Public-readonly
+   *  (like {@link betaHeaders}) so a factory→adapter e2e can assert the threading
+   *  without driving a live request. */
+  readonly serviceTier: string | undefined
   readonly betaHeaders: readonly string[]
   /** T1 stream-hang guard: pinned at construction (env knobs + optional
    *  caller overrides resolved ONCE) and applied to every `stream()` call
@@ -127,11 +138,18 @@ export class AnthropicAdapter implements LLMPort {
     this.model = config.model
     this.maxTokens = config.maxTokens ?? 8192
     this.cacheTtl = config.cacheTtl ?? "5m"
+    this.serviceTier = config.serviceTier
   }
 
   private async openRawStream(input: StreamInput): Promise<AsyncIterable<RawEvent>> {
     try {
-      const req = buildAnthropicMessagesRequest(this.model, this.maxTokens, input, this.cacheTtl)
+      const req = buildAnthropicMessagesRequest(
+        this.model,
+        this.maxTokens,
+        input,
+        this.cacheTtl,
+        this.serviceTier,
+      )
       // Caller cancellation: the SDK request-options `signal` aborts the
       // underlying fetch — covers the create()/TTFT phase that the stream
       // wrapper cannot see (it only decorates the AsyncIterable returned

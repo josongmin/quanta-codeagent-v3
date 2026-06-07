@@ -49,6 +49,23 @@ export const SKILL_KEBAB_RENAME: Readonly<Record<string, string>> = Object.freez
   "user-invocable": "userInvocable",
 })
 
+/**
+ * FROZEN closed set of frontmatter keys that the strict `parseSkillMarkdown`
+ * block-list lookahead may open as a YAML block-list parent EVEN WHEN ZERO
+ * items follow (an explicit tool-less skill declaring `allowed-tools:` with an
+ * empty list ⇒ `[]`, the safe "no tools" scoping). Without this the strict
+ * authority rejects a bare `allowed-tools:` header with "empty value" while the
+ * LENIENT discover.ts read path yields `[]` — a real parse-path asymmetry
+ * (ticket §4.b parity). Exported so the hellgate asserts the set is exactly the
+ * one enumerated block-list interop key (widening it is guard-visible).
+ *
+ * Compat-only / default-OFF: the strict parser ONLY consults this when the
+ * `QUANTA_MANIFEST_COMPAT` knob is armed, so unarmed parsing is byte-identical.
+ */
+export const SKILL_KEBAB_BLOCK_LIST_KEYS: ReadonlySet<string> = Object.freeze(
+  new Set(["allowed-tools"]),
+) as ReadonlySet<string>
+
 /** Observability hook for dropped/normalized keys (ticket §5: keep drift
  *  visible). The default is a no-op; `discover.ts` / parsers may pass a debug
  *  sink. NEVER throws. */
@@ -58,6 +75,15 @@ const NOOP_LOG: CompatLog = () => {}
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v)
+
+/**
+ * Keys the normalizer NEVER copies onto the output object. `out["__proto__"] =
+ * v` mutates the prototype rather than creating an own key; the `.strip()`
+ * schemas absorb that today, but skipping these keys is the load-bearing
+ * defense-in-depth so the normalizer can never alias a prototype or carry a
+ * forbidden own-key through (matches the lenient parser's `FORBIDDEN_KEYS`).
+ */
+const FORBIDDEN_KEYS: ReadonlySet<string> = new Set(["__proto__", "constructor", "prototype"])
 
 /**
  * Normalize a raw plugin manifest object for codex-shape ingest. Closed set:
@@ -71,7 +97,16 @@ const isPlainObject = (v: unknown): v is Record<string, unknown> =>
  */
 export const normalizePluginManifest = (raw: unknown, log: CompatLog = NOOP_LOG): unknown => {
   if (!isPlainObject(raw)) return raw
-  const out: Record<string, unknown> = { ...raw }
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(raw)) {
+    // Never copy a forbidden prototype key (spread `{...raw}` would mutate the
+    // prototype for an own-enumerable `__proto__`); drop it.
+    if (FORBIDDEN_KEYS.has(key)) {
+      log(`[manifest-compat] dropped forbidden prototype key '${key}'`)
+      continue
+    }
+    out[key] = value
+  }
   if (typeof out.skills === "string") {
     const dir = out.skills
     out.skills = [dir]
@@ -96,6 +131,12 @@ export const normalizeSkillFrontmatter = (data: unknown, log: CompatLog = NOOP_L
   if (!isPlainObject(data)) return data
   const out: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(data)) {
+    // Never copy a forbidden prototype key (defense-in-depth — assigning
+    // `out["__proto__"]` mutates the prototype, not an own slot).
+    if (FORBIDDEN_KEYS.has(key)) {
+      log(`[manifest-compat] dropped forbidden prototype key '${key}'`)
+      continue
+    }
     const camel = SKILL_KEBAB_RENAME[key]
     if (camel === undefined) {
       // Not an enumerated interop key — pass through verbatim.

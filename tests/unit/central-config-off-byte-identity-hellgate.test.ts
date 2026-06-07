@@ -62,6 +62,29 @@ describe("runtime-config default-OFF", () => {
     __resetRuntimeConfig()
     expect(runtimeConfig().centralConfig).toBe(true)
   })
+
+  test("disk knobs are INERT raw carriers — a disk knob can NEVER arm a security gate (round-4 F8)", () => {
+    // The header documents `parseX(env.X ?? disk?.x)` consumption, but the disk
+    // values are carried RAW (`stringOrUndef`) and consumed by NO gate today.
+    // This is the forward-guard the host-wiring lane must not regress: setting a
+    // disk knob to the strict-gate magic value `"1"` must NOT flip the master
+    // `centralConfig` gate (or any gate). A disk value crossing into a
+    // `gateOnStrict` field would be a fail-OPEN — the disk source must stay
+    // inert metadata until the host explicitly resolves + trust-gates it.
+    for (const k of KNOBS) delete process.env[k]
+    process.env.QUANTA_CONFIG_DIR = "1"
+    process.env.QUANTA_SETTING_SOURCES = "1"
+    process.env.QUANTA_TRUSTED_PATHS = "1"
+    __resetRuntimeConfig()
+    const rc = runtimeConfig()
+    // RED-ON-INJECTION: if any disk knob were wired to feed `centralConfig` (or
+    // a future `?? disk?.x` accidentally targeted a gate), this would be true.
+    expect(rc.centralConfig).toBe(false)
+    // The disk fields are carried verbatim, NOT parsed into a bool/gate.
+    expect(rc.centralConfigDir).toBe("1")
+    expect(rc.centralConfigSources).toBe("1")
+    expect(rc.trustedPaths).toBe("1")
+  })
 })
 
 describe("loader does ZERO reads when no source is discovered", () => {

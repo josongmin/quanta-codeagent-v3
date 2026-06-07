@@ -100,6 +100,12 @@ export type SubagentBlock = {
    *  (trigger). With no live waker the tool delivers the message and reports
    *  honest degradation (`cause:"no_waker"`). */
   enableFollowup?: boolean
+  /** §25.1 — opt-in `run_workflow` tool (LLM-authored declarative multi-agent
+   *  orchestration). Absent/`false` ⇒ NOT registered (byte-identical). `true` ⇒
+   *  the tier-1 subagent block builds it against the SAME injected runner the
+   *  trio/6-tool use (each workflow step is one subagent spawn). Requires
+   *  `subagent` enabled (a runner must exist). Default-OFF (QUANTA_WORKFLOW). */
+  enableWorkflow?: boolean
 }
 
 /**

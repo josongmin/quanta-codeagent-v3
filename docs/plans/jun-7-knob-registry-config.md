@@ -1,251 +1,209 @@
-# RFC — Knob Registry: 선언적 설정 SSOT + derive-everything (`src/config/`)
+# RFC — 설정/기능 토글 통합 (knob 거버넌스 + Capability 레이어)
 
-> **Status: 📐 DRAFT (jun-07) — 설계 제안. 미구현. 그린필드(quanta는 현재 설정파일 레이어 없음, env-only).**
+> **Status: 📐 DRAFT rev2 (jun-07) — 3-에이전트 적대 어딧 후 전면 축소. rev1은 이미 있는 인프라(`@/runner/knobs`·`@/config`·`runtime-config`·`tools/pm`)를 재발명하고 있었음. rev2는 "신축"이 아니라 "통합+거버넌스+capability"로 범위 재정의.**
 > Date: 2026-06-07
-> Slice: NEW `src/config/` (descriptor + registry + read + sources + derive + control) — 슬라이스 펜스: `zod`/`@/shared`만, `@/agent` 금지
-> Default posture: byte-identical 마이그레이션 (P0는 기존 `loadFromEnv` 139개를 registry fold로 교체, 출력 불변)
-> Feature axis: 설정/거버넌스 축 (NEW) — feature-catalog(기능축)·tool-surface manifest(도구축)에 이은 **세 번째 SSOT 축**
-> 한 줄: knob 하나당 타입 있는 descriptor 하나를 단일 테이블에 선언하고, 파싱·기본값·검증·runtime-config·`--help`·config UI·on/off 토글·settings 레이어·가드를 **전부 그 테이블에서 파생**한다.
+> 한 줄: **새 registry를 만들지 않는다.** 이미 있는 3개 knob 시스템 + settings 레이어 + ratchet 위에, (1) 누락 봉인 거버넌스 (2) cross-surface Capability 레이어 (3) discoverability(`/config`·`--help`)만 얹는다.
 
 ---
 
-## 1. 요약
+## 0. 어딧 판정 — rev1이 재발명하던 것 (grep-verified, ⚠️ 신축 금지)
 
-quanta는 환경변수 `QUANTA_*` ≈ **438개**(src, 비-test, grep-verified)로 동작이 갈리지만, 진실원이 **암묵적**이다. 중앙 `loadFromEnv`에 등록된 건 **139개**뿐이고, 나머지 ~60개(아티팩트 제거 후)는 CLI/host/slice 레이어에서 `process.env`로 직접 읽혀 **어느 registry에도 없다**. 결과: (1) 사용자가 기능 존재를 모르고(`--help`엔 41개), (2) on/off 토글 수단이 env뿐이며(영속 settings도, 세션 중 토글도 없음), (3) ~60개는 default-OFF auto-guard 밖.
+3-에이전트 적대 어딧(중복/갭/개선-교체) 결과, rev1이 "신축"하려던 Layer-1이 **거의 다 이미 존재**:
 
-본 RFC는 **선언적 KnobDescriptor registry**를 단일 SSOT로 도입하고, runtime-config·`quanta config` CLI·`--help`·settings.json 레이어·검증·가드·런타임 토글을 전부 거기서 파생한다. UX는 **VSCode 환경설정과 동형**(검색·그룹·토글·기본값표시·JSON 레이어·라이브 반영). drift는 ratchet으로 영구 차단.
-
----
-
-## 2. 경쟁사 레퍼런스 (verified evidence)
-
-- **VSCode `contributes.configuration`** (`package.json`): 각 설정이 `type/default/description/enum/enumDescriptions/scope(application|machine|window|resource)/markdownDescription/order`를 선언 → Settings UI(검색·카테고리·토글/드롭다운·modified표시·reset-to-default)와 `settings.json` 검증이 전부 이 스키마에서 파생. 본 RFC의 `KnobDescriptor`가 1:1 대응.
-- **Claude Code settings** (`docs/plans/jun-7-draft-ide-integration-spec-claude.md` §12): `claude-code-settings.schema.json`이 `**/.claude/settings.json`·`settings.local.json`·`managed-settings.json`을 검증; `--setting-sources user,project,local` precedence; `allowManagedHooksOnly`/`disableBypassPermissionsMode` 같은 관리자 lock. 본 RFC의 sources 레이어가 동형.
-- **Claude Code control-request** (동 문서 §2): `set_model`/`set_permission_mode`/`get_settings`/`apply_flag_settings` 로 **세션 중 라이브 설정 변경**. 본 RFC의 `set_config` 런타임 토글이 동형.
-
-→ 흡수 결론: 세 레퍼런스 모두 "선언 스키마 → 파생 UI/파일/검증 + 레이어드 소스 + 런타임 토글" 패턴. quanta는 이걸 멀티-surface(CLI/web/embedded)로 일반화한다.
-
----
-
-## 3. 현재 quanta 상태 (grep-verified)
-
-- **설정파일 레이어 없음**: quanta 자체 `settings.json` 로더 0. (`migration/external-config`는 경쟁사 config IMPORT 전용, quanta 런타임 설정 아님.) → env-only.
-- **registry/descriptor 없음**: `src/shared/runtime-config.ts`의 `loadFromEnv`가 손으로 쓴 객체. 리더 분포(실측): `gateOn` 68 · `parsePositiveInt` 30 · `parseBool` 14 · `gateDisabled` 3 · `parseSwebench`/`parsePtyBackend`/`parseLogLevel` 각 2 → **7종 kind**.
-- **있는 것(위에 얹는다)**: gateOn/gateDisabled(+strict) SSOT(jun-7 통일 완료) · feature-catalog(YAML, 기능축) · tool-surface manifest(도구축) · ratchet/burn-down 패턴(검증됨) · `runtimeConfig()` accessor(캐시+reset) · permission accessor per-turn 재읽기 패턴.
-- **측정 갭**: distinct `QUANTA_*` 438 / 중앙등록 139 / `--help` 41 / 미등록 read ~60.
-
----
-
-## 4. 설계
-
-### 4.1 원자 — `KnobDescriptor`
-
-```ts
-// src/config/descriptor.ts
-type KnobKind = "bool" | "int" | "float" | "enum" | "string" | "path" | "duration-ms" | "bytes" | "csv"
-type KnobGroup =
-  | "loop" | "memory" | "permission" | "mcp" | "subagent" | "ui"
-  | "git" | "network" | "session" | "vector" | "web" | "bench" | "observability"
-
-interface KnobDescriptor<T = unknown> {
-  name: `QUANTA_${string}`                  // env 이름 = SSOT 키 (유일)
-  kind: KnobKind
-  default: T                                // unset일 때 값 (대부분 false/0/undefined)
-  // bool 전용
-  polarity?: "opt-in" | "kill-switch"       // default-OFF vs default-ON
-  tier?: "normal" | "strict-security"       // gateOn vs gateOnStrict (code-mode/tls-mitm류)
-  // 검증
-  enumValues?: readonly string[]
-  min?: number; max?: number
-  // 거버넌스/표시
-  scope: ReadonlyArray<"cli" | "web" | "bench" | "headless" | "ide">  // 어느 surface가 존중
-  audience: "user" | "internal" | "bench"   // user만 --help/config UI에 노출
-  group: KnobGroup
-  summary: string                           // 한 줄 (--help/UI에 그대로)
-  stability?: "stable" | "experimental" | "deprecated"
-  deprecatedBy?: `QUANTA_${string}`
-  adr?: string                              // 추적성
-}
-```
-
-### 4.2 SSOT + 파생 모듈
-
-```
-src/config/
-  descriptor.ts   KnobDescriptor 타입 + KnobKind/KnobGroup union
-  registry.ts     export const REGISTRY: readonly KnobDescriptor[]   ← 유일한 진실원 (~200)
-  read.ts         readKnob<T>(name, sources): T — descriptor 보고 kind/tier/default대로 파싱+검증
-  sources.ts      precedence chain + resolve(name)
-  derive.ts       runtimeConfigFor(surface) / helpDoc() / settingsJsonSchema() — 전부 REGISTRY fold
-  control.ts      set_config 런타임 토글 핸들러 (descriptor로 검증)
-  index.ts        배럴
-```
-
-**파생물 (전부 REGISTRY에서 생성 — 손수 관리하는 표를 두지 않는다):**
-
-| 파생물 | 생성 방법 | 대체 대상 |
-|---|---|---|
-| `runtimeConfig()` | `REGISTRY.filter(scope∋surface).reduce(readKnob)` | 손으로 쓴 `loadFromEnv` 139 |
-| `quanta config list/get/set/diff` | `REGISTRY.filter(audience:user)` 그룹별 + 현재값/기본값/출처 | 없음 (신규) |
-| `--help` knob 섹션 | 동일 | help-render 하드코딩 41 |
-| settings.json **JSON Schema** | descriptor→schema (검증/에디터 자동완성) | 없음 |
-| 값 검증 | kind/enum/min-max 위반 시 명확 에러(출처 인용) | ad-hoc `parsePositiveInt` |
-| default-OFF 가드 | `descriptor.polarity`로 단언 | knob-completeness regex discovery |
-| 텔레메트리 | non-default knob 목록 = config drift 가시화 | 없음 |
-| 웹/embedded 설정 GUI | descriptor → 검색+토글 위젯 (kind→위젯) | 없음 |
-
-핵심: **runtime-config는 registry의 타입 프로젝션**이 된다(이중관리 제거). `gateOn`/`parsePositiveInt` 등은 `readKnob` 내부 디테일로 흡수.
-
-### 4.3 소스 레이어링 (사용자 on/off의 실체)
-
-```ts
-// sources.ts — 위가 이김
-resolve(name) = firstDefined(
-  env[name],               // 1. ad-hoc / CI (최우선)
-  session.get(name),       // 2. 세션 중 /config set (이 세션 한정)
-  settingsLocal[name],     // 3. <proj>/.quanta/settings.local.json (gitignore, 개인)
-  settingsProject[name],   // 4. <proj>/.quanta/settings.json (커밋, 팀)
-  managed[name],           // 5. managed-settings.json (관리자 lock)
-  descriptor.default,      // 6. 코드 기본값
-)
-```
-
-- Claude Code `--setting-sources` + `allowManagedHooksOnly`와 동형. quanta trust/policy-merge layering과 정합.
-- `managed`는 admin 강제층(예: 보안팀이 `code-mode` 영구 OFF lock) → `allowManagedOnly`로 하위층 무시.
-- 보안 carve-out: `tier:"strict-security"` knob(code-mode/tls-mitm)은 `env`/`managed`만 허용하고 `session`/`settings` 레이어로는 못 켜게 막는다(우발적 활성화 방지).
-
-### 4.4 런타임 토글
-
-- control-request `set_config {knob, value}` (Claude `set_model` 동형) → descriptor 검증 → `session.set` → **config-accessor per-turn 재읽기**(기존 permission accessor authority 패턴 그대로).
-- CLI: `/config list`, `/config set memory off`, `/config diff`(기본값 대비).
-- 잘못된 값 → descriptor 인용 즉시 거부: `QUANTA_EFFORT: enum {default,low,medium,high,max} 중 하나, 'foo' 받음`.
-
----
-
-## 5. 통합 (3축 분리·교차참조)
-
-- **기능축** = feature-catalog(YAML): "어떤 기능이 있나".
-- **도구축** = tool-surface manifest: "LLM이 어떤 도구를 보나".
-- **설정축** = knob-registry(본 RFC): "사용자가 무엇을 토글하나". ← NEW
-- 교차 무결: 게이트형 도구의 env가 registry에 있고 manifest gate와 일치(ratchet). feature-catalog 엔트리는 자기 knob을 registry로 link.
-- composition root: `runtimeConfigFor(surface)`가 surface 부트스트랩(cli/web/headless)에서 호출 — surface별 시딩이 `scope` 필드로 일원화.
-
----
-
-## 6. 가드 / 헬게이트 ("다 등록"을 영구 강제 — jun-7 ratchet 패턴 재사용)
-
-1. **registry-completeness ratchet**: src에서 읽히는 모든 `QUANTA_*` ∈ REGISTRY. 누락 시 실패 + burn-down 허용리스트(현 ~60 → file→count 소진).
-2. **no-raw-env-read ratchet**: `read.ts` 밖에서 `process.env.QUANTA_*` 직접 read 금지(gate-vocab ratchet의 일반화). 전부 `readKnob` 경유.
-3. **doc-completeness**: 모든 `audience:user` descriptor는 비지 않은 `summary`+`group` 필수.
-4. **default-OFF (registry 기반)**: `polarity!=="kill-switch"`면 default falsy 단언(기존 regex discovery 졸업).
-5. **cross-axis 정합**: catalog·manifest·registry 3축 상호 참조 무결.
-6. **red-on-injection self-test**: 각 ratchet이 주입된 위반을 실제로 잡는지(vacuous-0 방지).
-
----
-
-## 7. 마이그레이션 단계 (빅뱅 금지 · byte-identical · 단계별 회귀게이트)
-
-- **P0 — registry 골격 + 기계추출**: descriptor+registry+readKnob 도입. registry를 기존 139 `loadFromEnv`에서 **기계 추출**(`gateOn(env,"X")`→`{name:"X",kind:"bool",polarity:"opt-in",tier:"normal",default:false}`; `parsePositiveInt`→`{kind:"int",...}`). `loadFromEnv`는 registry fold로 교체. **출력 byte-identical**(기존 default-OFF/byte-identity hellgate가 증명). 회귀 0.
-- **P1 — 미등록 burn-down**: ~60개를 registry로 편입(ratchet이 강제). bench-internal은 `audience:bench`로. 갭→0.
-- **P2 — discoverability**: `--help` knob 섹션 + `quanta config` CLI를 registry에서 파생(하드코딩 41 제거).
-- **P3 — settings 레이어**: settings.json/local/managed 로더 + precedence + `/config set` + JSON Schema 생성.
-- **P4 — read 일원화**: no-raw-env-read ratchet 활성화(슬라이스 read 전부 readKnob 경유 전환 완료 후).
-- **P5(opt) — 웹/embedded GUI**: web surface 붙으면 descriptor→검색+토글 설정화면(같은 registry).
-
-각 단계 독립 PR, 회귀 0, 보안 carve-out(code-mode/tls-mitm strict) 보존.
-
----
-
-## 8. 비용 / ROI (HONEST)
-
-- **비용**: P0~P1이 핵심(타입+registry+readKnob+139 기계추출+~60 burndown) ≈ 1~2 세션. P2~P5 점증(각 독립).
-- **ROI 큼**: ① discoverability(사용자가 전 기능 발견+토글) ② drift 영구차단(파생==원본 ratchet) ③ 검증 일원화(좋은 에러) ④ settings.json으로 팀/CI 영속화 ⑤ config-drift 텔레메트리 ⑥ 멀티-surface 공짜(한 번 등록→CLI/web/embedded 다 따라옴) ⑦ 경쟁사(VSCode/Claude settings-schema) 패리티 흡수.
-- **위험 낮음**: P0가 byte-identical 추출이라 기존 동작 불변, 기존 hellgate가 안전망. 표면적 큰 건 P3(settings 레이어)뿐 — 독립이라 분리/연기 가능.
-
----
-
-## 9. 리스크 / 대안 / 비결정
-
-- **리스크**: registry가 거대 단일파일(~200엔트리) → group별 파일 분할(`registry/loop.ts`+barrel)로 완화. 기계추출 오분류(int를 bool로) → P0 byte-identity hellgate가 즉시 적발.
-- **대안 A (기각)**: zod 스키마만으로 검증. → 검증은 되나 default/scope/audience/group/runtime-toggle 메타가 없어 UI/레이어 파생 불가. descriptor가 상위호환.
-- **대안 B (기각)**: 그냥 `--help`만 채우기. → discoverability 일부 해결하나 drift/토글/레이어/가드 미해결. 본질 미봉.
-- **비결정**: settings.json 위치(`.quanta/` vs `~/.quanta/`)와 trust-scope 연동은 P3에서 trust/policy-merge ADR과 함께 확정.
-
----
-
-## 10. 코드 위치 요약
-
-- NEW: `src/config/{descriptor,registry,read,sources,derive,control,index}.ts`
-- 변경: `src/shared/runtime-config.ts` `loadFromEnv` → `derive.runtimeConfigFor()` 위임(P0)
-- 파생 소비: `src/apps/cli/help-render.ts`(P2), `src/apps/cli/config-cmd.ts`(NEW, P2), settings 로더(P3)
-- 가드: `tests/unit/config/{registry-completeness,no-raw-env-read,doc-completeness,default-off-from-registry}-hellgate.test.ts`
-- 교차: feature-catalog YAML `knob:` 필드 link, tool-surface manifest gate 정합 ratchet
-
----
-
-## 11. UX 비교 (VSCode 환경설정과 동형)
-
-| VSCode | quanta knob-registry |
+| rev1이 만들려던 것 | 실제 위치 (이미 있음) |
 |---|---|
-| `contributes.configuration` 엔트리 | `KnobDescriptor` |
-| Settings UI(검색/그룹/토글/기본값/reset) | `quanta config` (CLI grid) + web/embedded 설정화면 |
-| `settings.json` (user→workspace→folder) | sources 레이어 (env→session→local→project→managed→default) |
-| `onDidChangeConfiguration` (라이브) | control-request `set_config` + per-turn 재읽기 |
-| scope(application/machine/window/resource) | scope(cli/web/bench/headless/ide) |
-| (거의 전부 노출) | `audience` 게이팅(internal/bench 숨김 — 438개 중 user-facing만) |
+| 타입 knob descriptor | `src/runner/knobs/types.ts` `Knob<T>` (id/envKey/category/surfaces/parse/apply/describe/conflicts/requires/default + `hotToggleable`) |
+| registry SSOT | `src/runner/knobs/registry.ts` (registerKnob/allKnobs/knobsForSurface) — 25 def, ~49 knob |
+| 레이어드 소스 해석(precedence) | `src/runner/knobs/resolve.ts` — `cli>session>env>config-file>preset>default` + `KnobValue.source` 추적 |
+| knobs.json 영속 | `src/runner/knobs/persist.ts` (`~/.quanta/knobs.json`, 0600) |
+| 관계검증/apply | `src/runner/knobs/{validate,apply}.ts` |
+| kind 파서 | `src/shared/env-flag.ts`(gateOn/strict/isTruthyToken) + `runtime-config.ts`(parsePositiveInt/parseBool/…) |
+| 4-레이어 settings + trust + setting-sources | `src/config/`(ADR-0497) |
+| default-OFF 자동발견 | `tests/unit/knob-default-off-completeness-guard.test.ts` (regex 발견 = rev1이 formalize하려던 바로 그것) |
+| ratchet/burn-down | `tools/pm/{definition-of-done,check}.ts` + baseline.json |
+| gate vocab SSOT | `src/shared/env-flag.ts` (jun-7 통일) |
+| **`/config` CLI** ← rev1이 신축하려던 것 | `src/apps/cli/slash-commands-knobs.ts` (428줄 **`/knobs`**: show/list/set/reset/**preset**/save/help + `KnobsSurfaceWire` + `DEFAULT_OVERRIDES` 세션영속 + 자동완성). **`diff`만 없음.** |
+| preset 번들 | `src/runner/knobs/presets.ts` `KNOB_PRESETS` + `/knobs preset` 배선 완료 |
+| `--setting-sources` | `src/config/index.ts parseSettingSources` + `runtime-config.centralConfigSources`(`QUANTA_SETTING_SOURCES`). **CLI 플래그 형태만 없음**(env는 됨) |
+| feature↔surface↔knob 메타데이터 | `tools/feature-catalog/schema.ts:47,50,75` (`ui_surfaces`/`configurable`/`knobs`[descriptive]) — capability가 **링크**(병합 아님) |
+| hook 이벤트 타입 | `src/agent/hooks.ts` typed `HookEvent` union(12 이벤트) — hook-registry가 참조 |
+| 런타임 토글 프레임워크 | `src/agent/control-request/` (ADR-0496, `QUANTA_CONTROL_REQUEST`) — `set_config`는 variant 1개 추가 |
+
+**진짜 NEW (어디에도 없음, R1b 확정) — rev2의 실제 범위:**
+1. **cross-surface Capability 레이어** (기능↔LLM도구↔슬래시↔스킬↔훅 통합) — 유일하게 미구현, split-brain 근본해결. (+ **hook은 manifest 같은 registry조차 없음** → 작은 hook-registry도 신설 필요.)
+2. **누락-봉인 거버넌스** (신규 `QUANTA_*`가 어느 registry에도 안 들어가면 CI/컴파일 실패).
+
+**부분존재 — "신축" 아니라 "확장" (R1b 교정):**
+3. **discoverability**: `/knobs` CLI가 **이미 거의 완성**(428줄) → `diff` 추가 + `--help`를 `allKnobs`서 파생(하드코딩 41 폐기)만. 새 `/config` 신축 ❌(있는 `/knobs` 확장/별칭). `set_config` 세션영속은 기존 `DEFAULT_OVERRIDES` 재사용. preset 번들도 이미 완성.
+4. **고아 편입 + 검증**: 슬라이스 직접 read(완전성가드가 이미 자동발견)를 적절한 registry로 burn-down, knobs.json untyped→registry 검증. + `--setting-sources` **CLI 플래그**만 추가(env는 됨).
 
 ---
 
-## 12. Capability 레이어 (호출 surface 통합 — knob 한 층 위)
+## 1. ⚠️ 레이어링 제약이 설계를 결정한다 (핵심)
 
-### 12.1 문제: knob ≠ invocation surface
-knob은 기능의 **on/off 값**이지만, 켜진 기능이 **어떻게 호출되냐**는 surface마다 다르다:
-- **LLM 도구**: 모델 tool list에 등록되냐 (`src/tool/surface/manifest.ts`, `gate:{kind:"env-flag"|"config-slot"}`)
-- **슬래시커맨드**: command 목록에 보이냐 (`src/apps/cli/slash/registry-surface.ts`)
-- **스킬**: auto-load 되냐 (`buildSkillGate`)
-- **훅**: 이벤트가 구독/발화되냐
+knob이 **3개 병렬 시스템**으로 존재하는 건 우연이 아니라 **헥사고날 레이어 때문**이다. 그래서 "하나로 합쳐라"는 **불가능**:
 
-오늘은 이 네 surface가 **각자 env를 직접 읽어 독립 게이팅**한다. 한 기능(예 `subagent`)이 manifest env-flag + runtime-config knob + 슬래시 visible 조건에 **따로따로** 박혀 있다. → **이게 jun-7 split-brain 버그 클래스의 정체**(manifest는 "on"인데 슬라이스 reader는 `=== "1"`이라 `=on`이 도구만 켜고 기능은 안 켜짐 — QUANTA_INDEX, 6-게이트). surface마다 손으로 게이트를 박으니 drift가 난다.
+> **측정 주석(R1a/R2b 교정 — metric 혼동 금지):** `438`=src 전역 distinct `QUANTA_*` 토큰(help 언급·const 이름 포함, **실 knob 아님 다수**). 실 등록: loadFromEnv 발견 **~132–143**(완전성가드 실측, 세션 중 사용자 동시편집으로 변동; RuntimeConfig 인터페이스 필드는 146이나 1:1 아님) + @/runner/knobs **49**(registerKnob 실측) + **어느 registry에도 없는 고아 read 77**(R2b 재실측, ~60 아님). 이 셋은 **합산 대상 아님**(서로 다른 metric).
 
-### 12.2 해결: `CapabilityDescriptor` (Layer 2)
+- `src/shared/runtime-config.ts` (~132 knob) = **`@/shared` leaf 레이어**. AgentConfig를 안 만지고 **값만** 노출.
+- `src/runner/knobs/` (49 knob) = **`@/runner` Layer-2**. `apply(cfg: AgentConfig)`로 **AgentConfig를 변형**(bench matrix/agent-config 튜닝).
+- **`@/shared`가 `@/runner`를 import하면 upward 위반 — `biome.json:905`가 실제로 금지**("@/shared is the leaf — pure utilities only", 컨벤션 아니라 tool-enforced) → runtime-config를 @/runner/knobs로 fold **불가**. (a42f "다 합쳐라"는 이래서 기각, a32722 "분리 유지"가 맞음.)
+
+**결론(두 도메인 분리 유지):**
+- **값-게이트 knob** (AgentConfig 안 만짐) → `@/shared/runtime-config`에 **그대로 둔다**(rich JSDoc·byte-identity 계약·완전성 가드 이미 있음).
+- **AgentConfig-변형 knob** (bench/matrix) → `@/runner/knobs`에 **그대로 둔다**.
+- **고아 77개**: 읽히는 레이어에 따라 배치(runner+ 레이어 read → @/runner/knobs; shared/값성 → runtime-config).
+- **통합은 registry 병합이 아니라 (a) 거버넌스 ratchet 한 개가 두 테이블 전부 커버, (b) Capability 레이어가 기능↔surface를 묶음 — 두 지점에서만 한다.**
+
+---
+
+## 2. 워크스트림 (rev2 실제 범위)
+
+### W1 — 누락-봉인 거버넌스 (실현가능 순서로 재정렬, R2b 교정)
+"기능 추가 시 또 놓침"을 차단. **즉시가능 → 점증 → 장기** 순(R2b: 효과 강도순이 아니라 구현가능 순으로):
+1. **메타 ratchet (즉시, 신규 코드 최소)** — *이게 P0의 핵심*: src의 모든 `QUANTA_*` read ∈ **3 테이블 union**(runtime-config 발견 ∪ @/runner/knobs `allKnobs()` ∪ apps/cli-local `cli-knobs`) + 명시적 예외. (capability.gate.knob 체크셋은 앞 2개만 — §9-7.) 기존 knob-completeness 가드를 **두 테이블 합집합**으로 확장(source-scan + allKnobs, 둘 다 이미 발견가능). **decreasing-ceiling burn-down**(현 고아 **77** → 0, 오직 감소; gate-vocab ratchet과 동일 패턴) → **즉시 도입·non-blocking**(===0 강제 아님이라 고아 건드는 PR이 CI RED 안 됨). 신규 누락은 ceiling 초과로 실패.
+2. **tools/pm PR 게이트 (`check.ts`)** — *definition-of-done.ts 아님*(그건 순수 verdict). `check.ts`에 git-diff 훅: 새 `QUANTA_*` 추가 PR이 어느 registry도 안 건드리면 실패. 사람 실수 그물.
+3. **no-raw-env-read ratchet (점증)**: 지정 reader 밖 `process.env.QUANTA_*`/`gateOn(env,"QUANTA_*")` 직접 read 금지. ⚠️ 허용리스트가 **작지 않음**(R2b: ~12 모듈/~92 site — runtime-config·@/runner/knobs·factory·agent-config-assembler·테스트 + 마이그레이션 중 고아). vacuous는 아니나 "단일 reader"가 아니라 "curated 모듈 집합". 고아 read를 reader로 전환 후 조임.
+4. **타입 레벨 (P4-급, 장기)** — ⚠️ *R2b: P0 아님*. `gateOn(env, name: string)`이 string을 받으므로 컴파일에러 내려면 **173+ call-site를 typed `readKnob(name: KnobName)`로 변환** 필요(union은 인터페이스서 자동도출 불가, codegen/hand). 가장 강하지만 가장 비쌈 → 고아 burn-down(W4) 후 P4에서.
+5. **드리프트 텔레메트리**: non-default knob emit → north-star(agent-state 가시성) 합류.
+
+### W2 — Capability 레이어 (유일한 신축, §4)
+기능↔게이트knob↔surface(LLM도구/슬래시/스킬/훅) 매핑을 **한 곳**에 선언 → 각 surface 노출을 파생. split-brain 근본 봉인. (rev1 §12 그대로, 단 multi-gate/per-surface 보강 — §4.)
+
+### W3 — discoverability (R1b: 대부분 이미 있음, "확장")
+- `--help` knob 섹션을 **두 registry의 `describe`/필드에서 파생**(help-render 하드코딩 41 폐기). 테스트 floor를 "≥5" → "audience:user 전수".
+- **기존 `/knobs`(428줄, show/list/set/reset/preset/save) 확장** — `diff` 서브커맨드 추가 + runtime-config 값-knob도 노출(현재 @/runner/knobs만). 새 `/config`는 별칭으로만(신축 아님). 출처표시는 기존 `KnobValue.source` 재사용.
+
+### W4 — 고아 편입 + knobs.json 검증
+- 고아 77개를 §1 분류대로 배치(burn-down).
+- `runner/knobs/persist`의 `user_defaults`(untyped) → registry 타입검증(v1→v2, fail-soft).
+
+---
+
+## 3. 기존 자산별 처분 (어딧 매트릭스)
+
+| 자산 | 처분 | 근거 |
+|---|---|---|
+| `runtime-config.ts loadFromEnv` (~132-143) | **KEEP** (신축/대체 안 함) | rich JSDoc=감사추적, byte-identity 계약, 완전성 가드 이미 커버. fold는 churn 큰데 ROI 낮음(a32722). registry는 **참조/거버넌스 대상**으로만. |
+| `@/runner/knobs/` 프레임워크 | **KEEP-SEPARATE + REUSE** | 레이어상 합칠 수 없음(§1). discoverability/거버넌스가 이걸 **소비**. |
+| `src/config/` (ADR-0497) | **EXTEND (⚠️ knobs band SPLIT 필수)** | resolveKnobs "config-file" 소스층 그대로. **R3a-P0 보안**: knobs band를 통째로 `LayerBenign`에 넣으면 untrusted repo settings.json이 `QUANTA_CODE_MODE=1` 켤 수 있음=capability-grant 구멍 → **security-knob(tier:strict-security; code-mode/tls-mitm/mcp/team)→`LayerSecurity`(trust-gated), benign-knob(log-level/pty)→`LayerBenign`**로 분리. ⚠️R4a: merge.ts는 기존 필드(permissions/hooks/mcp)만 하드코딩 게이팅 → **`types.ts`(knobs sub-band)+`merge.ts`(gate 분기)+`loader.ts`(parse) 신규 코드 필요**(자동 안 됨). trust/precedence 재발명 금지. |
+| `manifest.ts` config-slot | **EXTEND (capability가 권위)** | manifest=도구축 SSOT 유지. capability.gate가 권위, manifest.gate는 derived/descriptive. ratchet이 일치 강제. |
+| `help-render.ts` 하드코딩 41 | **DISCARD + DERIVE** | 수동 큐레이션 실패 증거. registry에서 파생. |
+| gate 헬퍼들 | **`parseBool` KEEP-EXPORTED, 나머지 reader 뒤로** | parseBool은 mcp-tool-annotations 테스트가 양 채널 byte-parity로 pin(§6). gateOn/parsePositiveInt는 reader 내부 디테일. |
+| `tools/pm/` | **EXTEND** | DoD에 knob-등록 규칙 추가. |
+| **`src/config/registry.ts` (rev1 신축안)** | **❌ DROP** | @/runner/knobs가 이미 그것. 4번째 시스템 추가 = 파편화 악화. |
+
+---
+
+## 4. Capability 레이어 (W2 — 유일 신축)
+
+### 4.1 문제
+knob=값. 호출 surface(LLM도구=tool-list 등록 / 슬래시=command visible / 스킬=auto-load / 훅=구독)는 **각자 env 직접 읽어 독립 게이팅** → drift(이번 세션 split-brain 정체). manifest config-slot이 도구축에만 부분 존재, 4-surface 통합은 **없음**.
+
+### 4.2 descriptor + 파생
 ```ts
-// src/config/capability.ts
-type Surface = "cli" | "web" | "bench" | "headless" | "ide"
+type Surface = "cli" | "web" | "bench" | "agent-batch" | "agent-interactive" | "ide"  // @/runner/knobs Surface 재사용
 
 interface CapabilityDescriptor {
-  id: string                              // "memory" | "subagent" | "web-search"
-  gate: { knob: `QUANTA_${string}`; tier?: "normal" | "strict-security" }  // 단 하나의 게이트 knob (→ Layer 1 registry)
-  surfaces: {                             // 켜졌을 때 "어떻게 호출되냐"
-    llmTool?: { names: readonly string[] }      // 모델에 노출되는 도구 이름
-    slash?:   { commands: readonly string[] }   // 보이는 슬래시커맨드
-    skill?:   { ids: readonly string[] }        // 자동 가용 스킬
-    hook?:    { events: readonly string[] }      // 발화되는 훅 이벤트
+  id: string
+  gate: { knob: string } | { composite: { requires: string[]; resolve(v: Record<string,string|undefined>): boolean } }  // 단일 OR 복합(tls-mitm류 — R2a 작동확인)
+  surfaces: {
+    llmTool?:    { names: readonly string[] }     // manifest group과 동일(subagent 6-tool/lsp 7-tool 표현 OK, R2a)
+    slash?:      { commands: readonly string[] }
+    skill?:      { ids: readonly string[] }
+    hook?:       { events: readonly string[] }
+    thinClient?: { routes: readonly string[] }     // NEW(R2a): skill thinClientDispatch (web/thin 노출) — R3a 확인: skills 한정
+    // mcp?: 보류(R3a) — quanta는 MCP CLIENT만(client.ts+oauth-provider), 자기 tool을 MCP SERVER로 재노출 안 함. MCP server mode 생기면 추가.
   }
-  defaultBySurface?: Partial<Record<Surface, "on" | "off" | "opt-in">>  // surface별 기본 posture
+  perSurface?: Partial<Record<Surface, "on" | "off" | "opt-in">>  // surface별 부분 노출
 }
+// 순수 config→bool. ⚠️(R2a) "runtime 강제"가 아니라 각 surface의 자연스러운 게이트 시점에 호출:
+//   slash = registry-build/load-time(현 BUILTINS 포함여부 결정 지점), llmTool = tool-registration(composition root),
+//   hook = wiring 시점. → 기존 load-time 제거(/memory가 env off면 BUILTINS서 빠짐)와 충돌 안 함.
+resolveExposure(capId, surface, config) → { llmTool: boolean; slash: boolean; skill: boolean; hook: boolean; thinClient: boolean }
 ```
+- 각 surface의 게이트 reader가 env 직접 read를 멈추고 **자기 시점에** `resolveExposure` 호출 → 결정의 단일 SOURCE는 capability, 호출 시점은 surface별 → **split-brain 구조적 불가 + load-time 제거 보존**(R2a 핵심).
+- **multi-gate**: `gate.composite`로 tls-mitm 표현(R2a 작동확인). **부분 노출**: `perSurface`.
+- **scope-out(R2a)**: passive-behavior(passive-vcs/read-dedup, 이벤트구동)·status-bar pill(상태반영 UI)은 invocation surface 아니라 capability 대상에서 제외(별도 관리).
+- capability.gate.knob ∈ 두 registry(dangling ratchet). 선언 ↔ 실제 manifest/slash/skill 등록 일치 ratchet(split-brain 영구봉인).
 
-### 12.3 파생: `resolveExposure`
+**hook-registry 신설(R2a — hook은 manifest 같은 게 없음)**: `src/runner/knobs/hooks-registry.ts`
 ```ts
-// 게이트는 capability에 한 번만 선언 → 각 surface 노출은 파생 (손으로 env 안 읽음)
-resolveExposure(capId, surface, config): { llmTool: boolean; slash: boolean; skill: boolean; hook: boolean }
+interface HookEntry { id: string; env: string; ackEnv?: string; source: "env" | "settings.json#hooks"; surfaces: Surface[]; describe: string }
+// 추출(R3a — settings-기반 vs env-only 구분 필수):
+//   command-hooks: env QUANTA_COMMAND_HOOKS + ackEnv QUANTA_COMMAND_HOOKS_ACK + source settings.json#hooks (CommandHookGate: armed/acknowledgedRisk/bindings/envAllowlist)
+//   lsp-diagnostics: env QUANTA_LSP_DIAGNOSTICS_HOOK, source env-only
+//   bench-hooks: env QUANTA_BENCH_HOOKS (bench surface)  ← ≥3개, 착수 전 전수 audit
 ```
-- `manifest`/`slash registry`/`skill gate`/`hook subscriber`가 더 이상 env를 직접 읽지 않고 `resolveExposure`를 호출한다 → **split-brain 구조적 불가능**(jun-7 버그 클래스 소멸).
-- surface별 호출 의미가 다른 걸 descriptor가 선언으로 흡수: LLM도구=tool-list 등록, 슬래시=command 목록 visible, 스킬=auto-load, 훅=구독.
-- surface별 기본값 차이도 `defaultBySurface`로(예: `memory` = CLI on / web opt-in / headless off).
 
-### 12.4 두 레이어의 관계 + 가드
-- **Layer 1 (knob-registry, §4)** = 값. "QUANTA_X가 무슨 타입/기본/검증인가."
-- **Layer 2 (capability)** = 매핑. "어떤 기능이 어떤 knob으로 게이팅되고, 켜지면 어느 surface로 노출되나."
-- capability.gate.knob ∈ knob-registry (ratchet으로 dangling 참조 차단).
-- **cross-surface 정합 ratchet**: capability가 선언한 surface 노출이 실제 manifest/slash/skill 등록과 일치(불일치 = 빌드 실패). 이게 split-brain을 영구 봉인.
-- `/config set memory off` → Layer 1 값 변경 → `resolveExposure`가 LLM도구·슬래시·스킬·훅 노출을 **한꺼번에** 끔(cascade). 사용자가 한 번 끄면 모든 호출 경로가 일관되게 사라진다.
+**manifest 권위 인버전(R2a — realistic, R3a 확인: manifest.ts 실존 72 gate)**: capability가 권위가 되면 manifest.gate는 **projector로 파생**. ⚠️ 단 **capability 없는 always-on/resource 도구**(manifest gate `always`/`resource`)는 capability에 안 묶임 → projector는 config-slot/env-flag gate 도구만 변환, always-on은 그대로 통과. 기존 tool-surface drift guard가 manifest==실도구 계속 검증(안전망). projector seam 1개 추가.
 
-### 12.5 마이그레이션 (§7에 추가)
-- **P6 — Capability 승격**: manifest의 `config-slot`(이미 tool↔slot↔env 링크 존재)을 최상위 `CapabilityDescriptor`로 승격. manifest/slash/skill/hook 게이트를 `resolveExposure` 파생으로 전환. cross-surface 정합 ratchet 활성화. (P1~P4 knob-registry 안정화 후 착수 — Layer 1 위에 Layer 2를 얹음.)
+---
 
-### 12.6 3축과의 관계
-- 기능축(feature-catalog) = "무엇이 있나" (사람용 카탈로그)
-- 도구축(manifest) = "LLM이 무엇을 보나" → **capability.surfaces.llmTool로 파생**
-- 설정축(knob-registry) = "사용자가 무엇을 토글하나" (Layer 1)
-- **Capability(Layer 2)** = 이 셋을 묶는 접착제: 기능 ↔ 게이트 knob ↔ 모든 surface 노출. 결과적으로 feature-catalog/manifest/slash/skill이 전부 capability에서 파생되어 **단일 진실원으로 수렴**.
+## 5. 어딧이 잡은 갭/오설계 수정 (rev1 → rev2)
+
+| # | rev1 문제 | 수정 |
+|---|---|---|
+| 1 | precedence를 새로 발명(settings>knobs.json) | **`resolve.ts` 기존 precedence 채택**(cli>session>env>config-file>preset>default). 발명 금지. |
+| 2 | secret(OPENAI_API_KEY)을 registry에 포함 | **❌ 제외.** credential은 기존 `@/auth`·`@/llm/credential-helper`가 권위. `/config set`로 API키 세션변경=과금위험. registry는 feature 토글만. |
+| 3 | hot-reload "blanket per-turn 재읽기" 약속 | 기존 `Knob.hotToggleable`로 한정. cached(runtimeConfig 부팅캐시) knob은 "restart 필요" 명시. set_config는 hotToggleable knob만 라이브. |
+| 4 | descriptor name `QUANTA_${string}` 하드락 | 기존 `Knob.envKey: string`(QUANTA 안 잠금) 따름. 단 secret/표준env(NO_COLOR)는 registry 밖. |
+| 5 | bench를 통합 precedence에 편입 | **bench 격리 보존.** resolveBenchKnobs는 env+preset만(측정무결성) — 기존 surface-aware resolve가 이미 처리, 안 깨면 됨. |
+| 6 | knob rename 시 user 데이터 마이그레이션 없음 | knobs.json load 시 마이그레이션 훅(deprecatedBy 따라 old→new rename, warn+keep). |
+| 7 | capability 1-cap=1-knob | §4.2 `composite` + `perSurface`로 multi-gate/부분노출 처리. |
+| 8 | byte-identity가 등록여부만 검사 | P0에 old-vs-new **출력 스냅샷 비교 테스트** 추가(canonical env → 동일 RuntimeConfig). strict carve-out(code-mode `=`"1"/tls-mitm dual/fs-jail "off") 손-표기 보존. |
+
+---
+
+## 6. 불변식 정합 (어딧: 위반 없음, 단 구현이 지켜야)
+
+- **thin-surface/hexagonal**: 두 도메인 분리(§1)로 upward import 회피. Capability는 `@/config` 또는 신규 얇은 슬라이스, env 직접 read 금지(닫힌 포트). 토큰 판정은 `@/shared`(이미 거기) 재사용.
+- **closed-port DI**: resolveExposure/readers는 주입된 sources만(process.env 직접 read 금지).
+- **default-OFF byte-identity**: runtime-config KEEP라 P0 추출 churn 없음 → 기존 byte-identity hellgate가 안전망. carve-out 강등 금지(§5-8).
+- **parseBool pin**: mcp-tool-annotations 테스트가 양 채널 byte-parity 요구 → parseBool은 단일 함수로 양쪽 공유, export 유지.
+- **surface-coupling ratchet**: Capability cross-surface ratchet(§4.2)이 active test로 split-brain 봉인.
+
+---
+
+## 7. 단계 (rev2 — 훨씬 작음, 신규 인프라 최소)
+
+- **P0 — 거버넌스(W1)**: knob-completeness 가드를 **두 registry 합집합**으로 확장 + 고아 burn-down 허용리스트. no-raw-env-read ratchet 초안(P3 후 활성). tools/pm DoD 규칙. → **신규 코드 거의 없음, ROI 즉시**(누락 봉인).
+- **P1 — 고아 편입(W4)**: 77개를 §1 분류대로 배치, burn-down→0. knobs.json registry 검증 + 마이그레이션 훅.
+- **P2 — discoverability(W3)**: `--help` 파생(하드코딩 폐기) + `/config` CLI.
+- **P3 — Capability(W2)**: `CapabilityDescriptor` 신설, manifest/slash/skill/hook을 resolveExposure 파생으로, cross-surface ratchet 활성. (multi-gate/perSurface 포함.)
+- **P4 — read 일원화**: no-raw-env-read ratchet 활성(모든 read가 지정 reader 경유 후).
+- **P5(opt) — web/embedded 설정 GUI**: 기존 web surface 위에 registry→검색+토글.
+
+---
+
+## 8. ROI / 결론
+
+- **rev1 대비 범위 ~70% 축소**: "registry 신축"이 환상이었음(이미 3개 존재). 진짜 일 = **거버넌스 + Capability + discoverability + 고아편입**.
+- **최고 ROI = W1 거버넌스**(신규 인프라 최소, "또 놓침"을 컴파일/CI에서 봉인). 다음 = W2 Capability(split-brain 근본해결, 유일 신축).
+- **DROP**: `src/config/registry` 신축, 발명한 precedence, secret 포함, QUANTA 잠금 — 전부 기존 자산이 더 잘하거나 충돌.
+- **레이어링이 핵심 교훈**: knob 3시스템은 헥사고날 산물이라 병합 불가 — 통합은 registry 병합이 아니라 거버넌스 ratchet + Capability 두 지점에서만.
+
+---
+
+## 9. 착수 전 명세 보강 (R3b 완전성 비평)
+
+내부모순은 0(R3b-A 전부 CLEAN). 단 아래 under-specification을 P0 착수 전 확정:
+
+1. **통합 `/knobs` 뷰 배선(B7)**: `/knobs`는 apps/cli라 `@/runner/knobs`(allKnobs)와 `@/shared/runtime-config` **둘 다 downward import 가능**(레이어 위반 아님 — apps가 최상위). 통합 뷰 = 두 테이블을 apps 레이어서 합쳐 표시. (런타임-config는 값+기본값만, @/runner/knobs는 hotToggleable/preset까지.)
+2. **Capability 레이어 자체 kill-switch(B8)**: P3는 quanta default-OFF 규칙 따라 `QUANTA_CAPABILITY_LAYER`(strict opt-in) 뒤. OFF면 **각 surface의 기존 게이트(load-time 제거/env 직접read) 그대로** = byte-identical degrade. resolveExposure는 ON일 때만 권위. → 버그 시 즉시 롤백.
+3. **resolveExposure 테스트(B9)**: ratchet(선언↔등록 일치) 외에 단위테스트 — composite.resolve() truth-table(tls-mitm), perSurface 부분노출, capability-OFF 시 기존동작 byte-identical, 미등록 capId fail-closed.
+4. **CapabilityDescriptor registry 위치(B10)**: `@/runner/knobs`와 동형 패턴 — `src/config/capabilities/` 하위 per-feature 파일 + `registerCapability()`/`allCapabilities()` 배럴. (capability.gate.knob ∈ 두 knob registry는 ratchet 검증.)
+5. **고아 분류 알고리즘(B11, ⚠️R4a 3번째 버킷)**: 고아 77개 = ① `AgentConfig` 변형? → `@/runner/knobs`(apply 필요) ② daemon 값/path/gate? → `runtime-config` ③ **CLI-render-only**(둘 다 아님 — `QUANTA_STATUSBAR`/`HISTORY_DEFAULT_N`/`KEYBINDINGS`: 표시/입력만, AgentConfig도 daemon-config도 아님) → **`apps/cli` 로컬 registry**(`src/apps/cli/cli-knobs.ts`, 동일 register 패턴; 메타-ratchet은 이 3번째 테이블도 union에 포함). 판정 수동 triage(77개 1회) 후 ratchet 고정. (즉 union = runtime-config ∪ @/runner/knobs ∪ apps/cli-local.) check.ts 시그니처: `(prDiff, unionRegistry) → unregistered[]`.
+
+6. **기존 partial 인프라 reconcile(⚠️R4b — capability가 무에서 만드는 게 아님)**: ① **feature-catalog schema에 `ui_surfaces`+`knobs`+`configurable` 필드 존재**(`tools/feature-catalog/schema.ts:47,50,75`). 단 `knobs`는 **descriptive metadata**(string|object 배열, typed registry 아님 — R5b) → CapabilityDescriptor는 이걸 **참조/링크**(registry 병합 아님, §1 정합). ② **`src/agent/hooks.ts`의 typed `HookEvent` union = 12 이벤트**(R5b 정정: session_start/end·pre/post_tool_use·**post_tool_use_failure**·pre_compact·**post_compact**·subagent_start/stop·permission_request·turn_start·user_prompt_submit) → hook-registry `HookEntry`에 `events: HookEvent[]` 필드로 이 union 참조(이벤트명 재발명 금지; `source`=where-config-comes-from은 별개 축). ③ **set_config는 기존 control-request 프레임워크(ADR-0496, `QUANTA_CONTROL_REQUEST`; set_model/set_permission_mode/set_thinking/get_context_usage)에 variant 1개 추가** — 새 메커니즘 아님(R5b 확인). ④ **`/knobs doHelp`가 이미 `allKnobs()`서 help 파생**(slash-commands-knobs.ts:362) → `--help` env 섹션은 그 derivation 재사용(ENV_TABLE 수동분만 폐기). ⑤ 레지스트리 헬퍼는 **`@/runner/knobs/registry.ts` 패턴**(registerKnob/allKnobs) 복제. (⚠️R5b: `@/skill/registry.ts`는 discovery 패턴이라 register 모델 아님 — 참조 대상서 제외.)
+
+7. **ratchet check-set 명시(R5a — 이제 registry 다중)**: capability.gate.knob ∈ **(runtime-config 발견 ∪ @/runner/knobs `allKnobs()`)** — 이 2개만(knob 진실원). CapabilityDescriptor 자체는 **별도 registry**(`src/config/capabilities/`, knob 아님)라 union에 안 들어감. dangling ratchet은 capability.gate.knob이 위 2개 집합에 있는지만 검증.
+8. **`QUANTA_CAPABILITY_LAYER` 등록처(R5a)**: value-gate(AgentConfig 안 변형)라 **`runtime-config`**(strict opt-in, default-OFF). resolveExposure는 이게 ON일 때만 권위; OFF면 각 surface 기존 게이트 그대로(byte-identical degrade).
+
+---
+
+## 10. 어딧 출처 (3-에이전트 + 직접, jun-07)
+- 중복/재발명: `@/runner/knobs` 전 프레임워크가 Layer-1 = rev1 §4 (types.ts:47-63 `Knob<T>`, registry.ts, resolve.ts 6-layer, persist.ts, validate/apply).
+- 갭/정합: precedence 역전·secret 분리·hotToggleable·bench 격리·rename 마이그레이션·capability multi-gate·byte-identity 스냅샷.
+- 개선/교체: runtime-config EXTEND(KEEP)·@/runner/knobs KEEP-SEPARATE(레이어)·manifest EXTEND·help DISCARD+DERIVE·parseBool KEEP.
+- 직접: 3시스템 병렬 공존 실측(runtime-config ~132-143 / @/runner/knobs 49 / 고아 77), 레이어링 upward-import 제약.

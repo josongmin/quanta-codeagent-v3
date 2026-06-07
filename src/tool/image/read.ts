@@ -31,6 +31,8 @@ import { errMessage } from "@/shared"
 import { FsJailError } from "@/storage"
 import { resolveJailedDoc } from "../_shared/resolve-jailed-doc"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+import { planImageRead } from "./downsample-plan"
+import type { ImageDownsamplePort } from "./downsample-port"
 export const readImageInputSchema = z.object({
   path: z.string().min(1).describe("Repo-relative or absolute path to the image file"),
 })
@@ -45,6 +47,11 @@ export type SupportedMediaType = (typeof SUPPORTED_MEDIA_TYPES)[number]
 /** Anthropic vision cap — 5 MB raw bytes (before base64). We reject above this
  *  at the tool boundary; future re-encoding/downsizing belongs in a follow-up. */
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+
+/** gap-other-agent GAP 1 — longest-edge target the downsample port shrinks an
+ *  oversized image to (a sensible vision-input dimension). The codec computes the
+ *  paired short edge via {@link scaleToMaxDim}. */
+export const DOWNSAMPLE_MAX_DIM = 2048
 
 /** Magic-byte sniff. Returns null when the bytes don't match any supported
  *  type; the tool emits ok:false in that case (the only typed-content
@@ -112,6 +119,7 @@ const errResult = (output: string, failure?: ToolResult["failure"]): ToolResult 
 const statPhase = async (
   abs: string,
   visiblePath: string,
+  canDownsample: boolean,
 ): Promise<
   { kind: "fail"; result: ToolResult } | { kind: "ok"; stat: Awaited<ReturnType<typeof lstat>> }
 > => {
@@ -136,7 +144,10 @@ const statPhase = async (
         }),
       }
     }
-    if (stat.size > MAX_IMAGE_BYTES) {
+    if (stat.size > MAX_IMAGE_BYTES && !canDownsample) {
+      // gap-other-agent GAP 1: when a downsample codec is wired, DEFER the
+      // over-cap decision to decodePhase (which has the bytes + port). Absent a
+      // port (canDownsample=false) ⇒ reject here exactly as before (byte-identical).
       return {
         kind: "fail",
         result: errResult(`image too large: ${stat.size} bytes (cap ${MAX_IMAGE_BYTES})`, {
@@ -167,6 +178,8 @@ const statPhase = async (
 const decodePhase = async (
   abs: string,
   visiblePath: string,
+  downsamplePort: ImageDownsamplePort | undefined,
+  signal: AbortSignal,
 ): Promise<
   | { kind: "fail"; result: ToolResult }
   | { kind: "ok"; bytes: Uint8Array; mediaType: SupportedMediaType }
@@ -189,6 +202,36 @@ const decodePhase = async (
         mode: "error",
         modelVisibleError: "unsupported_media_type",
       }),
+    }
+  }
+  // gap-other-agent GAP 1 — decide on the ACTUAL bytes: within cap ⇒ use as-is;
+  // over cap + codec wired ⇒ downsample; over cap + no codec ⇒ reject (today's
+  // behavior, byte-identical when unwired).
+  const plan = planImageRead(bytes.length, MAX_IMAGE_BYTES, downsamplePort !== undefined)
+  if (plan === "reject") {
+    return {
+      kind: "fail",
+      result: errResult(`image too large: ${bytes.length} bytes (cap ${MAX_IMAGE_BYTES})`, {
+        mode: "error",
+        modelVisibleError: "image_over_cap",
+      }),
+    }
+  }
+  if (plan === "downsample" && downsamplePort !== undefined) {
+    const out = await downsamplePort.downsample(
+      bytes,
+      mediaType,
+      MAX_IMAGE_BYTES,
+      DOWNSAMPLE_MAX_DIM,
+      signal,
+    )
+    if (out.kind === "ok") return { kind: "ok", bytes: out.bytes, mediaType: out.mediaType }
+    return {
+      kind: "fail",
+      result: errResult(
+        `image too large: ${bytes.length} bytes (cap ${MAX_IMAGE_BYTES}); downsample unable: ${out.reason}`,
+        { mode: "error", modelVisibleError: "image_over_cap" },
+      ),
     }
   }
   return { kind: "ok", bytes, mediaType }
@@ -229,7 +272,10 @@ const preflight = (
   return { kind: "ok", abs, visiblePath: parsed.data.path }
 }
 
-export const readImageTool: Tool<ReadImageInput> = {
+/** Build the `read_image` tool. `downsamplePort` (gap-other-agent GAP 1) is
+ *  default-OFF: absent ⇒ oversized images are rejected exactly as before
+ *  (byte-identical); present ⇒ over-cap images are downsampled via the codec. */
+export const makeReadImageTool = (downsamplePort?: ImageDownsamplePort): Tool<ReadImageInput> => ({
   name: "read_image",
   description:
     "Read an image file and attach it to the model's view via the next tool_result. " +
@@ -244,12 +290,12 @@ export const readImageTool: Tool<ReadImageInput> = {
       yield { type: "result", result: pre.result }
       return
     }
-    const statOut = await statPhase(pre.abs, pre.visiblePath)
+    const statOut = await statPhase(pre.abs, pre.visiblePath, downsamplePort !== undefined)
     if (statOut.kind === "fail") {
       yield { type: "result", result: statOut.result }
       return
     }
-    const decoded = await decodePhase(pre.abs, pre.visiblePath)
+    const decoded = await decodePhase(pre.abs, pre.visiblePath, downsamplePort, ctx.signal)
     if (decoded.kind === "fail") {
       yield { type: "result", result: decoded.result }
       return
@@ -265,4 +311,9 @@ export const readImageTool: Tool<ReadImageInput> = {
       },
     }
   },
-}
+})
+
+/** Default `read_image` tool — NO downsample codec (oversized ⇒ reject, exactly
+ *  as before this slice). The composition root passes a port via
+ *  {@link makeReadImageTool} / `DefaultToolPorts.imageDownsample` when wired. */
+export const readImageTool: Tool<ReadImageInput> = makeReadImageTool()

@@ -23,6 +23,19 @@ import type { ParsedFrontmatter } from "./types"
 
 const FENCE = "---"
 
+/**
+ * Frontmatter keys that MUST NEVER become a `data[key]` slot or a carried
+ * `pendingKey`. Assigning `data["__proto__"] = []` does not create an own
+ * property — it mutates the object's prototype — so a later `- item` line whose
+ * `pendingKey` is `__proto__` resolves `data[pendingKey]` to a DIFFERENT array
+ * (prototype aliasing) and can append a smuggled value into the REAL prior
+ * block-list (e.g. an `allowed-tools` tool allowlist). Treating these as
+ * non-keys closes that grant-widening smuggle. No legitimate SKILL.md uses a
+ * `__proto__`/`constructor`/`prototype` frontmatter key, so this is a no-op for
+ * every valid file (byte-identical) and only neutralizes a hostile shape.
+ */
+const FORBIDDEN_KEYS: ReadonlySet<string> = new Set(["__proto__", "constructor", "prototype"])
+
 /** Strip a single matching pair of wrapping quotes. */
 const unquote = (s: string): string => {
   const t = s.trim()
@@ -122,18 +135,27 @@ const tryNestedMapEntry = (
  * Apply a single frontmatter line to `data`. Returns the updated {@link
  * LineState} carried to the next line.
  */
+/** Append a `  - value` block-list item to the pending key's array. Returns
+ *  true when the line was a block-list item that was consumed. */
+const tryBlockListItem = (
+  line: string,
+  data: FrontmatterData,
+  pendingKey: string | null,
+): boolean => {
+  const itemMatch = line.match(/^\s*-\s+(.*)$/)
+  if (!itemMatch || pendingKey === null) return false
+  const cur = data[pendingKey]
+  const val = unquote(itemMatch[1] ?? "")
+  if (Array.isArray(cur)) cur.push(val)
+  else data[pendingKey] = [val]
+  return true
+}
+
 const applyFrontmatterLine = (line: string, data: FrontmatterData, state: LineState): LineState => {
   if (line.trim() === "" || line.trim().startsWith("#")) return state
 
   // Block-list item: `  - value` belonging to the previous key.
-  const itemMatch = line.match(/^\s*-\s+(.*)$/)
-  if (itemMatch && state.pendingKey) {
-    const cur = data[state.pendingKey]
-    const val = unquote(itemMatch[1] ?? "")
-    if (Array.isArray(cur)) cur.push(val)
-    else data[state.pendingKey] = [val]
-    return state
-  }
+  if (tryBlockListItem(line, data, state.pendingKey)) return state
 
   // ADR-0457: indented `child: scalar` under an empty-value parent ⇒ nested map.
   if (tryNestedMapEntry(line, data, state.pendingKey)) return state
@@ -141,9 +163,26 @@ const applyFrontmatterLine = (line: string, data: FrontmatterData, state: LineSt
   // Leading-letter key shape, aligned with the strict schema (see child regex
   // above) so lenient discovery never accepts a key strict validation rejects.
   const kv = line.match(/^([A-Za-z][A-Za-z0-9_-]*)\s*:\s*(.*)$/)
-  if (!kv) return state
+  if (!kv) {
+    // A NON-INDENTED line that is not a valid key/value (e.g. a forbidden
+    // `__proto__:` header, which the leading-letter key regex rejects) TERMINATES
+    // any pending block-list parent. Without this reset the line's following
+    // `- item` lines would bleed into the PREVIOUS block-list array (e.g. an
+    // `allowed-tools` allowlist), smuggling a grant the file never declared.
+    // An INDENTED unrecognized line keeps the pending parent (legacy behavior —
+    // it is part of / under the current block and is ignored by this tiny parser).
+    return /^\s/.test(line) ? state : { pendingKey: null }
+  }
   const key = kv[1] ?? ""
   const rawValue = (kv[2] ?? "").trim()
+
+  // Forbidden prototype keys are NEVER stored or carried — assigning them would
+  // mutate the prototype (not create an own key) and a later `- item` whose
+  // pendingKey is this key would alias a prior block-list array, smuggling a
+  // value into the real allowlist. Drop the key and clear any pending parent.
+  if (FORBIDDEN_KEYS.has(key)) {
+    return { pendingKey: null }
+  }
 
   if (rawValue === "") {
     // Either an empty scalar or the header of a block list / nested map —

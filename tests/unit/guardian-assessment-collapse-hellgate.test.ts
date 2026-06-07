@@ -199,6 +199,76 @@ describe("collapseAssessment — allow_with_edit never executes original (harden
   })
 })
 
+describe("collapseAssessment — allow_with_edit with MISSING/undefined updatedInput is STILL a non-allow (R4: L3→L4 future-hop guard)", () => {
+  // §5 trap: "allow_with_edit never degrades to allow-original". The decoder's
+  // `updatedInput: z.unknown()` does NOT require the key to be present, so a
+  // model reply that names `allow_with_edit` but omits `updatedInput` decodes to
+  // an assessment whose `updatedInput` is `undefined`. TODAY the conservative
+  // collapse saves it (steered deny). But the spec describes a future
+  // reviewer→executor input-mutation hop that WOULD thread `updatedInput` to the
+  // executor; if that hop is added and someone threads an `undefined` edit, the
+  // ORIGINAL (un-edited) action would run under an "allow" — exactly the §5
+  // worst case. This pins the invariant at the collapse boundary so the future
+  // hop CANNOT make a missing-edit allow_with_edit collapse to an allow without
+  // first turning this test RED. (Red-on-injection: change the collapse to
+  // approve allow_with_edit and this fails.)
+  test("undefined updatedInput ⇒ guardian_denied (never allow-original)", () => {
+    const a = {
+      kind: "allow_with_edit",
+      rationale: "fix it",
+      updatedInput: undefined,
+      steer: "use the safer form",
+    } as ActionAssessment
+    const d = collapseAssessment(a, DECIDED_AT)
+    expect(d.outcome).toBe("guardian_denied")
+    expect(isAllowed(d.outcome)).toBe(false)
+    // The verb carries ONLY the steer — never any input payload.
+    expect(d.verb).toEqual({ verb: "reject_and_tell", message: "use the safer form" })
+  })
+
+  test("entirely-absent updatedInput key ⇒ guardian_denied (no allow-original)", () => {
+    const a = { kind: "allow_with_edit", rationale: "fix", steer: "safer" } as unknown as ActionAssessment
+    const d = collapseAssessment(a, DECIDED_AT)
+    expect(isAllowed(d.outcome)).toBe(false)
+    expect(d.outcome).toBe("guardian_denied")
+  })
+})
+
+describe("reviewAction — knob-ON collapse threads ctx.decidedAt provenance (R4 hardening)", () => {
+  const originalGate = process.env.QUANTA_GUARDIAN_ASSESSOR
+  beforeEach(() => {
+    __resetRuntimeConfig()
+  })
+  afterEach(() => {
+    if (originalGate === undefined) delete process.env.QUANTA_GUARDIAN_ASSESSOR
+    else process.env.QUANTA_GUARDIAN_ASSESSOR = originalGate
+    __resetRuntimeConfig()
+  })
+
+  test("the collapsed decision carries the SAME decidedAt the context supplied (deterministic clock, no drift)", async () => {
+    process.env.QUANTA_GUARDIAN_ASSESSOR = "1"
+    __resetRuntimeConfig()
+    const customClock = 1_700_123_456_789
+    const port: ReviewerPort = {
+      userReview: async () => {
+        throw new Error("unused")
+      },
+      autoReview: async () => {
+        throw new Error("unused")
+      },
+      guardianReview: async () => {
+        throw new Error("binary path must NOT run when assessor services the tier")
+      },
+      // assessor uses a DIFFERENT decidedAt internally to prove the collapse uses
+      // ctx.decidedAt (caller-threaded), not whatever the assessment carried.
+      guardianAssess: async () => ({ kind: "deny", rationale: "no", denyReason: denyR }),
+    }
+    const dec = await reviewAction(action, ctx({ decidedAt: customClock }), port)
+    expect(dec.decidedAt).toBe(customClock)
+    expect(dec.outcome).toBe("guardian_denied")
+  })
+})
+
 describe("collapseAssessment — buildDecision second line rejects malformed assessment", () => {
   test("an empty-rationale allow THROWS (never a silent allow with no audit trail)", () => {
     // A hand-built / malformed-but-typed assessment with an empty rationale must
@@ -223,6 +293,97 @@ describe("collapseAssessment — unknown/future variant ⇒ fail-closed (red-on-
     const d = collapseAssessment(rogue, DECIDED_AT)
     expect(d.outcome).toBe("guardian_denied")
     expect(isAllowed(d.outcome)).toBe(false)
+  })
+})
+
+describe("collapseAssessment — KNOWN kind with malformed body ⇒ fail-closed, NEVER throws (R3 red-on-injection)", () => {
+  // The unknown-KIND default arm handles a wrong discriminant. But a KNOWN kind
+  // whose required body field is missing at runtime (version skew, a loosely
+  // decoded reply, a hand-built malformed-but-typed value) is the §5
+  // "malformed-but-typed" case: it must ALSO fall to the most-restrictive
+  // outcome (`guardian_denied`), NEVER raise an uncaught TypeError. A raw throw
+  // is neither a clean deny nor a silent allow — it crashes the turn (a DoS /
+  // availability hole) and escapes the documented fail-closed contract. These
+  // assertions go RED if the collapse dereferences a missing field blindly.
+
+  test("escalate MISSING escalation ⇒ guardian_denied (no TypeError on .escalation.axis)", () => {
+    const rogue = { kind: "escalate", rationale: "x" } as unknown as ActionAssessment
+    let threw = false
+    let d: ReturnType<typeof collapseAssessment> | undefined
+    try {
+      d = collapseAssessment(rogue, DECIDED_AT)
+    } catch {
+      threw = true
+    }
+    expect(threw).toBe(false)
+    expect(d?.outcome).toBe("guardian_denied")
+    expect(isAllowed(d?.outcome ?? "guardian_denied")).toBe(false)
+  })
+
+  test("escalate with escalation but MISSING axis ⇒ guardian_denied (no undefined in steer)", () => {
+    const rogue = {
+      kind: "escalate",
+      rationale: "x",
+      escalation: {},
+    } as unknown as ActionAssessment
+    const d = collapseAssessment(rogue, DECIDED_AT)
+    expect(d.outcome).toBe("guardian_denied")
+    expect(isAllowed(d.outcome)).toBe(false)
+    // The steer, if present, must be a well-formed string — never carry the
+    // literal "undefined" produced by interpolating a missing axis.
+    if (d.verb?.verb === "reject_and_tell") {
+      expect(d.verb.message).not.toContain("undefined")
+      expect(typeof d.verb.message).toBe("string")
+    }
+  })
+
+  test("deny_and_steer MISSING steer ⇒ guardian_denied with a STRING verb message (never undefined)", () => {
+    const rogue = {
+      kind: "deny_and_steer",
+      rationale: "x",
+      denyReason: denyR,
+    } as unknown as ActionAssessment
+    const d = collapseAssessment(rogue, DECIDED_AT)
+    expect(d.outcome).toBe("guardian_denied")
+    expect(isAllowed(d.outcome)).toBe(false)
+    // reject_and_tell's contract is `message: string`. A missing steer must NOT
+    // produce `{verb:"reject_and_tell"}` with an undefined message (a malformed
+    // verb the steering seam would render as the literal "undefined").
+    if (d.verb !== undefined) {
+      expect(d.verb.verb).toBe("reject_and_tell")
+      if (d.verb.verb === "reject_and_tell") {
+        expect(typeof d.verb.message).toBe("string")
+        expect(d.verb.message.length).toBeGreaterThan(0)
+      }
+    }
+  })
+
+  test("allow_with_edit MISSING steer ⇒ guardian_denied (original NEVER runs) with a STRING verb message", () => {
+    const rogue = {
+      kind: "allow_with_edit",
+      rationale: "x",
+      updatedInput: { command: "rm -rf /" },
+    } as unknown as ActionAssessment
+    const d = collapseAssessment(rogue, DECIDED_AT)
+    expect(d.outcome).toBe("guardian_denied")
+    expect(isAllowed(d.outcome)).toBe(false)
+    if (d.verb !== undefined && d.verb.verb === "reject_and_tell") {
+      expect(typeof d.verb.message).toBe("string")
+      expect(d.verb.message.length).toBeGreaterThan(0)
+    }
+  })
+
+  test("allow MISSING/invalid riskLevel ⇒ NOT a malformed allow (riskLevel is a valid literal)", () => {
+    // An allow whose riskLevel is absent or not one of the three literals must
+    // not flow through as an allow carrying an invalid riskLevel. The collapse
+    // clamps to a valid literal (the conservative "high"), so the emitted
+    // ApprovalDecision is always well-formed.
+    for (const bad of [undefined, "critical", "", null, 7]) {
+      const rogue = { kind: "allow", rationale: "x", riskLevel: bad } as unknown as ActionAssessment
+      const d = collapseAssessment(rogue, DECIDED_AT)
+      expect(d.outcome).toBe("guardian_approved")
+      expect(["low", "medium", "high"]).toContain(d.riskLevel)
+    }
   })
 })
 

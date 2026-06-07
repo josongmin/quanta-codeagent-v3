@@ -96,6 +96,16 @@ export class JsonlRecorder implements StreamPort {
     // it for the same reasons — it carries no durable trajectory value and must
     // stay out of `KIND_MAP` / `dataOf`.
     if (event.type === "ratelimit_snapshot") return
+    // gap-other-agent GAP 10 — item lifecycle (item_started/updated/completed) is
+    // the SAME class of transient, render-only UI signal as output_progress: it
+    // carries no durable trajectory state, so the recorder SKIPS it (kept out of
+    // `RecordedEventType` below so `KIND_MAP` / `dataOf` never see it).
+    if (
+      event.type === "item_started" ||
+      event.type === "item_updated" ||
+      event.type === "item_completed"
+    )
+      return
     if (this.written >= this.maxLines) {
       this.handleCap()
       return
@@ -259,7 +269,10 @@ export class JsonlRecorder implements StreamPort {
 // drops before reaching `kindOf`/`dataOf` (see the early return there), so it
 // has no trajectory kind or payload. Excluding it from the map type keeps that
 // invariant honest rather than mapping it to a kind that is never written.
-type RecordedEventType = Exclude<AgentEvent["type"], "output_progress" | "ratelimit_snapshot">
+type RecordedEventType = Exclude<
+  AgentEvent["type"],
+  "output_progress" | "ratelimit_snapshot" | "item_started" | "item_updated" | "item_completed"
+>
 type RecordedEvent = Extract<AgentEvent, { type: RecordedEventType }>
 
 const KIND_MAP: Record<RecordedEventType, TrajectoryKind> = {

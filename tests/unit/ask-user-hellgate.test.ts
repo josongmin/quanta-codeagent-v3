@@ -16,7 +16,7 @@
  *   5. The tool is read-only, hitlTier "none", concurrency-safe.
  */
 import { describe, expect, test } from "bun:test"
-import type { AskUserPort, AskUserRequest, AskUserResult } from "@/tool/ask-user"
+import type { AskUserInput, AskUserPort, AskUserRequest, AskUserResult } from "@/tool/ask-user"
 import { askUserTool } from "@/tool/ask-user"
 import type { ToolContext, ToolEvent } from "@/tool/types"
 
@@ -81,7 +81,7 @@ describe("ask_user — typed refusals never throw", () => {
 describe("ask_user — adversarial input", () => {
   test("invalid input shape ⇒ ok:false (no throw)", async () => {
     const tool = askUserTool(portReturning({ ok: true, value: "x" }))
-    const r = await resultOf(tool.execute({ kind: "nonsense" } as unknown, ctx()))
+    const r = await resultOf(tool.execute({ kind: "nonsense" } as unknown as AskUserInput, ctx()))
     expect(r.ok).toBe(false)
   })
 
@@ -142,9 +142,10 @@ describe("ask_user — adversarial input", () => {
 describe("ask_user — tool contract", () => {
   test("read-only, none HITL, concurrency-safe", () => {
     const tool = askUserTool(portReturning({ ok: true, value: "x" }))
+    const probe: AskUserInput = { kind: "string", prompt: "?" }
     expect(tool.isReadOnly?.()).toBe(true)
-    expect(tool.hitlTier?.()).toBe("none")
-    expect(tool.isConcurrencySafe?.()).toBe(true)
+    expect(tool.hitlTier?.(probe)).toBe("none")
+    expect(tool.isConcurrencySafe?.(probe)).toBe(true)
     expect(tool.name).toBe("ask_user")
   })
 })

@@ -65,22 +65,22 @@ export interface ScrubbedSpawnOptions {
 /** Closed-port spawner seam. Production wires {@link bunScrubbedSpawner}; tests
  *  pass a recorder that captures `{ argv, options }`. The return is the opaque
  *  `Bun.Subprocess`-like handle — callers narrow it at their site. */
-export type ScrubbedSpawner = (
-  argv: readonly string[],
-  options: ScrubbedSpawnOptions,
-) => unknown
+export type ScrubbedSpawner = (argv: readonly string[], options: ScrubbedSpawnOptions) => unknown
 
 /** Production spawner — funnels the branded options into the real `Bun.spawn`.
  *  The branded `env` is unwrapped here (the brand is a compile-time-only
  *  phantom; at runtime it is the plain scrubbed record Bun.spawn expects). */
 export const bunScrubbedSpawner: ScrubbedSpawner = (argv, options) => {
   const { cwd, env, stdout, stderr, stdin, extra } = options
-  return Bun.spawn(argv as string[], {
-    cwd,
-    env: env as unknown as Record<string, string | undefined>,
-    ...(stdout !== undefined ? { stdout } : {}),
-    ...(stderr !== undefined ? { stderr } : {}),
-    ...(stdin !== undefined ? { stdin } : {}),
-    ...(extra ?? {}),
-  } as Parameters<typeof Bun.spawn>[1])
+  return Bun.spawn(
+    argv as string[],
+    {
+      cwd,
+      env: env as unknown as Record<string, string | undefined>,
+      ...(stdout !== undefined ? { stdout } : {}),
+      ...(stderr !== undefined ? { stderr } : {}),
+      ...(stdin !== undefined ? { stdin } : {}),
+      ...(extra ?? {}),
+    } as Parameters<typeof Bun.spawn>[1],
+  )
 }

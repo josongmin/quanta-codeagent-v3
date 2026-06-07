@@ -173,6 +173,12 @@ export class IsolatedMcpClient {
   async start(): Promise<void> {
     if (this.started) return
     this.started = true
+    // Ticket misc-jun-7/01 R4 — re-arm the exit fan-out for THIS attempt. A prior
+    // fail-closed start set `exitNotified` to suppress its rollback teardown; a
+    // fresh start wires a NEW host/exitPromise, so a real exit on this attempt
+    // must fan out again. (No-op on a first start; `stopped` is never reset here,
+    // so a deliberately-stopped client stays stopped.)
+    if (!this.stopped) this.exitNotified = false
     if (this.config.command.length === 0) {
       throw new IsolatedMcpError(`mcp server "${this.config.name}" has empty command`)
     }
@@ -222,6 +228,16 @@ export class IsolatedMcpClient {
       this.pinNegotiatedVersion(initResult, offered)
       this.host.notify("notifications/initialized", {})
     } catch (e) {
+      // Ticket misc-jun-7/01 R4 — suppress the exit fan-out for this DELIBERATE
+      // teardown BEFORE `host.stop()` resolves `exitPromise`. The fan-out wired
+      // above (`host.exitPromise.then(notifyExit)`) would otherwise emit a
+      // spurious `"process exit"` to the ADR-0435 auto-restart supervisor for a
+      // client-initiated rollback (e.g. an unsupported negotiated version — a
+      // permanent, NOT-restartable condition), crash-looping a server that will
+      // fail-close again. `exitNotified` short-circuits `notifyExit`; a follow-up
+      // `start()` re-arms it (reset at the top of `start()`), so a retry's REAL
+      // exit still fans out.
+      this.exitNotified = true
       // Roll back partial start so a follow-up start() can be reattempted.
       void this.host.stop().catch(() => undefined)
       this.host = null

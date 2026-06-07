@@ -780,6 +780,11 @@ const buildToolContext = (args: {
     ...(config.fastApplyFallback !== undefined
       ? { fastApplyFallback: config.fastApplyFallback }
       : {}),
+    // jun-7-misc 06 (ADR ≥0497) wire-finish — thread the model-based fast-apply
+    // MERGE port from AgentConfig into the ToolContext so the `edit` tool's
+    // merge rung actually receives it. ABSENT ⇒ ctx field absent ⇒ edit ladder
+    // byte-identical (default-OFF).
+    ...(config.fastApplyMerge !== undefined ? { fastApplyMerge: config.fastApplyMerge } : {}),
     // ADR-0428 jun-02 wire — surface the LIVE proxy-env (bound loopback address)
     // so shell-class tools inject HTTP(S)_PROXY into the child spawn. ABSENT ⇒
     // omitted ⇒ `withProxyEnv` returns the same base env (byte-identical legacy).

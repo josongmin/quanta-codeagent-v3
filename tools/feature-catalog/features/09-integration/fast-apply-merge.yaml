@@ -1,7 +1,7 @@
 id: fast-apply-merge
 title: Model-based fast-apply MERGE rung (apply-model elision merge)
 section: 9
-subsystem: Edit-apply ladder recovery (ADR-0498, jun-7-misc 06)
+subsystem: Edit-apply ladder recovery (ADR-0500, jun-7-misc 06)
 order: 4172
 maturity: L3
 status: stable
@@ -27,8 +27,11 @@ purpose: |
   The merge is a PROPOSAL, never a blind write. Two-layer verification:
     (1) runner STRUCTURAL check (`verifyMergeStructural`): non-empty,
         changed-vs-original, no leftover elision marker, complete fenced block.
-    (2) edit-scoped bounded check (`verifyEditScopedMerge`): must contain
-        new_string, must not still contain old_string (unless new_string
+    (2) edit-scoped bounded check (`verifyEditScopedMerge`): must ADD new_string
+        (its occurrence count strictly INCREASES vs the original — R3 audit; mere
+        `includes(new_string)` is UNSOUND when new_string already exists unrelated
+        to the edit, letting a drop-others merge pass while keeping the pre-existing
+        occurrence), must not still contain old_string (unless new_string
         legitimately re-introduces it), must differ from the original, AND
         (R1 audit) REJECT an empty new_string (the `includes("")` landed-signal
         is vacuous, so arbitrary content would otherwise pass).
@@ -36,6 +39,29 @@ purpose: |
         `line_ranges`: a whole-file merge cannot honor a bounded scope, so a
         model merge could mutate lines OUTSIDE the declared span — fail-closed
         to the typed mismatch instead.
+    (R2 audit) The rung is likewise SKIPPED under `replace_all`: that is a
+        deterministic "change EVERY occurrence" contract, but a whole-file merge
+        + single-occurrence verification cannot prove all N sites changed (a
+        partial merge would pass `includes(new_string)`) — fail-closed instead.
+    (R4 audit) DEFENSE-IN-DEPTH against the duck-typed port: `verifyEditScopedMerge`
+        ALSO rejects a merged file that still literally contains the `// ... existing
+        code ...` elision marker BEYOND what the original + new_string legitimately
+        account for. The runner's structural check rejects this, but the consumer
+        must NOT trust an arbitrary `ctx.fastApplyMerge` implementation to have run
+        it: a buggy/compromised port that returns a merge where the apply model
+        COPIED the sketch verbatim (dropping the real lines the marker stood for)
+        would otherwise pass the edit-scoped check (new_string lands, old absent) and
+        write the corrupted file. The count-attributed bound avoids over-rejecting a
+        legitimate edit whose new_string genuinely embeds the marker (EM-17 RED / EM-18
+        GREEN).
+    (R2 KNOWN GAP, ticket §9.3) SEMANTIC content-drop is NOT deterministically
+        caught: a merge that lands new_string (even in a comment) while dropping
+        unrelated real code passes the presence/absence gate. Bounding it needs a
+        structural diff with a delta threshold (a magic number forbidden by
+        [[no-heuristics-only-validated]]). The backstop is the reviewer/diff gate
+        (§4.c): the full before/after IS fed to the `ToolDiffSink`, so the drop is
+        SURFACED to the human/reviewer, never a silent side-channel write
+        (EM-14 pins this; flip it to fail-closed if a validated bound lands).
   An accepted merge then flows through the SAME gated commit + `ToolDiffSink`
   path as ANY edit — there is NO code path that writes a merged file without
   verification + the normal gate.

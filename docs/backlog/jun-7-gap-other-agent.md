@@ -832,7 +832,7 @@
 
 ## 25. Orchestration / Self-correction / 버전-delta net-new
 
-> **STATUS (verified jun-07)**: §25.1 선언적 multi-phase workflow 엔진 🔲 **STILL OPEN**(`workflowPhase`/`WorkflowEngine`/`QUANTA_WORKFLOW`/phase-engine grep=0 — budget/cap/subagent primitive는 있으나 phase-구조화 엔진 미존재) · §25.2 `reflect` mid-turn 도구 🔲 **STILL OPEN**(manifest `reflect`/`think` 도구 grep=0; `apply_patch`의 "self-correction hints"는 다른 것) · §25.3 SmartMode classifier-gate PARTIAL. **§25 전체 미진척.**
+> **STATUS (verified jun-07)**: §25.1 선언적 multi-phase workflow 엔진 ✅ **LANDED (jun-7)** — 신규 슬라이스 `src/workflow/`(`@/workflow`): 선언적 노드트리(agent/sequence/parallel/phase/fanout/pipeline/loop builders) + 결정적 executor(동시성 semaphore cap·structured-output zod 검증+retry·duplicate-id fail-closed·budget/maxAgents/abort backstop·progress 이벤트). 하네스 `Workflow` 도구 연산자셋 미러링하되 임의-JS 인터프리터 아님(샌드박스 표면 회피). pure leaf(zod만 import), default-OFF(`runWorkflow` 호출시만), no clock/random. 프로덕션 어댑터 `src/agent/workflow-agent-adapter.ts`(`subagentRunnerToAgentRunPort`: `SubagentRunner`→`AgentRunPort`). 35 hellgate+e2e(`tests/unit/workflow/`: engine 27 + e2e 3 review→verify→synth/loop-until-dry + adapter 5), tsc0/biome0, slice-graph ratchet pass. **저작 표면 결정+구현+LIVE 배선됨**: LLM이 선언적 **JSON `WorkflowSpec`**(phases·steps seq/parallel·forEach fanout·`{{ref}}` 템플릿·typed outputSchema)을 emit → `compileWorkflowSpec`가 노드트리로 컴파일(JS-script 인터프리터 대신 — 보안) → engine 완주. **`run_workflow` LLM 도구 풀배선 완료**: `src/tool/workflow/run-workflow-tool.ts`(`createRunWorkflowTool`) + tier-1 subagent block(`buildSubagentBlock`)이 자기 runner를 workflow 어댑터로 재사용해 등록 + `enableWorkflow` config flag 3계층(agent-capabilities type → assemble/subagent core → CLI internal `gateOn(QUANTA_WORKFLOW)` default-OFF) + manifest GATED config-slot entry. drift-guard·slice-graph·tsc0 pass. **gate: `QUANTA_WORKFLOW=on` + subagent enabled**(runner 필요). 57 test(`tests/unit/workflow/`). · §25.2 `reflect` mid-turn 도구 🔲 **STILL OPEN**(manifest `reflect`/`think` 도구 grep=0; `apply_patch`의 "self-correction hints"는 다른 것) · §25.3 SmartMode classifier-gate PARTIAL.
 
 > prev-vs-current(Codex 2867→3390, Cursor 3.2→3.5, Claude 2.1.138→2.1.150) DIFF + Cursor `agent.v1` **832 타입 전수 스윕**(49 tool family)으로 23 카테고리 **밖**에서 잡은 net-new. 대부분 churn/already-landed였고 아래만 진짜 신규.
 
@@ -949,3 +949,29 @@
 - **stale 전제 정정**: retrieval "in-flight tsc errors" = 거짓(232 에러 전부 test fixture, prod src clean). MCP OAuth "no live caller" = stale(jun-06 wired).
 - **provider-specific는 N/A**: realtime/responses WebSocket = OpenAI 계정 전용, BYO-provider quanta엔 흡수 부적합.
 - 각 항목 경쟁사 소스는 `.extracted_source/<corpus>/...`, quanta 소스는 repo `src/...` 절대경로 기준.
+
+---
+
+## MED 흡수 실행계획 (src-verified jun-07, quanta 소스칼럼 + 정정)
+
+> 6병렬 어딧(quanta 소스 검증 + .extracted_source 경쟁사 메커니즘)으로 확정. 과대평가 4건 정정 포함.
+
+### 정정 (false-parity)
+- **§4.2 multi_agents peer verb**: "wait_agent/resume_agent 없음"은 **틀림** — `wait_agent`·`subagent_send_message`·`subagent_read_messages`·`list_agents`·`followup_task`+bg `fork/poll/await` 전부 존재(`src/subagent/handlers-6.ts`, `src/tool/subagent-mailbox/`, `src/subagent/introspect-tools.ts`, `src/tool/subagent-bg/`). 진짜 갭 = **`fork_turns`(턴 suspend→resume) + 3 도구평면 통합**.
+- **§(workflow/reflect)**: overclaim 위험 최고. Codex엔 workflow struct 없음(orchestrator.rs=HTTP client). Claude "dynamic-workflow"=hooks 가능성. Cursor만 `workflow_id`/`workflow_status`(ZJ enum)+`reflectToolCall`(cursor-agent-exec/dist/main.js) 있으나 선언층 난독화. → **reflect 도구 먼저, workflow 엔진 defer**.
+- **§(agent-requested rules)**: 버그 아님 — `src/agent/glob-rules.ts:25` JSDoc가 명시적으로 out-of-scope(Skill progressive-disclosure 위임)로 deferred. Cursor `CursorRuleTypeAgentFetched`+`fetch_rules`(cursor-agent-worker/dist/main.js)는 일부 protobuf-schema-only.
+- **GAP3 1M 경로정정**: `src/llm/advisor.ts:53`(X) → **`src/runner/knobs/knobs/advisor.ts:53`**(knob allowlist `[1m]` 리터럴) + `src/llm/provider-metadata.ts:129-131`(`-1m` window 엔트리 존재하나 slug변환/beta헤더 미plumb).
+
+### 실행표 (gap | quanta 소스 verified | 경쟁사 메커니즘 file:line | wave | effort/ROI)
+| # | 갭 | quanta 소스 (verified) | 경쟁사 메커니즘 | wave | effort/ROI |
+|---|---|---|---|---|---|
+| 5 | Anthropic service_tier | `src/llm/anthropic-messages-codec.ts:176-205` (grep0) · `factory.ts:192` resolver OpenAI만 | Anthropic body `service_tier:auto\|standard_only` | W1 | S / MED |
+| 4 | MCP SSE resumption | `src/mcp/transports/http-sse.ts:86-97` (id 무시) | Cursor MCP `cursor-mcp/dist/main.js:46544,46645` lastEventId→`Last-Event-ID` | W1⚠️ | S / HIGH (※user concurrent edit — defer) |
+| 9 | turn_context/session_meta 필드 | `src/session/envelope.ts:198-232` · `types.ts:17-40` | Codex `turn_context.rs`: developer_instructions/base_instructions/service_tier/dynamic_tools/approvals_reviewer/model_provider/originator/agent_nickname | W1 | S~M / 부분HIGH (소비자 있는것만: model_provider·service_tier·originator·thread_source) |
+| 10 | item lifecycle 이벤트 | `src/stream/types.ts:74-386` (turn-granular only) | Codex `ItemStarted/Updated/CompletedNotification` per output_item | W2 | M / HIGH (additive default-OFF) |
+| 3 | [1m] 1M-context | `provider-metadata.ts:129-131` + `knobs/advisor.ts:53` orphan | Claude `[1m]` suffix→beta `context-1m-2025-08-07` | W2 | M / HIGH |
+| 1 | 큰 이미지 downsample | `src/tool/image/read.ts:39-47` (5MB hard-reject) | Codex PIL LANCZOS→`--downscale-max-dim` (`imagegen/scripts/image_gen.py:330-361`) | W2 | M / MED |
+| 7 | batch-jobs LLM 도구화 | `src/agent/batch-jobs/port.ts:7` (InMemory only) · `apps/cli/batch-cmd.ts` | Codex `spawn_agents_on_csv`+`report_agent_job_result`+sqlite `agent_jobs`/`agent_job_items` (`state_5.schema.sql:79-112`) | W3 | L / HIGH |
+| 8 | peer fork_turns + 통합 | `src/subagent/handlers-6.ts` · `subagent-bg/` · `introspect-tools.ts` (4/6 있음) | Codex `multi_agents_v2/{spawn,wait,close_agent,message_tool,list_agents,followup_task}.rs` | W3 | L / HIGH |
+| 6 | agent-requested rules | `src/agent/glob-rules.ts:97-116` (description-only drop, 설계선택) | Cursor `CursorRuleTypeAgentFetched`+`fetch_rules` | W3 | M / MED-HIGH |
+| 11 | reflect 도구 (→workflow defer) | `src/agent/` (grep0) | Cursor `reflectToolCall` ("expensive, next_steps 필수") | W4 | M(reflect) / HIGH · workflow=L defer |

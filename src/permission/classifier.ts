@@ -167,6 +167,182 @@ export const EXFIL_SCOUTING_TAXONOMY_LINE =
 export const withExfilScoutingTaxonomy = (base: string, enabled: boolean): string =>
   enabled ? `${base}\n\n${EXFIL_SCOUTING_TAXONOMY_LINE}` : base
 
+/* ------------------------------------------------------------------------- *
+ * jun-7-misc 04 (a) — auto-mode user-rule overlay.
+ *
+ * A pure, default-OFF composer that layers operator `allow` / `soft_deny` /
+ * `hard_deny` / `environment` rules onto {@link CLASSIFIER_SYSTEM_PROMPT},
+ * mirroring {@link withExfilScoutingTaxonomy}'s shape. Knob OFF (the default)
+ * ⇒ {@link withUserRuleOverlay} returns `base` BYTE-IDENTICAL — the four
+ * baseline slots are never substituted, the baseline lists never materialise.
+ *
+ * Faithful port of Claude Code CLI 2.1.150's auto-mode overlay (`YG_` /
+ * `uB7` / the four `<user_*_to_replace>` slots + `$defaults` sentinel). The
+ * `$defaults` sentinel splices the category BASELINE in at its position,
+ * exactly once; a user list WITHOUT `$defaults` fully REPLACES the baseline.
+ *
+ * SECURITY (untrusted-source fence, parity with
+ * `tengu_settings_auto_mode_untrusted_source_ignored`): a repo-controllable
+ * source (the `@/rules` `project` layer) MUST NOT be able to inject an `allow`
+ * or `hard_deny` line — those LOOSEN the AFK boundary. The fence lives in the
+ * `@/rules → AutoModeOverlay` adapter ({@link buildAutoModeOverlay} in
+ * `circumvention.ts`), which only ever populates `allow` / `hard_deny` from the
+ * trusted `user` layer; the `project` layer can only TIGHTEN (`soft_deny`) or
+ * add `environment` context. This composer takes the overlay as already-fenced
+ * data — it does not re-derive provenance.
+ * ------------------------------------------------------------------------- */
+
+/** The literal `$defaults` sentinel — when it appears in a user rule list, the
+ *  category's baseline is spliced in at that position (once). Verbatim port of
+ *  Claude's `OtH`. */
+export const AUTO_MODE_DEFAULTS_SENTINEL = "$defaults"
+
+/** Operator rule overlay for the auto-mode classifier. Each field is a list of
+ *  verbatim rule lines (the operator's own text), optionally including the
+ *  {@link AUTO_MODE_DEFAULTS_SENTINEL}. An ABSENT field ⇒ baseline verbatim for
+ *  that category. The whole overlay being `undefined` ⇒ byte-identical OFF. */
+export interface AutoModeOverlay {
+  readonly allow?: readonly string[] | undefined
+  readonly soft_deny?: readonly string[] | undefined
+  readonly hard_deny?: readonly string[] | undefined
+  readonly environment?: readonly string[] | undefined
+}
+
+/** Per-category baseline rule lists (the `<user_*_to_replace>` defaults). These
+ *  are a one-time verbatim port of Claude's baseline; they materialise ONLY when
+ *  the overlay is present (knob ON), so the OFF prompt is byte-identical. The
+ *  soft-deny baseline carries the named destructive categories from the corpus. */
+export const AUTO_MODE_BASELINES = {
+  allow: [] as readonly string[],
+  soft_deny: [
+    "- Git Destructive: history rewrites, force-pushes, hard resets, or branch/tag deletions that discard committed work.",
+    "- Production Deploy: deploying, releasing, or rolling out to a production or shared environment.",
+    "- Remote Shell Writes: writing to or mutating files on remote/shared hosts (ssh, rsync to a remote, remote shell redirects).",
+    "- Code from External: running or installing code fetched from an external/untrusted source without review.",
+    "- Mass Mutation: bulk deletes, mass file rewrites, or sweeping mutations across many shared resources.",
+  ] as readonly string[],
+  hard_deny: [] as readonly string[],
+  environment: [] as readonly string[],
+} as const
+
+/** The four template slots in the (overlay-extended) classifier prompt. Each is
+ *  the placeholder text the composer regex-replaces with the merged rule list.
+ *  Verbatim slot names from Claude's `uB7`. */
+const OVERLAY_SLOTS = {
+  allow: "<user_allow_rules_to_replace>",
+  soft_deny: "<user_soft_deny_rules_to_replace>",
+  hard_deny: "<user_hard_deny_rules_to_replace>",
+  environment: "<user_environment_to_replace>",
+} as const
+
+/** The overlay section appended to the base prompt (carrying the four slots).
+ *  Only ever appended when the overlay is present — never in the OFF path. */
+const OVERLAY_SECTION = `
+
+## Operator Rules (auto-mode overlay)
+
+These operator-authored rules tune the AFK boundary for this environment. Apply them per the precedence below.
+
+### ALLOW (auto-approve carve-outs — never widens a HARD BLOCK)
+${OVERLAY_SLOTS.allow}
+
+### SOFT_DENY (destructive/irreversible — block unless User Intent clears)
+${OVERLAY_SLOTS.soft_deny}
+
+### HARD_DENY (security boundary — block UNCONDITIONALLY; User Intent does NOT clear)
+${OVERLAY_SLOTS.hard_deny}
+
+### ENVIRONMENT (context about the operator's setup)
+${OVERLAY_SLOTS.environment}`
+
+/**
+ * Merge a user rule list onto a category baseline, honoring the `$defaults`
+ * sentinel (splice baseline in at that position, once). Verbatim semantics of
+ * Claude's `YG_`:
+ *   - `user` empty/absent ⇒ baseline verbatim.
+ *   - `user` contains `$defaults` ⇒ baseline spliced at that position (once);
+ *     other entries kept in order.
+ *   - `user` WITHOUT `$defaults` ⇒ full replace (baseline dropped).
+ */
+export const mergeOverlayCategory = (
+  user: readonly string[] | undefined,
+  baseline: readonly string[],
+): readonly string[] => {
+  if (!user || user.length === 0) return [...baseline]
+  let splicedOnce = false
+  const out: string[] = []
+  for (const line of user) {
+    if (line === AUTO_MODE_DEFAULTS_SENTINEL) {
+      if (!splicedOnce) {
+        out.push(...baseline)
+        splicedOnce = true
+      }
+      continue
+    }
+    out.push(line)
+  }
+  return out
+}
+
+/** Render a merged category list to the slot body. Empty ⇒ the literal
+ *  `(none)` so the prompt section is well-formed but carries no rules. */
+const renderSlot = (lines: readonly string[]): string =>
+  lines.length === 0 ? "(none)" : lines.join("\n")
+
+/**
+ * Layer an {@link AutoModeOverlay} onto a base classifier prompt. When
+ * `overlay === undefined` (knob OFF or no operator rules) return `base`
+ * UNCHANGED (byte-identical — the OFF ratchet). Otherwise append the overlay
+ * section with each of the four slots substituted by the merged (baseline +
+ * user) rule list.
+ *
+ * Pure: no IO, no clock, no `process.env`. The only seam by which operator
+ * rules enter the classifier prompt.
+ */
+export const withUserRuleOverlay = (base: string, overlay: AutoModeOverlay | undefined): string => {
+  if (overlay === undefined) return base
+  const merged = {
+    allow: mergeOverlayCategory(overlay.allow, AUTO_MODE_BASELINES.allow),
+    soft_deny: mergeOverlayCategory(overlay.soft_deny, AUTO_MODE_BASELINES.soft_deny),
+    hard_deny: mergeOverlayCategory(overlay.hard_deny, AUTO_MODE_BASELINES.hard_deny),
+    environment: mergeOverlayCategory(overlay.environment, AUTO_MODE_BASELINES.environment),
+  }
+  let section = OVERLAY_SECTION
+  section = section.replace(OVERLAY_SLOTS.allow, renderSlot(merged.allow))
+  section = section.replace(OVERLAY_SLOTS.soft_deny, renderSlot(merged.soft_deny))
+  section = section.replace(OVERLAY_SLOTS.hard_deny, renderSlot(merged.hard_deny))
+  section = section.replace(OVERLAY_SLOTS.environment, renderSlot(merged.environment))
+  return `${base}${section}`
+}
+
+/* ------------------------------------------------------------------------- *
+ * jun-7-misc 04 (b) — tool-switch circumvention advisory taxonomy.
+ *
+ * The §3.2 circumvention instruction (VERBATIM from the Claude Code CLI
+ * 2.1.150 corpus). It is advisory: it threads a context line into the
+ * classifier prompt for the NEXT evaluation after a soft-deny, so the
+ * classifier itself catches a same-effect-via-different-tool follow-up. It is
+ * NOT a deterministic block — fidelity is load-bearing, do not paraphrase.
+ * ------------------------------------------------------------------------- */
+
+/** VERBATIM (Claude Code CLI 2.1.150). The circumvention instruction. */
+export const CIRCUMVENTION_TAXONOMY_LINE =
+  "- TOOL-SWITCH CIRCUMVENTION: Using `python -c`, `sed -i`, `cat >`, heredocs, or similar to write or edit a file that an Edit/Write/MultiEdit deny rule covers, or otherwise routing around a deny rule by switching tools. The named tool itself is enforced separately; your job here is to catch circumvention. Using redirect operators (`>`, `>>`, `|`) or heredocs to write to files counts."
+
+/**
+ * Append a circumvention CONTEXT line to the base prompt for the next
+ * evaluation, naming the still-live denied effect so the classifier treats a
+ * same-effect write via a different tool as circumvention. `note === undefined`
+ * (no live signal, or knob OFF) ⇒ return `base` UNCHANGED (byte-identical).
+ *
+ * The `note` is the categorical advisory string built by the tracker
+ * ({@link import("./circumvention").CircumventionTracker}); it carries the path
+ * (the agent's own input) only on the model-facing prompt, never on a logged
+ * structured field — matching the C6 no-leak boundary for structured reasons.
+ */
+export const withCircumventionContext = (base: string, note: string | undefined): string =>
+  note === undefined ? base : `${base}\n\n${CIRCUMVENTION_TAXONOMY_LINE}\n${note}`
+
 /** Stage-1 (fast) tail appended to the system prompt in "both" mode
  *  (auto-mode-classifier.md §2 `hQ5`). Err toward blocking; do NOT apply user
  *  intent / ALLOW — stage 2 handles those. */

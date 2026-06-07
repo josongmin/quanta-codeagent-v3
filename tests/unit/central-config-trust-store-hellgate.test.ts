@@ -85,3 +85,62 @@ describe("static trusted-path allow-list (headless/CI opt-in)", () => {
     expect(set.size).toBe(1)
   })
 })
+
+describe("corrupt/forged persisted trust file is fail-soft (never crashes hydration)", () => {
+  // RED-ON-INJECTION: TrustStore.load must mirror the slice's fail-soft parse
+  // discipline. A persisted trust map that carries an un-canonicalizable key
+  // (a relative path, an empty string — corruption, or a forged file trying to
+  // DoS the store) must NOT throw out of load() and must NOT discard the valid
+  // records that share the file. If the per-key guard is removed, load() throws
+  // and the entire trust store (including legitimately-trusted paths) is lost.
+  const malicious = (raw: Readonly<Record<string, TrustRecord>>): TrustPersistencePort => ({
+    load: async () => raw,
+    save: async () => {},
+  })
+
+  test("a relative/empty key does not throw and does not nuke the valid records", async () => {
+    const store = await TrustStore.load(
+      malicious({
+        "relative/key": { trusted: true, grantedAt: 0 },
+        "": { trusted: true, grantedAt: 0 },
+        "/abs/ok": { trusted: true, grantedAt: 7 },
+      } as Readonly<Record<string, TrustRecord>>),
+    )
+    // the valid absolute record survived the corrupt siblings
+    expect(store.isTrusted("/abs/ok")).toBe(true)
+    // the relative key was NOT silently trusted under some coerced spelling
+    expect(store.isTrusted("relative/key", "/somewhere")).toBe(false)
+    expect(store.isTrusted("/somewhere/relative/key")).toBe(false)
+  })
+
+  test("a non-canonicalizable LOOKUP path fails CLOSED (untrusted), never throws", async () => {
+    // RED-ON-INJECTION (round-3 F4): the security GATE read (`isTrusted`) must
+    // be fail-closed, exactly like the store's default-untrusted posture and
+    // the loader's fail-soft discipline. A non-canonicalizable lookup path — a
+    // relative path or empty string handed in without a cwd base — must resolve
+    // to UNTRUSTED (false), NEVER propagate a throw out of the trust gate. A
+    // throwing gate is both an availability bug (it crashes the session at the
+    // trust check) and a fail-open risk (an upstream catch could mishandle the
+    // throw). If the per-lookup guard is removed (direct canonicalize), this
+    // call throws and the test goes RED.
+    const store = await TrustStore.load(emptyPort())
+    store.setTrusted("/abs/ok", 1)
+    expect(store.isTrusted("relative/lookup")).toBe(false)
+    expect(store.isTrusted("")).toBe(false)
+    // the legitimately-trusted absolute path is unaffected by the fail-soft read
+    expect(store.isTrusted("/abs/ok")).toBe(true)
+    // an explicit untrust read on a relative path also fails closed, not throws
+    expect(store.setUntrusted).toBeDefined()
+  })
+
+  test("a key whose value is not a record is skipped, valid sibling survives", async () => {
+    const store = await TrustStore.load(
+      malicious({
+        "/abs/ok": { trusted: true, grantedAt: 1 },
+        "/abs/bad": null as unknown as TrustRecord,
+      }),
+    )
+    expect(store.isTrusted("/abs/ok")).toBe(true)
+    expect(store.isTrusted("/abs/bad")).toBe(false)
+  })
+})

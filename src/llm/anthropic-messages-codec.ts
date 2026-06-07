@@ -173,18 +173,41 @@ export const toAnthropicToolChoice = (
   }
 }
 
+/** Map a resolved service-tier intent onto the value we SEND to Anthropic. The
+ *  Anthropic Messages API accepts `auto` | `standard_only` | `priority`; we emit
+ *  only `auto` | `standard_only` and DELIBERATELY collapse `priority`/`fast` →
+ *  `auto` (safer: `auto` uses priority capacity when available but falls back to
+ *  standard, whereas a literal `priority` request can be rejected when priority
+ *  capacity is unavailable). Anything unmappable (flex/scale/garbage) → undefined
+ *  so an invalid tier is never sent. Pure, NO-THROW. (gap-other-agent GAP 5.) */
+export const normalizeAnthropicServiceTier = (
+  raw: string | undefined,
+): "auto" | "standard_only" | undefined => {
+  if (typeof raw !== "string") return undefined
+  const v = raw.trim().toLowerCase()
+  if (v === "auto" || v === "priority" || v === "fast") return "auto"
+  if (v === "standard" || v === "standard_only") return "standard_only"
+  return undefined
+}
+
 export const buildAnthropicMessagesRequest = (
   model: string,
   maxTokens: number,
   input: StreamInput,
   cacheTtl: CacheTtl = "5m",
+  serviceTier?: string,
 ): Anthropic.MessageCreateParamsStreaming => {
   const toolNames = input.tools.map((t) => t.name)
   const toolChoice = toAnthropicToolChoice(input.toolChoice, toolNames)
+  const tier = normalizeAnthropicServiceTier(serviceTier)
   return {
     model,
     max_tokens: maxTokens,
     stream: true,
+    // gap-other-agent GAP 5 — `service_tier` (auto|standard_only). Absent ⇒ key
+    // omitted (byte-identical). The installed @anthropic-ai/sdk@0.40.1 type lacks
+    // the field, so the same scoped-cast style as `thinking` below is used.
+    ...(tier !== undefined ? ({ service_tier: tier } as { service_tier: string }) : {}),
     ...(input.system ? { system: toAnthropicSystem(input.system, cacheTtl) } : {}),
     // The `thinking` object is already the correct wire JSON for every arm
     // (`enabled` / `adaptive` / `disabled`). The installed `@anthropic-ai/sdk`

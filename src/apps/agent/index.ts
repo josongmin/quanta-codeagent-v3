@@ -21,6 +21,8 @@
  *   • exit 0 on `--help` (after a usage dump to stdout).
  */
 
+import { readFile, realpath, writeFile } from "node:fs/promises"
+import { homedir } from "node:os"
 import { join } from "node:path"
 import { buildSearchPipelineFromEnv, clearSearchPipelineWireForTests } from "@/runner/assemble"
 import { loadEnvFiles } from "@/shared/env-files"
@@ -29,6 +31,17 @@ loadEnvFiles([".env.dev", ".env.local", ".env"])
 
 import { loadNamedAgents } from "@/agent"
 import { loadCommandHookBindings } from "@/agent/command-hooks"
+import { bindingsFromHookEvents } from "@/agent/command-hooks/settings-loader"
+import type { CommandHookBinding } from "@/agent/command-hooks/types"
+import {
+  type ReadTextPort,
+  type TrustPersistencePort,
+  type TrustRecord,
+  TrustStore,
+  canonicalizeTrustedPaths,
+  parseSettingSources,
+  resolveDiskConfig,
+} from "@/config"
 // ADR-0303 thin-surface relocation — the env-READING "argv → AgentConfig base"
 // composition builder + the pure argv parser moved DOWN into `@/host/runtime`
 // so `apps/cli`'s `batch` subcommand reaches them without a sideways
@@ -154,6 +167,127 @@ const defaultLoadDispatcher = async (mode: AssembleRequest["mode"]): Promise<Mod
   return mod
 }
 
+// ── ADR-0497 jun-7-misc 05 — central-config disk loader + per-project trust
+//    gate host wire. The concrete closed ports the composition root injects into
+//    the (pure) `@/config` slice: a `node:fs` text read and a `~/.quanta/trust.json`
+//    persistence read/write. These are constructed ONLY on the central (knob-ON)
+//    branch — the default-OFF legacy path never allocates them, never touches the
+//    trust file, never reads a config layer. ──────────────────────────────────
+
+/** Concrete `node:fs` ReadTextPort for the @/config loader. ENOENT/ENOTDIR ⇒
+ *  absent (undefined), parity with the legacy `loadCommandHookBindings` reader. */
+const fsReadText: ReadTextPort = async (path) => {
+  try {
+    return await readFile(path, "utf8")
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === "ENOENT" || code === "ENOTDIR") return undefined
+    throw err
+  }
+}
+
+/** Concrete `~/.quanta/trust.json` persistence for the TrustStore. Absent /
+ *  malformed file ⇒ `undefined` (everything UNTRUSTED — fail-closed), mirroring
+ *  the store's own hydration discipline. */
+const makeTrustPersistence = (trustFilePath: string): TrustPersistencePort => ({
+  load: async () => {
+    let text: string
+    try {
+      text = await readFile(trustFilePath, "utf8")
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (code === "ENOENT" || code === "ENOTDIR") return undefined
+      throw err
+    }
+    try {
+      const parsed = JSON.parse(text) as unknown
+      return typeof parsed === "object" && parsed !== null
+        ? (parsed as Record<string, TrustRecord>)
+        : undefined
+    } catch {
+      return undefined
+    }
+  },
+  save: async (records) => {
+    await writeFile(trustFilePath, JSON.stringify(records), "utf8")
+  },
+})
+
+/**
+ * ADR-0497 jun-7-misc 05 — resolve the agent's `CommandHookBinding[]` at the
+ * async composition root, gating on `runtimeConfig().centralConfig`:
+ *
+ *   • OFF (knob unset / loose-truthy): the BYTE-IDENTICAL legacy path — exactly
+ *     `loadCommandHookBindings(join(process.cwd(),"settings.json"))` (ADR-0454).
+ *     No disk-config read, no trust-store read, no port allocation.
+ *   • ON (strict `=== "1"`): the trust-gated central path — realpath the cwd,
+ *     consult the `~/.quanta/trust.json` TrustStore (+ the headless
+ *     `QUANTA_TRUSTED_PATHS` allow-list, NEVER auto-trusting cwd), run the real
+ *     `resolveDiskConfig` over the layered settings (an UNTRUSTED repo's
+ *     repo-layer hook grants are DROPPED by the merge), then flatten via
+ *     `bindingsFromHookEvents`. A hostile cloned repo's `PreToolUse` command
+ *     NEVER becomes a live binding unless the repo is explicitly trusted.
+ *
+ * Mirrors `tests/unit/central-config-trust-e2e-hellgate.test.ts`'s
+ * `hostResolveCommandHooks` byte-for-byte; that E2E exercises every callee here
+ * with the real modules, this is the production wire landing it.
+ *
+ * `deps` is a TEST SEAM ONLY (the wire-level hellgate injects a call-counting
+ * read port + an in-memory trust persistence to prove the OFF branch consults
+ * NEITHER). Production passes nothing ⇒ the concrete `node:fs` ports above.
+ */
+export interface ResolveCommandHooksDeps {
+  /** Central-loader text read (default: the concrete `fsReadText`). */
+  readonly read?: ReadTextPort
+  /** Trust-store persistence factory keyed by the resolved trust-file path
+   *  (default: the concrete `~/.quanta/trust.json` reader/writer). */
+  readonly makeTrustPersistence?: (trustFilePath: string) => TrustPersistencePort
+}
+
+export const resolveCommandHookBindings = async (
+  cwd: string,
+  deps: ResolveCommandHooksDeps = {},
+): Promise<CommandHookBinding[]> => {
+  const rc = runtimeConfig()
+  if (!rc.centralConfig) {
+    // DEFAULT-OFF byte-identity — the ADR-0454 legacy read, verbatim. The
+    // injected central `read` / trust persistence are NEVER referenced here, so
+    // their call counters stay at ZERO (the wire test pins this).
+    return loadCommandHookBindings(join(cwd, "settings.json"))
+  }
+  // ON: trust-gated central path. Realpath the cwd so symlinked / aliased repo
+  // spellings canonicalize to the SAME trust key (the store stays purely
+  // lexical; symlink resolution is the host's job). A realpath failure
+  // (e.g. cwd removed) falls back to the raw path — still untrusted by default.
+  let realCwd: string
+  try {
+    realCwd = await realpath(cwd)
+  } catch {
+    realCwd = cwd
+  }
+  const userConfigDir = rc.centralConfigDir ?? join(homedir(), ".quanta")
+  const persist = deps.makeTrustPersistence ?? makeTrustPersistence
+  const store = await TrustStore.load(persist(join(userConfigDir, "trust.json")))
+  const trustedFromEnv = canonicalizeTrustedPaths(
+    (rc.trustedPaths ?? "").split(",").map((s) => s.trim()),
+  )
+  const trusted = store.isTrusted(realCwd) || trustedFromEnv.has(realCwd)
+  const resolved = await resolveDiskConfig({
+    cwd: realCwd,
+    userConfigDir,
+    // Managed-OS-path enumeration (the `/Library/.../managed-settings.json` /
+    // `/etc/quanta` machine layer, §9 Q5) is DEFERRED — undefined ⇒ the managed
+    // layer is simply absent (never read), which is fail-safe (a non-existent
+    // machine layer just doesn't contribute). Wiring it is a follow-up.
+    managedPath: undefined,
+    trusted,
+    sources: parseSettingSources(rc.centralConfigSources),
+    read: deps.read ?? fsReadText,
+    warn: () => {},
+  })
+  return bindingsFromHookEvents(resolved.hooks)
+}
+
 /**
  * The entry function. Pure routing — every effectful concern (IO, exit) is
  * injectable via {@link MainDeps}. Production caller at the bottom of this
@@ -202,9 +336,13 @@ export const runMain = async (deps: MainDeps = {}): Promise<void> => {
   // knob unset ⇒ not loaded ⇒ no command hooks. The enabled-without-ack fail-fast
   // throw happens later in buildBaseFromArgs (startup, never mid-turn).
   if (gateOn(process.env, "QUANTA_COMMAND_HOOKS")) {
-    partial.commandHookBindings = await loadCommandHookBindings(
-      join(process.cwd(), "settings.json"),
-    )
+    // ADR-0497 jun-7-misc 05 wire — the source of the bindings is gated on
+    // `runtimeConfig().centralConfig` inside `resolveCommandHookBindings`:
+    // knob OFF ⇒ the EXACT ADR-0454 legacy `loadCommandHookBindings(
+    // <cwd>/settings.json)` read (byte-identical, no disk-config / trust read);
+    // knob ON ⇒ the trust-gated central loader (an UNTRUSTED repo's hook
+    // commands are dropped before they can become live bindings).
+    partial.commandHookBindings = await resolveCommandHookBindings(process.cwd())
   }
   // Named-agent registry — load `.quanta/agents` (+ native dir) ONCE per session
   // at the async root and thread the resolver onto the partial; `buildBaseFromArgs`

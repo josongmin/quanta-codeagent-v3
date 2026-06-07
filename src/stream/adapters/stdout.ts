@@ -228,6 +228,14 @@ export class StdoutStream implements StreamPort {
         // line is the operator-visible hint that knobs were resolved.
         this.write(renderKnobsApplied(event))
         break
+      // gap-other-agent GAP 10 — item lifecycle is a transient render-only signal
+      // (per-output-item progress); the plain stdout renderer does not draw it (the
+      // live token counter + tool lines already convey progress). Explicit no-op so
+      // the exhaustiveness guard stays satisfied.
+      case "item_started":
+      case "item_updated":
+      case "item_completed":
+        break
       default: {
         // Exhaustiveness guard: a new AgentEvent variant must be handled
         // explicitly rather than silently rendered (or crashing) here.

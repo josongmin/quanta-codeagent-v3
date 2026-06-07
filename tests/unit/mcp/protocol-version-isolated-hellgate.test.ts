@@ -125,3 +125,77 @@ describe("IsolatedMcpClient — fail-closed on unsupported server version", () =
     await client.stop()
   })
 })
+
+/** R2 hardening (round-1 attack vector #4) — a fail-closed isolated start must
+ *  leave the client in a CLEAN state: the spawned host torn down (no leaked
+ *  subprocess) AND `started` reset to `false` so a follow-up `start()` is
+ *  possible (the catch in `IsolatedMcpClient.start` resets both). A path that
+ *  left `started===true` after a failed start would permanently brick the client
+ *  (every retry would early-return at `if (this.started) return`). */
+describe("IsolatedMcpClient — fail-closed start leaves a clean, retry-able state", () => {
+  /** Spawner that records `kill()` (the host teardown) + lets the test flip the
+   *  initialize reply between attempts, so we can prove a SECOND start succeeds
+   *  after a fail-closed FIRST one. */
+  const retryableSpawner = (
+    replyForAttempt: () => Record<string, unknown> | { error: { code: number; message: string } },
+    killCount: { n: number },
+  ): IsolatedProcessSpawnerPort => ({
+    spawn: async (opts) => {
+      let handler: ((msg: unknown) => void) | null = null
+      const proc: IsolatedProcess = {
+        pid: 1,
+        serviceName: opts.serviceName,
+        send: (msg: unknown) => {
+          const m = msg as { id?: number; method?: string }
+          if (m.method === "initialize" && typeof m.id === "number") {
+            const out = replyForAttempt()
+            const id = m.id
+            queueMicrotask(() => {
+              if ("error" in out) handler?.({ jsonrpc: "2.0", id, error: out.error })
+              else handler?.({ jsonrpc: "2.0", id, result: out })
+            })
+          }
+        },
+        onMessage: (h: (msg: unknown) => void) => {
+          handler = h
+          return () => {
+            handler = null
+          }
+        },
+        kill: async () => {
+          killCount.n += 1
+        },
+        exitPromise: new Promise(() => {}),
+      }
+      return proc
+    },
+  })
+
+  test("fail-closed start tears down the host AND resets `started` (retry succeeds)", async () => {
+    const killCount = { n: 0 }
+    let attempt = 0
+    const client = new IsolatedMcpClient(
+      { name: "iso", command: ["bun", "x"] },
+      {
+        spawner: retryableSpawner(() => {
+          attempt += 1
+          // First attempt: unsupported version ⇒ fail-closed. Second: accept.
+          return attempt === 1
+            ? { protocolVersion: "1999-01-01", capabilities: {} }
+            : { protocolVersion: LATEST_PROTOCOL_VERSION, capabilities: {} }
+        }, killCount),
+        requestTimeoutMs: 2000,
+      },
+    )
+    // First start fails closed.
+    await expect(client.start()).rejects.toThrow("unsupported protocolVersion")
+    // The host must have been torn down (no leaked subprocess).
+    expect(killCount.n).toBe(1)
+    // `started` must be back to false — proven by a SECOND start that does NOT
+    // early-return but actually re-spawns and negotiates to a clean pin. A
+    // bricked client (started left true) would early-return and leave the pin null.
+    await client.start()
+    expect(client.pinnedProtocolVersion()).toBe(LATEST_PROTOCOL_VERSION)
+    await client.stop()
+  })
+})

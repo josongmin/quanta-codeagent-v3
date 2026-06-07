@@ -41,6 +41,11 @@ export interface SubagentConfigAssembleInput {
    *  from the shared TaskRegistry; empty when none). The natural companion to
    *  {@link enable6Tools}. Absent/false ⇒ not registered. */
   enableIntrospect?: boolean | undefined
+  /** §25.1 — when true, the `run_workflow` tool (LLM-authored declarative
+   *  multi-agent orchestration) is registered against the shared runner. The
+   *  surface owns the env read (QUANTA_WORKFLOW). Absent/false ⇒ not registered
+   *  (byte-identical). */
+  enableWorkflow?: boolean | undefined
 }
 
 export const buildSubagentConfigCore = (
@@ -65,6 +70,9 @@ export const buildSubagentConfigCore = (
   }
   if (input.enableIntrospect === true) {
     out.enableIntrospect = true
+  }
+  if (input.enableWorkflow === true) {
+    out.enableWorkflow = true
   }
   return out
 }

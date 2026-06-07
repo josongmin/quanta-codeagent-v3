@@ -45,7 +45,7 @@ import type { DedupGate, DedupGateCaps } from "./dispatch-dedup"
 import type { DispatchGuard } from "./dispatch-guard"
 import type { EffortLevel } from "./effort"
 import type { EffortClassifierPort } from "./effort-classifier"
-import type { FastApplyFallbackPort } from "./fast-apply-fallback"
+import type { FastApplyFallbackPort, FastApplyPort } from "./fast-apply-fallback"
 import type { FollowUpQueue, PausedReason } from "./follow-up-queue"
 import type { SessionForker } from "./fork-session"
 import type { GlobRule } from "./glob-rules"
@@ -774,6 +774,18 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    * default-OFF).
    */
   fastApplyFallback?: FastApplyFallbackPort
+  /**
+   * jun-7-misc 06 (ADR ≥0497) — model-based fast-apply MERGE rung. When the
+   * deterministic edit ladder (exact + fuzzy) misses, this port asks a dedicated
+   * apply model to fold a terse edit sketch into the full original file and
+   * return the merged file; the `edit` tool verifies the proposal and routes it
+   * through the SAME gated commit path. The composition root constructs it behind
+   * `QUANTA_FAST_APPLY_MERGE=1` + a configured `QUANTA_FAST_APPLY_MODEL`
+   * (`optional-ports.ts`) and the dispatch seam threads it onto
+   * `ToolContext.fastApplyMerge`. Absent ⇒ no merge rung, byte-identical
+   * (RFC §1.2 default-OFF).
+   */
+  fastApplyMerge?: FastApplyPort
   /**
    * Session-scoped role→model override carrier (ADR-0256). Surfaces that need a
    * live executor/default model resolver thread the SAME resolver instance here
@@ -2301,6 +2313,7 @@ export type FeaturesConfig = Pick<
   // ─── ADR-0417 (ports-only, consumer wire deferred) ───
   | "effortClassifier"
   | "fastApplyFallback"
+  | "fastApplyMerge"
 >
 
 /** Narrow contract for per-turn prompt / context assembly (the loop's

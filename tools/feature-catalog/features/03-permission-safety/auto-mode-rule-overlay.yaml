@@ -1,0 +1,57 @@
+id: auto-mode-rule-overlay
+title: jun-7 auto-mode user-rule overlay (4-category $defaults splice + untrusted-source fence)
+section: 3
+subsystem: Permission auto-mode — operator-tunable AFK classifier boundary
+order: 81
+maturity: L3
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_AUTO_MODE_RULES]
+owners: ["@songmin"]
+labels: [surface:cli, category:permission, security, security-touched, default-off, absorbed:claude]
+depends_on: [auto-mode-classifier, deny-reason-surfacing]
+purpose: |
+  AFK auto-mode 분류기(`CLASSIFIER_SYSTEM_PROMPT`, frozen 상수)에 operator 가 자신의
+  `allow`/`soft_deny`/`hard_deny`/`environment` 룰을 레이어링하는 pure overlay
+  composer. Claude Code CLI 2.1.150 의 `YG_`/`uB7` + 4-slot(`<user_*_to_replace>`)
+  + `$defaults` 센티넬을 verbatim 포팅. `withUserRuleOverlay(base, overlay)` 는
+  `withExfilScoutingTaxonomy` 의 default-OFF shape 미러 — `overlay===undefined`
+  (knob OFF or no rules) ⇒ base BYTE-IDENTICAL 반환. `$defaults` ⇒ 해당 카테고리
+  baseline 을 그 위치에 1회 splice; 없으면 full-replace; 빈 리스트 ⇒ baseline verbatim.
+  룰 출처는 기존 `@/rules` 3-layer DSL(user/project) — parallel 스토어 신설 금지.
+  SECURITY CRUX(untrusted-source fence, Claude `tengu_settings_auto_mode_untrusted_
+  source_ignored` 패리티): repo-controllable `project` 레이어는 TIGHTEN(`soft_deny`)/
+  context(`environment`) 방향만 적용 — `allow`/`hard_deny`(LOOSEN/security-boundary)
+  는 DROP. `buildAutoModeOverlay` 어댑터(`@/permission` 거주, `@/rules→@/permission`
+  커플링 회피)가 이 fence 를 강제하고 hellgate red-on-injection 으로 봉인.
+  DEFAULT-OFF(`QUANTA_AUTO_MODE_RULES` strict `=== "1"`): 부재 ⇒ overlay slot 미치환,
+  baseline 리스트 미materialize, 분류기는 canonical prompt 그대로 — byte-identical.
+evidence:
+  code:
+    - src/permission/classifier.ts
+    - src/permission/circumvention.ts
+    - src/agent/admissibility-gate.ts
+    - src/shared/runtime-config.ts
+  adrs: ["docs/tickets/misc-jun-7/04-auto-mode-rule-overlay-circumvention.md"]
+  tests:
+    unit:
+      - tests/unit/auto-mode-overlay-hellgate.test.ts
+      - tests/unit/auto-mode-rules-gate-off-byte-identity-hellgate.test.ts
+      - tests/unit/auto-mode-rule-overlay-circumvention-e2e-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_AUTO_MODE_RULES
+    default: 'undefined'
+    purpose: Strict opt-in (`=== "1"`). OFF ⇒ `withUserRuleOverlay` 은 overlay 미생성, 분류기는 canonical `CLASSIFIER_SYSTEM_PROMPT`(or scout-overlaid) 그대로 — byte-identical classification. ON ⇒ gate 가 rules-store snapshot 을 fenced 어댑터로 overlay 화하여 prompt 에 splice.
+deliberate_hold: null
+notes: |
+  설계 provenance: 티켓 `docs/tickets/misc-jun-7/04-auto-mode-rule-overlay-circumvention.md`
+  §4.a. ADR(≥0497) 미발행 — 티켓이 authoritative design. DSL `deny`→`soft_deny`/`hard_deny`
+  매핑(티켓 Open Question §6.2): 현 `@/rules` DSL 은 single `deny`(hard 태그 없음)라 모든
+  `deny`→`soft_deny`(보수적 default); `LayeredRule.hard` 태그는 deferred DSL 확장으로
+  어댑터 시그니처에 예약됨. `environment` 슬롯도 현 DSL 미저작(deferred) — `(none)` 렌더.

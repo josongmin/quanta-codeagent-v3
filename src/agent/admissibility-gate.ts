@@ -31,14 +31,20 @@ import { attrs, QUANTA_ATTRS, recordAttrs, SPAN_NAMES } from "@/observability"
 import {
   type AutoModeClassifier,
   autoPassByPatterns,
+  buildAutoModeOverlay,
+  type CircumventionTracker,
+  CLASSIFIER_SYSTEM_PROMPT,
   classifyCommand,
   computeActionSignature,
   type DenialMemory,
   type DenyLayer,
   type DenyPillar,
+  type EffectSignature,
+  type EvaluateAutoOptions,
   evaluate,
   evaluateAuto,
   evaluateStack,
+  extractWriteEffects,
   getDefaultPermissionStore,
   grantAndCascade,
   type HITLTier,
@@ -48,9 +54,11 @@ import {
   inferToolTier,
   isAllowed,
   isDecisionLegalFor,
+  type LayeredRule,
   type LearningSource,
   type PendingPermission,
   type PermissionContext,
+  type PermissionDecision,
   type PermissionStore,
   type ReviewContext,
   type ReviewerPort,
@@ -61,6 +69,8 @@ import {
   type StructuredDenyReasonInput,
   structuredDenyReason,
   type ToolActionKeyed,
+  withExfilScoutingTaxonomy,
+  withUserRuleOverlay,
 } from "@/permission"
 import type { RulesStore } from "@/rules"
 import { errMessage, runtimeConfig, writeStderr } from "@/shared"
@@ -236,6 +246,18 @@ export interface AdmissibilityWaveAOptions {
    * armed".
    */
   coordinationBroker?: GateEscalationBroker
+  /**
+   * jun-7-misc 04 (b) — session-scoped denied-effect tracker for tool-switch
+   * circumvention detection. Caller-owned (one tracker per `runAgent` run).
+   *
+   * SECURITY / DEFAULT-OFF: the gate ALSO re-checks `runtimeConfig().
+   * circumventDetect` (strict `=== "1"`) before consulting the tracker, so even
+   * a wired tracker is inert unless the knob is ON. Absent ⇒ no circumvention
+   * detection at all (byte-identical auto-mode gate). It is ADVISORY by default
+   * (threads a context line to the classifier) and only forces a HITL `ask`
+   * under the stricter `escalate` posture — NEVER auto-allow / auto-hard-block.
+   */
+  circumventionTracker?: CircumventionTracker
 }
 
 /**
@@ -1415,6 +1437,114 @@ const policyDenyStructured = (
         ...(softPillar !== undefined ? { pillar: softPillar } : {}),
       }
 
+/* ------------------------------------------------------------------------- *
+ * jun-7-misc 04 — auto-mode overlay + circumvention wiring (BOTH default-OFF).
+ *
+ * `buildEvaluateAutoOptions` assembles the optional {@link EvaluateAutoOptions}
+ * for `evaluateAuto` from gate config/opts, STRICTLY knob-gated:
+ *
+ *   - `runtimeConfig().autoModeRules` (`=== "1"`) ⇒ compose the operator
+ *     rule overlay onto the classifier prompt. OFF ⇒ no overlay slot, the
+ *     canonical `CLASSIFIER_SYSTEM_PROMPT` flows through `evaluateAuto`
+ *     unchanged (byte-identical classification).
+ *   - `runtimeConfig().circumventDetect` (`=== "1"`) AND a wired
+ *     `opts.circumventionTracker` ⇒ extract THIS action's write-effect and pass
+ *     the tracker + effect + turn. OFF (or no tracker) ⇒ no effect memory.
+ *
+ * When BOTH knobs are OFF this returns `undefined`, so `runModePolicy` calls the
+ * 3-arg `evaluateAuto(...)` exactly as before (the OFF ratchet).
+ *
+ * Untrusted-source fence: the overlay is built from the rules store snapshot via
+ * {@link buildAutoModeOverlay}, which DROPS a `project`-layer (repo-controllable)
+ * `allow`/`hard_deny` — a repo cannot loosen the AFK boundary.
+ * ------------------------------------------------------------------------- */
+
+/** Project a `RulesStore` snapshot to the layered-rule view the overlay adapter
+ *  consumes. The current `@/rules` DSL has a single `deny` action with NO hard
+ *  tag, so every `deny` maps to `soft_deny` (the conservative default — Open
+ *  Question §6.2: a hard-deny tag is a deferred DSL extension). */
+const snapshotToLayeredRules = (store: RulesStore): readonly LayeredRule[] => {
+  const snap = store.snapshot()
+  const out: LayeredRule[] = []
+  for (const layerRules of [snap.system, snap.user, snap.project]) {
+    for (const r of layerRules) {
+      out.push({ action: r.action, prefix: r.prefix, layer: r.layer })
+    }
+  }
+  return out
+}
+
+const buildEvaluateAutoOptions = (
+  config: AdmissibilityGateConfig,
+  action: AdmissibilityAction,
+  opts: AdmissibilityWaveAOptions,
+): EvaluateAutoOptions | undefined => {
+  const rulesOn = runtimeConfig().autoModeRules
+  const circumventOn = runtimeConfig().circumventDetect && opts.circumventionTracker !== undefined
+  if (!rulesOn && !circumventOn) return undefined
+
+  const result: {
+    overlaidSystemPrompt?: string
+    tracker?: CircumventionTracker
+    effect?: EffectSignature
+    effects?: readonly EffectSignature[]
+    turn?: number
+  } = {}
+
+  if (rulesOn && opts.rulesStore !== undefined) {
+    const overlay = buildAutoModeOverlay(snapshotToLayeredRules(opts.rulesStore))
+    if (overlay !== undefined) {
+      // Compose the overlay ONTO the scout-overlaid base so the existing
+      // exfil-scouting seam (its own knob) still applies underneath.
+      const scoutBase = withExfilScoutingTaxonomy(
+        CLASSIFIER_SYSTEM_PROMPT,
+        runtimeConfig().exfilScouting,
+      )
+      result.overlaidSystemPrompt = withUserRuleOverlay(scoutBase, overlay)
+    }
+  }
+
+  if (circumventOn && opts.circumventionTracker !== undefined) {
+    // Round-4: extract ALL write effects (a shell command can write multiple
+    // paths; a decoy-prefixed redirect must not hide the soft-denied target).
+    const effects = extractWriteEffects(
+      action.tool,
+      action.input,
+      action.shellCommand,
+      config.cwd,
+      action.isReadOnly,
+    )
+    const first = effects[0]
+    if (first !== undefined) {
+      result.tracker = opts.circumventionTracker
+      result.effects = effects
+      // Keep the single `effect` populated for any consumer/test that reads it.
+      result.effect = first
+      result.turn = config.run?.turn ?? 0
+    }
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined
+}
+
+/** Resolve the mode-policy decision: "auto" + a wired classifier routes through
+ *  the async classifier (with the optional, knob-gated overlay/circumvention
+ *  wiring); every other mode uses the synchronous policy verbatim. Extracted so
+ *  {@link runModePolicy} stays under the complexity bar. */
+const resolveModeDecision = async (
+  config: AdmissibilityGateConfig,
+  permission: PermissionContext,
+  action: AdmissibilityAction,
+  autoClassifier: AutoModeClassifier | undefined,
+  opts: AdmissibilityWaveAOptions,
+): Promise<PermissionDecision> => {
+  if (permission.mode === "auto" && autoClassifier) {
+    const autoOpts = buildEvaluateAutoOptions(config, action, opts)
+    return evaluateAuto(action, permission, autoClassifier, autoOpts)
+  }
+  return evaluate(action, permission)
+}
+
 /** Mode-based permission decision (legacy path). Tier 1 capability (ADR-0011):
  *  "auto" mode routes to the session-scoped LLM classifier; all other modes
  *  use the synchronous policy verbatim. */
@@ -1426,10 +1556,9 @@ const runModePolicy = async (
   autoClassifier?: AutoModeClassifier,
   opts: AdmissibilityWaveAOptions = {},
 ): Promise<DispatchResult | null> => {
-  const decision =
-    permission.mode === "auto" && autoClassifier
-      ? await evaluateAuto(action, permission, autoClassifier)
-      : evaluate(action, permission)
+  // jun-7-misc 04 — in "auto" mode, assemble the optional overlay +
+  // circumvention wiring (BOTH knobs OFF ⇒ `undefined`, byte-identical call).
+  const decision = await resolveModeDecision(config, permission, action, autoClassifier, opts)
   // ADR-0267 Phase 2 — emit the mode-policy decision BEFORE acting on it so a
   // tracer sees the categorical outcome (allow/deny/ask) even on paths that
   // later short-circuit via the ask handler. `decision.reason` is the

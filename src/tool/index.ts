@@ -35,7 +35,7 @@ import { type FileHistoryStore, makeFileHistoryRewindTool } from "./file-history
 import { fileTreeSummaryTool } from "./file-tree-summary"
 import { globTool } from "./glob"
 import { grepTool } from "./grep"
-import { readImageTool, readImageUrlTool } from "./image"
+import { type ImageDownsamplePort, makeReadImageTool, readImageUrlTool } from "./image"
 import { type ImageGenPort, imageGenTool } from "./image-gen"
 import { localizeTool } from "./localize"
 import { mcpResourcesTools, type ResourcesHandle } from "./mcp_resources"
@@ -44,6 +44,7 @@ import { parseTestFailureTool } from "./parse-test-failure"
 import { type PermissionPatternProposePort, permissionProposeTools } from "./permission-propose"
 import { type PtySessionPort, ptyTools } from "./pty"
 import { makeReadTool, readTool } from "./read"
+import { type ReflectPort, reflectTool } from "./reflect"
 import { scriptedReplaceTool } from "./scripted-replace"
 import { sessionConfigTool } from "./session_config"
 import { testRunnerTool } from "./test-runner"
@@ -640,6 +641,17 @@ export interface DefaultToolPorts {
    *  `AskUserPort` shape) ONLY when `QUANTA_ASK_USER` is on; a headless host
    *  passes a port that returns typed `headless-denied`, so wiring is always safe. */
   askUser?: AskUserPort
+  /** ADR-0504 (gap GAP 11) — when set, append `reflect` (mid-turn self-correction
+   *  consult). Absent ⇒ tool NOT registered (byte-identical). The composition root
+   *  wires an LLM-backed `ReflectPort` ONLY when `QUANTA_REFLECT` is on (like the
+   *  advisor port). The tool enforces a per-session quota (reflect is expensive). */
+  reflect?: ReflectPort
+  /** gap-other-agent GAP 1 — when set, `read_image` downsamples an oversized image
+   *  (> MAX_IMAGE_BYTES) via this codec instead of rejecting. Absent ⇒ over-cap
+   *  images are rejected exactly as before (byte-identical). The composition root
+   *  wires a WASM/native codec port ONLY when `QUANTA_IMAGE_DOWNSAMPLE` is on
+   *  (quanta ships no pure-TS image codec, so it is always host-provided). */
+  imageDownsample?: ImageDownsamplePort
   /** file_history_rewind — when set, append `file_history_rewind` (per-file
    *  session-snapshot list/restore) bound to this session's history store.
    *  Absent ⇒ tool NOT registered (byte-identical default menu). The
@@ -832,6 +844,12 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => {
   if (ports.askUser !== undefined) {
     base.push(askUserTool(ports.askUser) as Tool)
   }
+  // ADR-0497 (gap GAP 11) — conditional `reflect` registration. Absent port ⇒
+  // tool NOT registered (byte-identical). Present ⇒ the mid-turn self-correction
+  // tool bound to the host's LLM-backed reflect port (per-session quota enforced).
+  if (ports.reflect !== undefined) {
+    base.push(reflectTool(ports.reflect) as Tool)
+  }
   // file_history_rewind — conditional registration of the per-file snapshot
   // list/restore tool. Absent store ⇒ default set is byte-identical (the model
   // never sees the tool). Present ⇒ the tool bound to the host's session history
@@ -939,7 +957,10 @@ const buildBaseDefaultTools = (ports: DefaultToolPorts): Tool[] => [
   testRunnerTool as Tool,
   diagnosticsTool(ports.diagnostics ?? nullDiagnosticsProvider) as Tool,
   // ADR-0126: vision input. Read-only + concurrency-safe; safe in defaults.
-  readImageTool as Tool,
+  // gap-other-agent GAP 1 — the downsample codec (if wired via
+  // DefaultToolPorts.imageDownsample) lets read_image shrink oversized images
+  // instead of rejecting; absent ⇒ byte-identical (reject over-cap as before).
+  makeReadImageTool(ports.imageDownsample) as Tool,
   // ADR-0132 / ADR-0146 — vision input from HTTPS URL. Read-only +
   // concurrency-safe; parallel to `read_image` (FS) and `web_fetch` (HTTP).
   // Factory binds global `fetch` by default (`readImageUrlTool({fetcher})`

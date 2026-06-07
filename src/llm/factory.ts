@@ -6,6 +6,7 @@ import { AnthropicAdapter } from "./adapters/anthropic"
 import { ChatGPTOAuthAdapter } from "./adapters/chatgpt-oauth"
 import { OpenAIAdapter } from "./adapters/openai"
 import { OpenAIResponsesAdapter } from "./adapters/openai-responses"
+import { resolveContext1M } from "./context-1m"
 import type { CredentialSource } from "./credential-helper"
 import type { LLMPort } from "./ports"
 import { type BedrockAdapterOptions, BedrockProviderAdapter } from "./providers/bedrock-adapter"
@@ -138,11 +139,26 @@ const ADAPTER_REGISTRY: Record<
       ...(resolveReasoningCarryover(env) ? { reasoningCarryover: true } : {}),
     })
   },
-  anthropic: (apiKey, model, opts, _env) =>
-    new AnthropicAdapter({
+  anthropic: (apiKey, model, opts, env) => {
+    // gap-other-agent GAP 5 — resolve the env/opts service_tier ONCE; the codec
+    // normalizes to Anthropic's auto|standard_only and drops the rest. Absent ⇒
+    // omitted ⇒ no `service_tier` key (byte-identical).
+    const serviceTier = resolveServiceTier(opts, env)
+    // gap-other-agent GAP 3 — 1M-context: strip the `[1m]` suffix off the API
+    // model id and, when active+eligible, ADD the `context-1m-2025-08-07` beta
+    // header (de-duped). Inactive ⇒ canonical model unchanged, no header added
+    // (byte-identical). (Window-metadata bump for compaction is a separate broad
+    // plumbing step — server-side activation via the header is the essential win.)
+    const ctx1m = resolveContext1M(model, env)
+    const betaHeaders =
+      ctx1m.betaHeader !== undefined
+        ? [...(opts.betaHeaders ?? []).filter((h) => h !== ctx1m.betaHeader), ctx1m.betaHeader]
+        : opts.betaHeaders
+    return new AnthropicAdapter({
       apiKey,
-      model,
-      ...(opts.betaHeaders !== undefined ? { betaHeaders: opts.betaHeaders } : {}),
+      model: ctx1m.model,
+      ...(serviceTier !== undefined ? { serviceTier } : {}),
+      ...(betaHeaders !== undefined ? { betaHeaders } : {}),
       ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
       ...(opts.streamFirstChunkMs !== undefined
         ? { streamFirstChunkMs: opts.streamFirstChunkMs }
@@ -150,8 +166,9 @@ const ADAPTER_REGISTRY: Record<
       ...(opts.streamIdleMs !== undefined ? { streamIdleMs: opts.streamIdleMs } : {}),
       // Prompt-cache 1h TTL: only granted when the knob is "1h" AND the model
       // is allowlisted; otherwise "5m" (byte-identical fixed-5m cache_control).
-      cacheTtl: resolveCacheTtl(model, runtimeConfig()),
-    }),
+      cacheTtl: resolveCacheTtl(ctx1m.model, runtimeConfig()),
+    })
+  },
   // ChatGPT-OAuth provider (ADR-0094 Phase 2). The api-key argument is unused
   // — the credential is the on-disk token bundle written by `/login`. `env`
   // is forwarded so the adapter resolves OAuth config (issuer/sku/originator)

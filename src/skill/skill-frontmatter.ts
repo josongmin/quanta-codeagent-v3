@@ -27,7 +27,7 @@
 
 import { z } from "zod"
 import { runtimeConfig } from "@/shared"
-import { normalizeSkillFrontmatter } from "./manifest-compat"
+import { normalizeSkillFrontmatter, SKILL_KEBAB_BLOCK_LIST_KEYS } from "./manifest-compat"
 import { SKILL_INSTALL_STATES, SKILL_SCOPES } from "./types"
 
 export const SkillCategorySchema = z.enum(["skill", "extension"])
@@ -540,9 +540,17 @@ const blockListHeaderKey = (
 ): string | null => {
   if (isBlankOrComment(line) || /^\s/.test(line)) return null
   if (!/^[A-Za-z][A-Za-z0-9_-]*\s*:\s*$/.test(line)) return null
-  const nxt = nextContentLine(lines, i + 1, end)
-  if (nxt === -1 || !isBlockListItem(lines[nxt] ?? "")) return null
   const key = (line.match(/^([A-Za-z][A-Za-z0-9_-]*)/)?.[1] ?? "").trim()
+  const nxt = nextContentLine(lines, i + 1, end)
+  const nextIsItem = nxt !== -1 && isBlockListItem(lines[nxt] ?? "")
+  // Open a block-list parent when EITHER an item follows OR the key is an
+  // enumerated block-list interop key (`allowed-tools`) — the latter lets an
+  // explicit TOOL-LESS skill (`allowed-tools:` with no items) ingest as `[]`
+  // (the safe "no tools" scoping) instead of failing "empty value". Without
+  // this the strict authority and the lenient discover.ts read site disagree
+  // (lenient yields `[]`); the closed key set keeps this from over-broadening to
+  // arbitrary empty-value headers. Compat-only ⇒ default-OFF byte-identical.
+  if (!nextIsItem && !SKILL_KEBAB_BLOCK_LIST_KEYS.has(key)) return null
   if (key in data) {
     throw new FrontmatterParseError(`duplicate key '${key}'`, i + 1)
   }

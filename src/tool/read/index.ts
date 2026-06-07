@@ -87,7 +87,11 @@ const truncateLine = (line: string): string => {
  *  `execute` stays under the lint complexity gate (the typed-failure catches
  *  raised the in-line branch count beyond 15). Pure: no I/O, no schema. */
 const renderReadOk = (text: string, offset: number | undefined, limit: number): string => {
-  const lines = text.split("\n")
+  // Split on `\r?\n` so a CRLF (Windows-authored) file does NOT leave a trailing
+  // `\r` on every rendered line — a bare CR is terminal noise that pollutes the
+  // model context (and the line count is identical to a `\n`-only split, so
+  // offset/limit paging is unchanged). The body is re-joined with `\n`.
+  const lines = text.split(/\r?\n/)
   const start = Math.max(0, (offset ?? 1) - 1)
   const end = Math.min(lines.length, start + limit)
   const numbered = lines

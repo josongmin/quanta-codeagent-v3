@@ -1,4 +1,9 @@
-import { type AutoModeClassifier, CLASSIFIER_SYSTEM_PROMPT } from "./classifier"
+import type { CircumventionTracker, EffectSignature } from "./circumvention"
+import {
+  type AutoModeClassifier,
+  CLASSIFIER_SYSTEM_PROMPT,
+  withCircumventionContext,
+} from "./classifier"
 import { hostMutationVerdict } from "./per-host-mode"
 import { threadAllowsMutation } from "./per-thread-store"
 import type {
@@ -250,10 +255,91 @@ export const evaluate = (action: ToolAction, ctx: PermissionContext): Permission
  * Behavior-preserving for the 3 existing modes: anything that is not "auto"
  * delegates verbatim to the synchronous `evaluate()`.
  */
+/**
+ * jun-7-misc 04 — optional auto-mode overlay + circumvention wiring. ALL fields
+ * optional; an OMITTED `opts` (the default, knobs OFF) ⇒ `evaluateAuto` runs the
+ * exact legacy path BYTE-IDENTICALLY (the OFF ratchet). Every field is consumed
+ * additively and only when present.
+ */
+export interface EvaluateAutoOptions {
+  /** Pre-composed, overlay-extended system prompt (the gate builds it via
+   *  `withUserRuleOverlay(withExfilScoutingTaxonomy(...), overlay)`). When
+   *  absent, the canonical `CLASSIFIER_SYSTEM_PROMPT` flows through unchanged. */
+  overlaidSystemPrompt?: string | undefined
+  /** Session-scoped denied-effect tracker (constructed ONLY when the
+   *  `QUANTA_CIRCUMVENT_DETECT` knob is ON). Absent ⇒ no effect memory. */
+  tracker?: CircumventionTracker | undefined
+  /** The current action's WRITE effect signature (gate-extracted via
+   *  `extractWriteEffect`). Required for any tracker interaction. */
+  effect?: EffectSignature | undefined
+  /** ALL of the current action's WRITE effect signatures (gate-extracted via
+   *  `extractWriteEffects`). A single shell command can write MORE THAN ONE path
+   *  (`a > X; b > Y`); tracking only `effect` (the first) let a decoy-prefixed
+   *  redirect route around a soft-deny silently (round-4 finding). When present
+   *  this SUPERSEDES `effect` for match/note/clear so EVERY path is checked.
+   *  Absent ⇒ fall back to the single `effect` (back-compat). */
+  effects?: readonly EffectSignature[] | undefined
+  /** Monotonic session turn number (the injected "clock"). */
+  turn?: number | undefined
+  /** Posture: `"escalate"` turns a circumvention match into a forced HITL
+   *  `ask`; the default (advisory) threads a context line to the classifier and
+   *  lets it decide. NEVER auto-allow / auto-hard-block on a signal. */
+  posture?: "advisory" | "escalate" | undefined
+}
+
+/** The resolved write-effect set for this action: the plural `effects` when the
+ *  gate supplies it (round-4 multi-path fix), else the single `effect` boxed
+ *  into a 1-list (back-compat). Empty ⇒ no tracker interaction. */
+const effectsOf = (opts: EvaluateAutoOptions | undefined): readonly EffectSignature[] => {
+  if (opts?.effects !== undefined) return opts.effects
+  return opts?.effect !== undefined ? [opts.effect] : []
+}
+
+/** True iff `opts` carries the full circumvention wiring (tracker + at least one
+ *  effect + turn). All-or-nothing so a partially-wired opts never half-activates. */
+const circumventionArmed = (
+  opts: EvaluateAutoOptions | undefined,
+): opts is EvaluateAutoOptions & {
+  tracker: CircumventionTracker
+  turn: number
+} => opts?.tracker !== undefined && opts.turn !== undefined && effectsOf(opts).length > 0
+
+/** Pre-classification circumvention check. Returns a forced-`ask` decision
+ *  (stricter `escalate` posture) when a same-effect-different-tool match fires,
+ *  an `{advisory}` note (default posture) to thread into the prompt, or
+ *  `undefined` (no signal / detector inert). NEVER auto-allow / hard-block. */
+const precheckCircumvention = (
+  action: ToolAction,
+  opts: EvaluateAutoOptions | undefined,
+): { decision: PermissionDecision } | { advisory: string } | undefined => {
+  if (!circumventionArmed(opts)) return undefined
+  // Check EVERY write effect — a decoy-prefixed redirect (`a > DECOY; b > X`)
+  // must not hide the soft-denied path. First match wins (advisory/escalate).
+  let signal: ReturnType<CircumventionTracker["matchCircumvention"]>
+  for (const eff of effectsOf(opts)) {
+    signal = opts.tracker.matchCircumvention(eff, action.tool, opts.turn)
+    if (signal !== undefined) break
+  }
+  if (signal === undefined) return undefined
+  if (opts.posture === "escalate") {
+    return {
+      decision: emit(
+        {
+          kind: "ask",
+          reason: "tool-switch circumvention of a prior soft-deny — escalating to review",
+        },
+        { stackSource: "global-default" },
+      ),
+    }
+  }
+  return { advisory: signal.advisory }
+}
+
 export const evaluateAuto = async (
   action: ToolAction,
   ctx: PermissionContext,
   classifier: AutoModeClassifier,
+  opts?: EvaluateAutoOptions,
 ): Promise<PermissionDecision> => {
   if (ctx.mode !== "auto") return evaluate(action, ctx)
 
@@ -262,11 +348,26 @@ export const evaluateAuto = async (
   // `isReadOnly:true` on a shell-bearing action) authorizes it. Checked first
   // so it matches `evaluate`/`evaluateStack` precedence level 1. `hardDeny`
   // is a no-op when no `shellCommand` is present, so genuine read-only tools
-  // still allow below.
+  // still allow below. NOTE: a HARD_DENY hit is terminal and is NEVER routed
+  // through the circumvention tracker — it needs no soft-deny memory.
   const denied = hardDeny(action)
   if (denied) return emit(denied, { stackSource: "hard-deny" })
 
   if (action.isReadOnly) return emit({ kind: "allow" }, { stackSource: "read-only-bypass" })
+
+  // jun-7-misc 04 (b) — circumvention detection (advisory-first). A match under
+  // the `escalate` posture short-circuits to a forced HITL `ask`; otherwise it
+  // yields an advisory context line threaded into the classifier prompt.
+  const circ = precheckCircumvention(action, opts)
+  if (circ !== undefined && "decision" in circ) return circ.decision
+  const circumventionNote = circ?.advisory
+
+  // Compose the model-facing system prompt: the gate-supplied overlaid prompt
+  // (or the canonical taxonomy) plus the advisory circumvention context line for
+  // this one evaluation. Both seams are byte-identical when their input is
+  // absent (`withCircumventionContext(base, undefined) === base`).
+  const basePrompt = opts?.overlaidSystemPrompt ?? CLASSIFIER_SYSTEM_PROMPT
+  const composedPrompt = withCircumventionContext(basePrompt, circumventionNote)
 
   const decision = await classifier.evaluate({
     tool: action.tool,
@@ -274,7 +375,7 @@ export const evaluateAuto = async (
     systemPrompt: ctx.classify
       ? // The injected port owns the real system prompt; pass the canonical
         // taxonomy so a mock/echo port still sees the canonical wording.
-        CLASSIFIER_SYSTEM_PROMPT
+        composedPrompt
       : "",
   })
 
@@ -282,9 +383,23 @@ export const evaluateAuto = async (
     return emit({ kind: "ask", reason: decision.reason }, { stackSource: "global-default" })
   }
   if (decision.verdict === "allow") {
+    // A genuine allow of these effects clears any prior denied-effect signature
+    // so the detector cannot poison the rest of the session (§4.b clear-on-allow).
+    // Clear EVERY effect (the multi-path action allowed all of them).
+    if (opts?.tracker !== undefined) {
+      for (const eff of effectsOf(opts)) opts.tracker.clearOnAllow(eff)
+    }
     return emit({ kind: "allow" }, { stackSource: "global-default" })
   }
   if (decision.verdict === "deny") {
+    // SOFT deny — record the denied WRITE effect so a same-effect-different-tool
+    // follow-up is caught. HARD_DENY already returned above (terminal), so this
+    // is unambiguously a soft policy deny.
+    // Record EVERY denied write effect so a later tool-switch to ANY of them is
+    // caught (a multi-path soft-deny remembers all its targets).
+    if (circumventionArmed(opts)) {
+      for (const eff of effectsOf(opts)) opts.tracker.noteDenied(eff, action.tool, opts.turn)
+    }
     return emit({ kind: "deny", reason: decision.reason }, { stackSource: "global-default" })
   }
   return emit({ kind: "ask", reason: decision.reason }, { stackSource: "global-default" })

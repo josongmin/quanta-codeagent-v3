@@ -81,20 +81,46 @@ export class TrustStore {
     const records = new Map<string, TrustRecord>()
     if (raw !== undefined) {
       for (const [key, rec] of Object.entries(raw)) {
-        if (rec !== null && typeof rec === "object" && typeof rec.trusted === "boolean") {
-          records.set(canonicalizeProjectPath(key), {
-            trusted: rec.trusted,
-            grantedAt: typeof rec.grantedAt === "number" ? rec.grantedAt : 0,
-          })
+        if (rec === null || typeof rec !== "object" || typeof rec.trusted !== "boolean") continue
+        // FAIL-SOFT (mirrors the loader's per-layer parse discipline): a
+        // persisted key that does not canonicalize — a relative path, an empty
+        // string, file corruption, or a forged map crafted to DoS hydration —
+        // is SKIPPED, never thrown. A single bad key must not crash the store
+        // nor discard the file's other, legitimately-trusted records.
+        let canonKey: string
+        try {
+          canonKey = canonicalizeProjectPath(key)
+        } catch {
+          continue
         }
+        records.set(canonKey, {
+          trusted: rec.trusted,
+          grantedAt: typeof rec.grantedAt === "number" ? rec.grantedAt : 0,
+        })
       }
     }
     return new TrustStore(records, persistence)
   }
 
-  /** DEFAULT UNTRUSTED: a path with no `trusted:true` record is untrusted. */
+  /** DEFAULT UNTRUSTED: a path with no `trusted:true` record is untrusted.
+   *
+   *  FAIL-CLOSED (round-3 F4): this is the security GATE read, so a
+   *  non-canonicalizable lookup path (a relative path / empty string handed in
+   *  without a cwd base) resolves to UNTRUSTED rather than propagating a throw.
+   *  A throwing gate is both an availability bug (it crashes the session at the
+   *  trust check) and a fail-open risk (an upstream catch could mishandle it).
+   *  This mirrors `canonicalizeTrustedPaths`, which already drops (never
+   *  trusts) an un-canonicalizable path. Mutations (`setTrusted`/`setUntrusted`)
+   *  deliberately still throw — an explicit grant against a bad path is a
+   *  caller programming error, not a gate read. */
   isTrusted(path: string, cwd?: string): boolean {
-    const rec = this.records.get(canonicalizeProjectPath(path, cwd))
+    let key: string
+    try {
+      key = canonicalizeProjectPath(path, cwd)
+    } catch {
+      return false
+    }
+    const rec = this.records.get(key)
     return rec?.trusted === true
   }
 

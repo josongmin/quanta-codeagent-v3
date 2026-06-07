@@ -24,19 +24,42 @@ export type { BranchOnlyVerdict } from "./branch-only"
 export { DEFAULT_PROTECTED_BRANCHES, decideBranchOnly } from "./branch-only"
 export type {
   AutoDecision,
+  AutoModeOverlay,
   ClassifierPort,
   ClassifyDecision,
   ClassifyRequest,
   DenialState,
 } from "./classifier"
 export {
+  AUTO_MODE_BASELINES,
+  AUTO_MODE_DEFAULTS_SENTINEL,
   AutoModeClassifier,
+  CIRCUMVENTION_TAXONOMY_LINE,
   CLASSIFIER_SYSTEM_PROMPT,
   DENIAL_LIMITS,
+  EXFIL_SCOUTING_TAXONOMY_LINE,
+  mergeOverlayCategory,
   STAGE1_BOTH_TAIL,
   STAGE1_FAST_TAIL,
   STAGE2_THINKING_TAIL,
+  withCircumventionContext,
+  withExfilScoutingTaxonomy,
+  withUserRuleOverlay,
 } from "./classifier"
+export type {
+  CircumventionSignal,
+  EffectSignature,
+  LayeredRule,
+} from "./circumvention"
+export {
+  buildAutoModeOverlay,
+  canonicalizeEffectPath,
+  CIRCUMVENTION_TTL_TURNS,
+  CircumventionTracker,
+  extractShellWritePaths,
+  extractWriteEffect,
+  extractWriteEffects,
+} from "./circumvention"
 export type {
   DenyLayer,
   DenyPillar,
@@ -169,6 +192,7 @@ export {
   getDefaultPermissionStore,
 } from "./permission-store"
 export type {
+  EvaluateAutoOptions,
   EvaluateStackOptions,
   PermissionStackContext,
 } from "./policy"

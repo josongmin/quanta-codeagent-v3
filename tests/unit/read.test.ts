@@ -227,6 +227,20 @@ describe("readTool", () => {
     expect(out).not.toMatch(/large file/i)
   })
 
+  test("CRLF file does NOT leave a trailing \\r on rendered lines (jun-7 Phase-2)", async () => {
+    const f = join(dir, "crlf.txt")
+    writeFileSync(f, "alpha\r\nbeta\r\ngamma\r\n") // Windows-authored
+    const r = await run({ path: f })
+    expect(r.ok).toBe(true)
+    const out = r.output ?? ""
+    // No bare CR anywhere in the model-facing output (was: `\r` per line).
+    expect(out.includes("\r")).toBe(false)
+    // Content + line numbers intact.
+    expect(out).toContain("1\talpha")
+    expect(out).toContain("2\tbeta")
+    expect(out).toContain("3\tgamma")
+  })
+
   test("normal small files are byte-identical (no cap, no nudge) (D8)", async () => {
     const f = join(dir, "small-d8.txt")
     writeFileSync(f, "alpha\nbeta\ngamma")

@@ -93,8 +93,8 @@ import {
   type Tool,
 } from "@/tool"
 import { DefaultDeferredResultRegistry } from "@/tool/deferred/default-registry"
-import { createMarkdownPainter } from "./markdown-painter"
 import { buildCliAskUserTool } from "./ask-user-wire"
+import { createMarkdownPainter } from "./markdown-painter"
 import { buildCliElicitationPrompterFactory } from "./mcp-elicitation-prompter"
 import { isPathLikeToken } from "./resume"
 import { isIndicatorEnabled } from "./turn-indicator"
@@ -343,6 +343,10 @@ export const buildSubagentConfig = (
   // disable individually. Zero-adapter: both ride the existing runner/registry.
   const enableBatchSpawn = enabled && parseEnvFlag(process.env.QUANTA_SUBAGENT_BATCH, true)
   const enableIntrospect = enabled && parseEnvFlag(process.env.QUANTA_SUBAGENT_INTROSPECT, true)
+  // §25.1 — `run_workflow` (LLM-authored declarative orchestration). DEFAULT-OFF
+  // (gateOn ⇒ must be explicitly QUANTA_WORKFLOW=on/1): it fans out a tree of
+  // subagents, so it opts in rather than riding the default subagent-ON seed.
+  const enableWorkflow = enabled && gateOn(process.env, "QUANTA_WORKFLOW")
   return buildSubagentConfigCore({
     enabled,
     ...(Number.isFinite(depth) ? { maxDepth: depth } : {}),
@@ -351,6 +355,7 @@ export const buildSubagentConfig = (
     ...(Number.isFinite(conc) ? { maxConcurrent: conc } : {}),
     ...(enableBatchSpawn ? { enableBatchSpawn: true } : {}),
     ...(enableIntrospect ? { enableIntrospect: true } : {}),
+    ...(enableWorkflow ? { enableWorkflow: true } : {}),
   })
 }
 

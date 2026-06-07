@@ -65,7 +65,13 @@ export const mergeSettings = (
   const allow: string[] = []
   const deny: string[] = []
   const ask: string[] = []
-  const hooks: Record<string, HookGroupSetting[]> = {}
+  // NULL-PROTOTYPE accumulator (round-3 F6): a hooks EVENT NAME of `__proto__`
+  // (or `constructor`/`prototype`) must be treated as an ordinary own-key, NOT
+  // a reach into Object.prototype. With a plain `{}`, `hooks["__proto__"] ?? []`
+  // returns the PROTOTYPE OBJECT (truthy, no `.push`) → a TypeError CRASH on a
+  // hostile-or-typo event name, AND `hooks["__proto__"] = …` is a prototype
+  // assignment. A null-proto object makes every event name a safe own-key.
+  const hooks: Record<string, HookGroupSetting[]> = Object.create(null)
   const mcpEnabled: string[] = []
   let model: string | undefined
   const droppedForUntrust: SettingsLayerName[] = []
@@ -90,6 +96,13 @@ export const mergeSettings = (
     //    could redirect the agent's model id, so an untrusted repo contributes
     //    nothing — not even a "benign" override. Machine-owned (managed/user)
     //    benign keys always apply. ──
+    // `droppedHere` records the layer in `droppedForUntrust` provenance, but
+    // ONLY when a NON-EMPTY loosening grant was actually dropped (round-3 F5
+    // precision). A defined-but-empty collection (`allow:[]`, `events:{}`,
+    // `enabledServers:[]`) drops nothing material, so it must NOT surface a
+    // spurious "settings ignored" signal. (The parse path collapses empties to
+    // `undefined`; this guard makes the public `mergeSettings` seam — consumed
+    // by ticket 04 — precise for direct construction too.)
     if (layer.benign?.model !== undefined) {
       if (dropLoosening) droppedHere = true
       else model = layer.benign.model
@@ -110,17 +123,17 @@ export const mergeSettings = (
     const hooksBlocked = managedHooksOnly && !managedLayer
 
     // ── permission allow/ask — LOOSENING ──
-    if (sec.permissions?.allow !== undefined) {
+    if (sec.permissions?.allow !== undefined && sec.permissions.allow.length > 0) {
       if (dropLoosening) droppedHere = true
       else if (!permsBlocked) allow.push(...sec.permissions.allow)
     }
-    if (sec.permissions?.ask !== undefined) {
+    if (sec.permissions?.ask !== undefined && sec.permissions.ask.length > 0) {
       if (dropLoosening) droppedHere = true
       else if (!permsBlocked) ask.push(...sec.permissions.ask)
     }
 
     // ── hooks — command execution, LOOSENING ──
-    if (sec.hooks?.events !== undefined) {
+    if (sec.hooks?.events !== undefined && Object.keys(sec.hooks.events).length > 0) {
       if (dropLoosening) droppedHere = true
       else if (!hooksBlocked) {
         for (const [event, groups] of Object.entries(sec.hooks.events)) {
@@ -132,7 +145,7 @@ export const mergeSettings = (
     }
 
     // ── mcp server launchers — LOOSENING ──
-    if (sec.mcp?.enabledServers !== undefined) {
+    if (sec.mcp?.enabledServers !== undefined && sec.mcp.enabledServers.length > 0) {
       if (dropLoosening) droppedHere = true
       else mcpEnabled.push(...sec.mcp.enabledServers)
     }

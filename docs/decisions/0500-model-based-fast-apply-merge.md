@@ -1,4 +1,4 @@
-# ADR-0498: model-based fast-apply MERGE rung (apply-model elision merge)
+# ADR-0500: model-based fast-apply MERGE rung (apply-model elision merge)
 
 - **상태**: Accepted
 - **날짜**: 2026-06-07

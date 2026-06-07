@@ -52,11 +52,38 @@ import type { ActionAssessment, ApprovalDecision } from "./types"
  *  the matrix forbids for a different tier. */
 const ASSESSMENT_REVIEWER = "guardian_subagent" as const
 
-/** Build the reject-and-tell verb carried by the steered-deny collapses. */
-const steerVerb = (message: string): ReviewDecision => ({
+/** Build the reject-and-tell verb carried by the steered-deny collapses.
+ *
+ *  DEFENSE-IN-DEPTH (R3): `reject_and_tell`'s contract is `message: string`. A
+ *  malformed-but-typed assessment (right `kind`, missing required `steer`/`axis`
+ *  at runtime — version skew, a loosely-decoded reply, a hand-built value) could
+ *  thread a non-string here. Rather than emit a malformed verb whose message
+ *  renders as the literal "undefined" downstream, we coerce a missing/non-string
+ *  message to a CATEGORICAL fallback string. The outcome stays `guardian_denied`
+ *  either way — this only guarantees the verb itself is well-formed. */
+const STEER_UNSPECIFIED = "guardian denied this action (no steering detail provided)" as const
+const steerVerb = (message: unknown): ReviewDecision => ({
   verb: "reject_and_tell",
-  message,
+  message: typeof message === "string" && message.length > 0 ? message : STEER_UNSPECIFIED,
 })
+
+/** Clamp a candidate riskLevel to a valid `ApprovalDecision` literal. A
+ *  malformed-but-typed `allow` (missing / non-literal riskLevel at runtime) must
+ *  NOT flow through as an allow carrying an invalid riskLevel; the conservative
+ *  clamp is `"high"`. Advisory-only field, but the emitted decision must be
+ *  well-formed regardless of how the assessment was constructed. */
+const clampRisk = (risk: unknown): ApprovalDecision["riskLevel"] =>
+  risk === "low" || risk === "medium" || risk === "high" ? risk : "high"
+
+/** Read the escalation axis defensively. A KNOWN `escalate` kind whose
+ *  `escalation`/`axis` body is missing at runtime must NOT raise an uncaught
+ *  TypeError (which crashes the turn — an availability/DoS hole, neither a clean
+ *  deny nor a silent allow). Absent a valid axis the steer omits the axis name;
+ *  the collapse still fails closed to `guardian_denied`. */
+const escalationAxisOf = (escalation: unknown): "sandbox" | "network" | "permission" | null => {
+  const axis = (escalation as { axis?: unknown } | null | undefined)?.axis
+  return axis === "sandbox" || axis === "network" || axis === "permission" ? axis : null
+}
 
 /**
  * Collapse a typed {@link ActionAssessment} into the standard
@@ -75,7 +102,9 @@ export const collapseAssessment = (
       return buildDecision({
         reviewer: ASSESSMENT_REVIEWER,
         outcome: "guardian_approved",
-        riskLevel: assessment.riskLevel,
+        // Clamp: a malformed-but-typed allow must never flow through as an allow
+        // carrying an invalid riskLevel literal.
+        riskLevel: clampRisk(assessment.riskLevel),
         rationale: assessment.rationale,
         decidedAt,
       })
@@ -136,10 +165,15 @@ export const collapseAssessment = (
         decidedAt,
         verb: steerVerb(assessment.steer),
       })
-    case "escalate":
+    case "escalate": {
       // NEVER auto-grant. Default collapse = forced ask-the-human → fail-closed
       // guardian_denied with a categorical steer naming the requested axis. A
       // sandbox/policy auto-grant is a separately-gated opt-in (deferred).
+      //
+      // DEFENSE-IN-DEPTH (R3): read the axis defensively. A KNOWN `escalate`
+      // whose `escalation`/`axis` body is missing at runtime must fail closed to
+      // guardian_denied, NOT raise an uncaught TypeError on `.escalation.axis`.
+      const axis = escalationAxisOf(assessment.escalation)
       return buildDecision({
         reviewer: ASSESSMENT_REVIEWER,
         outcome: "guardian_denied",
@@ -147,9 +181,12 @@ export const collapseAssessment = (
         rationale: assessment.rationale,
         decidedAt,
         verb: steerVerb(
-          `guardian requests a ${assessment.escalation.axis} policy amendment — operator review required (no auto-grant)`,
+          axis !== null
+            ? `guardian requests a ${axis} policy amendment — operator review required (no auto-grant)`
+            : "guardian requests a policy amendment — operator review required (no auto-grant)",
         ),
       })
+    }
     default: {
       // Compile-time exhaustiveness. If a new ActionAssessment variant is added
       // without a case above, this fails to compile.

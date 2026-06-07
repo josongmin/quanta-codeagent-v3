@@ -111,6 +111,12 @@ const checkHashPrecondition = (
   }
 }
 
+/** jun-7-misc 06 (ADR ≥0497) — the elision marker the derived sketch uses to
+ *  stand in for unchanged regions (Cursor 3.5.33's apply IO convention). Hoisted
+ *  to a named constant so the sketch builder AND the consumer's reject-on-leftover
+ *  check (R4 FINDING 6) reference the SAME literal — they can never drift. */
+const ELISION_MARKER = "// ... existing code ..."
+
 /** jun-7-misc 06 (ADR ≥0497) — derive a terse, Cursor-style edit sketch from the
  *  already-failed `old_string`/`new_string` (Open-Q §9.5 decision: DERIVE, never
  *  change the main model's output contract). The sketch fences the new text
@@ -118,18 +124,26 @@ const checkHashPrecondition = (
  *  unchanged regions are preserved and only the named region changes. Pure. */
 const buildEditSketch = (oldString: string, newString: string): string =>
   [
-    "// ... existing code ...",
+    ELISION_MARKER,
     `// replace this exact region:`,
     oldString,
     "// with:",
     newString,
-    "// ... existing code ...",
+    ELISION_MARKER,
   ].join("\n")
+
+/** Count NON-OVERLAPPING occurrences of `needle` in `haystack`. Pure, deterministic.
+ *  `needle` is always nonempty at the call site (the empty-new_string case is
+ *  rejected before this runs), so the split-length identity is exact. */
+const occurrences = (haystack: string, needle: string): number =>
+  needle.length === 0 ? 0 : haystack.split(needle).length - 1
 
 /** jun-7-misc 06 — EDIT-SCOPED verification of a model-merged file (ticket §4.c).
  *  The runner already ran the generic structural check (non-empty, changed,
  *  no leftover elision marker); this adds the bounds the EDIT knows about:
- *    - the merged file MUST contain `new_string` (the intended change landed),
+ *    - the merged file MUST add `new_string` — its occurrence count strictly
+ *      INCREASES vs the original (the intended change landed; mere presence is
+ *      unsound when new_string already exists unrelated to the edit),
  *    - the merged file MUST NOT still contain `old_string` (unless the new text
  *      itself contains it, e.g. an append) — i.e. the old anchor was resolved,
  *    - the merged file MUST differ from the original (a no-op is not a fix).
@@ -143,13 +157,46 @@ const verifyEditScopedMerge = (
   newString: string,
 ): string | null => {
   if (merged === original) return "merged file unchanged"
+  // R4 adversarial fix (FINDING 6) — DEFENSE-IN-DEPTH against the duck-typed port.
+  // The runner's `verifyMergeStructural` rejects a merge that still literally
+  // contains the elision marker (the apply model COPIED the sketch instead of
+  // EXPANDING it — dropping the real unchanged lines the marker stood for). But
+  // the consumer must NOT trust the port to have run that check: slice isolation
+  // means `ctx.fastApplyMerge` is any structural implementation, and a buggy /
+  // compromised one could return such a merge with `ok:true`. The marker is a
+  // deterministic literal THIS module injected via `buildEditSketch`, so its
+  // survival in the merged output is sound, non-heuristic proof the model did not
+  // expand the elisions ⇒ real code was dropped ⇒ reject ⇒ fail-closed. Without
+  // this, the merge-runner header's "even a runner that returned ok:true on garbage
+  // can never reach disk unverified" promise is FALSE for the elision-copy case.
+  // Sound, NOT a blanket ban: a marker the merged file LEGITIMATELY carries —
+  // because the ORIGINAL already contained it, or the caller's `new_string` itself
+  // introduces it (e.g. editing a Cursor-rules doc) — is fine. Only a marker count
+  // BEYOND what those two sources account for is the copied-sketch signature.
+  // (occurrences split-count is exact; the marker is a fixed nonempty literal.)
+  const legitMarkers =
+    occurrences(original, ELISION_MARKER) + occurrences(newString, ELISION_MARKER)
+  if (occurrences(merged, ELISION_MARKER) > legitMarkers) {
+    return "merged file still contains the elision marker (sketch copied, not expanded)"
+  }
   // R1 adversarial fix — a DELETION edit (new_string === "") makes the
   // `merged.includes(newString)` "did the change land" check vacuously true (every
   // string contains ""), so a hallucinated merge of arbitrary unrelated content
   // would pass. The merge rung has no trustworthy landed-signal for an empty
   // new_string, so refuse it and fall through to the typed mismatch (fail-closed).
   if (newString.length === 0) return "empty new_string has no verifiable landed signal"
-  if (!merged.includes(newString)) return "merged file does not contain new_string"
+  // R3 adversarial fix — `merged.includes(newString)` (presence ANYWHERE) is an
+  // UNSOUND landed-signal when new_string ALREADY occurs in the original
+  // (unrelated to this edit): a hallucinated merge that DROPS unrelated lines but
+  // keeps the pre-existing occurrence passes vacuously while the edit never
+  // landed. The rung only fires when old_string was ABSENT from the original
+  // (exact+fuzzy missed), so a real edit MUST strictly INCREASE the count of
+  // new_string (it adds the intended text where it was not before). No increase
+  // ⇒ no trustworthy proof the edit landed ⇒ fail-closed. Strict-greater is the
+  // only sound bound (no magic threshold; no-heuristics-only-validated).
+  if (occurrences(merged, newString) <= occurrences(original, newString)) {
+    return "merged file does not add new_string (no verifiable landed signal)"
+  }
   // The old anchor must be gone — UNLESS the replacement text itself embeds it
   // (append / wrap), in which case its presence is expected. Conservative: only
   // accept when the old anchor is absent OR the new text legitimately re-introduces it.

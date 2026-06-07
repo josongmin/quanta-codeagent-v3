@@ -399,6 +399,13 @@ W1(ratchet 2) → W2(테스트 4) → W3(M1). 각 항목 tsc0/biome0/red-on-inje
 | | M5 | dead compactor 삭제 | 저 |
 | | S2/S3 | `TokenBaselineBox` 클래스 / active-model SSOT (별도) | 중 |
 
-**비범위 확정**: D1 double-fork · D6 mixed-EOL 정밀화 · D8 empty-file sentinel · CRLF-`\r`-in-read(cosmetic) · §26.2/26.3(embedder messaging).
+**비범위 확정 → 최종 처리(jun-07)**:
+- **CRLF-`\r`-in-read**: ✅ FIXED (`read/index.ts` `split(/\r?\n/)` — CRLF줄 trailing `\r` 제거, 모델컨텍스트 오염 방지. 라인수/offset 불변).
+- **stale doc comment** (tool-result-evict가 삭제된 microcompact 참조): ✅ FIXED.
+- **D6 mixed-EOL 정밀화**: ⚖️ ACCEPTED-NOT-BUG — fuzzy 편집이 이미-mixed 파일을 dominant EOL로 정규화하는 건 broken 파일 *개선*이지 악화 아님(uniform 파일은 fuzz 5000-iter clean 증명). 어딧도 "claim imprecise"지 "bug" 아님. per-line terminator 보존 리팩터는 저-ROI라 미채택.
+- **D1 double-fork orphan**: 🔒 INHERENT-LIMIT — OS process-group 필요(Bun detached 미노출, macOS setsid 부재). `process-tree.ts` 주석에 정직 문서화. 모든 ppid-walk 도구(Cursor proclist 포함)의 공통 한계. 흔한 build/test/dev-server 트리는 reap됨. **고칠 수 없음.**
+- §26.2/26.3(embedder messaging) · D8 empty-file sentinel: 非D-set / cosmetic, 보류.
+
+**🏁 하드닝 종료**: D1-D8 + 8바퀴 ~16버그 + Phase-2 14항목(M1-M5/R-D3·D6/T-D1·D2·D3·D6/S1·S2·S3) + CRLF-read = 전부 FIXED. 유일 미해결 = D1 double-fork(OS 한계, 고칠수없음).
 
 **핵심 변화 vs draft**: ① M2=현존완화책 default 결정(W1 최우선) ② **M4 ANSI-strip 신규**(최명확 orphan) ③ M3 타깃 정정 ④ R-D3 시그니처 강화+S1 상위목표 ⑤ T-D1 결정적-fixture ⑥ SOTA++ S1/S2/S3.

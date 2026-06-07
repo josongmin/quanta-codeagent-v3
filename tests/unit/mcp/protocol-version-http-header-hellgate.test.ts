@@ -135,6 +135,74 @@ describe("HTTP header — offered on initialize, pinned thereafter", () => {
   })
 })
 
+describe("§4.c strict-server re-offer — header re-pins to the floor on the retry POST (real transport)", () => {
+  /** A strict server: the first `initialize` (offering the newest) is answered
+   *  with a JSON-RPC version-rejection (-32602) in a 200 body; the SECOND
+   *  `initialize` (the floor re-offer) succeeds. Records the header on every POST
+   *  so we can prove the retry POST carries the FLOOR, not the newest. */
+  // Strict-server initialize replies: 1st (newest offer) → version-rejection
+  // error; 2nd (floor re-offer) → accept echoing the floor.
+  const initReply = (attempt: number, id: number | undefined): HttpFetchResponse =>
+    attempt === 1
+      ? jsonResponse({
+          jsonrpc: "2.0",
+          id,
+          error: { code: -32602, message: "unsupported protocolVersion" },
+        })
+      : jsonResponse({
+          jsonrpc: "2.0",
+          id,
+          result: { protocolVersion: "2025-06-18", capabilities: { tools: {} } },
+        })
+
+  const strictReofferFetch = (log: Captured[]): HttpFetchFn => {
+    let initSeen = 0
+    const noStream: HttpFetchResponse = {
+      ok: false,
+      status: 405,
+      headers: { get: () => null },
+      text: async () => "",
+      body: null,
+    }
+    return async (_url, init) => {
+      const protocolHeader = init.headers["mcp-protocol-version"]
+      if (init.method !== "POST") return noStream
+      const payload = init.body ? (JSON.parse(init.body) as { method?: string; id?: number }) : {}
+      log.push({ method: init.method, protocolHeader, rpcMethod: payload.method })
+      if (payload.method === "initialize") {
+        initSeen += 1
+        return initReply(initSeen, payload.id)
+      }
+      if (payload.method === "tools/list") {
+        return jsonResponse({ jsonrpc: "2.0", id: payload.id, result: { tools: [] } })
+      }
+      return accepted()
+    }
+  }
+
+  test("retry initialize POST + every subsequent request carry the FLOOR header end-to-end", async () => {
+    const log: Captured[] = []
+    const transport = buildTransport(strictReofferFetch(log), LATEST_PROTOCOL_VERSION)
+    const client = new McpClient(httpCfg(), { transport })
+    await client.start()
+    await client.listTools()
+    await client.stop()
+
+    const inits = log.filter((l) => l.rpcMethod === "initialize")
+    expect(inits.length).toBe(2)
+    // First initialize POST offered (and carried in header) the newest.
+    expect(inits[0]?.protocolHeader).toBe(LATEST_PROTOCOL_VERSION)
+    // RETRY initialize POST must carry the FLOOR in its header (re-pinned by the
+    // §4.c setProtocolVersion before the retry POST) — the load-bearing assertion
+    // the scripted-double test could not prove on the real carrier.
+    expect(inits[1]?.protocolHeader).toBe("2025-06-18")
+    // And every subsequent request carries the pinned floor.
+    const list = log.find((l) => l.rpcMethod === "tools/list")
+    expect(list?.protocolHeader).toBe("2025-06-18")
+    expect(client.pinnedProtocolVersion()).toBe("2025-06-18")
+  })
+})
+
 describe("transport setter — direct contract", () => {
   test("setProtocolVersion re-pins the header value used by subsequent requests", () => {
     const transport = buildTransport(makeFetch("2025-06-18", []), LATEST_PROTOCOL_VERSION)

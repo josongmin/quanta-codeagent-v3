@@ -238,6 +238,16 @@ export type AgentEvent =
   | { type: "plan_created"; plan: PlanReadonlyMirror }
   | { type: "plan_updated"; delta: PlanDeltaReadonlyMirror; version: number }
   | { type: "plan_snapshot"; plan: PlanReadonlyMirror }
+  // gap-other-agent GAP 10 — per-output-item lifecycle (Codex
+  // ItemStarted/Updated/Completed parity). Additive + OPT-IN: emitted only when
+  // `QUANTA_ITEM_LIFECYCLE` is on (the loop wraps `stream.emit` with the
+  // item-lifecycle projector). Absent ⇒ never emitted, byte-identical — every
+  // existing consumer ignores unknown event types (no exhaustive `assertNever`
+  // over `AgentEvent`). Lets an SDK/UI show granular per-item progress
+  // (text run / tool call / thinking) WITHOUT waiting for the full turn.
+  | { type: "item_started"; itemId: string; itemKind: "text" | "tool" | "thinking"; index: number }
+  | { type: "item_updated"; itemId: string; delta: string }
+  | { type: "item_completed"; itemId: string }
   // Plan-mode cluster (P3): user-input checkpoint. `plan_user_input_requested`
   // fires when the plan flow pauses to ask a user a clarifying question
   // (e.g., "approve this plan?"); `plan_user_input_resolved` fires when the

@@ -1,0 +1,73 @@
+id: circumvention-detector
+title: jun-7 tool-switch circumvention detector (denied-effect memory, advisory-first)
+section: 3
+subsystem: Permission auto-mode — same-effect-via-different-tool bypass defense
+order: 82
+maturity: L3
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: integrated
+config_refs:
+  env: [QUANTA_CIRCUMVENT_DETECT]
+owners: ["@songmin"]
+labels: [surface:cli, category:permission, security, security-touched, default-off, absorbed:claude]
+depends_on: [auto-mode-classifier, deny-reason-surfacing]
+purpose: |
+  실제 AFK 바이패스를 닫음: write-to-X 가 tool A(`Edit`/`Write`/`MultiEdit`)로
+  SOFT-deny 됐을 때, 조작된 에이전트가 동일 EFFECT 를 다른 tool B(`bash` `echo > X`/
+  `sed -i X`/`cat > X`/heredoc/`python -c`)로 달성해 통과하는 redirect-around-deny.
+  quanta 는 각 action 을 독립 평가(`EVALUATE ON OWN MERITS`)하고 denied-effect 기억이
+  없어 이 우회가 invisible 했음. `CircumventionTracker`(`AutoModeClassifier` denial
+  state 의 sibling)가 soft-denied WRITE effect signature(`{kind:"write", path:
+  canonical-abs}`)를 세션-스코프로 기억. 후속 action 이 SAME canonical path 를 DIFFERENT
+  tool 로 쓰면 circumvention signal. 설계 posture(티켓 §5, 핵심제약): 의도적으로
+  CONSERVATIVE+ADVISORY-FIRST — FALSE-NEGATIVE 를 FALSE-POSITIVE 보다 선호. (1)write-only
+  (2)same-canonical-path (3)different-tool 셋 다 만족시만 발화; computed/`$VAR`/base64
+  경로는 accepted false-negative. 해소: ADVISORY(default) = verbatim circumvention
+  taxonomy line(Claude CLI 2.1.150)+advisory 를 다음 분류기 prompt 에 thread → LLM 이
+  결정; ESCALATE(strict posture) = forced HITL `ask`. NEVER auto-allow, NEVER
+  auto-hard-block — human 이 FP-tolerant resolver. TTL(=DENIAL_LIMITS.maxTotal, 기존
+  validated 상수 — 신규 magic-number 아님)+clear-on-allow 로 stale deny 세션 오염 방지.
+  HARD_DENY 는 terminal — tracker 미경유. write-effect 추출은 `extractShellCommand`
+  재사용 위 closed v1 패턴셋(`>`/`>>`/`tee`/`sed -i`/`cp`/`mv`/`cat >`/heredoc/`python -c`).
+  DEFAULT-OFF(`QUANTA_CIRCUMVENT_DETECT` strict `=== "1"`): 부재 ⇒ tracker 미생성,
+  signature 0건, auto-mode gate byte-identical.
+evidence:
+  code:
+    - src/permission/circumvention.ts
+    - src/permission/classifier.ts
+    - src/permission/policy.ts
+    - src/agent/admissibility-gate.ts
+    - src/shared/runtime-config.ts
+  adrs: ["docs/tickets/misc-jun-7/04-auto-mode-rule-overlay-circumvention.md"]
+  tests:
+    unit:
+      - tests/unit/circumvention-detector-hellgate.test.ts
+      - tests/unit/auto-mode-circumvention-wire-hellgate.test.ts
+      - tests/unit/auto-mode-rules-gate-off-byte-identity-hellgate.test.ts
+      - tests/unit/circumvention-fd-redirect-hellgate.test.ts
+      - tests/unit/circumvention-dd-of-hellgate.test.ts
+      - tests/unit/circumvention-noclobber-redirect-hellgate.test.ts
+      - tests/unit/circumvention-readonly-noneffect-hellgate.test.ts
+      - tests/unit/auto-mode-circumvention-advisory-only-live-hellgate.test.ts
+      - tests/unit/circumvention-multipath-decoy-hellgate.test.ts
+      - tests/unit/circumvention-cp-target-dir-hellgate.test.ts
+      - tests/unit/circumvention-symlink-symmetry-hellgate.test.ts
+      - tests/unit/auto-mode-rule-overlay-circumvention-e2e-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_CIRCUMVENT_DETECT
+    default: 'undefined'
+    purpose: Strict opt-in (`=== "1"`). OFF ⇒ `CircumventionTracker` 미생성, effect signature 미기록, gate 가 tracker 미consult — auto-mode byte-identical. ON(+gate 에 tracker 배선) ⇒ soft-denied write effect 기억 → same-path-different-tool 후속 write 가 advisory(default) 또는 forced-`ask`(escalate posture) — 절대 auto-deny 아님.
+deliberate_hold: null
+notes: |
+  설계 provenance: 티켓 `docs/tickets/misc-jun-7/04-auto-mode-rule-overlay-circumvention.md`
+  §3.2/§4.b/§5. ADR(≥0497) 미발행 — 티켓이 authoritative design. v1 granularity =
+  path-equality only(티켓 Open Question §6.1, prefix/content-class 매칭은 데이터측정
+  전까지 보류 — no-heuristics rule). Posture default = advisory(§6.3); forced-`ask` 는
+  stricter opt-in. Network-exfil circumvention 은 out-of-scope(§6.5, 기존 exfil-scouting
+  rail 이 network 방향 담당). 정직한 갭: 충분히 영리한 우회(computed path/encoding)는
+  v1 통과 — aggressive equivalence 가 legit agent work 을 깨는 게 더 나쁜 실패라는 trade.

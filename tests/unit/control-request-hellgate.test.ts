@@ -120,7 +120,7 @@ describe("control-request — no-throw / adversarial", () => {
 
 describe("control-request — exhaustive coverage + gate", () => {
   test("ALL_CONTROL_REQUEST_KINDS matches the union", () => {
-    expect([...ALL_CONTROL_REQUEST_KINDS].sort()).toEqual(
+    expect(([...ALL_CONTROL_REQUEST_KINDS] as string[]).sort()).toEqual(
       ["get_context_usage", "set_model", "set_permission_mode", "set_thinking"].sort(),
     )
   })

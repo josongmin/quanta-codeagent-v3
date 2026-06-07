@@ -7,11 +7,11 @@ import type { Message } from "@/llm"
  * of OLD tool_result blocks (keeping the last `keepRecent` intact), reclaiming
  * context for ZERO LLM cost and ZERO loss of conversational reasoning.
  *
- * This is a DISTINCT slice from `src/agent/microcompact/` (ADR-0409), which
- * drops whole MESSAGES (no orphan guard, no disk persistence, unwired). Here we
- * clear the CONTENT of a tool_result in place and KEEP the block, so every
- * `tool_use`↔`tool_result` pairing is structurally preserved — no boundary
- * walk, no orphan set (RFC §3.3).
+ * Unlike a whole-MESSAGE drop (a naive FIFO `createMicroCompactor` once lived in
+ * `src/agent/microcompact/`, deleted jun-7 Phase-2 M5 as dead/unwired/orphan-
+ * unaware), here we clear the CONTENT of a tool_result IN PLACE and KEEP the
+ * block, so every `tool_use`↔`tool_result` pairing is structurally preserved —
+ * no boundary walk, no orphan set (RFC §3.3). This is the ONLY live tier-1 path.
  */
 
 /** The literal placeholder a cleared tool_result body is rewritten to. The

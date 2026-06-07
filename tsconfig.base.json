@@ -90,6 +90,8 @@
       "@/plugin-isolation/*": ["./src/plugin-isolation/*"],
       "@/scheduler": ["./src/scheduler/index.ts"],
       "@/scheduler/*": ["./src/scheduler/*"],
+      "@/workflow": ["./src/workflow/index.ts"],
+      "@/workflow/*": ["./src/workflow/*"],
       "@/side-agent": ["./src/side-agent/index.ts"],
       "@/side-agent/*": ["./src/side-agent/*"],
       "@/apps/*": ["./src/apps/*"],

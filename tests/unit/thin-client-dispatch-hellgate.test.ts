@@ -30,7 +30,7 @@ const off: Record<string, string | undefined> = {}
 
 const desc = (route?: DispatchDescriptor["thinClientDispatch"]): DispatchDescriptor => ({
   name: "usage",
-  thinClientDispatch: route,
+  ...(route !== undefined ? { thinClientDispatch: route } : {}),
 })
 
 describe("thin-client-dispatch — default-OFF byte-identity", () => {

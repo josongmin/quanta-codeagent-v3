@@ -47,7 +47,16 @@ const asObject = (v: unknown): Record<string, unknown> | undefined =>
 
 const asStringArray = (v: unknown): readonly string[] | undefined => {
   if (!Array.isArray(v)) return undefined
-  const out = v.filter((x): x is string => typeof x === "string" && x.length > 0)
+  // round-4 F7: parse-time TRIM parity with the hook-command parse
+  // (`ho.command.trim().length > 0`, loader.ts:81). A whitespace-only
+  // permission rule (`allow: ["  "]`) carries NO meaning today, but if a future
+  // permission matcher trims-then-prefix-matches, a `"  "` rule could collapse
+  // into an unexpected wildcard. Dropping whitespace-only rules at parse — the
+  // SAME normalization the hook path already applies — keeps a whitespace rule
+  // from ever becoming load-bearing. (Non-empty rules are carried verbatim; we
+  // filter, we do not rewrite, so a legitimately-spaced rule like `Bash(ls a)`
+  // is unaffected — only an ALL-whitespace token is dropped.)
+  const out = v.filter((x): x is string => typeof x === "string" && x.trim().length > 0)
   return out.length > 0 ? out : undefined
 }
 
@@ -64,7 +73,11 @@ const parseHookEvents = (
 ): Readonly<Record<string, readonly HookGroupSetting[]>> | undefined => {
   const events = asObject(raw)
   if (events === undefined) return undefined
-  const out: Record<string, HookGroupSetting[]> = {}
+  // NULL-PROTOTYPE accumulator (round-3 F6 defense-in-depth): an event name of
+  // `__proto__` must be a safe own-key, never a reach into Object.prototype
+  // (with a plain `{}`, `out["__proto__"] ?? []` is the prototype object → no
+  // `.push` → TypeError; and `out["__proto__"] = …` mutates the prototype).
+  const out: Record<string, HookGroupSetting[]> = Object.create(null)
   for (const [event, rawGroups] of Object.entries(events)) {
     if (!Array.isArray(rawGroups)) continue
     for (const rawGroup of rawGroups) {

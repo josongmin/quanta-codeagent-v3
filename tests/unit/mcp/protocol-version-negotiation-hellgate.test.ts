@@ -322,11 +322,25 @@ describe("§7 SSOT single-source ratchet — the permanent triplication guard", 
       "src/mcp/isolated-client.ts",
       "src/mcp/transports/http-sse.ts",
     ]
+    // R2 hardening — the assignment-only regex (`=\s*"<ver>"`) let an
+    // array-literal (`["2025-06-18", …]`) or a quoted literal used as a call
+    // argument re-introduce the triplication. Forbid ANY *quoted* version-string
+    // literal in a consumer file (the SSOT is the only place a version string is
+    // quoted). Doc-comments mention versions UNQUOTED (`spec 2025-06-18`), so the
+    // quote-anchored guard catches a real re-divergence without false-tripping on
+    // prose. Covers `'…'`, `"…"`, and template `` `…` `` forms.
+    const quotedVersionLiteral = (ver: string): RegExp =>
+      new RegExp(`["'\`]${ver}["'\`]`)
     for (const file of offenders) {
       const src = readSrc(file)
       // No file may assign a protocol-version string to a const/let/var.
       expect(src).not.toMatch(/=\s*"2025-06-18"/)
       expect(src).not.toMatch(/=\s*"2025-11-25"/)
+      // No file may carry ANY quoted version-string literal (array element, call
+      // arg, template) for ANY member of the SSOT set — that is the SSOT's job.
+      for (const ver of SUPPORTED_PROTOCOL_VERSIONS) {
+        expect(src).not.toMatch(quotedVersionLiteral(ver))
+      }
     }
     // The SSOT module DOES carry them (proof the ratchet is anchored on a real
     // source, not vacuously true).

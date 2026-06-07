@@ -367,6 +367,14 @@ export interface SessionBootstrapDeps {
   /** Build the guardian review adapter. Replaces direct import of
    *  `@/agent/tier1/reviewer-subagent#createSubagentBackedGuardianReview`. */
   readonly createSubagentBackedGuardianReview: CreateGuardianReviewFactory
+  /** jun-7-misc 03 (ADR-0497) — build the guardian per-action ASSESSOR adapter.
+   *  Sibling of {@link createSubagentBackedGuardianReview}; emits the typed
+   *  `ActionAssessment` the composition root wires into `ReviewerPort.guardianAssess`
+   *  ONLY when the `QUANTA_GUARDIAN_ASSESSOR` knob is on. Replaces a direct import
+   *  of `@/agent/tier1/reviewer-subagent#createSubagentBackedGuardianAssess`,
+   *  keeping `src/apps/cli/repl/**` free of the reviewer-subagent module (ADR-0299
+   *  §3). The opts shape is identical to the review factory. */
+  readonly createSubagentBackedGuardianAssess: CreateGuardianAssessFactory
   /** Build the `/mcp` surface descriptor. Replaces direct import of
    *  `apps/cli/repl/mcp-surface-wire#buildMcpSurfaceInfo`. */
   readonly buildMcpSurfaceInfo: BuildMcpSurfaceInfoFactory
@@ -485,4 +493,9 @@ export interface SessionBootstrapResult {
    *  reference to the reviewer subagent module. */
   readonly materializeReviewerAgent: MaterializeReviewerAgentFactory
   readonly createSubagentBackedGuardianReview: CreateGuardianReviewFactory
+  /** jun-7-misc 03 (ADR-0497) — re-exposed guardian per-action ASSESSOR factory,
+   *  threaded the same way as {@link createSubagentBackedGuardianReview} so the
+   *  CLI surface can build the assessor servicer without re-importing the
+   *  reviewer-subagent module (ADR-0299 §3). */
+  readonly createSubagentBackedGuardianAssess: CreateGuardianAssessFactory
 }

@@ -74,11 +74,32 @@ export class McpError extends QuantaError {
   /** R4 — the HTTP status this error carried, when the transport surfaced one
    *  structurally (`error.data.httpStatus`). `undefined` otherwise. */
   readonly httpStatus?: number
-  constructor(message: string, options?: { cause?: unknown; httpStatus?: number }) {
+  /** Ticket misc-jun-7/01 R2 — the JSON-RPC error `code` this failure carried,
+   *  when it originated from a server `error` envelope (copied by
+   *  {@link McpClient.resolveResponse}). `undefined` for a non-protocol failure
+   *  (timeout, connection refusal, transport synth) — the absence is itself the
+   *  signal that the §4.c re-offer must NOT fire (a re-offer is scoped to a
+   *  genuine version-REJECTION code, not any McpError). */
+  readonly jsonRpcCode?: number
+  constructor(
+    message: string,
+    options?: { cause?: unknown; httpStatus?: number; jsonRpcCode?: number },
+  ) {
     super("mcp", message, options)
     if (options?.httpStatus !== undefined) this.httpStatus = options.httpStatus
+    if (options?.jsonRpcCode !== undefined) this.jsonRpcCode = options.jsonRpcCode
   }
 }
+
+/** Ticket misc-jun-7/01 R2 — the JSON-RPC error codes a strict server uses to
+ *  REJECT an unspeakable `initialize` offer (a version-rejection), per JSON-RPC
+ *  2.0 §5.1: `InvalidParams (-32602)` (the ticket §4.c canonical) and
+ *  `InvalidRequest (-32600)`. A re-offer at the floor is scoped to EXACTLY these
+ *  — a timeout / connection refusal (no code) or a transient server fault
+ *  (`InternalError -32603`, app-defined `-32000`) is NOT a version rejection and
+ *  must propagate WITHOUT a downgrade probe (else a transient hiccup silently
+ *  pins the OLDER protocol — a capability loss). */
+const VERSION_REJECTION_CODES: ReadonlySet<number> = new Set([-32602, -32600])
 
 interface PendingRequest {
   resolve: (value: unknown) => void
@@ -522,12 +543,24 @@ export class McpClient {
     try {
       return { result: await this.sendInitialize(offer), offered: offer }
     } catch (err) {
-      // Re-offer ONLY when the offered version was newer than the floor (so the
-      // floor is a real downgrade) and the failure is a protocol error (any
-      // McpError thrown by the request core — a strict server's -32602, a
-      // synthesized transport error, etc.). A floor-level offer has nowhere to
-      // downgrade to, so it propagates.
-      if (offer === PROTOCOL_DOWNGRADE_FLOOR || !(err instanceof McpError)) throw err
+      // Ticket misc-jun-7/01 R2 — re-offer ONLY when (a) the offered version was
+      // newer than the floor (so the floor is a real downgrade) AND (b) the
+      // failure is a genuine VERSION-REJECTION: a server JSON-RPC `error` whose
+      // code is in {@link VERSION_REJECTION_CODES} (-32602 / -32600), the §4.c
+      // canonical strict-reject shape.
+      //
+      // It must NOT fire on any other McpError. A request TIMEOUT, a
+      // connection-level transport failure, or a transient server fault
+      // (`InternalError -32603`, an app-defined `-32000` transport synth) carries
+      // NO version-rejection code — re-offering the floor on those would (1)
+      // waste a round-trip and (2) WORSE, silently pin the OLDER protocol if the
+      // floor then succeeds, masking a transient fault as a permanent version
+      // incompatibility (a capability loss). Those propagate untouched.
+      const isVersionRejection =
+        err instanceof McpError &&
+        err.jsonRpcCode !== undefined &&
+        VERSION_REJECTION_CODES.has(err.jsonRpcCode)
+      if (offer === PROTOCOL_DOWNGRADE_FLOOR || !isVersionRejection) throw err
       // Re-pin the transport header to the floor for the re-offer POST so the
       // header and body agree on the retry.
       transport.setProtocolVersion?.(PROTOCOL_DOWNGRADE_FLOOR)
@@ -839,11 +872,22 @@ export class McpClient {
     this.failAllPending(new McpError(`mcp server "${this.config.name}" stopped`))
     this.unsubscribeMessage?.()
     this.unsubscribeMessage = null
+    // Ticket misc-jun-7/01 R4 — UNSUBSCRIBE the carrier-exit handler BEFORE
+    // `close()`. A real carrier fires its exit handler FROM `close()` (HTTP's
+    // `http-sse.ts close()` → `fireExit` synchronously; stdio's `proc.exited`).
+    // That routes to `onTransportExit()`, which fans a `"transport exit"` out to
+    // EXTERNAL subscribers (the ADR-0435 auto-restart supervisor). A DELIBERATE
+    // `stop()` (incl. the R1 fail-closed teardown inside `start()` for an
+    // unsupported negotiated version) must NOT masquerade as a crash, or the
+    // supervisor crash-loop-restarts a server that will fail-close again forever.
+    // Dropping the subscription first makes the client-initiated close silent on
+    // the supervisor channel; an UNSOLICITED carrier death (server crash) still
+    // fans out, because that path never goes through `stop()`.
+    this.unsubscribeExit?.()
+    this.unsubscribeExit = null
     // `transport` is null only if `stop()` runs before `start()` materialized
     // the deferred OAuth carrier — nothing to close in that case.
     await this.transport?.close()
-    this.unsubscribeExit?.()
-    this.unsubscribeExit = null
   }
 
   // --- internals -----------------------------------------------------------
@@ -1014,11 +1058,15 @@ export class McpClient {
     if (!entry) return
     if (msg.error) {
       const httpStatus = httpStatusOf(msg.error.data)
+      // Ticket misc-jun-7/01 R2 — carry the JSON-RPC code structurally so the
+      // §4.c re-offer can scope itself to a genuine version-rejection rather than
+      // firing on any McpError (timeout / transient fault).
+      const code = typeof msg.error.code === "number" ? msg.error.code : undefined
       entry.reject(
-        new McpError(
-          `mcp error ${msg.error.code}: ${msg.error.message}`,
-          httpStatus !== undefined ? { httpStatus } : undefined,
-        ),
+        new McpError(`mcp error ${msg.error.code}: ${msg.error.message}`, {
+          ...(httpStatus !== undefined ? { httpStatus } : {}),
+          ...(code !== undefined ? { jsonRpcCode: code } : {}),
+        }),
       )
       return
     }

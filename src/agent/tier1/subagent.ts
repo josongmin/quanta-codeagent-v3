@@ -14,6 +14,7 @@
 
 import { resolveJailed } from "@/storage"
 import type { Tool } from "@/tool"
+import { createRunWorkflowTool } from "@/tool/workflow/run-workflow-tool"
 import {
   createAgentTool,
   createSubagent6Tools,
@@ -25,6 +26,7 @@ import {
 } from "../../subagent"
 import { createSubagentRunner } from "../subagent-runner"
 import type { AgentConfig } from "../types"
+import { subagentRunnerToAgentRunPort } from "../workflow-agent-adapter"
 
 /** Materialized subagent block. The three tools share ONE `TaskRegistry`
  *  instance — both `agentTool.registry` and the returned `taskRegistry` point
@@ -67,6 +69,19 @@ const toTaskOutputPolicy = (p: WaitTimeoutPolicy): TaskOutputTimeoutPolicy => ({
   maxMs: p.maxMs,
   defaultMs: p.defaultMs,
 })
+
+/** §25.1 — the `run_workflow` tool as a spread-ready array (`[]` when off).
+ *  Reuses THIS block's `runner` via the workflow adapter so each workflow
+ *  `agent` step forks a child exactly like the trio / 6-tool do (the same
+ *  runner enforces `maxDepth`). Extracted so `buildSubagentBlock` stays under
+ *  the cognitive-complexity cap. Default-OFF ⇒ `[]` ⇒ byte-identical tool menu. */
+const workflowTools = (
+  enabled: boolean,
+  runner: ReturnType<typeof createSubagentRunner>,
+): Tool[] =>
+  enabled
+    ? [createRunWorkflowTool({ agentRun: subagentRunnerToAgentRunPort(runner, { depth: 1 }) })]
+    : []
 
 /** Build the subagent block from `config.subagent`. Returns `undefined` when
  *  the block is absent so the composer can skip it. */
@@ -115,7 +130,14 @@ export const buildSubagentBlock = (config: AgentConfig): SubagentBlock | undefin
     wtp !== undefined
       ? createTaskOutputTool(reg, toTaskOutputPolicy(wtp))
       : createTaskOutputTool(reg)
-  const extraTools: Tool[] = [agentTool, taskOutputTool, createTaskStopTool(reg)]
+  // §25.1 — `run_workflow` spread (default-OFF; see {@link workflowTools}). Built
+  // as a spread so `buildSubagentBlock` stays under the cognitive-complexity cap.
+  const extraTools: Tool[] = [
+    agentTool,
+    taskOutputTool,
+    createTaskStopTool(reg),
+    ...workflowTools(config.subagent.enableWorkflow === true, runner),
+  ]
 
   // ADR-0041 LIVE assembly — when `enable6Tools` is set, build the six-tool
   // router AND keep the trio (COEXIST — see agent-tools-6.ts header + ADR-0041

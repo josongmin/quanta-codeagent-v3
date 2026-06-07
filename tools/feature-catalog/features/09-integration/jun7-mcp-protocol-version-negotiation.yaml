@@ -60,7 +60,7 @@ evidence:
     - src/mcp/transports/stdio.ts
     - src/mcp/transports/port.ts
     - src/shared/runtime-config.ts
-  adrs: []
+  adrs: ["docs/decisions/0501-mcp-protocol-version-negotiation.md"]
   tests:
     unit:
       - tests/unit/mcp/protocol-version-negotiation-hellgate.test.ts
@@ -68,6 +68,13 @@ evidence:
       - tests/unit/mcp/protocol-version-isolated-hellgate.test.ts
       - tests/unit/mcp/protocol-version-failclosed-teardown-hellgate.test.ts
       - tests/unit/mcp/protocol-version-edge-strings-hellgate.test.ts
+      - tests/unit/mcp/protocol-version-reoffer-scope-hellgate.test.ts
+      - tests/unit/mcp/protocol-version-code-shape-hellgate.test.ts
+      - tests/unit/mcp/protocol-version-reoffer-pin-hellgate.test.ts
+      - tests/unit/mcp/protocol-version-failclosed-exit-signal-hellgate.test.ts
+      - tests/unit/mcp/protocol-version-isolated-exit-signal-hellgate.test.ts
+      - tests/unit/mcp/protocol-version-reoffer-concurrency-hellgate.test.ts
+      - tests/unit/mcp/protocol-version-e2e-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -77,10 +84,11 @@ knobs:
     purpose: pin the MAX offered protocol version (e.g. back to 2025-06-18 for a peer that mis-handles the bump). Absent ⇒ offer the SSOT newest. Unsupported value ⇒ conservative fallback to newest (never an unspeakable version on the wire).
 deliberate_hold: null
 notes: |
-  jun-7-misc 01. The candidate ADR (ticket §) was NOT landed — docs/decisions/ is
-  outside this lane's owned file set and 0497+ are already allocated by concurrent
-  lanes; `adrs: []` until an ADR number is reconciled centrally. The
-  `QUANTA_MCP_PROTOCOL_MAX` runtime-config field was added by the Knobs phase
+  jun-7-misc 01. ADR landed at docs/decisions/0501-mcp-protocol-version-negotiation.md
+  by the reconcile pass (0497 guardian, 0498 central-config, 0499 manifest-codex,
+  0500 model-based-fast-apply were allocated by concurrent lanes; the duplicated
+  0498 fast-apply was renumbered to 0500, so the next free slot for MCP was 0501).
+  The `QUANTA_MCP_PROTOCOL_MAX` runtime-config field was added by the Knobs phase
   (consumed via runtimeConfig().mcpProtocolMax). Open-question decisions
   (conservative): adopt version-negotiation ALONE (no new capability auto-enable);
   global knob v1 (no speculative per-server override); fail-closed on an

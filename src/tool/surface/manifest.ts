@@ -134,6 +134,14 @@ export const BASE_TOOL_NAMES: readonly string[] = [
 /** The GATED tools — the scattered-gate axis this SSOT exists to centralize. */
 export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
   {
+    name: "run_workflow",
+    origin: "@/tool/workflow/run-workflow-tool",
+    gate: { kind: "config-slot", slot: "subagent.enableWorkflow", env: "QUANTA_WORKFLOW" },
+    default: {},
+    risk: "spawns-subagent",
+    note: "§25.1 LLM-authored DECLARATIVE multi-agent workflow: a JSON `WorkflowSpec` (phases · steps seq/parallel · forEach fan-out · `{{ref}}` templates · typed outputSchema) compiled + driven to completion; each step = one subagent spawn. Rides the tier-1 subagent block (reuses its runner via the workflow adapter) so it needs `subagent` enabled AND QUANTA_WORKFLOW. Default-OFF every surface (opt-in) — it fans out a tree of children.",
+  },
+  {
     name: "apply_patch_structured",
     origin: "@/tool/apply-patch-structured-tool",
     gate: {
@@ -472,7 +480,7 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     default: { cli: "on" },
     risk: "spawns-subagent",
     adr: "0041",
-    note: "Deliver a message to an existing child subagent AND trigger/interrupt its turn (the agent↔agent ACTIVE-call companion to the passive subagent_send_message mailbox). Wired via optional-ports `wireOptionalAgentPorts` (which also mints the TurnWakeRegistry + mailbox substrate) under a STRICT `QUANTA_SUBAGENT_FOLLOWUP=on` gate — NOT the `=== \"1\"` SSOT-seed convention, so the env is INTENTIONALLY omitted from this gate record (apps/cli seeds it to \"on\" directly). CLI default-ON; bench/web opt-in.",
+    note: 'Deliver a message to an existing child subagent AND trigger/interrupt its turn (the agent↔agent ACTIVE-call companion to the passive subagent_send_message mailbox). Wired via optional-ports `wireOptionalAgentPorts` (which also mints the TurnWakeRegistry + mailbox substrate) under a STRICT `QUANTA_SUBAGENT_FOLLOWUP=on` gate — NOT the `=== "1"` SSOT-seed convention, so the env is INTENTIONALLY omitted from this gate record (apps/cli seeds it to "on" directly). CLI default-ON; bench/web opt-in.',
   },
   {
     name: "list_mcp_tasks",
@@ -563,6 +571,19 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     risk: "meta",
     adr: "0494",
     note: "Generalized structured elicitation (ADR-0494) — the model puts a STRUCTURED question to the user mid-task (free-text / yes-no / number / integer / single- or multi-select) and gets a typed answer back in-band, GENERALIZING the binary host onConfirm (allow/deny). Routed to a host AskUserPort that mirrors the @/mcp/elicitation request vocabulary, so ONE host prompter serves both the MCP elicitation surface and this agent-callable tool. risk:meta (a pure human touchpoint — no FS/shell/tool side effects; isReadOnly, hitlTier:none). Opt-in EVERYWHERE (QUANTA_ASK_USER): a new capability whose prompter must be wired, so it never auto-seeds; a headless host wires a port that returns typed `headless-denied` so the agent never blocks. Duck-typed port keeps @/tool fence-clean (no @/mcp import in the leaf).",
+  },
+  {
+    name: "reflect",
+    origin: "@/tool/reflect (via DefaultToolPorts.reflect)",
+    gate: {
+      kind: "config-slot",
+      slot: "DefaultToolPorts.reflect",
+      env: "QUANTA_REFLECT",
+    },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "meta",
+    adr: "0504",
+    note: "Mid-turn self-correction (gap-other-agent GAP 11, Cursor reflectToolCall parity) — when the agent's actions are not working it calls `reflect` with its situation + the DIFFERENT plan it proposes (next_steps REQUIRED — the forcing function) and gets a critique back in-band. EXPENSIVE: a per-session call quota is enforced. Pure interaction (isReadOnly, hitlTier:none, no shell extractor); the reflection itself rides an LLM-backed ReflectPort the composition root wires (like advisor) ONLY when QUANTA_REFLECT is on. Opt-in EVERYWHERE: a new capability whose backend must be wired, so it never auto-seeds; absent port ⇒ tool absent, byte-identical. Distinct from advisor (advisor = second opinion on a question; reflect = self-critique of the agent's own trajectory with a committed plan).",
   },
   {
     name: "file_history_rewind",

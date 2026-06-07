@@ -285,11 +285,13 @@ const buildPerCallWrap =
  *  match ASCII escape/control ranges), and idempotent (a cleaned body has no
  *  remaining match). `new RegExp(string)` avoids biome's
  *  `noControlCharactersInRegex` trip on the literal form. */
+const ESC = String.fromCharCode(0x1b)
+const BEL = String.fromCharCode(0x07)
 const ANSI_OSC_DCS_RE = new RegExp(
-  "\\u001b\\][\\s\\S]*?(?:\\u0007|\\u001b\\\\)|\\u001b[PX^_][\\s\\S]*?\\u001b\\\\",
+  `${ESC}\\][\\s\\S]*?(?:${BEL}|${ESC}\\\\)|${ESC}[PX^_][\\s\\S]*?${ESC}\\\\`,
   "g",
 )
-const ANSI_CSI_RE = new RegExp("\\u001b\\[[0-9;?]*[ -/]*[@-~]", "g")
+const ANSI_CSI_RE = new RegExp(`${ESC}\\[[0-9;?]*[ -/]*[@-~]`, "g")
 // C0 controls EXCEPT `\t` (U+0009) and `\n` (U+000A), plus DEL (U+007F). `\r`
 // (U+000D) IS stripped — a bare CR rewinds the line and is pure terminal noise
 // to the model; the visible text after it survives.
@@ -362,7 +364,9 @@ const buildBackgroundCompletedResult = (snap: {
   stderr: string
   exitCode: number | null
 }): ToolEvent => {
-  const body = stripModelControlChars([snap.stdout, snap.stderr].filter(Boolean).join("\n")).trimEnd()
+  const body = stripModelControlChars(
+    [snap.stdout, snap.stderr].filter(Boolean).join("\n"),
+  ).trimEnd()
   const exit = snap.exitCode ?? -1
   const isKilled = snap.status === "killed" || snap.status === "aborted"
   const status = isKilled ? "killed" : `exit ${exit}`

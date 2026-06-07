@@ -1,10 +1,14 @@
 import { createEffortClassifier } from "@/agent/effort-classifier"
-import { createFastApplyFallback } from "@/agent/fast-apply-fallback"
+import {
+  type ApplyRoleResolverLike,
+  createFastApplyFallback,
+  createFastApplyMerge,
+} from "@/agent/fast-apply-fallback"
 import { dispatchSideConversation } from "@/agent/side-conversation"
 import { createSubagentMailbox } from "@/agent/subagent-mailbox"
 import type { LLMPort } from "@/llm"
 import { defaultRoleModelResolver, type RoleModelResolver } from "@/llm/role-model-override"
-import { gateOn, gateOnStrict, logger } from "@/shared"
+import { gateOn, gateOnStrict, logger, runtimeConfig } from "@/shared"
 import { AgentMetaRegistry, TurnWakeRegistry } from "@/subagent"
 import type { CloseoutCritic, CloseoutCriticVerdict } from "./closeout-critic"
 import { buildCodeCellDispatchPort } from "./codemode-wire"
@@ -48,6 +52,7 @@ type OptionalPortBase = Pick<
   | "signal"
   | "modelCandidates"
   | "fastApplyFallback"
+  | "fastApplyMerge"
   | "effortClassifier"
   | "roleModelResolver"
   | "sessionId"
@@ -120,6 +125,18 @@ export const wireOptionalAgentPorts = <T extends OptionalPortBase>(
       }
     }
   }
+
+  // jun-7-misc 06 (ADR ≥0497) — model-based fast-apply MERGE rung. STRICT gate
+  // (`runtimeConfig().fastApplyMerge`, `QUANTA_FAST_APPLY_MERGE === "1"`) — NOT
+  // the loose `=on` vocabulary the other gates use — so the composition root
+  // flips EXACTLY the same knob the consumer (`edit` tool) reads and the
+  // runtime-config strict-fold tests already pin. BOTH the strict gate AND a
+  // configured apply-model (`runtimeConfig().fastApplyModel`) are required: the
+  // apply call must run against the operator-chosen cheap model, never the main
+  // chat model (which would defeat the cost win), so an empty/absent model id ⇒
+  // NO port (byte-identical default-OFF). Caller-override-precedence (ADR-0332):
+  // a pre-set `fastApplyMerge` is preserved verbatim.
+  next = wireFastApplyMerge(next)
 
   if (next.effortClassifier === undefined && envGateOn(env, QUANTA_EFFORT_AUTO_ENV)) {
     next = {
@@ -427,6 +444,80 @@ const wireSubagentToolGates = <T extends OptionalPortBase>(base: T, env: Optiona
   // wakers into) + DELIVERY (mailbox). Both required for `followup_task` to be
   // built AND to wake a child (not `no_waker`). Caller-override-precedence.
   return wantFollowup ? wireFollowupDeps(next) : next
+}
+
+/**
+ * jun-7-misc 06 (ADR ≥0497) — composition-root wire for the model-based
+ * fast-apply MERGE port. Mirrors the {@link createFastApplyFallback} block's
+ * dep-acquisition (role resolver + `dispatchSideConversation` adapter) but for
+ * the MERGE direction (`createFastApplyMerge`), and gates STRICT via
+ * `runtimeConfig().fastApplyMerge` (`QUANTA_FAST_APPLY_MERGE === "1"`).
+ *
+ * Deps obtained at the comp-root (same seams as the fallback block):
+ *   - `roleResolver`: the LIVE `RoleModelResolver` (or a fresh
+ *     `defaultRoleModelResolver()`), ADAPTED into the `"apply"`-role
+ *     {@link ApplyRoleResolverLike} shape. `"apply"` is not a member of the
+ *     resolver's `Role` union, so the adapter forwards to `resolve` (which
+ *     falls through to the supplied `applyModel` for any unconfigured role) —
+ *     i.e. the apply call runs against the operator-set model id, NEVER the
+ *     main chat model.
+ *   - `sideConversation`: the SAME `dispatchSideConversation` adapter the
+ *     fallback uses (host LLM port resolved per-request, read-only tools, the
+ *     turn's signal), closing over the parent session id.
+ *   - `applyModel`: `runtimeConfig().fastApplyModel` (`QUANTA_FAST_APPLY_MODEL`).
+ *
+ * Default-OFF byte-identical (RFC §1.2): gate unset / model absent / model
+ * empty ⇒ `base` returned UNCHANGED (no port, no allocation). A pre-set
+ * `fastApplyMerge` is preserved verbatim (caller-override-precedence).
+ */
+const wireFastApplyMerge = <T extends OptionalPortBase>(base: T): T => {
+  if (!runtimeConfig().fastApplyMerge) return base
+  if (base.fastApplyMerge !== undefined) return base
+  const applyModel = runtimeConfig().fastApplyModel
+  // BOTH the strict gate AND a configured apply model are required — absent /
+  // empty ⇒ no port (the merge must never fall through to the main chat model).
+  if (applyModel === undefined || applyModel.length === 0) return base
+
+  let next = base
+  const roleModelResolver = roleModelResolverOf(next) ?? defaultRoleModelResolver()
+  if (next.roleModelResolver === undefined) {
+    next = { ...next, roleModelResolver } as T
+  }
+  // Adapt the real `RoleModelResolver` into the `"apply"`-role duck-type. The
+  // resolver falls through to `applyModel` for the unconfigured `"apply"` role,
+  // so the call binds to the operator-set cheap model, not the chat model.
+  const applyRoleResolver: ApplyRoleResolverLike = {
+    resolve: (role, fallback) => (roleModelResolver as { resolve: (r: string, f: string) => string }).resolve(role, fallback),
+  }
+  const parentSessionId = resolveSessionId(next)
+  // Capture for the per-request LLM resolution (mirrors the fallback block).
+  const resolverHost = next
+  return {
+    ...next,
+    fastApplyMerge: createFastApplyMerge({
+      roleResolver: applyRoleResolver,
+      applyModel,
+      sideConversation: {
+        dispatch: async (req) => {
+          const llm = resolveModelPort(resolverHost, req.model)
+          if (llm === null) return { ok: false, text: "" }
+          const result = await dispatchSideConversation(
+            {
+              parentSessionId,
+              question: req.prompt,
+              model: req.model,
+            },
+            {
+              resolveLlm: () => llm,
+              resolveTools: () => [],
+              signal: resolverHost.signal,
+            },
+          )
+          return { ok: true, text: result.answer }
+        },
+      },
+    }),
+  } as T
 }
 
 /** Wire the `followup_task` trigger + delivery substrate, preserving any port

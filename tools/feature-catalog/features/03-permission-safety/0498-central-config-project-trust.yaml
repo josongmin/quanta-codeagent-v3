@@ -38,6 +38,7 @@ evidence:
       - tests/unit/central-config-trust-hellgate.test.ts
       - tests/unit/central-config-trust-store-hellgate.test.ts
       - tests/unit/central-config-off-byte-identity-hellgate.test.ts
+      - tests/unit/central-config-trust-e2e-hellgate.test.ts
     integration: []
     contract: []
 knobs:

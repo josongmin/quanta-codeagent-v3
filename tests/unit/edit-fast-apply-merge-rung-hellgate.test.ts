@@ -419,6 +419,117 @@ describe("jun-7-misc 06 edit fast-apply MERGE rung hellgate", () => {
     expect(captured[0]!.after).not.toContain("function pay")
   })
 
+  test("EM-15 RED: pre-existing new_string + drop ⇒ rejected (landed-signal must be count-increase, not presence-anywhere)", async () => {
+    // R3 adversarial finding. The edit-scoped "did the change land" check used
+    // `merged.includes(new_string)` — true if new_string appears ANYWHERE. But
+    // when new_string ALREADY exists in the original (unrelated to the edit), a
+    // hallucinated merge that DROPS unrelated lines while keeping the pre-existing
+    // occurrence passes that check vacuously: the edit never landed, yet real code
+    // (here a SECRET line) was silently dropped and written.
+    //   original: `import {BETA} ...` (already contains "BETA") + a SECRET line.
+    //   edit: old_string absent (rung fires), new_string = "BETA" (pre-exists).
+    //   merge: drops the SECRET line, keeps the pre-existing BETA → includes("BETA") true.
+    // A SOUND landed-signal requires the new_string COUNT to strictly INCREASE
+    // (the merge actually added the intended text), not merely be present. With no
+    // increase AND old_string absent from the original, there is no trustworthy
+    // proof the edit landed ⇒ fail-closed to the typed mismatch.
+    const ORIG = "import {BETA} from 'x'\nalpha\ngamma\nSECRET_TOKEN=abc123\n"
+    const { port, files, writes } = makePort({ "a.ts": ORIG })
+    const DROPPED = "import {BETA} from 'x'\nalpha\ngamma\n" // SECRET line dropped; BETA pre-exists
+    const merge = makeMerge(() => ({ ok: true, merged: DROPPED }))
+    const tool = makeEditTool(port)
+    const res = await run(
+      tool,
+      { path: "a.ts", old_string: "beta_typo_absent", new_string: "BETA" },
+      ctxOf({ fastApplyMerge: merge.seam }),
+    )
+    expect(merge.calls).toHaveLength(1)
+    expect(res.ok).toBe(false)
+    expect(res.failure?.mode).toBe("not_found")
+    expect(writes).toHaveLength(0)
+    expect(files.get("a.ts")).toBe(ORIG)
+  })
+
+  test("EM-16 GREEN companion: genuine landing where new_string pre-exists ⇒ accepted (count increased)", async () => {
+    // Dual of EM-15: a LEGITIMATE merge where new_string also pre-exists in the
+    // original but the merge actually ADDS another occurrence (count 1 → 2). The
+    // strict count-increase signal must still ACCEPT this so the fix does not
+    // over-reject real edits that introduce a duplicate of existing text.
+    const ORIG = "import {BETA} from 'x'\nalpha\nbeta_anchor_typo_missing\ngamma\n"
+    const { port, files, writes } = makePort({ "a.ts": ORIG })
+    // genuine landing: the anchor region becomes "BETA" → now TWO occurrences of BETA.
+    const MERGED = "import {BETA} from 'x'\nalpha\nBETA\ngamma\n"
+    const merge = makeMerge(() => ({ ok: true, merged: MERGED }))
+    const tool = makeEditTool(port)
+    const res = await run(
+      tool,
+      { path: "a.ts", old_string: "beta_anchor_typo_missing", new_string: "BETA" },
+      ctxOf({ fastApplyMerge: merge.seam }),
+    )
+    expect(res.ok).toBe(true)
+    expect(writes).toHaveLength(1)
+    expect(files.get("a.ts")).toBe(MERGED)
+  })
+
+  test("EM-17 RED: merge that COPIED the elision marker (dropped real code) ⇒ rejected, file UNCHANGED", async () => {
+    // R4 adversarial finding. The merge-runner's header promises that "even a
+    // runner that returned ok:true on garbage can never reach disk unverified"
+    // because the CONSUMER re-verifies. But the consumer only ran
+    // `verifyEditScopedMerge` (new_string present / old_string absent / changed) —
+    // it did NOT re-check the elision marker the way the runner's
+    // `verifyMergeStructural` does. A buggy/compromised/duck-typed port that
+    // returns a merge where the apply model COPIED the `// ... existing code ...`
+    // sketch verbatim instead of EXPANDING it stands the literal marker in place of
+    // the dropped real lines: here `alpha` and `gamma` are GONE, replaced by the
+    // marker text, while `BETA_NEW` lands (count 0→1) and the absent old_string is
+    // gone — so the edit-scoped check passes and the corrupted file (real code
+    // dropped, marker text written as source) reaches disk. The consumer MUST
+    // reject any merge that still literally contains the elision marker it injected,
+    // independent of the runner (slice isolation ⇒ the port cannot be trusted to
+    // have run the structural check). Defense-in-depth, deterministic, no heuristic.
+    const ORIG = "alpha\nbeta\ngamma\n"
+    const { port, files, writes } = makePort({ "a.ts": ORIG })
+    const MARKER_LEFTOVER = "// ... existing code ...\nBETA_NEW\n// ... existing code ..."
+    const merge = makeMerge(() => ({ ok: true, merged: MARKER_LEFTOVER }))
+    const tool = makeEditTool(port)
+    const res = await run(
+      tool,
+      // old_string genuinely absent → exact/fuzzy miss → rung fires.
+      { path: "a.ts", old_string: "absent_anchor_typo", new_string: "BETA_NEW" },
+      ctxOf({ fastApplyMerge: merge.seam }),
+    )
+    expect(merge.calls).toHaveLength(1)
+    expect(res.ok).toBe(false)
+    expect(res.failure?.mode).toBe("not_found")
+    expect(writes).toHaveLength(0)
+    expect(files.get("a.ts")).toBe(ORIG)
+  })
+
+  test("EM-18 GREEN companion: a LEGITIMATE edit whose new_string introduces the marker is NOT over-rejected", async () => {
+    // Dual of EM-17. The leftover-marker guard must NOT be a blanket ban: when the
+    // caller's intended `new_string` legitimately CONTAINS `// ... existing code ...`
+    // (e.g. editing a Cursor-rules doc / a snippet that quotes the convention) and
+    // the merge introduces it exactly that many times, the count is accounted for by
+    // the new_string itself — so the merge must still be accepted. Otherwise the R4
+    // guard would corrupt a real use case.
+    const ORIG = "header\nbeta_absent_anchor\nfooter\n"
+    const { port, files, writes } = makePort({ "a.ts": ORIG })
+    // new_string genuinely embeds the marker; merge introduces exactly one marker
+    // (attributable to new_string), drops nothing.
+    const NEW = "// ... existing code ... (quoted in a doc)"
+    const MERGED = `header\n${NEW}\nfooter\n`
+    const merge = makeMerge(() => ({ ok: true, merged: MERGED }))
+    const tool = makeEditTool(port)
+    const res = await run(
+      tool,
+      { path: "a.ts", old_string: "beta_absent_anchor", new_string: NEW },
+      ctxOf({ fastApplyMerge: merge.seam }),
+    )
+    expect(res.ok).toBe(true)
+    expect(writes).toHaveLength(1)
+    expect(files.get("a.ts")).toBe(MERGED)
+  })
+
   test("EM-10 never-blind-write: rejected merges produce ZERO writes", async () => {
     for (const behavior of [
       () => ({ ok: true as const, merged: "   " }), // empty
