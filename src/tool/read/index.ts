@@ -2,7 +2,7 @@ import { homedir } from "node:os"
 import { z } from "zod"
 import type { CodeParserPort } from "@/retrieval/code-parser"
 import { classifyPath } from "@/security"
-import { runtimeConfig } from "@/shared"
+import { escapeBoundary, runtimeConfig } from "@/shared"
 import { defaultFileSystemPort, type FileSystemPort, FsJailError } from "@/storage"
 import { defineTool } from "../factory"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
@@ -90,7 +90,20 @@ const renderReadOk = (text: string, offset: number | undefined, limit: number): 
     .slice(start, end)
     // D8: cap each rendered line so one giant (minified) line can't flood the
     // context. Truncation is surrogate-safe and marks the elision in-band.
-    .map((line, i) => `${start + i + 1}\t${truncateLine(line)}`)
+    // M2 (RFC jun-7 Phase-2-FINAL W1, USER-LOCKED): a file whose CONTENT carries
+    // a literal `<system-reminder>` / `</system-reminder>` token would, unescaped,
+    // read into the model context indistinguishably from a GENUINE harness
+    // reminder boundary — letting attacker-authored file content forge a reminder
+    // close + trailing "system" instruction (prompt-injection). We defang ONLY
+    // that boundary token (a single backslash wedged after the `<`, via the
+    // canonical `@/shared` escaper — the SAME transform the agent-side
+    // `escapeReminderBoundary` uses) so it can no longer terminate the harness's
+    // real `<system-reminder>` wrapper downstream. Applied per-line AFTER the
+    // surrogate-safe truncation so it sees the final rendered content; the
+    // benign invariant holds (a line with no genuine boundary token is
+    // byte-identical). NOT the broad default-OFF untrusted-envelope — this is the
+    // narrow, always-on read-output defang the user locked in.
+    .map((line, i) => `${start + i + 1}\t${escapeBoundary("system-reminder", truncateLine(line))}`)
     .join("\n")
   const note = end < lines.length ? `\n… (${lines.length - end} more lines, use offset)` : ""
   const body = numbered === "" ? "(empty file)" : numbered + note

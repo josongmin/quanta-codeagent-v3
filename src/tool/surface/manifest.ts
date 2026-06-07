@@ -552,6 +552,19 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     note: "Canvas / artifact persistence store (§7). Session registry for NON-code generation outputs (image_gen PNGs, xlsx/docx/pptx files) — list/get/destroy by id + a stable `quanta-artifact://<id>` preview URL, so artifacts live OUTSIDE the transcript. `register` is host-side (the generation tools register their outputs); the model only reads/manages. Opt-in EVERYWHERE (QUANTA_ARTIFACT_STORE): a new capability whose registry must be wired, so it never auto-seeds. Pure in-memory registry (@/artifact, injected clock + id-factory); duck-typed port keeps @/tool fence-clean.",
   },
   {
+    name: "ask_user",
+    origin: "@/tool/ask-user (via DefaultToolPorts.askUser)",
+    gate: {
+      kind: "config-slot",
+      slot: "DefaultToolPorts.askUser",
+      env: "QUANTA_ASK_USER",
+    },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "meta",
+    adr: "0494",
+    note: "Generalized structured elicitation (ADR-0494) — the model puts a STRUCTURED question to the user mid-task (free-text / yes-no / number / integer / single- or multi-select) and gets a typed answer back in-band, GENERALIZING the binary host onConfirm (allow/deny). Routed to a host AskUserPort that mirrors the @/mcp/elicitation request vocabulary, so ONE host prompter serves both the MCP elicitation surface and this agent-callable tool. risk:meta (a pure human touchpoint — no FS/shell/tool side effects; isReadOnly, hitlTier:none). Opt-in EVERYWHERE (QUANTA_ASK_USER): a new capability whose prompter must be wired, so it never auto-seeds; a headless host wires a port that returns typed `headless-denied` so the agent never blocks. Duck-typed port keeps @/tool fence-clean (no @/mcp import in the leaf).",
+  },
+  {
     name: "file_history_rewind",
     origin: "@/tool/file-history (via DefaultToolPorts.fileHistory)",
     gate: {

@@ -19,6 +19,12 @@ export { assertNever } from "./assert-never"
 export { byteCompare } from "./byte-compare"
 export { chunkBatches } from "./chunk"
 export { gateDisabled, gateDisabledStrict, gateOn, gateOnStrict, parseEnvFlag } from "./env-flag"
+export {
+  THIN_CLIENT_DISPATCH_FLAG,
+  THIN_CLIENT_ROUTES,
+  parseThinClientRoute,
+  type ThinClientRoute,
+} from "./thin-client-route"
 export { classify } from "./error-classifier"
 export type { HeaderLookup, LLMErrorKind, LLMProvider } from "./errors"
 export {

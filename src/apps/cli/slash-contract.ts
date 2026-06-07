@@ -1,3 +1,4 @@
+import type { ThinClientRoute } from "@/shared"
 import type { DebugCmdState } from "./debug-cmd"
 import type { IdleMonitor } from "./idle-monitor"
 import type { RetryWithSessionState } from "./retry-with"
@@ -184,4 +185,11 @@ export interface SlashCommand {
     partial: string,
     ctx: SlashContext,
   ) => readonly SlashCompletionHint[]
+  /**
+   * ADR-0493 — thin-client dispatch route. Tells a thin host (web/ide) HOW to
+   * run this command ("local" | "post-text" | "control-request"). Absent ⇒
+   * "local". Resolved via `resolveThinClientRoute` under the
+   * `QUANTA_THIN_CLIENT_DISPATCH` gate; additive/byte-identical when absent.
+   */
+  readonly thinClientDispatch?: ThinClientRoute
 }

@@ -55,6 +55,27 @@ describe("captureTokenBaseline — provider-aware cache buckets (D5)", () => {
     expect(b.current).toEqual({ measuredInputTokens: 100_000, measuredAtMessageCount: 4 })
   })
 
+  test("EMPTY model id does NOT add cache buckets (OpenAI-safe; `providerOf('')` defaults anthropic)", () => {
+    // A provider that didn't echo `model` (`usage.model ?? ""`) makes
+    // `providerOf("")` return "anthropic" → the SUM branch → an OpenAI-shaped
+    // cache-hit (100k incl. 90k cached) double-counts to 190k → premature
+    // compaction. The fix gates the sum on a POSITIVELY-identified anthropic id,
+    // so an empty model uses inputTokens-alone. Red-on-injection: drop the
+    // `ev.model !== ""` guard ⇒ this records 190_000.
+    const b = box(4)
+    captureTokenBaseline(b, { inputTokens: 100_000, cacheReadTokens: 90_000, model: "" }, 50_000)
+    expect(b.current).toEqual({ measuredInputTokens: 100_000, measuredAtMessageCount: 4 })
+  })
+
+  test("EMPTY model + anthropic-shaped cache-hit ⇒ under-reports below estimate ⇒ SKIPS (legacy, safe)", () => {
+    // An Anthropic cache-hit with no model id: inputTokens alone (200) is below
+    // the estimate (120k) ⇒ NOT captured ⇒ next turn uses legacy chars/4. Safe
+    // fail-to-legacy, never a wrong baseline.
+    const b = box(4)
+    captureTokenBaseline(b, { inputTokens: 200, cacheReadTokens: 149_800, model: "" }, 120_000)
+    expect(b.current).toBeUndefined()
+  })
+
   test("anthropic inputTokens ALONE below the estimate does NOT capture (the cached-turn bug)", () => {
     const b = box(10)
     captureTokenBaseline(b, { inputTokens: 200, model: ANTHROPIC }, 120_000)

@@ -10,6 +10,8 @@
  * "required" at parse time (see {@link skill-frontmatter.ts}).
  */
 
+import type { ThinClientRoute } from "@/shared"
+
 /** Effort override a skill may declare. Mirrors CC's low|medium|high|max|<int>. */
 export type SkillEffort = "low" | "medium" | "high" | "max" | number
 
@@ -138,6 +140,14 @@ export interface Skill {
    * it is acted on. Additive: a skill without a deps block is byte-identical.
    */
   readonly rawDependencies?: unknown
+  /**
+   * ADR-0493 — frontmatter `thin-client-dispatch` route tag. Tells a thin host
+   * (web/ide) HOW to run this skill: "local" | "post-text" | "control-request".
+   * Absent / invalid ⇒ "local". Consumed by `resolveThinClientRoute`
+   * (`@/agent/thin-client-dispatch`) under the `QUANTA_THIN_CLIENT_DISPATCH`
+   * gate; additive and byte-identical when absent.
+   */
+  readonly thinClientDispatch?: ThinClientRoute
 }
 
 /**

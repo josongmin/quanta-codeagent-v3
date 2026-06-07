@@ -22,6 +22,9 @@ import {
   type ParseLang,
   wasmBasename,
 } from "@/retrieval/code-parser"
+// `isWrapper` is not re-exported by the barrel (the barrel is outside this
+// slice's edit scope); drive it from the module directly.
+import { isWrapper } from "@/retrieval/code-parser/lang-table"
 
 describe("lang-table — langForPath (extension detection)", () => {
   const cases: ReadonlyArray<[string, ParseLang | null]> = [
@@ -120,7 +123,11 @@ describe("lang-table — kindForNodeType (node-type → DeclNode.kind)", () => {
     // Python.
     ["python", "function_definition", "function"],
     ["python", "class_definition", "class"],
-    ["python", "decorated_definition", "function"],
+    // `decorated_definition` is a WRAPPER, NOT a direct decl kind: it must NOT
+    // be in NODE_KINDS, else `collectDecls` would lift the whole decorated node
+    // as a leaf `function` — mislabelling a decorated CLASS and dropping its
+    // methods. Its kind is inherited from the wrapped inner decl at walk time.
+    ["python", "decorated_definition", undefined],
     ["python", "function_declaration", undefined], // py uses _definition
     // Rust.
     ["rust", "function_item", "function"],
@@ -168,6 +175,9 @@ describe("lang-table — isContainer (descend-into-children set)", () => {
     // Python.
     ["python", "class_definition", true],
     ["python", "function_definition", false],
+    // A wrapper is NOT itself a container — container-ness is read from the
+    // INNER decl (`isContainer(lang, inner.type)`), not the wrapper.
+    ["python", "decorated_definition", false],
     // Rust.
     ["rust", "impl_item", true],
     ["rust", "trait_item", true],
@@ -182,6 +192,35 @@ describe("lang-table — isContainer (descend-into-children set)", () => {
 
   test.each(cases)("%s / %s ⇒ container=%s", (lang, type, expected) => {
     expect(isContainer(lang, type)).toBe(expected)
+  })
+})
+
+describe("lang-table — isWrapper (decorator-style wrapper set)", () => {
+  const cases: ReadonlyArray<[ParseLang, string, boolean]> = [
+    // Python `decorated_definition` is the only wrapper: it spans the
+    // `@decorator` lines and the wrapped class/function decl.
+    ["python", "decorated_definition", true],
+    ["python", "class_definition", false],
+    ["python", "function_definition", false],
+    // No other language has a wrapper today — guard against leakage.
+    ["typescript", "decorated_definition", false],
+    ["typescript", "export_statement", false], // descended-through, NOT a wrapper
+    ["tsx", "decorated_definition", false],
+    ["javascript", "decorated_definition", false],
+    ["rust", "decorated_definition", false],
+    ["go", "decorated_definition", false],
+    ["bash", "decorated_definition", false],
+  ]
+
+  test.each(cases)("%s / %s ⇒ wrapper=%s", (lang, type, expected) => {
+    expect(isWrapper(lang, type)).toBe(expected)
+  })
+
+  test("a wrapper node-type is NOT also a direct decl kind (kind comes from the inner decl)", () => {
+    // Were `decorated_definition` BOTH a wrapper AND in NODE_KINDS, the walk
+    // would double-handle it; the invariant is: wrappers carry NO own kind.
+    expect(isWrapper("python", "decorated_definition")).toBe(true)
+    expect(kindForNodeType("python", "decorated_definition")).toBeUndefined()
   })
 })
 

@@ -44,6 +44,18 @@ const DEFAULT_MICROCOMPACT_INTERVAL_MS = 30_000
 const lastMicrocompactAt = new Map<string, number>()
 
 /**
+ * Drop a session's microcompact-cadence entry. Called from `finishAgentSession`
+ * on session end so this module `Map` does not accumulate ONE entry per session
+ * for the whole process lifetime — a real leak in a long-lived daemon running
+ * many sessions with `QUANTA_MICROCOMPACT` on (measured ~2 KB/session, never
+ * GC-reclaimable while the module holds the key). Idempotent / no-op on a session
+ * that never microcompacted.
+ */
+export const forgetMicrocompactSession = (sessionId: string | undefined): void => {
+  lastMicrocompactAt.delete(sessionId ?? "")
+}
+
+/**
  * Tier-1 microcompaction pass (RFC §4.6). Runs INSIDE `maybeCompact` BEFORE
  * `compactIfNeeded`, guarded by the knob + the time-based cadence gate. Installs
  * the result via `wm.replace(...)` (NOT in-place mutation) so the delta-token
@@ -110,10 +122,16 @@ export const maybeCompact = async (
   turn: number,
   bgController: BackgroundSummarizationController<BgSummaryPayload> | undefined,
   resetClassifier: (classifier: AgentConfig["effortClassifier"]) => void,
-  // D5 (jun-7) — the authoritative input-token baseline captured by the prior
-  // turn's `exact` provider usage. `undefined` on turn-1 / before any exact
-  // usage ⇒ the trigger uses the chars/4 estimate (legacy, byte-identical).
-  tokenBaseline: import("../compaction").TokenBaseline | undefined,
+  // D5 (jun-7) — the per-session token-baseline BOX. `.current` (the prior turn's
+  // exact measurement) anchors the trigger; `undefined` ⇒ chars/4 (legacy). We
+  // take the BOX (not the value) so a tier-1 MICROCOMPACT — which replaces
+  // tool_result CONTENT while keeping the message COUNT — can INVALIDATE the
+  // baseline: the length-based `markBaselineStaleIfShrunk` (context-assembler)
+  // structurally cannot see a content-only shrink, so the stale prefix-measured
+  // baseline would otherwise force a premature tier-2 compaction.
+  tokenBaselineBox:
+    | { current?: import("../compaction").TokenBaseline | undefined; sendCount?: number }
+    | undefined,
   // D4 (jun-7) — the model that will ACTUALLY process this turn (sticky/skill
   // swap), so the window-derived threshold tracks the active model, not base
   // `config.llm`. Defaults to the base model id.
@@ -139,6 +157,11 @@ export const maybeCompact = async (
   if (maybeMicrocompact(config, wm, snapshot, Date.now())) {
     snapshot = [...wm.snapshot()]
     before = wm.tokenTotal?.() ?? estimateTokens(snapshot)
+    // D5 — microcompact replaced the prefix's tool_result CONTENT (count-stable),
+    // so the baseline measured against that fat prefix is now stale. Invalidate
+    // it; the tier-2 decision below + the next turn re-anchor on chars/4 until a
+    // fresh exact usage lands. (The length-based invalidation cannot catch this.)
+    if (tokenBaselineBox !== undefined) tokenBaselineBox.current = undefined
   }
   // D4 (jun-7 naive-impl hardening) — the bg-controller ceiling must match the
   // synchronous proactive path's model-derived threshold, so pass the same model.
@@ -188,7 +211,9 @@ export const maybeCompact = async (
         // loop captured an `exact` usage (absent ⇒ chars/4 over the whole
         // transcript, byte-identical legacy).
         model: activeModel,
-        ...(tokenBaseline !== undefined ? { tokenBaseline } : {}),
+        ...(tokenBaselineBox?.current !== undefined
+          ? { tokenBaseline: tokenBaselineBox.current }
+          : {}),
         ...(config.compaction.thresholdTokens !== undefined
           ? { thresholdTokens: config.compaction.thresholdTokens }
           : {}),

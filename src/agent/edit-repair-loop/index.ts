@@ -1,5 +1,10 @@
 /** Edit-repair-loop slice barrel (ADR-0472). */
-export { computeLintDelta, diagnosticKey, renderLintDelta } from "./lint-delta"
+export {
+  computeLintDelta,
+  computeLintDeltaTolerant,
+  diagnosticKey,
+  renderLintDelta,
+} from "./lint-delta"
 export { editRepairLoopEnabled, runRepairLoop } from "./runner"
 export type {
   CheckKind,

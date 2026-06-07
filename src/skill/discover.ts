@@ -1,6 +1,6 @@
 import { readdir, readFile } from "node:fs/promises"
 import { basename, join, sep } from "node:path"
-import { errMessage } from "@/shared"
+import { errMessage, parseThinClientRoute } from "@/shared"
 import { parseFrontmatter } from "./frontmatter"
 import { liftRawDependenciesBlock } from "./skill-frontmatter"
 import { discoverSkillResources } from "./skill-resources"
@@ -139,6 +139,9 @@ const toSkill = (name: string, sourcePath: string, raw: string): Skill => {
   // frontmatter, so the block would be invisible if lifted later. NO-THROW:
   // returns undefined when no `dependencies:` block exists ⇒ field absent.
   const rawDependencies = liftRawDependenciesBlock(raw)
+  // ADR-0493 — thin-client dispatch route (kebab key). NO-THROW parse: an
+  // unknown token degrades to undefined ⇒ field absent ⇒ resolves "local".
+  const thinClientDispatch = parseThinClientRoute(asScalar(data["thin-client-dispatch"]))
 
   const skill: Skill = {
     name: asScalar(data.name) ?? name,
@@ -151,6 +154,7 @@ const toSkill = (name: string, sourcePath: string, raw: string): Skill => {
     ...(argumentHint !== undefined ? { argumentHint } : {}),
     ...(shortDescription !== undefined ? { shortDescription } : {}),
     ...(rawDependencies !== undefined ? { rawDependencies } : {}),
+    ...(thinClientDispatch !== undefined ? { thinClientDispatch } : {}),
   }
   const strictTools = declaredAllowedTools(data.allowedTools)
   if (strictTools.kind === "declared") {

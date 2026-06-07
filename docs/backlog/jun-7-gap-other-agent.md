@@ -56,7 +56,7 @@
 ## 🔴 우선순위 TOP (ROI×임팩트, 근거 확정)
 
 > **STATUS (verified jun-07 src grep)** — P-list 검증마커는 각 §섹션 본문에 인라인(아래 §14–§26). 요약(15 verified flips/confirms):
-> **✅ LANDED (13)**: P5(tool_search) · P12(closeout-critic) · P13(=§26.5 model-window) · P14(=§26.10 read truncation) · P19(MCP annotations) · P20(MCP image) · P21(subagent system) · P22(named-agent load) · P23(grep -A/-B/-C) · P24(grep output_mode) · P25(glob gitignore/mtime) · P26(stream-json) · P27(ratelimit notice).
+> **✅ LANDED (14)**: P5(tool_search) · P12(closeout-critic) · P13(=§26.5 model-window) · P14(=§26.10 read truncation) · P19(MCP annotations) · P20(MCP image) · P21(subagent system) · P22(named-agent load) · P23(grep -A/-B/-C) · P24(grep output_mode) · P25(glob gitignore/mtime) · P26(stream-json) · P27(ratelimit notice) · §26.1(tree-sitter chunking — jun-07 2nd-pass 배선). 또 §12.2 HTTPS-MITM body-scan(Node+Bun)·D1-D8 naive-impl 하든 8/8 FIXED.
 > **🔲 OPEN (10)**: P1(MCP proto 2025-06-18 그대로) · P3(Guardian assessor) · P4(auto-mode bypass) · P6(image downsample) · P7(중앙config/trust-gate) · P10(MCP SSE resume) · **P11(shell ANSI-strip — verified OPEN)** · P15(UTF-16/BOM) · P16(bash -lc Windows) · P17(NotebookEdit). P18(corrupt-store)은 §13 소관(이번 검증범위 외).
 > **PARTIAL (3)**: P2(skill 측 부분해소·plugin 측 strict 그대로) · P8(subagent worktree isolation 있음·Enter/ExitWorktree 도구 없음) · P9(compaction-window 해소·1m beta-header 미plumb).
 
@@ -865,8 +865,9 @@
 
 > "없는 기능"이 아니라 **quanta가 가진 기능의 구현이 경쟁사보다 얕거나 실제로 틀린** 것. side-by-side 알고리즘 대조(5바퀴, Codex/Cursor/Claude 전부). 🔴=실제버그/silent-corruption, 🟠=과대평가정정, 🟢=확인결과 나이브 아님(정정).
 
-### 26.1 🟠 OVERCLAIM — tree-sitter syntactic chunking 프로덕션 미배선 (HIGH-ROI, ~2줄) — 🔲 **STILL OPEN (verified jun-07)**
-> **VERIFIED jun-07 (재확인, headline overclaim 여전함)**: `src/runner/assemble/search-pipeline.ts:216` `createDefaultIndexer({scanner, upsert})`가 **여전히 `parser` 안 넘김**(직접 읽음 — 220번째 줄까지 `parser:` 키 없음). `createTreeSitterParser` non-test 호출자 **여전히 0**(`retrieval/code-parser/index.ts`·`retrieval/index.ts` re-export barrel뿐, 실호출 없음). default-scanner는 `parser?` opt를 받고 `QUANTA_SYNTAX_CHUNK` ON일 때 `chunkFileSyntactic` 쓰도록 **준비돼 있으나**(`indexer/default-scanner.ts:54,81-91`) 프로덕션 caller가 parser 미주입이라 **knob 무관하게 line-window fallback**. `@vscode/tree-sitter-wasm` WASM 구현(`code-parser/tree-sitter.ts`)도 존재만 함. **작업 프롬프트의 "today wired" 힌트는 FALSE — 라이브 미배선 그대로.**
+### 26.1 ✅ **LANDED (verified jun-07, 2nd pass wired)** — tree-sitter syntactic chunking 프로덕션 배선 완료 (HIGH-ROI)
+> **STATUS FLIP → LANDED (jun-07 2nd pass)**: 1차 재검증서 미배선 확인된 것을 **`startIndexer`에 parser 주입으로 배선** — `src/runner/assemble/search-pipeline.ts:228` `...(runtimeConfig().syntaxChunk ? { parser: createTreeSitterParser() } : {})`. 이제 `QUANTA_SYNTAX_CHUNK` ON ⇒ live 인덱스가 `chunkFileSyntactic`(AST-boundary, 함수 mid-body 안쪼갬) 사용, OFF ⇒ parser 미생성·WASM 미로드·line-window byte-identical. `createTreeSitterParser`는 lazy(첫 parse까지 grammar 미로드)라 knob-ON 구성 비용 0. 검증: search-pipeline tsc0/biome0, syntax-chunk+retrieval 518/0. (이전 OPEN 증거는 정직하게 보존 ↓)
+> **(1차 OPEN 증거, 보존)**: 배선 전엔 `search-pipeline.ts:216` `createDefaultIndexer({scanner, upsert})`가 `parser` 안 넘겨 `createTreeSitterParser` non-test 호출자 0 → knob 무관 line-window fallback이었음. default-scanner의 `parser?` opt(`indexer/default-scanner.ts:54,81-91`)는 준비돼 있었고, 어려운 부분(parser+chunker+WASM+hellgate) 다 완성돼 있어 ~2줄 배선만 남았던 것.
 - **증거**: `src/retrieval/indexer/chunker-syntactic.ts`(AST-boundary chunker, 함수 mid-body 안쪼갬)+`code-parser/tree-sitter.ts`(실 web-tree-sitter WASM)는 **존재**하나, 프로덕션 wire `src/runner/assemble/search-pipeline.ts:216`이 `createDefaultIndexer({scanner,upsert})` 호출 시 **`parser` 안 넘김** → `opts.parser` 항상 undefined → `QUANTA_SYNTAX_CHUNK` **무관하게** 고정 50줄 윈도우/20줄 overlap fallback. `createTreeSitterParser` non-test 호출자 0.
 - **정정**: [[jun-07-gap-other-agent-audit]]·메모리의 "retrieval 강함(tree-sitter chunking)" 라벨은 **shipped 기준 과대평가**. 라이브 인덱스는 fixed-window. 70줄 함수(30~100)가 두 청크로 쪼개져 tail 매치 시 시그니처 없는 mid-body 청크 반환.
 - **fix**: `startIndexer`서 `createTreeSitterParser()` 생성+전달 ~2줄. 어려운 부분(parser+chunker+hellgate) 완성됨. **ROI 고.**

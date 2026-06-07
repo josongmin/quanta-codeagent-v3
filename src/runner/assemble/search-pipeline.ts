@@ -17,16 +17,17 @@ import {
   createRipgrepLexicalSearch,
   type IndexError,
 } from "@/retrieval"
+import { createTreeSitterParser } from "@/retrieval/code-parser"
 import type { SearchPipeline } from "@/retrieval/pipeline"
-import { errMessage, logger } from "@/shared"
+import { errMessage, gateOn, logger, runtimeConfig } from "@/shared"
 import { searchCodebaseTool, type Tool } from "@/tool"
 import { assemblePipeline, type PipelinePreset, type PipelineWireOverrides } from "./pipeline"
 import {
-  type ChunkUpsertPort,
   buildSemanticBackend,
+  type ChunkUpsertPort,
   resolveIndexEmbedder,
-  type SemanticReconcileBatch,
   type SearchIndexMetrics,
+  type SemanticReconcileBatch,
 } from "./search-index-backend"
 
 export interface WiredSearchPipeline {
@@ -55,8 +56,6 @@ const SEMANTIC_PRESETS = new Set<PipelinePreset>([
   "semantic-then-rerank",
   "budget-aware",
 ])
-
-const isOn = (v: string | undefined): boolean => v === "on"
 
 const toPosix = (p: string): string => (sep === "/" ? p : p.split(sep).join("/"))
 
@@ -213,12 +212,18 @@ const startIndexer = (
     ...(metrics !== undefined ? { metrics } : {}),
   })
   const trackedUpsert = createTrackedSemanticUpsert(sem.upsert)
+  // RFC jun-6 §26.1 — wire the syntax-aware (tree-sitter) chunker into the LIVE
+  // index when `QUANTA_SYNTAX_CHUNK` is on. The scanner consults the parser only
+  // under that knob (default-scanner gate); absent ⇒ no WASM, line-window
+  // chunking, byte-identical. Lazy: `createTreeSitterParser` loads no grammar
+  // until the first parse, so constructing it under the knob is cheap.
   const indexer = createDefaultIndexer({
     scanner: {
       root: cwd,
       ...(env.QUANTA_INDEX_GLOB !== undefined ? { glob: env.QUANTA_INDEX_GLOB } : {}),
     },
     upsert: trackedUpsert.upsert,
+    ...(runtimeConfig().syntaxChunk ? { parser: createTreeSitterParser() } : {}),
   })
   let reconcile = Promise.resolve()
   const queueReconcile = (batch: SemanticReconcileBatch): void => {
@@ -293,7 +298,10 @@ export const buildSearchPipelineFromEnv = (
   cwd: string,
   metrics?: SearchIndexMetrics,
 ): WiredSearchPipeline | null => {
-  const indexOn = isOn(env.QUANTA_INDEX)
+  // Canonical SSOT vocab (gateOn: 1/on/true/yes) — matches the tool-surface
+  // manifest's `env-flag` declaration for QUANTA_INDEX (was a strict `=== "on"`
+  // that silently ignored `=1`, splitting brain with the manifest).
+  const indexOn = gateOn(env, "QUANTA_INDEX")
   const { preset, explicit } = buildRequestedPreset(env, indexOn)
   if (preset === "none") return rememberActiveWire(null)
 

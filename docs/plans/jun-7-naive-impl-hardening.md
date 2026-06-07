@@ -306,3 +306,99 @@ red-on-injection이 "가드 실효성" 표준. allowlist는 file→count burn-do
 - D8: render가 라인 *수*만 cap, 라인 *길이* 무지.
 
 **공통**: 측정/수명/정확성의 한 차원을 무시 — 코어 로직은 맞으나 가장자리 차원이 빠짐. 이 RFC는 그 빠진 차원을 1급 시민으로 승격.
+
+---
+
+# Phase 2 — 잔여 하드닝 계획 (8바퀴 적대어딧 산출물, jun-07)
+
+> D1~D8 본체 + 발견 실버그(D1 sandbox 3-site / D5 cache·stale·empty-model / D4 misroute·swap / killer-leak / microcompact-baseline / map-leak)는 **전부 FIXED+TDD**. 아래는 *어딧이 지목했으나 아직 안 닫은* 잔여 — (a) 실-modality 미실행 커버리지 갭, (b) 구조적 ratchet 부재, (c) misc. **각 항목: 무엇/왜/방법(TDD)/노력/리스크/판정.** 객관검증 원칙 유지(faked가 아닌 실제 modality 실행 or red-on-injection).
+
+## Wave 1 — 구조적 ratchet (재발 영구차단, 최고 레버리지)
+
+| # | ratchet | 무엇/왜 | 방법(red-on-injection) | 노력 | 판정 |
+|---|---|---|---|---|---|
+| R-D3 | spawn env scrub | exec-cluster(shell/bash-bg/sandbox/sandbox-exec/pty)의 `Bun.spawn` env가 raw `...process.env` 우회 금지(시크릿 누수). 어딧 최고위험 ratchet 갭. | exec-cluster 파일만 source-scan: `Bun.spawn`의 `env:`가 `scrubEnv`/`buildPtyEnv`/`applyLocalEnv` 경유인지. pty opt-out 브랜치(`QUANTA_PTY_INHERIT_ENV`)는 allowlist. 합성 `env:{...process.env}` 주입→red | 중 | **DO** (전역 `...process.env` 스캔은 노이즈—exec-cluster 한정) |
+| R-D6 | detectEol join | fuzzy splice가 `.join("\n")`로 회귀하면 CRLF corruption 재발. | `tool/edit/fuzzy.ts` 스캔: splice join이 `detectEol(...)` 경유 강제. `.join("\n")` 직접사용→red | 저 | **DO** (저노이즈) |
+| ~~R-D4~~ | ~~bare 120k~~ | — | — | — | **SKIP**: `120_000`은 흔한 timeout(idle/shell/sandbox/bench)이라 스캔 노이즈>가치 |
+| ~~R-D2~~ | ~~unbounded `+=`~~ | — | — | — | **SKIP**: `+=` 편재—깨끗한 시그니처 없음. behavioral bounded-buffer 테스트가 정답(존재). 대신 W2의 통합테스트로 |
+| ~~R-D5~~ | ~~capture-wire~~ | — | — | — | **CLOSED**: 채택한 loop-e2e가 실 usage→capture 배선 구동 |
+
+## Wave 2 — 실-modality 테스트 (faked-only 갭 닫기, behavioral은 이미 correct 확인)
+
+| # | 테스트 | 무엇/왜 | 방법 | 노력 | 리스크 | 판정 |
+|---|---|---|---|---|---|---|
+| T-D1 | real-process kill smoke | `defaultPpidWalkKiller`(실 `ps` shell-out+parse)가 한번도 실프로세스에 안돌음. | 실 `bash -lc "sleep 100 & sleep 100"` spawn→signalTree→자식 reaped 단언. **double-fork는 제외**(본질적 한계, 별도 문서화됨) | 중 | 타이밍 flake(`bun:test` 격리) | **DO** (smoke로, retry/tolerance) |
+| T-D3 | real PTY spawn env | `buildPtyEnv`는 unit됐으나 실 `Bun.spawn({env})` child가 시크릿 없는지 미단언. | 실 PTY(or 동등 spawn)로 `FOO_API_KEY` 주입→child env에 부재 단언. R-D3 ratchet과 짝 | 중 | Bun.Terminal 가용성 | **DO** (가용시, 아니면 spawn-env 직접) |
+| T-D2 | registry-integration overflow | BoundedBuffer는 fuzz됐으나 bash-bg-registry 실 drain→buffer→snapshot >200k 미실행. | 실 `createBashBgRegistry`+fake spawn으로 1.9MB drain→snapshot bounded+head/tail 단언 | 저 | — | **DO** (저비용) |
+| T-D6 | edit-tool disk roundtrip CRLF | eol는 pure-string만, 실 CRLF 파일 read→edit→write 미실행. | 실 CRLF 파일 디스크 쓰기→edit 도구→재읽기, lone-LF 0 단언 | 저 | — | **DO** (저비용, 결정적) |
+
+## Wave 3 — misc / 위생
+
+| # | 항목 | 무엇/왜 | 판정 |
+|---|---|---|---|
+| M1 | `killAll()` 배선 | bash-bg `killAll`이 **호출자 0**—세션종료시 bg-shell 미reap(LRU로 bounded지만 새지 않게). `cleanupFinishedSession`에 배선(map-leak fix와 같은 자리). | **DO** (저비용, 수명 정합) |
+| M2 | `</system-reminder>` passthrough | 파일 내용의 `</system-reminder>`가 read 출력 verbatim=프롬프트인젝션. **D1-D8 무관 기존 이슈**. trusted tool-result text에 `escapeReminderBoundary` 적용. | **별도 RFC** (스코프 밖, 보안 follow-up으로 분리) |
+| M3 | `context-warning.ts:11` 중복 120k | CLI 컨텍스트경고가 `compactTokens ?? 120_000` 하드코딩—실 threshold(D4 모델-파생)와 불일치 가능. 표시용이라 minor. | **DO-옵션** (저우선, resolveModelWindow로 정합) |
+
+## 명시적 비범위 (정직)
+- **D1 double-fork orphan**: OS process-group 필요(Bun detached 미노출+macOS setsid 부재). 본질적 한계, `process-tree.ts` 주석에 문서화 완료. **고치지 않음.**
+- **D6 mixed-EOL 정밀화**: 이미-mixed 파일의 untouched 줄 EOL 변경. documented 저-ROI tradeoff. **보류.**
+- **D8 empty-file sentinel** (offset>EOF): cosmetic. **보류.**
+
+## 시퀀싱 + 검증
+W1(ratchet 2) → W2(테스트 4) → W3(M1). 각 항목 tsc0/biome0/red-on-injection 증명/회귀0. 실-process(T-D1)는 flake 대비 retry+격리. 예상: W1+W2+M1 = ~6 신규 테스트파일 + 2 source-ratchet, hot-path 비침습(테스트+가드 추가, src 변경은 M1 1줄+R-D3/R-D6는 src 무변경).
+
+---
+
+# Phase 2 FINAL — plan-audit 반영 (3-agent 비판+객관 감사, jun-07)
+
+> 위 draft를 **그 자체로 적대 감사**(비판 1 + 객관 1 + findings 전수 대조 1)했다. 결과: **orphan 3 + 잘못된 판정 3 + SOTA++ 누락 3 + viability 1**. 아래가 **최종 확정본**(draft supersede). 모든 정정은 객관 grep으로 재확인됨.
+
+## 🔴 정정 (draft가 틀렸던 것 — 전부 객관 확인)
+
+| 항목 | draft | FINAL (확인 evidence) |
+|---|---|---|
+| **M2** | "별도 RFC" deferral | **오인**. 완화책 `wrapToolResult`(ADR-0471)이 **이미 `dispatch.ts:1174` 배선**, `read`→provenance `file`→defang. 단 `untrustedEnvelope` **default-OFF**(opt-in). ⇒ 새 RFC 아니라 **결정**: (A) file/bash/mcp에 envelope default-ON OR (B) read 출력에 narrow always-on `escapeReminderBoundary`. **현존 완화책의 default 결정.** |
+| **M3** | `context-warning.ts:11` | **위치 틀림**(주석임). 실 model-blind 표시는 `notify-and-warning.ts:26,58`(`COMPACT_DEFAULT_THRESHOLD=120_000`, D4 `resolveModelWindow` 무시). display-only. |
+| **R-D3 시그니처** | `env:`가 scrubber 경유인지 | **leaky**. `env:` *부재* spawn(tmux `pty-backend.ts:47`/docker `sandbox.ts:311`)=inherit-by-omission를 못봄. 시그니처=**"spawn은 env: 반드시 전달 AND scrubber 경유"**(존재+라우팅). 경로 정정: `command-hooks/sandbox-exec.ts`·`host/runtime/pty-backend.ts`. "최고위험"→**regression-guard**(기본은 이미 scrubbed). |
+| ~~R-D4 narrow~~ | narrow 식별 후 skip | **SKIP 유지 확정**: bare `?? 120_000`은 *주석에만*(live는 named const). value-ratchet anchor할 live literal 없음. M3가 실 이슈 직접 고침. |
+| T-D2 | faked-only "DO" | **대부분 CLOSED**: `runtime/bash-bg-registry-behavior-hellgate.test.ts`+`bash-output-cap-delegation`이 >200k 실 stream. 잔여=elision-marker 단언 보강만. |
+| T-D3 | "buildPtyEnv unit됐으나" | 맞음(객관 에이전트 dir 오류—`src/host/runtime/__tests__/`에 unit 존재). 갭=**real Bun.spawn child env**만. |
+| R-D5/T-D6/M1/out-of-scope | — | **전부 확인 OK**. |
+
+## ❗ ORPHAN 추가 (findings 전수대조로 색출)
+
+| # | 항목 | 심각도 | 무엇 (객관 확인) |
+|---|---|---|---|
+| **M4** | **ANSI/control-char strip-to-model** | 🟠 MED | `bash/index.ts:287 formatRunBody`+`:340 buildBackgroundCompletedResult` 둘 다 `[stdout,stderr].join("\n")` verbatim — `stripAnsi`(존재) 미적용. ANSI가 모델 오염. §26.11+§17.1 quick-win인데 fix/plan/scope 전부서 누락. **가장 명확한 orphan.** |
+| **M5** | dead `microcompact/compactor.ts` 삭제 | 🟡 LOW | `createMicroCompactor` live 호출자 0(barrel+주석만). RFC §8 "삭제" 권고 미실행. FIFO footgun. |
+
+## ⭐ SOTA++ 구조적 상향 (ratchet+test patching 넘어서)
+
+- **S1 branded `ScrubbedEnv` 타입**: exec-cluster `Bun.spawn` env를 brand(`scrubEnv`/`buildPtyEnv`/`applyLocalEnv`만 생산)로 요구 → 누수 **표현불가**(env 생략=tsc 에러, inherit-by-omission 무료로 닫힘). 스캔보다 strict-우위. **R-D3 상위 타깃, 스캔은 interim.**
+- **S2 `TokenBaselineBox` 클래스**: box에 8바퀴 **4 분산 패치** 누적=설계 증상. `capture/invalidateOnShrink/invalidateOnContentChange/trigger` 소유 + provider-bucket·fail-safe를 private 불변식으로 → 4버그 한 owner 국소화.
+- **S3 `resolveActiveModel(turn)` SSOT**: compaction-threshold AND display-window-emit 둘 다 소비 → 불일치 불가 + **M3 자동해결**.
+
+## ⚠️ Viability 정정
+- **T-D1 real-process smoke = CI theater 위험**(첫 flake에 `.skip`). load-bearing=**결정적 `parsePsTable` fixture + fake-signal**(+기존 `kill-escalation-and-worktree-retry.test.ts`가 실 bash spawn+signal). real-`ps`-parse만 갭 → 결정적 fixture로 충분, 실-ps-shell-out은 non-blocking nightly만.
+
+## 📋 최종 Wave (재랭킹 — 심각도×blast-radius)
+
+| Wave | 항목 | 작업 | 노력 |
+|---|---|---|---|
+| **W1 보안/누수 (최우선)** | **M2 ✅LOCKED** | read `</system-reminder>` 완화 = **(B) narrow always-on `escapeReminderBoundary` on read 출력**(사용자 확정 jun-07). default-ON envelope 미채택(blast-radius). `read/index.ts` 렌더 출력의 reminder 경계만 항상 defang, 다른 경로 불변. red-on-injection: 파일에 `</system-reminder>` 심고 출력서 defang 단언 | 저 |
+| | **M4 ANSI-strip** | `formatRunBody`+`buildBackgroundCompletedResult`에 `stripAnsi`(순수, surrogate-safe). red-on-injection | 저 |
+| | **M1 killAll 배선** | `cleanupFinishedSession`서 `killAll()`(map-leak fix 옆). 세션종료 bg-shell reap | 저 |
+| **W2 구조 ratchet** | **R-D3** (+S1 노트) | exec-cluster(`shell`·`bash-bg-registry`·`sandbox`·`command-hooks/sandbox-exec`·`host/runtime/pty-backend`) 스캔: **env: 존재 AND scrubber 경유**. pty opt-out allowlist. S1을 상위목표 주석 | 중 |
+| | **R-D6** | fuzzy splice join `detectEol` 경유 강제 스캔. `.join("\n")`→red | 저 |
+| **W3 실-modality** | **T-D3** | 실 Bun.spawn child env `*_API_KEY` 부재 단언 | 중 |
+| | **T-D6** | 실 CRLF 파일 read→edit→write, lone-LF 0 | 저 |
+| | T-D1 | 결정적 `parsePsTable` fixture(실-ps-shell-out 아님) | 저 |
+| | T-D2 | elision-marker 단언 보강(대부분 CLOSED) | 저 |
+| **W4 위생/상향(옵션)** | M3 | `notify-and-warning.ts:58`이 `resolveModelWindow` 경유(또는 S3) | 저 |
+| | M5 | dead compactor 삭제 | 저 |
+| | S2/S3 | `TokenBaselineBox` 클래스 / active-model SSOT (별도) | 중 |
+
+**비범위 확정**: D1 double-fork · D6 mixed-EOL 정밀화 · D8 empty-file sentinel · CRLF-`\r`-in-read(cosmetic) · §26.2/26.3(embedder messaging).
+
+**핵심 변화 vs draft**: ① M2=현존완화책 default 결정(W1 최우선) ② **M4 ANSI-strip 신규**(최명확 orphan) ③ M3 타깃 정정 ④ R-D3 시그니처 강화+S1 상위목표 ⑤ T-D1 결정적-fixture ⑥ SOTA++ S1/S2/S3.

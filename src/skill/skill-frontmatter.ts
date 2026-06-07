@@ -82,6 +82,10 @@ export const SkillFrontmatterSchema = z
     // record (codex puts `short-description` under it; future keys allowed).
     "argument-hint": z.string().min(1).optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
+    // ADR-0493 — thin-client dispatch route tag (kebab key). Optional/additive:
+    // a pre-0493 SKILL.md without it parses byte-identical. The `.strict()`
+    // schema would otherwise REJECT a SKILL.md that declares it.
+    "thin-client-dispatch": z.enum(["local", "post-text", "control-request"]).optional(),
   })
   .strict()
   .superRefine((v, ctx) => {

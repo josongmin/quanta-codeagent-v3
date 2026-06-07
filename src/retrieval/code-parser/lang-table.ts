@@ -91,7 +91,12 @@ const NODE_KINDS: Readonly<Record<ParseLang, Readonly<Record<string, Kind>>>> = 
   python: {
     function_definition: "function",
     class_definition: "class",
-    decorated_definition: "function",
+    // `decorated_definition` is NOT listed here: it is a WRAPPER (see
+    // WRAPPER_KINDS). It spans the `@decorator` lines AND the inner
+    // class/function decl; its kind + container-ness are INHERITED from that
+    // inner decl so a decorated CLASS surfaces as a container `class` (with its
+    // methods as children) and a decorated FUNCTION as `function`, while the
+    // decl's line span still covers the decorator lines.
   },
   rust: {
     function_item: "function",
@@ -129,6 +134,26 @@ const CONTAINER_KINDS: Readonly<Record<ParseLang, ReadonlySet<string>>> = {
   bash: new Set([]),
 }
 
+/** Node types that WRAP a single inner declaration: the wrapper supplies the
+ *  outer LINE SPAN (so e.g. python `@decorator` lines stay in the decl's range)
+ *  while the inner decl supplies the kind, name and container-ness. The walk in
+ *  `tree-sitter.ts` lifts a wrapper into ONE `DeclNode` keyed on the inner decl
+ *  but spanned by the wrapper. Distinct from a plain non-decl node (whose
+ *  children are merely descended): a wrapper is a decl in its own right.
+ *
+ *  Python `decorated_definition` is the canonical case. (TS `export_statement`
+ *  is deliberately NOT a wrapper — it is descended through as a non-decl, which
+ *  keeps the pre-existing "export keyword not in span" behaviour unchanged.) */
+const WRAPPER_KINDS: Readonly<Record<ParseLang, ReadonlySet<string>>> = {
+  typescript: new Set([]),
+  tsx: new Set([]),
+  javascript: new Set([]),
+  python: new Set(["decorated_definition"]),
+  rust: new Set([]),
+  go: new Set([]),
+  bash: new Set([]),
+}
+
 /** Detect the language for `path` by its extension. `null` ⇒ no grammar. */
 export const langForPath = (path: string): ParseLang | null => {
   const dot = path.lastIndexOf(".")
@@ -144,3 +169,7 @@ export const kindForNodeType = (lang: ParseLang, type: string): Kind | undefined
 
 export const isContainer = (lang: ParseLang, type: string): boolean =>
   CONTAINER_KINDS[lang].has(type)
+
+/** True iff `type` wraps a single inner decl (see {@link WRAPPER_KINDS}). The
+ *  walk treats it as a decl spanned by the wrapper but kinded by the child. */
+export const isWrapper = (lang: ParseLang, type: string): boolean => WRAPPER_KINDS[lang].has(type)

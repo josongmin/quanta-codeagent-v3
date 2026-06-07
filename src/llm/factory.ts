@@ -1,5 +1,5 @@
-import { gateOn } from "@/shared"
 import { hasUsableChatgptToken } from "@/auth/chatgpt-oauth"
+import { gateOn } from "@/shared"
 import type { LLMProvider } from "@/shared/errors"
 import { runtimeConfig } from "@/shared/runtime-config"
 import { AnthropicAdapter } from "./adapters/anthropic"
@@ -189,7 +189,10 @@ export type EnvLike = Record<string, string | undefined>
  *  `QUANTA_SERVICE_TIER`. Empty ⇒ undefined. Keeping this read HERE (the
  *  factory already owns `env`) is what lets the adapter/wire slice stay free of
  *  `process.env` (slice-boundary invariant). */
-const resolveServiceTier = (opts: CreateLLMOptions, env: EnvLikeDecl): string | undefined => {
+export const resolveServiceTier = (
+  opts: CreateLLMOptions,
+  env: EnvLikeDecl,
+): string | undefined => {
   if (opts.serviceTier !== undefined) return opts.serviceTier
   const fromFast = gateOn(env, "QUANTA_FAST") ? "priority" : undefined
   const value = fromFast ?? env.QUANTA_SERVICE_TIER
@@ -205,7 +208,7 @@ const resolveReasoningEffort = (opts: CreateLLMOptions, env: EnvLikeDecl): strin
 /** H15 — composition-root resolution of o-series reasoning carry-over
  *  (`QUANTA_REASONING_CARRYOVER`). Default-OFF: unset ⇒ false ⇒ the Responses
  *  adapters drop thinking + emit no `include` (byte-identical). */
-const resolveReasoningCarryover = (env: EnvLikeDecl): boolean =>
+export const resolveReasoningCarryover = (env: EnvLikeDecl): boolean =>
   gateOn(env, "QUANTA_REASONING_CARRYOVER")
 
 /** Models whose Anthropic cache_control supports the extended `ttl:"1h"`
@@ -277,7 +280,7 @@ export const resolveCacheTtl = (model: string, cfg: { readonly cacheTtl: CacheTt
 
 /** Composition-root resolution of the ChatGPT-OAuth body-debug flag. Explicit
  *  option wins; otherwise `QUANTA_DEBUG_OAUTH === "1"`. */
-const resolveDebugOAuth = (opts: CreateLLMOptions, env: EnvLikeDecl): boolean =>
+export const resolveDebugOAuth = (opts: CreateLLMOptions, env: EnvLikeDecl): boolean =>
   opts.debugOAuth ?? gateOn(env, "QUANTA_DEBUG_OAUTH")
 
 const resolveOpenAISurface = (

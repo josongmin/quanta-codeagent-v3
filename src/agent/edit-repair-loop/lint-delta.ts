@@ -20,11 +20,15 @@ import type { Diagnostic } from "./types"
 
 /**
  * Stable identity key for delta purposes. Column and severity are deliberately
- * EXCLUDED so a benign column shift never registers as a new lint. `\x00` is a
- * field separator that cannot appear in any real diagnostic field, so distinct
- * tuples can never collide into the same key.
+ * EXCLUDED so a benign column shift never registers as a new lint. The tuple is
+ * JSON-encoded (length-prefixed strings) rather than `\x00`-joined: a message
+ * that echoes source containing a NUL byte could otherwise straddle a field
+ * boundary and COLLIDE two distinct diagnostics into one key — suppressing a
+ * genuinely-introduced lint (a false negative). JSON encoding is collision-free
+ * regardless of field content.
  */
-export const diagnosticKey = (d: Diagnostic): string => `${d.file}\x00${d.line}\x00${d.code}\x00${d.message}`
+export const diagnosticKey = (d: Diagnostic): string =>
+  JSON.stringify([d.file, d.line, d.code, d.message])
 
 /**
  * Compute the introduced diagnostics: `post` minus `pre` as a count-aware
@@ -56,6 +60,99 @@ export const computeLintDelta = (
     } else {
       introduced.push(d)
     }
+  }
+  return introduced
+}
+
+/** Identity key WITHOUT line — `(file, code, message)`. Used by the
+ *  line-shift-tolerant delta so a diagnostic that merely moved lines can still
+ *  match its pre-edit twin within a tolerance window. JSON-encoded (not
+ *  `\x00`-joined) for the same collision-free reason as {@link diagnosticKey}. */
+const groupKey = (d: Diagnostic): string => JSON.stringify([d.file, d.code, d.message])
+
+/**
+ * Line-shift-tolerant introduced-diagnostics delta (ADR-0495).
+ *
+ * The plain {@link computeLintDelta} keys on the exact line, so an edit that
+ * inserts/removes lines renumbers every later diagnostic and FALSELY reports the
+ * shifted pre-existing lints as "introduced". This variant mirrors Claude Code:
+ * a `post` diagnostic is pre-existing iff it can be MATCHED to an unconsumed
+ * `pre` diagnostic that shares `(file, code, message)` AND lies within
+ * `|lineShift|` lines (the edit's net line delta is the tolerance window). The
+ * remaining unmatched `post` diagnostics are the introduced set, returned in
+ * ORIGINAL `post` order.
+ *
+ * Matching is MAXIMUM-cardinality, not greedy-nearest: within a group it sorts
+ * pre and post by line and assigns each post (ascending) the SMALLEST unused pre
+ * still inside its window. This is the classic optimal greedy for interval point
+ * matching — it never strands a pre that a later post needed (a bug greedy
+ * nearest-first has: pre=[10,14] post=[13,16] tol=3 ⇒ optimal []; nearest ⇒ [16]).
+ *
+ * Properties: `lineShift === 0` reproduces {@link computeLintDelta} exactly
+ * (line must match), so it is a strict SUPERSET — safe to adopt behind a gate.
+ * Pure + NO-THROW: a non-finite / negative / fractional `lineShift` is coerced
+ * to a non-negative integer tolerance (`|trunc|`, NaN ⇒ 0); never throws.
+ */
+interface PostItem {
+  /** Original index in `postDiags` (to restore order + mark matched). */
+  readonly idx: number
+  readonly line: number
+}
+
+/** Mark which post items in a single group are matched to a pre line. Sorts both
+ *  ascending and assigns each post the smallest unused pre within `tol` — the
+ *  optimal greedy for interval matching. Mutates `matched` in place. */
+const matchGroup = (
+  preLinesSorted: readonly number[],
+  postItems: readonly PostItem[],
+  tol: number,
+  matched: boolean[],
+): void => {
+  const used = new Array<boolean>(preLinesSorted.length).fill(false)
+  const byLine = [...postItems].sort((a, b) => a.line - b.line)
+  for (const p of byLine) {
+    for (let j = 0; j < preLinesSorted.length; j++) {
+      if (used[j]) continue
+      const preLine = preLinesSorted[j] as number
+      if (preLine < p.line - tol) continue
+      if (preLine > p.line + tol) break // sorted ⇒ no further candidate
+      used[j] = true
+      matched[p.idx] = true
+      break
+    }
+  }
+}
+
+export const computeLintDeltaTolerant = (
+  preDiags: readonly Diagnostic[],
+  postDiags: readonly Diagnostic[],
+  lineShift: number,
+): readonly Diagnostic[] => {
+  const t = Math.trunc(lineShift)
+  const tol = Number.isFinite(t) ? Math.abs(t) : 0
+  // Group pre lines + post items by (file,code,message).
+  const preByKey = new Map<string, number[]>()
+  for (const d of preDiags) {
+    const arr = preByKey.get(groupKey(d))
+    if (arr) arr.push(d.line)
+    else preByKey.set(groupKey(d), [d.line])
+  }
+  const postByKey = new Map<string, PostItem[]>()
+  for (let i = 0; i < postDiags.length; i++) {
+    const d = postDiags[i] as Diagnostic
+    const item: PostItem = { idx: i, line: d.line }
+    const arr = postByKey.get(groupKey(d))
+    if (arr) arr.push(item)
+    else postByKey.set(groupKey(d), [item])
+  }
+  const matched = new Array<boolean>(postDiags.length).fill(false)
+  for (const [key, postItems] of postByKey) {
+    const preLinesSorted = [...(preByKey.get(key) ?? [])].sort((a, b) => a - b)
+    matchGroup(preLinesSorted, postItems, tol, matched)
+  }
+  const introduced: Diagnostic[] = []
+  for (let i = 0; i < postDiags.length; i++) {
+    if (!matched[i]) introduced.push(postDiags[i] as Diagnostic)
   }
   return introduced
 }

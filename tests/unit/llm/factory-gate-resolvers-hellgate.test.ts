@@ -6,27 +6,34 @@
  * were migrated from scattered strict `=== "1"` reads onto the broadened `gateOn`
  * SSOT vocabulary `{1,on,true,yes}`.
  *
- * REACHABILITY (verified against source 2026-06-07): all three resolvers are
- * module-INTERNAL (not exported) AND the values they produce are stored in
- * PRIVATE adapter fields (`OpenAIResponsesAdapter#serviceTier`,
- * `ChatGPTOAuthAdapter#debugOAuth`, …) with NO public getter, and surface only
- * inside an outbound request body that `createLLM` provides no `fetchImpl` seam
- * to intercept. So the RESOLVED value is NOT observable from the public
- * `createLLM` surface. See the REPORT — this is a source-shape blocker, not a bug.
+ * VALUE-TESTABILITY (jun-7 structural fix): the three resolvers are pure
+ * functions of `(opts?, env)` — side-effect-free — so they are now EXPORTED
+ * from `@/llm/factory` as a zero-risk testability seam. This locks the actual
+ * MAPPING (e.g. `QUANTA_FAST` truthy ⇒ `"priority"`), not just the upstream
+ * `gateOn` vocab. A regression that re-narrows a read to strict `=== "1"`, or
+ * changes the `"priority"` literal, or mis-wires an env key, now goes RED.
  *
- * What IS reachable + locked here:
- *   1. `createLLM` constructs the Responses / chatgpt-oauth adapter across the
- *      whole truthy/falsy gate matrix without throwing (the resolver runs on
- *      that path), and the env path never short-circuits the surface pick.
- *   2. The shared `gateOn` vocabulary keyed by the EXACT env-var names those
- *      resolvers consume — so a regression that narrows any of the three reads
- *      back to a strict `=== "1"` (dropping `on`/`true`/`yes`) goes red.
+ * What is locked here:
+ *   1. `gateOn` vocabulary keyed by the EXACT env-var names those resolvers
+ *      consume — so dropping `on`/`true`/`yes` upstream goes red.
+ *   2. VALUE-level: the resolver outputs across the truthy/falsy matrix,
+ *      pinning the exact env key + output literal/boolean and the opts/env
+ *      precedence (explicit opt wins; `QUANTA_SERVICE_TIER` honored; empty ⇒
+ *      undefined).
+ *   3. `createLLM` constructs the Responses / chatgpt-oauth adapter across the
+ *      whole gate matrix without throwing (the resolver runs on that path).
  *
- * Hermetic: env is passed explicitly to `createLLM` / `gateOn`; no process.env.
+ * Hermetic: env is passed explicitly to the resolvers / `createLLM` / `gateOn`;
+ * no process.env.
  */
 
 import { describe, expect, test } from "bun:test"
-import { createLLM } from "@/llm/factory"
+import {
+  createLLM,
+  resolveDebugOAuth,
+  resolveReasoningCarryover,
+  resolveServiceTier,
+} from "@/llm/factory"
 import { gateOn } from "@/shared"
 
 const BROAD_TRUTHY = ["1", "on", "true", "yes"] as const
@@ -94,11 +101,76 @@ describe("createLLM — resolver code path runs on the Responses surface across 
   }
 })
 
-describe("BLOCKER — resolved serviceTier/debugOAuth value not observable from createLLM", () => {
-  // Documented, not a bug: the resolved values land in PRIVATE adapter fields
-  // with no public getter and no fetch-injection seam through createLLM, so a
-  // value-level assertion (`serviceTier === "priority"`) is unreachable without
-  // editing source (export the resolver, or add a fetchImpl passthrough). Left
-  // as a todo so the gap is visible in the test report. See REPORT.
-  test.todo("QUANTA_FAST=1 ⇒ adapter request body service_tier='priority' (needs exported resolver or fetchImpl seam)", () => {})
+describe("resolveServiceTier — VALUE mapping (QUANTA_FAST ⇒ 'priority')", () => {
+  // Contract (source): opts.serviceTier wins; else gateOn(env,"QUANTA_FAST")
+  //   ? "priority" : undefined, then ?? env.QUANTA_SERVICE_TIER; empty ⇒ undefined.
+  test("every broadened truthy QUANTA_FAST maps to exactly 'priority'", () => {
+    for (const v of BROAD_TRUTHY)
+      expect(resolveServiceTier({}, { QUANTA_FAST: v })).toBe("priority")
+  })
+
+  test("QUANTA_FAST off/absent ⇒ undefined (no QUANTA_SERVICE_TIER fallback set)", () => {
+    for (const v of NOT_ON) expect(resolveServiceTier({}, { QUANTA_FAST: v })).toBeUndefined()
+    expect(resolveServiceTier({}, {})).toBeUndefined()
+  })
+
+  test("QUANTA_SERVICE_TIER is honored when QUANTA_FAST is off/absent", () => {
+    expect(resolveServiceTier({}, { QUANTA_SERVICE_TIER: "flex" })).toBe("flex")
+    expect(resolveServiceTier({}, { QUANTA_FAST: "0", QUANTA_SERVICE_TIER: "default" })).toBe(
+      "default",
+    )
+  })
+
+  test("empty QUANTA_SERVICE_TIER ⇒ undefined (empty collapses to undefined)", () => {
+    expect(resolveServiceTier({}, { QUANTA_SERVICE_TIER: "" })).toBeUndefined()
+  })
+
+  test("QUANTA_FAST 'priority' shortcut OUTRANKS an explicit QUANTA_SERVICE_TIER", () => {
+    // fromFast ?? env.QUANTA_SERVICE_TIER → priority wins when FAST is on.
+    expect(resolveServiceTier({}, { QUANTA_FAST: "on", QUANTA_SERVICE_TIER: "flex" })).toBe(
+      "priority",
+    )
+  })
+
+  test("explicit opts.serviceTier wins over both env knobs", () => {
+    expect(
+      resolveServiceTier(
+        { serviceTier: "scale" },
+        { QUANTA_FAST: "1", QUANTA_SERVICE_TIER: "flex" },
+      ),
+    ).toBe("scale")
+  })
+})
+
+describe("resolveDebugOAuth — VALUE mapping (QUANTA_DEBUG_OAUTH ⇒ boolean)", () => {
+  // Contract (source): opts.debugOAuth ?? gateOn(env,"QUANTA_DEBUG_OAUTH").
+  test("every broadened truthy QUANTA_DEBUG_OAUTH ⇒ true", () => {
+    for (const v of BROAD_TRUTHY)
+      expect(resolveDebugOAuth({}, { QUANTA_DEBUG_OAUTH: v })).toBe(true)
+  })
+
+  test("QUANTA_DEBUG_OAUTH off/absent ⇒ false (default-OFF)", () => {
+    for (const v of NOT_ON) expect(resolveDebugOAuth({}, { QUANTA_DEBUG_OAUTH: v })).toBe(false)
+    expect(resolveDebugOAuth({}, {})).toBe(false)
+  })
+
+  test("explicit opts.debugOAuth wins over env (true overrides off env)", () => {
+    expect(resolveDebugOAuth({ debugOAuth: true }, { QUANTA_DEBUG_OAUTH: "0" })).toBe(true)
+    expect(resolveDebugOAuth({ debugOAuth: false }, { QUANTA_DEBUG_OAUTH: "1" })).toBe(false)
+  })
+})
+
+describe("resolveReasoningCarryover — VALUE mapping (QUANTA_REASONING_CARRYOVER ⇒ boolean)", () => {
+  // Contract (source): gateOn(env,"QUANTA_REASONING_CARRYOVER"). Env-only — no
+  // opts param (default-OFF: unset ⇒ false).
+  test("every broadened truthy QUANTA_REASONING_CARRYOVER ⇒ true", () => {
+    for (const v of BROAD_TRUTHY)
+      expect(resolveReasoningCarryover({ QUANTA_REASONING_CARRYOVER: v })).toBe(true)
+  })
+
+  test("QUANTA_REASONING_CARRYOVER off/absent ⇒ false (default-OFF)", () => {
+    for (const v of NOT_ON)
+      expect(resolveReasoningCarryover({ QUANTA_REASONING_CARRYOVER: v })).toBe(false)
+    expect(resolveReasoningCarryover({})).toBe(false)
+  })
 })

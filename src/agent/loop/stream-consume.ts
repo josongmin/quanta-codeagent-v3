@@ -70,11 +70,18 @@ export const captureTokenBaseline = (
   sentEstimate: number,
 ): void => {
   if (box === undefined || box.sendCount === undefined) return
-  // Provider-aware: OpenAI's input already includes cached; Anthropic's does not.
-  const fullInput =
-    providerOf(ev.model) === "openai"
-      ? ev.inputTokens
-      : ev.inputTokens + (ev.cacheReadTokens ?? 0) + (ev.cacheCreationTokens ?? 0)
+  // Provider-aware cache arithmetic: Anthropic's `inputTokens` EXCLUDES cache
+  // reads (sum them); OpenAI's INCLUDES them (don't). We add the buckets ONLY
+  // for a POSITIVELY-identified Anthropic model — an EMPTY/unidentified model id
+  // (a provider that didn't echo `model`, `usage.model ?? ""`) falls back to
+  // inputTokens-alone, the OpenAI-safe path: for OpenAI it's already correct, and
+  // for an Anthropic cache-HIT it under-reports below the estimate ⇒ the capture
+  // is SKIPPED ⇒ legacy chars/4 (safe), never the 2× double-count `providerOf("")
+  // === "anthropic"` would otherwise produce (premature compaction).
+  const isAnthropic = ev.model !== "" && providerOf(ev.model) === "anthropic"
+  const fullInput = isAnthropic
+    ? ev.inputTokens + (ev.cacheReadTokens ?? 0) + (ev.cacheCreationTokens ?? 0)
+    : ev.inputTokens
   if (!Number.isFinite(fullInput) || fullInput < sentEstimate) return
   box.current = { measuredInputTokens: fullInput, measuredAtMessageCount: box.sendCount }
 }

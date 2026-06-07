@@ -160,6 +160,103 @@ describe("syntax-chunk hellgate", () => {
     expect(sorted[sorted.length - 1]!.endLine).toBe(400)
   })
 
+  test("oversize-by-gap — tiny decls split by a large inter-decl gap never exceed maxLines", () => {
+    // RED-ON-INJECTION repro for the mergeSmall/planRanges oversize bug: three
+    // small top-level decls with a BIG gap (lines 21-199) before the last one.
+    // The merge accumulator measured its span GAP-INCLUSIVE from accStart and
+    // the FINAL accumulator was emitted whole with no size check, so the bug
+    // produced chunks [1,20] and [21,205] — a 185-line chunk for maxLines=80.
+    const maxLines = 80
+    const text = linesFile(205)
+    const parsed: ParsedFile = {
+      lang: "typescript",
+      decls: [
+        leaf("const", "A", 1, 10),
+        leaf("const", "B", 15, 20),
+        leaf("const", "C", 200, 205),
+      ],
+    }
+    const chunks = [...chunkFileSyntactic(mkInput(text), { ok: true, parsed }, { maxLines })]
+    // INVARIANT 1: no emitted chunk exceeds maxLines. None of these decls is an
+    // indivisible oversized LEAF body (each spans <= maxLines), so the
+    // documented single-oversized-leaf exception does NOT apply here.
+    for (const c of chunks) {
+      expect(c.endLine - c.startLine + 1).toBeLessThanOrEqual(maxLines)
+    }
+    // INVARIANT 2: coverage is still EXACT over [1, lineCount] — the gap lines
+    // (21-199) must still land in SOME chunk — and contiguous (no holes/overlaps).
+    chunks.sort((a, b) => a.startLine - b.startLine)
+    expect(chunks[0]!.startLine).toBe(1)
+    expect(chunks[chunks.length - 1]!.endLine).toBe(205)
+    for (let i = 1; i < chunks.length; i++) {
+      expect(chunks[i]!.startLine).toBe(chunks[i - 1]!.endLine + 1)
+    }
+  })
+
+  test("oversize-by-trailing-gap — large gap AFTER the last decl stays bounded + covered", () => {
+    // The tail-coverage path: a tiny decl early, then nothing for the rest of
+    // the file. coverTail must NOT inflate the last chunk past maxLines while
+    // still covering every trailing line.
+    const maxLines = 50
+    const text = linesFile(300)
+    const parsed: ParsedFile = {
+      lang: "typescript",
+      decls: [leaf("const", "A", 1, 5), leaf("const", "B", 8, 12)],
+    }
+    const chunks = [...chunkFileSyntactic(mkInput(text), { ok: true, parsed }, { maxLines })]
+    for (const c of chunks) {
+      expect(c.endLine - c.startLine + 1).toBeLessThanOrEqual(maxLines)
+    }
+    chunks.sort((a, b) => a.startLine - b.startLine)
+    expect(chunks[0]!.startLine).toBe(1)
+    expect(chunks[chunks.length - 1]!.endLine).toBe(300)
+    for (let i = 1; i < chunks.length; i++) {
+      expect(chunks[i]!.startLine).toBe(chunks[i - 1]!.endLine + 1)
+    }
+  })
+
+  test("windowLines > maxLines — split bound NEVER leaks a chunk past maxLines (gaps everywhere)", () => {
+    // RED-ON-INJECTION repro for the pushBounded incomplete-bound bug: pushBounded
+    // GUARDS on maxLines (oversized if span > maxLines) but SPLIT via splitWindow
+    // with windowLines. With windowLines (50) > maxLines (10), each emitted window
+    // could STILL be up to 50 lines — exceeding the very bound the guard checks.
+    //
+    // Layout exercises every pushBounded site at once:
+    //   - LEADING gap: first decl starts at 6 (lines 1-5 attach to it),
+    //   - BIG inter-decl gap: 16..199 between B and C (mergeSmall flush + final
+    //     accumulator flush go through pushBounded),
+    //   - TRAILING gap: 211..260 after the last decl (coverTail → pushBounded).
+    // Pre-fix, the final flush pushBounded(1?,..) splits e.g. [6,199] into
+    // [6,55],[56,105],... — 50-line chunks ≫ maxLines 10.
+    const maxLines = 10
+    const lineCount = 260
+    const text = linesFile(lineCount)
+    const parsed: ParsedFile = {
+      lang: "typescript",
+      decls: [
+        leaf("const", "A", 6, 8),
+        leaf("const", "B", 12, 15),
+        leaf("const", "C", 200, 205),
+      ],
+    }
+    const chunks = [
+      ...chunkFileSyntactic(mkInput(text), { ok: true, parsed }, { maxLines, windowLines: 50 }),
+    ]
+    // INVARIANT 1: EVERY emitted chunk's span ≤ maxLines. None of these decls is
+    // an indivisible oversized LEAF (each spans ≤ maxLines), so the documented
+    // single-oversized-leaf exception does NOT apply — the bound must hold for all.
+    for (const c of chunks) {
+      expect(c.endLine - c.startLine + 1).toBeLessThanOrEqual(maxLines)
+    }
+    // INVARIANT 2: coverage still EXACT over [1, lineCount] + contiguous.
+    chunks.sort((a, b) => a.startLine - b.startLine)
+    expect(chunks[0]!.startLine).toBe(1)
+    expect(chunks[chunks.length - 1]!.endLine).toBe(lineCount)
+    for (let i = 1; i < chunks.length; i++) {
+      expect(chunks[i]!.startLine).toBe(chunks[i - 1]!.endLine + 1)
+    }
+  })
+
   test("non-code / unknown-lang fallback ⇒ BYTE-IDENTICAL to chunkFile (NO-THROW)", () => {
     const text = linesFile(120)
     const input = mkInput(text)

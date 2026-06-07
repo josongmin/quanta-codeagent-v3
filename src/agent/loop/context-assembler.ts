@@ -249,7 +249,7 @@ export const prepareTurnContext = async (
     turn,
     bgController,
     resetEffortClassifier,
-    tokenBaselineBox?.current,
+    tokenBaselineBox,
     activeModel,
   )
   if (tokenBaselineBox !== undefined) {

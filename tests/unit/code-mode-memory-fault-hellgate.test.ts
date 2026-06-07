@@ -1,18 +1,33 @@
 /**
- * code-mode RUNTIME — memory-limit status + VM-fault containment hellgate
- * (src/codemode/runtime.ts). Uses the REAL quickjs-emscripten runtime (same
- * setup as code-mode-hellgate.test.ts).
+ * code-mode RUNTIME — POST-FAULT memory classification + VM-fault containment
+ * hellgate (src/codemode/runtime.ts). Uses the REAL quickjs-emscripten runtime
+ * (same setup as code-mode-hellgate.test.ts).
  *
- * Two round-1 suspects:
+ * STRUCTURAL FIX (jun-07): the old per-tick memory watchdog (a
+ * `computeMemoryUsage()` probe in the interrupt handler firing at a 0.9 fraction
+ * of the cap) was WRONG. An adversarial audit proved QuickJS invokes the
+ * interrupt handler at backward-jumps/calls, NOT on allocation — so a BULK
+ * allocation (`new Array(N).fill`, `JSON.parse(huge)`, `"x".repeat(N)`) fires the
+ * handler ~once then hard-OOMs BEFORE the watchdog ever observes 90%, so those
+ * (the common real OOM) were MISLABELLED `"error"`. The per-tick probe also taxed
+ * every cell ~26%, and the 0.9 fraction was an unjustified magic number.
  *
- *  (a) `status === "memory"` is set NOWHERE. The `AbnormalReason = "memory"`
- *      enum + `CodeCellStatus = "memory"` exist, and `abnormalMessage("memory")`
- *      has a branch — but no code path ever assigns `drive.abnormal = "memory"`.
- *      `runtime.setMemoryLimit` makes QuickJS THROW an "out of memory" /
- *      "string too long" JS error INSIDE the cell, which the drive loop collects
- *      as an ordinary REJECTED promise ⇒ status `"error"`, never `"memory"`.
- *      => see the `test.todo` below + the REPORT. The companion PASSING test pins
- *      the ACTUAL behavior (status `error`) so it is a real regression guard.
+ * The watchdog is REPLACED by a POST-FAULT classifier: when a cell ends in a
+ * fault / uncaught throw the runtime classifies it `"memory"` iff the fault is
+ * QuickJS's own out-of-memory exception (`InternalError: out of memory` — a
+ * STRUCTURED error-type signal, not a substring guess on user text) OR a single
+ * confirming heap probe shows usage reached the configured cap. ZERO per-tick
+ * cost; covers ALL FOUR OOM shapes the old watchdog missed.
+ *
+ * Two areas:
+ *
+ *  (a) POST-FAULT memory classification. ALL FOUR over-allocation shapes
+ *      (bulk-array, repeat, JSON.parse, incremental-loop) — picked BIG relative
+ *      to a small injected `memoryBytes` cap so they reliably OOM — now report the
+ *      dedicated status `"memory"` with a consistent "memory limit exceeded"
+ *      message. RED-ON-INJECTION: without the post-fault classifier each comes
+ *      back as `"error"` (QuickJS's OOM surfaced as a generic rejected promise). A
+ *      plain `throw` stays `"error"` (no false-positive).
  *
  *  (b) VM-fault containment — a cell that blows the WASM stack / over-allocates
  *      must yield a CONTAINED typed-error result, never crash / reject into the
@@ -42,68 +57,75 @@ const TINY_MEM_LIMITS = {
   outputCap: 16 * 1024,
 }
 
-describe("memory limit — observed status (a)", () => {
-  test("allocating past a tiny memoryBytes limit yields a CONTAINED non-ok result (never hangs)", async () => {
-    const { port } = spyPort(() => ({ ok: true, content: "" }))
-    // Grow an array without bound — QuickJS hits the 256 KiB heap cap.
-    const r = await runCodeCell({
-      code: `const a = []; for (let i = 0; i < 1e7; i++) { a.push({ x: i, pad: "padding-" + i }); } return a.length;`,
-      dispatch: port,
-      limits: TINY_MEM_LIMITS,
-      signal: liveSignal(),
-      now,
-    })
-    // The make-or-break property: it TERMINATES with a typed non-ok result
-    // (no hang, no host throw). The status is `error` in the current runtime.
-    expect(r.status).not.toBe("ok")
-    // Documented current behavior — the OOM surfaces as a generic `error`.
-    expect(r.status).toBe("error")
-    expect(r.output.toLowerCase()).toContain("memory") // "out of memory"
-  }, 15000)
+/** Run a cell against the tiny-memory caps with the no-op port. */
+const runTiny = (code: string) =>
+  runCodeCell({
+    code,
+    dispatch: spyPort(() => ({ ok: true, content: "" })).port,
+    limits: TINY_MEM_LIMITS,
+    signal: liveSignal(),
+    now,
+  })
 
-  test("a huge-string allocation past the heap cap is ALSO contained as a non-ok result", async () => {
-    const { port } = spyPort(() => ({ ok: true, content: "" }))
-    const r = await runCodeCell({
-      code: `let s = "x"; for (let i = 0; i < 40; i++) { s = s + s; } return s.length;`,
-      dispatch: port,
-      limits: { ...TINY_MEM_LIMITS, memoryBytes: 512 * 1024 },
-      signal: liveSignal(),
-      now,
-    })
-    expect(r.status).not.toBe("ok")
-    expect(r.status).toBe("error") // "string too long" — again NOT "memory"
-  }, 15000)
+describe("memory limit — POST-FAULT classification (a)", () => {
+  // Every OOM SHAPE below is BIG relative to the 256 KiB cap, so it reliably
+  // exhausts the heap. RED-ON-INJECTION: without the post-fault classifier each
+  // returns `"error"` (QuickJS's `InternalError: out of memory` surfaced as a
+  // generic rejected promise) — the classifier relabels it the dedicated
+  // `"memory"` status. The per-tick watchdog the audit removed could NOT catch the
+  // bulk shapes (it fires ~once before the hard-OOM, never observing the breach).
+  const OOM_SHAPES: ReadonlyArray<readonly [string, string]> = [
+    // Bulk array — a single huge allocation the interrupt handler never sees grow.
+    ["bulk-array", `const a = new Array(1000000).fill(0); return a.length;`],
+    // String repeat — a single huge string allocation past the cap.
+    ["repeat", `const s = "x".repeat(5000000); return s.length;`],
+    // JSON.parse of a huge array literal — bulk allocation inside the parser.
+    ["JSON.parse-huge", `return JSON.parse("[" + "0,".repeat(1000000) + "0]").length;`],
+    // Incremental loop — the heap genuinely climbs past the cap over many ticks.
+    [
+      "incremental-loop",
+      `const a = []; for (let i = 0; i < 1e7; i++) { a.push({ x: i, pad: "padding-" + i }); } return a.length;`,
+    ],
+  ]
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // ⛔ REAL BUG (round-1 confirmed): the dedicated `"memory"` status is DEAD.
-  // OBSERVED vs EXPECTED: an over-allocating cell comes back with status
-  // `"error"` (message "out of memory"), NOT the dedicated `"memory"` status.
-  // `drive.abnormal = "memory"` is assigned NOWHERE in src/codemode/runtime.ts —
-  // `runtime.setMemoryLimit` makes QuickJS throw a normal in-VM JS error, which
-  // the drive loop collects as a rejected promise ⇒ finalize() maps it to
-  // `"error"`. The `"memory"` arm of CodeCellStatus / AbnormalReason /
-  // abnormalMessage is unreachable. A user who wired
-  // `QUANTA_CODE_MODE_MEM_BYTES` cannot tell an OOM apart from any other cell
-  // error (the model-facing message + the `code_cell_<status>` tag both say
-  // `error`). This test is the EXPECTED-behavior assertion; flip it to a `test`
-  // once the runtime distinguishes the memory-limit interrupt.
-  // ───────────────────────────────────────────────────────────────────────────
-  test.todo(
-    "REAL BUG — an OOM cell SHOULD report status 'memory' (currently 'error'); see REPORT",
-    async () => {
-      const { port } = spyPort(() => ({ ok: true, content: "" }))
-      const r = await runCodeCell({
-        code: `const a = []; for (let i = 0; i < 1e7; i++) { a.push(new Array(1000).fill(i)); } return a.length;`,
-        dispatch: port,
-        limits: TINY_MEM_LIMITS,
-        signal: liveSignal(),
-        now,
-      })
-      // EXPECTED (once fixed): the dedicated memory status + its message.
+  for (const [label, code] of OOM_SHAPES) {
+    test(`OOM shape '${label}' classifies as status 'memory' (red-on-injection)`, async () => {
+      const r = await runTiny(code)
+      // The dedicated memory status — NOT the generic "error" it would be without
+      // the post-fault classifier.
       expect(r.status).toBe("memory")
+      // CONSISTENCY: status "memory" ⇒ the model-visible message says so (the old
+      // code had a status="memory"/message="runtime fault" divergence; this path
+      // now flows BOTH from `drive.abnormal`).
       expect(r.output).toContain("memory limit exceeded")
-    },
-  )
+      expect(r.status).not.toBe("ok")
+    }, 15000)
+  }
+
+  test("a plain `throw` stays 'error' (no memory false-positive)", async () => {
+    const r = await runTiny(`throw new Error("boom");`)
+    expect(r.status).toBe("error")
+    expect(r.output).not.toContain("memory limit exceeded")
+    expect(r.output).toContain("boom")
+  }, 15000)
+
+  test("a normal compute cell is 'ok' (the classifier never fires on success)", async () => {
+    const r = await runTiny(`let s = 0; for (let i = 0; i < 100; i++) s += i; return s;`)
+    expect(r.status).toBe("ok")
+    expect(r.output).toContain("4950")
+  }, 15000)
+
+  test("CONSISTENCY: every status 'memory' result carries the 'memory limit exceeded' message", async () => {
+    // Cross-shape invariant: there is NO path that yields status "memory" with a
+    // divergent (e.g. "runtime fault") message.
+    for (const [, code] of OOM_SHAPES) {
+      const r = await runTiny(code)
+      if (r.status === "memory") {
+        expect(r.output).toContain("memory limit exceeded")
+        expect(r.output.toLowerCase()).toContain("memory")
+      }
+    }
+  }, 30000)
 })
 
 describe("VM-fault containment (b)", () => {
@@ -114,10 +136,16 @@ describe("VM-fault containment (b)", () => {
     let output = ""
     try {
       const r = await runCodeCell({
-        // Unbounded recursion ⇒ QuickJS "Maximum call stack size exceeded".
+        // Unbounded recursion ⇒ QuickJS "Maximum call stack size exceeded" — a
+        // RangeError, NOT an OOM, so it must stay "error" (no memory mislabel).
         code: `function f() { return f() + 1; } return f();`,
         dispatch: port,
-        limits: { memoryBytes: 16 * 1024 * 1024, timeoutMs: 3000, maxCalls: 64, outputCap: 16 * 1024 },
+        limits: {
+          memoryBytes: 16 * 1024 * 1024,
+          timeoutMs: 3000,
+          maxCalls: 64,
+          outputCap: 16 * 1024,
+        },
         signal: liveSignal(),
         now,
       })
@@ -130,19 +158,23 @@ describe("VM-fault containment (b)", () => {
     expect(threw).toBe(false)
     expect(status).toBe("error")
     expect(output.length).toBeGreaterThan(0)
+    expect(output).not.toContain("memory limit exceeded")
   }, 15000)
 
   test("a cell that throws a non-Error value is still contained (no host crash)", async () => {
     const { port } = spyPort(() => ({ ok: true, content: "" }))
     let threw = false
-    let r:
-      | Awaited<ReturnType<typeof runCodeCell>>
-      | undefined
+    let r: Awaited<ReturnType<typeof runCodeCell>> | undefined
     try {
       r = await runCodeCell({
         code: `throw { weird: "not-an-error-object" };`,
         dispatch: port,
-        limits: { memoryBytes: 16 * 1024 * 1024, timeoutMs: 2000, maxCalls: 64, outputCap: 16 * 1024 },
+        limits: {
+          memoryBytes: 16 * 1024 * 1024,
+          timeoutMs: 2000,
+          maxCalls: 64,
+          outputCap: 16 * 1024,
+        },
         signal: liveSignal(),
         now,
       })

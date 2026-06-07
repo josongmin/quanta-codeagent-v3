@@ -167,6 +167,61 @@ describe("tree-sitter collectDecls — class-with-two-methods (via real parse)",
     // The method is collected as a child (python class_definition is a container).
     expect(cls!.children.map((c) => c.name)).toContain("m1")
   })
+
+  // RED-ON-INJECTION (the bug this slice fixes): a python `decorated_definition`
+  // WRAPPING a `class_definition`. Before the fix, NODE_KINDS.python mapped
+  // `decorated_definition: "function"`, so `collectDecls` lifted the whole
+  // decorated node as a LEAF labelled `function` — a decorated CLASS was
+  // mislabelled `function` AND its methods were dropped (not a container). The
+  // wrapper fix surfaces it as a container `class` (methods as children) while
+  // KEEPING the wrapper's span so the `@decorator` lines stay in the range.
+  test("decorated CLASS surfaces as container 'class' with method children + decorator lines in span", async () => {
+    const src =
+      "@dataclass\n@final\nclass Foo:\n    def m(self):\n        return 1\n    def n(self):\n        return 2\n"
+    const out = await tryParse("d.py", src)
+    if (out === null) return // grammar unavailable — premise held; skip
+    const decls = out.parsed.decls
+    expect(decls.length).toBe(1)
+    const cls = decls[0]!
+    // (a) kind is "class", NOT "function" (the pre-fix mislabel).
+    expect(cls.kind).toBe("class")
+    expect(cls.name).toBe("Foo")
+    // (b) it IS a container — both methods collected as children, source order.
+    expect(cls.children.map((c) => c.name)).toEqual(["m", "n"])
+    expect(cls.children.length).toBe(2)
+    for (const m of cls.children) expect(m.children.length).toBe(0)
+    // (c) the decl span COVERS the `@decorator` lines: `@dataclass` is line 1,
+    // the inner `class` keyword is line 3 — startLine must be 1 (the decorator),
+    // NOT 3. Were `decorated_definition` simply descended-through, the inner
+    // class_definition's startLine (3) would leak and the decorators would be
+    // lost from the chunk/outline range.
+    expect(cls.startLine).toBe(1)
+    expect(cls.endLine).toBe(7)
+  })
+
+  test("decorated FUNCTION still surfaces as 'function' (leaf), decorator line in span", async () => {
+    const src = "@cache\ndef plain():\n    return 0\n"
+    const out = await tryParse("d.py", src)
+    if (out === null) return
+    const decls = out.parsed.decls
+    expect(decls.length).toBe(1)
+    const fn = decls[0]!
+    expect(fn.kind).toBe("function")
+    expect(fn.name).toBe("plain")
+    expect(fn.children.length).toBe(0) // a function is a leaf
+    expect(fn.startLine).toBe(1) // `@cache` decorator line included
+    expect(fn.endLine).toBe(3)
+  })
+
+  test("non-decorated python class is UNAFFECTED by the wrapper change", async () => {
+    const out = await tryParse("d.py", "class Bare:\n    def k(self):\n        return 9\n")
+    if (out === null) return
+    const cls = out.parsed.decls.find((d) => d.kind === "class")
+    expect(cls).toBeDefined()
+    expect(cls!.name).toBe("Bare")
+    expect(cls!.startLine).toBe(1) // no decorators — span starts at `class`
+    expect(cls!.children.map((c) => c.name)).toEqual(["k"])
+  })
 })
 
 describe("tree-sitter collectDecls — REPORTED follow-up (walk not isolable)", () => {

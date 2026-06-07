@@ -14,6 +14,7 @@ import { persistSession } from "../memory"
 import { buildPersistDeps } from "../session-resources"
 import type { StopCategory } from "../stop-category"
 import type { AgentConfig, AgentOutcome, MemoryCitation, StopReason } from "../types"
+import { forgetMicrocompactSession } from "./compaction-wire"
 import {
   latestUserTextFromWm,
   observeEffortClassifierPrompt,
@@ -78,8 +79,21 @@ export const cleanupFinishedSession = async (args: {
       message: `skill-mcp shutdown failed: ${errMessage(e)}`,
     })
   }
+  // M1 leak fix (jun-7) — reap this process's background bash shells on session
+  // end. A `timeout_behavior:"background"` command registers a DETACHED shell
+  // (`bash -lc "npm run dev"` + its tree) that outlives the turn; without this
+  // the registry holds it for the whole process lifetime. No-throw wrapped like
+  // the sibling disposals above.
+  try {
+    await getBashBgRegistry().killAll()
+  } catch (e) {
+    args.cfg.stream.emit({ type: "error", message: `bg-shell reap failed: ${errMessage(e)}` })
+  }
   await saveFollowUpQueueSnapshot(args.cfg)
   await savePlanSnapshot(args.cfg)
+  // Leak fix (jun-7) — drop this session's microcompact-cadence map entry so the
+  // module Map in `compaction-wire` doesn't grow one entry per session forever.
+  forgetMicrocompactSession(args.cfg.sessionId)
 }
 
 export const buildFinalAgentOutcome = (args: {

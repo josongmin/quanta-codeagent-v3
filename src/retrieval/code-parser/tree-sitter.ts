@@ -20,7 +20,7 @@ import { readFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { join } from "node:path"
 import { runtimeConfig } from "@/shared"
-import { isContainer, kindForNodeType, langForPath, wasmBasename } from "./lang-table"
+import { isContainer, isWrapper, kindForNodeType, langForPath, wasmBasename } from "./lang-table"
 import type { CodeParserPort, DeclNode, ParsedFile, ParseLang, ParseOutcome } from "./types"
 
 /** Resolve the directory holding the grammar `.wasm` files. Operator override
@@ -76,6 +76,37 @@ const nodeName = (node: TsNode): string => {
   return typeof t === "string" ? t : ""
 }
 
+/** Emit ONE `DeclNode` for a decl whose kind/name/container-ness come from
+ *  `inner`, but whose LINE SPAN comes from `span`. For a plain decl `inner` and
+ *  `span` are the same node; for a python `decorated_definition` wrapper, `span`
+ *  is the wrapper (covering the `@decorator` lines) and `inner` is the wrapped
+ *  class/function (supplying the kind, name and — when a container — children).
+ *  Deterministic; pre-order. */
+const emitDecl = (
+  lang: ParseLang,
+  span: TsNode,
+  inner: TsNode,
+  kind: DeclNode["kind"],
+): DeclNode => {
+  const startLine = span.startPosition.row + 1
+  const endLine = span.endPosition.row + 1
+  const children = isContainer(lang, inner.type) ? collectDeclsInBody(lang, inner) : []
+  // signatureEndLine: the line before the first child's start, else the
+  // start line itself (a leaf decl has a 1-line header for outline purposes;
+  // the body, if any, is everything after).
+  const firstChild = children[0]
+  const signatureEndLine =
+    firstChild !== undefined ? Math.max(startLine, firstChild.startLine - 1) : startLine
+  return {
+    kind,
+    name: nodeName(inner),
+    startLine,
+    endLine,
+    signatureEndLine,
+    children,
+  }
+}
+
 /** Walk a node's named children, lifting decl-typed nodes into `DeclNode`s.
  *  Pre-order, source order. Recurses into container nodes (class/impl bodies)
  *  to collect nested decls. Deterministic. */
@@ -83,34 +114,46 @@ const collectDecls = (lang: ParseLang, parent: TsNode): DeclNode[] => {
   const out: DeclNode[] = []
   for (const child of parent.namedChildren) {
     if (child === null) continue
-    const kind = kindForNodeType(lang, child.type)
-    if (kind === undefined) {
-      // Not a decl itself, but it may CONTAIN decls (e.g. an `export_statement`
-      // wrapping a class, or a python `decorated_definition`). Descend so a
-      // wrapped declaration is not lost.
-      const nested = collectDecls(lang, child)
-      for (const n of nested) out.push(n)
-      continue
-    }
-    const startLine = child.startPosition.row + 1
-    const endLine = child.endPosition.row + 1
-    const children = isContainer(lang, child.type) ? collectDeclsInBody(lang, child) : []
-    // signatureEndLine: the line before the first child's start, else the
-    // start line itself (a leaf decl has a 1-line header for outline purposes;
-    // the body, if any, is everything after).
-    const firstChild = children[0]
-    const signatureEndLine =
-      firstChild !== undefined ? Math.max(startLine, firstChild.startLine - 1) : startLine
-    out.push({
-      kind,
-      name: nodeName(child),
-      startLine,
-      endLine,
-      signatureEndLine,
-      children,
-    })
+    for (const n of declsForChild(lang, child)) out.push(n)
   }
   return out
+}
+
+/** Lift ONE named child into zero-or-more `DeclNode`s. Three cases:
+ *   - WRAPPER (python `decorated_definition`): a decl in its OWN right — it spans
+ *     the decorator lines AND the wrapped decl. Inherit kind + container-ness
+ *     from the inner decl but keep the WRAPPER's span so the `@decorator` lines
+ *     stay in range. Degenerate wrapper (no inner decl) ⇒ descend (lose nothing).
+ *   - KINDED node ⇒ one decl (a container's children are collected by `emitDecl`).
+ *   - otherwise ⇒ descend (e.g. an `export_statement` wrapping a class — don't
+ *     lose the wrapped decl).
+ *  Extracted from {@link collectDecls} to keep that loop under the
+ *  cognitive-complexity cap. Mutually recursive with `collectDecls` (same
+ *  use-before-declaration pattern the file already relies on for `wrappedDecl`). */
+const declsForChild = (lang: ParseLang, child: TsNode): DeclNode[] => {
+  if (isWrapper(lang, child.type)) {
+    const inner = wrappedDecl(lang, child)
+    return inner !== undefined
+      ? [emitDecl(lang, child, inner.node, inner.kind)]
+      : collectDecls(lang, child)
+  }
+  const kind = kindForNodeType(lang, child.type)
+  return kind === undefined ? collectDecls(lang, child) : [emitDecl(lang, child, child, kind)]
+}
+
+/** Find the inner declaration a wrapper node wraps: the first named child that
+ *  is itself a decl (has a kind). Returns the node and its kind, or undefined
+ *  when the wrapper has no decl child. */
+const wrappedDecl = (
+  lang: ParseLang,
+  wrapper: TsNode,
+): { node: TsNode; kind: DeclNode["kind"] } | undefined => {
+  for (const child of wrapper.namedChildren) {
+    if (child === null) continue
+    const kind = kindForNodeType(lang, child.type)
+    if (kind !== undefined) return { node: child, kind }
+  }
+  return undefined
 }
 
 /** For a container node (class/impl/trait/module), find its body child and

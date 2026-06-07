@@ -273,18 +273,43 @@ const buildPerCallWrap =
     }
   }
 
+/** M4 (jun-7 Phase-2) — strip ANSI escape sequences + bare C0 controls from a
+ *  model-facing body, PRESERVING `\n` and `\t` (layout the model legitimately
+ *  reads). `npm`/`cargo`/`pytest` paint their output with SGR colour + cursor /
+ *  erase CSI sequences; left verbatim they reach the LLM as token-wasting noise
+ *  that also degrades parsing. Local to the bash slice (not `@/shared`'s
+ *  `sanitizeLogText`, which strips `\n`/`\t` — wrong for a shell body — and not
+ *  `@/ui`'s `stripAnsi`, which would cross the `@/tool` → `@/ui` fence).
+ *
+ *  Pure, surrogate-safe (the regexes never split a surrogate pair — they only
+ *  match ASCII escape/control ranges), and idempotent (a cleaned body has no
+ *  remaining match). `new RegExp(string)` avoids biome's
+ *  `noControlCharactersInRegex` trip on the literal form. */
+const ANSI_OSC_DCS_RE = new RegExp(
+  "\\u001b\\][\\s\\S]*?(?:\\u0007|\\u001b\\\\)|\\u001b[PX^_][\\s\\S]*?\\u001b\\\\",
+  "g",
+)
+const ANSI_CSI_RE = new RegExp("\\u001b\\[[0-9;?]*[ -/]*[@-~]", "g")
+// C0 controls EXCEPT `\t` (U+0009) and `\n` (U+000A), plus DEL (U+007F). `\r`
+// (U+000D) IS stripped — a bare CR rewinds the line and is pure terminal noise
+// to the model; the visible text after it survives.
+const C0_CONTROL_RE = new RegExp("[\\u0000-\\u0008\\u000b-\\u001f\\u007f]", "g")
+
+export const stripModelControlChars = (s: string): string =>
+  s.replace(ANSI_OSC_DCS_RE, "").replace(ANSI_CSI_RE, "").replace(C0_CONTROL_RE, "")
+
 /** Format the combined stdout/stderr body + status banner.
  *
  *  ADR-0411: no length cap here. The registry's `capToolOutput` is the single
  *  authoritative truncator (head + tail, persists overflow). Bash returns the
- *  buffered body verbatim. */
+ *  buffered body verbatim (after M4 ANSI/control strip). */
 const formatRunBody = (r: {
   stdout: string
   stderr: string
   exitCode: number
   timedOut: boolean
 }): { readonly status: string; readonly body: string } => {
-  const body = [r.stdout, r.stderr].filter(Boolean).join("\n").trimEnd()
+  const body = stripModelControlChars([r.stdout, r.stderr].filter(Boolean).join("\n")).trimEnd()
   const status = r.timedOut ? "timed out" : r.exitCode === 0 ? "exit 0" : `exit ${r.exitCode}`
   return { status, body }
 }
@@ -337,7 +362,7 @@ const buildBackgroundCompletedResult = (snap: {
   stderr: string
   exitCode: number | null
 }): ToolEvent => {
-  const body = [snap.stdout, snap.stderr].filter(Boolean).join("\n").trimEnd()
+  const body = stripModelControlChars([snap.stdout, snap.stderr].filter(Boolean).join("\n")).trimEnd()
   const exit = snap.exitCode ?? -1
   const isKilled = snap.status === "killed" || snap.status === "aborted"
   const status = isKilled ? "killed" : `exit ${exit}`

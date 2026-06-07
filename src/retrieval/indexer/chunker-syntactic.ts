@@ -68,16 +68,52 @@ const emit = (input: ChunkInput, lines: readonly string[], r: Range): FileChunk 
  *  altering the coverage range, so the union stays exact via the first
  *  window). To keep coverage exact AND simple, we cut the body at line
  *  windows and let the first window own the signature. */
-const splitLeaf = (decl: DeclNode, windowLines: number): Range[] => {
+const splitLeaf = (decl: DeclNode, windowLines: number): Range[] =>
+  splitWindow(decl.startLine, decl.endLine, windowLines)
+
+/** Cut an arbitrary inclusive [start,end] line range into CONTIGUOUS,
+ *  non-overlapping windows of at most `windowLines` lines each. The union of
+ *  the returned ranges is exactly [start,end] (no holes, no overlaps), so this
+ *  is coverage-safe for both leaf bodies AND merge-accumulator / gap ranges.
+ *  Deterministic: a pure function of (start,end,windowLines). */
+const splitWindow = (start: number, end: number, windowLines: number): Range[] => {
+  if (end < start) return []
+  // A non-positive window would loop forever / under-cover; treat as "no split"
+  // so coverage stays exact (defensive — knobs are validated upstream).
+  const w = windowLines > 0 ? windowLines : end - start + 1
   const out: Range[] = []
-  let cursor = decl.startLine
-  while (cursor <= decl.endLine) {
-    const end = Math.min(cursor + windowLines - 1, decl.endLine)
-    out.push({ startLine: cursor, endLine: end })
-    if (end >= decl.endLine) break
-    cursor = end + 1
+  let cursor = start
+  while (cursor <= end) {
+    const winEnd = Math.min(cursor + w - 1, end)
+    out.push({ startLine: cursor, endLine: winEnd })
+    if (winEnd >= end) break
+    cursor = winEnd + 1
   }
   return out
+}
+
+/** Push a [start,end] range onto `out`, WINDOW-SPLITTING it first if it would
+ *  exceed `maxLines` so no emitted chunk is oversized. Empty ranges (end <
+ *  start) are dropped. Coverage of [start,end] is exact and contiguous.
+ *
+ *  The split window is `min(maxLines, windowLines)` so the bound the guard
+ *  checks (maxLines) is the bound the split ENFORCES: a user-set windowLines >
+ *  maxLines must NOT leak a still-oversized chunk past the guard. (windowLines
+ *  ≤ 0 is treated as "use maxLines" — splitWindow's own non-positive defense is
+ *  for the leaf path; here we always have a positive bound.) */
+const pushBounded = (
+  out: Range[],
+  start: number,
+  end: number,
+  opts: Required<SyntacticChunkOptions>,
+): void => {
+  if (end < start) return
+  if (end - start + 1 <= opts.maxLines) {
+    out.push({ startLine: start, endLine: end })
+    return
+  }
+  const splitBy = opts.windowLines > 0 ? Math.min(opts.maxLines, opts.windowLines) : opts.maxLines
+  for (const r of splitWindow(start, end, splitBy)) out.push(r)
 }
 
 /** Produce the ranges for ONE top-level decl. ≤ maxLines ⇒ one whole-unit
@@ -142,7 +178,10 @@ const emitOversized = (
   opts: Required<SyntacticChunkOptions>,
 ): void => {
   if (s.pending) {
-    s.out.push({ startLine: s.accStart, endLine: decl.startLine - 1 })
+    // The pending merge accumulator (which owns the leading gap lines up to this
+    // decl) may exceed maxLines if a large inter-decl gap precedes an oversized
+    // decl — window-split it so no emitted chunk is oversized.
+    pushBounded(s.out, s.accStart, decl.startLine - 1, opts)
     s.pending = false
   }
   const dr = rangesForDecl(decl, opts)
@@ -160,23 +199,39 @@ const emitOversized = (
  *  would exceed maxLines (measured from accStart). */
 const mergeSmall = (s: PlanState, decl: DeclNode, opts: Required<SyntacticChunkOptions>): void => {
   if (s.pending && decl.endLine - s.accStart + 1 > opts.maxLines) {
-    s.out.push({ startLine: s.accStart, endLine: s.accEnd })
+    // Adding this decl would push the accumulator past maxLines: flush what we
+    // have. The flushed range may ITSELF exceed maxLines when a large gap sits
+    // between the previous decl and accEnd (the accumulator is gap-inclusive
+    // from accStart) — window-split it so no emitted chunk is oversized. The
+    // new accumulator re-anchors at accEnd+1 so the inter-decl gap that follows
+    // attaches to the NEXT chunk (and is itself bounded on its own flush).
+    pushBounded(s.out, s.accStart, s.accEnd, opts)
     s.accStart = s.accEnd + 1
   }
   s.accEnd = decl.endLine
   s.pending = true
 }
 
-/** Stretch the LAST range (or push one) so the union covers [1, lineCount]. */
-const coverTail = (out: Range[], lineCount: number): void => {
+/** Stretch the LAST range (or push one) so the union covers [1, lineCount].
+ *  Trailing lines after the last decl attach to the last chunk when that keeps
+ *  it ≤ maxLines; otherwise they become their own bounded window(s) so the tail
+ *  is never inflated past maxLines. Coverage of [1,lineCount] stays exact and
+ *  contiguous either way. */
+const coverTail = (
+  out: Range[],
+  lineCount: number,
+  opts: Required<SyntacticChunkOptions>,
+): void => {
   const tail = out[out.length - 1]
   const lastEnd = tail !== undefined ? tail.endLine : 0
   if (lastEnd >= lineCount) return
-  if (tail !== undefined) {
+  if (tail !== undefined && lineCount - tail.startLine + 1 <= opts.maxLines) {
     out[out.length - 1] = { startLine: tail.startLine, endLine: lineCount }
-  } else {
-    out.push({ startLine: 1, endLine: lineCount })
+    return
   }
+  // Either no chunk yet, or stretching the tail would oversize it: emit the
+  // uncovered trailing region [lastEnd+1, lineCount] as bounded window(s).
+  pushBounded(out, lastEnd + 1, lineCount, opts)
 }
 
 /** Walk top-level decls, MERGING tiny siblings up to maxLines and absorbing
@@ -198,8 +253,12 @@ const planRanges = (
     if (oversized) emitOversized(s, decl, opts)
     else mergeSmall(s, decl, opts)
   }
-  if (s.pending) s.out.push({ startLine: s.accStart, endLine: s.accEnd })
-  coverTail(s.out, lineCount)
+  // Flush the final accumulator. This was the ORIGINAL oversize bug: the tail
+  // accumulator was emitted whole with no size check, so a small trailing decl
+  // sitting after a large inter-decl gap produced a chunk far larger than
+  // maxLines. Route it through pushBounded so the trailing chunk is bounded too.
+  if (s.pending) pushBounded(s.out, s.accStart, s.accEnd, opts)
+  coverTail(s.out, lineCount, opts)
   return s.out
 }
 

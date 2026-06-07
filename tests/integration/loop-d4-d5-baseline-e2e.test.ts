@@ -196,7 +196,11 @@ describe("D5 cross-turn baseline capture through the real loop", () => {
     // findBoundary HAS a prefix, but the trigger (chars/4, tiny) stays under
     // threshold because no over-threshold authoritative baseline was captured.
     const out = await runAgent(
-      cfg({ llm, messages: richSeed(), compaction: { thresholdTokens: 60_000, keepRecentTurns: 1 } }),
+      cfg({
+        llm,
+        messages: richSeed(),
+        compaction: { thresholdTokens: 60_000, keepRecentTurns: 1 },
+      }),
     )
     expect(out.reason).toBe("completed")
     // No compaction anywhere: no request saw a summary head.
@@ -288,7 +292,9 @@ describe("D4 model-derived threshold through the real loop", () => {
       toolTurn({ inputTokens: 140_000, model: "claude-opus-4-8" }),
       textTurn("second"),
     ])
-    const out = await runAgent(cfg({ llm, messages: richSeed(), compaction: { keepRecentTurns: 1 } }))
+    const out = await runAgent(
+      cfg({ llm, messages: richSeed(), compaction: { keepRecentTurns: 1 } }),
+    )
     expect(out.reason).toBe("completed")
     // 140k < 155k derived threshold -> NO compaction.
     expect(llm.inputs.some((i) => hasSummaryHead(i))).toBe(false)

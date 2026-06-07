@@ -5,6 +5,7 @@ import { applyPatchTool } from "./apply-patch"
 import { makeApplyPatchStructuredTool } from "./apply-patch-structured-tool"
 import { type AppshotArtifactSink, type AppshotPort, appshotVerifyTool } from "./appshot"
 import { type ArtifactRegistryPort, artifactTools } from "./artifact"
+import { type AskUserPort, askUserTool } from "./ask-user"
 import { automationUpdateTool } from "./automation_update"
 import { makeBashTool } from "./bash"
 import { bashAwaitTool } from "./bash/await"
@@ -632,6 +633,13 @@ export interface DefaultToolPorts {
    *  when `QUANTA_ARTIFACT_STORE` is on. `register` is host-side (the generation
    *  tools register their outputs); the model only lists/inspects/destroys. */
   artifactRegistry?: ArtifactRegistryPort
+  /** ADR-0494 — when set, append `ask_user` (generalized structured elicitation:
+   *  free-text / yes-no / number / single- or multi-select). Absent ⇒ tool NOT
+   *  registered (byte-identical default menu). The composition root wires a
+   *  prompter (adapting the existing `@/mcp/elicitation` host prompter to the
+   *  `AskUserPort` shape) ONLY when `QUANTA_ASK_USER` is on; a headless host
+   *  passes a port that returns typed `headless-denied`, so wiring is always safe. */
+  askUser?: AskUserPort
   /** file_history_rewind — when set, append `file_history_rewind` (per-file
    *  session-snapshot list/restore) bound to this session's history store.
    *  Absent ⇒ tool NOT registered (byte-identical default menu). The
@@ -815,6 +823,14 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => {
   // host's session registry are appended.
   if (ports.artifactRegistry !== undefined) {
     base.push(...artifactTools(ports.artifactRegistry))
+  }
+  // ADR-0494 — conditional registration of `ask_user` (generalized structured
+  // elicitation: free-text / yes-no / number / single- or multi-select). Absent
+  // port ⇒ default set is byte-identical (the model never sees the tool).
+  // Present ⇒ the tool bound to the host prompter is appended (read-only; the
+  // host returns a typed `headless-denied` when no human is reachable).
+  if (ports.askUser !== undefined) {
+    base.push(askUserTool(ports.askUser) as Tool)
   }
   // file_history_rewind — conditional registration of the per-file snapshot
   // list/restore tool. Absent store ⇒ default set is byte-identical (the model

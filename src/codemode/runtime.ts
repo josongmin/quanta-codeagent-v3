@@ -79,6 +79,44 @@ interface DriveState {
 type Ctx = import("quickjs-emscripten").QuickJSContext
 type Handle = import("quickjs-emscripten").QuickJSHandle
 
+/** Read the runtime's CURRENT heap usage (`computeMemoryUsage().memory_used_size`,
+ *  quickjs-emscripten 0.32 — a real malloc-stats measurement, NOT an error-string
+ *  heuristic). Returns the live byte count, or `undefined` if the probe itself
+ *  could not run (e.g. the runtime is already at the malloc limit so the probe's
+ *  own allocation fails — handled as "cannot measure", the hard cap then applies).
+ *  The transient handle is disposed immediately so the poll leaks nothing.
+ *
+ *  Called ONCE on the TERMINAL fault path (POST-FAULT probe — RFC §4.4, jun-07
+ *  structural fix), NOT per interrupt tick: the audit proved a per-tick probe
+ *  (a) adds ~26% overhead to every cell, and (b) still MISLABELS the common bulk
+ *  allocation (`new Array(N).fill`, `JSON.parse(huge)`, `"x".repeat(N)`) — those
+ *  fire the interrupt handler ~once then hard-OOM BEFORE any 0.9-fraction is
+ *  observed. After the OOM fault the cell has stopped growing, so a single probe
+ *  reads the genuinely-breached heap (the audit confirmed the probe still
+ *  succeeds post-OOM — the runtime is not torn down until `runCodeCell`'s
+ *  finally). The transient handle is disposed in finally so the probe leaks
+ *  nothing even on the OOM path. */
+const readMemoryUsedBytes = (ctx: Ctx): number | undefined => {
+  let handle: Handle | undefined
+  try {
+    handle = ctx.runtime.computeMemoryUsage()
+    const usage = ctx.dump(handle) as { memory_used_size?: unknown }
+    const used = usage.memory_used_size
+    return typeof used === "number" ? used : undefined
+  } catch {
+    // The probe allocates; under extreme pressure that allocation can itself
+    // trip the malloc limit. Treat as unmeasurable — the hard cap still bounds
+    // the cell (it just surfaces as the generic OOM `error`, not `memory`).
+    return undefined
+  } finally {
+    try {
+      handle?.dispose()
+    } catch {
+      /* runtime torn down mid-probe — handle freed with it. */
+    }
+  }
+}
+
 /**
  * Run one code cell. NEVER throws — every failure path returns a typed
  * {@link CodeCellResult}.
@@ -113,10 +151,22 @@ export const runCodeCell = async (opts: RunCodeCellOptions): Promise<CodeCellRes
   let disposePending: () => void = () => {}
   try {
     ctx.runtime.setMemoryLimit(limits.memoryBytes)
-    // Interrupt handler (RFC §4.4): abort / deadline. Returning `true` interrupts
-    // a SYNCHRONOUS run (a tight `while(true){}` loop is broken here — the only
-    // place a sync-infinite cell can be stopped). The async drive loop also has an
-    // outer deadline check, so a stalled (non-looping) cell is bounded too.
+    // Interrupt handler (RFC §4.4): abort / deadline ONLY. Returning `true`
+    // interrupts a SYNCHRONOUS run (a tight `while(true){}` loop is broken here —
+    // the only place a sync-infinite cell can be stopped). The async drive loop
+    // also has an outer deadline check, so a stalled (non-looping) cell is bounded
+    // too.
+    //
+    // MEMORY is NOT checked here (jun-07 structural fix). QuickJS invokes the
+    // interrupt handler at backward-jumps/calls, NOT on allocation — so a BULK
+    // allocation (`new Array(N).fill`, `JSON.parse(huge)`, `"x".repeat(N)`,
+    // `Array.from({length:N})`) fires the handler ~once then hard-OOMs BEFORE any
+    // fraction-of-cap is observed, and a per-tick probe ALSO taxes every cell ~26%.
+    // Instead, memory is classified ONCE on the terminal fault path
+    // (`classifyMemoryFault` below): when the cell ends in a fault/uncaught throw
+    // we probe `computeMemoryUsage().memory_used_size` and, if it reached the
+    // configured cap, relabel the run `"memory"`. Zero per-tick cost; covers the
+    // common bulk-OOM case the watchdog missed.
     ctx.runtime.setInterruptHandler(() => {
       if (signal.aborted) {
         drive.abnormal = "aborted"
@@ -143,6 +193,14 @@ export const runCodeCell = async (opts: RunCodeCellOptions): Promise<CodeCellRes
     disposePending = binding.disposePending
 
     const collected = await evalAndDrive(ctx, code, drive, deadline, now)
+    // POST-FAULT memory classification (RFC §4.4, jun-07 structural fix): if the
+    // cell ended in a FAULT/uncaught throw (`collected.kind === "error"`) and no
+    // other abnormal reason already won (timeout/abort/cap), probe the heap ONCE.
+    // If usage reached the configured cap the fault was an OOM → relabel `"memory"`
+    // (status AND message both flow from `drive.abnormal`, so they stay consistent
+    // — no status="memory"/message="runtime fault" divergence). The probe runs
+    // ONLY here → zero per-tick cost.
+    classifyMemoryFault(ctx, collected, drive, limits.memoryBytes)
     return finalize(collected, {
       limits,
       ledger,
@@ -180,8 +238,75 @@ export const runCodeCell = async (opts: RunCodeCellOptions): Promise<CodeCellRes
   }
 }
 
-/** The raw collected outcome of the drive (before redact/cap/ledger shaping). */
-type Collected = { kind: "value"; value: unknown } | { kind: "error"; message: string }
+/** The raw collected outcome of the drive (before redact/cap/ledger shaping). An
+ *  `error` carries `oom: true` when the fault was QuickJS's own out-of-memory
+ *  exception (see {@link isQuickJsOom}) — the structural signal the post-fault
+ *  memory classifier keys on. */
+type Collected =
+  | { kind: "value"; value: unknown }
+  | { kind: "error"; message: string; oom?: boolean }
+
+/** Is a faulted error QuickJS's OWN out-of-memory exception? QuickJS raises
+ *  resource exhaustion as an `InternalError` whose canonical message is exactly
+ *  `"out of memory"` (the `JS_ThrowOutOfMemory` path — the same identity for a
+ *  bulk `new Array(N).fill`, `JSON.parse(huge)`, `"x".repeat(N)`,
+ *  `Array.from({length:N})`, AND an incremental loop). This keys on the structured
+ *  error TYPE (`name`), NOT a fragile substring search of arbitrary user message
+ *  text: a plain `throw new Error("out of memory")` has `name === "Error"` and is
+ *  NOT matched; a `RangeError`/`TypeError`/stack-overflow is NOT matched.
+ *
+ *  BEST-EFFORT (known + accepted, pinned by the spoof case in
+ *  `code-mode-memory-fault-hellgate`): a cell CAN forge the engine's OOM identity
+ *  — `throw Object.assign(new Error("out of memory"), { name: "InternalError" })`
+ *  — to self-label its failure "memory". This is COSMETIC-ONLY: `status` only
+ *  selects the model-visible diagnostic tag (`code_cell_memory` vs
+ *  `code_cell_error`) and BOTH are `ok:false`; the forged label cannot escape the
+ *  sandbox, widen the tool surface, or evade a cap, and it is shown back to the
+ *  same model that authored the cell. The engine's REAL OOMs are always caught.
+ *  We deliberately do NOT bolt on a counter-measure: a post-OOM heap probe reads
+ *  LOW for both a real OOM (the over-cap allocation is refused atomically, leaving
+ *  no residual heap) and a forged throw, so it cannot distinguish them — a guard
+ *  that can't separate the cases would be exactly the fragile heuristic to avoid. */
+const isQuickJsOom = (name: unknown, message: unknown): boolean =>
+  name === "InternalError" && message === "out of memory"
+
+/** POST-FAULT memory classification (RFC §4.4, jun-07 structural fix). Called
+ *  ONCE after the drive loop, BEFORE `finalize` — ZERO per-tick cost (the audit
+ *  proved a per-tick `computeMemoryUsage()` probe taxes every cell ~26% AND still
+ *  misses the bulk-OOM shapes the interrupt handler never observes growing).
+ *
+ *  When the cell ended in a fault / uncaught throw (`collected.kind === "error"`)
+ *  and no other abnormal reason already won (timeout/abort/cap), relabel
+ *  `drive.abnormal = "memory"` (so status + message both flow from it, staying
+ *  consistent) when EITHER:
+ *    (1) the fault is QuickJS's typed out-of-memory exception (`collected.oom` —
+ *        the deterministic signal that catches ALL bulk + incremental OOM shapes;
+ *        a rejected bulk allocation leaves NO residual heap, so accounting alone
+ *        cannot see it), OR
+ *    (2) a single confirming heap probe shows usage REACHED the configured cap
+ *        (`limits.memoryBytes` — the cap IS the threshold, no magic fraction);
+ *        defense-in-depth for an incremental breach the engine surfaced
+ *        differently.
+ *  A non-OOM fault (a plain `throw`, a stack blowout below the cap) leaves
+ *  `abnormal` unset → stays `"error"`. If the probe throws or cannot measure it
+ *  returns `undefined` and we fall back to the `oom` flag (NO-THROW preserved). */
+const classifyMemoryFault = (
+  ctx: Ctx,
+  collected: Collected,
+  drive: DriveState,
+  memoryBytes: number,
+): void => {
+  if (collected.kind !== "error") return
+  if (drive.abnormal !== undefined) return
+  if (collected.oom === true) {
+    drive.abnormal = "memory"
+    return
+  }
+  const used = readMemoryUsedBytes(ctx)
+  if (used !== undefined && used >= memoryBytes) {
+    drive.abnormal = "memory"
+  }
+}
 
 /**
  * Eval the wrapped program (SYNCHRONOUSLY — `evalCode` returns the top-level cell
@@ -206,10 +331,11 @@ const evalAndDrive = async (
     return { kind: "error", message: errMessage(e) }
   }
   if (evalResult.error) {
-    // Synchronous parse error / top-level throw before the promise formed.
-    const msg = dumpErrorMessage(ctx, evalResult.error)
+    // Synchronous parse error / top-level throw before the promise formed (a
+    // sync bulk allocation can OOM here too — carry the `oom` flag through).
+    const { message, oom } = dumpError(ctx, evalResult.error)
     evalResult.error.dispose()
-    return { kind: "error", message: msg }
+    return { kind: "error", message, oom }
   }
 
   const promiseHandle = evalResult.value
@@ -315,9 +441,13 @@ const collectPromise = (ctx: Ctx, promiseHandle: Handle, drive: DriveState): Col
       return { kind: "value", value }
     }
     if (state.type === "rejected") {
-      const msg = dumpErrorMessage(ctx, state.error)
+      // A cell that OOMs inside the async IIFE rejects the cell promise with
+      // QuickJS's `InternalError: out of memory` — carry the `oom` flag so the
+      // post-fault classifier relabels it `"memory"` (this is the path the bulk
+      // + incremental OOM shapes take).
+      const { message, oom } = dumpError(ctx, state.error)
       state.error.dispose()
-      return { kind: "error", message: msg }
+      return { kind: "error", message, oom }
     }
     return { kind: "value", value: undefined }
   } catch {
@@ -371,12 +501,16 @@ const finalize = (
 ): CodeCellResult => {
   const status: CodeCellStatus =
     state.abnormal !== undefined ? state.abnormal : collected.kind === "error" ? "error" : "ok"
+  // Message precedence: an ABNORMAL reason (timeout/memory/cap/abort) ALWAYS wins
+  // the message, even when `collected` is a fault `error` — so a post-fault
+  // memory-classified run shows "memory limit exceeded", NOT the generic "runtime
+  // fault" text (status="memory"/message="runtime fault" divergence, fixed jun-07).
   const raw =
-    status === "ok" && collected.kind === "value"
-      ? stringifyReturn(collected.value)
-      : collected.kind === "error"
-        ? collected.message
-        : abnormalMessage(state.abnormal)
+    state.abnormal !== undefined
+      ? abnormalMessage(state.abnormal)
+      : collected.kind === "value"
+        ? stringifyReturn(collected.value)
+        : collected.message
   const { text, truncated } = redactAndCap(raw, state.limits.outputCap)
   return {
     status,
@@ -414,18 +548,26 @@ const stringifyReturn = (value: unknown): string => {
   }
 }
 
-/** Extract a SANITIZED message from a thrown QuickJS error handle — only the
- *  `.message` (cell-internal stack stays inside the VM, RFC §4.5). */
-const dumpErrorMessage = (ctx: Ctx, errHandle: Handle): string => {
+/** Extract BOTH the sanitized `.message` AND whether the error is QuickJS's own
+ *  out-of-memory exception (`oom`) from a thrown error handle. The `oom` flag
+ *  keys on the structured error `name` (`InternalError`) + the canonical engine
+ *  message via {@link isQuickJsOom} — used by the post-fault memory classifier so
+ *  a bulk OOM (which leaves no residual heap to measure) is still labelled
+ *  `"memory"`. Only the `.message` is surfaced to the model (cell-internal stack
+ *  stays inside the VM, RFC §4.5). */
+const dumpError = (ctx: Ctx, errHandle: Handle): { message: string; oom: boolean } => {
   try {
     const dumped = ctx.dump(errHandle)
     if (dumped !== null && typeof dumped === "object" && "message" in dumped) {
       const m = (dumped as { message?: unknown }).message
-      return typeof m === "string" ? m : String(m)
+      const name = (dumped as { name?: unknown }).name
+      const message = typeof m === "string" ? m : String(m)
+      return { message, oom: isQuickJsOom(name, m) }
     }
-    return typeof dumped === "string" ? dumped : JSON.stringify(dumped)
+    const message = typeof dumped === "string" ? dumped : JSON.stringify(dumped)
+    return { message, oom: false }
   } catch {
-    return "code cell threw a non-introspectable error"
+    return { message: "code cell threw a non-introspectable error", oom: false }
   }
 }
 
