@@ -20,6 +20,7 @@ import {
 } from "@/config/knob-catalog"
 import { allInventoryKnobs } from "@/config/knob-inventory"
 import { allKnobs } from "@/runner/knobs"
+import { allRuntimeConfigKnobs } from "@/shared/runtime-config-knobs"
 // Side-effect: populate the @/runner/knobs registry (its def modules self-register
 // via `registerKnob(...)` on import). Without this, `allKnobs()` is empty unless
 // the CLI bootstrap already ran. Importing the bundle makes the catalog complete
@@ -46,6 +47,13 @@ export const buildKnobCatalog = (): ReadonlyMap<string, UnifiedKnob> => {
       group: k.group,
       home: k.home,
       readSite: k.readSite,
+    })),
+    runtimeConfig: allRuntimeConfigKnobs().map((k) => ({
+      envKey: k.envKey,
+      kind: k.kind,
+      default: k.default,
+      describe: k.describe,
+      group: k.group,
     })),
     runner: [...allKnobs().values()].map((k) => ({
       envKey: k.envKey,

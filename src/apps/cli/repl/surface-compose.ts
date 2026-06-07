@@ -14,6 +14,7 @@ import {
   defaultConversationCheckpointStore,
 } from "@/agent/conversation-checkpoint"
 import { type InboundMode, parseInboundMode } from "@/agent/inbound-mode"
+import { createInterruptedTurnBuffer } from "@/agent/interrupted-turn"
 import {
   defaultPlanQueueStore,
   type PlanQueueStore,
@@ -794,6 +795,12 @@ export const composeSurfaceWires = (
   const conversationActions = isEnvTruthy(envSource.QUANTA_CONVERSATION_ACTIONS)
     ? createConversationActionSurface()
     : undefined
+  // §11.5 — the session interrupted-turn restore buffer. Minted alongside the
+  // conversation-action surface (interrupt/resume ride that surface). The loop
+  // captures a partial turn into it on a conversation-action `cancel`, and a
+  // `resume` re-injects it. Absent ⇒ no capture, resume is a no-op.
+  const interruptedTurnBuffer =
+    conversationActions !== undefined ? createInterruptedTurnBuffer() : undefined
   // §steer — session-mutable inbound delivery mode (queue | weave | interrupt),
   // seeded from QUANTA_INBOUND_MODE (default `queue`), mutated at runtime by the
   // `/inbound` slash. The session loop reads `.current` per mid-turn line; the
@@ -852,6 +859,7 @@ export const composeSurfaceWires = (
           activeTurnRef: conversationActions.activeTurnRef,
         }
       : {}),
+    ...(interruptedTurnBuffer !== undefined ? { interruptedTurnBuffer } : {}),
     ...(shadowVerify !== undefined ? { shadowVerify } : {}),
   }
   // ADR-0292 — turn-end record wire. Env-gated: `QUANTA_CHECKPOINT_CONV=on`

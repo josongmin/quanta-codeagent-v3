@@ -374,11 +374,11 @@ describe("/knobs help", () => {
 })
 
 describe("/knobs completion", () => {
-  test("empty partial ⇒ all 7 subcommands", () => {
+  test("empty partial ⇒ all 9 subcommands", () => {
     const h = buildHarness()
     const out = h.cmd.complete?.([], "", h.ctx) ?? []
     expect(out.map((c) => c.value).sort()).toEqual(
-      ["help", "list", "preset", "reset", "save", "set", "show"].sort(),
+      ["all", "find", "help", "list", "preset", "reset", "save", "set", "show"].sort(),
     )
   })
 

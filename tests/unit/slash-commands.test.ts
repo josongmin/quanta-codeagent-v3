@@ -122,6 +122,7 @@ describe("BUILTINS table", () => {
       "/cancel",
       "/summarize-now",
       "/inbound",
+      "/resume-turn",
       // ── app layer (./slash/registry-app.ts) ─────────────────────────
       "/permission",
       "/mcp",

@@ -26,6 +26,11 @@ import {
   createObservabilityEmitter,
   type ObservabilityEmitterHandle,
 } from "./observability-emitter"
+import {
+  buildWebKnobCatalog,
+  catalogByGroup,
+  resolveCatalogValues,
+} from "./knob-catalog-wire"
 import { openThreadStore } from "./persistence-sqlite"
 import {
   createSessionRegistry,
@@ -671,6 +676,25 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
           return jsonResponse(404, { error: "persistence_disabled" })
         }
         return jsonResponse(200, { threads: threadStore.listThreads() })
+      }
+      // ADR-0503 P3 — unified knob catalog for the web settings UI (read-only;
+      // mutation stays the closed-allowlist POST /config). Secrets are absent
+      // from the inventory by construction, so nothing here leaks credentials.
+      if (url.pathname === "/api/knobs" && req.method === "GET") {
+        const denied = requireAuth(url, req)
+        if (denied !== null) return denied
+        const catalog = buildWebKnobCatalog()
+        const current = resolveCatalogValues(catalog, process.env)
+        const grouped = [...catalogByGroup(catalog).entries()].map(([group, knobs]) => ({
+          group,
+          knobs: knobs.map((k) => ({
+            ...k,
+            value: current.get(k.envKey)?.raw,
+            source: current.get(k.envKey)?.source,
+            isDefault: current.get(k.envKey)?.isDefault,
+          })),
+        }))
+        return jsonResponse(200, { total: catalog.size, groups: grouped })
       }
       {
         const eventsMatch = url.pathname.match(/^\/threads\/([^/]+)\/events$/)

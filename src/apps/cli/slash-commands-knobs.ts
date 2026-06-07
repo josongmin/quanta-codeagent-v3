@@ -42,6 +42,13 @@ import {
   writeKnobConfig,
 } from "@/runner/knobs"
 import { errMessage } from "@/shared"
+import {
+  buildKnobCatalog,
+  catalogByGroup,
+  resolveCatalogValues,
+  searchCatalog,
+  type UnifiedKnob,
+} from "./knob-catalog-wire"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 
 /** Surface-wire contract passed to {@link buildKnobsSlash}. */
@@ -65,7 +72,7 @@ export interface KnobsSurfaceWire {
   readonly configPath: string
 }
 
-const SUBCOMMANDS = ["show", "list", "set", "reset", "preset", "save", "help"] as const
+const SUBCOMMANDS = ["show", "list", "all", "find", "set", "reset", "preset", "save", "help"] as const
 type Subcommand = (typeof SUBCOMMANDS)[number]
 const isSubcommand = (s: string): s is Subcommand => (SUBCOMMANDS as readonly string[]).includes(s)
 
@@ -109,6 +116,10 @@ export const buildKnobsSlash = (wire: KnobsSurfaceWire): SlashCommand => ({
         return renderActive(wire, ctx)
       case "list":
         return renderList(wire, ctx)
+      case "all":
+        return renderAll(ctx)
+      case "find":
+        return renderFind(args.slice(1).join(" "), ctx)
       case "set":
         return doSet(args.slice(1), wire, ctx)
       case "reset":
@@ -160,6 +171,56 @@ const fmtValue = (v: unknown): string => {
   if (v === undefined || v === null) return "-"
   if (typeof v === "object") return JSON.stringify(v)
   return String(v)
+}
+
+/* ─── /knobs all | find (UNIFIED catalog — all 200+ knobs, ADR-0503 P3) ── */
+
+/** One compact catalog line: `QUANTA_X = value  ·describe` with a home tag. */
+const catalogLine = (k: UnifiedKnob, raw: string | undefined, isDefault: boolean): string => {
+  const val = raw === undefined ? "-" : raw
+  const mark = isDefault ? "" : "*" // '*' = overridden (non-default)
+  const tag = k.home === "cli" ? "" : ` [${k.home}]`
+  return `  ${k.envKey}=${val}${mark}${tag}  — ${k.describe}`
+}
+
+/** `/knobs all` — the FULL unified catalog (cli + inventory + runner), grouped,
+ *  with each knob's current value + source. This is the discoverability surface
+ *  the 3-registry split otherwise hides. */
+const renderAll = (ctx: SlashContext): number => {
+  const catalog = buildKnobCatalog()
+  const values = resolveCatalogValues(catalog, process.env)
+  const grouped = catalogByGroup(catalog)
+  ctx.out(`All ${catalog.size} knobs ('*' = overridden; [home] = non-CLI):\n`)
+  for (const [group, knobs] of grouped) {
+    ctx.out(`\n${group} (${knobs.length})\n`)
+    for (const k of knobs) {
+      const v = values.get(k.envKey)
+      ctx.out(`${catalogLine(k, v?.raw, v?.isDefault ?? true)}\n`)
+    }
+  }
+  return 0
+}
+
+/** `/knobs find <query>` — fuzzy search across the unified catalog (envKey +
+ *  describe + group), envKey-prefix ranked first. */
+const renderFind = (query: string, ctx: SlashContext): number => {
+  if (query.trim().length === 0) {
+    ctx.err("/knobs find: needs a query (e.g. /knobs find memory)\n")
+    return 1
+  }
+  const catalog = buildKnobCatalog()
+  const values = resolveCatalogValues(catalog, process.env)
+  const hits = searchCatalog(catalog, query)
+  if (hits.length === 0) {
+    ctx.out(`No knob matches "${query}".\n`)
+    return 0
+  }
+  ctx.out(`${hits.length} knob(s) matching "${query}":\n`)
+  for (const k of hits) {
+    const v = values.get(k.envKey)
+    ctx.out(`${catalogLine(k, v?.raw, v?.isDefault ?? true)}\n`)
+  }
+  return 0
 }
 
 /* ─── /knobs show ───────────────────────────────────────────────────── */
@@ -342,6 +403,8 @@ const FAMILY_HELP = [
   "/knobs                  — alias for `/knobs show`",
   "/knobs show             — render active knobs (compact box)",
   "/knobs list             — render full registry + active marks",
+  "/knobs all              — full UNIFIED catalog (all 200+ knobs, grouped)",
+  "/knobs find <query>     — search the unified catalog by name/desc/group",
   "/knobs set <id>=<val>   — set a session-level override",
   "/knobs reset <id>       — clear a session override",
   `/knobs preset <name>    — apply a named bundle (known: ${Object.keys(KNOB_PRESETS).join(", ")})`,

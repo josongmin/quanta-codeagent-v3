@@ -53,7 +53,9 @@ const isDeclarationFile = (path: string): boolean =>
   // the CLI-local registry (ADR-0503 P1) — declared, not orphan
   path.endsWith("src/apps/cli/cli-knobs.ts") ||
   // the daemon/agent-side declaration inventory (ADR-0503 P1)
-  path.endsWith("src/config/knob-inventory.ts")
+  path.endsWith("src/config/knob-inventory.ts") ||
+  // the typed runtime-config knob declaration registry (ADR-0503 P3)
+  path.endsWith("src/shared/runtime-config-knobs.ts")
 
 /** Files excluded from the orphan scan entirely: tests, type decls, and the
  *  `--help` doc renderer (it NAMES knobs as documentation, not reads). */

@@ -499,6 +499,14 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
    *  reflecting the stop reason after finish). Absent ⇒ no state exposed
    *  (byte-identical legacy). */
   activeTurnRef?: { current: ActiveTurnState }
+  /** §11.5 — interrupted-turn restore buffer. When a turn is aborted by a
+   *  conversation-action `cancel` (interrupt mode / `/cancel`), the loop captures
+   *  the partial turn into THIS session-scoped buffer; a later `resume` action
+   *  re-injects it (the agent picks the interrupted task back up). Absent ⇒ no
+   *  capture, `resume` is a no-op (byte-identical legacy). The buffer's presence
+   *  is the session-level "interrupted" signal (vs the per-turn
+   *  {@link ActiveTurnState.isInterrupted} which resets each boundary). */
+  interruptedTurnBuffer?: import("./interrupted-turn").InterruptedTurnBuffer
   /** ADR-0030: awaited ONCE at the top of each turn (before the next LLM
    *  call) so a surface can fence a mid-turn injection into the conversation
    *  buffer before the loop snapshots it. Absent ⇒ never awaited

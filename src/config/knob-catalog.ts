@@ -51,9 +51,20 @@ export interface RunnerKnobRow {
   readonly hotToggleable?: boolean
 }
 
+/** Typed runtime-config knobs (consumed as `runtimeConfig().field`; declared in
+ *  `@/shared/runtime-config-knobs`). Always `home: "runtime-config"`. */
+export interface RuntimeConfigRow {
+  readonly envKey: string
+  readonly kind: UnifiedKnob["kind"]
+  readonly default: UnifiedKnob["default"]
+  readonly describe: string
+  readonly group: string
+}
+
 export interface CatalogSources {
   readonly cli: readonly CliKnobRow[]
   readonly inventory: readonly InventoryRow[]
+  readonly runtimeConfig?: readonly RuntimeConfigRow[]
   readonly runner: readonly RunnerKnobRow[]
 }
 
@@ -89,6 +100,19 @@ export const mergeKnobCatalog = (sources: CatalogSources): ReadonlyMap<string, U
       home: k.home,
       hotToggleable: false,
       ...(k.readSite !== undefined ? { readSite: k.readSite } : {}),
+    })
+  }
+  // typed runtime-config knobs — authoritative over the inventory's "should-be"
+  // duplicates (same envKey), still beaten by @/runner's richer contract.
+  for (const k of sources.runtimeConfig ?? []) {
+    out.set(k.envKey, {
+      envKey: k.envKey,
+      kind: k.kind,
+      default: k.default,
+      describe: k.describe,
+      group: k.group,
+      home: "runtime-config",
+      hotToggleable: false,
     })
   }
   // @/runner/knobs win (richest contract: real parse/apply + hot-toggle).

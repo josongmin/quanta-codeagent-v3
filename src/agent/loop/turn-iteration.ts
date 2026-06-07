@@ -1,6 +1,7 @@
 import type { Message } from "@/llm"
 import type { WorkingMemory } from "@/memory"
 import { errMessage } from "@/shared"
+import { captureInterruptedTurn } from "../interrupted-turn"
 import { stampTurn } from "../session-resources"
 import type { ShellSnapshotSession } from "../shell-snapshot-session"
 import { makeTurnHeader } from "../turn-kind"
@@ -50,7 +51,15 @@ export const syncQueuedTurnInputs = async (args: {
   const peerMail = pollPeerInbox(args.cfg)
   if (peerMail !== null) args.wm.append(peerMail)
   const actionOutcome = await pollConversationAction(args.cfg, args.taskRegistry)
-  if (actionOutcome.kind === "finish_aborted") return "aborted"
+  if (actionOutcome.kind === "finish_aborted") {
+    // §11.5 — capture the partial turn into the session buffer so a later
+    // `resume` can restore it. Default-OFF: no buffer wired ⇒ no capture
+    // (byte-identical). The buffer's presence is the resumable-interrupt signal.
+    args.cfg.interruptedTurnBuffer?.capture(
+      captureInterruptedTurn(args.wm.snapshot(), actionOutcome.reason, Date.now()),
+    )
+    return "aborted"
+  }
   if (actionOutcome.kind === "injection") {
     args.wm.append(actionOutcome.message)
     observeEffortClassifierPrompt(args.cfg.effortClassifier, latestUserTextFromWm(args.wm))

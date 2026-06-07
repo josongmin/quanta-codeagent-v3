@@ -142,6 +142,26 @@ const inboundCmd: SlashCommand = {
   },
 }
 
+/** `/resume-turn` — §11.5: resume the most-recently interrupted turn. The loop
+ *  re-injects the captured partial work from the session buffer (a no-op when
+ *  nothing was interrupted). Distinct from `/resume` (which un-snoozes idle). */
+const resumeTurnCmd: SlashCommand = {
+  name: "/resume-turn",
+  describe: "Resume the most-recently interrupted turn (§11.5 interrupt restore)",
+  category: "session",
+  async run(_args, ctx) {
+    if (ctx.conversationActions === undefined) {
+      ctx.out(
+        "/resume-turn: not wired in this surface (boot with QUANTA_CONVERSATION_ACTIONS=on)\n",
+      )
+      return 0
+    }
+    ctx.conversationActions.pushResume()
+    ctx.out("/resume-turn: queued — restores the interrupted turn at the next turn boundary\n")
+    return 0
+  },
+}
+
 /** Slot order matches the layered ordering. The historic slot of
  *  `/retry-with` (index 6 in the old BUILTINS) is intentionally NOT
  *  preserved — see ADR-0306 §"Slot ordering" for the rationale. */
@@ -153,4 +173,5 @@ export const SESSION_SLASH_COMMANDS: readonly SlashCommand[] = [
   cancelCmd,
   summarizeNowCmd,
   inboundCmd,
+  resumeTurnCmd,
 ]

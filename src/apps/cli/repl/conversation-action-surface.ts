@@ -62,6 +62,11 @@ export interface ConversationActionSurface {
    *  No `expectedTurnId` — targets whatever turn is active (the REPL never
    *  observed a turn id, mirroring the cancel/summarize contract above). */
   pushUserMessage(input: string): void
+  /** §11.5 — enqueue a `resume` of the most-recent interrupted turn. The loop
+   *  re-injects the captured turn from `AgentConfig.interruptedTurnBuffer` (a
+   *  no-op when nothing was interrupted). No `expectedTurnId` — resume consults
+   *  the session buffer, not the per-turn state. */
+  pushResume(): void
   /** Number of pending (not-yet-drained) actions — for status/observability. */
   pending(): number
 }
@@ -97,6 +102,9 @@ export const createConversationActionSurface = (): ConversationActionSurface => 
     },
     pushSummarize(): void {
       queue.push({ kind: "summarize" })
+    },
+    pushResume(): void {
+      queue.push({ kind: "resume" })
     },
     pushUserMessage(input: string): void {
       // §steer — `decideAction`'s `user_message` path delegates to `steer()`,

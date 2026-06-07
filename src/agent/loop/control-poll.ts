@@ -3,6 +3,7 @@ import { errMessage } from "@/shared"
 import { cancelSubagent } from "../control-op-handler"
 import { decideAction } from "../conversation-action"
 import { threadId as makeThreadId } from "../follow-up-queue"
+import { buildResumeMessage } from "../interrupted-turn"
 import type { AgentConfig } from "../types"
 import { emitInterrupted, emitResponseQueued, emitSubagentCancel } from "./emit-helpers"
 
@@ -77,6 +78,27 @@ export const pollConversationAction = async (
     return { kind: "none" }
   }
   if (action === undefined) return { kind: "none" }
+  // §11.5 — `resume` consults the SESSION interrupted-turn buffer, NOT
+  // `decideAction`'s per-turn `isInterrupted` gate (which resets every boundary
+  // and so could never accept a cross-turn resume). Restore re-injects the
+  // captured turn through the existing `injection` path; nothing buffered ⇒ a
+  // clean no-op. Handled before the `activeTurnRef`-required `decideAction` so
+  // `resume` works even on a fresh (non-interrupted) turn header.
+  if (action.kind === "resume") {
+    const turn = cfg.interruptedTurnBuffer?.take() ?? null
+    if (turn === null) {
+      cfg.stream.emit({
+        type: "recovery",
+        reason: "conversation_action_noop",
+        detail: "resume:nothing_to_resume",
+      })
+      return { kind: "continue" }
+    }
+    return {
+      kind: "injection",
+      message: { role: "user", content: [{ type: "text", text: buildResumeMessage(turn) }] },
+    }
+  }
   if (cfg.activeTurnRef === undefined) {
     cfg.stream.emit({
       type: "error",

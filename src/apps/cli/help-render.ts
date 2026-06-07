@@ -324,7 +324,9 @@ export const renderHelp = (builtins: readonly SlashCommand[]): string => {
     lines.push(renderEnvRow(e))
   }
   lines.push("")
-  lines.push(dim("(See docs/ for the full env-var catalog beyond SSOT-routed knobs.)"))
+  lines.push(
+    dim("(/knobs all → full 240+ knob catalog, grouped · /knobs find <q> → search.)"),
+  )
   return renderBox(lines, {
     title: "quanta — slash commands",
     titleStyle: bold,
