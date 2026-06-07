@@ -31,17 +31,38 @@ describe("T06 / search pipeline dispose", () => {
     }).not.toThrow()
   })
 
-  test("DISPOSE-2: dispose() clears an active delta-scan interval handle", () => {
-    const wire = buildSearchPipelineFromEnv(
-      { QUANTA_INDEX: "on", QUANTA_PIPELINE: "parallel-rrf" } as NodeJS.ProcessEnv,
-      process.cwd(),
-    )
-    expect(wire).not.toBeNull()
-    // An indexed preset wires a scan interval. dispose() must clear it; a
-    // second dispose() must be a no-op.
-    if (wire?.intervalHandle != null) {
-      expect(() => wire.dispose()).not.toThrow()
+  test("DISPOSE-2: dispose() actually clears the delta-scan interval + is idempotent", () => {
+    // Spy on the real clearInterval so we PROVE teardown happened (the prior
+    // version only asserted not.toThrow, so a no-op dispose stayed green).
+    const cleared: Array<ReturnType<typeof setInterval>> = []
+    const realClear = globalThis.clearInterval
+    globalThis.clearInterval = ((handle: ReturnType<typeof setInterval>) => {
+      cleared.push(handle)
+      return realClear(handle)
+    }) as typeof clearInterval
+    try {
+      const wire = buildSearchPipelineFromEnv(
+        { QUANTA_INDEX: "on", QUANTA_PIPELINE: "parallel-rrf" } as NodeJS.ProcessEnv,
+        process.cwd(),
+      )
+      expect(wire).not.toBeNull()
+      const handle = wire?.intervalHandle ?? null
+      wire?.dispose()
+      if (handle != null) {
+        // Semantic preset wired a scan interval: dispose MUST have cleared
+        // exactly that handle.
+        const countAfterFirst = cleared.filter((h) => h === handle).length
+        expect(countAfterFirst).toBeGreaterThanOrEqual(1)
+        // Second dispose is guarded by the `disposed` flag — no double clear.
+        wire?.dispose()
+        expect(cleared.filter((h) => h === handle).length).toBe(countAfterFirst)
+      } else {
+        // Lexical fallback (no semantic deps in this env): nothing to clear,
+        // but dispose must still be safe + idempotent.
+        expect(() => wire?.dispose()).not.toThrow()
+      }
+    } finally {
+      globalThis.clearInterval = realClear
     }
-    expect(() => wire?.dispose()).not.toThrow()
   })
 })

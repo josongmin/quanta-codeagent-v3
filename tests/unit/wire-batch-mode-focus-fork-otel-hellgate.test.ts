@@ -57,20 +57,9 @@ const sinkOf = (): { sink: MetricSink; samples: MetricSample[] } => {
   }
 }
 
-// ───────────────────────────────────────────────────────────────────────────
-// Wire 1 — voice → prompt-pipeline (SKIP tombstone)
-// ───────────────────────────────────────────────────────────────────────────
-
-describe("Wire 1 voice → prompt-pipeline — SKIPPED (user mid-refactor)", () => {
-  test("tombstone: this wire is intentionally NOT shipped in this batch", () => {
-    // The dispatch instructions documented "voice — user mid-refactor면 skip".
-    // The voice slice (`apps/cli/voice-cmd.ts`) is already wired into its own
-    // `planQueue` sink; the *prompt-pipeline* surface lacks a `voiceQueue`
-    // field today (REPL slash dispatch is the seam, not the pipeline). This
-    // case exists so a future round that adds the seam can flip this expect.
-    expect(true).toBe(true)
-  })
-})
+// NOTE: Wire 1 (voice → prompt-pipeline) is intentionally not shipped — the
+// prompt-pipeline surface has no `voiceQueue` field yet (REPL slash dispatch is
+// the seam, not the pipeline). A future round that adds the seam adds the test.
 
 // ───────────────────────────────────────────────────────────────────────────
 // Wire 2 — Mode-typed delegation router (composition-root slot)

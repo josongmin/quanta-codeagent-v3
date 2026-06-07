@@ -135,7 +135,7 @@ const skippedResult = (
 /** Verdict ladder. `matched` → pass; few diverged events relative to original
  *  length → partial; otherwise fail. NEVER returns "pass" for an aborted /
  *  timed-out run — callers thread `timedOut`/`runFailed` separately. */
-const verdictFromDiff = (diff: DiffSummary): Verdict => {
+export const verdictFromDiff = (diff: DiffSummary): Verdict => {
   if (diff.matched) return "pass"
   const ratio = diff.divergedEvents / Math.max(diff.originalLength, 1)
   return ratio <= REPLAY_PARTIAL_RATIO ? "partial" : "fail"

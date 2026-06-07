@@ -40,9 +40,10 @@ import {
   type ReplSlashCtx,
 } from "../../../src/apps/cli/repl/slash-surface"
 import { BUILTINS, runSlashCommand, type SlashContext } from "../../../src/apps/cli/slash-commands"
+import { readCliFeatureConfig } from "../../../src/apps/cli/repl/cli-feature-config"
+import { buildTimelinePanelAndStream } from "../../../src/apps/cli/repl/factories"
 import type { SessionEnvelopeRecord } from "../../../src/session"
-import type { AgentEvent } from "../../../src/stream"
-import { type StreamPort, TeeStream } from "../../../src/stream"
+import type { AgentEvent, StreamPort } from "../../../src/stream"
 
 // =============================================================================
 // helpers: capture stdout / stderr
@@ -66,47 +67,17 @@ const mkSinks = (): { sinks: Sinks; ctx: Pick<SlashContext, "out" | "err" | "cwd
   return { sinks, ctx }
 }
 
-// Re-import the host helper indirectly through repl.ts; the symbol is module-
-// private so the test exercises the boot behavior by REPLICATING the exact
-// same parse logic the host uses. The shape contract is locked separately by
-// session-setup-hellgate.test.ts (12 keys / dep contract).
-// Re-implementing here lets the test isolate the env-parse + TTY gate without
-// booting the whole session.
-const buildTimelinePanelAndStreamUnderTest = (
+// Drive the REAL host path: env → `readCliFeatureConfig` (the production
+// env-parse + stderr-TTY gate) → `buildTimelinePanelAndStream` (the production
+// panel + tee factory). The earlier version re-implemented both here and only
+// proved the copy — a regression in either real function stayed green.
+const realBuildTimeline = (
   stream: StreamPort,
   envSource: Record<string, string | undefined>,
-  isTTY: boolean | undefined,
-): {
-  stream: StreamPort
-  panel: { emit: (e: AgentEvent) => void; teardown: () => void } | undefined
-} => {
-  if (isTTY !== true) return { stream, panel: undefined }
-  const raw = Number(envSource.QUANTA_TIMELINE ?? "0")
-  const height = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0
-  if (height === 0) return { stream, panel: undefined }
-  let emits = 0
-  let torn = 0
-  const panel = {
-    emit: (_e: AgentEvent): void => {
-      emits += 1
-    },
-    teardown: (): void => {
-      torn += 1
-    },
-    // expose counts for assertions
-    _emits: (): number => emits,
-    _torn: (): number => torn,
-  } as never
-  const proxy: StreamPort = {
-    emit: (event): void => {
-      try {
-        ;(panel as { emit: (e: AgentEvent) => void }).emit(event)
-      } catch {
-        /* swallow */
-      }
-    },
-  }
-  return { stream: new TeeStream([stream, proxy]), panel }
+  stderrIsTTY: boolean | undefined,
+): { stream: StreamPort; panel: { teardown: () => void } | undefined } => {
+  const cfg = readCliFeatureConfig(envSource as NodeJS.ProcessEnv, undefined, stderrIsTTY)
+  return buildTimelinePanelAndStream(cfg, stream)
 }
 
 // =============================================================================
@@ -270,113 +241,75 @@ describe("Track R — `/replay` dispatcher behavior", () => {
 // Track T — `QUANTA_TIMELINE=<N>` boot toggle (host helper)
 // =============================================================================
 
-describe("Track T — `buildTimelinePanelAndStream` boot toggle", () => {
+describe("Track T — `buildTimelinePanelAndStream` boot toggle (real factory)", () => {
   const baseStream: StreamPort = { emit: () => undefined }
 
-  test("non-TTY ⇒ literal stream + no panel (default-OFF byte-identical)", () => {
-    const { stream, panel } = buildTimelinePanelAndStreamUnderTest(
-      baseStream,
-      { QUANTA_TIMELINE: "5" },
-      false,
-    )
-    expect(panel).toBeUndefined()
-    expect(stream).toBe(baseStream)
-  })
+  // The production gate is `stderrIsTTY === true && QUANTA_TIMELINE parses to a
+  // positive int`. Every OFF arm must return the LITERAL base stream (default-
+  // OFF byte-identical: no tee, no extra consumer) and `panel: undefined`.
+  const offCases: Array<[string, Record<string, string | undefined>, boolean | undefined]> = [
+    ["non-TTY (stderr) even with QUANTA_TIMELINE=5", { QUANTA_TIMELINE: "5" }, false],
+    ["TTY + QUANTA_TIMELINE unset", {}, true],
+    ["TTY + QUANTA_TIMELINE=0", { QUANTA_TIMELINE: "0" }, true],
+    ["TTY + QUANTA_TIMELINE=abc (malformed)", { QUANTA_TIMELINE: "abc" }, true],
+    ["TTY + QUANTA_TIMELINE=-3 (negative)", { QUANTA_TIMELINE: "-3" }, true],
+    ["TTY + QUANTA_TIMELINE=NaN", { QUANTA_TIMELINE: "NaN" }, true],
+  ]
+  for (const [label, env, tty] of offCases) {
+    test(`OFF: ${label} ⇒ literal stream + no panel`, () => {
+      const { stream, panel } = realBuildTimeline(baseStream, env, tty)
+      expect(panel).toBeUndefined()
+      expect(stream).toBe(baseStream)
+    })
+  }
 
-  test("TTY + QUANTA_TIMELINE unset ⇒ literal stream + no panel", () => {
-    const { stream, panel } = buildTimelinePanelAndStreamUnderTest(baseStream, {}, true)
-    expect(panel).toBeUndefined()
-    expect(stream).toBe(baseStream)
-  })
-
-  test("TTY + QUANTA_TIMELINE=0 ⇒ literal stream + no panel", () => {
-    const { stream, panel } = buildTimelinePanelAndStreamUnderTest(
-      baseStream,
-      { QUANTA_TIMELINE: "0" },
+  test("env-parse: QUANTA_TIMELINE=10.7 + TTY ⇒ cfg height floored to 10, enabled", () => {
+    const cfg = readCliFeatureConfig(
+      { QUANTA_TIMELINE: "10.7" } as NodeJS.ProcessEnv,
+      undefined,
       true,
     )
-    expect(panel).toBeUndefined()
-    expect(stream).toBe(baseStream)
+    expect(cfg.timelinePanel.enabled).toBe(true)
+    expect(cfg.timelinePanel.height).toBe(10)
   })
 
-  test("TTY + QUANTA_TIMELINE=abc (malformed) ⇒ literal stream + no panel", () => {
-    const { stream, panel } = buildTimelinePanelAndStreamUnderTest(
-      baseStream,
-      { QUANTA_TIMELINE: "abc" },
-      true,
-    )
-    expect(panel).toBeUndefined()
-    expect(stream).toBe(baseStream)
+  test("env-parse: non-TTY forces enabled=false regardless of height", () => {
+    const cfg = readCliFeatureConfig({ QUANTA_TIMELINE: "5" } as NodeJS.ProcessEnv, undefined, false)
+    expect(cfg.timelinePanel.enabled).toBe(false)
+    expect(cfg.timelinePanel.height).toBe(5)
   })
 
-  test("TTY + QUANTA_TIMELINE=-3 (negative) ⇒ literal stream + no panel", () => {
-    const { stream, panel } = buildTimelinePanelAndStreamUnderTest(
-      baseStream,
-      { QUANTA_TIMELINE: "-3" },
-      true,
-    )
-    expect(panel).toBeUndefined()
-    expect(stream).toBe(baseStream)
-  })
-
-  test("TTY + QUANTA_TIMELINE=NaN ⇒ literal stream + no panel", () => {
-    const { stream, panel } = buildTimelinePanelAndStreamUnderTest(
-      baseStream,
-      { QUANTA_TIMELINE: "NaN" },
-      true,
-    )
-    expect(panel).toBeUndefined()
-    expect(stream).toBe(baseStream)
-  })
-
-  test("TTY + QUANTA_TIMELINE=5 ⇒ panel allocated + tee stream returned", () => {
+  test("ON: TTY + QUANTA_TIMELINE=5 ⇒ panel allocated + tee fans every emit to base", () => {
     let baseEmits = 0
     const countingBase: StreamPort = {
       emit: () => {
         baseEmits += 1
       },
     }
-    const { stream, panel } = buildTimelinePanelAndStreamUnderTest(
-      countingBase,
-      { QUANTA_TIMELINE: "5" },
-      true,
-    )
-    expect(panel).toBeDefined()
-    expect(stream).not.toBe(countingBase)
-    // Emitting through the tee must reach the panel AND the original sink
-    // exactly once each. Catches a tee-emit doubling regression where the
-    // panel sees 2 emits for a single dispatch.
-    const evt: AgentEvent = { type: "session_start", sessionId: "x" } as AgentEvent
-    stream.emit(evt)
-    const p = panel as unknown as { _emits: () => number }
-    expect(p._emits()).toBe(1)
-    expect(baseEmits).toBe(1)
-    // Emit a second time and prove both fan out symmetrically (each = 2).
-    stream.emit(evt)
-    expect(p._emits()).toBe(2)
-    expect(baseEmits).toBe(2)
+    const { stream, panel } = realBuildTimeline(countingBase, { QUANTA_TIMELINE: "5" }, true)
+    try {
+      expect(panel).toBeDefined()
+      // A tee was interposed — the returned stream is NOT the literal base.
+      expect(stream).not.toBe(countingBase)
+      // Every emit through the tee reaches the original sink exactly once (a
+      // tee-doubling regression would make base see 2 per dispatch).
+      const evt: AgentEvent = { type: "session_start", sessionId: "x" } as AgentEvent
+      stream.emit(evt)
+      expect(baseEmits).toBe(1)
+      stream.emit(evt)
+      expect(baseEmits).toBe(2)
+    } finally {
+      panel?.teardown()
+    }
   })
 
-  test("TTY + QUANTA_TIMELINE=10.7 ⇒ floored to integer + panel allocated", () => {
-    const { panel } = buildTimelinePanelAndStreamUnderTest(
-      baseStream,
-      { QUANTA_TIMELINE: "10.7" },
-      true,
-    )
+  test("ON: panel.teardown() is callable + idempotent", () => {
+    const { panel } = realBuildTimeline(baseStream, { QUANTA_TIMELINE: "3" }, true)
     expect(panel).toBeDefined()
-  })
-
-  test("teardown is callable + idempotent", () => {
-    const { panel } = buildTimelinePanelAndStreamUnderTest(
-      baseStream,
-      { QUANTA_TIMELINE: "3" },
-      true,
-    )
-    expect(panel).toBeDefined()
-    panel?.teardown()
-    panel?.teardown()
-    const p = panel as unknown as { _torn: () => number }
-    expect(p._torn()).toBe(2)
+    expect(() => {
+      panel?.teardown()
+      panel?.teardown()
+    }).not.toThrow()
   })
 })
 

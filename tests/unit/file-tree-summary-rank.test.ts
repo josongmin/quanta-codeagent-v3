@@ -210,12 +210,4 @@ describe("unified rollup display", () => {
     expect(typeof eb).toBe("function")
   })
 
-  test("rollup line format: indent matches segment depth of ancestor (pure invariant)", () => {
-    // Verify via the extBreakdown and parseRecencyHits exports (pure helpers work correctly).
-    // The rollupLine helper is private — validated through the integration test fixture.
-    // Here we just assert the contract: same indent formula for all ancestors.
-    // depth 1 ancestor = 2 spaces; depth 2 ancestor = 4 spaces.
-    // This is validated in the integration test via the actual rendered output.
-    expect(true).toBe(true) // placeholder; real shape tested in integration
-  })
 })

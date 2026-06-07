@@ -1,29 +1,15 @@
 /**
- * Sandbox escape — uses `path.relative` semantics so the check is portable.
- *
- * We exercise the file-write path of `synthetic/runner` by handing it a
- * synthetic Scenario with a path that LOOKS in-sandbox but resolves outside.
- * The runner's `writeFiles` must throw; otherwise an attacker-controlled
- * scenario could clobber files outside the tmp dir.
- *
- * The runner is async + invokes the whole agent loop; isolating just the
- * `writeFiles` step would require exporting it. We test the equivalent
- * predicate via a small re-implementation here that matches the runner's
- * `isInsideSandbox` semantics, and the runner-level test that imports the
- * exported helper lives in the integration suite.
+ * Sandbox escape — exercises the REAL `isInsideSandbox` predicate exported from
+ * `synthetic/runner`, the same gate `writeFiles` uses to refuse scenario file
+ * paths that resolve outside the tmp sandbox. (Previously this test re-declared
+ * a private copy of the predicate and only proved the copy — a bug flipping the
+ * runner's gate would have stayed green.)
  */
-// meta-test: re-implements the runner's pure path-predicate in-line because the
-// real runner is async/full-loop; the integration suite covers the live import.
 import { describe, expect, test } from "bun:test"
-import { relative, resolve, sep } from "node:path"
+import { resolve } from "node:path"
+import { isInsideSandbox } from "@/../src/apps/eval/synthetic/runner"
 
-const isInsideSandbox = (sandbox: string, dest: string): boolean => {
-  if (dest === sandbox) return true
-  const rel = relative(sandbox, dest)
-  return rel !== "" && !rel.startsWith("..") && !rel.startsWith(`..${sep}`)
-}
-
-describe("sandbox-escape predicate (matches synthetic/runner + compare/cli-base)", () => {
+describe("sandbox-escape predicate (synthetic/runner writeFiles gate)", () => {
   const sandbox = resolve("/tmp/sandbox-xyz")
 
   test("dest equal to sandbox is allowed", () => {

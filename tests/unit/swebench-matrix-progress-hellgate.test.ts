@@ -202,15 +202,7 @@ describe("hellgate axes-condition timeline (bit-pattern walk == progress order)"
   })
 })
 
-describe("hellgate progress slice absence notes", () => {
-  test("design pin: NO `formatProgressBar` / `estimateEtaMs` / `CostAccumulator`", () => {
-    // The brief named these helpers for a `tools/swebench-matrix/progress.ts`
-    // slice that has not been written. The current progress UX is:
-    //   - one-line console.error per condition (`[matrix] (i/total) ...`)
-    //   - partial-jsonl checkpoint written after EACH condition
-    //   - estimateAxesCost provides the pre-flight budget hint
-    // A future refactor that adds the helpers should EXTEND this file with
-    // adversarial cases (NaN clamp, empty observation set, etc.).
-    expect(true).toBe(true)
-  })
-})
+// NOTE: no `tools/swebench-matrix/progress.ts` slice exists (no
+// `formatProgressBar`/`estimateEtaMs`/`CostAccumulator`). Progress UX today is a
+// one-line console.error per condition + partial-jsonl checkpoints +
+// estimateAxesCost pre-flight hint. A future slice adds adversarial cases here.

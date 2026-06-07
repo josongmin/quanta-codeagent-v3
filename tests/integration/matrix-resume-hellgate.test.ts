@@ -341,15 +341,9 @@ describe("hellgate matrix resume — partial → resume flow algebra", () => {
       rmSync(dir, { recursive: true, force: true })
     }
   })
-
-  test("design pin: --resume / --summary modes NOT YET IMPLEMENTED — refactor breadcrumb", () => {
-    // This integration suite pins the algebra a future --resume implementation
-    // MUST preserve:
-    //   1. partial-*.jsonl is a line-append checkpoint (idempotent read).
-    //   2. aggregate(part1 ++ part2) === aggregate(merged) for disjoint conditions.
-    //   3. corrupt single-condition artifacts degrade gracefully (no abort).
-    //   4. order-invariance under aggregate; canonical output order.
-    // When --resume lands, it MUST satisfy these invariants byte-for-byte.
-    expect(true).toBe(true)
-  })
+  // NOTE: --resume / --summary modes are NOT YET IMPLEMENTED. The real tests
+  // above pin the algebra a future --resume MUST preserve: partial-*.jsonl is an
+  // idempotent line-append checkpoint; aggregate is associative over disjoint
+  // conditions; corrupt single-condition artifacts degrade gracefully; aggregate
+  // is order-invariant with canonical output order.
 })

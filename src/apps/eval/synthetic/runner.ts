@@ -125,7 +125,7 @@ const safeRm = async (path: string): Promise<void> => {
 /** True when `dest` lies inside (or is) `sandbox`. Uses `path.relative` so the
  *  check is portable (BSD/macOS/Linux/Windows) — string `startsWith('/')` was
  *  POSIX-only and silently let `..\evil` through on Windows. */
-const isInsideSandbox = (sandbox: string, dest: string): boolean => {
+export const isInsideSandbox = (sandbox: string, dest: string): boolean => {
   if (dest === sandbox) return true
   const rel = relative(sandbox, dest)
   return rel !== "" && !rel.startsWith("..") && !rel.startsWith(`..${sep}`)

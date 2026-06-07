@@ -33,7 +33,7 @@ import {
   headlessDelegationRunner,
   MAX_DEPTH,
 } from "@/agent/delegation-runner"
-import { AGENT_MODES, type AgentMode } from "@/agent/subagent-typed"
+import { AGENT_MODES } from "@/agent/subagent-typed"
 
 const baseSpec = (over?: Partial<DelegateSpec>): DelegateSpec => ({
   mode: "explore",
@@ -292,9 +292,4 @@ describe("delegation-runner hellgate (ADR-0283)", () => {
     expect(Array.isArray(mod.ALL_RUNNER_ERROR_KINDS)).toBe(true)
   })
 
-  // Helper unused-import quieter — keeps AgentMode binding live for tooling.
-  test("AgentMode binding live", () => {
-    const m: AgentMode = "explore"
-    expect(m).toBe("explore")
-  })
 })

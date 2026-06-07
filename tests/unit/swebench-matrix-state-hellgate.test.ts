@@ -656,16 +656,7 @@ describe("hellgate collectRowsForCondition — adversarial", () => {
   })
 })
 
-// ── design-decision pins (these would be needed if state.ts existed) ─────
-
-describe("hellgate state-file design pins (slice absence note)", () => {
-  test("design pin: matrix tool has NO `saveSweepState`/`loadSweepState` slice", () => {
-    // Reason: the brief named these for a `tools/swebench-matrix/state.ts`
-    // slice that has not been written. The current matrix tool writes a
-    // `partial-*.jsonl` file as a checkpoint stream (line-append) and a
-    // final `matrix-summary.jsonl` / `matrix-summary.md`. There is NO
-    // `--resume` mode and NO `--summary` mode. This test documents the
-    // absence so a future refactor sees the gap.
-    expect(true).toBe(true)
-  })
-})
+// NOTE: the matrix tool has NO `tools/swebench-matrix/state.ts` slice
+// (`saveSweepState`/`loadSweepState`) and NO `--resume`/`--summary` modes. It
+// writes a `partial-*.jsonl` checkpoint stream + a final
+// `matrix-summary.{jsonl,md}`. A future refactor that adds state.ts adds tests.
