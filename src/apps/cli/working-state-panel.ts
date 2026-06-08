@@ -28,8 +28,8 @@
  *     `ColorPolicyResolver`); we add no extra escapes of our own.
  */
 
-import type { Blocker, NextStep, OwnerCandidate, WorkingState } from "@/agent"
-import { cyan, dim, gray, red, renderBox, yellow } from "@/ui/ui-helpers"
+import type { Blocker, NextStep, OwnerCandidate, SkillScopeView, WorkingState } from "@/agent"
+import { cyan, dim, gray, green, red, renderBox, yellow } from "@/ui/ui-helpers"
 
 /** Exported alias requested by the spec — the SAME shape `snapshot()` returns
  *  on a {@link WorkingStateSession}. We re-export under the spec name so a
@@ -222,6 +222,51 @@ export const formatWorkingStateSummaryRow = (snap: WorkingStateSnapshot | undefi
     parts.push(yellow(`${snap.deferredValidation.length}×deferred`))
   }
   return `${cyan("◈ state:")} ${parts.join(" · ")}`
+}
+
+/** Cap the number of tool names painted in the skill-scope panel so a wide
+ *  allowlist (or a huge hidden set) does not blow the terminal. The trailing
+ *  `… +N more` marker preserves the total signal. */
+const MAX_SCOPE_TOOLS = 24
+
+/**
+ * ADR-0512 P3 — render the active skill's tool-availability partition for
+ * `/state`. Answers the user's "왜 이 도구가 없지?": which tools the CURRENTLY-
+ * active skill scoped IN (the model sees + can call) vs OUT (the model never
+ * sees them, so it can't fumble into a red error).
+ *
+ * `view` is the read-only {@link SkillScopeView} the surface threads from the
+ * live `skillGate` (reuse of `buildSkillScopeView`). Returns `""` when there is
+ * NOTHING to show — no view (slot absent ⇒ v2 OFF / skill-less session) OR a
+ * view with no active skill (`activeSkill === null`, gate armed-but-no-scope).
+ * The `/state` caller appends a non-empty result, so an empty string keeps the
+ * panel BYTE-IDENTICAL to the working-state-only render.
+ */
+export const renderSkillScopePanel = (view: SkillScopeView | undefined): string => {
+  if (view === undefined || view.activeSkill === null) return ""
+  const lines: string[] = []
+  lines.push(`${dim("Active skill:")} ${cyan(truncate(view.activeSkill))}`)
+  const visible = renderList([...view.visibleTools], MAX_SCOPE_TOOLS, (t) => green(truncate(t)))
+  pushSection(lines, "Visible:    ", visible)
+  if (view.hiddenTools.length > 0) {
+    const hiddenNames = view.hiddenTools
+      .slice(0, MAX_SCOPE_TOOLS)
+      .map((t) => dim(truncate(t)))
+      .join(", ")
+    const more =
+      view.hiddenTools.length > MAX_SCOPE_TOOLS
+        ? dim(` … +${view.hiddenTools.length - MAX_SCOPE_TOOLS} more`)
+        : ""
+    lines.push(
+      `${dim("Hidden:")}     ${gray(`${view.hiddenTools.length} scoped out`)} ${hiddenNames}${more}`,
+    )
+  }
+  return renderBox(lines, {
+    title: "Skill scope",
+    titleStyle: cyan,
+    padX: 2,
+    minInner: 48,
+  })
 }
 
 /** Internal helpers exported for unit-test drilling — NOT part of the

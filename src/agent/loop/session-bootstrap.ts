@@ -37,6 +37,7 @@ import type { TurnSession } from "../turn-context"
 import type { AgentConfig, MemoryCitation } from "../types"
 import { finishAgentSession } from "./session-lifecycle"
 import { buildSkillGate } from "./skill-gate"
+import { buildSkillScopeView } from "./skill-scope-view"
 import { sleep } from "./sleep"
 import type {
   FinishAgentSession,
@@ -183,6 +184,23 @@ export const createRunAgentContext = async (config: AgentConfig): Promise<RunAge
     ...(rateLimitProactive !== undefined ? { rateLimitProactive } : {}),
     guards: guardChain,
     hookPromptPending,
+  }
+
+  // ADR-0512 P3 — publish a live skill-scope getter for `/state` ("왜 이 도구가
+  // 없지?"). Mirrors `onWorkingStateReady`: fire ONCE with a getter that re-reads
+  // the live `skillGate` each call (a mid-turn `Skill` arms scope) and projects
+  // the L1 availability filter via `buildSkillScopeView` (reuse — no scope logic
+  // here). Gated on `skillScopeV2`; OFF / no observer ⇒ no publish (byte-
+  // identical). Pure observation; never throws into the loop.
+  if (config.onSkillScopeReady !== undefined && runtimeConfig().skillScopeV2) {
+    try {
+      config.onSkillScopeReady(() => buildSkillScopeView(session.skillGate, session.specs))
+    } catch (e) {
+      config.stream.emit({
+        type: "error",
+        message: `onSkillScopeReady observer threw: ${errMessage(e)}`,
+      })
+    }
   }
 
   const turnStateSeed: RunAgentTurnStateSeed = {

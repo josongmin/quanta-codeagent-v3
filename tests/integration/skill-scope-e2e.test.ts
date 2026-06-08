@@ -649,4 +649,69 @@ describe("skill tool-scoping v2 escalation (e2e)", () => {
     const msg = allToolResults(outcome).find((b) => b.type === "tool_result" && b.tool_use_id === "p1")
     expect(msg?.type === "tool_result" ? msg.content : "").toContain("use grep instead")
   })
+
+  test("allow_once: approve {scope:'once'} dispatches but does NOT widen ⇒ RE-ASKED next call", async () => {
+    expect(runtimeConfig().skillScopeV2).toBe(true)
+    await sealedSkill(dir)
+    const counts: Record<string, number> = {}
+    const registry = new ToolRegistry([countingToolRO("peek", counts)])
+    let asks = 0
+    const llm = new FakeLLM([
+      toolUseScript("s1", "Skill", { name: "sealed" }),
+      toolUseScript("p1", "peek", {}), // out of scope ⇒ ask, approve ONCE
+      toolUseScript("p2", "peek", {}), // NOT widened ⇒ ask AGAIN
+      textScript("done"),
+    ])
+    const stream = new RecordingStream()
+    await runAgent({
+      ...baseConfig(llm, registry, stream, dir, { mode: "default" }),
+      skills: { dir },
+      onConfirm: async () => {
+        asks += 1
+        return { decision: "allow", scope: "once" }
+      },
+    })
+
+    expect(counts.peek).toBe(2) // both dispatched
+    expect(asks).toBe(2) // RE-ASKED — allow_once never widened the scope
+    const res = stream.events.filter((e) => e.type === "permission_escalation_resolved")
+    expect(res).toHaveLength(2)
+    for (const r of res) {
+      expect(r.type === "permission_escalation_resolved" ? r.decision : "").toBe("allow_once")
+    }
+  })
+
+  test("justification: the model's pre-tool prose seeds the escalation card + web bridge", async () => {
+    await sealedSkill(dir)
+    const counts: Record<string, number> = {}
+    const registry = new ToolRegistry([countingToolRO("peek", counts)])
+    let seenAction: { scopeContext?: { justification?: string } } | undefined
+    const llm = new FakeLLM([
+      toolUseScript("s1", "Skill", { name: "sealed" }),
+      // The model EXPLAINS itself in prose, THEN reaches for the out-of-scope tool.
+      [
+        { type: "text_delta", delta: "I need to peek at the config to localize the bug" },
+        { type: "tool_use_start", id: "p1", name: "peek" },
+        { type: "tool_use_end", id: "p1", input: {} },
+        { type: "message_stop", stop_reason: "tool_use" },
+      ],
+      textScript("done"),
+    ])
+    const stream = new RecordingStream()
+    await runAgent({
+      ...baseConfig(llm, registry, stream, dir, { mode: "default" }),
+      skills: { dir },
+      onConfirm: async (action) => {
+        seenAction = action
+        return true
+      },
+    })
+
+    const expected = "I need to peek at the config to localize the bug"
+    // (a) the CLI stream event carries it…
+    const req = stream.events.find((e) => e.type === "permission_escalation_requested")
+    expect(req?.type === "permission_escalation_requested" ? req.justification : "").toBe(expected)
+    // (b) …AND it rides on action.scopeContext so the web/IDE approval bridge forwards it.
+    expect(seenAction?.scopeContext?.justification).toBe(expected)
+  })
 })

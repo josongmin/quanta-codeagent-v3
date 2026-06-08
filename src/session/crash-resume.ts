@@ -31,7 +31,7 @@
  * injected into {@link markSessionInterrupted} by the caller.
  */
 
-import { gateOn, logger } from "@/shared"
+import { errMessage, gateOn, logger } from "@/shared"
 import type { SessionRootProvider } from "./root-port"
 import { loadSessionById, saveSessionById } from "./store"
 import type { PersistedInterruptedTurn, SessionMeta } from "./types"
@@ -77,7 +77,7 @@ export const markSessionInterrupted = async (
   } catch (e) {
     logger.warn("crash-resume: failed to persist interrupted-turn marker", {
       sessionId,
-      error: e instanceof Error ? e.message : String(e),
+      error: errMessage(e),
     })
   }
 }
@@ -110,7 +110,7 @@ export const clearSessionInterrupted = async (
   } catch (e) {
     logger.warn("crash-resume: failed to clear interrupted-turn marker", {
       sessionId,
-      error: e instanceof Error ? e.message : String(e),
+      error: errMessage(e),
     })
   }
 }

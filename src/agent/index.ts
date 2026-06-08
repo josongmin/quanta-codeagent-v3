@@ -61,8 +61,8 @@ export {
   dropOldestTurn,
   estimateTokens,
   findBoundary,
-  markBaselineStaleIfShrunk,
   MAX_DROP_OLDEST_ROUNDS,
+  markBaselineStaleIfShrunk,
   resolveCompactionLimitTokens,
   type TokenBaseline,
   TokenBaselineBox,
@@ -190,6 +190,12 @@ export {
   parseAgentlessResponse,
 } from "./issue-hint"
 export { runAgent } from "./loop"
+// ADR-0512 — skill tool-scope gate + the read-only `/state` projection of its
+// L1 availability filter. The surface (`/state`) reuses `buildSkillScopeView`
+// (which itself reuses `filterSpecsByScope` + `activeSkillName`) so the panel
+// can never drift from what the model actually sees.
+export { buildSkillGate, filterSpecsByScope, isAlwaysInScope } from "./loop/skill-gate"
+export { buildSkillScopeView, type SkillScopeView } from "./loop/skill-scope-view"
 export { lspDiagnosticsTool, lspNavToolList } from "./lsp-bridge"
 export {
   attachLspDiagnosticsHook,
@@ -389,6 +395,7 @@ export {
   type DeltaTokenWorkingMemory,
   decorateWithDeltaCounter,
 } from "./token-delta/wm-decorator"
+export type { SkillGate, SkillTurnOverride } from "./turn-context"
 export type {
   AgentConfig,
   AgentOutcome,

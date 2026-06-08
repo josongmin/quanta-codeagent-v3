@@ -1204,6 +1204,20 @@ export interface AgentConfig extends SafetyConfig, PermissionExtrasConfig, Steer
     getSnapshot: () => import("./working-state").WorkingState | undefined,
   ) => void
   /**
+   * ADR-0512 P3 — OPTIONAL skill tool-scope publisher. Fired ONCE at session
+   * start (alongside {@link onWorkingStateReady}) with a getter over the live
+   * {@link import("./loop/skill-scope-view").SkillScopeView} — the active skill +
+   * the L1 availability filter's visible/hidden partition. The getter re-reads
+   * the live `skillGate` each call so `/state` reflects the CURRENT scope (a
+   * mid-turn `Skill` call may have armed it). The surface (`/state`) retains it
+   * to render "왜 이 도구가 없지?". Fired ONLY when `runtimeConfig().skillScopeV2`
+   * is on; absent / OFF ⇒ no publish (byte-identical). Pure observation; never
+   * throws into the loop (the call site try/catches).
+   */
+  onSkillScopeReady?: (
+    getView: () => import("./loop/skill-scope-view").SkillScopeView | undefined,
+  ) => void
+  /**
    * OPTIONAL per-turn stream-input capture sink. Fired right before each
    * provider stream call with the EXACT {@link import("@/llm").StreamInput}
    * used for that turn (messages / system / tools / thinking / toolChoice).

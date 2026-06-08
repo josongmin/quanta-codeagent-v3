@@ -38,7 +38,7 @@
  *    an empty steer is a wiring bug and throws {@link ConfirmDecisionError}.
  */
 export type ConfirmDecision =
-  | { decision: "allow" }
+  | { decision: "allow"; scope?: "once" | "session" }
   | { decision: "deny" }
   | { decision: "deny_and_steer"; steer: string }
 
@@ -81,6 +81,22 @@ export class ConfirmDecisionError extends Error {
  * Any other shape (null/undefined/number/…) is a wiring bug ⇒
  * {@link ConfirmDecisionError}. There is no silent coercion.
  */
+/** ADR-0512 — validate + preserve the optional `scope` ("once" | "session") on
+ *  an allow decision so a skill-scope escalation can distinguish allow_once
+ *  (dispatch WITHOUT widening) from allow_session (widen). Absent ⇒ session (the
+ *  legacy approve-widens behavior, byte-identical to `true` / `{decision:"allow"}`).
+ *  Extracted from `normalizeConfirm` to keep it under biome's complexity cap. */
+const normalizeAllowScope = (r: object): ConfirmDecision => {
+  const scope = (r as { scope?: unknown }).scope
+  if (scope !== undefined && scope !== "once" && scope !== "session") {
+    throw new ConfirmDecisionError(
+      "scope",
+      `allow scope must be "once" | "session" (got ${String(scope)})`,
+    )
+  }
+  return scope === undefined ? { decision: "allow" } : { decision: "allow", scope }
+}
+
 export const normalizeConfirm = (r: boolean | ConfirmDecision): ConfirmDecision => {
   if (typeof r === "boolean") {
     return r ? { decision: "allow" } : { decision: "deny" }
@@ -93,8 +109,9 @@ export const normalizeConfirm = (r: boolean | ConfirmDecision): ConfirmDecision 
   }
   switch (r.decision) {
     case "allow":
+      return normalizeAllowScope(r)
     case "deny":
-      return { decision: r.decision }
+      return { decision: "deny" }
     case "deny_and_steer": {
       const steer = (r as { decision: "deny_and_steer"; steer: unknown }).steer
       if (typeof steer !== "string") {

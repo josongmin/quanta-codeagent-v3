@@ -105,6 +105,7 @@ interface RuntimeContextSnapshot {
   readonly onPromptAssembled?: AgentConfig["onPromptAssembled"]
   readonly workingState?: AgentConfig["workingState"]
   readonly onWorkingStateReady?: AgentConfig["onWorkingStateReady"]
+  readonly onSkillScopeReady?: AgentConfig["onSkillScopeReady"]
   readonly onTurnStreamInput?: AgentConfig["onTurnStreamInput"]
   readonly shadowOdb?: AgentConfig["shadowOdb"]
   readonly shadowCheckpoint?: AgentConfig["shadowCheckpoint"]
@@ -149,6 +150,7 @@ type RuntimeContextPatch = Partial<
     | "onPromptAssembled"
     | "workingState"
     | "onWorkingStateReady"
+    | "onSkillScopeReady"
     | "onTurnStreamInput"
     | "shadowOdb"
     | "shadowCheckpoint"
@@ -599,6 +601,7 @@ const buildOptionalSnapshotFields = (
   ...whenDefined("onPromptAssembled", base.onPromptAssembled),
   ...whenDefined("workingState", base.workingState),
   ...whenDefined("onWorkingStateReady", base.onWorkingStateReady),
+  ...whenDefined("onSkillScopeReady", base.onSkillScopeReady),
   ...whenDefined("onTurnStreamInput", base.onTurnStreamInput),
   ...whenDefined("shadowOdb", base.shadowOdb),
   ...whenDefined("shadowCheckpoint", base.shadowCheckpoint),
@@ -797,9 +800,10 @@ const escalationScopeFields = (action: ToolAction): Pick<PendingApprovalView, "s
   const scope = action.scopeContext
   if (scope === undefined) return {}
   // `justification` is OPTIONAL on the escalation's `scopeContext` (Codex
-  // `on-request` rationale). The action carries it only when the escalation set
-  // it; forward it through when present so the card can render the row.
-  const justification = (scope as { justification?: string }).justification
+  // `on-request` rationale, seeded from the model's pre-tool prose). The action
+  // carries it only when the escalation set it; forward it through when present
+  // so the web/IDE card can render the row.
+  const justification = scope.justification
   return {
     scopeContext: {
       tool: action.tool,

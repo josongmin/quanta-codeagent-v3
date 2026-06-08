@@ -49,6 +49,14 @@ export interface SlashContext {
   readonly planSnapshot?: (() => import("@/agent/plan/types").Plan | null) | undefined
   /** Read-only WorkingState snapshot. */
   readonly workingState?: (() => import("@/agent").WorkingState | undefined) | undefined
+  /** ADR-0512 P3 — read-only skill tool-scope projection for `/state` ("왜 이
+   *  도구가 없지?"): the CURRENTLY-active skill + the L1 availability filter's
+   *  visible/hidden tool partition. A GETTER (read each invocation so it reflects
+   *  the live gate, which a mid-turn `Skill` call may have armed). Present ONLY
+   *  when `QUANTA_SKILL_SCOPE_V2` is on AND the surface published the getter;
+   *  absent OR yielding `undefined`/`activeSkill: null` ⇒ `/state` omits the
+   *  skill-scope section (byte-identical to the working-state-only render). */
+  readonly skillScope?: (() => import("@/agent").SkillScopeView | undefined) | undefined
   /** Recent turns + tool-call breadcrumb. */
   readonly history?: import("./history-cmd").HistorySessionState | undefined
   /** N-best candidate tracker snapshot. */
@@ -192,9 +200,7 @@ export interface SlashContext {
    *  `QUANTA_BG_TURN` is on AND the surface built a portal; absent ⇒
    *  `/background` prints "not wired" + exit 0 (default-OFF byte-identical).
    *  The view CANNOT detach a new turn nor re-enter the loop. */
-  readonly background?:
-    | import("./repl/background-turn-portal").BackgroundPortalView
-    | undefined
+  readonly background?: import("./repl/background-turn-portal").BackgroundPortalView | undefined
 }
 
 /** Inventory row returned by {@link SlashContext.skills}. Mirrors the host

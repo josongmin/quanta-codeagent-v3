@@ -164,6 +164,17 @@ const skillScopeDeny = (call: { id: string; name: string }): StreamDispatchOut =
 const scopeReasonFor = (tool: string, skill: string): string =>
   `Tool "${tool}" is outside the active skill "${skill}" (not in its allowed-tools).`
 
+/** ADR-0512 P3 — the model's one-line rationale for the escalation card, seeded
+ *  from the assistant text it streamed IMMEDIATELY BEFORE reaching for the
+ *  out-of-scope tool (Codex `on-request` style: the model explains itself in
+ *  prose, then calls the tool). Trimmed + tail-capped so the card stays a row,
+ *  not a paragraph; empty/whitespace ⇒ `undefined` (the card omits the row). */
+const deriveJustification = (text: string): string | undefined => {
+  const t = text.trim()
+  if (t === "") return undefined
+  return t.length <= 200 ? t : `…${t.slice(-200).trimStart()}`
+}
+
 /** Operator-facing label for the `skill_scope_decision` timeline event. */
 const scopeDecisionLabel = (
   kind: ScopeVerdict["kind"],
@@ -227,6 +238,12 @@ export const createStreamDispatcher = (
   const { toolHistory, workingState, collector, onRedaction } = state
   const { turnTimingCapture } = anchors
 
+  // ADR-0512 P3 — assistant prose streamed since the last tool dispatch. Read as
+  // the escalation card's `justification`, then reset on every dispatch so each
+  // tool call's rationale is the text that immediately preceded IT. Captured only
+  // here (no global) — absent skill-scope v2 it is written but never read.
+  let pendingAssistantText = ""
+
   // ADR-0512 — resolve a skill-scope outcome for a tool the active skill does
   // NOT permit. Returns a recoverable tool_result to SHORT-CIRCUIT with, or
   // `null` to fall through to normal dispatch (the tool is in scope, or the
@@ -245,6 +262,8 @@ export const createStreamDispatcher = (
     const tier = inferToolTier(tool, call.input)
     const reason = scopeReasonFor(call.name, activeSkill)
     const isReadOnly = config.registry.isReadOnly(call.name)
+    // ADR-0512 P3 — seed the card's justification from the model's pre-tool prose.
+    const justification = deriveJustification(pendingAssistantText)
     const verdict = await decideScopeEscalation({
       tool: call.name,
       input: call.input,
@@ -253,10 +272,7 @@ export const createStreamDispatcher = (
       mode: config.permission.mode,
       activeSkill,
       scopeReason: reason,
-      // `justification` is intentionally OMITTED: the model has no seam yet to
-      // attach a one-line rationale to a tool call, so the card's justification
-      // line stays empty (renders nothing). Wiring a model-supplied justification
-      // is a documented follow-up (ADR-0512 §UI/UX), not a silent gap.
+      ...(justification !== undefined ? { justification } : {}),
       onConfirm: config.onConfirm,
       // ADR-0512 P3 — surface the INTERACTIVE escalation pair: a
       // `permission_escalation_requested` approval CARD (NOT a red error) fired
@@ -297,7 +313,7 @@ export const createStreamDispatcher = (
     })
     // Approved ⇒ widen scope so the SAME tool is not re-asked, then fall through
     // to normal dispatch (the tool's own permission gate still runs downstream).
-    if (verdict.kind === "dispatch") skillGate.widenScope(call.name)
+    if (verdict.kind === "dispatch" && verdict.widen) skillGate.widenScope(call.name)
     return scopeOutcome(verdict, call.id, reason)
   }
 
@@ -373,11 +389,16 @@ export const createStreamDispatcher = (
       })
       return out
     } finally {
+      // ADR-0512 P3 — the next tool's justification is the prose that precedes
+      // IT, so reset after every dispatch (in/out of scope alike).
+      pendingAssistantText = ""
       s?.()
     }
   }
 
   const onTextDelta = (delta: string): void => {
+    // ADR-0512 P3 — accumulate the pre-tool rationale for the escalation card.
+    pendingAssistantText += delta
     config.stream.emit({ type: "assistant_text", delta })
   }
 

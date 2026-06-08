@@ -51,7 +51,7 @@ import { statusCmd } from "../status-cmd"
 import { formatSegmentedUsage } from "../status-line"
 import { runVoiceLiveCmd } from "../voice-live-cmd"
 import { webCmd } from "../web-cmd"
-import { renderWorkingStatePanel } from "../working-state-panel"
+import { renderSkillScopePanel, renderWorkingStatePanel } from "../working-state-panel"
 import { modelCmd } from "./model-cmd"
 import { runSkillsRender } from "./render-helpers"
 
@@ -399,6 +399,13 @@ const stateCmd: SlashCommand = {
     }
     const snap = ctx.workingState()
     ctx.out(`${renderWorkingStatePanel(snap)}\n`)
+    // ADR-0512 P3 — append the active skill's tool-availability scope when the
+    // surface wired the getter AND a skill is actively scoping (v2 ON + armed).
+    // `renderSkillScopePanel` returns "" for absent/null views, so an
+    // unscoped/v2-OFF `/state` stays byte-identical.
+    const scopeView = ctx.skillScope?.()
+    const scopePanel = renderSkillScopePanel(scopeView)
+    if (scopePanel !== "") ctx.out(`${scopePanel}\n`)
     return 0
   },
 }

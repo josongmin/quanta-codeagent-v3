@@ -27,7 +27,10 @@ import { type ConfirmDecision, normalizeConfirm } from "./confirm-decision"
 /** What the caller must do with an out-of-scope call. */
 export type ScopeVerdict =
   | { kind: "hard_deny" } // hand-off-required — security boundary
-  | { kind: "dispatch" } // approved — caller dispatches (downstream gate still applies)
+  // approved — caller dispatches (downstream gate still applies). `widen` ⇒
+  // remember the tool for the rest of the session (allow_session); `false` ⇒
+  // allow_once (dispatch THIS call only, re-ask next time).
+  | { kind: "dispatch"; widen: boolean }
   | { kind: "deny" } // user declined, or no onConfirm wired (fail-closed)
   | { kind: "deny_and_steer"; steer: string } // declined + corrective steer
 
@@ -57,16 +60,11 @@ export interface EscalationResolution {
 }
 
 /** The 4 verbs offered on every escalation card (stable order — drives both the
- *  card buttons and the e2e contract).
- *
- *  KNOWN LIMITATION (audit-flagged, not a silent cap): `allow_once` is PRESENTED
- *  but not yet distinctly RETURNABLE. The host touchpoint is `onConfirm`, whose
- *  `ConfirmDecision` only carries `allow` / `deny` / `deny_and_steer` — it has no
- *  once-vs-session bit. So an approval resolves to `allow_session` (widen) via
- *  {@link resolutionOf} regardless of which approve button the surface drew. True
- *  `allow_once` (dispatch this one call WITHOUT widening, re-ask next time) needs a
- *  `ConfirmDecision` extension carrying the scope choice — tracked as follow-up. A
- *  surface SHOULD therefore treat the two approve buttons as equivalent for now. */
+ *  card buttons and the e2e contract). All 4 are now distinctly actionable: a
+ *  surface returns `{ decision: "allow", scope: "once" }` for **한 번 허용**
+ *  (dispatch this call WITHOUT widening — re-asked next time) vs
+ *  `{ decision: "allow", scope: "session" }` (or bare `allow` / `true`) for
+ *  **이 세션 허용** (widen). See {@link resolutionOf} + the caller's widen gate. */
 export const ESCALATION_OPTIONS: readonly EscalationOption[] = [
   "allow_once",
   "allow_session",
@@ -110,11 +108,14 @@ export interface ScopeEscalationCtx {
 const riskOf = (isReadOnly: boolean): ToolRiskMirror => (isReadOnly ? "read-only" : "mutating")
 
 /** ADR-0512 P3 — map a `ConfirmDecision` verb to the card's resolution verb.
- *  `allow` ⇒ `allow_session` (the approve path WIDENS the skill scope so the
- *  same tool is not re-asked — see `widenScope` in the caller). */
+ *  An approve carries an optional `scope`: `allow` + `scope:"once"` ⇒ allow_once
+ *  (dispatch this call WITHOUT widening); `allow` + `session`/absent ⇒
+ *  allow_session (widen so the same tool is not re-asked — see `widenScope`). */
 const resolutionOf = (decision: ConfirmDecision): EscalationOption =>
   decision.decision === "allow"
-    ? "allow_session"
+    ? decision.scope === "once"
+      ? "allow_once"
+      : "allow_session"
     : decision.decision === "deny"
       ? "deny"
       : "deny_and_steer"
@@ -130,12 +131,12 @@ export const decideScopeEscalation = async (ctx: ScopeEscalationCtx): Promise<Sc
   if (ctx.tier === "hand-off-required") return { kind: "hard_deny" }
   // The user already lowered the gate (bypass / acceptEdits) — do NOT add a
   // scope prompt on top. (hand-off-required above is still denied even here.)
-  if (ctx.mode === "bypass" || ctx.mode === "acceptEdits") return { kind: "dispatch" }
+  if (ctx.mode === "bypass" || ctx.mode === "acceptEdits") return { kind: "dispatch", widen: true }
   // A tool that prompts on its OWN every use (`always-confirm`) is already a
   // single human touchpoint downstream — asking a SEPARATE scope question would
   // double-prompt. Defer: dispatch, and the tool's own gate asks (the user
   // approving the action implicitly admits it past the skill scope).
-  if (ctx.tier === "always-confirm") return { kind: "dispatch" }
+  if (ctx.tier === "always-confirm") return { kind: "dispatch", widen: true }
   // Remaining: a tool that would AUTO-RUN (`none` / `pre-approval-ok`) in an
   // ask-mode — this is the case where an out-of-scope tool would silently
   // execute, so this is exactly where we ask. Fail-closed with no asker.
@@ -144,7 +145,14 @@ export const decideScopeEscalation = async (ctx: ScopeEscalationCtx): Promise<Sc
     tool: ctx.tool,
     input: ctx.input,
     isReadOnly: ctx.isReadOnly,
-    scopeContext: { activeSkill: ctx.activeSkill, reason: ctx.scopeReason },
+    // `justification` rides on `scopeContext` so the web/IDE approval bridge
+    // (`escalationScopeFields`) forwards the model's rationale to its card too —
+    // not just the CLI stream event.
+    scopeContext: {
+      activeSkill: ctx.activeSkill,
+      reason: ctx.scopeReason,
+      ...(ctx.justification !== undefined ? { justification: ctx.justification } : {}),
+    },
   }
   // ADR-0512 P3 — we are NOW in the ONLY branch that asks the user. Emit the
   // `permission_escalation_requested` card payload IMMEDIATELY before the ask
@@ -165,7 +173,9 @@ export const decideScopeEscalation = async (ctx: ScopeEscalationCtx): Promise<Sc
   ctx.onEscalationResolved?.({ id, decision: resolutionOf(decision) })
   switch (decision.decision) {
     case "allow":
-      return { kind: "dispatch" }
+      // allow_once (`scope:"once"`) dispatches WITHOUT widening — the same tool
+      // is re-asked next time; allow_session (default) widens for the session.
+      return { kind: "dispatch", widen: decision.scope !== "once" }
     case "deny":
       return { kind: "deny" }
     case "deny_and_steer":

@@ -74,6 +74,19 @@ describe("decideScopeEscalation — P3 escalation emit hooks", () => {
     expect(c.resolved[0]?.id).toBe(req?.id)
   })
 
+  test("allow_once: approve {scope:'once'} ⇒ resolved decision 'allow_once' (no widen)", async () => {
+    const c = collect()
+    const v = await decideScopeEscalation({
+      ...base,
+      tier: "none",
+      onConfirm: async () => ({ decision: "allow", scope: "once" }),
+      onEscalationRequested: c.onEscalationRequested,
+      onEscalationResolved: c.onEscalationResolved,
+    })
+    expect(v).toEqual({ kind: "dispatch", widen: false })
+    expect(c.resolved[0]?.decision).toBe("allow_once")
+  })
+
   test("read-only tool ⇒ requested.risk = 'read-only'", async () => {
     const c = collect()
     await decideScopeEscalation({

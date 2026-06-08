@@ -104,4 +104,30 @@ describe("ADR-0512 P3 — daemon approval bridge carries escalation scopeContext
     expect(approval.scopeContext?.risk).toBe("read-only")
     expect(approval.scopeContext?.activeSkill).toBe("localize-fault")
   })
+
+  test("ADR-0512 P3 — the model's justification rides through to the web card", async () => {
+    const { ctrl, slot } = makeCtrl()
+    const approval = await requestApprovalInScope(ctrl, slot, {
+      tool: "edit",
+      input: { path: "a.ts" },
+      isReadOnly: false,
+      scopeContext: {
+        activeSkill: "localize-fault",
+        reason: "out of scope",
+        justification: "need to edit foo.ts to fix the bug",
+      },
+    })
+    expect(approval.scopeContext?.justification).toBe("need to edit foo.ts to fix the bug")
+  })
+
+  test("escalation without justification ⇒ web card omits the row (byte-identical)", async () => {
+    const { ctrl, slot } = makeCtrl()
+    const approval = await requestApprovalInScope(ctrl, slot, {
+      tool: "edit",
+      input: { path: "a.ts" },
+      isReadOnly: false,
+      scopeContext: { activeSkill: "s", reason: "r" },
+    })
+    expect(approval.scopeContext?.justification).toBeUndefined()
+  })
 })

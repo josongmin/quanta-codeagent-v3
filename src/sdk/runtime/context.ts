@@ -49,6 +49,11 @@ export interface RuntimeFacadeComposeOptions {
   /** Publisher the loop fires once with a live working-state snapshot getter
    *  (mirrors `onPromptAssembled`). The surface retains it for `/state`. */
   readonly onWorkingStateReady?: AgentConfig["onWorkingStateReady"]
+  /** ADR-0512 P3 — publisher the loop fires once with a live skill-scope getter
+   *  (mirrors `onWorkingStateReady`). The surface retains it so `/state` can show
+   *  the active skill's visible/hidden tool partition. Fired only under
+   *  `skillScopeV2`. */
+  readonly onSkillScopeReady?: AgentConfig["onSkillScopeReady"]
   /** Per-turn stream-input capture sink. The surface retains the latest so
    *  `/retry-with` can re-stream the last turn against an alternate model. */
   readonly onTurnStreamInput?: AgentConfig["onTurnStreamInput"]
@@ -174,71 +179,40 @@ const patchRuntimeContextState = (
   patch: RuntimeContextPatch,
 ): InternalRuntimeContextState => state.patch(patch)
 
+/** The compose keys that pass STRAIGHT through to the runtime-context snapshot
+ *  (a present value ⇒ a single-key `patch`). Each is structurally identical, so
+ *  they fold into one data-driven loop (keeping
+ *  {@link applyRuntimeFacadeComposeOptions} under the complexity budget). The
+ *  two NON-uniform keys (`registryToolMapper`, `automationEngine` — they derive
+ *  a new `registry`) stay as explicit branches below. ADR-0512 added
+ *  `onSkillScopeReady` to this set. */
+const PASS_THROUGH_COMPOSE_KEYS = [
+  "granularRegistry",
+  "onPromptAssembled",
+  "workingState",
+  "onWorkingStateReady",
+  "onSkillScopeReady",
+  "onTurnStreamInput",
+  "shadowOdb",
+  "shadowCheckpoint",
+  "onPreCompact",
+  "imageSanitizationRetry",
+  "gitObservability",
+  "conversationActionPort",
+  "activeTurnRef",
+] as const satisfies readonly (keyof RuntimeFacadeComposeOptions & keyof RuntimeContextPatch)[]
+
 const applyRuntimeFacadeComposeOptions = (
   binding: RuntimeContextBinding,
   compose: RuntimeFacadeComposeOptions | undefined,
 ): RuntimeContextBinding => {
   if (compose === undefined) return binding
   let next = binding
-  if (compose.granularRegistry !== undefined) {
-    next = patchRuntimeContextState(next, {
-      granularRegistry: compose.granularRegistry,
-    })
-  }
-  if (compose.onPromptAssembled !== undefined) {
-    next = patchRuntimeContextState(next, {
-      onPromptAssembled: compose.onPromptAssembled,
-    })
-  }
-  if (compose.workingState !== undefined) {
-    next = patchRuntimeContextState(next, {
-      workingState: compose.workingState,
-    })
-  }
-  if (compose.onWorkingStateReady !== undefined) {
-    next = patchRuntimeContextState(next, {
-      onWorkingStateReady: compose.onWorkingStateReady,
-    })
-  }
-  if (compose.onTurnStreamInput !== undefined) {
-    next = patchRuntimeContextState(next, {
-      onTurnStreamInput: compose.onTurnStreamInput,
-    })
-  }
-  if (compose.shadowOdb !== undefined) {
-    next = patchRuntimeContextState(next, {
-      shadowOdb: compose.shadowOdb,
-    })
-  }
-  if (compose.shadowCheckpoint !== undefined) {
-    next = patchRuntimeContextState(next, {
-      shadowCheckpoint: compose.shadowCheckpoint,
-    })
-  }
-  if (compose.onPreCompact !== undefined) {
-    next = patchRuntimeContextState(next, {
-      onPreCompact: compose.onPreCompact,
-    })
-  }
-  if (compose.imageSanitizationRetry !== undefined) {
-    next = patchRuntimeContextState(next, {
-      imageSanitizationRetry: compose.imageSanitizationRetry,
-    })
-  }
-  if (compose.gitObservability !== undefined) {
-    next = patchRuntimeContextState(next, {
-      gitObservability: compose.gitObservability,
-    })
-  }
-  if (compose.conversationActionPort !== undefined) {
-    next = patchRuntimeContextState(next, {
-      conversationActionPort: compose.conversationActionPort,
-    })
-  }
-  if (compose.activeTurnRef !== undefined) {
-    next = patchRuntimeContextState(next, {
-      activeTurnRef: compose.activeTurnRef,
-    })
+  for (const key of PASS_THROUGH_COMPOSE_KEYS) {
+    const value = compose[key]
+    if (value !== undefined) {
+      next = patchRuntimeContextState(next, { [key]: value } as RuntimeContextPatch)
+    }
   }
   if (compose.registryToolMapper !== undefined) {
     const registry = next.snapshot.registry

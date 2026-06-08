@@ -119,4 +119,50 @@ describe("decideScopeEscalation", () => {
     expect(seen?.tool).toBe("edit")
     expect(seen?.isReadOnly).toBe(false)
   })
+
+  test("ADR-0512 allow_once: approve {scope:'once'} ⇒ dispatch WITHOUT widening", async () => {
+    const v = await decideScopeEscalation({
+      ...base,
+      tier: "none",
+      onConfirm: async () => ({ decision: "allow", scope: "once" }),
+    })
+    expect(v).toEqual({ kind: "dispatch", widen: false }) // re-asked next time
+  })
+
+  test("ADR-0512 allow_session: approve {scope:'session'} (or bare allow) ⇒ dispatch + widen", async () => {
+    const session = await decideScopeEscalation({
+      ...base,
+      tier: "none",
+      onConfirm: async () => ({ decision: "allow", scope: "session" }),
+    })
+    expect(session).toEqual({ kind: "dispatch", widen: true })
+    const bare = await decideScopeEscalation({ ...base, tier: "none", onConfirm: async () => true })
+    expect(bare).toEqual({ kind: "dispatch", widen: true }) // legacy approve = session
+  })
+
+  test("ADR-0512 justification: the model's rationale rides on action.scopeContext (web bridge)", async () => {
+    let seen: ToolAction | undefined
+    await decideScopeEscalation({
+      ...base,
+      tier: "none",
+      justification: "need to read config to localize the bug",
+      onConfirm: async (a) => {
+        seen = a
+        return true
+      },
+    })
+    expect(seen?.scopeContext?.justification).toBe("need to read config to localize the bug")
+  })
+
+  test("bypass / always-confirm dispatch widen:true (consistent session admit)", async () => {
+    const bypass = await decideScopeEscalation({
+      ...base,
+      tier: "none",
+      mode: "bypass",
+      onConfirm: async () => false,
+    })
+    expect(bypass).toEqual({ kind: "dispatch", widen: true })
+    const ac = await decideScopeEscalation({ ...base, tier: "always-confirm", onConfirm: async () => false })
+    expect(ac).toEqual({ kind: "dispatch", widen: true })
+  })
 })

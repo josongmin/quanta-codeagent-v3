@@ -30,7 +30,7 @@ export interface ToolAction {
    *  (the active skill + why the tool is out of scope); a surface that ignores
    *  it sees a plain confirm. Absent ⇒ byte-identical for every pre-ADR-0512
    *  caller (the field is never set on the legacy always-confirm path). */
-  scopeContext?: { activeSkill: string; reason: string }
+  scopeContext?: { activeSkill: string; reason: string; justification?: string }
 }
 
 /**

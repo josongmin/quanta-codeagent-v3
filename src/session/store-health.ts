@@ -32,7 +32,7 @@
 
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import { readFile } from "@/storage"
 import { archivedFilePath, sessionFilePath, sessionsRoot } from "./paths"
 
@@ -87,7 +87,7 @@ const classifyOne = async (
       path,
       archived,
       status: "unreadable",
-      detail: e instanceof Error ? e.message : String(e),
+      detail: errMessage(e),
     }
   }
   let json: unknown
@@ -99,7 +99,7 @@ const classifyOne = async (
       path,
       archived,
       status: "corrupt",
-      detail: `malformed JSON: ${e instanceof Error ? e.message : String(e)}`,
+      detail: `malformed JSON: ${errMessage(e)}`,
     }
   }
   const ok =

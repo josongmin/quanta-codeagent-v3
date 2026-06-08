@@ -3,6 +3,7 @@ import {
   EFFORT_LEVELS,
   effortToTokenBudget,
   resolveAgentMode,
+  type SkillScopeView,
   type WorkingState,
 } from "@/agent"
 import {
@@ -82,11 +83,8 @@ import type { StatusBar } from "../status-bar"
 import type { SegmentedUsageView } from "../status-line"
 import { createTextInbox, type TextInbox } from "../text-inbox"
 import type { VoiceLiveCtx } from "../voice-live-cmd"
+import { type BackgroundTurnPortal, createBackgroundTurnPortal } from "./background-turn-portal"
 import type { CliFeatureConfig } from "./cli-feature-config"
-import {
-  type BackgroundTurnPortal,
-  createBackgroundTurnPortal,
-} from "./background-turn-portal"
 import { type ContextUsageHolder, createContextUsageHolder } from "./context-usage-snapshot"
 import { type ConvCheckpointWire, startConvCheckpointWire } from "./conv-checkpoint-wire"
 import {
@@ -94,6 +92,7 @@ import {
   createConversationActionSurface,
 } from "./conversation-action-surface"
 import { type ComposerHandle, createComposerHandle } from "./ctx-adapters/composer-edit-adapter"
+import { buildModelAdapter } from "./ctx-adapters/model-adapter"
 import { buildPerToolCheckpointWire } from "./per-tool-checkpoint-wire"
 import { createPerToolSnapshotRecorder } from "./per-tool-snapshot-recorder"
 import {
@@ -103,7 +102,6 @@ import {
 import type { SessionLoopSinks } from "./session-loop"
 import type { SessionSetupResult } from "./session-setup"
 import { buildSkillsCallback } from "./skills-surface"
-import { buildModelAdapter } from "./ctx-adapters/model-adapter"
 import {
   buildReplSlashCtx,
   projectSlashCtx,
@@ -550,6 +548,10 @@ const buildSurfaceDispatch = (args: {
   /** `/state` working-state snapshot getter. Always wired (returns undefined
    *  when `QUANTA_WORKING_STATE` is off ⇒ `/state` renders an empty panel). */
   readonly workingState?: (() => WorkingState | undefined) | undefined
+  /** ADR-0512 P3 — `/state` skill-scope getter. Returns the active skill's
+   *  visible/hidden tool partition, or undefined when `QUANTA_SKILL_SCOPE_V2` is
+   *  off / no skill is scoping ⇒ `/state` omits the skill-scope section. */
+  readonly skillScope?: (() => SkillScopeView | undefined) | undefined
   /** `/retry-with` session-state factory. Returns the live re-stream state
    *  (candidates + last stream input + stdout renderer) or undefined when the
    *  feature is off or no turn has streamed yet ⇒ slot omitted. */
@@ -621,6 +623,10 @@ const buildSurfaceDispatch = (args: {
       // `/state` working-state snapshot getter: always wired (empty when the
       // feature is off ⇒ renders an empty panel instead of "not wired").
       ...(args.workingState !== undefined ? { workingState: args.workingState } : {}),
+      // ADR-0512 P3 — `/state` skill-scope getter: wired only when v2 is on (the
+      // getter yields undefined until the loop publishes ⇒ section omitted,
+      // byte-identical).
+      ...(args.skillScope !== undefined ? { skillScope: args.skillScope } : {}),
       // `/retry-with` re-stream state: present only when the feature is on AND a
       // turn has streamed (so there is a stream input to replay).
       ...(() => {
@@ -811,6 +817,14 @@ export const composeSurfaceWires = (
   // stays undefined so `/state` renders an empty panel (NOT "not wired").
   let workingStateGet: (() => WorkingState | undefined) | undefined
   const workingStateEnabled = isEnvTruthy(envSource.QUANTA_WORKING_STATE)
+  // ADR-0512 P3 `/state` skill-scope visibility — the loop's `onSkillScopeReady`
+  // callback installs a live getter here once the session gate is built. Env-
+  // gated `QUANTA_SKILL_SCOPE_V2`: ON ⇒ the loop fires the publisher AND `/state`
+  // appends the active skill's visible/hidden tool partition; unset ⇒ feature OFF
+  // (config byte-identical) and the getter stays undefined so `/state` omits the
+  // skill-scope section (byte-identical to the working-state-only render).
+  let skillScopeGet: (() => SkillScopeView | undefined) | undefined
+  const skillScopeEnabled = isEnvTruthy(envSource.QUANTA_SKILL_SCOPE_V2)
   // `/retry-with` — model candidates from `QUANTA_RETRY_MODELS` + the latest
   // per-turn stream input (captured via `onTurnStreamInput` when enabled). Both
   // default-OFF: empty candidates ⇒ slot omitted ⇒ "no model candidates
@@ -902,6 +916,13 @@ export const composeSurfaceWires = (
           workingState: { enabled: true },
           onWorkingStateReady: (get) => {
             workingStateGet = get
+          },
+        }
+      : {}),
+    ...(skillScopeEnabled
+      ? {
+          onSkillScopeReady: (get) => {
+            skillScopeGet = get
           },
         }
       : {}),
@@ -1154,6 +1175,10 @@ export const composeSurfaceWires = (
     ...(backgroundPortal !== undefined ? { background: backgroundPortal.view() } : {}),
     planQueue: planQueueStore,
     workingState: () => workingStateGet?.(),
+    // ADR-0512 P3 — `/state` skill-scope section. Getter is undefined until the
+    // loop fires `onSkillScopeReady` (v2 ON), so unset ⇒ `() => undefined` ⇒
+    // `/state` omits the section (byte-identical).
+    skillScope: () => skillScopeGet?.(),
     retry: () =>
       retryEnabled && lastStreamInput !== undefined
         ? {
